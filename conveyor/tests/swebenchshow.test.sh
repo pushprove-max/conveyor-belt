@@ -3,7 +3,8 @@
 # timeout: 120
 # Engine cases: what the Board's Benchmarks tab reads of `conveyor.sh bench swe` (bench/swe.sh): one run's page
 # (`bench swe show`), the cost Start shows (`bench swe history`, each arm's perTask), and the arms the form saves
-# (`bench swe arms save`, the choices history offers). The fixture is swebench.test.sh's swe().
+# (`bench swe arms save`, the choices history offers), with the settings a run shares and the reuse of its results
+# (`--settings`, swe_inputs). The fixture is swebench.test.sh's swe().
 
 # Bugs (#326): (1) the run page could not open a run of 500 tasks and 6 arms on Linux: show passed the run's line,
 # 3,000 task records, to jq as one argument, past the system's 128 KiB limit on one argument; (2) a stopped run showed
@@ -101,9 +102,9 @@ t_swearmeffort() {
   o=$(loop bench swe 1 --arm "$cx" --arm "$sp" 2>&1) || fail "the run failed: $o"
   [ -s "$SWE_FX/codex-args" ] && ! grep -v -- '-m x -c model_reasoning_effort="low" -' "$SWE_FX/codex-args" || fail "Codex was not given the saved model and effort: $(cat "$SWE_FX/codex-args")"
   [ -s "$STUB/sessions" ] && ! grep -v -- '--model m2 --effort max$' "$STUB/sessions" || fail "the method's Claude was not given the saved model and effort: $(cat "$STUB/sessions")"
-  jq -e '.resolved' "$B/results/$cx/$first.json" > /dev/null || fail "the Codex arm did not resolve its task: $(cat "$B/results/$cx/$first.json" 2>&1)"
-  jq -e '.fired == false and .why == "it did not fire: its output shows no use of its method"' "$B/results/$sp/$first.json" > /dev/null \
-    && grep -qF "unresolved (it did not fire: its output shows no use of its method)" <<<"$o" || fail "the method that did not fire lost why: $o $(cat "$B/results/$sp/$first.json" 2>&1)"
+  jq -e '.resolved' "$B"/results/"$cx"-*/"$first.json" > /dev/null || fail "the Codex arm did not resolve its task: $(cat "$B"/results/"$cx"-*/"$first.json" 2>&1)"
+  jq -e '.fired == false and .why == "it did not fire: its output shows no use of its method"' "$B"/results/"$sp"-*/"$first.json" > /dev/null \
+    && grep -qF "unresolved (it did not fire: its output shows no use of its method)" <<<"$o" || fail "the method that did not fire lost why: $o $(cat "$B"/results/"$sp"-*/"$first.json" 2>&1)"
 }
 
 # Bug (#634): a conveyor arm's seat models were added to the sandbox pack's models.allowed under the seat's CLI, so a
@@ -118,4 +119,101 @@ t_swearmsaverun() {
   jq -e '.model == {cli: "codex", model: "xb"}' "$SWE_FX/control.seen" > /dev/null || fail "the engine was not given the saved arm's builder: $(cat "$SWE_FX/control.seen")"
   [ "$(jq -c .models.allowed "$SWE_FX/pack.seen")" = "$(jq -c .models.allowed "$R/.conveyor/project.json")" ] \
     || fail "the saved arm changed the sandbox's allowed models: $(jq -c .models.allowed "$SWE_FX/pack.seen")"
+}
+
+# Bugs (#638): a run's settings did not reach its trials: every container took swe.json's CPU and memory limits and
+# its time limit, the tasks came in the pinned seed's order, the grade read the pinned dataset revision; a result kept
+# on other limits was reused, as an agent arm's results were kept under its name alone; and Start took a preflight
+# passed on another image or other limits.
+t_swesettings() {
+  swe; local s o set f0 f1 d=$T/$CASE/bin rv=0123456789abcdef0123456789abcdef01234567; f0=$(sweorder | head -n 1)
+  for s in s1 s2 s3 s4 s5 s6 s7 s8; do [ "$(sweorder "$s" | head -n 1)" = "$f0" ] || break; done; f1=$(sweorder "$s" | head -n 1)
+  [ "$f1" != "$f0" ] || fail "no seed of s1 to s8 puts the tasks in another order"
+  # The first run keeps the chosen revision's task list in the pinned seed's order.
+  o=$(loop bench swe 1 --arm stub-a --settings "{\"revision\": \"$rv\"}" 2>&1) && grep -q "^1/1 $f0: resolved$" <<<"$o" || fail "the run on the revision failed: $o"
+  [ "$(cat "$SWE_FX/graded")" = "$(jq -r .dataset "$SRC/bench/swe.json") $rv $f0" ] || fail "the grade did not read the revision chosen: $(cat "$SWE_FX/graded")"
+  # timeout notes the limit it is given and the script it runs: an install ends "; true", a stub-a run writes creds-seen.
+  mkdir -p "$d" && printf '%s\n' '#!/usr/bin/env bash' '{ printf "%s\t" "$1"; printf "%s" "${@: -1}" | tr "\n" " "; echo; } >> "$SWE_FX/timeouts"' 'exec "$SWE_TIMEOUT" "$@"' > "$d/timeout" \
+    && chmod +x "$d/timeout" || fail "the timeout stand-in was not made"
+  export SWE_TIMEOUT; SWE_TIMEOUT=$(command -v timeout); export PATH=$d:$PATH; : > "$SWE_FX/docker.log"
+  set=$(jq -cn --arg s "$s" --arg r "$rv" '{seed: $s, revision: $r, cpus: 0.5, memory: "600m", taskTimeout: 123}')
+  # Bug: the list kept for that revision was read for another seed.
+  o=$(loop bench swe 1 --arm stub-a --settings "$set" 2>&1) && grep -q "^1/1 $f1: resolved$" <<<"$o" || fail "the run did not take the first task of the seed's order: $o"
+  [ "$(grep -c '^create ' "$SWE_FX/docker.log")" = 2 ] && ! grep '^create ' "$SWE_FX/docker.log" | grep -qv -- '--cpus 0.5 --memory 600m ' \
+    || fail "the preflight's and the trial's containers did not get the limits: $(grep '^create ' "$SWE_FX/docker.log")"
+  [ "$(grep -c $'^123\t.*; true$' "$SWE_FX/timeouts")" = 2 ] && [ "$(grep -c $'^123\t.*creds-seen' "$SWE_FX/timeouts")" = 2 ] \
+    || fail "the install and the run of the preflight and of the task were not each held to taskTimeout: $(cat "$SWE_FX/timeouts")"
+  tail -n 1 "$B/runs.jsonl" | jq -e --arg s "$s" --arg r "$rv" '.set.seed == $s and .set.revision == $r and .limits == {cpus: 0.5, memory: "600m", taskTimeout: 123}' > /dev/null \
+    || fail "the run's line does not keep its settings: $(tail -n 1 "$B/runs.jsonl")"
+  # Bug: the preflight passed on the first task's image of the seed was taken for the pinned order's first task.
+  : > "$SWE_FX/docker.log"; o=$(loop bench swe 1 --arm stub-a --settings "$(jq -c 'del(.seed)' <<<"$set")" 2>&1) \
+    && grep -q "^create .*-preflight .* img-$f0 infinity" "$SWE_FX/docker.log" || fail "a preflight on another image was taken: $o $(grep '^create ' "$SWE_FX/docker.log")"
+  o=$(loop bench swe arms check --settings "$(jq -c '.cpus = 0.25' <<<"$set")" stub-a 2>&1) && [ "$(grep '^create ' "$SWE_FX/docker.log" | tail -n 1 | grep -o -- '--cpus [^ ]*')" = '--cpus 0.25' ] \
+    || fail "the check's container did not get its CPU limit: $o $(grep '^create ' "$SWE_FX/docker.log" | tail -n 1)"
+  # Bug: Start took that check, passed on other limits.
+  : > "$SWE_FX/docker.log"; o=$(loop bench swe 1 --arm stub-a --settings "$set" 2>&1) && grep -q "^1/1 $f1: resolved (reused)$" <<<"$o" \
+    || fail "the result of the same settings was not reused: $o"
+  grep -q '^create .*-preflight .*--cpus 0\.5 ' "$SWE_FX/docker.log" || fail "a preflight on other limits was taken: $(grep '^create ' "$SWE_FX/docker.log")"
+  o=$(loop bench swe 1 --arm stub-a --settings "$(jq -c '.cpus = 1' <<<"$set")" 2>&1) && grep -q "^1/1 $f1: resolved$" <<<"$o" || fail "a run on another CPU limit returned the former result: $o"
+  # A limit past this machine is refused before anything starts.
+  o=$(loop bench swe 1 --arm stub-a --settings '{"memory": "9999999g"}' 2>&1); [ $? = 2 ] && grep -q 'memory is at most the .* this machine holds' <<<"$o" \
+    || fail "memory past this machine's was not refused: $o"
+}
+
+# Bug (#638): a conveyor arm's results were kept under its engine commit alone, so a run after the builder's model
+# changed returned the result built on the former model.
+t_swereuse() {
+  swe; local o first; first=$(sweorder | head -n 1)
+  o=$(loop bench swe 1 2>&1) && o=$(loop bench swe 1 2>&1) && grep -q "^1/1 $first: resolved (reused)$" <<<"$o" || fail "the unchanged arm's result was not reused: $o"
+  jq -c '.model.effort = "high"' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json"
+  o=$(loop bench swe 1 2>&1) && grep -q "^1/1 $first: resolved$" <<<"$o" || fail "a run on another builder effort returned the former result: $o"
+}
+
+# Bug (#638): a conveyor arm's sandbox read the project's control record and rules again at each task, so a change
+# made while a run went gave its later tasks other seats and rules than its first, kept under the run's inputs.
+t_swefrozen() {
+  swe; local o p second; second=$(sweorder | tail -n 1)
+  jq '.rules = "project" | .label = "Conveyor, project rules"' "$SWE_FX/arms/conveyor.json" > "$SWE_FX/arms/conveyor-rules.json" && echo 'Rule A.' > "$R/.conveyor/card-rules.md" \
+    && jq -c '.model.effort = "high"' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json" || fail "the arm, its rules or the record were not made"
+  # Its preflight passed, as swe() keeps the conveyor arm's.
+  mkdir -p "$B/preflight/conveyor-rules" && jq -c --arg k "conveyor-rules-$EA" '.arm = "conveyor-rules" | .key = $k | .spec = $s[0]' --slurpfile s <(jq -cS '.name = "conveyor-rules"' "$SWE_FX/arms/conveyor-rules.json") \
+    "$B/preflight/conveyor/$EA.json" > "$B/preflight/conveyor-rules/conveyor-rules-$EA.json" || fail "the preflight pass was not kept"
+  : > "$SWE_FX/hold"; rm -f "$SWE_FX/pid"
+  loop bench swe 2 --arm conveyor-rules --engine v1.0.0 > "$T/$CASE/run.out" 2>&1 & p=$!
+  wait_until "[ -s '$SWE_FX/pid' ]" || fail "the first task's build did not start"
+  # The reviewer moves from Codex to Claude too.
+  jq -c '.model.effort = "low" | .reviewer = {cli: "claude", model: "m"}' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json" && echo 'Rule B.' > "$R/.conveyor/card-rules.md" && rm -f "$SWE_FX/hold"
+  wait "$p" && grep -q "^2/2 $second: resolved$" "$T/$CASE/run.out" || fail "the run failed: $(cat "$T/$CASE/run.out")"
+  # The second task's sandbox is the last the fake engine noted.
+  [ "$(jq -r .model.effort "$SWE_FX/control.seen")" = high ] && grep -q 'Rule A' "$SWE_FX/rules.seen" && ! grep -q 'Rule B' "$SWE_FX/rules.seen" \
+    || fail "the second task built on the record or rules changed while the run went: $(jq -c .model "$SWE_FX/control.seen") $(cat "$SWE_FX/rules.seen")"
+  # Bug (#638): the container's logins followed the project's seats now, so the second task's frozen Codex reviewer
+  # ran in a container with no Codex login.
+  [ "$(jq -r .reviewer.model "$SWE_FX/control.seen")" = x ] && [ "$(cat "$SWE_FX/codex.seen" 2>/dev/null)" = CODEX-LOGIN ] \
+    || fail "the second task's Codex reviewer had no Codex login: $(jq -c .reviewer "$SWE_FX/control.seen") $(cat "$SWE_FX/codex.seen" 2>&1)"
+}
+
+# Bug (#638): Compare read an arm's results under the key of swe.json's settings and the project's seats now, so it
+# lost the results kept under an arm's name before inputs were recorded, and those of a run on other settings.
+t_swediffkeys() {
+  swe; local o
+  mkdir -p "$B/results/stub-a" "$B/results/stub-b-0123456789ab" \
+    && jq -nc '{task: "proj__a-1", arm: "stub-a", label: "Stub a", key: "stub-a", resolved: true, fired: true, sessions: 1, tokens: 7, minutes: 1, steps: [], at: "2026-11-01T00:00:00Z"}' \
+      > "$B/results/stub-a/proj__a-1.json" \
+    && jq -nc '{task: "proj__a-1", arm: "stub-b", label: "Stub b", key: "stub-b-0123456789ab", resolved: true, fired: true, sessions: 1, tokens: 3, minutes: 1, steps: [],
+      at: "2026-11-02T00:00:00Z", inputs: {limits: {cpus: 1, memory: "8g", taskTimeout: 14400}}}' > "$B/results/stub-b-0123456789ab/proj__a-1.json" || fail "the results were not made"
+  o=$(loop bench swe diff stub-a stub-b --json 2>&1) && [ "$(jq -c '[.tasks, .same, .a.totals.tokens, .b.totals.tokens]' <<<"$o")" = '[1,["proj__a-1"],7,3]' ] \
+    || fail "Compare did not read the arms' kept results: $o"
+}
+
+# Bug (#638): a conveyor arm on the project's rules kept its results under its engine commit alone, so a run after the
+# card rules changed returned the result built on the former rules.
+t_swerulesreuse() {
+  swe; local o
+  jq '.rules = "project" | .label = "Conveyor, project rules"' "$SWE_FX/arms/conveyor.json" > "$SWE_FX/arms/conveyor-rules.json" && echo 'Rule A.' > "$R/.conveyor/card-rules.md" \
+    || fail "the arm or its rules were not made"
+  o=$(loop bench swe 1 --arm conveyor-rules 2>&1) && grep -q "Rule A" "$SWE_FX/rules.seen" || fail "the run on rules A failed: $o $(cat "$SWE_FX/rules.seen" 2>&1)"
+  echo 'Rule B.' > "$R/.conveyor/card-rules.md"
+  o=$(loop bench swe 1 --arm conveyor-rules 2>&1) && grep -q ": resolved$" <<<"$o" && grep -q "Rule B" "$SWE_FX/rules.seen" \
+    || fail "a run on other card rules returned the former result: $o"
 }

@@ -44,8 +44,8 @@ t_sweharnessver() {
 # before the arms, so a missing or wrong swebench showed only once a task was graded, as a task not run. The check
 # names each state apart: no harness, the wrong release, the right one.
 t_swearmswebench() {
-  swe; local C=$T/$CASE out rev; rev=$(jq -r .revision "$SRC/bench/swe.json")
-  mkdir -p "$B" "$C/none" && "$SWE_FX/py" - tasks d r "$B/tasks.$rev.jsonl" || fail "the saved task list was not made"
+  swe; local C=$T/$CASE out
+  mkdir -p "$B" "$C/none" && "$SWE_FX/py" - tasks d r "$TL" || fail "the saved task list was not made"
   # The real harness, on the stand-in swebench in $HARNESS_PATH, for check; the fixture's stub for the rest.
   printf '#!/usr/bin/env bash\n[ "$2" = check ] && exec env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$HARNESS_PATH" python3 "$@"\nexec %q "$@"\n' "$SWE_FX/py" > "$C/mixed" \
     && chmod +x "$C/mixed" || fail "the harness wrapper was not made"

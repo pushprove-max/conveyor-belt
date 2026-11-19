@@ -31,8 +31,9 @@
 # A saved arm (`bench swe arms save`, swe_armsave) is a revision the Board's form made: a name and choices only, no
 # command. It runs on a host arm (its recipe: the conveyor arm, or an agent arm that takes a model) with its seats or
 # model over it, and its name is its revision ID.
-# Every trial runs in a container of its own (swe_box): the task's image, the same limits for every arm (swe.json's
-# limits and taskTimeout), the logins copied in at its start only, and the container removed when the trial ends.
+# Every trial runs in a container of its own (swe_box): the task's image, the same limits for every arm (the run's
+# settings: cpus, memory and taskTimeout, swe_settings), the logins copied in at its start only, and the container
+# removed when the trial ends.
 SWE_ARMS=${CONVEYOR_BENCH_ARMS:-${BASH_SOURCE[0]%/*}/arms}
 SWE_HOME=/bench
 swe_arm() { # <name | saved revision ID>: the arm's JSON, its keys sorted (a preflight's record is compared with it whole)
@@ -122,13 +123,71 @@ swe_armsave() { # <name> <spec json>
   printf '%s\n' "$id"
 }
 swe_armnames() { local f; for f in "$SWE_ARMS"/*.json; do [ -e "$f" ] || continue; f=${f##*/}; printf '%s\n' "${f%.json}"; done; }
-# The key an arm's results are kept under: the engine commit for the conveyor arm (as before arms), <arm>-<commit> for
-# another conveyor arm, <arm>-<model> for an arm on the builder's model (solo-<model> for Claude alone), else <arm>.
+# The key an arm's preflights are kept under: the engine commit for the conveyor arm, <arm>-<commit> for another
+# conveyor arm, <arm>-<model> for an arm on the builder's model (solo-<model> for Claude alone), else <arm>.
 swe_armkey() { # <arm json> <engine commit, conveyor kind> <model>
   local n k; n=$(jq -r .name <<<"$1")
   if [ "$(jq -r .kind <<<"$1")" = conveyor ]; then [ "$n" = conveyor ] && k=$2 || k=$n-$2
   elif [ "$(jq -r '.model // ""' <<<"$1")" = builder ]; then k=$n-${3:-default}
   else k=$n; fi
+  printf '%s\n' "${k//[^A-Za-z0-9._-]/-}"
+}
+# Where a conveyor arm's sandbox reads the project's files from: the run's copy of them for the arm in use (SWE_FZ,
+# swe_freeze), else the project's checkout (a preflight `bench swe arms check` runs, the Board's history, Compare).
+# Sets the caller's o to that folder and PACK, the pack packget reads, to the pack there: the caller makes both local.
+swe_root() {
+  if [ -n "${SWE_FZ:-}" ]; then o=$SWE_FZ/main; PACK=$o/.conveyor/project.json; else o=$MAIN; fi
+}
+# A run's copy of what a conveyor arm's sandbox reads of the project, taken once at the run's start, so every task of
+# the run builds on the same seats, policy and rules, even when the project's change while it runs: the sandbox's
+# control record (swe_ctl) in <folder>/control.json, and under <folder>/main the pack and, for an arm on the project's
+# rules, the card rules and each area rule file the pack maps. A rule file missing or unreadable now is missing there
+# too: swe_taskrules and swe_pack refuse the arm when a task's card reads it.
+swe_freeze() { # <arm json> <folder>
+  local SWE_FZ='' r=$2/main a g f
+  rm -rf "$2" && mkdir -p "$r/.conveyor" && swe_ctl "$1" > "$2/control.json" && cp -- "$PACK" "$r/.conveyor/project.json" || return 1
+  [ "$(jq -r '.rules // "engine"' <<<"$1")" = project ] || return 0
+  [ ! -f "$MAIN/.conveyor/card-rules.md" ] || cp -- "$MAIN/.conveyor/card-rules.md" "$r/.conveyor/card-rules.md" 2>/dev/null || :
+  packget areas a || return 1
+  while IFS=$'\t' read -r g f; do
+    [[ $f != /* && /$f/ != */../* ]] && [ -f "$MAIN/$f" ] && [ -r "$MAIN/$f" ] || continue
+    mkdir -p "$r/$(dirname -- "$f")" && cp -- "$MAIN/$f" "$r/$f" || return 1
+  done < <([ -z "$a" ] || jq -r 'to_entries[] | "\(.key)\t\(.value)"' <<<"$a")
+}
+# What a trial of an arm is given, as JSON, the same for each task of a run: the task set and the grading (dataset,
+# revision, the harness's swebench version), the limits, the arm (its JSON without the words that only name it), the
+# model and, for a conveyor arm, the control record and the parts of the pack its sandbox takes (swe_ctl, swe_pack)
+# and its rules: the mode and, for the project's, the sha256 of the card rules and of every area rule file the pack
+# maps (a task's card reads some of them). A conveyor arm's engine commit is not in it: its key holds it (swe_reskey).
+# The control record leaves out what the card's build does not read: the queue, the cap, the guard and the Tests
+# seat (the benchmark's `run 1` starts no `testaction`). Read from the run's copy of the arm in use (swe_root).
+swe_inputs() { # <arm json> <model>
+  local c=null p=null r=null a g f h o PACK=$PACK; swe_root
+  if [ "$(jq -r .kind <<<"$1")" = conveyor ]; then
+    c=$(swe_ctl "$1" | jq -c 'del(.mode, .held, .order, .start, .startHeld, .startSeen, .forced, .onboarded, .cards, .cap, .guard, .tests, .signin)') && [ -n "$c" ] || return 1
+    p=$(jq -c '{labels, models, review, tunables, privacy}' "$PACK") || return 1
+    r=$(jq -c '{mode: (.rules // "engine")}' <<<"$1")
+    if [ "$(jq -r .mode <<<"$r")" = project ]; then
+      packget areas a || return 1
+      r=$(jq -c --arg h "$(sha256sum < "$o/.conveyor/card-rules.md" 2>/dev/null | cut -c1-64)" '. + {card: $h, areas: {}}' <<<"$r")
+      while IFS=$'\t' read -r g f; do
+        h=$(sha256sum < "$o/$f" 2>/dev/null | cut -c1-64)
+        r=$(jq -c --arg g "$g" --arg f "$f" --arg h "$h" '.areas[$g] = {file: $f, sha: $h}' <<<"$r")
+      done < <([ -z "$a" ] || jq -r 'to_entries[] | "\(.key)\t\(.value)"' <<<"$a")
+    fi
+  fi
+  jq -cSn --argjson s "$SWE_SET" --argjson a "$1" --arg m "$2" --argjson c "$c" --argjson p "$p" --argjson r "$r" \
+    '{set: ($s | {dataset, revision, swebench}), limits: ($s | {cpus, memory, taskTimeout}), arm: ($a | del(.name, .label, .revision, .why)),
+      model: (if $m == "" then null else $m end)} + (if $a.kind == "conveyor" then {control: $c, pack: $p, rules: $r} else {} end)'
+}
+# The key an arm's results are kept under: its preflight key (swe_armkey) with the first 12 of the sha256 of its
+# inputs (swe_inputs) in it, before the engine commit for a conveyor arm (<fp>-<commit>, <arm>-<fp>-<commit>: with no
+# commit given, the part before the commit, the Board's keyPrefix), else at the end (<arm>-<fp>, <arm>-<model>-<fp>).
+# A result is kept with its inputs, and reused only while they are the same (swe_reused).
+swe_reskey() { # <arm json> <engine commit, conveyor kind> <model> <inputs json>
+  local f k n; f=$(jq -cS . <<<"$4" | sha256sum | cut -c1-12); n=$(jq -r .name <<<"$1")
+  if [ "$(jq -r .kind <<<"$1")" = conveyor ]; then [ "$n" = conveyor ] && k=$f-$2 || k=$n-$f-$2
+  else k=$(swe_armkey "$1" '' "$3")-$f; fi
   printf '%s\n' "${k//[^A-Za-z0-9._-]/-}"
 }
 # The host's credential file of a login, the one copied into a container, and its place in the container's home.
@@ -141,16 +200,18 @@ swe_login() { # <claude | codex>
   esac
 }
 # The logins an arm's container is given: the arm's own, and for a conveyor arm the CLI of each seat `run 1` uses
-# there (the project's control record with the arm's seats and its policy's judgeOn over it, as swe_pack writes it:
-# the builder, the reviewer, the judge only when it is on, and the fix and testFix seats; the Tests seat serves `testaction`, which the run does not start), so a Conveyor arm on Claude seats needs
-# no Codex login. The seats are worked out on the models the engine in the container offers, not this host's: the
-# task's pack (swe_pack: the project's models.allowed, with a host arm's seats in it) when it lists some, else the
-# built-in MODELS0, as the arm's install puts Codex in the container even where this host has none.
+# there (the sandbox's control record, swe_ctl, as swe_pack writes it: the builder, the reviewer, the judge only when
+# it is on, and the fix and testFix seats; the Tests seat serves `testaction`, which the run does not start), so a
+# Conveyor arm on Claude seats needs no Codex login. The seats are worked out on the models the engine in the
+# container offers, not this host's: the task's pack (swe_pack: the project's models.allowed, with a host arm's seats
+# in it) when it lists some, else the built-in MODELS0, as the arm's install puts Codex in the container even where
+# this host has none. Both are read from the run's copy of them for the arm in use (swe_root, swe_freeze), as the
+# sandbox's are: a seat moved while a run goes changes neither.
 swe_logins() { # <arm json>
-  local c a s x=''
+  local c a x='' o PACK=$PACK
   if [ "$(jq -r .kind <<<"$1")" = conveyor ]; then
-    s=$(jq -c '.seats // {}' <<<"$1")
-    c=$(ctl 2>/dev/null) && c=$(jq -c --argjson s "$s" --argjson p "$(jq -c '.policy // {}' <<<"$1")" '. + $s + ($p | with_entries(select(.key == "judgeOn")))' <<<"$c") || c=null
+    swe_root
+    c=$(swe_ctl "$1" 2>/dev/null | jq -c .) && [ -n "$c" ] || c=null
     packget models.allowed a 2>/dev/null || a=''
     x=$(jq -r --argjson c "$c" --argjson s "$(jq -c 'if has("revision") then {} else .seats // {} end' <<<"$1")" --argjson d "$MODELS0" "$SEATNOW$JUDGENOW$FIXSEAT"'
         reduce ($s[] | objects | select(.cli != null)) as $x (.; .[$x.cli] = ((.[$x.cli] // []) + [$x.model] | unique)) | (. // $d)
@@ -162,14 +223,14 @@ swe_logins() { # <arm json>
 }
 swe_logindest() { case $1 in claude) echo .claude/.credentials.json ;; codex) echo .codex/auth.json ;; esac; }
 # A trial's container: the task's image; the sandbox mounted at its own path (and, for a conveyor arm, the engine's
-# version folder, read-only) and nothing else of the host; swe.json's CPU and memory limits; run as this user (a
+# version folder, read-only) and nothing else of the host; the settings' CPU and memory limits; run as this user (a
 # passwd line names it) with a home that is in the container only. The logins are copied into that home before the
 # container starts: they are in this one container, gone when it is removed, and never in an image. The home's
 # .gitconfig gives git an identity: the task's image has none, and the engine cannot commit a fix without one.
 swe_box() { # <container> <image> <sb> <logins, space-separated> [<engine folder>]
   local h l f m=() rc=0
   [ -z "${5:-}" ] || m=(-v "$5:$5:ro")
-  docker create --name "$1" --user "$(id -u):$(id -g)" -e "HOME=$SWE_HOME" --cpus "$(swe_conf .limits.cpus)" --memory "$(swe_conf .limits.memory)" \
+  docker create --name "$1" --user "$(id -u):$(id -g)" -e "HOME=$SWE_HOME" --cpus "$(swe_set .cpus)" --memory "$(swe_set .memory)" \
     -v "$3:$3" "${m[@]}" --entrypoint sleep "$2" infinity > /dev/null || return 1
   h=$(mktemp -d) || return 1
   mkdir -p "$h/home/.claude" "$h/home/.codex" "$h/home/.local/bin" && chmod 700 "$h/home" \
@@ -202,12 +263,12 @@ swe_arearules() { # <task json>
 # of their cards reads (swe_arearules) is a readable file, so no card builds on fewer rules than the arm says. Prints
 # nothing when it can, else why not (swe_pack's words). A rule file no task's card reads is never checked.
 swe_taskrules() { # <arm json> < tasks
-  local t l g f
+  local t l g f o PACK=$PACK; swe_root
   [ "$(jq -r '.rules // "engine"' <<<"$1")" = project ] || return 0
   while IFS= read -r t; do
     l=$(swe_arearules "$t") || { echo "the project's pack could not be read for its area rules"; return; }
     while IFS=$'\t' read -r g f; do
-      [ -f "$MAIN/$f" ] && [ -r "$MAIN/$f" ] \
+      [ -f "$o/$f" ] && [ -r "$o/$f" ] \
         || { echo "the arm takes the project's rules, and the area rule file $f its pack maps to $g is missing or cannot be read"; return; }
     done < <([ -z "$l" ] || printf '%s\n' "$l")
   done
@@ -220,21 +281,21 @@ swe_taskrules() { # <arm json> < tasks
 # rules (its rules field): "engine" (the default), the engine version's core rules alone; "project", a copy of the
 # project's card rules (.conveyor/card-rules.md) and of each area rule file its pack's areas map, by path glob, to a
 # path the task's issue names (the sandbox's issue #1, swe_sandbox: title and body, scanned as cardrules() scans them),
-# taken now, so the card there gets the rules cardrules() gives a card here (swe_arearules). An area no such path
+# so the card there gets the rules cardrules() gives a card here (swe_arearules). An area no such path
 # matches is left out of the pack, as no card there reads its rule. A rule file the card reads missing or unreadable
-# refuses the arm.
+# refuses the arm. The project's files are read from the run's copy of them (swe_root, swe_freeze).
 swe_pack() { # <task json> <sb> <engine's conveyor.sh> <arm json>
-  local sb=$2 d=$2/$SWE_MAIN/.conveyor s m l g f a e i=0 ar='{}';s=$(jq -c '.seats // {}' <<<"$4"); m=$(jq -r '.rules // "engine"' <<<"$4")
+  local sb=$2 d=$2/$SWE_MAIN/.conveyor m l g f a e o i=0 ar='{}' PACK=$PACK; m=$(jq -r '.rules // "engine"' <<<"$4"); swe_root
   mkdir -p "$d" "$sb/cards" && : > "$sb/rulings.jsonl" || return 1
   case $m in
     engine) ;;
     project)
-      cp -- "$MAIN/.conveyor/card-rules.md" "$d/card-rules.md" 2>/dev/null \
+      cp -- "$o/.conveyor/card-rules.md" "$d/card-rules.md" 2>/dev/null \
         || { echo "the arm takes the project's rules, and its card rules .conveyor/card-rules.md are missing or cannot be read"; return 1; }
       l=$(swe_arearules "$1") || { echo "the project's pack could not be read for its area rules"; return 1; }
       mkdir -p "$d/area-rules" || return 1
       while IFS=$'\t' read -r g f; do
-        i=$((i + 1)); cp -- "$MAIN/$f" "$d/area-rules/$i.md" 2>/dev/null \
+        i=$((i + 1)); cp -- "$o/$f" "$d/area-rules/$i.md" 2>/dev/null \
           || { echo "the arm takes the project's rules, and the area rule file $f its pack maps to $g is missing or cannot be read"; return 1; }
         ar=$(jq -c --arg g "$g" --arg f ".conveyor/area-rules/$i.md" '.[$g] = $f' <<<"$ar")
       done < <([ -z "$l" ] || printf '%s\n' "$l") ;;
@@ -245,12 +306,10 @@ swe_pack() { # <task json> <sb> <engine's conveyor.sh> <arm json>
     push: {env: {}}, remote: "origin", defaultBranch: "main", landBatch: 1} | with_entries(select(.value != null))
     | if $ar != {} then .areas = $ar else . end
     | reduce ($s[] | objects | select(.cli != null)) as $x (.; .models.allowed[$x.cli] = ((.models.allowed[$x.cli] // []) + [$x.model] | unique))' \
-    "$MAIN/.conveyor/project.json" > "$d/project.json" || { echo "the project's pack could not be read to make the task's pack"; return 1; }
+    "$PACK" > "$d/project.json" || { echo "the project's pack could not be read to make the task's pack"; return 1; }
   # The container holds no host file, so the engine there keeps its state in the checkout's own conveyor/state.
   SWE_SST=$sb/$SWE_MAIN/conveyor/state
-  mkdir -p "$SWE_SST" && ctl | jq --argjson s "$s" --argjson p "$(jq -c '.policy // {}' <<<"$4")" '.mode = "run" | .held = [] | .order = [] | .startHeld = [] | .start = "queue" | .rules.followups = false | .rules.visible = false
-    | .rules.push = true | .cards = {} | del(.account, .reviewAccount) + $s
-    | .rules += ($p | with_entries(select(.key | test("^P[0-3]$")))) | . + ($p | with_entries(select(.key | IN("judgeOn", "judgeAlways"))))' > "$SWE_SST/control.json" || { echo "the project's control record could not be read"; return 1; }
+  mkdir -p "$SWE_SST" && swe_ctl "$4" > "$SWE_SST/control.json" || { echo "the project's control record could not be read"; return 1; }
   # A fix or testFix seat the card's record sets (the arm's, or the project's) that the engine version does not know
   # (its lib/control-defaults.json has no such key: an engine from before those seats) would be passed over there
   # unread, and the card would repair on its builder: the arm is refused.
@@ -269,6 +328,15 @@ swe_pack() { # <task json> <sb> <engine's conveyor.sh> <arm json>
   jq -c --argjson l "$g" '.labels = ($l | map({name: .}))' "$sb/issue.json" > "$sb/issue.json.new" && mv -f "$sb/issue.json.new" "$sb/issue.json" \
     || { rm -f "$sb/issue.json.new"; echo "the task's issue could not be given its priority"; return 1; }
 }
+# The control record of a conveyor arm's sandbox (swe_pack): the project's, with the arm's seats and review policy over
+# it, its queue and per-issue seats emptied, no named account, follow-ups and visible-change asks off, a push on; the
+# run's copy of it for the arm in use (SWE_FZ, swe_freeze).
+swe_ctl() { # <arm json>
+  [ -z "${SWE_FZ:-}" ] || { cat "$SWE_FZ/control.json"; return; }
+  ctl | jq --argjson s "$(jq -c '.seats // {}' <<<"$1")" --argjson p "$(jq -c '.policy // {}' <<<"$1")" '.mode = "run" | .held = [] | .order = [] | .startHeld = [] | .start = "queue" | .rules.followups = false | .rules.visible = false
+    | .rules.push = true | .cards = {} | del(.account, .reviewAccount) + $s
+    | .rules += ($p | with_entries(select(.key | test("^P[0-3]$")))) | . + ($p | with_entries(select(.key | IN("judgeOn", "judgeAlways"))))'
+}
 SWE_ASK='Fix this issue in the repository in the current folder. Change the code only; do not commit.'
 # One trial: the arm builds the task in its container. Prints {sessions, tokens, minutes, steps, fired, why}; keeps
 # the patch (and a conveyor arm's loop log) in <sb>.h, the trial's own folder on the host, outside the container's
@@ -277,7 +345,7 @@ SWE_ASK='Fix this issue in the repository in the current folder. Change the code
 # has fired false and why: that is the arm's failure, never a task not run.
 swe_trial() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor kind>
   local sb=$2 a=$3 h=$2.h base t0 c rc run why='' kind eng='' to b n p=0
-  base=$(jq -r .base <<<"$1"); t0=$(date +%s); kind=$(jq -r .kind <<<"$a"); to=$(swe_conf .taskTimeout)
+  base=$(jq -r .base <<<"$1"); t0=$(date +%s); kind=$(jq -r .kind <<<"$a"); to=$(swe_set .taskTimeout)
   n=conveyor-swe-${SWE_RUN:-check}-$(jq -r .name <<<"$a")-$(jq -r .id <<<"$1"); c=${n//[^A-Za-z0-9_.-]/-}
   { chmod -R u+w "$h"; rm -rf "$h"; } 2>/dev/null; mkdir -m 700 "$h" && : > "$h/out" || return 1
   { printf '%s\n\n' "$SWE_ASK"; jq -r .issue <<<"$1"; } > "$sb/prompt" && jq -r '.exclude // [] | .[]' <<<"$a" >> "$sb/$SWE_MAIN/.git/info/exclude" || return 1
@@ -343,7 +411,7 @@ swe_checktask() { # <image>
 # An arm's preflight: offered, each login it uses present on this machine, then the trivial task in a container: its
 # install, its preflight command and its run, which must fire and change hello.py (Docker and the harness are checked
 # before, by swe_setup, in both callers). Prints nothing when it passed, else what is missing; keeps the state in
-# preflight/<arm>/<key>.json (swe_arms reads it).
+# preflight/<arm>/<key>.json (swe_arms reads it), with the image and the limits (swe_settings) it ran on.
 swe_preflight() { # <arm json> <key> <image> <engine's conveyor.sh, conveyor kind>
   local a=$1 n why='' l f t sb b
   n=$(jq -r .name <<<"$a")
@@ -363,22 +431,25 @@ swe_preflight() { # <arm json> <key> <image> <engine's conveyor.sh, conveyor kin
     { chmod -R u+w "$sb" "$sb.h"; rm -rf "$sb" "$sb.h"; } 2>/dev/null
   fi
   mkdir -p "$SWE_DIR/preflight/$n" && swe_put "$SWE_DIR/preflight/$n/$2.json" "$(jq -nc --argjson a "$a" --arg k "$2" --arg w "$why" --arg at "$(swe_now)" --argjson e "$(date +%s)" \
-    --arg l "$(swe_logins "$a")" '{arm: $a.name, key: $k, ok: ($w == ""), why: (if $w == "" then null else $w end), at: $at, epoch: $e, spec: $a, logins: $l}')"
+    --arg l "$(swe_logins "$a")" --arg i "$3" --argjson lim "$(swe_set '{cpus, memory, taskTimeout}')" \
+    '{arm: $a.name, key: $k, ok: ($w == ""), why: (if $w == "" then null else $w end), at: $at, epoch: $e, spec: $a, logins: $l, image: $i, limits: $lim}')"
   printf '%s' "$why"
 }
 # An arm can be picked once its preflight passed: a pass of the same arm file and key from the last day, with the
-# same logins (a seat may have moved to another CLI since), is taken, else the preflight runs now. Prints nothing
-# when the arm is ready, else why not.
+# same logins (a seat may have moved to another CLI since), on the same image and limits as the run's, is taken, else
+# the preflight runs now. Prints nothing when the arm is ready, else why not.
 swe_ready() { # <arm json> <key> <image> <engine's conveyor.sh, conveyor kind>
-  jq -e --argjson a "$1" --arg l "$(swe_logins "$1")" --argjson now "$(date +%s)" '.ok and .spec == $a and .logins == $l and $now - .epoch < 86400' "$SWE_DIR/preflight/$(jq -r .name <<<"$1")/$2.json" > /dev/null 2>&1 \
+  jq -e --argjson a "$1" --arg l "$(swe_logins "$1")" --argjson now "$(date +%s)" --arg i "$3" --argjson lim "$(swe_set '{cpus, memory, taskTimeout}')" \
+    '.ok and .spec == $a and .logins == $l and .image == $i and .limits == $lim and $now - .epoch < 86400' "$SWE_DIR/preflight/$(jq -r .name <<<"$1")/$2.json" > /dev/null 2>&1 \
     || swe_preflight "$@"
 }
 # `bench swe arms`: each arm with its preflight state (its latest preflight); `bench swe arms check <arm>...` runs
-# those arms' preflights now, a conveyor arm's on main's engine (an arm is a host arm's name or a saved revision's ID);
+# those arms' preflights now, a conveyor arm's on main's engine (an arm is a host arm's name or a saved revision's ID),
+# in containers of the --settings' limits on the image of their task set's first task (swe_settings);
 # `bench swe arms save <name> <spec>` keeps a saved arm and prints its ID (swe_armsave); `bench swe arms show <id>`
 # prints that revision as it was saved.
-SWE_ARMSUSE='usage: conveyor.sh bench swe arms [check <arm>...] | bench swe arms save <name> <spec json> | bench swe arms show <id>'
-swe_arms() { # [check <arm>... | save <name> <spec json> | show <id>]
+SWE_ARMSUSE='usage: conveyor.sh bench swe arms [check [--settings <json>] <arm>...] | bench swe arms save <name> <spec json> | bench swe arms show <id>'
+swe_arms() { # [check [--settings <json>] <arm>... | save <name> <spec json> | show <id>]
   local n a r tf img eng k bad=0 gc='' ga=''
   case ${1:-} in
     save) [ $# = 3 ] || { echo "$SWE_ARMSUSE" >&2; return 2; }; swe_armsave "$2" "$3"; return ;;
@@ -386,7 +457,8 @@ swe_arms() { # [check <arm>... | save <name> <spec json> | show <id>]
       [[ $2 =~ $SWE_ARMID ]] && jq -ce 'objects' "$SWE_DIR/arms/$2.json" 2>/dev/null || { echo "conveyor: no saved arm $2" >&2; return 1; }; return ;;
   esac
   if [ "${1:-}" = check ]; then
-    shift; [ $# -gt 0 ] || { echo "$SWE_ARMSUSE" >&2; return 2; }
+    shift; [ "${1:-}" != --settings ] || { [ $# -ge 2 ] || { echo "$SWE_ARMSUSE" >&2; return 2; }; swe_settings "$2" || return; shift 2; }
+    [ $# -gt 0 ] || { echo "$SWE_ARMSUSE" >&2; return 2; }
     # A preflight starts a model session on the trivial task: the usage guard holds it back as it holds a run.
     for n; do a=$(swe_arm "$n") || continue; case $(swe_guards "$a") in conveyor) gc=1 ;; agent) ga=1 ;; esac; done
     ! swe_held "$gc" "$ga" || { echo "conveyor: the usage guard is reached: no preflight starts while it stands" >&2; return 1; }

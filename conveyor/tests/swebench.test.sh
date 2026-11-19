@@ -123,7 +123,7 @@ swe() {
   export SWE_FX=$T/$CASE/fx XDG_DATA_HOME=$T/$CASE/data; cp -a "$FIXTURE.swe/." "$SWE_FX/" || fail "the fixture was not copied"
   export CONVEYOR_BENCH_PYTHON=$SWE_FX/py CONVEYOR_BENCH_SOURCE=file://$SWE_FX/eng.git B=$ST/bench/swe SWE_SRC=$SRC
   trap 'chmod -R u+w "$T/$CASE"' EXIT
-  EA=$(git -C "$SWE_FX/eng.git" rev-parse 'v1.0.0^{commit}'); EB=$(git -C "$SWE_FX/eng.git" rev-parse main)
+  EA=$(git -C "$SWE_FX/eng.git" rev-parse 'v1.0.0^{commit}'); EB=$(git -C "$SWE_FX/eng.git" rev-parse main); TL=$B/tasks.$(jq -r .revision "$SRC/bench/swe.json").$(jq -j .seed "$SRC/bench/swe.json" | sha256sum | cut -c1-12).jsonl
   # Docker is the stand-in, the arms the fixture's, and the logins made-up files: the builder's account (`control
   # account`) holds a Claude login, CODEX_HOME a Codex one.
   export PATH=$SWE_FX/bin:$PATH CONVEYOR_BENCH_ARMS=$SWE_FX/arms CODEX_HOME=$T/$CASE/codex
@@ -131,16 +131,16 @@ swe() {
     && jq -cn --arg a "$T/$CASE/acct" '{accounts: [{name: "bench", configDir: $a}]}' > "$XDG_CONFIG_HOME/conveyor/host.json" \
     && jq -c '.account = "bench"' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json" || fail "the logins were not made"
   # The conveyor arm on both engines and Claude alone passed their preflight an hour ago (a case of the preflight runs it),
-  # with the logins their seats take: the conveyor arm's builder m is Claude's, its reviewer x Codex's.
+  # with the logins their seats take (the conveyor arm's builder m is Claude's, its reviewer x Codex's), on the pinned first task's image and swe.json's limits.
   local k a
   for k in conveyor/$EA conveyor/$EB solo/solo-m; do a=${k%/*}; mkdir -p "$B/preflight/$a"
-    jq -cn --arg k "${k#*/}" --argjson e "$(($(date +%s) - 3600))" --argjson s "$(jq -cS --arg n "$a" '.name = $n' "$SWE_FX/arms/$a.json")" \
-      '{arm: $s.name, key: $k, ok: true, why: null, at: "2026-11-17T00:00:00Z", epoch: $e, spec: $s, logins: (if $s.kind == "conveyor" then "claude codex" else "claude" end)}' \
+    jq -cn --arg k "${k#*/}" --argjson e "$(($(date +%s) - 3600))" --argjson s "$(jq -cS --arg n "$a" '.name = $n' "$SWE_FX/arms/$a.json")" --arg i "img-$(sweorder | head -n 1)" --argjson lim "$(jq -c '{cpus: .limits.cpus, memory: .limits.memory, taskTimeout}' "$SRC/bench/swe.json")" \
+      '{arm: $s.name, key: $k, ok: true, why: null, at: "2026-11-17T00:00:00Z", epoch: $e, spec: $s, logins: (if $s.kind == "conveyor" then "claude codex" else "claude" end), image: $i, limits: $lim}' \
       > "$B/preflight/$a/${k#*/}.json" || fail "the preflight passes were not kept"
   done
 }
-# The tasks in the pinned order: sha256 of "<seed>:<id>", as swe.json's seed gives it.
-sweorder() { local s t; s=$(jq -r .seed "$SRC/bench/swe.json"); for t in proj__a-1 proj__b-2; do printf '%s %s\n' "$(printf '%s:%s' "$s" "$t" | sha256sum | cut -c1-64)" "$t"; done | sort | cut -d ' ' -f 2; }
+# The tasks in the pinned order: sha256 of "<seed>:<id>", as swe.json's seed (or the seed given) gives it.
+sweorder() { local s=${1:-} t; [ -n "$s" ] || s=$(jq -r .seed "$SRC/bench/swe.json"); for t in proj__a-1 proj__b-2; do printf '%s %s\n' "$(printf '%s:%s' "$s" "$t" | sha256sum | cut -c1-64)" "$t"; done | sort | cut -d ' ' -f 2; }
 
 # Bugs: `swe n` takes other tasks than the first n of the pinned order (so `swe 5` is not the start of `swe 20`), runs a
 # task again that the same engine commit already ran, takes an n past the list or none of 1 to 500, or keeps no
@@ -157,8 +157,8 @@ t_swepresets() {
   out=$(loop bench swe 2 2>&1) || fail "swe 2 failed: $out"
   [ "$(sed -n 2p "$SWE_FX/log")" = "B SWE-bench $second" ] && [ "$(wc -l < "$SWE_FX/log")" = 2 ] || fail "swe 2 did not reuse the first task's result and build only the second: $(cat "$SWE_FX/log")"
   grep -q "1/2 $first: resolved (reused)" <<<"$out" || fail "swe 2 did not say the first task was reused: $out"
-  jq -e --arg e "$EB" '.sessions == 2 and .tokens == 440 and (.minutes | type) == "number" and .engine == $e and .resolved' "$B/results/$EB/$first.json" > /dev/null \
-    || fail "the task's result holds no sessions, tokens, minutes or engine: $(cat "$B/results/$EB/$first.json")"
+  jq -e --arg e "$EB" '.sessions == 2 and .tokens == 440 and (.minutes | type) == "number" and .engine == $e and .resolved' "$B"/results/*-"$EB/$first.json" > /dev/null \
+    || fail "the task's result holds no sessions, tokens, minutes or engine: $(cat "$B"/results/*-"$EB/$first.json")"
   [ "$(tail -n 1 "$B/runs.jsonl" | jq -c --arg e "$EB" '[.n, .resolved, .engine == $e, .state]')" = '[2,1,true,"done"]' ] || fail "the run's line is not 1 of 2 resolved with its engine: $(tail -n 1 "$B/runs.jsonl")"
   grep -q "Resolved 1 of 2 with engine main ($EB)" <<<"$out" || fail "the run did not end with its resolved count and engine commit: $out"
   out=$(loop bench swe 3 2>&1) && fail "an n past the task list was taken: $out"
@@ -178,12 +178,12 @@ t_swepresets() {
 t_sweoldraw() {
   swe; local rev out; rev=$(jq -r .revision "$SRC/bench/swe.json")
   # The earlier list's tasks have no cmd (the test command run in the task's container), as an earlier harness made it.
-  mkdir -p "$B" && "$SWE_FX/py" - tasks d r "$B/t" && jq -c 'del(.cmd)' "$B/t" > "$B/tasks.$rev.jsonl" && echo REFFIX > "$B/raw.$rev.jsonl" && echo REFFIX > "$B/raw.older.jsonl" \
+  mkdir -p "$B" && "$SWE_FX/py" - tasks d r "$B/t" && jq -c 'del(.cmd)' "$B/t" > "$TL" && echo REFFIX > "$B/raw.$rev.jsonl" && echo REFFIX > "$B/raw.older.jsonl" \
     || fail "the earlier run's files were not made"
   out=$(loop bench swe 3 2>&1); [ $? = 2 ] || fail "an n past the task list was not refused: $out"
   [ -z "$(ls "$B"/raw.*.jsonl 2>/dev/null)" ] || fail "the dataset's rows an earlier harness kept are still in the state folder: $(ls "$B")"
   # Bug: the list kept from before was used, and every conveyor arm's card got an empty test command.
-  jq -se 'length == 2 and all(.cmd == "true")' "$B/tasks.$rev.jsonl" > /dev/null || fail "a task list with no test commands was not made again: $(cat "$B/tasks.$rev.jsonl")"
+  jq -se 'length == 2 and all(.cmd == "true")' "$TL" > /dev/null || fail "a task list with no test commands was not made again: $(cat "$TL")"
 }
 
 # Bug: a task whose Docker image cannot be fetched or built is counted as failed (or stops the run) instead of being
@@ -194,7 +194,7 @@ t_swenotrun() {
   echo "img-$first" > "$SWE_FX/broken"
   out=$(loop bench swe 2 2>&1) || fail "the run failed: $out"
   grep -q "1/2 $first: not run: its Docker image could not be fetched or built" <<<"$out" || fail "the task with no image was not reported as not run: $out"
-  [ ! -e "$B/results/$EB/$first.json" ] && [ -e "$B/results/$EB/$second.json" ] || fail "a result was kept for the task not run, or none for the other"
+  ! compgen -G "$B/results/*-$EB/$first.json" > /dev/null && compgen -G "$B/results/*-$EB/$second.json" > /dev/null || fail "a result was kept for the task not run, or none for the other"
   grep -q "Resolved 0 of 2 .*not run: 1\." <<<"$out" || fail "the run's total does not set the task not run apart: $out"
   [ "$(cat "$SWE_FX/log")" = "B SWE-bench $second" ] || fail "the task with no image was built: $(cat "$SWE_FX/log")"
 }
@@ -210,7 +210,7 @@ t_swestop() {
   wait_until "! kill -0 $p 2>/dev/null" || fail "the engine loop of the sandbox still runs after Stop"
   wait $! 2>/dev/null
   [ "$(tail -n 1 "$B/runs.jsonl" | jq -r .state)" = stopped ] || fail "the run's line does not say stopped: $(cat "$B/runs.jsonl" 2>&1)"
-  [ ! -d "$B/work" ] && [ -z "$(ls "$B/results/$EB" 2>/dev/null)" ] || fail "the stopped task left a sandbox or a result"
+  [ ! -d "$B/work" ] && [ -z "$(ls "$B"/results/*-"$EB" 2>/dev/null)" ] || fail "the stopped task left a sandbox or a result"
   # Bug: Stop killed the docker client only; the trial's container, with the logins copied into it, was left running.
   [ -z "$(ls "$SWE_FX/boxes")" ] || fail "the stopped trial's container was not removed: $(ls "$SWE_FX/boxes")"
 }
@@ -222,7 +222,7 @@ t_sweengine() {
   out=$(loop bench swe 1 --engine v1.0.0 2>&1) || fail "the run on v1.0.0 failed: $out"
   out=$(loop bench swe 1 --engine "$EB" 2>&1) || fail "the run on a commit failed: $out"
   [ "$(cut -d ' ' -f 1 "$SWE_FX/log" | tr '\n' ' ')" = 'A B ' ] || fail "the tasks were not built with the engines named: $(cat "$SWE_FX/log")"
-  [ "$(cat "$B/results/$EA"/*.json | jq -r .version)" = v1.0.0 ] || fail "the result of the release does not name it"
+  [ "$(cat "$B"/results/*-"$EA"/*.json | jq -r .version)" = v1.0.0 ] || fail "the result of the release does not name it"
   out=$(loop bench swe results 2>&1); grep -q "^v1.0.0 ${EA:0:12}: 1 of 1 resolved" <<<"$out" && grep -q "^main ${EB:0:12}: 1 of 1 resolved" <<<"$out" \
     && grep -q "with 1 task only a total break shows" <<<"$out" || fail "the two engines' results are not shown side by side with the noise line: $out"
   if out=$(loop bench swe 1 --engine v9.9.9 2>&1); then fail "a version that is not released was taken: $out"; fi
@@ -243,8 +243,8 @@ t_swediff() {
   jq -e '.flipped[0] | .b.findings == ["[P1] x.py:1 the fix is wrong", "[P1] x.py:1 still wrong\n[P2] y.py:2 past the cut reason"] and .b.fixRounds == 1 and (.reading | startswith("B blocked at review"))' <<<"$out" > /dev/null \
     || fail "the flipped task's facts or the model's reading are missing: $(jq -c .flipped[0] <<<"$out")"
   # Bug: every step's tail was saved, test output and GO reviews too, though Compare reads only a NO-GO review's.
-  cat "$B/results/$EB"/*.json | jq -se '[.[].steps[] | select(has("tail")) | .step + " " + .result] == ["review NO-GO"]' > /dev/null \
-    || fail "a tail was kept other than the NO-GO review's: $(cat "$B/results/$EB"/*.json | jq -sc '[.[].steps[] | select(has("tail"))]')"
+  cat "$B"/results/*-"$EB"/*.json | jq -se '[.[].steps[] | select(has("tail")) | .step + " " + .result] == ["review NO-GO"]' > /dev/null \
+    || fail "a tail was kept other than the NO-GO review's: $(cat "$B"/results/*-"$EB"/*.json | jq -sc '[.[].steps[] | select(has("tail"))]')"
   # Bug: the judge sessions on B's two reviews were left out of the task's sessions (build, 2 reviews, a fix: 4).
   jq -e '.flipped[0].b.sessions == 6' <<<"$out" > /dev/null || fail "the judge's sessions are not counted: $(jq -c .flipped[0].b <<<"$out")"
   grep -q '"apart":"review"' "$STUB/brief" || fail "the model was not given the facts: $(cat "$STUB/brief")"
@@ -279,8 +279,8 @@ t_swesolo() {
     && $a == *'--setting-sources  --strict-mcp-config'* && $a != *bypassPermissions* ]] \
     || fail "the solo session is not held to its sandbox's files with no shell: $a"
   [ ! -s "$SWE_FX/log" ] && [ "$(wc -l < "$STUB/sessions")" = 1 ] || fail "the solo run did not take one Claude session and no engine"
-  jq -e '.arm == "solo" and .model == "m" and .sessions == 1 and .tokens == 35 and .resolved and .engine == null' "$B/results/solo-m/$first.json" > /dev/null \
-    || fail "the solo result is not one session's: $(cat "$B/results/solo-m/$first.json" 2>&1)"
+  jq -e '.arm == "solo" and .model == "m" and .sessions == 1 and .tokens == 35 and .resolved and .engine == null' "$B"/results/solo-m-*/"$first.json" > /dev/null \
+    || fail "the solo result is not one session's: $(cat "$B"/results/solo-m-*/"$first.json" 2>&1)"
   grep -q 'Fix x.py for' "$STUB/brief" || fail "the session was not given the issue"
   # Bug: the Board read the solo key board.json kept from its last run, so after the builder's model changed it
   # counted the old model's results as reused and showed no sessions for a run that builds every task.
@@ -301,8 +301,8 @@ echo "{\"type\":\"result\",\"is_error\":true,\"result\":\"Invalid API key · Ple
   out=$(loop bench swe 1 --solo 2>&1) || fail "the solo run failed: $out"
   grep -q "1/1 $first: unresolved (its command failed (exit 1): Authorization: Bearer \[left out\] \[a line left out: email\] Invalid API key · Please run /login)$" <<<"$out" \
     && grep -q "Resolved 0 of 1 with Claude alone; not run: 0\." <<<"$out" || fail "the failed session was not counted as the arm's failure, with its words and no credential: $out"
-  jq -e '.fired == false and .resolved == false and (.why | startswith("its command failed"))' "$B/results/solo-m/$first.json" > /dev/null \
-    && [ ! -e "$SWE_FX/graded" ] || fail "the failed trial was not kept as not fired, or its change was graded: $(cat "$B/results/solo-m/$first.json" 2>&1)"
+  jq -e '.fired == false and .resolved == false and (.why | startswith("its command failed"))' "$B"/results/solo-m-*/"$first.json" > /dev/null \
+    && [ ! -e "$SWE_FX/graded" ] || fail "the failed trial was not kept as not fired, or its change was graded: $(cat "$B"/results/solo-m-*/"$first.json" 2>&1)"
   [ -s "$B/board.json" ] && [ -s "$B/live.json" ] || fail "the run left no Board record to check"
   ! grep -rqF -e "$(cat "$STUB/secret")" -e "corp-mail" "$B/board.json" "$B/live.json" "$B/results" || fail "the results or the Board's record hold the credential or the address"
   out=$(loop bench swe results 2>&1); grep -q "^Claude alone (m): 0 of 1 resolved (1 did not fire)" <<<"$out" || fail "the results do not count the trial that did not fire: $out"
@@ -357,7 +357,7 @@ t_swewrong() {
   grep -q "Expected: about 2 sessions (worst case 12)" <<<"$out" || fail "the worst case leaves out a judge session for each of the 4 reviews, or the test fix and its review: $out"
   echo "$first" > "$SWE_FX/wrong"
   out=$(loop bench swe 1 2>&1) || fail "the run on main failed: $out"
-  grep -q "1/1 $first: unresolved$" <<<"$out" && jq -e '.resolved == false' "$B/results/$EB/$first.json" > /dev/null \
+  grep -q "1/1 $first: unresolved$" <<<"$out" && jq -e '.resolved == false' "$B"/results/*-"$EB/$first.json" > /dev/null \
     || fail "an unresolved grade was not kept as unresolved: $out"
   out=$(loop bench swe 1 2>&1) && grep -q "1/1 $first: unresolved (reused)" <<<"$out" || fail "the unresolved task was built again: $out"
   [ "$(sort -u "$SWE_FX/graded")" = "$(jq -r '"\(.dataset) \(.revision)"' "$SRC/bench/swe.json") $first" ] \
@@ -378,10 +378,10 @@ t_swearms() {
   grep -q "^Resolved 2 of 2 with Stub a; not run: 0\.$" <<<"$out" && grep -q "^Resolved 1 of 2 with Stub b; not run: 0\.$" <<<"$out" \
     || fail "the run does not end with each arm's own resolved count: $out"
   # Bug (#326): a run's line named its arms but not their results keys, so the Board could not read each arm's figures.
-  [ "$(tail -n 1 "$B/runs.jsonl" | jq -c '[(.cols | map([.arm, .key])), .set.revision == $rv]' --arg rv "$(jq -r .revision "$SRC/bench/swe.json")")" = '[[["stub-a","stub-a"],["stub-b","stub-b"]],true]' ] \
+  [ "$(tail -n 1 "$B/runs.jsonl" | jq -c '[(.cols | map([.arm, (.key | sub("-[0-9a-f]{12}$"; ""))])), .set.revision == $rv]' --arg rv "$(jq -r .revision "$SRC/bench/swe.json")")" = '[[["stub-a","stub-a"],["stub-b","stub-b"]],true]' ] \
     || fail "the run's line does not name each arm's results key and the task set: $(tail -n 1 "$B/runs.jsonl")"
-  [ "$(cat "$B/results/stub-a"/*.json | jq -sc 'map([.task, .resolved, .arm, .tokens]) | sort')" = "$(jq -nc --arg a proj__a-1 --arg b proj__b-2 '[[$a, true, "stub-a", 7], [$b, true, "stub-a", 7]]')" ] \
-    && [ "$(cat "$B/results/stub-b"/*.json | jq -sc 'map([.task, .resolved]) | sort')" = '[["proj__a-1",false],["proj__b-2",true]]' ] \
+  [ "$(cat "$B"/results/stub-a-*/*.json | jq -sc 'map([.task, .resolved, .arm, .tokens]) | sort')" = "$(jq -nc --arg a proj__a-1 --arg b proj__b-2 '[[$a, true, "stub-a", 7], [$b, true, "stub-a", 7]]')" ] \
+    && [ "$(cat "$B"/results/stub-b-*/*.json | jq -sc 'map([.task, .resolved]) | sort')" = '[["proj__a-1",false],["proj__b-2",true]]' ] \
     || fail "the results are not kept per arm: $(cat "$B"/results/stub-*/*.json)"
   # Each arm passed its preflight first; then every trial had a container of its own, removed after it.
   jq -se 'length == 2 and all(.ok)' "$B/preflight/stub-a/stub-a.json" "$B/preflight/stub-b/stub-b.json" > /dev/null || fail "an arm ran with no passed preflight"
@@ -418,7 +418,7 @@ t_swearmmodel() {
 # their state; show gives one run's tasks in its order, each arm's result and patch; neither is in the snapshot.
 t_swehistory() {
   swe; local p o
-  mkdir -p "$B/results/stub-a" "$B/results/stub-b" && jq -nc '{id: "proj__b-2", issue: "\nSecond line first\nmore"}, {id: "proj__a-1", issue: "First task"}' > "$B/tasks.$(jq -r .revision "$SRC/bench/swe.json").jsonl" \
+  mkdir -p "$B/results/stub-a" "$B/results/stub-b" && jq -nc '{id: "proj__b-2", issue: "\nSecond line first\nmore"}, {id: "proj__a-1", issue: "First task"}' > "$TL" \
     && for p in stub-a/proj__a-1/true/1/7 stub-a/proj__b-2/true/2/5 stub-b/proj__a-1/false/1/3; do IFS=/ read -r a t r s k <<<"$p"
       jq -nc --arg a "$a" --arg t "$t" --argjson r "$r" --argjson s "$s" --argjson k "$k" '{task: $t, arm: $a, key: $a, label: $a, resolved: $r, fired: true, sessions: $s, tokens: $k, minutes: 1, steps: []}' > "$B/results/$a/$t.json"; done \
     && printf '%s\n' 'diff --git a/x.py b/x.py' '--- a/x.py' '+++ b/x.py' '@@ -1 +1 @@' '-bug' '+fixed' > "$B/results/stub-a/proj__a-1.patch" \
@@ -431,8 +431,8 @@ t_swehistory() {
   [ "$(jq -c '[(.runs | map([.id, .state, .n])), (.runs[1].cols | map([.arm, .done, .resolved, .notRun, .sessions, .tokens])), (.runs[0] | has("tasks") or has("pid"))]' <<<"$o")" \
     = '[[["r20261117T140000-2","stopped",1],["r20261117T090000-1","done",2]],[["stub-a",2,2,0,3,12],["stub-b",2,0,1,1,3]],false]' ] \
     || fail "history does not give the runs newest first with each arm's figures: $o"
-  [ "$(jq -c '[(.arms | map(select(.name | IN("solo", "stub-a", "conveyor"))) | map([.name, .state, .key, .keyPrefix])), (.keys | map([.key, .at]))]' <<<"$o")" \
-    = '[[["conveyor","ready",null,""],["solo","ready","solo-m",null],["stub-a","unchecked","stub-a",null]],[["stub-a",[0,1]],["stub-b",[1]]]]' ] \
+  [ "$(jq -c 'def fp: if . then gsub("[0-9a-f]{12}"; "F") else . end; [(.arms | map(select(.name | IN("solo", "stub-a", "conveyor"))) | map([.name, .state, (.key | fp), (.keyPrefix | fp)])), (.keys | map([.key, .at]))]' <<<"$o")" \
+    = '[[["conveyor","ready",null,"F-"],["solo","ready","solo-m-F",null],["stub-a","unchecked","stub-a-F",null]],[["stub-a",[0,1]],["stub-b",[1]]]]' ] \
     || fail "history does not give each arm's state and key, or each key's places in the pinned order: $(jq -c '[.arms, .keys]' <<<"$o")"
   o=$(loop bench swe show r20261117T090000-1 2>&1) || fail "show failed: $o"
   [ "$(jq -c '[.run.id, (.tasks | map([.id, .title, (.cells | map([.arm, .result, .resolved, .patch]))]))]' <<<"$o")" \
@@ -486,8 +486,8 @@ t_swearmquiet() {
   out=$(loop bench swe 2 --arm stub-quiet 2>&1) || fail "the run failed: $out"
   [ "$(grep -c ': unresolved (it did not fire: its output shows no use of its method)$' <<<"$out")" = 2 ] && grep -q "^Resolved 0 of 2 with Stub quiet; not run: 0\.$" <<<"$out" \
     || fail "the trials that did not fire are not the arm's failures: $out"
-  [ "$(cat "$B/results/stub-quiet"/*.json | jq -sc 'map([.fired, .resolved]) | unique')" = '[[false,false]]' ] && [ ! -e "$SWE_FX/graded" ] \
-    || fail "a trial that did not fire was graded, or not kept as failed: $(cat "$B/results/stub-quiet"/*.json)"
+  [ "$(cat "$B"/results/stub-quiet-*/*.json | jq -sc 'map([.fired, .resolved]) | unique')" = '[[false,false]]' ] && [ ! -e "$SWE_FX/graded" ] \
+    || fail "a trial that did not fire was graded, or not kept as failed: $(cat "$B"/results/stub-quiet-*/*.json)"
 }
 
 # Bug: after an arm's container exited, the host ran git in the sandbox the arm could write (its clean filter ran on
@@ -527,7 +527,7 @@ t_sweseats() {
   jq -e '.test == {command: "true", survey: false}' "$SWE_FX/pack.seen" > /dev/null || fail "the engine's pack does not hold the task's test command: $(jq -c .test "$SWE_FX/pack.seen")"
   # Bug: the container was given the arm file's logins only, so the Codex builder seat had no Codex login there.
   [ "$(cat "$SWE_FX/codex.seen" 2>/dev/null)" = CODEX-LOGIN ] || fail "the Codex seat's container had no Codex login"
-  [ -s "$B/results/conveyor-seats-$EB/$(sweorder | head -n 1).json" ] || fail "the seats arm's results are not kept apart from the conveyor arm's: $(ls "$B/results")"
+  [ -n "$(cat "$B"/results/conveyor-seats-*-"$EB/$(sweorder | head -n 1).json" 2>/dev/null)" ] || fail "the seats arm's results are not kept apart from the conveyor arm's: $(ls "$B/results")"
 }
 
 # Bug: the conveyor arm's preflight asked for a Codex login on a project whose seats all use Claude, so the default

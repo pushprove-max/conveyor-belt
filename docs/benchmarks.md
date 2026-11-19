@@ -39,8 +39,35 @@ runs the first 5 tasks. Give any number from 1 to 500. The quick choices are `sw
 and `swe 20` and `swe 50`.
 
 The order of the tasks is fixed: `conveyor/bench/swe.json` pins the dataset revision and a seed, and they put the
-tasks in one order. So `swe 5` is always the first 5 tasks of `swe 20`. A task that the same engine commit already ran
-is not run again: its result is used again, at no cost.
+tasks in one order. So `swe 5` is always the first 5 tasks of `swe 20`, while the seed stays the same.
+
+A task that an arm already ran with the same inputs is not run again: its result is used again, at no cost. The
+inputs are the arm and its models and efforts, the engine commit, the control record and pack settings of a Conveyor
+arm, the contents of its card and area rules, the dataset revision, the harness version and the limits. A change to
+one of them gives a new result, and the earlier result stays in the results. A result with no recorded inputs is
+shown, but never used again. A run reads these inputs once, when it starts. A change to the control record or the
+rules while it runs applies to the next run only.
+
+### Run settings
+
+`--settings <json>` changes the task set and the limits for every arm of one run:
+
+```
+conveyor.sh bench swe 5 --settings '{"seed": "my-seed", "cpus": 2, "memory": "4g", "taskTimeout": 7200}'
+```
+
+Each key is optional. A key that you leave out keeps its value in `conveyor/bench/swe.json`.
+
+| Key | What it sets |
+| --- | --- |
+| `revision` | The dataset revision, as a full commit id. The grade reads the tasks from this revision. |
+| `seed` | The seed of the task order, 1 to 80 characters. |
+| `cpus` | The CPUs of each task's container. It cannot be more than this machine has. |
+| `memory` | The memory of each task's container, such as `600m` or `4g`. It cannot be more than this machine holds. |
+| `taskTimeout` | The seconds that the install of an arm and its run on one task can each take. The preflight command has a fixed limit of its own. |
+
+The run records its settings in its line in the run history. `conveyor.sh bench swe arms check --settings <json>
+<arm>...` runs the preflights with the same settings.
 
 Before it starts, a run prints the sessions it usually takes and the worst case, and the minutes it is expected to
 take. A run does not start while the usage guard (`conveyor.sh control guard`, in [the control
@@ -174,7 +201,8 @@ does not add a model to the project's models. `bench swe history` shows the perm
 
 Each arm builds each task in a Docker container of its own, made from the task's image. Every arm gets the same CPU
 and memory limits (the `limits` setting in `conveyor/bench/swe.json`) and the same time limit for a task (the
-`taskTimeout` setting in the same file). The container can see the task's sandbox and no other folder of this
+`taskTimeout` setting in the same file). The [run settings](#run-settings) of a run change these limits for all of its
+arms. The container can see the task's sandbox and no other folder of this
 machine, except for a Conveyor arm: its container can also see the folder of the installed Conveyor version,
 read-only. The official harness grades the patch of every arm in the same way.
 
@@ -188,7 +216,8 @@ image, the repository, a log or a result.
 An arm runs only after its preflight passes. The preflight checks that each login of the arm is on this machine. It then installs the arm in a container and runs the arm on one small task: a file that prints a
 word with a spelling mistake. The arm must fire and change the file. A preflight that fails says what is missing. A
 run does not start when the preflight of one of its arms fails. A preflight that passed stays good for one day, while
-the arm's file and the logins it needs do not change.
+the arm's file and the logins it needs do not change. A run uses it only when it ran on the same image and limits as
+the run's. If not, the run does the preflight again.
 
 ```
 conveyor.sh bench swe arms
@@ -219,7 +248,17 @@ says how big a difference the number of tasks can show.
 
 `conveyor.sh bench swe diff <A> <B>` compares two arms or two versions on the tasks both ran. Each of A and B is a
 version (of the `conveyor` arm), an arm such as `codex-sol`, a Conveyor arm at a version, such as
-`conveyor-codex-claude@v1.5.0`, or a results key, as `conveyor.sh bench swe results --json` lists it (`key`). It shows:
+`conveyor-codex-claude@v1.5.0`, or a results key, as `conveyor.sh bench swe results --json` lists it (`key`). A
+name that is also a results key reads the results of that key. An arm or a version reads its newest results, whatever
+settings that run used, from these results only:
+
+- a Conveyor arm with no version: the results on the commit that `main` of the engine source points to now;
+- a version, or a Conveyor arm at a version: the results on the commit of that version;
+- an arm that uses the model of the builder seat, such as `solo`: the results on the builder's model as it is set now, when
+  that is a Claude model, else all its results;
+- any other arm: all its results.
+
+To read older results, give their results key. It shows:
 
 - the tasks that flipped (resolved by one version and not by the other), and the tasks that stayed the same;
 - for each flipped task, the first step where the two runs went apart (build, review, a fix round, the test step, or
