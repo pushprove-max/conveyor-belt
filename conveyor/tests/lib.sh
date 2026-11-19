@@ -183,8 +183,7 @@ filemode() {
   echo '# The stub test file of a.txt: the pack'"'"'s test.fileCommand runs $STUB/file-cmd for it.' > "$R/a.test.sh"
   git -C "$R" add a.test.sh || fail "main's stub test file a.test.sh could not be staged"
   linkset '{"a.txt": ["a.test.sh"]}'
-  tune '.test.fileCommand = ". \"$STUB/file-cmd\"" | .push.check = false'
-  tune '.test.command = .test.fileCommand'
+  tune '.test.fileCommand = ". \"$STUB/file-cmd\"" | .push.check = false | .test.command = .test.fileCommand'
 }
 # Main's committed test links (.conveyor/test-links.json, which the fixture's .gitignore leaves out, so added by
 # force) set to <json>, committed with anything staged and pushed: after setup, a case's links of its own.
