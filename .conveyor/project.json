@@ -97,5 +97,13 @@
   },
   "plugin": {
     "follow": "main"
+  },
+  "auto": {
+    "standing": [
+      "asked-fix",
+      "review-followup",
+      "release-check",
+      "fixed-block"
+    ]
   }
 }
