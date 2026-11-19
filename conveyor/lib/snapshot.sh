@@ -227,7 +227,8 @@ SNAPKEEP=20 PUSHKEEP=100
 # a step is unpriced), tokens, unpriced (how many of its steps have no price) and timeline: each finished step with
 # its time, seconds, tokens, dollars, model (the one it was priced at, else the one its line names), effort,
 # findings, tests, session stats, unpriced (why it has no price, null when it has one) and, on a step priced from
-# the pack's prices, override (true). A reading that was not
+# the pack's prices, override (true) and, on a review whose reviewer or judge wrote cache, writes and judgeWrites (each
+# {model, write, write1h}: the cache write tokens of its session, which keeps no transcript). A reading that was not
 # taken is null: a session whose usage could not be read has tokens null, not 0. runSec (pick-up to end, or to now),
 # fixes and testRuns (its fix and test lines). runs: how many runs of its issue the card's figures add up (the cards
 # of the issue since it last landed or closed, with the retried ones, to this one): with more than one, usd, tokens,
@@ -236,7 +237,10 @@ SNAPKEEP=20 PUSHKEEP=100
 # The snapshot's metrics: today, week (the 7 days to today) and prev (the 7 days before those) as totals() gives them;
 # days, each of the 7 days oldest first ({day, landed, blocked, cycleSec: its median, firstReviewPass, perLandedUsd: null
 # when a step of the day's landed cards is unpriced, so a part cost is never drawn as the whole});
-# slots, today's samples by local hour ({hour, slots: the mean in use, cap}); and cards, each card of the 7 days.
+# slots, today's samples by local hour ({hour, slots: the mean in use, cap}); cards, each card of the 7 days; and
+# steps, each card with a step that ended in the last 25 h ({card, issue, name when it has one, steps: those steps'
+# {step, time, writes, judgeWrites}}), not cut at SNAPKEEP as cards is: the Board's cache-write alert names the card step of each
+# session that wrote cache in its 24 h by them, from more cards than the newest SNAPKEEP.
 METRICS=$(<"$HERE/jq/metrics.jq")
 # CARDRUNS (after METRICS; cardruns.py runs it on the cards of the issues that changed): given cards, every card of
 # each issue among them, it prints for each, in their order, the card with its metrics and its runs' sums, then its
@@ -953,6 +957,9 @@ snapshot() (
   # Past the cut, landed keeps every card still on the belt (the Board puts one landed today in Landed, not Building),
   # and branches the newest row of each lane's change (lanekeys), so a lane left as it was is still told it landed.
   jq -c --argjson k "$SNAPKEEP" --argjson p "$PUSHKEEP" --argjson lk "$(lanekeys)" --arg hs "$hs" '.landedCount = (.landed | length)
+    | ((($ENV.CONVEYOR_NOW // "" | tonumber?) // now) - 90000) as $day
+    | .metrics.steps = [.metrics.cards // [] | .[] | {card, issue, steps: [.metrics.timeline // [] | .[] | select((.time | fromdate? // 0) >= $day)
+        | {step, time} + ({writes, judgeWrites} | with_entries(select(.value != null)))]} + (if .name then {name} else {} end) | select(.steps != [])]
     | .historySum = (if $hs == "" then null else $hs end)
     | .landedUsd = (if all(.landed[]; .usd | type == "number") then [.landed[].usd] | add // 0 else null end)
     | [.belt[] | select(.landed == true) | .card] as $on

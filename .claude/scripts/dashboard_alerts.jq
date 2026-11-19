@@ -25,10 +25,42 @@ def a($key; $sev; $text; $action): {key: $key, severity: $sev, text: "\($text). 
     ($d.limit.api // {} | select(.limitUsd != null and .spentUsd != null and .goalUsd != null and .spentUsd > .goalUsd)
       | a("limit-api"; "crit"; "API spend is on pace to pass the weekly limit before Monday: $\(.spentUsd | round) spent, the even pace for now is $\(.goalUsd | round) of $\(.limitUsd | round)";
           "slow Conveyor (a lower builder-cap) or move work to the other provider")),
-    # Kept by measurement: every day from 2026-10-11 to 10-18 wrote 1.7% to 3.3%, so it fires only on waste.
-    ($d.limit.cacheWritePct24h // null | select(. != null and . > 5)
-      | a("cache-write"; "warn"; "\(. | r)% of input tokens over the last 24 h were written to cache, over 5%";
-          "find the sessions rewriting cache")),
+    # Kept by measurement: every day from 2026-10-11 to 10-18 wrote 1.7% to 3.3%. It names where the writes came from:
+    # the limit's cacheWrites24h.cards (each card, session and model's writes in the 24 h, counted by request as the
+    # share is: dashboard_limit.py cache_writes()), each put to its card's step by the Metrics steps ($d.metrics.steps,
+    # every card's steps of the last 25 h): the first step line at or after the session's last request, in whole
+    # seconds as a step line's time is; a session after its card's last step line has no step recorded. A Claude
+    # reviewer or judge keeps no transcript, so the writes of each review and judge are its step line's (writes,
+    # judgeWrites), for a step line of the 24 h; the share does not count them, so the rest line is the share's writes
+    # less the transcripts' card writes. The card steps that wrote the most first, up to five, and the rest as one
+    # line. It says what was written, never that a write was waste.
+    ($d.limit.cacheWritePct24h // null | select(. != null and . > 5) as $pct
+      | ($d.limit.cacheWrites24h | if type == "object" then . else {} end) as $w
+      | ([$d.metrics.steps // [] | .[]? | objects | select(.card | type == "string") | {key: .card, value: .}] | from_entries) as $steps
+      | def who($card): $steps[$card] as $c
+          | $c.name // (if $c != null then "\($c.repo // "")#\($c.issue)" else ($card | capture("^c[0-9]{8}T[0-9]{6}-(?<r>.+)-(?<n>[0-9]+)$") | "\(.r)#\(.n)") // $card end);
+        def entry($m; $w5; $w1): {model: ($m | strings // "no model recorded"), w5: ($w5 | numbers // 0), w1: ($w1 | numbers // 0)};
+      [($w.cards // [] | .[]? | objects | select((.card | type) == "string" and (.first | type) == "number" and (.last | type) == "number") | . as $s
+          | ([$steps[$s.card].steps // [] | .[]? | objects | . + {at: (.time | strings | ts)} | select(.at != null)] | sort_by(.at)
+             | map(select(.at >= ($s.last | floor))) | .[0]) as $st
+          | {id: [$s.card, $st.at], who: who($s.card), step: (if $st == null then "(no step recorded)" else $st.step end), ledger: false}
+            + entry(.model; .write; .write1h)),
+        ($steps[] | . as $c | .steps // [] | .[]? | objects | (.time | strings | ts) as $at | select($at != null and $at >= $now - 86400)
+          | (["review", .writes], ["judge", .judgeWrites]) as [$step, $x] | $x | objects
+          | {id: [$c.card, $at], who: who($c.card), step: $step, ledger: true} + entry(.model; .write; .write1h))]
+      # One entry a card step (its card and step line; the judge apart) and model: its sessions' writes added up.
+      | group_by([.id, .step, .model, .ledger]) | map(.[0] + {w5: (map(.w5) | add), w1: (map(.w1) | add)}) | map(select(.w5 + .w1 > 0))
+      | sort_by(-(.w5 + .w1)) as $cw
+      | [$cw[] | select(.ledger | not)] as $tw
+      | ([{w5: ([(($w.write | numbers // 0) - ([$tw[].w5] | add // 0)), 0] | max), w1: ([(($w.write1h | numbers // 0) - ([$tw[].w1] | add // 0)), 0] | max)}
+          | select(.w5 + .w1 > 0)] | .[0]) as $rest
+      | a("cache-write"; "warn"; "\($pct | r)% of input tokens over the last 24 h were written to cache, over 5%"
+          + (if $cw == [] and ($w.cards | type) != "array" then ""
+             elif $cw == [] then ". No card step wrote cache in those 24 h"
+             else ". The card steps that wrote the most cache in those 24 h (5-minute + 1-hour cache write tokens): "
+               + ([$cw[:5][] | "\(.who) \(.step) \(.model) \(.w5)+\(.w1)"] | join("; ")) end)
+          + (if $rest == null then "" else ". Cache writes of those 24 h that no card step accounts for: \($rest.w5)+\($rest.w1)" end);
+          if $cw == [] then "find the sessions outside the cards that wrote this cache" else "read the records of the card steps named here" end)),
     ($d.guardBlocks // {} | select(.lastHour != null and .perHour != null and .lastHour >= 30 and .lastHour > 3 * .perHour)
       | a("guard-spike"; "warn"; "\(.lastHour) guard blocks in the last hour, over 3 times the \(.perHour | r) an hour average";
           "find the session looping on a refused command and redirect it")),

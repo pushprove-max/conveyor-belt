@@ -21,7 +21,11 @@ map(select(.step != "push")) | group_by(.card) | map(. as $all
          reviews: $r, startedAt: .[0].time, stepAt: last.time,
          steps: [range(1; length) as $i | .[$i] | select(.step | IN("build", "review", "test", "fix", "rebase"))
            | {step, time, sec: ((.time | fromdate) - ($g[$i - 1].time | fromdate)), tokens, usage} + (if .model then {model} else {} end)
-             + ({result, effort, counts, tests, stats, unread, ran: .sec, route} | with_entries(select(.value != null)))]
+             # judgeWrites: the cache writes of a review's judge session (the review line's judge), {model, write, write1h},
+             # when it wrote any. A Claude judge keeps no transcript (--no-session-persistence), so its line is their one record.
+             + ({result, effort, counts, tests, stats, unread, ran: .sec, route,
+                 judgeWrites: (.judge | if type == "object" and (.usage | type) == "object" and ((.usage.write | numbers // 0) + (.usage.write1h | numbers // 0)) > 0
+                   then {model, write: (.usage.write | numbers // 0), write1h: (.usage.write1h | numbers // 0)} else null end)} | with_entries(select(.value != null)))]
            # The session or review a blocked line says failed (spent): a step like the others, result fail.
            + [range(1; length) as $i | .[$i] | select(.step == "blocked" and (.spent | type) == "object") | .spent as $sp
              | {step: $sp.step, time, sec: ((.time | fromdate) - ($g[$i - 1].time | fromdate)), tokens: {claude: ($sp.tokens.claude // 0), codex: ($sp.tokens.codex // 0)},

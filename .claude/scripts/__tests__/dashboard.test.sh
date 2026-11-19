@@ -597,7 +597,8 @@ P=$(snap '{"needsYou": {"waiting": [{"card": "c1-12", "issue": 12, "title": "But
   "awaitingDeploy": [{"issue": 802, "title": "Stack split", "since": "2026-11-05T00:00:00Z"}, {"issue": 803, "title": "No time", "since": null}],
   "metrics": {"cards": [{"card": "c5-1", "issue": 1, "metrics": {"buildSec": 600, "reviewSec": 300, "fixSec": null}}, {"card": "c5-2", "issue": 2, "metrics": {"buildSec": 200, "reviewSec": 100, "fixSec": 0}},
     {"card": "c5-3", "issue": 3, "metrics": {"buildSec": 400}}], "prev": {"cards": 2, "landed": 1}, "days": [{"day": "2026-11-09", "landed": 1, "blocked": 0}],
-    "slots": [{"hour": 9, "slots": 1.5, "cap": 3}]},
+    "slots": [{"hour": 9, "slots": 1.5, "cap": 3}],
+    "steps": [{"card": "c5-9", "issue": 9, "steps": [{"step": "review", "time": "2026-11-09T09:00:00Z", "judgeWrites": {"model": "claude-haiku-5-5", "write": 40, "write1h": 0}}]}]},
   "declined": [{"id": "d0123456789ab", "time": "'"$TODAY_ISO"'T08:40:00Z", "card": "c3-801", "issue": 801, "finding": "[P1] b.txt:2 no mark here", "by": "judge", "why": "its proof needs a stub built to misbehave", "repo": "sample"}],
   "declinedRest": [{"id": "dba9876543210", "time": "'"$TODAY_ISO"'T07:10:00Z", "card": "c0-6", "issue": 6, "finding": "[P2] a.txt:1 wrong word", "by": "code", "why": "follow-up of a follow-up", "repo": "sample", "built": 90},
     {"id": "d0000000000dd", "time": "'"$TODAY_ISO"'T08:50:00Z", "card": "c3-801", "issue": 801, "finding": "[P3] d.txt:4 a word", "by": "judge", "why": "taste", "repo": "sample", "dismissed": {"time": "'"$TODAY_ISO"'T09:00:00Z", "by": "Board user owner"}}],
@@ -678,6 +679,10 @@ q '.panels.declined.data.rest | map([.repo, .id, .url, .built, .dismissed]) == [
 # Metrics' tiles and charts: each record's 7 days before, its days and today's slots, as its snapshot gives them.
 q '.panels.metrics.data.records | map([.repo, .prev, .days, .slots]) == [["sample", {cards: 2, landed: 1}, [{day: "2026-11-09", landed: 1, blocked: 0}], [{hour: 9, slots: 1.5, cap: 3}]], ["widgetshop", null, null, null]]' \
   "metrics carries each record's 7 days before, its days and its slots by hour; a record without them has null"
+# Bug caught: the cache-write alert read only the newest cards (the snapshot's cut), so it could not name the step of
+# an older card's session. The snapshot's uncut steps reach the panel, each with its repo; a record without them has none.
+q '.panels.metrics.data.steps | map([.repo, .card, .issue, .steps]) == [["sample", "c5-9", 9, [{step: "review", time: "2026-11-09T09:00:00Z", judgeWrites: {model: "claude-haiku-5-5", write: 40, write1h: 0}}]]]' \
+  "metrics carries each record's card steps of the last 25 h"
 # Belt 3D is cut from the same answers: a lane each belt card and stuck card, a bay each of queued, waiting, held and
 # landed today. Bug it catches: a held issue, an issue waiting on another, or what it waits on, missing from the floor.
 q '.panels.belt3d.data | (.belt | map([.repo, .issue, .step, .landed, .url])) == [["sample", 801, "review", false, "'"$PU"'/801"], ["widgetshop", 5, "build", false, "'"$CU"'/5"]]

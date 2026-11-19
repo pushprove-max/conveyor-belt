@@ -1039,14 +1039,21 @@ def reuses(cache, since, now):
         and isinstance(held[0], (int, float)) and held[0] <= since
 
 
-def requests(projects, cache_path, since, now, roots=None):
+def requests(projects, cache_path, since, now, roots=None, places=None):
     """Each distinct API request's row from Claude Code's transcripts (subagents included) since `since`.
 
     A week of transcripts runs to gigabytes, so each file is read once from the
     byte offset the last call stopped at; the cache keeps every request's row,
     and the working folder its session ran in. With `roots`, only the requests
-    of sessions run in those folders are returned: one project's own.
+    of sessions run in those folders are returned: one project's own. A list
+    given as `places` is filled with each returned row's (working folder,
+    session id), in the same order.
     """
+    def picked(seen, where, sess):
+        keys = [k for k, v in seen.items() if since <= v[0] <= now and under(where.get(k), roots)]
+        if places is not None:
+            places[:] = [(where.get(k), sess.get(k)) for k in keys]
+        return [seen[k] for k in keys]
     if not os.path.isdir(projects):
         return None
     try:
@@ -1061,7 +1068,7 @@ def requests(projects, cache_path, since, now, roots=None):
             raise ValueError("cache from before requests kept their working folder, session and sidechain flag")
         missing, held = set(cache.get("unread", [])), cache.get("covered")
         if reuses(cache, since, now):
-            return [v for k, v in seen.items() if since <= v[0] <= now and under(where.get(k), roots)]
+            return picked(seen, where, sess)
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         offsets, seen, where, sess, side, missing, held = {}, {}, {}, {}, {}, set(), None
     # A file or folder deleted since it was listed is gone, and its cached rows stay. One that is there
@@ -1131,7 +1138,7 @@ def requests(projects, cache_path, since, now, roots=None):
     if unread:
         print(f"dashboard_limit: {len(unread)} transcript path(s) could not be read, so requests and cost are unknown: {unread[0]}", file=sys.stderr)
         return None
-    return [v for k, v in seen.items() if since <= v[0] <= now and under(where.get(k), roots)]
+    return picked(seen, where, sess)
 
 
 CODEX_TAIL = 262144  # a session file is read 256 KB at a time from its end: token_count events are frequent
@@ -1480,6 +1487,11 @@ def api_week(limit, rows, now, codex_rows=None, codex_partial=False, since=None)
     return out
 
 
+def cache_day(rows, now):
+    """The last 24 h's requests (advisor calls too) whose input, cache write and cache read counts are all known."""
+    return [r for r in model_calls(rows) if r[0] >= now - 86400 and None not in (r[2], r[3], r[4], r[5])]
+
+
 def cache_write_pct(rows, now):
     """Share of the last 24 h's input tokens (new + cache write + cache read) written to cache, in percent.
 
@@ -1488,10 +1500,40 @@ def cache_write_pct(rows, now):
     """
     if rows is None:
         return None
-    day = [r for r in model_calls(rows) if r[0] >= now - 86400 and None not in (r[2], r[3], r[4], r[5])]
+    day = cache_day(rows, now)
     writes = sum(r[3] + r[4] for r in day)
     total = writes + sum(r[2] + r[5] for r in day)
     return writes * 100 / total if total > 0 else None
+
+
+# An issue's card ends in its issue number, a main-red fix card (which has no issue) in -0.
+CARD_DIR = re.compile(r"c[0-9]{8}T[0-9]{6}-.+-(0|[1-9][0-9]{0,8})")
+
+
+def card_of(folder):
+    """The card id of a session's working folder: its last part named as a card's worktree is (<cards>/<card id>)."""
+    return next((p for p in reversed(folder.split("/")) if CARD_DIR.fullmatch(p)), None) if isinstance(folder, str) else None
+
+
+def cache_writes(rows, now, places=None):
+    """The cache write tokens of the requests cache_write_pct counts, {write: 5-minute, write1h: 1-hour, cards}; None
+    with no rows. cards: those of them made in a card's worktree (places, requests()'s, gives each row's folder and
+    session), a row each card, session and model that wrote cache: {card, model, first, last (its requests' times),
+    write, write1h}, the most written first. Each is counted by when its request was made, as the share is, so the
+    cache-write alert names a card step by what it wrote in the 24 h, and shows the rest as written by no card step."""
+    if rows is None:
+        return None
+    day, cards = [], {}
+    for i, r in enumerate(rows):
+        folder, session = places[i] if places else (None, None)
+        card = card_of(folder)
+        for x in cache_day([r], now):
+            day.append(x)
+            if card and x[3] + x[4] > 0:
+                c = cards.setdefault((card, session, x[1]), {"card": card, "model": x[1], "first": x[0], "last": x[0], "write": 0, "write1h": 0})
+                c.update(first=min(c["first"], x[0]), last=max(c["last"], x[0]), write=c["write"] + x[3], write1h=c["write1h"] + x[4])
+    return {"write": sum(r[3] for r in day), "write1h": sum(r[4] for r in day),
+            "cards": sorted(cards.values(), key=lambda c: (-(c["write"] + c["write1h"]), c["card"], c["first"]))}
 
 
 def codex_sources(sessions):
@@ -1531,7 +1573,8 @@ def build(status, usage_path, now, cache_dir, projects, sessions=None, roots=Non
         rows = read_history(hist_path, folder)
     # The cache write share is a rolling 24 h, so the first day after a reset reads back before the window start.
     since = min(start, now - 86400) if live else None
-    loaded = requests(projects, os.path.join(cache_dir, "limit-requests.json"), since, now) if live else None
+    places, api_places = [], []
+    loaded = requests(projects, os.path.join(cache_dir, "limit-requests.json"), since, now, places=places) if live else None
     reqs = [r for r in loaded if r[0] >= start] if loaded is not None else None
     five_reset = epoch(five.get("resets_at"))
     five_used = five.get("utilization") if isinstance(five.get("utilization"), (int, float)) else None
@@ -1547,6 +1590,7 @@ def build(status, usage_path, now, cache_dir, projects, sessions=None, roots=Non
         "requests": len(reqs) if reqs is not None else None,
         "cost": cost(reqs, used, start, now) if reqs is not None else None,
         "cacheWritePct24h": cache_write_pct(loaded, now),
+        "cacheWrites24h": cache_writes(loaded, now, places),
         "codex": codex(sessions, now),
     })
     out["codex"]["subscription"] = codex_subscription(sessions)
@@ -1560,11 +1604,11 @@ def build(status, usage_path, now, cache_dir, projects, sessions=None, roots=Non
     if mode == "api":
         monday = epoch(api_week(None, None, now)["windowStart"])
         codex_rows = codex_requests(codex_dirs, os.path.join(cache_dir, "codex-requests.json"), monday, now, missed)
-        api_rows = requests(projects, os.path.join(cache_dir, "limit-requests.json"), min(monday, now - 86400), now)
+        api_rows = requests(projects, os.path.join(cache_dir, "limit-requests.json"), min(monday, now - 86400), now, places=api_places)
         out["api"] = api_week(limit, api_rows, now, codex_rows, bool(missed))
         # With no subscription reading nothing above loaded the requests, and cache writes still cost dollars here.
         if out["cacheWritePct24h"] is None:
-            out["cacheWritePct24h"] = cache_write_pct(api_rows, now)
+            out["cacheWritePct24h"], out["cacheWrites24h"] = cache_write_pct(api_rows, now), cache_writes(api_rows, now, api_places)
     # The day's cost for the top strip: both providers since host-local midnight, in either billing mode. Unlike
     # every figure above, which is the account's, it counts only the sessions run in `roots`: one project's own.
     # Read from midnight itself, which is over 24 h back on the day the clocks go back.

@@ -38,6 +38,10 @@ t_snapsize() {
   # The newest of each, never the oldest.
   [ "$(jq -c '[.landed[0].card, .metrics.cards[0].card, .cost.cards[0].card, .declinedRest[0].id, .branches[0].card, .pushedCards[0].card]' <<<"$out")" = '["c110","c110","c110","d30","c110","c110"]' ] \
     || fail "the snapshot keeps other than the newest: $(jq -c '[.landed[0].card, .metrics.cards[0].card, .cost.cards[0].card, .declinedRest[0].id, .branches[0].card, .pushedCards[0].card]' <<<"$out")"
+  # The steps of the last 25 h are not cut: the Board's cache-write alert names the step of every card that wrote cache
+  # by them. Bug caught: steps read from the newest SNAPKEEP cards, so an older card's session had no step.
+  [ "$(jq -c '[(.metrics.steps | length), (.metrics.steps[-1] | [.card, (.steps | map(.step))])]' <<<"$out")" = "[$n,[\"c1\",[\"build\",\"review\",\"test\"]]]" ] \
+    || fail "the snapshot's steps are cut: $(jq -c '[(.metrics.steps | length), .metrics.steps[-1]]' <<<"$out")"
   [ "${#out}" -lt 524288 ] || fail "the snapshot of $n landed cards is ${#out} bytes, over the 512 KB README.md states"
   hist=$(loop history) || fail "history exited non-zero"
   # pushedCards whole too (#544): the Foreman's watcher reads it there for an awaited push past the snapshot's 100.

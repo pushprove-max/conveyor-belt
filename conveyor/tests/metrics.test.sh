@@ -92,7 +92,10 @@ t_metricstotals() {
   l 3 03:00 picked ok "{\"title\":\"T3\",\"created\":\"${d}T02:50:00Z\"}"; l 3 03:10 build ok "$B"
   # Its fix session timed out after 60 s and 1M input tokens: the blocked line holds what it spent, priced ($2).
   l 3 03:11 blocked blocked '{"reason":"fix: session failed (exit 124; 124 is the 3600s timeout): x","tokens":{"claude":1000000,"codex":0},"spent":{"step":"fix","tokens":{"claude":1000000},"usage":{"input":1000000,"write":0,"write1h":0,"read":0,"output":0},"model":"claude-sonnet-5-5","sec":60}}'
-  l 4 04:00 picked ok '{"title":"T4"}'; l 4 04:10 build ok "$B"; l 4 04:15 review GO "$V"; l 4 04:16 blocked blocked "{\"reason\":\"visible to customers or staff: needs Dana's yes: a button\"}"
+  # Its review, by Claude, and its judge wrote cache: the snapshot's steps keep those writes (a Claude reviewer or judge
+  # keeps no transcript), which the Board's cache-write alert reads.
+  J='{"model":"claude-haiku-5-5","effort":"low","sec":5,"tokens":{"claude":20},"usage":{"input":1,"write":7,"write1h":3,"read":0,"output":9}}'
+  l 4 04:00 picked ok '{"title":"T4"}'; l 4 04:10 build ok "$B"; l 4 04:15 review GO "$(jq -c --argjson j "$J" '.judge = $j | .model = "claude-sonnet-5-5" | .usage += {write: 11, write1h: 0}' <<<"$V")"; l 4 04:16 blocked blocked "{\"reason\":\"visible to customers or staff: needs Dana's yes: a button\"}"
   # Card 6, on the belt: a build recorded before the token split and the model (its fresh tokens only).
   l 6 06:00 picked ok '{"title":"T6"}'; l 6 06:10 build ok '{"tokens":{"claude":500000,"codex":0}}'
   # Card 5: blocked yesterday at 22:00 and still blocked: today it waits on the owner from midnight only.
@@ -124,6 +127,12 @@ t_metricstotals() {
     = '[3600,60,600,600,600,300,60,240,5760,2160,{"P0":0,"P1":2,"P2":1,"P3":0},{"files":2,"added":30,"removed":4},{"before":10,"after":12,"used":2},null,true,3000000]' ] || fail "card 1's metrics: $(q '.metrics.cards[] | select(.card == "c1") | .metrics')"
   [ "$(q '.metrics.cards | map(select(.card | IN("c3", "c4"))) | map([.metrics.blockClass, .metrics.slotSec, .metrics.queueSec])')" = '[["visible change",null,null],["timeout",null,600]]' ] \
     || fail "the blocked cards' metrics: $(q .metrics.cards)"
+  # The steps of the last 25 h, each card's (card 5, blocked yesterday, has none), with the reviewer's and judge's cache
+  # writes on card 4's review. Bug caught: the writes of sessions with no transcript were lost, so the cache-write alert
+  # never named a Claude review or judge.
+  [ "$(q '[.metrics.steps[] | .card] | sort')" = '["c1","c2","c3","c4","c6"]' ] || fail "the cards of the steps: $(q .metrics.steps)"
+  [ "$(q '.metrics.steps[] | select(.card == "c4") | [.issue, .steps]')" = "[4,[{\"step\":\"build\",\"time\":\"${d}T04:10:00Z\"},{\"step\":\"review\",\"time\":\"${d}T04:15:00Z\",\"writes\":{\"model\":\"claude-sonnet-5-5\",\"write\":11,\"write1h\":0},\"judgeWrites\":{\"model\":\"claude-haiku-5-5\",\"write\":7,\"write1h\":3}}]]" ] \
+    || fail "card 4's steps: $(q '.metrics.steps[] | select(.card == "c4")')"
   [ "$(q '.metrics.cards[] | select(.card == "c2") | .metrics.limit')" = '{"before":80,"after":1,"used":null}' ] || fail "a limit reset during card 2: $(q '.metrics.cards[] | select(.card == "c2") | .metrics.limit')"
   # No null cost: the old build (fresh tokens only, no split, no model) is not guessed at. It is left out of the
   # figures, counted, and says why; every other step, Codex reviews and the failed fix among them, is priced.

@@ -216,6 +216,14 @@ cursor goes to the heading of that group.
   processes that no card owns, such as another program or a stray test process. A closed card that still runs
   processes shows **closed: left over**, with the command that stops them. **Read again** reads the machine again.
   It is the same list as `conveyor.sh work`.
+- The cache-write alert, which wakes the Foreman, shows where the cache writes of the last 24 hours came from. It
+  names up to five card steps that wrote the most cache in that time, the largest first. Each shows the issue, the
+  step (build, fix, rebase, review, judge or test), the model, and its 5-minute and 1-hour cache write tokens. A step
+  shows only the tokens it wrote in those 24 hours. A Claude review or judge shows the tokens its card record gives,
+  when the record is from those 24 hours. A step that has no record yet, such as one that still runs, shows
+  as **(no step recorded)**. One more line shows the cache write tokens of those 24 hours that no card step accounts
+  for, such as your own sessions.
+  The alert shows what was written. It does not say that a write is waste.
 - A blocked landing in the Fast lane shows its reason on one line. Its log is under **Show output**, as plain text,
   with **Copy output**.
 

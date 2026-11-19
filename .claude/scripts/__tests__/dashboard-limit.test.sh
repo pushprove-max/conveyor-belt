@@ -188,6 +188,16 @@ json.dump({"version": 7, "offsets": {p: os.path.getsize(p)}, "requests": {}, "cw
           open(f"{T}/cache7.json", "w"))
 got = d.requests(f"{T}/p", f"{T}/cache7.json", now - 7200, now)
 assert got is not None and len(got) == 3, f"a version-7 cache's transcript is not read again, so its uuid-only lines stay zero: {got}"
+# places: each returned row's working folder and session, in the rows' order. Bug caught: no folder per request, so
+# the cache-write alert could not tell a card's writes in its 24 h from a step's whole total.
+with open(f"{T}/p/w.jsonl", "w") as f:
+    for rid, cwd, sid in (("r1", "/x/c20261119T100000-alpha-11", "s1"), ("r2", "/y", "s2")):
+        f.write(json.dumps({"type": "assistant", "requestId": rid, "timestamp": "2026-10-10T00:00:00Z", "cwd": cwd, "sessionId": sid,
+                            "message": {"model": rid, "usage": use}}) + "\n")
+places = []
+got = d.requests(f"{T}/p", f"{T}/cachew.json", now - 7200, now, places=places)
+assert sorted((r[1], p) for r, p in zip(got, places) if r[1] in ("r1", "r2")) == [("r1", ("/x/c20261119T100000-alpha-11", "s1")), ("r2", ("/y", "s2"))] \
+    and len(places) == len(got), f"each request's folder and session: {list(zip(got, places))}"
 PY
 # Cost today: noon UTC on 2026-10-10, host clock in UTC. A request an hour ago
 # ($20 of Opus 5.5 output) counts; one before midnight does not; a day whose
@@ -259,6 +269,20 @@ now = 1791633600; a = d.api_week(1000, $1, now, []); print(json.dumps([a['spentU
 cwp() { python3 -c "import sys; sys.path.insert(0, '${LIM%/*}'); import dashboard_limit as d; print(d.cache_write_pct($1, 1000))"; }
 [ "$(cwp '[[990, "claude-opus-5-5", 0, 0, 0, 100, 0, [990, "claude-fable-5-1", 0, 100, 0, 0, 0]]]')" = 50.0 ] \
   || fail "cache_write_pct_counts_advisor_calls: an advisor's cache write is part of the day's input"
+# The day's cache writes, 5-minute and 1-hour apart, of the same requests: an old one, and one with a count unknown,
+# left out. Those made in a card's worktree (a subfolder too), a row each card, session and model, with the times of
+# its requests; one outside a card counts in the total only. Bug caught: writes counted that the share leaves out, or
+# a card's request before the 24 h counted in its step (a step crossing the cutoff ranked by its whole total), so the
+# alert's card steps and its "no card step" line were wrong.
+cws() { python3 -c "import sys, json; sys.path.insert(0, '${LIM%/*}'); import dashboard_limit as d; print(json.dumps(d.cache_writes($1, 1000, $2)))"; }
+C=/w/conveyor-cards/c20261119T100000-alpha-11
+got=$(cws '[[990, "claude-opus-5-5", 0, 40, 60, 100, 0, [990, "claude-fable-5-1", 0, 5, 0, 0, 0]], [995, "claude-opus-5-5", 0, 10, 0, 0, 0], [-90000, "claude-opus-5-5", 0, 9, 9, 0, 0],
+  [995, "claude-opus-5-5", None, 9, 9, 0, 0], [996, "claude-opus-5-5", 0, 7, 0, 0, 0]]' "[('$C/sub', 's1'), ('$C', 's1'), ('$C', 's1'), ('$C', 's1'), ('/home/x', 's2')]")
+[ "$got" = '{"write": 62, "write1h": 60, "cards": [{"card": "c20261119T100000-alpha-11", "model": "claude-opus-5-5", "first": 990, "last": 995, "write": 50, "write1h": 60}, {"card": "c20261119T100000-alpha-11", "model": "claude-fable-5-1", "first": 990, "last": 990, "write": 5, "write1h": 0}]}' ] \
+  || fail "cache_writes: $got"
+# A main-red fix card's worktree ends in -0, not an issue number. Bug caught: its writes counted as no card step's.
+got=$(cws '[[990, "claude-opus-5-5", 0, 8, 0, 0, 0]]' "[('/w/conveyor-cards/c20261119T003744-beta-0', 's3')]")
+[ "$(jq -c '.cards | map(.card)' <<<"$got")" = '["c20261119T003744-beta-0"]' ] || fail "cache_writes of a main-red card: $got"
 ) & part transcripts
 
 (

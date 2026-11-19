@@ -165,7 +165,8 @@
 #           conveyor/bench/swe.sh swe_board()) and drift (the snapshot's: the latest drift watch, conveyor/bench/drift.sh);
 #           each null from a snapshot without it. The runs and their results are read when shown (--bench).
 #   metrics records (each record's measured totals, today and week) and cards (each card of the 7 days with
-#           its metrics: step timeline, seconds, tokens, dollars, findings; null from a snapshot without them), and
+#           its metrics: step timeline, seconds, tokens, dollars, findings; null from a snapshot without them), steps
+#           (each card's steps of the last 25 h, uncut: the snapshot's metrics.steps, with its repo and url), and
 #           compare (the 7 days side by side, {projects: a row a project, naming its repo; machine: the machine's}:
 #           landed, leadSec (the median seconds from an issue's opening to its landing) and usd; a figure not measured
 #           is null).
@@ -945,6 +946,8 @@ PANELS_JQ='
           days: (.snap.metrics.days // null), slots: (.snap.metrics.slots // null)}],
         cards: (if any($R[]; .snap.metrics.cards | type != "array") then null
           else [$R[] as $r | $r.snap.metrics.cards[] | tag($r) | {repo, card, issue, title, url, state, at, metrics} + (if .name then {name} else {} end)] end),
+        # The steps of the last 25 h of every card, past the newest cards above (snapshot metrics.steps), for the cache-write alert.
+        steps: [$R[] as $r | $r.snap.metrics.steps // [] | .[] | objects | tag($r) | {repo, card, issue, steps} + (if .name then {name} else {} end)],
         # The 7 days side by side: each project (projects, each naming its repo) and the machine. The time to land of the machine is
         # the median over the landed cards of every project (an issue already fixed, closed, is landed too, as in the
         # median of each project; one closed while blocked has no time to land), never a mean of their medians; null when

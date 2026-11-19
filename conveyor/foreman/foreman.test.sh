@@ -371,6 +371,14 @@ board 20; bash "$SRC/watch-alerts.sh" --once
 board 90
 bash "$SRC/watch-alerts.sh" --once || fail "an alert that cleared and came back did not wake"
 rm -f "$FD"/pending/*.wake
+# The cache-write alert names the card step of each session by the Board's Metrics steps. Bug caught: a watcher that
+# passed the rules the limit alone, so the wake named no card step.
+printf 'window.DASH = %s;\n' "$(jq -cn '((now | floor) - 60) as $t | {panels: {health: {data: {limit: {usedPct: 20, goalPct: 50, cacheWritePct24h: 8,
+    cacheWrites24h: {write: 3000, write1h: 1000, cards: [{card: "c7", model: "claude-opus-5-5", first: ($t - 300), last: ($t - 10), write: 3000, write1h: 1000}]}}}},
+  metrics: {data: {steps: [{repo: "alpha", card: "c7", issue: 7, steps: [{step: "build", time: ($t | todate)}]}]}}}}')" > "$T/data.js"
+bash "$SRC/watch-alerts.sh" --once || fail "the cache-write alert did not wake"
+grep -qF 'alpha#7 build claude-opus-5-5 3000+1000' "$FD"/pending/*.wake || fail "the cache-write wake names no card step: $(cat "$FD"/pending/*.wake)"
+rm -f "$FD"/pending/*.wake
 # A question the owner has left over an hour wakes too, read from the ledger of a project of this Foreman and named
 # for it; one in the Board's Needs panel does not: that is the one ledger of the Board's checkout, whichever project's
 # Foreman reads it.

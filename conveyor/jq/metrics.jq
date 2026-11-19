@@ -50,6 +50,12 @@
          timeline: [$c.steps[] | {step, result, time, sec: (.ran // .sec),
            tokens: (if .unread != null then null else (.tokens.claude // 0) + (.tokens.codex // 0) end), usd,
            model: (.pricedAs // .model), effort, counts, tests, stats, unpriced: (.unpriced // null)} + (if .override == true then {override: true} else {} end)
+           # The cache writes of a review's reviewer (writes) and judge (judgeWrites), {model, write, write1h}, when they
+           # wrote any: a Claude reviewer or judge keeps no transcript (--no-session-persistence), so the cache-write
+           # alert reads them here.
+           + (if .step == "review" and (.usage | type) == "object" and ((.usage.write | numbers // 0) + (.usage.write1h | numbers // 0)) > 0
+              then {writes: {model, write: (.usage.write | numbers // 0), write1h: (.usage.write1h | numbers // 0)}} else {} end)
+           + (if .judgeWrites then {judgeWrites} else {} end)
            # The route a Claude or Codex session took (session1(), claudereview(), codexreview()): subscription or proxy, when a proxy is set.
            + (if .route then {route} else {} end)]};
     # The totals of the cards that ended in a window, with the loop and host samples and the pushes of that window.
