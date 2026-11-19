@@ -81,6 +81,16 @@ On a wake for a waiting card, the Foreman does more than report it. It finds why
 the card it waits on, the main-red record and the test log. Then it fixes the cause. If the belt is blocked and your
 rules allow it, it makes a fix by hand. If not, it files an issue.
 
+An issue that the Foreman files is held until you say yes. While the Foreman files it, every record of the host file
+starts new issues held. After it files the issue, the Foreman holds it in the record for its GitHub repository. That
+is the record whose main checkout on this machine has a remote (`origin`, or the pack's `remote`) for that
+repository, so the record's name can be different, as when setup named it for its folder. This is also true when the
+Foreman runs in a worktree of that main checkout. If no record has such a main checkout, it is the record with the
+name of the repository. Letter case does not count. If no record
+is for the repository, the Foreman tells you the repository, the records it looked at, and the fix: set the `main` of
+the project's record in the host file to its main checkout on this machine, or run `conveyor.sh setup` in that
+checkout.
+
 A card that moves from one step to the next, as from build to review, gives no wake.
 
 The Foreman's reply to a wake says only what needs you. If nothing needs you, the reply is the one word Idle. A

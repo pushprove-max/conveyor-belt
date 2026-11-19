@@ -59,14 +59,16 @@ plugin_home() {
   return 1
 }
 # record_of <name> <records>: the record, "<repo> TAB <main>" as records prints them, that holds an issue of the
-# GitHub repository <name>: the first whose main checkout's repository (repo_name) is <name>, else the one named
-# <name> (so a record whose main is not on this machine is still found by its name). Empty when none is.
+# GitHub repository <name>: the first whose main checkout, a folder on this machine, has <name> for its repository
+# (repo_name; a worktree of it, as the checkout a hook runs in may be, shares its remotes); else the one named <name>
+# (so a record whose main is not on this machine is still found by its name). Letter case aside, as GitHub prints a
+# repository's name in its own case. Empty when none is.
 record_of() {
-  local rec main
+  local rec main r n=${1,,}
   while IFS=$'\t' read -r rec main; do
-    [ -n "$main" ] && [ -d "$main" ] && [ "$(repo_name "$main")" = "$1" ] && { printf '%s\t%s\n' "$rec" "$main"; return 0; }
+    [ -n "$main" ] && [ -d "$main" ] && r=$(repo_name "$main") && [ "${r,,}" = "$n" ] && { printf '%s\t%s\n' "$rec" "$main"; return 0; }
   done <<<"$2"
-  awk -F'\t' -v r="$1" '$1 == r { print; exit }' <<<"$2"
+  awk -F'\t' -v r="$n" 'tolower($1) == r { print; exit }' <<<"$2"
 }
 # ledger <repo> <main>: the checkout whose decision ledger (.claude/metrics/decisions.jsonl) a record's open decisions
 # are read from: its main when that is on this machine; else, for the record mine matched by this checkout's

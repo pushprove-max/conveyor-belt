@@ -57,8 +57,8 @@
 #   (another project's too, as the command may file there) (conveyor.sh control start held), so an issue is held from its first sight, however long the command runs on;
 #   when a record cannot be set, or the command is to run in the background, the command is refused. filed holds every
 #   issue the command's output links (github.com/<owner>/<name>/issues/<n>) in the record whose main checkout's GitHub
-#   repository is <name>, else the record named <name> (lib.sh record_of), unless it was
-#   released or held already (conveyor.sh control adopt; control hold in a record whose engine has no adopt), so a
+#   repository is <name>, else the record named <name>, letter case aside (lib.sh record_of; filing needs no lookup,
+#   as it sets every record), unless it was released or held already (conveyor.sh control adopt; control hold in a record whose engine has no adopt), so a
 #   release given before filed runs stays, and tells the Foreman only those it holds; then it sets back to
 #   the queue each record a filing set to held, once no other filing, of any Foreman, is in flight (SF, below), which
 #   holds every open issue opened while it was held, a follow-up too (conveyor.sh control start queue filed), so an
@@ -532,7 +532,7 @@ filed() {
     # The record is found by its main checkout's GitHub repository, else by its name: a record (or the folder a host
     # file with no records names it for) may be named apart from its repository.
     repo='' main=''; IFS=$'\t' read -r repo main < <(record_of "$gh" "$recs")
-    if [ -z "$main" ]; then bad+=("${nums// /, } of $gh: no record of the host file is for $gh")
+    if [ -z "$main" ]; then bad+=("${nums// /, } of $gh: no record of $HOSTF is for $gh; it looked at $(awk -F'\t' '{ printf "%s%s (main %s)", (NR > 1 ? ", " : ""), $1, $2 }' <<<"$recs"), and none has a main checkout on this machine whose remote (origin, or its pack's remote) is $gh, nor is named $gh. Set the \"main\" of its record in $HOSTF to its main checkout on this machine, or run conveyor.sh setup in that checkout")
     else
       c=$(ask "$repo" "$main" control adopt $nums 2>&1); rc=$?
       # An engine before `control adopt` (a record's pack pins its own) refuses it as a usage error (2): hold them.
