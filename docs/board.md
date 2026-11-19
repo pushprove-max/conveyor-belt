@@ -438,10 +438,11 @@ Under the top row are three numbered steps. Each step has a mark: done, failed, 
    "Not run". While the suite runs, a bar shows the test files done of all the test files, with the names of the files
    that failed. A test case that ran out of time shows as "<case>: timed out". When the run under way, or the last run,
    runs test files, the step says how: one by one or in parallel. A **Release** that uses the suite that passed or
-   failed before shows the mode of that suite. It says no mode for a run that keeps every pass of an earlier run,
-   because that run runs no test files. A full
-   test run in progress shows here too. When **Release** is enabled, the step also says what
-   it does: "Uses the suite that passed at <time> on <commit>", or "Runs the suite first (about N min)".
+   failed before shows the mode of that suite. It says no mode for a run that runs no test files and keeps the
+   passes of an earlier run, on the same commit or an earlier one. A run that runs only some files again, and keeps
+   the passes of the other files, shows its mode. A full test run in progress shows here too. When **Release** is
+   enabled, the step also says what it does: "Uses the suite that passed at <time> on <commit>", or "Runs the suite
+   first (about N min)".
 3. **Release**: the tag and the GitHub release.
 
 When a run stops, each reason that it gave shows under its step: a notes reason under step 1, a suite reason under
