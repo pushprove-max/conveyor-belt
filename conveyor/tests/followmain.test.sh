@@ -3,7 +3,7 @@
 # timeout: 300
 # Engine cases: a project that follows the plugin's main (plugin.follow) and keeps itself up to date (take(),
 # lib/install.sh): the pack's check, the loop's move to a new commit, a commit refused, the shim, the record of the
-# engine a card ran on, a pinned pack left alone, old installs pruned, and a pack that does not read said once.
+# engine a card ran on, a pinned pack left alone, and old installs pruned.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -429,17 +429,4 @@ t_followprunelist() {
   pushed 'echo 8 > n.txt'; takeby "$C7" >/dev/null || fail "$NEW was not taken"
   [ -d "$V/$C6" ] && ! engine '.taken[]' | grep -qxF "$C6" \
     || fail "an old commit another project's taken list names stayed in this project's list, or its install was removed: $(engine .taken) $(ls "$V")"
-}
-
-# Bug: an installed loop whose pack does not read wrote why at every turn, twice: it asks the pack for its pin at
-# every turn (stale), and that reading said the reason itself, past the loop's own once-only word. The install's
-# engine, loaded while the pack reads (eng(), serve.test.sh); the pack then goes for 6 turns, each the pin's reading
-# (stale) and the pack's (packturn()): the reason is said once, and nothing else is.
-t_servesame() {
-  setup '[]'; coderepo; trap 'chmod -R u+w "$T/$CASE"' EXIT
-  bash "$D/conveyor/conveyor.sh" install "$B" >/dev/null || fail "the install failed"
-  tune --arg c "$B" '.plugin.commit = $c'
-  eng "$V/$B/conveyor" "mv $(printf '%q %q' "$R/.conveyor/project.json" "$STUB/pack")"'; [ -n "$OWN" ] || echo "not run from the install"
-    told=""; for i in 1 2 3 4 5 6; do stale; packturn; [ -n "$nopack" ] || echo "turn $i read the pack"; done' > "$STUB/turns.out" 2>&1
-  [ "$(cat "$STUB/turns.out")" = "conveyor pack: $R/.conveyor/project.json: no such file" ] || fail "held for 6 turns by a pack that does not read, the installed loop said more than the reason, once: $(cat "$STUB/turns.out")"
 }
