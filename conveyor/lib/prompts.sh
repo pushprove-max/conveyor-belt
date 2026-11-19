@@ -597,7 +597,7 @@ BUGREVIEW='# The bug-card check
 This issue is a bug: after the build, the test cases the change adds or changes were run on main'"'"'s code without the
 fix (its test files alone, and the inline tests of its product files without the rest of their change, in a
 worktree of main). At least one must fail there. A change to test files alone is not
-run, as it has no fix to take out. A change that selects no test of its own (comments only) is proved by the test
+run, as it has no fix to take out, nor is one whose product files change only comments. A change that selects no test of its own (comments only) is proved by the test
 files its issue'"'"'s Done-when names instead, and is not checked when it names none. Its result:'
 # What the review of a speed-up card (speedproof(), card()) is told before the check's result.
 # shellcheck disable=SC2034 # used in lib/card.sh

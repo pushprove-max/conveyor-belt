@@ -995,7 +995,13 @@ checked by the cases that main fails, not by its tests (the **main** verdict, ab
 alone (every path it changes is a test file, as in a fix to a test that main made wrong) is not checked either: it has
 no fix to take out, so its tests would run on the same code and pass, and the card would be blocked though correct.
 Its result says the change is test-only, and the review judges whether each changed test still checks what it was
-written to check. A change with any other file is checked as above.
+written to check. A change to test files and to product files that changes only comments in those product files is
+not checked either, as a comment changes no behaviour and no test of it can fail without the fix. Only
+`.js`, `.mjs`, `.cjs`, `.ts`, `.mts` and `.cts` product files can be so: the `//` and `/* */` comments are found
+in the whole file. Text in a string, code that a change puts between `/*` and `*/`, and a `/* */` comment that parts
+two words are not comment changes. Blank lines can change too. Its result says the product change is comments only.
+A change with any other product file, such as a `.css`, `.html`, `.sh` or `.py` file, or with any other change, is
+checked as above.
 
 A change that selects no test of its own is checked another way. This is a change where every changed line is a
 comment, or one that touches no code the `test.command` knows: that command, run on main's code with the whole change

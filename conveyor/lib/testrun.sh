@@ -1100,7 +1100,8 @@ runnernote() { # <paths>
 # repair the runner). A run that cannot be made (no worktree, or the files do not apply) fails
 # nothing, as a build session cannot repair it (but for a change with no test file, which fails as before): the result says so. A change to test files alone (a test fix for a
 # red main) is not run and fails nothing: with no fix to take out, its tests run on the same code and pass. The result
-# says it is test-only, and the review judges its tests.
+# says it is test-only, and the review judges its tests. So is a change to test files and to product files whose part in
+# them is comments only (commentsonly()): no test of a comment can fail without it. The result says it is comments only.
 # A change that selects no test of its own (the command, run on main's code with the whole change staged, ended
 # "nothing selected": every changed line is a comment, or it touches no code the command knows) is proved by the test
 # files the issue's `## Done when` section names that are test files of that commit (testpaths()): each named in the
@@ -1276,6 +1277,76 @@ inlinesplit() { # <worktree> <path> <kind json>
   fi
   rm -rf "$d"; return $rc
 }
+# The JavaScript text on stdin with its comments (// and /* */, around strings, template literals and regular
+# expressions) taken out. Whitespace before a comment goes with it, and a /* */ comment between two tokens leaves one
+# space, as it parts them (a/**/b is not ab). Blank lines outside a string go; all else is kept as it is. So two texts
+# that differ only in comment text and blank lines give the same output, and text that only looks like a comment (in
+# a string, or code between a /* and a */ on lines of their own) stays. Fails (2) on a text it cannot read so (a
+# string, comment or expression left open), so a doubt never counts as a comment.
+uncomment() {
+  LC_ALL=C awk -v sq="'" '
+    function cut() { sub(/[ \t]+$/, "", line) }
+    BEGIN { m = "code"; k = 0; lc = ""; w = ""
+      split("return typeof instanceof in of new delete void throw case do else yield await", kw, " ")
+      for (x in kw) key[kw[x]] = 1 }
+    { s = $0; n = length(s); line = ""; esc = 0; i = 1
+      while (i <= n) {
+        c = substr(s, i, 1); c2 = substr(s, i, 2)
+        if (m == "blk") {
+          j = index(substr(s, i), "*/"); if (!j) { i = n + 1; continue }
+          i += j + 1; m = "code"; while (substr(s, i, 1) ~ /[ \t]/) i++; continue
+        }
+        if (m == "str" || m == "tpl" || m == "re" || m == "cls") {
+          if (c == "\\") { line = line c2; if (i == n) esc = 1; i += 2; continue }
+          if (m == "tpl" && c2 == "${") { k++; dep[k] = 0; m = "code"; lc = "("; line = line c2; i += 2; continue }
+          if (m == "re" && c == "[") m = "cls"; else if (m == "cls" && c == "]") m = "re"
+          else if ((m == "str" || m == "tpl") && c == q || m == "re" && c == "/") { m = "code"; lc = "a"; w = "" }
+          line = line c; i++; continue
+        }
+        # m == "code"
+        if (c2 == "//") { cut(); i = n + 1; continue }
+        if (c2 == "/*") { cut(); if (line != "") line = line " "; m = "blk"; i += 2; continue }
+        if (c == "\"" || c == sq || c == "`") { q = c; m = (c == "`") ? "tpl" : "str"; line = line c; i++; continue }
+        # A / starts a regular expression unless it follows a value: a name (not a keyword), a number, ) or ].
+        if (c == "/" && !(lc ~ /[])]/ || lc ~ /[A-Za-z0-9_$]/ && !(w in key))) { m = "re"; line = line c; i++; continue }
+        if (c == "{" && k) dep[k]++
+        if (c == "}" && k) { if (!dep[k]) { k--; m = "tpl"; q = "`"; line = line c; i++; continue } dep[k]-- }
+        if (c ~ /[A-Za-z0-9_$]/) { w = (lc ~ /[A-Za-z0-9_$]/) ? w c : c; lc = c } else if (c !~ /[ \t\r]/) lc = c
+        line = line c; i++
+      }
+      if (m == "re" || m == "cls" || m == "str" && !esc) exit 2
+      if (m == "code" || m == "blk") sub(/[ \t\r]+$/, "", line)
+      if (line ~ /^[ \t\r]*$/ && m !~ /^(str|tpl)$/) next
+      print line }
+    END { if (m != "code") exit 2 }'
+}
+# Whether the staged change of <worktree> (bugproof()) changes test files (testpaths()) and product files, and each
+# product file is a JavaScript file (.js .mjs .cjs .ts .mts .cts) that changes only in its comments: its text before
+# and after, its comments taken out (uncomment()), is the same. A file of any other kind, or one whose mode or link
+# changes, is not comments only: in a shell or Python file a # in a heredoc or a string cannot be told from a comment
+# by its line, a CSS comment can part two tokens of a value or selector, and an HTML comment is a node of the page. Fails when the diff or pack cannot be read.
+commentsonly() { # <worktree>
+  local ps=() ts=() f r om nm ob nb a b
+  mapfile -d '' -t ps < <(git -C "$1" diff --cached --name-only --no-renames -z HEAD -- 2>/dev/null | testpaths -vz)
+  mapfile -d '' -t ts < <(git -C "$1" diff --cached --name-only --no-renames -z HEAD -- 2>/dev/null | testpaths -z)
+  [ ${#ps[@]} != 0 ] && [ ${#ts[@]} != 0 ] || return 1
+  for f in "${ps[@]}"; do
+    case ${f,,} in
+      *.js|*.mjs|*.cjs|*.ts|*.mts|*.cts) ;;
+      *) return 1 ;;
+    esac
+    # Its raw diff line: ":<old mode> <new mode> <old blob> <new blob> <status>". Each mode is a plain file's, the same
+    # both sides (or 000000 on the side where the file is not, whose text is empty).
+    r=$(git -C "$1" diff --cached --raw --no-abbrev --no-renames -z HEAD -- ":(literal)$f" 2>/dev/null | tr '\0' '\n' | head -n 1)
+    read -r om nm ob nb _ <<<"${r#:}"
+    [[ $om =~ ^(000000|100644|100755)$ && $nm =~ ^(000000|100644|100755)$ ]] || return 1
+    [ "$om" = "$nm" ] || [ "$om" = 000000 ] || [ "$nm" = 000000 ] || return 1
+    a=''; b=''
+    if [[ ! $ob =~ ^0+$ ]]; then a=$(set -o pipefail; git -C "$1" cat-file blob "$ob" | uncomment) || return 1; fi
+    if [[ ! $nb =~ ^0+$ ]]; then b=$(set -o pipefail; git -C "$1" cat-file blob "$nb" | uncomment) || return 1; fi
+    [ "$a" = "$b" ] || return 1
+  done
+}
 bugproof() { # <card> <worktree> <issue json>
   local mwt=$CARDS/mainrun/$1.unfixed fs=() tf=() ins=() iks=() nf=() fl=() f k out rc fx held='' sha='' why nr='' fc='' fld alone='' sh='' wide='' wc stop='' gv pc cn
   rm -f "$2.unfixed"; BUGWHY=$UNFIXED
@@ -1292,6 +1363,13 @@ bugproof() { # <card> <worktree> <issue json>
     && [ "$((out))" = 0 ]; then
     { echo 'The change is test-only: every file it changes is a test file, so it has no fix to take out, and its tests were not run on main'"'"'s code.'
       echo 'Judge whether each test it changes still checks what it was written to check.'; } > "$2.unfixed"
+    return 0
+  fi
+  # A change to test files and to product files whose part in them is comments only (commentsonly()) has no fix to take
+  # out either: a comment changes no behaviour, so no test of it can fail on main's code. It is not run; the review is told.
+  if commentsonly "$2"; then
+    { echo 'The change is comments only in its product files: every line it changes in them is a comment or blank, so it has no fix to take out, and its tests were not run on main'"'"'s code.'
+      echo 'Judge whether each changed comment says what the code does, and whether each test it changes checks what the code does.'; } > "$2.unfixed"
     return 0
   fi
   mapfile -d '' -t tf < <(git -C "$2" diff --cached --name-only --no-renames --diff-filter=AM -z HEAD -- 2>/dev/null | testpaths -z)

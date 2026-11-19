@@ -12,7 +12,7 @@
 # files before the push, pushtests(); with the default pack it runs none).
 nopush() { jq -c '.rules.push = false' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json" || fail "the control record"; }
 
-# One card of #7 with the given labels: its build fixes a.txt (adds `two`; runs $FIX in its place when set, `:` for no
+# One card of #7 with the given labels ($PREP, when set, is run after setup, before the loop): its build fixes a.txt (adds `two`; runs $FIX in its place when set, `:` for no
 # fix) and, unless <test> is empty, adds a.test.sh (or the file $TF names) holding <test>. The run on main (a worktree under cards/mainrun/) notes its folder and staged files in
 # $STUB/mainran and runs that test file, or what $MAINRUN holds when set; the reviewer's prompt is kept in $STUB/asked;
 # one GO review. $TUNE, when set, is a jq filter of the pack (tune). No push (nopush).
@@ -21,6 +21,7 @@ bugcard() { # <test> <label>...
   local t=$1 tf=${TF:-a.test.sh}; shift
   setup "[$(issue 7 2026-01-01 "$@")]"; nopush
   [ -z "${TUNE:-}" ] || tune "$TUNE"
+  [ -z "${PREP:-}" ] || eval "$PREP"
   sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
   echo "$GO" > "$STUB/review.1"
   echo "${FIX-echo two >> a.txt}${t:+; mkdir -p \"\$(dirname '$tf')\"; printf '%s\n' '$t' > '$tf'}" > "$STUB/build"
@@ -152,6 +153,70 @@ t_bugtestonly() {
   grep -qx '# The bug-card check' "$STUB/asked" && grep -q '^The change is test-only: ' "$STUB/asked" \
     || fail "the review was not told the change is test-only: $(cat "$STUB/asked" 2>&1)"
   [ -n "$(st 'select(.step == "landed") | .sha')" ] || fail "a test-only bug card did not land: $(st 'select(.step | IN("blocked", "landed"))')"
+}
+
+# #515. Main holds a.js; a bug card fixes its // comment and adds a test of what a.js already does (with a # comment).
+COMMENTPREP='printf "%s\n" "// x is two" "export const x = 1;" > "$R/a.js" && git -C "$R" add a.js && linkset "{\"a.txt\": [\"a.test.sh\"], \"a.js\": [\"a.test.sh\"]}"'
+COMMENTFIX='sed -i "s|^// x is two|// x is one|" a.js'
+COMMENTTEST='grep -qxF "export const x = 1;" a.js # a.js sets x to one'
+# D1. Bug it catches: a bug card whose product change is comments only, with a test file, is blocked with "the new
+# tests pass without the fix", which no comment fix can avoid. It is not run on main, has one build session, its
+# review is told the product change is comments only, and it lands.
+t_bugcomments() {
+  local -x FILEMODE=1
+  PREP=$COMMENTPREP FIX=$COMMENTFIX bugcard "$COMMENTTEST" bug
+  [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ ! -e "$STUB/mainran" ] \
+    || fail "a comments-only bug card was run on main or sent back to build: $(st 'select(.step == "build")'; cat "$STUB/mainran" 2>&1)"
+  grep -q '^The change is comments only in its product files: ' "$STUB/asked" \
+    || fail "the review was not told the product change is comments only: $(cat "$STUB/asked" 2>&1)"
+  [ -n "$(st 'select(.step == "landed") | .sha')" ] || fail "a comments-only bug card did not land: $(st 'select(.step | IN("blocked", "landed"))')"
+}
+
+# D2. Bug it catches: a product change with one real code line beside its comment fix is let skip the check as
+# comments only. Its test passes on main, so it is blocked with "the new tests pass without the fix", as before.
+t_bugcommentcode() {
+  local -x FILEMODE=1
+  PREP=$COMMENTPREP FIX="$COMMENTFIX; echo 'export const y = 2;' >> a.js" bugcard "$COMMENTTEST" bug
+  [ "$(st 'select(.step == "blocked") | .reason' | head -n 1)" = "build: the new tests pass without the fix, so they do not prove it" ] \
+    || fail "a comment fix with a code line was not blocked as unproved: $(st 'select(.step | IN("blocked", "landed"))')"
+  grep -q '/cards/mainrun/' "$STUB/mainran" || fail "its test was not run on main: $(cat "$STUB/mainran" 2>&1)"
+}
+
+# Bug it catches: commentsonly() reads each changed line alone, so a change that puts code between a /* line and a */
+# line (the code no longer runs), or edits a # line in a shell heredoc (text the program prints), is let skip the
+# check; and so are a/**/b in js read as ab, and two .css and .html changes that look like comment fixes but change
+# the page: 16/**/px (two CSS tokens, the rule dropped) read as 16px, and a new <!-- --> in an empty <nav> (a node:
+# the Board sees a first child and draws no tabs). Each change here is staged beside a test file in a fresh repo and
+# given to commentsonly().
+t_bugcommentsyntax() {
+  local r=$T/$CASE/r got=''
+  mkdir -p "$r" && git -C "$r" init -q && git -C "$r" config user.email t@example.com && git -C "$r" config user.name t \
+    || fail "the fixture repo"
+  printf '%s\n' '// x is two' 'const s = `a' '// b' '`;' 'export const x = 1;' 'draw();' > "$r/app.js"
+  printf '%s\n' '/* the top bar */' '.x { color: red; }' '.y { font-size: 16px; }' > "$r/app.css"
+  printf '%s\n' '<!-- the tiles -->' '<nav id="stats"></nav>' '<nav id="tabs"></nav>' > "$r/index.html"
+  printf '%s\n' "cat <<'E'" '# STANDING YES' 'E' > "$r/rules.sh"
+  printf '%s\n' 'ok();' > "$r/a.test.js"
+  git -C "$r" add -A && git -C "$r" commit -qm main || fail "the fixture commit"
+  # <name> <file> <sed script>: the file changed so and a.test.js changed, staged; notes "<name>=<0 when comments only>".
+  try() {
+    sed -i "$3" "$r/$2" && echo 'ok(1);' >> "$r/a.test.js" && git -C "$r" add -A || fail "staging $1"
+    # shellcheck disable=SC2034 # TESTRX and TESTRUNNERS are read by testpaths(), loaded below
+    got+=" $1=$( . "$SRC/lib/portable.sh"; TESTRX='\.test\.' TESTRUNNERS=''
+      eval "$(sed -n '/^testpaths() {/,/^}/p' "$SRC/lib/issues.sh"; sed -n '/^uncomment() {/,/^}/p; /^commentsonly() {/,/^}/p' "$SRC/lib/testrun.sh")"
+      commentsonly "$r"; echo $?)"
+    git -C "$r" reset -q --hard
+  }
+  try js app.js 's|x is two|x is one|'
+  try wrap app.js 's|^draw();|/*\n&\n*/|'
+  try template app.js 's|^// b|// c|'
+  try jsblank app.js 's|x is two|x is one|; 1s|$|\n|'
+  try jstoken app.js 's|^draw|dr/**/aw|'
+  try csstoken app.css 's|16px|16/* root size */px|'
+  try htmlnode index.html 's|"tabs">|&<!-- Tabs -->|'
+  try heredoc rules.sh 's|YES|NO|'
+  [ "$got" = ' js=0 wrap=1 template=1 jsblank=0 jstoken=1 csstoken=1 htmlnode=1 heredoc=1' ] \
+    || fail "commentsonly() does not tell js comment fixes (0) from code changes (1): $got"
 }
 
 # Bug it catches: a bug card that adds no test at all goes to review unchecked; or (#137) it is told and blocked with
