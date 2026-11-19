@@ -352,7 +352,8 @@
       if (view && view !== 'all') { const b = btn('Back to the list', 'declined-list', true); b.addEventListener('click', () => go(null)); bar.append(' ', b); }
       bar.append(' ', said0);
       // The collector gives them newest first. A row is kept by its line (repo:id): "Show 5 more" adds the new rows
-      // under the ones shown, which keep their focus and an open F-number explanation.
+      // under the ones shown, which stay the same nodes and keep an open F-number explanation; the focus moves to the
+      // first new row.
       el.replaceChildren(bar, ul, ctx.more(view ? `declined:${view}` : 'declined', lines, (ls) => { drawn = ls; ctx.list(ul, ls, key, row); drawAll(); }));
     },
     // Each second: an unchanged snapshot does not draw the panel again, so the clock moves "Expires in" on. A line that
