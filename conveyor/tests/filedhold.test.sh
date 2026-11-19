@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# timeout: 300
+# Engine cases: an issue filed by a Foreman's command starts held, through the filing hooks (foreman/foreman.sh filing
+# and filed) on this engine's control record, however the command printed what it filed.
+# The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
+# file runs its own cases through the runner.
+[ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
+  exec bash "$(dirname "$0")/../conveyor.test.sh"
+# The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
+SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+
+# One main with #4 open, Queue, and a filer's hooks on it: the research lane's (CONVEYOR_LANE=research), so no Foreman
+# claim is needed, with a host file of their own whose one record "r" is the main (the stub's links name o/r). The
+# hooks reach the record through this engine (CONVEYOR_FOREMAN_ASK), with the engine's own config folder.
+# hook <filing|filed> <command> [stdout]: one hook call, as Claude Code makes it for a Bash call.
+filedsetup() {
+  setup "[$(issue 4 2000-01-01T00:00:00Z P2)]"; C=$ST/control.json; echo : > "$STUB/build"; touch "$STUB/list-filed"
+  FC=$T/$CASE/filer-config; mkdir -p "$FC/conveyor" "$T/$CASE/filer/lane"
+  jq -cn --arg m "$R" '{records: [{repo: "r", main: $m}]}' > "$FC/conveyor/host.json"
+  printf -v ASKE 'cd "$CONVEYOR_MAIN" && XDG_CONFIG_HOME=%q CONVEYOR_CARDS=%q bash %q $CONVEYOR_CMD' "$XDG_CONFIG_HOME" "$T/$CASE/cards" "$SRC/conveyor.sh"
+  hook() {
+    jq -cn --arg e "$1" --arg c "$2" --arg o "${3:-}" '{hook_event_name: (if $e == "filing" then "PreToolUse" else "PostToolUse" end), session_id: "s1",
+      tool_use_id: "t1", tool_input: {command: $c}} + (if $e == "filed" then {tool_response: {stdout: $o, stderr: ""}} else {} end)' \
+      | (cd "$R" && XDG_CONFIG_HOME=$FC CONVEYOR_MAIN=$R CONVEYOR_LANE=research CONVEYOR_FOREMAN_DIR=$T/$CASE/filer/lane CONVEYOR_FOREMAN_ASK=$ASKE \
+        bash "$SRC/foreman/foreman.sh" "$1")
+  }
+}
+# Issue 761: a command that pipes `gh issue create` to `grep -oE '[0-9]+$'` prints the new issue's number and no link.
+# Bug: filed held only the issues the output links, so it held none, set new issues back to the queue, and the loop
+# picked the issue before the owner's yes. The issue is a follow-up, which the loop's own hold of new issues (adopted())
+# passes over, so only filed's Queue (control start queue filed) can hold it: here it is held once filed has run, and
+# the loop picks #4 alone.
+t_filedbare() {
+  filedsetup
+  cmd='n=$(gh issue create --title example --body example --label conveyor-followup | grep -oE "[0-9]+$"); echo "$n"'
+  out=$(hook filing "$cmd"); [ -z "$out" ] && [ "$(jq -r .start "$C")" = held ] || fail "filing did not set new issues held: $out $(cat "$C")"
+  n=$(gh issue create --title example --body example --label conveyor-followup | grep -oE '[0-9]+$') || fail "the stub filed no issue"
+  hook filed "$cmd" "$n"$'\n' >/dev/null
+  jq -e --argjson n "$n" '.start == "queue" and (.held | index($n))' "$C" >/dev/null || fail "the issue filed (#$n) is not held after filed: $(cat "$C")"
+  # The real loop, not a check of the record: only a pick shows the follow-up is not built, as the pick applies its own
+  # rules to the open issues it reads (adopted() and upnext.jq, which leave a follow-up eligible), not only the held list.
+  loop run >/dev/null 2>&1; [ "$(st 'select(.step == "picked") | .issue' | tr '\n' ' ')" = "4 " ] || fail "picks after the filing: $(st 'select(.step == "picked") | .issue')"
+}
+# With the links in the output, the issue filed is still held, and one the owner released before filed ran (the
+# second, released between the command and its hook) stays released: Queue holds neither again.
+t_filedlink() {
+  filedsetup
+  cmd='gh issue create --title a --body a; gh issue create --title b --body b'
+  hook filing "$cmd" >/dev/null
+  o=$(gh issue create --title a --body a; gh issue create --title b --body b) || fail "the stub filed no issues"
+  a=$(sed -n '1s|.*/||p' <<<"$o"); b=$(sed -n '2s|.*/||p' <<<"$o")
+  loop control release "$b" >/dev/null || fail "the release of #$b failed"
+  out=$(hook filed "$cmd" "$o"$'\n')
+  [ "$(jq -c '[.start, .held, .startSeen]' "$C")" = "[\"queue\",[$a],[$a,$b]]" ] || fail "after filed: $(cat "$C")"
+  jq -e --arg a "$a" --arg b "$b" '.hookSpecificOutput.additionalContext | test("Held in Conveyor \\(r: " + $a + "\\)") and test("released already \\(r: " + $b + "\\)")' <<<"$out" >/dev/null \
+    || fail "filed did not tell which it held: $out"
+  # filed's Queue that cannot read the open issues changes nothing: closing the span unread could leave a filed issue unheld.
+  loop control start held >/dev/null; echo '[ "$4" != open ] || exit 1' > "$STUB/list-cmd"
+  out=$(loop control start queue filed 2>&1); [ $? = 1 ] && [ "$(jq -r .start "$C")" = held ] || fail "Queue with the open issues unread: $out $(cat "$C")"
+}

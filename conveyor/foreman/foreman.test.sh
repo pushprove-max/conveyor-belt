@@ -536,7 +536,7 @@ out=$(jq -cn --arg c "$cmd" '{hook_event_name: "PostToolUse", tool_input: {comma
   | bash "$SRC/foreman.sh" filed)
 grep -qx 'beta control adopt 12 15' "$T/calls" && grep -qx 'alpha control adopt 30' "$T/calls" || fail "each issue filed is not held in its own record: $(cat "$T/calls")"
 [ "$(grep -c 'control start queue' "$T/calls")" = 2 ] || fail "the records do not start new issues in the queue again: $(cat "$T/calls")"
-[ "$(sed -n '$p' "$T/calls" | cut -d' ' -f2-)" = 'control start queue' ] || fail "the queue was set back before every issue was held: $(cat "$T/calls")"
+[ "$(sed -n '$p' "$T/calls" | cut -d' ' -f2-)" = 'control start queue filed' ] || fail "the queue was set back before every issue was held: $(cat "$T/calls")"
 jq -e '.hookSpecificOutput.additionalContext | test("#?12") and test("15") and test("30")' <<<"$out" >/dev/null || fail "the Foreman is not told what was held: $out"
 # Issue 330: the Foreman is told as held only the issues the record holds after the adopt: one released already
 # (#15) is named apart, not as held with a word to release it again.
@@ -561,7 +561,7 @@ jq -cn --arg c "$cmd" '{hook_event_name: "PostToolUse", tool_input: {command: $c
 wait_until 'under "$filed" flock || ! kill -0 "$filed" 2>/dev/null' # it waits at the turn's lock, or has ended
 ! grep -q 'start queue' "$T/calls" || { echo go > "$T/turn"; fail "the Foreman started new issues in the queue again while the lane's filer held its turn: $(cat "$T/calls")"; }
 echo go > "$T/turn"; wait "$turn"; wait "$filed"
-[ "$(cat "$T/calls")" = 'alpha control start queue' ] && [ ! -s "$FH" ] \
+[ "$(cat "$T/calls")" = 'alpha control start queue filed' ] && [ ! -s "$FH" ] \
   || fail "the Foreman did not start new issues in the queue again once the filer's turn was free: $(cat "$T/calls" "$T/filed")"
 # A quoted subcommand files an issue just the same: it is held before and after.
 cmd="gh issue 'create' --repo example/alpha --title example --body example"
@@ -913,7 +913,7 @@ jq -cn '{session_id: "a2", tool_input: {command: "gh issue create -R example/bet
 grep -qx 'beta control start held' "$T/calls" || fail "filing in beta from alpha's Foreman left beta's new issues buildable: $(cat "$T/calls")"
 jq -cn '{session_id: "a2", tool_input: {command: "gh issue create -R example/beta --title example --body example"}, tool_response: {stdout: "https://github.com/example/beta/issues/60\n"}}' \
   | (cd "$M" && CONVEYOR_FOREMAN_ASK=$ASKC bash "$SRC/foreman.sh" filed) > /dev/null
-grep -qx 'beta control adopt 60' "$T/calls" && grep -qx 'beta control start queue' "$T/calls" || fail "the issue filed in beta was not held, or beta's gate not set back: $(cat "$T/calls")"
+grep -qx 'beta control adopt 60' "$T/calls" && grep -qx 'beta control start queue filed' "$T/calls" || fail "the issue filed in beta was not held, or beta's gate not set back: $(cat "$T/calls")"
 # Two Foremen filing at once share the gate: alpha's filing sets both held, beta's finds them held and sets nothing,
 # and alpha's ending does not start new issues in the queue again while beta's command runs on; beta's ending does.
 : > "$T/calls"; ci='{tool_input: {command: "gh issue create -R example/beta --title example --body example"}, tool_response: {stdout: ""}}'

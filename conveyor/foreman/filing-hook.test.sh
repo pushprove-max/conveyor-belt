@@ -54,7 +54,7 @@ grep -qx 'alpha control start held' "$T/calls" || fail "new issues do not start 
 out=$(run "$(line PostToolUse)" "$(input "$c" '{hook_event_name: "PostToolUse"}')")
 grep -qx 'conveyor/foreman/foreman.sh filed' "$T/marks" || fail "the filed line did not start foreman.sh filed: $(cat "$T/marks")"
 grep -qx 'alpha control adopt 41' "$T/calls" || fail "the issue filed is not held: $(cat "$T/calls")"
-[ "$(tail -n 1 "$T/calls")" = 'alpha control start queue' ] || fail "new issues are not set back to the queue once the filed one is held: $(cat "$T/calls")"
+[ "$(tail -n 1 "$T/calls")" = 'alpha control start queue filed' ] || fail "new issues are not set back to the queue once the filed one is held: $(cat "$T/calls")"
 jq -e '.hookSpecificOutput.additionalContext | test("Held in Conveyor \\(alpha: 41\\)")' <<<"$out" >/dev/null || fail "filed did not say the issue is held: $out"
 out=$(run "$(line PreToolUse)" "$(input "$c" '{hook_event_name: "PreToolUse", tool_input: {command: $c, run_in_background: true}}')")
 jq -e '.hookSpecificOutput.permissionDecision == "deny"' <<<"$out" >/dev/null || fail "a filing command run in the background was not refused: $out"

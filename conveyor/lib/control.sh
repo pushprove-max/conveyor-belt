@@ -872,10 +872,10 @@ capnow() { # [the control record, when the caller has read it]
 # Under the lock: one change to the control record, written whole beside it and moved into place, so a reader finds
 # the old record or the new one. Prints the record as it now stands. A bad action or argument changes nothing: exit 2.
 control() { # [action [arguments]]
-  local c a=${1:-} f=. new x ag es top=0 p=''
+  local c a=${1:-} f=. new x ag es top=0 p='' open=''
   c=$(ctl) || return 1
   [ $# = 0 ] || shift
-  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | hold <issue>... | release <issue>... | adopt <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|<areaPrefix><name>>=<on|off>... | rules split=<off|shadow|on> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | dep-guard <on|off> | land-as <main|pr> | pr-merge <button|release|idle> | push-check <on|off> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>... | card <issue> <builder|reviewer|judge> <model> [effort] | card <issue> [builder|reviewer|judge] clear | card <issue> pick]" >&2; return 2; }
+  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | hold <issue>... | release <issue>... | adopt <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|<areaPrefix><name>>=<on|off>... | rules split=<off|shadow|on> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | start queue filed | dep-guard <on|off> | land-as <main|pr> | pr-merge <button|release|idle> | push-check <on|off> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>... | card <issue> <builder|reviewer|judge> <model> [effort] | card <issue> [builder|reviewer|judge] clear | card <issue> pick]" >&2; return 2; }
   nums() { local x; for x; do [[ $x =~ ^[1-9][0-9]{0,8}$ ]] || return 1; done; }
   # A main-red fix card is of no issue (issue 0), named by its card id: there is nothing of it to hold or release.
   case $a in hold | release) for x; do [[ ! $x =~ ^(0+|c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0)$ ]] || {
@@ -965,20 +965,28 @@ control() { # [action [arguments]]
     # Held opens a span and Queue closes it: adopt() holds every issue opened in any span, whenever it first sees it.
     # Each end is the newest issue's number at the switch, not a time: createdAt is in whole seconds, so a time cannot
     # tell an issue opened in the switch's second before it from one opened after it, and GitHub numbers issues in the
-    # order they are opened. When the number cannot be read, nothing changes.
-    start) [ $# = 1 ] && [[ $1 =~ ^(queue|held)$ ]] || { bad; return; }
+    # order they are opened. When the number cannot be read, nothing changes. `start queue filed` is the filing hooks'
+    # Queue (foreman/foreman.sh filed, once a filing ends): it first holds every open issue opened in the span it
+    # closes that startSeen does not have, a follow-up too, as adopt does with the issues named, so an issue the
+    # Foreman filed is held however the command that filed it printed it (no link to it, only its number), and one
+    # released already stays released. When the open issues cannot be read, nothing changes either.
+    start) { [ $# = 1 ] && [[ $1 =~ ^(queue|held)$ ]]; } || [ "$*" = "queue filed" ] || { bad; return; }
       if [ "$(jq -r .start <<<"$c")" != "$1" ]; then
         top=$(timeout 60 gh issue list --state all --limit 1 --json number 2>/dev/null | jq -e '.[0].number // 0 | numbers') \
           || { echo "conveyor: cannot read the newest issue number; nothing changed" >&2; return 1; }
+        [ $# = 1 ] || { names && open=$(openissues number 2>/dev/null | jq -ce 'arrays'); } \
+          || { echo "conveyor: cannot read the open issues; nothing changed" >&2; return 1; }
       fi
       f='if .start == $v[0] then . elif $v[0] == "held" then .start = "held" | .startHeld += [{from: $n, to: null}]
          else .start = "queue" | .startHeld[(.startHeld | length) - 1].to = $n end' ;;
     *) bad; return ;;
   esac
   new=$(jq -c --arg a "$a" --arg p "$p" --argjson n "$top" "\$ARGS.positional as \$v | $f" --args "$@" <<<"$c") && [ -n "$new" ] || return 1
+  [ -z "$open" ] || { new=$(jq -c --argjson o "$open" '.startHeld[-1] as $s | ([$o[].number | select(. > $s.from and . <= $s.to)] - .startSeen) as $h
+    | .held = (.held + $h | unique) | .startSeen = (.startSeen + $h | unique)' <<<"$new") && [ -n "$new" ]; } || return 1
   ctlput "$c" "$new" || return 1
-  # A release dates only the issues the record held; an adopt only those it held now.
-  case $a in hold) movedlocked movedhold hold "$new" "$@" ;; adopt) x=$(jq -r --argjson c "$c" '.held - $c.held | .[]' <<<"$new")
+  # A release dates only the issues the record held; an adopt, or the filing hooks' Queue, only those it held now.
+  case $a in hold) movedlocked movedhold hold "$new" "$@" ;; adopt | start) x=$(jq -r --argjson c "$c" '.held - $c.held | .[]' <<<"$new")
     [ -z "$x" ] || movedlocked movedhold hold "$new" $x ;; release) x=$(jq -r '.held as $h | $ARGS.positional[] | select(tonumber | IN($h[]))' --args "$@" <<<"$c")
     [ -z "$x" ] || movedlocked movedhold release "$new" $x ;; esac
   # A resume puts back the cards a sign-in failure blocked, once each (signinback()).

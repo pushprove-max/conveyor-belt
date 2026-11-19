@@ -60,7 +60,10 @@
 #   repository is <name>, else the record named <name> (lib.sh record_of), unless it was
 #   released or held already (conveyor.sh control adopt; control hold in a record whose engine has no adopt), so a
 #   release given before filed runs stays, and tells the Foreman only those it holds; then it sets back to
-#   the queue each record a filing set to held, once no other filing, of any Foreman, is in flight (SF, below). The
+#   the queue each record a filing set to held, once no other filing, of any Foreman, is in flight (SF, below), which
+#   holds every open issue opened while it was held, a follow-up too (conveyor.sh control start queue filed), so an
+#   issue the output does not link (`gh issue create ... | grep -oE '[0-9]+$'`) is held too, and one released already
+#   stays released. The
 #   research lane (lanes/research.sh) runs these two as well, with CONVEYOR_LANE=research and its own folder as $FD, so an issue it files starts held too.
 set -uo pipefail
 case ${1:-} in
@@ -481,7 +484,7 @@ deny() { jq -cn --arg r "$1" '{hookSpecificOutput: {hookEventName: "PreToolUse",
 # This filing's end is left in $SF/ended, a file each, whole once moved there; whoever next holds the shared lock takes
 # its line from $SF/in (ends): a lock not had (another filing holding it long) never leaves the filing in flight for ever.
 queue_again() {
-  local repo main left=() fl lk sl e
+  local repo main c left=() fl lk sl e
   e=$(mktemp "$SF/end.XXXXXX") && printf '%s\t%s\t%s\n' "$SID" "$FD" "$TID" > "$e" && mkdir -p "$SF/ended" && mv "$e" "$SF/ended/"
   if exec {sl}>>"$SF/lock" && flock -w 300 "$sl"; then
     ends
@@ -498,7 +501,9 @@ queue_again() {
   [ ! -s "$SF/in" ] || return 0
   while read -r repo; do
     main=$(awk -F'\t' -v r="$repo" '$1 == r { print $2; exit }' <<<"$(records 2>/dev/null)")
-    [ -n "$main" ] && ask "$repo" "$main" control start queue > /dev/null 2>&1 || left+=("$repo")
+    # An engine before `control start queue filed` refuses it as a usage error (2): set Queue as it can.
+    [ -n "$main" ] && { c=$(ask "$repo" "$main" control start queue filed 2>&1) \
+      || { [ $? = 2 ] && [[ $c == *'usage: conveyor.sh control'* ]] && ask "$repo" "$main" control start queue > /dev/null 2>&1; }; } || left+=("$repo")
   done < "$SF/held"
   if [ ${#left[@]} = 0 ]; then : > "$SF/held"; else printf '%s\n' "${left[@]}" | tee "$SF/held"; fi
 }
