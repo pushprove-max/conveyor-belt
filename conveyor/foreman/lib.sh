@@ -135,7 +135,8 @@ forget() { touch "$FD/former" && awk -v s="$1" '$1 != s' "$FD/former" > "$FD/for
 told() { awk -v s="$1" '{ print ($0 == s ? s " told" : $0) }' "$FD/former" > "$FD/former.new" && mv "$FD/former.new" "$FD/former"; }
 # claim <session id>: marks that session the Foreman; an empty id turns the role off. The session that held it is
 # listed in former and its waiter is stopped now, so its watchers exit before the new Foreman's waiter starts: two
-# Foremen never run the same watchers. Refused while mine is (groups not understood): which folder is the
+# Foremen never run the same watchers. A claim by the session that holds the role replaces its Stop hook's waiter
+# (below). Refused while mine is (groups not understood): which folder is the
 # Foreman's cannot be told then, and a mark in the wrong one would make a second Foreman.
 claim() { locked claim_ "${1:-}"; }
 claim_() {
@@ -150,10 +151,19 @@ claim_() {
   # The session is the fourth field, or the third in a waiter.pid of an older engine's waiter (no session's process).
   { read -r pid _ w3 sid < "$FD/waiter.pid"; } 2>/dev/null || return 0
   [ -n "$sid" ] || [[ $w3 =~ ^[0-9]+$ ]] || sid=$w3
-  [ "$sid" != "$1" ] || return 0
+  # The session's own waiter is left running, but for its Stop hook's (no --held): that hook may be one the session
+  # no longer reads, in the same process (Claude Code's /restart, issue 594), which nothing outside it can tell. So it
+  # is replaced by a waiter that listens until the next stop; its wakes stay pending for that stop.
+  if [ "$sid" = "$1" ]; then
+    [[ $pid =~ ^[0-9]+$ ]] && ps -o args= -p "$pid" 2>/dev/null | grep -q '/conveyor/foreman/waiter\.sh *$' || return 0
+  fi
   flock -n "$FD/waiter.lock" true 2>/dev/null && return 0 # no waiter alive
   kill -TERM "$pid" 2>/dev/null; flock -w 10 "$FD/waiter.lock" true \
     || { echo "foreman: the previous Foreman's waiter (pid $pid) did not stop" >&2; return 1; }
+  # Not on claim.lock (fd 9): the waiter it starts runs on, and would hold that lock from every later claim.
+  [ "$sid" != "$1" ] || jq -cn --arg s "$1" '{session_id: $s}' \
+    | bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/waiter.sh" --check > /dev/null 2>&1 9>&-
+  return 0
 }
 
 # waiter_state: the Foreman's waiter now, one line. "listening" while the pid waiter.pid names runs waiter.sh; else,

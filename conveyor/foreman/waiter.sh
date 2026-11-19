@@ -15,7 +15,10 @@
 # shell; CONVEYOR_FOREMAN_SESSION_PID in tests): it checks at each look, and again before and after it relays a wake,
 # so a wake it could not relay stays in pending. A session that goes on in a new process runs its hooks from that
 # one: a stop or hook that finds waiter.lock held by a waiter of another process that has ended takes over (stops it,
-# then takes the lock), as that waiter would hold the lock and relay its wakes to no one.
+# then takes the lock), as that waiter would hold the lock and relay its wakes to no one. A session that goes on in
+# the same process (Claude Code's /restart) no longer reads its old hook: that hook's waiter ends at the first wake its
+# stderr does not take (deliver), its wake left pending; the next stop of the session replaces it, as a stop takes
+# over from any waiter that runs, and a claim of the session replaces it at once (lib.sh claim).
 # waiter.log, in the Foreman's folder, has a line when a waiter starts and when it ends, with why (lib.sh
 # waiter_state reads it); a waiter killed with no chance to write leaves its start line last.
 # The watchers: watch-conveyor.sh, watch-limit.sh, watch-alerts.sh, watch-idle.sh. One that exits with nothing put
@@ -98,10 +101,12 @@ else
     else
       osp=''
       [ -z "$MODE" ] || exit 0 # --check: a waiter runs
-      # The waiter that runs can wake the session itself, but for one a refused stop started: its wake would be lost.
+      # A stop takes over from any waiter of its session. One that listens until the next stop (held), or one a
+      # refused stop started, cannot wake the session; nor can an earlier stop's whose hook the session no longer
+      # reads, though its process runs (Claude Code's /restart, issue 594), which nothing here can tell.
       if held "${old:-}"; then log "the stop takes over from the waiter $old, which listened during the turn"
       elif [ "$AFTER" = true ]; then log "the stop that follows a refused stop takes over from the waiter $old"
-      else exit 0; fi
+      else log "the stop takes over from the waiter $old of an earlier stop, whose hook the session may no longer read"; fi
     fi
     kill -TERM "$old" 2>/dev/null
     flock -w 10 7 || { log "the waiter $old did not stop in 10 s; this stop passes"; exit 0; }
@@ -162,12 +167,17 @@ ACK=$(mktemp) || { why='no temporary file could be made'; exit 0; }
 # deliver: 0 when anything pending went to stderr while the session's process was alive. What it relays leaves
 # pending only then: a wake relayed to an ended process, or one stderr would not take, waits for the next stop. It is
 # kept as <wake>.sent-<session> until a later stop shows the session got it (below).
+# A stderr that takes no wake has no reader: the session no longer reads this hook's output, though its process runs
+# (Claude Code's /restart runs the new program in the same process; issue 594). Such a waiter can never wake the
+# session, so it ends, its wake left pending: the next hook of the session starts a waiter, and the next stop delivers.
+# SIGPIPE is ignored for that write, as Claude Code's hooks have it, so the waiter sees the failed write and says why.
 deliver() {
   : > "$ACK"
   live
   local text; text=$(pending_run "$ACK") || return 1
-  trap '' TERM HUP INT
-  printf '%s\n' "$text" >&2 || { trap onterm TERM HUP INT; return 1; }
+  trap '' TERM HUP INT PIPE
+  printf '%s\n' "$text" >&2 || { why="its hook's stderr takes no wake (the session no longer reads it); the wake waits in pending for the next hook's waiter"; stop_all; exit 0; }
+  trap - PIPE
   live
   printf '%s\n' "$text" > "$FD/last-wake.txt"
   while IFS= read -r f; do mv -f "$f" "$f.sent-$SID"; done < "$ACK"

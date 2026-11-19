@@ -278,7 +278,56 @@ after false s2; rc=$?
 [ "$rc" = 2 ] && [ "$(cat "$T/wake")" = 'Alert: blocked #8' ] || fail "the new Foreman's first stop did not deliver the wake (exit $rc): $(cat "$T/wake")"
 }
 
-cases=(handoff restart why downheld downstop goneblock takeover undelivered takecheck oldpid refused refusedwait claimed)
+# Issue 594: Claude Code's /restart runs the new program in the same process, which no longer reads the Stop hook it
+# ran before. reader: a stop's waiter (SW) whose stderr is a pipe read by RP, which unread ends as the restart does;
+# SIGPIPE is ignored, as Claude Code's hooks have it (with it not ignored, the write would kill the waiter).
+reader() { # [<session>]
+  mkfifo "$T/err" && { cat "$T/err" > /dev/null & RP=$!; } || exit 1
+  (trap '' PIPE; jq -cn --arg s "${1:-}" 'if $s == "" then {} else {session_id: $s} end' \
+    | CONVEYOR_FOREMAN_WATCHERS=$W bash "$SRC/waiter.sh" 2> "$T/err" > /dev/null) & SW=$!
+  wait_until '[ -s "$T/starts" ]' || fail "the stop's waiter started no watcher"
+}
+restarted() { kill "$RP"; wait "$RP" 2>/dev/null; }
+
+# D1. Bug: the waiter's write of each wake failed and it listened on, holding the lock, so no hook started another,
+# and the wakes the poll made never reached the session.
+t_noreader() {
+fixture noreader; reader; restarted
+put 'Alert: blocked #5'
+WAIT_CEILING=20 wait_until "! kill -0 $SW 2>/dev/null" || fail "the waiter listens on with a stderr no one reads"
+[ "$(wakes)" = 1 ] || fail "the wake it could not deliver did not stay pending: $(cat "$FD/waiter.log")"
+[ "$(logged "ended: its hook's stderr takes no wake")" = 1 ] || fail "the waiter's end does not say why: $(cat "$FD/waiter.log")"
+check; isheld "$(wpid)" || fail "the next hook did not start a waiter: $(cat "$FD/waiter.log")"
+wait_until '[ "$(wc -l < "$T/starts")" -ge 2 ]' || fail "the new waiter started no watcher"
+put 'Alert: blocked #6'; wait_until '[ "$(wakes)" = 2 ]' || fail "the wake found after the restart was not kept in pending"
+stop; rc=$?
+[ "$rc" = 2 ] && [ "$(sort "$T/wake")" = $'Alert: blocked #5\nAlert: blocked #6' ] || fail "the next stop did not deliver both wakes (exit $rc): $(cat "$T/wake")"
+}
+
+# D1. Bug: after the restart the first prompt (a hook) and the turn's stop both found the old waiter listening and
+# left it, so a wake made after that stop waited in pending for some later hook. The stop takes over from it.
+t_stopover() {
+fixture stopover; reader; old=$(wpid); restarted
+check # the first prompt: a hook cannot tell the old waiter's hook is unread
+stop & s=$!
+WAIT_CEILING=20 wait_until "! kill -0 $SW 2>/dev/null" || fail "the stop left the waiter of the earlier stop running"
+[ "$(logged "the stop takes over from the waiter $old of an earlier stop")" = 1 ] || fail "no takeover in the log: $(cat "$FD/waiter.log")"
+wait_until '[ "$(wc -l < "$T/starts")" -ge 2 ]' || fail "the stop started no watcher"
+put 'Alert: blocked #5'; wait "$s"; rc=$?
+[ "$rc" = 2 ] && [ "$(cat "$T/wake")" = 'Alert: blocked #5' ] || fail "the stop did not deliver the wake found after it (exit $rc): $(cat "$T/wake")"
+}
+
+# D2. Bug: the claim in the restarted session left the old waiter, as its session and process were the same.
+t_reclaim() {
+fixture reclaim; belt # a claim needs a host file with records
+(. "$SRC/lib.sh" && claim s1) || fail "the claim by s1 failed"
+reader s1; old=$(wpid); restarted
+(. "$SRC/lib.sh" && claim s1) || fail "the claim by s1 in the restarted session failed"
+WAIT_CEILING=20 wait_until "! kill -0 $old 2>/dev/null" || fail "the claim left the waiter whose hook is gone running" # its lock is freed just before its parent reaps it
+h=$(wpid); [ "$h" != "$old" ] && isheld "$h" || fail "the claim started no new waiter: waiter.pid names $h"
+}
+
+cases=(handoff restart why downheld downstop goneblock takeover undelivered takecheck oldpid refused refusedwait claimed noreader stopover reclaim)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
