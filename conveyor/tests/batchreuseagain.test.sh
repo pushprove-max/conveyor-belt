@@ -26,13 +26,16 @@ t_batchreuseagain() {
   cat > "$STUB/review-cmd" <<'EOF'
 n=${PWD##*-}
 case $n in
-  8) [ -e "$STUB/rev.8" ] || { : > "$STUB/rev.8"; while [ -d "$STUB" ]; do jq -e .held ../*-7.claim >/dev/null 2>&1 && break; ls -d ../*-7 >/dev/null 2>&1 || break; sleep 0.1; done; rm -f ../*-7.cpatch; } ;;
+  8) [ -e "$STUB/rev.8" ] || { : > "$STUB/rev.8"; s=''; while [ -d "$STUB" ]; do jq -e .held ../*-7.claim >/dev/null 2>&1 && break
+      if ls -d ../*-7 >/dev/null 2>&1; then s=1; elif [ -n "$s" ]; then break; fi; sleep 0.1; done; rm -f ../*-7.cpatch; } ;;
   9) [ -e "$STUB/rev.9" ] || { : > "$STUB/rev.9"; while [ -d "$STUB" ]; do
       [ -e "$STUB/refused" ] && ! ls ../*-7.claim >/dev/null 2>&1 && jq -e .held ../*-8.claim >/dev/null 2>&1 && break; ls -d ../*-8 >/dev/null 2>&1 || break; sleep 0.1; done; } ;;
 esac
 EOF
   # Each wait gives up once the card it waits on is gone (landed or blocked: its worktree removed), and the hold once #9
-  # holds a.txt beside #8, failing the case below rather than hanging when the engine takes another path.
+  # holds a.txt beside #8, failing the case below rather than hanging when the engine takes another path. #8's review
+  # gives up on #7 only once it has seen #7's worktree: #7 is picked last, and a fast loop reviews #8 before it, which
+  # then landed alone.
   cat >> "$STUB/hold" <<'EOF'
 case $PWD in *-8) [ -e "$STUB/refused" ] && [ ! -e "$STUB/again" ] && jq -e '.held == true' "$PWD.claim" >/dev/null 2>&1 && {
   while [ -d "$STUB" ]; do jq -e .tested ../*-9.ready >/dev/null 2>&1 && jq -e '.held == false and .away != true' ../*-9.claim >/dev/null 2>&1 && break
