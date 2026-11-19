@@ -579,8 +579,8 @@
     try { window.sessionStorage.setItem(KEPT_KEY, JSON.stringify({ login: keptLogin, items: kept })); } catch (e) { /* kept then for this page's life only */ }
   }
   // A long list shows its first `size` items (ctx.more: the panel's length unless said; 5 for a panel of length 'all'),
-  // then "Show <size> more" and "Show all (N)". The box says how many items the list holds (data-items):
-  // the panel's foot counts them (clipPlan). show(items)
+  // then "Show <size> more" and "Show all (N)". The box says how many items the list holds (data-items)
+  // and its step (data-step): the panel's foot counts them (clipPlan). show(items)
   // draws the items given; the control returned goes under them. The owner's choice is kept per list (key) through
   // every redraw and a reload (keep, in scope); a list of `size` or fewer has no control. done(kind) runs after a click
   // ('more' or 'all'). After
@@ -598,6 +598,7 @@
     const box = h('div', 'show-more'), next = h('button', 'btn btn-quiet'), all = h('button', 'btn btn-quiet');
     box.dataset.list = key;
     box.dataset.items = String(n);
+    box.dataset.step = String(step);
     next.type = 'button'; next.dataset.act = 'list-more';
     all.type = 'button'; all.dataset.act = 'list-all';
     const shown = () => { const want = pageOf(scope, key) || step; return want === 'all' ? n : Math.min(n, want); };
@@ -1343,9 +1344,10 @@
     return rows.length ? rows : shownOnly(p.body.children);
   };
   const inRow = (p, el) => !!(el.parentElement && el.parentElement.closest(p.mod.rowSelector || ROW_SEL));
-  // A panel with a shared long list (ctx.more) is not cut by default: that list is its length control (clipPlan).
+  // A panel with a shared long list (ctx.more) of more than one page is not cut by default: that list is its length
+  // control (clipPlan). A list that fits on one page has no control, so the panel keeps its default length.
   const listsOf = (p) => Array.from(p.body.querySelectorAll('.show-more[data-items]'));
-  const lengthOf = (p) => (listsOf(p).length ? 'all' : p.mod.rows);
+  const lengthOf = (p) => (listsOf(p).some((b) => Number(b.dataset.items) > Number(b.dataset.step)) ? 'all' : p.mod.rows);
   const wantOf = (p) => { const v = layouts[tabOf(p.mod.id)].lengths[p.mod.id]; return v === undefined ? lengthOf(p) : v; };
   // Cuts the body to its length: past it the body scrolls (the head stays), and the foot says how many rows there are
   // in all, with the one control to show all of them (or, when all are shown past the default, to show fewer).

@@ -60,12 +60,12 @@ test('each panel states its tab and its default length: about 5 to 8 rows for a 
       stated[id] = [tab, length === 'all' ? 'all' : Number(length)];
     }
   }
-  // A panel with a shared long list (needs, landed, declined, cost, metrics) is not cut at a length: its list shows
-  // the panel's length (5) and then "Show 5 more", so the panel's own cut is 'all'.
+  // A panel with a shared long list (needs, landed, declined, cost, metrics) is cut at its length (5) while that list
+  // fits on one page, as each does here; a longer list is then its length control ('all', the cases below).
   assert.deepEqual(stated, {
     machine: ['control', 'all'], 'board-loop': ['control', 'all'], 'board-push': ['control', 'all'], board: ['control', 'all'],
-    rules: ['rules', 'all'], 'rules-produce': ['rules', 'all'], 'rules-prices': ['rules', 'all'], 'rules-held': ['rules', 'all'], 'rules-issues': ['rules', 'all'], needs: ['overview', 'all'], belt: ['overview', 5], belt3d: ['belt3d', 'all'], tests: ['tests', 'all'], bench: ['bench', 'all'], queue: ['overview', 8], landed: ['overview', 'all'], release: ['overview', 'all'], declined: ['overview', 'all'],
-    health: ['overview', 'all'], lanes: ['overview', 'all'], cost: ['overview', 'all'], metrics: ['overview', 'all'],
+    rules: ['rules', 'all'], 'rules-produce': ['rules', 'all'], 'rules-prices': ['rules', 'all'], 'rules-held': ['rules', 'all'], 'rules-issues': ['rules', 'all'], needs: ['overview', 5], belt: ['overview', 5], belt3d: ['belt3d', 'all'], tests: ['tests', 'all'], bench: ['bench', 'all'], queue: ['overview', 8], landed: ['overview', 5], release: ['overview', 'all'], declined: ['overview', 5],
+    health: ['overview', 'all'], lanes: ['overview', 'all'], cost: ['overview', 5], metrics: ['overview', 5],
   });
   for (const [id, [, rows]] of Object.entries(stated)) if (rows !== 'all') assert.ok(rows >= 5 && rows <= 8, `${id} shows ${rows} rows by default`);
 });
@@ -116,6 +116,21 @@ test('a panel whose list uses ctx.more: the step is its length, its foot has no 
   act(p, 'list-all').click();
   assert.equal(rows(), 20);
   assert.equal(p.querySelector('.panel-foot').hidden, true, 'all shown: nothing to count or show');
+});
+
+// Bug: a ctx.more list that fits on one page (its control hidden) still took the panel's default length to all, so
+// Needs you with five blocked cards, one waiting card and one decision showed all seven, uncut and with no foot.
+test('a panel whose ctx.more list fits on one page keeps its default length: Needs you with five blocked cards is cut', () => {
+  const w = boot();
+  const data = full();
+  const P = 'https://github.com/example/example/issues';
+  data.panels.needs.data.cards.blocked = Array.from({ length: 5 }, (_, i) => ({ repo: 'example', card: `c${i}-${300 + i}`, issue: 300 + i, title: `Card ${i}`, reason: 'tests failed', since: '2026-11-09T01:00:00Z', url: `${P}/${300 + i}` }));
+  deliver(w, data);
+  const p = panel(w, 'needs');
+  assert.equal(p.querySelectorAll('.show-more:not([hidden])').length, 0, 'five blocked cards: one page, no list control');
+  assert.equal(p.dataset.length, '5', 'the default length, not all');
+  assert.ok(p.querySelector('.scrolls'), 'the body is cut');
+  assert.deepEqual([p.querySelector('.panel-foot').hidden, p.querySelector('.panel-rows').textContent, p.querySelector('.panel-foot .show-all').hidden], [false, `5 of ${p.dataset.rows}`, false]);
 });
 
 // Bug: with a length the owner set (Home on the handle), the list's Show all showed the list whole but left the panel
