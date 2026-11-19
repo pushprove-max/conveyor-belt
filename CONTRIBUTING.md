@@ -70,7 +70,7 @@ A test says why the behaviour matters and fails when it breaks; an existing test
   name in its own area file. A record made before this that names `conveyor/conveyor.test.sh: <case>` still reads:
   the case counts for the area file that defines it. `bash conveyor/tests/<area>.test.sh` runs one area file by hand.
   A change that selects every case runs no area file on the card: the runner is whole-only (`wholeOnly` in
-  `.conveyor/project.json`), so only the full test suite runs it.
+  `.conveyor/project.json`), so only the full test suite runs those cases, each in its area file.
 - `bash conveyor/conveyor.test.sh` runs the whole engine test by hand. A new engine case goes in its area's file under
   `conveyor/tests/` (no case file over 600 lines), and a new engine source file in one area of
   `.conveyor/engine-areas.json` that names its case files: `test-changed.sh --check` fails for a file under

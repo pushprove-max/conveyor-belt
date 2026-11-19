@@ -29,6 +29,9 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    as the commit status `conveyor/release-suite`. It does not run the suite when the notes break the style. Push
    nothing to `main` after this step and before the next.
 
+   In this repository the suite is `.conveyor/test-full.sh`. It runs each area file under `conveyor/tests/`, and
+   not the whole engine test, so each engine case runs once.
+
    An earlier suite run is a release's, or one of the Board's **Run full test suite** or **Push landed**. When one of
    them passed every file on the head of `main`, this step runs no test and posts the pass. When one was on a commit
    that is an ancestor of the head of `main`, this step runs again only some test files, and keeps the passes of the

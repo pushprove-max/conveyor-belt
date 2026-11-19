@@ -31,6 +31,8 @@ for f in conveyor/tests/fx-a.test.sh conveyor/tests/fx-b.test.sh; do
   printf '%s\n' 't_one() { :; }' 't_two() { :; }' 'echo "TESTRUN cases=2"' \
     '[ -z "${CONVEYOR_TEST_LOG:-}" ] || { mkdir -p "$CONVEYOR_TEST_LOG/cases/ok" && : > "$CONVEYOR_TEST_LOG/cases/ok/one" && : > "$CONVEYOR_TEST_LOG/cases/ok/two"; }' > "$R/$f"
 done
+# The engine's runner, which runs the cases of those case files again; it notes that it ran.
+echo 'echo "runner ${CONVEYOR_SHELL_TEST_CASE:-all}" >> "$(dirname "$0")/../ran"' > "$R/conveyor/conveyor.test.sh"
 echo ran > "$R/.gitignore"
 git -C "$R" init -q && git -C "$R" add -A && git -C "$R" commit -qm init
 echo 'echo untracked >> "$(dirname "$0")/../ran"' > "$R/lib/fx-untracked.test.sh"
@@ -48,11 +50,15 @@ got=$(cd "$T/log/cases" && find ok failed -type f | sort | tr '\n' ' ')
 of=$(awk -F= '/^TESTRUN cases=/ { n += $2 } END { print n + 0 }' "$T/out")
 [ "$of" = 5 ] || no "the full suite's case total is $of, not the 5 names it marks as ended: $(grep TESTRUN "$T/out")"
 [ $rc = 1 ] || no "a failing test file did not fail the full suite (exit $rc): $(cat "$T/out")"
-[ "$(sort "$R/ran" 2>/dev/null | tr '\n' ' ')" = "pass py " ] || no "the full suite did not run each tracked test file alone: $(cat "$R/ran" 2>&1)"
+[ "$(sort "$R/ran" 2>/dev/null | tr '\n' ' ')" = "pass py " ] || no "the full suite did not run each tracked test file alone, and not the runner: $(cat "$R/ran" 2>&1)"
+# Bug (#720): the suite ran the engine's runner and then each case file, so each engine case ran twice (the runner
+# alone took 950 s of a release's 3600 s), and the totals counted the runner. Its first two lines count what it runs.
+[ "$(head -2 "$T/out" | tr '\n' ' ')" = "TESTRUN cases=5 TESTRUN files=5 " ] \
+  || no "the full suite's first two lines do not count only the files it runs: $(head -2 "$T/out")"
 grep -qx -- '-- ok lib/fx-pass.test.sh' "$T/out" && grep -qx -- '-- FAIL lib/fx-fail.test.py' "$T/out" \
   || no "the full suite does not name each file's result: $(cat "$T/out")"
-# Bug: a whole-suite run timed no file, so the Tests page had no time for a file that only whole-suite runs run
-# (conveyor/conveyor.test.sh, wholeOnly). Each file it ran has its own `TESTRUN sec` line, and a nested file has none.
+# Bug: a whole-suite run timed no file, so the Tests page had no time for a file that only whole-suite runs run. Each
+# file it ran has its own `TESTRUN sec` line, and a nested file and the runner, which it does not run, have none.
 got=$(awk -F'\t' '$1 == "TESTRUN sec" && $3 ~ /^[0-9]+\.[0-9]$/ && $4 ~ /^[0-9]+\.[0-9]$/ { print $2 }' "$T/out" | sort | tr '\n' ' ')
 [ "$got" = "conveyor/tests/fx-a.test.sh conveyor/tests/fx-b.test.sh lib/fx-fail.test.py lib/fx-own.test.sh lib/fx-pass.test.sh " ] \
   || no "the full suite does not time each file it runs, and only those: $got"
@@ -75,16 +81,19 @@ git -C "$R" rm -q lib/fx-fail.test.py && rm -f "$R/lib/fx-untracked.test.sh"
 # Bug: the list reached the files it runs, so a test file that runs a suite of its own (this one) ran a part of it:
 # lib/fx-env fails when it sees the list.
 echo '[ -z "${CONVEYOR_SUITE_FILES:-}" ]' > "$R/lib/fx-env.test.sh" && git -C "$R" add lib/fx-env.test.sh && git -C "$R" commit -qm env
-printf '%s\n' lib/fx-pass.test.sh lib/fx-env.test.sh conveyor/tests/fx-a.test.sh lib/source.sh lib/gone.test.sh > "$T/list"
+# Bug (#720): a list that names the engine's runner ran it, so its case files' cases ran twice.
+printf '%s\n' lib/fx-pass.test.sh lib/fx-env.test.sh conveyor/tests/fx-a.test.sh lib/source.sh lib/gone.test.sh \
+  conveyor/conveyor.test.sh > "$T/list"
+rm -f "$R/ran"
 (cd "$R" && CONVEYOR_SUITE_FILES=$T/list bash -c "$full") > "$T/out" 2>&1 || no "the listed files' run failed: $(cat "$T/out")"
 got=$(sed -n 's/^-- ok //p' "$T/out" | sort | tr '\n' ' ')
 [ "$got" = "conveyor/tests/fx-a.test.sh lib/fx-env.test.sh lib/fx-pass.test.sh " ] || no "the suite with a list did not run only its tracked test files: $got"
 grep -qx 'TESTRUN files=3' "$T/out" && grep -qx 'TESTRUN cases=4' "$T/out" || no "the totals of a listed run are not of its files: $(grep TESTRUN "$T/out")"
+[ "$(cat "$R/ran" 2>&1)" = pass ] || no "the suite with a list naming the engine's runner ran it: $(cat "$R/ran" 2>&1)"
 
 # Bug: the whole test on main runs each failed case alone 3 times through this suite (fulltest.sh fullalone()), which
 # read no CONVEYOR_TEST_RERUN list, so each run alone was the whole suite again. With `fail` lines it runs only those
 # files: of the engine's runner the cases named (of it or of an engine case file), of a node file the case named.
-echo 'echo "runner ${CONVEYOR_SHELL_TEST_CASE:-all}" >> "$(dirname "$0")/../ran"' > "$R/conveyor/conveyor.test.sh"
 printf '%s\n' "import { test } from 'node:test'; import { appendFileSync } from 'node:fs';" "const ran = new URL('../ran', import.meta.url);" \
   "test('a (b)', () => appendFileSync(ran, 'node a\\n'));" "test('c', () => appendFileSync(ran, 'node c\\n'));" > "$R/lib/fx-node.test.mjs"
 git -C "$R" add -A && git -C "$R" commit -qm runner && rm -f "$R/ran"
@@ -107,5 +116,19 @@ rm -f "$R/ran"; printf 'pass\tlib/fx-pass.test.sh\nfail\t%s\tc\n' "$full" > "$T/
 (cd "$R" && CONVEYOR_TEST_RERUN=$T/rerun bash -c "$full") > "$T/out" 2>&1
 got=$(sort "$R/ran" 2>/dev/null | tr '\n' ' ')
 [ "$got" = "node a node c pass " ] || no "a failed case named by the command, not a test file, ran no test file: $got"
+
+# Bug (#720): the suite runs each engine case in its case file alone, not in the runner, so a case file that does not
+# start the runner with its cases (swebenchshow.test.sh only defined them) exits 0 having run none of them, while the
+# suite's total still counts them. Each of this checkout's case files, run alone, starts the runner with its own cases.
+E=$T/engine; mkdir -p "$E/tests"; cp "$HERE"/../conveyor/tests/*.test.sh "$E/tests/"
+# A stub runner that notes the cases it is given, by CONVEYOR_SHELL_TEST_CASE or as arguments.
+echo 'echo "${CONVEYOR_SHELL_TEST_CASE:-} $*" > "$(dirname "$0")/cases"' > "$E/conveyor.test.sh"
+for f in "$E"/tests/*.test.sh; do
+  want=$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$f" | sort | tr '\n' ' ')
+  [ -n "$want" ] || continue
+  rm -f "$E/cases"; (cd "$T" && bash "$f" < /dev/null > /dev/null 2>&1)
+  got=$(tr ' ' '\n' < "$E/cases" 2>/dev/null | grep . | sort | tr '\n' ' ')
+  [ "$got" = "$want" ] || no "conveyor/tests/${f##*/}, run alone, did not run its cases ($want) but: $got"
+done
 
 [ $fails = 0 ] && echo "ok - test-full" || exit 1

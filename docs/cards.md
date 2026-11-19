@@ -104,6 +104,9 @@ an entry from outside a card. A case with entries from three sources within seve
 <case> fails at random". Until that issue closes, card test steps keep the case off. The full test suite still runs
 it. The Board's Health panel has a "Flaky tests" line (`conveyor/README.md`, Flaky tests).
 
+The full test suite of this repository, `.conveyor/test-full.sh`, runs each area file under `conveyor/tests/`. It
+does not run the whole engine test, so each engine case runs once ([releases.md](releases.md)).
+
 The whole test on main runs only for a project whose pack names `test.main` (`conveyor/README.md`, The whole test on
 main).
 

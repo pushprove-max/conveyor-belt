@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# This project's full test suite (the pack's test.full, .conveyor/project.json): every test file git lists, each run
-# whole, in the checkout it is started in. release-prep, release and
+# This project's full test suite (the pack's test.full, .conveyor/project.json): every test file git lists but the
+# engine's runner (below), each run whole, in the checkout it is started in. release-prep, release and
 # the Board's full test suite run it. Exit 1 if any file fails; each file's result is a line `-- ok <file>` or `-- FAIL <file>`.
 # With the engine's test log folder (CONVEYOR_TEST_LOG), a file whose runner named none of its cases as ended there
 # (cases/ok, cases/failed) is named there itself, its path's slashes as colons, so a whole-suite run's progress (on the
 # Board and in /units) counts it and its failure.
 # Its first line, `TESTRUN cases=<n>`, is the whole run's total of those names, for that progress's total (fulltest.sh
-# suiteprog()): the engine's cases (conveyor.test.sh runs them, and each case file again under the same names, so each
-# counts once) and one for every other file. Its files' own `TESTRUN cases=` lines are left out of its output, as the
-# total names them already.
+# suiteprog()): the engine's cases of the case files it runs and one for every other file. It does not run the engine's
+# runner, conveyor/conveyor.test.sh, which runs every case of the case files under conveyor/tests/ again: each engine
+# case runs once, in its case file (a run of failed cases alone, below, still runs the runner on those cases). Its
+# files' own `TESTRUN cases=` lines are left out of its output, as the total names them already.
 # Its second line, `TESTRUN files=<n>`, is the number of files it runs, the total of the progress's files (suiteprog()
 # reads that line and the `-- ok|FAIL <file>` lines). Its files' own lines of these forms are left out of its output.
 # Before each file's `-- ok|FAIL` line it prints the file's `TESTRUN sec<TAB><file><TAB><clock s><TAB><CPU s>` (as
@@ -18,8 +19,8 @@
 # A file named a case when a name was added, or written again (a case file runs cases the runner named already).
 # With CONVEYOR_SUITE_FILES, a file of paths one a line (release-prep's run that reuses the passes of an earlier run,
 # conveyor/commands/release-prep.sh), it runs only the test files of its list that git lists: a path in it that is no
-# test file of the checkout is left out. Its case total then counts the engine's cases of the case files it runs (all of
-# them when it runs conveyor/conveyor.test.sh).
+# test file of the checkout is left out, and so is conveyor/conveyor.test.sh. Its case total then counts the engine's
+# cases of the case files it runs.
 rc=0
 stamp=$(mktemp); tt=$(mktemp); trap 'rm -f "$stamp" "$tt"' EXIT
 marks() { find "$CONVEYOR_TEST_LOG/cases/ok" "$CONVEYOR_TEST_LOG/cases/failed" -maxdepth 1 -type f "$@" 2>/dev/null | wc -l; }
@@ -44,6 +45,8 @@ if [ -s "$RERUN" ] && grep -q $'^fail\t' "$RERUN" \
   ! grep -qxF $'fail\tconveyor/conveyor.test.sh' "$RERUN" || again=()
   mapfile -t files < <(printf '%s\n' "${files[@]}" | grep -xFf <({ awk -F'\t' '$1 == "fail" && !($3 != "" && $2 ~ /^conveyor\/tests\//) { print $2 }' "$RERUN"
     [ ${#again[@]} = 0 ] || echo conveyor/conveyor.test.sh; } | grep .))
+else
+  mapfile -t files < <(printf '%s\n' "${files[@]}" | grep -vxF -e conveyor/conveyor.test.sh -e '') # '': no file
 fi
 engine=0 other=0 cf=()
 for t in "${files[@]}"; do case $t in conveyor/conveyor.test.sh) engine=1 ;; conveyor/tests/*.test.sh) cf+=("$t") ;; *) other=$((other + 1)) ;; esac; done

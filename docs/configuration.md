@@ -158,7 +158,9 @@ Run full test suite on the Control tab, and in a release. These do not always ru
 on the same commit, no test runs. After a suite run on an earlier commit, the files that failed there run again, and
 so do the files that the commits since then add or change, and the files that `test.command` picks for those changes.
 A change to the `test` settings of the pack, or to a file that its test commands name, runs the whole suite
-([releases.md](releases.md)). The whole test on main runs `test.main`.
+([releases.md](releases.md)). In this repository the suite is `.conveyor/test-full.sh`. It runs each area file under
+`conveyor/tests/`. It does not run the whole engine test, even when `test.command` picks
+it, so each engine case runs once. The whole test on main runs `test.main`.
 
 A test file can set its own time limit with a line `# timeout: <seconds>` among the comments at its top. Words after
 the number are a note. Past that limit, Conveyor stops the file and every process that it started, and the output says

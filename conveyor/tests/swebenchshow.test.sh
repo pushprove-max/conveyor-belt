@@ -5,6 +5,8 @@
 # (`bench swe show`), the cost Start shows (`bench swe history`, each arm's perTask), and the arms the form saves
 # (`bench swe arms save`, the choices history offers), with the settings a run shares and the reuse of its results
 # (`--settings`, swe_inputs). The fixture is swebench.test.sh's swe().
+[ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
+  exec bash "$(dirname "$0")/../conveyor.test.sh"
 
 # Bugs (#326): (1) the run page could not open a run of 500 tasks and 6 arms on Linux: show passed the run's line,
 # 3,000 task records, to jq as one argument, past the system's 128 KiB limit on one argument; (2) a stopped run showed
