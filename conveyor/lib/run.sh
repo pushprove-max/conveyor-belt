@@ -279,6 +279,16 @@ unstick() { # <issue>
     endcard "$c" "$1" "$p" "$s" "$(stuckwhy "$s" "$how")" && echo "conveyor: card $c was open with $([ "$how" = gone ] && echo "its process gone" || echo "no process of its $s step for $((STUCK + REVIEW_PAUSE))s"); it is blocked, its work kept"
   done
 }
+# run()'s cards in progress (running), set in run()'s own variables: its jobs less the push (pusher) and the other
+# jobs beside the cards, and the cards it took over (took). A push so leaves its builder slot free.
+cardsrun() {
+  running=$(($(jobs -rp | grep -cvx -e "${pusher:-0}" -e "${tester:-0}" -e "${taker:-0}" -e "${muter:-0}" -e "${prober:-0}" -e "${merger:-0}" -e "${fixer:-0}") + ${#took[@]}))
+}
+# A `run` (not a serve) may end at this turn, read in run()'s own variables: no card of its own runs, no push
+# (pusher) or machine-hold look (prober) is under way, and no pick waits.
+runends() {
+  [ "$running" = 0 ] && [ -z "$serve" ] && [ -z "$pusher" ] && [ -z "$waits" ] && { [ -z "$prober" ] || ! jobs -rp | grep -qx "$prober"; }
+}
 run() { # [max-cards] [serve]
   local left=${1:--1} serve=${2:-} cap base='' picked running building idles started=0 c n again timer pusher='' owed tried='' triedat=0 ctl pct now='' p k lim='' waits sampled=-1000000 guard issues='' asking urgent red
   local why say said='' old='' nopack told='' nocli self adopt='' held='' new t tester='' mtried=-1000000 stried=-1000000 taker='' ttook=-1000000 f muter='' utried=-1000000
@@ -416,7 +426,7 @@ run() { # [max-cards] [serve]
     if [ -n "$serve" ] && [ -z "$new" ] && [ -z "$nopack" ] && [ $((SECONDS - stried)) -ge 60 ]; then
       stried=$SECONDS; survey 8>&- < /dev/null; noprice 8>&- < /dev/null || :
     fi
-    running=$(($(jobs -rp | grep -cvx -e "${pusher:-0}" -e "${tester:-0}" -e "${taker:-0}" -e "${muter:-0}" -e "${prober:-0}" -e "${merger:-0}" -e "${fixer:-0}") + ${#took[@]})); waits=''
+    cardsrun; waits=''
     # The cards counted against the builder cap (building): those running, less those that only wait (idle()), at
     # most as many of them as the cap. running still counts every card: the loop ends only once none is left.
     idles=$(idle "$(for p in "${!mine[@]}"; do echo "$p ${mine[$p]% *}"; done)"); [ "$idles" -le "$cap" ] || idles=$cap; [ "$idles" -ge 0 ] || idles=0
@@ -558,7 +568,7 @@ run() { # [max-cards] [serve]
       gtried=$SECONDS; ( idlemerge ) 8>&- < /dev/null & merger=$!
     fi
     # A card that landed after this turn's push check is owed a push no turn has tried: one more turn makes it.
-    if [ "$running" = 0 ] && [ -z "$serve" ] && [ -z "$pusher" ] && [ -z "$waits" ] && { [ -z "$prober" ] || ! jobs -rp | grep -qx "$prober"; }; then
+    if runends; then
       [ -n "$nopack" ] || ! owed=$(owed) || [ "$owed" = "$tried" ] || continue
       break
     fi
