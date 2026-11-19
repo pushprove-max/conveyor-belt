@@ -102,9 +102,11 @@ suitebase() { # <commit>
   [ -n "$best" ] && printf '%s\n' "$best"
 }
 # Whether the suite on <commit> reruns some files only (suitebase()'s line is on an ancestor of <commit>, or on it), and
-# the commits since change neither the pack's test settings (test.*) nor a file the pack's test commands name (a word
-# of test.full, test.command, test.changed or test.wholeCommands in the pack: .conveyor/test-full.sh, the engine's
-# runner). Then <worktree> (a worktree of <commit>) gets <worktree>.files, the files to run: those that did not pass in
+# the commits since change neither the pack's test settings (test.*) nor a file the pack's suite commands name (a word
+# of test.full or test.wholeCommands in the pack: .conveyor/test-full.sh, the engine's runner). A file that only
+# test.command or test.changed names (the changed-tests script, which picks files and runs no suite) is not one: its
+# change reruns as any changed file does, and the picks are made by that script as it is on <commit>.
+# Then <worktree> (a worktree of <commit>) gets <worktree>.files, the files to run: those that did not pass in
 # that line, those the commits change or add, and those the changed-tests command (test.command, as a card's test step
 # runs it) selects for those changes, which it lists to the file CONVEYOR_TEST_LIST names, in <worktree> with its HEAD
 # at the line's commit. Prints the line. 1: the whole suite runs (no line, a test setting or command changed, or the
@@ -119,7 +121,7 @@ suitereuse() { # <worktree> <commit>
   mapfile -t ch < <(git diff --name-only --no-renames "$b" "$sha") || return 1
   while read -ra w; do
     for f in "${w[@]}"; do printf '%s\n' "${ch[@]}" | grep -qxF -- "${f#./}" && return 1; done
-  done < <(jq -r '.test | [.full, .command, .changed, (.wholeCommands // [])[]] | .[] | strings' "$PACK" 2>/dev/null)
+  done < <(jq -r '.test | [.full, (.wholeCommands // [])[]] | .[] | strings' "$PACK" 2>/dev/null)
   packget test.command cmd && [ -n "$cmd" ] || return 1
   rm -f "$wt.sel"
   git -C "$wt" reset -q "$b" 2>/dev/null && (cd "$wt" && CONVEYOR_TEST_LIST=$wt.sel timeout 300 bash -c "$cmd" > "$wt.sel.out" 2>&1 < /dev/null 8>&-)

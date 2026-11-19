@@ -49,8 +49,9 @@ t_fullreusecmd() {
 
 # Bug (#710): docs/configuration.md said Push landed and Run full test suite run the whole suite on each click, where
 # fulltest.sh reuses a green run on the same commit, reruns failed, changed and test.command-selected files, and runs
-# the whole suite after a test setting or test command file changes. t_fullreusefail runs the reuse on the same
-# commit and the rerun of a changed file; t_fullreusecmd runs the whole suite after .conveyor/test-full.sh changes.
+# the whole suite after a test setting or a suite command file (not a changed-tests command file) changes.
+# t_fullreusefail runs the reuse on the same commit and the rerun of a changed file; t_fullreusecmd runs the whole
+# suite after .conveyor/test-full.sh changes; t_relreusepick reruns only the changed file after test-changed.sh changes.
 # Text check: a doc page has no behaviour to run.
 t_fullreusedoc() {
   local d; d=$(tr '\n' ' ' < "$SRC/../docs/configuration.md")
@@ -58,6 +59,6 @@ t_fullreusedoc() {
     || fail "docs/configuration.md does not say a suite run on a commit that already passed runs no test"
   grep -q 'and the files that `test.command` picks for those changes' <<<"$d" \
     || fail "docs/configuration.md does not say a suite run also reruns the files test.command picks for the changes"
-  grep -q 'or to a file that its test commands name, runs the whole suite' <<<"$d" \
-    || fail "docs/configuration.md does not say a change to a test command file runs the whole suite"
+  grep -qF 'or to a file that its suite commands name (`test.full` and `test.wholeCommands`, not `test.command` or `test.changed`), runs the whole suite' <<<"$d" \
+    || fail "docs/configuration.md does not say a change to a suite command file, and not to a changed-tests command file, runs the whole suite"
 }

@@ -14,16 +14,20 @@
 # (those CONVEYOR_SUITE_FILES lists, when set), notes each in $STUB/ran and prints its `-- ok|FAIL` line; t/f1 fails,
 # t/f2 and t/f3 pass, and the changed-tests command (test.command, $STUB/test-cmd) lists t/f3.test.sh for a change to
 # src/s3.sh. A whole release-prep (with `full`: a whole Run full test suite) runs on that commit (A), then t/f1 is made
-# to pass, not yet committed.
-rrsetup() { # [full]
+# to pass, not yet committed. With `pick`, test.command runs the committed .conveyor/pick.sh, which picks as
+# $STUB/test-cmd does, and test.changed names it, as this repository's pack names .conveyor/test-changed.sh in both.
+rrsetup() { # [full | pick]
   runsetup true
   tune '.test.full = "bash .conveyor/test-full.sh"'
+  [ "${1:-}" != pick ] || tune '.test.command = "bash .conveyor/pick.sh" | .test.changed = ".conveyor/pick.sh"'
   mkdir -p "$R/t" "$R/src" && printf '%s\n' 'fs=$(git ls-files "t/*.test.sh"); [ -z "${CONVEYOR_SUITE_FILES:-}" ] || fs=$(grep -xFf "$CONVEYOR_SUITE_FILES" <<<"$fs")' \
     'echo "TESTRUN files=$(grep -c . <<<"$fs")"; rc=0' \
     'for f in $fs; do echo "$f" >> "$STUB/ran"; if bash "$f"; then echo "-- ok $f"; else echo "-- FAIL $f"; rc=1; fi; done; exit $rc' > "$R/.conveyor/test-full.sh" \
     && echo 'exit 1' > "$R/t/f1.test.sh" && echo 'exit 0' > "$R/t/f2.test.sh" && echo 'exit 0' > "$R/t/f3.test.sh" && echo one > "$R/src/s3.sh" \
     && echo '[ -z "${CONVEYOR_TEST_LIST:-}" ] || git diff --name-only HEAD | sed -n "s|^src/s3[.]sh\$|t/f3.test.sh|p" > "$CONVEYOR_TEST_LIST"' > "$STUB/test-cmd" \
-    && git -C "$R" add -f .conveyor/test-full.sh t src && git -C "$R" commit -qm 'the suite' && git -C "$R" push -q origin main || fail "the fixture could not be made"
+    && { [ "${1:-}" != pick ] || cp "$STUB/test-cmd" "$R/.conveyor/pick.sh"; } \
+    && git -C "$R" add -f .conveyor/test-full.sh t src && { [ "${1:-}" != pick ] || git -C "$R" add -f .conveyor/pick.sh; } \
+    && git -C "$R" commit -qm 'the suite' && git -C "$R" push -q origin main || fail "the fixture could not be made"
   A=$(git -C "$R" rev-parse HEAD)
   if [ "${1:-}" = full ]; then
     loop full-test > "$T/$CASE.a" 2>&1 || fail "full-test did not start: $(cat "$T/$CASE.a")"
@@ -78,6 +82,17 @@ t_relreusecmd() {
   rrprep
   [ "$got" = "t/f1.test.sh t/f2.test.sh t/f3.test.sh" ] || fail "a change to .conveyor/test-full.sh did not run every file: '$got'"
   jq -e '.reused == null' "$RUN" > /dev/null || fail "a whole suite's record says it reused a run: $(cat "$RUN")"
+}
+# Release 1.6.0: a one-line change to the changed-tests command (test.command, .conveyor/test-changed.sh here) made
+# release-prep run all 400 files again, though that command picks files and runs no suite. Its file reruns as a
+# changed file does: only t/f1 (failed on A) runs, and the record names the run it reused.
+t_relreusepick() {
+  local A B RUN got
+  rrsetup pick
+  echo '# changed' >> "$R/.conveyor/pick.sh"
+  rrprep
+  [ "$got" = "t/f1.test.sh" ] || fail "a change to the changed-tests command's file ran more than the failed file: '$got'"
+  jq -e --arg a "$A" '.reused.sha == $a' "$RUN" > /dev/null || fail "the record does not say it reused the run on A: $(cat "$RUN")"
 }
 # Bug (#44 review): the record's newest line on an ancestor was taken, so a release-prep on origin's A after a green
 # full test on the unpushed B hid B's pass, and Push landed on B ran every file again. suitebase() takes the line on

@@ -1166,8 +1166,9 @@ that record before it runs:
 - A run is on an ancestor of the commit (with more than one, the nearest ancestor): only the files that failed in it,
   the files that the commits since add or change, and the files that the changed-tests command (`test.command`)
   selects for those changes run. Each other file keeps its ok. The Board says how many files reran.
-- There is no such run, or the commits since change the pack's test settings (`test.*`) or a file that their commands
-  name (for example `.conveyor/test-full.sh`): the whole suite runs.
+- There is no such run, or the commits since change the pack's test settings (`test.*`) or a file that their suite
+  commands (`test.full` and `test.wholeCommands`, not `test.command` or `test.changed`) name (for example
+  `.conveyor/test-full.sh`): the whole suite runs.
 
 Push anyway does not read the record: it pushes over the red run with no new run.
 

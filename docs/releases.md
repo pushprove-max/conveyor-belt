@@ -49,7 +49,7 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
      those changes.
 
    It runs the whole suite when there is no earlier run, when the commit of that run is not an ancestor of the head,
-   or when the commits since change the `test` settings of the pack or a file that its test commands name (such as
+   or when the commits since change the `test` settings of the pack or a file that its suite commands name (such as
    `.conveyor/test-full.sh` or the engine's test runner). When the files pass, the status is a pass, and its text
    says how many files ran and how many passes it kept, and from which commit. The Release panel says the same
    in its step 2.
