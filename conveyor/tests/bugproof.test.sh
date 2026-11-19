@@ -519,6 +519,11 @@ t_optkeep() {
   [ "$(cat "$STUB/mainran")" = 'f.test.sh: fast' ] || fail "the file did not run alone with the change: $(cat "$STUB/mainran" 2>&1)"
   grep -qx '# The Optimize check' "$STUB/asked" && grep -q 'passed in 4 CPU s, lower than its median on record, 10 CPU s' "$STUB/asked" \
     || fail "the review was not shown the Optimize check"
+  # Bug it catches (#614): the review was told a kept file must cost less than its figure, save for stabilise, so it
+  # flagged a merge the engine passes at the file's figure plus the merged file's (t_optmergeinto). The whole rule is
+  # matched, so a second, unconditional "less than that figure" limit for a kept file also fails it.
+  tr '\n' ' ' < "$STUB/asked" | grep -qF 'A file kept must cost less than that figure; for stabilise, no more than it; and, when another test file is merged into it, no more than that figure plus the median on record of each test file merged into it. The files of a split' \
+    || fail "the review was not told one limit for a kept file, with the limit of a merge into it"
   [ -n "$(st 'select(.step == "landed") | .sha')" ] || fail "a faster Optimize card did not land: $(st 'select(.step | IN("blocked", "landed"))')"
 }
 
