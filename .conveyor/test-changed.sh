@@ -5,7 +5,8 @@
 # test files TESTS_OF lists for it (ones named after another file, or none). A test named <stem>-<rest> belongs to the
 # longest source name its name starts with: a change to <stem> does not select it when another source file beside it
 # or beside its __tests__ folder, or a name in NAMED, is named <stem>-<part>… and the test's name starts with that
-# (issue 463). And the test files .conveyor/test-links.json links to a changed file (issue 598: LINKS, below).
+# (issue 463). And the test files .conveyor/test-links.json links to a changed file (issue 598: LINKS, below). And the
+# Board test files that import a changed module beside them, or draw a changed panel (issue 544: boardtests, below).
 # Exit 1 if any fails or none ran for a changed source file that has tests.
 # The engine: each engine source file is in one area of .conveyor/engine-areas.json, which names the case files
 # (conveyor/tests/) that cover it ("all": every one). In a build or fix session an engine change runs only the cases of
@@ -362,6 +363,27 @@ declare -A TESTS_OF=([.claude/dashboard/panels/rules.js]=.claude/scripts/__tests
   [hooks/sources.ts]=hooks/units.test.tsx [hooks/elements.ts]="hooks/sources.test.tsx hooks/units.test.tsx"
   [hooks/fixtures/units-two-projects.ts]="hooks/units-fetch.test.sh hooks/units.test.tsx hooks/sources.test.tsx"
   [.conveyor/engine-areas.json]=.conveyor/test-map-areas.test.sh [conveyor/lib/testmap.sh]=.conveyor/test-map-areas.test.sh)
+# boardtests <file>: the Board test files a change to a shared test module or to a panel reaches, read from the test
+# files, not from a list (issue 544): a module beside the Board's tests (.claude/scripts/__tests__/, not a test) selects
+# each test file there that imports it (`from './<module>'`), as dashboard-view.helpers.mjs, the page's fixture, is
+# imported by most of them; a panel file (.claude/dashboard/panels/<id>.js) selects each one whose cases draw that
+# panel: they fill its data (`panels.<id>`) or read its element (`panel(w, '<id>')`, `panel-<id>`; `<id>-<part>` for a
+# panel drawn as several; `panelState.<state>('<id>')`), or they draw each panel of the helpers' list (a loop over LIST
+# or OVERVIEW). A test that only names the file (`panels/<id>.js`) is not selected.
+boardtests() {
+  local f=$1 d=.claude/scripts/__tests__ b re e='([^A-Za-z0-9_]|$)'
+  local -a tests=()
+  case $f in
+    "$d"/*.test.*) return 0 ;;
+    "$d"/*.mjs|"$d"/*.js) b=${f##*/}; re="(from|import[(]) *['\"]\\./${b//./[.]}['\"]" ;;
+    .claude/dashboard/panels/*.js) b=${f##*/}; b=${b%.js}; re="panels[.]$b$e|panel[(][A-Za-z0-9_]+, *['\"\`]$b(-[a-z0-9]+)?['\"\`]|panel-$b$e|panelState[.][a-z]+[(]['\"\`]${b}['\"\`]"
+      re+="|(of |[^A-Za-z0-9_.])(LIST|OVERVIEW)[.](map|filter|flatMap|forEach)[(]|of (LIST|OVERVIEW)$e" ;;
+    *) return 0 ;;
+  esac
+  mapfile -t tests < <(git ls-files -co --exclude-standard "$d" | grep -E '[.]test[.](mjs|js|ts|tsx)$')
+  [ ${#tests[@]} = 0 ] || grep -lE -- "$re" "${tests[@]}" 2>/dev/null
+  return 0
+}
 # The test links (issue 598): a test that broke main without the card running it is run by later cards that change
 # the files of the landing that broke it. .conveyor/test-links.json, {"<changed file>": ["<test file>", ...]}, written
 # by the engine (conveyor/lib/testrun.sh brokeby(), testlinks()) and committed by the main-red fix card. LINKS holds
@@ -989,6 +1011,9 @@ for f; do
     conveyor/tests/*.test.sh) casesof "$f" || area[$f]=1; continue ;;
     *.test.sh|*.test.mjs|*.test.ts|*.test.tsx) run[$f]=1; continue ;;
   esac
+  # The Board tests that import a changed module or draw a changed panel, before the rules below can end the pick: a
+  # panel's texts and rows are what those tests check (boardtests).
+  while read -r t; do [ -z "$t" ] || run[$t]=1; done < <(boardtests "$f")
   # A change to its texts and comments alone: the tests that hold the texts (textonly).
   [ -n "$NOTEXT" ] || ! textonly "$f" || continue
   # A change to functions alone that the coverage map holds: the cases it lists (issue 527), and of the tests below,
