@@ -24,7 +24,8 @@ stagerun() { # <list>
   ( export TMPDIR=$d/tmp CONVEYOR_SHELL_TEST_CASE=install; timeout 200 bash "$t" ) > "$d/run.out" 2>&1
 }
 
-# Bug (issue 775): the copy's paths are checked against the set, not only what closure.sh walks from the copy, so a
+# Bug (issue 775): the check compared the set with what closure.sh walked from the copy, so a shipped file the walk
+# did not reach was not seen; now the files the copy holds are listed and compared with the checkout's set, and a
 # shipped file missing from the copy fails, named. A copy step that leaves conveyor/jq/rows.jq out fails the install
 # case, naming it.
 t_closuremiss() {
