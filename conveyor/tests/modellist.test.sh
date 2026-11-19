@@ -13,7 +13,8 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # Bug: a new Codex model could be picked as a default, or named alone, only once someone added it by hand to the pack's
 # models.allowed (gpt-6.2-sol and gpt-6.2-astra needed that). Codex keeps the models its account can use in its models
 # cache: a new slug there is offered with no hand edit, a hidden one is not, and a pack that sets no models.allowed
-# follows the cache (the reviewer's default its first model). A pack that sets its own list keeps it: the owner's.
+# follows the cache (the reviewer's default its first model). A pack that sets its own list has the cache's added
+# (t_modelsadd).
 t_modelcache() {
   setup '[]'
   export CODEX_HOME=$T/$CASE/codex; mkdir -p "$CODEX_HOME"
@@ -29,9 +30,30 @@ t_modelcache() {
   local d np=''; for d in ${PATH//:/ }; do [ -x "$d/codex" ] || np+=$d:; done
   out=$(PATH=${np%:} loop snapshot --fresh | jq -c '.modelSettings.reviewer | [.allowed.codex, .model, .agent]')
   [ "$out" = '[[],"claude-opus-5-5","claude"]' ] || fail "with no Codex installed, a pack with no models.allowed still offers Codex models: $out"
-  tune '.models.allowed = {claude: ["m"], codex: ["x"], "claude-reviewer": []}'
-  out=$(loop snapshot --fresh | jq -c '.modelSettings.reviewer | [.clis.codex.models, .allowed.codex, .model]')
-  [ "$out" = '[["gpt-9-new","gpt-6.1-sol"],["x"],"x"]' ] || fail "a pack's own models.allowed is not the list in force: $out"
+}
+
+# Bug (#794): a pack that set models.allowed.codex hid the models Codex reports, so a new Codex model was refused as a
+# seat's model (cardok()) until someone added it to the pack by hand. The pack's list adds models to the CLI's: with
+# the pack allowing gpt-a and Codex reporting gpt-a and gpt-b, the reviewer's menu list (allowed, choices) has both once
+# each, the seat check takes both for the reviewer and the judge, and the pack's first model stays the default.
+t_modelsadd() {
+  setup '[]'
+  jq -cn '{at: (now | floor), clis: {codex: ["gpt-a", "gpt-b"]}}' > "$ST/clis.json"
+  tune '.models.allowed.codex = ["gpt-a"]'
+  looks 'modelsettings null | jq -c ".reviewer | [.allowed.codex, [.choices[] | select(startswith(\"gpt-\"))], .model]"
+    for m in gpt-a gpt-b; do for s in reviewer judge; do printf "%s %s: [%s]\n" "$s" "$m" "$(cardok "$s" "$m" medium)"; done; done'
+  out=$(cat "$T/$CASE/out")
+  [ "$out" = '[["gpt-a","gpt-b"],["gpt-a","gpt-b"],"gpt-a"]
+reviewer gpt-a: []
+judge gpt-a: []
+reviewer gpt-b: []
+judge gpt-b: []' ] || fail "the pack's models.allowed.codex and Codex's report are not taken together, once each: $out"
+  # Bug: an empty models.allowed.codex (a Claude-only pack) got Codex's report added too, so the reviewer's default
+  # moved from the pack's Claude reviewer to Codex's first model.
+  tune '.models.allowed = {claude: ["m"], codex: [], "claude-reviewer": ["claude-opus-5-5"]}'
+  looks 'modelsallowed a && jq -c "$OKMODELS [.codex, seed(\"reviewer\").model]" <<<"$a"'
+  out=$(cat "$T/$CASE/out")
+  [ "$out" = '[[],"claude-opus-5-5"]' ] || fail "an empty models.allowed.codex took Codex's report, and the reviewer's default moved: $out"
 }
 
 # Bug: docs/configuration.md said the fallback list keeps the built-in Codex models on a host without Codex, where
@@ -91,13 +113,15 @@ t_nopricefamily() {
 # Bug: a pack that sets models.allowed got an issue for each model of the host's Codex cache, though the Board offers
 # only the pack's list and no seat runs them (seven held issues for models the project never used). The host's models
 # are looked at only when the pack sets no list: then the Board offers them (t_nopricehost).
+# The pack's models.allowed.codex has the host's Codex models added (#794), so one only Codex reports is offered, and
+# with no price gets its issue too.
 t_nopriceallowed() {
   setup '[]'; unset CONVEYOR_NOPRICE_CMD
   jq -cn '{at: (now | floor), clis: {codex: ["gpt-extra-9"]}}' > "$ST/clis.json"
   looks 'noprice'
   out=$(jq -cs 'map(.title)' "$STUB/filed" 2>&1)
-  [ "$out" = '["Model price missing: m","Model price missing: x"]' ] \
-    || fail "a model only the host's Codex cache lists got an issue, though the pack's models.allowed does not offer it: $out"
+  [ "$out" = '["Model price missing: gpt-extra-9","Model price missing: m","Model price missing: x"]' ] \
+    || fail "a model the host's Codex reports, added to the pack's models.allowed.codex and offered, got no issue: $out"
 }
 # With no models.allowed the Board offers the host's Codex models, so one with no price gets its issue.
 t_nopricehost() {

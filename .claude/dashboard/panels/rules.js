@@ -632,7 +632,7 @@
 
   // ---- left: one row a rule ----
   // A role: its CLI (one of those installed on the loop's host, s.clis; the judge's the reviewer's too), then a model
-  // from that CLI's list (for a CLI that lists none, the pack's models for it), then Other… for a name typed in (a
+  // from that CLI's list with the pack's models for it added, each once, then Other… for a name typed in (a
   // text box alone for a CLI with neither list), then an effort of those the CLI takes there. A model in force that
   // the list does not have is said to be "(not listed)". A pick sends nothing: the row says Unsaved, and Save sends
   // the CLI, model and effort as one action (Default clears the role); Cancel puts back what is in force. In the setup a
@@ -671,10 +671,11 @@
     const v = draftOf(key) || now;
     const cli = v.cli;
     const of = cli && clis[cli] && typeof clis[cli] === 'object' ? clis[cli] : null;
-    // An installed CLI offers its own models, or, when it lists none, the pack's models for it (s.allowed); then Other…
-    // for a name typed in. One with neither list takes a typed name.
-    const names = (c, o) => (!o ? [] : Array.isArray(o.models) ? list(o.models)
-      : list(s.allowed && typeof s.allowed === 'object' ? s.allowed[c] : null)).filter((m) => typeof m === 'string' && m);
+    // An installed CLI offers its own models with the pack's models for it (s.allowed) after them, each once: the pack's
+    // list adds models to the CLI's and does not replace it; then Other… for a name typed in. One with neither list
+    // takes a typed name.
+    const names = (c, o) => (!o ? [] : Array.from(new Set(list(o.models)
+      .concat(list(s.allowed && typeof s.allowed === 'object' ? s.allowed[c] : null)).filter((m) => typeof m === 'string' && m))));
     const listed = names(cli, of);
     const allowed = of && !Array.isArray(of.models) ? listed : [];
     const typed = !!of && (v.other || (v.model !== '' && !listed.includes(v.model)) || (!Array.isArray(of.models) && !allowed.length));
@@ -1667,9 +1668,9 @@
     // Seen but not priced: an ID of the steps that no model and no alias prices (an OpenCode one keeps OpenCode's cost).
     const unpriced = seen.filter((x) => x.as === null && !aliasTo.has(x.model) && !isModel(x.model) && !x.model.startsWith('opencode:'));
     // Offered or run with no price: a model a role runs, or one the models.allowed in force offers a role (the pack's
-    // list when it sets one, else the built-in models with the host's Codex models in place of the built-in Codex ones,
-    // and none of them when the host has no Codex, modelsallowed() in conveyor/lib/control.sh: a model only a CLI's
-    // own list names is not one when the pack sets a list), that no
+    // list when it sets one, with the host's Codex models added to its codex list when that list has a model in it, else the built-in models with the
+    // host's Codex models in place of the built-in Codex ones, and none of them when the host has no Codex,
+    // modelsallowed() in conveyor/lib/control.sh), that no
     // model and no alias prices and no step has run yet (those are Seen but not priced). OpenCode's keep the cost OpenCode reports. A one-word name (sol, opus) is a family or an alias, no
     // model ID: the CLI runs a model of its own choice, so the name has no price to add. Conveyor files one issue to
     // add each (noprice()).

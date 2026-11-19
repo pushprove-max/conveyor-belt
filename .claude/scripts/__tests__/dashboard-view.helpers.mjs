@@ -301,7 +301,7 @@ export const counts = (P0, P1, P2, P3) => ({ P0, P1, P2, P3 });
 const EFF = { claude: ['low', 'medium', 'high', 'xhigh', 'max'], codex: ['minimal', 'low', 'medium', 'high', 'xhigh'], opencode: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] };
 export const CLIS = { claude: { models: null, efforts: EFF.claude }, codex: { models: ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6.1-terra'], efforts: EFF.codex },
   opencode: { models: ['openrouter/vendor/m-1', 'prov/m-2'], efforts: EFF.opencode } };
-// allowed: the pack's models.allowed by CLI, what the Board offers for a CLI that lists none (Claude Code).
+// allowed: the pack's models.allowed by CLI, what the Board offers after a CLI's own models (alone for one that lists none).
 export const CLAUDE4 = ['claude-opus-5-5', 'claude-fable-5-2', 'claude-sonnet-5-5', 'claude-haiku-5-5'];
 export const MODELS = {
   builder: { model: 'claude-opus-5-5', effort: 'high', agent: 'claude', modelFrom: 'control', effortFrom: 'control', choices: ['claude-fable-5-2', 'claude-opus-5-5'], efforts: EFF.claude,

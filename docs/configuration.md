@@ -434,7 +434,7 @@ Only the keys it leaves out take those defaults. `default` sets a value back: fo
 or `conveyor.sh control model default`. For a seat, the default is the pack's first model for it (`models.allowed`, or with no list set the models that the CLIs report: [Models](#models)).
 
 A model set with its CLI runs as set, whether the pack's `models.allowed` lists it or not. A model set without a CLI
-must be one that `models.allowed` lists for the seat; if it is not, the seat runs on its default. A seat whose
+must be one that `models.allowed` lists for the seat, or, for a Codex reviewer or judge, one that Codex reports (not when the pack's `models.allowed` has no `codex` list or an empty one); if it is not, the seat runs on its default. A seat whose
 CLI is not installed does not start, and `conveyor.sh doctor` names it.
 
 Models can run on a second route: an API proxy, or the provider's own API with your own key. `claudeProxy` in the
@@ -569,14 +569,20 @@ The host asks each CLI for its models:
   When there is no cache, the host asks `codex debug models`.
 - OpenCode: `opencode models`, one `<provider>/<model>` a line.
 - Claude Code has no command and no file that lists the models your account can use (its `--model` takes an alias
-  such as `opus`, or a full name). For Claude, the Board offers the list that comes with Conveyor, and a field for
-  any other name.
+  such as `opus`, or a full name). For Claude, the Board offers the pack's list, or the list that comes with Conveyor
+  when you set none, and a field for any other name.
+
+The Board's model menus offer the models that the CLI reports and then the models of the pack's `models.allowed` for
+that CLI, each one time, then Other…. The pack's list adds models to the CLI's list. It does not replace it.
 
 `conveyor.sh clis` reads the lists again and prints them. The Board does not offer a CLI that is not installed. A seat
 set to a CLI that the host no longer has is marked on the Board, and the loop starts no card on it.
 
-Set `models.allowed` in the pack to keep your own list. When you do not set it (setup does not), the project uses
-the models that the CLIs report: Codex's from its models cache, and for Claude the list that comes with Conveyor.
+Set `models.allowed` in the pack to add models to the CLIs' lists, for example a model that the CLI does not report
+yet. The models that Codex reports are added after the pack's `models.allowed.codex`, so a seat can run them too, and
+the pack's first model stays the seat's default. An empty `models.allowed.codex` gets no Codex models, so the
+reviewer stays on Claude. When you do not set `models.allowed` (setup does not), the project
+uses the models that the CLIs report: Codex's from its models cache, and for Claude the list that comes with Conveyor.
 
 The pack's `models.allowed` limits nothing. Its first model for a seat is the seat's default, run by the CLI it is
 listed under:
@@ -586,10 +592,9 @@ listed under:
 - for the reviewer and the judge: `codex`, `claude-reviewer` and `opencode`.
 
 A model that a seat runs, or that the project's model list has, can have no price. The model list is
-`models.allowed` when you set it. When you do not, it is Conveyor's built-in models, with the Codex models that Codex
+`models.allowed` when you set it, with the Codex models that Codex reports added to its `codex` list when that list has a model in it. When you do not, it is Conveyor's built-in models, with the Codex models that Codex
 reports in place of the built-in Codex ones, and with no Codex models when Codex is not installed. The Rules tab shows such a
-model under Model prices, in "Offered with no price". A model that only Codex reports, when you set
-`models.allowed`, is not on this list. A model that the sessions of the last 30 days used, and that no price prices, shows in
+model under Model prices, in "Offered with no price". A model that the sessions of the last 30 days used, and that no price prices, shows in
 "Seen but not priced". The loop files one held issue for each such model, "Model price missing: <model>", and does
 not file it again. A Codex family name, such as `sol`, is not a model ID: the check uses the model that Codex runs for
 it. Add the price on the Rules tab (Model prices), or with `conveyor.sh prices add`. An OpenCode model

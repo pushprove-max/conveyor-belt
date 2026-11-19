@@ -207,12 +207,13 @@ test('Tests actions: the Tests model offers the pack\'s models for a CLI that li
   assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'tests', args: ['claude', 'claude-sonnet-5-5', 'medium'], repo: 'sample' } }]);
 });
 
-// Bug it guards: the pack's list put in place of, or beside, the models a CLI lists of its own.
-test('Tests actions: the Tests model offers a CLI\'s own models, not the pack\'s, when it lists some', () => {
+// Bug it guards (#794): a CLI that lists models of its own hid the pack's, so a model added to the pack's models.allowed
+// was never offered. The CLI's models come first, then the pack's it does not list, each once.
+test('Tests actions: the Tests model offers a CLI\'s own models with the pack\'s added, each once', () => {
   const w = boot({ tab: 'tests' });
-  deliver(w, packSnap(['m1']));
+  deliver(w, packSnap(['claude-opus-5-5', 'm1']));
   pick(act(model(w), 'tmodel-cli'), 'claude');
-  assert.deepEqual(choices(w), ['Pick a model', 'm1', 'Other…']);
+  assert.deepEqual(choices(w), ['Pick a model', 'claude-opus-5-5', 'm1', 'claude-sonnet-5-5', 'Other…']);
 });
 
 // Bug it guards: a runner's flaky case that showed no Put back on its case file's row, as the row's file is not the

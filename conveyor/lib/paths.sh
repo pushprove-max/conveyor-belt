@@ -256,9 +256,10 @@ OKMODELS='def okmodels($s): def oc: startswith("opencode:"); . as $a | if $s == 
   def seed($s): {model: ([okmodels($s)[][]] | first), effort: "medium"};'
 # The models.allowed of a pack that sets none (modelsallowed()): Claude's are this list, as Claude Code reports no
 # list of the models an account can use; Codex's are the ones Codex reports (climodels()), none when it is not
-# installed, and these only when an installed Codex has reported none.
+# installed, and these only when an installed Codex has reported none. A pack that sets a codex list with a model in it
+# has the ones Codex reports added to it.
 # shellcheck disable=SC2034 # read by lib/control.sh and lib/setup.sh, which conveyor.sh sources beside this file
-MODELS0='{"claude":["claude-opus-5-5","claude-fable-5-2","claude-sonnet-5-5","claude-haiku-5-5"],"codex":["gpt-6.1-sol","gpt-6-astra"],"claude-reviewer":["claude-opus-5-5","claude-sonnet-5-5","claude-fable-5-2"]}'
+MODELS0='{"claude":["claude-opus-5-5","claude-fable-5-2","claude-sonnet-5-5","claude-haiku-5-5"],"codex":["gpt-6.2-sol","gpt-6.2-astra","gpt-6.1-terra","gpt-6.1-sol","gpt-6-astra","gpt-6-sol","gpt-6-luna","gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna","gpt-daybreak-blue-latest"],"claude-reviewer":["claude-opus-5-5","claude-sonnet-5-5","claude-fable-5-2"]}'
 # The CLIs a seat can run, and how each lists the models it has registered on this host (climodels()); a CLI that
 # offers no list (Claude Code's --model takes an alias or a full name, and nothing lists them) has null for its models.
 CLINAMES='claude codex opencode'

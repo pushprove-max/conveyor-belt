@@ -121,7 +121,7 @@
 // Its part (dashboard.sh, tests): {repo (null: none is steered), tests (the snapshot's: settings, rules, files (each
 // with its optimize issues, each with its url, and removed), slower, edits, totals; null from a snapshot without it),
 // testActions ({limit, actions, allowed:
-// the pack's models by CLI, offered for a CLI that lists none}), control (the control record: its tests, the Tests model),
+// the pack's models by CLI, offered after a CLI's own}), control (the control record: its tests, the Tests model),
 // clis (the host's CLIs, {models: null when it lists none, efforts} each), flaky ([{case, count, issue, files}]), testMap
 // (conveyor/lib/testmap.sh mapboard(): state, as the map page shows it, with made, seconds and notMapped; tool or toolWhy; suiteSec; build,
 // the last build by hand's record; null from a snapshot without it, and the part is not shown), repos, others}.
@@ -1007,9 +1007,9 @@
     const set = { cli: inForce ? inForce.cli : '', model: inForce ? inForce.model : '', effort: inForce && inForce.effort ? inForce.effort : '' };
     const v = S.tmodel.get(repo) || Object.assign({ other: false }, set);
     const of = v.cli ? obj(clis[v.cli]) : null;
-    // An installed CLI offers its own models, or, when it lists none (Claude Code), the pack's models for it
-    // (testActions.allowed), as the Rules tab's roles do; then Other… for a name typed in.
-    const listed = list(!of ? null : Array.isArray(of.models) ? of.models : (obj(ta().allowed) || {})[v.cli]).filter((m) => typeof m === 'string' && m);
+    // An installed CLI offers its own models with the pack's models for it (testActions.allowed) after them, each
+    // once, as the Rules tab's roles do: the pack's list adds models to the CLI's; then Other… for a name typed in.
+    const listed = !of ? [] : Array.from(new Set(list(of.models).concat(list((obj(ta().allowed) || {})[v.cli])).filter((m) => typeof m === 'string' && m)));
     const typed = !!v.cli && (v.other || (v.model !== '' && !listed.includes(v.model)) || !listed.length);
     const unsaved = () => { const d = S.tmodel.get(repo); return !!d && (d.cli !== set.cli || d.model.trim() !== set.model || d.effort !== set.effort); };
     const edit = (o) => {

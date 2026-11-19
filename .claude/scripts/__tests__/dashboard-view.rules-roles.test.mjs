@@ -83,6 +83,22 @@ test('Rules: a reviewer cleared to Default stops the Judge row saying it is of t
   assert.doesNotMatch(row(w, 'judge').textContent, /same family/, 'the default reviewer is not the cleared Claude one');
 });
 
+// Bug (#794): the Codex menu offered Codex's own list alone or the pack's alone, never both, so a model on one list
+// only could not be picked (a model added to the pack was not offered). With the pack allowing gpt-a and gpt-c and
+// Codex reporting gpt-a and gpt-b, each role's Codex menu offers Codex's, then the pack's other one, once each, then Other….
+test('Rules: each role\'s Codex menu offers the CLI\'s models and the pack\'s together, once each', () => {
+  const w = boot({ tab: 'rules' });
+  const d = full(), ms = d.panels.rules.data.modelSettings;
+  for (const k of ['builder', 'reviewer', 'judge']) {
+    ms[k] = { ...ms[k], allowed: { ...ms[k].allowed, codex: ['gpt-a', 'gpt-c'] }, clis: { ...ms[k].clis, codex: { ...ms[k].clis.codex, models: ['gpt-a', 'gpt-b'] } } };
+  }
+  deliver(w, d);
+  for (const k of ['builder', 'reviewer', 'judge']) {
+    set(w, k, `${k}-cli`, 'codex');
+    assert.deepEqual(values(w, k, `${k}-model`), ['', 'gpt-a', 'gpt-b', 'gpt-c', '*other'], `${k}: gpt-a, gpt-b and gpt-c once each, then Other…`);
+  }
+});
+
 // Bug (#441 review): the default judge is of another family than the reviewer's, so it moves when the reviewer does.
 // With a Codex reviewer and the default Claude judge, a reviewer saved as Claude kept the snapshot's Claude judge, and
 // the row said "same family" though the default judge is now a Codex one.

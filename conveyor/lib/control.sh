@@ -202,24 +202,31 @@ judgeseat() { seat judge; }
 # Nothing, and a failure, when it is off or the record does not read.
 judgeon() { local c; c=$(ctl 2>/dev/null) && jq -ce 'select(.judgeOn) | .judgeAlways' <<<"$c"; }
 # The models.allowed in force, in the variable named: the pack's, as packget gives it, when it sets one (the owner's
-# list); else the models this host's CLIs report: Codex's as the host's report has them (hostclis(), climodels()), none
+# list), with the Codex models the host's report has (hostclis(), climodels()) added to its codex list, when it has
+# one with a model in it, after the pack's own, each once: the pack's list adds models to the CLI's and does not
+# replace it (a pack with no codex list, or an empty one, keeps none, so its reviewer stays on the CLI it names).
+# With no pack list, the
+# models this host's CLIs report: Codex's as the host's report has them, none
 # when Codex is not installed, and for Claude, which reports none, the built-in MODELS0's, as are Codex's while an
 # installed Codex has reported none (or the report cannot be read). Worked out in
-# one jq run and kept, keyed on the report's text (MODELS_K), so a step that asks again starts no program for it.
-# Fails when the pack does not read.
+# one jq run and kept, keyed on the pack's list and the report's text (MODELS_K), so a step that asks again starts no
+# program for it. Fails when the pack does not read.
 MODELS_K=()
 modelsallowed() { # <variable>
-  local m_
-  packget models.allowed m_ 2>/dev/null || return 1
-  if [ -z "$m_" ]; then
-    hostclis >/dev/null 2>&1 || HOST_R=''
-    if [ "${#MODELS_K[@]}" = 2 ] && [ "${MODELS_K[0]}" = "$HOST_R" ]; then m_=${MODELS_K[1]}
-    else
-      m_=$(jq -cn --argjson d "$MODELS0" --argjson h "${HOST_R:-null}" '$h.codex as $x
-        | $d | if ($x | type) == "array" and ($x | length) > 0 then .codex = $x
-          elif ($h | type) == "object" and ($h | has("codex") | not) then .codex = [] else . end') || return 1
-      MODELS_K=("$HOST_R" "$m_")
-    fi
+  local m_ p_
+  packget models.allowed p_ 2>/dev/null || return 1
+  hostclis >/dev/null 2>&1 || HOST_R=''
+  if [ "${#MODELS_K[@]}" = 2 ] && [ "${MODELS_K[0]}" = "$p_"$'\037'"$HOST_R" ]; then m_=${MODELS_K[1]}
+  elif [ -n "$p_" ]; then
+    m_=$(jq -c --argjson h "${HOST_R:-null}" '$h.codex? as $x
+      | if type == "object" and ($x | type) == "array" and (.codex | type) == "array" and (.codex | length) > 0
+        then .codex = reduce (.codex + $x)[] as $m ([]; if index([$m]) then . else . + [$m] end) else . end' <<<"$p_") || return 1
+    MODELS_K=("$p_"$'\037'"$HOST_R" "$m_")
+  else
+    m_=$(jq -cn --argjson d "$MODELS0" --argjson h "${HOST_R:-null}" '$h.codex as $x
+      | $d | if ($x | type) == "array" and ($x | length) > 0 then .codex = $x
+        elif ($h | type) == "object" and ($h | has("codex") | not) then .codex = [] else . end') || return 1
+    MODELS_K=("$p_"$'\037'"$HOST_R" "$m_")
   fi
   printf -v "$1" '%s' "$m_"
 }
@@ -227,7 +234,7 @@ modelsallowed() { # <variable>
 # so Conveyor files one issue to add the price, held (the control record holds it, as `control hold` does), once for
 # each model whatever the loop's turns or restarts: $NOPRICE keeps {filed: [{model, issue, at}]}. The models: those of
 # the models.allowed in force (modelsallowed(), the list the Board's "Offered with no price" takes: the pack's when it sets
-# one, so a model only the host's Codex cache lists is looked at only when the pack sets none), and those run: the builder's, the
+# one, with the host's Codex models added to a codex list it has with a model in it), and those run: the builder's, the
 # reviewer's and the judge's seats, the Tests seat, the research lane's model, and each model ID the Board lists under Seen: those the card sessions of the last 30 days ran (a failed one's too) and those
 # the research lane's sessions ran (dashboard_limit.py lane_models). Which
 # have no price is dashboard_limit.py's (unpriced: the built-in table with the pack's prices over it; an OpenCode
@@ -764,11 +771,11 @@ inforce() { # [efforts] [the control record, when the caller has read it]
 # The model settings of the two seats, as the Board sets them: {builder, reviewer}, each {model, effort: the
 # ones in force (seat()), modelFrom, effortFrom: "control" when the control record sets it, else "seed" (the seed's,
 # seed()), choices: the models the pack allows the seat (okmodels: the reviewer's Codex's, then its Claude ones),
-# allowed: the same by CLI ({<cli>: its models, OpenCode's without the opencode: mark}: the list the Board offers for a
-# CLI that lists no models of its own),
+# allowed: the same by CLI ({<cli>: its models, OpenCode's without the opencode: mark}: the list the Board offers after
+# a CLI's own models, each once),
 # efforts: the efforts the program of the model in force takes, agent: that program (null when no model is in
 # force), clis: the CLIs installed on this host that the seat can be set to, each {models: the models it has
-# registered (null: it offers no list, so the Board offers allowed's; either way, then a typed name), efforts: the efforts it takes in this seat}, and
+# registered (null: it offers no list, so the Board offers allowed's alone; either way, then a typed name), efforts: the efforts it takes in this seat}, and
 # missing: why the seat in force cannot start on this host (MISSING; null when it can)}, and judge, the review's judge
 # (judgeseat()): the same fields, its choices (and allowed) the models the pack allows the review and its clis every
 # installed one, the reviewer's too, and default: the model it runs on when the record names none (its model is null
