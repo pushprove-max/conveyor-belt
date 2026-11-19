@@ -584,6 +584,12 @@ the pack's first model stays the seat's default. An empty `models.allowed.codex`
 reviewer stays on Claude. When you do not set `models.allowed` (setup does not), the project
 uses the models that the CLIs report: Codex's from its models cache, and for Claude the list that comes with Conveyor.
 
+`conveyor.sh doctor` shows a `warning:` line for each model that the pack's `models.allowed` lists for Codex or
+OpenCode and that the CLI does not report, as a seat set to it may not start. A Codex family name, such as `sol`,
+gets no warning when Codex has a model of that family. Doctor also shows a `warning:` line for each model that the
+CLI reports and the pack leaves out. Doctor does not compare the lists for Codex when `models.allowed.codex` is empty
+or not set, for OpenCode when the pack lists no OpenCode model, or for a CLI that gives no model list.
+
 The pack's `models.allowed` limits nothing. Its first model for a seat is the seat's default, run by the CLI it is
 listed under:
 

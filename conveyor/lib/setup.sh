@@ -753,6 +753,27 @@ narrowwarn() {
     return 0
   done < <(git -C "$MAIN" -c core.quotePath=false ls-files 2>/dev/null | testpaths)
 }
+# Doctor's warnings where the pack's models.allowed and a CLI's report (hostclis()) differ, one model a line: a model
+# the pack lists for Codex (codex, codex-builder) or OpenCode (opencode, without its opencode: mark) that the CLI does
+# not report, and one the CLI reports that the pack leaves out. A Codex family name (sol) is a model Codex has when
+# it resolves, as a seat's does (codexmodel()), with that seat's route. Nothing when the pack sets no models.allowed
+# (the project then takes the models the CLIs report, modelsallowed()), for Codex when the pack's codex list has no
+# model (an empty codex list takes none of Codex's), for OpenCode when the pack lists none, or for a CLI whose report
+# has no list (null: Codex installed with no models cache that reads, say).
+modelswarn() {
+  local p h f r s fam='[]'
+  packget models.allowed p 2>/dev/null && [ -n "$p" ] && h=$(hostclis due 2>/dev/null) || return 0
+  for s in codex:reviewer codex-builder:builder; do
+    while IFS= read -r f; do
+      [ -z "$f" ] || ! r=$(PROXY_ROLE=${s#*:} codexmodel "$f" 2>/dev/null) || [ -z "$r" ] || fam=$(jq -c --arg f "$f" '. + [$f]' <<<"$fam")
+    done < <(jq -r --arg k "${s%%:*}" '.[$k] // [] | arrays | .[] | strings | select(test("^[a-z]{2,}$"))' <<<"$p" 2>/dev/null)
+  done
+  jq -r --argjson h "$h" --argjson fam "$fam" '. as $p | [{c: "codex", n: "Codex", k: "codex", a: "", on: ($p.codex // [] | any(strings)), l: (($p.codex // []) + ($p["codex-builder"] // [])), x: $fam},
+      {c: "opencode", n: "OpenCode", k: "opencode", a: "opencode:", l: [($p.opencode // [])[] | strings | select(startswith("opencode:")) | ltrimstr("opencode:")]}][]
+    | (.l | map(strings)) as $l | select(if has("on") then .on else $l | length > 0 end) | ($h[.c] | arrays) as $r
+    | (($l - $r - (.x // []) | unique[]) as $m | "warning: the pack'"'"'s models.allowed lists \($m) for \(.n), which \(.n) does not report on this host, so a seat set to it may not start; fix: correct the name, or take it out of models.allowed"),
+      (($r - $l | unique[]) as $m | "warning: \(.n) reports \($m), which the pack'"'"'s models.allowed leaves out; a seat can run it, after the pack'"'"'s models in the list; fix: add \(.a)\($m) to models.allowed.\(.k) to put it in another place in the list, or leave it out")' <<<"$p" 2>/dev/null
+}
 doctor() {
   local bad=0 p e t c h f
   ok() { echo "ok: $1"; }; no() { echo "missing: $1; fix: $2"; bad=1; }
@@ -904,6 +925,7 @@ doctor() {
     else no "$p, for the models the pack's models.allowed lists for it" "install it ($(case $p in claude) echo "npm install -g @anthropic-ai/claude-code" ;;
       codex) echo "npm install -g @openai/codex" ;; *) echo "npm install -g opencode-ai, a 1.x release, then opencode auth login for each provider its models name" ;; esac)), or take its models out of models.allowed"; fi
   done
+  modelswarn
   # The builder and the reviewer in force (the control record's, its defaults' or the seed's): one whose CLI is not
   # installed here does not start (seatready), and the loop starts no card, so doctor names that seat.
   for t in builder reviewer; do
