@@ -87,17 +87,18 @@ t_watchlive() {
   [ "$(ev '.type == "live"' | jq -c '.cards | [keys, (.c1 | [.live.turns, .tokens.claude, .usd == 2, .reading])]')" = '[["c1"],[3,1000000,true,true]]' ] \
     || fail "the live line: $(ev '.type == "live"')"
   # A snapshot clears its reader's live fields: the live fields as they are now come right after it, with no new
-  # output from the session (a live line sent while a snapshot was built came before that snapshot).
+  # output from the session (a live line sent while a snapshot was built came before that snapshot). Beat and retried
+  # lines (the cards given back, sent at the start) do not touch the live fields, so they are left out here.
   loop control resume >/dev/null
   come '.type == "snapshot" and .why == "control" and .snap.control.mode == "run"' "the control change"
-  till "the live fields after the snapshot" last 'select(.type != "beat") | .type' '"live"'
-  [ "$(jq -c 'select(.type != "beat") | [.type, .why, .cards.c1.live.action]' "$W" | tail -n 2 | tr -d '\n')" = '["snapshot","control",null]["live",null,"Bash: npm test"]' ] \
-    || fail "the live fields did not follow the snapshot: $(jq -c 'select(.type != "beat") | [.type, .why]' "$W" | tail -n 3)"
+  till "the live fields after the snapshot" last 'select(.type == "snapshot" or .type == "live") | .type' '"live"'
+  [ "$(jq -c 'select(.type == "snapshot" or .type == "live") | [.type, .why, .cards.c1.live.action]' "$W" | tail -n 2 | tr -d '\n')" = '["snapshot","control",null]["live",null,"Bash: npm test"]' ] \
+    || fail "the live fields did not follow the snapshot: $(jq -c 'select(.type == "snapshot" or .type == "live") | [.type, .why]' "$W" | tail -n 3)"
   # The step ends: its live record goes, and the last live line says no card has one (an earlier one, after a snapshot, said so too).
   rm "$CD/c1.live"
   till "the end of a running step" last 'select(.type == "live") | .cards' '{}'
   come '.type == "beat"' "a beat line in a quiet stream"
-  [ "$(jq -r .type "$W" | sort -u | tr '\n' ' ')" = "beat live snapshot " ] || fail "a line of another kind: $(jq -r .type "$W" | sort -u)"
+  [ "$(jq -r .type "$W" | sort -u | tr '\n' ' ')" = "beat live retried snapshot " ] || fail "a line of another kind: $(jq -r .type "$W" | sort -u)"
   kill $pid; wait $pid 2>/dev/null; :
 }
 
