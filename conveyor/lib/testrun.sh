@@ -415,9 +415,10 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
     rerunsince "$1" "$p" "$b" "$t"; r=$?
     # A card's run that would run its whole selection, and is none of a first run, a merge in doubt or the full test
     # suite (the owner, 2026-11-14): refused. It runs what the list did not keep as passed, and says why on its line.
+    # With no HEAD or tree now, it keeps no list (rerunlist()): the whole selection runs.
     if [ $r = 1 ] && [ -n "$p" ] && [ -z "$mw" ] && { { [ -n "$ob" ] && [ "$ob" = "$b" ]; } || testedbefore "$1"; }; then
       TEST_REFUSED="refused full run: $RERUN_WHY"
-      if [ -s "$1.rerun" ] && { printf 'change\t%s\nbase\t%s\ntree\t%s\n' "$p" "$b" "$t"; grep -E $'^(pass|ok|fail|shared)\t' "$1.rerun"; } > "$1.rerun.new" \
+      if [ -s "$1.rerun" ] && [ -n "$b" ] && [ -n "$t" ] && { printf 'change\t%s\nbase\t%s\ntree\t%s\n' "$p" "$b" "$t"; grep -E $'^(pass|ok|fail|shared)\t' "$1.rerun"; } > "$1.rerun.new" \
         && mv -f "$1.rerun.new" "$1.rerun"; then r=0; fi
     fi
     # Those times are in <worktree>.oldtimes, apart from this run's own (<worktree>.times).
@@ -2538,8 +2539,11 @@ covkeep() { # <worktree>
 # `fail` line for each of them that did not print `ok` now, so its other cases, which did not run (a fix's run of the
 # cases of the files the fix changed, then the run's timeout), stay kept. Else (a file run whole, or a log that names
 # no case) it keeps no `pass` line, nor, in a run that was given `changed` lines (rerunsince()), its `ok` lines.
+# With no HEAD or tree (git write-tree failed, as under load) it keeps no list: the next run could not compare the
+# trees, and the refused full run (tests()) would keep the passes, so a fix's changed files would not run their tests.
 rerunlist() { # <worktree> <the staged change's id> <testfails() of the run> <HEAD> <tree>
   local old ran='' sel='' logs=() ch=''
+  [ -n "${4:-}" ] && [ -n "${5:-}" ] || { rm -f "$1.rerun"; return 0; }
   ! grep -q $'^changed\t' "$1.rerun" 2>/dev/null || ch=1
   mapfile -t logs < <(testlogs "$1")
   if [ ${#logs[@]} != 0 ]; then

@@ -581,7 +581,8 @@ A full run, of the whole selection, is allowed in three cases only:
 Before it runs, the test step finds why it would run each file: what did not pass, what the card's change changed and
 what main changed (above). When that cannot be found (the last run's list is missing, or names a tree or commit that
 cannot be compared), it would run the whole selection. A card's run that would, and is none of the three, refuses the
-full run: it runs only what its list did not keep as passed (with no list, nothing was kept and every file runs), its
+full run: it runs only what its list did not keep as passed (with no list, or when the card's tree cannot be read
+now, nothing was kept and every file runs), its
 test line records `refused: "refused full run: <the reason seen>"`, and `health` lists it under
 `refused` (`{card, issue, reason, since}`, for 24 hours), which wakes the Foreman once.
 
