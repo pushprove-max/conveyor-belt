@@ -30,11 +30,14 @@ if grep -q '^# Landing conflict' "$STUB/brief"; then printf 'ONE\ntwo\n' > a.txt
 elif [ "$(wc -l < "$STUB/sessions")" = 1 ]; then echo two >> a.txt
 else wc -l < "$STUB/sessions" > fixed.txt; fi
 EOS
-  echo 'echo x >> "$STUB/tests"; [ "$(wc -l < "$STUB/tests")" -gt 2 ] || { echo "FAIL widget.test.ts"; printf "%s\n" "== widget.test.ts" "-- FAIL widget.test.ts" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1; }; [ "$(wc -l < "$STUB/tests")" != 3 ] || { echo ONE > "$R/a.txt"; git -C "$R" commit -qam other; }' > "$STUB/test-cmd"
+  echo 'echo x >> "$STUB/tests"; [ "$(wc -l < "$STUB/tests")" -gt 2 ] || { echo "FAIL widget.test.ts"; exit 1; }; [ "$(wc -l < "$STUB/tests")" != 3 ] || { echo ONE > "$R/a.txt"; git -C "$R" commit -qam other; }' > "$STUB/test-cmd"
   echo "$NOGO" > "$STUB/review.1"; for i in 2 3 4; do echo "$GO" > "$STUB/review.$i"; done
   loop run 1 >/dev/null || fail "run exited non-zero"
   [ "$(st '.step' | tr '\n' ' ')" = "picked worktree deps brief start build start review start fix start review start test start fix start review start test start start rebase start review start test start landed pushed issue " ] \
     || fail "steps of a card with a build, a fix, a test fix and a rebase: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
+  # Bug: a stub that logged its own `-- FAIL widget.test.ts` beside filecmd()'s `-- FAIL a.test.sh` made one run two failed files.
+  [ "$(st 'select(.step == "test" and .result == "fail") | .failures.files | map(.file) | join(" ")')" = a.test.sh ] \
+    || fail "the failed test step does not name a.test.sh alone: $(st 'select(.step == "test" and .result == "fail") | .failures | tojson')"
   for i in 1 2 3 4; do
     k=$(sed -n "${i}p" <<<$'build\n# Reviewer findings\n# The changed tests fail\n# Landing conflict')
     [ "$i" = 1 ] || grep -q "^$k" "$STUB/prompt.$i" || fail "session $i is not the $k session"
