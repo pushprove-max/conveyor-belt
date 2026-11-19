@@ -710,7 +710,7 @@ control_actions() {
 }
 
 ( control_part actions "${PORTS[9]}"
-control_actions 'rules P1=off followups=on area:infra=on' 'rules P3=off' 'rules P3=on' 'rules team/billing=off' 'rules visible=off' 'rules visible=on' 'rules split=shadow' 'rules split=on' 'model claude claude-opus-5-5 high' 'model claude claude-opus-5-5' 'model default' 'reviewer codex gpt-6.1-sol low' 'reviewer default' 'start held' 'start queue' \
+control_actions 'rules P1=off followups=on area:infra=on' 'rules P3=off' 'rules P3=on' 'rules team/billing=off' 'rules visible=off' 'rules visible=on' 'rules split=shadow' 'rules split=on' 'rules pick=shadow' 'model claude claude-opus-5-5 high' 'model claude claude-opus-5-5' 'model default' 'reviewer codex gpt-6.1-sol low' 'reviewer default' 'start held' 'start queue' \
   'reviewer opencode openrouter/vendor/model-1:free high' 'judge opencode openrouter/vendor/model-1' 'model claude opus[1m]' 'model codex gpt-6.1-sol' \
   'judge on' 'judge off' 'judge claude claude-opus-5-5 high' 'judge default' 'judge always security data' 'judge always' \
   'account second' 'account default' 'account' 'review-account first' 'review-account' 'dep-guard off' 'dep-guard on' 'push-check off' 'push-check on' 'force 12' 'land-as pr' 'land-as main' 'pr-merge idle' 'pr-merge release' 'pr-merge button' 'onboarded build review-account dep-guard'
@@ -1121,7 +1121,7 @@ pass=$((pass + 4))
 for b in "$(act frob)" "$(act 'pause;rm')" "$(act pause now)" "$(act cap 101)" "$(act cap 0)" "$(act cap 08)" "$(act cap)" "$(act guard 0)" "$(act guard 101)" \
   "$(act hold)" "$(act hold x)" "$(act hold '12; rm -rf /')" "$(act hold 012)" "$(act release -1)" "$(act order 12 '$(id)')" \
   "$(act start)" "$(act start maybe)" "$(act start held queue)" "$(act start 'held;id')" \
-  "$(act rules)" "$(act rules P4=off)" "$(act rules P1=maybe)" "$(act rules 'area:a b=off')" "$(act rules split=maybe)" "$(act rules 'split=on;id')" \
+  "$(act rules)" "$(act rules P4=off)" "$(act rules P1=maybe)" "$(act rules 'area:a b=off')" "$(act rules split=maybe)" "$(act rules pick=maybe)" "$(act rules 'split=on;id')" \
   "$(act model)" "$(act model --help)" "$(act model claude m bogus)" "$(act model default high)" "$(act model claude m high x)" "$(act reviewer codex 'm;id')" \
   "$(act model claude-opus-5-5)" "$(act model claude-opus-5-5 high)" "$(act model nosuch m)" "$(act model claude --help)" "$(act model claude '')" \
   "$(act reviewer opencode 'openrouter/m;id')" "$(act reviewer opencode '/m')" "$(act judge opencode 'p/m $(id)')" "$(act judge opencode 'p/m x')" \

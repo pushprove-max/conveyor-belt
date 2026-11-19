@@ -4,8 +4,10 @@
 # With a branch and its tip (land-branch) the card skips the build: that commit is merged into the worktree, staged
 # and uncommitted, in place of a session's work. Issue 0 is a branch that names no issue: branchissue() stands in.
 # Before the worktree, the rule Split large issues checks the card's issue (splitcheck(), lib/slices.sh): an issue it
-# splits ends its card there, closed, its slices filed.
+# splits ends its card there, closed, its slices filed. Then the rule Pick settings records the card's group and
+# builder choice on each of its lines from there on (modelpick(), lib/modelpick.sh).
 . "$HERE/lib/slices.sh" || exit 1
+. "$HERE/lib/modelpick.sh" || exit 1
 began() { # <card> <issue> <what begins>
   local e=''
   switchcode "$1" "$3"; rm -f "$CARDS/$1.firsttry" "$CARDS/$1.firsttry.new"
@@ -129,6 +131,9 @@ card() { # <card> <issue> [<branch> <tip>]
   # shellcheck disable=SC2034 # SEATCARD is read by seat() in lib/control.sh
   local SEATCARD=$n # every step of this card, its split check too, runs on the seats the control record keeps for its issue (seat(), lib/control.sh)
   [ -n "$br" ] || [ "$n" = 0 ] || splitcheck "$c" "$n" || return 0
+  # shellcheck disable=SC2034 # PICK and PICKCARD are read by line() in lib/records.sh
+  local PICK='' PICKCARD='' # the card's pick (modelpick(), lib/modelpick.sh), which line() puts on each of its lines
+  [ -n "$br" ] || [ "$n" = 0 ] || modelpick "$c" "$n"
   err=$(git worktree add -q --detach "$wt" "refs/heads/$BRANCH" 2>&1) || { block "$c" "$n" "$wt" "worktree: $err"; return; }
   [ -z "$br" ] || err=$(git -C "$wt" merge -q --squash "$tip" 2>&1) \
     || { block "$c" "$n" "$wt" "worktree: branch $br does not merge into main as it stands; rebase it on main and land it again: ${err:0:400}"; return; }

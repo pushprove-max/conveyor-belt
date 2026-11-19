@@ -102,13 +102,24 @@ linesum() { # <records file> <kept> <to> <filter>
   { printf '%s %s %s\n' "$size" "$cs" "$k" && cat "$3"; } > "$2.$$" 2>/dev/null && mv -f "$2.$$" "$2" || rm -f "$2.$$"
 }
 append() { printf '%s\n' "$1" | stdb append cards; }
+# The pick a card's own lines hold (the newest), for a line written outside card(), which holds none: a card stopped
+# (stopped(), lib/session.sh) or blocked by the loop when its process was gone or stuck (block(), lib/push.sh). Sets
+# PICK and PICKCARD, which the caller declares local; a card with no pick leaves them as they were.
+heldpick() { # <card>
+  local p
+  p=$(stdb ask card "$1" 2>/dev/null | jq -cs '[.[] | objects | .pick | objects] | last // empty' 2>/dev/null)
+  [ -z "$p" ] || { PICK=$p; PICKCARD=$1; }
+}
 # One step = one line, of no fixed size (a tail can hold many long lines), appended under the lock (locked, above),
 # so another writer's line never lands inside it.
 line() { # <card> <issue> <step> <result> [extra json]
   # The extra fields come on stdin, not as an argument: a tail of long lines can be more than one argument can hold.
-  local x=${5:-}; [ -n "$x" ] || x='{}'
-  printf '%s' "$x" | jq -c --arg c "$1" --argjson i "$2" --arg s "$3" --arg r "$4" --arg repo "$REPO" \
+  # A line of the card whose pick card() holds (PICK, PICKCARD: modelpick(), lib/modelpick.sh) carries it.
+  local x=${5:-} p=null; [ -n "$x" ] || x='{}'
+  [ -z "${PICK:-}" ] || [ "${PICKCARD:-}" != "$1" ] || p=$PICK
+  printf '%s' "$x" | jq -c --arg c "$1" --argjson i "$2" --arg s "$3" --arg r "$4" --arg repo "$REPO" --argjson p "$p" \
     '. as $x | {card:$c,issue:$i,step:$s,time:(now|todate),tokens:{claude:0,codex:0},result:$r,sha:"",reason:"",repo:$repo} * $x | .reason |= .[0:1500]
+     | if $p != null then .pick = $p else . end
      | if has("tail") then .tail |= '"($TAIL)"' else . end'
 }
 # A line's tail (a blocked line's output, a NO-GO review's findings): its last 60 lines, each whole, so no line loses what it says and identical lines stay

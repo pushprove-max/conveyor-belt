@@ -333,6 +333,8 @@ stopped() { # <card> <issue>
   local wt=$CARDS/$1 last of o f m e s x roll run='' ft=$CARDS/$1.firsttry
   last=$(stdb ask last "$1" 2>/dev/null)
   [ "$(jq -r '.step' <<<"${last:-null}" 2>/dev/null)" = start ] || return 0
+  # shellcheck disable=SC2034 # PICK and PICKCARD are read by line() in lib/records.sh
+  local PICK='' PICKCARD=''; heldpick "$1" # the stopped line carries the card's pick (heldpick(), lib/records.sh)
   of=$(jq -r .of <<<"$last"); m=$(jq -r '.model // ""' "$wt.live" 2>/dev/null); e=''
   s=$(jq -r '(now - (.time | fromdate)) | floor' <<<"$last" 2>/dev/null) || s=0
   # Stopped in the pause before a review ran again (no live file then), or before its second attempt wrote anything:

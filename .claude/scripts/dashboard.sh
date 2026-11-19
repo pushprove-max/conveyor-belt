@@ -105,7 +105,8 @@
 #           card of that record that lands them) and research (branch, run); a lane the record does not name is null.
 #   cost    todayUsd, weekUsd, perLandedUsd (the priced steps' dollars), todayLeftOut, weekLeftOut, perLandedLeftOut (the
 #           steps each leaves out for having no price), unpriced (those of the 7 days, each with why), landedAfter,
-#           unpricedSteps, cards (today's, each with its usd; a restarted card's row with runs, its dollars every run's), sessions
+#           unpricedSteps, cards (today's, each with its usd; a restarted card's row with runs, its dollars every run's),
+#           picks (the rule Pick settings' cards by group and builder choice, each row with its repo), sessions
 #           (every session on this machine: todayUsd, weekUsd, at list prices).
 #   board   the Board, of the record on host.json's main (repo null when none is), with repos (every record's repo, in
 #           host.json's order) and others ({repo: the same part, of that record} for every other record): state (running, paused,
@@ -890,7 +891,10 @@ PANELS_JQ='
            # Every card with a step in the 7 days, the rows of each record in its own order (the one worked on last
            # first); null when the snapshot of a record is from before it carried the rows.
            perCard: (if any($R[]; .snap.cost.cards | type != "array") then null
-             else [$R[] as $r | $r.snap.cost.cards[] | tag($r) | {repo, card, issue, title, url, state, runs, todayUsd: .today, weekUsd: .week} + (if .name then {name} else {} end)] end)} end),
+             else [$R[] as $r | $r.snap.cost.cards[] | tag($r) | {repo, card, issue, title, url, state, runs, todayUsd: .today, weekUsd: .week} + (if .name then {name} else {} end)] end),
+           # The cards of the rule Pick settings by group and builder choice, the rows of each record with its repo; null when the
+           # snapshot of a record is from before it carried them.
+           picks: (if any($R[]; .snap.cost.picks | type != "array") then null else [$R[] as $r | $r.snap.cost.picks[] | {repo: $r.repo} + .] end)} end),
         cardsError: $cerr,
         sessions: (if $lim.limit == null then null else {todayUsd: $lim.limit.today.spentUsd, todayComplete: ($lim.limit.today.complete // false), weekUsd: ($lim.limit.cost.week // null)} end),
         sessionsError: $lim.error}} end),

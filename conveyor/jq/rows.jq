@@ -58,6 +58,9 @@ map(select(.step != "push")) | group_by(.card) | map(. as $all
              # Its split line (splitcheck(), lib/slices.sh): {result: kept or split, slices: how many the judge gave,
              # filed: the slices filed (the rule On), else null}; null for a card the rule did not check.
              split: (map(select(.step == "split")) | last | if . == null then null else {result, slices: (.split.slices // [] | length), filed: (.split.filed // null)} end),
+             # Its pick (modelpick(), lib/modelpick.sh): the one its last line with a pick holds; null for a card the
+             # rule Pick settings did not pick.
+             pick: (map(.pick | objects) | last // null),
              log: [range(0; $all | length) as $i | $all[$i] | {step, of, result, time, counts, created, sec: (if .step == "pushed" then .sec else null end), pr: (if .step == "pushed" then .pr else null end), failed: (if .step == "blocked" then .spent.step else null end), n: (if .step == "filed" then .followups | length else null end),
                # An issue line, a test line and a review that failed, a blocked line (its sentence) and a fix line (what started it) keep their reason; a blocked line and a failed test line their output and a NO-GO review its findings (tail); a failed test line its failing files (failures).
                reason: (if (.step == "issue" and .result != "ok") or (.step == "test" and .result != "pass") or (.step == "review" and (.result | IN("fail", "stopped")))

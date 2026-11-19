@@ -202,7 +202,10 @@
 #   only when the price table cannot be run. cards, one row for every card with a step that ended in the 7
 #   days, the one worked on last first: card, issue, title, state (on the belt, blocked, landed, closed or retried)
 #   and its usd of today and of the 7 days. A card landed or blocked on an earlier day is in it, so is a retried one.
-#   A card restarted is one row, of its newest run: runs (how many), its usd those of every run's steps.
+#   A card restarted is one row, of its newest run: runs (how many), its usd those of every run's steps. picks: the
+#   cards the rule Pick settings picked, on any day, one row a group and builder choice ({group, model, effort,
+#   cards, landed, usd, firstTry, reviews, open}; a card's earlier runs count with it; usd null when a step of them
+#   has no price).
 # A day is this machine's local day (day names today). Dollars are list prices from the one price table
 # (dashboard_limit.py, `cards`; the pack's prices win over its rows), at the models that ran the step (its session's result, else the model its line
 # names), never at the models in force now: a step whose line names no model is unpriced. A step that table cannot
@@ -877,7 +880,19 @@ snapshot() (
          cards: ([$all[0][] | select(.card | IN($later[]) | not) | [.runSteps[] | select((.time | day) >= $since)] as $s | select($s | length > 0)
              | {card, issue, title, state: (if .x.retried then "retried" elif .result == "" then "on the belt" else .step end), runs: .metrics.runs,
                 today: ($s | map(select((.time | day) == $day)) | usd), week: ($s | usd), last: ($s | map(.time) | max)}]
-           | sort_by(.last) | reverse | map(del(.last)))}),
+           | sort_by(.last) | reverse | map(del(.last))),
+         # The cards the rule Pick settings picked (x.pick, rows.jq), by group and builder choice, on any day: one a
+         # card that no later run of its issue follows, with the newest pick of its runs (an earlier run, blocked with
+         # the rule off, counts with it): cards, landed (landed or closed, as totals() counts them), usd (every step of
+         # their runs, blocked, stopped and retried ones too; null when one step has no price), firstTry (landed ones
+         # with no earlier run), reviews (the review rounds of the runs of the landed ones) and open (on the belt, or
+         # blocked, and not retried: a card that `control stop` or `retry` moved out is not open).
+         picks: ([$all[0][] | select(.card | IN($later[]) | not) | (($runsOf[.card] // [.]) | map(.x.pick | objects) | last) as $p
+             | select($p != null) | .pick = $p] | group_by(.pick | [.group, .choice.model, .choice.effort])
+           | map(.[0].pick as $p | map(select((.step | IN("landed", "closed")) and .x.blockedAt == null)) as $l
+             | {group: $p.group, model: $p.choice.model, effort: $p.choice.effort, cards: length, landed: ($l | length), usd: ([.[].runSteps[]] | usd),
+                firstTry: ($l | map(select(.metrics.runs == 1)) | length), reviews: ($l | map(.runReviews) | add // 0),
+                open: (map(select((.x.retried | not) and (.result == "" or .step == "blocked"))) | length)}))}),
        metrics: {
          today: totals([$all[0][] | select(.x.endAt != null and (.x.endAt | day) == $day)]; [$smp[] | select((.time | day) == $day)]; [$pu[] | select((.time | day) == $day)]; $every; $waits; $t0d; $nowt),
          week: totals([$all[0][] | select(.x.endAt != null and (.x.endAt | day) >= $since)]; [$smp[] | select((.time | day) >= $since)]; [$pu[] | select((.time | day) >= $since)]; $every; $waits; $t0w; $nowt),

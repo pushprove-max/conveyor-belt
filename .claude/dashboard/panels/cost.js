@@ -3,7 +3,9 @@
 // sessions | null, sessionsError}. cards is {todayUsd, weekUsd, perLandedUsd, landedAfter, unpricedSteps, perCard: [each
 // card worked on in the 7 days, landed, blocked or still on the belt, with its todayUsd and weekUsd; a restarted card is
 // one row with runs, its dollars every run's] | null when the
-// host gave no such rows, todayLeftOut, weekLeftOut, perLandedLeftOut, unpriced: [{repo, card, issue, step, time, why}]};
+// host gave no such rows, todayLeftOut, weekLeftOut, perLandedLeftOut, unpriced: [{repo, card, issue, step, time, why}],
+// picks: [the rule Pick settings' cards, one row a group and builder choice: {repo, group, model, effort, cards, landed,
+// usd (null when a step has no price), firstTry, reviews, open}] | null};
 // sessions is every session on this machine ({todayUsd, weekUsd}). The three figures are the priced steps' dollars,
 // and the steps they leave out are listed with why; a host from before that gives null for a figure with an
 // unpriced step, shown as "not priced". A card's own sum with an unpriced step in it is null, never a part sum.
@@ -91,6 +93,26 @@ window.DASH_APP.panel({
         const apart = ctx.sorted();
         const byCost = c.perCard.slice().sort((a, b) => (apart && a.repo !== b.repo ? (a.repo < b.repo ? -1 : 1) : usd(b) - usd(a)));
         out.push(h('h3', 'group-title', 'Per card, last 7 days'), ul, ctx.more('per-card', byCost, (xs) => ctx.list(ul, xs, (x) => `${x.repo}/${x.card}`, () => h('li', 'row'), fill)));
+      }
+      // The rule Pick settings: one row a group and builder choice, of every card it picked. The spend is every step of
+      // those cards and of the earlier blocked, stopped and retried cards of their issues, over the cards that landed; one step with no price makes it unknown.
+      if (Array.isArray(c.picks) && c.picks.length) {
+        const t = h('table', 'tests-table picks'), head = h('tr');
+        ['Project', 'Group', 'Builder', 'Cards', 'Spend per landed card', 'Landed with no retry', 'Review rounds per landed card', 'Still open']
+          .forEach((x) => head.append(h('th', null, x)));
+        t.append(head);
+        const share = (n, of) => (of > 0 ? `${Math.round((n / of) * 100)}%` : 'none landed');
+        c.picks.forEach((x) => {
+          const tr = h('tr');
+          tr.dataset.group = x.group;
+          const spend = x.usd === null ? 'unknown: a step has no price' : x.landed > 0 ? ctx.money(x.usd / x.landed) : 'none landed';
+          [x.repo, x.group, `${ctx.modelName(x.model)}${x.effort ? ` ${x.effort}` : ''}`, String(x.cards), spend, share(x.firstTry, x.landed),
+            x.landed > 0 ? (x.reviews / x.landed).toFixed(2) : 'none landed', String(x.open)].forEach((v) => tr.append(h('td', null, v)));
+          t.append(tr);
+        });
+        const wrap = h('div', 'tests-scroll'); // one column wide: the table scrolls across
+        wrap.append(t);
+        out.push(h('h3', 'group-title', 'Pick settings, by group and builder'), wrap);
       }
     } else out.push(ctx.unread(`The Board could not read the card costs, so it shows none. ${ctx.retry}`, d.cardsError), ctx.restartButton());
     if (d.sessions) {

@@ -50,8 +50,13 @@ its own, and the Board's Rules tab sets them in its Judge row.
   review: keep, or keep the core change and move the rest into follow-up slices. Shadow records the answer on the
   card's `grown` line. On files the slices, drops their files from the change in one fix session, and goes on
   ([Split large issues](../docs/configuration.md#split-large-issues)).
+- `pick`: the rule Pick settings, `off`, `shadow` or `on` (`conveyor.sh control rules pick=<off|shadow|on>`). After
+  the split check and before the build, code puts each card in a group and records the builder that the rule
+  chooses for it, as `pick` on each step line of the card from then on, up to its end. The choice is the project's builder, or the
+  card's own builder when you set it (`control card`). In Shadow and On, the card builds on its builder as before
+  ([Pick settings](../docs/configuration.md#pick-settings)).
 
-Every rule is on by default, except `push` and `visible`, which are off, and `split`, which is `shadow`. An issue a rule excludes is left out of the pick and listed as skipped, with the rule
+Every rule is on by default, except `push` and `visible`, which are off, `split`, which is `shadow`, and `pick`, which is `off`. An issue a rule excludes is left out of the pick and listed as skipped, with the rule
 that skips it. A record saved before a rule existed reads that rule at its default.
 
 `conveyor.sh control land-as main|pr` sets Land as (`landAs` in the record; null, the default, is the pack's

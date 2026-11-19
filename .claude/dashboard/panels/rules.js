@@ -15,7 +15,8 @@
 // Idle, the record's prMerge or else the pack's; disabled the same way for a record with no prMerge), Test before a push (On or Off: the
 // record's pushCheck, else the pack's push.check; disabled the same way for a snapshot with no pushCheck), Visible changes need your yes (On or
 // Off; disabled the same way for a record with no rules.visible), Split large issues (Off, Shadow or On; disabled the same way for a
-// record with no rules.split), Cores kept for you (shown,
+// record with no rules.split), Pick settings (Off, Shadow or On; disabled the same way for a record with no rules.pick),
+// Cores kept for you (shown,
 // not set here: the machine's reserveCores, the cores it keeps and the test slots left, or why the machine cannot keep
 // cores), one row a standing kind of
 // routine yes the Foreman takes without asking (the pack's auto.standing: Fix you asked for, Review follow-up, Release
@@ -273,7 +274,7 @@
   // A change in words, for the head.
   function words(action, args) {
     const a = list(args);
-    if (action === 'rules') return a.map((x) => { const [k, o] = x.split('='); return isArea(k) ? `${o === 'off' ? 'never build' : 'build'} ${k}` : `${k === 'followups' ? 'Follow-ups' : k === 'push' ? 'Push when a card lands' : k === 'visible' ? 'Visible changes need your yes' : k === 'split' ? 'Split large issues' : k} ${o}`; }).join(', ');
+    if (action === 'rules') return a.map((x) => { const [k, o] = x.split('='); return isArea(k) ? `${o === 'off' ? 'never build' : 'build'} ${k}` : `${k === 'followups' ? 'Follow-ups' : k === 'push' ? 'Push when a card lands' : k === 'visible' ? 'Visible changes need your yes' : k === 'split' ? 'Split large issues' : k === 'pick' ? 'Pick settings' : k} ${o}`; }).join(', ');
     if (action === 'cap') return a[0] === 'off' ? 'at once: the default' : `at once ${a[0]}`;
     if (action === 'guard') return a[0] === 'off' ? 'pause at: off' : `pause at ${a[0]}%`;
     if (action === 'model' || action === 'reviewer') return `${action === 'model' ? 'builder' : 'reviewer'} ${a[0] === 'default' ? 'back to the default' : a.join(' ')}`;
@@ -306,12 +307,12 @@
       r.rules = r.rules && typeof r.rules === 'object' ? r.rules : {};
       a.forEach((x) => {
         const [key, o] = String(x).split('=');
-        if (key === 'split') { r.rules.split = o; return; } // Split large issues keeps its word: off, shadow or on
+        if (key === 'split' || key === 'pick') { r.rules[key] = o; return; } // Split large issues and Pick settings keep their word: off, shadow or on
         if (!isArea(key)) { r.rules[key] = o === 'on'; return; }
         const never = list(r.rules.never).filter((y) => y !== key);
         r.rules.never = o === 'off' ? never.concat([key]) : never;
       });
-      return [r, isArea(k) ? 'never' : k === 'push' || k === 'visible' || k === 'split' ? k : 'build'];
+      return [r, isArea(k) ? 'never' : k === 'push' || k === 'visible' || k === 'split' || k === 'pick' ? k : 'build'];
     }
     if (action === 'cap' || action === 'guard') { r[action] = a[0] === 'off' ? null : Number(a[0]); return [r, action]; }
     if (action === 'judge' && (a[0] === 'on' || a[0] === 'off')) { r.judgeOn = a[0] === 'on'; return [r, 'judge']; }
@@ -994,6 +995,18 @@
       splitTo('off', 'Off'), splitTo('shadow', 'Shadow'), splitTo('on', 'On'),
       splitAt === null ? newer(false) : splitAt === 'shadow' ? h('span', 'board-from rules-off', 'shadow: the verdict is recorded, and the issue is built whole')
         : splitAt === 'off' ? offLine(false, 'no issue is checked') : null));
+    // Pick settings: Shadow records each card's group and the builder the rule chooses, and builds on the builder as
+    // before; Off (the default) records none. An engine whose record has no rules.pick is sent none of them.
+    const pickAt = ['off', 'shadow', 'on'].includes(r.pick) ? r.pick : null;
+    const pickTo = (v, label) => {
+      const b = choice(label, `pick-${v}`, `Pick settings: ${label.toLowerCase()}`, pickAt === v, () => { if (pickAt !== v) send('rules', [`pick=${v}`], null, ['rules', [`pick=${pickAt}`]]); });
+      b.disabled = pickAt === null;
+      return b;
+    };
+    el.append(row('pick', 'Pick settings', 'code puts each card in a group before its build and records the builder it chooses for it; a builder you set for a card always wins',
+      pickTo('off', 'Off'), pickTo('shadow', 'Shadow'), pickTo('on', 'On'),
+      pickAt === null ? newer(false) : pickAt === 'off' ? offLine(false, 'no pick is recorded')
+        : h('span', 'board-from rules-off', `${pickAt}: the pick is recorded, and the card builds on its builder as before`)));
     // Cores kept for you: the machine's (the host file's reserveCores), shown here and set in the host file.
     const co = S.cores, slots = co && typeof co.slots === 'number' ? `${co.slots} test slot${co.slots === 1 ? '' : 's'}` : 'test slots not read';
     el.append(row('cores', 'Cores kept for you', 'card sessions and tests never run on these cores, for every project (the host file\'s reserveCores)',

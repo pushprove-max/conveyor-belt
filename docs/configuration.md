@@ -291,6 +291,29 @@ Done-when items of its own and the files of the change that it takes. Each file 
 
 Conveyor does not count the files of a follow-up or of a fix card that has no issue.
 
+## Pick settings
+
+The rule **Pick settings** on the Rules tab records a group and a builder for each card. It has three settings: Off,
+Shadow and On. Off is the default. `conveyor.sh control rules pick=off`, `pick=shadow` or `pick=on` also sets it.
+
+Conveyor picks one time for each card, after the split check and before the build. Each slice of a split issue gets
+its own pick. Fix cards that have no issue get no pick. Code puts the card in a group, and no model is asked:
+
+- **small** or **large**: small when the issue is under all the `split` limits in `.conveyor/project.json`.
+- **pipeline**, **docs** or **code**: pipeline when the issue names a path in `pipelineFiles`. Else docs when it has
+  the label `documentation`, or when each path that it names is a Markdown file or a file under `docs/`. Else code.
+
+The group is the two words, for example "small docs". The choice is the project's builder (Builder on the Rules tab).
+When you set the builder of a card (`conveyor.sh control card <issue> builder <model>`), the choice is your setting,
+and the pick says that you chose it. Each step line of the card from then on, up to its end, has a `pick` field:
+`group`, `choice` (model and effort), `by` (`owner` or `auto`), `trial` and `mode`. A card that starts again for the same issue, after a retry
+or a stop, keeps the pick that the issue had.
+
+- **Off**: Conveyor records no pick.
+- **Shadow** and **On**: Conveyor records the pick, and the card builds on its builder as before.
+
+The Cost panel on the Board shows a table of the picked cards, one row for each group and builder.
+
 ## The project's checks
 
 Set `test.checkCommand` in `.conveyor/project.json` to a command that runs your project's checks, for example a lint

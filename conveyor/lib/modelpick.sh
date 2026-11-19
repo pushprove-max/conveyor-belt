@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: Apache-2.0
+# The rule Pick settings (the control record's rules.pick: off, shadow or on; off by default). card() asks
+# modelpick() once, after the split check and before the worktree, for an issue of its own (not a main-red fix card,
+# issue 0, nor a branch); the slices of a split issue are issues of their own, so each gets its own pick. Code
+# decides, with no model call: the card's group, from its issue, and the builder the rule chooses for that group. No
+# trial runs yet, so the choice is the project's builder; when the owner set the issue's builder (`control card
+# <issue> builder`), the choice is the owner's, by "owner". In shadow and on alike the pick changes nothing about
+# which model builds the card: seat() gives the card its builder, as with the rule off.
+# The group is "<size> <kind>". size is small when the issue is under each of the pack's split thresholds (SPLITSIZE
+# and split.doneWhen, split.files, split.areas, split.chars, as splitcheck() measures it, lib/slices.sh), else large.
+# kind is pipeline when a path it names is one of the pack's pipelineFiles or a file under one (onpipeline(),
+# lib/followups.sh); else docs when it has the label documentation, or names files and each is a Markdown file or a
+# file under docs/; else code.
+# The pick goes on each line card() writes from then on, up to its end (PICK and PICKCARD, which line() reads,
+# lib/records.sh; a stopped or blocked line the loop writes outside card() takes it from the card's lines,
+# heldpick(); the push's lines, written after the card has ended, have none):
+# {group, choice: {model, effort} of the builder, by: owner or auto, trial: false (no trial runs yet), mode: the
+# rule, shadow or on}. A later card of the same issue (a retry, or a stop and a new pick) reuses the newest pick that
+# a line of the issue holds, in the card records or the retried lines, so a restart keeps its group and choice; only
+# the owner's setting is put over it, as that always wins (and a pick the owner had set, whose setting is gone since,
+# takes the rule's choice again). An issue that cannot be read gets no pick, and the card goes on.
+# shellcheck disable=SC2034 # PICK and PICKCARD are card()'s, read by line() in lib/records.sh
+modelpick() { # <card> <issue>: sets card()'s PICK and PICKCARD
+  local c=${CARDCTL:-} rule old b by=auto issue size t1 t2 t3 t4 pipe group
+  [ -n "$c" ] || c=$(ctl 2>/dev/null) || return 0
+  rule=$(jq -r '.rules.pick // "off"' <<<"$c" 2>/dev/null)
+  [ "$rule" = shadow ] || [ "$rule" = on ] || return 0
+  b=$(seat builder "$c" | jq -c '{model, effort}') && [ -n "$b" ] || { echo "conveyor: card $1: no builder to record in its pick" >&2; return 0; }
+  ! jq -e --arg n "$2" '.cards[$n].builder | objects' <<<"$c" >/dev/null 2>&1 || by=owner
+  old=$({ stdb ask issue retried "$2" -- issue cards "$2"; } 2>/dev/null | jq -cs --argjson n "$2" \
+    '[.[] | objects | select(.issue == $n and (.pick | type) == "object")] | sort_by(.time) | last | .pick // empty' 2>/dev/null)
+  if [ -n "$old" ]; then
+    PICK=$(jq -c --arg m "$rule" --arg by "$by" --argjson b "$b" '.mode = $m | if $by == "owner" or .by == "owner" then .by = $by | .choice = $b else . end' <<<"$old") || return 0
+    PICKCARD=$1; return 0
+  fi
+  issue=$(gh issue view "$2" --json number,title,body,labels 2>/dev/null) && jq -e 'objects | .number' <<<"$issue" >/dev/null 2>&1 || return 0
+  size=$(jq -c --arg area "$AREA" "$SPLITSIZE" <<<"$issue") && packget split.doneWhen t1 split.files t2 split.areas t3 split.chars t4 pipelineFiles pipe || return 0
+  group=$(jq -r --argjson t "[$t1,$t2,$t3,$t4]" 'if (.doneWhen | length) < $t[0] and (.files | length) < $t[1] and .areas < $t[2] and .chars < $t[3] then "small" else "large" end' <<<"$size") || return 0
+  if [ -n "$(onpipeline "$(jq -r '.files | join(" ")' <<<"$size")" <<<"$pipe")" ]; then group+=' pipeline'
+  elif jq -e --argjson s "$size" 'any(.labels[]?; .name == "documentation") or ($s.files | length > 0 and all(.[]; test("\\.md$") or startswith("docs/")))' <<<"$issue" >/dev/null; then group+=' docs'
+  else group+=' code'; fi
+  PICK=$(jq -cn --arg g "$group" --argjson b "$b" --arg by "$by" --arg m "$rule" '{group: $g, choice: $b, by: $by, trial: false, mode: $m}') || return 0
+  PICKCARD=$1
+}

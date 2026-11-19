@@ -13,6 +13,7 @@
     "push": false,
     "visible": false,
     "split": "shadow",
+    "pick": "off",
     "never": []
   },
   "model": {

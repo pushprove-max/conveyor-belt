@@ -634,6 +634,8 @@ clean() { tidy "$1"; rm -f "$1".out "$1".err "$1".review "$1".test "$1".withdraw
 block() { # <card> <issue> <worktree> <reason> [post the reason on the issue whatever the review holds]
   local k=$ST/kept/$1 f kept='' left='' stay='' hold='' patch='' reason=${4%%$'\n'*} tail='' shown body d size=null sp named=null err ws=null
   [ -z "${waitsec+x}" ] || ws=$((waitsec + ${mainsec:-0}))
+  # Blocked by the loop, outside card() (its process gone or stuck): the blocked line carries the card's pick too.
+  local PICK=${PICK:-} PICKCARD=${PICKCARD:-}; [ "$PICKCARD" = "$1" ] || heldpick "$1"
   [[ $4 != *$'\n'* ]] || tail=$(tail -n 60 <<<"${4#*$'\n'}")
   # Its claim on its files goes first: a card waiting on them goes on now, not after the comment and the evidence.
   rm -f "$3.claim" "$3.claim.new" "$3.cpatch" "$3.cpatch.new"

@@ -337,6 +337,15 @@ the Judge would split a large issue into, and builds the issue whole. The tab sa
 and the issue is built whole". On files the slices as follow-ups and as sub-issues of the issue, and holds the issue
 as their umbrella until all its slices are closed. Off checks no issue ([Split large issues](configuration.md#split-large-issues)).
 
+**Pick settings** has three settings per project: Off, Shadow and On. Off is the default. Shadow and On record the
+group of each card and the builder that the rule chooses for it, and the card builds on its builder as before. The
+tab says "shadow: the pick is recorded, and the card builds on its builder as before". A builder that you set for a
+card always wins. The **Cost** panel then shows **Pick settings, by group and builder**: one row for each group and
+builder, with its cards, the spend per landed card, the share of cards that landed with no retry, the review rounds
+per landed card and the cards still open. The spend is all the steps of those cards, also the steps of the earlier
+blocked, stopped and retried cards of the same issue. A card is still open when it is on the belt or blocked; a card
+that you retried or stopped is not. When one of the steps has no price, the spend is "unknown" ([Pick settings](configuration.md#pick-settings)).
+
 The **... without asking** rules turn each standing kind of yes on or off ([Standing yes](foreman.md#standing-yes)).
 All are Off until you turn them on. **Review retry without asking** On: the Foreman's watcher tries again each card
 that its review blocked, and the Foreman gets no wake for it. A retry that fails still wakes the Foreman, with the

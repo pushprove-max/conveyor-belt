@@ -609,7 +609,8 @@ P=$(snap '{"needsYou": {"waiting": [{"card": "c1-12", "issue": 12, "title": "But
   "cost": {"today": 3.75, "week": 10, "perLanded": 2.5, "landedAfter": {"1": 0, "2": 1, "3": 0, "more": 0}, "unpricedSteps": 0,
     "cards": [{"card": "c3-801", "issue": 801, "title": "Rebuild the dashboard", "state": "on the belt", "today": 1.25, "week": 1.25},
       {"card": "c0-6", "issue": 6, "title": "Landed days ago", "state": "landed", "today": 0, "week": 6.25},
-      {"card": "c2-13", "issue": 13, "title": "Broken", "state": "blocked", "today": 2.5, "week": null}]}}')
+      {"card": "c2-13", "issue": 13, "title": "Broken", "state": "blocked", "today": 2.5, "week": null}],
+    "picks": [{"group": "small docs", "model": "claude-x", "effort": "medium", "cards": 2, "landed": 1, "usd": 5, "firstTry": 0, "reviews": 2, "open": 0}]}}')
 C=$(snap '{"belt": [{"card": "c4-5", "issue": 5, "title": "Plugin thing", "step": "build", "review": null, "of": 3, "stepAt": "'"$(ago 60)"'", "model": "claude-x", "tokens": {"claude": 1, "codex": 0}, "usd": 0.25}],
   "queue": {"next": [{"issue": 9, "title": "CD next", "priority": "P3", "followup": false, "retried": true}]},
   "open": {"count": 3, "split": {"queued": 1, "you": 1, "labelOrRule": 0, "belt": 1}, "held": [{"issue": 10, "title": "CD held", "priority": "P3", "followup": false, "labels": [], "created": null, "parent": null, "reasons": [{"kind": "you"}]}]},
@@ -618,7 +619,8 @@ C=$(snap '{"belt": [{"card": "c4-5", "issue": 5, "title": "Plugin thing", "step"
   "landed": [{"card": "c'"$TODAY"'T090000-4", "issue": 4, "title": "CD fixed already", "step": "closed", "time": "'"$TODAY_ISO"'T09:10:00Z", "usd": 0.5, "reviews": 1, "followups": [], "sha": "", "pushed": null}],
   "health": {"loop": false, "builderCap": 2, "unpushed": [{"card": "c9-2", "issue": 2, "sha": "def", "since": "'"$(ago 3600)"'"}]},
   "cost": {"today": 0.5, "week": 4, "perLanded": 0.5, "landedAfter": {"1": 3, "2": 0, "3": 0, "more": 0}, "unpricedSteps": 1,
-    "cards": [{"card": "c8-4", "issue": 4, "title": "CD fixed already", "state": "retried", "today": 0.5, "week": 0.5}]},
+    "cards": [{"card": "c8-4", "issue": 4, "title": "CD fixed already", "state": "retried", "today": 0.5, "week": 0.5}],
+    "picks": [{"group": "small code", "model": "claude-x", "effort": "medium", "cards": 1, "landed": 1, "usd": null, "firstTry": 1, "reviews": 1, "open": 0}]},
   "release": {"tag": "v1.0.0", "count": 2, "commits": [], "next": "1.1.0", "notes": true, "head": "abc"},
   "suites": [{"kind": "release", "version": "1.1.0", "sha": "abc", "ended": null, "state": "running", "done": 3, "failed": 1, "cases": ["x: y"]}]}')
 PU=https://github.com/example/sample-project/issues CU=https://github.com/example/WidgetShop/issues
@@ -1111,6 +1113,8 @@ q '.panels.board.data | .checkRuns == [{error: "check run: progress unreadable: 
 q '.panels.cost.data.cards | .todayUsd == 4.25 and .weekUsd == 14 and .perLandedUsd == 1 and .landedAfter == {"1": 3, "2": 1, "3": 0, more: 0} and .unpricedSteps == 1' "cost sums both records; the average per landed card weighs each record by the cards it landed"
 q '.panels.cost.data.cards.perCard | map([.repo, .issue, .state, .todayUsd, .weekUsd]) == [["sample", 801, "on the belt", 1.25, 1.25], ["sample", 6, "landed", 0, 6.25], ["sample", 13, "blocked", 2.5, null], ["widgetshop", 4, "retried", 0.5, 0.5]]' "per card, the 7 days: a card landed on an earlier day and a blocked one are rows too, and an unpriced sum stays null"
 q '.panels.cost.data.cards.perCard | (.[1] | .url == "'"$PU"'/6" and .title == "Landed days ago") and (.[3].url == "'"$CU"'/4") and (.[0] | keys) == ["card", "issue", "repo", "runs", "state", "title", "todayUsd", "url", "weekUsd"]' "a per-card cost row names its repo and links to that repo's issue"
+# Bug: the rule Pick settings' rows of each record did not reach the Cost panel, or lost which project they are of.
+q '.panels.cost.data.cards.picks | map([.repo, .group, .usd]) == [["sample", "small docs", 5], ["widgetshop", "small code", null]]' "each record's pick rows reach the Cost panel with its repo"
 # The figures are the priced steps'; how many each leaves out is summed over the records, and the steps are
 # listed with why. A record from before it named them leaves the list unknown, never empty.
 q '.panels.cost.data.cards | .todayLeftOut == 0 and .weekLeftOut == 0 and .perLandedLeftOut == 0 and .unpriced == null' "no record gives the steps left out"
