@@ -141,7 +141,7 @@ test('Start: only the arms whose preflight passed can be picked; the cost before
   assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-seg button'), (b) => [b.textContent, b.getAttribute('aria-pressed')]), [['1', 'false'], ['5', 'false'], ['20', 'true'], ['50', 'false']]);
   assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-arm-pick > .board-label'), text), ['Conveyor', 'Claude, plain', 'Claude + a plugin or method', 'Codex', 'Other agents']);
   assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-arm'), (l) => [l.dataset.arm, l.querySelector('input').disabled, l.querySelector('.chip').textContent]), [
-    ['conveyor', false, 'Ready'], ['solo', false, 'Ready'], ['superpowers', true, 'Preflight failed'], ['chisle', true, 'Not checked'], ['codex-sol', false, 'Ready'], ['openhands', true, 'Not offered']]);
+    ['conveyor', false, 'Ready'], ['solo', false, 'Ready'], ['superpowers', false, 'Preflight failed'], ['chisle', false, 'Not checked'], ['codex-sol', false, 'Ready'], ['openhands', true, 'Not offered']]);
   // Bug it guards: every agent arm was said to take one session a task; a method arm's spec can set more (chisle: 4).
   assert.deepEqual(['solo', 'chisle'].map((a) => text(bp(w).querySelector(`.bench-arm[data-arm="${a}"] .bench-sub`))), ['one session a task, headless', '4 sessions a task, headless']);
   assert.deepEqual(['check-superpowers', 'check-chisle', 'check-openhands'].map((a) => (act(bp(w), a) || {}).textContent || null), ['Check again', 'Check', null]);
@@ -181,6 +181,36 @@ test('Start: only the arms whose preflight passed can be picked; the cost before
   act(bp(w), 'start').click();
   assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['run', '5', '--arm', 'codex-sol']]);
   await settle();
+});
+
+// Bug it guards (#629): every arm's box was disabled until its preflight passed, so with every arm Not checked no box
+// could be ticked and a click on one did nothing. Ticking an arm not ready sends its preflight (as Check does), shows
+// it being checked, picks it once the arms read again show it Ready, and clears it when its preflight comes back
+// failed; a Not offered arm's box stays disabled.
+test('Start: ticking an arm not ready runs its preflight and picks it once it passes; one that fails is cleared; Not offered stays off', async () => {
+  const w = await opened();
+  act(bp(w), 'to-start').click();
+  const arm = (a) => bp(w).querySelector(`.bench-arm[data-arm="${a}"]`);
+  const state = (a) => [arm(a).querySelector('input').checked, arm(a).querySelector('.chip').textContent];
+  assert.equal(act(bp(w), 'arm-openhands').disabled, true, 'a Not offered arm cannot be ticked');
+  pick(w, 'arm-conveyor');
+  w.reply = BH.reply('conveyor: the arms\' preflights started');
+  pick(w, 'arm-chisle');
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['arms', 'check', 'chisle']]);
+  await settle();
+  pick(w, 'arm-superpowers');
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['arms', 'check', 'superpowers']]);
+  await settle();
+  assert.deepEqual(['chisle', 'superpowers'].map(state), [[true, 'Checking its preflight…'], [true, 'Checking its preflight…']]);
+  assert.equal(act(bp(w), 'start').disabled, true, 'no picked arm is Ready yet');
+  const now = (a) => ({ chisle: { state: 'ready', at: '2026-11-19T06:20:00Z' }, superpowers: { state: 'failed', why: 'it is not logged in', at: '2026-11-19T06:20:00Z' } })[a.name];
+  w.benchBody = () => { const x = BH.hist(); return { ...x, arms: x.arms.map((a) => ({ ...a, ...now(a) })) }; };
+  act(bp(w), 'arms-again').click();
+  await settle();
+  assert.deepEqual(['chisle', 'superpowers'].map(state), [[true, 'Ready'], [false, 'Preflight failed']]);
+  assert.match(text(arm('superpowers')), /it is not logged in/);
+  assert.equal(act(bp(w), 'start').disabled, false);
+  assert.equal(text(act(bp(w), 'start')), 'Start · 1 arm on 20 tasks');
 });
 
 // Bug it guards: there was no picture of the results to share, and a picture made by hand or by a model can drop the

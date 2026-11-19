@@ -19,7 +19,8 @@
 //     <A> <B> --json`: the tasks that flipped, where the two went apart, the facts read from the records and, beside
 //     them, the model's reading.
 //   Start a run: n (the presets, or any n), the Conveyor version, the arms (only those whose preflight passed can be
-//     picked; one not checked can be checked) and, before Start, each arm's usual and worst-case sessions, minutes
+//     picked; ticking one not checked, changed or failed runs its preflight, and picks it once the arms read again
+//     show it ready) and, before Start, each arm's usual and worst-case sessions, minutes
 //     and cost for the tasks it has not run yet (each session at perTask.session, the mean dollars of this project's
 //     own priced sessions). Start is off while the usage guard holds an arm picked back.
 //   Infographic: the runs ticked (up to 6) on a fixed template filled by code (SVG, no library; no model writes or picks
@@ -42,7 +43,7 @@
     task: null,         // the task opened on the run page
     sel: [],            // the runs ticked, in the order ticked
     older: false,       // History shows every run, not the newest 20
-    start: { n: 20, arms: new Set(['conveyor']), engine: 'main', commit: '' },
+    start: { n: 20, arms: new Set(['conveyor']), engine: 'main', commit: '', checking: new Map() },
     cmp: { a: '', b: '', data: null, text: null, all: false },
     title: IG_TITLE,
     busy: false, held: false, late: false, keep: null,
@@ -142,7 +143,7 @@
   }
 
   // ---- actions (POST control, action bench) ----
-  function send(args, said, then) {
+  function send(args, said, then, no) {
     if (B.busy) { say('Wait for the answer to the last action.'); return; }
     const repo = B.repo;
     B.busy = true; draw(); say('Sending…');
@@ -150,6 +151,7 @@
       () => [false, 'the build machine did not answer']).then(([ok, text]) => {
       B.busy = false;
       if (ok && then && repo === B.repo) then(text);
+      if (!ok && no) no();
       draw();
       say(ok ? said(text) : `Not done: ${B.ctx.refusal(text)}`);
     });
@@ -631,20 +633,40 @@
     if (!hist()) return [s, reading('the arms')];
     return [s, armPick(), before()];
   }
+  // An arm ticked while not ready waits in B.start.checking (name -> its check time then) for its preflight: picked once
+  // it reads ready, cleared once it reads failed with a newer check time.
+  function settleChecks(arms) {
+    arms.forEach((a) => {
+      if (!B.start.checking.has(a.name)) return;
+      if (a.state === 'ready') B.start.checking.delete(a.name);
+      else if (a.state === 'not offered' || (a.state === 'failed' && (a.at === undefined ? null : a.at) !== B.start.checking.get(a.name))) { B.start.checking.delete(a.name); B.start.arms.delete(a.name); }
+    });
+  }
   function armPick() {
-    const arms = armsOf(), picked = arms.filter((a) => a.state === 'ready' && B.start.arms.has(a.name));
-    const s = section('bench-arm-pick', 'Arms', `${picked.length} picked`, 'An arm can be picked once its preflight succeeds: installed, logged in, and it runs one trivial task headless.');
+    const arms = armsOf();
+    settleChecks(arms);
+    const picked = arms.filter((a) => a.state === 'ready' && B.start.arms.has(a.name));
+    const s = section('bench-arm-pick', 'Arms', `${picked.length} picked`, 'An arm can be picked once its preflight succeeds: installed, logged in, and it runs one trivial task headless. Ticking an arm not ready runs its preflight.');
     GROUPS.forEach((g) => {
       const these = arms.filter((a) => armGroup(a) === g);
       if (!these.length) return;
       const grid = h('div', 'bench-armgrid');
       s.append(h('p', 'board-label', g), grid);
       these.forEach((a) => {
-        const ready = a.state === 'ready', lab = h('label', ready ? 'bench-arm' : 'bench-arm off'), box = h('input'), text = h('span');
+        const ready = a.state === 'ready', offered = a.state !== 'not offered', checking = !ready && B.start.checking.has(a.name);
+        const lab = h('label', ready ? 'bench-arm' : 'bench-arm off'), box = h('input'), text = h('span');
         lab.dataset.arm = a.name;
-        box.type = 'checkbox'; box.checked = ready && B.start.arms.has(a.name); box.disabled = !ready; box.dataset.act = `arm-${a.name}`; box.setAttribute('aria-label', a.label);
-        box.addEventListener('change', () => { if (box.checked) B.start.arms.add(a.name); else B.start.arms.delete(a.name); draw(); });
-        const [word, tone] = ARM_STATE[a.state] || [String(a.state), 'quiet'];
+        box.type = 'checkbox'; box.checked = (ready && B.start.arms.has(a.name)) || checking; box.disabled = !offered; box.dataset.act = `arm-${a.name}`; box.setAttribute('aria-label', a.label);
+        box.addEventListener('change', () => {
+          if (!box.checked) { B.start.arms.delete(a.name); B.start.checking.delete(a.name); draw(); return; }
+          if (ready) { B.start.arms.add(a.name); draw(); return; }
+          // Not ready: the box sends the arm's preflight, as its Check button does, and picks the arm once it passes.
+          if (B.busy) { box.checked = false; say('Wait for the answer to the last action.'); return; }
+          B.start.checking.set(a.name, a.at === undefined ? null : a.at); B.start.arms.add(a.name);
+          send(['arms', 'check', a.name], (t) => `${t.replace(/^conveyor: /, '')}. Read the arms again in a few minutes.`, null,
+            () => { B.start.checking.delete(a.name); B.start.arms.delete(a.name); });
+        });
+        const [word, tone] = checking ? ['Checking its preflight…', 'quiet'] : ARM_STATE[a.state] || [String(a.state), 'quiet'];
         text.append(h('span', 'bench-name', a.label), ' ', B.ctx.chip(word, tone), h('span', 'bench-sub', a.why || (a.kind === 'conveyor' ? 'the engine\'s loop builds each task: build, reviews, fix rounds, test step' : `${sessionsWord(a.perTask && a.perTask.worst) || 'its own sessions'} a task, headless`)));
         const p = plan(a);
         lab.append(box, text, h('span', 'bench-cost', a.perTask && a.state !== 'not offered' ? `${p.usual} sessions (worst ${p.worst}) · ${p.minutes} min · ${p.usd === null ? COST : B.ctx.money(p.usd)}` : ''));
