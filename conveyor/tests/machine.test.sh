@@ -329,11 +329,14 @@ t_machinecards() {
 # One machine's Conveyor over one project, solo, with issue #1 (or the issues given), started in the background: sets
 # S (solo's main checkout) and mp (the machine's Conveyor), its output in $SH/machine.out. With lines given, the
 # card's session runs them before its build.
-machine1() { # [issues json] [lines]
+machine1() { # [issues json] [lines] [notest]
   SH=$T/$CASE/shared; mkdir -p "$SH"; export XDG_CONFIG_HOME=$T/$CASE/config # the machine's folder is the case's own
   project solo "${1:-[$(issue 1 2026-01-01)]}"
   dispatch; watchturns
   S=$P_solo; mkdir -p "$XDG_CONFIG_HOME/conveyor"
+  # notest: main has no test file (the per-file fixture's a.test.sh is taken out), so the loop's idle mutation check
+  # (mutnext(), lib/mutate.sh) has none to check and writes no line: for a case that counts every line of the output.
+  [ -z "${3:-}" ] || { git -C "$S" rm -q a.test.sh && git -C "$S" commit -qm 'no test file'; } || fail "main's a.test.sh could not be taken out"
   [ -z "${2:-}" ] || { printf '%s\n' "$2" "$(cat "$STUB/build")" > "$SH/build" && mv "$SH/build" "$STUB/build"; }
   jq -n --arg s "$S" '{records: [{repo: "so_lo.1", main: $s}]}' > "$XDG_CONFIG_HOME/conveyor/host.json"
   ( cd "$S" && CONVEYOR_MAIN=$S exec bash "$SRC/conveyor.sh" machine > "$SH/machine.out" 2>&1 ) & mp=$!
@@ -350,11 +353,11 @@ running() { ps -o pid=,stat=,args= -p "$(IFS=,; echo "$*")" 2>/dev/null | awk '$
 # $d/group.
 left_start() {
   local d=${T%/in} sp far=''
-  machine1
+  # The card's session holds until it is killed: the project's own build ends on its own after 600 waits of 0.1 s,
+  # and on a loaded machine the starts below took longer, so the session had ended (and its process group with it)
+  # before the groups were listed. For the same reason the `serve` under timeout starts last, just before they are.
+  machine1 '' ': > "${STUB%/solo/stub}/shared/run/solo-1"; while :; do sleep 1; done' # sleep: a session held until killed
   wait_until '[ -e "$SH/run/solo-1" ]' || fail "#1 did not start: $(cat "$SH/machine.out")"
-  project side '[]'
-  ( export CONVEYOR_MAIN=$P_side CONVEYOR_CARDS=$T/$CASE/side-cards; exec timeout 120 bash "$SRC/conveyor.sh" serve > "$SH/serve.out" 2>&1 ) & sp=$!
-  turns 1 "$P_side"
   if [ "$(uname -s)" = Linux ]; then
     project far '[]'
     CONVEYOR_MAIN=$P_far CONVEYOR_CARDS=$T/$CASE/far-cards setsid env -u CONVEYOR_TEST_CASE_ID \
@@ -363,6 +366,10 @@ left_start() {
     [ "$(ps -o sid= -p "$far" | tr -d ' ')" != "$(ps -o sid= -p "$BASHPID" | tr -d ' ')" ] || fail "the serve under setsid is in the case's session"
     ! tr '\0' '\n' < "/proc/$far/environ" | grep -q '^CONVEYOR_TEST_CASE_ID=' || fail "the serve under setsid has the case's mark in its environment"
   fi
+  project side '[]'
+  # shellcheck disable=SC2154 # P_side is set by project(), with printf -v
+  ( export CONVEYOR_MAIN=$P_side CONVEYOR_CARDS=$T/$CASE/side-cards; exec timeout 120 bash "$SRC/conveyor.sh" serve > "$SH/serve.out" 2>&1 ) & sp=$!
+  turns 1 "$P_side"
   { below "$mp"; below "$sp"; [ -z "$far" ] || below "$far"; } > "$d/all"
   for p in $(cat "$d/all"); do running "$p" | grep -q 'conveyor\.sh' && echo "$p"; done > "$d/procs"
   ps -o pgid= -p "$(paste -sd, "$d/all")" | tr -d ' ' | sort -u > "$d/groups"; ps -o pgid= -p "$BASHPID" | tr -d ' ' > "$d/group"
@@ -448,17 +455,19 @@ t_machinekept() { export CONVEYOR_MACHINE_KEPT=1; term_ends; }
 # grew for as long as it ran (a pack that does not read holds every turn's push and pick: one line a second). Held
 # for many turns by the same reason, the loop says it once; and once more when it holds the loop again later.
 t_machinesame() {
-  local said="so_lo.1: conveyor pack: .*project.json: no such file"
-  machine1 '[]'
+  local said="so_lo.1: conveyor pack: .*project.json: no such file" pj
+  machine1 '[]' '' notest; pj=$S/.conveyor/project.json
   said() { grep -c "^$said" "$SH/machine.out"; }
   turns 2 "$S"
-  mv "$S/.conveyor/project.json" "$SH/pack"
+  # The pack is taken away between two turns (atturn), here and below: taken in a turn, after the check that says
+  # why the loop holds, that turn's pick read it again and wrote that it does not read, one more line of the reason.
+  atturn "[ ! -e $(printf %q "$pj") ] || mv $(printf %q "$pj") $(printf %q "$SH/pack")"; turns 1 "$S"
   wait_until '[ "$(said)" -ge 1 ]' || fail "the loop does not say its pack does not read: $(cat "$SH/machine.out")"
   turns 6 "$S"
   [ "$(said)" = 1 ] || fail "held for 6 turns by one reason, the loop said it $(said) times: $(cat "$SH/machine.out")"
   [ "$(wc -l < "$SH/machine.out")" = 1 ] || fail "the loop wrote more than the reason in those turns: $(cat "$SH/machine.out")"
-  cp "$SH/pack" "$S/.conveyor/project.json"; turns 2 "$S"
-  rm "$S/.conveyor/project.json"
+  cp "$SH/pack" "$pj"; turns 2 "$S"
+  atturn "rm -f $(printf %q "$pj")"; turns 1 "$S"
   wait_until '[ "$(said)" -ge 2 ]' || fail "the loop does not say that its pack, read again since, does not read once more: $(cat "$SH/machine.out")"
   turns 4 "$S"
   [ "$(said)" = 2 ] || fail "held a second time, the loop said its reason $(($(said) - 1)) times: $(cat "$SH/machine.out")"
@@ -470,7 +479,7 @@ t_machinesame() {
 # more when the file, read again since, does not read again.
 t_machinehost() {
   local said="conveyor: the records of .*host.json are not understood" H
-  machine1 '[]'; H=$XDG_CONFIG_HOME/conveyor/host.json
+  machine1 '[]' '' notest; H=$XDG_CONFIG_HOME/conveyor/host.json
   said() { grep -c "^$said" "$SH/machine.out"; }
   turns 2 machine
   cp "$H" "$SH/host"; echo '{' > "$H"

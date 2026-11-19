@@ -127,14 +127,18 @@ seed() {
 # engine's own sleep is this function, which knows the wait by its caller (run(), conveyor.sh) and its length (the
 # 0.1 s waits there are for a card being stopped). turns <n> [<main>] (default: $R) returns once that loop has begun <n>
 # more of those waits; the turn between two of them ran whole after the call, so two are one whole turn at least.
+# atturn <commands>: a loop's next such wait runs them (bash) before it is noted, so `turns 1` after it returns once
+# they ran. They run between two turns, never in one: a file one part of a turn read and a later part reads again
+# reads the same to both. A wait ended before they ran or were cleared runs them again: they must do no harm twice.
 # The machine's Conveyor (machineloop) notes the wait that ends each of its turns as a line `machine`: turns <n> machine.
 # That wait is 1 s here, not its 5 s (MACHINE_POLL): a case waits for its turns, never for their seconds, and five
 # seconds a turn made the machine's cases sit out a minute each.
 watchturns() {
   export TURNS=$T/$CASE/turns; : > "$TURNS"
-  sleep() { case ${FUNCNAME[1]:-} in run) [ "$1" = 0.1 ] || echo "${CONVEYOR_MAIN:-}" >> "$TURNS" ;; machineloop) echo machine >> "$TURNS"; set -- 1 ;; esac; command sleep "$@"; } # sleep: the engine's own, passed on as called
+  sleep() { case ${FUNCNAME[1]:-} in run) [ "$1" = 0.1 ] || { [ ! -e "$TURNS.at" ] || { bash "$TURNS.at" && rm -f "$TURNS.at"; }; echo "${CONVEYOR_MAIN:-}" >> "$TURNS"; } ;; machineloop) echo machine >> "$TURNS"; set -- 1 ;; esac; command sleep "$@"; } # sleep: the engine's own, passed on as called
   export -f sleep
 }
+atturn() { printf '%s\n' "$1" > "$TURNS.new" && mv "$TURNS.new" "$TURNS.at"; } # <commands>
 turns() { # <n> [<main>]
   local m=${2:-$R} n; n=$(( $(grep -cxF "$m" "$TURNS") + $1 ))
   wait_until "[ \"\$(grep -cxF '$m' '$TURNS')\" -ge $n ]" || fail "the loop of $m did not take $1 more turns"
