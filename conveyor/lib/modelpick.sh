@@ -8,9 +8,9 @@
 # which model builds the card: seat() gives the card its builder, as with the rule off.
 # The group is "<size> <kind>". size is small when the issue is under each of the pack's split thresholds (SPLITSIZE
 # and split.doneWhen, split.files, split.areas, split.chars, as splitcheck() measures it, lib/slices.sh), else large.
-# kind is pipeline when a path it names is one of the pack's pipelineFiles or a file under one (onpipeline(),
-# lib/followups.sh); else docs when it has the label documentation, or names files and each is a Markdown file or a
-# file under docs/; else code.
+# kind is pipeline when its title or body names one of the pack's pipelineFiles or a file under one (onpipeline(),
+# lib/followups.sh, which reads a directory or a file with no extension too, as SPLITSIZE's files do not); else docs
+# when it has the label documentation, or names files and each is a Markdown file or a file under docs/; else code.
 # The pick goes on each line card() writes from then on, up to its end (PICK and PICKCARD, which line() reads,
 # lib/records.sh; a stopped or blocked line the loop writes outside card() takes it from the card's lines,
 # heldpick(); the push's lines, written after the card has ended, have none):
@@ -36,7 +36,7 @@ modelpick() { # <card> <issue>: sets card()'s PICK and PICKCARD
   issue=$(gh issue view "$2" --json number,title,body,labels 2>/dev/null) && jq -e 'objects | .number' <<<"$issue" >/dev/null 2>&1 || return 0
   size=$(jq -c --arg area "$AREA" "$SPLITSIZE" <<<"$issue") && packget split.doneWhen t1 split.files t2 split.areas t3 split.chars t4 pipelineFiles pipe || return 0
   group=$(jq -r --argjson t "[$t1,$t2,$t3,$t4]" 'if (.doneWhen | length) < $t[0] and (.files | length) < $t[1] and .areas < $t[2] and .chars < $t[3] then "small" else "large" end' <<<"$size") || return 0
-  if [ -n "$(onpipeline "$(jq -r '.files | join(" ")' <<<"$size")" <<<"$pipe")" ]; then group+=' pipeline'
+  if [ -n "$(onpipeline "$(jq -r '(.title // "") + "\n" + (.body // "")' <<<"$issue")" <<<"$pipe")" ]; then group+=' pipeline'
   elif jq -e --argjson s "$size" 'any(.labels[]?; .name == "documentation") or ($s.files | length > 0 and all(.[]; test("\\.md$") or startswith("docs/")))' <<<"$issue" >/dev/null; then group+=' docs'
   else group+=' code'; fi
   PICK=$(jq -cn --arg g "$group" --argjson b "$b" --arg by "$by" --arg m "$rule" '{group: $g, choice: $b, by: $by, trial: false, mode: $m}') || return 0

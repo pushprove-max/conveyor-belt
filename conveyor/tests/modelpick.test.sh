@@ -37,12 +37,14 @@ t_pickshadow() {
 # Bug caught: the group did not follow the issue: an issue that names a pipeline file (the pack's pipelineFiles, a
 # file under conveyor/lib/ here) was put with code, one at the split thresholds (three Done-when items,
 # split.doneWhen 3) with small ones, or one with the label documentation with code. One fixture, one call an issue.
+# Issue 11 names only the directory conveyor/lib/, in Markdown bold: a path with no extension that SPLITSIZE's files
+# do not hold, and a "**" that onpipeline() kept as part of the name; it went into the code group (#825).
 t_pickgroups() {
-  setup "[$(issue 8 2026-01-01 | jq -c '.body = "Change conveyor/lib/run.sh."'),$(issue 9 2026-01-01 | jq -c '.body = "Change src/a.js.\n\nDone when:\n- one\n- two\n- three"'),$(issue 10 2026-01-01 documentation | jq -c '.body = "Change src/a.js."')]"
+  setup "[$(issue 8 2026-01-01 | jq -c '.body = "Change conveyor/lib/run.sh."'),$(issue 9 2026-01-01 | jq -c '.body = "Change src/a.js.\n\nDone when:\n- one\n- two\n- three"'),$(issue 10 2026-01-01 documentation | jq -c '.body = "Change src/a.js."'),$(issue 11 2026-01-01 | jq -c '.body = "Change how the scripts in **conveyor/lib/** log."')]"
   tune '.split.doneWhen = 3 | .pipelineFiles = ["conveyor/lib/"]'
   loop control rules pick=on >/dev/null || fail "control rules pick=on was refused"
-  fx_in 'for n in 8 9 10; do SEATCARD=$n PICK=""; modelpick c1-$n $n; jq -r "\"\(.group) \(.mode)\"" <<<"$PICK"; done'
-  [ "$(cat "$T/$CASE/run.out")" = $'small pipeline on\nlarge code on\nsmall docs on' ] || fail "the groups of a pipeline, a large and a documentation issue: $(cat "$T/$CASE/run.out")"
+  fx_in 'for n in 8 9 10 11; do SEATCARD=$n PICK=""; modelpick c1-$n $n; jq -r "\"\(.group) \(.mode)\"" <<<"$PICK"; done'
+  [ "$(cat "$T/$CASE/run.out")" = $'small pipeline on\nlarge code on\nsmall docs on\nsmall pipeline on' ] || fail "the groups of a pipeline, a large, a documentation and a pipeline-directory issue: $(cat "$T/$CASE/run.out")"
 }
 
 # Bug caught: a card whose builder the owner set was recorded as the rule's choice, or the pick moved its builder off

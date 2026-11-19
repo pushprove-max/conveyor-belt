@@ -262,10 +262,12 @@ t_declinefail() {
 # finding on any other file is held too, or gets the cost line, or is no longer picked; once released it is not built.
 t_pipeline() {
   setup "[$(issue 7 2026-01-01 P1)]"; tune '.pipelineFiles = ["a.txt", "lib/"]'
-  # Another spelling of a listed file is that file; a longer name that starts with one is another file.
+  # Another spelling of a listed file is that file; a longer name that starts with one is another file. A name in
+  # Markdown emphasis is that name: the "**" was kept as part of it, so `**lib/**` was not held (#825).
+  # Each emphasis spelling is its own line, so a match on one cannot pass for the other.
   . <(sed -n '/^onpipeline() {/,/^}/p' "$SRC/lib/followups.sh")
-  [ "$(for f in '[P1] ./a.txt:9 x' '[P1] lib/./b.sh:9 x' '[P1] lib//c/../b.sh:9 x' 'in `c/../a.txt`.' '[P1] a.txt.bak:9 x' '[P1] library/b.sh:9 x' '[P1] c/a.txt:9 x'; do
-    echo "[$(onpipeline "$f" <<<'["a.txt", "lib/"]')]"; done | tr -d '\n')" = '[1][1][1][1][][][]' ] || fail "a pipeline file under another spelling is not held, or a file that only starts with its name is"
+  [ "$(for f in '[P1] ./a.txt:9 x' '[P1] lib/./b.sh:9 x' '[P1] lib//c/../b.sh:9 x' 'in `c/../a.txt`.' 'in **lib/**.' 'in *a.txt*.' '[P1] a.txt.bak:9 x' '[P1] library/b.sh:9 x' '[P1] c/a.txt:9 x'; do
+    echo "[$(onpipeline "$f" <<<'["a.txt", "lib/"]')]"; done | tr -d '\n')" = '[1][1][1][1][1][1][][][]' ] || fail "a pipeline file under another spelling (or in Markdown emphasis) is not held, or a file that only starts with its name is"
   # A listed name with a space in it is that name, quoted or not; one of its words alone is not.
   [ "$(for f in '[P1] `ci/build engine.sh`:9 wrong command' 'see ci/build engine.sh:9.' '[P1] ci/build:9 x' '[P1] engine.sh:9 x'; do
     echo "[$(onpipeline "$f" <<<'["ci/build engine.sh"]')]"; done | tr -d '\n')" = '[1][1][][]' ] || fail "a pipeline file whose name holds a space is not held, or one of its words alone is"

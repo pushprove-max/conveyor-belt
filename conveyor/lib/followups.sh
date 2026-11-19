@@ -162,10 +162,11 @@ decline() { # <card> <issue> <why>, the findings on stdin, one a line: each to t
 # <finding>, the pack's pipelineFiles on stdin: prints 1 when the finding names one of them, or a file under one. Each
 # path is read as git would: "." parts and doubled slashes dropped, ".." taking the part before it, so another
 # spelling of a listed file is that file, and a longer name that starts with one (a.sh.bak) is not. A name may hold
-# spaces: every run of words between the finding's other separators is a candidate.
+# spaces: every run of words between the finding's other separators is a candidate. A "*" is a separator too, so a
+# name in Markdown emphasis (**conveyor/lib/**) is that name.
 onpipeline() {
   jq -r --arg f "$1" 'def norm: reduce (split("/")[] | select(. != "" and . != ".")) as $s ([]; if $s == ".." and length > 0 and .[-1] != ".." then .[:-1] else . + [$s] end) | join("/");
-    map(norm) as $e | [$f | scan("[^\\]\\[:,;()\u0027\"`<>]+") | [splits("\\s+") | select(. != "")] as $w
+    map(norm) as $e | [$f | scan("[^\\]\\[:,;()\u0027\"`<>*]+") | [splits("\\s+") | select(. != "")] as $w
       | range(0; $w | length) as $i | range($i + 1; ($w | length) + 1) as $j | $w[$i:$j] | join(" ") | sub("\\.+$"; "") | norm]
     | if any(. as $p | $e | any(. as $x | $x == "" or $p == $x or ($p | startswith($x + "/")))) then "1" else "" end'
 }
