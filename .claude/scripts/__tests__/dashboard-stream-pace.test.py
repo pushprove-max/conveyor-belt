@@ -143,6 +143,18 @@ class Pace(unittest.TestCase):
             self.assertIn(n - 1 + ds.GAP, builds, '%s was not built 2 s after the last build: %s' % (what, builds))
             self.assertNotIn(n, builds, '%s was built sooner than 2 s after the last build: %s' % (what, builds))
 
+    def test_a_change_ends_a_figures_only_wait(self):
+        # Bug caught: a change that comes while the publisher already holds figures-only lines for SLOW s waits out
+        # the rest of those 15 s (a sleep in place of the wait on urgent). Figures-only lines from 3 s start that
+        # wait after the build at 2; an action comes at 7 and a snapshot at 12, each well past GAP, so each is built
+        # in its own second, not at 17.
+        def line(n, f, rec):
+            if n == 12:
+                return {'type': 'snapshot', 'snap': {'belt': [{'card': 'c1'}]}}
+            return live(n, action='Edit: hooks/units.tsx' if n >= 7 else 'Bash: npm test')
+        builds, _, _ = self.feed(13, line)
+        self.assertEqual(builds, [0, 2, 7, 12], 'a change did not end the figures-only wait: %s' % builds)
+
     def test_the_cycle_build_starts_the_wait(self):
         # Bug caught: the Board's own cycle builds data.js at 10 s, and a figures-only line was built again at 17 s,
         # 15 s after this feed's last build but 7 s after the cycle's.
