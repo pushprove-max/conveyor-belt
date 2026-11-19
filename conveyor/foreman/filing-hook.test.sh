@@ -46,7 +46,7 @@ done
 # the background is still refused.
 t_files() {
 CASE=files; case_ files
-c='gh issue create -R example/alpha --title example --body example'
+local c='gh issue create -R example/alpha --title example --body example'
 out=$(run "$(line PreToolUse)" "$(input "$c" '{hook_event_name: "PreToolUse"}')")
 [ -z "$out" ] || fail "filing an issue was refused: $out"
 grep -qx 'conveyor/foreman/foreman.sh filing' "$T/marks" 2>/dev/null || fail "the filing line did not start foreman.sh filing: $(cat "$T/marks" 2>/dev/null)"
@@ -60,8 +60,14 @@ out=$(run "$(line PreToolUse)" "$(input "$c" '{hook_event_name: "PreToolUse", to
 jq -e '.hookSpecificOutput.permissionDecision == "deny"' <<<"$out" >/dev/null || fail "a filing command run in the background was not refused: $out"
 }
 
-rc=0
-(t_quiet) & a=$!
-(t_files) & b=$!
-wait "$a" || rc=1; wait "$b" || rc=1
-[ "$rc" = 0 ] && echo ok; exit "$rc"
+cases=(quiet files)
+# The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
+SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
+for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
+read -ra cases <<<"$SEL"
+for c in "${cases[@]}"; do (t_"$c" && : > "$B/$c.passed") > "$B/$c.out" 2>&1 & done
+wait
+bad=0
+for c in "${cases[@]}"; do cat "$B/$c.out" >&2; [ -e "$B/$c.passed" ] || bad=1; done
+[ "$bad" = 0 ] || exit 1
+echo "ok [filing-hook]"
