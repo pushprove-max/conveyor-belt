@@ -80,6 +80,7 @@
     ['review-followup', 'Review follow-up', 'a follow-up that only finishes or corrects a card you approved is queued'],
     ['release-check', 'Release check', 'a failed check in a release you asked for gets one fix card, then the release goes on'],
     ['fixed-block', 'Fixed block', 'a card blocked by a cause that a landed fix removed waits on that fix and is tried again'],
+    ['review-retry', 'Review retry', 'a card blocked by its review is tried again, with no turn of the Foreman'],
   ];
   const ORDER_MAX = 500;  // the issues one order takes (dashboard_server.py)
   const ARM_MS = 5000;    // a Queue that removes a label, or a Build choice that skips queued issues, waits this long for its second click

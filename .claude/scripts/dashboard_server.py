@@ -234,7 +234,7 @@ KIND = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]{0,39}')  # a finding kind the judge
 CARD_SEATS = frozenset({'builder', 'reviewer', 'judge'})  # the seats one issue keeps of its own (`conveyor.sh control card`)
 KINDS_MAX = 20
 # The standing kinds of routine yes, as conveyor.sh's auto standing takes them (conveyor/lib/standing.sh).
-STANDING = frozenset({'asked-fix', 'review-followup', 'release-check', 'fixed-block'})
+STANDING = frozenset({'asked-fix', 'review-followup', 'release-check', 'fixed-block', 'review-retry'})
 # An area rule is the pack's area prefix and a name: any label here; conveyor.sh checks the prefix.
 # The rule Split large issues (split) takes off, shadow or on.
 RULE = re.compile(r'split=(off|shadow|on)|(P[0-3]|followups|(?!P[0-9]+=)[A-Za-z0-9][A-Za-z0-9._:/-]{0,79})=(on|off)')

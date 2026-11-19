@@ -58,7 +58,10 @@ it up:
 - A card that the Foreman waits for lands: the wake names its commit.
 - A blocked card: the wake names the reason. When the snapshot fails or is slow, as when it is made anew from the
   whole card records, the watcher reads `conveyor.sh health`. A blocked card, or a change that waits for your yes,
-  then wakes the Foreman from health at that poll, and does not wait for the snapshot.
+  then wakes the Foreman from health at that poll, and does not wait for the snapshot. With the standing kind
+  `review-retry` on, a card that its review blocked gives no wake ([Standing yes](#standing-yes)).
+- gh is signed out, GitHub does not answer, or the project gives no snapshot: the wake comes only when three polls in
+  a row find it. One or two such polls give no wake.
 - A release or full-test run that ends: the wake names the result and the failed cases.
 - A card that waits for main to change, or waits on another card, for the minutes of the pack setting
   `foreman.waitWake` (in `.conveyor/project.json`): the wake names the card and what it waits on. For another card,
@@ -183,6 +186,10 @@ asking"). The pack keeps the list as `auto.standing`. A kind works whether `/con
   Foreman files one fix card for it. When the fix lands, the release goes on.
 - `fixed-block`: a fix that landed removed the cause of a blocked card. The Foreman adds `Depends on: #<fix>` to the
   card's issue and runs `conveyor.sh retry <issue> --fresh`.
+- `review-retry`: the review blocked a card, because the fix for a finding did not hold after its fix rounds. The
+  Foreman's watcher runs `conveyor.sh retry <issue>` on the host itself and logs the step in the ruling log. The
+  Foreman gets no wake for that card and does not tell you. If the retry fails, the blocked card wakes the Foreman, and
+  the wake gives the reason of the failed retry. A card blocked for another reason wakes the Foreman as before.
 
 Some steps always go to you, whatever kinds are on: new engine behaviour that you did not ask for, a design choice, a
 release that you did not ask for, and anything that `auto.reserved` holds.
@@ -191,5 +198,5 @@ The Foreman's start text lists each kind that is on, with these limits. It reads
 on the host that runs its belt, where the Board turns them on or off. The commands the Foreman runs for a kind also
 run on that host, for that project. `conveyor.sh auto standing` is different: it reads the pack of the checkout where
 you run it, not the pack on the host. Each step
-taken under a kind goes into the ruling log with its kind (source `standing`). The Foreman then tells you about it in
-one line.
+taken under a kind goes into the ruling log with its kind (source `standing`). For each kind but `review-retry`, the
+Foreman then tells you about it in one line.

@@ -19,9 +19,9 @@ mkdir -p "$HOME" "$FD" "$XDG_CONFIG_HOME/conveyor" "$I/conveyor/lib" "$I/.claude
   && jq -n --arg m "$M" '{records: [{repo: "alpha", main: $m}]}' > "$XDG_CONFIG_HOME/conveyor/host.json" \
   && git init -q "$M" && mkdir -p "$M/.conveyor" && jq -n '{plugin: {follow: "main"}}' > "$M/.conveyor/project.json" \
   || fail "the fixture was not made"
-# The snapshot has been unread for 2 minutes; this poll's ask removes the install the watcher runs from, as the
-# prune did, and fails as the engine of a removed install does.
-echo "$((NOW - 120)) $((NOW - 60))" > "$FD/conveyor-down-alpha.txt"
+# The snapshot has been unread for 2 minutes, on the two polls before this one; this poll's ask removes the install
+# the watcher runs from, as the prune did, and fails as the engine of a removed install does.
+echo "$((NOW - 120)) $((NOW - 60)) 2" > "$FD/conveyor-down-alpha.txt"
 CONVEYOR_FOREMAN_DIR=$FD CONVEYOR_MAIN=$M CONVEYOR_FOREMAN_NOW=$NOW \
   CONVEYOR_FOREMAN_ASK="chmod -R u+w $I && rm -rf $I; echo \"bash: $I/conveyor/conveyor.sh: No such file or directory\" >&2; exit 127" \
   bash "$I/conveyor/foreman/watch-conveyor.sh" --once 2> "$T/err" || fail "no wake for the record unread for 2 minutes: $(cat "$T/err")"

@@ -1,13 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 # The standing kinds of routine yes: the pack's auto.standing, each kind a step the owner said yes to ahead of time, so
-# the Foreman takes it without asking (and, for review-followup, the engine: followups(), lib/followups.sh). Each kind
+# the Foreman takes it without asking (and, for review-followup, the engine: followups(), lib/followups.sh). The
+# Foreman's watcher takes review-retry in its place (foreman/watch-conveyor.sh reviewretry()). Each kind
 # is off until the owner turns it on: setup writes the list empty, and the Board's Rules tab turns a kind on or off
 # (`conveyor.sh auto standing <kind> on|off`). The Foreman is told the kinds that are on, with their limits, at its
 # start (foreman.sh asks each of its records for `conveyor.sh auto standing`, on the host that has the record). Each act under a kind is one row of the
-# ruling log, source "standing", with its kind (standinglog); the Foreman then tells the owner in one line.
+# ruling log, source "standing", with its kind (standinglog); the Foreman then tells the owner in one line (a
+# review-retry act the watcher takes and logs, and no one tells the owner of).
 # Sourced by commands/auto.sh and lib/followups.sh, after lib/prompts.sh (packget).
 # Test seam: CONVEYOR_RULING_LOG (the ruling log).
-STANDING_KINDS=(asked-fix review-followup release-check fixed-block)
+STANDING_KINDS=(asked-fix review-followup release-check fixed-block review-retry)
 # The ruling log's path (.claude/hooks/lib/rulings.sh rulings_log, of main's checkout); fails when it cannot be named.
 rulingslog() { [ -z "${CONVEYOR_RULING_LOG:-}" ] || { echo "$CONVEYOR_RULING_LOG"; return; }; CONVEYOR_MAIN=$MAIN bash -c '. "$1" && rulings_log' _ "$HERE/../.claude/hooks/lib/rulings.sh"; }
 standingon() { # <kind>: 0 when the pack turns that kind on
@@ -37,7 +39,7 @@ standingrules() { # <run> <reserved>
   cat <<EOF
 # STANDING YES (the pack's auto.standing; the owner turns each kind on or off in the Board's Rules tab)
 
-The owner said yes ahead of time to the kinds of step below. Take each one without asking, also where your other rules say to wait for the owner's yes. After each act, log it with \`$1 auto act <kind> "<what you did, with the issue or card>"\`, then tell the owner in one line, in your next reply: "Done without asking (<kind>): <what>; logged as <id>."
+The owner said yes ahead of time to the kinds of step below. Take each one without asking (but review-retry, which the watcher takes itself), also where your other rules say to wait for the owner's yes. After each act, log it with \`$1 auto act <kind> "<what you did, with the issue or card>"\`, then tell the owner in one line, in your next reply: "Done without asking (<kind>): <what>; logged as <id>."
 EOF
   for k in "${STANDING_KINDS[@]}"; do
     jq -e --arg k "$k" 'index($k) != null' <<<"$s_" >/dev/null || continue
@@ -46,6 +48,7 @@ EOF
       review-followup) echo "- review-followup: a follow-up filed from the review of a card the owner approved. Release it when it only finishes or corrects that card's own change. The engine itself does not hold, and logs, a follow-up whose finding names only files of its parent card's change and no word of auto.reserved: tell the owner of each one in one line too." ;;
       release-check) echo "- release-check: a check fails in a release the owner asked for (a false privacy hit, a red test file). File one fix card and release it; when it lands, go on with the release." ;;
       fixed-block) echo "- fixed-block: a card is blocked, and a fix that landed removed the cause. Add \`Depends on: #<fix>\` to the card's issue, then run \`$1 retry <issue> --fresh\`." ;;
+      review-retry) echo "- review-retry: a card blocked by its review (\"the fix for <finding> did not hold after <n> rounds\"). The watcher runs \`retry <issue>\` for it itself and logs the act, so you get no wake for it: you take no step for it, log nothing and tell the owner nothing of it. A wake for such a card says why its retry failed: act on that reason." ;;
     esac
   done
   echo "- Still ask the owner, whatever the kind: new engine behaviour (a change to how the engine builds, reviews, fixes, tests, lands or pushes that the owner did not ask for); a design choice; a release the owner did not ask for; anything about $2. When a step does not clearly fit its kind, ask."

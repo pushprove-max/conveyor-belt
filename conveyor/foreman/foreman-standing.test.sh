@@ -32,7 +32,7 @@ fixture() {
   M=$T/alpha H=$T/host/alpha FD=$T/foreman
   export CONVEYOR_FOREMAN_DIR=$FD CONVEYOR_MAIN=$M
   mkdir -p "$XDG_CONFIG_HOME/conveyor" "$FD" && pack "$H" "$2" \
-    && pack "$M" "$(jq -c 'if length == 0 then ["asked-fix", "review-followup", "release-check", "fixed-block"] else [] end' <<<"$2")" \
+    && pack "$M" "$(jq -c 'if length == 0 then ["asked-fix", "review-followup", "release-check", "fixed-block", "review-retry"] else [] end' <<<"$2")" \
     && git -C "$M" remote add origin https://example.com/acme/alpha.git \
     && jq -n --arg h "$H" '{records: [{repo: "alpha", main: $h}]}' > "$XDG_CONFIG_HOME/conveyor/host.json" \
     || fail "the fixture was not made"
@@ -40,11 +40,11 @@ fixture() {
 start() { (cd "$M" && bash "$SRC/foreman.sh" claim sA) || fail "the claim failed"; } # the claim prints the start's context
 # The line each kind's rule starts with.
 line() { echo "- $1: "; }
-kinds=(asked-fix review-followup release-check fixed-block)
+kinds=(asked-fix review-followup release-check fixed-block review-retry)
 
-# One kind on: its rule and the limits are in the start, and no other kind's rule is.
+# One kind on: its rule and the limits are in the start, and no other kind's rule is. The start is left in $out.
 one() { # <kind>
-  local out k
+  local k
   fixture "$1" "[\"$1\"]"; out=$(start)
   grep -qF '# STANDING YES' <<<"$out" && grep -qF -- "$(line "$1")" <<<"$out" \
     && grep -qF -- '- Still ask the owner, whatever the kind: new engine behaviour' <<<"$out" || fail "the start does not name the kind $1 that is on: $out"
@@ -54,6 +54,14 @@ t_askedfix() { one asked-fix; }
 t_reviewfollowup() { one review-followup; }
 t_releasecheck() { one release-check; }
 t_fixedblock() { one fixed-block; }
+# #715: the start names the kind the watcher acts on, and leaves its act to the watcher. Bug it catches: the start told
+# the Foreman to take, log and report each kind that is on, so it would retry and log the watcher's cards a second time.
+t_reviewretry() {
+  one review-retry
+  grep -qF 'Take each one without asking (but review-retry, which the watcher takes itself)' <<<"$out" \
+    && grep -qF 'you take no step for it, log nothing and tell the owner nothing of it' <<<"$out" \
+    || fail "the start gives the watcher's review-retry to the Foreman: $out"
+}
 # Every kind off (the list setup writes): the start says nothing of standing kinds.
 t_none() {
   local out; fixture none '[]'; out=$(start)
@@ -83,7 +91,7 @@ t_act() {
     && [ "$(jq -r .answer "$CONVEYOR_RULING_LOG")" = 'filed #12 as the owner asked' ] || fail "the start's act command did not log the act in the record: $out"
 }
 
-cases=(askedfix reviewfollowup releasecheck fixedblock none unread act)
+cases=(askedfix reviewfollowup releasecheck fixedblock reviewretry none unread act)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

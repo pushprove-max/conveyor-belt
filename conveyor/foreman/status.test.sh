@@ -159,7 +159,7 @@ grep -qxF 'alpha: 2 on the belt; building 1 of the cap 1, 1 waiting not counted'
 # The health read between the two fails, so it shows no new problem; only the snapshot reads' waits are recorded.
 slowask() { # <what the read with the longer wait does>
   export CONVEYOR_FOREMAN_ASK="[ \"\$CONVEYOR_CMD\" = snapshot ] || exit 1; echo \$ASK_LIMIT >> $T/limits; [ \"\$ASK_LIMIT\" -gt 45 ] || exit 124; $1"
-  echo "$((NOW - 120)) $((NOW - 60))" > "$FD/conveyor-down-alpha.txt"
+  echo "$((NOW - 120)) $((NOW - 60)) 2" > "$FD/conveyor-down-alpha.txt" # two failed polls before this one
 }
 t_slowlive() {
 CASE=slowlive; fixture slowlive; mkdir -p "$FD"
@@ -233,7 +233,7 @@ CASE=healthwake; fixture healthwake; mkdir -p "$FD"
 snap '.health.blocked = [{card: "c948", issue: 948, since: "2026-11-15T11:58:00Z", reason: "tests failed twice"}] | .health.loop = false | .health'
 export CONVEYOR_FOREMAN_ASK="echo \"\$CONVEYOR_CMD \${ASK_LIMIT:-45}\" >> $T/asks; [ \"\$CONVEYOR_CMD\" = health ] && cat $T/snap && exit;
   echo 'conveyor: the snapshot is being made anew from the whole card records; this one takes longer' >&2; exit 124"
-echo "$((NOW - 120)) $((NOW - 60))" > "$FD/conveyor-down-alpha.txt"
+echo "$((NOW - 120)) $((NOW - 60)) 2" > "$FD/conveyor-down-alpha.txt"
 poll || fail "no wake for the blocked card health lists: $(cat "$T/err")"
 w=$(cat "$FD"/pending/*.wake)
 grep -qxF 'alpha: #948 is blocked since 2026-11-15T11:58:00Z: tests failed twice' <<<"$w" || fail "the wake does not name the blocked card: $w"
@@ -261,13 +261,16 @@ rm -f "$FD"/pending/*.wake
 poll && fail "the same outage woke again: $(cat "$FD"/pending/*.wake)"
 grep -qxF 'alpha/unreachable' "$FD/conveyor-reported.txt" || fail "the outage is not marked reported after the longer read"
 # The Foreman closed for 10 minutes, with the outage still marked reported, then a new outage: its first poll reads
-# health with no longer read, and two minutes on the longer read fails too. Bug it catches: that first poll kept the
-# old outage's unreachable key, so the new outage never woke.
-echo "$((NOW - 660)) $((NOW - 600))" > "$FD/conveyor-down-alpha.txt"
+# health with no longer read, and on its third poll, three minutes on, the longer read fails too. Bug it catches: that
+# first poll kept the old outage's unreachable key, so the new outage never woke. Its second poll is two minutes on, so
+# only the count of failed polls holds its wake (#715: the record unreachable wakes on the third failed poll, not the
+# second, however long the outage is).
+echo "$((NOW - 660)) $((NOW - 600)) 5" > "$FD/conveyor-down-alpha.txt"
 poll && fail "the first poll of a new outage woke: $(cat "$FD"/pending/*.wake)"
 ! grep -qxF 'alpha/unreachable' "$FD/conveyor-reported.txt" || fail "the new outage keeps the old outage's reported key"
-CONVEYOR_FOREMAN_NOW=$((NOW + 120)) poll || fail "no wake for the new outage after 2 minutes: $(cat "$T/err")"
-grep -qF 'alpha: no snapshot for 2 minutes' "$FD"/pending/*.wake || fail "the wake does not name the new outage: $(cat "$FD"/pending/*.wake)"
+CONVEYOR_FOREMAN_NOW=$((NOW + 120)) poll && fail "the second poll of a new outage woke after 2 minutes: $(cat "$FD"/pending/*.wake)"
+CONVEYOR_FOREMAN_NOW=$((NOW + 180)) poll || fail "no wake for the new outage on its third poll: $(cat "$T/err")"
+grep -qF 'alpha: no snapshot for 3 minutes' "$FD"/pending/*.wake || fail "the wake does not name the new outage: $(cat "$FD"/pending/*.wake)"
 }
 
 # Issue 357: each poll writes one line to the poll log: its start, end, time taken, each record's outcome and the read

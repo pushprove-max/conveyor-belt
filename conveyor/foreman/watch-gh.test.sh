@@ -5,7 +5,8 @@
 # given by CONVEYOR_FOREMAN_ASK, the clock set by CONVEYOR_FOREMAN_NOW. Each case has a Foreman folder of its own.
 # Bug (#410): a gh auth status that was slow or timed out read as signed out, and woke the Foreman with "gh is signed
 # out" while gh held its token. Health now says signed in (gh) from gh auth token, and GitHub reached (ghReached) from
-# gh auth status; GitHub not reached and signed out each wake only on two polls in a row (#490).
+# gh auth status; GitHub not reached and signed out each wake only on three polls in a row (#490; #715: a wake on the
+# second poll cost the Foreman a turn, and the next poll had cleared it).
 set -uo pipefail
 SRC=$(cd "$(dirname "$0")" && pwd -P)
 T=$(mktemp -d) || exit 1
@@ -50,14 +51,15 @@ unreached() {
   ! poll unreached 0 || return 1 # one such poll wakes nothing
   ! poll unreached 1 || return 1 # nor the same snapshot again, as the snapshot cache gives it (#490)
   snap true false '' r1; ! poll unreached 2 || return 1 # nor one built again from the same GitHub read (#490)
-  snap true false '' r2; poll unreached 3 && grep -qF 'alpha: GitHub not reached' <<<"$wake" && ! grep -qF 'signed out' <<<"$wake"
+  snap true false '' r2; ! poll unreached 3 || return 1 # nor the second read in a row (#715)
+  snap true false '' r3; poll unreached 4 && grep -qF 'alpha: GitHub not reached' <<<"$wake" && ! grep -qF 'signed out' <<<"$wake"
 }
-check 'GitHub not reached wakes on the second poll in a row, never as signed out' unreached
+check 'GitHub not reached wakes on the third poll in a row, not the second, never as signed out' unreached
 
 # Bug (#490): one health read with gh false, while gh held its token, woke the Foreman with "gh is signed out".
 # gh auth token times out once: no wake from that read, nor from the next poll that the snapshot cache gives the
 # same snapshot, nor from a snapshot built again (a new health time) from the same GitHub folder read, nor from the
-# good read after it. It times out on two reads in a row: the second wakes, with the reason.
+# good read after it. It times out on three reads in a row: the third wakes, with the reason (#715: not the second).
 timedout() {
   wake=
   : > "$T/token-timeout"; ghread; ! poll timedout 0 || return 1
@@ -65,8 +67,9 @@ timedout() {
   ghread again; ! poll timedout 2 || return 1 # built again after a card update, from the same read: still one read
   rm "$T/token-timeout"; ghread; ! poll timedout 3 || return 1
   : > "$T/token-timeout"; ghread; ! poll timedout 4 || return 1
-  ghread; poll timedout 5 && grep -qF 'alpha: gh is signed out: gh auth token timed out after 20 s' <<<"$wake"
+  ghread; ! poll timedout 5 || return 1
+  ghread; poll timedout 6 && grep -qF 'alpha: gh is signed out: gh auth token timed out after 20 s' <<<"$wake"
 }
-check 'one timed-out gh auth token wakes nothing; two in a row wake as signed out, with why' timedout
+check 'one or two timed-out gh auth tokens in a row wake nothing; three wake as signed out, with why' timedout
 
 [ "$fails" = 0 ]

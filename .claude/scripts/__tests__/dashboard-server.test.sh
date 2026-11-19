@@ -905,6 +905,9 @@ pass=$((pass + 2))
 fresh_control
 [ "$(ctl "$(act standing review-followup on)")" = 200 ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM auto standing review-followup on" ] \
   || fail "standing_reaches_conveyor: $(cat "$M/ctl.out") ran '$(calls)'"
+fresh_control # #715: the kind the watcher acts on is taken too
+[ "$(ctl "$(act standing review-retry off)")" = 200 ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM auto standing review-retry off" ] \
+  || fail "standing_reaches_conveyor: review-retry: $(cat "$M/ctl.out") ran '$(calls)'"
 fresh_control
 for a in 'review-followup' 'review-followup maybe' 'any-fix on' 'asked-fix on off' '-x on'; do
   # shellcheck disable=SC2086 # each word an argument

@@ -329,6 +329,11 @@ the Judge would split a large issue into, and builds the issue whole. The tab sa
 and the issue is built whole". On files the slices as follow-ups and as sub-issues of the issue, and holds the issue
 as their umbrella until all its slices are closed. Off checks no issue ([Split large issues](configuration.md#split-large-issues)).
 
+The **... without asking** rules turn each standing kind of yes on or off ([Standing yes](foreman.md#standing-yes)).
+All are Off until you turn them on. **Review retry without asking** On: the Foreman's watcher tries again each card
+that its review blocked, and the Foreman gets no wake for it. A retry that fails still wakes the Foreman, with the
+reason.
+
 ## Held issues and dependencies
 
 An issue that is not being built is in Held for one of four reasons: **Held by you**, **Held by a label**,

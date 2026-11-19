@@ -6,7 +6,8 @@
 # before entries (record()), and, on any NEW problem, puts one wake in pending and
 # exits. The problems, each a record's own:
 #   a card waiting on the owner's yes       an issue waiting on the owner's yes before its build (health's before)
-#   a card blocked
+#   a card blocked; one blocked by its review, while the standing kind review-retry is on, the watcher retries itself
+#     and wakes nothing for, unless that retry fails (reviewretry())
 #   a card stuck (health's stuck: no new step and no output, its process gone, a wait on other cards past the
 #     limit, with the cards it waited on, or a test case that hangs, by name); one whose step the engine ended
 #     for no progress and runs once more (did) is a new problem, and says so ("ended and retried"); a second stall
@@ -14,7 +15,7 @@
 #   a card that has waited for main to change, or on another card, for the pack's foreman.waitWake minutes (default
 #     10): it names the card, what it waits on and that card's step and last action (for main, each main-red fix card
 #     open or blocked); once per wait, and "still waiting" after each further waitWake minutes of it
-#   the record unreachable: no snapshot for 2 minutes (never one failed poll), and none from one more read with a
+#   the record unreachable: no snapshot on three polls in a row and for 2 minutes, and none from one more read with a
 #     longer wait (a live engine under a high machine load reads slowly)
 #   an awaited issue landed: $FD/await-<repo>.txt lists issue numbers, one per line, of the record <repo>, so a
 #     group's Foreman claimed in another checkout awaits the same issues of the same projects; one whose card has
@@ -33,9 +34,10 @@
 #     and any kind added to the list later, under its kind). A held pipeline change's line names it, its parent and
 #     its finding: "pipeline change held: #615 (follow-up of #597): <finding>"
 #   no loop running, a push failing for over 10 minutes or listed under the Board's blocked cards (needsYou.blocked:
-#   it failed twice), a control record the loop cannot read, a dependency cycle among open issues, and, each on two
-#   polls in a row, gh signed out (no token: `gh auth token`; the wake gives health's ghWhy), Conveyor idle (nothing on
-#   the belt and nothing to pick) and GitHub not reached (gh signed in, but `gh auth status` failed or timed out)
+#   it failed twice), a control record the loop cannot read, a dependency cycle among open issues, Conveyor idle
+#   (nothing on the belt and nothing to pick) on two polls in a row, and, each on three polls in a row, gh signed out
+#   (no token: `gh auth token`; the wake gives health's ghWhy) and GitHub not reached (gh signed in, but `gh auth
+#   status` failed or timed out)
 # Every wake names every item. Its first line lists every issue number by kind, per project:
 #   Conveyor: shop: needs the owner's yes: #12 #15; blocked: #7 | site: needs the owner's yes: #19
 # then one line per item, each cut alone if it must be; the wake as a whole is never cut.
@@ -131,10 +133,10 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
     # A card records line the check set aside (health quarantined, conveyor/lib/views.sh check()).
     (.quarantined | arrays | .[] | objects | ["quarantined:\(.line):\(.time)", "record set aside", "",
       "the card records line \(.line) is set aside in quarantined.jsonl: the record check refused its field \(.field | one)"]),
-    # Signed out, with why (health ghWhy): a candidate, as ghreach is; record() reports it on its second poll in a row,
+    # Signed out, with why (health ghWhy): a candidate, as ghreach is; record() reports it on its third poll in a row,
     # as one read can fail while gh holds its token (#490).
     (select(.gh | not) | ["gh", "gh signed out", "", "gh is signed out\((.ghWhy | strings | select(. != "") | ": " + one) // "")"]),
-    # Signed in, but gh auth status did not answer (health ghReached): a candidate here, as idle is; record() reports it on its second poll.
+    # Signed in, but gh auth status did not answer (health ghReached): a candidate here, as idle is; record() reports it on its third poll in a row.
     (select(.gh and .ghReached == false) | ["ghreach", "GitHub not reached", "", "GitHub not reached: gh is signed in, but gh auth status failed or timed out"]),
     (select(.state == "control record unreadable") | ["control", "picks nothing", "", "the loop picks nothing: \(.reason // "the control record does not read" | one)"]),
     (.cycles | arrays | .[] | arrays | map(tostring) | ["cycle:\(join("-"))", "dependency cycle", (map("#" + .) | join(" ")),
@@ -283,11 +285,36 @@ record() { # <repo> <main> <now> <await>
     && all=$(jq -r --argjson push "$PUSH_S" --argjson now "$now" --argjson await '[]' --argjson hist '[null]' --slurpfile kinds "$KINDS" "{health: .} | $PROBLEMS" <<<"$h" 2>>"$errf") \
     && hcur=$(awk -F'\t' '$1 ~ /^(blocked|waiting|before):/' <<<"$all")
   }
-  # The outage so far: a gap of more than three polls since the last failed one is a new outage, timed from now.
-  # goes: set when the last failed poll's outage goes on, so its reported unreachable key is still this outage's.
-  read -r first last 2>/dev/null < "$down" || first=
+  # The standing kind review-retry (lib/standing.sh), while the snapshot's pack turns it on (snapshot standing): each
+  # card blocked by its review (card.sh: "the fix for [P1] ... did not hold after <n> rounds", as the Board's reviewWhy
+  # reads it, with any notes block() adds after it in brackets, lib/push.sh) and not reported yet is given back with `conveyor.sh retry <issue>` on the record's host, and the act is
+  # logged there (`auto act review-retry`: standinglog). Its line then keeps only its key: it wakes nothing, and is not
+  # retried again while a snapshot still lists it. A retry that fails, or an act that is not logged, wakes as the block
+  # does, with why. Another block, or a main-red fix card (no issue), wakes as before.
+  reviewretry() {
+    local card issue out rc note
+    jq -e '.standing | arrays | index("review-retry") != null' <<<"$rec" >/dev/null 2>&1 || return 0
+    while IFS=$'\t' read -r card issue; do
+      ! grep -qxF "$repo/blocked:$card" "$SEEN" || continue
+      out=$(ask "$repo" "$main" retry "$issue" 2>&1); rc=$?
+      if [ "$rc" = 0 ]; then
+        note=''; out=$(ask "$repo" "$main" auto act review-retry "retried #$issue: its card $card was blocked by its review" 2>&1) \
+          || { rc=$?; note="#$issue was retried (review-retry), but the act was not logged"; }
+      else note="the review-retry of #$issue failed"; fi
+      out=$(tr -s '[:space:]' ' ' <<<"$out" | sed 's/^ *//; s/ *$//' | cut -c1-200)
+      cur=$(K="blocked:$card" N="$note${note:+: ${out:-exit $rc}}" awk -F'\t' 'BEGIN { OFS = FS }
+        $1 == ENVIRON["K"] { if (ENVIRON["N"] == "") { print $1 "\t\t\t"; next } $4 = $4 "; " ENVIRON["N"] } { print }' <<<"$cur")
+    done < <(jq -r '.health.blocked[] | select((.issue | numbers) > 0 and (.reason | strings
+      | test("\\Athe fix for \\[P[0-3]\\][\\s\\S]* did not hold after [0-9]+ rounds?( \\[[\\s\\S]*\\])?\\z"))) | "\(.card)\t\(.issue)"' <<<"$rec" 2>/dev/null)
+  }
+  # The outage so far ($down: its first failed poll, its last and how many failed in a row): a gap of more than three
+  # polls since the last failed one is a new outage, timed from now. goes: set when the last failed poll's outage goes
+  # on, so its reported unreachable key is still this outage's.
+  local fails
+  read -r first last fails 2>/dev/null < "$down" || first=
   local goes=1
-  [[ $first =~ ^[0-9]+$ ]] && [[ $last =~ ^[0-9]+$ ]] && [ $((now - last)) -le $((POLL * 3)) ] || { first=$now goes=; }
+  [[ $first =~ ^[0-9]+$ ]] && [[ $last =~ ^[0-9]+$ ]] && [ $((now - last)) -le $((POLL * 3)) ] || { first=$now goes='' fails=0; }
+  [[ $fails =~ ^[0-9]+$ ]] || fails=0
   # A failed read that would make the record unreachable is read once more with the longer wait SLOW_S first (#241):
   # under a high machine load a live engine's snapshot can take longer than the first wait. An engine that fails
   # fast (stopped, its host down) fails the second read as fast, so its wake is not later; one that hangs wakes up to
@@ -299,12 +326,13 @@ record() { # <repo> <main> <now> <await>
   readsnap "${ASK_LIMIT:-45}"; rc=$?
   if [ "$rc" != 0 ]; then
     if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then outcome=slow; else outcome=failed; fi
-    used=none
+    used=none fails=$((fails + 1))
     if readhealth; then
       used=health
       hnew=$(awk -F'\t' -v p="$repo/" '!cur { seen[$0]; next } $1 != "" && !((p $1) in seen)' "$SEEN" cur=1 - <<<"$hcur")
     fi
-    if [ -z "$hnew" ] && [ $((now - first)) -ge "$DOWN_S" ]; then
+    # Unreachable only from the third failed poll in a row on (#715: most outages cleared on the poll after the first).
+    if [ -z "$hnew" ] && [ "$fails" -ge 3 ] && [ $((now - first)) -ge "$DOWN_S" ]; then
       tried=1; readsnap "$SLOW_S"; rc=$?
       [ "$rc" != 0 ] || { outcome=slow used=snapshot; }
     fi
@@ -312,20 +340,24 @@ record() { # <repo> <main> <now> <await>
   printf '%s: %s, read %s\n' "$repo" "$outcome" "$used" >> "$POLLF"
   if [ "$rc" = 0 ]; then
     rm -f "$down"
-    # Idle, GitHub not reached and gh signed out are problems only on the second poll in a row that lists them:
-    # $idle, $ghreach and $ghout mark the first. $ghreach and $ghout hold the GitHub read that listed them (health
-    # ghRead, ghok()'s GHREAD): a snapshot given again from the cache, or built again from the same GitHub folder
-    # read, is the same read, so it is still the first poll (#490). Health's own time is not the read's: a snapshot
-    # built again after a card update has a new one.
+    # Idle is a problem only on the second poll in a row that lists it ($idle marks the first); GitHub not reached
+    # and gh signed out only on the third (#715: most cleared on the poll after the first). $ghreach and $ghout hold
+    # how many polls in a row listed them, 1 or 2, and the GitHub read of the last (health ghRead, ghok()'s GHREAD): a
+    # snapshot given again from the cache, or built again from the same GitHub folder read, is the same read, so it
+    # counts as no new poll (#490). Health's own time is not the read's: a snapshot built again after a card update has
+    # a new one.
     if ! grep -q $'^idle\t' <<<"$cur"; then rm -f "$idle"
     elif [ ! -e "$idle" ]; then touch "$idle"; cur=$(grep -v $'^idle\t' <<<"$cur"); fi
     local hread; hread=$(jq -r '.health.ghRead | strings' <<<"$rec" 2>/dev/null)
-    if ! grep -q $'^ghreach\t' <<<"$cur"; then rm -f "$ghreach"
-    elif [ ! -e "$ghreach" ] || { [ -n "$hread" ] && [ "$(cat "$ghreach")" = "$hread" ]; }; then
-      printf '%s\n' "$hread" > "$ghreach"; cur=$(grep -v $'^ghreach\t' <<<"$cur"); fi
-    if ! grep -q $'^gh\t' <<<"$cur"; then rm -f "$ghout"
-    elif [ ! -e "$ghout" ] || { [ -n "$hread" ] && [ "$(cat "$ghout")" = "$hread" ]; }; then
-      printf '%s\n' "$hread" > "$ghout"; cur=$(grep -v $'^gh\t' <<<"$cur"); fi
+    thirdpoll() { # <key> <its file>: the key left in cur only on the third poll in a row that lists it
+      local n r
+      grep -q "^$1"$'\t' <<<"$cur" || { rm -f "$2"; return; }
+      read -r n r 2>/dev/null < "$2" && [[ $n =~ ^[0-9]+$ ]] || n=0
+      { [ -n "$hread" ] && [ "$n" != 0 ] && [ "$r" = "$hread" ]; } || n=$((n + 1))
+      [ "$n" -lt 3 ] || return 0
+      printf '%s %s\n' "$n" "$hread" > "$2"; cur=$(grep -v "^$1"$'\t' <<<"$cur")
+    }
+    thirdpoll ghreach "$ghreach"; thirdpoll gh "$ghout"
     # A stuck card is a problem only when two snapshots in a row, at least a poll apart, list it: one reading can
     # fall between two lines of a step that goes on. $stuckf holds each stuck key of the last snapshot and when a
     # snapshot first listed it ("<key> TAB <epoch>"); a key the snapshot does not list is dropped from it. When that
@@ -334,12 +366,13 @@ record() { # <repo> <main> <now> <await>
       FILENAME == f { t[$1] = $2; next }
       $1 ~ /^stuck:/ { s = ($1 in t) ? t[$1] : now; print $1 "\t" s > (f ".tmp"); if (now - s < poll) next }
       { print }' "$stuckf" - <<<"$cur") && mv "$stuckf.tmp" "$stuckf"; then cur=$held; fi
+    reviewretry
   else
     # A failed poll breaks a run of idle polls, of polls that did not reach GitHub, and of polls with gh signed out.
     grep -qxF "$repo/idle" "$SEEN" || rm -f "$idle"
     grep -qxF "$repo/ghreach" "$SEEN" || rm -f "$ghreach"
     grep -qxF "$repo/gh" "$SEEN" || rm -f "$ghout"
-    echo "$first $now" > "$down"
+    echo "$first $now $fails" > "$down"
     # Its reported keys stay reported (no text: a key already reported is never printed again). When health read, its
     # blocked, waiting and before entries are this poll's (hcur): one it no longer lists is dropped, so it wakes again
     # when it comes back. The unreachable key is this poll's only when the longer read was made; a poll that woke on
