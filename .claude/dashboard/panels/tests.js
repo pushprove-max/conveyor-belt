@@ -757,7 +757,7 @@
         ...(v ? ['', `The judge's verdict (${v.end || v.start}, ${v.cli} · ${v.model} · ${v.effort}): ${v.verdict}.`] : [])],
       [['Its proxy parts (what it protects | the direct check | the cases that must keep passing):', directOf(f.file), (x) => `- DIRECT: ${directSaid(x)}`]],
       ['- The file keeps each case that a DIRECT line above names, and adds or removes no other test file.',
-        '- Run alone with the change on a test slot, the file passes and costs less CPU time than its recent runs.']);
+        '- Run alone with the change on a test slot, the file succeeds and costs less CPU time than its recent runs.']);
   }
   const draftDelete = (f) => drafted('Delete it', `Delete the test file ${f.file}`, f.file,
     [neverSaid(f), 'Delete it. For each of its cases that matters, name the test that already proves its behaviour, on a line of its own: COVERED-BY: <test file>: <its case>. When no other test proves a case that matters, make the file run instead.'], [],

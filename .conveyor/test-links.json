@@ -360,5 +360,11 @@
   ],
   "conveyor/foreman/waiter.test.sh": [
     ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "conveyor/tools/closure.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "conveyor/tools/closure.test.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
   ]
 }
