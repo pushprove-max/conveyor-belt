@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
 # Engine cases: a batch run again when main moved during its run reuses its last run's passes (rebatch(), batchkeep()),
-# and is run again when what landed meanwhile shares a test file with it (sharedtests()).
+# and is run again when what landed meanwhile shares a test file with it (sharedtests()); its run reuses no pass of a
+# card whose change changed since its tests passed (batchkeep()).
 # Its own file, with the fixture of batchreuse.test.sh (reusesetup): each case of the batch's reuse is a whole batch
 # run, and together they were over the test step's CPU budget for one file.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
@@ -47,14 +48,21 @@ t_batchsharedmoved() {
   mkdir -p "$R/lib"; echo mine > "$R/lib/mine.sh"; echo other > "$R/lib/other.sh"; echo case1 > "$R/lib/mine-other.test.sh"
   git -C "$R" add lib; git -C "$R" commit -qm "two sources and their shared test"
   echo 'case $PWD in *-7) echo seven >> lib/mine.sh ;; esac' >> "$STUB/build"
-  # #8 changes after its own run, so the batch's run runs its cases (a run of none would not start the test command).
+  # #8 changes after its own run, so the batch's run runs its cases (a run of none would not start the test command),
+  # and only those: checked below.
   echo 'd=$(echo ../*-8); echo more >> "$d/y.txt"; git -C "$d" add -A' > "$STUB/held-then"
   echo 'grep -qx seven a.txt && grep -qx eight a.txt && [ ! -e "$STUB/moved" ] && { : > "$STUB/moved"; echo moved >> "$STUB/runs"; (cd "$R" && echo main >> lib/other.sh && git commit -qam "main changes the other source"); }; :' >> "$STUB/test-cmd"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   c7=$(cardof 7); c8=$(cardof 8)
   grep -q "card $c7: cards landed during its batch's run touch its test files too, so the batch is tested again: lib/mine-other.test.sh on main as it is now" <<<"$out" \
     || fail "the batch landed on its run though main's change shares a test file with it: $out"
+  # A card whose change changed since its tests passed brings no pass (batchkeep()): the batch's first run (the line
+  # before `moved`) runs y.test's two cases, as #8's y.txt changed after its own run, and not x.test's or m1, which #7
+  # passed on its unchanged change.
+  [ "$(grep -B1 -x moved "$STUB/runs" | head -n 1)" = "7 y1 y2" ] \
+    || fail "the batch's first run did not run #8's changed cases alone: $(runs)"
   sed -n '/^moved$/,$p' "$STUB/runs" | grep -q ' m1\b' || fail "the shared test's case m1 did not run again after main moved: $(runs)"
-  [ "$(st 'select(.step == "landed") | .issue' | sort | tr '\n' ' ')" = "7 8 " ] && [ "$(tail -n 1 "$R/lib/other.sh")" = main ] \
-    && [ "$(tail -n 1 "$R/lib/mine.sh")" = seven ] || fail "both cards did not land on main as it moved: $(st 'select(.step == "landed")')"
+  landedtogether "$c8 $c7" && [ "$(tail -n 1 "$R/lib/other.sh")" = main ] \
+    && [ "$(tail -n 1 "$R/lib/mine.sh")" = seven ] || fail "both cards did not land as one batch on main as it moved: $(st 'select(.step == "landed")')"
+  [ "$(cat "$R/y.txt" | tr '\n' ' ')" = "y more " ] || fail "main does not hold #8's change as it was tested: $(cat "$R/y.txt")"
 }
