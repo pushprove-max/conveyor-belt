@@ -113,6 +113,52 @@ test('the tabs are Overview, 3D View, Control, Rules, Tests and Benchmarks, reac
   }
 });
 
+// Issue 598. Bugs it catches: the page had no keys of its own, so a keyboard user tabbed through every panel to reach
+// another tab, Needs you or the Board filter; and a key handler that also ran while a field had focus would switch tabs
+// as the owner typed "3" in the Board filter, or would take a browser's own Ctrl key.
+test('page keys: 1 to 5 open the tabs in order, n Needs you, / the Board filter, ? the list of keys; none while typing in a field or with Ctrl', () => {
+  const w = boot();
+  deliver(w, full());
+  const body = w.document.body;
+  const press = (el, k, mods = {}) => el.dispatchEvent(new w.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...mods }));
+  press(body, '3');
+  assert.deepEqual(order(w), CONTROL_IDS, '3 opens the third tab, Control');
+  // A collapsed Board hides its filter: / must open the Board, or the filter it focuses is not shown.
+  panel(w, 'board').querySelector('.tool.collapse').click();
+  assert.equal(panel(w, 'board').dataset.collapsed, 'true');
+  press(body, '1', { ctrlKey: true });
+  assert.deepEqual(order(w), CONTROL_IDS, 'Ctrl+1 is left to the browser');
+  ['belt3d', 'control', 'rules', 'tests', 'overview'].forEach((t, i) => {
+    press(body, String([2, 3, 4, 5, 1][i]));
+    assert.equal(tabBtn(w, t).getAttribute('aria-selected'), 'true', `key ${[2, 3, 4, 5, 1][i]} opens ${t}`);
+  });
+  press(body, '/');
+  const filter = panel(w, 'board').querySelector('[data-filter="text"]');
+  assert.ok(filter && w.document.activeElement === filter, '/ opens Control and focuses the Board filter');
+  assert.deepEqual([panel(w, 'board').dataset.collapsed, panel(w, 'board').querySelector('.panel-body').hidden], ['false', false],
+    '/ opens the collapsed Board, so its filter shows');
+  assert.equal(press(filter, '1'), true, 'a key typed in the filter is not taken from it');
+  assert.equal(press(filter, '3'), true);
+  assert.deepEqual(order(w), CONTROL_IDS, 'typing 1 or 3 in the Board filter opens no tab');
+  press(body, 'n');
+  assert.deepEqual(order(w), OVERVIEW, 'n opens Overview');
+  assert.ok(w.document.activeElement === panel(w, 'needs'), 'and goes to Needs you');
+  const keys = w.document.getElementById('keys');
+  assert.equal(keys.hidden, true);
+  const was = tabBtn(w, 'rules');
+  was.focus();
+  press(was, '?');
+  assert.equal(keys.hidden, false, '? shows the list of keys');
+  assert.match(keys.textContent, /go to Needs you/);
+  press(w.document.activeElement, 'Escape');
+  assert.equal(keys.hidden, true, 'Esc hides it');
+  // Closing the list must not leave the focus on its hidden Close button: the owner keeps their place on the page.
+  assert.equal(w.document.activeElement, was, 'Esc gives the focus back to where it was');
+  press(was, '?');
+  w.document.getElementById('keys-close').click();
+  assert.equal(w.document.activeElement, was, 'Close gives the focus back too');
+});
+
 test('each tab keeps its own layout, and restore restores the tab in view', () => {
   const w = boot();
   deliver(w, full());

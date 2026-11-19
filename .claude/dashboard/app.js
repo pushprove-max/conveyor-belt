@@ -2119,6 +2119,40 @@
     doc.addEventListener('click', (e) => { if (box.classList.contains('open') && !box.contains(e.target)) show(false); });
     doc.addEventListener('keydown', (e) => { if (e.key === 'Escape' && box.classList.contains('open')) { show(false); btn.focus(); } });
   }
+  // The page's keys, one handler: 1 to 5 open the first five tabs in order, n goes to Needs you, / to the Board filter
+  // and ? shows the list of keys (#keys; Esc or Close hides it and gives the focus back to where it was). A key typed in
+  // a field, or with Ctrl, Alt or Meta (a browser's own keys), is left alone.
+  function wireKeys() {
+    const sheet = byId('keys'), close = byId('keys-close');
+    if (!sheet) return;
+    let back = null;
+    const show = (on) => {
+      if (on) back = doc.activeElement;
+      sheet.hidden = !on;
+      if (on) close.focus();
+      else if (back && back.isConnected && back !== doc.body) back.focus();
+    };
+    close.addEventListener('click', () => show(false));
+    doc.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { if (!sheet.hidden) show(false); return; }
+      if (e.ctrlKey || e.altKey || e.metaKey || e.defaultPrevented) return;
+      const t = e.target;
+      if (t && t.closest && t.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
+      const n = '12345'.indexOf(e.key);
+      if (e.key.length === 1 && n >= 0) setTab(TABS[n][0], true);
+      else if (e.key === 'n') goTo('needs');
+      else if (e.key === '/') {
+        goTo('board');
+        // A collapsed Board is opened, as its filter is in the body the collapse hides.
+        const b = panels.get('board');
+        if (b && !b.el.hidden && lay().collapsed.includes('board')) toggle('collapsed', 'board', false);
+        const f = panels.has('board') && panels.get('board').el.querySelector('[data-filter="text"]');
+        if (f) f.focus();
+      } else if (e.key === '?') show(sheet.hidden);
+      else return;
+      e.preventDefault();
+    });
+  }
 
   // ---- the head line's tiles ----
   // Each tile is a figure over its label, a link to the panel that holds its detail, on that panel's tab. They are
@@ -2623,6 +2657,7 @@
     wireCustomize();
     wireMenu();
     wireTips();
+    wireKeys();
     applyLayout();
     buildHead();
     // Back and Forward may bring another project, filter or sort with the tab: every panel is drawn again from the

@@ -191,8 +191,10 @@
         // The running step's live fields, streamed as the session or review prints them: what it does now,
         // its model replies (turns; none for a test run, which runs no model), and how long since its last output.
         const live = c.live && typeof c.live === 'object' ? c.live : null;
-        // What it does now, in words ("now: running a command"); the command or file itself on hover and tap.
-        if (live && typeof live.action === 'string' && live.action) parts.push(['action', live.action, () => ctx.tip(h('span', 'live-action', `now: ${actionSaid(live.action)}`), live.action)]);
+        // What it does now, in words ("now: running a command"); the command or file itself on hover and tap. A button,
+        // so the keyboard reaches it: Enter opens the same words a tap does.
+        const actionEl = (a) => { const b = h('button', 'live-action', `now: ${actionSaid(a)}`); b.type = 'button'; return ctx.tip(b, a); };
+        if (live && typeof live.action === 'string' && live.action) parts.push(['action', live.action, () => actionEl(live.action)]);
         if (live && c.step !== 'tests' && num(live.turns) && live.turns > 0) parts.push(['turns', live.turns, () => h('span', null, `${live.turns} model ${live.turns === 1 ? 'reply' : 'replies'}`)]);
         if (live && typeof live.lastOutputAt === 'string') parts.push(['quiet', live.lastOutputAt, () => quiet(live.lastOutputAt, ctx)]);
         parts.forEach(([kind, value, make], i) => {

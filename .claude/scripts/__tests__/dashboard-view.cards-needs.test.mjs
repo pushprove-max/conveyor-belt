@@ -186,7 +186,7 @@ test('Declined: the findings newest first with who and why; "File as issue", con
   b.click();
   await settle();
   assert.equal(w.posts.length, 0, 'the first click only asks');
-  assert.match(rows()[1].querySelector('.answer-note').textContent, /Click again to file it as an issue/);
+  assert.equal(b.textContent, 'Click again to file it as an issue', 'armed, it says what the next click does');
   b.click();
   await settle();
   assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'build', args: ['d0123456789ab'], repo: 'sample' } }]);

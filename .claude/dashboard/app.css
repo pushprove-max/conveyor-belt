@@ -230,6 +230,7 @@ h1 { font-size: var(--fs-lg); font-weight: 700; letter-spacing: -0.01em; }
 .choice-item input:disabled { cursor: default; }
 .sheet-restore { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); }
 .sheet-restore .sheet-note { margin-bottom: 0; }
+.keys-list { padding-left: var(--sp-4); }
 
 /* ---- the setup of a repository not yet onboarded (rules.js): the line above the panels, and the box over the page ---- */
 .onboard-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); margin: var(--sp-3) var(--sp-5) 0; padding: var(--sp-3) var(--sp-4);
@@ -456,6 +457,9 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .track-now > * { flex: 0 0 auto; }
 .track-now > .live-action, .track-now > .failed { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .track-now .failed { color: var(--bad); font-weight: 650; }
+/* The live action is a button (the keyboard reaches it) drawn as the line's text. */
+.track-now > button.live-action { font: inherit; color: inherit; background: none; border: 0; padding: 0; text-align: start; white-space: nowrap; }
+.track-now > button.live-action:focus-visible { outline-offset: -2px; } /* .track-now hides what overflows it */
 .track-detail { margin-top: var(--sp-2); font-size: var(--fs-sm); }
 .track-detail > summary { cursor: pointer; color: var(--muted); }
 /* Every step as a timeline: a row a step, its name, then its bar on the card's one time axis (left and width set from

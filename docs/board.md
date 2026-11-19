@@ -69,6 +69,15 @@ serves the Board, because its requests come from a loopback address. An admin se
 - **Tests**: the project's test files.
 - **Benchmarks**: the project's SWE-bench runs and their arms ([Benchmarks tab](#benchmarks-tab)).
 
+Keys on the page:
+
+- `1` to `5` open Overview, 3D View, Control, Rules and Tests.
+- `n` goes to Needs you.
+- `/` goes to the filter of the Board panel, and opens the Board panel if it is collapsed.
+- `?` shows the list of keys. Escape closes it, and the focus goes back to where it was.
+
+The keys do nothing while you type in a field, and with Ctrl, Alt or Meta.
+
 The Queue panel lists the issues that Conveyor builds next, in order. Under them are two groups, each a heading with
 its count: **Waiting on another card (N)** and **Built, waiting for your PROD deploy (N)**. A group is closed until
 you click its heading. It stays open when the Board gets new data. The length of the panel counts only the issues
@@ -94,6 +103,10 @@ not show. Click the button, then click it again. If the lines that the button co
 the button shows the new count and you must click two times again. A new line changes the count of **Dismiss all**.
 It changes the count of **Dismiss all shown** only if the panel shows the new line. The lines leave the panel and its count. **Show every line** still shows
 them, marked Dismissed.
+
+**File as issue** on a Declined line files the finding as an issue, and Conveyor builds it in its turn. Click it, then
+click it again. If you do not click it again in 5 s, it shows **File as issue** again and the next click only asks
+again.
 
 Customize also sets how the Board writes times and dates, in this browser:
 

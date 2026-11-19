@@ -4,7 +4,7 @@
 // days old), rest every other (the newest the snapshot keeps, and the older ones from the history); a line is {repo, repoUrl, id, time, card, issue, name (a main-red fix card's, which has issue 0, or null), url, finding, by, why, built, dismissed}, as
 // the project's declined list holds it (conveyor.sh declined()), with round and findings (the review the judge
 // declined it in and that review's findings as the judge numbered them), which turn each F<n> of the judge's reason
-// into the finding it means (why, below). "File as issue" (confirmed by a second click: it costs a build) files the
+// into the finding it means (why, below). "File as issue" (confirmed by a second click within 5 s: it costs a build) files the
 // finding as an ordinary issue, through POST /control build with the line's repository and id; the line is greyed in
 // place at once, and built is that issue once it is filed, the line then saying so in place of the button. "Dismiss"
 // (one line, on a second click that says it is for good), "Dismiss all shown (n)" and "Dismiss all (n)" (in the panel's
@@ -20,11 +20,10 @@
   const WHO = { code: 'the code', judge: 'the judge', owner: 'the owner' };
   const DISMISS_MAX = 400; // the most ids POST /control dismiss takes in one request (dashboard_server.py control_ok)
   const DAY = 86400000, KEEP = 7 * DAY, WARN = 2 * DAY; // a line leaves the panel KEEP after its time; WARN before, it says so
-  // What the owner did with a line since the page loaded, through every redraw: armed (the first click of "File as
-  // issue"), said (the host's answer), busy (sent, no answer yet) and gone (dismissed here: {time, by}, until a snapshot
-  // has the line in its rest).
+  // What the owner did with a line since the page loaded, through every redraw: said (the host's answer), busy (sent,
+  // no answer yet) and gone (dismissed here: {time, by}, until a snapshot has the line in its rest).
   // filed: the lines the host filed here, greyed until a list shows them built.
-  const armed = new Set(), said = new Map(), busy = new Set(), gone = new Map(), filed = new Set();
+  const said = new Map(), busy = new Set(), gone = new Map(), filed = new Set();
   let allSaid = ''; // the host's answer to "Dismiss all shown" or "Dismiss all", when it refused
   // By button: the keys of the lines "Dismiss all shown" or "Dismiss all" was first clicked for; a second click sends
   // them only while they are still its targets, so a click never dismisses lines its count did not name.
@@ -260,24 +259,21 @@
         if (x.dismissed) return li;
         const box = h('div', 'answer'), note = h('p', 'answer-note');
         note.setAttribute('aria-live', 'polite');
-        // File as issue costs a build: it asks for a second click. Dismiss cannot be undone: a second click too.
-        const b = h('button', 'btn btn-cost'), off = h('button', 'btn btn-quiet', 'Dismiss');
+        // File as issue costs a build: it asks for a second click (ctx.twice: the first click arms it for 5 s). Dismiss
+        // cannot be undone: a second click too.
+        const b = h('button', 'btn', 'File as issue'), off = h('button', 'btn btn-quiet', 'Dismiss');
         b.type = 'button'; off.type = 'button';
-        b.dataset.act = 'build'; off.dataset.act = 'dismiss'; b.dataset.guard = 'spend';
+        b.dataset.act = 'build'; off.dataset.act = 'dismiss';
         const draw = () => {
-          b.textContent = armed.has(k) ? 'Click again to file it as an issue' : 'File as issue';
-          b.setAttribute('aria-pressed', String(armed.has(k)));
-          b.toggleAttribute('data-armed', armed.has(k));
           b.disabled = busy.has(k); off.disabled = busy.has(k);
           // Filed, the line is greyed in place and its buttons go, until the list no longer shows it.
           li.classList.toggle('is-pending', filed.has(k));
           b.hidden = filed.has(k); off.hidden = filed.has(k);
           note.textContent = said.get(k) || '';
         };
-        b.addEventListener('click', () => {
+        ctx.twice(b, 'spend', 'Click again to file it as an issue', () => {
           if (busy.has(k)) return;
-          if (!armed.has(k)) { armed.add(k); said.set(k, 'Click again to file it as an issue. Conveyor then builds it in its turn, as an ordinary issue.'); draw(); return; }
-          armed.delete(k); busy.add(k); said.set(k, 'Sending…'); draw();
+          busy.add(k); said.set(k, 'Sending…'); draw();
           ctx.post('control', { action: 'build', args: [x.id], repo: x.repo })
             .then(answer, noAnswer)
             .then((r) => {
@@ -288,7 +284,7 @@
         });
         ctx.twice(off, 'final', 'Click again: dismiss it for good', () => {
           if (busy.has(k)) return;
-          armed.delete(k); said.set(k, 'Sending…'); draw();
+          said.set(k, 'Sending…'); draw();
           dismiss([x], (bad) => said.set(k, bad.length ? `Not dismissed: ${bad[0]}` : ''));
           draw();
         });

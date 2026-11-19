@@ -60,6 +60,21 @@
   <div id="customize-body"></div>
 </aside>
 
+<!-- The page's keys: ? opens this list (app.js, wireKeys). -->
+<aside id="keys" class="sheet" aria-label="Keys" hidden>
+  <header class="sheet-head">
+    <h2>Keys</h2>
+    <button type="button" id="keys-close" class="btn btn-quiet">Close</button>
+  </header>
+  <ul class="sheet-note keys-list">
+    <li><kbd>1</kbd> to <kbd>5</kbd>: open Overview, 3D View, Control, Rules or Tests</li>
+    <li><kbd>n</kbd>: go to Needs you</li>
+    <li><kbd>/</kbd>: go to the Board filter</li>
+    <li><kbd>?</kbd>: show this list</li>
+  </ul>
+  <p class="sheet-note">The keys do nothing while you type in a field.</p>
+</aside>
+
 <main id="grid" class="grid" aria-busy="true">
   <!-- Shown until the page's code has run, so the page is never blank. -->
   <section class="panel" data-size="wide" aria-hidden="true"><div class="panel-body"><div class="skeleton"><span class="bar w60"></span><span class="bar w90"></span><span class="bar w75"></span></div></div></section>

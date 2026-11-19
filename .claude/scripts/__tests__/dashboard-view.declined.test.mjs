@@ -254,6 +254,31 @@ test('Declined: "Dismiss all shown (n)" sits in the heading as a warning, asks o
   assert.equal(all(), null, 'nothing left to dismiss: no button in the heading');
 });
 
+// Bug it catches: "File as issue" kept its own armed state with no time limit, so a first click left it armed for
+// good and a stray click minutes later filed the finding (a build). Through ctx.twice, as Dismiss, it disarms after 5 s.
+test('Declined: with a fake clock, "File as issue" disarms 5 s after its first click, and the next click only arms it again', async () => {
+  const w = boot();
+  deliver(w, full());
+  const b = panel(w, 'declined').querySelector('.rows > .row button[data-act="build"]');
+  assert.equal(b.dataset.guard, 'spend', 'it is guarded as a cost, by the shared rule');
+  b.click();
+  await settle();
+  assert.equal(b.textContent, 'Click again to file it as an issue');
+  assert.equal(b.getAttribute('aria-pressed'), 'true');
+  // 5 s on the fake clock: the arming's timer, and only it, runs.
+  const arm = w.timeouts.filter((t) => t.ms === 5000);
+  assert.equal(arm.length, 1, 'the first click set one 5 s timer');
+  w.timeouts = w.timeouts.filter((t) => t.ms !== 5000);
+  w.clock += 5000;
+  arm[0].fn();
+  assert.equal(b.textContent, 'File as issue', '5 s later it says "File as issue" again');
+  assert.equal(b.getAttribute('aria-pressed'), 'false');
+  b.click();
+  await settle();
+  assert.equal(b.textContent, 'Click again to file it as an issue', 'the next click arms it again');
+  assert.equal(w.posts.length, 0, 'nothing was posted');
+});
+
 // Issue 141. Bug: a main-red fix card has no issue (issue 0), so its declined lines, opened from its declined count,
 // said "Showing the line of #0 only"; the note and the line's head show the card's name.
 test('Declined: a main-red fix card\'s lines are shown by its name, never as "#0"', () => {

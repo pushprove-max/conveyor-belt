@@ -28,10 +28,17 @@ test('a Belt part where only one card\'s tokens changed redraws only that card\'
   const head = a.querySelector('.row-main'), heads = nodes(head), others = nodes(b);
   const cost = a.querySelector('.live-cost'), action = a.querySelector('.live-action');
   assert.match(cost.textContent, /412k tokens so far/);
+  // Issue 598: the live action was a span, out of the keyboard's reach. It is a button that takes focus and opens the
+  // full command (Enter on a button clicks it).
+  assert.equal(action.tagName, 'BUTTON');
+  assert.equal(action.type, 'button');
+  action.focus();
+  assert.ok(w.document.activeElement === action, 'the live action takes focus');
   // The live action's words tapped open.
   action.click();
   const pop = w.document.getElementById('tip');
   assert.equal(pop.hidden, false, 'the tapped live action shows its words');
+  assert.equal(pop.textContent, 'Bash: npm test', 'its words are the full command');
   const renders = panel(w, 'belt').dataset.renders;
   const part = clone(data.panels.belt);
   part.data.cards[0].tokens = { claude: 900000, codex: 12300 };
