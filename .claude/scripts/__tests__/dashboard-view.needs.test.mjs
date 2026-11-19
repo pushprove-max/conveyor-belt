@@ -3,8 +3,9 @@
 // button that changes real work follows one guard rule, every action shows its result at once, a blocked card leads
 // with why it failed, and a push failing while it is tried again is said under Needs you's tick. Each case names the
 // bug it catches. Shared setup: dashboard-view.helpers.mjs. A page loads only the panels its case reads (boot's
-// `list`): it then evaluates and draws fewer panel scripts than a page of every panel; the every-tab cases load each
-// tab's own.
+// `list`): it then evaluates and frames fewer panels than a page of every panel. The every-tab cases load each tab's
+// own, which saves evaluating the other tabs' scripts and making their panel frames: the Board draws only the tab in
+// view either way.
 import assert from 'node:assert/strict';
 import { boot, panel, deliver, next, settle, full, trackOf, counts, board, loopP, bcard, act, note, record, rulesP, clone, cases, pickProject, P, LIST, TAB } from './dashboard-view.helpers.mjs';
 const test = cases(import.meta.url);
