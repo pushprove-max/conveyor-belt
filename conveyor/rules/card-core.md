@@ -14,6 +14,11 @@ Keep tests fast:
 - One fixture, render or build per file where the cases allow it, as each one is paid for on every run; a case that runs several fixtures one after another is split into one case per fixture, as cases run side by side and a file takes about as long as its slowest case.
 - Use the project's shared fast test helpers rather than the slow real thing, unless the test is about that thing; call the function rather than run the whole program when only the function is under test: the slow path adds its time to every run and proves nothing more about the code under test.
 
+Your own test runs, in a build or fix session:
+- Run only the cases the change adds or changes, by name: `bash conveyor/conveyor.test.sh <case>`. Also run the existing cases that cover the changed code. For a project with no case runner, run the test file the change touches.
+- Do not run a whole area file, the whole suite, or many files to look for failures. The Test step selects and runs them.
+- Do not run tests on a second checkout of HEAD or main to find out whether a failure was there before. The Test step does that run on main.
+
 Keep the session's context small (each tool result is read again on every later turn):
 - Test commands run through the engine's `testbrief.sh -- <command>`, and the command guard adds it to one that does not: it prints the failures with their line numbers, the summary and the path of the whole log, so read the log by line range or search it, never whole.
 - Other commands with over 8,000 characters of output print their first 60 lines, their last 40 lines and the path of a file with the whole output. When the middle matters, read the saved file by line range or search it. Put `CONVEYOR_WHOLE=1` in a command only when it must print whole.

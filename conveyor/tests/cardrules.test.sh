@@ -146,3 +146,24 @@ t_longwait() {
   timeout 0.5 bash -c "${b//\/tmp\/<name>/$T/$CASE} ${w//\/tmp\/<name>/$T/$CASE}" && fail "the wait read an earlier run's status: $b $w"
   [ ! -e "$T/$CASE.rc" ] || fail "an earlier run's status file is still there while the run goes on: $b"
 }
+
+# Bug (#628): a build session ran whole area files and ran failing cases again on a second checkout of HEAD, with sleep
+# loops waiting on them, until it hit its time limit; the Test step does both jobs, and no rule told the session so.
+# The prompt a build session and a fix session are given holds the three lines that say what to run and what not to.
+t_ownruns() {
+  local f l
+  setup "[$(issue 7 2026-01-01)]"
+  echo 'cp "$STUB/brief" "$STUB/brief.$(wc -l < "$STUB/sessions")"; echo "fix$(wc -l < "$STUB/sessions")" >> a.txt' > "$STUB/build"
+  printf '%s\n' '[P1] a.txt:1 wrong word' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
+  printf '%s\n' 'USER-VISIBLE: no' 'VERDICT: GO' > "$STUB/review.2"
+  loop run --only 7 >/dev/null || fail "run exited non-zero"
+  [ -s "$STUB/brief.1" ] && grep -qF '# Reviewer findings: fix these findings' "$STUB/brief.2" \
+    || fail "no build brief, or the second session was no fix session: $(cat "$STUB/sessions" 2>&1)"
+  for f in "$STUB/brief.1" "$STUB/brief.2"; do
+    for l in '- Run only the cases the change adds or changes, by name: `bash conveyor/conveyor.test.sh <case>`. Also run the existing cases that cover the changed code. For a project with no case runner, run the test file the change touches.' \
+      '- Do not run a whole area file, the whole suite, or many files to look for failures. The Test step selects and runs them.' \
+      '- Do not run tests on a second checkout of HEAD or main to find out whether a failure was there before. The Test step does that run on main.'; do
+      grep -qxF -- "$l" "$f" || fail "the ${f##*/} prompt does not hold the line: $l"
+    done
+  done
+}
