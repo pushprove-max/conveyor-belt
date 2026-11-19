@@ -369,7 +369,9 @@ ncblock() { # <card> <issue> <worktree> <reason> <words>
 # confirms that main already does what the issue asks, and on its GO the issue is closed with that line and the
 # card's closing line is `closed`. Anything else blocks the card with the reason; there is no fix round.
 # The untouched worktree is first moved to main as it stands, so the reviewer reads today's main, not the one the
-# session started from; closed() then refuses a main that has moved on from the commit the reviewer read.
+# session started from; closed() then refuses a main that has moved on from the commit the reviewer read, unless
+# every file the ALREADY-DONE line names is the same on the new main (issue 552: on a busy belt main moves during
+# nearly every review, and a new review only meets the same move again).
 # A main-red fix card (issue 0, its entry in the main-red record) that made no change first runs its cases again on
 # main as it is now (redproof(), issue 323): when every case passes there, main is no longer red for them, and the card
 # closes as not needed, its closed line saying so. Else it is blocked, saying why, whatever its reply says: only that
@@ -418,10 +420,21 @@ nochange() { # <card> <issue> <worktree> <brief>
 }
 
 # Under the lock, as one step, so no Conveyor landing comes between the check and the close: the issue is closed
-# only if main is still the commit the reviewer read, then the closed line is written. Prints the reason when it fails.
+# only if main is still the commit the reviewer read, or main moved but no file the ALREADY-DONE line names (a word
+# of it, its `:<line>` and quotes taken off, that is a file or folder in the commit read) changed since; a line that
+# names none is refused as before. Then the closed line is written. Prints the reason when it fails.
 closed() { # <card> <issue> <worktree> <ALREADY-DONE line>
-  local err l
-  [ "$(git rev-parse "refs/heads/$BRANCH")" = "$(git -C "$3" rev-parse HEAD)" ] \
+  local err l h m w p ps=() ws
+  h=$(git -C "$3" rev-parse HEAD) m=$(git rev-parse "refs/heads/$BRANCH")
+  if [ "$m" != "$h" ]; then
+    read -ra ws <<<"${4#ALREADY-DONE:}"
+    for w in "${ws[@]}"; do
+      [[ $w =~ ^[^[:alnum:]._/-]*([[:alnum:]._/-]+) ]] || continue
+      p=${BASH_REMATCH[1]}; while [[ $p == *. ]]; do p=${p%.}; done
+      [ -n "$p" ] && git cat-file -e "$h:$p" 2>/dev/null && ps+=("$p")
+    done
+  fi
+  [ "$m" = "$h" ] || { [ ${#ps[@]} -gt 0 ] && git diff --quiet "$h" "$m" -- "${ps[@]}"; } \
     || { echo "the reviewer confirmed that main already fixes the issue, but main changed during that review. The fix is possibly not on main now, so the engine did not close the issue"; return 1; }
   l=$(line "$1" "$2" closed ok "$(jq -cn --arg r "$4" --argjson e "$(ending)" --argjson w "$(waited)" '{reason:$r} + $e + $w')") || { echo "the engine cannot make the closed line, so it did not close the issue"; return 1; }
   # A card of issue 0 (a main-red fix card) has no issue to close.

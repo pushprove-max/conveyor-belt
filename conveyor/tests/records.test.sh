@@ -274,7 +274,7 @@ t_reopenonly() {
 # the reviewer reads the main the session started from, not today's; a GO closes the issue although main moved
 # during that review (another card may have removed the fix); the closed line has no waitSec, so the drift watch
 # (bench/drift.sh) leaves the closed card out of its mean wait.
-# Each kind is a case of its own on a main of its own (done, donenogo, donemoved, doneempty), so they run side by side.
+# Each kind is a case of its own on a main of its own (done, donenogo, donemoved, donemovedkept, doneempty), so they run side by side.
 # donesetup <issue>...: a fresh main with those issues, whose session changes nothing and says ALREADY-DONE (not last
 # for #9, not at all for #10); the reviewer's prompt is kept in $STUB/asked.
 donesetup() {
@@ -322,16 +322,31 @@ t_donenogo() {
   [ ! -e "$STUB/closed" ] && [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] || fail "issue #8 was closed over a NO-GO, or it got a fix round or a second review"
 }
 
-# Main moves while the session works: the reviewer reads the new main. It moves again during the review: the GO
-# is for a main that is gone, so the card is blocked and the issue stays open.
+# Main moves while the session works: the reviewer reads the new main. It moves again during the review and replaces
+# the word one in a.txt, the line the ALREADY-DONE line cites, so the fix is gone: the card is blocked and the issue
+# stays open.
 t_donemoved() {
   donesetup 11; echo 'git -C "$R" commit -q --allow-empty -m "landed during the session"' > "$STUB/build"
   sed -i 's|^case \$(tee "\$STUB/brief") in|. "$STUB/build"\n&|' "$STUB/claude"
-  echo 'git rev-parse HEAD > "$STUB/reviewed"; git -C "$R" commit -q --allow-empty -m "landed during the review"' > "$STUB/review-cmd"; echo "$GO" > "$STUB/review.1"
+  echo 'git rev-parse HEAD > "$STUB/reviewed"; (cd "$R" && echo two > a.txt && git commit -qam "landed during the review")' > "$STUB/review-cmd"; echo "$GO" > "$STUB/review.1"
   loop run 1 >/dev/null || fail "run with a moving main exited non-zero"
   [ "$(cat "$STUB/reviewed")" = "$(git -C "$R" rev-parse HEAD~1)" ] || fail "the reviewer did not read main as it stood when the review started"
   st 'select(.issue == 11 and .step == "blocked") | .reason' | grep -q 'main changed during that review.*ALREADY-DONE: a.txt already' || fail "a GO for a main that moved did not block with the reason: $(st 'select(.issue == 11) | "\(.step) \(.reason)"')"
+  [ "$(git -C "$R" show HEAD:a.txt)" = two ] || fail "main's move during the review did not replace the cited line"
   [ ! -e "$STUB/closed" ] && [ -z "$(st 'select(.issue == 11 and .step == "closed")')" ] || fail "issue #11 was closed although main moved during the review"
+}
+
+# Bug (#552): main moved during the review but left a.txt, the file the ALREADY-DONE line names, as it was; the card
+# was blocked anyway, and on a busy belt every retry's review met another move. The engine checks the named file
+# against the new main and closes the issue, with no second review.
+t_donemovedkept() {
+  donesetup 12
+  echo '(cd "$R" && echo other > other.txt && git add other.txt && git commit -qm "landed during the review")' > "$STUB/review-cmd"; echo "$GO" > "$STUB/review.1"
+  loop run 1 >/dev/null || fail "run with a moving main exited non-zero"
+  [ "$(git -C "$R" log -1 --format=%s)" = "landed during the review" ] || fail "main did not move during the review"
+  [ "$(cat "$STUB/closed" 2>&1)" = 12 ] && [ "$(st 'select(.issue == 12 and .step == "closed") | .reason')" = 'ALREADY-DONE: a.txt already holds the word one' ] \
+    || fail "issue #12 was not closed although main kept a.txt: $(st 'select(.issue == 12) | "\(.step) \(.reason)"')"
+  [ -z "$(st 'select(.issue == 12 and .step == "blocked")')" ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] || fail "the card was blocked, or got a second review"
 }
 
 # No change and no ALREADY-DONE last line (#9 says it, but not last; #10 does not say it): blocked as before, with no review.
