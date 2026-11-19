@@ -2125,12 +2125,13 @@ alonefile() { # <issue json>
 }
 # The check of a Make it run alone card: main's pack (.conveyor/project.json) as the change leaves it no longer marks
 # the file wholeOnly, and the file runs alone, with the change, on a test slot, through the test.fileCommand of that
-# same pack (with none set, the check fails naming it). The run must pass and name the file: what it passed (testfails()) or
-# timed (timed()) names it. A change that removes the file (its runs moved into other test files) runs the test files
-# the change adds or changes in its place. Writes the result in <worktree>.unfixed, the reason first when it does not
+# same pack (with none set, the check fails naming it). The run must pass and the command must have run the file: a
+# case of it that passed (testfails(): one whose name is in the file's text) or the runner's time of it names it (a time
+# from Record CPU time only when the change leaves main's test.fileCommand). A change that removes the file (its runs
+# moved into other test files) runs the test files the change adds or changes in its place. Writes the result in <worktree>.unfixed, the reason first when it does not
 # hold, and fails then.
 aloneproof() { # <card> <worktree> <test file>
-  local mwt=$CARDS/mainrun/$1.alone f=$3 sha out='' rc=0 why='' x tl='' fs=() ok pp=$2/.conveyor/project.json
+  local mwt=$CARDS/mainrun/$1.alone f=$3 sha out='' rc=0 why='' x tl='' fs=() ok t tm pp=$2/.conveyor/project.json
   rm -f "$2.unfixed"
   # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
   git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || return 0
@@ -2155,8 +2156,20 @@ aloneproof() { # <card> <worktree> <test file>
       why="the test file ${fs[*]} failed run alone through the pack's test.fileCommand, with the change, on a test slot (exit $rc)${x:+: its failing cases: $x}"
       tl=$(tail -n 30 "$mwt.test" 2>/dev/null | tr -d '\000')
     else
-      ok=$({ testfails "$mwt.test" 0 2>/dev/null | jq -r '.passed[]?, (.passcases + .okcases)[]?.file' 2>/dev/null; timed "$mwt" 2>/dev/null | jq -r 'keys[]' 2>/dev/null; })
-      for x in "${fs[@]}"; do grep -qxF -- "$x" <<<"$ok" || { why="the run alone through the pack's test.fileCommand passed, but did not run the test file $x: no log line or report of the run names it"; break; }; done
+      # Not the file's `-- ok` line: filecmd() writes it on any exit 0 of the command, so a command that runs nothing
+      # (as `true`) has it too. A case of the file that passed (in its text), or a time of it the runner gave (a
+      # `TESTRUN sec` line of its logs or its report, reported()). The log `cputime`, which the engine's wrapper
+      # (cputwrap(), lib/testfiles.sh; the Board's Record CPU time) writes for any command it wraps, counts only when
+      # the change leaves main's test.fileCommand: a card's own wrapper around a command that runs nothing writes it too.
+      t=$(testfails "$mwt.test" 0 2>/dev/null) x='/cputime$'
+      [ "$(jq -c '.test.fileCommand' "$pp" 2>/dev/null)" != "$(jq -c '.test.fileCommand' "$PACK" 2>/dev/null)" ] || x='^$'
+      tm=$({ cat "$mwt.reported"; testlogs "$mwt" | grep -v -- "$x" | tr '\n' '\0' | xargs -0r cat; } 2>/dev/null | awk -F '\t' '$1 == "TESTRUN sec" { print $2 }')
+      for x in "${fs[@]}"; do
+        grep -qxF -- "$x" <<<"$tm" && continue
+        ok=$(jq -r --arg f "$x" '(.passcases + .okcases)[]? | select(.file == $f) | .cases[] | select(. != "")' <<<"$t" 2>/dev/null)
+        [ -n "$ok" ] && grep -qF -- "$ok" "$mwt/$x" 2>/dev/null && continue
+        why="the run alone through the pack's test.fileCommand passed, but did not run the test file $x: no case of it that passed, and no time of it from the runner itself, is in the run's output, logs or report"; break
+      done
     fi
   else why="the test file ${fs[*]} could not be run with the change: ${out:0:300}"; fi
   { if [ -n "$why" ]; then printf '%s\n' "$why"

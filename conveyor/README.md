@@ -1288,7 +1288,9 @@ cards either; each has a check of its own, and the review is shown its result:
 - Make it run alone, "Make the test file <file> run alone", for a file `test.files` marks `wholeOnly`: the pack as
   the change leaves it (main's own when the project does not track `.conveyor/project.json`) must no longer mark the
   file `wholeOnly`. Then the file runs alone with the change, on a test slot, through `test.fileCommand`. It must
-  pass, and the run's log lines or its runner's report must name it. A change that removes the file runs the test
+  pass, and the run must show that the command ran the file. The output must name a case of the file that passed,
+  with the name in the file's text, or the runner must give the file's time. A `-- ok` line does not show this. A time
+  from Record CPU time shows it only when the change keeps the `test.fileCommand` of main. A change that removes the file runs the test
   files it adds or changes in its place. The card is blocked when the mark stays, when the pack sets no
   `test.fileCommand`, or when the run fails or does not run the file.
 
