@@ -16,6 +16,7 @@ tf_runs() { # <file> <CPU s>...
     time: "2026-11-10T12:\(.key | tostring | if length < 2 then "0" + . else . end):00Z", tokens: {claude: 0, codex: 0}, result: "pass",
     sha: "", reason: "", times: {($f): .value}, clocks: {($f): (.value + 1)}}' --args "${@:2}" >> "$ST/cards.jsonl"
 }
+# Each case's main holds setup's stub test file a.test.sh (filemode, lib.sh), so the part lists it; no card test line times it (only t_tfsuite's whole-suite runs).
 # The engine's functions, as the script of <command> (conveyor/commands/) loads them, in a shell of the case's main
 # ($R): <function> run there, with the 7 days from 2026-11-09. tf_in as the snapshot loads them (testspart), tf_card
 # as the loop does a card's test step (slowtests, slowrec).
@@ -50,7 +51,7 @@ t_tfpart() {
   [ "$(jq -c '.files[] | select(.file == "a.test") | {cpu, median, change, runs: [.runs[].cpu], newest: (.runs[0] | {card, time}), lastRun, timedRuns, failedSteps, flaky, issue}' <<<"$got")" \
     = '{"cpu":10,"median":3.5,"change":1.857,"runs":[10,3,4,2],"newest":{"card":"c-a.test-3","time":"2026-11-10T12:03:00Z"},"lastRun":{"sec":11,"cpu":10,"clockPerCpu":1.1,"time":"2026-11-10T12:03:00Z","whole":false},"timedRuns":4,"failedSteps":2,"flaky":2,"issue":42}' ] \
     || fail "a.test's figures: $(jq -c '.files[] | select(.file == "a.test")' <<<"$got")"
-  [ "$(jq -cS '.files | map({key: .file, value: .issue}) | from_entries' <<<"$got")" = '{"a.test":42,"b.test":44,"c.test":47,"d.test":49}' ] \
+  [ "$(jq -cS '.files | map({key: .file, value: .issue}) | from_entries' <<<"$got")" = '{"a.test":42,"a.test.sh":null,"b.test":44,"c.test":47,"d.test":49}' ] \
     || fail "each file's issue, the newest filed for it in any record: $(jq -c '[.files[] | {file, issue}]' <<<"$got")"
 }
 
@@ -144,20 +145,20 @@ t_tfslower() {
   tf_runs r.test 10 10 900 900; tf_runs c.test 10 10 900 900
   got=$(tf_in testspart 2026-11-09) || fail "testspart failed: $got"
   [ "$(jq -cS '[.slower, .totals.slower, (.files | map({key: .file, value: .slower}) | from_entries)]' <<<"$got")" \
-    = '[["c.test","s.test"],2,{"c.test":true,"f.test":false,"h.test":false,"o.test":false,"r.test":false,"s.test":true}]' ] || fail "the files slower than usual: $(jq -c '[.slower, .files]' <<<"$got")"
+    = '[["c.test","s.test"],2,{"a.test.sh":false,"c.test":true,"f.test":false,"h.test":false,"o.test":false,"r.test":false,"s.test":true}]' ] || fail "the files slower than usual: $(jq -c '[.slower, .files]' <<<"$got")"
   [ "$(jq -c '[(.files[] | select(.file == "s.test") | .usual), (.files[] | select(.file == "f.test") | .usual)]' <<<"$got")" = '[10,null]' ] || fail "the usual times: $got"
   [ "$(jq -c '[(.totals | keys), any(.files[]; has("budget") or has("budgetFrom") or has("over")), (.settings | has("fileBudget"))]' <<<"$got")" \
     = '[["files","slower","steps"],false,false]' ] || fail "the part names a CPU budget: $(jq -c '[.totals, .settings, .files]' <<<"$got")"
 }
 
-# A project with no recorded file time still has the part (the page shows its step totals, never an error): an empty
-# list and the steps of the 7 days, their slot wait and run seconds added up; a step before the 7 days, and one that
+# A project with no recorded file time still has the part (the page shows its step totals, never an error): main's
+# one test file (a.test.sh), no file counted in the totals, and the steps of the 7 days, their slot wait and run seconds added up; a step before the 7 days, and one that
 # reused a pass (it ran nothing), are not counted. Bug caught: a project with no test line at all had no part (the
 # search for test lines found none and failed the part).
 t_tfempty() {
   setup '[]'
   got=$(tf_in testspart 2026-11-09) || fail "testspart failed with no test line: $got"
-  [ "$(jq -c '[.files, .totals.steps]' <<<"$got")" = '[[],{"count":0,"waitSec":0,"runSec":0}]' ] || fail "the part with no test line: $got"
+  [ "$(jq -c '[(.files | map(.file)), .totals.steps]' <<<"$got")" = '[["a.test.sh"],{"count":0,"waitSec":0,"runSec":0}]' ] || fail "the part with no test line: $got"
   # #190: with no whole-suite run and no test.report, the part says none of either (null), never a made-up figure.
   [ "$(jq -c '[.suite, .settings.report]' <<<"$got")" = '[null,null]' ] || fail "the suite and report with none on record: $got"
   { jq -cn '{card: "c-1", issue: 1, step: "test", time: "2026-11-12T12:00:00Z", result: "pass", wait: 3, run: 7}'
@@ -165,7 +166,7 @@ t_tfempty() {
     jq -cn '{card: "c-3", issue: 3, step: "test", time: "2026-11-12T14:00:00Z", result: "pass", reused: true}'
     jq -cn '{card: "c-0", issue: 4, step: "test", time: "2026-11-01T12:00:00Z", result: "pass", wait: 100, run: 100}'; } >> "$ST/cards.jsonl"
   got=$(tf_in testspart 2026-11-09) || fail "testspart failed: $got"
-  [ "$(jq -c '[.files, .slower, .totals]' <<<"$got")" = '[[],[],{"files":0,"slower":0,"steps":{"count":2,"waitSec":4.5,"runSec":9}}]' ] \
+  [ "$(jq -c '[(.files | map(.file)), .slower, .totals]' <<<"$got")" = '[["a.test.sh"],[],{"files":0,"slower":0,"steps":{"count":2,"waitSec":4.5,"runSec":9}}]' ] \
     || fail "the part with no file time: $got"
 }
 
@@ -185,8 +186,8 @@ t_tfsuite() {
 }
 
 # Bug it catches (#189): a file with no run on record showed "Never run" with no reason, and a file that Waits had no
-# waits to name. Each file never run says why when the engine can tell: lone.test.sh, which the pack's tests.patterns
-# do not match; other/o.test.mjs, which the test command's folder (tests) does not hold; tests/bad.test.sh, which
+# waits to name. Each file never run says why when the engine can tell: lone.test.sh and a.test.sh, which the pack's
+# tests.patterns do not match; other/o.test.mjs, which the test command's folder (tests) does not hold; tests/bad.test.sh, which
 # does not parse (bash -n); tests/skip.test.mjs, skipped by its describe.skip. tests/fine.test.sh says nothing, nor
 # does tests/ran.test.sh, which ran. The waits are its newest judge's WAIT lines: an older judge's are not shown. The
 # parse is kept by the file's content: a second look reads it from the record, not from bash -n.
@@ -201,7 +202,8 @@ t_tfnever() {
   jq -cn '{id: "000000000001", action: "judge", state: "done", file: "tests/ran.test.sh", end: "2026-11-10T00:00:00Z", waits: [{case: "old", kind: "sleep", at: "tests/ran.test.sh:1", reason: "older"}]}' > "$ST/testactions/000000000001.json"
   jq -cn '{id: "000000000002", action: "judge", state: "done", file: "tests/ran.test.sh", end: "2026-11-11T00:00:00Z", waits: [{case: "one", kind: "polling", at: "tests/ran.test.sh:1", reason: "it polls"}]}' > "$ST/testactions/000000000002.json"
   got=$(tf_in testspart 2026-11-09) || fail "testspart failed: $got"
-  [ "$(jq -c '[.files[] | {file, neverRun}] | sort_by(.file)' <<<"$got")" = '[{"file":"lone.test.sh","neverRun":{"kind":"patterns","reason":"the pack'"'"'s tests.patterns do not match it"}},'\
+  [ "$(jq -c '[.files[] | {file, neverRun}] | sort_by(.file)' <<<"$got")" = '[{"file":"a.test.sh","neverRun":{"kind":"patterns","reason":"the pack'"'"'s tests.patterns do not match it"}},'\
+'{"file":"lone.test.sh","neverRun":{"kind":"patterns","reason":"the pack'"'"'s tests.patterns do not match it"}},'\
 '{"file":"other/o.test.mjs","neverRun":{"kind":"patterns","reason":"the test command (node --test tests) runs tests, which does not match it"}},'\
 '{"file":"tests/bad.test.sh","neverRun":{"kind":"load","reason":"loading it fails: tests/bad.test.sh: line 1: syntax error near unexpected token `then'"'"'"}},'\
 '{"file":"tests/fine.test.sh","neverRun":null},{"file":"tests/ran.test.sh","neverRun":null},{"file":"tests/skip.test.mjs","neverRun":{"kind":"skipped","reason":"it is skipped: describe.skip"}}]' ] \
