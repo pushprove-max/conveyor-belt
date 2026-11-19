@@ -42,10 +42,16 @@ acctsetup() {
   tune '.tunables.limitTtl = 0'; b tune '.tunables.limitTtl = 0'
   export CONVEYOR_LIMIT_CMD='. "$STUB/limitcmd"'
 }
-# The email every usage response carried is in no record and in no GitHub write.
+# The email every usage response carried is in no record and in no GitHub write. The kept snapshot (snapshot.json,
+# commands/snapshot.sh) is left out: it is the snapshot's own output, whose limits give the Board each account's login
+# on this machine (t_accounts checks that), not a record.
 acctnomail() {
-  ! grep -rqF "$mail" "$ST" "$STB" $(ls "$STUB"/comments "$STUB"/close-comments "$STUB"/filed "$SB"/comments "$SB"/close-comments "$SB"/filed 2>/dev/null) \
-    || fail "the account's email reached the records or a GitHub write"
+  local f found writes=()
+  for f in "$STUB"/comments "$STUB"/close-comments "$STUB"/filed "$SB"/comments "$SB"/close-comments "$SB"/filed; do
+    [ -e "$f" ] && writes+=("$f")
+  done
+  found=$(grep -rlF --exclude=snapshot.json "$mail" "$ST" "$STB" "${writes[@]}")
+  [ -z "$found" ] || fail "the account's email reached the records or a GitHub write: $found"
 }
 t_accounts() {
   acctsetup
