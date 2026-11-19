@@ -192,7 +192,7 @@ t_bugcommentsyntax() {
   local r=$T/$CASE/r got=''
   mkdir -p "$r" && git -C "$r" init -q && git -C "$r" config user.email t@example.com && git -C "$r" config user.name t \
     || fail "the fixture repo"
-  printf '%s\n' '// x is two' 'const s = `a' '// b' '`;' 'export const x = 1;' 'draw();' > "$r/app.js"
+  printf '%s\n' '// x is two' 'const s = `a' '// b' '`;' 'export const x = 1;' 'function f() { return 1; }' 'draw();' > "$r/app.js"
   printf '%s\n' '/* the top bar */' '.x { color: red; }' '.y { font-size: 16px; }' > "$r/app.css"
   printf '%s\n' '<!-- the tiles -->' '<nav id="stats"></nav>' '<nav id="tabs"></nav>' > "$r/index.html"
   printf '%s\n' "cat <<'E'" '# STANDING YES' 'E' > "$r/rules.sh"
@@ -215,7 +215,12 @@ t_bugcommentsyntax() {
   try csstoken app.css 's|16px|16/* root size */px|'
   try htmlnode index.html 's|"tabs">|&<!-- Tabs -->|'
   try heredoc rules.sh 's|YES|NO|'
-  [ "$got" = ' js=0 wrap=1 template=1 jsblank=0 jstoken=1 csstoken=1 htmlnode=1 heredoc=1' ] \
+  # #542: a line break other than the newline inside a comment is code to JavaScript. In a /* */ comment it ends the
+  # return's statement (f() returns undefined); in a // comment it ends the comment, so draw() runs.
+  try blocklsep app.js $'s|return |return /*\xe2\x80\xa8*/ |'
+  try blockcr app.js $'s|return |return /*\r*/ |'
+  try linepsep app.js $'s|x is two|x is two\xe2\x80\xa9draw();|'
+  [ "$got" = ' js=0 wrap=1 template=1 jsblank=0 jstoken=1 csstoken=1 htmlnode=1 heredoc=1 blocklsep=1 blockcr=1 linepsep=1' ] \
     || fail "commentsonly() does not tell js comment fixes (0) from code changes (1): $got"
 }
 

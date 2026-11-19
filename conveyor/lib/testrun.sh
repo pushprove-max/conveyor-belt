@@ -1282,10 +1282,14 @@ inlinesplit() { # <worktree> <path> <kind json>
 # space, as it parts them (a/**/b is not ab). Blank lines outside a string go; all else is kept as it is. So two texts
 # that differ only in comment text and blank lines give the same output, and text that only looks like a comment (in
 # a string, or code between a /* and a */ on lines of their own) stays. Fails (2) on a text it cannot read so (a
-# string, comment or expression left open), so a doubt never counts as a comment.
+# string, comment or expression left open), so a doubt never counts as a comment, and on a comment that holds a line
+# break other than the newline that ends its line (a CR, U+2028 or U+2029): JavaScript ends a // comment there, and
+# reads a /* */ comment that holds one as a line break (return /*<U+2028>*/ x returns undefined).
 uncomment() {
-  LC_ALL=C awk -v sq="'" '
+  LC_ALL=C awk -v sq="'" -v ls=$'\xe2\x80\xa8' -v ps=$'\xe2\x80\xa9' '
     function cut() { sub(/[ \t]+$/, "", line) }
+    # Whether comment text t holds a line break; with end set, t runs to the end of its line, whose CRLF CR is not one.
+    function brk(t, end) { if (end) sub(/\r$/, "", t); return index(t, "\r") || index(t, ls) || index(t, ps) }
     BEGIN { m = "code"; k = 0; lc = ""; w = ""
       split("return typeof instanceof in of new delete void throw case do else yield await", kw, " ")
       for (x in kw) key[kw[x]] = 1 }
@@ -1293,7 +1297,8 @@ uncomment() {
       while (i <= n) {
         c = substr(s, i, 1); c2 = substr(s, i, 2)
         if (m == "blk") {
-          j = index(substr(s, i), "*/"); if (!j) { i = n + 1; continue }
+          j = index(substr(s, i), "*/"); if (brk(j ? substr(s, i, j - 1) : substr(s, i), !j)) exit 2
+          if (!j) { i = n + 1; continue }
           i += j + 1; m = "code"; while (substr(s, i, 1) ~ /[ \t]/) i++; continue
         }
         if (m == "str" || m == "tpl" || m == "re" || m == "cls") {
@@ -1304,7 +1309,7 @@ uncomment() {
           line = line c; i++; continue
         }
         # m == "code"
-        if (c2 == "//") { cut(); i = n + 1; continue }
+        if (c2 == "//") { if (brk(substr(s, i + 2), 1)) exit 2; cut(); i = n + 1; continue }
         if (c2 == "/*") { cut(); if (line != "") line = line " "; m = "blk"; i += 2; continue }
         if (c == "\"" || c == sq || c == "`") { q = c; m = (c == "`") ? "tpl" : "str"; line = line c; i++; continue }
         # A / starts a regular expression unless it follows a value: a name (not a keyword), a number, ) or ].
