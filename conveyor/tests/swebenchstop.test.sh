@@ -35,9 +35,12 @@ t_swestop() {
   [ "$out" = "conveyor: run $id is stopped. Its finished tasks are kept." ] || fail "Stop did not say the run is stopped: $out"
   wait_until "! kill -0 $p 2>/dev/null" || fail "the engine loop of the sandbox still runs after Stop"
   wait $! 2>/dev/null
-  tail -n 1 "$B/runs.jsonl" | jq -e --arg id "$id" '.id == $id and .state == "stopped" and (.stopping | type) == "string" and .ended >= .stopping' > /dev/null \
+  # Bug (#646 review E3): the arm's active time left out the work Stop interrupted: its wall minutes are kept. A run
+  # stopped by you is not gone.
+  tail -n 1 "$B/runs.jsonl" | jq -e --arg id "$id" '.id == $id and .state == "stopped" and (.stopping | type) == "string" and .ended >= .stopping
+      and (.interrupted.minutes | type) == "number" and .gone == null' > /dev/null \
     && [ "$(jq -sc 'map(.event)[-2:]' "$B/tails/$id.jsonl")" = '["Stopping","Run stopped"]' ] \
-    || fail "the run's line does not say stopped, or the run did not record its stopping before its end: $(tail -n 1 "$B/runs.jsonl") $(cat "$B/tails/$id.jsonl" 2>&1)"
+    || fail "the run's line does not say stopped, or the run did not record its stopping before its end, or the interrupted work's minutes: $(tail -n 1 "$B/runs.jsonl") $(cat "$B/tails/$id.jsonl" 2>&1)"
   out=$(loop bench swe show "$id" 2>&1) && [ "$(jq -c '[.tasks[].cells[0].state, .run.cost]' <<<"$out")" = '["interrupted","not reached",{"usd":0,"state":"known"}]' ] \
     || fail "show does not tell the task Stop interrupted from the one never reached (#643), or the task stopped before its card recorded anything reads as an unknown cost, not \$0 (#644): $out"
   [ ! -d "$B/work" ] && [ -z "$(ls "$B"/results/*-"$EB" 2>/dev/null)" ] || fail "the stopped task left a sandbox or a result"
@@ -100,11 +103,17 @@ t_swestopstale() {
 t_swestopgone() {
   swe; local out id=r20261119T000000-1
   swegone "$id"; swecheckbox
+  # Bug (#646): the run page read this run as stopped like any other, so it said "Stopped by you" and offered no Stop
+  # run, which records its end and removes its container. gone tells the page it still needs one.
+  out=$(loop bench swe show "$id" 2>&1) && [ "$(jq -c '.run | [.state, .gone]' <<<"$out")" = '["stopped",true]' ] \
+    || fail "show does not say the run's process is gone with no end written: $(jq -c .run <<<"$out" 2>&1 || echo "$out")"
   out=$(loop bench swe stop "$id" 2>&1) || fail "stop failed: $out"
   [ "$out" = "conveyor: run $id was interrupted: its process had ended. Its end is recorded, its containers are removed, and its finished tasks are kept." ] \
     || fail "Stop did not say the run was interrupted: $out"
-  tail -n 1 "$B/runs.jsonl" | jq -e --arg id "$id" --arg t "$(sweorder | head -n 1)" '.id == $id and .state == "stopped" and .interrupted.task == $t' > /dev/null \
-    || fail "the run's end was not recorded: $(cat "$B/runs.jsonl" 2>&1)"
+  # Bug (#646 review E2): the end Stop recorded for it read as any stopped run's, so the run page said "Stopped by
+  # you" once its end was written. gone stays on the end.
+  tail -n 1 "$B/runs.jsonl" | jq -e --arg id "$id" --arg t "$(sweorder | head -n 1)" '.id == $id and .state == "stopped" and .interrupted.task == $t and .gone == true' > /dev/null \
+    || fail "the run's end was not recorded, or not as the end of a run whose process was gone: $(cat "$B/runs.jsonl" 2>&1)"
   [ "$(ls "$SWE_FX/boxes")" = conveyor-swe-check-other-x ] || fail "the run's container was left, or an arms check's removed: $(ls "$SWE_FX/boxes")"
 }
 

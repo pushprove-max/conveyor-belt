@@ -206,21 +206,25 @@ swe_board() {
 # cols), and cost, the list price of the work it did in this run (costsum of each task's cost, the interrupted
 # task's and the active task's so far, the active one's none before its trial's command starts; a reused task adds
 # none, and a task or interrupted line kept with no cost, as one written before costs were, is unknown); the
-# run's cost is that of its cols (null when one is). A run whose process is gone with no end written shows stopped,
-# as the snapshot shows it.
+# run's cost is that of its cols (null when one is). wall is the wall minutes of the arm's work in this run: each
+# task it ran (a reused task adds none) and the interrupted one's (a line kept with no minutes adds none); the active
+# task's minutes so far are the time since its active.start. A run whose process is gone with no end written shows
+# stopped, as the snapshot shows it, with gone true and no ended: its end and its containers wait for a Stop
+# (swe_stop), whose end keeps gone true.
 # costsum: the list price of several pieces of work ({usd, state} each, as swe_cost gives it; null when none was
 # kept): known when every piece is (none at all is a known $0), partial when some piece is priced in whole or in part
 # (usd the priced part), else unknown (usd null).
 SWE_RUNSUM='def costsum: [.[] | objects | .usd | numbers] as $u | all(.[]; type == "object" and .state == "known") as $k
   | {usd: (if $u == [] then (if $k then 0 else null end) else $u | add * 10000 | round / 10000 end), state: (if $k then "known" elif $u == [] then "unknown" else "partial" end)};
   def runsum($R): . as $l | ((.arms // [.arm]) | length) as $na
-  | (if .state == "running" and (.pid | type) == "number" and (.alive | not) then {state: "stopped", current: null, active: null} else {} end) as $gone
+  | (if .state == "running" and (.pid | type) == "number" and (.alive | not) then {state: "stopped", gone: true, ended: null, current: null, active: null} else {} end) as $gone
   | del(.tasks, .pid, .alive) + $gone + {n: (((.n // 0) / ([$na, 1] | max)) | floor), cols: [(.cols // ((.arms // [.arm]) | map({arm: ., key: null, label: .})))[] | . as $c
     | [$l.tasks[]? | select(.arm == $c.arm)] as $t | [$t[] | select(.result | tostring | startswith("not run") | not)] as $ran
     | [$ran[] | $R["\($c.key)/\(.id)"] // empty] as $r | def sum(f): if $c.key == null then null else $r | map(f // 0) | add // 0 end;
     $c + {done: ($t | length), resolved: ($t | map(select(.result == "resolved")) | length), notRun: (($t | length) - ($ran | length)),
       sessions: sum(.sessions), tokens: sum(.tokens), minutes: (sum(.minutes) | if . == null then null else . * 10 | round / 10 end),
-      cost: (if $c.key == null then null else [($t[] | select(.reused != true) | .cost), ($l.interrupted | objects | select(.arm == $c.arm) | .cost), ($l.active | objects | select(.arm == $c.arm) | .cost | objects)] | costsum end)}]}
+      cost: (if $c.key == null then null else [($t[] | select(.reused != true) | .cost), ($l.interrupted | objects | select(.arm == $c.arm) | .cost), ($l.active | objects | select(.arm == $c.arm) | .cost | objects)] | costsum end),
+      wall: ([($t[] | select(.reused != true) | .minutes), ($l.interrupted | objects | select(.arm == $c.arm) | .minutes) | numbers] | add // 0 | . * 10 | round / 10)}]}
   | .cost = (if any(.cols[]; .cost == null) then null else [.cols[].cost] | costsum end);'
 # Every run's line (runs.jsonl, then the run in progress), one JSON a line, alive true on a running line whose process is there.
 swe_lines() {
@@ -308,6 +312,8 @@ swe_show() { # <run id>
   # The tasks are the ones its line names, in its order, then the rest of its plan (the first n of its task list, n
   # the run's tasks of each arm), not reached yet. Each cell's state: finished (a result is recorded), active (the arm's work in progress: its phase,
   # swe_phase), waiting (the run goes and has not reached it), interrupted (the work a Stop ended) or not reached.
+  # Each cell's cost is that of this run's work on it: its task line's (a task not run after its trial ran costs what
+  # the trial did), the interrupted work's, else its kept result's (a line written before costs were); null when none.
   # tail: the run's event tail (swe_event), its fields only.
   jq -c --slurpfile res "$o" --slurpfile tl <(jq -c '{id, title: (.issue // "" | split("\n") | map(select(test("\\S"))) | first // "" | .[0:160])}' \
     "$(swe_list "$(jq -r --arg d "$(swe_conf .revision)" '(.set.revision | strings | select(test("^[0-9a-f]{40}$"))) // $d' <<<"$l")" "$(jq -r --arg d "$(swe_conf .seed)" '(.set.seed | strings) // $d' <<<"$l")")" 2>/dev/null) \
@@ -322,7 +328,9 @@ swe_show() { # <run id>
            state: (if $t != null then "finished" elif at($run.active; $c; $id) then "active" elif $run.state == "running" then "waiting"
              elif at($l.interrupted; $c; $id) then "interrupted" else "not reached" end)}
           + (if $t == null and at($run.active; $c; $id) then {phase: $run.active.phase} else {} end)
-          + ((if $t == null or ($t.result | tostring | startswith("not run")) then {} else $R["\($c.key)/\($id)"] // {} end) | {resolved, fired, why, sessions, tokens, minutes, cost, steps, patch})]}],
+          + ((if $t == null or ($t.result | tostring | startswith("not run")) then {} else $R["\($c.key)/\($id)"] // {} end) | {resolved, fired, why, sessions, tokens, minutes, cost, steps, patch})
+          + {cost: (if $t != null then $t.cost // (if $t.result | tostring | startswith("not run") then null else $R["\($c.key)/\($id)"].cost end)
+              elif at($l.interrupted; $c; $id) then $l.interrupted.cost else null end)}]}],
       tail: [$tail[] | objects | {at, arm, task, event} | select(all(.[]; . == null or type == "string"))]}' <<<"$l"
   local rc=$?; rm -f "$o"; return $rc
 }
@@ -342,15 +350,18 @@ swe_event() { # <event> [<arm>] [<task>]
     '{at: $at, arm: (if $a == "" then null else $a end), task: (if $t == "" then null else $t end), event: $e}' >> "$f" || return 0
   [ "$(wc -l < "$f")" -le $((2 * SWE_TAILN)) ] || { tail -n "$SWE_TAILN" "$f" > "$f.$$" && mv -f "$f.$$" "$f"; }
 }
-# The work in progress of the run going (SWE_RUN): live.json's active, {arm, task, phase, since, cost}, of the arm in
-# use and the task it is on (SWE_TASK; null while the arm's preflight runs), and an event of the phase. Nothing
-# outside a run or when the phase is the one shown. cost is the trial's work so far (swe_sofar), kept from phase to
-# phase of one task; none before its trial's command starts.
+# The work in progress of the run going (SWE_RUN): live.json's active, {arm, task, phase, since, start, cost}, of the
+# arm in use and the task it is on (SWE_TASK; null while the arm's preflight runs), and an event of the phase. Nothing
+# outside a run or when the phase is the one shown. start is the time the arm's work on the task began, and cost the
+# trial's work so far (swe_sofar), both kept from phase to phase of one task; no cost before its trial's command starts.
+# The wall minutes of the active work so far (from active.start), to a tenth; null when it has no start.
+SWE_WALL='def wall: .active.start | if type == "string" then (now - fromdate) / 60 * 10 | round / 10 else null end;'
 swe_phase() { # <phase>
   [ -n "${SWE_RUN:-}" ] || return 0
   ! jq -e --arg a "$SWE_ARM" --arg t "${SWE_TASK:-}" --arg p "$1" '.active | objects | .arm == $a and (.task // "") == $t and .phase == $p' "$SWE_DIR/live.json" > /dev/null 2>&1 || return 0
   swe_live --arg a "$SWE_ARM" --arg t "${SWE_TASK:-}" --arg p "$1" '(if $t == "" then null else $t end) as $t
-    | .active = ({arm: $a, task: $t, phase: $p, since: (now | todate)} + ((.active | objects | select(.arm == $a and .task == $t and .cost != null) | {cost}) // {}))' > /dev/null
+    | ((.active | objects | select(.arm == $a and .task == $t)) // null) as $o
+    | .active = ({arm: $a, task: $t, phase: $p, since: (now | todate), start: ($o.start // (now | todate))} + (($o | objects | select(.cost != null) | {cost}) // {}))' > /dev/null
   swe_event "$1" "$SWE_ARM" "${SWE_TASK:-}"
 }
 # The list price of a trial's work (the Board's pricing, dashboard_limit.py work, with the pack's prices over its
@@ -550,13 +561,14 @@ swe_task() { # <task json>
 # sandboxes and the run's copies of the project's files (swe_freeze) gone. The containers removed are the run's own,
 # named with its ID (swe_trial's, and the grading harness's: swe_harness.py's grade): an arms check's, which runs apart from any run, is left. A Stop that comes while the
 # end is written waits for it (SIGTERM ignored until then), so a run that finished first keeps its one end, done.
-swe_end() { # <state>
+swe_end() { # <state> [gone: its process had ended with no end written]
   [ -n "${SWE_RUN:-}" ] || return 0
   trap '' TERM INT
   # interrupted: the arm and task a stopped run was on, apart from the tasks it never reached, with the cost of its
-  # work so far (swe_sofar; a known $0 when its trial had not started its command): the run's cost counts it.
-  local l f; l=$(jq -c --arg s "$1" --arg at "$(swe_now)" '(if $s == "stopped" and (.active.task | type) == "string" then {interrupted: (.active | {arm, task, cost: (.cost // {usd: 0, state: "known", unpriced: 0})})} else {} end) as $i
-    | .state = $s | .ended = $at | .current = null | .active = null | .seq = ((.seq // 0) + 1) | .updated = $at | del(.pid) + $i' "$SWE_DIR/live.json") && swe_put "$SWE_DIR/live.json" "$l" \
+  # work so far (swe_sofar; a known $0 when its trial had not started its command) and its wall minutes: the run's
+  # cost and its arm's wall count them. gone: the end of a run whose process had ended (the Board says interrupted).
+  local l f; l=$(jq -c --arg s "$1" --arg g "${2:-}" --arg at "$(swe_now)" "$SWE_WALL"'(if $s == "stopped" and (.active.task | type) == "string" then {interrupted: (wall as $w | .active | {arm, task, cost: (.cost // {usd: 0, state: "known", unpriced: 0}), minutes: $w})} else {} end) as $i
+    | .state = $s | .ended = $at | .current = null | .active = null | .seq = ((.seq // 0) + 1) | .updated = $at | del(.pid) + $i + (if $g == "" then {} else {gone: true} end)' "$SWE_DIR/live.json") && swe_put "$SWE_DIR/live.json" "$l" \
     && printf '%s\n' "$l" >> "$SWE_DIR/runs.jsonl"
   swe_event "Run ${1/guard/stopped by the usage guard}"
   for f in "$SWE_DIR"/work/*/box "$SWE_DIR"/check/*/box; do
@@ -644,7 +656,8 @@ swe_run() { # <n> <engine> <arm>...
       swe_live --arg t "$id" '.current = $t'
       SWE_TASK=$id; r=$(swe_task "$t"); echo "$i/$n $id$tag: $r"
       # The task's cost is its trial's (swe_sofar); a task whose trial never started its command ran no session: $0.
-      swe_live --arg t "$id" --arg a "$SWE_ARM" --arg r "$r" '.tasks += [{id: $t, arm: $a, result: $r, reused: false, cost: (.active.cost // {usd: 0, state: "known", unpriced: 0})}] | .done += 1 | .current = null | .active = null | .resolved += (if $r == "resolved" then 1 else 0 end)'
+      # Its minutes are the wall time of the arm's work on it (SWE_WALL), a task not run included.
+      swe_live --arg t "$id" --arg a "$SWE_ARM" --arg r "$r" "$SWE_WALL"'.tasks += [{id: $t, arm: $a, result: $r, reused: false, cost: (.active.cost // {usd: 0, state: "known", unpriced: 0}), minutes: wall}] | .done += 1 | .current = null | .active = null | .resolved += (if $r == "resolved" then 1 else 0 end)'
       # The event names the result only: the why of a task not run can hold a command's own output.
       case $r in resolved) r=Resolved ;; unresolved) r=Unresolved ;; unresolved*) r='Unresolved: did not fire' ;; *) r='Not run' ;; esac
       swe_event "$r" "$SWE_ARM" "$id"
@@ -666,7 +679,7 @@ swe_lock() {
   local s id rc=0; exec {s}>>"$SWE_DIR/stop.lock" || return 1
   if flock -w 60 "$s" && exec 7>>"$SWE_DIR/run.lock" && flock -n 7; then
     id=$(jq -r 'select(.state == "running") | .id // empty' "$SWE_DIR/live.json" 2>/dev/null)
-    [ -z "$id" ] || { SWE_RUN=$id; swe_end stopped; }
+    [ -z "$id" ] || { SWE_RUN=$id; swe_end stopped gone; }
   else rc=1; fi
   exec {s}>&-; return $rc
 }
@@ -697,7 +710,7 @@ swe_stop() { # [<run id>]
         mapfile -t ps < <(swe_tree "$p"); ! kill -0 "$p" 2>/dev/null || kill -KILL "${ps[@]}" 2>/dev/null
       else gone=1; fi
       # A run killed before its end was written (SIGKILL, or a process gone before Stop) gets it here.
-      ! jq -e --arg id "$id" '.id == $id and .state == "running"' "$SWE_DIR/live.json" > /dev/null 2>&1 || { SWE_RUN=$id; swe_end stopped; }
+      ! jq -e --arg id "$id" '.id == $id and .state == "running"' "$SWE_DIR/live.json" > /dev/null 2>&1 || { SWE_RUN=$id; swe_end stopped "$gone"; }
     fi
     swe_said "$id" "$gone"; rc=$?
   fi
@@ -766,7 +779,8 @@ swe_side() { # <A or B>
   [ -n "$SIDE_KEY" ] || { echo "conveyor: $1 has no results" >&2; return 1; }
 }
 # Two sides that both run an engine are told the engine changes to the stage where their runs went apart; for any
-# other two, changes is null.
+# other two, changes is null. Each side's totals have cost, the list price of its results on those tasks (costsum: a
+# result kept before costs were has none, so it is unknown, never $0).
 swe_diff() { # <A> <B> [--json]
   local ca cb va vb ka kb d da db ids id fa fb st sm files=() flips='[]' ch why n e=''
   swe_side "$1" || return 1; ca=$SIDE_COMMIT; va=$SIDE_NAME; ka=$SIDE_KEY; swe_side "$2" || return 1; cb=$SIDE_COMMIT; vb=$SIDE_NAME; kb=$SIDE_KEY
@@ -796,8 +810,9 @@ swe_diff() { # <A> <B> [--json]
     flips=$(jq -c --argjson n "$n" --arg w "$why" '. + [$n + {reading: (if $w == "" then null else $w end)}]' <<<"$flips")
   done <<<"$ids"
   local j; j=$(jq -n --slurpfile fl <(printf '%s\n' "$flips") --arg va "$va" --arg vb "$vb" --arg ca "$ca" --arg cb "$cb" --arg noise "$(swe_noise "$(wc -l <<<"$ids")")" \
-    --slurpfile ra <(for id in $ids; do cat "$da/$id.json"; done) --slurpfile rb <(for id in $ids; do cat "$db/$id.json"; done) "$SWE_NOISED"'
-    def tot: {resolved: (map(select(.resolved)) | length), sessions: (map(.sessions) | add), tokens: (map(.tokens) | add), minutes: (map(.minutes) | add * 10 | round / 10)};
+    --slurpfile ra <(for id in $ids; do cat "$da/$id.json"; done) --slurpfile rb <(for id in $ids; do cat "$db/$id.json"; done) "$SWE_RUNSUM$SWE_NOISED"'
+    def tot: {resolved: (map(select(.resolved)) | length), sessions: (map(.sessions) | add), tokens: (map(.tokens) | add), minutes: (map(.minutes) | add * 10 | round / 10),
+      cost: (map(.cost) | costsum)};
     def c: if . == "" then null else . end; $fl[0] as $f
     | ($ra | length) as $n | ($ra | tot) as $ta | ($rb | tot) as $tb | noised($n) as $dd
     | {a: {version: $va, commit: ($ca | c), totals: $ta}, b: {version: $vb, commit: ($cb | c), totals: $tb}, tasks: $n,

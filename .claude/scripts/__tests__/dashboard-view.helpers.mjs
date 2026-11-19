@@ -576,7 +576,8 @@ export const SAYS = {
     empty: 'The floor is empty', failed: 'The Board could not read Belt 3D' },
   tests: { title: 'Tests', count: '', data: ['Timed files', 'conveyor/tests/merge.test.sh', 'Slower than usual', 'Test limits', 'Files slow on purpose'],
     empty: 'No tests to show', failed: 'The Board could not read the tests' },
-  bench: { title: 'Benchmarks', count: '', data: ['Overview', 'Start a run', 'Newest run', 'History', 'Arms', 'Drift watch'],
+  // With no run going the tab opens on Start a run (#646).
+  bench: { title: 'Benchmarks', count: '', data: ['Overview', 'Start a run', 'How many tasks', 'Conveyor version'],
     empty: 'No benchmarks to show', failed: 'The Board could not read the benchmarks' },
   queue: { title: 'Queue', count: '2', data: ['Next up', 'P1', 'Follow-up', 'Later', 'Retried', 'Holds keep 2 issues back: see Held.','Built, waiting for your PROD deploy (2)', 'Stack split', '2 d 0 h waiting', 'No label time'], empty: 'The queue is empty', failed: 'The Board could not read the queue' },
   landed: { title: 'Landed today', count: '2', data: ['Landed one', '2 reviews', 'started 10:30 AM', '30 min overall', 'landed 11:00 AM', '$2.50', 'Landed and pushed', 'follow-ups #31', 'Before deploy: Run migration 0004. Without it: the new column is missing. At db/0004.sql:1', 'Fixed before', 'Already fixed', '2 cards, $3.00 at list prices'], empty: 'No card landed today', failed: 'The Board could not read the landed cards' },
@@ -791,7 +792,7 @@ export const TA = (() => {
 // the newest run (5 tasks: Conveyor 1.5.0 4 of 5, Claude alone 2, Codex alone 2 with 1 not run) and an older one of 20
 // tasks stopped at the usage guard; the arms (Conveyor, Claude alone and Codex alone ready, Superpowers failing its
 // preflight, Chisle not checked, OpenHands not offered); the places of each results key's tasks. BH.run() is the
-// newest run's tasks. BH.open(w) boots the tab with both served; w.downloads lists what the page downloads.
+// newest run's tasks. BH.open(w) boots the tab with both served, on the Overview; w.downloads lists what the page downloads.
 export const BH = (() => {
   const EB = 'b'.repeat(40), EA = 'a'.repeat(40), SET = { dataset: 'princeton-nlp/SWE-bench_Verified', revision: 'c104f840cc67f8b6eec6f759ebc8b2693d585d4a' };
   const C = { arm: 'conveyor', key: EB, label: 'Conveyor', kind: 'conveyor', engine: EB, version: 'v1.5.0', model: null };
@@ -824,6 +825,9 @@ export const BH = (() => {
     w.downloads = [];
     w.HTMLAnchorElement.prototype.click = function () { w.downloads.push({ name: this.download, href: this.href }); };
     deliver(w, full());
+    // The tab opens on Start a run with no run going (#646); the cases start from the Overview, as a person does who
+    // clicks it. The cases of where the tab opens boot it without BH.open.
+    act(bp(w), 'page-overview').click();
   }
   const bp = (w) => panel(w, 'bench');
   const heads = (w) => Array.from(bp(w).querySelectorAll('.bench-sec > .bench-head > .board-head'), (x) => x.textContent);

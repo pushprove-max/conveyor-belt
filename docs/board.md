@@ -739,17 +739,23 @@ anything here. The Board refuses these buttons to a member. The answer to each b
 stays there until you click it again. The answer of one button does not replace that of another. An answer is about
 one project and one run, pair or selection: it does not show for another.
 
+Each time you open the tab, it opens on the page of the run that goes. When no run goes, it opens on **Start a run**.
+Both pages have **Latest result** beside their heading, which opens the newest run that ended. While a run goes, the
+other pages have **Watch run** in the row of buttons, which opens it.
+
 **Overview** has four parts:
 
 - **Newest run**: the resolved tasks of each arm, side by side, as bars. A dashed band around each bar shows the
   run-to-run noise for that number of tasks. A difference inside the band is not a difference. With 5 tasks, only a
-  total break shows. Under the bars are the sessions, tokens and minutes of each arm, and notes to read the run with.
-  While a run goes, the part shows a bar of tasks done for each arm, the task now, the sessions so far and **Stop**.
-  It also says when the last run was stopped by you, stopped at the usage guard, or did not start. A run does not
+  total break shows. Under the bars are the cost, sessions, tokens and minutes of each arm, and notes to read the run
+  with. While a run goes, the part shows a bar of tasks done for each arm, the task now, the sessions so far and
+  **Stop run**.
+  It also says when the last run was stopped by you, stopped at the usage guard, was interrupted, or did not start.
+  A run does not
   start when an arm failed its preflight, or when the build machine has no Docker or no harness of the release it
   needs. Before the first run, it says so and links to **Start a run**.
 - **History**: every run, newest first, grouped by task set. Each row shows the date, the number of tasks, the arms
-  and versions, the resolved count of each arm, the sessions, tokens and minutes, and the state. A run that did not
+  and versions, the resolved count of each arm, the sessions, tokens, minutes and cost, and the state. A run that did not
   start shows why, and the page of that run shows it too. Tick up to 6 runs. A
   bar at the foot of the screen then offers **Compare**, **Generate infographic** and **Clear**.
 - **Arms**: how many arms are ready, are checking, fail their preflight, are not checked, or are not offered, with the
@@ -759,15 +765,35 @@ one project and one run, pair or selection: it does not show for another.
   standard errors apart, and In its usual range when they are not. It shows Not read when a group has no spread for
   the figure, and Too few cards when a group is too small to mean anything.
 
-**A run** shows one run, the newest or the one you opened. Each arm is a column and each task is a row: ✓ resolved, ✗
-not resolved, or not run, with the sessions and minutes. The foot of the table gives the totals of each arm. Click a
-task to open it. Each arm then shows its patch (its files, and the lines added and removed), its steps and the
-harness result. The steps of a Conveyor arm are its build, each review with its first finding, each fix round, the
-test step and the block reason. **Export figures** downloads the run's figures as one JSON file. The file has no code,
-no names and no machine names.
+**A run** shows one run, the newest or the one you opened. Its first line gives the run ID, its state and its elapsed
+time, setup and grading included. While the run goes, the line also has **Stop run**. Under it are the arm, the task
+and the step that the run is at, the arm and task pairs finished of all that the run plans, the resolved, reused and
+not run counts, and the cost so far. A table gives the same figures for each arm, with the work of the arm now and its
+active time: the time of its work in this run, the task that it is on and a task not run included. A reused result
+adds no time. The elapsed time and the active time count on while the run goes. The page reads the run again when it moves on, also when only the step changes. When
+a read gets no answer, the page keeps the last update, says so, and offers **Read again**.
+
+**Stop run** stops the whole run: the work in progress and the tasks that it did not reach yet. Finished results stay.
+After you click it, the page says "Stopping run" with the run ID, and the button stays off. When the build machine has
+ended the run and its containers, the answer says "Run stopped". It says "Run finished before Stop" when the run ended
+first, and "Run interrupted" when the process of the run had already stopped. A Stop names its run, so a late Stop
+never stops a newer run. When the run has ended, its first line shows how it ended, with the answer to **Stop run**
+under it. When the process of a run ended with no end recorded, its first line says "Interrupted" and keeps **Stop
+run**, which records the end of the run and removes its containers. After that, the run still shows "Interrupted" on
+its page and in **History**, not "Stopped".
+
+Each arm is a column and each task is a row: ✓ resolved, ✗ not resolved, or not run, with the sessions, minutes and
+cost. A task that the run has not finished shows its step, waiting, or interrupted (the task that Stop ended). A task
+not run and an interrupted task show the cost of the work done on them. A reused result says so and adds no cost.
+The foot of the table gives the totals of each arm. Click a task to open it. Each
+arm then shows its patch (its files, and the lines added and removed), its steps and the harness result. The steps of
+a Conveyor arm are its build, each review with its first finding, each fix round, the test step and the block reason.
+Under the table, **Recent log** gives the last events of the run: the time, the arm, the task and the event. The log
+stays after the run ends. **Export figures** downloads the run's figures as one JSON file, with the cost of the run,
+of each arm and of each task. The file has no code, no names and no machine names.
 
 **Compare** offers the arms of the runs you ticked, or of the run open. Pick A and B, then click **Compare**. The page
-shows the totals of both, how many tasks flipped each way, and whether the difference is within the noise. Each
+shows the totals of both with their cost, how many tasks flipped each way, and whether the difference is within the noise. Each
 flipped task shows where the two went apart, the facts read from the records, and, beside them, a short reading
 written by one model call from those facts only. No task runs again.
 
@@ -831,8 +857,16 @@ writes or picks anything. You can type a title. The notes on how to read the gra
 **Download SVG** and **Download PNG** save it. A table under it gives the same figures. Each download also saves that
 table beside the picture, as a CSV file with the same name.
 
-The costs of a benchmark run are not kept: its sessions run in containers that are removed. The places for the cost
-of a run show "–". The harness result shows resolved or not resolved. The counts of FAIL_TO_PASS and PASS_TO_PASS tests are not kept.
+The cost of a run, an arm or a task is its [cost at list prices](benchmarks.md#results), as the build machine
+recorded it. It shows in one of three ways:
+
+- A sum, such as "$1.20": every session is priced.
+- "$1.20 recorded, part unknown": some sessions have no usage that can be priced. While a run goes, the run's line
+  says "Cost for the active session is unknown." when that is the session with no price yet.
+- "unknown": no session is priced. Runs from before costs were recorded show unknown, not $0.
+
+The infographic's table and **Export figures** keep the same difference. The harness result shows resolved or not
+resolved. The counts of FAIL_TO_PASS and PASS_TO_PASS tests are not kept.
 
 ## Accounts
 

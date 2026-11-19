@@ -7,14 +7,17 @@
 // progress moves on.
 // Its pages, picked from the row of page buttons at its top:
 //   Overview: Newest run (resolved of n for each arm side by side with the noise band for n, each arm's figures, the
-//     notes to read it with; or the run in progress with a bar of tasks done a arm, the task now and Stop; or how the
+//     notes to read it with; or the run in progress with a bar of tasks done a arm, the task now and Stop run; or how the
 //     last run ended: stopped, at the usage guard, an arm's preflight failed; or nothing yet), History (every run newest
 //     first, grouped by task set, each with a box to tick: up to 6, for Compare and the infographic), Arms (how many are
 //     ready, checking with its step, failing their preflight, not checked, not offered) and Drift watch, folded. With runs ticked, a bar at the
 //     foot of the screen offers Compare, Generate infographic and Clear.
-//   A run: each arm a column and each task a row (resolved or not, sessions, minutes), totals a arm, Export figures
-//     (one JSON file of the figures: no code, no names, no machine names); a task opened shows each arm's patch, its
-//     steps (a Conveyor arm's build, reviews, fix rounds, test step, block) and the harness's grade.
+//   A run: its first line (state, wall time and, while it goes, Stop run, with Stop's answer under it); while it goes,
+//     the arm, task and step now, the pairs finished, resolved, reused and not run, the cost so far and each arm's;
+//     each arm a column and each task a row (resolved or not, sessions, minutes, cost; or the step, waiting,
+//     interrupted), totals a arm, Export figures (one JSON file of the figures: no code, no names, no machine names);
+//     a task opened shows each arm's patch, its steps (a Conveyor arm's build, reviews, fix rounds, test step, block)
+//     and the harness's grade; and the run's recent log.
 //   Compare: two arms or versions of the runs ticked (else the run open, else the newest), sent as `bench swe diff
 //     <A> <B> --json`: the tasks that flipped, where the two went apart, the facts read from the records and, beside
 //     them, the model's reading.
@@ -32,8 +35,11 @@
 //   Infographic: the runs ticked (up to 6) on a fixed template filled by code (SVG, no library; no model writes or picks
 //     anything), with its notes on how to read it, which a title typed cannot remove; Download SVG and Download PNG,
 //     each with the table of its figures beside it (<id>.csv).
-// Costs are not kept for a benchmark run (its sessions run in containers that are removed, with no usage reading), nor
-// the harness's FAIL_TO_PASS and PASS_TO_PASS counts (only resolved): those places show "–" and say so.
+// Each time it is shown, the tab opens on the run in progress when there is one (its page, with Stop run on its first
+// line), else on Start a run; both have Latest result beside their heading. The other pages have Watch run in their
+// page row while a run goes. A run's cost is the list price `bench swe` recorded ({usd, state}):
+// recorded, recorded in part (the rest unknown) or unknown, never $0 for one not recorded (costSaid). The harness's
+// FAIL_TO_PASS and PASS_TO_PASS counts are not kept (only resolved).
 // Every action is POST control {action: bench} (an admin's: the server refuses a member).
 (function () {
   'use strict';
@@ -54,6 +60,7 @@
     edit: null,         // the arm editor's form while it is open (blank, copyOf), else null
     title: IG_TITLE,
     busy: false, held: false, late: false, keep: null,
+    landed: false,      // the page the tab opens on was chosen for this showing of the tab (land)
     said: new Map(),    // each action's answer, by its key: {repo, text, tone}, shown beside that action (saidAt)
   };
   const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -71,8 +78,15 @@
   const gradedAll = (c, n) => n > 0 && num(c.done) === n && num(c.notRun) === 0;
   const tokens = (t) => (num(t) === null ? '–' : t >= 1e6 ? `${(t / 1e6).toFixed(1)}M` : t >= 1e3 ? `${Math.round(t / 1e3)}k` : String(t));
   const took = (m) => { if (num(m) === null) return '–'; const r = Math.round(m); return r < 60 ? `${r} min` : `${Math.floor(r / 60)} h${r % 60 ? ` ${String(r % 60).padStart(2, '0')} min` : ''}`; };
-  const COST = '–';  // a benchmark run keeps no cost (see the head of this file)
-  const COST_WHY = 'Costs are not kept for benchmark runs yet: their sessions run in containers that are removed, with no usage reading.';
+  const COST = '–';  // an estimate with no price data (Start a run)
+  // A cost `bench swe` recorded: {usd, state} with state known (every session priced), partial (usd the priced part)
+  // or unknown; anything else (null: a run or result from before costs were recorded) is unknown, never $0.
+  const costOf = (c) => { const o = obj(c); return o && (o.state === 'known' || o.state === 'partial') && num(o.usd) !== null ? { usd: o.usd, state: o.state } : { usd: null, state: 'unknown' }; };
+  function costSaid(c) {
+    const k = costOf(c);
+    return k.state === 'unknown' ? 'unknown' : k.state === 'partial' ? `${B.ctx.money(k.usd)} recorded, part unknown` : B.ctx.money(k.usd);
+  }
+  const COST_WHY = 'Costs are at list prices. "Part unknown": some sessions have no usage that can be priced.';
   // An arm as a run's column names it: a Conveyor arm with its version (main with its commit), another with its model
   // when each model's results are kept apart (its key is not its name).
   const commit7 = (c) => String(c.engine || '').slice(0, 7);
@@ -164,10 +178,11 @@
   }
 
   // ---- actions (POST control, action bench) ----
-  function send(key, args, said, then, no, more) {
+  // While the answer is out, the action's message is `sending` (else "Sending…") and has out: true.
+  function send(key, args, said, then, no, more, sending) {
     if (B.busy) { say(key, 'Wait for the answer to the last action.', 'warn'); return; }
     const repo = B.repo;
-    B.busy = true; say(key, 'Sending…', 'quiet', repo, more);
+    B.busy = true; say(key, sending || 'Sending…', 'quiet', repo, { ...more, out: true });
     B.ctx.post('control', { action: 'bench', args, repo }).then((r) => r.text().then((t) => [r.ok, String(t).trim() || `the build machine answered ${r.status}`]),
       () => [false, 'the build machine did not answer']).then(([ok, text]) => {
       B.busy = false;
@@ -213,6 +228,11 @@
       if (B.page === p) b.setAttribute('aria-current', 'page');
       nav.append(b);
     });
+    // While a run goes, every other view links to it.
+    const l = live();
+    if (l && l.state === 'running' && typeof l.id === 'string' && !(B.page === 'run' && (B.open || (runsOf()[0] && runsOf()[0].id)) === l.id)) {
+      nav.append(button('Watch run', 'btn-link', 'watch-live', `Watch the run ${l.id}`, () => { openRun(l.id); draw(); }));
+    }
     return nav;
   }
   const span = (r) => {
@@ -220,6 +240,9 @@
     return r.ended ? `${a} to ${B.ctx.when(r.ended)}` : a;
   };
   const STATE = { done: ['Done', 'ok'], stopped: ['Stopped', 'quiet'], guard: ['Stopped at the usage guard', 'warn'], refused: ['Did not start', 'bad'], running: ['Running', 'info'] };
+  // A run whose process ended with no end written (bench swe's gone, kept on the end a Stop then records) was
+  // interrupted, never stopped by you.
+  const stateOf = (r) => (r.state === 'stopped' && r.gone === true ? ['Interrupted', 'warn'] : STATE[r.state] || [String(r.state || 'not read'), 'quiet']);
 
   // ---- Overview ----
   function newest() {
@@ -246,8 +269,8 @@
     const figs = h('div', 'figures bench-figures');
     cols.forEach((c) => {
       const f = h('div', 'figure');
-      f.append(h('span', 'num unknown', COST), h('span', 'figure-label', `${colName(c)}: ${num(c.sessions) === null ? '–' : c.sessions} sessions · ${tokens(c.tokens)} tokens · ${took(c.minutes)}`),
-        h('span', 'figure-label', 'cost: not kept yet'));
+      f.append(h('span', costOf(c.cost).state === 'unknown' ? 'num unknown' : 'num', costSaid(c.cost)), h('span', 'figure-label', `${colName(c)}: ${num(c.sessions) === null ? '–' : c.sessions} sessions · ${tokens(c.tokens)} tokens · ${took(c.minutes)}`),
+        h('span', 'figure-label', 'cost at list prices'));
       figs.append(f);
     });
     s.append(figs, care(cols));
@@ -261,8 +284,9 @@
     row.append(B.ctx.chip('Python tasks only; the models may have seen these repositories', 'quiet'), B.ctx.chip(COST_WHY, 'quiet'));
     return row;
   }
-  // How the newest run ended when it did not end done: stopped by the owner, at the usage guard, or refused (an arm's
-  // preflight failed before it started, or the build machine had no Docker or harness to run it).
+  // How the newest run ended when it did not end done: stopped by the owner, at the usage guard, refused (an arm's
+  // preflight failed before it started, or the build machine had no Docker or harness to run it), or interrupted (its
+  // process gone with no end written: gone; once a Stop recorded its end, gone stays and ended is set).
   function ended(r) {
     const p = h('p', 'bench-ended'), cols = colsOf(r), n = num(r.n) || 0, least = cols.length ? Math.min(...cols.map((c) => num(c.done) || 0)) : 0;
     if (r.state === 'refused') {
@@ -272,18 +296,33 @@
     } else if (r.state === 'guard') {
       const behind = cols.filter((c) => (num(c.done) || 0) < n).map(colName);
       p.append(B.ctx.chip('Stopped at the usage guard', 'warn'), ` ${behind.length ? behind.join(' and ') : 'Every arm'} did ${least} of ${n} tasks. Start again later: the rest runs, the done tasks are reused.`);
+    } else if (r.gone === true && r.ended) {
+      p.append(B.ctx.chip('Run interrupted', 'warn'), ` Its process ended before Stop, after ${least} of ${n} tasks for every arm. Stop recorded its end and removed its containers. The finished tasks are kept and reused.`);
+    } else if (r.gone === true) {
+      p.append(B.ctx.chip('Run interrupted', 'warn'), ` Its process ended with no end recorded, after ${least} of ${n} tasks for every arm. Stop run, on the page of the run, records its end and removes its containers. The finished tasks are kept and reused.`);
     } else {
       p.append(B.ctx.chip('Stopped by you', 'quiet'), ` ${least} of ${n} tasks done for every arm. The finished tasks are kept and reused.`);
     }
     return p;
   }
-  // The run in progress: the snapshot's live record (tasks done a arm, the task now) with Stop.
+  // Stop run: it names the run shown (`bench swe stop <id>`: a Stop that comes late never stops the run after it), says
+  // "Stopping" and stays off until the build machine answers, which it does once the run and its containers ended
+  // (swe_stop), with how the run ended (swe_said). Its answer is kept by run, so it shows on that run's page after.
+  const STOPPED = [[/ is stopped\./, 'Run stopped. Finished results are kept.'], [/ was interrupted: /, 'Run interrupted: its process had ended. Its end is recorded, its containers are removed and its finished results are kept.'],
+    [/ finished before Stop\./, 'Run finished before Stop.'], [/ at the usage guard before Stop\./, 'Run had stopped at the usage guard before Stop.'], [/ did not start, before Stop\./, 'Run did not start, before Stop.']];
+  function stopRun(id, stopping) {
+    const key = `stop-${id}`, m = B.said.get(saidKey(key)), out = Boolean(m && m.out) || Boolean(stopping);
+    const b = button(out ? 'Stopping run' : 'Stop run', 'btn-sm', 'stop-run', `Stop the run ${id}`, () => send(key, ['stop', id], (t) => { const s = STOPPED.find(([re]) => re.test(t)); return s ? s[1] : t.replace(/^conveyor: /, ''); },
+      () => { readHist(true); const o = B.runs.get(`${B.repo}|${id}`); if (o) o.stamp = null; }, null, null, `Stopping run ${id}. Finished results are kept.`));
+    b.disabled = out;
+    return b;
+  }
+  // The run in progress: the snapshot's live record (tasks done a arm, the task now) with Stop run.
   function running(l, r) {
     const box = h('div', 'bench-running'), arms = list(l.arms).length ? list(l.arms) : [l.arm], n = Math.floor((num(l.n) || 0) / Math.max(arms.length, 1));
     const cols = (list(l.cols).length ? list(l.cols) : arms.map((a) => ({ arm: a, label: a }))).map((c) => ({ ...c, done: list(l.tasks).filter((t) => obj(t) && t.arm === c.arm).length }));
     const line = h('p', 'bench-state');
-    line.append(B.ctx.chip('Running', 'info'), ` ${plural(cols.length, 'arm')} on ${plural(n, 'task')}${l.current ? ` · now ${l.current}` : ''} `,
-      button('Stop', 'btn-quiet btn-sm', 'stop', 'Stop the benchmark run', () => send(`stop-${l.id}`, ['stop'], (t) => `Stop sent: the benchmark run. ${t}`)));
+    line.append(B.ctx.chip('Running', 'info'), ` ${plural(cols.length, 'arm')} on ${plural(n, 'task')}${l.current ? ` · now ${l.current}` : ''} `, stopRun(l.id, typeof l.stopping === 'string'));
     box.append(line, saidAt(`stop-${l.id}`), bars(cols, n, true));
     const so = r && r.state === 'running' ? colsOf(r).reduce((s, c) => s + (num(c.sessions) || 0), 0) : null;
     const per = (c) => obj((armsOf().find((a) => a.name === c.arm) || {}).perTask);
@@ -310,13 +349,13 @@
         box.addEventListener('change', () => { B.sel = box.checked ? B.sel.concat(r.id).slice(-MAX_SEL) : B.sel.filter((x) => x !== r.id); draw(); });
         const link = button(r.id, 'btn-link mono', `run-${r.id}`, `Open the run ${r.id}`, () => { B.open = r.id; B.task = null; go('run'); });
         const sum = (k) => (cols.some((c) => num(c[k]) === null) ? null : cols.reduce((x, c) => x + c[k], 0));
-        const [word, tone] = STATE[r.state] || [String(r.state || 'not read'), 'quiet'];
+        const [word, tone] = stateOf(r);
         const state = h('td'), n = num(r.n) || 0, res = cols.map((c) => num(c.resolved) || 0), notRun = cols.reduce((x, c) => x + (num(c.notRun) || 0), 0);
         const spread = res.length > 1 ? Math.max(...res) - Math.min(...res) : null;
         state.append(B.ctx.chip(word, tone), [notRun ? ` ${plural(notRun, 'task')} not run` : '', r.state === 'done' && spread !== null && cols.every((c) => gradedAll(c, n)) && spread < noiseOf(n) ? ` within the noise${noiseOf(n) >= n ? `: only a total break shows at ${n}` : ` (${noiseOf(n)})`}` : ''].join(''));
         if (r.state === 'refused' && r.why) state.append(h('span', 'bench-sub', String(r.why)));
         const cells = [h('td'), h('td'), h('td', null, B.ctx.when(r.started)), h('td', 'r', String(n)), h('td', 'bench-arms-cell', cols.map(colName).join(' · ')), h('td', 'r', res.join(' · ')),
-          h('td', 'r', sum('sessions') === null ? '–' : String(sum('sessions'))), h('td', 'r', tokens(sum('tokens'))), h('td', 'r', took(sum('minutes'))), h('td', 'r', COST), state];
+          h('td', 'r', sum('sessions') === null ? '–' : String(sum('sessions'))), h('td', 'r', tokens(sum('tokens'))), h('td', 'r', took(sum('minutes'))), h('td', 'r', costSaid(r.cost)), state];
         cells[0].append(box); cells[1].append(link);
         tr.append(...cells);
         t.append(tr);
@@ -405,17 +444,39 @@
     if (!id) return [B.ctx.state('empty', 'No run to show', 'Start a run: its tasks and each arm\'s results show here.')];
     const o = readRun(id);
     if (!o || !o.data) return [o && o.error ? B.ctx.state('error', `The Board could not read the run ${id}`, o.error) : B.ctx.state('empty',`Reading the run ${id}…`, 'Its tasks are read from the build machine when it is opened.')];
-    const r = o.data.run, tasks = list(o.data.tasks).filter(obj), cols = colsOf(r), n = num(r.n) || 0;
-    const s = section('bench-run-head', `Run ${r.id}`, null, `${span(r)} · SWE-bench Verified (dataset revision pinned in conveyor/bench/swe.json) · the first ${n} tasks of the pinned order · ${plural(cols.length, 'arm')} · each task in its own Docker container`);
+    const r = o.data.run, tasks = list(o.data.tasks).filter(obj), cols = colsOf(r), n = num(r.n) || 0, going = r.state === 'running';
+    const s = section('bench-run-head', `Run ${r.id}`), hd = s.querySelector('.bench-head');
+    // Its first line: its state, its wall time (setup and grading with it) and, while it goes, Stop run. Once it ended,
+    // the same line gives how it ended, and Stop's answer stays under it.
+    // A run whose process is gone with no end written (gone, no ended) keeps Stop run: it records the end and removes
+    // the containers. Once recorded, it still reads Interrupted (stateOf).
+    const unended = r.state === 'stopped' && r.gone === true && !r.ended;
+    const [word, tone] = going && r.stopping ? ['Stopping', 'warn'] : stateOf(r);
+    // While it goes, its wall time counts on the Board's clock (ctx.since): an agent in one phase sends no update.
+    const wall = h('span', 'board-from bench-wall', 'Elapsed ');
+    wall.append(going && Number.isFinite(Date.parse(r.started)) ? B.ctx.since(r.started, '') : took(elapsed(r)));
+    hd.append(B.ctx.chip(word, tone), wall);
+    if (going || unended) hd.append(stopRun(r.id, typeof r.stopping === 'string'));
+    const last = latest(r.id);
+    if (last) hd.append(last);
     const tools = h('div', 'bench-tools');
     tools.append(button('Back', 'btn-quiet', 'back', 'Back to the overview', () => go('overview')),
       button('Compare two arms', '', 'run-compare', 'Compare two arms of this run', () => { B.sel = B.sel.includes(r.id) ? B.sel : [r.id]; dropCmp(); go('compare'); }),
       button('Export figures', '', 'export', 'Export the figures as one JSON file', () => exportRun(o.data)));
-    s.querySelector('.bench-head').append(tools);
-    s.append(saidAt(`export-${r.id}`),h('p', 'board-from', `${noiseSaid(n)} Export writes the figures as one JSON file: no code, no names, no machine names.`));
-    if (r.state === 'refused') s.append(ended(r));
+    hd.append(tools);
+    s.append(saidAt(`stop-${r.id}`));
+    if (going) s.append(...progress(r, tasks, cols, n));
+    // A read that got no answer keeps the last update on the page, and says so.
+    if (o.error) {
+      const p = h('p', 'warn-note bench-lost', `The last read of this run got no answer: ${o.error}. The page shows ${typeof r.updated === 'string' ? `the update of ${B.ctx.clock(r.updated)}` : 'the last update read'}. `);
+      p.append(button('Read again', 'btn-quiet btn-sm', 'run-read-again', `Read the run ${r.id} again`, () => { o.stamp = null; draw(); }));
+      s.append(p);
+    }
+    s.append(h('p', 'board-from', `${span(r)} · SWE-bench Verified (dataset revision pinned in conveyor/bench/swe.json) · the first ${n} tasks of the pinned order · ${plural(cols.length, 'arm')} · each task in its own Docker container`),
+      saidAt(`export-${r.id}`), h('p', 'board-from', `${noiseSaid(n)} Export writes the figures as one JSON file: no code, no names, no machine names.`));
+    if (r.state === 'stopped' || r.state === 'guard' || r.state === 'refused') s.append(ended(r));
     s.append(bars(cols, n));
-    const m = section('bench-matrix', 'Tasks by arm', `${plural(tasks.length, 'task')} · ${plural(cols.length, 'arm')}`, `✓ resolved · ✗ not resolved · not run: the harness image, sandbox or grade failed. Each cell: sessions · minutes · cost (${COST}: not kept yet). Open a task to see each arm's work.`);
+    const m = section('bench-matrix', 'Tasks by arm', `${plural(tasks.length, 'task')} · ${plural(cols.length, 'arm')}`, '✓ resolved · ✗ not resolved · not run: the harness image, sandbox or grade failed. Each cell: sessions · minutes · cost at list prices. A reused result adds no cost. A task not run or interrupted shows the cost of its work. Open a task to see each arm\'s work.');
     const wrap = h('div', 'tests-scroll'), t = h('table', 'tests-table bench-mat'), head = h('tr');
     head.append(h('th', null, 'Task'));
     cols.forEach((c) => { const th = h('th', null, colName(c)); if (colSub(c)) th.append(h('span', 'bench-sub', colSub(c))); head.append(th); });
@@ -428,7 +489,7 @@
       t.append(tr);
     });
     const tot = [['Resolved', (c) => `${c.resolved} of ${n}`], ['Sessions · tokens', (c) => `${num(c.sessions) === null ? '–' : c.sessions} · ${tokens(c.tokens)}`],
-      ['Minutes · cost', (c) => `${num(c.minutes) === null ? '–' : Math.round(c.minutes)} · ${COST}`]];
+      ['Minutes · cost', (c) => `${num(c.minutes) === null ? '–' : Math.round(c.minutes)} · ${costSaid(c.cost)}`]];
     const foot = h('tfoot');
     tot.forEach(([name, f]) => { const tr = h('tr'); tr.append(h('td', 'bench-name', name), ...cols.map((c) => h('td', null, f(c)))); foot.append(tr); });
     t.append(foot);
@@ -437,7 +498,60 @@
     const out = [s, m];
     const open = tasks.find((x) => x.id === B.task);
     if (open) out.push(taskPart(open, cols));
+    // The run's event log (`bench swe show`'s tail), its last LOGN lines, kept after the run ends.
+    const tail = list(o.data.tail).filter(obj).slice(-LOGN);
+    if (tail.length) {
+      const lg = section('bench-log', 'Recent log', null, `The last ${LOGN} events at most. They stay with the run.`), ol = h('ol', 'bench-loglines');
+      tail.forEach((e) => {
+        const li = h('li'), c = cols.find((x) => x.arm === e.arm);
+        li.append(h('span', 'mono', B.ctx.clock(e.at)), h('span', null, e.arm ? (c ? colName(c) : String(e.arm)) : 'Run'), h('span', 'mono', e.task ? String(e.task) : ''), h('span', null, String(e.event || '')));
+        ol.append(li);
+      });
+      lg.append(ol);
+      out.push(lg);
+    }
     return out;
+  }
+  const LOGN = 20;
+  // A run's wall time in minutes, from its start to its end; null when not read (or not ended).
+  const elapsed = (r) => { const a = Date.parse(r.started), b = Date.parse(r.ended); return Number.isFinite(a) && Number.isFinite(b) ? Math.max(0, (b - a) / 60000) : null; };
+  // Latest result, beside a page's heading: the newest run that is not going, unless it is the run shown.
+  function latest(shown) {
+    const r = runsOf().find((x) => x.state !== 'running');
+    return r && r.id !== shown ? button('Latest result', 'btn-link', 'latest', `Open the run ${r.id}`, () => { openRun(r.id); draw(); }) : null;
+  }
+  // A run that goes, under its first line: the arm, task and step it is at; the arm and task pairs finished of all it
+  // plans (a not run among them), resolved, reused, not run and its cost so far; then each arm's.
+  function progress(r, tasks, cols, n) {
+    const a = obj(r.active), at = a && cols.find((c) => c.arm === a.arm), sum = (k) => cols.reduce((x, c) => x + (num(c[k]) || 0), 0);
+    const work = (x) => [typeof x.task === 'string' ? x.task : null, typeof x.phase === 'string' && x.phase ? x.phase : 'Running'].filter(Boolean).join(' · ');
+    const now = h('p', 'bench-now');
+    now.append(a ? `Now: ${at ? colName(at) : String(a.arm)} · ${work(a)}` : 'Now: between two tasks.');
+    if (a && typeof a.since === 'string') now.append(' ', h('span', 'board-from', `since ${B.ctx.clock(a.since)}`));
+    // Each arm's cells: reused counts its results taken from an earlier run. Active time is the wall minutes of the
+    // arm's work in this run (bench swe's wall: each task it ran, a task not run included; a reused result adds none)
+    // and, for the arm at work, the time since its task began (active.start), counted on the Board's clock (ctx.since).
+    const of = (c) => tasks.flatMap((t) => list(t.cells).filter((x) => obj(x) && x.arm === c.arm));
+    const reusedOf = (c) => of(c).filter((x) => x.reused === true).length;
+    const activeOf = (c) => (a && a.arm === c.arm && Number.isFinite(Date.parse(a.start)) ? B.ctx.since(a.start, '', (num(c.wall) || 0) * 60) : took(num(c.wall)));
+    // The active session's cost is unknown only once it has one: a task still preparing its image has no session yet.
+    const k = costOf(r.cost), price = k.state === 'known' ? `Recorded list price ${B.ctx.money(k.usd)}.`
+      : k.state === 'partial' ? `${B.ctx.money(k.usd)} recorded. ${a && obj(a.cost) && costOf(a.cost).state !== 'known' ? 'Cost for the active session is unknown.' : 'Part of the cost is unknown.'}` : 'Cost unknown.';
+    const figs = h('p', 'bench-sofar', `${sum('done')} of ${n * cols.length} arm results finished · ${sum('resolved')} resolved · ${cols.reduce((x, c) => x + reusedOf(c), 0)} reused · ${sum('notRun')} not run · ${price}`);
+    if (typeof r.updated === 'string') figs.append(' ', h('span', 'board-from', `Last update ${B.ctx.clock(r.updated)}`));
+    const t = h('table', 'tests-table bench-live'), hr = h('tr');
+    ['Arm', 'Finished', 'Resolved', 'Reused', 'Not run', 'Current work', 'Active time', 'Cost so far'].forEach((x, i) => hr.append(h('th', i && i !== 5 ? 'r' : null, x)));
+    t.append(hr);
+    cols.forEach((c) => {
+      const tr = h('tr'), d = num(c.done) || 0, act = h('td', 'r');
+      tr.dataset.arm = c.arm; act.append(activeOf(c));
+      tr.append(h('td', 'bench-name', colName(c)), h('td', 'r', `${d} of ${n}`), h('td', 'r', String(num(c.resolved) || 0)), h('td', 'r', String(reusedOf(c))),
+        h('td', 'r', String(num(c.notRun) || 0)), h('td', null, a && a.arm === c.arm ? work(a) : d >= n ? 'Finished' : 'Waiting'), act, h('td', 'r', costSaid(c.cost)));
+      t.append(tr);
+    });
+    const wrap = h('div', 'tests-scroll');
+    wrap.append(t);
+    return [now, figs, wrap];
   }
   const said = (c) => (c.result === 'resolved' || c.resolved === true ? 'yes' : typeof c.result === 'string' && c.result.startsWith('not run') ? 'nr' : c.result || c.resolved === false ? 'no' : null);
   // A cell with no result yet, by the state `bench swe show` gives it: the step of the arm's work on the task now, waiting
@@ -446,9 +560,10 @@
   const PENDSAID = { waiting: 'The run has not reached this task for this arm yet.', interrupted: 'Stop ended the work of this arm on this task. No result is kept.' };
   function cell(c) {
     const td = h('td', 'bench-cell'), k = said(c);
-    if (k === null) { td.append(h('span', 'muted', pend(c))); return td; }
+    // A task not run, and the work Stop interrupted, show the cost of the work done on them (bench swe show's cost).
+    if (k === null) { td.append(h('span', 'muted', pend(c))); if (c.state === 'interrupted') td.append(h('span', 'bench-sub', costSaid(c.cost))); return td; }
     td.append(h('span', k, k === 'yes' ? '✓' : k === 'no' ? '✗' : 'not run'));
-    td.append(h('span', 'bench-sub', k === 'nr' ? String(c.result).replace(/^not run: /, '') : `${plural(num(c.sessions) || 0, 'session')} · ${took(c.minutes)} · ${COST}${c.reused ? ' · reused' : ''}`));
+    td.append(h('span', 'bench-sub', k === 'nr' ? `${String(c.result).replace(/^not run: /, '')} · ${costSaid(c.cost)}` : `${plural(num(c.sessions) || 0, 'session')} · ${took(c.minutes)} · ${c.reused ? 'reused, no new cost' : costSaid(c.cost)}`));
     return td;
   }
   // One task opened: each arm's card, its patch, its steps and the harness's grade.
@@ -506,10 +621,12 @@
   function exportRun(data) {
     const r = data.run, cols = colsOf(r);
     const figs = { run: r.id, benchmark: 'SWE-bench Verified', set: obj(r.set) ? { dataset: r.set.dataset, revision: r.set.revision } : null, started: r.started || null, ended: r.ended || null,
-      tasksPerArm: r.n, state: r.state,
-      arms: cols.map((c) => ({ arm: c.arm, label: colName(c), version: c.version || null, engine: c.engine || null, model: c.model || null, done: c.done, resolved: c.resolved, notRun: c.notRun, sessions: c.sessions, tokens: c.tokens, minutes: c.minutes })),
+      tasksPerArm: r.n, state: r.state, cost: costOf(r.cost),
+      arms: cols.map((c) => ({ arm: c.arm, label: colName(c), version: c.version || null, engine: c.engine || null, model: c.model || null, done: c.done, resolved: c.resolved, notRun: c.notRun, sessions: c.sessions, tokens: c.tokens, minutes: c.minutes,
+        cost: costOf(c.cost) })),
+      // Each cost is {usd, state} (costOf): a reused result's is the known $0 it added to this run.
       tasks: list(data.tasks).filter(obj).map((x) => ({ task: x.id, arms: list(x.cells).map((c) => ({ arm: c.arm, result: said(c) === 'yes' ? 'resolved' : said(c) === 'no' ? 'not resolved' : said(c) === 'nr' ? 'not run' : null,
-        sessions: num(c.sessions), tokens: num(c.tokens), minutes: num(c.minutes) })) })) };
+        sessions: num(c.sessions), tokens: num(c.tokens), minutes: num(c.minutes), reused: c.reused === true, cost: c.reused === true ? { usd: 0, state: 'known' } : costOf(c.cost) })) })) };
     download(`bench-${r.id}.json`, `data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(figs, null, 2))}`);
     say(`export-${r.id}`, `Exported: bench-${r.id}.json.`, 'ok');
   }
@@ -529,6 +646,8 @@
     picked.forEach((r) => colsOf(r).forEach((c) => { if (typeof c.key === 'string' && c.key && !seen.has(c.key)) seen.set(c.key, c); }));
     return Array.from(seen.values());
   }
+  // A side's cost for each task it resolved (`bench swe diff`'s totals.cost), recorded, in part or unknown as its cost is.
+  const perResolved = (x) => { const k = costOf(x.cost); return !num(x.resolved) ? '–' : costSaid(k.usd === null ? k : { ...k, usd: k.usd / x.resolved }); };
   function comparePage() {
     if (!hist()) return [reading('the runs')];
     const sides = sidesOf(), s = section('bench-compare', 'Compare');
@@ -581,7 +700,8 @@
     const t = h('table', 'tests-table'), hr = h('tr');
     ['', 'Resolved', 'Sessions', 'Tokens', 'Minutes', 'Cost', 'Cost a resolved task'].forEach((x, i) => hr.append(h('th', i ? 'r' : null, x)));
     t.append(hr);
-    [[A, ta], [Bn, tb]].forEach(([name, x]) => { const tr = h('tr'); tr.append(h('td', 'bench-name', name), h('td', 'r', `${x.resolved} of ${n}`), h('td', 'r', String(x.sessions ?? '–')), h('td', 'r', tokens(x.tokens)), h('td', 'r', String(x.minutes ?? '–')), h('td', 'r', COST), h('td', 'r', COST)); t.append(tr); });
+    [[A, ta], [Bn, tb]].forEach(([name, x]) => { const tr = h('tr'); tr.append(h('td', 'bench-name', name), h('td', 'r', `${x.resolved} of ${n}`), h('td', 'r', String(x.sessions ?? '–')), h('td', 'r', tokens(x.tokens)), h('td', 'r', String(x.minutes ?? '–')), h('td', 'r', costSaid(x.cost)),
+      h('td', 'r', perResolved(x))); t.append(tr); });
     const wrap = h('div', 'tests-scroll'); wrap.append(t);
     const fold = h('details', 'bench-flipped'); fold.append(h('summary', null, `The ${plural(flips.length, 'flipped task')}`), h('p', 'board-from mono', flips.map((f) => f.task).join(' · ') || 'none'));
     s.append(head, foot, wrap, fold);
@@ -687,6 +807,8 @@
   function startPage() {
     const s = section('bench-start', 'Start a run', null, 'SWE-bench Verified run through each arm, graded by the official harness.'), bench = obj(B.d && B.d.bench) || {};
     s.querySelector('.bench-head').append(button('Back', 'btn-quiet', 'back', 'Back to the overview', () => go('overview')));
+    const last = latest(null);
+    if (last) s.querySelector('.bench-head').append(last);
     const max = num(bench.max) || 500, row = h('div', 'bench-row'), seg = h('div', 'bench-seg');
     row.append(h('span', 'board-label', 'How many tasks'));
     (list(bench.presets).length ? list(bench.presets) : [1, 5, 20, 50]).forEach((p) => {
@@ -1166,7 +1288,7 @@
     // The same figures as a table, saved beside the picture as <id>.csv by either download.
     const head = ['Run', 'Arm', 'Resolved', 'Noise for n', 'Sessions', 'Tokens', 'Cost'];
     const figs = runs.flatMap((r) => colsOf(r).map((c) => [r.id, colName(c), `${c.resolved} of ${r.n}`, String(noiseOf(num(r.n) || 0)),
-      num(c.sessions) === null ? '–' : String(c.sessions), tokens(c.tokens), COST]));
+      num(c.sessions) === null ? '–' : String(c.sessions), tokens(c.tokens), costSaid(c.cost)]));
     const csv = [head].concat(figs).map((row) => row.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\r\n') + '\r\n';
     const table = () => download(`${id}.csv`, `data:text/csv;charset=utf-8,${encodeURIComponent(csv)}`);
     // A download's answer belongs to the runs it was made from: a new selection shows no answer about the last one.
@@ -1213,11 +1335,30 @@
   function render(el, d, ctx) {
     const view = ctx.project(d);
     ctx.title(Array.isArray(view.repos) && view.repos.length > 1 && view.repo ? `Benchmarks: ${view.repo}` : null);
-    if (B.repo !== undefined && view.repo !== B.repo) { B.sel = []; B.open = null; B.task = null; B.cmp = { a: '', b: '', data: null, text: null, all: false, ask: null, n: B.cmp.n }; B.runs.clear(); B.edit = null; }
+    if (B.repo !== undefined && view.repo !== B.repo) { B.sel = []; B.open = null; B.task = null; B.cmp = { a: '', b: '', data: null, text: null, all: false, ask: null, n: B.cmp.n }; B.runs.clear(); B.edit = null; B.landed = false; }
     Object.assign(B, { el, ctx, d: view, repo: view.repo });
+    watchOut();
+    // The tab opens on the work that needs attention, each time it is shown: the page of the project's run in
+    // progress, else Start a run. A run that starts while the tab is shown does not move the page: Watch run, in the
+    // page row, opens it.
+    if (!B.landed && typeof view.repo === 'string') {
+      B.landed = true;
+      const l = live();
+      if (l && l.state === 'running' && typeof l.id === 'string') openRun(l.id); else B.page = 'start';
+    }
     if (B.held) { B.late = true; return; }
     draw();
   }
+  // The panel taken out of the page (another tab shown: the Board removes the other tabs' panels) makes the next draw
+  // choose the page again. The Board draws a panel shown again with a part equal to the last one through same().
+  let watched = null;
+  function watchOut() {
+    const box = B.el && B.el.closest('[data-panel]'), grid = box && box.parentNode;
+    if (!grid || grid === watched || typeof window.MutationObserver !== 'function') return;
+    watched = grid;
+    new window.MutationObserver(() => { if (B.el && !B.el.isConnected) B.landed = false; }).observe(grid, { childList: true });
+  }
+  function same(el, d, ctx) { if (!B.landed) render(el, d, ctx); }
   // While an arm's check runs, the arms are read again on the Board's clock (its tick), one read at a time and at most
   // one each CHECK_MS after the last one ended: a check alone moves no run, so the Board sends the panel no update for
   // it, yet its step and its end show with no press, after a reload too (the arms read checking then).
@@ -1246,6 +1387,7 @@
     empty(el, ctx) { el.append(ctx.state('empty', 'No benchmarks to show', 'Conveyor did not run on this project on the build machine yet. Start Conveyor there, and its benchmarks show here.')); },
     error(el, message, ctx) { el.append(ctx.state('error', 'The Board could not read the benchmarks', message)); },
     render,
+    same,
     tick,
   });
 }());

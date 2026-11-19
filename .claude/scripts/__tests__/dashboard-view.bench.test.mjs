@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // The Benchmarks tab's Overview (#326, the owner's approved mockup, overview.html): its page row, Newest run (each arm's
 // resolved of n side by side with the noise for n, or the run in progress, or how the last run ended), History (every
-// run newest first, ticked for Compare and the infographic), Arms and the Drift watch, folded. The runs come from GET
-// bench, not the snapshot. Shared setup: dashboard-view.helpers.mjs (BH).
+// run newest first, ticked for Compare and the infographic), Arms and the Drift watch, folded; the tab opened while a
+// run goes, on that run's page with Stop run, else on Start a run, each time it is shown, and a run whose process is
+// gone (#646); and each place a cost shows, recorded, partial or unknown (#646).
+// The runs come from GET bench, not the snapshot. Shared setup: dashboard-view.helpers.mjs (BH).
 import assert from 'node:assert/strict';
-import { boot, deliver, next, settle, act, cases, full, iso, T0, BH } from './dashboard-view.helpers.mjs';
+import { boot, deliver, next, settle, act, cases, full, iso, T0, BH, tick, tabBtn } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const { bp, heads, pages, NEW, OLD } = BH;
@@ -29,11 +31,11 @@ test('Overview: the newest run per arm with its noise, every run in History, the
   assert.deepEqual(bars(w), [['Conveyor 1.5.0', '4 of 5'], ['Claude alone (claude-opus-5-5)', '2 of 5'], ['Codex alone (gpt-6.2-sol)', '2 of 5']]);
   const noise = bp(w).querySelector('.bench-newest .bench-noise');
   assert.deepEqual([noise.style.left, noise.style.width, noise.title], ['0%', '100%', 'noise for n=5'], 'the band is 4 tasks either side of 4 of 5, cut at 0 and 5');
-  assert.deepEqual(Array.from(bp(w).querySelector('.bench-figures .figure').children, text), ['–', 'Conveyor 1.5.0: 13 sessions · 15.3M tokens · 1 h 42 min', 'cost: not kept yet']);
+  assert.deepEqual(Array.from(bp(w).querySelector('.bench-figures .figure').children, text), ['unknown', 'Conveyor 1.5.0: 13 sessions · 15.3M tokens · 1 h 42 min', 'cost at list prices']);
   assert.match(text(bp(w).querySelector('.bench-care')), /1 task not run for Codex alone \(gpt-6\.2-sol\): .*\(not counted as failed\)/);
   const rows = Array.from(bp(w).querySelectorAll('.bench-history tr[data-run]'), (r) => Array.from(r.children).slice(1).map(text));
-  assert.deepEqual(rows, [[NEW, '10:00 AM', '5', 'Conveyor 1.5.0 · Claude alone (claude-opus-5-5) · Codex alone (gpt-6.2-sol)', '4 · 2 · 2', '22', '24.4M', '2 h 50 min', '–', 'Done 1 task not run'],
-    [OLD, '11/08/2026, 11:00 AM', '20', 'Conveyor 1.4.0', '8', '30', '40.0M', '4 h 20 min', '–', 'Stopped at the usage guard']], 'every run, newest first');
+  assert.deepEqual(rows, [[NEW, '10:00 AM', '5', 'Conveyor 1.5.0 · Claude alone (claude-opus-5-5) · Codex alone (gpt-6.2-sol)', '4 · 2 · 2', '22', '24.4M', '2 h 50 min', 'unknown', 'Done 1 task not run'],
+    [OLD, '11/08/2026, 11:00 AM', '20', 'Conveyor 1.4.0', '8', '30', '40.0M', '4 h 20 min', 'unknown', 'Stopped at the usage guard']], 'every run, newest first');
   assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-arms tr'), (r) => [text(r.children[0]), ...Array.from(r.children[1].children, text)]),
     [['Ready', '3'], ['Checking', '0'], ['Preflight failing', '1', 'Claude with Superpowers: it did not fire: its output shows no use of its method'], ['Not checked', '1', 'Claude with Chisle'],
       ['Not offered', '1', 'OpenHands: it needs an API key']]);
@@ -74,16 +76,17 @@ test('Overview: a run in progress shows a bar of tasks done per arm, the task no
   next(w, d);
   await settle();
   const box = bp(w).querySelector('.bench-running');
-  assert.match(text(box), /^Running 2 arms on 5 tasks · now pydata__xarray-4094 Stop/);
+  assert.match(text(box), /^Running 2 arms on 5 tasks · now pydata__xarray-4094 Stop run/);
   assert.deepEqual(Array.from(box.querySelectorAll('.bench-bar'), (b) => [b.querySelector('.bench-name').textContent, b.querySelector('.bench-num').textContent]),
     [['Conveyor 1.5.0', '2 of 5'], ['Claude alone (claude-opus-5-5)', '1 of 5']]);
   assert.equal(text(box.querySelector('.board-from')), 'tasks done by each arm · 7 sessions so far, usual for the run 18, worst case 45');
-  w.reply = BH.reply('conveyor: the SWE-bench run is stopped');
-  act(bp(w), 'stop').click();
-  assert.deepEqual(w.posts.splice(0).map((p) => p.body), [{ action: 'bench', args: ['stop'], repo: 'sample' }]);
+  // Bug it guards (#646): Stop sent no run ID, so a Stop that came late stopped the run after the one shown.
+  w.reply = BH.reply(`conveyor: run ${id} is stopped. Its finished tasks are kept.`);
+  act(bp(w), 'stop-run').click();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body), [{ action: 'bench', args: ['stop', id], repo: 'sample' }]);
   await settle();
   const said = () => { const p = bp(w).querySelector('.bench-running .bench-said'); return p && text(p); };
-  assert.equal(said(), 'Stop sent: the benchmark run. conveyor: the SWE-bench run is stopped');
+  assert.equal(said(), 'Run stopped. Finished results are kept.');
   // Bug it guards (#632): a Stop's answer was kept by action only, so the next run's Stop read "Stop sent" unclicked.
   const d2 = full();
   d2.panels.bench.data.bench.live = { ...d.panels.bench.data.bench.live, id: 'r20261109T170000-13' };
@@ -130,6 +133,7 @@ test('Overview: the drift watch is folded, one row a figure, and a group of 2 ca
   d.panels.bench.data.drift = { before: g('aaaaaaaa1111', 5, 1320), after: g('bbbbbbbb2222', 2, 3000), small: ['after'] };
   w.benchBody = () => BH.hist();
   deliver(w, d);
+  act(bp(w), 'page-overview').click();
   const box = bp(w).querySelector('.bench-drift details');
   assert.equal(box.open, false, 'folded');
   assert.equal(box.querySelector('summary').textContent, 'Engine aaaaaaa → bbbbbbb · 5 cards before, 2 since');
@@ -149,4 +153,188 @@ test('Overview: the drift watch is folded, one row a figure, and a group of 2 ca
   assert.equal(box2.querySelector('summary').textContent, 'Engine aaaaaaa → bbbbbbb · 20 cards before, 18 since · 1 figure moved');
   assert.deepEqual(Array.from(box2.querySelectorAll('tr'), (r) => [text(r.children[0]), text(r.children[3])]).slice(1), [['Tokens', 'In its usual range'], ['Minutes', 'Moved'],
     ['Reviews to land', 'In its usual range'], ['Fix rounds', 'In its usual range'], ['Blocked', 'In its usual range'], ['Minutes waited', 'Not read']]);
+});
+
+// Bugs it guards (#646): the run in progress was a line on the Overview: opening the tab showed no step and no figures
+// so far, its page had no Stop, and Stop named no run. The tab opens on the run going. Its first line has its state,
+// its time and Stop run; a step change with the same done count shows; a read with no answer keeps the last update;
+// Stop says Stopping and stays off until the build machine answers; the page then says how the run ended.
+test('A run going: the tab opens on it, its step moves with the same done count, a lost read keeps it, Stop run ends it from its first line', async () => {
+  const w = boot({ tab: 'bench' });
+  const id = 'r20261109T164200-12', [t1, t2, t3, ...rest] = BH.TASKS, [C, S] = BH.hist().runs[0].cols;
+  let phase = 'Building', state = 'running', lost = false, acost = { usd: null, state: 'unknown' };
+  const going = () => state === 'running', usd = (v, s = 'known') => ({ usd: v, state: s });
+  const c = (arm, result, o = {}) => ({ arm, result, reused: false, state: result ? 'finished' : going() ? 'waiting' : 'not reached', sessions: 1, minutes: 8, ...o });
+  const show = () => ({
+    run: { id, state, started: iso(T0 - 1080000), ended: going() ? null : iso(T0), updated: iso(T0 - 60000), n: 5, cost: usd(2, 'partial'),
+      active: going() ? { arm: 'conveyor', task: t3, phase, since: iso(T0 - 120000), start: iso(T0 - 300000), ...(acost ? { cost: acost } : {}) } : null,
+      cols: [{ ...C, done: 2, resolved: 2, notRun: 0, cost: usd(1.2, 'partial'), wall: 8 }, { ...S, done: 2, resolved: 1, notRun: 0, cost: usd(0.8), wall: 16 }] },
+    tasks: [{ id: t1, cells: [c('conveyor', 'resolved', { reused: true, cost: usd(3) }), c('solo', 'resolved', { cost: usd(0.4) })] },
+      { id: t2, cells: [c('conveyor', 'resolved', { cost: usd(1.2) }), c('solo', 'unresolved', { cost: usd(0.4) })] },
+      { id: t3, cells: [going() ? { arm: 'conveyor', result: null, reused: false, state: 'active', phase } : { arm: 'conveyor', result: null, reused: false, state: 'interrupted', cost: usd(0.4, 'partial') }, c('solo', null)] },
+      ...rest.map((t) => ({ id: t, cells: [c('conveyor', null), c('solo', null)] }))],
+    tail: [{ at: iso(T0 - 1080000), arm: null, task: null, event: 'Run started' }, { at: iso(T0 - 900000), arm: 'conveyor', task: t1, event: 'Reused: Resolved' },
+      { at: iso(T0 - 120000), arm: 'conveyor', task: t3, event: phase }] });
+  w.benchBody = (url) => (!/&run=/.test(url) ? BH.hist() : lost ? null : show());
+  const snap = (seq) => { const d = full(); d.panels.bench.data.bench.live = { id, state, pid: 1, arms: ['conveyor', 'solo'], n: 10, done: 4, resolved: 3, seq, started: iso(T0 - 1080000), tasks: [] }; return d; };
+  deliver(w, snap(1));
+  await settle();
+  assert.deepEqual(heads(w), [`Run ${id}`, 'Tasks by arm', 'Recent log'], 'the tab opens on the run going');
+  assert.equal(pages(w).find(([p]) => p === 'A run')[1], 'page');
+  const head = () => Array.from(bp(w).querySelector('.bench-run-head > .bench-head').children, text).slice(0, 4);
+  assert.deepEqual(head(), [`Run ${id}`, 'Running', 'Elapsed 18 min', 'Stop run']);
+  const now = () => text(bp(w).querySelector('.bench-now'));
+  assert.match(now(), new RegExp(`^Now: Conveyor 1\\.5\\.0 · ${t3} · Building since `));
+  assert.match(text(bp(w).querySelector('.bench-sofar')), /^4 of 10 arm results finished · 3 resolved · 1 reused · 0 not run · \$2\.00 recorded\. Cost for the active session is unknown\. Last update /);
+  // Bug it guards (#646 review E3): the table for each arm had no reused or not run count and no active time, and
+  // then an active time of the finished tasks only. Conveyor's 13 min is its wall of 8 min (bench swe's: a reused
+  // result adds none) and the 5 min since its task in progress began; Claude alone's is its wall.
+  assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-live tr'), (r) => Array.from(r.children, text)),
+    [['Arm', 'Finished', 'Resolved', 'Reused', 'Not run', 'Current work', 'Active time', 'Cost so far'],
+      ['Conveyor 1.5.0', '2 of 5', '2', '1', '0', `${t3} · Building`, '13 min', '$1.20 recorded, part unknown'], ['Claude alone (claude-opus-5-5)', '2 of 5', '1', '0', '0', 'Waiting', '16 min', '$0.80']]);
+  // Bug it guards (#646 review E5): an agent in one phase sends no update, and its elapsed time stood still. It counts
+  // on the Board's clock with no new read, as does the active time of the arm at work.
+  tick(w, 120000);
+  assert.equal(head()[2], 'Elapsed 20 min');
+  assert.equal(text(bp(w).querySelector('.bench-live tr[data-arm="conveyor"]').children[6]), '15 min');
+  assert.equal(act(bp(w), 'latest').textContent, 'Latest result', 'Latest result beside the heading');
+  assert.equal(text(bp(w).querySelector(`tr[data-task="${t1}"] .bench-cell .bench-sub`)), '1 session · 8 min · reused, no new cost');
+  assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-loglines li'), (li) => Array.from(li.children, text).slice(1)),
+    [['Run', '', 'Run started'], ['Conveyor 1.5.0', t1, 'Reused: Resolved'], ['Conveyor 1.5.0', t3, 'Building']]);
+  // The step moves on and no result comes: done stays 4, seq goes up.
+  phase = 'Reviewing';
+  next(w, snap(2));
+  await settle();
+  assert.match(now(), / · Reviewing since /, 'the step change read the run again');
+  assert.match(text(bp(w).querySelector('.bench-sofar')), /^4 of 10 arm results finished/);
+  // A read with no answer keeps the last update and says so; Read again reads it.
+  phase = 'Testing'; lost = true;
+  next(w, snap(3));
+  await settle();
+  assert.match(now(), / · Reviewing since /, 'the last update stays');
+  assert.match(text(bp(w).querySelector('.bench-lost')), /^The last read of this run got no answer: no benchmarks\. The page shows the update of .*\. Read again$/);
+  lost = false;
+  act(bp(w), 'run-read-again').click();
+  await settle();
+  assert.match(now(), / · Testing since /);
+  assert.equal(bp(w).querySelector('.bench-lost'), null);
+  // Bug it guards (#646 review E6): a task preparing its image has no session yet, and the line said the cost of the
+  // active session was unknown.
+  phase = 'Preparing image'; acost = null;
+  next(w, snap(4));
+  await settle();
+  assert.match(text(bp(w).querySelector('.bench-sofar')), /\$2\.00 recorded\. Part of the cost is unknown\. Last update /);
+  // Bug it guards (#646 review E1): the tab chose its page once, so a person back from another tab saw the page they
+  // left, not the run going.
+  act(bp(w), 'page-overview').click();
+  tabBtn(w, 'overview').click();
+  await settle();
+  tabBtn(w, 'bench').click();
+  await settle();
+  assert.equal(pages(w).find(([p]) => p === 'A run')[1], 'page', 'the tab shown again opens on the run going');
+  // Stop run, from the run's first line: it names the run and stays off until the build machine answers.
+  let answer;
+  w.reply = new Promise((res) => { answer = res; });
+  act(bp(w), 'stop-run').click();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body), [{ action: 'bench', args: ['stop', id], repo: 'sample' }]);
+  const stop = act(bp(w), 'stop-run'), said = () => text(bp(w).querySelector('.bench-run-head .bench-said'));
+  assert.deepEqual([stop.textContent, stop.disabled, said()], ['Stopping run', true, `Stopping run ${id}. Finished results are kept.`]);
+  state = 'stopped';
+  answer(BH.reply(`conveyor: run ${id} is stopped. Its finished tasks are kept.`));
+  await settle();
+  assert.deepEqual(head().slice(0, 3), [`Run ${id}`, 'Stopped', 'Elapsed 18 min'], 'how it ended');
+  assert.equal(act(bp(w), 'stop-run'), null, 'no Stop run once it ended');
+  assert.equal(said(), 'Run stopped. Finished results are kept.');
+  assert.equal(text(bp(w).querySelector('.bench-run-head .bench-ended')), 'Stopped by you 2 of 5 tasks done for every arm. The finished tasks are kept and reused.');
+  assert.equal(text(bp(w).querySelector(`tr[data-task="${t3}"] .bench-cell`)), 'interrupted$0.40 recorded, part unknown');
+  assert.equal(bp(w).querySelector('.bench-now'), null);
+});
+
+// Bug it guards (#646 review E1): with no run going the tab opened on the Overview, so Start a run was a click away,
+// and a person back from another tab saw the page they had left; neither heading linked to the latest result.
+test('No run going: the tab opens on Start a run with Latest result beside its heading, and again when shown again', async () => {
+  const w = boot({ tab: 'bench' });
+  w.benchBody = (url) => (/&run=/.test(url) ? BH.run() : BH.hist());
+  deliver(w, full());
+  await settle();
+  assert.equal(pages(w).find(([p]) => p === 'Start a run')[1], 'page');
+  assert.equal(heads(w)[0], 'Start a run');
+  act(bp(w), 'latest').click();
+  await settle();
+  assert.equal(heads(w)[0], `Run ${NEW}`, 'Latest result opens the newest run that ended');
+  assert.equal(act(bp(w), 'latest'), null, 'no link to the run shown');
+  tabBtn(w, 'overview').click();
+  await settle();
+  tabBtn(w, 'bench').click();
+  await settle();
+  assert.equal(heads(w)[0], 'Start a run', 'the tab shown again opens on Start a run');
+});
+
+// Bug it guards (#646 review E2): a run whose process was gone with no end written read as stopped by you, with no
+// Stop run, so its end was never recorded and its containers stayed. It says interrupted and keeps Stop run.
+test('A run whose process is gone: its page says interrupted and keeps Stop run, which records its end', async () => {
+  const w = boot({ tab: 'bench' });
+  const id = 'r20261109T164200-13', r0 = BH.hist().runs[0];
+  let recorded = false;
+  // As bench swe gives it: gone with no ended, then the end Stop recorded, which keeps gone.
+  const run = () => ({ ...r0, id, state: 'stopped', gone: true, ended: recorded ? iso(T0) : null, interrupted: recorded ? { arm: 'conveyor', task: BH.TASKS[0] } : undefined });
+  BH.open(w, { body: (url) => (/&run=/.test(url) ? { run: run(), tasks: [] } : { ...BH.hist(), runs: [run(), ...BH.hist().runs] }) });
+  await settle();
+  assert.match(text(bp(w).querySelector('.bench-newest .bench-ended')), /^Run interrupted Its process ended with no end recorded/);
+  act(bp(w), 'open-newest').click();
+  await settle();
+  const head = () => Array.from(bp(w).querySelector('.bench-run-head > .bench-head').children, text).slice(1, 3);
+  assert.deepEqual(head(), ['Interrupted', 'Elapsed –']);
+  w.reply = BH.reply(`conveyor: run ${id} was interrupted: its process had ended. Its end is recorded, its containers are removed, and its finished tasks are kept.`);
+  act(bp(w), 'stop-run').click();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['stop', id]]);
+  recorded = true;
+  await settle();
+  assert.match(text(bp(w).querySelector('.bench-run-head .bench-said')), /^Run interrupted: its process had ended\./);
+  assert.equal(act(bp(w), 'stop-run'), null, 'no Stop run once its end is recorded');
+  // Bug it guards (#646 review E2, again): once Stop recorded its end, the page said "Stopped by you". It still says
+  // interrupted, on its first line, under it and in History.
+  assert.equal(head()[0], 'Interrupted');
+  assert.match(text(bp(w).querySelector('.bench-run-head .bench-ended')), /^Run interrupted Its process ended before Stop, after \d+ of \d+ tasks for every arm\. Stop recorded its end/);
+  act(bp(w), 'back').click();
+  await settle();
+  assert.match(text(bp(w).querySelector(`.bench-history tr[data-run="${id}"]`).lastElementChild), /^Interrupted/);
+});
+
+// Bug it guards (#646): every cost of a run read "–" (not kept), so a cost recorded in full, one recorded in part and
+// one never recorded looked the same in History, on a run's page, in its export, in Compare and in the infographic's
+// table. A cost never recorded is unknown, never $0.
+test('Costs: History, a run, its export, Compare and the infographic table tell a recorded, a partial and an unknown cost apart', async () => {
+  const w = boot({ tab: 'bench' });
+  const h = BH.hist(), [r0, r1] = h.runs, known = { usd: 2.5, state: 'known' }, part = { usd: 1.2, state: 'partial' };
+  h.runs = [{ ...r0, cost: part, cols: r0.cols.map((x, i) => ({ ...x, cost: [known, part, null][i] })) }, { ...r1, cost: known }, { ...r1, id: 'r20261107T100000-5', cost: null }];
+  const run = BH.run();
+  run.run = h.runs[0];
+  run.tasks[0].cells = run.tasks[0].cells.map((x, i) => ({ ...x, cost: [{ usd: 0.5, state: 'known' }, { usd: 0.1, state: 'partial' }, undefined][i] }));
+  BH.open(w, { body: (url) => (/&run=/.test(url) ? run : h) });
+  await settle();
+  assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-history tr[data-run]'), (r) => text(r.children[9])), ['$1.20 recorded, part unknown', '$2.50', 'unknown']);
+  act(bp(w), `run-${NEW}`).click();
+  await settle();
+  assert.deepEqual(Array.from(bp(w).querySelector(`tr[data-task="${BH.TASKS[0]}"]`).querySelectorAll('.bench-cell .bench-sub'), text),
+    ['3 sessions · 20 min · $0.50', '1 session · 8 min · $0.10 recorded, part unknown', '1 session · 8 min · unknown']);
+  assert.deepEqual(Array.from(bp(w).querySelector('.bench-mat tfoot tr:last-child').children, text), ['Minutes · cost', '102 · $2.50', '40 · $1.20 recorded, part unknown', '28 · unknown']);
+  act(bp(w), 'export').click();
+  const figs = JSON.parse(decodeURIComponent(w.downloads[0].href.slice(w.downloads[0].href.indexOf(',') + 1)));
+  assert.deepEqual([figs.cost, ...figs.arms.map((a) => a.cost), ...figs.tasks[0].arms.map((a) => a.cost)],
+    [part, known, part, { usd: null, state: 'unknown' }, { usd: 0.5, state: 'known' }, { usd: 0.1, state: 'partial' }, { usd: null, state: 'unknown' }]);
+  act(bp(w), 'back').click();
+  const box = act(bp(w), `pick-${NEW}`); box.checked = true; box.dispatchEvent(new w.Event('change'));
+  act(bp(w), 'sel-compare').click();
+  w.reply = BH.reply(JSON.stringify({ a: { version: 'A', commit: null, totals: { resolved: 4, sessions: 13, tokens: 1, minutes: 102, cost: part } },
+    b: { version: 'B', commit: null, totals: { resolved: 2, sessions: 5, tokens: 1, minutes: 40, cost: { usd: null, state: 'unknown' } } }, tasks: 5, same: [], flipped: [], withinNoise: true }));
+  act(bp(w), 'compare').click();
+  await settle();
+  assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-compare tr'), (r) => Array.from(r.children, text).slice(5)).slice(1),
+    [['$1.20 recorded, part unknown', '$0.30 recorded, part unknown'], ['unknown', 'unknown']]);
+  act(bp(w), 'back').click();
+  act(bp(w), 'sel-infographic').click();
+  act(bp(w), 'ig-svg').click();
+  const csv = decodeURIComponent(w.downloads[2].href.slice(w.downloads[2].href.indexOf(',') + 1)).trim().split('\r\n');
+  assert.deepEqual(csv.slice(1).map((l) => /"([^"]*)"$/.exec(l)[1]), ['$2.50', '$1.20 recorded, part unknown', 'unknown']);
 });

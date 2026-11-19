@@ -27,7 +27,9 @@ t_sweshow() {
   jq -nc '{id: "r20261117T090000-1", arms: ["a1", "a2", "a3", "a4", "a5", "a6"], cols: [range(1; 7) | {arm: "a\(.)", key: "k\(.)"}], n: 3000,
       started: "2026-11-17T09:00:00Z", state: "done", tasks: [range(500) as $t | range(1; 7) | {id: "proj__task-\(1000 + $t)", arm: "a\(.)", result: "unresolved"}]}' > "$B/runs.jsonl" \
     && jq -nc '{id: "r20261117T100000-2", arms: ["stub-a", "stub-b"], cols: [{arm: "stub-a", key: "stub-a"}, {arm: "stub-b", key: "stub-b"}], n: 2,
-      started: "2026-11-17T10:00:00Z", state: "stopped", tasks: [{id: "proj__a-1", arm: "stub-a", result: "unresolved"}]}' >> "$B/runs.jsonl" \
+      started: "2026-11-17T10:00:00Z", state: "stopped", tasks: [{id: "proj__a-1", arm: "stub-a", result: "unresolved", minutes: 4},
+        {id: "proj__b-2", arm: "stub-a", result: "not run: the harness could not grade it (exit 1)", reused: false, cost: {usd: 0.7, state: "known", unpriced: 0}, minutes: 2.5}],
+      interrupted: {arm: "stub-b", task: "proj__a-1", cost: {usd: 0.3, state: "partial", unpriced: 1}, minutes: 1.5}}' >> "$B/runs.jsonl" \
     && { echo "k0 s0"; for i in 2 4 0.5 0; do jq -nc --argjson u "$i" '{card: "c1", steps: [{step: "build", usd: $u, pricedAs: (if $u == 0.5 then "other" else "m" end)}, {step: "review", usd: null}]}' \
       | sed 's/^/h\t/; s/$/\t[]/'; done; } > "$ST/cards.jsonl.priced" || fail "the runs and prices could not be written"
   [ "$(wc -c < "$B/runs.jsonl")" -gt 131072 ] || fail "the big run's line is not past the 128 KiB argument limit, so it proves nothing"
@@ -37,6 +39,12 @@ t_sweshow() {
   o=$(loop bench swe show r20261117T100000-2 2>&1) || fail "show failed: $o"
   [ "$(jq -c '.tasks[0].cells | map([.arm, .result, .resolved])' <<<"$o")" = '[["stub-a","unresolved",false],["stub-b",null,null]]' ] \
     || fail "the stopped run shows a result for an arm it never ran on the task: $o"
+  # Bug (#646): a task not run after its trial ran, and the task Stop interrupted, had no cost in their cells: the run
+  # page and its export said unknown for work whose cost the run line keeps.
+  [ "$(jq -c '[.tasks[0].cells[1] | .state, .cost.usd, .cost.state] + [.tasks[1].cells[0] | .cost.usd, .cost.state]' <<<"$o")" = '["interrupted",0.3,"partial",0.7,"known"]' ] \
+    || fail "the interrupted task's cost or the not run task's cost is not in its cell: $(jq -c '.tasks' <<<"$o")"
+  # Bug (#646 review E3): an arm's active time left out a task not run after its trial ran and the interrupted work.
+  [ "$(jq -c '.run.cols | map(.wall)' <<<"$o")" = '[6.5,1.5]' ] || fail "an arm's wall does not sum its tasks' and its interrupted work's minutes: $(jq -c .run.cols <<<"$o")"
   o=$(loop bench swe history 2>&1) || fail "history failed: $(head -c 300 <<<"$o")"
   [ "$(jq -c '.arms | map(select(.name | IN("conveyor", "solo")) | [.name, .perTask.session])' <<<"$o")" = '[["conveyor",2.1667],["solo",3]]' ] \
     || fail "an arm's perTask has not the mean dollars of this project's priced sessions (its model's, for an arm with one): $(jq -c '.arms | map([.name, .perTask])' <<<"$o")"
@@ -227,12 +235,16 @@ t_swefrozen() {
 t_swediffkeys() {
   swe; local o
   mkdir -p "$B/results/stub-a" "$B/results/stub-b-0123456789ab" \
-    && jq -nc '{task: "proj__a-1", arm: "stub-a", label: "Stub a", key: "stub-a", resolved: true, fired: true, sessions: 1, tokens: 7, minutes: 1, steps: [], at: "2026-11-01T00:00:00Z"}' \
-      > "$B/results/stub-a/proj__a-1.json" \
+    && jq -nc '{task: "proj__a-1", arm: "stub-a", label: "Stub a", key: "stub-a", resolved: true, fired: true, sessions: 1, tokens: 7, minutes: 1, steps: [], at: "2026-11-01T00:00:00Z",
+      cost: {usd: 0.5, state: "known", unpriced: 0}}' > "$B/results/stub-a/proj__a-1.json" \
     && jq -nc '{task: "proj__a-1", arm: "stub-b", label: "Stub b", key: "stub-b-0123456789ab", resolved: true, fired: true, sessions: 1, tokens: 3, minutes: 1, steps: [],
       at: "2026-11-02T00:00:00Z", inputs: {limits: {cpus: 1, memory: "8g", taskTimeout: 14400}}}' > "$B/results/stub-b-0123456789ab/proj__a-1.json" || fail "the results were not made"
   o=$(loop bench swe diff stub-a stub-b --json 2>&1) && [ "$(jq -c '[.tasks, .same, .a.totals.tokens, .b.totals.tokens]' <<<"$o")" = '[1,["proj__a-1"],7,3]' ] \
     || fail "Compare did not read the arms' kept results: $o"
+  # Bug (#646): Compare's totals had no cost, so the Board could not tell a recorded cost from one never kept. A
+  # result kept before costs were (stub-b's) is unknown, not $0.
+  [ "$(jq -c '[.a.totals.cost, .b.totals.cost]' <<<"$o")" = '[{"usd":0.5,"state":"known"},{"usd":null,"state":"unknown"}]' ] \
+    || fail "Compare's totals did not tell a recorded cost from an unknown one: $o"
 }
 
 # Bug (#638): a conveyor arm on the project's rules kept its results under its engine commit alone, so a run after the
@@ -250,9 +262,10 @@ t_swerulesreuse() {
 # Bugs (#643): (1) a task in progress showed no arm or step until its result was kept; (2) a step that changed with
 # nothing else left the read revision the same, so the Board did not refresh; (3) the run page listed only the tasks
 # with a result, never the ones still waiting; (4) the run kept no log of its events once it ended, and the step text
-# shown could be any word a container wrote in its card's records.
+# shown could be any word a container wrote in its card's records; (6, #646) an arm's active time had no start for
+# its task in progress and no minutes for a task that ran.
 t_swelive() {
-  swe; local o s c l id p first second u='Running Conveyor. Step unavailable.'; first=$(sweorder | head -n 1); second=$(sweorder | tail -n 1)
+  swe; local o s st c l id p first second u='Running Conveyor. Step unavailable.'; first=$(sweorder | head -n 1); second=$(sweorder | tail -n 1)
   # The fake engine waits at hold; the case writes its card's start lines, as the real loop does at each step.
   : > "$SWE_FX/hold"
   loop bench swe 2 > "$T/$CASE/run.out" 2>&1 & p=$!
@@ -266,7 +279,7 @@ t_swelive() {
   id=$(jq -r .live.id "$B/board.json"); o=$(loop bench swe show "$id" 2>&1) || fail "show failed while the run goes: $o"
   [ "$(jq -c '[.tasks[] | [.id, .cells[0].state, .cells[0].phase]]' <<<"$o")" = "[[\"$first\",\"active\",\"Building\"],[\"$second\",\"waiting\",null]]" ] \
     || fail "the matrix does not show the active task and the waiting one: $(jq -c .tasks <<<"$o")"
-  s=$(jq .live.seq "$B/board.json")
+  s=$(jq .live.seq "$B/board.json"); st=$(jq -r '.live.active.start | strings' "$B/board.json")
   # (5) the judge's live record (judgecall()) is the review step's, so the run said Reviewing while the judge read the
   # findings. A judge's record older than the review's start line is an earlier pass's: it is not this review's judge.
   l=$(echo "$B/work/$first")/cards/c1.live; mkdir -p "${l%/*}" \
@@ -276,6 +289,8 @@ t_swelive() {
     || fail "the step change did not advance the read revision: $s $(jq -c '.live | [.seq, .active]' "$B/board.json")"
   o=$(loop bench swe show "$id" 2>&1) && jq -e --argjson s "$s" '.run.seq > $s and .tasks[0].cells[0].phase == "Reviewing"' <<<"$o" > /dev/null \
     || fail "show's read revision did not advance with the step: $s $(jq -c '[.run.seq, .tasks[0].cells[0]]' <<<"$o")"
+  # (6, #646 review E3) an arm's active time had no start for the task it is on: start stays the task's from step to step.
+  [ -n "$st" ] && [ "$(jq -r .run.active.start <<<"$o")" = "$st" ] || fail "the active work's start is not kept from step to step: $st $(jq -c .run.active <<<"$o")"
   echo '{"step":"review","at":"2026-01-01T00:00:03Z","action":"the judge reads the findings"}' > "$l" || fail "the judge's live record was not written"
   wait_until "jq -e '.live.active.phase == \"Judging\"' '$B/board.json' > /dev/null" || fail "the judge reading the findings was not shown: $(jq -c .live.active "$B/board.json")"
   echo '{"card":"c1","issue":1,"step":"start","result":"ok","of":"sk-SECRET"}' >> "$c" || fail "the odd start line was not written"
@@ -289,6 +304,9 @@ t_swelive() {
     and any(.tail[]; . == (. | {at} + {arm: "conveyor", task: null, event: "Checking"}))
     and .tail[-1] == (.tail[-1] | {at} + {arm: null, task: null, event: "Run done"}) and all(.tasks[].cells[]; .state == "finished")' <<<"$o" > /dev/null \
     || fail "show does not give the run's events after it ended: $o"
+  # (6) each task the arm ran keeps the wall minutes of its work, which its arm's wall sums for the active time.
+  tail -n 1 "$B/runs.jsonl" | jq -e '(.tasks | length) == 2 and all(.tasks[]; (.minutes | type) == "number")' > /dev/null \
+    && jq -e '(.run.cols[0].wall | type) == "number"' <<<"$o" > /dev/null || fail "a task's or the arm's wall minutes are not kept: $(tail -n 1 "$B/runs.jsonl") $(jq -c .run.cols <<<"$o")"
 }
 
 # Bugs (#644): a benchmark run kept no cost, so the Board could show none. (1) A session's known token usage gave no

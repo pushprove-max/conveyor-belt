@@ -37,9 +37,9 @@ test('A run: tasks by arm with the totals, one task opened with each arm\'s patc
   assert.deepEqual(Array.from(mat.querySelectorAll('tr[data-task]'), (r) => [r.dataset.task, ...Array.from(r.querySelectorAll('.bench-cell'), (c) => c.firstChild.textContent)]), [
     ['astropy__astropy-12907', '✓', '✓', '✓'], ['django__django-15347', '✓', '✗', '✓'], ['pydata__xarray-4094', '✓', '✓', '✗'],
     ['sympy__sympy-21614', '✓', '✗', '✗'], ['sphinx-doc__sphinx-8595', '✗', '✗', 'not run']]);
-  assert.equal(text(mat.querySelector('tr[data-task] .bench-cell .bench-sub')), '3 sessions · 20 min · –');
+  assert.equal(text(mat.querySelector('tr[data-task] .bench-cell .bench-sub')), '3 sessions · 20 min · unknown');
   assert.deepEqual(Array.from(mat.querySelectorAll('tfoot tr'), cells), [['Resolved', '4 of 5', '2 of 5', '2 of 5'], ['Sessions · tokens', '13 · 15.3M', '5 · 5.5M', '4 · 3.6M'],
-    ['Minutes · cost', '102 · –', '40 · –', '28 · –']]);
+    ['Minutes · cost', '102 · unknown', '40 · unknown', '28 · unknown']]);
   act(bp(w), 'task-django__django-15347').click();
   assert.deepEqual(heads(w), [`Run ${NEW}`, 'Tasks by arm', 'django__django-15347, opened']);
   const task = bp(w).querySelector('.bench-task');
@@ -60,8 +60,9 @@ test('A run: tasks by arm with the totals, one task opened with each arm\'s patc
   assert.equal(text(bp(w).querySelector('.bench-run-head .bench-said')), `Exported: bench-${NEW}.json.`);
   const raw = body(w.downloads[0].href), figs = JSON.parse(raw);
   assert.deepEqual(figs.arms.map((a) => [a.label, a.resolved, a.sessions]), [['Conveyor 1.5.0', 4, 13], ['Claude alone (claude-opus-5-5)', 2, 5], ['Codex alone (gpt-6.2-sol)', 2, 4]]);
-  assert.deepEqual(figs.tasks[1], { task: 'django__django-15347', arms: [{ arm: 'conveyor', result: 'resolved', sessions: 3, tokens: 4000000, minutes: 20 },
-    { arm: 'solo', result: 'not resolved', sessions: 1, tokens: 1000000, minutes: 8 }, { arm: 'codex-sol', result: 'resolved', sessions: 1, tokens: 1000000, minutes: 8 }] });
+  const none = { reused: false, cost: { usd: null, state: 'unknown' } };
+  assert.deepEqual(figs.tasks[1], { task: 'django__django-15347', arms: [{ arm: 'conveyor', result: 'resolved', sessions: 3, tokens: 4000000, minutes: 20, ...none },
+    { arm: 'solo', result: 'not resolved', sessions: 1, tokens: 1000000, minutes: 8, ...none }, { arm: 'codex-sol', result: 'resolved', sessions: 1, tokens: 1000000, minutes: 8, ...none }] });
   for (const s of ['query.py', 'negation', 'combine()', 'patch', 'steps']) assert.ok(!raw.includes(s), `the export holds no code, finding or title: ${s}`);
   // Bug it guards (#632): the export's answer was kept by action only, so another run's page said it was exported.
   w.benchBody = (url) => (url.includes(`&run=${OLD}`) ? { ...BH.run(), run: BH.hist().runs.find((r) => r.id === OLD) } : BH.hist());
@@ -101,14 +102,24 @@ test('A run: a cell with no result shows its step, waiting or interrupted, as `b
     if (!/&run=/.test(url)) return BH.hist();
     const r = BH.run();
     r.tasks[1].cells = [{ arm: r.tasks[1].cells[0].arm, result: null, reused: false, state: 'active', phase: 'Reviewing' },
-      { arm: r.tasks[1].cells[1].arm, result: null, reused: false, state: 'waiting' }, { arm: r.tasks[1].cells[2].arm, result: null, reused: false, state: 'interrupted' }];
+      { arm: r.tasks[1].cells[1].arm, result: null, reused: false, state: 'waiting' },
+      { arm: r.tasks[1].cells[2].arm, result: null, reused: false, state: 'interrupted', cost: { usd: 0.3, state: 'known' } }];
+    // A grade that failed after the trial ran: the run line keeps the trial's cost (a Docker image failure comes
+    // before the trial, at a known $0).
+    r.tasks[4].cells[2] = { ...r.tasks[4].cells[2], result: 'not run: the harness could not grade it (exit 1)', cost: { usd: 0.7, state: 'known' } };
     return r;
   } });
   await settle();
   act(bp(w), 'open-newest').click();
   await settle();
   const row = bp(w).querySelector('tr[data-task="django__django-15347"]');
-  assert.deepEqual(Array.from(row.querySelectorAll('.bench-cell'), text), ['Reviewing', 'waiting', 'interrupted']);
+  assert.deepEqual(Array.from(row.querySelectorAll('.bench-cell'), text), ['Reviewing', 'waiting', 'interrupted$0.30']);
+  // Bug it guards (#646 review E4): the work Stop interrupted, and a task not run after its trial ran, showed no cost,
+  // and Export figures said unknown for both, though `bench swe show` gives the cost the run line keeps.
+  assert.equal(text(bp(w).querySelector('tr[data-task="sphinx-doc__sphinx-8595"] .bench-cell:last-child .bench-sub')), 'the harness could not grade it (exit 1) · $0.70');
+  act(bp(w), 'export').click();
+  const figs = JSON.parse(body(w.downloads[0].href));
+  assert.deepEqual([figs.tasks[1].arms[2].cost, figs.tasks[4].arms[2].cost], [{ usd: 0.3, state: 'known' }, { usd: 0.7, state: 'known' }]);
   act(bp(w), 'task-django__django-15347').click();
   assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-task .bench-card p'), text), ['This arm is on the task now: Reviewing.',
     'The run has not reached this task for this arm yet.', 'Stop ended the work of this arm on this task. No result is kept.']);

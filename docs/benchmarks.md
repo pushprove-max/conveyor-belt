@@ -80,7 +80,8 @@ goes now. The run records when it started to stop, ends the work of its arm on t
 removes the run's own containers, the grading container too, and keeps its finished tasks. It does not touch the container of an arms check. A
 second Stop of the same run changes nothing. A Stop for a run that already ended says how it ended, and a newer run
 goes on. When the process of a run has stopped with no end recorded, Stop records the end and removes the run's
-containers. A new run does this too before it starts.
+containers. A new run does this too before it starts. `bench swe show <run>` and `bench swe history` give such a run
+as `stopped` with `gone` true, before and after its end is recorded.
 
 Each task is built in a sandbox of its own: a local clone of the task's repository at its base commit, with the issue
 text as the card's issue. Conveyor builds the task in a Docker container made from the task's own image, with a pack
@@ -308,14 +309,17 @@ The step is one of Checking, Preparing image, Setting up, Running agent, Reading
 the step its card is at: Building, Reviewing, Judging, Fixing, Rebasing, Testing, Landing or Filing follow-ups. An engine
 version that does not record when a step starts shows "Running Conveyor. Step unavailable." The read revision, `seq`,
 goes up each time the run changes, including when only the step changes. Every task the run plans is listed, with
-each arm's state: waiting, active, finished, interrupted (the task that Stop ended) or not reached.
+each arm's state: waiting, active, finished, interrupted (the task that Stop ended) or not reached. Each arm also has
+`wall`: the minutes of its work in this run, a task not run and the task that Stop ended included. A reused result
+adds none. The active task gives `start`, the time its work began, so its minutes so far are the time since then.
 
 Each run also keeps a short event log, the last lines of which `bench swe show <run>` gives as `tail`. Each line has
 a time, an arm, a task and an event: a step, a result (Resolved, Unresolved, Not run or reused), or the start and end
 of the run. The log stays after the run ends. It holds no output of the arms and no text from their containers.
 
 A run also gives its cost at list prices: the same prices as the Board's Cost panel, with your `prices` in the pack
-over them. `bench swe show <run>` and `bench swe history` give `cost` for the run and for each arm. While a run goes,
+over them. `bench swe show <run>` and `bench swe history` give `cost` for the run and for each arm, and `bench swe
+diff <A> <B> --json` gives it in the totals of each side, for the tasks that both ran. While a run goes,
 the cost includes the active task's work so far. Each task's result keeps its `cost` and the prices used for it. A
 Conveyor arm's sessions are priced from the token usage that its card records for each session, including the judge's
 and that of a session that failed.
