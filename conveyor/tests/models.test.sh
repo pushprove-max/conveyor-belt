@@ -457,9 +457,11 @@ t_proxydirect() {
 
 # Bug (#794): a pack's models.allowed that named a model Codex does not report (a typo, or one the account lost), or
 # left out one Codex reports, was found only when a seat on it did not start or a menu showed it. Doctor warns of
-# each, by its name: the pack lists gpt-a and gpt-c, Codex reports gpt-a and gpt-b. For OpenCode the fix names the
-# model with its opencode: mark, as models.allowed.opencode takes it (a bare name there is not compared, and the
-# warning stays). A family name the seat resolves (sol, to gpt-6-sol in Codex's models cache) is a model Codex has,
+# each, by its name: the pack lists gpt-a and gpt-c, Codex reports gpt-a and gpt-b. For OpenCode the same: the pack's
+# opencode:prov/gone, which OpenCode does not report, is warned of without its mark, and the fix for a reported model
+# names it with its opencode: mark, as models.allowed.opencode takes it. A bare name there is not compared: the bare
+# other/vendor/m-2 leaves its warning in place, and the bare prov/bare, which OpenCode does not report, gets none.
+# A family name the seat resolves (sol, to gpt-6-sol in Codex's models cache) is a model Codex has,
 # so doctor does not tell the user to correct it; one that resolves to none (luna) is warned of. The checks run the
 # whole doctor: a call of modelswarn alone passes when doctor does not call it.
 t_modelsdiff() {
@@ -467,15 +469,16 @@ t_modelsdiff() {
   export CODEX_HOME=$T/$CASE/codex-home; mkdir -p "$CODEX_HOME"
   echo '{"models":[{"slug":"gpt-a"},{"slug":"gpt-b"},{"slug":"gpt-6-sol"}]}' > "$CODEX_HOME/models_cache.json"
   jq -cn '{at: (now | floor), clis: {codex: ["gpt-a", "gpt-b", "gpt-6-sol"], opencode: ["prov/m-1", "other/vendor/m-2"]}}' > "$ST/clis.json"
-  tune '.models.allowed.codex = ["gpt-a", "gpt-c", "sol", "luna"] | .models.allowed.opencode = ["opencode:prov/m-1"]'
+  tune '.models.allowed.codex = ["gpt-a", "gpt-c", "sol", "luna"] | .models.allowed.opencode = ["opencode:prov/m-1", "opencode:prov/gone", "other/vendor/m-2", "prov/bare"]'
   out=$( { (cd "$R" && loop doctor) 2>&1 || :; } | grep "^warning: .*models.allowed")
-  [ "$(wc -l <<<"$out")" = 5 ] \
+  [ "$(wc -l <<<"$out")" = 6 ] && ! grep -q "prov/bare" <<<"$out" \
     && grep -q "^warning: the pack's models.allowed lists gpt-c for Codex, which Codex does not report" <<<"$out" \
     && grep -q "^warning: the pack's models.allowed lists luna for Codex, which Codex does not report" <<<"$out" \
     && grep -q "^warning: Codex reports gpt-b, which the pack's models.allowed leaves out.*fix: add gpt-b to models.allowed.codex " <<<"$out" \
     && grep -q "^warning: Codex reports gpt-6-sol, which the pack's models.allowed leaves out" <<<"$out" \
+    && grep -q "^warning: the pack's models.allowed lists prov/gone for OpenCode, which OpenCode does not report" <<<"$out" \
     && grep -q "^warning: OpenCode reports other/vendor/m-2, which .*fix: add opencode:other/vendor/m-2 to models.allowed.opencode " <<<"$out" \
-    || fail "doctor does not warn of gpt-c and luna, listed and not reported, and gpt-b, gpt-6-sol and other/vendor/m-2, reported and not listed, alone (sol resolves), with the name to add: $out"
+    || fail "doctor does not warn of gpt-c, luna and prov/gone, listed and not reported, and gpt-b, gpt-6-sol and other/vendor/m-2, reported and not listed (bare names not compared), alone (sol resolves), with the name to add: $out"
 }
 # Bug (#794): a Claude-only pack (an empty codex list) takes no Codex models, so it gets no warning for each one Codex
 # reports, even with a codex-builder model. The whole doctor runs, as in t_modelsdiff.
