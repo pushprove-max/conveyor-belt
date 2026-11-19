@@ -240,9 +240,10 @@ test('the pane draws at the width it is given, over 72 too, from bodyColumns or 
     // The head row is padded to the pane width and ends at the day's spend: its length is the width the pane drew at.
     expect(wide.match(/^.*?DAY SPEND \$\d+\.\d\d/)?.[0]).toHaveLength(120)
   }
-  // Under 70 columns the matrix has no title column.
+  // At 56 columns the matrix row ends in the title, cut with … to the row's free width (#603).
   const narrow = await at({})
-  expect(narrow).not.toContain('Benchmark')
+  expect(narrow).toMatch(/ +– +–  Benchmark: run[^…]*…/)
+  expect(narrow).not.toContain(title)
   expect(narrow).toContain('✓ ✓ ▶ · · ·')
   expect(narrow.match(/^.*?DAY SPEND \$\d+\.\d\d/)?.[0]).toHaveLength(56)
 })

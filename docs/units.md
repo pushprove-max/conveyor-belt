@@ -126,12 +126,13 @@ this page says that it wraps.
   the test map line and the weekly limit.
 - The old-engine line and the whole-suite line, when there is one, and the cards that need you, one line each.
 - **BUILD MATRIX**: on the right, the project and its slots in use against the builder cap (`bookstore · 3/4
-  slots`). One row for each card on the belt: the issue (`#486`), its short title, one column for each step (`B R F T
-  L P`: Build, Review, Fix, Test, Land, Push), its overall time (`Age`) and its cost. A step shows `▶` while it runs,
+  slots`). One row for each card on the belt: the issue (`#486`), one column for each step (`B R F T L P`: Build,
+  Review, Fix, Test, Land, Push), its overall time (`Age`), its cost and, last, its short title (`Title`). The title
+  uses the remaining width of the row, and a title that is too long ends in `…`. A step shows `▶` while it runs,
   `✓` when it is done, `✗` when it failed and `·` when the card did not get to it (Fix after a GO, too). A dim
   legend is under the table. Each project with cards on the belt has its own matrix. Each other project of the
-  machine has one dim line with its name and slots. When the pane is narrower than 70 columns, the title column is
-  not shown. When the row still does not fit, the `Age` column is not shown.
+  machine has one dim line with its name and slots. When the row does not fit, the `Age` column is not shown. When
+  fewer than 6 columns are left after the cost, the title is not shown.
 - **WORKER ACTIVITY**: one line for each card: its mark, its issue and the command that runs now, made short. A path
   in the card's worktree shows as `worktree` (`cd worktree/x && git add -A`), and any other path shows only its last
   part. On the right: the tool (`Bash`) and the time the step started. A card that runs no command shows its step.

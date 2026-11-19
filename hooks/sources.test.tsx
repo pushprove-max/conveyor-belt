@@ -688,23 +688,46 @@ test('a second record\'s cards carry its name, and one record that cannot be rea
   expect(tableText(state(fetched([['bookstore', 'null'], ['widgetshop', other]])), 100)).toMatch(/^CONVEYOR +today partial  ● buildbox\n/)
 })
 
-// Issue 497, the pane's Build matrix layout. Bug it catches: at 60 columns a pane line wrapped (a title, a lane), or
-// the matrix kept its title column and pushed the step marks off the edge.
-test('the pane at 60 columns: no line wider than the pane, and the matrix drops its title column', () => {
+// Issue 497, the pane's Build matrix layout; issue 603, the title after Cost. Bug it catches: at 60 columns a pane
+// line wrapped (a title, a lane), or the matrix dropped the card's title and left the rest of each row empty.
+test('the pane at 60 columns: no line wider than the pane, and each matrix row ends in its title, cut to fit', () => {
   const landed = Array.from({ length: 7 }, (_, i) => ({ ...LANDED[0], card: `c-${i}`, issue: 3800 + i, time: ago(i) }))
   const s = board({ needsYou: { waiting: [WAITING], blocked: [BLOCKED] }, belt: BELT, queue: { next: queued(10), held: { dormant: 3 } }, landed, cost: { today: 29.48 } },
     { limit: { pct: 50, resetsAt: NOW + 3600_000 }, research: { state: 'ok', lastAt: NOW - 60_000 }, fast: { state: 'ok', branch: 'fast-lane', ahead: 1, dirty: 0, subject: 'A long subject '.repeat(8) } })
   const lines = paneModel(s, 60, 0).map(plain)
   for (const l of lines) expect(cols(l)).toBeLessThanOrEqual(60)
   const text = lines.join('\n')
-  expect(text).toMatch(/\nID +B R F T L P +Age +Cost\n#3863 +▶ · · · · · /)
-  expect(text).not.toMatch(/Title|Rebuild/)
-  // At 72 columns the title column is there.
-  expect(paneModel(s, 72, 0).map(plain).join('\n')).toMatch(/\nID +Title +B R F T L P +Age +Cost\n#3863 +Rebuild the workflow dashboard/)
+  const matrix = section(text, 'BUILD MATRIX').split('\n')
+  expect(matrix[1]).toMatch(/^ID +B R F T L P +Age +Cost  Title$/)
+  // The long title is cut with … at the pane's edge; the short one is whole. Each starts two columns after its Cost.
+  expect(matrix[2]).toMatch(/^#3863 +▶ · · · · · +\S+ +–  Rebuild the workflow[^]*…$/)
+  expect(cols(matrix[2])).toBe(60)
+  expect(matrix[3]).toMatch(/^#3864 +✓ ▶ · · · · +\S+ +\$1\.25  Rebuild \/units for Conveyor$/)
   expect(text).toMatch(/\n◆ #3861 Fast lane lands thro… · your yes: Staff land F… +12m\n✗ #3850 Logo upload · blocked: review 3 was NO-GO: … +1h 30m\n/)
   expect(text).toMatch(/\nPICK ORDER +10\+ ready\n  nothing waiting\nheld back: 3 dormant\n/)
   expect(text).toMatch(/\nLANDED TODAY · 7 +5 most recent of 7\nLanded +Issue +Verdict +Total +Cost\n(\S+ [AP]M +#380\d +2 reviews +– +\$4\.21\n){5}/)
   expect(text).toMatch(/\nFAST LANE      1 commit on fast-lane: A long subject .*…\nRESEARCH LANE  working · last activity 1m ago$/)
+})
+
+// Issue 603. Bug it catches: on a wide pane the title column kept a width of its own (or sat before the steps) and
+// did not take the row's free width after Cost; on a pane that leaves under 6 columns after Cost, a cut stub of a
+// title (or of its header) was drawn.
+test('the matrix title fills the free width after Cost at 100 columns, and is left out with under 6 columns free', () => {
+  const long = { ...BELT[0], title: 'Rebuild the workflow dashboard for Conveyor so that every lane, slot and step reads at a glance' }
+  const s = board({ belt: [long, BELT[1]] })
+  const wide = section(paneModel(s, 100, 0).map(plain).join('\n'), 'BUILD MATRIX').split('\n')
+  expect(wide[1]).toMatch(/^ID +B R F T L P +Age +Cost  Title$/)
+  expect(wide[2]).toMatch(/^#3863 +▶ · · · · · +\S+ +–  Rebuild the workflow dashboard for Conveyor so[^]*…$/)
+  expect(cols(wide[2])).toBe(100)
+  expect(wide[3]).toMatch(/\$1\.25  Rebuild \/units for Conveyor$/)
+  // The width that leaves 5 columns after Cost and its two-column gap: Age is still there, the title is not.
+  const w = cols(wide[1]) - cols('  Title') + 2 + 5
+  const narrow = section(paneModel(s, w, 0).map(plain).join('\n'), 'BUILD MATRIX').split('\n')
+  expect(narrow[1]).toMatch(/^ID +B R F T L P +Age +Cost$/)
+  expect(narrow[2]).toMatch(/^#3863 +▶ · · · · · +\S+ +–$/)
+  expect(narrow[3]).toMatch(/^#3864 +✓ ▶ · · · · +\S+ +\$1\.25$/)
+  // One column more leaves 6, and the title is back.
+  expect(section(paneModel(s, w + 1, 0).map(plain).join('\n'), 'BUILD MATRIX').split('\n')[1]).toMatch(/Cost  Title$/)
 })
 
 // Issue 497. Bugs it catches: the pane said "0 queued" and "the queue is empty" while issues waited on other cards,

@@ -964,8 +964,9 @@ const statesOf = (b: Belt): Step['state'][] => (b.track ? b.track.steps.map(st =
   : STEP_NAMES.map((_, i) => { const at = STEP_AT[b.step]; return at === undefined || i > at ? 'todo' : i < at ? 'done' : 'now' }))
 const slotsOf = (l: Loop) => (l.cap !== null ? `${l.building ?? l.onBelt}/${l.cap} slots` : `${l.building ?? l.onBelt} building`)
 
-// One project's matrix: ID, title, a column a step (headed by its first letter), Age and Cost. Under 70 columns the
-// title goes first, then Age when the row still does not fit.
+// One project's matrix: ID, a column a step (headed by its first letter), Age, Cost and last the title, which takes
+// the rest of the row's width at any pane width (#603). Age goes first when the row does not fit; the title is left
+// out when fewer than 6 columns are left after Cost.
 const matrixTable = (s: State, cards: Belt[], w: number): Line[] => {
   const rows = cards.map(b => {
     const all = overallOf(b, s.now)
@@ -976,20 +977,17 @@ const matrixTable = (s: State, cards: Belt[], w: number): Line[] => {
   const noAge = idW + 2 + stepsW + 2 + costW
   const age = noAge + 2 + ageW <= w
   const fixed = noAge + (age ? 2 + ageW : 0)
-  const titleW = w >= 70 && w - fixed - 2 >= 6 ? w - fixed - 2 : 0
-  const head = `${padR('ID', idW)}  ${titleW ? `${padR('Title', titleW)}  ` : ''}${STEP_NAMES.map(n => n[0]).join(' ')}  ${age ? `${padL('Age', ageW)}  ` : ''}${padL('Cost', costW)}`
-  const title = (b: Belt): Line => {
-    const t = fitWidth([{ t: shortTitle(b.title) || (b.issue ? '' : 'a branch with no issue'), c: C.name }], titleW)
-    return [...t, { t: ' '.repeat(titleW - cols(plain(t)) + 2) }]
-  }
+  const titleW = w - fixed - 2 >= 6 ? w - fixed - 2 : 0
+  const head = `${padR('ID', idW)}  ${STEP_NAMES.map(n => n[0]).join(' ')}  ${age ? `${padL('Age', ageW)}  ` : ''}${padL('Cost', costW)}${titleW ? '  Title' : ''}`
+  const title = (b: Belt): Line => [{ t: '  ' }, ...fitWidth([{ t: shortTitle(b.title) || (b.issue ? '' : 'a branch with no issue'), c: C.name }], titleW)]
   return [
     fitWidth([{ t: head, d: true }], w),
     ...rows.map((r): Line => fitWidth([
       { t: padR(r.id, idW), c: C.name, b: true }, { t: '  ' },
-      ...(titleW ? title(r.b) : []),
       ...statesOf(r.b).flatMap((st, i) => [...(i ? [{ t: ' ' }] : []), MARK[st]]), { t: '  ' },
       ...(age ? [{ t: `${padL(r.age, ageW)}  `, d: true }] : []),
       { t: padL(r.cost, costW), c: C.cost },
+      ...(titleW ? title(r.b) : []),
     ], w)),
     fitWidth([{ t: '▶ running · pending ✓ done ✗ failed', d: true }], w),
   ]
