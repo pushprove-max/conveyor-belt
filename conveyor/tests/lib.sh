@@ -255,10 +255,14 @@ case $2 in
     echo "https://github.com/o/r/issues/$n" ;;
 esac
 EOF
-  # `--version` (doctor's requirement check, lib/requires.sh) is no session: the stubs answer it as the CLIs do.
+  # `--version` (doctor's requirement check, lib/requires.sh) is no session: the stubs answer it as the CLIs do. A
+  # call with no tools (askmodel(), as doctor's askcheck() makes it) is no session either: claude answers OK, in JSON with
+  # --output-format json, else as text, as Claude Code does.
   cat > "$STUB/claude" <<'EOF'
 #!/usr/bin/env bash
 [ "${1:-}" != --version ] || { echo '2.1.322 (Claude Code)'; exit 0; }
+case " $* " in *" --tools  "*) cat > /dev/null
+  [[ " $* " == *" --output-format json "* ]] && echo '{"type":"result","is_error":false,"subtype":"success","result":"OK","num_turns":1}' || echo OK; exit 0 ;; esac
 cat > "$STUB/brief"; echo "$*" >> "$STUB/sessions"; . "$STUB/build"
 echo '{"type":"result","is_error":false,"usage":{"input_tokens":10,"cache_creation_input_tokens":20,"cache_read_input_tokens":999,"output_tokens":5}}'
 EOF

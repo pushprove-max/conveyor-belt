@@ -61,10 +61,14 @@ case "$1 $2" in
 esac
 EOF
   # claude: `plugin install <plugin>` records it in $G/claude-installs and, as Claude Code does, in its record of
-  # installed plugins in CLAUDE_CONFIG_DIR; --version is a version doctor takes (2.1.322 or newer); anything else does nothing.
+  # installed plugins in CLAUDE_CONFIG_DIR; --version is a version doctor takes (2.1.322 or newer); a call with no
+  # tools (doctor's askcheck()) answers $G/ask, else OK, in Claude's JSON (with no --output-format json, as Claude
+  # Code does, only its result); anything else does nothing.
   cat > "$G/claude" <<'EOF'
 #!/usr/bin/env bash
 [ "$1" != --version ] || { echo '2.1.400 (Claude Code)'; exit 0; }
+case " $* " in *" --tools  "*) cat > /dev/null; j=$(cat "$G/ask" 2>/dev/null || echo '{"type":"result","is_error":false,"subtype":"success","result":"OK","num_turns":1}')
+  [[ " $* " == *" --output-format json "* ]] && echo "$j" || jq -r .result <<<"$j"; exit 0 ;; esac
 [ "$1 $2" = "plugin install" ] || exit 0
 mkdir -p "$CLAUDE_CONFIG_DIR/plugins" && echo "$3" >> "$G/claude-installs" \
   && jq -n --arg p "$3" '{version: 2, plugins: {($p): [{scope: "user"}]}}' > "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json"

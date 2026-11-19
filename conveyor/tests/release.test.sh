@@ -34,8 +34,11 @@ relsetup() {
   O=$(git -C "$T/$CASE/origin" rev-parse refs/heads/main)
 }
 
-# relmodel <answer>: the model (the stub claude) keeps its prompt in $STUB/notes-prompt and answers <answer>.
-relmodel() { printf '#!/usr/bin/env bash\ncat > "$STUB/notes-prompt"\nprintf "%%s\\n" %q\n' "$1" > "$STUB/claude"; }
+# relmodel <answer>: the model (the stub claude) keeps its prompt in $STUB/notes-prompt and answers <answer>, as the
+# result of Claude's JSON output. RELFMT, the end of a stub's pipe: as Claude Code does, the JSON output only with
+# --output-format json, else only its result.
+RELFMT='{ [[ " $* " == *" --output-format json "* ]] && cat || jq -j .result; }'
+relmodel() { printf '#!/usr/bin/env bash\ncat > "$STUB/notes-prompt"\njq -cn --arg r %q '\''{type: "result", is_error: false, result: ($r + "\\n"), num_turns: 1}'\'' | %s\n' "$1" "$RELFMT" > "$STUB/claude"; }
 
 # release-prep on a head with no notes: the project's first release, then, v1.0.0 tagged, its next.
 # Bugs: a project's first release (no tag) is drafted from every commit ever made, an engineering log, rather than as an
@@ -48,7 +51,7 @@ relmodel() { printf '#!/usr/bin/env bash\ncat > "$STUB/notes-prompt"\nprintf "%%
 # commit; a model that gives no notes leaves an empty draft, or an earlier run's, to be taken for this run's.
 t_reldraft() {
   local O out s
-  relsetup true nonotes notag; printf '#!/usr/bin/env bash\ntee "$STUB/notes-prompt"\n' > "$STUB/claude"
+  relsetup true nonotes notag; printf '#!/usr/bin/env bash\ntee "$STUB/notes-prompt" | jq -Rsc '\''{type: "result", is_error: false, result: ., num_turns: 1}'\'' | %s\n' "$RELFMT" > "$STUB/claude"
   out=$(loop release-prep 1.0.0 2>&1); [ $? = 1 ] && grep -qF "the notes draft, an overview from the README and docs, as no release is tagged yet, is $ST/release/1.0.0.md. " <<<"$out" \
     || fail "release-prep did not draft an overview for a project with no release: $out"
   [ "$(grep '^## ' "$ST/release/1.0.0.md")" = $'## Cards\n## The Board' ] && grep -q README-INTRO "$ST/release/1.0.0.md" \

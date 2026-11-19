@@ -774,6 +774,27 @@ modelswarn() {
     | (($l - $r - (.x // []) | unique[]) as $m | "warning: the pack'"'"'s models.allowed lists \($m) for \(.n), which \(.n) does not report on this host, so a seat set to it may not start; fix: correct the name, or take it out of models.allowed"),
       (($r - $l | unique[]) as $m | "warning: \(.n) reports \($m), which the pack'"'"'s models.allowed leaves out; a seat can run it, after the pack'"'"'s models in the list; fix: add \(.a)\($m) to models.allowed.\(.k) to put it in another place in the list, or leave it out")' <<<"$p" 2>/dev/null
 }
+
+# doctor's check of the judge and the reviewer in force, each on Claude: one question with no tools, as askmodel()
+# asks it for Pick for me and the split check, on the review's route and account (as cardpick() calls the judge).
+# On some machines such a call ends at once with an empty answer and exit 0; one that sends back an empty answer or an
+# error is missing, naming the seat. Returns 1 when one is.
+askcheck() {
+  local t s a m c d e r rc=0 x
+  c=$(ctl 2>/dev/null) || c=null
+  mapfile -t x < <(SEATCARD='' cardaccts "$c" 2>/dev/null)
+  c=$(jq -c --arg a "${x[1]-${x[0]-}}" 'objects | .account = (if $a == "" then null else $a end)' <<<"$c" 2>/dev/null) || c=''
+  for t in judge reviewer; do
+    s=$(SEATCARD='' seat "$t" "$c" 2>/dev/null) && jqget "$s" agent a model m 2>/dev/null && [ "$a" = claude ] || continue
+    d=$(mktemp -d) || { echo "not checked: the $t ($m): no folder for its call"; continue; }
+    echo "conveyor: asking the $t ($m) one question with no tools (up to 120 s)..." >&2
+    e=$(PROXY_ROLE=reviewer ASKSEAT=$t askmodel "$d" 120 low "$c" 'Reply with the one word OK.'); r=$?
+    rm -rf "$d"
+    if [ "$r" = 0 ] && [ -z "$e" ]; then echo "ok: the $t ($m, claude) answers a call with no tools"
+    else echo "missing: an answer from the $t ($m, claude) to a call with no tools: ${e:-exit $r; 124 is the 120 s timeout}; fix: check claude -p on this machine's account and route, or move the $t to another CLI (conveyor.sh control $t codex <model>, or Rules on the Board)"; rc=1; fi
+  done
+  return $rc
+}
 doctor() {
   local bad=0 p e t c h f
   ok() { echo "ok: $1"; }; no() { echo "missing: $1; fix: $2"; bad=1; }
@@ -934,6 +955,7 @@ doctor() {
       "install its CLI, or set the $t to a CLI and model this host has (conveyor.sh control, or Rules on the Board)"
   done
   routes || bad=1
+  askcheck || bad=1
   # A pack that follows the plugin's main or its releases: the commit it is on here, how far behind main that is (or
   # the release it is and whether a newer one is published), and a newer commit that failed its check (take()); then
   # that commit's install is checked as a pin's is.

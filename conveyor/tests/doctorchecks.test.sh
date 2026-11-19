@@ -87,3 +87,29 @@ t_doctorold() {
   grep -qxF "missing: jq 1.8 or newer (found 1.7.1 at $d/jq); fix: run /conveyor-belt:setup, which installs it" <<<"$out" \
     || fail "doctor did not name jq 1.7.1, and where it is: $out"
 }
+# Issue 800. Bug caught: a Claude judge whose call with no tools exits 0 with an empty result (as on one machine)
+# passed doctor, and every Pick for me then failed on a format complaint about an empty text. Doctor fails, naming the
+# judge seat and the empty answer; with a judge that answers, it passes.
+t_doctoraskempty() {
+  local X out; doctordone
+  echo '{"is_error":false,"subtype":"success","result":"","num_turns":2}' > "$G/ask"
+  out=$(cd "$S" && bash "$X" doctor 2>&1) && fail "doctor passed with a judge that sends back an empty answer: $out"
+  grep -qE '^missing: an answer from the judge \([^)]*, claude\) to a call with no tools: the judge sent back an empty answer \(exit 0, 2 turns\); no error output; fix: .*move the judge to another CLI' <<<"$out" \
+    || fail "doctor did not name the judge and its empty answer: $out"
+  rm "$G/ask"
+  out=$(cd "$S" && bash "$X" doctor 2>&1) || fail "doctor failed with a judge that answers: $out"
+  grep -qE '^ok: the judge \([^)]*, claude\) answers a call with no tools$' <<<"$out" || fail "doctor did not check the judge that answers: $out"
+}
+# Issue 800. Bugs caught: doctor asked only the judge, so a Claude reviewer that sends back nothing passed it; and a
+# Claude answer with is_error true and a result (the error's text) read as an answer. Doctor fails, naming the
+# reviewer seat and its error.
+t_doctoraskerror() {
+  local X out; doctordone
+  # The sample's control record sets the reviewer to Claude, so the judge runs on Codex.
+  jq '.reviewer = {cli: "claude", model: "claude-opus-5-5", effort: "medium"}' "$S/conveyor/state/control.json" > "$T/$CASE/c" \
+    && mv "$T/$CASE/c" "$S/conveyor/state/control.json" || fail "the control record was not rewritten"
+  echo '{"is_error":true,"subtype":"success","result":"API Error: 400 refused","num_turns":1}' > "$G/ask"
+  out=$(cd "$S" && bash "$X" doctor 2>&1) && fail "doctor passed with a reviewer that sends back an error: $out"
+  grep -qE '^missing: an answer from the reviewer \(claude-opus-5-5, claude\) to a call with no tools: the reviewer sent back an error \(exit 0, 1 turn\): API Error: 400 refused; no error output; fix: .*move the reviewer to another CLI' <<<"$out" \
+    || fail "doctor did not name the reviewer and its error: $(grep -E 'judge|reviewer|answer' <<<"$out")"
+}

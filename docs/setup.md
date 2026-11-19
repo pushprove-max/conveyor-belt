@@ -365,6 +365,13 @@ worktree.setup`: your checkout has that dependency folder, and the card's worktr
 pack's `linkFromMain`, or set `worktree.setup` to the command that installs it ([Configuration](configuration.md#the-pack)).
 `conveyor.sh doctor` makes a test worktree and names each folder that is missing there, with the same fix.
 
+Pick for me, the split check or the release notes draft fails with `the judge sent back an empty answer (exit 0, 2
+turns)` (or names the builder or the reviewer): that seat's Claude Code ended its call with no answer and no error.
+On some machines a call with no tools does this, and the cause depends on that machine's account, profile or
+route. `conveyor.sh doctor` asks the judge and the reviewer on Claude one such question and names the seat that sends
+back nothing. To work around it, move that seat to another CLI, such as Codex: `conveyor.sh control judge codex
+<model>`, or Rules on the Board.
+
 `/plugin install conveyor-belt@conveyor-belt` fails with `git@github.com: Permission denied (publickey)`: release
 1.1.0 and older clone the plugin over SSH, and this machine has no GitHub SSH key. Run this command once, then install
 again. Git then fetches the plugin over HTTPS:

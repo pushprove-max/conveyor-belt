@@ -249,8 +249,9 @@ overlap() { # <open issues json> <retried or ""> <the control record>: sets OVL 
 # One answer from a model with no tools: the builder's CLI on the last model the pack's models.allowed lists for that
 # CLI (none listed, the builder's own), at <effort>, <seconds> at most, run in <folder> (a scratch folder the caller
 # removes), the answer left in <folder>/answer. Returns the CLI's exit (124: the timeout); when no CLI could be
-# started, 1 with why on stdout (nothing else is printed there). With ASKSEAT=judge it runs on the judge's seat, its
-# own CLI and model (the split check, lib/slices.sh).
+# started, or a Claude seat sent back an error or an empty answer, 1 (or its exit) with why on stdout (nothing else
+# is printed there). With ASKSEAT=judge it runs on the judge's seat, its own CLI and model (the split check,
+# lib/slices.sh); ASKSEAT=reviewer, the reviewer's (doctor's check, askcheck()).
 askmodel() { # <folder> <seconds> <effort> <the control record, or ""> <prompt>
   local d=$1 p=$5 s a agent model acct rc
   s=$(seat "${ASKSEAT:-builder}" "$4") && jqget "$s" agent agent model model && modelsallowed a \
@@ -259,7 +260,7 @@ askmodel() { # <folder> <seconds> <effort> <the control record, or ""> <prompt>
   case $agent in
     claude) acct=$(acctenv "$(ctlacct "$4")") || { echo "$acct"; return 1; }
       (cd "$d" && proxyenv && acctrun "$acct" && exec timeout --kill-after=10 "$2" claude -p --model "$model" --effort "$3" --tools "" \
-        --setting-sources "" --strict-mcp-config --no-session-persistence --output-format text <<<"$p" > "$d/answer" 2> "$d/err" 8>&- 9>&-); rc=$? ;;
+        --setting-sources "" --strict-mcp-config --no-session-persistence --output-format json <<<"$p" > "$d/raw" 2> "$d/err" 8>&- 9>&-); rc=$? ;;
     codex) model=$(codexmodel "$model") || { echo "$model"; return 1; }
       (cd "$d" && codexargs && exec timeout --kill-after=10 "$2" codex exec --skip-git-repo-check -s read-only "${CODEX_PX[@]}" -m "$model" -c "model_reasoning_effort=\"$3\"" \
         -o "$d/answer" - <<<"$p" > "$d/err" 2>&1 8>&- 9>&-); rc=$? ;;
@@ -268,8 +269,25 @@ askmodel() { # <folder> <seconds> <effort> <the control record, or ""> <prompt>
     *) rc=1 ;;
   esac
   # Its login failed and the proxy is the builder's fallback: asked again at once through the proxy.
-  ! loginfallback "$rc" "$agent" "$d/answer" "$d/err" || { PROXY_NOW=1 askmodel "$@"; return; }
-  return $rc
+  a=$d/answer; [ "$agent" != claude ] || a=$d/raw
+  ! loginfallback "$rc" "$agent" "$a" "$d/err" || { PROXY_NOW=1 askmodel "$@"; return; }
+  [ "$agent" = claude ] || return $rc
+  # Claude's JSON answer: its result is the answer. One that is an error, or an empty result, fails the call with
+  # why, as a Claude seat can exit 0 with an empty result and no error (issue 800); with no JSON, a call that failed
+  # returns its exit, for the caller to name.
+  s=$(jq -Rn '[inputs | fromjson? | objects | select(has("result") or has("is_error"))] | last // empty' "$d/raw" 2>/dev/null) || s=''
+  [ -n "$s" ] || [ "$rc" = 0 ] || return $rc
+  if [ -n "$s" ] && jq -e '(.is_error != true) and (.result | type == "string" and test("\\S"))' <<<"$s" >/dev/null 2>&1; then
+    jq -j '.result' <<<"$s" > "$d/answer"; return $rc
+  fi
+  a=$(cliwords "$(tail -n 20 "$d/err" 2>/dev/null)" | jq -Rrs 'split("\n") | map(select(. != "")) | join("; ")')
+  jq -rn --argjson j "${s:-null}" --arg s "${ASKSEAT:-builder}" --arg rc "$rc" --arg w "$(cliwords "$(jq -r '.result | strings' <<<"${s:-null}")" | paste -sd ' ' -)" --arg e "$a" '
+    ($j.num_turns | if . == null then "no count of turns" elif . == 1 then "1 turn" else "\(.) turns" end) as $t
+    | if $j == null then "the \($s) sent back no answer that reads as Claude'"'"'s JSON output (exit \($rc))"
+      elif $j.is_error == true then "the \($s) sent back an error (exit \($rc), \($t))\(if $w == "" then "" else ": " + $w end)"
+      else "the \($s) sent back an empty answer (exit \($rc), \($t))" end
+    + (if $e == "" then "; no error output" else "; its error output: " + $e end)'
+  [ "$rc" = 0 ] && return 1 || return $rc
 }
 # One same-file judgement (overlap()): prints "<card's issue>\t<file>" or NONE, else why not and fails.
 overlapcall() { # <issue> <the belt's issues, a JSON array> <open issues json> <the control record>

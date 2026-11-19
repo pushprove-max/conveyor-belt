@@ -11,7 +11,7 @@
 # The setup: the pack allows the builder m and m2 (Claude), the review x and x2 (Codex) and j and j2 (Claude), so the
 # project's seats are m, x and the judge j, each at medium. A Claude call with the review's read-only tools is the
 # judge: its arguments are kept in $STUB/judges and its answer is $STUB/judge; a Claude call with no tools (askmodel)
-# is Pick for me, once $STUB/pick is there (before, it is a card run's same-file check, answered NONE): its prompt is kept in $STUB/pick-asked, its account folder and route in $STUB/pick-env, and its answer is $STUB/pick; any other is a session.
+# is Pick for me, once $STUB/pick or $STUB/pick-json is there (before, it is a card run's same-file check, answered NONE): its prompt is kept in $STUB/pick-asked, its account folder and route in $STUB/pick-env, and its answer is $STUB/pick (or the whole JSON output $STUB/pick-json); any other is a session.
 seatsetup() { # <issues json>
   setup "$1"
   tune '.models.allowed = {claude: ["m", "m2"], codex: ["x", "x2"], "claude-reviewer": ["j", "j2"]}'
@@ -22,8 +22,13 @@ case "$*" in
   *"--tools Read,Grep,Glob"*) cat > /dev/null; echo "$*" >> "$STUB/judges"
     jq -cn --rawfile r "$STUB/judge" '{type: "result", is_error: false, result: $r, usage: {input_tokens: 3, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 2}}'
     exit ;;
-  *"--tools  "*) [ -f "$STUB/pick" ] || { cat > /dev/null; echo NONE; exit; } # a same-file check of a card run (overlapcall())
-    cat > "$STUB/pick-asked"; echo "$*" >> "$STUB/picks"; echo "${CLAUDE_CONFIG_DIR:-default} ${ANTHROPIC_BASE_URL:-login}" > "$STUB/pick-env"; cat "$STUB/pick"; exit ;;
+  *"--tools  "*) if [ -f "$STUB/pick" ] || [ -f "$STUB/pick-json" ]; then
+      cat > "$STUB/pick-asked"; echo "$*" >> "$STUB/picks"; echo "${CLAUDE_CONFIG_DIR:-default} ${ANTHROPIC_BASE_URL:-login}" > "$STUB/pick-env"
+      # $STUB/pick-json, when it is there, is the JSON output as it is; else $STUB/pick is its result.
+      j=$(cat "$STUB/pick-json" 2>/dev/null || jq -cn --rawfile r "$STUB/pick" '{type: "result", is_error: false, subtype: "success", result: $r, num_turns: 1}')
+    else cat > /dev/null; j='{"type":"result","is_error":false,"result":"NONE","num_turns":1}'; fi # a same-file check of a card run (overlapcall())
+    # As Claude Code does, the JSON output only with --output-format json, else only its result.
+    [[ " $* " == *" --output-format json "* ]] && echo "$j" || jq -r .result <<<"$j"; exit ;;
 esac
 cat > "$STUB/brief"; echo "$*" >> "$STUB/sessions"; . "$STUB/build"
 echo '{"type":"result","is_error":false,"usage":{"input_tokens":10,"cache_creation_input_tokens":20,"cache_read_input_tokens":999,"output_tokens":5}}'
@@ -152,6 +157,21 @@ t_cardpick() {
   sed -i 's/"model": "x"/"model": "m"/' "$STUB/pick"
   out=$(loop control card 7 pick 2>&1) && fail "Pick for me took a reviewer model the review does not allow: $out"
   [[ $out == *"the judge's choice for the reviewer is refused: m is not one of the models"* ]] || fail "a refused pick did not say why: $out"
+}
+
+# Issue 800. Bug: a Claude judge that exits 0 with an empty result (Claude's JSON output says success) read as an
+# answer, so Pick for me failed with "the judge's answer held no JSON object of the three seats:" and an empty text,
+# never saying the judge sent back nothing. The same JSON output with the three seats in its result is the pick.
+t_cardpickempty() {
+  seatsetup "[$(issue 7 2026-01-01)]"
+  echo '{"is_error":false,"subtype":"success","result":"","num_turns":2}' > "$STUB/pick-json"
+  out=$(loop control card 7 pick 2>&1) && fail "Pick for me passed on an empty answer: $out"
+  grep -qF "conveyor: the judge (j) did not answer: the judge sent back an empty answer (exit 0, 2 turns)" <<<"$out" && ! grep -q 'held no JSON object' <<<"$out" \
+    || fail "Pick for me did not say the judge sent back an empty answer, with the turns: $out"
+  jq -cn --arg r '{"builder": {"model": "m2", "effort": "high", "why": "w"}, "reviewer": {"model": "x", "effort": "low", "why": "s"}, "judge": {"model": "j", "effort": "medium", "why": "c"}}' \
+    '{is_error: false, subtype: "success", result: $r, num_turns: 2}' > "$STUB/pick-json"
+  out=$(loop control card 7 pick 2>&1) || fail "Pick for me failed on an answer: $out"
+  [ "$(jq -c '[.builder.model, .reviewer.model, .judge.model, .model]' <<<"$out")" = '["m2","x","j","j"]' ] || fail "Pick for me did not print the pick: $out"
 }
 
 # Bugs: Pick for me with an OpenCode judge failed, as the control command had not loaded the OpenCode runner (ocrun);

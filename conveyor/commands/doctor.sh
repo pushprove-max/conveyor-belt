@@ -5,6 +5,8 @@
 . "$HERE/lib/control.sh" || exit 1
 . "$HERE/lib/views.sh" || exit 1
 . "$HERE/lib/issues.sh" || exit 1
+# askmodel() (lib/pick.sh), which askcheck() calls, reads a failed login and a CLI's words with lib/session.sh.
+. "$HERE/lib/session.sh" || exit 1
 . "$HERE/lib/pick.sh" || exit 1
 . "$HERE/lib/run.sh" || exit 1
 . "$HERE/lib/machine.sh" || exit 1
