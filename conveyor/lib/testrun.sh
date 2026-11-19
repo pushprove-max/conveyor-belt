@@ -2043,7 +2043,9 @@ HOLLOWDONE='HOLLOW-CHECK: done'
 # drops the escapes of a line (name\'s to name's), so a case title is read as it shows. ind is how far in a line is;
 # tq is the triple quotes in a line. shin and jsin read an array of lines of shell or JavaScript and give, for each, true
 # when it starts inside text: a quoted string or a heredoc (shell), or a template string, a block comment or a code part
-# ${...} of a template (JavaScript; a ' or " string ends with its line). A regular expression is read as code.
+# ${...} of a template (JavaScript; a ' or " string ends with its line). A regular expression is read as code. shin
+# gives true also for a shell line that cannot close a case: one with a comment, one that ends inside text, and one
+# whose last bracket of code closes a bracket or a $( opened on that line or inside a $( (x=$(f), a() { :; }, [ -s f ]).
 HOLLOW_JQ='def cases: [table[] | . + {note: (if any(.ext[]; . == "sh") then "^\\s*(#|$)" else "^\\s*(//|/\\*|\\*(\\s|/|$)|$)" end),
       close: "[)\\]}]\\s*;?\\s*$", sh: any(.ext[]; . == "sh")}]
     + [{ext: ["py"], case: "^\\s*(async\\s+)?def\\s+test", note: "^\\s*(#|$)", close: null}];
@@ -2053,19 +2055,21 @@ HOLLOW_JQ='def cases: [table[] | . + {note: (if any(.ext[]; . == "sh") then "^\\
   def tq: [scan("\"\"\"|\u0027\u0027\u0027")] | length;
   def shin: foreach .[] as $l ({s: [], h: null, t: false, in: false};
       if .h then .in = true | if (if .t then $l | sub("^\t+"; "") else $l end) == .h then .h = null else . end
-      else .in = (.s | length > 0) | .p = null | .x = false
-        | reduce ($l | [scan("\\\\.|\\$\\(|\\$\u0027|\u0027|\"|[()]|<<<|<<-?\\s*[\"\u0027]?[A-Za-z_][A-Za-z0-9_]*[\"\u0027]?|(?<!\\S)#")][]) as $k (.; .s[-1] as $top
+      else .in = (.s | length > 0) | .p = null | .x = false | .d = 0 | .c = true
+        | reduce ($l | [scan("\\\\.|\\$\\(|\\$\u0027|\u0027|\"|[(){}\\[\\]]|<<<|<<-?\\s*[\"\u0027]?[A-Za-z_][A-Za-z0-9_]*[\"\u0027]?|(?<!\\S)#")][]) as $k (.; .s[-1] as $top
           | if .x then .
             elif $top == "\u0027" then (if $k | endswith("\u0027") then .s |= .[:-1] else . end)
             elif $top == "$\u0027" then (if $k == "\u0027" or $k == "$\u0027" then .s |= .[:-1] else . end)
             elif $top == "\"" then (if $k == "\"" then .s |= .[:-1] elif $k == "$(" then .s += [$k] else . end)
             elif $k == "#" then .x = true
             elif $k == "\u0027" or $k == "$\u0027" or $k == "\"" or $k == "$(" then .s += [$k]
-            elif $k == "(" then (if $top then .s += [$k] else . end)
-            elif $k == ")" then (if $top then .s |= .[:-1] else . end)
+            elif $k == "(" and $top then .s += [$k]
+            elif $k == ")" and $top then .s |= .[:-1] | .c = false
+            elif $k | IN("(", "{", "[") then .d += 1
+            elif $k | IN(")", "}", "]") then (if .d > 0 then .d -= 1 | .c = false else .c = true end)
             elif ($k | startswith("<<<")) or ($k | startswith("\\")) or .p then .
             else .p = ($k | sub("^<<-?\\s*[\"\u0027]?"; "") | sub("[\"\u0027]$"; "")) | .t = ($k | startswith("<<-")) end)
-        | .h = .p end; .in);
+        | .h = .p end; .in or .x or (.c | not) or (.s | length > 0));
   def jsin: foreach .[] as $l ({s: [], in: false};
       .in = (.s | length > 0) | .x = false
       | reduce ($l | [scan("\\\\.|`|\u0027|\"|//|/\\*|\\*/|\\$\\{|[{}]")][]) as $k (.; .s[-1] as $top
@@ -2094,10 +2098,12 @@ hollowproof() { # <card> <worktree> <issue json> <test file>
   # at the latest on the line before the next start line, so the code between two cases (a table of values set up for
   # a later case) is in no case (#606). A line of fixture text in a case (a JSON record in a heredoc, the end of a
   # template string, a comment or a docstring at the left edge) does not end it, as it starts inside text (shin, jsin,
-  # tq); brackets are not counted, as one in a regular expression or a case pattern closes nothing.
+  # tq); brackets are not counted across lines, as one in a regular expression or a case pattern closes nothing. In
+  # shell a comment or a line of code whose last bracket closes one it opened (shin) does not end it either (#612),
+  # and shin reads a start line without the case's own opener, so a case of one line (t_x() { f; }) ends there.
   [ ! -e "$wt/$f" ] || starts=$(jq -Rsr --arg f "$f" "$TESTEDIT_TABLE$HOLLOW_JQ"'row($f) as $t
       | if $t == null then "none" else split("\n") as $ls | [range(0; $ls | length) | select($ls[.] | test($t.case))] as $k
-        | (if $t.close == null then [] elif $t.sh then [$ls | shin] else [$ls | jsin] end) as $tx | [$ls[] | tq] as $tq
+        | (if $t.close == null then [] elif $t.sh then [[$ls[] | if test($t.case) then sub("^.*?\\(\\s*\\)\\s*[{(]|^\\s*@test\\s+(\"(\\\\.|[^\"])*\"|\\S+)\\s*\\{"; "") else . end] | shin] else [$ls | jsin] end) as $tx | [$ls[] | tq] as $tq
         | ["row"] + [range(0; $k | length) as $i | $k[$i] as $a | (if $i + 1 < ($k | length) then $k[$i + 1] else ($ls | length) end) as $z
           | ($ls[$a] | ind) as $in
           | (if $t.close then first(range($a; $z) | select(($tx[.] | not) and ($ls[.] | ind) <= $in and ($ls[.] | test($t.close)))) // ($z - 1)

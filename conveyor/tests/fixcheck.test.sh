@@ -182,6 +182,20 @@ t_hollowpyfixture() {
     || fail "a changed Python case still hollow passed when a comment or docstring in it was at the left edge: $RC $WHY"
 }
 
+# Bug it catches (#612): in shell a line at the left edge that ends in a bracket closing one it opened (a comment that
+# ends `(x)`, x=$(f), a() { :; }, [ -n "$x" ]) ended the case, so a change after it was in no case and a changed case
+# still hollow was declined. A case of one line (t_mid) still ends on its line, so the setup after it is in no case.
+t_hollowshclose() {
+  FXWT=; hollowrun "sed -i -e '3s/1/2/' -e '9s/:/: changed/' h.test.sh" 'Done.' \
+    $'HOLLOW: t_mid | no-assert | it asserts nothing\nHOLLOW: t_old | no-assert | it asserts nothing\nHOLLOW-CHECK: done' \
+    h.test.sh $'t_one() { true; }\nt_mid() { :; }\nV=1\nt_old() {\n# a comment (x)\nx=$(echo a)\na() { :; }\n[ -n "$x" ]\n:\n}\nt_two() { grep -q x f; }'
+  [ "$RC" != 0 ] && [ "$WHY" = "the judge's hollow check (codex m-other) still finds hollow cases in h.test.sh: t_old (no-assert): it asserts nothing" ] \
+    || fail "a changed shell case still hollow passed, or a one-line case took the setup after it: $RC $WHY"
+  fx_in 'stdb ask lines declined'
+  jq -e -s 'length == 1 and .[0].finding == "Hollow case of the test file h.test.sh: t_mid (no-assert): it asserts nothing"' "$T/$CASE/run.out" > /dev/null \
+    || fail "the old one-line case is not declined: $(cat "$T/$CASE/run.out")"
+}
+
 # Bug it catches (#584 review): with every case start line put in a comment the file had no case left, so its whole
 # text was read, and the names in the comments passed as kept cases with no COVERED-BY line.
 t_hollowcommented() {
