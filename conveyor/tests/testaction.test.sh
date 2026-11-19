@@ -249,3 +249,71 @@ t_tabigtexts() {
   out=$(loop snapshot --fresh 2>&1 | jq -c '[.testActions.actions[] | .text | length] | [length, unique]' 2>&1)
   [ "$out" = '[10,[16000]]' ] || fail "the snapshot does not list the ten actions with their texts: ${out:0:300}"
 }
+
+# The setup of an explain case: main maps src/a.sh to tests/x.test.sh (the pack's test.map), and a card, c9-14, landed
+# a commit that changed the test file, src/a.sh and src/b.sh, after which the file ran 10 times slower; c8-13 landed
+# before it, between the last fast run and c9-14's slow one, a commit that added <n> lines to the test file; c1-5
+# landed before its first run, so its change is not around the rise. <lines> are added to the test file by c9-14.
+taslowed() { # <n> <lines of the test file's change>
+  tasetup; local sha old i
+  mkdir -p "$R/src" && echo 'a=1' > "$R/src/a.sh" && echo 'b=1' > "$R/src/b.sh" && echo '{"src/a.sh": ["tests/x.test.sh"]}' > "$R/map.json" \
+    && git -C "$R" add src map.json && git -C "$R" commit -qm 'the sources' || fail "the sources could not be committed"
+  tune '.test.map = "map.json"'
+  for i in $(seq 1 "$1"); do echo "echo old line $i" >> "$R/tests/x.test.sh"; done
+  git -C "$R" commit -qam 'Log more' && old=$(git -C "$R" rev-parse HEAD) || fail "the older card's change could not be committed"
+  shift
+  printf '%s\n' "$@" >> "$R/tests/x.test.sh" && echo 'retry 9 # a=2' > "$R/src/a.sh" && echo 'b=2 # not mapped' > "$R/src/b.sh" \
+    && git -C "$R" commit -qam 'Wait for the port' && sha=$(git -C "$R" rev-parse HEAD) || fail "the card's change could not be committed"
+  jq -cn --arg s "$sha" --arg m "$old" --arg o "$(git -C "$R" rev-parse HEAD~2)" '{card: "c1-5", issue: 5, step: "test", time: "2026-11-01T00:00:00Z", result: "pass", times: {"tests/x.test.sh": 1}},
+    {card: "c1-5", issue: 5, step: "landed", time: "2026-11-01T01:00:00Z", sha: $o},
+    {card: "c2-6", issue: 6, step: "test", time: "2026-11-02T00:00:00Z", result: "pass", times: {"tests/x.test.sh": 1.2}},
+    {card: "c8-13", issue: 13, step: "landed", time: "2026-11-02T12:00:00Z", sha: $m},
+    {card: "c9-14", issue: 14, step: "test", time: "2026-11-03T00:00:00Z", result: "pass", times: {"tests/x.test.sh": 10}},
+    {card: "c9-14", issue: 14, step: "landed", time: "2026-11-03T01:00:00Z", sha: $s},
+    {card: "c10-15", issue: 15, step: "test", time: "2026-11-04T00:00:00Z", result: "pass", times: {"tests/x.test.sh": 10.5}}' >> "$ST/cards.jsonl"
+  TASHA=$sha
+}
+# Bug it catches (#767): the explain session has no git, and its facts named the card it blamed but held none of its
+# change, so it could not say what in it made the file slower. The prompt holds the card's commit, subject, changed
+# files and its diff of the test file and the mapped source, not of a file the map does not link; not the change of a
+# card that landed before the rise; the change of the card of the slow run comes before an older one's; and the
+# session keeps Read, Grep and Glob alone.
+t_taexplainchange() {
+  taslowed 2 'nc -l 8080 & wait'; local id out
+  loop control tests claude m-tests high > /dev/null || fail "control tests was refused"
+  id=$(loop testaction explain tests/x.test.sh 2>&1) && [[ $id =~ ^[0-9a-f]{12}$ ]] || fail "the explain did not start: $id"
+  wait_until "grep -q 'first words' '$ST/testactions/$id.txt'" "cat '$ST/testactions/$id.err'" || fail "the session did not start"
+  : > "$STUB/ta-go"; out=$(cat "$STUB"/ta-prompt.*)
+  grep -qF "Card c9-14 (#14), landed as commit $TASHA: Wait for the port" <<<"$out" && grep -qF 'tests/x.test.sh (+1, -0)' <<<"$out" \
+    && grep -qF 'src/b.sh (+1, -1)' <<<"$out" && grep -qF '+nc -l 8080 & wait' <<<"$out" && grep -qF '+retry 9 # a=2' <<<"$out" \
+    && ! grep -qF '+b=2 # not mapped' <<<"$out" && ! grep -qF 'Card c1-5' <<<"$out" && grep -qF 'from 1.2 s at 2026-11-02T00:00:00Z to 10 s at 2026-11-03T00:00:00Z' <<<"$out" \
+    || fail "the prompt does not hold the change of the card that landed at the rise (its commit, files and diff of the test file and its mapped source) alone: $out"
+  grep -qF '+echo old line 2' <<<"$out" && [ "$(grep -oE '^Card c(9-14|8-13) ' <<<"$out" | tr -d '\n')" = 'Card c9-14 Card c8-13 ' ] \
+    || fail "the change of the card of the slow run does not come first, before the older card's: $out"
+  grep -q -- '--tools Read,Grep,Glob --setting-sources' "$STUB/ta-args" || fail "the explain session is not kept to Read, Grep and Glob: $(cat "$STUB/ta-args")"
+}
+# Bug it catches (#767): a big change filled the session's prompt with no end. Its diffs keep to TACHANGEMAX
+# characters, cut at a whole line, and the facts say which lines and files of the diff are left out. The older card's
+# 40-line diff, given first, took the whole limit and left out all of the diff of the card of the slow run (E1).
+t_taexplaincut() {
+  local out
+  taslowed 40 'nc -l 8080 & wait'
+  # shellcheck disable=SC2034 # TACHANGEMAX is read by tachanges()
+  out=$( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/testaction.sh")" \
+    && TACHANGEMAX=1000 && tachanges tests/x.test.sh "$(testfacts tests/x.test.sh)" "$R")
+  grep -qF '+retry 9 # a=2' <<<"$out" && grep -qF '+nc -l 8080 & wait' <<<"$out" \
+    || fail "the diff of the card of the slow run is not given whole before an older card's: $out"
+  grep -qF '+echo old line 1' <<<"$out" && ! grep -qF '+echo old line 40' <<<"$out" && [ "$(grep -c '^\[Left out' <<<"$out")" = 1 ] \
+    && sed -n '/^Card c8-13 /,$p' <<<"$out" | grep -qE '^\[Left out: lines [0-9]+ to [0-9]+ of its [0-9]+ lines of diff, of the files tests/x.test.sh; the diffs of these facts keep to 1000 characters\.\]$' \
+    || fail "the older card's diff over the limit is not cut at it, saying which lines and files are left out: $out"
+  # 1000 characters and the newline that ends the last line kept of each of the two diffs (a diff has no empty line).
+  [ "$(awk '/^Its diff:$/ { d = 1; next } /^\[Left out|^Card / { d = 0 } d && $0 != "" { c += length($0) + 1 } END { print c + 0 }' <<<"$out")" -le 1002 ] \
+    || fail "the diffs kept are over the limit: $out"
+  # Bug it catches (E2): when a whole-suite run marks the rise, the facts said the card of that run came first, though
+  # that run has no card (and the line naming the rise came out empty). The same fixture, its slow run of c9-14 read as
+  # one of the full suite, names the rise and says all the cards come oldest first.
+  out=$( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/testaction.sh")" \
+    && tachanges tests/x.test.sh "$(testfacts tests/x.test.sh | jq -c '.runs |= map(if .card == "c9-14" then del(.card, .issue) + {whole: true} else . end)')" "$R" | head -n 1)
+  grep -qF 'to 10 s at 2026-11-03T00:00:00Z, a whole-suite run), so all of them oldest first, each with' <<<"$out" && ! grep -qF 'card of that run first' <<<"$out" \
+    || fail "the facts of a rise marked by a whole-suite run do not say all the cards come oldest first: $out"
+}

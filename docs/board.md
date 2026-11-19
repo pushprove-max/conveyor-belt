@@ -656,6 +656,12 @@ the end of its text. Edit it, then click "File this issue". Cancel files nothing
 Mutation check, Keep a case off, Close its issue as done and Mark as slow on purpose
 (`conveyor.sh test-settings`). Use the arrow keys to move in the More menu, and Escape to close it.
 
+Explain the slowdown gives the model the file's recorded times and the changes of the cards that landed when its time
+went up. For each card, the model gets the commit, its subject, its changed files with their line counts, and its diff
+of the test file and of the files that the test map links to the test file. When a card's test step is the first slow
+run, that card comes first. The other cards come oldest first. The model cannot run git. When the diffs are too long,
+the model gets their start and a note that says which lines and files are left out.
+
 Mutation check puts the file at the front of the idle queue (`conveyor.sh mutate ask`). It does not start a check.
 `conveyor.sh serve` runs the checks of the queue one at a time, and only while no card needs a test slot. When a card
 asks for a test slot, the check pauses, and it goes on from its next mutant later. After the files you asked for, the

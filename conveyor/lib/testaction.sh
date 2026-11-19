@@ -6,7 +6,8 @@
 # or explain (which card and what cause made it slower). With no Tests seat set it starts nothing and says why (exit 2).
 # The session is given the file, its recorded times from the test lines of the card records (times, clocks, timed) and
 # from the whole-suite runs, as the Tests page shows them, the
-# cards that ran it, its flaky entries, its recent failures, and its newest run of them all, named (testfacts()). It reads a copy of main as it is at the ask, a worktree of
+# cards that ran it, its flaky entries, its recent failures, and its newest run of them all, named (testfacts()); explain, the changes of the cards
+# that landed around the rise in its time too (tachanges()). It reads a copy of main as it is at the ask, a worktree of
 # that commit whose files it cannot write ($CARDS/testactions/<id>, removed when it ends), and finds a gh that refuses
 # every call first on its PATH; a Claude session has only Read, Grep and Glob, a Codex one its read-only sandbox and an
 # OpenCode one the review's read-only agent (ocrun()). The ask returns once the session has started, or is queued
@@ -67,7 +68,7 @@ taverdict() { # <text file>
   v=$(grep -v '^[[:space:]]*$' "$1" | tail -n 1 | sed -nE "s/^[[:space:]*\`_>-]*VERDICT:[[:space:]*\`_]*($TAVERDICTS)([^[:alpha:]].*)?$/\1/Ip")
   jq -cn --arg v "${v,,}" 'if $v == "" then "no verdict" else $v end'
 }
-TAEXPLAIN="Explain the slowdown of one test file of this project. From its recorded times below, find when it became slower, which card's change made it slower, and what in that change is the cause. Read the repository and its history as you need. Change nothing: do not write or edit a file, do not file an issue, do not change any state."
+TAEXPLAIN="Explain the slowdown of one test file of this project. From its recorded times below, find when it became slower, which card's change made it slower, and what in that change is the cause. The changes of the cards that landed around the rise in its time, with their commits, changed files and diffs, are in the facts below; you have no git. Read the repository as you need. Change nothing: do not write or edit a file, do not file an issue, do not change any state."
 # `conveyor.sh testissue <test file> <title> <body>`: the Board's File an issue about one test file (an Optimize issue,
 # "Optimize the test file <file>", checked by optproof(), or a speed-up; the owner read and edited the title and body), filed through the GitHub write path with the pack's
 # type and its last priority. Each one filed is kept in $TAFILED, one line {time, event: filed, file, issue}, so the
@@ -166,6 +167,7 @@ tastart() { # <id>
       + "\n\nIts recent failures, newest first (the test steps that failed in it; verdict card: the change of that card made it fail; main: it failed on main too; flaky: it failed and then passed when run again; none on record: a step from before verdicts were kept), each with its failing cases and the end of the output of its test step:\n"
       + (if .failures == [] then "none" else .failures | map("- \(.time), card \(.card) (#\(.issue)), verdict \(.verdict // "none on record"), failing cases: \(if .cases == [] then "none named" else .cases | join(", ") end)"
           + (if .tail then "\n  The end of its output:\n" + (.tail | split("\n") | map("    " + .) | join("\n")) else "" end)) | join("\n") end)' <<<"$facts")"
+    [ "$how" = judge ] || p+=$'\n\n'"$(tachanges "$t" "$facts" "$wt")"
     # The session's runner holds no descriptor of this process's (nor the queue's lock): the Board's ssh ends with this
     # process, not with it.
     ( trap - TERM; trap '' HUP; exec {LOGFD}>&- && exec {LOGFD}>&2; tarun "$r" "$wt" "$p" ) >> "$f.err" 2>&1 < /dev/null 8>&- {TALOCK}>&- &
@@ -225,6 +227,60 @@ testfacts() { # <file>
          else {time: $t, run: ((map(.run) | join(" and ")) + ", which ended in the same second, so which of them ran last is not known"),
            result: (if (map(.result) | unique | length) == 1 then .[0].result else map("\(.result) on \(.run)") | join("; ") end)} end) as $nw
     | {runs: ($c + $w | sort_by(.time)), cards: ($c | map({card, issue}) | unique_by(.card)), flaky: $fl, failures: $fails, newest: $nw}'
+}
+# The changes an explain session is given (#767: it has no shell and no git, so it cannot read them itself), as text:
+# of <facts>' runs (testfacts()) with a time of the file (times, a whole run's cpu or timed's cpu; a carried line is
+# not a run of it), the one where they split best into a part before it and a higher part from it on (the least sum
+# of squares of their logs about each part's mean) marks the rise; the
+# cards that landed (their last landed record) in that run (its card) or between the run before it and it are named,
+# the card of that run first when that run is a card's test step and the others after it oldest first (the diff budget
+# goes to that card's change before an older one's; a whole-suite run has no card, so all of them are oldest first),
+# each with the commit that landed it, its subject, its changed files with lines added and removed, and
+# its diff of <file> and the files the test map links to it (mapread() of <worktree>: for this repository, the engine
+# files of its area in .conveyor/engine-areas.json). The diffs together keep to TACHANGEMAX characters: the part past
+# it is left out, and the text says which lines and files.
+TACHANGEMAX=60000
+tachanges() { # <file> <facts> <worktree>
+  local ld cs fs files=() card issue sha d keep rest k n out used=0 cut
+  ld=$({ olds; recs; } 2>/dev/null | jq -cRn '[inputs | fromjson? | objects | select(.step == "landed" and (.card | type) == "string" and (.sha | strings | test("^[0-9a-f]{40}$")))
+    | {card, issue, sha, time}]') || ld='[]'
+  # The landed records go in as a file: as one argument, a long history passes the 128 KiB Linux takes (#344).
+  cs=$(jq -c --slurpfile l <(printf '%s' "$ld") '$l[0] as $l | def mean: add / length; def sse: mean as $m | map((. - $m) * (. - $m)) | add;
+    [.runs[] | select(.carried != true) | {time, card, t: (.times // .cpu // .timed.cpu?)} | select(.t | numbers | . > 0)] as $r
+    | [$r[].t | log] as $g
+    | [range(1; $r | length) as $i | {i: $i, cost: (($g[:$i] | sse) + ($g[$i:] | sse)), rise: (($g[$i:] | mean) - ($g[:$i] | mean))}] | min_by(.cost)
+    | if . == null or .rise <= 0 then {at: null, cards: []} else $r[.i - 1] as $a | $r[.i] as $n
+      | {at: {from: $a, to: $n}, cards: ([$l[] | select(.card == $n.card or (.time > $a.time and .time <= $n.time))] | group_by(.card) | map(last) | sort_by(.time)
+        | map(select(.card == $n.card)) + map(select(.card != $n.card)))} end' <<<"$2") \
+    || { echo "The changes of the cards around a rise in its time: they could not be read."; return 0; }
+  fs=$(mapread "$3" 2>/dev/null | jq -c --arg f "$1" '[.sources | objects | to_entries[] | select(any(.value[]?; . == $f)) | .key] | unique' 2>/dev/null)
+  mapfile -t files < <(jq -r --arg f "$1" '[$f] + (. // []) | .[]' <<<"${fs:-null}")
+  if [ "$(jq '.at == null' <<<"$cs")" = true ]; then echo "The changes of the cards around a rise in its time: no run of it marks a rise in its time, so no change is given."; return 0; fi
+  out=$(jq -r '"The changes of the cards that landed around the rise in its time (from \(.at.from.t) s at \(.at.from.time) to \(.at.to.t) s at \(.at.to.time)"
+    + (if .at.to.card | type == "string" then ", the test step of card \(.at.to.card)), the card of that run first and the others" else ", a whole-suite run), so all of them" end)
+    + " oldest first, each with its diff of \($ARGS.positional | join(", ")) (the test file and the files the test map links to it):"
+    + (if .cards == [] then " none: no card of that run or between those runs landed." else "" end)' --args "${files[@]}" <<<"$cs")
+  while IFS=$'\t' read -r card issue sha; do
+    out+=$'\n\n'"Card $card (#$issue), landed as commit $sha"
+    git -C "$MAIN" cat-file -e "$sha^{commit}" 2>/dev/null || { out+=": that commit is not in main's checkout, so its change cannot be given."; continue; }
+    out+=": $(git -C "$MAIN" log -1 --format=%s "$sha")"$'\n'"Its changed files (lines added, lines removed):"$'\n'
+    out+=$(git -C "$MAIN" show --no-color --format= --numstat --diff-merges=first-parent "$sha" | awk -F'\t' '{print "  " $3 " (+" $1 ", -" $2 ")"}')
+    d=$(git -C "$MAIN" --literal-pathspecs show --no-color --format= --diff-merges=first-parent "$sha" -- "${files[@]}")
+    if [ -z "$d" ]; then out+=$'\n'"It changed none of the files of the diff."; continue; fi
+    keep=$d
+    if [ $((used + ${#d})) -gt "$TACHANGEMAX" ]; then
+      # Cut at the last whole line within the limit.
+      cut=${d:0:$((TACHANGEMAX - used))}
+      if [[ $cut == *$'\n'* ]]; then keep=${cut%$'\n'*}; else keep=''; fi
+    fi
+    used=$((used + ${#keep}))
+    out+=$'\n'"Its diff:"$'\n'"$keep"
+    [ ${#keep} -lt ${#d} ] || continue
+    n=$(printf '%s\n' "$d" | wc -l); k=0; [ -z "$keep" ] || k=$(printf '%s\n' "$keep" | wc -l)
+    rest=$(printf '%s\n' "$d" | awk -v k="$k" '/^diff --git a\// { f = $0; sub(/^diff --git a\//, "", f); sub(/ b\/.*$/, "", f) } NR > k && f != "" && !s[f]++ { printf "%s%s", (c++ ? ", " : ""), f }')
+    out+=$'\n'"[Left out: lines $((k + 1)) to $((n)) of its $((n)) lines of diff, of the files ${rest:-named above}; the diffs of these facts keep to $TACHANGEMAX characters.]"
+  done < <(jq -r '.cards[] | [.card, (.issue // "none"), .sha] | @tsv' <<<"$cs")
+  printf '%s\n' "$out"
 }
 # The worktree a session read, gone: made writable again, then removed.
 tadrop() { chmod -R u+w "$1" 2>/dev/null; git -C "$MAIN" worktree remove --force "$1" 2>/dev/null; rm -rf "$1"; git -C "$MAIN" worktree prune 2>/dev/null; } # <worktree>
