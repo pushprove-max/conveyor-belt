@@ -1016,16 +1016,19 @@ export const shortCommand = (cmd: string, card: string): string => {
   return inTree.replace(new RegExp(`(^|[\\s'"=(])(~?/${PATH_END}+)`, 'g'), (_, pre: string, p: string) => `${pre}${p.replace(/\/+$/, '').split('/').pop() || p}`)
 }
 // WORKER ACTIVITY: a line a card, its mark (it turns with `motion`), its ID and its live command made short; on the
-// right the tool and when the step started. A card that streams no command shows its step.
+// right the tool and when the step started. A card that streams no command shows its step. A card in its Test step
+// whose track gives test counts shows, in place of the command, a bar of its tests done of all: `▰▰▰▰▰▰▰▰▱▱ 72/89 · 3 failed`.
 export const activityModel = (s: State, snap: Snap, w: number, frame: number): Line[] => [
   section('WORKER ACTIVITY', '', w),
   ...(snap.belt.length ? [] : [empty('nothing on the belt')]),
   ...snap.belt.map((b): Line => {
     const m = /^([A-Za-z][\w.-]*): ([\s\S]*)$/.exec(b.live?.action ?? '')
     const what = m ? shortCommand(m[2], b.card) : b.live?.action ? shortCommand(b.live.action, b.card) : stepOf(b)
+    const tests = b.track?.at === 3 ? b.track.tests : null
+    const shown: Line = tests ? [...gauge(tests.of ? (100 * tests.done) / tests.of : 0), { t: ` ${tests.done}/${tests.of}${tests.failed ? ` · ${tests.failed} failed` : ''}` }] : [{ t: what }]
     const at = b.track?.since ?? b.stepAt
     const right = [m?.[1] ?? '', at === null ? '' : clockOf(at)].filter(Boolean).join(' · ')
-    return spread([{ t: `${workMark(frame)} `, c: C.work }, { t: `${idOf(b)}  `, c: C.name, b: true }, { t: what }], right ? { t: right, d: true } : null, w)
+    return spread([{ t: `${workMark(frame)} `, c: C.work }, { t: `${idOf(b)}  `, c: C.name, b: true }, ...shown], right ? { t: right, d: true } : null, w)
   }),
 ]
 

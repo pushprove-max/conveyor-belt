@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { expect, test } from 'claude-code/testing'
 import { TWO_PROJECTS } from './fixtures/units-two-projects'
-import { boardOf, fastText, paneModel, parseFetch, parseLimit, researchText, seatFromGit, seenOf, shortTitle, tableText, toasts } from './sources'
+import { activityModel, boardOf, fastText, paneModel, parseFetch, parseLimit, researchText, seatFromGit, seenOf, shortTitle, tableText, toasts } from './sources'
 import type { Fast, Research, State } from './sources'
 import { clockOf, cols, plain } from './elements'
 
@@ -874,4 +874,32 @@ test('an old engine: the whole line, wrapped between words at the width, the com
   }
   // A fetch with no engine line (the project runs the newest commit) shows none.
   expect(tableText(board(), 62)).not.toContain('old engine')
+})
+
+// Issue 609: WORKER ACTIVITY, a card in its Test step. Bugs it catches: the row gave only the short test command, so
+// the owner could not see how far the tests were; the bar was not filled to the share done, the count or the failed
+// count was missing, the row passed the pane's width, or the row changed for a card with no test counts yet or in
+// another step.
+test('WORKER ACTIVITY: a card in its Test step shows a bar of its tests done of all, the count and the failed count', () => {
+  const live = { action: 'Bash: npm test', turns: null, lastOutputAt: ago(0) }
+  const s = board({ belt: [
+    { ...BELT[1], card: 'c8-3865', issue: 3865, step: 'tests', live, track: track('+++>..', 'tests', { tests: { done: 72, of: 89, failed: 3 } }) },
+    { ...BELT[1], card: 'c9-3866', issue: 3866, step: 'tests', live, track: track('+++>..', 'tests') },
+    // A card in its Build step whose track has test counts too: not in its Test step, so its row keeps its step.
+    { ...BELT[0], track: track('>.....', 'build', { tests: { done: 5, of: 9, failed: 1 } }) },
+    { ...BELT[1], card: 'c10-3867', issue: 3867, step: 'tests', live, track: track('+++>..', 'tests', { tests: { done: 45, of: 90, failed: 0 } }) },
+  ] })
+  const rows = (w: number) => activityModel(s, s.snap!, w, 0).map(plain)
+  const right = (tool: string, at: number) => ` +${tool}${clockOf(NOW - at * 60_000)}$`
+  const [, bar, none, other, passing] = rows(62)
+  // 72 of 89 is 81%: 8 of the bar's 10 cells filled.
+  expect(bar).toMatch(new RegExp(`^◐ #3865  ▰{8}▱{2} 72/89 · 3 failed${right('Bash · ', 3)}`))
+  // The rows as they were before the bar: the short command, or the step.
+  expect(none).toMatch(new RegExp(`^◐ #3866  npm test${right('Bash · ', 3)}`))
+  expect(other).toMatch(new RegExp(`^◐ #3863  build${right('', 3)}`))
+  // No failed test: no failed count.
+  expect(passing).toMatch(new RegExp(`^◐ #3867  ▰{5}▱{5} 45/90${right('Bash · ', 3)}`))
+  for (const l of rows(62)) expect(cols(l)).toBeLessThanOrEqual(62)
+  const narrow = rows(30)[1]
+  expect(narrow.startsWith('◐ #3865  ▰') && cols(narrow) <= 30).toBe(true)
 })
