@@ -221,6 +221,35 @@ t_proofrun() {
   : > "$STUB/end"; wait $run || fail "the watch of the run exited non-zero: $(cat "$T/$CASE/run.out")"
 }
 
+# Issue 611: after a card's tests failed, the run again of its failed tests on main (testrun.sh verdicts(), in
+# $CARDS/mainrun/<card>) keeps its live record in mainrun/<card>.live; the card's own live record is gone and it writes
+# no line. Health called the card stuck, since its Test step's start, while that run (and its .test file before it)
+# made output. Card c7-7 began its test step 1300 s ago (past tunables.stuck, 1200 s) and has no live record of its own.
+t_mainrunout() {
+  local -x FILEMODE=1
+  local now d=$T/$CASE/cards; setup "[$(issue 7 2026-01-01)]"; now=$(date +%s); c7at "$((now - 1300))" picked worktree deps brief start:build build start:review review:GO start:test
+  at() { TZ=UTC0 touch -t "$(jq -rn --argjson t "$1" '$t | strftime("%Y%m%d%H%M.%S")')" "$2"; } # <epoch seconds> <file>
+  mkdir -p "$d/mainrun" && echo 'not ok 1 a case' > "$d/c7-7.test" && at "$((now - 100))" "$d/c7-7.test" || fail "the card's .test file"
+  # The main run has printed no output yet: watch() starts its live record with last null and a test run's progress
+  # set, so only its progress is newer than the .test file (a check that reads last alone calls it stuck since then).
+  jq -cn --argjson t "$((now - 50))" '{step: "test", at: ($t - 30 | todate), last: null, progress: ($t | todate), turns: 0}' > "$d/mainrun/c7-7.live"
+  stuckat() { CONVEYOR_NOW=$1 loop health | jq -c '.stuck | map([.card, .step, .since])'; } # <epoch seconds>
+  [ "$(stuckat "$now")" = '[]' ] || fail "a card whose failed tests run again on main is stuck: $(stuckat "$now")"
+  # No record changed for tunables.stuck: stuck, since the newest of them, the main run's live record.
+  [ "$(stuckat "$((now + 1150))")" = "[[\"c7-7\",\"test\",\"$(jq -rn --argjson t "$((now - 50))" '$t | todate')\"]]" ] \
+    || fail "a silent main run is not stuck since its last output: $(stuckat "$((now + 1150))")"
+  # The .test file written later is the newest: the card is not stuck then, and is stuck since it later.
+  at "$((now - 20))" "$d/c7-7.test" || fail "the .test file's time"
+  [ "$(stuckat "$((now + 1150))")" = '[]' ] || fail "the card's .test file is not counted as its output: $(stuckat "$((now + 1150))")"
+  [ "$(stuckat "$((now + 1180))")" = "[[\"c7-7\",\"test\",\"$(jq -rn --argjson t "$((now - 20))" '$t | todate')\"]]" ] \
+    || fail "a card is not stuck since its .test file's last write: $(stuckat "$((now + 1180))")"
+  # The main run prints a line: its live record's last, newer than its progress and the .test file, is the card's
+  # last output (a check that reads progress alone calls it stuck since the .test file's write).
+  jq -cn --argjson t "$((now - 10))" '{step: "test", at: ($t - 70 | todate), last: ($t | todate), progress: ($t - 40 | todate), turns: 0}' > "$d/mainrun/c7-7.live"
+  [ "$(stuckat "$((now + 1195))")" = "[[\"c7-7\",\"test\",\"$(jq -rn --argjson t "$((now - 10))" '$t | todate')\"]]" ] \
+    || fail "a card is not stuck since its main run's last line: $(stuckat "$((now + 1195))")"
+}
+
 # Bug: a stalled session was still sent keep-alive bytes, lines with nothing in them, and each counted as output, so
 # the session was never silent for tunables.sessionStuck. Only a line that says something is output. The session here
 # calls one tool, then is sent an empty line every 0.1 s until $STUB/go: its last output stays the tool call, and it is
