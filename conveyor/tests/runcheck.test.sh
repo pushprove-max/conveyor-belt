@@ -11,11 +11,12 @@
 
 # A whole card, for what only it proves: card() checks a Make it run card by its title, after its test step.
 # Bug it catches: a Make it run card whose test step never ran its file landed as fixed (the test command still
-# skipped it). The card's test step passes without running f.test.sh, so the card is blocked after it, saying so.
+# skipped it). The change leaves f.test.sh alone and changes a.txt, so the card's test step runs only a.txt's linked
+# a.test.sh (a step runs the test files the change touches) and passes without f.test.sh: the card is blocked after it.
 t_runcard() {
   setup "[$(issue 7 2026-01-01 bug | jq -c '.title = "Make the test file f.test.sh run"')]"
   echo 'echo never' > "$R/f.test.sh" && git -C "$R" add f.test.sh && git -C "$R" commit -qm 'a test' && git -C "$R" push -q origin main || fail "main's file"
-  echo "$GO" > "$STUB/review.1"; echo 'echo "echo now" > f.test.sh' > "$STUB/build"
+  echo "$GO" > "$STUB/review.1"; echo 'echo two >> a.txt' > "$STUB/build"
   loop run > /dev/null || fail "run exited non-zero"
   [ "$(st 'select(.step == "blocked") | .reason')" = "test: the card's test step did not run the test file f.test.sh: the test command still does not run it, or it ran none of its cases" ] \
     || fail "a Make it run card whose test step did not run its file was not blocked: $(st 'select(.step | IN("blocked", "landed"))')"
@@ -64,11 +65,12 @@ t_deleterefix() {
 # A whole card, for what only it proves: a retry with no build (#232) is checked as a build is.
 # Bug it catches: a Make it run card stopped for the owner's yes to a visible change; retried with the yes, it landed
 # from its kept patch with no build, so its proof checks were never set up, and it landed though its test step never
-# ran its file. It is blocked after that test step, saying so.
+# ran its file. The change leaves f.test.sh alone (its test step runs a.txt's a.test.sh), so it is blocked after that
+# test step, saying so.
 t_runlandyes() {
   setup "[$(issue 7 2026-01-01 bug | jq -c '.title = "Make the test file f.test.sh run"')]"
   echo 'echo never' > "$R/f.test.sh" && git -C "$R" add f.test.sh && git -C "$R" commit -qm 'a test' && git -C "$R" push -q origin main || fail "main's file"
-  echo 'echo "echo now" > f.test.sh; mkdir -p web; echo pay >> web/pay.ts' > "$STUB/build"
+  echo 'echo two >> a.txt; mkdir -p web; echo pay >> web/pay.ts' > "$STUB/build"
   printf '%s\n' 'USER-VISIBLE: yes: guests see a new Pay button' 'VERDICT: GO' > "$STUB/review.1"
   loop run > /dev/null || fail "first run exited non-zero"
   st 'select(.step == "blocked") | .reason' | grep -q "^visible to customers or staff: needs .*'s yes" || fail "the card did not stop for the yes: $(st 'select(.step | IN("blocked", "landed"))')"
