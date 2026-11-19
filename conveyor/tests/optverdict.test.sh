@@ -214,3 +214,17 @@ t_optdirectescape() {
   fx_in "casesgone \"\$T/\$CASE/wt\" f.test.mjs \"\$(printf '%s\n' \"the switch changes the rows to that project's\" 'a \"quoted\" name' 'a tick \` name' 'gone one')\""
   [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = 'gone one' ] || fail "cases with escaped quotes in their names were read as gone: exit $RC, $(cat "$T/$CASE/run.out")"
 }
+
+# Bug it catches (#799): card() sends a Rewrite as a direct check card (REWRITE) to optproof(); without that route it
+# goes to the bug-card check, which never reads its DIRECT lines, so a build that drops the case relpin they name is
+# not blocked for it. A whole card run, as only it shows which check card() picks for the issue's title.
+t_optdirectcard() {
+  setup "[$(issue 7 2026-01-01 bug | jq -c '.title = "Rewrite the test file f.test.sh as direct checks"
+    | .body = "- DIRECT: the install holds the right files | compare the installed list with the manifest | relpin"')]"; nopush
+  printf '%s\n' 't_relstop() { :; }' 't_relpin() { :; }' > "$R/f.test.sh"
+  git -C "$R" add f.test.sh && git -C "$R" commit -qm 'a test' && git -C "$R" push -q origin main || fail "main's files"
+  echo "printf '%s\n' 't_relstop() { :; }' > f.test.sh" > "$STUB/build"
+  loop run >/dev/null || fail "run exited non-zero"
+  [ "$(st 'select(.step == "blocked") | .reason')" = "build: the verdict is indirect, and the change drops cases of f.test.sh that the issue's DIRECT lines say must keep passing: relpin" ] \
+    || fail "card() did not send a Rewrite card to the Optimize check: $(st 'select(.step | IN("review", "blocked", "landed"))')"
+}

@@ -611,6 +611,7 @@
 {"area": "records", "test": "recwriters.test.sh"}
 {"area": "card", "test": "recwriters.test.sh"}
 {"area": "card", "test": "rollout.test.sh"}
+{"area": "card", "test": "optverdict.test.sh"}
 {"area": "claim", "test": "recwriters.test.sh"}
 {"area": "claim", "test": "stdbcalls.test.sh"}
 {"area": "push", "test": "recwriters.test.sh"}
