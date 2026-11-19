@@ -49,8 +49,8 @@
 # {kind: "release", step (release-prep or release), version, since, ended (null while it runs), state (running, then
 # passed (release-prep), released (release), failed (the suite failed), refused (any other refusal) or stopped), sha
 # (the commit the suite runs or ran on, null before it), mode (the suite's mode, serial or parallel, null before it:
-# release-prep's --serial or --parallel, which the suite's command is told as CONVEYOR_SUITE_MODE; null in a release
-# that runs no suite itself, so the Board says a mode only for test files this run ran), done, failed and cases (the cases ended, those failed and their
+# release-prep's --serial or --parallel, which the suite's command is told as CONVEYOR_SUITE_MODE; a release keeps the
+# mode of the suite whose result it keeps, as relstart() does, and step 2 of the Board shows it), done, failed and cases (the cases ended, those failed and their
 # names, as at the suite's end; while it runs the snapshot counts them: suiteprog()), timedout (those of them stopped
 # at their time limit, by name), alone (release-prep's red suite: each failed case run alone, as fulljudge() prints it:
 # {case, line, runs, verdict: flaky or failed, why}; a suite passed with every failed case flaky has them here only),
@@ -172,12 +172,12 @@ RELSTARTED=''
 relrec() { jq -c "$@" "$RELRUN" > "$RELRUN.new" 2>/dev/null && mv -f "$RELRUN.new" "$RELRUN"; } # <jq arguments, the filter first>
 relstart() { # <command name> <version>
   local was=null
-  # release keeps the suite's commit and cases from release-prep's pass of its version, or from a release of it
+  # release keeps the suite's commit, mode and cases from release-prep's pass of its version, or from a release of it
   # refused since (a retry takes the pass from the status and runs no suite). From release-prep's failed suite of its
   # version: that suite, and red, the failed run `release --anyway` may go over, kept through a refused release.
-  [ "$1" != release ] || was=$(jq -ce --arg v "$2" 'select(.version == $v and .sha != null) | if .step == "release-prep" and .state == "passed" then {since, sha,done, failed, cases, moved, reused, alone: (.alone // [])}
-    elif .step == "release-prep" and .state == "failed" then {since, sha,done, failed, cases, moved, reused, files, timedout, alone: (.alone // []), red: {sha, files: (.files.failed // []), cases}}
-    elif .step == "release" and .state == "refused" then {since, sha,done, failed, cases, reused, red} else empty end' "$RELRUN" 2>/dev/null) || was=null
+  [ "$1" != release ] || was=$(jq -ce --arg v "$2" 'select(.version == $v and .sha != null) | if .step == "release-prep" and .state == "passed" then {since, sha, mode, done, failed, cases, moved, reused, alone: (.alone // [])}
+    elif .step == "release-prep" and .state == "failed" then {since, sha, mode, done, failed, cases, moved, reused, files, timedout, alone: (.alone // []), red: {sha, files: (.files.failed // []), cases}}
+    elif .step == "release" and .state == "refused" then {since, sha, mode, done, failed, cases, reused, red} else empty end' "$RELRUN" 2>/dev/null) || was=null
   # by: what started the run when it was not the owner (CONVEYOR_RELEASE_BY: "fixes landed", relfixes(), lib/fulltest.sh).
   jq -cn --arg s "$1" --arg v "$2" --arg t "$(clock)" --argjson p "${CONVEYOR_RELEASE_PID:-$$}" --argjson w "$was" --arg by "${CONVEYOR_RELEASE_BY:-}" \
     '{kind: "release", step: $s, version: $v, since: $t, ended: null, state: "running", sha: null, mode: null, done: 0, failed: 0, cases: [], alone: [], moved: false, reused: null, reasons: [], pid: $p, red: null, anyway: null, allowed: null, minver: null, by: (if $by == "" then null else $by end)} + $w' > "$RELRUN.new" \

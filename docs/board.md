@@ -428,8 +428,9 @@ Under the top row are three numbered steps. Each step has a mark: done, failed, 
 2. **Full suite**: the whole suite on the head of `main`. It shows passed or failed, with the commit and the time, or
    "Not run". While the suite runs, a bar shows the test files done of all the test files, with the names of the files
    that failed. A test case that ran out of time shows as "<case>: timed out". When the run under way, or the last run,
-   runs test files, the step says how: one by one or in parallel. It says no mode for a run that keeps every pass of an
-   earlier run, or for a **Release** that uses the suite that passed before, because these run no test files. A full
+   runs test files, the step says how: one by one or in parallel. A **Release** that uses the suite that passed or
+   failed before shows the mode of that suite. It says no mode for a run that keeps every pass of an earlier run,
+   because that run runs no test files. A full
    test run in progress shows here too. When **Release** is enabled, the step also says what
    it does: "Uses the suite that passed at <time> on <commit>", or "Runs the suite first (about N min)".
 3. **Release**: the tag and the GitHub release.

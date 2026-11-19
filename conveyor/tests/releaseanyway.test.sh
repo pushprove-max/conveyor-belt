@@ -37,6 +37,8 @@ t_relanyway() {
   local a=10.0; out=$(loop release 1.1.0 --anyway --by "$a.0.1" 2>&1); [ $? = 1 ] && grep -q "refused, nothing tagged or released: --anyway: the privacy check finds something in --by" <<<"$out" \
     && grep -q 'private address' <<<"$out" && ! grep -qF "$a.0.1" <<<"$out" || fail "a private address in --by was not refused before the release: $out"
   [ -z "$(git -C "$T/$CASE/origin" tag -l v1.1.0)" ] && ! grep -q '^release' "$STUB/gh-calls" || fail "the refused --by was tagged or released"
+  # Bug (#821): the release refused over release-prep's failed suite lost that suite's mode, while step 2 shows it.
+  jq -e '.state == "refused" and .mode == "serial"' "$RUN" > /dev/null || fail "the refused release lost the failed suite's mode: $(cat "$RUN")"
   out=$(loop release 1.1.0 --anyway --by 'the owner' 2>&1) || fail "--anyway over the red run of the head was refused: $out"
   grep -qF "1.1.0 goes out over the failed suite on ${O:0:12}, by the owner; failed files: a.test; failed cases: breaks" <<<"$out" \
     || fail "release did not print the failed files and cases before it went: $out"

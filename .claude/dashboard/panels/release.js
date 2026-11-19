@@ -39,7 +39,8 @@
 
   // The mode of a run's suite (its record's mode) as a line on step 2, or null when the record has none or no file ran
   // in that mode: a run that reused a green run and ran no file (its reused.ran empty). A release that runs no suite
-  // itself has no mode in its record (release-prep.sh relstart()); one that runs the suite has its own.
+  // itself keeps the mode of the suite whose result it keeps (release-prep.sh relstart()); one that runs the suite has
+  // its own.
   function modeLine(h, x, going) {
     const m = MODES.find((o) => o.mode === x.mode);
     if (!m) return null;

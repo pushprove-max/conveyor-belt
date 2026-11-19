@@ -19,7 +19,7 @@ relreusesetup() {
 }
 # Bug (#35): the Board's Release ran the whole suite again (release-prep, about 25 min) on the commit whose pass
 # release-prep had just recorded. The suite here fails if called.
-# Bug (#791): release kept release-prep's mode though it ran no suite, so the Board said it ran its files in a mode.
+# Bug (#821): release dropped release-prep's mode, so step 2 showed the passed suite with no mode.
 t_relreuse() {
   local O RUN out
   relreusesetup 'exit 1'
@@ -27,7 +27,7 @@ t_relreuse() {
   relwait "the run did not end" '.step == "release" and .ended != null'
   [ ! -e "$STUB/runs" ] || fail "the suite ran again on the commit it passed on: $(cat "$T/$CASE/cards/release/run.log")"
   jq -e --arg o "$O" '.state == "released" and .sha == $o and .done == 3' "$RUN" > /dev/null || fail "release did not release the passed commit $O: $(cat "$RUN") $(cat "$T/$CASE/cards/release/run.log")"
-  jq -e '.mode == null' "$RUN" > /dev/null || fail "release, which ran no suite, kept release-prep's mode: $(cat "$RUN")"
+  jq -e '.mode == "parallel"' "$RUN" > /dev/null || fail "release lost the mode of release-prep's suite it kept: $(cat "$RUN")"
   [ -n "$(git -C "$T/$CASE/origin" tag -l v1.1.0)" ] || fail "no tag v1.1.0 was pushed"
 }
 # Bug (#35): a pass on a main that moved since is reused, so a commit no suite tested is released. Here a card lands
@@ -44,14 +44,17 @@ t_relreusemoved() {
 }
 # Bug: release tried again after a refusal takes release-prep's pass from the status and runs no suite, but its record
 # lost the commit and cases that pass was of.
+# Bug (#821): the refused release, and the release tried again after it, lost that pass's mode, while step 2 shows
+# the pass.
 t_relretry() {
   local O RUN out
   runsetup 'mkdir -p "$CONVEYOR_TEST_LOG/cases/ok" && : > "$CONVEYOR_TEST_LOG/cases/ok/one"'
-  out=$(loop release-prep 1.1.0 2>&1) || fail "release-prep failed: $out"
+  out=$(loop release-prep 1.1.0 --parallel 2>&1) || fail "release-prep failed: $out"
   echo changed >> "$R/docs/releases/1.1.0.md"
   out=$(loop release 1.1.0 2>&1); [ $? = 1 ] || fail "release was not refused with an uncommitted change: $out"
+  jq -e '.state == "refused" and .mode == "parallel"' "$RUN" > /dev/null || fail "the refused release lost the passed suite's mode: $(cat "$RUN")"
   printf '# 1.1.0\n\n## Fixes\n\n- A fix\n' > "$R/docs/releases/1.1.0.md"
   out=$(loop release 1.1.0 2>&1) || fail "the release tried again was refused: $out"
-  jq -e --arg o "$O" '.state == "released" and .sha == $o and .done == 1' "$RUN" > /dev/null || fail "the released record lost the tested commit or its cases: $(cat "$RUN")"
+  jq -e --arg o "$O" '.state == "released" and .sha == $o and .done == 1 and .mode == "parallel"' "$RUN" > /dev/null || fail "the released record lost the tested commit, its mode or its cases: $(cat "$RUN")"
   [ "$(wc -l < "$STUB/runs")" = 1 ] || fail "the suite ran $(wc -l < "$STUB/runs") times, not once"
 }
