@@ -3,7 +3,7 @@
 // reset), a panel's length, how the panels fill the page, and the five-row long lists. Shared setup:
 // dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { html, css, read, T0, STORE, iso, clone, OVERVIEW, CONTROL_IDS, BELT3D_IDS, RULES_IDS, TESTS_IDS, SIZES0, CONTROL_SIZES, RULES_SIZES, boot, $, panel, state, order, saved, kept,
+import { html, css, read, T0, STORE, iso, clone, OVERVIEW, CONTROL_IDS, BELT3D_IDS, RULES_IDS, TESTS_IDS, BENCH_IDS, SIZES0, CONTROL_SIZES, RULES_SIZES, boot, $, panel, state, order, saved, kept,
   settle, deliver, next, later, key, P, CARD_METRICS, full, act, moreText, groupEl, rowsOf, heldMany, cases, setSize, hidePanel } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
@@ -189,6 +189,7 @@ test('reordering, resizing, collapsing and hiding persist in the browser and are
       control: { order: CONTROL_IDS, sizes: CONTROL_SIZES, lengths: {}, collapsed: [], hidden: [] },
       rules: { order: RULES_IDS, sizes: RULES_SIZES, lengths: {}, collapsed: [], hidden: [] },
       tests: { order: TESTS_IDS, sizes: { tests: 'full' }, lengths: {}, collapsed: [], hidden: [] },
+      bench: { order: BENCH_IDS, sizes: { bench: 'full' }, lengths: {}, collapsed: [], hidden: [] },
     },
     density: 'comfortable', theme: 'system', time: '12-hour', date: 'mm/dd/yyyy' });
   await settle();
@@ -251,7 +252,7 @@ test('restore default layout puts everything back and keeps it that way', () => 
   assert.equal(panel(w, 'belt').dataset.size, 'wide');
   assert.equal(root.dataset.density, 'comfortable');
   assert.equal(root.dataset.theme, undefined);
-  assert.deepEqual(saved(w), { tabs: { overview: { order: OVERVIEW, sizes: SIZES0, lengths: {}, collapsed: [], hidden: [] }, belt3d: { order: BELT3D_IDS, sizes: { belt3d: 'full' }, lengths: {}, collapsed: [], hidden: [] }, control: { order: CONTROL_IDS, sizes: CONTROL_SIZES, lengths: {}, collapsed: [], hidden: [] }, rules: { order: RULES_IDS, sizes: RULES_SIZES, lengths: {}, collapsed: [], hidden: [] }, tests: { order: TESTS_IDS, sizes: { tests: 'full' }, lengths: {}, collapsed: [], hidden: [] } }, density: 'comfortable', theme: 'system', time: '12-hour', date: 'mm/dd/yyyy' });
+  assert.deepEqual(saved(w), { tabs: { overview: { order: OVERVIEW, sizes: SIZES0, lengths: {}, collapsed: [], hidden: [] }, belt3d: { order: BELT3D_IDS, sizes: { belt3d: 'full' }, lengths: {}, collapsed: [], hidden: [] }, control: { order: CONTROL_IDS, sizes: CONTROL_SIZES, lengths: {}, collapsed: [], hidden: [] }, rules: { order: RULES_IDS, sizes: RULES_SIZES, lengths: {}, collapsed: [], hidden: [] }, tests: { order: TESTS_IDS, sizes: { tests: 'full' }, lengths: {}, collapsed: [], hidden: [] }, bench: { order: BENCH_IDS, sizes: { bench: 'full' }, lengths: {}, collapsed: [], hidden: [] } }, density: 'comfortable', theme: 'system', time: '12-hour', date: 'mm/dd/yyyy' });
   assert.deepEqual(order(boot({ store: { [STORE]: w.localStorage.getItem(STORE) } })), OVERVIEW);
 });
 

@@ -13,7 +13,7 @@ const test = cases(import.meta.url);
 test('every panel is one file in panels/ and one entry of the list', () => {
   const files = fs.readdirSync(path.join(VIEW, 'panels')).filter((f) => f !== 'index.js').map((f) => f.replace(/\.js$/, '')).sort();
   assert.deepEqual(files, LIST.slice().sort(), 'the files in panels/ are exactly the list');
-  assert.deepEqual(LIST, ['machine', 'board', 'rules', 'needs', 'belt', 'belt3d', 'tests', 'queue', 'landed', 'release', 'declined', 'health', 'lanes', 'cost', 'metrics'], 'the panels the issues name, in their default order');
+  assert.deepEqual(LIST, ['machine', 'board', 'rules', 'needs', 'belt', 'belt3d', 'tests', 'bench', 'queue', 'landed', 'release', 'declined', 'health', 'lanes', 'cost', 'metrics'], 'the panels the issues name, in their default order');
   const w = boot();
   assert.deepEqual(order(w), OVERVIEW, 'Overview is the tab the page opens on');
   for (const id of OVERVIEW) assert.equal($(w, `#panel-${id} .panel-title`).textContent, SAYS[id].title);
@@ -31,6 +31,9 @@ test('every panel is one file in panels/ and one entry of the list', () => {
   const t = boot({ tab: 'tests' });
   assert.deepEqual(order(t), ['tests'], 'the Tests tab holds the Tests panel alone');
   assert.equal(panel(t, 'tests').dataset.size, 'full');
+  const bt = boot({ tab: 'bench' });
+  assert.deepEqual(order(bt), ['bench'], 'the Benchmarks tab holds the Benchmarks panel alone');
+  assert.equal(panel(bt, 'bench').dataset.size, 'full');
 });
 
 // A panel states its tab and its default length in its module; the page shows it on that tab, cut to that length.
@@ -44,7 +47,7 @@ test('each panel states its tab and its default length: about 5 to 8 rows for a 
   const data = full();
   for (const id of LIST) data.panels[as(id)] = data.panels[id];
   const stated = {};
-  for (const [tab, ids] of [['overview', OVERVIEW], ['control', CONTROL_IDS], ['rules', RULES_IDS], ['belt3d', BELT3D_IDS], ['tests', ['tests']]]) {
+  for (const [tab, ids] of [['overview', OVERVIEW], ['control', CONTROL_IDS], ['rules', RULES_IDS], ['belt3d', BELT3D_IDS], ['tests', ['tests']], ['bench', ['bench']]]) {
     const w = boot({ tab, list: LIST.map(as), extra });
     deliver(w, data);
     assert.deepEqual(order(w), ids.map(as), `the ${tab} tab holds its panels in their order`);
@@ -57,7 +60,7 @@ test('each panel states its tab and its default length: about 5 to 8 rows for a 
   }
   assert.deepEqual(stated, {
     machine: ['control', 'all'], 'board-loop': ['control', 'all'], 'board-push': ['control', 'all'], board: ['control', 'all'],
-    rules: ['rules', 'all'], 'rules-produce': ['rules', 'all'], 'rules-prices': ['rules', 'all'], 'rules-held': ['rules', 'all'], 'rules-issues': ['rules', 'all'], needs: ['overview', 6], belt: ['overview', 5], belt3d: ['belt3d', 'all'], tests: ['tests', 'all'], queue: ['overview', 8], landed: ['overview', 6], release: ['overview', 'all'], declined: ['overview', 6],
+    rules: ['rules', 'all'], 'rules-produce': ['rules', 'all'], 'rules-prices': ['rules', 'all'], 'rules-held': ['rules', 'all'], 'rules-issues': ['rules', 'all'], needs: ['overview', 6], belt: ['overview', 5], belt3d: ['belt3d', 'all'], tests: ['tests', 'all'], bench: ['bench', 'all'], queue: ['overview', 8], landed: ['overview', 6], release: ['overview', 'all'], declined: ['overview', 6],
     health: ['overview', 'all'], lanes: ['overview', 'all'], cost: ['overview', 8], metrics: ['overview', 8],
   });
   for (const [id, [, rows]] of Object.entries(stated)) if (rows !== 'all') assert.ok(rows >= 5 && rows <= 8, `${id} shows ${rows} rows by default`);

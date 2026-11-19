@@ -429,6 +429,23 @@ d=''; ! d=$(xrun nosuch c1 2>/dev/null) && [ -z "$d" ] || fail "a record the hos
 d=''; ! d=$(xrun widgetshop c1 2>/dev/null) && [ -z "$d" ] || fail "a host that gave no answer was passed off as a card with no reviewed lines: $d"
 ) & started excerpts
 
+# --- --bench (#326): the Benchmarks tab's history, or one run's tasks, which data.js does not carry: the named record's
+# `conveyor.sh bench swe history` or `bench swe show <run>` in one host command. Bugs: another record was asked; the
+# run reached the host unquoted; a host that gave no answer was passed off as no benchmarks ---
+( fresh bench
+brun() { env -u CONVEYOR_HOOK_FIRE_LOG HOME="$T/userhome" PATH="$BIN:$PATH" CONVEYOR_HOST_OS=Linux CONVEYOR_MAIN="$MAIN" CONVEYOR_WORKSPACES="$WS" CONVEYOR_SCRATCH="$SCR" \
+  CONVEYOR_DASHBOARD_DIR="$OUT" timeout 20 bash "$DASH" --bench "$@"; }
+echo '{"runs":[],"arms":[]}' > "$T/ssh-out"; : > "$T/ssh-calls"
+o=$(brun widgetshop) && [ "$o" = '{"runs":[],"arms":[]}' ] || fail "--bench does not give the record's history: $o"
+o=$(brun widgetshop 'r20261117T090000-1') || fail "--bench <run> exited non-zero"
+[ "$(wc -l < "$T/ssh-calls")" = 2 ] && grep -q "CONVEYOR_MAIN='/srv/cd' bash .*conveyor.sh' bench swe history$" "$T/ssh-calls" \
+  && grep -q "CONVEYOR_MAIN='/srv/cd' bash .*conveyor.sh' bench swe show 'r20261117T090000-1'$" "$T/ssh-calls" \
+  || fail "--bench does not ask the host once a read, for the named record and the run quoted: $(cat "$T/ssh-calls")"
+o=''; ! o=$(brun nosuch 2>/dev/null) && [ -z "$o" ] || fail "a record the host file does not name gave benchmarks: $o"
+: > "$T/ssh-out"
+o=''; ! o=$(brun widgetshop 2>/dev/null) && [ -z "$o" ] || fail "a host that gave no benchmarks was passed off as none: $o"
+) & started bench
+
 # --- cards on both records: every row names its repo and links to that repo's issue ---
 # cards_fixture -- the two records' snapshots with cards on them (P, C) and each repo's issue links (PU, CU), which the
 # parts from here to the host that did not answer read.
@@ -704,12 +721,15 @@ q '.panels.tests.data | (.testActions.actions | map([.id, .text])) == [["0123456
 # Bug (#178): the Tests page had no test map to show, nor a tool to build it with. Each project's own reaches it.
 q '.panels.tests.data | .testMap == {state: "none", tool: "V8 coverage", build: null} and .others.widgetshop.testMap == null' \
   "the Tests part holds its project's test map part"
-# Bug (#237): the Board had no drift watch to show beside the benchmark results. Each project's own reaches its Tests part.
-q '.panels.tests.data | .drift == {before: {cards: 5}, after: {cards: 2}, small: ["after"]} and .others.widgetshop.drift == null' \
-  "the Tests part holds its project's latest drift watch"
-# Bug (#236): the Benchmarks part had no SWE-bench runs to show. Each project's own reaches it.
-q '.panels.tests.data | .bench == {presets: [1, 5, 20, 50], live: null} and .others.widgetshop.bench == null' \
-  "the Tests part holds its project's Benchmarks part"
+# Bug (#237): the Board had no drift watch to show beside the benchmark results. Each project's own reaches the
+# Benchmarks tab's part (#326: a tab of its own, so a part of its own).
+q '.panels.bench.data | .repo == "sample" and .drift == {before: {cards: 5}, after: {cards: 2}, small: ["after"]} and .others.widgetshop.drift == null' \
+  "the Benchmarks part holds its project's latest drift watch"
+# Bug (#236): the Benchmarks tab had no SWE-bench runs to show. Each project's own reaches it, and the Tests part no
+# longer carries them.
+q '.panels.bench.data | .bench == {presets: [1, 5, 20, 50], live: null} and .others.widgetshop.bench == null and .repos == ["sample", "widgetshop"]' \
+  "the Benchmarks part holds its project's run in progress and versions"
+q '.panels.tests.data | has("bench") or has("drift") | not' "the Tests part no longer carries the Benchmarks"
 q '.panels.rules.data | has("machine") | not' "the Rules part no longer carries the load limit: the Tests page has it"
 q '.panels.machine.data | .state == "running" and .cap == 5 and .used == 4 and (.projects | map([.repo, .state, .mode, .used, .cap])) == [["sample", "paused", "pause", 1, 3], ["widgetshop", "running", "run", 3, 2]]' \
   "one machine head: 4 of 5, the slots of both projects (3 and 2) under the machine's 10; sample's own pause leaves widgetshop and the machine running"
@@ -1400,7 +1420,7 @@ rm -f "$BIN/systemctl" "$OUT/update.json"
 
 # --- only what the script was asked for ---
 rc=0; env HOME="$T/userhome" CONVEYOR_MAIN="$MAIN" CONVEYOR_DASHBOARD_DIR="$OUT" bash "$DASH" --follow > "$T/usage.out" 2>&1 || rc=$?
-[ "$rc" = 2 ] && grep -qF 'usage: dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--older <repo> <test file>|--donewhen <repo> <card id>|--shot <repo> <card> <file>|--excerpts <repo> <card id>|--check]' "$T/usage.out" || fail "an argument the collector does not have is refused with its usage: rc=$rc $(cat "$T/usage.out")"
+[ "$rc" = 2 ] && grep -qF 'usage: dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--older <repo> <test file>|--donewhen <repo> <card id>|--shot <repo> <card> <file>|--excerpts <repo> <card id>|--bench <repo> [<run>]|--check]' "$T/usage.out" || fail "an argument the collector does not have is refused with its usage: rc=$rc $(cat "$T/usage.out")"
 
 # --- the strip-down holds: the retired workflow is named nowhere in the collector, the page or their tests ---
 # "seat" is not on the list: it now names a card's builder, reviewer and judge (docs/board.md), not the retired workflow.

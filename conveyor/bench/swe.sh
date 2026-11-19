@@ -7,6 +7,9 @@
 #   bench swe arms [check <arm>...]    the arms with their preflight state; check runs those arms' preflights
 #   bench swe stop                     ends the run in progress
 #   bench swe results [--json]         the results of every arm and version so far, side by side
+#   bench swe history                  every run newest first with each arm's figures, and every arm's state, as JSON
+#                                      (the Board's Benchmarks tab; swe_history says what it holds)
+#   bench swe show <run>               one run's tasks with each arm's result, steps and patch, as JSON (swe_show)
 #   bench swe diff <A> <B> [--json]    why two arms or versions differ on the tasks both ran; A and B are each a
 #                                      version (the conveyor arm's), an arm, <arm>@<version> for a conveyor arm,
 #                                      or a results key (bench swe results --json)
@@ -29,7 +32,8 @@
 # arm's command runs on the issue, and its change is the patch. An arm that does not fire is a failed task of it.
 # What is kept, under the state folder's bench/swe: tasks.<revision>.jsonl (the ordered list), results/<key>/<task>.json
 # (key: swe_armkey(); resolved, fired, sessions, tokens, minutes, a card's records) and .patch, preflight/<arm>/<key>.json,
-# a line a run in runs.jsonl, the run in progress in live.json, and board.json, what the Board's Benchmarks part shows.
+# a line a run in runs.jsonl, the run in progress in live.json, and board.json, what the snapshot carries for the
+# Board's Benchmarks tab (the tab reads the runs and results with history and show).
 # The dataset's rows (each task's reference fix and hidden tests) are never kept: the card's sessions have a shell as
 # this account, so the harness reads them into a cache of its own that it removes, for the task list and each grade.
 # A result of the same key and task is reused, never run again. A task whose image cannot be fetched or built, whose
@@ -108,32 +112,110 @@ swe_noise() { jq -rn --argjson n "$1" "$SWE_NOISED"'noised($n) as $d | if $d >= 
 # The sessions a task takes, usual (the mean of the arm's results so far, else build and review for a conveyor arm,
 # or the arm's own sessions) and worst case (a conveyor arm's: the build, MAX_REVIEWS reviews, the fix rounds between
 # them, the one fix of a failed test step and the review after it and, while the control record has the judge on, a
-# judge session for each review; another arm's own sessions), and its minutes (swe.json's for its kind at first).
-swe_pertask() { # <arm> <conveyor | agent> <the arm's sessions>
+# judge session for each review; another arm's own sessions), its minutes (swe.json's for its kind at first) and
+# session, the dollars one session costs at list prices: a benchmark session keeps no usage to price, so it is the mean
+# of this project's own priced card sessions (the snapshot's $STATE.priced, dashboard_limit.py cardlines' summary: a
+# header line, then a line a card, the card priced in its second tab-separated field; each step with dollars above 0;
+# a test run costs none), those priced at the arm's model when it is given one; null when there is none to take the mean of.
+swe_pertask() { # <arm> <conveyor | agent> <the arm's sessions> [<the arm's model>]
   local w=$((2 * MAX_REVIEWS + 2)); ! judgeon > /dev/null || w=$((3 * MAX_REVIEWS + 3))
   [ "$2" = conveyor ] || w=$3
   cat "$SWE_DIR"/results/*/*.json 2>/dev/null | jq -sc --arg a "$1" --argjson w "$w" --argjson u "$(if [ "$2" = conveyor ]; then echo 2; else echo "$3"; fi)" --argjson m "$(swe_conf ".minutes.$2")" \
+    --slurpfile pr <(awk -F '\t' 'NR > 1 { print $2 }' "$STATE.priced" 2>/dev/null | jq -Rc 'fromjson? | .steps[]?| select((.usd | type) == "number" and .usd > 0) | {usd, pricedAs}' 2>/dev/null) --arg pm "${4:-}" \
     'map(select(.arm == $a)) as $r | {usual: (if $r == [] then $u else ($r | map(.sessions) | add / length * 10 | round / 10) end),
-      worst: $w, minutes: (if $r == [] then $m else ($r | map(.minutes) | add / length | ceil) end)}'
+      worst: $w, minutes: (if $r == [] then $m else ($r | map(.minutes) | add / length | ceil) end),
+      session: ($pr | map(select($pm == "" or .pricedAs == $pm) | .usd) | if . == [] then null else add / length * 10000 | round / 10000 end)}'
 }
 # The model a solo run takes (the builder seat's, when it is Claude) and the key its results are kept under.
 swe_solomodel() { seat builder 2>/dev/null | jq -r 'select(.agent == "claude") | .model // empty'; }
 swe_solokey() { local k=solo-${1:-default}; printf '%s\n' "${k//[^A-Za-z0-9._-]/-}"; } # <model>
-# board.json: the run in progress, the runs, each key's results by task with at (the places of those tasks in the
-# pinned order, from 0, so the Board counts the tasks of the first n a run reuses), the key a solo run takes now
-# (soloKey), the versions (the last read, SWE_VERSIONS) and the expected figures.
+# board.json, what the snapshot carries: the run in progress, the key a solo run takes now (soloKey), the versions
+# (the last read, SWE_VERSIONS) and the expected figures. The runs and the results are not in it (the snapshot's size):
+# the Board reads them when it shows them (swe_history, swe_show).
 swe_board() {
   local vs; vs=$(jq -c '.versions // null' "$SWE_DIR/board.json" 2>/dev/null) || vs=null
   [ -z "${SWE_VERSIONS:-}" ] || vs=$SWE_VERSIONS
   mkdir -p "$SWE_DIR" || return 1
-  swe_put "$SWE_DIR/board.json" "$(cat "$SWE_DIR"/results/*/*.json 2>/dev/null | jq -sc --slurpfile live <(jq -c . "$SWE_DIR/live.json" 2>/dev/null || echo null) \
-    --slurpfile runs <(tail -n 50 "$SWE_DIR/runs.jsonl" 2>/dev/null | jq -sc .) --argjson vs "$vs" --argjson c "$(swe_pertask conveyor conveyor 2)" --argjson s "$(swe_pertask solo agent 1)" \
-    --slurpfile order <(jq -c .id "$SWE_DIR/tasks.$(swe_conf .revision).jsonl" 2>/dev/null) --arg sk "$(swe_solokey "$(swe_solomodel)")" \
-    --argjson presets "$(swe_conf .presets)" --argjson max "$(swe_conf .tasks)" '
-    ($order | to_entries | map({key: .value, value: .key}) | from_entries) as $pos
-    | {live: $live[0], runs: $runs[0], versions: $vs, presets: $presets, max: $max, perTask: {conveyor: $c, solo: $s}, soloKey: $sk,
-     keys: (group_by(.key) | map({key: .[0].key, arm: .[0].arm, label: .[0].label, engine: .[0].engine, version: .[0].version, model: .[0].model,
-       tasks: (map({key: .task, value: {resolved, sessions, tokens, minutes}}) | from_entries), at: (map($pos[.task] // empty) | sort)}))}')"
+  swe_put "$SWE_DIR/board.json" "$(jq -nc --slurpfile live <(jq -c . "$SWE_DIR/live.json" 2>/dev/null || echo null) \
+    --argjson vs "$vs" --argjson c "$(swe_pertask conveyor conveyor 2)" --argjson s "$(swe_pertask solo agent 1)" --arg sk "$(swe_solokey "$(swe_solomodel)")" \
+    --argjson presets "$(swe_conf .presets)" --argjson max "$(swe_conf .tasks)" \
+    '{live: $live[0], versions: $vs, presets: $presets, max: $max, perTask: {conveyor: $c, solo: $s}, soloKey: $sk}')"
+}
+# A run's line as the Board reads it ($R: each result by "<key>/<task>"): its line without its tasks and pid, n the
+# tasks of each arm, and cols, each arm with the tasks it did (done), resolved and not run, and the sessions, tokens
+# and minutes of its results of the tasks it ran (null when the line names no results key: a line written before
+# cols). A run whose process is gone with no end written shows stopped, as the snapshot shows it.
+SWE_RUNSUM='def runsum($R): . as $l | ((.arms // [.arm]) | length) as $na
+  | (if .state == "running" and (.pid | type) == "number" and (.alive | not) then {state: "stopped", current: null} else {} end) as $gone
+  | del(.tasks, .pid, .alive) + $gone + {n: (((.n // 0) / ([$na, 1] | max)) | floor), cols: [(.cols // ((.arms // [.arm]) | map({arm: ., key: null, label: .})))[] | . as $c
+    | [$l.tasks[]? | select(.arm == $c.arm)] as $t | [$t[] | select(.result | tostring | startswith("not run") | not)] as $ran
+    | [$ran[] | $R["\($c.key)/\(.id)"] // empty] as $r | def sum(f): if $c.key == null then null else $r | map(f // 0) | add // 0 end;
+    $c + {done: ($t | length), resolved: ($t | map(select(.result == "resolved")) | length), notRun: (($t | length) - ($ran | length)),
+      sessions: sum(.sessions), tokens: sum(.tokens), minutes: (sum(.minutes) | if . == null then null else . * 10 | round / 10 end)}]};'
+# Every run's line (runs.jsonl, then the run in progress), one JSON a line, alive true on a running line whose process is there.
+swe_lines() {
+  local p; p=$(jq -r 'select(.state == "running") | .pid // empty' "$SWE_DIR/live.json" 2>/dev/null)
+  # Neither file is there before the first run: that is no runs, not a failure (the Board's Start reads history then).
+  { cat "$SWE_DIR/runs.jsonl" 2>/dev/null; jq -c 'select(.state == "running")' "$SWE_DIR/live.json" 2>/dev/null; :; } \
+    | jq -Rc --argjson a "$([ -n "$p" ] && kill -0 "$p" 2>/dev/null && echo true || echo false)" 'fromjson? | objects | select(.id | strings) | if .state == "running" then .alive = $a else . end'
+}
+# `bench swe history`: what the Board's Benchmarks tab reads when it is shown, as one JSON object: runs, every run
+# newest first (runsum); arms, every arm with its state (ready, failed, unchecked, changed since its check, not
+# offered), why, its last check (at), the guard that holds it back (swe_guards), its results key (null for a conveyor
+# arm, whose key is its engine's: keyPrefix and the commit) and its sessions, minutes and a session's dollars (swe_pertask); keys,
+# each results key with the places of its tasks in the pinned order (a run reuses them); guard, whether the usage guard
+# holds back a run with a conveyor arm (conveyor) or another arm on the Claude login (agent); set, the task set.
+swe_history() {
+  local arms='[]' n a r p m k gc=false ga=false
+  for n in $(swe_armnames); do
+    a=$(swe_arm "$n") || continue
+    r=$(cat "$SWE_DIR/preflight/$n"/*.json 2>/dev/null | jq -sc 'sort_by(.epoch) | last // null')
+    p=null; k=null
+    if jq -e '.offered != false' <<<"$a" > /dev/null; then
+      m=''; if [ "$(jq -r .kind <<<"$a")" != conveyor ]; then m=$(jq -r '.model // ""' <<<"$a"); [ "$m" != builder ] || m=$(swe_solomodel); k=$(swe_armkey "$a" '' "$m" | jq -R .); fi
+      p=$(swe_pertask "$n" "$(jq -r .kind <<<"$a")" "$(jq -r '.sessions // 1' <<<"$a")" "$m")
+    fi
+    arms=$(jq -c --argjson a "$a" --argjson r "$r" --argjson p "$p" --argjson k "$k" --arg g "$(swe_guards "$a")" '. + [{name: $a.name, label: ($a.label // $a.name), kind: $a.kind,
+      state: (if $a.offered == false then "not offered" elif $r == null then "unchecked" elif $r.spec != $a then "changed" elif $r.ok then "ready" else "failed" end),
+      why: (if $a.offered == false then ($a.why // null) else ($r.why // null) end), at: ($r.at // null), guard: (if $g == "" then null else $g end), perTask: $p,
+      key: $k, keyPrefix: (if $a.kind != "conveyor" then null elif $a.name == "conveyor" then "" else "\($a.name)-" end)}]' <<<"$arms")
+  done
+  ! swe_guarded || gc=true; ! swe_guarded 1 || ga=true
+  swe_lines | jq -sc --argjson arms "$arms" --argjson gc "$gc" --argjson ga "$ga" --slurpfile res <(cat "$SWE_DIR"/results/*/*.json 2>/dev/null) \
+    --slurpfile order <(jq -c .id "$SWE_DIR/tasks.$(swe_conf .revision).jsonl" 2>/dev/null) --arg ds "$(swe_conf .dataset)" --arg rv "$(swe_conf .revision)" "$SWE_RUNSUM"'
+    ($res | map({key: "\(.key)/\(.task)", value: .}) | from_entries) as $R | ($order | to_entries | map({key: .value, value: .key}) | from_entries) as $pos
+    | {set: {dataset: $ds, revision: $rv}, guard: {conveyor: $gc, agent: $ga}, arms: $arms,
+       runs: (sort_by(.started // "") | reverse | map(runsum($R))),
+       keys: ($res | group_by(.key) | map({key: .[0].key, at: (map($pos[.task] // empty) | sort)}))}'
+}
+# `bench swe show <run>`: one run as the Board's run page shows it: run, its line (runsum), and tasks, each task the
+# run took in its order, with its title (the issue's first line) and, for each arm (cells, in cols order), what the run
+# said of it (result, reused) and, where it ran that arm on the task, its kept result: resolved, fired, why, sessions, tokens, minutes, its steps (a conveyor
+# arm's card records) and its patch (each file with its lines added and removed; null when none is kept).
+swe_show() { # <run id>
+  local l k t ks=() ts=() f o
+  [[ $1 =~ ^r[0-9]{8}T[0-9]{6}-[0-9]+$ ]] && l=$(swe_lines | jq -c --arg id "$1" 'select(.id == $id)' | tail -n 1) && [ -n "$l" ] \
+    || { echo "conveyor: no SWE-bench run $1" >&2; return 1; }
+  mapfile -t ks < <(jq -r '.cols[]?.key // empty' <<<"$l" | grep -E '^[A-Za-z0-9][A-Za-z0-9._-]*$')
+  mapfile -t ts < <(jq -r '.tasks[]?.id' <<<"$l" | awk '!s[$0]++' | grep -E '^[A-Za-z0-9][A-Za-z0-9._-]*$')
+  o=$(mktemp) || return 1
+  for k in "${ks[@]}"; do for t in "${ts[@]}"; do
+    f=$SWE_DIR/results/$k/$t; [ -s "$f.json" ] || continue
+    jq -c --argjson p "$(if [ -e "$f.patch" ]; then git apply --numstat "$f.patch" 2>/dev/null | jq -Rsc '[split("\n")[] | select(. != "") | split("\t")
+      | {path: .[2], added: (.[0] | tonumber? // null), removed: (.[1] | tonumber? // null)}]'; else echo null; fi)" '. + {patch: $p}' "$f.json"
+  done; done > "$o"
+  # The run's line goes in on stdin, not as an argument: a run of 500 tasks and 6 arms is past the system's limit
+  # on one argument. A cell has a kept result only where this run ran that arm on the task: the result kept under
+  # its key may be another run's (a run resumed after this one stopped), never this run's to show.
+  jq -c --slurpfile res "$o" --slurpfile tl <(jq -c '{id, title: (.issue // "" | split("\n") | map(select(test("\\S"))) | first // "" | .[0:160])}' \
+    "$SWE_DIR/tasks.$(swe_conf .revision).jsonl" 2>/dev/null) "$SWE_RUNSUM"'. as $l
+    | ($res | map({key: "\(.key)/\(.task)", value: .}) | from_entries) as $R | ($tl | map({key: .id, value: .title}) | from_entries) as $T | ($l | runsum($R)) as $run
+    | ($l.tasks | map({key: "\(.arm)/\(.id)", value: .}) | from_entries) as $E
+    | {run: $run, tasks: [$l.tasks | map(.id) | reduce .[] as $i ({s: {}, l: []}; if .s[$i] then . else .s[$i] = true | .l += [$i] end) | .l[] as $id
+      | {id: $id, title: ($T[$id] // null), cells: [$run.cols[] | . as $c | $E["\($c.arm)/\($id)"] as $t
+        | {arm: $c.arm, result: ($t.result // null), reused: ($t.reused // false)}
+          + ((if $t == null or ($t.result | tostring | startswith("not run")) then {} else $R["\($c.key)/\($id)"] // {} end) | {resolved, fired, why, sessions, tokens, minutes, steps, patch})]}]}' <<<"$l"
+  local rc=$?; rm -f "$o"; return $rc
 }
 swe_live() { local l; l=$(jq -c "$@" "$SWE_DIR/live.json") && swe_put "$SWE_DIR/live.json" "$l" && swe_board; } # [jq options] <jq filter>
 # The sandbox of one task: <sb>/origin, a bare repository holding the base commit as main, <sb>/swe-<project>, its clone, and
@@ -254,9 +336,13 @@ swe_run() { # <n> <engine> <arm>...
   for x; do swe_context "$x" "$eng0" || return 1; ctxs+=("$SWE_CTX"); done
   # The run is live from its preflights on, which can take minutes: Stop ends it there too, and a failed preflight is
   # the run's recorded end (state refused, with why), which the Board shows once it no longer waits for the answer.
+  # cols names each arm's results key (the Board's history and run page read each arm's results by it) and set the
+  # task set (dataset and revision): runs of one set are read side by side.
   SWE_RUN=r$(date -u +%Y%m%dT%H%M%S)-$$; rm -f "$SWE_DIR/stop"
-  swe_put "$SWE_DIR/live.json" "$(printf '%s\n' "${ctxs[@]}" | jq -sc --arg id "$SWE_RUN" --argjson pid "$$" --argjson n "$n" --arg at "$(swe_now)" "$SWE_NAMES"'. as $c | $c[0]
+  swe_put "$SWE_DIR/live.json" "$(printf '%s\n' "${ctxs[@]}" | jq -sc --arg id "$SWE_RUN" --argjson pid "$$" --argjson n "$n" --arg at "$(swe_now)" \
+    --arg ds "$(swe_conf .dataset)" --arg rv "$(swe_conf .revision)" "$SWE_NAMES"'. as $c | $c[0]
     | {id: $id, pid: $pid, arm, key, engine, version, model, arms: ($c | map(.arm)), label: ($c | map(runname) | join(", ")), n: ($n * ($c | length)),
+       cols: ($c | map({arm, key, label, kind, engine, version, model})), set: {dataset: $ds, revision: $rv},
        done: 0, resolved: 0, current: null, started: $at, state: "running", tasks: []}')"
   swe_board
   trap 'pkill -TERM -P $$ 2>/dev/null; swe_end stopped; exit 143' TERM INT
@@ -371,11 +457,11 @@ swe_diff() { # <A> <B> [--json]
     fi
     flips=$(jq -c --argjson n "$n" --arg w "$why" '. + [$n + {reading: (if $w == "" then null else $w end)}]' <<<"$flips")
   done <<<"$ids"
-  local j; j=$(jq -n --argjson f "$flips" --arg va "$va" --arg vb "$vb" --arg ca "$ca" --arg cb "$cb" --arg noise "$(swe_noise "$(wc -l <<<"$ids")")" \
+  local j; j=$(jq -n --slurpfile fl <(printf '%s\n' "$flips") --arg va "$va" --arg vb "$vb" --arg ca "$ca" --arg cb "$cb" --arg noise "$(swe_noise "$(wc -l <<<"$ids")")" \
     --slurpfile ra <(for id in $ids; do cat "$da/$id.json"; done) --slurpfile rb <(for id in $ids; do cat "$db/$id.json"; done) "$SWE_NOISED"'
     def tot: {resolved: (map(select(.resolved)) | length), sessions: (map(.sessions) | add), tokens: (map(.tokens) | add), minutes: (map(.minutes) | add * 10 | round / 10)};
-    def c: if . == "" then null else . end;
-    ($ra | length) as $n | ($ra | tot) as $ta | ($rb | tot) as $tb | noised($n) as $dd
+    def c: if . == "" then null else . end; $fl[0] as $f
+    | ($ra | length) as $n | ($ra | tot) as $ta | ($rb | tot) as $tb | noised($n) as $dd
     | {a: {version: $va, commit: ($ca | c), totals: $ta}, b: {version: $vb, commit: ($cb | c), totals: $tb}, tasks: $n,
        same: [$ra[] | .task] - [$f[] | .task], flipped: $f, noise: $noise, withinNoise: ((($ta.resolved - $tb.resolved) | fabs) < $dd)}')
   [ "${3:-}" != --json ] || { printf '%s\n' "$j"; return; }
@@ -395,6 +481,8 @@ swe_main() {
   case ${1:-} in
     stop) [ $# = 1 ] && { swe_stop; return; } ;;
     results) [ $# = 1 ] || [ "$*" = 'results --json' ] && { swe_results "${2:-}"; return; } ;;
+    history) [ $# = 1 ] && { swe_history; return; } ;;
+    show) [ $# = 2 ] && { swe_show "$2"; return; } ;;
     versions) [ $# = 1 ] && { SWE_VERSIONS=$(swe_versions) && swe_board && printf '%s\n' "$SWE_VERSIONS"; return; } ;;
     diff) { [ $# = 3 ] || { [ $# = 4 ] && [ "$4" = --json ]; }; } && { swe_diff "$2" "$3" "${4:-}"; return; } ;;
     arms) shift; swe_arms "$@"; return ;;
@@ -407,7 +495,7 @@ swe_main() {
   if [ -n "$n" ] && [ -n "$named" ]; then
     k=''; for a in "${arms[@]}"; do [ "$(swe_arm "$a" | jq -r .kind)" = agent ] || k=1; done; [ -n "$k" ] || n=''
   fi
-  [ -n "$n" ] || { echo "usage: conveyor.sh bench swe <1-$(swe_conf .tasks)> [--arm <arm>]... [--solo] [--engine <version | commit>] | bench swe arms [check <arm>...] | bench swe stop | bench swe results [--json] | bench swe diff <A> <B> [--json] | bench swe versions" >&2; return 2; }
+  [ -n "$n" ] || { echo "usage: conveyor.sh bench swe <1-$(swe_conf .tasks)> [--arm <arm>]... [--solo] [--engine <version | commit>] | bench swe arms [check <arm>...] | bench swe stop | bench swe results [--json] | bench swe history | bench swe show <run> | bench swe diff <A> <B> [--json] | bench swe versions" >&2; return 2; }
   mapfile -t arms < <(printf '%s\n' "${arms[@]}" | awk '!seen[$0]++')
   swe_run "$n" "$eng" "${arms[@]}"
 }

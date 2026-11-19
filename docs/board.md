@@ -66,6 +66,7 @@ serves the Board, because its requests come from a loopback address. An admin se
   **Open issues**. On Control and Rules, the line that says what an action did, with its Undo, shows in the panel
   where you did it.
 - **Tests**: the project's test files.
+- **Benchmarks**: the project's SWE-bench runs and their arms ([Benchmarks tab](#benchmarks-tab)).
 
 A panel's head moves and collapses it, and its width menu sets it to Small, Wide or Full. Customize shows or hides
 each panel. It never hides Needs you.
@@ -461,18 +462,8 @@ issue number, as a link, and the issue title.
 
 ## Tests page
 
-The Tests tab shows, from top to bottom: the Test map, Benchmarks: SWE-bench Verified, the figures, the table of
-test files, Test edits by cards, Removed by Optimize, Recent actions, Benchmarks, and Settings.
-
-The Benchmarks: SWE-bench Verified part runs [SWE-bench Verified](benchmarks.md) through Conveyor. Pick 1, 5, 20 or
-50 tasks, or type any number up to 500, and pick main, a release, or Claude alone. Before you click **Start**, the part
-shows the sessions and minutes the run is expected to take. While the run goes, a bar shows the tasks done, and
-**Stop** ends it. The results of every version show side by side, one column a version, with a line that says how big
-a difference the number of tasks can show. **Compare** shows why two versions differ, task by task.
-
-The Benchmarks part shows the latest [drift watch](benchmarks.md#drift-watch): the cards of the latest engine commit
-against the cards of the commit before it, with the number of cards in each group. It says when a group is too small
-to mean anything.
+The Tests tab shows, from top to bottom: the Test map, a line with a link to the [Benchmarks tab](#benchmarks-tab), the
+figures, the table of test files, Test edits by cards, Removed by Optimize, Recent actions, and Settings.
 
 The Test map part shows the state of the [test map](configuration.md#the-test-map). A made map shows how many source
 files and test files it maps, how many commits it is behind main, when it was made and how long its run took. It
@@ -692,6 +683,60 @@ Settings is closed until you open it. It holds "Model for Tests actions" (Judge 
 Test limits (the files slow on purpose in the pack), and Auto-file,
 which shows the test rules (`conveyor.sh testrules`) and the log of what they filed (`conveyor/README.md`, Test
 actions).
+
+## Benchmarks tab
+
+The Benchmarks tab shows the [SWE-bench Verified](benchmarks.md) runs of the project and their arms. A row of buttons
+at its top opens its pages: **Overview**, **A run**, **Compare**, **Start a run** and **Infographic**. The tab reads the
+runs from the build machine when you open it, and again when a run moves on. Only an admin can start, stop or check
+anything here. The Board refuses these buttons to a member.
+
+**Overview** has four parts:
+
+- **Newest run**: the resolved tasks of each arm, side by side, as bars. A dashed band around each bar shows the
+  run-to-run noise for that number of tasks. A difference inside the band is not a difference. With 5 tasks, only a
+  total break shows. Under the bars are the sessions, tokens and minutes of each arm, and notes to read the run with.
+  While a run goes, the part shows a bar of tasks done for each arm, the task now, the sessions so far and **Stop**.
+  It also says when the last run was stopped by you, stopped at the usage guard, or did not start because an arm
+  failed its preflight. Before the first run, it says so and links to **Start a run**.
+- **History**: every run, newest first, grouped by task set. Each row shows the date, the number of tasks, the arms
+  and versions, the resolved count of each arm, the sessions, tokens and minutes, and the state. Tick up to 6 runs. A
+  bar at the foot of the screen then offers **Compare**, **Generate infographic** and **Clear**.
+- **Arms**: how many arms are ready, fail their preflight, are not checked, or are not offered, with the reasons.
+- **Drift watch**: folded. Open it to see the [drift watch](benchmarks.md#drift-watch): each figure a card, for the
+  cards before and after the last engine change. Each figure shows Moved when the two means are more than two
+  standard errors apart, and In its usual range when they are not. It shows Not read when a group has no spread for
+  the figure, and Too few cards when a group is too small to mean anything.
+
+**A run** shows one run, the newest or the one you opened. Each arm is a column and each task is a row: ✓ resolved, ✗
+not resolved, or not run, with the sessions and minutes. The foot of the table gives the totals of each arm. Click a
+task to open it. Each arm then shows its patch (its files, and the lines added and removed), its steps and the
+harness result. The steps of a Conveyor arm are its build, each review with its first finding, each fix round, the
+test step and the block reason. **Export figures** downloads the run's figures as one JSON file. The file has no code,
+no names and no machine names.
+
+**Compare** offers the arms of the runs you ticked, or of the run open. Pick A and B, then click **Compare**. The page
+shows the totals of both, how many tasks flipped each way, and whether the difference is within the noise. Each
+flipped task shows where the two went apart, the facts read from the records, and, beside them, a short reading
+written by one model call from those facts only. No task runs again.
+
+**Start a run** sets the number of tasks (1, 5, 20, 50, or any number up to 500), the Conveyor version, and the arms.
+You can pick only an arm whose preflight passed. An arm that is not checked yet, or that failed, has **Check**, which
+runs its preflight on the build machine; click **Read the arms again** after a few minutes. Before you click **Start**,
+the page shows the usual and worst-case sessions, the minutes and the cost of each arm, for the tasks it did not run
+on that version before. The cost is an estimate at list prices: each session costs the mean of this project's own
+priced card sessions, or of those on the arm's model when the arm has a model. An arm with no priced session of its
+model shows "–" for cost, and then the page shows no total. **Start** is off while the usage guard holds back an arm
+you picked.
+
+**Infographic** draws the runs you ticked on a fixed template: the resolved tasks of each arm with the noise band, the
+sessions, tokens and minutes, the number of tasks, the dates, the versions and the model IDs. Code fills it. No model
+writes or picks anything. You can type a title. The notes on how to read the graphic stay under any title.
+**Download SVG** and **Download PNG** save it. A table under it gives the same figures. Each download also saves that
+table beside the picture, as a CSV file with the same name.
+
+The costs of a benchmark run are not kept: its sessions run in containers that are removed. The places for the cost
+of a run show "–". The harness result shows resolved or not resolved. The counts of FAIL_TO_PASS and PASS_TO_PASS tests are not kept.
 
 ## Accounts
 

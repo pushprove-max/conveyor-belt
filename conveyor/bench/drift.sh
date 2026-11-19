@@ -9,8 +9,9 @@
 # line (a blocked card whose issue is closed later stays blocked, its minutes to the block).
 # Each group: cards, landed, blocked, and a mean a card of tokens (every line's Claude and Codex tokens), minutes
 # (picked line to end), fix rounds (fix lines) and minutes waited (the end line's waitSec: on other cards and on main;
-# only the cards whose end line has it), and reviews to land (review lines, landed cards only). A group of fewer than 5
-# cards is too small to mean anything: small names it.
+# only the cards whose end line has it), and reviews to land (review lines, landed cards only), and spread, the
+# standard deviation a card of each of those five (null with fewer than 2 cards to take it from), which tells a move
+# from the cards' usual range. A group of fewer than 5 cards is too small to mean anything: small names it.
 # Usage: drift.sh [--json] <records file> [<engine commit>]
 # Prints the two groups side by side, or with --json one object {before, after, small}; exit 1 with a reason when
 # there is nothing to compare.
@@ -40,10 +41,12 @@ OUT=$(jq -nc --arg want "$WANT" '
     elif $i < 1 then error("the cards ran on fewer than two engine commits, so there is nothing to compare")
     else . end
   | def mean(f): [.[] | f | numbers] | if length == 0 then null else add / length | . * 10 | round / 10 end;
+    def sd(f): [.[] | f | numbers] | if length < 2 then null else (add / length) as $m | map((. - $m) * (. - $m)) | add / (length - 1) | sqrt * 10 | round / 10 end;
     def group($e): [$cards[] | select(.engine == $e)]
       | {engine: $e, cards: length, landed: map(select(.landed)) | length, blocked: map(select(.blocked)) | length,
          tokens: (mean(.tokens) | if . == null then null else round end), minutes: mean(.minutes),
-         reviews: (map(select(.landed)) | mean(.reviews)), fixes: mean(.fixes), waits: mean(.wait)};
+         reviews: (map(select(.landed)) | mean(.reviews)), fixes: mean(.fixes), waits: mean(.wait),
+         spread: {tokens: sd(.tokens), minutes: sd(.minutes), reviews: (map(select(.landed)) | sd(.reviews)), fixes: sd(.fixes), waits: sd(.wait)}};
     {before: group($order[$i - 1]), after: group($order[$i])} | .small = [to_entries[] | select(.value.cards < 5) | .key]
 ' "$1" 2>&1) || { echo "drift: $(sed 's/^jq: error (at [^)]*): //' <<<"${OUT:-the records could not be read}")" >&2; exit 1; }
 [ -z "$JSON" ] || { printf '%s\n' "$OUT"; exit 0; }

@@ -77,7 +77,8 @@ The loop:
   commit, `--solo` with Claude alone. `bench swe arms` lists the arms and the state of their preflight, and
   `bench swe arms check <arm>` runs a preflight. `bench swe stop` ends a run, `bench swe results` shows every arm's and
   version's results side by side, and `bench swe diff <A> <B>` says why two arms or versions differ
-  ([Benchmarks](benchmarks.md)).
+  ([Benchmarks](benchmarks.md)). `bench swe history` prints every run with each arm's figures and the state of every
+  arm, and `bench swe show <run>` prints one run's tasks by arm, both as JSON, for the Board's Benchmarks tab.
 - `install-service` installs `machine` as the machine's service.
 - `board` installs the [Board](board.md#install-the-board) as a user service, for the project of the checkout it runs in.
 

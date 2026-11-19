@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# The Tests page's Benchmarks part sends POST /control action bench (#236): the server takes Start (n of 1 to 500, then
-# --solo or --engine <main, a release or a full commit>), Stop, List versions and Compare (two versions), and nothing
-# else; Start's script leaves the run going on the host and answers at once, or answers the engine's refusal when the
+# The Benchmarks tab sends POST /control action bench (#236, #326): the server takes Start (n of 1 to 500, then
+# --solo, or arms with --arm and --engine <main, a release or a full commit>), Stop, List versions, an arm's preflight
+# and Compare (two versions or results keys, as JSON or text), and nothing else; it gives the tab's history and a run's
+# tasks at GET /bench. Start's script leaves the run going on the host and answers at once, or answers the engine's refusal when the
 # run ends at its start, or its summary when the run ends well at its start. Here the host's conveyor.sh is a stub that
 # refuses a run while $T/guard is there, answers a summary at once while $T/saved is there, and else waits while
 # $T/hold is there. Bug each case catches: a shape that reaches the host's shell unchecked, or a Start
@@ -56,6 +57,15 @@ for args in (['diff', 'main', '-x'], ['diff', '--json', 'main'], ['diff', 'main'
 for args in (['run', '0'], ['run', '501'], ['run', '05'], ['run', '5', '--solo', '--engine', 'main'], ['run', '5', '--engine', 'v1.2'],
              ['run', '5', '--engine', 'main;rm -rf ~'], ['run', '5', '--engine', 'a' * 12], ['diff', 'main'], ['diff', 'main', '$(id)'], ['stop', 'now'], []):
     check('refuses_%s' % '_'.join(args)[:30], not ok(args), args)
+# Bug (#326): the Benchmarks tab's Start sends the arms picked (each one --arm), runs the preflight of an arm not yet
+# checked, and Compare reads the comparison as JSON; none of these shapes was taken, and none other may reach the host.
+for args in (['run', '20', '--arm', 'conveyor', '--arm', 'codex-sol', '--engine', 'v1.2.0'], ['run', '1', '--arm', 'solo'],
+             ['arms', 'check', 'superpowers', 'conveyor-codex-claude'], ['diff', 'solo-m', 'a' * 40, '--json']):
+    check('tab_takes_%s' % '_'.join(args)[:40], ok(args), args)
+for args in (['run', '5', '--arm', '-x'], ['run', '5', '--arm'], ['run', '5', '--arm', 'a b'], ['run', '5', '--arm', 'Up'], ['run', '5', '--arm', 'solo', '--solo'],
+             ['run', '5', '--engine', 'main', '--arm', 'solo'], ['run', '5'] + ['--arm', 'a'] * 21, ['arms', 'check'], ['arms', 'check', '../x'],
+             ['arms', 'check'] + ['a'] * 21, ['arms', 'list'], ['diff', 'a', 'b', '--text'], ['diff', 'a', 'b', '--json', 'x']):
+    check('tab_refuses_%s' % '_'.join(args)[:40], not ok(args), args)
 
 
 def host(args):
@@ -98,6 +108,12 @@ said = post(['run', '1', '--solo'])
 check('start_answers_a_run_that_ended_at_once', said == (200, 'SWE-bench run: 1 of 1 tasks resolved (results saved before)'), said)
 os.remove(T + '/saved')
 os.remove(T + '/hold')
+# An arm's preflight takes minutes: like a run, it starts on the host and the Board is answered at once.
+open(T + '/hold', 'w').close()
+rc, out, sec = host(['arms', 'check', 'superpowers'])
+check('preflight_answers_while_it_goes', rc == 0 and "the arms' preflights started" in out and sec < 30, (rc, out, sec))
+check('preflight_runs_bench_swe_arms_check', open(MAIN + '/asked').read().split('\n')[-2] == 'bench swe arms check superpowers', open(MAIN + '/asked').read())
+os.remove(T + '/hold')
 rc, out, sec = host(['diff', 'v1.0.0', 'main'])
 check('compare_runs_bench_swe_diff', rc == 0 and open(MAIN + '/asked').read().split('\n')[-2] == 'bench swe diff v1.0.0 main', open(MAIN + '/asked').read())
 # Bug: Compare's answer was the last line of `bench swe diff` alone, so the Board showed no totals, no task list and
@@ -106,6 +122,24 @@ DIFF = ('v1.0.0 against main on the 2 tasks both ran:\n  v1.0.0: 2 resolved\n  m
         '  The same in both: 1 task(s): p__b-2. Flipped: 1.\n\np__a-1: resolved by v1.0.0 only; the runs went apart at: review\n')
 ds.run_script = lambda args, timeout, env=None: subprocess.CompletedProcess(args, 0, DIFF, '')
 said = post(['diff', 'v1.0.0', 'main'])
+# Bug (#326): the tab's history and a run's tasks are not in data.js (its size): GET /bench runs dashboard.sh --bench
+# for the repo, and the run when one is asked, and gives its JSON; a run id of another shape never reaches it.
+started = []
+ds.run_script = lambda args, timeout, env=None: (started.append(args), subprocess.CompletedProcess(args, 0, '{"runs":[]}\n', ''))[1]
+
+
+def get(path):
+    c = http.client.HTTPConnection('127.0.0.1', srv.server_address[1], timeout=60)
+    c.request('GET', path, headers={'Host': 'localhost:%d' % srv.server_address[1]})
+    r = c.getresponse()
+    return r.status, r.read().decode()
+
+
+got = (get('/bench?repo=proj'), get('/bench?repo=proj&run=r20261117T090000-12'))
+check('bench_gives_the_history_and_a_run', got == ((200, '{"runs":[]}\n'),) * 2 and [a[2:] for a in started] == [['--bench', 'proj'], ['--bench', 'proj', 'r20261117T090000-12']]
+      and all(a[1].endswith('/dashboard.sh') for a in started), (got, started))
+for path in ('/bench?repo=proj&run=../x', '/bench?repo=proj&run=-x', '/bench?repo=a%20b', '/bench'):
+    check('bench_refuses_%s' % path, get(path)[0] == 400 and len(started) == 2, path)
 srv.shutdown()
 check('compare_answers_the_whole_comparison', said == (200, DIFF.strip()), said)
 print('PASS: dashboard-server-bench (%d checks)' % passed[0])

@@ -169,6 +169,16 @@ r = req('POST', '/control', cookie=ana, body={'action': 'test-settings', 'args':
 check('member_cannot_change_the_test_command', r[0] == 403 and b'only an admin' in r[2] and len(RAN) == n, r)
 r = req('POST', '/control', cookie=mx, body={'action': 'test-settings', 'args': ['cpu-time', 'a.test.js'], 'repo': 'project'}, **other)
 check('admin_records_cpu_time', r[0] == 200 and len(RAN) == n + 1 and RAN[-1][-1].endswith("conveyor.sh test-settings cpu-time a.test.js'"), (r, RAN[-1:]))
+# Benchmarks (#326) start model sessions on the build machine for hours: a member's Start, preflight or Compare is
+# refused (403) and nothing runs; an admin's runs bench swe there. The tab's history is read behind the login. Bugs
+# it catches: a member started a run; the runs and their figures were read with no login.
+n = len(RAN)
+for args in (['run', '1'], ['arms', 'check', 'solo'], ['diff', 'a', 'b']):
+    r = req('POST', '/control', cookie=ana, body={'action': 'bench', 'args': args, 'repo': 'project'}, **other)
+    check('member_cannot_run_bench_%s' % args[0], r[0] == 403 and b'only an admin' in r[2] and len(RAN) == n, r)
+r = req('POST', '/control', cookie=mx, body={'action': 'bench', 'args': ['stop'], 'repo': 'project'}, **other)
+check('admin_runs_bench', r[0] == 200 and len(RAN) == n + 1 and RAN[-1][-1].endswith("conveyor.sh bench swe stop'"), (r, RAN[-1:]))
+check('bench_needs_a_login', req('GET', '/bench?repo=project', **other)[0] == 401)
 srv.shutdown()
 print('PASS: dashboard-server-local (%d checks)' % passed[0])
 EOF

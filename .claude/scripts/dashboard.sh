@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--older|--donewhen|--shot|--excerpts] -- the collector of the Conveyor dashboard (the
+# dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--older|--donewhen|--shot|--excerpts|--bench] -- the collector of the Conveyor dashboard (the
 # strip-down to Conveyor). It writes one file, data.js in dashboard/ of the state folder (`conveyor.sh state-dir`)
 # (`window.DASH = {...};`), which the static page in .claude/dashboard/ reads, through the page server's /events as it
 # changes, or every 15 s when that stream is not open. No model call, ever.
@@ -157,10 +157,12 @@
 #           settings and the test steps' totals; null from a snapshot without it), and, for the page's actions, testActions (the snapshot's limit,
 #           actions, each with its text, and allowed, the pack's models by CLI), control (the snapshot's control record: its tests is the Tests model), clis
 #           (the CLIs installed on the host, as the judge's role offers them), flaky (the snapshot's flaky cases) and
-#           testMap (the snapshot's: the Test map part, conveyor/lib/testmap.sh mapboard()), drift (the snapshot's:
-#           the latest drift watch, conveyor/bench/drift.sh, for the Benchmarks part) and bench (the snapshot's: the
-#           Benchmarks part, the SWE-bench runs' board.json, conveyor/bench/swe.sh swe_board());
-#           each null from a snapshot without it.
+#           testMap (the snapshot's: the Test map part, conveyor/lib/testmap.sh mapboard()); each null from a snapshot
+#           without it.
+#   bench   the Benchmarks tab: each record's (repo null when none is steered; repos and others as the Tests part's)
+#           bench (the snapshot's: the run in progress and the versions, the SWE-bench runs' board.json,
+#           conveyor/bench/swe.sh swe_board()) and drift (the snapshot's: the latest drift watch, conveyor/bench/drift.sh);
+#           each null from a snapshot without it. The runs and their results are read when shown (--bench).
 #   metrics records (each record's measured totals, today and week) and cards (each card of the 7 days with
 #           its metrics: step timeline, seconds, tokens, dollars, findings; null from a snapshot without them), and
 #           compare (the 7 days side by side, {projects: a row a project, naming its repo; machine: the machine's}:
@@ -922,10 +924,17 @@ PANELS_JQ='
           | if (.failures | type) == "array" then .failures |= map(if type == "object" then tag($r) else . end) else . end
           | if (.optimize | type) == "array" then .optimize |= map(if type == "object" then tag($r) | shut($oi) else . end) else . end else . end) else . end),
         testActions: ((.snap.testActions | objects | {limit, actions, allowed}) // null), control: (.snap.control | objects // null), clis: ((.snap.modelSettings | objects | (.judge.clis // .reviewer.clis) | objects) // null),
-        flaky: (.snap.flaky | arrays // null), testMap: (.snap.testMap | objects // null), drift: (.snap.drift | objects // null),
-        bench: (.snap.bench | objects // null)};
+        flaky: (.snap.flaky | arrays // null), testMap: (.snap.testMap | objects // null)};
       {error: null, data: (([$R[] | select(.steered)][0] | if . == null then {repo: null} else testsOf end)
           + {repos: [$R[].repo], others: ([$R[] | select(.steered | not) | {key: .repo, value: testsOf}] | from_entries)})} end),
+   # The Benchmarks tab, of the same records (repo null when none is steered; repos and others as the Tests page'"'"'s):
+   # each record'"'"'s bench (its snapshot'"'"'s: the run in progress and the versions, conveyor/bench/swe.sh swe_board()) and
+   # drift (its snapshot'"'"'s latest drift watch, conveyor/bench/drift.sh). The runs and their results are read when the
+   # tab shows them (--bench).
+   bench: (if $R == null then {error: $cerr, data: null} else
+      def benchOf: {repo, bench: (.snap.bench | objects // null), drift: (.snap.drift | objects // null)};
+      {error: null, data: (([$R[] | select(.steered)][0] | if . == null then {repo: null} else benchOf end)
+          + {repos: [$R[].repo], others: ([$R[] | select(.steered | not) | {key: .repo, value: benchOf}] | from_entries)})} end),
    # What Conveyor measured: the totals of each record for today, the 7 days and the 7 before them, each of the 7
    # days and the slots of today by hour, and every card of the 7 days with its own measurements; cards null when the
    # snapshot of a record is from before it carried them (and prev, days and slots null from one before those).
@@ -1188,6 +1197,22 @@ excerpts() {
     || { echo "dashboard: $host gave no reviewed lines" >&2; return 1; }
 }
 
+# --bench <repo> [<run>]: the Benchmarks tab's history (every run with each arm's figures, and the arms) or, with a
+# run's id, that run's tasks by arm, which the snapshot leaves out: the record's `conveyor.sh bench swe history` or
+# `bench swe show <run>`, in one command to the host (hostof, onhost). The page server gives it at GET /bench, which
+# the tab asks for when it is shown and when a run is opened; never kept.
+bench() {
+  local host main engine target recs why remote cmd
+  hostof || { echo "dashboard: no benchmarks: $why" >&2; return 1; }
+  cmd=$(jq -er --arg r "$1" --arg run "$2" --arg e "$engine/conveyor/conveyor.sh" 'first(.[] | select(.repo == $r) | .main | @sh)
+      | "CONVEYOR_MAIN=\(.) bash \($e | @sh) bench swe \(if $run == "" then "history" else "show \($run | @sh)" end)"' <<<"$recs") \
+    || { echo "dashboard: no benchmarks: the host file names no record $1" >&2; return 1; }
+  RUN=$(mktemp -d "$OUT/.run.XXXXXX") || return 1
+  onhost "$cmd" > "$RUN/bench" 2>"$RUN/err-bench" \
+    || { echo "dashboard: $host gave no benchmarks: $(tail -n 1 "$RUN/err-bench" | tr -d '\r' | cut -c1-200)" >&2; return 1; }
+  jq -ce 'objects' "$RUN/bench" 2>/dev/null || { echo "dashboard: $host gave no benchmarks" >&2; return 1; }
+}
+
 # view_files -- the page's files, relative to .claude/dashboard: the page, its core, its tab icon and one file per panel.
 view_files() { (cd "$VIEW_SRC" && find . -type f \( -name '*.html' -o -name '*.css' -o -name '*.js' -o -name '*.svg' \) | sed 's|^\./||' | LC_ALL=C sort); }
 # copy_view -- copy each page file from the primary checkout into $OUT, skipping one that is already the same. Each
@@ -1430,6 +1455,9 @@ case "${1:-}" in
              history || exit 1 ;;
   --work) mkdir -p "$OUT" || exit 1
           work || exit 1 ;;
+  --bench) [ $# = 2 ] || [ $# = 3 ] || { echo "usage: dashboard.sh --bench <repo> [<run>]" >&2; exit 2; }
+           mkdir -p "$OUT" || exit 1
+           bench "$2" "${3:-}" || exit 1 ;;
   --older) [ $# = 3 ] || { echo "usage: dashboard.sh --older <repo> <test file>" >&2; exit 2; }
            mkdir -p "$OUT" || exit 1
            older "$2" "$3" || exit 1 ;;
@@ -1445,5 +1473,5 @@ case "${1:-}" in
   --check) check || exit 1 ;;
   "") mkdir -p "$OUT" || exit 1
       render || { echo "dashboard: collection FAILED; data.js keeps the last snapshot" >&2; exit 1; } ;;
-  *) echo "usage: dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--older <repo> <test file>|--donewhen <repo> <card id>|--shot <repo> <card> <file>|--excerpts <repo> <card id>|--check]" >&2; exit 2 ;;
+  *) echo "usage: dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--older <repo> <test file>|--donewhen <repo> <card id>|--shot <repo> <card> <file>|--excerpts <repo> <card id>|--bench <repo> [<run>]|--check]" >&2; exit 2 ;;
 esac

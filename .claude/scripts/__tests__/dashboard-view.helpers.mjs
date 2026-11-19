@@ -113,7 +113,9 @@ export const CONTROL_SIZES = { machine: 'full', 'board-loop': 'full', 'board-pus
 export const RULES_SIZES = { rules: 'wide', 'rules-produce': 'small', 'rules-prices': 'full', 'rules-held': 'full', 'rules-issues': 'full' };
 export const BELT3D_IDS = ['belt3d'];
 export const TESTS_IDS = ['tests'];
-export const TAB = (id) => (CONTROL_IDS.includes(id) ? 'control' : RULES_IDS.includes(id) ? 'rules' : BELT3D_IDS.includes(id) ? 'belt3d' : TESTS_IDS.includes(id) ? 'tests' : 'overview');
+export const BENCH_IDS = ['bench'];
+export const TAB = (id) => (CONTROL_IDS.includes(id) ? 'control' : RULES_IDS.includes(id) ? 'rules' : BELT3D_IDS.includes(id) ? 'belt3d' : TESTS_IDS.includes(id) ? 'tests'
+  : BENCH_IDS.includes(id) ? 'bench' : 'overview');
 export const OVERVIEW = LIST.filter((id) => TAB(id) === 'overview');
 
 // One page in jsdom. `store` is what an earlier visit left in localStorage; `list` and `extra` stand in for
@@ -182,6 +184,14 @@ export function boot({ store = {}, reducedMotion = false, list = LIST, extra = '
       assert.equal(opt, undefined, 'the reviewed lines are read with a plain GET');
       (w.excerptsAsks = w.excerptsAsks || []).push(url);
       return Promise.resolve(w.excerptsReply || { ok: false, status: 502, text: () => Promise.resolve('no reviewed lines') });
+    }
+    // The Benchmarks tab's history and a run's tasks (GET bench?repo=…[&run=…]): w.benchBody(url) is the server's JSON
+    // for that address (null: it answers 502 with w.benchError); w.benchAsks lists the addresses asked.
+    if (/^bench\?/.test(url)) {
+      assert.equal(opt, undefined, 'the benchmarks are read with a plain GET');
+      (w.benchAsks = w.benchAsks || []).push(url);
+      const b = w.benchBody ? w.benchBody(url) : null;
+      return Promise.resolve(b ? { ok: true, status: 200, json: () => Promise.resolve(b) } : { ok: false, status: 502, text: () => Promise.resolve(w.benchError || 'no benchmarks') });
     }
     assert.ok(['answer', 'restart', 'control', 'machine', 'time'].includes(url), `the page writes to nothing but its own answer, restart, control, machine and time addresses: ${url}`);
     assert.equal(opt.method, 'POST');
@@ -491,6 +501,8 @@ export function full(now = T0) {
       } },
       // The Tests page: the same record's test files and test settings.
       tests: { error: null, data: { repo: 'sample', tests: clone(TESTS) } },
+      // The Benchmarks tab: the same record's run in progress (none) and versions; its runs are read when shown (GET bench).
+      bench: { error: null, data: { repo: 'sample', bench: { live: null, presets: [1, 5, 20, 50], max: 500, versions: [{ name: 'main', commit: 'b'.repeat(40) }, { name: 'v1.2.0', commit: 'a'.repeat(40) }] }, drift: null } },
       metrics: { error: null, data: {
         records: [{ repo: 'sample', today: METRIC_TOTALS, week: { ...METRIC_TOTALS, cards: 9, landed: 7, blocked: 2 }, prev: METRIC_PREV, days: clone(METRIC_DAYS), slots: clone(METRIC_SLOTS) }],
         cards: [
@@ -507,6 +519,7 @@ export const EMPTY = {
   board: { repo: null },
   rules: { repo: null },
   tests: { repo: null },
+  bench: { repo: null },
   needs: { cards: { waiting: [], blocked: [] }, cardsError: null, decisions: [], decisionsError: null, kinds: KINDS, entries: {} },
   belt: { cap: 3, cards: [] },
   belt3d: { repos: ['sample'], byRepo: {}, belt: [], queue: { next: [], held: [], waiting: [] }, needs: [], landed: [] },
@@ -548,6 +561,8 @@ export const SAYS = {
     empty: 'The floor is empty', failed: 'The Board could not read Belt 3D' },
   tests: { title: 'Tests', count: '', data: ['Timed files', 'conveyor/tests/merge.test.sh', 'Slower than usual', 'Test limits', 'Files slow on purpose'],
     empty: 'No tests to show', failed: 'The Board could not read the tests' },
+  bench: { title: 'Benchmarks', count: '', data: ['Overview', 'Start a run', 'Newest run', 'History', 'Arms', 'Drift watch'],
+    empty: 'No benchmarks to show', failed: 'The Board could not read the benchmarks' },
   queue: { title: 'Queue', count: '2', data: ['Next up', 'P1', 'Follow-up', 'Later', 'Retried', 'Holds keep 2 issues back: see Held.','Built, waiting for your PROD deploy (2):', 'Stack split', '2 d 0 h waiting', 'No label time'], empty: 'The queue is empty', failed: 'The Board could not read the queue' },
   landed: { title: 'Landed today', count: '2', data: ['Landed one', '2 reviews', 'started 10:30 AM', '30 min overall', 'landed 11:00 AM', '$2.50', 'Landed and pushed', 'follow-ups #31', 'Before deploy: Run migration 0004. Without it: the new column is missing. At db/0004.sql:1', 'Fixed before', 'Already fixed', '2 cards, $3.00 at list prices'], empty: 'No card landed today', failed: 'The Board could not read the landed cards' },
   release: { title: 'Release', count: '', data: ['sample', 'Newest release v1.2.0', '2 changes since', 'Notes missing', 'docs/releases/1.3.0.md on main: missing: Draft notes writes them',
@@ -748,4 +763,48 @@ export const TA = (() => {
     results,
     resultRow: (w, id) => Array.from(results(w).querySelectorAll('.tests-result-row')).find((r) => r.dataset.id === id),
     reply: (text) => ({ ok: true, status: 200, text: () => Promise.resolve(text) }) };
+})();
+
+// The Benchmarks tab (#326; dashboard-view.bench and bench-pages). BH.hist() is what GET bench gives for the history:
+// the newest run (5 tasks: Conveyor 1.5.0 4 of 5, Claude alone 2, Codex alone 2 with 1 not run) and an older one of 20
+// tasks stopped at the usage guard; the arms (Conveyor, Claude alone and Codex alone ready, Superpowers failing its
+// preflight, Chisle not checked, OpenHands not offered); the places of each results key's tasks. BH.run() is the
+// newest run's tasks. BH.open(w) boots the tab with both served; w.downloads lists what the page downloads.
+export const BH = (() => {
+  const EB = 'b'.repeat(40), EA = 'a'.repeat(40), SET = { dataset: 'princeton-nlp/SWE-bench_Verified', revision: 'c104f840cc67f8b6eec6f759ebc8b2693d585d4a' };
+  const C = { arm: 'conveyor', key: EB, label: 'Conveyor', kind: 'conveyor', engine: EB, version: 'v1.5.0', model: null };
+  const S = { arm: 'solo', key: 'solo-claude-opus-5-5', label: 'Claude alone', kind: 'agent', engine: null, version: null, model: 'claude-opus-5-5' };
+  const X = { arm: 'codex-sol', key: 'codex-sol', label: 'Codex alone (gpt-6.2-sol)', kind: 'agent', engine: null, version: null, model: 'gpt-6.2-sol' };
+  const NEW = 'r20261109T150000-11', OLD = 'r20261108T162000-7';
+  const TASKS = ['astropy__astropy-12907', 'django__django-15347', 'pydata__xarray-4094', 'sympy__sympy-21614', 'sphinx-doc__sphinx-8595'];
+  const hist = () => ({ set: SET, guard: { conveyor: false, agent: false },
+    runs: [{ id: NEW, state: 'done', started: iso(T0 - 7200000), ended: iso(T0 - 3600000), n: 5, set: SET, arms: ['conveyor', 'solo', 'codex-sol'], current: null,
+      cols: [{ ...C, done: 5, resolved: 4, notRun: 0, sessions: 13, tokens: 15300000, minutes: 102 }, { ...S, done: 5, resolved: 2, notRun: 0, sessions: 5, tokens: 5500000, minutes: 40 },
+        { ...X, done: 5, resolved: 2, notRun: 1, sessions: 4, tokens: 3600000, minutes: 28 }] },
+    { id: OLD, state: 'guard', started: iso(T0 - 90000000), ended: iso(T0 - 80000000), n: 20, set: SET, arms: ['conveyor'], current: null,
+      cols: [{ ...C, key: EA, engine: EA, version: 'v1.4.0', done: 12, resolved: 8, notRun: 0, sessions: 30, tokens: 40000000, minutes: 260 }] }],
+    arms: [{ name: 'conveyor', label: 'Conveyor', kind: 'conveyor', state: 'ready', why: null, guard: 'conveyor', perTask: { usual: 2.5, worst: 8, minutes: 20, session: 1.25 }, key: null, keyPrefix: '' },
+      { name: 'solo', label: 'Claude alone', kind: 'agent', state: 'ready', why: null, guard: 'agent', perTask: { usual: 1, worst: 1, minutes: 8, session: 2 }, key: 'solo-claude-opus-5-5', keyPrefix: null },
+      { name: 'codex-sol', label: 'Codex alone (gpt-6.2-sol)', kind: 'agent', state: 'ready', why: null, guard: null, perTask: { usual: 1, worst: 1, minutes: 6 }, key: 'codex-sol', keyPrefix: null },
+      { name: 'superpowers', label: 'Claude with Superpowers', kind: 'agent', state: 'failed', why: 'it did not fire: its output shows no use of its method', guard: 'agent', perTask: { usual: 1, worst: 1, minutes: 8 }, key: 'superpowers-claude-opus-5-5', keyPrefix: null },
+      { name: 'chisle', label: 'Claude with Chisle', kind: 'agent', state: 'unchecked', why: null, guard: 'agent', perTask: { usual: 4, worst: 4, minutes: 8 }, key: 'chisle', keyPrefix: null },
+      { name: 'openhands', label: 'OpenHands', kind: 'agent', state: 'not offered', why: 'it needs an API key', guard: null, perTask: null, key: null, keyPrefix: null }],
+    keys: [{ key: EA, at: [0, 1, 2] }, { key: 'solo-claude-opus-5-5', at: [0, 1, 2, 3, 4] }] });
+  const cell = (arm, r, o = {}) => ({ arm, result: r, reused: false, resolved: r === 'resolved', fired: true, why: null, sessions: 1, tokens: 1000000, minutes: 8, steps: [], patch: [{ path: 'a.py', added: 3, removed: 1 }], ...o });
+  const STEPS = [{ step: 'build', result: 'ok', tokens: { claude: 3100000, codex: 0 } }, { step: 'review', result: 'NO-GO', tail: '[P1] query.py:9 combine() drops the negation when the right side is empty' },
+    { step: 'fix', result: 'ok', tokens: { claude: 900000, codex: 0 } }, { step: 'review', result: 'GO' }, { step: 'test', result: 'fail' }, { step: 'fix', result: 'ok', tokens: { claude: 400000, codex: 0 } }, { step: 'landed', result: 'ok' }];
+  const run = () => ({ run: hist().runs[0], tasks: TASKS.map((id, i) => ({ id, title: i === 1 ? 'Q objects lose their negation when combined with an empty Q' : null,
+    cells: [cell('conveyor', i === 4 ? 'unresolved' : 'resolved', { sessions: 3, minutes: 20, tokens: 4000000, steps: i === 1 ? STEPS : [], patch: i === 1 ? [{ path: 'django/db/models/sql/query.py', added: 30, removed: 5 }, { path: 'tests/queries/test_q.py', added: 8, removed: 1 }] : [] }),
+      cell('solo', [0, 2].includes(i) ? 'resolved' : 'unresolved'),
+      i === 4 ? { arm: 'codex-sol', result: 'not run: its Docker image could not be fetched or built', reused: false } : cell('codex-sol', i < 2 ? 'resolved' : 'unresolved')] })) });
+  function open(w, { body } = {}) {
+    w.benchBody = body || ((url) => (/&run=/.test(url) ? run() : hist()));
+    w.downloads = [];
+    w.HTMLAnchorElement.prototype.click = function () { w.downloads.push({ name: this.download, href: this.href }); };
+    deliver(w, full());
+  }
+  const bp = (w) => panel(w, 'bench');
+  const heads = (w) => Array.from(bp(w).querySelectorAll('.bench-sec > .bench-head > .board-head'), (x) => x.textContent);
+  const pages = (w) => Array.from(bp(w).querySelectorAll('.bench-pnav button'), (b) => [b.textContent, b.getAttribute('aria-current')]);
+  return { EA, EB, NEW, OLD, TASKS, hist, run, open, bp, heads, pages, reply: TA.reply };
 })();

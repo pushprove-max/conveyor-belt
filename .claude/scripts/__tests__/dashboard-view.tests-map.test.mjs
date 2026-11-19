@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // The Tests page's Test map part (#178): the map's state at the top of the page, Build the test map with its tool and
-// the last whole-suite run's time, a bar while the build runs, Stop, and the result in place; and its Benchmarks part
-// (#237), the latest drift watch. Shared setup:
+// the last whole-suite run's time, a bar while the build runs, Stop, and the result in place; and the one line that
+// says the Benchmarks moved to their own tab (#326). Shared setup:
 // dashboard-view.helpers.mjs (TA.snap()).
 import assert from 'node:assert/strict';
-import { boot, deliver, next, settle, act, cases, T0, TA } from './dashboard-view.helpers.mjs';
+import { boot, deliver, next, settle, act, cases, order, T0, TA } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const { snap, tp, reply } = TA;
@@ -92,19 +92,15 @@ test('Test map: a refused Build says why in the part', async () => {
   assert.ok(act(part(w), 'map-build'), 'Build is still offered');
 });
 
-// The Benchmarks part (#237) is on the same page, so it shares this file's boot. Bug it guards: the Board did not show
-// the latest drift watch, or showed a group of 2 cards as if it meant something; a snapshot with no drift watch shows
-// no part.
-test('Benchmarks: the latest drift watch shows both groups with their cards, and a group of 2 is called too small', () => {
+// Bug it guards (#326): the Benchmarks were a small part of the Tests page; they moved to a tab of their own, and the
+// Tests page keeps one line that opens it.
+test('Benchmarks moved: the Tests page says so in one line, and its link opens the Benchmarks tab', () => {
   const w = boot({ tab: 'tests' });
-  const g = (engine, cards, x) => ({ engine, cards, landed: cards, blocked: 0, tokens: x, minutes: 14, reviews: 1, fixes: 0.2, waits: null });
-  const d = snap();
-  d.panels.tests.data.drift = { before: g('aaaaaaaa1111', 5, 1320), after: g('bbbbbbbb2222', 2, 3000), small: ['after'] };
-  deliver(w, d);
-  const bench = tp(w).querySelector('.tests-bench');
-  assert.equal(bench.querySelector('.tests-drift').textContent, 'Drift watch, engine aaaaaaaa (5 cards) against bbbbbbbb (2 cards): tokens a card 1320 to 3000, '
-    + 'minutes a card 14 to 14, reviews to land 1 to 1, fix rounds a card 0.2 to 0.2, blocked 0 to 0, minutes waited a card - to -.');
-  assert.deepEqual(Array.from(bench.querySelectorAll('.warn-note'), (p) => p.textContent), ['The after group holds 2 cards: too small to mean anything (fewer than 5 cards).']);
-  next(w, snap());
-  assert.equal(tp(w).querySelector('.tests-bench'), null, 'no drift watch, no part');
+  deliver(w, snap());
+  const line = tp(w).querySelector('.tests-bench-moved');
+  assert.equal(line.textContent, 'Benchmarks moved to their own tab. Open Benchmarks');
+  assert.equal(tp(w).querySelector('[data-act^="bench-"]'), null, 'no Benchmarks control is left on the Tests page');
+  act(line, 'to-bench').click();
+  assert.deepEqual(order(w), ['bench']);
+  assert.equal(new w.URL(w.location.href).searchParams.get('tab'), 'bench');
 });

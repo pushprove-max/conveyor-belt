@@ -774,6 +774,65 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .tests-selbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: flex; flex-direction: column; gap: var(--sp-1); max-height: 70vh; overflow: auto;
   padding: var(--sp-2) var(--sp-3); background: var(--surface); border-top: 1px solid var(--border); box-shadow: var(--shadow); }
 .tests-has-selbar { padding-bottom: 10rem; }
+/* The Benchmarks tab (issue 326, panels/bench.js): its pages, the bars of resolved tasks with the noise band, the tasks by
+   arm, the arms to pick and the infographic. */
+.bench { display: flex; flex-direction: column; gap: var(--sp-4); }
+.bench-has-selbar { padding-bottom: 7rem; }
+.bench-pnav { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.bench-pnav [aria-current="page"] { background: var(--accent); color: var(--on-accent); }
+.bench-sec { display: flex; flex-direction: column; gap: var(--sp-2); }
+.bench-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-3); }
+.bench-head .board-head { margin-bottom: 0; }
+.bench-count { font-size: var(--fs-xs); color: var(--muted); }
+.bench-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); margin-left: auto; }
+.bench-headline { font-size: var(--fs-lg); font-weight: 700; }
+.bench-headline .board-from { font-weight: 400; }
+.bench .ok, .bench .yes { color: var(--ok); }
+.bench .bad, .bench .no { color: var(--bad); }
+.bench .nr, .bench .muted { color: var(--muted); }
+.bench .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--fs-sm); }
+.bench .r { text-align: right; }
+.bench .btn-sm { min-height: 28px; padding: 2px var(--sp-2); font-size: var(--fs-sm); }
+.bench .btn-link, .tests-bench-moved .btn-link { padding: 0; min-height: 0; border: 0; background: none; color: var(--accent); text-decoration: underline; cursor: pointer; }
+.bench-bars { display: flex; flex-direction: column; gap: var(--sp-2); }
+.bench-bar { display: grid; grid-template-columns: minmax(10rem, 16rem) minmax(8rem, 1fr) 6rem; align-items: center; gap: var(--sp-3); }
+.bench-name { font-weight: 600; }
+.bench-sub { display: block; font-size: var(--fs-xs); font-weight: 400; color: var(--muted); }
+.bench-track { position: relative; height: 22px; border-radius: 4px; background: var(--surface-2); }
+.bench-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; }
+.bench-noise { position: absolute; top: -3px; bottom: -3px; border-left: 2px dashed var(--muted); border-right: 2px dashed var(--muted); }
+.bench-num { text-align: right; }
+.bench-s1 { background: var(--series-1); }
+.bench-s2 { background: var(--series-2); }
+.bench-s3 { background: var(--series-3); }
+.bench-s4 { background: var(--series-4); }
+.bench-s5 { background: var(--series-5); }
+.bench-legend { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); list-style: none; font-size: var(--fs-xs); color: var(--muted); }
+.bench-sw { display: inline-block; width: 12px; height: 12px; margin-right: var(--sp-1); border-radius: 3px; vertical-align: -2px; }
+.bench-sw-noise { width: 18px; height: 0; border-top: 2px dashed var(--muted); border-radius: 0; }
+.bench-care, .bench-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); }
+.bench-care .chip { white-space: normal; }
+.bench-table tr.picked td, .bench-mat tr.open td { background: var(--surface-2); }
+.bench-mat .bench-cell span:first-child { font-weight: 700; }
+.bench-set { font-weight: 650; }
+.bench-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: var(--sp-3); }
+.bench-card { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+.bench-card h3 { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); font-size: var(--fs-md); }
+.bench-reading { background: var(--surface-2); }
+.bench-steps { display: flex; flex-direction: column; gap: 2px; padding-left: var(--sp-4); font-size: var(--fs-sm); }
+.bench-seg { display: inline-flex; }
+.bench-seg .btn { border-radius: 0; }
+.bench-seg .btn[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.bench-n { flex: none; width: 7rem; }
+.bench-armgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: var(--sp-2); }
+.bench-arm { display: grid; grid-template-columns: auto 1fr; gap: 2px var(--sp-2); align-items: start; padding: var(--sp-2); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.bench-arm.off { opacity: .7; }
+.bench-arm .bench-cost { grid-column: 2; font-size: var(--fs-xs); color: var(--muted); }
+.info-note { margin-bottom: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); background: var(--info-bg); color: var(--info); font-size: var(--fs-sm); }
+.bench-selbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-2) var(--sp-3); background: var(--surface); border-top: 1px solid var(--border); box-shadow: var(--shadow); }
+.bench-ig { width: 100%; height: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.bench-title { min-width: 16rem; }
 .tests-selbar-answers { display: flex; flex-direction: column; gap: 2px; list-style: none; font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .tests-refused { color: var(--bad); }
 /* An opened row's More menu opens on a line of its own, under the actions. */
@@ -1188,6 +1247,8 @@ html.b3-filling, html.b3-filling body { overflow: hidden; }
    this browser, as on a wider window. */
 @media (max-width: 700px) {
   .grid { grid-template-columns: minmax(0, 1fr); padding: var(--sp-3); gap: var(--sp-3); }
+  .bench-bar { grid-template-columns: 1fr 5rem; }
+  .bench-bar .bench-track { grid-column: 1 / -1; grid-row: 2; }
   .panel, .panel[data-size="wide"], .panel[data-size="full"] { grid-column: 1 / -1; }
   .drag { display: none; }
   .step-time { display: none; }

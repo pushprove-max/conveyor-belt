@@ -36,6 +36,8 @@ which data.js does not carry (dashboard.sh --donewhen): the Board asks for it wh
 owner's yes kept (dashboard.sh --shot): Needs you shows it beside the card's Approve.
 `GET /excerpts?repo=<repo>&card=<card id>`, behind the login too, gives the lines a card's review findings cite, as each
 review kept them from the tree it read (dashboard.sh --excerpts): the Board asks for it when a finding's place is opened.
+`GET /bench?repo=<repo>[&run=<run id>]`, behind the login too, gives the Benchmarks tab's history of the SWE-bench
+runs, or one run's tasks by arm, which data.js does not carry (dashboard.sh --bench): the tab asks for it when shown.
 
 The login: users in dashboard-auth.json beside the ruling log (env CONVEYOR_DASHBOARD_AUTH), each with a name, a
 role (admin or member), an scrypt hash, when it was created and last logged in, its MFA state and its trusted
@@ -119,6 +121,7 @@ SHOT_LIMIT = 90        # GET /shot: dashboard.sh --shot's one ssh command (its S
 # GET /shot: a screenshot a card kept, named by its content (keepshots(), lib/push.sh); the card is a CARD id.
 SHOT = re.compile(r'([0-9a-f]{40,64})\.(png|jpg|gif|webp)')
 SHOT_TYPES = {'png': 'image/png', 'jpg': 'image/jpeg', 'gif': 'image/gif', 'webp': 'image/webp'}
+BENCH_LIMIT = 90       # GET /bench: dashboard.sh --bench's one ssh command (its SSH_LIMIT, 60 s) and its check
 ANSWER_KEYS = {'id', 'answer', 'askedAt', 'repo'}
 DECISION_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$')
 ASKED_AT = re.compile(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$')
@@ -197,8 +200,9 @@ SETUP_PAGE = b'''<!doctype html><meta charset=utf-8><title>Conveyor Board: set y
 # or prices (the Rules tab's Model prices: one model's price set or cleared, a model added or removed, its display name
 # or an alias: `conveyor.sh prices`),
 # or testmap (the Tests page's Build the test map and its Stop: `conveyor.sh testmap build | stop`; an admin's alone),
-# or bench (the Tests page's Benchmarks: Start, Stop, List versions and Compare: `conveyor.sh bench swe <n> [--solo |
-# --engine <version>] | stop | versions | diff <version> <version>`),
+# or bench (the Benchmarks tab: Start, Stop, List versions, an arm's preflight and Compare: `conveyor.sh bench swe <n>
+# [--solo | [--arm <arm>]... [--engine <version>]] | stop | versions | arms check <arm>... | diff <A> <B> [--json]`; an
+# admin's alone),
 # or the Tests page's actions: testaction (`conveyor.sh testaction`: judge, explain or run one file, stop one), tests
 # (its seat), mutate (Mutation check: `conveyor.sh mutate ask <file>...`, one ask for a list of files), testrules (Auto-file: `conveyor.sh testrules on|off|guard|set`), flaky-off (Keep a case off: `conveyor.sh
 # flaky off`, which files no issue), test-close (an issue closed with a comment) and test-issue (`conveyor.sh testissue`: an issue filed about a file with the title and body sent,
@@ -239,6 +243,9 @@ BENCH_N = re.compile(r'[1-9][0-9]{0,2}')
 # One side of a Compare, as `bench swe diff` takes it: a version, or a column's results key (an arm's name, solo-<model>,
 # <arm>-<engine commit>), so two arms on one engine commit are each their own side; never one that starts with -.
 BENCH_SIDE = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,119}')
+BENCH_ARM = re.compile(r'[a-z0-9][a-z0-9-]{0,63}')  # an arm's name, as bench swe's swe_arm takes it
+BENCH_ARMS_MAX = 20  # the arms one Start or one preflight check names
+BENCH_RUN = re.compile(r'r[0-9]{8}T[0-9]{6}-[0-9]{1,10}')  # a run's id, as bench swe show takes it (GET /bench)
 # every other action: 30 s. start outlasts conveyor.sh's 60 s `timeout 60 gh issue list` (control start), so the
 # panel gets the record and not a 504 while GitHub is slow; raise it with that timeout.
 DECLINED_ID = re.compile(r'd[0-9a-f]{12}')  # a line of the declined list, as conveyor.sh's declined() names it
@@ -445,10 +452,21 @@ def control_ok(body):
             or (n == 2 and v[0] == 'stop' and RUN_ID.fullmatch(v[1]) is not None)
     if a == 'testmap':  # the Tests page's Build the test map, or its Stop
         return v in (['build'], ['stop'])
-    if a == 'bench':  # the Tests page's Benchmarks: Start (n, then --solo or --engine <version>), Stop, List versions, Compare (two versions or results keys)
-        return v in (['stop'], ['versions']) or (n == 3 and v[0] == 'diff' and all(BENCH_SIDE.fullmatch(x) for x in v[1:])) or (
-            2 <= n <= 4 and v[0] == 'run' and BENCH_N.fullmatch(v[1]) is not None and int(v[1]) <= 500
-            and (n == 2 or v[2:] == ['--solo'] or (n == 4 and v[2] == '--engine' and BENCH_ENGINE.fullmatch(v[3]) is not None)))
+    if a == 'bench':  # the Benchmarks tab: Start (n, then --solo, or arms and a version), Stop, List versions, an arm's preflight, Compare (two versions or results keys)
+        if v in (['stop'], ['versions']):
+            return True
+        if v[:1] == ['diff']:
+            return n in (3, 4) and all(BENCH_SIDE.fullmatch(x) for x in v[1:3]) and v[3:] in ([], ['--json'])
+        if v[:2] == ['arms', 'check']:
+            return 3 <= n <= 2 + BENCH_ARMS_MAX and all(BENCH_ARM.fullmatch(x) for x in v[2:])
+        if not (n >= 2 and v[0] == 'run' and BENCH_N.fullmatch(v[1]) is not None and int(v[1]) <= 500):
+            return False
+        rest, arms = v[2:], 0
+        if rest == ['--solo']:
+            return True
+        while rest[:1] == ['--arm'] and len(rest) >= 2 and BENCH_ARM.fullmatch(rest[1]) is not None:
+            rest, arms = rest[2:], arms + 1
+        return arms <= BENCH_ARMS_MAX and (rest == [] or (len(rest) == 2 and rest[0] == '--engine' and BENCH_ENGINE.fullmatch(rest[1]) is not None))
     if a == 'mutate':  # the Tests page's Mutation check: one test file or a list of them, to the front of the idle queue
         return 1 <= n <= TEST_FILES_MAX and all(TEST_FILE.fullmatch(x) for x in v)
     if a == 'testrules':  # the Tests page's Auto-file: the switch, a guard, or one setting of a rule
@@ -641,14 +659,16 @@ def control_script(action, args, main, today, record=None, user=None):
         # The record's pack's auto.standing: one kind on or off (conveyor.sh auto standing, which checks it).
         return '%s auto standing %s %s' % (conv, q(args[0]), q(args[1]))
     if action == 'bench':
-        if args[0] == 'run':
-            # A run takes hours: it starts on the host and goes on after the answer. One the engine refuses at once (a
-            # run already going, the usage guard reached, a version it cannot take) answers its refusal on stderr, the
-            # stream the handler reads when a script fails; one that ends well at once (all its results saved before)
-            # answers its summary on stdout, the stream the handler reads when a script succeeds.
+        if args[0] == 'run' or args[:2] == ['arms', 'check']:
+            # A run takes hours, and an arm's preflight minutes: it starts on the host and goes on after the answer. One
+            # the engine refuses at once (a run already going, the usage guard reached, a version it cannot take)
+            # answers its refusal on stderr, the stream the handler reads when a script fails; one that ends well at
+            # once (all its results saved before) answers its summary on stdout, the stream the handler reads when a
+            # script succeeds.
+            what, rest = ('the SWE-bench run', args[1:]) if args[0] == 'run' else ("the arms' preflights", args)
             return ('l=$(mktemp) || exit 1; %s bench swe %s > "$l" 2>&1 < /dev/null & p=$!; sleep 3; '
-                    'if kill -0 "$p" 2>/dev/null; then rm -f "$l"; echo "conveyor: the SWE-bench run started"; '
-                    'else wait "$p"; r=$?; if [ "$r" = 0 ]; then cat "$l"; else cat "$l" >&2; fi; rm -f "$l"; exit "$r"; fi') % (conv, ' '.join(q(x) for x in args[1:]))
+                    'if kill -0 "$p" 2>/dev/null; then rm -f "$l"; echo "conveyor: %s started"; '
+                    'else wait "$p"; r=$?; if [ "$r" = 0 ]; then cat "$l"; else cat "$l" >&2; fi; rm -f "$l"; exit "$r"; fi') % (conv, ' '.join(q(x) for x in rest), what)
         return '%s bench swe %s' % (conv, ' '.join(q(x) for x in args))
     if action in ('testaction', 'testrules', 'testmap'):
         # A test action starts on the host and returns its id (conveyor.sh testaction); a rule's change is the pack's;
@@ -1596,6 +1616,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # Record CPU time changes the pack's test command, which every card runs: an admin's.
         if not machine and body['action'] == 'test-settings' and body['args'][0] == 'cpu-time' and role_of(read_store(), user) != 'admin':
             return self.reply(403, 'only an admin changes the test command')
+        # A benchmark's run, preflight or Compare starts model sessions on the build machine: an admin's.
+        if not machine and body['action'] == 'bench' and role_of(read_store(), user) != 'admin':
+            return self.reply(403, 'only an admin runs benchmarks')
         # A Tests page action on a list of files is answered one result a file; only it may be over MAX_CONTROL_BODY.
         files = None if machine else test_files(body['action'], body['args'])
         if int(length) > MAX_CONTROL_BODY and not files:
@@ -1683,6 +1706,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.shot()
         if path == '/excerpts':
             return self.excerpts()
+        if path == '/bench':
+            return self.bench()
         if path in ('/me', '/users'):
             return self.users_get(path)
         if path == '/me/qr':
@@ -1996,6 +2021,33 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.send_header('Content-Type', SHOT_TYPES[m.group(2)])
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('Cache-Control', 'private, max-age=3600')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def bench(self):
+        """GET /bench?repo=<repo>[&run=<run id>]: the Benchmarks tab's history (every run with each arm's figures, and
+        the arms) or one run's tasks by arm, which data.js does not carry: dashboard.sh --bench's JSON, read afresh on
+        each ask (the tab asks when it is shown, and when a run is opened). 400 for a repo or run of another shape, 502
+        with the reason when it gives none."""
+        if not self.authed():
+            return self.reply(401, 'log in to see the benchmarks')
+        q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        repo, run_id = (q.get('repo') or [''])[0], (q.get('run') or [''])[0]
+        if not REPO.fullmatch(repo) or not (run_id == '' or BENCH_RUN.fullmatch(run_id)):
+            return self.reply(400, 'no repo or run of the shape the Board names')
+        try:
+            run = run_script(['bash', os.path.join(HERE, 'dashboard.sh'), '--bench', repo] + ([run_id] if run_id else []), BENCH_LIMIT)
+        except subprocess.TimeoutExpired:
+            return self.reply(502, 'the benchmarks did not come in %d s' % BENCH_LIMIT)
+        except OSError as e:
+            return self.reply(502, 'could not start dashboard.sh: %s' % e)
+        if run.returncode != 0:
+            return self.reply(502, (run.stderr.strip().splitlines() or ['no message'])[-1])
+        body = run.stdout.encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Cache-Control', 'no-store')
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)

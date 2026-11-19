@@ -15,8 +15,8 @@
   const SEEN_KEY = 'conveyor-board-seen';     // the "Needs you" items already shown once
   const TIME_SENT_KEY = 'conveyor-board-time-sent';  // set once this browser has sent a Time to the server
   // Overview first, with 3D View, the one to look at rather than act on, beside it (#87); then Control and Rules; then
-  // Tests, the test files and the test limits (#520).
-  const TABS = [['overview', 'Overview'], ['belt3d', '3D View'], ['control', 'Control'], ['rules', 'Rules'], ['tests', 'Tests']];
+  // Tests, the test files and the test limits (#520); then Benchmarks, the SWE-bench runs and their arms (#326).
+  const TABS = [['overview', 'Overview'], ['belt3d', '3D View'], ['control', 'Control'], ['rules', 'Rules'], ['tests', 'Tests'], ['bench', 'Benchmarks']];
   const SIZES = ['small', 'wide', 'full'];
   const DENSITIES = ['comfortable', 'compact'];
   const THEMES = ['system', 'light', 'dark'];
@@ -1206,7 +1206,7 @@
     layouts = Object.fromEntries(TABS.map(([t]) => [t, tidy(t, kept[t])]));
     prefs = prefsOf(s);
   }
-  // The Time goes to the server (time.json) for the plugin's pane on its machine; a send that fails leaves the pane on
+  // The Time goes to the server (time.json) for the plugin's Build pane on its machine; a send that fails leaves the pane on
   // its own `time` option or the Time sent before.
   function sendTime() {
     try { window.localStorage.setItem(TIME_SENT_KEY, '1'); } catch (e) { /* then a kept 24-hour is sent again on the next visit */ }

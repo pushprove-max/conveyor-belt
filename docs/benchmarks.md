@@ -164,8 +164,10 @@ version (of the `conveyor` arm), an arm such as `codex-sol`, a Conveyor arm at a
   model's reading;
 - the totals of each version, and the run-to-run noise for that number of tasks.
 
-On the Board, the Tests page has a Benchmarks part with the same run, results and Compare ([Tests
-page](board.md#tests-page)).
+On the Board, the [Benchmarks tab](board.md#benchmarks-tab) shows the same runs, results and Compare. It has an
+overview with the history of every run, a page for each run, Compare, Start a run with the expected sessions, minutes
+and cost of each arm, and an infographic of up to 6 runs. `conveyor.sh bench swe history` and `conveyor.sh bench swe show <run>`
+print what the tab reads, as JSON.
 
 ## What the numbers mean
 
@@ -234,5 +236,12 @@ The command shows the two groups side by side, before and after:
 A group of fewer than 5 cards is too small to mean anything, and the command says so under the table. A difference
 between the groups does not tell you its cause: the issues of the two groups are not the same issues.
 
-The Board shows the latest drift watch of a project in the Benchmarks part of the
-[Tests page](board.md#tests-page).
+With `--json`, each group also has `spread`: the standard deviation of each mean figure a card.
+
+The Board shows the latest drift watch of a project on the [Benchmarks tab](board.md#benchmarks-tab), folded under
+**Drift watch**. Each figure there shows one of these:
+
+- **Moved**: the two means are more than two standard errors apart.
+- **In its usual range**: the two means are closer than that.
+- **Too few cards**: a group has fewer than 5 cards, so no figure is judged.
+- **Not read**: a group has no figure or no spread for it.

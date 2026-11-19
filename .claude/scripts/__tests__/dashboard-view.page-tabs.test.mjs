@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // The dashboard page as a whole: the tabs and the head line's tiles. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { css, T0, STORE, iso, clone, CONTROL_IDS, RULES_IDS, RULES_SIZES, BELT3D_IDS, TESTS_IDS, OVERVIEW, boot, $, panel, state, order, kept, deliver, next, later, key, full, tabBtn, tiles, tile, fig, shownTiles, cases, setSize } from './dashboard-view.helpers.mjs';
+import { css, T0, STORE, iso, clone, CONTROL_IDS, RULES_IDS, RULES_SIZES, BELT3D_IDS, TESTS_IDS, BENCH_IDS, OVERVIEW, boot, $, panel, state, order, kept, deliver, next, later, key, full, tabBtn, tiles, tile, fig, shownTiles, cases, setSize } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 
@@ -49,6 +49,8 @@ test('the tab in view is in the address and survives a reload; Back goes to the 
   assert.deepEqual(order(boot({ tab: 'belt3d' })), BELT3D_IDS, '?tab=belt3d opens 3D View');
   // #520: the Tests page is a tab of its own, and a link to ?tab=tests opens it.
   assert.deepEqual(order(boot({ tab: 'tests' })), TESTS_IDS, '?tab=tests opens Tests');
+  // #326: Benchmarks is a tab of its own too.
+  assert.deepEqual(order(boot({ tab: 'bench' })), BENCH_IDS, '?tab=bench opens Benchmarks');
   // Back: the browser restores the address before, and the page follows it.
   w.history.replaceState(null, '', 'https://dash.test/index.html?tab=overview');
   w.dispatchEvent(new w.PopStateEvent('popstate'));
@@ -57,15 +59,16 @@ test('the tab in view is in the address and survives a reload; Back goes to the 
 });
 
 // Issue 408 (UX7): the Overview tab says the Needs you count ("Overview · 2"), so it is read from every tab.
-// #520: Tests, the fifth, after Rules.
+// #520: Tests, the fifth, after Rules. #326: Benchmarks, the sixth, after Tests (the approved plan put it on a tab of
+// its own; it was built as a small part of the Tests page).
 // #87: the 3D tab is named 3D View and sits next to Overview; this fails while it is named Belt 3D or comes after Rules.
-test('the tabs are Overview, 3D View, Control, Rules and Tests, reached by keyboard, saying which one is selected; Overview counts Needs you, Rules a paused loop', () => {
+test('the tabs are Overview, 3D View, Control, Rules, Tests and Benchmarks, reached by keyboard, saying which one is selected; Overview counts Needs you, Rules a paused loop', () => {
   const w = boot();
   deliver(w, full());
   const list = w.document.querySelector('#tabs [role="tablist"]');
   assert.ok(list);
   const words = (b) => [b.querySelector('.tab-name').textContent, b.querySelector('.tab-count').textContent].filter(Boolean).join(' ');
-  assert.deepEqual(Array.from(list.querySelectorAll('[role="tab"]'), (b) => [words(b), b.tabIndex, b.getAttribute('aria-controls')]), [['Overview · 2', 0, 'grid'], ['3D View', -1, 'grid'], ['Control', -1, 'grid'], ['Rules', -1, 'grid'], ['Tests', -1, 'grid']]);
+  assert.deepEqual(Array.from(list.querySelectorAll('[role="tab"]'), (b) => [words(b), b.tabIndex, b.getAttribute('aria-controls')]), [['Overview · 2', 0, 'grid'], ['3D View', -1, 'grid'], ['Control', -1, 'grid'], ['Rules', -1, 'grid'], ['Tests', -1, 'grid'], ['Benchmarks', -1, 'grid']]);
   assert.equal(fig(w, 'needs'), '2', 'the count is the Needs you tile\'s');
   assert.equal(tabBtn(w, 'overview').getAttribute('aria-label'), 'Overview: 2 things need attention');
   tabBtn(w, 'overview').focus();
@@ -85,10 +88,13 @@ test('the tabs are Overview, 3D View, Control, Rules and Tests, reached by keybo
   assert.equal(w.document.activeElement, tabBtn(w, 'tests'));
   assert.deepEqual(order(w), TESTS_IDS);
   key(w, tabBtn(w, 'tests'), 'ArrowRight');
+  assert.equal(w.document.activeElement, tabBtn(w, 'bench'));
+  assert.deepEqual(order(w), BENCH_IDS);
+  key(w, tabBtn(w, 'bench'), 'ArrowRight');
   assert.equal(w.document.activeElement, tabBtn(w, 'overview'), 'the arrows go round');
   key(w, tabBtn(w, 'overview'), 'End');
-  assert.equal(w.document.activeElement, tabBtn(w, 'tests'));
-  key(w, tabBtn(w, 'tests'), 'Home');
+  assert.equal(w.document.activeElement, tabBtn(w, 'bench'));
+  key(w, tabBtn(w, 'bench'), 'Home');
   assert.deepEqual(order(w), OVERVIEW);
   const none = full();
   none.panels.needs.data.cards.waiting = []; none.panels.needs.data.cards.blocked = [];

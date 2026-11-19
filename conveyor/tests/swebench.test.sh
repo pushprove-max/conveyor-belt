@@ -156,10 +156,11 @@ t_swepresets() {
   grep -q "Resolved 1 of 2 with engine main ($EB)" <<<"$out" || fail "the run did not end with its resolved count and engine commit: $out"
   out=$(loop bench swe 3 2>&1) && fail "an n past the task list was taken: $out"
   out=$(loop bench swe 501 2>&1); [ $? = 2 ] || fail "n 501 was not refused as a wrong argument: $out"
-  # The Board's part reads the presets, the last run, the results and the versions a run can pick from the snapshot.
+  # The Board's tab reads the presets, the last run and the versions a run can pick from the snapshot (the results it
+  # reads with bench swe history: t_swehistory).
   [ "$(jq -c .presets "$SRC/bench/swe.json")" = '[1,5,20,50]' ] \
-    && [ "$(loop snapshot --fresh | jq -c '[.bench.presets, .bench.live.state, (.bench.keys | length), (.bench.versions | map(.name))]')" = '[[1,5,20,50],"done",1,["main","v1.0.0"]]' ] \
-    || fail "the snapshot does not carry the Benchmarks part with its presets and versions: $(loop snapshot --fresh | jq -c .bench)"
+    && [ "$(loop snapshot --fresh | jq -c '[.bench.presets, .bench.live.state, (.bench.versions | map(.name))]')" = '[[1,5,20,50],"done",["main","v1.0.0"]]' ] \
+    || fail "the snapshot does not carry the Benchmarks tab's presets, last run and versions: $(loop snapshot --fresh | jq -c .bench)"
   # A run whose process was killed with no end written is not shown running for good.
   jq -c '.live.state = "running" | .live.pid = 2147483646' "$B/board.json" > "$B/b.new" && mv "$B/b.new" "$B/board.json"
   [ "$(loop snapshot --fresh | jq -r .bench.live.state)" = stopped ] || fail "a run whose process is gone is shown running"
@@ -369,6 +370,9 @@ t_swearms() {
     || fail "the two arms did not each build both tasks of the pinned order: $out"
   grep -q "^Resolved 2 of 2 with Stub a; not run: 0\.$" <<<"$out" && grep -q "^Resolved 1 of 2 with Stub b; not run: 0\.$" <<<"$out" \
     || fail "the run does not end with each arm's own resolved count: $out"
+  # Bug (#326): a run's line named its arms but not their results keys, so the Board could not read each arm's figures.
+  [ "$(tail -n 1 "$B/runs.jsonl" | jq -c '[(.cols | map([.arm, .key])), .set.revision == $rv]' --arg rv "$(jq -r .revision "$SRC/bench/swe.json")")" = '[[["stub-a","stub-a"],["stub-b","stub-b"]],true]' ] \
+    || fail "the run's line does not name each arm's results key and the task set: $(tail -n 1 "$B/runs.jsonl")"
   [ "$(cat "$B/results/stub-a"/*.json | jq -sc 'map([.task, .resolved, .arm, .tokens]) | sort')" = "$(jq -nc --arg a proj__a-1 --arg b proj__b-2 '[[$a, true, "stub-a", 7], [$b, true, "stub-a", 7]]')" ] \
     && [ "$(cat "$B/results/stub-b"/*.json | jq -sc 'map([.task, .resolved]) | sort')" = '[["proj__a-1",false],["proj__b-2",true]]' ] \
     || fail "the results are not kept per arm: $(cat "$B"/results/stub-*/*.json)"
@@ -399,6 +403,38 @@ t_swearmmodel() {
     && grep -q "^Stub f (m3): 1 of 1 resolved" <<<"$out" || fail "the results do not name each key's model once: $out"
   out=$(loop bench swe diff stub-a-m1 stub-a-m2 --json 2>&1) && [ "$(jq -c '[.a.version, .b.version]' <<<"$out")" = '["Stub a (m1)","Stub a (m2)"]' ] \
     || fail "diff does not name each key's model: $out"
+}
+
+# Bug (#326): the Board's Benchmarks tab had no history of the runs, no figures of each arm and no task of a run to
+# open; and the snapshot carried every run and result, past its size budget. history gives every run newest first (a
+# run whose process is gone shows stopped) with each arm's resolved, not run, sessions and tokens, and the arms with
+# their state; show gives one run's tasks in its order, each arm's result and patch; neither is in the snapshot.
+t_swehistory() {
+  swe; local p o
+  mkdir -p "$B/results/stub-a" "$B/results/stub-b" && jq -nc '{id: "proj__b-2", issue: "\nSecond line first\nmore"}, {id: "proj__a-1", issue: "First task"}' > "$B/tasks.$(jq -r .revision "$SRC/bench/swe.json").jsonl" \
+    && for p in stub-a/proj__a-1/true/1/7 stub-a/proj__b-2/true/2/5 stub-b/proj__a-1/false/1/3; do IFS=/ read -r a t r s k <<<"$p"
+      jq -nc --arg a "$a" --arg t "$t" --argjson r "$r" --argjson s "$s" --argjson k "$k" '{task: $t, arm: $a, key: $a, label: $a, resolved: $r, fired: true, sessions: $s, tokens: $k, minutes: 1, steps: []}' > "$B/results/$a/$t.json"; done \
+    && printf '%s\n' 'diff --git a/x.py b/x.py' '--- a/x.py' '+++ b/x.py' '@@ -1 +1 @@' '-bug' '+fixed' > "$B/results/stub-a/proj__a-1.patch" \
+    && jq -nc '{id: "r20261117T090000-1", arms: ["stub-a", "stub-b"], cols: [{arm: "stub-a", key: "stub-a"}, {arm: "stub-b", key: "stub-b"}], n: 4, started: "2026-11-17T09:00:00Z", state: "done",
+      tasks: [{id: "proj__a-1", arm: "stub-a", result: "resolved"}, {id: "proj__a-1", arm: "stub-b", result: "unresolved"}, {id: "proj__b-2", arm: "stub-a", result: "resolved", reused: true},
+        {id: "proj__b-2", arm: "stub-b", result: "not run: its Docker image could not be fetched or built"}]}' > "$B/runs.jsonl" \
+    && jq -nc '{id: "r20261117T140000-2", pid: 2147483646, arms: ["stub-a"], cols: [{arm: "stub-a", key: "stub-a"}], n: 1, started: "2026-11-17T14:00:00Z", state: "running", current: "proj__b-2", tasks: []}' > "$B/live.json" \
+    || fail "the runs and results could not be written"
+  o=$(loop bench swe history 2>&1) || fail "history failed: $o"
+  [ "$(jq -c '[(.runs | map([.id, .state, .n])), (.runs[1].cols | map([.arm, .done, .resolved, .notRun, .sessions, .tokens])), (.runs[0] | has("tasks") or has("pid"))]' <<<"$o")" \
+    = '[[["r20261117T140000-2","stopped",1],["r20261117T090000-1","done",2]],[["stub-a",2,2,0,3,12],["stub-b",2,0,1,1,3]],false]' ] \
+    || fail "history does not give the runs newest first with each arm's figures: $o"
+  [ "$(jq -c '[(.arms | map(select(.name | IN("solo", "stub-a", "conveyor"))) | map([.name, .state, .key, .keyPrefix])), (.keys | map([.key, .at]))]' <<<"$o")" \
+    = '[[["conveyor","ready",null,""],["solo","ready","solo-m",null],["stub-a","unchecked","stub-a",null]],[["stub-a",[0,1]],["stub-b",[1]]]]' ] \
+    || fail "history does not give each arm's state and key, or each key's places in the pinned order: $(jq -c '[.arms, .keys]' <<<"$o")"
+  o=$(loop bench swe show r20261117T090000-1 2>&1) || fail "show failed: $o"
+  [ "$(jq -c '[.run.id, (.tasks | map([.id, .title, (.cells | map([.arm, .result, .resolved, .patch]))]))]' <<<"$o")" \
+    = '["r20261117T090000-1",[["proj__a-1","First task",[["stub-a","resolved",true,[{"path":"x.py","added":1,"removed":1}]],["stub-b","unresolved",false,null]]],["proj__b-2","Second line first",[["stub-a","resolved",true,null],["stub-b","not run: its Docker image could not be fetched or built",null,null]]]]]' ] \
+    || fail "show does not give the run's tasks in its order with each arm's result and patch: $o"
+  o=$(loop bench swe show r20261117T000000-9 2>&1) && fail "show gave a run that is not there: $o"
+  o=$(loop bench swe show ../../x 2>&1) && fail "show took a run id of another shape: $o"
+  loop bench swe versions > /dev/null 2>&1; o=$(loop snapshot --fresh | jq -c '.bench | [has("live"), has("runs"), has("keys")]')
+  [ "$o" = '[true,false,false]' ] || fail "the snapshot carries the runs or the results: $o"
 }
 
 # Bugs: an arm whose preflight fails could still be picked, or failed with no word of what is missing; an arm that

@@ -178,9 +178,9 @@
 #   (lib/testfiles.sh testspart() says what it holds); null when the pack cannot be read.
 # testMap: the Tests page's Test map part: the map's state, its coverage tool, the last whole-suite run's seconds and
 #   the last build by hand (lib/testmap.sh mapboard() says what it holds); null when the pack cannot be read.
-# bench: the Tests page's Benchmarks part: the SWE-bench runs' board.json (bench/swe.sh swe_board() says what it
-#   holds: the run in progress, the runs, each engine's results by task, the versions, the expected figures); null
-#   before any run.
+# bench: the Benchmarks tab's live part: the SWE-bench runs' board.json (bench/swe.sh swe_board() says what it
+#   holds: the run in progress, the versions, the expected figures; the tab reads the runs and results when shown,
+#   `bench swe history` and `bench swe show`); null before any run.
 # prices: the Rules tab's Model prices: builtIn (each row of the built-in price table: model, input, output, cacheRead,
 #   cacheWrite, in $ per million tokens), overrides (the pack's prices, added models and aliases, which win over it),
 #   names (each model's display name) and seen (each model ID the steps and the research lane's sessions of the last
@@ -901,7 +901,7 @@ snapshot() (
   testspart "$since" > "$d/tests" 2>/dev/null && [ -s "$d/tests" ] || echo null > "$d/tests"
   # testMap: the Test map part (mapboard(), lib/testmap.sh).
   mapboard "$MAIN" > "$d/testmap" 2>/dev/null && [ -s "$d/testmap" ] || echo null > "$d/testmap"
-  # bench: the Benchmarks part, board.json of `conveyor.sh bench swe` (bench/swe.sh); a run in progress whose process
+  # bench: the Benchmarks tab's live part, board.json of `conveyor.sh bench swe` (bench/swe.sh); a run in progress whose process
   # is gone (killed with no end written) is shown stopped, and soloKey is the key of the builder seat in force now
   # (swe_solokey()), not the one board.json kept from its last write. No program starts before the first run.
   echo null > "$d/bench"

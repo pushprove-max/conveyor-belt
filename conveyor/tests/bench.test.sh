@@ -204,6 +204,10 @@ Minutes waited a card  2.3              5
 The after group holds 2 cards: too small to mean anything (fewer than 5 cards)." ] || fail "the drift table is not the expected one: $out"
   [ "$("$SRC/bench/drift.sh" --json "$f" bbbbbbbb | jq -c '[.before.engine, .after.engine, .small]')" = "[\"$DRIFTA\",\"$DRIFTB\",[\"after\"]]" ] \
     || fail "the drift watch of engine commit B is not A against B: $("$SRC/bench/drift.sh" --json "$f" bbbbbbbb)"
+  # Bug (#326): the Board's drift watch had no spread a figure, so it could not say Moved or In its usual range.
+  [ "$("$SRC/bench/drift.sh" --json "$f" | jq -c '[.before.spread, .after.spread]')" \
+    = '[{"tokens":268.3,"minutes":8.9,"reviews":0,"fixes":0.4,"waits":2.5},{"tokens":0,"minutes":0,"reviews":0,"fixes":0,"waits":0}]' ] \
+    || fail "the drift watch does not give each figure's spread a card: $("$SRC/bench/drift.sh" --json "$f")"
   out=$("$SRC/bench/drift.sh" "$f" aaaaaaaa 2>&1) && fail "engine commit A, the first, was compared: $out"
   [ "$out" = "drift: no card ran on an engine commit before aaaaaaaa" ] || fail "the first engine commit was not refused as one: $out"
   # Engine commit C: its one card still runs. It is the latest change, compared with B, its group empty.
