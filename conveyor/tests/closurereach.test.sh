@@ -9,7 +9,7 @@
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
-# Bug (issue 563): a file of conveyor/commands/ sourced only through a path built at run time is not in the set, and
+# Bug (issue 563): a file of conveyor/commands/ the walk does not reach is not in the set, and
 # the install case failed on it only after every test had run from the copy, 20 to 30 minutes. A checkout of the set
 # with such a file fails the install case, not in quick mode, in seconds, naming the file, and starts no test from the
 # copy. A file on closure.sh's left-out list (conveyor/tests/speed/) is not named, and once the unreached file is gone
@@ -18,8 +18,10 @@ t_closurereach() {
   local d=$T/$CASE c=$T/$CASE/co s
   slotpool 2; mkdir -p "$c/conveyor/commands" "$c/conveyor/tests/speed" "$d/tmp"; unset CONVEYOR_TEST_WHOLE CONVEYOR_TEST_TURNWAIT CONVEYOR_CLOSURE_QUICK
   ( cd "$SRC/.." && bash conveyor/tools/closure.sh | tar -cf - -T - ) | tar -C "$c" -xf - || fail "cannot copy the release set"
+  # No file names hello.sh: a load by a path built at run time with no table or declaration fails closure.sh itself
+  # (closuretables.test.sh t_closureloads).
   echo 'hello() { :; }' > "$c/conveyor/commands/hello.sh" && echo notes > "$c/conveyor/tests/speed/extra.md" \
-    && sed -i '1a CMDS=commands; . "$(dirname "$0")/$CMDS/hello.sh"' "$c/conveyor/conveyor.sh" || fail "cannot make the fixture's files"
+    || fail "cannot make the fixture's files"
   git -C "$c" init -q && git -C "$c" add -A && git -C "$c" commit -qm set || fail "cannot make the checkout a repository"
   s=$SECONDS
   ! ( export TMPDIR=$d/tmp CONVEYOR_SHELL_TEST_CASE=install; timeout 120 bash "$c/conveyor/tools/closure.test.sh" ) > "$d/run.out" 2>&1 \

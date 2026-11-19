@@ -11,9 +11,12 @@
 # (git rev-parse --show-toplevel). A bare path such as 'src/x.ts' is the user's repository's, not ours (a hook's test
 # input, a check's pattern), and a path in a comment, a document or a data file is for its reader; neither is
 # followed. A file a table names (TABLES, below: the command table, SNAPLIBS, FETCH) is required: a missing or
-# untracked one fails, naming the file that holds the table, the name and the path it expects. The project pack (the
+# untracked one fails, naming the file that holds the table, the name and the path it expects. So is a file a
+# computed load's declaration names (LOAD, below), each file a command of hooks/hooks.json runs and each ./ path of
+# hooks.json and of .claude-plugin/plugin.json (PLUGIN, below); a computed load with no table and no declaration
+# fails, naming its file, as does a declaration no computed load reads. The project pack (the
 # .conveyor/ folder: the host project's input, read at run time), the area rule files and the startup instructions stay in the host project (section 11): a reference to one is never followed. A page's relative
-# src/href/import, an ES module's relative import (a test's shared helper) and a Python import resolve from the file's
+# src/href/import, an ES or TS module's relative import (a test's shared helper) and a Python import resolve from the file's
 # folder. closure.test.sh
 # copies exactly this set into an empty directory and runs the hooks, the Board and the engine tests from there: a
 # reference this misses fails that test.
@@ -38,8 +41,9 @@ ENTRY=(
 )
 HOOKS=(git-safety bash-guardrails bash-write-rules file-size-cop dependency-addition-guard new-test-file-guard
   bugfix-test-lock suite-rerun-guard literal-secret-warning adversarial-review-gate)
-# The plugin's hooks: hooks/hooks.json runs each one through shim.sh, so both ship, and so does every hook it names.
-ENTRY+=(shim.sh hooks/hooks.json)
+# The plugin's hooks: hooks/hooks.json runs each one through shim.sh, so both ship, and so does every hook it names
+# (PLUGIN, below), with its tests; the plugin's manifest, whose file fields Claude Code reads.
+ENTRY+=(shim.sh hooks/hooks.json .claude-plugin/plugin.json)
 # The /units pane: its FETCH (a table, below) names the fetch it runs, which the engine's Board cases run from the
 # install too.
 ENTRY+=(hooks/units.tsx)
@@ -47,9 +51,10 @@ ENTRY+=(hooks/units.tsx)
 # lib.sh's FHERE, which is not followed, so the whole folder ships, with the plugin commands that set it up (its test
 # checks them for private names).
 ENTRY+=('conveyor/foreman/*' 'commands/*.md')
-# A missing hooks.json is named by the check of the set below.
+for h in "${HOOKS[@]}"; do ENTRY+=(".claude/hooks/$h.sh"); done
+# A missing hooks.json is named by the check of the set below; a hook it runs that is missing, by the walk (PLUGIN).
 [ ! -f "$ROOT/hooks/hooks.json" ] || HOOKS+=($(jq -r '.hooks[][].hooks[].command' "$ROOT/hooks/hooks.json" | sed -n 's|.*/shim\.sh \.claude/hooks/\([^ /]*\)\.sh.*|\1|p'))
-for h in "${HOOKS[@]}"; do ENTRY+=(".claude/hooks/$h.sh" ".claude/hooks/__tests__/$h.*" ".claude/hooks/__tests__/$h-*"); done
+for h in "${HOOKS[@]}"; do ENTRY+=(".claude/hooks/__tests__/$h.*" ".claude/hooks/__tests__/$h-*"); done
 
 # What section 11 keeps in the host project that a release-1 file names (a hook reads the project's rules, the engine the
 # project's pack folder, .conveyor/, a test the project's startup text). The tests read a pack of their own, conveyor/lib/test-pack.json, so
@@ -157,11 +162,64 @@ TABLES = {
     "conveyor/commands/snapshot.sh": ("SNAPLIBS", r"^SNAPLIBS=[\x27\"]([^\x27\"]*)[\x27\"]", "conveyor/lib/%s.sh"),
     "hooks/units.tsx": ("FETCH", r"^const FETCH = [\x27\"]([^\x27\"]*)[\x27\"]", "%s"),
 }
+# A computed load: a source or a run (., source, bash, sh, exec, python3, node, $BASH) of a path under a known place
+# that a variable completes ("$HERE/$NAME.sh"). Its targets come from the table of its file, when the path is the one the
+# table stands for, or else from its declaration: the assignment, in the same file, of the variable the load reads,
+# marked `# closure: load` (NAME=dashboard # closure: load), its value the one target. The load opens the value as one
+# path, so a value of more than one word fails, as do a computed load with neither, a declaration no computed load of
+# its file reads, and a target that is missing or untracked.
+LOAD = re.compile(r"(?:^|[\s;&|(){}])(?:\.|source|bash|sh|exec|python3?|node|\"?\$\{?BASH\}?\"?)\s+\"?" + M
+                  + r"\"?(/[^\s\"\x27;|&)]*\$[^\s\"\x27;|&)]*)", re.M)
+VAR = re.compile(r"\$\{?([A-Za-z_]\w*)\}?")
+DECL = re.compile(r"^\s*(?:export |readonly |local )?([A-Za-z_]\w*)=([\x27\"]?)([\w./ -]*)\2\s+#\s*closure: load\s*$", re.M)
+
+def loads(path, raw, text):
+    out, decls, used = set(), {n: v for n, _, v in DECL.findall(raw)}, set()
+    for n, v in sorted(decls.items()):
+        if len(v.split()) != 1:
+            sys.exit("closure: %s: the declaration of %s must hold one name, as the load reads it as one path" % (path, n))
+    for m in LOAD.finditer(text):
+        load = os.path.normpath(m.group(1) + m.group(2))
+        names = set(VAR.findall(m.group(2)))
+        if path in TABLES and VAR.sub("%s", load) == TABLES[path][2]:
+            continue
+        if len(names) != 1 or not names <= set(decls):
+            sys.exit("closure: %s: the computed load %s has no table and no declaration" % (path, load))
+        used |= names
+        w = decls[min(names)]
+        t = norm(VAR.sub(lambda _: w, load))
+        if t not in files:
+            sys.exit("closure: %s: the declaration of %s names %s, but %s is missing or untracked" % (path, min(names), w, t))
+        out.add(t)
+    for n in sorted(set(decls) - used):
+        sys.exit("closure: %s: no computed load reads the declaration of %s" % (path, n))
+    return out
+
+# The plugin files Claude Code reads: each string of hooks/hooks.json or .claude-plugin/plugin.json that starts with
+# ./ (a module of hooks.json, from its folder; a file field of plugin.json, such as types, from the plugin root), and
+# each file a hook command runs from the plugin root (${CLAUDE_PLUGIN_ROOT}/<path>, and the <path> shim.sh is given).
+PLUGIN = {"hooks/hooks.json": "hooks", ".claude-plugin/plugin.json": "."}
+
+def plugin(path):
+    import json
+    out, todo = [], [json.load(open(path, encoding="utf-8"))]
+    while todo:
+        v = todo.pop()
+        if isinstance(v, dict): todo += v.values()
+        elif isinstance(v, list): todo += v
+        elif isinstance(v, str) and v.startswith("./"): out.append((v, os.path.join(PLUGIN[path], v)))
+        elif isinstance(v, str):
+            for m in re.finditer(r"\$\{CLAUDE_PLUGIN_ROOT\}\"?/(\S+)(?:\s+([^\s\x27\";|&-]\S*))?", v):
+                out += [(m.group(1), m.group(1))] + ([(m.group(2), m.group(2))] if m.group(1) == "shim.sh" and m.group(2) else [])
+    for s, p in out:
+        if norm(p) not in files:
+            sys.exit("closure: %s: names %s, but %s is missing or untracked" % (path, s, norm(p)))
+    return set(norm(p) for _, p in out)
 
 def refs(path):
     if not os.path.isfile(path):
         sys.exit("closure: a file of the set is missing: " + path)
-    out = set()
+    out = plugin(path) if path in PLUGIN else set()
     if path in TABLES:
         name, rx, at = TABLES[path]
         vals = re.findall(rx, open(path, encoding="utf-8").read(), re.M)
@@ -172,24 +230,23 @@ def refs(path):
                 sys.exit("closure: %s: %s names %s, but %s is missing or untracked" % (path, name, s, at % s))
             out.add(norm(at % s))
     ext = os.path.splitext(path)[1]
-    if ext not in (".sh", ".py", ".jq", ".js", ".mjs", ".cjs", ".html", ".css", ".service", ""):
+    if ext not in (".sh", ".py", ".jq", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".html", ".css", ".service", ""):
         return out
     try:
         text = open(path, encoding="utf-8").read()
     except UnicodeDecodeError:
         return out
-    here = os.path.dirname(path)
+    here, raw = os.path.dirname(path), text
     if ext in (".sh", ".py", ".jq", ".service", ""):
         text = "\n".join(l for l in text.split("\n") if not l.lstrip().startswith("#"))
     # The parts of the engine (conveyor/lib/*.sh) and the scripts of its commands (conveyor/commands/*.sh), sourced
     # by conveyor.sh, read HERE as it sets it: the engine folder.
     if re.fullmatch(r"conveyor/(?:lib|commands)/[^/]+\.sh", path) and ".test." not in path:
         text = "HERE=" + mk("conveyor") + "\n" + text
-    # The line of conveyor.sh that sources the script of the given command by name reads the one script its command
-    # table names (TABLES), not the whole folder.
-    if path == "conveyor/conveyor.sh":
-        text = text.replace(". \"$HERE/commands/$CMD_RUN\"", "")
-    text = rewrite(text, here, ext in (".py", ".js", ".mjs", ".cjs"))
+    text = rewrite(text, here, ext in (".py", ".js", ".mjs", ".cjs", ".ts", ".tsx"))
+    # A test builds its fixtures by paths a variable completes: they are not loads of the release.
+    if ".test." not in os.path.basename(path):
+        out |= loads(path, raw, text)
     # A file the code first tests for ([ -e x ] || skip, [ ! -e x ] || run x) is optional, so not followed; but not one
     # whose absence stops the code ([ -f x ] || exit 1, [ ! -e x ] && fail ...), which is required.
     stop = r"\s*(?:\{[^}]*?)?\b(?:exit(?!\s+0\b)|fail|die)\b"
@@ -210,10 +267,12 @@ def refs(path):
         elif loc in dirs and not test and not (here + "/").startswith(loc + "/") and loc != "." \
                 and not re.match(r"\"?/\$", text[m.end():]):
             out.update(f for f in files if os.path.dirname(f) == loc)
-    if ext in (".html", ".css", ".js", ".mjs"):
+    # A TS import names its file without the extension (from "./auto": auto.tsx).
+    if ext in (".html", ".css", ".js", ".mjs", ".ts", ".tsx"):
         for m in re.finditer(r"(?:\b(?:src|href)=|\bfrom\s+|\bimport\s*\(\s*|\burl\(\s*)" + Q, text):
             p = norm(os.path.join(here, m.group(1).split("?")[0]))
-            if p in files: out.add(p)
+            p = next((q for q in [p] + ([p + ".ts", p + ".tsx"] if p and ext in (".ts", ".tsx") else []) if q in files), None)
+            if p: out.add(p)
     # A Python import: the folder of the file, and every folder the file puts on sys.path.
     for m in re.finditer(r"^\s*(?:from\s+([\w.]+)\s+import|import\s+([\w., ]+))", text, re.M):
         for mod in (m.group(1) or m.group(2)).split(","):

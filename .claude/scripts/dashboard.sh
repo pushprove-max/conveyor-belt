@@ -248,7 +248,8 @@ host_os() { printf '%s' "${CONVEYOR_HOST_OS:-$(uname -s)}"; }
 LABEL_PREFIX=com.conveyor.
 # The & is escaped: from Bash 5.2 a bare & in the replacement is the match.
 xml() { local s=${1//&/\&amp;}; s=${s//</\&lt;}; printf '%s' "${s//>/\&gt;}"; }
-NAME=dashboard
+# The cycle runs this script again as "$HERE/$NAME.sh"; the mark tells tools/closure.sh what that load reaches.
+NAME=dashboard # closure: load
 # The Board's folder: dashboard/ in the state folder of the primary checkout, as `conveyor.sh state-dir` names it
 # (the engine beside this Board's files). A state folder that cannot be named (a host file that cannot be read)
 # stops the Board, as it stops the engine.
