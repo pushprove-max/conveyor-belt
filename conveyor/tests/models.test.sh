@@ -22,11 +22,19 @@ modelsengine() { # <run|doctor|snapshot> <the engine command>
 # The snapshot's modelSettings (what the Board's model choices show), as snapshot() makes it: the host's CLI report read
 # when due (hostclis), then modelsettings(), with no whole snapshot around them.
 msettings() { modelsengine snapshot 'hostclis due >/dev/null 2>&1; modelsettings'; }
-# reviewed() alone, as a card's review step calls it, on a worktree of main (cards/c<n>) with the build's change
-# staged: what it prints, then a last line of its exit and the verdict it left (rc=<exit> <verdict>).
-rvcall() { # <n>
-  modelsengine run "w=\$CARDS/c$1"' && git -C "$MAIN" worktree add -q --detach "$w" && echo two >> "$w/a.txt" && git -C "$w" add a.txt \
-    && { reviewed "$w" "# Issue: body of the issue"; echo "rc=$? $(verdict "$w.review" 2>/dev/null)"; }'
+# A worktree of main, cards/c$n, with the build's change staged, as a card's review step finds it (engine code).
+# shellcheck disable=SC2016 # expanded in the engine shell (modelsengine)
+RVWT='w=$CARDS/c$n && git -C "$MAIN" worktree add -q --detach "$w" && echo two >> "$w/a.txt" && git -C "$w" add a.txt'
+# reviewed() alone, as a card's review step calls it, on that worktree: what it prints, then a line of its exit and the
+# verdict it left (rc=<exit> <verdict>). With fix, the review after a fix round follows, as a card's next review is
+# given it: that round's diff in <worktree>.rounds and its re-review section (rereview()) in the brief.
+rvcall() { # <n> [fix]
+  # shellcheck disable=SC2016 # expanded in the engine shell (modelsengine)
+  modelsengine run "n=$1 f=${2:-}; $RVWT"' && { reviewed "$w" "# Issue: body of the issue"; echo "rc=$? $(verdict "$w.review" 2>/dev/null)"; } \
+    && { [ -z "$f" ] || { mkdir -p "$w.rounds" && git -C "$w" diff --cached > "$w.rounds/1.diff" && : > "$w.rounds/findings.jsonl" \
+      && b="# Issue: body of the issue
+
+$(rereview "c$n" "$w" 1)" && { reviewed "$w" "$b"; echo "rc=$? $(verdict "$w.review" 2>/dev/null)"; }; }; }'
 }
 
 # Bugs: a Claude model is refused as the reviewer, or one named with no CLI, or a Codex effort for it, is
@@ -52,34 +60,33 @@ t_claudereview() {
   [ "$(rv | jq -c '.[1]')" = '["low","medium","high","xhigh","max"]' ] || fail "a Claude reviewer's efforts are not Claude's: $(rv)"
   [ "$(loop health | jq -c '[.models.codex, .efforts.codex]')" = '["claude-opus-5-5","max"]' ] || fail "health does not name the Claude reviewer: $(loop health)"
   claude_stub
+  # The two reviews of a card, called alone (rvcall): a NO-GO, then a GO after a fix round.
   echo "$NOGO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
-  loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
+  out=$(rvcall 7 fix)
   [ ! -e "$STUB/codex-ran" ] || fail "a Claude reviewer ran Codex"
-  [ "$(st 'select(.issue == 7 and .step == "review") | "\(.result) \(.counts.P1) \(.model) \(.effort)"' | tr '\n' ,)" = 'NO-GO 1 claude-opus-5-5 max,GO 0 claude-opus-5-5 max,' ] \
-    && [ -n "$(st 'select(.issue == 7 and .step == "landed") | .sha')" ] || fail "a Claude reviewer's NO-GO and GO were not read: $(st 'select(.issue == 7)')"
-  [ "$(st 'select(.issue == 7 and .step == "review") | [.tokens, .usage, .stats.turns] | tojson' | sort -u)" \
-    = '[{"claude":157,"codex":0},{"input":100,"write":50,"write1h":0,"read":1000,"output":7},2]' ] || fail "a Claude review's line lacks tokens.claude or its usage: $(st 'select(.issue == 7 and .step == "review")')"
+  [ "$(sed -n '2p;4p' <<<"$out" | tr '\n' ,)" = 'rc=0 NO-GO,rc=0 GO,' ] \
+    && [ "$(sed -n '1p;3p' <<<"$out" | jq -r '"\(.model) \(.effort)"' | sort -u)" = 'claude-opus-5-5 max' ] || fail "a Claude reviewer's NO-GO and GO were not read: $out"
+  [ "$(sed -n '1p;3p' <<<"$out" | jq -c '[.tokens, .usage, .stats.turns]' | sort -u)" \
+    = '[{"claude":157},{"input":100,"write":50,"write1h":0,"read":1000,"output":7},2]' ] || fail "a Claude review's line lacks tokens.claude or its usage: $out"
   # The write attempt changed nothing: after the last review the worktree holds the build's change alone.
-  [ "$(cat "$STUB/status")" = 'M  a.txt' ] && ! grep -q pwned "$STUB/a" && ! git -C "$R" show HEAD --stat | grep -q z.txt \
-    || fail "a review session changed the worktree: $(cat "$STUB/status") $(cat "$STUB/a")"
+  w=$T/$CASE/cards/c7
+  [ "$(git -C "$w" status --porcelain)" = 'M  a.txt' ] && ! grep -q pwned "$w/a.txt" \
+    || fail "a review session changed the worktree: $(git -C "$w" status --porcelain) $(cat "$w/a.txt")"
   [ "$(head -n 1 "$STUB/reviews")" = "$(sed -n 2p "$STUB/reviews")" ] || fail "the two reviews were launched differently"
   grep -q -- '-p --model claude-opus-5-5 --effort max --permission-mode default --tools Read,Grep,Glob --setting-sources  --strict-mcp-config' "$STUB/reviews" \
     && ! grep -q -- '--settings' "$STUB/reviews" || fail "the review session was given more than Read, Grep and Glob, or settings or hooks: $(head -n 1 "$STUB/reviews")"
   grep -q '^+two$' "$STUB/staged.1" || fail "the review session was not given the staged change: $(cat "$STUB/staged.1")"
   # The review after the fix reads that fix's diff, given in its own folder as the staged change is; the first is given none.
   [ ! -e "$STUB/fix.1" ] && grep -q '^+two$' "$STUB/fix.2" || fail "the review session after the fix was not given the fix's diff: $(cat "$STUB/fix.2" 2>&1)"
-  [ "$(grep -c AGENTS-RULES-MARK "$STUB/asked.1")" = 1 ] && grep -q 'Proof: <proof>' "$STUB/asked.1" && grep -q 'body of 7' "$STUB/asked.1" \
+  [ "$(grep -c AGENTS-RULES-MARK "$STUB/asked.1")" = 1 ] && grep -q 'Proof: <proof>' "$STUB/asked.1" && grep -q 'body of the issue' "$STUB/asked.1" \
     || fail "the review session was not given REVIEW, the brief and AGENTS.md once: $(cat "$STUB/asked.1")"
 }
 
-# The stubs of a Claude reviewer's cases: a build session as before; a review session (the one given --tools) answers
-# review.N, and first does what a session that got a write through would do: it writes in the worktree, whatever it
-# was launched with. Codex fails, and says it ran.
+# The stubs of a Claude reviewer's cases: a review session answers review.N, and first does what a session that got a
+# write through would do: it writes in the worktree, whatever it was launched with. Codex fails, and says it ran.
 claude_stub() {
   cat > "$STUB/claude" <<'EOF'
 #!/usr/bin/env bash
-case " $* " in *" --tools "*) ;; *) cat > "$STUB/brief"; echo "$*" >> "$STUB/sessions"; . "$STUB/build"
-  echo '{"type":"result","is_error":false,"usage":{"input_tokens":10,"cache_creation_input_tokens":20,"cache_read_input_tokens":999,"output_tokens":5}}'; exit 0 ;; esac
 cat > "$STUB/asked"; printf '%s\n' "$*" >> "$STUB/reviews"; n=$(wc -l < "$STUB/reviews"); cp "$STUB/asked" "$STUB/asked.$n"
 echo pwned > a.txt; echo pwned > z.txt
 f=$(grep -o 'the file [^ ]*staged\.diff' "$STUB/asked" | cut -d' ' -f3); cp "$f" "$STUB/staged.$n" 2>/dev/null
@@ -96,7 +103,6 @@ jq -cn --rawfile r "$STUB/review.$n" '{type: "result", is_error: false, result: 
 EOF
   # `codex debug models` (the host's report, read again before a seat starts: seatready()) is no review.
   printf '#!/usr/bin/env bash\n[ "${1:-}" != debug ] || exit 1\ntouch "$STUB/codex-ran"; exit 1\n' > "$STUB/codex"
-  echo 'git status --porcelain > "$STUB/status"; cat a.txt > "$STUB/a"' > "$STUB/test-cmd"
 }
 # A Claude reviewer (claude-opus-5-5 at max, as t_claudereview sets it) on a main with the given issues and AGENTS.md,
 # and its stubs: each review run after t_claudereview's is a case of its own, so they run side by side.
@@ -111,7 +117,9 @@ t_claudefail() {
   claude_reviewer "[$(issue 8 2026-01-02)]"
   # A review that fails is recorded with what it spent, under tokens.claude, never left out of the cost. It ended with
   # no verdict, so it ran once more before the card blocked; one that answered with a verdict and then failed did not.
-  loop run --only 8 >/dev/null 2>&1
+  # The review alone, then what the review step does with its failure (card(), lib/card.sh: block()), on card c8.
+  # shellcheck disable=SC2016 # expanded in the engine shell (modelsengine)
+  modelsengine run "n=8; $RVWT"' && { t=$(reviewed "$w" "# Issue: body of the issue") || block c8 8 "$w" "review 1: $t"; }' >/dev/null 2>&1
   [ "$(wc -l < "$STUB/reviews")" = 2 ] && st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -q 'run again after 0s: review failed (exit 1)' \
     || fail "a Claude review that failed with no verdict was not run once more before the card blocked: $(st 'select(.issue == 8)')"
   # Both attempts are priced: the blocked line's tokens and the usage the dashboard prices hold the first's beside the second's.
@@ -119,7 +127,7 @@ t_claudefail() {
       .spent.usage == {input: 200, write: 100, write1h: 0, read: 2000, output: 14}] | tojson')" = '["review","claude-opus-5-5",157,314,314,true]' ] \
     || fail "a failed Claude review left its cost out: $(st 'select(.issue == 8 and .step == "blocked")')"
 }
-# The three below call the review alone (rvcall): what a card does with its answer is t_claudereview's and t_claudefail's.
+# The three below call the review alone (rvcall), as t_claudereview does: what the review step does with a failure is t_claudefail's.
 t_claudeexit() {
   claude_reviewer "[$(issue 9 2026-01-03)]"
   echo "$NOGO" > "$STUB/review.1"; : > "$STUB/review-exit"
@@ -194,30 +202,38 @@ t_opencodereview() {
   [ "$(msettings | jq -c '.reviewer | [.choices, .agent, .efforts]')" \
     = '[["gpt-6.1-sol","gpt-6-astra","claude-opus-5-5","claude-sonnet-5-5","claude-fable-5-2","opencode:prov/vendor/m-1"],"opencode",["minimal","low","medium","high","xhigh","max"]]' ] \
     || fail "the Reviewer choices do not list the OpenCode model once, run by OpenCode with its efforts: $(msettings | jq -c .reviewer)"
-  echo 'git status --porcelain > "$STUB/status"; cat a.txt > "$STUB/a"' > "$STUB/test-cmd"
-  # #7: a NO-GO, its finding sent to the fix, then a GO.
+  # The two reviews of a card, called alone (rvcall): a NO-GO, then a GO after a fix round.
   echo "$NOGO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
-  loop run --only 7 > "$STUB/log" 2>&1 & run=$!
+  wt=$T/$CASE/cards/c7
+  rvcall 7 fix > "$STUB/out" 2>&1 & run=$!
   # Its live record, read as an OpenCode run's (not as a Codex review's, whose events these are not): the step it
-  # finished is a turn with its usage and cost, and its tool call is the action.
-  wait_until "jq -e '.step == \"review\" and .turns == 1' '$T/$CASE'/cards/*.live" || { : > "$STUB/go"; wait $run; fail "the live record never counted the OpenCode review's first step: $(cat "$T/$CASE"/cards/*.live 2>/dev/null)"; }
-  live=$(jq -c '{model, turns, action, usage}' "$T/$CASE"/cards/*.live)
-  : > "$STUB/go"; wait $run || fail "run of #7 exited non-zero: $(cat "$STUB/log")"
+  # finished is a turn with its usage and cost, and its tool call is the action. A poll: the record is there only
+  # while the review runs, which the stub holds after its first step until the case has read it.
+  wait_until "jq -e '.step == \"review\" and .turns == 1' '$wt.live'" || { : > "$STUB/go"; wait $run; fail "the live record never counted the OpenCode review's first step: $(cat "$wt.live" 2>/dev/null)"; }
+  live=$(jq -c '{model, turns, action, usage}' "$wt.live")
+  : > "$STUB/go"; wait $run || fail "the reviews exited non-zero: $(cat "$STUB/out")"
   [ "$live" = '{"model":"opencode:prov/vendor/m-1","turns":1,"action":"read","usage":{"input":100,"write":50,"write1h":0,"read":1000,"output":8,"cost":0.25}}' ] \
     || fail "the live record of an OpenCode review lost its turns, action or usage: $live"
-  [ ! -e "$STUB/codex-ran" ] && ! grep -q -- '--tools' "$STUB/sessions" || fail "an OpenCode reviewer ran Codex or Claude"
-  [ "$(st 'select(.issue == 7 and .step == "review") | "\(.result) \(.counts.P1) \(.model) \(.effort)"' | tr '\n' ,)" = 'NO-GO 1 opencode:prov/vendor/m-1 high,GO 0 opencode:prov/vendor/m-1 high,' ] \
-    && grep -qxF 'E1 [P1] a.txt:1 wrong word' "$STUB/brief" && [ -n "$(st 'select(.issue == 7 and .step == "landed") | .sha')" ] \
-    || fail "an OpenCode reviewer's NO-GO, its finding, and its GO were not read: $(st 'select(.issue == 7)')"
+  [ ! -e "$STUB/codex-ran" ] && [ ! -e "$STUB/sessions" ] || fail "an OpenCode reviewer ran Codex or Claude"
+  out=$(cat "$STUB/out")
+  [ "$(sed -n '2p;4p' <<<"$out" | tr '\n' ,)" = 'rc=0 NO-GO,rc=0 GO,' ] \
+    && [ "$(sed -n '1p;3p' <<<"$out" | jq -r '"\(.model) \(.effort)"' | sort -u)" = 'opencode:prov/vendor/m-1 high' ] \
+    || fail "an OpenCode reviewer's NO-GO and GO were not read: $out"
   # What it reports: input, cache writes and output (reasoning counted as output) as tokens; its cost, summed, in its
   # usage (usage.cost), where the Board prices an OpenCode step from: anywhere else the review is unpriced.
-  [ "$(st 'select(.issue == 7 and .step == "review") | [.tokens, .usage, .cost, .stats] | tojson' | sort -u)" \
-    = '[{"claude":0,"codex":185},{"input":120,"write":50,"read":1500,"output":15,"cost":0.75},null,{"turns":2,"tools":{"read":1}}]' ] \
-    || fail "an OpenCode review's line lacks the tokens, usage or cost it reported: $(st 'select(.issue == 7 and .step == "review")')"
-  [ "$(loop snapshot --fresh | jq -c '[.landed[] | select(.issue == 7) | .metrics.timeline[] | select(.step == "review") | [.usd, .unpriced]]')" = '[[0.75,null],[0.75,null]]' ] \
-    || fail "the Board does not price the OpenCode reviews at the cost OpenCode reported: $(loop snapshot --fresh | jq -c '[.landed[] | select(.issue == 7) | .metrics.timeline]')"
+  [ "$(sed -n '1p;3p' <<<"$out" | jq -c '[.tokens, .usage, .cost, .stats]' | sort -u)" \
+    = '[{"codex":185},{"input":120,"write":50,"read":1500,"output":15,"cost":0.75},null,{"turns":2,"tools":{"read":1}}]' ] \
+    || fail "an OpenCode review's line lacks the tokens, usage or cost it reported: $out"
+  # The Board's price of each review, from the two lines written as the review step writes them (record()), priced as
+  # the snapshot prices the cards' steps (rows(), then dashboard_limit.py cardlines).
+  # shellcheck disable=SC2034 # read by the engine code below (modelsengine's subshell)
+  l1=$(sed -n 1p <<<"$out") l2=$(sed -n 3p <<<"$out")
+  # shellcheck disable=SC2016 # expanded in the engine shell (modelsengine)
+  priced=$(modelsengine snapshot 'record c7 7 picked ok && record c7 7 review NO-GO "$l1" && record c7 7 review GO "$l2" && d=$T/$CASE/priced && mkdir -p "$d" \
+    && rows "$STATE" | jq -c ".[]" > "$d/all" && jq -cn "{prices: {}, since: (now - 86400 | todate)}" \
+    | python3 "$HERE/../.claude/scripts/dashboard_limit.py" cardlines "$d/all" "$d/kept" "$d/priced" >/dev/null && jq -c "[.steps[] | select(.step == \"review\") | [.usd, .unpriced]]" "$d/priced"')
+  [ "$priced" = '[[0.75,null],[0.75,null]]' ] || fail "the Board does not price the OpenCode reviews at the cost OpenCode reported: $priced"
   # Run in the worktree, read-only, on the model and the effort set, given the staged change; its write undone.
-  wt=$T/$CASE/cards/$(st 'select(.issue == 7 and .step == "review") | .card' | head -n 1)
   [ "$(head -n 1 "$STUB/oc-runs")" = 'run --pure --format json --agent conveyor-readonly -m prov/vendor/m-1 --variant high' ] && [ "$(sed -n 1p "$STUB/oc-env.1")" = "$wt" ] \
     || fail "OpenCode was not run in the worktree on the model and effort set: $(head -n 1 "$STUB/oc-runs") in $(sed -n 1p "$STUB/oc-env.1")"
   # OpenCode takes the last rule that matches: the deny of everything comes first, the reads after it. It runs as its
@@ -229,8 +245,8 @@ t_opencodereview() {
       and ($p.external_directory | keys_unsorted == ["*", $rv] and .["*"] == "deny" and .[$rv] == "allow")' >/dev/null \
     && [ "$(sed -n 3p "$STUB/oc-env.1")" = 1 ] || fail "OpenCode was not run with every tool but reading denied, over the worktree's own config: $(cat "$STUB/oc-env.1")"
   grep -q '^+two$' "$STUB/oc-staged.1" && grep -q 'Proof: <proof>' "$STUB/oc-asked" || fail "OpenCode was not given REVIEW and the staged change"
-  [ "$(cat "$STUB/status")" = 'M  a.txt' ] && ! grep -q pwned "$STUB/a" || fail "an OpenCode review changed the worktree: $(cat "$STUB/status") $(cat "$STUB/a")"
-  loop check >/dev/null || fail "the cards' lines do not pass the record check"
+  [ "$(git -C "$wt" status --porcelain)" = 'M  a.txt' ] && ! grep -q pwned "$wt/a.txt" || fail "an OpenCode review changed the worktree: $(git -C "$wt" status --porcelain) $(cat "$wt/a.txt")"
+  loop check >/dev/null || fail "the review lines do not pass the record check"
 }
 # The OpenCode review's runs again and its failure, each a review called alone (rvcall) on the reviewer above.
 t_opencoderetry() {
@@ -315,13 +331,18 @@ PY
 
 t_proxy() {
   proxy_start 7
-  # The session's key in a variable named v, a variable of proxyenv()'s callers in a card, so only a whole card proves it
-  # still carries the key it holds; a key apart from PROXY_KEY's, so a lookup of the wrong variable fails the check.
+  # The session's key in a variable named v, as a card session holds it: a key apart from PROXY_KEY's, so a lookup of
+  # the wrong variable fails the check. The session launcher alone (builder(), lib/session.sh), on the Claude stub,
+  # whose build step keeps the environment it was given.
   tune '.models.claudeProxy.keyEnv = "v"'
   vkey=v-$RANDOM$RANDOM-secret
-  v=$vkey loop run >/dev/null || fail "run exited non-zero"
+  # shellcheck disable=SC2016 # expanded in the engine shell (modelsengine)
+  v=$vkey modelsengine run 'w=$CARDS/c7 && git -C "$MAIN" worktree add -q --detach "$w" && ( builder "$w" "the brief" m high "" claude )' >/dev/null 2>&1 \
+    || fail "the card session did not start: $(cat "$T/$CASE/cards/c7.err" 2>/dev/null)"
   tune '.models.claudeProxy.keyEnv = "PROXY_KEY"'
-  [ "$(st 'select(.step == "review") | .model')" = gpt-6.10-sol ] || fail "the family sol did not resolve to the newest gpt-<version>-sol: $(st 'select(.step == "review") | .model')"
+  # The review alone (rvcall), as a card's review step calls it: the family resolves for Codex through the proxy.
+  out=$(rvcall 8)
+  [ "$(head -n 1 <<<"$out" | jq -r .model)" = gpt-6.10-sol ] && [ "$(tail -n 1 <<<"$out")" = 'rc=0 GO' ] || fail "the family sol did not resolve to the newest gpt-<version>-sol: $out"
   grep -q -- ' -m gpt-6.10-sol ' "$STUB/codex-args" && ! grep -q -- ' -m sol ' "$STUB/codex-args" || fail "Codex was not run with the resolved model id: $(cat "$STUB/codex-args")"
   [ "$(cat "$STUB/env")" = "$(printf 'ANTHROPIC_AUTH_TOKEN=%s\nANTHROPIC_BASE_URL=%s\nENABLE_TOOL_SEARCH=true' "$vkey" "$base")" ] \
     || fail "the card session's environment does not carry the proxy, or a key in a variable named v was lost: $(cat "$STUB/env")"
@@ -437,14 +458,11 @@ t_proxynomatch() {
   proxy_start 7
   # The inline table t_proxytables ends on.
   printf 'model_provider = "copilot"\n[model_providers.copilot]\nbase_url = """\n%s/v1"""\nenv_key = \047\047\047PROXY_KEY\047\047\047\n' "$base" > "$CODEX_HOME/config.toml"
-  # No match: nothing is picked, by run or by land-branch, and each names the setting to set.
-  echo '{"data":[{"id":"gpt-7-astra"}]}' > "$STUB/models"; echo "[$(issue 9 2026-01-03)]" > "$STUB/issues.json"
-  out=$(loop run 2>&1) && fail "a run whose reviewer family matches no model exited zero"
-  grep -q 'models.allowed.codex in .conveyor/project.json' <<<"$out" && [ -z "$(st 'select(.issue == 9)')" ] || fail "a card started, or the fix is not named: $out"
-  n=$(st 'select(.step == "picked") | .card' | wc -l)
-  git -C "$R" worktree add -q -b lane-x "$T/$CASE/lane-x" main && echo bee > "$T/$CASE/lane-x/b.txt" && git -C "$T/$CASE/lane-x" add b.txt && git -C "$T/$CASE/lane-x" commit -qm 'fix(tooling): lane change'
-  out=$(loop land-branch lane-x 2>&1) && fail "land-branch with a reviewer family that matches no model exited zero"
-  grep -q 'models.allowed.codex in .conveyor/project.json' <<<"$out" && [ "$(st 'select(.step == "picked") | .card' | wc -l)" = "$n" ] || fail "land-branch started a card, or the fix is not named: $out"
+  # No match: the check run and land-branch each make before a card starts (codexready()), called alone, fails and
+  # names the setting to set.
+  echo '{"data":[{"id":"gpt-7-astra"}]}' > "$STUB/models"
+  out=$(modelsengine run codexready 2>&1) && fail "the reviewer check passed a reviewer family that matches no model: $out"
+  grep -q 'models.allowed.codex in .conveyor/project.json' <<<"$out" || fail "the reviewer check does not name the fix: $out"
   # The proxy unreachable: Codex's models_cache.json answers.
   kill $srv; wait $srv 2>/dev/null
   echo '{"models":[{"slug":"gpt-6.3-sol"},{"slug":"gpt-6-sol"}]}' > "$CODEX_HOME/models_cache.json"
