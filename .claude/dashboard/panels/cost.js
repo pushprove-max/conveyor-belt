@@ -36,7 +36,7 @@ function replayBox(r, ctx) {
   box.append(head);
   if (x && typeof x === 'object') {
     box.append(h('p', 'foot replay-last', `${ctx.modelName(x.model)}${x.effort ? ` ${x.effort}` : ''}, ${ctx.when(x.time)}: it agreed with the recorded judge on ${x.agree} of ${x.findings} findings of ${x.reviews} reviews.`
-      + (x.unanswered ? ` ${x.unanswered} got no answer.` : '') + (x.skipped ? ` ${x.skipped} reviews were left out: they had no diff, or not the diff that their judge read.` : '')
+      + (x.unanswered ? ` ${x.unanswered} got no answer.` : '') + (x.skipped ? ` ${x.skipped === 1 ? '1 review was left out: it had' : `${x.skipped} reviews were left out: they had`} no diff, or not the diff that ${x.skipped === 1 ? 'its' : 'their'} judge read.` : '')
       + ` Cost: ${replayCost(ctx, x.usd)}; the recorded judge cost ${replayCost(ctx, x.recordedUsd)} on the same reviews.`));
     if (Array.isArray(x.differ) && x.differ.length) {
       const ul = h('ul', 'rows compact replay-differ');
@@ -84,7 +84,7 @@ function replayBox(r, ctx) {
   if (s.estimate && s.estimate.model === s.model && (s.estimate.effort || '') === (s.effort || '')) {
     const y = s.estimate;
     box.append(h('p', 'foot replay-estimate', `About ${replayCost(ctx, y.usd)} to replay ${y.findings} findings of ${y.reviews} reviews: the token use of the recorded judge, at the price of this model. The recorded judge cost ${replayCost(ctx, y.recordedUsd)}.`
-      + (y.skipped ? ` ${y.skipped} reviews are left out: they have no diff, or not the diff that their judge read.` : '')));
+      + (y.skipped ? ` ${y.skipped === 1 ? '1 review is left out: it has' : `${y.skipped} reviews are left out: they have`} no diff, or not the diff that ${y.skipped === 1 ? 'its' : 'their'} judge read.` : '')));
     const run = btn('Run the replay', 'replay-run');
     ctx.twice(run, 'spend', 'Click again to run the replay', () => ask([], (ok, t) => {
       s.estimate = null;

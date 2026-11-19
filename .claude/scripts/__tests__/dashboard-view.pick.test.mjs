@@ -69,7 +69,7 @@ test('Cost: Pick settings trials shows each dropped challenger and each flagged 
 // The judge replay study (#765) beside the pick table: the last replay, Estimate (no model called) and Run.
 // Bugs this guards: the panel did not show how often the replay judge agreed, the findings where it differs or its
 // cost against the recorded judge's; Run was sent before the owner saw the estimate, or on one click; an estimate or
-// a run went out with another model or effort than the ones picked.
+// a run went out with another model or effort than the ones picked; one left-out review read "1 reviews were" (#856).
 test('Cost: the judge replay shows the last result, and runs only after its estimate and a second click', async () => {
   const w = boot();
   const d = full();
@@ -78,7 +78,7 @@ test('Cost: the judge replay shows the last result, and runs only after its esti
       differ: [{ card: 'c1-7', issue: 7, n: 2, finding: '[P2] a.txt:1 F-two', recorded: 'decline', replay: 'accept', reason: 'the change causes it' }] } }];
   deliver(w, d);
   const box = () => panel(w, 'cost').querySelector('.replay[data-repo="sample"]');
-  assert.match(box().querySelector('.replay-last').textContent, /agreed with the recorded judge on 2 of 3 findings of 3 reviews\. 1 got no answer\. 1 reviews were left out: they had no diff, or not the diff that their judge read\. Cost: \$0\.30; the recorded judge cost \$6\.00/);
+  assert.match(box().querySelector('.replay-last').textContent, /agreed with the recorded judge on 2 of 3 findings of 3 reviews\. 1 got no answer\. 1 review was left out: it had no diff, or not the diff that its judge read\. Cost: \$0\.30; the recorded judge cost \$6\.00/);
   assert.match(box().querySelector('.replay-differ').textContent, /#7 \[P2\] a\.txt:1 F-two.*recorded judge: decline\. The replay: accept, the change causes it/);
   assert.equal(act(box(), 'replay-run'), null, 'no Run before an estimate');
   const e = act(box(), 'replay-effort');
@@ -87,7 +87,13 @@ test('Cost: the judge replay shows the last result, and runs only after its esti
   act(box(), 'replay-estimate').click();
   await settle(); await settle();
   assert.deepEqual(w.posts.splice(0).map((p) => p.body), [{ action: 'replay', args: ['claude-haiku-5-5', 'low', '--estimate'], repo: 'sample' }]);
-  assert.match(box().querySelector('.replay-estimate').textContent, /About \$0\.30 to replay 4 findings of 3 reviews.* 1 reviews are left out: they have no diff, or not the diff that their judge read\./);
+  assert.match(box().querySelector('.replay-estimate').textContent, /About \$0\.30 to replay 4 findings of 3 reviews.* 1 review is left out: it has no diff, or not the diff that its judge read\./);
+  // A second estimate with two left out keeps the plural.
+  w.reply = { ok: true, status: 200, text: () => Promise.resolve('{"estimate":true,"model":"claude-haiku-5-5","effort":"low","reviews":3,"skipped":2,"findings":4,"usd":0.3,"recordedUsd":6}') };
+  act(box(), 'replay-estimate').click();
+  await settle(); await settle();
+  w.posts.splice(0);
+  assert.match(box().querySelector('.replay-estimate').textContent, /About \$0\.30 to replay 4 findings of 3 reviews.* 2 reviews are left out: they have no diff, or not the diff that their judge read\./);
   act(box(), 'replay-run').click();
   await settle();
   assert.deepEqual(w.posts, [], 'one click sends no run');
