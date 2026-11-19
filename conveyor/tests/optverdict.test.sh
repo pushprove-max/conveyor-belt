@@ -89,6 +89,27 @@ t_optdearer() {
     || fail "a stabilise card dearer than its recent runs was not blocked naming the verdict and the figure: exit $RC, $WHY"
 }
 
+# Bug it catches (#615): conveyor/README.md says the median on record is used only when the issue has no "Last runs"
+# line, but the Board writes "- Last runs, newest first: none" for a file with no runs, and "— CPU s" for each run with
+# a clock time only (draftIssue()), and recentcpu() then uses the median on record (4 here). The guide must name both.
+t_optrecentnone() {
+  local c
+  setup '[]'
+  for c in 3 4 5; do
+    jq -cn --argjson c "$c" '{time: "2026-11-01T00:00:00Z", how: "full", sha: "abc", files: {"f.test.sh": {result: "ok", sec: $c, cpu: $c}}}' >> "$ST/suiteruns.jsonl"
+  done
+  # shellcheck disable=SC2034 # read by the commands fx_in runs
+  NONE=$(jq -cn '{number: 7, body: "What the Board measured:\n- Last runs, newest first: none"}')
+  # shellcheck disable=SC2034 # read by the commands fx_in runs
+  CLOCK=$(jq -cn '{number: 7, body: "What the Board measured:\n- Last runs, newest first: — CPU s (a full run), — CPU s (a full run)"}')
+  fx_in 'recentcpu "$NONE" f.test.sh; recentcpu "$CLOCK" f.test.sh'
+  [ "$(cat "$T/$CASE/run.out")" = $'4\tits median on record\n4\tits median on record' ] \
+    || fail "an issue whose Last runs line gives no CPU seconds did not use the median on record: $(cat "$T/$CASE/run.out")"
+  # A text check, as the bug is in the guide's words: it must say a Last runs line with no CPU seconds falls back too.
+  tr '\n' ' ' < "$SRC/README.md" | grep -qF 'or the line gives no CPU seconds, the check uses the file'"'"'s median on record.' \
+    || fail "conveyor/README.md does not say a Last runs line with no CPU seconds uses the median on record"
+}
+
 # D5. Bug it catches: a "keep" card is held to the old median (4) as a speed up was. Cut to 15, below its recent runs
 # (22), it passes.
 t_optkeepverdict() {

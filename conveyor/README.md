@@ -1015,9 +1015,10 @@ test file", as the Board's Tests page files it (`conveyor.sh testissue`). The fi
 the title's next word. Such a change keeps what the file tests, so its tests pass on main's code, and no test must fail
 there. The file runs alone, with the change, on a test slot, with the pack's `test.command`. It must pass, and its CPU
 seconds must be lower than the median of its recent runs: the runs on the issue's "Last runs, newest first" line, as
-the Tests page writes it. When the issue has no such line, the check uses the file's median on record (the median the
-Tests page shows). The card's `bugproof` line (result
-`ok` or `fail`) names the file and both numbers: `speed: {file, before, after}`. When the file is not faster, the card
+the Tests page writes it. The Tests page writes `none` on that line when the file has no runs, and `— CPU s` for a
+run with a clock time only. When the issue has no such line, or the line gives no CPU seconds, the check uses the
+file's median on record. This is the median the Tests page shows. The card's `bugproof` line (result `ok` or `fail`) names the file and both numbers: `speed: {file, before,
+after}`. When the file is not faster, the card
 is blocked with "the file is not faster than <the median of its recent runs, or its median on record> (<before> CPU
 s), as the verdict speed up asks: <after> CPU s now", with no review. When the file
 fails, has no CPU seconds on record, or its run gives none, the card is blocked too, with the reason. The review is
