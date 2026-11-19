@@ -6,10 +6,12 @@ import { createRequire } from 'node:module';
 import { read, html, css, LIST, T0, iso, clone, CONTROL_IDS, RULES_IDS, BELT3D_IDS, TAB, OVERVIEW, boot, $, panel, state, pending, deliver, refresh, next, tick, later, seen, act, rulesP, groupEl, heldMany, P, full, SAYS, cases, settle } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
+// A case loads only the panels it reads (`list`): a tab's panels are on the page only while that tab is open, and
+// each panel file a worker loads is code it compiles again, so loading every panel is most of the file's time.
 
 // ---- nothing a source wrote becomes markup, and only a GitHub issue address becomes a link ----
 test('source text is shown as text, never as markup', () => {
-  const w = boot();
+  const w = boot({ list: OVERVIEW });
   const evil = '<img src=x onerror=alert(1)><b>bold</b>';
   const data = full();
   data.panels.belt.data.cards[0].title = evil;
@@ -28,14 +30,14 @@ test('source text is shown as text, never as markup', () => {
   deliver(w, data);
   assert.equal(w.document.querySelectorAll('img, b').length, 0, 'no element came from source text');
   assert.ok(panel(w, 'belt').textContent.includes(evil), 'the text itself is shown');
-  const c = boot({ tab: 'control' });
+  const c = boot({ tab: 'control', list: CONTROL_IDS });
   deliver(c, data);
   assert.equal(c.document.querySelectorAll('img, b').length, 0, 'no element came from source text on the Control tab');
   assert.ok(panel(c, 'board').textContent.includes(evil));
 });
 
 test('an issue number is a link only to a GitHub issue address', () => {
-  const w = boot();
+  const w = boot({ list: ['belt', 'queue'] });
   const data = full();
   data.panels.queue.data.next[0].url = 'javascript:alert(1)';
   data.panels.queue.data.next[1].url = 'https://github.com.evil.example/a/b/issues/21';
@@ -53,7 +55,7 @@ test('an issue number is a link only to a GitHub issue address', () => {
 
 // ---- a refresh leaves a panel alone unless its own data changed ----
 test('a refresh re-renders only the panels whose data changed', () => {
-  const w = boot();
+  const w = boot({ list: OVERVIEW });
   deliver(w, full());
   const kept = Object.fromEntries(OVERVIEW.map((id) => [id, panel(w, id).querySelector('.panel-body').firstElementChild]));
   const same = full();
@@ -71,7 +73,7 @@ test('a refresh re-renders only the panels whose data changed', () => {
 });
 
 test('a time keeps counting between refreshes without a re-render: the time in the step and the overall time', () => {
-  const w = boot();
+  const w = boot({ list: ['belt'] });
   deliver(w, full());
   const row = panel(w, 'belt').querySelector('li[data-key="sample:c3-63"]');
   const t = row.querySelector('.track-now time[data-since]'), all = row.querySelector('.card-times time[data-since]');
@@ -125,7 +127,7 @@ test('the page loads only its own files and is never blank', () => {
   assert.doesNotMatch(html, /<script>|<style|style="|https?:\/\//, 'no inline code or style, and nothing from another host');
   assert.ok((html.match(/class="skeleton"/g) || []).length >= 3, 'placeholders show before the page\'s code has run');
   for (const tab of ['overview', 'control', 'rules']) {
-    const w = boot({ tab });
+    const w = boot({ tab, list: LIST.filter((x) => TAB(x) === tab) });
     for (const id of LIST.filter((x) => TAB(x) === tab)) {
       assert.equal(state(w, id), 'loading');
       assert.ok(panel(w, id).querySelector('.panel-body .skeleton'), `${id} shows a skeleton until its data arrives`);
@@ -159,7 +161,7 @@ test('the loader adds one file per listed panel and starts the page once each ha
 
 // ---- the top bar: is this live ----
 test('the status says whether the data is fresh, stale or missing', () => {
-  const w = boot();
+  const w = boot({ list: [] });
   const word = () => w.document.getElementById('status').textContent;
   assert.equal(word(), 'Loading');
   deliver(w, full());
@@ -175,7 +177,7 @@ test('the status says whether the data is fresh, stale or missing', () => {
 });
 
 test('a first load that fails says so in every panel; a later one keeps the last snapshot', () => {
-  const w = boot();
+  const w = boot({ list: [...OVERVIEW, ...BELT3D_IDS, ...CONTROL_IDS, ...RULES_IDS] });
   pending(w, 'data.js').dispatchEvent(new w.Event('error'));
   assert.equal(w.document.getElementById('status').textContent, 'No data');
   assert.equal(w.document.getElementById('banner').hidden, false);
@@ -207,7 +209,7 @@ test('a first load that fails says so in every panel; a later one keeps the last
 });
 
 test('a heartbeat that stops is a stopped collector, and a changed page reloads itself', async () => {
-  const w = boot();
+  const w = boot({ list: [] });
   const beat = (at, view) => { w.DASH_ALIVE = { at: iso(at), view, snapshotAgeSec: 5, cycleStartedAt: iso(at), lastCycleSec: 3 }; pending(w, 'alive.js').dispatchEvent(new w.Event('load')); };
   deliver(w, full());
   await settle();  // the page's history read is answered: no request in flight
@@ -245,7 +247,7 @@ const answerField = (w) => panel(w, 'needs').querySelector('input[aria-label="An
 const type = (w, field, text) => { field.value = text; field.dispatchEvent(new w.Event('input', { bubbles: true })); };
 
 test('a new copy waits while a Needs you answer has text, says so beside the status mark, and reloads once the field is cleared', async () => {
-  const w = boot();
+  const w = boot({ list: ['needs'] });
   deliver(w, full());
   await settle();
   type(w, answerField(w), 'Ship on Monday');
@@ -264,7 +266,7 @@ test('a new copy waits while a Needs you answer has text, says so beside the sta
 });
 
 test('a new copy that waits on a typed answer reloads once the page is hidden', async () => {
-  const w = boot();
+  const w = boot({ list: ['needs'] });
   deliver(w, full());
   await settle();  // the history read is answered: the draft alone holds the reload
   type(w, answerField(w), 'Ship on Monday');
@@ -275,7 +277,7 @@ test('a new copy that waits on a typed answer reloads once the page is hidden', 
 });
 
 test('the notice\'s Reload button reloads the page', () => {
-  const w = boot();
+  const w = boot({ list: ['needs'] });
   deliver(w, full());
   type(w, answerField(w), 'Ship on Monday');
   newCopy(w);
@@ -284,7 +286,7 @@ test('the notice\'s Reload button reloads the page', () => {
 });
 
 test('a new copy waits while a field has the focus', async () => {
-  const w = boot();
+  const w = boot({ list: ['needs'] });
   deliver(w, full());
   await settle();
   answerField(w).focus();
@@ -297,7 +299,7 @@ test('a new copy waits while a field has the focus', async () => {
 });
 
 test('a new copy waits while a two-click button is armed', async () => {
-  const w = boot();
+  const w = boot({ list: [] });
   deliver(w, full());
   await settle();
   w.document.getElementById('restart').click();
@@ -313,7 +315,7 @@ test('a new copy waits while a two-click button is armed', async () => {
 // Bug: the arm was found by a "Click again" label, so a panel's own two-click button with another label (Rules' "Turn
 // P2 off: skip 2") reloaded the page between its two clicks.
 test('a new copy waits while a panel\'s own two-click button is armed, whatever its label says', () => {
-  const w = boot({ tab: 'rules' });
+  const w = boot({ tab: 'rules', list: ['rules'] });
   deliver(w, full());
   act(rulesP(w), 'rule-P2').click();
   assert.equal(act(rulesP(w), 'rule-P2').textContent, 'Turn P2 off: skip 2');
@@ -328,7 +330,7 @@ test('a new copy waits while a panel\'s own two-click button is armed, whatever 
 // Bug: a question that waits for its confirm with no time limit (Rules' Queue all) was not seen, and the page reloaded
 // under it.
 test('a new copy waits while a question waits for its confirm, until it is cancelled', () => {
-  const w = boot({ tab: 'rules' });
+  const w = boot({ tab: 'rules', list: ['rules'] });
   deliver(w, heldMany());
   act(groupEl(w, 'web'), 'queue-all').click();
   newCopy(w);
@@ -346,7 +348,7 @@ const releaseRec = (repo) => ({ repo, url: `https://github.com/example/${repo}`,
   release: { tag: null, count: 1, next: '1.0.0', notes: true, written: ['1.0.0'], head: 'b'.repeat(40), releases: true, commits: [] } });
 const versions = (w) => Array.from(panel(w, 'release').querySelectorAll('[data-field="version"]'));
 test('a new copy waits while a draft the panel drew again has text', async () => {
-  const w = boot();
+  const w = boot({ list: ['release'] });
   const d = full();
   d.panels.release.data.records = [releaseRec('plugin')];
   deliver(w, d);
@@ -368,7 +370,7 @@ test('a new copy waits while a draft the panel drew again has text', async () =>
 // release" field: after one was typed in and cleared, the other's untouched version counted as typed and held the
 // reload; and a draft in one must still hold it after the other is cleared.
 test('a typed field cleared no longer holds a new copy, though another field has its label and a value', async () => {
-  const w = boot();
+  const w = boot({ list: ['release'] });
   const d = full();
   d.panels.release.data.records = [releaseRec('plugin'), releaseRec('widgets'), releaseRec('tools')];
   deliver(w, d);
@@ -391,7 +393,7 @@ test('a typed field cleared no longer holds a new copy, though another field has
 // Bug: only the fields in the page were looked at: a Needs you draft left on Overview while the owner looked at
 // another tab was lost to a reload.
 test('a new copy waits while a draft has text in a panel of another tab', async () => {
-  const w = boot();
+  const w = boot({ list: ['needs', 'machine'] });
   deliver(w, full());
   const needs = panel(w, 'needs');
   type(w, answerField(w), 'Ship on Monday');
@@ -411,7 +413,7 @@ test('a new copy waits while a draft has text in a panel of another tab', async 
 // Bug (E4): Rules' Undo on the note line kept its armed mark after its arm lapsed (the note is not drawn again), and
 // the page never reloaded.
 test('a new copy waits while the Rules note\'s Undo is armed, and reloads once its arm lapses', async () => {
-  const w = boot({ tab: 'rules' });
+  const w = boot({ tab: 'rules', list: ['rules'] });
   const off = full();
   off.panels.rules.data.control.rules.P2 = false;
   deliver(w, off);
@@ -434,7 +436,7 @@ test('a new copy waits while the Rules note\'s Undo is armed, and reloads once i
 // Bug: a request a panel sent itself (Health's Work now) was not counted, and a counted one stopped counting at its
 // answer's headers, before its body was read: a reload lost the answer.
 test('a new copy waits while a request is in flight, until its answer\'s body is read', async () => {
-  const w = boot();
+  const w = boot({ list: ['health'] });
   let body;
   w.workReply = { ok: true, status: 200, json: () => new Promise((r) => { body = r; }) };
   deliver(w, full());
@@ -454,7 +456,7 @@ test('a new copy waits while a request is in flight, until its answer\'s body is
 
 // Issue 407: a restart costs the collector's time, so it acts on a second click like every such button, and looks it.
 test('the collector can be restarted from the page, on a second click', async () => {
-  const w = boot();
+  const w = boot({ list: [] });
   const restart = w.document.getElementById('restart');
   assert.equal(restart.dataset.guard, 'spend');
   w.reply = { ok: true, status: 202, text: () => Promise.resolve('restarting') };
@@ -474,8 +476,10 @@ test('the collector can be restarted from the page, on a second click', async ()
 });
 
 // ---- the live feed: the page server's /events ----
+// The page, not a panel, decides what the feed draws: three panels are enough to see one drawn and the others not.
+const FEW = ['belt', 'queue', 'health'];
 test('the live feed: its snapshot draws the page, a change redraws only its own panel, and data.js is read only while it is closed', () => {
-  const w = boot({ feed: true });
+  const w = boot({ feed: true, list: FEW });
   assert.deepEqual(w.sources.map((s) => s.url), ['events'], 'the page opens one feed, at its own address');
   const es = w.sources[0];
   // Issue 565: the feed's first message is the whole of data.js, so a page with a feed does not read data.js too at start.
@@ -484,8 +488,8 @@ test('the live feed: its snapshot draws the page, a change redraws only its own 
   es.readyState = 1; es.emit('open');
   es.emit('snapshot', full());
   // Only the tab in view is drawn: Overview's panels.
-  for (const id of OVERVIEW) assert.equal(state(w, id), 'ready');
-  const before = Object.fromEntries(OVERVIEW.map((id) => [id, Number(panel(w, id).dataset.renders)]));
+  for (const id of FEW) assert.equal(state(w, id), 'ready');
+  const before = Object.fromEntries(FEW.map((id) => [id, Number(panel(w, id).dataset.renders)]));
   const part = clone(full().panels.belt);
   part.data.cards[0].live = { turns: 7, lastOutputAt: iso(T0 - 4000), action: 'Bash: npm test' };
   es.emit('panel', { id: 'belt', part, updatedAt: iso(T0) });
@@ -493,7 +497,7 @@ test('the live feed: its snapshot draws the page, a change redraws only its own 
   for (const s of ['now: running a command', '7 model replies', '4 s since its last output']) assert.ok(belt.includes(s), `the belt shows "${s}": ${belt}`);
   assert.equal(panel(w, 'belt').querySelector('.live-action').dataset.tip, 'Bash: npm test', 'the command itself on tap');
   assert.equal(Number(panel(w, 'belt').dataset.renders), before.belt + 1, 'the panel the change is for is drawn again');
-  for (const id of OVERVIEW) if (id !== 'belt') assert.equal(Number(panel(w, id).dataset.renders), before[id], `${id} is not drawn again`);
+  for (const id of FEW) if (id !== 'belt') assert.equal(Number(panel(w, id).dataset.renders), before[id], `${id} is not drawn again`);
   assert.equal($(w, '#updated').textContent, 'under a minute ago', 'the change carries when it was published');
   refresh(w);
   assert.equal(pending(w, 'data.js'), null, 'no data.js is read while the feed is open');
@@ -506,7 +510,7 @@ test('the live feed: its snapshot draws the page, a change redraws only its own 
 });
 
 test('the live feed: a feed that does not open at start has the page read data.js at once, and once', () => {
-  const w = boot({ feed: true });
+  const w = boot({ feed: true, list: FEW });
   const es = w.sources[0];
   assert.equal(pending(w, 'data.js'), null);
   // The feed fails before it opens (the browser tries again): the page does not wait for the next refresh to draw.
@@ -515,11 +519,11 @@ test('the live feed: a feed that does not open at start has the page read data.j
   es.emit('error');
   assert.equal(w.document.head.querySelectorAll('script[src^="data.js"]').length, 1, 'a second failed try does not ask for data.js again');
   deliver(w, full());
-  for (const id of OVERVIEW) assert.equal(state(w, id), 'ready', `${id} is drawn from data.js`);
+  for (const id of FEW) assert.equal(state(w, id), 'ready', `${id} is drawn from data.js`);
 });
 
 test('the live feed: a data.js asked for before the feed\'s snapshot, answering after it, is not drawn over it', () => {
-  const w = boot({ feed: true });
+  const w = boot({ feed: true, list: FEW });
   const es = w.sources[0];
   es.readyState = 0; es.emit('error');
   deliver(w, full());
@@ -536,10 +540,10 @@ test('the live feed: a data.js asked for before the feed\'s snapshot, answering 
   es.emit('snapshot', newer);
   assert.ok(panel(w, 'belt').querySelector('.live-action')?.dataset.tip === 'Bash: newer');
   // The old data.js answers now: it is dropped, and every panel stays the feed's.
-  const renders = Object.fromEntries(OVERVIEW.map((id) => [id, Number(panel(w, id).dataset.renders)]));
+  const renders = Object.fromEntries(FEW.map((id) => [id, Number(panel(w, id).dataset.renders)]));
   deliver(w, full());
   assert.ok(panel(w, 'belt').querySelector('.live-action')?.dataset.tip === 'Bash: newer', 'the older data.js did not draw over the feed\'s snapshot');
-  for (const id of OVERVIEW) assert.equal(Number(panel(w, id).dataset.renders), renders[id], `${id} is not drawn again from the old data.js`);
+  for (const id of FEW) assert.equal(Number(panel(w, id).dataset.renders), renders[id], `${id} is not drawn again from the old data.js`);
   // The same when the feed opened and closed again before data.js answered: its snapshot is newer all the same.
   es.readyState = 0; es.emit('error');
   refresh(w);
@@ -555,7 +559,7 @@ test('the live feed: a data.js asked for before the feed\'s snapshot, answering 
 });
 
 test('health says how old what the page shows is: Live, or the seconds since the host was last heard, counting', () => {
-  const w = boot({ feed: true });
+  const w = boot({ feed: true, list: ['health'] });
   const es = w.sources[0];
   const data = full();
   data.panels.health.data.stream = { live: false, heardAt: iso(T0 - 12000), since: iso(T0 - 9000), error: 'buildhost: no line in 30 s' };
@@ -582,7 +586,7 @@ test('health says how old what the page shows is: Live, or the seconds since the
 });
 
 test('health stops saying Live when the live feed stops writing, with no new data to say so', () => {
-  const w = boot({ feed: true });
+  const w = boot({ feed: true, list: ['health'] });
   const es = w.sources[0];
   const data = full();
   data.panels.health.data.stream = { live: true, heardAt: iso(T0), since: null, error: null, writtenAt: iso(T0) };
@@ -607,7 +611,7 @@ test('health stops saying Live when the live feed stops writing, with no new dat
 });
 
 test('the live feed: a change to a panel of the other tab is kept and drawn when that tab opens; its count on the tab moves at the next frame', () => {
-  const w = boot({ feed: true });
+  const w = boot({ feed: true, list: ['rules'] });
   const es = w.sources[0];
   es.readyState = 0; es.emit('error'); // the feed opens after a first failed try: the page is drawn from data.js meanwhile
   deliver(w, full());
@@ -626,7 +630,7 @@ test('the live feed: a change to a panel of the other tab is kept and drawn when
 });
 
 test('the seconds since a running step\'s last output count each second', () => {
-  const w = boot({ feed: true });
+  const w = boot({ feed: true, list: ['belt'] });
   const es = w.sources[0];
   es.readyState = 0; es.emit('error'); // the feed opens after a first failed try: the page is drawn from data.js meanwhile
   deliver(w, full());
@@ -640,7 +644,7 @@ test('the seconds since a running step\'s last output count each second', () => 
 });
 
 test('health has no age line for a reading that names no stream', () => {
-  const w = boot();
+  const w = boot({ list: ['health'] });
   deliver(w, full());
   assert.doesNotMatch(panel(w, 'health').textContent, /Data|s old|Live/);
 });
