@@ -537,4 +537,3 @@ t_pack() {
   PATH=${np%:} fx_in clis
   [ "$RC" = 0 ] || fail "a pack that lists Codex models was held for codex with no seat on it: $(cat "$T/$CASE/run.out")"
 }
-
