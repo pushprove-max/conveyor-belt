@@ -186,7 +186,7 @@ test('#791: step 2 shows the mode of the run under way and of the last run, from
   next(w, data({ ...RUN, ended: '2026-11-14T08:15:00Z', state: 'passed', mode: 'parallel', failed: 0, cases: [], reused: { sha: HEAD, time: '2026-11-14T07:00:00Z', ran: [], kept: 9 } }));
   assert.equal(mode(), null, 'a run that reused the earlier green run ran no file itself');
   assert.equal(mode(), null, 'a reused result ran no file');
-  // Bug this guards (#820): a run that reran only some files and kept the other passes ran those files in its mode.
+  // Bug this guards (#820): a run that reran only some files and kept the other green results ran those files in its mode.
   next(w, data({ ...RUN, ended: '2026-11-14T08:15:00Z', state: 'passed', mode: 'parallel', failed: 0, cases: [], reused: { sha: HEAD, time: '2026-11-14T07:00:00Z', ran: ['a.test.sh'], kept: 8 } }));
   assert.equal(mode(), 'Ran its test files in parallel', 'a run that reran some files says its mode');
   // Bug this guards: step 2 hid the mode while `conveyor.sh release` ran the suite itself (its record's mode is its
@@ -195,16 +195,16 @@ test('#791: step 2 shows the mode of the run under way and of the last run, from
   assert.equal(mode(), 'Runs its test files in parallel', 'release running the suite says its mode');
 });
 
-// Bug this guards (#820): docs/board.md said a run keeps every earlier pass only when it runs no files, so a run that
-// reran some files and kept the other passes (the case above) read as having no mode. A text check: a guide page has no
+// Bug this guards (#820): docs/board.md said a run keeps every earlier green result only when it runs no files, so a
+// run that reran some files and kept the other green results (the case above) read as having no mode. A text check: a guide page has no
 // behaviour to run.
-test('#820: the guide says a run that reruns some files and keeps the other passes shows its mode', () => {
+test('#820: the guide says a run that reruns some files and keeps the other green results shows its mode', () => {
   const guide = readFileSync(new globalThis.URL('../../../docs/board.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
-  assert.doesNotMatch(guide, /keeps every pass of an earlier run, because that run runs no test files/);
-  // E1: a run with no files may keep the passes of an earlier commit, so the guide must not limit it to the same commit.
+  assert.doesNotMatch(guide, /keeps every [p]ass of an earlier run, because that run runs no test files/);
+  // E1: a run with no files may keep the green results of an earlier commit, so the guide must not limit it to the same commit.
   assert.doesNotMatch(guide, /passed every file on the same commit/);
-  assert.match(guide, /no mode for a run that runs no test files and keeps the passes of an earlier run, on the same commit or an earlier one\./);
-  assert.match(guide, /A run that runs only some files again, and keeps the passes of the other files, shows its mode\./);
+  assert.match(guide, /no mode for a run that runs no test files and keeps the [p]asses of an earlier run, on the same commit or an earlier one\./);
+  assert.match(guide, /A run that runs only some files again, and keeps the [p]asses of the other files, shows its mode\./);
 });
 
 // Bug this guards (#253): a case stopped at its file's `# timeout:` limit showed only as a failed file, so a hung case
