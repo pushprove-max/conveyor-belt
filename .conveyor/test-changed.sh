@@ -58,6 +58,7 @@
 # and with neither mark it is not run, and fails; its run of chosen cases is not, and runs whatever its mark.
 # Every run also runs the test lint (.conveyor/test-lint.sh): a sleep-then-check in any test file fails the run.
 # And shellcheck on the changed .sh files: a warning on a line the change added or changed fails the run (below).
+# And `claude plugin validate` when the change touches hooks/, types/ or .claude-plugin/: an error fails the run (below).
 # In one-file mode in a test step these checks run once a tree, and later runs of that tree reuse their result.
 # A run again of the same change (conveyor.sh tests(): CONVEYOR_TEST_RERUN names what passed and what failed) runs
 # no file that passed, and of the engine's runner only the cases that failed, when the run before named them, else
@@ -282,10 +283,11 @@ metarunners() {
 }
 if [ "${1:-}" = --check ]; then mapcheck; r=$?; covage; metarunners; exit $r; fi
 mapfile -t changed < <({ git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u)
-# checks: the checks every run makes (the map check, the test lint, no browser tests, shellcheck), printing what they
+# checks: the checks every run makes (the map check, the test lint, no browser tests, shellcheck, the plugin's
+# validate when the change touches it), printing what they
 # find; exit 1 when one fails. In one-file mode in a test step they run once a tree (below), not on every run.
 checks() {
-local rc=0 scfiles bang nobang keep new f
+local rc=0 scfiles bang nobang keep new f pv pvout moved
 mapcheck || rc=1
 covage
 # The test lint, with the map check: a test that sleeps a set time and then checks fails the run (test-lint.sh).
@@ -312,6 +314,29 @@ elif [ ${#scfiles[@]} -gt 0 ]; then
     | awk -F: -v k="$keep" 'BEGIN { n = split(k, a, "\n"); for (i = 1; i <= n; i++) keep[a[i]] = 1 }
       ($1 ":" $2) in keep || ($1 ":all") in keep')
   [ -z "$new" ] || { echo "shellcheck: a new warning on a line this change added or changed:"; echo "$new"; rc=1; }
+fi
+# Claude Code's own check of the plugin, with the map check too (issue 604): a change to the mod (hooks/), its types
+# contract (types/) or its manifest (.claude-plugin/) runs `claude plugin validate` on the worktree. An error
+# ("✘ Validation failed", or a failed exit) fails the run, printed with its error lines; a warning does not. With no
+# `claude`, the run says the check could not run and fails, so a change to the mod never lands unchecked. It is a
+# static check: it runs no test file. A change to none of those paths does not run it.
+pv=
+# The paths both sides of a move (--no-renames): a file moved out of those directories changes the plugin too.
+mapfile -t moved < <(git diff --name-only --no-renames HEAD)
+for f in "${changed[@]}" "${moved[@]}"; do
+  case $f in hooks/*|types/*|.claude-plugin/*) pv=$f; break ;; esac
+done
+if [ -n "$pv" ] && ! command -v claude > /dev/null; then
+  echo "claude plugin validate: could not run, claude is not installed: $pv changed and the plugin is not checked"; rc=1
+elif [ -n "$pv" ] && { ! pvout=$(claude plugin validate . 2>&1) || grep -q '✘ Validation failed' <<<"$pvout"; }; then
+  echo "claude plugin validate: the plugin fails Claude Code's check ($pv changed):"
+  # Each `✘ Found <n> error(s)` block's lines, under the `Validating` line they are of, and the result line (not the
+  # plugin directory's `✘ Found <n> problem` block, which does not change the result); when there is none (the command
+  # failed some other way), its last lines.
+  new=$(awk '/^Validating / { h = $0 } /^✘ Found [0-9]+ errors?:/ { print h; print; on = 1; s = 0; next }
+    on && /^  / { print; s = 1; next } on && s && /^$/ { on = 0 } /^✘ Validation failed/ { print }' <<<"$pvout")
+  if [ -n "$new" ]; then echo "$new"; else tail -n 20 <<<"$pvout"; fi
+  rc=1
 fi
 return $rc
 }

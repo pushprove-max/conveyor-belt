@@ -22,7 +22,8 @@ R=$T/r; mkdir -p "$R/.conveyor" "$R/hooks" "$R/bin"
 cp "$HERE/test-changed.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$R/.conveyor/"
 echo '{"outside": "conveyor/README.md"}' > "$R/.conveyor/engine-areas.json"
 for s in a b; do echo "export const $s = 1" > "$R/hooks/$s.ts"; printf "test('%s one', () => {})\ntest('%s two', () => {})\n" "$s" "$s" > "$R/hooks/$s.test.tsx"; done
-printf '%s\n' '#!/usr/bin/env bash' '[ "$1 $2" = "plugin test" ] || exit 2' 'echo run >> "$(dirname "$0")/../runs"' \
+# Its `plugin validate` (the checks' run of it on a change to hooks/: issue 604) passes.
+printf '%s\n' '#!/usr/bin/env bash' '[ "$1 $2" != "plugin validate" ] || { echo "✔ Validation passed"; exit 0; }' '[ "$1 $2" = "plugin test" ] || exit 2' 'echo run >> "$(dirname "$0")/../runs"' \
   'cat "$(dirname "$0")/../plugin-out"' '! grep -q "^(fail)" "$(dirname "$0")/../plugin-out"' > "$R/bin/claude"
 chmod +x "$R/bin/claude"
 printf 'runs\nplugin-out\nlog/\n' > "$R/.gitignore"
