@@ -710,6 +710,10 @@ sys.stdout.write(urllib.request.build_opener(SameOrigin).open(req, timeout=10).r
   [ -n "$m" ] || { echo "the reviewer model $1 is a family name and no gpt-<version>-$1 is in $([ -n "$base" ] && echo "the models of ${base%/}/models or ")Codex's models_cache.json: set models.allowed.codex in .conveyor/project.json (and the control record's reviewer) to the full model id"; return 1; }
   echo "$m"
 }
+# Doctor's answers of codexmodel() for Codex's family names, by "<role>:<family>", a failed one too: modelswarn()
+# (lib/setup.sh) fills it as it resolves them, and routes() takes a role's from it, so one doctor asks for each family
+# once for each route.
+declare -gA CODEXMODEL_V=()
 # Before a card starts: the reviewer in force, when Codex runs it, resolves to a model id (codexmodel).
 codexready() {
   local s m a PROXY_ROLE=reviewer # the reviewer's route (proxyroute())
@@ -749,7 +753,7 @@ routesub() { # <claude|codex>
 # fix and rebase. A Claude role is checked on the account its cards run on (cardaccts()): the builder's the control
 # record's account, the reviewer's its reviewAccount, else that account.
 routes() {
-  local r s m a p name base env rc=0 PROXY_ROLE w c l k CALL_ACCT
+  local r s m a p name base env rc=0 PROXY_ROLE w c l k v CALL_ACCT
   proxypack; k=$(ctl 2>/dev/null) || k=null
   for r in builder reviewer; do
     PROXY_ROLE=$r
@@ -772,7 +776,9 @@ routes() {
     elif [ "$a" = opencode ]; then p=${m#opencode:}; echo "$r: $m (opencode) through its provider ${p%%/*}, as OpenCode's own config and sign-in set it"
     else
       name='' base='' env=''; IFS=$'\037' read -r name base env < <(codexproxy)
-      m=$(codexmodel "$m") || { echo "$r: $m"; rc=1; continue; }
+      if [ -n "${CODEXMODEL_V[$r:$m]:-}" ]; then # "<codexmodel's exit status>\037<what it printed>"
+        v=${CODEXMODEL_V[$r:$m]}; m=${v#*$'\037'}; [ "${v%%$'\037'*}" = 0 ] || { echo "$r: $m"; rc=1; continue; }
+      else m=$(codexmodel "$m") || { echo "$r: $m"; rc=1; continue; }; fi
       p=$(codexproxyset); w=$(proxyrole codex); c=''
       if [ "$w" = fallback ]; then
         l=0; c=$(routecheck codex "$m" login) && l=1; c+=$(routecheck codex "$m" route "$p") && l=1; [ $l = 1 ] || rc=1

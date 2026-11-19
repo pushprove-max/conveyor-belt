@@ -358,17 +358,24 @@ t_proxytool() {
   [ "$(ENV0=env0-secret pxenv)" = "$(printf 'ANTHROPIC_AUTH_TOKEN=env0-secret\nANTHROPIC_BASE_URL=%s\nENABLE_TOOL_SEARCH=false' "$base")" ] \
     || fail "a key in a variable named ENV0 did not reach the session: $(ENV0=env0-secret pxenv)"
 }
+# Each whole doctor asks the proxy once for the reviewer's family, with the key (bug #822: modelswarn() and routes()
+# each asked it, and the auth log held two lines). Each run is given its host report of Codex's models (clis.json, as
+# doctor reads it while fresh): a list, so modelswarn() resolves the family and routes() takes its answer; no list, so
+# modelswarn() asks for no family, astra included (the pack's, not a seat's); a list but no sol in the proxy's list or
+# models_cache.json, so routes() takes modelswarn()'s failed answer and names the setting.
 t_proxykeys() {
   proxy_start 7
-  : > "$STUB/auth"; sed -i 's/env_key = "PROXY_KEY"/env_key = "key"/' "$CODEX_HOME/config.toml"
+  clis() { jq -cn --argjson c "$1" '{at: (now | floor), clis: {codex: $c}}' > "$ST/clis.json"; } # <Codex's list, or null>
+  : > "$STUB/auth"; sed -i 's/env_key = "PROXY_KEY"/env_key = "key"/' "$CODEX_HOME/config.toml"; clis '["gpt-6.10-sol"]'
   key=key-secret doctorroutes | grep '^reviewer: gpt-6.10-sol ' >/dev/null || fail "doctor failed with the key in a variable named key"
-  [ "$(cat "$STUB/auth")" = "Bearer key-secret" ] || fail "a key in a variable named key was not sent: $(cat "$STUB/auth")"
-  : > "$STUB/auth"; sed -i 's/env_key = "key"/env_key = "e"/' "$CODEX_HOME/config.toml"
+  [ "$(cat "$STUB/auth")" = "Bearer key-secret" ] || fail "a key in a variable named key was not sent, or sent twice: $(cat "$STUB/auth")"
+  : > "$STUB/auth"; sed -i 's/env_key = "key"/env_key = "e"/' "$CODEX_HOME/config.toml"; clis null; tune '.models.allowed.codex += ["astra"]'
   e=e-secret doctorroutes | grep '^reviewer: gpt-6.10-sol ' >/dev/null || fail "doctor failed with the key in a variable named e"
-  [ "$(cat "$STUB/auth")" = "Bearer e-secret" ] || fail "a key in a variable named e was not sent: $(cat "$STUB/auth")"
-  : > "$STUB/auth"; sed -i 's/env_key = "e"/env_key = "ENV0"/' "$CODEX_HOME/config.toml"
-  ENV0=env0-secret doctorroutes | grep '^reviewer: gpt-6.10-sol ' >/dev/null || fail "doctor failed with the key in a variable named ENV0"
-  [ "$(cat "$STUB/auth")" = "Bearer env0-secret" ] || fail "a key in a variable named ENV0 was not sent: $(cat "$STUB/auth")"
+  [ "$(cat "$STUB/auth")" = "Bearer e-secret" ] || fail "a key in a variable named e was not sent, or the proxy was asked for a family with no list to warn against: $(cat "$STUB/auth")"
+  : > "$STUB/auth"; sed -i 's/env_key = "e"/env_key = "ENV0"/' "$CODEX_HOME/config.toml"; tune '.models.allowed.codex -= ["astra"]'
+  echo '{"data":[{"id":"gpt-7-astra"}]}' > "$STUB/models"; echo '{"models":[{"slug":"gpt-7-astra"}]}' > "$CODEX_HOME/models_cache.json"; clis '["gpt-7-astra"]'
+  ENV0=env0-secret doctorroutes | grep '^reviewer: the reviewer model sol is a family name .*models.allowed.codex' >/dev/null || fail "doctor with no sol model did not name the setting"
+  [ "$(cat "$STUB/auth")" = "Bearer env0-secret" ] || fail "a key in a variable named ENV0 was not sent, or the unresolved family was asked for twice: $(cat "$STUB/auth")"
 }
 t_proxyfetch() {
   proxy_start 7

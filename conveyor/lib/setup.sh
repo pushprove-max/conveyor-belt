@@ -761,11 +761,20 @@ narrowwarn() {
 # model (an empty codex list takes none of Codex's), for OpenCode when the pack lists none, or for a CLI whose report
 # has no list (null: Codex installed with no models cache that reads, say).
 modelswarn() {
-  local p h f r s fam='[]'
+  local p h f r s='' fam='[]'
   packget models.allowed p 2>/dev/null && [ -n "$p" ] && h=$(hostclis due 2>/dev/null) || return 0
-  for s in codex:reviewer codex-builder:builder; do
+  # Codex's families are resolved only when its report has a list to warn against: with no list the answer is never
+  # used. Each answer, a failed one too, is kept in CODEXMODEL_V, so doctor's routes() does not resolve the role's family
+  # again (codexmodel() asks the proxy when Codex has one, and reads models_cache.json when there is none, when it does
+  # not answer or when its list has none of the family).
+  jq -e '.codex | arrays' <<<"$h" >/dev/null 2>&1 || s=none
+  [ "$s" = none ] || for s in codex:reviewer codex-builder:builder; do
     while IFS= read -r f; do
-      [ -z "$f" ] || ! r=$(PROXY_ROLE=${s#*:} codexmodel "$f" 2>/dev/null) || [ -z "$r" ] || fam=$(jq -c --arg f "$f" '. + [$f]' <<<"$fam")
+      [ -n "$f" ] || continue
+      # shellcheck disable=SC2034 # CODEXMODEL_V is read by routes() in lib/control.sh
+      if r=$(PROXY_ROLE=${s#*:} codexmodel "$f" 2>/dev/null); then CODEXMODEL_V[${s#*:}:$f]=0$'\037'$r
+        [ -z "$r" ] || fam=$(jq -c --arg f "$f" '. + [$f]' <<<"$fam")
+      else CODEXMODEL_V[${s#*:}:$f]=1$'\037'$r; fi
     done < <(jq -r --arg k "${s%%:*}" '.[$k] // [] | arrays | .[] | strings | select(test("^[a-z]{2,}$"))' <<<"$p" 2>/dev/null)
   done
   jq -r --argjson h "$h" --argjson fam "$fam" '. as $p | [{c: "codex", n: "Codex", k: "codex", a: "", on: ($p.codex // [] | any(strings)), l: (($p.codex // []) + ($p["codex-builder"] // [])), x: $fam},
