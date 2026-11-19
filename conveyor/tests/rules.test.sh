@@ -48,6 +48,11 @@ EOS
       && [ "$(grep -nx '# Rules' "$STUB/prompt.$i" | cut -d: -f1)" -gt "$(grep -n 'keeps the work\.$' "$STUB/prompt.$i" | head -n 1 | cut -d: -f1)" ] \
       || fail "session $i ($k): the rules do not come after the header"
   done
+  # Bug (#779): a card session is not told that a test checks its behaviour directly, and that a proxy check (other
+  # test files, the real loop, polling) says why in a comment. This reads the prompt of the case's `loop run` above, not
+  # the rules file: only the prompt the loop hands the build session shows the rule reaches the session.
+  grep -qxF -- '- A test the card adds or changes checks the behaviour it protects directly. A test that runs other test files or the suite runner, runs the real loop, or polls a real process until a condition holds says why in a comment beside it: what a direct check cannot show. A reviewer flags one with no such comment as P3.' "$STUB/prompt.1" \
+    || fail "the build session was not given the direct-check rule"
   for i in 1 2 3 4; do
     [ "$(grep -cx '# Rules' "$STUB/asked.$i")" = 1 ] && [ "$(sed -n '/^# Rules$/,/^# Issue #7:/p' "$STUB/asked.$i" | sed '1,2d;$d')" = "$(cat "$f")" ] \
       || fail "review $i was not given the card rules, once, before the issue"

@@ -63,6 +63,10 @@ card, and the judge does not read it. The card's commit message has each one as 
 it, and the Landed today panel shows it under the card. The reviewer's steps come first, then the builder's, each in
 the order it was written.
 
+A test that a card adds or changes must check its behaviour directly. Some tests run other test files or the suite
+runner, run the real loop, or poll a real process until a condition holds. Such a test needs a comment beside it that
+says what a direct check cannot show. The reviewer raises a test with no such comment as a P3 finding.
+
 A project lists what it knowingly lives with under the heading `## Accepted limits` in its own `README.md`. Every
 card's reviewer reads that section and does not raise what it lists.
 

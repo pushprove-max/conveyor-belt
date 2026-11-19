@@ -43,6 +43,11 @@ t_reviewprompt() {
   ! grep -qF 'as its own finding' "$a.flat" || fail "the review prompt still asks for each place of one mistake as its own finding"
   # The card rules the reviewer is handed come after that introduction.
   grep -qx '# Rules' "$a" || fail "the reviewer was not handed the card rules"
+  # Bug (#779): the reviewer is not told that a test checks its behaviour directly, and that a proxy check with no
+  # comment saying why is a P3 finding. This reads the prompt of the case's one `loop run`, not the rules file: only the
+  # prompt the loop hands the reviewer shows the rule reaches the review (the file alone could be left out of it).
+  sed -n '/^# Rules$/,/^# Issue #7:/p' "$a" | grep -qF 'checks the behaviour it protects directly. A test that runs other test files or the suite runner, runs the real loop, or polls a real process until a condition holds says why in a comment beside it: what a direct check cannot show. A reviewer flags one with no such comment as P3.' \
+    || fail "the reviewer's card rules lack the direct-check rule"
   # The user-visible and approved-scope lines, word for word as they were (owner and product paths filled in), with
   # the ROLLOUT line between NEW CARD and them.
   cat > "$a.want" <<'EOF'

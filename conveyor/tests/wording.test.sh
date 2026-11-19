@@ -20,6 +20,10 @@ t_wording() {
   grep -q '^Angle 3 of 3, tests and words' <<<"$a" && ! grep -q '^Correctness bugs' <<<"$a" || fail "the adversarial wording: $a"
   head -1 <<<"$r" | grep -qx 'Correctness bugs, security problems and missing tests in the changed lines.' && grep -q '^Severity: critical is P0' <<<"$r" \
     && ! grep -q '^Angle' <<<"$r" || fail "the review wording: $r"
+  # Bug (#779): a review is not told to raise a proxy test (other test files, the real loop, polling) with no comment
+  # saying why as a low finding.
+  grep -qF 'Proxy tests: a test the change adds or changes that runs other test files or the suite runner, runs the real loop, or polls a real process until a condition holds, with no comment beside it that says what a direct check cannot show, is a low finding (P3).' <<<"$r" \
+    || fail "the review wording lacks the direct-check rule: $r"
 }
 
 # Bugs: the pack's review.wording is not read, or a file with a section missing is used anyway (the command must
