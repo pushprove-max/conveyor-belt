@@ -12,21 +12,40 @@
 # files before the push, pushtests(); with the default pack it runs none).
 nopush() { jq -c '.rules.push = false' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json" || fail "the control record"; }
 
-# One card of #7 with the given labels ($PREP, when set, is run after setup, before the loop): its build fixes a.txt (adds `two`; runs $FIX in its place when set, `:` for no
-# fix) and, unless <test> is empty, adds a.test.sh (or the file $TF names) holding <test>. The run on main (a worktree under cards/mainrun/) notes its folder and staged files in
-# $STUB/mainran and runs that test file, or what $MAINRUN holds when set; the reviewer's prompt is kept in $STUB/asked;
-# one GO review. $TUNE, when set, is a jq filter of the pack (tune). No push (nopush).
+# One card of #7 with the given labels, run by the loop: the cases of card()'s wiring of bugproof()'s exits (a proven
+# card lands, an unproven one goes back to build then is blocked, a card that is not a bug skips the check), which only
+# a whole card shows. Its build fixes a.txt (adds `two`) and adds a.test.sh holding <test>. The run on main (a worktree
+# under cards/mainrun/) notes its folder and staged files in $STUB/mainran and runs a.test.sh; the reviewer's prompt
+# is kept in $STUB/asked; one GO review. No push (nopush).
 bugcard() { # <test> <label>...
-  # shellcheck disable=SC2034 # tf is read in the build's and the run's commands below
-  local t=$1 tf=${TF:-a.test.sh}; shift
+  local t=$1; shift
   setup "[$(issue 7 2026-01-01 "$@")]"; nopush
-  [ -z "${TUNE:-}" ] || tune "$TUNE"
-  [ -z "${PREP:-}" ] || eval "$PREP"
   sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
   echo "$GO" > "$STUB/review.1"
-  echo "${FIX-echo two >> a.txt}${t:+; mkdir -p \"\$(dirname '$tf')\"; printf '%s\n' '$t' > '$tf'}" > "$STUB/build"
-  echo '{ pwd; git diff --cached --name-only; } >> "$STUB/mainran"; '"${MAINRUN:-bash '$tf'}" > "$STUB/mainrun-cmd"
+  echo "echo two >> a.txt; printf '%s\n' '$t' > a.test.sh" > "$STUB/build"
+  echo '{ pwd; git diff --cached --name-only; } >> "$STUB/mainran"; bash a.test.sh' > "$STUB/mainrun-cmd"
   loop run >/dev/null || fail "run exited non-zero"
+}
+
+# bugproof() called as card() calls it, on card c7 of #7 ($ISSUE, when set, is its issue json): its worktree on main
+# runs <change>, staged, and main holds the <file> <content> pairs first (fx_wt). Each run on main runs
+# $STUB/mainrun-cmd, which the case writes after setup. The check's exit is in $RC, its reason (BUGWHY) in $BW.
+bugwt() { # <change> [<file> <content>]...
+  local ISSUE=${ISSUE:-'{"number": 7}'}
+  fx_wt "$@"
+  fx_in 'bugproof c7 "$FXWT" "$ISSUE"; r=$?; printf "%s\n" "$BUGWHY" > "$T/$CASE/bugwhy"; exit $r'
+  BW=$(cat "$T/$CASE/bugwhy" 2>/dev/null)
+}
+# bugwt() on a change that fixes a.txt (adds `two`; runs $FIX in its place when set, `:` for no fix) and, unless
+# <test> is empty, writes <test> into a.test.sh (or the file $TF names), which main holds as `true`; main holds the
+# <file> <content> pairs too. Each run on main notes its folder and staged files in $STUB/mainran and runs that test
+# file. $TUNE, when set, is a jq filter of the pack (tune).
+bugtest() { # <test> [<file> <content>]...
+  local t=$1 tf=${TF:-a.test.sh}; shift
+  setup '[]'
+  [ -z "${TUNE:-}" ] || tune "$TUNE"
+  echo '{ pwd; git diff --cached --name-only; } >> "$STUB/mainran"; '"bash '$tf'" > "$STUB/mainrun-cmd"
+  bugwt "${FIX-echo two >> a.txt}${t:+; mkdir -p \"\$(dirname '$tf')\"; printf '%s\n' '$t' > '$tf'}" a.test.sh true "$@"
 }
 
 # D1. Bug it catches: a bug card whose new test fails without the fix (it proves the fix) is sent back to build, or
@@ -64,28 +83,27 @@ t_bugpasses() {
 # Bug it catches: the proof run had no time limit for one hung test, so a new test that waits for what the unfixed
 # code never writes held its card until stopped by hand. Here it hangs on main's code; its file's `# timeout: 2` line
 # stops the file there, far before the run's own limit (testTimeout 15 s, the limit a file with no such line has, as in
-# t_bughungdefault): the run's output and the review name a.test.sh as timed out at 2 s, not 15 s, it counts as failing
-# without the fix, and the card lands after one build.
+# t_bughungdefault): the result names a.test.sh as timed out at 2 s, not 15 s, and it counts as failing without the
+# fix (the check holds).
 t_bughung() {
-  TUNE='.tunables.testTimeout = 15' bugcard $'# timeout: 2\nuntil grep -qx two a.txt; do sleep 0.2; done' bug # sleep: the new test's own wait, which never ends on main's code
+  TUNE='.tunables.testTimeout = 15' bugtest $'# timeout: 2\nuntil grep -qx two a.txt; do sleep 0.2; done' # sleep: the new test's own wait, which never ends on main's code
   hungsaid 2 'it was stopped there' 124 # 124: a file past its own limit ends the run as timed out (filecmd())
 }
-# The checks of t_bughung and t_bughungdefault: the review is shown a.test.sh timed out at <seconds> (the output's
-# line ends `and <stop>`; the run's exit <exit>), counted as failing without the fix, and the card lands after one build.
+# The checks of t_bughung and t_bughungdefault: the result says a.test.sh timed out at <seconds> (the output's line
+# ends `and <stop>`; the run's exit <exit>), counted as failing without the fix, and the check holds.
 hungsaid() { # <seconds> <stop> <exit>
-  grep -qxF "conveyor: a.test.sh timed out: it ran past its time limit, $1 s, and $2" "$STUB/asked" \
-    && grep -q "^The run failed there (exit $3): at least one fails without the fix" "$STUB/asked" \
-    && grep -qxF "a.test.sh timed out: it ran past its time limit, $1 s, and was stopped. A test that hangs without the fix counts as failing without it." "$STUB/asked" \
-    || fail "the proof run was not stopped at the hung file's limit, naming it, and counted as failing: $(grep -A 40 '# The bug-card check' "$STUB/asked" 2>&1 | head -40)"
-  [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ -n "$(st 'select(.step == "landed") | .sha')" ] \
-    || fail "a card whose new test hangs without the fix did not land after one build: $(st 'select(.step | IN("build", "blocked"))')"
+  grep -qxF "conveyor: a.test.sh timed out: it ran past its time limit, $1 s, and $2" "$FXWT.unfixed" \
+    && grep -q "^The run failed there (exit $3): at least one fails without the fix" "$FXWT.unfixed" \
+    && grep -qxF "a.test.sh timed out: it ran past its time limit, $1 s, and was stopped. A test that hangs without the fix counts as failing without it." "$FXWT.unfixed" \
+    || fail "the proof run was not stopped at the hung file's limit, naming it, and counted as failing: $(head -40 "$FXWT.unfixed" 2>&1)"
+  [ "$RC" = 0 ] || fail "a new test that hangs without the fix did not prove it (exit $RC): $BW"
 }
 
 # Bug it catches: a hung new test whose file has no `# timeout:` line was stopped by the run's own limit (testTimeout,
 # 4 s here) with nothing naming it, so the run gave no failing file and did not count as proof; the card went back to
 # build. The file is named as timed out at the testTimeout limit and counts as failing without the fix.
 t_bughungdefault() {
-  TUNE='.tunables.testTimeout = 4' bugcard 'until grep -qx two a.txt; do sleep 0.2; done' bug # sleep: the new test's own wait, which never ends on main's code
+  TUNE='.tunables.testTimeout = 4' bugtest 'until grep -qx two a.txt; do sleep 0.2; done' # sleep: the new test's own wait, which never ends on main's code
   hungsaid 4 'the run was stopped there' 124
 }
 
@@ -107,39 +125,35 @@ t_bugnoresultnested() {
 }
 
 # Bug it catches: a bug card whose change is a test file alone (a test fixed for a red main, which passes on main's
-# code too) is blocked, as with no fix to take out its test passes "without the fix". It is not run on main, has one
-# build session, its review is told the change is test-only, and it lands.
+# code too) is blocked, as with no fix to take out its test passes "without the fix". It is not run on main, the check
+# holds, and the result says the change is test-only.
 t_bugtestonly() {
-  FIX=: bugcard 'grep -qx one a.txt' bug
-  [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ ! -e "$STUB/mainran" ] \
-    || fail "a test-only bug card was run on main or sent back to build: $(st 'select(.step == "build")'; cat "$STUB/mainran" 2>&1)"
-  grep -qx '# The bug-card check' "$STUB/asked" && grep -q '^The change is test-only: ' "$STUB/asked" \
-    || fail "the review was not told the change is test-only: $(cat "$STUB/asked" 2>&1)"
-  [ -n "$(st 'select(.step == "landed") | .sha')" ] || fail "a test-only bug card did not land: $(st 'select(.step | IN("blocked", "landed"))')"
+  FIX=: bugtest 'grep -qx one a.txt'
+  [ "$RC" = 0 ] && [ ! -e "$STUB/mainran" ] || fail "a test-only change was run on main or failed the check (exit $RC): $BW $(cat "$STUB/mainran" 2>&1)"
+  grep -q '^The change is test-only: ' "$FXWT.unfixed" || fail "the result does not say the change is test-only: $(cat "$FXWT.unfixed" 2>&1)"
+  [ ! -e "$T/$CASE/cards/mainrun" ] || fail "the check left its run's folder: $(ls "$T/$CASE/cards/mainrun")"
 }
 
 # #515. Main holds a.js; a bug card fixes its // comment and adds a test of what a.js already does (with a # comment).
-COMMENTPREP='printf "%s\n" "// x is two" "export const x = 1;" > "$R/a.js" && git -C "$R" add a.js && linkset "{\"a.txt\": [\"a.test.sh\"], \"a.js\": [\"a.test.sh\"]}"'
+COMMENTMAIN=$'// x is two\nexport const x = 1;'
 COMMENTFIX='sed -i "s|^// x is two|// x is one|" a.js'
 COMMENTTEST='grep -qxF "export const x = 1;" a.js # a.js sets x to one'
 # D1. Bug it catches: a bug card whose product change is comments only, with a test file, is blocked with "the new
-# tests pass without the fix", which no comment fix can avoid. It is not run on main, has one build session, its
-# review is told the product change is comments only, and it lands.
+# tests pass without the fix", which no comment fix can avoid. It is not run on main, the check holds, and the result
+# says the product change is comments only.
 t_bugcomments() {
-  PREP=$COMMENTPREP FIX=$COMMENTFIX bugcard "$COMMENTTEST" bug
-  [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ ! -e "$STUB/mainran" ] \
-    || fail "a comments-only bug card was run on main or sent back to build: $(st 'select(.step == "build")'; cat "$STUB/mainran" 2>&1)"
-  grep -q '^The change is comments only in its product files: ' "$STUB/asked" \
-    || fail "the review was not told the product change is comments only: $(cat "$STUB/asked" 2>&1)"
-  [ -n "$(st 'select(.step == "landed") | .sha')" ] || fail "a comments-only bug card did not land: $(st 'select(.step | IN("blocked", "landed"))')"
+  FIX=$COMMENTFIX bugtest "$COMMENTTEST" a.js "$COMMENTMAIN"
+  [ "$RC" = 0 ] && [ ! -e "$STUB/mainran" ] || fail "a comments-only change was run on main or failed the check (exit $RC): $BW $(cat "$STUB/mainran" 2>&1)"
+  grep -q '^The change is comments only in its product files: ' "$FXWT.unfixed" \
+    || fail "the result does not say the product change is comments only: $(cat "$FXWT.unfixed" 2>&1)"
 }
 
 # D2. Bug it catches: a product change with one real code line beside its comment fix is let skip the check as
-# comments only. Its test passes on main, so it is blocked with "the new tests pass without the fix", as before.
+# comments only. Its test runs on main, passes there, and the check fails with "the new tests pass without the fix".
 t_bugcommentcode() {
-  PREP=$COMMENTPREP FIX="$COMMENTFIX; echo 'export const y = 2;' >> a.js" bugcard "$COMMENTTEST" bug
-  [ "$(st 'select(.step == "blocked") | .reason' | head -n 1)" = "build: the new tests pass without the fix, so they do not prove it" ] \
-    || fail "a comment fix with a code line was not blocked as unproved: $(st 'select(.step | IN("blocked", "landed"))')"
+  FIX="$COMMENTFIX; echo 'export const y = 2;' >> a.js" bugtest "$COMMENTTEST" a.js "$COMMENTMAIN"
+  [ "$RC" = 1 ] && [ "$BW" = "the new tests pass without the fix, so they do not prove it" ] \
+    || fail "a comment fix with a code line was not failed as unproved (exit $RC): $BW"
   grep -q '/cards/mainrun/' "$STUB/mainran" || fail "its test was not run on main: $(cat "$STUB/mainran" 2>&1)"
 }
 
@@ -188,42 +202,39 @@ t_bugcommentsyntax() {
     || fail "commentsonly() does not tell js comment fixes (0) from code changes (1): $got"
 }
 
-# Bug it catches: a bug card that adds no test at all goes to review unchecked; or (#137) it is told and blocked with
-# "the new tests pass without the fix", though no test ran. It goes back to its build, then is blocked, each time
-# told no test file was found and the patterns that looked (the default, as the pack sets none); it runs nothing on
-# main (does it select a test? Here it does: the links give its a.txt the test file a.test.sh).
+# Bug it catches: a bug card that adds no test at all goes to review unchecked; or (#137) it is failed with "the new
+# tests pass without the fix", though no test ran. The check fails, its reason that no test file was found and the
+# patterns that looked (the default, as the pack sets none); it runs nothing on main (does it select a test? Here it
+# does: the links give its a.txt the test file a.test.sh) and writes no bugproof line.
 t_bugnotest() {
-  bugcard '' bug
+  bugtest ''
   local why; why="no test file found in the change (patterns: $(jq -r '.properties.tests.properties.patterns.default | join(", ")' "$SRC/schema/pack.schema.json")); set tests.patterns in .conveyor/project.json"
-  [ "$(st 'select(.step == "build") | .reason // ""' | tr '\n' '|')" = "|$why|" ] && grep -qxF "# Back to the build: $why" "$STUB/brief" \
-    && grep -qF "No test file found in the change (patterns: __tests__/, " "$STUB/brief" || fail "a bug card with no test did not go back to its build, told so: $(st 'select(.step == "build")')"
-  [ "$(st 'select(.step == "blocked") | .reason' | head -n 1)" = "build: $why" ] && ! grep -q 'pass without the fix' "$STUB/brief" \
-    || fail "a bug card with no test was not blocked with the no-test reason alone: $(st 'select(.step == "blocked")')"
+  [ "$RC" = 1 ] && [ "$BW" = "$why" ] || fail "a change with no test did not fail the check with the no-test reason (exit $RC): $BW"
+  grep -qF "No test file found in the change (patterns: __tests__/, " "$FXWT.unfixed" || fail "the result does not say no test file was found: $(cat "$FXWT.unfixed" 2>&1)"
   [ ! -e "$STUB/mainran" ] || fail "a card with no test file ran a test on main: $(cat "$STUB/mainran")"
-  [ -z "$(st 'select(.step == "bugproof")')" ] || fail "a code change with no test was let skip the check: $(st 'select(.step == "bugproof")')"
+  [ -z "$(st 'select(.step == "bugproof")' 2>/dev/null)" ] || fail "a code change with no test was let skip the check: $(st 'select(.step == "bugproof")')"
 }
 
 # #137. Bug it catches: a project whose tests are src/test-<name>.mjs, set in its pack's tests.patterns, had its test
 # file taken for no test file, never run on main, and the card blocked as "the new tests pass without the fix". The
-# file is found, runs alone on main's code without the fix and fails there, and the card lands with one build.
+# file is found, runs alone on main's code without the fix and fails there, and the check holds.
 t_bugpatterns() {
-  TF=src/test-a.mjs TUNE='.tests.patterns = ["src/test-*.mjs"]' bugcard 'grep -qx two a.txt' bug
-  [ "$(sed 1d "$STUB/mainran" | tr '\n' ' ')" = 'src/test-a.mjs ' ] && [ "$(wc -l < "$STUB/sessions")" = 1 ] \
-    || fail "the run on main was not of the card's src/test-a.mjs alone, or the card went back to build: $(cat "$STUB/mainran" 2>&1)"
-  grep -q '^The run failed there (exit 1)' "$STUB/asked" && [ -n "$(st 'select(.step == "landed") | .sha')" ] \
-    || fail "the card whose test fails on main was not reviewed as proven and landed: $(st 'select(.step | IN("blocked", "landed"))')"
+  TF=src/test-a.mjs TUNE='.tests.patterns = ["src/test-*.mjs"]' bugtest 'grep -qx two a.txt'
+  [ "$(sed 1d "$STUB/mainran" | tr '\n' ' ')" = 'src/test-a.mjs ' ] && [[ $(head -1 "$STUB/mainran") == */cards/mainrun/* ]] \
+    || fail "the run on main was not of the card's src/test-a.mjs alone: $(cat "$STUB/mainran" 2>&1)"
+  [ "$RC" = 0 ] && grep -q '^The run failed there (exit 1)' "$FXWT.unfixed" \
+    || fail "the test that fails on main did not prove the fix (exit $RC): $BW $(cat "$FXWT.unfixed" 2>&1)"
 }
 
 # #137. Bug it catches: a pack whose test command cannot run one file alone has no way to run a change's test files.
 # With test.fileCommand set, the check runs it once for each test file, given the file, in place of test.command:
-# the file fails on main without the fix, and the card lands. Only the check's runs (in its worktree on main) are
-# counted.
+# the file fails on main without the fix, and the check holds.
 t_bugfilecommand() {
-  TUNE='.test.fileCommand = "case $PWD in */mainrun/*) echo \"$CONVEYOR_TEST_FILE\" >> \"$STUB/fileran\" ;; esac; bash"' bugcard 'grep -qx two a.txt' bug
+  TUNE='.test.fileCommand = "case $PWD in */mainrun/*) echo \"$CONVEYOR_TEST_FILE\" >> \"$STUB/fileran\" ;; esac; bash"' bugtest 'grep -qx two a.txt'
   [ "$(cat "$STUB/fileran" 2>&1)" = a.test.sh ] && [ ! -e "$STUB/mainran" ] \
     || fail "the check did not run the test file alone with test.fileCommand: $(cat "$STUB/fileran" "$STUB/mainran" 2>&1)"
-  grep -q '^The run failed there (exit 1)' "$STUB/asked" && [ -n "$(st 'select(.step == "landed") | .sha')" ] \
-    || fail "the card proved through test.fileCommand did not land: $(st 'select(.step | IN("blocked", "landed"))')"
+  [ "$RC" = 0 ] && grep -q '^The run failed there (exit 1)' "$FXWT.unfixed" \
+    || fail "the test run through test.fileCommand did not prove the fix (exit $RC): $BW $(cat "$FXWT.unfixed" 2>&1)"
 }
 
 # #711. Bug it catches: the guides said every card with a test file and no test.fileCommand stops at its test step,
@@ -246,20 +257,14 @@ t_bugnofilecmd() {
     || fail "the pack schema's test.fileCommand does not say a comment change with no test file or in a .sh or .py file makes a bug card with a fix"
 }
 
-# A bug card of #7 whose build writes <card> into the product file <file>, which holds <main> on main: its fix and its
-# new test are both in that file, and it adds no test file. Its test command is <runner>, on main's code (the check)
-# and on the card (its test step, which must pass for it to land); each run on main notes in $STUB/mainran its staged
-# files and <file> as it is there. The reviewer's prompt is kept in $STUB/asked; one GO review. No push (nopush).
-inlinecard() { # <file> <main> <card> <runner>
-  setup "[$(issue 7 2026-01-01 bug)]"; nopush
-  mkdir -p "$(dirname "$R/$1")" && printf '%s\n' "$2" > "$R/$1" && git -C "$R" add "$1" && git -C "$R" commit -qm 'a product file' \
-    && git -C "$R" push -q origin main || fail "main's file"
-  sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
-  echo "$GO" > "$STUB/review.1"
-  printf '%s\n' "$3" > "$STUB/card-file"; echo "cp \"\$STUB/card-file\" '$1'" > "$STUB/build"
+# bugwt() on a change that writes <card> into the product file <file>, which holds <main> on main: its fix and its new
+# test are both in that file, and it adds no test file. Each run on main notes in $STUB/mainran its staged files and
+# <file> as it is there, then runs <runner>.
+inlinewt() { # <file> <main> <card> <runner>
+  setup '[]'; mkdir -p "$(dirname "$R/$1")"
+  printf '%s\n' "$3" > "$STUB/card-file"
   { echo "{ git diff --cached --name-only; cat '$1'; } >> \"\$STUB/mainran\""; printf '%s\n' "$4"; } > "$STUB/mainrun-cmd"
-  printf '%s\n' "$4" > "$STUB/test-cmd"
-  loop run >/dev/null || fail "run exited non-zero"
+  bugwt "mkdir -p \"\$(dirname '$1')\" && cp \"\$STUB/card-file\" '$1'" "$1" "$2"
 }
 # A Rust file, src/lib.rs, whose f() returns 1 on main. The runner stands in for cargo test (no Rust toolchain is
 # needed): the file's test passes when f() returns the number its assert_eq! asks for.
@@ -268,102 +273,92 @@ RUSTRUN='w=$(sed -n "s/.*assert_eq!([a-z:]*f(), \([0-9]*\)).*/\1/p" src/lib.rs);
 
 # #140 D1. Bug it catches: a bug card whose only new test is a Rust #[test] inside the product file it fixes had no
 # test file to run without the fix, and was blocked. The check stages src/lib.rs on main's code with the new test
-# module and without the fix: the test fails there, it passes on the card, and the card lands with one build.
+# module and without the fix: the test fails there, and the check holds.
 t_buginlinerust() {
-  inlinecard src/lib.rs "$RUSTMAIN" $'pub fn f() -> i32 {\n    2\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn two() {\n        assert_eq!(super::f(), 2);\n    }\n}' "$RUSTRUN"
+  inlinewt src/lib.rs "$RUSTMAIN" $'pub fn f() -> i32 {\n    2\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn two() {\n        assert_eq!(super::f(), 2);\n    }\n}' "$RUSTRUN"
   [ "$(cat "$STUB/mainran" 2>&1)" = "src/lib.rs"$'\n'"$RUSTMAIN"$'\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn two() {\n        assert_eq!(super::f(), 2);\n    }\n}' ] \
     || fail "the run on main was not of main's f() with the new test module alone: $(cat "$STUB/mainran" 2>&1)"
-  grep -qxF -- '- src/lib.rs (its inline tests, with the rest of its change taken out)' "$STUB/asked" && grep -q '^The run failed there (exit 1)' "$STUB/asked" \
-    || fail "the review was not shown that the inline test fails without the fix: $(cat "$STUB/asked" 2>&1)"
-  [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ -n "$(st 'select(.step == "landed") | .sha')" ] \
-    || fail "the card proved by its inline test did not land with one build: $(st 'select(.step | IN("build", "blocked", "landed"))')"
+  grep -qxF -- '- src/lib.rs (its inline tests, with the rest of its change taken out)' "$FXWT.unfixed" && grep -q '^The run failed there (exit 1)' "$FXWT.unfixed" \
+    || fail "the result does not say the inline test fails without the fix: $(cat "$FXWT.unfixed" 2>&1)"
+  [ "$RC" = 0 ] || fail "the inline test that fails without the fix did not prove it (exit $RC): $BW"
 }
 
 # #140 D1. Bug it catches: a Python doctest added to the docstring of the function a bug card fixes was no test the
-# check could run. The real doctest runner, on main's code with the new docstring and without the fix, fails; on the
-# card it passes, and the card lands with one build.
+# check could run. The real doctest runner, on main's code with the new docstring and without the fix, fails, and the
+# check holds.
 t_buginlinedoctest() {
-  inlinecard lib.py $'def double(x):\n    return x * 3' $'def double(x):\n    """\n    >>> double(2)\n    4\n    """\n    return x * 2' \
+  inlinewt lib.py $'def double(x):\n    return x * 3' $'def double(x):\n    """\n    >>> double(2)\n    4\n    """\n    return x * 2' \
     'PYTHONDONTWRITEBYTECODE=1 python3 -m doctest lib.py'
   [ "$(cat "$STUB/mainran" 2>&1)" = $'lib.py\ndef double(x):\n    """\n    >>> double(2)\n    4\n    """\n    return x * 3' ] \
     || fail "the run on main was not of main's double() with the new doctest alone: $(cat "$STUB/mainran" 2>&1)"
-  grep -q '^The run failed there (exit 1)' "$STUB/asked" && [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ -n "$(st 'select(.step == "landed") | .sha')" ] \
-    || fail "the card proved by its doctest was not reviewed as proven and landed: $(st 'select(.step | IN("build", "blocked", "landed"))'; cat "$STUB/asked" 2>&1)"
+  [ "$RC" = 0 ] && grep -qxF -- '- lib.py (its inline tests, with the rest of its change taken out)' "$FXWT.unfixed" && grep -q '^The run failed there (exit 1)' "$FXWT.unfixed" \
+    || fail "the doctest that fails without the fix did not prove it (exit $RC): $BW $(cat "$FXWT.unfixed" 2>&1)"
 }
 
 # #140 D2. Bug it catches: a new test written on the same line as the fix cannot be run without the fix, and the card
-# was blocked as "no test file found" or as "the new tests pass without the fix", though nothing ran. It goes back to
-# its build, then is blocked, each time with the reason that names the file; it is never run on main or reviewed.
+# was blocked as "no test file found" or as "the new tests pass without the fix", though nothing ran. The check fails
+# with the reason that names the file, and nothing runs on main.
 t_buginlineshared() {
-  inlinecard src/lib.rs 'pub fn f() -> i32 { 1 }' 'pub fn f() -> i32 { 2 } #[test] fn two() { assert_eq!(f(), 2); }' "$RUSTRUN"
+  inlinewt src/lib.rs 'pub fn f() -> i32 { 1 }' 'pub fn f() -> i32 { 2 } #[test] fn two() { assert_eq!(f(), 2); }' "$RUSTRUN"
   local why='the new test and the fix are in the same lines of src/lib.rs; bugproof cannot take out the fix alone'
-  [ "$(st 'select(.step == "build") | .reason // ""' | tr '\n' '|')" = "|$why|" ] && grep -qxF "# Back to the build: $why" "$STUB/brief" \
-    || fail "the card did not go back to its build with the shared-lines reason: $(st 'select(.step == "build")')"
-  [ "$(st 'select(.step == "blocked") | .reason' | head -n 1)" = "build: $why" ] && ! st 'select(.step == "blocked") | .reason, .tail' | grep -q 'pass' \
-    || fail "the card was not blocked with the shared-lines reason alone: $(st 'select(.step == "blocked")')"
-  [ ! -e "$STUB/mainran" ] && [ ! -e "$STUB/asked" ] || fail "a fix it could not take out was run on main or reviewed: $(cat "$STUB/mainran" 2>&1)"
+  [ "$RC" = 1 ] && [ "$BW" = "$why" ] && [ "$(head -n 1 "$FXWT.unfixed")" = "${why^}." ] \
+    || fail "the check did not fail with the shared-lines reason (exit $RC): $BW $(cat "$FXWT.unfixed" 2>&1)"
+  [ ! -e "$STUB/mainran" ] || fail "a fix it could not take out was run on main: $(cat "$STUB/mainran")"
 }
 
-# A bug card of #7 whose build only rewords a comment of s.sh (`# an old word` becomes `# a new word`), on a main that
-# holds s.sh and w.test.sh holding <test>; its issue's body is <body>. The run on main runs each file its
-# CONVEYOR_TEST_RERUN list names as `fail`; with none, it selects nothing (its log says files=0), as a runner does for a
-# comment-only change. Each run notes in $STUB/mainran its staged files, whether s.sh holds the fix and its fail lines.
-# No push (nopush).
-commentcard() { # <test> <body>
-  setup "[$(issue 7 2026-01-01 bug | jq -c --arg b "$2" '.body = $b')]"; nopush
-  printf '#!/usr/bin/env bash\n# an old word\n' > "$R/s.sh"; printf '%s\n' "$1" > "$R/w.test.sh"
-  git -C "$R" add s.sh w.test.sh && git -C "$R" commit -qm 'a comment and its test' && git -C "$R" push -q origin main || fail "main's files"
-  sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
-  echo "$GO" > "$STUB/review.1"
-  echo "printf '#!/usr/bin/env bash\n# a new word\n' > s.sh" > "$STUB/build"
+# bugwt() on a change that only rewords a comment of s.sh (`# an old word` becomes `# a new word`), on a main that holds
+# s.sh and w.test.sh holding <test>; its issue's body is <body>. The run on main runs each file its CONVEYOR_TEST_RERUN
+# list names as `fail`; with none, it selects nothing (its log says files=0), as a runner does for a comment-only
+# change. Each run notes in $STUB/mainran its staged files, whether s.sh holds the fix and its fail lines.
+commentwt() { # <test> <body>
+  setup '[]'
+  local ISSUE; ISSUE=$(jq -cn --arg b "$2" '{number: 7, body: $b}')
   cat > "$STUB/mainrun-cmd" <<'EOF'
 n=0 r=0; while IFS=$'\t' read -r k f; do [ "$k" = fail ] || continue; n=$((n + 1)); bash "$f" || r=1; done < "${CONVEYOR_TEST_RERUN:-/dev/null}"
 echo "staged: $(git diff --cached --name-only | tr '\n' ' ')fix: $(grep -c new s.sh) ran: $n" >> "$STUB/mainran"
 [ $n != 0 ] || echo 'TESTRUN files=0 of=1' >> "$CONVEYOR_TEST_LOG/r"; exit $r
 EOF
-  loop run >/dev/null || fail "run exited non-zero"
+  bugwt "printf '#!/usr/bin/env bash\n# a new word\n' > s.sh" s.sh $'#!/usr/bin/env bash\n# an old word' w.test.sh "$1"
 }
 
 # D1. Bug it catches: a comment-only bug card selects no test (no test file is linked to s.sh), so it was blocked as
 # "the new tests pass without the fix", though the test file its issue's Done-when names fails on main's comment. That
-# file runs alone with the fix (passes) and without it (fails), and nothing else runs on main: one build session, the
-# review is told so, and the card lands.
+# file runs alone with the fix (passes) and without it (fails), nothing else runs on main, the result says so, and the
+# check holds.
 t_bugcomment() {
-  commentcard '! grep -q old s.sh' $'body\n\n## Done when\nw.test.sh fails on main and passes with the fix.'
+  commentwt '! grep -q old s.sh' $'body\n\n## Done when\nw.test.sh fails on main and passes with the fix.'
   [ "$(cat "$STUB/mainran" 2>&1)" = $'staged: s.sh fix: 1 ran: 1\nstaged: fix: 0 ran: 1' ] \
     || fail "the named test did not run alone with the fix and without it: $(cat "$STUB/mainran" 2>&1)"
-  [ "$(wc -l < "$STUB/sessions")" = 1 ] && grep -q '^They pass with the fix, and the run without it failed (exit 1)' "$STUB/asked" \
-    || fail "a comment-only card proved by its named test went back to build, or the review was not told: $(st 'select(.step == "build")'; cat "$STUB/asked" 2>&1)"
-  [ -n "$(st 'select(.step == "landed") | .sha')" ] || fail "the card did not land: $(st 'select(.step | IN("blocked", "landed"))')"
+  [ "$RC" = 0 ] && grep -q '^They pass with the fix, and the run without it failed (exit 1)' "$FXWT.unfixed" \
+    || fail "a comment-only change proved by its named test failed the check, or the result does not say so (exit $RC): $BW $(cat "$FXWT.unfixed" 2>&1)"
 }
 
-# D2. Bug it catches: a comment-only card whose named test passes on main's code too is let through as proven. It
-# goes back to its build once and is then blocked, as any unproven bug card.
+# D2. Bug it catches: a comment-only card whose named test passes on main's code too is let through as proven. The
+# check fails with "the new tests pass without the fix", as for any unproven bug card.
 t_bugcommentpasses() {
-  commentcard 'grep -q word s.sh' $'body\n\n## Done when\nw.test.sh passes.'
-  [ "$(st 'select(.step == "build") | .reason // ""' | tr '\n' '|')" = "|the new tests pass without the fix, so they do not prove it|" ] \
-    && st 'select(.step == "blocked") | .tail' | grep -q '^They all passed without the fix: the new tests pass without the fix' \
-    && [ -z "$(st 'select(.step == "landed")')" ] && [ ! -e "$STUB/asked" ] \
-    || fail "a comment-only card whose named test passes on main was not blocked: $(st 'select(.step | IN("build", "blocked", "landed"))')"
+  commentwt 'grep -q word s.sh' $'body\n\n## Done when\nw.test.sh passes.'
+  [ "$RC" = 1 ] && [ "$BW" = "the new tests pass without the fix, so they do not prove it" ] \
+    && grep -q '^They all passed without the fix: the new tests pass without the fix' "$FXWT.unfixed" \
+    || fail "a comment-only change whose named test passes on main did not fail the check (exit $RC): $BW $(cat "$FXWT.unfixed" 2>&1)"
 }
 
 # Bug it catches: a comment-only card is taken as proven by a named test that fails on main but fails with the fix
-# too (it proves nothing of the fix). It is blocked, told the test fails with the fix.
+# too (it proves nothing of the fix). The check fails, its result saying the test fails with the fix.
 t_bugcommentfixfails() {
-  commentcard 'grep -q newer s.sh' $'body\n\n## Done when\nw.test.sh passes.'
-  st 'select(.step == "blocked") | .tail' | grep -q '^They failed with the fix (exit 1): the new tests pass without the fix' \
-    && [ -z "$(st 'select(.step == "landed")')" ] || fail "a named test that fails with the fix too let the card through: $(st 'select(.step | IN("blocked", "landed"))')"
+  commentwt 'grep -q newer s.sh' $'body\n\n## Done when\nw.test.sh passes.'
+  [ "$RC" = 1 ] && grep -q '^They failed with the fix (exit 1): the new tests pass without the fix' "$FXWT.unfixed" \
+    || fail "a named test that fails with the fix too passed the check (exit $RC): $BW $(cat "$FXWT.unfixed" 2>&1)"
 }
 
 # D3. Bug it catches: a comment-only card whose issue names no test file is blocked by a check that has nothing to run,
-# or goes on with no word of why. One build, a bugproof line (skipped) saying why, the review told, and it lands.
+# or goes on with no word of why. The check holds, with a bugproof line (skipped) saying why, and the result says so.
 t_bugcommentnamed() {
-  commentcard 'false' $'body\n\n## Done when\nThe comment says new.'
+  commentwt 'false' $'body\n\n## Done when\nThe comment says new.'
   [ "$(st 'select(.step == "bugproof") | "\(.result): \(.reason)"')" = "skipped: the change selects no test (no test file is linked to the files it touches), and the issue's Done-when names no test file" ] \
     || fail "the card's record does not say the check was skipped and why: $(st 'select(.step == "bugproof")')"
-  [ "$(wc -l < "$STUB/sessions")" = 1 ] && grep -q '^The bug-card check was skipped: ' "$STUB/asked" && [ -n "$(st 'select(.step == "landed") | .sha')" ] \
-    || fail "a comment-only card naming no test did not go on to review and land: $(st 'select(.step | IN("build", "blocked", "landed"))')"
-  loop check || fail "the record check refuses the bugproof line"
+  [ "$RC" = 0 ] && grep -q '^The bug-card check was skipped: ' "$FXWT.unfixed" \
+    || fail "a comment-only change naming no test did not hold, said skipped (exit $RC): $BW $(cat "$FXWT.unfixed" 2>&1)"
+  recok "$ST/cards.jsonl" "bugproof()"
 }
 
 # Bug it catches: a bug card whose build changed nothing (an ALREADY-DONE, or a session that did nothing) is sent to
@@ -383,80 +378,66 @@ t_notbug() {
     || fail "a card that is not a bug was checked: $(cat "$STUB/mainran" 2>&1)"
 }
 
-# One card of #7, a bug filed from the Tests page to speed up f.test.sh, whose median on record is 10 CPU s (three
-# whole-suite runs: 9, 10, 11). Its build changes f.test.sh. The file's run with the change (under cards/mainrun/)
-# notes its folder, the file as it runs and its list in $STUB/mainran, times the file at <cpu> CPU s and exits <exit>.
-# The reviewer's prompt is kept in $STUB/asked; one GO review. No push (nopush).
-speedcard() { # <cpu> [exit]
-  setup "[$(issue 7 2026-01-01 bug | jq -c '.title = "Speed up the test file f.test.sh"')]"; nopush
-  sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
-  echo "$GO" > "$STUB/review.1"
-  echo 'echo fast > f.test.sh' > "$STUB/build"
-  for c in 9 10 11; do
+# The median on record of f.test.sh, 10 CPU s: three whole-suite runs of 9, 10 and 11 (after setup).
+median10() {
+  local c; for c in 9 10 11; do
     jq -cn --argjson c "$c" '{time: "2026-11-01T00:00:00Z", how: "full", sha: "abc", files: {"f.test.sh": {result: "ok", sec: $c, cpu: $c}}}' >> "$ST/suiteruns.jsonl"
   done
+}
+# speedproof() called as card() calls it, on card c7 of #7, a bug filed from the Tests page to speed up f.test.sh
+# (`echo slow` on main, its median on record 10 CPU s: median10), whose change rewrites f.test.sh. The file's run
+# with the change (under cards/mainrun/) notes its folder, the file as it runs and its list in $STUB/mainran, times
+# the file at <cpu> CPU s and exits <exit>. When the check fails, the card is blocked as card() blocks it
+# (lib/card.sh: SPEEDCHECKED set). The check's exit is in $RC.
+speedwt() { # <cpu> [exit]
+  setup '[]'; median10
   echo '{ pwd; cat f.test.sh; cat "$CONVEYOR_TEST_RERUN"; } >> "$STUB/mainran"; printf "TESTRUN sec\tf.test.sh\t1\t%s\n" '"$1"' > "$CONVEYOR_TEST_LOG/r"; exit '"${2:-0}" > "$STUB/mainrun-cmd"
-  loop run >/dev/null || fail "run exited non-zero"
+  fx_wt 'echo fast > f.test.sh' f.test.sh 'echo slow'
+  fx_in 'speedproof c7 "$FXWT" "{\"number\": 7, \"title\": \"Speed up the test file f.test.sh\"}" f.test.sh \
+    || { r=$?; SPEEDCHECKED=$SPEEDCHECK block c7 7 "$FXWT" "build: $(<"$FXWT.unfixed")"; exit $r; }'
 }
 speedline() { st 'select(.step == "bugproof") | "\(.result) \(.speed | tojson)"'; }
+SPEEDV=$(sed -n 's/^SPEEDCHECK=//p' "$SRC/lib/testrun.sh") # the version of the speed check, as testrun.sh sets it
 
 # D1. Bug it catches: a speed-up card, whose tests pass on main by design, is blocked for not failing there, or goes on
 # with no proof that the file is faster. Its file runs alone with the change and is faster than its median on record:
-# one build session, the review shown the numbers, both numbers on its record, and it lands.
+# the check holds, the result shows the numbers, and both numbers are on its record.
 t_speedfaster() {
-  speedcard 4
+  speedwt 4
+  [ "$RC" = 0 ] || fail "a faster speed-up change failed the check: $(cat "$FXWT.unfixed" "$T/$CASE/run.out" 2>&1)"
   [ "$(speedline)" = 'ok {"file":"f.test.sh","before":10,"after":4,"fix":"sped up","into":[]}' ] || fail "the record does not hold both CPU numbers: $(st 'select(.step == "bugproof")')"
   [[ $(head -1 "$STUB/mainran") == */cards/mainrun/* ]] && [ "$(sed -n 2p "$STUB/mainran")" = fast ] && grep -qx $'fail\tf.test.sh' "$STUB/mainran" \
     || fail "the file did not run alone with the change: $(cat "$STUB/mainran" 2>&1)"
-  [ "$(wc -l < "$STUB/sessions")" = 1 ] && grep -qx '# The speed-up check' "$STUB/asked" && grep -q 'passed in 4 CPU s, lower than its median on record, 10 CPU s' "$STUB/asked" \
-    || fail "the card went back to build, or the review was not shown the speed-up check: $(st 'select(.step == "build")')"
-  [ -n "$(st 'select(.step == "landed") | .sha')" ] || fail "a faster speed-up card did not land: $(st 'select(.step | IN("blocked", "landed"))')"
-  loop check || fail "the record check refuses the speed-up bugproof line"
+  grep -q 'passed in 4 CPU s, lower than its median on record, 10 CPU s' "$FXWT.unfixed" || fail "the result does not show the numbers: $(cat "$FXWT.unfixed")"
+  recok "$ST/cards.jsonl" "speedproof()"
 }
 
-# D2. Bug it catches: a speed-up card whose file is as slow as its median lands as a speed-up. It is blocked with the
-# "not faster" reason naming both numbers, and no budget (#349), never reviewed.
+# D2. Bug it catches: a speed-up card whose file is as slow as its median lands as a speed-up. The check fails with the
+# "not faster" reason naming both numbers, and no budget (#349).
 t_speedslow() {
-  speedcard 10
-  [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the file is not faster than its median on record (10 CPU s), as the verdict speed up asks: 10 CPU s now' ] && [ ! -e "$STUB/asked" ] \
-    || fail "a speed-up card that is not faster was not blocked before review: $(st 'select(.step | IN("review", "blocked"))')"
+  speedwt 10
+  [ "$RC" != 0 ] && [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the file is not faster than its median on record (10 CPU s), as the verdict speed up asks: 10 CPU s now' ] \
+    || fail "a speed-up change that is not faster did not fail the check (exit $RC): $(st 'select(.step == "blocked")')"
   [ "$(speedline)" = 'fail {"file":"f.test.sh","before":10,"after":10,"fix":"sped up","into":[]}' ] || fail "the record does not hold both CPU numbers: $(st 'select(.step == "bugproof")')"
   # #180: with no version on its line, a later change to the check could not tell this block from others.
   [ "$(st 'select(.step == "blocked") | .speedcheck')" = "$SPEEDV" ] || fail "the blocked line does not carry the speed check's version $SPEEDV: $(st 'select(.step == "blocked")')"
 }
-SPEEDV=$(sed -n 's/^SPEEDCHECK=//p' "$SRC/lib/testrun.sh") # the version of the speed check, as testrun.sh sets it
 
 # Bug it catches: a speed-up card whose file fails with the change is let through because it ran fast.
 t_speedfails() {
-  speedcard 4 1
-  [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the file f.test.sh fails with the change (exit 1)' ] && [ ! -e "$STUB/asked" ] \
-    || fail "a speed-up card whose file fails was not blocked: $(st 'select(.step | IN("review", "blocked"))')"
+  speedwt 4 1
+  [ "$RC" != 0 ] && [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the file f.test.sh fails with the change (exit 1)' ] \
+    || fail "a speed-up change whose file fails did not fail the check (exit $RC): $(st 'select(.step == "blocked")')"
 }
 
-# One card of #7, an Optimize issue filed from the Tests page for f.test.sh (on main, `echo slow`, with g.test.sh,
-# `echo other`), whose median on
-# record is 10 CPU s (three whole-suite runs: 9, 10, 11). Its build runs <build>. Each run under cards/mainrun/ runs
-# the files of its list: it notes each, with what it holds there, in $STUB/mainran, names the cases one and two of each
-# as passed, and times each at the CPU seconds $STUB/cpu-<file> holds. The run of f on main for the build's brief
-# (speedbrief(), under cards/mainrun/<card>.cases) is not noted: ownbudget.test.sh holds that brief to its lines.
-# The reviewer's prompt is kept in $STUB/asked. No push (nopush).
-optcard() { # <build> <cpu of f> [<cpu of f1> <cpu of f2>]
-  local b=$1; shift
-  optmain "$@"
-  echo 'echo slow' > "$R/f.test.sh"; echo 'echo other' > "$R/g.test.sh"
-  git -C "$R" add f.test.sh g.test.sh && git -C "$R" commit -qm 'a slow test' && git -C "$R" push -q origin main || fail "main's files"
-  echo "$b" > "$STUB/build"
-  loop run >/dev/null || fail "run exited non-zero"
-}
-# optcard's case folder, but for main's two files and the card's build: its issue, review, median and runs on main.
+# The case folder of an Optimize issue filed from the Tests page for f.test.sh (on main, `echo slow`, with g.test.sh,
+# `echo other`), its median on record 10 CPU s (median10). Each run under cards/mainrun/ runs the files of its list:
+# it notes each, with what it holds there, in $STUB/mainran, names the cases one and two of each as passed, and times
+# each at the CPU seconds $STUB/cpu-<file> holds. The run of f on main for the build's brief (speedbrief(), under
+# cards/mainrun/<card>.cases) is not noted: ownbudget.test.sh holds that brief to its lines.
 optmain() { # <cpu of f> [<cpu of f1> <cpu of f2>]
-  setup "[$(issue 7 2026-01-01 bug | jq -c '.title = "Optimize the test file f.test.sh"')]"; nopush
-  sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
-  echo "$GO" > "$STUB/review.1"
+  setup '[]'; median10
   echo "$1" > "$STUB/cpu-f.test.sh"; echo "${2:-}" > "$STUB/cpu-f1.test.sh"; echo "${3:-}" > "$STUB/cpu-f2.test.sh"
-  for c in 9 10 11; do
-    jq -cn --argjson c "$c" '{time: "2026-11-01T00:00:00Z", how: "full", sha: "abc", files: {"f.test.sh": {result: "ok", sec: $c, cpu: $c}}}' >> "$ST/suiteruns.jsonl"
-  done
   # Run once for each file, as test.fileCommand runs it: the file is CONVEYOR_TEST_FILE.
   cat > "$STUB/mainrun-cmd" <<'EOF'
 f=$CONVEYOR_TEST_FILE
@@ -464,64 +445,77 @@ f=$CONVEYOR_TEST_FILE
 printf '== %s\n-- ok %s\nTESTRUN sec\t%s\t1\t%s\n' "$f" "$f" "$f" "$(cat "$STUB/cpu-$f")" >> "$CONVEYOR_TEST_LOG/r"
 EOF
 }
+# optproof() called as card() calls it, on card c7 of the Optimize issue for f.test.sh, whose change runs <change> in
+# its worktree on main (optmain's). When the check fails, the card is blocked as card() blocks it (lib/card.sh:
+# SPEEDCHECKED set). The check's exit is in $RC.
+optwt() { # <change> <cpu of f> [<cpu of f1> <cpu of f2>]
+  local b=$1; shift
+  optmain "$@"
+  fx_wt "$b" f.test.sh 'echo slow' g.test.sh 'echo other'
+  fx_in 'optproof c7 "$FXWT" "{\"number\": 7, \"title\": \"Optimize the test file f.test.sh\"}" f.test.sh \
+    || { r=$?; SPEEDCHECKED=$SPEEDCHECK block c7 7 "$FXWT" "build: $(<"$FXWT.unfixed")"; exit $r; }'
+}
 
 # D1. Bug it catches: an Optimize card, whose tests pass on main by design, is blocked for not failing there, or a
 # change that keeps the file lands with no proof that it is faster. It runs alone with the change and is faster than
-# its median: its record holds both numbers, the review is shown the Optimize check, and it lands.
+# its median: the check holds, its record holds both numbers, and the result shows them.
 t_optkeep() {
-  optcard 'echo fast > f.test.sh' 4
+  optwt 'echo fast > f.test.sh' 4
+  [ "$RC" = 0 ] || fail "a faster Optimize change failed the check: $(cat "$FXWT.unfixed" "$T/$CASE/run.out" 2>&1)"
   [ "$(speedline)" = 'ok {"file":"f.test.sh","before":10,"after":4,"fix":"sped up","into":[]}' ] || fail "the record does not hold both CPU numbers: $(st 'select(.step == "bugproof")')"
   [ "$(cat "$STUB/mainran")" = 'f.test.sh: fast' ] || fail "the file did not run alone with the change: $(cat "$STUB/mainran" 2>&1)"
-  grep -qx '# The Optimize check' "$STUB/asked" && grep -q 'passed in 4 CPU s, lower than its median on record, 10 CPU s' "$STUB/asked" \
-    || fail "the review was not shown the Optimize check"
+  grep -q 'passed in 4 CPU s, lower than its median on record, 10 CPU s' "$FXWT.unfixed" || fail "the result does not show the numbers: $(cat "$FXWT.unfixed")"
   # Bug it catches (#614): the review was told a kept file must cost less than its figure, save for stabilise, so it
   # flagged a merge the engine passes at the file's figure plus the merged file's (t_optmergeinto). The whole rule is
-  # matched, so a second, unconditional "less than that figure" limit for a kept file also fails it.
-  tr '\n' ' ' < "$STUB/asked" | grep -qF 'A file kept must cost less than that figure; for stabilise, no more than it; and, when another test file is merged into it, no more than that figure plus the median on record of each test file merged into it. The files of a split' \
-    || fail "the review was not told one limit for a kept file, with the limit of a merge into it"
-  [ -n "$(st 'select(.step == "landed") | .sha')" ] || fail "a faster Optimize card did not land: $(st 'select(.step | IN("blocked", "landed"))')"
+  # matched, so a second, unconditional "less than that figure" limit for a kept file also fails it. The review's
+  # prompt (OPTREVIEW, which card() gives the review of an Optimize card) is text with no behaviour to run, so it is read.
+  fx_in 'printf "%s\n" "$OPTREVIEW"'
+  tr '\n' ' ' < "$T/$CASE/run.out" | grep -qF 'A file kept must cost less than that figure; for stabilise, no more than it; and, when another test file is merged into it, no more than that figure plus the median on record of each test file merged into it. The files of a split' \
+    || fail "the review is not told one limit for a kept file, with the limit of a merge into it"
 }
 
-# D1. Bug it catches: an Optimize card that keeps its file as slow as its median lands. It is blocked before review.
+# D1. Bug it catches: an Optimize card that keeps its file as slow as its median lands. The check fails, and the
+# card's blocked line carries the speed check's version.
 t_optslow() {
-  optcard 'echo fast > f.test.sh' 10
-  [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the file is not faster than its median on record (10 CPU s), as the verdict speed up asks: 10 CPU s now' ] && [ ! -e "$STUB/asked" ] \
-    || fail "an Optimize card that is not faster was not blocked before review: $(st 'select(.step | IN("review", "blocked"))')"
+  optwt 'echo fast > f.test.sh' 10
+  [ "$RC" != 0 ] && [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the file is not faster than its median on record (10 CPU s), as the verdict speed up asks: 10 CPU s now' ] \
+    || fail "an Optimize change that is not faster did not fail the check (exit $RC): $(st 'select(.step == "blocked")')"
   [ "$(st 'select(.step == "blocked") | .speedcheck')" = "$SPEEDV" ] || fail "the blocked line does not carry the speed check's version $SPEEDV: $(st 'select(.step == "blocked")')"
 }
 
-# D2. Bug it catches: a split into f1 and f2 (f removed) is blocked because f is gone, or is let through unrun. The two
+# D2. Bug it catches: a split into f1 and f2 (f removed) is failed because f is gone, or is let through unrun. The two
 # new files run alone with the change, and their CPU seconds summed (2 + 3) are lower than f's median.
 t_optsplit() {
-  optcard 'rm f.test.sh; echo one > f1.test.sh; echo two > f2.test.sh' '' 2 3
+  optwt 'rm f.test.sh; echo one > f1.test.sh; echo two > f2.test.sh' '' 2 3
+  [ "$RC" = 0 ] || fail "a faster split failed the check: $(cat "$FXWT.unfixed" "$T/$CASE/run.out" 2>&1)"
   [ "$(speedline)" = 'ok {"file":"f.test.sh","before":10,"after":5,"fix":"split","into":["f1.test.sh","f2.test.sh"]}' ] || fail "the split's record does not hold its summed CPU seconds: $(st 'select(.step == "bugproof")')"
   [ "$(sort "$STUB/mainran" | tr '\n' '|')" = 'f1.test.sh: one|f2.test.sh: two|' ] || fail "the split's new files did not run alone with the change: $(cat "$STUB/mainran" 2>&1)"
-  grep -q 'f1.test.sh, f2.test.sh passed in 5 CPU s summed (the median on record of f.test.sh is 10 CPU s): f1.test.sh 2 CPU s, f2.test.sh 3 CPU s' "$STUB/asked" \
-    || fail "the review was not shown the split's numbers"
-  [ -n "$(st 'select(.step == "landed") | .sha')" ] || fail "a faster split did not land: $(st 'select(.step | IN("blocked", "landed"))')"
+  grep -q 'f1.test.sh, f2.test.sh passed in 5 CPU s summed (the median on record of f.test.sh is 10 CPU s): f1.test.sh 2 CPU s, f2.test.sh 3 CPU s' "$FXWT.unfixed" \
+    || fail "the result does not show the split's numbers: $(cat "$FXWT.unfixed")"
 }
 
-# D3. Bug it catches: a delete is blocked for having no test that fails on main, or for having no file to time, or the
-# review is never told what the file tested. The file runs alone on main's code as main has it, and the review is
-# given its cases and asked for the test that covers each.
-# The review names the covering tests on COVERED-BY lines (#74): they are no finding, so its GO holds, and they stay in
-# its record, where the Tests page reads them.
+# D3. Bug it catches: a delete is failed for having no test that fails on main, or for having no file to time, or the
+# review is never told what the file tested. The file runs alone on main's code as main has it, the check holds, and
+# the result gives its cases and asks for the test that covers each.
 t_optdelete() {
-  local GO=$'COVERED-BY: g.test.sh: one\nCOVERED-BY: g.test.sh: two\n'"$GO"
-  optcard 'rm f.test.sh' 4
+  optwt 'rm f.test.sh' 4
+  [ "$RC" = 0 ] || fail "a delete failed the check: $(cat "$FXWT.unfixed" "$T/$CASE/run.out" 2>&1)"
   [ "$(speedline)" = 'ok {"file":"f.test.sh","before":10,"after":null,"fix":"deleted","into":[]}' ] || fail "a delete's record: $(st 'select(.step == "bugproof")')"
   [ "$(cat "$STUB/mainran")" = 'f.test.sh: echo slow' ] || fail "the file did not run alone as main has it: $(cat "$STUB/mainran" 2>&1)"
-  grep -qx '# The Optimize check' "$STUB/asked" && grep -qx -- '- one' "$STUB/asked" && grep -qx -- '- two' "$STUB/asked" \
-    && grep -qF 'Name, for each of its cases, the test that still covers it after the change, each on its own line, exactly: `COVERED-BY: <its test file>: <its case>`' "$STUB/asked" \
-    || fail "the review was not given the file's cases and asked for the test that covers each"
-  [ -n "$(st 'select(.step == "landed") | .sha')" ] || fail "a delete did not land: $(st 'select(.step | IN("blocked", "landed", "review"))')"
-  [ "$(st 'select(.step == "review") | .reason' | grep -c '^COVERED-BY: g\.test\.sh: ')" = 2 ] || fail "the review's record lost its COVERED-BY lines: $(st 'select(.step == "review")')"
+  grep -qx -- '- one' "$FXWT.unfixed" && grep -qx -- '- two' "$FXWT.unfixed" \
+    && grep -qF 'Name, for each of its cases, the test that still covers it after the change, each on its own line, exactly: `COVERED-BY: <its test file>: <its case>`' "$FXWT.unfixed" \
+    || fail "the result does not give the file's cases and ask for the test that covers each: $(cat "$FXWT.unfixed")"
+  # The review names the covering tests on COVERED-BY lines (#74): they are no finding, so its GO holds (verdict()),
+  # and the review's record keeps them: card() records the review's lines that grep -Ev "$UNRECORDED" leaves.
+  printf '%s\n' 'COVERED-BY: g.test.sh: one' 'COVERED-BY: g.test.sh: two' "$GO" > "$FXWT.review"
+  fx_in 'verdict "$FXWT.review"; grep -Ev "$UNRECORDED" "$FXWT.review"'
+  [ "$(head -n1 "$T/$CASE/run.out")" = GO ] || fail "a review's COVERED-BY lines were taken for findings: $(cat "$T/$CASE/run.out")"
+  [ "$(grep -c '^COVERED-BY: g\.test\.sh: ' "$T/$CASE/run.out")" = 2 ] || fail "the review's record lost its COVERED-BY lines: $(cat "$T/$CASE/run.out")"
 }
 
 # Bug it catches (#74): a merge recorded as a delete, so the Tests page could not name the file that took the cases of
 # the file it removed. A change that removes the file and changes another test file is a merge into that file. What
-# it records is the Optimize check's (optproof()) alone: the check is called on such a change in a card's worktree, as
-# t_optdelete proves a whole card takes it there.
+# it records is the Optimize check's (optproof()) alone: the check is called on such a change in a card's worktree.
 t_optmerge() {
   optmain 4
   fx_wt 'rm f.test.sh; echo "echo slow" >> g.test.sh' f.test.sh 'echo slow' g.test.sh 'echo other'
