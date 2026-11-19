@@ -164,6 +164,16 @@ t_privcheck() {
   printf '%s\n' "Q${AT}fs.gt" > "$d/a.txt"; [ "$("$c" "$d/a.txt")" = "$d/a.txt:1: email" ] || fail "an email in a text file was not a hit"
 }
 
+# Bug (#783): release 1.6.0 was refused on a Board test's SWE-bench task ID, task-django__django-15347, whose "sk-..."
+# read as a secret key. A task ID, with its task- prefix (1) or without (2), is not a hit; an sk- key on its own (3),
+# after = (4) or in quotes (5) still is.
+t_privswebench() {
+  local c=$SRC/privacy/check.sh d=$T/$CASE k; mkdir -p "$d"; k="sk-$(printf 'a%.0s' $(seq 24))"
+  printf '%s\n' "act(bp(w), 'task-django__django-15347')" 'astropy__astropy-12907' "$k" "KEY=$k" "\"$k\"" > "$d/f"
+  [ "$("$c" "$d/f")" = "$(printf '%s\n' "$d/f:3: token" "$d/f:4: token" "$d/f:5: token")" ] || fail "task IDs and keys: $("$c" "$d/f")"
+  "$c" "$SRC/../.claude/scripts/__tests__/dashboard-view.bench-pages.test.mjs" || fail "the Benchmarks tab test is a hit"
+}
+
 # Bug: the release was refused on docs that name git${AT}github.com, a git SSH address, not a person's email. A git SSH
 # address (lines 1 to 4) is not a hit; a person's address at those hosts (5, 6), and git${AT} at another host with no
 # colon or ssh:// (7), still are, as is an address beside an SSH address on its line (8). An example address before a
