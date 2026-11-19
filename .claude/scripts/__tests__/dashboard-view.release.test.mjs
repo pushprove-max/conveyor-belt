@@ -183,7 +183,7 @@ test('#791: step 2 shows the mode of the run under way and of the last run, from
   assert.equal(mode(), null, 'a record with no mode says none');
   // Bug this guards: step 2 said the files ran in a mode when the run reused a green run and ran no file.
   next(w, data({ ...RUN, ended: '2026-11-14T08:15:00Z', state: 'passed', mode: 'parallel', failed: 0, cases: [], reused: { sha: HEAD, time: '2026-11-14T07:00:00Z', ran: [], kept: 9 } }));
-  assert.equal(mode(), null, 'a reused pass ran no file');
+  assert.equal(mode(), null, 'a run that reused the earlier green run ran no file itself');
   // Bug this guards: step 2 hid the mode while `conveyor.sh release` ran the suite itself (its record's mode is its
   // own; a release that runs no suite has none: t_relreuse).
   next(w, data({ ...RUN, step: 'release', ended: null, state: 'running', mode: 'parallel', failed: 0, cases: [], files: { done: 1, of: 9 } }));
