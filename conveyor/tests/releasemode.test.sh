@@ -20,11 +20,14 @@ modesetup() {
   runsetup true
   tune '.test.full = "bash .conveyor/test-full.sh"'
   mkdir -p "$R/t" && cp "$SRC/../.conveyor/test-full.sh" "$R/.conveyor/test-full.sh" || fail "the fixture could not be made"
+  POOL=2:$T/$CASE/pool
+  # Each start line also names the pool slot the file was started on, "none" when it holds none: the slot file that
+  # CONVEYOR_TEST_SLOT's descriptor is open on (a turn on the run's home slot, <fd>.t, names the home slot's descriptor).
   for i in 1 2 3 4; do
-    printf '%s\n' 'echo "$0 start $EPOCHREALTIME" >> "$STUB/times"' 'sleep 0.5' 'echo "$0 end $EPOCHREALTIME" >> "$STUB/times"' > "$R/t/f$i.test.sh" # sleep: a stand-in test file that runs a while, so files run at once overlap
+    printf '%s\n' "p=${POOL#2:}" 'd=${CONVEYOR_TEST_SLOT:-}; d=${d%%.*}; k=none; for s in 1 2; do [ -n "$d" ] && [ "/dev/fd/$d" -ef "$p/$s" ] && k=$s; done' \
+      'echo "$0 start $EPOCHREALTIME $k" >> "$STUB/times"' 'sleep 0.5' 'echo "$0 end $EPOCHREALTIME" >> "$STUB/times"' > "$R/t/f$i.test.sh" # sleep: a stand-in test file that runs a while, so files run at once overlap
   done
   git -C "$R" add -f .conveyor/test-full.sh t && git -C "$R" commit -qm 'the suite' && git -C "$R" push -q origin main || fail "the fixture could not be made"
-  POOL=2:$T/$CASE/pool
 }
 # The most of the four files that ran at once, from $STUB/times; fails unless each file started and ended once.
 atonce() {
@@ -45,6 +48,13 @@ t_relparallel() {
   for f in 1 2 3 4; do grep -qxF -- "-- ok t/f$f.test.sh" "$wt.test" || fail "the suite's output has no result line of t/f$f.test.sh: $(cat "$wt.test")"; done
   # Two exactly: files ran at once, and never more than the pool's two slots.
   [ "$(atonce)" = 2 ] || fail "the four files did not run two at once on a pool of two slots: $(cat "$STUB/times")"
+  # Bug: a scheduler that kept to two files at once but took no slot for each (no slot_take, slot_mine, slot_free)
+  # still passed the checks above: its files all ran on the run's own slot, beside each other, while other cards took
+  # the slots and cores the run used. Each file starts on a slot of the pool, and no two files at once on the same one.
+  tr , . < "$STUB/times" | sort -k3,3g | awk '$2 == "start" { if ($4 != 1 && $4 != 2) bad = bad " " $1 " held no slot of the pool;"
+      for (f in on) if (on[f] == $4) bad = bad " " $1 " and " f " held slot " $4 " at once;"; on[$1] = $4 }
+    $2 == "end" { delete on[$1] } END { if (bad != "") { print bad; exit 1 } }' > "$T/$CASE/slots" \
+    || fail "the files did not each hold a slot of their own:$(cat "$T/$CASE/slots") $(cat "$STUB/times")"
 }
 # Bug: a run with no mode chosen ran its files at once, though serial is the default. Each file runs alone.
 t_relserial() {
