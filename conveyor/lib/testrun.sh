@@ -1856,13 +1856,13 @@ optproof() { # <card> <worktree> <issue json> <test file>
     'speed up' | keep | stabilise) if [ ! -e "$2/$f" ]; then why="the verdict is $v, and the change removes the test file $f"
       elif [ ${#add[@]} != 0 ]; then why="the verdict is $v, and the change adds test files: ${add[*]}"
       elif [ ${#gone[@]} != 0 ]; then why="the verdict is $v, and the change removes test files, as a merge does: ${gone[*]}"; fi ;;
-    # indirect (#778): as speed up, and the file still holds each case the issue's DIRECT lines name (tadirect(),
+    # indirect (#778): as speed up, and the file still holds each case the issue's DIRECT lines name (directcases(),
     # casesgone()): a rewrite as direct checks loses no case that must keep passing.
     indirect) if [ ! -e "$2/$f" ]; then why="the verdict is $v, and the change removes the test file $f"
       elif [ ${#add[@]} != 0 ]; then why="the verdict is $v, and the change adds test files: ${add[*]}"
       elif [ ${#gone[@]} != 0 ]; then why="the verdict is $v, and the change removes test files, as a merge does: ${gone[*]}"
       else
-        cs=$(casesgone "$2" "$f" "$(jq -r '.body // ""' <<<"$3" | tadirect /dev/stdin 2>/dev/null | jq -r '.direct[]?.cases[]' 2>/dev/null | awk 'NF && !s[$0]++')")
+        cs=$(casesgone "$2" "$f" "$(directcases "$1" "$2" "$3" "$f")")
         [ -z "$cs" ] || why="the verdict is $v, and the change drops cases of $f that the issue's DIRECT lines say must keep passing: $(paste -sd, <<<"$cs" | sed 's/,/, /g')"
       fi ;;
   esac
@@ -2033,6 +2033,27 @@ casestarts() { # <worktree> <test file>
             else (first(foreach range($a + 1; $z) as $j ({q: $tq[$a]}; {p: .q, q: (.q + $tq[$j])};
                 select(.p % 2 == 0 and ($ls[$j] | test($t.note) | not) and ($ls[$j] | ind) <= $in) | $j)) // $z) - 1 end) as $e
           | "\($a + 1)\t\($e + 1)\t\($ls[$a] | plain)"] | join("\n") end' "$1/$2" 2>/dev/null
+}
+# The cases, one a line, that an indirect issue's DIRECT lines (tadirect()) say must keep passing (optproof(), #827):
+# only the names <test file> defines on the commit the card was built on (casesgone() of a copy of it), as a judge may
+# name a case of another test file or put words of its check in the list. The copy is named by the file's base name
+# in a new directory, so a path from the issue (../x) writes nowhere else. A DIRECT line that names no case the file
+# defines, or that names no case at all, is passed over, and the card's log says so.
+directcases() { # <card> <worktree> <issue json> <test file>
+  local d n cs b k=''
+  d=$(jq -r '.body // ""' <<<"$3" | tadirect /dev/stdin 2>/dev/null | jq -c '.direct[]?' 2>/dev/null)
+  n=$(jq -r '.body // ""' <<<"$3" | grep -cE '^[[:space:]*`_>-]*DIRECT:')
+  n=$((n - $(grep -c . <<<"$d")))
+  [ "$n" -le 0 ] || echo "conveyor: card $1: $n DIRECT line(s) of its issue name no case, so no case of them is checked" >&2
+  cs=$(jq -r '.cases[]' <<<"$d" | awk 'NF && !s[$0]++'); [ -n "$cs" ] || return 0
+  b=$(mktemp -d) || return 1
+  if git -C "$2" show "HEAD:$4" > "$b/x$(basename -- "$4")" 2>/dev/null; then
+    k=$(grep -vxF -f <(casesgone "$b" "x$(basename -- "$4")" "$cs") <<<"$cs")
+  fi
+  rm -rf "$b"
+  jq -r --arg c "$1" --arg f "$4" --arg k "$k" '($k | split("\n")) as $k | select(.cases - $k == .cases)
+    | "conveyor: card \($c): a DIRECT line of its issue (\(.protects)) names no case \($f) defines, so no case of it is checked"' <<<"$d" >&2
+  [ -z "$k" ] || printf '%s\n' "$k"
 }
 # The names of <cases> (one a line) that the test file in <worktree> no longer holds (hollowproof(), optproof()): a case
 # is held while the name of a case that a line starts (casestarts(); any line of the file, unescaped, for a language

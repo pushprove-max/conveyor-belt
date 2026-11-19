@@ -230,15 +230,33 @@ t_taverdict() {
 # Bug this guards (#778): a judge found a file that checks what it protects through a proxy (it runs the suite again),
 # and its record had no verdict for it and no part to rewrite, so the Tests page could not offer the direct check. The
 # record's fields (tajudged(), as the end of tarun() writes them) hold the verdict indirect and each DIRECT line that
-# reads, its cases split; a DIRECT line with no case is left out.
+# reads, its cases split; a DIRECT line with no case is left out. Bug this guards too (#827): a | inside a DIRECT
+# line's check text made the rest of the check its case list, so a rewrite card was blocked on cases that never
+# existed; the cases are the text after the last |, and the check keeps its own |.
 t_tadirect() {
   local f=$T/tadirect.txt out
+  mkdir -p "$T/tadirect/wt" && printf 't_%s() { :; }\n' relfiles relpins case1 case2 > "$T/tadirect/wt/f.test.sh"
   printf '%s\n' 'It runs the whole suite again from a copy.' \
     '- DIRECT: the install holds the right files | compare the installed list with the manifest | `relfiles`, relpins' \
+    'DIRECT: a | run x | y, which z | case1, case2' \
     'DIRECT: the loop lands | no cases named |' '**VERDICT: Indirect**' > "$f"
-  out=$(STATE=$T/tadirect/state . "$SRC/lib/testaction.sh" && tajudged "$f" | jq -c '{verdict, direct}') \
-    && [ "$out" = '{"verdict":"indirect","direct":[{"protects":"the install holds the right files","check":"compare the installed list with the manifest","cases":["relfiles","relpins"]}]}' ] \
-    || fail "the record of an indirect judge does not hold its verdict and DIRECT line: $out"
+  out=$(export STATE=$T/tadirect/state && . "$SRC/lib/testaction.sh" && . "$SRC/lib/testfiles.sh" && . "$SRC/lib/testrun.sh" && tajudged "$f" "$T/tadirect/wt" f.test.sh | jq -c '{verdict, direct}') \
+    && [ "$out" = '{"verdict":"indirect","direct":[{"protects":"the install holds the right files","check":"compare the installed list with the manifest","cases":["relfiles","relpins"]},{"protects":"a","check":"run x | y, which z","cases":["case1","case2"]}]}' ] \
+    || fail "the record of an indirect judge does not hold its verdict and DIRECT lines: $out"
+}
+
+# Bug this guards (#827): a judge named on a DIRECT line of views.test.sh cases that snapshot.test.sh defines, and the
+# rewrite card was blocked for dropping cases the file never had. Read as tarun() reads it, with the judged file at the
+# judge's commit, the record keeps the line with only the cases the file defines and lists the other as dropped. The
+# file's cases are read from its case start lines (testfiles.sh's table), so a case that only calls snapfixlive does
+# not hold a case of that name, as a scan of the whole file would.
+t_tadirectin() {
+  local d=$T/tadirectin out
+  mkdir -p "$d/wt" && printf '%s\n' 't_relfiles() { :; }' 't_relpins() { snapfixlive; }' > "$d/wt/f.test.sh"
+  printf '%s\n' 'DIRECT: the install holds the right files | compare the list | relfiles, snapfixlive, relpins' 'VERDICT: indirect' > "$d/t.txt"
+  out=$(export STATE=$d/state && . "$SRC/lib/testaction.sh" && . "$SRC/lib/testfiles.sh" && . "$SRC/lib/testrun.sh" && tajudged "$d/t.txt" "$d/wt" f.test.sh | jq -c .direct) \
+    && [ "$out" = '[{"protects":"the install holds the right files","check":"compare the list","cases":["relfiles","relpins"],"dropped":["snapfixlive"]}]' ] \
+    || fail "the record keeps a case another test file defines: $out"
 }
 
 # Bug this guards: a session that never ended held its action running for ever.

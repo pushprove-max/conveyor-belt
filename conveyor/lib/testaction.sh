@@ -20,7 +20,7 @@
 # may run), zone and hours (explain: its --time, the zone, or null for this machine's, and the clock of its facts' times), verdict (judge: the word its text's last line names, VERDICT: <keep | speed up | split | merge | delete |
 # stabilise | indirect> (taverdict()), else "no verdict"; explain: null), hollow and hollowSkipped (judge: the hollow cases its HOLLOW lines name, and the
 # HOLLOW lines that could not be read: tahollow()), causes (judge: the causes of its failures its CAUSE lines name,
-# tacauses()), waits (judge: the waits its WAIT lines name, tawaits()), direct (judge: the proxy parts its DIRECT lines name, tadirect()), pid (the process to stop while it runs) and reason (failed: why)}; <id>.txt, the
+# tacauses()), waits (judge: the waits its WAIT lines name, tawaits()), direct (judge: the proxy parts its DIRECT lines name, with the cases the file does not define in dropped, tadirectin()), pid (the process to stop while it runs) and reason (failed: why)}; <id>.txt, the
 # session's text, written as the session writes it; <id>.events and <id>.err, the CLI's output and its errors. All of
 # it stays after the session ends. `conveyor.sh testaction stop <id>` ends that one session and no other, or takes a
 # queued one off, unstarted.
@@ -40,7 +40,7 @@ TAHOLLOWASK="name each hollow case of the file, a case that passes without provi
 # What it is asked of the waits (#189): the Tests page marks a file Waits when its last run took more than 2 times its
 # CPU time on the clock (WAITRATIO, lib/testrun.sh).
 TAWAITASK="When its recent runs took more than 2 times their CPU seconds on the clock (clocks against times, or sec against cpu, above), the file waits more than it works: name each wait in it on a line of its own: WAIT: <case> | <kind> | <file:line> | <one-line reason>. The kind is one of: sleep, polling, timeout, lock, network, other. Give no WAIT line when it does not wait."
-TAJUDGE="You judge one test file of this project: is it worth what it costs on every test run? Choose one: keep it, speed it up, split it, merge it with another test file (name that file), delete it, stabilise it, or rewrite it as direct checks (indirect). Give the evidence for your choice: its recorded times below, what it tests, whether another test already proves the same behaviour, and why it failed in its recent failures below. A failure with the verdict card is the test doing its job: the change of that card broke what the test checks. Choose stabilise when its failures with the verdict flaky or main have a cause in the test itself: shared state, timing, order, environment or a fixture. For stabilise, name the cause of each failing case on a line of its own: CAUSE: <case> | <kind> | <one-line reason>. The kind is one of: shared state, timing, order, environment, fixture. Say what the file protects, and whether it checks that directly or through a proxy: running other test files or the suite runner, running the real loop, or waiting on a real process with a poll such as wait_until. Choose indirect when it checks through a proxy, and name each proxy part on a line of its own: DIRECT: <what it protects> | <the direct check that would replace it> | <the cases that must keep passing, comma-separated>. Read the repository as you need. Change nothing: do not write or edit a file, do not file an issue, do not change any state. Beside your verdict, $TAHOLLOWASK $TAWAITASK End your answer with one line: VERDICT: <keep | speed up | split | merge | delete | stabilise | indirect>"
+TAJUDGE="You judge one test file of this project: is it worth what it costs on every test run? Choose one: keep it, speed it up, split it, merge it with another test file (name that file), delete it, stabilise it, or rewrite it as direct checks (indirect). Give the evidence for your choice: its recorded times below, what it tests, whether another test already proves the same behaviour, and why it failed in its recent failures below. A failure with the verdict card is the test doing its job: the change of that card broke what the test checks. Choose stabilise when its failures with the verdict flaky or main have a cause in the test itself: shared state, timing, order, environment or a fixture. For stabilise, name the cause of each failing case on a line of its own: CAUSE: <case> | <kind> | <one-line reason>. The kind is one of: shared state, timing, order, environment, fixture. Say what the file protects, and whether it checks that directly or through a proxy: running other test files or the suite runner, running the real loop, or waiting on a real process with a poll such as wait_until. Choose indirect when it checks through a proxy, and name each proxy part on a line of its own: DIRECT: <what it protects> | <the direct check that would replace it> | <the cases that must keep passing, comma-separated>. A field of a DIRECT line holds no |, and its cases are the names of cases this test file defines. Read the repository as you need. Change nothing: do not write or edit a file, do not file an issue, do not change any state. Beside your verdict, $TAHOLLOWASK $TAWAITASK End your answer with one line: VERDICT: <keep | speed up | split | merge | delete | stabilise | indirect>"
 # A judge's lines `<tag>: <case> | <kind> | <reason>`, from its text: each {case, kind, reason}, or false for a line
 # that starts with the tag and does not read as a case, one of the kinds and a reason. A line may start with the marks
 # of a list, quote or emphasis, as the VERDICT line may.
@@ -64,20 +64,31 @@ tawaits() { # <text file>
 }
 # Its DIRECT lines (#778): {direct: [{protects, check, cases}]}, each proxy part of a file an indirect verdict names:
 # what it protects, the direct check that would replace it, and the cases (comma-separated on the line) that must keep
-# passing. A DIRECT line that does not read (fewer than three parts, or no case) is left out.
+# passing. A DIRECT line that does not read (fewer than three parts, or no case) is left out. The cases are the text
+# after the line's last | and the check all between its first and last | (#827), so a | in the check stays in it.
 tadirect() { # <text file>
   jq -Rnc '{direct: [inputs | sub("^[\\s*`_>-]+"; "") | select(startswith("DIRECT:"))
-    | capture("^DIRECT:\\s*(?<protects>[^|]*?\\S)\\s*\\|\\s*(?<check>[^|]*?\\S)\\s*\\|\\s*(?<cases>.*?[^\\s*`_])[\\s*`_]*$")
+    | capture("^DIRECT:\\s*(?<protects>[^|]*?\\S)\\s*\\|\\s*(?<check>.*?\\S)\\s*\\|\\s*(?<cases>[^|]*?[^\\s*`_|])[\\s*`_]*$")
     | .cases |= [split(",")[] | gsub("^[\\s`\"\u0027]+|[\\s`\"\u0027]+$"; "") | select(. != "")] | select(.cases != [])]}' "$1"
 }
+# The DIRECT lines of <text file> (tadirect()) as the judged <test file> in <worktree> (the judge's commit) has them
+# (#827): each line keeps only the cases the file defines (casesgone(), lib/testrun.sh) and names the others in
+# dropped, as a judge may name a case of another test file. A line left with no case is kept: it still names a part.
+tadirectin() { # <text file> <worktree> <test file>
+  local d g
+  d=$(tadirect "$1") && g=$(casesgone "$2" "$3" "$(jq -r '.direct[].cases[]' <<<"$d" | awk '!s[$0]++')") || return 1
+  jq -c --arg g "$g" '($g | split("\n") | map(select(. != ""))) as $g
+    | .direct |= map((.cases - $g) as $k | (.cases - $k) as $x | .cases = $k | if $x == [] then . else .dropped = $x end)' <<<"$d"
+}
 # A judge's fields of its record (tarun()), from its text: verdict (taverdict()), hollow and hollowSkipped
-# (tahollow()), causes (tacauses()), waits (tawaits()) and direct (tadirect()).
-tajudged() { # <text file>
+# (tahollow()), causes (tacauses()), waits (tawaits()) and direct (tadirectin() of the judged <test file> in
+# <worktree>).
+tajudged() { # <text file> <worktree> <test file>
   local v hv
   v=$(taverdict "$1")
   hv=$(tahollow "$1" 2>/dev/null) || hv='{"hollow": [], "hollowSkipped": 0}'
   jq -c --argjson v "$v" --slurpfile c <(tacauses "$1" 2>/dev/null || echo '{"causes": []}') --slurpfile w <(tawaits "$1" 2>/dev/null || echo '{"waits": []}') \
-    --slurpfile d <(tadirect "$1" 2>/dev/null || echo '{"direct": []}') '{verdict: $v} + . + $c[0] + $w[0] + $d[0]' <<<"$hv"
+    --slurpfile d <(tadirectin "$1" "$2" "$3" 2>/dev/null || echo '{"direct": []}') '{verdict: $v} + . + $c[0] + $w[0] + $d[0]' <<<"$hv"
 }
 # Its verdict: the word its last line that is not blank names (VERDICT: <one of TAVERDICTS>), in lower case; "no
 # verdict" when that line names none.
@@ -378,7 +389,7 @@ tarun() { # <the record> <worktree> <prompt>
   elif [ $rc = 0 ]; then state=done
   else state=failed; why=$(jq -cn --arg r "exit $rc: $(tail -n 5 "$f.err" 2>/dev/null)" '$r[0:600]'); fi
   if [ "$(jq -r .action <<<"$r")" = judge ]; then
-    hv=$(tajudged "$f.txt") || hv='{"verdict": "no verdict"}'
+    hv=$(tajudged "$f.txt" "$wt" "$(jq -r .file <<<"$r")") || hv='{"verdict": "no verdict"}'
   fi
   taput "$f.json" "$(jq -c --arg t "$(clock)" --arg s "$state" --argjson v "$v" --argjson w "$why" --slurpfile hv <(printf '%s' "$hv") '$hv[0] as $hv | . + {end: $t, state: $s, verdict: $v} + $hv + (if $w == null then {} else {reason: $w} end) | del(.pid)' <<<"$r")"
   tadrop "$wt"

@@ -120,6 +120,17 @@ test('Tests fixes: an indirect verdict makes Rewrite as a direct check the prima
   assert.match(opened(w, MERGE).textContent, /Rewrite as a direct check: Filed: https:\/\/github\.com\/example\/sample\/issues\/702/);
 });
 
+// Bug it guards (#827): a judge's check text held a | (control rules P3=off | on), the draft wrote it as it was, and
+// the card's check, which splits a DIRECT line at |, read the words after it as cases the file must keep. The draft
+// writes a | inside a field as /, so its DIRECT line has exactly three fields.
+test('Tests fixes: Rewrite as a direct check writes a | inside a DIRECT field as /, so the line keeps three fields', () => {
+  const direct = [{ protects: 'the stop is clean', check: 'control rules P3=off | on', cases: ['relstop'] }];
+  const w = show({ acts: [rec({ state: 'done', end: iso(Date.now()), verdict: 'indirect', direct, text: 'VERDICT: indirect\n' })] });
+  const line = preview(w, MERGE, 'rewrite-direct')[1].split('\n').find((l) => l.startsWith('- DIRECT: '));
+  assert.equal(line, '- DIRECT: the stop is clean | control rules P3=off / on | relstop');
+  assert.equal(line.split('|').length, 3);
+});
+
 // Bug it guards (#768): the owner could not ask for a test file to be split. More has Split it, whose preview is titled
 // "Split the test file <file>" and says how to split it; File posts one test-issue with that title and the body as the
 // owner edited it. Bug it guards too: a runner (wholeOnly, here X) is the sum of other test files, so splitting it

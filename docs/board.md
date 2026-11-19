@@ -638,12 +638,15 @@ that run.
 A test must check what it protects directly. Some files check it through a proxy: they run other test files or the
 suite runner, run the real loop, or wait for a real process with a poll such as `wait_until`. Judge says what a file
 protects and how it checks it. For a proxy, the verdict is indirect, and Judge names each proxy part on a line
-`DIRECT: <what it protects> | <the direct check> | <the cases that must keep passing>`. With that verdict,
+`DIRECT: <what it protects> | <the direct check> | <the cases that must keep passing>`. The cases are the text
+after the last `|` of the line. A DIRECT line keeps only the cases that the file has. The record lists the other
+names as dropped. With that verdict,
 **Rewrite as a direct check** is the step that the Board suggests. A Whole suite only file does not get it, because
 the check of the card runs the file alone: make it run alone first. The button opens the issue preview, with the title
-"Rewrite the test file <file> as direct checks" and the DIRECT lines in its text. You can edit both before you file
-it. Conveyor checks the card as an Optimize card. The change must keep the file and each case that a DIRECT line
-names, and add or remove no other test file. When it drops one of those cases, the card is blocked, and the reason
+"Rewrite the test file <file> as direct checks" and the DIRECT lines in its text. A `|` inside a field shows as
+`/`. You can edit both before you file it. Conveyor checks the card as an Optimize card. The change must keep the
+file and each case that a DIRECT line names and the file had before the change, and add or remove no other test
+file. The check skips a name that is not a case of the file. When it drops one of those cases, the card is blocked, and the reason
 names the case. The file must also pass alone with the change, in fewer CPU seconds than its last runs.
 
 Conveyor also finds proxy checks with no model and no test run: it reads each test file of the default branch. A line

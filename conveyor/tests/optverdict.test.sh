@@ -22,7 +22,8 @@ ovissue() { # <verdict>
 # <change> in its worktree on main, where f.test.sh (`echo slow`) has a median of 4 CPU s on record (whole-suite runs of
 # 3, 4 and 5) and g.test.sh one of 2. The build's reply is <reply>. Each run under cards/mainrun/ names the case relstop of each file its list
 # names as passed and times it at <cpu> CPU s, noting the file in $STUB/mainran. Main also has each <file> <content>
-# pair given. The check's exit is in $RC and the first line of what the review is shown in $WHY.
+# pair given. The issue's body ends with the lines of $OVLINES, if set. The check's exit is in $RC and the first line
+# of what the review is shown in $WHY.
 ovrun() { # <verdict> <change> <cpu> <reply> [<file> <content>]...
   local c
   setup '[]'
@@ -40,7 +41,7 @@ EOF
   fx_wt "$2" f.test.sh 'echo slow' "${@:5}"
   jq -cn --arg r "$4" '{type: "result", result: $r}' > "$FXWT.out"
   # shellcheck disable=SC2034 # read by the commands fx_in runs
-  ISSUE=$(ovissue "$1")
+  ISSUE=$(ovissue "$1" | jq -c --arg l "${OVLINES:-}" 'if $l == "" then . else .body += "\n" + $l end')
   fx_in 'optproof c7 "$FXWT" "$ISSUE" f.test.sh'
 }
 FIXED='Done.
@@ -201,6 +202,41 @@ t_optdirect() {
   [ "$RC" != 0 ] && [ "$WHY" = "the verdict is indirect, and the change drops cases of f.test.sh that the issue's DIRECT lines say must keep passing: relpin" ] && [ ! -e "$STUB/mainran" ] \
     || fail "a rewrite that drops a case its DIRECT lines name was not blocked: exit $RC, $WHY"
   [ "$(st 'select(.step == "bugproof") | .result')" = fail ] || fail "the bugproof line: $(st 'select(.step == "bugproof")')"
+}
+
+# Bug it catches (#827): a DIRECT line with a | in its check text ("P3=off | on, which ...") made the words after it
+# the case list, and a judge named a case another file defines (snapfixlive), so a rewrite that keeps every case of
+# its file was blocked for dropping cases the file never had. The check reads only the case names the file defines on
+# the card's base commit (relstop) and passes; a DIRECT line that names no case of the file, or no case at all, is
+# passed over, as the log says.
+t_optdirectbar() {
+  OVLINES=$(printf '%s\n' '- DIRECT: the stop is clean | control rules P3=off | on, which t_relstop already asserts | relstop, snapfixlive' \
+    '- DIRECT: the loop lands | run the loop | no case named here' 'DIRECT: the slot is freed | no cases named |')
+  ovrun indirect "printf '%s\n' 't_relstop() { :; }' 't_direct() { :; }' > f.test.sh" 15 'Done.' f.test.sh 't_relstop() { :; }'
+  [ "$RC" = 0 ] || fail "a rewrite that keeps every case its DIRECT lines name was blocked: $WHY $(cat "$T/$CASE/run.out")"
+  grep -qF 'conveyor: card c7: a DIRECT line of its issue (the loop lands) names no case f.test.sh defines, so no case of it is checked' "$T/$CASE/run.out" \
+    || fail "the log does not say a DIRECT line names no case of the file: $(cat "$T/$CASE/run.out")"
+  grep -qF 'conveyor: card c7: 1 DIRECT line(s) of its issue name no case, so no case of them is checked' "$T/$CASE/run.out" \
+    || fail "the log does not say a DIRECT line with an empty case field was passed over: $(cat "$T/$CASE/run.out")"
+}
+
+# Bugs it catches (#827): directcases() kept only case names of one word, so a JavaScript case whose name has spaces
+# was never checked and a rewrite could drop it; and it copied the base file to a path built from the issue's file
+# name, so a name with ../ in it wrote outside the copy's directory. The case with spaces is kept, and a file beside
+# the worktree that the ../ name points to is left as it was.
+t_directcases() {
+  setup '[]'
+  local w=$T/$CASE/wt
+  mkdir -p "$w" && git -C "$w" init -q && printf '%s\n' "test('under reduced motion nothing animates', () => {});" > "$w/f.test.mjs" \
+    && git -C "$w" add f.test.mjs && git -C "$w" -c user.name=t -c user.email=t@example.com commit -qm base || fail "the base commit"
+  echo kept > "$T/$CASE/out.test.mjs"
+  # shellcheck disable=SC2034 # read by the commands fx_in runs
+  ISSUE=$(jq -cn '{body: "DIRECT: motion | run it | under reduced motion nothing animates, snapproof"}')
+  mkdir -p "$T/$CASE/tmp"
+  # The copy's directory is made under $T/$CASE/tmp, so ../../out.test.mjs from it is the file above.
+  FXWT=$w TMPDIR=$T/$CASE/tmp fx_in 'directcases c7 "$FXWT" "$ISSUE" f.test.mjs; directcases c7 "$FXWT" "$ISSUE" ../../out.test.mjs'
+  [ "$(head -n 1 "$T/$CASE/run.out")" = 'under reduced motion nothing animates' ] || fail "a case name with spaces was not checked: $(cat "$T/$CASE/run.out")"
+  [ "$(cat "$T/$CASE/out.test.mjs")" = kept ] || fail "a ../ file name in the issue wrote outside the copy's directory"
 }
 
 # Bug it catches (#798): casesgone() read a JavaScript case's name from its unescaped start line, so an escaped quote

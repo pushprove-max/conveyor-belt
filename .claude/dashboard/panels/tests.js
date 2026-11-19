@@ -760,7 +760,9 @@
     const v = verdictOf(file);
     return v && v.verdict === 'indirect' ? list(v.direct).filter((x) => obj(x) && typeof x.protects === 'string' && typeof x.check === 'string' && Array.isArray(x.cases)) : [];
   };
-  const directSaid = (x) => `${x.protects} | ${x.check} | ${x.cases.filter((c) => typeof c === 'string').join(', ')}`;
+  // A | inside a field is written as / (#827): the card's check splits the line at |, so it keeps three fields.
+  const directField = (s) => s.replace(/\|/g, '/');
+  const directSaid = (x) => [x.protects, x.check, x.cases.filter((c) => typeof c === 'string').join(', ')].map(directField).join(' | ');
   function draftDirect(f) {
     const v = verdictOf(f.file), runs = list(f.runs).filter(obj);
     return drafted('Rewrite as a direct check', `Rewrite the test file ${f.file} as direct checks`, f.file,
