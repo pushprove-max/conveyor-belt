@@ -422,12 +422,14 @@ t_trailers() {
 
 # Bugs: a card whose change fails a product check (here two of the case's own: a baseline raised, a schema added)
 # lands, or gets a fix round in place of being blocked; the reason does not hold the check's own lines; a clean card
-# does not land.
+# does not land, or lands with no test run.
 t_checks() {
   local -x FILEMODE=1
   setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-02-01) <(issue 9 2026-03-01))"
   echo '{"hex":3}' > "$R/baseline.json"; echo 'SCHEMA_4' > "$R/schema.txt"
   git -C "$R" add -A; git -C "$R" commit -qm ratchets
+  # The cards change baseline.json and schema.txt: linked to the stub test file, so a card's test step runs the stub.
+  linkset '{"a.txt": ["a.test.sh"], "baseline.json": ["a.test.sh"], "schema.txt": ["a.test.sh"]}'
   cat > "$STUB/raise-check.sh" <<'CHECK'
 a=$(git show "$1:baseline.json" | jq .hex); b=$(git show "$2:baseline.json" | jq .hex)
 [ "$b" -le "$a" ] || { printf 'a%.0s' {1..1000}; echo; printf '12345678\n%.0s' {1..20000}; echo "LOOSENED baseline.json hex: $a -> $b"; exit 1; }
@@ -456,9 +458,10 @@ CHECK
     && st 'select(.issue == 8 and .step == "blocked") | .tail' | grep -q 'adds schema 5' \
     || fail "the blocked line's tail does not hold the second check's line: $(st 'select(.issue == 8 and .step == "blocked") | .tail')"
   [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] || fail "a card that adds a schema landed"
-  # A clean card (it lowers a baseline) lands after its changed tests.
+  # A clean card (it lowers a baseline) lands after its changed tests, which ran ($STUB/tests: the stub's one line).
   echo 'echo "{\"hex\":2}" > baseline.json' > "$STUB/build"
   loop run 1 >/dev/null || fail "third run exited non-zero"
+  [ "$(cat "$STUB/tests" 2>/dev/null)" = x ] || fail "the clean card's changed tests did not run once: $(cat "$STUB/tests" 2>/dev/null)"
   [ "$(tl 9)" = "picked worktree brief build review test landed " ] && [ "$(cat "$R/baseline.json")" = '{"hex":2}' ] \
     || fail "a clean card did not land: $(st 'select(.issue == 9) | "\(.step) \(.reason)"' | tr '\n' ,)"
 }
