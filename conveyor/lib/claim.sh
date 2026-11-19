@@ -755,8 +755,9 @@ batchpass() { # <card> <worktree> <units json> <cases> <the run's cards>
 # alone on top of what passed is the one that breaks it: a card it took is told its exit, given that run's output
 # (<worktree>.test), and goes to its fix as if its own tests failed. Sets mates (the cards that passed, the card among
 # them, in order; none when no other card passed); the card's worktree is left as it was, the output of the run that
-# judged the card in <worktree>.test, and TEST_BATCH ({cases: 0, kept}: for the selected of its test line, when what
-# judged it ran no case and kept that many passes; else empty, a run's log saying what it ran and kept).
+# judged the card in <worktree>.test, and TEST_BATCH (for the selected of its test line: {cases: 0, kept} when what
+# judged it ran no case and kept that many passes; {kept} when it ran the rest with batchkeep()'s list, its log
+# saying what it ran; else empty).
 # A run reuses each card's passed tests (the owner, 2026-11-13, issue #346; batchkeep()): it does not run a case a card
 # passed on its own change, unchanged since (the same patch-id as in its <worktree>.ready), when no other card of the
 # run selects it, nor a case the last batch run that passed passed for cards still in this one, on their unchanged
@@ -802,7 +803,8 @@ batch() { # <card> <worktree> <the batch's cards, in order, the card among them>
         echo "conveyor: card $c: its batch of ${#k[@]} runs no case, each having passed on its cards' changes ($(jq .kept <<<"$keep") kept): ${k[*]}"
         batchpass "$c" "$wt" "$(jq -c .units <<<"$keep")" "$(jq .kept <<<"$keep")" "${k[@]}"
       else
-        [ -z "$keep" ] || batchlist "$wt" "$keep"
+        # The passes the list keeps are counted here: a file it keeps whole is not run, so no log counts its cases.
+        if [ -n "$keep" ] && batchlist "$wt" "$keep"; then bt=$(jq -c '{kept}' <<<"$keep" 2>/dev/null) || bt=''; fi
         tests "$wt"; rc=$?
         [ $rc != 0 ] || [ ! -s "$wt.passed" ] || batchpass "$c" "$wt" "$(jq -c .units "$wt.passed")" "$(jq .cases "$wt.passed")" "${k[@]}"
       fi

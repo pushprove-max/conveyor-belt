@@ -1420,8 +1420,8 @@ its pass. A batch with no such case left runs nothing and passes. The command is
 as a run again (`CONVEYOR_TEST_RERUN`, The test step, above): `pass` and `ok` lines for the passes kept, `changed`
 lines for the files of a card whose pass no longer holds; what a card's run passed is read from its logs, and a run
 whose command writes none counts as one test, which every other card of the batch selects too. The test line of a
-batch's run says how many cases it ran and how many passes it kept in `selected` (`cases` and `kept`, as the runner's
-log gives them; `cases` 0 and the kept cases summed when it ran nothing).
+batch's run says how many cases it ran and how many passes it kept in `selected`: `cases` as the runner's log gives
+it, or 0 when it ran nothing, and `kept`, the cases of the passes it kept, summed.
 What this gives up: two changes that each passed alone can fail together in a case only one of them selects; the
 whole test on main is the net. Green, main gets one commit per card, each with its own message and trailers, in one
 move, and one push carries them; each card's landed line is its own, with `batch` naming the batch's cards. Red, the

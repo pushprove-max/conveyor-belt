@@ -797,7 +797,7 @@ card() { # <card> <issue> [<branch> <tip>]
       fi
       # Not run again when they passed on what its worktree still holds (that run has its own line): this line says it
       # reused that pass.
-      # A batch that ran no case (batch(): TEST_BATCH) says so in selected: no case ran, and how many passes it kept.
+      # A batch's run (batch(): TEST_BATCH) says in selected how many passes it kept, and no case ran when it ran none.
       # A card the repair lane passed (repairlane()): its line says so, with the clean run of its changed tests.
       if [ -n "$repaired" ]; then record "$c" "$n" test pass "$(jq -cn --slurpfile x <(testrec "$wt" 0 "$sec") --arg r "$repaired" '$x[0] + {reason: $r}')"
       elif [ -n "$ran" ]; then record "$c" "$n" test pass "$(jq -cn --slurpfile x <(testrec "$wt" 0 "$sec") --slurpfile r <(firstrun "$wt" pass) --argjson b "${TEST_BATCH:-null}" \

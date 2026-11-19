@@ -33,7 +33,8 @@ t_batchreusewhole() {
 # the batch's list says x.test passed, so the run runs s.test's shared case alone, which both cards select (a.txt,
 # which both change, selects it), not y.test's, which #8 passed alone; #7's test line says one case ran and four were
 # kept. Bugs it catches: the list named x.test's cases as `ok` lines alone, and the run ran x.test whole again; the
-# batch's run ran a case a card passed alone again, or skipped the case both cards select.
+# batch's run ran a case a card passed alone again, or skipped the case both cards select; the test line counted only
+# the kept cases the runner's log names, so x.test's two, kept whole and not run, were left out.
 t_batchreuseshared() {
   reusesetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]" 'a.txt s.test' 'x.txt x.test' 'y.txt y.test'
   echo x.test > "$STUB/whole"
@@ -42,5 +43,5 @@ t_batchreuseshared() {
   [ "$(runs)" = "8 s1 y1 y2,7 s1 x1 x2,7 s1," ] || fail "the batch's run did not run s1 alone (it ran again x.test, which #7 passed whole, or y.test, which #8 passed, or skipped s1, which both cards select): $(runs)"
   landedtogether "$c8 $c7" || fail "the two cards did not land as one batch: $(st 'select(.step == "landed")')"
   [ "$(st 'select(.issue == 7 and .step == "test") | [.result, .selected.cases, .selected.kept] | tojson' | tail -n 1)" = '["pass",1,4]' ] \
-    || fail "#7's last test line does not say one case ran and four passes were kept: $(st 'select(.issue == 7 and .step == "test")')"
+    || fail "#7's last test line does not say one case ran and four passes were kept (x.test's two, kept whole, and y.test's two): $(st 'select(.issue == 7 and .step == "test")')"
 }
