@@ -100,7 +100,7 @@ export type Landed = Card & Times & { closed: boolean; at: number | null; usd: n
 export type Loop = { repo: string; state: string; reason: string; loop: boolean | null; building: number | null; waiting: number | null; cap: number | null; onBelt: number; landing: number }
 export type Suite = { repo: string; kind: string; version: string; sha: string; since: number | null; ended: number | null; state: string; done: number | null; failed: number | null }
 // own: the session's own project, whose cards carry no project name ('' or absent: none is).
-export type Snap = { own?: string; loops: Loop[]; needs: Need[]; belt: Belt[]; queue: Queued[] | null; queueMore: boolean; waits: Waiting[]; held: [string, number][]; deploy: Deploy[]; landed: Landed[]; todayUsd: number | null; todayLeftOut?: number; judgeDeclined: number[]; suites?: Suite[]; umbrellas: Umbrella[] }
+export type Snap = { own?: string; loops: Loop[]; needs: Need[]; belt: Belt[]; queue: Queued[] | null; queueMore: boolean; waits: Waiting[]; held: [string, number][]; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut?: number; judgeDeclined: number[]; suites?: Suite[]; umbrellas: Umbrella[] }
 export type Fast = { state: 'none' | 'unread' | 'norecord' } | { state: 'ok'; branch: string; ahead: number; dirty: number; subject: string }
 export type Research = { state: 'none' } | { state: 'ok'; lastAt: number | null }
 export type Limit = { pct: number; resetsAt: number }
@@ -213,7 +213,7 @@ const umbrellaOf = (x: any) => { const n = num(x.umbrella); return n !== null &&
 
 const liveOf = (v: any): Live | null => (v && typeof v === 'object' ? { action: one(v.action), turns: num(v.turns), lastOutputAt: time(v.lastOutputAt) } : null)
 
-type Rec = { loop: Loop; needs: Need[]; belt: Belt[]; queue: Queued[] | null; waits: Waiting[]; held: Record<string, number>; deploy: Deploy[]; landed: Landed[]; todayUsd: number | null; todayLeftOut: number; judgeDeclined: { id: string; at: number }[]; suites: Suite[]; umbrellas: Umbrella[]; snapshotAt: number | null }
+type Rec = { loop: Loop; needs: Need[]; belt: Belt[]; queue: Queued[] | null; waits: Waiting[]; held: Record<string, number>; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut: number; judgeDeclined: { id: string; at: number }[]; suites: Suite[]; umbrellas: Umbrella[]; snapshotAt: number | null }
 // One record's snapshot. null: it is not the object `conveyor.sh snapshot` prints, so nothing of it is shown.
 export const parseRecord = (repo: string, json: unknown): Rec | null => {
   let j: any = json
@@ -249,6 +249,9 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
         metrics: metricsOf(x.metrics),
       }
     }),
+    // Every card landed today: landed holds only the newest of them and the older ones still on the belt. A snapshot from an older engine has no count,
+    // so its rows are the count; the count is never fewer than the rows.
+    landedCount: Math.max(num(j.landedCount) ?? 0, j.landed.length),
     todayUsd: num(j.cost.today),
     // A snapshot from an older engine has no count: its today is null whenever a step was unpriced.
     todayLeftOut: num(j.cost.todayLeftOut) ?? 0,
@@ -341,6 +344,7 @@ const boardFrom = (name: string, records: { repo: string; json: unknown }[], own
       held: [...held].sort((a, b) => a[0].localeCompare(b[0])),
       deploy: recs.flatMap(r => r.deploy),
       landed: recs.flatMap(r => r.landed).sort((a, b) => at(b.at) - at(a.at)),
+      landedCount: recs.reduce((n, r) => n + r.landedCount, 0),
       // A record that was not read spent an unknown amount today, so the total is partial, like an unpriced step.
       todayUsd: recs.length < read.length || recs.some(r => r.todayUsd === null) ? null : Math.round(recs.reduce((n, r) => n + (r.todayUsd as number), 0) * 100) / 100,
       todayLeftOut: recs.reduce((n, r) => n + (r.todayLeftOut ?? 0), 0),
@@ -880,7 +884,7 @@ export const deployModel = (s: State, snap: Snap, w: number): Line[] => [
   }),
 ]
 
-// LANDED TODAY: the count and the day's cost in the heading; per card the time it landed, a check
+// LANDED TODAY: the count of every card landed today and the day's cost in the heading; per card the time it landed, a check
 // mark, the issue and short title, the last verdict and its round, and the cost ("pushing" in place of it while the
 // push runs, what it waits for while no step runs: "Landed, waiting for Push landed" with push off); beneath, when it was picked up and its overall time to the landing, and the follow-ups it filed.
 export const landedModel = (s: State, snap: Snap, w: number, short: boolean): Line[] => {
@@ -889,7 +893,7 @@ export const landedModel = (s: State, snap: Snap, w: number, short: boolean): Li
   const total = snap.todayUsd
   const pad = '         '
   return [
-    [{ t: 'LANDED TODAY', c: C.head, b: true }, ...(snap.landed.length ? [{ t: `  ${snap.landed.length} · `, d: true }, cost(total)] : [])],
+    [{ t: 'LANDED TODAY', c: C.head, b: true }, ...(snap.landed.length ? [{ t: `  ${snap.landedCount} · `, d: true }, cost(total)] : [])],
     ...(snap.landed.length ? [] : [empty('nothing landed today')]),
     ...shown.flatMap((l): Line[] => {
       const last = l.rounds.at(-1)
@@ -905,7 +909,7 @@ export const landedModel = (s: State, snap: Snap, w: number, short: boolean): Li
         ...(!short && judgeText(l.rounds) ? [judgeText(l.rounds)] : [])]
       return [titled(l, lead, [...verdict, { t: '  ' }, state], w, false), ...(under.length ? wrapParts(under, w, pad) : [])]
     }),
-    ...(snap.landed.length > shown.length ? [empty(`+${snap.landed.length - shown.length} more`)] : []),
+    ...(snap.landedCount > shown.length ? [empty(`+${snap.landedCount - shown.length} more`)] : []),
   ]
 }
 
@@ -1104,7 +1108,7 @@ export const landedTable = (s: State, snap: Snap, w: number): Line[] => {
   const W = (h: string, f: (r: (typeof rows)[number]) => string) => Math.max(cols(h), ...rows.map(r => cols(f(r))))
   const aW = W('Landed', r => r.at), iW = W('Issue', r => r.id), vW = W('Verdict', r => r.verdict.t), tW = W('Total', r => r.total), cW = W('Cost', r => r.state.t)
   return [
-    section(`LANDED TODAY · ${snap.landed.length}`, snap.landed.length ? `${shown.length} most recent of ${snap.landed.length}` : '', w),
+    section(`LANDED TODAY · ${snap.landedCount}`, snap.landed.length ? `${shown.length} most recent of ${snap.landedCount}` : '', w),
     ...(rows.length ? [fitWidth([{ t: `${padR('Landed', aW)}  ${padR('Issue', iW)}  ${padR('Verdict', vW)}  ${padL('Total', tW)}  ${padL('Cost', cW)}`, d: true }], w)] : [empty('nothing landed today')]),
     ...rows.map((r): Line => fitWidth([{ t: `${padR(r.at, aW)}  `, d: true }, { t: `${padR(r.id, iW)}  `, c: C.name, b: true }, { ...r.verdict, t: `${padR(r.verdict.t, vW)}  ` },
       { t: `${padL(r.total, tW)}  `, d: true }, { ...r.state, t: padL(r.state.t, cW) }], w)),

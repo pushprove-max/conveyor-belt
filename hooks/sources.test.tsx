@@ -767,6 +767,28 @@ test('the pane from two projects with 4 cards building, 5 waiting and 20 landed:
   expect(text).toMatch(/\nLANDED TODAY · 20 +5 most recent of 20\n[^]*\n\S+ [AP]M +#400 +✓ GO r2 +\S+ +\$4\.21\n/)
 })
 
+// Issue 830. Bug it catches: the snapshot keeps only the newest 20 landed rows (and older ones still on the belt), and
+// /units counted those rows, so a day of 156 landed cards read "20" and "5 most recent of 20". The count is the sum of
+// every project's landedCount. An older snapshot with no landedCount counts its rows.
+test('LANDED TODAY counts every card landed today (landedCount, summed across projects), not the snapshot rows; without it, the rows', () => {
+  const landed = Array.from({ length: 20 }, (_, i) => ({ ...LANDED[0], card: `c-l${i}`, issue: 400 + i, time: ago(i) }))
+  const other = Array.from({ length: 3 }, (_, i) => ({ ...LANDED[0], card: `c-g${i}`, issue: 450 + i, time: ago(30 + i) }))
+  const all = state(fetched([
+    ['bookstore', snapshot({ landed, landedCount: 100, cost: { today: 12 } })],
+    ['gadgetlab', snapshot({ landed: other, landedCount: 56, cost: { today: 8 } })],
+  ]))
+  expect(paneModel(all, 72, 0).map(plain).join('\n')).toMatch(/\nLANDED TODAY · 156 +5 most recent of 156\n/)
+  const full = section(tableText(all, 80), 'LANDED TODAY').split('\n')
+  expect(full[0]).toBe('LANDED TODAY  156 · $20.00')
+  expect(full.filter(l => / ✓ .*#4\d\d /.test(l))).toHaveLength(23)
+  expect(full.at(-1)).toBe('  +133 more')
+  const old = board({ landed, cost: { today: 20 } })
+  expect(paneModel(old, 72, 0).map(plain).join('\n')).toMatch(/\nLANDED TODAY · 20 +5 most recent of 20\n/)
+  const oldFull = section(tableText(old, 80), 'LANDED TODAY').split('\n')
+  expect(oldFull[0]).toBe('LANDED TODAY  20 · $20.00')
+  expect(oldFull.join('\n')).not.toContain('more')
+})
+
 // Issue 508. Bug it catches: at 60 columns a Pick order row with four dependencies, each with its state, was cut at the
 // width and lost #488, the last issue it waits for.
 test('a Pick order row too long for the pane wraps at each issue it waits for, and loses none', () => {

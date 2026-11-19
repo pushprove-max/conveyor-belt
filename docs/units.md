@@ -86,7 +86,8 @@ right-aligned and the title is what gives way.
   `follow-up` and `retried`); the issues that wait on another; then the held-back line.
 - **BUILT, WAITING FOR YOUR PROD DEPLOY**: the open issues labelled `awaiting-deploy`, which the loop never picks,
   with how long each has carried the label. Shown only when there is one.
-- **LANDED TODAY**: the count and the day's cost in the heading; per card the time it landed, `✓`, the issue and short
+- **LANDED TODAY**: the count of every card landed today and the day's cost in the heading; under it, the most
+  recent cards, and `+N more` for the rest. Per card the time it landed, `✓`, the issue and short
   title, the last verdict and its round (`NO-GO r3`), and its cost (`pushing` while the push runs, `Landed, waiting for Push landed` with that rule Off, `not pushed`,
   `issue open` when GitHub did not close it); beneath, when it was picked up, its overall time to the landing and the
   follow-ups it filed (`↳ 3 follow-ups: #13 #14 #15`).
@@ -140,7 +141,7 @@ this page says that it wraps.
   `Requires`: each issue that waits on other issues and is not forced, and the issues it waits for (`#489  #485  #486  #487  #488`), in
   the order that the loop picks them. When the issues it waits for do not fit on one line, they go on to more lines
   under `Requires`, so none is lost. The held-back line follows.
-- **LANDED TODAY · 20**: on the right, `5 most recent of 20`. One row for each of the five most recent cards: the time
+- **LANDED TODAY · 20**: the count of every card landed today; on the right, `5 most recent of 20`. One row for each of the five most recent cards: the time
   it landed, the issue, the last verdict and its round (`✓ GO r2`), its overall time and its cost (or `pushing`,
   `issue open` or `not pushed`).
 - The Fast and Research lanes, and the lines about what could not be read.
