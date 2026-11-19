@@ -88,7 +88,9 @@ Cards:
   blocked card's issue and keeps its work. A main-red fix
   card has no issue. It shows as "Main is red (<commit>)". Use `retry <card id>` and `shut <card id>`. `retry 0`
   lists the blocked ones by card id.
-- `land-branch <branch>` lands a branch's tip as one card, reviewed and tested as any card.
+- `land-branch <branch>` lands a branch's tip as one card, reviewed and tested as any card. A branch named as a card
+  id (`c<time>-<project>-<issue>`) lands as that issue. Other branches land as issue 0, also when the name has a
+  number in it.
 - `control [<action>]` changes the control record. `control depends` writes an issue's `Depends on:` line on GitHub.
   `control card <issue> ...` sets an issue's own builder, reviewer and judge, and `control card <issue> pick` asks the
   judge to choose them ([Configuration](configuration.md#settings-for-one-card)).

@@ -22,7 +22,9 @@ pickbranch() { # <branch> <issue> <title>
 
 # One branch landed as one card (the rule is in README.md). Everything that can be refused is refused before
 # the picked line, so a refusal leaves no card. The tip is read once: the card lands that commit's change, whatever
-# the branch gains meanwhile.
+# the branch gains meanwhile. The card's issue is the one of a branch named as the engine names a card of this
+# project (c<time>-<project>-<issue>), else 0: a number elsewhere in a name (hand/snapexec-290) is no issue, as the
+# engine would review the branch against that issue and could close it.
 landbranch() { # <branch>
   local br=$1 tip n title c end
   # A branch name only: revision syntax (fast-lane~0, @{-1}) names no branch.
@@ -37,10 +39,10 @@ landbranch() { # <branch>
   end=$(git merge-tree --write-tree "refs/heads/$BRANCH" "$tip") \
     || { echo "conveyor: branch $br does not merge into main as it stands; rebase it on main first. Nothing recorded: $(tail -n +2 <<<"$end" | head -c 600)" >&2; return 1; }
   [ "$(head -n 1 <<<"$end")" != "$(git rev-parse "refs/heads/$BRANCH^{tree}")" ] || { echo "conveyor: nothing to land: branch $br holds no change against main"; return 0; }
-  n=$(grep -oE '[0-9]+' <<<"$br" | head -n 1); [ ${#n} -le 9 ] || n=''; n=$((10#${n:-0}))
+  n=0; ! [[ $br =~ ^c[0-9]{8}T[0-9]{6}-"$CTAG"-([1-9][0-9]{0,8})$ ]] || n=${BASH_REMATCH[1]}
   if [ "$n" = 0 ]; then title=$(git log --reverse --format=%s "refs/heads/$BRANCH..$tip" | head -n 1)
   else title=$(timeout 60 gh issue view "$n" --json title | jq -er .title) \
-    || { echo "conveyor: branch $br names issue #$n, which cannot be read; nothing recorded" >&2; return 1; }
+    || { echo "conveyor: branch $br lands as issue #$n, which cannot be read; nothing recorded" >&2; return 1; }
   fi
   c=$(codexready) || { echo "conveyor: $c; nothing recorded" >&2; return 1; }
   c=$(locked pickbranch "$br" "$n" "$title") || return 1

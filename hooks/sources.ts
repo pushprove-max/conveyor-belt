@@ -540,11 +540,13 @@ const whenOf = (t: number, now: number) => {
 const overallOf = (x: Times, now: number): number | null =>
   x.totalSec !== null ? x.totalSec : x.pickedAt === null ? null : x.priorSec + Math.max(0, Math.round((now - x.pickedAt) / 1000))
 
-// The card that lands the Fast lane's branch, found as `conveyor.sh land-branch` names it: the issue is the first
-// number in the branch name, and a branch that names none lands as issue 0 under its first commit's subject.
+// The card that lands the Fast lane's branch, found as `conveyor.sh land-branch` names it: a branch named as a card
+// id of the own project (c<time>-<project>-<issue>) lands as that issue; any other branch, a number in its name or
+// not, lands as issue 0 under its first commit's subject.
 export const laneCard = (s: State): string => {
   if (!s.snap || s.fast.state !== 'ok' || !s.fast.ahead) return ''
-  const n = Number(/\d+/.exec(s.fast.branch)?.[0].slice(0, 9) ?? 0)
+  const tag = (s.snap.own ?? '').replace(/[^A-Za-z0-9]/g, '-')
+  const n = Number((tag && new RegExp(`^c\\d{8}T\\d{6}-${tag}-([1-9]\\d{0,8})$`).exec(s.fast.branch)?.[1]) || 0)
   const subject = s.fast.subject.slice(0, 200)
   const mine = (c: Card) => !c.repo && c.issue === n && (n > 0 || c.title === subject)
   const belt = s.snap.belt.find(mine)

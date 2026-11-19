@@ -181,8 +181,8 @@ nothing until then); a `/units` typed while a fetch is still waiting to start st
 - The lanes of the session's checkout: the folders its record names in `lanes.fast.worktree` and
   `lanes.research.worktree` (`conveyor.sh lane ... create` writes them; `~/` is the home folder). Of the Fast lane,
   with git: its branch, its commits ahead of the project's default branch, its tracked files changed. Its card is found as
-  `conveyor.sh land-branch` names it: the issue is the first number in the branch name, and a branch that names none
-  lands as issue 0 under its first commit's subject. A checkout the host file has no record of shows
+  `conveyor.sh land-branch` names it: a branch named as a card id (`c<time>-<project>-<issue>`) lands as that issue,
+  and any other branch lands as issue 0 under its first commit's subject. A checkout the host file has no record of shows
   `not read: the host file has no record of this checkout`.
 
 The live feed. Where the Board runs, it keeps `stream.json` in its own folder from one long-lived `conveyor.sh watch`

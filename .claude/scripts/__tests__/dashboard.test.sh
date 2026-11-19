@@ -1208,7 +1208,7 @@ echo x > "$FL/f.txt"; gw add f.txt
 run
 q '.panels.lanes.data.records[0].fast | .ahead == 2 and .subject == "Second lane commit" and .first == "First lane commit" and .dirty == 1 and .landing == {state: "none"}' "the open change: commits ahead of main, the newest and the oldest, and uncommitted files; no card lands it yet"
 ) & PIECES+=($!)
-( setup lanes-2; fast_lane fix-123-fast
+( setup lanes-2; fast_lane c20260101T000000-sample-123
 lane_card() { jq -c --argjson c "$1" "$2" <<<"$(snap)"; }
 BELT_CARD='{"card": "c5-123", "issue": 123, "title": "Fast thing", "step": "tests", "review": null, "of": 3, "stepAt": "'"$(ago 30)"'", "model": null, "tokens": {"claude": 0, "codex": 0}, "usd": 0}'
 answer "$(lane_card "$BELT_CARD" '.belt = [$c]')" "$P_URL" 0 "$(snap)" "$C_URL" 0
@@ -1237,6 +1237,12 @@ q '.panels.lanes.data.records[0].fast.landing == {state: "none"}' "a retried car
 answer "$(snap)" "$P_URL" 0 "$(lane_card "$BELT_CARD" '.belt = [$c]')" "$C_URL" 0
 run
 q '.panels.lanes.data.records[0].fast.landing == {state: "none"}' "another record's card of the same issue number is not this record's lane's landing"
+# Issue 601: a number at the end of a hand fix's name is no issue (land-branch lands it as issue 0): issue 123's card
+# is not the landing of a lane on fix-123.
+gw branch -q -m fix-123
+answer "$(lane_card "$BELT_CARD" '.belt = [$c]')" "$P_URL" 0 "$(snap)" "$C_URL" 0
+run
+q '.panels.lanes.data.records[0].fast.landing == {state: "none"}' "a number at the end of the branch name is not the lane's issue"
 # A branch that names no issue lands as a card of issue 0, titled with the first commit of the branch.
 gw branch -q -m lane-work
 NO_ISSUE='{"card": "c6-0", "issue": 0, "title": "First lane commit", "step": "review", "review": 1, "of": 3, "stepAt": "'"$(ago 30)"'", "model": "gpt-x", "tokens": {"claude": 0, "codex": 0}, "usd": 0}'

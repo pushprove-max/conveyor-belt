@@ -761,13 +761,13 @@ PANELS_JQ='
   | ($R // [] | map(. as $r | .snap.needsYou.engine | objects | tag($r) | {repo, commit, reason, since})) as $engines
   # The last run of the test rules of a record, when it matched more files than the cap of one day and so filed none (needsYou.testRules).
   | ($R // [] | map(. as $r | .snap.needsYou.testRules | objects | tag($r) | {repo, time, matched, cap})) as $testRules
-  # The card that lands the Fast lane of a record (conveyor.sh land-branch), one of the cards of that record: the issue is the first number in the branch name,
-  # and a branch that names none is a card of issue 0 titled with the first commit of the branch. The landed list
+  # The card that lands the Fast lane of a record (conveyor.sh land-branch), one of the cards of that record: a branch named as a card id of the record
+  # (c<time>-<project>-<issue>) is a card of that issue, and any other branch, a number in its name or not, is a card of issue 0 titled with the first commit of the branch. The landed list
   # holds only the cards of today, so a card that landed on an earlier day is found in the branches of the snapshot (the
   # newest land-branch cards that landed, on any day, and the newest that landed the change of each lane): the lane says it landed, with no time of day, for as long as it is
   # left as it was. A snapshot from before it carried branches has the cost rows, which end after 7 days.
   | def landing($l; $repo): if $R == null then null elif ($l.present | not) or ($l.ahead // 0) == 0 then {state: "none"} else
-        (($l.branch // "") | (capture("(?<n>[0-9]+)").n | tonumber) // 0) as $n
+        (($l.branch // "") | (capture("^c[0-9]{8}T[0-9]{6}-\($repo | gsub("[^A-Za-z0-9]"; "-"))-(?<n>[1-9][0-9]{0,8})$").n | tonumber) // 0) as $n
         | def mine: select(.issue == $n and ($n != 0 or .title == $l.first));
           def own: select(.repo == $repo);
           ([$belt[] | own | mine | select(.landed != true) | {state: "belt", card, step, review, of, since: .stepAt}]

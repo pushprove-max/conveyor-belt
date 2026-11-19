@@ -607,8 +607,11 @@ test('the Fast lane line names its card: on the belt with its step, needing you,
   expect(fastText(lane(fast, { belt: [{ ...BELT[1], ...card }] }))).toMatch(/ · card on the belt: review 2 of 3$/)
   expect(fastText(lane(fast, { needsYou: { waiting: [{ ...WAITING, ...card }], blocked: [] } }))).toMatch(/ · card needs you$/)
   expect(fastText(lane(fast, { landed: [{ ...LANDED[0], ...card }] }))).toMatch(new RegExp(` · card landed ${clockOf(NOW - 13 * 60_000)}$`))
-  // A branch that names an issue lands as that issue's card; another branchless card is not this lane's.
-  expect(fastText(lane('fast\tok\tfix-3864-units\t1\t0\tx', { belt: BELT }))).toMatch(/ · card on the belt: review 2 of 3$/)
+  // A branch named as a card id of this project lands as that issue's card; another branchless card is not this lane's.
+  expect(fastText(lane('fast\tok\tc20261110T040000-bookstore-3864\t1\t0\tx', { belt: BELT }))).toMatch(/ · card on the belt: review 2 of 3$/)
+  // Issue 601: a number at the end of a hand fix's name is no issue (land-branch lands it as issue 0), so the lane
+  // is not shown as the card of that issue.
+  expect(fastText(lane('fast\tok\tfix-3864-units\t1\t0\tx', { belt: BELT }))).toMatch(/ · not landed$/)
   expect(fastText(lane(fast, { belt: [{ ...BELT[0], card: 'c8-0', issue: 0, title: 'Another change' }] }))).toMatch(/ · not landed$/)
 })
 
@@ -654,7 +657,7 @@ test('a snapshot that cannot be read is one plain line saying why, in /units and
 // Bug: the first record was the session's own whatever checkout the session was in: a session in gadgetlab showed
 // bakery's card as #12 and looked for its Fast lane's card among bakery's, so it read `not landed`.
 test('a session in the second project: its cards carry no name, the first\'s carry theirs, and its Fast lane finds its card', () => {
-  const text = TWO_PROJECTS.replace('\t/r/HOME\tbakery\n', '\t/r/HOME\tgadgetlab\n').replace('fast\tnone', 'fast\tok\tfix-7-gears\t1\t0\tGear ratio chart')
+  const text = TWO_PROJECTS.replace('\t/r/HOME\tbakery\n', '\t/r/HOME\tgadgetlab\n').replace('fast\tnone', 'fast\tok\tc20261110T040000-gadgetlab-7\t1\t0\tGear ratio chart')
   const s = state(text)
   expect(tableText(s, 100)).toMatch(/\n bakery#12 Bread oven timer [^]*\n #7 Gear ratio chart /)
   expect(fastText(s)).toMatch(/ · card on the belt: review 1 of 3$/)

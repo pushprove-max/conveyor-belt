@@ -938,8 +938,9 @@ snapshot() (
     | .pushedCards |= (sort_by(.time) | reverse | .[:$p])' "$d/full"
 )
 # lanekeys -- what the Board finds the card that landed a lane's change by (dashboard.sh landing()), for each lane of
-# MAIN that holds a change (the linked worktrees lanetips counts as lanes): a JSON list of {issue: the first number in
-# its branch's name, else 0; title: the subject of the oldest commit it has that BRANCH has not}.
+# MAIN that holds a change (the linked worktrees lanetips counts as lanes): a JSON list of {issue: the issue at the end
+# of a branch named as a card id of this project (landbranch()), else 0; title: the subject of the oldest commit it
+# has that BRANCH has not}.
 lanekeys() {
   local l p q b f
   l=$(lanepath 2>/dev/null && cd "$LANE" 2>/dev/null && pwd -P)
@@ -949,7 +950,7 @@ lanekeys() {
     { [ -n "$l" ] && [ "$q" = "$l" ]; } || [ "$(git -C "$p" config --worktree --get protocol.allow 2>/dev/null)" = never ] || continue
     f=$(git -C "$p" log --reverse --format=%s "refs/heads/$BRANCH..HEAD" 2>/dev/null | head -n 1); [ -n "$f" ] || continue
     b=$(git -C "$p" symbolic-ref -q --short HEAD 2>/dev/null) || b=''
-    jq -cn --arg b "$b" --arg f "$f" '{issue: (($b | capture("(?<n>[0-9]+)").n | tonumber) // 0), title: $f}'
+    jq -cn --arg b "$b" --arg f "$f" --arg t "$CTAG" '{issue: (($b | capture("^c[0-9]{8}T[0-9]{6}-\($t)-(?<n>[1-9][0-9]{0,8})$").n | tonumber) // 0), title: $f}'
   done | jq -cs .
 }
 # history -- the lists the snapshot cuts, whole (HISTORY); a state with none yet has a snapshot taken first to write it.
