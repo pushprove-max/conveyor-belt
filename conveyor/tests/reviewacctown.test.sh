@@ -57,4 +57,8 @@ t_reviewacctcard() {
   # The dry pick holds #10 as the loop does (#9 has its card now): the bug answered 10.
   printf '[%s]\n' "$(issue 10 2026-01-04)" > "$STUB/issues.json"
   out=$(loop pick --dry --issues "$STUB/issues.json" --state "$ST") && [ -z "$out" ] || fail "the dry pick took #10 on its own reviewer's account at its limit: $out"
+  # The loop's own pick (pick(); the dry pick never logs the line) with only #10 ready, so the guard leaves none: it
+  # picks nothing and prints nothing, stdout or stderr. The bug logged to stderr that the next ready issue was picked.
+  fx_in "pick '' 10 \"\$(<$(printf %q "$STUB/issues.json"))\""
+  [ "$RC" = 0 ] && [ ! -s "$T/$CASE/run.out" ] || fail "the pick took #10, or logged that the next ready issue was picked when none was ready: $(cat "$T/$CASE/run.out")"
 }
