@@ -6,6 +6,9 @@ import assert from 'node:assert/strict';
 import { T0, iso, clone, boot, panel, deliver, tick, full, cases } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
+// A page with only the panel a case reads: every other panel's script is evaluated on each boot (and drawn when it is
+// on the tab in view), CPU paid for panels these cases never read and that their own files check.
+const page = (id, opt = {}) => boot({ list: [id], ...opt });
 // About 25 lines of a pre-push hook's output, as the audit saw poured into the row.
 const PUSH_OUT = ['exit 1 (124 is the 900s timeout): push-checks: ok typecheck-backend', ...Array.from({ length: 23 }, (_, i) => `web/src/page${i}.tsx(${i + 1},5): error TS2322: Type 'string' is not assignable to type 'number'.`),
   'push-checks: FAILED typecheck-web'].join('\n');
@@ -26,7 +29,7 @@ const dd = (w, label) => panel(w, 'health').querySelector(`dt[data-check="${labe
 // what to do. The failing rows lead, faults before warnings, each with one "Next:" line; every row that is fine is
 // folded into "N checks fine", closed, and says no next step.
 test('Health: failing rows come first, faults before warnings, each with a next step; the rows that are fine fold into "N checks fine"', () => {
-  const w = boot();
+  const w = page('health');
   deliver(w, failing());
   // The row with the Board's feed restart comes last, out of the fold while a check is a fault (issue 115).
   assert.deepEqual(failingRows(w), ['Last push', 'Flaky tests', 'Usage limit', 'Dashboard code', 'Board\'s feed'], 'the fault first, then the warnings in the order drawn');
@@ -38,7 +41,7 @@ test('Health: failing rows come first, faults before warnings, each with a next 
   assert.deepEqual(Array.from(fine.querySelectorAll('dt'), (dt) => dt.dataset.check), ['buildhost', 'Conveyor', 'Codex limit']);
   assert.equal(fine.querySelector('.check-next'), null, 'a row that is fine has no next step');
   // Nothing failing: no failing list, every row folded.
-  const ok = boot();
+  const ok = page('health');
   deliver(ok, full());
   assert.deepEqual(failingRows(ok), []);
   assert.equal(panel(ok, 'health').querySelector('details.checks-fine summary').textContent, '6 checks fine');
@@ -49,7 +52,7 @@ test('Health: failing rows come first, faults before warnings, each with a next 
 // which check), the output whole under a closed "Show output"; a long error shows its first 100 characters on the row
 // and the rest the same way; a wait reads "try again in 17 min".
 test('Health: a failing push is one plain line with its output under "Show output"; a long error is cut to its line; a wait reads "try again in"', () => {
-  const w = boot();
+  const w = page('health');
   const data = failing();
   data.panels.health.data.accounts = { error: null, list: [{ machine: null, name: 'default', email: 'noreply@example.com', usedPct: null, fiveHourPct: null, resetsAt: null,
     readAt: null, error: 'rate limited (429); retry after 1022 s', usedFor: ['not used by the Conveyor'] }] };
@@ -80,7 +83,7 @@ test('Health: a failing push is one plain line with its output under "Show outpu
 // owner could not see which file no card runs, or why. The row lists the file, both runs' CPU seconds, and the issue
 // whose card brings it back; it names no CPU budget, which no test file has (#349).
 test('Health: a test file kept off card test steps is listed with why and its issue', () => {
-  const w = boot();
+  const w = page('health');
   const data = full();
   data.panels.health.data.records[0].slowOff = [{ file: 'conveyor/tests/s.test.sh', issue: 17, url: 'https://github.com/example/sample/issues/17',
     cpu: 10.24, budget: 8, card: 'c2-9', last: { cpu: 9, card: 'c2-8' } }];
@@ -99,7 +102,7 @@ test('Health: a test file kept off card test steps is listed with why and its is
 // is the Board's served copy. Bug (review): a grouped Foreman's notes come once a project (so the project filter keeps
 // them), and were drawn as one row each.
 test('Health: the plugin problems a Foreman noted are a warning row, "N plugin problems noted", with a link to the file', () => {
-  const w = boot();
+  const w = page('health');
   const data = full();
   const note = { projects: ['sample', 'widgetshop'], count: 2, file: '/srv/sample/conveyor/state/foreman/plugin-bugs.md', url: 'plugin-bugs/sample.txt' };
   data.panels.health.data.pluginBugs = [{ repo: 'sample', ...note }, { repo: 'widgetshop', ...note }];
@@ -116,7 +119,7 @@ test('Health: the plugin problems a Foreman noted are a warning row, "N plugin p
 // output" or "checks fine" closed under the owner while they read it. What was open stays open; what was not, stays shut.
 // Bug (#557): the push's output was a new box at each draw, so a reader scrolled in it went back to its top.
 test('Health: an opened "Show output" and "checks fine" stay open when the live feed draws the panel again', async () => {
-  const w = boot({ feed: true });
+  const w = page('health', { feed: true });
   const es = w.sources[0];
   const data = failing();
   data.panels.health.data.stream = { live: true, heardAt: iso(T0), since: null, error: null, writtenAt: iso(T0) };
@@ -142,7 +145,7 @@ test('Health: an opened "Show output" and "checks fine" stay open when the live 
 
 // Bug: a Live data row that goes stale between snapshots stayed folded among the rows that are fine.
 test('Health: the Data row that turns stale on a tick leaves "checks fine" and leads the panel with its next step', () => {
-  const w = boot({ feed: true });
+  const w = page('health', { feed: true });
   const es = w.sources[0];
   const data = full();
   data.panels.health.data.stream = { live: true, heardAt: iso(T0), since: null, error: null, writtenAt: iso(T0) };
@@ -161,7 +164,7 @@ test('Health: the Data row that turns stale on a tick leaves "checks fine" and l
 // Issue 407 (UX3). Bug: three words for the same wait ("the next snapshot", "the next reading", "within a minute");
 // Health's next steps still said "The next snapshot reads it again". Each says "in about a minute".
 test('Health: a row not read or not checked says it is tried again "in about a minute", never "the next snapshot"', () => {
-  const w = boot();
+  const w = page('health');
   const data = full(), hd = data.panels.health.data;
   hd.host.reachable = null;
   hd.accounts = { list: [], error: 'ssh: no answer' };
@@ -181,7 +184,7 @@ test('Health: a usage or account reading 6 h old shows its age and a warning chi
     hd.limits[0].readAt = iso(T0 - ms);
     hd.accounts = { error: null, list: [{ machine: null, name: 'default', email: 'noreply@example.com', usedPct: 53, fiveHourPct: 10, resetsAt: null,
       readAt: iso(T0 - ms), error: 'rate limited (429)', usedFor: ['cards of sample: build and fix'], cards: true, others: true }] };
-    const w = boot();
+    const w = page('health');
     deliver(w, data);
     return w;
   };
@@ -208,7 +211,7 @@ test('Health: the usage limit is the reading of the account the cards run on, no
   hd.accounts = { error: null, list: [{ machine: null, name: 'default', email: 'noreply-b@example.com', usedPct: 92, fiveHourPct: 70, resetsAt: null,
     readAt: iso(T0 - 60000), error: null, usedFor: ['not used by the Conveyor'] }] };
   hd.limits = [{ repo: 'sample', account: null, uses: ['build', 'review'], pct: 3, readAt: iso(T0 - 60000), email: 'noreply-a@example.com' }];
-  const w = boot();
+  const w = page('health');
   deliver(w, data);
   const usage = dd(w, 'Usage limit');
   assert.match(usage.textContent, /^Fine3% of the 7-day limit usedaccount default, noreply-a@example\.com: build and fix and reviews$/);
@@ -224,7 +227,7 @@ test('Health: a builder account and a reviewer account each show their own readi
     { repo: 'sample', account: 'builder', uses: ['build'], pct: 40, readAt: iso(T0 - 60000), email: 'noreply-a@example.com' },
     { repo: 'sample', account: 'reviewer', uses: ['review'], pct: 95, readAt: iso(T0 - 60000), email: 'noreply-c@example.com' },
     { repo: 'sample', account: 'third', uses: ['review'], pct: null, readAt: null, email: null }];
-  const w = boot();
+  const w = page('health');
   deliver(w, data);
   assert.match(dd(w, 'Usage limit of sample: builder').textContent, /^Fine40% of the 7-day limit usedaccount builder, noreply-a@example\.com: build and fix$/);
   const rev = dd(w, 'Usage limit of sample: reviewer');
@@ -248,7 +251,7 @@ test('Health: with every role on an API route, no usage or account warning, and 
   hd.host.local = true;
   hd.accounts ={ error: null, list: [{ machine: null, name: 'default', email: 'noreply@example.com', usedPct: null, fiveHourPct: null, resetsAt: null,
     readAt: null, error: 'rate limited (429)', usedFor: ["this machine's Foreman"], cards: false, others: false }] };
-  const w = boot();
+  const w = page('health');
   deliver(w, data);
   assert.deepEqual(failingRows(w), [], 'no warning');
   assert.match(dd(w, 'Usage limit of sample').textContent, /^FineAPI route: no usage limit \(billed per token\)\$4\.25 spent today on sample on this machine, from the session logs$/);
@@ -264,7 +267,7 @@ test('Health: an API route on a build machine apart gives a fine row and not thi
   hd.records[0].routes = { subscription: { state: 'not used', roles: [] }, proxy: { state: 'works', baseUrl: 'http://192.0.2.1:4141', roles: { builder: 'proxy', reviewer: 'proxy' }, route: 'proxy' } };
   hd.limits = [];
   hd.limit.today = { spentUsd: 4.25 };
-  const w = boot();
+  const w = page('health');
   deliver(w, data);
   assert.deepEqual(failingRows(w), [], 'no warning');
   assert.equal(dd(w, 'Usage limit').textContent, 'FineAPI route: no usage limit (billed per token)');
@@ -277,7 +280,7 @@ test('Health: with mixed routes, only the subscription role\'s usage limit shows
   const data = full(), hd = data.panels.health.data;
   hd.records[0].routes = { subscription: { state: 'works', roles: ['reviewer'] }, proxy: { state: 'works', baseUrl: 'http://192.0.2.1:4141', roles: { builder: 'proxy', reviewer: 'subscription' }, route: 'proxy' } };
   hd.limits = [{ repo: 'sample', account: 'second', uses: ['review'], pct: null, readAt: null, email: null }];
-  const w = boot();
+  const w = page('health');
   deliver(w, data);
   assert.deepEqual(failingRows(w), ['Usage limit']);
   assert.match(dd(w, 'Usage limit').textContent, /^Not readno reading yetaccount second, no email recorded: reviewsNext:/);
@@ -291,7 +294,7 @@ test('Health: card test runs that recorded no test times are a warning that name
   const at = (n) => {
     const data = full();
     data.panels.health.data.records[0].untimed = n;
-    const w = boot();
+    const w = page('health');
     deliver(w, data);
     return w;
   };
@@ -310,7 +313,7 @@ test('Health: a card record line set aside names its line and the field the chec
   const at = (q) => {
     const data = full();
     data.panels.health.data.records[0].quarantined = q;
-    const w = boot();
+    const w = page('health');
     deliver(w, data);
     return w;
   };
@@ -327,7 +330,7 @@ test('Health: a card record line set aside names its line and the field the chec
 test('Health: no test times from a runner Conveyor cannot read names the runner and its report option', () => {
   const data = full();
   Object.assign(data.panels.health.data.records[0], { untimed: 5, report: { runner: 'jest', option: '--json --outputFile=<file>' } });
-  const w = boot();
+  const w = page('health');
   deliver(w, data);
   const row = dd(w, 'Test times');
   assert.match(row.textContent, /the last 5 card test runs recorded no test times; the test command runs jest, and Conveyor cannot read its output/);
@@ -341,7 +344,7 @@ const account = (over) => {
   const data = full();
   data.panels.health.data.accounts = { error: null, list: [{ machine: 'devbox', name: 'default', email: 'noreply@example.com', usedPct: 92, fiveHourPct: 40,
     resetsAt: iso(T0 + 2 * 3600000), readAt: iso(T0 - 60000), error: null, usedFor: ['cards of sample: build and fix'], cards: true, others: false, ...over }] };
-  const w = boot();
+  const w = page('health');
   deliver(w, data);
   return dd(w, 'Account default on devbox');
 };
@@ -367,7 +370,7 @@ test('Health: a used account at 92% with another account to move to names the Ru
 const routes = (r) => {
   const data = full();
   data.panels.health.data.records[0].routes = r;
-  const w = boot();
+  const w = page('health');
   deliver(w, data);
   return w;
 };
@@ -392,7 +395,7 @@ test('Health: an expired subscription login while the fallback proxy works is a 
 test('Metrics: a step that ran through the API proxy says so in the card timeline, and one on the subscription login says that', () => {
   const data = full(), card = data.panels.metrics.data.cards.find((c) => c.title === 'Landed one');
   card.metrics = { ...card.metrics, timeline: card.metrics.timeline.map((s, i) => (i === 0 ? { ...s, route: 'proxy' } : i === 1 ? { ...s, route: 'subscription' } : s)) };
-  const w = boot();
+  const w = page('metrics');
   deliver(w, data);
   const det = Array.from(panel(w, 'metrics').querySelectorAll('details.card-detail')).find((d) => d.querySelector('.title').textContent === 'Landed one');
   det.querySelector('summary').click();
@@ -406,7 +409,7 @@ test('Metrics: a step that ran through the API proxy says so in the card timelin
 test('Health: gh signed in but GitHub not reached is a warning row, never "Not signed in"', () => {
   const data = full();
   Object.assign(data.panels.health.data.records[0], { gh: true, ghReached: false });
-  const w = boot();
+  const w = page('health');
   deliver(w, data);
   const dt = Array.from(panel(w, 'health').querySelectorAll('dt[data-check]')).find((d) => d.dataset.check.startsWith('GitHub'));
   assert.ok(dt, 'a GitHub row');
@@ -427,7 +430,7 @@ test('Health: a read refused with HTTP 401 says the login has expired and where 
 // Issue 185. Bug it catches: the machine's Conveyor ran an older commit that refused a pack field it did not know, and
 // Health showed no sign of it. The row is a fault that names the commit, the field and what to run; none without it.
 test("Health: the machine's Conveyor on an older commit that refuses the pack names the field and what to run", () => {
-  const w = boot();
+  const w = page('health');
   const data = full();
   data.panels.health.data.records[0].serviceOld = { commit: `090ab497${'0'.repeat(32)}`, refused: '.tests', project: `c4bc952b${'1'.repeat(32)}` };
   deliver(w, data);
@@ -435,14 +438,14 @@ test("Health: the machine's Conveyor on an older commit that refuses the pack na
   const row = dd(w, "Conveyor's version");
   assert.match(row.textContent, /^Too old for the pack.*Conveyor 090ab4970000 on the build machine refuses the pack: \.tests/);
   assert.match(row.querySelector('.check-next').textContent, /^Next: Run conveyor\.sh install-service in the project's checkout on the build machine\. It starts Conveyor again on the project's commit c4bc952b1111\.$/);
-  const ok = boot();
+  const ok = page('health');
   deliver(ok, full());
   assert.equal(panel(ok, 'health').querySelector('dt[data-check="Conveyor\'s version"]'), null, 'no row while the machine reads the pack');
 });
 // Issue 346. Bug it catches: the machine room is removed, so no card or test waits for the machine's pressure, yet a
 // snapshot from an engine that still sends it drew a Strained "Machine room" warning that holds nothing back.
 test('Health: no Machine room row, even from a snapshot that still carries the pressure', () => {
-  const w = boot();
+  const w = page('health');
   const data = full();
   data.panels.health.data.records[0].pressure = { state: 'Strained', cpu: 85.5, memory: 1.5, wakeMs: 0.2, freeMB: null, why: 'CPU pressure 85.5% is at or above 80%', gates: true };
   deliver(w, data);
@@ -453,7 +456,7 @@ test('Health: no Machine room row, even from a snapshot that still carries the p
 // snapshot over a minute old says so (its age) with what to do, and a newer one adds no row. One shown at 30 s that
 // grows over a minute old with no new data (an equal part draws nothing) turns into the warning on a tick.
 test('Health: a kept snapshot turns into a warning with its age on the tick it is over a minute old, with no new data', () => {
-  const w = boot();
+  const w = page('health');
   const data = full();
   data.panels.health.data.records[0].snapshotAt = iso(T0 - 30000);
   deliver(w, data);
