@@ -152,7 +152,8 @@ The pane and `/units` write times of day in the form that the Board's **Time** s
 
 `time`, in `/config` under the plugin: `12-hour` (`3:04 PM`, the default) or `24-hour` (`15:04`). When the Board runs on
 this machine and you set its **Time** in Customize, the pane uses the Board's setting in place of `time`, within a
-minute. The pane uses the **Time** of the browser that last set it or last opened the Board.
+minute. The pane uses the **Time** that a browser last sent. A browser sends its **Time** each time you set it, and
+on opening the Board only one time: the first time, and only when its **Time** is not the default.
 
 The pane has its option in `/config`, under the plugin: `pane`, `auto`, `on` or `off`. `auto` is on in main, where the
 Foreman runs, off in every other worktree (a card's, a lane's). `/units pane on|off` sets it for the current session.

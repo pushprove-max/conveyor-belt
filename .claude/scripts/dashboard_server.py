@@ -1619,7 +1619,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(b'ok')
 
     def set_time(self):
-        """POST /time {time}: the Board's Time setting (12-hour or 24-hour), as a browser last set it or opened the Board with it.
+        """POST /time {time}: the Board's Time setting (12-hour or 24-hour), as a browser last sent it: on each change, and
+        on opening the Board only once per browser (app.js TIME_SENT_KEY), and only when its Time is not the default.
         Same checks and order as /answer. It is written whole to time.json in the served folder, where the /units
         pane on this machine reads it (hooks/units.tsx readTime): the one file this server writes there."""
         if not self.own_page():

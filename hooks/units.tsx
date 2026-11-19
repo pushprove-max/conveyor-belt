@@ -138,7 +138,8 @@ const readLimit = async ($: EngineInterface): Promise<{ limit: State['limit']; o
   if (dataRead?.file !== file || dataRead.at !== st.mtimeMs) dataRead = { file, at: st.mtimeMs, limit: parseLimit((await $.fs.read(file)) as string) }
   return { limit: dataRead.limit, over: null }
 }
-// The Board's Time setting, as its page last sent it, on a change or on opening (dashboard_server.py's POST /time writes
+// The Board's Time setting, as its page last sent it: on a change, or on opening only once per browser and only when not
+// the default (app.js TIME_SENT_KEY) (dashboard_server.py's POST /time writes
 // time.json in the Board's folder). It wins over the plugin's `time` option, which stands where the Board here has
 // sent none: else 24-hour on the Board left the pane writing AM and PM.
 let optionTime: unknown
