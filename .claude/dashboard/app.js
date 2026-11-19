@@ -725,8 +725,9 @@
   // What a failed test run says went wrong (the record's failures: {of, files: [{file, cases: [{name, line}]}],
   // timeout: null | {sec, file}}): one line that sums it up ("2 of 41 test files failed", or that it timed out and in
   // which file), then a row a failing file with its failing cases, each on a line of its own with its first failure
-  // line. Never a passing file or case. null when the record names no failing file and no timeout.
-  function testFails(f) {
+  // line. Never a passing file or case. null when the record names no failing file and no timeout. brief: the line that
+  // sums it up, then only the first failing file with its first failing case (Needs you, failureShort).
+  function testFails(f, brief) {
     if (!f || typeof f !== 'object') return null;
     const files = (Array.isArray(f.files) ? f.files : []).filter((x) => x && typeof x.file === 'string' && Array.isArray(x.cases));
     const t = f.timeout && typeof f.timeout === 'object' ? f.timeout : null;
@@ -735,9 +736,9 @@
     const timed = t ? `Timed out${num(t.sec) ? ` after ${t.sec < 60 ? took(t.sec) : `${Math.round(t.sec / 60)} min`}` : ''}${typeof t.file === 'string' && t.file ? ` in ${t.file}` : ''}` : '';
     const box = h('div', 'test-fails'), rows = h('ul', 'test-files');
     box.append(h('p', 'test-sum', t ? timed + (files.length ? ` · ${failed}` : '') : failed));
-    files.forEach((x) => {
+    (brief ? files.slice(0, 1) : files).forEach((x) => {
       const row = h('li', 'test-file'), cases = h('ul', 'test-cases');
-      x.cases.filter((c) => c && typeof c.name === 'string').forEach((c) => {
+      x.cases.filter((c) => c && typeof c.name === 'string').slice(0, brief ? 1 : Infinity).forEach((c) => {
         const line = typeof c.line === 'string' ? c.line : '', own = `FAIL [${c.name}]: `;
         const li = h('li', 'test-case');
         li.append(h('span', 'test-case-name', c.name), h('span', 'test-case-line', line.startsWith(own) ? line.slice(own.length) : line));
@@ -1060,13 +1061,13 @@
   // round") draws its finding as the Declined panel does (level, linked place, claim, proof); a test block its failing
   // files and cases with their first failure lines (testFails); any other the reason as recorded, in full. A sentence
   // that already says the whole reason has no block. Code spans and file paths are drawn as fill draws them, linked in
-  // the card's repository (repoOf).
+  // the card's repository (repoOf). brief (reviewWhy): only the first finding, with the first sentence of its proof.
   const SHOWN_LINES = 12;
-  function reviewWhy(full, repoUrl, known) {
+  function reviewWhy(full, repoUrl, known, brief) {
     const m = /^the fix for (\[P[0-3]\][\s\S]*?)\s+did not hold after \d+ rounds?$/.exec(full);
     if (!m) return null;
     const rows = h('ol', 'output-findings');
-    m[1].split(/\n(?=\[P[0-3]\])/).forEach((t) => {
+    m[1].split(/\n(?=\[P[0-3]\])/).slice(0, brief ? 1 : Infinity).forEach((t) => {
       const f = /^\[(P[0-3])\]\s*(?:\[E\d+\]\s*)?(?:(\S+:\d+(?:[-–]\d+)?)[:,]?\s+(?=\S))?([\s\S]*)$/.exec(t.trim());
       if (!f) return;
       const { at: cut, label } = proofAt(f[3]), claim = (cut < 0 ? f[3] : f[3].slice(0, cut)).trim(), proof = cut < 0 ? '' : f[3].slice(cut + label.length).trim();
@@ -1075,7 +1076,7 @@
       head.append(chip(f[1], f[1] === 'P0' || f[1] === 'P1' ? 'warn' : 'quiet'), said);
       row.append(head);
       if (f[2]) { const p = h('p', 'finding-at'); p.append(codeEl(repoUrl, f[2], known, 'finding-at-link').el); row.append(p); }
-      if (proof) row.append(h('p', 'finding-proof-label', 'Proof:'), fill(h('div', 'finding-proof-text'), proof, repoUrl, known, 'finding'));
+      if (proof) row.append(h('p', 'finding-proof-label', 'Proof:'), fill(h('div', 'finding-proof-text'), brief ? first(proof) : proof, repoUrl, known, 'finding'));
       rows.append(row);
     });
     return rows.children.length ? rows : null;
@@ -1097,11 +1098,23 @@
     const out = doc.createDocumentFragment();
     out.append(fill(h('p', 'reason why-said'), said, repoUrl, known, 'why-said'));
     const body = reviewWhy(full, repoUrl, known) || (fails && testFails(fails)) || (said !== full && clipped(full, repoUrl, known));
-    if (!body) return out;
-    const box = h('div', 'reason why-block');
-    box.append(h('strong', 'why-label', 'Why it blocked'), body);
-    out.append(box);
+    if (body) out.append(whyBlock('Why it blocked', body));
     return out;
+  }
+  const whyBlock = (label, body) => { const box = h('div', 'reason why-block'); box.append(h('strong', 'why-label', label), body); return box; };
+  // The short form, for Needs you, so its next step and buttons come right under the failure: {lead, rest}. lead is the
+  // sentence, then the first finding (its level, place, claim and the first sentence of its proof) or the first failing
+  // test file with its first failing case, in "Why it blocked"; rest is the whole explanation as failureLine draws it,
+  // in "Why it blocked, in full", or null when the lead already says all of it. A plain reason leads with its sentence.
+  function failureShort(c) {
+    const { said, full, fails } = failure(c);
+    const repoUrl = repoOf(c), known = new Set(pathsIn(full));
+    const lead = doc.createDocumentFragment();
+    lead.append(fill(h('p', 'reason why-said'), said, repoUrl, known, 'why-said'));
+    const one = reviewWhy(full, repoUrl, known, true) || (fails && testFails(fails, true));
+    if (one) lead.append(whyBlock('Why it blocked', one));
+    const body = reviewWhy(full, repoUrl, known) || (fails && testFails(fails)) || (said !== full && clipped(full, repoUrl, known));
+    return { lead, rest: body ? whyBlock('Why it blocked, in full', body) : null };
   }
 
   // ---- one guard rule for every button that changes real work ----
@@ -1892,7 +1905,7 @@
     }
     p.ctx = {
       h, chip, icon, tip, unread, get retry() { return retryText(); }, restartButton: restartHere, faults: panelFaults, get machine() { return machineWord(); }, get answerer() { return answerer(); }, details, since, clock, when, stamp, dur, took, money, modelName, findings, survived, judged, reviewChip, verdictSaid, output, issueLink, depRef, list, post, fresh, motion, state: stateBlock, track, trackDetail, trackShell, earlierTip, testProgress, fixNow,
-      param, params, pickRepo, project, now, tag, setTab, restart, goTo, panelHref: (id) => panelHref(id), failure, failureLine, twice, undoLine, text: findingText,
+      param, params, pickRepo, project, now, tag, setTab, restart, goTo, panelHref: (id) => panelHref(id), failure, failureLine, failureShort, twice, undoLine, text: findingText,
       pausedSaid, refusal, depPicked,
       // Whether the lists are sorted by project (the machine head's sort): a panel that orders a list itself keeps each
       // project's rows together then.

@@ -123,7 +123,7 @@ test("a landed card's finding opens the lines its own review read, from the serv
   d = open(rows()[3]);
   await settle();
   assert.deepEqual(notes(d), ['The review kept no lines for this place.']);
-  d = open(panel(w, 'needs').querySelector('li[data-key="blocked:c2-13"] > details.output li.output-finding'));
+  d = open(panel(w, 'needs').querySelector('li[data-key="blocked:c2-13"] > details.block-more > details.output li.output-finding'));
   await settle();
   assert.deepEqual(texts(d), ['2 two\n3 three', '2 deleted two', '2 fixed away'], "a blocked card's output shows its last review's lines");
 });

@@ -25,15 +25,11 @@ test('an open decision is answered from the page, and what the owner typed survi
   assert.equal(row().querySelector('input'), field, 'the row is the same after a refresh that changed the panel');
   assert.equal(field.value, 'Ship on Monday');
   assert.equal(w.document.activeElement, field, 'and the field still has the focus');
+  // The refusals first: a recorded answer leaves the row's controls disabled (#501).
+  w.reply = { ok: false, status: 409, text: () => Promise.resolve('decision q-ship is already answered') };
   key(w, field, 'Enter');
   await settle();
   assert.deepEqual(w.posts, [{ url: 'answer', body: { id: 'q-ship', answer: 'Ship on Monday', askedAt: '2026-11-09T10:00:00Z', repo: 'bookshop' } }]);
-  // Issue 415: the build machine's own reply ("sent to main") is shown only when the answer was not recorded.
-  assert.equal(row().querySelector('.answer-note').textContent, 'Answered: it leaves Needs you in about a minute.');
-  w.reply = { ok: false, status: 409, text: () => Promise.resolve('decision q-ship is already answered') };
-  row().querySelectorAll('.answer button')[1].click();
-  await settle();
-  assert.deepEqual(w.posts[1].body, { id: 'q-ship', answer: 'No', askedAt: '2026-11-09T10:00:00Z', repo: 'bookshop' });
   assert.equal(row().querySelector('.answer-note').textContent, 'Not recorded: decision q-ship is already answered');
   w.reply = { ok: false, status: 502, text: () => Promise.resolve('recorded, ruling r-1 logged, NOT sent to main: no pane') };
   row().querySelectorAll('.answer button')[0].click();
@@ -43,6 +39,41 @@ test('an open decision is answered from the page, and what the owner typed survi
   row().querySelectorAll('.answer button')[0].click();
   await settle();
   assert.equal(w.navigations, 1, 'a logged-out page goes to the login');
+  w.reply = null;
+  row().querySelectorAll('.answer button')[1].click();
+  await settle();
+  assert.deepEqual(w.posts[3].body, { id: 'q-ship', answer: 'No', askedAt: '2026-11-09T10:00:00Z', repo: 'bookshop' });
+  // Issue 415: the build machine's own reply ("sent to main") is shown only when the answer was not recorded.
+  assert.equal(row().querySelector('.answer-note').textContent, 'Answered: it leaves Needs you in about a minute.');
+});
+
+// Bug #501: while an answer was sent, its options, field and Answer stayed active and Enter still sent, so a second
+// click sent the answer again; a failure must give the controls back with the typed text, a recorded answer must not.
+test('an open decision locks while its answer is sent, stays locked once recorded, and unlocks with the typed text when it fails', async () => {
+  const w = boot();
+  deliver(w, full());
+  const row = panel(w, 'needs').querySelector('li[data-key="decision:bookshop:q-ship@2026-11-09T10:00:00Z"]');
+  const field = row.querySelector('input'), [yes, , answer] = row.querySelectorAll('.answer button');
+  const controls = () => [...row.querySelectorAll('.answer button'), field].map((b) => b.disabled);
+  let reply;
+  w.reply = new Promise((r) => { reply = r; });
+  field.value = 'Ship on Monday';
+  yes.click();
+  answer.click();
+  key(w, field, 'Enter');
+  await settle();
+  assert.equal(w.posts.length, 1, 'one request for a click, then Answer, then Enter');
+  assert.equal(w.posts[0].body.answer, 'Yes');
+  assert.deepEqual(controls(), [true, true, true, true], 'the options, Answer and the field are disabled while it is sent');
+  reply({ ok: false, status: 409, text: () => Promise.resolve('try again') });
+  await settle();
+  assert.deepEqual(controls(), [false, false, false, false], 'a failed send enables them again');
+  assert.equal(field.value, 'Ship on Monday', 'and the field still holds the typed text');
+  w.reply = null;
+  answer.click();
+  await settle();
+  assert.equal(w.posts[1].body.answer, 'Ship on Monday');
+  assert.deepEqual(controls(), [true, true, true, true], 'a recorded answer keeps them disabled');
 });
 
 // There is no main session any more; an answer that is recorded is done.

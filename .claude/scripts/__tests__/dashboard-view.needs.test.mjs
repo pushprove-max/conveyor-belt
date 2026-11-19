@@ -14,7 +14,7 @@ const lines = (li) => Array.from(li.children).slice(1).map((x) => (x.tagName ===
 // Bug: a blocked card's headline was where it stopped ("Failed at Test (step 3 of 6)"); the cause was in hover text,
 // in "Every step" or behind "Show output", or raw tool output cut off after about 90 letters before the part that says
 // what broke; and the advice was a command ("conveyor.sh retry 12") beside the Retry button.
-test('Needs you: a blocked card leads with why it failed in one sentence, then what Retry does; the explanation is shown without a tap', () => {
+test('Needs you: a blocked card leads with why it failed in one sentence and its first failing test; the rest is one click below', () => {
   const w = boot();
   const d = full();
   const tests = trackOf('+++!..', '', {
@@ -28,23 +28,27 @@ test('Needs you: a blocked card leads with why it failed in one sentence, then w
     reason: 'build: `make pay` failed at web/pay.ts:12. Nothing landed.' });
   deliver(w, d);
   const t = blockedRow(w);
-  assert.deepEqual([0, 2, 3].map((i) => lines(t)[i]), ['2 tests failed: pays once, refunds', 'Retry puts #13 back in the queue, and a new card builds it in its turn.', 'Show output'],
-    'the reason first, what it says second, what Retry does third, the output one click below');
+  assert.equal(lines(t)[0], '2 tests failed: pays once, refunds', 'the reason first');
   assert.equal(t.querySelector('details.why'), null, 'the explanation is not folded');
-  // Bug #472: the failing cases and their first failure lines were behind a tap; now they are shown.
-  assert.deepEqual(Array.from(t.querySelectorAll('.why-block .test-case'), (x) => x.textContent), ['pays onceexpected 1, got 2', 'refundsexpected 0, got 1'], 'both failing cases, each with its first failure line, without a click');
-  assert.equal(t.querySelector('.stopped').textContent, 'Failed at Test (step 4 of 6)', 'where it stopped comes after');
+  // Bug #472: the failing cases and their first failure lines were behind a tap; the first is shown.
+  const cases = (el) => Array.from(el.querySelectorAll('.why-block .test-case'), (x) => x.textContent);
+  assert.deepEqual(cases(t.querySelector(':scope > .why-block')), ['pays onceexpected 1, got 2'], 'the first failing case, with its first failure line, without a click');
+  // Bug #501: the rest of it pushed the buttons down; it is one click below them, what Retry does, then the output.
+  const more = t.querySelector(':scope > details.block-more');
+  assert.deepEqual(cases(more), ['pays onceexpected 1, got 2', 'refundsexpected 0, got 1'], 'every failing case in the full reason');
+  assert.deepEqual(lines(more).slice(1, 3), ['Retry puts #13 back in the queue, and a new card builds it in its turn.', 'Show output']);
+  assert.equal(more.querySelector('.stopped').textContent, 'Failed at Test (step 4 of 6)', 'where it stopped comes after');
   assert.doesNotMatch(panel(w, 'needs').textContent, /conveyor\.sh/, 'no command where a button does it');
   assert.equal(lines(blockedRow(w, 'c3-14'))[0], 'Review asked for changes three times');
   // Bug #437: a blocked card's reason showed its raw backticks and its file paths as plain text, unlike a declined
   // finding's reason: its code span and path are set apart, the path links to its line, and the whole reason is in a
-  // block labelled "Why it blocked".
+  // block labelled "Why it blocked, in full".
   const f = blockedRow(w, 'c4-15'), href = `https://github.com/example/sample-project/blob/HEAD/web/pay.ts#L12`;
   const code = (el) => Array.from(el.querySelectorAll('code.why-code'), (c) => c.textContent);
   assert.deepEqual(code(f.querySelector('.why-said')), ['make pay', 'web/pay.ts:12'], 'the lead sentence sets its code and path apart');
   assert.equal(f.querySelector('.why-said a').getAttribute('href'), href, "the lead sentence's path links to its line");
   const box = f.querySelector('.why-block');
-  assert.equal(box.querySelector('.why-label').textContent, 'Why it blocked');
+  assert.equal(box.querySelector('.why-label').textContent, 'Why it blocked, in full');
   assert.deepEqual(code(box.querySelector('.why-full')), ['make pay', 'web/pay.ts:12'], 'the whole reason sets its code and path apart');
   assert.equal(box.querySelector('.why-full a').getAttribute('href'), href, "the whole reason's path links to its line");
   assert.equal(box.querySelector('.why-full').textContent, 'build: make pay failed at web/pay.ts:12. Nothing landed.', 'the reason as written, without its backticks');
@@ -58,7 +62,7 @@ test('Needs you: a review block shows its unresolved finding, and a long reason 
   b[0].reason = 'the fix for [P1] [E1] conveyor/lib/card.sh:52 The loop never stops. Proof: it spins on `x` did not hold after 1 round';
   b.push({ repo: 'sample', card: 'c5-16', issue: 16, title: 'T16', url: `${P}/16`, since, reason: Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join('\n') });
   deliver(w, d);
-  const f = blockedRow(w).querySelector('.why-block .output-finding');
+  const f = blockedRow(w).querySelector(':scope > .why-block .output-finding');
   assert.equal(f.querySelector('.chip').textContent, 'P1', 'the level badge');
   assert.equal(f.querySelector('.finding-at a').getAttribute('href'), 'https://github.com/example/sample-project/blob/HEAD/conveyor/lib/card.sh#L52', 'the place links to its line');
   assert.equal(f.querySelector('.finding-claim').textContent, 'The loop never stops.');
@@ -68,6 +72,35 @@ test('Needs you: a review block shows its unresolved finding, and a long reason 
   long.querySelector('.show-all').click();
   assert.equal(shown(), 30, 'Show all shows the rest');
   assert.equal(long.querySelector('.show-all'), null);
+});
+
+// Bug #501: a blocked row showed every finding with its full proof, where it stopped, its track and its reviews before
+// its next step and buttons, so the owner scrolled to act on each card. The first finding, the next step and Retry
+// come first; the other findings are in one closed <details> under them, which a new part leaves as the owner set it.
+test('Needs you: a blocked card shows its first finding, next step and Retry before one <details> with the other findings, kept open through a new part', () => {
+  const w = boot();
+  const d = full();
+  d.panels.needs.data.cards.blocked[0].reason = 'the fix for [P1] a.sh:1 First wrong. Proof: p1 holds. The long rest of the proof.\n[P2] b.sh:2 Second wrong. Proof: p2\n[P2] c.sh:3 Third wrong. Proof: p3 did not hold after 1 round';
+  deliver(w, d);
+  const t = blockedRow(w), more = t.querySelector(':scope > details.block-more');
+  const first = t.querySelector(':scope > .why-block .output-finding'), step = t.querySelector(':scope > .block-step'), retry = t.querySelector(':scope > .answer button[data-act="retry"]');
+  assert.equal(first.querySelector('.finding-claim').textContent, 'First wrong.');
+  assert.equal(first.querySelector('.finding-proof-text').textContent, 'p1 holds.', 'the first sentence of its proof above the buttons');
+  const order = [first, step, retry, more];
+  order.slice(1).forEach((x, i) => assert.ok(order[i].compareDocumentPosition(x) & w.Node.DOCUMENT_POSITION_FOLLOWING, `${order[i].className} comes before ${x.className}`));
+  const claims = (el) => Array.from(el.querySelectorAll('.finding-claim'), (x) => x.textContent);
+  assert.deepEqual(claims(more).slice(1), ['Second wrong.', 'Third wrong.'], 'the second and third findings are in the <details>');
+  assert.equal(more.querySelector('.finding-proof-text').textContent, 'p1 holds. The long rest of the proof.', 'with the full proof');
+  assert.deepEqual(Array.from(t.querySelectorAll('.finding-claim')).filter((x) => !more.contains(x)).map((x) => x.textContent), ['First wrong.'], 'and not above it');
+  assert.equal(more.open, false, 'closed at first');
+  more.open = true;
+  // The new part says the host took its Retry: the row's key changes, so the row is drawn anew (a part equal to the
+  // last one is not drawn at all, and a row of the same key is reused, so neither proves the state is carried).
+  d.panels.needs.data.retried = [{ repo: 'sample', card: 'c2-13', issue: 13 }];
+  next(w, d);
+  const again = blockedRow(w, 'c2-13:retried');
+  assert.notEqual(again, t, 'the row is drawn anew');
+  assert.equal(again.querySelector(':scope > details.block-more').open, true, 'a new part for the same card keeps it open');
 });
 
 // Bug #456: every block ended "Fix the cause. Then press Retry.", though for a review, test or no-result block Retry is

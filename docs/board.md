@@ -121,6 +121,11 @@ heading of that group.
 
 ## Needs you
 
+- **A blocked card.** A blocked card shows, in this order: why it failed, in one sentence; the first finding of its
+  review, or the first failed test file with its first failure line; the next step; what **Fix** does, when it has
+  Fix; then its buttons. Under the buttons, open **The full reason and every step** to read the other findings and
+  their full proof, what Retry does, the card's output, the step where it failed, its track, every step and its
+  reviews. It stays open or closed as you left it when the Board reads Conveyor again.
 - **Retry and Close.** Each blocked card has a **Retry** button (`conveyor.sh retry`) and a **Close** button. Close
   asks once, then closes the card's issue with a comment and shuts the card (`conveyor.sh shut`).
 - **Hold.** Each blocked card of an issue has a **Hold** button (`conveyor.sh unblock <issue> --hold`). One click
@@ -136,7 +141,7 @@ heading of that group.
   A landing conflict ("rebase onto main conflicts") has no Fix button. **Retry** already brings the kept patch onto
   main. A push that fails a check needs a fix on main first. A card that waits for your yes to a visible change has
   **Approve** and **Decline**.
-- **The last line of a block.** The last line above the buttons tells you the step to take for that kind of block:
+- **The next step.** The line above the buttons tells you the step to take for that kind of block:
   - A review asked for changes again, the changed tests failed again, or the card's process ended without a result:
     "Retry: a new session gets the open finding (or the failing tests) and starts from the kept work." Retry is the
     fix. You do not have to do anything first.

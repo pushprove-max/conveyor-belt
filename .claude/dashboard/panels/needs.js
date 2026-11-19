@@ -2,11 +2,11 @@
 // Needs you: what waits on the owner, and the one place it is answered (the Control tab's Needs you column links here).
 // Blocked cards with the reason, visible changes waiting for their yes, and the open decisions, each with its project
 // (repo) and answered here (POST answer, to the page's own host). A blocked card leads with why it failed, in one plain
-// sentence (ctx.failureLine: its explanation is shown under it), then what Retry does, then its output on demand.
-// It has Retry and Close, each sent as POST /control retry or close on a second click (Retry costs a new build; Close
-// cannot be undone, and says so), and Hold (POST /control unblock: one click with Undo, a release). A card whose reason
-// has a fix Conveyor runs itself (FIXES) also has Fix, which says what it does. Its last line names the step its kind
-// of block takes (STEPS). One its host already gave back (retried) shows "Retried, waiting for its turn", with no
+// sentence and its first finding or failing test (ctx.failureShort), then its next step and its buttons; the rest of
+// it is in one <details> under them (blockedRow). It has Retry and Close, each sent as POST /control retry or close on
+// a second click (Retry costs a new build; Close cannot be undone, and says so), and Hold (POST /control unblock: one
+// click with Undo, a release). A card whose reason has a fix Conveyor runs itself (FIXES) also has Fix, which says
+// what it does. The line above its buttons names the step its kind of block takes (STEPS). One its host already gave back (retried) shows "Retried, waiting for its turn", with no
 // buttons. Its part:
 // {cards: {waiting, blocked} | null, cardsError, decisions | null, decisionsError, retrying, retried, kinds, entries}. A group that was not read says so; it is never "nothing". A card
 // comes with its reviews and its track, as `conveyor.sh snapshot` gives them: a blocked card is off the
@@ -46,7 +46,7 @@ const FIXES = [
   [/^(worktree: the kept patch of card \S+ could not be taken out of the worktree|review [0-9]+: the engine could not compare the port with the kept patch)/,
     ['--fresh'], (n) => `Fix builds ${n} again from nothing, without its kept work, which Conveyor cannot use. That work moves to kept-dropped/ in the state folder.`],
 ];
-// The step a blocked card's last line names, by its kind of block (docs/board.md, Needs you), read from the first line
+// The step a blocked card's next-step line names, by its kind of block (docs/board.md, Needs you), read from the first line
 // of its reason: the rest of it is a review finding or test output, which can hold any words. A review, test or
 // no-result block is fixed by Retry itself, as its new session gets the open finding or the failing tests; so is a
 // landing conflict, which its new session brings onto main. A block that needs the owner first says what to do, then
@@ -135,6 +135,9 @@ window.DASH_APP.panel({
     // snapshot that drops the card) waits for its new card: it is drawn anew, with no buttons, until that snapshot.
     const retried = new Set((Array.isArray(d.retried) ? d.retried : []).filter((x) => x && typeof x.card === 'string').map((x) => `${x.repo}\n${x.card}`));
     const isRetried = (c) => retried.has(`${c.repo}\n${c.card}`);
+    // The blocked cards whose <details> (.block-more) the owner left open: a row whose key changes (its card retried)
+    // is drawn anew, and opens it again (blockedRow).
+    const opened = new Set(Array.from(el.querySelectorAll('li[data-card]'), (li) => (li.querySelector(':scope > details.block-more[open]') ? li.dataset.card : null)).filter(Boolean));
     const keyOf = { tests:(x) => `tests:${x.repo}`, engines: (x) => `engine:${x.repo}@${x.commit}`, testRules: (x) => `testrules:${x.repo}@${x.time}`, before: (x) => `before:${x.repo}#${x.issue}`, pipeline: (x) => `pipeline:${x.repo}#${x.issue}`, farDeps: (x) => `fardep:${x.repo}#${x.issue}:${x.ref}`, waiting: (c) => `waiting:${c.card}`, blocked: (c) => `blocked:${c.card}${isRetried(c) ? ':retried' : ''}`, decisions: (x) => `decision:${x.repo}:${x.id}@${x.askedAt}` };
     const items = itemsOf(d);
     for (const key of Object.keys(items)) if (!Object.hasOwn(keyOf, key)) keyOf[key] = (x) => `${key}:${x.repo}#${x.issue}:${x.card}:${x.since}`;
@@ -158,31 +161,26 @@ window.DASH_APP.panel({
       const meta = h('p', 'row-meta');
       meta.append(ctx.tag(c.repo), ctx.since(c.since, ' ago'));
       const n = c.issue > 0 ? `#${c.issue}` : 'its issue';
-      // A blocked card's first line is why it failed, in one sentence; its second what Retry does (or why a push needs
-      // no retry); its output one click below.
-      if (kind === 'waiting') li.append(head, h('p', 'reason', `What customers or staff will see: ${c.sentence || 'the reviewer gave no sentence'}`));
-      else {
-        li.append(head, ctx.failureLine(c));
-        li.append(h('p', 'hint retry-does', c.push && c.check ? `Land a fix for ${c.check} on main. Conveyor then pushes again by itself. It does not retry until main moves.`
-          : c.push ? 'Conveyor pushes again by itself when the cause has a fix. You do not need to retry.'
-            : again ? `${n} is back in the queue. A new card builds it in its turn.` : `Retry puts ${n} back in the queue, and a new card builds it in its turn.`));
-      }
-      // A blocked card's output goes here, above its meta line, drawn at each refresh (outputOf): the row is kept.
+      if (kind === 'blocked') return blockedRow(c, li, head, meta, n, again);
+      li.append(head, h('p', 'reason', `What customers or staff will see: ${c.sentence || 'the reviewer gave no sentence'}`));
       // A follow-up whose change goes beyond the yes of an issue above it says what goes beyond it, as its reviewer said.
       const b = kind === 'waiting' && c.beyond && typeof c.beyond === 'object' ? c.beyond : null;
       if (b && typeof b.what === 'string' && b.what.trim()) {
         const of = Number.isInteger(b.from) && b.from > 0 ? `the yes of #${b.from}` : "its parent's yes";
         li.append(h('p', 'reason beyond', `Goes beyond ${of}: ${b.what.trim()}`));
       }
-      li.append(meta);
-      // A blocked card is off the belt: the step it stopped in and how long that step ran are said here,
-      // then its six steps as the belt panel draws them, every recorded step on demand, and one line a finished review.
-      const track = h('ol', 'track6');
+      li.append(meta, ...history(c), yesActions(c));
+      return li;
+    };
+    // A card's track and reviews: the step it stopped in and how long that step ran, its six steps as the belt panel
+    // draws them, every recorded step on demand, and one line a finished review.
+    const history = (c) => {
+      const out = [], track = h('ol', 'track6');
       if (ctx.track(track, c.track)) {
         const steps = c.track.steps, at = steps.map((s) => s.state).lastIndexOf('failed');
         const sec = at >= 0 && typeof steps[at].sec === 'number' && Number.isFinite(steps[at].sec) ? ctx.took(steps[at].sec) : '';
-        if (at >= 0) li.append(h('p', 'stopped', `Failed at ${steps[at].name} (step ${at + 1} of ${steps.length})${sec ? ` after ${sec}` : ''}`));
-        li.append(track, ctx.trackDetail(c.track, c.card, null, c.earlier, ctx.text.repoOf(c), c.repo));
+        if (at >= 0) out.push(h('p', 'stopped', `Failed at ${steps[at].name} (step ${at + 1} of ${steps.length})${sec ? ` after ${sec}` : ''}`));
+        out.push(track, ctx.trackDetail(c.track, c.card, null, c.earlier, ctx.text.repoOf(c), c.repo));
       }
       const done = Array.isArray(c.reviews) ? c.reviews : [];
       if (done.length) {
@@ -193,17 +191,39 @@ window.DASH_APP.panel({
           if (f) row.append(h('span', null, f));
           return row;
         }));
-        li.append(reviews);
+        out.push(reviews);
       }
-      if (kind === 'waiting') li.append(yesActions(c));
-      // A push that keeps failing is not a card to retry (its card has landed): the loop pushes again by itself; one
-      // that failed its check (c.check names it) is pushed again only once a fix lands on main.
-      else if (!c.push && !again) {
+      return out;
+    };
+    // A blocked card is off the belt. Its row is what to act on, near enough to act without a scroll: why it failed in
+    // one sentence, its first finding or first failing test (ctx.failureShort), the step its kind of block takes, what
+    // Fix does when it has one, then its buttons. The rest is one click below, in one <details> (.block-more): the
+    // whole explanation, what Retry does, its output (outputOf, drawn at each refresh), where it stopped, its track,
+    // every step and its reviews. The row is kept through a redraw (ctx.list), so that <details> stays as the owner
+    // left it; a row drawn anew for the same card (retried) opens it when the old one was open (opened). A push that keeps failing is not a card to retry (its card has landed): the loop pushes again by itself;
+    // one that failed its check (c.check names it) is pushed again only once a fix lands on main. It, and a card
+    // already retried, has no buttons: what happens next is said under the failure.
+    const blockedRow = (c, li, head, meta, n, again) => {
+      const { lead, rest } = ctx.failureShort(c), acts = !c.push && !again;
+      const does = h('p', 'hint retry-does', c.push && c.check ? `Land a fix for ${c.check} on main. Conveyor then pushes again by itself. It does not retry until main moves.`
+        : c.push ? 'Conveyor pushes again by itself when the cause has a fix. You do not need to retry.'
+          : again ? `${n} is back in the queue. A new card builds it in its turn.` : `Retry puts ${n} back in the queue, and a new card builds it in its turn.`);
+      li.append(head, lead);
+      const more = h('details', 'block-more');
+      more.append(h('summary', null, 'The full reason and every step'));
+      if (rest) more.append(rest);
+      if (acts) {
         const fix = fixOf(c);
         li.append(h('p', 'hint block-step', stepOf(c, ctx.failure(c).said)));
         if (fix) li.append(h('p', 'hint fix-does', fix[2](n)));
         li.append(blockedActions(c, fix));
-      }
+        more.append(does);
+      } else li.append(does);
+      more.append(...history(c));
+      more.hidden = more.children.length < 2;
+      li.dataset.card = `${c.repo}\n${c.card}`;
+      more.open = opened.has(li.dataset.card);
+      li.append(more, meta);
       return li;
     };
     // A blocked card is retried (conveyor.sh retry: it costs a new build) or its issue closed (for good), here, through
@@ -493,8 +513,14 @@ window.DASH_APP.panel({
     // The name under which an answer typed and not yet sent is kept through a reload: its decision's. send forgets
     // it once the build machine takes the answer.
     const draftOf = (x) => `${x.repo}:${x.id}@${x.askedAt}`;
-    const send = (x, text, note) => {
+    // While an answer is sent, its options, field and Answer are disabled and Enter does nothing, so a second click
+    // cannot send it again; they stay so once it is recorded, and come back, with the typed text, when it is not.
+    // controls: the row's option buttons, field and Answer.
+    const send = (x, text, note, controls) => {
+      if (controls.some((b) => b.disabled)) return;
       if (!text) { note.textContent = 'Type an answer first, or pick one.'; return; }
+      const lock = (on) => { controls.forEach((b) => { b.disabled = on; }); };
+      lock(true);
       note.textContent = 'Sending…';
       // The record names the ledger the answer goes to: the server finds its path in the host file.
       ctx.post('answer', { id: x.id, answer: text, askedAt: x.askedAt, repo: x.repo })
@@ -502,10 +528,10 @@ window.DASH_APP.panel({
           const said = String(t).trim() || `the build machine answered ${r.status}`;
           // A 5xx reply already says what was recorded; it is shown as the host wrote it.
           // The build machine's reply is shown only when the answer was not recorded.
-          if (r.ok) { ctx.keep('draft', draftOf(x), ''); return 'Answered: it leaves Needs you in about a minute.'; }
-          return r.status >= 500 ? said : `Not recorded: ${said}`;
-        }), () => 'Not recorded: the build machine did not answer. Make sure that it is on. Then try again.')
-        .then((msg) => { note.textContent = msg; });
+          if (r.ok) { ctx.keep('draft', draftOf(x), ''); return { ok: true, msg: 'Answered: it leaves Needs you in about a minute.' }; }
+          return { ok: false, msg: r.status >= 500 ? said : `Not recorded: ${said}` };
+        }), () => ({ ok: false, msg: 'Not recorded: the build machine did not answer. Make sure that it is on. Then try again.' }))
+        .then(({ ok, msg }) => { if (!ok) lock(false); note.textContent = msg; });
     };
     const decisionRow = (x) => {
       const li = h('li', 'row');
@@ -526,16 +552,17 @@ window.DASH_APP.panel({
       field.addEventListener('input', () => ctx.keep('draft', draft, field.value));
       let options = Array.isArray(x.options) ? x.options : [];
       if (!options.length && x.proposedDefault) options = [x.proposedDefault];
+      const typed = h('button', 'btn btn-primary', 'Answer'), controls = [field, typed];
       options.forEach((o) => {
         const b = h('button', 'btn', o === x.proposedDefault ? `${o} (default)` : o);
         b.type = 'button';
-        b.addEventListener('click', () => send(x, o, note));
+        b.addEventListener('click', () => send(x, o, note, controls));
         form.append(b);
+        controls.push(b);
       });
-      const typed = h('button', 'btn btn-primary', 'Answer');
       typed.type = 'button';
-      typed.addEventListener('click', () => send(x, field.value.trim(), note));
-      field.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(x, field.value.trim(), note); });
+      typed.addEventListener('click', () => send(x, field.value.trim(), note, controls));
+      field.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(x, field.value.trim(), note, controls); });
       form.append(field, typed);
       li.append(head, meta, form, note);
       return li;
@@ -544,9 +571,12 @@ window.DASH_APP.panel({
     // Its findings' places open the lines its last review kept (the time of that review's record).
     const outputOf = (li, c) => {
       const rv = c.track && Array.isArray(c.track.records) ? c.track.records.filter((s) => s && /^review \d/.test(s.name)).pop() : null;
-      const was = li.querySelector(':scope > details.output'), out = ctx.output(c.tail, c.card, null, was, ctx.text.repoOf(c), c.repo, rv ? rv.at : null);
+      const more = li.querySelector(':scope > details.block-more');
+      const was = more.querySelector(':scope > details.output'), out = ctx.output(c.tail, c.card, null, was, ctx.text.repoOf(c), c.repo, rv ? rv.at : null);
       if (was) was.remove();
-      if (out) li.insertBefore(out, li.querySelector(':scope > .row-meta'));
+      // In "The full reason and every step", after the explanation and what Retry does, before where it stopped.
+      if (out) more.insertBefore(out, more.querySelector(':scope > .stopped, :scope > .track6, :scope > .track-detail, :scope > .reviews'));
+      more.hidden = more.children.length < 2;
     };
     // An entry of a kind with no row of its own: its issue, title, reason, project and age, as the snapshot gives them.
     const entryRow = (x) => {
