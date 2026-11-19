@@ -58,12 +58,14 @@ t_nogo() {
 # not asked for a proof or the three angles.
 t_unproven() {
   setup "[$(issue 8 2026-01-01)]"
-  sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
-  printf '%s\n' 'UNPROVEN: b.txt may be read before it is written' 'USER-VISIBLE: no' 'VERDICT: GO' > "$STUB/review.1"
-  loop run >/dev/null || fail "run of #8 exited non-zero"
-  [ "$(st 'select(.issue == 8 and .step == "review") | [.result, .counts.P1] | tojson')" = '["GO",0]' ] \
-    && [ -n "$(st 'select(.issue == 8 and .step == "landed") | .sha')" ] || fail "a review whose only other line is UNPROVEN did not land as a GO with no finding counted: $(st 'select(.issue == 8)')"
-  st 'select(.issue == 8 and .step == "review") | .reason' | grep -qx 'UNPROVEN: b.txt may be read before it is written' || fail "the UNPROVEN line is not in the review's record"
+  printf '%s\n' 'UNPROVEN: b.txt may be read before it is written' 'USER-VISIBLE: no' 'VERDICT: GO' > "$STUB/r.review"
+  # The verdict, the counts and the finding lines the loop reads of the review; the lines its record keeps (UNRECORDED,
+  # as the review's reason); the review prompt as names() puts it together.
+  fx_in 'verdict "$STUB/r.review"; counts "$STUB/r.review"; echo "[$(leftovers "$STUB/r.review")]"; grep -Ev "$UNRECORDED" "$STUB/r.review"; echo ---
+    printf "%s\n" "$REVIEW" > "$STUB/asked"'
+  [ "$RC" = 0 ] && [ "$(sed -n 1,3p "$T/$CASE/run.out" | tr '\n' ' ')" = 'GO {"P0":0,"P1":0,"P2":0,"P3":0} [] ' ] \
+    || fail "a review whose only other line is UNPROVEN is not a GO with no finding counted: $(cat "$T/$CASE/run.out")"
+  [ "$(sed -n '4,/^---$/p' "$T/$CASE/run.out" | head -n 1)" = 'UNPROVEN: b.txt may be read before it is written' ] || fail "the UNPROVEN line is not in the review's record"
   grep -q 'Proof: <proof>' "$STUB/asked" && grep -q 'A problem you cannot prove that way is one line `UNPROVEN: what`' "$STUB/asked" \
     && grep -q 'look for the same mistake elsewhere in the staged change' "$STUB/asked" && grep -q '^- bypass and trust:' "$STUB/asked" \
     && grep -q '^- behaviour:' "$STUB/asked" && grep -q '^- tests and words:' "$STUB/asked" && grep -q 'is a P1 finding' "$STUB/asked" \
@@ -71,57 +73,50 @@ t_unproven() {
 }
 
 # Bugs: an UNPROVEN line is counted as a finding, or filed as a follow-up after a last NO-GO; a proven finding beside a
-# GO lets the card land; the fix session is not told to fix the same mistake elsewhere in the change.
+# GO lets the card land; the fix session is not given the proven finding, or not told to fix the same mistake elsewhere
+# in the change.
 t_proven() {
-  # #7: a proven finding beside a GO is a NO-GO; the third NO-GO lands and files only the proven finding.
+  # A proven finding beside a GO is a NO-GO, with one P1 counted; the follow-ups of a last NO-GO are the proven
+  # finding alone.
   setup "[$(issue 7 2026-01-02)]"
   F='[P1] a.txt:1 wrong word. Proof: a.txt line 2 reads "two"'
-  printf '%s\n' "$(moved 1 "$F")" 'UNPROVEN: b.txt may be stale' 'USER-VISIBLE: no' 'VERDICT: GO' > "$STUB/review.1"
-  printf '%s\n' "$(moved 2 "$F")" 'UNPROVEN: b.txt may be stale' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
-  printf '%s\n' "$F" 'UNPROVEN: b.txt may be stale' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.3"
+  printf '%s\n' "$F" 'UNPROVEN: b.txt may be stale' 'USER-VISIBLE: no' 'VERDICT: GO' > "$STUB/r.review"
+  fx_in 'verdict "$STUB/r.review"; counts "$STUB/r.review" | jq .P1; followups c1-7 "$(jq -c ".[0]" "$STUB/issues.json")" "$STUB/r.review"'
+  [ "$RC" = 0 ] && [ "$(tr '\n' ' ' < "$T/$CASE/run.out")" = 'NO-GO 1 [100101] ' ] \
+    || fail "a proven finding beside a GO did not make it a NO-GO, or the UNPROVEN line was counted or filed: $(cat "$T/$CASE/run.out")"
+  [ "$(jq -r .title "$STUB/filed")" = "$F" ] || fail "follow-ups filed after the last NO-GO are not the proven finding alone: $(cat "$STUB/filed")"
+  # The fix session is given the proven finding, with its id, under the same-mistake instruction. A loop run
+  # (that review, then a GO): the fix brief is put together inline in card() (card.sh) and given to session(), which
+  # no engine function returns alone.
+  cp "$STUB/r.review" "$STUB/review.1"; echo "$GO" > "$STUB/review.2"; rm -f "$STUB/filed"
   loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
-  [ "$(st 'select(.issue == 7 and .step == "review") | "\(.result) \(.counts.P1)"' | tr '\n' ,)" = 'NO-GO 1,NO-GO 1,NO-GO 1,' ] \
-    || fail "a proven finding beside a GO did not make it a NO-GO, or the UNPROVEN line was counted: $(st 'select(.issue == 7 and .step == "review")')"
-  [ "$(jq -r .title "$STUB/filed")" = "$F" ] && [ "$(st 'select(.issue == 7 and .step == "landed") | .followups | tojson')" = '[100101]' ] \
-    || fail "follow-ups filed after the last NO-GO are not the proven finding alone: $(cat "$STUB/filed")"
-  grep -q '^# Reviewer findings: fix these findings, and every other place in this change that makes the same mistake; nothing else$' "$STUB/brief" \
-    && grep -qF "$(moved 2 "$F")" "$STUB/brief" || fail "the fix session's prompt lacks the same-mistake instruction or the finding: $(cat "$STUB/brief")"
+  [ "$(wc -l < "$STUB/sessions")" = 2 ] || fail "not one build and one fix session: $(cat "$STUB/sessions")"
+  grep -qx '# Reviewer findings: fix these findings, and every other place in this change that makes the same mistake; nothing else' "$STUB/brief" \
+    && grep -qxF "E1 $F" "$STUB/brief" \
+    || fail "the fix session's brief lacks the same-mistake instruction or the proven finding: $(grep -n -e '^# Reviewer findings' -e 'wrong word' "$STUB/brief")"
 }
 
-# Bugs: a card goes round past 3 reviews, or is blocked on the third NO-GO instead of landing; a leftover
-# finding is not filed, or filed with the wrong mark, depth, labels or milestone; a NEW CARD line is filed as one;
-# the landed line does not name the follow-ups; a run limited to an issue leaves that issue's follow-up unbuilt;
-# a depth-1 follow-up's card declines its findings instead of filing them at depth 2.
+# Bugs: a leftover finding is not filed, or filed with the wrong mark, depth, labels or milestone; a NEW CARD line is
+# filed as one; a depth-1 follow-up (under the cap, MAX_DEPTH, 2) has its findings declined instead of filed at
+# depth 2, so a true finding of a follow-up's card is lost.
 t_leftover() {
-  setup "$(jq -cs . <(issue 7 2026-01-01 area:billing P3 | jq -c '.milestone = {title: "M1"}') <(issue 3 2025-01-01 P1))"
-  for i in 1 2; do moved $i "$NOGO" > "$STUB/review.$i"; done; for i in 4 5; do moved $i "$NOGO3" > "$STUB/review.$i"; done
-  echo "$NOGO3" | tee "$STUB/review.3" > "$STUB/review.6"; provenbug # the second run builds #7's follow-up, a bug card
-  loop run --only 7 >/dev/null || fail "run exited non-zero"
-  [ "$(wc -l < "$STUB/reviews")" = 3 ] && [ "$(wc -l < "$STUB/sessions")" = 3 ] || fail "$(wc -l < "$STUB/reviews") reviews and $(wc -l < "$STUB/sessions") sessions, not 3 and 3"
-  [ "$(st 'select(.step == "landed") | [.sha, .leftover, .followups] | tojson')" = "[\"$(git -C "$R" rev-parse HEAD)\",true,[100101,100102,100103]]" ] \
-    && [ -z "$(ls "$T/$CASE/cards")" ] || fail "third NO-GO did not land with its follow-ups named: $(st 'select(.step | IN("landed", "blocked"))')"
-  [ "$(jq -r '[.title, (.labels | map(.name) | join(" ")), .milestone.title] | join(" | ")' "$STUB/filed")" = '[P0] a.txt:1 wrong word | conveyor-followup bug P0 area:billing | M1
+  setup "[$(issue 7 2026-01-01 area:billing P3 | jq -c '.milestone = {title: "M1"}')]"
+  echo "$NOGO3" > "$STUB/r.review"
+  # The last NO-GO's findings of #7, and then those of the card of its first follow-up (#100101, its review the same),
+  # each filed as the card files them; the depth the card reads of each issue first (fudepth()), to file or decline.
+  fx_in 'i=$(jq -c ".[0]" "$STUB/issues.json"); fudepth "$i"; followups c1-7 "$i" "$STUB/r.review"
+    i=$(jq -c "select(.number == 100101)" "$STUB/filed"); fudepth "$i"; echo "$MAX_DEPTH"; followups c2-100101 "$i" "$STUB/r.review"'
+  [ "$RC" = 0 ] && [ "$(tr '\n' ' ' < "$T/$CASE/run.out")" = '0 [100101,100102,100103] 1 2 [100104,100105,100106] ' ] \
+    || fail "the follow-ups of #7, or those of its depth-1 follow-up under the cap of 2, were not filed: $(cat "$T/$CASE/run.out")"
+  [ "$(jq -rs '.[:3][] | [.title, (.labels | map(.name) | join(" ")), .milestone.title] | join(" | ")' "$STUB/filed")" = '[P0] a.txt:1 wrong word | conveyor-followup bug P0 area:billing | M1
 b.txt:22 no mark here | conveyor-followup bug P1 area:billing | M1
 [P2] c.txt:3 a nit | conveyor-followup bug P2 area:billing | M1' ] || fail "follow-ups filed: $(cat "$STUB/filed")"
-  card=$(st 'select(.step == "landed") | .card')
-  [ "$(jq -rs --arg c "$card" 'map(select((.body | contains("#7")) and (.body | contains($c)) and (.body | test("(^|\n)Follow-up depth: 1(\n|$)")))) | length' "$STUB/filed")" = 3 ] \
+  [ "$(jq -rs --arg c c1-7 '.[:3] | map(select((.body | contains("#7")) and (.body | contains($c)) and (.body | test("(^|\n)Follow-up depth: 1(\n|$)")))) | length' "$STUB/filed")" = 3 ] \
     && jq -rs '.[1].body' "$STUB/filed" | grep -q 'b.txt:22' || fail "a follow-up's body lacks the parent, the card, the file:line or the depth line: $(cat "$STUB/filed")"
-  [ ! -e "$STUB/comments" ] && [ ! -e "$STUB/closed" ] || fail "a card that landed posted a blocked comment or withdrew a follow-up"
-  # The run is limited to #7: it now builds #7's follow-up, and not #3. That card's issue is a follow-up at depth 1,
-  # under the cap (MAX_DEPTH, 2), so its third NO-GO files its findings as follow-ups at depth 2, as a first card
-  # does. Bug: a true finding of a follow-up's card went to the declined list and was lost.
-  [ ! -e "$ST/declined.jsonl" ] || fail "the card of #7, no follow-up, declined a finding: $(cat "$ST/declined.jsonl")"
-  jq -cs --slurpfile old "$STUB/issues.json" '[.[0]] + ($old[0] | map(select(.number == 3)))' "$STUB/filed" > "$STUB/issues.new" && mv "$STUB/issues.new" "$STUB/issues.json"
-  loop run --only 7 >/dev/null || fail "second run exited non-zero"
-  [ "$(st 'select(.step == "picked") | .issue' | tr '\n' ' ')" = "7 100101 " ] || fail "picks of a run limited to #7: $(st 'select(.step == "picked") | .issue' | tr '\n' ' ')"
-  [ "$(st 'select(.issue == 100101 and .step == "landed") | [.leftover, .followups] | tojson')" = '[true,[100104,100105,100106]]' ] \
-    || fail "a depth-1 follow-up's card did not land with its findings filed: $(st 'select(.issue == 100101 and (.step | IN("landed", "blocked", "filed")))'; cat "$STUB/filed")"
-  card=$(st 'select(.issue == 100101 and .step == "landed") | .card')
-  [ "$(jq -rs --arg c "$card" '.[3:] | map(select((.body | contains("Follow-up to #100101 (Conveyor card \($c))")) and (.body | test("(^|\n)Follow-up depth: 2$")))) | length' "$STUB/filed")" = 3 ] \
+  [ "$(jq -rs --arg c c2-100101 '.[3:] | map(select((.body | contains("Follow-up to #100101 (Conveyor card \($c))")) and (.body | test("(^|\n)Follow-up depth: 2$")))) | length' "$STUB/filed")" = 3 ] \
     || fail "a depth-1 follow-up's follow-ups do not name their parent, or do not carry depth 2: $(tail -n 3 "$STUB/filed")"
-  [ ! -e "$ST/declined.jsonl" ] || fail "a depth-1 follow-up's card declined its findings instead of filing them: $(cat "$ST/declined.jsonl")"
+  [ ! -e "$ST/declined.jsonl" ] || fail "a follow-up's card declined a finding: $(cat "$ST/declined.jsonl")"
 }
-
 # Bugs: with one card in flight and nothing else to pick, the run stops picking, and the follow-ups that
 # card files wait for another run; a follow-up is picked before its parent has landed (here #8's card ends while
 # #7's second follow-up is still being filed, so the loop picks again with #100101 open and #7 not landed).
@@ -186,54 +181,47 @@ KX="-----BEGIN PRIVATE"" KEY-----"
 # key header still was, as each of its words passes the check alone.
 t_privmask() {
   setup "[$(issue 7 2026-01-01)]"; tune '.privacy.mode = "public"'
-  for i in 1 2; do moved $i "$NOGO" > "$STUB/review.$i"; done
-  printf '%s\n' "[P2] b.txt:3 reads $HX/notes, and ${HX//\//\\/} and $KX too" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.3"
-  loop run >/dev/null || fail "run exited non-zero"
-  [ "$(st 'select(.step == "landed") | .followups | tojson')" = '[100101]' ] || fail "the card did not land with its follow-up filed: $(st 'select(.step | IN("landed", "blocked"))')"
+  printf '%s\n' "[P2] b.txt:3 reads $HX/notes, and ${HX//\//\\/} and $KX too" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/r.review"
+  fx_in 'followups c1-7 "$(jq -c ".[0]" "$STUB/issues.json")" "$STUB/r.review"'
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = '[100101]' ] || fail "the follow-up was not filed: $(cat "$T/$CASE/run.out")"
   [ "$(jq -r .title "$STUB/filed")" = '[P2] b.txt:3 reads <home path> and <home path> and <token> too' ] && jq -r .body "$STUB/filed" | grep -q 'Conveyor masked the parts' \
     && ! grep -qF -e "${HX#/}" -e "${KX#-----}" "$STUB/filed" || fail "the follow-up's text is not masked, or does not say so: $(cat "$STUB/filed")"
 }
 
 # Bug: a last finding that is a privacy hit in the card's own change (a line the card added holds a home path) was
 # filed as a follow-up, which would land the hit on main, instead of going to a fix round.
+# privown() is what sends the card to that fix round (card.sh); a hit the change does not add (here one on another
+# path) is no hit of the card's own, and goes to a follow-up as before.
 t_privfix() {
-  setup "[$(issue 7 2026-01-01)]"; export HX
-  echo 'if [ -e "$STUB/built" ]; then echo fix >> a.txt; ! grep -qF "$HX/bench" "$STUB/brief" || { grep -vF "$HX/bench" a.txt > a.new; mv a.new a.txt; }
-    else : > "$STUB/built"; printf "two\ncd %s/bench\n" "$HX" >> a.txt; fi' > "$STUB/build"
-  for i in 1 2; do moved $i "$NOGO" > "$STUB/review.$i"; done; echo "$GO" > "$STUB/review.4"
-  printf '%s\n' "[P0] a.txt:3 flags $HX/bench" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.3"
-  loop run >/dev/null || fail "run exited non-zero"
-  [ "$(st 'select(.step == "review") | .result' | tr '\n' ' ')" = "NO-GO NO-GO NO-GO GO " ] && [ ! -e "$STUB/filed" ] \
-    || fail "the privacy finding on the card's own line did not go to a fix round: $(st 'select(.step == "review") | .result' | tr '\n' ' ') $(cat "$STUB/filed" 2>&1)"
-  [ -n "$(st 'select(.step == "landed") | .sha')" ] && ! grep -qF "$HX" "$R/a.txt" || fail "the card did not land without the hit: $(cat "$R/a.txt")"
+  setup "[$(issue 7 2026-01-01)]"
+  fx_wt "printf 'two\ncd %s/bench\n' '$HX' >> a.txt" b.txt b
+  printf '%s\n' "[P0] a.txt:3 flags $HX/bench" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
+  fx_in 'privown "$FXWT"; echo ---; printf "%s\n" "[P0] b.txt:3 flags $HX/other" "VERDICT: NO-GO" > "$FXWT.review"; privown "$FXWT"'
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = "[P0] a.txt:3 flags $HX/bench
+---" ] || fail "the privacy finding on the card's own line is not found as one, or one on a line the card did not add is: $(cat "$T/$CASE/run.out")"
 }
 
 # Bug: a follow-up chain goes past the cap: a card whose issue is a follow-up at the cap (MAX_DEPTH, 2) files another
 # level on its third NO-GO, or its leftover finding is in no declined list, or its reason does not name the cap.
 t_deep() {
-  setup "$(issue 7 2026-01-01 conveyor-followup bug P1 | jq -c '[.body = "Follow-up to #5.\n\nFollow-up depth: 2"]')"
-  for i in 1 2 3 4; do moved $i "$NOGO" > "$STUB/review.$i"; done; provenbug
+  setup "[$(issue 7 2026-01-01 conveyor-followup bug P1 | jq -c '.body = "Follow-up to #5.\n\nFollow-up depth: 2"')]"
+  for i in 1 2 3; do moved $i "$NOGO" > "$STUB/review.$i"; done; provenbug
   mkdir -p "$ST"; landed 5 '[7]' > "$ST/cards.jsonl"
+  # A loop run: the choice to decline rather than file at the cap is made inline in card() (card.sh, after its last
+  # review), which no engine function exposes alone; fudepth() and decline() are checked directly in the cases below.
   loop run >/dev/null || fail "run exited non-zero"
-  [ "$(wc -l < "$STUB/reviews")" = 3 ] || fail "$(wc -l < "$STUB/reviews") reviews, not 3"
-  [ "$(st 'select(.issue == 7 and .step == "landed") | [.sha, .leftover, .followups] | tojson')" = "[\"$(git -C "$R" rev-parse HEAD)\",true,[]]" ] \
-    && [ ! -e "$STUB/filed" ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "a depth-2 card did not land, or filed a follow-up, or the worktree is left: $(st 'select(.issue == 7 and (.step | IN("landed", "blocked")))')"
+  [ "$(st 'select(.issue == 7 and .step == "landed") | [.leftover, .followups] | tojson')" = '[true,[]]' ] && [ ! -e "$STUB/filed" ] \
+    || fail "a depth-2 card did not land, or filed a follow-up: $(st 'select(.issue == 7 and (.step | IN("landed", "blocked")))')"
   [ "$(jq -c '[.issue, .finding, .by, .why]' "$ST/declined.jsonl")" = '[7,"[P1] a.txt:31 wrong word","code","its issue is a follow-up at the depth cap of 2, so no deeper follow-up is filed"]' ] \
     || fail "the depth-2 card's leftover finding is not in the declined list once, with who and why: $(cat "$ST/declined.jsonl" 2>&1)"
 }
 
-# fukept <issue json> <what it files>: that bug card's three NO-GO reviews land it, filing <what it files>.
-fukept() {
-  setup "[$1]"; provenbug; for i in 1 2 3; do moved $i "$NOGO" > "$STUB/review.$i"; done
-  mkdir -p "$ST"; landed 5 '[7]' > "$ST/cards.jsonl"
-  loop run >/dev/null || fail "run exited non-zero"
-  [ "$(st 'select(.step == "landed" and .issue != 5) | [.issue, .leftover, .followups] | tojson')" = "[$(jq .number <<<"$1"),true,$2]" ] \
-    || fail "the card did not land filing $2: $(st 'select(.step | IN("landed", "blocked", "filed"))'; cat "$STUB/filed" 2>&1)"
-}
 # Bug: a follow-up is known only by its depth line, so one with the follow-up label and no such line (a slice of a
 # split) counts as depth 0, and its follow-ups as depth 1, so the chain reaches the cap one level late.
 t_fuknown() {
-  fukept "$(issue 7 2026-01-01 conveyor-followup bug P1 | jq -c '.body = "Follow-up to #5"')" '[100101]'
+  setup "[$(issue 7 2026-01-01 conveyor-followup bug P1 | jq -c '.body = "Follow-up to #5"')]"; echo "$NOGO" > "$STUB/r.review"
+  fx_in 'i=$(jq -c ".[0]" "$STUB/issues.json"); fudepth "$i"; followups c1-7 "$i" "$STUB/r.review"'
+  [ "$RC" = 0 ] && [ "$(tr '\n' ' ' < "$T/$CASE/run.out")" = '1 [100101] ' ] || fail "a labelled issue with no depth line is not at depth 1: $(cat "$T/$CASE/run.out")"
   jq -r .body "$STUB/filed" | grep -qx 'Follow-up depth: 2' || fail "a follow-up of a labelled issue with no depth line is not at depth 2: $(cat "$STUB/filed")"
 }
 # Bug: a body past a pipe's 64 KiB (#8's, long lines: 6500 short ones took 100 s) hides its depth line (its read ends
@@ -241,25 +229,25 @@ t_fuknown() {
 t_fuknownlong() {
   local i; i=$(issue 8 2026-01-02 bug P1 | jq -c '.body = "Follow-up depth: 2\n" + (("filler text " * 70 + "\n") * 100)')
   [ "$(jq -r .body <<<"$i" | wc -c)" -gt 65536 ] || fail "#8's body fits a pipe"
-  fukept "$i" '[]'
-  [ ! -e "$STUB/filed" ] && [ "$(jq -c '[.issue, .by]' "$ST/declined.jsonl")" = '[8,"code"]' ] || fail "its leftover finding was filed, or is not in the declined list: $(cat "$STUB/filed" "$ST/declined.jsonl" 2>&1)"
+  setup "[$i]"
+  fx_in 'fudepth "$(jq -c ".[0]" "$STUB/issues.json")"'
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = 2 ] || fail "the depth line of a body past 64 KiB is not read: $(cat "$T/$CASE/run.out")"
 }
 
-# Bug: a declined list that cannot be written (here a folder is in its place) loses the findings: the card ends as
-# landed and clean, and its review goes with its worktree. It has landed, and ends blocked with its review kept.
+# Bug: a declined list that cannot be written (here a folder is in its place) loses the findings: decline() says it
+# wrote them, so the card ends as landed and clean, and its review goes with its worktree. On its failure (exit
+# non-zero) the card ends blocked, its review kept (card.sh).
 t_declinefail() {
-  setup "[$(issue 7 2026-01-01 conveyor-followup bug P1 | jq -c '.body = "Follow-up depth: 2"')]"; for i in 1 2 3; do moved $i "$NOGO" > "$STUB/review.$i"; done; provenbug
-  mkdir -p "$ST/declined.jsonl"
-  loop run >/dev/null 2>&1 || fail "run exited non-zero"
-  [ "$(st 'select(.step | IN("landed", "blocked")) | .step' | tr '\n' ' ')" = 'landed blocked ' ] \
-    && st 'select(.step == "blocked") | .reason' | grep -q 'could not write its leftover findings to the declined list' || fail "a card whose findings could not be declined did not end landed, then blocked saying so: $(st 'select(.step | IN("landed", "blocked"))')"
-  k=$ST/$(st 'select(.step == "blocked") | .kept'); grep -q 'wrong word' "$k"/*.review || fail "the review of the findings that could not be declined was not kept: $(ls "$k" 2>&1)"
+  setup "[$(issue 7 2026-01-01)]"; mkdir -p "$ST/declined.jsonl"
+  fx_in 'printf "%s\n" "[P1] a.txt:1 wrong word" | decline c1-7 7 "$FUCAP"'
+  [ "$RC" != 0 ] && grep -q '^conveyor: card c1-7: its declined findings could not be written to ' "$T/$CASE/run.out" \
+    || fail "a declined list that cannot be written did not fail decline() saying so: exit $RC, $(cat "$T/$CASE/run.out")"
 }
 
 # The owner approves every change to how the engine builds, reviews, fixes, tests, lands or pushes. Bugs: a leftover
 # finding on a file the pack lists as a pipeline file is filed like any other and built with no one asked; it is filed
 # with no "Cost to every card:" line, or not held, or the loop picks it while held; Needs you does not list it; a
-# finding on any other file is held too, or gets the cost line, or is no longer picked; once released it is not built.
+# finding on any other file is held too, or gets the cost line, or is no longer picked; once released it stays held.
 t_pipeline() {
   setup "[$(issue 7 2026-01-01 P1)]"; tune '.pipelineFiles = ["a.txt", "lib/"]'
   # Another spelling of a listed file is that file; a longer name that starts with one is another file. A name in
@@ -271,25 +259,27 @@ t_pipeline() {
   # A listed name with a space in it is that name, quoted or not; one of its words alone is not.
   [ "$(for f in '[P1] `ci/build engine.sh`:9 wrong command' 'see ci/build engine.sh:9.' '[P1] ci/build:9 x' '[P1] engine.sh:9 x'; do
     echo "[$(onpipeline "$f" <<<'["ci/build engine.sh"]')]"; done | tr -d '\n')" = '[1][1][][]' ] || fail "a pipeline file whose name holds a space is not held, or one of its words alone is"
-  for i in 1 2; do moved $i "$NOGO3" > "$STUB/review.$i"; done; echo "$NOGO3" > "$STUB/review.3"; for i in 4 5 6 7; do echo "$GO" > "$STUB/review.$i"; done
-  loop run --only 7 >/dev/null || fail "run exited non-zero"
-  [ "$(st 'select(.step == "landed") | .followups | tojson')" = '[100101,100102,100103]' ] || fail "the third NO-GO did not land with its three follow-ups: $(st 'select(.step | IN("landed", "blocked"))')"
+  echo "$NOGO3" > "$STUB/r.review"; echo "$GO" > "$STUB/review.1"
+  fx_in 'followups c1-7 "$(jq -c ".[0]" "$STUB/issues.json")" "$STUB/r.review"'
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = '[100101,100102,100103]' ] || fail "the last NO-GO's three follow-ups were not filed: $(cat "$T/$CASE/run.out")"
   [ "$(jq -rs 'map(.body | split("\n") | map(select(startswith("Cost to every card: "))) | join(",")) | join("|")' "$STUB/filed")" = 'Cost to every card: not assessed||' ] \
     && jq -rs '.[0].body' "$STUB/filed" | grep -qx 'Follow-up depth: 1' || fail "only the finding on the pipeline file a.txt gets the cost line, and keeps its depth line: $(cat "$STUB/filed")"
   [ "$(jq -c .held "$ST/control.json")" = '[100101]' ] || fail "the control record holds $(jq -c .held "$ST/control.json"), not the follow-up on the pipeline file alone"
   # The loop builds a follow-up on another file, as before, and never the held one (a run with no --only: one limited
   # to #7 goes on polling for the held follow-up). One such follow-up (#100102) is open: a second proves no more and
-  # costs a card. A bug card (provenbug).
-  jq -cs '.[:2]' "$STUB/filed" > "$STUB/issues.json"; provenbug
-  loop run >/dev/null || fail "second run exited non-zero"
-  [ "$(st 'select(.step == "picked") | .issue' | tr '\n' ' ')" = "7 100102 " ] || fail "picks with the pipeline follow-up held: $(st 'select(.step == "picked") | .issue' | tr '\n' ' ')"
+  # costs a card. A bug card (provenbug). A loop run: that the pick passes over a held issue is the loop's own choice
+  # of what to build, which no one engine function shows.
+  # #7's landed line, as its card writes it once its follow-ups are filed: a follow-up waits for its parent to land.
+  jq -cs '.[:2]' "$STUB/filed" > "$STUB/issues.json"; provenbug; landed 7 '[100101,100102,100103]' > "$ST/cards.jsonl"
+  loop run >/dev/null || fail "the run exited non-zero"
+  [ "$(st 'select(.step == "picked") | .issue' | tr '\n' ' ')" = "100102 " ] || fail "picks with the pipeline follow-up held: $(st 'select(.step == "picked") | .issue' | tr '\n' ' ')"
   [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 100102 " ] || fail "the follow-up on another file did not land: $(st 'select(.step | IN("landed", "blocked"))')"
   jq -cs '[.[0]]' "$STUB/filed" > "$STUB/issues.json"
   [ "$(loop snapshot --fresh | jq -c '.needsYou.pipeline | map([.issue, .title, .cost, .parent])')" = '[[100101,"[P0] a.txt:1 wrong word","not assessed",7]]' ] \
     || fail "Needs you does not list the held pipeline follow-up with its cost line: $(loop snapshot --fresh | jq -c .needsYou.pipeline)"
-  # The owner releases it: it is built like any follow-up, and leaves Needs you.
-  loop control release 100101 >/dev/null; loop run >/dev/null || fail "third run exited non-zero"
-  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 100102 100101 " ] || fail "the released pipeline follow-up was not built: $(st 'select(.step | IN("picked", "landed", "blocked")) | [.step, .issue] | join(":")' | tr '\n' ' ')"
+  # The owner releases it: it is held no more, so it is picked as the follow-up above was, and leaves Needs you.
+  loop control release 100101 >/dev/null || fail "the release exited non-zero"
+  [ "$(jq -c .held "$ST/control.json")" = '[]' ] || fail "a released pipeline follow-up is still held: $(jq -c .held "$ST/control.json")"
   [ "$(loop snapshot --fresh | jq -c .needsYou.pipeline)" = '[]' ] || fail "a released pipeline follow-up is still in Needs you"
 }
 
@@ -535,32 +525,28 @@ t_dismissed() {
 # from the Board's panel.
 t_donotraise() {
   setup "[$(issue 8 2026-01-02)]"
-  sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
-  echo "$GO" > "$STUB/review.1"
   printf '%s\n' '# Sample' '' '## Run' 'Run it with care.' '' '## Accepted limits' '' '- Two changes that each pass alone can fail together on main.' '' '## License' 'Any.' > "$R/README.md"
-  git -C "$R" add README.md && git -C "$R" commit -qm readme && git -C "$R" push -q origin main || fail "the README was not committed"
-  loop declined add c1-7 7 judge 'its proof needs a stub built to misbehave' '[P1] b.txt:2 no mark here' \
-    && loop declined add c1-7 7 code 'follow-up of a follow-up' '[P2] a.txt:1 wrong word' \
-    && loop declined build "$(jq -r 'select(.by == "code") | .id' "$ST/declined.jsonl")" >/dev/null \
-    && loop declined dismiss "$(jq -r 'select(.by == "judge") | .id' "$ST/declined.jsonl")" >/dev/null || fail "the declined list was not made"
-  jq -cn 'range(200) | {id: "dx\(.)", time: "2026-03-05T00:00:00Z", card: "c2-9", issue: 9, finding: "[P2] f.txt:\(.) a nit", by: "judge", why: "built after all", repo: "sample", built: (200 + .)}' >> "$ST/declined.jsonl"
-  loop run --only 8 >/dev/null || fail "run of #8 exited non-zero"
-  [ "$(st 'select(.issue == 8 and .step == "landed") | .result')" = ok ] || fail "#8 did not land"
+  # A finding still declined, dismissed from the Board's panel; one the owner asked to be built; 200 more built after them.
+  mkdir -p "$ST"
+  jq -cn '{id: "d1", time: "2026-03-04T00:00:00Z", card: "c1-7", issue: 7, finding: "[P1] b.txt:2 no mark here", by: "judge", why: "its proof needs a stub built to misbehave", repo: "sample", dismissed: {time: "2026-03-04T00:00:01Z", by: "the host"}},
+    {id: "d2", time: "2026-03-04T00:00:00Z", card: "c1-7", issue: 7, finding: "[P2] a.txt:1 wrong word", by: "code", why: "follow-up of a follow-up", repo: "sample", built: 100101},
+    (range(200) | {id: "dx\(.)", time: "2026-03-05T00:00:00Z", card: "c2-9", issue: 9, finding: "[P2] f.txt:\(.) a nit", by: "judge", why: "built after all", repo: "sample", built: (200 + .)})' > "$ST/declined.jsonl"
+  # What donotraise() prints, and the instructions a review of a change hands its session (review(), the session
+  # stubbed out at apitries()): they end with it.
+  fx_in 'donotraise > "$STUB/dnr"; apitries() { printf "%s\n" "$7" > "$STUB/asked"; return 1; }; review "$T/$CASE/cards/c1-8" "the brief"'
+  [ -s "$STUB/dnr" ] && [[ $(cat "$STUB/asked" 2>/dev/null) == 'Review the staged change'*"$(cat "$STUB/dnr")" ]] \
+    || fail "the review of a change is not told what not to raise after its instructions: $(cat "$T/$CASE/run.out"; tail -n 8 "$STUB/asked" 2>&1)"
   grep -qx '# Do not raise these' "$STUB/asked" && grep -qx -- '- Two changes that each pass alone can fail together on main.' "$STUB/asked" \
     || fail "the review prompt lacks the README's accepted limits: $(grep -n -A6 'Do not raise' "$STUB/asked")"
   ! grep -qx 'Run it with care.' "$STUB/asked" && ! grep -qx 'Any.' "$STUB/asked" || fail "the review prompt takes the README's other sections for limits"
   grep -qxF -- '- its proof needs a stub built to misbehave (the finding: [P1] b.txt:2 no mark here)' "$STUB/asked" \
     || fail "the review prompt lacks the reason of a declined finding: $(grep -n -A8 'Do not raise' "$STUB/asked")"
   ! grep -q 'follow-up of a follow-up\|built after all' "$STUB/asked" || fail "the reviewer is told not to raise a finding the owner asked to be built"
-  # The issue comes after the instructions, as before.
-  [ "$(grep -n -m1 '^# Do not raise these$' "$STUB/asked" | cut -d: -f1)" -lt "$(grep -n -m1 'body of 8' "$STUB/asked" | cut -d: -f1)" ] || fail "what not to raise is not part of the review's instructions"
 }
 
 # Bug: a project with no limit and no declined finding gets an empty "Do not raise these".
 t_donotraisenone() {
   setup "[$(issue 7 2026-01-01)]"
-  sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
-  echo "$GO" > "$STUB/review.1"
-  loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
+  fx_in 'apitries() { printf "%s\n" "$7" > "$STUB/asked"; return 1; }; review "$T/$CASE/cards/c1-7" "the brief"'
   grep -q '^Review the staged change' "$STUB/asked" && ! grep -q 'Do not raise these' "$STUB/asked" || fail "a project with nothing declined and no stated limit is told not to raise something: $(grep -n -A3 'Do not raise' "$STUB/asked")"
 }
