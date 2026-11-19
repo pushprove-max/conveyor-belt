@@ -162,12 +162,12 @@ test('Overview: the drift watch is folded, one row a figure, and a group of 2 ca
 test('A run going: the tab opens on it, its step moves with the same done count, a lost read keeps it, Stop run ends it from its first line', async () => {
   const w = boot({ tab: 'bench' });
   const id = 'r20261109T164200-12', [t1, t2, t3, ...rest] = BH.TASKS, [C, S] = BH.hist().runs[0].cols;
-  let phase = 'Building', state = 'running', lost = false, acost = { usd: null, state: 'unknown' };
+  let phase = 'Building', state = 'running', lost = false, acost = { usd: null, state: 'unknown' }, atask = t3;
   const going = () => state === 'running', usd = (v, s = 'known') => ({ usd: v, state: s });
   const c = (arm, result, o = {}) => ({ arm, result, reused: false, state: result ? 'finished' : going() ? 'waiting' : 'not reached', sessions: 1, minutes: 8, ...o });
   const show = () => ({
     run: { id, state, started: iso(T0 - 1080000), ended: going() ? null : iso(T0), updated: iso(T0 - 60000), n: 5, cost: usd(2, 'partial'),
-      active: going() ? { arm: 'conveyor', task: t3, phase, since: iso(T0 - 120000), start: iso(T0 - 300000), ...(acost ? { cost: acost } : {}) } : null,
+      active: going() ? { arm: 'conveyor', task: atask, phase, since: iso(T0 - 120000), start: iso(T0 - 300000), ...(acost ? { cost: acost } : {}) } : null,
       cols: [{ ...C, done: 2, resolved: 2, notRun: 0, cost: usd(1.2, 'partial'), wall: 8 }, { ...S, done: 2, resolved: 1, notRun: 0, cost: usd(0.8), wall: 16 }] },
     tasks: [{ id: t1, cells: [c('conveyor', 'resolved', { reused: true, cost: usd(3) }), c('solo', 'resolved', { cost: usd(0.4) })] },
       { id: t2, cells: [c('conveyor', 'resolved', { cost: usd(1.2) }), c('solo', 'unresolved', { cost: usd(0.4) })] },
@@ -229,6 +229,14 @@ test('A run going: the tab opens on it, its step moves with the same done count,
   next(w, snap(4));
   await settle();
   assert.match(text(bp(w).querySelector('.bench-sofar')), /\$2\.00 recorded\. Part of the cost is unknown\. Last update /);
+  // Bug it guards (#750): an arm checking its preflight (active with no task) counted its active time up from the
+  // check's start, then dropped back to its wall, which has task work only, once Checking moved to the next arm.
+  phase = 'Checking'; atask = null;
+  next(w, snap(5));
+  await settle();
+  assert.match(now(), /^Now: Conveyor 1\.5\.0 · Checking since /);
+  assert.equal(text(bp(w).querySelector('.bench-live tr[data-arm="conveyor"]').children[6]), '8 min', 'a preflight adds no active time');
+  atask = t3;
   // Bug it guards (#646 review E1): the tab chose its page once, so a person back from another tab saw the page they
   // left, not the run going.
   act(bp(w), 'page-overview').click();

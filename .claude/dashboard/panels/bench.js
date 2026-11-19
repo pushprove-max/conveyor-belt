@@ -530,10 +530,11 @@
     if (a && typeof a.since === 'string') now.append(' ', h('span', 'board-from', `since ${B.ctx.clock(a.since)}`));
     // Each arm's cells: reused counts its results taken from an earlier run. Active time is the wall minutes of the
     // arm's work in this run (bench swe's wall: each task it ran, a task not run included; a reused result adds none)
-    // and, for the arm at work, the time since its task began (active.start), counted on the Board's clock (ctx.since).
+    // and, for the arm at work on a task, the time since that task began (active.start), counted on the Board's clock
+    // (ctx.since). An arm checking its preflight (no task) adds none, as its wall leaves the check out once it ends.
     const of = (c) => tasks.flatMap((t) => list(t.cells).filter((x) => obj(x) && x.arm === c.arm));
     const reusedOf = (c) => of(c).filter((x) => x.reused === true).length;
-    const activeOf = (c) => (a && a.arm === c.arm && Number.isFinite(Date.parse(a.start)) ? B.ctx.since(a.start, '', (num(c.wall) || 0) * 60) : took(num(c.wall)));
+    const activeOf = (c) => (a && a.arm === c.arm && typeof a.task === 'string' && Number.isFinite(Date.parse(a.start)) ? B.ctx.since(a.start, '', (num(c.wall) || 0) * 60) : took(num(c.wall)));
     // The active session's cost is unknown only once it has one: a task still preparing its image has no session yet.
     const k = costOf(r.cost), price = k.state === 'known' ? `Recorded list price ${B.ctx.money(k.usd)}.`
       : k.state === 'partial' ? `${B.ctx.money(k.usd)} recorded. ${a && obj(a.cost) && costOf(a.cost).state !== 'known' ? 'Cost for the active session is unknown.' : 'Part of the cost is unknown.'}` : 'Cost unknown.';

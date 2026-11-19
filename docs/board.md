@@ -770,7 +770,8 @@ time, setup and grading included. While the run goes, the line also has **Stop r
 and the step that the run is at, the arm and task pairs finished of all that the run plans, the resolved, reused and
 not run counts, and the cost so far. A table gives the same figures for each arm, with the work of the arm now and its
 active time: the time of its work in this run, the task that it is on and a task not run included. A reused result
-adds no time. The elapsed time and the active time count on while the run goes. The page reads the run again when it moves on, also when only the step changes. When
+adds no time. The elapsed time and the active time count on while the run goes. While an arm checks its preflight,
+its active time stops, and it counts on again when the arm starts a task. The page reads the run again when it moves on, also when only the step changes. When
 a read gets no answer, the page keeps the last update, says so, and offers **Read again**.
 
 **Stop run** stops the whole run: the work in progress and the tasks that it did not reach yet. Finished results stay.
