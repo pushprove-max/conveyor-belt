@@ -23,6 +23,8 @@
 #     ("<issue> <its lines in await-<repo>.txt then>"), so a line appended later awaits it again
 #   a whole-suite run (a release's or the full test's, snapshot suites) that ended: its result, commit, reasons and
 #     failed cases (a full test run whose process is gone, with no result: an error, with that reason)
+#   the fix cards of a red release run (its record's fixes): each has landed, once, with release-prep started again
+#     or why it did not start; one closed with no landed card, once, naming it, as the release then waits on the Foreman
 #   a push that failed its check (health's pushError.kind check), at once and again for each commit it fails on: the
 #     loop does not push again until main moves
 #   a card's test step that refused a full run of its tests (health's refused: the engine's tests()), once a test line
@@ -115,6 +117,40 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
       | ["landed:\(.[0]):\(.[1])", "landed", "#\(.[0])", "#\(.[0]) landed\(if $sha == "" then "" else " as \($sha[0:12])" end): your step is due"]),
     ($snap.suites | arrays | .[] | objects | select(.ended != null)
       | ["suite:\(.kind | tostring | gsub("\\s"; "-")):\(.ended)", "suite ended", "", suiteline($now) | gsub("\\s+"; " ")]),
+    # The fix cards of a red release run (the release record'"'"'s fixes, each {issue, state}, and restarted, which the
+    # engine'"'"'s relfixes() writes, conveyor/lib/fulltest.sh; a run it started has by "fixes landed"): once a run. A
+    # started run that ends red is read for its own fixes as any red run is.
+    ($snap.suites | arrays | .[] | objects | select(.kind == "release") | (.version | tostring) as $v
+      | [.fixes | arrays | .[] | objects | select(.issue | numbers)] as $fx | ($fx | map("#\(.issue)") | join(", ")) as $all
+      | if .by == "fixes landed" and .ended == null then ["relfix:\($v):\(.since)", "release started again", "",
+          "every fix card of release \($v)'"'"'s failed suite has landed: release-prep \($v) started again at \(.since)"]
+        elif .step != "release-prep" or .state != "failed" or $fx == [] then empty
+        elif all($fx[]; .state == "landed") then
+          # relfixes() writes fixes and restarted in one go: all landed with no restarted is a hold it found. A card on
+          # the belt, or a push owed, ends by itself and wakes nothing, unless the rule "Push when a card lands" is off
+          # (the snapshot'"'"'s control.rules.push false): then nothing pushes until the owner does. A restart with no run
+          # of its own two polls on is a run that did not begin. With Land as pr and Merge PR button (the control
+          # record'"'"'s landAs and prMerge, else the pack'"'"'s), a push goes to the landing pull request and the suite runs
+          # on the branch it goes into (relhead(), lib/push.sh): the owner must merge it too. Each reason has its own
+          # key, so the merge still owed after the push wakes again.
+          (($snap.health.unpushed | arrays | length) > 0) as $owed
+          | ([$snap.control | objects | .rules | objects | .push] == [false]) as $pushoff
+          | ((($snap.control | objects | .landAs) // $snap.packLandAs) == "pr"
+              and (($snap.control | objects | .prMerge) // $snap.packPrMerge) == "button") as $bymerge
+          | ([$snap.health.landingPr | objects | select(.merged == null and .closed == null) | .number | numbers][0]) as $pr
+          | (if .restarted != null then select($now - (.restarted | fromdate? // $now) >= 2 * $poll)
+              | ["restart", "release-prep was started again at \(.restarted), but no run began: run `conveyor.sh release-run prep \($v)`"]
+            elif ($snap.belt | arrays | length) > 0 then empty
+            elif $owed and $pushoff then ["push", "the landed commits are not pushed, and the rule Push when a card lands is off: press Push landed on the Board'"'"'s Control tab"
+              + (if $bymerge then ", then Merge there, as the rule Land as is pr and the rule Merge PR is button: the suite runs on the branch the landing pull request goes into" else "" end)]
+            elif $owed then empty
+            elif $bymerge and $pr != null then ["merge", "landing pull request #\($pr) is not merged, and the rule Merge PR is button: press Merge on the Board'"'"'s Control tab"]
+            else ["wait", "the commit the suite runs on does not hold each fix card'"'"'s commit yet (a landing pull request not merged, or the remote not read)"] end) as [$tag, $why]
+          | ["relfix:\($v):\(.since):\($tag)", "release fixes landed", "", "every fix card of release \($v)'"'"'s failed suite has landed (\($all)), but release-prep \($v) did not start again: \($why)"]
+        else $fx[] | select(.state == "closed")
+          | ["relfixclosed:\($v):\(.issue)", "release fix closed", "#\(.issue)",
+             "fix card #\(.issue) of release \($v)'"'"'s failed suite was closed with no landed card: release-prep \($v) does not start again by itself; run `conveyor.sh release-run prep \($v)` when its failure is fixed"]
+        end),
     (select(.loop | not) | ["noloop", "no loop", "", "no loop is running"]),
     (select(.pushFailingSince != null) | .pushError as $e
       | if ($e | type) == "object" and $e.kind == "check" then
@@ -199,7 +235,7 @@ unreported() {
 # building against the cap and those waiting on another card, which that count leaves out; then a card a line: issue, or a main-red fix card's name, step, time in step, title cut to 60 characters), the
 # cards waiting on other issues and the held issues as issue numbers, the whole-suite run under way (else the last one
 # that ended), then every problem a wake names, the push failing at once, the suite that ended left out (its line is
-# above), each "needs you: <text>", then each card unreported names, "not yet reported: blocked #N". A record that gives no snapshot is one line, "<repo>: no snapshot (<why>)", the why
+# above), and a release-prep started again by its landed fixes (it needs no one), each "needs you: <text>", then each card unreported names, "not yet reported: blocked #N". A record that gives no snapshot is one line, "<repo>: no snapshot (<why>)", the why
 # never empty and one line (the last the engine said: of a stack trace, its error); when one read before (keepsnap),
 # "<repo>: the last snapshot, made <age> ago (a new one failed: <why>):" in its place, and that snapshot's lines as above. <project> names one
 # record of mine; with none, every one of them. Then the watcher's last poll, from
@@ -245,8 +281,8 @@ if [ "${1:-}" = --status ]; then
       echo "$repo: the last snapshot, made $age (a new one failed: $why):"
     else keepsnap "$repo" "$rec"; fi
     jq -r --arg repo "$repo" --argjson now "$now" "$STATUS" <<<"$rec" 2>/dev/null || echo "$repo: the snapshot's belt does not read"
-    if probs=$(jq -r --argjson push -1 --argjson now "$now" --argjson await '[]' --argjson hist '[null]' --slurpfile kinds "$KINDS" "$PROBLEMS" <<<"$rec" 2>/dev/null); then
-      awk -F'\t' '$1 != "" && $2 != "suite ended" { print "needs you: " $4 }' <<<"$probs"
+    if probs=$(jq -r --argjson push -1 --argjson now "$now" --argjson poll "$POLL" --argjson await '[]' --argjson hist '[null]' --slurpfile kinds "$KINDS" "$PROBLEMS" <<<"$rec" 2>/dev/null); then
+      awk -F'\t' '$1 != "" && $2 != "suite ended" && $2 != "release started again" { print "needs you: " $4 }' <<<"$probs"
       awk -v r="$repo" '$0 != "" { print r "\t" $0 }' <<<"$probs" | unreported "$now" | cut -d' ' -f2-
     else echo "needs you: unknown, the snapshot holds no health record"; fi
   done <<<"$RECS"
@@ -274,7 +310,7 @@ record() { # <repo> <main> <now> <await>
     ! jq -e objects <<<"$rec" >/dev/null 2>&1 || keepsnap "$repo" "$rec"
     { jq -e --argjson await "$await" "${PUSHED}"'pushed(null) as $p | any($await[]; .[0] | IN($p[]) | not)' <<<"$rec" >/dev/null 2>&1 \
       && ASK_LIMIT=$1 ask "$repo" "$main" history 2>>"$errf" | jq -ce objects > "$histf" 2>>"$errf" || echo null > "$histf"; }
-    cur=$(jq -r --argjson push "$PUSH_S" --argjson now "$now" --argjson await "$await" --slurpfile hist "$histf" --slurpfile kinds "$KINDS" "$PROBLEMS" <<<"$rec" 2>>"$errf")
+    cur=$(jq -r --argjson push "$PUSH_S" --argjson now "$now" --argjson poll "$POLL" --argjson await "$await" --slurpfile hist "$histf" --slurpfile kinds "$KINDS" "$PROBLEMS" <<<"$rec" 2>>"$errf")
   }
   # A snapshot that does not read, or not within the first wait (one made anew from the whole card records takes
   # minutes), is no reason to wake late on a card that needs the owner: `conveyor.sh health` holds the blocked, waiting
@@ -282,7 +318,7 @@ record() { # <repo> <main> <now> <await>
   readhealth() {
     local h all
     h=$(ask "$repo" "$main" health 2>>"$errf") \
-    && all=$(jq -r --argjson push "$PUSH_S" --argjson now "$now" --argjson await '[]' --argjson hist '[null]' --slurpfile kinds "$KINDS" "{health: .} | $PROBLEMS" <<<"$h" 2>>"$errf") \
+    && all=$(jq -r --argjson push "$PUSH_S" --argjson now "$now" --argjson poll "$POLL" --argjson await '[]' --argjson hist '[null]' --slurpfile kinds "$KINDS" "{health: .} | $PROBLEMS" <<<"$h" 2>>"$errf") \
     && hcur=$(awk -F'\t' '$1 ~ /^(blocked|waiting|before):/' <<<"$all")
   }
   # The standing kind review-retry (lib/standing.sh), while the snapshot's pack turns it on (snapshot standing): each

@@ -69,6 +69,15 @@ it up:
 - gh is signed out, GitHub does not answer, or the project gives no snapshot: the wake comes only when three polls in
   a row find it. One or two such polls give no wake.
 - A release or full-test run that ends: the wake names the result and the failed cases.
+- Each fix card of a failed release suite has landed
+  ([Fix cards of a failed suite](releases.md#fix-cards-of-a-failed-suite)): the wake names the version. It says that
+  release-prep started again, or why it did not start. A card on the belt, or a push that is still owed, gives no
+  wake, because release-prep starts when it ends. If the Rules tab's **Push when a card lands** rule is off, a push
+  that is owed gives the wake, because the push waits for you. If the rule **Land as** is pr and the rule **Merge
+  PR** is button, the wake also asks you to merge the landing pull request, and a pull request that is not merged
+  after the push gives one more wake.
+- A fix card of a failed release suite was closed with no landed card: the wake names the issue. The release then
+  waits for the Foreman, because release-prep does not start again by itself.
 - A card that waits for main to change, or waits on another card, for the minutes of the pack setting
   `foreman.waitWake` (in `.conveyor/project.json`): the wake names the card and what it waits on. For another card,
   it gives that card's step and last action. For main, it gives each main-red fix card that is open, with its step
