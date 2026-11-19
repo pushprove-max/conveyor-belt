@@ -188,27 +188,30 @@ relstart() { # <command name> <version>
 # Called alone in a command substitution ($(relprocs ...)), whose subshell is the process that lists them, and its ps
 # exec'd in its own substitution's subshell, so that the ps's parent is that process. Else the scan found a process of
 # its own that carries the mark (a pipe's other side, or a ps one subshell further down), and a reap from a process of
-# the run (the run's own end, its watcher) ran all its KILL rounds (relreap()).
+# the run (the run's own end, its watcher) ran all its KILL rounds (relreap()). What it starts (ps, awk, sort) carries
+# no mark, so another reap at the same time (the stop's, the run's own end's) does not find it as a process of the run.
 relprocs() { # <pid> <mark> [<pid left out>]
   local t e me=$BASHPID x=${3:-$$}
+  unset CONVEYOR_RELEASE_RUN # in this command substitution's subshell alone
   t=$(exec ps -A -o pid= -o ppid= -o stat= 2>/dev/null); e=$(exec ps axeww -o pid= -o ppid= -o command= 2>/dev/null)
   { awk -v r="$1" -v me="$me" -v x="$x" '{ k[$2] = k[$2] " " $1; a[$1] = ($3 !~ /Z/) } END { q[1] = r; n = 1
     for (i = 1; i <= n; i++) { if (q[i] == me) continue; if (a[q[i]] && q[i] != x) print q[i]; m = split(k[q[i]], c, " "); for (j = 1; j <= m; j++) q[++n] = c[j] } }' <<<"$t"
     awk -v k=" CONVEYOR_RELEASE_RUN=$2 " -v me="$me" -v x="$x" '$1 != me && $1 != x && $2 != me && index($0 " ", k) { print $1 }' <<<"$e"; } | sort -u
 }
 # A release run ended (relprocs()'s arguments): each of its processes told to end, then killed 10 s later if they
-# have not, and killed again while one is left (one started meanwhile, or one still ending), for up to 2 s.
+# have not, and killed again while one is left (one started meanwhile, or one still ending), for up to 2 s. Its sleeps
+# carry no mark either (relprocs()).
 relreap() { # <pid> <mark> [<pid left out>]
   local ps i
   ps=$(relprocs "$@") && [ -n "$ps" ] || return 0
   # shellcheck disable=SC2086 # one pid a word
   kill -TERM $ps 2>/dev/null
   # shellcheck disable=SC2086
-  for ((i = 0; i < 100; i++)); do kill -0 $ps 2>/dev/null || break; sleep 0.1; done
+  for ((i = 0; i < 100; i++)); do kill -0 $ps 2>/dev/null || break; env -u CONVEYOR_RELEASE_RUN sleep 0.1; done
   for ((i = 0; i < 20; i++)); do
     ps=$(relprocs "$@") && [ -n "$ps" ] || return 0
     # shellcheck disable=SC2086
-    kill -KILL $ps 2>/dev/null; sleep 0.1
+    kill -KILL $ps 2>/dev/null; env -u CONVEYOR_RELEASE_RUN sleep 0.1
   done
 }
 # The record at the command's end: its state, and each line it printed to stderr (<file>) as a reason.

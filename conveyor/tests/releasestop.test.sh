@@ -14,14 +14,15 @@
 # still held the release lock as it ended (its EXIT trap), unseen by the stop: its bash shows no mark, and it leaves the
 # tree of the run's pid once that pid has ended. A release-prep started then was refused ("already running"), and the
 # snapshot showed the stopped run as running. The suite's stand-in for it: a process of the run with no mark, out of
-# the run's tree, holding the lock it inherited until the case frees it ($STUB/free), once the stop waits for the lock.
-# A stand-in that let go of the lock after a fixed time made the case flaky: the stop's own reap takes 5 to 10 s, so
+# the run's tree (its timeout: a process group of its own, which the end of the suite's group does not reach), holding
+# the lock it inherited until the case ends it (its pid in $STUB/holder), once the stop waits for the lock. A stand-in that let go of the lock after a fixed time made the case flaky: the stop's own reap can take
+# up to 10 s, so
 # a stop that returned without waiting for the lock often passed. Bug (E1): a release-prep that took the lock first
 # wrote its own record while the stop waited, and the stop then marked that new run stopped; a second stop refused the
 # live run. The case writes such a record while the stop waits (the record that it says stopped is relstopgroup's).
 t_relstop() {
   local O RUN out lock sp
-  runsetup '( env -u CONVEYOR_RELEASE_RUN timeout 60 bash -c '\''until [ -e "$1" ]; do sleep 0.1; done'\'' _ "$STUB/free" & ); sleep 300 & echo $! > "$STUB/sleeper"; wait' # sleep: stand-in suite processes, which only the stop ends
+  runsetup '( env -u CONVEYOR_RELEASE_RUN timeout 60 sleep 60 & echo $! > "$STUB/holder" ); sleep 300 & echo $! > "$STUB/sleeper"; wait' # sleep: stand-in suite processes, which only the stop or the case ends
   lock=$T/$CASE/cards/release/lock
   out=$(loop release-run 1.1.0 2>&1) || fail "release-run did not start the run: $out"
   wait_until '[ -s "$STUB/sleeper" ]' || fail "the suite did not start: $(cat "$T/$CASE/cards/release/run.log" 2>&1)"
@@ -32,7 +33,7 @@ t_relstop() {
   ! { [ -s "$STUB/stop.rc" ] && ! flock -n "$lock" true; } || fail "the stop returned while a process of the run still held the release lock"
   jq -c --argjson p "$(cat "$STUB/sleeper")" '.pid = $p | .since = "2099-01-01T00:00:00Z"' "$RUN" > "$RUN.new" && mv "$RUN.new" "$RUN" \
     || fail "the next run's record could not be written"
-  touch "$STUB/free"
+  kill "$(cat "$STUB/holder")"
   wait_until "[ -s '$STUB/stop.rc' ]" || fail "the stop did not end once the release lock was free"
   [ "$(cat "$STUB/stop.rc")" = 0 ] || fail "the stop failed: $(cat "$STUB/stop.out")"
   flock -n "$lock" true || fail "the release lock is held after the stop"
@@ -46,14 +47,17 @@ t_relstop() {
 }
 # Bug (E1): a stop whose wait for the release lock timed out wrote the record without the lock, so it could write its
 # stale copy over the result that the lock's holder (the run's own end, or the next run) wrote at the same time. The
-# stand-in of relstop holds the lock past the stop's wait: the stop fails and leaves the record as it is.
+# stand-in of relstop holds the lock past the stop's wait: the stop fails and leaves the record as it is. A flock on
+# PATH makes the stop's 10 s wait 1 s: the wait's length is not under test, and the case waited through it whole.
 t_relstopheld() {
-  local O RUN out
-  runsetup '( env -u CONVEYOR_RELEASE_RUN timeout 60 bash -c '\''until [ -e "$1" ]; do sleep 0.1; done'\'' _ "$STUB/free" & ); sleep 300 & echo $! > "$STUB/sleeper"; wait' # sleep: stand-in suite processes, which only the stop ends
+  local O RUN out f
+  runsetup '( env -u CONVEYOR_RELEASE_RUN timeout 60 sleep 60 & echo $! > "$STUB/holder" ); sleep 300 & echo $! > "$STUB/sleeper"; wait' # sleep: stand-in suite processes, which only the stop or the case ends
   out=$(loop release-run 1.1.0 2>&1) || fail "release-run did not start the run: $out"
   wait_until '[ -s "$STUB/sleeper" ]' || fail "the suite did not start: $(cat "$T/$CASE/cards/release/run.log" 2>&1)"
-  out=$(loop release-run stop 2>&1); [ $? = 1 ] && grep -q 'still holds' <<<"$out" || { touch "$STUB/free"; fail "a stop that could not take the release lock did not fail: $out"; }
-  touch "$STUB/free"
+  f=$(command -v flock) && printf '%s\n' '#!/usr/bin/env bash' '[ "$1" != -w ] || set -- -w 1 "${@:3}"' "exec $f \"\$@\"" > "$STUB/flock" \
+    && chmod +x "$STUB/flock" || fail "the flock with a short wait could not be made"
+  out=$(loop release-run stop 2>&1); [ $? = 1 ] && grep -q 'still holds' <<<"$out" || { kill "$(cat "$STUB/holder")"; fail "a stop that could not take the release lock did not fail: $out"; }
+  kill "$(cat "$STUB/holder")"
   jq -e '.state == "running" and .ended == null' "$RUN" > /dev/null || fail "the stop wrote the record without the release lock: $(cat "$RUN")"
 }
 # The suite of relstopgroup and relendleft (a runsetup command), on its first run: a process left out from under the
@@ -76,11 +80,13 @@ t_relstopgroup() {
 # Bug (#596): the reaps of the run's own end and of its watcher, which carry the run's mark, found a process of their
 # own scan as a process of the run, so they never saw the run gone and ran all 20 KILL rounds, each a scan of the
 # process table (two ps), 2 to 4 s and the CPU of 40 ps a reap. A ps on PATH counts the scans (its env listing) of the whole stop, of a
-# run whose processes all end on the TERM: each reap needs two (the processes, then none left).
+# run whose processes all end on the TERM: each reap needs two (the processes, then none left). Bug: the ps, awk, sort
+# and sleeps of the run's own end's reap carried the mark, so the stop's reap, at the same time, found them as
+# processes of the run and took more rounds; the ps writes the mark it carries, which must be none.
 t_relstopscans() {
   local O RUN out ps p
   runsetup "$RELLEFT sleep 300; }" # sleep: the suite runs until the case ends the run
-  ps=$(command -v ps) && printf '%s\n' '#!/usr/bin/env bash' "[[ \" \$* \" != *' axeww '* ]] || echo scan >> \"\$STUB/scans\"" "exec $ps \"\$@\"" > "$STUB/ps" \
+  ps=$(command -v ps) && printf '%s\n' '#!/usr/bin/env bash' "[[ \" \$* \" != *' axeww '* ]] || echo \"scan \${CONVEYOR_RELEASE_RUN:-}\" >> \"\$STUB/scans\"" "exec $ps \"\$@\"" > "$STUB/ps" \
     && chmod +x "$STUB/ps" || fail "the ps that counts could not be made"
   out=$(loop release-run prep 1.1.0 2>&1) || fail "release-run did not start the run: $out"
   wait_until '[ -s "$STUB/left" ]' || fail "the suite did not start: $(cat "$T/$CASE/cards/release/run.log" 2>&1)"
@@ -89,6 +95,7 @@ t_relstopscans() {
   # The reaps of the run's own end and its watcher end with the last process that carries the run's mark ([ ]: the
   # grep's own command line does not match).
   wait_until "! $ps axeww -o command= | grep -q '[ ]CONVEYOR_RELEASE_RUN=$p '" || fail "a process of the run still runs after the stop"
+  ! grep -q '^scan .' "$STUB/scans" || fail "a reap's ps carried the run's mark: $(sort "$STUB/scans" | uniq -c)"
   [ "$(wc -l < "$STUB/scans")" -le 6 ] || fail "the stop's three reaps scanned the process table $(wc -l < "$STUB/scans") times, more than twice each"
 }
 # Bug (#335): a run whose pid was killed (KILL, which runs no trap) left its release-prep and the suite's process in a
