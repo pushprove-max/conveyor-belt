@@ -2,7 +2,7 @@
 // The Declined panel: how a reason is drawn; what an F<n> of the judge's reason means; when a line leaves the panel; "Dismiss all shown (n)" and "Dismiss all (n)".
 // Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { T0, iso, boot, panel, deliver, next, settle, full, tick, P, cases } from './dashboard-view.helpers.mjs';
+import { T0, iso, boot, panel, deliver, next, settle, full, tick, P, cases, act, moreText } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const FINDINGS = [{ n: 1, finding: '[P1] a.txt:2 reads the old word. Proof: a.txt:2 still says it' }, { n: 2, finding: '[P1] a.txt:2 the old word again. Proof: none new' }];
@@ -325,4 +325,117 @@ test('Declined: "Dismiss all (n)" never dismisses a line that arrived between it
   await settle();
   assert.equal(w.posts.length, 0, 'the click after the change only asks again');
   assert.equal(count(w), '9', 'the new line is not dismissed');
+});
+
+// Bug: "Show 5 more" drew every shown row again, so an F-number explanation the owner had opened closed, and the rows
+// were new nodes.
+test('Declined: with 12 lines, Show 5 more keeps the first 5 rows as the same nodes, an open F1 open, and focuses the first new row', () => {
+  const w = boot();
+  const data = full();
+  data.panels.declined.data.lines = Array.from({ length: 12 }, (_, i) => line({ id: `d${i.toString(16).padStart(12, '0')}`, time: iso(T0 - (i + 1) * 60000), finding: `[P3] f${i}.txt:1 a nit` }));
+  deliver(w, data);
+  const p = panel(w, 'declined'), rows = () => Array.from(p.querySelectorAll('.rows > .row'));
+  const before = rows();
+  assert.equal(before.length, 5);
+  before[2].querySelector('button[data-act="finding"]').click();
+  const said = before[2].querySelector('.finding-said');
+  assert.equal(said.hidden, false, 'the F1 explanation is open');
+  act(p, 'list-more').click();
+  const after = rows();
+  assert.equal(after.length, 10);
+  assert.ok(before.every((r, i) => after[i] === r), 'the first 5 rows are the same nodes');
+  assert.equal(said.hidden, false, 'the F1 explanation is still open');
+  assert.equal(said.textContent, 'F1, review round 2: [P1] a.txt:2 reads the old word.');
+  assert.equal(w.document.activeElement, after[5], 'the focus is on the first new row');
+});
+
+// Bug: the shared list's "Show all (58)" and the panel foot's own Show all were both drawn, and the foot counted the
+// rows drawn ("6 of 10"), never the 58 lines.
+test('Declined: with 58 lines it shows one Show all control, and the count says 58', () => {
+  const w = boot();
+  const data = full();
+  data.panels.declined.data.lines = many(58);
+  deliver(w, data);
+  const p = panel(w, 'declined');
+  const showAlls = () => Array.from(p.querySelectorAll('button')).filter((b) => /^Show all/.test(b.textContent) && !b.closest('[hidden]'));
+  assert.deepEqual(showAlls().map((b) => b.textContent), ['Show all (58)']);
+  assert.equal(p.querySelector('.panel-rows').textContent, '5 of 58');
+  act(p, 'list-more').click();
+  assert.deepEqual(showAlls().map((b) => b.textContent), ['Show all (58)'], 'still one after Show 5 more');
+  assert.equal(p.querySelector('.panel-rows').textContent, '10 of 58');
+  assert.deepEqual(moreText(p), ['Show 5 more', 'Show all (58)']);
+});
+
+// The pool is indexed once a render (each project's lines by time, their paths parsed once); a reason's F-numbers and
+// file links must read as they did when each row filtered the whole pool. Lines of two projects share a path, one line
+// has no readable time and one is older than the others (no later finding can be the one it names). The expected
+// values were drawn by the panel before the index. Bug caught: a row that names a finding of the other project, of a
+// later time or of itself, or that loses one of its own project's.
+test('Declined: with lines of two projects, each row\'s F-number and file links are those drawn before the pool index', () => {
+  const A = 'https://github.com/example/sample-project', B = 'https://github.com/example/other-project';
+  const F = [{ n: 1, finding: '[P1] a.txt:2 reads the old word. Proof: a.txt:2 still says it' }, { n: 2, finding: '[P2] lib/b.sh:9 drops the code. Proof: none' }];
+  const mk = (i, repo, url, over) => line({ repo, repoUrl: url, id: `d0000000000${i.toString(16)}`, time: iso(T0 - (20 - i) * 60000), card: `c${i}-${60 + i}`, issue: 60 + i, url: `${P}/${60 + i}`,
+    finding: `[P2] lib/b.sh:${i} finding ${i}. Proof: none`, why: 'F1 again', findings: F, ...over });
+  const w = boot();
+  const data = full();
+  data.panels.declined.data.lines = [
+    mk(1, 'sample', A, { finding: '[P1] lib/b.sh:9 first at nine. Proof: x' }),
+    mk(2, 'other', B, { finding: '[P1] lib/b.sh:9 other project at nine. Proof: x' }),
+    mk(3, 'sample', A, { finding: '[P2] lib/b.sh:9 second at nine. Proof: x' }),
+    mk(4, 'sample', A, { why: 'repeats the declined finding at `lib/b.sh:9`; F2 said it' }),
+    mk(5, 'other', B, { why: 'see `lib/b.sh:9` and F1, and `a.txt:2`', time: 'not a time' }),
+    mk(6, 'other', B, { why: 'see lib/b.sh:9 and F3' }),
+    mk(7, 'sample', A, { why: 'see `a.txt:2` and `lib/b.sh:9`; F1', by: 'code' }),
+    mk(8, 'sample', A, { why: 'later one at `lib/b.sh:9`', time: iso(T0 - 25 * 60000) }),
+  ].reverse();
+  data.panels.declined.data.rest = [];
+  deliver(w, data);
+  act(panel(w, 'declined'), 'list-all').click();
+  const drawn = Array.from(panel(w, 'declined').querySelectorAll('.rows > .row'), (r) => [r.querySelector('.title').textContent,
+    Array.from(r.querySelectorAll('a, .finding-ref'), (a) => [a.textContent, a.getAttribute('href'), a.title || null])]);
+  assert.deepEqual(drawn, [
+    ['[P2] lib/b.sh:8 finding 8. Proof: none', [
+      ['#68', `${P}/68`, null],
+      ['lib/b.sh:8', `${A}/blob/HEAD/lib/b.sh#L8`, null],
+      ['lib/b.sh:9', `${A}/blob/HEAD/lib/b.sh#L9`, 'F2, review round 2: [P2] lib/b.sh:9 drops the code.'],
+    ]],
+    ['[P2] lib/b.sh:7 finding 7. Proof: none', [
+      ['#67', `${P}/67`, null],
+      ['lib/b.sh:7', `${A}/blob/HEAD/lib/b.sh#L7`, null],
+      ['lib/b.sh:9', `${A}/blob/HEAD/lib/b.sh#L9`, '2 findings start at lib/b.sh:9: Declined on #63: [P2] lib/b.sh:9 second at nine. Declined on #61: [P1] lib/b.sh:9 first at nine.'],
+    ]],
+    ['[P2] lib/b.sh:6 finding 6. Proof: none', [
+      ['#66', `${P}/66`, null],
+      ['lib/b.sh:6', `${B}/blob/HEAD/lib/b.sh#L6`, null],
+      ['lib/b.sh:9', `${B}/blob/HEAD/lib/b.sh#L9`, '2 findings start at lib/b.sh:9: F2, review round 2: [P2] lib/b.sh:9 drops the code. Declined on #62: [P1] lib/b.sh:9 other project at nine.'],
+      ['F3', null, 'finding not found'],
+    ]],
+    ['[P2] lib/b.sh:5 finding 5. Proof: none', [
+      ['#65', `${P}/65`, null],
+      ['lib/b.sh:5', `${B}/blob/HEAD/lib/b.sh#L5`, null],
+      ['lib/b.sh:9', `${B}/blob/HEAD/lib/b.sh#L9`, 'F2, review round 2: [P2] lib/b.sh:9 drops the code.'],
+      ['F1', null, 'F1, review round 2: [P1] a.txt:2 reads the old word.'],
+    ]],
+    ['[P2] lib/b.sh:4 finding 4. Proof: none', [
+      ['#64', `${P}/64`, null],
+      ['lib/b.sh:4', `${A}/blob/HEAD/lib/b.sh#L4`, null],
+      ['lib/b.sh:9', `${A}/blob/HEAD/lib/b.sh#L9`, '3 findings start at lib/b.sh:9: F2, review round 2: [P2] lib/b.sh:9 drops the code. Declined on #63: [P2] lib/b.sh:9 second at nine. Declined on #61: [P1] lib/b.sh:9 first at nine.'],
+      ['F2', null, 'F2, review round 2: [P2] lib/b.sh:9 drops the code.'],
+    ]],
+    ['[P2] lib/b.sh:9 second at nine. Proof: x', [
+      ['#63', `${P}/63`, null],
+      ['lib/b.sh:9', `${A}/blob/HEAD/lib/b.sh#L9`, null],
+      ['F1', null, 'F1, review round 2: [P1] a.txt:2 reads the old word.'],
+    ]],
+    ['[P1] lib/b.sh:9 other project at nine. Proof: x', [
+      ['#62', `${P}/62`, null],
+      ['lib/b.sh:9', `${B}/blob/HEAD/lib/b.sh#L9`, null],
+      ['F1', null, 'F1, review round 2: [P1] a.txt:2 reads the old word.'],
+    ]],
+    ['[P1] lib/b.sh:9 first at nine. Proof: x', [
+      ['#61', `${P}/61`, null],
+      ['lib/b.sh:9', `${A}/blob/HEAD/lib/b.sh#L9`, null],
+      ['F1', null, 'F1, review round 2: [P1] a.txt:2 reads the old word.'],
+    ]],
+  ]);
 });

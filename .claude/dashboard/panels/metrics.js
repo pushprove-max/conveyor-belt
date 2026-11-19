@@ -34,7 +34,7 @@
     phoneFolded: true,  // a report: on a phone it starts as its heading (issue 413)
     projects: true,  // filtered to one project, its measurements alone, and its row beside the machine's in the side-by-side table
     // The tiles and charts always show; the rows are the recent cards under them.
-    rows: 8,
+    rows: 5, // the step of its lists of cards (ctx.more)
     // The live part holds the newest cards the snapshot keeps; the others of the 7 days come from the history, with
     // the machine's time to land, a median over every one of them.
     older: (d, o) => Object.assign({}, d, {

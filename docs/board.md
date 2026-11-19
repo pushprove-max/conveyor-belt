@@ -73,6 +73,13 @@ its count: **Waiting on another card (N)** and **Built, waiting for your PROD de
 you click its heading. It stays open when the Board gets new data. The length of the panel counts only the issues
 that Conveyor builds next, so the two headings also show when a group is long.
 
+A long list in Needs you, Landed today, Declined, Cost or Metrics shows as many rows as the panel's length. Under the
+list are **Show 5 more** (the panel's length) and **Show all (N)**, where N is the number of items in the list. This is
+the one **Show all** of the panel. It also shows all of a panel that you made shorter with its lower edge. The panel's
+foot shows how many items it shows of all its items, for example "10 of 58". A batch of cards is one item. In Needs
+you and Declined, **Show 5 more** adds the new rows under the rows that you see, and those rows do not change: an
+F-number explanation that you opened in Declined stays open.
+
 A panel's head moves and collapses it, and its width menu sets it to Small, Wide or Full. Customize shows or hides
 each panel. It never hides Needs you.
 

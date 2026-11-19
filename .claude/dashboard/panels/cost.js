@@ -20,7 +20,7 @@ window.DASH_APP.panel({
   phoneFolded: true,  // a report: on a phone it starts as its heading (issue 413)
   projects: true,  // filtered to one project, its cards and its own figures (cards' byRepo); the sessions stay the machine's
   // The figures always show; the rows are the lists under them (the steps not priced, the cost per card).
-  rows: 8,
+  rows: 5, // the step of its per-card list (ctx.more)
   // The live part holds the newest card rows and unpriced steps the snapshot keeps; the others of the same day come
   // from the history.
   older(d, o) {

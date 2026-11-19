@@ -15,7 +15,7 @@ window.DASH_APP.panel({
   size: 'wide',
   tab: 'overview',
   projects: true,
-  rows: 6,
+  rows: 5, // the step of its list (ctx.more)
   // The live part holds the newest cards of the day the snapshot keeps; the others of the same day come from the
   // history, and every card is drawn newest first.
   older: (d, o) => (o.day !== d.day ? d : Object.assign({}, d, {

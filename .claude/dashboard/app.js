@@ -578,9 +578,12 @@
     if (value === undefined || value === '') delete kept[k]; else kept[k] = value;
     try { window.sessionStorage.setItem(KEPT_KEY, JSON.stringify({ login: keptLogin, items: kept })); } catch (e) { /* kept then for this page's life only */ }
   }
-  // A long list shows its first `size` items (5 unless said), then "Show <size> more" and "Show all (N)". show(items)
+  // A long list shows its first `size` items (ctx.more: the panel's length unless said; 5 for a panel of length 'all'),
+  // then "Show <size> more" and "Show all (N)". The box says how many items the list holds (data-items):
+  // the panel's foot counts them (clipPlan). show(items)
   // draws the items given; the control returned goes under them. The owner's choice is kept per list (key) through
-  // every redraw and a reload (keep, in scope); a list of `size` or fewer has no control. done() runs after a click. After
+  // every redraw and a reload (keep, in scope); a list of `size` or fewer has no control. done(kind) runs after a click
+  // ('more' or 'all'). After
   // "Show <size> more" the focus goes to the first new row: the item at the old length in the list just above the control.
   // A row in a closed group (a <details> the owner left closed) cannot take the focus: that group's heading takes it.
   const PAGE = 5;
@@ -594,6 +597,7 @@
     const step = size || PAGE, n = items.length;
     const box = h('div', 'show-more'), next = h('button', 'btn btn-quiet'), all = h('button', 'btn btn-quiet');
     box.dataset.list = key;
+    box.dataset.items = String(n);
     next.type = 'button'; next.dataset.act = 'list-more';
     all.type = 'button'; all.dataset.act = 'list-all';
     const shown = () => { const want = pageOf(scope, key) || step; return want === 'all' ? n : Math.min(n, want); };
@@ -606,7 +610,7 @@
     };
     next.addEventListener('click', () => {
       const was = shown();
-      keep('pages', scope, key, was + step); paint(); if (done) done();
+      keep('pages', scope, key, was + step); paint(); if (done) done('more');
       let row = rowsAbove(box)[was];
       for (let g = row && row.parentElement.closest('details:not([open])'); g; g = g.parentElement && g.parentElement.closest('details:not([open])')) {
         const head = g.querySelector(':scope > summary');
@@ -614,7 +618,7 @@
       }
       if (row) { if (row.matches('li') && !row.hasAttribute('tabindex')) row.tabIndex = -1; row.focus(); }
     });
-    all.addEventListener('click', () => { keep('pages', scope, key, 'all'); paint(); if (done) done(); });
+    all.addEventListener('click', () => { keep('pages', scope, key, 'all'); paint(); if (done) done('all'); });
     box.append(next, all);
     paint();
     return box;
@@ -1331,21 +1335,40 @@
   // A row inside a closed group (a <details> not open, as the Board's long Held groups start) is not drawn: its box
   // is empty, so it is not counted, nor measured to as the last row shown.
   const shownOnly = (els) => Array.from(els).filter((r) => !r.closest('[hidden], details:not([open]) > :not(summary)'));
+  // A panel with a shared long list (ctx.more) counts its items: a row inside a row (the cards of a batch, a project's
+  // changes in Release) is part of that row, not a row of the panel.
   const rowsOf = (p) => {
-    const rows = shownOnly(p.body.querySelectorAll(p.mod.rowSelector || ROW_SEL));
+    const all = Array.from(p.body.querySelectorAll(p.mod.rowSelector || ROW_SEL));
+    const rows = shownOnly(listsOf(p).length ? all.filter((r) => !inRow(p, r)) : all);
     return rows.length ? rows : shownOnly(p.body.children);
   };
-  const wantOf = (p) => { const v = layouts[tabOf(p.mod.id)].lengths[p.mod.id]; return v === undefined ? p.mod.rows : v; };
+  const inRow = (p, el) => !!(el.parentElement && el.parentElement.closest(p.mod.rowSelector || ROW_SEL));
+  // A panel with a shared long list (ctx.more) is not cut by default: that list is its length control (clipPlan).
+  const listsOf = (p) => Array.from(p.body.querySelectorAll('.show-more[data-items]'));
+  const lengthOf = (p) => (listsOf(p).length ? 'all' : p.mod.rows);
+  const wantOf = (p) => { const v = layouts[tabOf(p.mod.id)].lengths[p.mod.id]; return v === undefined ? lengthOf(p) : v; };
   // Cuts the body to its length: past it the body scrolls (the head stays), and the foot says how many rows there are
   // in all, with the one control to show all of them (or, when all are shown past the default, to show fewer).
   // In three parts, so that arrange() can measure every panel before it writes to any (one layout, not one a panel):
   // clipPlan reads no layout, clipMeasure only reads it, clipApply only writes.
+  // A panel with a shared long list (ctx.more) has that list's "Show <n> more" and "Show all (N)" as its one length
+  // control: it is cut only at a length the owner set (its edge), never at its default, and its foot has no Show all
+  // while a list of its own rows shows its own, only "<shown> of <total>" in items (rowsOf), the items its lists hold
+  // back included. A list inside a row (a project's changes in Release) is part of that row: its Show all shows the
+  // rest of that list, not of the panel.
   function clipPlan(p) {
-    const id = p.mod.id, want = wantOf(p), l = layouts[tabOf(id)];
+    const id = p.mod.id, l = layouts[tabOf(id)], want = wantOf(p);
     const open = p.state === 'ready' && !l.collapsed.includes(id) && !p.body.hidden;
     const rows = open ? rowsOf(p) : [];
     const n = rows.length, limit = want === 'all' ? n : Math.min(n, want);
-    return { want, open, rows, n, limit, cut: n > limit, max: '' };
+    const all = listsOf(p), lists = all.filter((b) => !inRow(p, b));
+    let total = null;
+    if (all.length) {
+      // Every item drawn (in a closed group too) and every item a list of the panel's rows holds back.
+      const drawn = open ? Array.from(p.body.querySelectorAll(p.mod.rowSelector || ROW_SEL)).filter((r) => !inRow(p, r)).length || n : 0;
+      total = open ? drawn + lists.reduce((s, b) => s + Math.max(0, Number(b.dataset.items) - rowsAbove(b).length), 0) : 0;
+    }
+    return { want, open, rows, n, limit, total, listCtl: lists.some((b) => !b.hidden), cut: n > limit, max: '' };
   }
   function clipMeasure(p, c) {
     if (!c.cut) return;
@@ -1359,17 +1382,26 @@
     clipMeasure(p, c);
     clipApply(p, c);
   }
-  function clipApply(p, { want, open, n, limit, cut, max }) {
+  function clipApply(p, { want, open, n, limit, total, listCtl, cut, max }) {
     p.body.classList.toggle('scrolls', cut);
     p.body.style.maxHeight = max;
     p.el.dataset.rows = String(n);
     p.el.dataset.length = String(want);
-    const more = want === 'all' && p.mod.rows !== 'all' && n > p.mod.rows;
-    p.rowsNote.textContent = cut ? `${limit} of ${n}` : more ? `All ${n}` : '';
-    p.showAll.hidden = !cut && !more;
-    p.showAll.textContent = cut ? 'Show all' : 'Show fewer';
-    p.showAll.setAttribute('aria-label', cut ? `Show all ${n} rows of ${p.mod.title}` : `Show the first ${p.mod.rows} rows of ${p.mod.title}`);
-    p.foot.hidden = !cut && !more;
+    if (total !== null) {
+      p.rowsNote.textContent = open && limit < total ? `${limit} of ${total}` : '';
+      // Cut at its edge with every list shown whole: the foot's Show all is then the one that shows the rest.
+      p.showAll.hidden = !cut || listCtl;
+      p.showAll.textContent = 'Show all';
+      p.showAll.setAttribute('aria-label', `Show all ${total} rows of ${p.mod.title}`);
+      p.foot.hidden = !p.rowsNote.textContent && p.showAll.hidden;
+    } else {
+      const more = want === 'all' && p.mod.rows !== 'all' && n > p.mod.rows;
+      p.rowsNote.textContent = cut ? `${limit} of ${n}` : more ? `All ${n}` : '';
+      p.showAll.hidden = !cut && !more;
+      p.showAll.textContent = cut ? 'Show all' : 'Show fewer';
+      p.showAll.setAttribute('aria-label', cut ? `Show all ${n} rows of ${p.mod.title}` : `Show the first ${p.mod.rows} rows of ${p.mod.title}`);
+      p.foot.hidden = !cut && !more;
+    }
     p.grip.hidden = !open || n === 0;
     p.grip.setAttribute('aria-valuemin', '1');
     p.grip.setAttribute('aria-valuemax', String(Math.max(1, n)));
@@ -1378,7 +1410,7 @@
   }
   function setLength(p, v, message) {
     const id = p.mod.id, l = layouts[tabOf(id)];
-    change(() => { if (v === p.mod.rows) delete l.lengths[id]; else l.lengths[id] = v; }, message);
+    change(() => { if (v === lengthOf(p)) delete l.lengths[id]; else l.lengths[id] = v; }, message);
   }
   // By keyboard: up a row shorter, down a row longer (to all at the last), Page Up and Down five, Home one, End all.
   function lengthKey(p, e) {
@@ -1933,8 +1965,17 @@
       relength() { clip(p); arrangeSoon(); },
       // redraw(): the panel drawn again from the part it has, its count too (what the owner did changed what it shows).
       redraw() { p.json = undefined; if (last) draw(p, last.panels[partOf(mod.id)]); arrangeSoon(); },
-      // more(key, items, show, size): the shared long list (see more above), kept per panel and key.
-      more: (key, items, show, size) => more(`${mod.id}:${key}`, items, show, size, () => { clip(p); arrangeSoon(); }, keptScope(mod)),
+      // more(key, items, show, size): the shared long list (see more above), kept per panel and key. Its step is the
+      // panel's length (mod.rows) unless size says another; the list is then the panel's one length control (clipPlan).
+      // The Show all of a list of the panel's rows shows all of the panel too: a length the owner set (its edge) goes
+      // back to the default, all. That of a list inside a row (a project's changes in Release) shows that list only.
+      more: (key, items, show, size) => {
+        const box = more(`${mod.id}:${key}`, items, show, size || (mod.rows === 'all' ? PAGE : mod.rows), (kind) => {
+          if (kind === 'all' && !inRow(p, box) && layouts[tabOf(mod.id)].lengths[mod.id] !== undefined) setLength(p, 'all', `${title} shows all its rows`);
+          else { clip(p); arrangeSoon(); }
+        }, keptScope(mod));
+        return box;
+      },
       // kept(kind, name) and keep(kind, name, value): what a reload keeps (see keep above). Kind 'draft' is one for
       // every project (its name names the record); any other kind is kept by the project the panel shows (keptScope).
       kept: (kind, name) => keptGet(kind, kind === 'draft' ? '' : keptScope(mod), name),

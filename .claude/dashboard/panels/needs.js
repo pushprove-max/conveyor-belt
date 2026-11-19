@@ -100,7 +100,7 @@ window.DASH_APP.panel({
   projects: true,
   // What stops the loop for the owner is never hidden: a browser that hid it would miss every block.
   alwaysShown: true,
-  rows: 6,
+  rows: 5, // the step of its blocked list (ctx.more)
   // The Overview tab's count ("Overview · 4"): the cards stopped for the owner, as the head's Needs you tile counts
   // them (head.js), so the two never disagree.
   attention: (d) => (d.cards && Array.isArray(d.cards.waiting) && Array.isArray(d.cards.blocked) ? d.cards.waiting.length + d.cards.blocked.length : 0),  count(d) {

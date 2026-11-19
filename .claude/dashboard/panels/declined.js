@@ -43,8 +43,14 @@
     return ctx.sorted() ? all.sort((a, b) => (a.repo < b.repo ? -1 : a.repo > b.repo ? 1 : 0)) : all;
   };
   const open = (x) => !x.dismissed && typeof x.built !== 'number';
+  // Each pattern is made once, not once a row or a reference.
+  const FIRST_RE = /^.*?[.!?](?=\s|$)/;
+  const HEAD_RE = /^(\[P([0-9])\])(\s+)((?:\[[A-Za-z]+[0-9]+\]\s+)*)(\S+?:[0-9]+(?:[–-][0-9]+)?)(\s+)([\s\S]*)$/;
+  const CLAIM_RE = /^\S[\s\S]*?(?:[.!?](?=\s|$)|$)\s*/;
+  const FREF_RE = /\bF([0-9]+)\b/g; // matchAll works on a copy, so its lastIndex is never shared
+  const SPECIAL_RE = /[.*+?^${}()|[\]\\]/g;
   // A finding's first sentence: its level, file and line lead it.
-  const first = (s) => { const m = /^.*?[.!?](?=\s|$)/.exec(s); return m ? m[0] : s; };
+  const first = (s) => { const m = FIRST_RE.exec(s); return m ? m[0] : s; };
   // The text formatting every panel shares (app.js, findingText): the sentences, the code spans and the links to a
   // file's line, in the line's repository (repoUrl: a main-red fix card has no issue url).
   const T = window.DASH_APP.text;
@@ -60,7 +66,7 @@
     const box = h('div', 'title declined-finding');
     const fill = (el, s) => T.fill(el, s, x.repoUrl, known, 'declined');
     // A review's id for the finding ("[E1]", "[F2]"), when it has one, stands between the level and the file.
-    const m = /^(\[P([0-9])\])(\s+)((?:\[[A-Za-z]+[0-9]+\]\s+)*)(\S+?:[0-9]+(?:[–-][0-9]+)?)(\s+)([\s\S]*)$/.exec(text);
+    const m = HEAD_RE.exec(text);
     if (!m) { fill(box, text); return box; }
     const head = h('div', 'declined-head');
     const badge = h('span', 'declined-level', m[1]);
@@ -73,7 +79,7 @@
     // "Proof:" outside backticks splits the claim (and what follows it) from the proof.
     const { at: cut, label } = T.proofAt(rest);
     const said = cut < 0 ? rest : rest.slice(0, cut), proof = cut < 0 ? '' : rest.slice(cut + label.length);
-    const claim = /^\S[\s\S]*?(?:[.!?](?=\s|$)|$)\s*/.exec(said)?.[0] || said; // the first sentence, its space kept
+    const claim = CLAIM_RE.exec(said)?.[0] || said; // the first sentence, its space kept
     if (claim) { const b = h('strong', 'declined-claim'); fill(b, claim); box.append(b); }
     if (said.length > claim.length) { const r = h('div', 'declined-more'); fill(r, said.slice(claim.length)); box.append(r); }
     if (cut >= 0) {
@@ -94,18 +100,40 @@
   // of another review or card of the project starts with (pool: every line of the list) says that finding and its
   // card; when several findings start there, it says each of them. An F<n> whose finding is not found is left as written, with "finding not found" on hover. The text is never
   // changed.
+  // One index of the pool a render: each project's lines with a finding and a readable time, newest first (the pool's
+  // order kept between lines of one time), each with its time and the paths its finding names, parsed once; and the
+  // pattern of each `file:line` a reason names, made once (at).
+  const indexOf = (pool) => {
+    const by = new Map();
+    pool.forEach((y) => {
+      if (!y || typeof y.finding !== 'string') return;
+      const t = Date.parse(y.time);
+      if (Number.isNaN(t)) return;
+      if (!by.has(y.repo)) by.set(y.repo, []);
+      by.get(y.repo).push({ y, t, k: key(y), paths: pathsIn(y.finding) });
+    });
+    by.forEach((es) => es.sort((a, b) => b.t - a.t));
+    const ats = new Map();
+    const at = (place) => {
+      if (!ats.has(place)) ats.set(place, new RegExp(`^\\[P[0-9]\\]\\s+${place.replace(SPECIAL_RE, '\\$&')}\\b(?![-–])`));
+      return ats.get(place);
+    };
+    return { by, at };
+  };
   // The project's other lines declined by the time x's reason was written (kin), and the paths the line's findings and
-  // reasons name (known, for the links to a file's line).
-  const near = (x, pool) => {
+  // reasons name (known, for the links to a file's line), read from the render's index.
+  const near = (x, ix) => {
     // Only a finding declined by the time the reason was written can be the one it names; a line with no readable
     // time is not known to be earlier.
-    const when = Date.parse(x.time);
-    const kin = pool.filter((y) => y && y.repo === x.repo && typeof y.finding === 'string' && key(y) !== key(x)
-      && Date.parse(y.time) <= when);
-    const known = new Set([x.finding, x.why].concat(Array.isArray(x.findings) ? x.findings.map((y) => y && y.finding) : [], kin.map((y) => y.finding)).flatMap(pathsIn));
-    return { kin, known };
+    const when = Date.parse(x.time), es = ix.by.get(x.repo) || [], k = key(x);
+    // Newest first: the first line at or before `when`, and every one after it.
+    let lo = 0, hi = es.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (es[mid].t > when) lo = mid + 1; else hi = mid; }
+    const ks = Number.isNaN(when) ? [] : es.slice(lo).filter((e) => e.k !== k);
+    const own = [x.finding, x.why].concat(Array.isArray(x.findings) ? x.findings.map((y) => y && y.finding) : []).flatMap(pathsIn);
+    return { kin: ks.map((e) => e.y), known: new Set(own.concat(...ks.map((e) => e.paths))), at: ix.at };
   };
-  const why = (x, h, { kin, known }) => {
+  const why = (x, h, { kin, known, at: atOf }) => {
     const text = x.why || 'no reason given';
     const box = h('div', 'reason why-block');
     box.dataset.by = WHO[x.by] ? x.by : 'none';
@@ -129,7 +157,7 @@
     const refsIn = (line, s) => {
       if (x.by !== 'judge') { line.append(s); return; }
       let at = 0;
-      for (const m of s.matchAll(/\bF([0-9]+)\b/g)) {
+      for (const m of s.matchAll(FREF_RE)) {
         line.append(s.slice(at, m.index));
         at = m.index + m[0].length;
         const f = judged ? x.findings.find((y) => y && y.n === Number(m[1]) && typeof y.finding === 'string') : null;
@@ -146,7 +174,7 @@
       const code = (s) => {
         const { el: a, to } = codeEl(x, s, known, 'why');
         if (!to) { line.append(a); return; }
-        const at = new RegExp(`^\\[P[0-9]\\]\\s+${to.at.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b(?![-–])`);
+        const at = atOf(to.at);
         // Every finding that starts there, not only the first found: two findings can start at the same line, and the
         // text alone does not say which one the reason means.
         const fs = judged ? x.findings.filter((y) => y && Number.isInteger(y.n) && typeof y.finding === 'string' && y.finding !== x.finding && at.test(y.finding)) : [];
@@ -174,7 +202,7 @@
     tab: 'overview',
     projects: true,
     declinedOf: 'declined',
-    rows: 6,
+    rows: 5, // the step of its list (ctx.more)
     // The live part's rest holds the newest lines the snapshot keeps; the others come from the history.
     older: (d, o) => Object.assign({}, d, { rest: window.DASH_APP.joined(d.rest, o.rest, key) }),
     count: (d) => shown(d).length,
@@ -184,7 +212,8 @@
     render(el, d, ctx) {
       const h = ctx.h;
       const ul = h('ul', 'rows');
-      const pool = d.lines.concat(d.rest || []); // every line, for a reason that names a finding of another card
+      // Every line, for a reason that names a finding of another card: indexed once a render, read by each row (near).
+      const ix = indexOf(d.lines.concat(d.rest || []));
       // Marks lines dismissed on the host, one request a project of at most DISMISS_MAX lines (more lines, more
       // requests); then the panel is drawn again without them.
       const dismiss = (xs, done) => {
@@ -208,7 +237,7 @@
         const head = h('div', 'row-main');
         head.append(ctx.issueLink(x));
         if (done) head.append(h('span', 'chip chip-quiet done-tag', done));
-        const ns = near(x, pool);
+        const ns = near(x, ix);
         head.append(findingEl(h, x, ns.known));
         const meta = h('p', 'row-meta');
         meta.append(ctx.tag(x.repo), h('span', null, `declined by ${WHO[x.by] || 'no one named'}`), ctx.since(x.time, ' ago'));
@@ -322,8 +351,9 @@
       else { const b = btn('Show every line', 'declined-all', true); b.addEventListener('click', () => go('all')); bar.append(b); }
       if (view && view !== 'all') { const b = btn('Back to the list', 'declined-list', true); b.addEventListener('click', () => go(null)); bar.append(' ', b); }
       bar.append(' ', said0);
-      // The collector gives them newest first.
-      el.replaceChildren(bar, ul, ctx.more(view ? `declined:${view}` : 'declined', lines, (ls) => { drawn = ls; ul.replaceChildren(...ls.map(row)); drawAll(); }));
+      // The collector gives them newest first. A row is kept by its line (repo:id): "Show 5 more" adds the new rows
+      // under the ones shown, which keep their focus and an open F-number explanation.
+      el.replaceChildren(bar, ul, ctx.more(view ? `declined:${view}` : 'declined', lines, (ls) => { drawn = ls; ctx.list(ul, ls, key, row); drawAll(); }));
     },
     // Each second: an unchanged snapshot does not draw the panel again, so the clock moves "Expires in" on. A line that
     // comes within 2 days of leaving, or past it, has the panel drawn again (its note comes or goes); else the text counts.

@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { VIEW, read, html, LIST, panelState, PANEL_STATES, PANEL_DRAWN, CONTROL_IDS, RULES_IDS, titleOf, BELT3D_IDS, OVERVIEW, boot, $, panel, state, order, deliver, full, SAYS, cases, caseNames } from './dashboard-view.helpers.mjs';
+import { VIEW, read, html, LIST, panelState, PANEL_STATES, PANEL_DRAWN, CONTROL_IDS, RULES_IDS, titleOf, BELT3D_IDS, OVERVIEW, boot, $, panel, state, order, deliver, full, SAYS, cases, caseNames, moreText, act, key, next } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 
@@ -60,10 +60,12 @@ test('each panel states its tab and its default length: about 5 to 8 rows for a 
       stated[id] = [tab, length === 'all' ? 'all' : Number(length)];
     }
   }
+  // A panel with a shared long list (needs, landed, declined, cost, metrics) is not cut at a length: its list shows
+  // the panel's length (5) and then "Show 5 more", so the panel's own cut is 'all'.
   assert.deepEqual(stated, {
     machine: ['control', 'all'], 'board-loop': ['control', 'all'], 'board-push': ['control', 'all'], board: ['control', 'all'],
-    rules: ['rules', 'all'], 'rules-produce': ['rules', 'all'], 'rules-prices': ['rules', 'all'], 'rules-held': ['rules', 'all'], 'rules-issues': ['rules', 'all'], needs: ['overview', 6], belt: ['overview', 5], belt3d: ['belt3d', 'all'], tests: ['tests', 'all'], bench: ['bench', 'all'], queue: ['overview', 8], landed: ['overview', 6], release: ['overview', 'all'], declined: ['overview', 6],
-    health: ['overview', 'all'], lanes: ['overview', 'all'], cost: ['overview', 8], metrics: ['overview', 8],
+    rules: ['rules', 'all'], 'rules-produce': ['rules', 'all'], 'rules-prices': ['rules', 'all'], 'rules-held': ['rules', 'all'], 'rules-issues': ['rules', 'all'], needs: ['overview', 'all'], belt: ['overview', 5], belt3d: ['belt3d', 'all'], tests: ['tests', 'all'], bench: ['bench', 'all'], queue: ['overview', 8], landed: ['overview', 'all'], release: ['overview', 'all'], declined: ['overview', 'all'],
+    health: ['overview', 'all'], lanes: ['overview', 'all'], cost: ['overview', 'all'], metrics: ['overview', 'all'],
   });
   for (const [id, [, rows]] of Object.entries(stated)) if (rows !== 'all') assert.ok(rows >= 5 && rows <= 8, `${id} shows ${rows} rows by default`);
 });
@@ -91,6 +93,107 @@ test('a panel that throws shows its own error and takes no other panel with it',
   assert.match(panel(w, 'boom').textContent, /The Board could not draw BoomReload the page to draw it again\./);
   assert.equal(panel(w, 'boom').querySelector('.state-detail').dataset.tip, 'Details: kaput');
   assert.equal(state(w, 'belt'), 'ready');
+});
+
+// Bug: a panel with a shared long list had two Show all controls (the list's and its foot's), its foot counted the
+// rows drawn ("3 of 5") rather than the items, and the list's step (5) was not the panel's length.
+test('a panel whose list uses ctx.more: the step is its length, its foot has no Show all and counts every item', () => {
+  const extra = `window.DASH_APP.panel({ id: 'longs', title: 'Longs', rows: 3, isEmpty: () => false, empty() {}, error() {},
+    render(el, d, ctx) { const ul = ctx.h('ul', 'rows'); el.replaceChildren(ul, ctx.more('items', d.items, (xs) => ctx.list(ul, xs, String, (x) => ctx.h('li', 'row', x)))); } });`;
+  const w = boot({ list: ['belt', 'longs'], extra });
+  const data = full();
+  data.panels.longs = { error: null, data: { items: Array.from({ length: 20 }, (_, i) => `item ${i}`) } };
+  deliver(w, data);
+  const p = panel(w, 'longs'), rows = () => p.querySelectorAll('.rows > li').length;
+  const foot = () => [p.querySelector('.panel-foot').hidden, p.querySelector('.panel-rows').textContent, p.querySelector('.panel-foot .show-all').hidden];
+  assert.equal(rows(), 3, 'the panel length, 3, is the first page');
+  assert.deepEqual(moreText(p), ['Show 3 more', 'Show all (20)'], 'and the step');
+  assert.deepEqual(foot(), [false, '3 of 20', true], 'the foot counts the 20 items and has no Show all of its own');
+  act(p, 'list-more').click();
+  assert.equal(rows(), 6);
+  assert.equal(p.querySelector('.scrolls'), null, 'the rows the list shows are not cut at the panel length');
+  assert.deepEqual(foot(), [false, '6 of 20', true]);
+  act(p, 'list-all').click();
+  assert.equal(rows(), 20);
+  assert.equal(p.querySelector('.panel-foot').hidden, true, 'all shown: nothing to count or show');
+});
+
+// Bug: with a length the owner set (Home on the handle), the list's Show all showed the list whole but left the panel
+// cut at one row, "1 of 20", and with the list's controls gone the panel had no Show all at all.
+test('a panel whose list uses ctx.more, cut at a length the owner set: the list\'s Show all shows the whole panel', () => {
+  const extra = `window.DASH_APP.panel({ id: 'longs', title: 'Longs', rows: 3, isEmpty: () => false, empty() {}, error() {},
+    render(el, d, ctx) { const ul = ctx.h('ul', 'rows'); el.replaceChildren(ul, ctx.more('items', d.items, (xs) => ctx.list(ul, xs, String, (x) => ctx.h('li', 'row', x)))); } });`;
+  const w = boot({ list: ['belt', 'longs'], extra });
+  const data = full();
+  data.panels.longs = { error: null, data: { items: Array.from({ length: 20 }, (_, i) => `item ${i}`) } };
+  deliver(w, data);
+  const p = panel(w, 'longs'), footAll = p.querySelector('.panel-foot .show-all');
+  key(w, p.querySelector('.panel-length'), 'Home');
+  assert.equal(p.querySelector('.panel-rows').textContent, '1 of 20', 'cut at one row');
+  assert.equal(footAll.hidden, true, 'the list\'s Show all is the one shown');
+  act(p, 'list-all').click();
+  assert.equal(p.querySelector('.scrolls'), null, 'the panel is no longer cut');
+  assert.equal(p.querySelector('.panel-foot').hidden, true, 'all 20 shown');
+  // Cut again with the list whole: the foot's Show all is then the panel's one Show all.
+  key(w, p.querySelector('.panel-length'), 'Home');
+  assert.deepEqual([p.querySelector('.panel-rows').textContent, footAll.hidden, p.querySelectorAll('.show-more:not([hidden])').length], ['1 of 20', false, 0]);
+  footAll.click();
+  assert.equal(p.querySelector('.scrolls'), null);
+});
+
+// Bug: the foot counted every row drawn, nested ones too: a batch of eight cards counted eight ("13 of 14" beside
+// "Show all (6)"), and a closed list inside a row (Release's changes) added its items ("1 of 3" with all shown).
+test('a panel whose list uses ctx.more counts an item with rows in it once, and a list inside a row as part of that row', () => {
+  const extra = `window.DASH_APP.panel({ id: 'longs', title: 'Longs', rows: 3, isEmpty: () => false, empty() {}, error() {},
+    render(el, d, ctx) {
+      const h = ctx.h, top = h('ul', 'rows'), row = h('li', 'row', 'project'), det = h('details'), inner = h('ul', 'rows');
+      det.append(h('summary', null, 'changes'), inner, ctx.more('changes', ['c1', 'c2', 'c3'], (xs) => inner.replaceChildren(...xs.map((x) => h('li', 'row', x))), 1));
+      row.append(det); top.append(row);
+      const ul = h('ul', 'rows');
+      const item = (x) => { if (!Array.isArray(x)) return h('li', 'row', x); const li = h('li', 'row batch'), u = h('ul', 'rows'); u.append(...x.map((c) => h('li', 'row', c))); li.append(u); return li; };
+      el.replaceChildren(top, ul, ctx.more('items', d.items, (xs) => ul.replaceChildren(...xs.map(item))));
+    } });`;
+  const w = boot({ list: ['belt', 'longs'], extra });
+  const data = full();
+  data.panels.longs = { error: null, data: { items: [['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7', 'a8'], 'b1', 'b2', 'b3', 'b4', 'b5'] } };
+  deliver(w, data);
+  const p = panel(w, 'longs');
+  // The project row and the first 3 of the 6 items: the batch, b1 and b2.
+  assert.equal(p.querySelector('.panel-rows').textContent, '4 of 7');
+  p.querySelector('[data-list="longs:items"] [data-act="list-all"]').click();
+  assert.equal(p.querySelector('.panel-foot').hidden, true, 'every item shown: no count');
+});
+
+// Bug: a panel whose only list is inside a row (Release: a project's changes) counted the changes as its rows: cut at
+// one row by Home, its foot said "1 of 21" for one project, with a Show all beside the list's Show all (26). And the
+// list's Show all, which shows that project's changes, cleared the length the owner set for the whole panel.
+test('a panel whose only ctx.more list is inside a row counts its rows, not the list\'s, and that list\'s Show all keeps the panel\'s length', () => {
+  const extra = `window.DASH_APP.panel({ id: 'longs', title: 'Longs', rows: 3, isEmpty: () => false, empty() {}, error() {},
+    render(el, d, ctx) {
+      const h = ctx.h, top = h('ul', 'rows');
+      for (const name of d.projects) {
+        const row = h('li', 'row', name), inner = h('ul', 'rows');
+        row.append(inner, ctx.more(\`changes:\${name}\`, d.changes, (xs) => inner.replaceChildren(...xs.map((x) => h('li', 'row', x))), 10));
+        top.append(row);
+      }
+      el.replaceChildren(top);
+    } });`;
+  const w = boot({ list: ['belt', 'longs'], extra });
+  const data = full();
+  data.panels.longs = { error: null, data: { projects: ['one'], changes: Array.from({ length: 26 }, (_, i) => `change ${i}`) } };
+  deliver(w, data);
+  const p = panel(w, 'longs'), foot = p.querySelector('.panel-foot');
+  p.querySelector('[data-act="list-more"]').click();
+  key(w, p.querySelector('.panel-length'), 'Home');
+  assert.deepEqual([foot.hidden, p.querySelector('.panel-rows').textContent], [true, ''], 'one project, shown: nothing to count or show');
+  // Two projects, cut at one: the foot counts the projects, and its Show all is the one that shows the second.
+  data.panels.longs.data.projects = ['one', 'two'];
+  next(w, data);
+  key(w, p.querySelector('.panel-length'), 'Home');
+  assert.deepEqual([p.querySelector('.panel-rows').textContent, p.querySelector('.panel-foot .show-all').hidden], ['1 of 2', false]);
+  p.querySelector('[data-list="longs:changes:one"] [data-act="list-all"]').click();
+  assert.equal(p.querySelector('.panel-rows').textContent, '1 of 2', 'the panel stays at the length the owner set');
+  assert.ok(p.querySelector('.scrolls'));
 });
 
 // ---- each panel: data, empty, failed to load; the second half is in dashboard-view.page-states ----
