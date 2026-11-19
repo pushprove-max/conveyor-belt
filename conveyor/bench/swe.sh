@@ -344,7 +344,8 @@ swe_held() { { [ -n "$1" ] && swe_guarded; } || { [ -n "$2" ] && swe_guarded 1; 
 # engine's uses) or nothing, for an arm with no Claude login (Codex alone): the Claude guard does not hold it.
 swe_guards() { jq -r 'if .kind == "conveyor" then "conveyor" elif (.login // [] | index("claude")) then "agent" else empty end' <<<"$1"; } # <arm json>
 # A run: the first n tasks, each built by every arm in turn, so a run stopped early has compared the arms on the same
-# tasks. Each arm is picked only once its preflight passed (swe_ready).
+# tasks. Each arm is picked only once its preflight passed (swe_ready) and, for a conveyor arm, the area rule files
+# its cards of these tasks read are there (swe_taskrules).
 swe_run() { # <n> <engine> <arm>...
   local n=$1 eng0=$2 tf all i t id r x a l gc='' ga='' why ctxs=() specs=() plan='[]' ra tag
   shift 2
@@ -381,7 +382,8 @@ swe_run() { # <n> <engine> <arm>...
   trap 'pkill -TERM -P $$ 2>/dev/null; swe_end stopped; exit 143' TERM INT
   for x in "${ctxs[@]}"; do
     swe_use "$x"
-    why=$(swe_ready "$SWE_ARMJ" "$SWE_KEY" "$(head -n 1 "$tf" | jq -r .image)" "$SWE_ENG")
+    why=''; [ "$SWE_KIND" != conveyor ] || why=$(head -n "$n" "$tf" | swe_taskrules "$SWE_ARMJ")
+    [ -n "$why" ] || why=$(swe_ready "$SWE_ARMJ" "$SWE_KEY" "$(head -n 1 "$tf" | jq -r .image)" "$SWE_ENG")
     [ -z "$why" ] || { why="the arm $SWE_ARM cannot run: its preflight failed: $why. \`conveyor.sh bench swe arms check $SWE_ARM\` runs it again."
       echo "conveyor: $why" >&2; swe_live --arg w "$why" '.why = $w' > /dev/null; trap - TERM INT; swe_end refused; return 1; }
     ra=0; while IFS= read -r id; do [ ! -s "$SWE_DIR/results/$SWE_KEY/$id.json" ] || ra=$((ra + 1)); done < <(head -n "$n" "$tf" | jq -r .id)

@@ -190,9 +190,13 @@ swerulesarm() {
 # its issue names. Bug: a saved arm could not turn the judge off or set the finding priorities, so the host's always
 # stood, and its own judgeAlways list did not replace the host's ["P3"]. The arm is a saved one (the Board's form),
 # Claude builds at high effort and Codex reviews, on the project's rules, with the judge off, P3 findings off and
-# "style" the judge's one always-accepted kind; P2, which it leaves out, is the project's.
+# "style" the judge's one always-accepted kind; P2, which it leaves out, is the project's. Bug (#703): the arm was
+# refused when an area rule file was missing that no card of the run reads; the pack also maps gone/* to a file that
+# is not there, a path neither the preflight task nor the task run names, so the run goes on and its pack maps no
+# area to that file.
 t_swerules() {
   swerulesarm; local out r id
+  tune '.areas["gone/*"] = "rules/gone.md"' || fail "the absent area rule was not mapped"
   id=$(loop bench swe arms save 'Project rules' '{"kind":"conveyor","seats":{"model":{"cli":"claude","model":"m","effort":"high"},"reviewer":{"cli":"codex","model":"x"}},"rules":"project","policy":{"judgeOn":false,"judgeAlways":["style"],"P3":false}}' 2>&1) \
     || fail "the arm was not saved: $id"
   out=$(loop bench swe 1 --arm "$id" --engine v1.0.0 2>&1) || fail "the run failed: $out"
@@ -203,6 +207,7 @@ t_swerules() {
   r=$(cat "$SWE_FX/rules.seen")
   [[ $r == "$(cat "$SRC/rules/card-core.md")"* ]] && [[ $r == *PACK-CARD-RULE* ]] && [[ $r == *AREA-RULE-X* ]] && [[ $r != *AREA-RULE-OTHER* ]] \
     || fail "the card's rules are not the core rules, the project's card rules and the area rule of x.py alone: $r"
+  jq -e '.areas | keys == ["x.py"]' "$SWE_FX/pack.seen" > /dev/null || fail "the card's pack maps an area its task does not name: $(jq -c .areas "$SWE_FX/pack.seen")"
 }
 
 # Bug: an arm that takes the project's rules ran with one of them missing, so its cards built on fewer rules than the

@@ -175,29 +175,59 @@ swe_in() { # <seconds> <container> <folder> <script> [<NAME=value> ...]
   for x in "$@"; do e+=(-e "$x"); done
   timeout "$t" docker exec -i -w "$w" "${e[@]}" "$c" bash -c 'export PATH="$HOME/.local/bin:${SWE_SB:+$SWE_SB/bin:}$PATH"; '"$s"
 }
+# The areas of the project's pack whose rule a task's card reads: each "<glob>\t<rule file>" the pack's areas map, by
+# path glob, to a path the task's issue names (the sandbox's issue #1, swe_sandbox: its title and body), scanned as
+# cardrules() scans an issue, in the pack's order. Fails when the pack cannot be read.
+swe_arearules() { # <task json>
+  local a g f x ps
+  packget areas a || return 1
+  mapfile -t ps < <(jq -r '["SWE-bench \(.id)", .issue] | map(strings) | join("\n") | scan("[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*/?")' <<<"$1")
+  while IFS=$'\t' read -r g f; do
+    # shellcheck disable=SC2053 # $g is the area's path glob: matched as a pattern, as cardrules() matches it
+    for x in "${ps[@]}"; do [[ $x == $g ]] && { printf '%s\t%s\n' "$g" "$f"; break; }; done
+  done < <([ -z "$a" ] || jq -r 'to_entries[] | "\(.key)\t\(.value)"' <<<"$a")
+  return 0
+}
+# Whether an arm that takes the project's rules can run the tasks on stdin (one JSON a line): each area rule file one
+# of their cards reads (swe_arearules) is a readable file, so no card builds on fewer rules than the arm says. Prints
+# nothing when it can, else why not (swe_pack's words). A rule file no task's card reads is never checked.
+swe_taskrules() { # <arm json> < tasks
+  local t l g f
+  [ "$(jq -r '.rules // "engine"' <<<"$1")" = project ] || return 0
+  while IFS= read -r t; do
+    l=$(swe_arearules "$t") || { echo "the project's pack could not be read for its area rules"; return; }
+    while IFS=$'\t' read -r g f; do
+      [ -f "$MAIN/$f" ] && [ -r "$MAIN/$f" ] \
+        || { echo "the arm takes the project's rules, and the area rule file $f its pack maps to $g is missing or cannot be read"; return; }
+    done < <([ -z "$l" ] || printf '%s\n' "$l")
+  done
+}
 # The pack and control record of a conveyor arm's sandbox: the project's, with the task's test command run in the
 # container, the arm's seats (a host arm's models added to models.allowed; a saved arm's are the project's already,
 # swe_armsave), its review policy (policy: judgeOn, judgeAlways, rules.P0 to P3) over the record's, and no named
 # account: the container has one login of each. The project's per-issue seats (cards) are
 # left out: every task is issue 1 there, and a project's own cards["1"] must not change the arm's seats. The arm's
 # rules (its rules field): "engine" (the default), the engine version's core rules alone; "project", a copy of the
-# project's card rules (.conveyor/card-rules.md) and of each area rule file its pack's areas map names, taken now, so
-# the card there gets the rules cardrules() gives a card here. A rule file missing or unreadable refuses the arm.
+# project's card rules (.conveyor/card-rules.md) and of each area rule file its pack's areas map, by path glob, to a
+# path the task's issue names (the sandbox's issue #1, swe_sandbox: title and body, scanned as cardrules() scans them),
+# taken now, so the card there gets the rules cardrules() gives a card here (swe_arearules). An area no such path
+# matches is left out of the pack, as no card there reads its rule. A rule file the card reads missing or unreadable
+# refuses the arm.
 swe_pack() { # <task json> <sb> <engine's conveyor.sh> <arm json>
-  local sb=$2 d=$2/$SWE_MAIN/.conveyor s m a g f i=0 ar='{}'; s=$(jq -c '.seats // {}' <<<"$4"); m=$(jq -r '.rules // "engine"' <<<"$4")
+  local sb=$2 d=$2/$SWE_MAIN/.conveyor s m l g f i=0 ar='{}';s=$(jq -c '.seats // {}' <<<"$4"); m=$(jq -r '.rules // "engine"' <<<"$4")
   mkdir -p "$d" "$sb/cards" && : > "$sb/rulings.jsonl" || return 1
   case $m in
     engine) ;;
     project)
       cp -- "$MAIN/.conveyor/card-rules.md" "$d/card-rules.md" 2>/dev/null \
         || { echo "the arm takes the project's rules, and its card rules .conveyor/card-rules.md are missing or cannot be read"; return 1; }
-      packget areas a || { echo "the project's pack could not be read for its area rules"; return 1; }
+      l=$(swe_arearules "$1") || { echo "the project's pack could not be read for its area rules"; return 1; }
       mkdir -p "$d/area-rules" || return 1
       while IFS=$'\t' read -r g f; do
         i=$((i + 1)); cp -- "$MAIN/$f" "$d/area-rules/$i.md" 2>/dev/null \
           || { echo "the arm takes the project's rules, and the area rule file $f its pack maps to $g is missing or cannot be read"; return 1; }
         ar=$(jq -c --arg g "$g" --arg f ".conveyor/area-rules/$i.md" '.[$g] = $f' <<<"$ar")
-      done < <([ -z "$a" ] || jq -r 'to_entries[] | "\(.key)\t\(.value)"' <<<"$a") ;;
+      done < <([ -z "$l" ] || printf '%s\n' "$l") ;;
     *) echo "the arm's rules are engine or project, not $m"; return 1 ;;
   esac
   jq --arg t "$(jq -r .cmd <<<"$1")" --arg l "$sb/rulings.jsonl" --argjson s "$(jq -c 'if has("revision") then {} else .seats // {} end' <<<"$4")" --argjson ar "$ar" '{owner, labels: ((.labels // {}) + {nonProductAreas: []}), models, review, prices, privacy,
