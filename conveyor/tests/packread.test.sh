@@ -86,7 +86,9 @@ t_packnames() {
   loop run >/dev/null 2>&1 || fail "run exited non-zero: $(st .)"
   n=$(wc -l < "$STUB/names") f=$(wc -l < "$STUB/fields") t=$(wc -l < "$STUB/turns"); rm "$STUB/jq"
   [ "$(st 'select(.step == "picked") | .issue' | tr '\n' ' ')" = "5 " ] || fail "an issue with the label the changed pack names for built was picked: $(st 'select(.step == "picked") | .issue' | tr '\n' ' ')"
-  [ "$t" -ge 4 ] && [ "$n" -le 2 ] || fail "the pack's names were read again on an unchanged pack: $n reads in $t turns"
+  # Three reads: the loop's first, and two of the pack #5's build changed: the card's test step (listcmd(), in the
+  # card's own process, per file as setup has it) and the loop's next turn. A read on each unchanged turn makes more.
+  [ "$t" -ge 4 ] && [ "$n" -le 3 ] || fail "the pack's names were read again on an unchanged pack: $n reads in $t turns"
   [ "$f" = 0 ] || fail "a field of the schema was read by a jq run of its own, not from the run that read them all: $f runs"
 }
 
