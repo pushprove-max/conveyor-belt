@@ -4,7 +4,7 @@
 // tasks; Start a run with the cost before Start and only the arms whose preflight passed; the infographic of the runs
 // selected, whose notes a title cannot remove. Shared setup: dashboard-view.helpers.mjs (BH).
 import assert from 'node:assert/strict';
-import { boot, settle, act, cases, BH } from './dashboard-view.helpers.mjs';
+import { boot, next, settle, act, cases, full, BH } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const { bp, heads, NEW, OLD, EA, EB } = BH;
@@ -54,11 +54,20 @@ test('A run: tasks by arm with the totals, one task opened with each arm\'s patc
     'Harness: not resolved. FAIL_TO_PASS and PASS_TO_PASS counts are not kept yet.']);
   act(bp(w), 'export').click();
   assert.equal(w.downloads[0].name, `bench-${NEW}.json`);
+  // #632: the export's answer is beside it on the run page, not at the page's foot.
+  assert.equal(text(bp(w).querySelector('.bench-run-head .bench-said')), `Exported: bench-${NEW}.json.`);
   const raw = body(w.downloads[0].href), figs = JSON.parse(raw);
   assert.deepEqual(figs.arms.map((a) => [a.label, a.resolved, a.sessions]), [['Conveyor 1.5.0', 4, 13], ['Claude alone (claude-opus-5-5)', 2, 5], ['Codex alone (gpt-6.2-sol)', 2, 4]]);
   assert.deepEqual(figs.tasks[1], { task: 'django__django-15347', arms: [{ arm: 'conveyor', result: 'resolved', sessions: 3, tokens: 4000000, minutes: 20 },
     { arm: 'solo', result: 'not resolved', sessions: 1, tokens: 1000000, minutes: 8 }, { arm: 'codex-sol', result: 'resolved', sessions: 1, tokens: 1000000, minutes: 8 }] });
   for (const s of ['query.py', 'negation', 'combine()', 'patch', 'steps']) assert.ok(!raw.includes(s), `the export holds no code, finding or title: ${s}`);
+  // Bug it guards (#632): the export's answer was kept by action only, so another run's page said it was exported.
+  w.benchBody = (url) => (url.includes(`&run=${OLD}`) ? { ...BH.run(), run: BH.hist().runs.find((r) => r.id === OLD) } : BH.hist());
+  act(bp(w), 'back').click();
+  act(bp(w), `run-${OLD}`).click();
+  await settle();
+  assert.deepEqual(heads(w)[0], `Run ${OLD}`);
+  assert.equal(bp(w).querySelector('.bench-said'), null, `no answer about bench-${NEW}.json on run ${OLD}`);
 });
 
 // Bugs it guards: a task of a run stopped between two arms showed the arm it never reached as a harness failure
@@ -128,6 +137,15 @@ test('Compare: two arms of the runs selected, the flipped tasks with where they 
   await settle();
   assert.equal(text(bp(w).querySelector('.bench-compare > .board-from')),
     'With 20 tasks a difference under 7 tasks is within the noise. This difference is 1: within the noise. Even all 500 tasks cannot tell a difference of this size.');
+  // Bug it guards (#632): Compare's answer was kept by action only, so another pair chosen still read "Compared.".
+  const said = () => bp(w).querySelector('.bench-compare .bench-said');
+  assert.equal(text(said()), 'Compared.');
+  choose(w, 'cmp-a', 'codex-sol');
+  assert.equal(said(), null, 'no answer about the last pair beside the new one');
+  // Bug it guards (#632 E5): choosing the first pair again cleared its results but brought back "Compared.".
+  choose(w, 'cmp-a', EB);
+  assert.equal(said(), null, 'no answer beside a pair whose results were dropped');
+  assert.equal(bp(w).querySelector('.bench-compare .bench-headline'), null);
 });
 
 // Bug it guards: Start offered Conveyor or Claude alone only, with no arm's preflight state, so an arm that cannot run
@@ -156,7 +174,11 @@ test('Start: only the arms whose preflight passed can be picked; the cost before
   assert.deepEqual(plan(), [['Conveyor', '5', '16', '40', '$6.25 · worst $20.00'], ['Claude alone', '0', '0', '0', '$0.00 · worst $0.00']], 'the tasks each arm ran on v1.2.0 are reused at no cost');
   const total = () => Array.from(bp(w).querySelectorAll('.bench-before .figure')[2].children, text);
   assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-before .figure .num'), (n) => n.textContent), ['5', '0.7 h', '$6.25']);
-  assert.deepEqual(total(), ['$6.25', 'at list prices', 'worst case $20.00']);
+  assert.deepEqual(total(), ['$6.25', 'At list prices. Up to $20.00.']);
+  // Bug it guards (#632): a figure's number and captions were spans with no space between, so the page read
+  // "5sessions, usualworst case 16". Each figure is a number and one whole caption, as blocks with a real space.
+  assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-before .figure'), (f) => f.textContent),
+    ['5 Usually 5 sessions. Up to 16 sessions.', '0.7 h Of session time. The arms build one task at a time.', '$6.25 At list prices. Up to $20.00.']);
   assert.equal(text(act(bp(w), 'start')), 'Start · 2 arms on 5 tasks');
   w.reply = BH.reply('conveyor: the SWE-bench run started');
   act(bp(w), 'start').click();
@@ -177,7 +199,7 @@ test('Start: only the arms whose preflight passed can be picked; the cost before
   assert.equal(act(bp(w), 'start').disabled, false);
   // An arm with no priced session of its model (Codex here) has no cost, and no total stands for part of one.
   assert.deepEqual(plan().map((r) => r[4]), ['–']);
-  assert.deepEqual(total(), ['–', 'at list prices', 'not priced: Codex alone (gpt-6.2-sol)']);
+  assert.deepEqual(total(), ['–', 'At list prices. Not priced: Codex alone (gpt-6.2-sol).']);
   act(bp(w), 'start').click();
   assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['run', '5', '--arm', 'codex-sol']]);
   await settle();
@@ -203,6 +225,11 @@ test('Start: ticking an arm not ready runs its preflight and picks it once it pa
   await settle();
   assert.deepEqual(['chisle', 'superpowers'].map(state), [[true, 'Checking its preflight…'], [true, 'Checking its preflight…']]);
   assert.equal(act(bp(w), 'start').disabled, true, 'no picked arm is Ready yet');
+  // Bug it guards (#632): with no arm picked the estimate still showed a table head with no row and "$0.00".
+  const est = bp(w).querySelector('.bench-before');
+  assert.equal(est.querySelector('.bench-plan, th, .figure'), null, 'no estimate table, head or figure');
+  assert.ok(!est.textContent.includes('$'), est.textContent);
+  assert.equal(text(est.querySelector('.bench-no-estimate')), 'Choose an arm to see the estimate.');
   const now = (a) => ({ chisle: { state: 'ready', at: '2026-11-19T06:20:00Z' }, superpowers: { state: 'failed', why: 'it is not logged in', at: '2026-11-19T06:20:00Z' } })[a.name];
   w.benchBody = () => { const x = BH.hist(); return { ...x, arms: x.arms.map((a) => ({ ...a, ...now(a) })) }; };
   act(bp(w), 'arms-again').click();
@@ -211,6 +238,77 @@ test('Start: ticking an arm not ready runs its preflight and picks it once it pa
   assert.match(text(arm('superpowers')), /it is not logged in/);
   assert.equal(act(bp(w), 'start').disabled, false);
   assert.equal(text(act(bp(w), 'start')), 'Start · 1 arm on 20 tasks');
+});
+
+// Bug it guards (#632): every action's answer went to one line at the foot of the page, so a Check showed nothing
+// near its arm and the next action's answer replaced it. A Check's answer (sending, refused, passed) shows inside the
+// arm it checks and stays through a redraw; List versions keeps its own answer beside it.
+test('Start: a Check\'s answer shows in its arm through a redraw, pending, refused and passed; another action keeps its own', async () => {
+  const w = await opened();
+  act(bp(w), 'to-start').click();
+  const inArm = (a) => { const p = bp(w).querySelector(`.bench-arm[data-arm="${a}"]`).parentElement.querySelector('.bench-said'); return p && text(p); };
+  const versions = () => { const p = bp(w).querySelector('[data-said="versions"]'); return p && text(p); };
+  let answer;
+  w.reply = { ok: false, status: 403, text: () => new Promise((r) => { answer = r; }) };
+  act(bp(w), 'check-chisle').click();
+  act(bp(w), 'preset-5').click();  // a redraw while the check waits for its answer
+  assert.equal(inArm('chisle'), 'Sending…');
+  await settle();  // the host's reply has come; its text has not
+  assert.equal(inArm('chisle'), 'Sending…');
+  answer('only an admin can check an arm');
+  await settle();
+  act(bp(w), 'preset-20').click();
+  assert.equal(inArm('chisle'), 'Not done: only an admin can check an arm');
+  assert.equal(inArm('superpowers'), null, 'the answer is in the arm checked only');
+  w.reply = BH.reply('conveyor: v1.5.0 v1.4.0');
+  act(bp(w), 'versions').click();
+  await settle();
+  assert.equal(versions(), 'The versions are listed.');
+  assert.equal(inArm('chisle'), 'Not done: only an admin can check an arm', 'another action leaves the check\'s answer');
+  w.reply = BH.reply('conveyor: the arms\' preflights started');
+  act(bp(w), 'check-chisle').click();
+  await settle();
+  act(bp(w), 'arms-again').click();
+  await settle();
+  // Still not checked when read again: the check is pending, and its answer says so.
+  assert.equal(inArm('chisle'), 'the arms\' preflights started. Read the arms again in a few minutes.');
+  assert.equal(versions(), 'The versions are listed.', 'the check\'s answer leaves List versions\' own');
+  // Bug it guards (review E1): once the arm reads ready, its answer still said the check had started.
+  w.benchBody = () => { const x = BH.hist(); return { ...x, arms: x.arms.map((a) => (a.name === 'chisle' ? { ...a, state: 'ready', at: '2026-11-19T06:20:00Z' } : a)) }; };
+  act(bp(w), 'arms-again').click();
+  await settle();
+  assert.equal(inArm('chisle'), 'Check passed. Claude with Chisle is ready.');
+  // A failed arm checked again reads failed with a new check time: its answer is the failure and why, not "started".
+  act(bp(w), 'check-superpowers').click();
+  await settle();
+  w.benchBody = () => { const x = BH.hist(); return { ...x, arms: x.arms.map((a) => (a.name === 'superpowers' ? { ...a, why: 'it is not logged in', at: '2026-11-19T06:30:00Z' } : a)) }; };
+  act(bp(w), 'arms-again').click();
+  await settle();
+  assert.equal(inArm('superpowers'), 'Check failed. it is not logged in. Edit the arm or fix its setup, then choose Check again.');
+});
+
+// Bug it guards (review E2): answers were kept by action only, so List versions in one project replaced the answer
+// another project's List versions had; and an answer given for one project showed on another project's page.
+test('Start: an action\'s answer belongs to its project: another project\'s same action leaves it, and it shows on its own page only', async () => {
+  const w = await opened();
+  act(bp(w), 'to-start').click();
+  const versions = () => { const p = bp(w).querySelector('.bench-said'); return p && text(p); };
+  w.reply = BH.reply('conveyor: v1.5.0 v1.4.0');
+  act(bp(w), 'versions').click();
+  await settle();
+  assert.equal(versions(), 'The versions are listed.');
+  const other = full();
+  other.panels.bench.data.repo = 'other';
+  next(w, other);
+  await settle();
+  assert.equal(versions(), null, 'sample\'s answer is not on other\'s page');
+  w.reply = { ok: false, status: 403, text: () => Promise.resolve('only an admin can list versions') };
+  act(bp(w), 'versions').click();
+  await settle();
+  assert.equal(versions(), 'Not done: only an admin can list versions');
+  next(w, full());
+  await settle();
+  assert.equal(versions(), 'The versions are listed.', 'sample keeps its own answer');
 });
 
 // Bug it guards: there was no picture of the results to share, and a picture made by hand or by a model can drop the
@@ -240,6 +338,7 @@ test('Infographic: made from 2 selected runs on the fixed template; a title type
   for (const s of notes) assert.ok(words().includes(s), `a title typed leaves "${s}"`);
   act(bp(w), 'ig-svg').click();
   assert.equal(w.downloads[0].name, 'ig-20261109-1700.svg');
+  assert.equal(text(bp(w).querySelector('.bench-infographic .bench-said')), 'Downloaded: ig-20261109-1700.svg and ig-20261109-1700.csv.');
   const svg = body(w.downloads[0].href);
   assert.match(svg, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
   for (const s of ['Conveyor wins', 'How to read this', 'This does not show that one way is better on your code.']) assert.ok(svg.includes(s), `the SVG downloaded holds "${s}"`);
@@ -250,4 +349,9 @@ test('Infographic: made from 2 selected runs on the fixed template; a title type
   assert.equal(csv[0], '"Run","Arm","Resolved","Noise for n","Sessions","Tokens","Cost"');
   assert.equal(csv.length, 5, 'one line an arm of each run, as the table on the page');
   assert.ok(csv.some((l) => l.startsWith(`"${NEW}","Conveyor 1.5.0","4 of 5",`)), csv.join('\n'));
+  // Bug it guards (review E3): a download's answer was kept by action only, so other runs picked read as downloaded.
+  act(bp(w), 'back').click();
+  pick(w, `pick-${OLD}`);
+  act(bp(w), 'sel-infographic').click();
+  assert.equal(bp(w).querySelector('.bench-infographic .bench-said'), null, 'no answer about the last selection');
 });

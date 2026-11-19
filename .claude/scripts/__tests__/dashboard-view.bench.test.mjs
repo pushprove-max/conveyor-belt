@@ -82,6 +82,15 @@ test('Overview: a run in progress shows a bar of tasks done per arm, the task no
   act(bp(w), 'stop').click();
   assert.deepEqual(w.posts.splice(0).map((p) => p.body), [{ action: 'bench', args: ['stop'], repo: 'sample' }]);
   await settle();
+  const said = () => { const p = bp(w).querySelector('.bench-running .bench-said'); return p && text(p); };
+  assert.equal(said(), 'Stop sent: the benchmark run. conveyor: the SWE-bench run is stopped');
+  // Bug it guards (#632): a Stop's answer was kept by action only, so the next run's Stop read "Stop sent" unclicked.
+  const d2 = full();
+  d2.panels.bench.data.bench.live = { ...d.panels.bench.data.bench.live, id: 'r20261109T170000-13' };
+  next(w, d2);
+  await settle();
+  assert.match(text(bp(w).querySelector('.bench-running')), /^Running /);
+  assert.equal(said(), null, 'no answer about the last run beside the new run\'s Stop');
 });
 
 // Bug it guards: how the last run ended was a word in a line, so a run stopped at the usage guard read like one the

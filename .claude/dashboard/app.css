@@ -837,6 +837,11 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .bench-arm { display: grid; grid-template-columns: auto 1fr; gap: 2px var(--sp-2); align-items: start; padding: var(--sp-2); border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .bench-arm.off { opacity: .7; }
 .bench-arm .bench-cost { grid-column: 2; font-size: var(--fs-xs); color: var(--muted); }
+/* Each action's answer, beside the control it answers (in the arm for a Check). */
+.bench-said { margin: 0; font-size: var(--fs-sm); color: var(--muted); }
+.bench-said-ok { color: var(--ok); }
+.bench-said-warn { color: var(--warn); }
+.bench-said-bad { color: var(--bad); }
 .info-note { margin-bottom: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); background: var(--info-bg); color: var(--info); font-size: var(--fs-sm); }
 .bench-selbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3);
   padding: var(--sp-2) var(--sp-3); background: var(--surface); border-top: 1px solid var(--border); box-shadow: var(--shadow); }

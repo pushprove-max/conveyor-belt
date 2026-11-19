@@ -44,9 +44,10 @@
     sel: [],            // the runs ticked, in the order ticked
     older: false,       // History shows every run, not the newest 20
     start: { n: 20, arms: new Set(['conveyor']), engine: 'main', commit: '', checking: new Map() },
-    cmp: { a: '', b: '', data: null, text: null, all: false },
+    cmp: { a: '', b: '', data: null, text: null, all: false, ask: null, n: 0 },
     title: IG_TITLE,
     busy: false, held: false, late: false, keep: null,
+    said: new Map(),    // each action's answer, by its key: {repo, text, tone}, shown beside that action (saidAt)
   };
   const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
   const list = (v) => (Array.isArray(v) ? v : []);
@@ -100,7 +101,19 @@
     s.append(head);
     return s;
   }
-  function say(text) { const n = B.el && B.el.querySelector('.bench-note'); if (n) n.textContent = text; }
+  // Each action's answer stays beside its own control until that action is used again: a redraw keeps it, another
+  // action's answer does not replace it, and an answer given for one project does not show on another's page. A key
+  // names the action and what it acts on (stop-<run>, export-<run>, compare-<a>-<b>, check-<arm>), so an answer about
+  // one run, pair or selection does not show beside the control for another. `more` keeps facts the answer needs later.
+  const saidKey = (key, repo) => `${repo === undefined ? B.repo : repo}\n${key}`;
+  function say(key, text, tone, repo, more) { B.said.set(saidKey(key, repo), { ...more, text, tone: tone || 'quiet' }); draw(); }
+  function saidAt(key) {
+    const m = B.said.get(saidKey(key));
+    if (!m) return '';
+    const p = h('p', `bench-said bench-said-${m.tone}`, m.text);
+    p.dataset.said = key; p.setAttribute('role', 'status');
+    return p;
+  }
   const go = (page) => { B.page = page; draw(); };
 
   // ---- reads from the page server ----
@@ -143,17 +156,16 @@
   }
 
   // ---- actions (POST control, action bench) ----
-  function send(args, said, then, no) {
-    if (B.busy) { say('Wait for the answer to the last action.'); return; }
+  function send(key, args, said, then, no, more) {
+    if (B.busy) { say(key, 'Wait for the answer to the last action.', 'warn'); return; }
     const repo = B.repo;
-    B.busy = true; draw(); say('Sending…');
+    B.busy = true; say(key, 'Sending…', 'quiet', repo, more);
     B.ctx.post('control', { action: 'bench', args, repo }).then((r) => r.text().then((t) => [r.ok, String(t).trim() || `the build machine answered ${r.status}`]),
       () => [false, 'the build machine did not answer']).then(([ok, text]) => {
       B.busy = false;
       if (ok && then && repo === B.repo) then(text);
       if (!ok && no) no();
-      draw();
-      say(ok ? said(text) : `Not done: ${B.ctx.refusal(text)}`);
+      say(key, ok ? said(text) : `Not done: ${B.ctx.refusal(text)}`, ok ? 'ok' : 'bad', repo, more);
     });
   }
 
@@ -263,8 +275,8 @@
     const cols = (list(l.cols).length ? list(l.cols) : arms.map((a) => ({ arm: a, label: a }))).map((c) => ({ ...c, done: list(l.tasks).filter((t) => obj(t) && t.arm === c.arm).length }));
     const line = h('p', 'bench-state');
     line.append(B.ctx.chip('Running', 'info'), ` ${plural(cols.length, 'arm')} on ${plural(n, 'task')}${l.current ? ` · now ${l.current}` : ''} `,
-      button('Stop', 'btn-quiet btn-sm', 'stop', 'Stop the benchmark run', () => send(['stop'], (t) => `Stop sent: the benchmark run. ${t}`)));
-    box.append(line, bars(cols, n, true));
+      button('Stop', 'btn-quiet btn-sm', 'stop', 'Stop the benchmark run', () => send(`stop-${l.id}`, ['stop'], (t) => `Stop sent: the benchmark run. ${t}`)));
+    box.append(line, saidAt(`stop-${l.id}`), bars(cols, n, true));
     const so = r && r.state === 'running' ? colsOf(r).reduce((s, c) => s + (num(c.sessions) || 0), 0) : null;
     const per = (c) => obj((armsOf().find((a) => a.name === c.arm) || {}).perTask);
     const usual = cols.every(per) ? Math.ceil(cols.reduce((s, c) => s + n * per(c).usual, 0)) : null, worst = cols.every(per) ? cols.reduce((s, c) => s + n * per(c).worst, 0) : null;
@@ -369,7 +381,7 @@
     const bar = h('div', 'bench-selbar');
     bar.setAttribute('role', 'status');
     bar.append(h('strong', null, `${plural(B.sel.length, 'run')} selected`), h('span', 'board-from', `Up to ${MAX_SEL}. Runs of different n get their own panel on the infographic.`),
-      button('Compare', '', 'sel-compare', 'Compare arms of the runs selected', () => { B.cmp.data = null; B.cmp.text = null; go('compare'); }),
+      button('Compare', '', 'sel-compare', 'Compare arms of the runs selected', () => { dropCmp(); go('compare'); }),
       button('Generate infographic', 'btn-primary', 'sel-infographic', 'Generate the infographic of the runs selected', () => go('infographic')),
       button('Clear', 'btn-quiet', 'sel-clear', 'Clear the selection', () => { B.sel = []; draw(); }));
     return bar;
@@ -386,10 +398,10 @@
     const s = section('bench-run-head', `Run ${r.id}`, null, `${span(r)} · SWE-bench Verified (dataset revision pinned in conveyor/bench/swe.json) · the first ${n} tasks of the pinned order · ${plural(cols.length, 'arm')} · each task in its own Docker container`);
     const tools = h('div', 'bench-tools');
     tools.append(button('Back', 'btn-quiet', 'back', 'Back to the overview', () => go('overview')),
-      button('Compare two arms', '', 'run-compare', 'Compare two arms of this run', () => { B.sel = B.sel.includes(r.id) ? B.sel : [r.id]; B.cmp.data = null; B.cmp.text = null; go('compare'); }),
+      button('Compare two arms', '', 'run-compare', 'Compare two arms of this run', () => { B.sel = B.sel.includes(r.id) ? B.sel : [r.id]; dropCmp(); go('compare'); }),
       button('Export figures', '', 'export', 'Export the figures as one JSON file', () => exportRun(o.data)));
     s.querySelector('.bench-head').append(tools);
-    s.append(h('p', 'board-from', `${noiseSaid(n)} Export writes the figures as one JSON file: no code, no names, no machine names.`), bars(cols, n));
+    s.append(saidAt(`export-${r.id}`),h('p', 'board-from', `${noiseSaid(n)} Export writes the figures as one JSON file: no code, no names, no machine names.`), bars(cols, n));
     const m = section('bench-matrix', 'Tasks by arm', `${plural(tasks.length, 'task')} · ${plural(cols.length, 'arm')}`, `✓ resolved · ✗ not resolved · not run: the harness image, sandbox or grade failed. Each cell: sessions · minutes · cost (${COST}: not kept yet). Open a task to see each arm's work.`);
     const wrap = h('div', 'tests-scroll'), t = h('table', 'tests-table bench-mat'), head = h('tr');
     head.append(h('th', null, 'Task'));
@@ -478,7 +490,7 @@
       tasks: list(data.tasks).filter(obj).map((x) => ({ task: x.id, arms: list(x.cells).map((c) => ({ arm: c.arm, result: said(c) === 'yes' ? 'resolved' : said(c) === 'no' ? 'not resolved' : said(c) === 'nr' ? 'not run' : null,
         sessions: num(c.sessions), tokens: num(c.tokens), minutes: num(c.minutes) })) })) };
     download(`bench-${r.id}.json`, `data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(figs, null, 2))}`);
-    say(`Exported: bench-${r.id}.json.`);
+    say(`export-${r.id}`, `Exported: bench-${r.id}.json.`, 'ok');
   }
   function download(name, href) {
     const a = h('a');
@@ -487,6 +499,9 @@
   }
 
   // ---- Compare ----
+  // Compare's answer belongs to one request (ask, keyed compare-<n>-<a>-<b>): dropping the results drops the answer with
+  // them, so a pair chosen again, or a reply that comes after the pair changed, never reads "Compared." beside no results.
+  function dropCmp() { B.cmp.data = null; B.cmp.text = null; B.cmp.ask = null; }
   function sidesOf() {
     const runs = runsOf(), picked = B.sel.length ? runs.filter((r) => B.sel.includes(r.id)) : runs.filter((r) => r.id === (B.open || (runs[0] && runs[0].id)));
     const seen = new Map();
@@ -509,15 +524,18 @@
       sides.forEach((c) => { const o = h('option', null, colName(c)); o.value = c.key; sel.append(o); });
       if (!sides.some((c) => c.key === B.cmp[which])) B.cmp[which] = sides[which === 'a' ? 0 : 1].key;
       sel.value = B.cmp[which];
-      sel.addEventListener('change', () => { B.cmp[which] = sel.value; B.cmp.data = null; B.cmp.text = null; draw(); });
+      sel.addEventListener('change', () => { B.cmp[which] = sel.value; dropCmp(); draw(); });
       l.append(`${which.toUpperCase()} `, sel);
       return l;
     };
     tools.append(choose('a'), choose('b'), button('Compare', 'btn-primary', 'compare', 'Compare A and B', () => {
-      B.cmp.data = null; B.cmp.text = null; B.cmp.all = false;
-      send(['diff', B.cmp.a, B.cmp.b, '--json'], () => 'Compared.', (text) => { try { B.cmp.data = JSON.parse(text); } catch (e) { B.cmp.text = text; } });
+      dropCmp(); B.cmp.all = false;
+      const ask = `compare-${B.cmp.n += 1}-${B.cmp.a}-${B.cmp.b}`;
+      B.cmp.ask = ask;
+      send(ask, ['diff', B.cmp.a, B.cmp.b, '--json'], () => 'Compared.', (text) => { if (B.cmp.ask !== ask) return; try { B.cmp.data = JSON.parse(text); } catch (e) { B.cmp.text = text; } });
     }));
     s.querySelector('.bench-head').append(tools);
+    if (B.cmp.ask) s.append(saidAt(B.cmp.ask));
     const d = obj(B.cmp.data);
     if (!d) {
       s.append(h('p', 'board-from', B.cmp.text || 'Compare reads the results of the tasks both ran; for each task that flipped it writes one reading with one model call. No task is run again.'));
@@ -627,19 +645,20 @@
       c.addEventListener('change', () => { B.start.commit = c.value.trim(); draw(); });
       vrow.append(c);
     }
-    vrow.append(button('List versions', 'btn-sm', 'versions', 'List the released versions', () => send(['versions'], () => 'The versions are listed.')),
-      h('span', 'board-from', 'The version is the one every Conveyor arm of the run builds with.'));
+    vrow.append(button('List versions', 'btn-sm', 'versions', 'List the released versions', () => send('versions', ['versions'], () => 'The versions are listed.')),
+      saidAt('versions'), h('span', 'board-from', 'The version is the one every Conveyor arm of the run builds with.'));
     s.append(row, vrow);
     if (!hist()) return [s, reading('the arms')];
     return [s, armPick(), before()];
   }
   // An arm ticked while not ready waits in B.start.checking (name -> its check time then) for its preflight: picked once
   // it reads ready, cleared once it reads failed with a newer check time.
+  const atOf = (a) => (a.at === undefined ? null : a.at);
   function settleChecks(arms) {
     arms.forEach((a) => {
       if (!B.start.checking.has(a.name)) return;
       if (a.state === 'ready') B.start.checking.delete(a.name);
-      else if (a.state === 'not offered' || (a.state === 'failed' && (a.at === undefined ? null : a.at) !== B.start.checking.get(a.name))) { B.start.checking.delete(a.name); B.start.arms.delete(a.name); }
+      else if (a.state === 'not offered' || (a.state === 'failed' && atOf(a) !== B.start.checking.get(a.name))) { B.start.checking.delete(a.name); B.start.arms.delete(a.name); }
     });
   }
   function armPick() {
@@ -661,10 +680,10 @@
           if (!box.checked) { B.start.arms.delete(a.name); B.start.checking.delete(a.name); draw(); return; }
           if (ready) { B.start.arms.add(a.name); draw(); return; }
           // Not ready: the box sends the arm's preflight, as its Check button does, and picks the arm once it passes.
-          if (B.busy) { box.checked = false; say('Wait for the answer to the last action.'); return; }
-          B.start.checking.set(a.name, a.at === undefined ? null : a.at); B.start.arms.add(a.name);
-          send(['arms', 'check', a.name], (t) => `${t.replace(/^conveyor: /, '')}. Read the arms again in a few minutes.`, null,
-            () => { B.start.checking.delete(a.name); B.start.arms.delete(a.name); });
+          if (B.busy) { box.checked = false; say(`check-${a.name}`, 'Wait for the answer to the last action.', 'warn'); return; }
+          B.start.checking.set(a.name, atOf(a)); B.start.arms.add(a.name);
+          send(`check-${a.name}`, ['arms', 'check', a.name], (t) => `${t.replace(/^conveyor: /, '')}. Read the arms again in a few minutes.`, null,
+            () => { B.start.checking.delete(a.name); B.start.arms.delete(a.name); }, { at: atOf(a) });
         });
         const [word, tone] = checking ? ['Checking its preflight…', 'quiet'] : ARM_STATE[a.state] || [String(a.state), 'quiet'];
         text.append(h('span', 'bench-name', a.label), ' ', B.ctx.chip(word, tone), h('span', 'bench-sub', a.why || (a.kind === 'conveyor' ? 'the engine\'s loop builds each task: build, reviews, fix rounds, test step' : `${sessionsWord(a.perTask && a.perTask.worst) || 'its own sessions'} a task, headless`)));
@@ -674,8 +693,17 @@
         cell.append(lab);
         if (a.state === 'unchecked' || a.state === 'changed' || a.state === 'failed') {
           cell.append(button(a.state === 'failed' ? 'Check again' : 'Check', 'btn-quiet btn-sm', `check-${a.name}`, `Run the preflight of ${a.label}`,
-            () => send(['arms', 'check', a.name], (t) => `${t.replace(/^conveyor: /, '')}. Read the arms again in a few minutes.`)));
+            () => send(`check-${a.name}`, ['arms', 'check', a.name], (t) => `${t.replace(/^conveyor: /, '')}. Read the arms again in a few minutes.`, null, null, { at: atOf(a) })));
         }
+        // The answer to this arm's check (its box or its Check button) shows in the arm, not at the foot of the page. Once
+        // the arms are read again, a check the host took is answered by the arm's state: passed when the arm reads ready,
+        // failed when it reads failed with a check time other than the one it had when the check was sent.
+        const ck = saidKey(`check-${a.name}`), m = B.said.get(ck);
+        if (m && m.tone === 'ok' && 'at' in m && (ready || (a.state === 'failed' && atOf(a) !== m.at))) {
+          B.said.set(ck, ready ? { text: `Check passed. ${a.label} is ready.`, tone: 'ok' }
+            : { text: `Check failed. ${String(a.why || 'No reason was recorded').replace(/\.?$/, '.')} Edit the arm or fix its setup, then choose Check again.`, tone: 'bad' });
+        }
+        cell.append(saidAt(`check-${a.name}`));
         grid.append(cell);
       });
     });
@@ -685,34 +713,40 @@
   function before() {
     const arms = armsOf().filter((a) => a.state === 'ready' && B.start.arms.has(a.name)), n = B.start.n, s = section('bench-before', 'Before you start');
     const plans = arms.map((a) => [a, plan(a)]), sum = (k) => plans.reduce((x, [, p]) => x + p[k], 0), g = obj(hist().guard) || {};
-    const figs = h('div', 'figures'), fig = (v, label, change) => { const f = h('div', 'figure'); f.append(h('span', 'num', v), h('span', 'figure-label', label), h('span', 'figure-label', change)); return f; };
-    // A total that leaves an arm out would read as the whole cost: with one arm not priced, the total is not shown.
-    const unpriced = plans.filter(([, p]) => p.usd === null).map(([a]) => a.label);
-    figs.append(fig(String(sum('usual')), 'sessions, usual', `worst case ${sum('worst')}`), fig(`${(sum('minutes') / 60).toFixed(1)} h`, 'of session time', 'the arms build one task at a time'),
-      unpriced.length ? fig(COST, 'at list prices', `not priced: ${unpriced.join(', ')}`) : fig(B.ctx.money(sum('usd')), 'at list prices', `worst case ${B.ctx.money(sum('worstUsd'))}`));
-    const t = h('table', 'tests-table bench-plan'), hr = h('tr');
-    ['Arm', 'Usual', 'Worst', 'Minutes', 'Cost'].forEach((x, i) => hr.append(h('th', i ? 'r' : null, x)));
-    t.append(hr);
-    plans.forEach(([a, p]) => { const tr = h('tr'); tr.dataset.arm = a.name; tr.append(h('td', null, a.label), h('td', 'r', String(p.usual)), h('td', 'r', String(p.worst)), h('td', 'r', String(p.minutes)),
-      h('td', 'r', p.usd === null ? COST : `${B.ctx.money(p.usd)} · worst ${B.ctx.money(p.worstUsd)}`)); t.append(tr); });
-    const re = plans.filter(([, p]) => p.todo < n).map(([a, p]) => `${a.label} ${n - p.todo}`);
-    s.append(figs, t);
-    if (re.length) s.append(h('p', 'board-from', `Already run on this version and reused at no cost: ${re.join(', ')} of the ${n} tasks.`));
-    s.append(h('p', 'board-from', 'A cost is an estimate: each session at the mean list price of this project\'s own card sessions, those of the arm\'s model for an arm with one.'));
+    // Each figure is its number and one whole caption, as block elements with spaces between, so they never run
+    // together as words. With no arm picked there is no estimate: no figures, no table head with no row under it.
+    const figs = h('div', 'figures'), fig = (v, caption) => { const f = h('div', 'figure'); f.append(h('div', 'num', v), ' ', h('div', 'figure-label', caption)); return f; };
+    if (!plans.length) s.append(h('p', 'board-from bench-no-estimate', 'Choose an arm to see the estimate.'));
+    else {
+      // A total that leaves an arm out would read as the whole cost: with one arm not priced, the total is not shown.
+      const unpriced = plans.filter(([, p]) => p.usd === null).map(([a]) => a.label);
+      figs.append(fig(String(sum('usual')), `Usually ${plural(sum('usual'), 'session')}. Up to ${plural(sum('worst'), 'session')}.`),
+        fig(`${(sum('minutes') / 60).toFixed(1)} h`, 'Of session time. The arms build one task at a time.'),
+        unpriced.length ? fig(COST, `At list prices. Not priced: ${unpriced.join(', ')}.`) : fig(B.ctx.money(sum('usd')), `At list prices. Up to ${B.ctx.money(sum('worstUsd'))}.`));
+      const t = h('table', 'tests-table bench-plan'), hr = h('tr');
+      ['Arm', 'Usual', 'Worst', 'Minutes', 'Cost'].forEach((x, i) => hr.append(h('th', i ? 'r' : null, x)));
+      t.append(hr);
+      plans.forEach(([a, p]) => { const tr = h('tr'); tr.dataset.arm = a.name; tr.append(h('td', null, a.label), h('td', 'r', String(p.usual)), h('td', 'r', String(p.worst)), h('td', 'r', String(p.minutes)),
+        h('td', 'r', p.usd === null ? COST : `${B.ctx.money(p.usd)} · worst ${B.ctx.money(p.worstUsd)}`)); t.append(tr); });
+      const re = plans.filter(([, p]) => p.todo < n).map(([a, p]) => `${a.label} ${n - p.todo}`);
+      s.append(figs, t);
+      if (re.length) s.append(h('p', 'board-from', `Already run on this version and reused at no cost: ${re.join(', ')} of the ${n} tasks.`));
+      s.append(h('p', 'board-from', 'A cost is an estimate: each session at the mean list price of this project\'s own card sessions, those of the arm\'s model for an arm with one.'));
+    }
     s.append(h('p', 'warn-note', 'A run does not start while a login is at the usage guard, and it stops there. Done tasks are kept.'),
       h('p', 'info-note', 'Each task runs in its own Docker container, from the same image, with the same time and session limits for every arm. Logins are copied in at start only.'));
     const held = arms.filter((a) => a.guard && g[a.guard] === true), l = live(), e = engineOf(), conv = arms.some((a) => a.kind === 'conveyor');
     const why = l && l.state === 'running' ? 'A run is going: stop it on the Overview, or wait for its end.'
-      : !arms.length ? 'Pick an arm whose preflight passed.'
+      : !arms.length ? null
         : held.length ? `The usage guard is reached for ${held.map((a) => a.label).join(', ')}: no run starts while it stands.`
           : conv && B.start.engine === 'commit' && !/^[0-9a-f]{40}$/.test(e) ? 'A commit is named by its full 40-character id.' : null;
     const startBtn = button(`Start · ${plural(arms.length, 'arm')} on ${plural(n, 'task')}`, 'btn-primary', 'start', `Start: ${plural(arms.length, 'arm')} on ${plural(n, 'task')}`, () => {
       const args = ['run', String(n)].concat(...arms.map((a) => ['--arm', a.name]), conv ? ['--engine', e] : []);
-      send(args, (t) => `Started: ${t.replace(/^conveyor: /, '')}`, () => readHist(true));
+      send('start', args, (t) => `Started: ${t.replace(/^conveyor: /, '')}`, () => readHist(true));
     });
-    startBtn.disabled = Boolean(why) || B.busy;
+    startBtn.disabled = Boolean(why) || !arms.length || B.busy;
     if (why) { const no = h('p', 'warn-note bench-why', why); no.setAttribute('role', 'alert'); s.append(no); }
-    s.append(startBtn);
+    s.append(startBtn, saidAt('start'));
     return s;
   }
 
@@ -788,9 +822,9 @@
     return svg;
   }
   // The PNG: the same marks drawn on a canvas (the page's rules let it load no image of its own making).
-  function png(t, name) {
+  function png(t, name, key) {
     const c = document.createElement('canvas'), x = c.getContext && c.getContext('2d');
-    if (!x) { say('Not made: this browser cannot draw a PNG here. Download SVG works.'); return false; }
+    if (!x) { say(key,'Not made: this browser cannot draw a PNG here. Download SVG works.', 'bad'); return false; }
     c.width = t.w * 2; c.height = t.h * 2; x.scale(2, 2);
     x.fillStyle = '#ffffff'; x.fillRect(0, 0, t.w, t.h);
     t.marks.forEach((k) => {
@@ -825,11 +859,14 @@
       num(c.sessions) === null ? '–' : String(c.sessions), tokens(c.tokens), COST]));
     const csv = [head].concat(figs).map((row) => row.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\r\n') + '\r\n';
     const table = () => download(`${id}.csv`, `data:text/csv;charset=utf-8,${encodeURIComponent(csv)}`);
+    // A download's answer belongs to the runs it was made from: a new selection shows no answer about the last one.
+    const of = runs.map((r) => r.id).join(','), svgKey = `ig-svg-${of}`, pngKey = `ig-png-${of}`;
     tools.append(lab, button('Download SVG', '', 'ig-svg', 'Download the infographic as SVG', () => {
-      download(`${id}.svg`, `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText(template(runs, B.title, id)))}`); table(); say(`Downloaded: ${id}.svg and ${id}.csv.`);
+      download(`${id}.svg`, `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText(template(runs, B.title, id)))}`); table(); say(svgKey, `Downloaded: ${id}.svg and ${id}.csv.`, 'ok');
     }),
-      button('Download PNG', '', 'ig-png', 'Download the infographic as PNG', () => { if (png(template(runs, B.title, id), `${id}.png`)) table(); }));
+      button('Download PNG', '', 'ig-png', 'Download the infographic as PNG', () => { if (png(template(runs, B.title, id), `${id}.png`, pngKey)) { table(); say(pngKey, `Downloaded: ${id}.png and ${id}.csv.`, 'ok'); } }));
     s.querySelector('.bench-head').append(tools);
+    s.append(saidAt(svgKey), saidAt(pngKey));
     s.append(h('p', 'board-from', `Selected: ${runs.map((r) => `${r.id} (${plural(num(r.n) || 0, 'task')})`).join(' and ')}. Up to ${MAX_SEL} runs. Runs of different n get their own panel. The title can change; the notes on the graphic cannot be removed.`),
       svgNode(t));
     const tab = section('bench-ig-table', 'The same figures as a table', null, 'Saved beside the SVG.'), wrap = h('div', 'tests-scroll'), tt = h('table', 'tests-table'), hr = h('tr');
@@ -856,11 +893,6 @@
     else if (B.page === 'compare') root.append(...comparePage());
     else if (B.page === 'start') root.append(...startPage());
     else root.append(...infographicPage());
-    const note = h('p', 'board-note bench-note');
-    note.setAttribute('aria-live', 'polite');
-    const was = el.querySelector('.bench-note');
-    if (was) note.textContent = was.textContent;
-    root.append(note);
     el.replaceChildren(root);
     const keep = B.keep || a;
     B.keep = null;
@@ -869,7 +901,7 @@
   function render(el, d, ctx) {
     const view = ctx.project(d);
     ctx.title(Array.isArray(view.repos) && view.repos.length > 1 && view.repo ? `Benchmarks: ${view.repo}` : null);
-    if (B.repo !== undefined && view.repo !== B.repo) { B.sel = []; B.open = null; B.task = null; B.cmp = { a: '', b: '', data: null, text: null, all: false }; B.runs.clear(); }
+    if (B.repo !== undefined && view.repo !== B.repo) { B.sel = []; B.open = null; B.task = null; B.cmp = { a: '', b: '', data: null, text: null, all: false, ask: null, n: B.cmp.n }; B.runs.clear(); }
     Object.assign(B, { el, ctx, d: view, repo: view.repo });
     if (B.held) { B.late = true; return; }
     draw();

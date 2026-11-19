@@ -731,7 +731,9 @@ actions).
 The Benchmarks tab shows the [SWE-bench Verified](benchmarks.md) runs of the project and their arms. A row of buttons
 at its top opens its pages: **Overview**, **A run**, **Compare**, **Start a run** and **Infographic**. The tab reads the
 runs from the build machine when you open it, and again when a run moves on. Only an admin can start, stop or check
-anything here. The Board refuses these buttons to a member.
+anything here. The Board refuses these buttons to a member. The answer to each button shows beside that button, and
+stays there until you click it again. The answer of one button does not replace that of another. An answer is about
+one project and one run, pair or selection: it does not show for another.
 
 **Overview** has four parts:
 
@@ -764,9 +766,11 @@ written by one model call from those facts only. No task runs again.
 
 **Start a run** sets the number of tasks (1, 5, 20, 50, or any number up to 500), the Conveyor version, and the arms.
 You can pick only an arm whose preflight passed. An arm that is not checked yet, or that failed, has **Check**, which
-runs its preflight on the build machine; click **Read the arms again** after a few minutes. Before you click **Start**,
+runs its preflight on the build machine; click **Read the arms again** after a few minutes. The answer to a check shows
+inside its arm: sending, the reason when it is refused, or that it started. When you read the arms again, it says
+that the check passed, or that it failed and why. Before you click **Start**,
 the page shows the usual and worst-case sessions, the minutes and the cost of each arm, for the tasks it did not run
-on that version before. The cost is an estimate at list prices: each session costs the mean of this project's own
+on that version before. With no arm picked, it says "Choose an arm to see the estimate." and shows no figures. The cost is an estimate at list prices: each session costs the mean of this project's own
 priced card sessions, or of those on the arm's model when the arm has a model. An arm with no priced session of its
 model shows "–" for cost, and then the page shows no total. **Start** is off while the usage guard holds back an arm
 you picked.
