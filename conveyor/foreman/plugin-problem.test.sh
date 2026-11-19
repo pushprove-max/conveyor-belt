@@ -150,10 +150,10 @@ t_other() {
     || fail "in another project a filed line replaced the older note: $(cat "$FD/plugin-bugs.md")"
 }
 
-cases=(home legacy split other)
-cases=(home zero legacy other)
-SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
+# The default list is every t_ function in this file: a hand-kept list left t_split out (bug #558).
+cases=$(declare -F | sed -n 's/^declare -f t_//p')
+SEL=${CONVEYOR_SHELL_TEST_CASE:-$cases}; SEL=${SEL//,/ }
 rc=0; pids=()
-for c in $SEL; do (CASE=$c; "t_$c") & pids+=($!); done
+for c in $SEL; do (CASE=$c; "t_$c" && echo "ok [plugin-problem-$c]") & pids+=($!); done
 for p in "${pids[@]}"; do wait "$p" || rc=1; done
 exit "$rc"
