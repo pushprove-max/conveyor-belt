@@ -35,7 +35,7 @@ test('Overview: the newest run per arm with its noise, every run in History, the
   assert.deepEqual(rows, [[NEW, '10:00 AM', '5', 'Conveyor 1.5.0 · Claude alone (claude-opus-5-5) · Codex alone (gpt-6.2-sol)', '4 · 2 · 2', '22', '24.4M', '2 h 50 min', '–', 'Done 1 task not run'],
     [OLD, '11/08/2026, 11:00 AM', '20', 'Conveyor 1.4.0', '8', '30', '40.0M', '4 h 20 min', '–', 'Stopped at the usage guard']], 'every run, newest first');
   assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-arms tr'), (r) => [text(r.children[0]), ...Array.from(r.children[1].children, text)]),
-    [['Ready', '3'], ['Preflight failing', '1', 'Claude with Superpowers: it did not fire: its output shows no use of its method'], ['Not checked', '1', 'Claude with Chisle'],
+    [['Ready', '3'], ['Checking', '0'], ['Preflight failing', '1', 'Claude with Superpowers: it did not fire: its output shows no use of its method'], ['Not checked', '1', 'Claude with Chisle'],
       ['Not offered', '1', 'OpenHands: it needs an API key']]);
   // Ticking runs shows the bar at the foot of the screen with Compare and Generate infographic.
   for (const id of [NEW, OLD]) { const b = act(bp(w), `pick-${id}`); b.checked = true; b.dispatchEvent(new w.Event('change')); }

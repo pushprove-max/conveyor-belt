@@ -216,8 +216,8 @@ image, the repository, a log or a result.
 An arm runs only after its preflight passes. The preflight checks that each login of the arm is on this machine. It then installs the arm in a container and runs the arm on one small task: a file that prints a
 word with a spelling mistake. The arm must fire and change the file. A preflight that fails says what is missing. A
 run does not start when the preflight of one of its arms fails. A preflight that passed stays good for one day, while
-the arm's file and the logins it needs do not change. A run uses it only when it ran on the same image and limits as
-the run's. If not, the run does the preflight again.
+the arm's file and the logins it needs do not change. A run uses it only when it ran on the same image, limits and task
+set as the run's. If not, the run does the preflight again.
 
 ```
 conveyor.sh bench swe arms
@@ -226,6 +226,24 @@ conveyor.sh bench swe arms check codex-sol caveman
 
 The first command lists each arm with the state of its last preflight. The second runs the preflight of the arms that
 you name. It does not start while the usage guard is reached, unless no arm that you name uses the Claude login.
+
+The check prints `<arm>: checking <check ID>` for each arm when it starts, then `<arm>: ready` or
+`<arm>: failed: <why>` when it ends. A Conveyor arm is checked on main's engine. While a check runs, the list, the
+Board and Start show the arm as checking, with the step that the check is at. A check that fails before the preflight
+starts, for example when Docker does not answer or the test image cannot be fetched, records that failure for each
+arm. When you ask for a check of an arm while a check of that arm runs, your request waits for that check and gives
+its result, if the arm, its logins, the limits and the task set are the same. If not, your check prints its own check
+ID and starts when the other one ends.
+
+An arm shows one of these states:
+
+- `checking`: its check runs now.
+- `ready`: its last preflight passed, and a run on main's engine with the default settings can use that pass.
+- `failed`: its last preflight failed, or its check stopped before it ended.
+- `expired`: its last preflight passed more than one day ago.
+- `changed`: its last preflight passed, but the arm's file, its logins, the engine commit, the image, the limits or the
+  task set changed after it.
+- `not checked` or `not offered`.
 
 ### An arm that does not fire
 

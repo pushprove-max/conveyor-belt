@@ -37,7 +37,7 @@
 # arm's command runs on the issue, and its change is the patch. An arm that does not fire is a failed task of it.
 # What is kept, under the state folder's bench/swe: tasks.<revision>.<seed's id>.jsonl (the ordered list, swe_list),
 # results/<key>/<task>.json (key: swe_reskey(), from the trial's effective inputs, swe_inputs; resolved, fired,
-# sessions, tokens, minutes, a card's records, the inputs) and .patch, preflight/<arm>/<key>.json (key: swe_armkey()),
+# sessions, tokens, minutes, a card's records, the inputs) and .patch, preflight/<arm>/<key>.json (key: swe_armkey(); each check's record, from its start, swe_ckopen) and its lock,
 # arms/<id>.json (each saved arm revision, swe_armsave), frozen/<arm> while a run goes (its copy of what a conveyor
 # arm reads of the project, swe_freeze),
 # a line a run in runs.jsonl, the run in progress in live.json, and board.json, what the snapshot carries for the
@@ -218,18 +218,19 @@ swe_lines() {
     | jq -Rc --argjson a "$([ -n "$p" ] && kill -0 "$p" 2>/dev/null && echo true || echo false)" 'fromjson? | objects | select(.id | strings) | if .state == "running" then .alive = $a else . end'
 }
 # `bench swe history`: what the Board's Benchmarks tab reads when it is shown, as one JSON object: runs, every run
-# newest first (runsum); arms, every arm with its state (ready, failed, unchecked, changed since its check, not
-# offered), why, its last check (at), the guard that holds it back (swe_guards), its results key on swe.json's
+# newest first (runsum); arms, every arm with its state (swe_checkstate: checking, ready, failed, expired, changed
+# since its check, unchecked, not offered), why, the step a check that runs is at, its check's ID (check) and time (at), the guard that holds it back (swe_guards), its results key on swe.json's
 # settings (swe_reskey; null for a conveyor arm, whose key ends with its engine's commit: keyPrefix and the commit)
 # and its sessions, minutes and a session's dollars (swe_pertask); keys, each results key with the places of its tasks
 # in the pinned order (a run reuses them); guard, whether the usage guard
 # holds back a run with a conveyor arm (conveyor) or another arm on the Claude login (agent); set, the task set;
 # choices, the models and efforts a saved arm may choose (swe_choices; null when the pack does not read).
 swe_history() {
-  local arms='[]' n a r p m k i gc=false ga=false ch
+  local arms='[]' n a r p m k i x gc=false ga=false ch
   for n in $(swe_armnames); do
     a=$(swe_arm "$n") || continue
-    r=$(cat "$SWE_DIR/preflight/$n"/*.json 2>/dev/null | jq -sc 'sort_by(.epoch) | last // null')
+    [ "$(jq -r .kind <<<"$a")" != conveyor ] || swe_mainc
+    mapfile -t x < <(swe_armnow "$a"); r=$(swe_checkstate "$a" "${x[0]}" "${x[1]}")
     p=null; k=null
     if jq -e '.offered != false' <<<"$a" > /dev/null; then
       m=''; [ "$(jq -r .kind <<<"$a")" = conveyor ] || { m=$(jq -r '.model // ""' <<<"$a"); [ "$m" != builder ] || m=$(swe_solomodel); }
@@ -237,8 +238,7 @@ swe_history() {
       p=$(swe_pertask "$n" "$(jq -r .kind <<<"$a")" "$(jq -r '.sessions // 1' <<<"$a")" "$m")
     fi
     arms=$(jq -c --argjson a "$a" --argjson r "$r" --argjson p "$p" --argjson k "$k" --arg g "$(swe_guards "$a")" '. + [{name: $a.name, label: ($a.label // $a.name), kind: $a.kind,
-      state: (if $a.offered == false then "not offered" elif $r == null then "unchecked" elif $r.spec != $a then "changed" elif $r.ok then "ready" else "failed" end),
-      why: (if $a.offered == false then ($a.why // null) else ($r.why // null) end), at: ($r.at // null), guard: (if $g == "" then null else $g end), perTask: $p,
+      state: $r.state, why: $r.why, at: $r.at, step: $r.step, check: $r.id, guard: (if $g == "" then null else $g end), perTask: $p,
       key: (if $a.kind == "conveyor" then null else $k end), keyPrefix: (if $a.kind == "conveyor" then $k else null end)}]' <<<"$arms")
   done
   ! swe_guarded || gc=true; ! swe_guarded 1 || ga=true

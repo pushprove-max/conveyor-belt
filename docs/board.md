@@ -752,7 +752,8 @@ one project and one run, pair or selection: it does not show for another.
   and versions, the resolved count of each arm, the sessions, tokens and minutes, and the state. A run that did not
   start shows why, and the page of that run shows it too. Tick up to 6 runs. A
   bar at the foot of the screen then offers **Compare**, **Generate infographic** and **Clear**.
-- **Arms**: how many arms are ready, fail their preflight, are not checked, or are not offered, with the reasons.
+- **Arms**: how many arms are ready, are checking, fail their preflight, are not checked, or are not offered, with the
+  reasons. An arm that is checking shows the step that its check is at.
 - **Drift watch**: folded. Open it to see the [drift watch](benchmarks.md#drift-watch): each figure a card, for the
   cards before and after the last engine change. Each figure shows Moved when the two means are more than two
   standard errors apart, and In its usual range when they are not. It shows Not read when a group has no spread for
@@ -771,10 +772,11 @@ flipped task shows where the two went apart, the facts read from the records, an
 written by one model call from those facts only. No task runs again.
 
 **Start a run** sets the number of tasks (1, 5, 20, 50, or any number up to 500), the Conveyor version, and the arms.
-You can pick only an arm whose preflight passed. An arm that is not checked yet, or that failed, has **Check**, which
-runs its preflight on the build machine; click **Read the arms again** after a few minutes. The answer to a check shows
-inside its arm: sending, the reason when it is refused, or that it started. When you read the arms again, it says
-that the check passed, or that it failed and why. Before you click **Start**,
+You can pick only an arm whose preflight passed. An arm that is not checked yet or that changed has **Check**. An arm
+that failed, or whose last pass expired, has **Check again**. Each runs the arm's preflight on the build machine. While
+the check runs, the arm shows **Checking** and the step that the check is at, and the page reads the arms again every
+few seconds until the check ends. The answer to a check shows inside its arm: sending, the reason when it is refused, or that it
+started. When the check ends, it says that the check passed, or that it failed and why. Before you click **Start**,
 the page shows the usual and worst-case sessions, the minutes and the cost of each arm, for the tasks it did not run
 on that version before. With no arm picked, it says "Choose an arm to see the estimate." and shows no figures. The cost is an estimate at list prices: each session costs the mean of this project's own
 priced card sessions, or of those on the arm's model when the arm has a model. An arm with no priced session of its

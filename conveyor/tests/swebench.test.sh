@@ -18,8 +18,8 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # holds x.py "bug"; in <folder>/eng.git an engine with commits A (tagged v1.0.0) and B (main, its review stage
 # changed): each one's `run` notes "<version> <issue title>" in $SWE_FX/log, waits while $SWE_FX/hold is there, and
 # writes the card's records; A lands "fixed" in x.py for every task, B blocks the task proj__a-1 after two NO-GO
-# reviews, each read by the judge. <folder>/py is the stub harness: the two tasks, an image that fails when
-# $SWE_FX/broken names it, and a grade that resolves a patch holding "fixed" unless $SWE_FX/wrong names the task.
+# reviews, each read by the judge. <folder>/py is the stub harness: the two tasks, an image fetch that waits while
+# $SWE_FX/ihold is there and fails when $SWE_FX/broken names it, and a grade that resolves a patch holding "fixed" unless $SWE_FX/wrong names the task.
 swemake() { # <folder>
   local F=$1 e=$1/eng
   mkdir -p "$F" && git init -q -b main "$F/task" && echo bug > "$F/task/x.py" && git -C "$F/task" add -A && git -C "$F/task" commit -qm base \
@@ -65,7 +65,7 @@ shift # the harness script's path
 case $1 in
   tasks) for t in proj__a-1 proj__b-2; do jq -nc --arg t "$t" --arg u "file://$SWE_FX/task.git" --arg b "$(git -C "$SWE_FX/task.git" rev-parse main)" \
       '{id: $t, repo: "o/proj", url: $u, base: $b, issue: "Fix x.py for \($t)", image: "img-\($t)", cmd: "true"}'; done > "$4" ;;
-  image) [ "$(cat "$SWE_FX/broken" 2>/dev/null)" != "$2" ] || exit 3 ;;
+  image) while [ -e "$SWE_FX/ihold" ]; do sleep 0.1; done; [ "$(cat "$SWE_FX/broken" 2>/dev/null)" != "$2" ] || exit 3 ;;
   grade) echo "$2 $3 $4" >> "$SWE_FX/graded"
     if grep -q fixed "$5" && [ "$(cat "$SWE_FX/wrong" 2>/dev/null)" != "$4" ]; then echo '{"resolved":true}'; else echo '{"resolved":false}'; fi ;;
 esac
@@ -131,11 +131,12 @@ swe() {
     && jq -cn --arg a "$T/$CASE/acct" '{accounts: [{name: "bench", configDir: $a}]}' > "$XDG_CONFIG_HOME/conveyor/host.json" \
     && jq -c '.account = "bench"' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json" || fail "the logins were not made"
   # The conveyor arm on both engines and Claude alone passed their preflight an hour ago (a case of the preflight runs it),
-  # with the logins their seats take (the conveyor arm's builder m is Claude's, its reviewer x Codex's), on the pinned first task's image and swe.json's limits.
+  # with the logins their seats take (the conveyor arm's builder m is Claude's, its reviewer x Codex's), on the pinned first task's image, swe.json's limits and task set.
   local k a
   for k in conveyor/$EA conveyor/$EB solo/solo-m; do a=${k%/*}; mkdir -p "$B/preflight/$a"
     jq -cn --arg k "${k#*/}" --argjson e "$(($(date +%s) - 3600))" --argjson s "$(jq -cS --arg n "$a" '.name = $n' "$SWE_FX/arms/$a.json")" --arg i "img-$(sweorder | head -n 1)" --argjson lim "$(jq -c '{cpus: .limits.cpus, memory: .limits.memory, taskTimeout}' "$SRC/bench/swe.json")" \
-      '{arm: $s.name, key: $k, ok: true, why: null, at: "2026-11-17T00:00:00Z", epoch: $e, spec: $s, logins: (if $s.kind == "conveyor" then "claude codex" else "claude" end), image: $i, limits: $lim}' \
+      --argjson set "$(jq -c '{dataset, revision, seed}' "$SRC/bench/swe.json")" \
+      '{arm: $s.name, key: $k, ok: true, why: null, at: "2026-11-17T00:00:00Z", epoch: $e, spec: $s, logins: (if $s.kind == "conveyor" then "claude codex" else "claude" end), image: $i, limits: $lim, set: $set}' \
       > "$B/preflight/$a/${k#*/}.json" || fail "the preflight passes were not kept"
   done
 }
@@ -418,7 +419,7 @@ t_swearmmodel() {
 # their state; show gives one run's tasks in its order, each arm's result and patch; neither is in the snapshot.
 t_swehistory() {
   swe; local p o
-  mkdir -p "$B/results/stub-a" "$B/results/stub-b" && jq -nc '{id: "proj__b-2", issue: "\nSecond line first\nmore"}, {id: "proj__a-1", issue: "First task"}' > "$TL" \
+  mkdir -p "$B/results/stub-a" "$B/results/stub-b" && jq -nc --arg i "img-$(sweorder | head -n 1)" '{id: "proj__b-2", issue: "\nSecond line first\nmore", image: $i}, {id: "proj__a-1", issue: "First task"}' > "$TL" \
     && for p in stub-a/proj__a-1/true/1/7 stub-a/proj__b-2/true/2/5 stub-b/proj__a-1/false/1/3; do IFS=/ read -r a t r s k <<<"$p"
       jq -nc --arg a "$a" --arg t "$t" --argjson r "$r" --argjson s "$s" --argjson k "$k" '{task: $t, arm: $a, key: $a, label: $a, resolved: $r, fired: true, sessions: $s, tokens: $k, minutes: 1, steps: []}' > "$B/results/$a/$t.json"; done \
     && printf '%s\n' 'diff --git a/x.py b/x.py' '--- a/x.py' '+++ b/x.py' '@@ -1 +1 @@' '-bug' '+fixed' > "$B/results/stub-a/proj__a-1.patch" \

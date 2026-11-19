@@ -10,7 +10,7 @@
 //     notes to read it with; or the run in progress with a bar of tasks done a arm, the task now and Stop; or how the
 //     last run ended: stopped, at the usage guard, an arm's preflight failed; or nothing yet), History (every run newest
 //     first, grouped by task set, each with a box to tick: up to 6, for Compare and the infographic), Arms (how many are
-//     ready, failing their preflight, not checked, not offered) and Drift watch, folded. With runs ticked, a bar at the
+//     ready, checking with its step, failing their preflight, not checked, not offered) and Drift watch, folded. With runs ticked, a bar at the
 //     foot of the screen offers Compare, Generate infographic and Clear.
 //   A run: each arm a column and each task a row (resolved or not, sessions, minutes), totals a arm, Export figures
 //     (one JSON file of the figures: no code, no names, no machine names); a task opened shows each arm's patch, its
@@ -37,7 +37,7 @@
   const B = {
     el: null, ctx: null, d: null, repo: undefined,
     page: 'overview',
-    hist: null,         // the history read: {repo, stamp, busy, data, error}
+    hist: null,         // the history read: {repo, stamp, busy, data, error, read (when it ended, by the Board's clock)}
     runs: new Map(),    // each run's tasks read, by `${repo}|${id}`: {stamp, busy, data, error}
     open: null,         // the run the run page shows (null: the newest)
     task: null,         // the task opened on the run page
@@ -128,7 +128,7 @@
     const o = { repo, stamp, busy: true, data: was && was.repo === repo ? was.data : null, error: null };
     B.hist = o;
     getJSON(`bench?repo=${encodeURIComponent(repo)}`).then((x) => { if (obj(x)) o.data = x; else o.error = 'the answer did not read'; },
-      (e) => { o.error = e && e.message ? e.message : 'no answer'; }).then(() => { o.busy = false; if (B.hist === o) draw(); });
+      (e) => { o.error = e && e.message ? e.message : 'no answer'; }).then(() => { o.busy = false; o.read = B.ctx.now(); if (B.hist === o) draw(); });
   }
   function readRun(id) {
     const repo = B.repo, k = `${repo}|${id}`, was = B.runs.get(k), l = live();
@@ -325,12 +325,14 @@
   function armsPart() {
     const arms = armsOf(), s = section('bench-arms', 'Arms', hist() ? arms.length : null, 'An arm is one way to build a task. Each is one file in conveyor/bench/arms/ with a preflight.');
     if (!hist()) { s.append(reading('the arms')); return s; }
-    const t = h('table', 'tests-table'), rows = [['Ready', (a) => a.state === 'ready', 'ok'], ['Preflight failing', (a) => a.state === 'failed', 'bad'],
-      ['Not checked', (a) => a.state === 'unchecked' || a.state === 'changed', 'quiet'], ['Not offered', (a) => a.state === 'not offered', 'quiet']];
+    const t = h('table', 'tests-table'), rows = [['Ready', (a) => a.state === 'ready', 'ok'], ['Checking', (a) => a.state === 'checking', 'quiet'], ['Preflight failing', (a) => a.state === 'failed', 'bad'],
+      ['Not checked', (a) => a.state === 'unchecked' || a.state === 'changed' || a.state === 'expired', 'quiet'], ['Not offered', (a) => a.state === 'not offered', 'quiet']];
     rows.forEach(([name, is, tone]) => {
       const these = arms.filter(is), tr = h('tr'), v = h('td', 'r');
       v.append(h('span', tone === 'bad' && these.length ? 'bad' : tone === 'quiet' ? 'muted' : null, String(these.length)));
-      if (these.length && name !== 'Ready') v.append(h('span', 'bench-sub', these.map((a) => `${a.label}${a.why ? `: ${a.why}` : ''}`).join(' · ')));
+      // A check that runs says the step it is at; another state, why.
+      const why = (a) => (a.state === 'checking' ? String(a.step || 'Starting the test container') : a.why);
+      if (these.length && name !== 'Ready') v.append(h('span', 'bench-sub', these.map((a) => `${a.label}${why(a) ? `: ${why(a)}` : ''}`).join(' · ')));
       tr.append(h('td', 'bench-name', name), v);
       t.append(tr);
     });
@@ -597,7 +599,8 @@
   // ---- Start a run ----
   const armGroup = (a) => (a.state === 'not offered' ? 'Other agents' : { 1: 'Conveyor', 3: 'Conveyor', 2: 'Claude, plain', 5: 'Claude + a plugin or method', 4: 'Codex' }[group(a)]);
   const GROUPS = ['Conveyor', 'Claude, plain', 'Claude + a plugin or method', 'Codex', 'Other agents'];
-  const ARM_STATE = { ready: ['Ready', 'ok'], failed: ['Preflight failed', 'bad'], unchecked: ['Not checked', 'quiet'], changed: ['Changed since its check', 'warn'], 'not offered': ['Not offered', 'quiet'] };
+  const ARM_STATE = { ready: ['Ready', 'ok'], checking: ['Checking', 'quiet'], failed: ['Preflight failed', 'bad'], unchecked: ['Not checked', 'quiet'], changed: ['Changed since its check', 'warn'],
+    expired: ['Check expired', 'warn'], 'not offered': ['Not offered', 'quiet'] };
   const versionsOf = () => list(obj(B.d && B.d.bench) && B.d.bench.versions).filter((v) => obj(v) && typeof v.name === 'string');
   function engineOf() { return B.start.engine === 'commit' ? B.start.commit : B.start.engine; }
   // The tasks of the first n the arm has run on the version picked are reused: only the rest cost. Not for main: the
@@ -688,18 +691,22 @@
           // Not ready: the box sends the arm's preflight, as its Check button does, and picks the arm once it succeeds.
           if (B.busy) { box.checked = false; say(`check-${a.name}`, 'Wait for the answer to the last action.', 'warn'); return; }
           B.start.checking.set(a.name, atOf(a)); B.start.arms.add(a.name);
-          send(`check-${a.name}`, ['arms', 'check', a.name], (t) => `${t.replace(/^conveyor: /, '')}. Read the arms again in a few minutes.`, null,
+          send(`check-${a.name}`, ['arms', 'check', a.name], (t) => `${t.replace(/^conveyor: /, '')}. Read the arms again in a few minutes.`, () => readHist(true),
             () => { B.start.checking.delete(a.name); B.start.arms.delete(a.name); }, { at: atOf(a) });
         });
-        const [word, tone] = checking ? ['Checking its preflight…', 'quiet'] : ARM_STATE[a.state] || [String(a.state), 'quiet'];
-        text.append(h('span', 'bench-name', a.label), ' ', B.ctx.chip(word, tone), h('span', 'bench-sub', a.why || (a.kind === 'conveyor' ? 'the engine\'s loop builds each task: build, reviews, fix rounds, test step' : `${sessionsWord(a.perTask && a.perTask.worst) || 'its own sessions'} a task, headless`)));
+        const [word, tone] = checking && a.state !== 'checking' ? ['Checking its preflight…', 'quiet'] : ARM_STATE[a.state] || [String(a.state), 'quiet'];
+        // A check that runs shows the step it is at, in a polite live region (the arms are read again while it runs: recheck).
+        const sub = a.state === 'checking' ? h('span', 'bench-sub', String(a.step || 'Starting the test container').replace(/\.?$/, '.'))
+          : h('span', 'bench-sub', a.why || (a.kind === 'conveyor' ? 'the engine\'s loop builds each task: build, reviews, fix rounds, test step' : `${sessionsWord(a.perTask && a.perTask.worst) || 'its own sessions'} a task, headless`));
+        if (a.state === 'checking') sub.setAttribute('aria-live', 'polite');
+        text.append(h('span', 'bench-name', a.label), ' ', B.ctx.chip(word, tone), sub);
         const p = plan(a);
         lab.append(box, text, h('span', 'bench-cost', a.perTask && a.state !== 'not offered' ? `${p.usual} sessions (worst ${p.worst}) · ${p.minutes} min · ${p.usd === null ? COST : B.ctx.money(p.usd)}` : ''));
         const cell = h('div', 'bench-arm-cell');
         cell.append(lab);
-        if (a.state === 'unchecked' || a.state === 'changed' || a.state === 'failed') {
-          cell.append(button(a.state === 'failed' ? 'Check again' : 'Check', 'btn-quiet btn-sm', `check-${a.name}`, `Run the preflight of ${a.label}`,
-            () => send(`check-${a.name}`, ['arms', 'check', a.name], (t) => `${t.replace(/^conveyor: /, '')}. Read the arms again in a few minutes.`, null, null, { at: atOf(a) })));
+        if (a.state === 'unchecked' || a.state === 'changed' || a.state === 'failed' || a.state === 'expired') {
+          cell.append(button(a.state === 'failed' || a.state === 'expired' ? 'Check again' : 'Check', 'btn-quiet btn-sm', `check-${a.name}`, `Run the preflight of ${a.label}`,
+            () => send(`check-${a.name}`, ['arms', 'check', a.name], (t) => `${t.replace(/^conveyor: /, '')}. Read the arms again in a few minutes.`, () => readHist(true), null, { at: atOf(a) })));
         }
         // The answer to this arm's check (its box or its Check button) shows in the arm, not at the foot of the page. Once
         // the arms are read again, a check the host took is answered by the arm's state: passed when the arm reads ready,
@@ -912,6 +919,15 @@
     if (B.held) { B.late = true; return; }
     draw();
   }
+  // While an arm's check runs, the arms are read again on the Board's clock (its tick), one read at a time and at most
+  // one each CHECK_MS after the last one ended: a check alone moves no run, so the Board sends the panel no update for
+  // it, yet its step and its end show with no press, after a reload too (the arms read checking then).
+  const CHECK_MS = 5000;
+  function tick() {
+    const was = B.hist;
+    if (!was || was.repo !== B.repo || was.busy || !armsOf().some((a) => a.state === 'checking')) return;
+    if (B.ctx.now() - (was.read || 0) >= CHECK_MS) readHist(true);
+  }
   // The panel is drawn whole. A control drawn anew between its press and its release lost the click, so a part that
   // comes while the pointer is pressed in the panel is drawn after the release (as on the Tests page).
   document.addEventListener('pointerdown', (e) => { B.held = Boolean(B.el && B.el.contains(e.target)); }, true);
@@ -931,5 +947,6 @@
     empty(el, ctx) { el.append(ctx.state('empty', 'No benchmarks to show', 'Conveyor did not run on this project on the build machine yet. Start Conveyor there, and its benchmarks show here.')); },
     error(el, message, ctx) { el.append(ctx.state('error', 'The Board could not read the benchmarks', message)); },
     render,
+    tick,
   });
 }());

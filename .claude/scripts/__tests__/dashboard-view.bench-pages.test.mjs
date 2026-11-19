@@ -4,7 +4,7 @@
 // tasks; Start a run with the cost before Start and only the arms whose preflight passed; the infographic of the runs
 // selected, whose notes a title cannot remove. Shared setup: dashboard-view.helpers.mjs (BH).
 import assert from 'node:assert/strict';
-import { boot, next, settle, act, cases, full, BH } from './dashboard-view.helpers.mjs';
+import { boot, next, tick, settle, act, cases, full, BH } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const { bp, heads, NEW, OLD, EA, EB } = BH;
@@ -318,6 +318,44 @@ test('Start: a Check\'s answer shows in its arm through a redraw, pending, refus
   act(bp(w), 'arms-again').click();
   await settle();
   assert.equal(inArm('superpowers'), 'Check failed. it is not logged in. Edit the arm or fix its setup, then choose Check again.');
+});
+
+// Bug it guards (#639 review E2): the arms were read again only when the Board sent the panel an update, and a check
+// alone moves no run, so the Board sends none: a check that ran showed neither its step nor its end until Read the
+// arms again was pressed. The Overview's Checking row did not say the step. An arm whose pass had expired had no
+// Check again. While an arm reads checking, the panel's clock reads the arms again, with no update of the Board.
+test('Start: a check that runs shows its step and is read again on the clock until it ends; the Overview says its step; an expired arm offers Check again', async () => {
+  const w = await opened();
+  const arm = (a) => bp(w).querySelector(`.bench-arm[data-arm="${a}"]`);
+  const shown = (a) => [arm(a).querySelector('.chip').textContent, text(arm(a).querySelector('.bench-sub'))];
+  let step = 'Running the trivial task';
+  const now = (a) => ({ chisle: step ? { state: 'checking', step, at: '2026-11-19T06:20:00Z' } : { state: 'ready', at: '2026-11-19T06:25:00Z' },
+    solo: { state: 'expired', at: '2026-11-17T06:00:00Z' } })[a.name];
+  w.benchBody = () => { const x = BH.hist(); return { ...x, arms: x.arms.map((a) => ({ ...a, ...now(a) })) }; };
+  act(bp(w), 'to-start').click();
+  act(bp(w), 'arms-again').click();
+  await settle();
+  assert.deepEqual(shown('chisle'), ['Checking', 'Running the trivial task.']);
+  assert.equal(arm('chisle').querySelector('.bench-sub').getAttribute('aria-live'), 'polite');
+  assert.deepEqual([arm('solo').querySelector('.chip').textContent, text(act(bp(w), 'check-solo'))], ['Check expired', 'Check again']);
+  const asks = w.benchAsks.length;
+  step = 'Reading its change';
+  tick(w, 5000);  // the clock alone: no update of the Board
+  await settle();
+  assert.equal(w.benchAsks.length, asks + 1, 'the clock reads the arms again while one checks');
+  assert.deepEqual(shown('chisle'), ['Checking', 'Reading its change.']);
+  act(bp(w), 'back').click();
+  const row = Array.from(bp(w).querySelectorAll('.bench-arms tr')).find((r) => text(r.children[0]) === 'Checking');
+  assert.equal(text(row.children[1].querySelector('.bench-sub')), 'Claude with Chisle: Reading its change','the Overview says the step the check is at');
+  step = null;
+  tick(w, 5000);
+  await settle();
+  act(bp(w), 'see-every-arm').click();
+  assert.equal(shown('chisle')[0], 'Ready', 'the end of the check shows with no press');
+  const done = w.benchAsks.length;
+  tick(w, 5000);
+  await settle();
+  assert.equal(w.benchAsks.length, done, 'once no check runs, the clock reads nothing');
 });
 
 // Bug it guards (review E2): answers were kept by action only, so List versions in one project replaced the answer
