@@ -98,19 +98,24 @@ t_restart() {
 # of a loop on old code. (The cards in flight at a restart: adopt.test.sh.)
 t_follow() {
   setup '[]'; S=$ST; coderepo; trap 'kill $pid $z 2>/dev/null; chmod -R u+w "$T/$CASE"' EXIT; pid='' z=''
-  git -C "$D" reset -q --hard "$A" || fail "the checkout was not put back on $A"
-  newloop
+  git -C "$D" reset -q --hard "$A" || fail "the checkout was not put back on $A"; newloop
   # The checkout's engine, loaded once at $A: a `serve` of it (FOLLOW) is not stale until $B lands in the checkout,
   # and then is; a `run` of it is not, as its own landings move HEAD. The commit a card in flight runs (cardcode()),
   # which a restart names and hands on: the one its last start line names (it switched to new code), else the one it
   # started on. The loop's turn says why it restarts and starts the checkout's own code (exec, in its own process).
+  # c7-7's review step begins (began(), in a subshell: a card's own process) while loop.json says the loop runs $B from
+  # the checkout: c7-7 then runs $B's ctlcheck (cap 9 refused before, taken after) and its start line names $B. Bug: it
+  # could not read $A's files from the checkout (git archive), so kept $A's code. (issue..vrule: card()'s, for switchcode.)
   out=$(eng "$D/conveyor" 'FOLLOW=serve; stale && echo "stale on $A"; git -C "$D" merge -q --ff-only "$B" || echo "no merge"
     stale && echo "serve stale on $B"; FOLLOW=; stale && echo "run stale on $B"
-    record c7-7 7 picked ok; record c7-7 7 start ok "{\"of\":\"review\",\"engine\":\"$B\"}"; record c8-8 8 picked ok
+    record c7-7 7 picked ok; record c8-8 8 picked ok; jq -n --argjson p $$ --arg c "$B" --arg d "$D/conveyor" "{pid: \$p, commit: \$c, checkout: \$d}" > "$SAYS"
+    issue="{\"number\":7,\"title\":\"seven\",\"body\":\"\"}" hdr=h rules=r vrule=on; ( c9() { ctlcheck <<<"{\"cap\":9}" >/dev/null && echo "c7-7 takes cap 9 $1"; }; c9 before; began c7-7 7 review; c9 after )
     echo "c7-7 on $(cardcode c7-7 "$A"), c8-8 on $(cardcode c8-8 "$A")"
     nojobs; BASH=$STUB/newloop; run "" serve' 2>&1)
   ! grep -q '^stale on\|^run stale on\|^no merge' <<<"$out" && grep -qx "serve stale on $B" <<<"$out" \
     || fail "a serve from the checkout did not see its new commit alone, or a run from it did: $out"
+  grep -qxF "conveyor: card c7-7: Conveyor took commit $B; the card goes on with the new code from its review step, and no passed step runs again" <<<"$out" \
+    && grep -qx "c7-7 takes cap 9 after" <<<"$out" && ! grep -q "c7-7 takes cap 9 before" <<<"$out" || fail "a card of a loop run from the checkout did not go on with the checkout's new code: $out"
   grep -qx "c7-7 on $B, c8-8 on $A" <<<"$out" || fail "the commit of a card in flight is not the one its last switch named, else the one it started on: $out"
   grep -qxF "conveyor: the checkout has moved on from this loop's $A; nothing new is picked, and the loop restarts on the checkout's new code once its push is done" <<<"$out" \
     && grep -qxF "conveyor: restarting on the new code; 0 cards in flight carry on on $A" <<<"$out" \
@@ -581,4 +586,35 @@ t_servesame() {
   eng "$V/$B/conveyor" "mv $(printf '%q %q' "$R/.conveyor/project.json" "$STUB/pack")"'; [ -n "$OWN" ] || echo "not run from the install"
     told=""; for i in 1 2 3 4 5 6; do stale; packturn; [ -n "$nopack" ] || echo "turn $i read the pack"; done' > "$STUB/turns.out" 2>&1
   [ "$(cat "$STUB/turns.out")" = "conveyor pack: $R/.conveyor/project.json: no such file" ] || fail "held for 6 turns by a pack that does not read, the installed loop said more than the reason, once: $(cat "$STUB/turns.out")"
+}
+
+# Bug: the loop that a restart starts adopts a card that has landed and not pushed yet; the card's process ends while
+# the last line of the card records is still being written (a long line reaches the file in more than one write),
+# the whole read of the records fails, and the loop writes `blocked` ("its process ended without a result") for the
+# landed card, which then stays in Needs you after its push goes out.
+t_landedrestart() {
+  setup '[]'; S=$ST; O=$T/$CASE/origin; mkdir -p "$S"
+  echo x > "$R/n.txt"; git -C "$R" add -A; git -C "$R" commit -qm next; sha=$(git -C "$R" rev-parse HEAD)
+  rec() { # <card> <issue> <step> [extra json]
+    jq -cn --arg c "$1" --argjson i "$2" --arg s "$3" --argjson x "${4:-{\}}" \
+      '{card:$c,issue:$i,step:$s,time:(now | todate),tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""} * $x'
+  }
+  { rec c1-14 14 picked; rec c1-14 14 landed "{\"sha\":\"$sha\",\"product\":false}"; } >> "$S/cards.jsonl"
+  # Another card's line, half written.
+  l=$(rec c2-15 15 picked); printf '%s' "${l:0:40}" >> "$S/cards.jsonl"
+  # The landed card's process, adopted from the loop before the restart, has ended.
+  sleep 0 & dead=$!; wait $dead # sleep: a stand-in for a card's process that has ended
+  # One `run` given the adopted card (CONVEYOR_ADOPT, with the run lock on fd 8), with the push rule off: no line of
+  # its own is written after the half-written one. Its first turn sees to the adopted card, and it ends: the look at
+  # an adopted card is run()'s own, in its turn, so the case runs the loop, in the foreground.
+  pushrule() { jq --argjson p "$1" '.rules.push = $p' "$S/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$S/control.json"; } # <true | false>
+  pushrule false
+  out=$(CONVEYOR_ADOPT="$dead c1-14 14 $(git -C "$SRC" rev-parse HEAD)" loop run 8>>"$S/cards.jsonl.run" 2>&1) || fail "the run that adopted the landed card failed: $out"
+  ! grep -q '"step":"blocked"' "$S/cards.jsonl" || fail "the loop blocked the adopted card that had landed: $out"
+  # Once the line is whole, the landed card's push is the next loop's, as for any landing.
+  printf '%s\n' "${l:40}" >> "$S/cards.jsonl"; pushrule true
+  out=$(loop run 2>&1) || fail "the run that pushes the landed card failed: $out"
+  [ "$(git -C "$O" rev-parse main)" = "$sha" ] && [ -n "$(st 'select(.card == "c1-14" and .step == "pushed")')" ] && [ -z "$(st 'select(.step == "blocked")')" ] && loop check \
+    || fail "the landed card's push did not go out, or it was blocked: $(st '"\(.card) \(.step)"' | tr '\n' ,) $out"
+  loopend
 }
