@@ -33,6 +33,11 @@ EOF
 V=A
 t=$(gh issue list --json title | jq -r '.[0].title'); echo "$V $t" >> "$SWE_FX/log"; echo $$ > "$SWE_FX/pid"
 while [ -e "$SWE_FX/hold" ]; do sleep 0.1; done
+# The real loop starts no card unless its queue takes the task's issue: the dry pick on the sandbox's pack, control
+# record and issue, by the engine under test (a fake that skipped it missed an arm's policy keeping the issue off).
+# The issue is opened by the owner, as openissues() reads it from GitHub.
+q=$(mktemp) && gh issue list --json number,title,body,labels,createdAt | jq -c 'map(.authorAssociation = "OWNER")' > "$q" \
+  && p=$(bash "$SWE_SRC/conveyor.sh" pick --dry --issues "$q" --state "$CONVEYOR_MAIN/conveyor/state" 2>> "$SWE_FX/pick.err"); rm -f "$q"; [ -n "${p:-}" ] || exit 0
 mkdir -p "$CONVEYOR_MAIN/conveyor/state"
 rec() { jq -nc --arg s "$1" --arg r "$2" --arg w "${3:-}" --argjson j "${4:-null}" --arg t "${5:-}" '{card: "c1", issue: 1, step: $s, result: $r, reason: $w, time: "2026-11-01T00:00:00Z", tokens: {claude: 100, codex: 10}}
   + (if $j == null then {} else {judge: $j} end) + (if $t == "" then {} else {tail: $t} end)' >> "$CONVEYOR_MAIN/conveyor/state/cards.jsonl"; }

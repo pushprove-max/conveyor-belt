@@ -193,7 +193,8 @@ swerulesarm() {
 # "style" the judge's one always-accepted kind; P2, which it leaves out, is the project's. Bug (#703): the arm was
 # refused when an area rule file was missing that no card of the run reads; the pack also maps gone/* to a file that
 # is not there, a path neither the preflight task nor the task run names, so the run goes on and its pack maps no
-# area to that file.
+# area to that file. Bug (#702): with P3 off the task's issue, which has no priority label and so is P3, was kept off
+# the queue and no card ran (the fake engine runs the real dry pick).
 t_swerules() {
   swerulesarm; local out r id
   tune '.areas["gone/*"] = "rules/gone.md"' || fail "the absent area rule was not mapped"
@@ -208,6 +209,17 @@ t_swerules() {
   [[ $r == "$(cat "$SRC/rules/card-core.md")"* ]] && [[ $r == *PACK-CARD-RULE* ]] && [[ $r == *AREA-RULE-X* ]] && [[ $r != *AREA-RULE-OTHER* ]] \
     || fail "the card's rules are not the core rules, the project's card rules and the area rule of x.py alone: $r"
   jq -e '.areas | keys == ["x.py"]' "$SWE_FX/pack.seen" > /dev/null || fail "the card's pack maps an area its task does not name: $(jq -c .areas "$SWE_FX/pack.seen")"
+}
+
+# An arm whose policy turns off every level the task's issue can have would start a loop that never picks its card;
+# it is refused, and says why.
+t_swepolicyoff() {
+  swe; local out
+  jq '.policy = {P0: false, P1: false, P2: false, P3: false}' "$SWE_FX/arms/conveyor.json" > "$SWE_FX/arms/conveyor-off.json" || fail "the arm was not made"
+  out=$(loop bench swe 1 --arm conveyor-off 2>&1) && fail "the run started with every priority off: $out"
+  grep -qF "the arm's policy turns off every priority the task's issue can have, so its card would never be picked" <<<"$out" \
+    || fail "the run was not refused for its policy: $out"
+  [ ! -e "$SWE_FX/log" ] || fail "a card ran with every priority off: $(cat "$SWE_FX/log")"
 }
 
 # Bug: an arm that takes the project's rules ran with one of them missing, so its cards built on fewer rules than the

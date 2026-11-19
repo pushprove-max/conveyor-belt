@@ -214,7 +214,7 @@ swe_taskrules() { # <arm json> < tasks
 # matches is left out of the pack, as no card there reads its rule. A rule file the card reads missing or unreadable
 # refuses the arm.
 swe_pack() { # <task json> <sb> <engine's conveyor.sh> <arm json>
-  local sb=$2 d=$2/$SWE_MAIN/.conveyor s m l g f i=0 ar='{}';s=$(jq -c '.seats // {}' <<<"$4"); m=$(jq -r '.rules // "engine"' <<<"$4")
+  local sb=$2 d=$2/$SWE_MAIN/.conveyor s m l g f a i=0 ar='{}';s=$(jq -c '.seats // {}' <<<"$4"); m=$(jq -r '.rules // "engine"' <<<"$4")
   mkdir -p "$d" "$sb/cards" && : > "$sb/rulings.jsonl" || return 1
   case $m in
     engine) ;;
@@ -241,6 +241,16 @@ swe_pack() { # <task json> <sb> <engine's conveyor.sh> <arm json>
   mkdir -p "$SWE_SST" && ctl | jq --argjson s "$s" --argjson p "$(jq -c '.policy // {}' <<<"$4")" '.mode = "run" | .held = [] | .order = [] | .startHeld = [] | .start = "queue" | .rules.followups = false | .rules.visible = false
     | .rules.push = true | .cards = {} | del(.account, .reviewAccount) + $s
     | .rules += ($p | with_entries(select(.key | test("^P[0-3]$")))) | . + ($p | with_entries(select(.key | IN("judgeOn", "judgeAlways"))))' > "$SWE_SST/control.json" || { echo "the project's control record could not be read"; return 1; }
+  # The rules P0 to P3 also keep an issue of that level off the queue (upnext.jq), and the task's issue has no
+  # priority label, so the engine reads it as P3: an arm with P3 off (its P3 findings minor) never got its card
+  # picked. The issue takes no label while its level's rule is on, else the pack's least urgent priority whose level's
+  # rule is on (LEVEL, lib/prompts.sh); an arm whose rules leave no such level is refused.
+  packget labels.priorities a && g=$(jq -c --argjson p "$a" '.rules as $r | def on($l): $r[$l] != false;
+    if on("P3") then [] else [range($p | length) | select(on("P\([., 3] | min)"))] | last | if . == null then empty else [$p[.]] end end' "$SWE_SST/control.json") \
+    || { echo "the project's pack could not be read for its priorities"; return 1; }
+  [ -n "$g" ] || { echo "the arm's policy turns off every priority the task's issue can have, so its card would never be picked"; return 1; }
+  jq -c --argjson l "$g" '.labels = ($l | map({name: .}))' "$sb/issue.json" > "$sb/issue.json.new" && mv -f "$sb/issue.json.new" "$sb/issue.json" \
+    || { rm -f "$sb/issue.json.new"; echo "the task's issue could not be given its priority"; return 1; }
 }
 SWE_ASK='Fix this issue in the repository in the current folder. Change the code only; do not commit.'
 # One trial: the arm builds the task in its container. Prints {sessions, tokens, minutes, steps, fired, why}; keeps

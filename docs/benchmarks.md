@@ -143,7 +143,10 @@ The `policy` choice sets the judge and the priority switches of the task's card.
   them. An empty list means none.
 - `P0`, `P1`, `P2` and `P3`: `true` or `false`, as `conveyor.sh control rules P3=off` and the other priorities do.
   These switches set which issues the loop builds. The task's issue has no priority, so it counts as P3: `P0`, `P1`
-  and `P2` do not change the task's card, and with `P3` set to `false` the loop does not build the task.
+  and `P2` do not change the task's card while `P3` is on. A priority that is off also keeps issues of that priority
+  off the queue. When `P3` is off, the task's issue gets the least urgent priority label of your project that is
+  still on. When the arm turns off every priority, the check and the start refuse the arm and tell you that its card
+  would never be picked.
 
 A key that you leave out keeps the value of your control record.
 
