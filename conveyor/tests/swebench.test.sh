@@ -211,8 +211,8 @@ t_swestop() {
   wait_until "! kill -0 $p 2>/dev/null" || fail "the engine loop of the sandbox still runs after Stop"
   wait $! 2>/dev/null
   [ "$(tail -n 1 "$B/runs.jsonl" | jq -r .state)" = stopped ] || fail "the run's line does not say stopped: $(cat "$B/runs.jsonl" 2>&1)"
-  out=$(loop bench swe show "$(tail -n 1 "$B/runs.jsonl" | jq -r .id)" 2>&1) && [ "$(jq -c '[.tasks[].cells[0].state]' <<<"$out")" = '["interrupted","not reached"]' ] \
-    || fail "show does not tell the task Stop interrupted from the one never reached (#643): $out"
+  out=$(loop bench swe show "$(tail -n 1 "$B/runs.jsonl" | jq -r .id)" 2>&1) && [ "$(jq -c '[.tasks[].cells[0].state, .run.cost]' <<<"$out")" = '["interrupted","not reached",{"usd":0,"state":"known"}]' ] \
+    || fail "show does not tell the task Stop interrupted from the one never reached (#643), or the task stopped before its card recorded anything reads as an unknown cost, not \$0 (#644): $out"
   [ ! -d "$B/work" ] && [ -z "$(ls "$B"/results/*-"$EB" 2>/dev/null)" ] || fail "the stopped task left a sandbox or a result"
   # Bug: Stop killed the docker client only; the trial's container, with the logins copied into it, was left running.
   [ -z "$(ls "$SWE_FX/boxes")" ] || fail "the stopped trial's container was not removed: $(ls "$SWE_FX/boxes")"

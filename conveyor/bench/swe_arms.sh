@@ -338,7 +338,9 @@ swe_ctl() { # <arm json>
     | .rules += ($p | with_entries(select(.key | test("^P[0-3]$")))) | . + ($p | with_entries(select(.key | IN("judgeOn", "judgeAlways"))))'
 }
 SWE_ASK='Fix this issue in the repository in the current folder. Change the code only; do not commit.'
-# One trial: the arm builds the task in its container. Prints {sessions, tokens, minutes, steps, fired, why}; keeps
+# One trial: the arm builds the task in its container. Prints {sessions, tokens, minutes, steps, cost, fired, why}
+# (a conveyor arm's steps keep each line's model and token usage, cost is swe_cost of its card's lines, its live
+# records and the reviewer's record swe_watch kept); keeps
 # the patch (and a conveyor arm's loop log) in <sb>.h, the trial's own folder on the host, outside the container's
 # mount; fails (prints why) only when the container could not be made or the patch read, which says nothing of the
 # arm. An arm that does not fire (its install, preflight or command failed, or its output shows no use of its method)
@@ -379,7 +381,9 @@ swe_trial() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor kind
     else git add -A && git diff --binary --no-ext-diff --no-textconv --cached "$SWE_BASE" --; fi' "SWE_SB=$sb" "SWE_BASE=$base" "SWE_KIND=$kind" < /dev/null > "$h/patch" 2> /dev/null || p=1
   if [ "$kind" = conveyor ]; then
     swe_in 600 "$c" "$sb" 'cat "$SWE_SB/loop.log"' "SWE_SB=$sb" < /dev/null > "$h/loop.log" 2> /dev/null || rm -f "$h/loop.log"
-    swe_in 600 "$c" "$sb" 'cat "$SWE_SST/cards.jsonl"' "SWE_SST=$SWE_SST" < /dev/null > "$h/cards.jsonl" 2> /dev/null
+    swe_in 600 "$c" "$sb" 'cat "$SWE_SST/cards.jsonl"' "SWE_SST=$SWE_SST" < /dev/null > "$h/cards.jsonl" 2> /dev/null || rm -f "$h/cards.jsonl"
+    # The live records too: a session the time limit ended before its line was written is priced from them.
+    swe_in 600 "$c" / "$SWE_LIVES" "SWE_CARDS=$sb/cards" < /dev/null > "$h/live" 2> /dev/null || rm -f "$h/live"
   fi
   docker rm -f "$c" > /dev/null 2>&1; rm -f "$h/box"
   [ "$p" = 0 ] || return 1
@@ -388,8 +392,10 @@ swe_trial() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor kind
     b=$(jq -sc --argjson m "$secs" 'map(select(.issue == 1 and (.step | IN("start", "picked", "worktree", "deps", "brief") | not))) as $s
       | {sessions: ($s | map(select(.step | IN("build", "review", "fix", "rebase"))) | length) + ($s | map(select(.judge | type == "object")) | length),
          tokens: ($s | map((.tokens.claude // 0) + (.tokens.codex // 0) + (.judge.tokens.claude // 0) + (.judge.tokens.codex // 0)) | add // 0),
-         minutes: ($m / 6 | round / 10), steps: ($s | map({step, result, reason, time, tokens} + if .step == "review" and .result != "GO" and has("tail") then {tail} else {} end))}' "$h/cards.jsonl" 2>/dev/null) \
-      || b=$(jq -nc --argjson m "$secs" '{sessions: 0, tokens: 0, minutes: ($m / 6 | round / 10), steps: []}')
+         minutes: ($m / 6 | round / 10), steps: ($s | map({step, result, reason, time, tokens} + if .step == "review" and .result != "GO" and has("tail") then {tail} else {} end
+           + ({model, usage, byModel: .stats.byModel?, judge: (.judge | if type == "object" then {model, usage} else null end)} | with_entries(select(.value != null)))))}' "$h/cards.jsonl" 2>/dev/null) \
+      && b=$(jq -c --argjson k "$(cat "$h/cards.jsonl" "$h/live" "$h/reviewer" 2>/dev/null | swe_cost)" '. + {cost: $k}' <<<"$b") \
+      || b=$(jq -nc --argjson m "$secs" '{sessions: 0, tokens: 0, minutes: ($m / 6 | round / 10), steps: [], cost: {usd: null, state: "unknown", unpriced: null, basis: {}}}')
     # An engine that built no card (its pack refused, its loop failed) did not fire.
     [ -n "$why" ] || jq -e '.steps | any(.step == "build")' <<<"$b" > /dev/null \
       || why="the engine built no card: $(cliwords "$(tail -n 3 "$h/loop.log" 2>/dev/null)" | paste -sd ' ' - | head -c 400)"
@@ -398,6 +404,8 @@ swe_trial() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor kind
     b=$(jq -Rsc --argjson m "$secs" --argjson n "$(jq '.sessions // 1' <<<"$a")" "def fired: $(jq -r '.fired // "true"' <<<"$a"); def tok: $(jq -r '.tokens // "0"' <<<"$a");
       [splits(\"\\n\") | fromjson? | objects] as \$o | {sessions: \$n, tokens: ((\$o | tok) // 0), minutes: (\$m / 6 | round / 10), steps: [], fired: ((\$o | fired) == true)}" "$h/out") \
       || { echo "the arm's fired or tokens filter is not valid jq"; return 1; }
+    # An agent reports no usage by model: its cost is unknown.
+    b=$(jq -c '. + {cost: {usd: null, state: "unknown", unpriced: .sessions, basis: {}}}' <<<"$b")
     [ -n "$why" ] || jq -e .fired <<<"$b" > /dev/null || why="it did not fire: its output shows no use of its method"
   fi
   jq -c --arg w "$why" '. + {fired: ($w == ""), why: (if $w == "" then null else $w end)}' <<<"$b"

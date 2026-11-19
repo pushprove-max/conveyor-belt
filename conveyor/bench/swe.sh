@@ -37,7 +37,7 @@
 # arm's command runs on the issue, and its change is the patch. An arm that does not fire is a failed task of it.
 # What is kept, under the state folder's bench/swe: tasks.<revision>.<seed's id>.jsonl (the ordered list, swe_list),
 # results/<key>/<task>.json (key: swe_reskey(), from the trial's effective inputs, swe_inputs; resolved, fired,
-# sessions, tokens, minutes, a card's records, the inputs) and .patch, preflight/<arm>/<key>.json (key: swe_armkey(); each check's record, from its start, swe_ckopen) and its lock,
+# sessions, tokens, minutes, its cost at list prices (swe_cost), a card's records, the inputs) and .patch, preflight/<arm>/<key>.json (key: swe_armkey(); each check's record, from its start, swe_ckopen) and its lock,
 # arms/<id>.json (each saved arm revision, swe_armsave), frozen/<arm> while a run goes (its copy of what a conveyor
 # arm reads of the project, swe_freeze),
 # a line a run in runs.jsonl, the run in progress in live.json, tails/<run>.jsonl (each run's event tail, swe_event),
@@ -171,7 +171,7 @@ swe_noise() { jq -rn --argjson n "$1" "$SWE_NOISED"'noised($n) as $d | if $d >= 
 # or the arm's own sessions) and worst case (a conveyor arm's: the build, MAX_REVIEWS reviews, the fix rounds between
 # them, the one fix of a failed test step and the review after it and, while the control record has the judge on, a
 # judge session for each review; another arm's own sessions), its minutes (swe.json's for its kind at first) and
-# session, the dollars one session costs at list prices: a benchmark session keeps no usage to price, so it is the mean
+# session, the dollars one session costs at list prices: the mean
 # of this project's own priced card sessions (the snapshot's $STATE.priced, dashboard_limit.py cardlines' summary: a
 # header line, then a line a card, the card priced in its second tab-separated field; each step with dollars above 0;
 # a test run costs none), those priced at the arm's model when it is given one; null when there is none to take the mean of.
@@ -203,14 +203,25 @@ swe_board() {
 # A run's line as the Board reads it ($R: each result by "<key>/<task>"): its line without its tasks and pid, n the
 # tasks of each arm, and cols, each arm with the tasks it did (done), resolved and not run, and the sessions, tokens
 # and minutes of its results of the tasks it ran (null when the line names no results key: a line written before
-# cols). A run whose process is gone with no end written shows stopped, as the snapshot shows it.
-SWE_RUNSUM='def runsum($R): . as $l | ((.arms // [.arm]) | length) as $na
+# cols), and cost, the list price of the work it did in this run (costsum of each task's cost, the interrupted
+# task's and the active task's so far, the active one's none before its trial's command starts; a reused task adds
+# none, and a task or interrupted line kept with no cost, as one written before costs were, is unknown); the
+# run's cost is that of its cols (null when one is). A run whose process is gone with no end written shows stopped,
+# as the snapshot shows it.
+# costsum: the list price of several pieces of work ({usd, state} each, as swe_cost gives it; null when none was
+# kept): known when every piece is (none at all is a known $0), partial when some piece is priced in whole or in part
+# (usd the priced part), else unknown (usd null).
+SWE_RUNSUM='def costsum: [.[] | objects | .usd | numbers] as $u | all(.[]; type == "object" and .state == "known") as $k
+  | {usd: (if $u == [] then (if $k then 0 else null end) else $u | add * 10000 | round / 10000 end), state: (if $k then "known" elif $u == [] then "unknown" else "partial" end)};
+  def runsum($R): . as $l | ((.arms // [.arm]) | length) as $na
   | (if .state == "running" and (.pid | type) == "number" and (.alive | not) then {state: "stopped", current: null, active: null} else {} end) as $gone
   | del(.tasks, .pid, .alive) + $gone + {n: (((.n // 0) / ([$na, 1] | max)) | floor), cols: [(.cols // ((.arms // [.arm]) | map({arm: ., key: null, label: .})))[] | . as $c
     | [$l.tasks[]? | select(.arm == $c.arm)] as $t | [$t[] | select(.result | tostring | startswith("not run") | not)] as $ran
     | [$ran[] | $R["\($c.key)/\(.id)"] // empty] as $r | def sum(f): if $c.key == null then null else $r | map(f // 0) | add // 0 end;
     $c + {done: ($t | length), resolved: ($t | map(select(.result == "resolved")) | length), notRun: (($t | length) - ($ran | length)),
-      sessions: sum(.sessions), tokens: sum(.tokens), minutes: (sum(.minutes) | if . == null then null else . * 10 | round / 10 end)}]};'
+      sessions: sum(.sessions), tokens: sum(.tokens), minutes: (sum(.minutes) | if . == null then null else . * 10 | round / 10 end),
+      cost: (if $c.key == null then null else [($t[] | select(.reused != true) | .cost), ($l.interrupted | objects | select(.arm == $c.arm) | .cost), ($l.active | objects | select(.arm == $c.arm) | .cost | objects)] | costsum end)}]}
+  | .cost = (if any(.cols[]; .cost == null) then null else [.cols[].cost] | costsum end);'
 # Every run's line (runs.jsonl, then the run in progress), one JSON a line, alive true on a running line whose process is there.
 swe_lines() {
   local p; p=$(jq -r 'select(.state == "running") | .pid // empty' "$SWE_DIR/live.json" 2>/dev/null)
@@ -274,7 +285,7 @@ swe_history() {
 # arm, task and phase it is at, and seq, its read revision, swe_live), tasks, each task the run took in its order and
 # then each it plans and has not reached, with its title (the issue's first line) and, for each arm (cells, in cols
 # order), what the run said of it (result, reused), its state (and phase, while active) and, where it ran that arm on
-# the task, its kept result: resolved, fired, why, sessions, tokens, minutes, its steps (a conveyor
+# the task, its kept result: resolved, fired, why, sessions, tokens, minutes, cost (swe_cost; null in a result kept before it), its steps (a conveyor
 # arm's card records) and its patch (each file with its lines added and removed; null when none is kept); and tail,
 # the run's event tail (swe_event).
 swe_show() { # <run id>
@@ -310,7 +321,7 @@ swe_show() { # <run id>
            state: (if $t != null then "finished" elif at($run.active; $c; $id) then "active" elif $run.state == "running" then "waiting"
              elif at($l.interrupted; $c; $id) then "interrupted" else "not reached" end)}
           + (if $t == null and at($run.active; $c; $id) then {phase: $run.active.phase} else {} end)
-          + ((if $t == null or ($t.result | tostring | startswith("not run")) then {} else $R["\($c.key)/\($id)"] // {} end) | {resolved, fired, why, sessions, tokens, minutes, steps, patch})]}],
+          + ((if $t == null or ($t.result | tostring | startswith("not run")) then {} else $R["\($c.key)/\($id)"] // {} end) | {resolved, fired, why, sessions, tokens, minutes, cost, steps, patch})]}],
       tail: [$tail[] | objects | {at, arm, task, event} | select(all(.[]; . == null or type == "string"))]}' <<<"$l"
   local rc=$?; rm -f "$o"; return $rc
 }
@@ -330,14 +341,52 @@ swe_event() { # <event> [<arm>] [<task>]
     '{at: $at, arm: (if $a == "" then null else $a end), task: (if $t == "" then null else $t end), event: $e}' >> "$f" || return 0
   [ "$(wc -l < "$f")" -le $((2 * SWE_TAILN)) ] || { tail -n "$SWE_TAILN" "$f" > "$f.$$" && mv -f "$f.$$" "$f"; }
 }
-# The work in progress of the run going (SWE_RUN): live.json's active, {arm, task, phase, since}, of the arm in use
-# and the task it is on (SWE_TASK; null while the arm's preflight runs), and an event of the phase. Nothing outside a
-# run or when the phase is the one shown.
+# The work in progress of the run going (SWE_RUN): live.json's active, {arm, task, phase, since, cost}, of the arm in
+# use and the task it is on (SWE_TASK; null while the arm's preflight runs), and an event of the phase. Nothing
+# outside a run or when the phase is the one shown. cost is the trial's work so far (swe_sofar), kept from phase to
+# phase of one task; none before its trial's command starts.
 swe_phase() { # <phase>
   [ -n "${SWE_RUN:-}" ] || return 0
   ! jq -e --arg a "$SWE_ARM" --arg t "${SWE_TASK:-}" --arg p "$1" '.active | objects | .arm == $a and (.task // "") == $t and .phase == $p' "$SWE_DIR/live.json" > /dev/null 2>&1 || return 0
-  swe_live --arg a "$SWE_ARM" --arg t "${SWE_TASK:-}" --arg p "$1" '.active = {arm: $a, task: (if $t == "" then null else $t end), phase: $p, since: (now | todate)}' > /dev/null
+  swe_live --arg a "$SWE_ARM" --arg t "${SWE_TASK:-}" --arg p "$1" '(if $t == "" then null else $t end) as $t
+    | .active = ({arm: $a, task: $t, phase: $p, since: (now | todate)} + ((.active | objects | select(.arm == $a and .task == $t and .cost != null) | {cost}) // {}))' > /dev/null
   swe_event "$1" "$SWE_ARM" "${SWE_TASK:-}"
+}
+# The list price of a trial's work (the Board's pricing, dashboard_limit.py work, with the pack's prices over its
+# table): {usd, state (known, partial or unknown), unpriced (the sessions it could not price), basis (the rates)}.
+# Its input on stdin is a conveyor arm's card record lines and live records (a live record has no card), and the
+# reviewer's last live record swe_watch kept ({reviewer: {of, live}}): the sessions are its card's build, review,
+# fix and rebase lines, a failed one's on its blocked line (spent), and each review's judge, with each line's model
+# and token usage; the live record of the session running is priced only while the card's last line is the start of
+# its step, so the step's own line, once written, replaces what the live record said, and a session started with no
+# live record is unpriced. While the judge runs, the review's live record is the judge's (judgecall()) and the
+# review's line is not yet written: the reviewer is priced from the record swe_watch kept of it since that start
+# line. A review that ran again has its first attempt's usage on its .firsttry (SWE_LIVES) until its line, which
+# holds both (BOTHTRIES), is written: it is priced beside the second attempt's live record, or kept record while the
+# judge runs (one kept in the pause is the first attempt's: the second's is then unpriced), and in the pause it is
+# all the review used. A build, fix or rebase run again after it stalled (its live record names the stall) has its
+# first try kept by nothing a container shows, so that try is unpriced. A line with no usage (an engine that records
+# none) is unpriced; pricing that fails is unknown.
+swe_cost() {
+  local pp; packget prices pp 2>/dev/null && [ -n "$pp" ] || pp='{}'
+  jq -Rsc --argjson p "$pp" '[splits("\n") | fromjson? | objects] as $r | [$r[] | select(has("card") and .issue == 1)] as $c | ($c | last) as $s
+    | (if $s.step == "start" and ($s.of | IN("build", "review", "fix", "rebase")) then ([$r[] | select((has("card") | not) and .step == $s.of)] | last) // {step: $s.of} else null end) as $live
+    | ($s.of == "review" and ([($live.action | strings | startswith("the judge ")) and (($live.at | strings) >= ($s.time | strings))] | any)) as $judging
+    | (if $s.of == "review" then [$r[] | select(has("firsttry") and (.firsttry | type) == "object")] | last else null end) as $ft
+    | {prices: $p, live: (if $ft != null and $ft.second != true and ($judging | not) then null else $live end),
+       steps: [($c[] | if .step == "blocked" then .spent | objects else . end | select(.step | IN("build", "review", "fix", "rebase"))
+           | ({step, model, usage, unread, stats: (.stats | if type == "object" then {models, byModel} else null end)}, (.judge | objects | {step: "judge", model, usage}))),
+         ($ft | objects | .firsttry.spent | if type == "object" then {step: "review", model, usage, unread} else {step: "review"} end),
+         (if $judging then ([$r[] | .reviewer | objects | select(.of == $s and ($ft == null or .second == true)) | .live | objects] | last
+             | {step: "review", model, usage: (if .zero == true then null else .usage end)}) // {step: "review"} else empty end),
+         (if $live.stalled | type == "string" and $s.of != "review" then {step: $s.of} else empty end)]}' \
+    | python3 "$HERE/../.claude/scripts/dashboard_limit.py" work 2>/dev/null \
+    || echo '{"usd":null,"state":"unknown","unpriced":null,"basis":{}}'
+}
+# The active trial's cost so far (live.json's active.cost: {usd, state, unpriced}), written when it changed.
+swe_sofar() { # <cost json>
+  jq -e --argjson k "$1" '.active | objects | .cost != ($k | {usd, state, unpriced})' "$SWE_DIR/live.json" > /dev/null 2>&1 || return 0
+  swe_live --argjson k "$1" '.active.cost = ($k | {usd, state, unpriced})' > /dev/null
 }
 # The step a conveyor arm's card is at, from its card records and its live records (the lines on stdin; a live record
 # has no card): the step its last start line opens, by its name in SWE_STEPS; Judging while a review's judge reads the
@@ -356,15 +405,38 @@ swe_stepof() {
 }
 # While a trial's command runs (<pid>) on a task of the run: the phase it is at (swe_phase). An agent arm's is
 # "Running agent"; a conveyor arm's is its card's step (swe_stepof), read in its container every 2 seconds from its
-# card records and the live records in <sb>/cards, the cards folder its loop runs on (swe_trial).
+# card records and the live records in <sb>/cards, the cards folder its loop runs on (swe_trial). The same records
+# give the trial's cost so far (swe_cost, swe_sofar), priced again only when they changed; the reviewer's last live
+# record before the judge's replaced it is kept in <sb>.h/reviewer, with the start line it follows and whether it is a
+# second attempt's (SWE_LIVES), for swe_cost and
+# the trial's final figure (swe_trial). An agent arm reports no usage while it runs, so its cost is unknown.
+# A card's live records, in its container, and the first attempt of a review that ran again (reviewed() keeps it in
+# <card>.firsttry, .firsttry.new while that attempt's events are still there, until the review's line is written), as
+# {second, firsttry}: second is true once the second attempt has written its events, so the review's live record is
+# that attempt's (as stopped() tells them apart), and false in the pause, when the live record is still the first's.
+SWE_LIVES='for f in "$SWE_CARDS"/*.live; do [ ! -f "$f" ] || { echo; head -c 4000 "$f"; echo; }; done
+  for f in "$SWE_CARDS"/*.firsttry.new "$SWE_CARDS"/*.firsttry; do
+    [ -f "$f" ] || continue; w=${f%.new}; w=${w%.firsttry}; s=false
+    if [ "$f" = "$w.firsttry" ]; then [ ! -f "$f.new" ] || continue; [ ! -s "$w.events" ] || s=true; fi
+    printf "\n{\"second\":%s,\"firsttry\":" "$s"; tr -d "\n" < "$f"; printf "}\n"
+  done; :'
 swe_watch() { # <pid> <container> <kind> <sb>
   [ -n "${SWE_TASK:-}" ] || return 0
-  [ "$3" = conveyor ] || { swe_phase 'Running agent'; return 0; }
-  local k=0 s
+  [ "$3" = conveyor ] || { swe_phase 'Running agent'; swe_sofar "{\"usd\":null,\"state\":\"unknown\",\"unpriced\":${SWE_SESSIONS:-1}}"; return 0; }
+  local k=0 r was='' v
   while kill -0 "$1" 2>/dev/null; do
-    if [ $((k % 10)) = 0 ]; then
-      s=$(swe_in 60 "$2" / 'tail -n 200 "$SWE_SST/cards.jsonl" 2>/dev/null; for f in "$SWE_CARDS"/*.live; do [ ! -f "$f" ] || { echo; head -c 4000 "$f"; echo; }; done; :' \
-        "SWE_SST=$SWE_SST" "SWE_CARDS=$4/cards" < /dev/null | swe_stepof) && swe_phase "$s"
+    if [ $((k % 10)) = 0 ] && r=$(swe_in 60 "$2" / 'tail -n 200 "$SWE_SST/cards.jsonl" 2>/dev/null; '"$SWE_LIVES" \
+        "SWE_SST=$SWE_SST" "SWE_CARDS=$4/cards" < /dev/null); then
+      swe_phase "$(swe_stepof <<<"$r")"
+      if [ "$r" != "$was" ]; then
+        was=$r
+        v=$(jq -Rsc '[splits("\n") | fromjson? | objects] as $r | ([$r[] | select(has("card") and .issue == 1)] | last) as $s | select($s.step == "start" and $s.of == "review")
+          | ([$r[] | select(has("firsttry")) | .second] | last) as $f
+          | [$r[] | select((has("card") | not) and .step == "review" and (.action | strings // "" | startswith("the judge ") | not))] | last | objects
+          | {reviewer: {of: $s, live: ., second: ($f == true)}}' <<<"$r")
+        [ -z "$v" ] || printf '%s\n' "$v" > "$4.h/reviewer"
+        swe_sofar "$({ printf '%s\n' "$r"; cat "$4.h/reviewer" 2>/dev/null; } | swe_cost)"
+      fi
     fi
     k=$((k + 1)); sleep 0.2
   done
@@ -459,6 +531,9 @@ swe_task() { # <task json>
   mkdir -p "$SWE_DIR/work" && swe_sandbox "$1" "$sb" 2> "$SWE_DIR/work/$id.err" \
     || { echo "not run: its repository could not be fetched at the base commit: $(head -c 300 "$SWE_DIR/work/$id.err")"; return; }
   b=$(swe_trial "$1" "$sb" "$SWE_ARMJ" "$SWE_ENG") && [ -n "$b" ] && jq -e . <<<"$b" > /dev/null 2>&1 || { echo "not run: ${b:-the patch of the sandbox could not be read}"; return; }
+  # The trial's cost from all its records replaces what was read of them while it ran: the run counts it even when
+  # the task is then not run.
+  swe_sofar "$(jq -c .cost <<<"$b")"
   if ! jq -e .fired <<<"$b" > /dev/null || [ ! -s "$sb.h/patch" ]; then g='{"resolved":false}'
   else swe_phase Grading; g=$(swe_h grade "$(swe_set .dataset)" "$(swe_set .revision)" "$id" "$sb.h/patch" "$sb.h/grade" 2>/dev/null); rc=$?
     [ "$rc" = 0 ] && jq -e '.resolved | type == "boolean"' <<<"$g" > /dev/null 2>&1 || {
@@ -474,8 +549,9 @@ swe_task() { # <task json>
 # sandboxes and the run's copies of the project's files (swe_freeze) gone.
 swe_end() { # <state>
   [ -n "${SWE_RUN:-}" ] || return 0
-  # interrupted: the arm and task a stopped run was on, apart from the tasks it never reached.
-  local l f; l=$(jq -c --arg s "$1" --arg at "$(swe_now)" '(if $s == "stopped" and (.active.task | type) == "string" then {interrupted: (.active | {arm, task})} else {} end) as $i
+  # interrupted: the arm and task a stopped run was on, apart from the tasks it never reached, with the cost of its
+  # work so far (swe_sofar; a known $0 when its trial had not started its command): the run's cost counts it.
+  local l f; l=$(jq -c --arg s "$1" --arg at "$(swe_now)" '(if $s == "stopped" and (.active.task | type) == "string" then {interrupted: (.active | {arm, task, cost: (.cost // {usd: 0, state: "known", unpriced: 0})})} else {} end) as $i
     | .state = $s | .ended = $at | .current = null | .active = null | .seq = ((.seq // 0) + 1) | .updated = $at | del(.pid) + $i' "$SWE_DIR/live.json") && swe_put "$SWE_DIR/live.json" "$l" \
     && printf '%s\n' "$l" >> "$SWE_DIR/runs.jsonl"
   swe_event "Run ${1/guard/stopped by the usage guard}"
@@ -558,7 +634,8 @@ swe_run() { # <n> <engine> <arm>...
         || { echo "conveyor: the usage guard is reached: the run stops before $id"; swe_end guard; return 0; }
       swe_live --arg t "$id" '.current = $t'
       SWE_TASK=$id; r=$(swe_task "$t"); echo "$i/$n $id$tag: $r"
-      swe_live --arg t "$id" --arg a "$SWE_ARM" --arg r "$r" '.tasks += [{id: $t, arm: $a, result: $r, reused: false}] | .done += 1 | .current = null | .active = null | .resolved += (if $r == "resolved" then 1 else 0 end)'
+      # The task's cost is its trial's (swe_sofar); a task whose trial never started its command ran no session: $0.
+      swe_live --arg t "$id" --arg a "$SWE_ARM" --arg r "$r" '.tasks += [{id: $t, arm: $a, result: $r, reused: false, cost: (.active.cost // {usd: 0, state: "known", unpriced: 0})}] | .done += 1 | .current = null | .active = null | .resolved += (if $r == "resolved" then 1 else 0 end)'
       # The event names the result only: the why of a task not run can hold a command's own output.
       case $r in resolved) r=Resolved ;; unresolved) r=Unresolved ;; unresolved*) r='Unresolved: did not fire' ;; *) r='Not run' ;; esac
       swe_event "$r" "$SWE_ARM" "$id"

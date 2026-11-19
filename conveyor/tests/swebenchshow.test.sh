@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
 # Engine cases: what the Board's Benchmarks tab reads of `conveyor.sh bench swe` (bench/swe.sh): one run's page
-# (`bench swe show`), the cost Start shows (`bench swe history`, each arm's perTask), and the arms the form saves
+# (`bench swe show`, with the run's cost at list prices), the cost Start shows (`bench swe history`, each arm's perTask), and the arms the form saves
 # (`bench swe arms save`, the choices history offers), with the settings a run shares and the reuse of its results
 # (`--settings`, swe_inputs). The fixture is swebench.test.sh's swe().
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -285,4 +285,102 @@ t_swelive() {
     and any(.tail[]; . == (. | {at} + {arm: "conveyor", task: null, event: "Checking"}))
     and .tail[-1] == (.tail[-1] | {at} + {arm: null, task: null, event: "Run done"}) and all(.tasks[].cells[]; .state == "finished")' <<<"$o" > /dev/null \
     || fail "show does not give the run's events after it ended: $o"
+}
+
+# Bugs (#644): a benchmark run kept no cost, so the Board could show none. (1) A session's known token usage gave no
+# list price (the pack's prices over the Board's table); (2) a task with only part of its usage priced read as whole,
+# and one with none as $0; (3) a step's final line was added to what its live record had said, not put in its place;
+# (4) a reused result added its cost again; (5) the cost of the task Stop interrupted was lost; (6) a run or result
+# kept before costs were read as $0, as did an old run stopped on its first task; (8) a failed session's usage (its
+# blocked line's spent) was not priced, the reviewer's charge was dropped while its judge ran, a review run again
+# lost its first attempt's charge (or priced it twice in the pause), and a loop ended mid-session (the task's time
+# limit) kept a cost from the card's lines alone, dropping what its live records said; (9) a session run again after
+# it stalled read as whole, its first try left out.
+t_swecost() {
+  swe; local first second p id o c l u='Running Conveyor. Step unavailable.' one='{"input":1000000}'
+  { read -r first; read -r second; } < <(sweorder)
+  tune '.prices = {"bench-m": {input: 1, output: 2, cacheRead: 0.5}}'
+  # The fake engine waits at hold; the case writes its card's lines and live record, as the real loop does.
+  : > "$SWE_FX/hold"
+  loop bench swe 1 > "$T/$CASE/run.out" 2>&1 & p=$!
+  wait_until "jq -e --arg u '$u' '.live.active.phase == \$u' '$B/board.json' > /dev/null" || fail "the first task's card did not start: $(cat "$B/live.json" 2>&1)"
+  c=$(echo "$B/work/$first"/swe-*/conveyor/state)/cards.jsonl; l=$B/work/$first/cards/c1.live; mkdir -p "${l%/*}" || fail "the cards folder was not made"
+  echo '{"card":"c1","issue":1,"step":"start","result":"ok","of":"build"}' >> "$c" && echo "{\"step\":\"build\",\"model\":\"bench-m\",\"usage\":$one}" > "$l" \
+    || fail "the build's start line and live record were not written"
+  wait_until "jq -e '.live.active.cost == {usd: 1, state: \"known\", unpriced: 0}' '$B/board.json' > /dev/null" \
+    || fail "the running build's usage gave no list price: $(jq -c .live.active "$B/board.json")"
+  # The build's line (2M input: $2) replaces its live record; the review (1M cache reads: $0.50) and its judge (1M
+  # output: $2) are priced; the fix running has reported no usage yet (zero), so it is unpriced, not $0.
+  jq -nc '{card: "c1", issue: 1, step: "build", result: "ok", model: "bench-m", usage: {input: 2000000}},
+      {card: "c1", issue: 1, step: "review", result: "GO", model: "bench-m", usage: {read: 1000000}, judge: {model: "bench-m", usage: {output: 1000000}}},
+      {card: "c1", issue: 1, step: "start", result: "ok", of: "fix"}' >> "$c" && echo '{"step":"fix","zero":true,"usage":{"input":0}}' > "$l" \
+    || fail "the card's lines were not written"
+  wait_until "jq -e '.live.active.cost == {usd: 4.5, state: \"partial\", unpriced: 1}' '$B/board.json' > /dev/null" \
+    || fail "the cost so far did not replace the build's live figure, or read an unpriced session as whole: $(jq -c .live.active "$B/board.json")"
+  id=$(jq -r .live.id "$B/board.json"); o=$(loop bench swe show "$id" 2>&1) && [ "$(jq -c '[.run.cost, .run.cols[0].cost]' <<<"$o")" = '[{"usd":4.5,"state":"partial"},{"usd":4.5,"state":"partial"}]' ] \
+    || fail "show gives no cost so far while the run goes: $(jq -c '.run | [.cost, .cols]' <<<"$o" 2>&1 || echo "$o")"
+  # The fix stalled and runs again (its live record names the stall), 1M input so far ($1): its first try, which no
+  # record the container shows holds, is unpriced, not left out as if the fix were whole.
+  echo "{\"step\":\"fix\",\"model\":\"bench-m\",\"stalled\":\"2026-11-01T00:00:00Z\",\"usage\":$one}" > "$l" || fail "the fix's second live record was not written"
+  wait_until "jq -e '.live.active.cost == {usd: 5.5, state: \"partial\", unpriced: 1}' '$B/board.json' > /dev/null" \
+    || fail "a session run again after it stalled read as whole: $(jq -c .live.active "$B/board.json")"
+  # The fake engine then writes its own build and review lines, with no usage: the task's cost stays partial.
+  rm -f "$SWE_FX/hold"; wait "$p" || fail "the run failed: $(cat "$T/$CASE/run.out")"
+  jq -e '.cost == {usd: 4.5, state: "partial", unpriced: 2, basis: {"bench-m": {input: 1, output: 2, cacheRead: 0.5, cacheWrite: 1.25}}}
+      and (.steps | map(select(.usage)) | length) == 2 and .steps[1].judge == {model: "bench-m", usage: {output: 1000000}}' "$B"/results/*/"$first.json" > /dev/null \
+    && [ "$(tail -n 1 "$B/runs.jsonl" | jq -c '.tasks[0].cost')" = '{"usd":4.5,"state":"partial","unpriced":2}' ] \
+    || fail "the task's result or run line keeps no cost with its price basis, or not the usage it was priced from: $(cat "$B"/results/*/"$first.json") $(tail -n 1 "$B/runs.jsonl")"
+  # A second run reuses the first task and is stopped on the second, whose build has used 3M input tokens ($3).
+  : > "$SWE_FX/hold"
+  loop bench swe 2 > "$T/$CASE/run2.out" 2>&1 & p=$!
+  wait_until "jq -e --arg u '$u' --arg s '$second' '.live.active | .phase == \$u and .task == \$s' '$B/board.json' > /dev/null" || fail "the second task's card did not start: $(cat "$B/live.json" 2>&1)"
+  c=$(echo "$B/work/$second"/swe-*/conveyor/state)/cards.jsonl; l=$B/work/$second/cards/c1.live; mkdir -p "${l%/*}" || fail "the cards folder was not made"
+  echo '{"card":"c1","issue":1,"step":"start","result":"ok","of":"build"}' >> "$c" && echo '{"step":"build","model":"bench-m","usage":{"input":3000000}}' > "$l" \
+    || fail "the second build's lines were not written"
+  wait_until "jq -e '.live.active.cost.usd == 3' '$B/board.json' > /dev/null" || fail "the second build was not priced: $(jq -c .live.active "$B/board.json")"
+  o=$(loop bench swe stop 2>&1); rm -f "$SWE_FX/hold"; wait "$p" 2>/dev/null
+  [ "$o" = "conveyor: the SWE-bench run is stopped" ] || fail "Stop did not end the run: $o"
+  id=$(tail -n 1 "$B/runs.jsonl" | jq -r .id)
+  o=$(loop bench swe history 2>&1) && jq -e --arg id "$id" '.runs[] | select(.id == $id) | [.cost, .interrupted.cost] == [{usd: 3, state: "known"}, {usd: 3, state: "known", unpriced: 0}]' <<<"$o" > /dev/null \
+    || fail "the stopped run lost its interrupted task's cost, or added the reused task's again: $(jq -c --arg id "$id" '.runs[] | select(.id == $id)' <<<"$o" 2>&1 || echo "$o")"
+  # (8) A third run takes the second task again. A first card of it was blocked on a failed build that used 1M input
+  # ($1, on the blocked line's spent). Its next card's review ended with no verdict after 1M input ($1, kept in its
+  # .firsttry): in the pause the live record is still that attempt's, so it is not priced again; the second attempt
+  # (its events written) used 2M input ($2); then its judge runs, whose live record takes the place of the review's;
+  # then the loop ends on that start line, as the task's time limit ends it, with no review line written. The failed
+  # build, both review attempts and the judge (no usage yet, unpriced) all count.
+  : > "$SWE_FX/hold"
+  loop bench swe 2 > "$T/$CASE/run3.out" 2>&1 & p=$!
+  wait_until "jq -e --arg u '$u' --arg s '$second' '.live.active | .phase == \$u and .task == \$s' '$B/board.json' > /dev/null" || fail "the third run's card did not start: $(cat "$B/live.json" 2>&1)"
+  c=$(echo "$B/work/$second"/swe-*/conveyor/state)/cards.jsonl; l=$B/work/$second/cards/c1.live; mkdir -p "${l%/*}" || fail "the cards folder was not made"
+  jq -nc '{card: "c0", issue: 1, step: "blocked", result: "blocked", spent: {step: "build", model: "bench-m", usage: {input: 1000000}}},
+      {card: "c1", issue: 1, step: "start", result: "ok", of: "review", time: "2026-11-01T00:00:00Z"}' >> "$c" \
+    && echo '{"reason":"the review ended without one clear verdict","spent":{"model":"bench-m","usage":{"input":1000000}}}' > "${l%.live}.firsttry" \
+    && echo '{"step":"review","at":"2026-11-01T00:00:01Z","model":"bench-m","action":"reads x.py","usage":{"input":1000000}}' > "$l" || fail "the third run's lines were not written"
+  wait_until "jq -e '.live.active.cost == {usd: 2, state: \"known\", unpriced: 0}' '$B/board.json' > /dev/null" \
+    || fail "the failed build's usage on its blocked line was not priced, or the review's first attempt was not, or was priced twice in the pause: $(jq -c .live.active "$B/board.json")"
+  echo '{}' > "${l%.live}.events" && echo '{"step":"review","at":"2026-11-01T00:00:03Z","model":"bench-m","action":"reads x.py","usage":{"input":2000000}}' > "$l" \
+    || fail "the second attempt's records were not written"
+  wait_until "jq -e '.live.active.cost == {usd: 4, state: \"known\", unpriced: 0}' '$B/board.json' > /dev/null" \
+    || fail "the review's first attempt was dropped while the second ran: $(jq -c .live.active "$B/board.json")"
+  echo '{"step":"review","at":"2026-11-01T00:00:04Z","model":"bench-m","action":"the judge reads the findings","turns":0}' > "$l" || fail "the judge's live record was not written"
+  wait_until "jq -e '.live.active | .phase == \"Judging\" and .cost == {usd: 4, state: \"partial\", unpriced: 1}' '$B/board.json' > /dev/null" \
+    || fail "the reviewer's charge (both attempts) was dropped while the judge runs: $(jq -c .live.active "$B/board.json")"
+  : > "$B/work/$second/closed" && rm -f "$SWE_FX/hold"; wait "$p" || fail "the third run failed: $(cat "$T/$CASE/run3.out")"
+  tail -n 1 "$B/runs.jsonl" | jq -e --arg s "$second" '.tasks[] | select(.id == $s) | .cost == {usd: 4, state: "partial", unpriced: 1}' > /dev/null \
+    || fail "the task's cost dropped what its live records said when its loop ended mid-session: $(tail -n 1 "$B/runs.jsonl")"
+  # A run and a result kept before costs were: unknown, never $0; so is a run stopped on its first task then.
+  mkdir -p "$B/results/old" && jq -nc --arg t "$first" '{task: $t, arm: "conveyor", key: "old", resolved: true, sessions: 2, tokens: 3, minutes: 1, steps: []}' > "$B/results/old/$first.json" \
+    && jq -nc --arg t "$first" '{id: "r20261101T000000-1", arms: ["conveyor"], cols: [{arm: "conveyor", key: "old"}], n: 1, started: "2026-11-01T00:00:00Z", state: "done",
+      tasks: [{id: $t, arm: "conveyor", result: "resolved"}]}, {id: "r20261101T000000-2", arms: ["conveyor"], cols: [{arm: "conveyor", key: "old"}], n: 1,
+      started: "2026-11-01T00:00:00Z", state: "stopped", tasks: [], interrupted: {arm: "conveyor", task: $t}}' >> "$B/runs.jsonl" || fail "the old runs could not be written"
+  o=$(loop bench swe show r20261101T000000-1 2>&1) && [ "$(jq -c '[.run.cost, .run.cols[0].cost, .tasks[0].cells[0].cost]' <<<"$o")" = '[{"usd":null,"state":"unknown"},{"usd":null,"state":"unknown"},null]' ] \
+    || fail "a run or result kept before costs does not read as unknown: $o"
+  o=$(loop bench swe history 2>&1) && jq -e '.runs[] | select(.id == "r20261101T000000-2") | .cost == {usd: null, state: "unknown"}' <<<"$o" > /dev/null \
+    || fail "an old run stopped on its first task reads as a known cost: $(jq -c '.runs[] | select(.id == "r20261101T000000-2")' <<<"$o" 2>&1 || echo "$o")"
+  # (7) An agent arm reports no usage by model: its cost is unknown, never $0.
+  o=$(loop bench swe 1 --solo 2>&1) || fail "the solo run failed: $o"
+  jq -e '.cost == {usd: null, state: "unknown", unpriced: 1, basis: {}}' "$B"/results/solo-*/"$first.json" > /dev/null \
+    && tail -n 1 "$B/runs.jsonl" | jq -e '.tasks[0].cost == {usd: null, state: "unknown", unpriced: 1}' > /dev/null \
+    || fail "the agent arm's cost is not unknown: $(cat "$B"/results/solo-*/"$first.json" 2>&1) $(tail -n 1 "$B/runs.jsonl")"
 }

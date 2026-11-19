@@ -308,6 +308,22 @@ Each run also keeps a short event log, the last lines of which `bench swe show <
 a time, an arm, a task and an event: a step, a result (Resolved, Unresolved, Not run or reused), or the start and end
 of the run. The log stays after the run ends. It holds no output of the arms and no text from their containers.
 
+A run also gives its cost at list prices: the same prices as the Board's Cost panel, with your `prices` in the pack
+over them. `bench swe show <run>` and `bench swe history` give `cost` for the run and for each arm. While a run goes,
+the cost includes the active task's work so far. Each task's result keeps its `cost` and the prices used for it. A
+Conveyor arm's sessions are priced from the token usage that its card records for each session, including the judge's
+and that of a session that failed.
+When a session's final record comes, it replaces the figure for that session so far. An agent arm reports no usage by
+model, so its cost is unknown. A reused result adds nothing. The work of a task that Stop interrupted is counted.
+
+Each `cost` has `usd` and `state`:
+
+- `known`: every session is priced.
+- `partial`: some sessions have no usage that can be priced, for example a session that has not reported usage yet.
+  `usd` is the cost of the priced sessions only.
+- `unknown`: no session can be priced, and `usd` is null. Runs and results from before costs were recorded show
+  unknown, not $0.
+
 ## What the numbers mean
 
 The resolved count is the number of tasks whose final patch passes the task's hidden tests, as the official harness

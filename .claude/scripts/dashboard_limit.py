@@ -27,6 +27,8 @@
       The same, for the cards of <cards-file>, one a line (conveyor.sh snapshot): the priced cards go to
       <priced-file>, one a line, and the rest of the part to stdout. <kept> is a summary of the cards priced last
       time: a card whose line has not changed since is not priced again (card_costs).
+  dashboard_limit.py work  < {steps: [...], live, prices}
+      A benchmark trial's sessions priced the same way, as one figure that says whether it is whole (work_cost).
   dashboard_limit.py unpriced  < {prices, models: [...], since, research}
       The model IDs of models that no price row prices, the pack's prices put over the table (unpriced), as a JSON list:
       those of models, and those the research lane's sessions ran since then.
@@ -953,6 +955,29 @@ def card_costs(part, lines=None, kept=None, dest=None):
     return part
 
 
+def work_cost(part):
+    """A benchmark trial's work at list price (bench/swe.sh): part is {steps, live, prices}: the trial's sessions as
+    its card's record lines hold them (a judge's session a step of its own), the record of the session running now
+    (null when none) and the pack's prices. Each is priced as card_costs prices a card's step. A running session whose
+    answers so far all report usage 0 (zero) has no usage to price yet: it is unpriced, never $0.
+
+    Returns {usd, state, unpriced, basis}. state is "known" when every session is priced (no session at all is a
+    known $0), "partial" when only some are (usd is the priced part, unpriced how many are not) and "unknown" when
+    none is (usd null). basis is the rate each model priced was priced at ({input, output, cacheRead, cacheWrite}, $
+    per million tokens; a cost OpenCode reported has none), so a later change of prices leaves what was kept as it was."""
+    steps = [dict(s) for s in part.get("steps") or [] if isinstance(s, dict)]
+    live = part.get("live")
+    if isinstance(live, dict):
+        steps.append({"step": live.get("step"), "model": live.get("model"), "usage": None if live.get("zero") is True else live.get("usage")})
+    card_costs({"cards": [{"steps": steps}], "prices": part.get("prices")})
+    got = [s["usd"] for s in steps if s.get("usd") is not None]
+    n = len(steps) - len(got)
+    basis = {m: dict(zip(PRICE_KEYS + ("cacheWrite",), list(PRICES[m][:3]) + [write_rate(PRICES[m])]))
+             for s in steps for m in (s.get("pricedBy") or {}) if m in PRICES}
+    return {"usd": round(sum(got), 4) if got or not n else None, "state": "known" if not n else "partial" if got else "unknown",
+            "unpriced": n, "basis": basis}
+
+
 def cost(rows, used, start, now):
     """List-price equivalent of this host's requests in the week, and what it projects to.
 
@@ -1572,6 +1597,9 @@ def main(argv):
         return 0
     if len(argv) == 2 and argv[1] == "cards":
         json.dump(card_costs(json.load(sys.stdin)), sys.stdout)
+        return 0
+    if len(argv) == 2 and argv[1] == "work":
+        json.dump(work_cost(json.load(sys.stdin)), sys.stdout)
         return 0
     if len(argv) == 2 and argv[1] == "unpriced":
         json.dump(unpriced(json.load(sys.stdin)), sys.stdout)
