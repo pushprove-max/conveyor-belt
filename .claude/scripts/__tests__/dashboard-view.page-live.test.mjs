@@ -609,7 +609,7 @@ test('the live feed: a change to a panel of the other tab is kept and drawn when
   part.data.state = 'paused';
   es.emit('panel', { id: 'rules', part, updatedAt: iso(T0) });
   assert.equal(panel(w, 'rules'), null, 'the Rules panel is not drawn on Overview');
-  // The tabs are drawn once a frame, after every event of the version (issue 498).
+  // The tabs are drawn at most once a frame, after every event that came before that frame (issue 498).
   for (const f of w.frames.splice(0)) f();
   assert.equal(w.document.getElementById('tab-rules').querySelector('.tab-count').textContent, '· 1', 'Rules counts the pause');
   w.document.getElementById('tab-rules').click();

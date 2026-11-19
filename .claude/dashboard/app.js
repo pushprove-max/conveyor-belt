@@ -2302,7 +2302,8 @@
     }
     status();
   }
-  // The server sends one event a changed part of a version: the tabs and the head are drawn once a frame, after them all.
+  // The server sends one event a changed part of a version: the tabs and the head are drawn at most once a frame, after
+  // all the events that came before that frame. An event after the draw queues one more draw, of the same version or not.
   function headSoon() {
     if (headQueued) return;
     headQueued = true;
