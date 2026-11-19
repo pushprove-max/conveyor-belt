@@ -479,7 +479,7 @@ test('Start: a Check\'s answer shows in its arm through a redraw, pending, refus
 
 // Bug it guards (#639 review E2): the arms were read again only when the Board sent the panel an update, and a check
 // alone moves no run, so the Board sends none: a check that ran showed neither its step nor its end until Read the
-// arms again was pressed. The Overview's Checking row did not say the step. An arm whose pass had expired had no
+// arms again was pressed. The Overview's Checking row did not say the step. An arm whose check had expired had no
 // Check again. While an arm reads checking, the panel's clock reads the arms again, with no update of the Board.
 test('Start: a check that runs shows its step and is read again on the clock until it ends; the Overview says its step; an expired arm offers Check again', async () => {
   const w = await opened();
@@ -730,9 +730,9 @@ test('Arm editor: a saved agent arm is listed after a reload with its choices, c
 });
 
 // Bugs it guards (#641): a check is of one revision; an edit saved while it runs is another, with an ID of its own,
-// and a late pass of the old one must not pick it. Unticking an arm while its check runs withdraws it: the pass that
-// comes after must not pick it again.
-test('Saved arms: an old revision\'s check cannot pick its edited copy; an arm unticked during its check stays unpicked after it passes', async () => {
+// and a late success of the old one must not pick it. Unticking an arm while its check runs withdraws it: the
+// success that comes after must not pick it again.
+test('Saved arms: an old revision\'s check cannot pick its edited copy; an arm unticked during its check stays unpicked after it succeeds', async () => {
   const R1 = 'arm-aaaaaaaaaaaa', R2 = 'arm-bbbbbbbbbbbb', s1 = { kind: 'conveyor', seats: { model: { cli: 'claude', model: 'claude-opus-5-5', effort: 'high' } } };
   const s2 = { kind: 'conveyor', rules: 'engine', seats: { model: { ...s1.seats.model, effort: 'max' } } };
   const w = await editing(() => eh([saved(R1, s1)]));
@@ -749,7 +749,7 @@ test('Saved arms: an old revision\'s check cannot pick its edited copy; an arm u
   assert.deepEqual(w.posts.splice(0).map((p) => p.body.args.slice(0, 3)), [['arms', 'check', R1], ['arms', 'save', ARM]]);
   await settle();
   await read(saved(R1, s1, 'ready'), saved(R2, s2));
-  assert.deepEqual([shown(R1), shown(R2)], [[true, 'Ready'], [false, 'Not checked']], 'the old revision\'s pass picks the old revision only');
+  assert.deepEqual([shown(R1), shown(R2)], [[true, 'Ready'], [false, 'Not checked']], 'the old revision\'s success picks the old revision only');
   assert.equal(arm(R2).parentElement.querySelector('.bench-said'), null, 'no answer of the old check beside the edited copy');
   w.reply = BH.reply(`${R2}: checking c2`);
   pick(w, `arm-${R2}`);
@@ -758,7 +758,7 @@ test('Saved arms: an old revision\'s check cannot pick its edited copy; an arm u
   pick(w, `arm-${R2}`);
   assert.deepEqual(shown(R2), [false, 'Checking']);
   await read(saved(R1, s1, 'ready'), saved(R2, s2, 'ready'));
-  assert.deepEqual(shown(R2), [false, 'Ready'], 'the pass after the untick does not pick it');
+  assert.deepEqual(shown(R2), [false, 'Ready'], 'the success after the untick does not pick it');
   w.posts.splice(0);
   act(bp(w), 'start').click();
   assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['run', '20', '--arm', 'conveyor', '--arm', R1, '--engine', 'main']]);

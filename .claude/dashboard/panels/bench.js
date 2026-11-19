@@ -875,7 +875,7 @@
     return { kind: 'conveyor', name, rules: s.rules === 'project' ? 'project' : 'engine', seats: mine, judge, policy };
   }
   // The spec Save sends: a Conveyor arm's own seats only (a seat left out is the project's), the judge's off or on as
-  // judgeOn; an agent arm's effort only when one is chosen and its recipe passes it.
+  // judgeOn; an agent arm's effort only when one is chosen and its recipe gives it to the CLI.
   function specOf(e) {
     const one = (v) => ({ cli: v.cli, model: v.model, ...(v.effort ? { effort: v.effort } : {}) });
     if (e.kind === 'agent') return { kind: 'agent', recipe: e.recipe, cli: e.cli, model: e.model, ...(e.effort && recipeOf(e) && recipeOf(e).effort ? { effort: e.effort } : {}) };
@@ -958,7 +958,7 @@
     row('Model', picker('edit-model', 'Model', withOwn(list(ag[e.cli]).map((m) => [m, m]), e.model), e.model, (v) => { e.model = v; }),
       ...(why ? [h('span', 'warn-note bench-seat-why', `Not allowed: ${why}. Choose another.`)] : []));
     row('Effort', r && r.effort ? picker('edit-effort', 'Effort', withOwn([['', 'the CLI\'s own']].concat(effortsOf('agent', e.cli).map((x) => [x, x])), e.effort), e.effort, (v) => { e.effort = v; })
-      : h('span', 'board-from', 'This method does not pass an effort to its CLI.'));
+      : h('span', 'board-from', 'This method does not give an effort to its CLI.'));
     row('Method', picker('edit-method', 'Method', recipesOf(e.cli).map((a) => [a.name, `${a === plainOf(e.cli) ? `None (${a.label})` : a.label} · ${sessionsWord(a.sessions) || 'its own sessions'} a task`]), e.recipe,
       (v) => { e.recipe = v; const x = recipeOf(e); if (!x || !x.effort) e.effort = ''; }),
     h('span', 'board-from', r ? `${sessionsWord(r.sessions) || 'Its own sessions'} a task.` : 'Choose a method.'));
