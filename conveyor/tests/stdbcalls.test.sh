@@ -28,6 +28,25 @@ t_stdbcalls() {
   [ $((n * 2)) -lt 125 ] || fail "the loop called its state store $n times in one batch run of two cards, not fewer than half of 125: $(sort "$STUB/stdb.calls" | cut -c1-60 | uniq -c | sort -rn | head -n 8)"
 }
 
+# The loop's look at its cards in flight, each turn (run()): stuckcard with `turn` reads the card records the turn kept.
+# Bug it catches (issue 741): that look asking the store again, once a card a turn, for records the turn just read (the
+# batch run above made 63 calls).
+t_stuckturn() {
+  # shellcheck disable=SC2034 # HERE is read by stdb(), for the folder state.py is in
+  # CALLS, not a file under $s: stuckcard has a local s of its own.
+  local s=$T/$CASE/st HERE=$SRC STATE CARDS=$T/$CASE/cards CALLS=$T/$CASE/calls out
+  STATE=$s/cards.jsonl; mkdir -p "$s" "$CARDS"
+  eval "$(sed -n '/^declare -A ASKED_K/p; /^stdb() {/,/^}/p; /^turncards() {/p' "$SRC/lib/records.sh")"
+  eval "$(sed -n '/^stuckcard() {/,/^}/p' "$SRC/lib/run.sh")"
+  python3() { echo x >> "$CALLS"; command python3 "$@"; } # each state store call, counted
+  # Card c1 at its worktree line, its process (pid 1, with a start time it never had) gone.
+  printf '%s\n' '{"card":"c1","issue":1,"step":"worktree","pid":1,"started":"Thu Jan  1 00:00:00 1970","time":"2026-01-01T00:00:00Z"}' > "$STATE"
+  stdb ask lines cards > /dev/null # kept in this shell, as the loop's turn keeps them
+  : > "$CALLS"
+  out=$(stuckcard c1 turn) && [ "$out" = '1 worktree gone' ] || fail "the card with no process was not found gone: '$out'"
+  [ ! -s "$CALLS" ] || fail "the loop's look at a card in flight asked the state store $(wc -l < "$CALLS") times, not 0"
+}
+
 # Bug it catches: a kept answer given after its file changed (a line that ended since it was asked, an append, a
 # rewrite in place to the same size and mtime, as `retry` and a hand edit make), or an unchanged file asked again.
 t_stdbkept() {

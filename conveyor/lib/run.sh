@@ -226,10 +226,12 @@ cardgone() { # <card> <its last step>
 # runs, and watch() ends one that makes no progress for STUCK seconds; the step then waits REVIEW_PAUSE and runs once
 # more, writing nothing meanwhile. So a card in its build, review, fix or test step with no live record, and with no
 # new line and no write to any of its files for STUCK and REVIEW_PAUSE together, has no process of that step. Prints
-# "<pid> <step> gone" or "<pid> <step> stuck"; fails for any other card.
-stuckcard() { # <card>
+# "<pid> <step> gone" or "<pid> <step> stuck"; fails for any other card. With `turn`, the loop's look at its cards, it
+# reads the card records its turn kept (turncards()), asking the store nothing: a card is stuck only after minutes with
+# no new line, so that reading, of this turn, holds its last line then.
+stuckcard() { # <card> [turn]
   local c=$1 p t s at m f
-  IFS=$'\t' read -r p t s at < <(stdb ask card "$c" 2>/dev/null | jq -rs --arg c "$c" 'map(select(.card == $c and .step != "push")) as $l
+  IFS=$'\t' read -r p t s at < <(if [ "${2:-}" = turn ]; then turncards; else stdb ask card "$c"; fi 2>/dev/null | jq -rs --arg c "$c" 'map(select(.card == $c and .step != "push")) as $l
     | ($l | map(select(.step == "worktree" and (.pid | type) == "number" and (.started | type) == "string")) | last) as $w | ($l | last) as $z
     | select($w != null and all($l[]; .step | IN("landed", "closed", "blocked", "pushed") | not))
     | [$w.pid, $w.started, (if $z.step == "start" then $z.of elif $z.step | IN("build", "fix", "rebase") then "review" elif $z.step == "brief" then "build"
@@ -351,7 +353,7 @@ run() { # [max-cards] [serve]
     for p in "${!mine[@]}"; do
       # One alive with no process of its step for STUCK and REVIEW_PAUSE seconds (stuckcard(), #466) is ended and blocked, naming that
       # step, so `retry` can take it.
-      if kill -0 "$p" 2>/dev/null && [ ! -e "$CARDS/${mine[$p]% *}.live" ] && read -r _ gs gone < <(stuckcard "${mine[$p]% *}") && [ "$gone" = stuck ]; then
+      if kill -0 "$p" 2>/dev/null && [ ! -e "$CARDS/${mine[$p]% *}.live" ] && read -r _ gs gone < <(stuckcard "${mine[$p]% *}" turn) && [ "$gone" = stuck ]; then
         read -r c n <<<"${mine[$p]}"; unset 'mine[$p]' 'took[$p]' 'kids[$p]'
         gone=$(stuckwhy "$gs" stuck)
         endcard "$c" "$n" "$p" "$gs" "$gone" && echo "conveyor: card $c: $gone; it is blocked, and \`retry $n\` takes issue #$n again"

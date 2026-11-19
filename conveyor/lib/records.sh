@@ -66,7 +66,7 @@ stdb() {
 # The answers the loop's turn and the cards it starts read: kept in this shell (stdb, above).
 stdbkeeps() { { stdb ask lines cards; stdb ask lines retried; stdb ask lines declined; stdb ask tail limit 400; } >/dev/null 2>&1; return 0; }
 # The card records as the loop's turn kept them (stdbkeeps, run()): read once a turn and passed on to the turn's own
-# readers (run(), reopened(), approved(), overlap(), checkheld(); only the loop calls them), as one reading for the whole turn. The
+# readers (run(), reopened(), approved(), overlap(), checkheld(), stuckcard() with turn; only the loop calls them), as one reading for the whole turn. The
 # loop keeps them again after each line it writes in the turn, so those readers see the loop's own lines. Asked anew
 # when none are kept. A reader that stops early gets no "Broken pipe" line in the log (stdb, above).
 turncards() { if [ -n "${ASKED_K[lines cards ]:-}" ]; then printf '%s' "${ASKED_V[lines cards ]}" 2>/dev/null; else stdb ask lines cards; fi; }
