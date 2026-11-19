@@ -21,12 +21,14 @@ t_relminver() {
     && chmod +x "$STUB/claude" || fail "the fixture could not be made"
   # npm install --prefix <dir> @anthropic-ai/claude-code@<v>: a claude of version <v> in <dir>, whose validate logs the
   # version and whether the folder it checks holds hooks/a.ts, and fails with OLD-API-ERROR while $STUB/old-fail is there.
+  # The failure exits 0, which validate can do: release-prep must read the "✘ Validation failed" line, not the exit
+  # status alone (with exit 1 here, a release-prep that checks only the status would pass this case).
   printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$*" >> "$STUB/npm-calls"; p=; v=' \
     'while [ $# -gt 0 ]; do case $1 in --prefix) p=$2; shift ;; @anthropic-ai/claude-code@*) v=${1##*@} ;; esac; shift; done' \
     '[ -n "$p" ] && [ -n "$v" ] || exit 1; mkdir -p "$p/node_modules/.bin"' \
     'printf "%s\n" "#!/usr/bin/env bash" "[ \"\$1\" != --version ] || { echo \"$v (Claude Code)\"; exit 0; }" \' \
     '  "printf \"%s %s %s\\n\" $v \"\$*\" \"\$([ -f \"\$3/hooks/a.ts\" ] && echo packaged)\" >> \"\$STUB/old-calls\"" \' \
-    '  "[ ! -e \"\$STUB/old-fail\" ] || { echo \"✘ Validation failed\"; echo \"  ❯ hooks/a.ts: OLD-API-ERROR\"; exit 1; }" "echo \"✔ Validation passed\"" > "$p/node_modules/.bin/claude"' \
+    '  "[ ! -e \"\$STUB/old-fail\" ] || { echo \"✘ Validation failed\"; echo \"  ❯ hooks/a.ts: OLD-API-ERROR\"; exit 0; }" "echo \"✔ Validation passed\"" > "$p/node_modules/.bin/claude"' \
     'chmod +x "$p/node_modules/.bin/claude"' > "$STUB/npm" && chmod +x "$STUB/npm" || fail "the fixture could not be made"
   own=$(command -v claude); before=$(claude --version; cksum < "$own")
   # The tagged release already names the minimum, so only the later hooks/ commit can make a change to the mod.
