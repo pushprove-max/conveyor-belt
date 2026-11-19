@@ -115,7 +115,7 @@ install() {
   ! grep -E '^(\.claude/rules/|\.claude/commands/|\.conveyor/|AGENT_STARTUP\.md$|CLAUDE\.md$)' "$T/staged" \
     || fail "the staged copy holds what stays in the host project"
   ! grep -rlF "$TOP" "$I" || fail "a file of the set names the checkout"
-  path=''; IFS=: read -ra dirs <<<"$PATH"; for f in "${dirs[@]}"; do case $f/ in "$TOP"/*) ;; *) path=${path:+$path:}$f ;; esac; done
+  path=''; IFS=: read -ra p <<<"$PATH"; for f in "${p[@]}"; do case $f/ in "$TOP"/*) ;; *) path=${path:+$path:}$f ;; esac; done
   # The Board's virtualenv (setup fills it; the Board's server loads its packages) is a dependency: mounted read-only
   # where the install's fresh HOME looks for it. A machine with none mounts none, and the smoke check says to run setup.
   bv=$(readlink -f "${XDG_DATA_HOME:-$HOME/.local/share}/conveyor/board-venv") && [ -d "$bv" ] || bv=''
