@@ -110,13 +110,31 @@ t_sliceson() {
   [ "$(cat "$T/$CASE/run.out")" = '[100101,100102]' ] || fail "a run limited to the split parent does not take its slices: $(cat "$T/$CASE/run.out")"
 }
 
-# On, a held parent: its slices start held too. (A parent is held between its pick and its check only when the owner
-# holds it then; the slices follow the parent's state.)
+# On, a parent the owner released and put first in the order just before its pick: the card's control record (the
+# one the loop read at the start of its turn, CARDCTL) still holds it. Its slices start queued, stand where it stood
+# in the order, and the loop picks the first slice; the split line says they were not held. Bug caught (#782): the
+# slices were held as the card's old record had it, so the belt went idle on the owner's approved work.
+t_slicesreleased() {
+  slices on "$SPLIT2" "[$(big 7), $(issue 9 2026-10-01)]"
+  jq -c '.order = [8, 7, 9]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
+  fx_in 'CARDCTL=$(jq -c ".held = [7]" "$ST/control.json") splitcheck c1-7 7'
+  [ "$RC" = 1 ] && [ "$(jq -c '[.held, .order]' "$ST/control.json")" = '[[7],[8,100101,100102,9]]' ] \
+    || fail "a released parent's slices were held, or do not stand where it stood in the order (exit $RC): $(jq -c '[.held, .order]' "$ST/control.json") $(cat "$T/$CASE/run.out")"
+  [ "$(st 'select(.step == "split") | .split.held')" = false ] || fail "the split line does not say the slices started queued: $(st 'select(.step == "split")')"
+  recok "$ST/cards.jsonl" "a split card of a released parent"
+  # #8 is not open, so the slices stand first; #9, older and in the order after them, waits.
+  touch "$STUB/list-filed"; fx_in 'locked pick "" "" "$(asked)"'
+  [ "$RC" = 0 ] && [ "$(cut -d' ' -f2 "$T/$CASE/run.out")" = 100101 ] || fail "the loop did not pick the first slice #100101 (exit $RC): $(cat "$T/$CASE/run.out")"
+}
+
+# On, a held parent: its slices start held too, and the split line says so. (A parent is held between its pick and
+# its check only when the owner holds it then; the slices follow the parent's state.)
 t_slicesheld() {
   slices on "$SPLIT2" "[$(big 7)]"
   jq -c '.held = [7]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
   fx_in 'splitcheck c1-7 7'
   [ "$RC" = 1 ] && [ "$(jq -c .held "$ST/control.json")" = '[7,100101,100102]' ] || fail "a held parent's slices were not held (exit $RC): $(jq -c .held "$ST/control.json") $(cat "$T/$CASE/run.out")"
+  [ "$(st 'select(.step == "split") | .split.held')" = true ] || fail "the split line does not say the slices started held: $(st 'select(.step == "split")')"
 }
 
 # The umbrella closes once a card of each of its slices has landed or closed it as already done, and is released from

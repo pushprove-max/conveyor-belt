@@ -127,10 +127,12 @@ def ok: . as $r | (keys - known) == need
           | [.removedAsserts, .changedExpected, .skipsAdded, .timeoutsRaised, .casesDeleted] | all(if $read then type == "number" else . == null end))))
         and (.diff // {files: 0, added: 0, removed: 0} | type == "object" and keys == ["added", "files", "removed"] and all(type == "number"))
         # A split line (splitcheck(), lib/slices.sh): kept or split, the rule's setting, the issue's text and size,
-        # the verdict and why, the slices of a split, the issues filed for them (On), the answer that broke the rules.
+        # the verdict and why, the slices of a split, the issues filed for them and whether they started held (On), the
+        # answer that broke the rules.
         and ((.step == "split") == (.split != null))
         and (.split == null or ((.result | IN("kept", "split")) and (.split | type == "object"
-          and (keys - ["slices", "filed", "answer"]) == ["hash", "mode", "size", "verdict", "why"]
+          and (keys - ["slices", "filed", "held", "answer"]) == ["hash", "mode", "size", "verdict", "why"]
+          and (.held // false | type == "boolean")
           and (.mode | IN("shadow", "on")) and ([.hash, .why, .answer // ""] | all(type == "string"))
           and (.verdict | IN("under", "keep", "split", "invalid", "failed")) and ((.verdict == "split") == ($r.result == "split"))
           and (.size | type == "object" and keys == ["areas", "chars", "doneWhen", "files"] and all(type == "number"))

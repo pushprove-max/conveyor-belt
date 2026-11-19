@@ -17,9 +17,11 @@
 # The card's split line records it: result kept or split, and split {mode (the rule: shadow or on), hash, verdict
 # (under: under the thresholds; keep; split; invalid: an answer that broke the rules; failed: the call failed), why,
 # size, slices ({title, doneWhen, covers, dependsOn}, each slice's number from 1), filed (the issues filed, On only),
-# answer (the start of an answer that broke the rules)}, and model (the judge's) when the judge was asked.
+# held (On only: whether they started held, as the issue was, or queued), answer (the start of an answer that broke
+# the rules)}, and model (the judge's) when the judge was asked.
 # In shadow the card goes on and builds the issue whole, as with the rule off. On, with a split verdict, the slices are
-# filed as follow-ups of the issue (splitfile()); the issue becomes their umbrella: it is held (`control hold`), the
+# filed as follow-ups of the issue (splitfile()), held or queued as the issue is, and in its place in the pick order
+# when the order names it; the issue becomes their umbrella: it is held (`control hold`), the
 # slices are attached as its GitHub sub-issues (attachparts()), it gets a comment naming the slice that covers each of
 # its Done-when items, and the card ends with a closed line whose followups are the slices (so a run limited by --only
 # to the issue takes its slices too, ups() in DEPS); the issue stays open. umbrellas() closes it once its sub-issues
@@ -132,7 +134,7 @@ splitcheck() { # <card> <issue>: 0 when the card goes on to build; 1 when the is
   # On, a split is filed; one that cannot be filed is recorded as a split not filed, and the issue is built whole.
   if [ "$rule" = on ] && [ "$(jq -r .verdict <<<"$split")" = split ]; then
     began "$1" "$2" file # stop (halt(), lib/run.sh) leaves the card to finish from here: its slices are being filed
-    if nums=$(splitfile "$1" "$issue" "$(jq -c .slices <<<"$split")" "$c"); then split=$(jq -c --argjson f "$nums" '. + {filed: $f}' <<<"$split")
+    if nums=$(splitfile "$1" "$issue" "$(jq -c .slices <<<"$split")" 1); then split=$(jq -c --argjson f "$nums" '. + $f' <<<"$split")
     else split=$(jq -c --arg r "$nums" '.why += "; the slices could not be filed, so the issue is built whole: \($r)"' <<<"$split"); fi
   fi
   record "$1" "$2" split "$(jq -r 'if .verdict == "split" then "split" else "kept" end' <<<"$split")" \
@@ -156,15 +158,14 @@ splitcheck() { # <card> <issue>: 0 when the card goes on to build; 1 when the is
 # follow-up label, a body that opens "Follow-up of #<issue>", its Done-when items, the items of the parent it covers,
 # and a `Depends on:` line naming the slices it depends on. A slice of a grown change (one with files, growcheck())
 # names the files of the change it builds again in place of the items it covers, and depends on <issue> too, as it
-# builds on the change that lands it. They start where the parent is: held when the control
-# record holds it, else queued. Prints their numbers as a JSON array; when one cannot be filed, prints why and fails,
-# the ones filed before it withdrawn.
-splitfile() { # <card> <issue json> <slices json> <the control record>
+# builds on the change that lands it. They start where the parent is (splitplace()): held when the control record
+# holds it, else queued. Prints {filed: their numbers, held: whether they start held}; when one cannot be filed, or
+# they cannot be placed, prints why and fails, the ones filed before it withdrawn.
+splitfile() { # <card> <issue json> <slices json> <1: the slices take the parent's place in the pick order; 0: not>
   local n k i out num nums=() more=() body held
   n=$(jq -r .number <<<"$2") && k=$(jq length <<<"$3") || { echo "the slices could not be read"; return 1; }
   mapfile -t more < <(jq -r --arg a "$AREA" --arg t "$TYPE" --argjson p "$PRIOS" '(.labels // [] | map(.name)
       | map(select(($a != "" and startswith($a)) or . == $t or IN($p[]))) | unique[] | "--label", .), (.milestone.title // empty | "--milestone", .)' <<<"$2")
-  held=$(jq -r --argjson n "$n" '.held | index($n) != null' <<<"$4")
   for ((i = 0; i < k; i++)); do
     body=$(jq -r --argjson i "$i" --argjson k "$k" --arg c "$1" --arg area "$AREA" --argjson sl "$3" --argjson nums "$(jq -cn '$ARGS.positional | map(tonumber)' --args "${nums[@]}")" \
       '. as $iss | ('"$SPLITSIZE"' | .doneWhen) as $dw | $iss | .number as $n | $sl[$i] as $s
@@ -183,9 +184,23 @@ splitfile() { # <card> <issue json> <slices json> <the control record>
       || { splitwithdraw "$n" "${nums[@]}"; echo "slice $((i + 1)) was not filed: ${out:0:300}"; return 1; }
     nums+=("$num")
   done
-  [ "$held" != true ] || out=$(locked control hold "${nums[@]}" 2>&1 >/dev/null) \
-    || { splitwithdraw "$n" "${nums[@]}"; echo "the slices of a held issue could not be held: ${out:0:300}"; return 1; }
-  jq -cn '$ARGS.positional | map(tonumber)' --args "${nums[@]}"
+  held=$(locked splitplace "$n" "$4" "${nums[@]}") && [[ $held =~ ^(true|false)$ ]] \
+    || { splitwithdraw "$n" "${nums[@]}"; echo "the control record could not be read or written, so the slices could not be held or queued as their issue is"; return 1; }
+  jq -cn --argjson h "$held" '{filed: ($ARGS.positional | map(tonumber)), held: $h}' --args "${nums[@]}"
+}
+# Under the lock: the slices of <issue> start where it is now. The control record is read here, not taken from the
+# card: the card's copy is the one the loop read at the start of its turn, and an owner's release of the issue just
+# before its pick is not in it (#782). Held when the record holds <issue>, dated as `control hold` dates them; and
+# with <order> 1, when the pick order names <issue>, the slices stand in its place there, in their order. Prints
+# whether they are held (true or false).
+splitplace() { # <issue> <order: 1 or 0> <slice>...
+  local n=$1 o=$2 c new h; shift 2
+  c=$(ctl) && new=$(jq -c --argjson n "$n" --argjson o "$o" '($ARGS.positional | map(tonumber)) as $s
+    | (if .held | index($n) != null then .held = (.held + $s | unique) else . end)
+    | if $o == 1 and (.order | index($n) != null) then .order |= (index($n) as $i | .[:$i] + $s + (.[$i + 1:] - $s)) else . end' --args "$@" <<<"$c") \
+    && h=$(jq -r --argjson n "$n" '.held | index($n) != null' <<<"$new") && ctlput "$c" "$new" || return 1
+  [ "$h" != true ] || movedlocked movedhold hold "$new" "$@"
+  echo "$h"
 }
 splitwithdraw() { # <issue> <slice>...
   local n=$1 x; shift
@@ -275,7 +290,7 @@ growcheck() { # <card> <issue> <worktree> <issue json> <the sessions' prompt>: 0
   g=$(jq -c --arg m "$rule" --argjson k "$k" --argjson l "$lim" '{mode: $m, files: $k, limit: $l} + .' <<<"$v") || return 0
   if [ "$rule" = on ] && [ "$(jq -r .verdict <<<"$g")" = split ]; then
     began "$1" "$2" file # stop (halt(), lib/run.sh) leaves the card to finish from here: its slices are being filed
-    if nums=$(splitfile "$1" "$4" "$(jq -c .slices <<<"$g")" "$c"); then
+    if nums=$(splitfile "$1" "$4" "$(jq -c .slices <<<"$g")" 0) && nums=$(jq -c .filed <<<"$nums"); then
       # Each file a slice takes goes back to what HEAD has; one the change added is removed.
       while IFS= read -r f; do
         if git -C "$3" cat-file -e "HEAD:$f" 2>/dev/null; then git --literal-pathspecs -C "$3" restore --source=HEAD --staged --worktree -- "$f"

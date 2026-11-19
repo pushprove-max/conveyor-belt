@@ -259,8 +259,9 @@ records the verdict, the slices and the reason.
 - **Shadow**: the card's `split` line records the verdict and the slices, and Conveyor builds the issue as one card.
   The card on the Board shows "Would have split into N".
 - **On**: Conveyor files each slice as a follow-up of the issue: it has the follow-up label, and its body starts with
-  `Follow-up of #N`. The slices of a queued issue go in the queue. The slices of a held issue are held. The issue
-  becomes their umbrella: Conveyor holds it and does not build it. The slices become its GitHub sub-issues, and
+  `Follow-up of #N`. The slices of a queued issue go in the queue. The slices of a held issue are held. If the issue
+  is in the pick order, its slices take its place in the order. The `split` line records if the slices are held. The
+  issue becomes their umbrella: Conveyor holds it and does not build it. The slices become its GitHub sub-issues, and
   Conveyor adds a comment that names the slice for each Done-when item. Held on the Board names its slices. Conveyor
   closes the issue when all its slices are closed ([Issues](commands.md#issues)). An issue split before its slices
   were sub-issues closes when the last slice lands, or closes because main already does what it asks.
