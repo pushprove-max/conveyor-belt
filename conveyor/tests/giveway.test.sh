@@ -263,14 +263,15 @@ else case $PWD in
     echo eight >> a.txt ;;
 esac; fi
 EOF
-  # A failed run writes the runner's log naming its file, as a runner does: one that names only the test command is no
-  # result (voidrun()), run again and never sent to a fix.
+  # A failed run exits 1 and writes no log line of its own: test.fileCommand's runner (filecmd()) logs the file it was
+  # given and its failure. A second name the stub wrote (broken.test), seen by the run's watch before the runner exits
+  # (a loaded machine), stopped the run as one that ran files it was not given (<worktree>.wide): #7 blocked.
   cat >> "$STUB/test-cmd" <<'EOF'
 [ "$(cat ../*.claim 2>/dev/null | jq -s '[.[] | select(.held == true and (.paths | index("a.txt")))] | length')" -le 1 ] || : > "$STUB/both"
 case $PWD in *-7) n=$(($(cat "$STUB/runs7" 2>/dev/null || echo 0) + 1)); echo $n > "$STUB/runs7"
   cp "$PWD.claim" "$STUB/testclaim.$n"; tail -n 1 a.txt > "$STUB/testlast.$n"; [ $n != 1 ] || . "$STUB/firsttest" ;;
 esac
-[ ! -e broken ] || { echo "FAIL broken.test"; printf "%s\n" "== broken.test" "-- FAIL broken.test" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1; }
+[ ! -e broken ] || { echo "FAIL broken.test"; exit 1; }
 EOF
   echo : > "$STUB/firsttest"
 }
@@ -376,7 +377,7 @@ t_givewaymovedpass() {
   gwfixsetup "[$(issue 7 2026-01-01)]"; echo 'sed -i 1s/.*/seven/ a.txt' > "$STUB/build"
   { cat <<'EOF'; cat "$STUB/test-cmd"; } > "$STUB/test-cmd.new" && mv "$STUB/test-cmd.new" "$STUB/test-cmd"
 case $PWD in *-7) [ -e b.txt ] || { [ -e "$R/b.txt" ] || { echo b > "$R/b.txt"; git -C "$R" add b.txt; git -C "$R" commit -qnm "main moves"; }
-  echo "FAIL broken.test"; printf "%s\n" "== broken.test" "-- FAIL broken.test" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1; } ;; esac
+  echo "FAIL broken.test"; exit 1; } ;; esac
 EOF
   # land() runs main's pre-commit hook just before it lands: the claim #7 lands on.
   printf '#!/bin/sh\nfor c in "%s"/*-7.claim; do [ ! -e "$c" ] || cp "$c" "%s/landclaim"; done\n' "$T/$CASE/cards" "$STUB" > "$R/.git/hooks/pre-commit"
