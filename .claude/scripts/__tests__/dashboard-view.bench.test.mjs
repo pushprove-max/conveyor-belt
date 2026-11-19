@@ -6,6 +6,7 @@
 // gone (#646); and each place a cost shows, recorded, partial or unknown (#646).
 // The runs come from GET bench, not the snapshot. Shared setup: dashboard-view.helpers.mjs (BH).
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { boot, deliver, next, settle, act, cases, full, iso, T0, BH, tick, tabBtn } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
@@ -261,6 +262,15 @@ test('A run going: the tab opens on it, its step moves with the same done count,
   assert.equal(text(bp(w).querySelector('.bench-run-head .bench-ended')), 'Stopped by you 2 of 5 tasks done for every arm. The finished tasks are kept and reused.');
   assert.equal(text(bp(w).querySelector(`tr[data-task="${t3}"] .bench-cell`)), 'interrupted$0.40 recorded, part unknown');
   assert.equal(bp(w).querySelector('.bench-now'), null);
+});
+
+// Bug it guards (#752): docs/board.md said the active time counts on while the run goes, though the preflight check
+// before the first task adds none (the case above). A text check, as a guide page has no behaviour to run.
+test('The guide says a preflight adds no active time, as the run page counts it', () => {
+  const guide = readFileSync(new URL('../../../docs/board.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+  assert.doesNotMatch(guide, /active time counts? on while the run goes/, 'active time does not count on during the preflight check');
+  assert.match(guide, /the run checks the preflight of each arm, and this check adds no active time/);
+  assert.match(guide, /The active time of an arm counts on only while the arm works on a task\./);
 });
 
 // Bug it guards (#646 review E1): with no run going the tab opened on the Overview, so Start a run was a click away,
