@@ -50,7 +50,10 @@
 # passed (release-prep), released (release), failed (the suite failed), refused (any other refusal) or stopped), sha
 # (the commit the suite runs or ran on, null before it), done, failed and cases (the cases ended, those failed and their
 # names, as at the suite's end; while it runs the snapshot counts them: suiteprog()), timedout (those of them stopped
-# at their time limit, by name), moved (main moved while the suite
+# at their time limit, by name), alone (release-prep's red suite: each failed case run alone, as fulljudge() prints it:
+# {case, line, runs, verdict: flaky or failed, why}; a suite passed with every failed case flaky has them here only),
+# counts (only while those runs alone run: the suite's suiteprog(), which the snapshot shows in their place), moved
+# (main moved while the suite
 # ran; while it runs the snapshot compares main's head with main), main (main's head as the suite started), reused
 # (null for a whole suite; else {sha and time: the run it reused, ran: the files it reran, none when no test ran, kept:
 # the passes it kept}), reasons
@@ -58,7 +61,7 @@
 # the processes that carry its mark, `release-run stop` ends), red (a failed release-prep's suite a release may go over: {sha, files, cases}, else null)
 # and anyway (a release made over it: red with by, else null) and allowed (a release that passed over hits in named
 # commits: {by, commits}, else null)}. A release after a passed release-prep of the same
-# version keeps that run's suite (sha, done, failed, cases, moved, reused, since); one after a failed release-prep of
+# version keeps that run's suite (sha, done, failed, cases, alone, moved, reused, since); one after a failed release-prep of
 # it keeps that suite too, its files and timedout, and makes red of it; one after a refused release of it keeps that
 # one's (all but moved), and its red.
 # `conveyor.sh release-run [prep] <version>` is the Board's Release (docs/board.md): the owner's yes, given there. It
@@ -165,11 +168,11 @@ relstart() { # <command name> <version>
   # release keeps the suite's commit and cases from release-prep's pass of its version, or from a release of it
   # refused since (a retry takes the pass from the status and runs no suite). From release-prep's failed suite of its
   # version: that suite, and red, the failed run `release --anyway` may go over, kept through a refused release.
-  [ "$1" != release ] || was=$(jq -ce --arg v "$2" 'select(.version == $v and .sha != null) | if .step == "release-prep" and .state == "passed" then {since, sha, done, failed, cases, moved, reused}
-    elif .step == "release-prep" and .state == "failed" then {since, sha, done, failed, cases, moved, reused, files, timedout, red: {sha, files: (.files.failed // []), cases}}
+  [ "$1" != release ] || was=$(jq -ce --arg v "$2" 'select(.version == $v and .sha != null) | if .step == "release-prep" and .state == "passed" then {since, sha, done, failed, cases, moved, reused, alone: (.alone // [])}
+    elif .step == "release-prep" and .state == "failed" then {since, sha, done, failed, cases, moved, reused, files, timedout, alone: (.alone // []), red: {sha, files: (.files.failed // []), cases}}
     elif .step == "release" and .state == "refused" then {since, sha, done, failed, cases, reused, red} else empty end' "$RELRUN" 2>/dev/null) || was=null
   jq -cn --arg s "$1" --arg v "$2" --arg t "$(clock)" --argjson p "${CONVEYOR_RELEASE_PID:-$$}" --argjson w "$was" \
-    '{kind: "release", step: $s, version: $v, since: $t, ended: null, state: "running", sha: null, done: 0, failed: 0, cases: [], moved: false, reused: null, reasons: [], pid: $p, red: null, anyway: null, allowed: null} + $w' > "$RELRUN.new" \
+    '{kind: "release", step: $s, version: $v, since: $t, ended: null, state: "running", sha: null, done: 0, failed: 0, cases: [], alone: [], moved: false, reused: null, reasons: [], pid: $p, red: null, anyway: null, allowed: null} + $w' > "$RELRUN.new" \
     && mv -f "$RELRUN.new" "$RELRUN" && RELSTARTED=1
   # Each process the run starts carries its mark (relprocs()). The run's end ends them all: the suite's runner
   # (timeout) is a process group of its own, which a signal to this process never reaches, and each holds the release
@@ -250,14 +253,19 @@ lasttag() { git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | ta
 # with a pass of every file on <commit> itself (a full test run's, or Push landed's) it runs no test and posts the pass;
 # with results on an ancestor it runs only some files (the suite's command is told the list by the file
 # CONVEYOR_SUITE_FILES names), its record's reused naming that run and the files rerun; the others keep that run's ok.
+# A red suite of release-prep: each failed case is run alone FULL_ALONE times on <commit> and judged as the full test
+# judges it (fulljudge(), lib/fulltest.sh), the record's alone keeping each with its runs alone and verdict. One that
+# passed every run alone is flaky (the flaky-test record, its source "release <version> <commit>") and blocks nothing:
+# when every failed case is flaky, the suite passes, and its status and the record (cases [], failed 0) say so. Any
+# other blocks the release.
 # 0: passed and posted; 1: failed (failure posted), or a step could not be done; 2: the pack names no test.full.
 relsuite() { # <command name> <commit>
-  local n=$1 sha=$2 cmd wt=$CARDS/release/wt out rc state desc m0 m1 p l='' u=null
+  local n=$1 sha=$2 cmd wt=$CARDS/release/wt out rc sr state desc m0 m1 p l='' u=null f al='[]' fl=''
   packget test.full cmd || return 1
   [ -n "$cmd" ] || { echo "conveyor: $n: the pack names no full test suite (test.full); nothing run" >&2; return 2; }
   # main as the suite starts: a card that lands while it runs moves it (the record's moved).
   m0=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)
-  relrec --arg s "$sha" --arg m "$m0" '.sha = $s | .done = 0 | .failed = 0 | .cases = [] | .moved = false | .reused = null | .main = (if $m == "" then null else $m end)'
+  relrec --arg s "$sha" --arg m "$m0" '.sha = $s | .done = 0 | .failed = 0 | .cases = [] | .alone = [] | .moved = false | .reused = null | .main = (if $m == "" then null else $m end)'
   out=$({ git worktree remove --force "$wt" 2>/dev/null; rm -rf "$wt" "$wt".*; git worktree prune
     git worktree add -q --detach "$wt" "$sha" && deps "$wt"; } 2>&1 < /dev/null) || {
     git worktree remove --force "$wt" 2>/dev/null; echo "conveyor: $n: the worktree of ${sha:0:12} could not be made; nothing run: ${out:0:600}" >&2; return 1; }
@@ -289,11 +297,34 @@ relsuite() { # <command name> <commit>
   [ $rc = 0 ] || [ "$(jq .failed <<<"$p")" != 0 ] || p=$(testfails "$wt.test" "$rc" test.full | jq -c --argjson p "$p" --arg cmd "$cmd" \
     '$p + {cases: [.files[]? | .file as $f | if (.cases // []) == [] then $f else .cases[] | if $f == $cmd or $f == "" then .name else "\($f): \(.name)" end end] | unique}
       | .failed = (.cases | length)' 2>/dev/null) || p=$(suiteprog "$wt")
+  sr=$rc
+  if [ $rc != 0 ] && [ "$n" = release-prep ]; then
+    f=$(testfails "$wt.test" "$rc" test.full) || f='{"files":[]}'
+    # A file kept from the reused run passed: each case run alone is told so, as of a file that passed in this run.
+    [ -z "$l" ] || f=$(jq -c --slurpfile l <(printf '%s' "$l") --rawfile run "$wt.files" '$l[0] as $l | .passed = ((.passed // []) + ([$l.files | to_entries[] | select(.value == "ok") | .key] - ($run | split("\n"))))' <<<"$f")
+    # Each run alone below runs in this worktree, so it clears the suite's log folder and output: the record keeps the
+    # suite's counts while they run (the Release panel's progress: lib/snapshot.sh suites()), and the suite's log
+    # folder and output are put aside and back, so a failed release points to the suite's output, not a run alone's.
+    relrec --argjson p "$p" '.counts = $p'
+    rm -rf "$wt.suitelog" "$wt.suitetest"; mv "$wt.testlog" "$wt.suitelog" 2>/dev/null; mv "$wt.test" "$wt.suitetest" 2>/dev/null
+    al=$(fulljudge "$wt" "$sha" "$cmd" "$f" "release $(jq -r .version "$RELRUN")") && jq -e 'type == "array"' <<<"$al" > /dev/null || al='[]'
+    rm -rf "$wt.testlog" "$wt.test"; mv "$wt.suitelog" "$wt.testlog" 2>/dev/null; mv "$wt.suitetest" "$wt.test" 2>/dev/null
+    # Every failed case flaky passes the suite: only when the cases judged are at least those its runner named as failed,
+    # so a failure the output names no case of is never passed over.
+    if jq -e --argjson p "$p" 'length > 0 and length >= $p.failed and all(.verdict == "flaky")' <<<"$al" > /dev/null; then
+      rc=0; fl=$(jq -r 'map(.case) | join(", ")' <<<"$al")
+      p=$(jq -c '.failed = 0 | .cases = [] | .timedout = [] | .files.failed = []' <<<"$p")
+      echo "conveyor: $n: every failed case passed alone $FULL_ALONE of $FULL_ALONE on ${sha:0:12}, so the suite passes; judged flaky: $fl"
+    else
+      jq -r '.[] | "conveyor: '"$n"': \(.case): \(.verdict): runs alone \(.runs | join(", "))\(if .why then "; " + .why else "" end)"' <<<"$al" >&2
+    fi
+  fi
   m1=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)
-  relrec --argjson p "$p" --argjson mv "$([ "$m0" = "$m1" ] && echo false || echo true)" --arg st "$([ $rc = 0 ] && echo passed || echo failed)" \
-    '. + $p | .moved = $mv | .state = $st'
+  relrec --argjson p "$p" --argjson mv "$([ "$m0" = "$m1" ] && echo false || echo true)" --arg st "$([ $rc = 0 ] && echo passed || echo failed)" --argjson al "$al" \
+    '. + $p | .moved = $mv | .state = $st | .alone = $al | del(.counts)'
   [ "$m0" = "$m1" ] || echo "conveyor: $n: $BRANCH moved while the suite ran, from ${m0:0:12} to ${m1:0:12}: a card landed; the suite tested ${sha:0:12}"
-  if [ $rc = 0 ]; then maprefresh "$wt" || :; else mapstop "$wt" "the release's whole run failed"; fi
+  # The test map is of the suite run alone: a red one, though its failed cases then passed alone, refreshes none.
+  if [ $sr = 0 ]; then maprefresh "$wt" || :; else mapstop "$wt" "the release's whole run failed"; fi
   git worktree remove --force "$wt" 2>/dev/null
   if [ $rc = 0 ] && [ "$u" != null ] && [ "$(jq '.ran | length' <<<"$u")" = 0 ]; then
     state=success desc=$(jq -r '"The whole suite (test.full) passed on the build machine: reused the green run of \(.time) on \(.sha[0:12])"' <<<"$u")
@@ -301,6 +332,8 @@ relsuite() { # <command name> <commit>
     state=success desc=$(jq -r '"The whole suite (test.full) passed on the build machine: reran \(.ran | length) files, reused \(.kept) passed files from \(.sha[0:12])"' <<<"$u")
   elif [ $rc = 0 ]; then state=success desc="The whole suite (test.full) passed on the build machine"
   else state=failure desc="The whole suite (test.full) failed on the build machine (exit $rc)"; fi
+  # A status's description is at most 140 characters (GitHub): the record's alone names every case judged flaky.
+  [ -z "$fl" ] || { desc+="; judged flaky: $fl"; desc=${desc:0:140}; }
   gh_write api -X POST "repos/{owner}/{repo}/statuses/$sha" -f "state=$state" -f context=conveyor/release-suite -f "description=$desc" > /dev/null \
     || { echo "conveyor: $n: the status of ${sha:0:12} could not be posted (the suite $([ $rc = 0 ] && echo passed || echo failed))" >&2; return 1; }
   if [ $rc = 0 ]; then echo "conveyor: $n: the whole suite passed on ${sha:0:12}; its status is posted"

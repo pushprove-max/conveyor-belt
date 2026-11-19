@@ -14,7 +14,8 @@
 // version passed on main's head (step 2 and the confirm say "Uses the suite that passed"), else release-prep first
 // ("Runs the suite first"); then release makes the tag and the GitHub release. Beside release-prep's red result on main's
 // head, Release anyway sends `release-run anyway <version>`: release over that failed suite. Stop (`release-run stop`, a second click too) shows only while a run is
-// under way. Each reason a refused or failed run printed shows under the step it belongs to. The panel is wide or full,
+// under way. Each reason a refused or failed run printed shows under the step it belongs to, and each failed case
+// release-prep judged flaky (it passed every run alone) under the suite's step. The panel is wide or full,
 // never small: in the narrow column every line wraps.
 (() => {
   const VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
@@ -133,6 +134,17 @@
     return out;
   }
 
+  // The failed cases of release-prep's red suite that passed every run alone (the record's alone, verdict flaky): they
+  // block nothing, and a suite whose every failed case is one of them passed.
+  function flakyList(h, x) {
+    const names = list(x.alone).filter((c) => c && c.verdict === 'flaky').map((c) => String(c.case));
+    if (!names.length) return null;
+    const ul = h('ul', 'release-cases');
+    ul.dataset.list = 'flaky';
+    names.forEach((c) => ul.append(h('li', null, `${c}: judged flaky, passed alone`)));
+    return ul;
+  }
+
   function reasonsList(h, why) {
     if (!why.length) return null;
     const ul = h('ul', 'release-reasons');
@@ -214,7 +226,7 @@
         : !u.ran.length ? `Reused the green run of ${typeof u.time === 'string' ? ctx.clock(u.time) : 'an earlier time'} on ${short(u.sha)}`
           : `Reran ${files(u.ran.length)}, reused ${u.kept} passed ${u.kept === 1 ? 'file' : 'files'} from ${short(u.sha)}`);
       scope.dataset.figure = 'suite-scope';
-      s2 = step(h, 'Full suite', s.failed ? 'failed' : s.moved ? 'todo' : 'done', line, scope, ...counts(h, c, false), reasonsList(h, why[1]));
+      s2 = step(h, 'Full suite', s.failed ? 'failed' : s.moved ? 'todo' : 'done', line, scope, ...counts(h, c, false), flakyList(h, c), reasonsList(h, why[1]));
     } else {
       s2 = step(h, 'Full suite', why[1].length ? 'failed' : 'todo', `Not run on main's head (${short(m.head)})`, reasonsList(h, why[1]));
     }

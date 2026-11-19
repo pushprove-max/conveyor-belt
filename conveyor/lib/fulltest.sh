@@ -294,9 +294,12 @@ fullalone() { # <worktree> <testfails() of the run> <unit> [field]
   tests "$1" "${4:-test.full}" alone; rc=$?
   case $rc in 0) echo passed ;; 124) echo timeout ;; *) if [ "$rc" -gt 128 ]; then echo killed; else echo failed; fi ;; esac
 }
-# Each failed case of a red run, judged (above): prints them as a JSON array.
-fulljudge() { # <worktree> <commit> <command> <testfails() of the run>
-  local wt=$1 sha=$2 u name r runs outside code why cause body x v issue reused out=()
+# Each failed case of a red run, judged (above): prints them as a JSON array. With <release> (release-prep's red suite,
+# commands/release-prep.sh: "release <version>"), a flaky entry's source is "<release> <commit>", and a case that failed
+# alone is a verdict failed, which blocks the release: no fix card is filed and no declined line written.
+fulljudge() { # <worktree> <commit> <command> <testfails() of the run> [release]
+  local wt=$1 sha=$2 u name r runs outside code why cause body x v issue reused out=() run="the full test suite"
+  [ -z "${5:-}" ] || run="the suite run of $5"
   while IFS= read -r u; do
     name=$(jq -r .name <<<"$u"); runs=(); outside=(); code=''
     for ((x = 0; x < FULL_ALONE; x++)); do
@@ -309,8 +312,11 @@ fulljudge() { # <worktree> <commit> <command> <testfails() of the run>
     done
     why=''; issue=null; reused=false
     if [ ${#outside[@]} = 0 ] && [ -z "$code" ]; then
-      v=flaky; why="failed in the full test suite, passed alone $FULL_ALONE of $FULL_ALONE"
-      flaky "full test ${sha:0:12}" "$(jq -cn --arg c "$name" --arg n "$why" '[{case: $c, note: $n}]')" >/dev/null 2>&1 || why+="; the flaky-test record could not be written"
+      v=flaky; why="failed in $run, passed alone $FULL_ALONE of $FULL_ALONE"
+      flaky "${5:-full test} ${sha:0:12}" "$(jq -cn --arg c "$name" --arg n "$why" '[{case: $c, note: $n}]')" >/dev/null 2>&1 || why+="; the flaky-test record could not be written"
+    elif [ -n "${5:-}" ]; then
+      v=failed; why="failed in $run and alone too, so it blocks the release"
+      [ -n "$code" ] || why+="; outside the code: $(printf '%s\n' "${outside[@]}" | sort -u | paste -sd';' - | sed 's/;/; /g')"
     elif [ -z "$code" ]; then
       v=declined; why="outside the code: $(printf '%s\n' "${outside[@]}" | sort -u | paste -sd';' - | sed 's/;/; /g')"
       declined "full-test-${sha:0:12}" 0 code "$why" "$name: $(jq -r '.line // "failed"' <<<"$u")" 2>/dev/null || why+="; the declined list could not be written"

@@ -17,9 +17,10 @@ relwait() {
   fail "$1: $(cat "$RUN" 2>&1)"
 }
 # The Board's Release (release-run): cutsetup, with gh keeping each conveyor/release-suite status it is sent, so release
-# takes release-prep's pass, and the suite counting its runs in $STUB/runs.
+# takes release-prep's pass, and the suite counting its whole runs in $STUB/runs (not a red run's failed case run alone,
+# CONVEYOR_TEST_RERUN set: release-prep's judging of it, fulljudge()).
 runsetup() {
-  cutsetup "echo run >> \"\$STUB/runs\"; $1"
+  cutsetup "[ -n \"\${CONVEYOR_TEST_RERUN:-}\" ] || echo run >> \"\$STUB/runs\"; $1"
   printf '%s\n' '#!/usr/bin/env bash' 'if [ "$1" = release ] || [[ " $* " == *" -X POST "* ]]; then printf "%s\n" "$*" >> "$STUB/gh-calls"' \
     '[[ " $* " =~ \ state=([a-z]+)\  ]] && printf "[{\"context\":\"conveyor/release-suite\",\"state\":\"%s\"}]\n" "${BASH_REMATCH[1]}" > "$STUB/statuses" || :' \
     'else cat "$STUB/statuses" 2>/dev/null || echo "[]"; fi' > "$STUB/gh"

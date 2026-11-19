@@ -53,6 +53,13 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    `.conveyor/test-full.sh` or the engine's test runner). When the files pass, the status is a pass, and its text
    says how many files ran and how many passes it kept, and from which commit. The Release panel says the same
    in its step 2.
+
+   When the suite fails, this step runs each failed case alone three times on the same commit, as **Run full test
+   suite** does. A case that passes each time alone is flaky. It goes on the flaky-test record with the source
+   "release <version> <commit>", and it does not stop the release. When the flaky-test record has this case from
+   enough runs, Conveyor files an issue to make it stable, as it does after a full test run. When each failed case is
+   flaky, the suite passes. The status then names the flaky cases, and the Release panel lists them in its step 2. A
+   case that fails alone too stops the release, and the output gives the result of each of its runs alone.
 5. Ask the owner for a yes in chat. After the yes, run `conveyor.sh release <version>` in the main checkout, on `main`.
    It stops, and changes nothing, when one of these is true:
    - the version is not higher than the newest tag, or its tag exists,

@@ -320,7 +320,8 @@ CHECKRUN_SHOW='
 # The whole-suite runs, each in one shape (suites, above): the release's (its record, commands/release-prep.sh) and
 # the full test's (fulltest()). One under way is counted from its runner's marks (suiteprog(); a red full test's, while
 # its failed cases run alone, from those kept as its run ended), and says main moved once
-# main's head is not the one its suite started on (the record's main). A release record left
+# main's head is not the one its suite started on (the record's main); a red release's, while its failed cases run alone,
+# from the counts its record keeps (commands/release-prep.sh relsuite()). A release record left
 # running with its lock free was ended from outside before it could say so: stopped, when the record was last written.
 # A full test's run left so is shown as the line the next ask records for it: an error, with its reason.
 suites() {
@@ -328,11 +329,11 @@ suites() {
   if r=$(jq -ce 'objects | select(.kind == "release") | del(.pid)' "$CARDS/release/run.json" 2>/dev/null); then
     if [ "$(jq -r .ended <<<"$r")" = null ]; then
       if ( flock -n 9 ) 9>>"$CARDS/release/lock" 2>/dev/null; then
-        t=$(p_stat "$CARDS/release/run.json") && r=$(jq -c --argjson t "${t#* }" '.state = "stopped" | .ended = ($t | todate)' <<<"$r")
+        t=$(p_stat "$CARDS/release/run.json") && r=$(jq -c --argjson t "${t#* }" '. + (.counts // {}) | del(.counts) | .state = "stopped" | .ended = ($t | todate)' <<<"$r")
       elif jq -e '.state == "running" and .sha != null' <<<"$r" > /dev/null; then
         # A card that lands while the suite runs moves main: the panel says so now, not at the suite's end.
         r=$(jq -c --slurpfile p <(suiteprog "$CARDS/release/wt") --arg h "$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)" \
-          '. + $p[0] | if .main != null and $h != "" and .main != $h then .moved = true else . end' <<<"$r"); fi
+          '. + (.counts // $p[0]) | del(.counts) | if .main != null and $h != "" and .main != $h then .moved = true else . end' <<<"$r"); fi
     fi
   fi
   # A full test's marker read before and after its lock is found free ended with no result (fulldead()): a run that

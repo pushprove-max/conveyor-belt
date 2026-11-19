@@ -148,6 +148,16 @@ test('a failed run names each case that timed out as timed out, beside the faile
   assert.deepEqual(Array.from(stepOf(w, 'full-suite').querySelectorAll('[data-list="timedout"] li'), (x) => x.textContent), ['metrics: timed out']);
 });
 
+// Bug this guards (#789): a suite that passed because each failed case passed alone, or a red one with a flaky case
+// beside the one that blocks it, did not say which cases were judged flaky, so the owner could not tell what was passed over.
+test('#789: a passed suite names each case judged flaky under step 2, and a case that failed alone is not one', () => {
+  const w = boot();
+  deliver(w, data({ ...RUN, ended: '2026-11-14T08:15:00Z', state: 'passed', done: 140, of: 140, failed: 0, cases: [],
+    alone: [{ case: 'a.test: flips', runs: ['passed', 'passed', 'passed'], verdict: 'flaky' }, { case: 'b.test: breaks', runs: ['failed'], verdict: 'failed' }] }));
+  assert.equal(stepOf(w, 'full-suite').dataset.state, 'done');
+  assert.deepEqual(Array.from(stepOf(w, 'full-suite').querySelectorAll('[data-list="flaky"] li'), (x) => x.textContent), ['a.test: flips: judged flaky, passed alone']);
+});
+
 // Bugs this guards (#274): a red suite on main's head offers no honest way to release, or Release anyway goes on one
 // click, with a confirm that does not name the failures it releases over, or is offered over a suite of an older main.
 test('#274: release-prep\'s red run on main\'s head offers Release anyway, on a second click that names the failed files and cases', async () => {
