@@ -44,6 +44,7 @@ listrec() { # <the test line's list, as jq -c prints it>
 # 94. A change to one source file and a new test file runs only the test of that file by name (the nearest one, not
 # far/cartsum.test.js) and the new test, as arguments; a document of the change adds none. The test line says so.
 t_testlistargs() {
+  local -x WHOLESUITE=true
   listsetup args
   listrun 'echo y >> lib/cartsum.js; echo x > lib/new.test.js; echo d > notes.md'
   listgot 'args:lib/cartsum.test.js lib/new.test.js|env:' 'the test of the changed file and the new test, as arguments'
@@ -63,6 +64,7 @@ t_testlistdoc() {
 
 # The same change with test.list env: no argument, and CONVEYOR_TEST_FILES holds the two paths, one a line.
 t_testlistenv() {
+  local -x WHOLESUITE=true
   listsetup env
   listrun 'echo y >> lib/cartsum.js; echo x > lib/new.test.js'
   listgot 'args:|env:lib/cartsum.test.js lib/new.test.js' 'the two paths in CONVEYOR_TEST_FILES'
@@ -140,6 +142,7 @@ runnersetup() { # <runner> <command> <file>...
 # the map knew its tests. The packages of the tests the change touches go where ./... was, each once, and the rest of
 # the command stays.
 t_testlistgo() {
+  local -x WHOLESUITE=true
   runnersetup go 'go test ./... -count=1' pkg/cart/cart.go pkg/cart/cart_test.go pkg/tax/tax_test.go
   listrun 'echo y >> pkg/cart/cart.go; echo y >> pkg/cart/cart_test.go; echo x > root_test.go'
   listgot 'args:test . ./pkg/cart -count=1|env:' 'the packages of the tests, in place of ./...'
@@ -148,6 +151,7 @@ t_testlistgo() {
 
 # #154, the same for cargo test: each tests/<name>.rs the change touches is a --test <name> after cargo test.
 t_testlistcargo() {
+  local -x WHOLESUITE=true
   runnersetup cargo 'cargo test --release' src/cart.rs tests/cart.rs tests/tax.rs
   listrun 'echo y >> src/cart.rs; echo x > tests/fee.rs'
   listgot 'args:test --test cart --test fee --release|env:' 'a --test of each test target'
@@ -157,6 +161,7 @@ t_testlistcargo() {
 # A test file cargo test cannot be given alone (a test's own module, tests/cart/util.rs) runs the whole suite: a
 # --test of no target would fail, and leaving it out would skip the tests that read it.
 t_testlistcargomod() {
+  local -x WHOLESUITE=true
   runnersetup cargo 'cargo test' tests/cart.rs tests/cart/util.rs
   listrun 'echo y >> tests/cart/util.rs'
   listgot 'args:test|env:' 'no test target for a test module'
