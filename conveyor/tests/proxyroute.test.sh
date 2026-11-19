@@ -152,6 +152,28 @@ t_proxydown() {
   [ "$(jq -r .proxy.state "$ST/routes.json")" = fails ] || fail "the routes still record a stopped proxy working: $(cat "$ST/routes.json")"
   [ "$(loop health | jq -r '.routes.proxy.state')" = fails ] || fail "health still shows a stopped proxy working: $(loop health | jq -c .routes)"
 }
+# Bug: card() records its build and review lines without the route session() and review() give, so the Board's
+# timeline of a landed card shows the subscription for sessions that ran through the proxy. A loop run: the cases above
+# write the card's build and landing records themselves, and only card() joins the sessions' fields to those lines.
+# The builder and the Claude reviewer take the proxy as their fallback; on the subscription the login has expired.
+t_proxyfallbackrun() {
+  pxsetup; tune --slurpfile real "$SRC/lib/test-pack.json" --arg b "$PXURL" '.models.allowed = $real[0].models.allowed | .models.allowed.claude += ["m"]
+    | .models.claudeProxy = {baseUrl: $b, roles: {builder: "fallback", reviewer: "fallback"}}'
+  loop control reviewer claude claude-opus-5-5 >/dev/null || fail "a Claude reviewer was not set"
+  cat > "$STUB/claude" <<'EOF'
+#!/usr/bin/env bash
+[ "${1:-}" != --version ] || { echo '2.1.322 (Claude Code)'; exit 0; }
+cat > /dev/null; echo "${ANTHROPIC_BASE_URL:-subscription}" >> "$STUB/routes"
+[ -n "${ANTHROPIC_BASE_URL:-}" ] || { echo '{"type":"result","is_error":true,"result":"OAuth session expired and could not be refreshed","num_turns":1}'; exit 1; }
+case " $* " in *" --tools "*) r=$GO ;; *) r=''; echo two >> a.txt ;; esac
+jq -cn --arg r "$r" '{type: "result", is_error: false, result: $r, num_turns: 2, usage: {input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 5}}'
+EOF
+  export GO; loop run >/dev/null 2>&1 || fail "run exited non-zero: $(st 'select(.step == "blocked") | .reason')"
+  [ -n "$(st 'select(.issue == 7 and .step == "landed") | .sha')" ] || fail "the card did not land: $(st 'select(.issue == 7) | .step' | tr '\n' ' ')"
+  local s; s=$(loop snapshot --fresh)
+  [ "$(jq -c '[.landed[] | select(.issue == 7) | .metrics.timeline[] | select(.step == "build" or .step == "review") | [.step, .route]]' <<<"$s")" = '[["build","proxy"],["review","proxy"]]' ] \
+    || fail "the Board's timeline of the landed card does not say the proxy on its build and review: $(jq -c '.landed[] | select(.issue == 7) | .metrics.timeline' <<<"$s") $(cat "$STUB/routes")"
+}
 # Codex takes its route through its own provider settings: a Codex reviewer whose own login fails, with the host
 # file's codexProxy as the reviewer's fallback, runs again at once given that proxy as its provider, and its fields
 # say so.
