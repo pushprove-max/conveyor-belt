@@ -73,6 +73,24 @@ t_relstopgroup() {
   out=$(loop release-run prep 1.1.0 2>&1) || fail "the next release-prep did not start at once after the stop: $out"
   relwait "the next release-prep did not pass" '.state == "passed"'
 }
+# Bug (#596): the reaps of the run's own end and of its watcher, which carry the run's mark, found a process of their
+# own scan as a process of the run, so they never saw the run gone and ran all 20 KILL rounds, each a scan of the
+# process table (two ps), 2 to 4 s and the CPU of 40 ps a reap. A ps on PATH counts the scans (its env listing) of the whole stop, of a
+# run whose processes all end on the TERM: each reap needs two (the processes, then none left).
+t_relstopscans() {
+  local O RUN out ps p
+  runsetup "$RELLEFT sleep 300; }" # sleep: the suite runs until the case ends the run
+  ps=$(command -v ps) && printf '%s\n' '#!/usr/bin/env bash' "[[ \" \$* \" != *' axeww '* ]] || echo scan >> \"\$STUB/scans\"" "exec $ps \"\$@\"" > "$STUB/ps" \
+    && chmod +x "$STUB/ps" || fail "the ps that counts could not be made"
+  out=$(loop release-run prep 1.1.0 2>&1) || fail "release-run did not start the run: $out"
+  wait_until '[ -s "$STUB/left" ]' || fail "the suite did not start: $(cat "$T/$CASE/cards/release/run.log" 2>&1)"
+  p=$(jq .pid "$RUN") && rm -f "$STUB/scans"
+  out=$(loop release-run stop 2>&1) || fail "the stop failed: $out"
+  # The reaps of the run's own end and its watcher end with the last process that carries the run's mark ([ ]: the
+  # grep's own command line does not match).
+  wait_until "! $ps axeww -o command= | grep -q '[ ]CONVEYOR_RELEASE_RUN=$p '" || fail "a process of the run still runs after the stop"
+  [ "$(wc -l < "$STUB/scans")" -le 6 ] || fail "the stop's three reaps scanned the process table $(wc -l < "$STUB/scans") times, more than twice each"
+}
 # Bug (#335): a run whose pid was killed (KILL, which runs no trap) left its release-prep and the suite's process in a
 # group of its own running, holding the lock.
 t_relkilled() {
