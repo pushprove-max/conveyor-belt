@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
 # Engine cases: the check of an Optimize card's split (speedproof()): its files' CPU seconds summed against the old
-# file's on record and a start-up allowance for each file a split adds. No file is held to a CPU budget (#349).
+# file's on record and a start-up allowance for each file a split adds. No file is held to a CPU budget (#349). And
+# whose failure the check's reason names when its run fails (#602).
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -13,7 +14,12 @@
 # holds the old test.fileBudget of 8, which no file is held to. Each run under cards/mainrun/ times each file its list names `fail` at the CPU seconds
 # $STUB/cpu-<file> holds, and names the case one of it as passed; a line that names a case as well (a run with no case
 # selected) is timed at $STUB/cpu-probe, with no line when that is empty, and names no case unless $STUB/probe-whole
-# exists (PROBEWHOLE set: a runner with no case filter, which runs the file whole). The check's exit is in $RC and the first line of what the review is shown in $WHY.
+# exists (PROBEWHOLE set: a runner with no case filter, which runs the file whole). With $STUB/fail-<file> (OWNFAIL
+# set: f.test.sh), that file fails its case two; with $STUB/other-fail (OTHERFAIL set), the run first runs g.test.sh, a
+# file the change selects (as a Board test file's link selects one), which fails its case snapcase with the change
+# (and passes on main's f.test.sh, run alone there), and with OTHERFAIL=main the main-red record holds that case, its
+# fix card not picked yet; with OTHERFAIL=base it fails on main's f.test.sh too. Either failure makes the run exit
+# 1, its files named in its log. The check's exit is in $RC and the first line of what the review is shown in $WHY.
 # The files given after <change> are those the split adds.
 splitrun() { # <change> <cpu f.test.sh> <cpu f1.test.sh> <cpu f2.test.sh> <cpu probe> [<added file>...]
   local wt=$T/$CASE/cards/c7 c
@@ -24,15 +30,31 @@ splitrun() { # <change> <cpu f.test.sh> <cpu f1.test.sh> <cpu f2.test.sh> <cpu p
   done
   echo "$2" > "$STUB/cpu-f.test.sh"; echo "$3" > "$STUB/cpu-f1.test.sh"; echo "$4" > "$STUB/cpu-f2.test.sh"; echo "$5" > "$STUB/cpu-probe"
   [ -z "${PROBEWHOLE:-}" ] || : > "$STUB/probe-whole"
+  [ -z "${OWNFAIL:-}" ] || : > "$STUB/fail-f.test.sh"
+  [ -z "${OTHERFAIL:-}" ] || : > "$STUB/other-fail"
+  [ "${OTHERFAIL:-}" != base ] || : > "$STUB/other-base"
+  [ "${OTHERFAIL:-}" != main ] || jq -cn '{reds: [{sha: "abc", cases: [{case: "g.test.sh: snapcase", file: "g.test.sh", by: "c1", files: ["g.test.sh"], last: ""}], card: null}]}' > "$ST/mainred.json"
   cat > "$STUB/mainrun-cmd" <<'EOF'
+rc=0
+if [ -e "$STUB/other-fail" ] && ! grep -q fast f.test.sh && [ ! -e "$STUB/other-base" ]; then
+  printf '== g.test.sh\nok snapcase\n-- ok g.test.sh\n'; printf '== g.test.sh\n-- ok g.test.sh\n' >> "$CONVEYOR_TEST_LOG/r"
+elif [ -e "$STUB/other-fail" ]; then
+  printf '== g.test.sh\nFAIL [snapcase]: the snapshot differs\n-- FAIL g.test.sh\n'; printf '== g.test.sh\n-- FAIL g.test.sh\n' >> "$CONVEYOR_TEST_LOG/r"; rc=1
+fi
 while IFS=$'\t' read -r k f c; do
-  [ "$k" = fail ] || continue
+  [ "$k" = fail ] && [ "$f" != g.test.sh ] || continue
   if [ -n "$c" ]; then
     [ ! -e "$STUB/probe-whole" ] || printf '== %s\nok one\n-- ok %s\n' "$f" "$f"
     x=$(cat "$STUB/cpu-probe"); [ -z "$x" ] || printf 'TESTRUN sec\t%s\t1\t%s\n' "$f" "$x" >> "$CONVEYOR_TEST_LOG/r"; continue
   fi
-  printf '== %s\nok one\n-- ok %s\n' "$f" "$f"; printf 'TESTRUN sec\t%s\t1\t%s\n' "$f" "$(cat "$STUB/cpu-$f")" >> "$CONVEYOR_TEST_LOG/r"
+  if [ -e "$STUB/fail-$f" ]; then
+    printf '== %s\nFAIL [two]: it broke\n-- FAIL %s\n' "$f" "$f"; printf '== %s\n-- FAIL %s\n' "$f" "$f" >> "$CONVEYOR_TEST_LOG/r"; rc=1
+  else
+    printf '== %s\nok one\n-- ok %s\n' "$f" "$f"; [ ! -e "$STUB/other-fail" ] || printf '== %s\n-- ok %s\n' "$f" "$f" >> "$CONVEYOR_TEST_LOG/r"
+  fi
+  printf 'TESTRUN sec\t%s\t1\t%s\n' "$f" "$(cat "$STUB/cpu-$f")" >> "$CONVEYOR_TEST_LOG/r"
 done < "$CONVEYOR_TEST_RERUN"
+exit $rc
 EOF
   git -C "$R" worktree add -q --detach "$wt" && (cd "$wt" && eval "$1") && git -C "$wt" add -A || fail "the card's change could not be staged"
   ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
@@ -79,4 +101,38 @@ t_splitprobewhole() {
   PROBEWHOLE=1 splitrun "$SPLIT" '' 6 7 6 f1.test.sh f2.test.sh
   [ "$RC" != 0 ] && [ "$WHY" = "the split does not fit: the files take 13 CPU s summed, 1 over the 12 CPU s a split of f.test.sh may take: 10 CPU s on record plus a start-up allowance of 1 CPU s (the pack's test.splitAllowance: the run of f1.test.sh with no case ran its case one: the test command runs the file whole) for each of the 2 files it adds" ] \
     || fail "a run with no case selected that ran the file's cases was taken as its start-up: exit $RC, $WHY"
+}
+
+SPEEDUP='echo fast > f.test.sh'
+# #602. Bug it catches: the check's run also runs g.test.sh, a file the change selects, and when only g.test.sh fails
+# (its output before f.test.sh's passing lines, so the end of the run shows only passes) the block blames f.test.sh:
+# "the file f.test.sh fails with the change". The reason names g.test.sh and its failing case with its line.
+t_speedother() {
+  OTHERFAIL=1 splitrun "$SPEEDUP" 4 '' '' ''
+  [ "$RC" != 0 ] && [ "$WHY" = 'the file f.test.sh does not fail with the change, but another test file the change selects does (exit 1): g.test.sh fails, case `snapcase`: FAIL [snapcase]: the snapshot differs' ] \
+    || fail "another file's failure was not named as that file's: exit $RC, $WHY"
+}
+
+# #602. Bug it catches: a failure of another file that main fails too is said to be the change's. The main-red record
+# holds g.test.sh's case snapcase, its fix card not picked yet: the reason says it is main's.
+t_speedothermain() {
+  OTHERFAIL=main splitrun "$SPEEDUP" 4 '' '' ''
+  [ "$RC" != 0 ] && [ "$WHY" = 'the file f.test.sh does not fail with the change, but another test file the change selects does (exit 1): g.test.sh fails (main'"'"'s failure, not the change'"'"'s: the main-red record holds it), case `snapcase`: FAIL [snapcase]: the snapshot differs' ] \
+    || fail "a failure main holds red was not said to be main's: exit $RC, $WHY"
+}
+
+# #602. Bug it catches: naming another file's failure loses the optimized file's own: when f.test.sh fails (its case
+# two, named in the run's log), the reason names it as before.
+t_speedownfail() {
+  OWNFAIL=1 splitrun "$SPEEDUP" 4 '' '' ''
+  [ "$RC" != 0 ] && [ "$WHY" = 'the file f.test.sh fails with the change (exit 1)' ] || fail "the optimized file's own failure was not named: exit $RC, $WHY"
+}
+
+# #602. Bug it catches: a failure of another file that fails on the commit the card was built on too, with no entry in
+# the main-red record (as snapexec.test.sh failed on #585's base), is said to be the change's. g.test.sh fails its
+# case snapcase there too: the reason says it is main's.
+t_speedotherbase() {
+  OTHERFAIL=base splitrun "$SPEEDUP" 4 '' '' ''
+  [ "$RC" != 0 ] && [ "$WHY" = 'the file f.test.sh does not fail with the change, but another test file the change selects does (exit 1): g.test.sh fails (main'"'"'s failure, not the change'"'"'s: it fails on the commit the card was built on too), case `snapcase`: FAIL [snapcase]: the snapshot differs' ] \
+    || fail "a failure that main's commit fails too was not said to be main's: exit $RC, $WHY"
 }

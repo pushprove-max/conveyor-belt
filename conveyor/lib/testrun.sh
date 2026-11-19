@@ -1725,8 +1725,46 @@ splitstart() { # <worktree> <file> <the pack's test.command> <the pack's test.sp
 # over the budget of its own that the build proposes: ..."). Version 4 holds no file to a CPU budget.
 # shellcheck disable=SC2034 # read by lib/card.sh and lib/run.sh
 SPEEDCHECK=4
+# The failures of speedproof()'s run (exit <exit>, read by testfails() from <worktree>.test) of test files other than
+# <file run>...: the run also runs the test files the change selects (a Board test file's links,
+# .conveyor/test-links.json), and a failure of one of them is not the run's own file's (#602). Prints them, each file
+# with its failing cases and each case's first line. A file the main-red record holds red (redlisted(): the file, or
+# `<file>: <case>`) is named as main's failure; so is one that fails the same way on the commit the card was built on
+# (its HEAD): the change is taken out of the worktree again and the other files the record does not hold run alone
+# there, a file being main's when each of its failing cases fails there too (a file with no case named: when it fails
+# there). Prints nothing when no other file failed. Fails (1) when another file failed and none of <file run>... did.
+speedothers() { # <worktree> <exit> <file run>...
+  local t o cmd='' x f u=() m main=() base=() b='' brc
+  packget test.command cmd 2>/dev/null || cmd=''
+  t=$(testfails "$1.test" "$2" 2>/dev/null | jq -ce objects) || return 0
+  # A failure under no file, or under the test command (a run that wrote no log), names no other file.
+  o=$(jq -c --arg cmd "$cmd" '[.files[]?, (.timeout.file // empty | {file: ., cases: []})] | unique_by(.file)
+    | map(select(.file != "" and .file != $cmd and (.file | IN($ARGS.positional[]) | not)))' --args "${@:3}" <<<"$t") || return 0
+  [ "$o" != '[]' ] || return 0
+  while IFS= read -r f; do
+    mapfile -t u < <(jq -r --arg f "$f" '.[] | select(.file == $f) | $f, (.cases[]?.name | "\($f): \(.)")' <<<"$o")
+    if redlisted "${u[@]}"; then main+=("$f"); else base+=("$f"); fi
+  done < <(jq -r '.[].file' <<<"$o")
+  if [ ${#base[@]} -gt 0 ] && git -C "$1" diff --cached --binary --no-renames HEAD | git -C "$1" apply -R --index > /dev/null 2>&1; then
+    printf 'fail\t%s\n' "${base[@]}" > "$1.rerun"; tests "$1" test.command alone > /dev/null 2>&1; brc=$?
+    [ "$brc" = 0 ] || b=$(testfails "$1.test" "$brc" 2>/dev/null | jq -ce objects) || b=''
+  fi
+  x=''
+  while IFS= read -r f; do
+    m=''
+    if printf '%s\n' "${main[@]}" | grep -qxF -- "$f"; then m=" (main's failure, not the change's: the main-red record holds it)"
+    elif [ -n "$b" ] && jq -e --arg f "$f" --argjson o "$o" '[.files[]? | select(.file == $f)] as $bf | [$bf[].cases[]?.name] as $bc
+      | [$o[] | select(.file == $f) | .cases[]?.name] | if . == [] then $bf != [] else all(.[]; IN($bc[])) end' <<<"$b" > /dev/null 2>&1; then
+      m=" (main's failure, not the change's: it fails on the commit the card was built on too)"
+    fi
+    x+=${x:+; }$(jq -r --arg f "$f" --arg m "$m" '.[] | select(.file == $f)
+      | "\($f) fails\($m)" + (.cases | if . == [] then "" else ", " + (map("case `\(.name)`: \(.line)") | join(", ")) end)' <<<"$o")
+  done < <(jq -r '.[].file' <<<"$o")
+  printf '%s\n' "$x"
+  jq -e '[.files[]?.file, .timeout.file?] | any(.[]; IN($ARGS.positional[]))' --args "${@:3}" <<<"$t" > /dev/null
+}
 speedproof() { # <card> <worktree> <issue json> <test file> [<test file the change adds>...]
-  local mwt=$CARDS/mainrun/$1.speed f=$4 out='' rc='' sha before after='' why='' run=() l sa='' cpus='[]' over='' al='' alf='' lim='' tl='' cs='' cmd
+  local mwt=$CARDS/mainrun/$1.speed f=$4 out='' rc='' sha before after='' why='' run=() l sa='' cpus='[]' over='' al='' alf='' lim='' tl='' cs='' cmd oth own
   rm -f "$2.unfixed"
   # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
   git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || return 0
@@ -1745,11 +1783,16 @@ speedproof() { # <card> <worktree> <issue json> <test file> [<test file the chan
     # Each file run, with its CPU seconds.
     cpus=$(timed "$mwt" 2>/dev/null | jq -c '. as $t | [$ARGS.positional[] | {file: ., cpu: $t[.].cpu?}]' --args "${run[@]}" 2>/dev/null) || cpus='[]'
     after=$(jq -r 'map(.cpu) | if length > 0 and all(.[]; type == "number") then add | . * 1000 | round / 1000 else empty end' <<<"$cpus" 2>/dev/null)
-    if [ $# = 4 ]; then
-      if [ "$rc" != 0 ]; then why="the file $f fails with the change (exit $rc)"
+    # A failure of another test file the run selected is named as that file's, not the run's own files' (#602).
+    oth=''; own=0; [ "$rc" = 0 ] || { oth=$(speedothers "$mwt" "$rc" "${run[@]}"); own=$?; }
+    if [ "$rc" != 0 ] && [ "$own" != 0 ]; then
+      if [ $# = 4 ]; then why="the file $f does not fail with the change, but another test file the change selects does (exit $rc): $oth"
+      else why="the files of the split, $l, do not fail with the change, but another test file the change selects does (exit $rc): $oth"; fi
+    elif [ $# = 4 ]; then
+      if [ "$rc" != 0 ]; then why="the file $f fails with the change (exit $rc)${oth:+; another test file the change selects fails too: $oth}"
       elif [ -z "$after" ]; then why="the run of $f with the change gave no CPU seconds"
       elif ! jq -en --argjson a "$after" --argjson b "$before" '$a < $b' >/dev/null 2>&1; then why="the file is not faster: $before CPU s on record, $after CPU s now"; fi
-    elif [ "$rc" != 0 ]; then why="the files of the split, $l, fail with the change (exit $rc)"
+    elif [ "$rc" != 0 ]; then why="the files of the split, $l, fail with the change (exit $rc)${oth:+; another test file the change selects fails too: $oth}"
     elif [ -z "$after" ]; then why="the run of the files of the split, $l, with the change gave no CPU seconds for each"
     else
       # The start-up allowance is measured only when the sum needs it (splitstart()).
