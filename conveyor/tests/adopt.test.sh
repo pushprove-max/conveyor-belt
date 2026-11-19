@@ -452,3 +452,39 @@ t_gonebatch() {
   [ "$(st 'select(.step == "landed") | .issue')" = 7 ] && [ "$(git -C "$R" show main:a.txt | tr '\n' ' ')$(git -C "$R" show main:u.txt)" = "one two new" ] \
     && ! git -C "$R" cat-file -e main:m.txt 2>/dev/null || fail "#7 did not land its own change alone: $(st 'select(.issue == 7) | .step' | tr '\n' ' ') $(git -C "$R" show --stat main)"
 }
+
+# Bug: the loop that a restart starts adopts a card that has landed and not pushed yet; the card's process ends while
+# the last line of the card records is still being written (a long line reaches the file in more than one write),
+# the whole read of the records fails, and the loop writes `blocked` ("its process ended without a result") for the
+# landed card, which then stays in Needs you after its push goes out.
+t_landedrestart() {
+  setup '[]'; S=$ST; O=$T/$CASE/origin; mkdir -p "$S"
+  echo x > "$R/n.txt"; git -C "$R" add -A; git -C "$R" commit -qm next; sha=$(git -C "$R" rev-parse HEAD)
+  rec() { # <card> <issue> <step> [extra json]
+    jq -cn --arg c "$1" --argjson i "$2" --arg s "$3" --argjson x "${4:-{\}}" \
+      '{card:$c,issue:$i,step:$s,time:(now | todate),tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""} * $x'
+  }
+  { rec c1-14 14 picked; rec c1-14 14 landed "{\"sha\":\"$sha\",\"product\":false}"; } >> "$S/cards.jsonl"
+  # Another card's line, half written.
+  l=$(rec c2-15 15 picked); printf '%s' "${l:0:40}" >> "$S/cards.jsonl"
+  # The landed card's process, adopted from the loop before the restart, has ended.
+  sleep 0 & dead=$!; wait $dead # sleep: a stand-in for a card's process that has ended
+  # Its exit file: only the loop's look at a card of its own that has ended takes it away, so a run that skipped the
+  # adoption (and so had no adopted card to look at) leaves it, and the case fails.
+  mkdir -p "$T/$CASE/cards"; echo 0 > "$T/$CASE/cards/c1-14.exit"
+  # One `run` given the adopted card (CONVEYOR_ADOPT, with the run lock on fd 8), with the push rule off: no line of
+  # its own is written after the half-written one. Its first turn sees to the adopted card, and it ends: the look at
+  # an adopted card is run()'s own, in its turn, so the case runs the loop, in the foreground.
+  pushrule() { jq --argjson p "$1" '.rules.push = $p' "$S/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$S/control.json"; } # <true | false>
+  pushrule false
+  out=$(CONVEYOR_ADOPT="$dead c1-14 14 $(git -C "$SRC" rev-parse HEAD)" loop run 8>>"$S/cards.jsonl.run" 2>&1) || fail "the run that adopted the landed card failed: $out"
+  [ ! -e "$T/$CASE/cards/c1-14.exit" ] || fail "the run did not look at the adopted card: its exit file is still there: $out"
+  ! grep -q '"step":"blocked"' "$S/cards.jsonl" || fail "the loop blocked the adopted card that had landed: $out"
+  # Once the line is whole, the landed card's push is the next loop's, as for any landing.
+  printf '%s\n' "${l:40}" >> "$S/cards.jsonl"; pushrule true
+  out=$(loop run 2>&1) || fail "the run that pushes the landed card failed: $out"
+  [ "$(git -C "$O" rev-parse main)" = "$sha" ] && [ -n "$(st 'select(.card == "c1-14" and .step == "pushed")')" ] && [ -z "$(st 'select(.step == "blocked")')" ] && loop check \
+    || fail "the landed card's push did not go out, or it was blocked: $(st '"\(.card) \(.step)"' | tr '\n' ,) $out"
+  # The loop's push holds its run lock and can end a while after the run: the case waits for that lock before it ends.
+  wait_until "flock -n '$ST/cards.jsonl.run' true" || fail "a push of the loop still holds the loop's run lock"
+}

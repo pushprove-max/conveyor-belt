@@ -60,6 +60,7 @@
 {"area": "records", "test": "views.test.sh"}
 {"area": "records", "test": "snapblock.test.sh"}
 {"area": "records", "test": "serve.test.sh"}
+{"area": "records", "test": "adopt.test.sh"}
 {"area": "records", "test": "watch.test.sh"}
 {"area": "records", "test": "testrec.test.sh"}
 {"area": "records", "test": "transcript.test.sh"}
