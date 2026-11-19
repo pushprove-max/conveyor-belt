@@ -18,6 +18,7 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # test command or its commit trailers, read after the build, are the next read. Each kind of change is a case of its
 # own, on an engine copy of its own (packread_start), so they run side by side.
 packread_start() { # <issue>: a main with that one issue, the engine copied to $E (eng), the good pack kept
+  local -x WHOLESUITE=true # The old fixture: the per-file one runs a.test.sh through test.fileCommand, so an edit to test.command is never run.
   setup "[$(issue "$1" 2026-01-01)]"
   E=$T/$CASE/eng; mkdir -p "$E"; cp -r "$SRC"/* "$E/"; rm -rf "$E/state"; ln -s "$SRC/../.claude" "$T/$CASE/.claude"
   eng() { CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards bash "$E/conveyor.sh" "$@"; }
@@ -38,9 +39,10 @@ t_packread() {
   [ -n "$(st 'select(.issue == 7 and .step == "landed")')" ] || fail "the card with the edited pack did not land: $(st 'select(.issue == 7)')"
   c=$(wc -l < "$STUB/checks") r=$(wc -l < "$STUB/reads"); rm "$STUB/jq"
   # This run reads the pack 39 times (main before #379, which ran jq at every read, counted them): checked at each,
-  # that is 39 checks; once per process that reads a text, 9 (the build session's read of models.claudeProxy is one).
-  # Each check is followed by one run reading every field.
-  [ "$c" -ge 1 ] && [ "$c" -le 9 ] && [ "$r" = "$c" ] || fail "the same pack text was checked again at its reads, or a read ran jq of its own: $c checks, $r reads by jq"
+  # that is 39 checks; once per process that reads a text, 11 (names() twice, and once each in the subshells of the
+  # card's steps: the build session's read of models.claudeProxy, two tree checks, two trailer reads, the review's
+  # models, owing, checks and tests). Each check is followed by one run reading every field.
+  [ "$c" -ge 1 ] && [ "$c" -le 11 ] && [ "$r" = "$c" ] || fail "the same pack text was checked again at its reads, or a read ran jq of its own: $c checks, $r reads by jq"
 }
 # A broken pack: refused at the next read, so the card is blocked, saying why, and its test command never runs.
 t_packbroken() {

@@ -15,10 +15,11 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # script, which fails on main's a.txt). On main's code the test command runs <command> ($STUB/mainrun-cmd). Then
 # doctor's warning (widewarn()) as it stands, and again once the pack sets test.fileCommand. Writes $T/$CASE/unfixed
 # (the check's result), $T/$CASE/rc (its exit), $T/$CASE/warn and $T/$CASE/warnfc (the two warnings). With off, the
-# rule Whole suite in a card is off (the fixture's seed turns it on), the pack's test.list is <list> (none unset) and
-# its test.fileCommand is <file command> (none unset).
+# rule Whole suite in a card is off (the whole-suite fixture's seed turns it on), the pack's test.list is <list> (none
+# unset) and its test.fileCommand is <file command> (none unset).
 wideproof() { # <command> [off [<list> [<file command>]]]
   local wt=$T/$CASE/cards/c7
+  local -x WHOLESUITE=true # The old fixture: the per-file one sets test.fileCommand, which the proof run would take in place of test.command.
   setup '[]'
   [ "${2:-}" != off ] || { jq -c '.rules.wholeSuite = false' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"; } || fail "the rule could not be turned off"
   [ -z "${3:-}" ] || tune --arg l "$3" '.test.list = $l'
@@ -124,6 +125,7 @@ t_wideoffalone() {
 # command runs <given no list> and then each test file it is given. Writes $T/$CASE/unfixed and $T/$CASE/rc.
 wideoffsel() { # <given no list>
   local wt=$T/$CASE/cards/c7
+  local -x WHOLESUITE=true # The old fixture: the per-file one sets test.fileCommand, so the Done-when's file would run through it, not test.command.
   setup '[]'
   jq -c '.rules.wholeSuite = false' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json" || fail "the rule could not be turned off"
   tune '.test.list = "env"'
@@ -144,6 +146,7 @@ wideoffsel() { # <given no list>
 # was read), and for one that loads it through a dynamic import() (d.test.mjs; missed when only static imports were
 # followed); once a test file loads vitest, which plain node cannot run, it suggests nothing.
 t_widehint() {
+  local -x WHOLESUITE=true # The old fixture: setup suggests no test.fileCommand to a pack that sets one, as the per-file one does.
   setup '[]'
   mkdir -p "$R/src/lib" && printf '%s\n' "const test = require('node:test');" > "$R/src/a.test.js" \
     && printf '%s\n' "import { cases } from './lib/shared.mjs';" > "$R/src/b.test.mjs" \
