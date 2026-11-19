@@ -332,8 +332,9 @@ t_trailers() {
   [ "$(st '.step' | tr '\n' ' ')" = "picked worktree deps brief start build start review start fix start review start test start landed " ] \
     && [ "$(wc -l < "$STUB/sessions") $(wc -l < "$STUB/reviews")" = "2 2" ] && grep -qx 'Mutation-verified: removed the check, the test went red' "$STUB/asked" \
     || fail "the trailer the fix session wrote was not reviewed again: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
-  git -C "$R" log -1 --format=%B main | grep -qx 'Mutation-verified: removed the check, the test went red' \
-    || fail "the trailer the fix session wrote did not land though the tests deleted its file: $(git -C "$R" log -1 --format=%B main)"
+  # The whole message, so the trailer is checked in its place: after Closes, before the Conveyor card line.
+  [ "$(git -C "$R" log -1 --format=%B main)" = "feat(product): title 9 (#9)"$'\n\n'"Closes #9"$'\n'"Mutation-verified: removed the check, the test went red"$'\n'"Conveyor card $(st 'select(.step == "landed") | .card')" ] \
+    || fail "the trailer the fix session wrote did not land after Closes, though the tests deleted its file: $(git -C "$R" log -1 --format=%B main)"
 }
 
 # Bug: a required trailer still missing after the one fix session that asked for it does not stop the card, so it
