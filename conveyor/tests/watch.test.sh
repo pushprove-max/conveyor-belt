@@ -151,7 +151,11 @@ t_watchretried() {
   echo 30 > "$STUB/snapslow"
   jq -cn '{card: "c0", issue: 7, step: "blocked", time: "2026-01-01T00:00:00Z", tokens: {claude: 0, codex: 0}, result: "blocked", sha: "", reason: "x", retriedAt: "2026-01-01T01:00:00Z"}' >> "$S/retried.jsonl"
   come '.type == "retried" and .cards == [{card: "c0", issue: 7, at: "2026-01-01T01:00:00Z"}]' "the retried line, while the snapshot runs,"
-  [ -z "$(ev '.type == "snapshot" and .why == "record"')" ] || fail "the retried line waited for the snapshot"
+  # The order in the stream, not what is there yet: the reader prints the kept snapshot at once (commands/snapshot.sh),
+  # so the record snapshot can follow the retried line within milliseconds; the one that reads the retry waits at least
+  # 90 s (snaprows, lib/snapshot.sh, makes three cksum calls before it reads the records, each 30 s here).
+  [ "$(jq -r 'select((.type == "retried" and .cards != []) or (.type == "snapshot" and .why == "record")) | .type' "$W" 2>/dev/null | head -n 1)" = retried ] \
+    || fail "the retried line waited for the snapshot: $(ev '.type == "snapshot" and .why == "record"' | cut -c1-300)"
   # Bug: Hold (unblock) holds the issue and gives its card back as retry does, so the card was shown as back in the
   # queue, and its row, with the Undo of the Hold, was drawn anew. A held issue's card is not in the retried line.
   loop control hold 7 >/dev/null || fail "control hold 7 failed"
