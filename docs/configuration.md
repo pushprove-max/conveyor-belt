@@ -163,6 +163,11 @@ A change to the `test` settings of the pack, or to a file that its suite command
 `conveyor/tests/`. It does not run the whole engine test, even when `test.command` picks
 it, so each engine case runs once. The whole test on main runs `test.main`.
 
+A release's suite run is serial or parallel, as you choose for each run (`--serial` or `--parallel` after
+`conveyor.sh release-prep <version>`; [releases.md](releases.md)). Conveyor tells the suite command the choice.
+`.conveyor/test-full.sh` runs one file at a time in a serial run. In a parallel run, the script runs several files at once on the machine's test slots, never more
+files than the pool has slots (`testSlots` in [the host file](#the-host-file)).
+
 A test file can set its own time limit with a line `# timeout: <seconds>` among the comments at its top. Words after
 the number are a note. Past that limit, Conveyor stops the file and every process that it started, and the output says
 that the file timed out. A file without that line has the time limit of the card's test run (`testTimeout`).

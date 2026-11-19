@@ -184,7 +184,9 @@ Reading the belt:
 GitHub and releases:
 
 - `gh-write <gh arguments>` runs a `gh` write through the privacy check.
-- `release-prep <version>` prepares a release ([Releases](releases.md)).
+- `release-prep <version> [--parallel | --serial]` prepares a release ([Releases](releases.md)). `--parallel` runs
+  the suite's test files several at once; the default is `--serial`. `release-run [prep] <version>` takes the same
+  choice at the end.
 - `release <version>` makes the release: the tag, the pinned marketplace entry and the GitHub release
   ([Releases](releases.md)). Only the owner decides a release: the Foreman runs it only after the owner says yes in
   chat. `release <version> --anyway --by <who>` releases over the failed suite of `release-prep` on the same commit

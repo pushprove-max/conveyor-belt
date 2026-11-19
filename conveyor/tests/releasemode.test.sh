@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# timeout: 120
+# Engine cases: a release's suite runs its test files in the mode chosen for the run (release-prep and release-run
+# --parallel or --serial, serial by default; docs/releases.md), with this repository's suite command,
+# .conveyor/test-full.sh. Their fixture is modesetup, below, on releaseboard.test.sh's runsetup (release.test.sh's
+# cutsetup).
+# The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
+# file runs its own cases through the runner.
+[ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
+  exec bash "$(dirname "$0")/../conveyor.test.sh"
+
+# modesetup: runsetup, with the pack's test.full this repository's .conveyor/test-full.sh, committed, and four tracked
+# test files t/f1 to t/f4 that each note in $STUB/times when they start and end, with a pause between, so two files run
+# at once overlap. The suite's slots are a pool of two of the case's own (CONVEYOR_TEST_POOL, the case's slot of the
+# runner's pool unset), so a busy machine's pool cannot make a parallel run serial, and four files on two slots show
+# the limit of files at once. Sets POOL.
+modesetup() {
+  local i
+  runsetup true
+  tune '.test.full = "bash .conveyor/test-full.sh"'
+  mkdir -p "$R/t" && cp "$SRC/../.conveyor/test-full.sh" "$R/.conveyor/test-full.sh" || fail "the fixture could not be made"
+  for i in 1 2 3 4; do
+    printf '%s\n' 'echo "$0 start $EPOCHREALTIME" >> "$STUB/times"' 'sleep 0.5' 'echo "$0 end $EPOCHREALTIME" >> "$STUB/times"' > "$R/t/f$i.test.sh" # sleep: a stand-in test file that runs a while, so files run at once overlap
+  done
+  git -C "$R" add -f .conveyor/test-full.sh t && git -C "$R" commit -qm 'the suite' && git -C "$R" push -q origin main || fail "the fixture could not be made"
+  POOL=2:$T/$CASE/pool
+}
+# The most of the four files that ran at once, from $STUB/times; fails unless each file started and ended once.
+atonce() {
+  [ "$(awk '{ print $1, $2 }' "$STUB/times" 2>/dev/null | sort | paste -sd' ' -)" = "t/f1.test.sh end t/f1.test.sh start t/f2.test.sh end t/f2.test.sh start t/f3.test.sh end t/f3.test.sh start t/f4.test.sh end t/f4.test.sh start" ] \
+    || fail "the suite did not run each of the four files once: $(cat "$STUB/times" 2>&1)"
+  tr , . < "$STUB/times" | sort -k3,3g | awk '$2 == "start" { n++; if (n > m) m = n } $2 == "end" { n-- } END { print m + 0 }'
+}
+# Bug: the suite ran one test file at a time while most of the machine's cores stood idle (release 1.6.0: about 3.4
+# of 16 busy). In parallel mode, chosen on the Board's release-run, files run at once, each file's result line is in
+# the output, and the record says the mode.
+t_relparallel() {
+  local RUN out wt=$T/$CASE/cards/release/wt f
+  modesetup
+  out=$(unset CONVEYOR_TEST_SLOT; CONVEYOR_TEST_POOL=$POOL loop release-run prep 1.1.0 --parallel 2>&1) || fail "release-run prep --parallel did not start the run: $out"
+  # release-run starts release-prep in the background and returns: its record is where the run's end shows.
+  relwait "the run did not end" '.ended != null'
+  jq -e '.state == "passed" and .mode == "parallel"' "$RUN" > /dev/null || fail "the parallel run did not pass with mode parallel in its record: $(cat "$RUN") $(cat "$T/$CASE/cards/release/run.log")"
+  for f in 1 2 3 4; do grep -qxF -- "-- ok t/f$f.test.sh" "$wt.test" || fail "the suite's output has no result line of t/f$f.test.sh: $(cat "$wt.test")"; done
+  # Two exactly: files ran at once, and never more than the pool's two slots.
+  [ "$(atonce)" = 2 ] || fail "the four files did not run two at once on a pool of two slots: $(cat "$STUB/times")"
+}
+# Bug: a run with no mode chosen ran its files at once, though serial is the default. Each file runs alone.
+t_relserial() {
+  local RUN out
+  modesetup
+  out=$(unset CONVEYOR_TEST_SLOT; CONVEYOR_TEST_POOL=$POOL loop release-prep 1.1.0 2>&1) || fail "release-prep failed: $out"
+  jq -e '.state == "passed" and .mode == "serial"' "$RUN" > /dev/null || fail "the serial run did not pass with mode serial in its record: $(cat "$RUN")"
+  [ "$(atonce)" = 1 ] || fail "two files ran at once in serial mode: $(cat "$STUB/times")"
+}

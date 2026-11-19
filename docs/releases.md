@@ -40,6 +40,14 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    In this repository the suite is `.conveyor/test-full.sh`. It runs each area file under `conveyor/tests/`, and
    not the whole engine test, so each engine case runs once.
 
+   You choose for each run how the suite runs its test files: `conveyor.sh release-prep <version> --serial` runs them
+   one at a time, and `--parallel` runs several at once on the machine's test slots. With neither, the run is serial.
+   `conveyor.sh release-run [prep] <version>` takes the same choice at the end, for the `release-prep` it starts.
+   Conveyor tells the suite command the choice, and the run's record keeps it as `mode` (`parallel` or `serial`). A run that runs only some files again uses the same choice. In parallel, a file holds one
+   test slot while it runs, but an engine area file or the install check holds none, because each of its cases takes a slot. The suite never
+   runs more files at once than the pool has slots (`testSlots` in the host file). The output shows each file's
+   lines together, with its `-- ok` or `-- FAIL` line, when the file ends.
+
    The suite also checks the files that the plugin ships. It makes the list of these files and copies them into an
    empty folder. It fails when the copy does not have a file of the list, or has a file that is not on the list, and
    the output names the file. Then, from the copy, with a new home folder

@@ -21,9 +21,16 @@
 # conveyor/commands/release-prep.sh), it runs only the test files of its list that git lists: a path in it that is no
 # test file of the checkout is left out, and so is conveyor/conveyor.test.sh. Its case total then counts the engine's
 # cases of the case files it runs.
+# CONVEYOR_SUITE_MODE (release-prep's --serial or --parallel, conveyor/commands/release-prep.sh) is serial, one file
+# at a time, when unset; parallel runs several at once through the machine's test slots (conveyor/lib/slots.sh, the
+# library CONVEYOR_TEST_SLOTS names, else the checkout's), below. It is this run's: a test file that runs a suite of
+# its own runs it in its default mode.
+MODE=${CONVEYOR_SUITE_MODE:-serial}; unset CONVEYOR_SUITE_MODE
+case $MODE in serial | parallel) ;; *) echo "test-full: CONVEYOR_SUITE_MODE is '$MODE', not serial or parallel; nothing run" >&2; exit 2 ;; esac
 rc=0
-stamp=$(mktemp); tt=$(mktemp); trap 'rm -f "$stamp" "$tt"' EXIT
-marks() { find "$CONVEYOR_TEST_LOG/cases/ok" "$CONVEYOR_TEST_LOG/cases/failed" -maxdepth 1 -type f "$@" 2>/dev/null | wc -l; }
+tmp=$(mktemp -d) || exit 1; trap 'rm -rf "$tmp"' EXIT
+LOG=${CONVEYOR_TEST_LOG:-} # the run's test log folder; a file run in parallel names its cases in a folder of its own first (runone)
+marks() { find "$LOG/cases/ok" "$LOG/cases/failed" -maxdepth 1 -type f "$@" 2>/dev/null | wc -l; }
 mapfile -t files < <(git ls-files '*.test.sh' '*.test.mjs' '*.test.py')
 if [ -n "${CONVEYOR_SUITE_FILES:-}" ]; then
   mapfile -t files < <(printf '%s\n' "${files[@]}" | grep -xFf <(grep . "$CONVEYOR_SUITE_FILES" 2>/dev/null || echo /))
@@ -64,7 +71,10 @@ nodecases() { # <node test file>
 }
 echo "TESTRUN cases=$((engine + other))"
 echo "TESTRUN files=${#files[@]}"
-for t in "${files[@]}"; do
+# One test file run: its output, then its `TESTRUN sec` and `-- ok|FAIL` lines; exit 1 when it failed. <n> names its
+# scratch files in $tmp.
+runone() { # <test file> <n>
+  local t=$1 stamp=$tmp/$2.stamp tt=$tmp/$2.times c n st s e r
   case $t in
     *.mjs) mapfile -t c < <(nodecases "$t"); c=(node --max-old-space-size=4096 --test "${c[@]}" "$t") ;;
     *.py) c=(python3 "$t") ;;
@@ -77,7 +87,60 @@ for t in "${files[@]}"; do
   st=${PIPESTATUS[0]}; e=${EPOCHREALTIME/,/.}; times >> "$tt"
   awk -v f="$t" -v a="$s" -v b="$e" 'function c(x, a) { sub(/s$/, "", x); split(x, a, "m"); return a[1] * 60 + a[2] } { gsub(/,/, ".") }
     NR == 2 || NR == 4 { n[NR] = c($1) + c($2) } END { printf "TESTRUN sec\t%s\t%.1f\t%.1f\n", f, b - a, n[4] - n[2] }' "$tt"
-  if [ "$st" = 0 ]; then echo "-- ok $t"; r=ok; else echo "-- FAIL $t"; rc=1; r=failed; fi
-  [ ! -d "${CONVEYOR_TEST_LOG:-}" ] || [ "$(marks)" != "$n" ] || [ "$(marks -newer "$stamp")" != 0 ] || { mkdir -p "$CONVEYOR_TEST_LOG/cases/$r" && : > "$CONVEYOR_TEST_LOG/cases/$r/${t//\//:}"; }
+  if [ "$st" = 0 ]; then echo "-- ok $t"; r=ok; else echo "-- FAIL $t"; r=failed; fi
+  [ ! -d "$LOG" ] || [ "$(marks)" != "$n" ] || [ "$(marks -newer "$stamp")" != 0 ] || { mkdir -p "$LOG/cases/$r" && : > "$LOG/cases/$r/${t//\//:}"; }
+  [ "$st" = 0 ]
+}
+if [ "$MODE" = serial ]; then
+  i=0; for t in "${files[@]}"; do i=$((i + 1)); runone "$t" "$i" || rc=1; done
+  exit $rc
+fi
+# Parallel: at most as many files at once as the pool has slots. A file that is no engine runner holds a slot while it
+# runs (the run's home slot or one of the pool, slot_take) and is pinned to its core (slot_mine); the engine's runner,
+# its case files and any other bash file that reads the pool itself (a line of its own that sources the slots and calls
+# slot_pool, as conveyor/tools/closure.test.sh does) hold none, as each of their cases takes a slot of its own: a file
+# holding one would keep it from its own cases. Each file's output goes to a file of its own, printed whole once the file has ended, so no two files'
+# lines are mixed. Its case names go to a log folder of its own, copied into the run's once it has ended: a case
+# another file names meanwhile is then never taken for one of this file's (runone's marks check).
+SLOTS=${CONVEYOR_TEST_SLOTS:-conveyor/lib/slots.sh}
+# shellcheck source=/dev/null
+. "$SLOTS" && slot_pool || { echo "test-full: the test slots ($SLOTS) could not be read; nothing run" >&2; exit 1; }
+declare -A job=()
+reap() { # one file that ended: its output printed, its result counted
+  local p='' q st t
+  # A worker that ended before this wait began (while slot_take waited for a slot) is not among the jobs a bash before
+  # 5.3 waits for with `wait -n`: its exit is asked for by itself, as lib/session.sh watch() does, before and after.
+  for q in "${!job[@]}"; do kill -0 "$q" 2>/dev/null || { p=$q; break; }; done
+  if [ -n "$p" ]; then wait "$p"; st=$?; else wait -n -p p "${!job[@]}"; st=$?; fi
+  if [ -z "$p" ]; then
+    for q in "${!job[@]}"; do kill -0 "$q" 2>/dev/null || { p=$q; break; }; done
+    [ -n "$p" ] || { echo "test-full: no file it started could be waited for (exit $st); the run ends failed" >&2; exit 1; }
+    wait "$p"; st=$?
+  fi
+  t=${files[${job[$p]} - 1]}
+  cat "$tmp/${job[$p]}.out"; [ "$st" = 0 ] || rc=1
+  # A worker that ended before its file ran (no core to pin it to: slot_mine) printed no result line of it.
+  [ "$st" = 0 ] || grep -qxF -e "-- FAIL $t" -e "-- ok $t" "$tmp/${job[$p]}.out" || echo "-- FAIL $t"
+  unset "job[$p]"
+}
+i=0
+for t in "${files[@]}"; do
+  while [ ${#job[@]} -ge "$SLOT_N" ]; do reap; done
+  i=$((i + 1)); own=''
+  case $t in conveyor/conveyor.test.sh | conveyor/tests/*.test.sh) own=1 ;; *.sh) ! grep -q '^\. .*slot_pool' "$t" || own=1 ;; esac
+  [ -n "$own" ] || slot_take
+  ( [ -n "$own" ] || slot_mine
+    all=$LOG; LOG=''
+    [ ! -d "$all" ] || { LOG=$tmp/$i.log; mkdir "$LOG" && export CONVEYOR_TEST_LOG=$LOG; } || exit 1
+    runone "$t" "$i"; st=$?
+    # Each name copied alone: another file's copy may make the same folder of the run's log at the same time.
+    for f in "$LOG"/cases/*/*; do
+      [ -f "$f" ] || continue; d=${f%/*}; d=$all/cases/${d##*/}
+      mkdir -p "$d" && cp "$f" "$d/" || { echo "test-full: $f could not be copied into the run's test log" >&2; st=1; }
+    done
+    exit $st )> "$tmp/$i.out" 2>&1 < /dev/null &
+  job[$!]=$i
+  [ -n "$own" ] || slot_free
 done
+while [ ${#job[@]} -gt 0 ]; do reap; done
 exit $rc
