@@ -28,7 +28,14 @@
 MODE=${CONVEYOR_SUITE_MODE:-serial}; unset CONVEYOR_SUITE_MODE
 case $MODE in serial | parallel) ;; *) echo "test-full: CONVEYOR_SUITE_MODE is '$MODE', not serial or parallel; nothing run" >&2; exit 2 ;; esac
 rc=0
-tmp=$(mktemp -d) || exit 1; trap 'rm -rf "$tmp"' EXIT
+tmp=$(mktemp -d) || exit 1
+# A run stopped before its files end (the test step's timeout, testTimeout: testrun.sh testclock(), stops the whole
+# process group) still names in the run's log the cases that ended in each file run in parallel that is still running
+# (casecopy, below): its own log folder is gone with $tmp. timeout sends its TERM twice (to the suite, then to its
+# process group): the first is caught and the next ignored, so a second one does not stop the copy, nor the copy's own
+# commands.
+trap 'trap "" TERM; exit 143' TERM
+trap 'for p in "${!job[@]}"; do [ ! -d "$LOG" ] || casecopy "$tmp/${job[$p]}.log" "$LOG"; done; rm -rf "$tmp"' EXIT
 LOG=${CONVEYOR_TEST_LOG:-} # the run's test log folder; a file run in parallel names its cases in a folder of its own first (runone)
 marks() { find "$LOG/cases/ok" "$LOG/cases/failed" -maxdepth 1 -type f "$@" 2>/dev/null | wc -l; }
 mapfile -t files < <(git ls-files '*.test.sh' '*.test.mjs' '*.test.py')
@@ -106,6 +113,16 @@ SLOTS=${CONVEYOR_TEST_SLOTS:-conveyor/lib/slots.sh}
 # shellcheck source=/dev/null
 . "$SLOTS" && slot_pool || { echo "test-full: the test slots ($SLOTS) could not be read; nothing run" >&2; exit 1; }
 declare -A job=()
+# The case names <file log> (a file's own log folder) holds, copied into <run log>: each name alone, as another file's
+# copy may make the same folder of the run's log at the same time. Fails when one could not be copied.
+casecopy() { # <file log> <run log>
+  local f d st=0
+  for f in "$1"/cases/*/*; do
+    [ -f "$f" ] || continue; d=${f%/*}; d=$2/cases/${d##*/}
+    mkdir -p "$d" && cp "$f" "$d/" || { echo "test-full: $f could not be copied into the run's test log" >&2; st=1; }
+  done
+  return $st
+}
 reap() { # one file that ended: its output printed, its result counted
   local p='' q st t
   # A worker that ended before this wait began (while slot_take waited for a slot) is not among the jobs a bash before
@@ -133,11 +150,7 @@ for t in "${files[@]}"; do
     all=$LOG; LOG=''
     [ ! -d "$all" ] || { LOG=$tmp/$i.log; mkdir "$LOG" && export CONVEYOR_TEST_LOG=$LOG; } || exit 1
     runone "$t" "$i"; st=$?
-    # Each name copied alone: another file's copy may make the same folder of the run's log at the same time.
-    for f in "$LOG"/cases/*/*; do
-      [ -f "$f" ] || continue; d=${f%/*}; d=$all/cases/${d##*/}
-      mkdir -p "$d" && cp "$f" "$d/" || { echo "test-full: $f could not be copied into the run's test log" >&2; st=1; }
-    done
+    [ -z "$LOG" ] || casecopy "$LOG" "$all" || st=1
     exit $st )> "$tmp/$i.out" 2>&1 < /dev/null &
   job[$!]=$i
   [ -n "$own" ] || slot_free
