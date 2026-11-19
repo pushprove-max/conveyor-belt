@@ -79,6 +79,16 @@ t_hollowadded() {
     || fail "a hollow case the change added passed: $RC $WHY"
 }
 
+# Bug it catches (#607): a hollow old case the issue did not name, whose body (not its start line) the change edited,
+# passed as an old case the card did not touch. A changed line of a case that is not a note (blank or a comment) makes
+# it the card's work, so it blocks.
+t_hollowbody() {
+  FXWT=; hollowrun "$HOLLOWFIXED; sed -i '3a\  echo ran' h.test.sh" 'Done.' $'HOLLOW: t_old | no-assert | it asserts nothing\nHOLLOW-CHECK: done' \
+    h.test.sh $'t_one() { true; }\nt_old() {\n  [ 1 = 1 ]\n}\nt_two() { grep -q x f; }'
+  [ "$RC" != 0 ] && [ "$WHY" = "the judge's hollow check (codex m-other) still finds hollow cases in h.test.sh: t_old (no-assert): it asserts nothing" ] \
+    || fail "a hollow old case whose body the change edited passed: $RC $WHY"
+}
+
 # Bug it catches (#584): a card that fixed every case its issue named was blocked by an old hollow case the issue did
 # not name and the change did not touch, also when the case it deleted came right after the old one (the deletion was
 # placed on the old case's last line). It holds, and the old case goes to the declined list for the owner.
