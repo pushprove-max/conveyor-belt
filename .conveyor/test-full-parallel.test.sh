@@ -34,6 +34,11 @@ echo ran > "$R/.gitignore"
 git -C "$R" init -q && git -C "$R" add -A && git -C "$R" commit -qm init
 
 mkdir "$T/log" "$T/config"
+# This runs the whole suite script, not one of its functions: the code under test is its top-level parallel loop, which
+# is no function. That loop picks the files that hold no slot, takes and frees the slots, starts each file as a worker
+# and gives each one its own output file and log folder; reap only collects a worker the loop started, and runone runs
+# one file with none of this. Three of the bugs also need two files running at once on the shared pool (the wait for
+# ever, mixed lines, a lost progress name).
 (cd "$R" && unset CONVEYOR_TEST_SLOT CONVEYOR_CARD CONVEYOR_TEST_WHOLE && XDG_CONFIG_HOME=$T/config CONVEYOR_TEST_POOL=2:$T/pool \
   CONVEYOR_TEST_SLOTS=$HERE/../conveyor/lib/slots.sh CONVEYOR_TEST_LOG=$T/log CONVEYOR_SUITE_MODE=parallel timeout 60 bash .conveyor/test-full.sh) > "$T/out" 2>&1; rc=$?
 [ $rc = 0 ] || no "the parallel suite on a pool of two slots did not end passed (exit $rc; 124: it hung): $(cat "$T/out")"
