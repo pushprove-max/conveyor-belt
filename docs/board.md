@@ -70,6 +70,10 @@ serves the Board, because its requests come from a loopback address. An admin se
 A panel's head moves and collapses it, and its width menu sets it to Small, Wide or Full. Customize shows or hides
 each panel. It never hides Needs you.
 
+A running card's step and its action change on the Board at once. Its cost, tokens, reply count and time since its
+last output can be up to 15 s behind. If the page cannot keep its live connection open, it reads the Board's data
+every 15 s, and these figures can be up to 30 s behind.
+
 The Declined panel's heading has two buttons that dismiss lines for good. **Dismiss all shown (n)** dismisses the
 lines that the panel shows now. **Dismiss all (n)** dismisses every line that the panel counts, also the lines it does
 not show. Click the button, then click it again. If the lines that the button counts change before the second click,

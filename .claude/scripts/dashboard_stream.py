@@ -13,6 +13,8 @@ is down), writtenAt (when this file was written: every TICK seconds at least)}. 
 has `dashboard.sh --publish` build data.js again from that and the slower parts the last cycle read, so a card's step
 reaches the page without waiting for the 60 s cycle, and the slow reads (the usage limit, GitHub, cost history) never
 hold it up. A build starts at most every GAP seconds: the changes in that time go into the next one, none is lost. A
+live line that changes only a running card's figures (figures_only) is built SLOW seconds after the last build (this
+feed's or the cycle's) at the soonest, as such a line comes every second while a step runs; any other change in that wait builds after GAP. A
 line that changes nothing (a beat) builds nothing; with no change for KEEP seconds data.js is built once more, so its
 writtenAt stays within the page's window (health.js STREAM_EXPIRE_MS) and the page sees a feed that stopped. A
 record's live line is laid over its last snapshot's belt.
@@ -43,6 +45,7 @@ TICK = float(os.environ.get('CONVEYOR_STREAM_TICK') or 10)
 BACKOFF = float(os.environ.get('CONVEYOR_STREAM_BACKOFF') or 1)
 BACKOFF_MAX = 30.0
 GAP = 2.0    # s from the start of one build of data.js to the start of the next, at least
+SLOW = 15.0  # the same, when the only changes since the last build are a running card's figures (figures_only)
 KEEP = 45.0  # s with no change after which data.js is built again for its writtenAt: under health.js STREAM_EXPIRE_MS
 OPEN = set()  # the ssh of every stream open now: each in a group of its own, so each is ended with this process
 
@@ -77,6 +80,24 @@ def config(main):
     return (got['host'], got['main'], [(r['repo'], r['main']) for r in got['records']], got['target'], got['engine']), None
 
 
+FIGURES = ('tokens', 'usd', 'reading')   # a live card's figures: its counts, and whether its usage is read yet
+LIVE_FIGURES = ('turns', 'lastOutputAt')  # the same, in its `live`: its reply count and the time of its last output
+
+
+def figures_only(old, new):
+    """True when the live cards new differ from old, the overlay they replace, only in their figures (FIGURES and
+    LIVE_FIGURES): the same cards, each with the same step, action, files and atEnd. With no overlay before, the
+    snapshot's belt is replaced: not figures only."""
+    def rest(c):
+        if not isinstance(c, dict):
+            return c
+        c = {k: v for k, v in c.items() if k not in FIGURES}
+        if isinstance(c.get('live'), dict):
+            c['live'] = {k: v for k, v in c['live'].items() if k not in LIVE_FIGURES}
+        return c
+    return isinstance(old, dict) and old.keys() == new.keys() and all(rest(old[k]) == rest(new[k]) for k in new)
+
+
 def put(out, d):
     """<out>/stream.json replaced by d, whole: a reader never sees half of it."""
     tmp = os.path.join(out, '.stream.json.%d' % threading.get_ident())
@@ -105,6 +126,7 @@ class Feed:
                      for repo, m in recs]
         self.wlock = threading.Lock()
         self.dirty = threading.Event()  # data.js is to be built again
+        self.urgent = threading.Event()  # and a change since the last build is more than figures: after GAP, not SLOW
         self.built = time.monotonic() - GAP  # when the last build of data.js started (none yet: the first is not held)
         self.shown = None               # what of the stream the last publish showed: (live, error)
         self.gone = False               # the host file changed: stream.json is no longer this feed's
@@ -170,7 +192,7 @@ class Feed:
                     got = True
 
     def take(self, rec, ev):
-        kind, now, changed = ev.get('type'), time.time(), False
+        kind, now, changed, slow = ev.get('type'), time.time(), False, False
         with self.lock:
             rec['heardAt'] = now
             if kind == 'snapshot' and isinstance(ev.get('snap'), dict):
@@ -182,6 +204,7 @@ class Feed:
                            up=True, downAt=None, error=None, unreachable=False, snapAt=now, readAt=now - took, failed=None, failedAt=None)
                 changed = True
             elif kind == 'live' and isinstance(ev.get('cards'), dict) and rec['snap'] is not None:
+                slow = figures_only(rec['overlay'], ev['cards'])
                 rec['overlay'] = ev['cards']
                 changed = True
             elif kind == 'retried' and isinstance(ev.get('cards'), list):
@@ -199,6 +222,8 @@ class Feed:
         # stream.json is replaced before the publisher is told, so a publish that starts at once reads this change.
         self.write()
         if changed:
+            if not slow:
+                self.urgent.set()
             self.dirty.set()
         return kind == 'snapshot'
 
@@ -208,6 +233,7 @@ class Feed:
                 rec['downAt'] = time.time()
             rec.update(up=False, error=why, unreachable=unreachable)
         self.write()
+        self.urgent.set()
         self.dirty.set()
 
     # ---- stream.json ----
@@ -279,16 +305,24 @@ class Feed:
     def _write(self, d=None):
         put(self.out, d or self.doc())
 
-    # ---- data.js, built again after a change: one build at a time, at most every GAP s, and the changes during the
-    # wait or a build give one more ----
+    # ---- data.js, built again after a change: one build at a time, at most every GAP s (SLOW s while only figures
+    # changed), and the changes during the wait or a build give one more ----
     def publisher(self):
         while True:
             self.publish_next()
 
     def publish_next(self):
         self.dirty.wait()
+        # Figures only: held until SLOW s after the last build, this feed's or the cycle's, or until a change that is
+        # more comes in that time.
+        while not self.urgent.is_set():
+            left = self.last_build() + SLOW - time.monotonic()
+            if left <= 0:
+                break
+            self.urgent.wait(left)
         time.sleep(max(0.0, self.built + GAP - time.monotonic()))
         # Cleared after the wait: a change in it is in stream.json already, so this build takes it.
+        self.urgent.clear()
         self.dirty.clear()
         self.built = time.monotonic()
         try:
@@ -297,6 +331,15 @@ class Feed:
                 sys.stderr.write('dashboard_stream: publish failed: %s\n' % run.stderr.strip()[-300:])
         except (OSError, subprocess.TimeoutExpired) as e:
             sys.stderr.write('dashboard_stream: publish failed: %s\n' % e)
+
+    def last_build(self):
+        """When data.js was last built, on the monotonic clock: by this feed (built) or by the Board's own cycle, which
+        this feed does not start (the time data.js was written). A data.js dated in the future is not counted."""
+        try:
+            age = time.time() - os.stat(os.path.join(self.out, 'data.js')).st_mtime
+        except OSError:
+            return self.built
+        return self.built if age < 0 else max(self.built, time.monotonic() - age)
 
     def ticker(self):
         while True:
