@@ -579,10 +579,15 @@ t_servesame() {
   bash "$D/conveyor/conveyor.sh" install "$B" >/dev/null || fail "the install failed"
   tune --arg c "$B" '.plugin.commit = $c'; tune '.tunables.idle = 1 | .tunables.poll = 1'
   watchturns
+  # The idle mutation check has found nothing on main's commit (as in mutate.test.sh): its job, started beside the
+  # loop's first turn, would say its own line at any time, so the case could not tell it from the loop's words.
+  mkdir -p "$ST/testactions/mutations" && git -C "$R" rev-parse HEAD > "$ST/testactions/mutations/idle"
   ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
     exec bash "$V/$B/conveyor/conveyor.sh" serve > "$STUB/serve.out" 2>&1 ) & pid=$!
   turns 2
-  mv "$R/.conveyor/project.json" "$STUB/pack"
+  # The pack goes between two turns: gone in the middle of one, it fails that turn's later reads, each saying the
+  # reason, before the loop's once-only word at the next turn.
+  atturn "$(printf 'mv %q %q' "$R/.conveyor/project.json" "$STUB/pack")"
   wait_until 'grep -q "^conveyor pack: .*project.json: no such file" "$STUB/serve.out"' || fail "the loop does not say its pack does not read: $(cat "$STUB/serve.out")"
   turns 6
   [ "$(cat "$STUB/serve.out")" = "conveyor pack: $R/.conveyor/project.json: no such file" ] || fail "held for 6 turns by a pack that does not read, the installed loop said more than the reason, once: $(cat "$STUB/serve.out")"
