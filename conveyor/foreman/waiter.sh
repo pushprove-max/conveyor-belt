@@ -25,7 +25,11 @@
 # with nothing it wakes the session with one renew line.
 # The text relayed is never cut: every wake names every item (watch-conveyor.sh). It is kept as last-wake.txt, so the
 # reply check (stop.sh) knows a turn a wake started. A relayed wake leaves pending only once it is on stderr: a kill
-# before that relays it again, never loses it.
+# before that relays it again, never loses it. It is then kept as sent until a later stop shows the session got it
+# (issue 592): a stop that another hook refused (stop.sh) ends no turn, so the wake relayed at it, or by its waiter
+# during the turn it goes on with, is dropped with it. The next stop says so (stop_hook_active): it takes over the
+# waiter that runs, held or not, and relays the sent wakes again. A stop of the same session that follows no refused
+# stop drops them; a stop of another session (after a claim) relays them again, as the old session had them.
 # The waiter and its watchers run from the install the shim started it from (versions/<commit>). Once a minute it
 # reads the commit the project runs now (its pack's plugin.commit, else for a pack that follows the plugin its
 # conveyor-engine.json commit, as shim.sh reads them); when that is another installed commit, it stops its watchers
@@ -42,7 +46,11 @@
 set -u
 MODE=${1:-}
 case $MODE in '' | --check | --held) ;; *) echo "usage: waiter.sh [--check | --held]" >&2; exit 2 ;; esac
-SID=$(jq -r '.session_id // empty | strings' 2>/dev/null)
+IN=$(cat)
+SID=$(jq -r '.session_id // empty | strings' <<<"$IN" 2>/dev/null)
+# AFTER: true when this stop follows a stop another hook refused, false when it follows none; empty when the input does
+# not say (any other hook, a held waiter, a waiter that moved to a new install).
+AFTER=$(jq -r '.stop_hook_active | booleans' <<<"$IN" 2>/dev/null)
 SELF=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/waiter.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || exit 0
 foreman "$SID" || exit 0
@@ -90,8 +98,10 @@ else
     else
       osp=''
       [ -z "$MODE" ] || exit 0 # --check: a waiter runs
-      held "${old:-}" || exit 0 # the waiter that runs can wake the session itself
-      log "the stop takes over from the waiter $old, which listened during the turn"
+      # The waiter that runs can wake the session itself, but for one a refused stop started: its wake would be lost.
+      if held "${old:-}"; then log "the stop takes over from the waiter $old, which listened during the turn"
+      elif [ "$AFTER" = true ]; then log "the stop that follows a refused stop takes over from the waiter $old"
+      else exit 0; fi
     fi
     kill -TERM "$old" 2>/dev/null
     flock -w 10 7 || { log "the waiter $old did not stop in 10 s; this stop passes"; exit 0; }
@@ -150,7 +160,8 @@ log "started from ${FROM:-a checkout}${MODE:+, listening until the next stop}"
 trap 'log "ended: ${why:-it stopped for no known reason}"' EXIT
 ACK=$(mktemp) || { why='no temporary file could be made'; exit 0; }
 # deliver: 0 when anything pending went to stderr while the session's process was alive. What it relays leaves
-# pending only then: a wake relayed to an ended process, or one stderr would not take, waits for the next stop.
+# pending only then: a wake relayed to an ended process, or one stderr would not take, waits for the next stop. It is
+# kept as <wake>.sent-<session> until a later stop shows the session got it (below).
 deliver() {
   : > "$ACK"
   live
@@ -159,7 +170,7 @@ deliver() {
   printf '%s\n' "$text" >&2 || { trap onterm TERM HUP INT; return 1; }
   live
   printf '%s\n' "$text" > "$FD/last-wake.txt"
-  while IFS= read -r f; do rm -f "$f"; done < "$ACK"
+  while IFS= read -r f; do mv -f "$f" "$f.sent-$SID"; done < "$ACK"
   why='it delivered a wake'
 }
 declare -A CMD=() PID=() TRIES=()
@@ -179,6 +190,14 @@ onterm() {
   kill "${sp:-}" 2>/dev/null; why="it was stopped (a claim, a stop that took over, or the end of its hook)"; stop_all; exit 0
 }
 trap onterm TERM HUP INT
+# The wakes relayed before (<wake>.sent-<session>, deliver): a stop of their session that follows no refused stop
+# drops them, as they reached it; any other stop puts them back in pending, so it relays them again.
+if [ -z "$MODE" ] && [ -n "$AFTER" ]; then
+  for f in "$PENDING"/*.wake.sent-*; do
+    [ -f "$f" ] || continue
+    if [ "$AFTER" = false ] && [ "${f##*.sent-}" = "$SID" ]; then rm -f "$f"; else mv -f "$f" "${f%.sent-*}"; fi
+  done
+fi
 [ -n "$MODE" ] || ! deliver || { rm -f "$ACK"; handoff; exit 2; }
 # down <name>: 0 when the waiter that started this one left that watcher out (CONVEYOR_FOREMAN_DOWN).
 down() { [ -n "${CONVEYOR_FOREMAN_DOWN:-}" ] && [ "$1" = "$CONVEYOR_FOREMAN_DOWN" ]; }

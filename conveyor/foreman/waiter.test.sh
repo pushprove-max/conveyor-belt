@@ -222,7 +222,63 @@ kill -0 "$hp" 2>/dev/null || fail "the claim stopped the older waiter of the ses
 kill "$hp"
 }
 
-cases=(handoff restart why downheld downstop goneblock takeover undelivered takecheck oldpid)
+# Issue 592. after <true|false> [<session>]: a stop whose input says whether the stop before it was refused by another
+# hook (stop_hook_active), run to its end, 30 s at most (a waiter with nothing to deliver listens on).
+after() {
+  jq -cn --argjson a "$1" --arg s "${2:-}" '{stop_hook_active: $a} + if $s == "" then {} else {session_id: $s} end' \
+    | CONVEYOR_FOREMAN_WATCHERS=$W timeout 30 bash "$SRC/waiter.sh" 2> "$T/wake" > /dev/null
+}
+
+# D1: a stop that stop.sh refuses ends no turn, so the wake its waiter relays there is lost with it. Bug: the waiter
+# took that wake as delivered, and the blocked card it named stayed unreported. The next stop delivers it, once.
+t_refused() {
+fixture refused
+check; isheld "$(wpid)" || fail "no waiter listens during the turn"
+put 'Alert: blocked #7'; wait_until '[ "$(wakes)" = 1 ]' || fail "the wake found during the turn was not kept in pending"
+after false; rc=$? # the stop another hook refuses: the wake relayed here reaches no turn
+[ "$rc" = 2 ] && [ "$(cat "$T/wake")" = 'Alert: blocked #7' ] || fail "the refused stop's waiter did not relay the wake (exit $rc): $(cat "$T/wake")"
+after true; rc=$?
+[ "$rc" = 2 ] && [ "$(cat "$T/wake")" = 'Alert: blocked #7' ] || fail "the stop after the refused one did not deliver the wake again (exit $rc): $(cat "$T/wake")"
+# Once: the stop of the turn that wake started relays nothing. Its watchers start after its first relay (watchers.pid).
+after false & s=$!
+wait_until "p=\$(wpid) && ps -o args= -p \"\$p\" | grep -q 'waiter\.sh\$' && [ -s $FD/watchers.pid ]" || fail "the third stop's waiter did not start"
+[ ! -s "$T/wake" ] || fail "the wake was delivered twice: $(cat "$T/wake")"
+compgen -G "$FD/pending/*.sent-*" > /dev/null && fail "a wake the session got is still kept as sent: $(ls "$FD/pending")"
+kill "$(wpid)"; wait "$s"
+}
+
+# D1: the refused stop's own waiter listens during the turn the refusal goes on with; a wake it relays then is lost
+# too. Bug: the next stop left that waiter running, as if it could wake the session. The next stop takes it over.
+t_refusedwait() {
+fixture refusedwait
+after false & s=$! # the refused stop, with nothing to relay: its waiter listens
+wait_until "[ -s $FD/watchers.pid ] && [ \"\$(wpid)\" != '' ] && ps -o args= -p \"\$(wpid)\" | grep -q 'waiter\.sh\$'" || fail "the refused stop's waiter did not start"
+n=$(wpid)
+after true & s2=$!
+WAIT_CEILING=20 wait_until "! kill -0 $n 2>/dev/null" || fail "the stop after the refused one left the refused stop's waiter running"
+wait "$s"
+[ "$(logged "the stop that follows a refused stop takes over from the waiter $n")" = 1 ] || fail "no takeover in the log: $(cat "$FD/waiter.log")"
+wait_until '[ "$(wc -l < "$T/starts")" -ge 2 ]' || fail "the stop after the refused one started no watcher"
+put 'Alert: blocked #6'; wait "$s2"; rc=$?
+[ "$rc" = 2 ] && [ "$(cat "$T/wake")" = 'Alert: blocked #6' ] || fail "the stop after the refused one did not deliver the wake found in its turn (exit $rc): $(cat "$T/wake")"
+}
+
+# D2: a claim stops the waiter. Bug: a wake relayed to the old session was taken as delivered, so the new Foreman
+# never got it. The new session's first stop delivers it.
+t_claimed() {
+fixture claimed; belt # a claim needs a host file with records
+(. "$SRC/lib.sh" && claim s1) || fail "the claim by s1 failed"
+put 'Alert: blocked #8'
+after false s1; rc=$?
+[ "$rc" = 2 ] && [ "$(cat "$T/wake")" = 'Alert: blocked #8' ] || fail "s1's stop did not relay the wake (exit $rc): $(cat "$T/wake")"
+h=$(wpid); isheld "$h" || fail "no waiter listens after s1's stop"
+(. "$SRC/lib.sh" && claim s2) || fail "the claim by s2 failed"
+kill -0 "$h" 2>/dev/null && fail "the claim did not stop s1's waiter"
+after false s2; rc=$?
+[ "$rc" = 2 ] && [ "$(cat "$T/wake")" = 'Alert: blocked #8' ] || fail "the new Foreman's first stop did not deliver the wake (exit $rc): $(cat "$T/wake")"
+}
+
+cases=(handoff restart why downheld downstop goneblock takeover undelivered takecheck oldpid refused refusedwait claimed)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
