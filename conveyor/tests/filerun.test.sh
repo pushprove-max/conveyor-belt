@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 60
-# Engine cases (#376, #351 scenarios 11 and 12): Conveyor's own per-file runner (lib/filerun.sh), which a card's run
+# Engine cases (#376, #377, #351 scenarios 11 and 12): Conveyor's own per-file runner (lib/filerun.sh), which a card's run
 # gives each test file when the pack sets no test.fileCommand. Each case calls filerun.sh on a fixture project whose
 # runner is a stub on PATH that records the folder it ran in and its arguments: no real toolchain is needed. Each
 # fixture's package is in a folder of its own, as in a workspace or monorepo, so each case also shows the file run from
@@ -16,14 +16,21 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
 # The fixture project $T/$CASE/p (FRP, its real path) with the files <path>=<text>..., and a stub of each runner in
 # $T/$CASE/bin: each adds `<runner> <the folder it ran in, from the project: /...>|<its arguments>` to $T/$CASE/got.
+# A file whose <text> is `stub` is such a stub too, named as its path in the project (a project's own wrapper, as
+# gradlew or vendor/bin/phpunit), so a run of the runner on PATH in its place is told apart from it.
 frsetup() { # <path>=<text>...
   local r x
   mkdir -p "$T/$CASE/p" "$T/$CASE/bin" && FRP=$(cd "$T/$CASE/p" && pwd -P) || fail "the fixture could not be made"
-  for r in npx bun node pytest go cargo rspec bundle; do
-    printf '%s\n' '#!/usr/bin/env bash' "d=\$(pwd -P); d=\${d#$(printf %q "$FRP")}; echo \"$r \${d:-/}|\$*\" >> $(printf %q "$T/$CASE/got")" > "$T/$CASE/bin/$r" \
-      && chmod +x "$T/$CASE/bin/$r" || fail "the stub $r could not be made"
+  for r in npx bun node pytest go cargo rspec bundle gradle mvn dotnet swift phpunit mix ctest dart flutter; do frstub "$T/$CASE/bin/$r"; done
+  for x; do
+    mkdir -p "$FRP/$(dirname "${x%%=*}")" || fail "the folder of ${x%%=*} could not be made"
+    if [ "${x#*=}" = stub ]; then frstub "$FRP/${x%%=*}" "${x%%=*}"; else printf '%s\n' "${x#*=}" > "$FRP/${x%%=*}" || fail "the fixture file ${x%%=*} could not be made"; fi
   done
-  for x; do mkdir -p "$FRP/$(dirname "${x%%=*}")" && printf '%s\n' "${x#*=}" > "$FRP/${x%%=*}" || fail "the fixture file ${x%%=*} could not be made"; done
+}
+frstub() { # <path> [name, by default the file's]
+  local r=${2:-${1##*/}}
+  printf '%s\n' '#!/usr/bin/env bash' "d=\$(pwd -P); d=\${d#$(printf %q "$FRP")}; echo \"$r \${d:-/}|\$*\" >> $(printf %q "$T/$CASE/got")" > "$1" \
+    && chmod +x "$1" || fail "the stub $r could not be made"
 }
 # filerun.sh on <file> in the fixture project, with the run's list holding <lines> (CONVEYOR_TEST_RERUN; none when
 # empty) and the pack's report <args> before the file: what the stubs recorded in FRGOT, its exit in FRRC, its output
@@ -117,6 +124,75 @@ t_fileruncargo() {
 t_filerunrspec() {
   frsetup 'app/Gemfile=x' 'app/spec/m_spec.rb=x'
   frcheck app/spec/m_spec.rb 'bundle /app|exec rspec spec/m_spec.rb' 'bundle /app|exec rspec -e conveyor-no-case spec/m_spec.rb'
+}
+
+# Bug it catches (#377): a Gradle test file had no runner (the card stopped), ran every test of the build, or ran
+# with the gradle on PATH in place of the project's own wrapper: it runs its class only, through gradlew, from its
+# project.
+t_filerungradle() {
+  frsetup 'settings.gradle=x' 'gradlew=stub' 'lib/build.gradle.kts=x' 'lib/src/test/java/com/example/FooTest.java=x'
+  frcheck lib/src/test/java/com/example/FooTest.java 'gradlew /lib|test --tests com.example.FooTest' \
+    'gradlew /lib|test --tests com.example.FooTest.conveyor-no-case'
+}
+
+# Bug it catches (#377): a Maven test file had no runner, or ran every test of the build: it runs its class only.
+t_filerunmaven() {
+  frsetup 'pom.xml=x' 'app/pom.xml=x' 'app/src/test/kotlin/com/example/BarTest.kt=x'
+  frcheck app/src/test/kotlin/com/example/BarTest.kt 'mvn /app|test -Dtest=com.example.BarTest' \
+    'mvn /app|test -Dtest=com.example.BarTest#conveyor-no-case'
+}
+
+# Bug it catches (#377): a C# test file had no runner, or ran every test of its project. A real dotnet test whose
+# filter matches nothing can exit 0, so this checks the filter it is given, never the exit status: the whole name of
+# the case, in the class the file is, in its file-scoped namespace.
+t_filerundotnet() {
+  frsetup 'tests/Api.Tests/Api.Tests.csproj=x' 'tests/Api.Tests/Unit/CalcTests.cs=namespace Api.Tests.Unit;'
+  frcheck tests/Api.Tests/Unit/CalcTests.cs 'dotnet /tests/Api.Tests|test --filter FullyQualifiedName~Api.Tests.Unit.CalcTests.' \
+    'dotnet /tests/Api.Tests|test --filter FullyQualifiedName=Api.Tests.Unit.CalcTests.conveyor-no-case'
+}
+
+# Bug it catches (#377): a Swift test file had no runner, or ran every test of its package: the filter names its
+# target and class, the dot taken as text.
+t_filerunswift() {
+  frsetup 'pkg/Package.swift=x' 'pkg/Tests/CoreTests/MathTests.swift=x'
+  frcheck pkg/Tests/CoreTests/MathTests.swift 'swift /pkg|test --filter ^(CoreTests\.MathTests)/' \
+    'swift /pkg|test --filter ^(CoreTests\.MathTests)/(conveyor-no-case)$'
+}
+
+# Bug it catches (#377): a PHPUnit file had no runner, or ran with a phpunit other than the project's own
+# (vendor/bin), or from outside its project.
+t_filerunphpunit() {
+  frsetup 'web/composer.json={}' 'web/vendor/bin/phpunit=stub' 'web/tests/UserTest.php=x'
+  frcheck web/tests/UserTest.php 'web/vendor/bin/phpunit /web|tests/UserTest.php' \
+    'web/vendor/bin/phpunit /web|--filter /::(conveyor-no-case)( with data set .*)?$/ tests/UserTest.php'
+}
+
+# Bug it catches (#377): an Elixir test file had no runner, or ran from the umbrella's top in place of its app.
+t_filerunmix() {
+  frsetup 'mix.exs=x' 'apps/core/mix.exs=x' 'apps/core/test/core_test.exs=x'
+  frcheck apps/core/test/core_test.exs 'mix /apps/core|test test/core_test.exs' \
+    'mix /apps/core|test --only test:test conveyor-no-case test/core_test.exs'
+}
+
+# Bug it catches (#377): a C++ test file had no runner, or ran every test of the build; ctest's own run of a filter
+# that matches nothing passes, so --no-tests=error makes it fail. With no build folder it runs nothing and fails,
+# saying why.
+t_filerunctest() {
+  frsetup 'CMakeLists.txt=x' 'build/CTestTestfile.cmake=x' 'tests/parse_test.cpp=x'
+  frcheck tests/parse_test.cpp 'ctest /build|--no-tests=error -R ^(parse_test)$' 'ctest /build|--no-tests=error -R ^(conveyor-no-case)$'
+  rm "$FRP/build/CTestTestfile.cmake" && fr tests/parse_test.cpp
+  [ "$FRRC" = 2 ] && [ -z "$FRGOT" ] && grep -qF 'filerun: tests/parse_test.cpp: no CMake build folder' "$T/$CASE/out" \
+    || fail "a C++ file with no build ran, or did not fail saying why (exit $FRRC): [$FRGOT] $(cat "$T/$CASE/out")"
+}
+
+# Bug it catches (#377): a Flutter package's test ran under dart test (which cannot load flutter), or a plain Dart
+# package's under flutter test.
+t_filerundart() {
+  frsetup "app/pubspec.yaml=$(printf 'dependencies:\n  flutter:\n    sdk: flutter')" 'app/test/widget_test.dart=x' \
+    'core/pubspec.yaml=name: core' 'core/test/a_test.dart=x'
+  frcheck app/test/widget_test.dart 'flutter /app|test test/widget_test.dart' \
+    'flutter /app|test --name (^| )(conveyor-no-case)$ test/widget_test.dart'
+  fr core/test/a_test.dart; [ "$FRGOT" = 'dart /core|test test/a_test.dart' ] || fail "a Dart package's test did not run under dart test (exit $FRRC): [$FRGOT]"
 }
 
 # Bug it catches: the header of filerun.sh said a filter that names no case of the file runs none, while rspec -e

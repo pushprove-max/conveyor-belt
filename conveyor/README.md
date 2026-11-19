@@ -533,7 +533,8 @@ failure, the bug-card check, the run on main, the main-red check, the checks of 
 Make it run alone and the speed-up cards, the mutation check and `testaction run`. Each process has the file's own
 time limit (its `# timeout: <seconds>` line, else `testTimeout`). When the file runs past it, Conveyor stops the file
 and every process it started, and the file fails. With no `test.fileCommand`, Conveyor runs each file with the runner
-of its language, from the folder of its package (`conveyor/lib/filerun.sh`: Node, pytest, Go, Cargo and RSpec). When
+of its language, from the folder of its package (`conveyor/lib/filerun.sh`: Node, pytest, Go, Cargo, RSpec, Gradle,
+Maven, dotnet, swift, PHPUnit, mix, CTest and Dart or Flutter). When
 it has no runner for a file to run, the card stops at its test step under Needs you, and the reason names
 `test.fileCommand` and the file. A bug card with a test file and a fix stops earlier,
 at Build: its bug-card check cannot run, and the card is blocked with that reason (Bug cards: the new tests fail

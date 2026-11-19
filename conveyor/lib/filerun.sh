@@ -13,13 +13,31 @@
 #   *_test.go         under go.mod: `go test -count=1 ./<the file's folder>`, its package only
 #   tests/<name>.rs   of a crate (Cargo.toml): `cargo test --test <name>`, that test target only
 #   *_spec.rb         under a Gemfile or .rspec: `bundle exec rspec <path>` (with a Gemfile), else `rspec <path>`
+#   src/<set>/java, kotlin or groovy/<package path>/<class>.java .kt .groovy  under build.gradle or build.gradle.kts:
+#                     `gradle test --tests <package>.<class>`, else under pom.xml: `mvn test -Dtest=<package>.<class>`,
+#                     each through its wrapper (gradlew, mvnw) when the nearest folder up holds one
+#   .cs               under a .csproj: `dotnet test --filter FullyQualifiedName~<namespace>.<class>.`, the class the
+#                     file's name, in the first namespace it names; it also runs a class whose full name ends with it
+#   Tests/<target>/.../<class>.swift  under Package.swift: `swift test --filter ^(<target>\.<class>)/`
+#   *Test.php         under phpunit.xml, phpunit.xml.dist or composer.json: `phpunit <path>` (vendor/bin/phpunit when
+#                     the project has it)
+#   *_test.exs        under mix.exs (in an umbrella, the app's own): `mix test <path>`
+#   .c .cc .cpp .cxx  under a folder whose build/ holds CTestTestfile.cmake (a CMake build): `ctest --no-tests=error
+#                     -R ^(<the file's name, its extension left out>)$` in that build folder
+#   *_test.dart       under pubspec.yaml: `flutter test <path>` when it names the flutter sdk, else `dart test <path>`
 # The cases the run's list (CONVEYOR_TEST_RERUN) names of the file in `fail<TAB><file><TAB><case>` lines, unless one
 # such line names the file with no case, are the run's filter. A filter runs the cases each runner below matches to
 # it, so a name that is no exact case name of the file runs none, unless that runner also matches part of a name:
 # node --test, vitest, jest and bun: -t or --test-name-pattern `(^| )(<cases>)$`, as they match a case's name with its
 # suites' names before it, and a failed case is named alone (testfails()), so it also runs a case whose name ends with
 # a space and one of <cases>; pytest: the node ids <path>::<case>, each that case only; go: -run `^(<cases>)$` and
-# cargo: --exact <case>..., each the whole name; rspec: -e <case> each, which runs every case whose name holds it. A
+# cargo: --exact <case>..., each the whole name; rspec: -e <case> each, which runs every case whose name holds it;
+# gradle: --tests <class>.<case> each and mvn: -Dtest=<class>#<case>+..., each that method; dotnet:
+# FullyQualifiedName=<class>.<case>|..., each the whole name (a real dotnet test may still exit 0 when it matches
+# none); swift: --filter ^(<target>\.<class>)/(<cases>)$; phpunit: --filter /::(<cases>)( with data set .*)?$/, each a
+# case of the file's class, with any data set; mix: --only "test:test <case>" each, the whole name; ctest: -R
+# ^(<cases>)$, each a test of the build named whole (--no-tests=error: one that matches none fails); dart: --name
+# `(^| )(<cases>)$`, as for the JavaScript runners, its groups' names before a case's. A
 # path that is no file, and a file with no runner here, run nothing and fail (exit 2), the reason on stderr.
 # `filerun.sh --which <file>` runs nothing: it prints the command, as `<folder><TAB><word>...`, or the reason there is
 # none (exit 1).
@@ -36,10 +54,11 @@ none() {
 [ -n "$f" ] && [ -f "$f" ] || none "no such test file"
 # The nearest folder, from the file's own up to the checkout's (`.`), that holds one of <name>...
 near() { # <name>...
-  local d=$f n
+  local d=$f n x
   while :; do
     case $d in */*) d=${d%/*} ;; *) d=. ;; esac
-    for n; do [ ! -e "$d/$n" ] || { printf '%s\n' "$d"; return 0; }; done
+    # A <name> may be a pattern (*.csproj): unquoted, it gives the files it matches, or itself, which then is no file.
+    for n; do for x in "$d"/$n; do [ ! -e "$x" ] || { printf '%s\n' "$d"; return 0; }; done; done
     [ "$d" != . ] || return 1
   done
 }
@@ -52,6 +71,12 @@ whole() { # <case>...
   local c s='' x
   for c; do x=$(printf '%s' "$c" | sed 's/[][\\.*^$+?(){}|]/\\&/g'); s+=${s:+|}$x; done
   printf '^(%s)$' "$s"
+}
+# The path of <name>, a runner's wrapper script, as the nearest folder that holds it gives it, from any folder.
+wrapper() { # <name>
+  local w
+  w=$(near "$1") || return 1
+  if [ "$w" = . ]; then printf '%s/%s\n' "$PWD" "$1"; else printf '%s/%s/%s\n' "$PWD" "$w" "$1"; fi
 }
 cs=()
 if [ -s "${CONVEYOR_TEST_RERUN:-}" ] && ! awk -F'\t' -v f="$f" '$1 == "fail" && $2 == f && $3 == "" { e = 1 } END { exit !e }' "$CONVEYOR_TEST_RERUN"; then
@@ -91,6 +116,57 @@ case $f in
     d=$(near Gemfile .rspec) || none "no Gemfile or .rspec holds it"
     r=${f#"$d"/}; b=(rspec); [ ! -e "$d/Gemfile" ] || b=(bundle exec rspec)
     for c in "${cs[@]}"; do t+=(-e "$c"); done; t+=("$r") ;;
+  *.java|*.kt|*.groovy)
+    d=$(near build.gradle build.gradle.kts pom.xml) || none "no build.gradle, build.gradle.kts or pom.xml holds it"
+    r=${f#"$d"/}
+    [[ $r =~ ^src/[^/]+/(java|kotlin|groovy)/(.+)\.(java|kt|groovy)$ ]] \
+      || none "Gradle and Maven run test classes, and it is no src/<set>/java, kotlin or groovy/<package path>/<class> file of its project"
+    k=${BASH_REMATCH[2]//\//.}
+    if [ -e "$d/build.gradle" ] || [ -e "$d/build.gradle.kts" ]; then
+      b=(gradle); x=$(wrapper gradlew) && b=("$x"); b+=(test)
+      if [ ${#cs[@]} = 0 ]; then t=(--tests "$k"); else for c in "${cs[@]}"; do t+=(--tests "$k.$c"); done; fi
+    else
+      b=(mvn); x=$(wrapper mvnw) && b=("$x"); b+=(test)
+      if [ ${#cs[@]} = 0 ]; then t=("-Dtest=$k"); else t=("-Dtest=$k#$(IFS=+; printf '%s' "${cs[*]}")"); fi
+    fi ;;
+  *.cs)
+    d=$(near '*.csproj') || none "no .csproj file holds it"
+    # The test class: the file's name, in the namespace the file names first (as `namespace <name>` or `<name>;`).
+    k=${f##*/}; k=${k%.cs}; x=$(sed -nE 's/^[[:space:]]*namespace[[:space:]]+([A-Za-z0-9_.]+).*/\1/p' "$f" | head -n 1)
+    k=${x:+$x.}$k; b=(dotnet test)
+    # The filter's special characters, each escaped with a backslash.
+    esc() { printf '%s' "$1" | sed 's/[\\()&|=!~]/\\&/g'; }
+    if [ ${#cs[@]} = 0 ]; then x="FullyQualifiedName~$(esc "$k.")"
+    else x=; for c in "${cs[@]}"; do x+=${x:+|}FullyQualifiedName=$(esc "$k.$c"); done; fi
+    t=(--filter "$x") ;;
+  *.swift)
+    d=$(near Package.swift) || none "no Package.swift holds it"
+    r=${f#"$d"/}
+    [[ $r =~ ^Tests/([^/]+)/(.+/)?([^/]+)\.swift$ ]] || none "swift test runs test targets, and it is no Tests/<target>/ file of its package"
+    # swift test matches its filter to `<target>.<class>/<case>`; the class is the file's name.
+    x=$(whole "${BASH_REMATCH[1]}.${BASH_REMATCH[3]}"); x="${x%)\$})/"
+    if [ ${#cs[@]} = 0 ]; then t=(--filter "$x"); else c=$(whole "${cs[@]}"); t=(--filter "$x${c#^}"); fi
+    b=(swift test) ;;
+  *Test.php)
+    d=$(near phpunit.xml phpunit.xml.dist composer.json) || none "no phpunit.xml, phpunit.xml.dist or composer.json holds it"
+    r=${f#"$d"/}; b=(phpunit); [ ! -x "$d/vendor/bin/phpunit" ] || b=(vendor/bin/phpunit)
+    # phpunit matches its filter to `<class>::<case>`, with ` with data set <name>` after it for a case of a data provider.
+    if [ ${#cs[@]} != 0 ]; then x=$(whole "${cs[@]}"); x=${x#^}; x=${x%\$}; t=(--filter "/::${x//\//\\/}( with data set .*)?\$/"); fi
+    t+=("$r") ;;
+  *_test.exs)
+    d=$(near mix.exs) || none "no mix.exs holds it"
+    r=${f#"$d"/}; b=(mix test)
+    for c in "${cs[@]}"; do t+=(--only "test:test $c"); done; t+=("$r") ;;
+  *.c|*.cc|*.cpp|*.cxx)
+    d=$(near build/CTestTestfile.cmake) || none "no CMake build folder (build/CTestTestfile.cmake) holds it, so ctest has no tests to run"
+    if [ "$d" = . ]; then d=build; else d=$d/build; fi
+    x=${f##*/}; x=${x%.*}; b=(ctest --no-tests=error)
+    if [ ${#cs[@]} = 0 ]; then t=(-R "$(whole "$x")"); else t=(-R "$(whole "${cs[@]}")"); fi ;;
+  *_test.dart)
+    d=$(near pubspec.yaml) || none "no pubspec.yaml holds it"
+    r=${f#"$d"/}; b=(dart test); ! grep -Eq '^[[:space:]]+sdk:[[:space:]]*flutter' "$d/pubspec.yaml" || b=(flutter test)
+    if [ ${#cs[@]} != 0 ]; then x=$(whole "${cs[@]}"); t=(--name "(^| )${x#^}"); fi
+    t+=("$r") ;;
   *) none "it has no runner for a file of this kind" ;;
 esac
 # The pack's report args go right after the runner's own words, before the file and the filter.
