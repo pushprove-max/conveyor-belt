@@ -550,21 +550,47 @@ keepshots() { # <worktree> <kept folder> <card>
   [ "$n" -gt 0 ] && p=$(git hash-object -- "$2/$3.patch") || return 0
   jq -cn --arg p "$p" '{patch: $p, shots: [$ARGS.positional | range(0; length; 2) as $i | {file: .[$i], caption: .[$i + 1][0:200]}]}' --args "${list[@]}" > "$2/shots/shots.json"
 }
-# A patch file (git diff), hashed without what changes when it sits on a newer base: each hunk's line numbers and each
-# index line. Nothing for a missing or empty file.
-samechange() { # <patch>
-  [ -s "$1" ] && LC_ALL=C sed -E '/^index /d; s/^@@ -[0-9]+(,[0-9]+)? \+[0-9]+(,[0-9]+)? @@/@@/' "$1" | git hash-object --stdin
+# Whether two patch files (git diff --binary --no-renames), each made on a commit of main's, are the same change: they
+# change the same files, and each file the later patch gives is the earlier patch's, brought onto the later commit by a
+# three-way merge (git merge-file) with main's own change to that file between the two commits. The merge moves an edit
+# only as main's change moves its lines, never to another place with the same lines around it (as git apply, which
+# finds a hunk by its context, can), so an edit at another place is another change. Not the same when a patch or commit
+# cannot be read, a patch does not apply to its commit, or a merge has a conflict (a binary file main changed has one).
+samechange() { # <earlier patch> <the commit it was made on> <later patch> <the commit it was made on>
+  local d r
+  [ -s "$1" ] && [ -s "$3" ] && [ -n "$2" ] && [ -n "$4" ] && git -C "$MAIN" cat-file -e "$2^{commit}" 2>/dev/null \
+    && git -C "$MAIN" cat-file -e "$4^{commit}" 2>/dev/null && d=$(mktemp -d) || return 1
+  ( export GIT_LITERAL_PATHSPECS=1
+    g() { git -C "$MAIN" "$@"; }
+    ta=$(GIT_INDEX_FILE=$d/a g read-tree "$2" && GIT_INDEX_FILE=$d/a g apply --cached -- "$1" && GIT_INDEX_FILE=$d/a g write-tree) \
+      && tb=$(GIT_INDEX_FILE=$d/b g read-tree "$4" && GIT_INDEX_FILE=$d/b g apply --cached -- "$3" && GIT_INDEX_FILE=$d/b g write-tree) \
+      && [ -n "$ta" ] && [ -n "$tb" ] || exit 1
+    # The same files changed (diff-tree lists them in path order).
+    g diff-tree -r --name-only -z "$2" "$ta" > "$d/pa" && g diff-tree -r --name-only -z "$4" "$tb" > "$d/pb" && [ -s "$d/pa" ] \
+      && cmp -s "$d/pa" "$d/pb" || exit 1
+    while IFS= read -r -d '' p; do
+      # Each entry is "<mode> <type> <id>", or nothing for a file the patch deletes.
+      ea=$(g ls-tree "$ta" -- "$p") && eb=$(g ls-tree "$tb" -- "$p") || exit 1
+      ea=${ea%%$'\t'*} eb=${eb%%$'\t'*}
+      [ "$ea" != "$eb" ] || continue
+      [ -n "$ea" ] && [ -n "$eb" ] && [ "${ea%% *}" = "${eb%% *}" ] || exit 1
+      # Main did not change the file between the two commits: the change to it differs.
+      o=$(g rev-parse -q --verify "$2:$p") t=$(g rev-parse -q --verify "$4:$p")
+      [ "$o" != "$t" ] || exit 1
+      { [ -z "$o" ] || g cat-file blob "$o"; } > "$d/o" && { [ -z "$t" ] || g cat-file blob "$t"; } > "$d/t" \
+        && g cat-file blob "${ea##* }" > "$d/x" && g merge-file -p "$d/x" "$d/o" "$d/t" > "$d/m" 2>/dev/null \
+        && [ "$(g hash-object -- "$d/m")" = "${eb##* }" ] || exit 1
+    done < "$d/pa" )
+  r=$?; rm -rf "$d"; return "$r"
 }
 # The screenshots a card kept, kept again for the card that resumed its kept patch: only when they were kept for that
-# patch, and the new card's patch is the same change: the same patch, byte for byte, once the line numbers of its hunks
-# and the blob ids of its index lines are taken out (samechange()), so it may sit on a newer base. Context lines and
-# each hunk's function name still count: git patch-id reads neither, so it gives one id to a line added in two places
-# (and --stable reads no whitespace either, so `.a .b` to `.a.b` in CSS would pass). Its shots.json is tied to the new
-# card's own patch.
+# patch, and the new card's patch is the same change, brought onto its newer base (samechange()): a line added at
+# another place, even one with the same lines around it, is another change. Its shots.json is tied to the new card's
+# own patch.
 keptshots() { # <kept folder of the earlier card> <earlier card> <kept folder> <card>
-  local a b
+  local b
   [ -r "$1/shots/shots.json" ] && [ "$(jq -r .patch "$1/shots/shots.json" 2>/dev/null)" = "$(git hash-object -- "$1/$2.patch" 2>/dev/null)" ] \
-    && a=$(samechange "$1/$2.patch") && b=$(samechange "$3/$4.patch") && [ -n "$a" ] && [ "$a" = "$b" ] || return 0
+    && samechange "$1/$2.patch" "$(cat "$1/$2.base" 2>/dev/null)" "$3/$4.patch" "$(cat "$3/$4.base" 2>/dev/null)" || return 0
   rm -rf "$3/shots"
   cp -R "$1/shots" "$3/shots" && b=$(git hash-object -- "$3/$4.patch") \
     && jq -c --arg p "$b" '.patch = $p' "$1/shots/shots.json" > "$3/shots/shots.json" || rm -rf "$3/shots"
