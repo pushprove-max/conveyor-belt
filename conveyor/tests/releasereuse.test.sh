@@ -43,16 +43,19 @@ rrprep() {
 }
 
 # Bug (#43): one failed file made release-prep rerun the whole suite (about 250 files, 43 min) on the fix, though every
-# other file passed on the commit before. Here B changes t/f1 alone: only t/f1 runs, a pass is posted on B, the record
-# names the run reused and the file rerun, and `release` takes the pass and releases B with no suite run.
+# other file passed on the commit before; and reusing the passes of files whose code changed. Here B fixes t/f1 and
+# changes src/s3.sh, which the changed-tests command maps to t/f3: only t/f1 and t/f3 run (t/f2's pass is kept), a pass
+# is posted on B, the record names the run reused and the files rerun, and `release` takes the pass and releases B with
+# no suite run.
 t_relreusefail() {
   local A B RUN got
   rrsetup
+  echo two >> "$R/src/s3.sh"
   rrprep
-  [ "$got" = t/f1.test.sh ] || fail "release-prep on B ran '$got', not t/f1.test.sh alone: $(cat "$T/$CASE.b")"
+  [ "$got" = "t/f1.test.sh t/f3.test.sh" ] || fail "release-prep on B ran '$got', not t/f1 and t/f3 alone: $(cat "$T/$CASE.b")"
   grep -q "statuses/$B -f state=success -f context=conveyor/release-suite " "$STUB/gh-calls" || fail "no passing status was posted on B: $(cat "$STUB/gh-calls")"
-  jq -e --arg a "$A" --arg b "$B" '.state == "passed" and .sha == $b and (.reused | del(.time)) == {sha: $a, ran: ["t/f1.test.sh"], kept: 2}' "$RUN" > /dev/null \
-    || fail "the record does not name the run reused and the file rerun: $(cat "$RUN")"
+  jq -e --arg a "$A" --arg b "$B" '.state == "passed" and .sha == $b and (.reused | del(.time)) == {sha: $a, ran: ["t/f1.test.sh", "t/f3.test.sh"], kept: 1}' "$RUN" > /dev/null \
+    || fail "the record does not name the run reused and the files rerun: $(cat "$RUN")"
   rm -f "$STUB/ran"
   loop release 1.1.0 > "$T/$CASE.r" 2>&1 || fail "release did not take the pass on B: $(cat "$T/$CASE.r")"
   [ ! -e "$STUB/ran" ] && [ -n "$(git -C "$T/$CASE/origin" tag -l v1.1.0)" ] || fail "release ran the suite again or released nothing: $(cat "$T/$CASE.r")"
@@ -66,15 +69,6 @@ t_relreusecmd() {
   rrprep
   [ "$got" = "t/f1.test.sh t/f2.test.sh t/f3.test.sh" ] || fail "a change to .conveyor/test-full.sh did not run every file: '$got'"
   jq -e '.reused == null' "$RUN" > /dev/null || fail "a whole suite's record says it reused a run: $(cat "$RUN")"
-}
-# Bug (#43): reusing the passes of files whose code changed: B changes src/s3.sh, which the changed-tests command maps
-# to t/f3, so t/f3 runs beside the failed t/f1.
-t_relreusesel() {
-  local A B RUN got
-  rrsetup
-  echo two >> "$R/src/s3.sh"
-  rrprep
-  [ "$got" = "t/f1.test.sh t/f3.test.sh" ] || fail "a change to src/s3.sh did not run t/f3 beside t/f1: '$got'"
 }
 # Bug (#44 review): the record's newest line on an ancestor was taken, so a release-prep on origin's A after a green
 # full test on the unpushed B hid B's pass, and Push landed on B ran every file again. suitebase() takes the line on
