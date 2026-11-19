@@ -4,7 +4,7 @@
 // reset. A panel that shows data now keeps it, with a short note above it; one that never had data shows the error alone.
 // Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { T0, iso, boot, panel, state, deliver, next, trackOf, full, clone, cases } from './dashboard-view.helpers.mjs';
+import { T0, iso, boot, panel, state, deliver, next, trackOf, full, clone, cases, openEvery } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const at = (s) => iso(T0 - 1000000 + s * 1000);
@@ -19,8 +19,7 @@ test('a panel with data keeps it through a failed read, with a note, and the nex
   deliver(w, data);
   const good = clone(data.panels.belt);
   const row = () => panel(w, 'belt').querySelector(`li[data-key="sample:${card.card}"]`);
-  const steps = row().querySelector('details.track-detail');
-  steps.open = true;
+  const steps = openEvery(w, row().querySelector('details.track-detail'));
   const out = row().querySelector('details.output');
   out.open = true;
   out.querySelector('pre.output-text').scrollTop = 120;

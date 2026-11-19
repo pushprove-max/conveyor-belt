@@ -4,7 +4,7 @@
 // one unwrapped run of fixed-width digits (white-space: nowrap, tabular-nums), and the per-second update writes to no
 // other text. jsdom does no layout, so the rules are read from app.css, as the other Board layout tests do.
 import assert from 'node:assert/strict';
-import { css as raw, T0, iso, boot, panel, deliver, tick, full, cases } from './dashboard-view.helpers.mjs';
+import { css as raw, T0, iso, boot, panel, deliver, tick, full, cases, openEvery } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const css = raw.replace(/\/\*[\s\S]*?\*\//g, '');
@@ -71,7 +71,7 @@ test('the four texts the audit found are live texts: the card\'s overall timer, 
   const belt = panel(w, 'belt');
   live(belt.querySelector('.row-main .card-times .since'), 'the "N overall" timer');
   live(belt.querySelector('.row-meta .num').parentElement, 'the cost counter');
-  const total = belt.querySelector('.track-detail .tl-total');
+  const total = openEvery(w, belt.querySelector('.track-detail')).querySelector('.tl-total');
   live(total, 'the "Every step" total');
   tick(w, 61000);
   assert.equal(total.dataset.tip, total.textContent, 'the cut total carries its full text, as it is now');
@@ -114,6 +114,8 @@ for (const [tab, expect] of [
   test(`the ${tab} tab: each text the per-second update writes is a live text`, () => {
     const w = boot({ tab });
     deliver(w, data());
+    // A closed "Every step" has no steps and is not retimed: its texts tick only while it is open.
+    if (tab === 'overview') panel(w, 'belt').querySelectorAll('.more > details.track-detail').forEach((d) => openEvery(w, d));
     const els = written(w);
     assert.deepEqual(outside(els), [], 'a text that ticks but may wrap');
     // The fixture draws every live text of the tab, so a new one is caught.

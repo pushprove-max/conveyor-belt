@@ -962,6 +962,16 @@
     det.redraw = () => trackDetail(t, card, det, earlier, repoUrl, repo);
     return det;
   }
+  // A closed "Every step" with no steps drawn in it, only its summary (panels/belt.js draws them when it opens): it is
+  // hidden as trackDetail's is, when it has no step and no earlier attempt to show.
+  function trackShell(t, card, earlier) {
+    const det = h('details', 'track-detail');
+    det.append(h('summary', null, 'Every step'));
+    if (typeof card === 'string') det.dataset.card = card;
+    const prior = Array.isArray(earlier) && earlier.some((e) => e && typeof e === 'object' && e.track && typeof e.track === 'object');
+    det.hidden = !stepsOf(t).some((s) => s.name !== 'queued') && !prior;
+    return det;
+  }
 
   // Why a blocked card stopped, as one plain sentence first ("2 tests failed: a, b", "Review said NO-GO three times",
   // "Push refused: the check typecheck failed"), and its explanation under it, shown without a tap (no <details>, so
@@ -1837,12 +1847,15 @@
       ro.observe(head); ro.observe(body);
     }
     p.ctx = {
-      h, chip, icon, tip, unread, get retry() { return retryText(); }, restartButton: restartHere, faults: panelFaults, get machine() { return machineWord(); }, get answerer() { return answerer(); }, details, since, clock, when, stamp, dur, took, money, modelName, findings, survived, judged, reviewChip, verdictSaid, output, issueLink, depRef, list, post, fresh, motion, state: stateBlock, track, trackDetail, earlierTip, testProgress, fixNow,
+      h, chip, icon, tip, unread, get retry() { return retryText(); }, restartButton: restartHere, faults: panelFaults, get machine() { return machineWord(); }, get answerer() { return answerer(); }, details, since, clock, when, stamp, dur, took, money, modelName, findings, survived, judged, reviewChip, verdictSaid, output, issueLink, depRef, list, post, fresh, motion, state: stateBlock, track, trackDetail, trackShell, earlierTip, testProgress, fixNow,
       param, params, pickRepo, project, now, tag, setTab, restart, goTo, panelHref: (id) => panelHref(id), failure, failureLine, twice, undoLine, text: findingText,
       pausedSaid, refusal, depPicked,
       // Whether the lists are sorted by project (the machine head's sort): a panel that orders a list itself keeps each
       // project's rows together then.
       sorted: projectSort,
+      // whole: whether this draw is to draw the panel whole (a new time format, project or model name), not only what
+      // changed in its part: a panel that keeps its rows as they were draws each again then.
+      get whole() { return p.whole === true; },
       // updatedAt(): when the collector began the snapshot drawn now (ms by the page host's clock), or null.
       updatedAt: () => updatedAt,
       // Whether this page has the live feed open, and when what it shows was published (ms, or null).
@@ -1872,14 +1885,16 @@
     if (typeof p.mod.older === 'function' && (p.hist !== histVer || histDue())) p.json = undefined;
     p.hist = histVer;
     // The model names (modelName) are part of what a panel shows: a new alias or name draws it again.
-    const json = JSON.stringify(part === undefined ? null : part) + namesKey();
+    const names = namesKey(), json = JSON.stringify(part === undefined ? null : part) + names;
     if (p.json === json) {
       if (p.state === 'ready' && !p.note && typeof p.mod.same === 'function') {
         try { p.mod.same(p.body, shownData(p.mod, part.data), p.ctx); } catch (e) { /* the next part that differs draws the panel whole */ }
       }
       return;
     }
-    p.json = json;
+    // Drawn whole (ctx.whole): asked for (redrawAll, ctx.redraw), or the model names changed, whatever else changed too.
+    p.whole = p.json === undefined || p.names !== names;
+    p.json = json; p.names = names;
     p.renders += 1;
     p.el.dataset.renders = String(p.renders);
     const mod = p.mod;

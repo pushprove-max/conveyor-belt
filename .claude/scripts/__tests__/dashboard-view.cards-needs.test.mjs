@@ -3,7 +3,7 @@
 // main, a plugin commit not taken, an issue waiting for the yes, a held pipeline change), Declined, a review's judge
 // line, a card passed on re-run and a slow-test note. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { T0, iso, clone, boot, panel, deliver, next, settle, P, trackOf, counts, full, cases } from './dashboard-view.helpers.mjs';
+import { T0, iso, clone, boot, panel, deliver, next, settle, P, trackOf, counts, full, cases, openEvery } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 
@@ -231,6 +231,7 @@ test("a review step says what the judge made of it, in flight and landed, and on
   data.panels.landed.data.cards.push({ ...clone(two), repo: 'widgetshop', card: 'c9-9', issue: 9, fixes: 1, rounds:[r(1, 'NO-GO', true, { ran: true, accepted: 2, declined: 0, go: false }), r(2, 'GO', false, { ran: false, why: 'the review had no finding' })] });
   deliver(w, data);
   const row = panel(w, 'belt').querySelector('li[data-key="sample:c3-63"]');
+  openEvery(w, row.querySelector('details.track-detail'));
   assert.deepEqual(said(row.querySelector('.reviews')), LINES, 'each finished review of a card in flight');
   assert.deepEqual(Array.from(row.querySelectorAll('.tl-item'), (li) => said(li).join('')), SAID, 'each review step of its timeline');
   const landed = panel(w, 'landed').querySelector('.rows > li');
@@ -404,7 +405,7 @@ test('a card whose tests passed on re-run is drawn with "passed on re-run", neve
   const test6 = row.querySelectorAll('ol.track6 > li.step6')[3];
   assert.equal(test6.querySelector('.step-name').textContent, 'Test passed on re-run');
   assert.match(test6.getAttribute('aria-label'), /^Test passed on re-run: done/);
-  const bar = row.querySelector('details.track-detail .timeline > li.tl-item .tl-label');
+  const bar = openEvery(w, row.querySelector('details.track-detail')).querySelector('.timeline > li.tl-item .tl-label');
   assert.equal(bar.firstChild.textContent, 'Tests');
   assert.ok(Array.from(bar.querySelectorAll('.chip'), (c) => c.textContent).includes('passed on re-run'), 'the Tests bar says it passed on re-run');
   // A plain success: Test, with no such words.
@@ -423,6 +424,7 @@ test('a passing test run flags no slow file, though its step holds an old slow l
   const rec = (sec, slow) => ({ name: 'tests passed', state: 'done', sec, at: iso(T0 - sec * 1000), ...(slow === undefined ? {} : { slow }) });
   data.panels.belt.data.cards[0].track = trackOf('++++>.', 'landing', { records: [rec(240, [{ file: 's.test', cpu: 10.24, budget: 8 }]), rec(60)] });
   deliver(w, data);
+  openEvery(w, panel(w, 'belt').querySelector('li[data-key="sample:c3-63"] details.track-detail'));
   const items = Array.from(panel(w, 'belt').querySelectorAll('li[data-key="sample:c3-63"] details.track-detail .timeline > li.tl-item'));
   assert.ok(items.length >= 2);
   for (const li of items) {

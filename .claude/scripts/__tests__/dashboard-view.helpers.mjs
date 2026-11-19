@@ -242,6 +242,14 @@ export function tick(w, ms) { w.clock += ms; w.intervals.find((t) => t.ms === 10
 // seen(w, on): the page's tab is put in view (true) or in the background (false), as the browser tells the page.
 export function seen(w, on) { w.pageHidden = !on; w.document.dispatchEvent(new w.Event('visibilitychange')); }
 export function later(w) { for (const t of w.timeouts.splice(0)) t.fn(); }
+// Opens an "Every step" as a reader does, with the toggle the browser fires then (jsdom fires it on a later turn): On
+// the belt draws its steps only then (panels/belt.js), in a new element. Returns the element in its place now.
+export function openEvery(w, det) {
+  const at = det.parentNode, i = Array.from(at.children).indexOf(det);
+  det.open = true;
+  det.dispatchEvent(new w.Event('toggle'));
+  return at.children[i];
+}
 export function key(w, el, k) { el.dispatchEvent(new w.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })); }
 
 export const P = 'https://github.com/example/sample-project/issues';

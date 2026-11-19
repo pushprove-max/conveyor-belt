@@ -63,6 +63,26 @@
     return box;
   }
 
+  // Every recorded step and its time, on demand: its steps and earlier attempts are drawn only while it is open
+  // (ctx.trackDetail); closed, it is its summary alone (ctx.trackShell), holding what was drawn when it was last open
+  // (held), so it opens again with the same output boxes, earlier attempts and set-up open. It stays open or closed
+  // through a redraw, and the keyboard's place in it stays where it was. The focus is put back without scrolling: a
+  // focus that scrolls its element into view moved the page and the panel under the reader at each redraw. was: the
+  // "Every step" of the row's earlier card id, for a row that has none yet.
+  function every(li, c, ctx, was) {
+    const more = li.children[5], cur = more.firstChild || was;
+    // The places the keyboard can be: a fold, a step's bar.
+    const keys = 'summary, .tl-item';
+    const at = more.firstChild ? Array.from(more.firstChild.querySelectorAll(keys)).indexOf(li.ownerDocument.activeElement) : -1;
+    const t = c.track && typeof c.track === 'object' ? c.track : null;
+    const drawn = cur && cur.querySelector(':scope > ol.timeline') ? cur : (cur && cur.held) || null;
+    let det;
+    if (cur && cur.open) { det = ctx.trackDetail(t, c.card, drawn || cur, c.earlier, ctx.text.repoOf(c), c.repo); det.open = true; }
+    else { det = ctx.trackShell(t, c.card, c.earlier); det.held = drawn; }
+    more.replaceChildren(det);
+    if (at >= 0 && det.querySelectorAll(keys)[at]) det.querySelectorAll(keys)[at].focus({ preventScroll: true });
+  }
+
   window.DASH_APP.panel({
     id: 'belt',
     title: 'On the belt',
@@ -88,63 +108,105 @@
         const text = quietText(n.dataset.outputAt, ctx);
         if (n.textContent !== text) n.textContent = text;
       });
-      // A step in progress grows on its card's timeline, its time counting on; nothing else on the page moves.
-      el.querySelectorAll('.track-detail').forEach((det) => { if (det.retime) det.retime(); });
+      // A step in progress grows on its card's timeline, its time counting on; nothing else on the page moves. A
+      // closed timeline is not retimed.
+      el.querySelectorAll('.track-detail[open]').forEach((det) => { if (det.retime) det.retime(); });
       if (!ctx.motion()) return;
       const t = Date.now();
       if (t - (el.beatAt || 0) < BEAT_MS) return;
       el.beatAt = t;
-      el.querySelectorAll('.step6[data-state="now"] .step-chip, .tl-item[data-state="now"] .tl-bar').forEach((c) => { c.classList.remove('beat'); void c.offsetWidth; c.classList.add('beat'); });
+      // All the beats restart on one layout: the class off from all, one read of offsetWidth, the class on to all.
+      const chips = Array.from(el.querySelectorAll('.step6[data-state="now"] .step-chip, .tl-item[data-state="now"] .tl-bar'));
+      if (!chips.length) return;
+      chips.forEach((c) => c.classList.remove('beat'));
+      void chips[0].offsetWidth;
+      chips.forEach((c) => c.classList.add('beat'));
     },
     render(el, d, ctx) {
       const h = ctx.h;
       if (!el.firstChild) el.append(h('ul', 'rows belt'));
+      // A panel drawn whole (ctx.whole: a new time format, project or model name) keeps no row as it was.
+      const again = ctx.whole;
       ctx.list(el.firstChild, d.cards, (c) => `${c.repo}:${c.card}`, () => {
-        const li = h('li', 'row belt-card');
-        li.append(h('div', 'row-main'), h('p', 'row-meta'), h('ol', 'track6'), h('p', 'track-now'), h('ul', 'reviews'), h('div', 'more'));
+        const li = h('li', 'row belt-card'), more = h('div', 'more');
+        li.append(h('div', 'row-main'), h('p', 'row-meta'), h('ol', 'track6'), h('p', 'track-now'), h('ul', 'reviews'), more);
+        // "Every step" draws its steps when it opens, and drops them when it closes. toggle does not bubble: it is
+        // caught on its way down, and only for "Every step" itself, never a fold inside it.
+        more.addEventListener('toggle', (e) => {
+          const det = e.target;
+          if (det.parentNode === more && det.open !== Boolean(det.querySelector(':scope > ol.timeline')) && li.card) every(li, li.card, ctx, null);
+        }, true);
         return li;
       }, (li, c) => {
-        const [head, meta, track, now, reviews, more] = li.children;
-        head.replaceChildren(ctx.issueLink(c), h('span', 'title', c.title || 'untitled'));
-        if (typeof c.parent === 'number' && c.parent > 0) head.append(h('span', 'parent', `↳ #${c.parent}`));
-        const [said, why] = [].concat(doing(c, ctx)), pill = ctx.chip(said, c.track && c.track.reason ? 'bad' : 'info');
-        if (why) ctx.tip(pill, why);
-        head.append(times(c, ctx), pill);
+        // A card whose part is as it was keeps its row as it is: one card's new figures redraw only that card.
+        const json = JSON.stringify(c);
+        if (li.json === json && !again) return;
+        li.json = json;
+        li.card = c;
+        const [head, meta, track, now, reviews] = li.children;
+        // Each part of the row is drawn again only when what it shows changed (its key, kept on the node).
+        const redo = (node, key) => { const k = JSON.stringify(key); if (node.key === k && !again) return false; node.key = k; return true; };
+        const what = doing(c, ctx);
+        if (redo(head, [c.repo, c.card, c.issue, c.name, c.url, c.title, c.parent, c.start, c.pickedAt, c.totalSec, c.priorSec, c.earlier, what, Boolean(c.track && c.track.reason)])) {
+          head.replaceChildren(ctx.issueLink(c), h('span', 'title', c.title || 'untitled'));
+          if (typeof c.parent === 'number' && c.parent > 0) head.append(h('span', 'parent', `↳ #${c.parent}`));
+          const [said, why] = [].concat(what), pill = ctx.chip(said, c.track && c.track.reason ? 'bad' : 'info');
+          if (why) ctx.tip(pill, why);
+          head.append(times(c, ctx), pill);
+        }
         // The dollars and the tokens (the builder's and the reviewer's together) are the finished steps and the running one so far; before
         // any token is read there is no figure, and when the running session's route reports no usage until it ends (atEnd), it says so.
         const tok = c.tokens && num(c.tokens.claude) && num(c.tokens.codex) ? c.tokens.claude + c.tokens.codex : null;
         // One unwrapped piece of the meta row, dollars and tokens together a held width (app.css, .live-cost): it counts on as refreshes come.
-        let cost = h('span', 'live-cost', c.atEnd === true ? 'cost shown when the step ends' : 'no reading yet');
-        if (c.reading) {
-          cost = h('span', 'live-cost');
-          cost.append(ctx.number(`usd:${c.card}`, c.usd, ctx.money), h('span', null, tok !== null ? ` · ${count(tok)} tokens so far` : typeof c.usd === 'number' ? ' so far' : ''));
-        }
         // A proof run that waits for a test slot (its live action, testrun.sh) runs no tests yet.
         const slotWait = c.step === 'proof' && c.live && typeof c.live.action === 'string' && c.live.action.startsWith('waiting for a test slot');
-        meta.replaceChildren(ctx.tag(c.repo),h('span', null, ctx.modelName(c.model) || (slotWait ? 'waiting for a test slot' : c.step === 'tests' || c.step === 'proof' ? 'running tests' : 'no AI model in this step')), cost);
+        const model = ctx.modelName(c.model) || (slotWait ? 'waiting for a test slot' : c.step === 'tests' || c.step === 'proof' ? 'running tests' : 'no AI model in this step');
+        if (redo(meta, [c.repo, model])) meta.replaceChildren(ctx.tag(c.repo), h('span', null, model), h('span', 'live-cost'));
+        // The cost is the same node from one change to the next: the dollars are drawn again only when they changed (so
+        // they count on from the figure shown), the tokens' text is set in place.
+        const cost = meta.lastChild;
+        if (redo(cost, [c.card, c.reading, c.atEnd, c.usd])) {
+          if (c.reading) cost.replaceChildren(ctx.number(`usd:${c.card}`, c.usd, ctx.money), h('span'));
+          else cost.replaceChildren(c.atEnd === true ? 'cost shown when the step ends' : 'no reading yet');
+        }
+        if (c.reading) {
+          const text = tok !== null ? ` · ${count(tok)} tokens so far` : typeof c.usd === 'number' ? ' so far' : '';
+          if (cost.lastChild.textContent !== text) cost.lastChild.textContent = text;
+        }
         const t = c.track && typeof c.track === 'object' ? c.track : null;
         track.hidden = !ctx.track(track, t);
         // The step in progress, measured: how long it has run, how far a running test run has got (its tests, else
         // its files: ctx.testProgress), why a push failed.
-        const parts = [ctx.since((t && t.since) || c.stepAt, ' in this step')];
+        // Each piece is its kind, what it shows and how to draw it. A piece whose kind and value are the ones shown stays
+        // that node (never compared as a node: an open popover marks its item), so a tapped live action or push error
+        // keeps its popover open through a token update.
+        const since = (t && t.since) || c.stepAt;
+        const parts = [['since', since, () => ctx.since(since, ' in this step')]];
         const prog = ctx.testProgress(t);
-        if (prog) parts.push(h('span', 'test-progress', prog));
+        if (prog) parts.push(['prog', prog, () => h('span', 'test-progress', prog)]);
         // The line is one line high (app.css, .track-now): a text cut to fit there carries its full text as its title,
         // and a tap opens it (a phone shows no title).
         const full = (cls, text) => ctx.tip(h('span', cls, text), text);
-        if (t && t.reason) parts.push(full('failed', `Push failed: ${t.reason}`));
+        if (t && t.reason) parts.push(['failed', t.reason, () => full('failed', `Push failed: ${t.reason}`)]);
         // The running step's live fields, streamed as the session or review prints them: what it does now,
         // its model replies (turns; none for a test run, which runs no model), and how long since its last output.
         const live = c.live && typeof c.live === 'object' ? c.live : null;
         // What it does now, in words ("now: running a command"); the command or file itself on hover and tap.
-        if (live && typeof live.action === 'string' && live.action) parts.push(ctx.tip(h('span', 'live-action', `now: ${actionSaid(live.action)}`), live.action));
-        if (live && c.step !== 'tests' && num(live.turns) && live.turns > 0) parts.push(h('span', null, `${live.turns} model ${live.turns === 1 ? 'reply' : 'replies'}`));
-        if (live && typeof live.lastOutputAt === 'string') parts.push(quiet(live.lastOutputAt, ctx));
-        now.replaceChildren(...parts);
+        if (live && typeof live.action === 'string' && live.action) parts.push(['action', live.action, () => ctx.tip(h('span', 'live-action', `now: ${actionSaid(live.action)}`), live.action)]);
+        if (live && c.step !== 'tests' && num(live.turns) && live.turns > 0) parts.push(['turns', live.turns, () => h('span', null, `${live.turns} model ${live.turns === 1 ? 'reply' : 'replies'}`)]);
+        if (live && typeof live.lastOutputAt === 'string') parts.push(['quiet', live.lastOutputAt, () => quiet(live.lastOutputAt, ctx)]);
+        parts.forEach(([kind, value, make], i) => {
+          const key = JSON.stringify([kind, value]), old = now.children[i];
+          if (old && old.key === key && !again) return;
+          const n = make();
+          n.key = key;
+          if (old) old.replaceWith(n); else now.append(n);
+        });
+        while (now.children.length > parts.length) now.lastElementChild.remove();
         // One line a finished review: its round, its verdict, its findings by level (the verdict alone when none were counted).
         const done = Array.isArray(c.reviews) ? c.reviews : [];
         reviews.hidden = done.length === 0;
-        reviews.replaceChildren(...done.map((r) => {
+        if (redo(reviews, [c.card, done])) reviews.replaceChildren(...done.map((r) => {
           const row = h('li', 'review'), f = ctx.findings(r);
           row.append(ctx.reviewChip(r));
           if (f) row.append(h('span', null, f));
@@ -156,23 +218,15 @@
           if (j) row.append(j);
           return row;
         }));
-        // Every recorded step and its time, on demand; it and its set-up stay open through a redraw, and the
-        // keyboard's place in it stays where it was. The focus is put back without scrolling: a focus that scrolls
-        // its element into view moved the page and the panel under the reader at each redraw.
         // A retried card has a new card id, so its row is new: until it has drawn once, what was open is taken from
         // the row of its latest earlier card id still shown ("Every step" and its earlier attempts stay open).
-        // The places the keyboard can be: a fold, a step's bar.
-        const keys = 'summary, .tl-item';
-        let was = more.firstChild;
-        const at = was ? Array.from(was.querySelectorAll(keys)).indexOf(li.ownerDocument.activeElement) : -1;
-        if (!was && Array.isArray(c.earlier)) {
+        let was = null;
+        if (!li.children[5].firstChild && Array.isArray(c.earlier)) {
           const rows = Array.from(el.firstChild.children);
           const prev = c.earlier.slice().reverse().map((e) => e && rows.find((r) => r !== li && r.dataset.key === `${c.repo}:${e.card}`)).find(Boolean);
           was = prev ? prev.querySelector(':scope > .more > details.track-detail') : null;
         }
-        const det = ctx.trackDetail(t, c.card, was, c.earlier, ctx.text.repoOf(c), c.repo);
-        more.replaceChildren(det);
-        if (at >= 0 && det.querySelectorAll(keys)[at]) det.querySelectorAll(keys)[at].focus({ preventScroll: true });
+        every(li, c, ctx, was);
       });
     },
   });

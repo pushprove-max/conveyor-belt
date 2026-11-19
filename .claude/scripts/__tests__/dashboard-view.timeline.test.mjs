@@ -7,7 +7,7 @@
 // dashboard-view.helpers.mjs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { T0, iso, clone, boot, panel, deliver, next, tick, trackOf, counts, full } from './dashboard-view.helpers.mjs';
+import { T0, iso, clone, boot, panel, deliver, next, tick, trackOf, counts, full, openEvery } from './dashboard-view.helpers.mjs';
 
 // A card picked up 1000 s ago: built, reviewed, and its tests running for the last 5 s.
 const P0 = T0 - 1000000;
@@ -57,8 +57,8 @@ test('a tick moves no finished bar, and a running bar that grows past a quarter 
     { name: 'review 1 (GO)', state: 'done', sec: 400, at: ago(1000) }, { name: 'tests', state: 'now', sec: null }] });
   deliver(w, data);
   const p = panel(w, 'belt'), row = p.querySelector('li[data-key="sample:c3-63"]');
-  row.querySelector('details.track-detail').open = true;
-  const now = row.querySelector('.tl-item[data-state="now"]');
+  openEvery(w, row.querySelector('details.track-detail'));
+  const now =row.querySelector('.tl-item[data-state="now"]');
   assert.equal(now.querySelector('.tl-dur').parentNode.className, 'tl-lane');
   const before = bars(p);
   const seen = new w.MutationObserver(() => {});
@@ -79,7 +79,7 @@ test('a tick moves no finished bar, and a running bar that grows past a quarter 
 test('the one-second tick moves the running bar and its time texts only: no node added, removed or moved, no height changed, no arrange', () => {
   const w = boot();
   deliver(w, belt3());
-  timelines(w, 'belt').forEach((d) => { d.open = true; });
+  timelines(w, 'belt').forEach((d) => { openEvery(w, d); });
   reading(w, 'belt');
   const p = panel(w, 'belt');
   const nodes = p.querySelectorAll('*').length, was = box(w, 'belt'), where = place(w, 'belt'), drawn = bars(p);
@@ -135,7 +135,7 @@ test('a refresh that adds a step to an open timeline keeps it open and the reade
   const w = boot();
   const data = belt3();
   deliver(w, data);
-  timelines(w, 'belt').forEach((d) => { d.open = true; d.querySelector('summary').focus(); });
+  timelines(w, 'belt').forEach((d) => { openEvery(w, d).querySelector('summary').focus(); });
   reading(w, 'belt');
   const bars = () => timelines(w, 'belt').map((d) => d.querySelectorAll('.tl-item').length);
   const before = bars(), where = place(w, 'belt');

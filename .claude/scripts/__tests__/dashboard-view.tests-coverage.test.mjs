@@ -2,7 +2,7 @@
 // A card's timeline shows the changed lines no test reached (#309), from the coverage report its test run wrote (the
 // test record's coverage, testrun.sh uncovered()). Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { T0, iso, boot, panel, deliver, trackOf, full, cases } from './dashboard-view.helpers.mjs';
+import { T0, iso, boot, panel, deliver, trackOf, full, cases, openEvery } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const at = (s) => iso(T0 - 1000000 + s * 1000);
@@ -24,7 +24,7 @@ test('a test step lists the changed lines no test reached by file, and says unkn
     { name: 'review 1', state: 'now', sec: null }] });
   deliver(w, data);
   const row = panel(w, 'belt').querySelector(`li[data-key="sample:${card.card}"]`);
-  const boxes = Array.from(row.querySelectorAll('details.track-detail .test-coverage'));
+  const boxes = Array.from(openEvery(w, row.querySelector('details.track-detail')).querySelectorAll('.test-coverage'));
   assert.equal(boxes.length, 2, 'each test step shows its coverage');
   assert.equal(boxes[0].querySelector('.test-sum').textContent,
     'Changed lines no test reached: unknown (the coverage report names line 9 of src/a.js, which has 2 lines in the tested patch)');

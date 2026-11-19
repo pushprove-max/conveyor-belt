@@ -2,7 +2,7 @@
 // The dashboard page's cards, the lines a card shows: what started a fix, its reviews, its cost so far, what it waits on
 // or gave way to, and cards that landed in one batch. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { boot, panel, deliver, next, P, trackOf, counts, full, bcard, cases } from './dashboard-view.helpers.mjs';
+import { boot, panel, deliver, next, P, trackOf, counts, full, bcard, cases, openEvery } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 
@@ -31,7 +31,8 @@ test('a fix session is labelled with what started it, its reason on hover, never
     const d = full();
     d.panels.belt.data.cards[0].track = trackOf('++>...', label, { records: [...before, { name: label, state: 'now', sec: null }] });
     next(w, d);
-    const row = panel(w, 'belt').querySelector('li[data-key="sample:c3-63"]'), bars = row.querySelectorAll('.timeline > li.tl-item .tl-label');
+    openEvery(w, panel(w, 'belt').querySelector('li[data-key="sample:c3-63"] details.track-detail'));
+    const row = panel(w, 'belt').querySelector('li[data-key="sample:c3-63"]'), bars =row.querySelectorAll('.timeline > li.tl-item .tl-label');
     const pill = row.querySelector('.row-main .chip');
     assert.equal(bars[bars.length - 1].textContent, pill.textContent, 'the pill and the bar in progress say the same');
     return [pill.textContent, pill.title];

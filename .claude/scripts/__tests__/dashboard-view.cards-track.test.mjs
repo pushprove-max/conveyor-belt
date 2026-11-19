@@ -4,7 +4,7 @@
 // what was dashboard-view.cards.test.mjs, split so the runner runs them side by side. Shared setup:
 // dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { css, read, LIST, T0, iso, clone, boot, panel, deliver, next, tick, P, STEPS, DETAIL, trackOf, timesOf, counts, full, cases } from './dashboard-view.helpers.mjs';
+import { css, read, LIST, T0, iso, clone, boot, panel, deliver, next, tick, P, STEPS, DETAIL, trackOf, timesOf, counts, full, cases, openEvery } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 
@@ -56,8 +56,8 @@ test('a card keeps its row and each step of its track as its step changes, so on
   assert.equal(track.children[2].querySelector('.step-mark').textContent, '–');
   assert.equal(track.children[2].getAttribute('aria-label'), 'Fix: skipped');
   // Every recorded step, on demand.
-  const det = row.querySelector('details.track-detail');
-  assert.equal(det.open, false);
+  assert.equal(row.querySelector('details.track-detail').open, false);
+  const det = openEvery(w, row.querySelector('details.track-detail'));
   assert.deepEqual(Array.from(det.querySelectorAll('.timeline > li .tl-label'), (l) => l.textContent),
     ['Setup', 'Build', 'Review 1', 'Fix 1', 'Review 2', 'Fix 2', 'Review 3', 'Tests', 'Rebuild', 'Land', 'Push', 'Issue closed', 'Follow-ups filed'],
     'every recorded step but the queue, the set-up folded into one');
@@ -116,6 +116,7 @@ test('a card in its Test step shows its tests run of how many and those failed, 
   c.track.detail[11].state = 'now'; c.track.detailAt = 11;
   deliver(w, data);
   const row = () => panel(w, 'belt').querySelector('li[data-key="sample:c3-63"]');
+  openEvery(w, row().querySelector('details.track-detail'));
   const live = () => row().querySelector('.track-now').textContent;
   const detail = () => Array.from(row().querySelectorAll('.track-detail .tl-tests'), (p) => p.textContent);
   assert.match(live(), /3 of 5 tests · 1 failed/, `the live line counts the tests: ${live()}`);
@@ -339,6 +340,7 @@ test("a card's steps are bars in order on one time axis, the set-up folded, a re
     const data = full();
     data.panels.belt.data.cards[0].track = trackOf('++++>.', 'tests again', { since: at(2040), records: open });
     deliver(w, data);
+    openEvery(w, panel(w, 'belt').querySelector('li[data-key="sample:c3-63"] details.track-detail'));
     const items = Array.from(panel(w, 'belt').querySelectorAll('li[data-key="sample:c3-63"] details.track-detail .timeline > li.tl-item'));
     assert.deepEqual(items.map((li) => li.querySelector('.tl-label').firstChild.textContent),
       ['Setup', 'Build', 'Review 1', 'Fix 1: review findings', 'Review 2', 'Fix 2: review findings', 'Review 3', 'Tests', 'Fix 3: tests failed', 'Review 4', 'Tests again'], 'in order, the queue not among them');
@@ -417,7 +419,8 @@ test("a card's steps are bars in order on one time axis, the set-up folded, a re
   const pushfail = [...done.slice(0, -3), { name: 'push failed; it is tried again', state: 'failed', sec: null, at: at(2790), why: 'pre-push hook refused' }];
   data2.panels.belt.data.cards[0].track = trackOf('+++++!', 'push failed; it is tried again', { since: at(2790), records: pushfail });
   deliver(w2, data2);
-  const failed = Array.from(panel(w2, 'belt').querySelectorAll('li[data-key="sample:c3-63"] .timeline > li.tl-item'));
+  openEvery(w2, panel(w2, 'belt').querySelector('li[data-key="sample:c3-63"] details.track-detail'));
+  const failed =Array.from(panel(w2, 'belt').querySelectorAll('li[data-key="sample:c3-63"] .timeline > li.tl-item'));
   assert.equal(failed[failed.length - 1].querySelector('.tl-tip').textContent, 'Push failed; it is tried again: failed, 0 s, 11:46 AM to 11:46 AM: pre-push hook refused');
   assert.equal(failed[1].querySelector('.tl-tip').textContent, 'Build: done, 10 min, 11:01 AM to 11:11 AM');
   assert.ok(Math.abs(parseFloat(failed[failed.length - 3].querySelector('.tl-bar').style.left) - (2640 / 2790) * 100) < 0.01, 'the pause is still a gap');
@@ -436,7 +439,7 @@ test('a card with an earlier attempt shows it above its steps, and its overall t
   const all = row.querySelector('.card-times time');
   assert.equal(all.textContent, '1 h 00 min overall', 'the overall time is the earlier 20 min and the 40 min since its own pick-up');
   assert.match(all.title, /^Includes the earlier attempt/);
-  const det = row.querySelector('details.track-detail'), earlier = det.querySelectorAll(':scope > details.tl-earlier');
+  const det = openEvery(w, row.querySelector('details.track-detail')), earlier = det.querySelectorAll(':scope > details.tl-earlier');
   assert.equal(earlier.length, 1);
   assert.equal(earlier[0].querySelector('summary').textContent, 'Earlier attempt: 11:00 AM to 11:20 AM, 20 min, ended: a follow-up could not be held, so nothing landed');
   assert.equal(earlier[0].open, false, 'closed by default');
@@ -458,8 +461,7 @@ test('a retried card keeps "Every step" and its earlier attempt open when its ca
   const first = { card: 'c3-60', start: iso(T0 - 3600000), end: iso(T0 - 2400000), sec: 1200, reason: 'tests failed', track: trackOf('++++!.', '', { at: null, since: null }) };
   Object.assign(card, timesOf(T0, 1200), { earlier: [first] });
   deliver(w, data);
-  const det = panel(w, 'belt').querySelector('li[data-key="sample:c3-63"] details.track-detail');
-  det.open = true;
+  const det = openEvery(w, panel(w, 'belt').querySelector('li[data-key="sample:c3-63"] details.track-detail'));
   det.querySelector(':scope > details.tl-earlier').open = true;
   const second = { card: 'c3-63', start: iso(T0 - 2400000), end: iso(T0 - 600000), sec: 1800, reason: 'review said NO-GO', track: trackOf('++!...', '', { at: null, since: null }) };
   Object.assign(card, { card: 'c3-64', earlier: [first, second] });

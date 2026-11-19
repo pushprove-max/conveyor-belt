@@ -3,7 +3,7 @@
 // each time the step's output grew: the redraw made every output toggle new and closed. Needs you kept its row but never
 // drew a longer output into it, and Lanes drew its rows anew, its output closed. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { T0, iso, boot, panel, deliver, next, trackOf, full, cases } from './dashboard-view.helpers.mjs';
+import { T0, iso, boot, panel, deliver, next, trackOf, full, cases, openEvery } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const at = (s) => iso(T0 - 1000000 + s * 1000);
@@ -20,7 +20,7 @@ test('a step\'s "Show output" on the timeline stays open, with the longer output
   card.track = track('not ok 1 - pays once');
   deliver(w, data);
   const row = () => panel(w, 'belt').querySelector(`li[data-key="sample:${card.card}"]`);
-  row().querySelector('details.track-detail').open = true;
+  openEvery(w, row().querySelector('details.track-detail'));
   row().querySelector('details.output').open = true;
   card.track = track('not ok 1 - pays once\nnot ok 2 - refunds');
   next(w, data);
