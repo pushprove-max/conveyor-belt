@@ -75,7 +75,8 @@ t_pack() {
 }
 
 # Bug: a file the code needs is left out of the set because the code first tests for it, though its absence stops the
-# code ([ -f x ] || exit 1; . x), as if it were optional.
+# code ([ -f x ] || exit 1; . x), as if it were optional. Bug (#757): a file of conveyor/lib named at run time
+# (commands/snapshot.sh's "$HERE/lib/$l.sh") was taken for a read of the whole folder, so the optional files were in the set.
 t_required() {
   local d=$T/req l
   copyset "$d" || fail "cannot copy the set"

@@ -178,13 +178,16 @@ def refs(path):
     # A folder on sys.path gives imports, followed below, not its files.
     paths = [here] + re.findall(r"sys\.path\.insert\(\s*\d+\s*,\s*" + M, text)
     text = re.sub(r"sys\.path\.insert\(\s*\d+\s*,\s*" + M, "", text)
-    for loc in re.findall(M, text):
+    for m in re.finditer(M, text):
+        loc = m.group(1)
         if loc in opt:
             continue
         if loc in files:
             out.add(loc)
-        # A folder a program reads holds its files (a test links or copies a folder whole as a fixture).
-        elif loc in dirs and not test and not (here + "/").startswith(loc + "/") and loc != ".":
+        # A folder a program reads holds its files (a test links or copies a folder whole as a fixture). A file of a
+        # folder named at run time ("$HERE/lib/$l.sh") is one file, not the folder: it is not followed.
+        elif loc in dirs and not test and not (here + "/").startswith(loc + "/") and loc != "." \
+                and not re.match(r"\"?/\$", text[m.end():]):
             out.update(f for f in files if os.path.dirname(f) == loc)
     if ext in (".html", ".css", ".js", ".mjs"):
         for m in re.finditer(r"(?:\b(?:src|href)=|\bfrom\s+|\bimport\s*\(\s*|\burl\(\s*)" + Q, text):
