@@ -45,5 +45,7 @@
   "signin": null,
   "landAs": null,
   "prMerge": null,
-  "onboarded": null
+  "onboarded": null,
+  "picks": {},
+  "pickBack": null
 }

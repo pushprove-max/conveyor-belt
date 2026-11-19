@@ -312,7 +312,8 @@ or a stop, keeps the pick that the issue had.
 
 - **Off**: Conveyor records no pick.
 - **Shadow**: Conveyor records the pick, and the card builds on its builder as before.
-- **On**: Conveyor records the pick, and some cards are trials.
+- **On**: Conveyor records the pick. Some cards are trials, and the cards of a group that you promote build on the
+  challenger.
 
 ### Trials
 
@@ -328,7 +329,8 @@ settings.
 - **One at a time**: when a trial card is in progress, the next eligible card builds on the project's builder.
 - **Retry**: when a trial card is blocked, its retry builds on the project's builder. This is true for a retry by
   `review-retry` and for a retry that you start. The rule does not retry a card itself.
-- **Drop**: when two trial cards of a group are blocked, the group has no more trials. The next eligible card of
+- **Drop**: when two trial cards of a group are blocked after your last decision for the group, the group has no
+  more trials. The next eligible card of
   that group builds on the project's builder, also when its issue is in the share. The blocked lines of the two cards
   in the card records are the record of the drop.
 - **No challenger**: there are no trials when the project's builder is the challenger, or when `models.allowed` in
@@ -341,6 +343,31 @@ The issue of a trial card names no such path.
 The Cost panel on the Board shows a table of the picked cards, one row for each group and builder. Under the table,
 **Pick settings trials** shows each group that has no more trials, with the two blocked cards. It also shows each trial
 card whose change touches a path in `pipelineFiles`, with those paths.
+
+### Your decision after ten trial cards
+
+When ten trial cards of a group are done (landed, closed or blocked), **Needs you** on the Board asks you for a
+decision about the challenger of that group. The line shows the trial cards and the default cards of the group: how
+many there are, how many landed, and the spend for each landed card. The spend of a card includes all its runs, and
+its blocked runs too. When a step has no price, the spend shows as not known. Conveyor does not promote the challenger
+itself. Give your decision with `conveyor.sh control pick <group> <decision>`, for example
+`conveyor.sh control pick small docs promote`:
+
+- **promote**: the cards of the group build on the challenger, with no more trials. 1 card in 5 of the group stays
+  on the project's builder: the card of an issue whose number is a multiple of 5. A card whose builder you set keeps
+  your setting.
+- **keep**: the trials continue. Needs you asks again when ten more trial cards of the group are done. Trial cards
+  that were blocked before your decision do not count for a drop.
+- **drop**: the group has no more trials. Its cards build on the project's builder.
+
+### Back to Shadow
+
+With the rule On, Conveyor compares the promoted cards of a group with its default cards before it starts each card.
+It does this also for a group that you promote before it has trial cards.
+When the promoted cards cost more for each landed card, Conveyor sets the rule to Shadow. **Needs you** then shows
+a line with the two costs. The line stays until you set the rule again. Before you set it to On again, choose
+`keep` or `drop` for the group, because the same costs set the rule to Shadow again. Conveyor uses the costs that the Board
+showed last.
 
 ## Judge replay
 

@@ -18,7 +18,9 @@
 #   and engine (for a pack that follows the plugin's main, the newest commit of it this machine did not take, until a
 #   later one is taken: commit, reason (its failed check, or the hooks it lacks), since; else null), and testRules
 #   (when the last pass of the test rules, lib/testrules.sh, had the switch on and matched more files than one day's
-#   cap, so it filed nothing: time, matched, cap; else null).
+#   cap, so it filed nothing: time, matched, cap; else null), and pick (the rule Pick settings: a decision for each
+#   group whose tenth trial card ended, {group, title, reason, since, time (since again: the Foreman watcher keys it on time), trial, default}, cost.trials.groups' due; and,
+#   while the control record holds pickBack, the rule's own return to shadow, {group: null, title, reason, since, time}).
 #   mainTest, beside it, is the failure of the whole test on main that stands (maintest(): issue, cases, from, to,
 #   since, exit), null when its last run passed or none ran, when the pack names no test.main, or when its issue is
 #   known closed. fullTest is the full test suite of the Board (fulltest()): command (the pack names test.full), why
@@ -206,7 +208,10 @@
 #   cards the rule Pick settings picked, on any day, one row a group and builder choice ({group, model, effort,
 #   cards, landed, usd, firstTry, reviews, open}; a card's earlier runs count with it; usd null when a step of them
 #   has no price). trials: {dropped: [{group, model, effort, cards}], flagged: [{card, issue, group, files}]}, the
-#   groups whose trial challenger two blocked trial cards dropped, and the trial cards whose change touches pipeline files.
+#   groups whose trial challenger two blocked trial cards dropped, and the trial cards whose change touches pipeline files;
+#   groups: each group that had trial or promoted cards, {group, model, effort (the challenger), decision and decidedAt (the
+#   owner's, `control pick`, else null), trial, default and promoted ({cards, landed, ended, usd, perLanded}), due, over, and back while over: the rule's reason to go back to shadow},
+#   as the comment above its jq says.
 #   replay: the last judge replay study (the last line of REPLAYS, replay() in lib/replay.sh) with no
 #   calls (all of its differ), else null.
 # A day is this machine's local day (day names today). Dollars are list prices from the one price table
@@ -790,7 +795,38 @@ snapshot() (
           elif ($e.waits // []) != [] and ($e.forced | not) then "waiting for \($e.waits | map(if type == "number" then "#\(.)" else . end) | join(", "))"
           elif $n | IN(($q.order // [] | map(.issue))[]) then "queued"
           else "open, no card" end;
-    {time: $h.time, day: $day, repo: $h.repo,
+    # The groups of the rule Pick settings that had trial cards (picktrial(), lib/modelpick.sh), each with the decision
+    # of the owner on it (picks in the control record, `control pick`). A card here is one that no later run of its issue
+    # follows, picked by auto in a run of it, with the spend of all its runs, as picks counts them: a trial card when a
+    # run of it was a trial; else a promoted card when its newest pick is promoted (pickpromote(): by its mark, not its
+    # choice, as the builder of the project can be the challenger too); else a default card when that pick is by auto. A group
+    # is here when it had a trial or a promoted card, so a group promoted before any trial gets its cost check too; its
+    # challenger is the choice of its trial or promoted runs (a retry of a trial card builds on the default).
+    # Each side: cards, landed, ended (landed, closed or blocked, and not given
+    # back), usd (null when a step has no price) and perLanded (usd / landed: null with none landed, or usd null).
+    # due: when the tenth trial card ended after the last decision of the owner (of all of them, before the first), while the
+    # owner has not promoted or dropped the challenger; else null. over: promoted cards cost more per landed card than
+    # default cards (modelpick() then sets the rule to shadow, with back, the Needs you line, as its reason).
+    def dollars: if . == null then "not known" else (. * 100 | round) as $c | "$\($c / 100 | floor).\($c % 100 | tostring | if length == 1 then "0" + . else . end)" end;
+    ([$all[0][] | select(.card | IN($later[]) | not) | (($runsOf[.card] // [.]) | map(.x.pick | objects)) as $ps
+        | select(any($ps[]; .by == "auto"))
+        | {group: ($ps | last | .group), trial: any($ps[]; .trial == true), promoted: ($ps | last | .promoted == true), by: ($ps | last | .by),
+           challenger: ($ps | map(select(.trial == true or .promoted == true)) | last | .choice),
+           landed: ((.step | IN("landed", "closed")) and .x.blockedAt == null), ended: (.result != "" and (.x.retried | not)),
+           end: .x.endAt, usd: ([.runSteps[]] | usd)}]
+      | group_by(.group) | map(select(any(.[]; .trial or .promoted)))
+      | map(.[0].group as $g | (map(.challenger | objects) | first) as $ch | ($control // {} | .picks // {} | .[$g // ""]) as $d
+        | def side: {cards: length, landed: (map(select(.landed)) | length), ended: (map(select(.ended)) | length),
+            usd: (map(.usd) | if any(. == null) then null else add // 0 | . * 10000 | round / 10000 end)}
+            | .perLanded = (if .landed > 0 and .usd != null then .usd / .landed * 10000 | round / 10000 else null end);
+        (map(select(.trial and .ended and ($d == null or .end > $d.at))) | sort_by(.end)) as $since
+        | map(select(.trial | not)) as $rest
+        | {group: $g, model: $ch.model, effort: $ch.effort, decision: ($d.decision // null), decidedAt: ($d.at // null),
+           trial: (map(select(.trial)) | side), default: ($rest | map(select((.promoted | not) and .by == "auto")) | side), promoted: ($rest | map(select(.promoted)) | side),
+           due: (if ($d.decision // "" | IN("promote", "drop")) or ($since | length) < 10 then null else $since[9].end end)}
+        | .over = (.decision == "promote" and .promoted.perLanded != null and .default.perLanded != null and .promoted.perLanded > .default.perLanded)
+        | if .over then .back = "Promoted cards of \(.group) on \(.model) cost \(.promoted.perLanded | dollars) for each landed card, more than the \(.default.perLanded | dollars) of its default cards. Conveyor set Pick settings to Shadow. Before you set it to On again, choose keep or drop for the group: conveyor.sh control pick \(.group) keep or drop." else . end)) as $pg
+    | {time: $h.time, day: $day, repo: $h.repo,
        needsYou: {
          waiting: [$c[] | select(.step == "blocked" and (.reason | startswith($yes)))
            | {card, issue, title, sentence: ((.x.visible | select(startswith("yes: ")) | .[5:]) // (.reason | ltrimstr($yes))), since: .x.endAt, parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split, stalls: .x.stalls,
@@ -811,6 +847,12 @@ snapshot() (
          before: $h.before,
          engine: $eng,
          testRules: $tr,
+         # The rule Pick settings: one decision a group whose ten trial cards ended ($pg due), with the counts and spend
+         # of both sides, and the line of the return of the rule to shadow (pickBack in the control record, modelpick()).
+         pick: ([$pg[] | select(.due != null) | {group, title: "Pick settings: decide on \(.model) at \(.effort) effort for \(.group) cards",
+             reason: "Trial cards on \(.model): \(.trial.cards), \(.trial.landed) landed, \(.trial.perLanded | dollars) for each landed card. Default cards: \(.default.cards), \(.default.landed) landed, \(.default.perLanded | dollars) for each landed card. Conveyor does not promote by itself. Choose promote, keep or drop: conveyor.sh control pick \(.group) promote, keep or drop.",
+             since: .due, time: .due, trial, default}]
+           + [$control // {} | .pickBack | objects | {group: null, title: "Pick settings went back to Shadow", reason, since: .at, time: .at}]),
          pipeline: (if $open == null then null else ($control // {} | .held // []) as $mine
            | [$open[] | select((.number | IN($mine[])) and (.body // "" | test("^Follow-up to #[0-9]+ \\(Conveyor card ")))
               | (.body | capture("(^|\n)Cost to every card: (?<c>[^\n]*)").c) as $cost
@@ -900,9 +942,12 @@ snapshot() (
          # group whose challenger two blocked trial cards dropped, with the challenger and those cards; flagged, a trial
          # card whose change touches pipeline files (pick.pipeline, trialflag()), with those files.
          # A card whose issue was closed while it was blocked (x.blockedAt) still counts: picktrial() counts its blocked line.
-         trials: {dropped: ([$all[0][] | select((.step == "blocked" or .x.blockedAt != null) and .x.pick.trial == true)] | group_by(.x.pick.group)
+         # As picktrial(), a block before the last decision of the owner on the group (`control pick`, keep) does not count.
+         trials: {dropped: ([$all[0][] | select((.step == "blocked" or .x.blockedAt != null) and .x.pick.trial == true) | .x.pick.group as $g
+               | select((.x.blockedAt // .x.endAt // "") > ($control // {} | .picks // {} | .[$g // ""].at // ""))] | group_by(.x.pick.group)
              | map(select(map(.card) | unique | length >= 2) | {group: .[0].x.pick.group, model: .[0].x.pick.choice.model, effort: .[0].x.pick.choice.effort, cards: (map(.card) | unique)})),
-           flagged: [$all[0][] | select(.x.pick.trial == true and (.x.pick.pipeline | type == "array")) | {card, issue, group: .x.pick.group, files: .x.pick.pipeline}]}}),
+           flagged: [$all[0][] | select(.x.pick.trial == true and (.x.pick.pipeline | type == "array")) | {card, issue, group: .x.pick.group, files: .x.pick.pipeline}],
+           groups: $pg}}),
        metrics: {
          today: totals([$all[0][] | select(.x.endAt != null and (.x.endAt | day) == $day)]; [$smp[] | select((.time | day) == $day)]; [$pu[] | select((.time | day) == $day)]; $every; $waits; $t0d; $nowt),
          week: totals([$all[0][] | select(.x.endAt != null and (.x.endAt | day) >= $since)]; [$smp[] | select((.time | day) >= $since)]; [$pu[] | select((.time | day) >= $since)]; $every; $waits; $t0w; $nowt),

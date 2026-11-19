@@ -140,7 +140,9 @@ window.DASH_APP.panel({
     const opened = new Set(Array.from(el.querySelectorAll('li[data-card]'), (li) => (li.querySelector(':scope > details.block-more[open]') ? li.dataset.card : null)).filter(Boolean));
     const keyOf = { tests:(x) => `tests:${x.repo}`, engines: (x) => `engine:${x.repo}@${x.commit}`, testRules: (x) => `testrules:${x.repo}@${x.time}`, before: (x) => `before:${x.repo}#${x.issue}`, pipeline: (x) => `pipeline:${x.repo}#${x.issue}`, farDeps: (x) => `fardep:${x.repo}#${x.issue}:${x.ref}`, waiting: (c) => `waiting:${c.card}`, blocked: (c) => `blocked:${c.card}${isRetried(c) ? ':retried' : ''}`, decisions: (x) => `decision:${x.repo}:${x.id}@${x.askedAt}` };
     const items = itemsOf(d);
-    for (const key of Object.keys(items)) if (!Object.hasOwn(keyOf, key)) keyOf[key] = (x) => `${key}:${x.repo}#${x.issue}:${x.card}:${x.since}`;
+    // An entry of a kind with no row of its own (entryRow) is drawn once for its key, so the key holds its title and
+    // reason: an entry whose text changes under the same since (the counts of a Pick settings decision) is drawn anew.
+    for (const key of Object.keys(items)) if (!Object.hasOwn(keyOf, key)) keyOf[key] = (x) => `${key}:${x.repo}#${x.issue}:${x.card}:${x.since}\n${x.title}\n${x.reason}`;
     const isNew = new Set(ctx.fresh(Object.keys(items).flatMap((k) => items[k].map(keyOf[k]))));
     const errors = {
       before: d.cards && d.cards.before === null ? 'The Board could not read the issues that wait for your yes before their build: GitHub did not list the open issues.' : null,

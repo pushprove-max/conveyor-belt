@@ -2,7 +2,7 @@
 # The control record, whole: the file's keys over CTL0's, so a record written before a key existed still reads.
 # mode is run, pause or stop; cap and guard are a number or null; held and order are issue numbers; rules.never is
 # the area labels never built, rules.push whether a card that lands is pushed (off: land only, owed()), rules.visible whether a visible change
-# needs the owner's yes (yesrule()), rules.split the rule Split large issues, off, shadow or on (splitcheck(), lib/slices.sh), rules.pick the rule Pick settings, the same (modelpick(), lib/modelpick.sh); model, reviewer and judge (the review's judge, judgeseat()) are null or {cli: the
+# needs the owner's yes (yesrule()), rules.split the rule Split large issues, off, shadow or on (splitcheck(), lib/slices.sh), rules.pick the rule Pick settings, the same (modelpick(), lib/modelpick.sh), picks the owner's decision on each group's trial challenger ({"small docs" or "small code": {decision: promote, keep or drop, at}}, `control pick`) and pickBack null or {at, reason}, the rule's own return to shadow (pickback()); model, reviewer and judge (the review's judge, judgeseat()) are null or {cli: the
 # CLI that runs the seat (claude, codex or opencode), model, effort (null: the seed's)}, cli left out of one that names
 # a model of the pack's models.allowed, whose program it is (seatnow()); fix (the session that repairs review
 # findings) and testFix (the one that repairs failed changed tests) are null, the card's builder, or a builder seat of
@@ -80,6 +80,9 @@ ctlcheck() { # [<file>]: the record on the input, or in the file, whole, or exit
       and (.signin == null or (.signin | type == "string")) and (.landAs == null or (.landAs | IN("main", "pr")))
       and (.prMerge == null or (.prMerge | IN("button", "release", "idle")))
       and (.onboarded == null or (.onboarded | type == "object" and keys == ["at", "rules"] and (.at | type == "string") and (.rules | type == "array" and all(type == "string"))))
+      and (.picks | type == "object" and all(to_entries[]; (.key | IN("small docs", "small code")) and (.value | type == "object" and keys == ["at", "decision"]
+        and (.at | type == "string") and (.decision | IN("promote", "keep", "drop")))))
+      and (.pickBack == null or (.pickBack | type == "object" and keys == ["at", "reason"] and all(.[]; type == "string")))
       and ([.account, .reviewAccount] | all(. == null or (type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")))))' \
     "$@" 2>/dev/null
 }
@@ -922,7 +925,7 @@ control() { # [action [arguments]]
   local c a=${1:-} f=. new x ag es top=0 p='' open=''
   c=$(ctl) || return 1
   [ $# = 0 ] || shift
-  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | hold <issue>... | release <issue>... | adopt <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|<areaPrefix><name>>=<on|off>... | rules <split|pick>=<off|shadow|on> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | start queue filed | dep-guard <on|off> | land-as <main|pr> | pr-merge <button|release|idle> | push-check <on|off> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>... | card <issue> <builder|reviewer|judge> <model> [effort] | card <issue> [builder|reviewer|judge] clear | card <issue> pick]" >&2; return 2; }
+  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | hold <issue>... | release <issue>... | adopt <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|<areaPrefix><name>>=<on|off>... | rules <split|pick>=<off|shadow|on> | pick small <docs|code> <promote|keep|drop> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | start queue filed | dep-guard <on|off> | land-as <main|pr> | pr-merge <button|release|idle> | push-check <on|off> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>... | card <issue> <builder|reviewer|judge> <model> [effort] | card <issue> [builder|reviewer|judge] clear | card <issue> pick]" >&2; return 2; }
   nums() { local x; for x; do [[ $x =~ ^[1-9][0-9]{0,8}$ ]] || return 1; done; }
   # A main-red fix card is of no issue (issue 0), named by its card id: there is nothing of it to hold or release.
   case $a in hold | release) for x; do [[ ! $x =~ ^(0+|c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0)$ ]] || {
@@ -968,7 +971,14 @@ control() { # [action [arguments]]
       packget labels.areaPrefix p || return 1
       for x; do [[ $x =~ ^(P[0-3]|followups|push|visible)=(on|off)$ || $x =~ ^(split|pick)=(off|shadow|on)$ ]] || { [[ $x == "$p"* ]] && [[ ${x#"$p"} =~ ^[^=[:space:]]+=(on|off)$ ]]; } || { bad; return; }; done
       f='reduce ($v[] | capture("^(?<k>.*)=(?<o>on|off|shadow)$")) as $r (.; if $r.k | IN("split", "pick") then .rules[$r.k] = $r.o elif $r.k | startswith($p) | not then .rules[$r.k] = ($r.o == "on")
-           elif $r.o == "off" then .rules.never = (.rules.never + [$r.k] | unique) else .rules.never -= [$r.k] end)' ;;
+           elif $r.o == "off" then .rules.never = (.rules.never + [$r.k] | unique) else .rules.never -= [$r.k] end)
+         | if any($v[]; startswith("pick=")) then .pickBack = null else . end' ;;
+    # The owner's decision on a group's trial challenger (modelpick(), lib/modelpick.sh), asked in Needs you after ten
+    # trial cards: promote (the group builds on the challenger, 1 card in 5 on the default), keep (the trials go on,
+    # and the next ten ask again) or drop (no more trials). When it was taken: the trial cards that ended before it
+    # are not asked about again.
+    pick) [ $# = 3 ] && [ "$1" = small ] && [[ $2 =~ ^(docs|code)$ ]] && [[ $3 =~ ^(promote|keep|drop)$ ]] || { bad; return; }
+      f='.picks[$v[0] + " " + $v[1]] = {decision: $v[2], at: ((($ENV.CONVEYOR_NOW // "" | tonumber?) // now) | todate)}' ;;
     # The judge's on or off and the finding kinds it always accepts (no kind clears them) are the record's too. The
     # Tests seat is set as the others are; default is none, and no test action starts.
     model | reviewer | judge | tests)
@@ -1046,6 +1056,12 @@ control() { # [action [arguments]]
 signinpause() { # <reason>
   local c new; c=$(ctl) || return 1
   new=$(jq -c --arg r "$1" 'if .mode == "stop" then . else .mode = "pause" | .signin //= $r end' <<<"$c") && ctlput "$c" "$new"
+}
+# Under the lock: the rule Pick settings, On, goes back to shadow by itself (modelpick(), lib/modelpick.sh), with why
+# and when in pickBack, the Needs you line; an owner's `control rules pick=...` clears it. A rule not On is left as it is.
+pickback() { # <reason>
+  local c new; c=$(ctl) || return 1
+  new=$(jq -c --arg r "$1" --arg t "$(clock)" 'if .rules.pick != "on" then . else .rules.pick = "shadow" | .pickBack = {at: $t, reason: $r} end' <<<"$c") && ctlput "$c" "$new"
 }
 # `control depends <issue> add|remove <issue>...` (the Board's "Depends on…"): the issue's `Depends on: #N` lines, the
 # ones pick reads (DEPS, prompts.sh), changed on GitHub through gh_write; the control record is not touched, and the

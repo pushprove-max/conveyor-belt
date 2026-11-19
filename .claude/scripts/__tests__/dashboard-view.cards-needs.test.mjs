@@ -326,6 +326,11 @@ test('Needs you: a kind added to the shared list of kinds is shown with its entr
   assert.match(row.querySelector('.row-main').textContent, /#40.*a new kind of wait/s);
   assert.equal(row.querySelector('.reason').textContent, 'it waits on the owner');
   assert.equal(count(), was + 1, 'it counts as one thing that needs the owner');
+  // Bug: the row was kept by its since alone, so an entry whose reason changed under the same since (a Pick settings
+  // decision whose counts grew) kept showing the old reason.
+  data.panels.needs.data.entries.newKind[0].reason = 'it still waits on the owner';
+  next(w, data);
+  assert.equal(group.querySelector('li .reason').textContent, 'it still waits on the owner', 'the new reason is shown');
 });
 
 // Bugs: a held pipeline change had no button, so the owner had to find it on the Rules tab to release it and could not

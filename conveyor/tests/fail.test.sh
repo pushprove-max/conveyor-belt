@@ -225,7 +225,8 @@ t_corrupt() {
     jq -se --argjson l "$1" --arg f "$2" 'last | .line == $l and .field == $f and (.record | type == "string")' "$Q" > /dev/null \
       || fail "the quarantine does not name line $1 and $2 for $3: $(cat "$Q" 2>&1)"
   }
-  # A bugproof line only says the bug-card check was skipped: one with another result is not a record of it.
+  # A bugproof line only says the bug-card check was skipped: one with another result is not a record of it. A pick
+  # marked promoted (pickpromote(), lib/modelpick.sh) is no trial: a line that holds both is not one the engine writes.
   while IFS='|' read -r field bad; do
     printf '%s\n' "$good" "$bad" > "$S"; aside 2 "$field" "$bad"
     out=$(loop cards 2>&1) && [ "$(jq -c '.cards | map(.card)' <<<"$out")" = '["c0-4"]' ] || fail "cards did not answer with the good line after $bad: $out"
@@ -235,6 +236,7 @@ reason|{"card":"c","issue":7,"step":"landed"}
 step|${good/picked/future}
 step|${good/picked/landed}
 step|${good/picked/bugproof}
+pick|${good%\}},"pick":{"group":"small docs","choice":{"model":"m","effort":null},"by":"auto","trial":true,"mode":"on","promoted":true}}
 EOT
   # A reader of a copy (cards, as the snapshot) that meets the line first sets it aside too, and reads its copy without it.
   printf '%s\n' "$good" "${good/picked/future}" > "$S"
