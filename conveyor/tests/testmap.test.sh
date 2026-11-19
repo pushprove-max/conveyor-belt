@@ -218,7 +218,9 @@ t_testmaparea() { local -x WHOLESUITE=true
 # <tools> (space-separated) each written from <script>, the map made (mapbuild()), and its sources must be <want>.
 stubmap() { # <tools> <script> <want> <files>...
   local f t s=$2 w=$3 ts; read -ra ts <<<"$1"; shift 3
-  local -x WHOLESUITE=true # The old fixture: no test.fileCommand, so the map runs the language's own tool (the stub) on the test files: once a file, or once a package for Go.
+  # The old fixture, for the Ruby case: mapone() runs a spec file through test.fileCommand when the pack has one, so the
+  # per-file fixture's would run in place of the rspec stub. Go and Rust run go test and cargo llvm-cov directly.
+  local -x WHOLESUITE=true
   setup '[]'
   for f in "$@"; do mkdir -p "$R/$(dirname "$f")" && echo x > "$R/$f"; done
   git -C "$R" add -A && git -C "$R" commit -qm files || fail "main's files could not be committed"
