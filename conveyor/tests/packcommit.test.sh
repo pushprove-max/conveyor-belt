@@ -11,11 +11,12 @@
 
 # Main ($R) with its pack not committed (no longer ignored), a.txt changed and b.txt staged: the owner's other work,
 # which a commit of the pack must leave as it is; the push rule off, the default (setup's seed turns it on). HEAD0 is
-# main's commit before.
+# main's commit before. The case then works in main's checkout, as the owner runs setup there: a case starts in a folder
+# of its own that is no checkout (lib.sh), and setup refuses to run outside one (commands/setup.sh).
 packsetup() {
   setup '[]'
   loop control rules push=off > /dev/null && echo 'conveyor/' > "$R/.gitignore" && git -C "$R" commit -qam 'track the pack' && git -C "$R" push -q origin main \
-    && echo two >> "$R/a.txt" && echo b > "$R/b.txt" && git -C "$R" add b.txt && HEAD0=$(git -C "$R" rev-parse HEAD) \
+    && echo two >> "$R/a.txt" && echo b > "$R/b.txt" && git -C "$R" add b.txt && HEAD0=$(git -C "$R" rev-parse HEAD) && cd "$R" \
     || fail "the fixture was not made"
 }
 others() { [ "$(git -C "$R" status --porcelain -- a.txt b.txt)" = $' M a.txt\nA  b.txt' ]; }
