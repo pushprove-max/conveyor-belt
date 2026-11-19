@@ -58,7 +58,8 @@
 # and with neither mark it is not run, and fails; its run of chosen cases is not, and runs whatever its mark.
 # Every run also runs the test lint (.conveyor/test-lint.sh): a sleep-then-check in any test file fails the run.
 # And shellcheck on the changed .sh files: a warning on a line the change added or changed fails the run (below).
-# And `claude plugin validate` when the change touches hooks/, types/ or .claude-plugin/: an error fails the run (below).
+# And `claude plugin validate` when the change touches hooks/, types/ or .claude-plugin/: an error fails the run, and so
+# does a type error HEAD's copy of the plugin does not have (below).
 # In one-file mode in a test step these checks run once a tree, and later runs of that tree reuse their result.
 # A run again of the same change (conveyor.sh tests(): CONVEYOR_TEST_RERUN names what passed and what failed) runs
 # no file that passed, and of the engine's runner only the cases that failed, when the run before named them, else
@@ -287,7 +288,7 @@ mapfile -t changed < <({ git diff --name-only HEAD; git ls-files --others --excl
 # validate when the change touches it), printing what they
 # find; exit 1 when one fails. In one-file mode in a test step they run once a tree (below), not on every run.
 checks() {
-local rc=0 scfiles bang nobang keep new f pv pvout moved
+local rc=0 scfiles bang nobang keep new f pv pvout moved pvhead pvmain pvp
 mapcheck || rc=1
 covage
 # The test lint, with the map check: a test that sleeps a set time and then checks fails the run (test-lint.sh).
@@ -317,8 +318,8 @@ elif [ ${#scfiles[@]} -gt 0 ]; then
 fi
 # Claude Code's own check of the plugin, with the map check too (issue 604): a change to the mod (hooks/), its types
 # contract (types/) or its manifest (.claude-plugin/) runs `claude plugin validate` on the worktree. An error
-# ("✘ Validation failed", or a failed exit) fails the run, printed with its error lines; a warning does not. With no
-# `claude`, the run says the check could not run and fails, so a change to the mod never lands unchecked. It is a
+# ("✘ Validation failed", or a failed exit) fails the run, printed with its error lines; a warning does not, but for a
+# type error HEAD's copy does not have (below). With no `claude`, the run says the check could not run and fails, so a change to the mod never lands unchecked. It is a
 # static check: it runs no test file. A change to none of those paths does not run it.
 pv=
 # The paths both sides of a move (--no-renames): a file moved out of those directories changes the plugin too.
@@ -328,15 +329,39 @@ for f in "${changed[@]}" "${moved[@]}"; do
 done
 if [ -n "$pv" ] && ! command -v claude > /dev/null; then
   echo "claude plugin validate: could not run, claude is not installed: $pv changed and the plugin is not checked"; rc=1
-elif [ -n "$pv" ] && { ! pvout=$(claude plugin validate . 2>&1) || grep -q '✘ Validation failed' <<<"$pvout"; }; then
-  echo "claude plugin validate: the plugin fails Claude Code's check ($pv changed):"
-  # Each `✘ Found <n> error(s)` block's lines, under the `Validating` line they are of, and the result line (not the
-  # plugin directory's `✘ Found <n> problem` block, which does not change the result); when there is none (the command
-  # failed some other way), its last lines.
-  new=$(awk '/^Validating / { h = $0 } /^✘ Found [0-9]+ errors?:/ { print h; print; on = 1; s = 0; next }
-    on && /^  / { print; s = 1; next } on && s && /^$/ { on = 0 } /^✘ Validation failed/ { print }' <<<"$pvout")
-  if [ -n "$new" ]; then echo "$new"; else tail -n 20 <<<"$pvout"; fi
-  rc=1
+elif [ -n "$pv" ]; then
+  if ! pvout=$(claude plugin validate . 2>&1) || grep -q '✘ Validation failed' <<<"$pvout"; then
+    echo "claude plugin validate: the plugin fails Claude Code's check ($pv changed):"
+    # Each `✘ Found <n> error(s)` block's lines, under the `Validating` line they are of, and the result line (not the
+    # plugin directory's `✘ Found <n> problem` block, which does not change the result); when there is none (the
+    # command failed some other way), its last lines.
+    new=$(awk '/^Validating / { h = $0 } /^✘ Found [0-9]+ errors?:/ { print h; print; on = 1; s = 0; next }
+      on && /^  / { print; s = 1; next } on && s && /^$/ { on = 0 } /^✘ Validation failed/ { print }' <<<"$pvout")
+    if [ -n "$new" ]; then echo "$new"; else tail -n 20 <<<"$pvout"; fi
+    rc=1
+  fi
+  # The type errors validate reports as warnings (issue 617): validate also runs on HEAD's copy of hooks/, types/ and
+  # .claude-plugin/, and a type error the change has that HEAD's copy does not (or has more times than HEAD's) fails
+  # the run, named with its file, line and text. Errors are matched by file, TS code and message, not line and column,
+  # so moved lines are not new errors.
+  pvhead=$(mktemp -d)
+  if mapfile -t pvp < <(git ls-tree --name-only HEAD -- hooks types .claude-plugin) \
+    && { [ ${#pvp[@]} = 0 ] || git archive HEAD -- "${pvp[@]}" | tar -x -C "$pvhead"; }; then
+    pvmain=$(claude plugin validate "$pvhead" 2>&1)
+    # tserrs <root> <root>: each `❯ line <l>, column <c>: error TS<n>: <text>` line as <file>\t<line>\t<TS<n>: text>,
+    # the file relative to the root validate ran on (given as it is and as its physical path).
+    tserrs() { awk -v a="$1/" -v b="$2/" '/^Validating / { f = $0; sub(/^Validating [^:]*: /, "", f)
+        if (index(f, a) == 1) f = substr(f, length(a) + 1); else if (index(f, b) == 1) f = substr(f, length(b) + 1) }
+      match($0, /^  ❯ line [0-9]+, column [0-9]+: error TS[0-9]+: /) { l = $0; sub(/^  ❯ line /, "", l); sub(/,.*/, "", l)
+        t = $0; sub(/^  ❯ line [0-9]+, column [0-9]+: error /, "", t); print f "\t" l "\t" t }'; }
+    new=$(awk -F'\t' 'NR == FNR { m[$1 "\t" $3]++; next } { k = $1 "\t" $3; c[k]++; line[k] = line[k] $1 ":" $2 ": error " $3 "\n" }
+        END { for (k in c) if (c[k] > m[k] + 0) { printf "%s", line[k]; if (m[k]) printf "  (%d of this error here, %d in HEAD'\''s copy)\n", c[k], m[k] } }' \
+      <(tserrs "$pvhead" "$(cd "$pvhead" && pwd -P)" <<<"$pvmain") <(tserrs "$PWD" "$(pwd -P)" <<<"$pvout"))
+    [ -z "$new" ] || { echo "claude plugin validate: a type error this change adds, that HEAD's copy of the plugin does not have:"; echo "$new"; rc=1; }
+  else
+    echo "claude plugin validate: could not copy HEAD's plugin to compare its type errors ($pv changed)"; rc=1
+  fi
+  rm -rf "$pvhead"
 fi
 return $rc
 }

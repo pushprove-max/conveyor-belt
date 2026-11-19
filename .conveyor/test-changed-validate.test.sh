@@ -34,7 +34,8 @@ checks() {
   rm -f "$R/runs"
   (cd "$R" && PATH=${1:-$R/bin:$PATH} bash .conveyor/test-changed.sh --checks) > "$T/out" 2>&1; echo $? > "$T/rc"
 }
-runs() { grep -c '^plugin validate' "$R/runs" 2>/dev/null || echo 0; }
+# runs: the worktree's validate runs (`plugin validate .`); the run on HEAD's copy (issue 617) names its directory.
+runs() { grep -c '^plugin validate \.$' "$R/runs" 2>/dev/null || echo 0; }
 PARTS=()
 part() { PARTS+=("$1"); (B=$T; T=$T/$1; mkdir "$T" && cp -a "$B/r" "$T/r" || exit 1; R=$T/r; "p_$1") > "$T/$1.res" 2>&1 & }
 
@@ -58,7 +59,7 @@ p_declared() {
 # D3: a change to conveyor/lib/ alone does not run the check.
 p_lib() {
   echo 'y() { :; }' >> "$R/conveyor/lib/x.sh"; checks
-  [ "$(cat "$T/rc")" = 0 ] && [ "$(runs)" = 0 ] \
+  [ "$(cat "$T/rc")" = 0 ] && ! grep -q '^plugin validate' "$R/runs" 2>/dev/null \
     && ok "a change to conveyor/lib/ alone does not run claude plugin validate" || no "lib change: exit $(cat "$T/rc"), runs $(runs): $(cat "$T/out")"
 }
 # No `claude` on the build machine: the checks say the check could not run and fail, so the mod never lands unchecked.
@@ -83,6 +84,25 @@ p_moved() {
     && ok "a file moved out of hooks/ runs claude plugin validate" || no "moved file: exit $(cat "$T/rc"), runs $(runs): $(cat "$T/out")"
 }
 
-for p in undeclared declared lib noclaude types moved; do part "$p"; done
+# Issue 617: validate reports type errors as warnings only, so a change could add one that breaks a /units view at
+# run time and pass. HEAD's elements.ts has one "Object is possibly 'undefined'" (TS2532); the change adds a second.
+p_typeerr() {
+  echo "export const firstLen = (a: string[]) => a[0].length" >> "$R/hooks/elements.ts"; checks
+  local l; l=$(wc -l < "$R/hooks/elements.ts"); l=${l// /}
+  [ "$(cat "$T/rc")" = 1 ] && grep -q '^plugin validate /' "$R/runs" \
+    && grep -q "^claude plugin validate: a type error this change adds" "$T/out" \
+    && grep -qF "hooks/elements.ts:$l: error TS2532: Object is possibly 'undefined'." "$T/out" \
+    && ok "a mod change that adds a type error HEAD's copy does not have fails the checks, naming its file, line and text" \
+    || no "added type error: exit $(cat "$T/rc"): $(cat "$T/out")"
+}
+# The same errors as HEAD's at other lines (two lines added above all of them) are not new: the checks pass.
+p_typemoved() {
+  { printf '// a\n// b\n'; cat "$R/hooks/elements.ts"; } > "$T/e" && cat "$T/e" > "$R/hooks/elements.ts"; checks
+  [ "$(cat "$T/rc")" = 0 ] && grep -q '^plugin validate /' "$R/runs" && ! grep -q 'claude plugin validate' "$T/out" \
+    && ok "a mod change with HEAD's type errors at other lines passes the checks" \
+    || no "moved type errors: exit $(cat "$T/rc"): $(cat "$T/out")"
+}
+
+for p in undeclared declared lib noclaude types moved typeerr typemoved; do part "$p"; done
 wait
 for p in "${PARTS[@]}"; do cat "$T/$p.res"; grep -q '^ok' "$T/$p.res" || echo "not ok - part $p checked nothing"; done | awk '{ sub(/^ok -/, "ok " NR " -"); sub(/^not ok -/, "not ok " NR " -"); print } /^not ok/ { f = 1 } END { exit f }'
