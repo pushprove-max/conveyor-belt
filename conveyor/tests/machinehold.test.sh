@@ -15,7 +15,7 @@
 # b.test and c.test. The run of main's look at the hold (machineprobe(), in cards/mainrun/machine) is run `main`, as
 # the run of a card's failing cases on main is, its list in $STUB/rerun.main; it marks each of its runs in $STUB/looks.
 holdsetup() { # <plan lines>...
-  rerunsetup "$@"
+  rerunsetup "$@"; rerunfiles
   tune '.test.control = ["c.test"]'
   echo b > "$R/b.txt"; echo c > "$R/c.txt"; git -C "$R" add b.txt c.txt && git -C "$R" commit -qm inputs || fail "main's inputs could not be committed"
   echo 'case $PWD in */mainrun/machine) tr "\t\n" ":|" < "$RR" >> "$STUB/looks"; echo >> "$STUB/looks" ;; esac' > "$STUB/pre"
@@ -42,7 +42,8 @@ t_machinecontrol() {
   echo b2 > "$R/b.txt"; git -C "$R" commit -qam "b.test's input changes" || fail "main could not move"
   out=$(holdjudge) || fail "verdicts failed: $out"
   [ "$out" = '[{"case":"b.test: flaky","verdict":"machine"}]' ] || fail "a failing control did not give the verdict machine: $out"
-  [ "$(grep $'^fail\t' "$STUB/rerun.main" | tr '\t\n' ':|')" = "fail:b.test:flaky|fail:c.test|" ] \
+  # Each failing file runs on main alone and whole (#374), so the list names b.test, not its case.
+  [ "$(grep $'^fail\t' "$STUB/rerun.main" | tr '\t\n' ':|')" = "fail:b.test|fail:c.test|" ] \
     || fail "main's run did not run the control beside the failing case: $(cat "$STUB/rerun.main")"
   [ ! -s "$ST/mainred.json" ] || fail "the machine's failure opened a main-red entry: $(cat "$ST/mainred.json")"
   [ "$(jq -c '[.card, .controls, .cases]' "$ST/machinehold.json")" = '["c7",["c.test"],["b.test: flaky"]]' ] \
@@ -187,25 +188,29 @@ t_machineresume() {
 # the control c.test fails ('broken fail three'). The card's own runs, under the running engine's harness, fail b.test's
 # flaky, and main's run fails it and c.test beside it: the verdict is machine, and the hold names c.test. A run in a
 # clean harness (CONVEYOR_TEST_SLOTS not the running engine's) adds a line to $STUB/clean: the folder it ran in,
-# whether the harness it was given passed, its session and its parent (the session's leader, `timeout`, in a session
-# of its own), the descriptors above 2 it holds, the CONVEYOR_MAIN it was given and the harness it was named.
+# whether the harness it was given passed, the command that leads its session (the clean run's `timeout`, in a
+# session of its own: each file runs under a `timeout` of its own inside it, filecmd()), the descriptors above 2 it
+# holds, the CONVEYOR_MAIN it was given and the harness it was named. main links the harness to b.test, so a card that
+# changes only the harness runs b.test (each card runs only the test files linked to its change, #374).
 repairsetup() {
   holdsetup '1 fail flaky' '2 fail flaky' 'main fail flaky' 'main fail three' 'broken fail three'
   mkdir -p "$R/conveyor/lib" && echo 'harness() { return 1; }' > "$R/conveyor/lib/slots.sh" \
     && git -C "$R" add -f conveyor &&git -C "$R" commit -qm "a harness that fails" || fail "main's harness could not be committed"
-  tune --arg s "$STUB" '.test.command = "STUB=\($s); " + .test.command | .tunables.poll = 1' # a clean run is given no STUB
+  linkset '{"a.txt": ["a.test", "b.test", "c.test"], "conveyor/lib/slots.sh": ["b.test"]}'
+  tune --arg s "$STUB" '.test.fileCommand = "STUB=\($s); " + .test.fileCommand | .test.command = .test.fileCommand | .tunables.poll = 1' # a clean run is given no STUB
   holdpass $'c.test\tc.txt'
   cat >> "$STUB/pre" <<EOF
 case \${CONVEYOR_TEST_SLOTS:-} in "$SRC"/*) ;; *)
   if . "\$CONVEYOR_TEST_SLOTS" && harness; then n=mended; else n=broken; fi
   fds=''; for f in /dev/fd/*; do f=\${f##*/}; [ "\$f" -le 2 ] || [ ! -e "/dev/fd/\$f" ] || fds="\$fds \$f"; done
-  echo "\${PWD##*/} \$n sid=\$(python3 -c 'import os; print(os.getsid(0))') ppid=\$PPID fds=[\${fds# }] main=\${CONVEYOR_MAIN-unset} slots=\${CONVEYOR_TEST_SLOTS#"\$PWD"/}" >> "\$STUB/clean" ;;
+  s=\$(ps -o comm= -p "\$(python3 -c 'import os; print(os.getsid(0))')"); s=\${s##*/}
+  echo "\${PWD##*/} \$n sid=\$s fds=[\${fds# }] main=\${CONVEYOR_MAIN-unset} slots=\${CONVEYOR_TEST_SLOTS#"\$PWD"/}" >> "\$STUB/clean" ;;
 esac
 EOF
 }
 # The clean runs' lines with what every clean run must show taken out: a session of its own, no descriptor above 2,
 # none of the loop's environment, and the worktree's own harness.
-cleanruns() { sed -E 's/ sid=([0-9]+) ppid=\1 fds=\[\] main=unset slots=conveyor\/lib\/slots.sh$//; s/^c[^ ]*-7/card/' "$STUB/clean" | tr '\n' ,; }
+cleanruns() { sed -E 's/ sid=timeout fds=\[\] main=unset slots=conveyor\/lib\/slots.sh$//; s/^c[^ ]*-7/card/' "$STUB/clean" | tr '\n' ,; }
 
 # D1, D2, D4: a card whose change mends main's harness. Bug it catches: a fix to the test step was judged by the
 # harness it repairs, so it could never pass its own test step (two such cards were landed by hand). Its test step is
@@ -254,16 +259,19 @@ t_repairnot() {
   repairheld 'card.repair broken,card.repair broken,' 'c.test still failed with the change in a clean harness'
 }
 # D1: a card whose change makes the harness end the run at once with exit 0, so that nothing runs. Bug it catches: a
-# run that passed by running nothing taken for the controls passing. The lane asks the run's logs for c.test's pass.
+# run that passed by running nothing taken for the controls passing: each file's run that exits 0 is logged ok (#374),
+# so the lane asks the run's logs for c.test's pass and for a case that passed.
 t_repairempty() {
   repairsetup
   echo 'echo "exit 0" > conveyor/lib/slots.sh' > "$STUB/build"
   repairheld 'card.repair broken,' 'the run with the change passed, but its logs do not say that c.test passed in it'
 }
-# D1: the run without the change fails for a reason of its own, not the control: it is given a test file the change
-# adds, which main's commit lacks (with test.list env, .conveyor/test-changed.sh fails such a file), while c.test
-# passes there, as main's harness is sound. Bug it catches: the lane passed a card whose control passes without its
-# change, as it took any failed run without the change for the control's failure. The lane asks the run's logs for it.
+# D1: the card adds a test file, d.test, which main's commit lacks, and main's harness is sound, so c.test passes there.
+# The stub fails any run given a file that is not there: it stands for a pack whose test.fileCommand runs each file
+# CONVEYOR_TEST_FILES names (this project's .conveyor/test-changed.sh --file runs only the file it is given, so it would
+# not fail). Bug it catches: the lane gave the control's run without the change the card's test files, so c.test's own
+# run (each file runs alone, #374) failed on d.test, and the lane took that for the control's failure and passed a
+# card whose control passes without its change. The control's runs are given none of the card's files: c.test passes, and the lane says so.
 t_repairbaseline() {
   repairsetup
   local out
@@ -273,8 +281,8 @@ t_repairbaseline() {
   git -C "$R" worktree add -q --detach "$T/$CASE/cards/c7" && echo new > "$T/$CASE/cards/c7/d.test" && git -C "$T/$CASE/cards/c7" add d.test \
     || fail "the card's worktree could not be made"
   out=$(eng 'TEST_FILES=d.test; repairproof c7 "$CONVEYOR_CARDS/c7"; echo "$? $REPAIRED"')
-  [[ $out == "1 the run on main's code at "*" without the change failed, but its logs do not say that c.test failed in it, so it proves nothing" ]] \
-    || fail "the lane took a run that failed without the control failing for the control's failure: $out"
+  [[ $out == "1 c.test passed on main's code at "*" without the change in a clean harness, so the change repairs nothing there" ]] \
+    || fail "the lane took the card's own missing test file for the control's failure: $out"
 }
 
 # D1, D4: card c1 takes the repair lane through repairlane() and is judged (a repairproof() that does not end here).

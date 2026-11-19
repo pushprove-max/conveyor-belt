@@ -919,13 +919,17 @@ repairholder() {
 # in a worktree of the commit the card was built on (its HEAD), $CARDS/mainrun/<card>.repair, each named `fail` in
 # the run's list, each alone through the pack's test.fileCommand (else Conveyor's own runner: ownrunner()): first without the card's change, where they must
 # fail, then with it staged, where they must pass. The run without the change must fail with a control its logs
-# (testfails()) name failed or out of time: a run that fails for another reason, such as test files the change adds
-# that this commit lacks, proves nothing. Then the card's changed tests run in its own worktree (each alone, as its
+# (testfails()) name failed or out of time: a run that fails for another reason (one that stops before any file runs)
+# proves nothing. The run with the change must name every control passed and at least one case that passed (passcases):
+# each file's run that exits 0 is logged ok (filecmd()), so a harness that ends each run at once with exit 0 would pass
+# without running a case. Then the card's changed tests run in its own worktree (each alone, as its
 # test step runs them: listcmd(), and no list of earlier passes), and must pass. Each of the three runs is a clean one
-# (cleanrun()). Sets REPAIRED: what the runs showed.
+# (cleanrun()). The control runs are given none of the card's test files (CONVEYOR_TEST_FILES empty, as on main's run,
+# verdicts()): a pack's test.fileCommand that runs each file that list names would fail the control's own run on a
+# file the change adds, which this commit lacks, and that failure be taken for the control's. Sets REPAIRED: what the runs showed.
 # shellcheck disable=SC2034 # REPAIRED is read by card() (lib/card.sh)
 repairproof() { # <card> <worktree>
-  local mwt=$CARDS/mainrun/$1.repair cj cs sha='' out cmd rc=1 brc=0 LISTNONE='' TEST_GIVEN='' RUNOFF='' TEST_CASES=''
+  local mwt=$CARDS/mainrun/$1.repair cj cs sha='' out cmd rc=1 brc=0 LISTNONE='' TEST_GIVEN='' RUNOFF='' TEST_CASES='' TEST_FILES=''
   cj=$(jq -ce 'objects | .controls | select(length > 0)' "$MACHINEHOLD" 2>/dev/null) || { REPAIRED="the machine hold names no file to run"; return 1; }
   cs=$(jq -r 'join(", ")' <<<"$cj")
   if ! packget test.fileCommand cmd 2>/dev/null; then REPAIRED="the pack's test.fileCommand could not be read"
@@ -943,7 +947,7 @@ repairproof() { # <card> <worktree>
       REPAIRED="the change could not be applied to main's code at ${sha:0:12}, so $cs did not run with it: ${out:0:400}"
     elif ! cleanrun "$mwt" "$cmd" "$mwt.rerun"; then
       REPAIRED="$cs still failed with the change in a clean harness"
-    elif ! testfails "$mwt.test" 0 | jq -e --argjson c "$cj" '.passed as $p | all($c[]; IN($p[]))' >/dev/null 2>&1; then
+    elif ! testfails "$mwt.test" 0 | jq -e --argjson c "$cj" '.passed as $p | all($c[]; IN($p[])) and ([.passcases[]?.cases[]?] != [])' >/dev/null 2>&1; then
       REPAIRED="the run with the change passed, but its logs do not say that $cs passed in it"
     # A change linked to no test file runs none (listcmd()), and one whose list cannot be made stops with why
     # (<worktree>.stop).
