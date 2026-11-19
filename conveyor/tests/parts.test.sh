@@ -61,3 +61,14 @@ t_partscmd() {
     || fail "the snapshot does not give #10 one entry with 0 of 2 parts done and #12 in flight: $(jq -c .open.umbrellas "$T/$CASE/snap.json")"
   jq -e '[.queue.order[].issue] | index(10) == null' "$T/$CASE/snap.json" >/dev/null || fail "the parent #10 is in the queue: $(jq -c '.queue.order' "$T/$CASE/snap.json")"
 }
+
+# A pick without --only never reads the records --only grows from (#654): a card record and a retried line whose grown
+# field is no object cannot be read as one, so upnext() given them still lists #5. Bug caught: every pick and snapshot
+# built those records (the card records mapped, the retried lines scanned) before it checked for --only, work it never
+# used, and a line like either of these stopped the whole order.
+t_partsnoonly() {
+  setup "[$(issue 5 2026-11-01)]"
+  landed 4 | jq -c '. + {grown: "unread"}' > "$T/$CASE/hrec" && jq -cn '{card:"c0-4",issue:4,step:"retried",grown:"unread"}' > "$T/$CASE/hold" || fail "the fixture could not be written"
+  fx_in 'UPREC=$T/$CASE/hrec UPOLD=$T/$CASE/hold upnext "$(asked)" "" all | jq -c "map(.number)"'
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = '[5]' ] || fail "upnext without --only read the records --only grows from (exit $RC): $(cat "$T/$CASE/run.out")"
+}

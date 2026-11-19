@@ -14,11 +14,13 @@
     # them the run had nothing to build. Follow-ups and parts are taken in turn until neither adds an issue, so the
     # follow-up a part filed (a closed part too: it is not picked, as it is not open), and the parts of a follow-up, are
     # taken as well.
-    | . as $is | ($cards | map(.followups //= (if .issue | IN($done[]) then .grown.filed else null end))
-        + [$retried[] | select(.grown.filed and (.issue | IN($done[]))) | {issue, followups: .grown.filed}]) as $upc
-    | (def withparts: . as $o | . + [$is[] | select(.number | IN($o[])) | (.parts // [])[] | .number | numbers] | unique;
-       def grow: . as $o | (ups($upc; $o) | withparts) as $n | if $n == ($o | unique) then $n else $n | grow end;
-      if $only == null then null else $only | grow end) as $only
+    # The records it grows from are built only for --only: a pick or snapshot without it never reads them.
+    | . as $is | (if $only == null then null else
+        ($cards | map(.followups //= (if .issue | IN($done[]) then .grown.filed else null end))
+          + [$retried[] | select(.grown.filed and (.issue | IN($done[]))) | {issue, followups: .grown.filed}]) as $upc
+        | def withparts: . as $o | . + [$is[] | select(.number | IN($o[])) | (.parts // [])[] | .number | numbers] | unique;
+          def grow: . as $o | (ups($upc; $o) | withparts) as $n | if $n == ($o | unique) then $n else $n | grow end;
+          $only | grow end) as $only
     | ($retried | map(.issue) | unique) as $again
     | ((($ENV.CONVEYOR_NOW // "" | tonumber?) // now) | localtime | .[3] != $sh) as $loud
     | map((.labels | map(.name)) as $l
