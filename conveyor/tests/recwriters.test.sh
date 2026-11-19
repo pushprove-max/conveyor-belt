@@ -58,7 +58,7 @@ t_recblocked() {
 # then its passing run after the fix, checks. Bug it catches: no case above wrote a failed test line, so a field only
 # that writer adds (failures, tail, verdicts, mainRun) went unchecked.
 t_recfailed() {
-  rerunsetup '1 fail flaky' '2 fail flaky'
+  rerunsetup '1 fail flaky' '2 fail flaky'; rerunfiles
   loop run 1 > "$STUB/run.out" 2>&1 || fail "run exited non-zero: $(cat "$STUB/run.out")"
   [ "$(st 'select(.step == "test" and .result == "fail") | [(.failures.files | length > 0), (.tail | length > 0), .verdicts[0].verdict, (.mainRun.sha | length > 0)] | tojson')" = '[true,true,"card",true]' ] \
     || fail "the failed test line has no failures, tail, verdicts or main's run, so they went unchecked: $(st 'select(.step == "test")')"

@@ -217,14 +217,19 @@ test('a panel whose only ctx.more list is inside a row counts its rows, not the 
 test('every panel of the list has its four state cases, each on its own test line, in page-panels or page-states', async () => {
   const named = new Map();
   const ran = [];
-  // test-changed.sh's own filecases(), run on each file: it must count every case the file registers.
+  // test-changed.sh's own filecases(), run on each file: it must count every case the file registers. It is the host
+  // project's runner (.conveyor/), which an install of the release set (closure.test.sh) does not hold: counted only
+  // where it is (issue 769).
   const counter = fileURLToPath(new URL('../../../.conveyor/test-changed.sh', import.meta.url));
+  const counts = fs.existsSync(counter);
   for (const f of ['dashboard-view.page-panels.test.mjs', 'dashboard-view.page-states.test.mjs']) {
     const file = new URL(f, import.meta.url);
     const names = await caseNames(file.href);
     ran.push(...names);
-    const counted = execFileSync('bash', ['-c', 'eval "$(grep "^filecases()" "$1")"; filecases "$2"', '_', counter, fileURLToPath(file)], { encoding: 'utf8' });
-    assert.equal(Number(counted), names.length, `${f}: test-changed.sh counts each of its ${names.length} cases`);
+    if (counts) {
+      const counted = execFileSync('bash', ['-c', 'eval "$(grep "^filecases()" "$1")"; filecases "$2"', '_', counter, fileURLToPath(file)], { encoding: 'utf8' });
+      assert.equal(Number(counted), names.length, `${f}: test-changed.sh counts each of its ${names.length} cases`);
+    }
     const src = fs.readFileSync(file, 'utf8');
     for (const [, id, says, key, arg, drawn] of src.matchAll(/^test\('([a-z0-9]+): ([a-z ]+)', \(\) => assert\.equal\(panelState\.([a-z]+)\('([a-z0-9]+)'\), '([a-z]+)'\)\);$/gm)) {
       assert.equal(PANEL_STATES[key], says, `${f}: "${id}: ${says}" runs the ${key} case`);

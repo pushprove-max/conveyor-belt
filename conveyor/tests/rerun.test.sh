@@ -75,7 +75,12 @@ EOF
 # rerunsetup's main as a card runs it (#374: each test file alone, through test.fileCommand): a.test, b.test and c.test
 # are files of main, test files by the pack's tests.patterns, each linked to a.txt (the build's file), and the stub
 # runs only the file the run gives it (CONVEYOR_TEST_FILE), its cases' count of its own (of), a run being counted
-# ($STUB/n) at its first file (CONVEYOR_TEST_N). Without it the stub runs the three files at each call.
+# ($STUB/n) at its first file (CONVEYOR_TEST_N). Without it the stub runs the three files at each call: only for a
+# case that calls engine functions itself (tests() in rerunstep, on the worktree rerunwt makes; verdicts() in
+# mainlimit.test.sh's limitjudge; voidrun(), verdicts() and mainred() in voidrun.test.sh's t_voidcommand). A card
+# run (loop run) needs it: given one file there, a stub that reports three is stopped by watch() as a run of files it
+# was not given, whenever watch() looks before the stub ends, as it did under the load of a whole-suite run (issue
+# 769: t_rerunrebuilt's second run stopped, with no test line).
 rerunfiles() {
   local f
   for f in a.test b.test c.test; do echo "$f" > "$R/$f"; done; git -C "$R" add a.test b.test c.test || fail "main's test files could not be staged"
@@ -258,7 +263,7 @@ t_rerunfixtest() {
 # nothing (here a.txt, the card's own file, on a HEAD whose new commit changes no file) has edited it outside any
 # conflict: its passes are not kept, and the run after it is of the whole selection.
 t_rerunmoved() {
-  rerunsetup '1 fail flaky' '2 fail flaky'
+  rerunsetup '1 fail flaky' '2 fail flaky'; rerunfiles
   echo 'echo two >> a.txt; [ "$(wc -l < "$STUB/sessions")" = 1 ] || git update-ref HEAD "$(git commit-tree "HEAD^{tree}" -p HEAD -m moved)"' > "$STUB/build"
   loop run 1 > /dev/null || fail "run exited non-zero"
   [ "$(st 'select(.step == "fix") | .step' | wc -l)" = 1 ] || fail "no fix session ran"
@@ -272,7 +277,7 @@ t_rerunmoved() {
 # lists it, so the Foreman's watcher wakes on it (conveyor/foreman/foreman.test.sh, t_wake). The first run, before any
 # list, ran the whole selection and refused nothing.
 t_rerunrefused() {
-  rerunsetup '1 fail flaky' '2 fail flaky'
+  rerunsetup '1 fail flaky' '2 fail flaky'; rerunfiles
   cat > "$STUB/build" <<'EOF'
 if [ "$(wc -l < "$STUB/sessions")" = 1 ]; then echo two >> a.txt
 else awk 'BEGIN { FS = OFS = "\t" } $1 == "base" { $2 = "0000000000000000000000000000000000000001" } 1' "$PWD.rerun" > "$STUB/list" && mv "$STUB/list" "$PWD.rerun"; fi
@@ -291,7 +296,7 @@ EOF
 # A merge in doubt (the session that brought the change onto main edited it outside the conflicts: here b.txt beside
 # the conflict in a.txt) runs the whole selection, and refuses nothing: the merge may have broken what passed before.
 t_rerunmergedoubt() {
-  rerunsetup
+  rerunsetup; rerunfiles
   echo l1 > "$R/a.txt"; git -C "$R" add a.txt; git -C "$R" commit -qm "a.txt"
   echo "if grep -q '^# Landing conflict' \"\$STUB/brief\"; then sed -i.bak 's/^main1\$/seven/' a.txt; rm -f a.txt.bak; echo b > b.txt; else sed -i.bak 's/^l1\$/seven/' a.txt; rm -f a.txt.bak; fi" > "$STUB/build"
   echo '[ -e "$STUB/moved" ] || { : > "$STUB/moved"; echo main1 > "$R/a.txt"; git -C "$R" add a.txt; git -C "$R" commit -qm "main moves"; }' > "$STUB/pre"
@@ -306,7 +311,7 @@ t_rerunmergedoubt() {
 # which selects c.test. The rebuild session brings #7 onto main, and the run after it keeps the passes of the first:
 # a.test (main changed its a.txt) and c.test run, b.test, which nothing main changed selects, does not.
 t_rerunrebuilt() {
-  rerunsetup
+  rerunsetup; rerunfiles; linkset '{"a.txt": ["a.test", "b.test", "c.test"], "y.txt": ["c.test"]}'
   echo 'y.txt c.test' >> "$STUB/map"
   echo l1 > "$R/a.txt"; git -C "$R" add a.txt; git -C "$R" commit -qm "a.txt"
   echo "if grep -q '^# Landing conflict' \"\$STUB/brief\"; then sed -i 's/^main1\$/seven/' a.txt; else sed -i 's/^l1\$/seven/' a.txt; fi" > "$STUB/build"
@@ -329,7 +334,7 @@ t_rerunrebuilt() {
 # list with the patch) and runs flaky alone, on the main it was tested on and on one moved since by a commit that
 # changes only z.txt, which none of its tests selects. (Main moving by a file a test selects: t_rerunrebuilt.)
 retried() { # [move main]
-  rerunsetup '1 fail flaky' '2 fail flaky' '3 fail flaky' '4 fail flaky'
+  rerunsetup '1 fail flaky' '2 fail flaky' '3 fail flaky' '4 fail flaky'; rerunfiles
   for i in 4 5; do echo "$GO" > "$STUB/review.$i"; done
   echo 'grep -qx two a.txt || echo two >> a.txt' > "$STUB/build"
   loop run 1 > /dev/null || fail "run exited non-zero"
@@ -358,6 +363,25 @@ t_rerunslowoff() {
   grep -qxF $'off\tc.test' "$STUB/rerun.1" || fail "the first run was not told c.test is kept off: $(cat "$STUB/rerun.1" 2>&1)"
   [ "$(ran 2)" = flaky ] && grep -qxF $'off\tc.test' "$STUB/rerun.2" \
     || fail "the run again was not told c.test is kept off: $(ran 2): $(cat "$STUB/rerun.2" 2>&1)"
+}
+
+# Bug it catches (issue 769): each card's test step read all the card records from the state store (a python3 start)
+# to match them against a slow-test record that names no file (none is written now), so a batch run of two cards
+# made two calls more and went past stdbcalls.test.sh's count under load. With no record, or one that names no file,
+# slowoffs() keeps none off and asks the store nothing; t_rerunslowoff is the record that names one.
+t_rerunslownone() {
+  # shellcheck disable=SC2034 # HERE is read by stdb(), for the folder state.py is in
+  local s=$T/$CASE/st HERE=$SRC STATE SLOWFILED CALLS=$T/$CASE/calls out r
+  STATE=$s/cards.jsonl SLOWFILED=$s/slow.json; mkdir -p "$s"
+  eval "$(sed -n '/^declare -A ASKED_K/p; /^stdb() {/,/^}/p' "$SRC/lib/records.sh")"
+  eval "$(sed -n '/^slowoffs() {/,/^}/p' "$SRC/lib/testrun.sh")"
+  python3() { echo x >> "$CALLS"; command python3 "$@"; } # each state store call, counted
+  echo '{"card":"c1","issue":9,"step":"picked","time":"2026-01-01T00:00:00Z"}' > "$STATE"
+  for r in none '{"filed": []}' '{"filed": [{"issue": 9}]}'; do
+    [ "$r" = none ] || echo "$r" > "$SLOWFILED"
+    : > "$CALLS"; out=$(slowoffs)
+    [ -z "$out" ] && [ ! -s "$CALLS" ] || fail "with the slow-test record $r, slowoffs kept '$out' off and asked the state store $(wc -l < "$CALLS") times, not 0"
+  done
 }
 
 # Bug: a run killed part-way through a file kept none of that file's cases that had passed, so the run again ran them

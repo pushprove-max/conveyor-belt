@@ -94,12 +94,13 @@ t_reldraft() {
 # still posts a passing status, so `release` would release a red commit without running the suite.
 t_relpass() {
   local O out f=$T/$CASE.md rule line
-  # The 1.0.0 notes are checked where the docs are: an install (closure.test.sh) ships no docs/ folder. The fixtures
-  # below run in both. A checkout with docs/ but no 1.0.0 notes still fails.
-  if [ -d "$SRC/../docs" ]; then
+  # The 1.0.0 notes are checked where the release notes are: an install (closure.test.sh) ships no docs/releases/
+  # folder, though it has the docs/ pages a test of the set reads (issue 769). The fixtures below run in both. A
+  # checkout with docs/releases/ but no 1.0.0 notes still fails.
+  if [ -d "$SRC/../docs/releases" ]; then
     out=$("$SRC/tools/notes-check.sh" "$SRC/../docs/releases/1.0.0.md") || fail "the 1.0.0 notes break the style: $out"
   else
-    echo "skip [$CASE]: the 1.0.0 notes are not checked here: this install has no docs/ folder" >&2
+    echo "skip [$CASE]: the 1.0.0 notes are not checked here: this install has no docs/releases/ folder" >&2
   fi
   while IFS='|' read -r rule line; do
     printf '# 9.9.9\n\nThe release.\n\n%s\n' "$line" > "$f"

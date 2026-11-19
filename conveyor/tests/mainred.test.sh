@@ -116,7 +116,7 @@ caughtland() { # what the run after main's second move must show
 }
 # Main moved during the run (its run of the case passes: the failure is the card's).
 t_mainfixedcaught() {
-  caughtsetup; : > "$STUB/move2"
+  caughtsetup; rerunfiles; : > "$STUB/move2"
   loop run 1 > /dev/null || fail "run exited non-zero"
   caughtland
 }

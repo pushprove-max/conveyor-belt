@@ -13,12 +13,11 @@
 # in it is flaky, an entry, as a pass on re-run's is (the owner, 2026-11-14: every failure's verdict is the card's,
 # main's or flaky).
 t_flakyrerunfail() {
-  rerunsetup '1 fail flaky' '1 fail three' '2 fail flaky'
+  rerunsetup '1 fail flaky' '1 fail three' '2 fail flaky'; rerunfiles
   loop run 1 > /dev/null || fail "run exited non-zero"
   [ "$(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)" = "test fail,fix ok,test pass," ] \
     || fail "a case that failed on the run and the re-run was not handled as a failure: $(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)"
   [ "$(fl '[.entries[].case] | join("|")')" = "c.test: three" ] || fail "not one entry, for the case that passed in the failed run again: $(cat "$ST/flaky.json")"
-  # a.test.sh, the file the run gave test.fileCommand, failed with its case b.test: flaky: the card's too.
-  [ "$(tline 1 '.verdicts | map("\(.case) \(.verdict)") | join("|")')" = "c.test: three flaky|a.test.sh card|b.test: flaky card" ] \
+  [ "$(tline 1 '.verdicts | map("\(.case) \(.verdict)") | join("|")')" = "c.test: three flaky|b.test: flaky card" ] \
     || fail "the failed test line does not give each failure's verdict: $(tline 1 .verdicts)"
 }

@@ -228,8 +228,10 @@ SLOWFILED=${STATE%/*}/slow.json
 # filed it, card; last: {cpu, card}, the card run before it; budget) and since. Such a file runs only in the full suite
 # and the whole test on main (slowoff()), and comes back to card test steps when the card of its issue lands. The
 # snapshot gives what health reads of its copy of the card records (linesum(), HEALTHLINE): each line's step and issue.
+# A record that names no such file (none, as nothing writes it now) keeps none off, and the card records are not read.
 # shellcheck disable=SC2120 # the snapshot passes the lines (lib/snapshot.sh); the card steps read the database
 slowoffs() { # [<the card records' lines>]
+  jq -e '.filed | arrays | any(.[]; objects | (.file | type) == "string" and (.issue | type) == "number")' "$SLOWFILED" > /dev/null 2>&1 || return 0
   { if [ -n "${1:-}" ]; then cat -- "$1"; else stdb ask lines cards; fi; } 2>/dev/null | jq -cRn --slurpfile s "$SLOWFILED" '[inputs | fromjson? | objects | select(.step == "landed") | .issue | numbers] as $l
     | $s[0].filed | arrays | .[] | objects | select((.file | type) == "string" and (.issue | type) == "number" and (IN(.issue; $l[]) | not))' 2>/dev/null
 }
