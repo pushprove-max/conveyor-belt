@@ -483,6 +483,9 @@ asked "Claude Code-credentials-$(folder_hash "$HB")" || fail "limit_follows_acti
 acct_usage() { printf '{"seven_day":{"utilization":33.0,"resets_at":"%s"},"account":{"folder":"%s","email":"%s"}}' "$reset_iso" "$1" "$2" > "$AOUT/cache/claude-usage"; touch -d '-3 minutes' "$AOUT/cache/claude-usage"; }
 acct_usage "$HB" noreply-b@example.com
 echo '2000000000 rate limited (429)' > "$AOUT/cache/claude-usage.retry"
+# The first collect's accounts() also read A (no login from the stub) and keeps that failure in A's own file until its
+# `next`, which fetch() honours by design; drop it so only B's deadline could hold A's fetch back.
+rm -f "$AOUT/cache/account-$(folder_hash "$HA").json"
 touch "$HA/.claude.json"; : > "$T/security-calls"; arun
 asked "Claude Code-credentials-$(folder_hash "$HA")" || fail "limit_follows_active_profile: after a switch the fetch must ask for A's item, not wait out B's retry deadline: $(cat "$T/security-calls")"
 q '.limit.usedPct == null and .limit.account == null' "limit_follows_active_profile: B's cached reading must not be shown as A's"
@@ -493,7 +496,9 @@ q '.limit.usedPct == 33 and .limit.account == {folder: "'"$HA"'", email: "norepl
 # F05: the default folder's metadata is $HOME/.claude.json (there is no ~/.claude/.claude.json); newer than every profile's, it wins,
 # and its credentials are the unsuffixed item.
 printf '{"oauthAccount":{"emailAddress":"noreply-d@example.com"}}' > "$AHOME/.claude.json"
-rm -f "$AOUT/cache/claude-usage" "$AOUT/cache/claude-usage.retry"; : > "$T/security-calls"; arun
+# As above, the default folder's own kept failed read (from accounts()) is dropped too.
+rm -f "$AOUT/cache/claude-usage" "$AOUT/cache/claude-usage.retry" "$AOUT/cache/account-$(folder_hash "$AHOME/.claude").json"
+: > "$T/security-calls"; arun
 asked "Claude Code-credentials" || fail "limit_switch_back_to_default: the default folder's item is the unsuffixed one: $(cat "$T/security-calls")"
 acct=$(HOME="$AHOME" CONVEYOR_CLAUDE_PROFILES="$PROF" python3 "$LIM" account)
 [ "$(jq -c . <<<"$acct")" = "{\"folder\":\"$AHOME/.claude\",\"email\":\"noreply-d@example.com\"}" ] || fail "limit_switch_back_to_default: account says $acct"
