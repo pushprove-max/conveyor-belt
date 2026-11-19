@@ -44,9 +44,6 @@
     "map": ".conveyor/engine-areas.json",
     "slowIssues": false,
     "files": {
-      "conveyor/tools/closure.test.sh": {
-        "cardMode": "CONVEYOR_CLOSURE_QUICK=1"
-      },
       "conveyor/conveyor.test.sh": {
         "wholeOnly": true
       }

@@ -5,7 +5,7 @@
 # page's script or style) and prints the whole set, one path per line, relative to the checkout, sorted.
 # Usage: closure.sh [<checkout>]   (default: the checkout holding this script; a git repository, whose tracked files
 # are the only ones a reference can name). Exit 1 when an entry point is not a tracked file, or a file of the set is
-# missing from the checkout (closure.test.sh removes each one in turn and expects this).
+# missing from the checkout.
 # A file is reached only by a path anchored at a known place: the referring file's own folder ($(dirname "$0"),
 # BASH_SOURCE, __file__, import.meta.url, and a variable holding one of them) or the checkout's top
 # (git rev-parse --show-toplevel). A bare path such as 'src/x.ts' is the user's repository's, not ours (a hook's test
@@ -18,8 +18,8 @@
 # .conveyor/ folder: the host project's input, read at run time), the area rule files and the startup instructions stay in the host project (section 11): a reference to one is never followed. A page's relative
 # src/href/import, an ES or TS module's relative import (a test's shared helper) and a Python import resolve from the file's
 # folder. closure.test.sh
-# copies exactly this set into an empty directory and runs the hooks, the Board and the engine tests from there: a
-# reference this misses fails that test.
+# copies this set into an empty directory, fails on a path the copy misses or holds beyond the set, and runs the
+# engine, the Board's server module and a hook from there: a reference this misses fails that check.
 # closure.sh --unreached [<checkout>] prints, in place of the set, each tracked file of the engine and the Board
 # (conveyor/, .claude/dashboard/, .claude/scripts/dashboard*; not a test file, *.test.*, nor what stays in the host
 # project) that the set misses and the left-out list below does not name. closure.test.sh runs it first, and fails
@@ -47,10 +47,10 @@ ENTRY+=(shim.sh hooks/hooks.json .claude-plugin/plugin.json)
 # The /units pane: its FETCH (a table, below) names the fetch it runs, which the engine's Board cases run from the
 # install too.
 ENTRY+=(hooks/units.tsx)
-# Foreman mode: the hooks its setup writes run its scripts through the shim, and they reach one another through
-# lib.sh's FHERE, which is not followed, so the whole folder ships, with the plugin commands that set it up (its test
-# checks them for private names).
-ENTRY+=('conveyor/foreman/*' 'commands/*.md')
+# Foreman mode: hooks/hooks.json runs its scripts (PLUGIN, below), and they reach one another through lib.sh's FHERE
+# (read below as the foreman folder), so only the files the walk reaches ship, with the folder's tests and the plugin
+# commands that set it up (its test checks them for private names).
+ENTRY+=('conveyor/foreman/*.test.sh' 'commands/*.md')
 for h in "${HOOKS[@]}"; do ENTRY+=(".claude/hooks/$h.sh"); done
 # A missing hooks.json is named by the check of the set below; a hook it runs that is missing, by the walk (PLUGIN).
 [ ! -f "$ROOT/hooks/hooks.json" ] || HOOKS+=($(jq -r '.hooks[][].hooks[].command' "$ROOT/hooks/hooks.json" | sed -n 's|.*/shim\.sh \.claude/hooks/\([^ /]*\)\.sh.*|\1|p'))
@@ -243,6 +243,9 @@ def refs(path):
     # by conveyor.sh, read HERE as it sets it: the engine folder.
     if re.fullmatch(r"conveyor/(?:lib|commands)/[^/]+\.sh", path) and ".test." not in path:
         text = "HERE=" + mk("conveyor") + "\n" + text
+    # The scripts of Foreman mode source lib.sh, which sets FHERE to their own folder.
+    if re.fullmatch(r"conveyor/foreman/[^/]+\.sh", path) and ".test." not in path:
+        text = "FHERE=" + mk("conveyor/foreman") + "\n" + text
     text = rewrite(text, here, ext in (".py", ".js", ".mjs", ".cjs", ".ts", ".tsx"))
     # A test builds its fixtures by paths a variable completes: they are not loads of the release.
     if ".test." not in os.path.basename(path):

@@ -351,17 +351,6 @@ p_cputime() {
     && ok "the test step's log gives each file's CPU seconds, next to none for one that sleeps" || no "CPU seconds, file clock CPU: '$got': $(cat "$T/out")"
 }
 
-# Bug (issue 583): a card that changed the closure test ran its ~700 units from the copy, 20 to 30 minutes, for a
-# check of seconds. The test step runs it in quick mode (CONVEYOR_CLOSURE_QUICK=1, its card mode in this checkout's
-# pack: issue 584); another test file, not.
-p_closurequick() {
-  mkdir -p "$R/conveyor/tools" "$R/lib"; cp "$HERE/project.json" "$R/.conveyor/"
-  echo 'echo "closure:${CONVEYOR_CLOSURE_QUICK:-full}" >> "$(dirname "$0")/../../ran"' > "$R/conveyor/tools/closure.test.sh"
-  echo 'echo "w:${CONVEYOR_CLOSURE_QUICK:-full}" >> "$(dirname "$0")/../ran"' > "$R/lib/w.test.sh"
-  got=$(ran | sort | paste -sd ' ' -)
-  [ "$got" = "closure:1 w:full" ] && ok "the test step runs the closure test in quick mode, and no other test file" || no "closure test: ran '$got': $(cat "$T/out")"
-}
-
 # The loop's run again of the same change (CONVEYOR_TEST_RERUN): a file that passed is not run, and the runner runs only
 # its cases that failed (a name that is no case is left out), so one flaky case costs one case, not the selection.
 # wchange: the change these parts run again, a test file outside the engine (lib/w.test.sh) and area a's x.sh.
@@ -690,7 +679,7 @@ p_linked() {
 }
 
 for p in checkout area selected boardcount shellcount ended realstate filter named owned ownedpy deleted mapadd mapmove mapcore emptyarea casefile caseshared scnew scold enginetime cputime \
-  rerun closurequick mainrun mainwhole nodecases flakyoff slowoff killed fixengine fixtest mainmoved sharedwhy fixpassed core firstwhy handrun noarea why unlisted badline union cover linked; do part "$p"; done
+  rerun mainrun mainwhole nodecases flakyoff slowoff killed fixengine fixtest mainmoved sharedwhy fixpassed core firstwhy handrun noarea why unlisted badline union cover linked; do part "$p"; done
 
 # This checkout's own map, on a scratch copy of every file it names, each case file holding one case named after it
 # (t_<file>): a change to one engine file runs the case files its area names, not the whole engine test; a change to

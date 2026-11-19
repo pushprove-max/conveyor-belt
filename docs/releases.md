@@ -32,6 +32,13 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    In this repository the suite is `.conveyor/test-full.sh`. It runs each area file under `conveyor/tests/`, and
    not the whole engine test, so each engine case runs once.
 
+   The suite also checks the files that the plugin ships. It makes the list of these files and copies them into an
+   empty folder. It fails when the copy does not have a file of the list, or has a file that is not on the list, and
+   the output names the file. Then, from the copy, with a new home folder
+   and no access to the checkout, it runs `conveyor.sh state-dir`, loads the Board server without starting it, and
+   runs the shell write hook in a project with a rule and in a project with no rule. It does not run test files from
+   the copy.
+
    An earlier suite run is a release's, or one of the Board's **Run full test suite** or **Push landed**. When one of
    them passed every file on the head of `main`, this step runs no test and posts the pass. When one was on a commit
    that is an ancestor of the head of `main`, this step runs again only some test files, and keeps the passes of the

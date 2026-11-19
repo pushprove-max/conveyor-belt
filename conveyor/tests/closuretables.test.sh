@@ -15,13 +15,16 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # command whose script was not in it, and SNAPLIBS and FETCH were not read at all. In a checkout of the set, a new
 # entry of each table, with its file, is in the set with no other change; an unused sibling of a library the snapshot
 # loads is not (only --unreached names it); and each entry whose file is untracked or missing fails the set, naming the
-# file that holds the table and the path it expects, as does a table the reader no longer finds.
+# file that holds the table and the path it expects, as does a table the reader no longer finds. Bug (issue 775): every
+# tracked file of conveyor/foreman/ shipped for being in that folder; a new one no file reaches is not in the set
+# (only --unreached names it).
 t_closuretables() {
   local c=$T/$CASE/co o=$T/$CASE/out
   mkdir -p "$c"
   ( cd "$SRC/.." && bash conveyor/tools/closure.sh | tar -cf - -T - ) | tar -C "$c" -xf - || fail "cannot copy the release set"
   echo 'hello() { :; }' > "$c/conveyor/commands/hello.sh" && echo 'extra() { :; }' > "$c/conveyor/lib/extra.sh" \
     && echo 'unused() { :; }' > "$c/conveyor/lib/zzunused.sh" && echo 'echo fetch' > "$c/hooks/units-fetch2.sh" \
+    && echo 'unused() { :; }' > "$c/conveyor/foreman/zzunused.sh" \
     && sed -i '/^cmd watch /a cmd hello hello.sh -' "$c/conveyor/conveyor.sh" \
     && sed -i "s/^SNAPLIBS='/SNAPLIBS='extra /" "$c/conveyor/commands/snapshot.sh" \
     && sed -i "s|^const FETCH = 'hooks/units-fetch.sh'|const FETCH = 'hooks/units-fetch2.sh'|" "$c/hooks/units.tsx" \
@@ -33,8 +36,9 @@ t_closuretables() {
     grep -qxF "$f" "$o" || fail "the set misses $f, which a table names"
   done
   ! grep -qxF conveyor/lib/zzunused.sh "$o" || fail "the set holds an unused sibling of the snapshot's libraries"
-  [ "$(bash "$c/conveyor/tools/closure.sh" --unreached "$c")" = conveyor/lib/zzunused.sh ] \
-    || fail "--unreached did not name only the unused library"
+  ! grep -qxF conveyor/foreman/zzunused.sh "$o" || fail "the set holds a file of conveyor/foreman/ that no file reaches"
+  [ "$(bash "$c/conveyor/tools/closure.sh" --unreached "$c")" = $'conveyor/foreman/zzunused.sh\nconveyor/lib/zzunused.sh' ] \
+    || fail "--unreached did not name only the two unused files"
   # Each missing target in turn: untracked (the file is still on disk), then gone from the checkout.
   git -C "$c" rm -q --cached conveyor/commands/hello.sh || fail "cannot untrack the command's script"
   ! bash "$c/conveyor/tools/closure.sh" "$c" > /dev/null 2> "$o" || fail "closure.sh passed with a command's script untracked"

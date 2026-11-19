@@ -1570,8 +1570,8 @@ for t in "${order[@]}"; do
     # runs of it (oparts): CONVEYOR_SHELL_TEST_CASE.
     p=; [ -z "$oparts" ] && [ -n "${twhole[$t]:-}" ] || p=$(grep . <<<"${oparts:-${tparts[$t]:-}}" | LC_ALL=C sort -u | paste -sd, -)
     echo "== $t${p:+ (parts: $p)}"; s=${EPOCHREALTIME/,/.}; times > "$o.cpu"
-    # The closure test runs in its card mode, quick (issue 583: the pack's test.files cardMode, mk above): its checks,
-    # but none of the ~700 units it runs from the copy of the release set; the nightly whole test runs them.
+    # A meta-runner runs in its card mode (the pack's test.files cardMode, mk above): its own checks, with a stub in
+    # place of the files it starts.
     case $t in
       *.mjs) nodecases "$t"; env "${mk[@]}" node --max-old-space-size=4096 --test "${nargs[@]}" "$t" ;;
       *.py) env "${mk[@]}" python3 "$t" ;;

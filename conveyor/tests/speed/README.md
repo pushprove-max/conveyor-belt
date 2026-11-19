@@ -31,8 +31,7 @@ two cards edit one report.
   longer exists, or it asserts nothing that could fail when the behaviour breaks.
 - No test limit or timeout is raised and no case is skipped.
 - `.conveyor/engine-areas.json` stays true: every remaining case file is named by an area; a removed file leaves it.
-- A case renamed or split leaves `conveyor/conveyor.slowest` and `conveyor/tools/closure.slowest` naming only cases that
-  exist.
+- A case renamed or split leaves `conveyor/conveyor.slowest` naming only cases that exist.
 
 ## Rules for every test (its author and its reviewer)
 

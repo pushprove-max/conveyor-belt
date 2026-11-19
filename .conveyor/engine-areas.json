@@ -3,7 +3,6 @@
 {"outside": "conveyor/lanes/"}
 {"outside": "conveyor/commands/foreman.sh"}
 {"outside": "conveyor/tools/closure.sh"}
-{"outside": "conveyor/tools/closure.slowest"}
 {"outside": "conveyor/tests/speed/"}
 {"area": "core", "tests": "all"}
 {"area": "core", "file": "conveyor/conveyor.sh"}
@@ -26,7 +25,6 @@
 {"area": "slots", "test": "testrec.test.sh"}
 {"area": "slots", "test": "snapshot.test.sh"}
 {"area": "slots", "test": "closureturn.test.sh"}
-{"area": "slots", "test": "closurequick.test.sh"}
 {"area": "slots", "test": "closuremiss.test.sh"}
 {"area": "slots", "test": "closurereach.test.sh"}
 {"area": "slots", "test": "closuretables.test.sh"}
