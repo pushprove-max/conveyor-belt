@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
 # Engine cases: release-prep reruns only the files that failed or changed since the whole-suite run on the nearest
-# ancestor and reuses its passes (issue 43), and suitebase() takes that ancestor's run (issue 44). Their fixture is
-# rrsetup, below, on releaseboard.test.sh's runsetup (release.test.sh's cutsetup); fullreuse.test.sh and
-# crossreuse.test.sh use it too.
+# ancestor and reuses its passes (issue 43), Push landed counts its pass on the same commit, and suitebase() takes
+# that ancestor's run (issue 44). Their fixture is rrsetup, below, on releaseboard.test.sh's runsetup (release.test.sh's
+# cutsetup); fullreuse.test.sh uses it too. ftended is fulltest.test.sh's.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -47,6 +47,10 @@ rrprep() {
 # changes src/s3.sh, which the changed-tests command maps to t/f3: only t/f1 and t/f3 run (t/f2's pass is kept), a pass
 # is posted on B, the record names the run reused and the files rerun, and `release` takes the pass and releases B with
 # no suite run.
+# other file passed on the commit before. Here B changes t/f1 alone: only t/f1 runs, a pass is posted on B, the record
+# names the run reused and the file rerun, and `release` takes the pass and releases B with no suite run.
+# Bug (#44, D2): Push landed ran the whole suite on a commit release-prep had just passed. Before the release, B is made
+# an unpushed landing (origin put back on A, a card's landed line naming B): Push landed runs no test and pushes B.
 t_relreusefail() {
   local A B RUN got
   rrsetup
@@ -56,7 +60,16 @@ t_relreusefail() {
   grep -q "statuses/$B -f state=success -f context=conveyor/release-suite " "$STUB/gh-calls" || fail "no passing status was posted on B: $(cat "$STUB/gh-calls")"
   jq -e --arg a "$A" --arg b "$B" '.state == "passed" and .sha == $b and (.reused | del(.time)) == {sha: $a, ran: ["t/f1.test.sh", "t/f3.test.sh"], kept: 1}' "$RUN" > /dev/null \
     || fail "the record does not name the run reused and the files rerun: $(cat "$RUN")"
+  jq -e --arg a "$A" --arg b "$B" '.state == "passed" and .sha == $b and (.reused | del(.time)) == {sha: $a, ran: ["t/f1.test.sh"], kept: 2}' "$RUN" > /dev/null \
+    || fail "the record does not name the run reused and the file rerun: $(cat "$RUN")"
+  git -C "$T/$CASE/origin" update-ref refs/heads/main "$A" && git -C "$R" update-ref "refs/remotes/origin/main" "$A" \
+    && rm -f "$ST/pushed" && landed 7 | jq -c --arg b "$B" '.sha = $b' >> "$ST/cards.jsonl" || fail "the fixture could not be made"
   rm -f "$STUB/ran"
+  loop full-test push > "$T/$CASE.p" 2>&1 || fail "push landed did not start: $(cat "$T/$CASE.p")"; ftended 1
+  [ ! -e "$STUB/ran" ] || fail "Push landed ran tests on a commit release-prep passed: $(cat "$STUB/ran")"
+  [ "$(git -C "$T/$CASE/origin" rev-parse refs/heads/main)" = "$B" ] \
+    && [ "$(ftl '[.state, .pushed.ok, .reused.sha, .reused.ran]')" = "[\"passed\",true,\"$B\",[]]" ] \
+    || fail "Push landed did not push B on release-prep's pass: $(cat "$ST/fulltest.jsonl" "$ST/fulltest.jsonl.log")"
   loop release 1.1.0 > "$T/$CASE.r" 2>&1 || fail "release did not take the pass on B: $(cat "$T/$CASE.r")"
   [ ! -e "$STUB/ran" ] && [ -n "$(git -C "$T/$CASE/origin" tag -l v1.1.0)" ] || fail "release ran the suite again or released nothing: $(cat "$T/$CASE.r")"
 }
