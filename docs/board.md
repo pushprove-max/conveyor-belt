@@ -668,11 +668,17 @@ the end of its text. Edit it, then click "File this issue". Cancel files nothing
 Mutation check, Keep a case off, Close its issue as done and Mark as slow on purpose
 (`conveyor.sh test-settings`). Use the arrow keys to move in the More menu, and Escape to close it.
 
-Explain the slowdown gives the model the file's recorded times and the changes of the cards that landed when its time
-went up. For each card, the model gets the commit, its subject, its changed files with their line counts, and its diff
-of the test file and of the files that the test map links to the test file. When a card's test step is the first slow
-run, that card comes first. The other cards come oldest first. The model cannot run git. When the diffs are too long,
-the model gets their start and a note that says which lines and files are left out.
+Explain the slowdown gives the model the file's recorded times and the window where its time went up: from the last
+run at its usual time to the first slower run. The model gets each commit made in that window that changed the test
+file, a file that the test map links to the test file, or a file that the map shares with most tests (such as a shared
+test helper). When a card's test step is the first slower run, the commit that landed that card is in the list too,
+if it changed one of these files. Commits that changed only other files are not in the list. For each commit, the
+model gets its card and issue, its time, its subject, its changed files with their line counts, and its diff of these
+files. The commit of the card of the first slower run comes first. The other commits come oldest first. When no such
+commit was made in the window, the facts say so. The model must weigh every commit in the window. It must not blame
+a card only because that card's run was the first slower one. The model cannot run git. When the diffs are too long,
+the model gets their start and a note that says which lines and files are left out. All times are in the time zone
+of your browser, on the clock that is set in **Time** in Customize when you click Explain the slowdown.
 
 Mutation check puts the file at the front of the idle queue (`conveyor.sh mutate ask`). It does not start a check.
 `conveyor.sh serve` runs the checks of the queue one at a time, and only while no card needs a test slot. When a card

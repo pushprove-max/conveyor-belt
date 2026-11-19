@@ -5,7 +5,7 @@
 // dashboard-view.tests-select.test.mjs. Shared setup: dashboard-view.helpers.mjs (TESTS: three files; TA: the snapshot
 // with the actions).
 import assert from 'node:assert/strict';
-import { boot, deliver, next, settle, later, act, cases, iso, key, T0, TA } from './dashboard-view.helpers.mjs';
+import { boot, deliver, next, settle, later, act, cases, iso, key, STORE, T0, TA } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const { MERGE, X, ID1, ID2, rec, snap, tp, rowOf, opened, open, type, pick, said, model, resultRow, reply } = TA;
@@ -86,6 +86,19 @@ test('Tests actions: Judge this test posts the engine action with the file; the 
   assert.match(box.textContent, /Judge this test.*0:00 of the 15:00 time limit/);
   assert.match(box.querySelector('.tests-out').textContent, /Its text shows here as it comes/);
   assert.match(said(w), /Started: Judge this test, conveyor\/tests\/merge\.test\.sh/);
+});
+
+// Bug it guards (#770): the explain facts gave times in the build machine's zone and the Time kept in one project's
+// Board folder, not those of the Board that asked. Explain sends this browser's zone and its 24-hour Time setting.
+test('Tests actions: Explain the slowdown sends the browser\'s time zone and the Time set in Customize', async () => {
+  const w = boot({ tab: 'tests', store: { [STORE]: JSON.stringify({ time: '24-hour' }) } });
+  deliver(w, snap());
+  w.reply = reply(ID1);
+  act(open(w, MERGE), 'more').click();
+  act(opened(w, MERGE), 'explain').click();
+  await settle();
+  // The page sends its Time to POST /time too, on opening with one that is not the default.
+  assert.deepEqual(w.posts.splice(0).filter((p) => p.url === 'control').map((p) => p.body.args), [['explain', '--time', 'America/New_York', '24-hour', MERGE]]);
 });
 
 // Bug it guards (#571): Run this file showed the session time limit (testActionTimeout, 15:00) in its box and in

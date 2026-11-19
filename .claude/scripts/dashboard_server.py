@@ -208,7 +208,8 @@ SETUP_PAGE = b'''<!doctype html><meta charset=utf-8><title>Conveyor Board: set y
 # bench swe <n> [--solo | [--arm <arm>]... [--engine <version>]] [--settings <json>] | stop [<run id>] | versions | arms check
 # [--settings <json>] <arm>... | arms save <name> <spec json> | diff <A> <B> [--json]`, an arm being a host arm's name or
 # a saved revision's ID; Start and a check answer their receipt; an admin's alone),
-# or the Tests page's actions: testaction (`conveyor.sh testaction`: judge, explain or run one file, stop one), tests
+# or the Tests page's actions: testaction (`conveyor.sh testaction`: judge, explain or run one file, stop one; an
+# explain sends --time <zone> <12-hour | 24-hour>, the browser's time zone and its Time setting, first), tests
 # (its seat), mutate (Mutation check: `conveyor.sh mutate ask <file>...`, one ask for a list of files), testrules (Auto-file: `conveyor.sh testrules on|off|guard|set`), flaky-off (Keep a case off: `conveyor.sh
 # flaky off`, which files no issue), test-close (an issue closed with a comment) and test-issue (`conveyor.sh testissue`: an issue filed about a file with the title and body sent,
 # such as an Optimize issue, "Optimize the test file <file>"); testaction judge, explain or run and test-issue also take a list of
@@ -626,7 +627,11 @@ def control_ok(body):
             or (n in (7, 8) and v[0] == 'add' and v[2] in PROVIDERS and NAME.fullmatch(v[3]) is not None and all(PRICE.fullmatch(x) for x in v[4:]))
             or (n in (2, 3) and v[0] == 'name' and all(NAME.fullmatch(x) for x in v[2:]))
             or (n == 4 and v[0] == 'alias' and v[2] in ('add', 'remove') and MODEL.fullmatch(v[3]) is not None))
-    if a == 'testaction':  # the Tests page: judge, explain or run one test file or a list of them, or stop one action by its id
+    if a == 'testaction':  # the Tests page: judge, explain or run one test file or a list of them, or stop one action by
+        # its id; an explain with --time, the zone and Time setting of the browser that asked, which its facts' times are in
+        if n >= 5 and v[:2] == ['explain', '--time']:
+            return ZONE.fullmatch(v[2]) is not None and v[3] in ('12-hour', '24-hour') and n <= 4 + TEST_FILES_MAX \
+                and all(TEST_FILE.fullmatch(x) for x in v[4:])
         return (2 <= n <= 1 + TEST_FILES_MAX and v[0] in ('judge', 'explain', 'run') and all(TEST_FILE.fullmatch(x) for x in v[1:])) \
             or (n == 2 and v[0] == 'stop' and RUN_ID.fullmatch(v[1]) is not None)
     if a == 'testmap':  # the Tests page's Build the test map, or its Stop
@@ -680,7 +685,8 @@ def test_files(action, args):
     the action on that file alone) for each: control() runs each on its own, as the action on one file, and answers
     each on its own. None for any other action, and for one on a single file, answered as before."""
     if action == 'testaction' and args[0] != 'stop':
-        each = [(f, [args[0], f]) for f in args[1:]]
+        k = 4 if args[1:2] == ['--time'] else 1  # an explain's --time goes with each file
+        each = [(f, args[:k] + [f]) for f in args[k:]]
     elif action == 'test-issue':
         each = [(f, [f, t, b]) for f, t, b in zip(args[0::3], args[1::3], args[2::3])]
     else:
@@ -701,6 +707,8 @@ MAX_TEST_LIST_BODY = TEST_FILES_MAX * MAX_CONTROL_BODY
 # A test file's path from the repository root, as the Tests page sends it (the host checks that main's checkout tracks
 # it); never one that starts with - or /.
 TEST_FILE = re.compile(r'[A-Za-z0-9._@+][A-Za-z0-9._@+/-]{0,299}')
+# A browser's time zone, as its IANA name (America/New_York, Etc/GMT+5), as `conveyor.sh testaction explain --time` takes it.
+ZONE = re.compile(r'(?=.{1,64}$)[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*')
 # A price as typed, one word: `conveyor.sh prices set` checks it is $ per million tokens and says why it is not, so the
 # Rules tab shows the refusal (a negative or a word) in the engine's own words.
 PRICE = re.compile(r'\S{1,40}')

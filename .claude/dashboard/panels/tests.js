@@ -476,6 +476,9 @@
     (clip && clip.writeText ? clip.writeText(text) : Promise.reject(new Error('no clipboard')))
       .then(() => say('Copied.'), () => say('Not copied: the browser gave no clipboard.'));
   }
+  // The arguments of a test action before its files: an explain's facts give their times as this page shows them, in
+  // this browser's time zone and the Time set in Customize (#770), so it sends both.
+  const actArgs = (how) => (how === 'explain' ? [how, '--time', new Intl.DateTimeFormat().resolvedOptions().timeZone, S.ctx.hours()] : [how]);
   // An action of a row: its box shows at once, beside its buttons: sending until the build machine answers, then
   // running (or why it was refused); one that cannot be sent says why there.
   function start(how, file) {
@@ -484,7 +487,7 @@
     S.open.add(file);
     if (why) { S.started.set(k, { id: '', action: how, file, state: 'refused', reason: why }); draw(); say(`Not started: ${why}`); return; }
     S.started.set(k, { id: '', action: how, file, start: now(), state: 'sending' });
-    send('testaction', [how, file], () => `Started: ${ACTS[how]}, ${file}.`, (text) => {
+    send('testaction', [...actArgs(how), file], () => `Started: ${ACTS[how]}, ${file}.`, (text) => {
       const id = text.split('\n').pop().trim();
       S.started.set(k, { id: ID.test(id) ? id : '', action: how, file, start: now(), state: 'running' });
     }, (reason) => S.started.set(k, { id: '', action: how, file, state: 'refused', reason }));
@@ -1117,7 +1120,7 @@
   function startMany(how, files) {
     const { files: fs, left } = chosen(files, how), names = fs.map((f) => f.file);
     if (!names.length) { S.answers = { what: ACTS[how], kind: 'act', lines: [], left, note: 'No file to act on.' }; draw(); return; }
-    bulk(ACTS[how], 'testaction', [how, ...names], names, left, (lines) => lines.forEach((l) => {
+    bulk(ACTS[how], 'testaction', [...actArgs(how), ...names], names, left, (lines) => lines.forEach((l) => {
       if (!l.ok || !ID.test(l.text)) return;
       S.started.set(dk(l.file), { id: l.text, action: how, file: l.file, start: new Date(S.ctx.now()).toISOString(), state: 'running' });
     }));

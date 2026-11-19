@@ -1962,6 +1962,8 @@
       // whole: whether this draw is to draw the panel whole (a new time format, project or model name), not only what
       // changed in its part: a panel that keeps its rows as they were draws each again then.
       get whole() { return p.whole === true; },
+      // hours(): the Time set in Customize, 12-hour or 24-hour.
+      hours: () => (prefs || prefsOf(stored())).time,
       // updatedAt(): when the collector began the snapshot drawn now (ms by the page host's clock), or null.
       updatedAt: () => updatedAt,
       // Whether this page has the live feed open, and when what it shows was published (ms, or null).

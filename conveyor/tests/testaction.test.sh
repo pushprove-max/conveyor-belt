@@ -31,6 +31,7 @@ EOF
   chmod +x "$STUB/claude"
 }
 tarec() { jq -r "$2" "$ST/testactions/$1.json" 2>/dev/null; } # <id> <jq filter>: of the action's record
+tacommit() { GIT_AUTHOR_DATE=$1 GIT_COMMITTER_DATE=$1 git -C "$R" commit -qam "$2"; } # <time> <subject>: main's changes, made at <time>
 
 # Bugs this guards: a judge started with no Tests seat (on a seat the owner never chose); a session given no times of
 # the file, so it judged blind; text that reached the Board only once the session ended; a record that did not say the
@@ -265,20 +266,22 @@ t_tabigtexts() {
   [ "$out" = '[10,[16000]]' ] || fail "the snapshot does not list the ten actions with their texts: ${out:0:300}"
 }
 
-# The setup of an explain case: main maps src/a.sh to tests/x.test.sh (the pack's test.map), and a card, c9-14, landed
-# a commit that changed the test file, src/a.sh and src/b.sh, after which the file ran 10 times slower; c8-13 landed
-# before it, between the last fast run and c9-14's slow one, a commit that added <n> lines to the test file; c1-5
-# landed before its first run, so its change is not around the rise. <lines> are added to the test file by c9-14.
+# The setup of an explain case: main maps src/a.sh to tests/x.test.sh and shares tests/lib.sh with every test (the
+# pack's test.map, in lines of areas), and a card, c9-14, landed a commit that changed the test file, src/a.sh and
+# src/b.sh, after which the file ran 10 times slower; c8-13 landed before it, between the last fast run and c9-14's
+# slow one, a commit that added <n> lines to the test file; c1-5 landed before its first run, so its change is not
+# around the rise. <lines> are added to the test file by c9-14. Each commit is made at the time its card landed.
 taslowed() { # <n> <lines of the test file's change>
   tasetup; local sha old i
-  mkdir -p "$R/src" && echo 'a=1' > "$R/src/a.sh" && echo 'b=1' > "$R/src/b.sh" && echo '{"src/a.sh": ["tests/x.test.sh"]}' > "$R/map.json" \
-    && git -C "$R" add src map.json && git -C "$R" commit -qm 'the sources' || fail "the sources could not be committed"
+  mkdir -p "$R/src" && echo 'a=1' > "$R/src/a.sh" && echo 'b=1' > "$R/src/b.sh" && echo 'h=1' > "$R/tests/lib.sh" \
+    && printf '%s\n' '{"area": "core", "tests": "all"}' '{"area": "core", "file": "tests/lib.sh"}' '{"area": "a", "file": "src/a.sh"}' '{"area": "a", "test": "tests/x.test.sh"}' > "$R/map.json" \
+    && git -C "$R" add src tests map.json && tacommit 2026-11-01T01:00:00Z 'the sources' || fail "the sources could not be committed"
   tune '.test.map = "map.json"'
   for i in $(seq 1 "$1"); do echo "echo old line $i" >> "$R/tests/x.test.sh"; done
-  git -C "$R" commit -qam 'Log more' && old=$(git -C "$R" rev-parse HEAD) || fail "the older card's change could not be committed"
+  tacommit 2026-11-02T12:00:00Z 'Log more' && old=$(git -C "$R" rev-parse HEAD) || fail "the older card's change could not be committed"
   shift
   printf '%s\n' "$@" >> "$R/tests/x.test.sh" && echo 'retry 9 # a=2' > "$R/src/a.sh" && echo 'b=2 # not mapped' > "$R/src/b.sh" \
-    && git -C "$R" commit -qam 'Wait for the port' && sha=$(git -C "$R" rev-parse HEAD) || fail "the card's change could not be committed"
+    && tacommit 2026-11-03T01:00:00Z 'Wait for the port' && sha=$(git -C "$R" rev-parse HEAD) || fail "the card's change could not be committed"
   jq -cn --arg s "$sha" --arg m "$old" --arg o "$(git -C "$R" rev-parse HEAD~2)" '{card: "c1-5", issue: 5, step: "test", time: "2026-11-01T00:00:00Z", result: "pass", times: {"tests/x.test.sh": 1}},
     {card: "c1-5", issue: 5, step: "landed", time: "2026-11-01T01:00:00Z", sha: $o},
     {card: "c2-6", issue: 6, step: "test", time: "2026-11-02T00:00:00Z", result: "pass", times: {"tests/x.test.sh": 1.2}},
@@ -296,13 +299,25 @@ taslowed() { # <n> <lines of the test file's change>
 t_taexplainchange() {
   taslowed 2 'nc -l 8080 & wait'; local id out
   loop control tests claude m-tests high > /dev/null || fail "control tests was refused"
-  id=$(loop testaction explain tests/x.test.sh 2>&1) && [[ $id =~ ^[0-9a-f]{12}$ ]] || fail "the explain did not start: $id"
+  # Asked as the Board asks it, with --time: a zone of 5 hours west of UTC with no daylight time, named EST (a POSIX TZ,
+  # so no zone database is needed), while this machine is in UTC, and the 12-hour Time setting.
+  id=$(TZ=UTC loop testaction explain --time EST5 12-hour tests/x.test.sh 2>&1) && [[ $id =~ ^[0-9a-f]{12}$ ]] || fail "the explain did not start: $id"
+  [ "$(tarec "$id" '[.zone, .hours] | tojson')" = '["EST5","12-hour"]' ] || fail "the record does not keep the zone and Time of the ask: $(cat "$ST/testactions/$id.json")"
+  # Polled: the prompt is built in the queue's start of the session (tastart()), which runs apart from the ask, and the
+  # stub session writes it only once it runs; what the session is given is what only a started session shows.
   wait_until "grep -q 'first words' '$ST/testactions/$id.txt'" "cat '$ST/testactions/$id.err'" || fail "the session did not start"
   : > "$STUB/ta-go"; out=$(cat "$STUB"/ta-prompt.*)
-  grep -qF "Card c9-14 (#14), landed as commit $TASHA: Wait for the port" <<<"$out" && grep -qF 'tests/x.test.sh (+1, -0)' <<<"$out" \
+  grep -qF "Card c9-14 (#14), landed as commit $TASHA at 2026-11-02 8:00:00 PM EST: Wait for the port" <<<"$out" && grep -qF 'tests/x.test.sh (+1, -0)' <<<"$out" \
     && grep -qF 'src/b.sh (+1, -1)' <<<"$out" && grep -qF '+nc -l 8080 & wait' <<<"$out" && grep -qF '+retry 9 # a=2' <<<"$out" \
-    && ! grep -qF '+b=2 # not mapped' <<<"$out" && ! grep -qF 'Card c1-5' <<<"$out" && grep -qF 'from 1.2 s at 2026-11-02T00:00:00Z to 10 s at 2026-11-03T00:00:00Z' <<<"$out" \
+    && ! grep -qF '+b=2 # not mapped' <<<"$out" && ! grep -qF 'Card c1-5' <<<"$out" \
+    && grep -qF 'from its last run at its usual time (1.2 s at 2026-11-01 7:00:00 PM EST) to its first slower run (10 s at 2026-11-02 7:00:00 PM EST, the test step of card c9-14)' <<<"$out" \
     || fail "the prompt does not hold the change of the card that landed at the rise (its commit, files and diff of the test file and its mapped source) alone: $out"
+  # Bug it catches (#770): the facts gave each time in UTC, then in the build machine's zone, while the Board shows the
+  # zone of its browser and its clock.
+  grep -qF '{"card":"c2-6","issue":6,"time":"2026-11-01 7:00:00 PM EST","times":1.2}' <<<"$out" && ! grep -qF '2026-11-02T00:00:00Z' <<<"$out" \
+    && ! grep -qF ' UTC' <<<"$out" || fail "the prompt's runs are not in the zone and clock the Board sent: $out"
+  grep -qF 'Weigh every commit in that window: do not blame a card only because its run was the first slower one.' <<<"$out" \
+    || fail "the explain prompt does not ask the session to weigh every commit in the window: $out"
   grep -qF '+echo old line 2' <<<"$out" && [ "$(grep -oE '^Card c(9-14|8-13) ' <<<"$out" | tr -d '\n')" = 'Card c9-14 Card c8-13 ' ] \
     || fail "the change of the card of the slow run does not come first, before the older card's: $out"
   grep -q -- '--tools Read,Grep,Glob --setting-sources' "$STUB/ta-args" || fail "the explain session is not kept to Read, Grep and Glob: $(cat "$STUB/ta-args")"
@@ -329,6 +344,40 @@ t_taexplaincut() {
   # one of the full suite, names the rise and says all the cards come oldest first.
   out=$( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/testaction.sh")" \
     && tachanges tests/x.test.sh "$(testfacts tests/x.test.sh | jq -c '.runs |= map(if .card == "c9-14" then del(.card, .issue) + {whole: true} else . end)')" "$R" | head -n 1)
-  grep -qF 'to 10 s at 2026-11-03T00:00:00Z, a whole-suite run), so all of them oldest first, each with' <<<"$out" && ! grep -qF 'card of that run first' <<<"$out" \
+  grep -qF ', a whole-suite run). The commits made in that window' <<<"$out" && grep -qF '), all of them oldest first, each with' <<<"$out" && ! grep -qF 'that commit first' <<<"$out" \
     || fail "the facts of a rise marked by a whole-suite run do not say all the cards come oldest first: $out"
+}
+# Bug it catches (#770): the explain facts named only the cards whose runs or landings fell around the rise, so the
+# session blamed the card of the first slow run while a commit to the shared test helper in the window was not in
+# them. Three more commits in the window (c2-6's fast run to c9-14's slow one): c11-16's to tests/lib.sh (shared
+# with every test by the map), c12-17's to src/b.sh (linked to no test) and one by hand to the test file, with no card.
+t_taexplainwindow() {
+  local out h fix
+  taslowed 2 'nc -l 8080 & wait'
+  echo 'h=2 # one fixture a file' > "$R/tests/lib.sh" && tacommit 2026-11-02T13:00:00Z 'Share the fixture' && h=$(git -C "$R" rev-parse HEAD) \
+    && echo 'b=3' > "$R/src/b.sh" && tacommit 2026-11-02T14:00:00Z 'Tidy b' \
+    && echo 'echo by hand' >> "$R/tests/x.test.sh" && tacommit 2026-11-02T15:00:00Z 'A line by hand' && fix=$(git -C "$R" rev-parse HEAD) \
+    || fail "the commits in the window could not be made"
+  jq -cn --arg h "$h" --arg b "$(git -C "$R" rev-parse HEAD~1)" '{card: "c11-16", issue: 16, step: "landed", time: "2026-11-02T13:00:00Z", sha: $h},
+    {card: "c12-17", issue: 17, step: "landed", time: "2026-11-02T14:00:00Z", sha: $b}' >> "$ST/cards.jsonl"
+  # tachanges() alone, in a zone 5 hours west of UTC with no daylight time (a POSIX TZ: no zone database is needed),
+  # on a clock of <$1> (empty: none given) and the facts changed by the jq filter <$2>.
+  tawin() { ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards TZ=EST5
+    . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/testaction.sh")" \
+    && tachanges tests/x.test.sh "$(testfacts tests/x.test.sh | jq -c "$2")" "$R" ${1:+"$1"} ); }
+  out=$(tawin '' .)
+  grep -qF 'The window of the rise in its time: from its last run at its usual time (1.2 s at 2026-11-01 7:00:00 PM EST) to its first slower run (10 s at 2026-11-02 7:00:00 PM EST, the test step of card c9-14)' <<<"$out" \
+    || fail "the facts do not name the window of the rise, in the machine's zone on a 12-hour clock: $out"
+  [ "$(grep -oE '^(Card c[0-9-]+|Commit [0-9a-f]+)' <<<"$out" | tr '\n' ' ')" = "Card c9-14 Card c8-13 Card c11-16 Commit $fix " ] \
+    && grep -qF "Card c11-16 (#16), landed as commit $h at 2026-11-02 8:00:00 AM EST: Share the fixture" <<<"$out" && grep -qF '+h=2 # one fixture a file' <<<"$out" \
+    && grep -qF "Commit $fix at 2026-11-02 10:00:00 AM EST, landed by no card on record: A line by hand" <<<"$out" \
+    && ! grep -qF 'c12-17' <<<"$out" && ! grep -qF '+b=3' <<<"$out" \
+    || fail "the facts do not list the commits in the window that changed the test file or the shared helper, with their cards, and only those: $out"
+  out=$(tawin 24-hour .)
+  grep -qF '(1.2 s at 2026-11-01 19:00:00 EST)' <<<"$out" && grep -qF "landed as commit $h at 2026-11-02 08:00:00 EST" <<<"$out" \
+    || fail "the facts' times do not follow a 24-hour Time setting: $out"
+  # The window moved past every commit in it, its slow run of a card that never landed: none is in it, and it says so.
+  out=$(tawin '' '.runs |= map(if .card == "c2-6" then .time = "2026-11-02T16:00:00Z" elif .card == "c9-14" then .card = "c99-99" else . end)')
+  grep -qF 'oldest first, each with its card and its diff of those files: none: no commit that changed one of these files was made in that window.' <<<"$out" \
+    && ! grep -qE '^(Card|Commit) ' <<<"$out" || fail "the facts of a window with no commit in it do not say so: $out"
 }

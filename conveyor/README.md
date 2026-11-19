@@ -1209,7 +1209,10 @@ and files no issue (or runs the file by hand, with no session: `testaction run`,
   When the recent runs of the file took more than 2 times their CPU seconds on the clock, it names each wait on a
   line `WAIT: <case> | <kind> | <file:line> | <one-line reason>`. The kind is `sleep`, `polling`, `timeout`, `lock`,
   `network` or `other`.
-- `conveyor.sh testaction explain <test file>`: which card made the file slower, and what in its change is the cause.
+- `conveyor.sh testaction explain [--time <zone> <12-hour | 24-hour>] <test file>`: which card made the file slower,
+  and what in its change is the cause. The times in its facts are in the time zone and on the clock that `--time`
+  names (the Board sends those of its browser and its Time setting); without it, in this machine's time zone on a
+  12-hour clock.
 
 The test file is a path of the repo as main has it. The session runs on the Tests seat of the control record: a CLI
 installed on the host, a model and an effort, set by `conveyor.sh control tests <cli> <model> [effort]` as the other

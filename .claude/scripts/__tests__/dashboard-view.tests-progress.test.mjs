@@ -36,7 +36,8 @@ for (const [how, words, click, own, ended, shows] of ROW) {
     click(w);
     assert.match(boxOf(w).textContent, new RegExp(`^${words}Starting: sent to the build machine`), 'at the click, before any answer');
     assert.ok(goesOn(boxOf(w)), 'with a bar');
-    assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [[how, MERGE]]);
+    // An explain sends the browser's zone (the helpers' TZ) and the Time setting, 12-hour by default (#770).
+    assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [how === 'explain' ? [how, '--time', 'America/New_York', '12-hour', MERGE] : [how, MERGE]]);
     await go(reply(ID1));
     assert.match(boxOf(w).textContent, /Running: 0:00/, 'answered: started');
     const r = (o) => rec({ action: how, start: iso(T0 - 100000), ...own, ...o });

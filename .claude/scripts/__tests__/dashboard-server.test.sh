@@ -656,9 +656,9 @@ case \$1 in
   retry) echo "conveyor: issue #\$2 can be picked again" ;;
   shut) echo "conveyor: issue #\$2 was closed while card c1 was blocked; the card is closed" ;;
   machine) echo "conveyor: the machine's Conveyor: \$2" ;;
-  # A test action's id, or an issue's address; a file named gone is not main's.
+  # A test action's id (of its file, the last argument), or an issue's address; a file named gone is not main's.
   testaction|testissue) [[ "\$*" != *gone* ]] || { echo "conveyor: the file is not a file of main" >&2; exit 2; }
-    if [ "\$1" = testaction ]; then echo "id-\${3##*/}"; else echo "https://github.com/o/r/issues/\$(grep -c . "$F/conveyor-calls")"; fi ;;
+    if [ "\$1" = testaction ]; then l=\${*: -1}; echo "id-\${l##*/}"; else echo "https://github.com/o/r/issues/\$(grep -c . "$F/conveyor-calls")"; fi ;;
 esac
 STUB
 printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s/gh-calls"\npwd >> "%s/gh-pwd"\ncase "$1 $2" in "issue view") echo "Old body" ;; "issue edit") cat > "%s/gh-body" ;; esac\n' "$F" "$F" "$F" > "$M/bin/gh"
@@ -939,7 +939,7 @@ fresh_control
 Verdict: split" ] && [ "$(cat "$F/gh-writes")" = "issue close 480 --comment Done: before 12 CPU s, after 6 CPU s." ] \
   || fail "test_issue_and_close_reach_conveyor: $(cat "$M/ctl.out") ran '$(calls)' wrote '$(cat "$F/gh-writes" 2>&1)'"
 fresh_control
-for a in 'testaction judge' 'testaction stop 12' 'testaction judge -x.test.sh' 'testaction delete a.test.sh' 'testrules guard perDay off' 'testrules set r limit' 'testrules add r budget 1 3 3' 'testrules set r measure budget' 'tests codex' 'test-close x done' 'flaky-off a.test.sh why'; do
+for a in 'testaction judge' 'testaction stop 12' 'testaction judge -x.test.sh' 'testaction delete a.test.sh' 'testaction explain --time ../zone 12-hour a.test.sh' 'testaction explain --time :/etc/zone 12-hour a.test.sh' 'testaction explain --time UTC 13-hour a.test.sh' 'testaction judge --time UTC 12-hour a.test.sh' 'testrules guard perDay off' 'testrules set r limit' 'testrules add r budget 1 3 3' 'testrules set r measure budget' 'tests codex' 'test-close x done' 'flaky-off a.test.sh why'; do
   # shellcheck disable=SC2086 # each word an argument
   [ "$(ctl "$(act $a)")" = 400 ] || fail "test_actions_take_only_their_shapes: '$a' answered '$(cat "$M/ctl.out")'"
 done
@@ -956,6 +956,13 @@ fresh_control
   && [ "$(calls)" = "CONVEYOR_MAIN=$HM testaction judge t/a.test.sh
 CONVEYOR_MAIN=$HM testaction judge t/b.test.sh
 CONVEYOR_MAIN=$HM testaction judge t/c.test.sh" ] || fail "testaction_list_one_a_file: $(cat "$M/ctl.out") ran '$(calls)'"
+# An explain carries the browser's zone and Time setting (#770), which go with each file of a list; bug: the facts'
+# times then fell back to the build machine's zone, or the --time words were read as files.
+fresh_control
+[ "$(ctl "$(act testaction explain --time America/New_York 24-hour t/a.test.sh t/b.test.sh)")" = 200 ] \
+  && [ "$(jq -c '.results' "$M/ctl.out")" = '[{"file":"t/a.test.sh","id":"id-a.test.sh"},{"file":"t/b.test.sh","id":"id-b.test.sh"}]' ] \
+  && [ "$(calls)" = "CONVEYOR_MAIN=$HM testaction explain --time America/New_York 24-hour t/a.test.sh
+CONVEYOR_MAIN=$HM testaction explain --time America/New_York 24-hour t/b.test.sh" ] || fail "testaction_explain_time_each_file: $(cat "$M/ctl.out") ran '$(calls)'"
 fresh_control
 [ "$(ctl "$(act test-issue t/a.test.sh 'Optimize the test file t/a.test.sh' 'Median 12 CPU s. VERDICT: split' t/b.test.sh 'Optimize the test file t/b.test.sh' 'Median 9 CPU s. VERDICT: delete')")" = 200 ] \
   && [ "$(jq -c '.results' "$M/ctl.out")" = '[{"file":"t/a.test.sh","id":"https://github.com/o/r/issues/1"},{"file":"t/b.test.sh","id":"https://github.com/o/r/issues/2"}]' ] \
@@ -974,7 +981,7 @@ for body in "$(act testaction judge t/a.test.sh -x.test.sh)" "$(act test-issue t
   [ "$(ctl "$body")" = 400 ] || fail "test_list_takes_only_its_shapes: '$body' answered '$(cat "$M/ctl.out")'"
 done
 [ -z "$(calls)" ] || fail "test_list_takes_only_its_shapes: ran '$(calls)'"
-pass=$((pass + 4))
+pass=$((pass + 5))
 # The Tests page's Mutation check (#79): the files selected are one ask, `mutate ask` with them all, which puts them at
 # the front of the idle queue. Bug: one call a file (each would go before the last, so the order turned round), a
 # command that ran a check now, or a file of a bad shape or a list over TEST_FILES_MAX that ran anything.
