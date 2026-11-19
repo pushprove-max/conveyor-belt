@@ -35,7 +35,9 @@ adoptserve() {
 # starts them again on the new code in place of their own processes (they switch at their next step: t_switchcode); it restarts beside a push still running and starts a second one, or waits for the push
 # of a card that landed during that push; a forged adoption takes the run lock beside a running loop.
 t_adopt() {
+  local -x FILEMODE=1
   adoptsetup "[$(issue 5 2025-12-31), $(issue 6 2026-01-01), $(issue 7 2026-01-02), $(issue 8 2026-01-03)]"
+  linkset '{"a.txt": ["a.test.sh"], "f7.txt": ["a.test.sh"]}' # #7's test step runs the stub, held below
   # Each card changes a file of its own, but #9 changes #7's. The reviews of #5, #8 and #9, and the tests of #7 (past its
   # claim on f7.txt, at its landing step), are held until $STUB/go.<issue>.
   echo 'n=${PWD##*-}; [ "$n" != 9 ] || n=7; echo two >> "f$n.txt"' > "$STUB/build"
@@ -108,6 +110,7 @@ EOF2
 # killed at a restart), or a process under it that ignores TERM holds the loop for good, or one it starts on TERM
 # before it ends outlives it unseen.
 t_adoptkill() {
+  local -x FILEMODE=1
   adoptsetup "[$(issue 8 2026-01-03)]"
   # Each card changes a file of its own; the reviews of #8 and #9 are held until $STUB/go.<issue>. The first review of
   # #8 starts a process that ignores TERM, and on TERM starts another that ignores it too (its pid in $STUB/spawned),
@@ -165,6 +168,7 @@ EOF2
 # Bugs: a restart with no card in flight is not what it was: on the pin, in the same process, holding the lock,
 # picking; after the restart, a ready issue with a free slot waits more than one turn to be picked.
 t_adoptidle() {
+  local -x FILEMODE=1
   local k
   adoptsetup '[]'
   # The loop's waits (TURNS) when #11 is made ready, and when it is picked: the turn running then may be past its
@@ -198,7 +202,7 @@ gonecard() {
 # its lib/card.sh, changes it more. #5 then started on $A, the pin moved to N while #5 is in its test step, and #5 let
 # go on to its end.
 switchrun() {
-  adoptsetup "[$(issue 5 2026-01-01)]"
+  adoptsetup "[$(issue 5 2026-01-01)]"; linkset '{"a.txt": ["a.test.sh"], "f5.txt": ["a.test.sh"]}' # #5's test step runs the stub
   printf '%s\n' 'eval "old$(declare -f redbrief)"; redbrief() { echo "$RAN" >> "$STUB/newcode"; cp "$wt.settings" "$STUB/settings"; local p=$sprompt; newtexts p; printf %s "$p" > "$STUB/prompt"; oldredbrief "$@"; }' >> "$D/conveyor/lib/card.sh"
   echo 'A rule of commit N.' >> "$D/conveyor/rules/card-core.md"
   [ -z "${1:-}" ] || sed -i "$1" "$D/conveyor/lib/card.sh"
@@ -219,6 +223,7 @@ switchrun() {
 # (its settings file) or the old rules (its prompt, a copy made before the switch too); prune() removes the install it
 # switched to while it runs; a later restart says, and hands on, the commit it started on in place of the one it runs.
 t_switchcode() {
+  local -x FILEMODE=1
   switchrun
   grep -qF "conveyor: card $(card 5): Conveyor took commit $N; the card goes on with the new code from its land step, and no passed step runs again" "$STUB/serve.out" \
     || fail "#5 did not say it switched at its land step: $(cat "$STUB/serve.out")"
@@ -240,6 +245,7 @@ t_switchcode() {
 # Bug (#449): a card switches to new code that reads another form of step files than its old code saved, or does not
 # say why it stays on its old code.
 t_switchkeep() {
+  local -x FILEMODE=1
   switchrun "s/^STEPFILES=.*/STEPFILES=2/"
   grep -qF "conveyor: card $(card 5): Conveyor took commit $N; the card goes on with its old code, commit $A: the new code cannot read the step files that the old code saved (form 1; the new code reads form 2)" "$STUB/serve.out" \
     || fail "#5 did not say why it kept its old code: $(cat "$STUB/serve.out")"
@@ -251,6 +257,7 @@ t_switchkeep() {
 # runs its old body beside the new code's other functions (a fix inside card() never reaches it); or its log does not
 # say why it stays on its old code.
 t_switchbusy() {
+  local -x FILEMODE=1
   switchrun '/^card() {/a :'
   grep -qF "conveyor: card $(card 5): Conveyor took commit $N; the card goes on with its old code, commit $A: the new code changes card(), which the card is running in" "$STUB/serve.out" \
     || fail "#5 did not say why it kept its old code: $(cat "$STUB/serve.out")"
@@ -265,6 +272,7 @@ t_switchbusy() {
 # without the new file), or waits for someone to `retry` it. It blocks it with its change kept and picks #7 again from
 # that work, with no one asked: the new card's session adds nothing, and the card lands with both files.
 t_gonebuild() {
+  local -x FILEMODE=1
   local lp c1 c2 out
   setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"
   echo '[ -e "$STUB/built" ] || { echo two >> a.txt; echo new > u.txt; : > "$STUB/built"; exec sleep 600; }' > "$STUB/build" # sleep: a build the machine stops
@@ -294,6 +302,7 @@ t_gonebuild() {
 # lost with its worktree), or is not told it passed. Its run is given `pass a.test` and runs b.test alone, as any run
 # again after a run cut short does. The build is the same edit each time, so the change tested is the same.
 t_gonetest() {
+  local -x FILEMODE=1
   local lp c1 out
   setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
   echo 'grep -qx two a.txt || echo two >> a.txt' > "$STUB/build"
@@ -328,6 +337,7 @@ EOF
 # The run is a batch's, its own change set aside (<worktree>.bpatch) and another card's alone in its worktree, as a
 # split does. Bug: the other card's change is kept as its work and its own is lost with its .bpatch.
 t_killedtest() {
+  local -x FILEMODE=1
   local lp c tp r
   setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"; echo 'echo two >> a.txt' > "$STUB/build"
   echo 'git add -A && git diff --cached --binary --no-renames > "$PWD.bpatch" && git rev-parse HEAD > "$PWD.lent" && git reset -q --hard && echo eight > m.txt && git add -A
@@ -365,6 +375,7 @@ its process ended without a result in its fix step; its exit status is not known
 # file there are left as they are, and its issue is not picked. #8's process is gone and so is its worktree: it is
 # blocked with nothing kept, and its issue is picked again and built from the start.
 t_gonealive() {
+  local -x FILEMODE=1
   local alive ended s out c w=c20260101T000000-t-7
   setup "[$(issue 7 2026-01-01), $(issue 8 2026-01-02)]"; echo "$GO" > "$STUB/review.1"
   sleep 600 & alive=$!; sleep 0 & ended=$!; wait $ended # sleep: stand-ins for two cards' processes, one alive and one ended
@@ -389,6 +400,7 @@ wtchange() { git -C "$R" worktree add -q --detach "$T/$CASE/cards/$1" && echo tw
 # ("still open") and nothing on the owner's side freed it. retry ends it as a block does, its change kept, then gives
 # the issue back, and the next card of #7 is built from that kept work.
 t_retrygone() {
+  local -x FILEMODE=1
   local ended out c=c20260101T000000-t-7 c2
   setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"; echo : > "$STUB/build"
   sleep 0 & ended=$!; wait $ended # sleep: a stand-in for the card's process, ended
@@ -410,6 +422,7 @@ t_retrygone() {
 # closed. retry 7 still refuses #7 and leaves it as it is; retry 8 ends #8 and everything under it, blocks it naming
 # its review step, with its work kept, and gives #8 back; shut 9 ends #9 the same way and closes the card.
 t_retrystuck() {
+  local -x FILEMODE=1
   local p7 p8 p9 out c7=c20260101T000000-t-7 c8=c20260101T000000-t-8 c9=c20260101T000000-t-9 why
   setup "[$(issue 7 2026-01-01), $(issue 8 2026-01-02)]"; tune '.tunables.stuck = 1 | .tunables.reviewPause = 0'
   sleep 600 & p7=$!; sleep 600 & p8=$!; sleep 600 & p9=$! # sleep: stand-ins for three cards' processes that run
@@ -435,6 +448,7 @@ t_retrystuck() {
 # Bug: its worktree is kept as it stands, #8's change saved as #7's work and #7's own lost with its .bpatch. Its own
 # change, the new file too, is put back and kept, none of #8's, and #7 lands it.
 t_gonebatch() {
+  local -x FILEMODE=1
   local ended out c=c20260101T000000-t-7 wt
   setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"; echo : > "$STUB/build"
   sleep 0 & ended=$!; wait $ended # sleep: a stand-in for the card's process, ended

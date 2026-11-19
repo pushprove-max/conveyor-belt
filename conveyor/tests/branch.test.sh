@@ -29,6 +29,8 @@ branchsetup() {
   count() { [ "$(cat "$STUB/sessions" 2>/dev/null | wc -l) $(cat "$STUB/reviews" 2>/dev/null | wc -l) $(cat "$STUB/tests" 2>/dev/null | wc -l)" = "$1" ] || fail "sessions, reviews and test runs so far are $(cat "$STUB/sessions" 2>/dev/null | wc -l) $(cat "$STUB/reviews" 2>/dev/null | wc -l) $(cat "$STUB/tests" 2>/dev/null | wc -l), not $1"; }
   init=$(git -C "$R" rev-parse HEAD)
 }
+# The old fixture: with FILEMODE the landed card leaves <card>.testlist in the cards folder (tidy() in lib/push.sh does
+# not remove it), and this case checks that folder is empty.
 t_branch() {
   branchsetup
   # A good change on a branch that names no issue: one review, the changed tests, landed. No build session.
@@ -51,6 +53,7 @@ t_branch() {
   out=$(loop land-branch fast-lane) && grep -q 'nothing to land' <<<"$out" && [ "$(newest)" = "$c" ] || fail "a branch main already holds made a card or failed: $out"
 }
 t_branchnolink() {
+  local -x FILEMODE=1
   branchsetup
   # Bug: a branch merged into the card's worktree, then the dependencies could not be linked
   # (here a folder the branch tracks is where the link goes), and the block threw the staged change away. It is

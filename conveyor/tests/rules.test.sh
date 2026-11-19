@@ -14,6 +14,7 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # same rules (plan section 10); a missing or empty rules file lets the card build without them, or blocks it with a reason that does not
 # name the file. The card rules are not the core rules followed by the pack's.
 t_rules() {
+  local -x FILEMODE=1
   local f=$T/$CASE.expected p i k
   printf '%s\n\n%s\n' "$(cat "$SRC/rules/card-core.md")" "$(cat "$SRC/lib/test-card-rules.md")" > "$f"
   setup "[$(issue 7 2026-01-01)]"
@@ -65,6 +66,7 @@ EOS
 # the project, not by its pinned path in the engine's checkout;
 # a pack hooks.json of another shape (one that would set what the generic settings set) lets the card build.
 t_packrules() {
+  local -x FILEMODE=1
   local s r x
   setup "[$(issue 7 2026-01-01 | jq -c '.body = "It breaks in web/src/a.tsx:12, package.json and tools/ too."'), $(issue 8 2026-01-02), $(issue 9 2026-01-03)]"
   for i in 1 2; do echo "$GO" > "$STUB/review.$i"; done
@@ -111,6 +113,7 @@ t_packrules() {
 # more than one; a card whose tests fail twice lands, or files follow-ups; a card landing on the last review's NO-GO
 # skips the tests, or files its follow-ups before they have passed; a test run leaves no line in the records.
 t_tests() {
+  # The old fixture: the fix session is handed the last 200 lines of test.command's own output.
   setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-02-01) <(issue 9 2026-03-01) <(issue 10 2026-04-01) <(issue 11 2026-05-01))"
   mkdir -p "$R/node_modules/dep" "$R/web/node_modules/wdep" "$R/infra" "$R/cache/deps/cdep"; echo '{}' | tee "$R/package.json" "$R/web/package.json" > "$R/infra/package.json"
   # Bug: a link whose parent folder the worktree does not have (cache/ is main's alone) failed.
@@ -179,6 +182,7 @@ t_tests() {
 # named a passing file as failed. Files run in the log's order: a `== ` line that goes back is a test's own, and a
 # FAIL line a passing file prints is no failure.
 t_testfails() {
+  # The old fixture: the failures are read from the runner's log of test.command (test.fileCommand's names its file).
   setup "$(jq -cs . <(issue 7 2026-01-01))"
   for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done
   # The first run: two of four files fail, one case each, one with a line over 200 characters and a second FAIL line,
@@ -238,6 +242,7 @@ EOF
 # line for the next file joined to its last line, where it was not read: the case was the next, passing file's alone
 # and was dropped. A `== ` line counts wherever it is in a line.
 t_testhide() {
+  # The old fixture: the failures are read from the runner's log of test.command (test.fileCommand's names its file).
   setup "$(jq -cs . <(issue 7 2026-01-01))"
   for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done
   cat > "$STUB/test-cmd" <<'EOF'
@@ -268,6 +273,7 @@ EOF
 # Bug: a passing test that printed its own `== ` line again (`== tests/b 0s`, a file done) was read as the beginning
 # of the later file its name begins with (`tests/b`), which failed: the passing file's `FAIL [` line became a case of it.
 t_testfailsspace() {
+  # The old fixture: the failures are read from the runner's log of test.command (test.fileCommand's names its file).
   setup "$(jq -cs . <(issue 7 2026-01-01))"
   for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done
   cat > "$STUB/test-cmd" <<'EOF'
@@ -295,6 +301,7 @@ EOF
 # Bug: a test command that writes no runner log (a pack that runs one test file itself) had its failing cases under
 # no file: the Board could not say what failed. Such a run is one file, the command.
 t_testnolog() {
+  # The old fixture: the case is of test.command with no runner log (test.fileCommand's names its file).
   setup "$(jq -cs . <(issue 7 2026-01-01))"
   for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done
   echo '[ -n "${CONVEYOR_TEST_RERUN:-}" ] && ! grep -q "^changed" "$CONVEYOR_TEST_RERUN" || echo x >> "$STUB/tests"; [ "$(wc -l < "$STUB/tests")" != 1 ] || { echo "ok lane"; echo "FAIL [views]: wrong"; exit 1; }; echo "ok one"; kill -ALRM "$PPID"; sleep 30' > "$STUB/test-cmd" # sleep: a test run that hangs, cut as at testTimeout (rerun.test.sh)
@@ -314,6 +321,7 @@ t_testnolog() {
 # own log is still a test's own. And a file both runners ran was kept in the first log's order only, so the second
 # runner's run of it read as going back and its failing case went to the file before it.
 t_testrunners() {
+  # The old fixture: the failures are read from the runners' logs of test.command (test.fileCommand's names its file).
   setup "$(jq -cs . <(issue 7 2026-01-01))"
   for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done
   cat > "$STUB/test-cmd" <<'EOF'
@@ -337,6 +345,7 @@ EOF
 # to the file before it: the Board named a file for a failure that was another's. Only the reading of the whole
 # output that takes every one of the runners' `== ` lines is right.
 t_testshared() {
+  # The old fixture: the failures are read from the runners' logs of test.command (test.fileCommand's names its file).
   setup "$(jq -cs . <(issue 7 2026-01-01))"
   for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done
   cat > "$STUB/test-cmd" <<'EOF'
@@ -361,6 +370,7 @@ EOF
 # writes lands unreviewed; the tests delete the trailers after the check and the card commits without them; a path
 # git quotes (café/), or one holding a newline, escapes the rule; a rule whose when is not a valid ERE silently requires nothing.
 t_trailers() {
+  local -x FILEMODE=1
   setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-01-02) <(issue 9 2026-01-03) <(issue 10 2026-01-04) <(issue 11 2026-01-05) <(issue 12 2026-01-06))"
   sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
   for i in 1 2 3 4 5 6 7; do echo "$GO" > "$STUB/review.$i"; done
@@ -414,6 +424,7 @@ t_trailers() {
 # lands, or gets a fix round in place of being blocked; the reason does not hold the check's own lines; a clean card
 # does not land.
 t_checks() {
+  local -x FILEMODE=1
   setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-02-01) <(issue 9 2026-03-01))"
   echo '{"hex":3}' > "$R/baseline.json"; echo 'SCHEMA_4' > "$R/schema.txt"
   git -C "$R" add -A; git -C "$R" commit -qm ratchets
@@ -459,6 +470,7 @@ CHECK
 # Bug: Held and Queue sorted by when an issue was opened, so one held today came before one held ten days ago when
 # it was opened first. Each issue there carries since: when it came to that column, never when it was opened.
 t_since() {
+  local -x FILEMODE=1
   setup '[]'; touch "$ST/cards.jsonl" "$ST/retried.jsonl"
   { issue 1 2026-01-01T00:00:00Z; issue 2 2026-01-02T00:00:00Z; } | jq -cs . > "$STUB/issues.json"
   on() { local t=$1; shift; CONVEYOR_NOW=$(date -u -d "$t" +%s) loop "$@"; }
@@ -516,6 +528,7 @@ t_since() {
 # lands on main and pushes to origin when the pack names master and upstream; a visible change asks for Dana's yes when
 # the owner is Quinn; the follow-up, type, priority and area labels, and the product paths, are the host project's.
 t_pack() {
+  local -x FILEMODE=1
   setup "[$(issue 7 2026-01-01 defect team/billing)]"; O=$T/$CASE/up
   sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
   git -C "$R" branch -m main master; git -C "$R" remote remove origin

@@ -18,6 +18,7 @@ nine() { seq 9 | sed 's/^/l/' > "$R/a.txt"; git -C "$R" commit -qam "a.txt of ni
 # #7 changes l4; during its tests main changes l6. Its change merges three-way onto main with no conflict: it lands with
 # no rebuild session, no second review and no second test run, both lines in main.
 t_mergeclean() {
+  # The old fixture: #7 lands on a main that changed a.txt too.
   setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"; nine
   echo "sed -i 's/^l4\$/seven/' a.txt" > "$STUB/build"
   echo '[ -e "$STUB/moved" ] || { : > "$STUB/moved"; sed -i "s/^l6\$/main6/" "$R/a.txt"; git -C "$R" commit -qam "main moves"; }' >> "$STUB/test-cmd"
@@ -37,6 +38,7 @@ t_mergeclean() {
 # rebuild session. #7 changes l4; during its tests main changes l4 too. The rebuild session brings #7 onto main, and it
 # is reviewed and tested again.
 t_mergeconflict() {
+  local -x FILEMODE=1
   setup "[$(issue 7 2026-01-01)]"; for i in 1 2; do echo "$GO" > "$STUB/review.$i"; done; nine
   echo "if grep -q '^# Landing conflict' \"\$STUB/brief\"; then sed -i 's/^main4\$/seven/' a.txt; else sed -i 's/^l4\$/seven/' a.txt; fi" > "$STUB/build"
   echo '[ -e "$STUB/moved" ] || { : > "$STUB/moved"; sed -i "s/^l4\$/main4/" "$R/a.txt"; git -C "$R" commit -qam "main moves"; }' >> "$STUB/test-cmd"
@@ -52,6 +54,7 @@ t_mergeconflict() {
 # once (#7's tests end only once #8 holds it, or after 30 s), and neither waits. #8's tests end only once #7 landed;
 # #8 is then merged onto main with no session and no second review, on the tests it passed.
 t_mergetogether() {
+  # The old fixture: #8 lands on a main that changed a.txt too.
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done; nine
   cat > "$STUB/build" <<'EOF'
 case $PWD in
@@ -86,7 +89,9 @@ EOF
 # conflict: neither waits, both holding their claims at once with no file named. #7 lands first; #8 meets the conflict
 # at its landing, and its rebuild session resolves it, as any conflict at landing.
 t_mergedocs() {
+  local -x FILEMODE=1
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done
+  linkset '{"a.txt": ["a.test.sh"], "README.md": ["a.test.sh"]}' # the cards' test steps run the stub, held below
   echo title > "$R/README.md"; git -C "$R" add README.md; git -C "$R" commit -qm "a README"
   cat > "$STUB/build" <<'EOF'
 if grep -q '^# Landing conflict' "$STUB/brief"; then printf 'seven\neight\n' > README.md
@@ -121,6 +126,7 @@ EOF
 # into the work tree, main's checkout, which then refused the landing of b.txt. The cards' change merges as the same
 # change onto a main that changed l6 alone: ready.
 t_mergesame() {
+  local -x FILEMODE=1
   setup '[]'; nine; CARDS=$T/$CASE/cards; mkdir -p "$CARDS"
   for n in 7 8; do
     git -C "$R" worktree add -q "$CARDS/c$n-$n" -b "card-$n" main
@@ -162,6 +168,7 @@ EOF
 # reply leaves out the D<n> lines, so the card was sent to a fix session and blocked. A merge that changed only the
 # conflict is not checked: no Done-when fix session, and #7 is reviewed, tested and lands as merged.
 t_mergedwconflict() {
+  local -x FILEMODE=1
   mergedw :
   [ "$(wc -l < "$STUB/sessions")" = 2 ] && [ -z "$(st 'select(.step == "blocked") | .reason')" ] \
     || fail "the merge that changed only the conflict was given the Done-when check: $(st '"\(.step) \(.reason) \(.doneWhen)"' | tr '\n' ,)"
@@ -173,6 +180,7 @@ t_mergedwconflict() {
 # A merge session that also changes a line outside the conflict (l8) is checked as any fix session: its reply with no
 # D<n> line is sent to one Done-when fix session, and #7 then goes through review and test before it lands.
 t_mergedwoutside() {
+  local -x FILEMODE=1
   mergedw "sed -i 's/^l8\$/eight/' a.txt"
   [ "$(wc -l < "$STUB/sessions")" = 3 ] && grep -q '^# The Done-when check failed' "$STUB/brief.3" \
     || fail "the merge that changed a line outside the conflict was not given the Done-when check: $(st '"\(.step) \(.reason) \(.doneWhen)"' | tr '\n' ,)"
@@ -204,6 +212,7 @@ casefile() { echo case1 > "$R/a.test.sh"; git -C "$R" add a.test.sh; git -C "$R"
 # is checked to parse (parses(), here through the pack's land.parse, which records each file it checks) before its
 # tests run on it. What a file that fails the check leads to is t_mergeparseclean's.
 t_mergetests() {
+  local -x FILEMODE=1
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2; do echo "$GO" > "$STUB/review.$i"; done; casefile
   cat > "$STUB/build" <<'EOF'
 case $PWD in
@@ -227,6 +236,7 @@ EOF
 # kept side by side may not work together. #7 adds a case; during its tests main adds one too. The merged file holds
 # both and its run fails: #7 goes to its fix, and lands after it with both cases.
 t_mergetestsrun() {
+  local -x FILEMODE=1
   setup "[$(issue 7 2026-01-01)]"; for i in 1 2; do echo "$GO" > "$STUB/review.$i"; done; casefile
   echo "if grep -q '^# The changed tests fail' \"\$STUB/brief\"; then echo fixed >> a.test.sh; else echo case7 >> a.test.sh; fi" > "$STUB/build"
   # The failed run writes the runner's log naming its file: one that names only the test command is no result (voidrun()).
@@ -251,6 +261,7 @@ EOF
 # tests pass before #7 lands; at its landing that test file runs again on main with #7's change, fails, and #8 goes to
 # its fix: it does not land red.
 t_mergesharedtests() {
+  # The old fixture: the shared file is found from the log of test.command, the runner that selects it.
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2 3 4; do echo "$GO" > "$STUB/review.$i"; done
   mkdir -p "$R/lib"; echo panel > "$R/lib/panel.sh"; echo rows > "$R/lib/rows.sh"; echo case1 > "$R/lib/view.test.sh"
   git -C "$R" add lib; git -C "$R" commit -qm "a panel, its rows and their test"
@@ -290,6 +301,7 @@ EOF
 # cards that landed: a commit on main and its landed line. Each run of A's tests logs the file, and the n-th lands the
 # n-th of them.
 sharedonce() { # [conflict]
+  # The old fixture (both cases): the shared file is found from the log of test.command, the runner that selects it.
   setup "[$(issue 7 2026-01-01)]"; for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done
   mkdir -p "$R/lib"; echo panel > "$R/lib/panel.sh"; echo case1 > "$R/lib/view.test.sh"
   git -C "$R" add lib; git -C "$R" commit -qm "a panel and its test"
@@ -354,6 +366,7 @@ t_mergeunshare() {
 # path, no session), and it leaves two openings and one end. The parse check finds it before any test runs on it, and
 # #7's fix session is given the file and node's SyntaxError; #7 lands after it with a file that parses.
 t_mergeparseclean() {
+  local -x FILEMODE=1
   setup "[$(issue 7 2026-01-01)]"; for i in 1 2; do echo "$GO" > "$STUB/review.$i"; done
   printf '%s\n' "import test from 'node:test';" '/* off until a() is fixed' "test('one', () => {" '  a();' '  b();' '});' '*/' > "$R/a.test.mjs"
   git -C "$R" add a.test.mjs; git -C "$R" commit -qm "a test file"
@@ -412,6 +425,7 @@ readme() { # <review-cmd|test-cmd> <the merge session's own edit>
 # after the card's tests passed sent it, after the rebuild session merged the README, to a new review and a new test
 # run. Its change outside documentation is the one reviewed and tested: it lands on that review and that run.
 t_mergereadme() {
+  local -x FILEMODE=1
   readme test-cmd :
   [ "$(st "select(.issue == 7 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test rebase test landed " ] \
     && [ "$(st 'select(.step == "test") | .reused // false' | tr '\n' ' ')" = "false true " ] \
@@ -422,6 +436,7 @@ t_mergereadme() {
 # The review and the test pass stand only for the same change: a rebuild session that also changes a line of code (l8)
 # sends #7 to a new review and a new test run.
 t_mergereadmecode() {
+  local -x FILEMODE=1
   readme test-cmd "sed -i 's/^l8\$/eight/' a.txt"
   [ "$(wc -l < "$STUB/reviews")" = 2 ] && [ "$(wc -l < "$STUB/tests")" = 2 ] && grep -qx eight "$R/a.txt" \
     || fail "#7's changed code was not reviewed and tested again: $(st "select(.issue == 7) | \"\(.step) \(.reused)\"" | tr '\n' ,)"
@@ -430,6 +445,7 @@ t_mergereadmecode() {
 # The same at the landing claim (settle()): a clash in a README alone during the review is merged by one session, and
 # the card goes on to its tests with no second review.
 t_mergereadmewait() {
+  local -x FILEMODE=1
   readme review-cmd :
   [ "$(st "select(.issue == 7 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review fix test landed " ] \
     && [ "$(wc -l < "$STUB/reviews")" = 1 ] && [ "$(wc -l < "$STUB/tests")" = 1 ] \
@@ -455,6 +471,7 @@ fastcase() { # <answer>, as the judge writes it
 # A good answer: both lines are kept, the change is staged on main's commit, no marker is left, and the judge was given
 # the conflict with its base.
 t_fastfit() {
+  local -x FILEMODE=1
   fastcase '{"1": "main4\nseven"}'
   [ $rc = 0 ] || fail "the fast resolver did not fit a conflict its answer merged"
   [ "$(git -C "$w" rev-parse HEAD)" = "$onto" ] && [ "$(git -C "$w" show :a.txt | sed -n 4,5p | tr '\n' ' ')" = "main4 seven " ] \
@@ -466,6 +483,7 @@ t_fastfit() {
 # An answer that leaves a marker, gives no text for the conflict, or is no JSON: no fit, and the worktree is main again
 # for the session.
 t_fastfitbad() {
+  local -x FILEMODE=1
   local a
   for a in '{"1": "main4\n=======\nseven"}' '{"2": "x"}' 'I could not merge it.'; do
     fastcase "$a"
@@ -478,6 +496,7 @@ t_fastfitbad() {
 
 # With the judge off in the control record, the fast resolver asks nothing: the session fits the card, as before.
 t_fastfitoff() {
+  local -x FILEMODE=1
   FASTOFF=1 fastcase '{"1": "main4\nseven"}'
   [ $rc != 0 ] && [ ! -e "$T/$CASE/called" ] || fail "the fast resolver ran with the judge off"
 }

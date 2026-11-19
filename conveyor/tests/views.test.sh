@@ -60,7 +60,7 @@ snapshotstart() {
     {"createdAt":"2026-11-05T00:00:00Z","label":{"name":"awaiting-deploy"}},{"createdAt":"2026-11-07T00:00:00Z","label":{"name":"P1"}}]}},{"number":26,"timelineItems":{"nodes":[]}}]}}}}' > "$STUB/labelled"
   q() { jq -c "$1" <<<"$out"; }
 }
-t_snapshot() { snapshotstart
+t_snapshot() { local -x FILEMODE=1; snapshotstart
   out=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
   [ "$(q .awaitingDeploy)" = '[{"issue":25,"title":"title 25","since":"2026-11-05T00:00:00Z"},{"issue":26,"title":"title 26","since":null},{"issue":27,"title":"title 27","since":null}]' ] \
     || fail "awaitingDeploy: $(q .awaitingDeploy)"
@@ -115,7 +115,7 @@ t_snapshot() { snapshotstart
     || fail "cost per card: $(q .cost.cards)"
 }
 # GitHub does not say when: the same list, every since null. No issue carries the label: an empty list.
-t_snapshotdeploy() { snapshotstart
+t_snapshotdeploy() { local -x FILEMODE=1; snapshotstart
   rm "$STUB/labelled"; [ "$(loop snapshot --fresh | jq -c '.awaitingDeploy | map([.issue, .since])')" = '[[25,null],[26,null],[27,null]]' ] || fail "awaitingDeploy without the label times"
   jq -c 'map(select(.labels | any(.name == "awaiting-deploy") | not))' "$STUB/issues.json" > "$STUB/issues.none" && mv "$STUB/issues.none" "$STUB/issues.json"
   [ "$(loop snapshot --fresh | jq -c .awaitingDeploy)" = '[]' ] || fail "awaitingDeploy with no such issue is not an empty list"
@@ -131,7 +131,7 @@ t_snapshotdeploy() { snapshotstart
   ! grep -qx junk "$S/cards.jsonl" && [ "$(jq -sc 'map(.record)' "$S/quarantined.jsonl")" = '["junk"]' ] || fail "the snapshot did not set the bad line aside: $(cat "$S/quarantined.jsonl" 2>&1)"
 }
 # #4042: card 12, landed 10 days ago, is in pushedCards once its push is recorded today (t_snapshot: not before).
-t_snapshotpushed() { snapshotstart; card 12 "$d" 'pushed:ok:{"sha":"abd","sec":5,"head":"abd"}'
+t_snapshotpushed() { local -x FILEMODE=1; snapshotstart; card 12 "$d" 'pushed:ok:{"sha":"abd","sec":5,"head":"abd"}'
   [ "$(loop snapshot --fresh | jq -c '.pushedCards | map(select(.card == "c12"))')" = "[{\"card\":\"c12\",\"issue\":12,\"time\":\"${d}T00:00:00Z\",\"day\":\"$d\"}]" ] \
     || fail "a card landed 10 days ago and pushed today is not in pushedCards: $(loop snapshot --fresh | jq -c .pushedCards)"
 }
@@ -139,7 +139,7 @@ t_snapshotpushed() { snapshotstart; card 12 "$d" 'pushed:ok:{"sha":"abd","sec":5
 # the end of its output, newlines kept. Without them the steps show only names, and the findings are lost.
 # The Board draws the steps on a time axis and a review with its findings: each step has the time it ended (the
 # queue's at the pick-up), and a review its counts. Without them the bars have no clock times and no findings chip.
-t_snapshotsteps() { snapshotstart
+t_snapshotsteps() { local -x FILEMODE=1; snapshotstart
   card 14 "$d" picked worktree brief build 'review:NO-GO:{"reason":"[P1] a.sh:1 wrong\n[P2] b.sh:2 slow","tail":"[P1] a.sh:1 wrong\n[P2] b.sh:2 slow","visible":"no","counts":{"P0":0,"P1":1,"P2":1,"P3":0}}' 'blocked:blocked:{"reason":"the changed tests failed; nothing landed.","tail":"ok 1\nFAIL x.test"}'
   out=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
   [ "$(q '.needsYou.blocked[] | select(.card == "c14") | .track.records | map(select(.name | IN("review 1 (NO-GO)", "stopped")) | {name, why, output})')" \
@@ -150,7 +150,7 @@ t_snapshotsteps() { snapshotstart
     || fail "a card's steps lack their end times or a review its counts: $(q '.needsYou.blocked[] | select(.card == "c14") | .track.records')"
 }
 # The snapshot and `cards` read the same rows: a review after a fix is review 2, and both call the step a review.
-t_snapshotcards() { snapshotstart
+t_snapshotcards() { local -x FILEMODE=1; snapshotstart
   card 4 "$d" fix; mv "$S/cards.jsonl" "$S/all"; grep '"card":"c4"' "$S/all" > "$S/cards.jsonl"
   [ "$(loop snapshot --fresh | jq -c '.belt | map([.step, .review, .usd + 0])')" = '[["review",2,5]]' ] && [ "$(loop cards | jq -r '.cards[0].step')" = review ] && ! loop cards | grep -q '"x"' \
     || fail "review 2 of 3, or cards gained the snapshot's fields: $(loop snapshot --fresh | jq -c .belt)"
@@ -160,7 +160,7 @@ t_snapshotcards() { snapshotstart
 # one with no price: those 3 steps are unpriced, each says why, and the totals are the priced steps' with the 3 left
 # out counted; a card with an unpriced step has no dollars of its own, never the sum of the rest. A model in force
 # with no price prices nothing differently. A failed gh leaves the queue null.
-t_snapshotprice() { snapshotstart
+t_snapshotprice() { local -x FILEMODE=1; snapshotstart
   cp "$S/cards.jsonl" "$STUB/cards.priced"
   jq -c 'if .card == "c4" then del(.model) elif .card == "c6" and .step == "build" then .model = "m" else . end' "$STUB/cards.priced" > "$S/cards.jsonl"
   seatset model m; echo junk > "$STUB/issues.json"
@@ -187,7 +187,7 @@ latestart() {
   after() { q '[.belt[] | select(.landed) | [.card, .step, .track.detailAt, .track.label, (.track.detail[14:16] | map(.state[0:1]) | join("")), .track.steps[5].state[0:1], .track.reason]]'; }
 }
 # One read: a card that lands while the snapshot is built (here as health asks gh) is in no part of that snapshot.
-t_snapshotlate() { latestart
+t_snapshotlate() { local -x FILEMODE=1; latestart
   echo '[ -e "$STUB/was-late" ] || { cat "$STUB/late" >> "$ST/cards.jsonl"; : > "$STUB/was-late"; }' > "$STUB/status-cmd"
   out=$(loop snapshot --fresh 2>/dev/null) || fail "snapshot exited non-zero when a card landed as it was built"
   grep -q '"card":"c5".*"landed"' "$S/cards.jsonl" || fail "the test's late landing was not written"
@@ -205,7 +205,7 @@ t_snapshotlate() { latestart
   [ "$(after)" = '[["c10","push",14,"pushing","nt","n",null],["c5","push",14,"pushing","nt","n",null]]' ] || fail "two landed cards waiting for their push: $(after)"
 }
 # From where the case above ends: card 5 landed, the blocked #8 retried.
-t_snapshotpush() { latestart; cat "$STUB/late" >> "$S/cards.jsonl"; loop retry 8 >/dev/null || fail "retry of the blocked #8 failed"
+t_snapshotpush() { local -x FILEMODE=1; latestart; cat "$STUB/late" >> "$S/cards.jsonl"; loop retry 8 >/dev/null || fail "retry of the blocked #8 failed"
   # A push that fails after they landed is their step failed, not a card gone from the belt.
   mark 5 push "${d}T00:40:00Z" fail "$ahead"; out=$(loop snapshot --fresh 2>/dev/null) || fail "snapshot after a failed push exited non-zero"
   [ "$(after)" = '[["c10","push",14,"push failed; it is tried again","ft","f",""],["c5","push",14,"push failed; it is tried again","ft","f",""]]' ] || fail "a failed push is not the failed step of the cards it carried: $(after)"
@@ -238,7 +238,7 @@ t_snapshotpush() { latestart; cat "$STUB/late" >> "$S/cards.jsonl"; loop retry 8
 }
 # With push off nothing pushes a landed card until the owner presses Push landed: it is off the belt, never "pushing"
 # (the owner read that as a push against the rule), and listed as landed and not pushed, waiting. With push on, pushing.
-t_snapshotpushoff() { latestart; cat "$STUB/late" >> "$S/cards.jsonl"; loop control rules push=off >/dev/null || fail "push=off failed"
+t_snapshotpushoff() { local -x FILEMODE=1; latestart; cat "$STUB/late" >> "$S/cards.jsonl"; loop control rules push=off >/dev/null || fail "push=off failed"
   out=$(loop snapshot --fresh 2>/dev/null) || fail "snapshot with push off exited non-zero"
   [ "$(q '[(.belt | map(select(.landed)) | length), (.health.unpushed | map(.card)), (.landed[] | select(.card == "c5") | [.step, .pushed, .track.label, .track.at, .track.steps[5].state, (.track.records | map(.state) | index("now"))])]')" \
     = '[0,["c10","c5"],["landed",false,"Landed, waiting for Push landed",null,"todo",null]]' ] || fail "a landed card with push off is on the belt or pushing: $out"
@@ -309,7 +309,7 @@ EOF
   done; }; seen() { jq -c "$1" <<<"$SEEN"; }
   local h; for h; do : > "$STUB/$h"; done; loop run >/dev/null 2>&1 & run=$!
 }
-t_livebuild() { livestart
+t_livebuild() { local -x FILEMODE=1; livestart
   until_is '.belt[0].track.label' '"building"'
   [ "$(seen '.belt[0] | [.usd, .reading, .tokens.claude, .live.lastOutputAt, .track.detailAt, .track.at]')" = '[null,false,0,null,5,0]' ] || fail "a session that has said nothing: $(seen '.belt[0]')"
   # Health asks 4 s on (the clock seam, CONVEYOR_NOW), never after a pause: the session, silent since its start, is then past the limit.
@@ -326,12 +326,12 @@ t_livebuild() { livestart
   kill $run; wait $run; : # the run is held here: what it would do next is the next case's
 }
 # The first review says NO-GO (44 lines, 43 of them findings), the fix session runs straight through, the next two say NO-GO too.
-t_livereview() { livestart emit go
+t_livereview() { local -x FILEMODE=1; livestart emit go
   until_is '.belt[0] | [.track.label, .tokens.codex]' '["review 1 of 3",600500]'
   [ "$(seen '.belt[0] | [.reading, .tokens.claude, .usd > 0, (.live.lastOutputAt | fromdate > 0)]')" = '[true,35,true,true]' ] || fail "the reading of a running review: $(seen '.belt[0]')"
   kill $run; wait $run; : # the run is held here: what it would do next is the next case's
 }
-t_live() { livestart emit go go1
+t_live() { livestart emit go go1 # the old fixture: the run is test.command's, a whole-suite runner with its own logs
   until_is '.belt[0].track.files' '{"run":2,"of":5}'
   [ -z "$(find "$CODEX_HOME/sessions" -type f)" ] || fail "the session file of a review that ended is left: $(find "$CODEX_HOME/sessions" -type f)"
   [ "$(seen '.belt[0] | [.track.label, .track.detailAt, (.reviews | map([.round, .verdict, .fixed, (.counts | tojson)]))]')" \
@@ -356,7 +356,7 @@ t_live() { livestart emit go go1
 # Land; a step skipped (Fix after a GO, Build of a card landed from a kept patch) reads as to come; a time is estimated
 # from past cards; a card resumed from a kept patch does not count the time of the card whose work it resumes. The 17
 # steps are still the detail a card opens to.
-t_track() {
+t_track() { local -x FILEMODE=1
   export TZ=UTC; setup '[]'; S=$ST; mkdir -p "$S"; d=$(date -u +%F); local made; made=$(date -u -d "$d 1 hour ago" +%FT%TZ)
   card() { # <issue> <step[:result[:extra json]]>...: its lines a minute apart; b, r, f, t, F, l and x are the starts of build, review, fix, test, the filing of follow-ups, land and rebase, and - a minute with no line
     local n=$1 m=0 a step res x; shift; for a; do IFS=: read -r step res x <<<"$a"
@@ -532,7 +532,7 @@ EOF
 # pushed and had its issue closed stays in Needs you as blocked, in the snapshot and in health (the host's view of the
 # loop's problems): a done card shown as needing the owner. A card blocked after it landed with no later step of its
 # own is still blocked. Record order decides, not time: c16's push started before its block and is written after it.
-t_unblock() {
+t_unblock() { local -x FILEMODE=1
   export TZ=UTC; setup '[]'; S=$ST; mkdir -p "$S"; d=$(date -u +%F)
   echo x > "$R/n.txt"; git -C "$R" add -A; git -C "$R" commit -qm next; sha=$(git -C "$R" rev-parse HEAD); git -C "$R" push -q origin main
   rec() { # <card> <issue> <minute> <step> <result> [extra json]
@@ -561,7 +561,7 @@ t_unblock() {
 # time (a card waiting on a same-file card asks under it at every poll), so the wait was 3 to 7 s of a 20 to 40 s
 # snapshot, and every reader of it timed out. Or, not waiting for it, the snapshot no longer holds a new issue before
 # its copy, no longer dates the issues it lists, or reads a card `retry` moved from both files.
-t_snaplock() {
+t_snaplock() { local -x FILEMODE=1
   setup "[$(issue 5 2026-03-01 P2)]"
   # Every flock on the card records is noted: the stub stands before the real one, which it then runs.
   real=$(command -v flock)
