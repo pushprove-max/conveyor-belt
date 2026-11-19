@@ -11,7 +11,7 @@
 
 # Bug: Stop leaves the run going, or ends more than that run's processes: the run shares this case's process group, so
 # a stop that ended the group would end this case before its checks. Bug: Stop returned while the run's release-prep
-# still held the release lock as it ended (its EXIT trap), unseen by the stop: its bash shows no mark, and it leaves the
+# still held the release lock as it ended (its TERM trap), unseen by the stop: its bash shows no mark, and it leaves the
 # tree of the run's pid once that pid has ended. A release-prep started then was refused ("already running"), and the
 # snapshot showed the stopped run as running. The suite's stand-in for it: a process of the run with no mark, out of
 # the run's tree (its timeout: a process group of its own, which the end of the suite's group does not reach), holding
@@ -110,6 +110,32 @@ t_relkilled() {
     || fail "the suite's process in a group of its own still runs, or the lock is held, after the run's pid was killed"
   out=$(loop release-run prep 1.1.0 2>&1) || fail "the next release-prep did not start once the killed run's processes ended: $out"
   relwait "the next release-prep did not pass" '.state == "passed"'
+}
+# Bug: a child the run's shell had just forked and at once ended (watch()'s timer, ended as its step ends; it had
+# already ended for the run, which waits on it no more) took the TERM before it reset its traps and ran the run's EXIT
+# trap: bash printed "wait_for: No record of process <pid>" to the run's stderr, the record of a passed release-prep
+# gave that as its reason (release 1.6.0), and the child's reap ended the run's processes. The run here (relrun() on a
+# stand-in step) ends 50 children each as it forks them, which lands the TERM in that window nearly every time. It
+# runs in a bash of its own, as conveyor.sh does, since the run reaps the tree of its $$. Nothing reaches its output
+# or record, a process of the run outlives the children, and the run's end ends that process.
+t_relforked() {
+  local RUN=$T/$CASE/cards/release/run.json
+  setup '[]'
+  mkdir -p "${RUN%/*}" || fail "the fixture could not be made"
+  local kept='forks() { local i; relstart release-prep "$1"; sleep 300 & echo $! > "$STUB/kept"' # sleep: a process of the run, ended by the run's end
+  local ended='  for ((i = 0; i < 50; i++)); do sleep 5 & kill $!; wait $! 2>/dev/null; done' # sleep: children the run ends as it forks them
+  printf '%s\n' '. "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(sed "/^shift\$/,\$d" "$SRC/commands/release-prep.sh")" || exit 9' \
+    "$kept" "$ended" \
+    '  kill -0 "$(cat "$STUB/kept")" 2>/dev/null || touch "$STUB/reaped"; }' \
+    'relrun forks 1.1.0; rc=$?; kill -0 "$(cat "$STUB/kept")" 2>/dev/null && touch "$STUB/left"; exit $rc' > "$T/$CASE/forks.sh" || fail "the fixture could not be made"
+  SRC=$SRC STUB=$STUB CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards bash "$T/$CASE/forks.sh" > "$T/$CASE/run.out" 2>&1 \
+    || fail "the stand-in run failed: $(cat "$T/$CASE/run.out")"
+  ! grep -F 'wait_for' "$T/$CASE/run.out" || fail "a bash warning reached the run's output: $(cat "$T/$CASE/run.out")"
+  jq -e '.state == "passed" and .reasons == []' "$RUN" > /dev/null || fail "the passed run's record has a reason: $(cat "$RUN")"
+  [ ! -e "$STUB/reaped" ] || fail "a child the run ended reaped the run's processes"
+  # Checked by the run itself as relrun() returns: its watcher, which ends what is left once the run's pid has ended,
+  # has not run yet.
+  [ ! -e "$STUB/left" ] || { kill "$(cat "$STUB/kept")"; fail "the run's end left a process of the run running"; }
 }
 # Bug (#335): a run that ended on its own left the suite's process in a group of its own running, holding the lock.
 t_relendleft() {

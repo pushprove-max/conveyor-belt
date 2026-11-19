@@ -65,9 +65,14 @@ t_relparallel() {
 }
 # Bug: a run with no mode chosen ran its files at once, though serial is the default. Each file runs alone.
 t_relserial() {
-  local RUN out
+  local RUN out SUITE line
   modesetup
   out=$(unset CONVEYOR_TEST_SLOT; CONVEYOR_TEST_POOL=$POOL loop release-prep 1.1.0 2>&1) || fail "release-prep failed: $out"
-  jq -e '.state == "passed" and .mode == "serial"' "$RUN" > /dev/null || fail "the serial run did not pass with mode serial in its record: $(cat "$RUN")"
+  jq -e '.state == "passed" and .mode == "serial" and .reasons == []' "$RUN" > /dev/null || fail "the serial run did not pass with mode serial and no reason in its record: $(cat "$RUN")"
+  # Bug: a bash warning on the run's stderr was a passed run's reason, and the Foreman's watcher woke on "release
+  # 1.6.0 passed on <commit> at <time>: <the warning>". The watcher's own line for the record ends at the time.
+  eval "$(sed -n "/^SUITE='/,/end;'\$/p" "$SRC/foreman/watch-conveyor.sh")"
+  line=$(jq -r --argjson now 0 "$SUITE"'suiteline($now)' "$RUN") && [ "$line" = "release 1.1.0 passed on $(jq -r '"\(.sha[0:12]) at \(.ended)"' "$RUN")" ] \
+    || fail "the watcher's line for the passed run is not its result, commit and time alone: $line"
   [ "$(atonce)" = 1 ] || fail "two files ran at once in serial mode: $(cat "$STUB/times")"
 }

@@ -189,8 +189,18 @@ relstart() { # <command name> <version>
   ( [ -z "$RELLK" ] || exec {RELLK}>&-
     while kill -0 "$CONVEYOR_RELEASE_RUN" 2>/dev/null; do sleep 1; done # sleep: the watcher's pause between two checks
     relreap "$$" "$CONVEYOR_RELEASE_RUN" "$BASHPID" ) < /dev/null > /dev/null 2>&1 &
-  trap 'relreap $$ "$CONVEYOR_RELEASE_RUN"' EXIT; trap 'exit 143' TERM; trap 'exit 130' INT; trap 'exit 129' HUP
+  # The run's end reaps (relrun()), and so does a stop (TERM, INT, HUP: relsig()). No EXIT trap: a TERM to a child just
+  # forked (watch()'s timer, ended with its step) can come before the child resets its traps, and a child that then
+  # runs an EXIT trap prints bash's "wait_for: No record of process" to the run's stderr, which the record took as a
+  # passed run's reason.
+  trap 'relsig 143' TERM; trap 'relsig 130' INT; trap 'relsig 129' HUP
   unset CONVEYOR_RELEASE_PID CONVEYOR_RELEASE_BY # the suite's own commands are no part of this run's record
+}
+# A stop's signal: the run's processes reaped, then the exit <code>. A child that took the signal before it reset its
+# traps (relstart()) only exits: the reap is this shell's alone, as the child's would end the run's processes.
+relsig() { # <exit code>
+  [ "$BASHPID" != $$ ] || relreap $$ "$CONVEYOR_RELEASE_RUN"
+  exit "$1"
 }
 # The processes of a release run, one a line: <pid> and those under it, and each that carries the run's <mark>
 # (CONVEYOR_RELEASE_RUN=<mark> in its environment, relstart()), which a process group or session of its own, or a
@@ -238,6 +248,7 @@ relrun() { # <function> <version>
   e=$(mktemp) || { echo "conveyor: $1: no scratch file; nothing run" >&2; return 1; }
   "$1" "$2" 2> "$e"; rc=$?
   cat "$e" >&2; relend "$rc" "$e"; rm -f "$e"
+  [ -z "$RELSTARTED" ] || relreap $$ "$CONVEYOR_RELEASE_RUN" # the run's end ends every process of the run (relstart())
   return $rc
 }
 # The newest vX.Y.Z tag, after the remote's branch and tags are fetched.
@@ -585,7 +596,7 @@ releasego() { # <version> [prep: release-prep alone | anyway <who>]
 # conveyor.sh is taken, so a record left by a run that died names no other process. A process of the run relreap cannot
 # see still holds the release lock as it ends: the run's release-prep, whose bash carries no mark ps can read (export
 # changes no process's own environment) and which leaves the tree of the record's pid once that pid has ended, ends
-# on the TERM through its EXIT trap. The stop waits for the lock, so a release-prep started next is not refused. It
+# on the TERM through its trap (relsig()). The stop waits for the lock, so a release-prep started next is not refused. It
 # writes the record only holding the lock (the run's own end and the next run write it holding it too), and only while
 # the record is still the stopped run's (its pid and start): a run started once the lock was free has its own record,
 # which is never marked stopped.
