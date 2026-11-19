@@ -79,13 +79,16 @@ slot_reserve_why() {
 # none. A case's loop read the machine's pool, found the case's slot of the runner's pool no slot of it, and waited
 # for one of the machine's slots (the owner, 2026-11-14: the engine suite hung whenever the belts held them all).
 slot_pool() {
-  local host=${XDG_CONFIG_HOME:-$HOME/.config}/conveyor/host.json f n p='' fd=${CONVEYOR_TEST_SLOT:-} c
-  SLOT_DIR=$(jq -er '.testSlotsDir | strings | select(startswith("/"))' "$host" 2>/dev/null) \
+  local host=${XDG_CONFIG_HOME:-$HOME/.config}/conveyor/host.json f n p='' fd=${CONVEYOR_TEST_SLOT:-} c h=()
+  # The host file's testSlotsDir and testSlots, read with one jq, each "" where it names none.
+  mapfile -d '' -t h < <(jq -j '((.testSlotsDir | strings | select(startswith("/"))) // ""), "\u0000",
+    ((.testSlots | numbers | floor | select(. >= 1) | tostring) // ""), "\u0000"' "$host" 2>/dev/null)
+  SLOT_DIR=${h[0]:-}; [ -n "$SLOT_DIR" ] \
     || if [[ ${CONVEYOR_TEST_POOL:-} =~ ^([1-9][0-9]{0,5}):(/.*)$ ]]; then p=${BASH_REMATCH[1]} SLOT_DIR=${BASH_REMATCH[2]}; else SLOT_DIR=/tmp/conveyor-test-slots; fi
   # The cores, each followed by a space, read with no program but slot_cpus's own (#532).
   mapfile -t c < <(slot_cpus); SLOT_CPUS=''; n=${#c[@]}; [ "$n" = 0 ] || printf -v SLOT_CPUS '%s ' "${c[@]}"; [ "$n" -ge 1 ] || n=$(nproc --all)
   # A pool larger than the cores would put two slots on one core: it is the cores.
-  SLOT_N=${p:-$(jq -er '.testSlots | numbers | floor | select(. >= 1)' "$host" 2>/dev/null)} && [ "$SLOT_N" -le "$n" ] || SLOT_N=$n
+  SLOT_N=${p:-${h[1]:-}} && [ -n "$SLOT_N" ] && [ "$SLOT_N" -le "$n" ] || SLOT_N=$n
   mkdir -p "$SLOT_DIR" || { echo "conveyor: the test slots folder $SLOT_DIR cannot be made: no test can take a slot" >&2; return 1; }
   for ((f = 1; f <= SLOT_N; f++)); do
     [ -e "$SLOT_DIR/$f" ] || : >> "$SLOT_DIR/$f" || { echo "conveyor: the test slot $SLOT_DIR/$f cannot be made: no test can take a slot" >&2; return 1; }

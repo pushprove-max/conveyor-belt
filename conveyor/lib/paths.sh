@@ -207,12 +207,15 @@ guardread() { # <control record> [ask]
 # repair runs on the builder's account and route, and builds nothing), and the reviewer's (the second line, only for a
 # Claude reviewer), each while its role runs on the subscription login (subroles()).
 subaccts() { # <control record>
-  local a on b r; on=$(subroles)
-  b=$(for a in builder fix testFix; do seat "$a" "${1:-null}" | jq -r .agent; done 2>/dev/null)
-  r=fix; [ "$(head -n 1 <<<"$b")" != claude ] || r=build
+  local a on b r; on=$'\n'$(subroles)$'\n'
+  # The seats worked out once, in this shell: seat() keeps its answer here, so the subshells below (each seat's, and
+  # cardaccts's) take it and start no jq of their own for it.
+  seat builder "${1:-null}" > /dev/null 2>&1 || :
+  b=$(for a in builder fix testFix; do seat "$a" "${1:-null}"; done 2>/dev/null | jq -r .agent 2>/dev/null)
+  r=fix; [ "${b%%$'\n'*}" != claude ] || r=build; b=$'\n'$b$'\n'
   cardaccts "$1" | {
-    IFS= read -r a; if grep -qx claude <<<"$b" && grep -qx builder <<<"$on"; then printf '%s %s\n' "$r" "$a"; fi
-    if IFS= read -r a && grep -qx reviewer <<<"$on"; then printf 'review %s\n' "$a"; fi
+    IFS= read -r a; if [[ $b == *$'\n'claude$'\n'* && $on == *$'\n'builder$'\n'* ]]; then printf '%s %s\n' "$r" "$a"; fi
+    if IFS= read -r a && [[ $on == *$'\n'reviewer$'\n'* ]]; then printf 'review %s\n' "$a"; fi
   }
 }
 # Each account guardread reads for the control record, for the Board's limit panel: [{account (null: the default

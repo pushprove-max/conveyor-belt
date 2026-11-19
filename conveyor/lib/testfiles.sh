@@ -344,9 +344,14 @@ CASESCAN='
   { if ($0 ~ /^#/) { if (!cm) cm = FNR } else cm = 0; end = opener($0) }
   open && !/^[ \t]*(#.*)?$/ { lb = FNR; lz = !inq() && /\}[ \t]*(#.*)?$/ }
   END { shut() }'
+# <file>: the file, for jq's --rawfile, or /dev/null (read as no lines) when it is not a file that can be read: jq
+# parses each line of a records file itself (JSONL), with no program started to read it first.
+rawok() { if [ -f "$1" ] && [ -r "$1" ]; then printf '%s' "$1"; else printf /dev/null; fi; }
+# Each line of the text on the input that is a JSON object, as `jq -cR 'fromjson? | objects'` reads a file's lines.
+JSONL='def jsonl: split("\n") | map(fromjson? | objects);'
 testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   # The caller's defs and refs when it has read them (testowners: the snapshot's), else read here.
-  local si sh rn mn fs fl sf defs=${defs:-} refs=${refs:-} cs ru all ln ch hv out nv rp cp
+  local si sh rn mn fs fl sf defs=${defs:-} refs=${refs:-} cs ru all ln ch hv out nv rp cp su
   packget test.slowIssues si test.slower.share sh test.slower.runs rn test.slower.minRuns mn test.files fs || return 1
   all=$(git -C "$MAIN" ls-files -z -- '*.test.*' 2>/dev/null | jq -Rsc 'split("\u0000") | map(select(. != ""))') || all='[]'
   fl=$(jq -ce 'objects' "$FLAKY" 2>/dev/null) || fl='{}'
@@ -358,6 +363,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   cs=$(git -C "$MAIN" grep -lzE '^t_[a-z0-9]+\(\) \{' -- '*.test.*' 2>/dev/null | (cd "$MAIN" && xargs -0 awk -v q="'" "$CASESCAN" 2>/dev/null) \
     | jq -cRn '[inputs | split("\t") | {f: .[0], c: .[1]}] | group_by(.f) | map({key: .[0].f, value: [.[].c] | unique}) | from_entries') || cs='{}'
   ln=$(testlines) || return 1
+  su=$(rawok "$SUITERUNS")
   # The files each landed commit of a card with a failed test step changed, by its sha: {sha: [file...]}, from one git
   # call (a commit main's checkout does not have is left out). A path is a commit's key only when it is one of the
   # commits asked for.
@@ -369,11 +375,15 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   out=$(printf '%s\n' "$ln" | jq -cRn --arg since "$1" --arg si "$si" --argjson sh "$sh" --argjson rn "$rn" --slurpfile ch <(printf '%s\n' "$ch") \
     --argjson mn "$mn" --slurpfile fs <(printf '%s' "$fs") --slurpfile fl <(printf '%s' "$fl") --slurpfile sf <(printf '%s' "$sf") --argjson keep "$TESTKEEP" \
     --slurpfile cs <(printf '%s' "$cs") --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") --argjson ru "$ru" --slurpfile all <(printf '%s' "$all") \
-    --slurpfile hv <(printf '%s' "$hv") --slurpfile mu <(cat "$MUTS"/*.json 2>/dev/null | jq -c 'objects' 2>/dev/null) --rawfile mq <(cat "$MUTS/asked" 2>/dev/null) --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) --slurpfile last <(jq -ce 'objects' "$TESTRULES" 2>/dev/null || echo null) \
-    --slurpfile lg <(tail -n "$TESTRULES_SHOWN" "$TESTRULESLOG" 2>/dev/null | jq -cRn '[inputs | fromjson? | objects] | reverse' 2>/dev/null || echo '[]') \
-    --slurpfile fd <(cat "$TESTRULESLOG" "$TAFILED" 2>/dev/null | jq -cR 'fromjson? | objects | select(.event == "filed")' 2>/dev/null) \
-    --slurpfile ta <(jq -cR 'fromjson? | objects | select(.event == "filed" and (.file | type == "string") and (.issue | type == "number"))' "$TAFILED" 2>/dev/null) \
-    --slurpfile tj <(cat "$TESTACTS"/*.json 2>/dev/null | jq -c 'objects | select(.action == "judge" and .state == "done" and (.file | type) == "string" and (.waits | type) == "array") | {file, end, waits}' 2>/dev/null) '$fs[0] as $fs | $fl[0] as $fl | $sf[0] as $sf | $all[0] as $all | $hv[0] as $hv | '"$OWNERS$FAILURE$RUNDEFS"'
+    --slurpfile hv <(printf '%s' "$hv") --slurpfile mu <(cat "$MUTS"/*.json 2>/dev/null | jq -c 'objects' 2>/dev/null) --rawfile mq "$(rawok "$MUTS/asked")" --rawfile su "$su" --slurpfile last <(jq -ce 'objects' "$TESTRULES" 2>/dev/null || echo null) \
+    --rawfile rl "$(rawok "$TESTRULESLOG")" --argjson shown "$TESTRULES_SHOWN" --rawfile tf "$(rawok "$TAFILED")" \
+    --slurpfile tj <(cat "$TESTACTS"/*.json 2>/dev/null | jq -c 'objects | select(.action == "judge" and .state == "done" and (.file | type) == "string" and (.waits | type) == "array") | {file, end, waits}' 2>/dev/null) '$fs[0] as $fs | $fl[0] as $fl | $sf[0] as $sf | $all[0] as $all | $hv[0] as $hv | '"$JSONL$OWNERS$FAILURE$RUNDEFS"'
+    # The rules log and the Board test issues, each read once: the log'"'"'s last $shown lines, newest first (lg), and
+    # their filed lines (fd); the test issues with a file and an issue number (ta).
+    ($su | jsonl) as $su | ($rl | split("\n") | if .[-1] == "" then .[:-1] else . end | .[-$shown:] | map(fromjson? | objects) | reverse) as $lg
+    | ($rl | jsonl) as $rl | ($tf | jsonl | map(select(.event == "filed"))) as $tf | [$rl[], $tf[] | select(.event == "filed")] as $fd
+    | [$tf[] | select((.file | type == "string") and (.issue | type == "number"))] as $ta
+    |
     def median: sort | if length == 0 then null else (.[(length - 1) / 2 | floor] + .[length / 2 | floor]) / 2 end;
     def r3: if . == null then null else . * 1000 | round / 1000 end;
     [inputs | fromjson? | objects] | sort_by(.time) | . as $cr | map(select(.step == "test")) as $ls
@@ -431,7 +441,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
     | sort_by(-(.cpu // -1), .file)
     | [$ls[] | select(.reused != true and ((.time | fromdate? | strflocaltime("%Y-%m-%d")) // "") >= $since)] as $wk
     | {settings: {slowIssues: ($si == "true"), slower: {share: $sh, runs: $rn, minRuns: $mn}, files: $fs},
-       rules: (if $ru == null then null else $ru + {last: $last[0], log: ($lg[0] // [])} end),
+       rules: (if $ru == null then null else $ru + {last: $last[0], log: $lg} end),
        files: ., slower: map(select(.slower) | .file),
        edits: (reduce $alledits[] as $e ({n: {}, out: []};
            if (.n[$e.file] // 0) < $keep then .out += [$e] | .n[$e.file] += 1 else . end) | .out),
@@ -440,7 +450,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   nv=$(neverwhy "$(jq -c '[.files[] | select(.runsOnRecord == 0 and (.removed | not)) | .file]' <<<"$out")") || nv='{}'
   rp=$(jq -ce '.test.report | objects' "$PACK" 2>/dev/null) || rp=null
   cp=$(cpuplan 2>/dev/null) || cp=null
-  jq -c --slurpfile nv <(printf '%s' "$nv") --argjson rp "$rp" --argjson cp "$cp" --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) '$nv[0] as $nv | .files |= map(.neverRun = ($nv[.file] // null))
+  jq -c --slurpfile nv <(printf '%s' "$nv") --argjson rp "$rp" --argjson cp "$cp" --rawfile su "$su" "$JSONL"'$nv[0] as $nv | ($su | jsonl) as $su | .files |= map(.neverRun = ($nv[.file] // null))
     | .settings.report = $rp | .settings.cpuTime = $cp
     | .suite = ($su | max_by(.time // "") | if . == null then null
         else {time, cpu: ([.files | objects | .[] | objects | .cpu | numbers] | if . == [] then null else add * 1000 | round / 1000 end)} end)' <<<"$out"
@@ -454,11 +464,12 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
 # file is parsed once a content; skipped: it
 # holds skip markers (the test edits' table, TESTEDIT_TABLE, an `only` mark aside), each named once.
 neverwhy() { # <the files, a JSON list>
-  local f cmd rn w pat x ld bl e l1 le sk new='' out='' nl=$TESTACTS/neverloads
-  [ "$(jq 'length' <<<"$1" 2>/dev/null)" != 0 ] || { echo '{}'; return; }
+  local f cmd rn w pat x ld bl e l1 le sk new='' out='' nl=$TESTACTS/neverloads fs
+  # The files read from the list once, for the patterns and for the loop below.
+  mapfile -t fs < <(jq -r '.[]' <<<"$1" 2>/dev/null); [ ${#fs[@]} != 0 ] || { echo '{}'; return; }
   packget test.command cmd 2>/dev/null || cmd=''
   rn=$(testrunner "$cmd" "$MAIN" 2>/dev/null); w=''; [[ $rn != named\ * ]] || w=${rn##* }
-  pat=$(jq -r '.[]' <<<"$1" | testpaths 2>/dev/null)
+  pat=$(printf '%s\n' "${fs[@]}" | testpaths 2>/dev/null)
   ld=$(jq -ce 'objects' "$nl" 2>/dev/null) || ld='{}'
   while IFS= read -r f; do
     [ -f "$MAIN/$f" ] || continue
@@ -492,7 +503,7 @@ except SyntaxError as x: print(f"{sys.argv[1]}: line {x.lineno}: {x.msg}"); sys.
       fi
     fi
     [ -z "$x" ] || out+=$(jq -cn --arg f "$f" --argjson x "$x" '{($f): $x}')$'\n'
-  done < <(jq -r '.[]' <<<"$1")
+  done < <(printf '%s\n' "${fs[@]}")
   # The parse results, kept for the next snapshot (a write that fails costs a parse again, nothing else).
   [ -z "$new" ] || { mkdir -p "$TESTACTS" && taput "$nl" "$ld"; } 2>/dev/null || :
   jq -cs 'add // {}' <<<"$out"

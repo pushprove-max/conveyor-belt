@@ -14,9 +14,6 @@
 # every program on PATH notes its name, then runs the program. Bug it catches: the snapshot starting programs again
 # where bash needs none.
 SNAPEXEC_WAS=269
-# The owner's rule: a check that creeps over its limit is raised by hand and the real cut filed. The 1.6.0 release
-# suite counted 284 programs; issue 721 cuts them and removes this ceiling, so the case again needs fewer than SNAPEXEC_WAS.
-SNAPEXEC_CEILING=290
 t_snapexec() {
   local root=$T/$CASE/brew log=$T/$CASE/execs d f n out; local shim=$root/bin; local -A seen=()
   export XDG_CONFIG_HOME=$T/$CASE/config
@@ -53,5 +50,5 @@ t_snapexec() {
   out=$(PATH=$shim loop snapshot --fresh) || fail "the snapshot under the shim exited non-zero"
   [ "$(jq -c '[.belt[].card]' <<<"$out")" = '["c3"]' ] || fail "the snapshot under the shim is not the fixture's: $(jq -c .belt <<<"$out")"
   n=$(wc -l < "$log")
-  [ "$n" -lt "$SNAPEXEC_CEILING" ] || fail "one snapshot started $n programs, not fewer than $SNAPEXEC_CEILING (the $SNAPEXEC_WAS before issue 2, raised until issue 721): $(sort "$log" | uniq -c | sort -rn | head -n 12 | tr -s ' \n' ' ')"
+  [ "$n" -lt "$SNAPEXEC_WAS" ] || fail "one snapshot started $n programs, not fewer than the $SNAPEXEC_WAS before issue 2: $(sort "$log" | uniq -c | sort -rn | head -n 12 | tr -s ' \n' ' ')"
 }
