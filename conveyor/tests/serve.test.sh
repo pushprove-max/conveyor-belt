@@ -194,18 +194,24 @@ turn() { pushturn; [ -z "$pusher" ] || wait "$pusher"; pusher=''; }
 # let through by skipping the check; a failed push leaves no line, or is not tried again after the next landing; one
 # that failed its check is tried again on the same main, at once or on the retry timer; one the remote refused is not
 # tried again at once by a new loop, or is tried at every turn, or never on the retry timer; a push line breaks the
-# record check or turns a landed card's dashboard row back into an open one. Each landing is one `run` in the
-# foreground; when a push is tried again is the loop's push decision (pushturn), called at the turns of a new loop.
+# record check or turns a landed card's dashboard row back into an open one. Each later landing is one `run` on a set
+# clock (CONVEYOR_NOW); when a push is tried again is the loop's push decision (pushturn), at a new loop's turns.
 t_serve() {
-  servesetup; tune '.tunables += {idle: 1, poll: 1}'
+  servesetup; tune '.tunables += {idle: 1, poll: 1}'; export CONVEYOR_NOW; CONVEYOR_NOW=$(date +%s)
   # An idle serve takes its turns and does not end: the KILL of servefor ends it (137), not its own exit.
   eng "$SRC" 'servefor 2' > "$STUB/serve.out" 2>&1; rc=$?
   [ "$rc" = 137 ] && [ ! -s "$S/cards.jsonl" ] || fail "an idle serve ended ($rc), or recorded something: $(cat "$STUB/serve.out")"
   # A loop holds the run lock (fd 8): a serve beside it is refused.
   out=$( { flock -n 9 || exit 9; loop serve 9>&- 2>&1; } 9>>"$S/cards.jsonl.run") && fail "a second serve ran beside a loop"
   grep -q 'already running' <<<"$out" || fail "a second serve beside a loop was not refused as one: $out"
-  add 7; loop run > "$STUB/run.out" 2>&1 || fail "the run that lands #7 failed: $(cat "$STUB/run.out")"
-  [ -n "$(landed7 7)" ] && [ "$(originat)" = "$(mainat)" ] || fail "the landing was not pushed: $(cat "$S/cards.jsonl" "$STUB/run.out")"
+  # Bug: an idle serve never sees a new issue. #7 is added at its first idle wait (no card or push), a KILL ends it at
+  # the first idle wait once #7 has landed and origin is at main: a card that ends after the turn's push decision
+  # leaves its push owed to the next turn, so an idle wait alone does not mean the push is done. After 20 idle waits
+  # with no landing pushed it ends all the same, and the check below fails.
+  eng "$SRC" 'nojobs; me=$BASHPID; sleep() { [ "${FUNCNAME[1]:-}" != run ] || [ "$1" = 0.1 ] || [ "$running" != 0 ] || [ -n "$pusher" ] || { trap "" TERM
+      if [ ! -e "$STUB/added7" ]; then add 7 && : > "$STUB/added7"; else echo >> "$STUB/idle7"
+        { [ -n "$(landed7 7)" ] && [ "$(originat)" = "$(mainat)" ]; } || [ "$(wc -l < "$STUB/idle7")" -ge 20 ] && kill -KILL "$me"; fi; trap - TERM; }; command sleep "$@"; }; run "" serve' > "$STUB/serve.out" 2>&1; rc=$? # sleep: the engine's own, passed on as called
+  [ "$rc" = 137 ] && [ -e "$STUB/added7" ] && [ -n "$(landed7 7)" ] && [ "$(originat)" = "$(mainat)" ] || fail "an idle serve did not land and push the issue that appeared while it was idle ($rc): $(cat "$S/cards.jsonl" "$STUB/serve.out")"; loopend
   [ "$(cat "$STUB/pushes")" = "$(st 'select(.step == "landed") | .sha')" ] && [ "$(fails)" = 0 ] && [ "$(cat "$S/pushed")" = "$(mainat) origin main" ] \
     || fail "the push did not pass the pre-push check once, with no push line: $(cat "$S/cards.jsonl")"
   [ "$(git -C "$R" status --porcelain)" = ' M b.txt' ] || fail "main's own edit was disturbed: $(git -C "$R" status --porcelain)"
