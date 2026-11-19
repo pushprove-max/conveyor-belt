@@ -447,7 +447,12 @@ Under the top row are three numbered steps. Each step has a mark: done, failed, 
    passes of an earlier run, on the same commit or an earlier one. A run that runs only some files again, and keeps
    the passes of the other files, shows its mode. A full test run in progress shows here too. When **Release** is
    enabled, the step also says what it does: "Uses the suite that passed at <time> on <commit>", or "Runs the suite
-   first (about N min)".
+   first (about N min)". When the suite failed and fix cards were filed for it (see `docs/releases.md`), the step says
+   how many of them have landed, and lists each fix card with its issue link and its state: open, landed, or closed with no landed card. One line under them
+   says what happens next: "The suite runs again when every fix has landed"; when every fix has landed, that the
+   suite runs again when their commits are on the branch it tests and no other card is open; "The suite runs again
+   now" when Conveyor has started it; or, when a fix card was closed with no landed card, that the release waits for
+   the Foreman.
 3. **Release**: the tag and the GitHub release.
 
 When a run stops, each reason that it gave shows under its step: a notes reason under step 1, a suite reason under

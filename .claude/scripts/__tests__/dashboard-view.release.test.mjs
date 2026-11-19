@@ -227,6 +227,43 @@ test('#789: a passed suite names each case judged flaky under step 2, and a case
   assert.deepEqual(Array.from(stepOf(w, 'full-suite').querySelectorAll('[data-list="flaky"] li'), (x) => x.textContent), ['a.test: flips: judged flaky, passed alone']);
 });
 
+// Bugs this guards (#760): a red run showed its failed files but not its fix cards, how many had landed, or that the
+// release waited on them; a fix closed with no landed card read as if the suite would run again by itself.
+const RED = { ...RUN, ended: '2026-11-14T08:15:00Z', state: 'failed', failed: 1, cases: ['a.test: breaks'], files: { done: 9, of: 9, failed: ['a.test'] } };
+const fixLines = (w) => Array.from(stepOf(w, 'full-suite').querySelectorAll('[data-list="fixes"] li'), (x) => x.textContent);
+const fixNext = (w) => stepOf(w, 'full-suite').querySelector('[data-figure="fixes-next"]').textContent;
+test('#760 D1: a red run with two fixes, one landed: both with their states and the line that the suite runs again when every fix has landed', () => {
+  const w = boot();
+  deliver(w, data({ ...RED, fixes: [{ issue: 753, state: 'landed' }, { issue: 754, state: 'open' }] }));
+  assert.deepEqual(fixLines(w), ['#753: landed', '#754: open']);
+  assert.equal(stepOf(w, 'full-suite').querySelector('[data-list="fixes"] a').href, `${URL}/issues/753`);
+  assert.match(stepOf(w, 'full-suite').querySelector('[data-list="fixes"]').textContent, /1 of 2 landed/);
+  assert.equal(fixNext(w), 'The suite runs again when every fix has landed.');
+  // Every fix landed but relfixes() has not started the run (restarted null: a push owed, a pull request not merged or
+  // another open card holds it): the Board must not say it runs now.
+  const all = [{ issue: 753, state: 'landed' }, { issue: 754, state: 'landed' }];
+  next(w, data({ ...RED, fixes: all, restarted: null }));
+  assert.equal(fixNext(w), 'Every fix has landed. The suite runs again when their commits are on the branch it tests and no other card is open.');
+  // Started (restarted set): it runs again now.
+  next(w, data({ ...RED, fixes: all, restarted: '2026-11-14T09:00:00Z' }));
+  assert.equal(fixNext(w), 'The suite runs again now.');
+});
+
+test('#760 D2: a fix closed with no landed card is named, and the release waits for the Foreman', () => {
+  const w = boot();
+  deliver(w, data({ ...RED, fixes: [{ issue: 753, state: 'landed' }, { issue: 755, state: 'closed' }] }));
+  assert.deepEqual(fixLines(w), ['#753: landed', '#755: closed with no landed card']);
+  assert.equal(fixNext(w), '#755 was closed with no landed card: the release waits for the Foreman.');
+});
+
+test('#760 D3: a red run with no fixes shows no fixes part', () => {
+  const w = boot();
+  deliver(w, data({ ...RED, fixes: [] }));
+  assert.equal(stepOf(w, 'full-suite').dataset.state, 'failed');
+  assert.equal(card(w).querySelector('[data-list="fixes"]'), null);
+  assert.equal(card(w).querySelector('[data-figure="fixes-next"]'), null);
+});
+
 // Bugs this guards (#274): a red suite on main's head offers no honest way to release, or Release anyway goes on one
 // click, with a confirm that does not name the failures it releases over, or is offered over a suite of an older main.
 test('#274: release-prep\'s red run on main\'s head offers Release anyway, on a second click that names the failed files and cases', async () => {

@@ -18,7 +18,8 @@
 // its second click and before it sends, whether the suite runs its test files one by one or in parallel, and sends the
 // choice last, `--serial` or `--parallel`; step 2 shows the mode of the run under way and of the last run. Stop (`release-run stop`, a second click too) shows only while a run is
 // under way. Each reason a refused or failed run printed shows under the step it belongs to, and each failed case
-// release-prep judged flaky (it passed every run alone) under the suite's step. The panel is wide or full,
+// release-prep judged flaky (it passed every run alone) under the suite's step, and beside a red result the fix cards of
+// that run (its record's fixes), each with its state, and what happens next. The panel is wide or full,
 // never small: in the narrow column every line wraps.
 (() => {
   const VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
@@ -190,6 +191,35 @@
     return ul;
   }
 
+  // The fix cards of a red run (its record's fixes, lib/fulltest.sh relfixes()): each with its issue link and state,
+  // then one line on what happens next. A fix closed with no landed card holds the release for the Foreman; else the
+  // suite runs again once every fix has landed, and "now" only when the record's restarted says relfixes() started it:
+  // until then a push owed, a pull request not merged or another open card holds it. A run with no fixes: null.
+  const FIXSTATE = { open: 'open', landed: 'landed', closed: 'closed with no landed card' };
+  function fixesList(h, ctx, x, url) {
+    const fx = list(x.fixes).filter((f) => f && num(f.issue) && f.issue > 0 && Object.hasOwn(FIXSTATE, f.state));
+    if (!fx.length) return null;
+    const box = h('div', 'release-fixes');
+    box.dataset.list = 'fixes';
+    const ul = h('ul', 'release-cases');
+    fx.forEach((f) => {
+      const li = h('li', null);
+      li.dataset.state = f.state;
+      li.append(ctx.issueLink({ issue: f.issue, url: url ? `${url}/issues/${f.issue}` : null }), `: ${FIXSTATE[f.state]}`);
+      ul.append(li);
+    });
+    const closed = fx.filter((f) => f.state === 'closed').map((f) => `#${f.issue}`);
+    const next = closed.length
+      ? `${closed.join(', ')} ${closed.length === 1 ? 'was' : 'were'} closed with no landed card: the release waits for the Foreman.`
+      : !fx.every((f) => f.state === 'landed') ? 'The suite runs again when every fix has landed.'
+        : typeof x.restarted === 'string' ? 'The suite runs again now.'
+          : 'Every fix has landed. The suite runs again when their commits are on the branch it tests and no other card is open.';
+    const p = h('p', 'row-meta', next);
+    p.dataset.figure = 'fixes-next';
+    box.append(h('p', 'row-meta', `Fixes of this run: ${fx.filter((f) => f.state === 'landed').length} of ${fx.length} landed`), ul, p);
+    return box;
+  }
+
   function reasonsList(h, why) {
     if (!why.length) return null;
     const ul = h('ul', 'release-reasons');
@@ -271,7 +301,8 @@
         : !u.ran.length ? `Reused the green run of ${typeof u.time === 'string' ? ctx.clock(u.time) : 'an earlier time'} on ${short(u.sha)}`
           : `Reran ${files(u.ran.length)}, reused ${u.kept} passed ${u.kept === 1 ? 'file' : 'files'} from ${short(u.sha)}`);
       scope.dataset.figure = 'suite-scope';
-      s2 = step(h, 'Full suite', s.failed ? 'failed' : s.moved ? 'todo' : 'done', line, scope, modeLine(h, c, false), ...counts(h, c, false), flakyList(h, c), reasonsList(h, why[1]));
+      s2 = step(h, 'Full suite', s.failed ? 'failed' : s.moved ? 'todo' : 'done', line, scope, modeLine(h, c, false), ...counts(h, c, false), flakyList(h, c),
+        s.failed ? fixesList(h, ctx, c, typeof rec.url === 'string' ? rec.url : '') : null, reasonsList(h, why[1]));
     } else {
       s2 = step(h, 'Full suite', why[1].length ? 'failed' : 'todo', `Not run on main's head (${short(m.head)})`, reasonsList(h, why[1]));
     }
