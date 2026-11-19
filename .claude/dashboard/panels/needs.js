@@ -406,6 +406,7 @@ window.DASH_APP.panel({
           const b = buttons[k];
           b.textContent = armed === k ? a.ask : a.label;
           b.setAttribute('aria-pressed', String(armed === k));
+          b.toggleAttribute('data-armed', armed === k);
           b.disabled = busy;
         }
         condition.disabled = busy; why.disabled = busy;

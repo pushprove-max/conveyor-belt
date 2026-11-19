@@ -458,7 +458,8 @@
     arm(key);
     say(`${skips.map(([name, k]) => skipWords(name, k)).join(' ')} Click Undo again to turn ${skips.map(([name]) => name).join(', ')} off.`, () => undoAsk(steps, go, repo));
     const b = tabLine() && tabLine().querySelector('[data-act="undo"]');
-    if (b) { b.textContent = undoLabel(skips); b.classList.add('board-danger'); }
+    // Its mark holds the key: draw() takes it off once S.armed is another or none (the note is not drawn again).
+    if (b) { b.textContent = undoLabel(skips); b.classList.add('board-danger'); b.dataset.armed = key; }
     return Promise.resolve(false);
   }
   // A change that costs money or time ('spend') or cannot be undone ('final') acts on a second click within ARM_MS: the
@@ -472,6 +473,7 @@
     });
     b.dataset.guard = tier;
     b.setAttribute('aria-pressed', String(on));
+    if (on) b.dataset.armed = '';
     return b;
   }
 
@@ -810,7 +812,7 @@
             S.armed = null;
             send('rules', [`${k}=${on ? 'off' : 'on'}`], null, ['rules', [`${k}=${on ? 'on' : 'off'}`]]);
           });
-        if (armed) b.classList.add('board-danger');
+        if (armed) { b.classList.add('board-danger'); b.dataset.armed = ''; }
         return b;
       }),
       would.length ? h('p', 'rules-would', would.map(([name, k]) => skipWords(name, k)).join(' ')) : null));
@@ -1272,6 +1274,7 @@
       const b = button(armed ? `Click again: remove ${what} on GitHub` : 'Queue', armed ? 'board-danger' : 'btn-quiet', 'queue',
         armed ? `Confirm: remove ${what} from ${t} on GitHub and queue it` : `Queue ${t}: remove ${what} and queue it`, () => queueOne(x));
       b.setAttribute('aria-pressed', String(armed));
+      if (armed) b.dataset.armed = '';
       li.append(b);
     } else {
       const r = x.rest[0] || {};
@@ -1304,7 +1307,7 @@
       const labelled = g.items.filter((x) => x.holds.length).length, unlabel = g.items.filter((x) => x.how === 'unlabel').length;
       const rel = g.items.filter((x) => x.how === 'release').length, none = g.items.length - rel - unlabel;
       const ask = h('div', 'rules-ask');
-      ask.setAttribute('role', 'group'); ask.setAttribute('aria-label', `Queue all of ${g.name}`);
+      ask.setAttribute('role', 'group'); ask.setAttribute('aria-label', `Queue all of ${g.name}`); ask.dataset.armed = '';
       ask.append(h('p', null, `Queue all ${plural(g.items.length, 'issue', 'issues')} of ${g.name}? ${labelled ? `A label holds ${labelled} of them (${labelMark(g.items)}): if you do not include them, Conveyor leaves them out.` : 'No label holds any of them.'}${none ? ` Something else also holds ${plural(none, 'issue', 'issues')}, and you cannot queue ${none === 1 ? 'it' : 'them'} from here.` : ''}`));
       const acts = h('div', 'rules-ask-acts');
       if (unlabel) {
@@ -1551,7 +1554,7 @@
       const u = mine.undo, armed = S.armed === `undo:${JSON.stringify(u)}` ? undoSkips(u) : [];
       const b = button(armed.length ? undoLabel(armed) : 'Undo', 'btn-quiet', 'undo', `Undo the last change here: ${mine.what}`,
         () => undoAsk(u, () => (u.length === 1 ? send(u[0][0], u[0][1]) : run(u, `undid: ${mine.what}`, null, null))));
-      if (armed.length) b.classList.add('board-danger');
+      if (armed.length) { b.classList.add('board-danger'); b.dataset.armed = ''; }
       line.append(b);
     }
     p.append(h('span', null, 'The Board saves a rule when you change it. It saves the Builder, Reviewer and Judge models when you press Save.'), line);
@@ -2210,6 +2213,13 @@
   // Draws the tab's panels (only: the one panel with that id), each in the place the page gave it (S.at).
   function draw(only) {
     const h = S.ctx.h, at = Array.from(S.at).filter(([id]) => !only || id === only);
+    // An Undo on a note line armed by undoAsk whose arming ended (timed out, or another armed): the page's reload waits
+    // on each [data-armed].
+    [...Array.from(S.at.values(), (p) => p.el), OB.box].forEach((el) => {
+      if (el) el.querySelectorAll('.rules-note [data-act="undo"][data-armed]').forEach((b) => {
+        if (b.dataset.armed !== S.armed) { delete b.dataset.armed; b.classList.remove('board-danger'); b.textContent = 'Undo'; }
+      });
+    });
     // No record on the host's main, and another to pick (under Show in the machine head): nothing until one is picked.
     if (S.d.repo === null) {
       at.forEach(([, p]) => p.el.replaceChildren(S.ctx.state('empty', 'No rules to show', 'Conveyor did not run on this project on the build machine yet, so it has no rules. Pick a project under Show, above the tabs.')));

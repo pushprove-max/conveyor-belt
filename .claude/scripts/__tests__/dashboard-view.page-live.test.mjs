@@ -3,7 +3,7 @@
 // the top bar and the live feed. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { read, html, css, LIST, T0, iso, clone, CONTROL_IDS, RULES_IDS, BELT3D_IDS, TAB, OVERVIEW, boot, $, panel, state, pending, deliver, refresh, next, tick, later, P, full, SAYS, cases, settle } from './dashboard-view.helpers.mjs';
+import { read, html, css, LIST, T0, iso, clone, CONTROL_IDS, RULES_IDS, BELT3D_IDS, TAB, OVERVIEW, boot, $, panel, state, pending, deliver, refresh, next, tick, later, seen, act, rulesP, groupEl, heldMany, P, full, SAYS, cases, settle } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 
@@ -206,10 +206,11 @@ test('a first load that fails says so in every panel; a later one keeps the last
   assert.equal(w.document.getElementById('status').textContent, 'Stale');
 });
 
-test('a heartbeat that stops is a stopped collector, and a changed page reloads itself', () => {
+test('a heartbeat that stops is a stopped collector, and a changed page reloads itself', async () => {
   const w = boot();
   const beat = (at, view) => { w.DASH_ALIVE = { at: iso(at), view, snapshotAgeSec: 5, cycleStartedAt: iso(at), lastCycleSec: 3 }; pending(w, 'alive.js').dispatchEvent(new w.Event('load')); };
   deliver(w, full());
+  await settle();  // the page's history read is answered: no request in flight
   beat(T0, 'v1');
   tick(w, 30000);
   assert.equal(w.document.getElementById('status').textContent, 'Live');
@@ -226,7 +227,229 @@ test('a heartbeat that stops is a stopped collector, and a changed page reloads 
   assert.equal(w.navigations, 0);
   refresh(w);
   beat(w.clock, 'v2');
-  assert.equal(w.navigations, 1, 'a new copy of the page files reloads the page');
+  assert.equal(w.navigations, 1, 'a new copy of the page files reloads an idle page');
+  tick(w, 1000);
+  assert.equal(w.navigations, 1, 'once: the next tick does not reload it again');
+  assert.equal(w.document.getElementById('new-view').hidden, true, 'an idle page shows no notice');
+});
+
+// Issue 509: a new copy of the page waits while the owner is at work on it, as a reload loses what they typed, an armed
+// button or a question, or a request's answer. jsdom forbids replacing location.reload: each call of it is counted as w.navigations.
+const newCopy = (w) => {
+  const beat = (view) => { w.DASH_ALIVE = { at: iso(w.clock), view, snapshotAgeSec: 5, cycleStartedAt: iso(w.clock), lastCycleSec: 3 }; pending(w, 'alive.js').dispatchEvent(new w.Event('load')); };
+  beat('v1');
+  refresh(w);
+  beat('v2');
+};
+const answerField = (w) => panel(w, 'needs').querySelector('input[aria-label="Answer to q-ship"]');
+const type = (w, field, text) => { field.value = text; field.dispatchEvent(new w.Event('input', { bubbles: true })); };
+
+test('a new copy waits while a Needs you answer has text, says so beside the status mark, and reloads once the field is cleared', async () => {
+  const w = boot();
+  deliver(w, full());
+  await settle();
+  type(w, answerField(w), 'Ship on Monday');
+  newCopy(w);
+  tick(w, 1000);
+  assert.equal(w.navigations, 0, 'the typed answer is not lost to a reload');
+  const note = w.document.getElementById('new-view');
+  assert.equal(note.hidden, false);
+  assert.equal(note.textContent, 'New version. Reload');
+  assert.equal(note.previousElementSibling.id, 'status', 'the notice is beside the status mark');
+  assert.equal(note.querySelector('button').textContent, 'Reload');
+  type(w, answerField(w), '');
+  assert.equal(w.navigations, 1, 'an emptied field leaves nothing to lose');
+  tick(w, 1000);
+  assert.equal(w.navigations, 1, 'once');
+});
+
+test('a new copy that waits on a typed answer reloads once the page is hidden', async () => {
+  const w = boot();
+  deliver(w, full());
+  await settle();  // the history read is answered: the draft alone holds the reload
+  type(w, answerField(w), 'Ship on Monday');
+  newCopy(w);
+  assert.equal(w.navigations, 0);
+  seen(w, false);
+  assert.equal(w.navigations, 1, 'a hidden page is not being read');
+});
+
+test('the notice\'s Reload button reloads the page', () => {
+  const w = boot();
+  deliver(w, full());
+  type(w, answerField(w), 'Ship on Monday');
+  newCopy(w);
+  w.document.querySelector('#new-view button').click();
+  assert.equal(w.navigations, 1);
+});
+
+test('a new copy waits while a field has the focus', async () => {
+  const w = boot();
+  deliver(w, full());
+  await settle();
+  answerField(w).focus();
+  newCopy(w);
+  tick(w, 1000);
+  assert.equal(w.navigations, 0, 'the owner is about to type');
+  answerField(w).blur();
+  tick(w, 1000);
+  assert.equal(w.navigations, 1);
+});
+
+test('a new copy waits while a two-click button is armed', async () => {
+  const w = boot();
+  deliver(w, full());
+  await settle();
+  w.document.getElementById('restart').click();
+  newCopy(w);
+  tick(w, 1000);
+  assert.equal(w.navigations, 0, 'the second click would land on a new page');
+  later(w);  // the button disarms
+  await settle();  // and the history read the timers sent again is answered
+  tick(w, 1000);
+  assert.equal(w.navigations, 1);
+});
+
+// Bug: the arm was found by a "Click again" label, so a panel's own two-click button with another label (Rules' "Turn
+// P2 off: skip 2") reloaded the page between its two clicks.
+test('a new copy waits while a panel\'s own two-click button is armed, whatever its label says', () => {
+  const w = boot({ tab: 'rules' });
+  deliver(w, full());
+  act(rulesP(w), 'rule-P2').click();
+  assert.equal(act(rulesP(w), 'rule-P2').textContent, 'Turn P2 off: skip 2');
+  newCopy(w);
+  tick(w, 1000);
+  assert.equal(w.navigations, 0);
+  later(w);  // the arm lapses
+  tick(w, 1000);
+  assert.equal(w.navigations, 1);
+});
+
+// Bug: a question that waits for its confirm with no time limit (Rules' Queue all) was not seen, and the page reloaded
+// under it.
+test('a new copy waits while a question waits for its confirm, until it is cancelled', () => {
+  const w = boot({ tab: 'rules' });
+  deliver(w, heldMany());
+  act(groupEl(w, 'web'), 'queue-all').click();
+  newCopy(w);
+  later(w);
+  tick(w, 1000);
+  assert.equal(w.navigations, 0, 'the question stays open');
+  act(groupEl(w, 'web'), 'queue-all-no').click();
+  tick(w, 1000);
+  assert.equal(w.navigations, 1);
+});
+
+// Bug: a panel drew a typed field again as a new element (Release's version), and the new one was not known as typed:
+// the page reloaded and lost the draft.
+const releaseRec = (repo) => ({ repo, url: `https://github.com/example/${repo}`, suites: [],
+  release: { tag: null, count: 1, next: '1.0.0', notes: true, written: ['1.0.0'], head: 'b'.repeat(40), releases: true, commits: [] } });
+const versions = (w) => Array.from(panel(w, 'release').querySelectorAll('[data-field="version"]'));
+test('a new copy waits while a draft the panel drew again has text', async () => {
+  const w = boot();
+  const d = full();
+  d.panels.release.data.records = [releaseRec('plugin')];
+  deliver(w, d);
+  await settle();  // the history read is answered: the draft alone holds the reload
+  const was = versions(w)[0];
+  type(w, was, '1.1.0');
+  assert.notEqual(versions(w)[0], was, 'the panel drew the field again');
+  versions(w)[0].blur();
+  newCopy(w);
+  tick(w, 1000);
+  assert.equal(w.navigations, 0, 'the draft 1.1.0 is not lost');
+  type(w, versions(w)[0], '');
+  versions(w)[0].blur();
+  tick(w, 1000);
+  assert.equal(w.navigations, 1, 'the cleared field holds it no more');
+});
+
+// Bug (E5): a typed field was known by its panel and label only, and each project in Release has a "Version to
+// release" field: after one was typed in and cleared, the other's untouched version counted as typed and held the
+// reload; and a draft in one must still hold it after the other is cleared.
+test('a typed field cleared no longer holds a new copy, though another field has its label and a value', async () => {
+  const w = boot();
+  const d = full();
+  d.panels.release.data.records = [releaseRec('plugin'), releaseRec('widgets'), releaseRec('tools')];
+  deliver(w, d);
+  await settle();
+  assert.equal(versions(w).length, 3);
+  type(w, versions(w)[0], '1.1.0');
+  type(w, versions(w)[1], '2.0.0');
+  type(w, versions(w)[1], '');
+  versions(w)[1].blur();
+  newCopy(w);
+  tick(w, 1000);
+  assert.equal(w.navigations, 0, 'the draft 1.1.0 of the first project is not lost');
+  type(w, versions(w)[0], '');
+  versions(w)[0].blur();
+  assert.equal(versions(w)[2].value, '1.0.0', 'the third project shows its own version, untouched');
+  tick(w, 1000);
+  assert.equal(w.navigations, 1, 'nothing typed is left');
+});
+
+// Bug: only the fields in the page were looked at: a Needs you draft left on Overview while the owner looked at
+// another tab was lost to a reload.
+test('a new copy waits while a draft has text in a panel of another tab', async () => {
+  const w = boot();
+  deliver(w, full());
+  const needs = panel(w, 'needs');
+  type(w, answerField(w), 'Ship on Monday');
+  w.document.getElementById('tab-control').click();
+  assert.equal(needs.isConnected, false, 'Needs you is out of the page');
+  await settle();  // every read the page sent is answered: the draft alone holds the reload
+  newCopy(w);
+  tick(w, 1000);
+  assert.equal(w.navigations, 0);
+  w.document.getElementById('tab-overview').click();
+  await settle();
+  type(w, answerField(w), '');
+  tick(w, 1000);
+  assert.equal(w.navigations, 1, 'the draft was what held it');
+});
+
+// Bug (E4): Rules' Undo on the note line kept its armed mark after its arm lapsed (the note is not drawn again), and
+// the page never reloaded.
+test('a new copy waits while the Rules note\'s Undo is armed, and reloads once its arm lapses', async () => {
+  const w = boot({ tab: 'rules' });
+  const off = full();
+  off.panels.rules.data.control.rules.P2 = false;
+  deliver(w, off);
+  act(rulesP(w), 'rule-P2').click();
+  await settle();
+  const undo = () => act(rulesP(w).querySelector('.rules-note'), 'undo');
+  undo().click();
+  await settle();
+  assert.equal(undo().textContent, 'Undo: skip 2', 'armed');
+  newCopy(w);
+  tick(w, 1000);
+  assert.equal(w.navigations, 0, 'the second click would land on a new page');
+  later(w);  // the arm lapses
+  await settle();
+  tick(w, 1000);
+  assert.equal(undo().textContent, 'Undo', 'the button no longer says it is armed');
+  assert.equal(w.navigations, 1);
+});
+
+// Bug: a request a panel sent itself (Health's Work now) was not counted, and a counted one stopped counting at its
+// answer's headers, before its body was read: a reload lost the answer.
+test('a new copy waits while a request is in flight, until its answer\'s body is read', async () => {
+  const w = boot();
+  let body;
+  w.workReply = { ok: true, status: 200, json: () => new Promise((r) => { body = r; }) };
+  deliver(w, full());
+  const work = panel(w, 'health').querySelector('details.work-now');
+  work.open = true;
+  work.dispatchEvent(new w.Event('toggle'));
+  await settle();
+  newCopy(w);
+  tick(w, 1000);
+  assert.equal(w.workAsks, 1);
+  assert.equal(w.navigations, 0, 'the answer is still being read');
+  body({ host: 'devbox', groups: [], other: [] });
+  await settle();
+  tick(w, 1000);
+  assert.equal(w.navigations, 1);
 });
 
 // Issue 407: a restart costs the collector's time, so it acts on a second click like every such button, and looks it.

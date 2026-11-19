@@ -1062,11 +1062,11 @@
     let timer = null;
     b.classList.add(tier === 'final' ? 'btn-final' : 'btn-cost');
     b.dataset.guard = tier;
-    const reset = () => { window.clearTimeout(timer); timer = null; b.textContent = label; b.setAttribute('aria-pressed', 'false'); };
+    const reset = () => { window.clearTimeout(timer); timer = null; b.textContent = label; b.setAttribute('aria-pressed', 'false'); delete b.dataset.armed; };
     b.setAttribute('aria-pressed', 'false');
     b.addEventListener('click', () => {
       if (b.disabled) return;
-      if (timer === null) { b.textContent = ask; b.setAttribute('aria-pressed', 'true'); timer = window.setTimeout(reset, ARM_MS); return; }
+      if (timer === null) { b.textContent = ask; b.setAttribute('aria-pressed', 'true'); b.dataset.armed = ''; timer = window.setTimeout(reset, ARM_MS); return; }
       reset();
       go();
     });
@@ -2192,6 +2192,7 @@
       try { p.mod.tick(p.body, p.ctx); } catch (e) { /* the next part that differs draws the panel whole */ }
     });
     status();
+    newView();
   }
   function apply(data) {
     if (!data || typeof data !== 'object' || !data.panels || typeof data.panels !== 'object') { failed(); return; }
@@ -2305,9 +2306,80 @@
       if (!a || typeof a !== 'object' || parse(a.at) === null) return;
       if (alive === null || a.at !== alive.at) aliveSeenAt = now();
       alive = a;
-      // A page left open picks up a newer copy of itself.
-      if (typeof a.view === 'string') { if (view === null) view = a.view; else if (a.view !== view) window.location.reload(); }
+      if (typeof a.view === 'string') { if (view === null) view = a.view; else if (a.view !== view) { newer = true; newView(); } }
     });
+  }
+  // A page left open picks up a newer copy of itself, but only when the owner loses nothing by it: no focused field,
+  // no field with text the owner typed, no two-click button or question that waits for its second click, no request
+  // in flight. Until then the head says "New version. Reload" beside the status mark; the page reloads once it is idle
+  // (looked at on each tick and each keystroke) or hidden.
+  let newer = false, reloading = false;
+  // A field the owner typed in, by its panel, label and place among the panel's fields of that label (each project's
+  // version in Release has the same label): a panel draws a field again (with the draft it keeps) as a new element in
+  // the same place, and the new one holds the same draft. A field typed in holds the reload only while it has text.
+  const typed = new Set();
+  const TEXT = ['text', 'search', 'email', 'url', 'tel', 'password', 'number'];
+  const textField = (el) => el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && TEXT.includes(el.type));
+  const fieldName = (f) => `${f.tagName}\n${f.getAttribute('aria-label') || f.name || f.placeholder || ''}`;
+  const fieldKey = (f) => {
+    const p = f.closest('[data-panel]'), name = fieldName(f);
+    const same = p ? Array.from(p.querySelectorAll('input, textarea')).filter((x) => fieldName(x) === name) : [f];
+    return `${p ? p.dataset.panel : ''}\n${name}\n${same.indexOf(f)}`;
+  };
+  // In the page, and in the panels of the other tabs (out of the page, with what the owner left in them).
+  const everywhere = (sel) => [doc, ...Array.from(panels.values(), (p) => p.el).filter((el) => el && !el.isConnected)]
+    .flatMap((root) => Array.from(root.querySelectorAll(sel)));
+  // Each request the page sends, from the send until its answer's body is read: a reload in between loses the answer.
+  // Panels and the Account page call window.fetch themselves, so it is window.fetch that counts them.
+  const asks = new Set();
+  if (typeof window.fetch === 'function') {
+    const fetch0 = window.fetch;
+    window.fetch = function (...args) {
+      const ask = { answered: false, reading: 0 };
+      asks.add(ask);
+      return fetch0.apply(this, args).then((r) => { answered(ask, r); return r; }, (e) => { asks.delete(ask); throw e; });
+    };
+  }
+  function answered(ask, r) {
+    ask.answered = true;
+    if (!r || typeof r !== 'object') return;
+    ['json', 'text', 'blob', 'arrayBuffer', 'formData'].forEach((m) => {
+      const read = r[m];
+      if (typeof read !== 'function') return;
+      r[m] = (...a) => {
+        ask.reading += 1;
+        const p = read.apply(r, a), end = () => { ask.reading -= 1; };
+        Promise.resolve(p).then(end, end);
+        return p;
+      };
+    });
+  }
+  // A caller reads an answer's body in the then() of the answer, before the next event or timer, where busy() runs: an
+  // answer whose body no read has started by then is done.
+  function inFlight() {
+    asks.forEach((a) => { if (a.answered && a.reading === 0) asks.delete(a); });
+    return asks.size > 0;
+  }
+  function busy() {
+    const a = doc.activeElement;
+    if (a && a.matches('input, textarea, select')) return true;
+    if (everywhere('input, textarea').some((f) => f.value.trim() !== '' && typed.has(fieldKey(f)))) return true;
+    // Each two-click button while it waits for its second click, and each question open for a confirm, has data-armed.
+    if (everywhere('[data-armed]').length) return true;
+    return inFlight();
+  }
+  function reload() { reloading = true; window.location.reload(); }
+  function newView() {
+    if (!newer || reloading) return;
+    if (doc.hidden || !busy()) { reload(); return; }
+    const note = byId('new-view');
+    if (note.hidden) { note.hidden = false; fitHead(); }
+  }
+  function watchView() {
+    byId('reload').addEventListener('click', reload);
+    // Before the field's own handler, which may draw it again as a new element out of its panel.
+    doc.addEventListener('input', (e) => { if (textField(e.target) && e.target.value.trim() !== '') typed.add(fieldKey(e.target)); newView(); }, true);
+    doc.addEventListener('visibilitychange', newView);
   }
   // The Board's feed (the collector) restarted, from the head or a panel's button (restartHere()): what the host
   // answered goes under the head, and to the promise returned (the panel shows it beside its button).
@@ -2379,6 +2451,7 @@
     tick();
     window.setInterval(tick, 1000);
     doc.addEventListener('visibilitychange', shownAgain);
+    watchView();
     refresh(follow());
     window.setInterval(() => refresh(), REFRESH_MS);
   }
@@ -2425,6 +2498,7 @@
     tick();
     window.setInterval(tick, 1000);
     doc.addEventListener('visibilitychange', shownAgain);
+    watchView();
     refresh(follow());
     window.setInterval(() => refresh(), REFRESH_MS);
   }

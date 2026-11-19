@@ -99,6 +99,12 @@ The `/units` pane on the Board's machine also uses the last **Time** you set.
 
 Click the button, then click it again. The text next to the button shows that the feed restarts, and then the result.
 
+When the Board gets a new version, an open page loads it again by itself if you are not using the page. You are
+using it when a field has the cursor, a field has text that you typed (also on another tab), a button or a question
+waits for you to confirm, or a request has no answer yet. Then the page shows **New version.** and a **Reload** button next to the
+status mark, and keeps what you did. The page loads again by itself when you finish, for example when you clear the
+field, or when you go to another browser tab. Click **Reload** to load the new version at once.
+
 **Show**, in the machine bar, picks the project that every tab shows.
 
 ## Needs you

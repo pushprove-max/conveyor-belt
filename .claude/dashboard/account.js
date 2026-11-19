@@ -159,10 +159,10 @@
     let timer = null;
     b.classList.add('btn-final');
     b.dataset.guard = 'final';
-    const reset = () => { window.clearTimeout(timer); timer = null; b.textContent = label; b.setAttribute('aria-pressed', 'false'); };
+    const reset = () => { window.clearTimeout(timer); timer = null; b.textContent = label; b.setAttribute('aria-pressed', 'false'); delete b.dataset.armed; };
     b.setAttribute('aria-pressed', 'false');
     b.addEventListener('click', () => {
-      if (timer === null) { b.textContent = ask; b.setAttribute('aria-pressed', 'true'); timer = window.setTimeout(reset, ARM_MS); return; }
+      if (timer === null) { b.textContent = ask; b.setAttribute('aria-pressed', 'true'); b.dataset.armed = ''; timer = window.setTimeout(reset, ARM_MS); return; }
       reset();
       go();
     });
@@ -250,12 +250,12 @@
     label.append(sw, ' No login on this device');
     sw.addEventListener('change', () => {
       if (!sw.checked && !armed) {
-        armed = true; sw.checked = true;
+        armed = true; sw.checked = true; sw.dataset.armed = '';
         warn.textContent = `You will need your password and code on ${where} from now on. Click the switch again to turn it off.`;
         warn.hidden = false;
         return;
       }
-      armed = false; warn.hidden = true;
+      armed = false; warn.hidden = true; delete sw.dataset.armed;
       act({ action: 'no-login-here', on: sw.checked },
         () => (sw.checked ? 'This device opens the Board with no login.' : 'This device now logs in like any other.'))
         .then((done) => { if (!done) sw.checked = !sw.checked; });

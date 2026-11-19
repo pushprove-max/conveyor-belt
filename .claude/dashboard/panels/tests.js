@@ -794,7 +794,9 @@
   function preview(f) {
     const h = S.ctx.h, a = S.ask, file = f.file;
     if (!a || a.repo !== S.d.repo || a.file !== file || a.kind === 'on') return null;
-    const el = h('div', 'tests-preview'), cancel = (act) => button('Cancel', 'btn-quiet', act, 'Cancel: send nothing', () => { S.ask = null; draw(); say('Cancelled. Nothing was sent.'); });
+    const el = h('div', 'tests-preview');
+    el.dataset.armed = '';
+    const cancel = (act) => button('Cancel', 'btn-quiet', act, 'Cancel: send nothing', () => { S.ask = null; draw(); say('Cancelled. Nothing was sent.'); });
     if (a.kind === 'issue') {
       el.append(h('p', 'board-head', 'Preview of the issue. Edit it, then file it.'));
       if (a.verdict) { const v = h('p', 'tests-fact tests-preview-verdict', 'With the judge\'s verdict: '); v.append(verdictChip(a.verdict)); el.append(v); }
@@ -1137,6 +1139,7 @@
   // them all in one test-issue, and Cancel files nothing.
   function manyPreview() {
     const h = S.ctx.h, a = S.ask, el = h('div', 'tests-preview tests-selbar-preview'), n = a.items.length;
+    el.dataset.armed = '';
     el.append(h('p', 'board-head', `Preview of ${n} ${n === 1 ? 'issue' : 'issues'}, one a file. Edit them, then file them.`));
     a.items.forEach((it) => {
       const item = h('div', 'tests-preview');
@@ -1349,6 +1352,7 @@
     el.append(row('auto-switch', 'Auto-file test issues', 'One switch for all rules. Off: the rules file no issue.', PACK, h('span', 'board-value', on ? 'On' : 'Off'), confirm ? null : sw));
     if (confirm && !on) {
       const c = h('div', 'tests-preview');
+      c.dataset.armed = '';
       c.append(h('p', 'board-head', 'Check the preview below. With the switch on, the rules file such issues after each card test step.'),
         button('Turn on: confirm', 'btn-primary', 'auto-on-confirm', 'Turn auto-file on', () => { S.ask = null; sendRule('rules-on', ['on'], 'true', 'Auto-file is now On.'); }),
         button('Cancel', 'btn-quiet', 'auto-on-cancel', 'Cancel: keep auto-file off', () => { S.ask = null; draw(); say('Cancelled. Auto-file stays Off.'); }));

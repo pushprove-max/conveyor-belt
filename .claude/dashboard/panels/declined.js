@@ -238,6 +238,7 @@
         const draw = () => {
           b.textContent = armed.has(k) ? 'Click again to file it as an issue' : 'File as issue';
           b.setAttribute('aria-pressed', String(armed.has(k)));
+          b.toggleAttribute('data-armed', armed.has(k));
           b.disabled = busy.has(k); off.disabled = busy.has(k);
           // Filed, the line is greyed in place and its buttons go, until the list no longer shows it.
           li.classList.toggle('is-pending', filed.has(k));
@@ -298,6 +299,7 @@
           const n = u.xs.length === 1 ? 'the line' : `the ${u.xs.length} lines`;
           u.b.textContent = on ? `Click again to dismiss ${n} for good` : `${u.label} (${u.xs.length})`;
           u.b.setAttribute('aria-pressed', String(on));
+          u.b.toggleAttribute('data-armed', on);
           if (on) ask = `Click again to dismiss ${n} ${u.where}: they leave the panel, and the reviewer still does not raise them again.`;
         });
         said0.textContent = ask || allSaid;

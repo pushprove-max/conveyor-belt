@@ -280,6 +280,7 @@
     });
     stop.disabled = mode === 'stop';
     stop.setAttribute('aria-pressed', String(armed));
+    if (armed) stop.dataset.armed = '';
     acts.append(stop);
     el.append(acts);
     // What the two controls do, printed under them at phone width (app.css, .phone-note), where no hover text shows.
@@ -415,6 +416,7 @@
     });
     b.dataset.guard = tier;
     b.setAttribute('aria-pressed', String(on));
+    if (on) b.dataset.armed = '';
     return b;
   }
   // Why neither button can work, or null when they can: no suite in the pack, or a run under way (a second press is
@@ -672,6 +674,7 @@
           send('unlabel', [String(item.issue)].concat(labels), () => { S.unlabeled.add(item.issue); });
         });
       b.setAttribute('aria-pressed', String(armed));
+      if (armed) b.dataset.armed = '';
       card.append(b);
     } else if (kinds(item).includes('standing')) {
       const r = issues(item.reasons).find((x) => x.kind === 'standing');
