@@ -94,11 +94,27 @@ machined() { grep -qE '^(cmd machine |  machine\) )' "$1" 2>/dev/null; }
 # A run with --only takes only the listed ones.
 # How many of the loop's cards in progress only wait now: alive, with <worktree>.idle standing. A card stands it while
 # it sleeps out a wait on a same-file card or on the batch card that took it (settle()), or for main to change on a
-# red main (mainwait()), or for the machine hold to go (holdwait()); never while it runs its checks or tests. run() leaves at most the cap of them out of its count
+# red main (mainwait()), or for the machine hold to go (holdwait()), or for its seat's CLI to come back (seatwait()); never while it runs its checks or tests. run() leaves at most the cap of them out of its count
 # against the cap: the rest count, so the loop does not start card after card while the old ones pile up waiting.
 idle() { # <the loop's own cards in progress, "<pid> <card>" one a line>
   local p c n=0
   while read -r p c; do [ -n "$c" ] && [ -e "$CARDS/$c.idle" ] && kill -0 "$p" 2>/dev/null && n=$((n + 1)); done <<<"$1"
+  echo "$n"
+}
+# The loop's cards that wait for their seat's CLI (seatwait(), lib/control.sh: alive, <worktree>.idle standing, their
+# live record's cli naming it) whose step starts again in this turn: at most <free> of them, each once the CLI is on
+# PATH and the host's report, read fresh, lists it. Each has its idle mark taken away here, so it counts against the
+# cap from this turn on, and the card starts its step. Prints how many.
+cliwake() { # <the loop's own cards in progress, "<pid> <card>" one a line> <free slots>
+  local p c a n=0 h=''
+  while read -r p c; do
+    [ "$n" -lt "$2" ] || break
+    [ -n "$c" ] && [ -e "$CARDS/$c.idle" ] && kill -0 "$p" 2>/dev/null && a=$(jq -r '.cli | strings' "$CARDS/$c.live" 2>/dev/null) \
+      && [ -n "$a" ] && command -v "$a" >/dev/null || continue
+    [ -n "$h" ] || h=$(hostclis fresh) || h=''
+    jq -e --arg a "$a" 'has($a)' <<<"${h:-null}" >/dev/null 2>&1 || continue
+    rm -f "$CARDS/$c.idle"; n=$((n + 1))
+  done <<<"$1"
   echo "$n"
 }
 urgent() {
@@ -199,9 +215,11 @@ revive() { # <the loop's own cards, one a line>
 }
 # A card of the loop: card() in a process of its own, under this one, which writes that process's exit status to
 # <cards>/<card>.exit when it ends (128 + N when signal N killed it), so the loop can say why a card that wrote no
-# closing line ended (cardgone()).
+# closing line ended (cardgone()). LOOPCARD marks it as the loop's: a step whose seat's CLI stays gone waits for the
+# loop to start it again (seatwait(), cliwake()).
 cardrun() { # <card> <issue>
-  ( card "$1" "$2" ); echo $? > "$CARDS/$1.exit"
+  # shellcheck disable=SC2034 # LOOPCARD is read by seatwait() in lib/control.sh
+  ( LOOPCARD=1; card "$1" "$2" ); echo $? > "$CARDS/$1.exit"
 }
 # The Conveyor commit a card of the loop runs now: the one its last switch to new code named on its start line
 # (began(), lib/card.sh), else the one it started on.
@@ -291,7 +309,7 @@ runends() {
 }
 run() { # [max-cards] [serve]
   local left=${1:--1} serve=${2:-} cap base='' picked running building idles started=0 c n again timer pusher='' owed tried='' triedat=0 ctl pct now='' p k lim='' waits sampled=-1000000 guard issues='' asking urgent red
-  local why say said='' old='' nopack told='' nocli self adopt='' held='' new t tester='' mtried=-1000000 stried=-1000000 taker='' ttook=-1000000 f muter='' utried=-1000000
+  local why say said='' old='' nopack told='' nocli self adopt='' held='' new t tester='' mtried=-1000000 stried=-1000000 taker='' ttook=-1000000 f muter='' utried=-1000000 woke
   local mhold htold='' prober='' htried=-1000000 gone gs merger='' gtried=-1000000 fixer='' rtried=-1000000
   # The loop's own cards in progress: pid -> "card issue"; took: those it adopted at its start -> the commit they run;
   # kids: a card's processes at the last turn, as "<pid> <started>" lines; at a restart, the list the loop
@@ -429,7 +447,13 @@ run() { # [max-cards] [serve]
     cardsrun; waits=''
     # The cards counted against the builder cap (building): those running, less those that only wait (idle()), at
     # most as many of them as the cap. running still counts every card: the loop ends only once none is left.
-    idles=$(idle "$(for p in "${!mine[@]}"; do echo "$p ${mine[$p]% *}"; done)"); [ "$idles" -le "$cap" ] || idles=$cap; [ "$idles" -ge 0 ] || idles=0
+    # A card that waits for its seat's CLI starts its step again in a free slot once the host lists the CLI (cliwake()).
+    # The free slots are the cap less the cards that do not wait at all: counted after the cap on idle cards, waits
+    # past the cap (the cap lowered while they waited) would fill every slot and none would start again.
+    idles=$(idle "$(for p in "${!mine[@]}"; do echo "$p ${mine[$p]% *}"; done)")
+    [ $((running - idles)) -ge "$cap" ] || { woke=$(cliwake "$(for p in "${!mine[@]}"; do echo "$p ${mine[$p]% *}"; done)" $((cap - running + idles))) \
+      && idles=$((idles - woke)); } || :
+    [ "$idles" -le "$cap" ] || idles=$cap; [ "$idles" -ge 0 ] || idles=0
     building=$((running - idles))
     # The machine hold's look (machineprobe()), at most once every POLL seconds (as often as a free loop would pick)
     # while the hold stands: a job beside the cards, never counted as one, and given no run lock; a `run` does not end

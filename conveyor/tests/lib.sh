@@ -133,9 +133,11 @@ seed() {
 # The machine's Conveyor (machineloop) notes the wait that ends each of its turns as a line `machine`: turns <n> machine.
 # That wait is 1 s here, not its 5 s (MACHINE_POLL): a case waits for its turns, never for their seconds, and five
 # seconds a turn made the machine's cases sit out a minute each.
+# A step's pause between two checks of its seat's CLI (seatwait(), SEAT_PAUSE) is noted as a line `seatwait` and not
+# waited out: four of them would hold a card two minutes.
 watchturns() {
   export TURNS=$T/$CASE/turns; : > "$TURNS"
-  sleep() { case ${FUNCNAME[1]:-} in run) [ "$1" = 0.1 ] || { [ ! -e "$TURNS.at" ] || { bash "$TURNS.at" && rm -f "$TURNS.at"; }; echo "${CONVEYOR_MAIN:-}" >> "$TURNS"; } ;; machineloop) echo machine >> "$TURNS"; set -- 1 ;; esac; command sleep "$@"; } # sleep: the engine's own, passed on as called
+  sleep() { case ${FUNCNAME[1]:-} in run) [ "$1" = 0.1 ] || { [ ! -e "$TURNS.at" ] || { bash "$TURNS.at" && rm -f "$TURNS.at"; }; echo "${CONVEYOR_MAIN:-}" >> "$TURNS"; } ;; machineloop) echo machine >> "$TURNS"; set -- 1 ;; seatwait) [ "$1" != "${SEAT_PAUSE:-}" ] || { echo seatwait >> "$TURNS"; set -- 0; } ;; esac; command sleep "$@"; } # sleep: the engine's own, passed on as called
   export -f sleep
 }
 atturn() { printf '%s\n' "$1" > "$TURNS.new" && mv "$TURNS.new" "$TURNS.at"; } # <commands>

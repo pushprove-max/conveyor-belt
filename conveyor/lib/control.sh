@@ -401,8 +401,10 @@ hostclis() { # [fresh | due | <cli>]
   done
   r=$(jq -cn --argjson o "$old" '$ARGS.positional as $p | [range(0; $p | length; 2) | {key: $p[.], value: ($p[. + 1] | fromjson)}
       | if .value == "*" then .value = ($o.clis[.key] // null) else . end] | from_entries' --args "${found[@]}") || return 1
-  if [ "$one" = fresh ]; then jq -cn --argjson r "$r" '{at: (now | floor), clis: $r}' > "$CLIS.$$"
-  elif [ -n "$one" ]; then jq -c --arg c "$one" --argjson r "$r" '.clis[$c] = $r[$c]' <<<"$old" > "$CLIS.$$"; fi
+  # seen: every CLI a report of this host has listed, kept when one goes (seatwait()). One CLI read that is not
+  # installed is taken out of clis, not written there as installed with no list.
+  if [ "$one" = fresh ]; then jq -cn --argjson r "$r" --argjson o "$old" '{at: (now | floor), clis: $r, seen: ([($o.seen | arrays | .[] | strings), ($o.clis | objects | keys[]), ($r | keys[])] | unique)}' > "$CLIS.$$"
+  elif [ -n "$one" ]; then jq -c --arg c "$one" --argjson r "$r" 'if $r | has($c) then .clis[$c] = $r[$c] else del(.clis[$c]) end | .seen = ([(.seen | arrays | .[] | strings), ($r | keys[])] | unique)' <<<"$old" > "$CLIS.$$"; fi
   [ ! -e "$CLIS.$$" ] || mv -f "$CLIS.$$" "$CLIS" || rm -f "$CLIS.$$"
   HOST_R=$r; printf '%s\n' "$r"
 }
@@ -418,6 +420,39 @@ seatready() { # <builder|reviewer|judge> <its seat>
   if [ -n "${READY_V[$2]+1}" ]; then why=${READY_V[$2]}
   else why=$(jq -r --argjson h "$h" "$MISSING"'missing($h) // empty' <<<"$2" 2>/dev/null) || why=''; [ -z "$h" ] || READY_V[$2]=$why; fi
   [ -z "$why" ] || { echo "the $1 is set to $(jq -r "$MISSING"'"\(.agent) \(bare)"' <<<"$2"), and $why: the $1 does not start; set it to a CLI and model this host has (conveyor.sh control, or Rules on the Board)"; return 1; }
+}
+# A step's check of its seat before its session starts (session1(), review(), judgecall()). A CLI that an update or a
+# reinstall takes away for a moment must not block the card for good (issue 839): when seatready fails on a CLI that a
+# report of this host has listed (its seen, or the clis of a report written before seen was), the host's CLIs are read
+# again (a fresh report) SEAT_TRIES times, SEAT_PAUSE seconds apart, the card keeping its build slot. When the CLI is
+# still missing, a card of the loop (LOOPCARD, cardrun()) waits in its step: its live record names the CLI (its cli
+# and action) and <worktree>.idle stands, so it holds no build slot, until the loop takes that mark away in a turn with
+# a free slot once the host's report lists the CLI again (cliwake(), lib/run.sh); the step then starts, or waits again
+# when the CLI is gone again. Outside the loop (a lane's preview review), and for a CLI that no report of this host
+# has listed, it fails with seatready's reason.
+SEAT_TRIES=4 SEAT_PAUSE=30
+seatwait() { # <role> <its seat> <worktree> <step>
+  local why a i=0 at
+  why=$(seatready "$1" "$2") && return 0
+  a=$(jq -r '.agent | strings' <<<"$2" 2>/dev/null)
+  [ -n "$a" ] && jq -e --arg a "$a" '[(.seen | arrays | .[]), (.clis | objects | keys[])] | index($a)' "$CLIS" >/dev/null 2>&1 || { printf '%s\n' "$why"; return 1; }
+  at=$(date -u +%FT%TZ)
+  while [ "$i" -lt "$SEAT_TRIES" ]; do
+    seatlive "$1" "$3" "$4" "$a" "$at"; i=$((i + 1)); sleep "$SEAT_PAUSE"; hostclis fresh >/dev/null
+    why=$(seatready "$1" "$2") && { rm -f "$3.live"; return 0; }
+  done
+  [ -n "${LOOPCARD:-}" ] || { rm -f "$3.live"; printf '%s\n' "$why"; return 1; }
+  until [ ! -e "$3.idle" ] && why=$(seatready "$1" "$2"); do
+    seatlive "$1" "$3" "$4" "$a" "$at"; : > "$3.idle"
+    while [ -e "$3.idle" ]; do sleep "$LIVE"; seatlive "$1" "$3" "$4" "$a" "$at"; done
+  done
+  rm -f "$3.live"
+}
+# The live record of a step that waits for its seat's CLI (seatwait()): cli names the CLI for cliwake() (lib/run.sh).
+seatlive() { # <role> <worktree> <step> <cli> <since>
+  jq -cn --arg s "$3" --arg at "$5" --arg a "$4" --arg r "$1" '{step: $s, at: $at, last: (now | todate), turns: 0, cli: $a,
+    action: "waiting for \($a): the \($r) is set to \($a), and \($a) is not on PATH on this host now; the \($s) starts once the host'"'"'s CLIs list \($a) again"}' \
+    > "$2.live.tmp" 2>/dev/null && mv -f "$2.live.tmp" "$2.live"
 }
 # The preflight of plan section 6: the builder and the reviewer in force can start on this host (seatready), so the
 # loop starts no card on a CLI that is gone. Prints why not and fails; prints

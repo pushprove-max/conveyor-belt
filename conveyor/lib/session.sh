@@ -558,8 +558,8 @@ cxready() { # <worktree>
 session1() {
   local model effort agent rc s sec f dir='' x='' read=$SESSIONREAD roll run role=${4:-builder}
   s=$(seat "$role") && jqget "$s" model model effort effort agent agent || { echo "the pack's models.allowed lists no builder model"; return 1; }
-  # The CLI the seat names, never another: one that is gone starts no session.
-  f=$(seatready "$role" "$s") || { echo "$f"; return 1; }
+  # The CLI the seat names, never another: one that is gone starts no session; one gone for a moment is waited for (seatwait()).
+  f=$(seatwait "$role" "$s" "$1" "${3:-build}") || { echo "$f"; return 1; }
   # OpenCode takes no effort here (its line names none); OpenCode and Codex run on no Claude account. A Codex model
   # named by its family is the newest of it, as for a review (codexmodel()).
   case $agent in

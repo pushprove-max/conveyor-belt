@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
 # Engine cases: what the snapshot (lib/snapshot.sh) reads of the machine beyond the cards' records: the test slots, and
-# a bug card's proof run on main's code.
+# a bug card's proof run on main's code, a step's wait for its seat's CLI.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -127,4 +127,21 @@ t_snapfixlive() {
   s=$(loop snapshot --fresh | jq -c '[.belt[] | [.card[-1:], .step, .stepAt, .track.since, .review]]')
   [ "$s" = '[["8","fix","2026-11-17T11:14:11Z","2026-11-17T11:14:11Z",null],["9","fix","2026-11-17T10:41:05Z","2026-11-17T10:41:05Z",null]]' ] \
     || fail "a fix after failed tests, and one that fits a card onto main after its GO: $s"
+}
+
+# Bug (#839): the judge's check of a test file for hollow cases (testrun.sh, judgecall()) runs after the card's build
+# line, with no start line of its own, so the snapshot left out its live record: a wait there for the judge's CLI
+# (seatwait(), its live record's cli) was shown neither on the Board nor in /units.
+t_snapcliwait() {
+  local s c=c20261117T100000-r-7
+  setup "[]"
+  snapproof_line() { jq -cn --arg c "$c" --arg s "$1" --arg r "$2" --arg t "2026-11-17T10:$3:00Z" --argjson x "${4:-{\}}" \
+    '{card: $c, issue: 7, step: $s, time: $t, tokens: {claude: 0, codex: 0}, result: $r, sha: "", reason: "", repo: "r"} * $x'; }
+  { snapproof_line picked ok 00 '{"title": "a test-speed fix", "created": "2026-11-17T09:59:00Z"}'; snapproof_line worktree ok 01
+    snapproof_line deps ok 01; snapproof_line brief ok 02; snapproof_line start ok 02 '{"of": "build"}'; snapproof_line build ok 05; } > "$ST/cards.jsonl"
+  mkdir -p "$T/$CASE/cards"
+  echo '{"step": "build", "at": "2026-11-17T10:06:00Z", "last": null, "turns": 0, "cli": "codex", "action": "waiting for codex: the judge is set to codex, and codex is not on PATH on this host now"}' \
+    > "$T/$CASE/cards/$c.live"
+  s=$(loop snapshot --fresh | jq -c '.belt[0].live.action')
+  [ "$s" = '"waiting for codex: the judge is set to codex, and codex is not on PATH on this host now"' ] || fail "a judge's wait for its CLI after the build line is not shown: $s"
 }

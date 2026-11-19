@@ -72,7 +72,7 @@ review() { # <worktree> <brief> [instructions, in place of REVIEW]
   local model effort agent s rc ins=${3:-$REVIEW} br=$2 PROXY_ROLE=reviewer # the reviewer's route (proxyroute())
   newtexts ins; newtexts br # the new code's texts in place of the old code's, for a card that switched (newtexts(), lib/session.sh)
   s=$(seat reviewer) && jqget "$s" model model effort effort agent agent || { echo "the pack's models.allowed lists no reviewer model"; return 1; }
-  rc=$(seatready reviewer "$s") || { echo "$rc"; return 1; } # the CLI the seat names, never another
+  rc=$(seatwait reviewer "$s" "$1" review) || { echo "$rc"; return 1; } # the CLI the seat names, never another; one gone for a moment is waited for
   rm -f "$1.review.new" "$1.spent"
   # A review of a change (its instructions begin with REVIEW, or REVIEWOFF, or FIXREVIEW for the review of a fix
   # alone) is told what not to raise; the check of an ALREADY-DONE claim (CONFIRM) lists what the issue still lacks,
@@ -367,7 +367,7 @@ judgecall() { # <worktree> <instructions> <the brief and the findings>
   local s=${CALLSEAT:-} model effort agent d p rc sec f='' roll run='' PROXY_ROLE=reviewer # the review's route (proxyroute())
   [ -n "$s" ] || s=$(judgeseat) || { jq -cn '{failed: "the control record names no judge, and the pack allows the review no model of another family than the reviewer runs on"}'; return 1; }
   jqget "$s" model model effort effort agent agent || model='' effort='' agent=''
-  d=$(seatready judge "$s") || { jq -cn --arg m "$model" --arg r "$d" '{model: $m, failed: $r}'; return 1; } # the CLI the seat names, never another
+  d=$(seatwait judge "$s" "$1" "${CALLSTEP:-review}") || { jq -cn --arg m "$model" --arg r "$d" '{model: $m, failed: $r}'; return 1; } # the CLI the seat names, never another; one gone for a moment is waited for
   rm -f "$1.judge" "$1.judge.events"
   jq -cn --arg m "$model" --arg s "${CALLSTEP:-review}" --arg a "${CALLACT:-the judge reads the findings}" '{step: $s, at: (now | todate), last: null, turns: 0, model: $m, action: $a}' > "$1.live.tmp" && mv -f "$1.live.tmp" "$1.live"
   sec=$SECONDS
