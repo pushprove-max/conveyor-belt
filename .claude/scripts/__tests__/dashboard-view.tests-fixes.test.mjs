@@ -119,3 +119,43 @@ test('Tests fixes: an indirect verdict makes Rewrite as a direct check the prima
   assert.deepEqual(w.posts.splice(0).map((p) => [p.body.action, p.body.args[0], p.body.args[1], p.body.args[2]]), [['test-issue', MERGE, title, body]]);
   assert.match(opened(w, MERGE).textContent, /Rewrite as a direct check: Filed: https:\/\/github\.com\/example\/sample\/issues\/702/);
 });
+
+// Bug it guards (#768): the owner could not ask for a test file to be split. More has Split it, whose preview is titled
+// "Split the test file <file>" and says how to split it; File posts one test-issue with that title and the body as the
+// owner edited it. Bug it guards too: a runner (wholeOnly, here X) is the sum of other test files, so splitting it
+// splits nothing; its Split it is disabled, with why.
+test('Tests fixes: Split it under More previews the split issue and files the edited body; a runner has it disabled', async () => {
+  const w = show({ whole: X });
+  act(open(w, X), 'more').click();
+  const off = act(opened(w, X), 'split');
+  assert.equal(off.disabled, true, 'a runner\'s Split it is disabled');
+  assert.equal(off.title, 'It runs other test files: split one of those, not the runner.');
+  act(open(w, MERGE), 'more').click();
+  act(opened(w, MERGE), 'split').click();
+  const more = opened(w, MERGE);
+  assert.equal(act(more, 'issue-title').value, `Split the test file ${MERGE}`);
+  const body = act(more, 'issue-body').value;
+  assert.match(body, /^Split this test file into two or more test files of the same area\. Keep each of its cases once, and unchanged\.\n/);
+  assert.match(body, /\nDone when:\n- Each case of the file is in exactly one of the new test files, unchanged\.\n- Each new test file is under 600 lines\.\n- \.conveyor\/engine-areas\.json and the test map name the new test files\.$/);
+  assert.doesNotMatch(body, /verdict/, 'with no split verdict, no judge\'s reason');
+  TA.type(act(more, 'issue-body'), `${body}\nKeep the fixtures in one helper.`);
+  w.reply = TA.reply('https://github.com/example/sample/issues/703');
+  act(opened(w, MERGE), 'issue-file').click();
+  await settle();
+  assert.deepEqual(w.posts.splice(0).map((p) => [p.body.action, p.body.args[0], p.body.args[1], p.body.args[2]]),
+    [['test-issue', MERGE, `Split the test file ${MERGE}`, `${body}\nKeep the fixtures in one helper.`]]);
+  assert.match(opened(w, MERGE).textContent, /Split it: Filed: https:\/\/github\.com\/example\/sample\/issues\/703/);
+});
+
+// Bug it guards (#768): the judge's newest verdict split was a verdict no action acted on, and its row still suggested
+// Run. Split it is then the one primary step (and so not in More too), and its preview names the judge's reason.
+test('Tests fixes: the newest verdict split makes Split it the primary step, its preview holding the judge\'s reason', () => {
+  const w = show({ acts: [rec({ state: 'done', end: iso(Date.now()), verdict: 'split', text: 'Its cases test two unrelated features.\nVERDICT: split\n' })] });
+  const steps = open(w, MERGE).querySelector('.tests-steps');
+  assert.deepEqual(Array.from(steps.querySelectorAll('.btn-primary'), (b) => b.textContent), ['Split it']);
+  act(opened(w, MERGE), 'more').click();
+  assert.equal(opened(w, MERGE).querySelector('[role="menu"] [data-act="split"]'), null, 'not in More while it is the step');
+  act(opened(w, MERGE), 'split').click();
+  assert.equal(act(opened(w, MERGE), 'issue-title').value, `Split the test file ${MERGE}`);
+  assert.match(act(opened(w, MERGE), 'issue-body').value, /\n\nThe judge's newest verdict is split: Its cases test two unrelated features\.\n/);
+});

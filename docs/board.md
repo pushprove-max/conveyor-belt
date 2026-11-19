@@ -679,8 +679,8 @@ cards and by how much each one changed it, and whether its runs are slower or fa
 verdict of Judge as a chip with its reason in one line, and **Full report**, which opens the Judge tab. Then come the
 buttons for the next step: Judge, Optimize (**Optimize again** after an Optimize landed), **Fix failures** (on a file
 with a flaky or main failure), **Fix hollow cases** (on a Hollow file), **Fix the waiting** (on a file that Waits),
-**Make it run** and **Delete it** (on a file Never run), **Make it run alone** (on a Whole suite only file), **Rewrite as a direct check** (when the verdict is indirect, on a file that is not Whole suite only), Run
-and More. The step that the Board suggests is the primary
+**Make it run** and **Delete it** (on a file Never run), **Make it run alone** (on a Whole suite only file), **Rewrite as a direct check** (when the verdict is indirect, on a file that is not Whole suite only), **Split it**
+(when the newest verdict is split, on a file that is not Whole suite only), Run and More. The step that the Board suggests is the primary
 button. Six tiles follow: the CPU seconds now with the median, the last 4 runs as bars, the last Optimize as a
 percentage with its issue and its CPU seconds before → after, the clock time with its clock / CPU ratio, the bugs
 caught and the mutants caught (or "not checked"). Point at a bar, or move the keyboard focus to it, to see its CPU
@@ -703,8 +703,15 @@ Judge (Judge this test) and Run (Run this file now) start at once.
 Optimize shows the issue first, with the title "Optimize the test file <file>", the file's numbers, its hollow cases,
 its surviving mutants (so that the card adds the assertions that catch them) and the newest verdict of Judge, with
 the end of its text. Edit it, then click "File this issue". Cancel files nothing. More holds Explain the slowdown,
-Mutation check, Keep a case off, Close its issue as done and Mark as slow on purpose
+Mutation check, Split it, Keep a case off, Close its issue as done and Mark as slow on purpose
 (`conveyor.sh test-settings`). Use the arrow keys to move in the More menu, and Escape to close it.
+
+Split it shows the issue first, with the title "Split the test file <file>". Its text asks for two or more test files
+of the same area, with each case kept once and unchanged, each new file under 600 lines, and
+`.conveyor/engine-areas.json` and the test map updated. When the newest verdict of Judge is split, the text also gives
+the reason of Judge. Edit it, then click "File this issue". On a Whole suite only file, Split it is disabled: the file
+runs other test files, so split one of those. When the newest verdict is split, Split it is a button of the row and
+not in More.
 
 Explain the slowdown gives the model the file's recorded times and the window where its time went up: from the last
 run at its usual time to the first slower run. The model gets each commit made in that window that changed the test

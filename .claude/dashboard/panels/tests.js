@@ -80,7 +80,9 @@
 // "tests still passed"). Mutation check, in More and in the bar, is one POST control {action: mutate, args: [file...]}
 // (`conveyor.sh mutate ask`: the front of the idle queue; no check starts while a card needs a test slot, and the bar
 // says so). Optimize's preview lists the survivors; a landed Optimize shows the mutants caught before and after.
-// Its More menu holds Explain the slowdown, Mutation check, Keep a case off, Close its issue as done and Mark as slow on purpose (it asks for the reason).
+// Its More menu holds Explain the slowdown, Mutation check, Split it (#768: the preview Optimize opens, of an issue to split
+// the file; disabled on a runner; a button of the row, primary, when the judge's newest verdict is split), Keep a case off,
+// Close its issue as done and Mark as slow on purpose (it asks for the reason).
 // Settings, Test limits. Each row names where it saves, the pack file (this project): the files slow on purpose (a
 // list), and, only when the snapshot names them, the hard box of each test file (settings.box: {on}) and "Take a
 // file off card runs" (settings.slowIssues, #457).
@@ -769,6 +771,19 @@
       ['- The file keeps each case that a DIRECT line above names, and adds or removes no other test file.',
         '- Run alone with the change on a test slot, the file succeeds and costs less CPU time than its recent runs.']);
   }
+  // Split it (#768): the cases of the file in two or more test files, and the judge's reason when its newest verdict
+  // is split.
+  function draftSplit(f) {
+    const v = verdictOf(f.file), split = !!v && v.verdict === 'split', why = split ? reasonOf(S.texts.get(v.id) || '') : '';
+    const d = drafted('Split it', `Split the test file ${f.file}`, f.file,
+      ['Split this test file into two or more test files of the same area. Keep each of its cases once, and unchanged.',
+        ...(split ? ['', `The judge's newest verdict is split${why ? `: ${why}` : '.'}`] : [])], [],
+      ['- Each case of the file is in exactly one of the new test files, unchanged.',
+        '- Each new test file is under 600 lines.',
+        '- .conveyor/engine-areas.json and the test map name the new test files.']);
+    return { ...d, verdict: split ? 'split' : null };
+  }
+  const SPLIT_RUNNER_WHY = 'It runs other test files: split one of those, not the runner.';
   const draftDelete = (f) => drafted('Delete it', `Delete the test file ${f.file}`, f.file,
     [neverSaid(f), 'Delete it. For each of its cases that matters, name the test that already proves its behaviour, on a line of its own: COVERED-BY: <test file>: <its case>. When no other test proves a case that matters, make the file run instead.'], [],
     ['- The file is deleted, and each of its cases that matters has a COVERED-BY line naming a test that proves it.']);
@@ -885,6 +900,8 @@
     return [
       ['explain', ACTS.explain, null, () => start('explain', file)],  // with no Tests model, its box says so
       ['mutate', 'Mutation check', null, () => mutAsk([file], false)],
+      // Split it is a button of the row while it is the step suggested (stepButtons()).
+      ...(nextStep(f) === 'split' ? [] : [['split', 'Split it', runner ? SPLIT_RUNNER_WHY : null, () => askSplit(f)]]),
       ['flaky-off', 'Keep a case off', null, () => { S.ask = { kind: 'keep', repo: S.d.repo, file, case: '', why: '' }; S.keep = { act: 'keep-case', file }; draw(); }],
       ['close-done', 'Close its issue as done', num(f.issue) === null ? 'It has no issue to close.' : null, () => {
         const before = num(f.usual) === null ? f.median : f.usual;
@@ -935,21 +952,24 @@
     else el.append(h('span', null, n.text));
     return el;
   }
+  const askSplit = (f) => { S.notes.delete(dk(f.file)); S.ask = draftSplit(f); S.keep = { act: 'issue-title', file: f.file }; draw(); };
   // The next step a row suggests (#130), from its state, its judge's verdict and its Optimize issues: run a file that
   // has no CPU time to judge, or that runs other test files; judge a file that needs a look and has no verdict; else
   // run it. No test file has a CPU budget (#349), so no step follows from one. A verdict indirect (#778) asks for the
-  // rewrite as direct checks first, except on a runner (wholeOnly): its card's check (optproof()) times the file alone,
-  // and a card's Test step never runs a runner alone, so Make it run alone comes first.
+  // rewrite as direct checks first, and a verdict split (#768) for Split it, except on a runner (wholeOnly): its card's
+  // check (optproof()) times the file alone, and a card's Test step never runs a runner alone, so Make it run alone
+  // comes first; a runner is not split.
   function nextStep(f) {
     if (f.wholeOnly === true) return 'run';
     const v = verdictOf(f.file);
     if (v && v.verdict === 'indirect') return 'rewrite-direct';
+    if (v && v.verdict === 'split') return 'split';
     if (!cpuTimed(f)) return 'run';
     return look(f) && !verdictOf(f.file) ? 'judge' : 'run';
   }
   // The buttons of an opened row: Judge, Optimize (Optimize again once one landed), Fix failures (with failures no
   // card's change caused), Fix hollow cases (Hollow), Fix the waiting (Waits), Make it run and Delete it (Never run),
-  // Rewrite as a direct check (the verdict indirect), Run and More; the next step suggested is the primary one.
+  // Rewrite as a direct check (the verdict indirect), Split it (the verdict split), Run and More; the next step suggested is the primary one.
   function stepButtons(f) {
     const h = S.ctx.h, file = f.file, now = h('div', 'tests-act-row tests-steps'), noSeat = !tmodel(), next = nextStep(f);
     const btn = (key, text, act, label, fn) => button(text, `${key === next ? 'btn-primary' : 'btn-quiet'} tests-act`, act, label, fn);
@@ -971,7 +991,7 @@
     const has = (k) => marks(f).some((m) => m[0] === k);
     const fixes = [[has('hollow'), 'Fix hollow cases', 'fix-hollow', draftHollow], [has('waits'), 'Fix the waiting', 'fix-waits', draftWaits],
       [has('never'), 'Make it run', 'make-run', draftRun], [has('never'), 'Delete it', 'delete-file', draftDelete], [f.wholeOnly === true, 'Make it run alone', 'make-alone', draftAlone],
-      [next === 'rewrite-direct', 'Rewrite as a direct check', 'rewrite-direct', draftDirect]]
+      [next === 'rewrite-direct', 'Rewrite as a direct check', 'rewrite-direct', draftDirect], [next === 'split', 'Split it', 'split', draftSplit]]
       .filter(([on]) => on).map(([, text, act, draft]) => btn(act, text, act, `${text}: preview an issue about ${file}`, () => {
         S.notes.delete(dk(file)); S.ask = draft(f); S.keep = { act: 'issue-title', file }; draw();
       }));
