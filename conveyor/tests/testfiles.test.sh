@@ -447,18 +447,22 @@ t_tfedits() {
 # beside it, on the line or right above, as its why. plain.test.sh is not marked: it names a test file only as text
 # (echo, cat, a command quoted as an argument), calls a helper whose name starts with wait_until and defines poll_for;
 # a comment that names wait_until is not read.
+# Bug it catches (#824): plain.test.sh also calls .conveyor/test-changed.sh (here the pack's test.full) with --check,
+# --map, --checks, --funcs and --parts, which exit before they run a test file, and is still not marked; runs.test.sh starts it with --file (line 10).
 t_tfproxy() {
-  setup '[]'; tune '.test.command = "bash run-all.sh" | .test.pollHelpers = ["wait_until", "poll_for"]'
+  setup '[]'; tune '.test.command = "bash run-all.sh" | .test.full = "bash .conveyor/test-changed.sh" | .test.pollHelpers = ["wait_until", "poll_for"]'
   mkdir -p "$R/tests"
   printf '%s\n' '# a whole run of it is what the exit status shows' 'bash tests/plain.test.sh' \
     'x="$(timeout 30 ./tests/plain.test.sh)" || exit 1' 'CONVEYOR_X=1 bash run-all.sh --quick' \
     "(cd t && A='a b' \\" '  exec timeout --kill-after=30 60 bash run-all.sh --quick) > out &' \
     "B=1 C='p q' timeout 9 bash \"\$T/plain.test.sh\" > o" "out=\$(eval \"\$(grep '^\\. \"x' \"f\")\" \\" \
-    '  && node --test t/a.test.js)' > "$R/tests/runs.test.sh"
+    '  && node --test t/a.test.js)' 'bash .conveyor/test-changed.sh --file tests/plain.test.sh' > "$R/tests/runs.test.sh"
   printf '%s\n' '# wait_until in a comment is no poll' 'start &' "wait_until '[ -e done ]' || fail 'not done' # the server writes done once it is up" \
     'if ! poll_for x; then exit 1; fi' "up() { wait_until \"jq -e '.of // \\\"\\\"' f\" 'cat log'; }" > "$R/tests/polls.test.sh"
   printf '%s\n' 'echo "bash tests/runs.test.sh"' 'cat tests/runs.test.sh' 'wait_until_ready x' 'poll_for() { :; }' \
-    "check 'cd t && bash all.test.sh' \"x; wait_until y\"" > "$R/tests/plain.test.sh"
+    "check 'cd t && bash all.test.sh' \"x; wait_until y\"" '(cd t && bash .conveyor/test-changed.sh --check) | grep -q map' \
+    'bash .conveyor/test-changed.sh --map > m' 'bash .conveyor/test-changed.sh --checks' \
+    'bash .conveyor/test-changed.sh --funcs lib/a.sh; ./.conveyor/test-changed.sh --parts t/a.test.sh' > "$R/tests/plain.test.sh"
   git -C "$R" add -A && git -C "$R" commit -qm 'tests' || fail "main's files"
   got=$(tf_in testspart 2026-11-09 | jq -c '[.files[] | select(.file | startswith("tests/")) | {file, proxy}]') || fail "testspart failed: $got"
   [ "$got" = '[{"file":"tests/plain.test.sh","proxy":[]},'\
@@ -470,5 +474,6 @@ t_tfproxy() {
 '{"line":4,"kind":"runs","text":"CONVEYOR_X=1 bash run-all.sh --quick","why":null},'\
 '{"line":6,"kind":"runs","text":"exec timeout --kill-after=30 60 bash run-all.sh --quick) > out &","why":null},'\
 '{"line":7,"kind":"runs","text":"B=1 C='"'"'p q'"'"' timeout 9 bash \"$T/plain.test.sh\" > o","why":null},'\
-'{"line":9,"kind":"runs","text":"&& node --test t/a.test.js)","why":null}]}]' ] || fail "the proxy checks: $got"
+'{"line":9,"kind":"runs","text":"&& node --test t/a.test.js)","why":null},'\
+'{"line":10,"kind":"runs","text":"bash .conveyor/test-changed.sh --file tests/plain.test.sh","why":null}]}]' ] || fail "the proxy checks: $got"
 }

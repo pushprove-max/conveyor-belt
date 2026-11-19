@@ -254,7 +254,8 @@ testhollow() { # <the test files of main's checkout, a JSON list>
 # its time, an interpreter (bash, sh, zsh, node, python, python3, ruby, perl, bun, deno) with its options, and ./.
 # runs: that word is a path ending in a test file's suffix (.test.<ext>), or is one of the runners (the pack's
 # test.command and test.full, conveyor/conveyor.test.sh and .conveyor/test-full.sh, each read the same way; a path
-# that ends in /<runner> too) with the runner's other words after it. polls: that word is one of the pack's
+# that ends in /<runner> too) with the runner's other words after it, except .conveyor/test-changed.sh with --check,
+# --checks, --map, --funcs or --parts, which exits before it runs a test file. polls: that word is one of the pack's
 # test.pollHelpers (wait_until by default). A comment (a line that starts # or //, or the end of a line from a # or //
 # after a space and outside quotes), a helper's own definition and a word set alone (NAME=value) start no command; a
 # command in a heredoc or a string over several lines can be marked too. why: the comment at the end of the line,
@@ -323,7 +324,9 @@ PROXY_AWK='function norm(s,  t) {
       # norm() cuts words from the front only, so the command word is at sf[j] + what it cut; p: its physical line.
       pos = sf[j] + length(seg[j]) - length(s); p = 1; while (p < pn && off[p + 1] <= pos) p++
       if (w ~ /\.test\.[A-Za-z0-9]+$/) mk[p, "runs"] = 1
-      for (i = 1; i <= nr; i++) if (rw[i] != "" && ends(w, rw[i]) && (rt[i] == "" || index(rest " ", rt[i] " ") == 1)) mk[p, "runs"] = 1
+      # .conveyor/test-changed.sh with --check, --checks, --map, --funcs or --parts exits before it runs a test file.
+      norun = ends(w, ".conveyor/test-changed.sh") && rest ~ /^(--check|--checks|--map|--funcs|--parts)([ \t"\047);]|$)/
+      for (i = 1; i <= nr; i++) if (!norun && rw[i] != "" && ends(w, rw[i]) && (rt[i] == "" || index(rest " ", rt[i] " ") == 1)) mk[p, "runs"] = 1
       for (i = 1; i <= np; i++) if (pp[i] != "" && w == pp[i] && !(j == 1 && w == def)) mk[p, "polls"] = 1
     }
     for (p = 1; p <= pn; p++) { if ((p, "runs") in mk) mark("runs", p); if ((p, "polls") in mk) mark("polls", p) }
