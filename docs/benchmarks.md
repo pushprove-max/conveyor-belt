@@ -136,12 +136,14 @@ The `rules` choice sets the rules that the task's card gets:
   files into the sandbox when it sets up the task. If one of them is missing, the arm does not run, and the run tells
   you which file is missing.
 
-The `policy` choice sets how the task's card treats review findings. It takes any of these keys:
+The `policy` choice sets the judge and the priority switches of the task's card. It takes any of these keys:
 
 - `judgeOn`: `true` or `false`. Turns the judge on or off, as `conveyor.sh control judge on` and `off` do.
 - `judgeAlways`: a list of finding kinds that the judge always accepts, as `conveyor.sh control judge always` takes
   them. An empty list means none.
 - `P0`, `P1`, `P2` and `P3`: `true` or `false`, as `conveyor.sh control rules P3=off` and the other priorities do.
+  These switches set which issues the loop builds. The task's issue has no priority, so it counts as P3: `P0`, `P1`
+  and `P2` do not change the task's card, and with `P3` set to `false` the loop does not build the task.
 
 A key that you leave out keeps the value of your control record.
 
