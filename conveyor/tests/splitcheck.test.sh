@@ -18,9 +18,10 @@
 # set: f.test.sh), that file fails its case two; with $STUB/other-fail (OTHERFAIL set), a run that names no one file
 # (CONVEYOR_TEST_FILE unset: the suite command) or names g.test.sh first runs g.test.sh, a file the change selects (as
 # a Board test file's link selects one), which fails its case snapcase with the change (and passes on main's
-# f.test.sh), and with OTHERFAIL=main the main-red record holds that case, its fix card not picked yet; with
-# OTHERFAIL=base it fails on main's f.test.sh too. A run of one other file (test.fileCommand, as
-# `test-changed.sh --file` selects that file alone) does not run g.test.sh. Either failure makes the run exit 1, its
+# f.test.sh), and with OTHERFAIL=main the main-red record holds that case, its fix card not picked yet, and a run of
+# one file runs g.test.sh too (a test.fileCommand that also runs the files a file links); with OTHERFAIL=base it fails
+# on main's f.test.sh too. Else a run of one other file (test.fileCommand, as `test-changed.sh --file` selects that
+# file alone) does not run g.test.sh. Either failure makes the run exit 1, its
 # files named in its log. Each run adds a line to $STUB/runs (the file it names and the checkout it runs in), and each
 # run of g.test.sh its checkout to $STUB/ran-g. The check's exit is in $RC and the first line of what the review is shown in
 # $WHY.
@@ -37,10 +38,11 @@ splitrun() { # <change> <cpu f.test.sh> <cpu f1.test.sh> <cpu f2.test.sh> <cpu p
   [ -z "${OWNFAIL:-}" ] || : > "$STUB/fail-f.test.sh"
   [ -z "${OTHERFAIL:-}" ] || : > "$STUB/other-fail"
   [ "${OTHERFAIL:-}" != base ] || : > "$STUB/other-base"
+  [ "${OTHERFAIL:-}" != main ] || : > "$STUB/other-alone"
   [ "${OTHERFAIL:-}" != main ] || jq -cn '{reds: [{sha: "abc", cases: [{case: "g.test.sh: snapcase", file: "g.test.sh", by: "c1", files: ["g.test.sh"], last: ""}], card: null}]}' > "$ST/mainred.json"
   cat > "$STUB/mainrun-cmd" <<'EOF'
 rc=0; printf '%s %s\n' "${CONVEYOR_TEST_FILE:-}" "$PWD" >> "$STUB/runs"
-if [ "${CONVEYOR_TEST_FILE:-g.test.sh}" != g.test.sh ]; then :
+if [ "${CONVEYOR_TEST_FILE:-g.test.sh}" != g.test.sh ] && [ ! -e "$STUB/other-alone" ]; then :
 elif [ -e "$STUB/other-fail" ] && ! grep -q fast f.test.sh && [ ! -e "$STUB/other-base" ]; then
   echo "$PWD" >> "$STUB/ran-g"; printf '== g.test.sh\nok snapcase\n-- ok g.test.sh\n'; printf '== g.test.sh\n-- ok g.test.sh\n' >> "$CONVEYOR_TEST_LOG/r"
 elif [ -e "$STUB/other-fail" ]; then
@@ -119,11 +121,15 @@ t_speedother() {
   [ "$RC" = 0 ] && [ "$WHY" = "$SPEEDOK" ] || fail "the speed check ran another file's failing test beside f.test.sh: exit $RC, $WHY"
 }
 
-# #602, #740. Bug it catches: with the main-red record holding g.test.sh's case snapcase, a check that runs the
-# change's selection (or a run with no one file named) runs g.test.sh too: g.test.sh never runs.
+# #602, #748. Bug it catches: when test.fileCommand runs g.test.sh beside f.test.sh and g.test.sh fails (so the run of
+# f.test.sh fails too), a failure the main-red record holds (its case snapcase, its fix card not picked yet) is said
+# to be the change's, or is run again on the commit the card was built on: the reason says it is main's, from the
+# record, and the check makes one run.
 t_speedothermain() {
   OTHERFAIL=main splitrun "$SPEEDUP" 4 '' '' ''
-  [ "$RC" = 0 ] && [ ! -e "$STUB/ran-g" ] || fail "the speed check ran g.test.sh beside f.test.sh: exit $RC, $WHY"
+  local n; n=$(wc -l < "$STUB/runs")
+  [ "$RC" != 0 ] && [ "$n" = 1 ] && [ "$WHY" = 'the file f.test.sh fails with the change (exit 1); another test file the change selects fails too: g.test.sh fails (main'"'"'s failure, not the change'"'"'s: the main-red record holds it), case `snapcase`: FAIL [snapcase]: the snapshot differs' ] \
+    || fail "a failure the main-red record holds was not said to be main's from the record: exit $RC, $n runs: $(cat "$STUB/runs"), $WHY"
 }
 
 # #602. Bug it catches: naming another file's failure loses the optimized file's own: when f.test.sh fails (its case
