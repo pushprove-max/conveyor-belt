@@ -95,6 +95,20 @@ t_shotsmovedfolder() {
   blockyes
   [ ! -e "$ST/kept/c7/shots" ] || fail "a screenshot from before a folder was moved back was kept: $(cat "$ST/kept/c7/shots/shots.json" 2>&1)"
 }
+# Bug: a card added index.html beside the screenshot folder, its run made a screenshot, and a later session removed
+# the file: no list names it once it is gone, and the folders above the screenshot folder were not reckoned at all, so
+# the old screenshot was kept as the final change's. At the worktree root (shotsgoneroot) and in a folder that holds
+# the screenshot folder (shotsgoneup).
+shotsgone() { # <folder that holds the screenshot folder: . or a folder>
+  shotswt; tune --arg d "$1" '.review.screenshots = (if $d == "." then "shots" else "\($d)/shots" end)'
+  mkdir -p "$FXWT/$1/shots" && echo page > "$FXWT/$1/index.html" && echo shot > "$FXWT/$1/shots/page.png" || fail "the screenshot"
+  sleep 0.05 # sleep: the folder's time is the clock's at the removal, so only time passing makes it later than the image
+  rm "$FXWT/$1/index.html" || fail "the removal"
+  blockyes
+  [ ! -e "$ST/kept/c7/shots" ] || fail "a screenshot from before a removal in $1 was kept: $(cat "$ST/kept/c7/shots/shots.json" 2>&1)"
+}
+t_shotsgoneroot() { shotsgone .; }
+t_shotsgoneup() { shotsgone ui; }
 t_shotsout() {
   shotswt; tune --arg d "$T/$CASE" '.review.screenshots = $d'; blockyes
   [ -s "$ST/kept/c7/c7.patch" ] && [ ! -e "$ST/kept/c7/shots" ] || fail "a folder outside the worktree gave screenshots: $(ls "$ST/kept/c7" 2>&1)"
