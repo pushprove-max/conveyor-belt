@@ -118,16 +118,17 @@ t_follow() {
     || fail "#7 did not go on with the checkout's new code from its review step: $(cat "$STUB/serve.out")"
   loopend $pid
   # doctor warns of a running loop behind its checkout's HEAD, or, from an install, behind the pin; not of one on it.
+  # It runs in main's checkout: from the case's folder, not a checkout, doctor stops before this check.
   sleep 60 & z=$!; t=$(p_started $z) # sleep: a stand-in for a running loop's process
   says() { jq -n --argjson p "$z" --arg t "$t" --arg c "$1" --arg h "$2" '{pid: $p, started: $t, state: "running", commit: $c, checkout: (if $h == "" then null else $h end)}' > "$S/loop.json"; }
-  says "$A" "$D"; out=$(loop doctor 2>&1)
+  says "$A" "$D"; out=$(cd "$R" && loop doctor 2>&1)
   grep -qx "warning: the running loop started on Conveyor commit $A, and its checkout is at $B: it runs old code until it restarts" <<<"$out" \
     || fail "doctor did not warn of a loop behind its checkout: $out"
-  says "$B" "$D"; out=$(loop doctor 2>&1); ! grep -q '^warning: the running loop' <<<"$out" || fail "doctor warned of a loop on its checkout's HEAD: $out"
-  ln -s "$D" "$T/$CASE/code\\repo"; says "$A" "$T/$CASE/code\\repo"; out=$(loop doctor 2>&1)
+  says "$B" "$D"; out=$(cd "$R" && loop doctor 2>&1); ! grep -q '^warning: the running loop' <<<"$out" || fail "doctor warned of a loop on its checkout's HEAD: $out"
+  ln -s "$D" "$T/$CASE/code\\repo"; says "$A" "$T/$CASE/code\\repo"; out=$(cd "$R" && loop doctor 2>&1)
   grep -qx "warning: the running loop started on Conveyor commit $A, and its checkout is at $B: it runs old code until it restarts" <<<"$out" \
     || fail "doctor did not warn of a loop behind a checkout whose path holds a backslash: $out"
-  tune --arg c "$B" '.plugin.commit = $c'; says "$A" ''; out=$(loop doctor 2>&1)
+  tune --arg c "$B" '.plugin.commit = $c'; says "$A" ''; out=$(cd "$R" && loop doctor 2>&1)
   grep -qx "warning: the running loop started on Conveyor commit $A, and the pack pins $B: it runs old code until it restarts" <<<"$out" \
     || fail "doctor did not warn of a loop behind the pin: $out"
 }
