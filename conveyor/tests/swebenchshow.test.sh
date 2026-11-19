@@ -219,3 +219,47 @@ t_swerulesreuse() {
   o=$(loop bench swe 1 --arm conveyor-rules 2>&1) && grep -q ": resolved$" <<<"$o" && grep -q "Rule B" "$SWE_FX/rules.seen" \
     || fail "a run on other card rules returned the former result: $o"
 }
+
+# Bugs (#643): (1) a task in progress showed no arm or step until its result was kept; (2) a step that changed with
+# nothing else left the read revision the same, so the Board did not refresh; (3) the run page listed only the tasks
+# with a result, never the ones still waiting; (4) the run kept no log of its events once it ended, and the step text
+# shown could be any word a container wrote in its card's records.
+t_swelive() {
+  swe; local o s c l id p first second u='Running Conveyor. Step unavailable.'; first=$(sweorder | head -n 1); second=$(sweorder | tail -n 1)
+  # The fake engine waits at hold; the case writes its card's start lines, as the real loop does at each step.
+  : > "$SWE_FX/hold"
+  loop bench swe 2 > "$T/$CASE/run.out" 2>&1 & p=$!
+  wait_until "jq -e --arg u '$u' --arg f '$first' '.live.active | .phase == \$u and .task == \$f' '$B/board.json' > /dev/null" \
+    || fail "the first task's card did not start, or showed a step before its start line: $(cat "$B/live.json" 2>&1)"
+  c=$(echo "$B/work/$first"/swe-*/conveyor/state)/cards.jsonl
+  echo '{"card":"c1","issue":1,"step":"start","result":"ok","of":"build"}' >> "$c" || fail "the build's start line was not written"
+  wait_until "jq -e '.live.active.phase == \"Building\"' '$B/board.json' > /dev/null" || fail "the held card's build step was not shown: $(cat "$B/live.json" 2>&1)"
+  [ "$(jq -c '.live.active | [.arm, .task]' "$B/board.json")" = "[\"conveyor\",\"$first\"]" ] && [ -z "$(ls "$B/results" 2>/dev/null)" ] \
+    || fail "the active work does not name its arm and task before any result: $(jq -c .live.active "$B/board.json") $(ls -R "$B/results" 2>&1)"
+  id=$(jq -r .live.id "$B/board.json"); o=$(loop bench swe show "$id" 2>&1) || fail "show failed while the run goes: $o"
+  [ "$(jq -c '[.tasks[] | [.id, .cells[0].state, .cells[0].phase]]' <<<"$o")" = "[[\"$first\",\"active\",\"Building\"],[\"$second\",\"waiting\",null]]" ] \
+    || fail "the matrix does not show the active task and the waiting one: $(jq -c .tasks <<<"$o")"
+  s=$(jq .live.seq "$B/board.json")
+  # (5) the judge's live record (judgecall()) is the review step's, so the run said Reviewing while the judge read the
+  # findings. A judge's record older than the review's start line is an earlier pass's: it is not this review's judge.
+  l=$(echo "$B/work/$first")/cards/c1.live; mkdir -p "${l%/*}" \
+    && echo '{"step":"review","at":"2026-01-01T00:00:01Z","action":"the judge reads the findings"}' > "$l" || fail "the earlier judge's live record was not written"
+  echo '{"card":"c1","issue":1,"step":"start","result":"ok","of":"review","time":"2026-01-01T00:00:02Z"}' >> "$c" || fail "the review's start line was not written"
+  wait_until "jq -e '.live.active.phase == \"Reviewing\" and .live.seq > $s' '$B/board.json' > /dev/null" \
+    || fail "the step change did not advance the read revision: $s $(jq -c '.live | [.seq, .active]' "$B/board.json")"
+  o=$(loop bench swe show "$id" 2>&1) && jq -e --argjson s "$s" '.run.seq > $s and .tasks[0].cells[0].phase == "Reviewing"' <<<"$o" > /dev/null \
+    || fail "show's read revision did not advance with the step: $s $(jq -c '[.run.seq, .tasks[0].cells[0]]' <<<"$o")"
+  echo '{"step":"review","at":"2026-01-01T00:00:03Z","action":"the judge reads the findings"}' > "$l" || fail "the judge's live record was not written"
+  wait_until "jq -e '.live.active.phase == \"Judging\"' '$B/board.json' > /dev/null" || fail "the judge reading the findings was not shown: $(jq -c .live.active "$B/board.json")"
+  echo '{"card":"c1","issue":1,"step":"start","result":"ok","of":"sk-SECRET"}' >> "$c" || fail "the odd start line was not written"
+  wait_until "jq -e --arg u '$u' '.live.active.phase == \$u' '$B/board.json' > /dev/null" || fail "a start line of no known step was not shown as no step: $(jq -c .live.active "$B/board.json")"
+  rm -f "$SWE_FX/hold"; wait "$p" || fail "the run failed: $(cat "$T/$CASE/run.out")"
+  [ ! -e "$B/work" ] && [ -s "$B/tails/$id.jsonl" ] || fail "the run's tail did not survive its cleanup: $(ls "$B" 2>&1)"
+  jq -se 'all(keys == ["arm", "at", "event", "task"])' "$B/tails/$id.jsonl" > /dev/null && ! grep -q SECRET "$B/tails/$id.jsonl" \
+    || fail "the tail holds other fields or a container's text: $(cat "$B/tails/$id.jsonl")"
+  o=$(loop bench swe show "$id" 2>&1) && jq -e --arg f "$first" --arg u "$u" '[.tail[] | select(.arm == "conveyor" and .task == $f) | .event] as $e
+    | all("Preparing image", "Setting up", "Building", "Reviewing", $u, "Reading patch"; IN($e[])) and ($e[-1] | IN("Resolved", "Unresolved"))
+    and any(.tail[]; . == (. | {at} + {arm: "conveyor", task: null, event: "Checking"}))
+    and .tail[-1] == (.tail[-1] | {at} + {arm: null, task: null, event: "Run done"}) and all(.tasks[].cells[]; .state == "finished")' <<<"$o" > /dev/null \
+    || fail "show does not give the run's events after it ended: $o"
+}

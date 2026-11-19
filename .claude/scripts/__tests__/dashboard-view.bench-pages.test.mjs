@@ -91,6 +91,51 @@ test('A run: an opened task says an arm was not reached, not that it failed, and
   assert.deepEqual(Array.from(codex.querySelectorAll('p'), text), ['The run stopped before this arm reached the task.']);
 });
 
+// Bug it guards (#643): every cell with no result showed "not reached" and "The run stopped before this arm reached the
+// task.", so a run still going looked stopped, and after Stop the task it interrupted looked never reached.
+test('A run: a cell with no result shows its step, waiting or interrupted, as `bench swe show` gives its state', async () => {
+  const w = boot({ tab: 'bench' });
+  BH.open(w, { body: (url) => {
+    if (!/&run=/.test(url)) return BH.hist();
+    const r = BH.run();
+    r.tasks[1].cells = [{ arm: r.tasks[1].cells[0].arm, result: null, reused: false, state: 'active', phase: 'Reviewing' },
+      { arm: r.tasks[1].cells[1].arm, result: null, reused: false, state: 'waiting' }, { arm: r.tasks[1].cells[2].arm, result: null, reused: false, state: 'interrupted' }];
+    return r;
+  } });
+  await settle();
+  act(bp(w), 'open-newest').click();
+  await settle();
+  const row = bp(w).querySelector('tr[data-task="django__django-15347"]');
+  assert.deepEqual(Array.from(row.querySelectorAll('.bench-cell'), text), ['Reviewing', 'waiting', 'interrupted']);
+  act(bp(w), 'task-django__django-15347').click();
+  assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-task .bench-card p'), text), ['This arm is on the task now: Reviewing.',
+    'The run has not reached this task for this arm yet.', 'Stop ended the work of this arm on this task. No result is kept.']);
+});
+
+// Bug it guards (#643): the run page read the run again only when the live run's `done` changed, so a step change
+// (Building to Reviewing, `seq` up, `done` the same) kept the cached Building cell until a result arrived.
+test('A run: an open running run is read again when its step changes and no result arrives', async () => {
+  const w = boot({ tab: 'bench' });
+  let phase = 'Building';
+  const snap = (seq) => { const d = full(); d.panels.bench.data.bench.live = { id: NEW, state: 'running', n: 10, done: 0, seq, tasks: [] }; return d; };
+  BH.open(w, { body: (url) => {
+    if (!/&run=/.test(url)) return BH.hist();
+    const r = BH.run();
+    r.tasks[1].cells = r.tasks[1].cells.map((c, i) => ({ arm: c.arm, result: null, reused: false, state: i ? 'waiting' : 'active', phase }));
+    return r;
+  } });
+  next(w, snap(1));
+  await settle();
+  act(bp(w), 'open-newest').click();
+  await settle();
+  const first = () => text(bp(w).querySelector('tr[data-task="django__django-15347"] .bench-cell'));
+  assert.equal(first(), 'Building');
+  phase = 'Reviewing';
+  next(w, snap(2));
+  await settle();
+  assert.equal(first(), 'Reviewing', 'the step change read the run again');
+});
+
 // Bug it guards (#633): a run the build machine refused (no Docker) kept its reason, but History showed only "Did not
 // start" and the run opened from it never said why, so the repair was nowhere on the Board once the Start reply was gone.
 test('A run: a run refused for no Docker says its repair in History and on its own page', async () => {

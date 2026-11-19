@@ -293,6 +293,17 @@ overview with the history of every run, a page for each run, Compare, Start a ru
 and cost of each arm, and an infographic of up to 6 runs. `conveyor.sh bench swe history` and `conveyor.sh bench swe show <run>`
 print what the tab reads, as JSON.
 
+While a run goes, `bench swe show <run>` gives the arm, the task and the step it is at, before the task has a result.
+The step is one of Checking, Preparing image, Setting up, Running agent, Reading patch, Grading, or for a Conveyor arm
+the step its card is at: Building, Reviewing, Judging, Fixing, Rebasing, Testing, Landing or Filing follow-ups. An engine
+version that does not record when a step starts shows "Running Conveyor. Step unavailable." The read revision, `seq`,
+goes up each time the run changes, including when only the step changes. Every task the run plans is listed, with
+each arm's state: waiting, active, finished, interrupted (the task that Stop ended) or not reached.
+
+Each run also keeps a short event log, the last lines of which `bench swe show <run>` gives as `tail`. Each line has
+a time, an arm, a task and an event: a step, a result (Resolved, Unresolved, Not run or reused), or the start and end
+of the run. The log stays after the run ends. It holds no output of the arms and no text from their containers.
+
 ## What the numbers mean
 
 The resolved count is the number of tasks whose final patch passes the task's hidden tests, as the official harness

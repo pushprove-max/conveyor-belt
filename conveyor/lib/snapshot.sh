@@ -932,7 +932,7 @@ snapshot() (
   echo null > "$d/bench"
   if [ -s "$ST/bench/swe/board.json" ]; then
     bp=$(jq -r 'objects | .live | objects | select(.state == "running") | .pid | numbers' "$ST/bench/swe/board.json" 2>/dev/null) || bp=''
-    bf=objects; [ -z "$bp" ] || kill -0 "$bp" 2>/dev/null || bf='.live.state = "stopped" | .live.current = null'
+    bf=objects; [ -z "$bp" ] || kill -0 "$bp" 2>/dev/null || bf='.live.state = "stopped" | .live.current = null | .live.active = null'
     bk=$(. "$HERE/bench/swe.sh" && swe_solokey "$(swe_solomodel)") || bk=''
     jq -c --arg bk "$bk" "$bf"' | if $bk == "" then . else .soloKey = $bk end' "$ST/bench/swe/board.json" > "$d/bench.new" 2>/dev/null && [ -s "$d/bench.new" ] && mv -f "$d/bench.new" "$d/bench"
   fi

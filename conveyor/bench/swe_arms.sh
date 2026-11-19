@@ -365,14 +365,16 @@ swe_trial() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor kind
     why="its preflight command failed: $(cliwords "$(tail -n 20 "$h/install.log")" | tail -n 2 | paste -sd ' ' -)"
   else
     swe_ckstep 'Running the trivial task'
-    swe_in "$to" "$c" "$sb/$SWE_MAIN" "$run" "SWE_SB=$sb" "SWE_PROMPT=$sb/prompt" "SWE_MODEL=${SWE_MODEL:-}" "SWE_EFFORT=$(jq -r '.effort | strings' <<<"$a")" < /dev/null > "$h/out" 2> "$h/err"; rc=$?
+    # A run's task shows the step the command is at while it runs (swe_watch, bench/swe.sh).
+    swe_in "$to" "$c" "$sb/$SWE_MAIN" "$run" "SWE_SB=$sb" "SWE_PROMPT=$sb/prompt" "SWE_MODEL=${SWE_MODEL:-}" "SWE_EFFORT=$(jq -r '.effort | strings' <<<"$a")" < /dev/null > "$h/out" 2> "$h/err" &
+    local j=$!; swe_watch "$j" "$c" "$kind" "$sb"; wait "$j"; rc=$?
     # A command stopped at the task's time limit is the arm's own result: its patch is graded.
     [ "$rc" = 0 ] || [ "$rc" = 124 ] || why="its command failed (exit $rc): $(cliwords "$(tail -n 20 "$h/err" 2>/dev/null; jq -rRn "$NOSTARTSAID" "$h/out" 2>/dev/null)" | tail -n 3 | paste -sd ' ' -)"
   fi
   # What the arm left in the sandbox is read in its container, never by the host: the arm could write every file
   # there, so a host read or write could follow its symlink to a host file, and the checkout's .git/config could make
   # the host's git run the arm's code (a clean filter, an external diff).
-  swe_ckstep 'Reading its change'
+  swe_ckstep 'Reading its change'; [ -z "${SWE_TASK:-}" ] || swe_phase 'Reading patch'
   swe_in 600 "$c" "$sb/$SWE_MAIN" 'if [ "$SWE_KIND" = conveyor ]; then git diff --binary --no-ext-diff --no-textconv "$SWE_BASE" refs/heads/main --
     else git add -A && git diff --binary --no-ext-diff --no-textconv --cached "$SWE_BASE" --; fi' "SWE_SB=$sb" "SWE_BASE=$base" "SWE_KIND=$kind" < /dev/null > "$h/patch" 2> /dev/null || p=1
   if [ "$kind" = conveyor ]; then

@@ -118,7 +118,8 @@
 
   // ---- reads from the page server ----
   const live = () => obj(obj(B.d && B.d.bench) && B.d.bench.live);
-  const liveStamp = () => { const l = live(); return l ? `${l.id}|${l.state}|${l.done}` : ''; };
+  // `seq`, the read revision, goes up when the active step changes and `done` stays the same.
+  const liveStamp = () => { const l = live(); return l ? `${l.id}|${l.state}|${l.done}|${l.seq}` : ''; };
   function getJSON(url) {
     return window.fetch(url).then((r) => (r.ok ? r.json() : r.text().then((t) => Promise.reject(new Error(String(t).trim() || `the server answered ${r.status}`)))));
   }
@@ -432,9 +433,13 @@
     return out;
   }
   const said = (c) => (c.result === 'resolved' || c.resolved === true ? 'yes' : typeof c.result === 'string' && c.result.startsWith('not run') ? 'nr' : c.result || c.resolved === false ? 'no' : null);
+  // A cell with no result yet, by the state `bench swe show` gives it: the step of the arm's work on the task now, waiting
+  // (the run goes and has not reached it), interrupted (Stop ended it) or not reached (a line with no state, or the run ended first).
+  const pend = (c) => (c.state === 'active' ? (typeof c.phase === 'string' && c.phase ? c.phase : 'active') : c.state === 'waiting' || c.state === 'interrupted' ? c.state : 'not reached');
+  const PENDSAID = { waiting: 'The run has not reached this task for this arm yet.', interrupted: 'Stop ended the work of this arm on this task. No result is kept.' };
   function cell(c) {
     const td = h('td', 'bench-cell'), k = said(c);
-    if (k === null) { td.append(h('span', 'muted', 'not reached')); return td; }
+    if (k === null) { td.append(h('span', 'muted', pend(c))); return td; }
     td.append(h('span', k, k === 'yes' ? '✓' : k === 'no' ? '✗' : 'not run'));
     td.append(h('span', 'bench-sub', k === 'nr' ? String(c.result).replace(/^not run: /, '') : `${plural(num(c.sessions) || 0, 'session')} · ${took(c.minutes)} · ${COST}${c.reused ? ' · reused' : ''}`));
     return td;
@@ -447,11 +452,15 @@
     const cards = h('div', 'bench-cards');
     cells.forEach((c, i) => {
       const col = cols[i] || { arm: c.arm }, k = said(c), card = h('div', 'bench-card'), h3 = h('h3');
-      h3.append(h('span', k || 'muted', k === 'yes' ? '✓' : k === 'no' ? '✗' : '–'), ` ${colName(col)} `, B.ctx.chip(k === 'yes' ? 'resolved' : k === 'no' ? 'not resolved' : k === 'nr' ? 'not run' : 'not reached', k === 'yes' ? 'ok' : k === 'no' ? 'bad' : 'quiet'));
+      h3.append(h('span', k || 'muted', k === 'yes' ? '✓' : k === 'no' ? '✗' : '–'), ` ${colName(col)} `, B.ctx.chip(k === 'yes' ? 'resolved' : k === 'no' ? 'not resolved' : k === 'nr' ? 'not run' : pend(c), k === 'yes' ? 'ok' : k === 'no' ? 'bad' : 'quiet'));
       card.append(h3);
       if (k === 'nr') { card.append(h('p', 'board-from', String(c.result))); cards.append(card); return; }
-      // An arm the run never reached on this task (stopped before it) has no patch and no harness result to show.
-      if (k === null) { card.append(h('p', 'board-from', 'The run stopped before this arm reached the task.')); cards.append(card); return; }
+      // An arm with no result on this task has no patch and no harness result to show: it is on the task now, waits,
+      // was interrupted by Stop, or the run ended before it reached the task.
+      if (k === null) {
+        card.append(h('p', 'board-from', c.state === 'active' ? `This arm is on the task now: ${pend(c).replace(/\.$/, '')}.` : Object.hasOwn(PENDSAID, c.state) ? PENDSAID[c.state] : 'The run stopped before this arm reached the task.'));
+        cards.append(card); return;
+      }
       const files = Array.isArray(c.patch) ? c.patch : null;
       const add = files ? files.reduce((a, f) => a + (num(f.added) || 0), 0) : 0, del = files ? files.reduce((a, f) => a + (num(f.removed) || 0), 0) : 0;
       const steps = list(c.steps).filter(obj);

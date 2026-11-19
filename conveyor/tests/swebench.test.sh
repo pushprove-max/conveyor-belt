@@ -169,9 +169,9 @@ t_swepresets() {
   [ "$(jq -c .presets "$SRC/bench/swe.json")" = '[1,5,20,50]' ] \
     && [ "$(loop snapshot --fresh | jq -c '[.bench.presets, .bench.live.state, (.bench.versions | map(.name))]')" = '[[1,5,20,50],"done",["main","v1.0.0"]]' ] \
     || fail "the snapshot does not carry the Benchmarks tab's presets, last run and versions: $(loop snapshot --fresh | jq -c .bench)"
-  # A run whose process was killed with no end written is not shown running for good.
-  jq -c '.live.state = "running" | .live.pid = 2147483646' "$B/board.json" > "$B/b.new" && mv "$B/b.new" "$B/board.json"
-  [ "$(loop snapshot --fresh | jq -r .bench.live.state)" = stopped ] || fail "a run whose process is gone is shown running"
+  # A run whose process was killed with no end written is not shown running for good, nor at a step (#643).
+  jq -c '.live.state = "running" | .live.pid = 2147483646 | .live.active = {arm: "conveyor", task: "t", phase: "Building"}' "$B/board.json" > "$B/b.new" && mv "$B/b.new" "$B/board.json"
+  [ "$(loop snapshot --fresh | jq -c '.bench.live | [.state, .active]')" = '["stopped",null]' ] || fail "a run whose process is gone is shown running"
 }
 
 # Bug: the dataset's rows an earlier harness kept (raw.<revision>.jsonl, with the reference fixes and hidden tests)
@@ -211,6 +211,8 @@ t_swestop() {
   wait_until "! kill -0 $p 2>/dev/null" || fail "the engine loop of the sandbox still runs after Stop"
   wait $! 2>/dev/null
   [ "$(tail -n 1 "$B/runs.jsonl" | jq -r .state)" = stopped ] || fail "the run's line does not say stopped: $(cat "$B/runs.jsonl" 2>&1)"
+  out=$(loop bench swe show "$(tail -n 1 "$B/runs.jsonl" | jq -r .id)" 2>&1) && [ "$(jq -c '[.tasks[].cells[0].state]' <<<"$out")" = '["interrupted","not reached"]' ] \
+    || fail "show does not tell the task Stop interrupted from the one never reached (#643): $out"
   [ ! -d "$B/work" ] && [ -z "$(ls "$B"/results/*-"$EB" 2>/dev/null)" ] || fail "the stopped task left a sandbox or a result"
   # Bug: Stop killed the docker client only; the trial's container, with the logins copied into it, was left running.
   [ -z "$(ls "$SWE_FX/boxes")" ] || fail "the stopped trial's container was not removed: $(ls "$SWE_FX/boxes")"
