@@ -60,7 +60,8 @@
 # (each line the command printed to stderr, its "conveyor: <command>: " taken off), pid (the process whose tree, and
 # the processes that carry its mark, `release-run stop` ends), red (a failed release-prep's suite a release may go over: {sha, files, cases}, else null)
 # and anyway (a release made over it: red with by, else null) and allowed (a release that passed over hits in named
-# commits: {by, commits}, else null), by (what started the run when the owner did not: "fixes landed", else null)}; a
+# commits: {by, commits}, else null), minver (the mod's check on its oldest Claude Code, relminver(): {version, state,
+# why}, else null) and by (what started the run when the owner did not: "fixes landed", else null)}; a
 # failed release-prep's record also gets fixes (its fix cards, each {issue, state}: open, landed or closed) and
 # restarted (when release-prep started again on them), relfixes() (lib/fulltest.sh). A release after a passed release-prep of the same
 # version keeps that run's suite (sha, done, failed, cases, alone, moved, reused, since); one after a failed release-prep of
@@ -175,7 +176,7 @@ relstart() { # <command name> <version>
     elif .step == "release" and .state == "refused" then {since, sha, done, failed, cases, reused, red} else empty end' "$RELRUN" 2>/dev/null) || was=null
   # by: what started the run when it was not the owner (CONVEYOR_RELEASE_BY: "fixes landed", relfixes(), lib/fulltest.sh).
   jq -cn --arg s "$1" --arg v "$2" --arg t "$(clock)" --argjson p "${CONVEYOR_RELEASE_PID:-$$}" --argjson w "$was" --arg by "${CONVEYOR_RELEASE_BY:-}" \
-    '{kind: "release", step: $s, version: $v, since: $t, ended: null, state: "running", sha: null, done: 0, failed: 0, cases: [], alone: [], moved: false, reused: null, reasons: [], pid: $p, red: null, anyway: null, allowed: null, by: (if $by == "" then null else $by end)} + $w' > "$RELRUN.new" \
+    '{kind: "release", step: $s, version: $v, since: $t, ended: null, state: "running", sha: null, done: 0, failed: 0, cases: [], alone: [], moved: false, reused: null, reasons: [], pid: $p, red: null, anyway: null, allowed: null, minver: null, by: (if $by == "" then null else $by end)} + $w' > "$RELRUN.new" \
     && mv -f "$RELRUN.new" "$RELRUN" && RELSTARTED=1
   # Each process the run starts carries its mark (relprocs()). The run's end ends them all: the suite's runner
   # (timeout) is a process group of its own, which a signal to this process never reaches, and each holds the release
@@ -250,6 +251,49 @@ relmessage() {
     { print }'
 }
 lasttag() { git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1; }
+# The mod on the oldest Claude Code its plugin says it supports (issue 772). When <commit> is a Claude Code plugin
+# (.claude-plugin/plugin.json) and the commits since the newest vX.Y.Z tag (every file of <commit>, with no tag) change
+# the mod (hooks/), its types (types/) or .claude-plugin/plugin.json, `claude plugin validate` runs on the plugin as it
+# is packaged at <commit> (git archive) with the Claude Code version plugin.json's engines.claude-code names as its
+# minimum (>=X.Y.Z). That version is installed by npm in $CARDS/release/claude-code-<X.Y.Z>, kept for the next
+# release, apart from the machine's own claude, which it never replaces: its auto-updater is off. The record's minver
+# says what was done: {version (null when skipped), state: passed, failed or skipped, why}. 0: passed or skipped;
+# 1: validate failed (its output printed, as the release's reason) or could not run.
+relminver() { # <command name> <commit>
+  local n=$1 sha=$2 last ch pj min='' d c pkg out='' rc why=''
+  last=$(lasttag)
+  mrec() { relrec --arg v "$1" --arg s "$2" --arg w "$3" '.minver = {version: (if $v == "" then null else $v end), state: $s, why: $w}'; }
+  if ! pj=$(git show "$sha:.claude-plugin/plugin.json" 2>/dev/null); then why="${sha:0:12} is not a Claude Code plugin (it has no .claude-plugin/plugin.json)"
+  else
+    if [ -n "$last" ]; then ch=$(git diff --name-only --no-renames "$last" "$sha" -- hooks types .claude-plugin/plugin.json)
+    else ch=$(git ls-tree -r --name-only "$sha" -- hooks types .claude-plugin/plugin.json); fi || { echo "conveyor: $n: the files the commits since ${last:-the start} change could not be read, so the mod's check on its oldest Claude Code could not be made" >&2; return 1; }
+    if [ -z "$ch" ]; then why="the commits since ${last:-the start} change no file of the mod (hooks/, types/, .claude-plugin/plugin.json)"
+    elif ! min=$(jq -r '.engines["claude-code"] // ""' <<<"$pj" 2>/dev/null); then
+      echo "conveyor: $n: .claude-plugin/plugin.json on ${sha:0:12} could not be read, so the mod's check on its oldest Claude Code could not be made" >&2; return 1
+    elif [ -z "$min" ]; then why=".claude-plugin/plugin.json names no oldest Claude Code version (engines.claude-code)"
+    elif ! [[ $min =~ ^\>=[[:space:]]*([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+      echo "conveyor: $n: .claude-plugin/plugin.json's engines.claude-code, $min, is not >=X.Y.Z, so the mod's check on its oldest Claude Code could not be made" >&2; mrec '' failed "engines.claude-code is not >=X.Y.Z"; return 1
+    else min=${BASH_REMATCH[1]}; fi
+  fi
+  if [ -n "$why" ]; then echo "conveyor: $n: the mod is not validated on its oldest Claude Code: $why"; mrec '' skipped "$why"; return 0; fi
+  d=$CARDS/release/claude-code-$min c=$CARDS/release/claude-code-$min/node_modules/.bin/claude
+  # Its own copy, checked by the version it reports; one that is not that version is installed again.
+  if ! { [ -x "$c" ] && [[ $(DISABLE_AUTOUPDATER=1 timeout 60 "$c" --version < /dev/null 2>/dev/null) == "$min "* ]]; }; then
+    command -v npm > /dev/null || { echo "conveyor: $n: npm is not installed, so Claude Code $min could not be installed to validate the mod on it" >&2; mrec "$min" failed "npm is not installed"; return 1; }
+    rm -rf "$d" && mkdir -p "$d" && out=$(timeout 600 npm install --prefix "$d" --no-save --no-audit --no-fund --loglevel=error "@anthropic-ai/claude-code@$min" < /dev/null 2>&1) && [ -x "$c" ] || {
+      echo "conveyor: $n: Claude Code $min could not be installed in $d to validate the mod on it: $(tail -n 5 <<<"$out" | paste -sd ';' -)" >&2; mrec "$min" failed "Claude Code $min could not be installed"; return 1; }
+  fi
+  pkg=$(mktemp -d) && git archive "$sha" | tar -x -C "$pkg" || { rm -rf "$pkg"; echo "conveyor: $n: the plugin at ${sha:0:12} could not be packaged to validate it on Claude Code $min" >&2; return 1; }
+  out=$(DISABLE_AUTOUPDATER=1 timeout 300 "$c" plugin validate "$pkg" < /dev/null 2>&1); rc=$?
+  rm -rf "$pkg"
+  if [ $rc != 0 ] || grep -q '✘ Validation failed' <<<"$out"; then
+    echo "conveyor: $n: the mod fails claude plugin validate on Claude Code $min, the oldest .claude-plugin/plugin.json supports (exit $rc), so the suite is not run and no status is posted:" >&2
+    tail -n 40 <<<"$out" | sed "s/^/conveyor: $n: validate $min: /" >&2
+    mrec "$min" failed "claude plugin validate failed on Claude Code $min"; return 1
+  fi
+  echo "conveyor: $n: the mod passes claude plugin validate on Claude Code $min, the oldest .claude-plugin/plugin.json supports"
+  mrec "$min" passed "the commits since ${last:-the start} change ${ch%%$'\n'*}"
+}
 # The whole suite (test.full) on <commit>, in a worktree of it alone, its result posted on it as conveyor/release-suite,
 # its files' results and times kept for the Tests page (suiterec(), lib/testrun.sh) and its results in the whole-suite
 # record every whole-suite run shares (suitekeep(), lib/fulltest.sh). release-prep reuses that record (suitereuse()):
@@ -266,6 +310,8 @@ relsuite() { # <command name> <commit>
   local n=$1 sha=$2 cmd wt=$CARDS/release/wt out rc sr state desc m0 m1 p l='' u=null f al='[]' fl=''
   packget test.full cmd || return 1
   [ -n "$cmd" ] || { echo "conveyor: $n: the pack names no full test suite (test.full); nothing run" >&2; return 2; }
+  # The mod on its oldest Claude Code first: its failure stops the release, as a red test file does.
+  relminver "$n" "$sha" || return 1
   # main as the suite starts: a card that lands while it runs moves it (the record's moved).
   m0=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)
   relrec --arg s "$sha" --arg m "$m0" '.sha = $s | .done = 0 | .failed = 0 | .cases = [] | .alone = [] | .moved = false | .reused = null | .main = (if $m == "" then null else $m end)'

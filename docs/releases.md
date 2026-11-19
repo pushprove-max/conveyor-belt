@@ -29,6 +29,14 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    as the commit status `conveyor/release-suite`. It does not run the suite when the notes break the style. Push
    nothing to `main` after this step and before the next.
 
+   Before the suite, when the project is a Claude Code plugin and the commits since the last tag change `hooks/`,
+   `types/` or `.claude-plugin/plugin.json`, this step checks the plugin on the oldest Claude Code version that
+   `plugin.json` supports (`engines.claude-code`, such as `>=2.1.322`). It installs that version with npm in the
+   cards folder, apart from your own `claude`, which it does not change. Then it runs `claude plugin validate` with
+   it on the plugin files of the commit. When the check fails, the step stops with the validate output, and it does
+   not run the suite or post a status. When the commits do not change these files, the step does not do the check,
+   and its output and the run's record say why.
+
    In this repository the suite is `.conveyor/test-full.sh`. It runs each area file under `conveyor/tests/`, and
    not the whole engine test, so each engine case runs once.
 
@@ -68,7 +76,9 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    - the privacy check finds something in the tracked files or in a commit since the last tag (for a commit that is
      already on GitHub, see [Pushed commits the privacy check finds](#pushed-commits-the-privacy-check-finds)),
    - the whole test suite does not pass on the commit. When the newest `conveyor/release-suite` status on the commit
-     is a pass (step 4), the suite does not run again. Otherwise the command runs it. To release over a failed suite,
+     is a pass (step 4), the suite does not run again. Otherwise the command runs it, and before it the check of the
+     mod on the oldest Claude Code version (step 4). When that check fails, the command stops with the validate
+     output and does not run the suite. To release over a failed suite,
      see [A release over a failed suite](#a-release-over-a-failed-suite).
 
    The output gives the reason.
