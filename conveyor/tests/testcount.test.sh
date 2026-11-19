@@ -16,7 +16,7 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # <field>: no wait, for a run that is stopped, whose live record goes with it).
 # The card c7 is at its test step by its records, and the command is run and watched as its test step does it
 # (lib/testrun.sh testonce(): the engine's own watch(), on the output and logs where a card's worktree has them). A
-# whole loop run to that step cost each case about 3 s more; views.test.sh's t_live reads a real run's test step.
+# whole loop run to that step cost each case about 3 s more.
 countrun() { # <prints> <field> <want> [the card's test list, <worktree>.testlist]
   local w=$T/$CASE/cards/c7 now
   setup "[$(issue 7 2026-01-01)]"; mkdir -p "$ST" "$w.testlog"; now=$(date -u +%FT%TZ)

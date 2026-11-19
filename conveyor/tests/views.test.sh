@@ -258,94 +258,111 @@ t_snapshotpushoff() { latestart; cat "$STUB/late" >> "$S/cards.jsonl"; loop cont
 # still producing output is reported stuck, or a silent one is not; a running test run does not say how many of its
 # files are done; a review's findings are counted from the 1500 characters its record line keeps; the line written
 # when a step ends is not what it was; a mark (when the issue was opened, each start, the follow-ups filed, the push,
-# the issue closed or still open) is not recorded; a running review shows no tokens until it ends (its stream names
-# none before then: they are in the session file Codex keeps, which is gone once the review ends).
-# A card's run held at the build, the first review and the test run (t_live, the longest: conveyor.slowest starts it
-# first): each case watches one, the holds before it open from the start (livestart <hold file>...).
+# the issue closed or still open) is not on the landed card's track; a running review shows no tokens until it ends
+# (its stream names none before then: they are in the session file Codex keeps, which is gone once the review ends).
+# Each case calls the engine functions it proves (watch(), rollout(), testlogs() and testprogress() of lib/session.sh,
+# counts() of lib/testrun.sh, line() of lib/records.sh, the session reading SESSIONREAD) and reads what they give
+# through the snapshot and health, as card c7's records and live record: a whole card run held at each step was most
+# of this file's time.
 livestart() {
-  export TZ=UTC; setup "[$(issue 7 2026-01-01T00:00:00Z area:billing)]"; S=$ST
-  seatset model claude-sonnet-5-5; seatset reviewer gpt-6.1-sol
+  export TZ=UTC; setup "[$(issue 7 2026-01-01T00:00:00Z area:billing)]"; S=$ST; W=$T/$CASE/cards/c7; LM=0; d=$(date -u +%F)
+  mkdir -p "$S" "$T/$CASE/cards"; seatset model claude-sonnet-5-5; seatset reviewer gpt-6.1-sol
+  snap() { loop snapshot --fresh 2>/dev/null | jq -c "$1"; }
+}
+# Card c7's lines, one a minute from today 00:00, after those it wrote before: <step>[:<result>[:<extra json>]], a
+# start line as start:<the step it begins>.
+lines() { # <step>...
+  local a step res x
+  for a; do
+    IFS=: read -r step res x <<<"$a"
+    case $step in picked) x='{"title":"T7","created":"2026-01-01T00:00:00Z"}' ;; start) x="{\"of\":\"$res\"}" res=ok ;; esac
+    jq -cn --arg s "$step" --arg t "$(printf '%sT00:%02d:00Z' "$d" "$LM")" --arg r "${res:-ok}" --argjson x "${x:-{\}}" \
+      '{card:"c7",issue:7,step:$s,time:$t,tokens:{claude:0,codex:0},result:$r,sha:"",reason:""} * $x | .time = $t' >> "$S/cards.jsonl"
+    LM=$((LM + 1))
+  done
+}
+# watch() (lib/session.sh), the engine's own, on a <step> held open until $STUB/go, whose output is <output file> as
+# it stands; its live record is copied to $W.seen once <jq test> holds of it, and it is gone once the step ends.
+watched() { # <output file> <step> <model> <jq test>
+  # shellcheck disable=SC2034 # LIVE and STUCK are read by watch(), defined by the eval
+  ( . "$SRC/lib/portable.sh"; eval "$(for f in watch rollout holds; do sed -n "/^$f() {/,/^}/p" "$SRC/lib/session.sh"; done)"; LIVE=0.05 STUCK=600
+    (while [ -d "$STUB" ] && [ ! -e "$STUB/go" ]; do sleep 0.05; done) & watch $! "$1" "$W.live" "$2" "$3" ) > "$T/$CASE/run.out" 2>&1 & run=$!
+  # A wait on a real process: watch() keeps the live record only while its step runs and removes it as the step ends
+  # (a step that has ended leaves it nothing to read), so the record is read while the step is held.
+  wait_until "jq -e '$4' '$W.live'" "cat '$W.live'" || { : > "$STUB/go"; wait $run; fail "the live record never held $4: $(cat "$T/$CASE/run.out")"; }
+  cp "$W.live" "$W.seen"; : > "$STUB/go"; wait $run || fail "the watch of the step exited non-zero: $(cat "$T/$CASE/run.out")"
+  [ ! -e "$W.live" ] || fail "watch() left the live record of a step that ended: $(cat "$W.live")"
+}
+t_livebuild() { livestart; lines picked worktree deps brief start:build
+  # The session has said nothing yet: the live record watch() writes as its step begins.
+  printf '{"step":"build","at":"%sT00:04:00Z","last":null,"turns":0,"model":"claude-sonnet-5-5"}\n' "$d" > "$W.live"
+  [ "$(snap '.belt[0] | [.usd, .reading, .tokens.claude, .live.lastOutputAt, .track.detailAt, .track.at]')" = '[null,false,0,null,5,0]' ] || fail "a session that has said nothing: $(snap '.belt[0]')"
+  # Health asks 4 s after the step began (the clock seam, CONVEYOR_NOW): the session, silent since its start, is past the limit.
+  at=$(jq -n --arg t "${d}T00:04:00Z" '$t | fromdate + 4')
+  [ "$(CONVEYOR_NOW=$at tuned '.tunables.stuck = 3' loop health | jq -c '.stuck | map([.issue, .step])')" = '[[7,"build"]]' ] || fail "a session silent past the limit is not stuck: $(CONVEYOR_NOW=$at tuned '.tunables.stuck = 3' loop health)"
+  # Its stream: two answers, the first as two events with one id, then a call of a tool.
+  answer() { echo "{\"type\":\"assistant\",\"message\":{\"id\":\"$1\",\"usage\":{\"input_tokens\":1000000,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0}}}"; }
+  { echo '{"type":"system","subtype":"init"}'; answer m1; answer m1; echo '{"type":"user"}'; answer m2
+    echo '{"type":"assistant","message":{"id":"m2","content":[{"type":"tool_use","name":"Bash","input":{"command":"npm test"}}]}}'; } > "$W.out"
+  watched "$W.out" build claude-sonnet-5-5 '.action == "Bash: npm test"'
+  [ "$(jq -c '[.turns, .usage.input, .action, (.last != null)]' "$W.seen")" = '[2,2000000,"Bash: npm test",true]' ] || fail "the live record of a running session: $(cat "$W.seen")"
+  cp "$W.seen" "$W.live"; out=$(loop snapshot --fresh 2>/dev/null) || fail "snapshot of a running session exited non-zero"
+  [ "$(jq -c '[(.belt[0] | .usd, .reading, .tokens.claude, .live.turns, .live.action, (.live.lastOutputAt | fromdate > 0), .step), .cost.today]' <<<"$out")" \
+    = '[4,true,2000000,2,"Bash: npm test",true,"build",0]' ] || fail "the reading of a running session, or it is in the dollars of the steps that ended: $out"
+  # Health asks a second past the last output: the start is then far past the limit, so a health that ignored the
+  # output would say stuck.
+  at=$(( $(jq -r '.belt[0].live.lastOutputAt | fromdate' <<<"$out") + 1 ))
+  [ "$(CONVEYOR_NOW=$at tuned '.tunables.stuck = 3' loop health | jq -c '.stuck')" = '[]' ] || fail "a session whose start is old and whose last output is new is stuck: $(CONVEYOR_NOW=$at tuned '.tunables.stuck = 3' loop health)"
+}
+# The first review opens its thread, and Codex writes the running total to that thread's session file.
+t_livereview() { livestart; lines picked worktree deps brief start:build 'build:ok:{"tokens":{"claude":35,"codex":0},"usage":{"input":10,"write":20,"write1h":0,"read":999,"output":5},"model":"claude-sonnet-5-5"}' start:review
+  export CODEX_HOME=$STUB/codex-home; mkdir -p "$CODEX_HOME/sessions/2026/01/01"
+  local f=$CODEX_HOME/sessions/2026/01/01/rollout-2026-01-01T00-00-00-0aa1-b2.jsonl
+  printf '%s\n' '{"type":"thread.started","thread_id":"0aa1-b2"}' '{"type":"turn.started"}' > "$W.events"
+  printf '%s\n' '{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":500000,"cached_input_tokens":0,"output_tokens":0}}}}' \
+    '{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000000,"cached_input_tokens":400000,"output_tokens":500}}}}' > "$f"
+  [ "$(eval "$(sed -n '/^rollout() {/,/^}/p' "$SRC/lib/session.sh")"; rollout "$W.events")" = "$f" ] || fail "rollout() does not find the review's session file"
+  watched "$W.events" review gpt-6.1-sol '.usage.input == 600000'
+  [ "$(jq -c '[.usage, (.last != null)]' "$W.seen")" = '[{"input":600000,"read":400000,"output":500},true]' ] || fail "the live record of a running review: $(cat "$W.seen")"
+  cp "$W.seen" "$W.live"
+  [ "$(snap '.belt[0] | [.track.label, .tokens.codex, .reading, .tokens.claude, .usd > 0, (.live.lastOutputAt | fromdate > 0)]')" = '["review 1 of 3",600500,true,35,true,true]' ] \
+    || fail "the reading of a running review: $(snap '.belt[0]')"
+}
+# The first review says NO-GO (44 lines, 43 of them findings), the next two say NO-GO too; the test run then runs its
+# three files each alone, and c.test.sh runs now.
+t_live() { livestart
+  local cmd p h
   { for i in $(seq 40); do echo "[P2] a.txt:$i a finding long enough that forty of them pass the cut of the record line"; done
     printf '%s\n' '[P0] a.txt:99 the worst one, past the cut' 'b.txt:1 no mark here' '[P3] c.txt:1 small' 'NEW CARD: b.txt is stale' 'USER-VISIBLE: no' 'VERDICT: NO-GO'; } > "$STUB/review.1"
   for i in 2 3; do moved $i "$NOGO" > "$STUB/review.$i"; done
-  # The session says nothing until $STUB/emit, then two answers (the first as two events with one id), then waits for $STUB/go.
-  # Each hold of a stub here lasts until its file is there, however long that takes, or the stub folder is gone (the test's end).
-  cat > "$STUB/claude" <<'EOF'
-#!/usr/bin/env bash
-cat > /dev/null; echo two >> a.txt
-hold() { while [ -d "$STUB" ] && [ ! -e "$STUB/$1" ]; do sleep 0.1; done; }
-a() { echo "{\"type\":\"assistant\",\"message\":{\"id\":\"$1\",\"usage\":{\"input_tokens\":1000000,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0}}}"; }
-hold emit; echo '{"type":"system","subtype":"init"}'; a m1; a m1; echo '{"type":"user"}'; a m2
-echo '{"type":"assistant","message":{"id":"m2","content":[{"type":"tool_use","name":"Bash","input":{"command":"npm test"}}]}}'; hold go
-echo '{"type":"result","is_error":false,"usage":{"input_tokens":10,"cache_creation_input_tokens":20,"cache_read_input_tokens":999,"output_tokens":5}}'
-EOF
-  # The first review opens its thread, Codex writes the running total to that thread's session file, and it waits for $STUB/go1.
-  export CODEX_HOME=$STUB/codex-home; mkdir -p "$CODEX_HOME/sessions/2026/01/01"
-  cat > "$STUB/review-cmd" <<'EOF'
-if [ "$(wc -l < "$STUB/reviews")" = 1 ]; then
-  echo '{"type":"thread.started","thread_id":"0aa1-b2"}'; echo '{"type":"turn.started"}'
-  f=$CODEX_HOME/sessions/2026/01/01/rollout-2026-01-01T00-00-00-0aa1-b2.jsonl
-  echo '{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":500000,"cached_input_tokens":0,"output_tokens":0}}}}' > "$f"
-  echo '{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000000,"cached_input_tokens":400000,"output_tokens":500}}}}' >> "$f"
-  while [ -d "$STUB" ] && [ ! -e "$STUB/go1" ]; do sleep 0.1; done
-fi
-EOF
-  # The test run starts the three test files the links give a.txt, each alone (test.fileCommand), and holds in the
-  # last, c.test.sh, until $STUB/go2. A log of this worktree written anywhere else (where a runner once wrote) is not
-  # this run's (testcount.test.sh reads runners' own logs).
-  export TMPDIR=$STUB/tmp; mkdir -p "$TMPDIR/conveyor"
-  echo x > "$R/b.test.sh"; echo x > "$R/c.test.sh"; git -C "$R" add b.test.sh c.test.sh
-  linkset '{"a.txt": ["a.test.sh", "b.test.sh", "c.test.sh"]}'
-  cat > "$STUB/test-cmd" <<'EOF'
-printf 'TESTRUN files=7 root=%s\n-- ok   other.test.ts 0s\n' "$PWD" > "$TMPDIR/conveyor/test-changed-other.log"
-[ "$CONVEYOR_TEST_FILE" != c.test.sh ] || while [ -d "$STUB" ] && [ ! -e "$STUB/go2" ]; do sleep 0.1; done
-EOF
-  snap() { loop snapshot --fresh 2>/dev/null | jq -c "$1"; }
-  # A snapshot is taken again only once the card's records, live record or review session file changed (one every 0.2 s
-  # was the case's longest part); the one that showed <want> is kept ($SEEN) for the checks of the run held there (seen).
-  until_is() { local was='' now; while :; do # <jq filter> <want>
-    now=$(cat "$S/cards.jsonl" "$T/$CASE/cards"/*.live "$CODEX_HOME"/sessions/*/*/*/*.jsonl 2>/dev/null | cksum)
-    if [ "$now" != "$was" ]; then was=$now; SEEN=$(loop snapshot --fresh 2>/dev/null); [ "$(seen "$1")" != "$2" ] || return 0; fi
-    kill -0 "$run" 2>/dev/null || fail "never $2 before the run ended: $1 is $(snap "$1")"; sleep 0.1
-  done; }; seen() { jq -c "$1" <<<"$SEEN"; }
-  local h; for h; do : > "$STUB/$h"; done; loop run >/dev/null 2>&1 & run=$!
-}
-t_livebuild() { livestart
-  until_is '.belt[0].track.label' '"building"'
-  [ "$(seen '.belt[0] | [.usd, .reading, .tokens.claude, .live.lastOutputAt, .track.detailAt, .track.at]')" = '[null,false,0,null,5,0]' ] || fail "a session that has said nothing: $(seen '.belt[0]')"
-  # Health asks 4 s on (the clock seam, CONVEYOR_NOW), never after a pause: the session, silent since its start, is then past the limit.
-  at=$(( $(date +%s) + 4 ))
-  [ "$(CONVEYOR_NOW=$at tuned '.tunables.stuck = 3' loop health | jq -c '.stuck | map([.issue, .step])')" = '[[7,"build"]]' ] || fail "a session silent past the limit is not stuck: $(CONVEYOR_NOW=$at tuned '.tunables.stuck = 3' loop health)"
-  : > "$STUB/emit"; until_is '.belt[0].usd' 4
-  # Health asks at a second past the last output (the clock seam), not whenever a loaded machine gets to it: the
-  # start is then over 3 s old, so a health that ignored the output would say stuck.
-  at=$(( $(seen '.belt[0].live.lastOutputAt | fromdate') + 1 ))
-  [ "$(CONVEYOR_NOW=$at tuned '.tunables.stuck = 3' loop health | jq -c '.stuck')" = '[]' ] || fail "a session whose start is old and whose last output is new is stuck: $(CONVEYOR_NOW=$at tuned '.tunables.stuck = 3' loop health)"
-  [ "$(seen '.belt[0] | [.reading, .tokens.claude, .live.turns, (.live.lastOutputAt | fromdate > 0), .step]')" = '[true,2000000,2,true,"build"]' ] || fail "the reading of a running session: $(seen '.belt[0]')"
-  until_is '.belt[0].live.action' '"Bash: npm test"'
-  [ "$(seen '.cost.today')" = 0 ] || fail "a running step is in the dollars of the steps that ended: $(seen .cost)"
-  kill $run; wait $run; : # the run is held here: what it would do next is the next case's
-}
-# The first review says NO-GO (44 lines, 43 of them findings), the fix session runs straight through, the next two say NO-GO too.
-t_livereview() { livestart emit go
-  until_is '.belt[0] | [.track.label, .tokens.codex]' '["review 1 of 3",600500]'
-  [ "$(seen '.belt[0] | [.reading, .tokens.claude, .usd > 0, (.live.lastOutputAt | fromdate > 0)]')" = '[true,35,true,true]' ] || fail "the reading of a running review: $(seen '.belt[0]')"
-  kill $run; wait $run; : # the run is held here: what it would do next is the next case's
-}
-t_live() { livestart emit go go1
-  until_is '.belt[0].track.files | {run, of, now: .now.file}' '{"run":2,"of":3,"now":"c.test.sh"}'
-  [ -z "$(find "$CODEX_HOME/sessions" -type f)" ] || fail "the session file of a review that ended is left: $(find "$CODEX_HOME/sessions" -type f)"
-  [ "$(seen '.belt[0] | [.track.label, .track.detailAt, (.reviews | map([.round, .verdict, .fixed, (.counts | tojson)]))]')" \
-    = '["tests",11,[[1,"NO-GO",true,"{\"P0\":1,\"P1\":1,\"P2\":40,\"P3\":1}"],[2,"NO-GO",true,"{\"P0\":0,\"P1\":1,\"P2\":0,\"P3\":0}"],[3,"NO-GO",false,"{\"P0\":0,\"P1\":1,\"P2\":0,\"P3\":0}"]]]' ] \
-    || fail "the reviews in order, or the step of a running test run: $(seen '.belt[0] | [.track.label, .reviews]')"
-  echo OPEN > "$STUB/state"; : > "$STUB/go2"; wait "$run" || fail "run exited non-zero"
-  [ "$(st 'select(.step == "review") | [(.reason | length), .counts.P2] | tojson' | head -n 1)" = '[1500,40]' ] || fail "counts not taken from the whole review: $(st 'select(.step == "review") | .counts')"
-  [ "$(st 'select(.step == "build") | [.tokens.claude, (.usage | map(tostring) | join(" "))] | tojson')" = '[35,"10 20 0 999 5"]' ] || fail "the line written when the session ends changed: $(st 'select(.step == "build")')"
-  [ "$(st '[.step, .of // .created // (.followups | arrays | tojson) // .result] | join(":")' | tr '\n' ' ')" \
-    = 'picked:2026-01-01T00:00:00Z worktree:ok deps:ok brief:ok start:build build:ok start:review review:NO-GO start:fix fix:ok start:review review:NO-GO start:fix fix:ok start:review review:NO-GO start:test test:pass start:file filed:[100101] start:land landed:[100101] pushed:ok issue:fail ' ] \
-    || fail "the marks of a card: $(st '[.step, .of // .created // (.followups | arrays | tojson) // .result] | join(":")' | tr '\n' ' ')"
-  [ -z "$(ls "$T/$CASE/cards")" ] || fail "a live record or a worktree is left: $(ls "$T/$CASE/cards")"
-  # GitHub kept the issue open, so the card is still at Push, failed: its detail is at "issue closed".
+  printf '%s\n' '{"type":"system","subtype":"init"}' '{"type":"result","is_error":false,"usage":{"input_tokens":10,"cache_creation_input_tokens":20,"cache_read_input_tokens":999,"output_tokens":5}}' > "$STUB/build.out"
+  # The three review lines as the card writes them (lib/card.sh: counts() over the whole review, line()'s cut of
+  # the reason) and the build line from the session's output (SESSIONREAD, as session1() reads it), one a line.
+  # shellcheck disable=SC2016 # expanded where fx_in runs it, with the engine loaded
+  cmd='for i in 1 2 3; do line c7 7 review NO-GO "$(grep -Ev "$UNRECORDED" "$STUB/review.$i" | jq -cRs --argjson k "$(counts "$STUB/review.$i")" '\''sub("\n+$"; "") as $r | {reason: $r, counts: $k, tail: $r}'\'')"; done
+    line c7 7 build ok "$(jq -cRn --arg m claude-sonnet-5-5 --arg e "" --argjson s 0 --argjson run null "$SESSIONREAD" "$STUB/build.out" | tail -n 1 | jq -c "del(.ok)")"'
+  fx_in "$cmd"; [ "$RC" = 0 ] || fail "the review and build lines could not be made: $(cat "$T/$CASE/run.out")"
+  rv() { sed -n "${1}p" "$T/$CASE/run.out"; }
+  [ "$(rv 1 | jq -c '[(.reason | length), .counts.P2, .counts.P0]')" = '[1500,40,1]' ] || fail "counts not taken from the whole review: $(rv 1 | jq -c .counts)"
+  [ "$(rv 4 | jq -c '[.tokens.claude, (.usage | map(tostring) | join(" "))]')" = '[35,"10 20 0 999 5"]' ] || fail "the line written when the session ends changed: $(rv 4)"
+  # The test run: its output and its own log hold a.test.sh and b.test.sh ended and c.test.sh begun; the log of
+  # another card's worktree, which names 7 files, is not this run's.
+  printf '%s\n' '== a.test.sh' '-- ok a.test.sh' '== b.test.sh' '-- ok b.test.sh' '== c.test.sh' > "$W.test"
+  mkdir -p "$W.testlog" "$T/$CASE/cards/c8.testlog"; { echo 'TESTRUN files=3'; cat "$W.test"; } > "$W.testlog/files"
+  printf 'TESTRUN files=7\n-- ok   other.test.ts 0s\n' > "$T/$CASE/cards/c8.testlog/files"
+  p=$(eval "$(for f in testlogs testprogress; do sed -n "/^$f() {/,/^}/p" "$SRC/lib/session.sh"; done)"; mapfile -t logs < <(testlogs "$W"); testprogress "$W.test" "${logs[@]}")
+  [ "$p" = '{"run":2,"of":3,"cases":null,"now":"c.test.sh"}' ] || fail "the files of a running test run: $p"
+  lines picked worktree deps brief start:build "build:ok:$(rv 4)" start:review "review:NO-GO:$(rv 1)" start:fix fix start:review "review:NO-GO:$(rv 2)" \
+    start:fix fix start:review "review:NO-GO:$(rv 3)" start:test
+  jq -c --arg t "${d}T00:16:30Z" '{step: "test", at: $t, last: $t, turns: 0, progress: $t, files: {run, of, now: {file: .now, at: $t}}, tests: null}' <<<"$p" > "$W.live"
+  [ "$(snap '.belt[0] | [.track.label, .track.detailAt, (.track.files | {run, of, now: .now.file}), (.reviews | map([.round, .verdict, .fixed, (.counts | tojson)]))]')" \
+    = '["tests",11,{"run":2,"of":3,"now":"c.test.sh"},[[1,"NO-GO",true,"{\"P0\":1,\"P1\":1,\"P2\":40,\"P3\":1}"],[2,"NO-GO",true,"{\"P0\":0,\"P1\":1,\"P2\":0,\"P3\":0}"],[3,"NO-GO",false,"{\"P0\":0,\"P1\":1,\"P2\":0,\"P3\":0}"]]]' ] \
+    || fail "the reviews in order, or the step of a running test run: $(snap '.belt[0] | [.track, .reviews]')"
+  # The marks of the rest of its run: the follow-ups filed, the landing, the push, and GitHub kept the issue open, so
+  # the card is still at Push, failed: its detail is at "issue closed".
+  rm -f "$W.live"; h=$(git -C "$R" rev-parse HEAD)
+  lines test:pass start:file 'filed:ok:{"followups":[100101]}' start:land "landed:ok:{\"sha\":\"$h\",\"product\":false,\"followups\":[100101]}" \
+    "pushed:ok:{\"sha\":\"$h\"}" 'issue:fail:{"reason":"GitHub still shows the issue open 60 s after the push"}'
   [ "$(snap '.landed[0] | [(.rounds | length), .reviews, (.track.detail | map(.state) | join(" ")), .track.detail[16].n, .track.detail[0].sec > 86400, .track.detailAt, .track.at, .track.steps[5].state]')" \
     = '[3,3,"done done done done done done done done done done done done skipped done done failed done",1,true,15,5,"failed"]' ] || fail "the landed card's reviews and track: $(snap '.landed[0]')"
 }
