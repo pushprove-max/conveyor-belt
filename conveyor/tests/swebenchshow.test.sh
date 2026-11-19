@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
 # Engine cases: what the Board's Benchmarks tab reads of `conveyor.sh bench swe` (bench/swe.sh): one run's page
-# (`bench swe show`) and the cost Start shows (`bench swe history`, each arm's perTask). The fixture is swebench.test.sh's swe().
+# (`bench swe show`), the cost Start shows (`bench swe history`, each arm's perTask), and the arms the form saves
+# (`bench swe arms save`, the choices history offers). The fixture is swebench.test.sh's swe().
 
 # Bugs (#326): (1) the run page could not open a run of 500 tasks and 6 arms on Linux: show passed the run's line,
 # 3,000 task records, to jq as one argument, past the system's 128 KiB limit on one argument; (2) a stopped run showed
@@ -34,4 +35,51 @@ t_sweshow() {
   o=$(loop bench swe history 2>&1) || fail "history failed: $(head -c 300 <<<"$o")"
   [ "$(jq -c '.arms | map(select(.name | IN("conveyor", "solo")) | [.name, .perTask.session])' <<<"$o")" = '[["conveyor",2.1667],["solo",3]]' ] \
     || fail "an arm's perTask has not the mean dollars of this project's priced sessions (its model's, for an arm with one): $(jq -c '.arms | map([.name, .perTask])' <<<"$o")"
+}
+
+# Bugs (#634): the Board's arm form had no way to keep an arm (save it, read it back by an ID, and keep the old one when
+# it is edited), no list of the models the project allows each seat to offer, and nothing refused a CLI and model the
+# project does not allow, so a form could run a Codex review model as the builder of a pack that lists no Codex builder.
+t_swearmsave() {
+  swe; local o id1 id2 s1='{"kind":"conveyor","seats":{"model":{"cli":"claude","model":"m","effort":"high"},"reviewer":{"cli":"codex","model":"x"}}}'
+  o=$(loop bench swe history 2>&1) || fail "history failed: $(head -c 300 <<<"$o")"
+  [ "$(jq -c '.choices | [.source, .builder.claude[-1], .builder.codex, .reviewer.codex[-1], .agent.codex[-1], .efforts.codex[0]]' <<<"$o")" = '["project","m",[],"x","x","minimal"]' ] \
+    || fail "history does not publish the models the project allows each seat pool, by CLI: $(jq -c .choices <<<"$o")"
+  id1=$(loop bench swe arms save 'Claude builds, Codex reviews' "$s1" 2>&1) && [[ $id1 =~ ^arm-[0-9a-f]{12}$ ]] || fail "the arm was not saved: $id1"
+  o=$(loop bench swe arms show "$id1" 2>&1) && [ "$(jq -cS '[.id, .name, .spec]' <<<"$o")" = "$(jq -cSn --arg i "$id1" --argjson s "$s1" '[$i, "Claude builds, Codex reviews", $s]')" ] \
+    || fail "the saved arm does not read back by its ID as it was saved: $o"
+  # An edit is a new revision under the same name; the first stays as it was, for the runs that used it.
+  id2=$(loop bench swe arms save 'Claude builds, Codex reviews' '{"kind":"conveyor","seats":{"model":{"cli":"claude","model":"m"}}}' 2>&1) && [ "$id2" != "$id1" ] \
+    || fail "the edit did not make a new revision: $id2"
+  o=$(loop bench swe arms show "$id1" 2>&1) && [ "$(jq -cS .spec <<<"$o")" = "$(jq -cS . <<<"$s1")" ] || fail "the edit changed the earlier revision: $o"
+  # Refused, nothing kept: a Codex review model as the builder; a model of another CLI for an agent; a seat effort its
+  # CLI does not take; a command given through the form.
+  for o in '{"kind":"conveyor","seats":{"model":{"cli":"codex","model":"x"}}}/does not allow "x" on codex for the builder seat' \
+      '{"kind":"agent","recipe":"solo","cli":"claude","model":"x"}/does not allow "x" on claude' \
+      '{"kind":"conveyor","seats":{"reviewer":{"cli":"codex","model":"x","effort":"max"}}}/codex takes no effort "max"' \
+      '{"kind":"agent","recipe":"solo","cli":"claude","model":"m","run":"true"}/takes kind, recipe, cli and model only, not run'; do
+    id2=$(loop bench swe arms save bad "${o%%/*}" 2>&1) && fail "a choice the project does not allow was saved: ${o%%/*}"
+    grep -qF "${o#*/}; nothing saved" <<<"$id2" || fail "the refusal does not say why: $id2"
+  done
+  [ "$(ls "$B/arms" | wc -l)" = 2 ] || fail "a refused arm was kept: $(ls "$B/arms")"
+  # An agent arm's recipe runs on the saved model, not on its own (solo's: the builder's, m).
+  tune '.models.allowed.claude += ["m2"]'
+  id2=$(loop bench swe arms save 'Claude alone on m2' '{"kind":"agent","recipe":"solo","cli":"claude","model":"m2"}' 2>&1) || fail "an agent arm on an allowed model was refused: $id2"
+  echo 'echo fixed > x.py' > "$STUB/build"
+  o=$(loop bench swe 1 --arm "$id2" 2>&1) || fail "the saved agent arm's run failed: $o"
+  [[ $(tail -n 1 "$STUB/sessions") == *'--model m2 '* ]] || fail "the recipe was not given the saved arm's model: $(tail -n 1 "$STUB/sessions")"
+}
+
+# Bug (#634): a conveyor arm's seat models were added to the sandbox pack's models.allowed under the seat's CLI, so a
+# saved arm with a Codex builder put that builder model in the Codex review list: a form could add a model to the
+# project's choices. A saved arm's run gives the engine its seats on the project's own list.
+t_swearmsaverun() {
+  swe; local id o
+  tune '.models.allowed["codex-builder"] = ["xb"]'
+  id=$(loop bench swe arms save 'Codex builds' '{"kind":"conveyor","seats":{"model":{"cli":"codex","model":"xb"}}}' 2>&1) || fail "the arm was not saved: $id"
+  o=$(loop bench swe 1 --arm "$id" 2>&1) || fail "the saved arm's run failed: $o"
+  grep -q "^Resolved 1 of 1 with Codex builds on engine main ($EB); not run: 0\.$" <<<"$o" || fail "the saved arm did not run under its name: $o"
+  jq -e '.model == {cli: "codex", model: "xb"}' "$SWE_FX/control.seen" > /dev/null || fail "the engine was not given the saved arm's builder: $(cat "$SWE_FX/control.seen")"
+  [ "$(jq -c .models.allowed "$SWE_FX/pack.seen")" = "$(jq -c .models.allowed "$R/.conveyor/project.json")" ] \
+    || fail "the saved arm changed the sandbox's allowed models: $(jq -c .models.allowed "$SWE_FX/pack.seen")"
 }

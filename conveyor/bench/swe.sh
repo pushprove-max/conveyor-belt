@@ -5,6 +5,8 @@
 #                                      runs the first n tasks of the pinned order (1 to 500) with each arm (default:
 #                                      conveyor; --solo is --arm solo; --engine is the version a conveyor arm runs)
 #   bench swe arms [check <arm>...]    the arms with their preflight state; check runs those arms' preflights
+#   bench swe arms save <name> <spec>  keeps a saved arm's choices as a new revision and prints its ID (swe_armsave)
+#   bench swe arms show <id>           a saved revision as it was saved
 #   bench swe stop                     ends the run in progress
 #   bench swe results [--json]         the results of every arm and version so far, side by side
 #   bench swe history                  every run newest first with each arm's figures, and every arm's state, as JSON
@@ -32,6 +34,7 @@
 # arm's command runs on the issue, and its change is the patch. An arm that does not fire is a failed task of it.
 # What is kept, under the state folder's bench/swe: tasks.<revision>.jsonl (the ordered list), results/<key>/<task>.json
 # (key: swe_armkey(); resolved, fired, sessions, tokens, minutes, a card's records) and .patch, preflight/<arm>/<key>.json,
+# arms/<id>.json (each saved arm revision, swe_armsave),
 # a line a run in runs.jsonl, the run in progress in live.json, and board.json, what the snapshot carries for the
 # Board's Benchmarks tab (the tab reads the runs and results with history and show).
 # The dataset's rows (each task's reference fix and hidden tests) are never kept: the card's sessions have a shell as
@@ -180,9 +183,10 @@ swe_lines() {
 # offered), why, its last check (at), the guard that holds it back (swe_guards), its results key (null for a conveyor
 # arm, whose key is its engine's: keyPrefix and the commit) and its sessions, minutes and a session's dollars (swe_pertask); keys,
 # each results key with the places of its tasks in the pinned order (a run reuses them); guard, whether the usage guard
-# holds back a run with a conveyor arm (conveyor) or another arm on the Claude login (agent); set, the task set.
+# holds back a run with a conveyor arm (conveyor) or another arm on the Claude login (agent); set, the task set;
+# choices, the models and efforts a saved arm may choose (swe_choices; null when the pack does not read).
 swe_history() {
-  local arms='[]' n a r p m k gc=false ga=false
+  local arms='[]' n a r p m k gc=false ga=false ch
   for n in $(swe_armnames); do
     a=$(swe_arm "$n") || continue
     r=$(cat "$SWE_DIR/preflight/$n"/*.json 2>/dev/null | jq -sc 'sort_by(.epoch) | last // null')
@@ -197,10 +201,11 @@ swe_history() {
       key: $k, keyPrefix: (if $a.kind != "conveyor" then null elif $a.name == "conveyor" then "" else "\($a.name)-" end)}]' <<<"$arms")
   done
   ! swe_guarded || gc=true; ! swe_guarded 1 || ga=true
-  swe_lines | jq -sc --argjson arms "$arms" --argjson gc "$gc" --argjson ga "$ga" --slurpfile res <(cat "$SWE_DIR"/results/*/*.json 2>/dev/null) \
+  ch=$(swe_choices) || ch=null
+  swe_lines | jq -sc --argjson arms "$arms" --argjson gc "$gc" --argjson ga "$ga" --argjson ch "$ch" --slurpfile res <(cat "$SWE_DIR"/results/*/*.json 2>/dev/null) \
     --slurpfile order <(jq -c .id "$SWE_DIR/tasks.$(swe_conf .revision).jsonl" 2>/dev/null) --arg ds "$(swe_conf .dataset)" --arg rv "$(swe_conf .revision)" "$SWE_RUNSUM"'
     ($res | map({key: "\(.key)/\(.task)", value: .}) | from_entries) as $R | ($order | to_entries | map({key: .value, value: .key}) | from_entries) as $pos
-    | {set: {dataset: $ds, revision: $rv}, guard: {conveyor: $gc, agent: $ga}, arms: $arms,
+    | {set: {dataset: $ds, revision: $rv}, guard: {conveyor: $gc, agent: $ga}, arms: $arms, choices: $ch,
        runs: (sort_by(.started // "") | reverse | map(runsum($R))),
        keys: ($res | group_by(.key) | map({key: .[0].key, at: (map($pos[.task] // empty) | sort)}))}'
 }
@@ -523,7 +528,7 @@ swe_main() {
   if [ -n "$n" ] && [ -n "$named" ]; then
     k=''; for a in "${arms[@]}"; do [ "$(swe_arm "$a" | jq -r .kind)" = agent ] || k=1; done; [ -n "$k" ] || n=''
   fi
-  [ -n "$n" ] || { echo "usage: conveyor.sh bench swe <1-$(swe_conf .tasks)> [--arm <arm>]... [--solo] [--engine <version | commit>] | bench swe arms [check <arm>...] | bench swe stop | bench swe results [--json] | bench swe history | bench swe show <run> | bench swe diff <A> <B> [--json] | bench swe versions" >&2; return 2; }
+  [ -n "$n" ] || { echo "usage: conveyor.sh bench swe <1-$(swe_conf .tasks)> [--arm <arm>]... [--solo] [--engine <version | commit>] | bench swe arms [check <arm>...] | bench swe arms save <name> <spec json> | bench swe arms show <id> | bench swe stop | bench swe results [--json] | bench swe history | bench swe show <run> | bench swe diff <A> <B> [--json] | bench swe versions" >&2; return 2; }
   mapfile -t arms < <(printf '%s\n' "${arms[@]}" | awk '!seen[$0]++')
   swe_run "$n" "$eng" "${arms[@]}"
 }

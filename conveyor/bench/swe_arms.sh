@@ -18,12 +18,86 @@
 #   model      (agent) the model given as $SWE_MODEL; "builder": the builder seat's Claude model, as Claude alone takes
 #   exclude    paths the arm's method writes in the checkout that are not the change: kept out of the patch
 #   offered    false for an arm that cannot run here, with why
+# A saved arm (`bench swe arms save`, swe_armsave) is a revision the Board's form made: a name and choices only, no
+# command. It runs on a host arm (its recipe: the conveyor arm, or an agent arm that takes a model) with its seats or
+# model over it, and its name is its revision ID.
 # Every trial runs in a container of its own (swe_box): the task's image, the same limits for every arm (swe.json's
 # limits and taskTimeout), the logins copied in at its start only, and the container removed when the trial ends.
 SWE_ARMS=${CONVEYOR_BENCH_ARMS:-${BASH_SOURCE[0]%/*}/arms}
 SWE_HOME=/bench
-swe_arm() { # <name>: the arm's JSON, its keys sorted (a preflight's record is compared with it whole)
-  local j; [[ $1 =~ ^[a-z0-9][a-z0-9-]*$ ]] && j=$(jq -cSe 'objects' "$SWE_ARMS/$1.json" 2>/dev/null) && jq -cS --arg n "$1" '.name = $n' <<<"$j"
+swe_arm() { # <name | saved revision ID>: the arm's JSON, its keys sorted (a preflight's record is compared with it whole)
+  local j r
+  if [[ $1 =~ $SWE_ARMID ]]; then
+    # A saved revision: its recipe's JSON with the revision's seats or model over it, named by its ID.
+    r=$(jq -ce 'objects' "$SWE_DIR/arms/$1.json" 2>/dev/null) && j=$(jq -r '.spec.recipe // "conveyor"' <<<"$r") && [[ ! $j =~ $SWE_ARMID ]] && j=$(swe_arm "$j") || return 1
+    jq -cS --argjson r "$r" '. + ($r.spec | del(.kind, .recipe, .cli)) + {name: $r.id, label: $r.name, revision: {id: $r.id, name: $r.name, at: $r.at, recipe: .name}}' <<<"$j"
+    return
+  fi
+  [[ $1 =~ ^[a-z0-9][a-z0-9-]*$ ]] && j=$(jq -cSe 'objects' "$SWE_ARMS/$1.json" 2>/dev/null) && jq -cS --arg n "$1" '.name = $n' <<<"$j"
+}
+SWE_ARMID='^arm-[0-9a-f]{12}$'
+# The choices a saved arm may make, as the Board's form offers them: the models the project allows each seat pool by
+# CLI (okmodels: the builder's pool for the builder, the reviewer's for the reviewer and the judge), the models an
+# agent arm may run on each CLI a container can sign in to (both pools' for that CLI), and each CLI's efforts.
+# source: "project" when the pack sets models.allowed, else "engine": the engine's defaults (modelsallowed()).
+swe_choices() {
+  local a s=project
+  packget models.allowed a 2>/dev/null || return 1; [ -n "$a" ] || s=engine
+  modelsallowed a || return 1
+  jq -c --arg s "$s" --argjson e "$EFFORTS" "$OKMODELS"'okmodels("builder") as $b | okmodels("reviewer") as $r
+    | {source: $s, builder: $b, reviewer: $r, agent: {claude: ($b.claude + ($r.claude - $b.claude)), codex: ($b.codex + ($r.codex - $b.codex))}, efforts: $e}' <<<"$a"
+}
+# `bench swe arms save <name> <spec>`: checks a saved arm's choices against the project's (swe_choices) and keeps it as
+# a new revision, $SWE_DIR/arms/<id>.json, {id, name, at, spec}, never written again: saving under the same name makes
+# another revision, so a run keeps the one it used. Prints the ID: arm-<the first 12 of sha256 of name and spec>. The
+# spec holds choices only, no command:
+#   {kind: "conveyor", seats: {model, reviewer, judge}}   each seat given {cli, model, effort} (effort optional)
+#   {kind: "agent", recipe: <host agent arm>, cli: <claude | codex>, model}
+# A model the project does not allow that seat (or that CLI, for an agent) is refused, nothing kept: a saved arm cannot
+# add a model to the project's choices (swe_pack adds a host arm's seat models to the sandbox's list, never a saved one's).
+swe_armsave() { # <name> <spec json>
+  local c s w id r f
+  c=$(swe_choices) || { echo "conveyor: the project's models.allowed cannot be read; nothing saved" >&2; return 1; }
+  s=$(jq -cSe 'objects' <<<"$2" 2>/dev/null) || { echo "conveyor: the arm's spec is not a JSON object; nothing saved" >&2; return 1; }
+  w=$(jq -rn --arg n "$1" --argjson s "$s" --argjson c "$c" '
+    def seaterr($k; $v): (if $k == "model" then "builder" else $k end) as $w | (if $k == "model" then $c.builder else $c.reviewer end) as $p
+      | if ($v | type) != "object" or (($v | keys) - ["cli", "model", "effort"]) != [] then "the \($w) seat takes cli, model and effort only"
+        elif ($v.cli | type) != "string" or ($p | has($v.cli) | not) then "the \($w) seat cannot run on the CLI \($v.cli | tojson)"
+        elif ($v.model | type) != "string" or ($p[$v.cli] | index([$v.model])) == null then "the project does not allow \($v.model | tojson) on \($v.cli) for the \($w) seat"
+        elif $v.effort == null then empty
+        elif $k == "model" and $v.cli == "opencode" then "an OpenCode builder takes no effort"
+        elif ($v.effort | type) != "string" or ($c.efforts[$v.cli] | index([$v.effort])) == null then "\($v.cli) takes no effort \($v.effort | tojson)"
+        else empty end;
+    [ if ($n | length) < 1 or ($n | length) > 80 or ($n | test("[[:cntrl:]]")) or ($n | test("^\\s|\\s$")) then "the name must be 1 to 80 characters, with no control character and no space at either end"
+      elif $s.kind == "conveyor" then
+        (($s | keys) - ["kind", "seats"]) as $x | ($s.seats // {}) as $t
+        | if $x != [] then "a Conveyor arm takes kind and seats only, not \($x | join(", "))"
+          elif ($t | type) != "object" then "seats must be an object"
+          elif (($t | keys) - ["model", "reviewer", "judge"]) != [] then "the seats are model (the builder), reviewer and judge, not \(($t | keys) - ["model", "reviewer", "judge"] | join(", "))"
+          else $t | to_entries[] | seaterr(.key; .value) end
+      elif $s.kind == "agent" then
+        (($s | keys) - ["kind", "recipe", "cli", "model"]) as $x
+        | if $x != [] then "an agent arm takes kind, recipe, cli and model only, not \($x | join(", "))"
+          elif ($s.recipe | type) != "string" or ($s.recipe | test("^[a-z0-9][a-z0-9-]*$") | not) then "the recipe must name an agent arm"
+          elif ($c.agent | has($s.cli | tostring) | not) then "an agent arm runs on claude or codex, not \($s.cli | tojson)"
+          elif ($s.model | type) != "string" or ($c.agent[$s.cli] | index([$s.model])) == null then "the project does not allow \($s.model | tojson) on \($s.cli)"
+          else empty end
+      else "kind must be conveyor or agent" end ] | first // empty')
+  # An agent arm's recipe: a host arm of that kind, offered, signed in with the CLI chosen, that runs on the model given.
+  if [ -z "$w" ] && [ "$(jq -r .kind <<<"$s")" = agent ]; then
+    f=$(jq -r .recipe <<<"$s")
+    if [[ $f =~ $SWE_ARMID ]] || ! r=$(swe_arm "$f") || [ "$(jq -r .kind <<<"$r")" != agent ]; then w="no agent arm $f"
+    elif jq -e '.offered == false' <<<"$r" > /dev/null; then w="the arm $f is not offered: $(jq -r '.why // "no reason given"' <<<"$r")"
+    elif ! jq -e '.model | type == "string"' <<<"$r" > /dev/null; then w="the arm $f takes no model"
+    elif ! jq -e --arg c "$(jq -r .cli <<<"$s")" '.login == [$c]' <<<"$r" > /dev/null; then w="the arm $f does not run on $(jq -r .cli <<<"$s") alone"; fi
+  fi
+  [ -z "$w" ] || { echo "conveyor: $w; nothing saved" >&2; return 1; }
+  id=arm-$(jq -cSn --arg n "$1" --argjson s "$s" '{name: $n, spec: $s}' | sha256sum | cut -c1-12)
+  if [ ! -s "$SWE_DIR/arms/$id.json" ]; then
+    mkdir -p "$SWE_DIR/arms" && swe_put "$SWE_DIR/arms/$id.json" "$(jq -cn --arg id "$id" --arg n "$1" --argjson s "$s" --arg at "$(swe_now)" '{id: $id, name: $n, at: $at, spec: $s}')" \
+      || { echo "conveyor: the arm could not be saved" >&2; return 1; }
+  fi
+  printf '%s\n' "$id"
 }
 swe_armnames() { local f; for f in "$SWE_ARMS"/*.json; do [ -e "$f" ] || continue; f=${f##*/}; printf '%s\n' "${f%.json}"; done; }
 # The key an arm's results are kept under: the engine commit for the conveyor arm (as before arms), <arm>-<commit> for
@@ -48,7 +122,7 @@ swe_login() { # <claude | codex>
 # there (the project's control record with the arm's seats over it: the builder, the reviewer and the judge only when
 # it is on; the Tests seat serves `testaction`, which the run does not start), so a Conveyor arm on Claude seats needs
 # no Codex login. The seats are worked out on the models the engine in the container offers, not this host's: the
-# task's pack (swe_pack: the project's models.allowed with the arm's seats in it) when it lists some, else the
+# task's pack (swe_pack: the project's models.allowed, with a host arm's seats in it) when it lists some, else the
 # built-in MODELS0, as the arm's install puts Codex in the container even where this host has none.
 swe_logins() { # <arm json>
   local c a s x=''
@@ -56,7 +130,7 @@ swe_logins() { # <arm json>
     s=$(jq -c '.seats // {}' <<<"$1")
     c=$(ctl 2>/dev/null) && c=$(jq -c --argjson s "$s" '. + $s' <<<"$c") || c=null
     packget models.allowed a 2>/dev/null || a=''
-    x=$(jq -r --argjson c "$c" --argjson s "$s" --argjson d "$MODELS0" "$SEATNOW$JUDGENOW"'
+    x=$(jq -r --argjson c "$c" --argjson s "$(jq -c 'if has("revision") then {} else .seats // {} end' <<<"$1")" --argjson d "$MODELS0" "$SEATNOW$JUDGENOW"'
         reduce ($s[] | objects | select(.cli != null)) as $x (.; .[$x.cli] = ((.[$x.cli] // []) + [$x.model] | unique)) | (. // $d)
         | ([try seatnow("builder"; $c)] | first) as $b | ([try seatnow("reviewer"; $c)] | first) as $r
         | $b, $r, (if $c.judgeOn == true and $r != null then [try judgenow($c; $r)] | first else null end) | .agent? // empty' <<<"${a:-null}")
@@ -89,11 +163,12 @@ swe_in() { # <seconds> <container> <folder> <script> [<NAME=value> ...]
   timeout "$t" docker exec -i -w "$w" "${e[@]}" "$c" bash -c 'export PATH="$HOME/.local/bin:${SWE_SB:+$SWE_SB/bin:}$PATH"; '"$s"
 }
 # The pack and control record of a conveyor arm's sandbox: the project's, with the task's test command run in the
-# container, the arm's seats (and their models allowed), and no named account: the container has one login of each.
+# container, the arm's seats (a host arm's models added to models.allowed; a saved arm's are the project's already,
+# swe_armsave), and no named account: the container has one login of each.
 swe_pack() { # <task json> <sb> <engine's conveyor.sh> <arm json>
   local sb=$2 s; s=$(jq -c '.seats // {}' <<<"$4")
   mkdir -p "$sb/$SWE_MAIN/.conveyor" "$sb/cards" && : > "$sb/rulings.jsonl" || return 1
-  jq --arg t "$(jq -r .cmd <<<"$1")" --arg l "$sb/rulings.jsonl" --argjson s "$s" '{owner, labels: ((.labels // {}) + {nonProductAreas: []}), models, review, prices, privacy,
+  jq --arg t "$(jq -r .cmd <<<"$1")" --arg l "$sb/rulings.jsonl" --argjson s "$(jq -c 'if has("revision") then {} else .seats // {} end' <<<"$4")" '{owner, labels: ((.labels // {}) + {nonProductAreas: []}), models, review, prices, privacy,
     tunables: ((.tunables // {}) + {closeWait: 0}), rulings: {log: $l}, test: {command: $t, survey: false}, productPaths: [".conveyor-none/"], linkFromMain: [], checks: [],
     push: {env: {}}, remote: "origin", defaultBranch: "main", landBatch: 1} | with_entries(select(.value != null))
     | reduce ($s[] | objects | select(.cli != null)) as $x (.; .models.allowed[$x.cli] = ((.models.allowed[$x.cli] // []) + [$x.model] | unique))' \
@@ -208,11 +283,19 @@ swe_ready() { # <arm json> <key> <image> <engine's conveyor.sh, conveyor kind>
     || swe_preflight "$@"
 }
 # `bench swe arms`: each arm with its preflight state (its latest preflight); `bench swe arms check <arm>...` runs
-# those arms' preflights now, a conveyor arm's on main's engine.
-swe_arms() { # [check <arm>...]
+# those arms' preflights now, a conveyor arm's on main's engine (an arm is a host arm's name or a saved revision's ID);
+# `bench swe arms save <name> <spec>` keeps a saved arm and prints its ID (swe_armsave); `bench swe arms show <id>`
+# prints that revision as it was saved.
+SWE_ARMSUSE='usage: conveyor.sh bench swe arms [check <arm>...] | bench swe arms save <name> <spec json> | bench swe arms show <id>'
+swe_arms() { # [check <arm>... | save <name> <spec json> | show <id>]
   local n a r tf img eng k bad=0 gc='' ga=''
+  case ${1:-} in
+    save) [ $# = 3 ] || { echo "$SWE_ARMSUSE" >&2; return 2; }; swe_armsave "$2" "$3"; return ;;
+    show) [ $# = 2 ] || { echo "$SWE_ARMSUSE" >&2; return 2; }
+      [[ $2 =~ $SWE_ARMID ]] && jq -ce 'objects' "$SWE_DIR/arms/$2.json" 2>/dev/null || { echo "conveyor: no saved arm $2" >&2; return 1; }; return ;;
+  esac
   if [ "${1:-}" = check ]; then
-    shift; [ $# -gt 0 ] || { echo "usage: conveyor.sh bench swe arms [check <arm>...]" >&2; return 2; }
+    shift; [ $# -gt 0 ] || { echo "$SWE_ARMSUSE" >&2; return 2; }
     # A preflight starts a model session on the trivial task: the usage guard holds it back as it holds a run.
     for n; do a=$(swe_arm "$n") || continue; case $(swe_guards "$a") in conveyor) gc=1 ;; agent) ga=1 ;; esac; done
     ! swe_held "$gc" "$ga" || { echo "conveyor: the usage guard is reached: no preflight starts while it stands" >&2; return 1; }
@@ -233,7 +316,7 @@ swe_arms() { # [check <arm>...]
     done
     return "$bad"
   fi
-  [ $# = 0 ] || { echo "usage: conveyor.sh bench swe arms [check <arm>...]" >&2; return 2; }
+  [ $# = 0 ] || { echo "$SWE_ARMSUSE" >&2; return 2; }
   for n in $(swe_armnames); do
     a=$(swe_arm "$n") || { echo "$n: its file is not a JSON object"; continue; }
     r=$(cat "$SWE_DIR/preflight/$n"/*.json 2>/dev/null | jq -sc 'sort_by(.epoch) | last // null')

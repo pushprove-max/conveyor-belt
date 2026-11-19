@@ -112,6 +112,33 @@ not part of the patch.
 OpenHands and Aider are not offered. They run on a model provider's API key, and they cannot run on a subscription
 login. The benchmark uses no API keys.
 
+### Saved arms
+
+A saved arm is a name and a set of choices. It holds no command. It runs on one of the arms above: a Conveyor arm on
+the `conveyor` arm with its own seats, and an agent arm on an agent arm that takes a model, such as `solo`.
+
+```
+conveyor.sh bench swe arms save "Claude builds, Codex reviews" '{"kind":"conveyor","seats":{"model":{"cli":"claude","model":"claude-opus-5-5","effort":"high"},"reviewer":{"cli":"codex","model":"gpt-6.2-sol"}}}'
+conveyor.sh bench swe arms save "Claude alone on Sonnet" '{"kind":"agent","recipe":"solo","cli":"claude","model":"claude-sonnet-5-5"}'
+conveyor.sh bench swe arms show arm-0123456789ab
+```
+
+`save` prints the ID of the saved arm, for example `arm-0123456789ab`. Give that ID to `--arm` or to
+`bench swe arms check`, as you give the name of an arm. A Conveyor arm takes the seats `model` (the builder),
+`reviewer` and `judge`. Each seat takes `cli`, `model` and, if you want, `effort`. An agent arm takes `recipe`, `cli`
+(`claude` or `codex`, the CLI that the recipe signs in to) and `model`.
+
+When you save the same name again with other choices, you get a new ID. The earlier arm does not change, and
+`bench swe arms show` still shows it. A run keeps the ID of the arm that it used.
+
+You can choose only the models that the project allows. The builder takes the builder models of the `models.allowed`
+setting in `.conveyor/project.json`: `claude`, `codex-builder` and `opencode`. The reviewer and the judge take the
+review models: `codex`, `claude-reviewer` and `opencode`. An agent arm takes the models of both lists for its CLI.
+When the project has no `models.allowed` setting, Conveyor uses its own default models. The effort must be one that
+the CLI takes. Conveyor does not save an arm with a choice that is not permitted, and it tells you why. A saved arm
+does not add a model to the project's models. `bench swe history` shows the permitted choices under `choices`, and
+`source` tells you if they come from the project or from the defaults.
+
 ### Containers and logins
 
 Each arm builds each task in a Docker container of its own, made from the task's image. Every arm gets the same CPU
