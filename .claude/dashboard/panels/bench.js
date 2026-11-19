@@ -254,12 +254,12 @@
     return row;
   }
   // How the newest run ended when it did not end done: stopped by the owner, at the usage guard, or refused (an arm's
-  // preflight failed before it started).
+  // preflight failed before it started, or the build machine had no Docker or harness to run it).
   function ended(r) {
     const p = h('p', 'bench-ended'), cols = colsOf(r), n = num(r.n) || 0, least = cols.length ? Math.min(...cols.map((c) => num(c.done) || 0)) : 0;
     if (r.state === 'refused') {
       const m = /the arm ([a-z0-9-]+) cannot run: its preflight failed: (.*)/.exec(String(r.why || ''));
-      p.append(B.ctx.chip(m ? `${m[1]}: preflight failed` : 'Did not start', 'bad'), ` ${String(m ? m[2] : r.why || 'no reason recorded').replace(/\.?$/, '.')} The arm cannot be picked until its preflight succeeds. `,
+      p.append(B.ctx.chip(m ? `${m[1]}: preflight failed` : 'Did not start', 'bad'), ` ${String(m ? m[2] : r.why || 'no reason recorded').replace(/\.?$/, '.')} ${m ? 'The arm cannot be picked until its preflight succeeds. ' : ''}`,
         button('See arms', 'btn-quiet btn-sm', 'see-arms', 'See the arms', () => go('start')));
     } else if (r.state === 'guard') {
       const behind = cols.filter((c) => (num(c.done) || 0) < n).map(colName);
@@ -306,6 +306,7 @@
         const state = h('td'), n = num(r.n) || 0, res = cols.map((c) => num(c.resolved) || 0), notRun = cols.reduce((x, c) => x + (num(c.notRun) || 0), 0);
         const spread = res.length > 1 ? Math.max(...res) - Math.min(...res) : null;
         state.append(B.ctx.chip(word, tone), [notRun ? ` ${plural(notRun, 'task')} not run` : '', r.state === 'done' && spread !== null && cols.every((c) => gradedAll(c, n)) && spread < noiseOf(n) ? ` within the noise${noiseOf(n) >= n ? `: only a total break shows at ${n}` : ` (${noiseOf(n)})`}` : ''].join(''));
+        if (r.state === 'refused' && r.why) state.append(h('span', 'bench-sub', String(r.why)));
         const cells = [h('td'), h('td'), h('td', null, B.ctx.when(r.started)), h('td', 'r', String(n)), h('td', 'bench-arms-cell', cols.map(colName).join(' · ')), h('td', 'r', res.join(' · ')),
           h('td', 'r', sum('sessions') === null ? '–' : String(sum('sessions'))), h('td', 'r', tokens(sum('tokens'))), h('td', 'r', took(sum('minutes'))), h('td', 'r', COST), state];
         cells[0].append(box); cells[1].append(link);
@@ -401,7 +402,9 @@
       button('Compare two arms', '', 'run-compare', 'Compare two arms of this run', () => { B.sel = B.sel.includes(r.id) ? B.sel : [r.id]; dropCmp(); go('compare'); }),
       button('Export figures', '', 'export', 'Export the figures as one JSON file', () => exportRun(o.data)));
     s.querySelector('.bench-head').append(tools);
-    s.append(saidAt(`export-${r.id}`),h('p', 'board-from', `${noiseSaid(n)} Export writes the figures as one JSON file: no code, no names, no machine names.`), bars(cols, n));
+    s.append(saidAt(`export-${r.id}`),h('p', 'board-from', `${noiseSaid(n)} Export writes the figures as one JSON file: no code, no names, no machine names.`));
+    if (r.state === 'refused') s.append(ended(r));
+    s.append(bars(cols, n));
     const m = section('bench-matrix', 'Tasks by arm', `${plural(tasks.length, 'task')} · ${plural(cols.length, 'arm')}`, `✓ resolved · ✗ not resolved · not run: the harness image, sandbox or grade failed. Each cell: sessions · minutes · cost (${COST}: not kept yet). Open a task to see each arm's work.`);
     const wrap = h('div', 'tests-scroll'), t = h('table', 'tests-table bench-mat'), head = h('tr');
     head.append(h('th', null, 'Task'));

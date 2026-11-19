@@ -115,7 +115,10 @@ test('Overview: nothing yet, stopped at the usage guard, an arm\'s preflight fai
   assert.equal(await ended('refused', 'the arm superpowers cannot run: its preflight failed: it did not fire on the trivial task'),
     'superpowers: preflight failed it did not fire on the trivial task. The arm cannot be picked until its preflight succeeds. See arms');
   assert.equal(await ended('stopped'), 'Stopped by you 3 of 5 tasks done for every arm. The finished tasks are kept and reused.');
-  assert.equal(w.benchAsks.length, 4, 'read again each time the run moved on');
+  // Bug (#633): a run the build machine refused (no Docker) said its arm could not be picked until a preflight passed.
+  assert.equal(await ended('refused', 'Docker did not answer on the build machine. Install or start Docker, check that `docker info` works, then check again.'),
+    'Did not start Docker did not answer on the build machine. Install or start Docker, check that `docker info` works, then check again. See arms');
+  assert.equal(w.benchAsks.length, 5, 'read again each time the run moved on');
 });
 
 // Bug it guards (#237, moved from the Tests page): the drift watch was a line of figures, unfolded; a group of 2 cards

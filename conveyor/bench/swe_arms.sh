@@ -174,15 +174,14 @@ swe_checktask() { # <image>
   jq -nc --arg u "file://$g" --arg b "$(git -C "$g" rev-parse main)" --arg i "$1" \
     '{id: "preflight", url: $u, base: $b, issue: "hello.py prints \"helo\". It should print \"hello\".", image: $i, cmd: "python3 hello.py"}'
 }
-# An arm's preflight: offered, Docker answering, the harness's swebench the release it is written for, each login it uses present on this machine, then the trivial task in
-# a container: its install, its preflight command and its run, which must fire and change hello.py. Prints nothing
-# when it passed, else what is missing; keeps the state in preflight/<arm>/<key>.json (swe_arms reads it).
+# An arm's preflight: offered, each login it uses present on this machine, then the trivial task in a container: its
+# install, its preflight command and its run, which must fire and change hello.py (Docker and the harness are checked
+# before, by swe_setup, in both callers). Prints nothing when it passed, else what is missing; keeps the state in
+# preflight/<arm>/<key>.json (swe_arms reads it).
 swe_preflight() { # <arm json> <key> <image> <engine's conveyor.sh, conveyor kind>
   local a=$1 n why='' l f t sb b
   n=$(jq -r .name <<<"$a")
   if jq -e '.offered == false' <<<"$a" > /dev/null; then why="not offered: $(jq -r '.why // "no reason given"' <<<"$a")"
-  elif ! docker info > /dev/null 2>&1; then why="Docker is not installed or not running (docker info failed)"
-  elif ! b=$(swe_h check 2> /dev/null); then why=${b:-"the SWE-bench harness's Python could not run (docs/benchmarks.md)"}
   else
     for l in $(swe_logins "$a"); do
       f=$(swe_login "$l") && [ -s "$f" ] && continue
@@ -217,6 +216,7 @@ swe_arms() { # [check <arm>...]
     # A preflight starts a model session on the trivial task: the usage guard holds it back as it holds a run.
     for n; do a=$(swe_arm "$n") || continue; case $(swe_guards "$a") in conveyor) gc=1 ;; agent) ga=1 ;; esac; done
     ! swe_held "$gc" "$ga" || { echo "conveyor: the usage guard is reached: no preflight starts while it stands" >&2; return 1; }
+    swe_setup || return 1
     tf=$(swe_tasks) || return 1; img=$(head -n 1 "$tf" | jq -r .image)
     swe_h image "$img" > /dev/null 2>&1 || { echo "conveyor: the base image $img could not be fetched" >&2; return 1; }
     for n in "$@"; do

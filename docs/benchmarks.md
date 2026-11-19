@@ -17,8 +17,14 @@ python3 -m venv ~/.local/share/conveyor/swebench-venv
 ~/.local/share/conveyor/swebench-venv/bin/pip install swebench==4.1.0
 ```
 
-Conveyor needs this release of swebench. An arm's check fails when the harness has another release, and says which
-release it has.
+Conveyor needs this release of swebench, which `conveyor/bench/swe.json` names as `swebench`. Before a run or an
+arm's check starts, Conveyor checks that Docker answers and that the harness has this release. When one of them fails,
+the run or check stops and says what to repair:
+
+- No harness: install it with the commands above, then check again.
+- Another release: the message names the release the harness has. Install this release with the `pip install` command
+  above, then check again.
+- Docker does not answer: install or start Docker, check that `docker info` works, then check again.
 
 The first run reads the task list from the dataset. Each task then fetches its Docker image, which can be several
 gigabytes.
@@ -121,8 +127,7 @@ image, the repository, a log or a result.
 
 ### Preflight
 
-An arm runs only after its preflight passes. The preflight checks that Docker answers and that each login of the arm
-is on this machine. It then installs the arm in a container and runs the arm on one small task: a file that prints a
+An arm runs only after its preflight passes. The preflight checks that each login of the arm is on this machine. It then installs the arm in a container and runs the arm on one small task: a file that prints a
 word with a spelling mistake. The arm must fire and change the file. A preflight that fails says what is missing. A
 run does not start when the preflight of one of its arms fails. A preflight that passed stays good for one day, while
 the arm's file and the logins it needs do not change.

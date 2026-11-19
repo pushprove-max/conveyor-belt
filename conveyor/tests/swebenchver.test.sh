@@ -26,30 +26,44 @@ t_sweharnessver() {
   h() { env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$C/m" TMPDIR="$C/tmp" HOME="$C" python3 "$SRC/bench/swe_harness.py" "$@"; }
   out=$(h tasks o/ds rev1 "$C/list" 2>&1); rc=$?
   [ "$rc" != 0 ] || fail "tasks passed with a swebench that has no MAP_REPO_VERSION_TO_SPECS: $out"
-  grep -q '^conveyor: the SWE-bench harness has swebench 5\.0\.2; it needs swebench==4\.1\.0' <<<"$out" \
+  grep -q '^conveyor: The build machine has harness swebench 5\.0\.2\. This benchmark needs swebench 4\.1\.0\. Install swebench 4\.1\.0 in the benchmark virtual environment' <<<"$out" \
     || fail "the error does not name the installed swebench and the one to install: $out"
-  # The preflight's check: the wrong release fails with the same words, the right one passes and prints nothing.
+  # The check: the wrong release fails with the same words, the right one passes and prints nothing.
   out=$(h check 2>&1) && fail "check passed with swebench 5.0.2: $out"
-  grep -q 'has swebench 5\.0\.2; it needs swebench==4\.1\.0' <<<"$out" || fail "check does not name the installed swebench and the one to install: $out"
+  grep -q '^The build machine has harness swebench 5\.0\.2\. This benchmark needs swebench 4\.1\.0\.' <<<"$out" || fail "check does not name the installed swebench and the one to install: $out"
   swebenchstub "$C/m" 4.1.0
   out=$(h check 2>&1) && [ -z "$out" ] || fail "check failed with swebench 4.1.0: $out"
+  # Bug (#633): the release was a constant of the harness, not the one swe.json pins: a harness beside a swe.json that
+  # pins another release fails the check of 4.1.0 and names the pinned one.
+  mkdir -p "$C/pin" && cp "$SRC/bench/swe_harness.py" "$C/pin/" && jq '.swebench = "9.9.9"' "$SRC/bench/swe.json" > "$C/pin/swe.json" || fail "the pinned copy was not made"
+  out=$(env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$C/m" python3 "$C/pin/swe_harness.py" check 2>&1) && fail "check passed 4.1.0 with 9.9.9 pinned: $out"
+  grep -q 'harness swebench 4\.1\.0\. This benchmark needs swebench 9\.9\.9\.' <<<"$out" || fail "check does not name the pinned release: $out"
 }
 
-# Bug (#630): the Benchmarks tab's check of an arm showed "the harness needs Python with the swebench package" with
-# swebench 5 installed; the preflight passed a harness whose swebench is not the release it is written for.
+# Bug (#633): a saved task list hid the harness: a run or an arms check with the list saved never ran the harness
+# before the arms, so a missing or wrong swebench showed only once a task was graded, as a task not run. The check
+# names each state apart: no harness, the wrong release, the right one.
 t_swearmswebench() {
-  swe; local C=$T/$CASE out
+  swe; local C=$T/$CASE out rev; rev=$(jq -r .revision "$SRC/bench/swe.json")
+  mkdir -p "$B" "$C/none" && "$SWE_FX/py" - tasks d r "$B/tasks.$rev.jsonl" || fail "the saved task list was not made"
+  # The real harness, on the stand-in swebench in $HARNESS_PATH, for check; the fixture's stub for the rest.
+  printf '#!/usr/bin/env bash\n[ "$2" = check ] && exec env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$HARNESS_PATH" python3 "$@"\nexec %q "$@"\n' "$SWE_FX/py" > "$C/mixed" \
+    && chmod +x "$C/mixed" || fail "the harness wrapper was not made"
+  export CONVEYOR_BENCH_PYTHON=$C/mixed
+  out=$(HARNESS_PATH=$C/none loop bench swe arms check stub-a 2>&1) && fail "the check passed with no swebench: $out"
+  grep -qx 'conveyor: The build machine has no SWE benchmark harness. Install it in the benchmark virtual environment, then check again.' <<<"$out" \
+    || fail "the check does not say the harness is missing: $out"
   swebenchstub "$C/m" 5.0.2
-  # The real harness, on the stand-in swebench, for every call: the task list cannot be read, and the error says why.
-  printf '#!/usr/bin/env bash\nexec env PYTHONPATH=%q python3 "$@"\n' "$C/m" > "$C/real" && chmod +x "$C/real" || fail "the harness wrapper was not made"
-  out=$(CONVEYOR_BENCH_PYTHON=$C/real loop bench swe arms check stub-a 2>&1) && fail "the check passed with swebench 5.0.2: $out"
-  grep -q '^conveyor: the SWE-bench harness has swebench 5\.0\.2; it needs swebench==4\.1\.0' <<<"$out" \
-    || fail "the check's error does not name the installed swebench and the one to install: $out"
-  # The fixture's stub harness for the task list and images, the real one for check: the preflight fails and says why.
-  printf '#!/usr/bin/env bash\n[ "$2" = check ] && exec %q "$@"\nexec %q "$@"\n' "$C/real" "$SWE_FX/py" > "$C/mixed" && chmod +x "$C/mixed" || fail "the harness wrapper was not made"
-  out=$(CONVEYOR_BENCH_PYTHON=$C/mixed loop bench swe arms check stub-a 2>&1) && fail "the preflight passed with swebench 5.0.2: $out"
-  grep -q '^stub-a: failed: the SWE-bench harness has swebench 5\.0\.2; it needs swebench==4\.1\.0' <<<"$out" \
-    || fail "the preflight does not name the installed swebench and the one to install: $out"
+  out=$(HARNESS_PATH=$C/m loop bench swe arms check stub-a 2>&1) && fail "the check passed with swebench 5.0.2: $out"
+  grep -qx 'conveyor: The build machine has harness swebench 5\.0\.2\. This benchmark needs swebench 4\.1\.0\. Install swebench 4\.1\.0 in the benchmark virtual environment, then check again\.' <<<"$out" \
+    || fail "the check does not name the installed swebench and the one to install: $out"
+  # A run of an arm whose preflight passed an hour ago is refused too, before any task is built.
+  out=$(HARNESS_PATH=$C/m loop bench swe 1 --solo 2>&1) && fail "a run started with swebench 5.0.2: $out"
+  grep -q '^conveyor: The build machine has harness swebench 5\.0\.2\.' <<<"$out" || fail "the run's refusal does not name the installed swebench: $out"
+  [ ! -s "$SWE_FX/log" ] && [ ! -d "$B/results" ] || fail "a task was built with the wrong swebench"
+  swebenchstub "$C/m" 4.1.0
+  out=$(HARNESS_PATH=$C/m loop bench swe arms check stub-a 2>&1) || fail "the check failed with swebench 4.1.0: $out"
+  grep -qx 'stub-a: ready' <<<"$out" || fail "the arm is not ready with swebench 4.1.0: $out"
 }
 
 # Bug (#630 review): with swebench 4.1.0, no saved task list and no access to Hugging Face, the check dropped the

@@ -52,6 +52,17 @@ swe_h() {
   [ -n "$py" ] || { py=$SWE_VENV/bin/python3; [ -x "$py" ] || py=python3; }
   "$py" "${BASH_SOURCE[0]%/*}/swe_harness.py" "$@"
 }
+# The build machine can run a benchmark: Docker answers, and the harness has the swebench swe.json pins. Run before a
+# run or an arms check reads the task list, as a saved list (swe_tasks) or result never calls the harness. Says on
+# stderr, as the Board shows it, what to repair.
+swe_setup() {
+  local b
+  docker info > /dev/null 2>&1 \
+    || { echo "conveyor: Docker did not answer on the build machine. Install or start Docker, check that \`docker info\` works, then check again." >&2; return 1; }
+  # No Python, or a harness that cannot start, prints nothing: as no harness.
+  b=$(swe_h check 2> /dev/null) \
+    || { echo "conveyor: ${b:-The build machine has no SWE benchmark harness. Install it in the benchmark virtual environment, then check again.}" >&2; return 1; }
+}
 swe_conf() { jq -r "$1" "$SWE_CONF"; }
 swe_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 swe_put() { printf '%s\n' "$2" > "$1.$$" && mv -f "$1.$$" "$1"; } # <file> <text>: written whole
@@ -330,12 +341,24 @@ swe_guards() { jq -r 'if .kind == "conveyor" then "conveyor" elif (.login // [] 
 # A run: the first n tasks, each built by every arm in turn, so a run stopped early has compared the arms on the same
 # tasks. Each arm is picked only once its preflight passed (swe_ready).
 swe_run() { # <n> <engine> <arm>...
-  local n=$1 eng0=$2 tf all i t id r x a gc='' ga='' why ctxs=() plan='[]' ra tag
+  local n=$1 eng0=$2 tf all i t id r x a l gc='' ga='' why ctxs=() specs=() plan='[]' ra tag
   shift 2
   mkdir -p "$SWE_DIR" && exec 7>>"$SWE_DIR/run.lock" && flock -n 7 || { echo "conveyor: a SWE-bench run is already going; \`conveyor.sh bench swe stop\` ends it" >&2; return 1; }
   for x; do a=$(swe_arm "$x") || { echo "conveyor: no arm $x: \`conveyor.sh bench swe arms\` lists them" >&2; return 2; }
-    case $(swe_guards "$a") in conveyor) gc=1 ;; agent) ga=1 ;; esac; done
+    specs+=("$a"); case $(swe_guards "$a") in conveyor) gc=1 ;; agent) ga=1 ;; esac; done
   ! swe_held "$gc" "$ga" || { echo "conveyor: the usage guard is reached: no SWE-bench run starts while it stands" >&2; return 1; }
+  # A build machine that cannot run a task refuses the run, kept as its recorded end (state refused, with why) as a
+  # failed preflight is, so the run history still says what to repair once the Board no longer waits for the answer.
+  # Its conveyor arms name the engine asked for. Written here, not by swe_end: no container or sandbox is this run's,
+  # and the ones swe_end removes can be an arms check's.
+  why=$(swe_setup 2>&1) || { echo "$why" >&2
+    l=$(printf '%s\n' "${specs[@]}" | jq -sc --arg id "r$(date -u +%Y%m%dT%H%M%S)-$$" --argjson n "$n" --arg at "$(swe_now)" --arg w "${why#conveyor: }" \
+      --arg e "$eng0" --arg ds "$(swe_conf .dataset)" --arg rv "$(swe_conf .revision)" '($e | test("^[0-9a-f]{40}$")) as $c
+      | {id: $id, arm: .[0].name, arms: map(.name), label: (map(.label // .name) | join(", ")), n: ($n * length),
+         cols: map({arm: .name, key: null, label: (.label // .name), kind}
+           + (if .kind == "conveyor" then {engine: (if $c then $e else null end), version: (if $c then null else $e end)} else {} end)),
+         set: {dataset: $ds, revision: $rv}, done: 0, resolved: 0, current: null, started: $at, ended: $at, state: "refused", tasks: [], why: $w}') \
+      && swe_put "$SWE_DIR/live.json" "$l" && printf '%s\n' "$l" >> "$SWE_DIR/runs.jsonl"; swe_board; return 1; }
   tf=$(swe_tasks) || return 1; all=$(wc -l < "$tf")
   [ "$n" -le "$all" ] || { echo "conveyor: the task list holds $all tasks: n is 1 to $all" >&2; return 2; }
   for x; do swe_context "$x" "$eng0" || return 1; ctxs+=("$SWE_CTX"); done

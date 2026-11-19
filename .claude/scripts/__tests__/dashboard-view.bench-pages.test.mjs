@@ -91,6 +91,20 @@ test('A run: an opened task says an arm was not reached, not that it failed, and
   assert.deepEqual(Array.from(codex.querySelectorAll('p'), text), ['The run stopped before this arm reached the task.']);
 });
 
+// Bug it guards (#633): a run the build machine refused (no Docker) kept its reason, but History showed only "Did not
+// start" and the run opened from it never said why, so the repair was nowhere on the Board once the Start reply was gone.
+test('A run: a run refused for no Docker says its repair in History and on its own page', async () => {
+  const w = boot({ tab: 'bench' });
+  const why = 'Docker did not answer on the build machine. Install or start Docker, check that `docker info` works, then check again.';
+  const refused = () => ({ ...BH.hist().runs[0], state: 'refused', why, cols: BH.hist().runs[0].cols.map((c) => ({ ...c, done: 0, resolved: 0, notRun: 0 })) });
+  BH.open(w, { body: (url) => (/&run=/.test(url) ? { run: refused(), tasks: [] } : { ...BH.hist(), runs: [refused()] }) });
+  await settle();
+  assert.equal(text(bp(w).querySelector(`tr[data-run="${NEW}"] td:last-child`)), `Did not start${why}`);
+  act(bp(w), `run-${NEW}`).click();
+  await settle();
+  assert.equal(text(bp(w).querySelector('.bench-run-head .bench-ended')), `Did not start ${why} See arms`);
+});
+
 // Bug it guards: Compare showed `bench swe diff` as one block of text, with no way to see which tasks flipped and
 // where the two went apart. It sends two arms' results keys for JSON and shows the flipped tasks, each with the facts
 // read by code beside the model's reading.

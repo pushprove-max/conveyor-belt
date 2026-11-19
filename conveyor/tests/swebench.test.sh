@@ -454,7 +454,16 @@ t_swearmpre() {
   grep -q "^stub-broken: failed: on the trivial task, its install failed: .*no-such-package" <<<"$out" || fail "the preflight does not say its install failed: $out"
   : > "$SWE_FX/nodocker"
   out=$(loop bench swe arms check stub-a 2>&1) && fail "a preflight passed with no Docker: $out"
-  grep -q "^stub-a: failed: Docker is not installed or not running" <<<"$out" || fail "the preflight does not name Docker as missing: $out"
+  grep -qx 'conveyor: Docker did not answer on the build machine. Install or start Docker, check that `docker info` works, then check again.' <<<"$out" \
+    || fail "the check does not name Docker as missing and its repair: $out"
+  # Bugs (#633): a run of arms whose preflight passed started with no Docker, every task not run; its refusal removed an
+  # arms check's container (chk), was on stderr only (History had no why) and named no engine (the Board said main).
+  mkdir -p "$SWE_FX/boxes/chk" "$B/check/stub-a.h" && echo chk > "$B/check/stub-a.h/box"
+  out=$(loop bench swe 1 --solo --arm conveyor --engine v1.5.0 2>&1) && fail "a run started with no Docker: $out"
+  grep -q '^conveyor: Docker did not answer on the build machine\.' <<<"$out" || fail "the run's refusal does not name Docker: $out"
+  [ ! -d "$B/results" ] && [ -d "$SWE_FX/boxes/chk" ] || fail "a task was run, or a check's container removed, with no Docker"; rm -r "$SWE_FX/nodocker" "$B/check/stub-a.h"
+  out=$(loop bench swe history 2>&1); jq -e '.runs[0] | .state == "refused" and (.cols | map(.arm) == ["solo", "conveyor"]) and .cols[1].version == "v1.5.0"
+    and (.why | startswith("Docker did not answer on the build machine."))' <<<"$out" > /dev/null || fail "the run history does not keep the Docker refusal: $out"
   # The engine's own arms: every file is an arm, and one that cannot run on a subscription login says why.
   out=$(CONVEYOR_BENCH_ARMS=$SRC/bench/arms loop bench swe arms 2>&1)
   [ "$(grep -c '' <<<"$out")" = "$(ls "$SRC"/bench/arms/*.json | wc -l)" ] && ! grep -q 'not a JSON object' <<<"$out" \

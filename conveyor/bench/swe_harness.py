@@ -6,7 +6,8 @@ virtualenv's Python (swe_h()). Nothing here builds a card.
 
 Usage:
   swe_harness.py check
-      exit 1, saying which swebench this Python has, when it is not SWEBENCH (an arm's preflight runs it).
+      exit 1, saying that this Python has no swebench or which one it has, when it is not SWEBENCH (bench/swe.sh's
+      swe_setup runs it before a run or an arms check reads the task list, which a saved list would skip).
   swe_harness.py tasks <dataset> <revision> <out>
       every task of the dataset at that revision, one JSON line each, in the dataset's order, to <out>:
       {id, repo, url, base, issue, image, cmd}: no reference fix and no hidden test (cmd: the task's test command,
@@ -32,31 +33,31 @@ import sys
 import tempfile
 
 
-# The swebench release this file is written for, as docs/benchmarks.md installs it: swebench 5 has no
-# MAP_REPO_VERSION_TO_SPECS, which tasks() reads.
-SWEBENCH = '4.1.0'
+# The swebench release this file is written for and that passed a check on the build machine, as swe.json pins it and
+# docs/benchmarks.md installs it: swebench 5 has no MAP_REPO_VERSION_TO_SPECS, which tasks() reads.
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'swe.json')) as _f:
+    SWEBENCH = json.load(_f)['swebench']
 
 
-# '' when this Python's swebench is SWEBENCH, else what it has and what to install.
+# '' when this Python's swebench is SWEBENCH, else the Board's text: no harness, or the one it has and what to install.
 def swebench_wrong():
     try:
         import swebench
     except ImportError:
-        v, has = None, 'no swebench package'
-    else:
-        # The package's own __version__ first: a swebench on PYTHONPATH need not be the one pip recorded.
-        v = getattr(swebench, '__version__', None)
-        if not v:
-            try:
-                from importlib.metadata import version
-                v = version('swebench')
-            except Exception:
-                v = None
-        has = 'swebench %s' % v if v else 'a swebench of no known version'
+        return 'The build machine has no SWE benchmark harness. Install it in the benchmark virtual environment, then check again.'
+    # The package's own __version__ first: a swebench on PYTHONPATH need not be the one pip recorded.
+    v = getattr(swebench, '__version__', None)
+    if not v:
+        try:
+            from importlib.metadata import version
+            v = version('swebench')
+        except Exception:
+            v = None
     if v == SWEBENCH:
         return ''
-    return 'the SWE-bench harness has %s; it needs swebench==%s: install it in the harness virtualenv, %s (docs/benchmarks.md)' % (
-        has, SWEBENCH, sys.prefix)
+    need = 'swebench %s' % SWEBENCH
+    return ('The build machine has harness %s. This benchmark needs %s. Install %s in the benchmark virtual environment, then check again.'
+            % ('swebench %s' % v if v else 'swebench of no known version', need, need))
 
 
 def image_of(instance):

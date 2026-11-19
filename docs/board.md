@@ -741,10 +741,12 @@ one project and one run, pair or selection: it does not show for another.
   run-to-run noise for that number of tasks. A difference inside the band is not a difference. With 5 tasks, only a
   total break shows. Under the bars are the sessions, tokens and minutes of each arm, and notes to read the run with.
   While a run goes, the part shows a bar of tasks done for each arm, the task now, the sessions so far and **Stop**.
-  It also says when the last run was stopped by you, stopped at the usage guard, or did not start because an arm
-  failed its preflight. Before the first run, it says so and links to **Start a run**.
+  It also says when the last run was stopped by you, stopped at the usage guard, or did not start. A run does not
+  start when an arm failed its preflight, or when the build machine has no Docker or no harness of the release it
+  needs. Before the first run, it says so and links to **Start a run**.
 - **History**: every run, newest first, grouped by task set. Each row shows the date, the number of tasks, the arms
-  and versions, the resolved count of each arm, the sessions, tokens and minutes, and the state. Tick up to 6 runs. A
+  and versions, the resolved count of each arm, the sessions, tokens and minutes, and the state. A run that did not
+  start shows why, and the page of that run shows it too. Tick up to 6 runs. A
   bar at the foot of the screen then offers **Compare**, **Generate infographic** and **Clear**.
 - **Arms**: how many arms are ready, fail their preflight, are not checked, or are not offered, with the reasons.
 - **Drift watch**: folded. Open it to see the [drift watch](benchmarks.md#drift-watch): each figure a card, for the
