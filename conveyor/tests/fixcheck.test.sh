@@ -43,19 +43,21 @@ t_waitslow() {
   [ "$(wc -l < "$STUB/wait-runs")" = 2 ] || fail "runs were made after the one that waited: $(wc -l < "$STUB/wait-runs")"
 }
 
-# The hollow check of h.test.sh (cases t_one and t_two, both named hollow by the issue) on card c7, whose change is
-# <change> and whose build replied <reply>. The judge (judgecall(), stubbed) answers <answer> and keeps the seat it was
-# given in $STUB/hollow-seat; the builder runs on claude, the reviewer on claude too and the review's judge on codex.
-hollowrun() { # <change> <reply> <answer>
+# The hollow check of h.test.sh (cases t_one and t_two, both named hollow by the issue, and t_old between them, which
+# it does not name), or of <test file> with <its content>, on card c7, whose change is <change> and whose build replied
+# <reply>. The judge (judgecall(), stubbed) answers <answer> and keeps the seat it was given in $STUB/hollow-seat; the
+# builder runs on claude, the reviewer on claude too and the review's judge on codex.
+hollowrun() { # <change> <reply> <answer> [<test file> <its content>]
+  local f=${4:-h.test.sh}
   setup '[]'
-  fx_wt "$1" h.test.sh $'t_one() { true; }\nt_two() { grep -q x f; }' g.test.sh 't_three() { [ 1 = 1 ] || fail one; }'
+  fx_wt "$1" "$f" "${5:-$'t_one() { true; }\nt_old() { :; }\nt_two() { grep -q x f; }'}" g.test.sh 't_three() { [ 1 = 1 ] || fail one; }'
   jq -cn --arg r "$2" '{type: "result", result: $r}' > "$FXWT.out"
   printf '%s\n' "$3" > "$STUB/hollow-answer"
-  jq -cn '{number: 7, title: "Fix the hollow cases of the test file h.test.sh",
+  jq -cn --arg f "$f" '{number: 7, title: "Fix the hollow cases of the test file \($f)",
     body: "Its hollow cases (case | kind | reason):\n- HOLLOW: one | no-assert | it asserts nothing\n- HOLLOW: two | text-only | it only greps a file"}' > "$STUB/hollow-issue"
   fx_in 'seat() { case $1 in builder | reviewer) echo "{\"agent\":\"claude\",\"model\":\"m-$1\"}" ;; judge) echo "{\"agent\":\"codex\",\"model\":\"m-other\"}" ;; esac; }
     judgecall() { printf "%s\n" "$CALLSEAT" > "$STUB/hollow-seat"; cp "$STUB/hollow-answer" "$1.judge"; echo "{}"; }
-    hollowproof c7 "$FXWT" "$(cat "$STUB/hollow-issue")" h.test.sh'
+    hollowproof c7 "$FXWT" "$(cat "$STUB/hollow-issue")" '"$f"
 }
 HOLLOWFIXED='sed -i "s/true;/[ -s f ] || fail empty;/" h.test.sh'
 
@@ -67,6 +69,62 @@ t_hollowstill() {
   [ "$RC" != 0 ] && [ "$WHY" = "the judge's hollow check (codex m-other) still finds hollow cases in h.test.sh: t_two (text-only): it only greps a file" ] \
     || fail "a file with a case still hollow passed: $RC $WHY"
   [ "$(cat "$STUB/hollow-seat")" = '{"agent":"codex","model":"m-other"}' ] || fail "the check did not run on the other family's seat: $(cat "$STUB/hollow-seat" 2>&1)"
+}
+
+# Bug it catches (#584): a hollow case the change added passed as an old case the card need not fix. A case the
+# change adds is the card's own work, so a hollow one blocks it.
+t_hollowadded() {
+  FXWT=; hollowrun "$HOLLOWFIXED; sed -i 's/grep -q x f;/[ -s f ] || fail two;/' h.test.sh; echo 't_new() { :; }' >> h.test.sh" 'Done.' $'HOLLOW: t_new | no-assert | it asserts nothing\nHOLLOW-CHECK: done'
+  [ "$RC" != 0 ] && [ "$WHY" = "the judge's hollow check (codex m-other) still finds hollow cases in h.test.sh: t_new (no-assert): it asserts nothing" ] \
+    || fail "a hollow case the change added passed: $RC $WHY"
+}
+
+# Bug it catches (#584): a card that fixed every case its issue named was blocked by an old hollow case the issue did
+# not name and the change did not touch, also when the case it deleted came right after the old one (the deletion was
+# placed on the old case's last line). It holds, and the old case goes to the declined list for the owner.
+t_hollowold() {
+  FXWT=; hollowrun "$HOLLOWFIXED; sed -i '/t_two/d' h.test.sh" 'COVERED-BY: g.test.sh: t_three | two' $'HOLLOW: `t_old` | no-assert | it asserts nothing\nHOLLOW-CHECK: done'
+  [ "$RC" = 0 ] || fail "an old hollow case the card did not touch blocked it: $WHY $(cat "$T/$CASE/run.out")"
+  grep -qF 'It found these other hollow cases, each now on the declined list: t_old (no-assert): it asserts nothing.' "$FXWT.unfixed" \
+    || fail "the review is not told the old case: $(cat "$FXWT.unfixed")"
+  fx_in 'stdb ask lines declined'
+  jq -e -s 'length == 1 and (.[0] | .card == "c7" and .issue == 7 and .by == "code" and .finding == "Hollow case of the test file h.test.sh: t_old (no-assert): it asserts nothing")' "$T/$CASE/run.out" > /dev/null \
+    || fail "the old case is not a declined finding: $(cat "$T/$CASE/run.out")"
+}
+
+# Bug it catches (#584): in a file whose language has no case start line (Ruby), each line was read as a case, so a
+# case whose body the change edited passed as an old case. A hollow case the check cannot place blocks the card.
+t_hollowpy() {
+  FXWT=; hollowrun "sed -i 's/assert g/g/' h_test.rb" 'Done.' $'HOLLOW: test_old | no-assert | it asserts nothing\nHOLLOW-CHECK: done' \
+    h_test.rb $'def test_one\n  assert f\nend\ndef test_two\n  assert h\nend\ndef test_old\n  assert g\nend'
+  [ "$RC" != 0 ] && [ "$WHY" = "the judge's hollow check (codex m-other) still finds hollow cases in h_test.rb: test_old (no-assert): it asserts nothing" ] \
+    || fail "a hollow Ruby case the change edited passed: $RC $WHY"
+}
+
+# Bug it catches (#584): Python had no case start line, so every hollow case of a Python file blocked the card, also
+# an old one the judge names by its class (TestH.test_old). It is placed by its last part and declined.
+t_hollowpyold() {
+  FXWT=; hollowrun "sed -i -e '3s/pass/assert f()/' -e '5s/pass/assert h()/' h_test.py" 'Done.' $'HOLLOW: TestH.test_old | no-assert | it asserts nothing\nHOLLOW-CHECK: done' \
+    h_test.py $'class TestH:\n    def test_one(self):\n        pass\n    def test_two(self):\n        pass\n    def test_old(self):\n        pass'
+  [ "$RC" = 0 ] || fail "an old hollow Python case the card did not touch blocked it: $WHY $(cat "$T/$CASE/run.out")"
+  grep -qF 'each now on the declined list: TestH.test_old (no-assert)' "$FXWT.unfixed" || fail "the old case is not declined: $(cat "$FXWT.unfixed")"
+}
+
+# Bug it catches (#584 review): a comment the change put after an old case read as a change of that case, and a title
+# with an escape (name\'s) matched no start line, so each blocked the card on an old hollow case it did not touch.
+t_hollowjsold() {
+  FXWT=; hollowrun "sed -i -e '1s/{}/{ assert.ok(a); }/' -e '3s/{}/{ assert.ok(b); }/' -e '2a // The other cases moved to g.test.sh' h.test.mjs" 'Done.' \
+    $'HOLLOW: the name\'s belt | no-assert | it asserts nothing\nHOLLOW-CHECK: done' \
+    h.test.mjs $'test(\'one\', () => {});\ntest(\'the name\\\'s belt\', () => {});\ntest(\'two\', () => {});'
+  [ "$RC" = 0 ] || fail "an old hollow case with a comment after it, or an escaped title, blocked the card: $WHY $(cat "$T/$CASE/run.out")"
+  grep -qF "each now on the declined list: the name's belt (no-assert)" "$FXWT.unfixed" || fail "the old case is not declined: $(cat "$FXWT.unfixed")"
+}
+
+# Bug it catches (#584 review): with every case start line put in a comment the file had no case left, so its whole
+# text was read, and the names in the comments passed as kept cases with no COVERED-BY line.
+t_hollowcommented() {
+  FXWT=; hollowrun "sed -i 's/^t_/# t_/' h.test.sh" 'Done.' 'HOLLOW-CHECK: done'
+  [ "$RC" != 0 ] && [[ $WHY == *"COVERED-BY"*"these have none: one, two" ]] || fail "cases hidden in comments passed as kept: $RC $WHY"
 }
 
 # Bug it catches: a judge's answer cut short (no HOLLOW line, as it never got to them) passed as "no hollow case".

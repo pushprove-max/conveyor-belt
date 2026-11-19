@@ -36,7 +36,7 @@ test('Tests fixes: Fix hollow cases previews each case with its kind and reason,
   assert.equal(title, `Fix the hollow cases of the test file ${X}`);
   assert.match(body, /\nIts hollow cases \(case \| kind \| reason\):\n- HOLLOW: loads \| no-assert \| no expect or assert call\n/);
   assert.match(body, /COVERED-BY: <test file>: <its case> \| <the deleted case>/);
-  assert.match(body, /\nDone when:\n- The judge's hollow check of the changed file, run by the card's check on a model of another family than the builder's where one is set up, names no hollow case\.\n- Each deleted case has its COVERED-BY line, naming a test file that is kept\.$/);
+  assert.match(body, /\nDone when:\n- The judge's hollow check of the changed file, run by the card's check on a model of another family than the builder's where one is set up, names no hollow case among the cases above and the cases the change adds or changes\.\n- Each deleted case has its COVERED-BY line, naming a test file that is kept\.$/);
   w.reply = TA.reply('https://github.com/example/sample/issues/701');
   act(opened(w, X), 'issue-file').click();
   await settle();

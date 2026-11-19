@@ -632,8 +632,9 @@ tested before: a wait cut so that a case no longer checks what it waited for is 
 HOLLOWREVIEW='# The Fix hollow cases check
 This issue makes each hollow case of one test file assert the behaviour it names, or deletes it when another test
 already proves that behaviour. After the build, the judge'"'"'s hollow check, on a model of another family than the
-builder'"'"'s where one is set up, read the file with the change: it must find no hollow case. Each deleted case needs a
-COVERED-BY line in the build'"'"'s reply. Judge whether each case now asserts what it names, and whether the test each
+builder'"'"'s where one is set up, read the file with the change: it must find no hollow case among the cases the issue
+names and the cases the change adds or changes. A hollow case it finds elsewhere in the file is on the declined list,
+and is not a finding of this review. Each deleted case needs a COVERED-BY line in the build'"'"'s reply. Judge whether each case now asserts what it names, and whether the test each
 COVERED-BY line names proves what its deleted case named. Its result:'
 # shellcheck disable=SC2034 # used in lib/card.sh
 DELREVIEW='# The Delete it check

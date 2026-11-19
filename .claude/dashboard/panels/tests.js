@@ -720,7 +720,7 @@
     ['Make each hollow case of this test file prove something: a hollow case succeeds without proving anything. Make each case below assert the behaviour it names.',
       'Or delete a case when another test already proves that behaviour, and name that test in your reply, on a line of its own: COVERED-BY: <test file>: <its case> | <the deleted case>.'],
     [['Its hollow cases (case | kind | reason):', hollowOf(f), (x) => `- HOLLOW: ${x.case} | ${x.kind} | ${typeof x.reason === 'string' && x.reason.trim() ? x.reason : 'no reason given'}`]],
-    ['- The judge\'s hollow check of the changed file, run by the card\'s check on a model of another family than the builder\'s where one is set up, names no hollow case.',
+    ['- The judge\'s hollow check of the changed file, run by the card\'s check on a model of another family than the builder\'s where one is set up, names no hollow case among the cases above and the cases the change adds or changes.',
       '- Each deleted case has its COVERED-BY line, naming a test file that is kept.']);
   // Fix the waiting: the clock and CPU seconds of its recent runs, and the waits its judge named.
   function draftWaits(f) {

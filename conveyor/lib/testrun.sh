@@ -1875,20 +1875,32 @@ HOLLOWFIX='Fix the hollow cases of the test file ' MAKERUN='Make the test file '
 # case>`, naming a test file the change keeps. The lines are kept in <worktree>.covered, so a check again after a fix
 # session (fixproof()) reads the build's lines with those of the fix's reply. A file the change keeps is read by the judge's hollow check
 # (TAHOLLOWASK, the judge's own words): one read-only session in the card's worktree (judgecall(), lib/review.sh) on
-# the seat hollowseat() names, whose answer ends with HOLLOWDONE. The card holds when it names no hollow case. Writes
+# the seat hollowseat() names, whose answer ends with HOLLOWDONE. The card holds when it names no hollow case the issue
+# names or the change added or changed; each other hollow case it names goes to the declined list (declined()). Writes
 # the result in <worktree>.unfixed, the reason first when it does not hold (each case still found hollow, or each
 # deleted case with no COVERED-BY line), and fails then.
 HOLLOWDONE='HOLLOW-CHECK: done'
+# The rows hollowproof() reads a test file by (after TESTEDIT_TABLE): the test edits' table and Python (a case starts
+# `def test`), each with the lines that are a note and not code (note: blank or a comment); row($f) is the row of file
+# $f, or null. plain drops the escapes of a line (name\'s to name's), so a case title is read as it shows.
+HOLLOW_JQ='def cases: [table[] | . + {note: (if any(.ext[]; . == "sh") then "^\\s*(#|$)" else "^\\s*(//|/\\*|\\*(\\s|/|$)|$)" end)}]
+    + [{ext: ["py"], case: "^\\s*(async\\s+)?def\\s+test", note: "^\\s*(#|$)"}];
+  def row($f): (($f | capture("\\.(?<x>[^./]+)$").x | ascii_downcase) // "") as $x | first(cases[] | select(any(.ext[]; . == $x))) // null;
+  def plain: gsub("\\\\(?<c>.)"; .c);'
 hollowproof() { # <card> <worktree> <issue json> <test file>
-  local wt=$2 f=$4 c x cs kept='' gone=() uncov=() cov s j why='' found=''
+  local wt=$2 f=$4 c x cs starts='' rw kept gone=() uncov=() cov s j why='' found='' old='' sc d
   rm -f "$wt.unfixed"
   # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
   git -C "$wt" add -A 2>/dev/null && ! git -C "$wt" diff --cached --quiet HEAD 2>/dev/null || return 0
   cs=$(jq -r '.body // ""' <<<"$3" | tatagged HOLLOW "$TAHOLLOW" /dev/stdin 2>/dev/null | jq -r '.[] | objects | .case | gsub("^[`\"\u0027]+|[`\"\u0027]+$"; "")' 2>/dev/null | awk 'NF && !s[$0]++')
-  # The lines of the file that start a case (the test edits' table, TESTEDIT_TABLE; the whole file for a language it
-  # has no row for): a case is kept while one of them names it, so its name left in a comment does not keep it.
-  [ ! -e "$wt/$f" ] || kept=$(jq -Rsr --arg f "$f" "$TESTEDIT_TABLE"'(($f | capture("\\.(?<x>[^./]+)$").x | ascii_downcase) // "") as $x
-      | (first(table[] | select(any(.ext[]; . == $x))) // null) as $t | if $t == null then . else [split("\n")[] | select(test($t.case))] | join("\n") end' "$wt/$f" 2>/dev/null)
+  # The lines of the file that start a case (HOLLOW_JQ; the whole file for a language it has no row for), each plain: a
+  # case is kept while one of them names it, so its name left in a comment does not keep it, also when no case is left.
+  # Each start line is kept in starts with its line number first (<n><tab><line>); a language with no row has none, as
+  # a line of it is not a case.
+  [ ! -e "$wt/$f" ] || starts=$(jq -Rsr --arg f "$f" "$TESTEDIT_TABLE$HOLLOW_JQ"'row($f) as $t
+      | if $t == null then "none" else ["row"] + [split("\n") | to_entries[] | select(.value | test($t.case)) | "\(.key + 1)\t\(.value | plain)"] | join("\n") end' "$wt/$f" 2>/dev/null)
+  rw=$(head -n 1 <<<"$starts"); starts=$(tail -n +2 <<<"$starts")
+  if [ "$rw" = row ]; then kept=$(cut -f2- <<<"$starts"); else kept=$(sed 's/\\\(.\)/\1/g' "$wt/$f" 2>/dev/null); fi
   while IFS= read -r c; do
     [ -n "$c" ] || continue
     [ -e "$wt/$f" ] && grep -qF -- "$c" <<<"$kept" || gone+=("$c")
@@ -1910,13 +1922,47 @@ hollowproof() { # <card> <worktree> <issue json> <test file>
     elif [ "$(grep -v '^[[:space:]]*$' "$wt.judge" | tail -n 1 | tr -d '*`_' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')" != "$HOLLOWDONE" ]; then
       why="the judge's hollow check gave no whole answer: its last line is not $HOLLOWDONE"
     else
-      found=$(tahollow "$wt.judge" 2>/dev/null | jq -r '.hollow | map("\(.case) (\(.kind)): \(.reason)") | join("; ")' 2>/dev/null)
-      [ -z "$found" ] || why="the judge's hollow check ($(jq -r '"\(.agent) \(.model)"' <<<"$s")) still finds hollow cases in $f: $found"
+      # The lines the change added or changed in the file, by their number in the file it leaves; a line that is a note
+      # (blank or a comment) changes no case. A deletion is placed at the lines added in its place, or between the two
+      # lines round it (<n>.5) when none are, so it changes only a case that holds both; one that deletes a start line
+      # deletes cases, and changes none of the cases kept. A case runs from its start line to the line before the next
+      # start line.
+      d=$(git -C "$wt" diff --cached -U0 HEAD -- "$f" 2>/dev/null | jq -Rsr --arg f "$f" "$TESTEDIT_TABLE$HOLLOW_JQ"'row($f) as $t
+          | reduce split("\n")[] as $l ([]; if ($l | test("^@@ ")) then . + [$l | capture("^@@ -[0-9,]+ \\+(?<b>[0-9]+)") | (.b | tonumber) as $b | {b: $b, i: $b, a: [], del: false, s: false}]
+              elif length == 0 or $t == null then .
+              elif ($l | startswith("+")) then .[-1].i as $n | .[-1].i += 1 | if ($l[1:] | test($t.note)) then . else .[-1].a += [$n] end
+              elif ($l | startswith("-")) then if ($l[1:] | test($t.note)) then . elif ($l[1:] | test($t.case)) then .[-1].s = true else .[-1].del = true end
+              else . end)
+          | [.[] | .a[], (if .del and (.s | not) then (if .i > .b then .b else .b + 0.5 end) else empty end) | tostring] | join("\n")')
+      # Each case the judge finds hollow blocks the card (held) when the issue names it or the change added or changed
+      # it, or when no start line names it, so it cannot be placed. Else (old) it is an old case of the file (#584). A
+      # name is read plain; one of a single word that no start line holds (TestX.test_y) is read by its last part.
+      if ! sc=$(tahollow "$wt.judge" 2>/dev/null | jq -ce --arg s "$starts" --arg c "$cs" --arg d "$d" "$TESTEDIT_TABLE$HOLLOW_JQ"'
+          [$s | split("\n")[] | capture("^(?<n>[0-9]+)\t(?<t>.*)$") | .n |= tonumber] as $st
+          | [$c | split("\n")[] | select(length > 0) | plain] as $named | [$d | split("\n")[] | select(length > 0) | tonumber] as $ch
+          | [range(0; $st | length) as $i | $st[$i] + {e: (if $i + 1 < ($st | length) then $st[$i + 1].n - 1 else infinite end)}] as $r
+          | def on($x): [$r[] | select(.t | contains($x))];
+            def held($x): (on($x) | if . == [] and ($x | test("^[A-Za-z0-9_.:/-]+$")) then on([$x | splits("[.:/]+") | select(length > 0)] | last // $x) else . end) as $o
+              | $o == [] or any($o[]; . as $k | any($named[]; . as $m | $k.t | contains($m)) or any($ch[]; . >= $k.n and . <= $k.e));
+          .hollow | map(.case |= (gsub("^[`\"\\x27]+|[`\"\\x27]+$"; "") | plain)) | {held: map(select(held(.case))), old: map(select(held(.case) | not))}'); then
+        why="the judge's hollow check gave an answer the engine could not read"
+      else
+        found=$(jq -r '.held | map("\(.case) (\(.kind)): \(.reason)") | join("; ")' <<<"$sc")
+        old=$(jq -r '.old | map("\(.case) (\(.kind)): \(.reason)") | join("; ")' <<<"$sc")
+        [ -z "$found" ] || why="the judge's hollow check ($(jq -r '"\(.agent) \(.model)"' <<<"$s")) still finds hollow cases in $f: $found"
+        # A hollow old case does not block the card: it goes to the declined list, so the owner sees it.
+        while IFS= read -r x; do
+          [ -n "$x" ] || continue
+          declined "$1" "$(jq -r '.number' <<<"$3")" code "the judge's hollow check found it in a case the issue did not name and the change did not touch, so it does not block the card" "Hollow case of the test file $f: $x" \
+            || { why="the judge's hollow check found hollow cases the issue did not name and the change did not touch, and the engine could not write them to the declined list: $old"; break; }
+        done < <(jq -r '.old[] | "\(.case) (\(.kind)): \(.reason)"' <<<"$sc")
+      fi
     fi
   fi
   { if [ -n "$why" ]; then printf '%s\n' "$why"
     else printf 'This issue makes the hollow cases of the test file %s prove something. ' "$f"
-      if [ -e "$wt/$f" ]; then printf 'The judge'"'"'s hollow check (%s) read the file with the change and found no hollow case.' "$(jq -r '"\(.agent) \(.model)"' <<<"$s")"; else printf 'The change deletes the file.'; fi
+      if [ -e "$wt/$f" ]; then printf 'The judge'"'"'s hollow check (%s) read the file with the change and found no hollow case' "$(jq -r '"\(.agent) \(.model)"' <<<"$s")"
+        if [ -z "$old" ]; then printf '.'; else printf ' the issue named or the change added or changed. It found these other hollow cases, each now on the declined list: %s.' "$old"; fi; else printf 'The change deletes the file.'; fi
       [ ${#gone[@]} = 0 ] || printf ' The deleted cases, each with its COVERED-BY line in the card'"'"'s replies: %s.' "$(printf '%s, ' "${gone[@]}" | sed 's/, $//')"
       echo; fi
     [ -z "$cov" ] || { echo "The COVERED-BY lines of the card's replies:"; printf '%s\n' "$cov" | awk -F'\t' '{ print "- " $2 ": covered by " $1 }'; }; } > "$wt.unfixed"

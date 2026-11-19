@@ -583,8 +583,9 @@ case with its kind and reason. The issue asks a card to make each case assert th
 another test already proves that behaviour, the card can delete the case. It then names that test on a line
 `COVERED-BY: <test file>: <its case> | <the deleted case>`. Before the card goes to review, Conveyor runs the hollow
 check of Judge on the changed file. When a model of another family than the builder's is set up, the check runs on
-that model. When the check still finds a hollow case, or a deleted case has no COVERED-BY line, the card is blocked,
-and the reason names the cases. The file stops showing Hollow when a later run of Judge names no hollow case.
+that model. When the check still finds a hollow case that the issue names or that the card adds or changes, or a
+deleted case has no COVERED-BY line, the card is blocked, and the reason names the cases. A hollow case in another
+part of the file does not block the card. It goes to the Declined list of the card. The file stops showing Hollow when a later run of Judge names no hollow case.
 
 A file shows "Waits" when its last run took more than 2 times its CPU seconds on the clock. The file waits more than
 it works: it sleeps, polls, or waits for a timeout, a lock or the network. Judge reads the clock and CPU seconds of
