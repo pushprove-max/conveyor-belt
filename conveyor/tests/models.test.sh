@@ -270,6 +270,17 @@ t_opencoderetry() {
   [ "$(wc -l < "$STUB/oc-runs")" = 4 ] && grep -q 'the reviewer is set to opencode prov/vendor/m-1, and opencode is not installed on this host' <<<"$out" && [ "$(tail -n 1 <<<"$out")" = 'rc=1 none' ] \
     || fail "a review with no opencode on the host did not fail naming it: $out"
 }
+# Bug: the review step's record() (lib/card.sh) drops or misplaces the cost OpenCode reported, so a landed card's
+# timeline shows its review unpriced. A whole card run: t_opencodereview writes the review lines itself, so only a
+# card that reaches its review step and lands shows what that step records.
+t_opencodeland() {
+  opencode_reviewer; : > "$STUB/go" # no live record to wait for
+  echo "$GO" > "$STUB/review.1"
+  loop run --only 7 > "$STUB/log" 2>&1 || fail "run of #7 exited non-zero: $(cat "$STUB/log")"
+  [ -n "$(st 'select(.issue == 7 and .step == "landed") | .sha')" ] || fail "#7 did not land: $(st 'select(.issue == 7)')"
+  tl=$(loop snapshot --fresh | jq -c '[.landed[] | select(.issue == 7) | .metrics.timeline[] | select(.step == "review") | [.usd, .unpriced]]')
+  [ "$tl" = '[[0.75,null]]' ] || fail "the landed timeline does not price the OpenCode review at the cost OpenCode reported: $tl"
+}
 
 # Bugs: a card session never reaches the proxy the user set (its base URL, key and ENABLE_TOOL_SEARCH left out); a
 # reviewer family name (sol) is passed to Codex as written, or resolves to an older or another family's model; the
@@ -467,6 +478,21 @@ t_proxynomatch() {
   kill $srv; wait $srv 2>/dev/null
   echo '{"models":[{"slug":"gpt-6.3-sol"},{"slug":"gpt-6-sol"}]}' > "$CODEX_HOME/models_cache.json"
   [ "$(routes | sed -n 2p)" = "reviewer: gpt-6.3-sol (codex) through $base/v1, Codex's model_provider copilot, key in PROXY_KEY" ] || fail "models_cache.json is not the fallback: $(loop doctor)"
+}
+# Bug: run (lib/run.sh) or land-branch (lib/lane.sh) records a pick before its reviewer check (codexready()) holds,
+# so a reviewer family that matches no model still starts a card. The real commands: t_proxynomatch calls the check
+# alone, which cannot show where each command calls it against its pick. No proxy: Codex's models_cache.json, which
+# holds no sol model, is all the check reads.
+t_proxynomatchpick() {
+  setup "[$(issue 7 2026-01-01)]"
+  export CODEX_HOME=$T/$CASE/codex; mkdir -p "$CODEX_HOME"
+  echo '{"models":[{"slug":"gpt-7-astra"}]}' > "$CODEX_HOME/models_cache.json"
+  tune '.models.allowed.codex += ["sol"]'; seatset reviewer sol
+  out=$(loop run 2>&1) && fail "a run whose reviewer family matches no model exited zero"
+  grep -q 'models.allowed.codex in .conveyor/project.json' <<<"$out" && [ -z "$(st 'select(.step == "picked")')" ] || fail "run picked eligible #7, or the fix is not named: $out"
+  git -C "$R" worktree add -q -b lane-x "$T/$CASE/lane-x" main && echo bee > "$T/$CASE/lane-x/b.txt" && git -C "$T/$CASE/lane-x" add b.txt && git -C "$T/$CASE/lane-x" commit -qm 'fix(tooling): lane change'
+  out=$(loop land-branch lane-x 2>&1) && fail "land-branch with a reviewer family that matches no model exited zero"
+  grep -q 'models.allowed.codex in .conveyor/project.json' <<<"$out" && [ -z "$(st 'select(.step == "picked")')" ] || fail "land-branch picked mergeable lane-x, or the fix is not named: $out"
 }
 t_proxydirect() {
   proxy_start 10
