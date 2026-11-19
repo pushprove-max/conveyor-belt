@@ -361,6 +361,30 @@ t_bugcommentnamed() {
   recok "$ST/cards.jsonl" "bugproof()"
 }
 
+# #831 D1. A whole card, for what only it shows: card() hands the reason bugproof() set (BUGWHY) to the build it sends
+# back, that build's line and the review. Bug it catches: a comment card whose build omits a test is sent back with the
+# default reason ("the new tests pass without the fix"), or the test its issue's Done-when names is not the proof that
+# reaches the review. Main holds src/s.sh with src/s.test.sh (`true`, which s.sh selects by name), and src/w.sh, which
+# no test selects, with src/k.test.sh, which its issue names and which fails on w.sh's old comment. The first build
+# rewords s.sh's comment and adds no test; the second puts the fix in w.sh and adds no test either, so only the issue
+# selects src/k.test.sh (with no test named there, the check is skipped: t_bugcommentnamed). The card lands.
+t_bugcommentloop() {
+  setup "[$(issue 7 2026-01-01 bug | jq -c '.body = "body\n\n## Done when\nsrc/k.test.sh fails on main and passes with the fix."')]"; nopush
+  mkdir "$R/src"; printf '#!/usr/bin/env bash\n# an old word\n' | tee "$R/src/s.sh" > "$R/src/w.sh"; echo true > "$R/src/s.test.sh"; echo '! grep -q old src/w.sh' > "$R/src/k.test.sh"
+  git -C "$R" add src && git -C "$R" commit -qm 'comments and their tests' && git -C "$R" push -q origin main || fail "main's files"
+  sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"; echo "$GO" > "$STUB/review.1"
+  echo "if [ \"\$(wc -l < \"\$STUB/sessions\")\" = 1 ]; then printf '#!/usr/bin/env bash\n# a new word\n' > src/s.sh; else printf '#!/usr/bin/env bash\n# an old word\n' > src/s.sh; printf '#!/usr/bin/env bash\n# a new word\n' > src/w.sh; fi" > "$STUB/build"
+  echo 'bash src/k.test.sh' > "$STUB/mainrun-cmd"
+  loop run >/dev/null || fail "run exited non-zero"
+  local why; why="no test file found in the change (patterns: $(jq -r '.properties.tests.properties.patterns.default | join(", ")' "$SRC/schema/pack.schema.json")); set tests.patterns in .conveyor/project.json"
+  [ "$(st 'select(.step == "build") | .reason // ""' | tr '\n' '|')" = "|$why|" ] && grep -qxF "# Back to the build: $why" "$STUB/brief" \
+    || fail "the build sent back was not given the missing-test reason: $(st 'select(.step == "build")'; tail -n 5 "$STUB/brief")"
+  grep -qx '# The bug-card check' "$STUB/asked" && grep -q "the test files its issue's Done-when names were run alone on main's code" "$STUB/asked" \
+    && grep -qx -- '- src/k.test.sh' "$STUB/asked" && grep -q '^They pass with the fix, and the run without it failed (exit 1)' "$STUB/asked" \
+    || fail "the review was not shown that src/k.test.sh, named in the issue, fails on main: $(cat "$STUB/asked" 2>&1)"
+  [ -n "$(st 'select(.step == "landed") | .sha')" ] || fail "the card did not land: $(st 'select(.step | IN("blocked", "landed"))')"
+}
+
 # Bug it catches: a bug card whose build changed nothing (an ALREADY-DONE, or a session that did nothing) is sent to
 # build again to add a test, in place of going its own way. One session, and the card ends as a card with no change.
 t_bugnochange() {
@@ -428,6 +452,25 @@ t_speedfails() {
   speedwt 4 1
   [ "$RC" != 0 ] && [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the file f.test.sh fails with the change (exit 1)' ] \
     || fail "a speed-up change whose file fails did not fail the check (exit $RC): $(st 'select(.step == "blocked")')"
+}
+
+# #831 D2. A whole card, for what only it shows: card() picks speedproof() for a Speed up card, blocks on its failure,
+# and gives its result to the review (SPEEDREVIEW). Bug it catches: a Speed up card held to the bug check, reviewed
+# when not faster, or reviewed with no word of the speed. Its first build leaves f.test.sh as slow as its median (10
+# CPU s): blocked, no review. Its retry's build makes it fast (4 CPU s): the review sees both numbers, and it lands.
+t_speedcard() {
+  setup "[$(issue 7 2026-01-01 bug | jq -c '.title = "Speed up the test file f.test.sh"')]"; nopush; median10
+  echo 'echo slow' > "$R/f.test.sh"; git -C "$R" add f.test.sh && git -C "$R" commit -qm 'a slow test' && git -C "$R" push -q origin main || fail "main's files"
+  sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"; echo "$GO" > "$STUB/review.1"
+  echo '[ "$(wc -l < "$STUB/sessions")" = 1 ] && echo same > f.test.sh || echo fast > f.test.sh' > "$STUB/build"
+  echo 'printf "TESTRUN sec\tf.test.sh\t1\t%s\n" "$(grep -q fast f.test.sh && echo 4 || echo 10)" > "$CONVEYOR_TEST_LOG/r"' > "$STUB/mainrun-cmd"
+  loop run >/dev/null || fail "run exited non-zero"
+  [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the file is not faster than its median on record (10 CPU s), as the verdict speed up asks: 10 CPU s now' ] && [ ! -e "$STUB/asked" ] \
+    || fail "a Speed up card that is not faster was not blocked before review: $(st 'select(.step | IN("review", "blocked"))')"
+  loop retry 7 >/dev/null && loop run >/dev/null || fail "the retry exited non-zero"
+  grep -qx '# The speed-up check' "$STUB/asked" && grep -q 'passed in 4 CPU s, lower than its median on record, 10 CPU s' "$STUB/asked" \
+    || fail "the review was not shown the speed comparison: $(cat "$STUB/asked" 2>&1)"
+  [ -n "$(st 'select(.step == "landed") | .sha')" ] || fail "the faster retry did not land: $(st 'select(.step | IN("blocked", "landed"))')"
 }
 
 # The case folder of an Optimize issue filed from the Tests page for f.test.sh (on main, `echo slow`, with g.test.sh,
@@ -511,6 +554,25 @@ t_optdelete() {
   fx_in 'verdict "$FXWT.review"; grep -Ev "$UNRECORDED" "$FXWT.review"'
   [ "$(head -n1 "$T/$CASE/run.out")" = GO ] || fail "a review's COVERED-BY lines were taken for findings: $(cat "$T/$CASE/run.out")"
   [ "$(grep -c '^COVERED-BY: g\.test\.sh: ' "$T/$CASE/run.out")" = 2 ] || fail "the review's record lost its COVERED-BY lines: $(cat "$T/$CASE/run.out")"
+}
+
+# #831 D3. A whole card, for what only it shows: card() gives the review an Optimize card's check (OPTREVIEW, with
+# optproof()'s result) and records the review's lines grep -Ev "$UNRECORDED" leaves. Bug it catches: the review of an
+# Optimize deletion is not given the removed file's cases, or its COVERED-BY lines are lost from the landed card's
+# record, where the Tests page reads them. The build deletes f.test.sh (cases one and two); the review names g.test.sh.
+t_optdeleteland() {
+  optmain 4; nopush
+  issue 7 2026-01-01 bug | jq -c '[.title = "Optimize the test file f.test.sh"]' > "$STUB/issues.json"
+  echo 'echo slow' > "$R/f.test.sh"; echo 'echo other' > "$R/g.test.sh"
+  git -C "$R" add f.test.sh g.test.sh && git -C "$R" commit -qm 'a slow test' && git -C "$R" push -q origin main || fail "main's files"
+  sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
+  printf '%s\n' 'COVERED-BY: g.test.sh: one' 'COVERED-BY: g.test.sh: two' "$GO" > "$STUB/review.1"; echo 'rm f.test.sh' > "$STUB/build"
+  loop run >/dev/null || fail "run exited non-zero"
+  grep -qx '# The Optimize check' "$STUB/asked" && grep -qx -- '- one' "$STUB/asked" && grep -qx -- '- two' "$STUB/asked" \
+    && grep -qF 'Name, for each of its cases, the test that still covers it after the change, each on its own line, exactly: `COVERED-BY: <its test file>: <its case>`' "$STUB/asked" \
+    || fail "the review was not given the removed file's cases and asked for the test that covers each: $(cat "$STUB/asked" 2>&1)"
+  [ -n "$(st 'select(.step == "landed") | .sha')" ] || fail "a delete did not land: $(st 'select(.step | IN("blocked", "landed", "review"))')"
+  [ "$(st 'select(.step == "review") | .reason' | grep -c '^COVERED-BY: g\.test\.sh: ')" = 2 ] || fail "the review's record lost its COVERED-BY lines: $(st 'select(.step == "review")')"
 }
 
 # Bug it catches (#74): a merge recorded as a delete, so the Tests page could not name the file that took the cases of
