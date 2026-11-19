@@ -195,7 +195,7 @@ turn() { pushturn; [ -z "$pusher" ] || wait "$pusher"; pusher=''; }
 # that failed its check is tried again on the same main, at once or on the retry timer; one the remote refused is not
 # tried again at once by a new loop, or is tried at every turn, or never on the retry timer; a push line breaks the
 # record check or turns a landed card's dashboard row back into an open one. Each later landing is one `run` on a set
-# clock (CONVEYOR_NOW); when a push is tried again is the loop's push decision (pushturn), at a new loop's turns.
+# clock (CONVEYOR_NOW); when a push is tried again is the loop's push decision (pushturn), at one loop's turns.
 t_serve() {
   servesetup; tune '.tunables += {idle: 1, poll: 1}'; export CONVEYOR_NOW; CONVEYOR_NOW=$(date +%s)
   # An idle serve takes its turns and does not end: the KILL of servefor ends it (137), not its own exit.
@@ -244,6 +244,13 @@ t_serve() {
   loop check || fail "the record check refuses a push line"
   [ "$(loop cards | jq -c '[.landed, .open, (.cards | map("\(.step) \(.stage)") | unique)]')" = '[4,0,["landed 5"]]' ] || fail "a push line changed a landed card's dashboard row: $(loop cards)"
   CONVEYOR_MAIN=$R bash "$SRC/report.sh" | grep -Eq '^cards landed +4$' || fail "the report miscounts cards that hold a push line"
+  # Bug: a landing after a failed push waits for the retry timer. Each run above starts with nothing tried, so one loop's
+  # turns (after the counts): c98's push is tried and fails (the stub), the timer holds it, c99 lands and is tried at once.
+  eng "$SRC" 'land() { echo "$1" > "$R/f$1"; git -C "$R" add "f$1"; git -C "$R" commit -qm "$1"
+      record "c$1" "$1" landed ok "$(jq -cn --arg s "$(git -C "$R" rev-parse HEAD)" "{sha: \$s, product: false}")"; }
+    pushstub; land 98; turn; turn; echo T >> "$STUB/pushcalls"; land 99; turn'
+  [ "$(cut -d' ' -f1,2 "$STUB/pushcalls" | paste -sd,)" = "c98 98,T,c99 99" ] \
+    || fail "a landing after a failed push in the same loop was not pushed at once, or the failed one was tried again before its timer: $(cat "$STUB/pushcalls")"
 }
 
 # Why a push failed, from git's trace2 events of it (lib/push.sh hookfailed()): its pre-push hook exited non-zero, or
