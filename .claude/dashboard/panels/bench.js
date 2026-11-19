@@ -897,7 +897,7 @@
           cell.append(button(a.state === 'failed' || a.state === 'expired' ? 'Check again' : 'Check', 'btn-quiet btn-sm', `check-${a.name}`, `Run the preflight of ${a.label}`,
             () => send(`check-${a.name}`, ['arms', 'check', a.name], (t) => `${t.replace(/^conveyor: /, '')}. Read the arms again in a few minutes.`, () => readHist(true), null, { at: atOf(a) })));
         }
-        // Its pass was on the default run settings (the arms' states are read on them): the run checks it again first.
+        // Its check succeeded on the default run settings (the arms' states are read on them): the run checks it again first.
         if (ready && B.start.arms.has(a.name) && setChanged()) cell.append(h('p', 'warn-note bench-stale', 'Checked on the default run settings. The run checks it again on yours before its first task.'));
         if (obj(a.spec)) cell.append(button('Edit a copy', 'btn-quiet btn-sm', `copy-${a.name}`, `Edit a copy of ${a.label}`, () => openEdit(copyOf(a))));
         // The answer to this arm's check (its box or its Check button) shows in the arm, not at the foot of the page. Once

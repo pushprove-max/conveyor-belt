@@ -1545,6 +1545,8 @@ rc=0; env HOME="$T/userhome" CONVEYOR_MAIN="$MAIN" CONVEYOR_DASHBOARD_DIR="$OUT"
 [ "$rc" = 2 ] && grep -qF 'usage: dashboard.sh [--install|--uninstall|--restart|--loop|--publish|--update|--history|--work|--older <repo> <test file>|--donewhen <repo> <card id>|--shot <repo> <card> <file>|--excerpts <repo> <card id>|--bench <repo> [<run>]|--check]' "$T/usage.out" || fail "an argument the collector does not have is refused with its usage: rc=$rc $(cat "$T/usage.out")"
 
 # --- the strip-down holds: the retired workflow is named nowhere in the collector, the page or their tests ---
+# Comments count as well as the page's text: a panel's comment (bench.js, on an arm checked on the default run
+# settings) that named the retired word for a check that succeeded failed this case on main (#753).
 # "seat" is not on the list: it now names a card's builder, reviewer and judge (docs/board.md), not the retired workflow.
 RETIRED='\b([u]nits?|[p]ass(es)?|[m]erge queue|[c]hain)\b'
 found=$(grep -n -i -E "$RETIRED" "$DASH" "$VIEW"/*.* "$VIEW"/panels/*.js "$SOURCE"/.claude/scripts/__tests__/dashboard.test.sh \
