@@ -2,6 +2,6 @@
   "label": "Conveyor",
   "kind": "conveyor",
   "login": ["claude"],
-  "install": "set -e; mkdir -p ~/.local; curl -fsSL https://nodejs.org/dist/v22.12.0/node-v22.12.0-linux-x64.tar.xz | tar -xJ -C ~/.local --strip-components=1; curl -fsSL https://claude.ai/install.sh | bash; npm install -g @openai/codex",
-  "preflight": "claude --version && codex --version && jq --version && git --version"
+  "install": "set -e; mkdir -p ~/.local; curl -fsSL https://nodejs.org/dist/v22.12.0/node-v22.12.0-linux-x64.tar.xz | tar -xJ -C ~/.local --strip-components=1; curl -fsSL https://claude.ai/install.sh | bash; npm install -g @openai/codex; mkdir -p ~/.local/bin; curl -fsSL -o ~/.local/bin/jq https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux-amd64; echo \"020468de7539ce70ef1bceaf7cde2e8c4f2ca6c3afb84642aabc5c97d9fc2a0d  $HOME/.local/bin/jq\" | sha256sum -c -; chmod +x ~/.local/bin/jq",
+  "preflight": "claude --version && codex --version && v=$(jq --version) && n=$(printf %s \"$v\" | grep -oE '[0-9]+(\\.[0-9]+)+' | head -n 1) && { [ -n \"$n\" ] && [ \"$(printf '%s\\n' 1.8 \"$n\" | sort -V | head -n 1)\" = 1.8 ] || { echo \"jq in the container is $v: Conveyor needs jq 1.8 or newer\" >&2; exit 1; }; } && git --version"
 }

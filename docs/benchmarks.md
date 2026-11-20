@@ -121,7 +121,7 @@ arms on the same tasks. With no `--arm`, the run uses the `conveyor` arm.
 
 | Arm | What builds a task | Install in the container | Login |
 | --- | --- | --- | --- |
-| `conveyor` | Conveyor, on the seats of the control record | Node.js, the Claude Code and Codex CLIs, and the engine version | Claude, and Codex when a seat uses Codex |
+| `conveyor` | Conveyor, on the seats of the control record | Node.js, the Claude Code and Codex CLIs, jq 1.8.1 and the engine version. The preflight fails when jq is older than 1.8 | Claude, and Codex when a seat uses Codex |
 | `conveyor-codex-claude` | Conveyor, with Codex as the builder and Claude as the reviewer | The same as `conveyor` | Claude and Codex |
 | `solo` | One Claude session, with no shell (the same as `--solo`) | The Claude Code CLI | Claude |
 | `solo-review` | One Claude session, then one more Claude session that reviews the change and fixes it | The Claude Code CLI | Claude |

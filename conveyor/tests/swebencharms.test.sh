@@ -158,6 +158,17 @@ t_swearmlogin() {
   grep -q "^$on: failed: no codex login on this machine" <<<"$out" || fail "an arm that turns the Codex judge on passed with no Codex login: $out"
 }
 
+# Bug: the conveyor arm's preflight passed in a container whose jq is older than 1.8, so the engine ran on a jq it
+# does not support there and failed in the run, not in the preflight.
+t_swearmjq() {
+  swe; local out
+  jq '.install = "mkdir -p ~/.local/bin && printf \"#!/bin/sh\\necho jq-1.7.1\\n\" > ~/.local/bin/jq && chmod +x ~/.local/bin/jq"' \
+    "$SWE_FX/arms/conveyor.json" > "$SWE_FX/arms/conveyor-oldjq.json" || fail "the arm was not made"
+  out=$(loop bench swe arms check conveyor-oldjq 2>&1) && fail "the preflight passed with jq 1.7.1 in the container: $out"
+  grep -q "^conveyor-oldjq: failed: on the trivial task, its preflight command failed: .*jq-1\.7\.1: Conveyor needs jq 1\.8 or newer" <<<"$out" \
+    || fail "the failed preflight does not name the container's jq version: $out"
+}
+
 # Bug: the seats were worked out on this host's models, so on a host with no Codex and a pack that lists no models the
 # default reviewer was Claude's, while in the container, where the arm installs Codex, the same default is Codex's:
 # the arm passed with no Codex login and its container had none.

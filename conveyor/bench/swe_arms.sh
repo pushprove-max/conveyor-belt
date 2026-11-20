@@ -346,7 +346,7 @@ SWE_ASK='Fix this issue in the repository in the current folder. Change the code
 # arm. An arm that does not fire (its install, preflight or command failed, or its output shows no use of its method)
 # has fired false and why: that is the arm's failure, never a task not run.
 swe_trial() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor kind>
-  local sb=$2 a=$3 h=$2.h base t0 c rc run why='' kind eng='' to b n p=0
+  local sb=$2 a=$3 h=$2.h base t0 c rc='' run why='' kind eng='' to b n p=0
   base=$(jq -r .base <<<"$1"); t0=$(date +%s); kind=$(jq -r .kind <<<"$a"); to=$(swe_set .taskTimeout)
   n=conveyor-swe-${SWE_RUN:-check}-$(jq -r .name <<<"$a")-$(jq -r .id <<<"$1"); c=${n//[^A-Za-z0-9_.-]/-}
   { chmod -R u+w "$h"; rm -rf "$h"; } 2>/dev/null; mkdir -m 700 "$h" && : > "$h/out" || return 1
