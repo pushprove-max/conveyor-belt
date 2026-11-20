@@ -115,6 +115,14 @@ p_started() { local s; s=$(LC_ALL=C ps -o lstart= -p "$1" 2>/dev/null) || return
 # reaped by its parent, keeps its start time but does not run.
 p_alive() { [ -n "$2" ] && [ "$(p_started "$1")" = "$2" ] && [[ $(ps -o stat= -p "$1" 2>/dev/null) != *Z* ]]; } # <pid> <started>
 
+# A process held by a stop signal (SIGSTOP, SIGTSTP: state T) runs no more until it is given SIGCONT, and p_alive
+# still counts it as running. ps's stat starts with the state letter on Linux and macOS alike ("T", "Tl", "T+", "TN"),
+# after spaces on some; Linux's "t", stopped by a debugger, is not this: a SIGCONT does not resume it.
+# True when <pid> is so stopped.
+p_stopped() { [[ $(LC_ALL=C ps -o stat= -p "$1" 2>/dev/null) =~ ^[[:space:]]*T ]]; } # <pid>
+# The pids of every process so stopped, one a line.
+p_stoppedpids() { LC_ALL=C ps -A -o pid= -o stat= 2>/dev/null | awk '$2 ~ /^T/ { print $1 }'; }
+
 # Runs <command> as the leader of a session of its own (no controlling terminal, a process group of its own) and
 # exits as it does: setsid on Linux; macOS has no setsid command, so perl's POSIX::setsid there.
 p_setsid() { # <command> [args]

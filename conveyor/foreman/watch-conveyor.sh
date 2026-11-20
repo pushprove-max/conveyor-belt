@@ -12,7 +12,11 @@
 #   a card stuck (health's stuck: no new step and no output, its process gone, a wait on other cards past the
 #     limit, with the cards it waited on, or a test case that hangs, by name); one whose step the engine ended
 #     for no progress and runs once more (did) is a new problem, and says so ("ended and retried"); a second stall
-#     blocks the card, and its blocked alert says so; each only once two polls in a row, at least a poll apart, list it
+#     blocks the card, and its blocked alert says so; one whose process is stopped by a stop signal (health's
+#     stopped) names the stopped process, since when health first read it so, and the command that resumes it, in
+#     place of stuck, and a stopped engine (health's engineStopped), idle or not, is one item that does so for the
+#     engine and names the cards it holds, and the command for each of their own processes stopped too; each only once
+#     two polls in a row, at least a poll apart, list it
 #   a card that has waited for main to change, or on another card, for the pack's foreman.waitWake minutes (default
 #     10): it names the card, what it waits on and that card's step and last action (for main, each main-red fix card
 #     open or blocked); once per wait, and "still waiting" after each further waitWake minutes of it
@@ -108,7 +112,17 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
     (.before | arrays | .[] | objects | select(.issue | numbers)
       | ["before:\(.issue)", "needs the owner'"'"'s yes", "#\(.issue)", "#\(.issue) needs the owner'"'"'s yes before its build since \(.since): \(.title | one)"]),
     (.blocked[] | ["blocked:\(.card)", "blocked", ref, "\(ref) is blocked since \(.since): \(.reason | one)"]),
-    (.stuck[] | if .did then ["stuck:\(.card):\(.did)", "stuck", ref, "\(ref) is stuck: no progress since \(.since) at \(.step); the engine \(.did) it"]
+    # A stopped engine is one item, idle or not, naming the cards it holds; a card under it is not listed again.
+    # A held card whose own process is stopped too names that one as well: resuming the engine leaves it stopped.
+    (([.stuck[] | select(.stopped.of? == "engine")] | unique_by(.card)) as $h | [$h[] | ref] as $held
+      | [$h[] | select((.stopped.own | objects | .pid | numbers) != null) | "; \(ref)'"'"'s own process is stopped too since \(.stopped.own.since): `kill -CONT \(.stopped.own.pid)` resumes it"] as $own
+      | .engineStopped | objects | select(.pid | numbers)
+      | ["stopped:engine:\(.pid)", "stopped", ($held | join(" ")), "the engine is stopped (state T) since \(.since): `kill -CONT \(.pid)` resumes it"
+        + (if $held == [] then "" else " (it holds \($held | join(", ")))" end) + ($own | join(""))]),
+    (.stuck[] | if .stopped.of? == "engine" then empty
+      elif ((.stopped | objects | .pid) // null | type) == "number" then ["stopped:\(.card):\(.stopped.pid)", "stopped", ref,
+        "\(ref): its process is stopped (state T) since \(.stopped.since // .since): `kill -CONT \(.stopped.pid)` resumes it"]
+      elif .did then ["stuck:\(.card):\(.did)", "stuck", ref, "\(ref) is stuck: no progress since \(.since) at \(.step); the engine \(.did) it"]
       else ["stuck:\(.card)", "stuck", ref, "\(ref) is stuck: " + (
       if (.waitedOn | type) == "array" then "it has waited on other cards for \(.waitedMin) minutes in all (\([.waitedOn[] | objects | ref] | join(", ")))"
       elif (.cases | type) == "array" then "its test step has had \(.cases | map(tostring) | join(", ") | one) running since \(.since)"
@@ -422,12 +436,12 @@ record() { # <repo> <main> <now> <await>
     }
     thirdpoll ghreach "$ghreach"; thirdpoll gh "$ghout"
     # A stuck card is a problem only when two snapshots in a row, at least a poll apart, list it: one reading can
-    # fall between two lines of a step that goes on. $stuckf holds each stuck key of the last snapshot and when a
-    # snapshot first listed it ("<key> TAB <epoch>"); a key the snapshot does not list is dropped from it. When that
+    # fall between two lines of a step that goes on, or catch a stop that a SIGCONT soon ends (a stopped one).
+    # $stuckf holds each stuck key of the last snapshot and when a snapshot first listed it ("<key> TAB <epoch>"); a key the snapshot does not list is dropped from it. When that
     # file cannot be written, the stuck cards are reported at once.
     if touch "$stuckf" && : > "$stuckf.tmp" && held=$(awk -F'\t' -v now="$now" -v poll="$POLL" -v f="$stuckf" '
       FILENAME == f { t[$1] = $2; next }
-      $1 ~ /^stuck:/ { s = ($1 in t) ? t[$1] : now; print $1 "\t" s > (f ".tmp"); if (now - s < poll) next }
+      $1 ~ /^(stuck|stopped):/ { s = ($1 in t) ? t[$1] : now; print $1 "\t" s > (f ".tmp"); if (now - s < poll) next }
       { print }' "$stuckf" - <<<"$cur") && mv "$stuckf.tmp" "$stuckf"; then cur=$held; fi
     reviewretry
     stillblocked

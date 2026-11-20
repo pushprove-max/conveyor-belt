@@ -157,7 +157,10 @@ cards() {
 # every open card running a step again after the engine ended the step before it for no progress (since: when its
 # progress stopped; did: "ended and retried", on any stuck entry of such a card); and at once every open
 # card whose process (the pid and start its worktree line names) is gone, as nothing is left to write its line (but for
-# a card in its land step while the loop runs: the loop lands it, and STUCK holds) (step
+# a card in its land step while the loop runs: the loop lands it, and STUCK holds), or whose process or engine is
+# stopped by a stop signal (state T), as nothing of it moves (stopped: {pid, of: "engine" or "card", since: when health
+# first read it stopped, own: {pid, since} when of is "engine" and the card's own process is stopped too}, on every
+# stuck entry of such a card) (step
 # waiting and waitsOn for a card waiting on a same-file card, never the landing it waits to begin), and
 # every open card that has waited STUCK seconds on a same-file card that is not alive (not on the belt, or its process
 # gone: the wait never ends) (step waiting, since: when
@@ -165,7 +168,8 @@ cards() {
 # fix, rebase) has had no output for SESSION_STUCK seconds, every open card that has waited on other cards for more
 # than WAIT_LIMIT minutes in all (step waiting, since and waitsOn as above, waitedMin: the whole minutes of all its
 # waits, waitedOn: each card it waited on, in order, as waitsOn), and every open card whose test step has a case
-# running for CASE_STUCK seconds (step test, cases: their names, since: when the first of them started; testcases()); waitingOnCard (card, issue, since: when the
+# running for CASE_STUCK seconds (step test, cases: their names, since: when the first of them started; testcases()); engineStopped ({pid, since}: the
+# loop's own process, as loop.json names it, while a stop signal holds it, with or without cards; else null); waitingOnCard (card, issue, since: when the
 # wait began, waitsOn as stuck's): every open card waiting at its claim (the live record of the step it is running names
 # the card it waits on and was brought up to date within STUCK seconds); unpushed (card, issue, sha, since): the landed commits in main that neither the last push that worked nor
 # origin's main as last seen here holds; pushError (time, sha, reason, kind: check or transport, check: the check that
@@ -291,17 +295,30 @@ HEALTHLINE='select(. != "") | fromjson | {card, issue, step, of, time, result, f
     elif .step == "blocked" then {reason} elif .step == "landed" then {sha} elif .step == "push" then {sha, reason, kind, check} elif .step == "pushed" then {pr}
     elif .step == "picked" then {mainRed} elif .step == "test" then {refused, reused, ended, selected, times: (if (.times | type) == "object" then {} else null end)}
     else {} end'
+# When health first read each stopped process of the "<pid> TAB <started> TAB <card>" lines on stdin stopped, as ps
+# gives no time a process stopped: <now> for one not read so before. $STATE.stopped keeps "<pid> TAB <started> TAB
+# <epoch>" for those still stopped, so a stop is dated from the first reading of it, not from the card's last output.
+# Prints "<pid> TAB <card> TAB <epoch>" a line; when the file cannot be written, each reads as stopped since <now>.
+stopsince() { # <now>
+  local f=$STATE.stopped w=$STATE.stopped.$$
+  { [ -f "$f" ] || : > "$f"; } 2>/dev/null || { awk -F'\t' -v OFS='\t' -v now="$1" '{ print $1, $3, now }'; return; }
+  awk -F'\t' -v OFS='\t' -v now="$1" -v f="$f" -v w="$w" 'FILENAME == f { t[$1 FS $2] = $3; next }
+    { k = $1 FS $2; if (!(k in t)) t[k] = now; if (!(k in kept)) { kept[k] = 1; print k, t[k] > w } print $1, $3, t[k] }' "$f" - \
+    && if [ -f "$w" ]; then mv -f "$w" "$f"; else : > "$f"; fi
+}
+
 # READCHECKED, when set, says READ is a copy that check() has already passed and nothing appends to (the snapshot's):
 # health does not check it again.
 health() {
-  local loop=true gh=false ghr=null ghwhy='' free a not=() lv c r=null cap bw cyc=null pu=null bf=null st why='' said gone cm rm mc tr so co hd rc
+  local wt stopped en e t n loop=true gh=false ghr=null ghwhy='' free a not=() lv c r=null cap bw cyc=null pu=null bf=null st why='' said gone cm rm mc tr so co hd rc
   { [ -n "${READCHECKED:-}" ] || check; } && lv=${LIVEJSON:-$(live)} || return 1
   # The records and the retried lines, as health reads them (HEALTHLINE).
   hd=$(mktemp -d) || return 1
   linesum "$READ" "$STATE.health" "$hd/rec" "$HEALTHLINE" && linesum "$READ_OLD" "$RETRIED.health" "$hd/old" "$HEALTHLINE" || { rm -rf "$hd"; return 1; }
-  gone=$(jq -rs '[group_by(.card)[] | select(all(.step | IN("landed", "closed", "blocked") | not))
-      | map(select(.step == "worktree" and (.pid | type) == "number")) | last | select(.) | "\(.card)\t\(.pid)\t\(.started // "")"] | .[]' "$hd/rec" \
-    | while IFS=$'\t' read -r k p t; do p_alive "$p" "$t" || printf '%s\n' "$k"; done | jq -Rcs 'split("\n") | map(select(. != ""))') || { rm -rf "$hd"; return 1; }
+  # Each open card's process, as its last worktree line names it: "<card> TAB <pid> TAB <started>".
+  wt=$(jq -rs '[group_by(.card)[] | select(all(.step | IN("landed", "closed", "blocked") | not))
+      | map(select(.step == "worktree" and (.pid | type) == "number")) | last | select(.) | "\(.card)\t\(.pid)\t\(.started // "")"] | .[]' "$hd/rec") || { rm -rf "$hd"; return 1; }
+  gone=$(while IFS=$'\t' read -r k p t; do [ -z "$k" ] || p_alive "$p" "$t" || printf '%s\n' "$k"; done <<<"$wt" | jq -Rcs 'split("\n") | map(select(. != ""))') || { rm -rf "$hd"; return 1; }
   c=$(ctl 2>/dev/null) || { c=null; why=$(notwhole); }
   if a=${ISSUESJSON:-$(openissues number,title,body,labels,createdAt 2>/dev/null)} && [ "$a" != null ]; then
     cyc=$(jq -c --slurpfile cards "$hd/rec" "$DEPS"' cycles($cards)' <<<"$a" 2>/dev/null) && [ -n "$cyc" ] || cyc=null
@@ -318,6 +335,26 @@ health() {
   # The guard's reading is that of the accounts the next card will use.
   [ "$(jq -r .guard <<<"$c")" = null ] || r=$(guardread "$c" ask); [ -n "$r" ] || r=null
   ( flock -n 9 ) 9>>"$STATE.run" && loop=false
+  # The engine (the loop's own process, as loop.json names it, idle or running cards) while the loop runs, and each
+  # open card's process, when a stop signal holds it (state T, p_stopped): nothing of theirs moves until it is given
+  # SIGCONT, and the loop's own stall watcher stops with it. {engine: {pid, since} or null, cards: {"<card>": {pid, of:
+  # "engine" or "card", since, own}}}: each live card of a stopped engine names the engine, as its own process resumed
+  # under it still moves nothing, and own ({pid, since}) when its own process is stopped too, as resuming the engine
+  # leaves that one stopped. since: when health first read it stopped (stopsince()).
+  en=''
+  [ "$loop" = true ] && IFS=$'\t' read -r e t < <(jq -r '[.pid, .started] | @tsv' "$SAYS" 2>/dev/null) && [[ $e =~ ^[0-9]+$ ]] \
+    && p_alive "$e" "$t" && p_stopped "$e" && en=$e$'\t'$t
+  [[ ${CONVEYOR_NOW:-} =~ ^[0-9]+$ ]] && n=$CONVEYOR_NOW || n=$(date +%s)
+  stopped=$({ [ -z "$en" ] || printf '%s\t\n' "$en"
+      while IFS=$'\t' read -r k p t; do
+        [ -n "$k" ] && p_alive "$p" "$t" || continue
+        [ -z "$en" ] || printf '%s\t%s\n' "$en" "$k"
+        ! p_stopped "$p" || printf '%s\t%s\t%s\n' "$p" "$t" "$k"
+      done <<<"$wt"; } | stopsince "$n" | jq -Rcs --arg e "${en%%$'\t'*}" 'split("\n") | map(select(. != "") | split("\t") | {pid: (.[0] | tonumber), card: .[1], since: (.[2] | tonumber | todate)})
+      | {engine: (map(select(.card == "") | {pid, since}) | first // null),
+         cards: (map(select(.card != "")) | group_by(.card) | map((map(select((.pid | tostring) == $e)) | first) as $g
+           | (map(select((.pid | tostring) != $e) | {pid, since}) | first) as $o
+           | {key: .[0].card, value: (if $g then {pid: $g.pid, of: "engine", since: $g.since} + (if $o then {own: $o} else {} end) else {pid: $o.pid, of: "card", since: $o.since} end)}) | from_entries)}') || { rm -rf "$hd"; return 1; }
   st=$(state "$c" "$(jq -r '.pct // empty' <<<"$r")")
   # A loop a sign-in failure paused (signinpause()) says why, and what to run.
   [ "$st" != paused ] || why=$(jq -r '.signin // ""' <<<"$c")
@@ -353,7 +390,7 @@ health() {
   done
   # The landing pull request as GitHub has it (prsync(), lib/push.sh); under `watch`, its slower timer asks (github()).
   [ -n "$GITHUB" ] || prsync
-  jq -cs --argjson loop "$loop" --argjson gh "$gh" --argjson ghr "$ghr" --arg ghwhy "$ghwhy" --arg ghread "$GHREAD" --argjson free "$free" --argjson stuck "$STUCK" --argjson sstuck "$SESSION_STUCK" --argjson casestuck "$CASE_STUCK" --argjson waitlimit "$WAIT_LIMIT" --argjson gone "$gone" --argjson live "${lv:-{\}}" --argjson proof "$(proofs)" --argjson testout "$(testouts)" \
+  jq -cs --argjson loop "$loop" --argjson gh "$gh" --argjson ghr "$ghr" --arg ghwhy "$ghwhy" --arg ghread "$GHREAD" --argjson free "$free" --argjson stuck "$STUCK" --argjson sstuck "$SESSION_STUCK" --argjson casestuck "$CASE_STUCK" --argjson waitlimit "$WAIT_LIMIT" --argjson gone "$gone" --argjson stopped "$stopped" --argjson live "${lv:-{\}}" --argjson proof "$(proofs)" --argjson testout "$(testouts)" \
     --arg state "$st" --arg why "$why" --argjson commit "$cm" --argjson ctl "$c" --argjson r "$r" --arg yes "$YES" --arg lintyes "$LINTYES" \
     --argjson cap "$cap" --argjson bw "$bw" --arg repo "$REPO" --argjson room "$rm" --argjson machine "$mc" --argjson cores "$co" --argjson force "$(inforce "$c")" --argjson cycles "$cyc" --slurpfile before <(printf '%s\n' "$bf") --argjson pushing "$pu" --argjson homes "$(homes "$c")" --argjson routes "$(routesnow)" --argjson report "$tr" --argjson serviceold "$so" \
     --slurpfile old "$hd/old" --slurpfile mh <(jq -c 'objects | {since, card, sha, controls, cases}' "$MACHINEHOLD" 2>/dev/null) --slurpfile lp <(jq -c 'objects | select(.merged == null and .closed == null and (.number | type) == "number") | {number, url, merge}' "$LANDPR" 2>/dev/null) --slurpfile qt <(jq -c 'objects | {line, field, time}' "$QUARANTINE" 2>/dev/null) --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) "$UNTIMED$SPLITM"'
@@ -396,7 +433,7 @@ health() {
        blocked: ($b | map(select(.reason | startswith($yes) or startswith($lintyes) | not))), waiting: ($b | map(select(.reason | startswith($yes) or startswith($lintyes)))),
        stuck: ($c | map(select(.end == null) | . + {since: ([.last.time, .out // ""] | max)}
            # A session (build, fix, rebase) that says nothing is listed after SESSION_STUCK, when that is sooner.
-           | select((.card | IN($gone[])) or $now - (.since | fromdate) >= (if .last.step == "start" and (.last.of | IN("build", "fix", "rebase")) then [$stuck, $sstuck] | min else $stuck end))
+           | select((.card | IN($gone[])) or $stopped.cards[.card] or $now - (.since | fromdate) >= (if .last.step == "start" and (.last.of | IN("build", "fix", "rebase")) then [$stuck, $sstuck] | min else $stuck end))
          | ($live[.card].waits.on // null) as $h
          | {card, issue, step: (if $h then "waiting" else .last | if .step == "start" then .of else .step end end), since} + (if $h then {waitsOn: holder($h)} else {} end))
          # A step the engine ended for making no progress, run once more (watch()): stuck since its progress stopped,
@@ -419,7 +456,9 @@ health() {
          # A test step with a case that has run for CASE_STUCK, whatever the other cases print, and when none prints.
          | also([$c[] | select(.end == null and .last.step == "start" and .last.of == "test") | $live[.card] as $v
              | [select($v.step == "test") | $v.cases | arrays | .[] | objects | select((.name | type) == "string" and (.since | type) == "string" and $now - (.since | fromdate) >= $casestuck)] as $k
-             | select($k != []) | {card, issue, step: "test", since: ($k | map(.since) | min), cases: ($k | map(.name))}])),
+             | select($k != []) | {card, issue, step: "test", since: ($k | map(.since) | min), cases: ($k | map(.name))}])
+         # A card whose process or engine is stopped says which, on each of its entries.
+         | map(. + ($stopped.cards[.card] // null | if . then {stopped: .} else {} end))), engineStopped: $stopped.engine,
        waitingOnCard: [$c[] | select(.end == null and atclaim) | $live[.card] as $v | {card, issue, since: $v.at, waitsOn: holder($v.waits.on)}],
        unpushed: $un, pushError: ($fail | last | if . then {time, sha, reason, kind: (.kind // null), check: (.check // null), card, issue} else null end), pushFailingSince: ($fail[0].time // null), pushFails: ($fail | length), pushing: $pushing,
        gh: $gh, ghReached: $ghr, ghWhy: (if $gh then null else $ghwhy end), ghRead: $ghread, diskFreeKb: $free, builderCap: $cap, building: $bw.building, waitingCount: $bw.waiting, models: $force.models, efforts: $force.efforts, cycles: $cycles, before: $before[0], homes: $homes,

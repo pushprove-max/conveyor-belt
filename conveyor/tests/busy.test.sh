@@ -120,3 +120,28 @@ t_busywhy() {
   [ "$(jq -c '.[0] | [.card, .step, .closed, (.parents[0].pid == '"$p"')]' <<<"$out")" = '["c20261117T000001-main-5","build",false,true]' ] \
     || fail "why does not give the real worker to its parent's card: $out"
 }
+
+# Issue 1029: a card's process stopped by a stop signal (state T) read as running, and, using no CPU, work left it out:
+# nothing said why the card did not move or that a SIGCONT resumes it; nor for a stopped `serve`, which runs in the
+# main checkout and no card owns. A real stopped process in card c...-5's worktree is named stopped, with the command,
+# by why and by work, though idle; so is the stopped engine loop.json names, with those no card owns; the card's
+# running and missing (fixture pids no process has) ones read as before.
+t_busystopped() {
+  busycards
+  local s r e tab out
+  sleep 600 & s=$! # sleep: the stopped process, killed below
+  sleep 600 & r=$! # sleep: a running process of the same card, killed below
+  sleep 600 & e=$! # sleep: the stopped engine, killed below
+  kill -STOP "$s" "$e"
+  jq -cn --argjson p "$e" --arg t "$(p_started "$e")" '{pid: $p, started: $t}' > "$ST/loop.json"
+  tab=$(printf '%s\t%s\t%s\t%s\t%s\n' "$s" 1 0.0 "$C/c20261117T000001-main-5" 'claude -p' "$r" 1 0.0 "$C/c20261117T000001-main-5" 'node idle.js' \
+    200 1 50.0 "$C/c20261117T000001-main-5" 'claude -p --model m' "$e" 1 0.0 "$R" 'bash conveyor.sh serve')
+  out=$(busyfn busy_why "$s" <<<"$tab"; busyfn busy_why "$r" <<<"$tab"; busyfn busy_work --json <<<"$tab"; busyfn busy_work <<<"$tab")
+  kill -CONT "$s" "$e"; kill "$s" "$r" "$e"
+  [ "$(grep -c 'stopped (state T)' <<<"$out")" = 3 ] || fail "why and work do not name the stopped processes alone: $out"
+  grep -qxF "  stopped (state T): \`kill -CONT $s\` resumes it" <<<"$out" || fail "why does not name the stopped process and its command: $out"
+  grep -qxF "    stopped (state T): \`kill -CONT $s\` resumes it" <<<"$out" || fail "work does not name the stopped process and its command: $out"
+  grep -qE "^    the engine of .+ is stopped \(state T\): \`kill -CONT $e\` resumes it$" <<<"$out" || fail "work does not name the stopped engine and its command: $out"
+  [ "$(grep '^{' <<<"$out" | jq -c '[[.groups[].processes[] | [.pid, .stopped]], [.other[] | [.pid, .stopped, (.engine | type)]]]')" = "[[[200,false],[$s,true]],[[$e,true,\"string\"]]]" ] \
+    || fail "work does not list the idle stopped process with its card and the stopped engine with no card, or lists the idle running one: $out"
+}

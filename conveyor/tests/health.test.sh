@@ -318,6 +318,52 @@ t_gonelanding() {
     || fail "with no loop running, a landing card whose process is gone is not stuck at once: $(CONVEYOR_NOW=$((now + 30)) loop health | jq -c '[.loop, .stuck]')"
 }
 
+# Issue 1029: `serve` and every process under it were stopped by a stop signal (state T); health counted them as
+# running, so the card read as stuck only after STUCK, with no cause, and nothing said a SIGCONT would resume it.
+# Card c1-1 is in its build at <now>, its worktree line naming the process <pid>, as the loop writes it.
+stoppedcard() { # <pid> <now>
+  jq -cn --argjson p "$1" --arg s "$(p_started "$1")" --argjson t "$2" \
+    '{card:"c1-1",issue:1,time:($t | todate),tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""} as $l
+     | ($l + {step:"picked",title:"t",created:"2026-01-01T00:00:00Z"}), ($l + {step:"worktree",pid:$p,started:$s}), ($l + {step:"start",of:"build"})' >> "$ST/cards.jsonl"
+}
+# A stand-in for `serve` (holding the loop's lock, its pid in loop.json) with the card's process under a wrapper under
+# it, as the loop runs cardrun() and card() in shells of their own; the stand-in stopped: the card is stuck at once,
+# named with the stopped engine's pid, and health names the engine itself, both since health first read it stopped
+# (not the card's last output, <now>), and still so a minute on; with the card's process stopped too, as when the
+# whole tree is stopped, its entry also names that process (own), as resuming the engine leaves it stopped; once both
+# are resumed, it is not stuck and no engine is stopped, as before.
+t_stoppedengine() {
+  local e w c now h s; setup '[]'; now=$(date +%s); s=$(jq -rn --argjson t $((now + 30)) '$t | todate')
+  ( exec 9>>"$ST/cards.jsonl.run"; flock 9; ( sleep 600 & wait ) & wait ) & e=$! # sleep: the card's process under the stand-in, killed below
+  # The stand-in's shells start their children by themselves: wait for the card's process to be there.
+  for _ in $(seq 50); do w=$(pgrep -P "$e") && c=$(pgrep -P "$w" sleep) && break; sleep 0.1; done
+  [ -n "$c" ] || fail "the stand-in's card process did not start"
+  jq -cn --argjson p "$e" --arg t "$(p_started "$e")" '{pid: $p, started: $t}' > "$ST/loop.json"
+  stoppedcard "$c" "$now"; kill -STOP "$e"
+  h=$(CONVEYOR_NOW=$((now + 30)) loop health >/dev/null; CONVEYOR_NOW=$((now + 90)) loop health | jq -c '[.loop, (.stuck | map([.issue, .step, .stopped])), .engineStopped]')
+  [ "$h" = "[true,[[1,\"build\",{\"pid\":$e,\"of\":\"engine\",\"since\":\"$s\"}]],{\"pid\":$e,\"since\":\"$s\"}]" ] \
+    || { kill -CONT "$e"; kill "$c" "$e"; fail "a card under a stopped engine, or the engine, is not named so at once, since it was first read stopped: $h"; }
+  kill -STOP "$c"; h=$(CONVEYOR_NOW=$((now + 150)) loop health | jq -c '.stuck | map(.stopped)'); kill -CONT "$c" "$e"
+  [ "$h" = "[{\"pid\":$e,\"of\":\"engine\",\"since\":\"$s\",\"own\":{\"pid\":$c,\"since\":\"$(jq -rn --argjson t $((now + 150)) '$t | todate')\"}}]" ] \
+    || { kill "$c" "$e"; fail "a stopped card process under a stopped engine is not named, so resuming the engine leaves it stopped: $h"; }
+  h=$(CONVEYOR_NOW=$((now + 150)) loop health | jq -c '[.loop, .stuck, .engineStopped]'); kill "$c" "$e"
+  [ "$h" = '[true,[],null]' ] || fail "a card under a running engine is stuck, or the engine reads as stopped: $h"
+}
+# The card's own process stopped, no loop running: stuck at once, named with its pid; resumed, it is not stuck; ended
+# (missing), it is stuck at once as gone, with no stopped process named.
+t_stoppedcard() {
+  local p now h; setup '[]'; now=$(date +%s)
+  sleep 600 & p=$! # sleep: the card's process, stopped, resumed and then killed below
+  stoppedcard "$p" "$now"; kill -STOP "$p"
+  h=$(CONVEYOR_NOW=$((now + 30)) loop health | jq -c '[(.stuck | map([.issue, .stopped])), .engineStopped]'); kill -CONT "$p"
+  [ "$h" = "[[[1,{\"pid\":$p,\"of\":\"card\",\"since\":\"$(jq -rn --argjson t $((now + 30)) '$t | todate')\"}]],null]" ] \
+    || { kill "$p"; fail "a stopped card process is not named so at once, or no loop reads as a stopped engine: $h"; }
+  h=$(CONVEYOR_NOW=$((now + 30)) loop health | jq -c .stuck); kill "$p"; wait "$p" 2>/dev/null
+  [ "$h" = '[]' ] || fail "a card whose process runs is stuck: $h"
+  [ "$(CONVEYOR_NOW=$((now + 30)) loop health | jq -c '.stuck | map([.issue, .stopped])')" = '[[1,null]]' ] \
+    || fail "a card whose process is gone is not stuck at once, as before, or names a stopped process: $(CONVEYOR_NOW=$((now + 30)) loop health | jq -c .stuck)"
+}
+
 # Bug caught (#515): a project's test command printed no `TESTRUN sec` lines, so no card recorded test times, and
 # health said nothing for the Board's Health to show. untimed counts its last card test runs, a pass and a fail, when
 # none recorded times (a batch's reused line and a run that selected no file are no run); once the last run records

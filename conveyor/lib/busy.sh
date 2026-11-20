@@ -102,26 +102,32 @@ busy_pids() { # <records file>
 }
 
 # The projects of the host file's records (projects(), lib/machine.sh), this one first, as one JSON array of {repo,
-# cards (its cards folder, as the kernel names it), read (its card records), pids (busy_pids)}. Another record's folders are those its
+# cards (its cards folder, as the kernel names it), read (its card records), pids (busy_pids), engine (busy_engine)}. Another record's folders are those its
 # own commands use (its `conveyor.sh state-dir`, and the cards folder's name kept there); a record whose cards folder
 # was never made has no cards, and is left out.
 busy_recs() {
   local me o r m e st k c
   me=$(cd "$MAIN" 2>/dev/null && pwd -P) || me=$MAIN
   c=$(cd "$CARDS" 2>/dev/null && pwd -P) || c=$CARDS
-  o=$(jq -cn --arg r "$REPO" --arg c "$c" --arg d "$READ" --argjson p "$(busy_pids "$READ")" '[{repo: $r, cards: $c, read: $d, pids: $p}]')
+  o=$(jq -cn --arg r "$REPO" --arg c "$c" --arg d "$READ" --argjson p "$(busy_pids "$READ")" --argjson e "$(busy_engine "$SAYS")" '[{repo: $r, cards: $c, read: $d, pids: $p, engine: $e}]')
   while IFS=$'\t' read -r r m e; do
     [ "$(cd "$m" 2>/dev/null && pwd -P)" != "$me" ] || continue
     st=$(env -u CONVEYOR_CARDS CONVEYOR_MAIN="$m" bash "$HERE/conveyor.sh" state-dir 2>/dev/null) && k=$(keptcards "$st/cards-folder") \
       && c=$(cd "$(dirname "$m")/$k" 2>/dev/null && pwd -P) || continue
-    o=$(jq -c --arg r "$r" --arg c "$c" --arg d "$st/cards.jsonl" --argjson p "$(busy_pids "$st/cards.jsonl")" '. + [{repo: $r, cards: $c, read: $d, pids: $p}]' <<<"$o")
+    o=$(jq -c --arg r "$r" --arg c "$c" --arg d "$st/cards.jsonl" --argjson p "$(busy_pids "$st/cards.jsonl")" --argjson e "$(busy_engine "$st/loop.json")" '. + [{repo: $r, cards: $c, read: $d, pids: $p, engine: $e}]' <<<"$o")
   done < <(projects)
   echo "$o"
 }
 
+# The pid of the loop (`run` or `serve`, the project's engine) that <loop.json> names, while it runs; else null.
+busy_engine() { # <loop.json>
+  local p t
+  IFS=$'\t' read -r p t < <(jq -r '[.pid, .started] | @tsv' "$1" 2>/dev/null) && [[ $p =~ ^[0-9]+$ ]] && p_alive "$p" "$t" && echo "$p" || echo null
+}
+
 # The processes of the table on stdin (busy_procs) with their card's facts laid in: step (an open card's live step;
-# none for a closed card's or no card's), issue, closed (null for a process no card owns).
-# Its project is busy_procs's: the repo of the record whose cards folder holds the card. This command's processes are
+# none for a closed card's or no card's), issue, closed (null for a process no card owns), stopped (true when a stop
+# signal holds it, state T: p_stoppedpids), engine (the repo whose loop it is, busy_recs's engine, else null). Its project is busy_procs's: the repo of the record whose cards folder holds the card. This command's processes are
 # those under its own shell ($$).
 busy_read() {
   local p c='{}' recs r i ids
@@ -132,13 +138,15 @@ busy_read() {
     mapfile -t ids < <(jq -r --arg r "$(jq -r .repo <<<"$r")" '[.[] | select(.project == $r) | .card] | unique[]' <<<"$p")
     c=$(jq -c --argjson n "$(busy_cards "$(jq -r .cards <<<"$r")" "$(jq -r .read <<<"$r")" "${ids[@]}")" '. + $n' <<<"$c") || return 1
   done
-  jq -c --argjson c "$c" 'map(. as $p | ($c[$p.card // ""] // null) as $k
-    | . + {issue: $k.issue, closed: $k.closed, step: (if $k == null or $k.closed then null else $k.step end)})' <<<"$p"
+  jq -c --argjson c "$c" --argjson rs "$recs" --argjson t "$(p_stoppedpids | jq -Rcs 'split("\n") | map(select(. != ""))')" 'map(. as $p | ($c[$p.card // ""] // null) as $k
+    | . + {issue: $k.issue, closed: $k.closed, step: (if $k == null or $k.closed then null else $k.step end), stopped: (.pid | tostring | IN($t[])),
+        engine: first($rs[] | select(.engine == $p.pid) | .repo) // null})' <<<"$p"
 }
 
 # conveyor.sh why <pid | name> [--json], of the table on stdin (busy_table 0): the process <pid>, or every process
 # whose program is <name>, with its parents, and the card, step and project it is of, or that no card owns it; a
-# closed card's process with the command that stops what that card left. Exit 1 when no process is so.
+# closed card's process with the command that stops what that card left; a stopped one (state T) with the command
+# that resumes it. Exit 1 when no process is so.
 busy_why() { # <pid | name> [--json]
   local all m
   all=$(busy_read) || return 1
@@ -153,27 +161,32 @@ busy_why() { # <pid | name> [--json]
     "  " + (if .card == null then "no card owns it"
       else "card \(.card)" + (if .issue then " (issue #\(.issue))" else "" end) + " of project \(.project)"
         + (if .closed then ", which is closed: it is left over; stop what the card left with: \(.stop)"
-           else ", in its \(.step // "unknown") step" end) end)' <<<"$m"
+           else ", in its \(.step // "unknown") step" end) end),
+    (if .stopped then "  stopped (state T): `kill -CONT \(.pid)` resumes it" else empty end)' <<<"$m"
 }
 
 # conveyor.sh work [--json], of the table on stdin (busy_table 1: a look of a second): the busy processes (BUSY_MIN),
 # by card and step, the heaviest CPU first (each group by its processes' sum), and then the busy processes no card
-# owns. A closed card's group is left over, and names the command that stops every process of the card.
+# owns. A closed card's group is left over, and names the command that stops every process of the card. A card's
+# process held by a stop signal (state T) uses no CPU, yet is listed with its card, named as stopped with the command
+# that resumes it: nothing of the card moves until then. So is a stopped engine (a project's `run` or `serve`, which no
+# card owns), with those no card owns.
 busy_work() { # [--json]
   local all w
   all=$(busy_read) || return 1
-  w=$(jq -c --argjson min "$BUSY_MIN" '. as $all | map(select(.cpu != null and .cpu >= $min) | del(.parents)) as $b
+  w=$(jq -c --argjson min "$BUSY_MIN" '. as $all | map(select((.cpu != null and .cpu >= $min) or (.stopped and (.card or .engine))) | .cpu //= 0 | del(.parents)) as $b
     | {groups: ([$b[] | select(.card)] | group_by([.card, .step]) | map({card: .[0].card, issue: .[0].issue, project: .[0].project,
         step: .[0].step, closed: .[0].closed, cpu: (map(.cpu) | add * 10 | round / 10),
         stop: (.[0].card as $k | if .[0].closed then "kill \([$all[] | select(.card == $k) | .pid] | sort | map(tostring) | join(" "))" else null end),
-        processes: (sort_by(-.cpu) | map({pid, cpu, command}))}) | sort_by(-.cpu)),
-       other: ([$b[] | select(.card == null) | {pid, cpu, command}] | sort_by(-.cpu))}' <<<"$all") || return 1
+        processes: (sort_by(-.cpu) | map({pid, cpu, command, stopped}))}) | sort_by(-.cpu)),
+       other: ([$b[] | select(.card == null) | {pid, cpu, command, stopped, engine}] | sort_by(-.cpu))}' <<<"$all") || return 1
   [ "${1:-}" != --json ] || { echo "$w"; return 0; }
   jq -r --argjson min "$BUSY_MIN" '"conveyor: busy now (\($min)% of one core or more over the last second), heaviest first",
     (.groups[] | "card \(.card)" + (if .issue then " (issue #\(.issue))" else "" end) + " of \(.project), "
         + (if .closed then "closed: left over" else "\(.step // "unknown") step" end) + ": \(.cpu)%",
-      (.processes[] | "  \(.cpu)%  \(.pid)  \(.command[:120])"),
+      (.processes[] | "  \(.cpu)%  \(.pid)  \(.command[:120])", (if .stopped then "    stopped (state T): `kill -CONT \(.pid)` resumes it" else empty end)),
       (if .stop then "  stop them: \(.stop)" else empty end)),
-    (if .other != [] then "no card owns:", (.other[] | "  \(.cpu)%  \(.pid)  \(.command[:120])") else empty end),
+    (if .other != [] then "no card owns:", (.other[] | "  \(.cpu)%  \(.pid)  \(.command[:120])",
+      (if .stopped then "    " + (if .engine then "the engine of \(.engine) is stopped" else "stopped" end) + " (state T): `kill -CONT \(.pid)` resumes it" else empty end)) else empty end),
     (if .groups == [] and .other == [] then "nothing is busy" else empty end)' <<<"$w"
 }
