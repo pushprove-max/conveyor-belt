@@ -429,10 +429,11 @@ EOF
 # on c4-16 and went on (its live record names no card). `retry` gave back #12, #14 and #16 before the run. The run
 # picks #11, the oldest; its build session makes c3-13 wait on c4-12, then waits for #12's build (a pipe, 100 s at
 # most): #12 is picked past the cap while #11 holds the only slot. #14 (not in --only) is never picked; #16 only once
-# #11 and #12 have landed.
+# #11 and #12 have landed. #16's build makes no change, so its card blocks with no review, test or landing: its pick
+# is all the case reads of it.
 t_sameoffrun() {
   setup "[$(issue 11 2026-01-01),$(issue 12 2026-01-02),$(issue 14 2026-01-03),$(issue 16 2026-01-04)]"; mkdir -p "$T/$CASE/cards"
-  for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done; tune '.tunables.poll = 1'; loop control cap 1 >/dev/null || fail "cap 1 was refused"
+  for i in 1 2; do echo "$GO" > "$STUB/review.$i"; done; tune '.tunables.poll = 1'; loop control cap 1 >/dev/null || fail "cap 1 was refused"
   for n in 12 14 16; do
     { landed $n | jq -c --arg c "c4-$n" '.card = $c | .step = "picked"'
       landed $n | jq -c --arg c "c4-$n" '.card = $c | .step = "blocked" | .result = "blocked" | .reason = "review 1: review failed (exit 124)"'
@@ -446,14 +447,15 @@ case $PWD in
   *-11) exec {L}<> "$STUB/built12"; jq -cn '{step: "land", waits: {on: "c4-12", paths: ["a.txt"]}}' > "$C/c3-13.live"
     read -r -t 100 l <&"$L" && : > "$STUB/heard12"; exec {L}<&-; echo eleven > b.txt ;;
   *-12) echo go 1<> "$STUB/built12"; echo twelve > c.txt ;;
-  *) echo sixteen > e.txt ;;
+  *) : ;;
 esac
 EOF
   out=$(loop run --only 11,12,16 2>&1) || fail "run exited non-zero: $out"
   [ -e "$STUB/heard12" ] || fail "the retried #12 was not picked while #11 held the only slot: $(st '"\(.issue) \(.step)"' | tr '\n' ,)"
   [ -z "$(st 'select(.issue == 14 and .step == "picked")')" ] || fail "run --only 11,12,16 picked the retried #14: $(st '"\(.issue) \(.step)"' | tr '\n' ,)"
-  # The picked and landed lines in their order, #11's and #12's landings in either order.
+  # The picked and landed lines in their order, #11's and #12's landings in either order; #16, built to no change,
+  # blocks and never lands.
   [ "$(jq -rs '[.[] | select((.issue | IN(11, 12, 16)) and (.step | IN("picked", "landed"))) | "\(.issue) \(.step)"] | [.[:2], (.[2:4] | sort), .[4:]] | map(join(",")) | join(" ")' "$ST/cards.jsonl")" \
-    = "11 picked,12 picked 11 landed,12 landed 16 picked,16 landed" ] \
-    || fail "#16, waited on by nobody now, was picked past the cap, or a card did not land: $(st '"\(.issue) \(.step)"' | tr '\n' ,)"
+    = "11 picked,12 picked 11 landed,12 landed 16 picked" ] \
+    || fail "#16, waited on by nobody now, was picked past the cap, or #11 or #12 did not land: $(st '"\(.issue) \(.step)"' | tr '\n' ,)"
 }
