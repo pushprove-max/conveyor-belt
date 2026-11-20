@@ -553,6 +553,7 @@
 {"area": "testrun", "test": "speedretry.test.sh"}
 {"area": "issues", "test": "speedretry.test.sh"}
 {"area": "run", "file": "conveyor/lib/run.sh"}
+{"area": "run", "test": "turnwait.test.sh"}
 {"area": "run", "test": "landas.test.sh"}
 {"area": "machine", "test": "machine.test.sh"}
 {"area": "machine", "test": "machinefds.test.sh"}

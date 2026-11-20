@@ -476,3 +476,16 @@ t_overlapfail() {
   loop run >/dev/null 2>&1
   [ "$(picks)" = "2 3 4 " ] && [ ! -s "$STUB/edits" ] || fail "with the judgement failing, an issue was not picked or got a dependency: $(picks) $(cat "$STUB/edits" 2>/dev/null)"
 }
+# The same-file check asked of the builder's Claude seat itself (askmodel(), no CONVEYOR_OVERLAP_CMD), whose stub
+# answers as Claude Code does with --output-format json: a result record. Bug (issue 881's lead): a stub, or an
+# askmodel(), out of step with that form fails every check, and each card is picked without it.
+t_overlapseat() {
+  setup "[$(issue 1 2026-01-01), $(issue 2 2026-01-02)]"
+  printf '%s\n' '#!/usr/bin/env bash' 'cat > "$STUB/asked"; echo "$*" > "$STUB/args"' \
+    'j=$(jq -cn '"'"'{type: "result", is_error: false, subtype: "success", result: "DEPENDS #1: conveyor/lib/pick.sh", num_turns: 1}'"'"')' \
+    '[[ " $* " == *" --output-format json "* ]] && echo "$j" || jq -r .result <<<"$j"' > "$STUB/claude"
+  fx_in 'unset CONVEYOR_OVERLAP_CMD; overlapcall 2 "[1]" "$(cat "$STUB/issues.json")" ""'
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = $'1\tconveyor/lib/pick.sh' ] \
+    || fail "the same-file check on the Claude seat gave no answer (exit $RC): $(cat "$T/$CASE/run.out") (asked with: $(cat "$STUB/args" 2>/dev/null))"
+  grep -q '^# The queued issue$' "$STUB/asked" || fail "the seat was not asked the same-file question: $(head -c 300 "$STUB/asked")"
+}

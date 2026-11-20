@@ -302,6 +302,20 @@ unstick() { # <issue>
 cardsrun() {
   running=$(($(jobs -rp | grep -cvx -e "${pusher:-0}" -e "${tester:-0}" -e "${taker:-0}" -e "${muter:-0}" -e "${prober:-0}" -e "${merger:-0}" -e "${fixer:-0}") + ${#took[@]}))
 }
+# The wait that ends a turn, in run()'s own variables: until the turn's timer, one of the loop's cards (mine), the
+# push (pusher) or the machine hold's look (prober, which runends() waits for) ends, at once when one of them has
+# ended already. The other jobs beside the cards (take, relfixes, maintest, mutnext, idlemerge) never end it:
+# relfixes, started every IDLE seconds, ended during each turn, so a bare `wait -n` returned at once and the loop ran
+# turn after turn with no wait (issue 881). A job named that ended before is waited no more: bash keeps its status,
+# and a wait on it returns at once at every turn. The prober is named only while it runs, as nothing clears it (the
+# push is cleared at the turn's start, pushended(); a card leaves mine). An adopted card is no job of this shell's;
+# wait passes over it.
+turnwait() {
+  local j=()
+  [ -z "$pusher" ] || j+=("$pusher")
+  [ -z "$prober" ] || ! jobs -rp | grep -qx "$prober" || j+=("$prober")
+  wait -n "$timer" "${j[@]}" "${!mine[@]}" 2>/dev/null
+}
 # A `run` (not a serve) may end at this turn, read in run()'s own variables: no card of its own runs, no push
 # (pusher) or machine-hold look (prober) is under way, and no pick waits.
 runends() {
@@ -596,13 +610,13 @@ run() { # [max-cards] [serve]
       [ -n "$nopack" ] || ! owed=$(owed) || [ "$owed" = "$tried" ] || continue
       break
     fi
-    # wait -n returns at once when every card has already ended; the next turn then picks with none running.
+    # The wait (turnwait()) returns at once when a card has already ended; the next turn then counts it as gone.
     # A timer ends the wait too, even with every slot taken, so a push that is owed is tried on time; it is gone
     # again before the cards are next counted. Its length is worked out here, not in the timer: one ended while it
     # still worked that out wrote an error (a broken pipe) into the loop's output, at any turn.
     { [ "$running" != 0 ] || [ -n "$pusher" ] || [ -n "$waits" ]; } && t=$POLL || t=$IDLE
     sleep "$t" 8>&- & timer=$!
-    wait -n; kill "$timer" 2>/dev/null; wait "$timer" 2>/dev/null
+    turnwait; kill "$timer" 2>/dev/null; wait "$timer" 2>/dev/null
   done
   if [ -n "$old" ]; then echo "conveyor: this run ends: the pack pins another Conveyor commit; start it again from that commit's install"
   elif [ "$started" = 0 ] && [ -z "$tried" ]; then
