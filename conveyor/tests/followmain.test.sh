@@ -141,29 +141,18 @@ t_followshim() {
   [ "$(hook)" = 'one input' ] && [ "$(engine .commit)" = "$X1" ] || fail "the shim left the engine before it was taken, or took again within a minute"
   # Bug: a machine that runs hooks but no loop (`serve`) stays on its first commit for good. Its last look a minute
   # gone, a hook runs on the engine it has and starts a take beside it, with nobody asked; a later hook runs the new one.
+  # Bug (#179): a hook's background take threw its output and exit code away, so a project that follows main could
+  # stay on an old engine for hours and nothing said why. Run as Claude Code runs a hook (CONVEYOR_HOOK=1), the shim
+  # ends at once, its streams the hook's own; the take it started then moves the project to main's new commit and
+  # keeps its run in the log.
   touch -t 200001010000 "$R/.git/conveyor-engine.look"
-  [ "$(hook)" = 'one input' ] || fail "the shim left the engine before it was taken: $(cat "$STUB/shim.err")"
-  wait_until '[ "$(engine .commit)" = "$X2" ]' 'cat "$R/.git/conveyor-engine.json"' || fail "the shim did not take the plugin's new main on a machine with no loop"
-  [ "$(hook)" = 'two input' ] || fail "the shim did not run the hook from the new engine: $(cat "$STUB/shim.err")"
-}
-
-# Bug (#179): a hook's background take threw its output and exit code away, so a project that follows main could stay
-# on an old engine for hours and nothing said why. Run as Claude Code runs a hook (CONVEYOR_HOOK=1), the shim ends at
-# once; the take it started then moves the project to main's new commit and keeps its run in the log.
-t_followhook() {
-  setup '[]'; coderepo; trap 'chmod -R u+w "$T/$CASE"' EXIT
-  tune '.plugin = {follow: "main"}'
-  pushed "cp '$SRC/../shim.sh' shim.sh && printf '#!/bin/sh\necho ran\n' > probe.sh && chmod +x probe.sh"; X1=$NEW
-  bash "$D/conveyor/conveyor.sh" install "$X1" >/dev/null && takeby "$X1" >/dev/null || fail "the first commit was not taken"
-  pushed "echo two > two.txt"; X2=$NEW
-  # The shim's last look a minute gone: its next call starts a take.
-  touch -t 200001010000 "$R/.git/conveyor-engine.look"
-  out=$(echo '{}' | CONVEYOR_HOOK=1 CLAUDE_PROJECT_DIR=$R bash "$D/shim.sh" probe.sh 2>&1) && [ "$out" = ran ] \
-    || fail "the hook did not run, or the take wrote to its streams: $out"
+  out=$(echo input | CONVEYOR_HOOK=1 CLAUDE_PROJECT_DIR=$R bash "$D/shim.sh" probe.sh 2>&1) && [ "$out" = 'one input' ] \
+    || fail "the shim left the engine before it was taken, or the take wrote to the hook's streams: $out"
   wait_until '[ "$(engine .commit)" = "$X2" ] && [ -s "$R/.git/conveyor-engine.log" ]' 'cat "$R/.git/conveyor-engine.json" "$R/.git/conveyor-engine.log"' \
-    || fail "the hook's background take did not move the project to main's new commit, or kept no log"
+    || fail "the shim did not take the plugin's new main on a machine with no loop, or kept no log"
   jq -se --arg c "$X1" 'length == 1 and .[0].by == $c and .[0].exit == 0 and (.[0].time | fromdate) > 0' "$R/.git/conveyor-engine.log" >/dev/null \
     || fail "the log does not keep the take's run by the engine that ran it: $(cat "$R/.git/conveyor-engine.log")"
+  [ "$(hook)" = 'two input' ] || fail "the shim did not run the hook from the new engine: $(cat "$STUB/shim.err")"
 }
 
 # Bug (#186): the install of the project's taken commit was removed (another project's prune), and every hook then ran
