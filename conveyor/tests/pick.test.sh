@@ -9,6 +9,13 @@
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
+# <command> [<arg>...] in a shell with the engine's functions, sourced as the loop's turn sources them
+# (commands/run.sh): a case of one function calls it, not the whole program. Its stderr goes to $T/$CASE/err.
+pickfn() {
+  ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
+    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names && "$@" ) 2> "$T/$CASE/err"
+}
+
 # The issues the loop picks one after another, as "<n> <n> ": a dry pick (the issue the loop's next turn picks, t_dry),
 # then a picked line for it in the records, as a card's first line, until no issue qualifies.
 dryorder() {
@@ -20,6 +27,15 @@ dryorder() {
     jq -cn --argjson n "$n" '{card:"c9-\($n)",issue:$n,step:"picked",time:"2026-11-01T00:00:00Z",tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""}' >> "$ST/cards.jsonl"
   done
   echo "$out"
+}
+
+# The order of the open issues as a pick reads it (upnext(), lib/pick.sh, which the snapshot's queue is made from), as
+# [the issues a pick would take, in pick order; [issue, rule] of each one a rule skips, sorted; every issue it lists,
+# sorted]. An issue a pick never takes (one labelled awaiting-deploy) is not listed. upnext is called, not the snapshot:
+# the snapshot's queue is its rows reshaped (its skipped and next lists: tests/control.test.sh), and one costs about 2 s.
+upqueue() {
+  pickfn upnext "$(cat "$STUB/issues.json")" '' all | jq -c '[map(select((.hold | not) and .rule == null and (.waits == [] or .forced) and (.before | not)) | .number),
+    (map(select(.rule != null) | [.number, .rule]) | sort), (map(.number) | sort)]'
 }
 
 # Bugs: an older, higher-priority issue is built before a waiting follow-up; a follow-up Conveyor filed
@@ -55,9 +71,7 @@ t_bulk() {
   setup "[$(issue 7 2026-01-01 area:billing)]"
   for i in $(seq 1 25); do jq -cn --arg i "$i" '{id: ("r-b" + $i), question: "billing?", answer: ("y" * 5000)}'; done >> "$STUB/rulings"
   local out
-  out=$( ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
-    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names && brief c1-7 "$(jq -c '.[0]' "$STUB/issues.json")" 'The header.' ) 2> "$T/$CASE/err") \
-    || fail "brief failed: $(cat "$T/$CASE/err")"
+  out=$(pickfn brief c1-7 "$(jq -c '.[0]' "$STUB/issues.json")" 'The header.') || fail "brief failed: $(cat "$T/$CASE/err")"
   grep -q '"r-b25"' <<<"$out" && grep -q '"r-b6"' <<<"$out" && ! grep -q '"r-b5"' <<<"$out" || fail "brief does not hold just the newest 20 rulings: $(head -c 400 <<<"$out")"
   [ "$(wc -c <<<"$out")" -lt 20000 ] || fail "brief rulings not cut short: $(wc -c <<<"$out") bytes"
 }
@@ -85,8 +99,8 @@ t_emptyrelease() {
     <(issue 4 2026-01-01 awaiting-deploy P0) <(issue 5 2026-01-01 conveyor-followup awaiting-deploy P0))"
   loop control hold 1 2 3 >/dev/null
   loop control release 1 2 3 >/dev/null
-  out=$(CONVEYOR_SKIP='["backlog","dormant","ux-change"]' loop snapshot --fresh | jq -c '[(.queue.next | map(.issue) | sort), (.open.held | map(.issue))]')
-  [ "$out" = '[[1,2,3],[4,5]]' ] || fail "a released backlog, dormant or ux-change issue is not next, or an awaiting-deploy one is not held: $out"
+  out=$(CONVEYOR_SKIP='["backlog","dormant","ux-change"]' upqueue | jq -c '.[0] |= sort')
+  [ "$out" = '[[1,2,3],[],[1,2,3]]' ] || fail "a released backlog, dormant or ux-change issue is not next, or an awaiting-deploy one is in the order: $out $(cat "$T/$CASE/err")"
 }
 # The open issues of t_emptyfar and t_emptyfarrun: 1,000 awaiting-deploy ones, then #1001, the one that qualifies. The
 # 1,000 are made from one issue in one jq, not one jq each (that took about 2 s).
@@ -138,16 +152,16 @@ t_p3rule() {
   jq -e '.rules | has("P3") | not' "$ST/control.json" >/dev/null || fail "the seeded record already has a P3 key"
   [ "$(loop control | jq -c .rules.P3)" = true ] || fail "a record with no P3 key does not read as P3 on: $(loop control)"
   [ "$(loop control rules P3=off | jq -c .rules.P3)" = false ] || fail "rules P3=off did not turn P3 off: $(cat "$ST/control.json")"
-  [ "$(loop snapshot --fresh | jq -c '[(.queue.skipped | map([.issue, .rule]) | sort), (.queue.next | map(.issue))]')" = '[[[5,"P3"],[6,"P3"]],[7]]' ] \
-    || fail "P3 off: the P3 and unprioritised issues are not skipped by the rule P3: $(loop snapshot --fresh | jq -c .queue)"
+  out=$(upqueue); [ "$out" = '[[7],[[5,"P3"],[6,"P3"]],[5,6,7]]' ] \
+    || fail "P3 off: the P3 and unprioritised issues are not skipped by the rule P3: $out $(cat "$T/$CASE/err")"
 }
 # On again (t_p3rule turns it off): the P3 and unprioritised issues are picked.
 t_p3on() {
   setup "$(jq -cs . <(issue 5 2026-01-01 P3) <(issue 6 2026-02-01))"
   [ "$(loop control rules P3=off | jq -c .rules.P3)" = false ] || fail "rules P3=off did not turn P3 off: $(cat "$ST/control.json")"
   [ "$(loop control rules P3=on | jq -c .rules.P3)" = true ] || fail "rules P3=on did not turn P3 on: $(cat "$ST/control.json")"
-  [ "$(loop snapshot --fresh | jq -c '[(.queue.skipped | map(.issue)), (.queue.next | map(.issue))]')" = '[[],[5,6]]' ] \
-    || fail "P3 on: the P3 and unprioritised issues are skipped, or not next: $(loop snapshot --fresh | jq -c .queue)"
+  out=$(upqueue); [ "$out" = '[[5,6],[],[5,6]]' ] \
+    || fail "P3 on: the P3 and unprioritised issues are skipped, or not next: $out $(cat "$T/$CASE/err")"
 }
 
 # Bugs: lowest priority or newest picked first; an issue with a card (open after a restart) picked again; a second
@@ -176,13 +190,12 @@ t_pick() {
   [ ! -e "$STUB/list-asked" ] && [ "$(wc -l < "$ST/cards.jsonl")" = "$lines" ] || fail "the refused loop asked for the open issues or wrote a record"
 }
 
-# A7: `pick --dry` answers from frozen inputs, the same each time and the issue the loop then picks, and writes
+# A7: `pick --dry` answers from frozen inputs, the same each time and the issue the loop's pick() then takes, and writes
 # nothing: not in the state folder it reads, not in main's, and no card. Issue 7 is opened while new issues start held:
 # a dry pick that did not apply adopt()'s hold would answer 7 (P0), not 6.
 t_dry() {
-  local d=$T/$CASE/frozen mark=$T/$CASE.mark a b before
+  local d=$T/$CASE/frozen mark=$T/$CASE.mark a b before out
   setup "$(jq -cs . <(issue 5 2026-01-01 P3) <(issue 6 2026-02-01 P1) <(issue 4 2026-03-01 P1) <(issue 7 2026-04-01 P0))"
-  tune '.worktree.setup = "exit 1"'
   jq -c '.start = "held" | .startHeld = [{from: 6, to: null}]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
   echo '{"card":"c0-4","issue":4,"step":"picked","time":"2026-11-01T00:00:00Z","tokens":{"claude":0,"codex":0},"result":"ok","sha":"","reason":""}' > "$ST/cards.jsonl"
   mkdir -p "$d"; cp "$ST/cards.jsonl" "$ST/control.json" "$d/"
@@ -196,7 +209,10 @@ t_dry() {
   # Bug: a dry pick of the state folder itself asked the state database, which made (or wrote) state.db there.
   [ "$(loop pick --dry --issues "$STUB/issues.json" --state "$ST")" = 6 ] || fail "a dry pick of the state folder did not answer 6"
   [ "$(listing)" = "$before" ] && [ -z "$(find "$d" "$ST" "$T/$CASE" -newer "$mark")" ] || fail "a dry pick wrote a file: $(find "$d" "$ST" "$T/$CASE" -newer "$mark")"
-  loop run 1 >/dev/null; [ "$(st 'select(.step == "picked") | .issue' | tail -1)" = "$a" ] || fail "the loop picked $(st 'select(.step == "picked") | .issue' | tail -1), the dry pick $a"
+  # The loop's turn picks with pick() (lib/run.sh), which holds a new issue (adopt()) before it picks: called as the
+  # turn calls it, it takes the dry pick's issue and records it. A whole turn of the loop is t_emptyfarrun's.
+  out=$(pickfn pick '' '' "$(cat "$STUB/issues.json")") || fail "the pick failed: $(cat "$T/$CASE/err")"
+  [ "${out#* }" = "$a false" ] && [ "$(st 'select(.step == "picked") | .issue' | tail -1)" = "$a" ] || fail "the loop's pick took $out ($(st 'select(.step == "picked") | .issue' | tail -1) recorded), the dry pick $a"
   # Relative paths are read from where it is called; a reading at the guard picks nothing, as the loop picks nothing.
   [ "$(cd "$d" && loop pick --dry --issues "$STUB/issues.json" --state .)" = 6 ] || fail "a relative state folder was not read from the caller's folder"
   jq -c '.guard = 50' "$d/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$d/control.json"
@@ -217,9 +233,7 @@ t_dry() {
 t_pickjson() {
   setup "[$(issue 5 2026-01-01 | jq -c '.number = "5x"'), $(issue 6 2026-02-01)]"
   local out err; mkdir -p "$ST" && : > "$ST/cards.jsonl"
-  out=$( ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
-    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names && pick '' '' "$(cat "$STUB/issues.json")" ) 2> "$T/$CASE/err") \
-    || fail "the pick failed: $(cat "$T/$CASE/err")"
+  out=$(pickfn pick '' '' "$(cat "$STUB/issues.json")") || fail "the pick failed: $(cat "$T/$CASE/err")"
   err=$(cat "$T/$CASE/err")
   [ "${out#* }" = '6 false' ] && [ "$(st 'select(.step == "picked") | .issue')" = 6 ] || fail "the other ready issue was not picked by the same pick: out=$out $(st .)"
   grep -qF 'conveyor: the pick step could not read the title and created time of #5x as JSON; #5x is skipped, and the next ready issue is picked' <<<"$err" \
@@ -235,9 +249,6 @@ t_pickkept() {
     && jq -cn '{card:"c1-5",issue:5,step:"picked",time:"2026-11-01T00:00:00Z",result:"ok"}' > "$T/$CASE/hrec" && : > "$T/$CASE/hold" \
     || fail "the fixture could not be written"
   local out
-  out=$( ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
-    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names \
-    && UPREC=$T/$CASE/hrec UPOLD=$T/$CASE/hold upnext "$(cat "$STUB/issues.json")" '' all ) 2> "$T/$CASE/err") \
-    || fail "upnext failed: $(cat "$T/$CASE/err")"
+  out=$(UPREC=$T/$CASE/hrec UPOLD=$T/$CASE/hold pickfn upnext "$(cat "$STUB/issues.json")" '' all) || fail "upnext failed: $(cat "$T/$CASE/err")"
   [ "$(jq -c 'map(.number)' <<<"$out")" = '[6]' ] || fail "the order did not come from the kept summary's lines: $(head -c 400 <<<"$out")"
 }
