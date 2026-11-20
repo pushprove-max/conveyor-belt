@@ -290,6 +290,20 @@ t_narrowownwhole() {
     || fail "the test line's list: $(cat "$T/$CASE/cards/c7.rec")"
 }
 
+# #1000. Bug it catches: a card that changed a helper of its own test file (slotwhole.test.sh's wholerun) ran that file
+# alone, never the other files that call the helper, though .conveyor/test-links.json links them to it. A change to
+# a.test.sh's helper, linked to b.test.sh, c.test.sh and a file that is gone, runs a.test.sh, b.test.sh and c.test.sh
+# whole: b.test.sh, which the card did not change, is added to the list (E2), and c.test.sh, whose case t_ctwo the
+# card also changed, runs whole, not t_ctwo alone (E1: t_cone, which it did not change, can call the helper).
+t_narrowownlinks() {
+  ownrun "mkdir -p .conveyor && echo '{\"tests/a.test.sh\": [\"tests/b.test.sh\", \"tests/c.test.sh\", \"tests/gone.test.sh\"]}' > .conveyor/test-links.json \
+    && ownedit tests/a.test.sh 'echo a;' 'echo A;' && ownedit tests/c.test.sh '^  echo 2\$' '  echo 22'"
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sort "$STUB/got" 2>&1)" = $'one:tests/a.test.sh|\none:tests/b.test.sh|\none:tests/c.test.sh|' ] \
+    || fail "the changed helper's linked files did not run whole (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
+  [ "$(jq -c '.list | [.files, .cases]' "$T/$CASE/cards/c7.rec")" = '[3,null]' ] \
+    || fail "the test line's list: $(cat "$T/$CASE/cards/c7.rec")"
+}
+
 # D2 (#384). Bug it catches: a change with no test file of its own, linked to nearly every test file (a shared
 # helper), ran all of them, about 45 minutes a card. Of 120 linked files it runs 5, each alone: the two that failed
 # most recently in a test step on record, newest first, then the rest in order; the test line and output say so and
