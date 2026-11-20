@@ -3,7 +3,7 @@
 # The test lint (test-lint.sh): a test that sleeps a set time and then checks fails on a busy machine, where the thing
 # has not happened yet. So such a sleep fails the lint, and with it every test run (test-changed.sh runs the lint);
 # a wait for the condition, a loop's own pause and a sleep that says why pass. A full-loop run the change adds with no
-# "# loop: <why>" fails it too.
+# "# loop: <why>" fails it too, and so does a hand-written CLI stub it adds with no "# stub: <why>".
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd -P); ROOT=$(dirname "$HERE")
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
@@ -153,14 +153,41 @@ loopcheck() {
   else printf 'ok\tfails: a full-loop run the change added with no "# loop:", and only that'; fi
 }
 k=$((k + 1)); loopcheck > "$T/res.$k" &
-# With no merge base with main, the loop check finds nothing, and the sleep check still fails a sleep-then-check.
+# A claude, codex, opencode or gh a test writes for itself does not answer in the form the engine reads, and
+# clicontract.test.sh does not see it, so the lint fails one a change adds (with >, >>, tee, cp, mv or install) with no
+# "# stub: <why>" on its line or the line above. A file the shared stub reads ($STUB/build, codex-answer) is no stub;
+# a stub named in quoted text, copied from, or moved off PATH is written by nothing; a "# stub:" in quoted text clears
+# nothing; a line the change did not touch is not read. Bug: without it, a card's new test wrote its own stub where
+# the shared one would do, and nothing said so.
+stubcheck() {
+  local L=$T/stub exp got
+  mkdir -p "$L/.conveyor" "$L/conveyor/tests"; cp "$HERE/test-lint.sh" "$L/.conveyor/"
+  printf '%s\n' 't_old() {' '  printf x > "$STUB/codex"' '}' > "$L/conveyor/tests/old.test.sh"
+  git -C "$L" init -q -b main && git -C "$L" add -A && git -C "$L" -c user.name=t -c user.email=t@example.com commit -qm init \
+    && git -C "$L" checkout -q -b card || { printf 'no\tstub check: the fixture could not be made'; return; }
+  printf '%s\n' 't_a() {' "  cat > \"\$STUB/codex\" <<'EOF'" 'exit 0' 'EOF' '  # stub: a codex that keeps its arguments' \
+    "  printf '#!/bin/sh\\n' > \"\$STUB/claude\"" "  echo x >> \"\$G/opencode\" # stub: setup's own PATH folder" \
+    '  echo 1 > "$STUB/build"; echo a > "$STUB/codex-answer"; echo b >"$STUB/gh.out"' '  cp "$SRC/x" "$B/gh"' \
+    '  mv "$T/c" "$STUB"/claude' '  printf x | tee -a "$STUB/codex" >/dev/null' '  X=1 install -m 755 /dev/null $D/opencode' \
+    "  echo \"a > \$STUB/codex\"; cp \"\$STUB/codex\" \"\$T/saved\"" "  echo '# stub: x'; cat >\"\$STUB/gh\"" \
+    '  mv "$STUB/codex" "$STUB/codex.off"' '}' > "$L/conveyor/tests/a.test.sh"
+  if (cd "$L" && bash .conveyor/test-lint.sh) > "$T/stub.out" 2>&1; then printf 'no\tstub check: the lint passed'; return; fi
+  exp=$(printf '%s\n' conveyor/tests/a.test.sh:{2,9,10,11,12,14} | LC_ALL=C sort)
+  got=$(grep -o '^conveyor/tests/[a-z]*\.test\.sh:[0-9]*' "$T/stub.out" | LC_ALL=C sort)
+  if [ "$got" != "$exp" ]; then printf 'no\tstub check: not the lines %s: %s' "$(echo $exp)" "$(cat "$T/stub.out")"
+  elif ! grep -q '"# stub: <why>" comment' "$T/stub.out"; then printf 'no\tstub check: the comment that clears it is not named: %s' "$(cat "$T/stub.out")"
+  else printf 'ok\tfails: a hand-written stub the change added with no "# stub:", and only that'; fi
+}
+k=$((k + 1)); stubcheck > "$T/res.$k" &
+# With no merge base with main, the loop and stub checks find nothing, and the sleep check still fails a
+# sleep-then-check.
 nobase() {
   local N=$T/nobase
   mkdir -p "$N/.conveyor" "$N/conveyor/tests"; cp "$HERE/test-lint.sh" "$N/.conveyor/"
-  printf '%s\n' 'loop run' 'sleep 2; [ -e x ] || fail "no x"' > "$N/conveyor/tests/a.test.sh"
+  printf '%s\n' 'loop run' 'sleep 2; [ -e x ] || fail "no x"' 'cat > "$STUB/codex"' > "$N/conveyor/tests/a.test.sh"
   git -C "$N" init -q -b trunk && git -C "$N" add -A || { printf 'no\tno merge base: the fixture could not be made'; return; }
   if (cd "$N" && bash .conveyor/test-lint.sh) > "$T/nobase.out" 2>&1; then printf 'no\tno merge base: a sleep-then-check passed'
-  elif grep -q 'full-loop\|a.test.sh:1:' "$T/nobase.out" || ! grep -q '^conveyor/tests/a.test.sh:2: ' "$T/nobase.out"; then
+  elif grep -q 'full-loop\|hand-written\|a.test.sh:[13]:' "$T/nobase.out" || ! grep -q '^conveyor/tests/a.test.sh:2: ' "$T/nobase.out"; then
     printf 'no\tno merge base: not the sleep alone: %s' "$(cat "$T/nobase.out")"
   else printf 'ok\tfails: with no merge base, the sleep-then-check alone'; fi
 }

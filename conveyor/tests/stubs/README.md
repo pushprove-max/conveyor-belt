@@ -4,7 +4,9 @@ One stub for each CLI the engine tests fake: `claude`, `codex`, `opencode`, `gh`
 case's `$STUB` and puts that folder first on `PATH`. A case sets what a stub answers with files in `$STUB`; the header
 of each stub lists them. `clicontract.test.sh` runs the engine's own reading code against them.
 
-A new test uses these stubs. A case that needs something the stub cannot do writes its own, with a comment saying why.
+A new test uses these stubs. A case that needs something the stub cannot do writes its own, with a `# stub: <why>`
+comment on the line that writes it or the line above. The test lint (`.conveyor/test-lint.sh`) fails a line the change
+added or changed that writes a `claude`, `codex`, `opencode` or `gh` with no such comment.
 
 ## Local stubs that stay
 

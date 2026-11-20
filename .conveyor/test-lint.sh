@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # The test lint: no test sleeps a set time and then checks that something happened (on a busy machine it has not
 # happened yet, and the test fails), and no test the change adds runs the whole loop without saying why (a loop run
-# pays for the loop, its sessions and waits). test-changed.sh runs it on every run (in one-file mode in a test step, once
+# pays for the loop, its sessions and waits) or writes its own CLI stub without saying why (the shared stub answers in
+# the form the engine reads). test-changed.sh runs it on every run (in one-file mode in a test step, once
 # a tree); test-lint.test.sh is its own test.
 # Usage: test-lint.sh [<file>...]   (default: every shell test file under conveyor/ and .claude/scripts/__tests__/:
 # each *.test.sh, and the shared files of conveyor/tests/). Exit 1, naming each line, when a line calls sleep and the
@@ -28,6 +29,11 @@
 # assignments, exec, env, command, nohup, time, timeout <n>, bash or sh. One named in quoted text or in a comment, or
 # passed as an argument to another command, is not a run. With no merge base, or nothing changed, this check finds
 # nothing.
+# It also exits 1, naming each line, when a line this change added or changed writes a hand-written stub: a file named
+# claude, codex, opencode or gh (by any path, quoted or not) as the target of a `>` or `>>`, of tee, or the last
+# argument of cp, mv or install, and no `# stub: <why>` comment, read as `# loop:` is, is on that line or on the line
+# above. A file the shared stub reads (`$STUB/build`, `$STUB/codex-answer`) is no stub. One named in quoted text or
+# in a comment writes nothing. With no merge base, or nothing changed, this check finds nothing too.
 set -u
 cd "$(dirname "$0")/.." || exit 1
 if [ $# = 0 ]; then
@@ -35,7 +41,7 @@ if [ $# = 0 ]; then
     | while read -r f; do case $f in *.test.sh|conveyor/tests/*) [ ! -f "$f" ] || echo "$f" ;; esac; done)
 else files=("$@"); fi
 [ ${#files[@]} != 0 ] || exit 0
-# The lines the change added or changed, <file>:<line> one a line, for the loop check: of each hunk of the diff from
+# The lines the change added or changed, <file>:<line> one a line, for the loop and stub checks: of each hunk of the diff from
 # the merge base with main to the worktree, +<start>[,<count>] (count 1 when left out); of a file git does not track,
 # <file>:all. With no merge base, none.
 chg=
@@ -48,6 +54,29 @@ fi
 bad=$(awk -v kf=<(printf '%s\n' "$chg") '
   BEGIN { while ((getline x < kf) > 0) if (x != "") keep[x] = 1; close(kf) }
   function code(l) { return l !~ /^[ \t]*(#|$)/ }
+  # stubname(w): whether the word w (its quotes dropped) names a file claude, codex, opencode or gh.
+  function stubname(w) { gsub(/["\047]/, "", w); sub(/.*\//, "", w); return w ~ /^(claude|codex|opencode|gh)$/ }
+  # stub(s): whether the code s (cl of a line) writes a stub: the target of a > or >>, a file tee writes, or the last
+  # argument of cp, mv or install (each command of s, after any !, do, then, else, command, sudo or assignments).
+  function stub(s,   r, w, sg, ns, j, wd, nw, a, c) {
+    r = s
+    while (match(r, />>?[ \t]*[^ \t;&|<>()]+/)) {
+      w = substr(r, RSTART, RLENGTH); r = substr(r, RSTART + RLENGTH); sub(/^>>?[ \t]*/, "", w)
+      if (stubname(w)) return 1
+    }
+    ns = split(s, sg, /[;&|(){}`]/)
+    for (j = 1; j <= ns; j++) {
+      gsub(/[0-9]*(>>?|<)[ \t]*[^ \t;&|<>()]*/, " ", sg[j])
+      nw = split(sg[j], wd, /[ \t]+/)
+      for (a = 1; a <= nw && (wd[a] == "" || wd[a] ~ /^(!|do|then|else|command|sudo|[A-Za-z_][A-Za-z0-9_]*=.*)$/); a++) ;
+      if (a > nw) continue
+      c = wd[a]; gsub(/["\047]/, "", c); sub(/.*\//, "", c)
+      while (nw > a && wd[nw] == "") nw--
+      if (c ~ /^(cp|mv|install)$/ && nw > a && stubname(wd[nw])) return 1
+      if (c == "tee") for (a++; a <= nw; a++) if (wd[a] !~ /^-/ && stubname(wd[a])) return 1
+    }
+    return 0
+  }
   # open(s): where in s the innermost loop still open at its end begins (its while, until or for), 0 with none.
   function open(s,   r, base, ms, ml, m, n, st) {
     n = 0; base = 0; r = s
@@ -83,8 +112,9 @@ bad=$(awk -v kf=<(printf '%s\n' "$chg") '
   # says(c, t): whether one of the comments c (as reason gives them) is "# <t>: <why>".
   function says(c, t) { return c ~ ("(^|\001)#[ \t]*" t ":[ \t]*[^ \t\001]") }
   # reason(l): the comments l holds, each after a \001 ("" with none); in cs, l without its comments and with its
-  # single-quoted text blanked, and in double-quoted text each ;&|(){}! made a _, so it begins no command (where the
-  # loop check looks for a run). A comment begins at a # that begins a word of
+  # single-quoted text blanked, and in double-quoted text each ;&|(){}!<> made a _, so it begins no command and
+  # writes no file (where the loop and stub checks look for a run and a write). A comment begins at a # that begins a
+  # word of
   # the code of the test file: "# sleep: <why>" in quoted text is text the test prints, and explains nothing. What is
   # open at the end of a line stays open on the next (ctx, a stack: s and d a single- and a double-quoted text, a a
   # $-quoted one, k a backquoted command, b a ${...}, p a $(...), whose text is code again, with quotes of its own).
@@ -124,7 +154,7 @@ bad=$(awk -v kf=<(printf '%s\n' "$chg") '
         k += RLENGTH - 1; sp--; c = "`"; cmt = 1
       }
       p = c
-      cs = cs ((x == "s" || x == "a" || cmt) ? " " : (txt && c ~ /[;&|(){}!]/) ? "_" : substr(l, k0, k - k0 + 1))
+      cs = cs ((x == "s" || x == "a" || cmt) ? " " : (txt && c ~ /[;&|(){}!<>]/) ? "_" : substr(l, k0, k - k0 + 1))
     }
     return w
   }
@@ -145,6 +175,11 @@ bad=$(awk -v kf=<(printf '%s\n' "$chg") '
             "(([A-Za-z_][A-Za-z0-9_]*=(\"([^\"\\\\]|\\\\.)*\"|[$][(][^)]*[)]|[^ \t\"])*|exec|env|command|nohup|time|timeout[ \t]+[^ \t]+|bash|sh)[ \t]+)*" \
             "[\"\047]?(loop|[^ \t;&|()\"\047]*conveyor\\.sh)[\"\047]?[ \t]+(run|serve)([^A-Za-z0-9_.-]|$)"))
         printf "loop\t%s:%d: %s\n", name, i, line[i]
+    # A hand-written stub on a line the change added or changed, with no "# stub: <why>" on it or on the line above.
+    for (i = 1; i <= n; i++)
+      if (code(line[i]) && ((name ":" i) in keep || (name ":all") in keep) && !says(cm[i], "stub") \
+          && !(i > 1 && says(cm[i - 1], "stub")) && stub(cl[i]))
+        printf "stub\t%s:%d: %s\n", name, i, line[i]
     for (i = 1; i <= n; i++) {
       l = line[i]
       if (!code(l) || why[i]) continue
@@ -166,7 +201,8 @@ bad=$(awk -v kf=<(printf '%s\n' "$chg") '
   { name = FILENAME; line[++n] = $0 }
   END { flush() }' "${files[@]}") || { echo "test lint: the files could not be read"; exit 1; }
 [ -z "$bad" ] && exit 0
-loops=$(grep $'^loop\t' <<<"$bad" | cut -f2-); bad=$(grep -v $'^loop\t' <<<"$bad")
+loops=$(grep $'^loop\t' <<<"$bad" | cut -f2-); stubs=$(grep $'^stub\t' <<<"$bad" | cut -f2-)
+bad=$(grep -v -e $'^loop\t' -e $'^stub\t' <<<"$bad")
 if [ -n "$bad" ]; then
   echo "test lint failed: a sleep with a check after it. Wait for the condition (wait_until, conveyor/tests/wait.sh), or say"
   echo "why time must pass in a \"# sleep: <why>\" comment on the same line:"
@@ -177,5 +213,11 @@ if [ -n "$loops" ]; then
   echo "with no reason. Call the engine function the test is about, or say what only a whole loop run shows in a"
   echo "\"# loop: <why>\" comment on the line or on the line above:"
   echo "$loops"
+fi
+if [ -n "$stubs" ]; then
+  echo "test lint failed: a hand-written claude, codex, opencode or gh stub this change added or changed, with no"
+  echo "reason. Set the shared stub (conveyor/tests/stubs/) with files in \$STUB, or say what it cannot do in a"
+  echo "\"# stub: <why>\" comment on the line or on the line above:"
+  echo "$stubs"
 fi
 exit 1

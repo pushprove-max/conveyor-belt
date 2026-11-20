@@ -48,7 +48,10 @@ A test says why the behaviour matters and fails when it breaks; an existing test
 - An engine test that needs a `claude`, `codex`, `opencode` or `gh` uses the shared stub in `conveyor/tests/stubs/`
   (`conveyor/tests/lib.sh` puts it on `PATH`), set by files in `$STUB`, and does not write its own: the stub answers
   in the form the engine reads, and `clicontract.test.sh` fails when the engine's reading and the stub part. A stub
-  that must do what the shared one cannot says why in a comment.
+  that must do what the shared one cannot says why in a `# stub: <why>` comment on the line that writes it or the
+  line above: the test lint fails a line the change added or changed that writes a file named `claude`, `codex`,
+  `opencode` or `gh` (with `>`, `>>`, `tee`, `cp`, `mv` or `install`) with no such comment. A file the shared stub
+  reads, such as `$STUB/build`, is not a stub.
 
 - `bash .conveyor/test-changed.sh` runs the tests of what you changed. For the engine, each engine file runs its own
   case files: its area of `.conveyor/engine-areas.json` names the case files under `conveyor/tests/` that exercise
