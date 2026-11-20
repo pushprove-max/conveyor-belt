@@ -3,7 +3,11 @@
 # timeout: 300
 # Engine cases: doctor's checks of the pin, the Board's virtualenv, gh, the host file, the pack and the tools. Its own
 # file, to keep setup.test.sh under the 600 lines a case file may have. The helpers are doctor.test.sh's (doctordone,
-# without, uninstalled) and setup.test.sh's (sample).
+# without, uninstalled) and setup.test.sh's (sample). A case that checks only lines no setup run changes (the tools,
+# gh, the pack itself, and the Board, whose pin check reads the pack and, with none, finds no older Board) starts
+# from the sample with no setup run: doctordone's setup --pin added about 5 s of CPU to each and changed none of
+# those lines. A case that checks doctor fails for its one fault
+# keeps doctordone (or proves no other line is missing), as the missing pack alone fails doctor.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -29,7 +33,7 @@ t_doctornovenv() {
 # Bug caught (#20): with no python3-venv, python3 -m venv makes bin/python3 and then fails in ensurepip; doctor took
 # that virtualenv for made and said only to run setup again, and setup's rerun did not make it again.
 t_doctorvenvnopip() {
-  local X out py; doctordone; py=$(type -P python3) || fail "no python3 on PATH"
+  local X out py; sample; X=$D/conveyor/conveyor.sh; py=$(type -P python3) || fail "no python3 on PATH"
   echo pip > "$G/nopkg" # the virtualenv's python3 has no pip
   # python3 as on Debian with no python3-venv: venv records its arguments and fails.
   printf '#!/usr/bin/env bash\n[ "$1 $2" != "-m venv" ] || { echo "$*" >> "%s/venv"; exit 1; }\nexec "%s" "$@"\n' "$G" "$py" > "$G/python3" && chmod +x "$G/python3"
@@ -38,12 +42,14 @@ t_doctorvenvnopip() {
   out=$(cd "$S" && bash "$X" doctor 2>&1) && fail "doctor passed with a virtualenv with no pip: $out"
   grep -qxF "missing: the Board's virtualenv $XDG_DATA_HOME/conveyor/board-venv; fix: run /conveyor-belt:setup, which makes it (on Debian or Ubuntu, first install python3-venv: sudo apt install python3-venv)" <<<"$out" \
     && ! grep -q 'for the Board, in its virtualenv' <<<"$out" || fail "doctor's fix for a virtualenv with no pip does not name python3-venv: $out"
+  # With no setup run before this one, doctor's failure is the virtualenv's only when nothing else is missing.
+  [ "$(grep -c '^missing: ' <<<"$out")" = 1 ] || fail "doctor's failure is not the virtualenv's alone: $out"
 }
 # A snapshot folder that says gh is signed in is no word on this machine's gh (signed out here).
 # Its doctor run also has a Board that answers but fails the certificate check (curl exit 35, as macOS's curl gives
 # for a LibreSSL certificate with explicit curve parameters). Bug caught (#183): doctor said it was not running.
 t_doctorsnap() {
-  local X out; doctordone; : > "$G/out"
+  local X out; sample; X=$D/conveyor/conveyor.sh; : > "$G/out"
   mkdir -p "$T/$CASE/snap" "$T/$CASE/badcert"; echo true > "$T/$CASE/snap/gh"; printf '#!/bin/sh\nexit 35\n' > "$T/$CASE/badcert/curl"; chmod +x "$T/$CASE/badcert/curl"
   out=$(cd "$S" && CONVEYOR_GITHUB=$T/$CASE/snap PATH=$T/$CASE/badcert:$PATH bash "$X" doctor 2>&1)
   grep -qx 'missing: gh signed in; fix: run /conveyor-belt:setup, which starts gh auth login' <<<"$out" || fail "doctor took a snapshot's word that gh is signed in: $out"
@@ -64,13 +70,13 @@ t_doctorhostbad() {
   grep -q '^missing: a readable host file .*; fix: make it a JSON object' <<<"$out" && grep -q '^missing: the install' <<<"$out" || fail "doctor stopped at, or passed, a host file that does not read: $out"
 }
 t_doctornopack() {
-  local X out; doctordone
-  rm -r "$S/.conveyor"; out=$(cd "$S" && bash "$X" doctor 2>&1)
+  local X out; sample; X=$D/conveyor/conveyor.sh
+  out=$(cd "$S" && bash "$X" doctor 2>&1)
   grep -q "^missing: the pack $S/.conveyor/project.json; fix: run /conveyor-belt:setup" <<<"$out" || fail "doctor with no pack: $out"
 }
 # jq, git and gh not on PATH: each is named, and the project's checks are named as not checked; so is a valid host file.
 t_doctortools() {
-  local X out; doctordone; rm -r "$S/.conveyor"
+  local X out; sample; X=$D/conveyor/conveyor.sh
   echo '{}' > "$XDG_CONFIG_HOME/conveyor/host.json"; out=$(cd "$S" && CONVEYOR_MAIN=$S PATH=$(without jq git gh) bash "$X" doctor 2>&1) && fail "doctor passed with no jq, git or gh: $out"
   grep -q '^missing: jq 1.8 or newer (none on PATH); fix: run /conveyor-belt:setup, which installs it' <<<"$out" \
     && grep -q '^missing: git (none on PATH); fix: run /conveyor-belt:setup' <<<"$out" && grep -q '^missing: gh, the GitHub CLI (none on PATH); fix: run /conveyor-belt:setup' <<<"$out" \
