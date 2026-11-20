@@ -51,6 +51,9 @@ through a lint gate before each review, and through the landing gate (below) bef
 
 - A pass lets the card go on. So does a command whose tool is missing: the card's lint line says
   `skipped: missing <tool>` for it.
+- A command that main added with its script after the card's worktree was made, and that has files to check, is
+  skipped while the card's tree does not have the script. It runs at the landing gate, on the card's change on main as it is now
+  ([Lint](configuration.md#lint)).
 - A finding on the card's change goes to one fix session. The session gets the first 50 findings and their count.
   Then the gate runs again. A finding that is still there blocks the card with the reason
   `lint: <n> findings left after its fix session; nothing landed`. The fix uses no review: the review of the same pass

@@ -232,6 +232,27 @@ t_lintgateerror() {
     || fail "the execution error did not block the card with no fix session: $(did); $(st 'select(.step | IN("blocked", "landed")) | .reason')"
 }
 
+# Bug: main adds a lint command and its script (the command's trigger) while a card builds, and the review gate runs
+# that command in the card's worktree, made before the script: exit 127, an execution error that blocks the card. The
+# review gate skips it, saying why; the landing gate, on the change fitted onto main, runs it on the change: it lands.
+t_lintgatelate() {
+  gatesetup "[$(issue 7 2026-01-01)]"
+  echo "$GO" > "$STUB/review.1"
+  # Not $STUB/late.sh: bash looks up a script it cannot find at the top on PATH, which holds $STUB.
+  echo 'echo "late $*" >> "$STUB/lint-args"' > "$STUB/late.src"
+  jq '.lint.commands += [{files: ["*.txt"], triggers: ["late.sh"], run: "bash late.sh {files}"}]' "$R/.conveyor/project.json" > "$STUB/pack.late" || fail "the late pack"
+  printf '%s\n' "cp \"\$STUB/late.src\" '$R/late.sh' && git -C '$R' add -f late.sh && git -C '$R' commit -qm 'late lint script'" \
+    "cp \"\$STUB/pack.late\" '$R/.conveyor/project.json'" > "$STUB/addlate"
+  gatesessions "echo two >> a.txt; bash \"\$STUB/addlate\"" :
+  # loop: only a whole card run builds the worktree before main moves, then fits the change onto main for its landing gate
+  loop run > /dev/null || fail "run exited non-zero"
+  [ -n "$(st 'select(.step == "landed") | .sha')" ] && [ "$(grep -c '^late ' "$STUB/lint-args")" = 1 ] && grep -qx 'late a.txt' "$STUB/lint-args" \
+    || fail "the card did not land with the late command run once on its change: $(st 'select(.step | IN("blocked", "landed")) | .reason'); $(cat "$STUB/lint-args" 2>&1)"
+  [ "$(st 'select(.step == "lint") | .lint.commands[1].result' | paste -sd'|')" \
+    = 'skipped: missing late.sh, which main added after the commit of this tree: it runs on the change on main as it is now|pass' ] \
+    || fail "the review gate did not skip the late command and the landing gate pass it: $(st 'select(.step == "lint") | .reason')"
+}
+
 # Bug: a lint tool that is not installed blocks the card or is left out of its record. The card lands, its lint line
 # saying the command was skipped and why.
 t_lintgateskip() {

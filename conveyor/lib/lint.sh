@@ -9,8 +9,9 @@
 # the card's steps (block, session, checked, record, giveway, cardpatch), which a card's shell has.
 #
 # The pack is main's ($PACK); the scripts and configs a command loads are the worktree's, as it runs at the worktree's
-# top. A tree is the worktree as `git add -A` would stage it, read through a copy of its index (lintindex), so the
-# worktree's own index is never changed. A command's scope (lintscope) is found by git from its pathspecs: `files`
+# top; a command whose trigger main added after the tree's commit, and the tree lacks, is skipped (lintlate). A tree
+# is the worktree as `git add -A` would stage it, read through a copy of its index (lintindex), so the worktree's own
+# index is never changed. A command's scope (lintscope) is found by git from its pathspecs: `files`
 # (the sources it reads) and `triggers` (the scripts, configs and lock files that change its result). A command with
 # `{files}` in `run` gets the changed files that `files` matches, never a deleted one (a renamed file under its new
 # path); every match in the tree's index copy (an untracked file too) when one of its triggers changed or the pack's
@@ -72,6 +73,23 @@ lintscope() { # <worktree> <index> <base> <command json> <full> <scratch file>
   else GIT_INDEX_FILE=$2 git -C "$1" diff --cached --no-renames -z --name-only --diff-filter=d "$3" -- "${fs[@]}" > "$6" || return 1; fi
   mapfile -d '' -t LINT_F < "$6"
   [ ${#LINT_F[@]} = 0 ] || LINT_GO=1
+}
+
+# LINT_LATE: the first file a trigger of <command json> matches that main (the pack's defaultBranch) added after
+# <base> and <index>'s tree lacks; empty when there is none. Such a tree was made before main added the command's
+# script or config, so the command cannot run on it: it runs on the change on main as it is now (the landing gate,
+# after settle() fitted the card there). Fails when the pack or the files cannot be read.
+lintlate() { # <worktree> <index> <base> <command json> <scratch file>
+  local f
+  local -a tr
+  LINT_LATE=''
+  mapfile -d '' -t tr < <(jq -j '(.triggers // [])[] + "\u0000"' <<<"$4")
+  [ ${#tr[@]} != 0 ] || return 0
+  # The pack's defaultBranch, as names() reads it into BRANCH: `conveyor.sh lint` runs no names().
+  packget defaultBranch f && git -C "$1" diff --no-renames -z --name-only --diff-filter=A "$3" "refs/heads/$f" -- "${tr[@]}" > "$5" || return 1
+  while IFS= read -r -d '' f; do
+    [ -n "$(GIT_INDEX_FILE=$2 git -C "$1" ls-files -- ":(literal)$f")" ] || { LINT_LATE=$f; return 0; }
+  done < "$5"
 }
 
 # Runs <run> at <worktree>'s top, {files} in it replaced by the files, each quoted for the shell (as test.list's
@@ -177,9 +195,10 @@ lintsizelist() { # <worktree>
 
 # The pack's lint commands run on <worktree>'s tree, the change being from <base> (a commit) to that tree: one JSON
 # line a command, in the pack's order: {n, run, ratchet, complexity, result, why, files, findings, sec, triggered}.
-# result is pass, findings, skipped (why: the tool), error (why: what went wrong) or `no files` (its scope is empty: not
-# called); files is the count it was given (null for a command without {files}); findings its finding lines
-# (lintfindings); sec the seconds it ran; triggered whether the change changed one of its triggers. A size entry
+# result is pass, findings, skipped (why: the tool, or not called: a trigger file the tree lacks, lintlate), error
+# (why: what went wrong) or `no files` (its scope is empty: not called); files is the count it was given (null for a
+# command without {files}); findings its finding lines (lintfindings); sec the seconds it ran; triggered whether the
+# change changed one of its triggers. A size entry
 # (lintsize) is a command whose run is LINTRUN's name for it, with ratchet false (every finding is the change's, so
 # there is no base run), and triggered false (no tool runs as installed).
 # Nothing when the pack has no lint field. Fails, saying why, when the pack or the tree cannot be read.
@@ -193,10 +212,14 @@ lintcheck() { # <worktree> <base>
   ! lintfield "$1" "$t/index" "$2" || full=1
   while IFS= read -r c; do
     n=$((n + 1))
-    lintscope "$1" "$t/index" "$2" "$c" "$full" "$t/scope" || { rm -rf "$t"; echo "conveyor lint: the files of lint command $n could not be listed" >&2; return 1; }
-    if [ -z "$LINT_GO" ]; then
-      jq -c --argjson n $n --argjson g "$([ -n "$LINT_TRIG" ] && echo true || echo false)" '{n: $n, run: '"$LINTRUN"', ratchet: (.ratchet != false and .size == null),
-        complexity: (.complexity // []), result: "no files", why: null, files: 0, findings: [], sec: 0, triggered: ($g and .size == null)}' <<<"$c" \
+    LINT_LATE=''
+    { lintscope "$1" "$t/index" "$2" "$c" "$full" "$t/scope" && { [ -z "$LINT_GO" ] || lintlate "$1" "$t/index" "$2" "$c" "$t/scope"; }; } \
+      || { rm -rf "$t"; echo "conveyor lint: the files of lint command $n could not be listed" >&2; return 1; }
+    if [ -z "$LINT_GO" ] || [ -n "$LINT_LATE" ]; then
+      jq -c --argjson n $n --argjson g "$([ -n "$LINT_TRIG" ] && echo true || echo false)" --arg late "$LINT_LATE" '{n: $n, run: '"$LINTRUN"', ratchet: (.ratchet != false and .size == null),
+        complexity: (.complexity // []), result: (if $late == "" then "no files" else "skipped" end),
+        why: (if $late == "" then null else "\($late), which main added after the commit of this tree: it runs on the change on main as it is now" end),
+        files: 0, findings: [], sec: 0, triggered: ($g and .size == null)}' <<<"$c" \
         || { rm -rf "$t"; echo "conveyor lint: the result of lint command $n could not be written" >&2; return 1; }
       continue
     fi
@@ -394,8 +417,8 @@ lintrun() { # <worktree> <base> <card> <output file>
 }
 # A gate's lint line in the card's records, for <output file> of lintrun and its exit: result pass, findings or error;
 # lint.commands each command's {n, run, result, sec, findings: the count of the change's}, a skipped one's result
-# `skipped: missing <tool>`; lint.asInstalled true when a command that ran (not one with no files or a missing tool) has
-# a trigger the change changed (the tools ran as installed, not as the change would install them); lint.gate the gate
+# `skipped: missing <tool>` (or <the trigger file, lintlate>); lint.asInstalled true when a command that ran (not
+# one with no files or a missing tool) has a trigger the change changed (the tools ran as installed, not as the change would install them); lint.gate the gate
 # that ran it, review, land (the landing gate) or wait (the gate for a waiting card), so the Board and /units can name
 # the fix session it starts (track.jq). The reason says the same, and an execution error's why.
 lintline() { # <card> <issue> <output file> <lintrun's exit> <review|land|wait>

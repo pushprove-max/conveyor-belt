@@ -568,7 +568,12 @@ In `conveyor.sh lint`, `GIT_INDEX_FILE` names a copy of the index that holds the
 command also lists the files that are not tracked yet. `conveyor.sh doctor` gives the command the index of the main
 checkout, so there `git ls-files` lists only the tracked files.
 Conveyor reads the commands from the pack of your main checkout. The scripts and config files that a command loads
-come from the worktree.
+come from the worktree. A card's worktree can be older than a command that you add to main with its script. When the
+command has files to check, and a file that its `triggers` match is on main, but main added it after the card's commit
+and the card's tree does not have it, the command does not run on that tree. Its result is `skipped: missing <file>, which main added
+after the commit of this tree: it runs on the change on main as it is now`. Before the landing gate, the card's change
+goes onto main as it is now, so there the tree has the file and the command runs on the change. Put the command's
+script in its `triggers`.
 
 A finding is a line of the command's output in this form: `<path>:<line>[:<column>]: <text>`. The path is a file of
 the tree, from its top, with no `./`. A path can hold spaces and colons. The first word of the text is the rule code.
@@ -579,7 +584,9 @@ The four results:
 - Pass: the command exits 0 and prints no finding.
 - Findings: the command exits 1 and prints one finding or more.
 - Skipped: the first line is `lint: missing <tool>` and the command exits 127. Use this when the tool is not
-  installed.
+  installed. Conveyor also skips a command that has files to check, but that it does not run because the tree does
+  not have a trigger file that main added (above). Its result is `skipped: missing <file>, which main added after the commit of this tree: it runs
+  on the change on main as it is now`.
 - Execution error: any other result. For example, another exit code, an exit 127 without that first line, an exit 1
   with no finding, an exit 0 with findings, or a command that runs for longer than 5 minutes.
 

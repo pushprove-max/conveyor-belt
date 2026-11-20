@@ -122,9 +122,11 @@ Tests:
   worktree as `git add -A` would stage it, so it sees an edit that is not staged and a file that is not tracked. It
   does not stage them and does not change the worktree or its index. It does add the content of the changed files to
   the repository's objects, as `git add` does. The change is from the commit the worktree is on. It prints each command's
-  result: `pass`, `findings: <n>`, `skipped: missing <tool>`, `execution error: <why>` or `no files`. Then it lists the
-  findings on the lines that the change added or changed, and every finding of a command with `ratchet: false`. These
-  make it exit 1. A finding with a `complexity` code on such a line is listed under "the gate decides these" and does
+  result: `pass`, `findings: <n>`, `skipped: missing <tool>`, `execution error: <why>` or `no files`. A command that
+  has files to check, but whose trigger file main added after the commit of the worktree and the worktree does not
+  have, is `skipped: missing <file>` with the rest of the reason that [Lint](configuration.md#lint) gives. Then it
+  lists the findings on the lines that the change added or changed, and every finding of a command with
+  `ratchet: false`. These make it exit 1. A finding with a `complexity` code on such a line is listed under "the gate decides these" and does
   not change the exit code. Findings on other lines are only counted. It exits 2 when a command ends in an execution
   error and no finding made it exit 1.
 - `size --list` prints the files that have more lines than the limit of a size entry in the pack's lint commands
