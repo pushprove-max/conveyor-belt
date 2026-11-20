@@ -155,8 +155,8 @@ P=$(snap '{"needsYou": {"waiting": [{"card": "c1-12", "issue": 12, "title": "But
   "control": {"mode": "pause", "cap": null, "guard": 90, "held": [30], "order": [], "rules": {"P0": true, "P1": true, "P2": true, "followups": true, "never": ["area:infra"]}, "model": null, "reviewer": null, "judgeOn": true},
   "modelSettings": {"builder": {"model": "claude-x", "effort": "medium", "modelFrom": "seed", "effortFrom": "seed", "choices": ["claude-x"], "efforts": ["low"]},
     "judge": {"model": "claude-j", "effort": "high", "modelFrom": "seed", "effortFrom": "seed", "choices": ["claude-j"], "efforts": ["high"], "default": "claude-j"}},
-  "areaPrefix": "team/", "packLandAs": "pr", "packPrMerge": "idle", "packPick": {"lists": {"builder": {"claude-x": {"min": "medium", "max": "high"}}}, "efforts": {"claude": ["low", "medium", "high"]}}, "standing": ["asked-fix"], "pushCheck": false, "snapshotAt": "2026-11-05T00:00:02Z",
-  "health": {"state": "paused", "reason": "the loop says why", "guard": {"at": 90, "reading": 42, "readAt": "'"$(ago 60)"'", "missing": false}, "cycles": [[40, 41]],
+  "areaPrefix": "team/", "packLandAs": "pr", "packPrMerge": "idle", "packPick": {"lists": {"builder": {"claude-x": {"min": "medium", "max": "high"}}}, "efforts": {"claude": ["low", "medium", "high"]}}, "standing": ["asked-fix"], "pushCheck": false, "lintCommands": [{"run": "shellcheck {files}", "files": ["*.sh"]}], "snapshotAt": "2026-11-05T00:00:02Z",
+  "health": {"state": "paused", "reason": "the loop says why", "unchecked": 2, "guard": {"at": 90, "reading": 42, "readAt": "'"$(ago 60)"'", "missing": false}, "cycles": [[40, 41]],
     "pressure": {"state": "Busy", "cpu": 45.5, "memory": 1.5, "wakeMs": 0.2, "freeMB": null, "why": "CPU pressure 45.5% is at or above 40%"},
     "routes": {"subscription": {"state": "expired", "at": "2026-11-05T00:00:00Z"}, "proxy": {"state": "works", "at": "2026-11-05T00:00:01Z", "baseUrl": "http://127.0.0.1:4141", "route": "fallback"}},
     "unpushed": [{"card": "c5-7", "issue": 7, "sha": "abc", "since": "2026-11-05T00:00:00Z"}],
@@ -226,6 +226,10 @@ q '.panels.queue.data.awaitingDeploy | map([.repo, .issue, .title, .since, .url]
 q '.panels.queue.data.waiting | map([.repo, .issue, .waitsFor, .url]) == [["sample", 32, [20], "'"$PU"'/32"]]' "the queue lists each record's waiting issues with what each waits for"
 q '.panels.board.data.waits | map([.issue, .waitsFor]) == [[32, [20]]]' "the Board has the waiting issues with what each waits for"
 q '[.panels.health.data.records[] | .cycles] == [[[40, 41]], null]' "a dependency cycle reaches the health part; a record without the key has none"
+# Issue 261: the landed cards with a skipped lint command (Health's Lint check row) and the pack's lint commands (the
+# Rules tab's Lint check list) reach the Board; dropped here, neither shows.
+q '[.panels.health.data.records[] | .unchecked] == [2, null] and .panels.rules.data.lintCommands == [{run: "shellcheck {files}", files: ["*.sh"]}]' \
+  "the unchecked count reaches the health part and the pack's lint commands the rules part"
 # Issue 398: the host prints its kept snapshot, made before it is read. Health carries when it was made (its row says
 # the age past a minute), and the Rules part's readAt is that time: dated by the read, a move the Board waits on was
 # taken as read by a snapshot made before it.

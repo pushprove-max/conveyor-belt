@@ -64,7 +64,8 @@ export type Need = Card & Times & { yes: boolean; text: string; since: number | 
 const STATES = ['done', 'now', 'skipped', 'failed', 'todo'] as const
 export const STEP_NAMES = ['Build', 'Review', 'Fix', 'Test', 'Land', 'Push'] as const
 // replyFix: on Build, the fix the Done-when check on the build's reply started (track.jq): 'now' while it runs, 'done' after.
-export type Step = { name: string; state: (typeof STATES)[number]; sec: number | null; n: number | null; of: number | null; followups: number | null; replyFix: 'now' | 'done' | null }
+// lintFix: on Build, the review gate's lint fix after the build, the same; on Fix, 'now' while the landing gate's lint fix runs.
+export type Step = { name: string; state: (typeof STATES)[number]; sec: number | null; n: number | null; of: number | null; followups: number | null; replyFix: 'now' | 'done' | null; lintFix: 'now' | 'done' | null }
 export type Track = { steps: Step[]; at: number | null; label: string; since: number | null; reason: string | null; kept: string | null; files: { run: number; of: number | null; over: number | null; now: { file: string; at: number | null } | null } | null; tests: { done: number; of: number; failed: number } | null; list: { mode: 'changed'; files: number } | { mode: 'whole' } | null; grown: { before: number; after: number } | null }
 // reading is false while no token of the card has been read: its dollars are then "no reading yet", never $0; atEnd: in
 // that time the running session's route reports no usage until its step ends: "cost shown when the step ends".
@@ -198,7 +199,7 @@ const trackOf = (v: any): Track | null => {
   const at = num(v.at)
   return {
     steps: v.steps.map((x: any): Step => ({ name: one(x.name), state: x.state, sec: num(x.sec), n: num(x.n), of: num(x.of), followups: num(x.followups),
-      replyFix: x.replyFix === 'now' || x.replyFix === 'done' ? x.replyFix : null })),
+      replyFix: x.replyFix === 'now' || x.replyFix === 'done' ? x.replyFix : null, lintFix: x.lintFix === 'now' || x.lintFix === 'done' ? x.lintFix : null })),
     at: at !== null && v.steps[at] ? at : null, label: one(v.label), since: time(v.since), reason: one(v.reason) || null, kept: one(v.kept) || null,
     files: v.files && typeof v.files === 'object' && num(v.files.run) !== null ? { run: v.files.run, of: num(v.files.of), over: num(v.files.over),
       now: v.files.now && typeof v.files.now === 'object' && one(v.files.now.file) ? { file: one(v.files.now.file), at: time(v.files.now.at) } : null } : null,
@@ -475,9 +476,15 @@ const stepCount = (st: Step, short: boolean): string => {
   return st.name === 'Fix' ? ` ${n}` : ''
 }
 // A reply-check fix is Build's, never Fix's (the dashboard's names): "▶ Build · reply check fix", "✓ Build · reply check fixed".
+// The review gate's lint fix after the build is Build's too: "▶ Build · lint fix", "✓ Build · lint fixed"; the landing
+// gate's is a Fix round: "▶ Fix 2: lint findings" (track.jq lintFix). The review gate's after a fix round is that Fix
+// round's, the same; after a rebuild it is Land's: "▶ Land · lint fix".
 // Build also says when the card was split for its size (track.jq grown): ' · split for its size, 5 → 2 files'.
 const stepNote = (st: Step, t: Track): string =>
-  st.name !== 'Build' ? '' : (st.replyFix === 'now' && st.state === 'now' ? ' · reply check fix' : st.replyFix === 'done' && st.state === 'done' ? ' · reply check fixed' : '')
+  st.name === 'Fix' ? (st.lintFix === 'now' && st.state === 'now' ? ': lint findings' : '')
+  : st.name === 'Land' ? (st.lintFix === 'now' && st.state === 'now' ? ' · lint fix' : '')
+  : st.name !== 'Build' ? '' : (st.replyFix === 'now' && st.state === 'now' ? ' · reply check fix' : st.replyFix === 'done' && st.state === 'done' ? ' · reply check fixed' : '')
+    + (st.lintFix === 'now' && st.state === 'now' ? ' · lint fix' : st.lintFix === 'done' && st.state === 'done' ? ' · lint fixed' : '')
     + (t.grown ? ` · split for its size, ${t.grown.before} → ${t.grown.after} files` : '')
 const trackFit = (t: Track, w: number): { segs: Seg[]; count: 'full' | 'short' | null; times: number } => {
   const done = t.steps.flatMap((st, i) => (st.state === 'done' && st.sec !== null ? [i] : []))

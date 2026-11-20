@@ -387,3 +387,19 @@ t_healthuntimed() {
   jq -cn '{card: "c0-2", issue: 2, step: "test", time: "2026-11-02T00:00:00Z", tokens: {claude: 0, codex: 0}, result: "pass", sha: "", reason: "", times: {"a.test": 1}}' >> "$ST/cards.jsonl"
   [ "$(loop health | jq -c .untimed)" = 0 ] || fail "health still says no times after a run that recorded them: $(loop health | jq -c .untimed)"
 }
+
+# Bug caught (#261): a card that landed with a lint command skipped for a missing tool landed unchecked, and Health
+# did not count it. unchecked counts the landed cards whose last lint line skipped a command: not one whose last lint
+# line ran every command (c0-2, skipped at its first gate only), nor one skipped that has not landed (c0-3).
+t_healthunchecked() {
+  local c
+  setup '[]'
+  for c in 'c0-1 skipped: missing shellcheck' 'c0-2 skipped: missing shellcheck' 'c0-2 pass' 'c0-3 skipped: missing shellcheck' 'c0-4 pass'; do
+    jq -cn --arg c "${c%% *}" --arg r "${c#* }" '{card: $c, issue: ($c[3:] | tonumber), step: "lint", time: "2026-11-01T00:00:00Z", tokens: {claude: 0, codex: 0}, result: "pass", sha: "", reason: "",
+      lint: {commands: [{n: 1, run: "x", result: $r, sec: 0, findings: 0}], asInstalled: false, gate: "land"}}'
+  done >> "$ST/cards.jsonl"
+  for c in c0-1 c0-2 c0-4; do
+    jq -cn --arg c "$c" '{card: $c, issue: ($c[3:] | tonumber), step: "landed", time: "2026-11-01T00:01:00Z", tokens: {claude: 0, codex: 0}, result: "ok", sha: "abc", reason: "", product: false}'
+  done >> "$ST/cards.jsonl"
+  [ "$(loop health | jq -c .unchecked)" = 1 ] || fail "health does not count the one card that landed with a skipped lint command: $(loop health 2>&1 | jq -c .unchecked)"
+}

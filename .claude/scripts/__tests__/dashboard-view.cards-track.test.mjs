@@ -104,6 +104,31 @@ test('a reply-check fix shows on the Build step, and Fix is ticked only for a fi
   assert.deepEqual(show('+>+...', 'review 2 of 3', 1, null, [2, 1]).slice(0, 3), [['✓', 'Build'], ['▶', 'Review 2 of 3'], ['✓', 'Fix']]);
 });
 
+// Issue 261 (track.jq lintFix). Bugs: the review gate's lint fix after the build read as a Fix round before the first
+// review, and the landing gate's as a bare "Fix 2", so a lint fix could not be told from a review's.
+test('a lint fix shows on Build at the review gate and as "Fix N: lint findings" at the landing gate', () => {
+  const w = boot();
+  const row = () => panel(w, 'belt').querySelector('li[data-key="sample:c3-63"]');
+  const strip = () => Array.from(row().querySelector('ol.track6').children, (s) => [s.querySelector('.step-mark').textContent, s.querySelector('.step-name').textContent]);
+  const show = (marks, label, at, set, n) => {
+    const data = full(), t = trackOf(marks, label, { at });
+    t.steps[1].n = n[0]; t.steps[2].n = n[1];
+    set(t.steps);
+    data.panels.belt.data.cards[0].track = t;
+    next(w, data);
+    return strip().slice(0, 3);
+  };
+  deliver(w, full());
+  assert.deepEqual(show('>.....', 'fix after review 0', 0, (s) => { s[0].lintFix = 'now'; }, [0, 0]), [['▶', 'Build · lint fix'], ['·', 'Review'], ['·', 'Fix']]);
+  assert.equal(row().querySelector('.row-main .chip').textContent, 'Build · lint fix', 'the pill names the step as the strip does');
+  assert.deepEqual(show('+>....', 'review 1 of 3', 1, (s) => { s[0].lintFix = 'done'; }, [1, 0]), [['✓', 'Build · lint fixed'], ['▶', 'Review 1 of 3'], ['·', 'Fix']]);
+  assert.deepEqual(show('++>...', 'fix after review 2', 2, (s) => { s[2].lintFix = 'now'; }, [2, 2]), [['✓', 'Build'], ['✓', 'Review 2 of 3'], ['▶', 'Fix 2: lint findings']]);
+  // Bug it catches: the review gate's lint fix after a rebuild (on Land) read as a plain "Land".
+  show('++-+>.', 'fix after review 1', 4, (s) => { s[4].lintFix = 'now'; }, [1, 0]);
+  assert.equal(row().querySelector('ol.track6').children[4].querySelector('.step-name').textContent, 'Land · lint fix');
+  assert.equal(row().querySelector('.row-main .chip').textContent, 'Land · lint fix', 'the pill names the step as the strip does');
+});
+
 // Bug: a card in its Test step showed only its turns (always 0: a test run has no model) and when it last printed,
 // and a run of one test file with 205 cases read "0 of 1" until it ended. Its live line and its "Every step" say how
 // many tests have run of how many and how many failed (track.tests); with no case count, its test files (track.files).

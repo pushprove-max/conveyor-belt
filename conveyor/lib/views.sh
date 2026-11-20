@@ -179,7 +179,8 @@ cards() {
 # on the cards folder, null when df gives none); refused (card, issue, reason: "refused full run: <why>", since: the
 # line's time): each test line of the last 24 hours whose run refused a full run (tests()), for the Foreman's watcher;
 # untimed (UNTIMED, below): how many of the last card test runs recorded no test times, 0 when one did; split (SPLITM,
-# below): the cards the rule Split large issues checked, kept and would split, with their first reviews; report: the
+# below): the cards the rule Split large issues checked, kept and would split, with their first reviews; unchecked:
+# how many landed cards' last lint line (lintline(), lib/lint.sh) has a command skipped for a missing tool; report: the
 # pack's test.report ({runner, format, path, env, args, option}: the runner setup found and how its times are read), null with
 # none; routes: each
 # Claude route, subscription and proxy, with its state (routesnow()); quarantined (line, field, time): each line of the
@@ -294,7 +295,7 @@ SPLITM='def splitm($all): [$all | group_by(.card)[] | select(any(.step == "split
 # were most of the bytes it read. A test line's times only as whether they are an object (untimed).
 HEALTHLINE='select(. != "") | fromjson | {card, issue, step, of, time, result, followups} + if .step == "worktree" then {pid, started}
     elif .step == "blocked" then {reason} elif .step == "landed" then {sha} elif .step == "push" then {sha, reason, kind, check} elif .step == "pushed" then {pr}
-    elif .step == "picked" then {mainRed} elif .step == "test" then {refused, reused, ended, selected, times: (if (.times | type) == "object" then {} else null end)}
+    elif .step == "picked" then {mainRed} elif .step == "lint" then {skipped: any(.lint.commands[]?; .result | strings | startswith("skipped"))} elif .step == "test" then {refused, reused, ended, selected, times: (if (.times | type) == "object" then {} else null end)}
     else {} end'
 # When health first read each stopped process of the "<pid> TAB <started> TAB <card>" lines on stdin stopped, as ps
 # gives no time a process stopped: <now> for one not read so before. $STATE.stopped keeps "<pid> TAB <started> TAB
@@ -479,7 +480,8 @@ health() {
        unpushed: $un, pushError: ($fail | last | if . then {time, sha, reason, kind: (.kind // null), check: (.check // null), card, issue} else null end), pushFailingSince: ($fail[0].time // null), pushFails: ($fail | length), pushing: $pushing,
        gh: $gh, ghReached: $ghr, ghWhy: (if $gh then null else $ghwhy end), ghRead: $ghread, diskFreeKb: $free, builderCap: $cap, building: $bw.building, waitingCount: $bw.waiting, models: $force.models, efforts: $force.efforts, cycles: $cycles, before: $before[0], homes: $homes,
        refused: [.[] | select(.step == "test" and (.refused | type) == "string" and $now - (.time | fromdate) < 86400) | {card, issue, reason: .refused, since: .time}],
-       untimed: untimed, split: splitm([.[], $old[]]), report: $report, routes: $routes, quarantined: $qt, serviceOld: $serviceold, machineHold: ($mh[0] // null),
+       untimed: untimed, split: splitm([.[], $old[]]),
+       unchecked: ([group_by(.card)[] | select(any(.step == "landed")) | map(select(.step == "lint")) | last | select(.skipped == true)] | length), report: $report, routes: $routes, quarantined: $qt, serviceOld: $serviceold, machineHold: ($mh[0] // null),
        landingPr: ([.[] | select(.step == "pushed" and (.pr | type) == "number") | {pr, card}] as $pp
          | $lp[0] // null | if . == null then null else . + {cards: ([$pp[] | select(.pr == $lp[0].number) | .card] | unique | length)} end)}
     | walk(if type == "object" and (.card | type) == "string" and $names[.card] then .name = $names[.card] else . end)' "$hd/rec"

@@ -691,13 +691,19 @@
   const sixOf = (t) => (t && Array.isArray(t.steps) && t.steps.length === 6 && t.steps.every((s, i) => s && s.name === STEP_NAMES[i] && STEP_WORD[s.state]) ? t : null);
   // "Review 2 of 3", "Fix 2": a step that ran more than once, or the round in progress. Tests that passed only when the
   // cases that had not passed ran again: "Test passed on re-run", never a plain success. A fix the Done-when check on
-  // the build's reply started is Build's (track.jq replyFix), never Fix: "Build · reply check fix" while it runs.
+  // the build's reply started is Build's (track.jq replyFix), never Fix: "Build · reply check fix" while it runs. So is
+  // the review gate's lint fix after the build (lintFix): "Build · lint fix"; after a fix round it is "Fix 2: lint
+  // findings", as the landing gate's is; after a rebuild, "Land · lint fix".
   function stepName(s) {
     const n = num(s.n) ? s.n : 0;
     if (s.name === 'Build' && s.replyFix === 'now' && s.state === 'now') return 'Build · reply check fix';
     if (s.name === 'Build' && s.replyFix === 'done' && s.state === 'done') return 'Build · reply check fixed';
+    if (s.name === 'Build' && s.lintFix === 'now' && s.state === 'now') return 'Build · lint fix';
+    if (s.name === 'Build' && s.lintFix === 'done' && s.state === 'done') return 'Build · lint fixed';
     if (s.name === 'Test' && s.rerun === true && s.state === 'done') return 'Test passed on re-run';
     if (s.name === 'Review' && n >= 1 && (n > 1 || s.state === 'now')) return `Review ${n}${num(s.of) && n <= s.of ? ` of ${s.of}` : ''}`;
+    if (s.name === 'Fix' && s.lintFix === 'now' && s.state === 'now') return `Fix ${Math.max(n, 1)}: lint findings`;
+    if (s.name === 'Land' && s.lintFix === 'now' && s.state === 'now') return 'Land · lint fix';
     if (s.name === 'Fix' && n >= 1 && (n > 1 || s.state === 'now')) return `Fix ${n}`;
     return s.name;
   }
@@ -822,8 +828,12 @@
   }
   // records: one per recorded line, each with its own seconds; detail (17 summed slots) from a snapshot without them.
   const stepsOf = (t) => (t && Array.isArray(t.records) ? t.records : t && Array.isArray(t.detail) ? t.detail : []).filter((s) => s && typeof s.name === 'string' && STEP_WORD[s.state]);
-  // The fix in progress of track t, as fixOf names it; null when the card is in no fix or its steps were not given.
+  // The fix in progress of track t, as fixOf names it; null when the card is in no fix or its steps were not given. The
+  // review gate's lint fix after the build is Build's, after a rebuild Land's (track.jq lintFix), as the six steps name it.
   function fixNow(t) {
+    const six = sixOf(t);
+    if (six && six.steps[0].lintFix === 'now' && six.steps[0].state === 'now') return { name: 'Build · lint fix', why: FIX_SAID['lint findings'] };
+    if (six && six.steps[4].lintFix === 'now' && six.steps[4].state === 'now') return { name: 'Land · lint fix', why: FIX_SAID['lint findings'] };
     const all = stepsOf(t), i = all.length - 1;
     return i >= 0 && all[i].state === 'now' ? fixOf(all, i) : null;
   }
@@ -899,8 +909,8 @@
       const prev = groups[groups.length - 1];
       if (SETUP.test(s.name) && prev && SETUP.test(prev[0].name)) prev.push(s); else groups.push([s]);
     });
-    // A fix is named by what started it, its reason on hover and on a tap.
-    const bars = groups.map((g) => { const b = barOf(g), f = g.length === 1 ? fixOf(all, all.indexOf(g[0])) : null; return f ? Object.assign(b, { name: f.name, said: f.why }) : b; });
+    // A fix is named by what started it, its reason on hover and on a tap; the one in progress as the pill names it (fixNow).
+    const bars = groups.map((g) => { const b = barOf(g), i = all.indexOf(g[0]), f = g.length !== 1 ? null : i === all.length - 1 && g[0].state === 'now' ? fixNow(t) : fixOf(all, i); return f ? Object.assign(b, { name: f.name, said: f.why }) : b; });
     bars.forEach((b) => {
       const li = h('li', 'tl-item'), label = h('span', 'tl-label', b.name), lane = h('span', 'tl-lane'), bar = h('span', 'tl-bar');
       if (b.said) tip(label, b.said);

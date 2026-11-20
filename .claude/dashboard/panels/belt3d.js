@@ -58,7 +58,7 @@
   const keyOf = (c) => (c.card ? `${c.repo}:${c.card}` : `${c.repo}#${c.issue}`);
   function sixOf(track, at, kind) {
     const t = track && Array.isArray(track.steps) && track.steps.length === 6 ? track.steps : null;
-    if (t && t.every((s, i) => s && s.name === NAMES[i] && STATES.includes(s.state))) return t.map((s) => ({ name: s.name, state: s.state, sec: num(s.sec) ? s.sec : null, n: num(s.n) ? s.n : null, replyFix: str(s.replyFix) }));
+    if (t && t.every((s, i) => s && s.name === NAMES[i] && STATES.includes(s.state))) return t.map((s) => ({ name: s.name, state: s.state, sec: num(s.sec) ? s.sec : null, n: num(s.n) ? s.n : null, replyFix: str(s.replyFix), lintFix: str(s.lintFix) }));
     return NAMES.map((name, i) => ({ name, state: i < at ? 'done' : i === at ? (kind === 'blocked' ? 'failed' : kind === 'run' ? 'now' : 'todo') : 'todo', sec: null, n: null }));
   }
   const counted = (o, a, b) => (o && num(o[a]) && num(o[b]) && o[b] > 0 ? o : null);
@@ -132,7 +132,9 @@
   const time = (c) => (Number.isNaN(c.since) ? '' : view.ctx.took(Math.max(0, (Date.now() - c.since) / 1000)));
   function stepName(c) {
     const s = c.steps[c.at];
-    return c.at === 0 && s && s.replyFix === 'now' ? 'Build · reply check fix' : c.at === 1 && s && num(s.n) && s.n >= 1 ? `Review ${s.n}` : c.at === 2 && s && num(s.n) && s.n > 1 ? `Fix ${s.n}` : NAMES[c.at];
+    // The review gate's lint fix is on the step it checks, Build, Fix or Land; the landing gate's a Fix round (track.jq lintFix).
+    return c.at === 0 && s && s.replyFix === 'now' ? 'Build · reply check fix' : c.at === 0 && s && s.lintFix === 'now' ? 'Build · lint fix'
+      : c.at === 2 && s && s.lintFix === 'now' ? `Fix ${num(s.n) && s.n > 1 ? s.n : 1}: lint findings` : c.at === 4 && s && s.lintFix === 'now' ? 'Land · lint fix' : c.at === 1 && s && num(s.n) && s.n >= 1 ? `Review ${s.n}` : c.at === 2 && s && num(s.n) && s.n > 1 ? `Fix ${s.n}` : NAMES[c.at];
   }
   // A running card's test run, as far as it has got: the file that runs now, which of how many, and its time on it
   // (#433: the cases of the files that ended are no total, so they are not shown); else its cases, else its files.
@@ -424,7 +426,7 @@
     const six = h('ol', 'b3-six');
     c.steps.forEach((s, i) => {
       const li = h('li', `s-${s.state}`), when = s.state === 'done' && num(s.sec) ? ctx.took(s.sec) : s.state === 'now' ? `${time(c)} so far${runs(c, s)}` : s.state === 'todo' ? '' : s.state;
-      li.append(h('span', null, MARK[s.state]), i === c.at && c.kind === 'run' ? stepName(c) : i === 0 && s.state === 'done' && s.replyFix === 'done' ? 'Build · reply check fixed' : s.name, h('em', null, when));
+      li.append(h('span', null, MARK[s.state]), i === c.at && c.kind === 'run' ? stepName(c) : i === 0 && s.state === 'done' && s.replyFix === 'done' ? 'Build · reply check fixed' : i === 0 && s.state === 'done' && s.lintFix === 'done' ? 'Build · lint fixed' : s.name, h('em', null, when));
       six.append(li);
     });
     const parts = [h('div', 'b3-eyebrow', KIND[c.kind]), head, h('p', 'b3-ttl', c.title || 'untitled'), chip, six];

@@ -92,7 +92,7 @@
 #           cycles: the dependency cycles, flaky: the snapshot's flaky cases {case, count, issue, files, url}, null from a snapshot
 #           without them, slowOff: the snapshot's test files kept off card test steps, each with its issue's url, null
 #           likewise, untimed: how many of the last card test runs recorded no test times, null from a snapshot
-#           without it, report: the pack's test.report (the test runner setup found and how its times are read), null
+#           without it, unchecked: how many landed cards skipped a lint command for a missing tool, null likewise, report: the pack's test.report (the test runner setup found and how its times are read), null
 #           likewise, routes: each Claude route, subscription and proxy, with its state, null likewise, quarantined:
 #           the lines of the card records set aside as not whole records {line, field, time}, null likewise,
 #           serviceOld: the machine's Conveyor on another commit that refuses the pack {commit, refused, project}, null
@@ -153,7 +153,8 @@
 #           each model's display name and the model IDs seen in 30 days, for Model prices and the Board's model names; null
 #           from a snapshot without them), standing (the snapshot's: the pack's auto.standing, the standing kinds
 #           of routine yes that are on; null from a snapshot without it), pushCheck (the snapshot's: the pack's
-#           push.check, true or false; null from a snapshot without it), open (as the Board's: every held issue
+#           push.check, true or false; null from a snapshot without it), lintCommands (the snapshot's: the pack's
+#           lint commands, each {run, files}; null from a snapshot without them), open (as the Board's: every held issue
 #           with its labels and reasons, and every open issue) and readAt (when the build of the record's snapshot
 #           began: by this machine's clock from the live feed, else the host's snapshotAt; older than updatedAt when
 #           the snapshot is; null from a snapshot that does not say).
@@ -751,7 +752,7 @@ PANELS_JQ='
        building: [$s.belt[] | select(.landed != true)] | length, onBelt: [$s.belt[] | select(.landed != true) | .issue],
        beltSteps: [$s.belt[] | {issue, step, landed: (.landed == true)}],
        blocked: [$s.needsYou.blocked[] | {card, issue, name: (.name // null), title, since}] | few($r), forecast: ($s.forecast // null),
-       prices: ($s.prices // null), standing: ($s.standing // null), pushCheck: ($s.pushCheck | if type == "boolean" then . else null end), open: openOf($r), readAt: ($r.readAt // null)};
+       prices: ($s.prices // null), standing: ($s.standing // null), pushCheck: ($s.pushCheck | if type == "boolean" then . else null end), lintCommands: ($s.lintCommands | if type == "array" then . else null end), open: openOf($r), readAt: ($r.readAt // null)};
   # From the first pick-up of the work of the card to its landing: totalSec of the snapshot, else the time in its card id.
   def took: (.totalSec | numbers) // (try ((.card | capture("^c(?<d>[0-9]{8}T[0-9]{6})-").d | strptime("%Y%m%dT%H%M%S") | mktime) as $s
     | ((.time | fromdate) - $s) | select(. >= 0)) catch null) // null;
@@ -871,7 +872,7 @@ PANELS_JQ='
           cap: ($R | slots)}}} end),
    health: {error: null, data: {
         host: {name: $conv.host, local: ($conv.local == true), reachable: $conv.reachable, error: $cerr}, stream: ($conv.stream // null),
-        records: (if $R == null then null else $R | map({repo, repoUrl: (.repoUrl // null), lastPushAt, steered, snapshotAt: (.snap.snapshotAt // null)} + (.snap.health | {loop, state: (.state // null), newest, stuck, unpushed, pushError, pushFailingSince, gh, ghReached, diskFreeKb, builderCap, models, cycles: (.cycles // null), untimed: (.untimed // null), split: (.split // null), report: (.report // null), routes: (.routes // null), quarantined: (.quarantined // null), serviceOld: (.serviceOld // null)}) + {flaky: (. as $r | .snap.flaky | arrays | map(. + {url: link($r)})) // null}
+        records: (if $R == null then null else $R | map({repo, repoUrl: (.repoUrl // null), lastPushAt, steered, snapshotAt: (.snap.snapshotAt // null)} + (.snap.health | {loop, state: (.state // null), newest, stuck, unpushed, pushError, pushFailingSince, gh, ghReached, diskFreeKb, builderCap, models, cycles: (.cycles // null), untimed: (.untimed // null), unchecked: (.unchecked // null), split: (.split // null), report: (.report // null), routes: (.routes // null), quarantined: (.quarantined // null), serviceOld: (.serviceOld // null)}) + {flaky: (. as $r | .snap.flaky | arrays | map(. + {url: link($r)})) // null}
           + {slowOff: (. as $r | .snap.slowOff | arrays | map(. + {url: link($r)})) // null}) end),
         limit: $lim.limit, limitError: $lim.error, limits: limitsOf($R), accounts: accountsOf($R), update: $upd,
         # The plugin problems each Foreman noted, once under each of its projects (repo, as the project filter reads

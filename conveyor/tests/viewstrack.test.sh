@@ -58,6 +58,16 @@ t_track() {
   card 35 picked worktree deps brief b "$W" f 'fix:ok:{"reason":"the Done-when check failed: D1"}' r
   card 36 picked worktree deps brief b "$W" f
   card 37 $pre "review:NO-GO:$K" f fix r
+  # Issue 261: a lint fix is named by the gate on the lint line before it (lint.gate): the review gate's, after the
+  # build, is Build's, running (38), then done (39); the landing gate's is a Fix round, running (48).
+  lintl() { printf 'lint:%s:{"lint":{"commands":[],"asInstalled":false,"gate":"%s"},"reason":"%s"}' "$@"; }
+  card 38 picked worktree deps brief b build "$(lintl findings review 'lint command 1 (x): findings, 1 of this change, 2 s')" f
+  card 39 picked worktree deps brief b build "$(lintl findings review '')" f 'fix:ok:{"reason":"lint: 1 finding(s) of the change"}' \
+    "$(lintl pass review 'lint command 1 (x): skipped: missing shellcheck, 0 s')" r
+  card 48 $pre "review:GO:$Z" "$(lintl findings land '')" f
+  # The review gate's lint fix after a fix round is on Fix (49), after a rebuild on Land (50).
+  card 49 $pre "review:NO-GO:$K" f fix "$(lintl findings review '')" f
+  card 50 $pre "review:GO:$Z" t test:pass l x rebase "$(lintl findings review '')" f
   # A fifth lands, after a fix round that took 3 minutes.
   card 5 $pre "review:NO-GO:$K" f - - fix r "review:GO:$Z" t test:pass l 'landed:ok:{"sha":"abd","product":false}'
   # Five cards land after a rebuild (two minutes each): no time of any step is estimated from them.
@@ -127,7 +137,21 @@ EOF
 35 [1,"+>....",1,0]
 36 [0,">.....",0,0]
 37 [1,"+>+...",2,1]
+38 [0,">.....",0,0]
+39 [1,"+>....",1,0]
+48 [2,"++>...",1,1]
+49 [2,"++>...",1,1]
+50 [4,"++-+>.",1,0]
 EOF
+  # Bugs (#261): the review gate's lint fix was a Fix round before the first review, and the landing gate's had no
+  # note, so neither the Board nor /units could say "Build · lint fix" or "Fix N: lint findings"; the review gate's
+  # after a fix round or a rebuild had no note at all.
+  [ "$(jq -c '[.belt[] | select(.card | IN("c38", "c39", "c48", "c49", "c50")) | [.card, .track.steps[0].lintFix, .track.steps[2].lintFix, .track.steps[4].lintFix]] | sort' <<<"$out")" \
+    = '[["c38","now",null,null],["c39","done",null,null],["c48",null,"now",null],["c49",null,"now",null],["c50",null,null,"now"]]' ] \
+    || fail "the lint fix on Build, Fix and Land: $(jq -c '[.belt[] | select(.card | IN("c38", "c39", "c48", "c49", "c50")) | [.card, .track.steps]]' <<<"$out")"
+  # Bug (#261): a lint line showed in the card's history with none of its commands' results.
+  [ "$(b 39 '[.track.records[] | select(.name == "lint") | .why]')" = '[null,"lint command 1 (x): skipped: missing shellcheck, 0 s"]' ] \
+    || fail "the lint lines' results in the history: $(b 39 .track.records)"
   # The note /units and the Board draw on Build for a reply-check fix: running, done, and none without one.
   [ "$(jq -c '[.belt[] | select(.card | IN("c34", "c35", "c36", "c37")) | [.card, .track.steps[0].replyFix]] | sort' <<<"$out")" = '[["c34","done"],["c35","done"],["c36","now"],["c37",null]]' ] \
     || fail "the reply-check fix on Build: $(jq -c '[.belt[] | select(.card | IN("c34", "c35", "c36", "c37")) | [.card, .track.steps[0]]]' <<<"$out")"

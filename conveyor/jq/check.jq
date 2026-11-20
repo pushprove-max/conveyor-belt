@@ -167,10 +167,11 @@ def ok: . as $r | (keys - known) == need
             and ([.covers, .dependsOn] | all(type == "array" and all(type == "number"))) and (.doneWhen | type == "array" and all(type == "string"))))
           and (.filed // [] | type == "array" and all(type == "number")))))
         # A lint line (lintline(), lib/lint.sh): the gate's result, each command's result, seconds and findings of the
-        # change, and whether the tools ran as installed.
+        # change, whether the tools ran as installed and the gate that ran it (a line written before the gate was
+        # recorded has none).
         and ((.step == "lint") == (.lint != null))
-        and (.lint == null or ((.result | IN("pass", "findings", "error")) and (.lint | type == "object" and keys == ["asInstalled", "commands"]
-          and (.asInstalled | type == "boolean") and (.commands | type == "array" and all(type == "object" and keys == ["findings", "n", "result", "run", "sec"]
+        and (.lint == null or ((.result | IN("pass", "findings", "error")) and (.lint | type == "object" and (keys - ["gate"]) == ["asInstalled", "commands"]
+          and (.gate == null or (.gate | IN("review", "land", "wait"))) and (.asInstalled | type == "boolean") and (.commands | type == "array" and all(type == "object" and keys == ["findings", "n", "result", "run", "sec"]
             and ([.findings, .n, .sec] | all(type == "number")) and ([.result, .run] | all(type == "string")))))))
         # A grown line (growcheck(), lib/slices.sh): a change past split.growFiles files, the judge's verdict on it, the
         # slices of a split, the issues filed for them and the files left (On), the answer that broke the rules.

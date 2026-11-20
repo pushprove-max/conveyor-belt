@@ -75,7 +75,10 @@ right-aligned and the title is what gives way.
      progress lit `▶`, to come dim, skipped `–` (Fix after a GO), failed `✗` in red. Where the width has room, a
      done step adds the time it took (`✓ Build 16m`) and a step that ran more than once its count (`Review 2 of 3`,
      `Fix 2`); the times give way first, then the counts, and what gave way is on a dim line under the track
-     (`Test 16m · Land 16m`), so no measured time or count is lost.
+     (`Test 16m · Land 16m`), so no measured time or count is lost. A lint fix before a review, after the build, is
+     on Build: `▶ Build · lint fix` while it runs, then `✓ Build 16m · lint fixed`. A lint fix before the landing,
+     or before a review after a fix, is a Fix step: `▶ Fix 2: lint findings`. A lint fix before a review after a
+     rebuild is on Land: `▶ Land · lint fix`.
   3. The round (`round 1 of 3`), each finished round's verdict with its counts by level, and, right-aligned, the
      measured time in the step it is in (`fixing 2m`, `pushing 51s`, `push failed 3m`).
   A card that has landed stays on the belt, Push in progress, until main is pushed and its issue closed. With the

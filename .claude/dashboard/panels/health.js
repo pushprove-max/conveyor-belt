@@ -189,6 +189,10 @@ window.DASH_APP.panel({
         check(`Split check${of}`, ctx.chip(`${k.cards + w.cards + n} checked`, 'ok'),
           `kept ${k.cards} (${rate(k)}); would split ${w.cards} (${rate(w)})${n ? `; split into slices ${n}` : ''}`);
       }
+      // The landed cards whose last lint line skipped a command for a missing tool (unchecked; conveyor/lib/views.sh):
+      // that command checked nothing of their change. A count, as Split check is; none shows no row.
+      if (typeof r.unchecked === 'number' && r.unchecked > 0) check(`Lint check${of}`, ctx.chip(`${r.unchecked} unchecked`, 'ok'),
+        `${r.unchecked === 1 ? '1 card' : `${r.unchecked} cards`} landed with a lint command skipped for a missing tool`);
       // The card records' lines the record check set aside (quarantined: [{line, field, time}]; conveyor/lib/views.sh
       // check()): the loop reads on without them, and the owner decides what each was.
       const quarantined = Array.isArray(r.quarantined) ? r.quarantined.filter((q) => q && typeof q === 'object') : [];

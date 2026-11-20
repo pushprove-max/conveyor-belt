@@ -225,6 +225,8 @@ cursor goes to the heading of that group.
 - When the issue is filed, the note leaves the list and `plugin-bugs.md`, and the pane shows a link to the new issue
   until you load the page again. If `gh` fails, the note stays, and the preview shows its error. Each
   note is filed only from its own preview. The other notes stay as they are.
+- **Lint check** in Health counts the cards that landed with a lint command skipped because its tool is missing, as
+  "2 unchecked". That command did not check their change. With no such card, the row does not show.
 - A Health row whose error is one line says what failed in a short sentence, for example "The Board could not get
   main from GitHub." Click **Raw error** to read the error as it came, with **Copy output** to copy it.
 - **Work now**, at the foot of Health, shows what keeps the Conveyor machine busy now. Open it to read the machine.
@@ -298,8 +300,8 @@ one control, and the value in force is the selected part.
 3. **Picking**: **Build issues** (the P0 to P3 switches and Follow-ups), **Never build** (area labels), **New issues
    start in**, **Dependency guard**, **Split large issues** and **Pick settings**. A main-red fix card is built
    whatever the P0 to P3 switches say, by design: held, every card that meets the red main would wait for good.
-4. **Landing and push**: **Push on landing**, **Land as**, **Merge PR**, **Test before a push** and **Approve
-   visible changes**.
+4. **Landing and push**: **Push on landing**, **Land as**, **Merge PR**, **Test before a push**, **Lint check** and
+   **Approve visible changes**.
 5. **Done without asking**: **Requested fix**, **Review follow-up**, **Release check**, **Fixed block** and
    **Review retry**, each On or Off.
 6. **Issue order**: **Held issues** shows the count. Click it to go to the held list. **Pinned issues** shows one
@@ -370,6 +372,11 @@ landings since the last push, and a file that fails holds the push. Off, a push 
 "off: a push runs no test first". The switch shows the pack's `push.check` (on in a new project) until you change it
 here. Your change goes in the control record and wins over the pack
 ([Which tests a card runs](configuration.md#which-tests-a-card-runs)).
+
+**Lint check** is a switch per project, On by default. On, the pack's lint commands run on each card's change before
+its review and before its landing. Off, no lint command runs, and the tab says "off: no lint command runs, and cards
+land with no lint check". Under the switch, the tab lists the pack's lint commands, each with the files it reads. You
+cannot change them here: they are set in the `lint` field of `.conveyor/project.json` ([Lint](configuration.md#lint)).
 
 **Split large issues** has three settings per project: Off, Shadow and On. Shadow is the default. Shadow records what
 the Judge would split a large issue into, and builds the issue whole. The tab says "shadow: the verdict is recorded,
@@ -576,10 +583,18 @@ issue number, as a link, and the issue title.
   file link goes to main, which can show different code. Each
   other step's output shows as plain text, with its failures first. **Copy output** copies the output as plain text, for a
   review too. This is the same in On the belt, Landed today and Needs you.
-- A fix session shows what started it: **Fix 2: review findings**, **Fix 1: reply check**, **Fix 3: main changed under it** or
-  **Fix 4: tests failed**. Hover over the label for the full reason.
+- A fix session shows what started it: **Fix 2: review findings**, **Fix 1: reply check**, **Fix 3: main changed under it**,
+  **Fix 4: tests failed** or **Fix 5: lint findings**. Hover over the label for the full reason.
 - A reply-check fix after the build shows on the Build step, "Build · reply check fix" and then "Build · reply check
   fixed". The Fix step shows the other fixes.
+- A lint fix before a review, after the build, also shows on the Build step: "Build · lint fix" while it runs, then
+  "Build · lint fixed". A lint fix before the landing, or before a review after a fix, is a Fix step: "Fix 2: lint
+  findings". A lint fix before a review after a rebuild shows on the Land step: "Land · lint fix"
+  ([Lint](configuration.md#lint)).
+- Each lint check shows in the card's steps as **lint**, with each command's result and its seconds under it. A
+  command whose tool is missing reads `skipped: missing <tool>`. When the change changed the config of a command that
+  ran, the line ends with `tools ran as installed`. A command that was skipped or had no files to check does not add
+  this note.
 - A card in its Test step shows how many tests have run, "142 of 205 tests", and " · 2 failed" when any failed. A test
   command gives the count when it prints `TESTRUN cases=N`, and names each case as it ends with an empty file in
   `cases/ok` or `cases/failed` of its test log folder (`conveyor/README.md`, The test step). With no case count, the

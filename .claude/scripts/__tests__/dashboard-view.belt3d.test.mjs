@@ -217,6 +217,24 @@ test('belt3d: a reply-check fix after the build is drawn on Build, and the revie
   assert.deepEqual(Array.from(b3(w).querySelectorAll('.b3-detail .b3-six li'), (li) => [li.className, li.childNodes[1].textContent]),
     [['s-done', 'Build · reply check fixed'], ['s-now', 'Review 1'], ['s-todo', 'Fix'], ['s-todo', 'Test'], ['s-todo', 'Land'], ['s-todo', 'Push']]);
 });
+// Issue 261 (track.jq lintFix). Bug it catches: the 3D belt named the review gate's lint fix "Build" or a Fix round,
+// and the landing gate's a bare "Fix 2", unlike the flat Board.
+test('belt3d: a lint fix is named "Build · lint fix" at the review gate and "Fix N: lint findings" at the landing gate', async () => {
+  const review = trackOf('>.....', 'fix after review 0').steps;
+  review[0].lintFix = 'now';
+  const land = trackOf('++>...', 'fix after review 1').steps;
+  Object.assign(land[2], { n: 2, lintFix: 'now' });
+  // The review gate's lint fix after a rebuild is Land's: it read as a plain "Land".
+  const rebuilt = trackOf('++-+>.', 'rebuilding after a conflict').steps;
+  rebuilt[4].lintFix = 'now';
+  const w = await open3d(floor({ belt: [
+    runCard('c7-7', 7, 'fix', { track: { steps: rebuilt, at: 4, since: iso(T0 - 120000), tests: null, files: null, records: recs(['building', 10], ['rebuild', 10], ['fix after review 1', null]) } }),
+    runCard('c8-8', 8, 'fix', { track: { steps: review, at: 0, since: iso(T0 - 120000), tests: null, files: null, records: recs(['building', 10], ['fix after review 0', null]) } }),
+    runCard('c9-9', 9, 'fix', { track: { steps: land, at: 2, since: iso(T0 - 120000), tests: null, files: null, records: recs(['building', 10], ['review 1 (GO)', 10], ['fix after review 1', null]) } })] }));
+  assert.equal(backOn(w, 8, 'sample:c8-8').status[0], 'Build · lint fix · 2 min');
+  assert.equal(backOn(w, 9, 'sample:c9-9').status[0], 'Fix 2: lint findings · 2 min');
+  assert.equal(backOn(w, 7, 'sample:c7-7').status[0], 'Land · lint fix · 2 min');
+});
 // Bug it catches: the amber marks left on a card that has moved on, past the step it went back from; and the marks
 // gone when it is only back at that step (Review 2 a NO-GO, the card in Fix 2), not past it.
 test('belt3d: once the card moves on past the step it went back from, its amber marks are gone', async () => {

@@ -91,7 +91,7 @@
     ['models', 'Models', 'Three seats for each card.', ['builder', 'reviewer', 'judge', 'judge-always', 'account', 'review-account']],
     ['capacity', 'Capacity', 'Build slots and machine limits.', ['cap', 'guard', 'cores']],
     ['picking', 'Picking', 'Choose which issues enter the belt.', ['build', 'never', 'start', 'dep-guard', 'split', 'pick']],
-    ['landing', 'Landing and push', 'Decide how finished cards reach the repository.', ['push', 'land-as', 'pr-merge', 'push-check', 'visible']],
+    ['landing', 'Landing and push', 'Decide how finished cards reach the repository.', ['push', 'land-as', 'pr-merge', 'push-check', 'lint', 'visible']],
     ['standing', 'Done without asking', 'Choose when the Foreman can act on your behalf.', STANDING.map(([k]) => `standing-${k}`)],
     ['order', 'Issue order', 'Inspect held issues and set the order of pinned work.', ['held', 'order']],
   ];
@@ -292,7 +292,7 @@
   // A change in words, for the head.
   function words(action, args) {
     const a = list(args);
-    if (action === 'rules') return a.map((x) => { const [k, o] = x.split('='); return isArea(k) ? `${o === 'off' ? 'never build' : 'build'} ${k}` : `${k === 'followups' ? 'Follow-ups' : k === 'push' ? 'Push on landing' : k === 'visible' ? 'Approve visible changes' : k === 'split' ? 'Split large issues' : k === 'pick' ? 'Pick settings' : k} ${o}`; }).join(', ');
+    if (action === 'rules') return a.map((x) => { const [k, o] = x.split('='); return isArea(k) ? `${o === 'off' ? 'never build' : 'build'} ${k}` : `${k === 'followups' ? 'Follow-ups' : k === 'push' ? 'Push on landing' : k === 'visible' ? 'Approve visible changes' : k === 'lint' ? 'Lint check' : k === 'split' ? 'Split large issues' : k === 'pick' ? 'Pick settings' : k} ${o}`; }).join(', ');
     if (action === 'cap') return a[0] === 'off' ? 'at once: the default' : `at once ${a[0]}`;
     if (action === 'guard') return a[0] === 'off' ? 'pause at: off' : `pause at ${a[0]}%`;
     if (action === 'model' || action === 'reviewer') return `${action === 'model' ? 'builder' : 'reviewer'} ${a[0] === 'default' ? 'back to the default' : a.join(' ')}`;
@@ -331,7 +331,7 @@
         const never = list(r.rules.never).filter((y) => y !== key);
         r.rules.never = o === 'off' ? never.concat([key]) : never;
       });
-      return [r, isArea(k) ? 'never' : k === 'push' || k === 'visible' || k === 'split' || k === 'pick' ? k : 'build'];
+      return [r, isArea(k) ? 'never' : k === 'push' || k === 'visible' || k === 'lint' || k === 'split' || k === 'pick' ? k : 'build'];
     }
     if (action === 'cap' || action === 'guard') { r[action] = a[0] === 'off' ? null : Number(a[0]); return [r, action]; }
     if (action === 'judge' && (a[0] === 'on' || a[0] === 'off')) { r.judgeOn = a[0] === 'on'; return [r, 'judge']; }
@@ -1026,6 +1026,26 @@
     yOn.disabled = yOff.disabled = !yesKnown;
     el.append(row('visible', 'Approve visible changes', 'a change customers or staff will see waits for your yes',
       seg('Approve visible changes', yOn, yOff), yesKnown ? offLine(yesOn, 'visible changes land without your yes, and nobody approves them') : newer(yesKnown)));
+    // Lint check: On (the default) runs the pack's lint commands on each card's change at its review and landing gates
+    // (lintgate(), conveyor/lib/lint.sh); Off runs none. The pack's commands (the snapshot's lintCommands) are listed
+    // under it, read-only: the pack's lint field sets them. An engine whose record has no rules.lint is sent neither choice.
+    const lintOn = r.lint !== false, lintKnown = typeof r.lint === 'boolean';
+    const lnOn = choice('On', 'lint-on', 'Lint check: on', lintOn, () => { if (!lintOn) send('rules', ['lint=on'], null, ['rules', ['lint=off']]); });
+    const lnOff = choice('Off', 'lint-off', 'Lint check: off', !lintOn, () => { if (lintOn) send('rules', ['lint=off'], null, ['rules', ['lint=on']]); });
+    lnOn.disabled = lnOff.disabled = !lintKnown;
+    const lintCmds = Array.isArray(S.d.lintCommands) ? S.d.lintCommands.filter((x) => x && typeof x.run === 'string') : null;
+    let lintList = null;
+    if (lintCmds && lintCmds.length) {
+      lintList = h('ul', 'rules-lint');
+      lintList.setAttribute('aria-label', "The pack's lint commands");
+      lintCmds.forEach((x) => {
+        const li = h('li');
+        li.append(h('code', null, x.run), h('span', 'board-from', ` on ${list(x.files).join(', ') || 'no files'}`));
+        lintList.append(li);
+      });
+    } else if (lintCmds) lintList = h('span', 'board-from', 'the pack sets no lint command');
+    el.append(row('lint', 'Lint check', "the pack's lint commands run on each card's change before its review and its landing",
+      seg('Lint check', lnOn, lnOff), lintKnown ? offLine(lintOn, 'no lint command runs, and cards land with no lint check') : newer(lintKnown), lintList));
     // Split large issues: Shadow (the default) records what the Judge would split a large issue into, and builds it
     // whole; On files the slices as follow-ups and holds the issue as their umbrella; Off checks nothing. An engine whose
     // record has no rules.split is sent none of them. Undo sends the setting it had.

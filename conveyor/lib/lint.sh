@@ -395,16 +395,17 @@ lintrun() { # <worktree> <base> <card> <output file>
 # A gate's lint line in the card's records, for <output file> of lintrun and its exit: result pass, findings or error;
 # lint.commands each command's {n, run, result, sec, findings: the count of the change's}, a skipped one's result
 # `skipped: missing <tool>`; lint.asInstalled true when a command that ran (not one with no files or a missing tool) has
-# a trigger the change changed (the tools ran as installed, not as the change would install them). The reason says
-# the same, and an execution error's why.
-lintline() { # <card> <issue> <output file> <lintrun's exit>
+# a trigger the change changed (the tools ran as installed, not as the change would install them); lint.gate the gate
+# that ran it, review, land (the landing gate) or wait (the gate for a waiting card), so the Board and /units can name
+# the fix session it starts (track.jq). The reason says the same, and an execution error's why.
+lintline() { # <card> <issue> <output file> <lintrun's exit> <review|land|wait>
   local r=pass x
   case $4 in 1) r=findings ;; 2) r=error ;; esac
-  x=$(jq -cs --arg w "$LINT_WHY" 'map({n, run, result: (if .result == "skipped" then "skipped: missing \(.why)" else .result end), sec, findings: (.reported | length)}) as $c
+  x=$(jq -cs --arg w "$LINT_WHY" --arg g "$5" 'map({n, run, result: (if .result == "skipped" then "skipped: missing \(.why)" else .result end), sec, findings: (.reported | length)}) as $c
     | any(.[]; .triggered and (.result | IN("no files", "skipped") | not)) as $i
-    | {lint: {commands: $c, asInstalled: $i}, reason: ([$c[] | "lint command \(.n) (\(.run)): \(.result)\(if .result == "findings" then ", \(.findings) of this change" else "" end), \(.sec) s"]
+    | {lint: {commands: $c, asInstalled: $i, gate: $g}, reason: ([$c[] | "lint command \(.n) (\(.run)): \(.result)\(if .result == "findings" then ", \(.findings) of this change" else "" end), \(.sec) s"]
         + (if $i then ["tools ran as installed"] else [] end) + (if $w == "" then [] else [$w] end) | join("; "))}' "$3") \
-    || x=$(jq -cn --arg w "$LINT_WHY" '{lint: {commands: [], asInstalled: false}, reason: $w}')
+    || x=$(jq -cn --arg w "$LINT_WHY" --arg g "$5" '{lint: {commands: [], asInstalled: false, gate: $g}, reason: $w}')
   record "$1" "$2" lint "$r" "$x"
 }
 # The rule Lint check (rules.lint of the control record the card started on, CARDCTL, else the one in force): on
@@ -480,7 +481,7 @@ lintgate() { # <card> <issue> <worktree> <issue json> <the sessions' prompt> <br
   [ -z "${lfix:-}" ] || p=$(cardpatch "$wt") || p=''
   [ -n "$land" ] || [ -z "$p" ] || [ "$p" != "$lfix" ] || return 0
   base=$(git -C "$wt" rev-parse -q --verify HEAD) && o=$(mktemp) || { block "$c" "$n" "$wt" "lint: the engine could not start the lint check, so nothing landed"; return 1; }
-  lintrun "$wt" "$base" "$c" "$o"; rc=$?; lintline "$c" "$n" "$o" $rc
+  lintrun "$wt" "$base" "$c" "$o"; rc=$?; lintline "$c" "$n" "$o" $rc "${land:-review}"
   [ $rc != 2 ] || { rm -f "$o"; block "$c" "$n" "$wt" "lint: an execution error, so nothing landed: $LINT_WHY"; return 1; }
   [ $rc = 1 ] || { rm -f "$o"; return 0; }
   k=$(jq -s '[.[].reported[]] | length' "$o")
@@ -497,7 +498,7 @@ lintgate() { # <card> <issue> <worktree> <issue json> <the sessions' prompt> <br
   checked "$c" "$n" "$wt" "$4" "$5" fix "$(jq -c --arg r "lint: $k finding(s) of the change${land:+ on main as it is now}" '. + {reason: $r}' <<<"$t")" || { rm -f "$o"; return 1; }
   git -C "$wt" add -A 2>/dev/null
   [ -z "$land" ] || { rm -f "$o"; return 2; }
-  lintrun "$wt" "$base" "$c" "$o"; rc=$?; lintline "$c" "$n" "$o" $rc
+  lintrun "$wt" "$base" "$c" "$o"; rc=$?; lintline "$c" "$n" "$o" $rc review
   t=$(jq -rs '[.[] | . as $c | .reported[] | "lint command \($c.n): \(.file):\(.line): \(.text)"] | .[:50][]' "$o" 2>/dev/null); k=$(jq -s '[.[].reported[]] | length' "$o" 2>/dev/null)
   rm -f "$o"
   [ $rc != 2 ] || { block "$c" "$n" "$wt" "lint: an execution error after its fix session, so nothing landed: $LINT_WHY"; return 1; }
@@ -516,7 +517,7 @@ lintwait() { # <card> <issue> <worktree>
   packget lint l || { rm -f "$3.ready"; return 1; }
   [ -n "$l" ] || return 0
   base=$(git -C "$3" rev-parse -q --verify HEAD) && o=$(mktemp) || { rm -f "$3.ready"; return 1; }
-  lintrun "$3" "$base" "$1" "$o"; rc=$?; lintline "$1" "$2" "$o" $rc; rm -f "$o"
+  lintrun "$3" "$base" "$1" "$o"; rc=$?; lintline "$1" "$2" "$o" $rc wait; rm -f "$o"
   [ $rc != 0 ] || return 0
   rm -f "$3.ready"
   echo "conveyor: card $1: its lint found $([ $rc = 1 ] && echo findings || echo 'an execution error') while it waits: it runs no check or test, and its landing gate deals with it at its turn"

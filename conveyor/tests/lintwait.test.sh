@@ -50,7 +50,7 @@ t_lintwaitfind() {
   [ ! -e "$STUB/checked" ] && [ ! -e "$STUB/tested" ] && [ ! -e "$STUB/brief" ] \
     || fail "a check, test or session ran for the waiting card with a lint finding: $(cat "$STUB/checked" "$STUB/tested" 2>&1)"
   [ ! -e "$CARDS/c8-8.ready" ] || fail "the waiting card with a lint finding is still ready, so a batch can take it: $(cat "$CARDS/c8-8.ready")"
-  [ "$(st 'select(.issue == 8 and .step == "lint") | .result')" = findings ] || fail "no findings lint line: $(st 'select(.issue == 8) | .step')"
+  [ "$(st 'select(.issue == 8 and .step == "lint") | "\(.result) \(.lint.gate)"')" = 'findings wait' ] || fail "no findings lint line of the gate for a waiting card: $(st 'select(.issue == 8 and .step == "lint")')"
   # Bug: the lint line stays the card's last, so the Board and `health` no longer see its wait or its time limit.
   [ "$(st 'select(.issue == 8) | "\(.step):\(.of // "")"' | tail -n 1)" = start:land ] \
     || fail "the wait's start line is not the card's last after its lint line: $(st 'select(.issue == 8) | .step')"

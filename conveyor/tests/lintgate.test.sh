@@ -44,7 +44,7 @@ t_lintgatestaged() {
   # The empty folder: git cannot stage it, so it is no file that fails the check.
   fx_wt 'echo two >> a.txt && echo new > n.txt && git rm -q d.txt && echo new > .lintrc && mkdir empty' d.txt gone .lintrc old
   # shellcheck disable=SC2016 # expanded in fx_in's shell
-  fx_in 'lintrun "$FXWT" "$(git -C "$FXWT" rev-parse HEAD)" c7 "$T/$CASE/o"; rc=$?; echo "rc=$rc"; lintline c7 7 "$T/$CASE/o" $rc'
+  fx_in 'lintrun "$FXWT" "$(git -C "$FXWT" rev-parse HEAD)" c7 "$T/$CASE/o"; rc=$?; echo "rc=$rc"; lintline c7 7 "$T/$CASE/o" $rc review'
   grep -qx 'rc=0' "$T/$CASE/run.out" && [ "$(cat "$STUB/lint-args")" = 'run a.txt n.txt' ] \
     || fail "the staged change did not pass the read-only check, or the linter did not read it: $(cat "$T/$CASE/run.out") $(cat "$STUB/lint-args" 2>&1)"
   [ "$(st 'select(.step == "lint") | [.result, .lint.asInstalled, (.reason | endswith("; tools ran as installed"))] | tojson')" = '["pass",true,true]' ] \
@@ -58,7 +58,7 @@ t_lintgateskiptrigger() {
   tune '.lint.commands[0].triggers = [".lintrc"]'
   fx_wt 'echo two >> a.txt && echo new > .lintrc' .lintrc old
   # shellcheck disable=SC2016 # expanded in fx_in's shell
-  fx_in 'lintrun "$FXWT" "$(git -C "$FXWT" rev-parse HEAD)" c7 "$T/$CASE/o"; rc=$?; echo "rc=$rc"; lintline c7 7 "$T/$CASE/o" $rc'
+  fx_in 'lintrun "$FXWT" "$(git -C "$FXWT" rev-parse HEAD)" c7 "$T/$CASE/o"; rc=$?; echo "rc=$rc"; lintline c7 7 "$T/$CASE/o" $rc review'
   grep -qx 'rc=0' "$T/$CASE/run.out" || fail "the skipped command did not let the gate go on: $(cat "$T/$CASE/run.out")"
   [ "$(st 'select(.step == "lint") | [.lint.commands[0].result, .lint.asInstalled, (.reason | contains("tools ran as installed"))] | tojson')" = '["skipped: missing shellcheck",false,false]' ] \
     || fail "the lint line of a skipped command says the tools ran as installed: $(st 'select(.step == "lint")')"
@@ -280,6 +280,10 @@ t_lintgatemerge() {
     || fail "the merge's finding did not get one fix before any test and then a review: $(gatesteps); $(did)"
   [ "$(st 'select(.step == "fix") | .reason')" = 'lint: 1 finding(s) of the change on main as it is now' ] \
     || fail "the fix line does not say it fixed lint findings: $(st 'select(.step == "fix")')"
+  # Bug: the lint lines did not say which gate wrote them, so the Board and /units named the landing gate's fix
+  # "Build · lint fix" (the review gate's name) or the review gate's "Fix N: lint findings" (track.jq).
+  [ "$(st 'select(.step == "lint") | .lint.gate' | paste -sd' ')" = 'review land land land' ] \
+    || fail "the lint lines do not name the review gate, then the landing gate: $(st 'select(.step == "lint") | .lint.gate' | paste -sd' ')"
   [ "$(st 'select(.step == "landed") | .followups | length')" = 1 ] && [ -e "$R/gone.txt" ] && ! grep -q BAD "$R/a.txt" \
     || fail "the review after the lint fix was no last review, or the fixed change did not land: $(st 'select(.step == "landed")'); a.txt: $(cat "$R/a.txt")"
 }

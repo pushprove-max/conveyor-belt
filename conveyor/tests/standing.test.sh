@@ -20,9 +20,11 @@ t_standing() {
   out=$(cd "$R" && loop auto standing fixed-block on && loop auto standing asked-fix on && loop auto standing asked-fix on) || fail "standing on failed: $out"
   [ "$(jq -c .auto.standing "$R/.conveyor/project.json")" = '["asked-fix","fixed-block"]' ] || fail "the pack's kinds: $(jq -c .auto "$R/.conveyor/project.json")"
   # The Rules tab reads the kinds from the snapshot, and the pack's push.check (#395, Test before a push): one it is
-  # not given shows the owner the wrong switch.
-  tune '.push.check = false'
-  [ "$(cd "$R" && loop snapshot | jq -c '[.standing, .pushCheck]')" = '[["asked-fix","fixed-block"],false]' ] || fail "the snapshot's kinds and push.check: $(cd "$R" && loop snapshot | jq -c '[.standing, .pushCheck]')"
+  # not given shows the owner the wrong switch. And the pack's lint commands (#261), which the tab lists beside the rule
+  # Lint check: without them the owner cannot see what the rule runs.
+  tune '.push.check = false | .lint = {commands: [{files: ["*.sh"], run: "shellcheck {files}", triggers: [".shellcheckrc"]}]}'
+  [ "$(cd "$R" && loop snapshot | jq -c '[.standing, .pushCheck, .lintCommands]')" = '[["asked-fix","fixed-block"],false,[{"run":"shellcheck {files}","files":["*.sh"]}]]' ] \
+    || fail "the snapshot's kinds, push.check and lint commands: $(cd "$R" && loop snapshot | jq -c '[.standing, .pushCheck, .lintCommands]')"
   out=$(cd "$R" && loop auto standing)
   grep -qF -- '- asked-fix: ' <<<"$out" && grep -qF -- '- fixed-block: ' <<<"$out" && ! grep -qF -- '- release-check: ' <<<"$out" \
     && grep -qF -- '- Still ask the owner, whatever the kind: ' <<<"$out" || fail "auto standing does not list the kinds on, with their limits: $out"

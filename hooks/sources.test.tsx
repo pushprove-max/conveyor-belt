@@ -260,6 +260,24 @@ test('a reply-check fix is drawn on Build, and Fix is not ticked before the firs
   expect(beltCard({ track: fixed }, 45)[2]).toBe('    Build 30s · reply check fixed')
 })
 
+// Issue 261 (track.jq lintFix). Bugs: the review gate's lint fix after the build read as a Fix round before the first
+// review, and the landing gate's as a bare "Fix 2", so the owner could not tell a lint fix from a review's.
+test('a lint fix is drawn on Build at the review gate and as a lint Fix round at the landing gate', () => {
+  const review = track('>.....', 'fix after review 0')
+  Object.assign(review.steps[0]!, { lintFix: 'now' })
+  expect(beltCard({ track: review }, 100)[1]).toBe(' ▶ Build · lint fix ── Review ── Fix ── Test ── Land ── Push')
+  const fixed = track('+>....', 'review 1 of 3')
+  Object.assign(fixed.steps[0]!, { lintFix: 'done' })
+  expect(beltCard({ track: fixed }, 100)[1]).toBe(' ✓ Build 30s · lint fixed ━━ ▶ Review 1 of 3 ── Fix ── Test ── Land ── Push')
+  const land = track('++>...', 'fix after review 1')
+  Object.assign(land.steps[2]!, { n: 2, lintFix: 'now' })
+  expect(beltCard({ track: land }, 100)[1]).toBe(' ✓ Build 30s ━━ ✓ Review 31s ━━ ▶ Fix 2: lint findings ── Test ── Land ── Push')
+  // The review gate's lint fix after a rebuild is Land's: it read as a plain "Land".
+  const rebuilt = track('++-+>.', 'rebuilding after a conflict')
+  Object.assign(rebuilt.steps[4]!, { lintFix: 'now' })
+  expect(beltCard({ track: rebuilt }, 120)[1]).toContain('▶ Land · lint fix ── Push')
+})
+
 // A card split for its size (#448, track.jq grown): without the note, /units drew a change cut from 5 files to 2 as
 // any other card, and the owner could not tell that part of the work went to follow-ups.
 test('a card split for its size says so on Build, with the count of files before and after', () => {

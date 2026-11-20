@@ -78,12 +78,19 @@
       # step of the session it checks (last), never a Fix round of its own: after the build it is Build's, with a note
       # (replyFix: now while it runs, done after), so Fix is never ticked before the first review. rc: the start in
       # progress is one.
-      | (reduce $log[] as $l ({s: [range(6) | {state: "todo", sec: null}], cur: null, rev: 0, fix: 0, pushed: false, issue: null, closed: false, filed: null, last: 0, prev: null, rc: false};
+      # A lint fix (lintgate(), lib/lint.sh: its start right after a lint line with findings) is named by the gate on
+      # that line (its lint.gate, rows.jq gate): the review gate's is the step of the session before it, as the reply check's is (after
+      # the build, Build's, lintFix: now while it runs, done after; after a fix round Fix's, after a rebuild Land's,
+      # lintFix: now while it runs); the landing gate's is a Fix round (lintFix: now on Fix while it runs). lg: the gate of the start in progress, else null; lk: that gate, kept until its fix line.
+      | (reduce $log[] as $l ({s: [range(6) | {state: "todo", sec: null}], cur: null, rev: 0, fix: 0, pushed: false, issue: null, closed: false, filed: null, last: 0, prev: null, rc: false, lg: null, lk: null};
           def add($i): .s[$i].sec = (.s[$i].sec // 0) + ($l.took // 0) | .cur = $i;
           .rc = ($l.step == "start" and $l.of == "fix" and .prev.checkFailed == true)
+          | .lg = (if $l.step == "start" and $l.of == "fix" and .prev.step == "lint" and .prev.result == "findings" then .prev.gate // null else null end)
+          | .lk = (.lg // .lk)
           | if $l.step | IN("worktree", "deps", "brief") then add(0)
           elif $l.step == "build" then add(0) | .s[0].state = "done" | .last = 0
           elif $l.step == "review" then add(1) | .s[1].state = "done" | .rev += 1
+          elif $l.step == "fix" and .lk == "review" then add(.last) | if .last == 0 then .s[0].lintFix = "done" else . end
           elif $l.step == "fix" and ($l.reason | type == "string" and startswith("the Done-when check failed")) then add(.last) | if .last == 0 then .s[0].replyFix = "done" else . end
           elif $l.step == "fix" then add(2) | .s[2].state = "done" | .fix += 1 | .last = 2
           # Tests that failed are run again after their fix: the step is to come again, not failed. Tests that passed
@@ -95,7 +102,7 @@
             | .s[3].rerun = (if $l.result == "pass" and $l.reused == true then .s[3].rerun == true else $l.result == "pass" and $l.rerun != null end)
             | if ($l.wait | type) == "number" and ($l.run | type) == "number" then .s[3].wait = (.s[3].wait // 0) + $l.wait | .s[3].run = (.s[3].run // 0) + $l.run else . end
           # The landing that met a conflict ran until the rebuild began: those seconds are the landing's.
-          elif $l.step == "start" then (if $l.of == "rebase" then add(4) else . end) | .cur = (if .rc then .last else {build: 0, review: 1, fix: 2, test: 3}[$l.of] // 4 end)
+          elif $l.step == "start" then (if $l.of == "rebase" then add(4) else . end) | .cur = (if .rc or .lg == "review" then .last else {build: 0, review: 1, fix: 2, test: 3}[$l.of] // 4 end)
           elif $l.step == "rebase" then add(4) | .last = 4
           elif $l.step == "filed" then add(4) | .filed = ($l.n // 0)
           elif $l.step == "landed" then add(4) | .s[4].state = "done"
@@ -104,8 +111,8 @@
           elif $l.step == "issue" then add(5) | .issue = $l.result
           elif $l.step == "blocked" then ({worktree: 0, deps: 0, brief: 0}[$l.stop // ""] // .cur // 0) as $i
             | if $l.stop == "yes" then . else .s[$i].sec = (.s[$i].sec // 0) + ($l.took // 0) | .s[$i].state = "failed" end
-          else . end | .prev = $l)) as $u
-      | (if $after == "wait" then null elif $after then 5 elif $c.result != "" then null elif $kind == null then 0 elif $kind == "fix" and $u.rc then $u.cur
+          else . end | .prev = $l | if $l.step == "fix" then .lk = null else . end)) as $u
+      | (if $after == "wait" then null elif $after then 5 elif $c.result != "" then null elif $kind == null then 0 elif $kind == "fix" and ($u.rc or $u.lg == "review") then $u.cur
          else {build: 0, proof: 0, review: 1, fix: 2, test: 3}[$kind] // 4 end) as $six
       # Push is done once main is pushed and the issue is closed: by GitHub (an issue line that is ok), or found closed
       # (x.shut) after GitHub did not close it, closed by hand; it stays failed only while the issue is open.
@@ -122,7 +129,12 @@
             # Land is skipped only on a card closed unlanded.
             state: (if .state == "todo" and $i < $top and ($i != 4 or $u.closed) then "skipped" else .state end), sec}
           + (if $i == 0 and $six == 0 and $u.rc then {replyFix: "now"} elif $i == 0 and .replyFix != null then {replyFix} else {} end)
-          + (if $i == 1 then {n: ($u.rev + (if $six == 1 then 1 else 0 end)), of: $of} elif $i == 2 then {n: ($u.fix + (if $six == 2 and ($u.rc | not) then 1 else 0 end))}
+          + (if $i == 0 and $six == 0 and $kind == "fix" and $u.lg == "review" then {lintFix: "now"} elif $i == 0 and .lintFix != null then {lintFix} else {} end)
+          # A lint fix on Fix (the landing gate's, or the review gate's after a fix round) or on Land (the review gate's
+          # after a rebuild).
+          + (if ($i == 2 or $i == 4) and $six == $i and $kind == "fix" and $u.lg != null then {lintFix: "now"} else {} end)
+          + (if $i == 1 then {n: ($u.rev + (if $six == 1 then 1 else 0 end)), of: $of}
+             elif $i == 2 then {n: ($u.fix + (if $six == 2 and ($u.rc | not) and $u.lg != "review" then 1 else 0 end))}
              # A running Test step: n, the run that goes now (its sec is the earlier runs' seconds, added up: #433). A
              # run again of the failed cases in the same step (the live record's before, session.sh watch()) is one
              # more, and the first run's seconds are in sec: no test line has them yet.
@@ -169,11 +181,11 @@
                 + (if $l.step == "filed" then {n: ($l.n // 0)} elif $l.step == "review" then {counts: ($l.counts // null), judge: ($l.judge // null)}
                    elif $l.step == "test" and $l.result == "pass" and $l.rerun != null then {rerun: true} else {} end)
                 # A blocked line's sentence (why) and the end of its output, a failed test run's, review's or issue closing's reason (why),
-                # a worktree line's reason (why: how the card took up a kept patch),
-                # a NO-GO review's findings (output), a failed test run's failing files (failures) and the end of its output, and a
+                # a worktree line's reason (why: how the card took up a kept patch), a lint line's reason (why: each
+                # command's result and seconds, `skipped: missing <tool>`, `tools ran as installed`), a NO-GO review's findings (output), a failed test run's failing files (failures) and the end of its output, and a
                 # fix's reason: what started it when its line names it (a failed Done-when check, main moved), as the Board labels it.
                 + ({why: (if $l.step == "blocked" or ($l.step == "test" and $l.result != "pass") or ($l.step == "issue" and $l.result != "ok")
-                      or ($l.step == "review" and ($l.result | IN("fail", "stopped"))) or $l.step == "worktree" then $l.reason
+                      or ($l.step == "review" and ($l.result | IN("fail", "stopped"))) or $l.step == "worktree" or $l.step == "lint" then $l.reason
                       # A test run that left linked test files out (testcap(), testrun.sh), or ran only the changed
                       # cases of its own test files (owncases(), testrun.sh): its list's note (rows.jq) says so.
                       elif $l.step == "test" and $l.list != null then $l.list.why else null end),
