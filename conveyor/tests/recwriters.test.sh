@@ -15,7 +15,7 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # recok (lib.sh) fails on each line the check refuses. The writers the cases here do not reach are checked by recok in
 # the cases that already make their lines: the rebase line (port.test.sh t_rebase), the filed line and a landed line
 # with leftover and followups (port.test.sh t_portfix, t_resume), a land-branch card's picked line with branch
-# (branch.test.sh t_branch) and a landed line with yesFrom (visible.test.sh t_inheritpart).
+# (branch.test.sh t_branch) and a landed line with yesFrom (visibleinherit.test.sh t_inheritpart).
 # Fails unless the records hold a line of each step named.
 recsteps() { # <what wrote them> <step>...
   local s have; have=$(jq -r .step "$ST/cards.jsonl" | sort -u)
