@@ -152,25 +152,27 @@ c7watch() { # <step> <command file>
 # that reads their times is left out and the others stay (a bug: the live record then took no cases at all): the third
 # file's name, two lines, is listed as two files that are not there.
 t_casehung() {
-  local c=c7-7 was h live now s; setup "[$(issue 7 2026-01-01)]"; tune '.tunables.caseStuck = 2'
+  local c=c7-7 h live now s; setup "[$(issue 7 2026-01-01)]"; tune '.tunables.caseStuck = 2'
   c7at "$(date +%s)" picked worktree deps brief start:build build start:review review:GO start:test
   cat > "$STUB/cases-cmd" <<'EOF'
 C=$CONVEYOR_TEST_LOG/cases; mkdir -p "$C"; : > "$C/slow"; : > "$C/quick"; rm "$C/quick"; : > "$C/gone"$'\n'"x"
 while [ -d "$STUB" ] && [ ! -e "$STUB/end" ]; do echo "ok another case"; [ ! -e "$STUB/go" ] || rm -f "$C/slow"; sleep 0.1; done
 EOF
   c7watch test "$STUB/cases-cmd"
-  wait_until "[ \"\$(loop health | jq -c '.stuck | map([.issue, .step, .cases])')\" = '[[7,\"test\",[\"slow\"]]]' ]" "loop health | jq -c .stuck; cat '$T/$CASE/cards/'*.live" \
-    || fail "a test step with one case past its ceiling is not stuck by that case's name"
-  # The run still prints: its last output moves on, and the card is stuck all the same, since the case began.
-  was=$(jq -r .last "$T/$CASE/cards/$c.live")
-  wait_until "[ \"\$(jq -r .last '$T/$CASE/cards/$c.live')\" != '$was' ]" || fail "the run did not go on printing"
-  h=$(loop health); live=$(cat "$T/$CASE/cards/$c.live")
-  [ "$(jq -c '.stuck | map([.issue, .step, .cases, .since])' <<<"$h")" = "[[7,\"test\",[\"slow\"],$(jq -c '.cases[0].since' <<<"$live")]]" ] \
-    && [ "$(jq -r '.last > .cases[0].since' <<<"$live")" = true ] \
-    || fail "a hung case is not named while the other cases still print: $(jq -c .stuck <<<"$h") $live"
-  # Once the case ends, the run going on, the card is no longer stuck.
+  # The watch's live record lists the case slow alone, and the run still prints: its last output is later than the
+  # case's start (waited on, as watch() writing the cases from the runner's folder is part of what this case checks). Health is asked once, on the tests' clock (CONVEYOR_NOW) at caseStuck past that start, not polled
+  # on the real clock: the card is stuck by that case's name, since it began, whatever the other cases print.
+  live=$T/$CASE/cards/$c.live
+  wait_until "jq -e '(.cases | map(.name)) == [\"slow\"] and .last > .cases[0].since' '$live'" "cat '$live'" \
+    || fail "the live record does not list the case slow alone, or the run did not go on printing"
+  now=$(($(jq -r '.cases[0].since | fromdate' "$live") + 2))
+  h=$(CONVEYOR_NOW=$now loop health)
+  [ "$(jq -c '.stuck | map([.issue, .step, .cases, .since])' <<<"$h")" = "[[7,\"test\",[\"slow\"],$(jq -c '.cases[0].since' "$live")]]" ] \
+    || fail "a hung case is not named while the other cases still print: $(jq -c .stuck <<<"$h") $(cat "$live")"
+  # Once the case ends, the run going on, the card is no longer stuck, at the same clock.
   : > "$STUB/go"
-  wait_until "[ \"\$(loop health | jq -c .stuck)\" = '[]' ]" "loop health | jq -c .stuck; cat '$T/$CASE/cards/'*.live" || fail "the card is still stuck once its hung case ended"
+  wait_until "jq -e '.cases == []' '$live'" "cat '$live'" || fail "the live record still lists the case once it ended"
+  [ "$(CONVEYOR_NOW=$now loop health | jq -c .stuck)" = '[]' ] || fail "the card is still stuck once its hung case ended: $(CONVEYOR_NOW=$now loop health | jq -c .stuck)"
   : > "$STUB/end"; wait $run || fail "the watch of the test run exited non-zero: $(cat "$T/$CASE/run.out")"
   # Once every case is silent too, the card is stuck for that already, and the case is still named (a bug: its name
   # was left out of a card another check had listed). c12-12's run and its case slow began 1300 s ago, with no output since.
@@ -191,9 +193,10 @@ EOF
 # its records, as the loop writes them, with no card run, and its session has said nothing; health is asked on the
 # tests' clock (CONVEYOR_NOW).
 t_sessionquiet() {
-  local at; setup "[$(issue 7 2026-01-01)]"; at=$(date +%s); c7at "$at" picked worktree deps brief start:build
-  [ "$(loop health | jq -c '.homes["tunables.sessionStuck"]')" = '{"value":600,"home":"schema default"}' ] || fail "the session limit is not 10 minutes by default: $(loop health | jq -c .homes)"
-  [ "$(CONVEYOR_NOW=$((at + 599)) loop health | jq -c .stuck)" = '[]' ] || fail "a session silent for under 10 minutes is stuck: $(CONVEYOR_NOW=$((at + 599)) loop health | jq -c .stuck)"
+  local at h; setup "[$(issue 7 2026-01-01)]"; at=$(date +%s); c7at "$at" picked worktree deps brief start:build
+  h=$(CONVEYOR_NOW=$((at + 599)) loop health) || fail "health failed: $h"
+  [ "$(jq -c '.homes["tunables.sessionStuck"]' <<<"$h")" = '{"value":600,"home":"schema default"}' ] || fail "the session limit is not 10 minutes by default: $(jq -c .homes <<<"$h")"
+  [ "$(jq -c .stuck <<<"$h")" = '[]' ] || fail "a session silent for under 10 minutes is stuck: $(jq -c .stuck <<<"$h")"
   [ "$(CONVEYOR_NOW=$((at + 600)) loop health | jq -c '.stuck | map([.issue, .step, .since])')" = "[[7,\"build\",\"$(jq -rn --argjson t "$at" '$t | todate')\"]]" ] \
     || fail "a session with no output for 10 minutes is not stuck: $(CONVEYOR_NOW=$((at + 600)) loop health | jq -c .stuck)"
   # The limit is the pack's setting.
