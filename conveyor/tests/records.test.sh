@@ -184,9 +184,10 @@ t_retryfirst() {
 # up to 120 s on pipe seven, which #7's build writes as it begins: #12 notes whether it heard #7 before it ended.
 # Bug: with its one new card #12 taken, the turn picks with no `retried` mode and starts the new #13 too; #13 is the
 # open issue after #12, so only `pick retried` leaves it unbuilt.
+# The bugs are in what the turn picks and when, so each session changes nothing: its card is blocked after its build,
+# with no review, test run, landing or push to wait on.
 t_retryturn() {
   setup "$(jq -cs . <(issue 11 2026-01-01 P1) <(issue 12 2026-02-01) <(issue 7 2026-03-01) <(issue 13 2026-04-01))"; mkdir -p "$ST"
-  for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done
   { landed 11; landed 7; } | jq -c '.step = "blocked" | .result = "blocked"' >> "$ST/cards.jsonl"; loop retry 11 >/dev/null || fail "retry of #11 exited non-zero"
   mkfifo "$STUB/twelve" "$STUB/seven" || fail "the build pipes"
   cat > "$STUB/claude" <<'EOF'
@@ -197,7 +198,6 @@ case $n in
   12) exec 3<>"$STUB/seven"; echo began 1<>"$STUB/twelve"; read -r -t 120 -u 3 _ && echo heard > "$STUB/twelve-heard" || echo none > "$STUB/twelve-heard" ;;
   7) echo began 1<>"$STUB/seven" ;;
 esac
-echo "$n" > "f$n.txt"
 echo '{"type":"result","is_error":false,"usage":{"input_tokens":1,"cache_creation_input_tokens":1,"output_tokens":1}}'
 EOF
   exec 4<>"$STUB/twelve" # open before the run, so #12's line waits in the pipe for the read below
@@ -207,8 +207,8 @@ EOF
   loop retry 7 >/dev/null || fail "retry of the blocked #7 exited non-zero"
   wait "$run" || fail "run 1 exited non-zero: $(cat "$T/$CASE/loop.out")"
   [ "$(cat "$STUB/twelve-heard")" = heard ] || fail "the retried #7 did not start before the run's last card #12 ended its build"
-  [ "$(st 'select(.step == "landed" and .sha != "abc") | .issue' | sort -n | tr '\n' ' ')" = '7 11 12 ' ] \
-    || fail "run 1 did not land the retried #11 and #7 beside its one new card #12: $(st '"\(.issue) \(.step)"' | tr '\n' ,)"
+  [ "$(st 'select(.step == "build") | .issue' | sort -n | tr '\n' ' ')" = '7 11 12 ' ] \
+    || fail "run 1 did not build the retried #11 and #7 beside its one new card #12: $(st '"\(.issue) \(.step)"' | tr '\n' ,)"
   [ -z "$(st 'select(.issue == 13) | .step')" ] || fail "run 1 started the new #13 after its one new card #12: $(st 'select(.issue == 13) | .step' | tr '\n' ,)"
 }
 
