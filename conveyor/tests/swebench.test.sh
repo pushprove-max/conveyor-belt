@@ -49,6 +49,8 @@ J='{"model":"m","tokens":{"claude":5,"codex":0},"accepted":[],"declined":[]}' # 
 if [ "$V" = B ] && [[ $t == *a-1 ]]; then rec review NO-GO '[P1] x.py:1 the fix is wrong' "$J"; rec fix ok; rec review NO-GO '[P1] x.py:1 still wrong' "$J" $'[P1] x.py:1 still wrong\n[P2] y.py:2 past the cut reason'; rec blocked blocked 'review: the last review said NO-GO'; exit 0; fi
 cp "$CONVEYOR_MAIN/conveyor/state/control.json" "$SWE_FX/control.seen"; cp "$CONVEYOR_MAIN/.conveyor/project.json" "$SWE_FX/pack.seen"; (set -- run; HERE=$SWE_SRC; . "$SWE_SRC/lib/paths.sh" && . "$SWE_SRC/lib/prompts.sh" && cardrules "$(gh issue view 1)") > "$SWE_FX/rules.seen" 2>&1
 cat "$HOME/.codex/auth.json" > "$SWE_FX/codex.seen" 2>/dev/null || :
+# The Codex sandbox the engine under test gives a review in this container (codexsb()).
+(set -- run; HERE=$SWE_SRC; . "$SWE_SRC/lib/paths.sh" && . "$SWE_SRC/lib/control.sh" && codexsb read-only && echo "${CODEX_SB[*]}") > "$SWE_FX/sandbox.seen" 2>&1
 rec review GO '' null 'no findings'; rec test pass '' null 'test output'; echo fixed > "$CONVEYOR_MAIN/x.py"; git -C "$CONVEYOR_MAIN" add -A; git -C "$CONVEYOR_MAIN" commit -qm fix; rec landed ok; gh issue close 1
 EOF
   # The functions and globals the stage map (bench/stagemap.sh) starts each stage from, one file a stage or two.

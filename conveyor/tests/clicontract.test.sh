@@ -81,6 +81,43 @@ t_contractusagecodexreview() {
   [ "$(jq -c '{input, read, output}' "$T/$CASE/out" 2>&1)" = '{"input":40,"read":60,"output":7}' ] \
     || fail "the review's usage is not the codex stub's: $(cat "$T/$CASE/out")"
 }
+# A Codex review run alone, as t_contractusagecodexreview runs one, with the stub's arguments kept in $STUB/codex-args.
+cxreview() { # [NAME=value: the review's environment]
+  cread 'sed -i "2a printf \"%s\\\\n\" \"\$*\" >> \"\$STUB/codex-args\"" "$STUB/codex" && echo GO > "$STUB/review.1" && echo "echo x > wrote.txt" > "$STUB/review-cmd" && w=$CONVEYOR_CARDS/c7 && git -C "$R" worktree add -q --detach "$w" \
+    && '"$*"' REVIEW_TIMEOUT=60 codexreview "$w" brief instructions cx-1 low > /dev/null && cat "$STUB/codex-args" && ls "$w"'
+}
+# Bug: in a benchmark's task container Codex's own sandbox cannot start a command, so a review run with -s read-only
+# there read nothing and blocked the card; one run with none must not leave a write of its own in the worktree.
+t_cxreviewbox() {
+  cxreview CONVEYOR_BENCH_BOX=1 || fail "the review failed: $(cat "$T/$CASE/out")"
+  grep -q -- '^exec --json --dangerously-bypass-approvals-and-sandbox ' "$T/$CASE/out" && ! grep -q -- ' -s ' "$T/$CASE/out" \
+    || fail "the review in a benchmark's container kept Codex's sandbox: $(cat "$T/$CASE/out")"
+  ! grep -q '^wrote.txt$' "$T/$CASE/out" || fail "the unsandboxed review's write was left in the worktree: $(cat "$T/$CASE/out")"
+}
+# Bug: a Codex build in a benchmark's task container (the arm whose builder is Codex) ran in Codex's own sandbox
+# (-s workspace-write), which cannot start a command there, so it could change no file.
+t_cxbuildbox() {
+  csession 'tune ".models.allowed[\"codex-builder\"] = [\"cx-1\"]"; seatset model cx-1; export CONVEYOR_BENCH_BOX=1
+    sed -i "2a printf \"%s\\\\n\" \"\$*\" >> \"\$STUB/codex-args\"" "$STUB/codex"' || fail "the session failed: $(cat "$T/$CASE/out")"
+  grep -q -- '^exec --json --dangerously-bypass-approvals-and-sandbox -C ' "$STUB/codex-args" && ! grep -q -- ' -s ' "$STUB/codex-args" \
+    || fail "the build in a benchmark's container kept Codex's sandbox: $(cat "$STUB/codex-args" 2>&1)"
+}
+# Bug: a Codex judge in a benchmark's task container kept Codex's own sandbox, or left a write of its own in the worktree.
+t_cxjudgebox() {
+  cread 'sed -i "2a printf \"%s\\\\n\" \"\$*\" >> \"\$STUB/codex-args\"" "$STUB/codex" && echo "F1 DECLINE: no" > "$STUB/review.1" \
+    && echo "echo x > wrote.txt" > "$STUB/review-cmd" && w=$CONVEYOR_CARDS/c7 && git -C "$R" worktree add -q --detach "$w" \
+    && CALLSEAT="{\"agent\":\"codex\",\"model\":\"x\",\"effort\":\"low\"}" CONVEYOR_BENCH_BOX=1 REVIEW_TIMEOUT=60 judgecall "$w" instructions findings > /dev/null \
+    && cat "$STUB/codex-args" && ls "$w"' || fail "the judge failed: $(cat "$T/$CASE/out")"
+  grep -q -- '^exec --json --dangerously-bypass-approvals-and-sandbox ' "$T/$CASE/out" && ! grep -q -- ' -s ' "$T/$CASE/out" \
+    || fail "the judge in a benchmark's container kept Codex's sandbox: $(cat "$T/$CASE/out")"
+  ! grep -q '^wrote.txt$' "$T/$CASE/out" || fail "the unsandboxed judge's write was left in the worktree: $(cat "$T/$CASE/out")"
+}
+# Bug: a review outside a benchmark's container ran without Codex's read-only sandbox.
+t_cxreviewsandbox() {
+  cxreview || fail "the review failed: $(cat "$T/$CASE/out")"
+  grep -q -- '^exec --json -s read-only ' "$T/$CASE/out" && ! grep -q -- 'dangerously-bypass-approvals' "$T/$CASE/out" \
+    || fail "the review lost Codex's read-only sandbox: $(cat "$T/$CASE/out")"
+}
 # Bug: an OpenCode build session starts only past ocready() (`opencode --version` is 1.x) and its usage is read from
 # the events `opencode run --format json` prints (OPENCODEREAD); out of step, an OpenCode card is unbuilt or unread.
 t_contractusageopencode() {

@@ -628,6 +628,15 @@ codexargs() {
   elif [ -z "$KEY_V" ] && [ "$(jq -r .kind <<<"$p")" != api ]; then k=$NOKEYENV; declare -gx "$k=$NOKEY"; else k=''; fi
   codexpx "$b" "$k"
 }
+# The sandbox of a Codex session that runs commands (a build's, a review's, a judge's), in the array CODEX_SB: Codex's
+# own (-s <mode>), except in a benchmark's task container (CONVEYOR_BENCH_BOX, which the bench sets on a conveyor arm's
+# run, bench/swe_arms.sh swe_trial()): there Codex's Linux sandbox cannot start a command, and the container, with only
+# the task mounted, is the sandbox, so the session runs without Codex's (a review's or judge's worktree is put back
+# after it, codexreview() and judgecall()).
+codexsb() { # <sandbox mode: read-only or workspace-write>
+  # shellcheck disable=SC2034 # read by lib/review.sh and lib/session.sh
+  if [ -n "${CONVEYOR_BENCH_BOX:-}" ]; then CODEX_SB=(--dangerously-bypass-approvals-and-sandbox); else CODEX_SB=(-s "$1"); fi
+}
 # Codex's -c settings of the provider conveyor-proxy at <base URL> on the Responses API, in CODEX_PX, its env_key the
 # variable named when one is.
 codexpx() { # <base URL> [key variable]

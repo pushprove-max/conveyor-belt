@@ -353,7 +353,8 @@ shows. Use `swe 1` and `swe 5` to see that a version works at all, and `swe 50` 
   makes compiled parts can fail there for reasons other than the change.
 - The minutes are those of this machine and depend on the other work on it.
 - The sessions of an arm run in its container and see only the task's sandbox (a Conveyor arm also sees the folder of
-  the installed Conveyor version, read-only). Conveyor also reads the reference
+  the installed Conveyor version, read-only). In a Conveyor arm, Codex sessions run without Codex's own sandbox,
+  because it cannot start a command in the container. The container is their sandbox. Conveyor also reads the reference
   fixes and hidden tests only to make the task list and to grade a patch, and then removes them.
 - The task images are for x86-64. Each arm installs its tools in each task's container, with the network, so each
   task takes more minutes than the build alone, and an install that the network stops makes the arm fail that task.

@@ -354,7 +354,9 @@ swe_trial() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor kind
   if [ "$kind" = conveyor ]; then
     swe_pack "$1" "$sb" "$4" "$a" > "$h/pack.err" || { cat "$h/pack.err"; return 1; }
     eng=${4%/conveyor/conveyor.sh}
-    run="CONVEYOR_MAIN=$(printf %q "$sb/$SWE_MAIN") CONVEYOR_CARDS=$(printf %q "$sb/cards") bash $(printf %q "$4") run 1 > $(printf %q "$sb/loop.log") 2>&1"
+    # CONVEYOR_BENCH_BOX: the engine runs in the task's container, which is the sandbox, so its Codex sessions run
+    # without Codex's own, which cannot start a command there (codexsb(), lib/control.sh).
+    run="CONVEYOR_BENCH_BOX=1 CONVEYOR_MAIN=$(printf %q "$sb/$SWE_MAIN") CONVEYOR_CARDS=$(printf %q "$sb/cards") bash $(printf %q "$4") run 1 > $(printf %q "$sb/loop.log") 2>&1"
   else run=$(jq -r .run <<<"$a"); fi
   printf '%s\n' "$c" > "$h/box"; docker rm -f "$c" > /dev/null 2>&1
   swe_ckstep 'Starting the test container'

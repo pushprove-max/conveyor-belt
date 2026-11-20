@@ -493,7 +493,8 @@ newtexts() { # <the name of a variable that holds a prompt>
 # Codex (README.md, Codex builder): `codex exec --json` in the worktree, the prompt on stdin, its events as JSON lines,
 # on the model and effort as a Codex review is; its sandbox lets it write in the worktree, /tmp and $TMPDIR (where
 # the brief's background runs and a test run's own scratch folder go) and the machine's test slots folder (slot_pool;
-# the host's testSlotsDir may lie outside /tmp), which a test run takes a slot in, and nowhere else; its one
+# the host's testSlotsDir may lie outside /tmp), which a test run takes a slot in, and nowhere else (in a benchmark's
+# task container it has no Codex sandbox, the container being the sandbox: codexsb()); its one
 # PreToolUse hook, on every tool, is the guard hook (cxready()), which runs the same settings file's hooks before each
 # call. Hooks are on, and run without Codex's trust prompt, which a headless session cannot answer;
 # Codex's web search, a tool no hook is given, is off. Its commands get no terminal (unified_exec_tty off), so their input is
@@ -512,7 +513,8 @@ builder() { # <worktree> <prompt> <model> <effort> <account folder> <agent: clau
       # A pool that cannot be made is left out: a test run then says why it takes no slot.
       ! slot_pool >/dev/null 2>&1 || a=(--add-dir "$SLOT_DIR")
       codexargs # its provider, when its route is the proxy
-      exec "${KEEP[@]}" timeout --kill-after=30 "$BUILD_TIMEOUT" codex exec --json -s workspace-write -C "$1" "${a[@]}" "${CODEX_PX[@]}" -m "$3" -c "model_reasoning_effort=\"$4\"" \
+      codexsb workspace-write
+      exec "${KEEP[@]}" timeout --kill-after=30 "$BUILD_TIMEOUT" codex exec --json "${CODEX_SB[@]}" -C "$1" "${a[@]}" "${CODEX_PX[@]}" -m "$3" -c "model_reasoning_effort=\"$4\"" \
         -c 'web_search="disabled"' \
         --enable hooks --dangerously-bypass-hook-trust --disable unified_exec_tty -c "hooks.PreToolUse=$h" - <<<"$2" > "$1.out" 2> "$1.err" 8>&- ;;
     opencode) export CLAUDE_PROJECT_DIR=$1 CONVEYOR_GUARD_SETTINGS=$1.settings OPENCODE_CONFIG=$1.opencode.json OPENCODE_DISABLE_PROJECT_CONFIG=1

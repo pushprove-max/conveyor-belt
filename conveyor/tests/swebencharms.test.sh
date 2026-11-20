@@ -124,6 +124,10 @@ t_sweseats() {
   jq -e '.test == {command: "true", survey: false}' "$SWE_FX/pack.seen" > /dev/null || fail "the engine's pack does not hold the task's test command: $(jq -c .test "$SWE_FX/pack.seen")"
   # Bug: the container was given the arm file's logins only, so the Codex builder seat had no Codex login there.
   [ "$(cat "$SWE_FX/codex.seen" 2>/dev/null)" = CODEX-LOGIN ] || fail "the Codex seat's container had no Codex login"
+  # Bug: the engine in the container gave its Codex sessions Codex's own sandbox (-s read-only), which cannot start a
+  # command in the task's container, so the review read nothing and the card blocked.
+  [ "$(cat "$SWE_FX/sandbox.seen" 2>&1)" = --dangerously-bypass-approvals-and-sandbox ] \
+    || fail "the engine in the benchmark's container kept Codex's own sandbox: $(cat "$SWE_FX/sandbox.seen" 2>&1)"
   [ -n "$(cat "$B"/results/conveyor-seats-*-"$EB/$(sweorder | head -n 1).json" 2>/dev/null)" ] || fail "the seats arm's results are not kept apart from the conveyor arm's: $(ls "$B/results")"
 }
 

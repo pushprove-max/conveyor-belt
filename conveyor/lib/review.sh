@@ -92,10 +92,12 @@ review() { # <worktree> <brief> [instructions, in place of REVIEW]
 }
 codexreview() { # <worktree> <brief> <instructions> <model> <effort>: one Codex review, ending as review() says
   local model=$4 effort=$5 rc roll s sec f run='' no=''
-  rm -f "$1.review.new"; sec=$SECONDS
-  (cd "$1" && codexargs && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" codex exec --json -s read-only "${CODEX_PX[@]}" -m "$model" \
+  rm -f "$1.review.new"; sec=$SECONDS; codexsb read-only
+  (cd "$1" && codexargs && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" codex exec --json "${CODEX_SB[@]}" "${CODEX_PX[@]}" -m "$model" \
     -c "model_reasoning_effort=\"$effort\"" -o "$1.review.new" - <<<"$3"$'\n\n'"$2" > "$1.events" 2> "$1.err" 8>&-) &
   watch $! "$1.events" "$1.live" review "$model"; rc=$?; sec=$((SECONDS - sec))
+  # With no Codex sandbox (codexsb()), a write the review made is undone: the worktree is put back to the change it was given.
+  [ "${CODEX_SB[0]}" = -s ] || { git -C "$1" restore -q --worktree -- . && git -C "$1" clean -fdq; } || { echo "the worktree could not be put back after the review"; return 1; }
   # The running total its session file holds: the tokens of a review that ended before its turn did.
   roll=$(rollout "$1.events"); [ -z "$roll" ] || { run=$(grep '"token_count"' "$roll" | tail -n 1 | jq -c '.payload.info.total_token_usage | objects' 2>/dev/null); rm -f "$roll"; }
   # Its seconds and, from its stream, its turns (turns completed) and its tool calls by kind (the items that
@@ -396,8 +398,11 @@ judgecall() { # <worktree> <instructions> <the brief and the findings>
     f=$(jq -cRn --arg m "$model" --arg e "$effort" --argjson s "$sec" "$OCREVIEWREAD" "$1.judge.events" 2>/dev/null | tail -n 1 | jq -c '{model, effort, sec, tokens, usage} | del(.[] | nulls)' 2>/dev/null)
   else
     model=$(codexmodel "$model") || { jq -cn --arg r "$model" '{failed: $r}'; return 1; }
-    (cd "$1" && codexargs && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" codex exec --json -s read-only "${CODEX_PX[@]}" -m "$model" \
+    codexsb read-only
+    (cd "$1" && codexargs && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" codex exec --json "${CODEX_SB[@]}" "${CODEX_PX[@]}" -m "$model" \
       -c "model_reasoning_effort=\"$effort\"" -o "$1.judge" - <<<"$2"$'\n\n'"$3" > "$1.judge.events" 2> "$1.judge.err" 8>&-); rc=$?; sec=$((SECONDS - sec))
+    # With no Codex sandbox (codexsb()), the worktree is put back after the judge, as after an OpenCode one.
+    [ "${CODEX_SB[0]}" = -s ] || { git -C "$1" restore -q --worktree -- . && git -C "$1" clean -fdq; } || rc=1
     roll=$(rollout "$1.judge.events"); [ -z "$roll" ] || { run=$(grep '"token_count"' "$roll" | tail -n 1 | jq -c '.payload.info.total_token_usage | objects' 2>/dev/null); rm -f "$roll"; }
     f=$(jq -cRn --arg m "$model" --arg e "$effort" --argjson s "$sec" --argjson run "${run:-null}" "$REVIEWREAD" "$1.judge.events" 2>/dev/null | tail -n 1 | jq -c '{model, effort, sec, tokens, usage}' 2>/dev/null)
   fi
