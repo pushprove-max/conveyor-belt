@@ -937,6 +937,8 @@ doctor() {
   ok "the pack $PACK"
   # The pack's test-file globs: they must find the project's tests (testcheck()).
   testcheck || bad=1
+  # Each of the pack's lint commands, tried once (lintdoctor(), lib/lint.sh): nothing when the pack has no lint field.
+  lintdoctor || bad=1
   # The control record setup writes (heldstart()): with none, the loop would queue every open issue. With one, the
   # open issues it holds.
   if [ ! -s "$CONTROL" ]; then no "the control record $CONTROL (with none, the loop queues every open issue)" "run /conveyor-belt:setup, which writes it with every open issue held"

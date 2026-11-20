@@ -10,15 +10,17 @@ VERSIONS=${XDG_DATA_HOME:-$HOME/.local/share}/conveyor/versions; OWN=''; RAN='';
 up=${HERE%/*}; [ "$(cd "$VERSIONS" 2>/dev/null && pwd -P)" != "${up%/*}" ] || [ -z "${up%/*}" ] || OWN=${up##*/}
 RAN=$OWN; [ -n "$OWN" ] || RAN=$(git -C "$HERE" rev-parse -q --verify HEAD 2>/dev/null) || RAN=''
 # The main checkout is CONVEYOR_MAIN when it is set. If not, it is the checkout of the folder the command is called in
-# for these commands: `setup`, `doctor`, `foreman`, `lane`, `take` and `board`, which are for the project they are
-# called in (the plugin copy runs them before the project has an engine, `board` runs from an install, read-only, in
-# the project's checkout, and `lane` called in the fast lane acts for that lane's main checkout), and `auto` and
+# for these commands: `setup`, `doctor`, `foreman`, `lane`, `take`, `board`, `lint` and `size`, which are for the
+# project they are called in (the plugin copy runs them before the project has an engine, `board` runs from an install,
+# read-only, in the project's checkout, `lane` called in the fast lane acts for that lane's main checkout, and `lint`
+# called in a card's worktree reads that worktree's main checkout; `size`, a command still to come, is named with it),
+# and `auto` and
 # `wording`, which the plugin's commands run. It is that checkout for every command too when the engine runs from an
 # install, or from a folder in no git checkout (RAN empty), such as the plugin copy that Claude Code installs from a
 # marketplace. Any other command is for the checkout the engine is in. When the folder looked in is in no git
 # checkout, the command stops and names that folder: no path is made from an empty name.
 mainat=$HERE
-[[ ${1:-} =~ ^(setup|doctor|foreman|lane|take|board|auto|wording)$ ]] || [ -n "$OWN" ] || [ -z "$RAN" ] && mainat=$(pwd)
+[[ ${1:-} =~ ^(setup|doctor|foreman|lane|take|board|lint|size|auto|wording)$ ]] || [ -n "$OWN" ] || [ -z "$RAN" ] && mainat=$(pwd)
 MAIN=${CONVEYOR_MAIN:-}
 [ -n "$MAIN" ] || { MAIN=$(git -C "$mainat" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) && [ -n "$MAIN" ] && MAIN=$(cd "$MAIN/.." && pwd -P) && [ -n "$MAIN" ]; } \
   || { echo "conveyor: the project's main checkout cannot be found: $mainat is in no git checkout; run conveyor.sh in the project's checkout, or name it in CONVEYOR_MAIN" >&2; exit 1; }

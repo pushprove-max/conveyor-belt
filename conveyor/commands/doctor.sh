@@ -14,4 +14,5 @@
 . "$HERE/lib/push.sh" || exit 1
 . "$HERE/lib/setup.sh" || exit 1
 . "$HERE/lib/requires.sh" || exit 1
+. "$HERE/lib/lint.sh" || exit 1
 [ $# = 1 ] || { echo "usage: conveyor.sh doctor" >&2; exit 2; }; doctor

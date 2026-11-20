@@ -184,6 +184,28 @@
         "setup": { "description": "A command run once in each new worktree of the project, from its top, after the links of linkFromMain and before its build and tests: the install of its dependencies, such as npm ci, for a project whose dependency folders are not linked (for example when a card may change the lockfile). When it fails, the card is blocked with its last lines. None: nothing runs.", "type": "string", "minLength": 1 }
       }
     },
+    "lint": {
+      "description": "The project's lint commands (docs/configuration.md, Lint), run by conveyor.sh lint and checked by doctor (conveyor/lib/lint.sh). The field is lint policy. Not set: no lint command runs.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "commands": {
+          "description": "The lint commands, in the order they run.",
+          "type": "array", "default": [],
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["files", "run"],
+            "properties": {
+              "files": { "description": "Git pathspecs of the source files the command reads (a * crosses /, :(exclude) works).", "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+              "triggers": { "description": "Git pathspecs of the scripts, configs, manifests and lock files that change the command's result: when one changes, the command runs on every tracked file files matches. Never passed as sources.", "type": "array", "default": [], "items": { "type": "string", "minLength": 1 } },
+              "run": { "description": "A shell command, run at the worktree's top with bash -o pipefail -c and a 5-minute limit. {files} is replaced by the quoted list of the files in its scope; a command without {files} runs on the whole project. Exit 0 with no finding line passes; exit 1 with finding lines (<path>:<line>[:<column>]: <text>) has findings; exit 127 with the first line lint: missing <tool> is skipped; any other end is an execution error.", "type": "string", "minLength": 1 },
+              "ratchet": { "description": "false: every finding of the command is the change's, on any line.", "type": "boolean", "default": true },
+              "complexity": { "description": "The rule codes (the first word of a finding's text) that measure size.", "type": "array", "default": [], "items": { "type": "string", "minLength": 1 } }
+            }
+          }
+        },
+        "policy": { "description": "Git pathspecs of the files that are lint policy.", "type": "array", "default": [], "items": { "type": "string", "minLength": 1 } }
+      }
+    },
     "push": {
       "type": "object",
       "required": ["env"],

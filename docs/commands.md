@@ -113,6 +113,15 @@ Tests:
   a small change. Use `full-test push` when the whole suite must pass first.
 - `pr merge` merges the open pull request of Land as `pr` now, with a merge commit, whatever the rule Merge PR says
   ([Merge PR](configuration.md#merge-pr)). It fails with GitHub's reason when GitHub refuses the merge.
+- `lint` runs the pack's lint commands ([Lint](configuration.md#lint)) on the worktree it is called in. It reads the
+  worktree as `git add -A` would stage it, so it sees an edit that is not staged and a file that is not tracked. It
+  does not stage them and does not change the worktree or its index. It does add the content of the changed files to
+  the repository's objects, as `git add` does. The change is from the commit the worktree is on. It prints each command's
+  result: `pass`, `findings: <n>`, `skipped: missing <tool>`, `execution error: <why>` or `no files`. Then it lists the
+  findings on the lines that the change added or changed, and every finding of a command with `ratchet: false`. These
+  make it exit 1. A finding with a `complexity` code on such a line is listed under "the gate decides these" and does
+  not change the exit code. Findings on other lines are only counted. It exits 2 when a command ends in an execution
+  error and no finding made it exit 1.
 - `main-test` runs the whole test on main when one is due (the pack's `test.main`).
 - `survey` files the monthly test-speed survey's issue when one is due (the pack's `test.survey`).
 - `flaky add <case> <source> <note>` adds a flaky-test entry. `flaky off` adds one and files no issue.
@@ -163,6 +172,10 @@ Setup and the engine:
   [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--pin] [--foreman]` and `doctor` ([Setup](setup.md)). Yes to a lane makes that lane
   ([Lanes](lanes.md)). `--link yes|no` answers if each card's worktree links the dependency folders that setup found,
   and `--worktree-setup <command>` installs them in each card's worktree instead.
+  `doctor` also tries each of the pack's lint commands once in the main checkout: a command with `{files}` on one
+  tracked file that its `files` match, a command without it as it is. It prints one line for each command: `ok`,
+  `findings: <n>`, `missing: <tool>`, `error: <first line>`, or `empty` when no tracked file matches (the command is
+  not called) ([Lint](configuration.md#lint)).
 - `setup pack-commit` shows the pack's change that is not committed. `setup pack-commit yes` commits only the pack on
   the default branch, and `setup pack-commit no` commits nothing ([Setup](setup.md)).
 - `install <commit>` installs that commit read-only.

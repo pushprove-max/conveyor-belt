@@ -1,0 +1,190 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# timeout: 120
+# Engine cases: the lint check's core (conveyor/lib/lint.sh): the pack's lint.commands, the scope each is given, its
+# run and its four results; `conveyor.sh lint` in a card's worktree; doctor's probe (lintdoctor).
+# The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
+# file runs its own cases through the runner.
+[ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
+  exec bash "$(dirname "$0")/../conveyor.test.sh"
+# The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
+SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+
+# The case's main ($R, setup) with the stub linter $STUB/lint: it notes each run in $STUB/lint-args, one line `run`
+# and its arguments, each after a space, and prints a finding for each line holding BAD (E1) or BIG (C901, with a
+# column), in each file it is given or, given none, each tracked file; exit 1 with a finding, else 0.
+lintsetup() {
+  setup '[]'
+  printf '%s\n' '{ printf run; [ $# = 0 ] || printf " %s" "$@"; echo; } >> "$STUB/lint-args"' \
+    'if [ $# = 0 ]; then mapfile -t a < <(git ls-files); set -- "${a[@]}"; fi' 'r=0' \
+    'for f; do [ -f "$f" ] || continue; n=0; while IFS= read -r l; do n=$((n + 1))' \
+    '  case $l in *BAD*) echo "$f:$n: E1 a bad word"; r=1 ;; *BIG*) echo "$f:$n:1: C901 too big"; r=1 ;; esac' \
+    'done < "$f"; done; exit $r' > "$STUB/lint" || fail "the stub linter"
+}
+# The pack's lint.commands set to <commands json>, where $L in a run is the stub linter's command.
+lintcmds() { tune --arg l "bash $STUB/lint" --argjson c "$1" '.lint = {commands: ($c | map(.run |= gsub("\\$L"; $l)))}'; }
+# Main commits the <file> <content> pairs; card c7's worktree, $W, is made on that commit, with no change yet.
+lintwt() {
+  while [ $# -gt 1 ]; do mkdir -p "$(dirname "$R/$1")" && printf '%s\n' "$2" > "$R/$1" && git -C "$R" add -f "$1" || fail "main's $1"; shift 2; done
+  W=$T/$CASE/cards/c7
+  git -C "$R" commit -qm files && git -C "$R" worktree add -q --detach "$W" || fail "the card's worktree"
+}
+# <commands> run in a shell of the engine as conveyor.sh lint loads it, main being $R: output in $T/$CASE/out, exit in RC.
+lintin() {
+  ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
+    . "$SRC/conveyor.sh" state-dir > /dev/null && . "$SRC/lib/slots.sh" && . "$SRC/lib/prompts.sh" && . "$SRC/lib/lint.sh" || exit 9
+    eval "$1" ) > "$T/$CASE/out" 2>&1; RC=$?
+  [ "$RC" != 9 ] || fail "the engine could not be loaded: $(cat "$T/$CASE/out")"
+}
+# The runs of the stub linter, in order, as $STUB/lint-args notes them.
+lintargs() { cat "$STUB/lint-args" 2>/dev/null | paste -sd'|' -; }
+
+# Bugs: a missing tool counts as a pass or as an error; a failed run counts as a pass or as findings (a bare 127, an
+# exit 2, an exit 1 with nothing to show, an exit 0 that printed findings, a command that hangs, a pipe whose first
+# command failed). Each command runs through lintcall and is judged by lintresult, its lines read by lintfindings.
+t_lintresults() {
+  local over='exec sleep 30' # sleep: the command the 1-second limit ends; nothing waits for it
+  lintsetup
+  # shellcheck disable=SC2016 # expanded by the engine's shell, in lintin
+  lintin 'git -C "$MAIN" ls-files -z > "$T/$CASE/paths"; LINT_LIMIT=1
+    one() { local rc=0; lintcall "$MAIN" "" "$1" "$T/$CASE/o" || rc=$?; lintfindings "$T/$CASE/o" "$T/$CASE/paths" > "$T/$CASE/f"
+      printf "%s=" "$2"; lintresult $rc "$T/$CASE/o" "$(wc -l < "$T/$CASE/f" | tr -d " ")" "$LINT_OVER" | cut -f1; }
+    one "echo clean" pass; one "echo a.txt:1: E1 x; exit 1" findings; one "echo lint: missing shellcheck; exit 127" missing
+    one "exit 127" bare127; one "echo a.txt:1: E1 x; exit 2" exit2; one "echo nothing here; exit 1" one0; one "echo a.txt:1: E1 x" zero1
+    one "false | cat" pipe; one "'"$over"'" over
+    lintresult 127 <(echo "lint: missing shell check") 0 "" | tr "\t" /'
+  [ "$(paste -sd' ' "$T/$CASE/out")" = "pass=pass findings=findings missing=skipped bare127=error exit2=error one0=error zero1=error pipe=error over=error skipped/shell check" ] \
+    || fail "the results are not pass, findings, skipped and seven execution errors, the tool named: $(cat "$T/$CASE/out")"
+}
+
+# Bug: a finding of a file whose name holds a space and a colon is cut at its first colon, so it is a finding of no
+# file, or of the wrong one. The path is matched whole against the tree's paths; a line naming no file of the tree is
+# no finding.
+t_lintpaths() {
+  lintsetup
+  printf '%s\0' 'a b:c.txt' 'a b' > "$T/$CASE/paths"
+  printf '%s\n' 'a b:c.txt:3:2: E1 x: y' 'gone.txt:1: E1 x' 'a b:c.txt: no line' > "$T/$CASE/lines"
+  # shellcheck disable=SC2016 # expanded in lintin
+  lintin 'lintfindings "$T/$CASE/lines" "$T/$CASE/paths"'
+  [ "$(cat "$T/$CASE/out")" = '{"file":"a b:c.txt","line":3,"column":2,"text":"E1 x: y","code":"E1"}' ] \
+    || fail "the finding was not read as one of 'a b:c.txt', line 3, column 2, code E1: $(cat "$T/$CASE/out")"
+}
+
+# Bugs: a per-file command is given a deleted file, is given every file for a deletion or a rename, is given the
+# renamed file under its old path, or gets an excluded file; a command with nothing to read is called anyway.
+t_lintscope() {
+  lintsetup
+  lintcmds '[{"files": ["*.c", ":(exclude)x/*"], "run": "$L {files}"}, {"files": ["*.py"], "run": "$L {files}"}]'
+  lintwt d.c one r.c two m.c three u.c four
+  (cd "$W" && git rm -q d.c && git mv r.c r2.c &&echo BAD >> m.c && mkdir x && echo BAD > x/skip.c) || fail "the card's change"
+  lintin 'lintcheck "$W" "$(git -C "$W" rev-parse HEAD)"'
+  [ "$(lintargs)" = 'run m.c r2.c' ] || fail "the per-file command was not given m.c and r2.c alone: $(lintargs)"
+  jq -e -s 'length == 2 and .[0].result == "findings" and .[0].files == 2 and .[0].findings == [{file: "m.c", line: 2, column: null, text: "E1 a bad word", code: "E1"}]
+    and .[1].result == "no files" and .[1].files == 0' "$T/$CASE/out" > /dev/null \
+    || fail "the results are not the m.c finding and no files: $(cat "$T/$CASE/out")"
+}
+
+# Bug: a changed trigger (the linter's config) leaves its command on the changed files alone, so an old file the new
+# config fails is never read. It is given every tracked file its files match; a command without {files} runs too,
+# but not one whose files match no tracked file (*.md here): its result is `no files`.
+t_linttrigger() {
+  lintsetup
+  lintcmds '[{"files": ["*.c"], "triggers": [".lintrc"], "run": "$L {files}"}, {"files": ["*.md"], "triggers": [".lintrc"], "run": "$L"},
+    {"files": ["*.c"], "triggers": [".lintrc"], "run": "$L"}]'
+  lintwt a.c one b.c two .lintrc old
+  echo new > "$W/.lintrc"
+  lintin 'lintcheck "$W" "$(git -C "$W" rev-parse HEAD)"'
+  [ "$(lintargs)" = 'run a.c b.c|run' ] || fail "the trigger did not run the *.c commands alone, the per-file one on every *.c: $(lintargs)"
+  jq -e -s '[.[].result] == ["pass", "no files", "pass"]' "$T/$CASE/out" > /dev/null || fail "the *.md command's result is not no files: $(cat "$T/$CASE/out")"
+}
+
+# Bug: a change to the pack's lint field (a new command, a rule turned on) is checked on the changed files alone. Every
+# command runs on every tracked file it matches, though the change touches none of them.
+t_lintfield() {
+  lintsetup
+  lintcmds '[{"files": ["*.c"], "run": "$L {files}"}, {"files": ["*.txt"], "run": "$L {files}"}]'
+  git -C "$R" add -f .conveyor/project.json || fail "main's pack"
+  lintwt a.c one
+  jq '.lint.commands[0].ratchet = false' "$W/.conveyor/project.json" > "$W/p" && mv "$W/p" "$W/.conveyor/project.json" || fail "the card's pack"
+  lintin 'lintcheck "$W" "$(git -C "$W" rev-parse HEAD)"'
+  [ "$(lintargs)" = 'run a.c|run a.txt' ] || fail "the changed lint field did not run every command on every tracked match: $(lintargs)"
+}
+
+# Bugs: `conveyor.sh lint` in a card's worktree misses an edit that is not staged or a file that is not tracked, stages
+# them, makes a state folder or a base worktree, or exits 0 with findings on the lines the change made. A finding on
+# a line it did not touch is counted, not listed. The second command, without {files}, lists the project itself with
+# `git ls-files`: it must see the file that is not tracked, as the per-file one does.
+t_lintcmd() {
+  local before after idx
+  lintsetup
+  lintcmds '[{"files": ["*.c"], "run": "$L {files}"}, {"files": ["*.c"], "run": "$L"}]'
+  lintwt a.c "$(printf 'BAD old\none')"
+  rm -rf "$ST"
+  echo 'BAD edit' >> "$W/a.c"; echo 'BAD new' > "$W/n.c"
+  # status first: it refreshes the index's stat data, which is no change of the lint's.
+  before=$(git -C "$W" status --porcelain); git -C "$R" worktree list --porcelain > "$T/$CASE/wt.before"
+  idx=$(git -C "$W" rev-parse --git-path index); idx=$(cd "$W" && cksum < "$idx")
+  out=$(cd "$W" && CONVEYOR_CARDS=$T/$CASE/cards bash "$SRC/conveyor.sh" lint 2>&1); RC=$?
+  [ "$idx" = "$(cd "$W" && cksum < "$(git -C "$W" rev-parse --git-path index)")" ] || fail "conveyor.sh lint changed the worktree's index"
+  after=$(git -C "$W" status --porcelain)
+  [ "$RC" = 1 ] && [ "$(grep -cxF '  a.c:3: E1 a bad word' <<<"$out")" = 2 ] && [ "$(grep -cxF '  n.c:1: E1 a bad word' <<<"$out")" = 2 ] \
+    && grep -qxF '2 finding(s) on lines this change did not touch: counted, not judged here.' <<<"$out" \
+    || fail "conveyor.sh lint did not fail on the edit's and the new file's findings of both commands, the old ones counted (exit $RC): $out"
+  [ "$before" = "$after" ] || fail "the worktree changed: '$before' then '$after'"
+  [ ! -e "$ST" ] && [ ! -e "$T/$CASE/cards/mainrun" ] && git -C "$R" worktree list --porcelain | cmp -s - "$T/$CASE/wt.before" \
+    || fail "conveyor.sh lint made a state folder or a base worktree: $(ls "$ST" "$T/$CASE/cards" 2>&1)"
+}
+
+# Bug: a size finding (a code the command lists in complexity) on a line the change made fails `conveyor.sh lint`,
+# though the gate, with the base's findings, decides it. It is listed apart, and the exit is 0.
+t_lintgate() {
+  lintsetup
+  lintcmds '[{"files": ["*.c"], "complexity": ["C901"], "run": "$L {files}"}]'
+  lintwt a.c one
+  echo 'BIG' >> "$W/a.c"
+  out=$(cd "$W" && CONVEYOR_CARDS=$T/$CASE/cards bash "$SRC/conveyor.sh" lint 2>&1); RC=$?
+  [ "$RC" = 0 ] && [ "$out" = "$(printf '%s\n' 'lint command 1 (bash '"$STUB"'/lint {files}): findings: 1' \
+    'The gate decides these (a size finding on a line this change made):' '  a.c:2:1: C901 too big')" ] \
+    || fail "the size finding was not listed under the gate's, with exit 0 (exit $RC): $out"
+}
+
+# Bug: a `ratchet: false` command's finding on a line the change did not touch is only counted, so `conveyor.sh lint`
+# passes a rule the project wants kept on every line. Each of its findings is listed, a size one too, and fails, under a
+# heading that does not call them findings on lines this change made.
+t_lintnoratchet() {
+  lintsetup
+  lintcmds '[{"files": ["*.c"], "ratchet": false, "complexity": ["C901"], "run": "$L {files}"}]'
+  lintwt a.c "$(printf 'BAD old\nBIG old')"
+  echo two >> "$W/a.c"
+  out=$(cd "$W" && CONVEYOR_CARDS=$T/$CASE/cards bash "$SRC/conveyor.sh" lint 2>&1); RC=$?
+  [ "$RC" = 1 ] && [ "$(grep -c '^  a\.c:' <<<"$out")" = 2 ] && grep -qxF '  a.c:1: E1 a bad word' <<<"$out" && grep -qxF '  a.c:2:1: C901 too big' <<<"$out" \
+    && grep -qxF 'Findings that fail the check (on lines this change made, and every finding of a ratchet: false command):' <<<"$out" \
+    && ! grep -q 'gate decides\|not judged' <<<"$out" || fail "the ratchet: false command's old findings did not fail the lint, each listed (exit $RC): $out"
+}
+
+# Bug: doctor says nothing of a lint command that cannot run, or runs one with no file to read. Each of five stub
+# commands gives its line: ok, findings, missing, error, empty. lintdoctor is called alone: doctor's other checks
+# need a whole setup, and doctor() only prints what it prints.
+t_lintdoctor() {
+  lintsetup
+  lintcmds '[{"files": ["*.txt"], "run": "$L {files}"}, {"files": ["*.txt"], "run": "echo a.txt:1: E1 x; echo a.txt:2: E2 y; exit 1"},
+    {"files": ["*.txt"], "run": "echo lint: missing ruff; exit 127"}, {"files": ["*.txt"], "run": "echo the config is bad; echo more; exit 2"},
+    {"files": ["*.py"], "run": "$L {files}"}]'
+  lintin 'lintdoctor'
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/out")" = "$(printf '%s\n' "lint command 1 (bash $STUB/lint {files}): ok" \
+    'lint command 2 (echo a.txt:1: E1 x; echo a.txt:2: E2 y; exit 1): findings: 2' 'lint command 3 (echo lint: missing ruff; exit 127): missing: ruff' \
+    'lint command 4 (echo the config is bad; echo more; exit 2): error: the config is bad' "lint command 5 (bash $STUB/lint {files}): empty")" ] \
+    || fail "doctor's lint lines are not ok, findings, missing, error and empty: $(cat "$T/$CASE/out")"
+  [ "$(lintargs)" = 'run a.txt' ] || fail "the per-file command was not run on one tracked file alone, or the empty one was run: $(lintargs)"
+}
+
+# Bug: a pack with no lint field gets lint lines from doctor or a lint run, or fails. There is nothing to say.
+t_lintnone() {
+  lintsetup
+  lintwt a.c BAD
+  echo BAD >> "$W/a.c"
+  lintin 'lintdoctor && lintcheck "$W" "$(git -C "$W" rev-parse HEAD)"'
+  [ "$RC" = 0 ] && [ ! -s "$T/$CASE/out" ] && [ ! -e "$STUB/lint-args" ] || fail "a pack with no lint field gave lint results (exit $RC): $(cat "$T/$CASE/out")"
+  out=$(cd "$W" && CONVEYOR_CARDS=$T/$CASE/cards bash "$SRC/conveyor.sh" lint 2>&1) && [ "$out" = "conveyor lint: the pack $R/.conveyor/project.json sets no lint commands" ] \
+    || fail "conveyor.sh lint with no lint field: $out"
+}

@@ -45,7 +45,7 @@ git() { command git "$@" 8>&-; }
 # checkout, the record lines (records.sh). The command's script (commands/, below) then sources the other engine files
 # it uses, each in this order, into this one shell: slots, busy, prompts, control, views, snapshot, issues, pick, session,
 # review, testrun, claim, push, followups, flaky, fulltest, testaction, testfiles, mutate, testrules, survey, card, lane, run,
-# machine, install, setup, requires.
+# machine, install, setup, requires, lint.
 . "$HERE/lib/paths.sh" || exit 1
 . "$HERE/lib/records.sh" || exit 1
 # The command table, one line a command: `cmd <command> <its script under commands/> <its part of the usage message>`
@@ -84,6 +84,7 @@ cmd bench bench.sh 'bench drift [<engine commit>] | bench swe <1-500> [--arm <ar
 cmd setup setup.sh 'setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--pin] [--foreman]'
 cmd setup setup.sh 'setup pack-commit [yes | no]'
 cmd doctor doctor.sh 'doctor'
+cmd lint lint.sh 'lint'
 cmd wording wording.sh 'wording adversarial | review'
 cmd auto auto.sh 'auto on | narrow | off | status | band | rules | decide | standing [<run> | <kind> on|off] | act <kind> <what>'
 cmd foreman foreman.sh 'foreman [status [<project>] | <claude argument>...]'

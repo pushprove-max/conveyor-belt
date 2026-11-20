@@ -936,6 +936,14 @@ it saves, and a bad value is refused with the reason:
 - `testrules set <name> <on | measure | limit | runs | minRuns | days | minClock> <value>`: one setting of a rule;
 - `testrules remove <name>`: a rule.
 
+## Lint
+
+`lib/lint.sh` runs the pack's lint commands (the `lint` field, [Lint](../docs/configuration.md#lint)). It finds the
+files of each command with git pathspecs, runs the command at the top of the worktree with `bash -o pipefail -c`
+and a limit of 5 minutes, on one test slot, and reads the result: pass, findings, skipped or an execution error. It
+reads a finding's path by the paths of the tree, so a path can hold spaces and colons. `conveyor.sh lint` uses it on
+the worktree it is called in, and `conveyor.sh doctor` tries each command once ([Commands](../docs/commands.md)).
+
 ## Flaky tests
 
 The flaky-test record (`flaky.json` in the state folder, `lib/flaky.sh`) keeps each time a test case failed and then

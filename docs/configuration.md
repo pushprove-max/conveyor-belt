@@ -444,6 +444,69 @@ them again. Your test command can read that result in its test log folder: the e
 
 Without `test.checkCommand`, Conveyor runs no such checks.
 
+## Lint
+
+The pack's `lint` field lists your project's lint commands. `conveyor.sh lint` runs them on a change, and `conveyor.sh
+doctor` tries each one ([Commands](commands.md)). Without a `lint` field, no lint command runs.
+
+`lint.commands` is a list. Each entry has these keys:
+
+- `files`: git pathspecs of the source files that the command reads.
+- `triggers`: git pathspecs of the scripts, config files, manifests and lock files that change the command's result.
+  They are never given to the command as sources. The default is none.
+- `run`: a shell command. `{files}` in it becomes the list of files, each one quoted for the shell. A command without
+  `{files}` runs on the whole project.
+- `ratchet`: `false` makes every finding of the command count, on any line. The default is `true`.
+- `complexity`: the rule codes of the command that measure size, such as a limit on the length of a function.
+
+`lint.policy` is a list of git pathspecs of the files that are lint policy. The `lint` field itself is always lint
+policy.
+
+Git matches the pathspecs. A `*` also matches a `/`, and `:(exclude)<pathspec>` leaves files out.
+
+Which files a command gets:
+
+- A command with `{files}` gets the changed files that `files` matches. A renamed file has its new path. A deleted
+  file is never given.
+- When a file that `triggers` matches changes, the command gets every file of the tree that `files` matches. When the
+  `lint` field changes, every command does. A deleted or renamed source file does not do this.
+- When no file is left, the command is not called, and its result is `no files`.
+- A command without `{files}` runs when a changed file, also a deleted one, matches `files` or `triggers`, or when the
+  `lint` field changes. It is not called when no file of the tree matches `files`, and its result is `no files`.
+
+The tree is the worktree as `git add -A` would stage it: a file that is not tracked yet and not ignored is a file of
+the tree.
+
+How a command runs: from the top of the worktree, with `bash -o pipefail -c`, on a test slot, for at most 5 minutes.
+In `conveyor.sh lint`, `GIT_INDEX_FILE` names a copy of the index that holds the tree, so `git ls-files` in the
+command also lists the files that are not tracked yet. `conveyor.sh doctor` gives the command the index of the main
+checkout, so there `git ls-files` lists only the tracked files.
+Conveyor reads the commands from the pack of your main checkout. The scripts and config files that a command loads
+come from the worktree.
+
+A finding is a line of the command's output in this form: `<path>:<line>[:<column>]: <text>`. The path is a file of
+the tree, from its top, with no `./`. A path can hold spaces and colons. The first word of the text is the rule code.
+Conveyor does not read other lines as findings.
+
+The four results:
+
+- Pass: the command exits 0 and prints no finding.
+- Findings: the command exits 1 and prints one finding or more.
+- Skipped: the first line is `lint: missing <tool>` and the command exits 127. Use this when the tool is not
+  installed.
+- Execution error: any other result. For example, another exit code, an exit 127 without that first line, an exit 1
+  with no finding, an exit 0 with findings, or a command that runs for longer than 5 minutes.
+
+For example:
+
+```json
+"lint": {
+  "commands": [
+    {"files": ["*.py"], "triggers": ["pyproject.toml"], "complexity": ["C901"], "run": "ruff check --output-format concise {files}"}
+  ]
+}
+```
+
 ## The test map
 
 The test map tells which test files cover which source files. With it, a card runs the tests that cover its change,
