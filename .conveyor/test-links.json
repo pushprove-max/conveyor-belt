@@ -240,6 +240,9 @@
   "conveyor/tests/cardrules.test.sh": [
     "conveyor/tests/snapexec.test.sh"
   ],
+  "conveyor/tests/doctor.test.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
   "conveyor/tests/doctorbudget.test.sh": [
     "conveyor/tests/snapexec.test.sh"
   ],

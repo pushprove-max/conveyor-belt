@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
 # Engine cases: doctor's checks of the pin, the Board's virtualenv, gh, the host file, the pack and the tools. Its own
-# file, to keep setup.test.sh under the 600 lines a case file may have. The helpers (doctordone, sample, without,
-# uninstalled) are setup.test.sh's.
+# file, to keep setup.test.sh under the 600 lines a case file may have. The helpers are doctor.test.sh's (doctordone,
+# without, uninstalled) and setup.test.sh's (sample).
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
