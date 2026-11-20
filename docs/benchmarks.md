@@ -87,7 +87,9 @@ Each task is built in a sandbox of its own: a local clone of the task's reposito
 text as the card's issue. Conveyor builds the task in a Docker container made from the task's own image, with a pack
 made for it. The pack holds the task's test command, run in the container, and a command that runs one test file in
 the task's own Python environment: `python3 -m pytest` on the file when that Python has pytest, else `python3` on the
-file. That command imports the task's package from the card's checkout (its `src/` folder when it has one) before
+file. In a Django repository (one with `tests/runtests.py`), it runs Django's own runner on the file instead, as the
+task's test command does: the file `tests/<a>/<b>.py` is run as `./tests/runtests.py --settings=test_sqlite --parallel 1
+<a>.<b>`. That command imports the task's package from the card's checkout (its `src/` folder when it has one) before
 the copy installed in the image, so the file tests the card's change. The change leaves
 out the files Python makes (`__pycache__/`, `*.pyc`). The container can see the sandbox and, read-only, the
 folder of the installed Conveyor version, and no other folder of this machine. Conveyor builds, reviews, fixes and

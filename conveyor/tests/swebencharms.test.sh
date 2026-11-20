@@ -257,3 +257,19 @@ t_swearmdefault() {
   out=$(PATH=${p%:} loop bench swe arms check conveyor 2>&1)
   grep -q "^conveyor: failed: no codex login on this machine" <<<"$out" || fail "the default reviewer, Codex's in the container, asked for no Codex login: $out"
 }
+
+# Bug (#1052): Django's images have no pytest, so the pack's test.fileCommand ran a Django test module with python3
+# alone, which fails at once, and the card's Test step failed. In a checkout with tests/runtests.py (a stand-in that
+# notes its arguments) the file is given to that runner as a module label. Pytest is importable here, so the case also
+# fails if the pytest run still wins. The pytest and python3 runs without runtests.py are t_sweseats'.
+t_swedjango() {
+  local fc d=$T/$CASE
+  fc=$(. "$SRC/bench/swe_arms.sh" && swe_filecmd '{}') || fail "swe_filecmd failed: $fc"
+  mkdir -p "$d/pytest/pytest" "$d/repo/tests" && : > "$d/pytest/pytest/__init__.py" \
+    && echo 'open("pytest.args", "w").write("pytest")' > "$d/pytest/pytest/__main__.py" \
+    && printf '%s\n' '#!/usr/bin/env bash' 'echo "$*" > runtests.args' > "$d/repo/tests/runtests.py" && chmod +x "$d/repo/tests/runtests.py" \
+    || fail "the Django checkout was not made"
+  ( cd "$d/repo" && PYTHONPATH=$d/pytest bash -c "$fc"' "$1"' _ tests/invalid_models_tests/test_models.py ) \
+    && [ "$(cat "$d/repo/runtests.args" 2>&1)" = '--settings=test_sqlite --parallel 1 invalid_models_tests.test_models' ] && [ ! -e "$d/repo/pytest.args" ] \
+    || fail "the pack's test.fileCommand did not run a Django test file through tests/runtests.py by its label: $fc $(cat "$d/repo/runtests.args" "$d/repo/pytest.args" 2>&1)"
+}

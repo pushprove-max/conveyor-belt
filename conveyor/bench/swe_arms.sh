@@ -280,14 +280,17 @@ swe_taskrules() { # <arm json> < tasks
 # which adds the file's path at the command's end). A task repository can have no test configuration that Conveyor's
 # own runner reads, and then the card's Test step blocked. This command first starts the task's environment (its env in
 # the task list, swe_harness.py: the Python that has the task's packages, as test.command starts it), then runs the file
-# with pytest when that python3 has pytest, else with python3 alone. test.command stays the task's own. The env runs
+# with pytest when that python3 has pytest, else with python3 alone. A Django checkout (one with tests/runtests.py) has
+# no pytest, and its test modules fail run alone: there each file tests/<a>/<b>.py is given to Django's own runner as
+# the label <a>.<b>, as the task's test.command runs it (a file outside a folder of tests/ falls back to the other
+# runs). test.command stays the task's own. The env runs
 # with no arguments: a script it sources is given the function's arguments otherwise, and conda's activate takes the
 # first one as the environment to start. The image installs the task's package from its own checkout (/testbed, often
 # editable), and the card's worktree is another checkout: the worktree's folder, and its src/ when it has one, go first
 # on PYTHONPATH, so the file imports the worktree's copy of the package (with the card's fix), not the image's.
 swe_filecmd() { # <task json>
   local e; e=$(jq -r '.env // ""' <<<"$1")
-  printf 'swe_pyfile() { local f=("$@"); set --; %sexport PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}"; [ ! -d src ] || PYTHONPATH="$PWD/src:$PYTHONPATH"; if python3 -c "import pytest" > /dev/null 2>&1; then python3 -m pytest "${f[@]}"; else python3 "${f[@]}"; fi; }; swe_pyfile\n' "${e:+$e || return 1; }"
+  printf 'swe_pyfile() { local f=("$@"); set --; %sexport PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}"; [ ! -d src ] || PYTHONPATH="$PWD/src:$PYTHONPATH"; local l=() x; if [ -f tests/runtests.py ]; then for x in "${f[@]}"; do case $x in tests/*/*.py) x=${x#tests/}; x=${x%%.py}; l+=("${x//\\//.}") ;; *) l=(); break ;; esac; done; fi; if [ "${#l[@]}" -gt 0 ]; then ./tests/runtests.py --settings=test_sqlite --parallel 1 "${l[@]}"; elif python3 -c "import pytest" > /dev/null 2>&1; then python3 -m pytest "${f[@]}"; else python3 "${f[@]}"; fi; }; swe_pyfile\n' "${e:+$e || return 1; }"
 }
 # The pack and control record of a conveyor arm's sandbox: the project's, with the task's test command run in the
 # container, the arm's seats (a host arm's models added to models.allowed; a saved arm's are the project's already,
