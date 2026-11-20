@@ -10,7 +10,7 @@
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
 # The Done-when check: a card that says it is done without showing each line of the issue's `## Done when` holds
-# leaves the review to find the missing item. Its cases (dw*) each run one issue's card, side by side.
+# leaves the review to find the missing item. Most of its cases (dw*) each run one issue's card, side by side.
 # A Done-when case's main and stubs: its one issue (a JSON object), the review prompt kept in $STUB/asked, and each
 # session's reply read from $STUB/reply.<its number>. No case here checks a push, so the rule "Push when a card lands"
 # that setup turns on is off, as it is by default (a card still lands on main, its landed line keeping its sha): the
@@ -186,29 +186,55 @@ t_dwrebase() {
   grep -qx 'D2 met: a.txt:2 after the rebuild' "$STUB/asked" && ! grep -q 'is the build' "$STUB/asked" || fail "the review after the rebuild had stale D<n> lines: $(cat "$STUB/asked")"
 }
 
+# dwchecked() (lib/testrun.sh), the Done-when part of checked(), called on one worktree as checked() calls it after
+# a build whose reply is in <worktree>.out, with the steps around it stubbed: record() appends the line with the
+# fields the record check needs, session() is the one fix session (its reply $STUB/reply.2, one line in
+# $STUB/sessions), block() keeps its reason in $STUB/blocked. Then reviewseen() (lib/card.sh, with its heading
+# DONEWHENREVIEW from lib/prompts.sh, and no commit trailers) writes what the review is shown to <worktree>.seen. A
+# whole card run of this cost the case about 4 CPU s more; dwland and dwfix land one.
+dwcall() { # <worktree> <issue json> <the build session's fields>
+  # shellcheck disable=SC2034 # STATE is read by the sourced lib/testrun.sh (SUITERUNS=${STATE%/*}/...), DWFIX (the fix
+  # prompt's heading, which dwfix checks) by dwchecked()
+  ( STATE=$ST/cards.jsonl DWFIX='# The Done-when check failed'; . "$SRC/lib/testrun.sh"
+    eval "$(sed -n "/^DONEWHENREVIEW='/,/'\$/p" "$SRC/lib/prompts.sh"; sed -n '/^reviewseen() {/,/^}/p' "$SRC/lib/card.sh")"
+    trailerview() { :; }
+    record() { local x=${5:-}; [ -n "$x" ] || x='{}'
+      jq -c --arg c "$1" --argjson i "$2" --arg s "$3" --arg r "$4" \
+        '{card: $c, issue: $i, step: $s, result: $r, sha: "", reason: "", time: "2026-01-06T00:00:00Z", tokens: {claude: 0, codex: 0}} + .' <<<"$x" >> "$STATE"; }
+    began() { :; }
+    block() { echo "$4" > "$STUB/blocked"; }
+    session() { echo "$3" >> "$STUB/sessions"; jq -cn --rawfile r "$STUB/reply.2" '{type: "result", is_error: false, result: $r}' > "$1.out"; echo '{"model":"m"}'; }
+    dwchecked c1 "$(jq .number <<<"$2")" "$1" "$2" prompt build "$3" || exit 1
+    reviewseen "$1" proof > "$1.seen" )
+}
+
 # Bugs: a named file that is not there (a bare root name too, or two on one line) fails its item, or is not a note
 # shown to the review; the record check takes notes that are not a list of strings (it sets that line aside).
 t_dwnotes() {
   # #12: a pytest case after a missing path, a missing name with a one-letter extension and a :line, and one with no
   # :line and a one-letter extension (beside an e.g., which names no file), a missing path with no extension and a
   # :line, an absolute path outside the worktree, and a TODO added in a file whose name git quotes in a diff header are
-  # each noted by name, not failed; the TODO fails, the fix reply names it (beside an i.e.), and the card lands.
-  dwsetup "$(issue 12 2026-01-06 | jq -c '.body = "## Done when\n- one\n- two\n- three\n- four\n- five"')"
-  echo "$GO" > "$STUB/review.1"
-  echo "mkdir -p src && echo all: > src/Makefile && echo int > x.c && echo int > ok.h && echo 'TODO later' > café.py" > "$STUB/build"
-  printf '## Done when\nD1 met: tests/missing.py::test_case passed\nD2 met: missing.c:1\nD3 met: lib/Makefile:1\nD4 met: %s:1 passes\nD5 met: y.c implements the requirement, e.g. as asked\n' "$STUB/x.py" > "$STUB/reply.1"
+  # each noted by name, not failed; the TODO fails, the fix reply names it (beside an i.e.), and the card goes on.
+  setup '[]'
+  local w=$T/$CASE/w
+  git -C "$R" worktree add -q --detach "$w" \
+    && (cd "$w" && mkdir -p src && echo all: > src/Makefile && echo int > x.c && echo int > ok.h && echo 'TODO later' > café.py) || fail "the worktree could not be made"
+  jq -cn --arg r "$(printf '## Done when\nD1 met: tests/missing.py::test_case passed\nD2 met: missing.c:1\nD3 met: lib/Makefile:1\nD4 met: %s:1 passes\nD5 met: y.c implements the requirement, e.g. as asked\n' "$STUB/x.py")" \
+    '{type: "result", is_error: false, result: $r}' > "$w.out"
   printf 'The TODO in café.py stays.\n\n## Done when\nD1 met: tests/missing.py::test_case and tests/gone.py passed\nD2 met: x.c:1\nD3 met: src/Makefile:1\nD4 met: x.c:1 holds\nD5 met: x.c and ok.h implement it, i.e. as asked\n' > "$STUB/reply.2"
-  loop run --only 12 >/dev/null || fail "run of #12 exited non-zero"
+  dwcall "$w" "$(issue 12 2026-01-06 | jq -c '.body = "## Done when\n- one\n- two\n- three\n- four\n- five"')" '{"model":"m"}' \
+    || fail "dwchecked blocked #12 or failed: $(cat "$STUB/blocked" 2>&1)"
+  [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ ! -e "$STUB/blocked" ] || fail "#12 did not have one fix session, or was blocked: $(cat "$STUB/blocked" 2>&1)"
   [ "$(st 'select(.issue == 12 and .step == "build") | .doneWhen | [.items, .met, (.failed | sort | join(" | "))] | tojson')" \
     = '[5,5,"TODO added in café.py is not named in the reply"]' ] \
     && [ "$(st 'select(.issue == 12 and .step == "build") | .doneWhen.notes | join(" | ")')" = "D1: names tests/missing.py, which is not in this worktree | D2: names missing.c, which is not in this worktree | D3: names lib/Makefile, which is not in this worktree | D4: names $STUB/x.py, which is not in this worktree | D5: names y.c, which is not in this worktree" ] \
     || fail "a file reference was not noted, failed its item, or a quoted-name TODO slipped past the check: $(st 'select(.issue == 12 and .step == "build") | .doneWhen')"
   # The fix reply still names two missing files on one line: the card is not blocked for them, and the review is shown
   # a note for each.
-  [ "$(st 'select(.issue == 12 and .step == "fix") | .doneWhen | tojson')" = '{"items":5,"met":5,"failed":[],"notes":["D1: names tests/gone.py, which is not in this worktree","D1: names tests/missing.py, which is not in this worktree"]}' ] && [ -n "$(st 'select(.issue == 12 and .step == "landed") | .sha')" ] \
-    && grep -qx 'Note: D1: names tests/missing.py, which is not in this worktree' "$STUB/asked" && grep -qx 'Note: D1: names tests/gone.py, which is not in this worktree' "$STUB/asked" \
-    || fail "#12's fix reply did not pass with its missing file as a note shown to the review, or #12 did not land: $(st 'select(.issue == 12)')"
-  loop check || fail "a line with doneWhen is not a whole record"
+  [ "$(st 'select(.issue == 12 and .step == "fix") | .doneWhen | tojson')" = '{"items":5,"met":5,"failed":[],"notes":["D1: names tests/gone.py, which is not in this worktree","D1: names tests/missing.py, which is not in this worktree"]}' ] \
+    && grep -qx 'Note: D1: names tests/missing.py, which is not in this worktree' "$w.seen" && grep -qx 'Note: D1: names tests/gone.py, which is not in this worktree' "$w.seen" \
+    || fail "#12's fix reply did not pass with its missing file as a note shown to the review: $(st 'select(.issue == 12)') $(cat "$w.seen")"
+  recok "$ST/cards.jsonl" "#12's build and fix lines"
   local bad; bad=$(jq -c 'select(.issue == 12 and .step == "fix") | .doneWhen.notes = false' "$ST/cards.jsonl"); echo "$bad" >> "$ST/cards.jsonl"
   # A refused line is set aside (#157), not passed: it leaves the records for the quarantine, named by its field.
   local n; n=$(wc -l < "$ST/cards.jsonl")
@@ -221,15 +247,19 @@ t_dwnotes() {
 # --argjson refuses, and the line was written bare, the loop's log showing only jq's own error: the build and fix lines
 # of the cards the engine files, which have no Done-when, were left unpriced on the Board, issue 452).
 t_dwnone() {
-  # #10: no `## Done when`: no check, and a reply with no section lands.
-  dwsetup "$(issue 10 2026-01-04)"
-  echo "$GO" > "$STUB/review.1"; echo 'echo four >> b.txt' > "$STUB/build"
-  loop run --only 10 > /dev/null 2> "$STUB/run.err" || fail "run of #10 exited non-zero"
-  [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ "$(st 'select(.issue == 10) | select(has("doneWhen"))')" = '' ] && [ -n "$(st 'select(.issue == 10 and .step == "landed") | .sha')" ] \
-    || fail "an issue with no Done when section was checked, or did not land: $(st 'select(.issue == 10)')"
+  # #10: no `## Done when`: no check and no fix session, and the card goes on (an issue with no such section lands in
+  # the landing cases of other files, issue() giving none).
+  setup '[]'
+  local w=$T/$CASE/w
+  git -C "$R" worktree add -q --detach "$w" && echo four >> "$w/b.txt" || fail "the worktree could not be made"
+  jq -cn '{type: "result", is_error: false, result: "Done."}' > "$w.out"
+  dwcall "$w" "$(issue 10 2026-01-04)" '{"model":"m","usage":{"read":999},"tokens":{"claude":5}}' 2> "$STUB/run.err" \
+    || fail "dwchecked blocked #10 or failed: $(cat "$STUB/blocked" "$STUB/run.err" 2>&1)"
+  [ ! -e "$STUB/sessions" ] && [ "$(st 'select(.issue == 10) | select(has("doneWhen"))')" = '' ] \
+    || fail "an issue with no Done when section was checked, or had a fix session: $(st 'select(.issue == 10)')"
   [ "$(st 'select(.issue == 10 and .step == "build") | .model == "m" and .usage.read == 999 and .tokens.claude > 0')" = true ] && ! grep -q 'invalid JSON text' "$STUB/run.err" \
     || fail "the build line of an issue with no Done when section lost the session's fields: $(st 'select(.issue == 10 and .step == "build")') $(cat "$STUB/run.err")"
-  ! grep -q "Done-when lines" "$STUB/asked" || fail "the reviewer of #10 was given Done-when lines"
+  ! grep -q "Done-when lines" "$w.seen" || fail "the reviewer of #10 was given Done-when lines"
 }
 
 # The reply check counts a TODO or [VERIFY] marker as added only when the change adds more lines holding it than it
