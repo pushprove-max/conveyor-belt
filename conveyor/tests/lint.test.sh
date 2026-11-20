@@ -85,8 +85,9 @@ t_lintscope() {
 }
 
 # Bug: a changed trigger (the linter's config) leaves its command on the changed files alone, so an old file the new
-# config fails is never read. It is given every tracked file its files match; a command without {files} runs too,
-# but not one whose files match no tracked file (*.md here): its result is `no files`.
+# config fails is never read. It is given every file of the tree its files match (a file not tracked yet too); a
+# command without {files} runs too, but not one whose files match no file of the tree (*.md here): its result is
+# `no files`.
 t_linttrigger() {
   lintsetup
   lintcmds '[{"files": ["*.c"], "triggers": [".lintrc"], "run": "$L {files}"}, {"files": ["*.md"], "triggers": [".lintrc"], "run": "$L"},
@@ -99,7 +100,7 @@ t_linttrigger() {
 }
 
 # Bug: a change to the pack's lint field (a new command, a rule turned on) is checked on the changed files alone. Every
-# command runs on every tracked file it matches, though the change touches none of them.
+# command runs on every file of the tree it matches, though the change touches none of them.
 t_lintfield() {
   lintsetup
   lintcmds '[{"files": ["*.c"], "run": "$L {files}"}, {"files": ["*.txt"], "run": "$L {files}"}]'
@@ -107,7 +108,7 @@ t_lintfield() {
   lintwt a.c one
   jq '.lint.commands[0].ratchet = false' "$W/.conveyor/project.json" > "$W/p" && mv "$W/p" "$W/.conveyor/project.json" || fail "the card's pack"
   lintin 'lintcheck "$W" "$(git -C "$W" rev-parse HEAD)"'
-  [ "$(lintargs)" = 'run a.c|run a.txt' ] || fail "the changed lint field did not run every command on every tracked match: $(lintargs)"
+  [ "$(lintargs)" = 'run a.c|run a.txt' ] || fail "the changed lint field did not run every command on every match in the tree: $(lintargs)"
 }
 
 # Bugs: `conveyor.sh lint` in a card's worktree misses an edit that is not staged or a file that is not tracked, stages
