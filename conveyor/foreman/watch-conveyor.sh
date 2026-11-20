@@ -8,7 +8,9 @@
 #   a card waiting on the owner's yes       an issue waiting on the owner's yes before its build (health's before)
 #   a card blocked; one blocked by its review, while the standing kind review-retry is on, the watcher retries itself
 #     and wakes nothing for, unless that retry fails (reviewretry()); a card still blocked 30 minutes after a poll
-#     first listed it, and once an hour after, while no open owner question names its issue (stillblocked())
+#     first listed it, and once an hour after, while no open owner question names its issue (stillblocked()); of a
+#     snapshot made before the last change to the card records, only a card health still lists blocked (recheck()),
+#     its line ending "(as of <the snapshot's time>)"
 #   a card stuck (health's stuck: no new step and no output, its process gone, a wait on other cards past the
 #     limit, with the cards it waited on, or a test case that hangs, by name); one whose step the engine ended
 #     for no progress and runs once more (did) is a new problem, and says so ("ended and retried"); a second stall
@@ -110,6 +112,8 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
   | . as $snap
   # The push the Board lists under blocked (snapshot.sh: a push that failed twice), which health holds only as pushFailingSince.
   | any(.needsYou | objects | .blocked | arrays | .[]; objects | .push == true) as $pushheld
+  # A blocked line of a snapshot made before the last change to the card records says when that snapshot was made (#1114).
+  | (if .recordsNewer == true then (.snapshotAt | strings | " (as of \(.[11:16])Z)") // "" else "" end) as $asof
   | .health
   | if type == "object" and ([.loop, .gh] | all(type == "boolean")) and ([.blocked, .waiting, .stuck] | all(type == "array" and all(type == "object")))
     and (.time | fromdate | type == "number") and (.pushFailingSince | type == "null" or (fromdate | type == "number"))
@@ -117,7 +121,7 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
   | (.waiting[] | ["waiting:\(.card)", "needs the owner'"'"'s yes", ref, "\(ref) needs the owner'"'"'s yes since \(.since): \(.reason | one)"]),
     (.before | arrays | .[] | objects | select(.issue | numbers)
       | ["before:\(.issue)", "needs the owner'"'"'s yes", "#\(.issue)", "#\(.issue) needs the owner'"'"'s yes before its build since \(.since): \(.title | one)"]),
-    (.blocked[] | ["blocked:\(.card)", "blocked", ref, "\(ref) is blocked since \(.since): \(.reason | one)"]),
+    (.blocked[] | ["blocked:\(.card)", "blocked", ref, "\(ref) is blocked since \(.since): \(.reason | one)\($asof)"]),
     # A stopped engine is one item, idle or not, naming the cards it holds; a card under it is not listed again.
     # A held card whose own process is stopped too names that one as well: resuming the engine leaves it stopped.
     (([.stuck[] | select(.stopped.of? == "engine")] | unique_by(.card)) as $h | [$h[] | ref] as $held
@@ -284,6 +288,17 @@ keepsnap() { # <repo> <snapshot>
   { mkdir -p "$FD" && (umask 077 && printf '%s\n' "$2" > "$FD/conveyor-snapshot-$1.json.$$") && mv -f "$FD/conveyor-snapshot-$1.json.$$" "$FD/conveyor-snapshot-$1.json"; } 2>/dev/null \
     || rm -f "$FD/conveyor-snapshot-$1.json.$$"
 }
+# recheck <repo> <main> <snapshot>: the snapshot, with only the blocked cards (health.blocked) that `conveyor.sh health`,
+# read from the card records and the retried lines now, still lists blocked, when the records changed after the
+# snapshot was made (recordsNewer) and it lists a blocked card (#1114: a card retried, picked again or building since
+# was named blocked again, and the Foreman acted on it again). When health does not read, the snapshot as it is.
+recheck() {
+  local cards
+  if jq -e '.recordsNewer == true and (.health.blocked | arrays | length > 0)' <<<"$3" >/dev/null 2>&1 \
+    && cards=$(ask "$1" "$2" health 2>/dev/null | jq -ce 'select(type == "object" and (.blocked | type == "array")) | [.blocked[] | objects | .card]' 2>/dev/null) \
+    && jq -c --argjson c "$cards" '.health.blocked |= map(select(.card | IN($c[])))' <<<"$3" 2>/dev/null; then return; fi
+  printf '%s\n' "$3"
+}
 
 if [ "${1:-}" = --status ]; then
   now=${CONVEYOR_FOREMAN_NOW:-$(date +%s)} n=0
@@ -305,6 +320,7 @@ if [ "${1:-}" = --status ]; then
         elif $now - . < 60 then "under a minute ago" else "\($now - . | took) ago" end' <<<"$rec" 2>/dev/null) && [ -n "$age" ] || age='at an unknown time'
       echo "$repo: the last snapshot, made $age (a new one failed: $why):"
     else keepsnap "$repo" "$rec"; fi
+    rec=$(recheck "$repo" "$main" "$rec")
     jq -r --arg repo "$repo" --argjson now "$now" "$STATUS" <<<"$rec" 2>/dev/null || echo "$repo: the snapshot's belt does not read"
     if probs=$(jq -r --argjson push -1 --argjson now "$now" --argjson poll "$POLL" --argjson await '[]' --argjson hist '[null]' --slurpfile kinds "$KINDS" "$PROBLEMS" <<<"$rec" 2>/dev/null); then
       awk -F'\t' '$1 != "" && $2 != "suite ended" && $2 != "release started again" { print "needs you: " $4 }' <<<"$probs"
@@ -332,7 +348,7 @@ record() { # <repo> <main> <now> <await>
   # 128 KB a single argument may hold (#544).
   readsnap() { # <ask limit, seconds>: rec, the history file and cur, the problems; nonzero when the record does not read (the ask's exit when it failed)
     rec=$(ASK_LIMIT=$1 ask "$repo" "$main" snapshot 2>"$errf") || return
-    ! jq -e objects <<<"$rec" >/dev/null 2>&1 || keepsnap "$repo" "$rec"
+    ! jq -e objects <<<"$rec" >/dev/null 2>&1 || { keepsnap "$repo" "$rec"; rec=$(recheck "$repo" "$main" "$rec"); }
     { jq -e --argjson await "$await" "${PUSHED}"'pushed(null) as $p | any($await[]; .[0] | IN($p[]) | not)' <<<"$rec" >/dev/null 2>&1 \
       && ASK_LIMIT=$1 ask "$repo" "$main" history 2>>"$errf" | jq -ce objects > "$histf" 2>>"$errf" || echo null > "$histf"; }
     cur=$(jq -r --argjson push "$PUSH_S" --argjson now "$now" --argjson poll "$POLL" --argjson await "$await" --slurpfile hist "$histf" --slurpfile kinds "$KINDS" "$PROBLEMS" <<<"$rec" 2>>"$errf")
