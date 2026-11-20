@@ -151,6 +151,10 @@ t_machinecard() {
   holdpass $'c.test\tc.txt'
   ( loop run 1 > "$STUB/run.out" 2>&1 ) & lp=$!
   wait_until "$waiting" 'cat "$STUB/run.out"' || fail "the card did not wait for the machine: $(cat "$STUB/run.out")"
+  # Bug it catches too: a card the repair lane does not pass (c.test fails in the clean harness with its change too)
+  # not told why. The loop's message (card()) is checked here; t_repairempty checks repairlane()'s other reason.
+  grep -qF 'the repair lane did not pass it (c.test still failed with the change in a clean harness): it waits until the machine passes its controls again' "$STUB/run.out" \
+    || fail "the loop did not say why the lane did not pass the card: $(grep -F 'repair lane' "$STUB/run.out")"
   # Bug it catches too: the machine's failure counted as the card's failed test step (result fail, "tests failed").
   [ "$(tline 1 '[.result, .verdicts] | tojson')" = '["held",[{"case":"b.test: flaky","verdict":"machine"}]]' ] \
     || fail "the test line is not held with the verdict machine: $(tline 1 tojson)"
@@ -164,7 +168,8 @@ t_machinecard() {
   [ "$(sort -u "$STUB/looks")" = 'fail:c.test|' ] && [ "$(wc -l < "$STUB/looks")" -ge 2 ] \
     || fail "the looks at the hold did not run the control alone on main, again once it failed: $(cat "$STUB/looks")"
   [ ! -e "$ST/machinehold.json" ] || fail "the hold stayed after the control passed: $(cat "$ST/machinehold.json")"
-  [ "$(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)" = "test held,test pass," ] && [ "$(ran 3)" = flaky ] \
+  # The held line keeps its run's own reason, exit 1: the repair lane, which did not pass the card, gave it none.
+  [ "$(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)" = "test held exit 1,test pass ," ] && [ "$(ran 3)" = flaky ] \
     || fail "the card on hold did not test again once the control passed, or went to a fix: $(st '"\(.step) \(.result)"' | tr '\n' ,)"
   [ "$(st 'select(.step == "landed") | .issue')" = 7 ] || fail "the card did not land: $(st '"\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
   loop check || fail "the record check refuses a test line with the verdict machine"
@@ -236,35 +241,30 @@ t_repairlands() {
   loop check || fail "the record check refuses the repair lane's test line"
 }
 
-# A card the repair lane does not pass, built by $STUB/build: it gives the lane up, waits for the machine as before,
-# and lands only once the hold goes, on a test step of its own.
-repairheld() { # <the clean runs, as cleanruns() gives them> <why the lane did not pass it>
-  local lp
-  ( loop run 1 > "$STUB/run.out" 2>&1 ) & lp=$!
-  wait_until 'grep -qs "waiting for the machine: the machine fails c.test" "$T/$CASE/cards/"*.live' 'cat "$STUB/run.out"' \
-    || fail "the card did not wait for the machine: $(cat "$STUB/run.out")"
-  [ "$(cleanruns)" = "$1" ] || fail "the lane's clean runs are not $1: $(cat "$STUB/clean" 2>&1)"
-  grep -qF "the repair lane did not pass it ($2)" "$STUB/run.out" || fail "the loop did not say why the lane did not pass the card: $(cat "$STUB/run.out")"
-  [ -z "$(st 'select(.step == "landed") | .issue')" ] || fail "a card that does not repair the machine landed while the hold stands"
-  [ -z "$(eng repairholder)" ] || fail "the card that did not pass kept the repair lane: $(cat "$ST/machinehold.json.lane")"
-  sed -i '/^main fail three$/d' "$STUB/plan"
-  wait "$lp" || fail "run exited non-zero: $(cat "$STUB/run.out")"
-  [ "$(st 'select(.step == "test") | "\(.result) \(.reason)"' | tr '\n' ,)" = 'held exit 1,pass ,' ] && [ "$(st 'select(.step == "landed") | .issue')" = 7 ] \
-    || fail "the card did not land on a test step of its own once the hold went: $(st '"\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+# A card the repair lane does not pass: its change, made by <edit> in its worktree c-7 on main and staged, judged by
+# repairlane() itself under the hold repairsetup's main gives (c.test). It does not pass, says why, and gives the lane
+# up while its process still runs. (That such a card then waits for the machine and lands once the hold goes, on a
+# test step of its own, is t_machinecard's whole card run, whose card the lane does not pass either.)
+repairheld() { # <edit> <the clean runs, as cleanruns() gives them> <why the lane did not pass it>
+  local out
+  eng 'machinehold c-7 "$(git rev-parse HEAD)" "[\"c.test\"]" "[\"b.test: flaky\"]"' || fail "the hold could not be written"
+  rulewt c-7 "$1"
+  out=$(eng 'repairlane c-7 "$CONVEYOR_CARDS/c-7"; echo "$? [$(repairholder)] $REPAIRED"')
+  [ "$(cleanruns)" = "$2" ] || fail "the lane's clean runs are not $2: $(cat "$STUB/clean" 2>&1)"
+  [ "$out" = "1 [] $3" ] || fail "the lane passed the card, kept the lane (in brackets) or did not say why it did not pass it: $out"
 }
 # D1, D4: a card that does not mend the harness (its build changes a.txt). Bug it catches: a card let through the
 # lane by its change alone. c.test fails in the clean harness with the change too.
 t_repairnot() {
   repairsetup
-  repairheld 'card.repair broken,card.repair broken,' 'c.test still failed with the change in a clean harness'
+  repairheld 'echo two >> a.txt' 'card.repair broken,card.repair broken,' 'c.test still failed with the change in a clean harness'
 }
 # D1: a card whose change makes the harness end the run at once with exit 0, so that nothing runs. Bug it catches: a
 # run that passed by running nothing taken for the controls passing: each file's run that exits 0 is logged ok (#374),
 # so the lane asks the run's logs for c.test's pass and for a case that passed.
 t_repairempty() {
   repairsetup
-  echo 'echo "exit 0" > conveyor/lib/slots.sh' > "$STUB/build"
-  repairheld 'card.repair broken,' 'the run with the change passed, but its logs do not say that c.test passed in it'
+  repairheld 'echo "exit 0" > conveyor/lib/slots.sh' 'card.repair broken,' 'the run with the change passed, but its logs do not say that c.test passed in it'
 }
 # D1: the card adds a test file, d.test, which main's commit lacks, and main's harness is sound, so c.test passes there.
 # The stub fails any run given a file that is not there: it stands for a pack whose test.fileCommand runs each file
