@@ -86,6 +86,24 @@ t_relholdstop() {
   rh_land
   [ "$(cat "$T/$CASE/land.out")" = 'land: 0' ] && [ "$(git -C "$R" show main:seven.txt)" = seven ] || fail "the card did not land once the run was stopped: $(cat "$T/$CASE/land.out")"
 }
+# Bug (#1124): a second `release-run` while the first waited for its hold (a push under way) passed the lock's check,
+# as the first's release-prep had not taken the lock yet: it wrote over the first's run.log and queued behind it, to
+# run its suite once the first ended. It is refused, and the first's run.log is left as it is.
+t_relholdtwice() {
+  local O RUN out rc l log=$T/$CASE/cards/release/run.log
+  runsetup true
+  ( exec {l}>>"$ST/release.landing" && flock -s "$l" && touch "$STUB/pushing" && while [ ! -e "$STUB/pushgo" ]; do sleep 0.1; done ) & # sleep: the stand-in push runs until the case lets it go
+  wait_until '[ -e "$STUB/pushing" ]' || fail "the stand-in push did not take its share of the hold"
+  out=$(loop release-run prep 1.1.0 2>&1) || { touch "$STUB/pushgo"; fail "release-run did not start the run: $out"; }
+  wait_until "grep -q 'a push runs: the run starts once it ends' '$log'" "cat '$log'" || { touch "$STUB/pushgo"; fail "the run did not wait for the push"; }
+  out=$(loop release-run prep 1.1.0 2>&1); rc=$?
+  [ $rc = 2 ] && grep -q 'release-prep or release is already running; this one is not started' <<<"$out" \
+    || { touch "$STUB/pushgo"; fail "a second release-run was not refused while the first waited for a push (exit $rc): $out"; }
+  grep -q 'a push runs: the run starts once it ends' "$log" || { touch "$STUB/pushgo"; fail "the second release-run wrote over the first's run.log: $(cat "$log")"; }
+  touch "$STUB/pushgo"
+  relwait "the run did not end" '.step == "release-prep" and .ended != null'
+  jq -e '.state == "passed"' "$RUN" > /dev/null || fail "release-prep did not pass: $(cat "$RUN") $(cat "$log")"
+}
 # A release run's stand-in: it holds the hold until the case lets it go ($STUB/letgo).
 rh_hold() {
   local h

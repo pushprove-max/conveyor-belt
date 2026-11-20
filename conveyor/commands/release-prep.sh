@@ -274,9 +274,15 @@ relfirst() { # <version> <commit>
 }
 # The release lock (its descriptor RELLK), held until the command ends, then the release hold (relhold(),
 # lib/push.sh): no card lands on main while the command runs. 1: either could not be made; 2: another run holds the lock.
+# Run by release-run (releasego()), it takes the lock that run holds, by the descriptor CONVEYOR_RELEASE_LOCK names
+# when that is open on the lock file: the flock of that same open file holds, where a new open of it would be refused.
 RELLK=''
 rellock() { # <command name>
-  mkdir -p "$CARDS/release" && { exec {RELLK}>>"$CARDS/release/lock"; } 2>/dev/null || { echo "conveyor: $1: its lock could not be made; nothing run" >&2; return 1; }
+  local d=${CONVEYOR_RELEASE_LOCK:-}
+  unset CONVEYOR_RELEASE_LOCK
+  if [[ $d =~ ^[0-9]+$ ]] && [ "/dev/fd/$d" -ef "$CARDS/release/lock" ]; then RELLK=$d
+  else mkdir -p "$CARDS/release" && { exec {RELLK}>>"$CARDS/release/lock"; } 2>/dev/null || { echo "conveyor: $1: its lock could not be made; nothing run" >&2; return 1; }
+  fi
   flock -n "$RELLK" || { echo "conveyor: $1: release-prep or release is already running; this one is not started" >&2; return 2; }
   relhold "$1"
 }
@@ -691,12 +697,16 @@ release() { # <version>
 # record (the newest run) is a passed release-prep of <version> on main's head, main not moved since: release alone,
 # told that commit. With anyway (Release anyway): release --anyway --by <who> alone, which checks the failed suite.
 releasego() { # <version> [prep: release-prep alone | anyway <who>]
-  local ok=''
-  ( flock -n 9 ) 9>>"$CARDS/release/lock" || { echo "conveyor: release-run: release-prep or release is already running; this one is not started" >&2; return 2; }
+  local ok='' lk
+  # The release lock, taken here, before run.log is opened, and kept by the run's process (CONVEYOR_RELEASE_LOCK, its
+  # descriptor, for its release-prep and release, rellock()): a second release-run, while the first waits for its
+  # hold (a push under way), is refused, and does not wait behind it nor write over its run.log.
+  { exec {lk}>>"$CARDS/release/lock"; } 2>/dev/null || { echo "conveyor: release-run: its lock could not be made; nothing run" >&2; return 1; }
+  flock -n "$lk" || { exec {lk}>&-; echo "conveyor: release-run: release-prep or release is already running; this one is not started" >&2; return 2; }
   [ -n "${2:-}" ] || { ok=$(jq -er --arg v "$1" 'select(.step == "release-prep" and .state == "passed" and .version == $v and .moved == false) | .sha | strings' "$RELRUN" 2>/dev/null) \
     && [ "$ok" = "$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)" ] || ok=''; }
   ( trap '' HUP; exec {LOGFD}>&- && exec {LOGFD}>&2
-    export CONVEYOR_RELEASE_PID=$BASHPID
+    export CONVEYOR_RELEASE_PID=$BASHPID CONVEYOR_RELEASE_LOCK=$lk
     # The release hold, from before release-prep to the end of release (also between the two: a card landed there moved
     # main under the release); they inherit it.
     relhold release-run || exit 1
@@ -706,6 +716,7 @@ releasego() { # <version> [prep: release-prep alone | anyway <who>]
     if [ "${2:-}" = anyway ]; then bash "$HERE/conveyor.sh" release "$1" --anyway --by "$3"
     elif [ -n "$ok" ]; then CONVEYOR_RELEASE_SHA=$ok bash "$HERE/conveyor.sh" release "$1"
     else bash "$HERE/conveyor.sh" release-prep "$1" "--$RELMODE" && [ "${2:-}" != prep ] && CONVEYOR_RELEASE_SHA=$(jq -r '.sha // ""' "$RELRUN") bash "$HERE/conveyor.sh" release "$1"; fi ) >"$CARDS/release/run.log" 2>&1 < /dev/null 8>&- &
+  exec {lk}>&- # the run's process holds the lock now
   if [ "${2:-}" = prep ]; then echo "conveyor: release-run: release-prep $1 is running, and nothing is released; its output is in $CARDS/release/run.log"
   elif [ "${2:-}" = anyway ]; then echo "conveyor: release-run: release $1 is running over release-prep's failed suite, by $3; its output is in $CARDS/release/run.log"
   elif [ -n "$ok" ]; then echo "conveyor: release-run: release $1 is running, with the suite that passed on ${ok:0:12}; its output is in $CARDS/release/run.log"
