@@ -575,7 +575,11 @@ lanes() {
 # project whose folder holds no mark has no Foreman: held false, and the page says so. When the host file names an
 # ssh target and a Foreman's first record's main is not on this machine (the belt runs on the host), the Foreman runs
 # in a checkout here whose remote is that repository (lib.sh's mine and FD), so its folder is read there
-# (checkout_of); with no such checkout, under main as before.
+# (checkout_of); with no such checkout, under main as before. There, the loop on the host notes a model with no
+# built-in price in the host's folder (noprice(), conveyor/lib/control.sh), which this machine does not read: each such
+# note the snapshot of one of the Foreman's projects gives (priceNotes, in <conveyor part>) is added to the folder read
+# here, under the lock the loop takes. Once a model: price-notes.txt in the folder lists the models added, so a note
+# dismissed or filed here does not come back; and none for a model a note in the file already names.
 # checkout_of <repo> [<ledger>]: the main checkout on this machine whose remote the pack names (.remote, default
 # origin) has that repository's name as the last part of its address (lib.sh's repo_name), looked for in the
 # checkout holding the record's ledger, then in the folders beside the Board's own checkout. Nonzero when none has.
@@ -592,8 +596,8 @@ checkout_of() {
   done
   return 1
 }
-foremen() {
-  local cfg=$HOST_FILE rows projects main hm sd ssh led here dir sid since wake f out='[]' waiting host engine target recs why remote bugs url
+foremen() { # <conveyor part>
+  local cfg=$HOST_FILE rows projects main hm sd ssh led here dir sid since wake f out='[]' waiting host engine target recs why remote bugs url away
   # The copies are made again each read: a Foreman whose notes are gone has none left.
   rm -rf "$OUT/plugin-bugs"
   [ -e "$cfg" ] || cfg=$PP_MAIN/conveyor/host.json
@@ -616,13 +620,25 @@ foremen() {
   while IFS= read -r -d '' projects && IFS= read -r -d '' main && IFS= read -r -d '' hm && IFS= read -r -d '' sd \
     && IFS= read -r -d '' ssh && IFS= read -r -d '' led; do
     # With ssh, a main not on this machine is the host's: the Foreman runs in a checkout here matched by its remote.
+    away=''
     if [ -n "$ssh" ] && [ ! -d "$main" ]; then
       [[ $led != "~/"* ]] || led=$HOME/${led#"~/"}
-      here=$(checkout_of "$(jq -r '.[0]' <<<"$projects")" "$led") && main=$here
+      here=$(checkout_of "$(jq -r '.[0]' <<<"$projects")" "$led") && main=$here && away=1
     fi
     dir=$main/conveyor/state
     [ -z "$sd" ] || { [ "$main" != "$hm" ] && [ "$(cd "$main" 2>/dev/null && pwd -P)" != "$(cd "$hm" 2>/dev/null && pwd -P || echo "$hm")" ]; } || dir=$sd
     dir=$dir/foreman
+    # The host's notes for models with no built-in price; only a note of noprice()'s form, one line, is added.
+    [ -z "$away" ] || ( mkdir -p "$dir" && { flock -w 30 9 || exit 1
+      while IFS= read -r l; do
+        m=${l#*" · No built-in price for "}; m=${m%%": "*}
+        ! grep -qxF -- "$m" "$dir/price-notes.txt" 2>/dev/null || continue
+        grep -qF -- " · No built-in price for $m: " "$dir/plugin-bugs.md" 2>/dev/null \
+          || { [ -s "$dir/plugin-bugs.md" ] || printf '# Plugin problems the Foreman noted (for the conveyor-belt repo)\n\n'; printf '%s\n' "$l"; } >> "$dir/plugin-bugs.md" || continue
+        printf '%s\n' "$m" >> "$dir/price-notes.txt"
+      done < <(jq -r --argjson p "$projects" '.records | arrays | .[] | objects | select(.repo | IN($p[])) | .snap.priceNotes | arrays | .[] | strings
+          | select((contains("\n") or contains("\r") | not) and test("^- [^ ]+ · card - · No built-in price for (claude|gpt)-[A-Za-z0-9._\\[\\]-]+: "))' "$1" 2>/dev/null); } 9>>"$dir/noprice.lock" ) \
+      || echo "dashboard: the notes for models with no built-in price could not be added to $dir/plugin-bugs.md" >&2
     sid='' since=''; { read -r sid since < "$dir/session"; } 2>/dev/null || true
     [[ $since =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$ ]] || since=''
     wake=$(stat -c %Y "$dir/last-wake.txt" 2>/dev/null) && wake=$(iso "$wake") || wake=''
@@ -1034,8 +1050,9 @@ render() {
   limit > "$RUN/limit.json" & b=$!
   decisions > "$RUN/decisions.json" || rc=1
   lanes > "$RUN/lanes.json" || rc=1
-  foremen > "$RUN/foremen.json" || rc=1
+  # The Foremen after Conveyor: they take the notes Conveyor's part gives.
   if [ -n "$a" ]; then wait "$a" || rc=1; fi
+  foremen "$RUN/conveyor.json" > "$RUN/foremen.json" || rc=1
   wait "$b" || rc=1
   if [ -n "$a" ]; then
     why='the live feed is not running'; [ ! -e "$OUT/stream.json" ] || why='the live feed has stopped'

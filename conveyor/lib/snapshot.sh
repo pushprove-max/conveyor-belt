@@ -23,6 +23,9 @@
 #   price, as serve's last look found them, noprice(): models; else null), and pick (the rule Pick settings: a decision for each
 #   group whose tenth trial card ended, {group, title, reason, since, time (since again: the Foreman watcher keys it on time), trial, default}, cost.trials.groups' due; and,
 #   while the control record holds pickBack, the rule's own return to shadow, {group: null, title, reason, since, time}).
+#   priceNotes, beside it, is each plugin problem note serve's look made for a model the built-in price table does
+#   not price, as noprice() wrote it in the Foreman's plugin-bugs.md ([] for none): a Board on another machine than the
+#   belt adds it to the Foreman's folder there (.claude/scripts/dashboard.sh foremen()).
 #   mainTest, beside it, is the failure of the whole test on main that stands (maintest(): issue, cases, from, to,
 #   since, exit), null when its last run passed or none ran, when the pack names no test.main, or when its issue is
 #   known closed. fullTest is the full test suite of the Board (fulltest()): command (the pack names test.full), why
@@ -631,6 +634,8 @@ snapshot() (
   tr=$(jq -ce 'select(.on == true) | .time as $t | .burst | objects | {time: $t, matched, cap}' "$TESTRULES" 2>/dev/null) || tr=null
   # The models the belt runs or offers with no price, as serve's last look found them (noprice()).
   np=$(jq -ce '.missing | arrays | map(strings) | select(length > 0) | {models: .}' "$NOPRICE" 2>/dev/null) || np=null
+  # The plugin problem notes that look made for the models the built-in price table does not price (noprice()).
+  pn=$(jq -ce '[.notes | arrays | .[] | strings | select(startswith("- "))]' "$NOPRICE" 2>/dev/null) || pn='[]'
   # The full test suite (fulltest()): the run in progress, only while its lock is held (a run that was killed left its
   # file), and the last line of its record.
   packget test.full ft 2>/dev/null || ft=''
@@ -650,7 +655,7 @@ snapshot() (
     || exit 1
   jq -cn --slurpfile all "$d/cards" --slurpfile hs "$d/health" --slurpfile allp "$d/paths" --slurpfile shots "$d/shots" --slurpfile onm "$d/onmain" --argjson mt "$mt" --slurpfile fl <(printf '%s' "$fl") --slurpfile so <(printf '%s' "$so") --slurpfile ft <(printf '%s' "$ft") --slurpfile su <(printf '%s' "$su") --argjson rl "$rl" --argjson dr "$dr" --argjson eng "$eng" --argjson tr "$tr" --argjson np "$np" --argjson m "$models" --argjson next "$next" --slurpfile built <(printf '%s' "$built") \
     --slurpfile iss "$d/issues" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" --arg pla "$pla" --arg ppm "$ppm" --arg pef "$pef" --argjson efforts "$EFFORTS" \
-    --argjson control "$control" --argjson settings "$settings" --argjson accts "$(acctnames)" --argjson ga "$ga" --slurpfile q <(printf '%s' "$queue") --slurpfile lim "$d/limit" --slurpfile smp "$d/samples" --slurpfile pu "$d/pushes" --argjson every "$SAMPLE" --argjson priced "$pricedok" --argjson cr "$cr" --argjson ts "$ts" \
+    --argjson control "$control" --argjson settings "$settings" --argjson accts "$(acctnames)" --argjson ga "$ga" --slurpfile q <(printf '%s' "$queue") --slurpfile lim "$d/limit" --slurpfile smp "$d/samples" --slurpfile pu "$d/pushes" --argjson every "$SAMPLE" --argjson priced "$pricedok" --argjson pn "$pn" --argjson cr "$cr" --argjson ts "$ts" \
     --argjson max "$MAX_REVIEWS" --argjson wait "$((CLOSE_WAIT + 300))" --arg yes "$yes" --arg lintyes "$lintyes" --arg day "$day" --arg since "$since" --arg prev "$prev" \
     --argjson t0d "$t0d" --argjson t0w "$t0w" --argjson t0p "$t0p" '$fl[0] as $fl | $so[0] as $so | $ft[0] as $ft | $su[0] as $su | $built[0] as $built | $q[0] as $q | '"$DEPS$LEVEL$INSIDE"'
     def day: fromdate | strflocaltime("%Y-%m-%d");
@@ -921,6 +926,7 @@ snapshot() (
                  line: ([$i.body // "" | splits("\r?\n") | select({body: .} | farneeds | index([$r]) != null)] | first // "" | sub("^\\s+"; "") | .[0:300])}]
            | sort_by(.issue) end)},
        mainTest: $mt,
+       priceNotes: $pn,
        fullTest: $ft,
        suites: $su,
        release: $rl,

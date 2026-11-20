@@ -589,8 +589,23 @@ here "$T/away/sample-here" "https://$GH/example/sample.git" 'sess-s 2026-11-12T0
 mkdir -p "$T/away/sample-here/.claude/metrics"; : > "$T/away/sample-here/.claude/metrics/decisions.jsonl"
 here "$T/widgetshop-here" "https://$GH/example/widgetshop" 'sess-w 2026-11-12T06:00:00Z'
 jq --arg s "$T/fstate" --arg l "$T/away/sample-here/.claude/metrics/decisions.jsonl" '.stateDir = $s | .records[0].ledger = $l' "$T/host.before" > "$MAIN/conveyor/host.json"
+# Bug (#1115): there, the loop notes a model with no built-in price in the host's Foreman folder, and Plugin problems,
+# which reads this machine's, never showed it. The host's snapshot gives the note (priceNotes), and the Board adds it
+# here once; a line not of the loop's form (another card's, two lines in one) is not added.
+PN='- 2026-11-12T09:00:00Z · card - · No built-in price for claude-new-9: the belt runs or offers this Claude model · evidence: -'
+answer "$(snap "$(jq -cn --arg n "$PN" '{priceNotes: [$n, "- 2026-11-12T09:00:00Z · card #3 · No built-in price for claude-z: y", "\($n | sub("new-9"; "new-8"))\n- x"]}')")" \
+  "$P_URL" 1794000000 "$(snap)" "$C_URL" 0
 run
 q '.panels.machine.data.foremen | map([.projects, .held, .since]) == [[["sample"], true, "2026-11-12T07:00:00Z"], [["widgetshop"], true, "2026-11-12T06:00:00Z"]]' "with ssh and a main not on this machine, the Foreman is read from the checkout here whose origin is that repository"
+SN=$T/away/sample-here/conveyor/state/foreman/plugin-bugs.md
+[ "$(grep '^- ' "$SN" 2>&1)" = "$PN" ] || fail "the host's note for a model with no built-in price is not in the Foreman's folder here, once: $(cat "$SN" 2>&1)"
+q '.panels.health.data.pluginBugs | map([.repo, (.notes | map(.line))]) == [["sample", ["'"$PN"'"]]]' "Plugin problems does not show the host's note for a model with no built-in price"
+# Dismissed here (the server takes the line out), the note does not come back from the host's snapshot.
+grep -v '^- ' "$SN" > "$SN.new" && mv "$SN.new" "$SN"
+run
+[ -z "$(grep '^- ' "$SN")" ] || fail "a dismissed note for a model with no built-in price came back: $(cat "$SN")"
+# Bug: each cycle after the first listed the model again in price-notes.txt, so the file grew every Board refresh.
+[ "$(cat "${SN%/*}/price-notes.txt" 2>&1)" = claude-new-9 ] || fail "price-notes.txt does not list the added model once: $(cat "${SN%/*}/price-notes.txt" 2>&1)"
 # Without ssh the folder is read under main as before, even when a checkout here has the repository as its origin.
 # With no ssh target Conveyor is read on this machine, where /srv/main is no checkout, so it gives no snapshot (the
 # machine panel is null) and the cycle's kept Foremen part is read.

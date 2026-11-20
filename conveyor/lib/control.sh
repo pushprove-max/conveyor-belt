@@ -254,6 +254,8 @@ modelsallowed() { # <variable>
 # which the Overview's Plugin problems pane files to the plugin's repository on the owner's yes: once for each model
 # whatever the loop's turns or restarts ($NOPRICE's noted), the projects of its group (a note in that file counts) and
 # a note filed or dismissed since (that folder's noprice-noted).
+# Each such note's line, or the line another project of the group noted, is kept too ($NOPRICE's notes): the snapshot
+# gives them (priceNotes), so a Board on another machine than the belt adds them to the Foreman's folder it reads.
 # The
 # models: those of the models.allowed in force (modelsallowed(), the list the Board's "Offered with no price" takes:
 # the pack's when it sets one, with the host's Codex models added to a codex list it has with a model in it), and those
@@ -296,7 +298,7 @@ noprice() {
 }
 # noprice()'s look, under its lock.
 noprice_() {
-  local a c p r ms rs k miss gaps m n u out x y cli ran since st notes rc=0 noted=()
+  local a c p r ms rs k miss gaps m n u l out x y cli ran since st notes rc=0 noted=() lines=()
   while IFS=$'\t' read -r n m; do
     out=$(gh_write issue close "$n" --comment "Conveyor no longer files an issue for a model with no price: the price now shows on the Board. While the belt runs or offers \`$m\` with no price, the Board lists it under Rules, Model prices, and Needs you counts it until its price is added there." 2>&1 </dev/null) \
       || { echo "conveyor: #$n, the issue for the price of $m, could not be closed: ${out:0:300}" >&2; rc=1; continue; }
@@ -355,17 +357,22 @@ noprice_() {
   if [ -n "$y" ]; then
     out=$(mkdir -p "${notes%/*}" 2>/dev/null && { flock -w 30 9 || exit 1
       while IFS= read -r m; do
-        grep -qxF -- "$m" "${notes%/*}/noprice-noted" 2>/dev/null || grep -qF -- " · No built-in price for $m: " "$notes" 2>/dev/null \
-          || { { [ -s "$notes" ] || printf '# Plugin problems the Foreman noted (for the conveyor-belt repo)\n\n'
-            printf -- '- %s · card - · No built-in price for %s: the belt runs or offers this %s model, and the built-in price table (dashboard_limit.py) has no price for it, so the Board cannot show what it costs · evidence: -\n' \
-              "$(clock)" "$m" "$([[ $m == claude-* ]] && echo Claude || echo Codex)"; } >> "$notes"; } 2>/dev/null || continue
+        l=$(grep -m 1 -F -- " · No built-in price for $m: " "$notes" 2>/dev/null) \
+          || grep -qxF -- "$m" "${notes%/*}/noprice-noted" 2>/dev/null \
+          || { l=$(printf -- '- %s · card - · No built-in price for %s: the belt runs or offers this %s model, and the built-in price table (dashboard_limit.py) has no price for it, so the Board cannot show what it costs · evidence: -' \
+              "$(clock)" "$m" "$([[ $m == claude-* ]] && echo Claude || echo Codex)") \
+            && { [ -s "$notes" ] || printf '# Plugin problems the Foreman noted (for the conveyor-belt repo)\n\n'; printf '%s\n' "$l"; } >> "$notes"; } 2>/dev/null || continue
         grep -qxF -- "$m" "${notes%/*}/noprice-noted" 2>/dev/null || { printf '%s\n' "$m" >> "${notes%/*}/noprice-noted"; } 2>/dev/null || continue
-        printf '%s\n' "$m"
+        printf '%s\t%s\n' "$m" "$l"
       done <<<"$y"; } 9>>"${notes%/*}/noprice.lock")
-    [ -z "$out" ] || mapfile -t noted <<<"$out"
+    # One line a model noted: the model, a tab, then its note (none for a model on noprice-noted whose note was filed
+    # or dismissed: a second line, empty, would be cut off with the output's last newline).
+    while IFS=$'\t' read -r m l; do [ -z "$m" ] || { noted+=("$m"); lines+=("$l"); }; done <<<"$out"
     [ "${#noted[@]}" = "$(wc -l <<<"$y")" ] || { echo "conveyor: a plugin problem for a model with no price could not be noted in $notes" >&2; rc=1; }
   fi
-  jq -c --argjson m "$miss" '.missing = $m | .noted = ((.noted | arrays // []) + $ARGS.positional | unique)' --args "${noted[@]}" <<<"$st" > "$NOPRICE.new" 2>/dev/null \
+  l=$(printf '%s\n' "${lines[@]}" | jq -Rsc '[splits("\n") | select(. != "")]') || return 1
+  jq -c --argjson m "$miss" --argjson l "$l" '.missing = $m | .noted = ((.noted | arrays // []) + $ARGS.positional | unique) | .notes = ((.notes | arrays // []) + $l)' \
+      --args "${noted[@]}" <<<"$st" > "$NOPRICE.new" 2>/dev/null \
     && mv -f "$NOPRICE.new" "$NOPRICE" || { rm -f "$NOPRICE.new"; echo "conveyor: the models with no price could not be written to $NOPRICE" >&2; return 1; }
   [ "$rc" != 0 ] || NOPRICE_K=$k
   return $rc

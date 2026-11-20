@@ -163,10 +163,15 @@ t_noprice() {
   looks "noprice && noprice && NOPRICE_K='' && noprice"
   [ ! -e "$STUB/filed" ] || fail "an issue was filed for a model with no price: $(jq -sc 'map(.title)' "$STUB/filed")"
   out=$(missing); [ "$out" = '["claude-new-9","m","x"]' ] || fail "the models with no price, a seat's among them, are not listed: $out"
-  out=$(loop snapshot --fresh | jq -c .needsYou.prices)
+  loop snapshot --fresh > "$T/$CASE/snap" || fail "no snapshot"
+  out=$(jq -c .needsYou.prices "$T/$CASE/snap")
   [ "$out" = '{"models":["claude-new-9","m","x"]}' ] || fail "the snapshot does not give Needs you the models with no price: $out"
   [ "$(grep -c '^- ' "$ST/foreman/plugin-bugs.md" 2>&1)" = 1 ] && grep -q '^- [^ ]* · card - · No built-in price for claude-new-9: ' "$ST/foreman/plugin-bugs.md" \
     || fail "a Claude model with no built-in price did not get one plugin problem note, or a stub model got one: $(cat "$ST/foreman/plugin-bugs.md" 2>&1)"
+  # Bug (#1115): the note was only in the build machine's file, and a Board on another machine never showed it. The
+  # snapshot, which that Board reads over ssh, gives the note as written.
+  out=$(jq -c .priceNotes "$T/$CASE/snap"); [ "$out" = "$(grep '^- ' "$ST/foreman/plugin-bugs.md" | jq -Rsc '[splits("\n") | select(. != "")]')" ] \
+    || fail "the snapshot does not give the plugin problem note for the model with no built-in price: $out"
 }
 # Bug (review of #1074): in a Foreman group the note went to this project's own folder, which neither the group's
 # Foreman nor the Board reads: both read the folder of the group's first project. Bug too: a pack price for a seat's
@@ -191,6 +196,9 @@ t_nopricegroup() {
   out=$(missing); [ "$out" = '["m","x"]' ] || fail "the models with no price, the pack's price put over the table: $out"
   [ "$(grep -c 'No built-in price for claude-new-9: ' "$n" 2>&1)" = 1 ] \
     || fail "not one note for a seat's model the built-in table does not price, in the group's Foreman folder: $(cat "$n" 2>&1)"
+  # Bug (#1115): this project's snapshot must give that note too, for a Board on another machine than the belt.
+  [ "$(jq -r '.notes | join("|")' "$ST/noprice.json")" = "$(grep 'No built-in price for claude-new-9: ' "$n")" ] \
+    || fail "the note another project made is not kept as this project's: $(cat "$ST/noprice.json")"
   [ ! -e "$ST/foreman/plugin-bugs.md" ] || fail "the note went to this project's own folder: $(cat "$ST/foreman/plugin-bugs.md")"
   grep -v 'No built-in price for claude-new-9: ' "$n" > "$n.new"; mv "$n.new" "$n"
   looks 'rm "$NOPRICE" && noprice'
