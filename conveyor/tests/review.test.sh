@@ -41,6 +41,9 @@ t_nogo() {
   # the review does not cut them off, as the reason's length cap would.
   [ "$(st 'select(.step == "review" and .result == "NO-GO") | .tail | split("\n") | [(.[0] | length), (any(. == "[P1] a.txt:1 wrong word"))] | tojson' | head -1)" = '[1500,true]' ] \
     || fail "a NO-GO review's line does not keep its findings whole: $(st 'select(.step == "review") | .tail' | head -c 300)"
+  # Its counts are taken from the whole review (card.sh), so the P1 finding past the reason's cut is counted: the
+  # line of 1500 a's, which has no mark, is one P1 and that finding the other (the reason alone gives 1).
+  [ "$(st 'select(.step == "review") | .counts.P1' | head -n 1)" = 2 ] || fail "the P1 finding past the reason's cut is not counted: $(st 'select(.step == "review") | .counts | tojson' | head -n 1)"
   [ "$(wc -l < "$STUB/reviews")" = 3 ] && [ "$(wc -l < "$STUB/sessions")" = 3 ] || fail "not a fix session and a new review after each NO-GO"
   # #307: each review's line keeps the line its finding cites as that review read it, so the Board shows it after the
   # worktree is gone (the case's last check): the first review read a.txt's first line, "one".

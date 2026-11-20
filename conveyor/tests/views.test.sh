@@ -366,6 +366,49 @@ t_live() { livestart
   [ "$(snap '.landed[0] | [(.rounds | length), .reviews, (.track.detail | map(.state) | join(" ")), .track.detail[16].n, .track.detail[0].sec > 86400, .track.detailAt, .track.at, .track.steps[5].state]')" \
     = '[3,3,"done done done done done done done done done done done done skipped done done failed done",1,true,15,5,"failed"]' ] || fail "the landed card's reviews and track: $(snap '.landed[0]')"
 }
+# Bugs: a card's own build, review or test run, started by the loop, is joined to the wrong process, output file,
+# model, log folder or watch (session.sh session(), review.sh codexreview(), testrun.sh testonce()), so the snapshot
+# shows nothing live or another card's; a review leaves its session file behind. The cases above call those parts
+# alone; these run one card through the loop, as only a run joins them. A stub step says "<step> <worktree>" on the
+# pipe $STUB/held.pipe and waits there until the case writes $STUB/go.pipe: hold <step>. (Not $STUB/go: $STUB is on
+# PATH, and a `go` command looked for there would be the pipe.)
+gatestart() { mkfifo "$STUB/held.pipe" "$STUB/go.pipe" || fail "the pipes"; exec 4<>"$STUB/held.pipe"
+  echo 'hold() { exec 3<>"$STUB/go.pipe"; echo "$1 $PWD" 1<>"$STUB/held.pipe"; read -r -t 100 -u 3 _; }' > "$STUB/hold.sh"
+  # A run that ends says so on the pipe too, so a card that never reaches a held step fails the case at once.
+  ( loop run 4<&- > "$T/$CASE/loop.out" 2>&1; x=$?; echo "ended $x" 1<>"$STUB/held.pipe"; exit $x ) & run=$!; }
+held() { # <step> <jq test of its live record>: the step is held, and watch() has read what its stub wrote
+  local s wt; read -r -t 100 -u 4 s wt && [ "$s" = "$1" ] || fail "the $1 never reached its stub: $s $(cat "$T/$CASE/loop.out") $(tail -n 2 "$S/cards.jsonl")"
+  # A wait on the real loop: watch() reads the output on its own timer and says nothing when it has.
+  wait_until "jq -e '$2' '$wt.live'" "cat '$wt.live'" || fail "the live record of the $1 never held $2"
+}
+letgo() { echo go 1<>"$STUB/go.pipe"; }
+t_livegated() { livestart
+  export CODEX_HOME=$STUB/codex-home; local f=$STUB/codex-home/sessions/2026/01/01/rollout-2026-01-01T00-00-00-0aa1-b2.jsonl
+  printf '%s\n' 'echo two >> a.txt; . "$STUB/hold.sh"' \
+    'echo '\''{"type":"assistant","message":{"id":"m1","usage":{"input_tokens":1000000,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0},"content":[{"type":"tool_use","name":"Bash","input":{"command":"npm test"}}]}}'\''; hold build' > "$STUB/build"
+  printf '%s\n' ". \"\$STUB/hold.sh\"; mkdir -p \"${f%/*}\"; echo '{\"type\":\"thread.started\",\"thread_id\":\"0aa1-b2\"}'" \
+    "echo '{\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1000000,\"cached_input_tokens\":400000,\"output_tokens\":500}}}}' > '$f'; hold review" > "$STUB/review-cmd"
+  echo "$GO" > "$STUB/review.1"; gatestart
+  held build '.action == "Bash: npm test"'
+  [ "$(snap '.belt[0] | [.step, .live.action, .tokens.claude, .usd]')" = '["build","Bash: npm test",1000000,2]' ] || fail "the snapshot of a held build: $(snap '.belt[0]')"
+  letgo; held review '.usage.input == 600000'
+  # Its dollars are its running total's beside the build's recorded line (0.0002): that of the stub's result.
+  [ "$(snap '.belt[0] | [.step, .tokens.codex, .usd, .done.usd]')" = '["review",600500,1.2452,0.0002]' ] || fail "the snapshot of a held review: $(snap '.belt[0]')"
+  letgo; wait $run || fail "the run exited non-zero: $(cat "$T/$CASE/loop.out")"
+  [ ! -e "$f" ] || fail "the review that ended left its session file"
+}
+# The card's change runs three linked files; the third is held. Card c8's log, beside it, names seven files.
+# The runner copies its file lines to the output too, so the held file writes a line only to its run's log (4 cases)
+# and a runner-like line only to the output (z.test.sh): the wait holds only when watch() reads the log
+# (testlogs()) and not the output.
+t_testgated() { livestart
+  echo x > "$R/b.test.sh"; echo x > "$R/c.test.sh"; git -C "$R" add b.test.sh c.test.sh; linkset '{"a.txt": ["a.test.sh", "b.test.sh", "c.test.sh"]}'
+  echo '[ "$CONVEYOR_TEST_FILE" != c.test.sh ] || { echo "TESTRUN cases=4" >> "$CONVEYOR_TEST_LOG/c"; echo "-- ok z.test.sh"; . "$STUB/hold.sh"; hold test; }' > "$STUB/file-cmd"
+  mkdir -p "$T/$CASE/cards/c8.testlog"; printf 'TESTRUN files=7\n-- ok   other.test.ts 0s\n' > "$T/$CASE/cards/c8.testlog/files"; echo "$GO" > "$STUB/review.1"; gatestart
+  held test '.files.run == 2 and .tests.of == 4'
+  [ "$(snap '.belt[0] | [.step, (.track.files | {run, of, now: .now.file})]')" = '["tests",{"run":2,"of":3,"now":"c.test.sh"}]' ] || fail "the snapshot of a held test run: $(snap '.belt[0]')"
+  letgo; wait $run || fail "the run exited non-zero: $(cat "$T/$CASE/loop.out")"
+}
 
 # Bugs: the track of a card on the belt names the wrong step, hides a fix round the card did not need instead
 # of showing it skipped, loses a failed test run or a rebuild after a landing conflict, or differs in shape from card
