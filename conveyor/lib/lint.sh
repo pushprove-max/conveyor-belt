@@ -326,13 +326,14 @@ lintrun() { # <worktree> <base> <card> <output file>
 }
 # A gate's lint line in the card's records, for <output file> of lintrun and its exit: result pass, findings or error;
 # lint.commands each command's {n, run, result, sec, findings: the count of the change's}, a skipped one's result
-# `skipped: missing <tool>`; lint.asInstalled true when a command that ran has a trigger the change changed (the tools
-# ran as installed, not as the change would install them). The reason says the same, and an execution error's why.
+# `skipped: missing <tool>`; lint.asInstalled true when a command that ran (not one with no files or a missing tool) has
+# a trigger the change changed (the tools ran as installed, not as the change would install them). The reason says
+# the same, and an execution error's why.
 lintline() { # <card> <issue> <output file> <lintrun's exit>
   local r=pass x
   case $4 in 1) r=findings ;; 2) r=error ;; esac
   x=$(jq -cs --arg w "$LINT_WHY" 'map({n, run, result: (if .result == "skipped" then "skipped: missing \(.why)" else .result end), sec, findings: (.reported | length)}) as $c
-    | any(.[]; .triggered and .result != "no files") as $i
+    | any(.[]; .triggered and (.result | IN("no files", "skipped") | not)) as $i
     | {lint: {commands: $c, asInstalled: $i}, reason: ([$c[] | "lint command \(.n) (\(.run)): \(.result)\(if .result == "findings" then ", \(.findings) of this change" else "" end), \(.sec) s"]
         + (if $i then ["tools ran as installed"] else [] end) + (if $w == "" then [] else [$w] end) | join("; "))}' "$3") \
     || x=$(jq -cn --arg w "$LINT_WHY" '{lint: {commands: [], asInstalled: false}, reason: $w}')

@@ -51,6 +51,18 @@ t_lintgatestaged() {
     || fail "the lint line does not say the tools ran as installed: $(st 'select(.step == "lint")')"
   recok "$ST/cards.jsonl" "lintline"
 }
+# Bug: a command whose tool is missing (skipped) and whose trigger the change changed makes the lint line say the
+# tools ran as installed, though no tool ran.
+t_lintgateskiptrigger() {
+  gatesetup '[]' 'echo "lint: missing shellcheck"; exit 127'
+  tune '.lint.commands[0].triggers = [".lintrc"]'
+  fx_wt 'echo two >> a.txt && echo new > .lintrc' .lintrc old
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  fx_in 'lintrun "$FXWT" "$(git -C "$FXWT" rev-parse HEAD)" c7 "$T/$CASE/o"; rc=$?; echo "rc=$rc"; lintline c7 7 "$T/$CASE/o" $rc'
+  grep -qx 'rc=0' "$T/$CASE/run.out" || fail "the skipped command did not let the gate go on: $(cat "$T/$CASE/run.out")"
+  [ "$(st 'select(.step == "lint") | [.lint.commands[0].result, .lint.asInstalled, (.reason | contains("tools ran as installed"))] | tojson')" = '["skipped: missing shellcheck",false,false]' ] \
+    || fail "the lint line of a skipped command says the tools ran as installed: $(st 'select(.step == "lint")')"
+}
 
 # Bugs: a lint command that writes a tracked file, adds a file git neither tracks nor ignores, or changes the index
 # passes the gate, or leaves what it did in the card's change. Each is an execution error, and the worktree and index
