@@ -30,6 +30,15 @@ as the commit's author. To sign off commits you made already, run `git rebase --
 - shellcheck is the linter of the shell files: the pack's `lint` field runs `.conveyor/lint-shell.sh` on each changed
   `.sh` file, and `bash .conveyor/test-changed.sh` fails on a warning on a line the change added or changed. A file
   with no `#!` line is read as bash.
+- `.conveyor/lint-funcs.sh` is the function-length linter of the shell files: a shell function can have at most 100
+  lines. A shell, Python, JavaScript or TypeScript file can have at most 800 lines (the pack's size entry; the files
+  under `.claude/dashboard/vendor` are not counted). The pack's `lint` field runs both checks, and every finding of
+  them counts, on any line. The exempt file `.conveyor/size-exempt.txt` names the files (`<path>`) that are over the
+  file limit now, and the functions (`<path><TAB><name>`) that are over the function limit or that the linter cannot
+  measure (`lint-funcs.sh --list` says `not measured`). A change that splits an exempt file or function so it is in
+  the limit removes its line from the exempt file. The function-length entry's `files` name the exempt file and leave
+  out `.conveyor/lint-funcs.sh` and `.conveyor/lint-shell.sh`: a change that only removes lines from a file those
+  `files` match needs no owner's yes, which is right for the exempt file and wrong for a linter.
 - The engine is bash 5.1 and jq; the Board is Python 3's standard library unless an issue names a pinned library.
   Both run on macOS and Linux (`conveyor/lib/portable.sh`).
 - The plugin is generic: no project's own names, paths or labels outside docs that name one as an example.

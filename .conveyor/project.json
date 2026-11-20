@@ -134,10 +134,45 @@
           ".conveyor/lint-shell.sh"
         ],
         "run": "bash .conveyor/lint-shell.sh {files}"
+      },
+      {
+        "files": [
+          "*.sh",
+          ".conveyor/size-exempt.txt",
+          ":(exclude).conveyor/lint-funcs.sh",
+          ":(exclude).conveyor/lint-shell.sh"
+        ],
+        "ratchet": false,
+        "triggers": [
+          ".conveyor/lint-funcs.sh",
+          ".conveyor/lint-funcs.awk",
+          ".conveyor/size-exempt.txt"
+        ],
+        "run": "bash .conveyor/lint-funcs.sh --max 100 --exempt .conveyor/size-exempt.txt {files}"
+      },
+      {
+        "files": [
+          "*.sh",
+          "*.py",
+          "*.js",
+          "*.ts",
+          "*.tsx",
+          ":(exclude).claude/dashboard/vendor"
+        ],
+        "triggers": [
+          ".conveyor/size-exempt.txt"
+        ],
+        "size": {
+          "file": 800,
+          "exempt": ".conveyor/size-exempt.txt"
+        }
       }
     ],
     "policy": [
-      ".conveyor/lint-shell.sh"
+      ".conveyor/lint-shell.sh",
+      ".conveyor/lint-funcs.sh",
+      ".conveyor/lint-funcs.awk",
+      ".conveyor/size-exempt.txt"
     ]
   }
 }

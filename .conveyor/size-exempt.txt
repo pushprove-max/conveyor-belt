@@ -1,0 +1,51 @@
+.claude/dashboard/app.js
+.claude/dashboard/panels/bench.js
+.claude/dashboard/panels/board.js
+.claude/dashboard/panels/rules.js
+.claude/dashboard/panels/tests.js
+.claude/hooks/bash-guardrails.sh
+.claude/hooks/new-test-file-guard.sh	loadTypeScript
+.claude/hooks/new-test-file-guard.sh	main
+.claude/scripts/__tests__/dashboard-cards.test.sh
+.claude/scripts/__tests__/dashboard-server-feed.test.sh	feed.look
+.claude/scripts/__tests__/dashboard-server-feed.test.sh	started.clear
+.claude/scripts/__tests__/dashboard-server-feed.test.sh	t.start
+.claude/scripts/__tests__/dashboard-server.test.sh
+.claude/scripts/__tests__/dashboard-stream.test.sh	self.beat
+.claude/scripts/dashboard.sh
+.claude/scripts/dashboard_limit.py
+.claude/scripts/dashboard_server.py
+.conveyor/lint-funcs.test.sh	show
+.conveyor/test-changed.sh
+.conveyor/test-changed.sh	newcmd
+.conveyor/test-changed.sh	start
+.conveyor/test-changed.test.sh
+conveyor/bench/swe.sh
+conveyor/commands/release-prep.sh	release
+conveyor/foreman/foreman-session.test.sh	t_filing
+conveyor/foreman/watch-conveyor.sh	record
+conveyor/lib/card.sh
+conveyor/lib/card.sh	card
+conveyor/lib/claim.sh
+conveyor/lib/claim.sh	settle
+conveyor/lib/control.sh
+conveyor/lib/control.sh	control
+conveyor/lib/install.sh	installservice
+conveyor/lib/run.sh	run
+conveyor/lib/session.sh	watch
+conveyor/lib/setup.sh
+conveyor/lib/setup.sh	doctor
+conveyor/lib/setup.sh	setup
+conveyor/lib/snapshot.sh
+conveyor/lib/snapshot.sh	snapshot
+conveyor/lib/testfiles.sh	testspart
+conveyor/lib/testrun.sh
+conveyor/lib/testrun.sh	bugproof
+conveyor/lib/testrun.sh	tests
+conveyor/lib/views.sh	health
+conveyor/tests/kept.test.sh	t_keptgate
+conveyor/tests/swebench.test.sh	swemake
+conveyor/tests/viewstrack.test.sh	t_track
+hooks/sources.test.tsx
+hooks/sources.ts
+hooks/units.test.tsx
