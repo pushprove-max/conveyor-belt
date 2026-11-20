@@ -36,9 +36,10 @@ t_control() {
   rm "$C"; [ "$(ctl | jq -c '[.mode, .cap, .guard, .held, .order, .model, .reviewer, .judge, .judgeOn, .judgeAlways, .rules, .depGuard, .start]')" \
     = '["run",6,98,[],[],{"model":"claude-opus-5-5","effort":"medium"},{"model":"gpt-6.1-sol","effort":"medium"},{"model":"claude-opus-5-5","effort":"medium"},true,[],{"P0":true,"P1":true,"P2":true,"P3":true,"followups":true,"push":false,"visible":false,"split":"shadow","pick":"off","never":[]},true,"queue"]' ] \
     && [ ! -e "$C" ] || fail "no record does not read as the plugin project's settings: $(ctl)"
-  [ "$(loop health | jq -c '[.models, .efforts, .builderCap]')" = '[{"claude":"m","codex":"x"},{"claude":"medium","codex":"medium"},6]' ] || fail "no record does not have the seed's seats and the defaults' cap: $(loop health)"
-  [ "$(loop health | jq -c '.homes | [.["control.cap"].value, (.["control.model"] | [.value.model, .home])]')" = '[6,["m","seed"]]' ] \
-    || fail "health does not name the seed as the seat's home: $(loop health | jq -c .homes)"
+  h=$(loop health)
+  [ "$(jq -c '[.models, .efforts, .builderCap]' <<<"$h")" = '[{"claude":"m","codex":"x"},{"claude":"medium","codex":"medium"},6]' ] || fail "no record does not have the seed's seats and the defaults' cap: $h"
+  [ "$(jq -c '.homes | [.["control.cap"].value, (.["control.model"] | [.value.model, .home])]' <<<"$h")" = '[6,["m","seed"]]' ] \
+    || fail "health does not name the seed as the seat's home: $(jq -c .homes <<<"$h")"
   # A pack allowing only Sonnet and Astra builds on them with no control command.
   [ "$(tuned '.models.allowed = {claude: ["claude-sonnet-5-5"], codex: ["gpt-6-astra"], "claude-reviewer": []}' loop health | jq -c .models)" = '{"claude":"claude-sonnet-5-5","codex":"gpt-6-astra"}' ] \
     || fail "the seed is not the pack's first allowed model: $(loop health)"
@@ -69,10 +70,11 @@ t_control() {
     && [ "$(ctl pause | jq -r .mode)" = pause ] && [ "$(ctl stop | jq -r .mode)" = stop ] && [ "$(ctl resume | jq -r .mode)" = run ] \
     && [ "$(ctl guard off | jq .guard)" = null ] && [ "$(ctl cap 5 | jq .cap)" = 5 ] && [ "$(ctl order | jq -c .order)" = '[]' ] \
     || fail "an action did not change the record as asked: $(cat "$C")"
-  [ "$(loop health | jq -c '[.models, .efforts, .builderCap]')" = '[{"claude":"m2","codex":"x2"},{"claude":"high","codex":"medium"},5]' ] || fail "health does not name the models in force: $(loop health)"
+  h=$(loop health)
+  [ "$(jq -c '[.models, .efforts, .builderCap]' <<<"$h")" = '[{"claude":"m2","codex":"x2"},{"claude":"high","codex":"medium"},5]' ] || fail "health does not name the models in force: $h"
   # Each value in force and its home (plan section 6).
-  [ "$(loop health | jq -c '.homes | [.["tunables.poll"], .["tunables.limitTtl"], .["models.allowed"].home, .["rulings.log"].home, .["checks"].home, .["control.cap"], (.["control.model"] | [.value.model, .home])]')" \
-    = '[{"value":30,"home":"pack"},{"value":0,"home":"pack"},"pack","pack","pack",{"value":5,"home":"control record"},["m2","control record"]]' ] || fail "health does not name each value's home: $(loop health | jq -c .homes)"
+  [ "$(jq -c '.homes | [.["tunables.poll"], .["tunables.limitTtl"], .["models.allowed"].home, .["rulings.log"].home, .["checks"].home, .["control.cap"], (.["control.model"] | [.value.model, .home])]' <<<"$h")" \
+    = '[{"value":30,"home":"pack"},{"value":0,"home":"pack"},"pack","pack","pack",{"value":5,"home":"control record"},["m2","control record"]]' ] || fail "health does not name each value's home: $(jq -c .homes <<<"$h")"
   [ "$(tuned 'del(.tunables.poll) | del(.checks) | del(.rulings)' loop health | jq -c '.homes | [.["tunables.poll"], .["checks"], .["rulings.log"]]')" \
     = '[{"value":30,"home":"schema default"},{"value":[],"home":"schema default"},{"value":null,"home":"none"}]' ] || fail "health does not name a schema default as the home: $(loop health | jq -c .homes)"
   # The Board's model settings: each in force, where it comes from, and the choices the pack allows.
@@ -102,33 +104,43 @@ t_controlpick() {
     || fail "the held issues and their reasons: $(jq -c .open <<<"$out")"
   [ "$(jq -c '[.forecast.cards, .forecast.usd, .forecast.pausesAt, .health.models]' <<<"$out")" = '[2,null,null,{"claude":"m","codex":"x"}]' ] \
     || fail "forecast with nothing landed, or the models in force: $(jq -c '[.forecast, .health.models]' <<<"$out")"
-  ctl order 9 >/dev/null; loop run >/dev/null 2>&1 || fail "run exited non-zero"
-  [ "$(picks)" = "9 5 " ] || fail "picks with #9 ordered first, #8 held and P1 off: $(picks)"
-  # Area labels never built: #6 is P1 and billing; P1 on again, billing still off.
-  ctl rules P1=on area:billing=off >/dev/null; loop run >/dev/null 2>&1; [ "$(picks)" = "9 5 " ] || fail "an issue of an area never built was picked: $(picks)"
-  [ "$(loop snapshot --fresh | jq -c '.queue.skipped | map([.issue, .rule])')" = '[[6,"area:billing"]]' ] || fail "the skipped rule of #6: $(loop snapshot --fresh | jq -c .queue)"
   # The guard: a reading at or over it pauses; one under it does not; no reading pauses nothing and health says so.
-  ctl rules area:billing=on >/dev/null; ctl release 8 >/dev/null; ctl guard 50 >/dev/null
+  # The run under the guard is the run that checks the pick order, so the case builds two cards, not three. These are
+  # real loop runs, as only one shows what a run does: the guard's "paused by guard" message and exit, the reading the
+  # loop asks for and records, and the picked lines it writes in order. The dry pick reads a reading and writes nothing.
+  ctl order 9 >/dev/null; ctl guard 50 >/dev/null
   echo '{"seven_day":{"utilization":50}}' > "$STUB/limit"
-  out=$(loop run 2>&1); [ "$(picks)" = "9 5 " ] && grep -q 'paused by guard' <<<"$out" || fail "a reading at the guard did not pause the loop: $(picks) $out"
+  out=$(loop run 2>&1); [ -z "$(picks)" ] && grep -q 'paused by guard' <<<"$out" || fail "a reading at the guard did not pause the loop: $(picks) $out"
   [ "$(loop health | jq -c '[.state, .guard.at, .guard.reading, .guard.missing]')" = '["paused by guard",50,50,false]' ] || fail "health under the guard: $(loop health)"
-  # Two cards have landed, and the stub's model m has no price: no dollars.
-  [ "$(loop snapshot --fresh | jq -c '[.forecast.pausesAt, .forecast.cards, .forecast.usd]')" = '[6,2,null]' ] \
-    || fail "the forecast under the guard: $(loop snapshot --fresh | jq -c .forecast)"
   rm "$S/limit.jsonl"; rm "$STUB/limit"
   [ "$(loop health | jq -c '[.state, .guard.reading, .guard.missing]')" = '["running",null,true]' ] || fail "no reading paused the loop, or health did not say it is missing: $(loop health)"
-  echo '{"seven_day":{"utilization":49}}' > "$STUB/limit"; loop run 1 >/dev/null 2>&1; [ "$(picks)" = "9 5 6 " ] || fail "a reading under the guard did not let the loop pick: $(picks)"
+  echo '{"seven_day":{"utilization":49}}' > "$STUB/limit"; loop run >/dev/null 2>&1 || fail "run exited non-zero"
+  [ "$(picks)" = "9 5 " ] || fail "picks under the guard with #9 ordered first, #8 held and P1 off: $(picks)"
+  # Area labels never built: #6 is P1 and billing; P1 on again, billing still off.
+  ctl rules P1=on area:billing=off >/dev/null; loop run >/dev/null 2>&1; [ "$(picks)" = "9 5 " ] || fail "an issue of an area never built was picked: $(picks)"
+  out=$(loop snapshot --fresh)
+  [ "$(jq -c '.queue.skipped | map([.issue, .rule])' <<<"$out")" = '[[6,"area:billing"]]' ] || fail "the skipped rule of #6: $(jq -c .queue <<<"$out")"
+  # billing on again and #8 released: #6 (P1) is the next pick. The dry pick is the loop's own pick (upnext) on the
+  # same records and the run's last reading (49), with no third card built.
+  ctl rules area:billing=on >/dev/null; ctl release 8 >/dev/null
+  [ "$(loop pick --dry --issues "$STUB/issues.json" --state "$S")" = 6 ] || fail "#6 is not picked with billing on again: $(loop pick --dry --issues "$STUB/issues.json" --state "$S" 2>&1)"
+  # The reading at the guard again: the guard pauses at #6, the queue's first, with #8 after it. Two cards have landed,
+  # and the stub's model m has no price: no dollars.
+  echo '{"seven_day":{"utilization":50}}' > "$STUB/limit"
+  out=$(loop snapshot --fresh)
+  [ "$(jq -c '[.forecast.pausesAt, .forecast.cards, .forecast.usd]' <<<"$out")" = '[6,2,null]' ] || fail "the forecast under the guard: $(jq -c .forecast <<<"$out")"
 }
 t_controlcap() {
-  # The cap in force: with cap 1 two cards never run at once.
-  controlsetup "$(jq -cs . <(issue 20 2026-06-01 P2) <(issue 21 2026-06-01 P2) <(issue 22 2026-06-01 P2))"
+  # The cap in force: with cap 1 two cards never run at once. Two issues are enough: a loop that did not keep the cap
+  # picks the second before the first lands.
+  controlsetup "$(jq -cs . <(issue 20 2026-06-01 P2) <(issue 21 2026-06-01 P2))"
   # A build lasts a whole turn of the loop (two of its waits begun, lib.sh), the turn in which a loop that did not keep
   # the cap would pick the next card: the record then has a pick before the landing of the card in flight.
   watchturns
   echo 'k=$(wc -l < "$TURNS"); while [ -d "$STUB" ] && [ "$(wc -l < "$TURNS")" -lt $((k + 2)) ]; do sleep 0.1; done; echo two >> a.txt' > "$STUB/build"
-  ctl cap 1 >/dev/null; tuned '.tunables.poll = 1' loop run 3 >/dev/null 2>&1
-  [ "$(st 'select(.issue >= 20 and (.step | IN("picked", "landed"))) | .step' | tr '\n' ' ')" = "picked landed picked landed picked landed " ] \
-    || fail "cap 1 let two cards run at once, or the three did not land: $(st 'select(.issue >= 20 and (.step | IN("picked", "landed"))) | "\(.issue) \(.step)"' | tr '\n' ,)"
+  ctl cap 1 >/dev/null; tuned '.tunables.poll = 1' loop run 2 >/dev/null 2>&1
+  [ "$(st 'select(.issue >= 20 and (.step | IN("picked", "landed"))) | .step' | tr '\n' ' ')" = "picked landed picked landed " ] \
+    || fail "cap 1 let two cards run at once, or the two did not land: $(st 'select(.issue >= 20 and (.step | IN("picked", "landed"))) | "\(.issue) \(.step)"' | tr '\n' ,)"
 }
 # The record is read at every use, but checked only when its text is not the one last checked (ctlread). Bugs: it is
 # checked again at every use, one jq run each, though it has not changed (about 37 in one card's run); or the check
