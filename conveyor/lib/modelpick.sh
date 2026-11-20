@@ -160,12 +160,11 @@ PICKCLAMP="$OKMODELS"'def noeff($s; $g): $s == "builder" and $g == "opencode";
 # (PICKSEAT, which then is its choice), except a card the rule keeps on the project's builder (PICKHOLD, modelpick()'s,
 # set by pickpromote() and by modelpick() itself): a promoted group's card in the share, which the snapshot's cost
 # check compares the promoted cards with, and each later card of an issue whose trial card was blocked, which builds
-# on the default; a trial card
-# keeps its challenger, at the judge's effort fitted to the
-# builder's range (fit()): its choice stays the challenger, by which the snapshot counts the group's trials, and
-# trialEffort is the effort it builds at when that is another. A card that is not a trial runs its review on the
-# judge's reviewer and judge (PICKSEATS), each one the owner promoted from a replay result standing over it. A seat the
-# owner set for the issue (`control card`) is used as set, whatever the judge answers (seat(), lib/control.sh). When
+# on the default; a trial card keeps its challenger, at the judge's effort fitted to the builder's range (fit()), or
+# its own effort fitted to the range when the judge fails (picktrial()): its choice stays the challenger, by which the
+# snapshot counts the group's trials, and trialEffort is the effort it builds at when that is another. A card that
+# is not a trial runs its review on the judge's reviewer and judge (PICKSEATS), each one the owner promoted from a
+# replay result standing over it. A seat the owner set for the issue (`control card`) is used as set, whatever the judge answers (seat(), lib/control.sh). When
 # the judge's seats run on a Claude account at the weekly limit guard, the card builds on the seats it had before, and
 # asked.guard says so.
 # shellcheck disable=SC2034 # PICKSEAT and PICKSEATS are card()'s, read by seat() in lib/control.sh
@@ -197,7 +196,7 @@ pickjudge() { # <card> <issue> <control record> [<issue json>]
     x=$(jq -c --argjson p "$PICKSEAT" --argjson q "$(jq -c .asked.builder <<<"$PICK")" --argjson r "$r" --argjson e "$EFFORTS" "$PICKCLAMP"'
       first(okmodels("builder") | to_entries[] | select(.value | index($p.model)) | .key) as $g
       | fit($r; $e; "builder"; $g; ($q.asked.effort // $p.effort)) as $f | if $f == null then $p else $p + {effort: $f} end' <<<"$a" 2>/dev/null) && [ -n "$x" ] \
-      && PICKSEAT=$x && PICK=$(jq -c --argjson s "$x" 'if .choice.effort == $s.effort then . else .trialEffort = $s.effort end' <<<"$PICK") || :
+      && PICKSEAT=$x && PICK=$(jq -c --argjson s "$x" 'if .choice.effort == $s.effort then del(.trialEffort) else .trialEffort = $s.effort end' <<<"$PICK") || :
   elif [ -z "${PICKSEAT:-}" ] && [ -z "${PICKHOLD:-}" ] && [ "$(jq -r .by <<<"$PICK")" = auto ]; then
     x=$(jq -c '.asked.builder | select(.model != null) | {model, effort}' <<<"$PICK" 2>/dev/null)
     [ -z "$x" ] || { PICKSEAT=$x; PICK=$(jq -c --argjson s "$x" '.choice = $s' <<<"$PICK") || :; }
@@ -262,7 +261,7 @@ challenger() {
 # when the rules above allow it; else a pick on the project's builder, with no PICKSEAT. Fails on none of them.
 # shellcheck disable=SC2034 # PICKSEAT is card()'s, read by seat() in lib/control.sh
 picktrial() {
-  local lines why='' claim=${STATE%/*}/trial.card ch
+  local lines why='' claim=${STATE%/*}/trial.card ch a r f
   PICKSEAT=''
   PICK=$(jq -c --argjson b "$4" '.trial = false | .choice = $b | del(.promoted)' <<<"$PICK") || return 0
   # The group's challenger: the one its next decision put on trial, else PICKTRIAL.
@@ -282,6 +281,15 @@ picktrial() {
   # The challenger the pack allows for the builder, as seat() gives it (else seat() keeps the project's builder), on
   # an account not at the weekly limit guard.
   challenger "$1" "$2" "$3" "$ch" || return 0
+  # A challenger whose program takes no effort in the builder's range (models.effort.builder) has no trial, as it
+  # would build outside the range: the card builds as one that is no trial (pickjudge()). Else the trial builds at
+  # the challenger's effort fitted to the range (fit()), also when the judge fails; pickjudge() then fits the judge's.
+  packget models.effort r 2>/dev/null && [ -n "$r" ] || r='{}'
+  if ! { modelsallowed a && f=$(jq -ce --argjson p "$ch" --argjson r "$r" --argjson e "$EFFORTS" "$PICKCLAMP"'
+      first(okmodels("builder") | to_entries[] | select(.value | index($p.model)) | .key) as $g
+      | select($g != null) | fit($r; $e; "builder"; $g; $p.effort) as $f | select($f != null) | $p + {effort: $f}' <<<"$a" 2>/dev/null) && [ -n "$f" ]; }; then
+    echo "conveyor: card $1: no trial: the challenger's program takes no effort in models.effort.builder" >&2; PICKSEAT=''; return 0
+  fi
   # One trial card in flight: the claim is checked and taken under its lock.
   # shellcheck disable=SC2094 # the claim is read and then written while its lock is held
   if ( flock 9 || exit 1
@@ -290,6 +298,7 @@ picktrial() {
          'map(select(.card == $c)) | length > 0 and (any(.step | IN("landed", "closed", "blocked")) | not)' >/dev/null 2>&1 \
          || { echo "conveyor: card $1: no trial: trial card $o is in flight" >&2; exit 1; }
        printf '%s\n' "$1" > "$claim" ) 9>>"$claim"; then
-    PICK=$(jq -c --argjson s "$ch" '.trial = true | .choice = $s' <<<"$PICK") || PICKSEAT=''
+    PICKSEAT=$f
+    PICK=$(jq -c --argjson s "$ch" --argjson f "$f" '.trial = true | .choice = $s | if $f.effort == $s.effort then . else .trialEffort = $f.effort end' <<<"$PICK") || PICKSEAT=''
   else PICKSEAT=''; fi
 }

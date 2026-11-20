@@ -358,8 +358,9 @@ reason, and the card uses the project's seats.
 With On, the card uses these seats, with these exceptions:
 
 - A seat that you set for the issue (`control card`) keeps your setting.
-- A trial card keeps its challenger as the builder, at the judge's effort fitted to the range of the builder. Its
-  reviewer and judge are the project's. The `choice` of its pick stays the challenger, so the trial counts for the
+- A trial card keeps its challenger as the builder, at the judge's effort fitted to the range of the builder. When
+  the judge fails, the card uses the challenger's own effort fitted to that range. Its reviewer and judge are the
+  project's. The `choice` of its pick stays the challenger, so the trial counts for the
   challenger. `trialEffort` shows the effort that the card builds at, when it is a different effort.
 - When a seat of the judge's choice runs on a Claude account at the weekly limit guard, the card uses the project's
   seats, and `asked` has `guard` with the reason.
@@ -375,8 +376,8 @@ the builder of an earlier answer.
 ### Trials
 
 With the rule On, a trial card builds on the challenger, Sonnet 5.5 (`claude-sonnet-5-5`), at the judge's effort
-fitted to the effort range of the builder, and its pick has `trial: true`. All other cards build on the project's
-builder. Its review and judge use the project's settings.
+fitted to the effort range of the builder, and its pick has `trial: true`. Its review and judge use the project's
+settings. A card that is not a trial uses the seats above.
 
 - **Eligible cards**: a card is eligible when its group is "small docs" or "small code", or a medium group that you
   added (below). The issue names no path in `pipelineFiles`. The cards of a medium group that you did not add use
@@ -393,7 +394,8 @@ builder. Its review and judge use the project's settings.
   in the card records are the record of the drop.
 - **No challenger**: there are no trials when the project's builder is the challenger, or when `models.allowed` in
   `.conveyor/project.json` does not allow the challenger for the builder. There is also no trial when the Claude
-  account of the challenger is at the weekly limit guard.
+  account of the challenger is at the weekly limit guard, or when the CLI of the challenger takes no effort in the
+  range of the builder in `models.effort`. Such a card uses the seats above, as a card that is not a trial.
 
 When the change of a trial card touches a path in `pipelineFiles`, the `pick` field also has `pipeline`: those paths.
 The issue of a trial card names no such path.

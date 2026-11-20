@@ -300,6 +300,27 @@ t_pickjudgeowner() {
   recok "$ST/cards.jsonl" "a trial card's pick, and its retry's"
 }
 
+# Bugs (#1056): with a builder range of minimal only, which Claude does not take, issue 10's trial card built on the
+# challenger (Sonnet 5.5) at its own medium, outside models.effort.builder; it is no trial, and builds on the judge's
+# Codex builder at minimal.
+t_pickjudgetrialrange() {
+  seatsetup "[$(issue 10 2026-01-01),$(issue 15 2026-01-01)]"
+  tune '.models.allowed.claude += ["claude-sonnet-5-5"] | .models.allowed["codex-builder"] = ["cb"] | .models.effort = {builder: {min: "minimal", max: "minimal"}}'
+  loop control rules pick=on >/dev/null || fail "control rules pick=on was refused"
+  pjask 'cb minimal' 'x medium' 'j medium'
+  fx_in "N=10; $PJ; jq -c '[.trial, .choice, .trialEffort]' <<<\"\$PICK\""
+  [ "$(sed -n '2p;5p' "$T/$CASE/run.out" | paste -sd,)" = 'cb minimal,[false,{"model":"cb","effort":"minimal"},null]' ] \
+    || fail "the trial card built outside the builder's effort range: $(cat "$T/$CASE/run.out")"
+  # Bug: with a range of high only, which Sonnet 5.5 takes, a judge that failed (here, an answer with no model, which
+  # leaves pickjudge() as a timeout does) left issue 15's trial card at the challenger's medium.
+  tune '.models.effort = {builder: {min: "high", max: "high"}}'
+  printf '%s\n' '{"builder": {"model": null, "effort": "low"}}' > "$STUB/pick"
+  fx_in "N=15; $PJ; jq -c '[.trial, .choice, .trialEffort]' <<<\"\$PICK\""
+  [ "$(sed -n '2p;5p' "$T/$CASE/run.out" | paste -sd,)" = 'claude-sonnet-5-5 high,[true,{"model":"claude-sonnet-5-5","effort":"medium"},"high"]' ] \
+    && jq -e .failed <<<"$(head -n 1 "$T/$CASE/run.out")" >/dev/null \
+    || fail "the trial card of a failed judge built outside the builder's effort range: $(cat "$T/$CASE/run.out")"
+}
+
 # Bug (#1055): with the rule On, the card in the share of a promoted group (issue 15, 1 in 5), which the snapshot's
 # cost check compares with the promoted cards, built on the judge's builder (m2 high), not the project's (m medium).
 t_pickjudgeshare() {
