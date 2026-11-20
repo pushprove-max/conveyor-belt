@@ -131,7 +131,7 @@ window.DASH_APP.panel({
           : 'Conveyor tries it again by itself. If a retry fails, it shows in Needs you.';
       } else if (r.unpushed.length) {
         check(`Last push${of}`, ctx.chip(`${r.unpushed.length} not pushed`, 'warn'), 'oldest landed', ctx.since(r.unpushed[0].since, ' ago')).next =
-          'Conveyor pushes after each landing. If Push when a card lands is off, Push landed on the Rules tab pushes them.';
+          'Conveyor pushes after each landing. If Push on landing is off, Push landed on the Control tab pushes them.';
       } else check(`Last push${of}`, ctx.chip('All pushed', 'ok'), r.lastPushAt ? 'pushed' : 'no push recorded', r.lastPushAt ? ctx.since(r.lastPushAt, ' ago') : null);
       if (r.stuck.length) check(`Stuck cards${of}`, ctx.chip(`${r.stuck.length} stuck`, 'bad'), plain(r.stuck.map(stuck).join(', '))).next =
         "Conveyor stops a stuck session and tries it again by itself. If the session stays stuck, read the card's last step in On the belt.";

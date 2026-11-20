@@ -175,6 +175,7 @@ test('Setup: Finish writes onboarded and the modal stops opening', async () => {
   deliver(w, snap(null, { guard: 98, judgeAlways: ['security'] }, { cap: null }));
   for (let i = 0; i < 5; i += 1) {
     for (const k of asked(w)) {
+      if (k === 'judge-always') continue;  // part of the Judge's rule, set with it (the case after this one)
       if (k === 'builder') {
         // A model picked is saved at once, with no Save.
         pick(w, 'builder-cli', 'codex');
@@ -218,6 +219,25 @@ test('Setup: Finish writes onboarded and the modal stops opening', async () => {
   await settle();
   assert.ok(!shown(w), 'the modal closes');
   assert.equal(line(w).hidden, true, 'the line goes');
+});
+
+// Bug guarded: the Models step drew the Judge without the kinds it always accepts, once their row was apart from the
+// Judge's on the Rules tab, so the setup could not set them. Their row comes with the Judge, not as a rule to confirm.
+// Bug guarded: Add set only the Always accept row, so Next still sent the Judge's defaults, `judge always` with no
+// kind among them, and cleared the kinds just added. Add sets the Judge's rule.
+test('Setup: the Judge step shows Always accept; Add sends the kinds and sets the Judge, so Next keeps them', async () => {
+  const w = boot();
+  deliver(w, snap({ at: '2026-11-01T00:00:00Z', rules: ALL.filter((k) => k !== 'judge') }));
+  assert.deepEqual(asked(w), ['judge', 'judge-always']);
+  assert.equal(count(w), '0 of 1 rules set', 'Always accept is not a rule of its own to confirm');
+  const kind = act(box(w), 'judge-kind');
+  kind.value = 'security';
+  kind.dispatchEvent(new w.Event('input'));
+  w.reply = record({ judgeAlways: ['security'], onboarded: { at: '2026-11-01T00:00:00Z', rules: ALL.filter((k) => k !== 'judge') } });
+  assert.deepEqual(await sent(w, () => act(box(w), 'judge-kind-add').click()), [{ action: 'judge', args: ['always', 'security'], repo: 'sample' }]);
+  assert.equal(count(w), '1 of 1 rules set', 'Add set the Judge');
+  assert.deepEqual(await sent(w, () => nextB(w).click()), [{ action: 'onboarded', args: ALL.filter((k) => k !== 'judge').concat('judge'), repo: 'sample' }],
+    'Finish sends no Judge default over the kinds');
 });
 
 // Bug guarded: the setup reopened on every load after Finish.

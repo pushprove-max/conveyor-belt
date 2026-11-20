@@ -60,7 +60,7 @@ test('UX10: paused, paused by the guard or stopped, each says in one line who di
   assert.equal(act(project(w), 'resume').textContent, 'Resume sample');
   const g = boot({ tab: 'control' });
   deliver(g, at('paused by guard', 'run'));
-  const guard = 'Paused by the weekly-limit guard at 90%. Raise or turn off "Pause when the weekly limit reaches" in Rules to pick again.';
+  const guard = 'Paused by the weekly-limit guard at 90%. Raise or turn off "Weekly pause" in Rules to pick again.';
   assert.equal(loopP(g).querySelector('.board-paused').textContent, guard);
   assert.equal(project(g).querySelector('.project-paused').textContent, guard);
   const s = boot({ tab: 'control' });

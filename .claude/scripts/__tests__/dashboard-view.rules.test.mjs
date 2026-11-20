@@ -10,7 +10,8 @@ const test = cases(import.meta.url);
 test('Rules: one row a rule on the left, what the snapshot says they produce on the right', () => {
   const w = boot({ tab: 'rules' });
   deliver(w, full());
-  assert.deepEqual(Array.from(ruled(w).querySelectorAll('.rules-row'), (r) => r.dataset.rule), ['build', 'never', 'cap', 'guard', 'builder', 'reviewer', 'judge', 'account', 'review-account', 'start', 'dep-guard', 'push', 'land-as', 'pr-merge', 'push-check', 'visible', 'split', 'pick', 'cores',
+  assert.deepEqual(Array.from(ruled(w).querySelectorAll('.rules-row'), (r) => r.dataset.rule), ['builder', 'reviewer', 'judge', 'judge-always', 'account', 'review-account', 'cap', 'guard', 'cores',
+    'build', 'never', 'start', 'dep-guard', 'split', 'pick', 'push', 'land-as', 'pr-merge', 'push-check', 'visible',
     'standing-asked-fix', 'standing-review-followup', 'standing-release-check', 'standing-fixed-block', 'standing-review-retry', 'held', 'order']);
   assert.deepEqual(['start-queue', 'start-held'].map((a) => act(rulesP(w), a).getAttribute('aria-pressed')), ['true', 'false'], 'New issues start in: Queue, the default');
   assert.match(ruled(w).querySelector('[data-rule="start"]').textContent, /New issues start in/);
@@ -18,7 +19,7 @@ test('Rules: one row a rule on the left, what the snapshot says they produce on 
   const tog = (k) => act(rulesP(w), `rule-${k}`).getAttribute('aria-pressed');
   assert.deepEqual(['P0', 'P1', 'P2', 'followups'].map(tog), ['true', 'true', 'true', 'true']);
   assert.deepEqual(['guard-off', 'guard-90', 'guard-95', 'guard-98'].map((a) => act(rulesP(w), a).getAttribute('aria-pressed')), ['false', 'true', 'false', 'false'], 'Pause at: Off and three choices');
-  assert.match(ruled(w).querySelector('[data-rule="guard"]').textContent, /now at 44%/);
+  assert.match(ruled(w).querySelector('[data-rule="guard"]').textContent, /44% used/);
   assert.doesNotMatch(ruled(w).querySelector('[data-rule="guard"]').textContent, /no guard set/);
   assert.equal(act(rulesP(w), 'builder-cli').value, 'claude');
   assert.equal(act(rulesP(w), 'builder-model').value, 'claude-opus-5-5');
@@ -55,7 +56,7 @@ test('Rules: one row a rule on the left, what the snapshot says they produce on 
   assert.equal(figure(w, 'ready'), '8');
   assert.equal(produced(w).querySelector('[data-figure="usd"]').textContent, 'Forecast for the queue: not known.');
   assert.deepEqual(Array.from(produced(w).querySelectorAll('.rules-skip'), (x) => x.lastChild.textContent), ['P2 is off', 'follow-ups are off']);
-  assert.match(ruled(w).querySelector('[data-rule="guard"]').textContent, /the Board does not know the reading now.*no guard set/, 'no guard set is marked');
+  assert.match(ruled(w).querySelector('[data-rule="guard"]').textContent, /the Board does not know the use now.*no guard set/, 'no guard set is marked');
   assert.equal(act(rulesP(w), 'guard-off').getAttribute('aria-pressed'), 'true');
   // Nothing queued, and the issues not listed.
   const none = full();
@@ -78,7 +79,7 @@ test('Rules: one row a rule on the left, what the snapshot says they produce on 
   assert.match(heldP(w).querySelector('.warn-note').textContent, /GitHub did not list the open issues on buildhost\. Not known: .*\(1 issue held by you\)/);
   assert.equal(heldP(w).querySelector('.rules-groups'), null);
   assert.match(ruled(w).querySelector('[data-rule="held"]').textContent, /Not known/);
-  assert.doesNotMatch(ruled(w).querySelector('[data-rule="held"]').textContent, /0 issues held/);
+  assert.doesNotMatch(ruled(w).querySelector('[data-rule="held"]').textContent, /0 held issues|No issue is held/);
   assert.ok(act(rulesP(w), 'rule-P0'), 'the rules can still be set');
 });
 
@@ -102,7 +103,7 @@ test('Rules: with 183 held issues the rules list none, and the held section is o
   const w = boot({ tab: 'rules' });
   deliver(w, heldMany());
   assert.equal(ruled(w).querySelectorAll('[data-issue], .issue').length, 0, 'no issue among the rules');
-  assert.match(ruled(w).querySelector('[data-rule="held"]').textContent, /183 issues held.*See them below/);
+  assert.match(ruled(w).querySelector('[data-rule="held"]').textContent, /View 183 held issues/);
   assert.equal(ruled(w).querySelector('[data-act="held-link"]').getAttribute('href'), '#rules-held');
   assert.equal(heldP(w).id, 'rules-held');
   assert.equal(heldP(w).querySelector('.board-head').textContent, 'Held by you or a label · 183');
@@ -324,14 +325,15 @@ test('Rules: each rule sends its one change through POST control; the host\'s re
   next(w, after);
   assert.deepEqual(nextUp(w).map((x) => x[0]), [21, 22, 24], 'the next snapshot shows what the change produced');
   assert.doesNotMatch(produced(w).textContent, /shows it in about a minute/);
-  // One change at a time; the search and the grouping change nothing and stay on.
+  // One change at a time; the searches, the grouping and the rules' index change nothing and stay on.
   let answer;
   w.reply = { ok: true, status: 200, text: () => new Promise((r) => { answer = r; }) };
   act(rulesP(w), 'rule-P0').click();
   await settle();
   assert.equal(w.posts.splice(0).length, 1);
   for (const b of rulesAll(w).flatMap((p) => Array.from(p.querySelectorAll('.rules button, .rules input, .rules select')))) {
-    assert.equal(b.disabled, !['held-search', 'held-by'].includes(b.dataset.act), `${b.dataset.act} is ${b.disabled ? 'off' : 'on'} while the change is out`);
+    assert.equal(b.disabled, !['held-search', 'held-by', 'rules-find', 'rules-set-models', 'rules-set-capacity', 'rules-set-picking', 'rules-set-landing',
+      'rules-set-standing', 'rules-set-order'].includes(b.dataset.act),`${b.dataset.act} is ${b.disabled ? 'off' : 'on'} while the change is out`);
   }
   answer(JSON.stringify(CONTROL));
   await settle();
@@ -396,20 +398,20 @@ test('Rules: the Judge row shows each project\'s judge (on or off, CLI, model, e
   Object.assign(d.panels.rules.data, { repos: ['sample', 'widgetshop'], others: { widgetshop: { ...clone(d.panels.rules.data), repo: 'widgetshop', control: wctl, modelSettings: wmodels } } });
   d.panels.machine.data.repos = ['sample', 'widgetshop'];
   deliver(w, d);
-  const row = () => ruled(w).querySelector('[data-rule="judge"]');
+  const row = () => ruled(w).querySelector('[data-rule="judge"]'), kindRow = () => ruled(w).querySelector('[data-rule="judge-always"]');
   const shown = () => ({
     on: ['judge-on', 'judge-off'].map((a) => act(row(), a).getAttribute('aria-pressed')).join(' '),
     cli: act(row(), 'judge-cli').value, model: act(row(), 'judge-model').value, effort: act(row(), 'judge-effort').value,
     offered: Array.from(act(row(), 'judge-cli').options, (o) => o.textContent),
-    kinds: Array.from(row().querySelectorAll('[data-list="judge-kinds"] .rules-item .chip'), (c) => c.textContent),
+    kinds: Array.from(kindRow().querySelectorAll('[data-list="judge-kinds"] .rules-item .chip'), (c) => c.textContent),
   });
   const sends = async (fn, body, repo) => { fn(); await settle(); assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { ...body, repo } }]); };
   const set = (a, v) => { const s = act(row(), a); s.value = v; s.dispatchEvent(new w.Event('change')); };
-  const type = (v) => { const f = act(row(), 'judge-kind'); f.value = v; f.dispatchEvent(new w.Event('input')); act(row(), 'judge-kind-add').click(); };
+  const type = (v) => { const f = act(kindRow(), 'judge-kind'); f.value = v; f.dispatchEvent(new w.Event('input')); act(kindRow(), 'judge-kind-add').click(); };
   // sample: off, at the default, which names the model the judge would run on; every installed CLI is offered.
   assert.deepEqual(shown(), { on: 'false true', cli: '', model: '', effort: '', offered: ['Default (claude-opus-5-5)', 'claude', 'codex', 'opencode'], kinds: [] });
   assert.match(row().textContent, /claude-opus-5-5 · medium/, 'the model and effort in force');
-  assert.match(row().textContent, /always accepts no kind/);
+  assert.match(kindRow().textContent, /always accepts no kind/);
   assert.doesNotMatch(row().textContent, /same family/, 'a Claude judge is not of the Codex reviewer\'s family');
   act(row(), 'judge-off').click(); await settle();
   assert.deepEqual(w.posts, [], 'the choice in force sends nothing');
@@ -445,7 +447,7 @@ test('Rules: the Judge row shows each project\'s judge (on or off, CLI, model, e
   w.reply = record({ judgeOn: true, judgeAlways: ['security'] });
   await sends(() => type('security'), { action: 'judge', args: ['always', 'security'] }, 'sample');
   assert.deepEqual(shown().kinds, ['security']);
-  assert.equal(act(row(), 'judge-kind').value, '', 'the field is cleared once the host took it');
+  assert.equal(act(kindRow(), 'judge-kind').value, '','the field is cleared once the host took it');
   type('two words'); await settle();
   assert.deepEqual(w.posts, [], 'a kind the host would refuse is not sent');
   assert.match(rulesP(w).querySelector('.rules-note').textContent, /finding kind/);
@@ -453,10 +455,10 @@ test('Rules: the Judge row shows each project\'s judge (on or off, CLI, model, e
   pickProject(w, 'widgetshop');
   assert.deepEqual(shown(), { on: 'true false', cli: 'codex', model: 'gpt-6-astra', effort: 'high', offered: ['Default (gpt-6.1-sol)', 'claude', 'codex', 'opencode'], kinds: ['security', 'data'] });
   w.reply = record({ ...wctl, judgeAlways: ['security'] });
-  await sends(() => row().querySelectorAll('[data-act="judge-kind-remove"]')[1].click(), { action: 'judge', args: ['always', 'security'] }, 'widgetshop');
+  await sends(() => kindRow().querySelectorAll('[data-act="judge-kind-remove"]')[1].click(), { action: 'judge', args: ['always', 'security'] }, 'widgetshop');
   assert.deepEqual(shown().kinds, ['security']);
   w.reply = record({ ...wctl, judgeAlways: [] });
-  await sends(() => act(row(), 'judge-kind-remove').click(), { action: 'judge', args: ['always'] }, 'widgetshop');
+  await sends(() => act(kindRow(), 'judge-kind-remove').click(), { action: 'judge', args: ['always'] }, 'widgetshop');
   assert.deepEqual(shown().kinds, [], 'none clears them');
   w.reply = record({ ...wctl, judgeAlways: [], judgeOn: false });
   await sends(() => act(row(), 'judge-off').click(), { action: 'judge', args: ['off'] }, 'widgetshop');

@@ -484,3 +484,12 @@ test('Health: a kept snapshot turns into a warning with its age on the tick it i
   assert.match(row.textContent, /^Old.*made.*1 min.*ago/);
   assert.match(row.querySelector('.check-next').textContent, /^Next: .*conveyor\.sh snapshot --fresh/);
 });
+
+// Bug: a landed card not pushed sent the owner to the Rules tab for Push landed, which is on the Control tab.
+test('Health: cards not pushed name Push landed on the Control tab', () => {
+  const w = page('health');
+  const data = full();
+  data.panels.health.data.records[0].unpushed = [{ card: 'c1-7', issue: 7, since: iso(T0 - 600000) }];
+  deliver(w, data);
+  assert.match(dd(w, 'Last push').querySelector('.check-next').textContent, /Push landed on the Control tab pushes them\.$/);
+});

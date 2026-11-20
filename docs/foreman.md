@@ -77,7 +77,7 @@ it up:
 - Each fix card of a failed release suite has landed
   ([Fix cards of a failed suite](releases.md#fix-cards-of-a-failed-suite)): the wake names the version. It says that
   release-prep started again, or why it did not start. A card on the belt, or a push that is still owed, gives no
-  wake, because release-prep starts when it ends. If the Rules tab's **Push when a card lands** rule is off, a push
+  wake, because release-prep starts when it ends. If the Rules tab's **Push on landing** rule is off, a push
   that is owed gives the wake, because the push waits for you. If the rule **Land as** is pr and the rule **Merge
   PR** is button, the wake also asks you to merge the landing pull request, and a pull request that is not merged
   after the push gives one more wake.

@@ -75,7 +75,7 @@ right-aligned and the title is what gives way.
   3. The round (`round 1 of 3`), each finished round's verdict with its counts by level, and, right-aligned, the
      measured time in the step it is in (`fixing 2m`, `pushing 51s`, `push failed 3m`).
   A card that has landed stays on the belt, Push in progress, until main is pushed and its issue closed. With the
-  rule "Push when a card lands" Off, a landed card that is not pushed is not on the belt: LANDED TODAY shows it. A Push
+  rule "Push on landing" Off, a landed card that is not pushed is not on the belt: LANDED TODAY shows it. A Push
   that failed adds a fourth line, `✗` and the reason (the push's error, or that GitHub kept the issue open), cut to
   the width. From the live feed, while a step runs, a dim line follows: what it is doing now, its turns and the
   seconds since its last output (`now Bash: npm test · 3 turns · last output 6s ago`). The Test step runs no model,

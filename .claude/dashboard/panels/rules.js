@@ -3,26 +3,28 @@
 // area). It is a tab of its own, after Overview and Control, and carries the count
 // of a paused loop, since the pause setting is here. Its one part is drawn as five panels (PANELS): Rules, What these
 // rules produce, Model prices, the held issues and Open issues.
-// Rules: first, one line, where the Machine section was: "Test limits are on the Tests page." (#520).
-// Then one row a rule, each with what it does and its control: Build (P0, P1, P2, P3, Follow-ups), Never build (the
-// labels, each removable, and a field to add one, with the area labels of the open issues to pick from), At once, Pause
-// at (Off, 90%, 95%, 98%, beside the weekly limit's
-// reading), Builder and Reviewer (CLI, model and effort), Judge (on or off, CLI, model and effort, the finding kinds it always
-// accepts, with the kinds the review prompt names to pick from), New issues start in (Queue or Held), Dependency guard
-// (On or Off; drawn disabled, "needs a newer engine", for a project whose control record has no depGuard), Push when a
-// card lands (On or Off; disabled the same way for a record with no rules.push), Land as (Main or Pull request, the
-// record's landAs or else the pack's; disabled the same way for a record with no landAs), Merge PR (Button, Release or
-// Idle, the record's prMerge or else the pack's; disabled the same way for a record with no prMerge), Test before a push (On or Off: the
-// record's pushCheck, else the pack's push.check; disabled the same way for a snapshot with no pushCheck), Visible changes need your yes (On or
-// Off; disabled the same way for a record with no rules.visible), Split large issues (Off, Shadow or On; disabled the same way for a
-// record with no rules.split), Pick settings (Off, Shadow or On; disabled the same way for a record with no rules.pick),
-// Cores kept for you (shown,
-// not set here: the machine's reserveCores, the cores it keeps and the test slots left, or why the machine cannot keep
-// cores), one row a standing kind of
-// routine yes the Foreman takes without asking (the pack's auto.standing: Fix you asked for, Review follow-up, Release
-// check, Fixed block, each On or Off; disabled the same way for a snapshot with no standing), Held by you (the count, a
-// link to the list below)
-// and, when there is one, the pinned order with Move up (not on the first), Move down (not on the last) and Unpin.
+// Rules (the owner chose mockup B, indexed settings, #861): under the head, a search box and an index of six groups
+// (SETS) on the left, the group picked on the right; with search text, every rule that matches, by group (index()).
+// One row a rule, each with what it does and its control; a choice of two or more is one segmented control (seg).
+// Models: Builder and Reviewer (CLI, model and effort), Judge (on or off, CLI, model and effort), Always accept (the
+// finding kinds the judge always accepts, with the kinds the review prompt names to pick from), Account, Review account.
+// Capacity: Cards at once, Weekly pause (Off, 90%, 95%, 98%, beside the weekly limit's use), Reserved cores (shown, not
+// set here: the machine's reserveCores, the cores it keeps and the test slots left, or why the machine cannot keep
+// cores; with "Test limits are on the Tests page.", #520). Picking: Build issues (P0, P1, P2, P3, Follow-ups), Never
+// build (the labels, each removable, and a field to add one, with the area labels of the open issues to pick from), New
+// issues start in (Queue or Held), Dependency guard (On or Off; drawn disabled, "needs a newer engine", for a project
+// whose control record has no depGuard), Split large issues (Off, Shadow or On; disabled the same way for a record with
+// no rules.split), Pick settings (Off, Shadow or On; disabled the same way for a record with no rules.pick). Landing
+// and push: Push on landing (On or Off; disabled the same way for a record with no rules.push), Land as (Main or Pull
+// request, the record's landAs or else the pack's; disabled the same way for a record with no landAs), Merge PR
+// (Button, Release or Idle, the record's prMerge or else the pack's; disabled the same way for a record with no
+// prMerge), Test before a push (On or Off: the record's pushCheck, else the pack's push.check; disabled the same way
+// for a snapshot with no pushCheck), Approve visible changes (On or Off; disabled the same way for a record with no
+// rules.visible). Done without asking: one row a standing kind of routine yes the Foreman takes without asking (the
+// pack's auto.standing: Requested fix, Review follow-up, Release check, Fixed block, Review retry, each On or Off;
+// disabled the same way for a snapshot with no standing). Issue order: Held issues (the count, a link to the list
+// below) and, when there is one, the pinned order, one row a pin with its title, dragged to a new place or moved by its
+// menu's Move up (not on the first), Move down (not on the last) and Unpin.
 // A switch's words under its name say what it does, whichever choice is set; what Off means shows beside it only
 // while Off is set. Push landed and Run full test suite are actions, not rules: they are on the Board (Control tab).
 // No issue is listed among the rules. A change is saved at once (a Builder, Reviewer or Judge CLI, model and effort
@@ -77,12 +79,22 @@
   const DEPENDS_MAX = 20; // the issues one depends takes (dashboard_server.py)
   // The standing kinds of routine yes (the pack's auto.standing, conveyor/lib/standing.sh): key, name, what it does.
   const STANDING = [
-    ['asked-fix', 'Fix you asked for', 'the Foreman files the fix you ask for and queues it at once'],
+    ['asked-fix', 'Requested fix','the Foreman files the fix you ask for and queues it at once'],
     ['review-followup', 'Review follow-up', 'a follow-up that only finishes or corrects a card you approved is queued'],
     ['release-check', 'Release check', 'a failed check in a release you asked for gets one fix card, then the release goes on'],
     ['fixed-block', 'Fixed block', 'a card blocked by a cause that a landed fix removed waits on that fix and is tried again'],
     ['review-retry', 'Review retry', 'a card blocked by its review is tried again, with no turn of the Foreman'],
   ];
+  // The Rules panel's six groups, in the index's order: key, name, what it holds, the rows (by their rule) it shows.
+  const SETS = [
+    ['models', 'Models', 'Three seats for each card.', ['builder', 'reviewer', 'judge', 'judge-always', 'account', 'review-account']],
+    ['capacity', 'Capacity', 'Build slots and machine limits.', ['cap', 'guard', 'cores']],
+    ['picking', 'Picking', 'Choose which issues enter the belt.', ['build', 'never', 'start', 'dep-guard', 'split', 'pick']],
+    ['landing', 'Landing and push', 'Decide how finished cards reach the repository.', ['push', 'land-as', 'pr-merge', 'push-check', 'visible']],
+    ['standing', 'Done without asking', 'Choose when the Foreman can act on your behalf.', STANDING.map(([k]) => `standing-${k}`)],
+    ['order', 'Issue order', 'Inspect held issues and set the order of pinned work.', ['held', 'order']],
+  ];
+  const PINS_SHOWN = 5;  // the pins shown before "View remaining N pins"
   const ORDER_MAX = 500;  // the issues one order takes (dashboard_server.py)
   const ARM_MS = 5000;    // a Queue that removes a label, or a Build choice that skips queued issues, waits this long for its second click
   // The finding kinds offered to pick from: those the review prompt names (its P0 level: security, data; its three
@@ -101,7 +113,8 @@
     kept: new Map(), at: new Map(), from: PART, heard: new WeakSet(), raw: null, ctx: null, busy: false, area: '', kind: '', keep: null, search: '', by: 'area',
     open: new Set(), armed: null, unarm: null, asking: null, withLabels: false, moved: new Map(), picked: new Set(), waitsOpen: false, dep: null, depText: '',
     drafts: null, priceEdit: null, priceAdd: null, priceFind: '', priceSaved: null, priceThis: new Map(), priceOpen: new Set(),
-    cores: null, bare: null, bareFor: null, idle: null, shown: new Map() };
+    cores: null, bare: null, bareFor: null, idle: null, shown: new Map(),
+    ruleSet: 'models', ruleFind: '', pinsAll: false, pinMenu: null, dragPin: null };
   // The setup of a repository not yet onboarded (drawOnboard()): its box and the line above the panels, once made; open;
   // later (Later pressed: shut for this visit); repo, the project it is for; keys, the rules it asks for, worked out
   // when it opens; set, the rules whose choice the host saved; rule, the rule of the row a box event is on (run());
@@ -115,6 +128,8 @@
   // (pricesSection): priceEdit, the row open in Edit as typed; priceAdd, the Add model form as typed; priceFind, the
   // search typed; priceSaved, the pack's prices as the changes saved here left them, until the next snapshot;
   // priceThis, the model picked for each ID's This is…; priceOpen, the folded groups opened.
+  // The Rules panel's index (index()), kept for this page only: ruleSet, the group picked (SETS); ruleFind, the search
+  // typed. pinsAll: every pin shown; pinMenu, the pin whose menu is open; dragPin, the place of the pin being dragged.
 
   const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
   const list = (v) => (Array.isArray(v) ? v : []);
@@ -274,7 +289,7 @@
   // A change in words, for the head.
   function words(action, args) {
     const a = list(args);
-    if (action === 'rules') return a.map((x) => { const [k, o] = x.split('='); return isArea(k) ? `${o === 'off' ? 'never build' : 'build'} ${k}` : `${k === 'followups' ? 'Follow-ups' : k === 'push' ? 'Push when a card lands' : k === 'visible' ? 'Visible changes need your yes' : k === 'split' ? 'Split large issues' : k === 'pick' ? 'Pick settings' : k} ${o}`; }).join(', ');
+    if (action === 'rules') return a.map((x) => { const [k, o] = x.split('='); return isArea(k) ? `${o === 'off' ? 'never build' : 'build'} ${k}` : `${k === 'followups' ? 'Follow-ups' : k === 'push' ? 'Push on landing' : k === 'visible' ? 'Approve visible changes' : k === 'split' ? 'Split large issues' : k === 'pick' ? 'Pick settings' : k} ${o}`; }).join(', ');
     if (action === 'cap') return a[0] === 'off' ? 'at once: the default' : `at once ${a[0]}`;
     if (action === 'guard') return a[0] === 'off' ? 'pause at: off' : `pause at ${a[0]}%`;
     if (action === 'model' || action === 'reviewer') return `${action === 'model' ? 'builder' : 'reviewer'} ${a[0] === 'default' ? 'back to the default' : a.join(' ')}`;
@@ -488,6 +503,13 @@
     const b = button(text, 'rules-tog', act, label, fn);
     b.setAttribute('aria-pressed', String(on));
     return b;
+  }
+  // The choices of one rule as one segmented control: the pressed one is the value in force.
+  function seg(label, ...choices) {
+    const box = S.ctx.h('span', 'rules-seg');
+    box.setAttribute('role', 'group'); box.setAttribute('aria-label', label);
+    box.append(...choices);
+    return box;
   }
   // The values a field offers to pick from (its list), or null when there is none to offer.
   function pickList(id, values) {
@@ -757,13 +779,15 @@
     }
     const save = button('Save', 'btn-primary', `${key}-save`, `Save the ${name}'s CLI, model and effort`, saveNow);
     const cancel = button('Cancel', 'btn-quiet', `${key}-cancel`, `Put the ${name} back as it is in force`, () => { draftDrop(key); draw(); });
-    function mark() { const on = unsaved(); [flag, save, cancel].forEach((x) => { x.hidden = !on; }); }
-    mark();
-    // The model in force, "(not listed)" when its CLI, installed, offers a list without it (a name typed in).
+    // The model in force, "(not listed)" when its CLI, installed, offers a list without it (a name typed in). The
+    // selects show it, so it is not said again beside them: it shows only while they show an unsaved change, or to
+    // say it is not listed.
     const inForce = s.agent && clis[s.agent] && typeof clis[s.agent] === 'object' ? names(s.agent, clis[s.agent]) : null;
     const unlisted = !!(inForce && inForce.length && s.model && !inForce.includes(bare(s.agent, s.model)));
-    box.append(pick, model, ...(field ? [field] : []), effort, flag, save, cancel,
-      h('span', 'board-from', `${s.agent ? `${s.agent} ` : ''}${s.model || 'not set'}${unlisted ? ' (not listed)' : ''} · ${s.effort || 'not set'}`));
+    const was = h('span', 'board-from rules-in-force', `In force: ${s.agent ? `${s.agent} ` : ''}${s.model || 'not set'}${unlisted ? ' (not listed)' : ''} · ${s.effort || 'not set'}`);
+    function mark() { const on = unsaved(); [flag, save, cancel].forEach((x) => { x.hidden = !on; }); was.hidden = !on && !unlisted; }
+    mark();
+    box.append(pick, model, ...(field ? [field] : []), effort, flag, save, cancel, was);
     if (missing) box.append(S.ctx.chip(`cannot start: ${missing}`, 'bad'));
     // The engine runs a judge on the reviewer's CLI as any other: the row says it is no second family. A role the host
     // took since the snapshot is known by its CLI alone. One cleared to the default, or set by its model alone, runs on
@@ -805,8 +829,8 @@
     // Build: each choice, and what turning one off would skip, said before it is turned off. One that would skip queued
     // issues takes a second click: the first arms it, its button then naming the count.
     const would = BUILDS.filter(([k]) => r[k] !== false).map(([k, name]) => [name, wouldSkip(k)]).filter(([, k]) => k > 0);
-    el.append(row('build', 'Build', 'which issues Conveyor may pick',
-      ...BUILDS.map(([k, name]) => {
+    el.append(row('build', 'Build issues', 'which issues Conveyor may pick',
+      seg('Build issues', ...BUILDS.map(([k, name]) => {
         const on = r[k] !== false, k2 = on ? wouldSkip(k) : 0, armed = k2 > 0 && S.armed === `rule-${k}`;
         const b = choice(armed ? `Turn ${name} off: skip ${k2}` : name, `rule-${k}`,
           armed ? `Confirm: turn ${name} off and skip ${plural(k2, 'queued issue', 'queued issues')}` : `Build ${name}: ${on ? 'on' : 'off'}${k2 ? `; turning it off would skip ${k2} queued` : ''}`, on, () => {
@@ -816,7 +840,7 @@
           });
         if (armed) { b.classList.add('board-danger'); b.dataset.armed = ''; }
         return b;
-      }),
+      })),
       would.length ? h('p', 'rules-would', would.map(([name, k]) => skipWords(name, k)).join(' ')) : null));
 
     // Never build: the labels, each removable, and a field to add one.
@@ -864,20 +888,20 @@
       h('span', 'board-from', capSet !== null ? 'set here' : 'the default'),
       capSet !== null ? button('Default', 'btn-quiet', 'cap-off', 'Cards at once: back to the default', () => send('cap', ['off'], null, ['cap', [String(capSet)]])) : null));
 
-    // Pause at: Off and three percents (and the one set, when it is another), beside the reading now.
+    // Weekly pause: Off and three percents (and the one set, when it is another), beside the use now.
     const guard = num(c.guard);
     const pcts = GUARDS.concat(guard !== null && !GUARDS.includes(guard) ? [guard] : []).sort((a, b) => a - b);
     const lim = d.limit && num(d.limit.pct) !== null ? d.limit.pct : null;
-    const reading = h('span', 'board-from', lim === null ? 'the Board does not know the reading now' : `now at ${Math.round(lim * 10) / 10}%`);
-    el.append(row('guard', 'Pause when the weekly limit reaches', 'weekly Claude limit',
-      choice('Off', 'guard-off', 'Pause when the weekly limit reaches: off', guard === null, () => { if (guard !== null) send('guard', ['off'], null, ['guard', [String(guard)]]); }),
-      ...pcts.map((p) => choice(`${p}%`, `guard-${p}`, `Pause Conveyor when the weekly limit reaches ${p} percent`, guard === p, () => { if (guard !== p) send('guard', [String(p)], null, ['guard', [guard === null ? 'off' : String(guard)]]); })),
+    const reading = h('span', 'board-from', lim === null ? 'the Board does not know the use now' : `${Math.round(lim * 10) / 10}% used`);
+    el.append(row('guard', 'Weekly pause', 'pause when the weekly Claude limit reaches',
+      seg('Weekly pause', choice('Off', 'guard-off', 'Pause when the weekly limit reaches: off', guard === null, () => { if (guard !== null) send('guard', ['off'], null, ['guard', [String(guard)]]); }),
+      ...pcts.map((p) => choice(`${p}%`, `guard-${p}`, `Pause Conveyor when the weekly limit reaches ${p} percent`, guard === p, () => { if (guard !== p) send('guard', [String(p)], null, ['guard', [guard === null ? 'off' : String(guard)]]); }))),
       reading, guard === null ? S.ctx.chip('no guard set', 'warn') : null));
 
     // Builder and Reviewer: CLI, model and effort.
     const m = d.modelSettings;
-    el.append(row('builder', 'Builder', 'builds and fixes', m && m.builder ? modelCtl('Builder', 'builder', m.builder) : h('span', 'board-from', 'The build machine names no models yet.')));
-    el.append(row('reviewer', 'Reviewer', 'reviews each round', m && m.reviewer ? modelCtl('Reviewer', 'reviewer', m.reviewer) : h('span', 'board-from', 'The build machine names no models yet.')));
+    el.append(row('builder', 'Builder', 'Builds the card and fixes findings.', m && m.builder ? modelCtl('Builder', 'builder', m.builder) : h('span', 'board-from', 'The build machine names no models yet.')));
+    el.append(row('reviewer', 'Reviewer', 'Reviews each round of changes.', m && m.reviewer ? modelCtl('Reviewer', 'reviewer', m.reviewer) : h('span', 'board-from', 'The build machine names no models yet.')));
 
     // Judge: on or off, its CLI, model and effort (every installed CLI, the reviewer's too; the default names the one
     // of another family it runs on when none is set), and the finding kinds it always accepts, each removable,
@@ -908,24 +932,24 @@
     kind.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addKind(); } });
     const kindForm = h('span', 'rules-add');
     kindForm.append(...[kind, kindPick].filter(Boolean), button('Add', 'btn-quiet', 'judge-kind-add', 'Always accept the findings of this kind', addKind));
-    el.append(row('judge', 'Judge', 'decides which review findings count',
-      choice('On', 'judge-on', 'Judge: on', judgeOn, () => { if (!judgeOn) send('judge', ['on'], null, ['judge', ['off']]); }),
-      choice('Off', 'judge-off', 'Judge: off', !judgeOn, () => { if (judgeOn) send('judge', ['off'], null, ['judge', ['on']]); }),
-      m && m.judge ? modelCtl('Judge', 'judge', m.judge) : h('span', 'board-from', 'The build machine names no model for the reviewer, so none for the judge.'),
-      always, kindForm));
+    el.append(row('judge', 'Judge', 'Decides which review findings count.',
+      seg('Judge', choice('On', 'judge-on', 'Judge: on', judgeOn, () => { if (!judgeOn) send('judge', ['on'], null, ['judge', ['off']]); }),
+        choice('Off', 'judge-off', 'Judge: off', !judgeOn, () => { if (judgeOn) send('judge', ['off'], null, ['judge', ['on']]); })),
+      m && m.judge ? modelCtl('Judge', 'judge', m.judge) : h('span', 'board-from', 'The build machine names no model for the reviewer, so none for the judge.')));
+    el.append(row('judge-always', 'Always accept', 'Finding kinds the Judge accepts every time.', always, kindForm));
 
     // Account: the Claude account of the host's accounts this project's cards use, and one for its reviews when the
     // reviewer is Claude. A change reaches the cards started after it; a card in flight keeps its own.
     el.append(row('account', 'Account', 'cards started after a change', accountCtl('Account', 'account', c.account, "the build machine's own login")));
-    el.append(row('review-account', 'Review account', 'a Claude reviewer only', accountCtl('Review account', 'review-account', c.reviewAccount, 'the Account')));
+    el.append(row('review-account', 'Review account', 'Used only by Claude reviewers.', accountCtl('Review account', 'review-account', c.reviewAccount, 'the Account')));
 
     // New issues start in: Queue (the default) or Held. A follow-up is always queued.
     const start = c.start === 'held' ? 'held' : 'queue';
-    el.append(row('start', 'New issues start in', 'Conveyor always queues follow-ups',
-      choice('Queue', 'start-queue', 'New issues start in the Queue', start === 'queue', () => { if (start !== 'queue') send('start', ['queue'], null, ['start', ['held']]); }),
-      choice('Held', 'start-held', 'New issues start in Held', start === 'held', () => { if (start !== 'held') send('start', ['held'], null, ['start', ['queue']]); })));
+    el.append(row('start', 'New issues start in', 'Follow-ups always enter the queue.',
+      seg('New issues start in', choice('Queue', 'start-queue', 'New issues start in the Queue', start === 'queue', () => { if (start !== 'queue') send('start', ['queue'], null, ['start', ['held']]); }),
+      choice('Held', 'start-held', 'New issues start in Held', start === 'held', () => { if (start !== 'held') send('start', ['held'], null, ['start', ['queue']]); }))));
 
-    // Dependency guard, Push when a card lands and Visible changes need your yes: the words under each name say what
+    // Dependency guard, Push on landing and Approve visible changes: the words under each name say what
     // it does, whichever choice is set; what Off means shows beside the switch only while Off is set. An engine that
     // does not know one (its record has no depGuard, rules.push or rules.visible) is sent neither choice.
     const offLine = (on, text) => (on ? null : h('span', 'board-from rules-off', `off: ${text}`));
@@ -937,16 +961,16 @@
     const gOff = choice('Off', 'dep-guard-off', 'Dependency guard: off', !guardOn, () => { if (guardOn) send('dep-guard', ['off'], null, ['dep-guard', ['on']]); });
     gOn.disabled = gOff.disabled = !knows;
     el.append(row('dep-guard', 'Dependency guard', 'an issue waits while one it depends on is open',
-      gOn, gOff, knows ? offLine(guardOn, 'Conveyor can build a waiting issue all the same') : newer(knows)));
+      seg('Dependency guard', gOn, gOff), knows ? offLine(guardOn, 'Conveyor can build a waiting issue all the same') : newer(knows)));
 
-    // Push when a card lands: On pushes each card once it lands; Off (the default, control-defaults.json) lands only, and what landed waits for
+    // Push on landing: On pushes each card once it lands; Off (the default, control-defaults.json) lands only, and what landed waits for
     // Push landed on the Board.
     const pushOn = r.push !== false, pushKnown = typeof r.push === 'boolean';
-    const pOn = choice('On', 'push-on', 'Push when a card lands: on', pushOn, () => { if (!pushOn) send('rules', ['push=on'], null, ['rules', ['push=off']]); });
-    const pOff = choice('Off', 'push-off', 'Push when a card lands: off', !pushOn, () => { if (pushOn) send('rules', ['push=off'], null, ['rules', ['push=on']]); });
+    const pOn = choice('On', 'push-on', 'Push on landing: on', pushOn, () => { if (!pushOn) send('rules', ['push=on'], null, ['rules', ['push=off']]); });
+    const pOff = choice('Off', 'push-off', 'Push on landing: off', !pushOn, () => { if (pushOn) send('rules', ['push=off'], null, ['rules', ['push=on']]); });
     pOn.disabled = pOff.disabled = !pushKnown;
-    el.append(row('push', 'Push when a card lands', 'Conveyor pushes each card when it lands',
-      pOn, pOff, pushKnown ? offLine(pushOn, 'land only: cards land on main, and Push landed on the Control tab pushes them') : newer(pushKnown)));
+    el.append(row('push', 'Push on landing', 'Conveyor pushes each card when it lands',
+      seg('Push on landing', pOn, pOff), pushKnown ? offLine(pushOn, 'land only: cards land on main, and Push landed on the Control tab pushes them') : newer(pushKnown)));
     // Land as: Main pushes main to the default branch; Pull request pushes it to conveyor/landing and keeps one pull
     // request open into the default branch. The record's value, else the pack's (landNow).
     const land = landNow(c), landK = landKnown();
@@ -954,7 +978,7 @@
     const lPr = choice('Pull request', 'land-as-pr', 'Land as: one pull request', land === 'pr', () => { if (land !== 'pr') send('land-as', ['pr'], null, ['land-as', ['main']]); });
     lMain.disabled = lPr.disabled = !landK;
     el.append(row('land-as', 'Land as', 'where the push sends the cards that landed',
-      lMain, lPr, landK ? (land === 'pr' ? h('span', 'board-from', 'one pull request from conveyor/landing collects the cards; merge it to close their issues') : null) : newer(landK)));
+      seg('Land as', lMain, lPr), landK ? (land === 'pr' ? h('span', 'board-from', 'one pull request from conveyor/landing collects the cards; merge it to close their issues') : null) : newer(landK)));
     // Merge PR: who merges that pull request. Button (the default): only you, with Merge on the Control tab; Release:
     // the release merges it before it tags; Idle: Conveyor merges it when nothing is on the belt and nothing can be
     // picked, once the test files linked to its cards succeed. The record's value, else the pack's (prNow).
@@ -963,7 +987,7 @@
       choice(t, `pr-merge-${v}`, `Merge PR: ${PRMERGE[v]}`, pm === v, () => { if (pm !== v) send('pr-merge', [v], null, ['pr-merge', [pm]]); }));
     pms.forEach((b) => { b.disabled = !pmK; });
     el.append(row('pr-merge', 'Merge PR', 'who merges the pull request of Land as',
-      ...pms, pmK ? h('span', 'board-from', `merged ${PRMERGE[pm]}`) : newer(pmK)));
+      seg('Merge PR', ...pms), pmK ? h('span', 'board-from', `merged ${PRMERGE[pm]}`) : newer(pmK)));
     // Test before a push: On (the default of a new pack) runs the test files linked to the landings since the last
     // push before each push, and a file that fails holds it; Off pushes with no test first. The pack's push.check
     // sets it until a change here, which the control record keeps over the pack.
@@ -972,16 +996,16 @@
     const cOff = choice('Off', 'push-check-off', 'Test before a push: off', !checkOn, () => { if (checkOn) send('push-check', ['off'], null, ['push-check', ['on']]); });
     cOn.disabled = cOff.disabled = !checkKnown;
     el.append(row('push-check', 'Test before a push', 'the test files linked to the landings run before each push, and one that fails holds the push',
-      cOn, cOff, checkKnown ? offLine(checkOn, 'a push runs no test first') : newer(checkKnown)));
-    // Visible changes need your yes: On stops a card whose change customers or staff will see until its
+      seg('Test before a push', cOn, cOff), checkKnown ? offLine(checkOn, 'a push runs no test first') : newer(checkKnown)));
+    // Approve visible changes: On stops a card whose change customers or staff will see until its
     // issue has a `Visible change approved:` line; Off (the default) lets it land without one, and says so beside the switch, so a
     // landed visible change is not read as approved.
     const yesOn = r.visible !== false, yesKnown = typeof r.visible === 'boolean';
-    const yOn = choice('On', 'visible-on', 'Visible changes need your yes: on', yesOn, () => { if (!yesOn) send('rules', ['visible=on'], null, ['rules', ['visible=off']]); });
-    const yOff = choice('Off', 'visible-off', 'Visible changes need your yes: off', !yesOn, () => { if (yesOn) send('rules', ['visible=off'], null, ['rules', ['visible=on']]); });
+    const yOn = choice('On', 'visible-on', 'Approve visible changes: on', yesOn, () => { if (!yesOn) send('rules', ['visible=on'], null, ['rules', ['visible=off']]); });
+    const yOff = choice('Off', 'visible-off', 'Approve visible changes: off', !yesOn, () => { if (yesOn) send('rules', ['visible=off'], null, ['rules', ['visible=on']]); });
     yOn.disabled = yOff.disabled = !yesKnown;
-    el.append(row('visible', 'Visible changes need your yes', 'a change customers or staff will see waits for your yes',
-      yOn, yOff, yesKnown ? offLine(yesOn, 'visible changes land without your yes, and nobody approves them') : newer(yesKnown)));
+    el.append(row('visible', 'Approve visible changes', 'a change customers or staff will see waits for your yes',
+      seg('Approve visible changes', yOn, yOff), yesKnown ? offLine(yesOn, 'visible changes land without your yes, and nobody approves them') : newer(yesKnown)));
     // Split large issues: Shadow (the default) records what the Judge would split a large issue into, and builds it
     // whole; On files the slices as follow-ups and holds the issue as their umbrella; Off checks nothing. An engine whose
     // record has no rules.split is sent none of them. Undo sends the setting it had.
@@ -992,7 +1016,7 @@
       return b;
     };
     el.append(row('split', 'Split large issues', 'the Judge reads a large issue before its build and says whether to build it as 2 or 3 follow-ups',
-      splitTo('off', 'Off'), splitTo('shadow', 'Shadow'), splitTo('on', 'On'),
+      seg('Split large issues', splitTo('off', 'Off'), splitTo('shadow', 'Shadow'), splitTo('on', 'On')),
       splitAt === null ? newer(false) : splitAt === 'shadow' ? h('span', 'board-from rules-off', 'shadow: the verdict is recorded, and the issue is built whole')
         : splitAt === 'off' ? offLine(false, 'no issue is checked') : null));
     // Pick settings: Shadow records each card's group and the builder the rule chooses, and builds on the builder as
@@ -1004,15 +1028,17 @@
       return b;
     };
     el.append(row('pick', 'Pick settings', 'code puts each card in a group before its build and records the builder it chooses for it; a builder you set for a card always wins',
-      pickTo('off', 'Off'), pickTo('shadow', 'Shadow'), pickTo('on', 'On'),
+      seg('Pick settings', pickTo('off', 'Off'), pickTo('shadow', 'Shadow'), pickTo('on', 'On')),
       pickAt === null ? newer(false) : pickAt === 'off' ? offLine(false, 'no pick is recorded')
         : h('span', 'board-from rules-off', `${pickAt}: the pick is recorded, and the card builds on its builder as before`)));
-    // Cores kept for you: the machine's (the host file's reserveCores), shown here and set in the host file.
+    // Reserved cores: the machine's (the host file's reserveCores), shown here and set in the host file, with the
+    // line that says where the test limits are.
     const co = S.cores, slots = co && typeof co.slots === 'number' ? `${co.slots} test slot${co.slots === 1 ? '' : 's'}` : 'test slots not read';
-    el.append(row('cores', 'Cores kept for you', 'card sessions and tests never run on these cores, for every project (the host file\'s reserveCores)',
+    el.append(row('cores', 'Reserved cores', 'Set in the host file (reserveCores). Card sessions and tests never run on these cores, for every project.',
       !co ? newer(false)
-        : h('span', 'board-from rules-cores', co.unavailable ? `not available on this machine: ${co.unavailable}`
-          : co.reserved.length ? `cores ${co.reserved.join(', ')}; ${slots} left` : `none; ${slots}`)));
+        : h('span', 'board-from rules-cores', co.unavailable ? `Not available on this machine: ${co.unavailable}`
+          : co.reserved.length ? `Cores ${co.reserved.join(', ')} · ${slots} left` : `None · ${slots}`),
+      limitsLine()));
 
     // Done without asking: one row a standing kind of routine yes, On or Off. Off (each kind's setting from setup)
     // sends each such step to you. A Conveyor whose snapshot has no standing is sent neither choice.
@@ -1022,36 +1048,111 @@
       const sOn = choice('On', `standing-${k}-on`, `${name} without asking: on`, on, () => { if (!on) send('standing', [k, 'on'], null, ['standing', [k, 'off']]); });
       const sOff = choice('Off', `standing-${k}-off`, `${name} without asking: off`, !on, () => { if (on) send('standing', [k, 'off'], null, ['standing', [k, 'on']]); });
       sOn.disabled = sOff.disabled = !standingOn;
-      el.append(row(`standing-${k}`, `${name} without asking`, what, sOn, sOff, standingOn ? offLine(on, 'the Foreman asks you first') : newer(false)));
+      el.append(row(`standing-${k}`, name, what, seg(name, sOn, sOff), standingOn ? offLine(on, 'the Foreman asks you first') : newer(false)));
     });
 
-    // Held by you: the count, and a link to the list below.
-    const link = h('a', 'rules-link', 'See them below');
+    // Held issues: the count, as a link to the list in the Held panel.
+    const link = h('a', 'rules-link', `View ${plural(all.length, 'held issue', 'held issues')}`);
     link.href = '#rules-held'; link.dataset.act = 'held-link';
-    el.append(unlisted() ? row('held', HELD, 'parked issues', h('span', 'board-from', heldUnknown()))
-      : row('held', HELD, 'parked issues', h('span', 'board-value', plural(all.length, 'issue held', 'issues held')), all.length ? link : null));
+    el.append(unlisted() ? row('held', 'Held issues', 'parked issues', h('span', 'board-from', heldUnknown()))
+      : row('held', 'Held issues', 'parked issues', all.length ? link : h('span', 'board-value', 'No issue is held.')));
 
-    // The pinned order, when there is one: one line, each with Move up (not on the first), Move down (not on the
-    // last) and Unpin. unpin takes this one issue out of the record's
-    // order on the host, under its lock: an order sent whole from here would drop a pin set elsewhere (the Board).
+    // The pinned order, when there is one: one row a pin, with its number and title (as the snapshot's queue, held,
+    // waiting, skipped and open issues give it), a drag handle and a menu of Move up (not on the first), Move down (not on the
+    // last) and Unpin; the first PINS_SHOWN, then "View remaining N pins". unpin takes this one issue out of the
+    // record's order on the host, under its lock: an order sent whole from here would drop a pin set elsewhere (the Board).
     const order = list(c.order);
     if (order.length) {
-      const titles = new Map(list(d.queue).concat(list(d.held), list(d.waits)).map((x) => [x.issue, x.title]));
-      const pins = h('span', 'rules-list');
-      // Move up and Move down send the pinned order with the two swapped.
-      // Undo, of a move or an unpin, sends the pinned order as it was.
-      const swap = (i, j) => { const o = order.slice(); [o[i], o[j]] = [o[j], o[i]]; send('order', o.map(String), null, ['order', order.map(String)]); };
+      const titles = new Map(list(d.queue).concat(list(d.held), list(d.waits), list(d.skipped), list(d.open && d.open.issues), list(d.open && d.open.held))
+        .filter((x) => x && typeof x.title === 'string' && x.title).map((x) => [x.issue, x.title]));
+      const pins = h('ol', 'rules-pins');
+      // Move up, Move down and a drop send the pinned order with the one pin moved: a move to the next place is the
+      // two swapped. Undo, of a move or an unpin, sends the pinned order as it was.
+      const move = (i, j) => { const o = order.slice(); o.splice(j, 0, o.splice(i, 1)[0]); send('order', o.map(String), null, ['order', order.map(String)]); };
       order.forEach((n, i) => {
-        const item = h('span', 'rules-item');
+        if (i >= PINS_SHOWN && !S.pinsAll) return;
+        const item = h('li', 'rules-item rules-pin-row');
         item.dataset.issue = String(n);
-        const up = i > 0 ? button('Move up', 'btn-quiet', 'pin-up', `Move #${n} up in the pinned order`, () => swap(i, i - 1)) : null;
-        const down = i < order.length - 1 ? button('Move down', 'btn-quiet', 'pin-down', `Move #${n} down in the pinned order`, () => swap(i, i + 1)) : null;
-        item.append(...[h('span', 'rules-pin', titles.get(n) ? `#${n} ${titles.get(n)}` : `#${n}`), up, down].filter(Boolean),
-          button('Unpin', 'btn-quiet', 'unpin', `Unpin #${n}: pick takes it in its own order`, () => send('unpin', [String(n)], null, ['order', order.map(String)])));
+        item.draggable = true;
+        item.addEventListener('dragstart', (e) => { S.dragPin = i; if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', `#${n}`); } });
+        item.addEventListener('dragend', () => { S.dragPin = null; });
+        item.addEventListener('dragover', (e) => { if (S.dragPin !== null) e.preventDefault(); });
+        item.addEventListener('drop', (e) => {
+          const from = S.dragPin;
+          S.dragPin = null;
+          if (from === null) return;
+          e.preventDefault();
+          if (from !== i && !S.busy) move(from, i);
+        });
+        const grip = h('span', 'rules-grip', '⠿');
+        grip.setAttribute('aria-hidden', 'true');
+        const menu = h('details', 'rules-menu'), sum = h('summary', 'btn btn-quiet', '⋯'), acts = h('span', 'rules-menu-acts');
+        sum.setAttribute('aria-label', `Actions for #${n}`);
+        menu.open = S.pinMenu === n;
+        menu.addEventListener('toggle', () => { if (menu.open) S.pinMenu = n; else if (S.pinMenu === n) S.pinMenu = null; });
+        acts.append(...[i > 0 ? button('Move up', 'btn-quiet', 'pin-up', `Move #${n} up in the pinned order`, () => move(i, i - 1)) : null,
+          i < order.length - 1 ? button('Move down', 'btn-quiet', 'pin-down', `Move #${n} down in the pinned order`, () => move(i, i + 1)) : null,
+          button('Unpin', 'btn-quiet', 'unpin', `Unpin #${n}: pick takes it in its own order`, () => send('unpin', [String(n)], null, ['order', order.map(String)]))].filter(Boolean));
+        menu.append(sum, acts);
+        item.append(grip, h('span', 'rules-pin', titles.has(n) ? `#${n} ${titles.get(n)}` : `#${n}`), menu);
         pins.append(item);
       });
-      el.append(row('order', 'Pinned', 'picked first, in this order', pins));
+      const rest = order.length - PINS_SHOWN;
+      el.append(row('order', 'Pinned issues', 'Picked first, from top to bottom.', pins,
+        rest > 0 && !S.pinsAll ? button(`View remaining ${plural(rest, 'pin', 'pins')}`, 'btn-quiet', 'pins-all', null, () => { S.pinsAll = true; draw(); }) : null));
     }
+
+    // The six groups (SETS), each with its rows; the index and the search pick which show (index()). The setup takes
+    // the rows by their rule from here, so a row stays a .rules-row of its own.
+    const byRule = new Map(Array.from(el.querySelectorAll(':scope > .rules-row'), (x) => [x.dataset.rule, x]));
+    const sets = h('div', 'rules-sets');
+    SETS.forEach(([k, name, what, keys]) => {
+      const set = h('section', 'rules-set');
+      set.dataset.set = k;
+      set.append(h('h4', 'rules-set-name', name), h('p', 'rules-set-what', what),
+        ...(k === 'models' ? [h('p', 'rules-set-what', 'Save model changes per seat. Other rules save as you change them.')] : []),
+        ...keys.filter((x) => byRule.has(x)).map((x) => byRule.get(x)));
+      sets.append(set);
+    });
+    const none = h('p', 'board-from rules-none');
+    none.setAttribute('aria-live', 'polite');
+    sets.append(none);
+    const find = h('input', 'field rules-field rules-find');
+    find.type = 'search'; find.placeholder = 'Search rules'; find.value = S.ruleFind; find.dataset.act = 'rules-find';
+    find.setAttribute('aria-label', 'Search the rules by group, name or key');
+    find.addEventListener('input', () => { S.ruleFind = find.value; index(el); relength(); });
+    const nav = h('nav', 'rules-index');
+    nav.setAttribute('aria-label', 'Rule groups');
+    nav.append(...SETS.map(([k, name]) => button(name, 'btn-quiet rules-index-item', `rules-set-${k}`, `Show the ${name} rules`, () => {
+      S.ruleSet = k; S.ruleFind = ''; find.value = ''; index(el); relength();
+    })));
+    const pick = h('div', 'rules-pick');
+    pick.append(find, nav);
+    const both = h('div', 'rules-indexed');
+    both.append(pick, sets);
+    el.append(h('p', 'rules-hint', 'Choose a group or search for a rule to edit it in place.'), both);
+    return el;
+  }
+  // The Rules panel shows the group picked, or, with search text, each rule whose group's name, own name or key holds
+  // it (any case), and each group with such a rule; with none, a line that says so. The index marks the group picked
+  // while no search is typed.
+  function index(el) {
+    const q = S.ruleFind.trim().toLowerCase();
+    let any = false;
+    el.querySelectorAll('.rules-set').forEach((set) => {
+      const name = set.querySelector('.rules-set-name').textContent.toLowerCase();
+      let hits = 0;
+      set.querySelectorAll('.rules-row').forEach((r) => {
+        const hit = !q || name.includes(q) || r.dataset.rule.includes(q) || r.querySelector('.board-label').textContent.toLowerCase().includes(q);
+        r.hidden = !hit;
+        if (hit) hits += 1;
+      });
+      set.hidden = q ? !hits : set.dataset.set !== S.ruleSet;
+      if (!set.hidden) any = true;
+    });
+    SETS.forEach(([k]) => { const b = el.querySelector(`[data-act="rules-set-${k}"]`); if (b) b.setAttribute('aria-pressed', String(!q && k === S.ruleSet)); });
+    const none = el.querySelector('.rules-none');
+    if (none) { none.hidden = any; none.textContent = any ? '' : `No rule matches "${S.ruleFind.trim()}".`; }
     return el;
   }
 
@@ -1985,8 +2086,8 @@
   }
 
   // ---- the setup of a repository not yet onboarded ----
-  // Its five steps, each the project's rules it asks for, by their row in rules(). The machine's rule (Cores kept
-  // for you) is the build machine's, not the repository's, and the pack's own setup answers stay
+  // Its five steps, each the project's rules it asks for, by their row in rules(). The machine's rule (Reserved
+  // cores) is the build machine's, not the repository's, and the pack's own setup answers stay
   // with /conveyor-belt:setup: neither is asked here.
   const ONBOARD = [
     ['What to build', ['build', 'never', 'split']],
@@ -2095,8 +2196,14 @@
     // Every action here says what it did on the box's own line, and a change it sends is on the rule of its row
     // (OB.rule): the rule is set only when the host saved it (run()), so a check that sends nothing, a first click
     // that asks again, a draft or a refusal does not set it.
+    // The Always accept row is part of the Judge's rule (onbDefault sets the kinds with it): a change there sets the
+    // Judge, so Next does not send the Judge's defaults over the kinds just added.
     ['click', 'input', 'change', 'keydown'].forEach((t) => {
-      dlg.addEventListener(t, (e) => { S.from = ONB; const row = e.target.closest && e.target.closest('.rules-row'); OB.rule = row ? row.dataset.rule : null; }, true);
+      dlg.addEventListener(t, (e) => {
+        S.from = ONB;
+        const row = e.target.closest && e.target.closest('.rules-row'), k = row ? row.dataset.rule : null;
+        OB.rule = k === 'judge-always' ? 'judge' : k;
+      }, true);
       dlg.addEventListener(t, () => { OB.rule = null; });
     });
     // The control focused last, focused again when a redraw replaced it (onbDraw).
@@ -2168,8 +2275,11 @@
       row.querySelector('.rules-key').append(
         button(`default: ${text}`, 'btn-quiet onboard-default', `onboard-default-${k}`, `${name}: the default, ${text}`, () => onbConfirm(k, name)),
         set(k) ? S.ctx.chip('Set', 'ok') : h('span', 'board-from', 'Click a choice to set it'));
-      return row;
-    }));
+      // The Judge's setup rule sets its always-accepted kinds too (onbDefault): their row, drawn apart on the Rules
+      // tab, comes with it, as part of that one rule.
+      const always = k === 'judge' && rows.get('judge-always');
+      return always ? [row, always] : [row];
+    }).flat());
     lock(dlg.querySelector('.onboard-body'));
     dlg.querySelector('.onboard-count').textContent = `${n} of ${OB.keys.length} rules set`;
     const last = OB.step === steps.length - 1, next = dlg.querySelector('[data-act="onboard-next"]');
@@ -2204,14 +2314,16 @@
     onbFocusStep();
   }
 
-  // Controls that change nothing (the search, the grouping, the issue filters and picks, and showing more) stay on while a change is out.
-  const STILL = new Set(['held-search', 'held-by', 'held-link', 'list-more', 'list-all', 'pick', 'pick-all'].concat(IFILTERS));
+  // Controls that change nothing (the searches, the grouping, the rules' index, the issue filters and picks, and showing
+  // more) stay on while a change is out.
+  const STILL = new Set(['held-search', 'held-by', 'held-link', 'list-more', 'list-all', 'pick', 'pick-all', 'rules-find', 'pins-all']
+    .concat(IFILTERS, SETS.map(([k]) => `rules-set-${k}`)));
   // While a change is out every other control is off, a page drawn by "Show more" too.
   const lock = (root) => { if (S.busy) root.querySelectorAll('button, input, select').forEach((b) => { if (!STILL.has(b.dataset.act)) b.disabled = true; }); };
   // The tab's panels, in their default order, each drawn from the one Rules part: [id, title, width, its sections].
   // Each has its own line (.rules-note: say) under its sections.
   const PANELS = [
-    [PART, 'Rules', 'wide', (all) => [limitsLine(), head(), rules(all)]],
+    [PART, 'Rules', 'wide', (all) => [head(), index(rules(all))]],
     [`${PART}-produce`, 'What these rules produce', 'small', (all) => [produce(all)]],
     [`${PART}-prices`, 'Model prices', 'full', () => [pricesSection()]],
     [HELD_P, HELD, 'full', (all) => [heldSection(all)]],

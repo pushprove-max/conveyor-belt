@@ -147,7 +147,7 @@ line that names the other card's issue waits.
 ## Push
 
 By default, Conveyor lands each card and pushes when you press
-[Push landed](board.md#push-landed-and-run-full-test-suite). Turn on the Rules tab's **Push when a card lands** rule,
+[Push landed](board.md#push-landed-and-run-full-test-suite). Turn on the Rules tab's **Push on landing** rule,
 and the loop pushes main on its own after each landing. Each push goes through the project's own pre-push hook.
 
 Before the loop pushes main, and before Push now, Conveyor runs the test files that the test map and

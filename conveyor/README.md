@@ -31,11 +31,11 @@ its own, and the Board's Rules tab sets them in its Judge row.
   happens to an accepted P3 review finding (below, The judge).
 - `followups`: follow-up issues.
 - `<areaPrefix><name>`: an area label; off means issues with that label are never built.
-- `push`: whether a card that lands is pushed (Push when a card lands). On, the loop pushes each landing.
+- `push`: whether a card that lands is pushed (Push on landing). On, the loop pushes each landing.
   Off is land only: cards still land on main one after another, each building on the last, and the loop pushes none of
   them (a `run` does not end in failure for it); what landed waits for the Board's Push landed (The full test suite,
   below), and the Board shows how many landed cards are not pushed and which.
-- `visible`: whether a change customers or staff will see needs the owner's yes (Visible changes need your yes). On,
+- `visible`: whether a change customers or staff will see needs the owner's yes (Approve visible changes). On,
   a card whose change touches product code and that its reviewer says is visible stops for a
   `Visible change approved:` line, and an issue whose `## What customers or staff will see` section names a change is
   not picked without one. Off, no card or issue waits for that line: the build brief and the review do not ask for it,

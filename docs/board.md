@@ -232,12 +232,12 @@ cursor goes to the heading of that group.
 The first time the Board opens for a repository, a box asks you to set each project rule. Its title is
 **Set up Conveyor for <owner/repo>**. It has five steps, and a bar at the top names each step:
 
-1. **What to build**: Build, Never build and Split large issues.
-2. **Landing**: Land as, Push when a card lands, Test before a push, Dependency guard, New issues start in and Whole
+1. **What to build**: Build issues, Never build and Split large issues.
+2. **Landing**: Land as, Push on landing, Test before a push, Dependency guard, New issues start in and Whole
    suite in a card.
 3. **Models**: Builder, Reviewer, Judge, Account and Review account.
-4. **Limits**: Cards at once and Pause when the weekly limit reaches.
-5. **Your yes**: Visible changes need your yes.
+4. **Limits**: Cards at once and Weekly pause.
+5. **Your yes**: Approve visible changes.
 
 Each rule shows its name, what it does and the controls of the Rules tab. The default is already selected, also when
 the rule has another value now. To keep the default, click the selected choice or the **default: <value>** button.
@@ -252,24 +252,47 @@ at the top says **Conveyor is not set up for this repository yet**. Its **Set up
 **Finish** records the setup in the project's control record. The box then stops opening. When a newer Conveyor has a
 rule that you did not set, the box opens again with only the steps that hold the new rules.
 
-The box does not ask for the machine's setting, Cores kept for you: it belongs to the build machine. The test
+The box does not ask for the machine's setting, Reserved cores: it belongs to the build machine. The test
 command, the product paths and the owner stay with `/conveyor-belt:setup`.
 
 ## Rules
 
-The Rules tab holds the settings:
+The **Rules** panel holds the settings. At its top, a line shows the last change you made here, with **Undo**. A
+line under it says when each change is saved.
 
-- which issues to build (the P0 to P3 switches, follow-ups and area labels). A main-red fix card is built whatever the
-  P0 to P3 switches say, by design: held, every card that meets the red main would wait for good.
-- cards at once. A card that only waits on another card does not count, up to as many waiting cards as this
-  setting. The On the belt figure leaves these cards out, and a tap on it says how many wait,
-- the usage at which no new card starts,
-- the builder, reviewer and judge: each a CLI installed on the loop's machine, then a model, then an effort
-  ([Models](configuration.md#models)),
-- the accounts ([Accounts](#accounts)),
-- where new issues start.
+On the left are a search box and an index of six groups. Click a group to show its rules on the right. You change
+each rule there, in its row. Type in the search box to find a rule in all the groups. The search reads the group
+name, the rule name and the rule key. Only the rules that match show, and a group with no match hides. When no rule
+matches, a line says so. The group you chose and the search text stay only while the page is open.
 
-A setting changed there shows its new value at once. A value the host refuses goes back, with the refusal beside it.
+Each row shows the rule name, one short line on what it does, and its control. A choice of two or more values is
+one control, and the value in force is the selected part.
+
+1. **Models**: **Builder**, **Reviewer** and **Judge**, each a CLI installed on the loop's machine, then a model,
+   then an effort ([Models](configuration.md#models)). The Judge is also On or Off. **Always accept** lists the
+   finding kinds the Judge accepts every time. **Account** and **Review account** pick the accounts
+   ([Accounts](#accounts)). A seat is saved only when you press its **Save**. While a seat has a change that is not
+   saved, the row shows the model in force.
+2. **Capacity**: **Cards at once**. A card that only waits on another card does not count, up to as many waiting
+   cards as this setting. The On the belt figure leaves these cards out, and a tap on it says how many wait.
+   **Weekly pause** is the usage at which no new card starts, with the usage now beside it. **Reserved cores**
+   shows the cores that card work does not use. You set them in the host file
+   ([Reserved cores](configuration.md#cores-kept-for-you)). The row also links to the Tests page, which holds the test
+   limits.
+3. **Picking**: **Build issues** (the P0 to P3 switches and Follow-ups), **Never build** (area labels), **New issues
+   start in**, **Dependency guard**, **Split large issues** and **Pick settings**. A main-red fix card is built
+   whatever the P0 to P3 switches say, by design: held, every card that meets the red main would wait for good.
+4. **Landing and push**: **Push on landing**, **Land as**, **Merge PR**, **Test before a push** and **Approve
+   visible changes**.
+5. **Done without asking**: **Requested fix**, **Review follow-up**, **Release check**, **Fixed block** and
+   **Review retry**, each On or Off.
+6. **Issue order**: **Held issues** shows the count. Click it to go to the held list. **Pinned issues** shows one
+   row for each pinned issue, with its number and title. Conveyor picks them first, from top to bottom. Drag a row to
+   a new place, or use its menu (**⋯**): **Move up**, **Move down** or **Unpin**. The first five pins show. **View
+   remaining N pins** shows the others.
+
+The other rules save when you change them. A setting changed there shows its new value at once. A value the host
+refuses goes back, with the refusal beside it.
 
 **Model prices** lists the price of each model the Board knows, in dollars per million tokens: input, output, cache
 read and cache write. Each release updates the built-in prices. With no cache write price, a 5-minute cache write
@@ -312,7 +335,7 @@ name on the Board. A new display name does not change the model's ID.
 Your prices, added models and aliases are saved in the pack (`prices` in `.conveyor/project.json`), so you commit them
 with the project. Each change has Undo.
 
-**Visible changes need your yes** is a switch per project, Off by default. On, a card whose change customers or staff
+**Approve visible changes** is a switch per project, Off by default. On, a card whose change customers or staff
 will see stops until its issue has a `Visible change approved:` line. Off, the tab says "off: visible changes land
 without your yes".
 
@@ -351,8 +374,8 @@ findings the replay judge ruled on as your judge did, each finding where the rul
 costs. Choose a model and an effort, then click **Estimate the cost**. The panel shows the estimate, and **Run the
 replay**. Click it two times to start the replay. Only an admin can start a replay. The result shows in the panel when the replay ends ([Judge replay](configuration.md#judge-replay)).
 
-The **... without asking** rules turn each standing kind of yes on or off ([Standing yes](foreman.md#standing-yes)).
-All are Off until you turn them on. **Review retry without asking** On: the Foreman's watcher tries again each card
+The **Done without asking** rules turn each standing kind of yes on or off ([Standing yes](foreman.md#standing-yes)).
+All are Off until you turn them on. **Review retry** On: the Foreman's watcher tries again each card
 that its review blocked, and the Foreman gets no wake for it. A retry that fails still wakes the Foreman, with the
 reason.
 
@@ -390,7 +413,7 @@ tells more.
 
 ## Push landed and Run full test suite
 
-The Rules tab's **Push when a card lands** rule is Off by default. Conveyor lands each card on main and pushes when you
+The Rules tab's **Push on landing** rule is Off by default. Conveyor lands each card on main and pushes when you
 press **Push landed** or **Push now**. Turn the rule On, and Conveyor pushes each card on its own after it lands.
 
 With the rule Off, a card that landed leaves the belt. It is not in On the belt, Belt 3D or `/units` ON THE BELT. Landed

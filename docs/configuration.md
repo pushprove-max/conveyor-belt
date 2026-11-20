@@ -521,7 +521,7 @@ No test slot is on a kept core, and the pool of test slots is never larger than 
 fix and review sessions and card test runs start with `taskset` on the cores that are left. Conveyor always leaves one
 core for card work: a setting that keeps every core leaves the lowest of them.
 
-`conveyor.sh doctor` and the **Cores kept for you** row on the Board's Rules tab show the kept cores and the number
+`conveyor.sh doctor` and the **Reserved cores** row on the Board's Rules tab show the kept cores and the number
 of test slots that are left. To change the setting, edit the host file.
 
 macOS cannot keep a process off a core, so the setting is not available there. Doctor and the Rules tab say so, with
@@ -638,7 +638,7 @@ At each push, Conveyor writes the pull request's body again. It lists every card
 reply, met or not met), its fix rounds and the tests it ran (each file, with the cases it ran of a file it ran in part).
 
 The pack's `push.landAs` sets the rule for the project. `conveyor.sh control land-as main|pr`, or Land as on the Board's
-Rules tab, sets it in the control record, and the record wins over the pack. The rule Push when a card lands still
+Rules tab, sets it in the control record, and the record wins over the pack. The rule Push on landing still
 decides when a push happens.
 
 ## Merge PR

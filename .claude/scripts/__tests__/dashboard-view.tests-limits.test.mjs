@@ -67,7 +67,7 @@ test('Rules: no Load limit field, and one line that says test limits are on the 
   assert.doesNotMatch(rulesP(w).textContent, /Load limit|In force: 30/);
   const line = rulesP(w).querySelector('.rules-limits');
   assert.equal(line.textContent, 'Test limits are on the Tests page.');
-  assert.equal(rulesP(w).querySelector('.rules').firstChild, line, 'where the Machine section was');
+  assert.ok(line.closest('[data-rule="cores"]'), 'in the Reserved cores row, with the other machine limit');
   act(line, 'tests-page').click();
   assert.equal(new w.URL(w.location.href).searchParams.get('tab'), 'tests', 'its link opens the Tests page');
   assert.ok(panel(w, 'tests'));

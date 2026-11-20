@@ -633,7 +633,7 @@
     const resume = name ? `Resume ${name}` : 'Resume all projects';
     if (state === 'paused' && reason) return `Paused by Conveyor for the reason shown. Fix it, then ${resume} to pick again.`;
     if (state === 'paused') return name ? `Paused by you (Pause ${name}). ${resume} to pick again.` : `Every project paused by you (Pause all projects). ${resume} to pick again.`;
-    if (state === 'paused by guard') return `Paused by the weekly-limit guard${num(guard) ? ` at ${guard}%` : ''}. Raise or turn off "Pause when the weekly limit reaches" in Rules to pick again.`;
+    if (state === 'paused by guard') return `Paused by the weekly-limit guard${num(guard) ? ` at ${guard}%` : ''}. Raise or turn off "Weekly pause" in Rules to pick again.`;
     if (state === 'stopped' && name) return `Stopped by Stop now: the cards in progress went back to the queue. ${resume} to pick again.`;
     return null;
   }

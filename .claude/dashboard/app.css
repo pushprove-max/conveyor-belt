@@ -716,9 +716,35 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 /* What these rules produce, its own panel: one taller than the window scrolls inside. */
 .rules-side { min-width: 0; }
 .rules-produce { max-height: calc(100vh - var(--head-h, 64px) - 2 * var(--sp-3)); overflow-y: auto; }
-.rules-row { display: grid; grid-template-columns: minmax(12ch, 16ch) minmax(0, 1fr); align-items: center; gap: var(--sp-3); padding: var(--sp-3) 0; border-top: 1px solid var(--surface-2); }
+/* The Rules panel (indexed): the search and the six groups on the left, the group's rules on the right. */
+.rules-hint { margin: 0 0 var(--sp-2); font-size: var(--fs-sm); color: var(--muted); }
+.rules-indexed { display: grid; grid-template-columns: minmax(16ch, 22ch) minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
+.rules-pick { display: grid; gap: var(--sp-2); position: sticky; top: var(--sp-2); }
+.rules-index { display: grid; gap: var(--sp-1); }
+.rules-index-item { justify-content: flex-start; text-align: left; }
+.rules-index-item[aria-pressed="true"] { background: var(--surface-2); border-color: var(--accent); border-left-width: 4px; font-weight: 700; }
+.rules-set + .rules-set { margin-top: var(--sp-4); }
+.rules-set-name { margin: 0; font-size: var(--fs-md); font-weight: 700; }
+.rules-set-what { margin: 0; font-size: var(--fs-sm); color: var(--muted); }
+.rules-row { display: grid; grid-template-columns: minmax(16ch, 26ch) minmax(0, 1fr); align-items: center; gap: var(--sp-3); padding: var(--sp-3) 0; border-top: 1px solid var(--surface-2); }
 .rules-key { display: grid; }
+/* A rule's label in plain sentence case, its help one short line under it. */
+.rules-row .rules-key > .board-label { font-size: var(--fs-sm); text-transform: none; letter-spacing: 0; color: var(--text); }
 .rules-what { font-size: var(--fs-xs); color: var(--muted); }
+/* A two- or more-way choice as one segmented control: the pressed part is the value in force. */
+.rules-seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
+.rules-seg > .rules-tog { border: 0; border-radius: 0; }
+.rules-seg > .rules-tog + .rules-tog { border-left: 1px solid var(--border); }
+.rules-seg > .rules-tog:focus-visible { outline-offset: -2px; } /* .rules-seg hides what overflows it */
+.rules-seg > .rules-tog[aria-pressed="true"]:focus-visible { outline-color: var(--on-accent); } /* --focus is the pressed fill's color */
+.rules-pins { display: grid; gap: var(--sp-1); flex: 1 1 100%; margin: 0; padding: 0; list-style: none; }
+.rules-pin-row { flex-wrap: nowrap; padding: var(--sp-1) var(--sp-2); border: 1px solid var(--surface-2); border-radius: var(--radius-sm); }
+.rules-pin-row .rules-pin { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rules-grip { cursor: grab; color: var(--muted); }
+.rules-menu { position: relative; }
+.rules-menu > summary { list-style: none; cursor: pointer; }
+.rules-menu > summary::-webkit-details-marker { display: none; }
+.rules-menu-acts { position: absolute; right: 0; z-index: 2; display: grid; gap: var(--sp-1); padding: var(--sp-1); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
 .rules-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); min-width: 0; }
 .rules-would { flex-basis: 100%; font-size: var(--fs-sm); color: var(--warn); }
 .rules-would:empty { display: none; }
@@ -762,7 +788,7 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .rules-big { font-size: var(--fs-xl); font-weight: 650; font-variant-numeric: tabular-nums; }
 .rules-forecast { font-size: var(--fs-sm); color: var(--muted); }
 .rules-warn { margin-top: var(--sp-2); }
-.rules-limits { font-size: var(--fs-sm); color: var(--muted); }
+.rules-limits { flex-basis: 100%; margin: 0; font-size: var(--fs-sm); color: var(--muted); }
 /* The Tests page (panels/tests.js): the figures, the table of test files and Test limits. A grid that holds a table, a
    <pre> or a block that scrolls sideways has one column of minmax(0, 1fr): a plain grid column takes the min-content
    width of its widest item, so on a phone the page ran past the panel and .tests-scroll did not scroll (issue 556). */
@@ -1351,6 +1377,8 @@ html.b3-filling, html.b3-filling body { overflow: hidden; }
   .board-today { margin-left: 0; }
   .rules-produce { max-height: none; overflow-y: visible; }
   .rules-row { grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); }
+  .rules-indexed { grid-template-columns: minmax(0, 1fr); }
+  .rules-pick { position: static; }
   /* Builder, Reviewer and Judge lay out alike: CLI, model and effort each a full-width line, so no model is cut. */
   .rules-model { display: grid; grid-template-columns: minmax(0, 1fr); flex: 1 1 100%; }
   .rules-model > .field { width: 100%; }
