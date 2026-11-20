@@ -117,16 +117,28 @@ FAILURE='def failedrun: if .result == "fail" then (if (.rerun.failures | type) =
 # What a card did to the test files it changed that main already had (#76), written on its landed line as testedits:
 # one entry a file, {file, read, removedAsserts, changedExpected, skipsAdded, timeoutsRaised, casesDeleted}. The one
 # table of patterns, a language a row: the file name endings it reads and the jq regular expressions of an assertion,
-# a skip, only or todo mark, a case and a timeout (its number captured as n). A file whose ending no row has is
-# recorded as edited, not read: read false, its counts null.
+# a skip, only or todo mark, a case and a timeout (its number captured as n). It is also the case reader of the hollow
+# check (HOLLOW_JQ, lib/testrun.sh). A case is a shell `t_<name>()`, `test<name>()` or bats `@test`; a node:test, Jest
+# or Vitest `test(` or `it(` (`.only`, `.skip` and the like too) whose name is a literal string on its line (a name
+# from a variable, a template with ${...} or a test.each table is not read); a pytest `def test<name>(`; and a Go
+# `func Test<Name>(`. A file whose ending no row has is a test file all the same, recorded as edited, not read: read
+# false, its counts null.
 TESTEDIT_TABLE='def table: [
   {ext: ["sh", "bash", "bats"], assert: "\\|\\|\\s*fail\\b|\\bassert[A-Za-z_]*\\b", skip: "^\\s*skip\\b",
    case: "^\\s*(function\\s+)?(t_|test)[A-Za-z0-9_]*\\s*\\(\\)|^\\s*@test\\s",
    timeout: "(\\btimeout\\s+|--timeout[= ]|^#\\s*timeout:\\s*)(?<n>[0-9][0-9_]*)"},
   {ext: ["js", "mjs", "cjs", "jsx", "ts", "mts", "cts", "tsx"], assert: "\\b(expect|assert)(\\.[A-Za-z]+)*\\s*\\(",
    skip: "\\b(it|test|describe|suite)\\.(skip|only|todo)\\b|\\b[xf](it|describe|test)\\s*\\(|\\bt\\.(skip|todo)\\s*\\(|[{,]\\s*(skip|only|todo)\\s*:\\s*(true|[\"\u0027`])",
-   case: "^\\s*[xf]?(it|test)(\\.[A-Za-z]+)?\\s*\\(",
-   timeout: "\\b(timeout|setTimeout)\\s*[:(=]\\s*(?<n>[0-9][0-9_]*)"}];'
+   case: "^\\s*[xf]?(it|test)(\\.[A-Za-z]+)?\\s*\\(\\s*([\"\\x27]|`(?![^`]*\\$\\{))",
+   timeout: "\\b(timeout|setTimeout)\\s*[:(=]\\s*(?<n>[0-9][0-9_]*)"},
+  {ext: ["py"], assert: "^\\s*assert\\b|\\bself\\.(assert[A-Za-z]*|fail)\\s*\\(|\\bpytest\\.(raises|fail)\\b",
+   skip: "@pytest\\.mark\\.(skip|skipif|xfail)\\b|\\bpytest\\.(skip|xfail)\\s*\\(|@unittest\\.(skip|skipIf|skipUnless|expectedFailure)\\b|\\bself\\.skipTest\\s*\\(",
+   case: "^\\s*(async\\s+)?def\\s+test[A-Za-z0-9_]*\\s*\\(",
+   timeout: "(@pytest\\.mark\\.timeout\\s*\\(\\s*(timeout\\s*=\\s*)?|\\btimeout\\s*=\\s*)(?<n>[0-9][0-9_]*)"},
+  {ext: ["go"], assert: "\\bt\\.(Error|Errorf|Fatal|Fatalf|Fail|FailNow)\\s*\\(|\\b(assert|require)\\.[A-Z][A-Za-z]*\\s*\\(",
+   skip: "\\bt\\.(Skip|Skipf|SkipNow)\\s*\\(",
+   case: "^func\\s+Test([A-Z0-9_][A-Za-z0-9_]*)?\\s*\\(",
+   timeout: "\\b(time\\.After|WithTimeout)\\s*\\([^0-9)]*(?<n>[0-9][0-9_]*)"}];'
 # The counts, from the file as main had it and as the card left it (the input, raw: the two joined by a NUL; nothing
 # after it for a file the card deleted) and its path ($f). Each is read as statements: a line, or an assertion line
 # with the lines after it that close its brackets, so an expected value on a line of its own is part of its assertion.
@@ -174,8 +186,23 @@ TESTEDIT_JQ='def count($re): map(select(test($re))) | length;
         else .o += [$l] end) | .o + if .c == null then [] else [.c] end;
       # An assertion as key (the call and its actual value) and val (its expected value), its message left out: a shell
       # test the text before `|| fail`; expect(actual).matcher(expected); assert.method(actual, expected, message), or
-      # assert(value, message) and assert.ok, whose value is masked in key and is val.
+      # assert(value, message) and assert.ok, whose value is masked in key and is val. Python: self.assertX(actual,
+      # expected, msg), self.assertTrue(value, msg) and the like as assert.ok, and `assert value, msg` as assert(value,
+      # msg). Go: t.Errorf(msg, ...) and the like are their message alone (val empty), and testify assert.X(t,
+      # expected, ..., msg) and require.X(...) are keyed by the call and t, val the value after t.
       def parts: if $t.ext[0] == "sh" then sub("\\s*\\|\\|\\s*fail\\b[\\s\\S]*$"; "") | {key: mask, val: norm}
+        elif $t.ext[0] == "py" and test("\\bself\\.(assert[A-Za-z]*|fail)\\s*\\(") then
+          capture("^(?<h>[\\s\\S]*?\\bself\\.(?<n>assert[A-Za-z]*|fail))\\s*\\((?<b>[\\s\\S]*)$") as $m | ($m.b | call) as $a
+          | if $m.n == "fail" then {key: ($m.h + "() " + $a.rest | norm), val: ""}
+            elif $m.n | IN("assertTrue", "assertFalse", "assertIsNone", "assertIsNotNone") then {key: ($m.h + "(" + ($a.args[0] // "" | mask) + ") " + $a.rest | norm), val: ($a.args[0] // "")}
+            else {key: ($m.h + "(" + ($a.args[0] // "") + ") " + $a.rest | norm), val: ($a.args[1] // "")} end
+        elif $t.ext[0] == "py" and test("^\\s*assert\\b") then (sub("^\\s*assert\\b"; "") | call) as $a
+          | {key: ("assert " + ($a.args[0] // "" | mask)), val: ($a.args[0] // "")}
+        elif $t.ext[0] == "go" and test("\\bt\\.(Error|Errorf|Fatal|Fatalf|Fail|FailNow)\\s*\\(") then
+          capture("^(?<h>[\\s\\S]*?\\bt\\.[A-Za-z]+)\\s*\\((?<b>[\\s\\S]*)$") as $m | {key: ($m.h + "() " + ($m.b | call).rest | norm), val: ""}
+        elif $t.ext[0] == "go" and test("\\b(assert|require)\\.[A-Z][A-Za-z]*\\s*\\(") then
+          capture("^(?<h>[\\s\\S]*?\\b(assert|require)\\.[A-Za-z]+)\\s*\\((?<b>[\\s\\S]*)$") as $m | ($m.b | call) as $a
+          | {key: ($m.h + "(" + ($a.args[0] // "") + ") " + $a.rest | norm), val: ($a.args[1] // "")}
         elif test("\\bexpect\\s*\\(") then capture("^(?<h>[\\s\\S]*?\\bexpect)\\s*\\((?<b>[\\s\\S]*)$") as $m | ($m.b | call) as $a
           | ($a.rest | capture("^(?<m>(\\s*\\.\\s*[A-Za-z_$]+)+)\\s*\\((?<b>[\\s\\S]*)$") // null) as $x
           | if $x == null then {key: ($m.h + "(" + ($a.args | join(", ")) + ")" + $a.rest | norm), val: ""}

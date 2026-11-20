@@ -104,9 +104,48 @@ t_tfpatfind() {
   got=$(tf_in eval 'testowners && jq -cn --argjson d "$defs" --argjson r "$refs" "[\$d.rone, \$r[\"src/test-c.mjs\"]]"') || fail "testowners failed: $got"
   [ "$got" = '[["src/test-c.mjs"],["run.test.sh"]]' ] || fail "the case's file and the runner it names: $got"
   W=$T/$CASE/cards/c-1; git -C "$R" worktree add -q --detach "$W" || fail "the card's worktree"
-  echo "test('b', () => {});" > "$W/src/test-a.mjs"; git -C "$W" add -A || fail "the card's change"
-  got=$(tf_card eval 'testedits "$W"' | jq -c 'map(.file)') || fail "testedits failed: $got"
-  [ "$got" = '["src/test-a.mjs"]' ] || fail "the test-*.mjs file the card changed: $got"
+  echo "import test from 'node:test';" > "$W/src/test-a.mjs"; git -C "$W" add -A || fail "the card's change"
+  got=$(tf_card eval 'testedits "$W"' | jq -c 'map([.file, .casesDeleted])') || fail "testedits failed: $got"
+  [ "$got" = '[["src/test-a.mjs",1]]' ] || fail "the test-*.mjs file the card changed, its test('a') case deleted: $got"
+}
+# The case reader (TESTEDIT_TABLE's case patterns) counts each language's cases: a card that deletes the whole file
+# deletes them all. Bug it catches (#1049): pytest and Go files had no row, so their cases were not read (read false),
+# and a JavaScript test( or it( call with a name from a variable or a template with ${...} counted as a case.
+# node:test: two cases (a t.test subtest and test(name) from a variable are not); Jest: two it( cases and a test.only,
+# not the describe; pytest: a def test_ and an async def test (not the helper); Go: TestOne and Test_two (not the
+# helper, nor Testing, which go test does not run); an .rb file is still listed, with no case count.
+t_tfcases() {
+  setup '[]'; tune '.tests.patterns = ["*.test.*", "test_*.py", "*_test.go"]'
+  printf '%s\n' "import test from 'node:test';" "test('a', async (t) => {" "  await t.test('sub', () => {});" '});' \
+    "test(\"b\", () => {});" 'for (const name of names) test(name, () => {});' 'test(`c ${n}`, () => {});' > "$R/node.test.mjs"
+  printf '%s\n' "describe('d', () => {" "  it('x', () => { expect(1).toBe(1); });" '  it(`y`, () => {});' "  test.only('z', () => {});" '});' > "$R/jest.test.js"
+  printf '%s\n' 'import pytest' 'def helper():' '    pass' 'def test_one():' '    assert helper() is None' 'async def test_two():' '    pass' > "$R/test_a.py"
+  printf '%s\n' 'package a' 'func helper() {}' 'func TestOne(t *testing.T) {' '	t.Fatal("x")' '}' 'func Test_two(t *testing.T) {}' 'func Testing() {}' > "$R/a_test.go"
+  echo "it 'works' do end" > "$R/a.test.rb"
+  git -C "$R" add -A && git -C "$R" commit -qm tests || fail "main's test files"
+  W=$T/$CASE/cards/c-1; git -C "$R" worktree add -q --detach "$W" || fail "the card's worktree"
+  git -C "$W" rm -q node.test.mjs jest.test.js test_a.py a_test.go a.test.rb || fail "the card's change"
+  got=$(tf_card eval 'testedits "$W"' | jq -c 'map([.file, .read, .casesDeleted]) | sort') || fail "testedits failed: $got"
+  [ "$got" = '[["a.test.rb",false,null],["a_test.go",true,2],["jest.test.js",true,3],["node.test.mjs",true,2],["test_a.py",true,2]]' ] \
+    || fail "each file's cases: $got"
+}
+# A Python or Go assertion whose message alone changes is no changed expected value; one whose expected value changes
+# is. Bug it catches (#1049): these assertions were read whole, the message as part of the expected value, so a
+# reworded unittest, bare assert, t.Errorf or require message showed as a changed expected value on the Board.
+t_tfeditmsg() {
+  local got
+  got=$( . "$SRC/lib/testfiles.sh"
+    ed() { printf '%s\0%s' "$2" "$3" | jq -Rsc --arg f "$1" "$TESTEDIT_TABLE$TESTEDIT_JQ" | jq -c '[.file, .removedAsserts, .changedExpected]'; }
+    ed u.py "        self.assertEqual(b, [0, 2], 'a change: %s' % b)" "        self.assertEqual(b, [0, 2], 'no change: %s' % b)"
+    ed v.py "        self.assertEqual(b, [0, 2], 'm')" "        self.assertEqual(b, [0, 3], 'm')"
+    ed t.py "        self.assertTrue(ok, 'on')" "        self.assertTrue(ok, 'it is on')"
+    ed a.py "    assert f() == 3, 'three'" "    assert f() == 3, 'it is three'"
+    ed b.py "    assert f() == 3, 'three'" "    assert f() == 4, 'three'"
+    ed e.go '	t.Errorf("got %v", got)' '	t.Errorf("have %v", got)'
+    ed r.go '	require.Equal(t, 3, got, "m")' '	require.Equal(t, 3, got, "n")'
+    ed s.go '	assert.Equal(t, 3, got, "m")' '	assert.Equal(t, 4, got, "m")' ) || fail "the reader failed: $got"
+  [ "$(jq -sc . <<<"$got")" = '[["u.py",0,0],["v.py",0,1],["t.py",0,0],["a.py",0,0],["b.py",0,1],["e.go",0,0],["r.go",0,0],["s.go",0,1]]' ] \
+    || fail "each edit's removed assertions and changed expected values: $got"
 }
 # A file no pattern lists but card runs keep on the page keeps its survey time too. Bug it catches (#1044): the part
 # dropped the survey run of an unlisted file, so its newest run was a card's, while testolder() counted the survey and
@@ -425,8 +464,8 @@ t_tfcaught() {
 
 # A card that weakens a test file main had, to get green, shows on the Tests page (#76). One card, landed by land():
 # in a.test.mjs it removes one expect( line, changes toBe(3) to toBe(4), adds it.skip and raises a timeout; in
-# s.test.sh it deletes a case (t_two, with its assertion) and raises the file's timeout; it edits a.test.py, a kind
-# the table does not read; it changes true to false in bool.test.mjs, the message alone in msg.test.mjs and the
+# s.test.sh it deletes a case (t_two, with its assertion) and raises the file's timeout; it edits a.test.rb, a kind
+# the table does not read (still listed, with no counts); it changes true to false in bool.test.mjs, the message alone in msg.test.mjs and the
 # expected value on its own line in multi.test.mjs; in re.test.mjs it changes 7 to 8 in a regular expression with a
 # comma and removes the assertion after one with an unclosed \( in its regular expression; it deletes gone.test.sh;
 # and it adds new.test.mjs. Bug caught: a landed line with no testedits, a count read wrong (a changed assertion taken
@@ -472,12 +511,12 @@ t_tfedits() {
   printf '%s\n' "test('r', () => {" '  assert.match(cost(), /no price \(1 today, 2 in 7 days\)/);' '  assert.match(open(), /a \( b/);' '  assert.equal(n(), 1);' '});' > "$R/re.test.mjs"
   printf '%s\n' 't_gone() {' '  [ "$(z)" = 3 ] || fail "z"' '}' > "$R/gone.test.sh"
   printf '%s\n' '# timeout: 120' 't_one() {' '  [ "$(x)" = 1 ] || fail "x"' '}' 't_two() {' '  [ "$(y)" = 2 ] || fail "y"' '}' > "$R/s.test.sh"
-  echo x > "$R/a.test.py"
-  git -C "$R" add a.test.mjs s.test.sh a.test.py bool.test.mjs msg.test.mjs multi.test.mjs re.test.mjs gone.test.sh && git -C "$R" commit -qm tests || fail "main's test files"
+  echo x > "$R/a.test.rb"
+  git -C "$R" add a.test.mjs s.test.sh a.test.rb bool.test.mjs msg.test.mjs multi.test.mjs re.test.mjs gone.test.sh && git -C "$R" commit -qm tests || fail "main's test files"
   W=$T/$CASE/cards/c-1; git -C "$R" worktree add -q --detach "$W" || fail "the card's worktree"
   printf '%s\n' "it('a', () => {" '  expect(f()).toBe(4);' '});' "it.skip('b', () => {" '  expect(h()).toBe(2);' '}, { timeout: 5000 });' > "$W/a.test.mjs"
   printf '%s\n' '# timeout: 300' 't_one() {' '  [ "$(x)" = 1 ] || fail "x"' '}' > "$W/s.test.sh"
-  echo y > "$W/a.test.py"; echo "it('n', () => { expect(1).toBe(1); });" > "$W/new.test.mjs"
+  echo y > "$W/a.test.rb"; echo "it('n', () => { expect(1).toBe(1); });" > "$W/new.test.mjs"
   printf '%s\n' "test('b', () => { assert.equal(on(), false, 'it is on'); });" > "$W/bool.test.mjs"
   printf '%s\n' "test('m', () => { assert.equal(n(), 2, 'it is two'); });" > "$W/msg.test.mjs"
   printf '%s\n' "test('l', () => {" '  assert.deepEqual(list(),' '    [1, 3]);' '});' > "$W/multi.test.mjs"
@@ -485,7 +524,7 @@ t_tfedits() {
   git -C "$W" rm -q gone.test.sh || fail "gone.test.sh not deleted"
   git -C "$W" add -A && tf_card eval 'names && land c-1 7 "$W" "weaken the tests"' || fail "the card did not land"
   got=$(st 'select(.step == "landed") | .testedits | map([.file, .read, .removedAsserts, .changedExpected, .skipsAdded, .timeoutsRaised, .casesDeleted])' | jq -c .)
-  [ "$got" = '[["a.test.mjs",true,1,1,1,1,0],["a.test.py",false,null,null,null,null,null],["bool.test.mjs",true,0,1,0,0,0],["gone.test.sh",true,1,0,0,0,1],["msg.test.mjs",true,0,0,0,0,0],["multi.test.mjs",true,0,1,0,0,0],["re.test.mjs",true,1,1,0,0,0],["s.test.sh",true,1,0,0,1,1]]' ] \
+  [ "$got" = '[["a.test.mjs",true,1,1,1,1,0],["a.test.rb",false,null,null,null,null,null],["bool.test.mjs",true,0,1,0,0,0],["gone.test.sh",true,1,0,0,0,1],["msg.test.mjs",true,0,0,0,0,0],["multi.test.mjs",true,0,1,0,0,0],["re.test.mjs",true,1,1,0,0,0],["s.test.sh",true,1,0,0,1,1]]' ] \
     || fail "the landed line's testedits: $got"
   loop check >/dev/null || fail "the landed line with testedits does not check"
   # Five later cards edit a.test.mjs: the part's edits keep a file's newest five alone (the list stays small).
@@ -495,7 +534,7 @@ t_tfedits() {
   done
   part=$(tf_in testspart 2026-11-09)
   got=$(jq -c '.edits | map([.card, .issue, .file])' <<<"$part")
-  [ "$got" = '[["c-6",6,"a.test.mjs"],["c-5",5,"a.test.mjs"],["c-4",4,"a.test.mjs"],["c-3",3,"a.test.mjs"],["c-2",2,"a.test.mjs"],["c-1",7,"a.test.py"],["c-1",7,"bool.test.mjs"],["c-1",7,"gone.test.sh"],["c-1",7,"msg.test.mjs"],["c-1",7,"multi.test.mjs"],["c-1",7,"re.test.mjs"],["c-1",7,"s.test.sh"]]' ] \
+  [ "$got" = '[["c-6",6,"a.test.mjs"],["c-5",5,"a.test.mjs"],["c-4",4,"a.test.mjs"],["c-3",3,"a.test.mjs"],["c-2",2,"a.test.mjs"],["c-1",7,"a.test.rb"],["c-1",7,"bool.test.mjs"],["c-1",7,"gone.test.sh"],["c-1",7,"msg.test.mjs"],["c-1",7,"multi.test.mjs"],["c-1",7,"re.test.mjs"],["c-1",7,"s.test.sh"]]' ] \
     || fail "the Tests part's edits, newest first, a file's newest five: $got"
   # #217: the sixth edit pushed the first out of edits, and so off the Board's Timeline, which lists every event of a
   # file: testolder() gives the edits of a file before its newest five, newest first.

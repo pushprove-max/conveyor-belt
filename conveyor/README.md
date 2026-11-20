@@ -828,13 +828,16 @@ its name; a new test file is not read) and writes `testedits` on the landed line
 file has no `testedits`. One table in `lib/testfiles.sh` (`TESTEDIT_TABLE`) holds the patterns, one row a language:
 shell (`.sh`, `.bash`, `.bats`: `|| fail` and `assert` lines, `skip`, `t_<name>()`, `test<name>()` and `@test` cases,
 `timeout <N>`, `--timeout` and `# timeout:`) and JavaScript and TypeScript (`expect(` and `assert` calls,
-`it.skip`, `test.only`, `describe.todo`, `xit`, `skip: true` and the like, `it(` and `test(` cases, `timeout:` and
-`setTimeout(` numbers). A file of another kind has `read` false and its counts null: edited, not read. A test file
+`it.skip`, `test.only`, `describe.todo`, `xit`, `skip: true` and the like, `it(` and `test(` cases with a literal
+name, `timeout:` and `setTimeout(` numbers), Python (`.py`: `assert`, `self.assert<X>(` and `pytest.raises` lines,
+`@pytest.mark.skip` and `self.skipTest(` marks, `def test<name>(` cases, `timeout=` numbers) and Go (`.go`:
+`t.Errorf(` and the like and testify `assert.` and `require.` calls, `t.Skip(` marks, `func Test<Name>(` cases). A file of another kind has `read` false and its counts null: edited, not read. A test file
 that the card deletes is read too: all of its assertions and cases are removed. An assertion includes the lines after
 it up to its closing bracket. A line removed and added again unchanged counts for nothing. An assertion that keeps its
 call and actual value but changes its expected value is a changed expected value: the value after `expect(...)`'s
-matcher, the second argument of `assert.equal` and the like, the value of `assert(...)` or `assert.ok`, or a shell
-test before `|| fail`. A changed message alone counts for nothing. A timeout whose number went up and nothing else is a raised timeout. Removed assertions, added
+matcher, the second argument of `assert.equal`, `self.assertEqual` and the like, the value of `assert(...)`,
+`assert.ok`, `self.assertTrue` or a Python `assert`, the value after `t` in a testify call, or a shell test before
+`|| fail`; a `t.Errorf(` and the like is its message alone. A changed message alone counts for nothing. A timeout whose number went up and nothing else is a raised timeout. Removed assertions, added
 marks and deleted cases count what the file lost or gained on balance, so an assertion rewritten or a case renamed
 counts for nothing.
 

@@ -1981,9 +1981,9 @@ HOLLOWFIX='Fix the hollow cases of the test file ' MAKERUN='Make the test file '
 # the result in <worktree>.unfixed, the reason first when it does not hold (each case still found hollow, or each
 # deleted case with no COVERED-BY line), and fails then.
 HOLLOWDONE='HOLLOW-CHECK: done'
-# The rows hollowproof() reads a test file by (after TESTEDIT_TABLE): the test edits' table and Python (a case starts
-# `def test`), each with the lines that are a note and not code (note: blank or a comment) and the line that closes a
-# case (close: a line that ends in a closing bracket, at most as far in as its start line, and that does not start
+# The rows hollowproof() reads a test file by (after TESTEDIT_TABLE): the rows of the test edits' table, its case
+# reader (a Go file read as JavaScript is), each with the lines that are a note and not code (note: blank or a
+# comment) and the line that closes a case (close: a line that ends in a closing bracket, at most as far in as its start line, and that does not start
 # inside a string, a heredoc or a comment; null for Python, whose case ends before the next line of code, not a comment
 # nor in a triple-quoted string, at most as far in as its start line); row($f) is the row of file $f, or null. plain
 # drops the escapes of a line (name\'s to name's), so a case title is read as it shows. ind is how far in a line is;
@@ -1992,9 +1992,9 @@ HOLLOWDONE='HOLLOW-CHECK: done'
 # ${...} of a template (JavaScript; a ' or " string ends with its line). A regular expression is read as code. shin
 # gives true also for a shell line that cannot close a case: one with a comment, one that ends inside text, and one
 # whose last bracket of code closes a bracket or a $( opened on that line or inside a $( (x=$(f), a() { :; }, [ -s f ]).
-HOLLOW_JQ='def cases: [table[] | . + {note: (if any(.ext[]; . == "sh") then "^\\s*(#|$)" else "^\\s*(//|/\\*|\\*(\\s|/|$)|$)" end),
-      close: "[)\\]}]\\s*;?\\s*$", sh: any(.ext[]; . == "sh")}]
-    + [{ext: ["py"], case: "^\\s*(async\\s+)?def\\s+test", note: "^\\s*(#|$)", close: null}];
+HOLLOW_JQ='def cases: [table[] | any(.ext[]; . == "py") as $py
+    | . + {note: (if any(.ext[]; . == "sh") or $py then "^\\s*(#|$)" else "^\\s*(//|/\\*|\\*(\\s|/|$)|$)" end),
+      close: (if $py then null else "[)\\]}]\\s*;?\\s*$" end), sh: any(.ext[]; . == "sh")}];
   def row($f): (($f | capture("\\.(?<x>[^./]+)$").x | ascii_downcase) // "") as $x | first(cases[] | select(any(.ext[]; . == $x))) // null;
   def plain: gsub("\\\\(?<c>.)"; .c);
   def ind: match("^\\s*").length;

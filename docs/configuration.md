@@ -88,6 +88,18 @@ that holds a failed case, and the record of the test files that a card changed. 
 and the files that your `tests.patterns` match. When you do not set `tests.patterns`, they use only the files named
 `*.test.*`, not the default above.
 
+The record of the test files that a card changed counts the test cases that the card deleted. The hollow-case check
+uses the same forms to find the cases. Conveyor reads these forms of case:
+
+- Shell: a `t_<name>()` or `test<name>()` function, or a bats `@test`.
+- JavaScript and TypeScript (`node:test`, Jest, Vitest): a `test(` or `it(` call, also with `.only` or `.skip`, with a
+  literal name on the same line, such as `test('adds two numbers', ...)`. A name from a variable, a template with
+  `${...}`, or a `test.each` table is not a case.
+- Python (pytest): a `def test<name>(` or an `async def test<name>(`.
+- Go: a `func Test<Name>(`.
+
+A test file in another language is still a test file. The record lists it with no case count.
+
 Your test runner is never a test file, also when a glob matches it. The test runner is a file that `test.command`,
 `test.full`, `test.main` or `test.fileCommand` names, or a file that a `package.json` script of those commands names, for example
 `scripts/run-tests.mjs` in `"test": "node scripts/run-tests.mjs"`. When a shell script of those commands starts a file
