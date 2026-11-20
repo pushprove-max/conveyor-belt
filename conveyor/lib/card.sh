@@ -551,6 +551,10 @@ card() { # <card> <issue> [<branch> <tip>]
       # declined. A depth that cannot be read counts as the cap.
       mode=''; last=1; isfu=1; d=$(fudepth "$issue") && [ "$d" -lt "$MAX_DEPTH" ] && isfu=''
     else
+      # A NO-GO with no finding (an UNPROVEN line alone, say) has nothing for a fix session to fix, or to number: the
+      # card blocks with the reviewer's own line (its first UNPROVEN line, else its VERDICT line), cut at 200 characters.
+      grep -Evq "$NOTFINDING" "$wt.review" || { why=$(grep -m1 '^UNPROVEN:' "$wt.review" || grep -m1 '^VERDICT:' "$wt.review")
+        block "$c" "$n" "$wt" "review $pass is NO-GO with no finding to fix: ${why:0:200}"; return; }
       # A card stacked on this one (stackto()) that passed its tests goes on during this round, fitted onto main alone
       # (giveway(), claim()).
       [ -z "$priv" ] || { privfix=1; echo "conveyor: card $c: a finding of its last review is a privacy hit in its own change, so it goes to one more fix round: ${priv:0:200}"; }

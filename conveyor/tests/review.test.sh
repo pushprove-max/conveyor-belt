@@ -99,6 +99,19 @@ t_proven() {
     || fail "the fix session's brief lacks the same-mistake instruction or the proven finding: $(grep -n -e '^# Reviewer findings' -e 'wrong word' "$STUB/brief")"
 }
 
+# Bug (#1020): a NO-GO with no finding, only an UNPROVEN line, blocked with "the engine could not give the review's
+# findings their ids", which says nothing of what the reviewer said. It blocks with that line, and starts no fix session.
+t_nogounproven() {
+  setup "[$(issue 7 2026-01-03)]"
+  U="UNPROVEN: the sandbox could not start git diff $(printf 'x%.0s' {1..300})"
+  printf '%s\n' "$U" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
+  # loop: the block is made inline in card() (card.sh) after the review, which no engine function returns alone.
+  loop run --only 7 >/dev/null
+  [ "$(wc -l < "$STUB/sessions")" = 1 ] || fail "a fix session was started for a NO-GO with no finding: $(cat "$STUB/sessions")"
+  [ "$(st 'select(.step == "blocked") | .reason')" = "review 1 is NO-GO with no finding to fix: ${U:0:200}" ] \
+    || fail "the block does not quote the review's UNPROVEN line: $(st 'select(.step == "blocked") | .reason')"
+}
+
 # Bugs: a leftover finding is not filed, or filed with the wrong mark, depth, labels or milestone; a NEW CARD line is
 # filed as one; a depth-1 follow-up (under the cap, MAX_DEPTH, 2) has its findings declined instead of filed at
 # depth 2, so a true finding of a follow-up's card is lost.
