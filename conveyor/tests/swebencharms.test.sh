@@ -211,12 +211,39 @@ t_swearmgit() {
   out=$(loop bench swe arms check conveyor-oldgit 2>&1) && fail "the preflight passed with git 2.34.1 in the container: $out"
   grep -q "^conveyor-oldgit: failed: on the trivial task, its preflight command failed: .*git version 2\.34\.1: Conveyor needs git 2\.36 or newer" <<<"$out" \
     || fail "the failed preflight does not name the container's git version: $out"
-  # The container Codex's sandbox can start a command in, with the run's limits and mounts kept. Bug (#1027): with the
-  # masks off but no SYS_ADMIN, the sandbox's user namespace still could not map its user, and the review read nothing.
+  # Bug (#1035): #1025 and #1027 ran the conveyor arm's container with Docker's seccomp, AppArmor and /proc masks off
+  # and with SYS_ADMIN, for a Codex sandbox that still did not start. The container keeps Docker's confinement, its
+  # limits and its two mounts (the sandbox, the engine folder).
   c=$(grep '^create .*-conveyor-oldgit-' "$SWE_FX/docker.log")
-  [[ $c == *'--security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined --cap-add SYS_ADMIN '* && $c == *' --cpus '*' --memory '* \
-    && $(grep -o -- '-v [^ ]*' <<<"$c" | wc -l) = 2 ]] || fail "the conveyor arm's container is not the one Codex's sandbox runs in, with its limits: $c"
+  [[ -n $c && $c != *SYS_ADMIN* && $c != *--cap-add* && $c != *--security-opt* && $c != *unconfined* && $c != *--privileged* \
+    && $c == *' --cpus '*' --memory '* && $(grep -o -- '-v [^ ]*' <<<"$c" | wc -l) = 2 ]] \
+    || fail "the conveyor arm's container has loosened Docker options, or lost its limits or mounts: $c"
 }
+
+# Bug (#1035): an engine older than #1019 runs its Codex review with `codex exec -s read-only`, and Codex's own sandbox
+# cannot start a command in the task's container, so the review read nothing. The Conveyor arms' install puts a
+# `codex` first on the PATH that runs `exec` without that sandbox, the container being the sandbox. Each arm's case
+# runs its real install with its downloads stubbed (curl, tar, sha256sum, npm), and calls the installed `codex`.
+codexwrap() {
+  local a=$1 d s out
+  d=$(mktemp -d "$T/wrap.XXXXXX") && s=$d/stub && mkdir -p "$s" "$d/home" || fail "no folder for the $a arm"
+  printf '#!/bin/sh\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && printf "#!/bin/sh\\n" > "$2" && chmod +x "$2"; shift; done\n' > "$s/curl"
+  printf '#!/bin/sh\ncat > /dev/null\n' > "$s/tar"; cp "$s/tar" "$s/sha256sum"
+  # stub: npm's Codex is a codex that prints each argument it was given on a line, so the wrapper's call can be read.
+  printf '#!/bin/sh\nmkdir -p "$HOME/.local/bin" && printf "#!/bin/sh\\nprintf \\"%%%%s\\\\\\\\n\\" \\"\\$@\\"\\n" > "$HOME/.local/bin/codex" && chmod +x "$HOME/.local/bin/codex"\n' > "$s/npm"
+  chmod +x "$s"/* || fail "the stubs for the $a arm were not made"
+  out=$(cd "$d" && HOME=$d/home PATH=$s:$PATH bash -c "$(jq -r .install "$SRC/bench/arms/$a.json")" 2>&1) || fail "the $a arm's install failed with its downloads stubbed: $out"
+  out=$(HOME=$d/home PATH=$d/home/.local/bin:$PATH codex exec --json -s read-only -m gpt-x --sandbox=workspace-write - 2>&1)
+  [ "$out" = "$(printf '%s\n' exec --dangerously-bypass-approvals-and-sandbox --json -m gpt-x -)" ] \
+    || fail "the $a arm's codex did not take out the sandbox mode and run exec without Codex's sandbox: $out"
+  out=$(HOME=$d/home PATH=$d/home/.local/bin:$PATH codex exec --dangerously-bypass-approvals-and-sandbox -m gpt-x - 2>&1)
+  [ "$out" = "$(printf '%s\n' exec --dangerously-bypass-approvals-and-sandbox -m gpt-x -)" ] \
+    || fail "the $a arm's codex gave the no-sandbox flag twice, which Codex refuses, to an engine that already asks for it: $out"
+  out=$(HOME=$d/home PATH=$d/home/.local/bin:$PATH codex login status -s read-only 2>&1)
+  [ "$out" = "$(printf '%s\n' login status -s read-only)" ] || fail "the $a arm's codex changed a call that is not exec: $out"
+}
+t_swearmcodexwrap() { codexwrap conveyor; }
+t_swearmcodexwrapcc() { codexwrap conveyor-codex-claude; }
 
 # Bug: the seats were worked out on this host's models, so on a host with no Codex and a pack that lists no models the
 # default reviewer was Claude's, while in the container, where the arm installs Codex, the same default is Codex's:
