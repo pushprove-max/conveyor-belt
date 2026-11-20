@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# The shared codex stub. `codex debug models` fails (a Codex that offers no list); --version is doctor's check;
+# `codex exec --help` names --dangerously-bypass-hook-trust, as the Codex a build session needs does (cxready()).
+# `codex exec ... -o <file>` writes the answer to <file> and prints the usage event on stdout. A call with no -o (a
+# build session) prints, with --json, its events (the usage event alone), else, as Codex does, the answer as text.
+# A case sets it with files in $STUB:
+#   codex-answer  the answer, for every call (askmodel); else a review: $STUB/review.<n>, n counting the calls
+#   review-cmd    shell run before a review answers (a case's own change to the run)
+#   codex-rc      the exit code, else 0, after the answer is written
+#   codex-delay   seconds to wait before it answers
+#   codex-usage   the JSON line printed last, else a usage of 100/60/7 tokens
+[ "${1:-}" != debug ] || exit 1
+[ "${1:-}" != --version ] || { echo 'codex-cli 0.130.0'; exit 0; }
+[ "${1:-} ${2:-}" != "exec --help" ] || { echo '      --dangerously-bypass-hook-trust'; exit 0; }
+json=; case " $* " in *" --json "*) json=1 ;; esac
+out=; while [ $# -gt 0 ]; do [ "$1" = -o ] && out=$2; shift; done
+[ ! -f "$STUB/codex-delay" ] || sleep "$(cat "$STUB/codex-delay")"
+[ -n "$out" ] || { cat > /dev/null; [ -n "$json" ] || { cat "$STUB/codex-answer" 2>/dev/null || echo OK; exit "$(cat "$STUB/codex-rc" 2>/dev/null || echo 0)"; }; }
+# The review line below is edited in place by cases that keep the prompt or the arguments (sed on this line): keep it whole.
+if [ -z "$out" ]; then :
+elif [ -f "$STUB/codex-answer" ]; then cat > /dev/null; cat "$STUB/codex-answer" > "$out" || exit 1
+else
+cat > /dev/null; echo x >> "$STUB/reviews"; [ ! -f "$STUB/review-cmd" ] || . "$STUB/review-cmd"; cat "$STUB/review.$(wc -l < "$STUB/reviews")" > "$out" || exit 1
+fi
+cat "$STUB/codex-usage" 2>/dev/null || echo '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":60,"output_tokens":7}}'
+exit "$(cat "$STUB/codex-rc" 2>/dev/null || echo 0)"

@@ -64,6 +64,7 @@ STAYS=('.claude/rules/*' '.claude/commands/*' '.conveyor/*' AGENT_STARTUP.md CLA
 # the reason it is left out, a pair a line.
 LEFT_OUT=(
   'conveyor/tests/speed/*' "the test speed survey: notes for this repository's developers, which no engine or Board file reads"
+  'conveyor/tests/stubs/README.md' "notes for this repository's developers on the shared CLI test stubs, which no engine or Board file reads"
 )
 LEFT=''
 for ((i = 0; i < ${#LEFT_OUT[@]}; i += 2)); do

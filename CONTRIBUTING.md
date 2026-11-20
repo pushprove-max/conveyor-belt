@@ -40,6 +40,11 @@ as the commit's author. To sign off commits you made already, run `git rebase --
 
 A test says why the behaviour matters and fails when it breaks; an existing test is never weakened to pass.
 
+- An engine test that needs a `claude`, `codex`, `opencode` or `gh` uses the shared stub in `conveyor/tests/stubs/`
+  (`conveyor/tests/lib.sh` puts it on `PATH`), set by files in `$STUB`, and does not write its own: the stub answers
+  in the form the engine reads, and `clicontract.test.sh` fails when the engine's reading and the stub part. A stub
+  that must do what the shared one cannot says why in a comment.
+
 - `bash .conveyor/test-changed.sh` runs the tests of what you changed. For the engine, each engine file runs its own
   case files: its area of `.conveyor/engine-areas.json` names the case files under `conveyor/tests/` that exercise
   it, and a change to `conveyor/lib/review.sh`, say, runs only those. What every case runs through stays whole: a

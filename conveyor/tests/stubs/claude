@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# The shared claude stub: answers in the form the engine reads now. A case sets it with files in $STUB:
+#   claude-answer  the text a call with no tools answers (askmodel, doctor's askcheck), else OK
+#   claude-rc      the exit code of a call with no tools, else 0 (the answer is still printed)
+#   claude-delay   seconds a call with no tools waits before it answers
+#   claude-usage   the stream a session prints (the lines in the file), else a result with 10/20/999/5 tokens
+# --output-format json: one JSON object with `result`; stream-json: the stream's result line; text: the text alone.
+# --version is doctor's requirement check. A call with no tools is no session; any other call is a session: its
+# prompt is kept in $STUB/brief, its arguments are added to $STUB/sessions, and $STUB/build runs in the worktree.
+[ "${1:-}" != --version ] || { echo '2.1.322 (Claude Code)'; exit 0; }
+case " $* " in *" --tools  "*) cat > /dev/null
+  [ ! -f "$STUB/claude-delay" ] || sleep "$(cat "$STUB/claude-delay")"
+  a=$(cat "$STUB/claude-answer" 2>/dev/null || echo OK)
+  case " $* " in
+    *" --output-format json "* | *" --output-format stream-json "*)
+      jq -cn --arg r "$a" '{type: "result", is_error: false, subtype: "success", result: $r, num_turns: 1}' ;;
+    *) printf '%s\n' "$a" ;;
+  esac
+  exit "$(cat "$STUB/claude-rc" 2>/dev/null || echo 0)" ;; esac
+cat > "$STUB/brief"; echo "$*" >> "$STUB/sessions"; . "$STUB/build"
+# A session asked for no stream (no --output-format stream-json) gets text, as Claude Code prints it.
+case " $* " in *" --output-format stream-json "*) ;; *) echo done; exit 0 ;; esac
+[ ! -f "$STUB/claude-usage" ] || { cat "$STUB/claude-usage"; exit 0; }
+echo '{"type":"result","is_error":false,"usage":{"input_tokens":10,"cache_creation_input_tokens":20,"cache_read_input_tokens":999,"output_tokens":5}}'

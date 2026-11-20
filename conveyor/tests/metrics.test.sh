@@ -19,18 +19,13 @@ t_metrics() {
   export TZ=UTC; setup "$(issue 7 2026-01-01 area:billing | jq -c '[.body = "body\nFollow-up depth: 1"]')"; S=$ST; mkdir -p "$S"
   echo "$GO" > "$STUB/review.1"
   jq -cn '{time: (now | todate), pct: 40}' > "$S/limit.jsonl"
-  cat > "$STUB/claude" <<'EOF'
-#!/usr/bin/env bash
-cat > /dev/null; echo "$*" >> "$STUB/sessions"; . "$STUB/build"
+  # The stream the shared claude stub's session prints, and the events after the shared codex stub's review (tests/stubs/).
+  bash > "$STUB/claude-usage" <<'EOF'
 echo '{"type":"assistant","message":{"id":"a1","content":[{"type":"tool_use","name":"Bash"},{"type":"tool_use","name":"Read"}],"usage":{"input_tokens":5,"output_tokens":2}}}'
 echo '{"type":"assistant","message":{"id":"a2","content":[{"type":"text","text":"x"},{"type":"tool_use","name":"Bash"}],"usage":{"input_tokens":5,"output_tokens":3}}}'
 echo '{"type":"result","is_error":false,"num_turns":3,"duration_ms":4000,"duration_api_ms":2600,"permission_denials":[{"tool_name":"Bash"}],"modelUsage":{"claude-opus-5-5":{}},"usage":{"input_tokens":10,"cache_creation_input_tokens":20,"cache_read_input_tokens":970,"output_tokens":5}}'
 EOF
-  cat > "$STUB/codex" <<'EOF'
-#!/usr/bin/env bash
-[ "${1:-}" != debug ] || exit 1 # `codex debug models` (the host's report) is no review: it lists none
-while [ $# -gt 0 ]; do [ "$1" = -o ] && out=$2; shift; done
-cat > /dev/null; echo x >> "$STUB/reviews"; cat "$STUB/review.$(wc -l < "$STUB/reviews")" > "$out" || exit 1
+  bash > "$STUB/codex-usage" <<'EOF'
 echo '{"type":"item.completed","item":{"type":"command_execution"}}'; echo '{"type":"item.completed","item":{"type":"command_execution"}}'
 echo '{"type":"item.completed","item":{"type":"agent_message"}}'
 echo '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":60,"output_tokens":7}}'
@@ -200,9 +195,7 @@ EOF
 t_metricstwo() {
   export TZ=UTC; setup "$(issue 7 2026-01-01 area:billing | jq -cs .)"; echo "$GO" > "$STUB/review.1"
   seatset reviewer gpt-6.1-sol
-  cat > "$STUB/claude" <<'EOF'
-#!/usr/bin/env bash
-cat > /dev/null; . "$STUB/build"
+  bash > "$STUB/claude-usage" <<'EOF' # the stream the shared claude stub's session prints
 echo '{"type":"system","subtype":"init","model":"claude-opus-5-5"}'
 echo '{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"t1","name":"Bash"}],"usage":{"input_tokens":3,"output_tokens":9}}}'
 echo '{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"t2","name":"Edit"}],"usage":{"input_tokens":3,"output_tokens":9}}}'
@@ -252,7 +245,7 @@ cutoff() { # <cut | early> <the step's dollars> <its Opus input tokens>
 # left out and why, the card goes on and lands, and the step shows as unpriced with that reason, never as $0.
 t_metricsunread() {
   export TZ=UTC; setup "$(issue 7 2026-01-01 area:billing | jq -cs .)"; echo "$GO" > "$STUB/review.1"
-  printf '%s\n' '#!/usr/bin/env bash' 'cat > /dev/null; . "$STUB/build"' 'echo "{\"type\":\"result\",\"is_error\":false,\"num_turns\":2,\"usage\":\"n/a\"}"' > "$STUB/claude"
+  echo '{"type":"result","is_error":false,"num_turns":2,"usage":"n/a"}' > "$STUB/claude-usage"
   loop run >/dev/null || fail "run exited non-zero on a session whose usage could not be read"
   [ "$(st 'select(.step == "build") | [.result, .unread, .usage, .tokens.claude, .stats.turns, .model] | tojson')" = '["ok","the session output holds no token usage",null,0,2,"m"]' ] \
     || fail "the unread build: $(st 'select(.step == "build")')"
@@ -271,9 +264,7 @@ t_metricsunread() {
 # from that model's answers.
 t_metricspartial() {
   export TZ=UTC; setup "$(issue 7 2026-01-01 area:billing | jq -cs .)"; echo "$GO" > "$STUB/review.1"
-  cat > "$STUB/claude" <<'EOF'
-#!/usr/bin/env bash
-cat > /dev/null; . "$STUB/build"
+  bash > "$STUB/claude-usage" <<'EOF' # the stream the shared claude stub's session prints
 echo '{"type":"assistant","message":{"id":"m1","model":"claude-opus-5-5","usage":{"input_tokens":5,"output_tokens":1,"cache_creation":{"ephemeral_1h_input_tokens":300}}}}'
 echo '{"type":"assistant","message":{"id":"m2","model":"claude-sonnet-5-5","usage":{"input_tokens":5,"output_tokens":1,"cache_creation":{"ephemeral_1h_input_tokens":0}}}}'
 echo '{"type":"result","is_error":false,"num_turns":1,"usage":{"input_tokens":10,"cache_creation_input_tokens":500,"cache_read_input_tokens":0,"output_tokens":2,"cache_creation":{"ephemeral_1h_input_tokens":300}}}'

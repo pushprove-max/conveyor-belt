@@ -210,77 +210,8 @@ fixture() { # <folder>
   # after its review (main moving before a review or landing is caught there, not at the landing).
   echo 'echo x >> "$STUB/tests"; [ ! -e "$STUB/move" ] || { read -r l m < "$STUB/move"; rm "$STUB/move"; echo "$l" > "$R/a.txt"; git -C "$R" commit -qam "$m"; }' > "$STUB/test-cmd"
   printf '%s\n' '{"id":"r-1","question":"billing export rule?","answer":"yes"}' '{"id":"r-2","question":"prism rule?","answer":"no"}' > "$STUB/rulings"
-  cat > "$STUB/gh" <<'EOF'
-#!/usr/bin/env bash
-# The open issues; with $STUB/list-filed, the follow-ups filed so far are among them, as on GitHub.
-issues() { jq -cs '.[0] + .[1:]' "$STUB/issues.json" $([ ! -e "$STUB/list-filed" ] || ls "$STUB/filed" 2>/dev/null); }
-# A label made (gh label create): kept in $STUB/labels, never taken for an issue filed.
-[ "$1" != label ] || { printf '%s\n' "$*" >> "$STUB/labels"; exit 0; }
-case $2 in
-  list) if [ "$4" = closed ]; then echo "$*" >> "$STUB/closed-asked"; [ ! -e "$STUB/closed-fail" ] || exit 1; cat "$STUB/closed-issues.json" 2>/dev/null || echo '[]'; else [ ! -f "$STUB/list-cmd" ] || . "$STUB/list-cmd"
-    if [ "$4" = all ]; then issues | jq -c "sort_by(-.number) | .[:$6]"; else issues | jq -c ".[:$6]"; fi; fi ;; # all: newest first, as on GitHub
-  # Another repository's issue (gh issue view <n> --repo <owner/repo> --json state): $STUB/repo.<owner_repo>.<n> holds
-  # its state, else CLOSED; with $STUB/repo-fail.<owner_repo>, that repository cannot be read.
-  view) case "$*" in *' --repo '*) k=${5//\//_}; [ ! -e "$STUB/repo-fail.$k" ] || { echo "GraphQL: Could not resolve to a Repository with the name '$5'. (repository)" >&2; exit 1; }
-      echo "{\"state\":\"$(cat "$STUB/repo.$k.$3" 2>/dev/null || echo CLOSED)\"}" ;;
-    *'--json closed'*) echo "$3" >> "$STUB/closed-viewed"; [ ! -e "$STUB/closed-fail" ] || exit 1
-      jq -c --argjson n "$3" '{closed: any(.[]; .number == $n)}' "$STUB/closed-issues.json" 2>/dev/null || echo '{"closed":false}' ;;
-    # closedAt: $STUB/closedAt.<n>, else "" (a closed issue whose closing time GitHub did not give).
-    *'--json state'*) echo "{\"state\":\"$(cat "$STUB/state.$3" 2>/dev/null || cat "$STUB/state" 2>/dev/null || echo CLOSED)\",\"closedAt\":\"$(cat "$STUB/closedAt.$3" 2>/dev/null)\"}" ;;
-    *) issues | jq --argjson n "$3" '.[] | select(.number == $n)' ;; esac ;;
-  # gh api graphql: an issue's fullDatabaseId, a string as GitHub's BigInt (6488700000 + its number: over the 32-bit
-  # Int of databaseId, which this stub does not answer, as real ids are), who opened each open issue (an issue's authorAssociation, else OWNER) and its parent and sub-issues
-  # ($STUB/subs: a line "<parent> <part>" for each; a part not among the open issues is closed), or when the
-  # awaiting-deploy labels were added.
-  graphql) case "$*" in *fullDatabaseId*) n=$(printf '%s\n' "$@" | sed -n 's/^number=//p'); echo "{\"data\": {\"repository\": {\"issue\": {\"fullDatabaseId\": \"$((n + 6488700000))\"}}}}" ;;
-      *authorAssociation*) s=$(jq -cRn '[inputs | split(" ") | map(tonumber)]' "$STUB/subs" 2>/dev/null) || s='[]'
-      issues | jq -c --argjson s "${s:-[]}" 'map(.number) as $open | {data: {repository: {nameWithOwner: "o/r", issues: {nodes: map(.number as $n | {number, authorAssociation: (.authorAssociation // "OWNER"),
-        parent: ([$s[] | select(.[1] == $n) | {number: .[0], repository: {nameWithOwner: "o/r"}}] | first),
-        subIssues: {nodes: [$s[] | select(.[0] == $n) | {number: .[1], state: (if .[1] | IN($open[]) then "OPEN" else "CLOSED" end), repository: {nameWithOwner: "o/r"}}]}}),
-        pageInfo: {hasNextPage: false, endCursor: null}}}}}' ;;
-      *) [ ! -f "$STUB/labelled" ] || cat "$STUB/labelled" ;; esac ;;
-  # gh api .../issues/<p>/sub_issues -F sub_issue_id=<id>: "<p> <part>" added to $STUB/subs (the part's id is
-  # 6488700000 + its number, as gh api graphql's fullDatabaseId gives it, above).
-  repos/*/sub_issues) p=${2%/sub_issues}; p=${p##*/}; for a; do [[ $a != sub_issue_id=* ]] || echo "$p $((${a#*=} - 6488700000))" >> "$STUB/subs"; done ;;
-  # gh auth token: the token gh holds, read without the network (none, with gh's error text, with $STUB/signed-out;
-  # timed out, exit 124 as `timeout` gives, with $STUB/token-timeout; an empty token with $STUB/token-empty). gh auth status: the
-  # network check, which fails with $STUB/signed-out, and times out (as a GitHub that does not answer) with $STUB/unreached.
-  token) [ ! -e "$STUB/token-timeout" ] || exit 124; [ ! -e "$STUB/token-empty" ] || exit 0; [ ! -e "$STUB/signed-out" ] || { echo 'no oauth token found for github.com' >&2; exit 1; }; echo gho_stub ;;
-  status) [ ! -f "$STUB/status-cmd" ] || . "$STUB/status-cmd"; [ ! -e "$STUB/unreached" ] || exit 124; [ ! -e "$STUB/signed-out" ] ;;
-  comment) [ ! -f "$STUB/comment-cmd" ] || . "$STUB/comment-cmd"; shift 2; printf '%s\n' "$*" >> "$STUB/comments" ;;
-  close) echo "$3" >> "$STUB/closed"; shift 3; printf '%s\n' "$*" >> "$STUB/close-comments" ;;
-  create) shift 2; n=$((100101 + $(cat "$STUB/filed" 2>/dev/null | wc -l))); l=(); m=
-    [ ! -f "$STUB/create-cmd" ] || . "$STUB/create-cmd"
-    while [ $# -gt 0 ]; do case $1 in --title) t=$2 ;; --body) b=$2 ;; --label) l+=("$2") ;; --milestone) m=$2 ;; esac; shift 2; done
-    jq -cn --argjson n "$n" --arg t "$t" --arg b "$b" --arg m "$m" '{number:$n,title:$t,body:$b,milestone:(if $m == "" then null else {title:$m} end),
-      createdAt:"2026-12-01",labels:($ARGS.positional|map({name:.}))}' --args "${l[@]}" >> "$STUB/filed"
-    echo "https://github.com/o/r/issues/$n" ;;
-esac
-EOF
-  # `--version` (doctor's requirement check, lib/requires.sh) is no session: the stubs answer it as the CLIs do. A
-  # call with no tools (askmodel(), as doctor's askcheck() makes it) is no session either: claude answers OK, in JSON with
-  # --output-format json, else as text, as Claude Code does.
-  cat > "$STUB/claude" <<'EOF'
-#!/usr/bin/env bash
-[ "${1:-}" != --version ] || { echo '2.1.322 (Claude Code)'; exit 0; }
-case " $* " in *" --tools  "*) cat > /dev/null
-  [[ " $* " == *" --output-format json "* ]] && echo '{"type":"result","is_error":false,"subtype":"success","result":"OK","num_turns":1}' || echo OK; exit 0 ;; esac
-cat > "$STUB/brief"; echo "$*" >> "$STUB/sessions"; . "$STUB/build"
-echo '{"type":"result","is_error":false,"usage":{"input_tokens":10,"cache_creation_input_tokens":20,"cache_read_input_tokens":999,"output_tokens":5}}'
-EOF
-  # `codex debug models` (the host's report, hostclis) is no review: the stub lists no models, as a Codex that offers no list.
-  cat > "$STUB/codex" <<'EOF'
-#!/usr/bin/env bash
-[ "${1:-}" != debug ] || exit 1
-[ "${1:-}" != --version ] || { echo 'codex-cli 0.130.0'; exit 0; }
-while [ $# -gt 0 ]; do [ "$1" = -o ] && out=$2; shift; done
-cat > /dev/null; echo x >> "$STUB/reviews"; [ ! -f "$STUB/review-cmd" ] || . "$STUB/review-cmd"; cat "$STUB/review.$(wc -l < "$STUB/reviews")" > "$out" || exit 1
-echo '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":60,"output_tokens":7}}'
-EOF
-  # An OpenCode that lists no models and runs nothing (a case that runs one writes its own): the host's own, found
-  # otherwise, is asked `opencode models` before every seat starts (hostclis), and can take its whole timeout to answer.
-  printf '#!/usr/bin/env bash\nexit 1\n' > "$STUB/opencode"
-  chmod +x "$STUB/gh" "$STUB/claude" "$STUB/codex" "$STUB/opencode"
+  # The CLIs are the shared stubs (stubs/README.md): a case sets their answers with files in $STUB.
+  cp "$SRC/tests/stubs/gh" "$SRC/tests/stubs/claude" "$SRC/tests/stubs/codex" "$SRC/tests/stubs/opencode" "$STUB/"
 }
 # FIXTURE is named once, here: a case that runs a case of its own under another scratch folder (machine.test.sh
 # t_machineleft: T=$d/in) copies this run's fixture, as $T/fixture is none there.

@@ -140,12 +140,7 @@ EOF
 case $(cat) in *'# Issue #8:'*) while [ -d "$STUB" ]; do [ -e "$STUB/filed" ] && break; sleep 0.1; done; exit 1 ;; *'# Issue #7:'*) . "$STUB/build" ;; esac
 echo '{"type":"result","is_error":false,"usage":{"input_tokens":10,"cache_creation_input_tokens":20,"cache_read_input_tokens":999,"output_tokens":5}}'
 EOF
-  cat > "$STUB/codex" <<'EOF'
-#!/usr/bin/env bash
-while [ $# -gt 0 ]; do [ "$1" = -o ] && out=$2; shift; done
-printf '[P2] a.txt:1 a nit\n[P3] c.txt:3 a style nit\nUSER-VISIBLE: no\nVERDICT: NO-GO\n' > "$out"
-echo '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":60,"output_tokens":7}}'
-EOF
+  printf '[P2] a.txt:1 a nit\n[P3] c.txt:3 a style nit\nUSER-VISIBLE: no\nVERDICT: NO-GO\n' > "$STUB/codex-answer" # every review's answer
   loop run >/dev/null || fail "run exited non-zero"
   steps=$(st 'select(.step | IN("picked", "landed", "blocked")) | "\(.issue) \(.step)"')
   at() { grep -nx "$1" <<<"$steps" | cut -d: -f1; }

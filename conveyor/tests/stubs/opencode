@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# The shared opencode stub: an OpenCode that lists no models. The host's own, found otherwise, is asked `opencode models`
+# before every seat starts, and can take its whole timeout to answer. `opencode run --format json` (a session, a review,
+# askmodel) answers with the events the engine reads, when $STUB/opencode-answer is there: a step_start, the answer as
+# the step's text, and a step_finish with the usage in $STUB/opencode-usage (its `tokens` object), else 100/20/0 tokens
+# with 1000 read and 50 written; a run with no --format json prints the answer as text, as OpenCode does. Without that
+# file a run exits 1, as an OpenCode that runs nothing does. --version is 1.x, the OpenCode a session needs (ocready()).
+[ "${1:-}" != --version ] || { echo '1.4.0'; exit 0; }
+[ "${1:-}" = run ] && [ -f "$STUB/opencode-answer" ] || exit 1
+cat > "$STUB/brief"; echo "$*" >> "$STUB/sessions"
+case " $* " in *" --format json "*) ;; *) cat "$STUB/opencode-answer"; exit 0 ;; esac
+jq -cn '{type: "step_start", timestamp: 1, sessionID: "s1", part: {type: "step-start"}}'
+jq -cn --rawfile a "$STUB/opencode-answer" '{type: "text", timestamp: 2, sessionID: "s1", part: {type: "text", text: ($a | sub("\n$"; ""))}}'
+jq -cn --argjson t "$(cat "$STUB/opencode-usage" 2>/dev/null || echo '{"input":100,"output":20,"reasoning":0,"cache":{"read":1000,"write":50}}')" \
+  '{type: "step_finish", timestamp: 3, sessionID: "s1", part: {type: "step-finish", cost: 0.01, tokens: $t}}'

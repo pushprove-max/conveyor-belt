@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# The open issues; with $STUB/list-filed, the follow-ups filed so far are among them, as on GitHub.
+issues() { jq -cs '.[0] + .[1:]' "$STUB/issues.json" $([ ! -e "$STUB/list-filed" ] || ls "$STUB/filed" 2>/dev/null); }
+# A label made (gh label create): kept in $STUB/labels, never taken for an issue filed.
+[ "$1" != label ] || { printf '%s\n' "$*" >> "$STUB/labels"; exit 0; }
+case $2 in
+  list) if [ "$4" = closed ]; then echo "$*" >> "$STUB/closed-asked"; [ ! -e "$STUB/closed-fail" ] || exit 1; cat "$STUB/closed-issues.json" 2>/dev/null || echo '[]'; else [ ! -f "$STUB/list-cmd" ] || . "$STUB/list-cmd"
+    if [ "$4" = all ]; then issues | jq -c "sort_by(-.number) | .[:$6]"; else issues | jq -c ".[:$6]"; fi; fi ;; # all: newest first, as on GitHub
+  # Another repository's issue (gh issue view <n> --repo <owner/repo> --json state): $STUB/repo.<owner_repo>.<n> holds
+  # its state, else CLOSED; with $STUB/repo-fail.<owner_repo>, that repository cannot be read.
+  view) case "$*" in *' --repo '*) k=${5//\//_}; [ ! -e "$STUB/repo-fail.$k" ] || { echo "GraphQL: Could not resolve to a Repository with the name '$5'. (repository)" >&2; exit 1; }
+      echo "{\"state\":\"$(cat "$STUB/repo.$k.$3" 2>/dev/null || echo CLOSED)\"}" ;;
+    *'--json closed'*) echo "$3" >> "$STUB/closed-viewed"; [ ! -e "$STUB/closed-fail" ] || exit 1
+      jq -c --argjson n "$3" '{closed: any(.[]; .number == $n)}' "$STUB/closed-issues.json" 2>/dev/null || echo '{"closed":false}' ;;
+    # closedAt: $STUB/closedAt.<n>, else "" (a closed issue whose closing time GitHub did not give).
+    *'--json state'*) echo "{\"state\":\"$(cat "$STUB/state.$3" 2>/dev/null || cat "$STUB/state" 2>/dev/null || echo CLOSED)\",\"closedAt\":\"$(cat "$STUB/closedAt.$3" 2>/dev/null)\"}" ;;
+    *) issues | jq --argjson n "$3" '.[] | select(.number == $n)' ;; esac ;;
+  # gh api graphql: an issue's fullDatabaseId, a string as GitHub's BigInt (6488700000 + its number: over the 32-bit
+  # Int of databaseId, which this stub does not answer, as real ids are), who opened each open issue (an issue's authorAssociation, else OWNER) and its parent and sub-issues
+  # ($STUB/subs: a line "<parent> <part>" for each; a part not among the open issues is closed), or when the
+  # awaiting-deploy labels were added.
+  graphql) case "$*" in *fullDatabaseId*) n=$(printf '%s\n' "$@" | sed -n 's/^number=//p'); echo "{\"data\": {\"repository\": {\"issue\": {\"fullDatabaseId\": \"$((n + 6488700000))\"}}}}" ;;
+      *authorAssociation*) s=$(jq -cRn '[inputs | split(" ") | map(tonumber)]' "$STUB/subs" 2>/dev/null) || s='[]'
+      issues | jq -c --argjson s "${s:-[]}" 'map(.number) as $open | {data: {repository: {nameWithOwner: "o/r", issues: {nodes: map(.number as $n | {number, authorAssociation: (.authorAssociation // "OWNER"),
+        parent: ([$s[] | select(.[1] == $n) | {number: .[0], repository: {nameWithOwner: "o/r"}}] | first),
+        subIssues: {nodes: [$s[] | select(.[0] == $n) | {number: .[1], state: (if .[1] | IN($open[]) then "OPEN" else "CLOSED" end), repository: {nameWithOwner: "o/r"}}]}}),
+        pageInfo: {hasNextPage: false, endCursor: null}}}}}' ;;
+      *) [ ! -f "$STUB/labelled" ] || cat "$STUB/labelled" ;; esac ;;
+  # gh api .../issues/<p>/sub_issues -F sub_issue_id=<id>: "<p> <part>" added to $STUB/subs (the part's id is
+  # 6488700000 + its number, as gh api graphql's fullDatabaseId gives it, above).
+  repos/*/sub_issues) p=${2%/sub_issues}; p=${p##*/}; for a; do [[ $a != sub_issue_id=* ]] || echo "$p $((${a#*=} - 6488700000))" >> "$STUB/subs"; done ;;
+  # gh auth token: the token gh holds, read without the network (none, with gh's error text, with $STUB/signed-out;
+  # timed out, exit 124 as `timeout` gives, with $STUB/token-timeout; an empty token with $STUB/token-empty). gh auth status: the
+  # network check, which fails with $STUB/signed-out, and times out (as a GitHub that does not answer) with $STUB/unreached.
+  token) [ ! -e "$STUB/token-timeout" ] || exit 124; [ ! -e "$STUB/token-empty" ] || exit 0; [ ! -e "$STUB/signed-out" ] || { echo 'no oauth token found for github.com' >&2; exit 1; }; echo gho_stub ;;
+  status) [ ! -f "$STUB/status-cmd" ] || . "$STUB/status-cmd"; [ ! -e "$STUB/unreached" ] || exit 124; [ ! -e "$STUB/signed-out" ] ;;
+  comment) [ ! -f "$STUB/comment-cmd" ] || . "$STUB/comment-cmd"; shift 2; printf '%s\n' "$*" >> "$STUB/comments" ;;
+  close) echo "$3" >> "$STUB/closed"; shift 3; printf '%s\n' "$*" >> "$STUB/close-comments" ;;
+  create) shift 2; n=$((100101 + $(cat "$STUB/filed" 2>/dev/null | wc -l))); l=(); m=
+    [ ! -f "$STUB/create-cmd" ] || . "$STUB/create-cmd"
+    while [ $# -gt 0 ]; do case $1 in --title) t=$2 ;; --body) b=$2 ;; --label) l+=("$2") ;; --milestone) m=$2 ;; esac; shift 2; done
+    jq -cn --argjson n "$n" --arg t "$t" --arg b "$b" --arg m "$m" '{number:$n,title:$t,body:$b,milestone:(if $m == "" then null else {title:$m} end),
+      createdAt:"2026-12-01",labels:($ARGS.positional|map({name:.}))}' --args "${l[@]}" >> "$STUB/filed"
+    echo "https://github.com/o/r/issues/$n" ;;
+esac
