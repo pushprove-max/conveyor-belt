@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# test-changed.sh and the engine area map: a build or fix session runs only the engine cases of the areas a change
-# touches (the full engine test is about 9 minutes, run several times a card), and so does the loop's test step
-# (CONVEYOR_TEST_LOG set); and an engine source file in no area fails the
-# map check, so a new file is never left out of the session runs unseen.
+# test-changed.sh on this checkout's own engine area map: a build or fix session runs only the engine cases of the
+# areas a change touches (the full engine test is about 9 minutes, run several times a card), and so does the
+# loop's test step (CONVEYOR_TEST_LOG set); and each engine file's area names the case files written to test it.
+# A change to the map runs this file and test-changed-areas.test.sh (test-changed.sh's map's own tests).
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd -P); ROOT=$(dirname "$HERE")
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT

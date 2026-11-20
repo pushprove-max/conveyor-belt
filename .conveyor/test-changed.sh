@@ -39,9 +39,9 @@
 # trace did not run). A part runs only when nothing selects its test file whole. A change outside any function, to a
 # function the map does not hold or lists no case for, or to one changed since the map was traced (its sum differs),
 # runs by the rules above (its area). The map check says how old the coverage map is.
-# A change to the map itself runs the map check, the map's own test (.conveyor/test-changed.test.sh) and the case files
-# whose naming changed: each case file an area lists in the map now and did not list at HEAD, and every case file of an
-# area whose files list changed, so a file moved to other cases runs them. An "all" area among those, or a map that cannot be read at HEAD or in the worktree, runs the whole engine
+# A change to the map itself runs the map check, the map's own tests (MAPTESTS: .conveyor/test-changed.test.sh and
+# .conveyor/test-changed-areas.test.sh, which read this checkout's map) and the case files whose naming changed: each
+# case file an area lists in the map now and did not list at HEAD, and every case file of an area whose files list changed, so a file moved to other cases runs them. An "all" area among those, or a map that cannot be read at HEAD or in the worktree, runs the whole engine
 # test. A map edit that wrongly drops a case file from an area is not caught here: the map check (every case file is
 # named by some area) and the nightly whole test are the net. `test-changed.sh --check` runs the map check alone, and
 # lists the meta-runners (below) the runs saw and those the pack marks, each with its mark.
@@ -144,6 +144,8 @@ if [ -s "$RERUN" ]; then
     }' > "$rlist" && RERUN=$rlist
 fi
 MAP=.conveyor/engine-areas.json
+# The map's own tests, the ones that read this checkout's map: a change to the map runs each that exists.
+MAPTESTS=".conveyor/test-changed.test.sh .conveyor/test-changed-areas.test.sh"
 # The map is one fact a line, so two changes that each add a line to it merge with no conflict (the repository's
 # .gitattributes merges it keeping both sides): {"outside": <path>}, or of an area {"area": <name>} with one more key,
 # "file": <engine file>, "test": <case file>, "tests": "all" or "why": <text>. AREAS reads its lines (jq -s) as
@@ -1071,10 +1073,10 @@ for f; do
     linked[$t$'\t'$f]=1
   done <<<"$LINKS"
   if [ "$f" = "$MAP" ]; then
-    # The map's own test, and the case files whose naming changed: each one an area lists now that it did not list at
-    # HEAD, and each one of an area whose files changed (in the map now, else at HEAD). "all", or a map either side
+    # The map's own tests (MAPTESTS), and the case files whose naming changed: each one an area lists now that it did
+    # not list at HEAD, and each one of an area whose files changed (in the map now, else at HEAD). "all", or a map either side
     # that cannot be read (none at HEAD, or a line that is not one of its shapes: AREAS), runs the whole engine test.
-    [ ! -f .conveyor/test-changed.test.sh ] || run[.conveyor/test-changed.test.sh]=1
+    for t in $MAPTESTS; do [ ! -f "$t" ] || run[$t]=1; done
     if [ -n "$AMAP" ] && named=$(git show "HEAD:$MAP" 2>/dev/null) && named=$(jq -cs "$AREAS" <<<"$named" 2>/dev/null) \
       && named=$(jq -rn --argjson o "$named" --argjson n "$AMAP" '($o.areas + $n.areas) | keys[] as $k
         | (($n.areas[$k].tests | arrays) - ($o.areas[$k].tests | arrays // []))[],
@@ -1201,9 +1203,10 @@ freshen() { # <reason> <only within the change's selection: 1, or empty> <file>.
   for f; do
     run=(); area=(); ccase=(); allby=(); all=
     # The map as main changed it is the one at HEAD, so which case files it names anew cannot be told: every case of
-    # the runner the change selects runs, and the map's own test.
+    # the runner the change selects runs, and the map's own tests (MAPTESTS).
     if [ -n "$o" ] && [ "$f" = "$MAP" ]; then
-      run[conveyor/conveyor.test.sh]=1; cases=; [ ! -f .conveyor/test-changed.test.sh ] || run[.conveyor/test-changed.test.sh]=1
+      run[conveyor/conveyor.test.sh]=1; cases=
+      for t in $MAPTESTS; do [ ! -f "$t" ] || run[$t]=1; done
     else pick "$f"; fi
     for t in "${!run[@]}"; do
       c=$cases

@@ -167,7 +167,13 @@
   ".conveyor/project.json": [
     "conveyor/tests/snapexec.test.sh"
   ],
+  ".conveyor/test-changed-areas.test.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
   ".conveyor/test-changed-meta.test.sh": [
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  ".conveyor/test-changed-rerun.test.sh": [
     "conveyor/tests/snapexec.test.sh"
   ],
   ".conveyor/test-changed-text.test.sh": [
