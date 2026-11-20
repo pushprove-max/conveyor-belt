@@ -25,6 +25,24 @@ deps_setup() { # <issues json>
   # Each card adds a file of its own, so cards built side by side do not conflict.
   echo 'echo x > "f${PWD##*-}.txt"' > "$STUB/build"
 }
+# Sets p to the issues the loop would pick one after another, in that order, a space after each: `pick --dry`
+# (drypick(), the loop's upnext() on the same records, pick.test.sh), each answer then given a landed line, until it
+# answers none (ten at most). For a case that checks which issues are picked, not what a card does: no card is built.
+# Run in the case's own shell, not in $(...), so a dry pick that fails fails the case and is not read as no pick.
+drypicks() {
+  local n i=0
+  p=''; mkdir -p "$ST"
+  while [ $i -lt 10 ]; do
+    n=$(loop pick --dry --issues "$STUB/issues.json" --state "$ST") || fail "pick --dry failed (exit $?) after: $p"
+    [ -n "$n" ] || break
+    p+="$n "; landed "$n" >> "$ST/cards.jsonl"; i=$((i + 1))
+  done
+}
+# The open issues read as the loop's pick and the snapshot read them: adopt() under the records' lock, which saves the
+# holds the start rule and the forced list give them in the control record, with no snapshot built.
+readopen() {
+  fx_in 'locked adopt "$(cat "$STUB/issues.json")"'; [ "$RC" = 0 ] || fail "adopt() failed (exit $RC): $(cat "$T/$CASE/run.out")"
+}
 # Where new issues start. Bugs: a new issue picked while the setting is Held, or not shown as held; a released
 # one held again, also one released before it was first seen; a follow-up, or an issue open before the switch (even
 # opened in its same second), held; switching back to Queue releasing the held ones, or letting through one opened
@@ -33,7 +51,8 @@ deps_setup() { # <issues json>
 # refused, or not named by health and snapshot.
 # The start of each start-rule case (t_start, t_startheld, t_startqueue), which run side by side: #4 open. These cases
 # check which issues are picked, not what lands: each card's build changes nothing, so the card ends after its build
-# (blocked: no change to review), with no review, tests or landing.
+# (blocked: no change to review), with no review, tests or landing. t_start and t_startheld run the loop; the others
+# ask the dry pick (drypicks()), as the loop's pick reads the same record.
 startsetup() {
   setup "[$(issue 4 2000-01-01T00:00:00Z P2)]"; C=$ST/control.json; echo : > "$STUB/build"
   ctl() { loop control "$@" 2>&1; }
@@ -73,16 +92,17 @@ t_startqueue() {
   for n in 4 5 7 10; do landed "$n"; done > "$ST/cards.jsonl"
   t=$(date -u +%FT%TZ); add "$(issue 5 "$t" P2)"; ctl start held >/dev/null; ctl release 10 >/dev/null
   add "$(issue 6 "$t" P0),$(issue 7 "$t" P2 conveyor-followup),$(issue 10 "$t" P2)"
-  loop snapshot --fresh >/dev/null; [ "$(jq -c '[.start, .held, .startHeld]' "$C")" = '["held",[6],[{"from":5,"to":null}]]' ] || fail "the record under Held: $(cat "$C")"
+  readopen; [ "$(jq -c '[.start, .held, .startHeld]' "$C")" = '["held",[6],[{"from":5,"to":null}]]' ] || fail "the record under Held: $(cat "$C")"
   # Back to Queue, all in one second: #6 stays held; #12 (opened while it was Held, first seen after the switch) is
   # held; #13 (opened after) is picked.
   t=$(date -u +%FT%TZ); add "$(issue 12 "$t" P0)"
   [ "$(ctl start queue | jq -c '[.start, .held, .startHeld]')" = '["queue",[6],[{"from":5,"to":12}]]' ] || fail "start queue: $(cat "$C")"
   add "$(issue 13 "$t" P2)"
-  loop run >/dev/null 2>&1; [ "$(picks)" = "13 " ] && [ "$(jq -c '[.held, .startSeen]' "$C")" = '[[6,12],[6,10,12]]' ] || fail "after Queue again: $(picks) $(cat "$C")"
+  readopen; drypicks
+  [ "$p" = "13 " ] && [ "$(jq -c '[.held, .startSeen]' "$C")" = '[[6,12],[6,10,12]]' ] || fail "after Queue again: $p $(cat "$C")"
   # Released, #6 is picked, and is not held again however often the open issues are read.
-  ctl release 6 >/dev/null; loop run >/dev/null 2>&1; loop snapshot --fresh >/dev/null
-  [ "$(picks)" = "6 13 " ] && [ "$(jq -c .held "$C")" = '[12]' ] || fail "a released issue: $(picks) $(cat "$C")"
+  ctl release 6 >/dev/null; readopen; drypicks; readopen
+  [ "$p" = "6 " ] && [ "$(jq -c .held "$C")" = '[12]' ] || fail "a released issue: $p $(cat "$C")"
   # A hold that cannot be saved: #14 is not shown in the queue.
   ctl start held >/dev/null; add "$(issue 14 "$t" P2)"; mkdir "$C.new"
   out=$(loop snapshot --fresh 2>/dev/null); rmdir "$C.new"
@@ -120,7 +140,7 @@ t_startoutside() {
   [ "$(jq -c '[.control.start, .control.held, (.queue.order | map(.issue) | sort), (.open.held | map([.issue, .reasons]))]' <<<"$s")" \
     = '["queue",[5,6],[4,7,8],[[5,[{"kind":"you","outside":true}]],[6,[{"kind":"you","outside":true}]]]]' ] \
     || fail "an issue from outside the project is queued, or not held as such: $(jq -c '[.control, .queue.order, .open.held]' <<<"$s")"
-  loop run >/dev/null 2>&1; [ "$(picks)" = "4 7 8 " ] || fail "picks under Queue with issues from outside the project: $(picks)"
+  drypicks; [ "$p" = "4 7 8 " ] || fail "picks under Queue with issues from outside the project: $p"
 }
 # Bug: the owner's release of an issue from outside the project does not queue it, or it is held again at the next read.
 t_startoutrel() {
@@ -129,7 +149,7 @@ t_startoutrel() {
   loop snapshot >/dev/null; [ "$(jq -c .held "$C")" = '[5]' ] || fail "an issue from outside the project was not held: $(cat "$C")"
   ctl release 5 >/dev/null; s=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
   [ "$(jq -c '[.control.held, (.queue.order | map(.issue))]' <<<"$s")" = '[[],[5]]' ] || fail "released, it is not in the queue: $(jq -c '[.control, .queue]' <<<"$s")"
-  loop run >/dev/null 2>&1; [ "$(picks)" = "5 " ] || fail "released, it was not picked: $(picks)"
+  drypicks; [ "$p" = "5 " ] || fail "released, it was not picked: $p"
 }
 dep() { jq -c --arg b "$2" '.body = "body\n" + $b' <<<"$1"; } # <issue json> <Depends on: lines>
 order() { st 'select(.step == "picked" or .step == "landed") | "\(.step):\(.issue)"' | tr '\n' ' '; }
@@ -139,7 +159,7 @@ t_depends() {
   # the Board and /units showed it as waiting on a card, as if queued, though the loop would not pick it.
   deps_setup "$(jq -cs . <(dep "$(issue 1 2026-01-01 P1)" 'Depends on: #2') <(issue 2 2026-01-01 backlog) <(dep "$(issue 7 2026-01-01 backlog)" 'Depends on: #2'))"
   loop control hold 2 7 >/dev/null
-  loop run | grep -q 'no issue qualifies' && [ ! -s "$ST/cards.jsonl" ] || fail "an issue whose dependency is open was picked"
+  drypicks; [ -z "$p" ] || fail "an issue whose dependency is open was picked: $p"
   out=$(loop snapshot --fresh)
   [ "$(jq -c '[(.queue.waiting | map([.issue, .waitsFor])), (.queue.holding | map([.issue, .waitsFor])), .queue.order, .queue.next, .health.cycles]' <<<"$out")" \
     = '[[[1,[2]]],[[2,[]],[7,[2]]],[],[],[]]' ] \
@@ -153,18 +173,14 @@ t_depends() {
   loop run >/dev/null && [ "$(order)" = "picked:1 landed:1 " ] || fail "the issue was not picked once its dependency closed: $(order)"
 }
 t_dependsside() {
-  deps_setup "$(jq -cs . <(issue 10 2026-01-01 P2) <(issue 11 2026-01-02 P2) <(dep "$(issue 12 2026-01-03 P0)" 'Depends on: #10, #11'))"
-  # Two independent issues build side by side; the third waits for both and is picked once the last of them closes.
-  # #10 and #11 each wait for both to have come before counting (or for the stub folder to go: the test's end), however
-  # slowly a loaded machine starts or runs either: a here.<n> mark is never removed, so one that is paused while the
-  # other finishes still sees both; no build of this case comes after these three. conc is how many build at once:
-  # the first to count does so before either has removed its in.<n> mark, so it counts both. #12 has only to be picked:
-  # its build changes nothing, so its card ends after it (blocked: no change to review), and the run exits non-zero.
-  echo 'n=${PWD##*-}; mkdir "$STUB/in.$n" "$STUB/here.$n"; while [ -d "$STUB" ] && [ "$n" != 12 ] && [ "$(ls -d "$STUB"/here.* | wc -l)" -lt 2 ]; do sleep 0.1; done
-    ls -d "$STUB"/in.* | wc -l >> "$STUB/conc"; rmdir "$STUB/in.$n"; [ "$n" = 12 ] || echo x > "f$n.txt"' > "$STUB/build"
-  tune '.tunables.poll = 1'; loop run >/dev/null
-  case "$(order)" in "picked:10 picked:11 landed:1"[01]" landed:1"[01]" picked:12 ") ;; *) fail "not two side by side and the third after both: $(order)" ;; esac
-  [ "$(sort -n "$STUB/conc" | tail -1)" = 2 ] || fail "the two independent issues did not build at once: $(cat "$STUB/conc")"
+  # The third waits for both: #12, P0 and so first if it did not wait, is picked only once the last of #10 and #11 has
+  # landed. Each of the two is landed first in turn, so a #12 that waits for only one of them is picked first, ahead of
+  # the open P2 issue, in the run where that one has landed. That two independent issues build side by side is t_only's run.
+  setup "$(jq -cs . <(issue 10 2026-01-01 P2) <(issue 11 2026-01-02 P2) <(dep "$(issue 12 2026-01-03 P0)" 'Depends on: #10, #11'))"
+  mkdir -p "$ST"; landed 10 > "$ST/cards.jsonl"
+  drypicks; [ "$p" = "11 12 " ] || fail "with #10 landed, #12 was picked before #11 landed: $p"
+  landed 11 > "$ST/cards.jsonl"
+  drypicks; [ "$p" = "10 12 " ] || fail "with #11 landed, #12 was picked before #10 landed: $p"
 }
 t_dependscycle() {
   # A cycle: health names its issues, and an issue waiting on it is never picked.
@@ -193,14 +209,15 @@ ghedits() {
 }
 # A dependency in another repository: `Depends on: other/repo#600` names that repository's #600, asked of GitHub with
 # gh issue view --repo. Bug it catches (issue 605): the line was read as this repository's #600, closed here, so the
-# issue was picked at once, before the other repository's issue landed. Each case's build changes nothing: a picked
+# issue was picked at once, before the other repository's issue landed. The case's build changes nothing: a picked
 # card ends after its build.
 t_fardeps() {
   setup "[$(dep "$(issue 1 2026-01-01 P1)" 'Depends on: other/repo#600 landing')]"; echo : > "$STUB/build"
   echo OPEN > "$STUB/repo.other_repo.600"
-  loop run >/dev/null 2>&1; [ ! -s "$ST/cards.jsonl" ] || fail "#1 was picked while other/repo#600 is open (this repository has no open #600)"
-  [ "$(loop snapshot --fresh | jq -c '[(.queue.waiting | map([.issue, .waitsFor])), (.open.issues | map(.dependsOn))]')" = '[[[1,["other/repo#600"]]],[["other/repo#600"]]]' ] \
-    || fail "the snapshot does not say #1 waits on other/repo#600: $(loop snapshot --fresh | jq -c '[.queue, .open.issues]')"
+  # The far state is read with the open issues (asked()), so the snapshot's pick order, not `pick --dry` on the
+  # file, shows what the loop would take: nothing (this repository has no open #600).
+  [ "$(loop snapshot --fresh | jq -c '[(.queue.order | map(.issue)), (.queue.waiting | map([.issue, .waitsFor])), (.open.issues | map(.dependsOn))]')" = '[[],[[1,["other/repo#600"]]],[["other/repo#600"]]]' ] \
+    || fail "#1 is queued while other/repo#600 is open, or the snapshot does not say it waits on it: $(loop snapshot --fresh | jq -c '[.queue, .open.issues]')"
   echo CLOSED > "$STUB/repo.other_repo.600"
   loop run >/dev/null 2>&1; [ "$(st 'select(.step == "picked") | .issue')" = 1 ] || fail "#1 was not picked once other/repo#600 closed: $(st .step)"
 }
@@ -220,11 +237,11 @@ t_fardepsboth() {
 # the line and what gh said. Bug it catches: a failed read taken as closed, so the issue is picked at once, or a wait
 # nobody is told of, as the other repository's issue may be closed long ago.
 t_fardepsfail() {
-  setup "[$(dep "$(issue 1 2026-01-01 P1)" 'Depends on: other/repo#600')]"; echo : > "$STUB/build"
+  setup "[$(dep "$(issue 1 2026-01-01 P1)" 'Depends on: other/repo#600')]"
   touch "$STUB/repo-fail.other_repo"
-  loop run >/dev/null 2>&1; [ ! -s "$ST/cards.jsonl" ] || fail "#1 was picked though other/repo cannot be read"
-  out=$(loop snapshot --fresh)
-  [ "$(jq -c '.queue.waiting | map([.issue, .waitsFor])' <<<"$out")" = '[[1,["other/repo#600"]]]' ] || fail "#1 does not wait on other/repo#600: $(jq -c .queue <<<"$out")"
+  out=$(loop snapshot --fresh) # its pick order is what the loop would take (t_fardeps)
+  [ "$(jq -c '[(.queue.order | map(.issue)), (.queue.waiting | map([.issue, .waitsFor]))]' <<<"$out")" = '[[],[[1,["other/repo#600"]]]]' ] \
+    || fail "#1 is queued though other/repo cannot be read, or does not wait on other/repo#600: $(jq -c .queue <<<"$out")"
   jq -e '.needsYou.farDeps == [{issue: 1, title: "title 1", ref: "other/repo#600", line: "Depends on: other/repo#600",
       reason: "GraphQL: Could not resolve to a Repository with the name '"'other/repo'"'. (repository)"}]' <<<"$out" >/dev/null \
     || fail "Needs you does not name the dependency that cannot be read: $(jq -c .needsYou.farDeps <<<"$out")"
@@ -261,7 +278,7 @@ t_dependsedit() {
   loop control depends 3 remove 7 >/dev/null 2>&1 && [ "$(body 3)" = $'body of 3\nDepends on: o/r#7.' ] || fail "removing #7 changed o/r#7: $(body 3)"
 }
 t_depguard() {
-  deps_setup "$(jq -cs . <(issue 2 2026-01-01 P2) <(dep "$(issue 3 2026-01-02 P1)" 'Depends on: #2') \
+  setup "$(jq -cs . <(issue 2 2026-01-01 P2) <(dep "$(issue 3 2026-01-02 P1)" 'Depends on: #2') \
     <(dep "$(issue 4 2026-01-03 P1)" 'Depends on: #2') <(dep "$(issue 5 2026-01-04 P1)" 'Depends on: #2'))"
   C=$ST/control.json; ctl() { loop control "$@" 2>&1; }
   [ "$(jq 'has("depGuard") or has("forced")' "$C")" = false ] || fail "the case's record is not one written before the guard: $(cat "$C")"
@@ -274,51 +291,52 @@ t_depguard() {
   # On: #3, released from a hold and pinned first, waits for #2 (held); force is refused, naming the guard.
   ctl hold 2 3 >/dev/null; ctl release 3 >/dev/null; ctl order 3 >/dev/null
   out=$(ctl force 3); [ $? = 2 ] && grep -q 'dependency guard is on' <<<"$out" && [ "$(ctl | jq -c .forced)" = '[]' ] || fail "control force with the guard on: $out"
-  loop run | grep -q 'no issue qualifies' && [ ! -s "$ST/cards.jsonl" ] || fail "with the guard on, an issue whose dependency is open was picked: $(order)"
+  drypicks; [ -z "$p" ] || fail "with the guard on, an issue whose dependency is open was picked: $p"
   # Off: #3 forced is picked; #4 and #5, not forced, still wait.
   [ "$(ctl dep-guard off | jq .depGuard)" = false ] && [ "$(ctl force 3 | jq -c .forced)" = '[3]' ] || fail "the guard off and #3 forced: $(cat "$C")"
-  [ "$(loop snapshot --fresh | jq -c '[(.queue.order | map(.issue)), (.queue.waiting | map([.issue, .forced]))]')" = '[[3],[[3,true],[4,false],[5,false]]]' ] \
-    || fail "the snapshot does not queue the forced issue, or does not say it is forced: $(loop snapshot --fresh | jq -c .queue)"
+  out=$(loop snapshot --fresh)
+  [ "$(jq -c '[(.queue.order | map(.issue)), (.queue.waiting | map([.issue, .forced]))]' <<<"$out")" = '[[3],[[3,true],[4,false],[5,false]]]' ] \
+    || fail "the snapshot does not queue the forced issue, or does not say it is forced: $(jq -c .queue <<<"$out")"
   # Queued, the forced issue keeps what it waits on (Next up and Control tag it by them), in order and in next alike.
-  [ "$(loop snapshot --fresh | jq -c '[.queue.order, .queue.next] | map(map([.issue, .forced, .waitsFor]))')" = '[[[3,true,[2]]],[[3,true,[2]]]]' ] \
-    || fail "the queued forced issue lost what it waits on: $(loop snapshot --fresh | jq -c .queue)"
-  loop run >/dev/null; [ "$(order)" = "picked:3 landed:3 " ] || fail "with the guard off, the forced issue was not picked, or one not forced was: $(order)"
-  [ "$(jq -c .forced "$C")" = '[]' ] || fail "the forced issue that landed and closed is still forced: $(cat "$C")"
-  # #4's card landed with its issue still open; #5 closed without a card: each leaves forced at the next snapshot.
+  [ "$(jq -c '[.queue.order, .queue.next] | map(map([.issue, .forced, .waitsFor]))' <<<"$out")" = '[[[3,true,[2]]],[[3,true,[2]]]]' ] \
+    || fail "the queued forced issue lost what it waits on: $(jq -c .queue <<<"$out")"
+  drypicks; [ "$p" = "3 " ] || fail "with the guard off, the forced issue was not picked, or one not forced was: $p"
+  # #3's card landed (drypicks' landed line) and its issue closed; #4's card landed with its issue still open; #5
+  # closed without a card: each leaves forced at the next read of the open issues (adopt(), as the snapshot reads them).
   ctl force 4 >/dev/null; ctl force 5 >/dev/null; landed 4 >> "$ST/cards.jsonl"
-  jq -c 'map(select(.number != 5))' "$STUB/issues.json" > "$STUB/issues.new" && mv "$STUB/issues.new" "$STUB/issues.json"
-  # shellcheck disable=SC2333 # the snapshot between the two reads of the control record rewrites it
-  [ "$(jq -c .forced "$C")" = '[4,5]' ] && loop snapshot --fresh >/dev/null && [ "$(jq -c .forced "$C")" = '[]' ] \
+  jq -c 'map(select(.number != 3 and .number != 5))' "$STUB/issues.json" > "$STUB/issues.new" && mv "$STUB/issues.new" "$STUB/issues.json"
+  # shellcheck disable=SC2333 # the read of the open issues between the two reads of the control record rewrites it
+  [ "$(jq -c .forced "$C")" = '[3,4,5]' ] && readopen && [ "$(jq -c .forced "$C")" = '[]' ] \
     || fail "a forced issue that landed, or whose issue closed, is still forced: $(cat "$C")"
 }
 # Bugs: an issue that depends on #50 is picked while a follow-up filed from #50, or one filed from that
 # follow-up, is open (held here: one kept off the belt is still waited for), or not picked once each is closed (a
 # withdrawn one too); the snapshot does not name the open follow-ups in waitsFor; an issue with no Depends on line
-# waits for any of it. The case checks what is picked, not what lands: each build changes nothing, so the card ends
-# after its build (blocked: no change to review).
+# waits for any of it. The case checks what is picked, not what lands: it asks the dry pick (drypicks()).
 depfu() { issue "$1" 2026-01-01 conveyor-followup P1 | jq -c --arg p "$2" '.body = "Follow-up to #\($p) (Conveyor card c0-\($p)): a finding\nFollow-up depth: 1"'; } # <number> <issue it follows>
 t_followdeps() {
-  deps_setup "$(jq -cs . <(dep "$(issue 60 2026-01-01 P0)" 'Depends on: #50') <(depfu 100101 50) <(depfu 100102 50) <(issue 70 2026-01-02 P2))"
-  mkdir -p "$ST"; landed 50 '[100101,100102]' > "$ST/cards.jsonl"; echo : > "$STUB/build"
+  setup "$(jq -cs . <(dep "$(issue 60 2026-01-01 P0)" 'Depends on: #50') <(depfu 100101 50) <(depfu 100102 50) <(issue 70 2026-01-02 P2))"
+  mkdir -p "$ST"; landed 50 '[100101,100102]' > "$ST/cards.jsonl"
   loop control hold 100101 100102 >/dev/null
-  [ "$(loop snapshot --fresh | jq -c '.queue.waiting | map([.issue, .waitsFor])')" = '[[60,[100101,100102]]]' ] \
-    || fail "waitsFor does not name the open follow-ups of the dependency: $(loop snapshot --fresh | jq -c .queue)"
+  out=$(loop snapshot --fresh)
+  [ "$(jq -c '.queue.waiting | map([.issue, .waitsFor])' <<<"$out")" = '[[60,[100101,100102]]]' ] \
+    || fail "waitsFor does not name the open follow-ups of the dependency: $(jq -c .queue <<<"$out")"
   # The Board's × (control depends remove) takes what the issue's own line names (open.issues dependsOn), #50, which
   # waitsFor leaves out; a × built from waitsFor sends removals the host refuses.
-  [ "$(loop snapshot --fresh | jq -c '.open.issues | map(select(.issue == 60 or .issue == 70) | [.issue, .dependsOn])')" = '[[60,[50]],[70,[]]]' ] \
-    || fail "open.issues does not carry the numbers each issue's Depends on: line names: $(loop snapshot --fresh | jq -c .open.issues)"
-  loop run >/dev/null; [ "$(order)" = "landed:50 picked:70 " ] || fail "#60 picked while #50's follow-ups are open, or #70 not picked: $(order)"
+  [ "$(jq -c '.open.issues | map(select(.issue == 60 or .issue == 70) | [.issue, .dependsOn])' <<<"$out")" = '[[60,[50]],[70,[]]]' ] \
+    || fail "open.issues does not carry the numbers each issue's Depends on: line names: $(jq -c .open.issues <<<"$out")"
+  drypicks; [ "$p" = "70 " ] || fail "#60 picked while #50's follow-ups are open, or #70 not picked: $p"
   # #100101 closes: #100102 still holds #60. #100102 has landed with a follow-up of its own, #100103: it holds #60 too.
   jq -cs . <(dep "$(issue 60 2026-01-01 P0)" 'Depends on: #50') <(depfu 100102 50) <(depfu 100103 100102) > "$STUB/issues.json"
-  loop run | grep -q 'no issue qualifies' && [ "$(order)" = "landed:50 picked:70 " ] || fail "#60 picked while #100102 is open: $(order)"
+  drypicks; [ -z "$p" ] || fail "#60 picked while #100102 is open: $p"
   jq -c '.card = "c1-100102"' <(landed 100102 '[100103]') >> "$ST/cards.jsonl"; loop control hold 100103 >/dev/null
   jq -c 'map(select(.number != 100102))' "$STUB/issues.json" > "$STUB/issues.new" && mv "$STUB/issues.new" "$STUB/issues.json"
   [ "$(loop snapshot --fresh | jq -c '.queue.waiting | map([.issue, .waitsFor])')" = '[[60,[100103]]]' ] \
     || fail "waitsFor does not name the follow-up of a follow-up: $(loop snapshot --fresh | jq -c .queue)"
-  loop run | grep -q 'no issue qualifies' && [ "$(order)" = "landed:50 picked:70 landed:100102 " ] || fail "#60 picked while #100102's follow-up #100103 is open: $(order)"
+  drypicks; [ -z "$p" ] || fail "#60 picked while #100102's follow-up #100103 is open: $p"
   # #100103 is withdrawn (closed as not planned): nothing holds #60 now, and it is picked.
   echo "[$(dep "$(issue 60 2026-01-01 P0)" 'Depends on: #50')]" > "$STUB/issues.json"
-  loop run >/dev/null; [ "$(order)" = "landed:50 picked:70 landed:100102 picked:60 " ] || fail "#60 not picked once every follow-up closed: $(order)"
+  drypicks; [ "$p" = "60 " ] || fail "#60 not picked once every follow-up closed: $p"
 }
 # A dependency whose card landed and was not pushed (push off: its issue stays open until the push). Bug (issue 356):
 # its issue being open held every issue that depends on it, though its change is on the main they are built from, so
@@ -386,7 +404,7 @@ t_followdepscycle() {
 # a source whose state cannot be read is not waited on.
 t_declineddeps() {
   local id body
-  deps_setup "[$(issue 7 2026-01-01 P2)]"
+  setup "[$(issue 7 2026-01-01 P2)]"
   echo OPEN > "$STUB/state.7"; : > "$STUB/state.9" # #7 open; #9's state reads empty: unknown. #8 reads CLOSED.
   for n in 7 8 9; do loop declined add "c1-$n" "$n" judge 'no proof' "[P2] f$n.txt:1 a nit" || fail "the finding of #$n was not declined"; done
   for n in 7 8 9; do
@@ -397,15 +415,16 @@ t_declineddeps() {
   [[ $(body 7) == *$'\n\nDepends on: #7' ]] || fail "the finding of the open #7 was filed with no Depends on line at its end: $(body 7)"
   ! grep -q 'Depends on' <<<"$(body 8)" || fail "the finding of the closed #8 was filed waiting on it: $(body 8)"
   [[ $(body 9) == *$'\n\nDepends on: #9' ]] || fail "the finding of #9, whose state could not be read, was filed with no Depends on line: $(body 9)"
-  # Pick does not take the new issue (#100101) while #7 is open (held here, so the run has nothing else to build).
+  # Pick does not take the new issue (#100101) while #7 is open (held here, so the pick has nothing else to take).
   loop control hold 7 >/dev/null; jq -c 'select(.number == 100101)' "$STUB/filed" | jq -cs '$i + .' --argjson i "$(cat "$STUB/issues.json")" > "$STUB/issues.new" \
     && mv "$STUB/issues.new" "$STUB/issues.json"
-  loop run | grep -q 'no issue qualifies' && [ ! -s "$ST/cards.jsonl" ] || fail "the issue filed from the open #7's finding was picked: $(order)"
+  drypicks; [ -z "$p" ] || fail "the issue filed from the open #7's finding was picked: $p"
   [ "$(loop snapshot --fresh | jq -c '.queue.waiting | map([.issue, .waitsFor])')" = '[[100101,[7]]]' ] || fail "the filed issue is not shown waiting on #7: $(loop snapshot --fresh | jq -c .queue)"
 }
 t_only() {
   deps_setup "$(jq -cs . <(issue 21 2026-01-01 P2) <(issue 22 2026-01-02 P2) <(issue 23 2026-01-03 P2) <(dep "$(issue 26 2026-01-06 P0)" 'Depends on: #21'))"
-  # Three issues free to build and a limit of two, so a loop that builds past the limit builds three at once. #21 to
+  # Three issues free to build and a limit of two, so a loop that builds past the limit builds three at once, and one
+  # that does not build independent issues side by side builds one. #21 to
   # #23 each wait for two to have come before counting (or for the stub folder to go: the test's end), so a loaded
   # machine that starts or runs cards slowly still shows two side by side: a here.<n> mark is never removed, so one that
   # is paused while the other finishes still sees both; a loop that builds one at a time never reaches two. The first
@@ -446,7 +465,7 @@ t_onlyheld() {
 # README.md. The judgement is CONVEYOR_OVERLAP_CMD (<command>): it is given the prompt on stdin. Each build changes
 # nothing, so its card ends after it (blocked: no change to review): the cases read what is picked.
 overlapsetup() { # <the judgement's command>
-  deps_setup "$(jq -cs . <(issue 1 2026-01-01 P2 | jq -c '.body = "Change upnext() in conveyor/lib/pick.sh"') \
+  setup "$(jq -cs . <(issue 1 2026-01-01 P2 | jq -c '.body = "Change upnext() in conveyor/lib/pick.sh"') \
     <(issue 2 2026-01-02 P0 | jq -c '.body = "Make upnext() in conveyor/lib/pick.sh skip a held issue"') \
     <(issue 3 2026-01-03 P1 | jq -c '.body = "Add a new file under conveyor/lib/"') <(issue 4 2026-01-04 P2 | jq -c '.body = "Fix a typo in README.md"'))"
   echo '{"card":"c1-1","issue":1,"step":"picked","time":"2026-11-01T00:00:00Z","tokens":{"claude":0,"codex":0},"result":"ok","sha":"","reason":""}' > "$ST/cards.jsonl"
@@ -470,11 +489,15 @@ t_overlap() {
     || fail "the judgement was not given the belt card's text and the rule: $(cat "$STUB/prompt.2")"
   [ "$(sort "$STUB/judged" | tr '\n' ' ')" = "#2 #3 #4 " ] || fail "each queued issue was not judged exactly once: $(cat "$STUB/judged")"
 }
-# Bug: a judgement that fails holds the issue back, or adds a dependency all the same.
+# Bug: a judgement that fails holds the issue back, or adds a dependency all the same. overlap() itself, as the loop
+# calls it before a pick (t_overlap runs the loop): the open issues it gives back are the pick's, so unchanged ones
+# leave every issue to be picked as it is.
 t_overlapfail() {
-  overlapsetup 'cat > /dev/null; exit 1'
-  loop run >/dev/null 2>&1
-  [ "$(picks)" = "2 3 4 " ] && [ ! -s "$STUB/edits" ] || fail "with the judgement failing, an issue was not picked or got a dependency: $(picks) $(cat "$STUB/edits" 2>/dev/null)"
+  overlapsetup ': > "$STUB/judged"; cat > /dev/null; exit 1'
+  fx_in 'overlap "$(cat "$STUB/issues.json")" "" "$(ctl)"; printf "%s\n" "$OVL" > "$STUB/ovl"'
+  [ "$RC" = 0 ] && [ -e "$STUB/judged" ] || fail "overlap() failed (exit $RC), or did not ask the judgement: $(cat "$T/$CASE/run.out")"
+  [ "$(jq -c . "$STUB/ovl")" = "$(jq -c . "$STUB/issues.json")" ] && [ ! -s "$STUB/edits" ] \
+    || fail "with the judgement failing, an issue was changed or got a dependency: $(cat "$STUB/ovl") $(cat "$STUB/edits" 2>/dev/null)"
 }
 # The same-file check asked of the builder's Claude seat itself (askmodel(), no CONVEYOR_OVERLAP_CMD), whose stub
 # answers as Claude Code does with --output-format json: a result record. Bug (issue 881's lead): a stub, or an
