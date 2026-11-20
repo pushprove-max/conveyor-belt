@@ -352,6 +352,20 @@ t_slowpush() {
   [ "$(jq -c '[.health.pushing.sha, (.belt | map(.track.label) | unique)]' "$STUB/snapshot")" = "[\"$first\",[\"pushing\"]]" ] \
     || fail "the snapshot does not report the push in progress: $(jq -c '[.health.pushing, (.belt | map(.track.label))]' "$STUB/snapshot")"
 }
+# t_slowpush end to end, in a real `run`: only it joins the card count, the pick and the end check (run(), lib/run.sh). Push 1 waits on the fifo held
+# till main's third landing (fifo landed, from a reference-transaction hook), push 2 on the run's next turn (fifo turn): a run that exits first leaves origin behind, or the push's pushed lines unwritten.
+t_heldpush() {
+  servesetup; loop control cap 1 >/dev/null; tune '.tunables.poll = 1'; add 7; add 8; add 9; mkfifo "$STUB/held" "$STUB/landed" "$STUB/turn"; exec {l}<> "$STUB/landed"
+  printf '#!/usr/bin/env bash\nread -r _ s _; echo "$s" >> "$STUB/pushes"; f=turn; [ "$(wc -l < "$STUB/pushes")" != 1 ] || f=held; read -r -t 120 _ <> "$STUB/$f"\n' > "$R/.git/hooks/pre-push"
+  printf '#!/usr/bin/env bash\n[ "$1" = committed ] && grep " refs/heads/main$" >> "$STUB/mains" && [ "$(wc -l < "$STUB/mains")" = 3 ] && echo > "$STUB/landed"; :\n' > "$R/.git/hooks/reference-transaction"
+  chmod +x "$R/.git/hooks/reference-transaction"; sleep() { [ "${FUNCNAME[1]:-}" != run ] || [ "$1" = 0.1 ] || echo 1<> "$STUB/turn"; command sleep "$@"; }; export -f sleep # sleep: the engine's own, passed on as called
+  at=$(originat); loop run > "$STUB/run.out" 2>&1 & pid=$!; read -r -t 200 -u "$l" _ || fail "three cards did not land while the first push was held: $(st '"\(.issue) \(.step)"' | tr '\n' ,)"
+  [ "$(cat "$STUB/pushes")" = "$(st 'select(.step == "landed") | .sha' | head -n 1)" ] && [ "$(originat)" = "$at" ] || fail "a push was not held for the first landing alone: $(cat "$STUB/pushes")"; echo > "$STUB/held"; wait "$pid"; rc=$?
+  [ "$rc" = 0 ] && [ "$(sed -n 2p "$STUB/pushes")" = "$(mainat)" ] && [ "$(originat)" = "$(mainat)" ] && [ "$(wc -l < "$STUB/pushes")" = 2 ] || fail "the run ($rc) did not push the landings made during the held push as one push of main's head: $(cat "$STUB/pushes" "$STUB/run.out")"
+  # Checked at once, with no wait: the push moves origin before it writes its pushed lines, so only those lines and a free run lock show the run waited for it.
+  [ "$(st "select(.step == \"pushed\" and .head == \"$(mainat)\") | .card" | sort -u | wc -l)" = 2 ] && flock -n "$ST/cards.jsonl.run" true \
+    || fail "the run exited before its final push cleared: $(st 'select(.step == "pushed") | "\(.card) \(.head)"' | tr '\n' ,)"; loopend
+}
 
 # Bugs: the remote's main holds a commit the Conveyor's main lacks (landed there by hand), so every push is refused
 # and no retry can work: the landings stack up unpushed, and nothing tells the owner. A refused push merges the
