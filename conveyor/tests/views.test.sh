@@ -22,15 +22,14 @@ snapshotstart() {
   # One card per call: its steps in order, a minute apart from <day>T00:00. A session is $2 at list price, a review $1.
   B='{"tokens":{"claude":1000000,"codex":0},"usage":{"input":1000000,"write":0,"write1h":0,"read":0,"output":0},"model":"claude-sonnet-5-5"}'
   V='{"tokens":{"claude":0,"codex":500000},"usage":{"input":500000,"read":0,"output":0},"visible":"no","model":"gpt-6.1-sol"}'
-  card() { # <issue> <day> <step[:result[:extra json]]>...
+  card() { # <issue> <day> <step[:result[:extra json]]>...: one jq for the card's lines, not one a line
     local n=$1 day=$2 m=0 a step res x; shift 2
     for a; do
       IFS=: read -r step res x <<<"$a"
       case $step in picked) x="{\"title\":\"T$n\"}" ;; build|fix) x=${x:-$B} ;; review) x=${x:-$V} ;; test) x='{"sec":60,"usage":{"input":0,"write":0,"write1h":0,"read":0,"output":0}}' ;; esac
-      jq -cn --arg c "c$n" --argjson i "$n" --arg s "$step" --arg t "$(printf '%sT00:%02d:00Z' "$day" "$m")" --arg r "${res:-ok}" --argjson x "${x:-{\}}" \
-        '{card:$c,issue:$i,step:$s,time:$t,tokens:{claude:0,codex:0},result:$r,sha:"",reason:""} * $x' >> "$S/cards.jsonl"
-      m=$((m + 1))
-    done
+      printf '%s\t%sT00:%02d:00Z\t%s\t%s\n' "$step" "$day" "$m" "${res:-ok}" "${x:-{\}}"; m=$((m + 1))
+    done | jq -cR --arg c "c$n" --argjson i "$n" 'split("\t") as [$s, $t, $r, $x]
+      | {card:$c,issue:$i,step:$s,time:$t,tokens:{claude:0,codex:0},result:$r,sha:"",reason:""} * ($x | fromjson)' >> "$S/cards.jsonl"
   }
   card 1 "$d" picked
   card 2 "$d" picked worktree brief
@@ -77,7 +76,8 @@ t_snapshot() { snapshotstart
   # No run of the test rules was held by their burst guard (t_rulesburst holds one).
   [ "$(q '.needsYou.testRules')" = null ] || fail "needsYou.testRules is not null with no test rule run: $(q .needsYou.testRules)"
   # No open issue names a dependency in another repository: farDeps is an empty list (t_fardepsfail holds one).
-  [ "$(q '.needsYou | del(.before, .pipeline, .engine, .testRules) | map_values(map(del(.reviews, .track, .metrics, .parent, .start, .pickedAt, .priorSec, .totalSec, .earlier)))')" = "{\"waiting\":[{\"card\":\"c7\",\"issue\":7,\"title\":\"T7\",\"sentence\":\"a new button\",\"since\":\"${d}T00:05:00Z\",\"doneWhen\":null,\"split\":null,\"stalls\":0,\"files\":{\"count\":null,\"paths\":null},\"patch\":null,\"shots\":null}],\"blocked\":[{\"card\":\"c8\",\"issue\":8,\"title\":\"T8\",\"reason\":\"review 1: no answer\",\"tail\":\"\",\"since\":\"${d}T00:04:00Z\",\"doneWhen\":null,\"split\":null,\"stalls\":0}],\"farDeps\":[]}" ] \
+  # No Pick settings decision is due: pick is an empty list.
+  [ "$(q '.needsYou | del(.before, .pipeline, .engine, .testRules) | map_values(map(del(.reviews, .track, .metrics, .parent, .start, .pickedAt, .priorSec, .totalSec, .earlier)))')" = "{\"waiting\":[{\"card\":\"c7\",\"issue\":7,\"title\":\"T7\",\"sentence\":\"a new button\",\"since\":\"${d}T00:05:00Z\",\"doneWhen\":null,\"split\":null,\"stalls\":0,\"files\":{\"count\":null,\"paths\":null},\"patch\":null,\"shots\":null}],\"blocked\":[{\"card\":\"c8\",\"issue\":8,\"title\":\"T8\",\"reason\":\"review 1: no answer\",\"tail\":\"\",\"since\":\"${d}T00:04:00Z\",\"doneWhen\":null,\"split\":null,\"stalls\":0}],\"pick\":[],\"farDeps\":[]}" ] \
     || fail "needsYou: $(q .needsYou)"
   [ "$(q '.belt | map("\(.card) \(.issue) \(.title) \(.step) \(.review) \(.of) \(.stepAt[14:16]) \(.model) \(.tokens.claude) \(.tokens.codex) \(.usd) \(.reading)") | join(", ")')" \
     = '"c1 1 T1 brief null 3 00 null 0 0 null false, c2 2 T2 build null 3 02 claude-sonnet-5-5 0 0 null false, c3 3 T3 review 1 3 03 gpt-6.1-sol 1000000 0 2 true, c4 4 T4 fix null 3 04 claude-sonnet-5-5 1000000 500000 3 true, c5 5 T5 tests null 3 04 null 1000000 500000 3 true, c6 6 T6 landing null 3 05 null 1000000 500000 3 true, c10 10 T10 push null 3 10 null 3000000 1500000 9 true"' ] \
@@ -106,7 +106,7 @@ t_snapshot() { snapshotstart
     = '[5,{"claude":"claude-sonnet-5-5","codex":"gpt-6.1-sol"},[7],[8],[10],false,true,true]' ] || fail "health: $(q .health)"
   # The time, free disk and GitHub read (ghRead: with no feed, the call's own time) are read again by each call.
   [ "$(q '.health | del(.time, .diskFreeKb, .ghRead)')" = "$(loop health | jq -c 'del(.time, .diskFreeKb, .ghRead)')" ] || fail "health is not the health record"
-  [ "$(q '.cost | del(.cards)')" = '{"today":31,"todayLeftOut":0,"week":37,"weekLeftOut":0,"perLanded":5.25,"perLandedLeftOut":0,"landedAfter":{"1":2,"2":1,"3":1,"more":0},"unpricedSteps":0,"unpriced":[],"picks":[],"trials":{"dropped":[],"flagged":[]}}' ] || fail "cost: $(q .cost)"
+  [ "$(q '.cost | del(.cards)')" = '{"today":31,"todayLeftOut":0,"week":37,"weekLeftOut":0,"perLanded":5.25,"perLandedLeftOut":0,"landedAfter":{"1":2,"2":1,"3":1,"more":0},"unpricedSteps":0,"unpriced":[],"picks":[],"trials":{"dropped":[],"flagged":[],"groups":[]},"replay":null}' ] || fail "cost: $(q .cost)"
   # Per card, the 7 days: a card landed on an earlier day (11) and the blocked ones (7, 8) are rows; one with no step
   # ended (1, 2) or last worked on before the 7 days (12) is not. The rows add up to the totals.
   [ "$(q '.cost.cards | map("\(.issue) \(.state) \(.today) \(.week)") | sort | join(", ")')" \
@@ -118,12 +118,13 @@ t_snapshot() { snapshotstart
 t_snapshotdeploy() { snapshotstart
   rm "$STUB/labelled"; [ "$(loop snapshot --fresh | jq -c '.awaitingDeploy | map([.issue, .since])')" = '[[25,null],[26,null],[27,null]]' ] || fail "awaitingDeploy without the label times"
   jq -c 'map(select(.labels | any(.name == "awaiting-deploy") | not))' "$STUB/issues.json" > "$STUB/issues.none" && mv "$STUB/issues.none" "$STUB/issues.json"
-  [ "$(loop snapshot --fresh | jq -c .awaitingDeploy)" = '[]' ] || fail "awaitingDeploy with no such issue is not an empty list"
-  mkdir "$STUB/tmp"; TMPDIR=$STUB/tmp loop snapshot --fresh >/dev/null 2>&1; [ -z "$(ls -A "$STUB/tmp")" ] || fail "a snapshot left its copy of the records behind: $(ls -A "$STUB/tmp")"
+  # That snapshot also shows it left no copy of the records in its TMPDIR, and is the one the bad line below is held to.
+  local before after; mkdir "$STUB/tmp"; before=$(TMPDIR=$STUB/tmp loop snapshot --fresh 2>/dev/null | jq -c '[.landed, .awaitingDeploy]')
+  [ "$(jq -c '.[1]' <<<"$before")" = '[]' ] || fail "awaitingDeploy with no such issue is not an empty list: $before"
+  [ -z "$(ls -A "$STUB/tmp")" ] || fail "a snapshot left its copy of the records behind: $(ls -A "$STUB/tmp")"
   # A line that does not check (#157): the snapshot is still given, with every card it gave before. The line is set
   # aside in quarantined.jsonl, and the snapshot's health names it. Bug: one bad line stopped every snapshot.
   # #290: the rows (snaprows) read the records before health's check set the line aside, and jq stopped on it.
-  local before after; before=$(loop snapshot --fresh | jq -c '[.landed, .awaitingDeploy]')
   echo junk >> "$S/cards.jsonl"; after=$(loop snapshot --fresh 2>"$STUB/junk.err") || fail "a snapshot stopped on a line that does not check: $(cat "$STUB/junk.err")"
   ! grep -q 'parse error' "$STUB/junk.err" || fail "the snapshot's rows read the line before it was set aside: $(cat "$STUB/junk.err")"
   [ "$(jq -c '[.landed, .awaitingDeploy]' <<<"$after")" = "$before" ] && [ "$(jq -c '.health.quarantined | map(.field)' <<<"$after")" = '["(not JSON)"]' ] \
@@ -152,8 +153,9 @@ t_snapshotsteps() { snapshotstart
 # The snapshot and `cards` read the same rows: a review after a fix is review 2, and both call the step a review.
 t_snapshotcards() { snapshotstart
   card 4 "$d" fix; mv "$S/cards.jsonl" "$S/all"; grep '"card":"c4"' "$S/all" > "$S/cards.jsonl"
-  [ "$(loop snapshot --fresh | jq -c '.belt | map([.step, .review, .usd + 0])')" = '[["review",2,5]]' ] && [ "$(loop cards | jq -r '.cards[0].step')" = review ] && ! loop cards | grep -q '"x"' \
-    || fail "review 2 of 3, or cards gained the snapshot's fields: $(loop snapshot --fresh | jq -c .belt)"
+  local s c; s=$(loop snapshot --fresh | jq -c '.belt | map([.step, .review, .usd + 0])'); c=$(loop cards)
+  [ "$s" = '[["review",2,5]]' ] && [ "$(jq -r '.cards[0].step' <<<"$c")" = review ] && ! grep -q '"x"' <<<"$c" \
+    || fail "review 2 of 3, or cards gained the snapshot's fields: $s $c"
 }
 # A step is priced at the model its own line names, never at the one in force now (the builder moved from Fable
 # to Opus, and every earlier Fable session read at Opus rates). Card 4's lines name no model, card 6's build names
@@ -203,7 +205,7 @@ t_snapshotlate() { latestart
   loop retry 8 >/dev/null || fail "retry of the blocked #8 failed"; # what the snapshot had said when health read the free disk (df), in the build: gh is asked before the build begins
   out=$(df() { { grep -c "made anew" "$STUB/err" || :; } >> "$STUB/said"; command df "$@"; }; export -f df; loop snapshot --fresh 2>"$STUB/err") || fail "snapshot after a retry exited non-zero"; [ "$(sort -u "$STUB/said")" = 1 ] || fail "the snapshot after a retry rewrote the card records did not say it is made anew before health's long work, so a reader that stops it waits with no reason (#282): $(tr '\n' ' ' < "$STUB/said"), $(cat "$STUB/err")"
   [ "$(q '[(.cost | del(.cards)), .needsYou.blocked, (.health.blocked | length), ([.belt[], .landed[]] | map(.card) | index("c8")), (.cost.cards[] | select(.card == "c8") | [.state, .today, .week])]')" \
-    = '[{"today":31,"todayLeftOut":0,"week":37,"weekLeftOut":0,"perLanded":4.8,"perLandedLeftOut":0,"landedAfter":{"1":3,"2":1,"3":1,"more":0},"unpricedSteps":0,"unpriced":[],"picks":[],"trials":{"dropped":[],"flagged":[]}},[],0,null,["retried",2,2]]' ] || fail "a retried card's spend left the totals, or the card is still shown: $out"
+    = '[{"today":31,"todayLeftOut":0,"week":37,"weekLeftOut":0,"perLanded":4.8,"perLandedLeftOut":0,"landedAfter":{"1":3,"2":1,"3":1,"more":0},"unpricedSteps":0,"unpriced":[],"picks":[],"trials":{"dropped":[],"flagged":[],"groups":[]},"replay":null},[],0,null,["retried",2,2]]' ] || fail "a retried card's spend left the totals, or the card is still shown: $out"
   # The rest of a landed card's track. Cards 10 and 5 landed and are not at origin: both are on the belt, pushing.
   [ "$(after)" = '[["c10","push",14,"pushing","nt","n",null],["c5","push",14,"pushing","nt","n",null]]' ] || fail "two landed cards waiting for their push: $(after)"
 }
