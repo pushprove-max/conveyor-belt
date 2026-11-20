@@ -49,12 +49,11 @@ pxblocked() { st 'select(.issue == 7 and .step == "blocked")'; }
 # Bug: on a fresh machine whose subscription login had expired, every card was blocked within a second, while a local
 # API proxy ran beside it. With the proxy set as the fallback, the same build runs again at once through it, with the
 # key from the variable it names; its fields say it ran through the proxy, the routes record the subscription expired
-# and the proxy working, health shows that with the proxy's URL and its fallback mode, and the Board's timeline of a
-# build line on the proxy says so.
+# and the proxy working, and health shows that with the proxy's URL and its fallback mode. The Board's timeline of a
+# build on the proxy is t_proxyfallbackrun's: a fresh snapshot here cost this case 1.4 s and proved nothing more.
 t_proxyfallback() {
   pxsetup; tune --arg b "$PXURL" '.models.claudeProxy = {baseUrl: $b, keyEnv: "PROXY_KEY", roles: {builder: "fallback", reviewer: "fallback"}}'
-  # The card's picked, build and landed lines, its build line of the session's own fields, for the Board's timeline.
-  PROXY_KEY=px-secret pxeng "$PXBUILD"' && record "${w##*/}" 7 picked ok && record "${w##*/}" 7 build ok "$t" && record "${w##*/}" 7 landed ok "{\"sha\": \"abc\", \"product\": false}"'; pxbuilt 0
+  PROXY_KEY=px-secret pxeng "$PXBUILD"; pxbuilt 0
   [ "$(cat "$STUB/routes")" = "subscription"$'\n'"$PXURL px-secret" ] || fail "the build did not run again through the proxy, with its key: $(cat "$STUB/routes")"
   [ "$(jq -r .route "$T/$CASE/build")" = proxy ] || fail "the build's fields do not say it ran through the proxy: $(cat "$T/$CASE/build")"
   [ "$(jq -c '[.subscription.state, .proxy.state]' "$ST/routes.json")" = '["expired","works"]' ] || fail "the routes do not record the subscription expired and the proxy working: $(cat "$ST/routes.json")"
@@ -62,9 +61,6 @@ t_proxyfallback() {
     || fail "health does not show the subscription expired and the proxy working: $(loop health | jq -c .routes)"
   # Issue 135: a sign-in failure the fallback route got past does not pause the loop.
   [ "$({ cat "$ST/control.json" 2>/dev/null || echo '{}'; } | jq -c '[.mode // "run", .signin]')" = '["run",null]' ] || fail "a sign-in failure with a working fallback paused the loop: $(cat "$ST/control.json")"
-  local s; s=$(loop snapshot --fresh)
-  [ "$(jq -r '.landed[] | select(.issue == 7) | .metrics.timeline[] | select(.step == "build") | .route' <<<"$s")" = proxy ] \
-    || fail "the Board's timeline of the build does not say the proxy: $(jq -c '.landed[] | select(.issue == 7) | .metrics.timeline' <<<"$s")"
 }
 # With no proxy set, the build is blocked with the login as its cause, and runs nowhere else; health shows the proxy
 # not set.
@@ -154,7 +150,7 @@ t_proxydown() {
 }
 # Bug: card() records its build and review lines without the route session() and review() give, so the Board's
 # timeline of a landed card shows the subscription for sessions that ran through the proxy. A loop run: the cases above
-# write the card's build and landing records themselves, and only card() joins the sessions' fields to those lines.
+# call the sessions alone and write no build or landing lines, and only card() joins the sessions' fields to those lines.
 # The builder and the Claude reviewer take the proxy as their fallback; on the subscription the login has expired.
 t_proxyfallbackrun() {
   pxsetup; tune --slurpfile real "$SRC/lib/test-pack.json" --arg b "$PXURL" '.models.allowed = $real[0].models.allowed | .models.allowed.claude += ["m"]
@@ -313,19 +309,22 @@ pxlimit() { # <roles JSON>
   loop control guard 90 >/dev/null 2>&1 && loop control reviewer claude claude-opus-5-5 >/dev/null 2>&1 || fail "the guard or the Claude reviewer was not set"
   tune --arg b "$PXURL" --argjson r "$1" '.models.claudeProxy = {baseUrl: $b, roles: $r}'
 }
+# The accounts the snapshot gives the Board to read (its limits are guardaccts() of the control record, as
+# accounts.test.sh proves of the snapshot itself), called alone: a fresh snapshot cost each case 1.4 s.
+pxaccts() { pxeng 'ctlread && guardaccts "$CTL_V"' || fail "guardaccts failed: $(cat "$T/$CASE/out")"; jq -c "$1" "$T/$CASE/out"; } # <jq filter>
 # Every role on an API route: no reading is asked for (health asks as the loop does before a pick: guardread ask),
 # none is given, and the snapshot gives the Board no account to read and no role on the subscription.
 t_pxnolimit() {
   pxlimit '{"builder": "proxy", "reviewer": "proxy"}'
   [ "$(loop health | jq -c '[.guard.reading, .routes.subscription.roles]')" = '[null,[]]' ] || fail "health read a limit for roles on an API route: $(loop health | jq -c '[.guard, .routes]')"
   [ ! -e "$STUB/limit-dirs" ] || fail "a usage reading was asked for with every role on an API route: $(cat "$STUB/limit-dirs")"
-  [ "$(loop snapshot --fresh | jq -c .limits)" = '[]' ] || fail "the snapshot gives the Board an account to read: $(loop snapshot --fresh | jq -c .limits)"
+  [ "$(pxaccts .)" = '[]' ] || fail "the snapshot gives the Board an account to read: $(cat "$T/$CASE/out")"
 }
 # Mixed routes: the builder on the API, the reviewer on the subscription. Only the reviewer's account is read.
 t_pxmixedlimit() {
   pxlimit '{"builder": "proxy", "reviewer": "subscription"}'
   [ "$(loop health | jq -c '[.guard.reading, .routes.subscription.roles]')" = '[50,["reviewer"]]' ] || fail "health did not read the reviewer's limit alone: $(loop health | jq -c '[.guard, .routes]')"
-  [ "$(loop snapshot --fresh | jq -c '.limits | map(.uses)')" = '[["review"]]' ] || fail "the snapshot does not give the reviewer's account alone: $(loop snapshot --fresh | jq -c .limits)"
+  [ "$(pxaccts 'map(.uses)')" = '[["review"]]' ] || fail "the snapshot does not give the reviewer's account alone: $(cat "$T/$CASE/out")"
 }
 # A role on fallback starts each session on the subscription (proxyroute()), and its reviewer on proxy never does:
 # the builder's account alone is read. Bug caught: a login that failed once (routes.json "expired") dropped the
@@ -335,5 +334,5 @@ t_pxfallbacklimit() {
   mkdir -p "$ST" && echo '{"subscription": {"state": "expired", "at": "2026-01-01T00:00:00Z"}}' > "$ST/routes.json"
   [ "$(loop health | jq -c '[.guard.reading, .routes.subscription.roles]')" = '[50,["builder"]]' ] && [ -s "$STUB/limit-dirs" ] \
     || fail "the fallback builder's account was not read after a failed login: $(loop health | jq -c '[.guard, .routes]')"
-  [ "$(loop snapshot --fresh | jq -c '.limits | map(.uses)')" = '[["build"]]' ] || fail "the snapshot does not give the fallback builder's account alone: $(loop snapshot --fresh | jq -c .limits)"
+  [ "$(pxaccts 'map(.uses)')" = '[["build"]]' ] || fail "the snapshot does not give the fallback builder's account alone: $(cat "$T/$CASE/out")"
 }
