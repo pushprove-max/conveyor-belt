@@ -37,6 +37,9 @@
     ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
+  "conveyor/tests/serve.test.sh": [
+    "conveyor/tests/pushmerge.test.sh"
+  ],
   "conveyor/tests/workdeps.test.sh": [
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
