@@ -585,11 +585,10 @@ snapshot() (
   done < "$d/yes" | jq -cs 'add // {}' > "$d/shots" 2>/dev/null || echo '{}' > "$d/shots"
   # Each blocked land-branch card of issue 0 whose branch's change is already on main (another card landed the same
   # change): the branch merged into main gives main's own tree, as landbranch() finds "nothing to land". Needs you says
-  # it can be shut. Only cards of issue 0 are read, a few, and a branch that is gone is not said to be on main.
+  # it can be shut. The cards come from the rows (rows.jq: step is the closing step, x.branch the picked line's
+  # branch), and a branch that is gone is not said to be on main.
   mtree=$(git rev-parse -q --verify "refs/heads/$BRANCH^{tree}" 2>/dev/null) || mtree=''
-  { [ -n "$mtree" ] && stdb ask issue cards 0 2>/dev/null; } | jq -rs 'map(select(.step != "push")) | group_by(.card)[]
-      | select(any(.step == "picked" and (.branch | type) == "string") and (map(select(.step | IN("landed", "closed", "blocked", "pushed"))) | last | .step) == "blocked")
-      | [.[0].card, (map(select(.step == "picked") | .branch | strings) | first)] | @tsv' 2>/dev/null \
+  { [ -n "$mtree" ] && jq -r '.[] | select(.issue == 0 and .step == "blocked" and (.x.branch | type) == "string") | [.card, .x.branch] | @tsv' "$d/rows" 2>/dev/null; } \
     | while IFS=$'\t' read -r c b; do
         if t=$(git merge-tree --write-tree "refs/heads/$BRANCH" "refs/heads/$b" 2>/dev/null) && [ "${t%%$'\n'*}" = "$mtree" ]; then printf '%s\n' "$c"; fi
       done | jq -Rcs 'split("\n") | map(select(. != ""))' > "$d/onmain" 2>/dev/null || echo '[]' > "$d/onmain"
