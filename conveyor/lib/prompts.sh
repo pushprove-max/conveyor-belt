@@ -105,10 +105,8 @@ names() {
   SUITERUNNERS=$(runnerfiles)
   # shellcheck disable=SC2034
   TESTRUNNERS=$(testpaths <<<"$SUITERUNNERS"); NAMED_PJ=$pj
-  YES="visible to customers or staff: needs $OWNER's yes: "
-  # The other stop for the owner's yes: a change of lint policy (lintpolicy(), lib/lint.sh) and no visible change.
-  # shellcheck disable=SC2034 # LINTYES is read in lib/card.sh and lib/issues.sh
-  LINTYES="lint policy: needs $OWNER's yes: "
+  # The two stops for the owner's yes (yesforms(), lib/records.sh).
+  yesforms "$OWNER"
   [ "$r" = real ] && r=$REALPROOF || r=''
   REVIEW=${REVIEWT//'<owner>'/"$OWNER"}; REVIEW=${REVIEW//'<product paths>'/"$p"}; REVIEW=${REVIEW//'<real proof>'/"$r"}
   REVIEWOFF=${REVIEW//'<yes>'/"$NOYESREVIEW"}; y=${YESREVIEW//'<owner>'/"$OWNER"}; REVIEW=${REVIEW//'<yes>'/"${y//'<product paths>'/"$p"}"}

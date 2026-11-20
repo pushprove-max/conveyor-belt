@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // The dashboard page's cards: the rest of Needs you (an answer names its card's repository, a whole test failing on
 // main, a plugin commit not taken, an issue waiting for the yes, a held pipeline change), Declined, a review's judge
-// line, a card passed on re-run and a slow-test note. Shared setup: dashboard-view.helpers.mjs.
+// line, a card passed on re-run, a slow-test note, and Needs you and the belt from a snapshot behind the card records.
+// Shared setup: dashboard-view.helpers.mjs.
 // Its cases run one after another in one thread, not in cases()'s workers: each worker loads jsdom and warms its code
 // again, and for these 14 cases that cost about twice the CPU of one thread (#586).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { T0, iso, clone, boot, panel, deliver, next, settle, P, trackOf, counts, full, openEvery, tabBtn } from './dashboard-view.helpers.mjs';
+import { T0, iso, clone, boot, panel, deliver, next, settle, P, trackOf, counts, full, openEvery, tabBtn, fig } from './dashboard-view.helpers.mjs';
 
 // Needs you lists the cards of every record, so the answer carries the card's repository with its number.
 // Bug: only the number was sent, and the host acted on main's issue of that number: approving another repository's
@@ -476,4 +477,41 @@ test('a passing test run flags no slow file, though its step holds an old slow l
     assert.doesNotMatch(li.textContent, /slow file|budget/i);
     assert.equal(li.querySelector('.tl-slow, .tl-slow-open'), null, 'no slow list and no button for it');
   }
+});
+
+// Bug (#1101): while a new snapshot took minutes, Needs you and the belt showed the old one with nothing to say it was
+// old, and the belt counted its cards, or said it was empty, while the loop built more. A part's behind names the
+// project whose snapshot is behind its card records: each panel says so under what it shows, and the belt counts the
+// loop's own figure (building); once none is behind, the line goes and the belt counts its cards again.
+test('Needs you and the belt say when a snapshot is behind the card records, and the belt counts what builds now', () => {
+  const w = boot();
+  const data = full(), at = iso(T0 - 120000);
+  const said = (id) => Array.from(panel(w, id).querySelectorAll('.behind p'), (p) => p.textContent);
+  const count = () => panel(w, 'belt').querySelector('.panel-count').textContent;
+  deliver(w, data);
+  const before = count();
+  data.panels.needs.data.behind = [{ repo: 'sample', at }];
+  // The blocked card as the records give it (fromRecords): no track and no reviews.
+  delete data.panels.needs.data.cards.blocked[0].track;
+  data.panels.needs.data.cards.blocked[0].fromRecords = true;
+  Object.assign(data.panels.belt.data, { behind: [{ repo: 'sample', at }], building: 2, cards: [] });
+  next(w, data);
+  const stopsAt = () => panel(w, 'needs').querySelector('li[data-key^="blocked:c2-13"] .track6');
+  assert.equal(stopsAt(), null, 'the card the records give has no track');
+  for (const id of ['needs', 'belt']) {
+    assert.equal(said(id).length, 1, `${id} says its snapshot is behind`);
+    assert.match(said(id)[0], /^sample As of .+, the belt has changed since\.$/);
+  }
+  assert.equal(panel(w, 'belt').dataset.state, 'ready', 'a belt with no card shown is not called empty while it is behind');
+  assert.equal(count(), '2 of 3', "the belt counts the loop's figure, not the cards it shows");
+  assert.equal(fig(w, 'belt'), '2 of 3', "the head's On the belt tile counts as the belt does");
+  // Bug: the row the records gave had the key of the whole card, so it was kept, with no track or reviews, once a new
+  // snapshot gave them.
+  const fresh = full();
+  fresh.panels.needs.data.cards.blocked[0].track = { ...trackOf('++!...', ''), at: null };
+  next(w, fresh);
+  assert.ok(stopsAt(), 'the whole card from the new snapshot is drawn anew, with its track');
+  assert.deepEqual([said('needs'), said('belt')], [[], []], 'the line goes once no project is behind');
+  assert.equal(count(), before);
+  assert.equal(fig(w, 'belt'), before);
 });

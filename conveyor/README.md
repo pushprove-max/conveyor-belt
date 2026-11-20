@@ -1612,8 +1612,12 @@ what is left grows with the cards open or blocked and the open issues, not with 
 
 `conveyor.sh snapshot` prints the last snapshot at once. Its first three fields are `snapshotAt`, when that snapshot
 was made, `snapshotAge`, its age in seconds, and `recordsNewer`. `recordsNewer` is true when the card records changed
-after the snapshot was made, so its belt can leave out a card that started since. The Foreman does not call such a
-snapshot idle, and `conveyor.sh foreman status` says the belt can hold more cards than it shows. When a record line, the control record, a card's live record or the
+after the snapshot was made, so its belt can leave out a card that started since. Then a fourth field, `recordsNow`,
+gives what the card records and `loop.json` say now: `blocked`, each card the records hold blocked now, `waiting`,
+each card that waits for your yes now, and `building` and `waitingCount`, the running loop's count at its last turn
+(null when no loop runs). The Foreman does not call such a snapshot idle. `conveyor.sh foreman status`, and the
+Board's Needs you and On the belt, say "as of <time>, the belt has changed since" and take their blocked and waiting
+cards and building count from `recordsNow`. When no loop runs, the Board counts no card building. When a record line, the control record, a card's live record or the
 list of issues changes, one process makes a new snapshot in the background and puts it in place whole. A reader does
 not wait for it, and it does not get a part of a snapshot. `conveyor.sh snapshot --fresh` makes a new snapshot now,
 prints it and keeps it. When a snapshot is already being made, it waits until that one is done. Then the calls that

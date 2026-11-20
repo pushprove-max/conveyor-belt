@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// On the belt: each card being built and where it is. Its part: {cards, cap, waiting}; a card is {repo, card,
+// On the belt: each card being built and where it is. Its part: {cards, cap, waiting, building (the loop's count now
+// while a snapshot is behind the card records, else null), behind ([{repo, at}]: ctx.behind)}; a card is {repo, card,
 // issue, title, url, parent, step, review, of, stepAt, landed, model, tokens, usd, reading, atEnd, live ({turns, lastOutputAt,
 // action} | null), reviews, track, start, pickedAt, priorSec, earlier, totalSec}, as `conveyor.sh snapshot` gives its
 // belt. track is the six steps Build, Review, Fix,
@@ -92,13 +93,15 @@
     rows: 5,  // a card is four lines: five of them fill the panel's default length
     // A card that has landed and waits for its push or for its issue to close holds no builder slot, and nor does a card
     // the loop leaves out of its count as it only waits on another card (the part's waiting): neither is counted, as
-    // the On the belt tile of the head counts them (head.js).
+    // the On the belt tile of the head counts them (head.js). While a project's snapshot is behind its card records,
+    // the count is the loop's own now (the part's building, from loop.json: dashboard.sh), not the cards it shows.
     count: (d) => {
       const all = d.cards.filter((c) => !c.landed).length;
-      const n = all - Math.min(typeof d.waiting === 'number' && d.waiting > 0 ? d.waiting : 0, all);
+      const n = num(d.building) ? d.building : all - Math.min(typeof d.waiting === 'number' && d.waiting > 0 ? d.waiting : 0, all);
       return typeof d.cap === 'number' ? `${n} of ${d.cap}` : n;
     },
-    isEmpty: (d) => d.cards.length === 0,
+    // A belt shown from a snapshot behind the card records is never "empty": cards may have begun since.
+    isEmpty: (d) => d.cards.length === 0 && !(Array.isArray(d.behind) && d.behind.length),
     empty(el, ctx) { el.append(ctx.state('empty', 'The belt is empty', 'Conveyor builds no card now.')); },
     error(el, message, ctx) { el.append(ctx.state('error', 'The Board could not read the belt', message)); },
     // Each second, whether or not a new snapshot came: the time since a running step's last output counts on, and
@@ -233,6 +236,8 @@
         }
         every(li, c, ctx, was);
       });
+      // Under the cards, each project whose snapshot is behind its card records (ctx.behind).
+      ctx.behind(el, d.behind);
     },
   });
 }());

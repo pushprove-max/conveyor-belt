@@ -123,7 +123,8 @@
           const b = part('belt');
           const all = b && Array.isArray(b.cards) ? b.cards.filter((c) => !(c && c.landed)).length : null;
           const waiting = all !== null ? Math.min(n(b.waiting) || 0, all) : 0;
-          const cards = all !== null ? all - waiting : null;
+          // The loop's own count while a snapshot is behind the card records (the part's building), as belt.js counts.
+          const cards = all !== null && n(b.building) !== null ? b.building : all !== null ? all - waiting : null;
           return { value: cards, sub: cards !== null && n(b.cap) !== null ? `of ${b.cap}` : null,
             left: waiting > 0 ? `${plural(waiting, 'card waits', 'cards wait')} on another card: not counted` : null };
         } },

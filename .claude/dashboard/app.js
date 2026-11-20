@@ -1744,6 +1744,18 @@
     el.dataset.project = String(repo);
     return el;
   }
+  // While a project's snapshot is behind its card records (a part's behind, [{repo, at}]: its recordsNewer), what a
+  // panel shows of that project is as of when the snapshot was made: one line a project under it (el) says so, "As of
+  // <time>, the belt has changed since." The line goes once no project is behind.
+  function behind(el, list) {
+    const xs = (Array.isArray(list) ? list : []).filter((b) => b && typeof b.repo === 'string');
+    let box = el.querySelector(':scope > .behind');
+    if (!xs.length) { if (box) box.remove(); return; }
+    const said = xs.map((b) => [b.repo, `As of ${when(b.at)}, the belt has changed since.`]), key = JSON.stringify(said);
+    if (!box) { box = h('div', 'behind'); box.setAttribute('role', 'status'); }
+    if (box.key !== key) { box.key = key; box.replaceChildren(...said.map(([r, t]) => { const p = h('p', 'hint'); p.append(tag(r), ` ${t}`); return p; })); }
+    if (el.lastElementChild !== box) el.append(box);
+  }
   // What needs attention on a tab: each of its panels may say how many things (attention(data) of its module).
   function attention(t) {
     if (!last || !last.panels) return 0;
@@ -2001,7 +2013,7 @@
     }
     p.ctx = {
       h, chip, icon, tip, unread, get retry() { return retryText(); }, restartButton: restartHere, faults: panelFaults, get machine() { return machineWord(); }, get answerer() { return answerer(); }, details, since, clock, when, stamp, dur, took, money, modelName, findings, survived, loopEnd, judged, reviewChip, verdictSaid, output, issueLink, depRef, list, post, fresh, motion, state: stateBlock, track, trackDetail, trackShell, earlierTip, testProgress, fixNow,
-      param, params, pickRepo, project, now, tag, setTab, restart, goTo, panelHref: (id) => panelHref(id), failure, failureLine, failureShort, twice, undoLine, text: findingText,
+      param, params, pickRepo, project, now, tag, behind, setTab, restart, goTo, panelHref: (id) => panelHref(id), failure, failureLine, failureShort, twice, undoLine, text: findingText,
       pausedSaid, refusal, depPicked,
       // Whether the lists are sorted by project (the machine head's sort): a panel that orders a list itself keeps each
       // project's rows together then.

@@ -101,15 +101,52 @@ snapwriter() {
 # the card records or the retried file changed after its build began: its belt can leave out a card begun since. A
 # retry rewrites the records, so the next build reads them whole and can take minutes (#1032: the Foreman's watcher
 # read the snapshot from before the retry, with the belt empty, and woke the Foreman with "Conveyor is idle").
+# While recordsNewer is true, recordsNow (recordsnow) follows it.
 snapprint() {
-  local k s m now newer=false
+  local k s m now newer=false at rn=''
   k=$(p_filekey "$KEPT") && k=${k#* } && [[ $k =~ ^([0-9]+)[.,]([0-9]{3}) ]] || { echo "conveyor: cannot read $KEPT" >&2; return 1; }
   s=${BASH_REMATCH[1]} m=$((BASH_REMATCH[1] * 1000 + 10#${BASH_REMATCH[2]}))
-  now=${EPOCHREALTIME/[.,]/}; now=$((10#$now / 1000)); m=$((now > m ? now - m : 0))
+  at=$(export TZ=UTC; printf '%(%Y-%m-%dT%H:%M:%SZ)T' "$s")
   # The shell's own test of the times (to the nanosecond, as find -newer): no program on each read.
   { [ "$STATE" -nt "$KEPT" ] || [ "$RETRIED" -nt "$KEPT" ]; } && newer=true
-  printf '{"snapshotAt":"%s","snapshotAge":%d.%03d,"recordsNewer":%s,' "$(export TZ=UTC; printf '%(%Y-%m-%dT%H:%M:%SZ)T' "$s")" $((m / 1000)) $((m % 1000)) "$newer"
+  if [ "$newer" = true ]; then rn=$(recordsnow "$at" 2>/dev/null) && [ -n "$rn" ] || rn=null; rn="\"recordsNow\":$rn,"; fi
+  now=${EPOCHREALTIME/[.,]/}; now=$((10#$now / 1000)); m=$((now > m ? now - m : 0))
+  printf '{"snapshotAt":"%s","snapshotAge":%d.%03d,"recordsNewer":%s,%s' "$at" $((m / 1000)) $((m % 1000)) "$newer" "$rn"
   tail -c +2 "$KEPT"
+}
+# What the card records and loop.json say now, which stay current while a new build takes minutes: the kept snapshot
+# can show nothing blocked and nothing building while cards block and build (#1101). One object: blocked, each card
+# the records hold blocked now, as {card, issue, name, reason, since}: the kept snapshot's health blocked and waiting,
+# but for a card with a closing line since <snapshotAt> or with no line left (retried), and each card whose last
+# closing line (landed, closed, blocked or pushed) since then is blocked; of those, a card stopped for the owner's yes
+# (its reason starts with YES or LINTYES, yesforms() with the pack's owner.name: block(), lib/card.sh) is in waiting
+# instead, as views.sh splits health's, with its sentence: the reason after that start; building and waitingCount,
+# the running loop's count at its last turn (loop.json, run()), null when no process of that loop lives. Nothing is
+# printed when the pack names no owner. A line of the second the build began is read again (the snapshot may hold
+# it): a card is listed once.
+# Only the lines since are read whole: a line's first "time" field is its own (line(), lib/records.sh).
+recordsnow() { # <snapshotAt>
+  local p b=null YES LINTYES o
+  o=$(jq -er '.owner.name | strings' "$MAIN/.conveyor/project.json" 2>/dev/null) || return 1
+  yesforms "$o"
+  p=$(jq -r '.pid | numbers' "$SAYS" 2>/dev/null) && [ -n "$p" ] && kill -0 "$p" 2>/dev/null \
+    && b=$(jq -c '{building: (.building | numbers), waiting: (.waiting | numbers)}' "$SAYS" 2>/dev/null) && [ -n "$b" ] || b=null
+  LC_ALL=C awk -v t="\"time\":\"$1\"" '{ i = index($0, "\"time\":\""); if (i && substr($0, i, length(t)) >= t) print }' "$STATE" \
+    | jq -cnR --slurpfile k "$KEPT" --argjson loop "$b" --arg at "$1" --arg yes "$YES" --arg lintyes "$LINTYES" --rawfile ids <(LC_ALL=C grep -o '^{"card":"[^"]*"' "$STATE") '
+      ($ids | split("\n") | map(select(. != "") | .[9:-1]) | INDEX(.)) as $have
+      | [inputs | fromjson? | objects | select((.card | type) == "string" and (.time | type) == "string" and .time >= $at)] as $new
+      | $k[0] as $s
+      # A main-red fix card has no issue: its name, as the belt has it, or as its picked line gives it (views.sh).
+      | ([$s.belt | arrays | .[] | objects | select((.card | type) == "string" and (.name | type) == "string") | {key: .card, value: .name}]
+         + [$new[] | select(.step == "picked" and (.mainRed | type) == "string") | {key: .card, value: "Main is red (\(.mainRed[0:12]))"}] | from_entries) as $names
+      | ($new | map(select(.step | IN("landed", "closed", "blocked", "pushed"))) | group_by(.card) | map(last)) as $ends
+      | ($ends | INDEX(.card)) as $ended
+      | ([$s.health | objects | (.blocked, .waiting) | arrays | .[] | objects | select((.card | type) == "string")
+            | select($have[.card] != null and $ended[.card] == null) | {card, issue, name: (.name // $names[.card]), reason, since}]
+          + [$ends[] | select(.step == "blocked") | {card, issue, name: $names[.card], reason, since: .time}]) as $all
+      | def yes: (.reason | type) == "string" and (.reason | startswith($yes) or startswith($lintyes));
+        {blocked: [$all[] | select(yes | not)], waiting: [$all[] | select(yes) | . + {sentence: (.reason | if startswith($lintyes) then ltrimstr($lintyes) else ltrimstr($yes) end)}],
+         building: $loop.building, waitingCount: $loop.waiting}'
 }
 if [ -z "$fresh" ] && [ -s "$KEPT" ]; then
   if snapdue; then

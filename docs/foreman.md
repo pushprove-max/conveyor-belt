@@ -45,6 +45,9 @@ off the Board that opens when a session starts.
 see only that project. It shows:
 
 - each card on the belt, one a line: its issue, step, time in that step and title
+- when the card records changed after the last snapshot was made, "as of <time>, the belt has changed since" after the
+  count of cards on the belt. The cards building and the blocked cards then come from the card records and
+  `loop.json`, which are up to date.
 - the cards that wait on other issues, and the held issues, by number
 - the release or full-test run in progress: its commit, how long it has run, the cases done of all its cases, and the
   failed cases. With no run in progress, it shows how the last run ended.

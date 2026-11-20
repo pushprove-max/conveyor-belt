@@ -17,12 +17,13 @@
 # such as ran() would replace another file's helper of that name (rerun.test.sh has its own ran()).
 snapsum_engine() {
   D=$T/$CASE; ST=$D/state
-  # shellcheck disable=SC2034 # HERE and YES are read by the engine's snaprows() and rows(), eval'd below; OWNER by
-  # the LINTYES line taken from lib/prompts.sh
-  HERE=$SRC YES="visible to customers or staff: needs the owner's yes: " OWNER="the owner"
+  # shellcheck disable=SC2034 # HERE is read by the engine's snaprows() and rows(), eval'd below; YES and LINTYES are
+  # set by the engine's yesforms(), taken from lib/records.sh
+  HERE=$SRC
   mkdir -p "$ST" "$D/d" && : > "$D/rows" && : >> "$ST/cards.jsonl" && : >> "$ST/retried.jsonl" || fail "the case's folders could not be made"
   eval "$(sed -n '/^snaprows() {/,/^}/p' "$SRC/lib/snapshot.sh"; sed -n '/^rows() {/,/^}/p' "$SRC/lib/views.sh" | sed '1s/^rows()/snapsum_realrows()/'
-    grep -hE '^(MAX_REVIEWS|NODEPS|SHUT|OWNSHUT| *LINTYES)=' "$SRC/lib/"{paths,push,issues,prompts}.sh)"
+    sed -n '/^yesforms() {/,/^}/p' "$SRC/lib/records.sh"; grep -hE '^(MAX_REVIEWS|NODEPS|SHUT|OWNSHUT)=' "$SRC/lib/"{paths,push,issues}.sh)"
+  declare -F yesforms > /dev/null && yesforms "the owner"
   # Bug (#1012): snaprows() reads LINTYES (#259); with it not set, the cases stopped on an unbound variable.
   declare -F snaprows snapsum_realrows > /dev/null && [ -n "$MAX_REVIEWS" ] && [ -n "$NODEPS" ] && [ -n "$SHUT" ] && [ -n "${OWNSHUT:-}" ] && [ -n "${LINTYES:-}" ] || fail "snaprows, rows or their settings were not found in the engine"
   rows() { echo "${1##*/} $(wc -l < "$1")" >> "$D/rows"; snapsum_realrows "$@"; }

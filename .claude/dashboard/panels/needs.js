@@ -8,7 +8,10 @@
 // click with Undo, a release). A card whose reason has a fix Conveyor runs itself (FIXES) also has Fix, which says
 // what it does. The line above its buttons names the step its kind of block takes (STEPS). One its host already gave back (retried) shows "Retried, waiting for its turn", with no
 // buttons. Its part:
-// {cards: {waiting, blocked} | null, cardsError, decisions | null, decisionsError, retrying, retried, kinds, entries}. A group that was not read says so; it is never "nothing". A card
+// {cards: {waiting, blocked} | null, cardsError, decisions | null, decisionsError, retrying, retried, kinds, entries,
+// behind ([{repo, at}]: a project whose snapshot is behind its card records, whose waiting and blocked cards are then
+// the ones its records hold blocked now: dashboard.sh; a card only the records hold has fromRecords true, and no track or
+// reviews, so its row has a key of its own and is drawn anew once a snapshot gives the whole card)}. A group that was not read says so; it is never "nothing". A card
 // comes with its reviews and its track, as `conveyor.sh snapshot` gives them: a blocked card is off the
 // belt, so the step it failed at, with the seconds that step ran, is shown here on its six steps. There is no main
 // session any more: an answer that is recorded is done, and nothing is listed as unsent. It stays on
@@ -113,6 +116,8 @@ window.DASH_APP.panel({
   isEmpty(d) { return Boolean(d.cards && d.decisions && !d.decisionsError && d.cards.before !== null) && this.count(d) === 0; },
   empty(el, ctx, d) {
     el.append(ctx.state('empty', 'Nothing needs you', 'Nothing blocks a card, and no test fails on main. No project refused a Conveyor update, and no visible change waits for your yes. No pipeline change waits for you, and no decision is open.'));
+    // Each project whose snapshot is behind its card records (ctx.behind): its cards here are the records' own.
+    ctx.behind(el, d && d.behind);
     // A push failing while the loop tries it again needs nothing of the owner, but is said under the tick.
     const r = d && Array.isArray(d.retrying) ? d.retrying.filter((x) => x && typeof x === 'object') : [];
     if (!r.length) return;
@@ -141,7 +146,7 @@ window.DASH_APP.panel({
     // The blocked cards whose <details> (.block-more) the owner left open: a row whose key changes (its card retried,
     // or the change of its branch now on main) is drawn anew, and opens it again (blockedRow).
     const opened = new Set(Array.from(el.querySelectorAll('li[data-card]'), (li) => (li.querySelector(':scope > details.block-more[open]') ? li.dataset.card : null)).filter(Boolean));
-    const keyOf = { tests:(x) => `tests:${x.repo}`, engines: (x) => `engine:${x.repo}@${x.commit}`, testRules: (x) => `testrules:${x.repo}@${x.time}`, prices: (x) => `prices:${x.repo}:${x.models.join(',')}`,before: (x) => `before:${x.repo}#${x.issue}`, pipeline: (x) => `pipeline:${x.repo}#${x.issue}`, farDeps: (x) => `fardep:${x.repo}#${x.issue}:${x.ref}`, waiting: (c) => `waiting:${c.card}`, blocked: (c) => `blocked:${c.card}${isRetried(c) ? ':retried' : ''}${c.onMain === true ? ':on-main' : ''}`, decisions: (x) => `decision:${x.repo}:${x.id}@${x.askedAt}` };
+    const keyOf = { tests:(x) => `tests:${x.repo}`, engines: (x) => `engine:${x.repo}@${x.commit}`, testRules: (x) => `testrules:${x.repo}@${x.time}`, prices: (x) => `prices:${x.repo}:${x.models.join(',')}`,before: (x) => `before:${x.repo}#${x.issue}`, pipeline: (x) => `pipeline:${x.repo}#${x.issue}`, farDeps: (x) => `fardep:${x.repo}#${x.issue}:${x.ref}`, waiting: (c) => `waiting:${c.card}${c.fromRecords === true ? ':records' : ''}`, blocked: (c) => `blocked:${c.card}${isRetried(c) ? ':retried' : ''}${c.onMain === true ? ':on-main' : ''}${c.fromRecords === true ? ':records' : ''}`, decisions: (x) => `decision:${x.repo}:${x.id}@${x.askedAt}` };
     const items = itemsOf(d);
     // An entry of a kind with no row of its own (entryRow) is drawn once for its key, so the key holds its title and
     // reason: an entry whose text changes under the same since (the counts of a Pick settings decision) is drawn anew.
@@ -641,5 +646,7 @@ window.DASH_APP.panel({
       const more = ctx.more('blocked', newest, show), old = g.querySelector('.show-more');
       if (old) old.replaceWith(more); else g.append(more);
     }
+    // Under the groups, each project whose snapshot is behind its card records (ctx.behind).
+    ctx.behind(el, d.behind);
   },
 });

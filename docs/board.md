@@ -158,6 +158,10 @@ cursor goes to the heading of that group.
 
 ## Needs you
 
+- **A snapshot that is behind.** When a project's card records changed after its last snapshot was made, Needs you
+  and On the belt each show "As of <time>, the belt has changed since." under what they show. Needs you then lists
+  the cards that the card records hold blocked or waiting for your yes now, and On the belt counts the cards that the
+  loop builds now (none when the loop does not run).
 - **A blocked card.** A blocked card shows, in this order: why it failed, in one sentence; the first finding of its
   review, or the first failed test file with its first failure line; the next step; what **Fix** does, when it has
   Fix; then its buttons. Under the buttons, open **The full reason and every step** to read the other findings and

@@ -776,8 +776,24 @@ PANELS_JQ='
   $conv.records as $R | $conv.error as $cerr
   | ($R // [] | map(. as $r | .snap.belt[] | tag($r))) as $belt
   | ($R // [] | map(. as $r | .snap.landed[] | tag($r) | . + {tookSec: took}) | sort_by(.time) | reverse) as $landed
-  | ($R // [] | map(. as $r | .snap.needsYou.waiting[] | tag($r))) as $waiting
-  | ($R // [] | map(. as $r | .snap.needsYou.blocked[] | tag($r))) as $blocked
+  # A record whose snapshot is behind its card records (recordsNewer, with recordsNow: conveyor.sh snapshot) has its
+  # cards stopped for the owner from the records now, which stay current while a new snapshot takes minutes (#1101): its
+  # waiting, the cards they hold stopped for the owner'"'"'s yes, and its blocked, those they hold blocked otherwise. A card
+  # of the snapshot'"'"'s waiting or blocked that the records no longer hold so is left out (a failing push, push true, is no
+  # card'"'"'s block and stays), and a card stopped since is added, its title the one the snapshot'"'"'s belt gave it, and
+  # fromRecords true: it has no track, reviews or changed files, so the page draws it anew once a snapshot gives them.
+  # $behind: each such record, {repo, at (its snapshotAt), building (loop.json'"'"'s count now; 0 once no process of the
+  # loop lives, as then none builds)}.
+  | def nowOf($r): [$r.snap | select(.recordsNewer == true) | .recordsNow | objects | select([.blocked, .waiting] | all(type == "array"))
+      | def cards: map(objects | select(.card | type == "string")); {blocked: (.blocked | cards), waiting: (.waiting | cards)}][0];
+    def stopped($r): {card, issue, name, title: (.card as $k | first($r.snap.belt[] | select(.card == $k) | .title) // null), since, fromRecords: true} | tag($r);
+    ($R // [] | map(. as $r | nowOf($r) as $now
+      | (.snap.needsYou.waiting[] | select($now == null or (.card | IN($now.waiting[].card))) | tag($r)),
+        ($now.waiting // [] | .[] | select(.card | IN($r.snap.needsYou.waiting[].card) | not) | stopped($r) + {sentence}))) as $waiting
+  | ($R // [] | map(. as $r | nowOf($r) as $now
+      | (.snap.needsYou.blocked[] | select($now == null or .push == true or (.card | IN($now.blocked[].card))) | tag($r)),
+        ($now.blocked // [] | .[] | select(.card | IN($r.snap.needsYou.blocked[].card) | not) | stopped($r) + {reason, tail: null}))) as $blocked
+  | [$R // [] | .[] | select(nowOf(.) != null) | {repo, at: (.snap.snapshotAt // null), building: ((.snap.recordsNow.building | numbers) // 0)}] as $behind
   # The issues waiting for the yes of the owner before their build; null when a record could not say (GitHub did not
   # list its open issues, or its snapshot is from before it said).
   | (if $R == null or any($R[]; .snap.needsYou.before | type != "array") then null
@@ -820,7 +836,7 @@ PANELS_JQ='
   [$belt[] | select(pushFailed) | . as $c | {repo, card, issue, name: (.name // null), title, url,
        fix: ([$belt[] | select(.repo == $c.repo and .landed != true and .parent == $c.issue and $c.issue > 0) | .issue][0] // null)}] as $retrying
   | {needs: (if $R == null and $dec.decisions == null then {error: "Nothing could be read. Cards: \($cerr). Decisions: \($dec.error).", data: null}
-      else {error: null, data: {cards: (if $R == null then null else {waiting: $waiting, blocked: $blocked, before: $before, pipeline: $pipeline, farDeps: $farDeps} end), cardsError: $cerr, tests: $tests, engines: $engines, testRules: $testRules, prices: $prices,
+      else {error: null, data: {cards: (if $R == null then null else {waiting: $waiting, blocked: $blocked, before: $before, pipeline: $pipeline, farDeps: $farDeps} end), cardsError: $cerr, behind: [$behind[] | {repo, at}], tests: $tests, engines: $engines, testRules: $testRules, prices: $prices,
         # The kinds of Needs you, in their order (dashboard_needs.json, which the Foreman watcher reads too), and
         # the entries of each, read from the snapshot field the list names: a kind the page has no row of its own for
         # shows these.
@@ -831,7 +847,15 @@ PANELS_JQ='
         retried: ($R // [] | map(. as $r | .retried | arrays | .[] | objects | select(.card | type == "string") | {repo: $r.repo, card, issue}))}} end),
    belt: (if $R == null then {error: $cerr, data: null} else {error: null, data: {cards: [$belt[] | select((pushFailed and (. as $c | any($landed[]; .repo == $c.repo and .card == $c.card))) | not)],
         cap: ($R | slots), waiting: ($R | idle),
-        byRepo: ($R | map({key: .repo, value: {cap: (.snap.health.builderCap | if type == "number" then . else null end), waiting: ([.] | idle)}}) | from_entries)}} end),
+        # building: while a record is behind its card records, the cards building now: loop.json'"'"'s count for each
+        # such record (0 once its loop has exited: never the old belt'"'"'s), and for any other its cards on the belt not
+        # landed less those that only wait (idle), as the page counts them; null when none is behind, and in byRepo for
+        # a record that is not. behind: those records.
+        building: (if $behind != [] then [$R[] | . as $r | first($behind[] | select(.repo == $r.repo) | .building | numbers)
+            // (([$belt[] | select(.repo == $r.repo and .landed != true)] | length) as $a | $a - ([[$r] | idle, $a] | min))] | add else null end),
+        behind: [$behind[] | {repo, at}],
+        byRepo: ($R | map(.repo as $p | {key: .repo, value: {cap: (.snap.health.builderCap | if type == "number" then . else null end), waiting: ([.] | idle),
+          building: (first($behind[] | select(.repo == $p) | .building | numbers) // null)}}) | from_entries)}} end),
    queue: (if $R == null then {error: $cerr, data: null} else {error: null, data: (
         # held: how many open issues the Board holds (the snapshot open.held: by you, a label, a rule or a wait), the
         # count of its Held column but for the landed, not pushed ones (a card reason notPushed: done, waiting for the

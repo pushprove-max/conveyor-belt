@@ -379,7 +379,7 @@ q '.panels.machine.data.projects[0] | .repo == "sample" and .state == "paused" a
 q '.panels.machine.data.projects[1] | .repo == "widgetshop" and .state == null and .mode == null and .cap == 2 and .guard == null and .used == 1 and (.belt | map([.issue, .url])) == [[5, "'"$CU"'/5"]]
   and .queue == null and .held == null and .waiting == null and .order == null and .rules == null and .models == null and .todayUsd == 0.5' \
   "the other project is its own section: a list or record its snapshot does not give is null, never the first project's and never empty"
-q '.panels.belt.data | .cap == 5 and .byRepo == {sample: {cap: 3, waiting: 0}, widgetshop: {cap: 2, waiting: 0}}' "the belt carries each project's own cap beside the sum, for the page filtered to one project"
+q '.panels.belt.data | .cap == 5 and .building == null and .byRepo == {sample: {cap: 3, waiting: 0, building: null}, widgetshop: {cap: 2, waiting: 0, building: null}}' "the belt carries each project's own cap beside the sum, for the page filtered to one project"
 q '.panels.queue.data.byRepo == {sample: {held: 2}, widgetshop: {held: 1}}' "the queue carries each project's own held count beside the sum"
 # The host file here names no Foreman group and no state folder holds a mark: each project has its own Foreman line,
 # and each says no session holds the role.
@@ -816,6 +816,44 @@ q '.panels.belt.error == "conveyor/host.json records are not understood: each ne
 [ ! -s "$T/ssh-calls" ] || fail "a host file that is not understood asks nothing over ssh: $(cat "$T/ssh-calls")"
 mv "$T/host.json" "$MAIN/conveyor/host.json"
 ) & started figures
+
+( fresh behind
+# --- a snapshot behind the card records: Needs you and the belt count from the records and loop.json ---
+# Bug (#1101): the Board read Needs you and the belt's count from the old snapshot alone while a new one took
+# minutes, so it showed nothing blocked and nothing building while cards blocked and built. sample's snapshot holds
+# c1 waiting for the yes, c2 blocked, a failing push, and c5 and c6 on the belt; since it was made c2 was retried,
+# c5 blocked and c6 stopped for the yes, and loop.json counts 4 building (recordsNow). widgetshop's snapshot is up to
+# date, one card on its belt. Bug: c6 was listed blocked, with no Approve, as the cards waiting for the yes were the
+# old snapshot's alone.
+at=$(ago 120)
+answer "$(snap "$(jq -cn --arg at "$at" '{snapshotAt: $at, recordsNewer: true,
+    needsYou: {waiting: [{card: "c1", issue: 12, title: "Button copy", sentence: "Staff see a button.", since: $at}],
+      blocked: [{card: "c2", issue: 13, title: "Broken build", reason: "tests failed", tail: "", since: $at},
+        {card: "c0", issue: 11, title: "Pushed", reason: "the push failed", tail: "", since: $at, push: true}]},
+    belt: [{card: "c5", issue: 15, title: "Fifteen", step: "build", stepAt: $at}, {card: "c6", issue: 16, title: "Sixteen", step: "build", stepAt: $at}],
+    recordsNow: {building: 4, waitingCount: 0, blocked: [{card: "c5", issue: 15, name: null, reason: "the session made no change", since: $at}],
+      waiting: [{card: "c1", issue: 12, name: null, reason: "needs a yes", since: $at, sentence: "a"},
+        {card: "c6", issue: 16, name: null, reason: "needs a yes", since: $at, sentence: "Guests see a new page."}]}}')")" "$P_URL" 1794000000 \
+  "$(snap '{"belt": [{"card": "w1", "issue": 3, "title": "Three", "step": "build"}]}')" "$C_URL" 0
+run
+q '.panels.needs.data | (.cards.waiting | map([.card, .repo, .title, .sentence])) == [["c1", "sample", "Button copy", "Staff see a button."], ["c6", "sample", "Sixteen", "Guests see a new page."]]
+  and (.cards.blocked | map([.card, .repo, .title])) == [["c0", "sample", "Pushed"], ["c5", "sample", "Fifteen"]]
+  and ([.cards.waiting[], .cards.blocked[] | .fromRecords == true] == [false, true, false, true])
+  and .behind == [{repo: "sample", at: "'"$at"'"}]' "Needs you holds the cards the records hold blocked and waiting for the yes now, and names the record that is behind"
+q '.panels.belt.data | .building == 5 and .byRepo.sample.building == 4 and .byRepo.widgetshop.building == null and .behind == [{repo: "sample", at: "'"$at"'"}]' \
+  "the belt counts loop.json's 4 for the record that is behind, and its cards for the one that is not"
+) & started behind
+
+( fresh behindgone
+# Bug: once `conveyor.sh run` exited, recordsNow gives no building count (null), and the belt fell back to the old
+# snapshot's belt: its last card, blocked since, was counted building. With no loop nothing builds: the count is 0.
+at=$(ago 120)
+answer "$(snap "$(jq -cn --arg at "$at" '{snapshotAt: $at, recordsNewer: true, needsYou: {waiting: [], blocked: []},
+    belt: [{card: "c5", issue: 15, title: "Fifteen", step: "build", stepAt: $at}],
+    recordsNow: {building: null, waitingCount: null, waiting: [], blocked: [{card: "c5", issue: 15, name: null, reason: "tests failed", since: $at}]}}')")" "$P_URL" 1794000000 "$(snap)" "$C_URL" 0
+run
+q '.panels.belt.data | .building == 0 and .byRepo.sample.building == 0' "a record behind its card records whose loop has exited counts none building"
+) & started behindgone
 
 # Every part ended and passed; a part that failed stopped at its FAIL line, above.
 bad=()

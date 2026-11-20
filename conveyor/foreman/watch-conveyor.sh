@@ -112,8 +112,9 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
   | . as $snap
   # The push the Board lists under blocked (snapshot.sh: a push that failed twice), which health holds only as pushFailingSince.
   | any(.needsYou | objects | .blocked | arrays | .[]; objects | .push == true) as $pushheld
-  # A blocked line of a snapshot made before the last change to the card records says when that snapshot was made (#1114).
-  | (if .recordsNewer == true then (.snapshotAt | strings | " (as of \(.[11:16])Z)") // "" else "" end) as $asof
+  # A blocked line of a snapshot made before the last change to the card records says when that snapshot was made (#1114),
+  # but for one the status took from the card records now (NOWBLOCKED).
+  | (if .recordsNewer == true and .blockedNow != true then (.snapshotAt | strings | " (as of \(.[11:16])Z)") // "" else "" end) as $asof
   | .health
   | if type == "object" and ([.loop, .gh] | all(type == "boolean")) and ([.blocked, .waiting, .stuck] | all(type == "array" and all(type == "object")))
     and (.time | fromdate | type == "number") and (.pushFailingSince | type == "null" or (fromdate | type == "number"))
@@ -263,11 +264,11 @@ unreported() {
 }
 
 # --status [<project>] (`conveyor.sh foreman status`): each record's state now as short plain text, read from one
-# snapshot, with no wake put and nothing marked reported: the belt (its count, "or more" when the card records changed
-# after the snapshot was made, and while the loop runs its cards
-# building against the cap and those waiting on another card, which that count leaves out; then a card a line: issue, or a main-red fix card's name, step, time in step, title cut to 60 characters), the
+# snapshot, with no wake put and nothing marked reported: the belt (its count, "as of <snapshotAt>, the belt has
+# changed since" when the card records changed after the snapshot was made, and while the loop runs its cards
+# building against the cap, loop.json's count now while the snapshot is behind (recordsNow, commands/snapshot.sh), and those waiting on another card, which that count leaves out; then a card a line: issue, or a main-red fix card's name, step, time in step, title cut to 60 characters), the
 # cards waiting on other issues and the held issues as issue numbers, the whole-suite run under way (else the last one
-# that ended), then every problem a wake names, the push failing at once, the suite that ended left out (its line is
+# that ended), then every problem a wake names (the blocked cards as NOWBLOCKED gives them), the push failing at once, the suite that ended left out (its line is
 # above), and a release-prep started again by its landed fixes (it needs no one), each "needs you: <text>", then each card unreported names, "not yet reported: blocked #N". A record that gives no snapshot is one line, "<repo>: no snapshot (<why>)", the why
 # never empty and one line (the last the engine said: of a stack trace, its error); when one read before (keepsnap),
 # "<repo>: the last snapshot, made <age> ago (a new one failed: <why>):" in its place, and that snapshot's lines as above. <project> names one
@@ -276,9 +277,11 @@ unreported() {
 # waiter: "waiter: listening", "waiter: starting again" or "waiter: down: <why>" (lib.sh waiter_state).
 STATUS=$SUITE$REF'def num: if type == "number" then "#\(.)" else tostring end;
   "\($repo): \(.belt | if type == "array" then length else 0 end) on the belt"
-    + (if .recordsNewer == true then " (or more: the card records changed after this snapshot was made, and a new one is not ready)" else "" end)
-    + ((.health | objects | select((.building | type) == "number" and (.builderCap | type) == "number")
-      | "; building \(.building) of the cap \(.builderCap)\(if (.waitingCount // 0) > 0 then ", \(.waitingCount) waiting not counted" else "" end)") // ""),
+    + (if .recordsNewer == true then " (as of \(.snapshotAt // "an unknown time"), the belt has changed since)" else "" end)
+    # While the snapshot is behind the card records, the loop'"'"'s count is the one loop.json gives now (recordsNow).
+    + (((if (.recordsNow | type) == "object" then .recordsNow | {building, waitingCount} else (.health | objects) // {} end) as $b
+      | .health | objects | select(($b.building | type) == "number" and (.builderCap | type) == "number")
+      | "; building \($b.building) of the cap \(.builderCap)\(if ($b.waitingCount // 0) > 0 then ", \($b.waitingCount) waiting not counted" else "" end)") // ""),
   (.belt | arrays | .[] | objects | "  \(ref) \(.step)\((.waitsOn | objects | select(.issue | numbers) | " on \(ref)") // "")"
     + " \((.stepAt | fromdate? | $now - .) // null | if . == null then "?" else took end) \(.title // "" | tostring | gsub("\\s+"; " ") | .[0:60] | sub(" $"; ""))"),
   (.queue.waiting | arrays | select(length > 0) | "waiting: " + (map(objects | "\(.issue | num) on \(.waitsFor | arrays | map(num) | join(" "))") | join(", "))),
@@ -286,6 +289,15 @@ STATUS=$SUITE$REF'def num: if type == "number" then "#\(.)" else tostring end;
   ([.suites | arrays | .[] | objects] as $s | ($s | map(select(.ended == null))) as $run
     | if $run != [] then $run[] | suiteline($now)
       else $s | map(select(.ended != null)) | max_by(.ended) | objects | "last " + suiteline($now) end)'
+# The snapshot as the status reads its problems: while it is behind the card records (recordsNow, commands/snapshot.sh),
+# its health's blocked and waiting cards are the ones the records hold blocked now, and of them those stopped for the
+# owner's yes, so a card blocked or stopped for the yes since the snapshot was made is named as such, and one retried
+# or landed since is not (#1101); being read now, their lines carry no "(as of <time>)" (blockedNow). The watcher's
+# polls read the snapshot's own: a card it holds blocked is later waiting or not.
+NOWBLOCKED='(if ((.recordsNow | objects | [.blocked, .waiting] | all(type == "array")) // false) and (.health | type) == "object" then
+    .health.blocked = [.recordsNow.blocked[] | objects | select(.card | type == "string")]
+    | .health.waiting = [.recordsNow.waiting[] | objects | select(.card | type == "string")] | .blockedNow = true
+  else . end) | '
 # The last snapshot of a record that read, kept by the status and each poll ($FD/conveyor-snapshot-<repo>.json,
 # written whole and renamed into place, readable by this user alone: it holds the accounts' email addresses): the status
 # shows it when a new one does not read.
@@ -327,7 +339,7 @@ if [ "${1:-}" = --status ]; then
     else keepsnap "$repo" "$rec"; fi
     rec=$(recheck "$repo" "$main" "$rec")
     jq -r --arg repo "$repo" --argjson now "$now" "$STATUS" <<<"$rec" 2>/dev/null || echo "$repo: the snapshot's belt does not read"
-    if probs=$(jq -r --argjson push -1 --argjson now "$now" --argjson poll "$POLL" --argjson await '[]' --argjson hist '[null]' --slurpfile kinds "$KINDS" "$PROBLEMS" <<<"$rec" 2>/dev/null); then
+    if probs=$(jq -r --argjson push -1 --argjson now "$now" --argjson poll "$POLL" --argjson await '[]' --argjson hist '[null]' --slurpfile kinds "$KINDS" "$NOWBLOCKED$PROBLEMS" <<<"$rec" 2>/dev/null); then
       awk -F'\t' '$1 != "" && $2 != "suite ended" && $2 != "release started again" { print "needs you: " $4 }' <<<"$probs"
       awk -v r="$repo" '$0 != "" { print r "\t" $0 }' <<<"$probs" | unreported "$now" | cut -d' ' -f2-
     else echo "needs you: unknown, the snapshot holds no health record"; fi

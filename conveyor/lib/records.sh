@@ -197,6 +197,15 @@ testcounts() { # <test output file>
     END { if (!seen || gone || (rsel && !rseen) || (wsel && !wseen)) t = p = f = s = ""; else { t += 0; p += 0; f += 0; s += 0 }
       printf "{\"files\":%s,\"total\":%s,\"passed\":%s,\"failed\":%s,\"skipped\":%s}\n", (sf ? files + 0 : "null"), n(t), n(p), n(f), n(s) }'
 }
+# The two forms a blocked line's reason starts with when the card stops for the owner's yes (block(), lib/card.sh):
+# YES, to a visible change, and LINTYES, to a change of lint policy (lintpolicy(), lib/lint.sh) and no visible change.
+# Set by names() (lib/prompts.sh), and by the snapshot's reader of the card records (recordsnow(), commands/snapshot.sh),
+# which runs before the pack is read.
+# shellcheck disable=SC2034 # YES and LINTYES are read in lib/card.sh, lib/issues.sh, lib/views.sh and commands/snapshot.sh
+yesforms() { # <owner>
+  YES="visible to customers or staff: needs $1's yes: "
+  LINTYES="lint policy: needs $1's yes: "
+}
 # One loop and host sample (README.md), appended to SAMPLES; only the loop writes there. Kept to 14 days of
 # minutes. A reading the host does not give is null.
 sample() { # <slots in use> <cap> <loop state>

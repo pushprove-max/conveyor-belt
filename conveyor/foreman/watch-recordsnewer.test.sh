@@ -21,10 +21,11 @@ unset CONVEYOR_FOREMAN CONVEYOR_FOREMAN_DIR CONVEYOR_FOREMAN_ASK CLAUDE_PROJECT_
 mkdir -p "$HOME" "$XDG_CONFIG_HOME/conveyor" && jq -n --arg m "$M" '{records: [{repo: "alpha", main: $m}]}' > "$XDG_CONFIG_HOME/conveyor/host.json" \
   && git init -q "$M" && mkdir -p "$M/.conveyor" && jq -n '{plugin: {follow: "main"}}' > "$M/.conveyor/project.json" \
   || { echo "FAIL [watch-recordsnewer]: the fixture was not made" >&2; exit 1; }
-# A snapshot with nothing on the belt and nothing to pick, and the records changed after it (<newer>: true) or not.
-snap() { # <newer>
-  jq -cn --argjson r "$1" '{recordsNewer: $r, belt: [], queue: {next: []}, health: {time: "2026-11-20T14:00:00Z", loop: true,
-    gh: true, ghReached: true, ghWhy: null, ghRead: "r1", state: "running", reason: null, stuck: [], waiting: [], blocked: [], pushError: null, pushFailingSince: null}}' > "$T/snap"
+# A snapshot made at 14:00 with nothing on the belt and nothing to pick, and the records changed after it (<newer>:
+# true) or not; <more> is merged into it.
+snap() { # <newer> [<more>]
+  jq -cn --argjson r "$1" --argjson x "$(jq -cn "${2:-{\}}")" '{snapshotAt: "2026-11-20T14:00:00Z", recordsNewer: $r, belt: [], queue: {next: []}, health: {time: "2026-11-20T14:00:00Z", loop: true,
+    gh: true, ghReached: true, ghWhy: null, ghRead: "r1", state: "running", reason: null, stuck: [], waiting: [], blocked: [], pushError: null, pushFailingSince: null}} * $x' > "$T/snap"
 }
 # The ask seam: the snapshot $T/snap, and `conveyor.sh health` as $T/health (when there is one) gives it.
 ASK="case \$CONVEYOR_CMD in snapshot) cat $T/snap ;; health) cat $T/health ;; *) exit 3 ;; esac"
@@ -43,13 +44,35 @@ check 'a snapshot made before the last change to the card records is not called 
 # The same snapshot made after it: the second poll wakes with idle, so the case above proves the flag.
 current() { snap false; wake=; ! poll current 0 && poll current 1 && grep -qF 'Conveyor is idle' <<<"$wake"; }
 check 'a snapshot made after the last change to the card records, with nothing to do, wakes as idle' current
-# The status of that snapshot says the belt can hold more than it shows.
+# The status of the snapshot in <T>/snap, its Foreman folder <case>'s.
+statusof() { CONVEYOR_FOREMAN_DIR=$T/$1/foreman CONVEYOR_MAIN=$M CONVEYOR_FOREMAN_NOW=$NOW CONVEYOR_FOREMAN_ASK="cat $T/snap" bash "$SRC/watch-conveyor.sh" --status 2>&1; }
+# The status of that snapshot says the belt has changed since it was made.
 status() {
-  snap true; wake=
-  out=$(CONVEYOR_FOREMAN_DIR=$T/status/foreman CONVEYOR_MAIN=$M CONVEYOR_FOREMAN_NOW=$NOW CONVEYOR_FOREMAN_ASK="cat $T/snap" bash "$SRC/watch-conveyor.sh" --status 2>&1)
-  grep -qxF 'alpha: 0 on the belt (or more: the card records changed after this snapshot was made, and a new one is not ready)' <<<"$out"
+  snap true; wake=; out=$(statusof status)
+  grep -qxF 'alpha: 0 on the belt (as of 2026-11-20T14:00:00Z, the belt has changed since)' <<<"$out"
 }
-check 'the status of a snapshot made before the last change to the card records says the belt can hold more' status
+check 'the status of a snapshot made before the last change to the card records says the belt has changed since' status
+# Bug (#1101): the status read the blocked cards and the building count from the old snapshot alone, so it said
+# "building 0" and named no blocked card while cards built and blocked. Here the snapshot (building 3, #4 blocked, #5
+# waiting for the yes) is older than a blocked line of #7 and one of #8 that stops for the yes, and #4 was retried
+# since: what the card records and loop.json say now (recordsNow, commands/snapshot.sh) names #7 blocked, keeps #5
+# waiting, drops #4 and counts 6. Bug: #8 was named an ordinary block, as the status took the cards waiting for the
+# yes from the old snapshot's list, which has no entry for a stop made since.
+blocked() {
+  snap true '{health: {builderCap: 8, building: 3, waitingCount: 0,
+      blocked: [{card: "c4", issue: 4, reason: "the session made no change", since: "2026-11-20T13:00:00Z"}],
+      waiting: [{card: "c5", issue: 5, reason: "needs a yes", since: "2026-11-20T13:30:00Z"}]},
+    recordsNow: {building: 6, waitingCount: 0, blocked: [{card: "c7", issue: 7, name: null, reason: "the session made no change", since: "2026-11-20T14:05:00Z"}],
+      waiting: [{card: "c5", issue: 5, name: null, reason: "needs a yes", since: "2026-11-20T13:30:00Z"},
+        {card: "c8", issue: 8, name: null, reason: "needs a yes too", since: "2026-11-20T14:06:00Z"}]}}'
+  wake=; out=$(statusof blocked)
+  grep -qxF 'alpha: 0 on the belt (as of 2026-11-20T14:00:00Z, the belt has changed since); building 6 of the cap 8' <<<"$out" \
+    && grep -qxF 'needs you: #7 is blocked since 2026-11-20T14:05:00Z: the session made no change' <<<"$out" \
+    && grep -qxF "needs you: #5 needs the owner's yes since 2026-11-20T13:30:00Z: needs a yes" <<<"$out" \
+    && grep -qxF "needs you: #8 needs the owner's yes since 2026-11-20T14:06:00Z: needs a yes too" <<<"$out" \
+    && ! grep -qF '#8 is blocked' <<<"$out" && ! grep -qF '#4' <<<"$out"
+}
+check 'the status of a snapshot older than a blocked line names the blocked card and counts what builds now' blocked
 
 # A snapshot made at 21:29 before the card records changed: #7 (card c7) blocked, #9 in its build. $T/health is the
 # health the engine reads from the card records now (health(), lib/views.sh: the records and the retried lines), with

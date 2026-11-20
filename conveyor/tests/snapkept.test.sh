@@ -246,3 +246,36 @@ t_snapkeptreach() {
   : > "$STUB/token-timeout"
   [ "$(loop snapshot --fresh | jq -c '.health | [.gh, .ghWhy]')" = '[false,"gh auth token timed out after 20 s"]' ] || fail "the snapshot does not give why gh is signed out: $(cat "$ST/snapgh/ghwhy")"
 }
+
+# Bug (#1101): while a new build took minutes, the reader printed the old snapshot alone, so the Board and the
+# Foreman's status showed nothing blocked and nothing building while cards blocked and built. The kept snapshot here
+# holds c2, c4 and c5 blocked; since it was made c2 landed, c4 was retried (its lines are gone) and the main-red card
+# c3 blocked, and loop.json counts 2 building. The reader's recordsNow, from the records and loop.json, holds c5 and
+# c3 (by its name), and the loop's count while its process lives, null once it is gone. The kept lock is held while
+# it reads, so no writer replaces the kept snapshot under it.
+t_snapkeptnow() {
+  local out now dead lk
+  snapkept_setup
+  snapkept_line c5 5 picked ok 07 '{"title": "five"}' >> "$ST/cards.jsonl" && snapkept_line c5 5 blocked blocked 08 '{"reason": "old block"}' >> "$ST/cards.jsonl" \
+    && jq -c '.health.blocked = [{card: "c2", issue: 2, reason: "r2", since: "2026-11-17T10:04:00Z"}, {card: "c4", issue: 4, reason: "r4", since: "2026-11-17T10:04:00Z"},
+      {card: "c5", issue: 5, reason: "old block", since: "2026-11-17T10:08:00Z"}]' "$ST/snapshot.json" > "$T/$CASE/kept" && mv "$T/$CASE/kept" "$ST/snapshot.json" \
+    || fail "the kept snapshot could not be set"
+  snapkept_quiet 20; now=$(export TZ=UTC; printf '%(%Y-%m-%dT%H:%M:%SZ)T' -1)
+  { snapkept_line c2 2 landed ok 09 "{\"time\": \"$now\", \"sha\": \"abd\", \"product\": false}"; snapkept_line c3 0 blocked blocked 09 "{\"time\": \"$now\", \"reason\": \"the session made no change\"}"
+    snapkept_line c6 6 picked ok 09 "{\"time\": \"$now\", \"title\": \"six\"}"; snapkept_line c6 6 blocked blocked 09 "{\"time\": \"$now\", \"reason\": \"visible to customers or staff: needs Dana's yes: a new button\"}"; } >> "$ST/cards.jsonl"
+  jq -cn --argjson p "$$" '{pid: $p, state: "running", building: 2, waiting: 1}' > "$ST/loop.json"
+  exec {lk}>>"$ST/snapshot.json.lock" && flock "$lk" || fail "the kept lock could not be held"
+  out=$(loop snapshot) || fail "the reader exited non-zero"
+  # Bug: c6, stopped for the owner's yes since (the pack's owner, Dana), was one of blocked, so the Board showed it
+  # with no Approve and the status named it an ordinary block: the readers' list of those waiting was the old one.
+  jq -e --arg now "$now" '.recordsNewer == true and .recordsNow == {building: 2, waitingCount: 1, blocked: [
+      {card: "c5", issue: 5, name: null, reason: "old block", since: "2026-11-17T10:08:00Z"},
+      {card: "c3", issue: 0, name: "Main is red (abcdef012345)", reason: "the session made no change", since: $now}],
+      waiting: [{card: "c6", issue: 6, name: null, reason: "visible to customers or staff: needs Dana'"'"'s yes: a new button", since: $now, sentence: "a new button"}]}' <<<"$out" > /dev/null \
+    || fail "the reader did not give what the records and loop.json say now: $(jq -c '{recordsNewer, recordsNow}' <<<"$out")"
+  dead=$(sh -c 'echo $$'); jq -cn --argjson p "$dead" '{pid: $p, state: "running", building: 2, waiting: 1}' > "$ST/loop.json"
+  out=$(loop snapshot) && jq -e '.recordsNow | .building == null and .waitingCount == null' <<<"$out" > /dev/null \
+    || fail "the reader gave the count of a loop whose process is gone: $(jq -c .recordsNow <<<"$out")"
+  # One build after the lock is let go: a writer the reads started finds nothing due, so none builds after the case.
+  exec {lk}>&-; loop snapshot --fresh > /dev/null || fail "the snapshot after the reads exited non-zero"
+}
