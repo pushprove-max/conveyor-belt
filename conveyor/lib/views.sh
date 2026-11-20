@@ -174,7 +174,9 @@ cards() {
 # wait began, waitsOn as stuck's): every open card waiting at its claim (the live record of the step it is running names
 # the card it waits on and was brought up to date within STUCK seconds); unpushed (card, issue, sha, since): the landed commits in main that neither the last push that worked nor
 # origin's main as last seen here holds; pushError (time, sha, reason, kind: check or transport, check: the check that
-# failed, card and issue: the landing it was pushed for; the last failed push since the oldest of those landed, else null), pushFailingSince (the first such failure, else null) and pushFails (how many such failures); pushing (the push in progress,
+# failed, card and issue: the landing it was pushed for; the last failed push since the oldest of those landed, else null), pushFailingSince (the first such failure, else null) and pushFails (how many such failures); pushFlaky (time, card,
+# issue, files, issues: the last pushed line whose push went on over a pre-push hook that failed naming test files that
+# each passed alone, pushone(), lib/push.sh, in the last 24 hours; else null); pushing (the push in progress,
 # {since, sha}, while the loop's push job runs, else null; a landing during it waits for the next push); gh (signed in); diskFreeKb (free space
 # on the cards folder, null when df gives none); refused (card, issue, reason: "refused full run: <why>", since: the
 # line's time): each test line of the last 24 hours whose run refused a full run (tests()), for the Foreman's watcher;
@@ -294,7 +296,7 @@ SPLITM='def splitm($all): [$all | group_by(.card)[] | select(any(.step == "split
 # (DEPS) and the issues before their build (SEE) take of a line, and none other: a line's tail, review and token counts
 # were most of the bytes it read. A test line's times only as whether they are an object (untimed).
 HEALTHLINE='select(. != "") | fromjson | {card, issue, step, of, time, result, followups} + if .step == "worktree" then {pid, started}
-    elif .step == "blocked" then {reason} elif .step == "landed" then {sha} elif .step == "push" then {sha, reason, kind, check} elif .step == "pushed" then {pr}
+    elif .step == "blocked" then {reason} elif .step == "landed" then {sha} elif .step == "push" then {sha, reason, kind, check} elif .step == "pushed" then {pr, flaky}
     elif .step == "picked" then {mainRed} elif .step == "lint" then {skipped: any(.lint.commands[]?; .result | strings | startswith("skipped"))} elif .step == "test" then {refused, reused, ended, selected, times: (if (.times | type) == "object" then {} else null end)}
     else {} end'
 # When health first read each stopped process of the "<pid> TAB <started> TAB <card>" lines on stdin stopped, as ps
@@ -478,6 +480,7 @@ health() {
          | map(. + ($stopped.cards[.card] // null | if . then {stopped: .} else {} end))), engineStopped: $stopped.engine,
        waitingOnCard: [$c[] | select(.end == null and atclaim) | $live[.card] as $v | {card, issue, since: $v.at, waitsOn: holder($v.waits.on)}],
        unpushed: $un, pushError: ($fail | last | if . then {time, sha, reason, kind: (.kind // null), check: (.check // null), card, issue} else null end), pushFailingSince: ($fail[0].time // null), pushFails: ($fail | length), pushing: $pushing,
+       pushFlaky: ([.[] | select(.step == "pushed" and (.flaky | type) == "object" and $now - (.time | fromdate) < 86400)] | last | if . then {time, card, issue, files: .flaky.files, issues: .flaky.issues} else null end),
        gh: $gh, ghReached: $ghr, ghWhy: (if $gh then null else $ghwhy end), ghRead: $ghread, diskFreeKb: $free, builderCap: $cap, building: $bw.building, waitingCount: $bw.waiting, models: $force.models, efforts: $force.efforts, cycles: $cycles, before: $before[0], homes: $homes,
        refused: [.[] | select(.step == "test" and (.refused | type) == "string" and $now - (.time | fromdate) < 86400) | {card, issue, reason: .refused, since: .time}],
        untimed: untimed, split: splitm([.[], $old[]]),

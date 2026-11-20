@@ -184,6 +184,11 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
         elif $pushheld or (.time | fromdate) - (.pushFailingSince | fromdate) > $push then
           ["push", "push failing", "", "the push has failed since \(.pushFailingSince): \(.pushError.reason // "" | one)"]
         else empty end),
+    # A push that went on over a pre-push hook that failed naming test files that each passed alone (health pushFlaky,
+    # conveyor/lib/push.sh pushone()): once a push. Not "will not pass on a retry": they passed alone.
+    (.pushFlaky | objects | (.issues | arrays | map("#\(.)")) as $i
+      | ["pushflaky:\(.time)", "push flaky", ($i | join(" ")),
+         "push went on: the pre-push hook failed naming \(.files | arrays | join(", ")), flaky: passed alone\(if $i == [] then "" else "; held for the owner: \($i | join(", "))" end)" | one]),
     (.refused | arrays | .[] | objects | ["refused:\(.card):\(.since)", "full test run refused", ref, "\(ref): the test step \(.reason | one)"]),
     # The machine hold (health machineHold, conveyor/lib/testrun.sh machinehold()): once a hold, by when it began.
     (.machineHold | objects | ["machine:\(.since)", "machine held", "",

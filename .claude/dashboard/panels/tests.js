@@ -1025,6 +1025,8 @@
       line.append(b);
       el.append(line);
     });
+    // A file recorded flaky twice within the flaky days, after its earlier fix (flakyAgain: that fix's issue).
+    if (num(f.flakyAgain) !== null) el.append(h('p', 'tests-fact tests-flaky', `Flaky again since its fix #${f.flakyAgain}`));
     const p = preview(f);
     if (p) el.append(p);
     return el.childNodes.length ? el : null;

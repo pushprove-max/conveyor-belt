@@ -1011,6 +1011,9 @@ run (its batch's) loses none; a batch's run counts as the card's that ran it. Fr
 case that failed in the full run and passed alone. `conveyor.sh flaky off <case> <source> <note>` adds the entry the
 same way and files no issue for it (the Board's Keep a case off, which files none); a later entry from a card still
 counts it. A call with no case name or no source adds nothing and exits 2.
+A push whose pre-push hook failed naming test files that each pass alone adds one entry for each whole file, its
+source `push <commit>`, and files one held issue for them, or opens again the issue of a file that is flaky again
+([docs/cards.md](../docs/cards.md#push)).
 Entries older than 30 days are dropped.
 
 Before it adds its entry, `conveyor.sh flaky` drops each case that is gone from main, with all its entries. A case is

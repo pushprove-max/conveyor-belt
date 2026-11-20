@@ -306,6 +306,16 @@ jq -c '.needsYou.blocked = [{card: "c12", issue: 12, title: "t", reason: "the pu
 bash "$SRC/watch-conveyor.sh" --once || fail "a push the Board lists under Needs you did not wake"
 [ "$(cat "$FD"/pending/*.wake)" = $'Conveyor: alpha: push failing\nalpha: the push has failed since 2026-11-11T11:55:00Z: push-checks: FAILED typecheck-web' ] \
   || fail "the push the Board lists woke as: $(cat "$FD"/pending/*.wake)"
+# #1079 ask 2. Bug it catches: a push that went on over a pre-push hook that failed naming a test file that passed
+# alone (health pushFlaky) said nothing, or that the check "will not pass on a retry". It wakes once, "flaky: passed
+# alone", naming the file and the held issue.
+rm -f "$FD"/pending/*.wake
+snap '[]' '[]' | jq -c '.health.pushFlaky = {time: "2026-11-11T11:58:00Z", card: "c12", issue: 12, files: ["lib/a.test.sh"], issues: [101]}' > "$T/ask/alpha"
+bash "$SRC/watch-conveyor.sh" --once || fail "a push over a flaky hook did not wake"
+[ "$(cat "$FD"/pending/*.wake)" = $'Conveyor: alpha: push flaky: #101\nalpha: push went on: the pre-push hook failed naming lib/a.test.sh, flaky: passed alone; held for the owner: #101' ] \
+  || fail "the push over a flaky hook woke as: $(cat "$FD"/pending/*.wake)"
+rm -f "$FD"/pending/*.wake
+bash "$SRC/watch-conveyor.sh" --once && fail "a flaky push already reported woke again: $(cat "$FD"/pending/*.wake)"
 # Bug (#544): the snapshot holds only the newest pushes and landed cards, so an awaited issue pushed before them was in
 # neither list and never woke the Foreman. Its push is in the history (`conveyor.sh history`), which the watcher reads
 # for an awaited issue the snapshot does not have: #2 in pushedCards, #5 landed and pushed in metrics.cards; #6 landed

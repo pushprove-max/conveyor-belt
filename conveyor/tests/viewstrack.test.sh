@@ -88,6 +88,8 @@ t_track() {
   card 60 picked worktree deps brief b - - 'blocked:blocked:{"reason":"build: session failed (exit 1)"}'
   card 61 picked 'worktree:ok:{"reason":"resumed from the kept patch of card c60: one session, then review"}' deps brief b build r "review:GO:$Z" t test:pass l 'landed:ok:{"sha":"abg","product":false}'
   card 62 picked worktree deps brief b build r
+  # #1079: a push that went on over a pre-push hook that failed naming a test file that passed alone.
+  card 63 $pre "review:GO:$Z" t test:pass l 'landed:ok:{"sha":"abh","product":false}' 'pushed:ok:{"flaky":{"files":["lib/a.test.sh"],"issues":[5]}}' issue
   # One snapshot of the cards above, and one jq a card: one after each group and one a line took the case 6 s more.
   out=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
   [ "$(jq -c '.belt[] | select(.card == "c34") | .track.records[6:9] | map([.name, .reason])' <<<"$out")" \
@@ -188,6 +190,11 @@ EOF
   [ "$(jq -c '.landed[] | select(.card == "c6") | .metrics | [.landSec, .rebuildSec]' <<<"$out")" = '[120,120]' ] \
     || fail "a rebuilt card's landSec lost the landing that met the conflict: $(jq -c '.landed[] | select(.card == "c6") | .metrics' <<<"$out")"
   [ "$(jq -c '.belt | map(select(.issue >= 40 and .issue <= 47)) | length' <<<"$out")" = 0 ] || fail "a blocked card is on the belt"
+  # #1079 ask 2. Bug it catches: a push that went on over a flaky hook read as a plain push, so nothing on the Board said
+  # its hook failed and the files passed alone ("flaky: passed alone"), and a plain push named them.
+  [ "$(jq -c '[.landed[] | select(.card == "c63" or .card == "c1") | [.card, (.track.records[] | select(.name | startswith("pushed")) | .name)]] | sort' <<<"$out")" \
+    = '[["c1","pushed"],["c63","pushed (flaky: passed alone: lib/a.test.sh)"]]' ] \
+    || fail "the Push step of a push over a flaky hook: $(jq -c '[.landed[] | select(.card == "c63" or .card == "c1") | {card, records: .track.records}]' <<<"$out")"
   nd() { jq -c --arg c "c$1" '.needsYou | .waiting[], .blocked[] | select(.card == $c) | [(.track.detail | map({done: "+", now: ">", skipped: "-", failed: "!", todo: "."}[.state]) | join("")), (.track.detail | map(select(.state == "failed") | [.name, .sec]))]' <<<"$out"; }
   while read -r n want; do [ "$(nd "$n")" = "$want" ] || fail "track of blocked card $n: $(nd "$n"), not $want"; done <<'EOF'
 40 ["+++++!...........",[["building",180]]]

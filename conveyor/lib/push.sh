@@ -50,7 +50,10 @@ depsreason() { # <the folders, from depsmissing>
 # on a slot it holds already (CONVEYOR_TEST_SLOT: a loop an engine case runs) pushes on that one, as its tests run. When
 # it works the commit, the remote and the branch are written to $PUSHED; when it fails, a push line under the given card (the last one landed)
 # holds the commit, the end of what git and the hook said, and why it failed (kind: check or transport; a check
-# failure names the check: the word after the last "FAILED" the hook printed, else the pre-push hook). The worktree goes either way; nothing but this
+# failure names the check: the word after the last "FAILED" the hook printed, else the pre-push hook). A hook that
+# failed naming test files has them run alone first (hookalone()): when each passes, the same commit is pushed with no
+# hook, the files go on the flaky-test record with one held issue (flakypush(), lib/flaky.sh), and each pushed line
+# names them (flaky: {files, issues}). The worktree goes either way; nothing but this
 # function writes in it, so a stale one (a push killed half way) is cleared before the next.
 # A push the remote refuses because its main holds a commit this one lacks (landed there by hand) is made again in the
 # same turn, of main merged with the remote's (remerge()); when they do not merge, the push line says so.
@@ -72,7 +75,7 @@ push() { # <card> <issue> [<commit>]
   pushone "$@" {lk}>&-; rc=$?; exec {lk}>&-; return $rc
 }
 pushone() { # <card> <issue> [<commit>]
-  local wt=$CARDS/push sha out rc=0 a c n s t state round=0 before=() got=() pend=() rest=() took=$SECONDS try m want=${3:-} at la to; local -A said=()
+  local wt=$CARDS/push sha out rc=0 a c n s t state round=0 before=() got=() pend=() rest=() took=$SECONDS try m want=${3:-} at la to nv='' ff=() fl='' ho=''; local -A said=()
   la=$(landas) || { echo "conveyor: the rule Land as could not be read (the pack's push.landAs or the control record); nothing pushed" >&2; return 1; }
   to=$BRANCH; [ "$la" != pr ] || to=$LANDING
   for a in "$(pushed)" "refs/remotes/$REMOTE/$BRANCH"; do
@@ -84,6 +87,11 @@ pushone() { # <card> <issue> [<commit>]
   if [ -z "$want" ] && sha=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null); then
     pushing "$sha"; pushtests "$1" "$2" "$sha" "${before[@]}" || return 1; at=$sha
   fi
+  # A pre-push hook that failed naming test files that each pass alone (hookalone()) failed under load, not in the
+  # code: the same commit is pushed again with no hook (nv: --no-verify), and the files go on the flaky-test record
+  # (ff, then fl: flakypush(), given the hook's output, ho). A file that fails alone too, or a hook that names none,
+  # holds the push as before.
+  while :; do
   for try in 1 2; do
     rm -f "$wt.trace"
     rc=0; sha=$(git rev-parse "$at" 2>&1) && pushing "$sha" && out=$({
@@ -91,19 +99,24 @@ pushone() { # <card> <issue> [<commit>]
       packget push.env e && mapfile -d '' -t e < <(jq -j 'to_entries[] | "\(.key)=\(.value)\u0000"' <<<"$e") \
         && git worktree add -q --detach "$wt" "$sha" && deps "$wt" && cd "$wt" \
         && slot_pool && { [ -n "$SLOT_HOME" ] || { slot_first && slot_mine; }; } \
-        && env "${e[@]}" GIT_TRACE2_EVENT="$wt.trace" timeout --kill-after=30 "$PUSH_TIMEOUT" git push "$REMOTE" "$sha:refs/heads/$to"
+        && env "${e[@]}" GIT_TRACE2_EVENT="$wt.trace" timeout --kill-after=30 "$PUSH_TIMEOUT" git push ${nv:+"$nv"} "$REMOTE" "$sha:refs/heads/$to"
     } 2>&1 < /dev/null 8>&-) && { [ "$la" = pr ] || echo "$sha $REMOTE $BRANCH" > "$PUSHED"; } || rc=$?
     # The remote refused the push (git's "[rejected]": its main holds a commit this one lacks): main takes the
     # remote's commits in a merge commit and is pushed again, once, in this same turn. The worktree stays until they
     # are fetched: the fetch is made from it, as the push was.
-    # With Land as pr, origin's default branch is not pushed to, so there is nothing of it to merge.
-    [ $rc != 0 ] && [ $try = 1 ] && [ "$la" != pr ] && grep -qF '[rejected]' <<<"$out"; a=$?
+    # With Land as pr, origin's default branch is not pushed to, so there is nothing of it to merge. A push with no
+    # hook merges nothing either: the merge is a commit no hook judged, so the next push makes it, through the hook.
+    [ $rc != 0 ] && [ $try = 1 ] && [ "$la" != pr ] && [ -z "$nv" ] && grep -qF '[rejected]' <<<"$out"; a=$?
     [ $a != 0 ] || [ -z "$want" ] || { out+=$'\n'"$REMOTE/$BRANCH holds a commit ${sha:0:12} lacks: a merge with it is a commit the full test run did not test, so nothing is pushed"; a=1; }
     [ $a != 0 ] || m=$(theirs "$sha" "$wt") || { out+=$'\n'"the remote's commits were not merged into main: ${m:0:600}"; a=1; }
     git worktree remove --force "$wt" 2>/dev/null
     [ $a = 0 ] || break
     # Main is the merge with the remote's commits now (remerge()).
     at=refs/heads/$BRANCH
+  done
+  [ $rc != 0 ] && [ -z "$nv" ] && [ $rc != 124 ] && [ $rc != 137 ] && hookfailed "$wt.trace" || break
+  m=$(hookalone "$sha" "$out") || { [ -z "$m" ] || out+=$'\n'"conveyor: $m"; break; }
+  mapfile -t ff <<<"$m"; ho=$out; nv=--no-verify; at=$sha
   done
   took=$((SECONDS - took))
   # Why it failed (docs/cards.md, Push): check, the pre-push hook exited non-zero (it fails the same way on the same
@@ -114,6 +127,8 @@ pushone() { # <card> <issue> [<commit>]
     --arg r "exit $rc (124 is the ${PUSH_TIMEOUT}s timeout): $(tail -c 1200 <<<"${out:-$sha}" | tr -d '\000')" '{sha:$s,reason:$r,sec:$t,kind:$k}
       + if $k == "check" then {check: ([$o | scan("(?:^|[^A-Za-z0-9_])FAILED:?[ \t]+(\\S+)")] | last[0] // "the pre-push hook" | .[0:100])} else {} end')"; return; }
   rm -f "$wt.trace"
+  # Pushed over a hook that failed under load: each pushed line says so (flaky: {files, issues}).
+  [ ${#ff[@]} = 0 ] || { fl=$(flakypush "$sha" "$ho" "${ff[@]}") || :; fl=",\"flaky\":${fl:-$(jq -cn '{files: $ARGS.positional, issues: []}' --args "${ff[@]}")}"; }
   mapfile -t got < <(jq -rs --rawfile in <(git rev-list "$sha" --not "${before[@]}" 2>/dev/null) '($in | split("\n") | map(select(. != "")) | INDEX(.)) as $in
     | map(select(.step == "pushed") | .card) as $have | .[] | select(.step == "landed" and $in[.sha] and (.card | IN($have[]) | not)) | "\(.card) \(.issue) \(.sha)"' < <(stdb ask lines cards))
   # With Land as pr: the pull request is opened or updated before the push counts. When it fails, the push line says
@@ -122,10 +137,10 @@ pushone() { # <card> <issue> [<commit>]
   if [ "$la" = pr ]; then
     m=$(landpr "${got[@]}") || { record "$1" "$2" push fail "$(jq -cn --arg s "$sha" --argjson t "$took" --arg r "the commit is on $REMOTE/$LANDING, but $m" '{sha:$s,reason:$r,sec:$t,kind:"transport"}')"; return; }
     echo "$sha $REMOTE $LANDING" > "$PUSHED"
-    for a in "${got[@]}"; do read -r c n s <<<"$a"; record "$c" "$n" pushed ok "{\"sha\":\"$s\",\"sec\":$took,\"head\":\"$sha\",\"pr\":$m}"; done
+    for a in "${got[@]}"; do read -r c n s <<<"$a"; record "$c" "$n" pushed ok "{\"sha\":\"$s\",\"sec\":$took,\"head\":\"$sha\",\"pr\":$m$fl}"; done
     return 0
   fi
-  for a in "${got[@]}"; do read -r c n s <<<"$a"; record "$c" "$n" pushed ok "{\"sha\":\"$s\",\"sec\":$took,\"head\":\"$sha\"}"; done
+  for a in "${got[@]}"; do read -r c n s <<<"$a"; record "$c" "$n" pushed ok "{\"sha\":\"$s\",\"sec\":$took,\"head\":\"$sha\"$fl}"; done
   for a in "${got[@]}"; do read -r c n s <<<"$a"; [ "$n" = 0 ] || pend+=("$a"); done
   t=$SECONDS
   while [ ${#pend[@]} != 0 ]; do
@@ -222,12 +237,53 @@ pushwt() { # <worktree> [<commit>]
   [ -n "${2:-}" ] || return 0
   git worktree add -q --detach "$1" "$2" > /dev/null 2>&1 && deps "$1" > /dev/null && mkdir -p "$1.testlog"
 }
-# One test file run alone in <worktree> (pushtests()), on the slot it holds, its output added to <worktree>.log.
+# One test file run alone in <worktree> (pushtests(), hookalone()), on the slot it holds, its output added to
+# <worktree>.log, with what a card's test run gives a test command (testonce(), lib/testrun.sh): the slots, its log
+# folder and CONVEYOR_TEST_TIME, which a test.fileCommand the Board's Record CPU time wrapped calls (cputwrap()).
 pushfile() { # <worktree> <test file>
   local cmd
   cmd=$(mapone "$1" "$2" '') || return 1
   { echo "== $2"; ( cd "$1" && { [ -n "$SLOT_HOME" ] || slot_mine; } && CONVEYOR_TEST_SLOTS=$HERE/lib/slots.sh CONVEYOR_TEST_LOG=$1.testlog \
-      exec timeout --kill-after=30 "${TEST_TIMEOUT:-3600}" bash -c "$cmd" < /dev/null 8>&- ); } >> "$1.log" 2>&1
+      CONVEYOR_TEST_TIME=$HERE/tools/testtime.sh exec timeout --kill-after=30 "${TEST_TIMEOUT:-3600}" bash -c "$cmd" < /dev/null 8>&- ); } >> "$1.log" 2>&1
+}
+# The test files a failed pre-push hook names as failing (hookalone()), one a line: each test file of <commit>
+# (testtracked(), lib/issues.sh) that a line of the hook's output names, whole or after a /, on a line that says it
+# failed (FAIL, failed, ✖ or "not ok"). None when the hook says a check FAILED (its words "FAILED <name>", the check a
+# push line names) that is not one of those files (a pytest node id, file::case, is its file): the hook failed for
+# more than these files, so running them alone cannot clear it. A count after FAILED, as Python's unittest ends a
+# failed run ("FAILED (failures=1)"), is no check.
+hookfiles() { # <commit> <the hook's output>
+  local fs
+  fs=$(testtracked "$MAIN" "$1") && [ -n "$fs" ] || return 0
+  printf '%s' "$2" | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\000\r' | jq -rRs --arg fs "$fs" '
+    def esc: gsub("(?<c>[][.+*?()|{}^$\\\\])"; "\\\(.c)");
+    split("\n") as $o | [$fs | split("\n")[] | select(. != "")] as $fs
+    # Each failure line takes the longest paths first, and the text of a path it names is then no other path: the
+    # end of lib/a.test.sh is not the file a.test.sh too.
+    | [$o[] | select(test("FAIL|failed|✖|not ok")) as $l
+        | reduce ($fs | sort_by(-length) | .[]) as $f ({l: $l, hit: []};
+            ("(?<a>^|[^A-Za-z0-9_.-])" + ($f | esc) + "(?<b>$|[^A-Za-z0-9_/-])") as $re
+            | if .l | test($re) then .hit += [$f] | .l |= gsub($re; "\(.a)\u0000\(.b)") else . end) | .hit[]] | unique as $hit
+    | [$o | join("\n") | scan("(?:^|[^A-Za-z0-9_])FAILED:?[ \t]+([^\\s(]\\S*)") | .[0] | sub("::.*$"; "") | sub("[:,.]$"; "")] as $checks
+    | if $hit != [] and all($checks[]; . as $c | any($hit[]; . == $c or ($c | endswith("/" + .)))) then $hit[] else empty end'
+}
+# Each test file a failed pre-push hook names (hookfiles()) run again alone, once, on <commit>, as the run before the
+# push runs one (pushfile(); in a worktree of the commit, $CARDS/pushhook, its output in $CARDS/pushhook.log, on one
+# test slot). Prints the files, one a line, when every one passed alone. Fails when the hook names none (printing
+# nothing), and when a file failed alone too or the worktree or the slots could not be had (printing why).
+hookalone() { # <commit> <the hook's output>
+  local wt=$CARDS/pushhook fs=() f bad=()
+  mapfile -t fs < <(hookfiles "$1" "$2")
+  [ ${#fs[@]} != 0 ] || return 1
+  rm -f "$wt.log"
+  pushwt "$wt" "$1" && slot_pool || { pushwt "$wt"; echo "the test files the pre-push hook named could not be run alone: their worktree or the test slots could not be had"; return 1; }
+  echo "conveyor: the pre-push hook of ${1:0:12} failed naming ${#fs[@]} test file(s); each runs alone, once" >&2
+  [ -n "$SLOT_HOME" ] || until slot_try || slot_wait; do :; done
+  for f in "${fs[@]}"; do pushfile "$wt" "$f" || bad+=("$f"); done
+  [ -n "$SLOT_HOME" ] || slot_free
+  pushwt "$wt"
+  [ ${#bad[@]} = 0 ] || { echo "the pre-push hook named $(printf '%s, ' "${bad[@]}" | sed 's/, $//'), which fails alone too (its output: $wt.log)"; return 1; }
+  printf '%s\n' "${fs[@]}"
 }
 # The remote's commits a refused push lacks, merged into main (remerge()). They are fetched as the push was made:
 # with the pack's push.env (what lets the push reach the remote lets the fetch too), from the push worktree (a

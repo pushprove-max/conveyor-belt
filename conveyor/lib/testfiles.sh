@@ -30,7 +30,8 @@
 #   failures (those steps, newest first, each {card, issue, time, verdict: main, flaky, card or null, cases, tail}
 #   (FAILURE); tail is null past the newest TESTKEEP), caught and changedToPass (those of them whose card landed: caught when the landed commit left the file as it was,
 #   so the fix went into the code; changedToPass when that commit changed the file),
-#   flaky (its entries in the flaky-test record, its cases' too, a runner's name for them as well), issue (the issue last filed for it, the highest number of the slow-test record's, the test rules' log's and the Board's filings ($TAFILED), else null; the Board's Close its issue as done closes it), slowOnPurpose (its reason, else null), usual (the median of
+#   flaky (its entries in the flaky-test record, its cases' too, a runner's name for them as well), flakyAgain (the
+#   issue of its earlier fix when it is flaky again: two entries within FLAKY_DAYS days, FLAKYAGAIN in lib/flaky.sh; else null), issue (the issue last filed for it, the highest number of the slow-test record's, the test rules' log's and the Board's filings ($TAFILED), else null; the Board's Close its issue as done closes it), slowOnPurpose (its reason, else null), usual (the median of
 #   its runs before its last slower.runs runs; null with fewer than slower.minRuns runs on record) and slower; a wholeOnly
 #   file (a runner that starts other test files whole, each timed on its own) has slower false; optimize: each issue the Board filed for it ($TAFILED: Optimize, and older
 #   speed-up, issues), newest first: {issue, time (filed), state (open: no card took it; building; blocked, with reason;
@@ -535,11 +536,11 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
     | jq -Rsc --arg want "$ch" '($want | split("\n") | map(select(. != "") | {key: ., value: true}) | from_entries) as $w
       | reduce (split("\u0000")[] | select(. != "")) as $x ({k: null, m: {}}; if $w[$x] then .k = $x | .m[$x] = [] elif .k == null then . else .m[.k] += [$x] end) | .m') || ch='{}'
   out=$(printf '%s\n' "$ln" | jq -cRn --arg since "$1" --arg si "$si" --argjson sh "$sh" --argjson rn "$rn" --slurpfile ch <(printf '%s\n' "$ch") \
-    --argjson mn "$mn" --slurpfile fs <(printf '%s' "$fs") --slurpfile fl <(printf '%s' "$fl") --slurpfile sf <(printf '%s' "$sf") --argjson keep "$TESTKEEP" \
+    --argjson mn "$mn" --slurpfile fs <(printf '%s' "$fs") --slurpfile fl <(printf '%s' "$fl") --slurpfile sf <(printf '%s' "$sf") --argjson keep "$TESTKEEP" --argjson days "$FLAKY_DAYS" \
     --slurpfile cs <(printf '%s' "$cs") --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") --argjson ru "$ru" --rawfile all <(printf '%s\0' "${tf[@]}") \
     --slurpfile hv <(printf '%s' "$hv") --slurpfile px <(printf '%s' "$px") --slurpfile mu <(cat "$MUTS"/*.json 2>/dev/null | jq -c 'objects' 2>/dev/null) --rawfile mq "$(rawok "$MUTS/asked")" --rawfile su "$su" --slurpfile sv <(printf '%s' "$sv") --slurpfile last <(jq -ce 'objects' "$TESTRULES" 2>/dev/null || echo null) \
     --rawfile rl "$(rawok "$TESTRULESLOG")" --argjson shown "$TESTRULES_SHOWN" --rawfile tf "$(rawok "$TAFILED")" \
-    --slurpfile tj <(cat "$TESTACTS"/*.json 2>/dev/null | jq -c 'objects | select(.action == "judge" and .state == "done" and (.file | type) == "string" and (.waits | type) == "array") | {file, end, waits}' 2>/dev/null) '$fs[0] as $fs | $fl[0] as $fl | $sf[0] as $sf | ($all | split("\u0000") | map(select(. != ""))) as $all | $hv[0] as $hv | $px[0] as $px | '"$JSONL$OWNERS$FAILURE$RUNDEFS"'
+    --slurpfile tj <(cat "$TESTACTS"/*.json 2>/dev/null | jq -c 'objects | select(.action == "judge" and .state == "done" and (.file | type) == "string" and (.waits | type) == "array") | {file, end, waits}' 2>/dev/null) '$fs[0] as $fs | $fl[0] as $fl | $sf[0] as $sf | ($all | split("\u0000") | map(select(. != ""))) as $all | $hv[0] as $hv | $px[0] as $px | '"$JSONL$OWNERS$FAILURE$RUNDEFS$FLAKYAGAIN"'
     # The rules log and the Board test issues, each read once: the log'"'"'s last $shown lines, newest first (lg), and
     # their filed lines (fd); the test issues with a file and an issue number (ta).
     ($su | jsonl) as $su | ($rl | split("\n") | if .[-1] == "" then .[:-1] else . end | .[-$shown:] | map(fromjson? | objects) | reverse) as $lg
@@ -594,6 +595,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
            failures: ($failed[$f] // [] | to_entries | map(.value + if .key < $keep then {} else {tail: null} end)),
            caught: ($catch[$f].caught // 0), changedToPass: ($catch[$f].changed // 0),
            flaky: ($flaky[$f] // 0),
+           flakyAgain: ($fl | again($f; (($ENV.CONVEYOR_NOW // "" | tonumber?) // now); $days)),
            issue: ([($sf.filed | arrays | .[] | objects), $fd[] | select(.file == $f) | .issue | numbers] | max),
            slowOnPurpose: ($own.slowOnPurpose // null), usual: ($usual | r3),
            slower: ($wo | not) and $usual != null and all($c[-$rn:][]; . > $usual * (1 + $sh)), hollow: ($hv[$f] // null), proxy: ($px[$f] // null),

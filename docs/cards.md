@@ -271,3 +271,15 @@ A push that fails is one of two kinds:
   Foreman and shows the hook's last lines on Needs you. It does not run the checks again until main's commit changes.
 - `transport`: git, the network or the remote failed. The loop tries again every `tunables.pushRetry` seconds. Needs
   you shows it once a retry fails too.
+
+When the pre-push hook fails and its output names test files as failed, Conveyor first runs each of those files
+alone, once, on the same commit, with `test.fileCommand`, as a card's Test step runs a file. When each file passes
+alone, Conveyor pushes the same commit again without the hook. The files go on the flaky-test record, and one
+`flaky-test` issue for all of them is filed held. The Foreman's wake and the card's Push step on the Board say
+"flaky: passed alone". When a file fails alone too, the push stays blocked as a `check` failure. The push also stays
+blocked when the hook prints `FAILED <name>` for a check that is not one of those files, or names no test file.
+
+A file whose flaky issue is still open gets a comment on that issue, not a new issue. A file recorded flaky twice
+within seven days, after an issue was filed for it, is flaky again. When that issue is closed, Conveyor opens it
+again, holds it and adds the comment "Flaky again since its fix #N". It does not file a new issue. The Tests page
+shows "Flaky again since its fix #N" on the file's row.

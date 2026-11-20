@@ -168,7 +168,9 @@
                   elif $l.step == "review" then "review \($nth)" + (if ($l.result // "") == "" then "" else " (\($l.result))" end)
                   elif $l.step == "fix" then "fix \($nth)" elif $l.step == "test" then "tests " + (if $l.result == "pass" then "passed" elif $l.result == "held" then "held: the machine" else "failed" end)
                   elif $l.step == "start" then "landing (met a conflict)" elif $l.step == "rebase" then "rebuild" elif $l.step == "landed" then "landing"
-                  elif $l.step == "closed" then "landing (issue closed)" elif $l.step == "pushed" then "pushed"
+                  elif $l.step == "closed" then "landing (issue closed)"
+                  # A push that went on over a pre-push hook that failed naming test files that each passed alone (pushone()).
+                  elif $l.step == "pushed" then "pushed" + (($l.flaky | objects | " (flaky: passed alone: \(.files | join(", ")))") // "")
                   elif $l.step == "push" then (if $l.result == "ok" then "push" else "push failed" end)
                   elif $l.step == "issue" then (if $l.result == "ok" then "issue closed" else "issue not closed" end)
                   elif $l.step == "filed" then "follow-ups filed" elif $l.step == "blocked" then "stopped"

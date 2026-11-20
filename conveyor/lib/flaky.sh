@@ -5,9 +5,11 @@
 # nightly whole test: a case that failed in the full run and passed alone); `flaky off` adds one the same way and files
 # no issue (the Board's Keep a case off, an action that files none). A case it names is kept off card test steps
 # (flakyoff()) until its flaky issue closes: the full suite and the whole test on main still run it. It adds no run,
-# wait or retry to a card.
+# wait or retry to a card. A push whose pre-push hook failed naming test files that pass alone adds one entry for
+# each whole file (flakypush()); a whole file is never kept off card test steps, but when the push reopens the closed
+# issue last filed for a case of that file (`<file>: <case>`), flakyoff() keeps that case off again while it is open.
 # $FLAKY keeps {entries: [{case, source, time} + {card, issue} (a card's) or {note} (flaky add or off)], filed: [{case,
-# issue}], the issue last filed for each case}. An entry older than FLAKY_KEEP days is dropped at the next write.
+# issue} + {time} (a push's)], the issue last filed for each case}. An entry older than FLAKY_KEEP days is dropped at the next write.
 # A case with entries from FLAKY_SOURCES different sources within FLAKY_DAYS days, and no open issue filed for it,
 # gets one issue (flakyfile()). One writer at a time: a lock of its own, held through the filing, so two cards that
 # add the third entry at once file one issue.
@@ -98,13 +100,88 @@ flakyfile() { # <case> <now>, under flaky()'s lock
     + ([counted
         | "- \(.time) \(.source)" + (if .issue != null then ", issue #\(.issue)" else "" end) + (if (.note // "") != "" then ": \(.note)" else "" end)] | join("\n"))
     + "\n\nMake the test reliable, or remove it.\n\nDone when: the case passes alone and in the whole test."' <<<"$rec") || return 1
-  labels=(--label "$TYPE" --label "$(jq -r '.[-1]' <<<"$PRIOS")")
-  ! jq -e --arg a "${AREA}engine" 'index($a)' <<<"$NONPRODUCT" >/dev/null || labels+=(--label "${AREA}engine")
-  labels+=(--label "$FLAKY_LABEL")
-  gh_write label create -- "$FLAKY_LABEL" >/dev/null 2>&1 # it fails when the label is there already
+  mapfile -t labels < <(flakylabels)
   out=$(gh_write issue create --title "$title" "${labels[@]}" --body "$body" 2>&1); n=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1); n=${n##*/}
   [ -n "$n" ] || { echo "conveyor: flaky test $1: its issue could not be filed: $out" >&2; return 1; }
   flakyput "$(jq -c --arg c "$1" --argjson n "$n" '.filed = [.filed[] | select(.case != $c)] + [{case: $c, issue: $n}]' <<<"$rec")"
+}
+# The labels of a flaky issue, as gh's arguments, one a line: the pack's type, its last priority, the area label
+# <areaPrefix>engine when the pack's nonProductAreas names it, and flaky-test (made here when the repo lacks it).
+flakylabels() {
+  printf '%s\n' --label "$TYPE" --label "$(jq -r '.[-1]' <<<"$PRIOS")"
+  ! jq -e --arg a "${AREA}engine" 'index($a)' <<<"$NONPRODUCT" >/dev/null || printf '%s\n' --label "${AREA}engine"
+  printf '%s\n' --label "$FLAKY_LABEL"
+  gh_write label create -- "$FLAKY_LABEL" >/dev/null 2>&1 # it fails when the label is there already
+}
+# A test file flaky again (the owner, 2026-11-20: "A file that fails twice in a week gets reopened, not marked fixed
+# again"): again($f; <now, seconds>; <days>) is the issue last filed for the file or a case of it (`<file>: <case>`,
+# a runner's name for the case too: caseowners, OWNERS in lib/testfiles.sh, read before it with its defs and refs)
+# when the record has two or more entries of them within <days> days of now, the newest made after that issue was
+# filed (a filed line with no time: before every entry); else null. The Tests page names it (testspart(),
+# lib/testfiles.sh) and a push's flaky issue reopens it (flakypush()).
+FLAKYAGAIN='def mine($f): (.case | strings) | any(caseowners[]; . == $f);
+  def again($f; $t; $d): ([.entries | arrays | .[] | objects | select(mine($f) and ((.time | fromdate?) // 0) > $t - $d * 86400)] | sort_by(.time)) as $e
+    | ([.filed | arrays | .[] | objects | select(mine($f) and (.issue | type) == "number")] | last) as $i
+    | if ($e | length) >= 2 and $i != null and (($i.time // "") | tostring) < $e[-1].time then $i.issue else null end;'
+# A push whose pre-push hook failed naming test files, each of which passed when run alone (pushone(), lib/push.sh):
+# one entry of the flaky-test record for each file, its source "push <commit>", and one issue for the files, filed
+# held (`control hold`, as a follow-up that changes a pipeline file is), not one each. A file the issue last filed for
+# it (or for a case of it) still holds is not filed again: that issue, when open, gets a comment; when closed and the
+# file is flaky again (FLAKYAGAIN), it is reopened with a comment that says "flaky again since its fix #<issue>", and
+# held. A file whose issue is closed and that is not flaky again goes in the new issue; one whose issue's state is
+# unread goes in none (it may be open), and is said. The record's filed list keeps {case: the file, issue, time: when
+# it was filed} for each file of a new issue; a reopened issue keeps its own, so the file stays flaky again. Prints {files, issues: the issues that now hold them}; fails when some could not be
+# filed, commented, reopened or held.
+flakypush() { # <the commit pushed> <the hook's output> <test file>...
+  local sha=$1 log=$2 lock rec now f n s out rc=0 put='' q new=() hold=() iss=() labels=() lines defs refs; local -A seen=()
+  shift 2
+  testowners
+  flaky "push ${sha:0:12}" "$(jq -cn '[$ARGS.positional[] | {case: ., note: "failed in the pre-push hook, passed alone"}]' --args "$@")" nofile || rc=1
+  { exec {lock}>>"$FLAKY.lock"; } 2>/dev/null && flock "$lock" \
+    || { echo "conveyor: the flaky-test record could not be locked; no flaky issue filed" >&2; jq -cn '{files: $ARGS.positional, issues: []}' --args "$@"; return 1; }
+  now=$(clock); rec=$(jq -ce 'objects | .filed |= [arrays | .[] | objects]' "$FLAKY" 2>/dev/null) || rec='{"filed": []}'
+  # The lines of the hook's output that name the files, for the issue and its comments.
+  lines=$(printf '%s\n' "$log" | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\000\r' | grep -F "${@/#/-e}" | head -n 20 | cut -c1-300)
+  for f; do
+    n=$(jq -r --arg f "$f" --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") "$OWNERS$FLAKYAGAIN"'[.filed[]| select(mine($f)) | .issue | numbers][-1] // empty' <<<"$rec")
+    [ -n "$n" ] || { new+=("$f"); continue; }
+    s=${seen[$n]:-}
+    [ -n "$s" ] || s=$(timeout 20 gh issue view "$n" --json state 2>/dev/null </dev/null | jq -r '.state // ""' 2>/dev/null) || s=''
+    # seen: an issue a file before this one found open, or reopened (open now): one comment a push.
+    if [ "$s" = OPEN ]; then
+      [ -n "${seen[$n]:-}" ] || out=$(gh_write issue comment "$n" --body "The pre-push hook failed again at ${sha:0:12} naming \`$f\`, which passed when run alone, so the push went on." 2>&1 </dev/null) \
+        || { echo "conveyor: flaky test $f: #$n could not be given a comment: $out" >&2; rc=1; }
+      seen[$n]=$s; iss+=("$n")
+    elif [ "$s" = CLOSED ] && jq -e --arg f "$f" --arg now "$now" --argjson d "$FLAKY_DAYS" --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") \
+      "$OWNERS$FLAKYAGAIN"'again($f; $now | fromdate; $d) != null' <<<"$rec" >/dev/null; then
+      q=''; [ -z "$lines" ] || q=$'\n\nThe lines of the hook that name it:\n```\n'"$(grep -F -e "$f" <<<"$lines")"$'\n```'
+      out=$(gh_write issue reopen "$n" --comment "Flaky again since its fix #$n: the pre-push hook failed at ${sha:0:12} naming \`$f\`, which passed when run alone, so the push went on. It was recorded flaky twice within $FLAKY_DAYS days, so this issue is reopened, not filed again.$q" 2>&1 </dev/null) || { echo "conveyor: flaky test $f: #$n could not be reopened: $out" >&2; rc=1; continue; }
+      seen[$n]=OPEN; hold+=("$n"); iss+=("$n")
+    elif [ "$s" = CLOSED ]; then new+=("$f")
+    else echo "conveyor: flaky test $f: the state of #$n could not be read; no flaky issue filed for it" >&2; rc=1; fi
+  done
+  if [ ${#new[@]} != 0 ]; then
+    names >/dev/null 2>&1 || :
+    mapfile -t labels < <(flakylabels)
+    q=''; [ -z "$lines" ] || q=$'\nThe lines of the hook that name them:\n```\n'"$lines"$'\n```\n'
+    out=$(gh_write issue create --title "$(printf 'Flaky test: %s failed in the pre-push hook and passed alone' "$(printf '%s, ' "${new[@]}" | sed 's/, $//')" | cut -c1-200)" "${labels[@]}" \
+      --body "The pre-push hook failed at ${sha:0:12} naming the test files below. Each passed when run alone, once, on the same commit, so the push went on without the hook.
+
+$(printf -- '- `%s`\n' "${new[@]}")
+$q
+Make each file pass in the pre-push hook on a busy machine, or remove it.
+
+Done when: each file passes in the pre-push hook and alone." 2>&1 </dev/null); n=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1); n=${n##*/}
+    if [ -n "$n" ]; then
+      hold+=("$n"); iss+=("$n"); put=1
+      rec=$(jq -c --argjson n "$n" --arg t "$now" '.filed = [.filed[] | select(IN(.case; $ARGS.positional[]) | not)] + [$ARGS.positional[] | {case: ., issue: $n, time: $t}]' --args "${new[@]}" <<<"$rec")
+    else echo "conveyor: the flaky test files ${new[*]}: their issue could not be filed: $out" >&2; rc=1; fi
+  fi
+  [ -z "$put" ] || flakyput "$rec" || { echo "conveyor: the flaky-test record could not be written; the issues filed are not kept in it" >&2; rc=1; }
+  exec {lock}>&-
+  for n in "${hold[@]}"; do out=$(locked control hold "$n" 2>&1 >/dev/null) || { echo "conveyor: flaky issue #$n could not be held: ${out:0:300}" >&2; rc=1; }; done
+  jq -cn --argjson i "$(printf '%s\n' "${iss[@]}" | jq -cs 'unique')" '{files: $ARGS.positional, issues: $i}' --args "$@"
+  return $rc
 }
 # A card's test run that passed on re-run (<worktree>.first), recorded by tests() as it ends: one entry for each case
 # that had not passed, the card its source (the worktree's name; its issue the number that ends it, none for 0:

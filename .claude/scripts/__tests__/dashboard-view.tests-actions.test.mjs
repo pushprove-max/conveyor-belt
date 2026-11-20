@@ -230,6 +230,17 @@ test('Tests actions: Put back shows a runner-named flaky case on its case file a
     args: ['490', 'Put back from the Board\'s Tests page: the case "mergeclean" runs on card test steps again.'] } }]);
 });
 
+// Bug it guards (#1079): a file recorded flaky twice within the flaky days read as flaky for the first time, so a
+// second fix was filed as if new. Its row names the issue of its earlier fix (flakyAgain); a file with none says nothing.
+test('Tests actions: a file flaky again names the issue of its earlier fix', () => {
+  const w = boot({ tab: 'tests' }), d = snap();
+  d.panels.tests.data.tests.files.find((f) => f.file === MERGE).flakyAgain = 77;
+  deliver(w, d);
+  const facts = (file) => Array.from(open(w, file).querySelectorAll('.tests-flaky'), (p) => p.textContent);
+  assert.ok(facts(MERGE).includes('Flaky again since its fix #77'), `the row of ${MERGE}: ${facts(MERGE)}`);
+  assert.ok(!facts(X).some((t) => t.startsWith('Flaky again')), `the row of ${X}: ${facts(X)}`);
+});
+
 // Bug it guards (issue 214): Keep off on an engine case file recorded the runner, conveyor/conveyor.test.sh, though a
 // card's run runs and names each case file as a test file of its own (.conveyor/test-changed.sh): the flaky list named
 // the runner. Each file, an engine case file too, keeps its own name.

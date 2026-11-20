@@ -42,6 +42,7 @@ case $2 in
   status) [ ! -f "$STUB/status-cmd" ] || . "$STUB/status-cmd"; [ ! -e "$STUB/unreached" ] || exit 124; [ ! -e "$STUB/signed-out" ] ;;
   comment) [ ! -f "$STUB/comment-cmd" ] || . "$STUB/comment-cmd"; shift 2; printf '%s\n' "$*" >> "$STUB/comments" ;;
   close) echo "$3" >> "$STUB/closed"; shift 3; printf '%s\n' "$*" >> "$STUB/close-comments" ;;
+  reopen) echo "$3" >> "$STUB/reopened"; shift 3; printf '%s\n' "$*" >> "$STUB/reopen-comments" ;;
   create) shift 2; n=$((100101 + $(cat "$STUB/filed" 2>/dev/null | wc -l))); l=(); m=
     [ ! -f "$STUB/create-cmd" ] || . "$STUB/create-cmd"
     while [ $# -gt 0 ]; do case $1 in --title) t=$2 ;; --body) b=$2 ;; --label) l+=("$2") ;; --milestone) m=$2 ;; esac; shift 2; done
