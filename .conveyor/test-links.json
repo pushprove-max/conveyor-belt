@@ -465,6 +465,16 @@
     ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
+  "conveyor/foreman/foreman-session.test.sh": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "conveyor/foreman/foreman-projects.test.sh": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
   "conveyor/tests/releaseagain.test.sh": [
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
     ".claude/scripts/__tests__/dashboard-local.test.sh",
