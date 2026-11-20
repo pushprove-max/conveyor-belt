@@ -558,10 +558,12 @@ lanes() {
 # The Foremen of this machine, one a project or one a group (conveyor/foreman/lib.sh mine: a list of the host file's
 # foreman.groups is one Foreman over the records it names; groups that name a project twice are not understood, and
 # then each project has its own): {foremen: [{projects, group, held, since, lastWakeAt, waiting, pluginBugs,
-# pluginBugsFile, pluginBugsUrl}], error}; pluginBugs: how many plugin problems it noted (plugin-bugs.md,
+# pluginBugsFile, pluginBugsUrl, pluginNotes}], error}; pluginBugs: how many plugin problems it noted (plugin-bugs.md,
 # conveyor/foreman/stop.sh), pluginBugsFile: that file, pluginBugsUrl: its copy in the Board's folder
 # (plugin-bugs/<first project>.txt, which the page server serves, as a browser opens no file:// link from an https
-# page); both null when it noted none. A Foreman's
+# page), pluginNotes: each note as {at, card, text, line} (stop.sh's "- <at> · card <card> · <text>"; at and card null
+# for a line in no such form; line: the whole line, which the page's Dismiss names to POST /plugin-dismiss); all three
+# null when it noted none. A Foreman's
 # folder is foreman/ in the state folder of its first project (lib.sh's FD), which is the host file's stateDir for the
 # host file's own checkout and that checkout's conveyor/state for any other (conveyor.sh's ST); the host file's own
 # checkout is the one its main leads to, links followed, as the engine compares them. held: a session holds
@@ -623,12 +625,15 @@ foremen() {
     wake=$(stat -c %Y "$dir/last-wake.txt" 2>/dev/null) && wake=$(iso "$wake") || wake=''
     waiting=$(for f in "$dir"/pending/*.wake; do [ ! -f "$f" ] || head -n 1 "$f" | cut -c1-200; done | jq -Rc . | jq -cs .) || waiting='[]'
     bugs=$(grep -c '^- ' "$dir/plugin-bugs.md" 2>/dev/null) || bugs=0
+    notes=$({ grep '^- ' "$dir/plugin-bugs.md" 2>/dev/null || true; } | jq -Rc '(capture("^- (?<at>[^ ]+) · card (?<card>[^ ]+) · (?<text>.*)$")
+      // {at: null, card: null, text: ltrimstr("- ")}) + {line: .}' | jq -cs .) || notes='[]'
     url=$(jq -r '.[0]' <<<"$projects"); url=plugin-bugs/${url//[^A-Za-z0-9._-]/_}.txt
     [ "$bugs" -eq 0 ] || { mkdir -p "$OUT/plugin-bugs" && cp -- "$dir/plugin-bugs.md" "$OUT/$url" && chmod 644 "$OUT/$url"; } || url=''
     out=$(jq -c --argjson p "$projects" --arg sid "$sid" --arg s "$since" --arg w "$wake" --argjson q "${waiting:-[]}" \
-      --argjson nb "${bugs:-0}" --arg fb "$dir/plugin-bugs.md" --arg u "$url" \
+      --argjson nb "${bugs:-0}" --arg fb "$dir/plugin-bugs.md" --arg u "$url" --argjson nt "${notes:-[]}" \
       'def n: if . == "" then null else . end; . + [{projects: $p, group: ($p | length > 1), held: ($sid != ""), since: ($s | n), lastWakeAt: ($w | n), waiting: $q,
-        pluginBugs: $nb, pluginBugsFile: (if $nb > 0 then $fb else null end), pluginBugsUrl: (if $nb > 0 then $u | n else null end)}]' <<<"$out") || return 1
+        pluginBugs: $nb, pluginBugsFile: (if $nb > 0 then $fb else null end), pluginBugsUrl: (if $nb > 0 then $u | n else null end),
+        pluginNotes: (if $nb > 0 then $nt else null end)}]' <<<"$out") || return 1
   done < <(jq -j '.[] | (.projects | tojson), "\u0000", .main, "\u0000", .hm, "\u0000", .sd, "\u0000", .ssh, "\u0000", .led, "\u0000"' <<<"$rows")
   jq -c '{foremen: ., error: null}' <<<"$out"
 }
@@ -871,7 +876,7 @@ PANELS_JQ='
         # The plugin problems each Foreman noted, once under each of its projects (repo, as the project filter reads
         # it), so a grouped Foreman'"'"'s show whichever of its projects is picked; the page shows each file once.
         pluginBugs: [$fm.foremen | arrays | .[] | select((.pluginBugs | numbers) > 0) | . as $f | .projects[]
-          | {repo: ., projects: $f.projects, count: $f.pluginBugs, file: $f.pluginBugsFile, url: $f.pluginBugsUrl}]}},
+          | {repo: ., projects: $f.projects, count: $f.pluginBugs, file: $f.pluginBugsFile, url: $f.pluginBugsUrl, notes: ($f.pluginNotes // [])}]}},
    lanes: (if ($lanes.error // null) != null then {error: $lanes.error, data: null} else {error: null, data: {
         records: ($lanes.records | map(.repo as $repo | .fast |= (if . != null and .present then . + {landing: landing(.; $repo)} else . end))),
         cardsError: $cerr}} end),

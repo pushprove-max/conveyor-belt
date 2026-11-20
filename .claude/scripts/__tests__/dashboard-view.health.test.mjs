@@ -4,7 +4,7 @@
 // dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { T0, iso, clone, boot, panel, deliver, tick, full, cases } from './dashboard-view.helpers.mjs';
+import { T0, iso, clone, boot, panel, deliver, next, tick, full, settle, cases } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 // A page with only the panel a case reads: every other panel's script is evaluated on each boot (and drawn when it is
@@ -114,6 +114,45 @@ test('Health: the plugin problems a Foreman noted are a warning row, "N plugin p
   assert.match(row.textContent, /2 plugin problems noted in \/srv\/sample\/conveyor\/state\/foreman\/plugin-bugs\.md/);
   assert.equal(row.querySelector('a').getAttribute('href'), 'plugin-bugs/sample.txt');
   assert.match(row.querySelector('.check-next').textContent, /conveyor-belt repo/);
+});
+
+// Issue 1042: the owner could only read the notes in the file. Bugs it catches: no pane listing each note with its time,
+// card and text; a pane drawn with no note; a Dismiss that posts anything but that one note's file and line (the
+// server removes that line and runs no gh); a dismissed note drawn again before the next snapshot drops it.
+test('Health: the Plugin problems pane lists each note with its time, card and text, and Dismiss removes only that note', async () => {
+  const w = page('health');
+  const data = full();
+  const file = '/srv/sample/conveyor/state/foreman/plugin-bugs.md';
+  const notes = [
+    { at: '2026-11-09T16:00:00Z', card: 'c20261109T150000-sample-12', text: 'setup never sets linkFromMain · evidence: -', line: '- 2026-11-09T16:00:00Z · card c20261109T150000-sample-12 · setup never sets linkFromMain · evidence: -' },
+    { at: '2026-11-09T16:10:00Z', card: '-', text: 'npm ci runs twice · evidence: -', line: '- 2026-11-09T16:10:00Z · card - · npm ci runs twice · evidence: -' }];
+  data.panels.health.data.pluginBugs = [{ repo: 'sample', projects: ['sample'], count: 2, file, url: 'plugin-bugs/sample.txt', notes }];
+  deliver(w, data);
+  const pane = () => panel(w, 'health').querySelector('section.plugin-problems');
+  assert.equal(pane().querySelector('h3').textContent, 'Plugin problems');
+  const rows = () => Array.from(pane().querySelectorAll('li.row'));
+  assert.equal(rows().length, 2);
+  assert.equal(rows()[0].querySelector('.title').textContent, 'setup never sets linkFromMain · evidence: -');
+  const meta = (li) => Array.from(li.querySelectorAll('.row-meta > span'), (s) => s.textContent);
+  assert.match(meta(rows()[0])[0], /^\d{1,2}:00/, `its time: ${meta(rows()[0])}`);
+  assert.equal(meta(rows()[0])[1], 'card c20261109T150000-sample-12');
+  assert.match(meta(rows()[1])[0], /^\d{1,2}:10/, `its time: ${meta(rows()[1])}`);
+  assert.equal(meta(rows()[1])[1], 'no card');
+  rows()[1].querySelector('[data-act="plugin-dismiss"]').click();
+  await settle(); await settle();
+  assert.deepEqual(w.posts, [{ url: 'plugin-dismiss', body: { file, line: notes[1].line } }], 'one post, of that note alone');
+  assert.deepEqual(rows().map((li) => li.querySelector('.title').textContent), ['setup never sets linkFromMain · evidence: -'], 'the dismissed note is gone, the other stays');
+  // A failed dismiss keeps the note and says why.
+  w.reply = { ok: false, status: 409, text: () => Promise.resolve('that note is no longer in the file; nothing was changed') };
+  rows()[0].querySelector('[data-act="plugin-dismiss"]').click();
+  await settle(); await settle();
+  assert.equal(rows().length, 1);
+  assert.match(rows()[0].querySelector('.warn-note').textContent, /^Not dismissed: that note is no longer in the file/);
+  // With an empty list, there is no pane.
+  const none = clone(data);
+  none.panels.health.data.pluginBugs = [];
+  next(w, none);
+  assert.equal(pane(), null);
 });
 
 // Bug: the live feed rewrites the stream every 10 s and the panel is drawn again on each write, so an opened "Show

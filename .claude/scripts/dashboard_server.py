@@ -13,7 +13,8 @@ Time setting through `POST /time` (time.json, the one file written in the served
 `conveyor.sh control`, or the yes, the no or the retry of a card, run on the host conveyor/host.json names (here on one
 machine: conveyor_host()), on the
 record of it the request names (`POST /machine` pauses or resumes the whole machine instead,
-and names no record); and manage
+and names no record); dismiss one plugin problem a Foreman noted through `POST /plugin-dismiss` (its line is
+removed from that Foreman's plugin-bugs.md; nothing is filed); and manage
 users (below). Every write is taken from the page's own address only (own_page), and each names the user who made it
 (the ruling row, the approval or decline line, the server's log line). An answer is recorded in the
 decisions ledger and the ruling log and sent to no pane. A dashboard-unsent/<id>.json an earlier version left beside
@@ -114,6 +115,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # whose ledger holds the decision.
 MAX_ANSWER_BODY = 4096
 MAX_TIME_BODY = 64     # POST /time: {"time": "24-hour"}
+MAX_DISMISS_BODY = 16384  # POST /plugin-dismiss: {file, line}, one note of plugin-bugs.md
 RESTART_COOLDOWN = 60  # seconds between restarts; the stamp is a file because the restart kills this server
 HISTORY_TTL = 60       # GET /history with no live feed gives the kept copy while it is this young (dashboard.sh's HISTORY_TTL)
 STREAM_FRESH = 60      # stream.json older than this: no live feed, so no ledger key (dashboard.sh's STREAM_FRESH)
@@ -1844,6 +1846,53 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         print('dashboard: Time set to %s by %s from %s' % (body['time'], user, self.client_address[0]), file=sys.stderr, flush=True)
         self.reply(200, 'kept')
 
+    def plugin_dismiss(self):
+        """POST /plugin-dismiss {file, line}: the Plugin problems pane's Dismiss. The first line of file that is line,
+        whole, is removed; every other line stays. Same checks and order as /answer. file must be a plugin-bugs.md the
+        Board read (the Health part of data.js names it), so no other file can be written; nothing is filed and gh
+        is not run."""
+        if not self.own_page():
+            return self.send_error(403)
+        user = self.authed()
+        if not user:
+            return self.reply(401, 'log in to dismiss a note')
+        body = self.json_body(MAX_DISMISS_BODY)
+        if body is None:
+            return None
+        if set(body) != {'file', 'line'} or not all(isinstance(body[k], str) for k in body) \
+                or not body['line'].startswith('- ') or '\n' in body['line'] or '\r' in body['line']:
+            return self.send_error(400)
+        try:
+            with open(os.path.join(self.directory, 'data.js'), encoding='utf-8') as f:
+                text = f.read()
+            bugs = json.loads(text[text.index('{'):text.rindex('}') + 1])['panels']['health']['data']['pluginBugs']
+            files = {b['file'] for b in bugs if isinstance(b, dict) and isinstance(b.get('file'), str)}
+        except (OSError, ValueError, KeyError, TypeError):
+            files = set()
+        path = body['file']
+        if path not in files:
+            return self.reply(409, 'the Board did not read plugin problems from that file; nothing was changed')
+        tmp = '%s.dismiss.%d' % (path, threading.get_ident())
+        try:
+            with open(path, encoding='utf-8') as f:
+                lines = f.read().splitlines(keepends=True)
+            at = next((i for i, x in enumerate(lines) if x.rstrip('\n') == body['line']), None)
+            if at is None:
+                return self.reply(409, 'that note is no longer in the file; nothing was changed')
+            del lines[at]
+            with open(tmp, 'w', encoding='utf-8') as f:
+                f.writelines(lines)
+            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+            os.replace(tmp, path)
+        except (OSError, ValueError) as e:  # ValueError: a file that is not UTF-8
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            return self.reply(500, 'the note could not be removed: %s' % (getattr(e, 'strerror', None) or e))
+        print('dashboard: plugin problem dismissed by %s from %s in %s' % (user, self.client_address[0], path), file=sys.stderr, flush=True)
+        self.reply(200, 'dismissed')
+
     def restart_collector(self):
         """POST /restart: restarts the collector job through dashboard.sh --restart, which kills this server
         too. Same checks and order as /answer; no body is read and the command is fixed. The reply goes out before
@@ -2432,6 +2481,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.users_post(self.path)
         if self.path == '/time':
             return self.set_time()
+        if self.path == '/plugin-dismiss':
+            return self.plugin_dismiss()
         if self.path != '/answer' or not self.own_page():
             return self.send_error(403)
         user = self.authed()

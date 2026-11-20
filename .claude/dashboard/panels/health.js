@@ -358,8 +358,9 @@ window.DASH_APP.panel({
       const link = h('a', null, b.file);
       if (typeof b.url === 'string' && b.url) { link.href = b.url; link.target = '_blank'; link.rel = 'noopener'; }
       check(`Plugin problems${of}`, ctx.chip(`${b.count} noted`, 'warn'), `${b.count} plugin ${b.count === 1 ? 'problem' : 'problems'} noted in `, link).next =
-        'Read each note in the file. Then fix it, or file it as an issue in the conveyor-belt repo.';
+        'Read each note under Plugin problems. Then fix it, or file it as an issue in the conveyor-belt repo. Then dismiss it.';
     });
+    const pane = pluginPane(bugs, ctx);
     // Failing first (faults, then warnings, each in the order drawn), each with its next step before its output; the
     // rest fold into "N checks fine". While a check here is a fault or another panel could not read its data
     // (ctx.faults()), the Data row and its restart stay out of the fold, where the texts that name the restart send
@@ -387,6 +388,7 @@ window.DASH_APP.panel({
     rows.forEach((row) => { const o = row.dd.querySelector(':scope > details.output'); if (o && opened.has(row.dt.dataset.check)) o.open = true; });
     const out = [];
     if (failing.length) out.push(list(failing));
+    if (pane) out.push(pane);
     if (fine.length) {
       const det = h('details', 'checks-fine');
       det.append(h('summary', null, `${fine.length} ${fine.length === 1 ? 'check' : 'checks'} fine`), list(fine));
@@ -417,6 +419,45 @@ window.DASH_APP.panel({
     });
   },
 });
+// The Plugin problems pane (issue 1042): each note of each Foreman's plugin-bugs.md is a row with its time, card and
+// text, and Dismiss, which removes that one line from the file (POST plugin-dismiss) and files nothing. With no note,
+// there is no pane (null). A note dismissed here stays out until the next snapshot no longer has it, so it does not
+// come back for a minute; one that failed says why in its row until the next try.
+const PLUGIN_DISMISSED = new Set();
+const PLUGIN_FAILED = new Map();
+function pluginPane(bugs, ctx) {
+  const h = ctx.h, key = (n) => `${n.file}\n${n.line}`;
+  const all = bugs.flatMap((b) => (Array.isArray(b.notes) ? b.notes : [])
+    .filter((n) => n && typeof n.line === 'string' && typeof n.text === 'string').map((n) => ({ ...n, file: b.file })));
+  const now = new Set(all.map(key));
+  PLUGIN_DISMISSED.forEach((k) => { if (!now.has(k)) PLUGIN_DISMISSED.delete(k); });
+  const notes = all.filter((n) => !PLUGIN_DISMISSED.has(key(n)));
+  if (!notes.length) return null;
+  const pane = h('section', 'plugin-problems'), ul = h('ul', 'rows');
+  notes.forEach((n) => {
+    const li = h('li', 'row'), head = h('div', 'row-main'), meta = h('p', 'row-meta'), k = key(n);
+    head.append(h('span', 'title', n.text));
+    meta.append(h('span', null, n.at ? ctx.when(n.at) : 'time not noted'), h('span', null, n.card && n.card !== '-' ? `card ${n.card}` : 'no card'));
+    const off = h('button', 'btn btn-quiet', 'Dismiss');
+    off.type = 'button'; off.dataset.act = 'plugin-dismiss';
+    off.addEventListener('click', () => {
+      off.disabled = true;
+      PLUGIN_FAILED.delete(k);
+      ctx.post('plugin-dismiss', { file: n.file, line: n.line })
+        .then((r) => r.text().then((t) => [r.ok, String(t).trim() || `the Board answered ${r.status}`]), () => [false, 'the Board did not answer'])
+        .then(([ok, said]) => {
+          if (ok) PLUGIN_DISMISSED.add(k); else PLUGIN_FAILED.set(k, `Not dismissed: ${said.replace(/\.$/, '')}.`);
+          ctx.redraw();
+        });
+    });
+    li.append(head, meta, off);
+    if (PLUGIN_FAILED.has(k)) li.append(h('p', 'warn-note', PLUGIN_FAILED.get(k)));
+    ul.append(li);
+  });
+  pane.append(h('h3', 'group-title', 'Plugin problems'),
+    h('p', 'row-meta', 'The Foreman noted these problems in Conveyor. Dismiss removes a note from its file. It does not file an issue.'), ul);
+  return pane;
+}
 // Work now: what keeps the Conveyor host busy now, as the page server reads it (GET work: `conveyor.sh work` of each
 // record): the busy processes by card and step, the heaviest first, a closed card's marked left over with the command
 // that stops them, then the busy work no card owns. Read when the owner first opens it and on "Read again", never with

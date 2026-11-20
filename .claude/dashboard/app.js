@@ -1161,8 +1161,8 @@
     if (r && (r.status === 401 || (r.redirected && /\/login$/.test(String(r.url || ''))))) window.location.assign('/login');
     return r;
   }
-  // The page's only writes: an answer to an open decision, a control action, the collector restart and the Time set in
-  // Customize, all to its own host.
+  // The page's only writes: an answer to an open decision, a control action, the collector restart, the Time set in
+  // Customize and the Dismiss of a plugin problem, all to its own host.
   function post(path, body) {
     return window.fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(goLogin);
   }

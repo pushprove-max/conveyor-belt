@@ -209,6 +209,10 @@ cursor goes to the heading of that group.
 - **Flaky tests** and **Kept off card tests** in Health list each test case or file on its own row under **Show
   output**. A row shows the name, a count ("3 re-runs", "Kept off") and the issue filed for it, as a link,
   when there is one.
+- **Plugin problems** in Health shows when a Foreman noted a problem in Conveyor itself, in `plugin-bugs.md` in its
+  folder. Each note is one row: the time, the card and what the Foreman saw. Fix the problem, or file it as an issue
+  in the repository of Conveyor. Then click **Dismiss** to remove that note from `plugin-bugs.md`. Dismiss does not file
+  an issue, and it keeps the other notes. When no note is left, the pane goes away.
 - A Health row whose error is one line says what failed in a short sentence, for example "The Board could not get
   main from GitHub." Click **Raw error** to read the error as it came, with **Copy output** to copy it.
 - **Work now**, at the foot of Health, shows what keeps the Conveyor machine busy now. Open it to read the machine.

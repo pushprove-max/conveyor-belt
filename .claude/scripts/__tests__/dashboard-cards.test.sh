@@ -539,11 +539,17 @@ answer "$P" "$P_URL" 1794000000 "$C" "$C_URL" 0
 run
 q '.panels.machine.data.foremen == [{projects: ["sample", "widgetshop"], group: true, held: true, since: "2026-11-12T08:00:00Z", lastWakeAt: "2026-11-12T09:30:00Z",
   waiting: ["Conveyor: widgetshop: needs the owner'"'"'s yes: #5", "Limit: 91% of the week used"], pluginBugs: 2, pluginBugsFile: "'"$FM"'/plugin-bugs.md",
-  pluginBugsUrl: "plugin-bugs/sample.txt"}]' "a grouped Foreman is one line with both its projects (a name no record has passed over), its claim, its last wake, what waits on it and the plugin problems it noted"
+  pluginBugsUrl: "plugin-bugs/sample.txt", pluginNotes: [
+    {at: "2026-11-12T09:00:00Z", card: "#13", text: "a · evidence: -", line: "- 2026-11-12T09:00:00Z · card #13 · a · evidence: -"},
+    {at: "2026-11-12T09:10:00Z", card: "-", text: "b · evidence: -", line: "- 2026-11-12T09:10:00Z · card - · b · evidence: -"}]}]' "a grouped Foreman is one line with both its projects (a name no record has passed over), its claim, its last wake, what waits on it and the plugin problems it noted"
 # Bug it catches: the notes were under the first project alone, so picking widgetshop (the project filter keeps the
 # rows whose repo it names) hid its Foreman's notes. Each project of the group has them.
 q '.panels.health.data.pluginBugs | map(.repo) == ["sample", "widgetshop"] and all(.projects == ["sample", "widgetshop"] and .count == 2
   and .file == "'"$FM"'/plugin-bugs.md" and .url == "plugin-bugs/sample.txt")' "Health has the plugin problems the Foreman noted, under each of its projects, with the Board's copy"
+# Issue 1042: the Plugin problems pane lists each note with its time, card and text. Bug it catches: Health had only
+# the count, so the pane had no note to show or to dismiss.
+q '.panels.health.data.pluginBugs[0].notes | map([.at, .card, .text]) == [["2026-11-12T09:00:00Z", "#13", "a · evidence: -"], ["2026-11-12T09:10:00Z", "-", "b · evidence: -"]]' \
+  "Health has each note the Foreman noted, with its time, card and text"
 # Bug it catches: the link was file://, which a browser does not open from the https Board; the copy is served beside the page.
 cmp -s "$FM/plugin-bugs.md" "$OUT/plugin-bugs/sample.txt" || fail "the Board's folder has a copy of the notes, which the page links to"
 rm -f "$FM/plugin-bugs.md"
