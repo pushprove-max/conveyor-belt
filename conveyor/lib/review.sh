@@ -95,7 +95,7 @@ codexreview() { # <worktree> <brief> <instructions> <model> <effort>: one Codex 
   rm -f "$1.review.new"; sec=$SECONDS; codexsb read-only
   (cd "$1" && codexargs && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" codex exec --json "${CODEX_SB[@]}" "${CODEX_PX[@]}" -m "$model" \
     -c "model_reasoning_effort=\"$effort\"" -o "$1.review.new" - <<<"$3"$'\n\n'"$2" > "$1.events" 2> "$1.err" 8>&-) &
-  watch $! "$1.events" "$1.live" review "$model"; rc=$?; sec=$((SECONDS - sec))
+  watch $! "$1.events" "$1.live" review "$model" "" "$effort"; rc=$?; sec=$((SECONDS - sec))
   # With no Codex sandbox (codexsb()), a write the review made is undone: the worktree is put back to the change it was given.
   [ "${CODEX_SB[0]}" = -s ] || { git -C "$1" restore -q --worktree -- . && git -C "$1" clean -fdq; } || { echo "the worktree could not be put back after the review"; return 1; }
   # The running total its session file holds: the tokens of a review that ended before its turn did.
@@ -174,7 +174,7 @@ opencodereview() { # <worktree> <brief> <instructions> <model> <effort>
   p=$(noshell "$1" "$2" "$3") || { echo "$p"; return 1; }
   sec=$SECONDS
   (ocrun "$1" "$4" "$5" <<<"$p"$'\n\n'"$2" > "$1.events" 2> "$1.err" 8>&-) &
-  watch $! "$1.events" "$1.live" review "$4"; rc=$?; sec=$((SECONDS - sec)); rm -rf "$1.rv"
+  watch $! "$1.events" "$1.live" review "$4" "" "$5"; rc=$?; sec=$((SECONDS - sec)); rm -rf "$1.rv"
   git -C "$1" restore -q --worktree -- . && git -C "$1" clean -fdq || { echo "the worktree could not be put back after the review"; return 1; }
   f=$(jq -cRn --arg m "$4" --arg e "$5" --argjson s "$sec" "$OCREVIEWREAD" "$1.events" 2>/dev/null | tail -n 1)
   jq -e objects <<<"$f" >/dev/null 2>&1 || f=$(jq -cn --arg m "$4" --arg e "$5" --argjson s "$sec" '{model: $m, effort: $e, sec: $s, unread: "the review output could not be read"}')
@@ -211,7 +211,7 @@ claudereview() { # <worktree> <brief> <instructions> <model> <effort>
   (cd "$1" && proxyenv && acctrun "$d" && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" claude -p --model "$4" --effort "$5" --permission-mode default --tools Read,Grep,Glob \
     --setting-sources "" --strict-mcp-config --add-dir "$1.rv" --no-session-persistence --output-format stream-json --verbose \
     <<<"$p"$'\n\n'"$2" > "$1.events" 2> "$1.err" 8>&-) &
-  watch $! "$1.events" "$1.live" review "$4"; rc=$?; sec=$((SECONDS - sec)); rm -rf "$1.rv"
+  watch $! "$1.events" "$1.live" review "$4" "" "$5"; rc=$?; sec=$((SECONDS - sec)); rm -rf "$1.rv"
   git -C "$1" restore -q --worktree -- . && git -C "$1" clean -fdq || { echo "the worktree could not be put back after the review"; return 1; }
   f=$(jq -cRn --arg m "$4" --arg e "$5" --argjson s "$sec" "$SESSIONREAD" "$1.events" 2>/dev/null | tail -n 1)
   jq -e 'objects | has("ok")' <<<"$f" >/dev/null 2>&1 \
@@ -371,7 +371,7 @@ judgecall() { # <worktree> <instructions> <the brief and the findings>
   jqget "$s" model model effort effort agent agent || model='' effort='' agent=''
   d=$(seatwait judge "$s" "$1" "${CALLSTEP:-review}") || { jq -cn --arg m "$model" --arg r "$d" '{model: $m, failed: $r}'; return 1; } # the CLI the seat names, never another; one gone for a moment is waited for
   rm -f "$1.judge" "$1.judge.events"
-  jq -cn --arg m "$model" --arg s "${CALLSTEP:-review}" --arg a "${CALLACT:-the judge reads the findings}" '{step: $s, at: (now | todate), last: null, turns: 0, model: $m, action: $a}' > "$1.live.tmp" && mv -f "$1.live.tmp" "$1.live"
+  jq -cn --arg m "$model" --arg e "$effort" --arg s "${CALLSTEP:-review}" --arg a "${CALLACT:-the judge reads the findings}" '{step: $s, at: (now | todate), last: null, turns: 0, model: $m, action: $a} + (if $e == "" then {} else {effort: $e} end)' > "$1.live.tmp" && mv -f "$1.live.tmp" "$1.live"
   sec=$SECONDS
   if [ "$agent" = claude ]; then
     # The card's review account, else its builder's; with no shell, the staged change is a file given to it alone.

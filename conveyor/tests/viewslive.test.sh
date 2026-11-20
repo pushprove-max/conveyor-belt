@@ -145,11 +145,13 @@ t_livegated() { livestart
   printf '%s\n' ". \"\$STUB/hold.sh\"; mkdir -p \"${f%/*}\"; echo '{\"type\":\"thread.started\",\"thread_id\":\"0aa1-b2\"}'" \
     "echo '{\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1000000,\"cached_input_tokens\":400000,\"output_tokens\":500}}}}' > '$f'; hold review" > "$STUB/review-cmd"
   echo "$GO" > "$STUB/review.1"; gatestart
+  # The effort each step runs at (the seats' medium) is on the belt beside its model (issue 1085): session1() and
+  # codexreview() give it to watch(), which writes it on the live record.
   held build '.action == "Bash: npm test"'
-  [ "$(snap '.belt[0] | [.step, .live.action, .tokens.claude, .usd]')" = '["build","Bash: npm test",1000000,2]' ] || fail "the snapshot of a held build: $(snap '.belt[0]')"
+  [ "$(snap '.belt[0] | [.step, .live.action, .tokens.claude, .usd, .model, .effort]')" = '["build","Bash: npm test",1000000,2,"claude-sonnet-5-5","medium"]' ] || fail "the snapshot of a held build: $(snap '.belt[0]')"
   letgo; held review '.usage.input == 600000'
   # Its dollars are its running total's beside the build's recorded line (0.0002): that of the stub's result.
-  [ "$(snap '.belt[0] | [.step, .tokens.codex, .usd, .done.usd]')" = '["review",600500,1.2452,0.0002]' ] || fail "the snapshot of a held review: $(snap '.belt[0]')"
+  [ "$(snap '.belt[0] | [.step, .tokens.codex, .usd, .done.usd, .model, .effort]')" = '["review",600500,1.2452,0.0002,"gpt-6.1-sol","medium"]' ] || fail "the snapshot of a held review: $(snap '.belt[0]')"
   letgo; wait $run || fail "the run exited non-zero: $(cat "$T/$CASE/loop.out")"
   [ ! -e "$f" ] || fail "the review that ended left its session file"
 }

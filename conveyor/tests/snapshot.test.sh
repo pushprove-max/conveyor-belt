@@ -122,11 +122,13 @@ t_snapfixlive() {
   # Its test run failed and its fix runs; card b's session fits it onto main after its GO, with no test run.
   { snapfixlive_line "$a" test fail 11:13; snapfixlive_line "$a" start ok 11:14 '{"of": "fix"}'
     snapfixlive_go "$b"; snapfixlive_line "$b" start ok 10:41 '{"of": "fix"}'; } >> "$ST/cards.jsonl"
-  echo '{"step": "fix", "at": "2026-11-17T11:14:11Z", "last": null, "turns": 2, "model": "claude-x"}' > "$T/$CASE/cards/$a.live"
+  # Issue 1085: the effort the live record names goes with its model, for the Board to show beside it; a record that
+  # names none gives null (the Board shows the model alone).
+  echo '{"step": "fix", "at": "2026-11-17T11:14:11Z", "last": null, "turns": 2, "model": "claude-x", "effort": "high"}' > "$T/$CASE/cards/$a.live"
   echo '{"step": "fix", "at": "2026-11-17T10:41:05Z", "last": null, "turns": 1, "model": "claude-x"}' > "$T/$CASE/cards/$b.live"
-  s=$(loop snapshot --fresh | jq -c '[.belt[] | [.card[-1:], .step, .stepAt, .track.since, .review]]')
-  [ "$s" = '[["8","fix","2026-11-17T11:14:11Z","2026-11-17T11:14:11Z",null],["9","fix","2026-11-17T10:41:05Z","2026-11-17T10:41:05Z",null]]' ] \
-    || fail "a fix after failed tests, and one that fits a card onto main after its GO: $s"
+  s=$(loop snapshot --fresh | jq -c '[.belt[] | [.card[-1:], .step, .stepAt, .track.since, .review, .model, .effort]]')
+  [ "$s" = '[["8","fix","2026-11-17T11:14:11Z","2026-11-17T11:14:11Z",null,"claude-x","high"],["9","fix","2026-11-17T10:41:05Z","2026-11-17T10:41:05Z",null,"claude-x",null]]' ] \
+    || fail "a fix after failed tests, and one that fits a card onto main after its GO (with its model's effort when its live record names one): $s"
 }
 
 # Bug (#839): the judge's check of a test file for hollow cases (testrun.sh, judgecall()) runs after the card's build

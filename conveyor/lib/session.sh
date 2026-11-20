@@ -127,15 +127,15 @@ holds() { # <worktree>: when it last changed, epoch seconds: the newest of its f
   { find "$1" ${g:+"$g/HEAD" "$g/logs/HEAD"} -printf '%T@\n%C@\n' 2>/dev/null; git -C "$1" log -1 --format=%ct 2>/dev/null; } \
     | awk -v n="$EPOCHSECONDS" '{t = int($1)} t <= n && t > m {m = t} END {print m + 0}' # a time after now is a wrong clock, not progress
 }
-watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the program that runs it: codex for a Codex build, fix or rebase]
+watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the program that runs it: codex for a Codex build, fix or rebase] [the effort it runs at]
   local pid=$1 f=$2 out=$3 st new who rc=0 timer n have=0 size=0 now logs roll='' rsize=0 wt=${3%.live} was='' seen=$EPOCHSECONDS at lines=0 rhave=0 rn cs dn cx=false wn
   [ "${6:-}" != codex ] || cx=true
   # rm only when there is a file to remove (#532: most steps have none).
   [ "$4" = test ] || { [ ! -e "$wt.stalled" ] && [ ! -L "$wt.stalled" ]; } || { [ ! -s "$wt.stalled" ] || was=$(<"$wt.stalled"); rm -f "$wt.stalled"; }
-  st=$(jq -cn --arg s "$4" --arg m "${5:-}" --arg w "$was" --slurpfile tl <([ "$4" != test ] || cat "$wt.testlist" 2>/dev/null) --arg b "${TEST_BEFORE:-}" '{step: $s, at: (now | todate), last: null, turns: 0}
+  st=$(jq -cn --arg s "$4" --arg m "${5:-}" --arg e "${7:-}" --arg w "$was" --slurpfile tl <([ "$4" != test ] || cat "$wt.testlist" 2>/dev/null) --arg b "${TEST_BEFORE:-}" '{step: $s, at: (now | todate), last: null, turns: 0}
       + (if $s == "test" then {progress: (now | todate), files: {run: 0, of: null}, tests: null} + (if $tl[0] | type == "object" then {list: $tl[0]} else {} end)
           + (if $b == "" then {} else {before: ($b | tonumber)} end) else {} end)
-      + (if $m == "" then {} else {model: $m} end) + (if $w == "" then {} else {stalled: $w} end)') \
+      + (if $m == "" then {} else {model: $m} end) + (if $e == "" then {} else {effort: $e} end) + (if $w == "" then {} else {stalled: $w} end)') \
     && printf '%s\n' "$st" > "$out"
   while :; do
     sleep "$LIVE" > /dev/null 8>&- & timer=$!
@@ -461,7 +461,7 @@ apitries() { # <worktree> <step> <output file> <command ...>
     read -r w at <<<"$(jq -rn --argjson p "$API_PAUSE" --argjson t "$try" '($p * pow(2; $t)) as $w | "\($w) \(now + $w | floor)"')"
     try=$((try + 1)); used=$(jq -c 'del(.step)' "$wt.spent")
     jq -cn --arg s "$st" --arg a "waiting: the model API refused ($api); trying again at $(p_date "@$at" +%H:%M)" --slurpfile u "$wt.spent" \
-      '{step: $s, at: (now | todate), last: null, turns: 0, model: $u[0].model, action: $a}' > "$wt.live.tmp" && mv -f "$wt.live.tmp" "$wt.live"
+      '{step: $s, at: (now | todate), last: null, turns: 0, model: $u[0].model, action: $a} + (if ($u[0].effort | type) == "string" and $u[0].effort != "" then {effort: $u[0].effort} else {} end)' > "$wt.live.tmp" && mv -f "$wt.live.tmp" "$wt.live"
     sleep "$w"
   done
 }
@@ -579,7 +579,7 @@ session1() {
   while :; do
     sec=$SECONDS
     builder "$1" "$2" "$model" "$effort" "$dir" "$agent" & bp=$!
-    watch $bp "$1.out" "$1.live" "${3:-build}" "$model" "$agent"; rc=$?; sec=$((SECONDS - sec))
+    watch $bp "$1.out" "$1.live" "${3:-build}" "$model" "$agent" "$effort"; rc=$?; sec=$((SECONDS - sec))
     # A Codex session cut off before its turn completed: its running total, from the session file Codex keeps (read
     # and removed, as a review's is).
     run=''; [ "$agent" != codex ] || { roll=$(rollout "$1.out"); [ -z "$roll" ] || { run=$(grep '"token_count"' "$roll" | tail -n 1 | jq -c '.payload.info.total_token_usage | objects' 2>/dev/null); rm -f "$roll"; }; }

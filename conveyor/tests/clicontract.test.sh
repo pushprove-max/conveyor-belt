@@ -107,9 +107,11 @@ t_cxjudgebox() {
   cread 'sed -i "2a printf \"%s\\\\n\" \"\$*\" >> \"\$STUB/codex-args\"" "$STUB/codex" && echo "F1 DECLINE: no" > "$STUB/review.1" \
     && echo "echo x > wrote.txt" > "$STUB/review-cmd" && w=$CONVEYOR_CARDS/c7 && git -C "$R" worktree add -q --detach "$w" \
     && CALLSEAT="{\"agent\":\"codex\",\"model\":\"x\",\"effort\":\"low\"}" CONVEYOR_BENCH_BOX=1 REVIEW_TIMEOUT=60 judgecall "$w" instructions findings > /dev/null \
-    && cat "$STUB/codex-args" && ls "$w"' || fail "the judge failed: $(cat "$T/$CASE/out")"
+    && cat "$STUB/codex-args" && ls "$w" && jq -c "{judgelive: {model, effort}}" "$w.live"' || fail "the judge failed: $(cat "$T/$CASE/out")"
   grep -q -- '^exec --json --dangerously-bypass-approvals-and-sandbox ' "$T/$CASE/out" && ! grep -q -- ' -s ' "$T/$CASE/out" \
     || fail "the judge in a benchmark's container kept Codex's sandbox: $(cat "$T/$CASE/out")"
+  # Issue 1085: the judge's live record names the effort it runs at, which the Board shows beside its model.
+  grep -qx '{"judgelive":{"model":"x","effort":"low"}}' "$T/$CASE/out" || fail "the judge's live record lost its effort: $(cat "$T/$CASE/out")"
   ! grep -q '^wrote.txt$' "$T/$CASE/out" || fail "the unsandboxed judge's write was left in the worktree: $(cat "$T/$CASE/out")"
 }
 # Bug: a review outside a benchmark's container ran without Codex's read-only sandbox.

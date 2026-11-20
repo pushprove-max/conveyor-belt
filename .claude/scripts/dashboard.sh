@@ -45,7 +45,7 @@
 #           `retry` gave back, but those of held issues: repo, card, issue; none without a live feed), kinds (the kinds of Needs you, in order, as
 #           dashboard_needs.json beside this script lists them: kind, from, title) and entries (for each kind, every record's
 #           entries of it: repo, url, card, issue, title, reason, since).
-#   belt    cards: every open card (but a landed card whose push failed, while Landed today shows it) with its step, the time the step began, model, tokens and usd so far (reading
+#   belt    cards: every open card (but a landed card whose push failed, while Landed today shows it) with its step, the time the step began, model, its effort (null when not known), tokens and usd so far (reading
 #           false and usd null before any token is read), its finished reviews, its track (the six steps Build, Review,
 #           Fix, Test, Land, Push, with every recorded step as its detail) and its times: start (the first pick-up
 #           of its work), pickedAt, priorSec and totalSec, as the snapshot gives them. No time is estimated.

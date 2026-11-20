@@ -163,7 +163,8 @@
         // One unwrapped piece of the meta row, dollars and tokens together a held width (app.css, .live-cost): it counts on as refreshes come.
         // A proof run that waits for a test slot (its live action, testrun.sh) runs no tests yet.
         const slotWait = c.step === 'proof' && c.live && typeof c.live.action === 'string' && c.live.action.startsWith('waiting for a test slot');
-        const model = ctx.modelName(c.model) || (slotWait ? 'waiting for a test slot' : c.step === 'tests' || c.step === 'proof' ? 'running tests' : 'no AI model in this step');
+        // The effort the step runs at beside its model, as the seat lines name it (board.js seatText()); none known, the model alone.
+        const model = (c.model ? `${ctx.modelName(c.model)}${typeof c.effort === 'string' && c.effort ? ` at ${c.effort}` : ''}` : '') || (slotWait ? 'waiting for a test slot' : c.step === 'tests' || c.step === 'proof' ? 'running tests' : 'no AI model in this step');
         if (redo(meta, [c.repo, model])) meta.replaceChildren(ctx.tag(c.repo), h('span', null, model), h('span', 'live-cost'));
         // The cost is the same node from one change to the next: the dollars are drawn again only when they changed (so
         // they count on from the figure shown), the tokens' text is set in place.

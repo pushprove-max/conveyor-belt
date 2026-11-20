@@ -88,6 +88,20 @@ test('a new model name redraws a card whose part is as it was, when another card
   assert.ok(meta().includes('Sol (proxy)'), `card A shows the new model name: ${meta()}`);
 });
 
+// Bug it catches (issue 1085): a running card showed its step's model alone, so with Pick settings giving each seat its
+// own effort the belt did not say how the step runs. A card with no effort known still shows the model alone.
+test('a running card shows the effort beside its model, and the model alone when no effort is known', () => {
+  const w = boot();
+  const data = full();
+  Object.assign(data.panels.belt.data.cards.find((c) => c.card === 'c4-5'), { model: 'claude-opus-5-5', effort: 'high' });
+  deliver(w, data);
+  const meta = (key) => row(w, key).querySelector('.row-meta').textContent;
+  // The fixture's prices give this model no display name, so the Board names it by its ID.
+  assert.ok(meta('widgetshop:c4-5').includes('claude-opus-5-5 at high'), `the effort beside the model: ${meta('widgetshop:c4-5')}`);
+  assert.ok(!/ at /.test(meta('sample:c3-63')), `no effort known, the model alone: ${meta('sample:c3-63')}`);
+  assert.ok(meta('sample:c3-63').includes('gpt-x'), `the model is still shown: ${meta('sample:c3-63')}`);
+});
+
 // Bug it catches: each card's timeline and its earlier attempts were built at every change, though "Every step" was
 // closed; and an open one must still follow each change with the keyboard where it was.
 test('"Every step" holds no steps while closed, draws them and its earlier attempts on open, and follows a change while open', () => {

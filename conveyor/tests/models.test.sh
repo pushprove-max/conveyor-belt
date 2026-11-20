@@ -62,9 +62,11 @@ t_claudereview() {
   [ "$(loop health | jq -c '[.models.codex, .efforts.codex]')" = '["claude-opus-5-5","max"]' ] || fail "health does not name the Claude reviewer: $(loop health)"
   claude_stub
   # The two reviews of a card, called alone (rvcall): a NO-GO, then a GO after a fix round.
-  echo "$NOGO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
+  echo "$NOGO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"; : > "$STUB/keep-live"
   out=$(rvcall 7 fix)
   [ ! -e "$STUB/codex-ran" ] || fail "a Claude reviewer ran Codex"
+  # Issue 1085: its live record names the effort it runs at, which the Board shows beside its model.
+  [ "$(jq -c '{model, effort}' "$STUB/live.1" 2>&1)" = '{"model":"claude-opus-5-5","effort":"max"}' ] || fail "the Claude review's live record lost its effort: $(cat "$STUB/live.1" 2>&1)"
   [ "$(sed -n '2p;4p' <<<"$out" | tr '\n' ,)" = 'rc=0 NO-GO,rc=0 GO,' ] \
     && [ "$(sed -n '1p;3p' <<<"$out" | jq -r '"\(.model) \(.effort)"' | sort -u)" = 'claude-opus-5-5 max' ] || fail "a Claude reviewer's NO-GO and GO were not read: $out"
   [ "$(sed -n '1p;3p' <<<"$out" | jq -c '[.tokens, .usage, .stats.turns]' | sort -u)" \
@@ -90,6 +92,9 @@ claude_stub() {
 #!/usr/bin/env bash
 cat > "$STUB/asked"; printf '%s\n' "$*" >> "$STUB/reviews"; n=$(wc -l < "$STUB/reviews"); cp "$STUB/asked" "$STUB/asked.$n"
 echo pwned > a.txt; echo pwned > z.txt
+# With $STUB/keep-live, the review's live record (<worktree>.live), copied once watch() has written it: watch() starts
+# beside this process and removes the record as the review ends, so it is read here, while the review runs.
+[ ! -f "$STUB/keep-live" ] || { i=0; while [ ! -s "$PWD.live" ] && [ $i -lt 100 ]; do i=$((i + 1)); sleep 0.05; done; cp "$PWD.live" "$STUB/live.$n"; }
 f=$(grep -o 'the file [^ ]*staged\.diff' "$STUB/asked" | cut -d' ' -f3); cp "$f" "$STUB/staged.$n" 2>/dev/null
 f=$(grep -o 'are in the folder [^ ]*/rounds' "$STUB/asked" | cut -d' ' -f5); [ -z "$f" ] || cp "$f/1.diff" "$STUB/fix.$n"
 [ ! -f "$STUB/review-bare" ] || { rm "$STUB/review-bare"; echo '{"type":"result","is_error":false,"result":"Review interrupted"}'; exit 0; }
@@ -211,10 +216,11 @@ t_opencodereview() {
   # finished is a turn with its usage and cost, and its tool call is the action. A poll: the record is there only
   # while the review runs, which the stub holds after its first step until the case has read it.
   wait_until "jq -e '.step == \"review\" and .turns == 1' '$wt.live'" || { : > "$STUB/go"; wait $run; fail "the live record never counted the OpenCode review's first step: $(cat "$wt.live" 2>/dev/null)"; }
-  live=$(jq -c '{model, turns, action, usage}' "$wt.live")
+  # Its effort too (issue 1085): the Board shows it beside the model of the running step.
+  live=$(jq -c '{model, effort, turns, action, usage}' "$wt.live")
   : > "$STUB/go"; wait $run || fail "the reviews exited non-zero: $(cat "$STUB/out")"
-  [ "$live" = '{"model":"opencode:prov/vendor/m-1","turns":1,"action":"read","usage":{"input":100,"write":50,"write1h":0,"read":1000,"output":8,"cost":0.25}}' ] \
-    || fail "the live record of an OpenCode review lost its turns, action or usage: $live"
+  [ "$live" = '{"model":"opencode:prov/vendor/m-1","effort":"high","turns":1,"action":"read","usage":{"input":100,"write":50,"write1h":0,"read":1000,"output":8,"cost":0.25}}' ] \
+    || fail "the live record of an OpenCode review lost its effort, turns, action or usage: $live"
   [ ! -e "$STUB/codex-ran" ] && [ ! -e "$STUB/sessions" ] || fail "an OpenCode reviewer ran Codex or Claude"
   out=$(cat "$STUB/out")
   [ "$(sed -n '2p;4p' <<<"$out" | tr '\n' ,)" = 'rc=0 NO-GO,rc=0 GO,' ] \

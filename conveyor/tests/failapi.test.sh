@@ -37,6 +37,8 @@ t_apierror() {
   # While it waited, the card's live record said why and when it tries again.
   [ "$(wc -l < "$STUB/waits")" = 1 ] && jq -e '.step == "build" and (.action | test("^waiting: the model API refused \\(403 Cloudflare\\); trying again at [0-2][0-9]:[0-5][0-9]$"))' "$STUB/waits" >/dev/null \
     || fail "the waiting card's live record does not say what it waits for and until when: $(cat "$STUB/waits" 2>&1)"
+  # Issue 1085: it keeps the effort of the try that was refused, which the Board shows beside the model.
+  jq -e '.effort == "medium"' "$STUB/waits" >/dev/null || fail "the waiting card's live record lost its effort: $(cat "$STUB/waits" 2>&1)"
   # What the refused try used is on the build's record with the try that worked (4 and 35 tokens).
   [ "$(head -n 1 "$T/$CASE/run.out" | jq -r '[.tokens.claude, .usage.input, .usage.output] | join(" ")')" = "39 13 6" ] || fail "the refused try's tokens are not on the build's record: $(cat "$T/$CASE/run.out")"
   # Refused at every try: the session fails after the fifth, naming the error, with the API's own words under it.
