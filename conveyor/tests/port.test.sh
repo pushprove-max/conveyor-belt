@@ -16,8 +16,8 @@ AGAIN='if grep -q "^# Landing conflict" "$STUB/brief"; then echo TWO > "$R/a.txt
 # rebuild starts from the card's stale tree, or without the card's patch and the conflict message; its result lands
 # unreviewed, or over the other change; a card is rebuilt and ported more than once; a NO-GO on the review after the rebuild
 # gets a fix round instead of landing with follow-ups; a card with no conflict runs an extra session. Each kind is a
-# case of its own on a main of its own (rebase, rebasetwice, rebaseclean, rebasenogo, rebasebig, rebaseempty), so they
-# run side by side.
+# case of its own on a main of its own (rebase, rebasetwice, rebasebig, rebaseempty), so they run side by side;
+# rebasebig's rebuild also gets the NO-GO, and a card with no conflict is keptunread's card built from nothing.
 # rebasesetup <issue>: a fresh main with that one issue, every review a GO; the build adds a line, and its rebuild
 # after a landing conflict ($STUB/rebuild) keeps what it was handed.
 rebasesetup() {
@@ -137,8 +137,9 @@ t_resumeport() {
 
 # Bug: the rebuild of a card whose diff is larger than a prompt may be fails at once with "Prompt is too
 # long", and the card is blocked. The session here refuses a prompt of 1 MB; the card's diff is 3 MB.
+# The review after the rebuild is a last review: its NO-GO lands the card with its finding filed, with no fix round.
 t_rebasebig() {
-  rebasesetup 11
+  rebasesetup 11; echo "$NOGO" > "$STUB/review.2"
   cat > "$STUB/build" <<'EOF'
 [ "$(wc -c < "$STUB/brief")" -lt 1000000 ] || { echo "Prompt is too long" >&2; exit 1; }
 yes 'a line of a large file' | head -n 140000 > big.txt
@@ -148,8 +149,10 @@ else echo eight >> a.txt; fi
 EOF
   echo 'SEVEN seventh' > "$STUB/move"
   loop run 1 >/dev/null || fail "run exited non-zero"
-  [ "$(st 'select(.issue == 11 and '"$NOMARK"') | "\(.step) \(.result)"' | tr '\n' ,)" = "picked ok,worktree ok,brief ok,build ok,review GO,test pass,rebase ok,review GO,test pass,landed ok," ] \
-    || fail "the rebuild of a card with a 3 MB diff: $(st 'select(.issue == 11) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+  [ "$(st 'select(.issue == 11 and '"$NOMARK"') | "\(.step) \(.result)"' | tr '\n' ,)" = "picked ok,worktree ok,brief ok,build ok,review GO,test pass,rebase ok,review NO-GO,test pass,landed ok," ] \
+    && [ "$(wc -l < "$STUB/sessions")" = 2 ] || fail "the rebuild of a card with a 3 MB diff, or a NO-GO after it: $(st 'select(.issue == 11) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+  [ "$(st 'select(.issue == 11 and .step == "landed") | [.sha, .followups] | tojson')" = "[\"$(git -C "$R" rev-parse HEAD)\",[100101]]" ] \
+    || fail "a NO-GO after the rebuild did not land with its follow-up: $(st 'select(.issue == 11 and .step == "landed")')"
   [ "$(cat "$STUB/patch-size")" -gt 3000000 ] && [ "$(wc -c < "$R/big.txt")" -gt 3000000 ] && [ "$(tr '\n' ' ' < "$R/a.txt")" = "SEVEN eight " ] || fail "the large card's patch file was not there for the rebuild, or its change did not land"
 }
 
@@ -157,28 +160,35 @@ EOF
 # landing met a conflict, and sat there until the owner ran `retry`. It is ported in the card with no owner action:
 # one session, one review of that port alone, the tests and the landing, which files the loop's findings again; the
 # Board shows the port as a step, not a block. A conflict after that port blocks for the owner (t_port).
-# Bug: its last NO-GO's test pass was stored nowhere (see lastsetup); here it is stored, keyed to its staged change,
-# and the port, a different change, runs its tests again; it lands alone.
+# Bug: a card that files a last NO-GO's follow-ups had no <worktree>.ready, so its test pass was stored nowhere and it
+# ran its tests again each time it came to the test step (the owner: passes are reused). Its pass is kept, keyed to
+# its staged change: the port, a different change, runs its tests again; main moving on another file during the
+# port's tests then fits it onto main with the same change, which reuses the port's pass and starts no run. It lands
+# alone, with the earlier loop's findings filed.
 t_autoport() {
   setup "[$(issue 8 2026-01-01)]"; for i in 1 2 3; do moved "${i/3/}" "$NOGO3" > "$STUB/review.$i"; done; echo "$GO" > "$STUB/review.4"
   steps() { st "select(.issue == $1 and $NOMARK) | \"\(.step) \(.result)\"" | tr '\n' ,; }
   echo 'echo two >> a.txt' > "$STUB/build"; echo 'ONE other' > "$STUB/move"
+  echo '[ "$(wc -l < "$STUB/tests")" != 2 ] || { echo b > "$R/b.txt"; git -C "$R" add b.txt; git -C "$R" commit -qm "main adds b.txt"; }' >> "$STUB/test-cmd"
   sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
   echo '[ ! -e "$PWD.port" ] || { cp "$PWD.port" "$STUB/port"; cp "$PWD.ready" "$STUB/readyatport"; }' > "$STUB/review-cmd"
   loop run >/dev/null || fail "run of #8 exited non-zero"
-  [ "$(steps 8)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review NO-GO,fix ok,review NO-GO,test pass,rebase ok,review GO,test pass,landed ok," ] \
+  [ "$(steps 8)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review NO-GO,fix ok,review NO-GO,test pass,rebase ok,review GO,test pass,test pass,landed ok," ] \
     && [ "$(wc -l < "$STUB/sessions")" = 4 ] && [ "$(wc -l < "$STUB/reviews")" = 4 ] \
     || fail "a finished loop whose landing conflicted was not ported by one session, reviewed once, tested and landed: $(steps 8)"
   [ "$(jq -c '[.tested, .alone, (.patch | length > 0)]' "$STUB/readyatport" 2>/dev/null)" = '[true,true,true]' ] \
     || fail "the card with a last NO-GO did not store its test pass, marked alone, keyed to its staged change: $(cat "$STUB/readyatport" 2>&1)"
-  [ "$(wc -l < "$STUB/tests")" = 2 ] && [ "$(st 'select(.issue == 8 and .step == "landed") | .batch')" = null ] \
-    || fail "the port, a different staged change, did not run its tests, or did not land alone: $(wc -l < "$STUB/tests") runs, $(st 'select(.issue == 8 and .step == "landed")')"
+  [ "$(wc -l < "$STUB/tests")" = 2 ] && [ "$(st 'select(.issue == 8 and .step == "test") | .reused' | tr '\n' ,)" = "null,null,true," ] \
+    && [ "$(st 'select(.issue == 8 and .step == "landed") | .batch')" = null ] \
+    || fail "the port, a different staged change, did not run its tests, its fit onto the moved main with the same change ran them again, or it did not land alone: $(wc -l < "$STUB/tests") runs, $(steps 8) $(st 'select(.issue == 8 and .step == "landed")')"
+  [ "$(cat "$R/b.txt")" = b ] && [ "$(git -C "$R" log -1 --format=%P | wc -w)" = 1 ] && [ "$(git -C "$R" log -2 --format=%s | tail -n 1)" = "main adds b.txt" ] \
+    || fail "#8 did not land alone on the main that moved: $(git -C "$R" log --oneline | head -3)"
   st 'select(.issue == 8 and .step == "rebase") | .reason' | grep -q '^rebase onto main conflicts: ' || fail "the port's step does not name the conflict"
   grep -q '^# This review is of a port alone$' "$STUB/asked" && grep -q "^The difference is the file $T/$CASE/cards/.*-8\.port\.$" "$STUB/asked" \
     && grep -qx -- '+ ONE' "$STUB/port" && grep -qx -- ' +two' "$STUB/port" || fail "the review after the port was not of the port alone: $(cat "$STUB/port" 2>&1)"
   [ "$(tr '\n' ' ' < "$STUB/closed")" = "100101 100102 100103 " ] && [ "$(st 'select(.issue == 8 and .step == "landed") | [.leftover, .followups] | tojson')" = '[true,[100104,100105,100106]]' ] \
     && [ "$(tr '\n' ' ' < "$R/a.txt")" = "ONE two " ] || fail "the port did not withdraw the follow-ups and file the loop's findings again at its landing: $(st 'select(.issue == 8 and .step == "landed")')"
-  [ "$(loop cards | jq -c '.cards[0] | [.step, (.steps | map(.step) | join(" "))]')" = '["landed","build review fix review fix review test rebase review test"]' ] \
+  [ "$(loop cards | jq -c '.cards[0] | [.step, (.steps | map(.step) | join(" "))]')" = '["landed","build review fix review fix review test rebase review test test"]' ] \
     && [ -z "$(st 'select(.step == "blocked")')" ] && [ ! -s "$ST/retried.jsonl" ] && loop check || fail "the port is not a step of the card's row, or it blocked or was retried: $(loop cards | jq -c '.cards[0]')"
 }
 
@@ -192,22 +202,6 @@ t_rebasetwice() {
   st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -q '^rebase onto main conflicts: ' || fail "a conflict after the port did not block with the conflict message"
   [ "$(git -C "$R" log -1 --format=%s)" = third ] && [ -z "$(git -C "$R" status --porcelain)" ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "a conflict after the port landed something, left main dirty or left the worktree"
   [ "$(wc -l < "$STUB/sessions")" = 3 ] && [ "$(wc -l < "$STUB/reviews")" = 3 ] || fail "a card that conflicts three times was rebuilt or ported more than once"
-}
-
-# No conflict: no extra session.
-t_rebaseclean() {
-  rebasesetup 9; echo 'echo four >> a.txt' > "$STUB/build"
-  loop run 1 >/dev/null || fail "run exited non-zero"
-  [ "$(st 'select(.issue == 9) | .step' | tr '\n' ' ')" = "picked worktree deps brief start build start review start test start landed pushed issue " ] && [ "$(wc -l < "$STUB/sessions")" = 1 ] || fail "a card with no conflict ran an extra session: $(st 'select(.issue == 9) | .step' | tr '\n' ' ')"
-}
-
-# The review after the rebuild is a last review: its NO-GO lands the card with its finding filed, with no fix round.
-t_rebasenogo() {
-  rebasesetup 10; echo "$NOGO" > "$STUB/review.2"
-  printf '%s\n' 'if grep -q "^# Landing conflict" "$STUB/brief"; then printf "FIVE\nsix\n" > a.txt' 'else echo six >> a.txt; fi' > "$STUB/build"; echo 'FIVE fifth' > "$STUB/move"
-  loop run 1 >/dev/null || fail "run exited non-zero"
-  [ "$(st 'select(.issue == 10) | "\(.step) \(.result)"' | tr '\n' ,)" = "picked ok,worktree ok,deps ok,brief ok,start ok,build ok,start ok,review GO,start ok,test pass,start ok,start ok,rebase ok,start ok,review NO-GO,start ok,test pass,start ok,filed ok,start ok,landed ok,pushed ok,issue ok," ] || fail "a NO-GO after the rebuild: $(st 'select(.issue == 10) | "\(.step) \(.result)"' | tr '\n' ,)"
-  [ "$(st 'select(.issue == 10 and .step == "landed") | [.sha, .followups] | tojson')" = "[\"$(git -C "$R" rev-parse HEAD)\",[100101]]" ] && [ "$(tr '\n' ' ' < "$R/a.txt")" = "FIVE six " ] || fail "a NO-GO after the rebuild did not land with its follow-up: $(st 'select(.issue == 10 and .step == "landed")')"
 }
 
 # Bug: a rebuild session that ends well but leaves no change blocks the card with nothing kept: the
@@ -229,8 +223,8 @@ t_rebaseempty() {
 # finding is lost; the card built after a retry is not told the blocked card's last findings or the withdrawn
 # follow-ups' findings; a kept patch that no longer applies to main is forced in, or the fallback does not say it
 # builds from nothing; a card blocked on a failed step is built again from nothing though its patch still applies.
-# Each kind is a case of its own on a main of its own (resume, resumeport, resumestep, resumeunread, resumeyes), so
-# they run side by side.
+# Each kind is a case of its own on a main of its own (resume, resumeport, resumestep, resumeyes), so they run side
+# by side.
 resumesetup() { # <issue>: a fresh main with that one issue; YES, a review's visible line; steps <issue>, its lines
   setup "[$(issue "$1" 2026-01-01)]"; YES='USER-VISIBLE: yes: guests see a new Pay button'
   steps() { st "select(.issue == $1) | \"\(.step) \(.result) \(.reason)\"" | tr '\n' ,; }
@@ -256,47 +250,34 @@ t_resume() {
 }
 
 # A failed step (here the review, tried twice) with a patch that still applies: one session that starts from the patch.
-t_resumestep() {
-  resumesetup 9; echo "$GO" > "$STUB/review.3"; echo 'exit 3' > "$STUB/review-cmd"
-  echo 'if grep -q "^# This card resumes blocked card" "$STUB/brief"; then git diff --cached --name-only > "$STUB/resumed-with"; else echo nine > n.txt; fi' > "$STUB/build"
-  loop run >/dev/null; st 'select(.issue == 9 and .step == "blocked") | .reason' | grep -q '^review 1: ' || fail "#9 was not blocked on its failed review: $(steps 9)"
-  rm "$STUB/review-cmd"; loop retry 9 >/dev/null && loop run >/dev/null || fail "run of the retried #9 exited non-zero"
-  [ "$(st 'select(.issue == 9 and '"$NOMARK"') | "\(.step) \(.result)"' | tr '\n' ,)" = "picked ok,worktree ok,brief ok,build ok,review GO,test pass,landed ok," ] && [ "$(cat "$STUB/resumed-with" 2>&1)" = n.txt ] \
-    && [ "$(cat "$R/n.txt")" = nine ] || fail "a card blocked on a failed step did not resume from its kept patch with one session: $(steps 9) $(cat "$STUB/resumed-with" 2>&1)"
-  st 'select(.issue == 9 and .step == "worktree") | .reason' | grep -q '^resumed from the kept patch of card ' && loop check || fail "the worktree line does not say the card resumed, or the records do not check: $(steps 9)"
-}
-
 # Bug (#585): retry gave back an issue while its blocked card's process was still ending. That process then wrote a
 # second blocked line after its lines were moved out, and could not keep its change, the worktree already taken.
 # Here the card's worktree line names a live process: retry refuses and names it, changing nothing; once the
 # process has ended, retry gives the issue back and the next card starts from the kept patch.
-t_retryending() {
+# GitHub does not answer for the withdrawn follow-ups while that card starts: its brief says the list may be short.
+t_resumestep() {
   local p t k before kept
-  resumesetup 11; echo 'exit 3' > "$STUB/review-cmd"; echo 'echo eleven > e.txt' > "$STUB/build"
-  loop run >/dev/null; k=$(st 'select(.issue == 11 and .step == "blocked") | "\($ENV.ST)/\(.kept)"')
-  [ -s "$k/$(st 'select(.issue == 11 and .step == "blocked") | .card').patch" ] || fail "#11 was not blocked with a kept patch: $(steps 11)"
+  resumesetup 9; echo "$GO" > "$STUB/review.3"; echo 'exit 3' > "$STUB/review-cmd"
+  echo 'if grep -q "^# This card resumes blocked card" "$STUB/brief"; then cp "$STUB/brief" "$STUB/brief.9"; git diff --cached --name-only > "$STUB/resumed-with"; else echo nine > n.txt; fi' > "$STUB/build"
+  loop run >/dev/null; st 'select(.issue == 9 and .step == "blocked") | .reason' | grep -q '^review 1: ' || fail "#9 was not blocked on its failed review: $(steps 9)"
+  k=$(st 'select(.issue == 9 and .step == "blocked") | "\($ENV.ST)/\(.kept)"')
+  [ -s "$k/$(st 'select(.issue == 9 and .step == "blocked") | .card').patch" ] || fail "#9 was not blocked with a kept patch: $(steps 9)"
   sleep 60 & p=$!; t=$(p_started "$p") # sleep: a stand-in for the blocked card's process, still ending
   jq -c --argjson p "$p" --arg t "$t" 'if .step == "worktree" then .pid = $p | .started = $t else . end' "$ST/cards.jsonl" > "$ST/cards.new" && mv "$ST/cards.new" "$ST/cards.jsonl"
   before=$(cat "$ST/cards.jsonl"; ls -A "$T/$CASE/cards"); kept=$(cd "$k" && ls -A && cat ./*)
-  loop retry 11 >/dev/null 2>"$STUB/refused" && fail "retry gave #11 back while its card's process $p was alive"
+  loop retry 9 >/dev/null 2>"$STUB/refused" && fail "retry gave #9 back while its card's process $p was alive"
   grep -q "still ending (pid $p)" "$STUB/refused" || fail "the refusal does not name the card's pid $p: $(cat "$STUB/refused")"
   [ "$(cat "$ST/cards.jsonl"; ls -A "$T/$CASE/cards")" = "$before" ] && [ ! -s "$ST/retried.jsonl" ] && [ "$(cd "$k" && ls -A && cat ./*)" = "$kept" ] \
     || fail "a refused retry changed the lines, the worktrees or the kept folder"
   kill "$p"; wait "$p" 2>/dev/null
-  rm "$STUB/review-cmd"; echo "$GO" > "$STUB/review.3"
-  loop retry 11 | grep -q 'starts from the kept patch' || fail "retry of #11 did not go on once its card's process had ended"
-  loop run >/dev/null || fail "run of the retried #11 exited non-zero"
-  st 'select(.issue == 11 and .step == "worktree") | .reason' | grep -q '^resumed from the kept patch of card ' && [ "$(cat "$R/e.txt")" = eleven ] \
-    || fail "the retried #11 did not start from its kept patch and land: $(steps 11)"
-}
-
-# GitHub does not answer for the withdrawn follow-ups: the brief says the list may be short.
-t_resumeunread() {
-  resumesetup 10; r=0; echo 'exit 3' > "$STUB/review-cmd"; echo 'cp "$STUB/brief" "$STUB/brief.10"; echo ten > t.txt' > "$STUB/build"
-  loop run >/dev/null; rm "$STUB/review-cmd"; echo "$GO" > "$STUB/review.$((r + 3))"; : > "$STUB/closed-fail"
-  loop retry 10 >/dev/null && loop run >/dev/null || fail "run of the retried #10 exited non-zero"; rm "$STUB/closed-fail"
-  grep -q '^## The withdrawn follow-ups of this issue could not be read from GitHub$' "$STUB/brief.10" && [ -n "$(st 'select(.issue == 10 and .step == "landed") | .sha')" ] \
-    || fail "a brief made while GitHub did not list the withdrawn follow-ups does not say so, or the card did not land: $(steps 10)"
+  rm "$STUB/review-cmd"; : > "$STUB/closed-fail"
+  loop retry 9 | grep -q 'starts from the kept patch' || fail "retry of #9 did not go on once its card's process had ended"
+  loop run >/dev/null || fail "run of the retried #9 exited non-zero"; rm "$STUB/closed-fail"
+  [ "$(st 'select(.issue == 9 and '"$NOMARK"') | "\(.step) \(.result)"' | tr '\n' ,)" = "picked ok,worktree ok,brief ok,build ok,review GO,test pass,landed ok," ] && [ "$(cat "$STUB/resumed-with" 2>&1)" = n.txt ] \
+    && [ "$(cat "$R/n.txt")" = nine ] || fail "a card blocked on a failed step did not resume from its kept patch with one session: $(steps 9) $(cat "$STUB/resumed-with" 2>&1)"
+  st 'select(.issue == 9 and .step == "worktree") | .reason' | grep -q '^resumed from the kept patch of card ' && loop check || fail "the worktree line does not say the card resumed, or the records do not check: $(steps 9)"
+  grep -q '^## The withdrawn follow-ups of this issue could not be read from GitHub$' "$STUB/brief.9" \
+    || fail "a brief made while GitHub did not list the withdrawn follow-ups does not say so: $(grep '^#' "$STUB/brief.9" 2>&1)"
 }
 
 # Bug: the owner's yes with a condition ("only for admins") landed the kept patch with no build and no
@@ -316,30 +297,6 @@ t_resumeyes() {
   [ "$(st 'select(.issue == 11 and '"$NOMARK"') | "\(.step) \(.result)"' | tr '\n' ,)" = "picked ok,worktree ok,brief ok,review NO-GO,fix ok,review GO,test pass,landed ok," ] && [ "$(wc -l < "$STUB/sessions")" = $((sessions + 1)) ] \
     && [ "$(tr '\n' ' ' < "$R/e.txt")" = "eleven admins " ] || fail "a kept patch approved with a condition was not reviewed against it before landing: $(steps 11)"
   st 'select(.issue == 11 and .step == "worktree") | .reason' | grep -q "^reviewing the kept patch of card $old against the condition of Dana's yes" && loop check || fail "the worktree line does not say the kept patch is reviewed, or the records do not check: $(steps 11)"
-}
-
-# Bug: a card that files a last NO-GO's follow-ups had no <worktree>.ready, so its test pass was stored nowhere and it
-# ran its tests again each time it came to the test step (the owner: passes are reused). Its pass is kept, keyed to
-# its staged change: a different change (the port after its landing conflict) runs its tests (autoport); main
-# moving on another file during the port's tests fits it onto main with the same change, which reuses the pass and
-# starts no run (lastreuse). Either way it lands alone, with the earlier loop's findings filed.
-lastsetup() { # [<line of the test stub>]
-  setup "[$(issue 8 2026-01-01)]"; for i in 1 2 3; do moved "${i/3/}" "$NOGO3" > "$STUB/review.$i"; done; echo "$GO" > "$STUB/review.4"
-  echo 'echo two >> a.txt' > "$STUB/build"; echo 'ONE other' > "$STUB/move"; echo "${1:-}" >> "$STUB/test-cmd"
-  echo '[ ! -e "$PWD.port" ] || cp "$PWD.ready" "$STUB/readyatport"' > "$STUB/review-cmd"
-  loop run >/dev/null || fail "run of #8 exited non-zero"
-  [ "$(jq -c '[.tested, .alone, (.patch | length > 0)]' "$STUB/readyatport" 2>/dev/null)" = '[true,true,true]' ] \
-    || fail "the card with a last NO-GO did not store its test pass, marked alone, keyed to its staged change: $(cat "$STUB/readyatport" 2>&1)"
-}
-laststeps() { st "select(.issue == 8 and $NOMARK) | \"\(.step) \(.result)\"" | tr '\n' ,; }
-t_lastreuse() {
-  lastsetup '[ "$(wc -l < "$STUB/tests")" != 2 ] || { echo b > "$R/b.txt"; git -C "$R" add b.txt; git -C "$R" commit -qm "main adds b.txt"; }'
-  [ "$(laststeps)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review NO-GO,fix ok,review NO-GO,test pass,rebase ok,review GO,test pass,test pass,landed ok," ] \
-    && [ "$(st 'select(.issue == 8 and .step == "test") | .reused' | tr '\n' ,)" = "null,null,true," ] \
-    && [ "$(wc -l < "$STUB/tests")" = 2 ] || fail "fitted onto main with the same staged change, the card ran its tests again: $(laststeps) $(wc -l < "$STUB/tests") runs"
-  [ "$(st 'select(.issue == 8 and .step == "landed") | [.leftover, .batch] | tojson')" = '[true,null]' ] && [ "$(tr '\n' ' ' < "$R/a.txt")" = "ONE two " ] \
-    && [ "$(cat "$R/b.txt")" = b ] && [ "$(git -C "$R" log -1 --format=%P | wc -w)" = 1 ] && [ "$(git -C "$R" log -2 --format=%s | tail -n 1)" = "main adds b.txt" ] \
-    || fail "#8 did not land alone on the main that moved, with its follow-ups: $(st 'select(.issue == 8 and .step == "landed")'; git -C "$R" log --oneline | head -3)"
 }
 
 # Bug: the earlier loop's review was put back in place of the port's own before the yes was
@@ -366,20 +323,14 @@ t_portyes() {
 # a build that fails before any review keeps its patch and names it nowhere on the issue; a review that fails after
 # a NO-GO and its fix deletes that NO-GO's findings; a retry that blocks before it takes up the kept patch makes the
 # next retry forget the patch and the review; carried findings past a length are cut from the rebuild's brief. Each
-# is a case of its own on a main of its own (kept, keptbuild, keptlong, keptevidence, keptleft, keptunread), so they
-# run side by side.
+# is a case of its own on a main of its own (kept, keptlong, keptevidence, keptleft, keptunread), so they run side by
+# side; keptunread's first card is the build that fails before any review.
 t_kept() {
   setup "[$(issue 7 2026-01-01)]"
   echo 'echo two >> a.txt; : > "$(git rev-parse --git-path index.lock)"; exit 3' > "$STUB/build"
   loop run >/dev/null; wt=$T/$CASE/cards/$(st 'select(.step == "blocked") | .card')
   st 'select(.step == "blocked") | .reason' | grep -q "^build: .*could not be kept as a patch.*its worktree is left at $wt\]" && [ "$(tail -n 1 "$wt/a.txt" 2>&1)" = two ] \
     || fail "a change that could not be staged went with its worktree, or the reason does not say where it is: $(st 'select(.step == "blocked") | .reason') $(ls "$T/$CASE/cards")"
-}
-t_keptbuild() {
-  setup "[$(issue 8 2026-01-01)]"; echo 'echo two >> a.txt; exit 3' > "$STUB/build"
-  loop run >/dev/null; k=$(st 'select(.issue == 8 and .step == "blocked") | "\($ENV.ST)/\(.kept)"')
-  grep -q '^8 --body Conveyor card .*-8 is blocked: build: ' "$STUB/comments" && grep -q "^Its work is kept as a patch: <state>/kept/${k##*/}/.*-8\.patch (1 files, 1 KB, built on commit $(git -C "$R" rev-parse HEAD))" "$STUB/comments" \
-    || fail "a build that failed before any review did not name its kept patch and size on the issue: $(cat "$STUB/comments" 2>&1)"
 }
 
 # NO-GO with more findings than a brief may hold, its fix, then a review that fails: the NO-GO's findings are kept.
@@ -441,14 +392,20 @@ t_keptleft() {
 }
 
 # A kept patch that git cannot parse is the one kind not used: that card is built from nothing and says so.
+# Its first card is the build that fails before any review: the issue's comment names its kept patch and size.
+# The card built from nothing meets no conflict at its landing: it runs no extra session (no rebase step).
 t_keptunread() {
   setup "[$(issue 12 2026-01-01)]"; echo 'echo twelve > w.txt; exit 3' > "$STUB/build"
   loop run >/dev/null; k=$(st 'select(.issue == 12 and .step == "blocked") | "\($ENV.ST)/\(.kept)"'); old=$(st 'select(.issue == 12 and .step == "blocked") | .card')
   [ -s "$k/$old.patch" ] || fail "#12 kept no patch: $(st 'select(.issue == 12 and .step == "blocked")')"
+  grep -q '^12 --body Conveyor card .*-12 is blocked: build: ' "$STUB/comments" && grep -q "^Its work is kept as a patch: <state>/kept/${k##*/}/.*-12\.patch (1 files, 1 KB, built on commit $(git -C "$R" rev-parse HEAD))" "$STUB/comments" \
+    || fail "a build that failed before any review did not name its kept patch and size on the issue: $(cat "$STUB/comments" 2>&1)"
   echo 'not a patch' > "$k/$old.patch"; echo "$GO" > "$STUB/review.1"; echo 'cp "$STUB/brief" "$STUB/brief.12"; echo twelve > w.txt' > "$STUB/build"
   loop retry 12 >/dev/null && loop run >/dev/null || fail "run of the retried #12 exited non-zero"
   st 'select(.issue == 12 and .step == "worktree") | .reason' | grep -q "^the kept patch of card $old cannot be read: built from nothing" && grep -q "^# The kept patch of blocked card $old cannot be read$" "$STUB/brief.12" \
     && [ -n "$(st 'select(.issue == 12 and .step == "landed") | .sha')" ] || fail "a kept patch that cannot be read was not given up for a build from nothing: $(st 'select(.issue == 12) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+  [ "$(st 'select(.issue == 12) | .step' | tr '\n' ' ')" = "picked worktree deps brief start build start review start test start landed pushed issue " ] && [ "$(wc -l < "$STUB/sessions")" = 2 ] \
+    || fail "a card with no conflict ran an extra session: $(st 'select(.issue == 12) | .step' | tr '\n' ' ') $(wc -l < "$STUB/sessions") sessions"
 }
 
 # Bug (#93): after the owner turned a card's change down, the only way to have its next card build from nothing was
