@@ -146,7 +146,7 @@ t_depends() {
     || fail "queue.waiting is not the unheld waiting issue alone, or a held entry does not say what it waits on: $(jq -c '[.queue, .health.cycles]' <<<"$out")"
   # #1 waits only on #2: it is not queued but held, its reason the wait; the four counts add up.
   [ "$(jq -c '.open | [.count, .split, (.held | map([.issue, (.reasons | map(.label // .kind) | join(","))]))]' <<<"$out")" \
-    = '[3,{"queued":0,"you":1,"labelOrRule":2,"belt":0},[[1,"waits"],[2,"you"],[7,"you,waits"]]]' ] \
+    = '[3,{"queued":0,"you":1,"labelOrRule":2,"landed":0,"belt":0},[[1,"waits"],[2,"you"],[7,"you,waits"]]]' ] \
     || fail "an issue held only by a dependency is not in Held, or is counted as queued: $(jq -c .open <<<"$out")"
   # #2 closed (as not planned too: closed is closed): #1 is picked.
   echo "[$(dep "$(issue 1 2026-01-01 P1)" 'Depends on: #2')]" > "$STUB/issues.json"

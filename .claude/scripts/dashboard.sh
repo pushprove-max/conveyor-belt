@@ -66,7 +66,7 @@
 #           the floor reads out: host, state (the machine's, as machine's), used (the belt cards holding a slot, every
 #           project's) and cap (the slots in force, as belt's); the page's project filter leaves it whole, as the head).
 #   queue   next (the issues the loop takes next, in its order), held (how many open issues are held: the snapshot's
-#           open.held, the Board's Held column; null when a record does not list them),
+#           open.held, the Board's Held column, less those landed and not pushed; null when a record does not list them),
 #           awaitingDeploy (the open issues labelled awaiting-deploy: built, waiting for the owner's PROD deploy; each with
 #           issue, title, since) and waiting (the open issues that wait on an open issue they depend on and that the
 #           loop would pick once it lands, as the snapshot's queue.waiting has them: none held or skipped, each with
@@ -808,8 +808,9 @@ PANELS_JQ='
         byRepo: ($R | map({key: .repo, value: {cap: (.snap.health.builderCap | if type == "number" then . else null end), waiting: ([.] | idle)}}) | from_entries)}} end),
    queue: (if $R == null then {error: $cerr, data: null} else {error: null, data: (
         # held: how many open issues the Board holds (the snapshot open.held: by you, a label, a rule or a wait), the
-        # count of its Held column; null when a record does not list them.
-        def heldN: .open.held | if type == "array" then length else null end;
+        # count of its Held column but for the landed, not pushed ones (a card reason notPushed: done, waiting for the
+        # push, not held back); null when a record does not list them.
+        def heldN: .open.held | if type == "array" then map(select(any(.reasons[]?; .kind == "card" and .notPushed == true) | not)) | length else null end;
         # A record whose issues GitHub did not list leaves the queue of every project unknown; byRepo then holds the
         # whole queue of each record apart, so the page filtered to a project that was read shows its own.
         if any($R[]; .snap.queue.next == null) then {next: null, held: null, awaitingDeploy: null, waiting: null, issuesError: "GitHub did not list the open issues on \($conv.host).",

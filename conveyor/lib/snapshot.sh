@@ -734,8 +734,9 @@ snapshot() (
                | if $k == null or $k >= ($o | length) then null else $o[$k].issue end end)};
     # Every open issue ("Move them to Held"): open counts them, and split says where each is:
     # queued (in pick order), held by you (the control record, and nothing else holds it), held by label or rule (or
-    # by anything else that keeps it from the pick order: an issue it waits on, a card of it, a parent), or on the
-    # belt; the four add up to open. issues lists every open issue, lowest number first (issue, title, priority,
+    # by anything else that keeps it from the pick order: an issue it waits on, a card of it, a parent), landed (its
+    # newest card landed while push is off, not pushed yet: never queued, and the push closes it), or on the belt; the
+    # five add up to open. issues lists every open issue, lowest number first (issue, title, priority,
     # labels, created, dependsOn: the numbers its own `Depends on:` lines name (needs, DEPS), the ones `control depends
     # remove` can take off, then the "owner/repo#N" of another repository they name (farneeds), unlike waitsFor, which adds follow-ups and leaves closed ones out), so the Rules tab can
     # list them all with their state. held lists every open issue that is
@@ -743,11 +744,13 @@ snapshot() (
     # outside: true when someone outside the project opened it, INSIDE, so it waits for a release by the owner), label
     # (the built label, awaiting-deploy, holds it back; label names it), rule (a rule of the
     # control record excludes it; rule names it), waits (an open issue it depends on; waitsFor), card (a card of it
-    # is blocked, or landed with the issue still open; step) or parent (a follow-up filed before its parent card
+    # is blocked, or landed with the issue still open; step; notPushed: true when it landed while push is off and is
+    # not pushed yet) or parent (a follow-up filed before its parent card
     # landed) or approve (it waits for the yes of the owner before its
 # build, in "Needs you"). null when gh cannot list the issues.
     ($iss[0]) as $open | ($ua[0]) as $up
-    | ([$c[] | select(.result == "" or .x.after != null) | .issue]) as $onbelt
+    # A card landed while push is off (x.after wait) is off the belt: its issue is landed, not pushed (held, below).
+    | ([$c[] | select(.result == "" or (.x.after != null and .x.after != "wait")) | .issue]) as $onbelt
     | ($q.order // [] | map(.issue)) as $queued
     # The column of each open issue (on the belt, queued, else held), for moved.json (movedsaw); null when the issues
     # were not listed.
@@ -765,7 +768,8 @@ snapshot() (
                 (if $e.rule != null then {kind: "rule", rule: $e.rule} else empty end),
                 (if ($e.waits // []) != [] then {kind: "waits", waitsFor: $e.waits} else empty end),
                 (if $e.before then {kind: "approve"} else empty end),
-                ([$c[] | select(.issue == $i.number and .result != "")] | last | if . == null then empty else {kind: "card", step: .step, card: .card} end)]) as $why
+                ([$c[] | select(.issue == $i.number and .result != "")] | last | if . == null then empty else {kind: "card", step: .step, card: .card}
+                  + (if .x.after == "wait" then {notPushed: true} else {} end) end)]) as $why
             | (if $why == [] and $e == null and $isfu then [{kind: "parent"}] elif $why == [] and $e == null then [{kind: "other"}] else $why end) as $why
             | select(($i.number | IN($queued[])) | not)
             | {issue: $i.number, title: ($i.title // "")[0:200], priority: level($l; $prio), followup: $isfu,
@@ -775,15 +779,16 @@ snapshot() (
                umbrella: (([$c[] | select(.issue == $i.number and (.x.split.filed | type) == "array")] | last | .x.split.filed)
                  // ([($i.parts // [])[].number | numbers] | if . == [] then null else . end))}] as $hl
         | ($hl | map(select((.reasons | map(.kind) | unique) == ["you"])) | length) as $you
+        | [$hl[] | select(any(.reasons[]; .notPushed == true)) | .issue] as $unpushed
         | {count: ($open | length), held: $hl,
            # Each open parent (an issue with GitHub sub-issues) as one entry: its parts, how many of them are done
-           # (closed) of all, those on the belt, and the closed ones (the Board shows them as landed).
+           # (closed, or landed and not pushed) of all, those on the belt, and the closed ones (the Board shows them as landed).
            umbrellas: [$open[] | select((.parts // []) != []) | {issue: .number, title: (.title // "")[0:200], parts: [.parts[].ref],
-             done: ([.parts[] | select(.open | not)] | length), all: (.parts | length), inFlight: [.parts[].number | numbers | select(IN($onbelt[]))],
+             done: ([.parts[] | select((.open | not) or (.number | IN($unpushed[])))] | length), all: (.parts | length), inFlight: [.parts[].number | numbers | select(IN($onbelt[]))],
              closed: [.parts[] | select(.open | not) | .ref]}],
            issues: ([$open[] | (.labels | map(.name)) as $l | {issue: .number, title: (.title // "")[0:200], priority: level($l; $prio), labels: $l, created: .createdAt, dependsOn: (needs + farneeds)}] | sort_by(.issue)),
            split: {queued: (($open | length) - ($hl | length) - ([$open[] | select(.number | IN($onbelt[]))] | length)), you: $you,
-                   labelOrRule: (($hl | length) - $you), belt: ([$open[] | select(.number | IN($onbelt[]))] | length)}} end) as $openpart
+                   labelOrRule: (($hl | length) - $you - ($unpushed | length)), landed: ($unpushed | length), belt: ([$open[] | select(.number | IN($onbelt[]))] | length)}} end) as $openpart
     # Why an open issue that others wait on does not move (waitsOn in queue.waiting): its newest card first, then
     # a hold of the control record, a label, a rule, the yes of the owner, its own wait, the pick order; else no card.
     | def depstate($n): ([$c[] | select(.issue == $n)] | last) as $k

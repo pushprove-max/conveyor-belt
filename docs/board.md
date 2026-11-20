@@ -383,6 +383,9 @@ reason.
 
 An issue that is not being built is in Held for one of four reasons: **Held by you**, **Held by a label**,
 **Skipped by a rule** or **Waiting on #N**. "What these mean", under the Held heading, says where to change each.
+With the rule **Push on landing** off, an open issue whose card landed is not work to build. The Rules tab shows it
+as **Landed, not pushed**, and the count of open issues names it apart. "Holds keep N issues back" does not count
+it, and the row of its parent issue shows it as landed. The push closes it.
 An issue that someone outside the project opened shows **Opened by someone outside the project: release it to build
 it** in place of **Held by you** ([The control record](configuration.md#the-control-record)).
 

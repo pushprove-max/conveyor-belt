@@ -7,8 +7,8 @@
 // "Waiting on another card (N)", each shown as "Waiting on #N"; a next row forced past its wait is "Forced past #N".
 // A next row with room is held back by the machine (its cap or its pause: "waiting for a machine slot: 2 of the
 // machine cap 2 in use"), shown as said.
-// How many open issues are held (held: the Board's Held column's count, by you, a label, a rule or a wait); null
-// when the open issues were not listed.
+// How many open issues are held (held: the Board's Held column's count, by you, a label, a rule or a wait, but for
+// the landed, not pushed ones); null when the open issues were not listed.
 const queueHeld = (d) => (d && typeof d.held === 'number' && d.held >= 0 ? d.held : null);
 // The issues listed under "Waiting on another card": one forced past its wait is in next, so not here.
 const queueWaits = (d) => (d.waiting || []).filter((w) => Array.isArray(w.waitsFor) && w.waitsFor.length && w.forced !== true);

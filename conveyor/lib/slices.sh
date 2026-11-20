@@ -24,8 +24,8 @@
 # when the order names it; the issue becomes their umbrella: it is held (`control hold`), the
 # slices are attached as its GitHub sub-issues (attachparts()), it gets a comment naming the slice that covers each of
 # its Done-when items, and the card ends with a closed line whose followups are the slices (so a run limited by --only
-# to the issue takes its slices too, ups() in DEPS); the issue stays open. umbrellas() closes it once its sub-issues
-# are all closed (or, when they could not be attached, once each slice has a card that landed or closed it as done). A slice that cannot be filed withdraws the
+# to the issue takes its slices too, ups() in DEPS); the issue stays open. umbrellas() closes it once each of its sub-issues
+# is closed or landed, push on or off (or, when they could not be attached, once each slice has a card that landed or closed it as done). A slice that cannot be filed withdraws the
 # ones filed before it, and the issue is built whole.
 SPLIT_TIMEOUT=300 SPLIT_FILE=6000 SPLIT_FILES=10
 # The issue (its input, as gh issue view gives it) as the split check measures it. $area is the pack's area prefix.
@@ -142,9 +142,9 @@ splitcheck() { # <card> <issue>: 0 when the card goes on to build; 1 when the is
   jq -e '.filed' <<<"$split" >/dev/null || return 0
   # The umbrella: held, told which slice covers each Done-when item, and its card closed; the issue stays open.
   x=$(locked control hold "$2" 2>&1 >/dev/null) || echo "conveyor: card $1: #$2 was split, and could not be held: ${x:0:300}" >&2
-  # Its slices become its parts (GitHub sub-issues): umbrellas() closes it once they are all closed.
+  # Its slices become its parts (GitHub sub-issues): umbrellas() closes it once each is closed or landed.
   # shellcheck disable=SC2046 # one issue number a word
-  if x=$(attachparts "$2" $(jq -r '.filed[]' <<<"$split")); then x='are its sub-issues and build it, and this issue is not built itself. It stays open and held until each of them is closed'
+  if x=$(attachparts "$2" $(jq -r '.filed[]' <<<"$split")); then x='are its sub-issues and build it, and this issue is not built itself. It stays open and held until each of them is closed or lands'
   else echo "conveyor: card $1: #$2 was split; its slices could not all be made its sub-issues: $x" >&2
     x='build it, and this issue is not built itself. It stays open and held until each of them lands or is already done on main'; fi
   x=$(jq -r --argjson s "$size" --arg w "$x" '"Conveyor split this issue under the rule Split large issues. Its follow-ups below \($w); then Conveyor closes it.\n\nEach Done-when item and the follow-up that covers it:\n"
@@ -312,22 +312,28 @@ growcheck() { # <card> <issue> <worktree> <issue json> <the sessions' prompt>: 0
   return 2
 }
 # At a turn of the loop, outside the lock: each open issue of the list that is a parent (it has GitHub sub-issues,
-# parts: openissues()) whose parts are all closed is closed, with a comment that names them, and released from held.
+# parts: openissues()) whose parts are each closed, or landed (its newest card has a landed or pushed line: landed()
+# in DEPS, so a part built again after a landing waits for its new card), is closed, with a comment that names them
+# and says which landed, and released from held. Push on or off alike: with push off (rules.push), a landed part stays
+# open until the owner's push, and a split's slices are its parts, so its umbrella waited for that push.
 # So is each open issue of the list with no parts (its slices were never attached as its sub-issues) that is the
 # umbrella of a split (a split line with filed slices) whose slices each have a landed line, or a closed line (main
 # already does it: ALREADY-DONE) that is not a shut one (SHUT: the owner closed it by hand).
 umbrellas() { # <open issues, a json list>
   local k n s x m
-  while read -r k n s; do
-    if [ "$k" = parts ]; then m="Conveyor: each part of this issue is closed ($s), so this issue is closed too."
+  while IFS=$'\t' read -r k n s; do
+    if [ "$k" = parts ]; then m="Conveyor: each part of this issue is closed or landed ($s), so this issue is closed too."
     else m="Conveyor: the last follow-up of this issue is done ($s), so each of its Done-when items is built."; fi
     x=$(gh_write issue close "$n" --comment "$m" 2>&1 >/dev/null) \
-      || { echo "conveyor: #$n is $([ "$k" = parts ] && echo "a parent whose parts are all closed" || echo "an umbrella whose follow-ups have all landed or are already done on main"), and it could not be closed (${x:0:300}); the next turn tries again" >&2; continue; }
+      || { echo "conveyor: #$n is $([ "$k" = parts ] && echo "a parent whose parts are all closed or landed" || echo "an umbrella whose follow-ups have all landed or are already done on main"), and it could not be closed (${x:0:300}); the next turn tries again" >&2; continue; }
     locked control release "$n" >/dev/null 2>&1 || :
-  done < <(jq -rn --argjson open "$1" '$open[] | select((.parts // []) != [] and all(.parts[]; .open | not)) | "parts \(.number) \(.parts | map(.ref) | join(", "))"' 2>/dev/null
-    jq -rs --argjson open "$1" --arg shut "$SHUT" '([.[] | select(.step == "landed" or (.step == "closed" and .reason != $shut)) | .issue] | unique) as $landed
-    | [.[] | select(.step == "split" and (.split.filed | type) == "array" and .split.filed != [] and (.issue | IN($open[] | select((.parts // []) == []) | .number)))]
-    | group_by(.issue)[] | last | select(all(.split.filed[]; IN($landed[]))) | "split \(.issue) \(.split.filed | map("#\(.)") | join(", "))"' < <(turncards) 2>/dev/null)
+  done < <(jq -rs --argjson open "$1" --arg shut "$SHUT" "$DEPS"'landed(.) as $done
+    | ([.[] | select(.step == "landed" or (.step == "closed" and .reason != $shut)) | .issue] | unique) as $landed
+    | ($open[] | select((.parts // []) != [] and all(.parts[]; (.open | not) or (.number | IN($done[]))))
+      | [.parts[] | select(.open and (.number | IN($done[]))) | .ref] as $l
+      | "parts\t\(.number)\t\(.parts | map(.ref) | join(", "))\(if $l == [] then "" else "; landed, not closed yet: \($l | join(", "))" end)"),
+      ([.[] | select(.step == "split" and (.split.filed | type) == "array" and .split.filed != [] and (.issue | IN($open[] | select((.parts // []) == []) | .number)))]
+      | group_by(.issue)[] | last | select(all(.split.filed[]; IN($landed[]))) | "split\t\(.issue)\t\(.split.filed | map("#\(.)") | join(", "))")' < <(turncards) 2>/dev/null)
 }
 # The issues given attached to <parent> as its GitHub sub-issues (its parts): GitHub takes each one's id, not its
 # number. The id is read through graphql (privacy.test.sh's ghwrite refuses a REST call outside gh_write in lib/)

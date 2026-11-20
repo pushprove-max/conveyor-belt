@@ -92,7 +92,7 @@ t_snapshot() { snapshotstart
     | map({issue: .[0], title: "title \(.[0])", priority: .[1], followup: .[2], retried: false, parent: null}))}')" ] || fail "queue: $(q .queue)"
   # Every open issue: the ones not queued are held, each with why; the four counts add up to the open issues.
   [ "$(q '.open | [.count, .split, (.held | map([.issue, (.reasons | map(.label // .step // .kind) | join(","))]))]')" \
-    = '[19,{"queued":13,"you":2,"labelOrRule":4,"belt":0},[[8,"blocked"],[22,"you"],[23,"you"],[27,"awaiting-deploy"],[26,"awaiting-deploy"],[25,"awaiting-deploy"]]]' ] \
+    = '[19,{"queued":13,"you":2,"labelOrRule":4,"landed":0,"belt":0},[[8,"blocked"],[22,"you"],[23,"you"],[27,"awaiting-deploy"],[26,"awaiting-deploy"],[25,"awaiting-deploy"]]]' ] \
     || fail "the open issues and why each is held: $(q .open)"
   # And every open issue, queued, held or on the belt, with its labels and age: the Rules tab lists them all, so an
   # issue missing here is one the owner cannot find or manage there.

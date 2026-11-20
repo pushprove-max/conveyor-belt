@@ -1491,7 +1491,7 @@
   // and release go RELEASE_MAX issues a request, retry one, as the host takes them.
   const NEXT = 5;
   const STATES = [['next', 'Next up'], ['queued', 'Queued'], ['you', 'Held by you'], ['label', 'Held by a label'], ['waits', 'Waiting on another card'], ['building', 'Building'],
-    ['blocked', 'Blocked'], ['rule', 'Skipped by a rule'], ['approve', 'Waits for your yes']];
+    ['blocked', 'Blocked'], ['rule', 'Skipped by a rule'], ['approve', 'Waits for your yes'], ['landed', 'Landed, not pushed']];
   const ISORTS = [['priority', 'Priority'], ['number', 'Number'], ['age', 'Age'], ['area', 'Area'], ['state', 'State']];
   const IFILTERS = ['iq', 'istate', 'iprio', 'iarea', 'ilabel', 'isort', 'idir'];
   // The open issues' filters as the address holds them, with the Time and Date set in Customize (a time written in
@@ -1510,6 +1510,8 @@
       let state = 'rule';
       if (belt.has(x.issue)) state = 'building';
       else if (blocked.has(x.issue)) state = 'blocked';
+      // Its card landed while push is off: done, waiting for the push, not open work.
+      else if (k('card') && k('card').notPushed === true) state = 'landed';
       else if (mine.has(x.issue)) state = 'you';
       else if (k('label')) state = 'label';
       else if (k('rule') || k('standing')) state = 'rule';

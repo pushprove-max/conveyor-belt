@@ -101,7 +101,7 @@ export type Landed = Card & Times & { closed: boolean; at: number | null; usd: n
 export type Loop = { repo: string; state: string; reason: string; loop: boolean | null; building: number | null; waiting: number | null; cap: number | null; onBelt: number; landing: number }
 export type Suite = { repo: string; kind: string; version: string; sha: string; since: number | null; ended: number | null; state: string; done: number | null; failed: number | null }
 // own: the session's own project, whose cards carry no project name ('' or absent: none is).
-export type Snap = { own?: string; loops: Loop[]; needs: Need[]; belt: Belt[]; queue: Queued[] | null; queueMore: boolean; waits: Waiting[]; held: [string, number][]; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut?: number; judgeDeclined: number[]; suites?: Suite[]; umbrellas: Umbrella[] }
+export type Snap = { own?: string; loops: Loop[]; needs: Need[]; belt: Belt[]; queue: Queued[] | null; queueMore: boolean; waits: Waiting[]; held: [string, number][]; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut?: number; judgeDeclined: number[]; suites?: Suite[]; umbrellas: Umbrella[]; unpushed?: { repo: string; issue: number }[] }
 export type Fast = { state: 'none' | 'unread' | 'norecord' } | { state: 'ok'; branch: string; ahead: number; dirty: number; subject: string }
 export type Research = { state: 'none' } | { state: 'ok'; lastAt: number | null }
 export type Limit = { pct: number; resetsAt: number }
@@ -214,7 +214,7 @@ const umbrellaOf = (x: any) => { const n = num(x.umbrella); return n !== null &&
 
 const liveOf = (v: any): Live | null => (v && typeof v === 'object' ? { action: one(v.action), turns: num(v.turns), lastOutputAt: time(v.lastOutputAt) } : null)
 
-type Rec = { loop: Loop; needs: Need[]; belt: Belt[]; queue: Queued[] | null; waits: Waiting[]; held: Record<string, number>; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut: number; judgeDeclined: { id: string; at: number }[]; suites: Suite[]; umbrellas: Umbrella[]; snapshotAt: number | null }
+type Rec = { loop: Loop; needs: Need[]; belt: Belt[]; queue: Queued[] | null; waits: Waiting[]; held: Record<string, number>; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut: number; judgeDeclined: { id: string; at: number }[]; suites: Suite[]; umbrellas: Umbrella[]; unpushed: number[]; snapshotAt: number | null }
 // One record's snapshot. null: it is not the object `conveyor.sh snapshot` prints, so nothing of it is shown.
 export const parseRecord = (repo: string, json: unknown): Rec | null => {
   let j: any = json
@@ -268,6 +268,10 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
     umbrellas: (Array.isArray(j.open?.umbrellas) ? j.open.umbrellas : []).filter((x: any) => x && typeof x === 'object' && num(x.issue) !== null)
       .map((x: any): Umbrella => ({ repo, issue: x.issue, title: one(x.title), done: num(x.done) ?? 0, all: num(x.all) ?? 0,
         inFlight: Array.isArray(x.inFlight) ? x.inFlight.filter((n: unknown): n is number => num(n) !== null) : [] })),
+    // The open issues whose card landed while push is off, not pushed yet (open.held, a card reason notPushed): on any
+    // day, as landed holds only today's landings.
+    unpushed: (Array.isArray(j.open?.held) ? j.open.held : []).filter((x: any) => x && num(x.issue) !== null && Array.isArray(x.reasons)
+      && x.reasons.some((r: any) => r && r.kind === 'card' && r.notPushed === true)).map((x: any) => x.issue as number).sort((a: number, b: number) => a - b),
     // When the kept snapshot was made (null from a snapshot that does not say).
     snapshotAt: time(j.snapshotAt),
   }
@@ -344,6 +348,7 @@ const boardFrom = (name: string, records: { repo: string; json: unknown }[], own
       waits: recs.flatMap(r => r.waits),
       held: [...held].sort((a, b) => a[0].localeCompare(b[0])),
       deploy: recs.flatMap(r => r.deploy),
+      unpushed: recs.flatMap(r => r.unpushed.map(issue => ({ repo: r.loop.repo, issue }))),
       landed: recs.flatMap(r => r.landed).sort((a, b) => at(b.at) - at(a.at)),
       landedCount: recs.reduce((n, r) => n + r.landedCount, 0),
       // A record that was not read spent an unknown amount today, so the total is partial, like an unpriced step.
@@ -848,6 +853,13 @@ const waitedOn = (ws: Waiting[]) => {
   return [...seen.values()].sort((a, b) => a[0] - b[0]).map(([, r], i, l) => (i < l.length - 1 ? `${r},` : r))
 }
 
+// The open issues whose card landed while push is off and that wait for the push: done, not open work, on any day
+// (LANDED TODAY lists only today's). One line, wrapped at its issues: `landed, not pushed: #12 · #15`.
+const unpushedLines = (snap: Snap, w: number, lead: string): Line[] => {
+  const l = snap.unpushed ?? []
+  return l.length ? wrapParts(['landed, not pushed:', ...l.map((x, i) => `${x.repo}#${x.issue}${i < l.length - 1 ? ' ·' : ''}`)], w, lead, ' ', { d: true }) : []
+}
+
 // QUEUE: the next five, numbered, the title cut to fit and the priority right-aligned; then the
 // held-back line.
 const NEXT = 5
@@ -876,6 +888,7 @@ export const queueModel = (snap: Snap, w: number): Line[] => {
     }),
     ...(snap.waits.length > NEXT ? [empty(`and ${snap.waits.length - NEXT} more waiting`)] : []),
     ...(snap.held.length ? [fitWidth([{ t: ` held back: ${snap.held.map(([label, n]) => `${n} ${label}`).join(' · ')}`, d: true }], w)] : []),
+    ...unpushedLines(snap, w, ' '),
   ]
 }
 
@@ -1152,6 +1165,7 @@ const paneBoard = (s: State, snap: Snap, w: number, frame: number, open: boolean
     ...activityModel(s, snap, w, frame), [],
     ...pickModel(snap, w),
     ...(snap.held.length ? [fitWidth([{ t: `held back: ${snap.held.map(([label, n]) => `${n} ${label}`).join(' · ')}`, d: true }], w)] : []),
+    ...unpushedLines(snap, w, ''),
     ...(snap.deploy.length ? [[], ...deployModel(s, snap, w)] : []), [],
     ...landedTable(s, snap, w),
     ...(lanes.length ? [[], ...lanes.map(l => fitWidth(l, w))] : []),

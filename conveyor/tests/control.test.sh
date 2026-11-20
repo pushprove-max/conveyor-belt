@@ -98,7 +98,7 @@ t_controlpick() {
   [ "$(jq -c '[(.queue.order | map(.issue)), (.queue.holding | map(del(.since))), .queue.skipped, .control.held, (.queue.next | map(.issue))]' <<<"$out")" \
     = '[[5,9],[{"issue":8,"title":"title 8","priority":"P2","followup":false,"retried":false,"created":"2026-03-01","waitsFor":[]}],[{"issue":6,"title":"title 6","rule":"P1"}],[8],[5,9]]' ] || fail "snapshot queue and record: $(jq -c '[.queue, .control]' <<<"$out")"
   # Held by you and skipped by a rule are both in Held, each with its reason; the four counts add up.
-  [ "$(jq -c '.open | [.split, (.held | map([.issue, (.reasons | map(.rule // .kind) | join(","))]))]' <<<"$out")" = '[{"queued":2,"you":1,"labelOrRule":1,"belt":0},[[6,"P1"],[8,"you"]]]' ] \
+  [ "$(jq -c '.open | [.split, (.held | map([.issue, (.reasons | map(.rule // .kind) | join(","))]))]' <<<"$out")" = '[{"queued":2,"you":1,"labelOrRule":1,"landed":0,"belt":0},[[6,"P1"],[8,"you"]]]' ] \
     || fail "the held issues and their reasons: $(jq -c .open <<<"$out")"
   [ "$(jq -c '[.forecast.cards, .forecast.usd, .forecast.pausesAt, .health.models]' <<<"$out")" = '[2,null,null,{"claude":"m","codex":"x"}]' ] \
     || fail "forecast with nothing landed, or the models in force: $(jq -c '[.forecast, .health.models]' <<<"$out")"

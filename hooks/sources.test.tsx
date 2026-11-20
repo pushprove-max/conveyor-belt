@@ -418,6 +418,17 @@ test('QUEUE lists the next five, numbered, the title cut to fit and the priority
   ])
 })
 
+// Issue 875. Bug: with push off, an open issue whose card landed on an earlier day and is not pushed was in no part of
+// /units: LANDED TODAY lists only today's landings, so it looked like open work. Its snapshot entry is open.held, a
+// card reason notPushed; one held by you is not listed.
+test('QUEUE names each open issue landed and not pushed, on any day, after the held-back line', () => {
+  const open = { held: [{ issue: 3700, reasons: [{ kind: 'card', step: 'landed', card: 'c-3700', notPushed: true }] }, { issue: 3701, reasons: [{ kind: 'you' }] },
+    { issue: 3702, reasons: [{ kind: 'card', step: 'landed', card: 'c-3702', notPushed: true }] }] }
+  const s = board({ queue: { next: [], held: { dormant: 3 } }, open })
+  expect(section(tableText(s, 80), 'QUEUE').split('\n').slice(-2)).toEqual([' held back: 3 dormant', ' landed, not pushed: #3700 · #3702'])
+  expect(paneModel(s, 80, 0).map(plain).join('\n')).toMatch(/\nheld back: 3 dormant\nlanded, not pushed: #3700 · #3702\n/)
+})
+
 test('QUEUE shows an issue that waits on another after the next ones, as "Waits for #N", never numbered', () => {
   const waiting = [{ issue: 3950, title: 'Second half', waitsFor: [3900] }, { issue: 3951, title: 'Both', waitsFor: [3900, 3950] }, { issue: 3952, title: 'Bad', waitsFor: [] }]
   const part = section(tableText(board({ queue: { next: queued(1), held: {}, waiting } }), 80), 'QUEUE')

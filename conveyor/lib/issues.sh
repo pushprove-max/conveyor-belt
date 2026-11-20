@@ -631,7 +631,7 @@ labelled() {
 # issue that is a part gets umbrella (its parent's number, when the parent is an issue of this repository), and a
 # parent gets parts ([{ref: "#N", or "owner/repo#N" for another repository's, number: N, null for another
 # repository's, open}]; GitHub allows 100 a parent). A pick never takes a parent (jq/upnext.jq), and umbrellas()
-# (lib/slices.sh) closes one whose parts are all closed.
+# (lib/slices.sh) closes one whose parts are each closed or landed.
 openissues() { # <json fields> [gh issue list arguments]
   local out f=$1 lim=1000 a; shift
   [ -z "$GITHUB" ] || { [ -s "$GITHUB/issues" ] && cat "$GITHUB/issues"; return; }  # the snapshot's fields, as `github` kept them

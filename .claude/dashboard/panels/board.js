@@ -129,6 +129,8 @@
     return { held: all.filter((x) => x.reasons.length).map(came), queue: pinned.concat(queue.filter((x) => !order.includes(x.issue))).map(came), waits };
   }
   const kinds = (x) => issues(x.reasons).map((r) => r.kind);
+  // Its card landed while push is off and is not pushed yet: done, waiting for the push, not held back.
+  const notPushed = (x) => issues(x && x.reasons).some((r) => r && r.kind === 'card' && r.notPushed === true);
   const onlyMine = (x) => kinds(x).length > 0 && kinds(x).every((k) => k === 'you');
   const labelsOf = (x) => issues(x.reasons).filter((r) => r.kind === 'label').map((r) => r.label);
   // Removing its labels queues it: nothing holds it but labels (and you, which the removal releases too).
@@ -522,20 +524,21 @@
     return el;
   }
 
-  // How the open issues split: the four add up to the open issues.
+  // How the open issues split: they add up to the open issues (landed, not pushed only when there are any).
   function split() {
     const h = S.ctx.h, o = S.d.open, p = h('p', 'board-split');
     p.dataset.figure = 'split';
     if (!o || typeof o !== 'object' || !o.split) { p.textContent = S.d.issuesError ? '' : 'The Board does not know how the open issues split: the host did not say.'; p.hidden = !p.textContent; return p; }
     const s = o.split;
     p.append(h('span', 'board-value', `${o.count} open`), h('span', null, `${s.queued} queued`), h('span', null, `${s.you} held by you`),
-      h('span', null, `${s.labelOrRule} held by a label or skipped by a rule`), h('span', null, `${s.belt} on the belt`));
+      h('span', null, `${s.labelOrRule} held by a label or skipped by a rule`),
+      ...(s.landed > 0 ? [h('span', null, `${s.landed} landed, not pushed`)] : []), h('span', null, `${s.belt} on the belt`));
     return p;
   }
 
   // The parts of each open parent (an issue with GitHub sub-issues: open.umbrellas) as one row: the parent's title,
   // its parts done of all with a bar, and its parts being built with their step. The row opens to every part with its
-  // state (landed: closed or landed today; building, with its step; blocked; waiting: any other) and a link to its
+  // state (landed: closed, landed today, or landed and not pushed; building, with its step; blocked; waiting: any other) and a link to its
   // card on the Board. The parts' own cards stay in their columns, so a blocked part is still in Needs you.
   // raw: every column's cards (unshaped); a part's card is looked up there, in the column it is in, closed or not.
   function partState(ref, closed, raw) {
@@ -548,6 +551,8 @@
     if ((c = of('review'))) return { state: 'building', step: `review ${c.review || '?'} of ${c.of || 3}`, card: c, col: 'review' };
     if ((c = of('needs', (x) => !x.waiting))) return { state: 'blocked', card: c, col: 'needs' };
     if ((c = of('landed'))) return { state: 'landed', card: c, col: 'landed' };
+    // Landed on an earlier day with push off, not pushed yet: Landed today no longer lists it, Held does.
+    if ((c = of('held', notPushed))) return { state: 'landed', card: c, col: 'held' };
     // Waiting for the owner's yes (Needs you), queued, waiting on another issue (in Queue) or held: not being built.
     const col = ['needs', 'queue', 'held'].find((k) => of(k));
     const open = n === null ? null : issues(S.d.open && S.d.open.issues).find((x) => x && x.issue === n);
@@ -622,7 +627,7 @@
     // (a standing rule of Conveyor's own and one not picked for a reason named too), Waiting on #N.
     return issues(x.reasons).map((r) => ({
       you: r.outside ? 'Opened by someone outside the project: release it to build it' : 'Held by you', label: `Held by a label: ${r.label}`, rule: `Skipped by a rule: ${r.rule}`, standing: `Skipped by a rule: ${r.rule || 'Conveyor\'s own'}`,
-      waits: `Waiting on ${issues(r.waitsFor).map(S.ctx.depRef).join(', ')}`, card: r.step === 'blocked' ? 'Card blocked (Needs you)' : `Card ${r.step || 'open'}`,
+      waits: `Waiting on ${issues(r.waitsFor).map(S.ctx.depRef).join(', ')}`, card: r.step === 'blocked' ? 'Card blocked (Needs you)' : r.notPushed === true ? 'Landed, not pushed' : `Card ${r.step || 'open'}`,
       parent: 'Waits for its parent card to land', approve: 'Approve before build (Needs you)', other: 'Skipped by a rule',
     }[r.kind]));
   }
@@ -1177,7 +1182,7 @@
   // issues back: see Held." (a link to the Held column); with none held, that nothing is open to build. held: Held's cards, or
   // null when the open issues were not listed.
   function queueEmpty(held) {
-    const h = S.ctx.h, li = h('li', 'board-empty board-queue-empty'), n = Array.isArray(held) ? held.length : null;
+    const h = S.ctx.h, li = h('li', 'board-empty board-queue-empty'), n = Array.isArray(held) ? held.filter((x) => !notPushed(x)).length : null;
     if (n === null) { li.textContent = 'Nothing queued.'; return li; }
     if (!n) { li.textContent = 'Nothing queued, and nothing holds an issue: each open issue is on the belt, or Conveyor built it.'; return li; }
     const a = h('a', null, 'see Held');

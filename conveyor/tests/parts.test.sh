@@ -3,7 +3,7 @@
 # timeout: 120
 # Engine cases (#648): a parent issue and its parts, GitHub sub-issues of it (the stub gh: $STUB/subs, a line
 # "<parent> <part>" for each). The pick (jq/upnext.jq) never takes a parent, umbrellas() (lib/slices.sh) closes one
-# whose parts are all closed, `conveyor.sh parts` attaches parts, and the snapshot names each part's parent.
+# whose parts are each closed or landed, `conveyor.sh parts` attaches parts, and the snapshot names each part's parent.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -29,6 +29,44 @@ t_partsloop() {
   fx_in 'umbrellas "$(asked)"'
   [ "$(cat "$STUB/closed" 2>/dev/null)" = 10 ] && grep -qF '(#11, #12)' "$STUB/close-comments" \
     || fail "the parent was not closed with a comment naming its parts once both were closed: $(cat "$STUB/closed" "$STUB/close-comments" 2>/dev/null) $(cat "$T/$CASE/run.out")"
+}
+
+# Push off (#875): the split umbrella #10, held, whose two parts #11 and #12 have each landed and are still open (a
+# landed issue stays open until the owner's push). The loop's turn (umbrellas()) closes it, with a comment that says
+# which parts landed, and releases it. Bug caught: the parent waited for its parts to close, which with push off never
+# happened, so it stayed open and held, looking like work waiting to build.
+t_partslanded() {
+  setup "[$(issue 10 2026-11-01), $(issue 11 2026-11-02), $(issue 12 2026-11-03)]"
+  printf '10 11\n10 12\n' > "$STUB/subs"
+  jq -c '.rules.push = false | .held = [10]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
+  { landed 11; landed 12; } >> "$ST/cards.jsonl"
+  fx_in 'umbrellas "$(asked)"'
+  [ "$(cat "$STUB/closed" 2>/dev/null)" = 10 ] && grep -qF '(#11, #12; landed, not closed yet: #11, #12)' "$STUB/close-comments" \
+    && [ "$(jq -c .held "$ST/control.json")" = '[]' ] \
+    || fail "the parent whose parts both landed was not closed and released with push off: $(cat "$STUB/closed" "$STUB/close-comments" 2>/dev/null) $(jq -c .held "$ST/control.json") $(cat "$T/$CASE/run.out")"
+}
+
+# Push off (#875): #30's card landed and its commit is not pushed, so the issue is still open. The snapshot shows it as
+# landed, not pushed: its held reason says so, the split counts it apart (not held by a rule, not on the belt), the
+# queue does not list it, and its parent #40 counts it as a part done. Push on, it is on the belt, pushing, as before.
+# Bug caught: with push off a landed issue was counted on the belt, and the Board showed it as skipped by a rule.
+t_partsunpushed() {
+  setup "[$(issue 30 2026-11-01), $(issue 40 2026-11-02), $(issue 41 2026-11-03)]"
+  printf '40 30\n40 41\n' > "$STUB/subs"
+  echo x > "$R/n.txt" && git -C "$R" add -A && git -C "$R" commit -qm next || fail "main's commit"
+  jq -c '.rules.push = false' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
+  jq -cn --arg s "$(git -C "$R" rev-parse HEAD)" 'def l($t; $x): {card: "c1-30", issue: 30, time: $t, tokens: {claude: 0, codex: 0}, result: "ok", sha: "", reason: ""} + $x;
+    l("2026-11-10T09:00:00Z"; {step: "picked", title: "title 30"}), l("2026-11-10T10:00:00Z"; {step: "landed", sha: $s, product: false})' >> "$ST/cards.jsonl"
+  loop snapshot > "$T/$CASE/snap.json" || fail "the snapshot failed: $(head -c 400 "$T/$CASE/snap.json")"
+  [ "$(jq -c '.open | [(.held[] | select(.issue == 30) | .reasons), .split, (.umbrellas[] | select(.issue == 40) | [.done, .inFlight])]' "$T/$CASE/snap.json")" \
+    = '[[{"kind":"card","step":"landed","card":"c1-30","notPushed":true}],{"queued":1,"you":0,"labelOrRule":1,"landed":1,"belt":0},[1,[]]]' ] \
+    || fail "the landed, unpushed #30 is not shown as landed, not pushed: $(jq -c .open "$T/$CASE/snap.json")"
+  jq -e '[.queue.order[].issue] == [41]' "$T/$CASE/snap.json" >/dev/null || fail "the queue is not #41 alone: $(jq -c '.queue.order' "$T/$CASE/snap.json")"
+  jq -c '.rules.push = true' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
+  loop snapshot --fresh > "$T/$CASE/snap.json" || fail "the snapshot with push on failed: $(head -c 400 "$T/$CASE/snap.json")"
+  [ "$(jq -c '[.open.split, ([.belt[] | select(.issue == 30) | .track.label]), (.open.umbrellas[] | select(.issue == 40) | .done)]' "$T/$CASE/snap.json")" \
+    = '[{"queued":1,"you":0,"labelOrRule":1,"landed":0,"belt":1},["pushing"],0]' ] \
+    || fail "with push on the landed #30 is not on the belt, pushing, as before: $(jq -c '[.open, .belt]' "$T/$CASE/snap.json")"
 }
 
 # A run limited to the parent #10 takes the open follow-up #13 its landed part #11 filed, which its other part #12

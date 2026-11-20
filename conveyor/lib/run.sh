@@ -52,7 +52,7 @@ onlyreport() { # what a run limited by --only will not build by itself, said at 
         | (select($out != []) | "conveyor: #\($n) depends on \($out | join(", ")), outside this run: it waits until \(if ($out | length) == 1 then "that issue closes" else "those close" end)"),
           (select($n | IN($cyc[])) | "conveyor: #\($n) is in a dependency cycle: it will not be picked"),
           (select($n | IN($taken[]) | not) | if (.parts // []) != [] then "conveyor: #\($n) is a parent: it is not built, " + ([.parts[] | select(.open) | .ref]
-              | if . == [] then "and its parts are all closed: the loop closes it at its next turn" else "its open parts \(join(", ")) are built in its place, and it closes when they all close" end)
+              | if . == [] then "and its parts are all closed: the loop closes it at its next turn" else "its open parts \(join(", ")) are built in its place, and it closes when each is closed or landed" end)
             elif $e == null then "conveyor: #\($n) is kept off the belt by a label: it will not be picked"
             elif $e.hold then "conveyor: #\($n) is held: the run waits until it is released"
             elif $e.rule != null then "conveyor: #\($n) is excluded by the rule \($e.rule): it will not be picked" else empty end))' <<<"$issues"
@@ -555,7 +555,7 @@ run() { # [max-cards] [serve]
     [ "$asking" != 1 ] || [ -z "$issues" ] || approved "$issues"
     # So is a card blocked by a session that never began its work, once a check session starts (startagain()).
     [ "$asking" != 1 ] || [ -z "$issues" ] || startagain "$issues"
-    # A parent whose GitHub sub-issues are all closed, and an umbrella of a split issue whose slices have all landed or
+    # A parent whose GitHub sub-issues are each closed or landed, and an umbrella of a split issue whose slices have all landed or
     # are already done on main, is closed (umbrellas(), lib/slices.sh).
     [ "$asking" != 1 ] || [ -z "$issues" ] || umbrellas "$issues"
     # The sample of the minute, and while a card is in progress a weekly limit reading (reading() asks at

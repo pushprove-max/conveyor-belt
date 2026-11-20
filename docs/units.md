@@ -87,7 +87,9 @@ right-aligned and the title is what gives way.
   the feed gives no test count, the test files run (`3 of 6 test files`); with neither, only its last output. The
   list that the run got comes first: `changed: 7 files`.
 - **QUEUE**: `next 5 of 9`: the next five, numbered, the title cut to fit, the priority right-aligned (with
-  `follow-up` and `retried`); the issues that wait on another; then the held-back line.
+  `follow-up` and `retried`); the issues that wait on another; then the held-back line. With the rule "Push on
+  landing" Off, `landed, not pushed:` follows, with each open issue whose card landed and that waits for the push,
+  from today or an earlier day.
 - **BUILT, WAITING FOR YOUR PROD DEPLOY**: the open issues labelled `awaiting-deploy`, which the loop never picks,
   with how long each has carried the label. Shown only when there is one.
 - **LANDED TODAY**: the count of every card landed today and the day's cost in the heading; under it, the most

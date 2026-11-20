@@ -28,7 +28,7 @@
       | select($l | index($built) | not)
       | select(.number | IN($taken[]) | not)
       # A parent (an issue with GitHub sub-issues, parts: openissues()) is never built: its parts are the work, and
-      # umbrellas() closes it once they are all closed.
+      # umbrellas() closes it once each is closed or landed.
       | select((.parts // []) == [])
       | select($mode != "retried" or (.number | IN($again[])))
       | select(($l | index($fu) | not) or (.number | IN($ready[])) or (.body // "" | test("^Follow-up to #[0-9]+ \\(Conveyor card ") | not))

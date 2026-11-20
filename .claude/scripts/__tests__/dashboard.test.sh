@@ -763,10 +763,14 @@ q '[.panels.health.data.records[] | .state] == ["paused", null]' "each record's 
 # waiting, sat in Held with nothing saying what it waits on, or (the rule-skipped #35) was in no bay at all.
 answer "$(jq -c '.queue.holding += [{issue: 34, title: "Held and waits", waitsFor: [20]}] | .queue.skipped += [{issue: 35, title: "Skipped and waits", rule: "area:infra"}]
   | .control.held += [34]
-  | .open.held += [{issue: 34, title: "Held and waits", reasons: [{kind: "you"}, {kind: "waits", waitsFor: [20]}]}, {issue: 35, title: "Skipped and waits", reasons: [{kind: "rule", rule: "area:infra"}, {kind: "waits", waitsFor: [20]}]}]' <<<"$P")" \
+  | .open.held += [{issue: 34, title: "Held and waits", reasons: [{kind: "you"}, {kind: "waits", waitsFor: [20]}]}, {issue: 35, title: "Skipped and waits", reasons: [{kind: "rule", rule: "area:infra"}, {kind: "waits", waitsFor: [20]}]},
+    {issue: 37, title: "Landed, not pushed", reasons: [{kind: "card", step: "landed", card: "c9-37", notPushed: true}]}]' <<<"$P")" \
   "$P_URL" 1794000000 "$C" "$C_URL" 0
 run
 q '.panels.queue.data.waiting | map([.issue, .waitsFor]) == [[32, [20]]]' "the Queue lists under waiting the snapshot's waiting issue alone; a held or skipped one with a Depends on line is not there"
+# Issue 875. Bug: with push off, #37 (its card landed, not pushed) was counted as held, so the Queue said "Holds keep
+# N issues back" for an issue that is done and waits only for the push.
+q '.panels.queue.data | .held == 5 and .byRepo.sample.held == 4' "the Queue's held count leaves out an open issue whose card landed and is not pushed"
 q '.panels.belt3d.data.queue | (.waiting | map([.issue, .waitsFor])) == [[32, [20]]] and (.held | map([.issue, .waitsFor])) == [[30, []], [34, [20]], [35, [20]]]' \
   "Belt 3D keeps a held or rule-skipped issue with a Depends on line in Held with what it waits on, never under Waiting on a card"
 q '.panels.rules.data.waits | map([.issue, .waitsFor]) == [[32, [20]], [34, [20]], [35, [20]]]' \

@@ -160,6 +160,11 @@ By default, Conveyor lands each card and pushes when you press
 [Push landed](board.md#push-landed-and-run-full-test-suite). Turn on the Rules tab's **Push on landing** rule,
 and the loop pushes main on its own after each landing. Each push goes through the project's own pre-push hook.
 
+The push closes the issue of each card that it carries. With **Push on landing** off, the issue of a landed card stays
+open until you push. The Board and `/units` show it as "landed, not pushed", and the queue does not list it. A parent issue, such
+as an issue that **Split large issues** split, does not wait for the push. The loop closes it when each of its parts
+is closed or landed on main, and it removes the hold on it.
+
 Before the loop pushes main, and before Push now, Conveyor runs the test files that the test map and
 `.conveyor/test-links.json` link to the landings since the last push. Each file runs alone, once for each commit of
 main. This run never runs a test runner or the whole suite. If a file fails, Conveyor runs that file on each landing

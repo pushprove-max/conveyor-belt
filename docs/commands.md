@@ -51,10 +51,11 @@
   the Board's **Hold**.
 - A parent issue keeps a large piece of work as one issue. Its parts are its GitHub sub-issues, and each part is an
   issue with its own number and its own card. The loop never picks an open issue that has sub-issues. At each turn,
-  the loop closes an open parent when all its parts are closed, with a comment that names them.
+  the loop closes an open parent when each of its parts is closed or landed on main, with a comment that names them
+  and says which landed. This is the same with the rule **Push on landing** on or off.
   `conveyor.sh parts <parent> <issue>...` attaches the issues as sub-issues of the parent. You can also attach them on
   GitHub. The Board and `/units` get the parent of each issue in the queue, on the belt and in Needs you, and one
-  entry for each parent with its parts done of all and its parts on the belt.
+  entry for each parent with its parts done (closed, or landed and not pushed) of all and its parts on the belt.
 - `conveyor.sh control` with no action prints the control record. Its other actions (pause, cap, order, rules, models,
   the judge, accounts, the dependency guard, the push check) are in `conveyor/README.md`, Control.
 
