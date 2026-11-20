@@ -88,17 +88,17 @@ codeload() { # <engine folder>
 # and the functions. A top-level declare in an engine file needs -g, as this loads inside a function.
 codediff() { # <old engine folder> <new engine folder>
   local n d wd=$PWD sh='BASH.*|EPOCH.*|S?RANDOM|SECONDS|LINENO|PIPESTATUS|FUNCNAME|PWD|OLDPWD|OPTIND|OPTARG|PPID|UID|EUID|GROUPS|DIRSTACK|HISTCMD|SHLVL|COLUMNS|LINES|IFS'
-  local -A was=()
+  local -A snap=() # snap: the old folder's declarations; not `was`, card()'s string, which shellcheck takes for this array
   # Both from the card's folder: records.sh moves into the main checkout, and paths.sh and records.sh read where they start.
   codeload "$1" >/dev/null 2>&1 && cd "$wd" || return 1
-  for n in $(compgen -v | grep -xE '[A-Z][A-Z0-9_]*' | grep -vxE "$sh"); do was[v$n]=$(declare -p "$n" 2>/dev/null); done
-  for n in $(compgen -A function); do was[f$n]=$(declare -f "$n"); done
+  for n in $(compgen -v | grep -xE '[A-Z][A-Z0-9_]*' | grep -vxE "$sh"); do snap[v$n]=$(declare -p "$n" 2>/dev/null); done
+  for n in $(compgen -A function); do snap[f$n]=$(declare -f "$n"); done
   codeload "$2" >/dev/null 2>&1 || return 1
   for n in $(compgen -v | grep -xE '[A-Z][A-Z0-9_]*' | grep -vxE "$sh"); do
-    d=$(declare -p "$n" 2>/dev/null) && [ "$d" != "${was[v$n]-}" ] && [[ ! $d =~ ^declare\ -[a-zA-Z]*r ]] || continue
+    d=$(declare -p "$n" 2>/dev/null) && [ "$d" != "${snap[v$n]-}" ] && [[ ! $d =~ ^declare\ -[a-zA-Z]*r ]] || continue
     case $d in "declare -- "*) printf '%s\n' "declare -g ${d#declare -- }" ;; *) printf '%s\n' "declare -g${d#declare -}" ;; esac
   done
-  for n in $(compgen -A function); do d=$(declare -f "$n"); [ "$d" = "${was[f$n]-}" ] || printf '%s\n' "$d"; done
+  for n in $(compgen -A function); do d=$(declare -f "$n"); [ "$d" = "${snap[f$n]-}" ] || printf '%s\n' "$d"; done
 }
 # A main-red fix card (issue 0, no branch): a case found failing on its commit while it runs (mainred()) joins its
 # brief. card() calls this right before each session, review, judge, settle() and land, as a case can come at any time
@@ -170,11 +170,11 @@ failline() { # <worktree> <exit> <seconds> <failures json, or null> <verdicts js
 }
 card() { # <card> <issue> [<branch> <tip>]
   local c=$1 n=$2 br=${3:-} tip=${4:-} wt=$CARDS/$1 issue b t pass res vis unclear msg d err isfu='' dec='' why ups='' left='' rebased='' tfix='' last rc sec out merged away
-  local prev from='' fromk='' was='' rev='' mode='' note='' old more base inh='' rv=$REVIEW yesfrom='' said extra
+  local from='' fromk='' was='' mode='' note='' old more base inh='' rv=$REVIEW yesfrom='' said extra
+  local yfile='' # yfile: ybase is written beside the worktree, as .approvals
   local me cc seen=none sect='' nyes=0 heldto='' vmode='' ybase rules sprompt hdr fin='' finrev earlier='' prv='' caught='' owe tsess='' cmsg rtr rrev ro='[]' pro='[]' rmsg ported='' kp='' mates=() t5=() trc ran apart='' back='' rf sf='' sk='' mk='' pk='' pt=''
   local vrule=on rounds=0 rep hard refix='' waitsec=0 behind='[]' cpid chead cseen own kept='' docpass='' docs parsecheck='' pfix='' # waitsec, behind: the seconds it has waited on other cards, and those cards (settle())
   local sv an ex ids fl # sv, an, ex: a review's survived findings, its answers and the lines it cites (repeats(), answers(), excerpts()); ids, fl: the fix round's numbered findings and its lines (numbered(), fixlines())
-  local crev='[]' # crev: the review lines of the kept-patch chain this card carries (pro and rounds are read from them)
   local grown='' # grown: the judge was asked about the size of its change (growcheck(), lib/slices.sh)
   local rline='' ended='{}' stop='' finend='{}' earlyend='' fe # rline, ended, stop: a review's line before it is written, and why the loop ended (loopstop()); finend, earlyend, fe: why the loop of a port's kept review ended, and the stop the filed line carries
   local lfix='' # lfix: the change the landing gate's lint fix left, its cardpatch() (lintgate(), lib/lint.sh)
@@ -187,7 +187,6 @@ card() { # <card> <issue> [<branch> <tip>]
   local mainsec=0 mw mwon # mwon: main's commit and the cases it waits on there (mainwait()); mainsec: the seconds it has waited for main to change (mainwait()); its landed line's waitSec adds them to waitsec
   local repaired='' lane # repaired: the repair lane passed its test step (repairlane()), saying how; lane: its exit
   local ins rr # ins, rr: the review's instructions, and fix when it reviews the fix alone (rereview())
-  local kw='' # kw: keptway()'s answer for a kept patch
   local ph pf pb # ph, pf: the hash and the files of the change's lint policy diff (lintpolicy()); pb: the body kept by the card it resumes
   local shared sb # shared: this test step runs its shared test files again (sharedtests()); sb: the commit its last tests ran on
   # shellcheck disable=SC2034 # SEATCARD is read by seat() in lib/control.sh
@@ -199,81 +198,19 @@ card() { # <card> <issue> [<branch> <tip>]
   err=$(git worktree add -q --detach "$wt" "refs/heads/$BRANCH" 2>&1) || { block "$c" "$n" "$wt" "worktree: $err"; return; }
   [ -z "$br" ] || err=$(git -C "$wt" merge -q --squash "$tip" 2>&1) \
     || { block "$c" "$n" "$wt" "worktree: branch $br does not merge into main as it stands; rebase it on main and land it again: ${err:0:400}"; return; }
-  # A retried issue (not issue 0: a branch, or a main-red fix card, which `retry` gives back built from nothing): the last kept review of its blocked cards comes along (its findings go in the brief, and
-  # stay kept if this card blocks before a review of its own), and the last kept patch is applied when it still
-  # applies. No build and no review only when that review is the review of that patch: both kept by the same card
-  # (in its kept folder, or beside its worktree when it could not be moved there).
-  # A patch that no longer applies is still used: its session brings it onto main. Only one git cannot
-  # parse is given up: that card is built from nothing.
   # Its issue's retried lines, read by prior() and carried(), kept in this shell (stdb, lib/records.sh).
   [ "$n" = 0 ] || stdb ask issue retried "$n" >/dev/null 2>&1 || :
-  if [ -z "$br" ] && [ "$n" != 0 ] && prev=$(prior "$n") && [ -n "$prev" ]; then
-    from=$(jq -r .card <<<"$prev"); fromk=$(jq -r .kept <<<"$prev"); was=$(jq -r .reason <<<"$prev"); rev=$(jq -r .review <<<"$prev")
-    [ -z "$rev" ] || cp "$rev" "$wt.review"
-    if [ -n "$from" ]; then
-      if git -C "$wt" apply --index "$fromk/$from.patch" 2>/dev/null; then
-        # What the tests of the blocked card had passed (block(); revive() for a card whose process was gone): its run
-        # goes on from there, as a run again does, on main as it is now (rerunsince()).
-        cp "$fromk/$from.rerun" "$wt.rerun" 2>/dev/null || :
-        mode=session; note="resumed from the kept patch of card $from: one session, then review"
-        ! yeskept "$prev" || { mode=land; note="landing from the kept patch of card $from: no build and no review"; }
-      elif [ -r "$fromk/$from.patch" ] && git apply --numstat "$fromk/$from.patch" >/dev/null 2>&1; then
-        mode=port; note="the kept patch of card $from no longer applies to main: one session brings it onto main, then review"
-        # Its loop finished: only a landing conflict blocked it, and the kept review is the review of that
-        # patch (a GO, or a last NO-GO whose follow-ups were filed). One review of the port alone, then tests and landing.
-        if [[ $was == "rebase onto main conflicts: "* ]] && { [ "$rev" = "$fromk/$from.review" ] || [ "$rev" = "$CARDS/$from.review" ]; } \
-          && [ -s "$wt.review" ] && fin=$(verdict "$wt.review") && [ "$fin" != none ]; then
-          note="the kept patch of card $from finished its review loop and no longer applies to main: one session brings it onto main, then one review of that port alone"
-          # finend: why that loop ended, for the filed line: from the blocked card's last NO-GO review that ended a loop,
-          # or its filed line, which says it for a port that blocked again (its review a GO, the loop an earlier card's).
-          finend=$(stdb ask issue retried "$n" 2>/dev/null | jq -cs --arg f "$from" 'map(select(.card == $f and .stop != null and (.step == "filed" or (.step == "review" and .result == "NO-GO")))) | last // {} | with_entries(select(.key == "stop" or .key == "pass" or .key == "rounds"))' 2>/dev/null) || finend='{}'
-          [ -n "$finend" ] || finend='{}'
-        else fin=''; fi
-      else
-        mode=stale; note="the kept patch of card $from cannot be read: built from nothing"
-      fi
-      # Its commit trailers and the COVERED-BY lines of its replies (hollowproof()) come with its patch (a card that
-      # lands from it has no session to write them again, and its deleted hollow cases are checked again on them).
-      [ "$mode" = stale ] || for t in trailers covered; do cp "$fromk/$from.$t" "$wt.$t" 2>/dev/null || cp "$CARDS/$from.$t" "$wt.$t" 2>/dev/null; done
-    fi
-  fi
-  # A card that applied no kept patch (session, land) and merged no branch starts on a clean worktree of main. A staged
-  # change found there is no work of this card: its build would take it for its own, so the card stops here.
-  if [ -z "$br" ] && [ "$mode" != session ] && [ "$mode" != land ]; then
-    err=$(git -C "$wt" diff --cached --name-only 2>&1) || { block "$c" "$n" "$wt" "worktree: the engine could not read the staged change of the new worktree: ${err:0:400}"; return; }
-    [ -z "$err" ] || { block "$c" "$n" "$wt" "worktree: the new worktree already holds a staged change that is no kept work of this issue: $(paste -sd ' ' - <<<"$err" | cut -c 1-400)"; return; }
-  fi
-  # A main-red fix card commits, with its fix, the links from the files of the landing that broke a case to its test
-  # file (issue 598: testlinks()).
-  testlinks "$c" "$wt" || { block "$c" "$n" "$wt" "the test links of the main-red record could not be staged in .conveyor/test-links.json"; return; }
   # A card of issue 0 with no branch is a main-red fix card (redpick()): its entry in the main-is-red record stands in.
   issue=$(if [ -n "$br" ] && [ "$n" = 0 ]; then branchissue "$br" "$tip"; elif [ "$n" = 0 ]; then redissue "$c"; else gh issue view "$n" --json number,title,body,labels,milestone; fi) || issue=''
   # The control record's rule "visible changes need the owner's yes" (yesrule()), as the card starts. Off, nothing below
   # waits for or asks for a `Visible change approved:` line: no condition, section or inherited yes is held to, the
   # brief and the review leave the approval out, and a visible change lands as any change does.
   yesrule "${CARDCTL:-}" || { vrule=off; rv=$REVIEWOFF; }
-  # A kept patch lands unreviewed only on the issue its review read (keptway(): the body its card kept when it
-  # stopped for the yes). A body changed since: the patch is built on and reviewed against the issue as it is now. A
-  # section of what customers or staff will see changed since: the issue asks for another change, built from nothing.
-  if [ "$mode" = land ] && [ -n "$issue" ]; then
-    d=$fromk/$from.body; [ -e "$d" ] || d=$CARDS/$from.body
-    kw=$(keptway "$issue" "$d")
-    case $kw in
-      review) mode=session; note="resumed from the kept patch of card $from: the issue changed since its review: one session, then review" ;;
-      build) git -C "$wt" reset -q --hard 2>/dev/null || { block "$c" "$n" "$wt" "worktree: the kept patch of card $from could not be taken out of the worktree"; return; }
-        rm -f "$wt.rerun" "$wt.trailers" "$wt.covered"; mode=''; note="the issue's section of what customers or staff will see changed since the review of the kept patch of card $from: built from nothing" ;;
-    esac
-  fi
   # The test file of a speed-up or Optimize card (a bug card whose issue speedfile() names): its build is told the
   # target (speedbrief()).
   [ -z "$issue" ] || ! jq -e --arg t "$TYPE" 'any(.labels[]?; .name == $t)' <<<"$issue" >/dev/null || sf=$(speedfile "$issue") || sf=$(speedfile "$issue" "$OPTIMIZE") || sf=$(speedfile "$issue" "$REWRITE") || sf=''
-  # The owner's yes with a condition: the kept review was written before that line was, so nothing has held the change
-  # against the condition. The reviewer does (an unmet condition is a finding, and its fix session builds it).
-  [ "$mode" != land ] || [ -z "$issue" ] || [ "$vrule" = off ] || ! conditional "$issue" \
-    || { mode=review; note="reviewing the kept patch of card $from against the condition of $OWNER's yes: no build"; }
   # Approve before build (the rule at the top): an issue whose section names a change and that has an approval
-  # line holds the card to that section (heldto). A kept review that did not say the change matches it was not asked
-  # (or said it differs, and no second yes has come since), so the kept patch is reviewed against it: no build.
+  # line holds the card to that section (heldto).
   if [ -n "$issue" ] && [ "$vrule" = on ]; then
     seen=$(jq -r "$SEE"' seen' <<<"$issue" 2>/dev/null) || seen=none
     nyes=$(jq -r "$SEE"' approvals' <<<"$issue" 2>/dev/null) || nyes=0
@@ -288,53 +225,22 @@ card() { # <card> <issue> [<branch> <tip>]
   ybase=$nyes
   if [ "$seen" = nothing ]; then
     ybase=$(yesbase "$n"); [[ $ybase =~ ^[0-9]{1,3}$ ]] || ybase=$nyes
-    printf '%s\n' "$ybase" > "$wt.approvals"
+    yfile=1
   elif [ "$seen" = change ] && [[ $nyes =~ ^[0-9]+$ ]] && [ "$nyes" -ge 1 ]; then
     ybase=$(yesbase "$n")
-    if [[ $ybase =~ ^[0-9]{1,3}$ ]]; then printf '%s\n' "$ybase" > "$wt.approvals"; else ybase=''; fi
+    if [[ $ybase =~ ^[0-9]{1,3}$ ]]; then yfile=1; else ybase=''; fi
     [ -n "$ybase" ] && [ "$nyes" -gt "$ybase" ] || { heldto=1; vmode=held; }
   fi
-  [ "$mode" != land ] || [ -z "$heldto" ] || [ "$(visible "$wt.review" any)" = matches ] \
-    || { mode=review; note="reviewing the kept patch of card $from against the change $OWNER approved before the build: no build"; }
-  # A follow-up whose parent (or an issue up its chain) has the owner's yes: a kept review that gave no INHERITED
-  # answer was not asked whether the change stays inside that yes, so the kept patch is reviewed again (no build):
-  # the card neither lands unasked nor blocks on the same review at every retry. So is one whose answer was
-  # "beyond": that answer was given against the approval line as it was then, and the yes up the chain may since
-  # have grown to cover the change; only a kept "part" lands unreviewed.
+  # A follow-up whose parent (or an issue up its chain) has the owner's yes (inherit()).
   [ "$n" = 0 ] || [ -z "$issue" ] || [ "$vrule" = off ] || inh=$(inherit "$issue")
-  [ "$mode" != land ] || [ -z "$inh" ] || [ "$(inheritance "$wt.review")" = part ] \
-    || { mode=review; note="reviewing the kept patch of card $from: is its visible change part of the yes of #$(jq -r .from <<<"$inh")? No build"; }
-  # pro: the rollout actions the reviews of the retried cards whose kept patch this card carries named, in order: the
-  # card it resumes ($from), the card whose kept patch that one resumed (its worktree line names it), and so on back
-  # to one built from nothing. `retry` moved those review lines out of its card records, and a new review replaces the
-  # kept one, so its landing reads them here (ro, below). Bug: every retried card of the issue was read, so a patch
-  # `retry --fresh` discarded brought its rollout action back into the commit.
-  # One read gives the chain's review lines (crev): pro is their rollout actions, and rounds (below) counts them.
-  if [ -n "$from" ] && [ -n "$mode" ] && [ "$mode" != stale ]; then
-    crev=$(stdb ask issue retried "$n" | jq -cs --argjson n "$n" --arg f "$from" 'map(select(.issue == $n)) as $l
-      | def up: . as $c | ($l | map(select(.card == $c and .step == "worktree")) | first | .reason // ""
-          | select(test("built from nothing") | not) | capture("kept patch of card (?<c>c[A-Za-z0-9-]+)").c) // null;
-      [limit(100; $f | recurse(up; . != null))] as $chain
-      | [$l[] | select(.step == "review" and (.card | IN($chain[])))]') \
-      && pro=$(jq -c '[.[] | .rollout // [] | .[]]' <<<"$crev") \
-      || { block "$c" "$n" "$wt" "worktree: the engine could not read the rollout actions of the retried cards of the issue"; return; }
-  fi
-  # A card that takes up the kept patch of a loop that did not finish carries that loop's review rounds: the round
-  # limit counts every review of the issue's retried cards, not just this card's. So does a kept patch reviewed again
-  # with no build: a NO-GO there is fixed and goes round the loop. Not the port of a finished loop: its loop ended,
-  # and this review checks something new.
-  # Its fix rounds' findings and diffs come with them, so a finding that comes back is known as one (repeats()).
-  # Only the reviews of that loop count: those of the cards whose kept patch this card carries (crev, the lines pro
-  # is read from). A card's id is its own, so another project's cards are not in the chain; the lines' repo is not
-  # read, as a project renamed in host.json keeps its chain. Bug (issue 1071): every review line of the issue in the
-  # retried file was counted, another chain's and another project's too, so a card's first NO-GO could be its last review.
-  if [ "$mode" = session ] || [ "$mode" = review ] || { [ "$mode" = port ] && [ -z "$fin" ]; }; then
-    rounds=$(jq 'length' <<<"$crev" 2>/dev/null) || rounds=0
-    [[ $rounds =~ ^[0-9]+$ ]] || rounds=0
-    # Rounds still beside the old worktree are the ones its block could not move (a folder of that name in the kept
-    # folder stopped it, so that one is not the history): those are copied.
-    if [ -d "$CARDS/$from.rounds" ]; then cp -R "$CARDS/$from.rounds" "$wt.rounds" 2>/dev/null; else cp -R "$fromk/$from.rounds" "$wt.rounds" 2>/dev/null; fi
-  fi
+  # The resume of a retried card: how it takes up the kept patch of its issue's blocked cards.
+  resumeplan || { block "$c" "$n" "$wt" "$err"; return; }
+  # A main-red fix card commits, with its fix, the links from the files of the landing that broke a case to its test
+  # file (issue 598: testlinks()). After resumeplan's check that the new worktree holds no staged change.
+  testlinks "$c" "$wt" || { block "$c" "$n" "$wt" "the test links of the main-red record could not be staged in .conveyor/test-links.json"; return; }
+  # ybase is kept beside the worktree (yesbase() reads it for the next card) once the checks of the new worktree have
+  # passed: a card that stops on one of them keeps no count.
+  [ -z "$yfile" ] || printf '%s\n' "$ybase" > "$wt.approvals"
   [ -z "$note" ] || echo "conveyor: card $c: $note"
   # The worktree line is written before the linking, so the linking's seconds are those of the deps line.
   # The weekly limit as the card begins: asked for here (at most every LIMIT_TTL seconds), guard or no guard,
@@ -1050,4 +956,114 @@ card() { # <card> <issue> [<branch> <tip>]
     block "$c" "$n" "$wt" "$t"; return
   done
   clean "$wt"
+}
+# The resume of a retried card (card()). A retried issue (not issue 0: a branch, or a main-red fix card, which `retry`
+# gives back built from nothing): the last kept review of its blocked cards comes along (its findings go in the brief,
+# and stay kept if this card blocks before a review of its own), and the last kept patch is applied when it still
+# applies. No build and no review only when that review is the review of that patch: both kept by the same card
+# (in its kept folder, or beside its worktree when it could not be moved there).
+# A patch that no longer applies is still used: its session brings it onto main. Only one git cannot
+# parse is given up: that card is built from nothing.
+# It reads card()'s n, br, wt, issue, vrule, heldto and inh, and sets its from, fromk, was, mode (land, review,
+# session, port, stale, or none: built from nothing), note, fin, finend, pro and rounds, and the files
+# beside the worktree that come with the kept patch (review, rerun, trailers, covered, rounds). It fails, with the
+# reason in err, when the card must block: a staged change in the new worktree that is no kept patch, a kept patch it
+# could not take out again, or retried lines it could not read.
+resumeplan() {
+  local prev d t rev='' kw='' crev='[]' # rev: the kept review prior() found; kw: keptway()'s answer for a kept patch; crev: the review lines of the kept-patch chain this card carries (pro and rounds are read from them)
+  if [ -z "$br" ] && [ "$n" != 0 ] && prev=$(prior "$n") && [ -n "$prev" ]; then
+    from=$(jq -r .card <<<"$prev"); fromk=$(jq -r .kept <<<"$prev"); was=$(jq -r .reason <<<"$prev"); rev=$(jq -r .review <<<"$prev")
+    [ -z "$rev" ] || cp "$rev" "$wt.review"
+    if [ -n "$from" ]; then
+      if git -C "$wt" apply --index "$fromk/$from.patch" 2>/dev/null; then
+        # What the tests of the blocked card had passed (block(); revive() for a card whose process was gone): its run
+        # goes on from there, as a run again does, on main as it is now (rerunsince()).
+        cp "$fromk/$from.rerun" "$wt.rerun" 2>/dev/null || :
+        mode=session; note="resumed from the kept patch of card $from: one session, then review"
+        ! yeskept "$prev" || { mode=land; note="landing from the kept patch of card $from: no build and no review"; }
+      elif [ -r "$fromk/$from.patch" ] && git apply --numstat "$fromk/$from.patch" >/dev/null 2>&1; then
+        mode=port; note="the kept patch of card $from no longer applies to main: one session brings it onto main, then review"
+        # Its loop finished: only a landing conflict blocked it, and the kept review is the review of that
+        # patch (a GO, or a last NO-GO whose follow-ups were filed). One review of the port alone, then tests and landing.
+        if [[ $was == "rebase onto main conflicts: "* ]] && { [ "$rev" = "$fromk/$from.review" ] || [ "$rev" = "$CARDS/$from.review" ]; } \
+          && [ -s "$wt.review" ] && fin=$(verdict "$wt.review") && [ "$fin" != none ]; then
+          note="the kept patch of card $from finished its review loop and no longer applies to main: one session brings it onto main, then one review of that port alone"
+          # finend: why that loop ended, for the filed line: from the blocked card's last NO-GO review that ended a loop,
+          # or its filed line, which says it for a port that blocked again (its review a GO, the loop an earlier card's).
+          finend=$(stdb ask issue retried "$n" 2>/dev/null | jq -cs --arg f "$from" 'map(select(.card == $f and .stop != null and (.step == "filed" or (.step == "review" and .result == "NO-GO")))) | last // {} | with_entries(select(.key == "stop" or .key == "pass" or .key == "rounds"))' 2>/dev/null) || finend='{}'
+          [ -n "$finend" ] || finend='{}'
+        else fin=''; fi
+      else
+        mode=stale; note="the kept patch of card $from cannot be read: built from nothing"
+      fi
+      # Its commit trailers and the COVERED-BY lines of its replies (hollowproof()) come with its patch (a card that
+      # lands from it has no session to write them again, and its deleted hollow cases are checked again on them).
+      [ "$mode" = stale ] || for t in trailers covered; do cp "$fromk/$from.$t" "$wt.$t" 2>/dev/null || cp "$CARDS/$from.$t" "$wt.$t" 2>/dev/null; done
+    fi
+  fi
+  # A card that applied no kept patch (session, land) and merged no branch starts on a clean worktree of main. A staged
+  # change found there is no work of this card: its build would take it for its own, so the card stops here.
+  if [ -z "$br" ] && [ "$mode" != session ] && [ "$mode" != land ]; then
+    t=$(git -C "$wt" diff --cached --name-only 2>&1) || { err="worktree: the engine could not read the staged change of the new worktree: ${t:0:400}"; return 1; }
+    [ -z "$t" ] || { err="worktree: the new worktree already holds a staged change that is no kept work of this issue: $(paste -sd ' ' - <<<"$t" | cut -c 1-400)"; return 1; }
+  fi
+  # A kept patch lands unreviewed only on the issue its review read (keptway(): the body its card kept when it
+  # stopped for the yes). A body changed since: the patch is built on and reviewed against the issue as it is now. A
+  # section of what customers or staff will see changed since: the issue asks for another change, built from nothing.
+  if [ "$mode" = land ] && [ -n "$issue" ]; then
+    d=$fromk/$from.body; [ -e "$d" ] || d=$CARDS/$from.body
+    kw=$(keptway "$issue" "$d")
+    case $kw in
+      review) mode=session; note="resumed from the kept patch of card $from: the issue changed since its review: one session, then review" ;;
+      build) git -C "$wt" reset -q --hard 2>/dev/null || { err="worktree: the kept patch of card $from could not be taken out of the worktree"; return 1; }
+        rm -f "$wt.rerun" "$wt.trailers" "$wt.covered"; mode=''; note="the issue's section of what customers or staff will see changed since the review of the kept patch of card $from: built from nothing" ;;
+    esac
+  fi
+  # The owner's yes with a condition: the kept review was written before that line was, so nothing has held the change
+  # against the condition. The reviewer does (an unmet condition is a finding, and its fix session builds it).
+  [ "$mode" != land ] || [ -z "$issue" ] || [ "$vrule" = off ] || ! conditional "$issue" \
+    || { mode=review; note="reviewing the kept patch of card $from against the condition of $OWNER's yes: no build"; }
+  # Held to the section approved before the build (heldto): a kept review that did not say the change matches it was
+  # not asked (or said it differs, and no second yes has come since), so the kept patch is reviewed against it: no build.
+  [ "$mode" != land ] || [ -z "$heldto" ] || [ "$(visible "$wt.review" any)" = matches ] \
+    || { mode=review; note="reviewing the kept patch of card $from against the change $OWNER approved before the build: no build"; }
+  # A follow-up whose parent (or an issue up its chain) has the owner's yes (inh): a kept review that gave no INHERITED
+  # answer was not asked whether the change stays inside that yes, so the kept patch is reviewed again (no build):
+  # the card neither lands unasked nor blocks on the same review at every retry. So is one whose answer was
+  # "beyond": that answer was given against the approval line as it was then, and the yes up the chain may since
+  # have grown to cover the change; only a kept "part" lands unreviewed.
+  [ "$mode" != land ] || [ -z "$inh" ] || [ "$(inheritance "$wt.review")" = part ] \
+    || { mode=review; note="reviewing the kept patch of card $from: is its visible change part of the yes of #$(jq -r .from <<<"$inh")? No build"; }
+  # pro: the rollout actions the reviews of the retried cards whose kept patch this card carries named, in order: the
+  # card it resumes ($from), the card whose kept patch that one resumed (its worktree line names it), and so on back
+  # to one built from nothing. `retry` moved those review lines out of its card records, and a new review replaces the
+  # kept one, so its landing reads them (ro, card()). Bug: every retried card of the issue was read, so a patch
+  # `retry --fresh` discarded brought its rollout action back into the commit.
+  # One read gives the chain's review lines (crev): pro is their rollout actions, and rounds (below) counts them.
+  if [ -n "$from" ] && [ -n "$mode" ] && [ "$mode" != stale ]; then
+    crev=$(stdb ask issue retried "$n" | jq -cs --argjson n "$n" --arg f "$from" 'map(select(.issue == $n)) as $l
+      | def up: . as $c | ($l | map(select(.card == $c and .step == "worktree")) | first | .reason // ""
+          | select(test("built from nothing") | not) | capture("kept patch of card (?<c>c[A-Za-z0-9-]+)").c) // null;
+      [limit(100; $f | recurse(up; . != null))] as $chain
+      | [$l[] | select(.step == "review" and (.card | IN($chain[])))]') \
+      && pro=$(jq -c '[.[] | .rollout // [] | .[]]' <<<"$crev") \
+      || { err="worktree: the engine could not read the rollout actions of the retried cards of the issue"; return 1; }
+  fi
+  # A card that takes up the kept patch of a loop that did not finish carries that loop's review rounds: the round
+  # limit counts every review of the issue's retried cards, not just this card's. So does a kept patch reviewed again
+  # with no build: a NO-GO there is fixed and goes round the loop. Not the port of a finished loop: its loop ended,
+  # and this review checks something new.
+  # Its fix rounds' findings and diffs come with them, so a finding that comes back is known as one (repeats()).
+  # Only the reviews of that loop count: those of the cards whose kept patch this card carries (crev, the lines pro
+  # is read from). A card's id is its own, so another project's cards are not in the chain; the lines' repo is not
+  # read, as a project renamed in host.json keeps its chain. Bug (issue 1071): every review line of the issue in the
+  # retried file was counted, another chain's and another project's too, so a card's first NO-GO could be its last review.
+  if [ "$mode" = session ] || [ "$mode" = review ] || { [ "$mode" = port ] && [ -z "$fin" ]; }; then
+    rounds=$(jq 'length' <<<"$crev" 2>/dev/null) || rounds=0
+    [[ $rounds =~ ^[0-9]+$ ]] || rounds=0
+    # Rounds still beside the old worktree are the ones its block could not move (a folder of that name in the kept
+    # folder stopped it, so that one is not the history): those are copied.
+    if [ -d "$CARDS/$from.rounds" ]; then cp -R "$CARDS/$from.rounds" "$wt.rounds" 2>/dev/null; else cp -R "$fromk/$from.rounds" "$wt.rounds" 2>/dev/null; fi
+  fi
+  return 0
 }
