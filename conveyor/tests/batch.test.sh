@@ -60,10 +60,14 @@ batchruns() { grep -c "tests a batch of" <<<"$out"; } # the batch test runs the 
 # test run. Three ready cards sharing a file land together: one test run, then one move of main with each card's own
 # commit and message, in the order they became ready (#7, whose turn it is, last), and each card's own landed line,
 # as if it landed alone, naming the batch; one push carries them. #7's check holds a second more once #8 and #9 wait
-# ($STUB/holdsec), so each has waited a second at least when the batch lands it.
+# ($STUB/holdsec), so each has waited a second at least when the batch lands it. Main's hooks judge each card's commit
+# as if it landed alone: #8 adds eight.txt, and main's commit-msg hook refuses a commit that adds eight.txt without
+# naming #8, so #9's and #7's commits, after #8's, pass it only if their hooks see their own change, not #8's too.
 t_batchland() {
   batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"; : > "$STUB/holdsec"
-  echo 'case $PWD in *-7) sed -i 1s/.*/seven/ a.txt ;; *-8) echo eight >> a.txt ;; *) sed -i 10s/.*/nine/ a.txt ;; esac' > "$STUB/build"
+  echo 'case $PWD in *-7) sed -i 1s/.*/seven/ a.txt ;; *-8) echo eight >> a.txt; : > eight.txt ;; *) sed -i 10s/.*/nine/ a.txt ;; esac' > "$STUB/build"
+  printf '%s\n' '! git diff --cached --name-only | grep -qx eight.txt || grep -q "(#8)" "$1" || { echo "eight.txt without #8"; exit 1; }' > "$R/.git/hooks/commit-msg"
+  chmod +x "$R/.git/hooks/commit-msg"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   c7=$(cardof 7); c8=$(cardof 8); c9=$(cardof 9)
   [ "$(batchruns)" = 1 ] && [ "$(wc -l < "$STUB/tests")" = 4 ] || fail "the three cards did not land on one test run after their own three: $(wc -l < "$STUB/tests") runs: $out"
@@ -88,6 +92,7 @@ t_batchland() {
     && [ "$(git -C "$T/$CASE/origin" rev-parse main)" = "$(git -C "$R" rev-parse main)" ] || fail "one push did not carry the three commits: $(st 'select(.step == "pushed")')"
   [ "$(sed -n '1p;10p;$p' "$R/a.txt" | tr '\n' ' ')" = "seven nine eight " ] && [ -z "$(git -C "$R" status --porcelain)" ] && [ -z "$(ls "$T/$CASE/cards")" ] \
     || fail "main does not hold the three changes, is dirty, or a worktree or mark is left: $(ls "$T/$CASE/cards")"
+  [ -z "$(git -C "$R" worktree list | grep -v "^$R ")" ] || fail "a worktree is left in git's list: $(git -C "$R" worktree list)"
   [ "$(wc -l < "$STUB/reviews")" = 3 ] || fail "a card was reviewed again: $(st '"\(.issue) \(.step) \(.result)"' | tr '\n' ,)"
 }
 
@@ -376,21 +381,6 @@ t_batchapply() {
   git -C "$R" diff --cached --quiet && git -C "$R" diff --quiet HEAD -- a.txt \
     || fail "a card's change is left in main's checkout with no commit: $(git -C "$R" diff HEAD) $(st 'select(.step == "landed")')"
   for s in $(st 'select(.step == "landed") | .sha'); do git -C "$R" merge-base --is-ancestor "$s" main || fail "a landed line names $s, which main does not hold"; done
-}
-
-# Main's hooks judge each card's commit as if it landed alone: a later card's hooks see its own change against the
-# commit before it, not the earlier cards' changes too. #8 adds eight.txt; main's commit-msg hook refuses a commit that
-# adds eight.txt without naming #8. #7, after #8 in the batch, adds nothing of the kind, and the batch lands.
-t_batchhooks() {
-  batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; echo 8 > "$STUB/ready"
-  echo 'case $PWD in *-7) sed -i 1s/.*/seven/ a.txt ;; *) echo eight >> a.txt; : > eight.txt ;; esac' > "$STUB/build"
-  printf '%s\n' '! git diff --cached --name-only | grep -qx eight.txt || grep -q "(#8)" "$1" || { echo "eight.txt without #8"; exit 1; }' > "$R/.git/hooks/commit-msg"
-  chmod +x "$R/.git/hooks/commit-msg"
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  c7=$(cardof 7); c8=$(cardof 8)
-  [ "$(batchruns)" = 1 ] && [ "$(st 'select(.step == "landed") | "\(.issue) \(.batch | join(" "))"' | tr '\n' ,)" = "8 $c8 $c7,7 $c8 $c7," ] \
-    || fail "#7's commit was judged with #8's change in it, so the batch did not land: $out"
-  [ -z "$(ls "$T/$CASE/cards")" ] && [ -z "$(git -C "$R" worktree list | grep -v "^$R ")" ] || fail "a worktree is left: $(git -C "$R" worktree list)"
 }
 
 # What main gets during the batch's one run, for the cases below: $STUB/during is run once, in main's checkout, by the
