@@ -126,3 +126,13 @@ t_swecheckenginefail() {
   grep -q "^conveyor: failed: on the trivial task, its command failed (exit 1): ENGINE-FAIL-SAID" <<<"$o" \
     || fail "the reason does not hold the last line of the engine's loop log: $o"
 }
+
+# Bug (#1025): an engine version whose card blocked in the container (its commit refused there) failed its check with
+# "changed no file" alone, so the Benchmarks page did not say why that version cannot run. Here the card blocks.
+t_swecheckblocked() {
+  swe; local o
+  : > "$SWE_FX/eblock" || fail "the blocking engine was not set"
+  o=$(loop bench swe arms check conveyor 2>&1) && fail "the check passed with a card that changed nothing: $o"
+  grep -q "^conveyor: failed: it ran the trivial task headless but changed no file; its card ended at its blocked step (blocked): commit: git: 'hook' is not a git command" <<<"$o" \
+    || fail "the reason does not give the card's last step and its reason: $o"
+}

@@ -125,7 +125,7 @@ arms on the same tasks. With no `--arm`, the run uses the `conveyor` arm.
 
 | Arm | What builds a task | Install in the container | Login |
 | --- | --- | --- | --- |
-| `conveyor` | Conveyor, on the seats of the control record | Node.js, the Claude Code and Codex CLIs, jq 1.8.1 and the engine version. The preflight fails when jq is older than 1.8 | Claude, and Codex when a seat uses Codex |
+| `conveyor` | Conveyor, on the seats of the control record | Node.js, the Claude Code and Codex CLIs, jq 1.8.1, git 2.56.1 (first on the `PATH`) and the engine version. The preflight fails when jq is older than 1.8 or git is older than 2.36 | Claude, and Codex when a seat uses Codex |
 | `conveyor-codex-claude` | Conveyor, with Codex as the builder and Claude as the reviewer | The same as `conveyor` | Claude and Codex |
 | `solo` | One Claude session, with no shell (the same as `--solo`) | The Claude Code CLI | Claude |
 | `solo-review` | One Claude session, then one more Claude session that reviews the change and fixes it | The Claude Code CLI | Claude |
@@ -218,7 +218,9 @@ and memory limits (the `limits` setting in `conveyor/bench/swe.json`) and the sa
 `taskTimeout` setting in the same file). The [run settings](#run-settings) of a run change these limits for all of its
 arms. The container can see the task's sandbox and no other folder of this
 machine, except for a Conveyor arm: its container can also see the folder of the installed Conveyor version,
-read-only. The official harness grades the patch of every arm in the same way.
+read-only. A Conveyor arm's container also runs without Docker's seccomp and AppArmor profiles and with all of `/proc`
+visible, so that Codex's own sandbox can start a command there. Conveyor v1.7.0 and older use that sandbox for their
+reviews. The official harness grades the patch of every arm in the same way.
 
 An arm uses the subscription logins that the cards use. The Claude login is the one of the builder's account
 (`conveyor.sh control account`). The Codex login is the one in `~/.codex`. Conveyor copies the login files into the
@@ -228,7 +230,9 @@ image, the repository, a log or a result.
 ### Preflight
 
 An arm runs only after its preflight passes. The preflight checks that each login of the arm is on this machine. It then installs the arm in a container and runs the arm on one small task: a file that prints a
-word with a spelling mistake. The arm must fire and change the file. A preflight that fails says what is missing. A
+word with a spelling mistake. The arm must fire and change the file. A preflight that fails says what is missing.
+When a Conveyor version's card ends with no change, the preflight also gives the last step of that card and its
+reason. A
 run does not start when the preflight of one of its arms fails. A preflight that passed stays good for one day, while
 the arm's file and the logins it needs do not change. A run uses it only when it ran on the same image, limits and task
 set as the run's. If not, the run does the preflight again.
@@ -357,8 +361,9 @@ shows. Use `swe 1` and `swe 5` to see that a version works at all, and `swe 50` 
   makes compiled parts can fail there for reasons other than the change.
 - The minutes are those of this machine and depend on the other work on it.
 - The sessions of an arm run in its container and see only the task's sandbox (a Conveyor arm also sees the folder of
-  the installed Conveyor version, read-only). In a Conveyor arm, Codex sessions run without Codex's own sandbox,
-  because it cannot start a command in the container. The container is their sandbox. Conveyor also reads the reference
+  the installed Conveyor version, read-only). In a Conveyor arm, Conveyor v1.7.0 and older run Codex sessions in
+  Codex's own sandbox, and later versions run them without it. So a Conveyor arm's container has fewer of
+  Docker's own limits on its commands (see [Containers and logins](#containers-and-logins)). The container is their sandbox. Conveyor also reads the reference
   fixes and hidden tests only to make the task list and to grade a patch, and then removes them.
 - The task images are for x86-64. Each arm installs its tools in each task's container, with the network, so each
   task takes more minutes than the build alone, and an install that the network stops makes the arm fail that task.

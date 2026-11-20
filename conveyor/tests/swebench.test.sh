@@ -17,7 +17,7 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # The fixture, made once per run (template) and copied: in <folder>/task.git a task repository whose base commit
 # holds x.py "bug"; in <folder>/eng.git an engine with commits A (tagged v1.0.0) and B (main, its review stage
 # changed): each one's `run` notes "<version> <issue title>" in $SWE_FX/log, waits while $SWE_FX/hold is there, exits 1 while
-# $SWE_FX/efail is there, and writes the card's records; A lands "fixed" in x.py for every task, B blocks the task proj__a-1 after two NO-GO
+# $SWE_FX/efail is there, blocks its card with no change while $SWE_FX/eblock is there, and writes the card's records; A lands "fixed" in x.py for every task, B blocks the task proj__a-1 after two NO-GO
 # reviews, each read by the judge. <folder>/py is the stub harness: the two tasks, an image fetch that waits while
 # $SWE_FX/ihold is there and fails when $SWE_FX/broken names it, and a grade that resolves a patch holding "fixed" unless $SWE_FX/wrong names the task.
 swemake() { # <folder>
@@ -43,6 +43,8 @@ mkdir -p "$CONVEYOR_MAIN/conveyor/state"
 rec() { jq -nc --arg s "$1" --arg r "$2" --arg w "${3:-}" --argjson j "${4:-null}" --arg t "${5:-}" '{card: "c1", issue: 1, step: $s, result: $r, reason: $w, time: "2026-11-01T00:00:00Z", tokens: {claude: 100, codex: 10}}
   + (if $j == null then {} else {judge: $j} end) + (if $t == "" then {} else {tail: $t} end)' >> "$CONVEYOR_MAIN/conveyor/state/cards.jsonl"; }
 rec picked ok; rec build ok
+# With $SWE_FX/eblock, the card blocks with no change, as an engine whose commit the container's git refuses.
+[ ! -e "$SWE_FX/eblock" ] || { rec blocked blocked "commit: git: 'hook' is not a git command"; exit 0; }
 # The project name this checkout's loop takes, as the real engine names it (and its machine slot file after it).
 (set -- run; HERE=$SWE_SRC; . "$SWE_SRC/lib/paths.sh" && echo "$RTAG" > "$SWE_FX/rtag")
 J='{"model":"m","tokens":{"claude":5,"codex":0},"accepted":[],"declined":[]}' # a judge session on the review
@@ -325,6 +327,8 @@ t_swesolo() {
   [ "$(cat "$STUB/solo-gh")" = "$B/work/$first/bin/gh" ] || fail "the solo session was not given the sandbox's gh: $(cat "$STUB/solo-gh")"
   [ "$(grep '^create ' "$SWE_FX/docker.log" | grep -o -- '-v [^ ]*' | tr '\n' ' ')" = "-v $B/work/$first:$B/work/$first " ] \
     || fail "the container mounts more of the host than the task's sandbox: $(grep '^create ' "$SWE_FX/docker.log")"
+  # Docker's own confinement is taken off a conveyor arm's container only, for Codex's sandbox (swe_box).
+  ! grep '^create ' "$SWE_FX/docker.log" | grep -q -- '--security-opt' || fail "the solo arm's container runs with Docker's confinement off: $(grep '^create ' "$SWE_FX/docker.log")"
   local a; a=$(tail -n 1 "$STUB/sessions")
   [[ $a == *'--permission-mode dontAsk'* && $a == *'--tools Read,Grep,Glob,Edit,Write '* && $a == *"Edit(/$B/work/$first/swe-${R##*/}/**)"* \
     && $a == *'--setting-sources  --strict-mcp-config'* && $a != *bypassPermissions* ]] \

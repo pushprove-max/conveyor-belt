@@ -201,6 +201,22 @@ t_swearmjq() {
     || fail "the failed preflight does not name the container's jq version: $out"
 }
 
+# Bugs (#1025): the image's git 2.34 has no `git hook run`, so an engine from before #1022 could not commit there, and
+# the preflight passed on it; and Docker's confinement kept Codex's own sandbox, which such an engine's reviews use,
+# from starting a command, so they read nothing. Here the arm's install puts a git 2.34.1 first on the PATH.
+t_swearmgit() {
+  swe; local out c
+  jq '.install = "mkdir -p ~/.local/bin && printf \"#!/bin/sh\\necho git version 2.34.1\\n\" > ~/.local/bin/git && chmod +x ~/.local/bin/git"' \
+    "$SWE_FX/arms/conveyor.json" > "$SWE_FX/arms/conveyor-oldgit.json" || fail "the arm was not made"
+  out=$(loop bench swe arms check conveyor-oldgit 2>&1) && fail "the preflight passed with git 2.34.1 in the container: $out"
+  grep -q "^conveyor-oldgit: failed: on the trivial task, its preflight command failed: .*git version 2\.34\.1: Conveyor needs git 2\.36 or newer" <<<"$out" \
+    || fail "the failed preflight does not name the container's git version: $out"
+  # The container Codex's sandbox can start a command in, with the run's limits and mounts kept.
+  c=$(grep '^create .*-conveyor-oldgit-' "$SWE_FX/docker.log")
+  [[ $c == *'--security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined '* && $c == *' --cpus '*' --memory '* \
+    && $(grep -o -- '-v [^ ]*' <<<"$c" | wc -l) = 2 ]] || fail "the conveyor arm's container is not the one Codex's sandbox runs in, with its limits: $c"
+}
+
 # Bug: the seats were worked out on this host's models, so on a host with no Codex and a pack that lists no models the
 # default reviewer was Claude's, while in the container, where the arm installs Codex, the same default is Codex's:
 # the arm passed with no Codex login and its container had none.

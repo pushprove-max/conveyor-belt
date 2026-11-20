@@ -227,9 +227,12 @@ swe_logindest() { case $1 in claude) echo .claude/.credentials.json ;; codex) ec
 # passwd line names it) with a home that is in the container only. The logins are copied into that home before the
 # container starts: they are in this one container, gone when it is removed, and never in an image. The home's
 # .gitconfig gives git an identity: the task's image has none, and the engine cannot commit a fix without one.
+# A conveyor arm's container (an engine folder given) also runs with Docker's seccomp, AppArmor and /proc masks off:
+# Codex's own Linux sandbox, which an engine from before CONVEYOR_BENCH_BOX gives its reviews (-s read-only), cannot
+# start a command under them, so that engine's review read nothing. Its CPU, memory and mount limits stay.
 swe_box() { # <container> <image> <sb> <logins, space-separated> [<engine folder>]
   local h l f m=() rc=0
-  [ -z "${5:-}" ] || m=(-v "$5:$5:ro")
+  [ -z "${5:-}" ] || m=(-v "$5:$5:ro" --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined)
   docker create --name "$1" --user "$(id -u):$(id -g)" -e "HOME=$SWE_HOME" --cpus "$(swe_set .cpus)" --memory "$(swe_set .memory)" \
     -v "$3:$3" "${m[@]}" --entrypoint sleep "$2" infinity > /dev/null || return 1
   h=$(mktemp -d) || return 1
@@ -461,7 +464,11 @@ swe_preflight() { # <arm json> <image> <engine's conveyor.sh, conveyor kind>
     if ! t=$(swe_checktask "$2") || ! swe_sandbox "$t" "$sb" 2> /dev/null; then why="the trivial task could not be set up"
     elif ! b=$(swe_trial "$t" "$sb" "$a" "$3"); then why=$b
     elif ! jq -e .fired <<<"$b" > /dev/null; then why="on the trivial task, $(jq -r .why <<<"$b")"
-    elif [ ! -s "$sb.h/patch" ]; then why="it ran the trivial task headless but changed no file"; fi
+    elif [ ! -s "$sb.h/patch" ]; then why="it ran the trivial task headless but changed no file"
+      # A conveyor arm's card says why it ended with no change (an engine version that cannot run in the container:
+      # its commit refused, its review blocked): the last step of its card, with its reason.
+      l=$(jq -r '.steps | last | select(. != null) | "its card ended at its \(.step) step (\(.result))\(if (.reason // "") != "" then ": \(.reason)" else "" end)"' <<<"$b" 2>/dev/null)
+      [ -z "$l" ] || why+="; $(cliwords "$l" | head -c 400)"; fi
     { chmod -R u+w "$sb" "$sb.h"; rm -rf "$sb" "$sb.h"; } 2>/dev/null
   fi
   printf '%s' "$why"
