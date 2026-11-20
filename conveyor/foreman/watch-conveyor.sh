@@ -42,7 +42,8 @@
 #     its finding: "pipeline change held: #615 (follow-up of #597): <finding>"
 #   no loop running, a push failing for over 10 minutes or listed under the Board's blocked cards (needsYou.blocked:
 #   it failed twice), a control record the loop cannot read, a dependency cycle among open issues, Conveyor idle
-#   (nothing on the belt and nothing to pick) on two polls in a row, and, each on three polls in a row, gh signed out
+#   (nothing on the belt and nothing to pick, in a snapshot made after the last change to the card records) on two
+#   polls in a row, and, each on three polls in a row, gh signed out
 #   (no token: `gh auth token`; the wake gives health's ghWhy) and GitHub not reached (gh signed in, but `gh auth
 #   status` failed or timed out)
 # Every wake names every item. Its first line lists every issue number by kind, per project:
@@ -102,7 +103,9 @@ REF='def ref: (.name | strings) // "#\(.issue)";'
 # tree (pids), as one sent to it alone leaves those under it, the builder among them, stopped.
 PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
   def cont: ([.pids | arrays | .[] | numbers] | if . == [] then null else . end) as $p | "`kill -CONT \($p // [.pid] | map(tostring) | join(" "))`";
-  (type == "object" and .belt == [] and (.queue.next // null) == []) as $idle
+  # Not idle when the card records changed after the snapshot was made (recordsNewer, commands/snapshot.sh): its empty
+  # belt can leave out a card begun since (#1032).
+  (type == "object" and .belt == [] and (.queue.next // null) == [] and .recordsNewer != true) as $idle
   | pushed($hist[0]) as $pushed
   | . as $snap
   # The push the Board lists under blocked (snapshot.sh: a push that failed twice), which health holds only as pushFailingSince.
@@ -249,7 +252,8 @@ unreported() {
 }
 
 # --status [<project>] (`conveyor.sh foreman status`): each record's state now as short plain text, read from one
-# snapshot, with no wake put and nothing marked reported: the belt (its count, and while the loop runs its cards
+# snapshot, with no wake put and nothing marked reported: the belt (its count, "or more" when the card records changed
+# after the snapshot was made, and while the loop runs its cards
 # building against the cap and those waiting on another card, which that count leaves out; then a card a line: issue, or a main-red fix card's name, step, time in step, title cut to 60 characters), the
 # cards waiting on other issues and the held issues as issue numbers, the whole-suite run under way (else the last one
 # that ended), then every problem a wake names, the push failing at once, the suite that ended left out (its line is
@@ -261,6 +265,7 @@ unreported() {
 # waiter: "waiter: listening", "waiter: starting again" or "waiter: down: <why>" (lib.sh waiter_state).
 STATUS=$SUITE$REF'def num: if type == "number" then "#\(.)" else tostring end;
   "\($repo): \(.belt | if type == "array" then length else 0 end) on the belt"
+    + (if .recordsNewer == true then " (or more: the card records changed after this snapshot was made, and a new one is not ready)" else "" end)
     + ((.health | objects | select((.building | type) == "number" and (.builderCap | type) == "number")
       | "; building \(.building) of the cap \(.builderCap)\(if (.waitingCount // 0) > 0 then ", \(.waitingCount) waiting not counted" else "" end)") // ""),
   (.belt | arrays | .[] | objects | "  \(ref) \(.step)\((.waitsOn | objects | select(.issue | numbers) | " on \(ref)") // "")"

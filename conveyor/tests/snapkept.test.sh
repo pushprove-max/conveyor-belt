@@ -82,7 +82,8 @@ t_snapkeptread() {
   printf -v at '%(%s)T' -1
   jq -e --argjson now "$at" '.snapshotAge >= 20 and .snapshotAge <= 25 and (.snapshotAt | fromdate) >= $now - .snapshotAge - 1' <<<"$out" > /dev/null \
     || fail "the reader did not say the kept snapshot's age (20 s): $(jq -c '{snapshotAt, snapshotAge}' <<<"$out" 2>&1)"
-  [ "$(jq -cS 'del(.snapshotAt, .snapshotAge)' <<<"$out")" = "$(jq -cS . "$ST/snapshot.json")" ] || fail "the reader did not print the kept snapshot"
+  [ "$(jq -cS 'del(.snapshotAt, .snapshotAge, .recordsNewer)' <<<"$out")" = "$(jq -cS . "$ST/snapshot.json")" ] || fail "the reader did not print the kept snapshot"
+  [ "$(jq .recordsNewer <<<"$out")" = false ] || fail "the reader said the records changed after the kept snapshot, and none did: $(jq .recordsNewer <<<"$out")"
 }
 
 # Bug: readers that found the snapshot out of date each built one, so 12 to 35 builds ran at once. Two readers at once
@@ -126,11 +127,17 @@ t_snapkeptrename() {
   out=$(PATH=$T/$CASE/bin:$PATH loop snapshot 2>&1) && jq -e .belt <<<"$out" > /dev/null || fail "the reader printed no snapshot: ${out:0:300}"
   t0=$(( (${EPOCHREALTIME/[.,]/} - t0) / 1000 ))
   [ "$t0" -lt 2000 ] || fail "the reader's output ended ${t0} ms after it began: it waited for the writer's build"
+  # Bug (#1032): the old snapshot, its belt without c9, did not say the records changed after it, so the Foreman's
+  # watcher took its empty belt for an idle Conveyor while c9 was in flight.
+  jq -e '.recordsNewer == true and (.belt | map(.card) | index("c9") | not)' <<<"$out" > /dev/null \
+    || fail "the old snapshot did not say the records changed after it: $(jq -c '{recordsNewer, belt: [.belt[].card]}' <<<"$out")"
   wait_until "! flock -n '$ST/snapshot.json.lock' true" || fail "no writer was building after the reader"
   jq -e '.belt | map(.card) | index("c9") | not' "$ST/snapshot.json" > /dev/null || fail "while the writer built, the kept file was not the old snapshot whole"
   loop snapshot | jq -e .belt > /dev/null || fail "while the writer built, a reader did not print a whole snapshot"
   snapkept_built
   [ "$(snapkept_ino)" != "$ino" ] || fail "the writer wrote into the kept file, not a new one renamed into its place"
+  out=$(loop snapshot) && jq -e '.recordsNewer == false and (.belt | map(.card) | index("c9"))' <<<"$out" > /dev/null \
+    || fail "the new snapshot, with c9 on its belt, still said the records changed after it: $(jq -c '{recordsNewer, belt: [.belt[].card]}' <<<"$out")"
 }
 
 # Bug: the rebuild ran jq on every line of the card records (the pick order, the Declined part: 54 s of a minute's

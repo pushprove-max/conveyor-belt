@@ -268,7 +268,7 @@ t_shutfirst() {
 # Bug (#1030): `retry --fresh` refused a card whose process a signal stopped (ps state T), as one still running, and
 # no command freed it. #7's process is stopped mid-build, its session's live record still there; #8's is gone. retry
 # 7 --fresh ends #7's stopped process, blocks it with its work kept, then gives #7 back with its work dropped, and
-# retry 8 --fresh does the same for #8.
+# retry 8 --fresh does the same for #8, held, and releases its hold.
 t_retrystopped() {
   local p7 gone out c7=c20260101T000000-t-7 c8=c20260101T000000-t-8
   setup "[$(issue 7 2026-01-01), $(issue 8 2026-01-02)]"
@@ -280,8 +280,13 @@ t_retrystopped() {
   grep -qF "card $c7 was open with its process stopped; it is blocked, its work kept" <<<"$out" && grep -qF 'issue #7 can be picked again' <<<"$out" \
     && ! kill -0 $p7 2>/dev/null && [ "$(jq -r --arg c "$c7" 'select(.card == $c and .step == "blocked") | .reason' "$ST/retried.jsonl")" = "build: its process was stopped by a signal, so the engine ended the card" ] \
     || fail "retry did not end the stopped #7 and give it back: $out $(cat "$ST/retried.jsonl" 2>&1)"
+  # #8 is held too: --fresh ends retry() early, and a hold it left would keep #8 off the belt while retry said it
+  # can be picked (#1032). The owner's retry is the release.
+  loop control hold 8 > /dev/null || fail "the hold of #8"
   out=$(loop retry 8 --fresh 2>&1) || fail "retry 8 --fresh, its card's process gone, exited non-zero: $out"
   grep -qF "card $c8 was open with its process gone" <<<"$out" && grep -qF 'issue #8 can be picked again' <<<"$out" || fail "retry did not give the gone #8 back: $out"
+  [ "$(jq -c .held "$ST/control.json")" = '[]' ] && grep -qF 'issue #8 was held; it is released, so the loop picks it again' <<<"$out" \
+    || fail "retry --fresh left the held #8 held, or did not say it released it: $(jq -c .held "$ST/control.json"); $out"
   [ ! -e "$ST/kept/$c7" ] && [ ! -e "$ST/kept/$c8" ] && ls "$ST"/kept-dropped/*-7/"$c7"/"$c7".patch "$ST"/kept-dropped/*-8/"$c8"/"$c8".patch >/dev/null 2>&1 \
     || fail "--fresh did not move the kept work aside: $(ls -R "$ST/kept-dropped" 2>&1)"
   wait $p7 2>/dev/null; return 0

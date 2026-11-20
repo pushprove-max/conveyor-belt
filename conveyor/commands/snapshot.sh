@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # `conveyor.sh snapshot [--fresh]`: the snapshot the Board reads (snapshot(), lib/snapshot.sh), sourced by conveyor.sh.
-# A reader prints the kept snapshot (KEPT, <state>/snapshot.json) at once and builds nothing. Its first two fields are
-# snapshotAt (when the build that made it began, UTC) and snapshotAge (its age in seconds as it is printed). The Board,
+# A reader prints the kept snapshot (KEPT, <state>/snapshot.json) at once and builds nothing. Its first three fields are
+# snapshotAt (when the build that made it began, UTC), snapshotAge (its age in seconds as it is printed) and
+# recordsNewer (the card records changed after that build began: snapprint). The Board,
 # /units and every watcher read the snapshot again and again: each built its own, and on a long history one build took
 # a minute, with 12 to 35 of them running at once, so no reader got one before it stopped waiting.
 # When an input changed after that build began (a record line, the retried lines, the control record, the files the
@@ -86,13 +87,17 @@ snapwriter() {
   done
 }
 # The kept snapshot as a reader gets it: snapshotAt and snapshotAge (to the millisecond: the stream dates what a
-# snapshot read by it, watch.py) first, then the snapshot's own fields.
+# snapshot read by it, watch.py) first, then recordsNewer, then the snapshot's own fields. recordsNewer is true when
+# the card records or the retried file changed after its build began: its belt can leave out a card begun since. A
+# retry rewrites the records, so the next build reads them whole and can take minutes (#1032: the Foreman's watcher
+# read the snapshot from before the retry, with the belt empty, and woke the Foreman with "Conveyor is idle").
 snapprint() {
-  local k s m now
+  local k s m now newer=false
   k=$(p_filekey "$KEPT") && k=${k#* } && [[ $k =~ ^([0-9]+)[.,]([0-9]{3}) ]] || { echo "conveyor: cannot read $KEPT" >&2; return 1; }
   s=${BASH_REMATCH[1]} m=$((BASH_REMATCH[1] * 1000 + 10#${BASH_REMATCH[2]}))
   now=${EPOCHREALTIME/[.,]/}; now=$((10#$now / 1000)); m=$((now > m ? now - m : 0))
-  printf '{"snapshotAt":"%s","snapshotAge":%d.%03d,' "$(export TZ=UTC; printf '%(%Y-%m-%dT%H:%M:%SZ)T' "$s")" $((m / 1000)) $((m % 1000))
+  [ -z "$(find "$STATE" "$RETRIED" -maxdepth 0 -newer "$KEPT" -print -quit 2>/dev/null)" ] || newer=true
+  printf '{"snapshotAt":"%s","snapshotAge":%d.%03d,"recordsNewer":%s,' "$(export TZ=UTC; printf '%(%Y-%m-%dT%H:%M:%SZ)T' "$s")" $((m / 1000)) $((m % 1000)) "$newer"
   tail -c +2 "$KEPT"
 }
 if [ -z "$fresh" ] && [ -s "$KEPT" ]; then

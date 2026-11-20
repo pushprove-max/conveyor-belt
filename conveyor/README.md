@@ -1596,8 +1596,10 @@ pushes. Past those 20, `landed` also keeps a card still on the belt (its push or
 However many cards land, a snapshot stays under 512 KB;
 what is left grows with the cards open or blocked and the open issues, not with the cards that landed.
 
-`conveyor.sh snapshot` prints the last snapshot at once. Its first two fields are `snapshotAt`, when that snapshot
-was made, and `snapshotAge`, its age in seconds. When a record line, the control record, a card's live record or the
+`conveyor.sh snapshot` prints the last snapshot at once. Its first three fields are `snapshotAt`, when that snapshot
+was made, `snapshotAge`, its age in seconds, and `recordsNewer`. `recordsNewer` is true when the card records changed
+after the snapshot was made, so its belt can leave out a card that started since. The Foreman does not call such a
+snapshot idle, and `conveyor.sh foreman status` says the belt can hold more cards than it shows. When a record line, the control record, a card's live record or the
 list of issues changes, one process makes a new snapshot in the background and puts it in place whole. A reader does
 not wait for it, and it does not get a part of a snapshot. `conveyor.sh snapshot --fresh` makes a new snapshot now,
 prints it and keeps it. A project with no snapshot yet gets its first one that way. The Board's Health panel and
