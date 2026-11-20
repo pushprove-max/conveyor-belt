@@ -14,7 +14,7 @@
 # What a failed run says went wrong, as a card's test line holds it (lib/testrun.sh testfails(), the line's .failures):
 # the test command $T/$CASE/cmd run as a card's test step runs it, its output and its runners' logs where a card's
 # worktree <w> has them (<w>.test, <w>.testlog), then read with the given exit and the step's timeout. A whole loop run
-# to read them cost each case about 2 s more; rules.test.sh's t_testfails proves a card's test line holds them.
+# to read them cost each case about 2 s more; testruns.test.sh's t_testfails proves a card's test line holds them.
 logfails() { # <exit> [<testTimeout>]
   allfails "$@" | jq -c 'del(.passed, .okcases, .passcases)'
 }
@@ -136,7 +136,7 @@ EOF
     || fail "a failed file with a space in its name is not named whole with its case, a file done whose name an end line begins with is named for the one running, or a passing file's own line is a case of the failed file its name begins with: $f"
 }
 # The timeout of t_testfailsspace's bugs: a run cut by its time (2 s, exit 124) in a file whose name has spaces, its
-# last one too. The card's reason names the timeout's file as it is (rules.test.sh t_testfails).
+# last one too. The card's reason names the timeout's file as it is (testruns.test.sh t_testfails).
 t_testfailsspacetimeout() {
   mkdir -p "$T/$CASE"; cat > "$T/$CASE/cmd" <<'EOF'
 L=$CONVEYOR_TEST_LOG/run.log

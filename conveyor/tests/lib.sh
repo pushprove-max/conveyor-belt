@@ -168,6 +168,18 @@ dispatch() {
   done
   PATH=$SH/bin:$PATH
 }
+# The card of the case's one picked issue, run by card() in a shell of the engine (fx_in), not by a loop run: the
+# pick takes the issue, and card() runs it to its end. A case calls this only for what card() alone makes as it goes.
+# For rules.test.sh and testruns.test.sh.
+rulecard() { # <issue>
+  fx_in 'cd "$R" && read -r c n _ <<<"$(locked pick "" "" "$(asked)")" && [ "$n" = '"$1"' ] || { echo "pick took ${n:-nothing}"; exit 3; }; card "$c" "$n"'
+  [ "$RC" != 3 ] && [ -s "$ST/cards.jsonl" ] || fail "#$1 was not picked (exit $RC): $(tail -n 20 "$T/$CASE/run.out")"
+}
+# A worktree of main, $T/$CASE/cards/<name>, with <change> made in it and staged, as a card's change is staged.
+rulewt() { # <name> <change>
+  git -C "$R" worktree add -q --detach "$T/$CASE/cards/$1" && (cd "$T/$CASE/cards/$1" && eval "$2") && git -C "$T/$CASE/cards/$1" add -A \
+    || fail "the worktree $1 and its change"
+}
 seatset() { jq -c --arg k "$1" --arg m "$2" '.[$k].model = $m' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"; } # <model|reviewer> <model>
 GO=$'USER-VISIBLE: no\nVERDICT: GO'
 NOGO=$'[P1] a.txt:1 wrong word\nNEW CARD: b.txt is stale\nUSER-VISIBLE: no\nVERDICT: NO-GO'
