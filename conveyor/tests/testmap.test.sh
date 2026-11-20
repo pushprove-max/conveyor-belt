@@ -16,6 +16,11 @@ mapeng() { # <command>
     cd "$R" && . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" || exit 1
     names || exit 1; eval "$1" ) > "$T/$CASE/eng.out" 2>&1
 }
+# For a mapeng command: the map's progress tick (mapcollect()'s and maptick()'s 2 s sleep between its counts) waits
+# 0.1 s, so a case that waits for the count to move waits for the tick's next count, not its seconds.
+quicktick() {
+  sleep() { case ${FUNCNAME[1]:-} in mapcollect|maptick) [ "$1" != 2 ] || set -- 0.1 ;; esac; command sleep "$@"; } # sleep: the tick's own, shortened
+}
 # Main as a Node project: src/a.js and src/b.js, each read by its own test (test/a.test.js, test/b.test.js), and
 # src/util.js, a helper every test reads, test/c.test.js too. A file runs alone with node --test (test.fileCommand),
 # as the map's run takes it; the pack's test command is $STUB/list-cmd (test.list args).
@@ -43,6 +48,14 @@ maprun() { # <change> [<file command>]
   if [ -n "${2:-}" ]; then tune --arg f "$2" '.test.fileCommand = $f'; else maprec; fi
   git -C "$R" worktree add -q --detach "$wt" && (cd "$wt" && eval "$1") && git -C "$wt" add -A || fail "the card's change could not be staged"
   mapeng 'tests "'"$wt"'" && testrec "'"$wt"'" 0 0 | jq -c .list > "'"$T/$CASE/list"'"' || fail "the test step failed: $(cat "$T/$CASE/eng.out")"
+}
+# Card c7's list of tests for <change> (as maprun stages it), as its test step asks testsel() for it (narrow), with no
+# run of them: its first line ({by, age}) and then the test files, in $T/$CASE/eng.out. t_testmapnode and
+# t_testmapshared run that step whole.
+mapsel() { # <change>
+  local wt=$T/$CASE/cards/c7
+  git -C "$R" worktree add -q --detach "$wt" && (cd "$wt" && eval "$1") && git -C "$wt" add -A || fail "the card's change could not be staged"
+  mapeng 'testsel "'"$wt"'" narrow' || fail "the card's tests could not be chosen: $(cat "$T/$CASE/eng.out")"
 }
 # The map mapbuild makes of nodemain's files (t_testmapnode proves it), written as it is, on main's commit: the other
 # cases start from it and pay for no run of the suite.
@@ -96,18 +109,18 @@ linkmain() {
     && git -C "$R" add -f .conveyor/test-links.json && git -C "$R" commit -qm links || fail "the links could not be committed"
 }
 # Bug it catches: a link to the shared helper returned its one linked test before the map's shared check, so a break
-# in most tests landed unseen. The map's shared check holds, links or not: every test that reads it runs.
+# in most tests landed unseen. The map's shared check holds, links or not: every test that reads it is chosen.
 t_testmaplinkshared() {
   linkmain
-  maprun 'echo "// more" >> src/util.js'
-  [ "$(cat "$STUB/got")" = $'test/a.test.js\ntest/b.test.js\ntest/c.test.js' ] || fail "a link to the shared helper ran only its linked test: $(cat "$T/$CASE/list") $(cat "$STUB/got")"
+  mapsel 'echo "// more" >> src/util.js'
+  [ "$(sed 1d "$T/$CASE/eng.out")" = $'test/a.test.js\ntest/b.test.js\ntest/c.test.js' ] || fail "a link to the shared helper chose only its linked test: $(cat "$T/$CASE/eng.out")"
 }
-# Bug it catches: a link to src/a.js replaced the tests the map says cover it, so test/a.test.js did not run. Both run.
+# Bug it catches: a link to src/a.js replaced the tests the map says cover it, so test/a.test.js did not run. Both are
+# chosen, by the map (the links' commit is one after the map's).
 t_testmaplinkcover() {
   linkmain
-  maprun 'echo "// more" >> src/a.js'
-  [ "$(cat "$STUB/got")" = $'test/a.test.js\ntest/c.test.js' ] || fail "the linked and the covering tests did not both run: $(cat "$STUB/got")"
-  jq -e '.by == "map"' "$T/$CASE/list" >/dev/null || fail "the list does not say the map found its tests: $(cat "$T/$CASE/list")"
+  mapsel 'echo "// more" >> src/a.js'
+  [ "$(cat "$T/$CASE/eng.out")" = $'{"by":"map","age":1}\ntest/a.test.js\ntest/c.test.js' ] || fail "the linked and the covering tests were not both chosen, by the map: $(cat "$T/$CASE/eng.out")"
 }
 
 # Bug it catches: a test file a card adds stayed out of the map, so a later change to what it covers did not run it.
@@ -189,7 +202,7 @@ esac
 EOF
   printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$*" > "$STUB/got"' > "$STUB/pytest" && chmod +x "$STUB/coverage" "$STUB/pytest" || fail "the stubs"
   tune '.test.list = "args" | .test.command = "pytest -q"'
-  mapeng 'mapbuild "$R"' || fail "the map was not made: $(cat "$T/$CASE/eng.out")"
+  mapeng 'quicktick; mapbuild "$R"' || fail "the map was not made: $(cat "$T/$CASE/eng.out")"
   [ "$(cat "$STUB/cov-run")" = '-m pytest -q --verbosity=0' ] || fail "coverage did not run the test command's pytest, at a verbosity that names its test files: $(cat "$STUB/cov-run")"
   jq -e '.done == 1 and .of == 2' "$STUB/cov-prog" > /dev/null || fail "the run did not count the test file its output named while it ran: $(cat "$STUB/cov-prog")"
   mapis '.sources == {"src/calc.py": ["tests/test_calc.py"], "src/util.py": ["tests/test_calc.py", "tests/test_other.py"]} and .language == "python"' "the contexts did not map to their test files"
@@ -343,7 +356,7 @@ t_testmapstate() {
 t_testmaprefresh() {
   nodemain; nodemap; tune '.test.command = "npm test"'
   # test/a.test.js's process has ended; test/b.test.js's file is still being written. The count is looked at for up to 5 s.
-  mapeng 'mapcovon "$R" > /dev/null
+  mapeng 'quicktick; mapcovon "$R" > /dev/null
     echo "{\"result\": [{\"url\": \"file://$(pwd -P)/test/a.test.js\"}, {\"url\": \"file://$(pwd -P)/src/a.js\"}]}" > "$R.mapcov/v8/coverage-1.json"
     echo "{\"result\": [{\"url\": \"file://$(pwd -P)/test/b.test.js\"" > "$R.mapcov/v8/coverage-2.json"
     for i in $(seq 50); do s=$(mapstate "$R"); [[ $s != *"\"done\":1"* ]] || break; sleep 0.1; done; echo "$s"; mapcovoff
