@@ -36,6 +36,7 @@ echo 'test-changed: root totals: tests 7, pass 6, fail 0, cancelled 0, skipped 1
 printf '\033[32mtest-changed: web totals: Test Files  1 passed (1); Tests  4 passed | 1 skipped (5)\033[0m\n'
 jq -cn '{time: (now | todate), pct: 42.5}' >> "$ST/limit.jsonl"
 EOF
+  # loop: the records only a card writes are checked here (its worktree, brief, landed and pushed lines, the review's and the test run's measurements on them, the loop's samples)
   loop run >/dev/null || fail "run exited non-zero"
   [ "$(st 'select(.step == "build") | [.stats, (.sec | type)] | tojson')" = '[{"turns":3,"apiSec":3,"tools":{"Bash":2,"Read":1},"refused":1,"cacheHit":0.97,"models":["claude-opus-5-5"],"byModel":{"claude-opus-5-5":{"input":0,"write":0,"read":0,"output":0}}},"number"]' ] \
     || fail "the build's session stats: $(st 'select(.step == "build")')"
@@ -159,6 +160,20 @@ t_metricstotals() {
   [ "$(q '[.metrics.prev.cards, .metrics.prev.landed, .metrics.prev.cycleSec.p50, .metrics.week.cards]')" = '[1,1,1800,5]' ] || fail "the 7 days before: $(q .metrics.prev)"
 }
 
+# Card c7's build session on its worktree of main (fx_wt), on the builder seat's model and the account folder
+# $T/$CASE/acct, as session1() (lib/session.sh) runs it: builder() runs the claude stub in the background, watch()
+# follows it to its end, its output is read with SESSIONREAD and transcribed(). No card runs. The fields are in
+# build.out of the case's folder, watch()'s exit in BRC.
+watched() {
+  fx_wt : x.txt x; mkdir -p "$T/$CASE/acct"
+  fx_in 'echo "{}" > "$FXWT.settings"; s=$(seat builder) && jqget "$s" model model effort effort || exit 1; KEEP=()
+    builder "$FXWT" brief "$model" "$effort" "$T/$CASE/acct" claude & watch $! "$FXWT.out" "$FXWT.live" build "$model" claude; echo $? > "$T/$CASE/build.rc"
+    f=$(jq -cRn --arg m "$model" --arg e "$effort" --argjson s 1 "$SESSIONREAD" "$FXWT.out" | tail -n 1) && transcribed "$f" "$FXWT.out" "$FXWT" "$T/$CASE/acct" > "$T/$CASE/build.out"'
+  BRC=$(cat "$T/$CASE/build.rc" 2>/dev/null) && [ -s "$T/$CASE/build.out" ] || fail "the session did not run: $(cat "$T/$CASE/run.out")"
+}
+# The landed line of card c7 (landed(), lib.sh), at 01:30 of the day $y.
+landed7() { landed 7 | jq -c --arg t "${y}T01:30:00Z" '.card = "c7" | .time = $t' >> "$ST/cards.jsonl"; }
+
 # A build that times out after two answers (no result): what it spent is on the blocked line and priced; the card
 # has its before and after weekly limit readings although no guard is set and no reading was taken before it.
 t_metricsfail() {
@@ -175,6 +190,7 @@ EOF
   # The stub's reading goes up by one at each asking: the after reading is asked for although the card ends well within
   # LIMIT_TTL (300 s) of its before one, so it is 34, not the before reading's 33 again.
   printf '#!/bin/sh\nn=$(($(cat "$STUB/limit.n" 2>/dev/null || echo 32) + 1)); echo $n > "$STUB/limit.n"; echo "{\\"seven_day\\":{\\"utilization\\":$n}}"\n' > "$STUB/limit"; chmod +x "$STUB/limit"
+  # loop: the before reading is card()'s (its worktree line), and the blocked line is block()'s of the spend the session left: only a card run takes both readings and writes both lines
   CONVEYOR_LIMIT_CMD="$STUB/limit" loop run >/dev/null 2>&1
   [ "$(st 'select(.step == "blocked") | [.spent.step, .spent.tokens.claude, .tokens.claude, .spent.usage.input, .spent.usage.output, .spent.stats.tools, (.spent.sec | type), .limit] | tojson')" \
     = '["build",501050,501050,501000,50,{"Bash":1,"Edit":1},"number",34]' ] || fail "the failed build's spend, or no fresh after reading: $(st 'select(.step == "blocked")')"
@@ -189,11 +205,11 @@ EOF
 # record: after its result a task notification started a second turn, so the output holds two results, each with
 # its own turn's usage, num_turns and permission_denials, and modelUsage and duration_api_ms the session's totals so
 # far. The step is one line with both turns added up, priced at the model that ran (Opus 5.5 rates: $4 in, $20 out,
-# $0.20 read, writes at 1.25 times in): 180 * 4 + 201000 * 5 + 1050000 * 0.2 + 7000 * 20 = $1.355720. The card goes
-# on and lands; on a new card no step is unpriced and no cost is null.
+# $0.20 read, writes at 1.25 times in): 180 * 4 + 201000 * 5 + 1050000 * 0.2 + 7000 * 20 = $1.355720. The session
+# goes on (exit 0); on a landed card with that build no step is unpriced and no cost is null.
 t_metricstwo() {
-  export TZ=UTC; setup "$(issue 7 2026-01-01 area:billing | jq -cs .)"; echo "$GO" > "$STUB/review.1"
-  seatset reviewer gpt-6.1-sol
+  local f
+  export TZ=UTC; setup "$(issue 7 2026-01-01 area:billing | jq -cs .)"; d=$(date -u +%F); y=$d; now=$(date -u -d "${d}T23:59:00Z" +%s)
   bash > "$STUB/claude-usage" <<'EOF' # the stream the shared claude stub's session prints
 echo '{"type":"system","subtype":"init","model":"claude-opus-5-5"}'
 echo '{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"t1","name":"Bash"}],"usage":{"input_tokens":3,"output_tokens":9}}}'
@@ -204,15 +220,18 @@ echo '{"type":"system","subtype":"task_notification"}'
 echo '{"type":"assistant","message":{"id":"m2","content":[{"type":"tool_use","id":"t3","name":"Read"}],"usage":{"input_tokens":10,"output_tokens":1000}}}'
 echo '{"type":"result","subtype":"success","is_error":false,"num_turns":3,"duration_api_ms":665529,"permission_denials":[],"usage":{"input_tokens":10,"cache_creation_input_tokens":1000,"cache_read_input_tokens":50000,"output_tokens":1000,"cache_creation":{"ephemeral_1h_input_tokens":0,"ephemeral_5m_input_tokens":1000}},"modelUsage":{"claude-opus-5-5":{"inputTokens":180,"outputTokens":7000,"cacheReadInputTokens":1050000,"cacheCreationInputTokens":201000,"costUSD":1.36}},"total_cost_usd":1.36,"origin":{"kind":"task-notification"}}'
 EOF
-  loop run >/dev/null || fail "run exited non-zero on a session with two results"
-  [ "$(st 'select(.step == "build") | [.tokens.claude, .usage, .stats.turns, .stats.refused, .stats.apiSec, .stats.tools, .stats.models, .unread] | tojson')" \
+  watched
+  f=$(cat "$T/$CASE/build.out")
+  # session1() goes on only when watch() exits 0 and the fields say ok.
+  [ "$BRC $(jq -r .ok <<<"$f")" = '0 true' ] || fail "a session with two results did not go on: $BRC $f"
+  [ "$(jq -c '[.tokens.claude, .usage, .stats.turns, .stats.refused, .stats.apiSec, .stats.tools, .stats.models, .unread]' <<<"$f")" \
     = '[208180,{"input":180,"write":201000,"write1h":0,"read":1050000,"output":7000},125,2,666,{"Bash":1,"Edit":1,"Read":1},["claude-opus-5-5"],null]' ] \
-    || fail "a session with two results: $(st 'select(.step != "picked")')"
-  [ -n "$(st 'select(.step == "landed")')" ] && [ ! -d "$T/$CASE/cards/$(st 'select(.step == "picked") | .card')" ] || fail "the card did not land: $(st .step | tr '\n' ' ')"
+    || fail "a session with two results: $f"
+  l 7 01:00 picked ok '{"title":"T7"}'; l 7 01:10 build ok "$(jq -c 'del(.ok)' <<<"$f")"; landed7
   recok "$ST/cards.jsonl" "a card whose build gave two results"
-  out=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
+  out=$(CONVEYOR_NOW=$now loop snapshot --fresh) || fail "snapshot exited non-zero"
   [ "$(jq -c '[(.landed[0].metrics.timeline | map([.step, .usd, .model])), .cost.unpricedSteps, .cost.weekLeftOut, (.cost.week != null), (.cost.perLanded != null)]' <<<"$out")" \
-    = '[[["build",1.3557,"claude-opus-5-5"],["review",0.0002,"gpt-6.1-sol"],["test",0,null]],0,0,true,true]' ] \
+    = '[[["build",1.3557,"claude-opus-5-5"]],0,0,true,true]' ] \
     || fail "the two-result build is not priced whole: $(jq -c '[.landed[0].metrics.timeline, .cost]' <<<"$out")"
 }
 
@@ -220,13 +239,13 @@ EOF
 # after its last result (cut: a resumed turn after a result that names two models) or of all its answers (early:
 # no result at all) are under the model each answer names, so the step is priced whole and at Opus rates.
 # cut: Opus 100 + 1M in, Sonnet 100 in: $4.0004 + $0.0002. early: Opus 1M in: $4 (4.0, as the snapshot prints it).
-# A whole card runs: only the loop's exit check (lib/session.sh) blocks a step that timed out after a successful
-# result and keeps its spend on the blocked line, and only the snapshot prices that line.
+# The session's exit check (session1(), lib/session.sh) fails a step that timed out after a successful result and
+# keeps its spend, block() puts it on the blocked line, and the snapshot prices that line.
 t_metricscut() { cutoff cut 4.0006 1000100; }
 t_metricsearly() { cutoff early 4.0 1000000; }
 cutoff() { # <cut | early> <the step's dollars> <its Opus input tokens>
   local k=$1 want=$2 opus=$3
-  export TZ=UTC; setup "$(issue 7 2026-01-01 area:billing | jq -cs .)"
+  export TZ=UTC; setup "$(issue 7 2026-01-01 area:billing | jq -cs .)"; d=$(date -u +%F); y=$d; now=$(date -u -d "${d}T23:59:00Z" +%s)
   seatset model claude-sonnet-5-5
   {
     echo '#!/usr/bin/env bash'; echo 'cat > /dev/null'
@@ -234,36 +253,51 @@ cutoff() { # <cut | early> <the step's dollars> <its Opus input tokens>
     echo "echo '{\"type\":\"assistant\",\"message\":{\"id\":\"m9\",\"model\":\"claude-opus-5-5\",\"content\":[],\"usage\":{\"input_tokens\":1000000,\"output_tokens\":0}}}'"
     echo 'exit 124'
   } > "$STUB/claude"
-  loop run >/dev/null 2>&1
+  l 7 00:00 picked ok '{"title":"T7"}'
+  # session() fails and leaves its spend ($FXWT.spent), and block() (lib/push.sh) writes card c7's blocked line of it.
+  fx_wt : x.txt x
+  fx_in 'echo "{}" > "$FXWT.settings"; session "$FXWT" brief > "$T/$CASE/build.out"; echo $? > "$T/$CASE/build.rc"
+    block c7 7 "$FXWT" "build: $(head -n 1 "$T/$CASE/build.out")"'
+  [ "$(cat "$T/$CASE/build.rc" 2>/dev/null)" = 1 ] || fail "the $k session that timed out went on: $(cat "$T/$CASE/build.out" "$T/$CASE/run.out")"
   [ "$(st 'select(.step == "blocked") | [.spent.stats.models, .spent.stats.byModel["claude-opus-5-5"].input] | tojson')" = "[[\"claude-opus-5-5\"$([ "$k" = early ] || echo ',"claude-sonnet-5-5"')],$opus]" ] \
     || fail "the $k session's tokens by model: $(st 'select(.step == "blocked")')"
-  out=$(loop snapshot --fresh) || fail "snapshot exited non-zero ($k)"
+  recok "$ST/cards.jsonl" "a $k session's blocked line"
+  out=$(CONVEYOR_NOW=$now loop snapshot --fresh) || fail "snapshot exited non-zero ($k)"
   [ "$(jq -c '.needsYou.blocked[0].metrics.timeline[0] | [.usd, .model]' <<<"$out")" = "[$want,\"claude-opus-5-5\"]" ] \
     || fail "the $k session is not priced at what ran it: $(jq -c '.needsYou.blocked[0].metrics.timeline' <<<"$out")"
 }
 
 # A session that ends with a successful result whose usage cannot be read: the step is recorded with its usage
-# left out and why, the card goes on and lands, and the step shows as unpriced with that reason, never as $0.
+# left out and why, the session goes on (exit 0), and on a landed card the step shows as unpriced with that reason,
+# never as $0. Its output names its session, and the account folder holds no transcript of it: transcribed() leaves
+# the step unread. With a transcript there (bug: a transcript in the account folder the session ran on was not
+# read), transcribed() gives that transcript's usage in place of unread.
 t_metricsunread() {
-  export TZ=UTC; setup "$(issue 7 2026-01-01 area:billing | jq -cs .)"; echo "$GO" > "$STUB/review.1"
-  echo '{"type":"result","is_error":false,"num_turns":2,"usage":"n/a"}' > "$STUB/claude-usage"
-  loop run >/dev/null || fail "run exited non-zero on a session whose usage could not be read"
-  [ "$(st 'select(.step == "build") | [.result, .unread, .usage, .tokens.claude, .stats.turns, .model] | tojson')" = '["ok","the session output holds no token usage",null,0,2,"m"]' ] \
-    || fail "the unread build: $(st 'select(.step == "build")')"
-  [ -n "$(st 'select(.step == "landed")')" ] || fail "the card did not go on: $(st .step | tr '\n' ' ')"
+  local f p sid=0b7c2a4e-1f3d-4c5b-9a8e-6d2f1e3c4b5a
+  export TZ=UTC; setup "$(issue 7 2026-01-01 area:billing | jq -cs .)"; d=$(date -u +%F); y=$d; now=$(date -u -d "${d}T23:59:00Z" +%s)
+  echo "{\"type\":\"result\",\"is_error\":false,\"session_id\":\"$sid\",\"num_turns\":2,\"usage\":\"n/a\"}" > "$STUB/claude-usage"
+  watched
+  f=$(cat "$T/$CASE/build.out")
+  [ "$BRC $(jq -r .ok <<<"$f")" = '0 true' ] || fail "a session whose usage could not be read did not go on: $BRC $f"
+  [ "$(jq -c '[.unread, .usage, .tokens.claude, .stats.turns, .model]' <<<"$f")" = '["the session output holds no token usage",null,null,2,"m"]' ] \
+    || fail "the unread build: $f"
+  p=$T/$CASE/acct/projects/$(cd "$FXWT" && pwd -P | sed 's/[^A-Za-z0-9]/-/g'); mkdir -p "$p"
+  jq -cn --arg s "$sid" '{type: "assistant", sessionId: $s, message: {id: "msg_1", model: "claude-sonnet-5-5", usage: {input_tokens: 3, cache_creation_input_tokens: 100, cache_read_input_tokens: 0, output_tokens: 40}}}' > "$p/$sid.jsonl"
+  fx_in 'transcribed "$(cat "$T/$CASE/build.out")" "$FXWT.out" "$FXWT" "$T/$CASE/acct" > "$T/$CASE/read.out"'
+  [ "$(jq -c '[.unread, .usage, .tokens.claude, .stats.models]' "$T/$CASE/read.out")" = '[null,{"input":3,"write":100,"write1h":0,"read":0,"output":40},143,["claude-sonnet-5-5"]]' ] \
+    || fail "the transcript in the session's account folder was not read: $(cat "$T/$CASE/read.out" "$T/$CASE/run.out")"
+  l 7 01:00 picked ok '{"title":"T7"}'; l 7 01:10 build ok "$(jq -c 'del(.ok)' <<<"$f")"; landed7
   recok "$ST/cards.jsonl" "a card whose build's usage was unread"
-  out=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
-  # The unpriced steps come newest first: the build and the review fall in one second or two, so their order is not
-  # fixed here, and the whys are compared sorted.
-  [ "$(jq -c '[(.landed[0].metrics.timeline[0] | [.step, .tokens, .usd, .unpriced]), .landed[0].metrics.tokens, (.cost.unpriced | map(.why) | sort)]' <<<"$out")" \
-    = '[["build",null,null,"its token usage could not be read: the session output holds no token usage"],null,["its token usage could not be read: the session output holds no token usage","no price for its model: x"]]' ] \
+  out=$(CONVEYOR_NOW=$now loop snapshot --fresh) || fail "snapshot exited non-zero"
+  [ "$(jq -c '[(.landed[0].metrics.timeline[0] | [.step, .tokens, .usd, .unpriced]), .landed[0].metrics.tokens, (.cost.unpriced | map(.why))]' <<<"$out")" \
+    = '[["build",null,null,"its token usage could not be read: the session output holds no token usage"],null,["its token usage could not be read: the session output holds no token usage"]]' ] \
     || fail "the unread build in the snapshot: $(jq -c '[.landed[0].metrics, .cost]' <<<"$out")"
 }
 
 # A session of two results, the second's usage unreadable: the usage read is kept, but the step says unread, so
 # its tokens show as missing and it is unpriced, never priced as whole. Each model's 1-hour cache writes are read
 # from that model's answers. The output is read as the loop reads a session's (SESSIONREAD, lib/session.sh), and the
-# line it gives is a landed card's build; t_metricsunread runs a whole card whose session's usage is unread.
+# line it gives is a landed card's build; t_metricsunread runs the session itself (watch()) on an unread usage.
 t_metricspartial() {
   local o f
   export TZ=UTC; setup '[]'; S=$ST; mkdir -p "$S"; d=$(date -u +%F); y=$d; now=$(date -u -d "${d}T23:59:00Z" +%s); o=$T/$CASE/session.out
@@ -274,7 +308,7 @@ t_metricspartial() {
 {"type":"result","is_error":false,"num_turns":1,"usage":"n/a","modelUsage":{"claude-opus-5-5":{"inputTokens":5,"outputTokens":1,"cacheCreationInputTokens":400},"claude-sonnet-5-5":{"inputTokens":5,"outputTokens":1,"cacheCreationInputTokens":100}}}
 EOF
   # The build line's fields, as session.sh keeps them of what SESSIONREAD gives. ok is true, so session.sh goes on
-  # with the card (its exit check, run whole in t_metricsunread) rather than blocking it.
+  # with the card (its exit check, which t_metricsunread checks on watch()'s exit and .ok) rather than blocking it.
   f=$(jq -cRn --arg m m --arg e medium --argjson s 60 -f "$SRC/jq/sessionread.jq" "$o" | tail -n 1) || fail "the session's output was not read"
   [ "$(jq -c '[.ok, .unread, .usage, .stats.byModel]' <<<"$f")" \
     = '[true,"1 of 2 results hold no readable token usage, so the usage recorded is only part of it",{"input":10,"write":200,"write1h":300,"read":0,"output":2},{"claude-opus-5-5":{"input":5,"write":400,"read":0,"output":1,"write1h":300},"claude-sonnet-5-5":{"input":5,"write":100,"read":0,"output":1,"write1h":0}}]' ] \
