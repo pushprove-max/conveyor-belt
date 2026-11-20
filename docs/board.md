@@ -257,8 +257,8 @@ command, the product paths and the owner stay with `/conveyor-belt:setup`.
 
 ## Rules
 
-The **Rules** panel holds the settings. At its top, a line shows the last change you made here, with **Undo**. A
-line under it says when each change is saved.
+The **Rules** panel holds the settings. At its top, a line says when each change is saved. A line under it shows the
+last change you made here, with **Undo**.
 
 On the left are a search box and an index of six groups. Click a group to show its rules on the right. You change
 each rule there, in its row. Type in the search box to find a rule in all the groups. The search reads the group

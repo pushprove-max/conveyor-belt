@@ -3,6 +3,7 @@
 // each rule's choices one segmented control, and the pinned issues one row a pin with its title, dragged or moved by
 // its menu. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { boot, deliver, settle, full, act, rulesP, record, css, cases } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
@@ -173,4 +174,20 @@ test('Rules: an armed part of a segmented control draws its focus outline in a c
     const [hi, lo] = [lum(bad), lum(bg)].sort((x, y) => y - x);
     assert.ok((hi + 0.05) / (lo + 0.05) >= 3, `--bad ${bad} on --bad-bg ${bg}`);
   }
+});
+
+// Bug: docs/board.md put "Last change here" at the top of the Rules panel and the save line under it, while the panel
+// draws the save line first, so a user read the two lines in the wrong order. The panel is drawn and the page's
+// Rules section must name its two top lines in the order they are drawn.
+test('Rules: docs/board.md names the two lines at the top of the panel in the order the panel draws them', () => {
+  const w = boot({ tab: 'rules' });
+  deliver(w, full());
+  const drawn = Array.from(rulesP(w).querySelector('.rules-top').children, (c) => c.textContent);
+  const saves = drawn.findIndex((t) => t.startsWith('The Board saves a rule')), last = drawn.findIndex((t) => t.startsWith('Last change here'));
+  assert.ok(saves >= 0 && last >= 0, drawn.join(' | '));
+  const doc = readFileSync(new URL('../../../docs/board.md', import.meta.url), 'utf8');
+  const top = doc.split(/^## Rules$/m)[1].split(/\n\n/)[1];
+  const dSaves = top.indexOf('when each change is saved'), dLast = top.indexOf('last change you made here');
+  assert.ok(dSaves >= 0 && dLast >= 0, top);
+  assert.equal(dSaves < dLast, saves < last, `the page: ${top}`);
 });
