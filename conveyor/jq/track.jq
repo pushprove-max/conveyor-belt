@@ -193,7 +193,9 @@
                     failures: (if $l.step == "test" and $l.result != "pass" then $l.failures else null end),
                     # A test run's changed lines no test reached, from its coverage report (uncovered(), testrun.sh).
                     coverage: (if $l.step == "test" then $l.coverage else null end),
-                    reason: (if $l.step == "fix" then $l.reason else null end)}
+                    reason: (if $l.step == "fix" then $l.reason else null end),
+                    # A lint line's gate (rows.jq gate): the Board numbers the lint fix after it as the six steps do.
+                    gate: (if $l.step == "lint" then $l.gate else null end)}
                    | with_entries(select(.value != null and .value != "")))]
            + (if $label == "" or $after == "wait" then [] else [{name: $label, sec: null} + (if $after | IN("pushfail", "pushheld", "issuefail")
                # A failed push or close of the issue: when it was last seen (the last line's time) and why, as the push step says.

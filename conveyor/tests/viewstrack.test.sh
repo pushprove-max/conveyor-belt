@@ -150,7 +150,9 @@ EOF
     = '[["c38","now",null,null],["c39","done",null,null],["c48",null,"now",null],["c49",null,"now",null],["c50",null,null,"now"]]' ] \
     || fail "the lint fix on Build, Fix and Land: $(jq -c '[.belt[] | select(.card | IN("c38", "c39", "c48", "c49", "c50")) | [.card, .track.steps]]' <<<"$out")"
   # Bug (#261): a lint line showed in the card's history with none of its commands' results.
-  [ "$(b 39 '[.track.records[] | select(.name == "lint") | .why]')" = '[null,"lint command 1 (x): skipped: missing shellcheck, 0 s"]' ] \
+  # Bug (#1110): the lint lines did not name their gate, so the Board numbered a finished lint fix by its fix line
+  # ("Fix 3: lint findings"), not as the six steps did while it ran ("Fix 1: lint findings").
+  [ "$(b 39 '[.track.records[] | select(.name == "lint") | [.why, .gate]]')" = '[[null,"review"],["lint command 1 (x): skipped: missing shellcheck, 0 s","review"]]' ] \
     || fail "the lint lines' results in the history: $(b 39 .track.records)"
   # The note /units and the Board draw on Build for a reply-check fix: running, done, and none without one.
   [ "$(jq -c '[.belt[] | select(.card | IN("c34", "c35", "c36", "c37")) | [.card, .track.steps[0].replyFix]] | sort' <<<"$out")" = '[["c34","done"],["c35","done"],["c36","now"],["c37",null]]' ] \

@@ -815,24 +815,46 @@
   const FIX_NAME = { 'main moved': 'main changed under it' };
   const FIX_SAID = { 'review findings': "a NO-GO review's findings", 'tests failed': 'the changed tests failed', 'reply check': 'the Done-when check on the reply failed', 'lint findings': 'the lint commands found findings in the change',
     'main moved': 'main moved after the card made its change, and the change no longer applied to it' };
+  // A fix line's lint gate, when a lint line with findings (which names its gate) started it; else null.
+  const gateOf = (all, k) => (k > 0 && all[k - 1].name === 'lint' && /^lint: /.test(all[k].reason || '') ? all[k - 1].gate || null : null);
+  // The Fix rounds before record i, and the step of the session before it (Build, Fix or Land), as track.jq counts them
+  // for the six steps: a fix the review gate's lint or the Done-when check on a reply started is no round of its own.
+  function roundsTo(all, i) {
+    let last = 'Build', rounds = 0;
+    all.slice(0, i).forEach((x, k) => {
+      if (x.name === 'building') last = 'Build';
+      else if (x.name === 'rebuild') last = 'Land';
+      else if (/^fix \d+$/.test(x.name) && gateOf(all, k) !== 'review' && !/^the Done-when check failed/.test(x.reason || '')) { rounds += 1; last = 'Fix'; }
+    });
+    return { rounds, last };
+  }
+  // A fix is numbered by its Fix round, as the strip numbers it, so a fix and its lint fix share a number. A fix that is
+  // no round keeps the name the six steps give it (track.jq): the step of the session before it ("Build · lint fix",
+  // "Fix 2: lint findings", "Land · reply check fix").
   function fixOf(all, i) {
     const s = all[i], m = /^fix (\d+)$/.exec(s.name), running = s.state === 'now' && /^fix\b/.test(s.name);
     if (!m && !running) return null;
-    const n = m ? Number(m[1]) : all.slice(0, i).filter((x) => /^fix \d+$/.test(x.name)).length + 1;
     const said = (x) => (typeof x.reason === 'string' ? x.reason : ''), causeOf = (r) => (FIX_CAUSE.find(([re]) => re.test(r)) || [])[1] || null;
     const reason = said(s), p = i > 0 ? all[i - 1] : { name: '' }, prev = p.name;
     const cause = !running ? causeOf(reason) || (reason ? null : prev === 'tests failed' ? 'tests failed' : /^review \d+ \(NO-GO\)$/.test(prev) ? 'review findings' : null)
       : prev === 'tests failed' ? 'tests failed' : prev === 'lint' ? 'lint findings' : prev === 'tests passed' ? 'main moved' : /^(building|rebuild)$/.test(prev) ? 'reply check'
         : !/^fix \d+$/.test(prev) ? null : !said(p) ? 'reply check' : causeOf(said(p)) === 'reply check' ? 'main moved' : null;
-    return { name: `Fix ${n}${cause ? `: ${FIX_NAME[cause] || cause}` : ''}`, why: reason || (cause ? FIX_SAID[cause] : '') };
+    const why = reason || (cause ? FIX_SAID[cause] : ''), { rounds, last } = roundsTo(all, i);
+    const gate = m ? gateOf(all, i) : prev === 'lint' ? p.gate || null : null;
+    if (gate === 'review' || cause === 'reply check') {
+      return { name: last === 'Fix' ? `Fix ${rounds}: ${cause}` : `${last} · ${gate === 'review' ? 'lint fix' : 'reply check fix'}`, why };
+    }
+    return { name: `Fix ${rounds + 1}${cause ? `: ${FIX_NAME[cause] || cause}` : ''}`, why };
   }
   // records: one per recorded line, each with its own seconds; detail (17 summed slots) from a snapshot without them.
   const stepsOf = (t) => (t && Array.isArray(t.records) ? t.records : t && Array.isArray(t.detail) ? t.detail : []).filter((s) => s && typeof s.name === 'string' && STEP_WORD[s.state]);
   // The fix in progress of track t, as fixOf names it; null when the card is in no fix or its steps were not given. The
   // review gate's lint fix after the build is Build's, after a rebuild Land's (track.jq lintFix), as the six steps name it.
+  // A lint fix on Fix (the review gate's after a fix round, the landing gate's) is named as the strip names it.
   function fixNow(t) {
     const six = sixOf(t);
     if (six && six.steps[0].lintFix === 'now' && six.steps[0].state === 'now') return { name: 'Build · lint fix', why: FIX_SAID['lint findings'] };
+    if (six && six.steps[2].lintFix === 'now' && six.steps[2].state === 'now') return { name: stepName(six.steps[2]), why: FIX_SAID['lint findings'] };
     if (six && six.steps[4].lintFix === 'now' && six.steps[4].state === 'now') return { name: 'Land · lint fix', why: FIX_SAID['lint findings'] };
     const all = stepsOf(t), i = all.length - 1;
     return i >= 0 && all[i].state === 'now' ? fixOf(all, i) : null;

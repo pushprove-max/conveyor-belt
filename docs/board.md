@@ -586,7 +586,8 @@ issue number, as a link, and the issue title.
   other step's output shows as plain text, with its failures first. **Copy output** copies the output as plain text, for a
   review too. This is the same in On the belt, Landed today and Needs you.
 - A fix session shows what started it: **Fix 2: review findings**, **Fix 1: reply check**, **Fix 3: main changed under it**,
-  **Fix 4: tests failed** or **Fix 5: lint findings**. Hover over the label for the full reason.
+  **Fix 4: tests failed** or **Fix 5: lint findings**. Hover over the label for the full reason. The number is the
+  Fix round that the Fix step shows, so a fix and the lint fix after it have the same number.
 - A reply-check fix after the build shows on the Build step, "Build · reply check fix" and then "Build · reply check
   fixed". The Fix step shows the other fixes.
 - A lint fix before a review, after the build, also shows on the Build step: "Build · lint fix" while it runs, then

@@ -113,7 +113,7 @@ test('a lint fix shows on Build at the review gate and as "Fix N: lint findings"
   const show = (marks, label, at, set, n) => {
     const data = full(), t = trackOf(marks, label, { at });
     t.steps[1].n = n[0]; t.steps[2].n = n[1];
-    set(t.steps);
+    set(t.steps, t);
     data.panels.belt.data.cards[0].track = t;
     next(w, data);
     return strip().slice(0, 3);
@@ -123,6 +123,31 @@ test('a lint fix shows on Build at the review gate and as "Fix N: lint findings"
   assert.equal(row().querySelector('.row-main .chip').textContent, 'Build · lint fix', 'the pill names the step as the strip does');
   assert.deepEqual(show('+>....', 'review 1 of 3', 1, (s) => { s[0].lintFix = 'done'; }, [1, 0]), [['✓', 'Build · lint fixed'], ['▶', 'Review 1 of 3'], ['·', 'Fix']]);
   assert.deepEqual(show('++>...', 'fix after review 2', 2, (s) => { s[2].lintFix = 'now'; }, [2, 2]), [['✓', 'Build'], ['✓', 'Review 2 of 3'], ['▶', 'Fix 2: lint findings']]);
+  // Issue 1110. Bug it catches: at the review gate's lint fix after review 1's fix (t_lintgatefix's second), the strip
+  // said "Fix 1: lint findings" and the pill and its bar "Fix 3", counting the Build lint fix and the review fix lines.
+  const LINT = 'lint: 1 finding(s) of the change', lint = { name: 'lint', state: 'done', sec: 5 };
+  const recs = [{ name: 'building', state: 'done', sec: 600 }, lint, { name: 'fix 1', state: 'done', sec: 60, reason: LINT }, lint,
+    { name: 'review 1 (NO-GO)', state: 'done', sec: 120 }, { name: 'fix 2', state: 'done', sec: 300 }, lint, { name: 'fix after review 1', state: 'now', sec: null }];
+  assert.deepEqual(show('++>...', 'fix after review 1', 2, (s, t) => { s[0].lintFix = 'done'; s[2].lintFix = 'now'; t.records = recs; }, [1, 1])[2], ['▶', 'Fix 1: lint findings']);
+  assert.equal(row().querySelector('.row-main .chip').textContent, 'Fix 1: lint findings', 'the pill numbers the fix as the strip does');
+  const bars = openEvery(w, row().querySelector('details.track-detail')).querySelectorAll('.timeline > li.tl-item .tl-label');
+  assert.equal(bars[bars.length - 1].textContent, 'Fix 1: lint findings', 'the bar in progress numbers the fix as the strip does');
+  // Bug it catches (review of 1110): once that fix's line is "fix 3", its bar said "Fix 3: lint findings", and the Build
+  // lint fix's bar "Fix 1: lint findings": each lint line names its gate (track.jq gate), so each keeps its name.
+  // Bug it catches (review of 1110): the review fix's bar said "Fix 2: review findings", its own lint fix's "Fix 1": a
+  // fix is numbered by its Fix round, so the two share one.
+  const gated = { ...lint, gate: 'review' }, done = [...recs.slice(0, -1).map((r) => (r === lint ? gated : r)), { name: 'fix 3', state: 'done', sec: 60, reason: LINT }, gated];
+  const fixBars = (records) => {
+    show('+>+...', 'review 2 of 3', 1, (s, t) => { s[0].lintFix = 'done'; t.records = [...records, { name: 'review 2 of 3', state: 'now', sec: null }]; }, [2, 1]);
+    return Array.from(openEvery(w, row().querySelector('details.track-detail')).querySelectorAll('.timeline > li.tl-item .tl-label'), (b) => b.textContent)
+      .filter((x) => /^(Build|Fix|Land) /.test(x));
+  };
+  assert.deepEqual(fixBars(done), ['Build · lint fix', 'Fix 1: review findings', 'Fix 1: lint findings'], 'a finished lint fix keeps the name it had while it ran');
+  // Bug it catches (review of 1110): with no case for them, the landing gate's lint fix (a Fix round of its own) and the
+  // review gate's after a rebuild (Land's) could lose their names unseen.
+  const more = [...done, { name: 'tests passed', state: 'done', sec: 60 }, { ...lint, gate: 'land' }, { name: 'fix 4', state: 'done', sec: 60, reason: LINT },
+    { name: 'rebuild', state: 'done', sec: 60 }, gated, { name: 'fix 5', state: 'done', sec: 60, reason: LINT }];
+  assert.deepEqual(fixBars(more).slice(3), ['Fix 2: lint findings', 'Land · lint fix'], 'the landing gate\'s lint fix is a round; the review gate\'s after a rebuild is Land\'s');
   // Bug it catches: the review gate's lint fix after a rebuild (on Land) read as a plain "Land".
   show('++-+>.', 'fix after review 1', 4, (s) => { s[4].lintFix = 'now'; }, [1, 0]);
   assert.equal(row().querySelector('ol.track6').children[4].querySelector('.step-name').textContent, 'Land · lint fix');
