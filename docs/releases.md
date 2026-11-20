@@ -91,7 +91,8 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    - the privacy check finds something in the tracked files or in a commit since the last tag (for a commit that is
      already on GitHub, see [Pushed commits the privacy check finds](#pushed-commits-the-privacy-check-finds)),
    - the whole test suite does not pass on the commit. When the newest `conveyor/release-suite` status on the commit
-     is a pass (step 4), the suite does not run again. Otherwise the command runs it, and before it the check of the
+     is a pass (step 4), the suite does not run again. Otherwise the command runs it as step 4 does, with the passes
+     of an earlier run on an ancestor kept for the files that do not run again. Before the suite, it runs the check of the
      mod on the oldest Claude Code version (step 4). When that check fails, the command stops with the validate
      output and does not run the suite. To release over a failed suite,
      see [A release over a failed suite](#a-release-over-a-failed-suite).

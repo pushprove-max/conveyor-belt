@@ -346,7 +346,7 @@ relminver() { # <command name> <commit>
 }
 # The whole suite (test.full) on <commit>, in a worktree of it alone, its result posted on it as conveyor/release-suite,
 # its files' results and times kept for the Tests page (suiterec(), lib/testrun.sh) and its results in the whole-suite
-# record every whole-suite run shares (suitekeep(), lib/fulltest.sh). release-prep reuses that record (suitereuse()):
+# record every whole-suite run shares (suitekeep(), lib/fulltest.sh). release-prep and release reuse that record (suitereuse()):
 # with a pass of every file on <commit> itself (a full test run's, or Push landed's) it runs no test and posts the pass;
 # with results on an ancestor it runs only some files (the suite's command is told the list by the file
 # CONVEYOR_SUITE_FILES names), its record's reused naming that run and the files rerun; the others keep that run's ok.
@@ -371,11 +371,8 @@ relsuite() { # <command name> <commit>
   out=$({ git worktree remove --force "$wt" 2>/dev/null; rm -rf "$wt" "$wt".*; git worktree prune
     git worktree add -q --detach "$wt" "$sha" && deps "$wt"; } 2>&1 < /dev/null) || {
     git worktree remove --force "$wt" 2>/dev/null; echo "conveyor: $n: the worktree of ${sha:0:12} could not be made; nothing run: ${out:0:600}" >&2; return 1; }
-  rc=1
-  if [ "$n" = release-prep ]; then
-    l=$(suitereuse "$wt" "$sha"); rc=$?
-    [ $rc != 2 ] || { git worktree remove --force "$wt" 2>/dev/null; echo "conveyor: $n: the worktree of ${sha:0:12} could not be put back on it after the changed-tests selection; nothing run" >&2; return 1; }
-  fi
+  l=$(suitereuse "$wt" "$sha"); rc=$?
+  [ $rc != 2 ] || { git worktree remove --force "$wt" 2>/dev/null; echo "conveyor: $n: the worktree of ${sha:0:12} could not be put back on it after the changed-tests selection; nothing run" >&2; return 1; }
   if [ $rc = 3 ]; then
     # A pass of every file on this very commit (a full test run's, or Push landed's): nothing runs.
     rc=0; u=$(jq -c '{sha, time, ran: [], kept: (.files | length)}' <<<"$l")

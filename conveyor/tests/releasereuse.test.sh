@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
-# Engine cases: release-prep reruns only the files that failed or changed since the whole-suite run on the nearest
+# Engine cases: release-prep (and release, issue 1069) reruns only the files that failed or changed since the whole-suite run on the nearest
 # ancestor and reuses its passes (issue 43), Push landed counts its pass on the same commit, and suitebase() takes
 # that ancestor's run (issue 44). Their fixture is rrsetup, below, on releaseboard.test.sh's runsetup (release.test.sh's
 # cutsetup); fullreuse.test.sh uses it too. ftended is fulltest.test.sh's.
@@ -93,6 +93,40 @@ t_relreusepick() {
   rrprep
   [ "$got" = "t/f1.test.sh" ] || fail "a change to the changed-tests command's file ran more than the failed file: '$got'"
   jq -e --arg a "$A" '.reused.sha == $a' "$RUN" > /dev/null || fail "the record does not say it reused the run on A: $(cat "$RUN")"
+}
+# rrrel: C, what the case changed after release-prep's pass on B, pushed; release runs on it. The stub's status (B's
+# pass, for any commit) is cleared, so release runs the suite on C. Sets C and got (the files that suite ran).
+rrrel() {
+  git -C "$R" commit -qam 'fix: C' && git -C "$R" push -q origin main && rm -f "$STUB/ran" "$STUB/statuses" || fail "the fixture could not be made"
+  C=$(git -C "$R" rev-parse HEAD)
+  loop release 1.1.0 > "$T/$CASE.r" 2>&1 || fail "release failed on C: $(cat "$T/$CASE.r")"
+  got=$(sort "$STUB/ran" 2>/dev/null | paste -sd' ' -)
+}
+# Bug (#1069): a card landed after a passed release-prep, and `release` on the new head ran all the files again,
+# though the suite record held release-prep's run on B, an ancestor. Here C changes t/f2 and src/s3.sh (which the
+# changed-tests command maps to t/f3): release reruns t/f2 and t/f3 alone, keeps t/f1's pass, and its record names B.
+t_relreuserel() {
+  local A B C RUN got
+  rrsetup
+  rrprep
+  echo 'exit 0 # changed' > "$R/t/f2.test.sh"; echo three >> "$R/src/s3.sh"
+  rrrel
+  [ "$got" = "t/f2.test.sh t/f3.test.sh" ] || fail "release on C ran '$got', not t/f2 and t/f3 alone: $(cat "$T/$CASE.r")"
+  jq -e --arg b "$B" --arg c "$C" '.step == "release" and .state == "released" and .sha == $c and (.reused | del(.time)) == {sha: $b, ran: ["t/f2.test.sh", "t/f3.test.sh"], kept: 1}' "$RUN" > /dev/null \
+    || fail "release's record does not name the run reused on B and the files rerun: $(cat "$RUN")"
+}
+# Bug (#1069, D2): a test setting changed since B can change what each file's ok means, so release, as release-prep
+# does, runs every file and its record reuses no run. The fixture's pack is not tracked (.conveyor is ignored), so B
+# adds it, for C to change it.
+t_relreuseset() {
+  local A B C RUN got
+  rrsetup
+  git -C "$R" add -f .conveyor/project.json || fail "the fixture could not be made"
+  rrprep
+  tune '.test.command += " # changed"'
+  rrrel
+  [ "$got" = "t/f1.test.sh t/f2.test.sh t/f3.test.sh" ] || fail "a change to a test setting did not make release run every file: '$got'"
+  jq -e --arg c "$C" '.sha == $c and .reused == null' "$RUN" > /dev/null || fail "a whole suite's record says it reused a run: $(cat "$RUN")"
 }
 # Bug (#44 review): the record's newest line on an ancestor was taken, so a release-prep on origin's A after a green
 # full test on the unpushed B hid B's pass, and Push landed on B ran every file again. suitebase() takes the line on
