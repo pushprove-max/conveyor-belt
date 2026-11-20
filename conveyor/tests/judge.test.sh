@@ -36,16 +36,18 @@ rev() { st "select(.issue == $1 and .step == \"review\") | $2"; } # <issue> <jq 
 # beside it is <review file> (with -, the stub reviewer's next review.<n>, written by review() as a card's review is,
 # its prompt in $STUB/asked), and the engine shell is made as `conveyor.sh run` makes one. What judged() prints is in
 # <worktree>.fields, with the verdict and counts the card's review line takes from the review after minor(), as
-# card() does; the review it leaves is <worktree>.review. The cases that need a whole card (its fix brief, its
-# landing, the reviewer's brief card() builds, the snapshot) still run one.
-judgeone() { # <issue> <review file | ->
+# card() does; the review it leaves is <worktree>.review, and with fix, for a NO-GO, what its fix round is told, as
+# card() gives it (numbered(), fixlines()), is <worktree>.fix. The cases that need a whole card (its fix round and
+# second review, its landing, the reviewer's brief card() builds, the snapshot) still run one.
+judgeone() { # <issue> <review file | -> [fix]
   local wt=$T/$CASE/cards/c$1
   mkdir -p "$T/$CASE/cards" && git -C "$R" worktree add -q --detach "$wt" && (cd "$wt" && . "$STUB/build") && git -C "$wt" add -A \
     && { [ "$2" = - ] || cp "$2" "$wt.review"; } || fail "the worktree of c$1 could not be made"
   ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
     && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names && { [ "$2" != - ] || review "$wt" "body of $1" > /dev/null; } \
     && f=$(judged "c$1" "$1" "$wt" "body of $1" '{}') && minor "$wt" \
-    && jq -c --arg v "$(verdict "$wt.review")" --argjson k "$(counts "$wt.review")" '. + {verdict: $v, counts: $k}' <<<"$f" > "$wt.fields" ) \
+    && jq -c --arg v "$(verdict "$wt.review")" --argjson k "$(counts "$wt.review")" '. + {verdict: $v, counts: $k}' <<<"$f" > "$wt.fields" \
+    && { [ "${3:-}" != fix ] || [ "$(verdict "$wt.review")" != NO-GO ] || { ids=$(numbered "$wt") && fixlines "$wt" "$ids" > "$wt.fix"; }; } ) \
     || fail "review() or judged() on c$1 failed"
 }
 jf() { jq -r "$2" "$T/$CASE/cards/c$1.fields"; } # <issue> <jq filter>: of what judged() printed for c<issue> (judgeone)
@@ -415,9 +417,12 @@ t_judgesnapshot() {
   echo "$NOGO" > "$STUB/review.3"; echo "$GO" > "$STUB/review.4"
   printf '%s\n' 'F1 ACCEPT: the word is wrong for every reader. Cost to every card: none' 'F2 DECLINE: a matter of taste' 'F3 DECLINE: a matter of taste too' > "$STUB/judge.1"
   echo 'F1 DECLINE: no such line' > "$STUB/judge.2"
-  loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
-  echo 'exit 1' > "$STUB/judge-cmd"
-  loop run --only 8 >/dev/null || fail "run of #8 exited non-zero"
+  # Whole cards, because the snapshot is read from the records card() writes: the review lines with their judge
+  # fields over two rounds and a fix, a failed judge call's line, and the track's review steps; records written here
+  # by hand would show only that the snapshot reads what the test wrote. One run, a card at a time (max-cards 1), #7
+  # first: its two reviews are the judge's first two calls, so the third, #8's first, is the one that fails.
+  echo '[ "$(wc -l < "$STUB/judges")" -lt 3 ] || exit 1' > "$STUB/judge-cmd"
+  loop run --only 7,8 1 >/dev/null || fail "run of #7 and #8 exited non-zero"
   out=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
   [ "$(jq -c '.landed[] | select(.issue == 7) | .rounds | map(.judge)' <<<"$out")" = '[{"ran":true,"accepted":1,"declined":2,"go":false},{"ran":true,"accepted":0,"declined":1,"go":true}]' ] \
     || fail "#7's reviews do not give one accepted and two declined, then a GO the judge made: $(jq -c '.landed[] | select(.issue == 7) | .rounds' <<<"$out")"
@@ -426,32 +431,41 @@ t_judgesnapshot() {
   # Each review step of the card's track says the same as its review.
   [ "$(jq -c '.landed[] | [.rounds | map(.judge)] == [.track.records | map(select(.name | startswith("review")) | .judge)]' <<<"$out" | sort -u)" = true ] \
     || fail "a review step of a card's track does not hold its review's judge: $(jq -c '.landed[] | .track.records | map(select(.name | startswith("review")))' <<<"$out")"
-  # A landed card's fixes are its fix rounds, a fix before any review too (its build failed the Done-when check):
-  # #9 was built, fixed, then reviewed GO, so it had one fix round though no review was followed by a fix.
-  local now s; now=$(date -u +%FT%TZ)
+  # A landed card's fixes are its fix rounds: #7 and #8 each had a NO-GO, then a fix (a fix before any review is
+  # t_judgesnapfixes').
+  [ "$(jq -c '[.landed[] | select(.issue | IN(7, 8)) | [.issue, .fixes]] | sort' <<<"$out")" = '[[7,1],[8,1]]' ] \
+    || fail "a landed card's fixes are not its fix rounds: $(jq -c '[.landed[] | [.issue, .fixes, (.rounds | map(.fixed))]]' <<<"$out")"
+}
+
+# Bug: a landed card's fixes are counted from its reviews followed by a fix, so a fix before any review (its build
+# failed the Done-when check) is not counted. #9's records are written as a card writes them, with no card run: it
+# was built, fixed, then reviewed GO, so it had one fix round though no review was followed by a fix.
+t_judgesnapfixes() {
+  local out now s; now=$(date -u +%FT%TZ)
+  setup '[]'
   for s in picked build fix review:GO landed; do
     jq -cn --arg s "${s%%:*}" --arg r "$([ "$s" = review:GO ] && echo GO || echo ok)" --arg t "$now" \
       '{card: "c9", issue: 9, step: $s, time: $t, tokens: {claude: 0, codex: 0}, result: $r, sha: (if $s == "landed" then "abc" else "" end), reason: "", title: "T9", product: false}' >> "$ST/cards.jsonl"
   done
   out=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
-  [ "$(jq -c '[.landed[] | select(.issue | IN(7, 8, 9)) | [.issue, .fixes]] | sort' <<<"$out")" = '[[7,1],[8,1],[9,1]]' ] \
-    || fail "a landed card's fixes are not its fix rounds: $(jq -c '[.landed[] | [.issue, .fixes, (.rounds | map(.fixed))]]' <<<"$out")"
+  [ "$(jq -c '[.landed[] | [.issue, .fixes]]' <<<"$out")" = '[[9,1]]' ] \
+    || fail "a fix before any review is not counted as a fix round of the landed card: $(jq -c '[.landed[] | [.issue, .fixes, (.rounds | map(.fixed))]]' <<<"$out")"
 }
 
 # P3 findings (the control record's rule P3). The issues are P1: an issue with no priority counts as P3, and the rule
 # P3 off would leave it unpicked.
 MINOR3='[P3] a.txt:1 the name says count but holds a sum. Proof: a.txt:1'
 # Bugs: an accepted P3 with the rule P3 on is listed only (as with the rule off) and causes no fix round, or the fix
-# is not told it, or is told a P3 the judge declined; the record does not count it as a P3.
+# is not told it, or is told a P3 the judge declined; the record does not count it as a P3. A NO-GO's fix round and
+# landing after it are t_judgeaccept's whole card: here the review is judged alone (judgeone).
 t_minoron() {
   judging "[$(issue 7 2026-01-01 P1)]"
-  printf '%s\n' "$MINOR3" '[P3] a.txt:2 odd spacing. Proof: a.txt:2' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
+  printf '%s\n' "$MINOR3" '[P3] a.txt:2 odd spacing. Proof: a.txt:2' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
   printf '%s\n' 'F1 ACCEPT: the name misleads the next reader. Cost to every card: none' 'F2 DECLINE: rare case' > "$STUB/judge.1"
-  loop run >/dev/null || fail "run exited non-zero"
-  [ "$(rev 7 .result | tr '\n' ' ')" = "NO-GO GO " ] && [ "$(wc -l < "$STUB/sessions")" = 2 ] && grep -qxF "E1 $MINOR3" "$STUB/brief" && ! grep -q 'odd spacing' "$STUB/brief" \
-    || fail "an accepted P3 with the rule P3 on did not send the card to a fix told it alone: $(rev 7 .result | tr '\n' ' '), $(grep 'a.txt:' "$STUB/brief")"
-  [ "$(rev 7 '.counts | tojson' | head -n 1)" = '{"P0":0,"P1":0,"P2":0,"P3":1}' ] && [ -n "$(st 'select(.step == "landed") | .sha')" ] \
-    || fail "the record does not count the accepted P3, or the card did not land: $(rev 7 '.counts | tojson' | head -n 1)"
+  judgeone 7 "$STUB/review" fix
+  [ "$(jf 7 .verdict)" = NO-GO ] && grep -qxF "E1 $MINOR3" "$T/$CASE/cards/c7.fix" && ! grep -q 'odd spacing' "$T/$CASE/cards/c7.fix" \
+    || fail "an accepted P3 with the rule P3 on did not make a NO-GO whose fix is told it alone: $(jf 7 .verdict), $(cat "$T/$CASE/cards/c7.fix")"
+  [ "$(jf 7 '.counts | tojson')" = '{"P0":0,"P1":0,"P2":0,"P3":1}' ] || fail "the review's counts do not count the accepted P3 alone: $(jf 7 '.counts | tojson')"
 }
 
 # Bugs: the judge is not told to judge a P3 as a P2, or is left to decline every P3 for causing no wrong result; a P3
