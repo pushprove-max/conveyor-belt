@@ -279,10 +279,12 @@ swe_taskrules() { # <arm json> < tasks
 # the task list, swe_harness.py: the Python that has the task's packages, as test.command starts it), then runs the file
 # with pytest when that python3 has pytest, else with python3 alone. test.command stays the task's own. The env runs
 # with no arguments: a script it sources is given the function's arguments otherwise, and conda's activate takes the
-# first one as the environment to start.
+# first one as the environment to start. The image installs the task's package from its own checkout (/testbed, often
+# editable), and the card's worktree is another checkout: the worktree's folder, and its src/ when it has one, go first
+# on PYTHONPATH, so the file imports the worktree's copy of the package (with the card's fix), not the image's.
 swe_filecmd() { # <task json>
   local e; e=$(jq -r '.env // ""' <<<"$1")
-  printf 'swe_pyfile() { local f=("$@"); set --; %sif python3 -c "import pytest" > /dev/null 2>&1; then python3 -m pytest "${f[@]}"; else python3 "${f[@]}"; fi; }; swe_pyfile\n' "${e:+$e || return 1; }"
+  printf 'swe_pyfile() { local f=("$@"); set --; %sexport PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}"; [ ! -d src ] || PYTHONPATH="$PWD/src:$PYTHONPATH"; if python3 -c "import pytest" > /dev/null 2>&1; then python3 -m pytest "${f[@]}"; else python3 "${f[@]}"; fi; }; swe_pyfile\n' "${e:+$e || return 1; }"
 }
 # The pack and control record of a conveyor arm's sandbox: the project's, with the task's test command run in the
 # container, the arm's seats (a host arm's models added to models.allowed; a saved arm's are the project's already,

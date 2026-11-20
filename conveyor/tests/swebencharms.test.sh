@@ -131,12 +131,22 @@ t_sweseats() {
   local fc d=$T/$CASE/py; fc=$(jq -r '.test.fileCommand // ""' "$SWE_FX/pack.seen")
   mkdir -p "$d/nopytest/pytest" "$d/pytest/pytest" "$d/repo" && echo 'raise ImportError("no pytest")' > "$d/nopytest/pytest/__init__.py" && : > "$d/pytest/pytest/__init__.py" \
     && printf '%s\n' 'import sys' 'import os' 'open(sys.argv[0] + ".ran", "w").write("RAN " + os.environ.get("SWE_TASKENV", ""))' > "$d/repo/test_one.py" && echo 'raise SystemExit(1)' > "$d/repo/test_bad.py" \
-    && printf '%s\n' 'import sys' 'open("pytest.args", "w").write(" ".join(sys.argv[1:]))' > "$d/pytest/pytest/__main__.py" || fail "the test files were not made"
+    && printf '%s\n' 'import sys' 'import swepkg' 'open("pytest.args", "w").write(" ".join(sys.argv[1:]) + " " + swepkg.WHERE)' > "$d/pytest/pytest/__main__.py" || fail "the test files were not made"
+  # Bug: the image installs the task's package from its own checkout (/testbed), so a file run from the card's worktree
+  # imported the image's copy, without the card's fix, and the fix was rejected. $d/image stands in for that install (on
+  # PYTHONPATH, which Python reads before site-packages, so the worktree's copies must come first to win): a package in
+  # the worktree's src/ (as Flask's is), imported by the pytest run, and that one with one at the worktree's root,
+  # imported by a python3 run of a file in a subfolder.
+  mkdir -p "$d/image/swepkg" "$d/image/rootpkg" "$d/repo/src/swepkg" "$d/repo/rootpkg" "$d/repo/tests" \
+    && for x in image/swepkg image/rootpkg repo/src/swepkg repo/rootpkg; do echo "WHERE = '${x%%/*}'" > "$d/$x/__init__.py"; done \
+    && printf '%s\n' 'import swepkg, rootpkg' 'open("where", "w").write(swepkg.WHERE + " " + rootpkg.WHERE)' > "$d/repo/tests/test_where.py" || fail "the package copies were not made"
   ( cd "$d/repo" && PYTHONPATH=$d/nopytest CONVEYOR_TEST_FILE=test_one.py bash -c "$fc"' "$CONVEYOR_TEST_FILE"' ) && [ "$(cat "$d/repo/test_one.py.ran" 2>&1)" = 'RAN testbed' ] \
     || fail "the pack's test.fileCommand did not run the named test file with python3 in the task's environment: $fc $(cat "$d/repo/test_one.py.ran" 2>&1)"
   ! ( cd "$d/repo" && PYTHONPATH=$d/nopytest bash -c "$fc"' "$1"' _ test_bad.py ) || fail "the pack's test.fileCommand passed a failing test file: $fc"
-  ( cd "$d/repo" && PYTHONPATH=$d/pytest bash -c "$fc"' "$1"' _ test_one.py ) && [ "$(cat "$d/repo/pytest.args" 2>&1)" = test_one.py ] \
-    || fail "the pack's test.fileCommand did not run the named test file with pytest where pytest is installed: $fc"
+  ( cd "$d/repo" && PYTHONPATH=$d/pytest:$d/image bash -c "$fc"' "$1"' _ test_one.py ) && [ "$(cat "$d/repo/pytest.args" 2>&1)" = 'test_one.py repo' ] \
+    || fail "the pack's test.fileCommand did not run the named test file with pytest, on the worktree's src/ copy of the package, where pytest is installed: $fc $(cat "$d/repo/pytest.args" 2>&1)"
+  ( cd "$d/repo" && PYTHONPATH=$d/nopytest:$d/image bash -c "$fc"' "$1"' _ tests/test_where.py ) && [ "$(cat "$d/repo/where" 2>&1)" = 'repo repo' ] \
+    || fail "the pack's test.fileCommand ran the named test file on the image's copy of the package, not the worktree's: $fc $(cat "$d/repo/where" 2>&1)"
   # Bug: the Python files a card's test run writes (__pycache__/, *.pyc) were in the trial's change.
   ! grep -qE '__pycache__|\.pyc' "$B"/results/conveyor-seats-*-"$EB/$(sweorder | head -n 1).patch" && grep -q '^+fixed' "$B"/results/conveyor-seats-*-"$EB/$(sweorder | head -n 1).patch" \
     || fail "the trial's change holds Python's generated files: $(cat "$B"/results/conveyor-seats-*-"$EB/$(sweorder | head -n 1).patch" 2>&1)"
