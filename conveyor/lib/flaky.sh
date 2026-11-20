@@ -37,15 +37,17 @@ flaky() { # <source> <entries, a JSON array of {case} and any of {card, issue, n
 # with a comment that names the reason. A case whose issue could not be closed, or whose state was unread, is kept
 # for the next read; so is the whole record when main's tracked files cannot be read.
 flakyprune() {
-  local lock rec tracked c f k w n s why m out gone='[]' files own
+  local lock rec tracked c f k w n s why m out gone='[]' files own tests=()
   [ -s "$FLAKY" ] || return 0
   tracked=$(git -C "$MAIN" -c core.quotePath=false ls-files 2>/dev/null) && [ -n "$tracked" ] || return 0
+  # Main's test files (testtracked(), lib/issues.sh), as paths, not globs.
+  mapfile -d '' -t tests < <(testtracked -z 2>/dev/null); wait $! || return 0
   { exec {lock}>>"$FLAKY.lock"; } 2>/dev/null && flock "$lock" || { echo "conveyor: the flaky-test record could not be locked; nothing dropped" >&2; return 1; }
   rec=$(jq -ce 'objects' "$FLAKY" 2>/dev/null) || { exec {lock}>&-; return 0; }
   while IFS= read -r c; do
     f=${c%%: *} k=${c#*: }
     mapfile -t own < <(F=$f awk '$0 == ENVIRON["F"] || substr($0, length($0) - length(ENVIRON["F"])) == "/" ENVIRON["F"]' <<<"$tracked")
-    mapfile -t files < <(git -C "$MAIN" -c core.quotePath=false grep -lwF -e "${f##*/}" -- '*.test.*' 2>/dev/null)
+    files=(); [ ${#tests[@]} = 0 ] || mapfile -t files < <(git -C "$MAIN" -c core.quotePath=false --literal-pathspecs grep -lwF -e "${f##*/}" -- "${tests[@]}" 2>/dev/null)
     files+=("${own[@]}")
     # A word: no letter or digit on either side (an engine case is defined as t_<case>, so _ is no part of one). A quote
     # may have a backslash before it, as in a quoted name in the source ('it\'s').

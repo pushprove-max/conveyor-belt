@@ -2345,7 +2345,7 @@ voidrun() { # <worktree> <exit>
 # is the case its case file names now.
 MAINRED=${STATE%/*}/mainred.json
 mainred() { # <card> <case> <its file> <main's commit> [<the landing that broke it: "<sha> <card> <issue>">]
-  local lock rec c t k re f fs by s lc li cmd='' same='def same($c; $f; $k): .case == $c or ($k != "" and (.case | endswith(": " + $k)) and any(.files[]?; . == $f));'
+  local lock rec c t k re f fs tf by s lc li cmd='' same='def same($c; $f; $k): .case == $c or ($k != "" and (.case | endswith(": " + $k)) and any(.files[]?; . == $f));'
   [ -n "$4" ] || return 1
   # The test command itself (what testfails() names a run that wrote no log) is no case: it names no test to fix.
   ! { packget test.command cmd 2>/dev/null && [ "$2" = "$cmd" ]; } \
@@ -2367,10 +2367,12 @@ mainred() { # <card> <case> <its file> <main's commit> [<the landing that broke 
   # The case's file: a runner names its cases' failures as its own, so the test files at main's commit that define the
   # case (`t_<case>()`, `<case>()` or the name quoted), the named file alone when it is one of them; else the named
   # file (a failure naming no case, or one no test file defines).
+  # The test files are those at that commit (testtracked(), lib/issues.sh), taken as paths, not globs.
   fs=()
   if [ -n "$k" ]; then
     re=$(sed 's/[][\\.*^$+?(){}|/]/\\&/g' <<<"$k")
-    mapfile -t fs < <(git grep -lE -e "(^|[^[:alnum:]_])(t_)?$re\\(\\)|['\"]$re['\"]" "$4" -- '*.test.*' 2>/dev/null | sed "s/^$4://")
+    mapfile -d '' -t tf < <(testtracked -z . "$4" 2>/dev/null)
+    [ ${#tf[@]} = 0 ] || mapfile -t fs < <(git --literal-pathspecs grep -lE -e "(^|[^[:alnum:]_])(t_)?${re}\\(\\)|['\"]${re}['\"]" "$4" -- "${tf[@]}" 2>/dev/null | sed "s/^$4://")
     for f in "${fs[@]}"; do [ "$f" != "$3" ] || { fs=("$3"); break; }; done
   fi
   [ ${#fs[@]} -gt 0 ] || [ -z "$3" ] || fs=("$3")

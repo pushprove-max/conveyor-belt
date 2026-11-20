@@ -83,6 +83,11 @@ When you set `tests.patterns`, it replaces the default. Without it, Conveyor use
 conventions: `__tests__/`, `*.test.*`, `*.spec.*`, `test_*.py`, `*_test.py`, `*_test.go`, `tests/`, `test/`, `spec/`,
 `*_spec.rb`, `*Test.java`, `*Tests.cs`, `test-*.mjs`, `*.t` and `t/*.sh`.
 
+Some parts of Conveyor use a smaller list of test files: the Tests page, the flaky-test record, the search for the file
+that holds a failed case, and the record of the test files that a card changed. They use the files named `*.test.*`
+and the files that your `tests.patterns` match. When you do not set `tests.patterns`, they use only the files named
+`*.test.*`, not the default above.
+
 Your test runner is never a test file, also when a glob matches it. The test runner is a file that `test.command`,
 `test.full`, `test.main` or `test.fileCommand` names, or a file that a `package.json` script of those commands names, for example
 `scripts/run-tests.mjs` in `"test": "node scripts/run-tests.mjs"`. When a shell script of those commands starts a file

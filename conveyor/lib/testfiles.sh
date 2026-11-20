@@ -75,9 +75,15 @@ TESTKEEP=5
 # the project, too long for an argument: `--slurpfile defs <(printf '%s' "$defs")`, and refs the same), at the start
 # of the program: caseowners (the files a flaky entry's case counts for) and failedfiles (the files a failed test line counts for).
 testowners() {
-  defs=$(git -C "$MAIN" grep -oE '^(t_)?[A-Za-z0-9_]+\(\)' -- '*.test.*' 2>/dev/null \
+  local tf=()
+  # Main's test files (testtracked(), lib/issues.sh), as paths, not globs; none, no search (git grep with no path
+  # searches the whole checkout).
+  mapfile -d '' -t tf < <(testtracked -z 2>/dev/null)
+  defs='{}' refs='{}'
+  [ ${#tf[@]} != 0 ] || return 0
+  defs=$(git -C "$MAIN" --literal-pathspecs grep -oE '^(t_)?[A-Za-z0-9_]+\(\)' -- "${tf[@]}" 2>/dev/null \
     | jq -cRn '[inputs | capture("^(?<f>.+):(t_)?(?<c>[A-Za-z0-9_]+)\\(\\)$")] | group_by(.c) | map({key: .[0].c, value: [.[].f] | unique}) | from_entries') || defs='{}'
-  refs=$(git -C "$MAIN" grep -oE '[A-Za-z0-9_.-]+\.test\.[A-Za-z0-9]+' -- '*.test.*' 2>/dev/null \
+  refs=$(git -C "$MAIN" --literal-pathspecs grep -oE '[A-Za-z0-9_.-]+\.test\.[A-Za-z0-9]+' -- "${tf[@]}" 2>/dev/null \
     | jq -cRn '[inputs | capture("^(?<f>[^:]+):(?<n>.+)$")] | group_by(.f) | map({key: .[0].f, value: [.[].n] | unique}) | from_entries') || refs='{}'
 }
 OWNERS='$defs[0] as $defs | $refs[0] as $refs | def owners($f; $c): ($defs[$c // ""] // []) as $d | ($f | split("/")[-1]) as $n
@@ -191,9 +197,12 @@ TESTEDIT_JQ='def count($re): map(select(test($re))) | length;
          timeoutsRaised: ([$to.p[] | select((.[1] | tval) > (.[0] | tval))] | length),
          casesDeleted: ([($c.r | count($t.case)) - ($c.a | count($t.case)), 0] | max)} end'
 testedits() { # <worktree>: its staged change's testedits, a JSON list (empty when it changed no test file main had)
-  local n s f o w e out=''
-  # Each changed (M) or deleted (D) test file, as its status and path.
-  n=$(git -C "$1" diff --cached --name-status --no-renames --diff-filter=MD -z -- '*.test.*' | jq -Rsc 'split("\u0000") | map(select(. != ""))') || return 1
+  local n s f o w e out='' tf=()
+  # Each changed (M) or deleted (D) test file, as its status and path: of the test files the card's base had
+  # (testtracked(), lib/issues.sh), taken as paths, not globs; none, no diff (one with no path takes every file).
+  mapfile -d '' -t tf < <(testtracked -z "$1" HEAD); wait $! || return 1
+  [ ${#tf[@]} != 0 ] || { echo '[]'; return 0; }
+  n=$(git -C "$1" --literal-pathspecs diff --cached --name-status --no-renames --diff-filter=MD -z -- "${tf[@]}" | jq -Rsc 'split("\u0000") | map(select(. != ""))') || return 1
   while IFS= read -r -d '' s && IFS= read -r -d '' f; do
     o=$(git -C "$1" show "HEAD:$f") || return 1
     w=''; [ "$s" = D ] || w=$(git -C "$1" show ":$f") || return 1
@@ -468,11 +477,9 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   # The caller's defs and refs when it has read them (testowners: the snapshot's), else read here.
   local si sh rn mn fs fl sf defs=${defs:-} refs=${refs:-} cs ru all tf=() ln ch hv px out nv rp cp su sv
   packget test.slowIssues si test.slower.share sh test.slower.runs rn test.slower.minRuns mn test.files fs || return 1
-  # The test files once, as names (tf: testhollow and testproxy take them so, with no jq of their own) and as JSON: the
-  # tracked *.test.* files and those the pack's tests.patterns match (testpaths()), when it sets them (#1036: a
-  # project's test-*.mjs files were missing); with none set, not the schema's default patterns: the *.test.* files alone.
-  mapfile -d '' -t tf < <({ git -C "$MAIN" ls-files -z -- '*.test.*'
-    ! haspatterns || git -C "$MAIN" -c core.quotePath=false ls-files -z | testpaths -z; } 2>/dev/null | LC_ALL=C sort -zu)
+  # The test files once, as names (tf: testhollow and testproxy take them so, with no jq of their own) and as JSON:
+  # main's tracked test files (testtracked(), lib/issues.sh; #1036: a project's test-*.mjs files were missing).
+  mapfile -d '' -t tf < <(testtracked -z 2>/dev/null)
   all=$(printf '%s\0' "${tf[@]}" | jq -Rsc 'split("\u0000") | map(select(. != ""))') || all='[]'
   fl=$(jq -ce 'objects' "$FLAKY" 2>/dev/null) || fl='{}'
   sf=$(jq -ce 'objects' "$SLOWFILED" 2>/dev/null) || sf='{}'

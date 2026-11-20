@@ -348,6 +348,23 @@ testpaths() { # [-v] [-z]
 haspatterns() { packok 2> /dev/null && jq -e '.tests.patterns | arrays' <<<"$PACK_T" > /dev/null 2>&1; }
 # 0 when <path>, one line, is a test file the pack's own tests.patterns match (haspatterns()).
 patterntest() { haspatterns && [ "$(printf '%s\n' "$1" | testpaths 2> /dev/null)" = "$1" ]; } # <path>
+# The one list of the project's test files for every place that looks for one by its path: the tracked files of
+# <checkout> (main's, $MAIN, by default; with <commit>, those of that commit) named *.test.*, and those the pack's own
+# tests.patterns match (testpaths()) when it sets them (haspatterns(); #1048: a project's test-*.mjs files were not
+# found). With none set, not the schema's default patterns, whose tests/ and test/ take in fixtures and helpers: the
+# *.test.* files alone. Each path once, sorted, one a line; with -z, each ended by a NUL. Fails when <checkout> is no
+# git checkout or <commit> is not in it.
+testtracked() { # [-z] [<checkout> [<commit>]]
+  local nul='' d ls=(ls-files -z) fs=()
+  [ "${1:-}" != -z ] || { nul=1; shift; }
+  d=${1:-$MAIN}
+  [ -z "${2:-}" ] || ls=(ls-tree -r -z --name-only "$2")
+  mapfile -d '' -t fs < <(git -C "$d" -c core.quotePath=false "${ls[@]}" 2> /dev/null); wait $! || return 1
+  [ ${#fs[@]} != 0 ] || return 0
+  # *.test.* as git's glob takes it (its * also matches a /): a path with .test. in it.
+  { printf '%s\0' "${fs[@]}" | grep -zF .test.
+    ! haspatterns || printf '%s\0' "${fs[@]}" | testpaths -z 2> /dev/null; } | LC_ALL=C sort -zu | if [ -n "$nul" ]; then cat; else tr '\0' '\n'; fi
+}
 # The JavaScript files <file>... load, each ended by a NUL: each <file>, with the local modules it imports (also by a
 # dynamic import(), as `await import('./x.mjs')`) or requires by a relative path (./ or ../; with no extension, the
 # .js, .mjs or .cjs file of that name), and theirs in turn, each once. A <file> is a path with a /.

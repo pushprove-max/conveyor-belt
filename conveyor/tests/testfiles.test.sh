@@ -95,6 +95,19 @@ t_tfnopatterns() {
   [ "$(jq -c '[.files[].file] | sort' <<<"$got")" = '[".claude/hooks/x.test.sh","a.test.sh"]' ] \
     || fail "the *.test.* files alone: $(jq -c '[.files[].file]' <<<"$got")"
 }
+# Bugs it catches (#1048): testowners and testedits read the *.test.* files alone, not those the pack's tests.patterns
+# match. So a case the runner run.test.sh names as its own, defined in src/test-c.mjs, which names that runner, counted
+# for the runner alone; and a card's change to src/test-a.mjs was missing from its testedits.
+t_tfpatfind() {
+  setup '[]'; tune '.tests.patterns = ["test-*.mjs"]'; mkdir -p "$R/src"
+  printf '// runs through run.test.sh\nrone() {}\n' > "$R/src/test-c.mjs"; tf_patfiles
+  got=$(tf_in eval 'testowners && jq -cn --argjson d "$defs" --argjson r "$refs" "[\$d.rone, \$r[\"src/test-c.mjs\"]]"') || fail "testowners failed: $got"
+  [ "$got" = '[["src/test-c.mjs"],["run.test.sh"]]' ] || fail "the case's file and the runner it names: $got"
+  W=$T/$CASE/cards/c-1; git -C "$R" worktree add -q --detach "$W" || fail "the card's worktree"
+  echo "test('b', () => {});" > "$W/src/test-a.mjs"; git -C "$W" add -A || fail "the card's change"
+  got=$(tf_card eval 'testedits "$W"' | jq -c 'map(.file)') || fail "testedits failed: $got"
+  [ "$got" = '["src/test-a.mjs"]' ] || fail "the test-*.mjs file the card changed: $got"
+}
 # A file no pattern lists but card runs keep on the page keeps its survey time too. Bug it catches (#1044): the part
 # dropped the survey run of an unlisted file, so its newest run was a card's, while testolder() counted the survey and
 # gave as older the oldest card run, which the part's runs already held: the Timeline showed that run twice.

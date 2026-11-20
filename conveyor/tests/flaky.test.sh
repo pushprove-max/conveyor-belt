@@ -168,6 +168,17 @@ t_flakysame() {
   [ "$(flakyfiled)" = 0 ] || fail "three entries from one source filed an issue: $(cat "$STUB/filed")"
 }
 
+# Bug it catches (#1048): a runner's case files were looked for in the *.test.* files alone, so the case run.mjs names
+# as its own, defined in src/test-a.mjs (the pack's tests.patterns), which names run.mjs, was dropped as gone.
+t_flakypatterns() {
+  setup '[]'; tune '.tests.patterns = ["test-*.mjs"]'; mkdir -p "$R/src" "$ST"
+  printf "// through run.mjs\ntest('one', () => {});\n" > "$R/src/test-a.mjs"; echo "// runs src/" > "$R/run.mjs"
+  git -C "$R" add src run.mjs && git -C "$R" commit -qm tests || fail "main's test files"
+  jq -cn '{entries: [{case: "run.mjs: one", source: "s", time: (now - 86400 | todate)}], filed: []}' > "$ST/flaky.json"
+  loop flaky off "run.mjs: one" "Board user" "kept off" > /dev/null 2> "$STUB/err" || fail "flaky off failed: $(cat "$STUB/err")"
+  [ "$(fl '[.entries[].case] | join("|")')" = "run.mjs: one|run.mjs: one" ] || fail "the case was dropped: $(cat "$STUB/err" "$ST/flaky.json")"
+}
+
 # `conveyor.sh flaky` drops, as it reads the record, each case gone from main: renamed in its file, no longer in a
 # runner's case files, or its file gone; its open issue is closed with the reason. A case still in its file (its name
 # quoted there as 'it\'s kept' too), one in a file named from a subfolder (pkg/s.test as s.test) and a runner's case

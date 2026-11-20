@@ -290,6 +290,17 @@ t_mainredcard() {
   [ ! -e "$STUB/filed" ] || fail "an issue was filed for main-red: $(cat "$STUB/filed")"
 }
 
+# Bug it catches (#1048): the case's file was looked for in the *.test.* files alone, so a case the runner run.mjs
+# names as its own, defined in src/test-a.mjs (the pack's tests.patterns), went to main-red under run.mjs, a file no
+# fix card could make pass.
+t_mainredpatterns() {
+  setup '[]'; tune '.tests.patterns = ["test-*.mjs"]'; mkdir -p "$R/src"
+  echo "test('one', () => {});" > "$R/src/test-a.mjs"; echo "// runs src/" > "$R/run.mjs"
+  git -C "$R" add src run.mjs && git -C "$R" commit -qm tests || fail "main's test files"
+  eng 'mainred c1 "run.mjs: one" run.mjs '"$(git -C "$R" rev-parse HEAD)" || fail "mainred failed"
+  [ "$(jq -c '.reds[0].cases[0].files' "$ST/mainred.json")" = '["src/test-a.mjs"]' ] || fail "the case's test-*.mjs file: $(cat "$ST/mainred.json")"
+}
+
 # Issue 618, by design and as docs/board.md and conveyor/README.md say: a main-red fix card is picked whatever the priority switches say.
 # Bug it catches: a fix card held by `control rules P0=off` (it is labelled a P0 bug) left every card that meets the
 # red main waiting for good. With P0 to P3 off, the P0 issue #7 is not picked, and the fix card still is.
