@@ -8,6 +8,8 @@
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+# resumed is port.test.sh's: the runner loads every case file into one shell. A change to port.test.sh runs this file
+# too, through its link in .conveyor/test-links.json.
 
 # Bugs: a blocked card whose change cannot be staged (an index lock) loses it with its worktree;
 # a build that fails before any review keeps its patch and names it nowhere on the issue; a review that fails after
@@ -17,8 +19,10 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # side; keptunread's first card is the build that fails before any review.
 t_kept() {
   setup "[$(issue 7 2026-01-01)]"
-  echo 'echo two >> a.txt; : > "$(git rev-parse --git-path index.lock)"; exit 3' > "$STUB/build"
-  loop run >/dev/null; wt=$T/$CASE/cards/$(st 'select(.step == "blocked") | .card')
+  # No retry follows: the card's block (block(), lib/push.sh) on its worktree, where its build left an index lock.
+  fx_wt 'echo two >> a.txt' k.txt kept; wt=$FXWT
+  fx_in ': > "$(git -C "$FXWT" rev-parse --git-path index.lock)" && block c7 7 "$FXWT" "build: the session exited 3"'
+  [ "$RC" = 0 ] || fail "block() failed: $(cat "$T/$CASE/run.out")"
   st 'select(.step == "blocked") | .reason' | grep -q "^build: .*could not be kept as a patch.*its worktree is left at $wt\]" && [ "$(tail -n 1 "$wt/a.txt" 2>&1)" = two ] \
     || fail "a change that could not be staged went with its worktree, or the reason does not say where it is: $(st 'select(.step == "blocked") | .reason') $(ls "$T/$CASE/cards")"
 }
@@ -31,6 +35,7 @@ t_keptlong() {
   local pad; pad=$(printf '%650s' '' | tr ' ' x)
   { for i in $(seq 1 100); do echo "[P1] a.txt:$i finding number $i of a very long review, $pad"; done; echo 'USER-VISIBLE: no'; echo 'VERDICT: NO-GO'; } > "$STUB/review.1"
   echo '[ "$(wc -l < "$STUB/reviews")" -lt 2 ] || exit 3' > "$STUB/review-cmd"
+  # loop: the NO-GO's findings must last through the card's fix and its failed second review, which only its run makes
   loop run >/dev/null; k=$(st 'select(.issue == 9 and .step == "blocked") | "\($ENV.ST)/\(.kept)"'); old=$(st 'select(.issue == 9 and .step == "blocked") | .card')
   st 'select(.issue == 9 and .step == "blocked") | .reason' | grep -q '^review 2: ' && grep -q 'finding number 100 ' "$k/$old.review" && grep -q 'finding number 1 ' "$STUB/comments" \
     || fail "a review that failed after a NO-GO and its fix lost that NO-GO's findings: $(ls "$k" 2>&1)"
@@ -41,6 +46,8 @@ t_keptlong() {
   jq -cn '{card:"c20270101T000000-9",issue:9,step:"blocked",time:"2027-01-01T00:00:00Z",tokens:{claude:0,codex:0},result:"blocked",sha:"",reason:"worktree: the engine could not link the dependencies of the main checkout: x",kept:""}' >> "$ST/retried.jsonl"
   echo "$GO" > "$STUB/review.4"; rm "$STUB/review-cmd"
   echo 'cp "$STUB/brief" "$STUB/brief.build"; git diff --cached --name-only > "$STUB/resumed-with"; f=$(grep -o "/[^ ]*\.carried" "$STUB/brief" | head -n 1); cp "$f" "$STUB/carried"' > "$STUB/build"
+  # loop: the cut findings and the file named for them must reach the retried build's brief, which card() makes
+  # (lib/card.sh) and only its run shows; its landing must then leave no file behind
   loop run >/dev/null || fail "run of the retried #9 exited non-zero"
   st 'select(.issue == 9 and .step == "worktree") | .reason' | grep -q "^resumed from the kept patch of card $old:" && [ "$(cat "$STUB/resumed-with" 2>&1)" = a.txt ] \
     && [ "$(st 'select(.issue == 9 and '"$NOMARK"') | "\(.step) \(.result)"' | tr '\n' ,)" = "picked ok,worktree ok,brief ok,build ok,review GO,test pass,landed ok," ] \
@@ -56,13 +63,14 @@ t_keptlong() {
 t_keptevidence() {
   setup "[$(issue 10 2026-01-01)]"
   echo 'echo ten > t.txt; c=$(basename "$PWD"); mkdir -p "$ST/kept/$c/$c.out/x"; exit 3' > "$STUB/build"
+  # loop: the block is a card's whole path to a failed build, with the session output it writes beside its worktree
   loop run >/dev/null; k=$(st 'select(.issue == 10 and .step == "blocked") | "\($ENV.ST)/\(.kept)"'); old=$(st 'select(.issue == 10 and .step == "blocked") | .card')
   st 'select(.issue == 10 and .step == "blocked") | .reason' | grep -q 'evidence not moved to ' && [ -s "$k/$old.patch" ] && [ -e "$T/$CASE/cards/$old.out" ] \
     || fail "a blocked line whose patch was kept names no folder when its evidence did not move: $(st 'select(.issue == 10 and .step == "blocked")') $(ls "$T/$CASE/cards")"
-  echo "$GO" > "$STUB/review.1"; echo 'git diff --cached --name-only > "$STUB/resumed-with"' > "$STUB/build"
-  loop retry 10 >/dev/null && loop run >/dev/null || fail "run of the retried #10 exited non-zero"
-  st 'select(.issue == 10 and .step == "worktree") | .reason' | grep -q "^resumed from the kept patch of card $old:" && [ "$(cat "$STUB/resumed-with")" = t.txt ] && [ "$(cat "$R/t.txt" 2>&1)" = ten ] \
-    || fail "a retry did not resume from a patch kept beside evidence that did not move: $(st 'select(.issue == 10) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+  loop retry 10 >/dev/null || fail "retry of #10 exited non-zero"
+  resumed 10 'git -C "$wt" show :t.txt > "$T/$CASE/t.txt"'
+  [ "$(jq -c '[.rc, .mode, .staged]' <<<"$RESUMED")" = '[0,"session",["t.txt"]]' ] && jq -r .note <<<"$RESUMED" | grep -q "^resumed from the kept patch of card $old:" \
+    && [ "$(cat "$T/$CASE/t.txt" 2>&1)" = ten ] || fail "a retry did not resume from a patch kept beside evidence that did not move: $RESUMED"
 }
 
 # Bug: the last review could not be moved into the kept folder (here nothing can be: the folder cannot be
@@ -72,10 +80,13 @@ t_keptleft() {
   setup "[$(issue 11 2026-01-01)]"; r=0; echo 'echo eleven >> e.txt' > "$STUB/build"; mkdir -p "$ST/kept"
   printf '%s\n' '[P1] e.txt:1 left beside the worktree' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.$((r + 1))"
   echo "[ \"\$(wc -l < \"\$STUB/reviews\")\" -lt $((r + 2)) ] || exit 3" > "$STUB/review-cmd"
+  # loop: the block is a card's whole path through its NO-GO, fix and failed second review, with that review beside its worktree
   chmod a-w "$ST/kept"; loop run >/dev/null; chmod u+w "$ST/kept"; old=$(st 'select(.issue == 11 and .step == "blocked") | .card')
   [ "$(st 'select(.issue == 11 and .step == "blocked") | .kept + (.reason | sub("^review 2: .*evidence not moved.*"; "left"; "s"))')" = left ] && grep -q 'left beside' "$T/$CASE/cards/$old.review" \
     || fail "#11 was not blocked on its second review with its first review left beside the worktree: $(st 'select(.issue == 11 and .step == "blocked")') $(ls "$T/$CASE/cards")"
   rm "$STUB/review-cmd"; echo "$GO" > "$STUB/review.$((r + 4))"; echo 'cp "$STUB/brief" "$STUB/brief.11"; echo eleven >> e.txt' > "$STUB/build"
+  # loop: the review left beside the old worktree must reach the retried build's brief, which card() makes
+  # (lib/card.sh) and only its run shows
   loop retry 11 >/dev/null && loop run >/dev/null || fail "run of the retried #11 exited non-zero"
   grep -qx '\[P1\] e.txt:1 left beside the worktree' "$STUB/brief.11" && [ -n "$(st 'select(.issue == 11 and .step == "landed") | .sha')" ] \
     || fail "the brief of a retried card lacks the findings of a review left beside the blocked card's worktree: $(tail -n 8 "$STUB/brief.11" 2>&1)"
@@ -86,11 +97,14 @@ t_keptleft() {
 # The card built from nothing meets no conflict at its landing: it runs no extra session (no rebase step).
 t_keptunread() {
   setup "[$(issue 12 2026-01-01)]"; echo 'echo twelve > w.txt; exit 3' > "$STUB/build"
+  # loop: the block and the issue comment that names its kept patch are a card's whole path to a failed build
   loop run >/dev/null; k=$(st 'select(.issue == 12 and .step == "blocked") | "\($ENV.ST)/\(.kept)"'); old=$(st 'select(.issue == 12 and .step == "blocked") | .card')
   [ -s "$k/$old.patch" ] || fail "#12 kept no patch: $(st 'select(.issue == 12 and .step == "blocked")')"
   grep -q '^12 --body Conveyor card .*-12 is blocked: build: ' "$STUB/comments" && grep -q "^Its work is kept as a patch: <state>/kept/${k##*/}/.*-12\.patch (1 files, 1 KB, built on commit $(git -C "$R" rev-parse HEAD))" "$STUB/comments" \
     || fail "a build that failed before any review did not name its kept patch and size on the issue: $(cat "$STUB/comments" 2>&1)"
   echo 'not a patch' > "$k/$old.patch"; echo "$GO" > "$STUB/review.1"; echo 'cp "$STUB/brief" "$STUB/brief.12"; echo twelve > w.txt' > "$STUB/build"
+  # Past resumeplan's stale mode, card() writes the brief's part on the unreadable patch (inline, no function gives it).
+  # loop: only the card's own steps show a card with no conflict runs no rebase session, and that brief part
   loop retry 12 >/dev/null && loop run >/dev/null || fail "run of the retried #12 exited non-zero"
   st 'select(.issue == 12 and .step == "worktree") | .reason' | grep -q "^the kept patch of card $old cannot be read: built from nothing" && grep -q "^# The kept patch of blocked card $old cannot be read$" "$STUB/brief.12" \
     && [ -n "$(st 'select(.issue == 12 and .step == "landed") | .sha')" ] || fail "a kept patch that cannot be read was not given up for a build from nothing: $(st 'select(.issue == 12) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
@@ -105,16 +119,16 @@ t_keptunread() {
 t_keptfresh() {
   local k d out
   setup "[$(issue 13 2026-01-01)]"; echo 'echo thirteen >> w.txt; exit 3' > "$STUB/build"
+  # loop: two blocked cards, the second resumed from the first's patch: the chain of kept work retry --fresh moves
   loop run >/dev/null; loop retry 13 >/dev/null && loop run >/dev/null
   k=$(st 'select(.issue == 13 and .step == "blocked") | .card'); [ -n "$k" ] && [ -s "$ST/kept/$k/$k.patch" ] || fail "#13 was not blocked again with a kept patch: $(st 'select(.issue == 13) | .step' | tr '\n' ,)"
   out=$(loop retry 13 --fresh) || fail "retry 13 --fresh exited non-zero: $out"
   d=$(ls -d "$ST"/kept-dropped/*-13 2>/dev/null)
   [ -n "$d" ] && [ "$(ls "$d" | wc -l)" = 2 ] && [ -s "$d/$k/$k.patch" ] && [ -z "$(ls -A "$ST/kept")" ] && grep -q "^conveyor: its next card builds from nothing; its kept work is in $d$" <<<"$out" \
     || fail "retry --fresh did not move both blocked cards' kept work to one dated folder: $out $(ls -R "$ST/kept" "$ST/kept-dropped" 2>&1)"
-  echo "$GO" > "$STUB/review.1"; echo 'git diff --cached --name-only > "$STUB/fresh-with"; echo fresh > w.txt' > "$STUB/build"
-  loop run >/dev/null || fail "run of #13 after retry --fresh exited non-zero"
-  [ "$(st 'select(.issue == 13 and .step == "worktree") | .reason' | tail -n 1)" = '' ] && [ ! -s "$STUB/fresh-with" ] && [ "$(cat "$R/w.txt")" = fresh ] \
-    || fail "the card after retry --fresh did not build from nothing: $(st 'select(.issue == 13 and .step == "worktree") | .reason') staged: $(cat "$STUB/fresh-with" 2>&1)"
+  resumed 13
+  [ "$(jq -c '[.rc, .mode, .note, .from, .staged, .beside]' <<<"$RESUMED")" = '[0,"","","",[],[]]' ] \
+    || fail "the card after retry --fresh did not build from nothing: $RESUMED"
 }
 
 # A blocked line written before kept work moved under the state folder names its folder by an absolute path,

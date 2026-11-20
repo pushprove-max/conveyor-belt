@@ -6,6 +6,8 @@
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
+# resumed is port.test.sh's: the runner loads every case file into one shell. A change to port.test.sh runs this file
+# too, through its link in .conveyor/test-links.json.
 
 # Bugs: a follow-up stops again for a visible change its parent already had the owner's yes for;
 # one whose change goes beyond that yes lands on it; an issue up the chain is not read; a parent with no
@@ -60,6 +62,7 @@ t_inherit() {
   landed 100101 '[100104]' | jq -c '.card = "c0-100101"' >> "$ST/cards.jsonl"
   printf '%s\n' 'INHERITED: beyond: guests see the Pay button too' 'USER-VISIBLE: yes: guests see a Pay button' 'VERDICT: GO' > "$STUB/review.1"
   head=$(git -C "$R" rev-parse HEAD)
+  # loop: the stop is a card's whole path: its review asked of the yes up the chain, the block and what Needs you shows
   loop run --only 100104 >/dev/null || fail "run of #100104 exited non-zero"
   [ "$(st 'select(.issue == 100104 and .step == "blocked") | .reason')" = "${Y}guests see a Pay button (it goes beyond the yes of #7: guests see the Pay button too)" ] \
     && [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] || fail "a follow-up whose change goes beyond its parent's yes did not stop, or its ask does not name what: $(steps 100104)"
@@ -68,14 +71,13 @@ t_inherit() {
   [ "$(loop snapshot --fresh | jq -c '.needsYou.waiting | map({issue, beyond})')" = '[{"issue":100104,"beyond":{"from":7,"what":"guests see the Pay button too"}}]' ] \
     || fail "the waiting follow-up does not name what goes beyond its parent's yes: $(loop snapshot --fresh | jq -c .needsYou.waiting)"
   # Bugs: #100104's kept review said "beyond". Retried (the yes up its chain may have grown since), its
-  # kept patch is reviewed again against the approval line as it is now, and it lands on a "part".
+  # kept patch is reviewed again against the approval line as it is now, with no build (its landing on a "part":
+  # t_inheritpart).
   old=$(st 'select(.issue == 100104 and .step == "blocked") | .card')
-  printf '%s\n' 'INHERITED: part' 'USER-VISIBLE: yes: guests see a Pay button' 'VERDICT: GO' > "$STUB/review.2"
   loop retry 100104 >/dev/null || fail "retry of the blocked #100104 exited non-zero"
-  loop run --only 100104 >/dev/null || fail "run of the retried #100104 exited non-zero"
-  [ "$(st 'select(.issue == 100104 and .step == "landed") | .yesFrom')" = 7 ] \
-    && st 'select(.issue == 100104 and .step == "worktree") | .reason' | grep -q "^reviewing the kept patch of card $old: is its visible change part of the yes of #7" \
-    || fail "a retried follow-up whose kept review said beyond was not reviewed again: $(steps 100104)"
+  resumed 100104
+  [ "$(jq -c '[.rc, .mode, .note, .staged]' <<<"$RESUMED")" = "[0,\"review\",\"reviewing the kept patch of card $old: is its visible change part of the yes of #7? No build\",[\"a.txt\",\"web/pay.ts\"]]" ] \
+    || fail "a retried follow-up whose kept review said beyond was not taken up to be reviewed again, with no build: $RESUMED"
 }
 # The follow-up of a parent with no yes, as it stops and is retried.
 t_inheritno() {
@@ -83,6 +85,7 @@ t_inheritno() {
   # #100103, a follow-up of #8, which has no approval line: nothing to inherit, the card stops as any other, and its
   # reviewer is not asked about a yes.
   printf '%s\n' 'USER-VISIBLE: yes: staff see a Pay button' 'VERDICT: GO' > "$STUB/review.1"
+  # loop: the stop is a card's whole path: its review and brief with no yes to tell of, the block and what Needs you shows
   loop run --only 100103 >/dev/null || fail "run of #100103 exited non-zero"
   [ "$(st 'select(.issue == 100103 and .step == "blocked") | .reason')" = "${Y}staff see a Pay button" ] || fail "a follow-up of a parent with no yes did not stop: $(steps 100103)"
   ! grep -q 'INHERITED\|# The yes of' "$STUB/asked" "$STUB/brief" || fail "a follow-up of a parent with no yes was told of one"
@@ -109,6 +112,7 @@ t_inheritno() {
   old=$(st 'select(.issue == 100103 and .step == "blocked") | .card')
   printf '%s\n' 'INHERITED: part' 'USER-VISIBLE: yes: staff see a Pay button' 'VERDICT: GO' > "$STUB/review.2"
   loop retry 100103 >/dev/null || fail "retry of the blocked #100103 exited non-zero"
+  # loop: the record check reads a retried follow-up's landed line on an inherited yes; resumeplan stops before a landing
   loop run --only 100103 >/dev/null || fail "run of the retried #100103 exited non-zero"
   [ "$(st 'select(.issue == 100103 and .step == "landed") | .yesFrom')" = 8 ] \
     && st 'select(.issue == 100103 and .step == "worktree") | .reason' | grep -q "^reviewing the kept patch of card $old: is its visible change part of the yes of #8" \

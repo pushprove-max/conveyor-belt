@@ -10,6 +10,7 @@
 
 # rerunsetup, rerunfiles, ran, rerunedit, rerunstep, rerunwt and tline are rerun.test.sh's: the runner loads every case
 # file into one shell. A change to rerun.test.sh's helpers or setup runs this file too, through its link in .conveyor/test-links.json.
+# So is resumed port.test.sh's, through that file's link.
 
 # Bug this guards against: a session that brings the change onto another HEAD and edits it where main changed
 # nothing (here a.txt, the card's own file, on a HEAD whose new commit changes no file) has edited it outside any
@@ -99,11 +100,17 @@ t_rerunretry() {
   rerunsetup '1 fail flaky' '2 fail flaky' '3 fail flaky' '4 fail flaky'; rerunfiles
   for i in 4 5; do echo "$GO" > "$STUB/review.$i"; done
   echo 'grep -qx two a.txt || echo two >> a.txt' > "$STUB/build"
+  # loop: the block is a card's whole path through its test runs and fix, whose passes block() keeps with the patch
   loop run 1 > /dev/null || fail "run exited non-zero"
   [ "$(st 'select(.step == "blocked") | .issue')" = 7 ] && [ "$(ran 4)" = flaky ] || fail "#7 did not block after failing flaky through its fix: $(st '"\(.step) \(.result)"' | tr '\n' ,)"
   echo z > "$R/z.txt"; git -C "$R" add z.txt; git -C "$R" commit -qm "main moves"
-  loop retry 7 > /dev/null && loop run 1 > /dev/null || fail "the retried #7 did not run"
-  [ "$(ran 5)" = flaky ] && [ "$(st 'select(.step == "test") | .result' | tail -n 1)" = pass ] \
+  loop retry 7 > /dev/null || fail "the retry of #7 exited non-zero"
+  # The next card's resume (its build stub leaves the kept patch as it was), then its test step (tests(),
+  # lib/testrun.sh) on that worktree, as rerunstep runs it.
+  resumed 7 'tests "$wt" > /dev/null 2>&1; echo $? > "$T/$CASE/testrc"'
+  [ "$(jq -c '[.rc, .mode, .staged, (.beside | index("rerun") != null)]' <<<"$RESUMED")" = '[0,"session",["a.txt"],true]' ] \
+    || fail "the retried card did not resume from its kept patch with the list of what its tests passed: $RESUMED"
+  [ "$(ran 5)" = flaky ] && [ "$(cat "$T/$CASE/testrc")" = 0 ] \
     || fail "the retried card did not keep the passes of its last run: $(ran 5): $(cat "$STUB/rerun.5" 2>&1)"
   [ "$(grep -E $'^(main|changed)\t' "$STUB/rerun.5" | tr '\t\n' ':|')" = "main:z.txt|" ] || fail "the retried card was not told what main changed, and that alone: $(cat "$STUB/rerun.5")"
 }

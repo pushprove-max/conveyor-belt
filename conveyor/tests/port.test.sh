@@ -59,6 +59,8 @@ t_portfix() {
   echo "$GO" > "$STUB/review.5"; echo "$GO" > "$STUB/review.6"
   # The third run fails, and its run again too (tests()), so the test fix starts.
   echo 'echo x >> "$STUB/tests"; case $(wc -l < "$STUB/tests") in 3|4) echo "FAIL widget.test.ts"; printf "%s\n" "== widget.test.ts" "-- FAIL widget.test.ts" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1 ;; esac' > "$STUB/test-cmd"
+  # The bug is after the resume, in the port's test fix, its second GO and the landing that files the earlier loop's findings.
+  # loop: only the card's own steps show the port's test fix, second GO and landing
   loop retry 8 >/dev/null && loop run >/dev/null || fail "run of the retried #8 exited non-zero"
   [ "$(st 'select(.issue == 8 and '"$NOMARK"') | "\(.step) \(.result)"' | tr '\n' ,)" = "picked ok,worktree ok,brief ok,build ok,review GO,test fail,fix ok,review GO,test pass,landed ok," ] \
     && [ "$(st 'select(.issue == 8 and .step == "landed") | .leftover')" = true ] \
@@ -81,6 +83,9 @@ t_port() {
     && st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -q '^rebase onto main conflicts: ' && [ "$(wc -l < "$STUB/sessions")" = 4 ] \
     && [ "$(git -C "$R" log -1 --format=%s)" = again ] || fail "a conflict after the port did not block for the owner: $(steps 8)"
   echo "$NOGO" > "$STUB/review.5"; echo "$GO" > "$STUB/review.6"; f=$(wc -l < "$STUB/filed")
+  # resumeplan only gives the port its finished loop's GO (fin); what is proved is card()'s handling of a NO-GO on that
+  # one review (fixed and reviewed again, nothing filed).
+  # loop: only the card's review loop shows a NO-GO on the port's one review fixed and reviewed again
   loop retry 8 >/dev/null && loop run >/dev/null || fail "run of the retried #8 exited non-zero"
   [ "$(st 'select(.issue == 8 and '"$NOMARK"') | "\(.step) \(.result)"' | tr '\n' ,)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review GO,test pass,landed ok," ] \
     && [ "$(wc -l < "$STUB/filed")" = "$f" ] && [ "$(st 'select(.issue == 8 and .step == "landed") | has("leftover")')" = false ] && [ "$(tr '\n' ' ' < "$R/a.txt")" = "TWO two two " ] \
@@ -114,6 +119,9 @@ t_resumeport() {
   # earlier loop's findings again.
   sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"; echo 'cp "$PWD.port" "$STUB/port"' > "$STUB/review-cmd"
   s0=$(wc -l < "$STUB/sessions"); r0=$(wc -l < "$STUB/reviews")
+  # Past the resume, the port's brief, its review scoped to the port and the landing that files the earlier loop's
+  # findings again (with the filed line's stop) are each the card's own steps.
+  # loop: only the card's own steps show the port's brief, its scoped review and its landing
   out=$(loop retry 8 && loop run) || fail "run of the retried #8 exited non-zero: $out"; n=$(wc -l < "$STUB/sessions"); rm "$STUB/review-cmd"
   [ "$n" = $((s0 + 1)) ] && [ "$(wc -l < "$STUB/reviews")" = $((r0 + 1)) ] || fail "a port of a finished loop did not get exactly one session and one review: $(steps 8)"
   grep -q '^# This review is of a port alone$' "$STUB/asked" && grep -q "^The difference is the file $T/$CASE/cards/.*-8\.port\.$" "$STUB/asked" \
@@ -263,6 +271,32 @@ resumesetup() { # <issue>: a fresh main with that one issue; YES, a review's vis
   setup "[$(issue "$1" 2026-01-01)]"; YES='USER-VISIBLE: yes: guests see a new Pay button'
   steps() { st "select(.issue == $1) | \"\(.step) \(.result) \(.reason)\"" | tr '\n' ,; }
 }
+# resumed <issue> [<commands>]: how the next card of a retried <issue> takes up its kept work (resumeplan(),
+# lib/card.sh), with no card run: card()'s new worktree of main ($T/$CASE/cards/c9), its issue as GitHub gives it, the rule
+# "visible changes need the owner's yes" and the inherited yes as card() reads them (the moved cases' issues have
+# no section naming a change, so none is held to one: heldto is empty). Its outcome, as card() acts on it, in
+# $RESUMED: {rc, err, mode, note, from, fin, finend, pro, rounds, staged (the worktree's staged files), beside (the
+# files beside the worktree, by their ending)}. <commands> run after it, in its shell (wt is that worktree).
+# Used by the resume cases of kept, rerunkept, visible and visibleinherit too (the runner loads every case
+# file into one shell; .conveyor/test-links.json runs them when this file changes).
+resumed() {
+  # FXWT, a fix card's worktree that fx_in reads, names none here.
+  FXWT=$T/$CASE/none fx_in 'cd "$R" || exit 3; n='"$1"' br="" wt=$CARDS/c9
+    git worktree add -q --detach "$wt" "refs/heads/$BRANCH" || exit 3
+    stdb ask issue retried "$n" >/dev/null 2>&1 || :
+    issue=$(gh issue view "$n" --json number,title,body,labels,milestone) || exit 3
+    vrule=on heldto="" inh=""; yesrule "" || vrule=off
+    [ "$vrule" = off ] || inh=$(inherit "$issue")
+    from="" fromk="" was="" mode="" note="" fin="" finend="{}" pro="[]" rounds=0 err=""
+    resumeplan; rc=$?
+    jq -cn --argjson rc "$rc" --arg err "$err" --arg mode "$mode" --arg note "$note" --arg from "$from" --arg fin "$fin" --argjson finend "$finend" \
+      --argjson pro "$pro" --argjson rounds "$rounds" --arg staged "$(git -C "$wt" diff --cached --name-only)" --arg beside "$(cd "$CARDS" && ls -d c9.* 2>/dev/null)" \
+      "{rc: \$rc, err: \$err, mode: \$mode, note: \$note, from: \$from, fin: \$fin, finend: \$finend, pro: \$pro, rounds: \$rounds,
+        staged: (\$staged | split(\"\n\") | map(select(. != \"\"))), beside: (\$beside | split(\"\n\") | map(select(. != \"\") | ltrimstr(\"c9.\")))}" > "$T/$CASE/resumed.json" || exit 3
+    '"${2:-}"
+  RESUMED=$(cat "$T/$CASE/resumed.json" 2>/dev/null)
+  [ "$RC" = 0 ] && [ -n "$RESUMED" ] || fail "resumeplan could not be called on #$1, or the commands after it failed: $(cat "$T/$CASE/run.out")"
+}
 t_resume() {
   resumesetup 7
   # A visible change stops only a card that touches product code: #7 and #11 change a file under web/ too.
@@ -270,10 +304,13 @@ t_resume() {
   # Three NO-GOs, the last one visible: blocked for the owner's yes, nothing filed. Approved and retried: it lands from the
   # kept patch with no build and no review, and files the last review's finding as a follow-up at that landing.
   for i in 1 2 3; do printf '%s\n' "$(moved "${i/3/}" '[P1] a.txt:1 wrong word')" "$YES" 'VERDICT: NO-GO' > "$STUB/review.$i"; done
+  # The resume cases that check resumeplan's outcome alone call it (resumed, below).
+  # loop: the end-to-end check of the resume path (block, retry, resumeplan, and card() landing on its outcome)
   loop run >/dev/null || fail "run exited non-zero"
   st 'select(.step == "blocked") | .reason' | grep -q "needs Dana's yes" && [ ! -e "$STUB/filed" ] || fail "#7 was not blocked for Dana's yes with nothing filed: $(steps 7)"
   issue 7 2026-01-01 | jq -c '[.body += "\nVisible change approved: r-11"]' > "$STUB/issues.json"
   loop retry 7 | grep -q 'lands from the kept patch .*-7\.patch, with no build and no review' || fail "retry does not say the approved next card lands from the kept patch"
+  # loop: as above, the retried card lands on resumeplan's outcome and files the leftover finding
   loop run >/dev/null || fail "run of the retried #7 exited non-zero"
   [ "$(st 'select(.issue == 7 and '"$NOMARK"') | .step' | tr '\n' ' ')" = "picked worktree brief test landed " ] && [ "$(wc -l < "$STUB/sessions")" = 3 ] && [ "$(wc -l < "$STUB/reviews")" = 3 ] \
     || fail "the retried card was built or reviewed again: $(steps 7)"
@@ -293,6 +330,7 @@ t_resumestep() {
   local p t k before kept
   resumesetup 9; echo "$GO" > "$STUB/review.3"; echo 'exit 3' > "$STUB/review-cmd"
   echo 'if grep -q "^# This card resumes blocked card" "$STUB/brief"; then cp "$STUB/brief" "$STUB/brief.9"; git diff --cached --name-only > "$STUB/resumed-with"; else echo nine > n.txt; fi' > "$STUB/build"
+  # loop: the block is a card's whole path to a failed review (its records, kept patch and worktree line, which retry reads)
   loop run >/dev/null; st 'select(.issue == 9 and .step == "blocked") | .reason' | grep -q '^review 1: ' || fail "#9 was not blocked on its failed review: $(steps 9)"
   k=$(st 'select(.issue == 9 and .step == "blocked") | "\($ENV.ST)/\(.kept)"')
   [ -s "$k/$(st 'select(.issue == 9 and .step == "blocked") | .card').patch" ] || fail "#9 was not blocked with a kept patch: $(steps 9)"
@@ -306,6 +344,7 @@ t_resumestep() {
   kill "$p"; wait "$p" 2>/dev/null
   rm "$STUB/review-cmd"; : > "$STUB/closed-fail"
   loop retry 9 | grep -q 'starts from the kept patch' || fail "retry of #9 did not go on once its card's process had ended"
+  # loop: the warning must reach the retried build's brief, which card() makes (lib/card.sh) and only its run shows
   loop run >/dev/null || fail "run of the retried #9 exited non-zero"; rm "$STUB/closed-fail"
   [ "$(st 'select(.issue == 9 and '"$NOMARK"') | "\(.step) \(.result)"' | tr '\n' ,)" = "picked ok,worktree ok,brief ok,build ok,review GO,test pass,landed ok," ] && [ "$(cat "$STUB/resumed-with" 2>&1)" = n.txt ] \
     && [ "$(cat "$R/n.txt")" = nine ] || fail "a card blocked on a failed step did not resume from its kept patch with one session: $(steps 9) $(cat "$STUB/resumed-with" 2>&1)"
@@ -318,19 +357,17 @@ t_resumestep() {
 # review, though nothing had held the change against the condition. The patch is reviewed, with no build first; the
 # condition it does not meet is a finding, fixed and reviewed again.
 t_resumeyes() {
-  resumesetup 11; r=0; echo 'echo eleven > e.txt; mkdir -p web; echo eleven > web/e.ts' > "$STUB/build"
-  printf '%s\n' "$YES" 'VERDICT: GO' > "$STUB/review.$((r + 1))"
+  resumesetup 11; echo 'echo eleven > e.txt; mkdir -p web; echo eleven > web/e.ts' > "$STUB/build"
+  printf '%s\n' "$YES" 'VERDICT: GO' > "$STUB/review.1"
+  # loop: the block for the yes is a card's whole path (its review, the kept patch, review and body), which the retry reads
   loop run >/dev/null; st 'select(.issue == 11 and .step == "blocked") | .reason' | grep -q "needs Dana's yes" || fail "#11 was not blocked for Dana's yes: $(steps 11)"
-  old=$(st 'select(.issue == 11 and .step == "blocked") | .card'); sessions=$(wc -l < "$STUB/sessions")
+  old=$(st 'select(.issue == 11 and .step == "blocked") | .card')
   issue 11 2026-01-01 | jq -c '[.body += "\nVisible change approved: r-12, only for admins"]' > "$STUB/issues.json"
-  printf '%s\n' '[P1] e.txt:1 guests see it: the approval is only for admins' "$YES" 'VERDICT: NO-GO' > "$STUB/review.$((r + 2))"; printf '%s\n' "$YES" 'VERDICT: GO' > "$STUB/review.$((r + 3))"
-  echo 'echo admins >> e.txt' > "$STUB/build"
   # Bug: retry said this card lands "with no build and no review", though the condition has it reviewed first.
   loop retry 11 | grep -q "reviews the kept patch .*-11\.patch against Dana's yes as the issue now gives it, with no build" || fail "retry does not say the conditionally approved kept patch is reviewed before it lands"
-  loop run >/dev/null || fail "run of the retried #11 exited non-zero"
-  [ "$(st 'select(.issue == 11 and '"$NOMARK"') | "\(.step) \(.result)"' | tr '\n' ,)" = "picked ok,worktree ok,brief ok,review NO-GO,fix ok,review GO,test pass,landed ok," ] && [ "$(wc -l < "$STUB/sessions")" = $((sessions + 1)) ] \
-    && [ "$(tr '\n' ' ' < "$R/e.txt")" = "eleven admins " ] || fail "a kept patch approved with a condition was not reviewed against it before landing: $(steps 11)"
-  st 'select(.issue == 11 and .step == "worktree") | .reason' | grep -q "^reviewing the kept patch of card $old against the condition of Dana's yes" && loop check || fail "the worktree line does not say the kept patch is reviewed, or the records do not check: $(steps 11)"
+  resumed 11
+  [ "$(jq -c '[.rc, .mode, .note, .staged]' <<<"$RESUMED")" = "[0,\"review\",\"reviewing the kept patch of card $old against the condition of Dana's yes: no build\",[\"e.txt\",\"web/e.ts\"]]" ] \
+    || fail "a kept patch approved with a condition was not taken up to be reviewed against it, with no build: $RESUMED"
 }
 
 # Bug: the earlier loop's review was put back in place of the port's own before the yes was
@@ -348,6 +385,7 @@ t_portyes() {
   loop run --only 100101 >/dev/null; st 'select(.issue == 100101 and .step == "blocked") | .reason' | grep -q '^rebase onto main conflicts' || fail "#100101 was not blocked on its landing conflict: $(steps 100101)"
   printf '%s\n' 'INHERITED: beyond: guests see it too' 'USER-VISIBLE: yes: guests see a Pay button' 'VERDICT: GO' > "$STUB/review.5"
   head=$(git -C "$R" rev-parse HEAD)
+  # loop: the bug is past the resume: the port's own review replacing the kept one before the landing's yes check
   loop retry 100101 >/dev/null && loop run --only 100101 >/dev/null || fail "run of the retried #100101 exited non-zero"
   [ "$(st 'select(.issue == 100101 and .step == "blocked") | .reason' | tail -n 1)" = "${Y}guests see a Pay button (it goes beyond the yes of #7: guests see it too)" ] \
     && [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] || fail "a port whose visible change goes beyond its parent's yes landed on the earlier review's: $(steps 100101)"

@@ -8,6 +8,8 @@
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+# resumed is port.test.sh's: the runner loads every case file into one shell. A change to port.test.sh runs this file
+# too, through its link in .conveyor/test-links.json.
 
 # Bugs: a change customers or staff would see lands without the owner's yes: on a GO, or on the last review's NO-GO
 # (and then with follow-ups filed); the reviewer's sentence is not posted on the issue; the card stays blocked once
@@ -35,7 +37,9 @@ visiblestart() { # <issue>
 # only count those lines).
 # Why the real loop: the gate is a card's path over turns (its review, the block, the kept patch, retry, and the next
 # card's worktree and landing), carried from one turn to the next in the records and the kept folder; no one engine
-# function holds that path, and these cases each prove one such path from end to end.
+# function holds that path, and t_visibleyes, t_visibleapproved and t_retryoff each prove one such path from end to
+# end. The block the others start from is that real turn; their retried card's resume is a call of resumeplan
+# (resumed, port.test.sh).
 RO='Run migration 0004 before the deploy | the new column is missing | a.txt:2'
 blockedmake() { # <folder>
   ( CASE=${1#"$T/"}; visiblestart 8
@@ -83,6 +87,8 @@ t_visibleyes() {
   # kept folder, which only a turn after `retry` does.
   sessions=$(wc -l < "$STUB/sessions"); out=$(loop retry 8) || fail "retry of the blocked #8 exited non-zero"
   grep -q "stops again for Dana's yes on the kept patch" <<<"$out" || fail "retry does not say the unapproved card stops again for the yes: $out"
+  # The other resume cases of this file call resumeplan alone.
+  # loop: the end-to-end check of the yes gate's resume path (retry, resumeplan, and card() waiting or landing on it)
   loop run >/dev/null || fail "run of the unapproved retry exited non-zero"
   [ "$(st 'select(.issue == 8 and '"$NOMARK"') | .step' | tr '\n' ' ')" = "picked worktree brief blocked " ] && [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] \
     && grep -qx '+two' "$(st 'select(.issue == 8 and .step == "blocked") | "\($ENV.ST)/\(.kept)/\(.card).patch"')" || fail "an unapproved retry did not wait again with its work kept: $(steps 8)"
@@ -92,6 +98,7 @@ t_visibleyes() {
   issue 8 2026-01-01 | jq -c '[.body += "\n\nVisible change approved: Dana 2026-01-02, r-9 (yes)\n"]' > "$STUB/issues.json"
   runs=$(wc -l < "$STUB/tests"); out=$(loop retry 8) || fail "second retry of the blocked #8 exited non-zero"
   grep -q 'lands from the kept patch .*, with no build and no review' <<<"$out" || fail "retry does not say the approved card lands from its kept patch: $out"
+  # loop: as above: the landing from the kept patch, with its trailer and rollout action
   loop run >/dev/null || fail "third run exited non-zero"
   [ "$(st 'select(.issue == 8 and .step == "landed") | .sha')" = "$(git -C "$R" rev-parse HEAD)" ] && [ "$(grep -c "^[0-9]* --body " "$STUB/comments")" = 2 ] || fail "the approved card did not land: $(steps 8)"
   [ "$(st 'select(.issue == 8 and '"$NOMARK"') | .step' | tr '\n' ' ')" = "picked worktree brief test landed " ] && [ "$(wc -l < "$STUB/sessions")" = "$sessions" ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] \
@@ -115,6 +122,8 @@ t_visibleapproved() {
   # by itself, so only a turn with no `retry` shows it.
   loop run >/dev/null; [ "$(st 'select(.issue == 8 and .step == "picked") | .card')" = "$old" ] && [ ! -s "$ST/retried.jsonl" ] || fail "#8 was given back with no approval line: $(steps 8)"
   issue 8 2026-01-01 | jq -c '[.body += "\n\nVisible change approved: Dana 2026-01-02 (yes)\n"]' > "$STUB/issues.json"
+  # The bug is the turn giving the card back by itself (approved(), at each turn of lib/run.sh), with no `retry`.
+  # loop: a call of resumeplan after a retry would not show the turn gives the card back by itself
   loop run >/dev/null || fail "run after the approval line exited non-zero"
   grep -q "\"card\":\"$old\"" "$ST/retried.jsonl" || fail "the turn did not give #8 back once its approval line was added"
   [ "$(st 'select(.issue == 8 and .step == "landed") | .sha')" = "$(git -C "$R" rev-parse HEAD)" ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] \
@@ -128,6 +137,9 @@ t_retryoff() {
   loop control rules visible=off >/dev/null || fail "control rules visible=off was refused"
   # Real retry and turn: the bug is retry's words disagreeing with what the next turn does, so both are run.
   out=$(loop retry 8) && grep -q 'lands from the kept patch .*-8\.patch, with no build and no review .*is off' <<<"$out" || fail "retry with the rule off does not say the card lands from its kept patch: $out"
+  # resumeplan gives this kept patch "land" with the rule on or off; whether the card lands or waits again for the yes
+  # is card()'s check after it.
+  # loop: only the card's run shows the rule off lets the kept patch land
   loop run >/dev/null; [ "$(st 'select(.issue == 8 and .step == "landed") | .sha')" = "$(git -C "$R" rev-parse HEAD)" ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] \
     || fail "with the rule off, the retried card did not land from its kept patch with no second review: $(steps 8)"
 }
@@ -136,34 +148,30 @@ t_retryoff() {
 # review. Its next card is built from nothing (the kept patch taken out first, so the change is not made twice),
 # then reviewed, and retry says so.
 t_visiblerewritten() {
-  blocked; echo "$GO" > "$STUB/review.2"; st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -q "needs Dana's yes" || fail "#8's visible change did not stop: $(steps 8)"
-  old=$(st 'select(.issue == 8 and .step == "blocked") | .card'); sessions=$(wc -l < "$STUB/sessions")
+  blocked; st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -q "needs Dana's yes" || fail "#8's visible change did not stop: $(steps 8)"
+  old=$(st 'select(.issue == 8 and .step == "blocked") | .card')
   issue 8 2026-01-01 | jq -c '[.body = "Do (b) instead.\n\n## What customers or staff will see\nNothing visible changes."]' > "$STUB/issues.json"
-  # Real retry and turn: the next card's build must run on a worktree with the kept patch taken out, which only
-  # the turn's worktree, build and landing together show (a.txt holds the change once).
   out=$(loop retry 8) && grep -q 'its next card is built from nothing' <<<"$out" || fail "retry does not say the rewritten issue's card is built from nothing: $out"
-  loop run >/dev/null || fail "run of the retried #8 exited non-zero"
-  new=$(st 'select(.issue == 8 and .step == "landed") | .card')
-  [ -n "$new" ] && [ "$(st "select(.card == \"$new\" and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test landed " ] \
-    && [ "$(wc -l < "$STUB/sessions")" = $((sessions + 1)) ] || fail "the rewritten issue's card was not built and reviewed before it landed: $(steps 8)"
-  st "select(.card == \"$new\" and .step == \"worktree\") | .reason" | grep -q "changed since the review of the kept patch of card $old: built from nothing" \
-    && [ "$(grep -c '^two$' "$R/a.txt")" = 1 ] || fail "the card did not build from nothing, or kept the old patch under its build: $(steps 8) / $(cat "$R/a.txt")"
+  # Built from nothing (mode ""): the build and review of any new card, on a worktree with the kept patch taken out
+  # (nothing staged, a.txt as on main) and none of the files that come with it beside it (its trailers): only the
+  # kept review, whose findings the brief carries.
+  resumed 8 'git -C "$wt" status --porcelain > "$T/$CASE/left"'
+  [ "$(jq -c '[.rc, .mode, .note, .staged]' <<<"$RESUMED")" = "[0,\"\",\"the issue's section of what customers or staff will see changed since the review of the kept patch of card $old: built from nothing\",[]]" ] \
+    && [ ! -s "$T/$CASE/left" ] && [ "$(jq -c .beside <<<"$RESUMED")" = '["review"]' ] \
+    || fail "the rewritten issue's card was not built from nothing, or kept the old patch or its files under its build: $RESUMED $(cat "$T/$CASE/left")"
 }
 # Bug: an approval line added with a body changed since the review is taken as the yes to that review's patch, and
 # the patch lands with no review. The section is the same: the card goes on from the kept patch with one session and
 # a review against the issue as it is now, and retry says so.
 t_visiblechanged() {
-  blocked; printf '%s\n' "$YES" 'VERDICT: GO' > "$STUB/review.2"; st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -q "needs Dana's yes" || fail "#8's visible change did not stop: $(steps 8)"
-  old=$(st 'select(.issue == 8 and .step == "blocked") | .card'); sessions=$(wc -l < "$STUB/sessions")
+  blocked; st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -q "needs Dana's yes" || fail "#8's visible change did not stop: $(steps 8)"
+  old=$(st 'select(.issue == 8 and .step == "blocked") | .card')
   issue 8 2026-01-01 | jq -c '[.body += "\nAlso show the price.\n\nVisible change approved: Dana 2026-01-02, r-9 (yes)\n"]' > "$STUB/issues.json"
-  # Real retry and turn: the bug is a kept patch landing with no review, so the turn's steps up to the landing are run.
   out=$(loop retry 8) && grep -q 'one session, then a review against the issue as it is now' <<<"$out" || fail "retry does not say the changed issue's card is reviewed again: $out"
-  loop run >/dev/null || fail "run of the retried #8 exited non-zero"
-  new=$(st 'select(.issue == 8 and .step == "landed") | .card')
-  [ -n "$new" ] && [ "$(st "select(.card == \"$new\" and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test landed " ] \
-    && [ "$(wc -l < "$STUB/sessions")" = $((sessions + 1)) ] || fail "the changed issue's card landed its kept patch with no session or review: $(steps 8)"
-  st "select(.card == \"$new\" and .step == \"worktree\") | .reason" | grep -q "^resumed from the kept patch of card $old: the issue changed since its review" \
-    || fail "the worktree line does not say the card resumes from the kept patch for a review: $(steps 8)"
+  # The bug is a kept patch landing with no review: the next card resumes from it (staged) with one session, then review.
+  resumed 8
+  [ "$(jq -c '[.rc, .mode, .note, .staged]' <<<"$RESUMED")" = "[0,\"session\",\"resumed from the kept patch of card $old: the issue changed since its review: one session, then review\",[\"a.txt\",\"web/pay.ts\"]]" ] \
+    || fail "the changed issue's card was not given one session and a review on its kept patch: $RESUMED"
 }
 # The words inside a line of the body are not the approval line: counted as the loop counts an issue's approval
 # lines (card.sh: SEE's approvals, prompts.sh), with no card run. A card with none stops (t_visibleyes).

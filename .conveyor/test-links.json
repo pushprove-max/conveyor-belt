@@ -489,6 +489,12 @@
   "conveyor/tests/rerun.test.sh": [
     "conveyor/tests/rerunkept.test.sh"
   ],
+  "conveyor/tests/port.test.sh": [
+    "conveyor/tests/kept.test.sh",
+    "conveyor/tests/rerunkept.test.sh",
+    "conveyor/tests/visible.test.sh",
+    "conveyor/tests/visibleinherit.test.sh"
+  ],
   "conveyor/tests/batch.test.sh": [
     "conveyor/tests/batchmain.test.sh"
   ],

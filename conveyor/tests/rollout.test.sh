@@ -67,10 +67,12 @@ t_rolloutretry() {
   local yes='USER-VISIBLE: yes: guests see a new Pay button' mig='Run migration 0004 before the deploy | the new column is missing | e.txt:1' want
   echo 'echo eleven > e.txt; mkdir -p web; echo eleven > web/e.ts' > "$STUB/build"
   printf '%s\n' "ROLLOUT: $mig" "$yes" 'VERDICT: GO' > "$STUB/review.1"
+  # loop: the block for the yes is a card's whole path (its review line with the rollout action, kept patch and body)
   loop run >/dev/null; st 'select(.issue == 11 and .step == "blocked") | .reason' | grep -q "needs Dana's yes" || fail "#11 was not blocked for Dana's yes: $(st 'select(.issue == 11)')"
   issue 11 2026-01-01 | jq -c '[.body += "\nVisible change approved: r-12, only for admins"]' > "$STUB/issues.json"
   printf '%s\n' '[P1] e.txt:1 guests see it: the approval is only for admins' "$yes" 'VERDICT: NO-GO' > "$STUB/review.2"; printf '%s\n' "$yes" 'VERDICT: GO' > "$STUB/review.3"
   echo 'echo admins >> e.txt' > "$STUB/build"
+  # loop: the bug is in the landing after new reviews (landed line and pushed commit); resumeplan stops before both
   loop retry 11 >/dev/null && loop run >/dev/null || fail "the retry and run of #11 exited non-zero"
   want=$(jq -cRn --arg s "$mig" '[$s | split(" | ") | {action: .[0], fails: .[1], place: .[2]}]')
   [ "$(st 'select(.issue == 11 and .step == "landed") | .rollout | tojson')" = "$want" ] \
@@ -86,11 +88,14 @@ t_rolloutfresh() {
   local yes='USER-VISIBLE: yes: guests see a new Pay button' mig='Run migration 0004 before the deploy | the new column is missing | e.txt:1'
   echo 'echo twelve > e.txt; mkdir -p web; echo twelve > web/e.ts' > "$STUB/build"
   printf '%s\n' "ROLLOUT: $mig" "$yes" 'VERDICT: GO' > "$STUB/review.1"; printf '%s\n' "$yes" 'VERDICT: GO' > "$STUB/review.2"
+  # loop: the two blocks for the yes are cards' whole paths: the review lines retry moves and the chain the resume reads
   loop run >/dev/null; loop retry 12 --fresh >/dev/null || fail "retry --fresh of #12 exited non-zero"
   echo 'echo plain > e.txt; mkdir -p web; echo plain > web/e.ts' > "$STUB/build"
+  # loop: as above, the card built afresh after retry --fresh
   loop run >/dev/null; [ "$(st 'select(.issue == 12 and .step == "blocked") | .reason' | grep -c "needs Dana's yes")" = 1 ] \
     || fail "the card built afresh did not wait for Dana's yes: $(st 'select(.issue == 12)')"
   issue 12 2026-01-01 | jq -c '[.body += "\n\nVisible change approved: r-13 (yes)\n"]' > "$STUB/issues.json"
+  # loop: the bug is in what the landing reads (landed line and pushed commit); resumeplan stops before both
   loop retry 12 >/dev/null && loop run >/dev/null || fail "the retry and run of #12 exited non-zero"
   [ "$(st 'select(.issue == 12 and .step == "landed") | .rollout')" = null ] && [ "$(git -C "$T/$CASE/origin" show main:e.txt)" = plain ] \
     && ! git -C "$T/$CASE/origin" log -1 --format=%B main | grep -q '^Rollout: ' \
