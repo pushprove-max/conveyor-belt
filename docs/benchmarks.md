@@ -85,7 +85,10 @@ as `stopped` with `gone` true, before and after its end is recorded.
 
 Each task is built in a sandbox of its own: a local clone of the task's repository at its base commit, with the issue
 text as the card's issue. Conveyor builds the task in a Docker container made from the task's own image, with a pack
-made for it (the task's test command, run in the container). The container can see the sandbox and, read-only, the
+made for it. The pack holds the task's test command, run in the container, and a command that runs one test file in
+the task's own Python environment: `python3 -m pytest` on the file when that Python has pytest, else `python3` on the
+file. The change leaves
+out the files Python makes (`__pycache__/`, `*.pyc`). The container can see the sandbox and, read-only, the
 folder of the installed Conveyor version, and no other folder of this machine. Conveyor builds, reviews, fixes and
 tests the card as it does any card. A card that lands is pushed only to the sandbox's own bare origin, never to the
 task's repository, and no issue is filed on GitHub. What lands on the sandbox's main is the final patch. A blocked

@@ -51,6 +51,8 @@ cp "$CONVEYOR_MAIN/conveyor/state/control.json" "$SWE_FX/control.seen"; cp "$CON
 cat "$HOME/.codex/auth.json" > "$SWE_FX/codex.seen" 2>/dev/null || :
 # The Codex sandbox the engine under test gives a review in this container (codexsb()).
 (set -- run; HERE=$SWE_SRC; . "$SWE_SRC/lib/paths.sh" && . "$SWE_SRC/lib/control.sh" && codexsb read-only && echo "${CODEX_SB[*]}") > "$SWE_FX/sandbox.seen" 2>&1
+# The Python files a card's test run writes beside the fix: the arm's exclude list keeps them out of the change.
+mkdir -p "$CONVEYOR_MAIN/__pycache__" && echo PYC > "$CONVEYOR_MAIN/__pycache__/x.cpython-311.pyc" && echo PYC > "$CONVEYOR_MAIN/y.pyc"
 rec review GO '' null 'no findings'; rec test pass '' null 'test output'; echo fixed > "$CONVEYOR_MAIN/x.py"; git -C "$CONVEYOR_MAIN" add -A; git -C "$CONVEYOR_MAIN" commit -qm fix; rec landed ok; gh issue close 1
 EOF
   # The functions and globals the stage map (bench/stagemap.sh) starts each stage from, one file a stage or two.
@@ -67,7 +69,7 @@ EOF
 shift # the harness script's path
 case $1 in
   tasks) for t in proj__a-1 proj__b-2; do jq -nc --arg t "$t" --arg u "file://$SWE_FX/task.git" --arg b "$(git -C "$SWE_FX/task.git" rev-parse main)" \
-      '{id: $t, repo: "o/proj", url: $u, base: $b, issue: "Fix x.py for \($t)", image: "img-\($t)", cmd: "true"}'; done > "$4" ;;
+      '{id: $t, repo: "o/proj", url: $u, base: $b, issue: "Fix x.py for \($t)", image: "img-\($t)", env: "source \"$SWE_FX/activate\"", cmd: "true"}'; done > "$4" ;;
   image) while [ -e "$SWE_FX/ihold" ]; do sleep 0.1; done; [ "$(cat "$SWE_FX/broken" 2>/dev/null)" != "$2" ] || exit 3 ;;
   # grade: its container named as the harness names it, with the run's ID ($7), held while $SWE_FX/ghold is there
   # and removed when the grade ends (left when it is killed).
@@ -77,6 +79,9 @@ case $1 in
 esac
 EOF
   chmod +x "$F/py"
+  # A task's env sources this stand-in for conda's activate, which, like that script, fails when it is given arguments
+  # (it takes the first as the environment to start).
+  printf '%s\n' '[ $# = 0 ] || { echo "no such environment: $1" >&2; return 1; }' 'export SWE_TASKENV=testbed' > "$F/activate" || return 1
   # A stand-in for Docker: a container is a folder under $SWE_FX/boxes, its home the folder's home; exec runs the script
   # on this machine in that home, with none of the caller's login, Git identity or checkout variables, and git takes
   # its identity from its config only (a task's image has no usable host name to make one from). Every call is kept in
@@ -241,6 +246,11 @@ t_sweoldraw() {
   [ -z "$(ls "$B"/raw.*.jsonl 2>/dev/null)" ] || fail "the dataset's rows an earlier harness kept are still in the state folder: $(ls "$B")"
   # Bug: the list kept from before was used, and every conveyor arm's card got an empty test command.
   jq -se 'length == 2 and all(.cmd == "true")' "$TL" > /dev/null || fail "a task list with no test commands was not made again: $(cat "$TL")"
+  # Bug: a list kept from before with no env (the commands that start the task's environment) gave every conveyor
+  # arm's card a one-file test command run outside that environment.
+  jq -c 'del(.env)' "$TL" > "$B/t" && mv -f "$B/t" "$TL" || fail "the list with no env was not made"
+  out=$(loop bench swe 3 2>&1); [ $? = 2 ] || fail "an n past the task list was not refused: $out"
+  jq -se 'length == 2 and all(.env == "source \"$SWE_FX/activate\"")' "$TL" > /dev/null || fail "a task list with no env was not made again: $(cat "$TL")"
 }
 
 # Bug: a task whose Docker image cannot be fetched or built is counted as failed (or stops the run) instead of being
@@ -468,6 +478,10 @@ t_sweharness() {
   # Bug: the test command ran `docker run` of the task's image, which a card building inside that image cannot start.
   [ "$(head -n 1 "$C/list" | jq -r .cmd)" = 'source /opt/miniconda3/bin/activate && conda activate testbed && pytest' ] \
     || fail "the task's test command is not the one run in its own container: $(head -n 1 "$C/list")"
+  # Bug: a card's one-file test command ran outside the task's environment (python3 with no pytest or task packages):
+  # the task names the commands that start it, for the pack's test.fileCommand (swe_filecmd).
+  [ "$(head -n 1 "$C/list" | jq -r .env)" = 'source /opt/miniconda3/bin/activate && conda activate testbed' ] \
+    || fail "the task does not name the commands that start its environment: $(head -n 1 "$C/list")"
   ! grep -rlE 'REFFIX|HIDDENTEST' "$C" || fail "a reference fix or hidden test stayed on disk after the task list was made"
   echo fixed > "$C/patch"
   out=$(h grade o/ds rev1 o__p-2 "$C/patch" "$C/grade" r1) && [ "$out" = '{"resolved": true}' ] \

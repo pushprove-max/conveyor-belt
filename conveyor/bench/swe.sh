@@ -110,11 +110,12 @@ swe_set() { jq -r "$1" <<<"$SWE_SET"; } # <jq filter>: of the settings in force 
 swe_list() { printf '%s/tasks.%s.%s.jsonl\n' "$SWE_DIR" "$1" "$(printf '%s' "$2" | sha256sum | cut -c1-12)"; } # <revision> <seed>
 # The task list of the settings' revision and seed, made once each: the harness's list, put in the seed's order. The
 # dataset's rows that an earlier harness kept beside it (raw.<revision>.jsonl, with the reference fixes and hidden
-# tests) are removed first. A list whose tasks have no cmd (the test command run in the task's container) is made again.
+# tests) are removed first. A list whose tasks have no cmd (the test command run in the task's container) or no env
+# (the shell commands that start the task's environment there) is made again.
 swe_tasks() {
   local rev f err; rev=$(swe_set .revision); f=$(swe_list "$rev" "$(swe_set .seed)")
   rm -f "$SWE_DIR"/raw.*.jsonl
-  [ -s "$f" ] && head -n 1 "$f" | jq -e 'has("cmd")' > /dev/null 2>&1 && { printf '%s\n' "$f"; return; }
+  [ -s "$f" ] && head -n 1 "$f" | jq -e 'has("cmd") and has("env")' > /dev/null 2>&1 && { printf '%s\n' "$f"; return; }
   # The harness's own conveyor: line (a swebench of the wrong version says which it has and which to install) is the
   # error; else its whole output (a failed download's traceback) goes on, and the error names its last line.
   mkdir -p "$SWE_DIR" && err=$(swe_h tasks "$(swe_set .dataset)" "$rev" "$SWE_DIR/raw.$rev" 2>&1 >&2) \

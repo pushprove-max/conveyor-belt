@@ -90,11 +90,13 @@ def tasks(dataset, revision, out):
             if isinstance(cmd, list):
                 cmd = ' && '.join(cmd)
             image = image_of(r['instance_id'])
-            # The repo's test command, run in the task's own environment: inside a container of its image (every
-            # arm builds the task in one, bench/swe_arms.sh), in the folder the command starts in.
-            test = 'source /opt/miniconda3/bin/activate && conda activate testbed && ' + cmd
+            # The repo's test command, run in the task's own environment (env: the image's Python with the task's
+            # packages): inside a container of its image (every arm builds the task in one, bench/swe_arms.sh), in
+            # the folder the command starts in.
+            env = 'source /opt/miniconda3/bin/activate && conda activate testbed'
+            test = env + ' && ' + cmd
             f.write(json.dumps({'id': r['instance_id'], 'repo': r['repo'], 'url': 'https://github.com/%s.git' % r['repo'],
-                                'base': r['base_commit'], 'issue': r['problem_statement'], 'image': image, 'cmd': test}) + '\n')
+                                'base': r['base_commit'], 'issue': r['problem_statement'], 'image': image, 'env': env, 'cmd': test}) + '\n')
 
 
 def image(name):

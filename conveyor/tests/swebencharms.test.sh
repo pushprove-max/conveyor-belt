@@ -121,7 +121,25 @@ t_sweseats() {
   jq -e '.model == {cli: "codex", model: "x"} and .reviewer == {cli: "claude", model: "m"} and (has("account") | not)' "$SWE_FX/control.seen" > /dev/null \
     && jq -e '.models.allowed.codex | index("x")' "$SWE_FX/pack.seen" > /dev/null || fail "the engine was not given the arm's seats: $(cat "$SWE_FX/control.seen") $(jq -c .models "$SWE_FX/pack.seen")"
   # Bug: the engine in the container ran the project's own test command, not the task's (its cmd in the task list).
-  jq -e '.test == {command: "true", survey: false}' "$SWE_FX/pack.seen" > /dev/null || fail "the engine's pack does not hold the task's test command: $(jq -c .test "$SWE_FX/pack.seen")"
+  jq -e '.test.command == "true" and .test.survey == false' "$SWE_FX/pack.seen" > /dev/null || fail "the engine's pack does not hold the task's test command: $(jq -c .test "$SWE_FX/pack.seen")"
+  # Bug: the pack set no test.fileCommand, so a card that added a test file to a task repository with no test
+  # configuration blocked at its Test step. It is run here as filecmd() runs it, on one named file, in the task's
+  # environment (the fixture task's env sources a stand-in activate that sets SWE_TASKENV and, as conda's does, fails
+  # when given the file's path as an argument; a file run outside it cannot import the task's packages):
+  # by python3 when that python3 has no pytest (a pytest that cannot be imported), else by python3 -m pytest (a
+  # stand-in pytest that notes its arguments).
+  local fc d=$T/$CASE/py; fc=$(jq -r '.test.fileCommand // ""' "$SWE_FX/pack.seen")
+  mkdir -p "$d/nopytest/pytest" "$d/pytest/pytest" "$d/repo" && echo 'raise ImportError("no pytest")' > "$d/nopytest/pytest/__init__.py" && : > "$d/pytest/pytest/__init__.py" \
+    && printf '%s\n' 'import sys' 'import os' 'open(sys.argv[0] + ".ran", "w").write("RAN " + os.environ.get("SWE_TASKENV", ""))' > "$d/repo/test_one.py" && echo 'raise SystemExit(1)' > "$d/repo/test_bad.py" \
+    && printf '%s\n' 'import sys' 'open("pytest.args", "w").write(" ".join(sys.argv[1:]))' > "$d/pytest/pytest/__main__.py" || fail "the test files were not made"
+  ( cd "$d/repo" && PYTHONPATH=$d/nopytest CONVEYOR_TEST_FILE=test_one.py bash -c "$fc"' "$CONVEYOR_TEST_FILE"' ) && [ "$(cat "$d/repo/test_one.py.ran" 2>&1)" = 'RAN testbed' ] \
+    || fail "the pack's test.fileCommand did not run the named test file with python3 in the task's environment: $fc $(cat "$d/repo/test_one.py.ran" 2>&1)"
+  ! ( cd "$d/repo" && PYTHONPATH=$d/nopytest bash -c "$fc"' "$1"' _ test_bad.py ) || fail "the pack's test.fileCommand passed a failing test file: $fc"
+  ( cd "$d/repo" && PYTHONPATH=$d/pytest bash -c "$fc"' "$1"' _ test_one.py ) && [ "$(cat "$d/repo/pytest.args" 2>&1)" = test_one.py ] \
+    || fail "the pack's test.fileCommand did not run the named test file with pytest where pytest is installed: $fc"
+  # Bug: the Python files a card's test run writes (__pycache__/, *.pyc) were in the trial's change.
+  ! grep -qE '__pycache__|\.pyc' "$B"/results/conveyor-seats-*-"$EB/$(sweorder | head -n 1).patch" && grep -q '^+fixed' "$B"/results/conveyor-seats-*-"$EB/$(sweorder | head -n 1).patch" \
+    || fail "the trial's change holds Python's generated files: $(cat "$B"/results/conveyor-seats-*-"$EB/$(sweorder | head -n 1).patch" 2>&1)"
   # Bug: the container was given the arm file's logins only, so the Codex builder seat had no Codex login there.
   [ "$(cat "$SWE_FX/codex.seen" 2>/dev/null)" = CODEX-LOGIN ] || fail "the Codex seat's container had no Codex login"
   # Bug: the engine in the container gave its Codex sessions Codex's own sandbox (-s read-only), which cannot start a
