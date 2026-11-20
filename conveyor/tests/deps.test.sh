@@ -50,7 +50,7 @@ t_depends() {
   # #7 is held: the snapshot still says what it waits on, on its held entry. The control record holds #2 and #7; their
   # backlog labels hold nothing. Bug it catches (issue 383): held #7, with its Depends on line, was in queue.waiting, so
   # the Board and /units showed it as waiting on a card, as if queued, though the loop would not pick it.
-  deps_setup "$(jq -cs . <(dep "$(issue 1 2026-01-01 P1)" 'Depends on: #2') <(issue 2 2026-01-01 backlog) <(dep "$(issue 7 2026-01-01 backlog)" 'Depends on: #2'))"
+  setup "$(jq -cs . <(dep "$(issue 1 2026-01-01 P1)" 'Depends on: #2') <(issue 2 2026-01-01 backlog) <(dep "$(issue 7 2026-01-01 backlog)" 'Depends on: #2'))"
   loop control hold 2 7 >/dev/null
   drypicks; [ -z "$p" ] || fail "an issue whose dependency is open was picked: $p"
   out=$(loop snapshot --fresh)
@@ -63,7 +63,7 @@ t_depends() {
     || fail "an issue held only by a dependency is not in Held, or is counted as queued: $(jq -c .open <<<"$out")"
   # #2 closed (as not planned too: closed is closed): #1 is picked.
   echo "[$(dep "$(issue 1 2026-01-01 P1)" 'Depends on: #2')]" > "$STUB/issues.json"
-  loop run >/dev/null && [ "$(order)" = "picked:1 landed:1 " ] || fail "the issue was not picked once its dependency closed: $(order)"
+  drypicks; [ "$p" = "1 " ] || fail "the issue was not picked once its dependency closed: $p"
 }
 # The forms a Depends on: line takes: several issues, each with its own #, split by spaces or by commas, are waited on
 # each; a line that is not a list of #N (`# 2 3`, `#2 3`) keeps its issue from the pick for good, and the rule it is
@@ -89,10 +89,10 @@ t_dependsside() {
 }
 t_dependscycle() {
   # A cycle: health names its issues, and an issue waiting on it is never picked.
-  deps_setup "$(jq -cs . <(dep "$(issue 3 2026-01-01)" 'Depends on: #4') <(dep "$(issue 4 2026-01-01)" 'Depends on: #3') <(dep "$(issue 5 2026-01-01)" 'Depends on: #4') \
+  setup "$(jq -cs . <(dep "$(issue 3 2026-01-01)" 'Depends on: #4') <(dep "$(issue 4 2026-01-01)" 'Depends on: #3') <(dep "$(issue 5 2026-01-01)" 'Depends on: #4') \
     <(dep "$(issue 6 2026-01-01)" 'Depends on: #6'))"
   [ "$(loop health | jq -c .cycles)" = '[[3,4],[6]]' ] || fail "health does not report the cycles: $(loop health | jq -c .cycles)"
-  loop run | grep -q 'no issue qualifies' || fail "an issue in a cycle, or waiting on one, was picked: $(order)"
+  drypicks; [ -z "$p" ] || fail "an issue in a cycle, or waiting on one, was picked: $p"
 }
 # The dependency guard. Bugs: a record written before the guard (no depGuard, no forced) not read as a whole record,
 # or read with the guard off; with the guard on, an issue whose dependency is open picked once released from a hold and
@@ -114,17 +114,18 @@ ghedits() {
 }
 # A dependency in another repository: `Depends on: other/repo#600` names that repository's #600, asked of GitHub with
 # gh issue view --repo. Bug it catches (issue 605): the line was read as this repository's #600, closed here, so the
-# issue was picked at once, before the other repository's issue landed. The case's build changes nothing: a picked
-# card ends after its build.
+# issue was picked at once, before the other repository's issue landed.
 t_fardeps() {
-  setup "[$(dep "$(issue 1 2026-01-01 P1)" 'Depends on: other/repo#600 landing')]"; echo : > "$STUB/build"
+  setup "[$(dep "$(issue 1 2026-01-01 P1)" 'Depends on: other/repo#600 landing')]"
   echo OPEN > "$STUB/repo.other_repo.600"
   # The far state is read with the open issues (asked()), so the snapshot's pick order, not `pick --dry` on the
   # file, shows what the loop would take: nothing (this repository has no open #600).
   [ "$(loop snapshot --fresh | jq -c '[(.queue.order | map(.issue)), (.queue.waiting | map([.issue, .waitsFor])), (.open.issues | map(.dependsOn))]')" = '[[],[[1,["other/repo#600"]]],[["other/repo#600"]]]' ] \
     || fail "#1 is queued while other/repo#600 is open, or the snapshot does not say it waits on it: $(loop snapshot --fresh | jq -c '[.queue, .open.issues]')"
+  # Closed: the dry pick on the open issues as asked() hands them to the loop's pick, each with its far state, takes #1.
   echo CLOSED > "$STUB/repo.other_repo.600"
-  loop run >/dev/null 2>&1; [ "$(st 'select(.step == "picked") | .issue')" = 1 ] || fail "#1 was not picked once other/repo#600 closed: $(st .step)"
+  fx_in 'asked > "$STUB/asked.json"'; [ "$RC" = 0 ] || fail "asked() failed (exit $RC): $(cat "$T/$CASE/run.out")"
+  p=$(loop pick --dry --issues "$STUB/asked.json" --state "$ST") && [ "$p" = 1 ] || fail "#1 was not picked once other/repo#600 closed: $p"
 }
 # Both repositories at once: `Depends on: #5, other/repo#7` waits on both. Bug it catches: one of the two read and the
 # other dropped, so the issue is queued while one of them is still open.
@@ -337,6 +338,7 @@ t_only() {
   # land: the other builds change nothing, so those cards end after their build (blocked: no change to review).
   echo 'n=${PWD##*-}; mkdir "$STUB/in.$n" "$STUB/here.$n"; while [ -d "$STUB" ]; do [ "$n" -gt 23 ] || [ "$(ls -d "$STUB"/here.* | wc -l)" -ge 2 ] && break; sleep 0.1; done
     ls -d "$STUB"/in.* | wc -l >> "$STUB/conc"; rmdir "$STUB/in.$n"; [ "$n" != 21 ] || echo x > "f$n.txt"' > "$STUB/build"
+  # loop: only a run shows two cards built side by side under its limit, and #26 started only after #21's card landed
   out=$(tune '.tunables.poll = 1'; loop run --only 21,22,23,26 2) || fail "run exited non-zero: $out"
   [ "$(st 'select(.step == "landed" or .step == "blocked") | "\(.issue):\(.step)"' | sort -n | tr '\n' ' ')" = "21:landed 22:blocked 23:blocked 26:blocked " ] \
     || fail "the run did not build all four: $(order) $out"
@@ -350,6 +352,7 @@ t_onlyheld() {
   # what lands.
   deps_setup "$(jq -cs . <(issue 30 2026-01-01 backlog) <(dep "$(issue 31 2026-01-01)" 'Depends on: #30') <(issue 33 2026-01-01))"
   loop control hold 33 >/dev/null; echo : > "$STUB/build"
+  # loop: only a run shows it polling on across turns while a listed issue is held or waits, then building it
   tune '.tunables.poll = 1'; watchturns; loop run --only 31,32,33 4 > "$STUB/only.out" 2>&1 & pid=$!
   said() { grep -q '#31 depends on #30, outside this run' "$STUB/only.out" && grep -q '#33 is held: the run waits until it is released' "$STUB/only.out" && grep -q '#32 is not open' "$STUB/only.out"; }
   until said || ! kill -0 $pid 2>/dev/null; do sleep 0.1; done # its three lines, or the run's end
@@ -385,6 +388,7 @@ t_overlap() {
   overlapsetup '. "$STUB/judge"'
   printf '%s\n' 'p=$(cat); n=$(sed -n "/^# The queued issue$/{n;p;q}" <<<"$p" | grep -oE "^#[0-9]+"); echo "$n" >> "$STUB/judged"; printf "%s\n" "$p" > "$STUB/prompt.${n#\#}"' \
     'if sed -n "/^# The queued issue$/,/^# The cards on the belt$/p" <<<"$p" | grep -q "upnext()"; then echo "DEPENDS #1: conveyor/lib/pick.sh"; else echo NONE; fi' > "$STUB/judge"
+  # loop: only a run shows the cards started beside #1's, and each queued issue judged once across the loop's turns
   loop run >/dev/null 2>&1
   [ "$(picks)" = "3 4 " ] || fail "the issue changing the same function was picked, or one sharing only a folder or README.md was not: $(picks)"
   [ "$(jq -r '.[] | select(.number == 2) | .body' "$STUB/issues.json")" = $'Make upnext() in conveyor/lib/pick.sh skip a held issue\nDepends on: #1' ] \
