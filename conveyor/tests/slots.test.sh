@@ -8,7 +8,7 @@
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
-cardchange() { git -C "$R" worktree add -q --detach "$1" && echo x >> "$1/a.txt" && git -C "$1" add a.txt; } # <worktree>: made, a.txt changed and staged, so its run starts a.test.sh alone (t_slots, t_slotclock, t_slotwholeclock: they test the test command itself)
+cardchange() { git -C "$R" worktree add -q --detach "$1" && echo x >> "$1/a.txt" && git -C "$1" add a.txt; } # <worktree>: made, a.txt changed and staged, so its run starts a.test.sh alone (t_slots, t_slotclock, t_slotwholeclock, t_slotleft, t_slotcaseloop: they test the test command itself)
 
 # A pool of the case's own, of <n> slots: the host file's testSlots, in a folder no other case shares (testSlotsDir).
 slotpool() { # <n>
@@ -227,32 +227,31 @@ t_slotwholeclock() {
   [ ! -e "$d/cards/c7.first" ] || fail "a run that waited for a turn longer than its timeout passed only when run again: its first run $(cat "$d/cards/c7.first")"
 }
 
-# The owner (2026-11-14): the engine suite hung whenever the belts held every one of the machine's slots. A case's
-# loop read the machine's pool (its host file is the case's and names none), took the case's slot, of the runner's
-# pool, for no slot of it, and waited in its card's test step for one of the machine's. A runner on a pool of its own
-# (one slot) runs a case (the probe below) whose loop takes a card through its test step: the card's tests run on the
-# case's slot, of the runner's pool, never on one of the machine's, and the card lands. A case that ran before it
-# (slotcasehost) wrote a host file naming a pool of one slot of its own, as t_codexbuild does: the probe's loop does
-# not read it (a bug: the cases shared one host file folder, so every loop after it waited for that pool's slot).
+# The owner (2026-11-14): the suite hung whenever the belts held every machine slot: a case's loop read the machine's
+# pool (the case's host file names none) and waited in its card's test step for one of its slots. A bash of its own
+# sources the runner's setup (tests/lib.sh; a whole runner cost 18 s) under a host file of a one-slot pool and runs two
+# cases as the runner does (run_case). The first writes a host file naming a pool of its own (as t_codexbuild does);
+# the second does not read it (a bug: the cases shared one host file folder), and its card's tests (teststep) run on
+# its slot of the pool lib.sh exports (CONVEYOR_TEST_POOL), never on one of the machine's.
 t_slotcaseloop() {
-  local d=$T/$CASE
-  slotpool 1
-  CONVEYOR_SLOTCASE_PROBE=1 CONVEYOR_SHELL_TEST_CASE='slotcasehost slotcaseprobe' timeout 120 bash "$SRC/conveyor.test.sh" > "$d/run.out" 2>&1 \
-    || fail "a case's loop did not run its card's tests on the case's slot: $(cat "$d/run.out")"
-}
-# The probes the case above runs: each passes in any other run.
-t_slotcasehost() {
-  [ -n "${CONVEYOR_SLOTCASE_PROBE:-}" ] || return 0
-  mkdir -p "$XDG_CONFIG_HOME/conveyor" "$T/$CASE" && echo "{\"testSlots\": 1, \"testSlotsDir\": \"$T/$CASE/slots\"}" > "$XDG_CONFIG_HOME/conveyor/host.json" \
-    || fail "the host file was not written"
-}
-t_slotcaseprobe() {
-  [ -n "${CONVEYOR_SLOTCASE_PROBE:-}" ] || return 0
-  setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"
-  printf '%s\n' "if [ \"/dev/fd/\${CONVEYOR_TEST_SLOT%%.*}\" -ef '$SLOT_DIR/1' ]; then echo case; else echo \"\$CONVEYOR_TEST_SLOT\"; fi >> \"\$STUB/slot\"" > "$STUB/test-cmd"
-  loop run >/dev/null 2>&1 || fail "run exited non-zero"
-  [ "$(cat "$STUB/slot" 2>/dev/null)" = case ] || fail "the card's tests did not run on the case's slot ($SLOT_DIR/1), but on: $(cat "$STUB/slot" 2>&1)"
-  [ "$(st 'select(.step == "landed") | .issue')" = 7 ] || fail "the card did not land: $(st '"\(.issue) \(.step) \(.reason)"' | tr '\n' ,)"
+  local d=$T/$CASE; slotpool 1
+  t_slotcasehost() { mkdir -p "$XDG_CONFIG_HOME/conveyor" "$T/$CASE" && echo "{\"testSlots\": 1, \"testSlotsDir\": \"$T/$CASE/slots\"}" > "$XDG_CONFIG_HOME/conveyor/host.json" || fail "the host file was not written"; }
+  t_slotcaseprobe() {
+    local w=$T/$CASE/cards/c7 out
+    setup "[]"; cardchange "$w" || fail "the worktree could not be made"
+    # teststep is a subshell, which sees the runner's unexported variables; a loop, a program, gets only its exports:
+    # the pool teststep's slot_pool reads is set to what lib.sh exported (empty if it exported none).
+    CONVEYOR_TEST_POOL=$(printenv CONVEYOR_TEST_POOL); export CONVEYOR_TEST_POOL
+    printf '%s\n' "if [ \"/dev/fd/\${CONVEYOR_TEST_SLOT%%.*}\" -ef '$SLOT_DIR/1' ]; then echo case; else echo \"\$CONVEYOR_TEST_SLOT\"; fi >> \"\$STUB/slot\"" > "$STUB/test-cmd"
+    out=$(teststep "$w" 2>&1) || fail "the card's test step did not pass: $out $(cat "$w.test" 2>&1)"
+    [ "$(cat "$STUB/slot" 2>/dev/null)" = case ] || fail "the card's tests did not run on the case's slot ($SLOT_DIR/1), but on: $(cat "$STUB/slot" 2>&1)"
+  }
+  env -u CONVEYOR_TEST_POOL D="$d" timeout 120 bash -c 'set -uo pipefail; . "$1/tests/lib.sh"; . "$1/tests/slots.test.sh"; '"$(declare -f t_slotcasehost t_slotcaseprobe)"'
+    declare -A CASE_LIMITS=()
+    for CASE in slotcasehost slotcaseprobe; do slot_take; run_case > "$D/$CASE.out" 2>&1 & slot_free; wait $!; done' _ "$SRC" > "$d/run.out" 2>&1 \
+    || fail "the runner's setup or its cases did not end: $(cat "$d"/*.out 2>&1)"
+  grep -qx "ok slotcasehost" "$d/slotcasehost.out" || fail "the first case did not write its host file: $(cat "$d/slotcasehost.out")"
+  grep -qx "ok slotcaseprobe" "$d/slotcaseprobe.out" || fail "a case's card test step did not run its tests on the case's slot: $(cat "$d/slotcaseprobe.out")"
 }
 
 # Two slots on one core are two test runs on one core, the load this pool exists to end. On a machine that lets its
@@ -280,22 +279,21 @@ t_slotcores() {
 
 # A test command may leave a process running that closed every descriptor it inherited (a program that starts another
 # so: Python's subprocess), the slot's among them: the slot then came back when the command ended, and the next card's
-# tests ran beside that process, on its core. With a pool of 1, a card's test command leaves such a process: the card
-# lands without waiting for it, the slot stays taken while it lives, and is free once it has ended. Bug it catches too
-# (#374): the card's run of a.test.sh, in a process group of its own (filecmd()), left it outside the group the slot
-# was kept for, and the slot came back at once. That process
-# lives until the case kills it, and push is off: a push takes a slot (push.sh), so the loop's push waited for the
-# process, and the case found it ended (one of 60 s) or never ended (one that lives on).
+# tests ran beside that process, on its core. With a pool of 1, a card's test command leaves such a process: the
+# card's test step (teststep) passes without waiting for it, the slot stays taken while it lives, and is free once it
+# has ended. Bug it catches too (#374): the card's run of a.test.sh, in a process group of its own (filecmd()), left
+# it outside the group the slot was kept for, and the slot came back at once. That process lives until the case
+# kills it. The test step alone is run, not a whole card's run (which cost the case 8 s).
 t_slotleft() {
-  local i
-  slotpool 1; setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"; loop control rules push=off > /dev/null
+  local i w=$T/$CASE/cards/c7
+  slotpool 1; setup "[]"; cardchange "$w" || fail "the worktree could not be made"
   cat > "$STUB/test-cmd" <<'EOF2'
 echo x >> "$STUB/tests"
 ( for ((f = 3; f < 256; f++)); do eval "exec $f>&-"; done; echo "$BASHPID" > "$STUB/left"; exec sleep 3600 ) > /dev/null 2>&1 & # sleep: a stand-in for a process the test command leaves, alive until the case kills it
 until [ -s "$STUB/left" ]; do sleep 0.05; done
 EOF2
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  [ "$(st 'select(.step == "landed") | .issue')" = 7 ] || fail "the card did not land: $out"
+  out=$(teststep "$w" 2>&1) || fail "the card's test step did not pass: $out $(cat "$w.test" 2>&1)"
+  [ -s "$STUB/tests" ] || fail "the card's test command did not run: $out"
   kill -0 "$(cat "$STUB/left")" 2>/dev/null || fail "the process the test command left is not running: the case shows nothing"
   slot_pool || fail "the pool could not be made"
   ! slot_try || fail "the slot was given out while a process of the card's test command still ran"
