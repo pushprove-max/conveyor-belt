@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# timeout: 300
+# Engine cases: what a card is told about the staged change it starts on.
+# The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
+# file runs its own cases through the runner.
+[ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
+  exec bash "$(dirname "$0")/../conveyor.test.sh"
+
+# Bug (#874): a card that starts from the kept patch of a blocked card was not told whose work the staged change is,
+# nor that it owns it now, so its builder took the change for unexplained leftovers and left it. Its build prompt names
+# the earlier card and its block reason and gives it the change; its start line names the kept patch's card.
+# Two whole card runs: the kept patch is made by a real block and taken up by a real retry, which only a card run gives.
+t_keptbrief() {
+  local old
+  setup "[$(issue 9 2026-01-01)]"; echo "$GO" > "$STUB/review.3"; echo 'exit 3' > "$STUB/review-cmd"
+  echo 'if grep -q "^# This card resumes blocked card" "$STUB/brief"; then cp "$STUB/brief" "$STUB/resumed-brief"; else echo nine > n.txt; fi' > "$STUB/build"
+  loop run >/dev/null; old=$(st 'select(.issue == 9 and .step == "blocked") | .card')
+  st 'select(.issue == 9 and .step == "blocked") | .reason' | grep -q '^review 1: ' || fail "#9 was not blocked on its failed review: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
+  rm "$STUB/review-cmd"; loop retry 9 >/dev/null && loop run >/dev/null || fail "run of the retried #9 exited non-zero"
+  [ "$(st "select(.issue == 9 and .step == \"worktree\" and .card != \"$old\") | .reason")" = "resumed from the kept patch of card $old: one session, then review" ] \
+    || fail "the start line of the retried card does not name the kept patch of $old: $(st 'select(.step == "worktree") | .reason')"
+  grep -qF "The staged change in this worktree is no leftover: it is the kept work of card $old, an earlier card of this issue" "$STUB/resumed-brief" \
+    && grep -qF 'applied to main as it stands. That card was blocked: review 1: ' "$STUB/resumed-brief" \
+    && grep -qF 'That change is yours now: keep, change or drop each part of it.' "$STUB/resumed-brief" \
+    && grep -qF 'The checks at the end (the bug-card check too) judge the whole staged change' "$STUB/resumed-brief" \
+    || fail "the build prompt does not name card $old, its block reason, and that the staged change is the build's own now: $(grep -A3 '^# This card resumes' "$STUB/resumed-brief" 2>&1)"
+}
+
+# Bug (#874): a card with no kept work that found a staged change in its new worktree built on it, as its own. It
+# stops before the build with a reason naming the files. The change is staged by a post-checkout hook of main (git
+# runs it in each new worktree), so it is there at the card's start as it would be in a project; a whole card run, as
+# the check is in card() between the worktree and the build.
+t_straystaged() {
+  setup "[$(issue 5 2026-01-01)]"; echo "$GO" > "$STUB/review.1"
+  printf '%s\n' '#!/bin/sh' '[ "$1" = 0000000000000000000000000000000000000000 ] || exit 0' 'echo stray > stray.txt && git add stray.txt' > "$R/.git/hooks/post-checkout"
+  chmod +x "$R/.git/hooks/post-checkout"
+  loop run >/dev/null
+  [ "$(st 'select(.issue == 5 and .step == "blocked") | .reason')" = "worktree: the new worktree already holds a staged change that is no kept work of this issue: stray.txt" ] \
+    || fail "a card whose new worktree held a staged change did not stop naming the file: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
+  [ ! -s "$STUB/sessions" ] && [ -z "$(st 'select(.issue == 5 and (.step | IN("build", "brief"))) | .step')" ] \
+    || fail "the card went on to its brief or build on the stray staged change: $(st '.step' | tr '\n' ' ')"
+}

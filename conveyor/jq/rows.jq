@@ -62,9 +62,9 @@ map(select(.step != "push")) | group_by(.card) | map(. as $all
              # rule Pick settings did not pick.
              pick: (map(.pick | objects) | last // null),
              log: [range(0; $all | length) as $i | $all[$i] | {step, of, result, time, counts, created, sec: (if .step == "pushed" then .sec else null end), pr: (if .step == "pushed" then .pr else null end), failed: (if .step == "blocked" then .spent.step else null end), n: (if .step == "filed" then .followups | length else null end),
-               # An issue line, a test line and a review that failed, a blocked line (its sentence) and a fix line (what started it) keep their reason; a blocked line and a failed test line their output and a NO-GO review its findings (tail); a failed test line its failing files (failures).
+               # An issue line, a test line and a review that failed, a blocked line (its sentence), a fix line (what started it) and a worktree line (how it took up a kept patch) keep their reason; a blocked line and a failed test line their output and a NO-GO review its findings (tail); a failed test line its failing files (failures).
                reason: (if (.step == "issue" and .result != "ok") or (.step == "test" and .result != "pass") or (.step == "review" and (.result | IN("fail", "stopped")))
-                 or .step == "blocked" or .step == "fix" then .reason else null end),
+                 or .step == "blocked" or .step == "fix" or .step == "worktree" then .reason else null end),
                tail: (if .step == "blocked" or (.step == "test" and .result != "pass") or (.step == "review" and .result == "NO-GO") then .tail else null end),
                failures: (if .step == "test" and .result != "pass" then .failures else null end),
                # A test line's failures' verdicts (card, main or flaky) and the seconds its run of them on main took (verdicts()).

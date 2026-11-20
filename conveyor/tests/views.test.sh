@@ -587,4 +587,9 @@ EOF
   [ "$(jq -c '.landed[] | select(.card == "c61") | [.start[11:16], .pickedAt[11:16], .priorSec, .totalSec, (.earlier | map([.card, .sec, .reason, .track.steps[0].state]))]' <<<"$out")" = '["00:00","00:00",420,1080,[["c60",420,"build: session failed (exit 1)","failed"]]]' ] \
     && [ "$(jq -c '.belt[] | select(.card == "c62") | [.start, .pickedAt, .priorSec, .totalSec, .earlier] | [.[0] == .[1], .[2], .[3], .[4]]' <<<"$out")" = '[true,0,null,[]]' ] \
     || fail "start and overall time: $(jq -c '[.landed[], .belt[]] | map(select(.card == "c61" or .card == "c62") | {card, start, pickedAt, priorSec, totalSec, earlier})' <<<"$out")"
+  # Bug (#874): a card started from a kept patch did not say so on the Board or in /units: its start line's reason is
+  # the track's kept and the why of its "worktree ready" step; a card that started on main alone has neither.
+  [ "$(jq -c '[.landed[], .belt[]] | map(select(.card == "c61" or .card == "c62") | [.card, .track.kept, (.track.records[] | select(.name == "worktree ready") | .why)])' <<<"$out")" \
+    = '[["c61","resumed from the kept patch of card c60: one session, then review","resumed from the kept patch of card c60: one session, then review"],["c62",null,null]]' ] \
+    || fail "the start line of a card resumed from a kept patch is not in its track: $(jq -c '[.landed[], .belt[]] | map(select(.card == "c61" or .card == "c62") | {card, kept: .track.kept, records: .track.records[0:3]})' <<<"$out")"
 }

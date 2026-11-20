@@ -350,6 +350,17 @@ test('a card whose latest review the judge ran on shows its accepted and decline
   expect(landed.match(/judge:/g)).toHaveLength(1)
 })
 
+// Bug (#874): a card started from the kept patch of an earlier card did not say so in /units. Its start line (the
+// track's kept) is a dim line under the card on the belt and under one that needs you; a card that started on main
+// alone has none, and the pane keeps its three lines a card.
+test('a card started from a kept patch names that patch\'s card under it; one that started on main has no such line', () => {
+  const kept = 'resumed from the kept patch of card c1-3851: one session, then review'
+  expect(beltCard({ track: track('++-+>.', 'landing', { kept }) }, 100)).toContain(`   ${kept}`)
+  expect(beltCard({ track: track('++-+>.', 'landing') }, 100).join('\n')).not.toContain('kept patch')
+  expect(section(tableText(board({ needsYou: { waiting: [], blocked: [{ ...BLOCKED, track: track('!.....', '', { kept }) }] } }), 100), 'NEEDS YOU')).toContain(`\n    ${kept}`)
+  expect(paneModel(board({ belt: [{ ...BELT[1], ...TIMES, track: track('++-+>.', 'landing', { kept }) }] }), 62, 0).map(plain).join('\n')).not.toContain('kept patch')
+})
+
 // /units gives the number of findings the judge declined today, from the declined list's lines by the judge:
 // those the Board's panel shows and those dismissed or built since, never a code or owner decline or an older day's,
 // and a line two records share counted once.

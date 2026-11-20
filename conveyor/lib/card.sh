@@ -214,6 +214,12 @@ card() { # <card> <issue> [<branch> <tip>]
       [ "$mode" = stale ] || for t in trailers covered; do cp "$fromk/$from.$t" "$wt.$t" 2>/dev/null || cp "$CARDS/$from.$t" "$wt.$t" 2>/dev/null; done
     fi
   fi
+  # A card that applied no kept patch (session, land) and merged no branch starts on a clean worktree of main. A staged
+  # change found there is no work of this card: its build would take it for its own, so the card stops here.
+  if [ -z "$br" ] && [ "$mode" != session ] && [ "$mode" != land ]; then
+    err=$(git -C "$wt" diff --cached --name-only 2>&1) || { block "$c" "$n" "$wt" "worktree: the engine could not read the staged change of the new worktree: ${err:0:400}"; return; }
+    [ -z "$err" ] || { block "$c" "$n" "$wt" "worktree: the new worktree already holds a staged change that is no kept work of this issue: $(paste -sd ' ' - <<<"$err" | cut -c 1-400)"; return; }
+  fi
   # A main-red fix card commits, with its fix, the links from the files of the landing that broke a case to its test
   # file (issue 598: testlinks()).
   testlinks "$c" "$wt" || { block "$c" "$n" "$wt" "the test links of the main-red record could not be staged in .conveyor/test-links.json"; return; }
@@ -345,7 +351,7 @@ card() { # <card> <issue> [<branch> <tip>]
   record "$c" "$n" brief ok "$([ -z "$d" ] && echo '{}' || echo "{\"depth\":$d}")"
   if [ -z "$br" ] && [ "$mode" != land ] && [ "$mode" != review ]; then
     more=''
-    [ "$mode" != session ] || more=$'\n\n# This card resumes blocked card '"$from"$'\nThat card\'s change is already in this worktree, staged: its kept patch, applied to main as it stands. The card was blocked: '"${was:0:600}"$'\nStart from that change, not from nothing: finish what the issue asks, fix the findings carried over above, and leave alone what is already right.'
+    [ "$mode" != session ] || more=$'\n\n# This card resumes blocked card '"$from"$'\nThe staged change in this worktree is no leftover: it is the kept work of card '"$from"$', an earlier card of this issue, applied to main as it stands. That card was blocked: '"${was:0:600}"$'\nThat change is yours now: keep, change or drop each part of it. Start from it, not from nothing: finish what the issue asks, fix the findings carried over above, and leave alone what is already right. The checks at the end (the bug-card check too) judge the whole staged change as this card\'s, that card\'s tests included.'
     if [ "$mode" = port ]; then
       base=$(git rev-parse -q --verify "$(cat "$fromk/$from.base" 2>/dev/null)^{commit}" 2>/dev/null) && base="commit $base" || base='a commit that was not recorded'
       more=$'\n\n# This card brings the change of blocked card '"$from"$' onto main\nThat card\'s change is kept as a patch, and it no longer applies to main as it stands. Do not build the change again from nothing. The patch is the file '"$fromk/$from.patch"$', built on '"$base"$'. Bring that change onto main as it is now, in this worktree, and resolve the conflicts: `git apply --3way --index` on that file applies what still fits and leaves conflict marks in the rest, and `git diff <that commit> HEAD -- <file>` shows what main changed in a file since. Read the patch in parts if it is large. Keep what main changed and what the card changed. '

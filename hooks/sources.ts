@@ -55,7 +55,8 @@ export type Need = Card & Times & { yes: boolean; text: string; since: number | 
 // The snapshot's track: the six steps Build, Review, Fix, Test, Land, Push, each done, now, skipped, failed or
 // todo with its measured seconds (Review and Fix with their rounds n, Review with the rule's of, Push with the
 // follow-ups filed). at is the step in progress (null on a card that has ended), label what it is doing, since when that
-// began, reason why Push failed. No time is estimated from past cards. A track of any other shape (an older loop's) is none.
+// began, reason why Push failed, kept how the card took up its issue's kept patch (its worktree line's reason: null
+// when that line gives none). No time is estimated from past cards. A track of any other shape (an older loop's) is none.
 // files: the test files run of all in the Test step, over: how many more ran than were selected (run is never above of), and now: the file that runs now and when it began; tests: its tests done of all, and failed (none until it gives them).
 // list: the list of tests that step's run was given: the files its change touches (changed, files: how many) or the
 // whole suite (null when the pack sets no test.list). grown: the files of its change before and after it was split for
@@ -64,7 +65,7 @@ const STATES = ['done', 'now', 'skipped', 'failed', 'todo'] as const
 export const STEP_NAMES = ['Build', 'Review', 'Fix', 'Test', 'Land', 'Push'] as const
 // replyFix: on Build, the fix the Done-when check on the build's reply started (track.jq): 'now' while it runs, 'done' after.
 export type Step = { name: string; state: (typeof STATES)[number]; sec: number | null; n: number | null; of: number | null; followups: number | null; replyFix: 'now' | 'done' | null }
-export type Track = { steps: Step[]; at: number | null; label: string; since: number | null; reason: string | null; files: { run: number; of: number | null; over: number | null; now: { file: string; at: number | null } | null } | null; tests: { done: number; of: number; failed: number } | null; list: { mode: 'changed'; files: number } | { mode: 'whole' } | null; grown: { before: number; after: number } | null }
+export type Track = { steps: Step[]; at: number | null; label: string; since: number | null; reason: string | null; kept: string | null; files: { run: number; of: number | null; over: number | null; now: { file: string; at: number | null } | null } | null; tests: { done: number; of: number; failed: number } | null; list: { mode: 'changed'; files: number } | { mode: 'whole' } | null; grown: { before: number; after: number } | null }
 // reading is false while no token of the card has been read: its dollars are then "no reading yet", never $0; atEnd: in
 // that time the running session's route reports no usage until its step ends: "cost shown when the step ends".
 // tokens: the card's fresh tokens so far, both seats together (null when the snapshot does not give them).
@@ -198,7 +199,7 @@ const trackOf = (v: any): Track | null => {
   return {
     steps: v.steps.map((x: any): Step => ({ name: one(x.name), state: x.state, sec: num(x.sec), n: num(x.n), of: num(x.of), followups: num(x.followups),
       replyFix: x.replyFix === 'now' || x.replyFix === 'done' ? x.replyFix : null })),
-    at: at !== null && v.steps[at] ? at : null, label: one(v.label), since: time(v.since), reason: one(v.reason) || null,
+    at: at !== null && v.steps[at] ? at : null, label: one(v.label), since: time(v.since), reason: one(v.reason) || null, kept: one(v.kept) || null,
     files: v.files && typeof v.files === 'object' && num(v.files.run) !== null ? { run: v.files.run, of: num(v.files.of), over: num(v.files.over),
       now: v.files.now && typeof v.files.now === 'object' && one(v.files.now.file) ? { file: one(v.files.now.file), at: time(v.files.now.at) } : null } : null,
     tests: v.tests && typeof v.tests === 'object' && [v.tests.done, v.tests.of, v.tests.failed].every(x => num(x) !== null) ? { done: v.tests.done, of: v.tests.of, failed: v.tests.failed } : null,
@@ -447,6 +448,9 @@ const judgeText =(rs: Review[]): string => {
   const j = rs.at(-1)?.judge
   return j ? `judge: ${j.accepted} accepted, ${j.declined} declined${j.go ? ' · GO from declines only' : ''}` : ''
 }
+// How a card took up its issue's kept patch, as its start line says (track.kept), dim and cut at the width: [] when
+// that line gives no reason.
+const keptLine = (t: Track | null, w: number, pad: string): Line[] => (t && t.kept ? [fitWidth([{ t: `${pad}${t.kept}`, d: true }], w)] : [])
 const judgeLine = (rs: Review[], w: number, pad: string): Line[] => {
   const t = judgeText(rs)
   return t ? [fitWidth([{ t: `${pad}${t}`, d: true }], w)] : []
@@ -754,6 +758,7 @@ export const needsModel = (s: State, snap: Snap, w: number, short: boolean): Lin
       ...(n.track ? trackLines(n.track, w, '   ') : []),
       ...n.reviews.map((r): Line => fitWidth([{ t: `    ${reviewText(r)}`, c: r.verdict === 'GO' ? C.ok : C.you }], w)),
       ...judgeLine(n.reviews, w, '    '),
+      ...keptLine(n.track, w, '    '),
       ...metricsLines(n.metrics, w),
     ]
   }),
@@ -826,6 +831,7 @@ export const beltModel = (s: State, snap: Snap, w: number, short: boolean, frame
       ...(t ? trackLines(t, w) : [[{ t: ` ${workMark(frame)} ${stepOf(b)}`, c: C.work }] as Line]),
       ...(t || b.reviews.length ? [third] : []),
       ...(short ? [] : judgeLine(b.reviews, w, '   ')),
+      ...(short ? [] : keptLine(t, w, '   ')),
       // A failed Push says why: the push's error, or that GitHub kept the issue open; cut at the width.
       ...(t && t.at === 5 && t.steps[5].state === 'failed' && t.reason ? [fitWidth([{ t: `   ✗ ${t.reason}`, c: C.bad }], w)] : []),
       ...liveLine(b, s.now, w),

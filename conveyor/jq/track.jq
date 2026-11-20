@@ -132,6 +132,9 @@
              elif $i == 5 and $u.filed != null then {followups: $u.filed} else {} end)],
          at: $six, label: $label, since: (if $at == null then null elif $kind == "proof" then ($c.proof.at | strings) // $last.time else ($c.live.at | strings) // $last.time end),
          reason: $why,
+         # How the card took up its issue's kept patch, as its worktree line says ("resumed from the kept patch of card
+         # <card>: ...", or why it was built from nothing); null for a card whose worktree line gives no reason.
+         kept: ([$log[] | select(.step == "worktree") | .reason // "" | select(. != "")] | first),
          # The card split for its size (growcheck(), lib/slices.sh): the files of its change before and after; else null.
          grown: ([$log[] | select(.step == "grown" and .grown.after != null) | .grown] | last | if . == null then null else {before: .files, after} end),
          files: (if $kind == "test" then ($c.live // {} | .files // null) elif $kind == "proof" then $c.proof.files else null end),
@@ -166,10 +169,11 @@
                 + (if $l.step == "filed" then {n: ($l.n // 0)} elif $l.step == "review" then {counts: ($l.counts // null), judge: ($l.judge // null)}
                    elif $l.step == "test" and $l.result == "pass" and $l.rerun != null then {rerun: true} else {} end)
                 # A blocked line's sentence (why) and the end of its output, a failed test run's, review's or issue closing's reason (why),
+                # a worktree line's reason (why: how the card took up a kept patch),
                 # a NO-GO review's findings (output), a failed test run's failing files (failures) and the end of its output, and a
                 # fix's reason: what started it when its line names it (a failed Done-when check, main moved), as the Board labels it.
                 + ({why: (if $l.step == "blocked" or ($l.step == "test" and $l.result != "pass") or ($l.step == "issue" and $l.result != "ok")
-                      or ($l.step == "review" and ($l.result | IN("fail", "stopped"))) then $l.reason
+                      or ($l.step == "review" and ($l.result | IN("fail", "stopped"))) or $l.step == "worktree" then $l.reason
                       # A test run that left linked test files out (testcap(), testrun.sh), or ran only the changed
                       # cases of its own test files (owncases(), testrun.sh): its list's note (rows.jq) says so.
                       elif $l.step == "test" and $l.list != null then $l.list.why else null end),

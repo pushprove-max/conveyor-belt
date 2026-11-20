@@ -54,6 +54,10 @@ right-aligned and the title is what gives way.
 - **The judge**, in `/units` only: a card (needing you, on the belt or landed) whose latest review the judge ran on has
   a dim line `judge: 2 accepted, 1 declined`, with ` · GO from declines only` when the GO came from the judge declining
   every finding. A latest review the judge did not run on (off, failed, nothing to judge) has no such line.
+- **Kept work**, in `/units`: a card (needing you, or on the belt) that took up the kept patch of an earlier card of
+  its issue has a dim line that names that card, as its start line gives it:
+  `resumed from the kept patch of card <card>: one session, then review`. A card of an issue with no kept patch has
+  no such line.
 - **NEEDS YOU**: one line, `NEEDS YOU  nothing`, when nothing does. Else cards waiting for your yes to a visible
   change (with the reviewer's sentence), then blocked cards (with the reason). A blocked card is off the belt, so the
   step it stopped in is said here: `failed at Build (step 1 of 6) after 12m`, then its six steps and one line for each
