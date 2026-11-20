@@ -89,7 +89,7 @@ modelpick() { # <card> <issue>: sets card()'s PICK, PICKCARD and PICKSEAT
     # a second retry, whose last pick is no trial, and a retry that picktrial() leaves before its check of the blocks.
     ! jq -e .hold <<<"$old" >/dev/null || PICKHOLD=1
     old=$(jq -c 'del(.hold)' <<<"$old") || return 0
-    PICK=$(jq -c --arg m "$rule" --arg by "$by" --argjson b "$b" '.mode = $m | del(.pipeline, .trialEffort) | if $by == "owner" or .by == "owner" then .by = $by | .choice = $b | .trial = false | del(.promoted) else . end' <<<"$old") || return 0
+    PICK=$(jq -c --arg m "$rule" --arg by "$by" --argjson b "$b" '.mode = $m | del(.pipeline, .trialEffort, .judged) | if $by == "owner" or .by == "owner" then .by = $by | .choice = $b | .trial = false | del(.promoted) else . end' <<<"$old") || return 0
     PICKCARD=$1
     if pickpromote "$1" "$2" "$c" "$b"; then :
     elif jq -e .trial <<<"$PICK" >/dev/null; then picktrial "$1" "$2" "$c" "$b"
@@ -168,7 +168,7 @@ PICKCLAMP="$OKMODELS"'def noeff($s; $g): $s == "builder" and $g == "opencode";
 # tokens and usage, or unread), so its tokens and price count on the card. Each card asks the judge: a later card of
 # the issue (a retry or a restart) asks again, and its answer replaces the asked of the pick it reuses.
 # On, a card that is not a trial nor promoted, and whose builder the owner did not set, builds on the judge's builder
-# (PICKSEAT, which then is its choice), except a card the rule keeps on the project's builder (PICKHOLD, modelpick()'s,
+# (PICKSEAT, which then is its choice, and judged true in the pick: the snapshot's seatsof()), except a card the rule keeps on the project's builder (PICKHOLD, modelpick()'s,
 # set by pickpromote() and by modelpick() itself): a promoted group's card in the share, which the snapshot's cost
 # check compares the promoted cards with, and each later card of an issue whose trial card was blocked, which builds
 # on the default; a trial card keeps its challenger, at the judge's effort fitted to its range in pick.builder (fit()), or
@@ -212,7 +212,7 @@ pickjudge() { # <card> <issue> <control record> [<issue json>]
       && PICKSEAT=$x && PICK=$(jq -c --argjson s "$x" 'if .choice.effort == $s.effort then del(.trialEffort) else .trialEffort = $s.effort end' <<<"$PICK") || :
   elif [ -z "${PICKSEAT:-}" ] && [ -z "${PICKHOLD:-}" ] && [ "$(jq -r .by <<<"$PICK")" = auto ]; then
     x=$(jq -c '.asked.builder | select(.model != null) | {model, effort}' <<<"$PICK" 2>/dev/null)
-    [ -z "$x" ] || { PICKSEAT=$x; PICK=$(jq -c --argjson s "$x" '.choice = $s' <<<"$PICK") || :; }
+    [ -z "$x" ] || { PICKSEAT=$x; PICK=$(jq -c --argjson s "$x" '.choice = $s | .judged = true' <<<"$PICK") || :; }
   fi
   jq -e '.trial == true' <<<"$PICK" >/dev/null && return 0
   r=${PICKSEATS:-}; [ -n "$r" ] || r='{}'

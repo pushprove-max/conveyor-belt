@@ -373,9 +373,8 @@ effort that comes after the highest effort. Then the pack does not change.
 The `pick` field of the card has `asked`: the three seats as Conveyor fitted them, and the judge's model. Each seat
 has the model and effort that the judge gave (`asked`) and its reason. A seat that Conveyor changed has `clamp`,
 which says what changed and why. When the judge fails, times out or names no model, `asked` has `failed` with the
-reason, and the card uses the project's seats. On the Board, a card with a pick has a **Seats** line. It says how
-many seats a limit clamped. Open it to see the model and effort of each seat, the judge's reason for it, and the
-clamp.
+reason, and the card uses the project's seats. On the Board, a card shows the seats it runs on, with the judge's
+reason and the clamp for each seat the judge chose ([Settings for one card](board.md#settings-for-one-card)).
 
 With On, the card uses these seats, with these exceptions:
 

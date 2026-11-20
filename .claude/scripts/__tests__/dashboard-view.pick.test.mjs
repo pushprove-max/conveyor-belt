@@ -100,42 +100,73 @@ test('Rules: Pick settings saves the models checked for a seat, each with its ow
   assert.equal(seat('builder', w2), null, 'a snapshot with no packPick (an older engine) shows no list to set');
 });
 
-// Bugs this guards (#1047): a card's page did not show the seats the Judge gave it, the Judge's reason for each, or
-// that a limit of the pack moved a seat; a failed pick looked like a pick; a refresh shut an open Seats list.
-test("Board: a card shows the Judge's seats, each one's reason, and what a limit clamped", async () => {
+// Bugs this guards (#1047, #1086): a card did not show the seats the Judge gave it, the Judge's reason for each, or
+// that a limit of the pack moved a seat; a failed pick looked like a pick; the card's seats line showed the project's
+// builder at medium beside the Judge's pick at high, so the reader could not tell which seats the card runs on; a pick
+// the card does not run on (Shadow, a trial) was shown as its seats; the Judge's reasons and clamps went missing on a
+// card that does not run on the Judge's seats, and a clamp with no model was dropped; a builder the owner cleared
+// after the card started still showed as "this card"; a Shadow card said it does not run on the seat shown above it.
+const RUN = { builder: { model: 'claude-opus-5-5', effort: 'high', by: 'judge' }, reviewer: { model: 'gpt-6.1-sol', effort: 'low', by: 'judge' },
+  judge: { model: 'claude-sonnet-5-5', effort: 'medium', by: 'judge' } };
+const PICKED = {
+  builder: { model: 'claude-opus-5-5', effort: 'high', why: 'A wide change.', asked: { model: 'claude-opus-5-5', effort: 'high' } },
+  reviewer: { model: 'gpt-6.1-sol', effort: 'low', why: 'One file to read.', asked: { model: 'gpt-6.1-sol', effort: 'low' } },
+  judge: { model: 'claude-sonnet-5-5', effort: 'medium', why: 'Few findings expected.', asked: { model: 'claude-sonnet-5-5', effort: 'low' },
+    clamp: 'low is not one of the efforts the judge may take on claude-sonnet-5-5 (medium, high): claude-sonnet-5-5 at medium' },
+  model: 'claude-opus-5-5', mode: 'on', run: RUN };
+const NOTRUN = { builder: null, reviewer: null, judge: null };
+const parts = (row) => Array.from(row.querySelector('.board-seat-line').children, (c) => c.textContent);
+test("Board: a card shows the seats it runs on, a row each, and the Judge's reason for each in its own callout", () => {
   const w = boot({ tab: 'control' });
   const d = full(), b = d.panels.board.data;
+  b.modelSettings.builder.effort = 'medium';  // the project's builder at medium; the Judge's pick builds at high
+  b.review[0].seats = PICKED;
   b.landed = [
-    { repo: 'sample', card: 'c5-7', issue: 7, title: 'Picked one', url: null, step: 'landed', usd: 1, reviews: 1, seats: {
-      builder: { model: 'claude-sonnet-5-5', effort: 'medium', why: 'A small docs change.', asked: { model: 'claude-sonnet-5-5', effort: 'low' },
-        clamp: 'low is not one of the efforts the builder may take on claude-sonnet-5-5 (medium, high): claude-sonnet-5-5 at medium' },
-      reviewer: { model: 'gpt-6.1-sol', effort: 'medium', why: 'One file to read.', asked: { model: 'gpt-6.1-sol', effort: 'medium' } },
-      judge: { model: 'claude-opus-5-5', effort: 'medium', why: 'Few findings expected.', asked: { model: 'claude-opus-5-5', effort: 'medium' } },
-      model: 'claude-opus-5-5' } },
-    { repo: 'sample', card: 'c5-8', issue: 8, title: 'Failed pick', url: null, step: 'landed', usd: 1, reviews: 1, seats: { failed: 'the judge timed out' } },
+    { repo: 'sample', card: 'c5-8', issue: 8, title: 'Failed pick', url: null, step: 'landed', usd: 1, reviews: 1, seats: { failed: 'the judge timed out', mode: 'on', run: NOTRUN } },
     { repo: 'sample', card: 'c5-9', issue: 9, title: 'Not picked', url: null, step: 'landed', usd: 1, reviews: 1, seats: null },
+    { repo: 'sample', card: 'c5-10', issue: 10, title: 'Shadow pick', url: null, step: 'landed', usd: 1, reviews: 1, seats: { ...PICKED, mode: 'shadow', run: NOTRUN } },
+    { repo: 'sample', card: 'c5-11', issue: 11, title: 'Trial', url: null, step: 'landed', usd: 1, reviews: 1,
+      seats: { ...PICKED, reviewer: { why: 'r', asked: { model: null, effort: null }, clamp: "the pack allows the reviewer no model, so the project's reviewer stands" },
+        run: { builder: { model: 'claude-sonnet-5-5', effort: 'high', by: 'trial' }, reviewer: null, judge: null } } },
+    { repo: 'sample', card: 'c5-81', issue: 81, title: 'Shadow, same reviewer', url: null, step: 'landed', usd: 1, reviews: 1,
+      seats: { ...PICKED, reviewer: { ...PICKED.reviewer, effort: 'medium' }, mode: 'shadow', run: NOTRUN } },
   ];
-  const again = structuredClone(d);
+  // The pick recorded a builder the owner set; the control record has none for issue 82 now (cleared).
+  b.review.push({ ...b.review[0], card: 'c3-82', issue: 82, title: 'Builder cleared',
+    seats: { ...PICKED, run: { ...NOTRUN, builder: { model: 'claude-sonnet-5-5', effort: 'low', by: 'card' } } } });
   deliver(w, d);
-  const card = (n) => panel(w, 'board').querySelector(`.board-col[data-col="landed"] .bcard[data-issue="${n}"]`);
-  const opened = card(7).querySelector('.board-seats');
-  const toggled = new Promise((r) => opened.addEventListener('toggle', r, { once: true }));
-  opened.open = true;
-  await toggled;  // jsdom fires the toggle on a later task (a setTimeout of 0), as a browser does, so wait for the event itself
-  const drawn = card(7).querySelector('.board-seats');
-  again.panels.board.data.landed[0].usd = 2;  // a snapshot that differs for this card, so its Seats list is drawn again
-  next(w, again);
-  const seats = card(7).querySelector('.board-seats');
-  assert.notEqual(seats, drawn, 'the refresh drew the Seats list again');
-  assert.equal(seats.open, true, 'a refresh keeps an open Seats list open');
-  assert.match(seats.querySelector('summary').textContent, /Seats: the Judge's pick, 1 clamped by a limit/);
-  const li = (k) => seats.querySelector(`li[data-seat="${k}"]`).textContent;
-  assert.match(li('builder'), /Builder: claude-sonnet-5-5 at medium\. A small docs change\. Clamped: low is not one of the efforts the builder may take/);
-  assert.match(li('reviewer'), /Reviewer: gpt-6\.1-sol at medium\. One file to read\./);
-  assert.doesNotMatch(li('reviewer'), /Clamped/, 'a seat no limit moved says nothing of a clamp');
-  assert.match(li('judge'), /Judge: claude-opus-5-5 at medium\. Few findings expected\./);
-  assert.match(card(8).textContent, /Seats: the project's, as the Judge's pick failed: the judge timed out/);
-  assert.equal(card(9).querySelector('.board-seats'), null, 'a card the rule did not pick shows no seats');
+  const card = (col, n) => panel(w, 'board').querySelector(`.board-col[data-col="${col}"] .bcard[data-issue="${n}"]`);
+  const c = card('review', 63), row = (k) => c.querySelector(`.board-seat[data-seat="${k}"]`);
+  assert.deepEqual(parts(row('builder')), ['Builder', 'claude-opus-5-5 · high', "Judge's pick"]);
+  assert.deepEqual(Array.from(c.querySelectorAll('[data-seat="builder"]'), (x) => x.textContent).filter((t) => /medium/.test(t)), [],
+    "the project's builder at medium is nowhere on the card");
+  assert.equal(c.querySelectorAll('.board-seats-line').length, 1, 'one list of seats on the card');
+  assert.deepEqual(parts(row('reviewer')), ['Reviewer', 'gpt-6.1-sol · low', "Judge's pick"]);
+  const why = (k) => Array.from(row(k).querySelectorAll('.why-block'), (x) => [x.dataset.by, x.querySelector('.why-label').textContent,
+    Array.from(x.querySelectorAll('.why-line'), (l) => l.textContent)]);
+  assert.deepEqual(why('builder'), [['judge', 'Why the Judge chose it', ['A wide change.']]]);
+  assert.deepEqual(why('reviewer'), [['judge', 'Why the Judge chose it', ['One file to read.']]], 'a seat no limit moved says nothing of a clamp');
+  assert.deepEqual(why('judge'), [['judge', 'Why the Judge chose it', ['Few findings expected.',
+    'Clamped: low is not one of the efforts the judge may take on claude-sonnet-5-5 (medium, high): claude-sonnet-5-5 at medium']]]);
+  assert.ok(act(c, 'seats') && act(c, 'seats-pick'), 'Settings and Pick for me stay');
+  // A failed pick: the card runs on the project's seats, and the callout says why.
+  assert.deepEqual(Array.from(card('landed', 8).querySelectorAll('.board-seat'), (r) => parts(r)[2]), ["project's", "project's", "project's"]);
+  assert.match(card('landed', 8).querySelector('.why-block').textContent, /Why the card runs on the project's seats.*The Judge's pick failed: the judge timed out/);
+  assert.equal(card('landed', 9).querySelector('.board-seats'), null, 'a landed card the rule did not pick shows no seats');
+  const shadow = card('landed', 10);
+  assert.deepEqual(Array.from(shadow.querySelectorAll('.board-seat'), (r) => parts(r)[2]), ["project's", "project's", "project's"], 'a Shadow pick is not the seats the card runs on');
+  const lines = (el, k) => Array.from(el.querySelectorAll(`.board-seat[data-seat="${k}"] .why-block .why-line`), (l) => l.textContent);
+  assert.deepEqual(lines(shadow, 'builder'), ['The Judge chose claude-opus-5-5 · high; the card does not run on it, as the rule Pick settings is in Shadow.', 'A wide change.'],
+    "a Shadow card keeps the Judge's reason, and says the card does not run on its seat");
+  assert.deepEqual(lines(shadow, 'judge').slice(-1), ['Clamped: low is not one of the efforts the judge may take on claude-sonnet-5-5 (medium, high): claude-sonnet-5-5 at medium']);
+  const trial = card('landed', 11);
+  assert.deepEqual(Array.from(trial.querySelectorAll('.board-seat'), (r) => parts(r).slice(1)),
+    [['claude-sonnet-5-5 · high', 'trial'], ['gpt-6.1-sol · medium', "project's"], ['claude-opus-5-5 · medium', "project's"]], 'a trial runs on the challenger and the project\'s reviewer and judge');
+  assert.deepEqual(lines(trial, 'builder'), ['The Judge chose claude-opus-5-5 · high; the card does not run on it.', 'A wide change.']);
+  assert.deepEqual(lines(trial, 'reviewer'), ['r', "Clamped: the pack allows the reviewer no model, so the project's reviewer stands"], 'a clamp with no model shows');
+  assert.deepEqual(lines(card('landed', 81), 'reviewer'), ['One file to read.'], 'the Judge chose the seat the card runs on: no line says it does not');
+  assert.deepEqual(parts(card('review', 82).querySelector('.board-seat[data-seat="builder"]')).slice(1), ['claude-opus-5-5 · medium', "project's"],
+    "a builder the owner cleared runs on the project's");
 });
 
 // Bugs this guards: the panel showed a group's whole spend as its spend per landed card (no division by the cards

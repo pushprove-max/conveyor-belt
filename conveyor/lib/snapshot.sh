@@ -94,7 +94,8 @@
 #   of it made no progress for STUCK seconds and was ended (watch()); the card detail shows it. split: what the rule
 #   Split large issues made of its issue ({result, slices, filed}, rows.jq), null when the rule did not check it. seats:
 #   the seats the judge gave it under the rule Pick settings (its pick's asked: each seat's model, effort, why and
-#   clamp, or failed: pickjudge(), lib/modelpick.sh), null when the rule did not pick it.
+#   clamp, or failed, or guard: pickjudge(), lib/modelpick.sh), with the pick's mode and run (the seats the card runs
+#   on that the rule set, each with who set it: seatsof, below), null when the rule did not pick it.
 # repo: the project's name (REPO), as health names it too; health's room is the card the machine holds back (room()),
 #   and its machine the machine's settings (mhost(): {cap, paused}, {unread: true} for a host file that
 #   does not read, null when it sets none), the same for every project of the machine, and
@@ -665,6 +666,23 @@ snapshot() (
     # The totals: the dollars of the steps that are priced, and how many are left out for having no price.
     def priced: [.[].usd | numbers] | add // 0 | . * 10000 | round / 10000;
     def leftout: map(select(.usd == null)) | length;
+    # The seats of a card (seats, above): the pick of the Judge (the asked of its pick) with the mode of the pick and
+    # run, the seats the card runs on that the rule set (pickpromote(), picktrial(), pickseats(), pickjudge(),
+    # lib/modelpick.sh), each {model, effort, by}: by card (the owner set the builder), trial (the challenger of the
+    # group, at trialEffort when the effort of the Judge moved it), promoted (a promoted challenger, or a seat the owner
+    # promoted from a replay) or judge (the seat of the Judge, with the rule On and no failed pick nor guard; for the
+    # builder, only when the pick says judged: a card the rule kept on the builder of the project is not, even when the Judge
+    # chose that builder); null for a seat the rule left at the default of the project.
+    def seatsof: (.x.pick | objects | select(.asked | objects) | . as $p | .asked as $a
+      | ($p.mode == "on" and ($a.failed | type) != "string" and ($a.guard | type) != "string") as $on
+      | ($p.choice | objects | select(.model | type == "string") | {model, effort}) as $c
+      | $a + {mode, run: ({builder: (if $c == null then null elif $p.by == "owner" then $c + {by: "card"}
+            elif $p.trial == true then $c + {effort: ($p.trialEffort // $c.effort), by: "trial"}
+            elif $p.promoted == true then $c + {by: "promoted"}
+            elif $on and $p.judged == true then $c + {by: "judge"} else null end)}
+          + ([("reviewer", "judge") as $k | {key: $k, value: (if $p.trial == true then null
+              elif ($p.seats[$k].model | type) == "string" then ($p.seats[$k] | {model, effort, by: "promoted"})
+              elif $on and ($a[$k].model | type) == "string" then ($a[$k] | {model, effort, by: "judge"}) else null end)}] | from_entries))}) // null;
     def sofar: . as $card | (.live // {} | .usage // null) as $u
       | ((.steps | any(.step != "test")) or (($u // {} | [.[]] | add // 0) > 0)) as $reading
       # atEnd: no reading yet, and every answer of the running Claude session reports usage 0 (its route streams no
@@ -890,7 +908,7 @@ snapshot() (
            # A stop for a lint policy change alone says so, whatever the reviewer said is visible (the rule on visible
            # changes off); a visible stop that changes lint policy too keeps the policy files after the sentence of the review.
            | {card, issue, title, sentence: (if .reason | startswith($lintyes) then .reason | ltrimstr($lintyes)
-               else .reason as $r | (.x.visible | select(startswith("yes: ")) | .[5:] + (($r | capture("(?<p>; it also changes lint policy: [^;]*)$").p) // "")) // (.reason | ltrimstr($yes)) end), since: .x.endAt, parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split, seats: (.x.pick.asked // null), stalls: .x.stalls,
+               else .reason as $r | (.x.visible | select(startswith("yes: ")) | .[5:] + (($r | capture("(?<p>; it also changes lint policy: [^;]*)$").p) // "")) // (.reason | ltrimstr($yes)) end), since: .x.endAt, parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split, seats: seatsof, stalls: .x.stalls,
               files: (($allp[0][.card] // .x.paths) as $p | {count: (.x.diff.files // ($p | if . == null then null else length end)), paths: $p})}
              # The screenshots it kept, beside the hash of its kept patch now (the Board shows them while the two are one).
              + ($shots[0][.card] // {patch: null, shots: null})
@@ -898,7 +916,7 @@ snapshot() (
              + ((.reason | capture("\\(it goes beyond the yes of #(?<from>[0-9]+): (?<what>.*)\\)") | {beyond: {from: (.from | tonumber), what}}) // {})
              + times],
          blocked: [$c[] | select(.step == "blocked" and (.reason | startswith($yes) or startswith($lintyes) | not))
-             | {card, issue, title, reason, tail, since: .x.endAt, parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split, seats: (.x.pick.asked // null), stalls: .x.stalls}
+             | {card, issue, title, reason, tail, since: .x.endAt, parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split, seats: seatsof, stalls: .x.stalls}
              # A land-branch card with the change of its branch already on main ($onm) says so apart from its reason,
              # which the Board reads by its form (the finding of a review, the failing tests): shut is all it needs.
              + (if .card | IN($onm[0][]) then {onMain: true} else {} end) + umbrella + times]
@@ -963,7 +981,7 @@ snapshot() (
            elif .proof then {turns: 0, lastOutputAt: null, action: (.proof.action // null), at: (.proof.at // null)} else null end),
          done: {tokens: .x.tokens, usd, reading: (.steps | any(.step != "test")), step: (.x.log | last | if .step == "start" then .of else null end)},
          # The step that runs now after a stall (stalled, in the live record) has no line yet: its stall is counted here.
-         parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split, seats: (.x.pick.asked // null), stalls: (.x.stalls + (if .live.stalled then 1 else 0 end)),
+         parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split, seats: seatsof, stalls: (.x.stalls + (if .live.stalled then 1 else 0 end)),
          beyond: (if $landed then null else .x.beyond end)} + umbrella + times],
        queue: {next: ($next | if . == null then null else map(. + {parent: parent} + umbrella + (if $h.room.issue == .issue then {room: $h.room.reason} else {} end)) end), order: ($q.order | if type == "array" then map(. + umbrella + (if $h.room.issue == .issue then {room: $h.room.reason} else {} end)) else null end),
          holding: ($q.holding // null | if . == null then null else map(. + umbrella) end), skipped: ($q.skipped // null | if . == null then null else map(. + umbrella) end),
@@ -982,7 +1000,7 @@ snapshot() (
        forecast: forecast,
        awaitingDeploy: $built,
        landed: [$week | sort_by(.x.endAt) | reverse[] | select((.x.endAt | day) == $day) | {card, issue, title, step, time: .x.endAt, usd, reviews: .runReviews, followups: .x.followups,
-         parent: parent, rounds: reviews, fixes: .runFixes, track: track($max; $perr), sha, pushed: (if .step == "closed" then null else (.sha | IN($un[]) | not) end), metrics, doneWhen: .x.doneWhen, split: .x.split, seats: (.x.pick.asked // null), stalls: .x.stalls, batch: .x.batch, rollout: .x.rollout} + times],
+         parent: parent, rounds: reviews, fixes: .runFixes, track: track($max; $perr), sha, pushed: (if .step == "closed" then null else (.sha | IN($un[]) | not) end), metrics, doneWhen: .x.doneWhen, split: .x.split, seats: seatsof, stalls: .x.stalls, batch: .x.batch, rollout: .x.rollout} + times],
        branches: ([$c[] | select(.x.branch != null and (.step | IN("landed", "closed")) and .x.blockedAt == null)] | group_by([.issue, .title])
          | map(max_by(.x.endAt) | {card, issue, title, step, time: .x.endAt})),
        pushedCards: [$c[] | (.x.log | map(select(.step == "pushed")) | last) as $p | select($p != null and ($p.time | day) >= $since)

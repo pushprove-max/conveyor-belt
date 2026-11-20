@@ -404,8 +404,7 @@ each seat on its own lines: each model that the seat allows has a checkbox. Sele
 give the seat, choose the lowest and the highest effort of each one (**Any** for no limit), and click **Save** for the
 seat. With no model selected, **Save** removes the list, and the seat shows **All models, any effort**
 ([The judge's choice of seats](configuration.md#the-judges-choice-of-seats)). A
-card with a pick shows **Seats**: open it to see the model, effort and Judge's reason of each seat, and what a limit
-clamped. The **Cost** panel then shows **Pick settings, by group and builder**: one row for each group and
+card shows its seats in one list ([Settings for one card](#settings-for-one-card)). The **Cost** panel then shows **Pick settings, by group and builder**: one row for each group and
 builder, with its cards, the spend per landed card, the share of cards that landed with no retry, the review rounds
 per landed card and the cards still open. The spend is all the steps of those cards, also the steps of the earlier
 blocked, stopped and retried cards of the same issue. A card is still open when it is on the belt or blocked; a card
@@ -441,9 +440,23 @@ issue that is not open, a cycle, or an issue whose card already runs.
 
 ## Settings for one card
 
-Each card in the Held, Queue, Building, Review and Needs you columns shows its builder, reviewer and judge. A seat
-that is the card's own, not the project's, says "(this card)". You can change a blocked card's settings before you
-retry it.
+Each card in the Held, Queue, Building, Review and Needs you columns shows the builder, reviewer and judge that it
+runs on, one row for each seat. A row shows the seat name, the model and effort (for example
+"claude-opus-5-5 · high"), and who chose the seat:
+
+- **this card**: you set the seat for the card. Your setting always wins.
+- **Judge's pick**: the rule Pick settings is On and the Judge chose the seat.
+- **trial**: the card is a trial, and builds on the group's challenger.
+- **promoted**: the seat is a challenger or a seat that you promoted.
+- **project's**: the project's seat. When the Judge's pick failed, or the weekly limit guard stopped it, a box under
+  the list says why the card runs on the project's seats.
+
+When the rule picked the card, a box under each row, labelled **Why the Judge chose it**, shows the Judge's reason
+for the seat. When a limit of the pack changed the seat, the box says what changed. When the card does not run on
+the Judge's seat, the box names the seat that the Judge chose.
+
+A landed card, or a card of another project, that the rule picked shows the same list, with no buttons. You can
+change a blocked card's settings before you retry it.
 
 - **Settings** opens a group for each seat: the seat name, its model list, and an effort list labelled **Effort**.
   Pick **Project's** to use the project's seat. The effort list shows only once you pick another model. Until then

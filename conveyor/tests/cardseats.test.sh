@@ -256,8 +256,9 @@ t_pickjudgeon() {
   # project's builder, so the Board counted the retry under a builder it did not run on.
   tune '.pick.builder.m = {min: "medium", max: "high"}'
   echo '{"type":"result","is_error":true,"result":"overloaded","num_turns":1}' > "$STUB/pick-json"
-  fx_in "N=7; $PJ; jq -r '.choice | \"\(.model) \(.effort)\"' <<<\"\$PICK\""
-  [ "$(sed -n '2p;5p' "$T/$CASE/run.out" | paste -sd,)" = 'm high,m high' ] \
+  # Also: it kept the earlier card's judged, so the Board credited the Judge with the project's builder.
+  fx_in "N=7; $PJ; jq -r '\"\(.choice.model) \(.choice.effort) \(.judged)\"' <<<\"\$PICK\""
+  [ "$(sed -n '2p;5p' "$T/$CASE/run.out" | paste -sd,)" = 'm high,m high null' ] \
     || fail "the retry's failed pick kept a choice that is not the builder it runs on: $(cat "$T/$CASE/run.out")"
   # Bug: a retry in Shadow took the judge's builder as its choice (from the deps line, or its new answer at
   # medium), while it builds on the project's m at high.
@@ -332,8 +333,8 @@ t_pickjudgetrialrange() {
   tune '.models.allowed.claude += ["claude-sonnet-5-5"] | .models.allowed["codex-builder"] = ["cb"] | .pick = {builder: {cb: {min: "minimal", max: "minimal"}}}'
   loop control rules pick=on >/dev/null || fail "control rules pick=on was refused"
   pjask 'cb minimal' 'x medium' 'j medium'
-  fx_in "N=10; $PJ; jq -c '[.trial, .choice, .trialEffort]' <<<\"\$PICK\""
-  [ "$(sed -n '2p;5p' "$T/$CASE/run.out" | paste -sd,)" = 'cb minimal,[false,{"model":"cb","effort":"minimal"},null]' ] \
+  fx_in "N=10; $PJ; jq -c '[.trial, .choice, .trialEffort, .judged]' <<<\"\$PICK\""
+  [ "$(sed -n '2p;5p' "$T/$CASE/run.out" | paste -sd,)" = 'cb minimal,[false,{"model":"cb","effort":"minimal"},null,true]' ] \
     || fail "the trial card built outside the builder's effort range: $(cat "$T/$CASE/run.out")"
   # Bug: with Sonnet 5.5 in the list at high only, a judge that failed (here, an answer with no model, which
   # leaves pickjudge() as a timeout does) left issue 15's trial card at the challenger's medium.
@@ -351,8 +352,9 @@ t_pickjudgeshare() {
   seatsetup "[$(issue 15 2026-01-01)]"
   loop control rules pick=on >/dev/null && loop control pick small code promote >/dev/null || fail "control rules pick=on or control pick was refused"
   pjask 'm2 high' 'x2 low' 'j2 low'
-  fx_in "N=15; $PJ; jq -c '[.group, .trial, .promoted, .choice]' <<<\"\$PICK\""
-  [ "$(sed -n '2,5p' "$T/$CASE/run.out" | paste -sd,)" = 'm medium,x2 low,j2 low,["small code",false,null,{"model":"m","effort":"medium"}]' ] \
+  # judged (null): the Board credits the Judge with a builder only when the pick says the card took it (seatsof()).
+  fx_in "N=15; $PJ; jq -c '[.group, .trial, .promoted, .choice, .judged]' <<<\"\$PICK\""
+  [ "$(sed -n '2,5p' "$T/$CASE/run.out" | paste -sd,)" = 'm medium,x2 low,j2 low,["small code",false,null,{"model":"m","effort":"medium"},null]' ] \
     || fail "the promoted group's card in the share did not build on the project's builder: $(cat "$T/$CASE/run.out")"
 }
 

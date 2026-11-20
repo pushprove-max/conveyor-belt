@@ -11,6 +11,8 @@ const PICK = { issue: 22, builder: { model: 'claude-fable-5-2', effort: 'high', 
   judge: { model: 'claude-sonnet-5-5', effort: 'medium', why: 'the cheapest that reads it well' }, model: 'claude-opus-5-5' };
 const answer = (text) => ({ ok: true, status: 200, text: () => Promise.resolve(text), headers: { get: () => null } });
 const seatLine = (w, n) => bcard(w, n).querySelector('.board-seats-line');
+// Each seat's row as its parts: the seat name, the model and effort, and who chose it.
+const seatRows = (w, n) => Array.from(seatLine(w, n).querySelectorAll('.board-seat-line'), (p) => Array.from(p.children, (c) => c.textContent).join(' | '));
 const pickLines = (w, n) => Array.from(bcard(w, n).querySelectorAll('.board-seat-pick'), (p) => p.textContent);
 function setTo(w, sel, v) { sel.value = v; sel.dispatchEvent(new w.Event('change')); }
 async function settled() { for (let i = 0; i < 6; i += 1) await settle(); }
@@ -22,7 +24,7 @@ test('Settings shows each seat, marks the card\'s own, and Save sends one contro
   const d = full();
   d.panels.board.data.control.cards = { 20: { judge: { model: 'claude-sonnet-5-5', effort: 'low' } } };
   deliver(w, d);
-  assert.equal(seatLine(w, 20).textContent, 'Builder claude-opus-5-5 at high; Reviewer gpt-6.1-sol at medium; Judge claude-sonnet-5-5 at low (this card)');
+  assert.deepEqual(seatRows(w, 20), ["Builder | claude-opus-5-5 · high | project's", "Reviewer | gpt-6.1-sol · medium | project's", 'Judge | claude-sonnet-5-5 · low | this card']);
   assert.deepEqual(Array.from(seatLine(w, 20).querySelectorAll('.is-own'), (x) => x.dataset.seat), ['judge'], 'only the judge is the card\'s own');
   assert.ok(act(bcard(w, 63), 'seats'), 'a card on the belt has Settings too');
   assert.equal(act(bcard(w, 5), 'seats'), null, 'a card of another project (widgetshop) is not set in this one\'s record');
@@ -99,8 +101,8 @@ test('Needs you cards have Settings and Pick for me, and an own seat shows the e
   d.panels.board.data.control.cards = { 20: { judge: { model: 'gpt-6.1-sol' } } };
   deliver(w, d);
   for (const n of [12, 13]) assert.ok(act(bcard(w, n), 'seats') && act(bcard(w, n), 'seats-pick'), `#${n} in Needs you has Settings and Pick for me`);
-  assert.equal(seatLine(w, 20).querySelector('[data-seat="judge"]').textContent, '; Judge gpt-6.1-sol at medium (this card)');
-  assert.equal(seatLine(w, 21).querySelector('[data-seat="judge"]').textContent, '; Judge claude-opus-5-5 at max', 'a card on the project\'s judge shows its effort');
+  assert.equal(seatRows(w, 20)[2], 'Judge | gpt-6.1-sol · medium | this card');
+  assert.equal(seatRows(w, 21)[2], "Judge | claude-opus-5-5 · max | project's", 'a card on the project\'s judge shows its effort');
 });
 
 // Bug: a pick, or an open Settings, of one project stayed on screen after a switch to another project with the same

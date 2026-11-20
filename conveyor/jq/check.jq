@@ -148,8 +148,9 @@ def ok: . as $r | (keys - known) == need
         # the owner promoted from a replay result (pickseats()), seats; asked, the judge's pick of the three seats
         # (pickjudge()): {failed: why}, or each seat {model, effort, why, asked: {model, effort} as the judge gave them,
         # clamp: why the pack moved it} or {why, asked, clamp} (no model allowed), model, the judge's, and guard, why
-        # the card kept its seats (at the weekly limit guard); on a trial card, trialEffort, the effort it builds at.
-        and (.pick == null or (.pick | type == "object" and (keys - ["pipeline", "promoted", "seats", "asked", "trialEffort"]) == ["by", "choice", "group", "mode", "trial"] and (.group | type == "string")
+        # the card kept its seats (at the weekly limit guard); on a trial card, trialEffort, the effort it builds at; on a
+        # card that builds on the judge's builder (pickjudge()), judged: true.
+        and (.pick == null or (.pick | type == "object" and (keys - ["pipeline", "promoted", "seats", "asked", "trialEffort", "judged"]) == ["by", "choice", "group", "mode", "trial"] and (.group | type == "string")
           and ((has("asked") | not) or (.asked | type == "object" and (if has("failed") then keys == ["failed"] and (.failed | type == "string")
             else (keys - ["guard"]) == ["builder", "judge", "model", "reviewer"] and (.model | type == "string") and (.guard == null or (.guard | type == "string"))
               and all(.builder, .reviewer, .judge; type == "object"
@@ -159,6 +160,7 @@ def ok: . as $r | (keys - known) == need
           and ((has("trialEffort") | not) or (.trial == true and (.trialEffort | type == "string")))
           and (.pipeline == null or (.trial and (.pipeline | type == "array" and length > 0 and all(type == "string"))))
           and ((has("promoted") | not) or (.promoted == true and .trial == false))
+          and ((has("judged") | not) or (.judged == true and .trial == false and .mode == "on" and .by == "auto"))
           and ((has("seats") | not) or (.trial == false and .mode == "on" and (.seats | type == "object" and length > 0 and all(keys[]; IN("reviewer", "judge"))
             and all(.[]; type == "object" and keys == ["effort", "model"] and all(.[]; type == "string")))))
           and (.choice | type == "object" and keys == ["effort", "model"] and (.model | type == "string") and (.effort == null or (.effort | type == "string")))

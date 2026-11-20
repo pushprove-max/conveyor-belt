@@ -126,7 +126,7 @@
 #           and blocked (Needs you; a blocked card with its track and reviews), landed (today: the newest the snapshot
 #           keeps; today is {landed, usd}, every card of the day counted and its usd added up, null when one has none), each card with doneWhen (its last Done-when check, {items, met,
 #           failed}, or null), split (what the rule Split large issues made of its issue, {result, slices, filed}, or
-#           null), seats (the seats the rule Pick settings gave it, the pick's asked, or null) and stalls (how many times a step of it made no progress and was ended; 0 for none), and open (every open issue, as the snapshot's open: count,
+#           null), seats (the seats the rule Pick settings gave it, the pick's asked with its mode and run, the seats the card runs on that the rule set, or null) and stalls (how many times a step of it made no progress and was ended; 0 for none), and open (every open issue, as the snapshot's open: count,
 #           split {queued, you, labelOrRule, belt}, held, each with its reasons, and issues, every open issue with its
 #           labels and dependsOn, the numbers its Depends on: lines name; null when GitHub did not list them, and
 #           umbrellas, each open parent with its parts, done of all, those in flight and the closed ones),

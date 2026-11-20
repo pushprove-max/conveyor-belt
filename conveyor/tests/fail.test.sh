@@ -290,7 +290,8 @@ t_corrupt() {
       || fail "the quarantine does not name line $1 and $2 for $3: $(cat "$Q" 2>&1)"
   }
   # A bugproof line only says the bug-card check was skipped: one with another result is not a record of it. A pick
-  # marked promoted (pickpromote(), lib/modelpick.sh) is no trial: a line that holds both is not one the engine writes.
+  # marked promoted (pickpromote(), lib/modelpick.sh) is no trial: a line that holds both is not one the engine writes;
+  # nor is a trial marked judged (a card on the judge's builder, pickjudge()), which the Board would credit to the Judge.
   while IFS='|' read -r field bad; do
     printf '%s\n' "$good" "$bad" > "$S"; aside 2 "$field" "$bad"
     out=$(loop cards 2>&1) && [ "$(jq -c '.cards | map(.card)' <<<"$out")" = '["c0-4"]' ] || fail "cards did not answer with the good line after $bad: $out"
@@ -301,6 +302,7 @@ step|${good/picked/future}
 step|${good/picked/landed}
 step|${good/picked/bugproof}
 pick|${good%\}},"pick":{"group":"small docs","choice":{"model":"m","effort":null},"by":"auto","trial":true,"mode":"on","promoted":true}}
+pick|${good%\}},"pick":{"group":"small docs","choice":{"model":"m","effort":null},"by":"auto","trial":true,"mode":"on","judged":true}}
 EOT
   # A reader of a copy (cards, as the snapshot) that meets the line first sets it aside too, and reads its copy without it.
   printf '%s\n' "$good" "${good/picked/future}" > "$S"

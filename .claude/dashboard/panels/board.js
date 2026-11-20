@@ -32,8 +32,8 @@
 // beside it); the host writes the issue's `Depends on: #N` line (POST control depends), and the card says "Now waits
 // on #N." until the next snapshot shows it. A cycle the host refuses is said as "#12 cannot wait on #15: #15 already
 // waits on #12".
-// Every card in Held, Queue, Building, Review and Needs you shows its builder, reviewer and judge, each its own or the
-// project's, and has Settings and Pick for me (seats(), below): a blocked card's are set before its Retry.
+// Every card in Held, Queue, Building, Review and Needs you shows its builder, reviewer and judge, each its own, the
+// Judge's pick or the project's, and has Settings and Pick for me (seats(), below): a blocked card's are set before its Retry.
 // The head says how the open issues split: queued, held by you, held by a label or skipped by a rule, on the belt.
 // Under it, each open parent issue is one row of its parts (parents(), below).
 // Its part (dashboard.sh, board): {repo (null: no record is on the host's main), state, reason (why it picks nothing | null), loop, control, cap, guard,
@@ -70,7 +70,6 @@
   const S = { d: null, ctl: null, at: new Map(), from: 'board', heard: new WeakSet(), raw: null, ctx: null, armed: false, unarm: null, dragging: null, busy: false, keep: null, ctlAt: null, moved: new Map(), floor: null, read: null, turned: false, lanesOpen: {}, lanesShown: {},
     groups: new Map(), filter: { text: '' }, text: null, unlabeled: new Set(), released: new Set(),
     dep: null, depText: '', depSaid: new Map(),
-    seatsOpen: new Set(),  // the cards (repo and card) whose Seats list is open, kept open over a redraw
     seats: null, picks: new Map(),  // the card whose Settings is open ({issue, draft}), and each card's Pick for me ({busy}, {data} or {error})
     dw: new Map(), dwOpen: new Set(),  // a card's Done-when items by card and check stamp ({busy, data, error}), and the cards whose line is open
     partsOpen: new Set() };  // the parents whose row of parts is open
@@ -856,17 +855,60 @@
     return !pe || !e.length ? null : e.includes(pe) ? pe : 'medium';
   }
   const seatText = (x) => `${S.ctx.modelName(x.model)}${x.effort ? ` at ${x.effort}` : ''}`;
+  // Who set a seat the card runs on (seats.run's by, from the snapshot's seatsof()), as its row says it.
+  const SEATBY = { card: 'this card', judge: "Judge's pick", trial: 'trial', promoted: 'promoted' };
+  // One list of the seats the card runs on: a row a seat, its name as a label, the model and effort, and who chose it
+  // (the owner's, "this card", always wins; then the seat the rule set, seats.run: the Judge's pick, a trial or a
+  // promoted seat; else the project's). Under the row, a callout holds the Judge's reason for the seat and what a limit
+  // clamped (seats.builder and the rest: its pick's asked), and, when the card does not run on the Judge's seat, which
+  // one the Judge chose. A failed pick, or the guard, says why the card runs on the project's seats in a callout under
+  // the list. here: the card is of the project shown, so its own and the project's seats are known; a card of another
+  // project shows only the seats the rule set.
+  function seatList(item, here) {
+    const h = S.ctx.h, own = here ? ownSeats(item.issue) : {}, s = item.seats && typeof item.seats === 'object' ? item.seats : null;
+    const run = s && s.run && typeof s.run === 'object' ? s.run : {};
+    const str = (v) => typeof v === 'string' && v ? v : null;
+    const named = (x) => `${S.ctx.modelName(x.model)}${str(x.effort) ? ` · ${x.effort}` : ''}`;
+    const list = h('div', 'board-seats-line');
+    const callout = (by, label, lines) => {
+      const box = h('div', 'why-block board-seat-why');
+      box.dataset.by = by;
+      box.append(h('strong', 'why-label', label));
+      lines.forEach((t) => box.append(h('span', 'why-line', t)));
+      return box;
+    };
+    SEATS.forEach(([k, name]) => {
+      const p = here ? projSeat(k) : null, o = own[k] && typeof own[k].model === 'string' ? own[k] : null;
+      // On a card of the project shown, the owner's seat is the control record's as it is now (own), not the pick's
+      // record of it: a seat the owner cleared since runs on the project's.
+      const q = !o && run[k] && typeof run[k].model === 'string' && SEATBY[run[k].by] && !(here && run[k].by === 'card') ? run[k] : null;
+      const x = o ? { model: o.model, effort: o.effort || ownEffort(k, o.model, p && p.effort) }
+        : q ? { model: q.model, effort: str(q.effort) } : p && p.model ? p : null;
+      const by = o ? 'card' : q ? q.by : null;
+      const row = h('div', o ? 'board-seat is-own' : 'board-seat');
+      row.dataset.seat = k;
+      const line = h('p', 'board-seat-line');
+      line.append(h('span', 'board-seat-name', name),
+        h('span', 'board-seat-model', x ? named(x) : here ? 'not set' : ''),
+        h('span', 'board-seat-by', by ? SEATBY[by] : "project's"));
+      row.append(line);
+      // The Judge's answer for the seat (a clamp with no model: the pack allowed it none, so the project's stands);
+      // the card does not run on it only when it is another model or effort than the row's.
+      const a = s && s[k] && typeof s[k] === 'object' ? s[k] : null, am = a && str(a.model) ? a : null;
+      const other = am && by !== 'judge' && !(x && x.model === am.model && str(x.effort) === str(am.effort));
+      const why = a ? [].concat(other ? [`The Judge chose ${named(am)}; the card does not run on it${s.mode === 'shadow' ? ', as the rule Pick settings is in Shadow' : ''}.`] : [],
+        str(a.why) ? [a.why] : am ? ['no reason given'] : [], str(a.clamp) ? [`Clamped: ${a.clamp}`] : []) : [];
+      if (why.length) row.append(callout('judge', 'Why the Judge chose it', why));
+      list.append(row);
+    });
+    const back = s && typeof s === 'object' ? (typeof s.failed === 'string' ? `The Judge's pick failed: ${s.failed}` : typeof s.guard === 'string' ? s.guard : null) : null;
+    if (back) list.append(callout('code', "Why the card runs on the project's seats", [back]));
+    return list;
+  }
   function seats(el, item) {
     const h = S.ctx.h, n = item.issue, own = ownSeats(n), t = `#${n}`;
     const box = h('div', 'board-seats');
-    const line = h('p', 'board-from board-seats-line');
-    SEATS.forEach(([k, name], i) => {
-      const p = projSeat(k), o = own[k] && typeof own[k].model === 'string' ? own[k] : null;
-      const x = o ? { model: o.model, effort: o.effort || ownEffort(k, o.model, p && p.effort) } : p && p.model ? p : null;
-      const part = h('span', o ? 'board-seat is-own' : 'board-seat', `${i ? '; ' : ''}${name} ${x ? seatText(x) : 'not set'}${o ? ' (this card)' : ''}`);
-      part.dataset.seat = k;
-      line.append(part);
-    });
+    const line = seatList(item, true);
     const open = S.seats && S.seats.issue === n;
     const b = button('Settings', 'btn-quiet', 'seats', `The builder, reviewer and judge of ${t}`, () => {
       // base: the seats as the form opened, so Save sends only a seat changed in the form, not one that changed since
@@ -1027,12 +1069,13 @@
       const r = num(item.reviews);
       el.append(h('p', 'row-meta', item.step === 'closed' ? (splitFiled(item).length ? 'split, not built' : 'already fixed') : `${r === null ? '?' : r} review${r === 1 ? '' : 's'} · ${ctx.money(item.usd)}`));
     }
-    if (col !== 'held' && col !== 'queue') { doneWhen(el, item); stalls(el, item); splitNote(el, item); seatsNote(el, item); }
+    if (col !== 'held' && col !== 'queue') { doneWhen(el, item); stalls(el, item); splitNote(el, item); }
     // A landed card has no step left to run; a main-red fix card has no issue to keep settings by. A card in Needs you
     // has them too, so a blocked card's are set before its Retry; it is still answered in the Needs you panel (issue
     // 407): its settings are no answer. A card of another project is not set from here: its seats are in that project's record.
     const mine = typeof item.repo !== 'string' || !item.repo || item.repo === S.d.repo;
     if (col !== 'landed' && mine && num(item.issue) !== null && item.issue > 0) seats(el, item);
+    else if (col !== 'held' && col !== 'queue') seatsNote(el, item, mine);
     return el;
   }
   // The cards of one batch (batch: the cards that landed together, itself among them) are one landing: its cards are
@@ -1137,33 +1180,14 @@
     if (!s || s.result !== 'split') return;
     el.append(S.ctx.h('p', 'board-from board-split', f.length ? `Split into ${f.map((x) => `#${x}`).join(', ')}` : `Would have split into ${n}`));
   }
-  // The seats the rule Pick settings gave the card (seats: its pick's asked, lib/modelpick.sh pickjudge()): a line that
-  // opens to each seat's model and effort, the Judge's one-line reason for it, and, when a limit of the pack moved it
-  // (models.allowed or the seat's effort range), what was clamped and why; or the reason the Judge's pick failed. A
-  // card the rule did not pick shows nothing.
-  function seatsNote(el, item) {
-    const h = S.ctx.h, s = item.seats;
-    if (!s || typeof s !== 'object') return;
-    if (typeof s.failed === 'string') { el.append(h('p', 'board-from board-seats', `Seats: the project's, as the Judge's pick failed: ${s.failed}`)); return; }
-    const rows = ['builder', 'reviewer', 'judge'].filter((k) => s[k] && typeof s[k] === 'object').map((k) => [k, s[k]]);
-    if (!rows.length) return;
-    const clamped = rows.filter(([, x]) => typeof x.clamp === 'string' && x.clamp).length;
-    const det = h('details', 'board-seats');
-    const sum = h('summary', null, `Seats: the Judge's pick, ${clamped ? `${clamped} clamped by a limit` : 'none clamped'}`);
-    sum.dataset.act = 'seats';
-    const ul = h('ul', 'board-seats-list');
-    rows.forEach(([k, x]) => {
-      const li = h('li', null, `${k[0].toUpperCase()}${k.slice(1)}: ${typeof x.model === 'string' ? `${x.model} at ${typeof x.effort === 'string' ? x.effort : 'no effort'}` : "the project's"}${typeof x.why === 'string' && x.why ? `. ${x.why}` : ''}`);
-      li.dataset.seat = k;
-      if (typeof x.clamp === 'string' && x.clamp) li.append(h('span', 'board-seats-clamp', ` Clamped: ${x.clamp}`));
-      ul.append(li);
-    });
-    if (typeof s.guard === 'string' && s.guard) ul.append(h('li', null, `Not used: ${s.guard}`));
-    det.append(sum, ul);
-    const key = `${item.repo || ''} ${item.card || item.issue}`;
-    det.open = S.seatsOpen.has(key);
-    det.addEventListener('toggle', () => { if (det.open) S.seatsOpen.add(key); else S.seatsOpen.delete(key); });
-    el.append(det);
+  // A card with no Settings (a landed one, or one of another project) that the rule Pick settings picked (seats, from
+  // pickjudge(), lib/modelpick.sh) shows the same list of its seats (seatList(), above), with no buttons. A card the
+  // rule did not pick shows nothing.
+  function seatsNote(el, item, here) {
+    if (!item.seats || typeof item.seats !== 'object') return;
+    const box = S.ctx.h('div', 'board-seats');
+    box.append(seatList(item, here));
+    el.append(box);
   }
   // ---- every column filtered by priority, area and label, and sorted, the choice kept in the address ----
   // A card's priority and labels are its own, else its open issue's (open.issues). A card whose issue is closed
