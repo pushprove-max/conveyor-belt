@@ -2367,12 +2367,14 @@ mainred() { # <card> <case> <its file> <main's commit> [<the landing that broke 
   # The case's file: a runner names its cases' failures as its own, so the test files at main's commit that define the
   # case (`t_<case>()`, `<case>()` or the name quoted), the named file alone when it is one of them; else the named
   # file (a failure naming no case, or one no test file defines).
-  # The test files are those at that commit (testtracked(), lib/issues.sh), taken as paths, not globs.
+  # The test files are those at that commit: its *.test.* files, by git's own glob, so a list of test files that fails
+  # or is empty still searches them (#1066: the runner's case was not found in its case file), and those
+  # testtracked() (lib/issues.sh) lists, the pack's tests.patterns, taken as paths, not globs.
   fs=()
   if [ -n "$k" ]; then
     re=$(sed 's/[][\\.*^$+?(){}|/]/\\&/g' <<<"$k")
-    mapfile -d '' -t tf < <(testtracked -z . "$4" 2>/dev/null)
-    [ ${#tf[@]} = 0 ] || mapfile -t fs < <(git --literal-pathspecs grep -lE -e "(^|[^[:alnum:]_])(t_)?${re}\\(\\)|['\"]${re}['\"]" "$4" -- "${tf[@]}" 2>/dev/null | sed "s/^$4://")
+    tf=(); mapfile -d '' -t tf < <(testtracked -z . "$4" 2>/dev/null)
+    mapfile -t fs < <(git grep -lE -e "(^|[^[:alnum:]_])(t_)?${re}\\(\\)|['\"]${re}['\"]" "$4" -- '*.test.*' "${tf[@]/#/:(literal)}" 2>/dev/null | sed "s/^$4://")
     for f in "${fs[@]}"; do [ "$f" != "$3" ] || { fs=("$3"); break; }; done
   fi
   [ ${#fs[@]} -gt 0 ] || [ -z "$3" ] || fs=("$3")

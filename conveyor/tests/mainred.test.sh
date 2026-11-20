@@ -227,6 +227,9 @@ t_mainredpartial() {
   land cc 3 lib/c.sh two; h=$(git -C "$r" rev-parse HEAD)
   got=$( cd "$r" && eval "$(sed -n '/^mainred() {/,/^}/p; /^brokeby() {/,/^}/p; /^landingof() {/,/^}/p; /^TESTLINK_DEPTH=/p' "$SRC/lib/testrun.sh")"
     stdb() { cat "$w/cards.jsonl"; }
+    # Issue 1066: the list of the commit's test files fails here. Bug it catches: mainred() then searched no file for
+    # the case, took r.test.sh as the case's file, and named no landing.
+    testtracked() { return 1; }
     export MAINRED=$w/mainred.json
     mainred c9 "r.test.sh: one" r.test.sh "$h" && echo ok ) || fail "mainred failed: $got"
   [ "$(jq -c '.reds[0].cases[0] | [.landing, .links]' "$w/mainred.json")" = "[{\"sha\":\"$a\",\"card\":\"ca\",\"issue\":2},{\"lib/a.sh\":[\"tests/b.test.sh\"]}]" ] \
