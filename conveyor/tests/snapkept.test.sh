@@ -270,7 +270,9 @@ t_snapkeptnow() {
   # with no Approve and the status named it an ordinary block: the readers' list of those waiting was the old one.
   # Bug (#1123): c6, picked since, is on no belt of the kept snapshot, and Needs you showed it untitled: its title is
   # the one its picked line gives (c5 is on no belt and its picked line is older than the snapshot: null).
-  jq -e --arg now "$now" '.recordsNewer == true and .recordsNow == {building: 2, waitingCount: 1, blocked: [
+  # Bug (#1107): the loop's count left out c2, landed since and on the belt until it pushes, so the status said fewer
+  # cards on the belt than it held: landed counts it.
+  jq -e --arg now "$now" '.recordsNewer == true and .recordsNow == {building: 2, waitingCount: 1, landed: 1, blocked: [
       {card: "c5", issue: 5, name: null, title: null, reason: "old block", since: "2026-11-17T10:08:00Z"},
       {card: "c3", issue: 0, name: "Main is red (abcdef012345)", title: "red", reason: "the session made no change", since: $now}],
       waiting: [{card: "c6", issue: 6, name: null, title: "six", reason: "visible to customers or staff: needs Dana'"'"'s yes: a new button", since: $now, sentence: "a new button"}]}' <<<"$out" > /dev/null \

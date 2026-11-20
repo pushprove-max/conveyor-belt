@@ -265,8 +265,10 @@ unreported() {
 
 # --status [<project>] (`conveyor.sh foreman status`): each record's state now as short plain text, read from one
 # snapshot, with no wake put and nothing marked reported: the belt (its count, "as of <snapshotAt>, the belt has
-# changed since" when the card records changed after the snapshot was made, and while the loop runs its cards
-# building against the cap, loop.json's count now while the snapshot is behind (recordsNow, commands/snapshot.sh), and those waiting on another card, which that count leaves out; then a card a line: issue, or a main-red fix card's name, step, time in step, title cut to 60 characters), the
+# changed since" when the card records changed after the snapshot was made, or, while the loop runs then, the count
+# now (loop.json's cards and the landed cards not yet pushed, recordsNow) with "the snapshot, as of <snapshotAt>, is behind the card records", and while the loop runs its cards
+# building against the cap, loop.json's count now while the snapshot is behind (recordsNow, commands/snapshot.sh), and those waiting on another card, which that count leaves out; then, when the
+# snapshot names the engine stopped and ps no longer shows it stopped, "the engine (pid <n>) runs" or "has ended"; then a card a line: issue, or a main-red fix card's name, step, time in step, title cut to 60 characters), the
 # cards waiting on other issues and the held issues as issue numbers, the whole-suite run under way (else the last one
 # that ended), then every problem a wake names (the blocked cards as NOWBLOCKED gives them), the push failing at once, the suite that ended left out (its line is
 # above), and a release-prep started again by its landed fixes (it needs no one), each "needs you: <text>", then each card unreported names, "not yet reported: blocked #N". A record that gives no snapshot is one line, "<repo>: no snapshot (<why>)", the why
@@ -276,8 +278,15 @@ unreported() {
 # the poll log: "watcher: last poll ended <time>, took <n> s (<outcomes>)", or "watcher: no poll logged yet". Last, the Foreman's
 # waiter: "waiter: listening", "waiter: starting again" or "waiter: down: <why>" (lib.sh waiter_state).
 STATUS=$SUITE$REF'def num: if type == "number" then "#\(.)" else tostring end;
-  "\($repo): \(.belt | if type == "array" then length else 0 end) on the belt"
-    + (if .recordsNewer == true then " (as of \(.snapshotAt // "an unknown time"), the belt has changed since)" else "" end)
+  (.belt | if type == "array" then length else 0 end) as $n
+  # While the snapshot is behind the card records and the loop runs, the count on the belt is the one of now: loop.json'"'"'s
+  # cards building and waiting, and the landed cards still on the belt for their push (recordsNow), and the line says
+  # the snapshot the card lines below come from is behind (#1107: "0 on the belt" while 5 built).
+  | ([.recordsNow | objects | select(.building | numbers) | .building + (.waitingCount // 0) + (.landed | numbers // 0)][0]) as $live
+  | (if .recordsNewer == true and $live != null then
+      "\($repo): \($live) on the belt now, from loop.json and the card records (the snapshot, as of \(.snapshotAt // "an unknown time"), is behind the card records: it lists \($n))"
+    else "\($repo): \($n) on the belt"
+      + (if .recordsNewer == true then " (as of \(.snapshotAt // "an unknown time"), the belt has changed since)" else "" end) end)
     # While the snapshot is behind the card records, the loop'"'"'s count is the one loop.json gives now (recordsNow).
     + (((if (.recordsNow | type) == "object" then .recordsNow | {building, waitingCount} else (.health | objects) // {} end) as $b
       | .health | objects | select(($b.building | type) == "number" and (.builderCap | type) == "number")
@@ -317,6 +326,19 @@ recheck() {
   printf '%s\n' "$3"
 }
 
+# engstate <pid>: the state of that process now, as ps shows it on the host the snapshot comes from (over the host
+# file's ssh target, as ask runs there), with no spaces; empty when no such process runs (ps exits 1 and says
+# nothing); nonzero when the state does not read (ssh or ps failed).
+engstate() {
+  local target out rc
+  target=$(host_ssh)
+  if [ -n "$target" ]; then
+    out=$(timeout -k 2 "${ASK_LIMIT:-45}" ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "LC_ALL=C ps -o stat= -p $1" < /dev/null 2>/dev/null); rc=$?
+  else out=$(LC_ALL=C ps -o stat= -p "$1" 2>/dev/null); rc=$?; fi
+  out=${out//[[:space:]]/}
+  if [ "$rc" = 0 ] && [ -n "$out" ]; then echo "$out"; elif [ "$rc" = 1 ] && [ -z "$out" ]; then echo; else return 1; fi
+}
+
 if [ "${1:-}" = --status ]; then
   now=${CONVEYOR_FOREMAN_NOW:-$(date +%s)} n=0
   errf=$(mktemp) || exit 1; trap 'rm -f "$errf"' EXIT
@@ -338,7 +360,24 @@ if [ "${1:-}" = --status ]; then
       echo "$repo: the last snapshot, made $age (a new one failed: $why):"
     else keepsnap "$repo" "$rec"; fi
     rec=$(recheck "$repo" "$main" "$rec")
+    # The engine the snapshot names stopped (health engineStopped), read again now as ps shows it on the machine the
+    # snapshot came from (#1107): a snapshot made before a SIGCONT, minutes old, still names it stopped. One that runs
+    # or has ended is no longer a stopped engine, and a card it held is no longer held by it (one whose own process is
+    # stopped stays, as that stop; one with an overdue test, a wait or a retry stays as that). A state that does not
+    # read changes nothing.
+    eng=''
+    if IFS=$'\t' read -r ep es < <(jq -r '.health.engineStopped | objects | select(.pid | numbers) | [.pid, .since // "an unknown time"] | @tsv' <<<"$rec" 2>/dev/null) \
+      && [[ $ep =~ ^[0-9]+$ ]] && st=$(engstate "$ep") && [[ $st != T* ]] \
+      && r2=$(jq -c '.health.stuck |= map(if .stopped.of? == "engine" then
+          ((.stopped.own | objects | select(.pid | numbers) | {pid, since, pids, of: "card"}) // null) as $o
+          | if $o then .stopped = $o elif (.cases | type) == "array" or (.waitedOn | type) == "array" or .did != null then del(.stopped) else empty end
+        else . end)
+        | .health.engineStopped = null' <<<"$rec" 2>/dev/null); then
+      eng="$repo: the engine (pid $ep) $([ -n "$st" ] && echo "runs (state $st now)" || echo "has ended"); the snapshot had it stopped since $es"
+      rec=$r2
+    fi
     jq -r --arg repo "$repo" --argjson now "$now" "$STATUS" <<<"$rec" 2>/dev/null || echo "$repo: the snapshot's belt does not read"
+    [ -z "$eng" ] || echo "$eng"
     if probs=$(jq -r --argjson push -1 --argjson now "$now" --argjson poll "$POLL" --argjson await '[]' --argjson hist '[null]' --slurpfile kinds "$KINDS" "$NOWBLOCKED$PROBLEMS" <<<"$rec" 2>/dev/null); then
       awk -F'\t' '$1 != "" && $2 != "suite ended" && $2 != "release started again" { print "needs you: " $4 }' <<<"$probs"
       awk -v r="$repo" '$0 != "" { print r "\t" $0 }' <<<"$probs" | unreported "$now" | cut -d' ' -f2-

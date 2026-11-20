@@ -121,7 +121,10 @@ snapprint() {
 # closing line (landed, closed, blocked or pushed) since then is blocked; of those, a card stopped for the owner's yes
 # (its reason starts with YES or LINTYES, yesforms() with the pack's owner.name: block(), lib/card.sh) is in waiting
 # instead, as views.sh splits health's, with its sentence: the reason after that start; building and waitingCount,
-# the running loop's count at its last turn (loop.json, run()), null when no process of that loop lives. Nothing is
+# the running loop's count at its last turn (loop.json, run()), null when no process of that loop lives; landed, the
+# count of landed cards on the belt for their push, which no loop count holds: those the kept snapshot's belt has
+# landed with no closing line since, and, unless the rule "Push when a card lands" is off, each card whose last
+# closing line since is landed (a card pushed since leaves it, though the belt keeps it until its issue closes). Nothing is
 # printed when the pack names no owner. A line of the second the build began is read again (the snapshot may hold
 # it): a card is listed once.
 # Only the lines since are read whole: a line's first "time" field is its own (line(), lib/records.sh).
@@ -149,7 +152,9 @@ recordsnow() { # <snapshotAt>
           + [$ends[] | select(.step == "blocked") | {card, issue, name: $names[.card], title: $titles[.card], reason, since: .time}]) as $all
       | def yes: (.reason | type) == "string" and (.reason | startswith($yes) or startswith($lintyes));
         {blocked: [$all[] | select(yes | not)], waiting: [$all[] | select(yes) | . + {sentence: (.reason | if startswith($lintyes) then ltrimstr($lintyes) else ltrimstr($yes) end)}],
-         building: $loop.building, waitingCount: $loop.waiting}'
+         building: $loop.building, waitingCount: $loop.waiting,
+         landed: ([$s.belt | arrays | .[] | objects | select(.landed == true and (.card | type) == "string" and $have[.card] != null and $ended[.card] == null) | .card]
+           + (if ($s.control | objects | .rules.push?) == false then [] else [$ends[] | select(.step == "landed") | .card] end) | unique | length)}'
 }
 if [ -z "$fresh" ] && [ -s "$KEPT" ]; then
   if snapdue; then

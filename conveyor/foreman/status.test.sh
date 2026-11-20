@@ -321,14 +321,24 @@ grep -qxF 'alpha: #5 is blocked since 2026-11-15T11:00:00Z: tests failed twice' 
 # Issue 1039: each command names every stopped process of its tree (health's pids), as one to the engine or the card
 # alone left the builder and its timeout wrapper stopped.
 # shellcheck disable=SC2016 # the backquotes are the wake's own text, not an expansion
-t_stopped() {
-CASE=stopped; fixture stopped
+# The engine's process state as ps shows it now (the status reads it again, #1107): `ps -o stat= -p 4242` prints
+# <state>, or, with none, nothing and exit 1 as ps does for no such process; any other ps call is the real one.
+psstub() { # <state>
+  local real; real=$(command -v ps) && mkdir -p "$T/bin" || return
+  if [ -n "$1" ]; then printf '#!/usr/bin/env bash\n[ "$*" = "-o stat= -p 4242" ] && { echo %q; exit 0; }\nexec %q "$@"\n' "$1" "$real" > "$T/bin/ps"
+  else printf '#!/usr/bin/env bash\n[ "$*" = "-o stat= -p 4242" ] && exit 1\nexec %q "$@"\n' "$real" > "$T/bin/ps"; fi
+  chmod +x "$T/bin/ps"; export PATH=$T/bin:$PATH
+}
+stopsnap() {
 snap '.health.engineStopped = {pid: 4242, since: "2026-11-15T11:40:00Z", pids: [4242, 4250]}
   | .needsYou.stopped = {title: "The engine is stopped", reason: "Run kill -CONT 4242 4250 to resume them.", since: "2026-11-15T11:40:00Z", pid: 4242, pids: [4242, 4250]}
   | .health.stuck = [{card: "c5", issue: 5, step: "build", since: "2026-11-15T11:30:00Z", stopped: {pid: 4242, of: "engine", since: "2026-11-15T11:40:00Z"}},
   {card: "c8", issue: 8, step: "build", since: "2026-11-15T11:30:00Z", stopped: {pid: 4242, of: "engine", since: "2026-11-15T11:40:00Z", own: {pid: 4444, since: "2026-11-15T11:45:00Z", pids: [4444, 4450, 4451]}}},
   {card: "c6", issue: 6, step: "review", since: "2026-11-15T11:00:00Z", stopped: {pid: 4343, of: "card", since: "2026-11-15T11:31:00Z", pids: [4343, 4350]}},
   {card: "c7", issue: 7, step: "build", since: "2026-11-15T11:32:00Z"}]'
+}
+t_stopped() {
+CASE=stopped; fixture stopped; stopsnap; psstub T
 out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the status failed: $out"
 own='; #8'"'"'s own process is stopped too since 2026-11-15T11:45:00Z: `kill -CONT 4444 4450 4451` resumes it'
 for l in "needs you: the engine is stopped (state T) since 2026-11-15T11:40:00Z: \`kill -CONT 4242 4250\` resumes it (it holds #5, #8)$own" \
@@ -348,7 +358,53 @@ grep -qxF "alpha: the engine is stopped (state T) since 2026-11-15T11:40:00Z: \`
 ! grep -qF 'The engine is stopped' <<<"$out$w" || fail "the stopped engine is named twice, once from the Board's Needs you: $out $w"
 }
 
-cases=(status wake suite suitedead mainred prmerge building slowlive slowdown nosnapanew nosnapquiet nosnaplast healthwake polllog unreported stopped)
+# Bug (#1107): the status took the engine's state from the snapshot alone, so after `kill -CONT` it still said "the
+# engine is stopped (state T)" while the engine (state S) picked cards. The same snapshot as above, the engine now in
+# state S: the status says it runs, names it stopped nowhere, and no longer counts #5 held by it; #8's own process,
+# stopped too, is still named, as resuming the engine left it stopped, and so is #9's overdue test (bug: the entry
+# of a held card with no own stop was dropped whole, its overdue test with it).
+# shellcheck disable=SC2016 # the backquotes are the status's own text, not an expansion
+t_resumed() {
+CASE=resumed; fixture resumed; stopsnap; psstub S
+jq '.health.stuck += [{card: "c9", issue: 9, step: "test", since: "2026-11-15T11:20:00Z", cases: ["stall"], stopped: {pid: 4242, of: "engine", since: "2026-11-15T11:40:00Z"}}]' \
+  "$T/snap" > "$T/snap.new" && mv "$T/snap.new" "$T/snap" || fail "the snapshot could not be set"
+out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the status failed: $out"
+grep -qxF 'alpha: the engine (pid 4242) runs (state S now); the snapshot had it stopped since 2026-11-15T11:40:00Z' <<<"$out" \
+  || fail "the status does not say the resumed engine runs: $out"
+grep -qF 'engine is stopped' <<<"$out" && fail "the status names the resumed engine stopped: $out"
+grep -qF '#5' <<<"$out" && fail "the status still names #5, held only by the resumed engine: $out"
+grep -qxF 'needs you: #8: its process is stopped (state T) since 2026-11-15T11:45:00Z: `kill -CONT 4444 4450 4451` resumes it' <<<"$out" \
+  || fail "the status drops #8, whose own process is still stopped: $out"
+grep -qxF 'needs you: #9 is stuck: its test step has had stall running since 2026-11-15T11:20:00Z' <<<"$out" \
+  || fail "the status drops #9's overdue test with the engine's stop: $out"
+# An engine ps no longer lists has ended: not stopped either.
+psstub ''
+out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the status failed: $out"
+grep -qxF 'alpha: the engine (pid 4242) has ended; the snapshot had it stopped since 2026-11-15T11:40:00Z' <<<"$out" \
+  && ! grep -qF 'engine is stopped' <<<"$out" || fail "the status does not say the engine has ended: $out"
+}
+
+# Bug (#1107 review): with a host file that names an ssh target, the snapshot is the host's, but ps ran on this
+# machine, where the host's engine pid is no process: the status said the engine had ended while it stayed stopped.
+# Here ps on this machine says S and the host (an ssh stub) says T: the status reads the host and keeps the stop.
+# shellcheck disable=SC2016 # the stub's own text, not an expansion
+t_resumedhost() {
+CASE=resumedhost; fixture resumedhost; stopsnap; psstub S
+jq '.ssh = "devhost"' "$XDG_CONFIG_HOME/conveyor/host.json" > "$T/host.new" && mv "$T/host.new" "$XDG_CONFIG_HOME/conveyor/host.json" || fail "the host file could not be set"
+# stub: ssh to the host, answering its ps of the engine's pid; this machine has no host to reach
+printf '#!/usr/bin/env bash\n[ "$1 ${*: -1}" = "-o LC_ALL=C ps -o stat= -p 4242" ] && { echo T; exit 0; }\nexit 255\n' > "$T/bin/ssh" && chmod +x "$T/bin/ssh"
+out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the status failed: $out"
+grep -qF 'needs you: the engine is stopped (state T) since 2026-11-15T11:40:00Z' <<<"$out" \
+  && ! grep -qF 'the engine (pid 4242)' <<<"$out" || fail "the status did not read the engine's state on the host: $out"
+# The host now has it running: the status says so.
+# stub: the same host, its engine resumed
+printf '#!/usr/bin/env bash\n[ "$1 ${*: -1}" = "-o LC_ALL=C ps -o stat= -p 4242" ] && { echo S; exit 0; }\nexit 255\n' > "$T/bin/ssh"
+out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the status failed: $out"
+grep -qxF 'alpha: the engine (pid 4242) runs (state S now); the snapshot had it stopped since 2026-11-15T11:40:00Z' <<<"$out" \
+  || fail "the status does not say the host's engine runs: $out"
+}
+
+cases=(status wake suite suitedead mainred prmerge building slowlive slowdown nosnapanew nosnapquiet nosnaplast healthwake polllog unreported stopped resumed resumedhost)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

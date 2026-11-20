@@ -196,6 +196,9 @@ waiter_state() {
 # claim the role. A command run on this machine still inherits the Foreman session's own environment, mark included.
 # CONVEYOR_FOREMAN_ASK, when set, runs in its place with CONVEYOR_REPO, CONVEYOR_MAIN and CONVEYOR_CMD (the command
 # and its arguments, space-separated) set (the tests' seam).
+host_ssh() { # the host file's ssh target, empty when it names none (or one that is not a plain host name)
+  jq -er '.ssh | select(type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._@-]*$"))' "$HOSTF" 2>/dev/null || :
+}
 ask() {
   local cmd target fm=
   [ "$3" != testissue ] || fm='CONVEYOR_FOREMAN=1 '
@@ -206,7 +209,7 @@ ask() {
   printf -v cmd 'cd %q && if jq -e ".plugin == null" .conveyor/project.json >/dev/null 2>&1; then e=$PWD/conveyor/conveyor.sh; else p=$(if jq -e .plugin.follow .conveyor/project.json >/dev/null 2>&1; then jq -er %q .git/conveyor-engine.json; else jq -er %q .conveyor/project.json; fi) && e=${XDG_DATA_HOME:-$HOME/.local/share}/conveyor/versions/$p/conveyor/conveyor.sh; fi && %sCONVEYOR_MAIN=%q bash "$e"' \
     "$2" '.commit | select(type == "string" and test("^[0-9a-f]{40}$"))' '.plugin.commit | select(type == "string" and test("^[0-9a-f]{40}$"))' "$fm" "$2"
   printf -v cmd '%s%s' "$cmd" "$(printf ' %q' "${@:3}")"
-  target=$(jq -er '.ssh | select(type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._@-]*$"))' "$HOSTF" 2>/dev/null) || target=''
+  target=$(host_ssh)
   if [ -n "$target" ]; then
     timeout -k 2 "${ASK_LIMIT:-45}" ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "$cmd" < /dev/null
   else timeout -k 2 "${ASK_LIMIT:-45}" bash -c "$cmd" < /dev/null; fi

@@ -56,17 +56,20 @@ check 'the status of a snapshot made before the last change to the card records 
 # "building 0" and named no blocked card while cards built and blocked. Here the snapshot (building 3, #4 blocked, #5
 # waiting for the yes) is older than a blocked line of #7 and one of #8 that stops for the yes, and #4 was retried
 # since: what the card records and loop.json say now (recordsNow, commands/snapshot.sh) names #7 blocked, keeps #5
-# waiting, drops #4 and counts 6. Bug: #8 was named an ordinary block, as the status took the cards waiting for the
+# waiting, drops #4 and counts 5. Bug: #8 was named an ordinary block, as the status took the cards waiting for the
 # yes from the old snapshot's list, which has no entry for a stop made since.
+# Bug (#1107): the status said "0 on the belt", the old snapshot's empty belt, while loop.json said building: 5. The
+# belt's count is the one of now, loop.json's 5 and one card landed since and on the belt for its push (recordsNow's
+# landed: bug, the count left it out), and the line says the snapshot is behind the card records.
 blocked() {
   snap true '{health: {builderCap: 8, building: 3, waitingCount: 0,
       blocked: [{card: "c4", issue: 4, reason: "the session made no change", since: "2026-11-20T13:00:00Z"}],
       waiting: [{card: "c5", issue: 5, reason: "needs a yes", since: "2026-11-20T13:30:00Z"}]},
-    recordsNow: {building: 6, waitingCount: 0, blocked: [{card: "c7", issue: 7, name: null, reason: "the session made no change", since: "2026-11-20T14:05:00Z"}],
+    recordsNow: {building: 5, waitingCount: 0, landed: 1, blocked: [{card: "c7", issue: 7, name: null, reason: "the session made no change", since: "2026-11-20T14:05:00Z"}],
       waiting: [{card: "c5", issue: 5, name: null, reason: "needs a yes", since: "2026-11-20T13:30:00Z"},
         {card: "c8", issue: 8, name: null, reason: "needs a yes too", since: "2026-11-20T14:06:00Z"}]}}'
   wake=; out=$(statusof blocked)
-  grep -qxF 'alpha: 0 on the belt (as of 2026-11-20T14:00:00Z, the belt has changed since); building 6 of the cap 8' <<<"$out" \
+  grep -qxF 'alpha: 6 on the belt now, from loop.json and the card records (the snapshot, as of 2026-11-20T14:00:00Z, is behind the card records: it lists 0); building 5 of the cap 8' <<<"$out" \
     && grep -qxF 'needs you: #7 is blocked since 2026-11-20T14:05:00Z: the session made no change' <<<"$out" \
     && grep -qxF "needs you: #5 needs the owner's yes since 2026-11-20T13:30:00Z: needs a yes" <<<"$out" \
     && grep -qxF "needs you: #8 needs the owner's yes since 2026-11-20T14:06:00Z: needs a yes too" <<<"$out" \
