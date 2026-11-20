@@ -2,10 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
 # Engine cases: the speed-up check (speedproof()) and the Optimize check (optproof()) of a card filed from the Tests
-# page: a change that keeps its file must make it faster than its median on record (for a stabilise or merge verdict,
-# no slower), and the files of a split, summed, may take that median plus a start-up allowance for each file it adds.
-# A change that deletes the file, or merges it into another, is not timed: a delete's review is asked for the tests
-# that cover its cases.
+# page. The file is held to the median of the recent runs its issue lists, else to its median on record (recentcpu());
+# when the issue's verdict is merge, a change that keeps the file adds to that figure the median on record of each
+# test file the change removes (a change with no verdict adds none). A change that keeps
+# its file must make it faster than that figure (for a stabilise or merge verdict, no slower), and the files of a
+# split, summed, may take that figure plus a start-up allowance for each file it adds. A change that deletes the file,
+# or merges it into another, is not timed: a delete's review is asked for the tests that cover its cases.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
