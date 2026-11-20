@@ -1047,8 +1047,8 @@ snapshot() (
   # is gone (killed with no end written) is shown stopped, and soloKey is the key of the builder seat in force now
   # (swe_solokey()), not the one board.json kept from its last write.
   # versions is the list now (swe_versionsnow(): a source on this machine is read from its local refs on each snapshot,
-  # with no network call; a source named by URL is read again only when the hour changes), with no run needed: before
-  # the first run, the part holds the versions alone.
+  # with no network call; a source named by URL is read again only when the source or the hour changes), with no run
+  # needed: before the first run, the part holds the versions alone.
   echo null > "$d/bench"
   bv=$(. "$HERE/bench/swe.sh" && swe_versionsnow 2>/dev/null) && [ -n "$bv" ] || bv=null
   if [ -s "$ST/bench/swe/board.json" ]; then
