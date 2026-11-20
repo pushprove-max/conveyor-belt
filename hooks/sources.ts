@@ -64,7 +64,8 @@ export type Need = Card & Times & { yes: boolean; text: string; since: number | 
 const STATES = ['done', 'now', 'skipped', 'failed', 'todo'] as const
 export const STEP_NAMES = ['Build', 'Review', 'Fix', 'Test', 'Land', 'Push'] as const
 // replyFix: on Build, the fix the Done-when check on the build's reply started (track.jq): 'now' while it runs, 'done' after.
-// lintFix: on Build, the review gate's lint fix after the build, the same; on Fix, 'now' while the landing gate's lint fix runs.
+// lintFix: on Build, the review gate's lint fix after the build, the same; on Fix, 'now' while the landing gate's lint fix
+// runs, or the review gate's after a review or test fix round; on Land, 'now' while the review gate's lint fix after a rebuild runs.
 export type Step = { name: string; state: (typeof STATES)[number]; sec: number | null; n: number | null; of: number | null; followups: number | null; replyFix: 'now' | 'done' | null; lintFix: 'now' | 'done' | null }
 export type Track = { steps: Step[]; at: number | null; label: string; since: number | null; reason: string | null; kept: string | null; files: { run: number; of: number | null; over: number | null; now: { file: string; at: number | null } | null } | null; tests: { done: number; of: number; failed: number } | null; list: { mode: 'changed'; files: number } | { mode: 'whole' } | null; grown: { before: number; after: number } | null }
 // reading is false while no token of the card has been read: its dollars are then "no reading yet", never $0; atEnd: in
