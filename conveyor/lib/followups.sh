@@ -207,7 +207,7 @@ unfile() { # <parent issue> <review file> <follow-up issue>...
   done
 }
 followups() { # <card> <issue json> <review file>
-  local f mark where out num n nums=() more=() found=() pipe cost own='' free res pm g masked depth
+  local f mark where out num n nums=() more=() found=() pipe cost own='' free res pm g masked depth kind clean
   depth=$(fudepth "$2") && [[ $depth =~ ^[0-9]+$ ]] || { echo "cannot read the parent issue's follow-up depth"; return 1; }
   packget pipelineFiles pipe || { echo "cannot read the pack's pipeline files"; return 1; }
   packget privacy.mode pm || { echo "cannot read the pack's privacy mode"; return 1; }
@@ -238,11 +238,19 @@ followups() { # <card> <issue json> <review file>
       || [ "$(jq --arg f "$f" 'any(.[]; . as $w | $f | ascii_downcase | contains($w | ascii_downcase))' <<<"$res" 2>/dev/null)" != false ] \
       || free=$(ownonly "$f" "${3%.review}")
     cost=${cost:+$'\nCost to every card: not assessed'}
-    out=$(gh_write issue create --title "${g:0:200}" --label "$FOLLOWUP" --label "$TYPE" ${mark:+--label "$mark"} "${more[@]}" \
+    # A finding the reviewer marks [cleanup] (REVIEWT: its fix changes no behaviour, as a comment, dead code or a
+    # redundant check) is filed without the pack's type label, so its card skips the bug-card check (card.sh): no test
+    # can fail on main for it. Its body says so, and its review judges that the change keeps behaviour. A finding with
+    # no such mark is a bug, as before. Bug: such a follow-up was built as a bug and blocked for having no failing test.
+    kind=$TYPE clean=''
+    if grep -qiE '^(\[[^]]*\][[:space:]]*)*\[cleanup\]' <<<"$f"; then
+      kind='' clean=$'\nCleanup: the finding changes no behaviour, so no test has to fail on main for it. The change must keep what the code does: the review judges that it does.'
+    fi
+    out=$(gh_write issue create --title "${g:0:200}" --label "$FOLLOWUP" ${kind:+--label "$kind"} ${mark:+--label "$mark"} "${more[@]}" \
       --body "Follow-up to #$n (Conveyor card $1). The last review of that card said NO-GO. The card landed without a fix for the finding below. Fix it in this issue.
 
 Finding: $g
-Where: ${where:-the finding names no file:line}$cost$masked
+Where: ${where:-the finding names no file:line}$clean$cost$masked
 Follow-up depth: $((depth + 1))" 2>&1) && num=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1) && num=${num##*/} && [ -n "$num" ] \
       || { unfile "$n" "$3" "${nums[@]}"; echo "follow-up not filed, so nothing landed (finding: ${f:0:200}): ${out:0:400}"; return 1; }
     nums+=("$num")

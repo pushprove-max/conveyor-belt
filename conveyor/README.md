@@ -548,9 +548,9 @@ Maven, dotnet, swift, PHPUnit, mix, CTest and Dart or Flutter). When
 it has no runner for a file to run, the card stops at its test step under Needs you, and the reason names
 `test.fileCommand` and the file. A bug card with a test file and a fix stops earlier,
 at Build: its bug-card check cannot run, and the card is blocked with that reason (Bug cards: the new tests fail
-without the fix). A bug card whose change is only test files, or test files and only comments in other `.js`, `.mjs`,
-`.cjs`, `.ts`, `.mts` or `.cts` files, has no check to run and stops at its test step. A comment change with no test
-file in the change, or in any other file, such as a `.sh` or `.py` file, is a fix, and that card stops at Build. A card with no test file to run passes its
+without the fix). A bug card whose change is only test files, or only comments in other `.js`, `.mjs`, `.cjs`, `.ts`,
+`.mts` or `.cts` files with or without test files, has no check to run, and with a test file it stops at its test
+step. A comment change in any other file, such as a `.sh` or `.py` file, is a fix, and that card stops at Build. A card with no test file to run passes its
 test step. [Which tests a card
 runs](../docs/configuration.md#which-tests-a-card-runs) says which files are on the list.
 The list is the test files the card's change adds or changes (`"by": "own"`; a shared helper is none). Of a test file
@@ -1001,7 +1001,7 @@ checked by the cases that main fails, not by its tests (the **main** verdict, ab
 alone (every path it changes is a test file, as in a fix to a test that main made wrong) is not checked either: it has
 no fix to take out, so its tests would run on the same code and pass, and the card would be blocked though correct.
 Its result says the change is test-only, and the review judges whether each changed test still checks what it was
-written to check. A change to test files and to product files that changes only comments in those product files is
+written to check. A change that changes only comments in its product files, with or without test files, is
 not checked either, as a comment changes no behaviour and no test of it can fail without the fix. Only
 `.js`, `.mjs`, `.cjs`, `.ts`, `.mts` and `.cts` product files can be so: the `//` and `/* */` comments are found
 in the whole file. Text in a string, code that a change puts between `/*` and `*/`, and a `/* */` comment that parts

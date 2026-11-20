@@ -44,7 +44,7 @@
   const open = (x) => !x.dismissed && typeof x.built !== 'number';
   // Each pattern is made once, not once a row or a reference.
   const FIRST_RE = /^.*?[.!?](?=\s|$)/;
-  const HEAD_RE = /^(\[P([0-9])\])(\s+)((?:\[[A-Za-z]+[0-9]+\]\s+)*)(\S+?:[0-9]+(?:[–-][0-9]+)?)(\s+)([\s\S]*)$/;
+  const HEAD_RE = /^(\[P([0-9])\])(\s+|(?=\[))((?:\[(?:[A-Za-z]+[0-9]+|cleanup)\]\s*)*)(\S+?:[0-9]+(?:[–-][0-9]+)?)(\s+)([\s\S]*)$/;
   const CLAIM_RE = /^\S[\s\S]*?(?:[.!?](?=\s|$)|$)\s*/;
   const FREF_RE = /\bF([0-9]+)\b/g; // matchAll works on a copy, so its lastIndex is never shared
   const SPECIAL_RE = /[.*+?^${}()|[\]\\]/g;
@@ -64,7 +64,8 @@
     const text = typeof x.finding === 'string' && x.finding ? x.finding : 'no finding';
     const box = h('div', 'title declined-finding');
     const fill = (el, s) => T.fill(el, s, x.repoUrl, known, 'declined');
-    // A review's id for the finding ("[E1]", "[F2]"), when it has one, stands between the level and the file.
+    // A review's id for the finding ("[E1]", "[F2]") and the "[cleanup]" mark (prompts.sh REVIEWT), when it has them,
+    // stand between the level and the file.
     const m = HEAD_RE.exec(text);
     if (!m) { fill(box, text); return box; }
     const head = h('div', 'declined-head');
@@ -114,7 +115,7 @@
     by.forEach((es) => es.sort((a, b) => b.t - a.t));
     const ats = new Map();
     const at = (place) => {
-      if (!ats.has(place)) ats.set(place, new RegExp(`^\\[P[0-9]\\]\\s+${place.replace(SPECIAL_RE, '\\$&')}\\b(?![-–])`));
+      if (!ats.has(place)) ats.set(place, new RegExp(`^\\[P[0-9]\\](?:\\s*\\[cleanup\\])?\\s+${place.replace(SPECIAL_RE, '\\$&')}\\b(?![-–])`));
       return ats.get(place);
     };
     return { by, at };

@@ -62,7 +62,8 @@ test('Needs you: a blocked card leads with why it failed in one sentence and its
 test('Needs you: a review block shows its unresolved finding, and a long reason shows 12 lines and Show all', () => {
   const w = boot({ list: ['needs'] });
   const d = full(), b = d.panels.needs.data.cards.blocked, since = b[0].since;
-  b[0].reason = 'the fix for [P1] [E1] conveyor/lib/card.sh:52 The loop never stops. Proof: it spins on `x` did not hold after 1 round';
+  // Bug: a finding with the cleanup mark after its level and review id lost its linked place.
+  b[0].reason = 'the fix for [P1] [E1][cleanup] conveyor/lib/card.sh:52 The loop never stops. Proof: it spins on `x` did not hold after 1 round';
   b.push({ repo: 'sample', card: 'c5-16', issue: 16, title: 'T16', url: `${P}/16`, since, reason: Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join('\n') });
   deliver(w, d);
   const f = blockedRow(w).querySelector(':scope > .why-block .output-finding');

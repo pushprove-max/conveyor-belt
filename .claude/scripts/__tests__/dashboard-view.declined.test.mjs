@@ -106,7 +106,8 @@ test('Declined: a reason links a file:line on a main-red fix card, finds the ful
   data.panels.declined.data.rest = [line({ id: 'd00000000000f', time: iso(T0 - 9 * 86400000), card: 'c1-380', issue: 380, url: `${P}/380`,
     finding: '[P2] conveyor/lib/claim.sh:99 shows a ready card waiting. Proof: none', round: 1, findings: null }),
     old('d000000000011', '[P1] conveyor/lib/rules.sh:20 a default leaves the rule unset. Proof: none'),
-    old('d000000000012', '[P1] conveyor/lib/rules.sh:20 a click changes its row. Proof: none'),
+    // Bug: a finding with the cleanup mark after its level was not found as one that starts at its file:line.
+    old('d000000000012', '[P1][cleanup] conveyor/lib/rules.sh:20 a click changes its row. Proof: none'),
     // Declined after the reason below was written (#409), so it cannot be the finding the reason names.
     line({ id: 'd000000000013', time: iso(T0 - 30000), card: 'c1-260', issue: 260, url: `${P}/260`,
       finding: '[P1] conveyor/lib/rules.sh:20 a later finding. Proof: none', round: 1, findings: null })];
@@ -121,7 +122,7 @@ test('Declined: a reason links a file:line on a main-red fix card, finds the ful
   assert.equal(red.href, `${REPO}/blob/HEAD/conveyor/lib/snapshot.sh#L525`, "a main-red fix card's reason links to its repository");
   const both = rowOf(w, '[P1] conveyor/lib/rules.sh:80 one switch resets its row').querySelector('.reason a.why-at');
   assert.equal(both.title, '2 findings start at conveyor/lib/rules.sh:20: Declined on #250: [P1] conveyor/lib/rules.sh:20 a default leaves the rule unset.'
-    + ' Declined on #250: [P1] conveyor/lib/rules.sh:20 a click changes its row.', 'hover names every finding at that line declined before the reason, not one picked of them, and none declined after it');
+    + ' Declined on #250: [P1][cleanup] conveyor/lib/rules.sh:20 a click changes its row.', 'hover names every finding at that line declined before the reason, not one picked of them, and none declined after it');
 });
 
 // Bug (#412): a finding was one long bold paragraph with its backticks shown raw, and in it and in its reason code and
@@ -131,13 +132,16 @@ const LONG = '[P2] src/services/fold-cutover-preflight.ts:338 The hash check acc
 const LONG_WHY = 'The proof runs with `componentInnerBoxes: 2`, and the manifest range at shared/taxonomy/verification-pipeline-capture-fields.ts:239 (`[1, 0, 1, \'integer\']`) says no.';
 // A finding the review gave an id ("[E1]") between its level and its file, as the fix reviews do.
 const TAGGED = '[P2] [E1] conveyor/lib/snapshot.sh:716 The snapshot drops a line. Proof: Run it twice.';
+// A finding the reviewer marked as changing no behaviour, the mark right after its level (prompts.sh REVIEWT).
+const CLEAN = '[P3][cleanup] lib/a.sh:1 The second check is redundant. Proof: line 2 makes it.';
 // One case, so one Board render: cases share no state, as the runner (dashboard-view.helpers.mjs) gives each case to
 // whichever of its workers is free, and these checks only read the rows.
 test('Declined: a finding and its reason draw a level badge, a file link, a bold claim, a Proof label, and code and paths as code', () => {
   const w = boot();
   const data = full();
   data.panels.declined.data.lines = [line({ finding: LONG, why: LONG_WHY, by: 'owner', round: null, findings: null }),
-    line({ id: 'd00000000000b', finding: TAGGED, why: 'not worth it', by: 'owner', round: null, findings: null })];
+    line({ id: 'd00000000000b', finding: TAGGED, why: 'not worth it', by: 'owner', round: null, findings: null }),
+    line({ id: 'd00000000000c', finding: CLEAN, why: 'not worth it', by: 'owner', round: null, findings: null })];
   // Bug #437: the panel kept its own copy of this formatting, so a review's output and a blocked card's reason drew the
   // same kind of text another way. It draws through the Board's shared helper (app.js findingText), and draws as before.
   const used = new Set();
@@ -184,6 +188,13 @@ test('Declined: a finding and its reason draw a level badge, a file link, a bold
   assert.equal(t.querySelector('strong.declined-claim').textContent, 'The snapshot drops a line. ');
   assert.equal(t.querySelector('.declined-proof-label').textContent, 'Proof: ');
   assert.equal(t.textContent, TAGGED, 'the text is the finding as written');
+  // Bug: a finding with the reviewer's no-behaviour mark ("[P3][cleanup] <file>:<line>") was drawn as plain prose.
+  const c = rowOf(w, CLEAN).querySelector('.declined-finding');
+  assert.equal(c.querySelector('.declined-level').dataset.level, 'P3', 'the cleanup mark after the level: the badge is kept');
+  assert.equal(c.querySelector('.declined-ids').textContent, '[cleanup] ');
+  assert.equal(c.querySelector('.declined-head a.declined-at').href, `${REPO}/blob/HEAD/lib/a.sh#L1`);
+  assert.equal(c.querySelector('strong.declined-claim').textContent, 'The second check is redundant. ');
+  assert.equal(c.textContent, CLEAN, 'the text is the finding as written');
 });
 
 // Audit UX14. Bug: a line left the panel 7 days after its time with no word before, and said "More than 7 days old"

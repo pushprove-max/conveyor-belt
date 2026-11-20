@@ -543,7 +543,7 @@ const nth = (n: number) => `${n}${[11, 12, 13].includes(n % 100) ? 'th' : ['th',
 // stale snapshot when ..."); its short title says what it fixes: the file's name and the finding's first words ("Board:
 // Board shows a stale snapshot"). A title that is not a finding is kept, and cut at the width where it is shown.
 export const shortTitle = (title: string): string => {
-  const m = /^(?:\[P[0-3]\]\s+)?(\S+?\.[A-Za-z0-9]+):\d+(?:-\d+)?\s+(.+)$/.exec(title)
+  const m = /^(?:\[P[0-3]\](?:\s*\[cleanup\])?\s+)?(\S+?\.[A-Za-z0-9]+):\d+(?:-\d+)?\s+(.+)$/.exec(title)
   if (!m) return title
   const base = (m[1].split('/').pop() ?? m[1]).replace(/\.[^.]+$/, '').replace(/[-_.]+/g, ' ').trim()
   const first = m[2].split(/[.;:,]\s|\s[—–-]\s|\.$/)[0].replace(/^(the|a|an)\s+/i, '').trim()

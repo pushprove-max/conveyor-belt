@@ -1035,8 +1035,9 @@ runnernote() { # <paths>
 # repair the runner). A run that cannot be made (no worktree, or the files do not apply) fails
 # nothing, as a build session cannot repair it (but for a change with no test file, which fails as before): the result says so. A change to test files alone (a test fix for a
 # red main) is not run and fails nothing: with no fix to take out, its tests run on the same code and pass. The result
-# says it is test-only, and the review judges its tests. So is a change to test files and to product files whose part in
-# them is comments only (commentsonly()): no test of a comment can fail without it. The result says it is comments only.
+# says it is test-only, and the review judges its tests. So is a change to product files whose part in them is comments
+# only (commentsonly()), with or without test files: no test of a comment can fail without it. The result says it is
+# comments only, and the review judges it.
 # A change that selects no test of its own (the test map and the links give it no test file: testsel() narrow, on
 # main's code with the whole change staged) is proved by the test
 # files the issue's `## Done when` section names that are test files of that commit (testpaths()): each named in the
@@ -1268,16 +1269,17 @@ uncomment() {
       print line }
     END { if (m != "code") exit 2 }'
 }
-# Whether the staged change of <worktree> (bugproof()) changes test files (testpaths()) and product files, and each
-# product file is a JavaScript file (.js .mjs .cjs .ts .mts .cts) that changes only in its comments: its text before
-# and after, its comments taken out (uncomment()), is the same. A file of any other kind, or one whose mode or link
+# Whether the staged change of <worktree> (bugproof()) changes product files (files testpaths() does not take as test
+# files), with or without test files, and each product file is a JavaScript file (.js .mjs .cjs .ts .mts .cts) that
+# changes only in its comments: its text before and after, its comments taken out (uncomment()), is the same. A file of any other kind, or one whose mode or link
 # changes, is not comments only: in a shell or Python file a # in a heredoc or a string cannot be told from a comment
 # by its line, a CSS comment can part two tokens of a value or selector, and an HTML comment is a node of the page. Fails when the diff or pack cannot be read.
 commentsonly() { # <worktree>
-  local ps=() ts=() f r om nm ob nb a b
-  mapfile -d '' -t ps < <(git -C "$1" diff --cached --name-only --no-renames -z HEAD -- 2>/dev/null | testpaths -vz)
-  mapfile -d '' -t ts < <(git -C "$1" diff --cached --name-only --no-renames -z HEAD -- 2>/dev/null | testpaths -z)
-  [ ${#ps[@]} != 0 ] && [ ${#ts[@]} != 0 ] || return 1
+  local ps=() f r om nm ob nb a b
+  # A diff or pack that cannot be read adds an empty path, which is no JavaScript file, so the change is not comments
+  # only: a list cut short by the failure could else hold only the JavaScript files of a change with others.
+  mapfile -d '' -t ps < <(set -o pipefail; git -C "$1" diff --cached --name-only --no-renames -z HEAD -- 2>/dev/null | testpaths -vz || printf '\0')
+  [ ${#ps[@]} != 0 ] || return 1
   for f in "${ps[@]}"; do
     case ${f,,} in
       *.js|*.mjs|*.cjs|*.ts|*.mts|*.cts) ;;
@@ -1313,11 +1315,12 @@ bugproof() { # <card> <worktree> <issue json>
       echo 'Judge whether each test it changes still checks what it was written to check.'; } > "$2.unfixed"
     return 0
   fi
-  # A change to test files and to product files whose part in them is comments only (commentsonly()) has no fix to take
-  # out either: a comment changes no behaviour, so no test of it can fail on main's code. It is not run; the review is told.
+  # A change to product files whose part in them is comments only (commentsonly()), with or without test files, has no
+  # fix to take out either: a comment changes no behaviour, so no test of it can fail on main's code. It is not run; the
+  # review is told. Bug: a comment fix with no test file was blocked, as no test could fail without it (#872).
   if commentsonly "$2"; then
-    { echo 'The change is comments only in its product files: every line it changes in them is a comment or blank, so it has no fix to take out, and its tests were not run on main'"'"'s code.'
-      echo 'Judge whether each changed comment says what the code does, and whether each test it changes checks what the code does.'; } > "$2.unfixed"
+    { echo 'The change is comments only in its product files: every line it changes in them is a comment or blank, so it has no fix to take out, and no test of it was run on main'"'"'s code.'
+      echo 'Judge whether each changed comment says what the code does, and whether each test it changes, if any, checks what the code does.'; } > "$2.unfixed"
     return 0
   fi
   mapfile -d '' -t tf < <(git -C "$2" diff --cached --name-only --no-renames --diff-filter=AM -z HEAD -- 2>/dev/null | testpaths -z)

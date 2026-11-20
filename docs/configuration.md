@@ -182,9 +182,9 @@ and a `*_test.dart` file with `flutter test` or `dart test`. For a `.c`, `.cc`, 
 CTest test with the same name as the file, in the `build/` folder of the CMake project. That folder must already
 contain the build. If Conveyor has no
 runner for a test file of a card, the card stops at its test step, and Needs you shows the reason. A bug card with a test file and a fix stops earlier, at its Build step, because its check cannot run that
-file on main's code. A bug card whose change is only test files, or test files and only comments in other `.js`,
-`.mjs`, `.cjs`, `.ts`, `.mts` or `.cts` files, has no check to run, and it stops at its test step. A comment change
-with no test file in the change, or in any other file, such as a `.sh` or `.py` file, is a fix, and that card stops at Build. The reason names the setting. If the pack has no `test.fileCommand` and Conveyor has no runner for one of the
+file on main's code. A bug card whose change is only test files, or only comments in other `.js`, `.mjs`, `.cjs`,
+`.ts`, `.mts` or `.cts` files with or without test files, has no check to run, and with a test file it stops at its
+test step. A comment change in any other file, such as a `.sh` or `.py` file, is a fix, and that card stops at Build. The reason names the setting. If the pack has no `test.fileCommand` and Conveyor has no runner for one of the
 project's test files, `conveyor.sh doctor` shows a `warning:` line that names that file.
 
 A card runs the test files that its change adds or changes, as `tests.patterns` finds them. A shared helper or a test

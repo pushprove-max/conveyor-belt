@@ -387,6 +387,8 @@ test('a follow-up shows its short title and its parent; a title no short one can
   expect(shortTitle('[P2] .claude/dashboard/panels/metrics.js:53 The Host row omits recorded memory usage and CPU frequency, leaving these')).toBe('Metrics: Host row omits recorded memory usage')
   expect(shortTitle('[P1] conveyor/conveyor.sh:1479 A reviewer exiting 124 without readable usage writes no spent entry')).toBe('Conveyor: Reviewer exiting 124 without readable usage')
   expect(shortTitle('src/web/upload-form.tsx:12-14 the button is grey')).toBe('Upload form: Button is grey')
+  // Bug: a cleanup follow-up's title ("[P3][cleanup] <file>:<line> ...", followups.sh) was kept raw.
+  expect(shortTitle('[P3][cleanup] conveyor/lib/card.sh:52 the second check is redundant')).toBe('Card: Second check is redundant')
   expect(shortTitle('Fast lane lands through Conveyor')).toBe('Fast lane lands through Conveyor')
   const raw = '[P2] .claude/dashboard/panels/metrics.js:53 The Host row omits recorded memory usage'
   const line = beltCard({ title: raw, parent: 3874, track: track('>.....', 'building') })[0]

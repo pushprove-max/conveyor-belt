@@ -91,6 +91,16 @@ a follow-up. Follow-ups go two levels deep. A card whose issue is at depth 2 fil
 go to the Declined list, and the reason names the cap. A follow-up that changes one of the pack's `pipelineFiles` is filed held.
 It builds only once you release it.
 
+A finding whose fix changes no behaviour, such as a comment, dead code or a redundant check, has the mark `[cleanup]`
+after its level, as `[P3][cleanup] file:line what`. Its follow-up is a cleanup, not a bug: it does not get the pack's
+type label (`labels.type`), and its body has a `Cleanup:` line. Its card skips the build check of a bug card, so no
+test must fail on main for it, and its review checks that the change keeps what the code does. A finding with no
+such mark is filed as a bug.
+
+The build check of a bug card does not block a change that changes only comments in its `.js`, `.mjs`, `.cjs`, `.ts`,
+`.mts` or `.cts` product files, with or without a test file. Its result says the change is comments only, and the
+review judges each changed comment.
+
 When the pack's `privacy.mode` is public, a follow-up's finding is filed with each part the privacy check flags
 replaced by a mark such as `<home path>`, and the issue says the text was masked. A last finding that the privacy check
 flags in a line the card itself adds gets one more fix round instead of a follow-up.

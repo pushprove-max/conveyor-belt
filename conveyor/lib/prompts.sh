@@ -301,6 +301,9 @@ Proof: <proof>`. The levels:
 - P2: a real defect with a limited effect.
 - P3: a real but minor defect with no wrong result that users or the next card meet (for example a misleading
   name or message, a small inconsistency, or dead code the change left).
+A finding whose fix changes no behaviour (a comment, dead code, a redundant check) has the mark `[cleanup]` after
+its level and any other mark, as `[P3][cleanup] file:line what. Proof: <proof>`: its follow-up is a cleanup, with no
+test that must fail. When the issue has a line that starts `Cleanup:`, a change to what the code does is a finding.
 The proof ends the line: the input or command that fails, or the exact line (code, test, comment
 or doc) that is untrue after the change. A problem you cannot prove that way is one line `UNPROVEN: what`: it never
 holds the verdict.<real proof> After each finding, look for the same mistake elsewhere in the staged change. One

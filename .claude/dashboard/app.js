@@ -311,8 +311,9 @@
   }
   const findingText = { sentences, pathsIn, repoOf, fileUrl, lineUrl, barePaths, linkTo, codeEl, fill, proofAt };
 
-  // A review finding: "[P1] path:line The sentence. Proof: why", its place and proof each optional.
-  const FINDING = /^\[(P[0-3])\]\s*(.*)$/;
+  // A review finding: "[P1] path:line The sentence. Proof: why", its place and proof each optional. A "[cleanup]" mark
+  // after the level (a fix that changes no behaviour, prompts.sh REVIEWT) is not drawn.
+  const FINDING = /^\[(P[0-3])\]\s*(?:\[cleanup\]\s*)?(.*)$/;
   // A review's findings as rows, in their order: the priority chip (P0 and P1 warn, P2 and P3 quiet) and the sentence
   // in bold on one line, the place (path:line) under it as a link to that line, and the part after "Proof:" folded
   // under a closed "Proof:" toggle. Code spans and file paths in the sentence and proof are drawn as fill draws them,
@@ -1073,7 +1074,7 @@
     if (!m) return null;
     const rows = h('ol', 'output-findings');
     m[1].split(/\n(?=\[P[0-3]\])/).slice(0, brief ? 1 : Infinity).forEach((t) => {
-      const f = /^\[(P[0-3])\]\s*(?:\[E\d+\]\s*)?(?:(\S+:\d+(?:[-–]\d+)?)[:,]?\s+(?=\S))?([\s\S]*)$/.exec(t.trim());
+      const f = /^\[(P[0-3])\]\s*(?:\[(?:E\d+|cleanup)\]\s*)*(?:(\S+:\d+(?:[-–]\d+)?)[:,]?\s+(?=\S))?([\s\S]*)$/.exec(t.trim());
       if (!f) return;
       const { at: cut, label } = proofAt(f[3]), claim = (cut < 0 ? f[3] : f[3].slice(0, cut)).trim(), proof = cut < 0 ? '' : f[3].slice(cut + label.length).trim();
       const row = h('li', 'output-finding'), head = h('div', 'finding-head'), said = h('p', 'finding-text');
