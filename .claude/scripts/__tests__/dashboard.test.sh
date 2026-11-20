@@ -28,6 +28,7 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 export XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}
 PY=$XDG_DATA_HOME/conveyor/board-venv/bin/python3
 "$PY" -c 'import pyotp, segno, cryptography' || fail "the Board's virtualenv $PY lacks its packages: run conveyor.sh setup"
+REALPY=$(command -v python3) # the python3 a collect runs, for the stub setup writes
 
 # The parts below run side by side ( fresh <part>; ... ) &, so the file takes its slowest part's time, not their sum.
 # fresh <part> -- the part's own folder ($T, under $TOP), checkout, host file, stubs and dashboard folder, set up as
@@ -60,6 +61,11 @@ g commit -q --allow-empty -m "feat: base commit"
 PPL=$T/ledgers/sample/decisions.jsonl WSL=$T/ledgers/widget\\shop/decisions.jsonl
 mkdir -p "${PPL%/*}" "${WSL%/*}"; : > "$PPL"
 stub() { printf '#!/usr/bin/env bash\n%s\n' "$2" > "$BIN/$1"; chmod +x "$BIN/$1"; }
+# The usage limit and accounts read (dashboard_limit.py, three Python starts a collect, some 40% of its CPU) fails
+# at once here, so the limit part is "could not be built" and every other python3 call runs the real one. A part that
+# checks the limit, the accounts or the session cost calls limit_read first, and its collects read them for real.
+stub python3 'case "${1-}" in */dashboard_limit.py) exit 1 ;; esac; exec '"$(printf %q "$REALPY")"' "$@"'
+limit_read() { rm -f "$BIN/python3"; }
 
 # Conveyor's host: two records on one machine, reached over ssh. The ssh stub records its arguments and answers
 # with $T/ssh-out, $T/ssh-err and the exit code in $T/ssh-rc, so no test opens a connection. The host's accounts
@@ -125,7 +131,7 @@ q() { json | jq -e "$1" >/dev/null || fail "$2 (jq: $1; data: $(json | jq -c '.p
 PARTS=()
 started() { PARTS+=("$1:$!"); } # <part>, after its ( ... ) &
 
-( fresh contract
+( fresh contract; limit_read
 # --- the data contract: one part per panel of the page, under the panel's id ---
 quiet
 run
@@ -1170,6 +1176,7 @@ run
 q '.panels.belt.data.cards | map(.url) == [null, null]' "a record whose origin is not a GitHub address gives no issue link"
 
 # --- the host did not answer, or answered with something else: no card is shown, and the reason is ---
+limit_read # this machine's session costs below are the limit read's
 quiet; echo 255 > "$T/ssh-rc"; echo 'ssh: connect to host devbox port 22: Connection timed out' > "$T/ssh-err"; : > "$T/ssh-out"
 run
 q '.panels.health.data.host | .name == "devbox" and .reachable == false and (.error | test("devbox did not answer: ssh: connect to host devbox"))' "ssh that does not get through is an unreachable host, with ssh's own reason"
