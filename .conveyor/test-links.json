@@ -396,5 +396,8 @@
   ],
   "conveyor/tests/swebench.test.sh": [
     "conveyor/tests/swebencharms.test.sh"
+  ],
+  "conveyor/tests/metrics.test.sh": [
+    "conveyor/tests/metricsstop.test.sh"
   ]
 }
