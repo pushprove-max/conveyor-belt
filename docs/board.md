@@ -592,7 +592,7 @@ issue number, as a link, and the issue title.
   findings". A lint fix before a review after a rebuild shows on the Land step: "Land · lint fix"
   ([Lint](configuration.md#lint)).
 - Each lint check shows in the card's steps as **lint**, with each command's result and its seconds under it. A
-  command whose tool is missing reads `skipped: missing <tool>`. When the change changed the config of a command that
+  command whose tool is missing reads `skipped: missing <tool>`. When the change changed a trigger of a command that
   ran, the line ends with `tools ran as installed`. A command that was skipped or had no files to check does not add
   this note.
 - A card in its Test step shows how many tests have run, "142 of 205 tests", and " · 2 failed" when any failed. A test
