@@ -232,6 +232,8 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
         elif $k == "farDeps" then ["farDeps\($id)", "dependency unreadable", $n, "\($n) waits on \(.ref // "") in another repository, which cannot be read: \(.reason // "")" | one]
         elif $k == "engines" then ["engines\($id)", "engine update not taken", "", "the plugin commit \(.commit // "") was not taken: \(.reason // "")" | one]
         elif $k == "testRules" then ["testRules\($id)", "test issues held", "", "the test rules matched \(.matched) files, over the cap of \(.cap) a day, so they filed none" | one]
+        elif $k == "prices" then (.models | arrays | map(tostring)) as $m | ["prices:\($m | join(","))", "models with no price", "",
+          "\($m | length) models the belt runs or offers have no price: \($m | join(", ")); add them on the Board, Rules, Model prices" | one]
         elif $k == "tests" then ["tests:\(.issue)", "tests failing on main", $n,
           "the whole test fails on main (\(if $n == "" then "no issue filed" else $n end)): \(.cases | if type == "array" then map(tostring) | join(", ") else "no case named" end)" | one]
         else ["\($k)\(if $id == "" then ":" + (tojson | one) else $id end)", $k, $n, "\($k): \($n) \(.title // .reason // tojson)" | one] end),

@@ -1783,7 +1783,8 @@
   // (the built-in rows), aliases (the built-in aliases: {alias: model}), overrides (the pack's entries: prices, name, provider, aliases), names (each model's own
   // display name) and seen (each model ID this project's steps ran in 30 days, with the model it is priced as). Prices
   // are $ per million tokens. Top to bottom: a search box (an ID, name or alias: the rows that do not match hide as it
-  // is typed) and Add model; Seen but not priced (an ID no model and no alias prices: This is… adds it as an alias of
+  // is typed) and Add model; Seen but not priced (an ID the steps ran that no model and no alias prices; one only the
+  // research lane's sessions ran (lane) is not listed, as the belt never runs it: This is… adds it as an alias of
   // the model picked, the likely one picked first; Add as new model fills the Add model form); In use by this project
   // (a model a role or the research lane runs, or its steps ran, each with its marks); Claude, OpenAI and Other, by
   // family, newest first, the older versions folded; then OpenCode (its models on the build machine, by provider/model,
@@ -1901,14 +1902,15 @@
     });
     const inUse = (m) => roles.has(m) || sessions.has(m);
     // Seen but not priced: an ID of the steps that no model and no alias prices (an OpenCode one keeps OpenCode's cost).
-    const unpriced = seen.filter((x) => x.as === null && !aliasTo.has(x.model) && !isModel(x.model) && !x.model.startsWith('opencode:'));
+    // One only the research lane's sessions ran (lane) is not: the belt never runs it.
+    const unpriced = seen.filter((x) => x.lane !== true && x.as === null && !aliasTo.has(x.model) && !isModel(x.model) && !x.model.startsWith('opencode:'));
     // Offered or run with no price: a model a role runs, or one the models.allowed in force offers a role (the pack's
     // list when it sets one, with the host's Codex models added to its codex list when that list has a model in it, else the built-in models with the
     // host's Codex models in place of the built-in Codex ones, and none of them when the host has no Codex,
     // modelsallowed() in conveyor/lib/control.sh), that no
     // model and no alias prices and no step has run yet (those are Seen but not priced). OpenCode's keep the cost OpenCode reports. A one-word name (sol, opus) is a family or an alias, no
-    // model ID: the CLI runs a model of its own choice, so the name has no price to add. Conveyor files one issue to
-    // add each (noprice()).
+    // model ID: the CLI runs a model of its own choice, so the name has no price to add. Needs you counts these and
+    // the Seen but not priced ones (noprice()).
     const offered = new Set(roles.keys());
     ROLES.forEach((k) => {
       const s = ms[k];
@@ -1917,7 +1919,7 @@
         if (c !== 'opencode') list(o).forEach((m) => { if (typeof m === 'string' && m) offered.add(m); });
       });
     });
-    const ran = new Set(seen.map((x) => x.model));
+    const ran = new Set(seen.filter((x) => x.lane !== true).map((x) => x.model));
     const noPrice = [...offered].filter((m) => !m.startsWith('opencode:') && !/^[a-z]{2,}$/.test(m) && !isModel(canon(m)) && !aliasTo.has(m) && !ran.has(m)).sort();
     const known = models.filter((m) => providerOf(m, over[m]) !== 'opencode').sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
     const norm = (s) => s.toLowerCase().replace(/\./g, '-');

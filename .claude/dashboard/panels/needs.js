@@ -32,6 +32,8 @@
 // a hook the project runs) is listed with that commit and why, until a later commit is taken.
 // A project whose test rules matched more test files in one run than one day's cap (testRules: the burst guard) filed
 // none of them: one line says how many and the cap, until a later run of the rules files or stops below it.
+// A project whose loop runs or offers models with no price (prices) has one line that counts them and links to the
+// list of them in the Rules tab's Model prices, where adding each price clears it.
 // A landed card whose push fails and is tried again by the loop (retrying: each with the fix card building for it, if
 // any) needs nothing of the owner: with nothing else here, the line under the tick says so, so a red "Failing" in
 // Health is never beside a bare "Nothing needs you".
@@ -84,11 +86,12 @@ const shotsOf = (c) => (c.shots && typeof c.shots === 'object' && typeof c.patch
 const testsOf = (d) => (Array.isArray(d.tests) ? d.tests : []);
 const enginesOf = (d) => (Array.isArray(d.engines) ? d.engines : []);
 const testRulesOf = (d) => (Array.isArray(d.testRules) ? d.testRules : []);
+const pricesOf = (d) => (Array.isArray(d.prices) ? d.prices.filter((x) => x && Array.isArray(x.models) && x.models.length) : []);
 // The kinds of Needs you, in order (kinds: .claude/scripts/dashboard_needs.json, the list the Foreman watcher reads too), each
 // a group here. A kind with a row of its own below reads its own part; any other (one added to the list later) shows
 // its entries (entries[kind]), so no kind is on the list and missing here.
 const kindsOf = (d) => (Array.isArray(d.kinds) ? d.kinds.filter((k) => k && typeof k.kind === 'string' && typeof k.title === 'string') : []);
-const OWN = { tests: testsOf, engines: enginesOf, testRules: testRulesOf, before: beforeOf, pipeline: pipelineOf, farDeps: farDepsOf,
+const OWN = { tests: testsOf, engines: enginesOf, testRules: testRulesOf, prices: pricesOf, before: beforeOf, pipeline: pipelineOf, farDeps: farDepsOf,
   waiting: (d) => (d.cards ? d.cards.waiting : []), blocked: (d) => (d.cards ? d.cards.blocked : []) };
 const itemsOf = (d) => Object.fromEntries([...kindsOf(d).map(({ kind }) => [kind, Object.hasOwn(OWN, kind) ? OWN[kind](d)
   : (d.entries && Array.isArray(d.entries[kind]) ? d.entries[kind].filter((x) => x && typeof x === 'object') : [])]), ['decisions', d.decisions || []]]);
@@ -138,7 +141,7 @@ window.DASH_APP.panel({
     // The blocked cards whose <details> (.block-more) the owner left open: a row whose key changes (its card retried,
     // or the change of its branch now on main) is drawn anew, and opens it again (blockedRow).
     const opened = new Set(Array.from(el.querySelectorAll('li[data-card]'), (li) => (li.querySelector(':scope > details.block-more[open]') ? li.dataset.card : null)).filter(Boolean));
-    const keyOf = { tests:(x) => `tests:${x.repo}`, engines: (x) => `engine:${x.repo}@${x.commit}`, testRules: (x) => `testrules:${x.repo}@${x.time}`, before: (x) => `before:${x.repo}#${x.issue}`, pipeline: (x) => `pipeline:${x.repo}#${x.issue}`, farDeps: (x) => `fardep:${x.repo}#${x.issue}:${x.ref}`, waiting: (c) => `waiting:${c.card}`, blocked: (c) => `blocked:${c.card}${isRetried(c) ? ':retried' : ''}${c.onMain === true ? ':on-main' : ''}`, decisions: (x) => `decision:${x.repo}:${x.id}@${x.askedAt}` };
+    const keyOf = { tests:(x) => `tests:${x.repo}`, engines: (x) => `engine:${x.repo}@${x.commit}`, testRules: (x) => `testrules:${x.repo}@${x.time}`, prices: (x) => `prices:${x.repo}:${x.models.join(',')}`,before: (x) => `before:${x.repo}#${x.issue}`, pipeline: (x) => `pipeline:${x.repo}#${x.issue}`, farDeps: (x) => `fardep:${x.repo}#${x.issue}:${x.ref}`, waiting: (c) => `waiting:${c.card}`, blocked: (c) => `blocked:${c.card}${isRetried(c) ? ':retried' : ''}${c.onMain === true ? ':on-main' : ''}`, decisions: (x) => `decision:${x.repo}:${x.id}@${x.askedAt}` };
     const items = itemsOf(d);
     // An entry of a kind with no row of its own (entryRow) is drawn once for its key, so the key holds its title and
     // reason: an entry whose text changes under the same since (the counts of a Pick settings decision) is drawn anew.
@@ -376,6 +379,23 @@ window.DASH_APP.panel({
       li.append(head, h('p', 'hint', 'See them with conveyor.sh testrules preview. Then change the rules, or raise perDay with conveyor.sh testrules guard perDay.'), meta);
       return li;
     };
+    // The models a project runs or offers with no price: one line, the count, and a link to the list in Model prices.
+    const pricesRow = (x) => {
+      const li = h('li', 'row');
+      const head = h('div', 'row-main');
+      const n = x.models.length;
+      head.append(h('span', 'title', `${n} ${n === 1 ? 'model has' : 'models have'} no price, so the Board cannot show what ${n === 1 ? 'it costs' : 'they cost'}.`));
+      const a = h('a', 'needs-prices-link', 'View in Model prices');
+      // The Rules tab shows one project (?repo=): the link names this row's, and the click picks it in the head's
+      // picker (ctx.pickRepo, as Projects' "open its Board" does), which draws every panel again, so the Rules tab drawn
+      // before for another project shows this one's list.
+      a.href = ctx.panelHref('rules-prices').replace('#', `&repo=${encodeURIComponent(x.repo)}#`); a.dataset.act = 'prices-see'; a.title = x.models.join(', ');
+      a.addEventListener('click', (e) => { if (e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return; e.preventDefault(); ctx.pickRepo(x.repo); ctx.goTo('rules-prices'); });
+      const meta = h('p', 'row-meta');
+      meta.append(ctx.tag(x.repo));
+      li.append(head, h('p', 'hint', 'Add each price there.'), a, meta);
+      return li;
+    };
     // An issue whose section names a change, waiting for the yes before it is built: the section as written.
     const beforeRow = (x) => {
       const li = h('li', 'row');
@@ -596,7 +616,7 @@ window.DASH_APP.panel({
       li.append(meta);
       return li;
     };
-    const make = { tests: testsRow, engines: engineRow, testRules: testRuleRow, before: beforeRow, pipeline: pipelineRow, farDeps: farDepRow, waiting: cardRow('waiting'), blocked: cardRow('blocked'), decisions: decisionRow };
+    const make = { tests: testsRow, engines: engineRow, testRules: testRuleRow, prices: pricesRow, before: beforeRow, pipeline: pipelineRow, farDeps: farDepRow, waiting: cardRow('waiting'), blocked: cardRow('blocked'), decisions: decisionRow };
     for (const key of Object.keys(items)) if (!Object.hasOwn(make, key)) make[key] = entryRow;
     for (const key of Object.keys(items)) {
       const g = el.querySelector(`[data-group="${key}"]`), warn = g.querySelector('.warn-note');

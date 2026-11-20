@@ -203,6 +203,9 @@ cursor goes to the heading of that group.
   screenshots, so a project without them shows none.
 - **Queue and Close.** Each entry under "Pipeline changes held for you" has a **Queue** button, which releases
   the issue (`conveyor.sh control release`), and a **Close** button.
+- **Models with no price.** One line for each project counts the models that the belt runs or offers with no price.
+  **View in Model prices** shows only that project on the Board and opens its list on the Rules tab, where you add
+  each price ([Models](configuration.md#models)).
 
 ## Health and Lanes
 
@@ -317,14 +320,13 @@ read and cache write. Each release updates the built-in prices. With no cache wr
 costs 1.25 times the input price. A 1-hour cache write costs twice the input price.
 
 - **Search** finds a model by its ID, its display name or one of its other IDs.
-- **Seen but not priced** lists each model ID that this project's sessions used in the last 30 days and that no
+- **Seen but not priced** lists each model ID that this project's card sessions used in the last 30 days and that no
   model or alias prices, with its session count. **This is…** marks the ID as a known model: pick the model (the Board
-  picks the likely one first). **Add as new model** opens Add model with the ID filled in. Conveyor files one held
-  issue to add each price ([Models](configuration.md#models)).
+  picks the likely one first). **Add as new model** opens Add model with the ID filled in. Needs you counts these
+  models ([Models](configuration.md#models)).
 - **Offered with no price** lists each model that a seat runs, or that the project's model list has
   ([Models](configuration.md#models)), and that no model
-  or alias prices, with the seats that use it. It has the same two buttons. Conveyor files one held issue to add each
-  price ([Models](configuration.md#models)).
+  or alias prices, with the seats that use it. It has the same two buttons. Needs you counts these models too.
 - **In use by this project** comes first. Each row has a mark: builder, reviewer, judge, Tests or research lane, or the
   number of sessions that used it in the last 30 days.
 - Then **Claude**, **OpenAI** and **Other**, by family, newest first. Older versions fold under "Older Claude models".

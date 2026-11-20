@@ -19,7 +19,8 @@
 #   and engine (for a pack that follows the plugin's main, the newest commit of it this machine did not take, until a
 #   later one is taken: commit, reason (its failed check, or the hooks it lacks), since; else null), and testRules
 #   (when the last pass of the test rules, lib/testrules.sh, had the switch on and matched more files than one day's
-#   cap, so it filed nothing: time, matched, cap; else null), and pick (the rule Pick settings: a decision for each
+#   cap, so it filed nothing: time, matched, cap; else null), and prices (the models the belt runs or offers with no
+#   price, as serve's last look found them, noprice(): models; else null), and pick (the rule Pick settings: a decision for each
 #   group whose tenth trial card ended, {group, title, reason, since, time (since again: the Foreman watcher keys it on time), trial, default}, cost.trials.groups' due; and,
 #   while the control record holds pickBack, the rule's own return to shadow, {group: null, title, reason, since, time}).
 #   mainTest, beside it, is the failure of the whole test on main that stands (maintest(): issue, cases, from, to,
@@ -201,7 +202,8 @@
 # prices: the Rules tab's Model prices: builtIn (each row of the built-in price table: model, input, output, cacheRead,
 #   cacheWrite, in $ per million tokens), aliases (the built-in aliases: {alias: the model it is priced as}), overrides (the pack's prices, added models and aliases, which win over it),
 #   names (each model's display name) and seen (each model ID the steps and the research lane's sessions of the last
-#   30 days ran: model, sessions, routes, as: the model it is priced as, or null) and research (the pack's research lane model, or null); null when the
+#   30 days ran: model, sessions, routes, as: the model it is priced as, or null, and lane: true for one only the
+#   research lane's sessions ran) and research (the pack's research lane model, or null); null when the
 #   table cannot be run.
 # checkRun: the check run the pack's checks.progress prints, as checkrun() below says; no such field without one.
 # cost: usd of the steps that ended today and in the 7 days to today, those of a blocked card that `retry` moved
@@ -627,6 +629,8 @@ snapshot() (
   so=$([ -n "$hrec" ] && slowoffs "$d/hrec" | jq -cs 'sort_by(.file)') || so='[]'
   # The last pass of the test rules, when its burst guard stopped it (testrulespass()).
   tr=$(jq -ce 'select(.on == true) | .time as $t | .burst | objects | {time: $t, matched, cap}' "$TESTRULES" 2>/dev/null) || tr=null
+  # The models the belt runs or offers with no price, as serve's last look found them (noprice()).
+  np=$(jq -ce '.missing | arrays | map(strings) | select(length > 0) | {models: .}' "$NOPRICE" 2>/dev/null) || np=null
   # The full test suite (fulltest()): the run in progress, only while its lock is held (a run that was killed left its
   # file), and the last line of its record.
   packget test.full ft 2>/dev/null || ft=''
@@ -644,7 +648,7 @@ snapshot() (
   printf '%s\n%s\n' "$METRICS" "$CARDRUNS" > "$d/cardruns.jq" \
     && python3 "$HERE/cardruns.py" "$d/priced" "$STATE.cardruns" "$d/cards" "$d/cardruns.jq" "$d/samples" "$ht" "$SAMPLE" "$yes" \
     || exit 1
-  jq -cn --slurpfile all "$d/cards" --slurpfile hs "$d/health" --slurpfile allp "$d/paths" --slurpfile shots "$d/shots" --slurpfile onm "$d/onmain" --argjson mt "$mt" --slurpfile fl <(printf '%s' "$fl") --slurpfile so <(printf '%s' "$so") --slurpfile ft <(printf '%s' "$ft") --slurpfile su <(printf '%s' "$su") --argjson rl "$rl" --argjson dr "$dr" --argjson eng "$eng" --argjson tr "$tr" --argjson m "$models" --argjson next "$next" --slurpfile built <(printf '%s' "$built") \
+  jq -cn --slurpfile all "$d/cards" --slurpfile hs "$d/health" --slurpfile allp "$d/paths" --slurpfile shots "$d/shots" --slurpfile onm "$d/onmain" --argjson mt "$mt" --slurpfile fl <(printf '%s' "$fl") --slurpfile so <(printf '%s' "$so") --slurpfile ft <(printf '%s' "$ft") --slurpfile su <(printf '%s' "$su") --argjson rl "$rl" --argjson dr "$dr" --argjson eng "$eng" --argjson tr "$tr" --argjson np "$np" --argjson m "$models" --argjson next "$next" --slurpfile built <(printf '%s' "$built") \
     --slurpfile iss "$d/issues" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" --arg pla "$pla" --arg ppm "$ppm" --arg pef "$pef" --argjson efforts "$EFFORTS" \
     --argjson control "$control" --argjson settings "$settings" --argjson accts "$(acctnames)" --argjson ga "$ga" --slurpfile q <(printf '%s' "$queue") --slurpfile lim "$d/limit" --slurpfile smp "$d/samples" --slurpfile pu "$d/pushes" --argjson every "$SAMPLE" --argjson priced "$pricedok" --argjson cr "$cr" --argjson ts "$ts" \
     --argjson max "$MAX_REVIEWS" --argjson wait "$((CLOSE_WAIT + 300))" --arg yes "$yes" --arg lintyes "$lintyes" --arg day "$day" --arg since "$since" --arg prev "$prev" \
@@ -899,6 +903,7 @@ snapshot() (
          before: $h.before,
          engine: $eng,
          testRules: $tr,
+         prices: $np,
          # The rule Pick settings: one decision a group whose ten trial cards ended ($pg due), with the counts and spend
          # of both sides, and the line of the return of the rule to shadow (pickBack in the control record, modelpick()).
          pick: ([$pg[] | select(.due != null) | {group, title: "Pick settings: decide on \(.model) at \(.effort) effort for \(.group) cards",

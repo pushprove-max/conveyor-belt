@@ -49,7 +49,8 @@ t_pricessnap() {
 # a model however many transcripts (its subagent's) name it, and none of a line older than 30 days, of a folder outside
 # the lane that Claude Code files under the same name or a name the lane's starts (~/lane-x), of "<synthetic>", or of
 # another checkout's lane. Bug caught: a model ID only a research session ran (one begun in ~/lane/reports, or in the
-# main checkout and moved into the lane, too) never reached Seen but not priced, so the owner could not price it.
+# main checkout and moved into the lane, too) was not counted in Seen. Each one has lane: true. Bug (#1074): the Board
+# listed such a model, which the belt never runs, as one with no price; lane marks it so the Board does not.
 t_pricesresearch() {
   local out lane other main t
   export HOME=$T/$CASE/home; mkdir -p "$XDG_CONFIG_HOME/conveyor" "$HOME/lane" "$HOME/other"
@@ -70,8 +71,8 @@ t_pricesresearch() {
   main=$HOME/.claude/projects/$(sed 's/[^a-zA-Z0-9]/-/g' <<<"$T/$CASE/main"); mkdir -p "$main"
   { line mainonly-9 "$T/$CASE/main" s7 "$t"; line moved-9 "$HOME/lane" s7 "$t"; } > "$main/s7.jsonl"
   out=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
-  jq -e '.prices.seen == [{model: "moved-9", sessions: 1, routes: [], as: null}, {model: "reports-9", sessions: 1, routes: [], as: null},
-    {model: "research-9", sessions: 1, routes: [], as: null}]' <<<"$out" > /dev/null \
+  jq -e '.prices.seen == [{model: "moved-9", sessions: 1, routes: [], as: null, lane: true}, {model: "reports-9", sessions: 1, routes: [], as: null, lane: true},
+    {model: "research-9", sessions: 1, routes: [], as: null, lane: true}]' <<<"$out" > /dev/null \
     || fail "the model IDs seen: $(jq -c .prices.seen <<<"$out")"
 }
 

@@ -244,26 +244,66 @@ modelsallowed() { # <variable>
   fi
   printf -v "$1" '%s' "$m_"
 }
-# A model the belt runs or offers that has no price (docs/configuration.md, Models): the Board cannot show its cost,
-# so Conveyor files one issue to add the price, held (the control record holds it, as `control hold` does), once for
-# each model whatever the loop's turns or restarts: $NOPRICE keeps {filed: [{model, issue, at}]}. The models: those of
-# the models.allowed in force (modelsallowed(), the list the Board's "Offered with no price" takes: the pack's when it sets
-# one, with the host's Codex models added to a codex list it has with a model in it), and those run: the builder's, the
-# reviewer's and the judge's seats, the Tests seat, the research lane's model, and each model ID the Board lists under Seen: those the card sessions of the last 30 days ran (a failed one's too) and those
-# the research lane's sessions ran (dashboard_limit.py lane_models). Which
-# have no price is dashboard_limit.py's (unpriced: the built-in table with the pack's prices over it; an OpenCode
-# model keeps the cost OpenCode reports, so it is never one). `serve` looks once a minute (run()), and asks that only
-# when the models or the pack's prices changed since the last look that filed all it had to (NOPRICE_K), or at every
-# look when there is a research lane, whose models only that ask reads; so a filing
-# GitHub did not take is tried again at the next look. One look at a time (a lock of its own). CONVEYOR_NOPRICE_CMD,
-# when set, runs in place of dashboard_limit.py unpriced, as bash -c; one that fails files nothing.
+# A model the belt runs or offers that has no price (docs/configuration.md, Models): the Board cannot show its cost.
+# The Board lists it under Rules, Model prices, and Needs you counts it: $NOPRICE keeps {missing: [model ID]}, which
+# the snapshot gives as needsYou.prices. Conveyor files no issue for it in the project's repository: a missing price
+# is a gap in Conveyor's own price table or a setting of the Board, no work of the project. A Claude or Codex model
+# the belt runs (an ID that starts claude- or gpt-, the built-in table's reach; a seat's, a session's, the Tests
+# seat's or the research lane's, not one only offered) that the built-in table does not price, whatever the pack's
+# prices, is also noted as a plugin problem, in the Foreman's plugin-bugs.md (foremandir(); foreman/stop.sh's form),
+# which the Overview's Plugin problems pane files to the plugin's repository on the owner's yes: once for each model
+# whatever the loop's turns or restarts ($NOPRICE's noted) and the projects of its group (a note in that file counts).
+# The
+# models: those of the models.allowed in force (modelsallowed(), the list the Board's "Offered with no price" takes:
+# the pack's when it sets one, with the host's Codex models added to a codex list it has with a model in it), and those
+# run: the builder's, the reviewer's and the judge's seats, the Tests seat, the research lane's model, and each model
+# ID the card sessions of the last 30 days ran (a failed one's too). The research lane's session history does not
+# count: it holds models the belt never runs. Which have no price is dashboard_limit.py's (unpriced: the built-in table
+# with the pack's prices over it; an OpenCode model keeps the cost OpenCode reports, so it is never one). `serve` looks
+# once a minute (run()), and asks that only when the models or the pack's prices changed since the last look that did
+# all it had to (NOPRICE_K). One look at a time (a lock of its own). CONVEYOR_NOPRICE_CMD, when set, runs in place of
+# dashboard_limit.py unpriced, as bash -c; one that fails changes nothing.
+# First, each issue an older Conveyor filed for a missing price ($NOPRICE's filed: [{model, issue, at}]) is closed, with
+# a comment that the price shows on the Board now, and taken off filed, so a later look closes nothing; one GitHub did
+# not close stays on filed, tried again at the next look. No other issue is closed.
+# The Foreman's folder for this project, printed, as foreman/lib.sh names it (mine, FD): for a project in a list of
+# the host file's foreman.groups, the folder of that list's first project that a record names (a name no record has is
+# passed over, as lib.sh and the Board pass it over), whose Foreman watches the whole group and whose plugin-bugs.md
+# the Board reads; else, when the groups name a project twice (not understood: each project has its own), or when
+# that project's checkout is not on this machine, this project's own.
+foremandir() {
+  local m
+  m=$(jq -r --arg r "$REPO" '(.records | arrays | map(objects)) as $rs | (.foreman.groups | arrays) as $gs
+    | select($gs | all(type == "array" and all(type == "string")) and ([.[][]] | length == (unique | length)))
+    | first($gs[] | select(index([$r]))) | first(.[] as $n | $rs[] | select(.repo == $n) | .main | strings) // empty' "$HOST" 2>/dev/null)
+  if [ -n "$m" ] && [ -d "$m" ] && ! [ "$m" -ef "$MAIN" ]; then
+    m=$(env -u CONVEYOR_CARDS CONVEYOR_MAIN="$m" bash "$HERE/conveyor.sh" state-dir 2>/dev/null) && [ -n "$m" ] && printf '%s/foreman\n' "$m"
+  else
+    printf '%s/foreman\n' "${STATE%/*}"
+  fi
+}
 NOPRICE=${STATE%/*}/noprice.json
 NOPRICE_CMD=${CONVEYOR_NOPRICE_CMD:-python3 $(printf %q "$HERE/../.claude/scripts/dashboard_limit.py") unpriced}
 NOPRICE_K=''
 noprice() {
-  local a c p r ms k miss m n out lock x y cli ran rw since rc=0
+  local lock rc
+  { exec {lock}>>"$NOPRICE.lock"; } 2>/dev/null || return 1
+  flock -n "$lock" || { exec {lock}>&-; return 0; }
+  noprice_; rc=$?
+  exec {lock}>&-
+  return $rc
+}
+# noprice()'s look, under its lock.
+noprice_() {
+  local a c p r ms rs k miss gaps m n u out x y cli ran since st notes rc=0 noted=()
+  while IFS=$'\t' read -r n m; do
+    out=$(gh_write issue close "$n" --comment "Conveyor no longer files an issue for a model with no price: the price now shows on the Board. While the belt runs or offers \`$m\` with no price, the Board lists it under Rules, Model prices, and Needs you counts it until its price is added there." 2>&1 </dev/null) \
+      || { echo "conveyor: #$n, the issue for the price of $m, could not be closed: ${out:0:300}" >&2; rc=1; continue; }
+    jq -c --argjson n "$n" '.filed |= map(select(type != "object" or .issue != $n))' "$NOPRICE" > "$NOPRICE.new" 2>/dev/null && mv -f "$NOPRICE.new" "$NOPRICE" \
+      || { rm -f "$NOPRICE.new"; echo "conveyor: #$n, the issue for the price of $m, was closed, but $NOPRICE could not be written" >&2; rc=1; continue; }
+    echo "conveyor: closed #$n, Model price missing: $m (the Board shows it now)"
+  done < <(jq -r '.filed | arrays | .[] | objects | select(.issue | type == "number" and . >= 1 and . == floor) | [.issue, (.model | tostring)] | @tsv' "$NOPRICE" 2>/dev/null)
   modelsallowed a || return 1
-  rw=$(researchwt)
   if ctlread 2>/dev/null; then c=$CTL_V; else c=null; fi
   packget prices p lanes.research r 2>/dev/null || return 1
   # The model IDs the card sessions of the last 30 days ran, as the Board counts them under Seen (dashboard_limit.py
@@ -280,38 +320,49 @@ noprice() {
       | .[] | strings | select(. != "")] | unique') || return 1
   # Each model with its CLI. A seat the record and pack leave unset (no judge, say) adds none, and fails no look.
   x=$({ for m in builder reviewer judge; do seat "$m" "$c" 2>/dev/null || :; done; } | jq -rs --argjson a "$a" --argjson c "$c" \
-      --argjson r "${r:-null}" --argjson ran "$ran" '[(.[] | [.agent, .model]), ($ran[] | ["", .]), ($a | objects | to_entries[] | (if .key == "codex" or .key == "codex-builder" then "codex" else "" end) as $k
-        | .value[]? | [$k, .]), ($c.tests | objects | if .cli == "opencode" then ["", "opencode:" + .model] else [.cli, .model] end),
-        ($r | objects | ["claude", .model])] | map(select(.[1] | strings)) | unique[] | map(. // "") | join("\u001f")') || return 1
+      --argjson r "${r:-null}" --argjson ran "$ran" '[(.[] | [.agent, .model, "r"]), ($ran[] | ["", ., "r"]), ($a | objects | to_entries[] | (if .key == "codex" or .key == "codex-builder" then "codex" else "" end) as $k
+        | .value[]? | [$k, ., ""]), ($c.tests | objects | if .cli == "opencode" then ["", "opencode:" + .model, "r"] else [.cli, .model, "r"] end),
+        ($r | objects | ["claude", .model, "r"])] | map(select(.[1] | strings)) | unique[] | map(. // "") | join("\u001f")') || return 1
   # A one-word name (sol, opus) is a family or an alias, no model ID: Codex runs a family's newest model (codexmodel()),
   # which is the one to price; one that resolves to none runs nothing (codexready() says so), and Claude's CLI
   # resolves its aliases itself, so neither is looked at.
   # Fields split on \037, no whitespace: IFS whitespace would drop an empty CLI field and read the model as the CLI.
-  ms=$(while IFS=$'\037' read -r cli m; do
-      if [[ $m =~ ^[a-z]{2,}$ ]]; then [ "$cli" != codex ] || ! y=$(codexmodel "$m" 2>/dev/null) || printf '%s\n' "$y"; else printf '%s\n' "$m"; fi
-    done <<<"$x" | jq -Rsc '[splits("\n") | select(length > 0)] | unique') || return 1
-  k=$ms$'\037'$p
-  [ -n "$rw" ] || [ "$k" != "$NOPRICE_K" ] || return 0
-  miss=$(jq -cn --argjson m "$ms" --argjson p "${p:-null}" --arg s "$since" --arg rw "$rw" --arg pj "$HOME/.claude/projects" \
-      '{prices: $p, models: $m, since: $s} | if $rw == "" then . else .research = {worktree: $rw, projects: $pj} end' | timeout 30 bash -c "$NOPRICE_CMD" 2>/dev/null 7>&- 8>&-) && jq -e 'arrays' <<<"$miss" >/dev/null 2>&1 || return 1
-  { exec {lock}>>"$NOPRICE.lock"; } 2>/dev/null || return 1
-  flock -n "$lock" || { exec {lock}>&-; return 0; }
-  while IFS= read -r m; do
-    [ -n "$m" ] && ! jq -e --arg m "$m" 'any(.filed[]?; .model == $m)' "$NOPRICE" >/dev/null 2>&1 || continue
-    out=$(gh_write issue create --title "Model price missing: $m" --label "$TYPE" --label "$(jq -r '.[-1]' <<<"$PRIOS")" --body "Conveyor runs or offers the model \`$m\`, and no price row prices it, so the Board cannot show what it costs. The Board's Rules tab shows it under Model prices as having no price.
-
-Add its price: on the Board's Rules tab, Model prices, Add model (or This is…, when it is another ID of a model that has a price), or with \`conveyor.sh prices add $m <provider> <name> <input> <output> <cache read>\`, each price in dollars per million tokens from the provider's price page.
-
-Done when: the Board's Model prices shows a price for \`$m\`." 2>&1) \
-      && n=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1) && n=${n##*/} && [ -n "$n" ] \
-      || { echo "conveyor: the issue for the price of $m could not be filed: ${out:0:300}" >&2; rc=1; continue; }
-    jq -c --arg m "$m" --argjson n "$n" --arg at "$(clock)" '.filed = [.filed[]?, {model: $m, issue: $n, at: $at}]' <<<"$(jq -ce 'objects' "$NOPRICE" 2>/dev/null || echo '{}')" \
-      > "$NOPRICE.new" && mv -f "$NOPRICE.new" "$NOPRICE" \
-      || { rm -f "$NOPRICE.new"; echo "conveyor: the issue #$n for the price of $m was filed, but $NOPRICE could not be written" >&2; rc=1; continue; }
-    locked control hold "$n" >/dev/null 2>&1 || { echo "conveyor: the issue #$n for the price of $m was filed, but could not be held" >&2; rc=1; }
-    echo "conveyor: filed #$n, Model price missing: $m (held)"
-  done < <(jq -r '.[]' <<<"$miss")
-  exec {lock}>&-
+  # The third field is r for a model the belt runs (a seat's, a session's, the Tests seat's, the research lane's), empty
+  # for one only offered: ms holds them all, rs those run.
+  y=$(while IFS=$'\037' read -r cli m u; do
+      if [[ $m =~ ^[a-z]{2,}$ ]]; then [ "$cli" != codex ] || ! m=$(codexmodel "$m" 2>/dev/null) || printf '%s\037%s\n' "$u" "$m"; else printf '%s\037%s\n' "$u" "$m"; fi
+    done <<<"$x" | jq -Rsc '[splits("\n") | select(length > 0) | split("\u001f")] | [(map(.[1]) | unique), (map(select(.[0] == "r") | .[1]) | unique)]') \
+    && ms=$(jq -c '.[0]' <<<"$y") && rs=$(jq -c '.[1]' <<<"$y") || return 1
+  k=$y$'\037'$p
+  [ "$k" != "$NOPRICE_K" ] || return $rc
+  # miss: the models with no price, the pack's prices put over the built-in table (what the Board lists). gaps: the
+  # models run that the built-in table alone does not price: a pack's price for one leaves the table's gap.
+  miss=$(jq -cn --argjson m "$ms" --argjson p "${p:-null}" '{prices: $p, models: $m}' \
+      | timeout 30 bash -c "$NOPRICE_CMD" 2>/dev/null 7>&- 8>&-) && miss=$(jq -ce 'arrays | map(strings | select(. != ""))' <<<"$miss" 2>/dev/null) || return 1
+  gaps=$(jq -cn --argjson m "$rs" '{prices: null, models: $m}' \
+      | timeout 30 bash -c "$NOPRICE_CMD" 2>/dev/null 7>&- 8>&-) && gaps=$(jq -ce 'arrays | map(strings | select(. != ""))' <<<"$gaps" 2>/dev/null) || return 1
+  st=$(jq -ce 'objects' "$NOPRICE" 2>/dev/null) || st='{}'
+  # A Claude or Codex model run with no built-in price and no note yet: one plugin problem each, in stop.sh's form,
+  # under the header stop.sh writes, in the Foreman's folder (foremandir()). Only an ID of the built-in table's form is
+  # noted: a note is one line. The projects of a group share that file, so a model another one noted there already
+  # gets no second note (it is put on noted all the same); the look and the note are made under a lock of the folder,
+  # so two loops of a group never both note one model.
+  notes=$(foremandir)/plugin-bugs.md || return 1
+  y=$(jq -r --argjson st "$st" '.[] | select(test("^(claude|gpt)-[A-Za-z0-9._\\[\\]-]+$")) | select(. as $m | $st.noted | arrays // [] | index([$m]) | not)' <<<"$gaps") || return 1
+  if [ -n "$y" ]; then
+    out=$(mkdir -p "${notes%/*}" 2>/dev/null && { flock -w 30 9 || exit 1
+      while IFS= read -r m; do
+        grep -qF -- " · No built-in price for $m: " "$notes" 2>/dev/null \
+          || { { [ -s "$notes" ] || printf '# Plugin problems the Foreman noted (for the conveyor-belt repo)\n\n'
+            printf -- '- %s · card - · No built-in price for %s: the belt runs or offers this %s model, and the built-in price table (dashboard_limit.py) has no price for it, so the Board cannot show what it costs · evidence: -\n' \
+              "$(clock)" "$m" "$([[ $m == claude-* ]] && echo Claude || echo Codex)"; } >> "$notes"; } 2>/dev/null || continue
+        printf '%s\n' "$m"
+      done <<<"$y"; } 9>>"${notes%/*}/noprice.lock")
+    [ -z "$out" ] || mapfile -t noted <<<"$out"
+    [ "${#noted[@]}" = "$(wc -l <<<"$y")" ] || { echo "conveyor: a plugin problem for a model with no price could not be noted in $notes" >&2; rc=1; }
+  fi
+  jq -c --argjson m "$miss" '.missing = $m | .noted = ((.noted | arrays // []) + $ARGS.positional | unique)' --args "${noted[@]}" <<<"$st" > "$NOPRICE.new" 2>/dev/null \
+    && mv -f "$NOPRICE.new" "$NOPRICE" || { rm -f "$NOPRICE.new"; echo "conveyor: the models with no price could not be written to $NOPRICE" >&2; return 1; }
   [ "$rc" != 0 ] || NOPRICE_K=$k
   return $rc
 }

@@ -29,9 +29,8 @@
       time: a card whose line has not changed since is not priced again (card_costs).
   dashboard_limit.py work  < {steps: [...], live, prices}
       A benchmark trial's sessions priced the same way, as one figure that says whether it is whole (work_cost).
-  dashboard_limit.py unpriced  < {prices, models: [...], since, research}
-      The model IDs of models that no price row prices, the pack's prices put over the table (unpriced), as a JSON list:
-      those of models, and those the research lane's sessions ran since then.
+  dashboard_limit.py unpriced  < {prices, models: [...]}
+      The model IDs of models that no price row prices, the pack's prices put over the table (unpriced), as a JSON list.
 
 Every figure comes from that reading or from Claude Code's own transcripts; a
 figure with no source is null, never 0 or an estimate. Dollars are list-price
@@ -725,14 +724,10 @@ def known(m):
 
 def unpriced(part):
     """Of the model IDs `models` names, those with no price row (known), after the part's `prices` (the pack's) are
-    put over the table: what Conveyor files an issue for (noprice(), lib/control.sh). An OpenCode model keeps the cost
-    OpenCode reports, so it is never one. The part's `research` ({worktree, projects}, as card_costs takes it) adds
-    the model IDs the research lane's sessions ran from `since` on (lane_models): the Board lists them under Seen."""
+    put over the table: what Needs you counts (noprice(), lib/control.sh). An OpenCode model keeps the cost OpenCode
+    reports, so it is never one."""
     use_prices(part.get("prices") if isinstance(part.get("prices"), dict) else {})
     ms = list(part.get("models")) if isinstance(part.get("models"), list) else []
-    r = part.get("research")
-    if isinstance(r, dict):
-        ms += lane_models(r.get("projects"), r.get("worktree"), epoch(part.get("since")))
     return sorted({m for m in ms if isinstance(m, str) and m and not m.startswith("opencode:") and known(m) is None})
 
 
@@ -783,7 +778,8 @@ def card_costs(part, lines=None, kept=None, dest=None):
     routes their lines name (proxy, subscription), as: the model it is priced as, null when none prices it}), the most
     used first. The part's `research` ({worktree, projects}: the research lane's folder and Claude Code's projects
     folder), taken out of the part, adds the model IDs its sessions ran from that time on (lane_models), one session
-    each: they are no card's step, and an ID only they ran would never reach Seen but not priced.
+    each: they are no card's step. An ID only they ran has lane: true, as the belt never runs it: the Board counts its
+    sessions, and does not list it as a model with no price.
     """
 
     def ran(step):
@@ -965,13 +961,13 @@ def card_costs(part, lines=None, kept=None, dest=None):
                     os.unlink(tmp)
                 except OSError:
                     pass
-    research = part.pop("research", None)
+    research, steps = part.pop("research", None), set(seen)
     if isinstance(since, str) and isinstance(research, dict):
         for x, n in lane_models(research.get("projects"), research.get("worktree"), epoch(since)).items():
             k, ways = seen.get(x, (0, set()))
             seen[x] = (k + n, ways)
     if isinstance(since, str):
-        part["seen"] = [{"model": x, "sessions": k, "routes": sorted(ways), "as": known(x)}
+        part["seen"] = [{"model": x, "sessions": k, "routes": sorted(ways), "as": known(x), **({} if x in steps else {"lane": True})}
                         for x, (k, ways) in sorted(seen.items(), key=lambda t: (-t[1][0], t[0]))]
     return part
 

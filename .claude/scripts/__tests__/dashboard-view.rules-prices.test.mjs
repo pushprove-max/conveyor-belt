@@ -215,6 +215,22 @@ test('Rules: an ID seen but not priced is listed, and This is… adds it as an a
   assert.match(rowOf(w, 'claude-sonnet-4-6').querySelector('.board-from').textContent, /also: claude-sonnet-4\.6$/);
 });
 
+// Bug (#1074): a model only the research lane's sessions ran (lane: an embedding model, an older chat model) was
+// listed as seen but not priced, though the belt never runs it. It is not listed; one the belt offers too stays under
+// Offered with no price, as no card ran it.
+test('Rules: a model only the research lane ran is not listed as having no price', () => {
+  const w = boot({ tab: 'rules' });
+  const d = full();
+  d.panels.rules.data.prices = JSON.parse(JSON.stringify(PRICES));
+  d.panels.rules.data.prices.seen.push({ model: 'text-embed-9', sessions: 4, routes: [], as: null, lane: true },
+    { model: 'gpt-6.3-sol', sessions: 1, routes: [], as: null, lane: true });
+  d.panels.rules.data.modelSettings.reviewer.allowed.codex.push('gpt-6.3-sol');
+  deliver(w, d);
+  assert.deepEqual(Array.from(prices(w).querySelectorAll('.rules-unpriced'), (x) => x.dataset.model), ['claude-sonnet-4.6']);
+  const offered = Array.from(prices(w).querySelectorAll('.rules-noprice'), (x) => x.dataset.model);
+  assert.ok(offered.includes('gpt-6.3-sol') && !offered.includes('text-embed-9'), offered.join(', '));
+});
+
 // Bug: a model the Board offers a role (the models.allowed in force), or one a role runs, with no price row showed
 // nowhere: its cost was missing with nothing to say so. Each is named as having no price, with the roles it is in use
 // by; a priced one, an alias of one, an OpenCode one and one already seen in steps are not.

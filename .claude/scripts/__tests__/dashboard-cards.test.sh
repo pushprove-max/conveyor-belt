@@ -143,7 +143,7 @@ P=$(snap '{"needsYou": {"waiting": [{"card": "c1-12", "issue": 12, "title": "But
                                      "reviews": [{"round": 1, "verdict": "NO-GO", "sec": 40}], "metrics": {"tokens": 5000, "usd": 0.4, "timeline": [{"model": "claude-x"}, {"model": "gpt-x"}]}}],
                         "before": [{"issue": 14, "title": "Green Pay", "section": "The Pay page: a green button.", "since": "'"$(ago 1200)"'"}],
                         "engine": {"commit": "cccc", "reason": "its check of the pack failed: .tunables.x: not a field of the schema", "since": "'"$(ago 800)"'"},
-                        "testRules": {"time": "'"$(ago 500)"'", "matched": 5, "cap": 3}},
+                        "testRules": {"time": "'"$(ago 500)"'", "matched": 5, "cap": 3}, "prices": {"models": ["claude-new-9", "m"]}},
   "mainTest": {"issue": 15, "cases": ["alpha", "beta"], "from": "aaaa", "to": "bbbb", "since": "'"$(ago 700)"'", "exit": 1},
   "flaky": [{"case": "b.test: flaky", "count": 3, "issue": 16}, {"case": "c.test: other", "count": 1, "issue": null}],
   "slowOff": [{"file": "s.test", "issue": 17, "cpu": 10, "budget": 8, "card": "c2-9", "last": {"cpu": 9, "card": "c2-8"}}],
@@ -220,6 +220,8 @@ q '.panels.needs.data.tests | map([.repo, .issue, .cases, .from, .to, .url]) == 
 q '.panels.needs.data.engines | map([.repo, .commit, .reason]) == [["sample", "cccc", "its check of the pack failed: .tunables.x: not a field of the schema"]]' "a commit of the plugin's main a record did not take is in Needs you with the commit and why; a record with none adds none"
 # Issue 519: a run of the test rules that matched more files than one day's cap filed none; without a row the owner never learns the rules wait for them.
 q '.panels.needs.data.testRules | map([.repo, .matched, .cap]) == [["sample", 5, 3]]' "a record whose test rules held a run is in Needs you with the files matched and the cap; a record with none adds none"
+# Issue 1074: Conveyor no longer files an issue for a model with no price, so Needs you is where the owner learns of one.
+q '.panels.needs.data.prices | map([.repo, .models]) == [["sample", ["claude-new-9", "m"]]]' "a record whose loop found models with no price is in Needs you with them; a record with none adds none"
 q '.panels.queue.data | (.next | map([.repo, .issue, .priority, .followup, .retried])) == [["sample", 20, "P1", true, false], ["widgetshop", 9, "P3", false, true]] and .held == 3' "the queue lists each record's next issues in its order, and counts every record's held issues (open.held: by you, a label, a rule or a wait), as the Board's Held column has them"
 q '.panels.queue.data.awaitingDeploy | map([.repo, .issue, .title, .since, .url]) == [["sample", 802, "Stack split", "2026-11-05T00:00:00Z", "'"$PU"'/802"], ["sample", 803, "No time", null, "'"$PU"'/803"]]' "the issues built and waiting for a PROD deploy are listed on their own (a record without the key adds none), each with its repo, link and since when"
 # An issue that waits on another is in the queue and on the Board with what it waits for; a cycle reaches health.

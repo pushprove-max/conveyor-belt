@@ -2,6 +2,7 @@
   {"kind": "tests", "from": ["mainTest"], "title": "Tests failing on main"},
   {"kind": "engines", "from": ["needsYou", "engine"], "title": "Engine updates not taken"},
   {"kind": "testRules", "from": ["needsYou", "testRules"], "title": "Test issues held"},
+  {"kind": "prices", "from": ["needsYou", "prices"], "title": "Models with no price"},
   {"kind": "before", "from": ["needsYou", "before"], "title": "Approve before build"},
   {"kind": "pipeline", "from": ["needsYou", "pipeline"], "title": "Pipeline changes held for you"},
   {"kind": "farDeps", "from": ["needsYou", "farDeps"], "title": "Dependencies that cannot be read"},

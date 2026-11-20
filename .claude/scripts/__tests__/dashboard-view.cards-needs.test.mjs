@@ -3,10 +3,10 @@
 // main, a plugin commit not taken, an issue waiting for the yes, a held pipeline change), Declined, a review's judge
 // line, a card passed on re-run and a slow-test note. Shared setup: dashboard-view.helpers.mjs.
 // Its cases run one after another in one thread, not in cases()'s workers: each worker loads jsdom and warms its code
-// again, and for these 13 cases that cost about twice the CPU of one thread (#586).
+// again, and for these 14 cases that cost about twice the CPU of one thread (#586).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { T0, iso, clone, boot, panel, deliver, next, settle, P, trackOf, counts, full, openEvery } from './dashboard-view.helpers.mjs';
+import { T0, iso, clone, boot, panel, deliver, next, settle, P, trackOf, counts, full, openEvery, tabBtn } from './dashboard-view.helpers.mjs';
 
 // Needs you lists the cards of every record, so the answer carries the card's repository with its number.
 // Bug: only the number was sent, and the host acted on main's issue of that number: approving another repository's
@@ -100,6 +100,45 @@ test('Needs you: a run of the test rules held by the burst guard shows one line 
   next(w, data);
   assert.equal(count(), with1 - 1, 'it is counted with the rest while the run is held');
   assert.equal(panel(w, 'needs').querySelector('[data-group="testRules"]').hidden, true);
+});
+
+// Bug (#1074): Conveyor filed a held issue in the project's repository for each model with no price. It files none
+// now, so Needs you is where the owner learns of them: one line a project that counts them, with a link that opens
+// the list in Model prices; with the prices added (no model left) the line goes. Bug (review of #1074): with every
+// project shown and the Rules tab drawn for sample, the link for widgetshop set ?repo= but the Rules panel, its part
+// unchanged, kept sample's Model prices.
+test('Needs you: the models with no price show as one line that counts them and opens Model prices', async () => {
+  const w = boot();
+  const data = full();
+  data.panels.machine.data.repos = ['sample', 'widgetshop'];
+  Object.assign(data.panels.rules.data, { repos: ['sample', 'widgetshop'], others: { widgetshop: { ...clone(data.panels.rules.data), repo: 'widgetshop' } } });
+  data.panels.needs.data.prices = [{ repo: 'widgetshop', models: ['claude-new-9', 'm'] }];
+  const count = () => Number(panel(w, 'needs').querySelector('.panel-count').textContent);
+  deliver(w, data);
+  const with1 = count();
+  const group = panel(w, 'needs').querySelector('[data-group="prices"]');
+  assert.equal(group.hidden, false);
+  assert.equal(group.querySelector('.group-title').textContent, 'Models with no price');
+  assert.equal(group.querySelectorAll('li').length, 1, 'one line, not one a model');
+  const row = group.querySelector('li[data-key="prices:widgetshop:claude-new-9,m"]');
+  assert.equal(row.querySelector('.row-main').textContent, '2 models have no price, so the Board cannot show what they cost.');
+  assert.match(row.querySelector('a[data-act="prices-see"]').getAttribute('href'), /\?tab=rules&repo=widgetshop#panel-rules-prices$/);
+  data.panels.needs.data.prices = [{ repo: 'widgetshop', models: [] }];
+  next(w, data);
+  assert.equal(count(), with1 - 1, 'it is counted with the rest until the prices are added');
+  assert.equal(panel(w, 'needs').querySelector('[data-group="prices"]').hidden, true);
+  data.panels.needs.data.prices = [{ repo: 'widgetshop', models: ['claude-new-9', 'm'] }];
+  next(w, data);
+  tabBtn(w, 'rules').click();
+  await settle();
+  assert.equal(panel(w, 'rules').querySelector('.panel-title').textContent, 'Rules: sample', 'the Rules tab is drawn for sample first');
+  tabBtn(w, 'overview').click();
+  panel(w, 'needs').querySelector('a[data-act="prices-see"]').click();
+  await settle();
+  assert.equal(tabBtn(w, 'rules').getAttribute('aria-selected'), 'true', 'the link opens the Rules tab');
+  assert.equal(w.document.activeElement, panel(w, 'rules-prices'), 'on Model prices');
+  assert.match(panel(w, 'rules').querySelector('.panel-title').textContent, /widgetshop/, 'of the row\'s project');
+  assert.equal(new URL(w.location.href).searchParams.get('repo'), 'widgetshop');
 });
 
 // An issue whose section "What customers or staff will see" names a change waits for the owner's yes before it is

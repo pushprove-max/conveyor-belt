@@ -949,11 +949,15 @@ listed under:
 A model that a seat runs, or that the project's model list has, can have no price. The model list is
 `models.allowed` when you set it, with the Codex models that Codex reports added to its `codex` list when that list has a model in it. When you do not, it is Conveyor's built-in models, with the Codex models that Codex
 reports in place of the built-in Codex ones, and with no Codex models when Codex is not installed. The Rules tab shows such a
-model under Model prices, in "Offered with no price". A model that the sessions of the last 30 days used, and that no price prices, shows in
-"Seen but not priced". The loop files one held issue for each such model, "Model price missing: <model>", and does
-not file it again. A Codex family name, such as `sol`, is not a model ID: the check uses the model that Codex runs for
-it. Add the price on the Rules tab (Model prices), or with `conveyor.sh prices add`. An OpenCode model
-does not need a price: the Board shows the cost that OpenCode reports.
+model under Model prices, in "Offered with no price". A model that the card sessions of the last 30 days used, and that no price prices, shows in
+"Seen but not priced". A model that only the research lane's sessions used is not in these lists, because the belt
+does not run it. While the loop runs, Needs you shows one line that counts these models, with a link to Model prices.
+Add the price on the Rules tab (Model prices), or with `conveyor.sh prices add`. At its next check, the loop takes the
+model off the count. Conveyor does not file an issue in your repository for a missing price. When the belt runs a Claude or Codex
+model that has no built-in price, Conveyor also adds one note for it to the Plugin problems pane on the Overview tab. From
+that pane, you can file the note in the plugin's repository. A Codex family name, such as `sol`, is not a model ID:
+the check uses the model that Codex runs for it. An OpenCode model does not need a price: the Board shows the cost
+that OpenCode reports.
 
 To use OpenCode for a seat:
 

@@ -478,7 +478,7 @@ run() { # [max-cards] [serve]
     fi
     # The monthly test-speed survey's issue (survey(), lib/survey.sh), looked at once a minute, in the loop itself: a
     # look is a date and a pack read, and files at most one issue a month. With it, the models with no price (noprice(),
-    # lib/control.sh), in this shell, which keeps what it last looked at: one held issue for each, once.
+    # lib/control.sh), in this shell, which keeps what it last looked at: the list Needs you counts, and no issue.
     if [ -n "$serve" ] && [ -z "$new" ] && [ -z "$nopack" ] && [ $((SECONDS - stried)) -ge 60 ]; then
       stried=$SECONDS; survey 8>&- < /dev/null; noprice 8>&- < /dev/null || :
     fi

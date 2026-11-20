@@ -37,7 +37,8 @@
 #   needs   cards {waiting, blocked} (null when Conveyor did not answer; each card with its reviews and its track,
 #           where the step a blocked card stopped in is failed, with its seconds; and farDeps: each open issue's
 #           dependency in another repository that could not be read, so the issue waits), tests (for each record whose whole
-#           test on main fails now: the issue filed for it, the failing cases and the commits it failed between), decisions (null when no named ledger
+#           test on main fails now: the issue filed for it, the failing cases and the commits it failed between), prices
+#           (for each record whose loop found models it runs or offers with no price: repo, models), decisions (null when no named ledger
 #           read; decisionsError names each record whose ledger did not read, beside the decisions of those that did),
 #           retrying (each landed card whose push of main failed and is tried again, not one whose issue GitHub kept open: repo, card, issue, title, url, and fix, the
 #           issue of a card on the belt whose parent it is, else null), retried (the cards the live feed says
@@ -775,6 +776,8 @@ PANELS_JQ='
   | ($R // [] | map(. as $r | .snap.needsYou.engine | objects | tag($r) | {repo, commit, reason, since})) as $engines
   # The last run of the test rules of a record, when it matched more files than the cap of one day and so filed none (needsYou.testRules).
   | ($R // [] | map(. as $r | .snap.needsYou.testRules | objects | tag($r) | {repo, time, matched, cap})) as $testRules
+  # The models the loop of a record runs or offers with no price (needsYou.prices), which Model prices lists.
+  | ($R // [] | map(. as $r | .snap.needsYou.prices | objects | select(.models | arrays | length > 0) | tag($r) | {repo, models})) as $prices
   # The card that lands the Fast lane of a record (conveyor.sh land-branch), one of the cards of that record: a branch named as a card id of the record
   # (c<time>-<project>-<issue>) is a card of that issue, and any other branch, a number in its name or not, is a card of issue 0 titled with the first commit of the branch. The landed list
   # holds only the cards of today, so a card that landed on an earlier day is found in the branches of the snapshot (the
@@ -801,7 +804,7 @@ PANELS_JQ='
   [$belt[] | select(pushFailed) | . as $c | {repo, card, issue, name: (.name // null), title, url,
        fix: ([$belt[] | select(.repo == $c.repo and .landed != true and .parent == $c.issue and $c.issue > 0) | .issue][0] // null)}] as $retrying
   | {needs: (if $R == null and $dec.decisions == null then {error: "Nothing could be read. Cards: \($cerr). Decisions: \($dec.error).", data: null}
-      else {error: null, data: {cards: (if $R == null then null else {waiting: $waiting, blocked: $blocked, before: $before, pipeline: $pipeline, farDeps: $farDeps} end), cardsError: $cerr, tests: $tests, engines: $engines, testRules: $testRules,
+      else {error: null, data: {cards: (if $R == null then null else {waiting: $waiting, blocked: $blocked, before: $before, pipeline: $pipeline, farDeps: $farDeps} end), cardsError: $cerr, tests: $tests, engines: $engines, testRules: $testRules, prices: $prices,
         # The kinds of Needs you, in their order (dashboard_needs.json, which the Foreman watcher reads too), and
         # the entries of each, read from the snapshot field the list names: a kind the page has no row of its own for
         # shows these.

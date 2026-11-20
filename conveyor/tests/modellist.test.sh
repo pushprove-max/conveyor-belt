@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
-# Engine cases: where the model list comes from (modelsallowed(), climodels(), lib/control.sh), and the issue filed for a
-# model with no price (noprice()).
+# Engine cases: where the model list comes from (modelsallowed(), climodels(), lib/control.sh), and the list of the
+# models with no price (noprice()).
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -140,78 +140,104 @@ t_modellistdoc() {
 }
 
 # Bug: a model the belt offered or ran with no price row showed no cost and nothing said so, until someone saw it.
-# Each such model gets one issue, held (the control record holds it), to add its price; a priced model gets none, and
-# a model gets no second issue at a later look, nor after the loop restarts. The test pack lists the stub models m and
-# x, which no price row prices, beside priced Claude and Codex models.
+# Each such model is listed: noprice.json's missing, which the snapshot gives Needs you (needsYou.prices); a priced
+# model is not. The test pack lists the stub models m and x, which no price row prices, beside priced Claude and Codex
+# models.
 # serve's look (noprice()), as the commands given run it in serve's shell; fails the case when they fail.
 looks() { # <commands>
   ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
     && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/serve.sh")" && names && eval "$1" ) > "$T/$CASE/out" 2>&1 || fail "a look failed: $(cat "$T/$CASE/out")"
 }
+# The models the last look found with no price, as a JSON list.
+missing() { jq -c .missing "$ST/noprice.json" 2>&1; }
+# Bug (#1074): the look filed a held "Model price missing" issue in the project's own repository for each model with
+# no price (26 in one morning in one project), though a gap in Conveyor's price table is no work of the project. With
+# the builder's seat on a Claude model with no price, no issue is filed, the snapshot gives Needs you the model, and
+# the model, which the built-in table should price, gets one plugin problem note however many looks and restarts; m
+# and x, no Claude or Codex model IDs, get none.
 t_noprice() {
   setup '[]'; unset CONVEYOR_NOPRICE_CMD
-  # The builder off m: m is a Claude model the pack offers and no seat runs. Bug: such a model, read with an empty
-  # CLI field, was read as the CLI, with no model, and got no issue.
-  loop control model claude claude-opus-5-5 >/dev/null || fail "the builder's seat was not set"
+  tune '.models.allowed.claude += ["claude-new-9"]'
+  loop control model claude claude-new-9 >/dev/null || fail "the builder's seat was not set"
   # serve's look, three times: twice in one loop, once more as a new loop that kept nothing in its shell.
   looks "noprice && noprice && NOPRICE_K='' && noprice"
-  out=$(jq -cs 'map([.title, (.labels | map(.name))])' "$STUB/filed" 2>&1)
-  [ "$out" = '[["Model price missing: m",["bug","P2"]],["Model price missing: x",["bug","P2"]]]' ] \
-    || fail "each model with no price did not get one issue, or a priced one got one, or a later look filed again: $out"
-  jq -e '.[0].body | contains("conveyor.sh prices add m ") and contains("Model prices")' -s "$STUB/filed" > /dev/null \
-    || fail "the issue does not say where to add the price: $(jq -sr '.[0].body' "$STUB/filed")"
-  [ "$(jq -c '[.held | index(100101, 100102) | . != null]' "$ST/control.json")" = '[true,true]' ] \
-    || fail "the issues filed were not held: $(jq -c .held "$ST/control.json")"
+  [ ! -e "$STUB/filed" ] || fail "an issue was filed for a model with no price: $(jq -sc 'map(.title)' "$STUB/filed")"
+  out=$(missing); [ "$out" = '["claude-new-9","m","x"]' ] || fail "the models with no price, a seat's among them, are not listed: $out"
+  out=$(loop snapshot --fresh | jq -c .needsYou.prices)
+  [ "$out" = '{"models":["claude-new-9","m","x"]}' ] || fail "the snapshot does not give Needs you the models with no price: $out"
+  [ "$(grep -c '^- ' "$ST/foreman/plugin-bugs.md" 2>&1)" = 1 ] && grep -q '^- [^ ]* · card - · No built-in price for claude-new-9: ' "$ST/foreman/plugin-bugs.md" \
+    || fail "a Claude model with no built-in price did not get one plugin problem note, or a stub model got one: $(cat "$ST/foreman/plugin-bugs.md" 2>&1)"
 }
-# Bug: a project with no judge (a Claude-only one: the judge needs another CLI than the reviewer's) filed no issue at
+# Bug (review of #1074): in a Foreman group the note went to this project's own folder, which neither the group's
+# Foreman nor the Board reads: both read the folder of the group's first project. Bug too: a pack price for a seat's
+# model kept it off the notes, though the built-in table still has no price for it. With this project second in a
+# group after alpha, and the pack pricing the builder's claude-new-9, the Board lists only m and x, and the note for
+# claude-new-9 is in alpha's Foreman folder, not this project's. Bug (review of #1074): with a name no record has
+# (gone) first in the group, the note went to this project's folder, though lib.sh and the Board pass gone over and
+# read alpha's. Bug too: each project of a group kept its own noted, so each noted the model in the shared file: the
+# second look here, with noprice.json gone as in another project of the group, adds no second note.
+t_nopricegroup() {
+  setup '[]'; unset CONVEYOR_NOPRICE_CMD
+  local a=$T/$CASE/alpha; mkdir -p "$a" "$XDG_CONFIG_HOME/conveyor"
+  jq -n --arg a "$a" --arg m "$R" '{records: [{repo: "alpha", main: $a}, {repo: "main", main: $m}], foreman: {groups: [["gone", "alpha", "main"]]}}' \
+    > "$XDG_CONFIG_HOME/conveyor/host.json"
+  tune '.models.allowed.claude += ["claude-new-9"] | .prices = {"claude-new-9": {input: 3, output: 15, cacheRead: 0.3}}'
+  loop control model claude claude-new-9 >/dev/null || fail "the builder's seat was not set"
+  looks 'noprice && rm "$NOPRICE" && NOPRICE_K="" && noprice'
+  out=$(missing); [ "$out" = '["m","x"]' ] || fail "the models with no price, the pack's price put over the table: $out"
+  [ "$(grep -c 'No built-in price for claude-new-9: ' "$a/conveyor/state/foreman/plugin-bugs.md" 2>&1)" = 1 ] \
+    || fail "not one note for a seat's model the built-in table does not price, in the group's Foreman folder: $(cat "$a/conveyor/state/foreman/plugin-bugs.md" 2>&1)"
+  [ "$(jq -c .noted "$ST/noprice.json")" = '["claude-new-9"]' ] || fail "a model another project noted is not on noted: $(cat "$ST/noprice.json")"
+  [ ! -e "$ST/foreman/plugin-bugs.md" ] || fail "the note went to this project's own folder: $(cat "$ST/foreman/plugin-bugs.md")"
+}
+# Bug: a project with no judge (a Claude-only one: the judge needs another CLI than the reviewer's) listed no model at
 # all, as the judge's seat, unset, failed the look.
 t_nopricenojudge() {
   setup '[]'; unset CONVEYOR_NOPRICE_CMD
   tune '.models.allowed = {claude: ["m"], codex: [], "claude-reviewer": ["claude-opus-5-5"]}'
   looks '! seat judge >/dev/null 2>&1 && noprice'
-  out=$(jq -cs 'map(.title)' "$STUB/filed" 2>&1)
-  [ "$out" = '["Model price missing: m"]' ] || fail "a project with no judge did not get its one issue for the model with no price: $out"
+  out=$(missing); [ "$out" = '["m"]' ] || fail "a project with no judge does not list its one model with no price: $out"
 }
-# Bug: a Codex model named by its family (sol) got an issue, though Codex runs the family's newest model, which has a
+# Bug: a Codex model named by its family (sol) was listed, though Codex runs the family's newest model, which has a
 # price: the family name is no model ID. The model it resolves to is the one priced. Here sol resolves to
 # gpt-6.3-sol, which no price row prices and the host's report does not list (hidden): only the family's resolved ID
-# names it, so a look that skipped family names, and did not resolve them, files no issue for it.
+# names it, so a look that skipped family names, and did not resolve them, does not list it.
 t_nopricefamily() {
   setup '[]'; unset CONVEYOR_NOPRICE_CMD
   export CODEX_HOME=$T/$CASE/codex; mkdir -p "$CODEX_HOME" && echo '{"models":[{"slug":"gpt-6.2-sol","visibility":"list"},{"slug":"gpt-6.3-sol","visibility":"hide"}]}' > "$CODEX_HOME/models_cache.json"
   tune '.models.allowed.codex = ["sol"]'
   jq '.reviewer = {model: "sol", effort: "medium"}' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
   looks '[ "$(seat reviewer | jq -r .model)" = sol ] && noprice'
-  out=$(jq -cs 'map(.title)' "$STUB/filed" 2>&1)
-  [ "$out" = '["Model price missing: gpt-6.3-sol","Model price missing: m"]' ] \
-    || fail "a Codex family name got an issue in place of the model it runs, or that model, with no price, got none: $out"
+  out=$(missing); [ "$out" = '["gpt-6.3-sol","m"]' ] \
+    || fail "a Codex family name is listed in place of the model it runs, or that model, with no price, is not: $out"
 }
-# Bug: a pack that sets models.allowed got an issue for each model of the host's Codex cache, though the Board offers
-# only the pack's list and no seat runs them (seven held issues for models the project never used). The host's models
-# are looked at only when the pack sets no list: then the Board offers them (t_nopricehost).
+# Bug: a pack that sets models.allowed listed each model of the host's Codex cache, though the Board offers only the
+# pack's list and no seat runs them (seven models the project never used). The host's models are looked at only when
+# the pack sets no list: then the Board offers them (t_nopricehost).
 # The pack's models.allowed.codex has the host's Codex models added (#794), so one only Codex reports is offered, and
-# with no price gets its issue too.
+# with no price is listed too. Bug (review of #1074): such a model, offered and never run, got a plugin problem note;
+# the note is for a model the belt runs.
 t_nopriceallowed() {
   setup '[]'; unset CONVEYOR_NOPRICE_CMD
   jq -cn '{at: (now | floor), clis: {codex: ["gpt-extra-9"]}}' > "$ST/clis.json"
   looks 'noprice'
-  out=$(jq -cs 'map(.title)' "$STUB/filed" 2>&1)
-  [ "$out" = '["Model price missing: gpt-extra-9","Model price missing: m","Model price missing: x"]' ] \
-    || fail "a model the host's Codex reports, added to the pack's models.allowed.codex and offered, got no issue: $out"
+  out=$(missing); [ "$out" = '["gpt-extra-9","m","x"]' ] \
+    || fail "a model the host's Codex reports, added to the pack's models.allowed.codex and offered, is not listed: $out"
+  ! grep -q 'gpt-extra-9' "$ST/foreman/plugin-bugs.md" 2>/dev/null || fail "a model only offered got a plugin problem note: $(cat "$ST/foreman/plugin-bugs.md")"
 }
-# With no models.allowed the Board offers the host's Codex models, so one with no price gets its issue.
+# With no models.allowed the Board offers the host's Codex models, so one with no price is listed.
 t_nopricehost() {
   setup '[]'; unset CONVEYOR_NOPRICE_CMD
   jq -cn '{at: (now | floor), clis: {codex: ["gpt-extra-9"]}}' > "$ST/clis.json"
   tune 'del(.models.allowed)'
   looks 'noprice'
-  out=$(jq -cs 'map(.title)' "$STUB/filed" 2>&1)
-  [ "$(jq -c 'index("Model price missing: gpt-extra-9") != null' <<<"$out")" = true ] \
-    || fail "with no models.allowed, a Codex model the host reports and the Board offers got no issue: $out"
+  out=$(missing)
+  [ "$(jq -c 'index("gpt-extra-9") != null' <<<"$out")" = true ] \
+    || fail "with no models.allowed, a Codex model the host reports and the Board offers is not listed: $out"
 }
-# Bug: a model only a session's result names (asked for one model, the CLI ran another) got no issue: the look read
+# Bug: a model only a session's result names (asked for one model, the CLI ran another) was not listed: the look read
 # the settings and the CLIs' lists, never the models the sessions ran, which the Board prices and lists under Seen.
-# Bug too: a failed build's models (the blocked line's spent), which the Board lists, got none. As the Board: a build's
+# Bug too: a failed build's models (the blocked line's spent), which the Board lists, were not. As the Board: a build's
 # models of the last 30 days count, a failed one's too, and a review's own model; a review's stats (priced at its own
 # model), a test's, an older build's and a line that does not read do not.
 t_nopriceran() {
@@ -223,27 +249,33 @@ t_nopriceran() {
     printf '{"card":"c0","step":"build","time":"%s","stats":{"models":["claude-old-9"]}}\n' "$old"
     echo '{"card":"c2","stats":{"models":[' ; } >> "$ST/cards.jsonl"
   # A failed build that `retry` took out of the card records: its line is in retried.jsonl only. Bug it catches: a look
-  # that read the card records alone filed no issue for it, though the Board lists it.
+  # that read the card records alone did not list it, though the Board lists it.
   printf '{"card":"c3","step":"blocked","time":"%s","spent":{"step":"build","model":"claude-opus-5-5","stats":{"models":["claude-spent-9"]}}}\n' "$now" >> "$ST/retried.jsonl"
   looks 'noprice'
-  out=$(jq -cs 'map(.title)' "$STUB/filed" 2>&1)
-  [ "$out" = '["Model price missing: claude-ran-9","Model price missing: claude-reviewer-9","Model price missing: claude-spent-9","Model price missing: m","Model price missing: x"]' ] \
-    || fail "a model a session (or a failed one) ran, or a review's own, got no issue, or a review's stats, a test's or an older one got one: $out"
+  out=$(missing); [ "$out" = '["claude-ran-9","claude-reviewer-9","claude-spent-9","m","x"]' ] \
+    || fail "a model a session (or a failed one) ran, or a review's own, is not listed, or a review's stats, a test's or an older one is: $out"
 }
-# Bug: a model only the research lane's sessions ran (no card's step) is listed under Seen but got no issue: the look
-# read the card records only. A session outside the lane's folder does not count, as on the Board.
+# Bug (#1074): the models only the research lane's sessions ran were listed (an embedding model, older chat models),
+# though the belt never runs them. With a lane session that ran research-9, the look lists only the pack's m and x.
 t_nopricelane() {
   export HOME=$T/$CASE/home; mkdir -p "$XDG_CONFIG_HOME/conveyor"
   setup '[]'; unset CONVEYOR_NOPRICE_CMD
   jq -n --arg m "$R" '{records: [{repo: "main", main: $m, lanes: {research: {worktree: "~/lane"}}}]}' > "$XDG_CONFIG_HOME/conveyor/host.json"
   local p=$HOME/.claude/projects/x t; t=$(TZ=UTC p_date now +%Y-%m-%dT%H:%M:%SZ); mkdir -p "$p"
-  sess() { jq -cn --arg m "$1" --arg c "$2" --arg t "$t" '{type: "assistant", cwd: $c, sessionId: $m, timestamp: $t, message: {model: $m}}'; }
-  { sess research-9 "$HOME/lane"; sess outside-9 "$HOME/lane-x"; } > "$p/s.jsonl"
-  # Two looks in one loop, a lane session that ran late-9 between them, the settings the same. Bug it catches: a later
-  # look skipped as the settings had not changed, so a model the lane ran after the loop's first look got no issue.
-  # The line and the path are put in here: the engine the look sources sets a p of its own.
-  looks "noprice && printf '%s\n' $(printf %q "$(sess late-9 "$HOME/lane")") >> $(printf %q "$p/s.jsonl") && noprice"
-  out=$(jq -cs 'map(.title)' "$STUB/filed" 2>&1)
-  [ "$out" = '["Model price missing: m","Model price missing: research-9","Model price missing: x","Model price missing: late-9"]' ] \
-    || fail "a model only the research lane ran (or ran after the first look) got no issue, or one outside the lane got one: $out"
+  jq -cn --arg c "$HOME/lane" --arg t "$t" '{type: "assistant", cwd: $c, sessionId: "s1", timestamp: $t, message: {model: "research-9"}}' > "$p/s.jsonl"
+  looks 'noprice'
+  out=$(missing); [ "$out" = '["m","x"]' ] || fail "a model only the research lane ran is listed as one with no price: $out"
+}
+# Bug (#1074): the held "Model price missing" issues an older Conveyor filed stayed open in the project's repository.
+# The first look closes each one noprice.json's filed names, with a comment that says the Board shows the model now,
+# and writes to no other issue; a second look, as a new loop, closes nothing, as filed is empty then.
+t_nopriceclose() {
+  setup '[]'; unset CONVEYOR_NOPRICE_CMD
+  jq -n '{filed: [{model: "m", issue: 100201, at: "2026-11-19T08:00:00Z"}, {model: "x", issue: 100202, at: "2026-11-19T08:00:01Z"}]}' > "$ST/noprice.json"
+  looks "noprice && NOPRICE_K='' && noprice"
+  [ "$(cat "$STUB/closed" 2>&1)" = $'100201\n100202' ] || fail "the filed issues were not closed once each, or another was: $(cat "$STUB/closed" 2>&1)"
+  [ "$(grep -c 'Rules, Model prices' "$STUB/close-comments" 2>&1)" = 2 ] && grep -q '`m`' "$STUB/close-comments" \
+    || fail "a close has no comment that says where the price shows now: $(cat "$STUB/close-comments" 2>&1)"
+  [ ! -e "$STUB/filed" ] && [ ! -e "$STUB/comments" ] || fail "the look filed or commented on another issue"
+  [ "$(jq -c .filed "$ST/noprice.json")" = '[]' ] || fail "the closed issues are still on filed: $(jq -c .filed "$ST/noprice.json")"
 }
