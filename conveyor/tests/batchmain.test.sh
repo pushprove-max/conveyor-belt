@@ -9,7 +9,7 @@
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
-# batchsetup, cardof and batchruns are batch.test.sh's: the runner loads every case file into one shell. A change to
+# batchsetup, cardof, batchruns and lintleft are batch.test.sh's: the runner loads every case file into one shell. A change to
 # batch.test.sh's helpers or setup runs this file too, through its link in .conveyor/test-links.json.
 
 # What main gets during the batch's one run, for the cases below: $STUB/during is run once, in main's checkout, by the
@@ -96,6 +96,30 @@ EOF
   st 'select(.issue == 8 and .step == "test" and .result == "fail") | .tail' | grep -q 'eight beside flag-x' || fail "#8's test line does not name the failing check: $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
   grep -q 'eight beside flag-x' "$STUB/fixbrief" || fail "#8's fix was not given the failing check"
   [ "$(sed -n '1p;$p' "$R/a.txt" | tr '\n' ' ')" = "seven eight-fixed " ] || fail "main does not hold #7's change and #8's fixed one: $(cat "$R/a.txt")"
+}
+
+# Bug: the card that runs a batch landed with a lint finding of its own. Main gets flag-x during the batch's run of #8
+# and #7, and the stub linter finds each line `seven` or `eight` of a tree with flag-x: so each card's gate passed
+# before, but on main as it moved both cards fail it. rebatch() runs the batch again there; #8 leaves by unbatch, and
+# #7, alone, is apart with no card landing, its worktree already on main: it must go back to its landing gate, not
+# land. Each card gets its lint fix on main, and blocks when the finding stays.
+t_batchmovedlint() {
+  batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; echo 8 > "$STUB/ready"
+  echo 'case $PWD in *-7) sed -i 1s/.*/seven/ a.txt ;; *) grep -qx eight a.txt || echo eight >> a.txt ;; esac' > "$STUB/build"
+  printf '%s\n' 'r=0; [ -e flag-x ] || exit 0' \
+    'for f; do n=0; while IFS= read -r l; do n=$((n + 1)); case $l in seven|eight) echo "$f:$n: E1 $l beside flag-x"; r=1 ;; esac; done < "$f"; done; exit $r' \
+    > "$STUB/lint" || fail "the stub linter"
+  tune --arg r "bash $STUB/lint {files}" '.lint = {commands: [{files: ["*.txt"], run: $r}]}'
+  during ': > flag-x; git add flag-x; git commit -qm "flag-x"'
+  # loop: only a whole card run shows card() taking the apart card from its batch back to its landing gate
+  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
+  c7=$(cardof 7)
+  grep -qx "conveyor: card $c7: the lint check failed on its batch's change on main as it is now, a red run, so the batch is run again there" <<<"$out" \
+    || fail "rebatch() did not find the lint red run on main as it moved: $out"
+  grep -qx "conveyor: card $c7: the lint check failed on its change in the batch of card $c7: it leaves the batch with no test failure, and its landing gate deals with it on main" <<<"$out" \
+    || fail "#7 did not leave its batch for its lint: $out"
+  [ -z "$(st 'select(.step == "landed")')" ] && [ "$(sed -n 1p "$R/a.txt")" = one ] || fail "a card landed with its lint finding: $(st 'select(.step == "landed")') $(cat "$R/a.txt")"
+  lintleft 7; lintleft 8
 }
 
 # The owner (2026-11-13): a batch landed only on the main its run was on, so each card on other files that landed

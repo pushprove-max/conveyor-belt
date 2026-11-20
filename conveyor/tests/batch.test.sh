@@ -382,3 +382,55 @@ t_batchapply() {
     || fail "a card's change is left in main's checkout with no commit: $(git -C "$R" diff HEAD) $(st 'select(.step == "landed")')"
   for s in $(st 'select(.step == "landed") | .sha'); do git -C "$R" merge-base --is-ancestor "$s" main || fail "a landed line names $s, which main does not hold"; done
 }
+
+# The lint gate for a batch (lintbatch(), lib/lint.sh) in whole card runs: #7, #8 and #9 as in t_batchland, the
+# pack's lint command the stub linter $STUB/lint with <word>: it finds each line of a.txt that is <word> when a.txt
+# has a line `eight` too. So no card's change alone has a finding (each one's gate passes, at its turn or while it
+# waits), but the batch's change does, on the line of the card whose word it is. Every session that is not the build
+# (the lint fix) makes the same change again, so the finding stays.
+lintloop() { # <word>
+  batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"
+  echo 'case $PWD in *-7) sed -i 1s/.*/seven/ a.txt ;; *-8) grep -qx eight a.txt || echo eight >> a.txt ;; *) sed -i 10s/.*/nine/ a.txt ;; esac' > "$STUB/build"
+  printf '%s\n' 'w=$1; shift; r=0' \
+    'for f; do grep -qx eight "$f" || continue; n=0; while IFS= read -r l; do n=$((n + 1)); [ "$l" != "$w" ] || { echo "$f:$n: E1 $w beside eight"; r=1; }; done < "$f"; done; exit $r' \
+    > "$STUB/lint" || fail "the stub linter"
+  tune --arg r "bash $STUB/lint $1 {files}" '.lint = {commands: [{files: ["*.txt"], run: $r}]}'
+  # A card that leaves its batch for its lint is fitted onto main, given its landing fix there and blocked when the
+  # finding stays.
+  # loop: only whole card runs show that path from the batch to main
+  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
+  c7=$(cardof 7); c8=$(cardof 8); c9=$(cardof 9)
+  grep -q "card $c7 tests a batch of 3: $c8 $c9 $c7" <<<"$out" || fail "#7 did not test a batch of three: $out"
+}
+# The card <issue> that left the batch for its lint: no test failure, one lint fix, then blocked on main as the
+# others left it.
+lintleft() { # <issue>
+  [ -z "$(st "select(.issue == $1 and .step == \"test\" and .result == \"fail\")")" ] || fail "#$1 was told a test failure: $(st "select(.issue == $1 and .step == \"test\")")"
+  [ "$(st "select(.issue == $1 and .step == \"fix\") | .reason")" = 'lint: 1 finding(s) of the change on main as it is now' ] \
+    || fail "#$1 did not get one lint fix on main: $(st "select(.issue == $1) | \"\(.step) \(.reason)\"" | tr '\n' ,)"
+  [ "$(st "select(.issue == $1 and .step == \"blocked\") | .reason" | head -n 1)" = 'lint: 1 findings left after its fix session; nothing landed' ] \
+    || fail "#$1 did not block once its lint fix was spent: $(st "select(.issue == $1) | \"\(.step) \(.reason)\"" | tr '\n' ,)"
+}
+
+# Bug: a batch whose combined change has a finding from a card it took (#9: nine beside #8's eight) fails that card's
+# tests, sending it to a test fix, or lands none of the batch. #9 leaves by unbatch; #8 and #7 land; #9, fitted onto
+# main with eight, gets its lint fix there, and blocks when the finding stays.
+t_batchlinttaken() {
+  lintloop nine
+  grep -qx "conveyor: card $c9: the lint check failed on its change in the batch of card $c7: it leaves the batch with no test failure, and its landing gate deals with it on main" <<<"$out" \
+    || fail "#9 did not leave the batch for its lint: $out"
+  [ "$(st 'select(.step == "landed") | .batch | join(" ")' | sort -u)" = "$c8 $c7" ] || fail "#8 and #7 did not land together: $(st 'select(.step == "landed")')"
+  lintleft 9
+  [ "$(sed -n '1p;10p;$p' "$R/a.txt" | tr '\n' ' ')" = "seven 10 eight " ] || fail "main does not hold #7's and #8's changes alone: $(cat "$R/a.txt")"
+}
+
+# Bug: the same with the finding on the change of the card that runs the batch (#7: seven beside eight). #7 is apart;
+# #8 and #9 land; #7, fitted onto main, gets its lint fix there and blocks.
+t_batchlintrunner() {
+  lintloop seven
+  grep -qx "conveyor: card $c7: the lint check failed on its change in the batch of card $c7: it leaves the batch with no test failure, and its landing gate deals with it on main" <<<"$out" \
+    || fail "#7 did not leave its batch for its lint: $out"
+  [ "$(st 'select(.step == "landed") | .batch | join(" ")' | sort -u)" = "$c8 $c9" ] || fail "#8 and #9 did not land together: $(st 'select(.step == "landed")')"
+  lintleft 7
+  [ "$(sed -n '1p;10p;$p' "$R/a.txt" | tr '\n' ' ')" = "one nine eight " ] || fail "main does not hold #8's and #9's changes alone: $(cat "$R/a.txt")"
+}

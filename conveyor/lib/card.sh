@@ -894,6 +894,9 @@ card() { # <card> <issue> [<branch> <tip>]
         [ $rc = 0 ] || { rm -f "$wt.ready"; locked giveway "$c" "$wt"; continue 2; }
         [ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" = "$old" ] && [ "$t" = 0 ] || continue
       fi
+      # Apart from its batch for its lint (lintleave(), lib/lint.sh): it goes back to its landing gate, also when main
+      # did not move (its batch run on main as it moved, rebatch(), lands no other card), so it never lands on that finding.
+      [ "$apart" != lint ] || continue
       while :; do
         # An ordered or a ready card went past this one since its claim (it holds its files only from its landing step,
         # so that is where it is passed): it claims again, waits for that card, and is fitted onto main as that card

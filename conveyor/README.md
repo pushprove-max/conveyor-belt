@@ -1495,12 +1495,18 @@ What this gives up: two changes that each passed alone can fail together in a ca
 whole test on main is the net. Green, main gets one commit per card, each with its own message and trailers, in one
 move, and one push carries them; each card's landed line is its own, with `batch` naming the batch's cards. Red, the
 batch is split, halves then single cards, until the card that breaks it is found: the others land, and that card goes
-to its fix with that run's output, as when its own tests fail. Each run is of the product checks on the change of the cards in it, then the
-tests; a check that fails is a red run. A batch whose run passed lands on that run when
+to its fix with that run's output, as when its own tests fail. Each run is of the pack's lint commands on the change of
+the cards in it, then the product checks, then the tests; a lint finding, a lint execution error and a check that fails
+are red runs. A missing lint tool lets the run go on. The card that the split finds for its lint gets no test failure
+and no test fix: it leaves the batch, and it is not ready. The others land. The card is then fitted onto main as they
+left it, and its landing gate gives it its fix session there, or blocks it (an execution error, or a finding still
+there after that fix). The card whose turn it is, left alone after the other cards leave, lands with no second lint
+run: its landing gate passed on that change and that main. A batch whose run passed lands on that run when
 main moved meanwhile (a card on other files landed during it), with no second run, when no card of it has changed since
-the run and its changes still apply, in its order, to main as it is now: the product checks run again on the batch's
-combined change there before it lands, and a check that fails is a red run: the batch is run again there and split, and
-the card that breaks it goes to its fix. When the cards that landed meanwhile touch a test file the batch touches too,
+the run and its changes still apply, in its order, to main as it is now: the lint commands and the product checks run
+again on the batch's combined change there before it lands, and a lint finding or execution error or a check that fails
+is a red run: the batch is run again there and split, and the card that breaks it goes to its fix, or leaves the batch
+for its lint, as above. When the cards that landed meanwhile touch a test file the batch touches too,
 the batch is tested again on main as it is now before it lands. A card of it whose
 change no longer applies to main leaves the batch and is fitted afterwards; the others land. A batch
 that does not land for another reason sends that card to its tests again, alone, before it lands alone. A card whose change does not apply on top of the

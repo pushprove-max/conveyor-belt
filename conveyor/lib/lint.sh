@@ -3,7 +3,8 @@
 # The lint check (docs/configuration.md, Lint): the pack's lint.commands, each run on the files of a change it reads,
 # and its result. Sourced, never run: by commands/lint.sh (conveyor.sh lint), commands/doctor.sh (lintdoctor),
 # commands/retry.sh (lintrule) and lib/card.sh (the review and landing gates, lintgate; lintwait, the gate for a
-# waiting card, is called by settle() in lib/claim.sh, in a card's shell). It uses packget (lib/prompts.sh) and the test slots
+# waiting card, is called by settle() in lib/claim.sh, in a card's shell, and lintbatch and lintleave, the gate for a
+# batch, by batch() and rebatch()). It uses packget (lib/prompts.sh) and the test slots
 # (lib/slots.sh), sourced before it; lintratchet also uses depdirs (lib/push.sh) and CARDS (lib/paths.sh); lintgate
 # the card's steps (block, session, checked, record, giveway, cardpatch), which a card's shell has.
 #
@@ -453,6 +454,40 @@ lintwait() { # <card> <issue> <worktree>
   rm -f "$3.ready"
   echo "conveyor: card $1: its lint found $([ $rc = 1 ] && echo findings || echo 'an execution error') while it waits: it runs no check or test, and its landing gate deals with it at its turn"
   return 1
+}
+
+# The gate for a batch's combined change (batch() and rebatch(), lib/claim.sh), before its product checks: the same
+# run on <worktree>'s staged change, the change of <the run's cards> on the commit the worktree is on. 0: the run goes
+# on (a pass, a missing tool, no lint command or the rule off); 1: findings of the change's or an execution error
+# (it prints which), a red run for the batch's split only. It writes no lint line: a line on a card that waits in the
+# batch would end that card's wait on the Board. The card alone, holding the change its own tests passed on, on the
+# commit they passed on (tested()), runs nothing: its gate passed there before those tests (the landing gate, or the
+# gate for a waiting card), so a batch whose other cards all leave lints the card no second time. On main moved since
+# (rebatch()), it runs.
+lintbatch() { # <card> <worktree> <the run's cards>
+  local c=$1 wt=$2 l base o rc
+  shift 2
+  lintrule || return 0
+  packget lint l || { echo "conveyor: card $c: the engine could not read the pack's lint field for its batch's change"; return 1; }
+  [ -n "$l" ] || return 0
+  base=$(git -C "$wt" rev-parse -q --verify HEAD) && o=$(mktemp) || { echo "conveyor: card $c: the engine could not start the lint check of its batch's change"; return 1; }
+  [ "$*" != "$c" ] || ! testedhere "$wt" || [ "$(jq -r .head "$wt.ready" 2>/dev/null)" != "$base" ] || { rm -f "$o"; return 0; }
+  lintrun "$wt" "$base" "$c" "$o"; rc=$?; rm -f "$o"
+  [ $rc != 0 ] || return 0
+  echo "conveyor: card $c: the lint check found $([ $rc = 1 ] && echo findings || echo "an execution error ($LINT_WHY)") on the change of $*: a red run of the batch, for its split only"
+  return 1
+}
+# The card a batch's split finds with a lint red run (lintbatch) leaves the batch with no test failure and no test
+# fix: by apart (set to lint, so card() takes it back to its landing gate even on a main that did not move) when it
+# is <card>, the card that runs the batch (batch()'s local), else by unbatch. Its
+# <worktree>.ready is removed, so no batch takes it again; once fitted onto main, its landing gate (lintgate) gives it
+# its fix session there, or blocks it. A card that the batch took leaves <card>'s kept change (<worktree>.cpatch,
+# gather()) holding its own: that file is removed, so the card is not stacked onto its own change (stackto()), and a
+# card waits on <card> as on one whose change cannot be read (together()).
+lintleave() { # <card> <worktree> <the card that leaves>
+  # shellcheck disable=SC2034 # apart is batch()'s, read by card()
+  if [ "$3" = "$1" ]; then apart=lint; rm -f "$2.ready"; else rm -f "$CARDS/$3.ready" "$2.cpatch"; unbatch "$3"; fi
+  echo "conveyor: card $3: the lint check failed on its change in the batch of card $1: it leaves the batch with no test failure, and its landing gate deals with it on main"
 }
 
 # `conveyor.sh lint`: the pack's lint commands on <worktree>'s tree, the change being from <base>, with no base run:

@@ -76,6 +76,14 @@ same lint commands run first, once in the wait. A pass and a missing tool let it
 execution error stops them, with no fix session. The card is then not ready: no batch takes it, and the lint does not
 run again while it waits. At its turn, its landing gate gives it its fix session, or blocks it on an execution error.
 
+A batch runs the same lint commands on the combined change of its cards, before its product checks and tests. This is
+true each time the batch is split, and when the batch runs again on main after main moved. A pass and a missing tool
+let the batch go on. A finding or an execution error is a red run, and the batch is split to find the card that
+causes it. That card gets no test failure and no test fix. It leaves the batch, and the other cards land. The card is
+then fitted onto main, and its landing gate gives it its fix session there, or blocks it. If each of the other
+cards fails or leaves, the card whose turn it is lands alone, with no second lint run, on the main where its landing
+gate passed. On a main that moved, its lint runs again, and a finding sends it back to its landing gate.
+
 The lint commands must not change the card's work. Before they run, the worktree must have no change that is not
 staged, and no file that git does not track or ignore. If it has one, that is an execution error, and Conveyor changes
 nothing. After they run, the staged change, the worktree and the untracked files must be as before. This is also true

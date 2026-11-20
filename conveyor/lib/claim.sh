@@ -785,8 +785,10 @@ batchpass() { # <card> <worktree> <units json> <cases> <the run's cards>
 # is. When that is the card's own patch, the card is apart (sets apart): the others are tested and land without it,
 # then it is fitted onto main as they left it (card()); the batch returns 0, its own tests having passed. Should the card's own patch not apply in a run (a card it came after left), the batch is given up: the
 # cards not yet judged wait on at their claims, and the card is tested alone. Red, the batch is split, no test left out: its
-# first half, then its second on top of what passed, down to single cards. Each run is of the product checks on the
-# change of the cards in it, then the tests; a check that fails is a red run. A second half whose first half passed whole
+# first half, then its second on top of what passed, down to single cards. Each run is of the lint gate (lintbatch()),
+# then the product checks, on the change of the cards in it, then the tests; a lint finding or execution error and a
+# check that fails are red runs. A card red alone on top of what passed for its lint leaves the batch with no test
+# failure (lintleave(): by apart when it is the card, else unbatched), its landing gate dealing with it on main. A second half whose first half passed whole
 # is what just failed, so it is split with no run of its own (a single card is still run, for its output). A card red
 # alone on top of what passed is the one that breaks it: a card it took is told its exit, given that run's output
 # (<worktree>.test), and goes to its fix as if its own tests failed. Sets mates (the cards that passed, the card among
@@ -801,7 +803,7 @@ batchpass() { # <card> <worktree> <units json> <cases> <the run's cards>
 # longer holds. A run with none of those left runs nothing, and passes. Given up for it: two changes that each passed
 # alone can fail together in a case only one of them selects; the whole test on main is the net.
 batch() { # <card> <worktree> <the batch's cards, in order, the card among them>; returns the exit of the run that judged the card
-  local c=$1 wt=$2 m s t out rc lrc=1 id half split=0 whole='' todo=() in=() good=() k=() lost='' bw='' br='' bf='' bz='' keep bt bb=''
+  local c=$1 wt=$2 m s t out rc lrc=1 id half split=0 whole='' todo=() in=() good=() k=() lost='' bw='' br='' bf='' bz='' keep bt bb='' lr
   shift 2; mates=(); apart=''; TEST_BATCH=''
   # From here the worktree may hold the batch's changes, not the card's own: <worktree>.lent names the commit the
   # card's change (<worktree>.bpatch) goes on, for a card whose process is gone meanwhile (revive()); card() removes it.
@@ -826,12 +828,15 @@ batch() { # <card> <worktree> <the batch's cards, in order, the card among them>
       rm -rf "$wt.batchtest" "$wt.batchtestlog" "$wt.batchfirst"; echo "conveyor: card $c: its change no longer applied in its batch, so it is tested alone"; tests "$wt"; return
     fi
     [ ${#in[@]} != 0 ] || continue
-    bt=''; TEST_REFUSED=''
+    bt=''; TEST_REFUSED=''; lr=''
     if [ "$half" = 1 ] && [ "$whole" = "$id" ] && [ ${#in[@]} = ${#s[@]} ] && [ ${#in[@]} -gt 1 ]; then rc=1
     else
       k=("${good[@]}" "${in[@]}"); echo "conveyor: card $c tests a batch of ${#k[@]}: ${k[*]}"
       t=$SECONDS
-      if ! out=$(checks "$wt"); then rc=1; norun "$wt" "a product check failed on the change of ${k[*]}:"$'\n'"$out"
+      # The lint gate for a batch first (lintbatch(), lib/lint.sh): a finding or an execution error is a red run (lr)
+      # for the split only; the card it finds leaves the batch (lintleave(), below).
+      if ! lintbatch "$c" "$wt" "${k[@]}"; then rc=1; lr=1; norun "$wt" "the lint check failed on the change of ${k[*]}"
+      elif ! out=$(checks "$wt"); then rc=1; norun "$wt" "a product check failed on the change of ${k[*]}:"$'\n'"$out"
       # Every case the run would run passed on its cards' changes (batchkeep()): no run.
       elif keep=$(batchkeep "$c" "$wt" "${k[@]}") && jq -e .all <<<"$keep" >/dev/null; then
         rc=0; bt=$(jq -c '{cases: 0, kept}' <<<"$keep")
@@ -851,7 +856,8 @@ batch() { # <card> <worktree> <the batch's cards, in order, the card among them>
     [ $rc != 0 ] || good+=("${in[@]}")
     for m in "${in[@]}"; do
       # The card's run's times go with its output (testrec()): a later part's run sets them again.
-      if [ "$m" = "$c" ]; then lrc=$rc; keeprun "$wt" "$wt.batchtest" "$wt.batchtestlog" "$wt.batchfirst"; bw=$TEST_WAIT br=$TEST_RUN bf=$TEST_FREE bz=$TEST_REFUSED bb=$bt
+      if [ -n "$lr" ]; then lintleave "$c" "$wt" "$m"
+      elif [ "$m" = "$c" ]; then lrc=$rc; keeprun "$wt" "$wt.batchtest" "$wt.batchtestlog" "$wt.batchfirst"; bw=$TEST_WAIT br=$TEST_RUN bf=$TEST_FREE bz=$TEST_REFUSED bb=$bt
       elif [ $rc != 0 ]; then
         keeprun "$wt" "$CARDS/$m.test" "$CARDS/$m.testlog" "$CARDS/$m.first" && jq -c --argjson r "$rc" --argjson s "$t" '. + {fail: $r, sec: $s}' "$CARDS/$m.batch" > "$CARDS/$m.batch.new" && mv -f "$CARDS/$m.batch.new" "$CARDS/$m.batch"
       fi
@@ -868,9 +874,10 @@ batch() { # <card> <worktree> <the batch's cards, in order, the card among them>
 # one (owner, 2026-11-13: the batch holds the shared files through every run, so every card waiting on them waited for
 # one more run of 5 to 10 minutes each time another card landed). Both must hold: no card of it has changed since the
 # run (its staged change is the patch the run applied), and its changes still apply, in its order, to main as it is
-# now. They are applied there in the card's worktree and the product checks run on the combined change (again, on
-# main as it is then, each time main moves during them, so a card landing meanwhile costs no batch run): a check that
-# fails is a red run of the batch, as in batch(): with the card and another card in it, the card's worktree is left on
+# now. They are applied there in the card's worktree and the lint gate for a batch (lintbatch()) and the product checks
+# run on the combined change (again, on main as it is then, each time main moves during them, so a card landing
+# meanwhile costs no batch run): a lint finding or execution error and a check that fails are a red run of the batch,
+# as in batch() (where the card the split finds for its lint leaves the batch, lintleave()): with the card and another card in it, the card's worktree is left on
 # main as it is now with its change, mates the cards in it, and it returns 3 for card() to run the batch there
 # (batch() splits it and sends the card that breaks it to its fix); else the batch is tested again, as when a card of
 # it changed. So too when the cards landed during the run touch a test file the batch's change touches too
@@ -902,15 +909,19 @@ rebatch() { # <card> <worktree>; card()'s mates is the batch
     done
     if [ ${#k[@]} = 0 ]; then asitwas || return 2
     else
-      if ! m=$(checks "$wt"); then
-        m=${m//$'\n'/ }
+      # The lint gate for a batch first (lintbatch(), lib/lint.sh), x saying which failed: a red run as a check's is.
+      m=''; x=''
+      if ! lintbatch "$c" "$wt" "${k[@]}"; then x='the lint check'
+      elif ! m=$(checks "$wt"); then x='a product check'; fi
+      if [ -n "$x" ]; then
+        m=${m//$'\n'/ }; [ -z "$m" ] || m=": ${m:0:300}"
         if [ -z "$gone" ] && [ ${#k[@]} -gt 1 ]; then
           git -C "$wt" reset -q --hard 2>/dev/null && git -C "$wt" apply --index "$wt.bpatch" 2>/dev/null || { asitwas || return 2; return 1; }
-          echo "conveyor: card $c: a product check failed on its batch's change on main as it is now, a red run, so the batch is run again there: ${m:0:300}"
+          echo "conveyor: card $c: $x failed on its batch's change on main as it is now, a red run, so the batch is run again there$m"
           [ ${#left[@]} = 0 ] || unbatch "${left[@]}"
           mates=("${k[@]}"); return 3
         fi
-        asitwas || return 2; echo "conveyor: card $c: a product check failed on its batch's change on main as it is now, so the batch is tested again: ${m:0:300}"; return 1
+        asitwas || return 2; echo "conveyor: card $c: $x failed on its batch's change on main as it is now, so the batch is tested again$m"; return 1
       fi
       # Main moved again during the checks: the batch is fitted onto main as it is now and they run there, not its tests.
       m=$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null) && [ "$m" != "$new" ] && { new=$m; continue; }
