@@ -635,14 +635,13 @@ snapshot() (
   packget push.landAs pla 2>/dev/null || pla=''
   packget push.prMerge ppm 2>/dev/null || ppm=''
   packget pick pef 2>/dev/null && [ -n "$pef" ] || pef='{}'
-  pef=$(jq -c --argjson e "$EFFORTS" '{lists: ., efforts: $e}' <<<"$pef") || pef=null
   # Each card with its metrics and its runs' sums, then the waits ($d/cards: two arrays, $all[0] and $all[1]), from a
   # summary kept beside the card records ($STATE.cardruns): only the issues whose cards changed are made again.
   printf '%s\n%s\n' "$METRICS" "$CARDRUNS" > "$d/cardruns.jq" \
-    && python3 "$HERE/cardruns.py" "$d/priced" "$STATE.cardruns" "$d/cards" "$d/cardruns.jq" "$d/samples" "$(jq -r '.time | fromdate' "$d/health")" "$SAMPLE" "$yes" \
+    && python3 "$HERE/cardruns.py" "$d/priced" "$STATE.cardruns" "$d/cards" "$d/cardruns.jq" "$d/samples" "$ht" "$SAMPLE" "$yes" \
     || exit 1
   jq -cn --slurpfile all "$d/cards" --slurpfile hs "$d/health" --slurpfile allp "$d/paths" --slurpfile shots "$d/shots" --slurpfile onm "$d/onmain" --argjson mt "$mt" --slurpfile fl <(printf '%s' "$fl") --slurpfile so <(printf '%s' "$so") --slurpfile ft <(printf '%s' "$ft") --slurpfile su <(printf '%s' "$su") --argjson rl "$rl" --argjson dr "$dr" --argjson eng "$eng" --argjson tr "$tr" --argjson m "$models" --argjson next "$next" --slurpfile built <(printf '%s' "$built") \
-    --slurpfile iss "$d/issues" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" --arg pla "$pla" --arg ppm "$ppm" --argjson pef "$pef" \
+    --slurpfile iss "$d/issues" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" --arg pla "$pla" --arg ppm "$ppm" --arg pef "$pef" --argjson efforts "$EFFORTS" \
     --argjson control "$control" --argjson settings "$settings" --argjson accts "$(acctnames)" --argjson ga "$ga" --slurpfile q <(printf '%s' "$queue") --slurpfile lim "$d/limit" --slurpfile smp "$d/samples" --slurpfile pu "$d/pushes" --argjson every "$SAMPLE" --argjson priced "$pricedok" --argjson cr "$cr" --argjson ts "$ts" \
     --argjson max "$MAX_REVIEWS" --argjson wait "$((CLOSE_WAIT + 300))" --arg yes "$yes" --arg lintyes "$lintyes" --arg day "$day" --arg since "$since" --arg prev "$prev" \
     --argjson t0d "$t0d" --argjson t0w "$t0w" --argjson t0p "$t0p" '$fl[0] as $fl | $so[0] as $so | $ft[0] as $ft | $su[0] as $su | $built[0] as $built | $q[0] as $q | '"$DEPS$LEVEL$INSIDE"'
@@ -951,7 +950,7 @@ snapshot() (
        areaPrefix: $area,
        packLandAs: (if $pla == "" then null else $pla end),
        packPrMerge: (if $ppm == "" then null else $ppm end),
-       packPick: $pef,
+       packPick: (try {lists: ($pef | fromjson), efforts: $efforts} catch null),
        waitWake: $ww,
        forecast: forecast,
        awaitingDeploy: $built,
