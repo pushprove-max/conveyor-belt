@@ -206,6 +206,9 @@ cursor goes to the heading of that group.
 - **Models with no price.** One line for each project counts the models that the belt runs or offers with no price.
   **View in Model prices** shows only that project on the Board and opens its list on the Rules tab, where you add
   each price ([Models](configuration.md#models)).
+- **Engine stopped.** When a stop signal has held a project's engine for more than a minute (state T in `ps`), the
+  engine starts no card. One line says so and gives the command that resumes the engine and each stopped process
+  under it: `kill -CONT` with their process IDs. Run it on the machine where the engine runs.
 
 ## Health and Lanes
 

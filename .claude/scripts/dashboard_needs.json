@@ -1,4 +1,5 @@
 [
+  {"kind": "stopped", "from": ["needsYou", "stopped"], "title": "Engine stopped"},
   {"kind": "tests", "from": ["mainTest"], "title": "Tests failing on main"},
   {"kind": "engines", "from": ["needsYou", "engine"], "title": "Engine updates not taken"},
   {"kind": "testRules", "from": ["needsYou", "testRules"], "title": "Test issues held"},

@@ -187,7 +187,9 @@ Setup and the engine:
   `findings: <n>`, `missing: <tool>`, `error: <first line>`, or `empty` when no tracked file matches (the command is
   not called) ([Lint](configuration.md#lint)).
 - `setup pack-commit` shows the pack's change that is not committed. `setup pack-commit yes` commits only the pack on
-  the default branch, and `setup pack-commit no` commits nothing ([Setup](setup.md)).
+  the default branch, and `setup pack-commit no` commits nothing ([Setup](setup.md)). When the rule "Push when a card
+  lands" is on, `yes` also pushes the commit. If that push does not end in 30 seconds, it is stopped. The commit
+  stays, and main's next push takes it.
 - `install <commit>` installs that commit read-only.
 - `take`: a project that follows main takes main's newest commit when it passes its check.
 - `wording adversarial|review` prints the review wording.

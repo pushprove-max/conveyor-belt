@@ -63,6 +63,60 @@ t_packcommitpush() {
     && [ "$(git -C "$T/$CASE/origin" rev-parse main)" = "$(git -C "$R" rev-parse HEAD)" ] || fail "the pack's commit was not pushed: $out"
 }
 
+# The push rule on and a pre-push hook that takes 30 s (the slow step after the commit; its pid in $STUB/hook.pid),
+# with an engine running: a stand-in for the loop, started as the machine's Conveyor starts one (a process group of
+# its own, holding the run lock, its pid in loop.json), with a card's process under it. E is its pid.
+pcslowpush() {
+  packsetup; loop control rules push=on > /dev/null || fail "the push rule was not turned on"
+  local h; h=$(git -C "$R" rev-parse --path-format=absolute --git-path hooks) && mkdir -p "$h" \
+    && printf '#!/bin/sh\necho $$ > "%s"\nexec sleep 30\n' "$STUB/hook.pid" > "$h/pre-push" && chmod +x "$h/pre-push" || fail "the pre-push hook was not made" # sleep: the slow hook, ended by the push's limit or killed by the case
+  set -m; ( cd "$R" && exec 9>>"$ST/cards.jsonl.run" && flock 9 && { sleep 600 & wait; } ) & E=$!; set +m # sleep: the card's process under the stand-in, killed by the case
+  jq -cn --argjson p "$E" --arg t "$(p_started "$E")" '{pid: $p, started: $t}' > "$ST/loop.json" || fail "loop.json was not written"
+}
+pcended() { local s; s=$(ps -o stat= -p "$1" 2>/dev/null); [ -z "$s" ] || [[ $s == *Z* ]]; } # <pid>: ended (a zombie not yet reaped is ended too)
+
+# Bug (#1106): pack-commit yes pushed with no time limit, so the project's pre-push hook (waiting minutes for a test
+# slot the engine's cards held) kept it running past the Foreman's ask limit after its commit. Its push is now
+# stopped at its own limit (CONVEYOR_PACK_PUSH, 1 s here), hook and all, and it says the commit is made, not pushed.
+t_packcommitslow() {
+  pcslowpush; local out rc s=$SECONDS
+  out=$(CONVEYOR_PACK_PUSH=1 loop setup pack-commit yes 2>&1); rc=$?
+  local took=$((SECONDS - s)) hp; hp=$(cat "$STUB/hook.pid" 2>/dev/null); kill -- "-$E"
+  [ "$rc" = 1 ] && [ "$took" -lt 10 ] || { kill "$hp" 2>/dev/null; fail "pack-commit yes did not end at its push's limit (exit $rc after ${took}s): $out"; }
+  grep -qF "the push took more than 1s, so it was stopped; it goes with main's next push" <<<"$out" && grep -q '^conveyor: committed ' <<<"$out" \
+    || fail "it did not say the commit was made and the push stopped: $out"
+  [ "$(git -C "$R" log -1 --format=%s)" = 'Add the Conveyor pack' ] && [ "$(git -C "$T/$CASE/origin" rev-parse main)" = "$HEAD0" ] \
+    || fail "the commit was not kept, or the push went through"
+  [ -n "$hp" ] && pcended "$hp" || { kill "$hp" 2>/dev/null; fail "the pre-push hook ran on after the push was stopped"; }
+}
+
+# Bug (#1106): `foreman.sh ask <project> setup pack-commit yes` hit its time limit after its commit, and the engine
+# was left stopped (state T). The case runs the real ask: what a direct call of packcommit cannot show is how the ask's
+# own time limit ends its command, and that it leaves no process of the engine stopped. The ask's limit (5 s) is
+# shorter than the hook, so it ends pack-commit in its push. The push runs in a process group of its own (its
+# limit's), which the ask's end does not reach: a push left running kept the ask's output open for the hook's 30 s
+# (the ask returned late) and ran on after it. The records name no sender of the reported stop, so the case checks
+# what is left after the ask: no process of the push, and no stopped one of the engine.
+t_packcommitask() {
+  local out rc hp s i=0
+  R=$T/$CASE/main; mkdir -p "$XDG_CONFIG_HOME/conveyor" && jq -n --arg m "$R" '{records: [{repo: "main", main: $m}]}' > "$XDG_CONFIG_HOME/conveyor/host.json" \
+    || fail "the host file was not written"
+  pcslowpush
+  # The record's own checkout's engine (a pack with no plugin key runs it, as lib.sh ask says): this one.
+  mkdir -p "$R/conveyor" && printf '#!/usr/bin/env bash\nexec bash %q "$@"\n' "$SRC/conveyor.sh" > "$R/conveyor/conveyor.sh" || fail "the record's engine was not made"
+  s=$SECONDS
+  out=$(cd "$T/$CASE" && unset CONVEYOR_FOREMAN_ASK CONVEYOR_PACK_PUSH && CONVEYOR_CARDS=$T/$CASE/cards CONVEYOR_MAIN=$R ASK_LIMIT=5 \
+    bash "$SRC/foreman/foreman.sh" ask main setup pack-commit yes 2>&1); rc=$?
+  local took=$((SECONDS - s)) st; hp=$(cat "$STUB/hook.pid" 2>/dev/null)
+  # The hook is a real process that pack-commit's end tells to stop (TERM): it is given up to 3 s to end.
+  while [ -n "$hp" ] && ! pcended "$hp" && [ $((i++)) -lt 30 ]; do sleep 0.1; done
+  local left=; [ -n "$hp" ] && pcended "$hp" || { left=1; kill "$hp" 2>/dev/null; }
+  st=$(p_stoppedtree "$E"); kill -CONT -- "-$E" 2>/dev/null; kill -- "-$E"
+  [ "$rc" = 124 ] && [ "$took" -lt 9 ] && grep -q '^conveyor: committed ' <<<"$out" || fail "the ask did not end at its limit after the commit (exit $rc after ${took}s): $out"
+  [ -z "$left" ] || fail "the push's pre-push hook ran on after the ask ended"
+  [ -z "$st" ] || fail "the ask's end left the engine's processes stopped (state T): $st"
+}
+
 # Bug: with another branch checked out, the pack is committed there, or a question is asked.
 t_packcommitbranch() {
   packsetup; local out

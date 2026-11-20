@@ -353,6 +353,28 @@ t_stoppedengine() {
   h=$(CONVEYOR_NOW=$((now + 150)) loop health | jq -c '[.loop, .stuck, .engineStopped]'); kill "$c" "$e"
   [ "$h" = '[true,[],null]' ] || fail "a card under a running engine is stuck, or the engine reads as stopped: $h"
 }
+# Issue 1106: an engine held by a stop signal was named by `foreman status` alone; the Board's Needs you said
+# nothing, so the belt stood still for minutes until the owner looked. A stand-in for `serve` (holding the loop's
+# lock, its pid in loop.json) and the process under it are stopped, and health first reads them so at <now>: 30 s on,
+# the snapshot's Needs you names nothing yet; 90 s on (over a minute), it names the engine as stopped, with the
+# kill -CONT command that resumes the stand-in and the process under it.
+t_stoppedneeds() {
+  local e w now early late; setup '[]'; now=$(date +%s)
+  ( exec 9>>"$ST/cards.jsonl.run"; flock 9; sleep 600 & wait ) & e=$! # sleep: the process under the stand-in, killed below
+  # Poll: health reads the stopped pids from the real process tree (ps state T), and the stand-in's shell starts its
+  # child by itself, so wait for the child to be there.
+  for _ in $(seq 50); do w=$(pgrep -P "$e" sleep) && break; sleep 0.1; done
+  [ -n "$w" ] || { kill "$e"; fail "the stand-in's child process did not start"; }
+  jq -cn --argjson p "$e" --arg t "$(p_started "$e")" '{pid: $p, started: $t}' > "$ST/loop.json"
+  kill -STOP "$e" "$w"
+  CONVEYOR_NOW=$now loop health > /dev/null
+  early=$(CONVEYOR_NOW=$((now + 30)) loop snapshot --fresh | jq -c '.needsYou.stopped')
+  late=$(CONVEYOR_NOW=$((now + 90)) loop snapshot --fresh | jq -c '.needsYou.stopped | [.title, .reason, .pid, .since]')
+  kill -CONT "$e" "$w"; kill "$w" "$e" 2>/dev/null # the stand-in may end as its child does
+  [ "$early" = null ] || fail "an engine stopped for 30 s is in Needs you already: $early"
+  [ "$late" = "[\"The engine is stopped\",\"A stop signal holds the engine (state T), so it starts no card. Run kill -CONT $e $w to resume it and each stopped process under it.\",$e,\"$(jq -rn --argjson t "$now" '$t | todate')\"]" ] \
+    || fail "an engine stopped for over a minute is not in Needs you with the command that resumes it: $late"
+}
 # The card's own process stopped with the process under it (a builder under its timeout wrapper, as card() runs it),
 # no loop running: stuck at once, named with its pid and both pids (issue 1039: the command named the card's process
 # alone and left the builder stopped); resumed, it is not stuck; ended (missing), it is stuck at once as gone, with no

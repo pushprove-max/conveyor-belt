@@ -229,10 +229,10 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
       | ["wait:\(.c.card):\(.since):\($n)", "card waiting", $r,
           (if $n == 1 then "\($r) has waited \($m) minutes on " else "\($r) is still waiting, \($m) minutes now, on " end) + .on | gsub("\\s+"; " ") | .[0:600]]),
     # Every other kind of Needs you on the Board, from the list the Board reads too (.claude/scripts/dashboard_needs.json), each
-    # read from the snapshot field the list names: waiting, before and blocked are read from health, above (the push
-    # the Board lists under blocked wakes as "push failing"). A kind added to the list later wakes under its name.
-    # Each line is cut alone (one).
-    ($kinds[0][] | objects | select(.kind | IN("waiting", "before", "blocked") | not) | (.kind | one) as $k | .from as $from
+    # read from the snapshot field the list names: waiting, before, blocked and stopped (the stopped engine) are read
+    # from health, above (the push the Board lists under blocked wakes as "push failing"). A kind added to the list
+    # later wakes under its name. Each line is cut alone (one).
+    ($kinds[0][] | objects | select(.kind | IN("waiting", "before", "blocked", "stopped") | not) | (.kind | one) as $k | .from as $from
       | $snap | (try getpath($from) catch null) | (if type == "array" then .[] else . end) | objects
       | ((.issue | numbers | "#\(.)") // "") as $n
       | ([.issue, .ref, .commit, .time, .card] | map(select(. != null) | one) | join(":") | if . == "" then "" else ":" + . end) as $id

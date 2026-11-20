@@ -20,7 +20,9 @@
 #   later one is taken: commit, reason (its failed check, or the hooks it lacks), since; else null), and testRules
 #   (when the last pass of the test rules, lib/testrules.sh, had the switch on and matched more files than one day's
 #   cap, so it filed nothing: time, matched, cap; else null), and prices (the models the belt runs or offers with no
-#   price, as serve's last look found them, noprice(): models; else null), and pick (the rule Pick settings: a decision for each
+#   price, as serve's last look found them, noprice(): models; else null), and stopped (the engine, while a stop signal
+#   has held it for over a minute, as health's engineStopped: title, reason (with the kill -CONT command that resumes
+#   it and each stopped process under it), since, pid, pids; else null), and pick (the rule Pick settings: a decision for each
 #   group whose tenth trial card ended, {group, title, reason, since, time (since again: the Foreman watcher keys it on time), trial, default}, cost.trials.groups' due; and,
 #   while the control record holds pickBack, the rule's own return to shadow, {group: null, title, reason, since, time}).
 #   priceNotes, beside it, is each plugin problem note serve's look made for a model the built-in price table does
@@ -909,6 +911,14 @@ snapshot() (
          engine: $eng,
          testRules: $tr,
          prices: $np,
+         # The engine held by a stop signal (state T) for over a minute, as health reads it (engineStopped): it starts
+         # no card until a SIGCONT resumes it; the command it gives also resumes each stopped process under it, whose
+         # cards make no progress while held (#1106: only foreman status said so).
+         # pids: the pid of the engine, then each stopped process under it (health, views.sh).
+         stopped: ($h.engineStopped | objects | select(.since | strings | fromdate? | . != null and ($h.time | fromdate) - . > 60)
+           | (.pids | map(tostring) | join(" ")) as $p
+           | {title: "The engine is stopped", reason: "A stop signal holds the engine (state T), so it starts no card. Run kill -CONT \($p) to resume it and each stopped process under it.",
+              since, pid, pids}) // null,
          # The rule Pick settings: one decision a group whose ten trial cards ended ($pg due), with the counts and spend
          # of both sides, and the line of the return of the rule to shadow (pickBack in the control record, modelpick()).
          pick: ([$pg[] | select(.due != null) | {group, title: "Pick settings: decide on \(.model) at \(.effort) effort for \(.group) cards",

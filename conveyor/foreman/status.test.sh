@@ -324,6 +324,7 @@ grep -qxF 'alpha: #5 is blocked since 2026-11-15T11:00:00Z: tests failed twice' 
 t_stopped() {
 CASE=stopped; fixture stopped
 snap '.health.engineStopped = {pid: 4242, since: "2026-11-15T11:40:00Z", pids: [4242, 4250]}
+  | .needsYou.stopped = {title: "The engine is stopped", reason: "Run kill -CONT 4242 4250 to resume them.", since: "2026-11-15T11:40:00Z", pid: 4242, pids: [4242, 4250]}
   | .health.stuck = [{card: "c5", issue: 5, step: "build", since: "2026-11-15T11:30:00Z", stopped: {pid: 4242, of: "engine", since: "2026-11-15T11:40:00Z"}},
   {card: "c8", issue: 8, step: "build", since: "2026-11-15T11:30:00Z", stopped: {pid: 4242, of: "engine", since: "2026-11-15T11:40:00Z", own: {pid: 4444, since: "2026-11-15T11:45:00Z", pids: [4444, 4450, 4451]}}},
   {card: "c6", issue: 6, step: "review", since: "2026-11-15T11:00:00Z", stopped: {pid: 4343, of: "card", since: "2026-11-15T11:31:00Z", pids: [4343, 4350]}},
@@ -342,6 +343,9 @@ w=$(cat "$FD"/pending/*.wake)
 grep -qxF 'Conveyor: alpha: stuck: #7; stopped: #5 #8 #6' <<<"$w" || fail "the wake's first line does not name the stopped cards: $w"
 grep -qxF "alpha: the engine is stopped (state T) since 2026-11-15T11:40:00Z: \`kill -CONT 4242 4250\` resumes it (it holds #5, #8)$own" <<<"$w" \
   || fail "the wake does not name the stopped engine and how to resume it: $w"
+# Issue 1106: the Board's Needs you lists the stopped engine too (needsYou.stopped, a kind of dashboard_needs.json);
+# the watcher reads it from health alone, so neither the status nor the wake names it a second time.
+! grep -qF 'The engine is stopped' <<<"$out$w" || fail "the stopped engine is named twice, once from the Board's Needs you: $out $w"
 }
 
 cases=(status wake suite suitedead mainred prmerge building slowlive slowdown nosnapanew nosnapquiet nosnaplast healthwake polllog unreported stopped)

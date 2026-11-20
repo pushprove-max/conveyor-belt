@@ -292,9 +292,12 @@ heldstart() {
 # changes in the checkout, staged or not, are left as they are), "Add the Conveyor pack" when the default branch has no
 # pack yet, else "Update the Conveyor pack", and pushes it to the pack's remote when the control record's rule "Push
 # when a card lands" (rules.push) is on; no commits nothing and says the pack stays on this machine. With the default
-# branch not checked out, or a conflict in the pack, it says so, asks nothing and commits nothing (exit 1).
+# branch not checked out, or a conflict in the pack, it says so, asks nothing and commits nothing (exit 1). A push
+# that takes more than PACK_PUSH seconds is stopped: the commit stays, and it says so (exit 1).
+# CONVEYOR_PACK_PUSH, when set, is used in place of the 30 s limit (the tests' seam).
+PACK_PUSH=${CONVEYOR_PACK_PUSH:-30}
 packcommit() {
-  local f=.conveyor/project.json st on msg out
+  local f=.conveyor/project.json st on msg out rc o p
   [ $# -le 1 ] && [[ ${1-ask} =~ ^(ask|yes|no)$ ]] || { echo "usage: conveyor.sh setup pack-commit [yes | no]" >&2; return 2; }
   st=$(git -C "$MAIN" status --porcelain -- "$f") || return 1
   [ -n "$st" ] || { echo "ok: the pack is committed"; return 0; }
@@ -320,8 +323,25 @@ packcommit() {
     || { echo "conveyor: the pack was not committed: $out" >&2; return 1; }
   echo "conveyor: committed $f on $BRANCH: $msg ($(git -C "$MAIN" rev-parse --short HEAD))"
   if [ "$(ctl 2>/dev/null | jq -r '.rules.push')" = true ]; then
-    out=$(git -C "$MAIN" push -q "$REMOTE" "$BRANCH" 2>&1) \
-      || { echo "conveyor: the pack's commit was not pushed to $REMOTE $BRANCH: $out" >&2; return 1; }
+    # The push runs under PACK_PUSH seconds, in a process group of its own (timeout's) that is ended whole at the limit,
+    # with no terminal prompt and no stdin. The project's pre-push hook can wait minutes for a test slot that the
+    # cards of a running engine hold, and git can wait for a password. foreman.sh ask ends its command at ASK_LIMIT
+    # (45 s), so with no limit here the ask ended pack-commit after its commit, in the middle of the push (#1106).
+    # The ask's limit ends only its own process group, which the push's is not: pack-commit ended by a signal (TERM,
+    # INT or HUP) first ends the push, as timeout ends its group on TERM. The push writes to a file, holding no copy
+    # of the caller's output (the $( ) of the ask, or LOGFD, the engine's stderr), so none is held open after that.
+    o=$(mktemp) || { echo "conveyor: the pack's commit was not pushed: no temporary file for the push's output" >&2; return 1; }
+    GIT_TERMINAL_PROMPT=0 timeout -k 2 "$PACK_PUSH" git -C "$MAIN" push -q "$REMOTE" "$BRANCH" > "$o" 2>&1 < /dev/null 8>&- {LOGFD}>&- &
+    p=$!
+    trap 'kill -TERM "$p" 2>/dev/null; rm -f "$o"; exit 143' TERM INT HUP # run in wait, below: p and o are in scope
+    wait "$p"; rc=$?
+    trap - TERM INT HUP
+    out=$(cat "$o"); rm -f "$o"
+    case $rc in
+      0) ;;
+      124 | 137) echo "conveyor: the pack's commit was not pushed to $REMOTE $BRANCH: the push took more than ${PACK_PUSH}s, so it was stopped; it goes with main's next push" >&2; return 1 ;;
+      *) echo "conveyor: the pack's commit was not pushed to $REMOTE $BRANCH: $out" >&2; return 1 ;;
+    esac
     echo "conveyor: pushed it to $REMOTE $BRANCH"
   else
     echo "conveyor: not pushed, as the rule \"Push when a card lands\" is off: it goes with main's next push"
