@@ -41,6 +41,9 @@
         hold: ((.number | IN($ctl.held[])) or ((inside | not) and (.number | IN($ctl.startSeen[]) | not))), rule: (([.labels[].name | select(IN($ctl.rules.never[]))] | sort | .[0])
         // (if .later | not then (if $ctl.rules.followups then null else "follow-ups" end) elif $ctl.rules[.p] == false then .p else null end)
         // (if $loud and (.title // "" | startswith("Test-speed survey, ")) then "the survey hour" else null end)
-        // (if .number | IN($guarded[]) then "the weekly limit guard" else null end))})
+        // (if .number | IN($guarded[]) then "the weekly limit guard" else null end)
+        # A Depends on: line it cannot read (baddeps, DEPS) would otherwise count as only the #N it holds (none for
+        # `# 2 3`, #2 alone for `#2 3`), and the issue would start before the other issues it names.
+        // (baddeps | first // null | if . == null then null else "the line \"\(.[0:200])\", not a list of issues in the form #N" end))})
     | map(select($all != "" or ((.hold | not) and .rule == null and (.waits == [] or .forced) and (.before | not))))
     | sort_by(.number as $n | ($ctl.order | index($n)) // ($ctl.order | length), .later, .rank, .createdAt)

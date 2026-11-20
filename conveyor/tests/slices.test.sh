@@ -353,3 +353,31 @@ t_slicesgrownsmall() {
   fx_in 'growcheck c7 7 "$FXWT" "$(big 7)" brief'
   [ "$RC" = 0 ] && [ "$(judged)" = 0 ] && [ ! -s "$ST/cards.jsonl" ] || fail "a change of 2 files was sent to the judge (exit $RC, $(judged) calls): $(cat "$ST/cards.jsonl" 2>/dev/null)"
 }
+
+# A split before work starts, where slice 4 depends on the three slices before it: splitfile() files it with one
+# `Depends on: #N` line for each of the three, and the pick (upnext()) leaves it out until all three have landed. A
+# slice of a grown change gets one line for its parent and one for each slice it depends on too.
+# Bug caught (#1008): the issues a slice depends on were put on one line, and a slice started before the slices it
+# builds on had landed.
+t_slicesdepends() {
+  slices on "$SPLIT2" "[$(big 7)]"
+  local sl='[{"title":"s1","doneWhen":["a"],"covers":[1],"dependsOn":[]},{"title":"s2","doneWhen":["b"],"covers":[2],"dependsOn":[]},{"title":"s3","doneWhen":["c"],"covers":[3],"dependsOn":[]},{"title":"s4","doneWhen":["d"],"covers":[],"dependsOn":[1,2,3]}]'
+  fx_in "splitfile c1-7 \"\$(big 7)\" '$sl' 0"
+  [ "$RC" = 0 ] || fail "the slices were not filed (exit $RC): $(cat "$T/$CASE/run.out")"
+  [ "$(jq -sr '.[3].body | split("\n") | map(select(startswith("Depends on:"))) | join("|")' "$STUB/filed")" = 'Depends on: #100101|Depends on: #100102|Depends on: #100103' ] \
+    || fail "the fourth slice does not have one Depends on: line for each slice it depends on: $(jq -sr '.[3].body' "$STUB/filed")"
+  jq -s --argjson p "[$(big 7)]" '$p + map(. + {authorAssociation: "OWNER"})' "$STUB/filed" > "$STUB/up.json"
+  # Each slice it depends on lands in turn; the slice is in the pick's list only once the last of them has.
+  local n got=''
+  for n in 100101 100102 100103; do
+    fx_in 'upnext "$(cat "$STUB/up.json")" | jq -c "any(.[]; .number == 100104)"'; got+="$(cat "$T/$CASE/run.out") "
+    landed "$n" >> "$ST/cards.jsonl"
+  done
+  fx_in 'upnext "$(cat "$STUB/up.json")" | jq -c "any(.[]; .number == 100104)"'; got+=$(cat "$T/$CASE/run.out")
+  [ "$got" = 'false false false true' ] || fail "the slice was picked before the three slices it depends on had landed, or not after (before each landing, then after the last): $got"
+  # A grown change's slice that depends on two slices before it: a line for its parent, then one for each of the two.
+  sl='[{"title":"g1","doneWhen":["a"],"files":["src/g1.sh"],"dependsOn":[]},{"title":"g2","doneWhen":["b"],"files":["src/g2.sh"],"dependsOn":[]},{"title":"g3","doneWhen":["c"],"files":["src/g3.sh"],"dependsOn":[1,2]}]'
+  fx_in "splitfile c1-7 \"\$(big 7)\" '$sl' 0"
+  [ "$RC" = 0 ] && [ "$(jq -sr '.[6].body | split("\n") | map(select(startswith("Depends on:"))) | join("|")' "$STUB/filed")" = 'Depends on: #7|Depends on: #100105|Depends on: #100106' ] \
+    || fail "a grown change's slice does not have one Depends on: line for its parent and each slice it depends on (exit $RC): $(jq -sr '.[6].body' "$STUB/filed")"
+}

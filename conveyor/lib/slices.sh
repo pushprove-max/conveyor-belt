@@ -156,7 +156,7 @@ splitcheck() { # <card> <issue>: 0 when the card goes on to build; 1 when the is
 }
 # The slices of a split, filed as follow-ups of <issue>: its priority, area and type labels and its milestone, the
 # follow-up label, a body that opens "Follow-up of #<issue>", its Done-when items, the items of the parent it covers,
-# and a `Depends on:` line naming the slices it depends on. A slice of a grown change (one with files, growcheck())
+# and a `Depends on: #N` line for each slice it depends on. A slice of a grown change (one with files, growcheck())
 # names the files of the change it builds again in place of the items it covers, and depends on <issue> too, as it
 # builds on the change that lands it. They start where the parent is (splitplace()): held when the control record
 # holds it, else queued. Prints {filed: their numbers, held: whether they start held}; when one cannot be filed, or
@@ -172,11 +172,11 @@ splitfile() { # <card> <issue json> <slices json> <1: the slices take the parent
       | if $s.files == null then
           "Follow-up of #\($n): slice \($i + 1) of \($k). Conveyor card \($c) split #\($n) under the rule Split large issues. #\($n) stays open and held until each of its slices lands or is already done on main.\n\n"
           + "## The Done-when items of #\($n) this slice covers\n" + ($s.covers | map("- D\(.): \($dw[. - 1])") | join("\n"))
-          + (if $s.dependsOn == [] then "" else "\n\nDepends on: " + ($s.dependsOn | map("#\($nums[. - 1])") | join(" ")) end)
+          + (if $s.dependsOn == [] then "" else "\n\n" + ($s.dependsOn | map("Depends on: #\($nums[. - 1])") | join("\n")) end)
         else
           "Follow-up of #\($n): slice \($i + 1) of \($k). Conveyor card \($c) moved this part out of its change for #\($n), which grew past the pack'"'"'s split.growFiles files, under the rule Split large issues: #\($n) lands without it.\n\n"
           + "## The files of that change this slice builds again\n" + ($s.files | map("- " + .) | join("\n"))
-          + "\n\nDepends on: #\($n)" + ($s.dependsOn | map(" #\($nums[. - 1])") | join(""))
+          + "\n\nDepends on: #\($n)" + ($s.dependsOn | map("\nDepends on: #\($nums[. - 1])") | join(""))
         end
         + "\n\n## Done when\n" + ($s.doneWhen | map("- " + .) | join("\n"))' <<<"$2") \
       && out=$(gh_write issue create --title "$(jq -r --argjson i "$i" '.[$i].title' <<<"$3")" --label "$FOLLOWUP" "${more[@]}" --body "$body" 2>&1) \

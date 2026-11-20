@@ -668,9 +668,11 @@ REREVIEWALL='A new defect anywhere in the change, in what the fix changed or els
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 REREVIEWFIX='A new defect that the fix'"'"'s lines cause, in its diff or in the code that calls what it changed, may
 still be raised, at any level. Do not review the rest of the change again: it passed its earlier review.'
-# Dependencies. An issue body may hold lines `Depends on: #N` (several numbers on a line, comma
-# separated); `owner/repo#N` there names issue N of another repository (farneeds, as "owner/repo#N"), never this
-# one's #N. openissues() asks GitHub for the state of each and keeps it on the issue as far: {"owner/repo#N": {open,
+# Dependencies. An issue body may hold lines `Depends on: #N` (several on a line, each with its own #, split by
+# spaces or commas); `owner/repo#N` there names issue N of another repository (farneeds, as "owner/repo#N"), never this
+# one's #N. baddeps is each such line that names no #N, or that keeps a digit or a # once its #N are taken out
+# (`Depends on: # 12 13`, `Depends on: #12 13`): the pick does not take that issue (upnext.jq), and its rule names
+# the line. openissues() asks GitHub for the state of each and keeps it on the issue as far: {"owner/repo#N": {open,
 # error}}; one with no state kept, or one that could not be read (error: what gh said), counts as open.
 # An issue waits while any issue it depends on is open, and while any follow-up Conveyor filed from one
 # of them is open, and theirs through the chain (a card is not built on work whose known
@@ -690,6 +692,8 @@ still be raised, at any level. Do not review the rest of the change again: it pa
 # Worked out again for each open issue, they were most of a snapshot's time on a long history.
 # shellcheck disable=SC2034 # used in lib/issues.sh, lib/pick.sh, lib/run.sh, lib/snapshot.sh, lib/views.sh and lib/control.sh
 DEPS='def deprefs: [.body // "" | splits("\r?\n") | select(test("^\\s*Depends on:")) | scan("(?:([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+))?#([0-9]+)")];
+  def baddeps: [.body // "" | splits("\r?\n") | select(test("^\\s*Depends on:")) | sub("^\\s+"; "")
+    | select((test("#[0-9]") | not) or (sub("^Depends on:"; "") | gsub("(?:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#[0-9]+"; "") | test("[0-9#]")))];
   def needs: [deprefs[] | select((.[0] // "") == "") | .[1] | tonumber] | unique;
   def farneeds: [deprefs[] | select((.[0] // "") != "") | "\(.[0])#\(.[1] | tonumber)"] | unique;
   def ups($cards; $o): reduce range('"$MAX_DEPTH"') as $_ ($o; . as $s | $s + [$cards[] | select(.followups and (.issue | IN($s[]))) | .followups[]] | unique);

@@ -65,6 +65,18 @@ t_depends() {
   echo "[$(dep "$(issue 1 2026-01-01 P1)" 'Depends on: #2')]" > "$STUB/issues.json"
   loop run >/dev/null && [ "$(order)" = "picked:1 landed:1 " ] || fail "the issue was not picked once its dependency closed: $(order)"
 }
+# The forms a Depends on: line takes: several issues, each with its own #, split by spaces or by commas, are waited on
+# each; a line that is not a list of #N (`# 2 3`, `#2 3`) keeps its issue from the pick for good, and the rule it is
+# skipped by names that line. #4 to #8 are older than #2 and #3, so a dependency read as none picks them first.
+# Bug caught (#1008): `Depends on: # 2 3` was read as no dependency, and its issue started before #2 and #3 landed.
+t_dependsforms() {
+  setup "$(jq -cs . <(dep "$(issue 4 2026-01-01)" 'Depends on: #2 #3') <(dep "$(issue 5 2026-01-01)" 'Depends on: #2, #3') \
+    <(dep "$(issue 6 2026-01-01)" 'Depends on: # 2 3') <(dep "$(issue 8 2026-01-01)" 'Depends on: #2 3') <(issue 2 2026-01-02) <(issue 3 2026-01-02))"
+  drypicks; [ "$p" = '2 3 4 5 ' ] || fail "an issue was picked before both issues its Depends on: line names had landed, or a line that is not a list of #N was taken: $p"
+  fx_in 'upnext "$(cat "$STUB/issues.json")" "" all | jq -c "map(select(.rule != null) | [.number, .rule])"'
+  [ "$(cat "$T/$CASE/run.out")" = '[[6,"the line \"Depends on: # 2 3\", not a list of issues in the form #N"],[8,"the line \"Depends on: #2 3\", not a list of issues in the form #N"]]' ] \
+    || fail "an issue with a Depends on: line that is not a list of #N is not skipped by a rule that names the line: $(cat "$T/$CASE/run.out")"
+}
 t_dependsside() {
   # The third waits for both: #12, P0 and so first if it did not wait, is picked only once the last of #10 and #11 has
   # landed. Each of the two is landed first in turn, so a #12 that waits for only one of them is picked first, ahead of
