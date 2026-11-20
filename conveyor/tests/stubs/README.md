@@ -18,7 +18,7 @@ own), each for what the shared stub cannot do:
   Codex whose help names no `--dangerously-bypass-hook-trust`.
 - `deps.test.sh` (`t_overlapseat`): a same-file check that keeps its prompt and arguments.
 - `donewhen.test.sh`, `merge.test.sh`: a session that answers `reply.<n>`, a different result for each session.
-- `fail.test.sh`: reviews that fail with an API error, then answer.
+- `failapi.test.sh`: reviews that fail with an API error, then answer.
 - `judge.test.sh`: a judge seat that answers `judge.<n>`.
 - `lane.test.sh`: a review that keeps the files staged when it ran.
 - `metrics.test.sh` (`t_metricsfail`, `t_metricscut`, `t_metricsearly`): a session cut off by its timeout (exit 124,
