@@ -344,7 +344,7 @@ testpaths() { # [-v] [-z]
 }
 # 0 when the pack itself sets tests.patterns (not the schema's default): then the files they match (testpaths()) are
 # test files of the Tests page (testspart(), lib/testfiles.sh), of a test file's Run (tafile(), lib/testaction.sh) and
-# of its mutation check (mutfile(), lib/mutate.sh), beside the files named *.test.* (#1036).
+# of its check with mutants (mutfile(), lib/mutate.sh), beside the files named *.test.* (#1036).
 haspatterns() { packok 2> /dev/null && jq -e '.tests.patterns | arrays' <<<"$PACK_T" > /dev/null 2>&1; }
 # 0 when <path>, one line, is a test file the pack's own tests.patterns match (haspatterns()).
 patterntest() { haspatterns && [ "$(printf '%s\n' "$1" | testpaths 2> /dev/null)" = "$1" ]; } # <path>

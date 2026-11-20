@@ -20,10 +20,12 @@ PY=$XDG_DATA_HOME/conveyor/board-venv/bin/python3
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/out" "$T/auth" "$T/bin" "$T/fm"
-# A gh that keeps each call's arguments and standard input and answers the issue's URL in the --repo it was given,
-# or fails while gh-fail is there.
+# A gh that keeps each call's arguments and the --body-file it was given (gh_write's copy of the body) and answers the
+# issue's URL in the --repo it was given, or fails while gh-fail is there.
 # stub: it leaves a mark when run, so the case can show Dismiss never runs it, which the shared stub cannot show.
-printf '#!/usr/bin/env bash\nT=%q\ntouch "$T/gh-ran"\n[ ! -e "$T/gh-fail" ] || { echo "HTTP 401: Bad credentials" >&2; exit 1; }\nprintf "%%s\\n" "$@" > "$T/gh-args"; cat > "$T/gh-body"; echo call >> "$T/gh-calls"\nwhile [ $# -gt 0 ]; do [ "$1" != --repo ] || r=$2; shift; done\necho "https://github.com/$r/issues/77"\n' "$T" > "$T/bin/gh"; chmod +x "$T/bin/gh"
+printf '#!/usr/bin/env bash\nT=%q\ntouch "$T/gh-ran"\n[ ! -e "$T/gh-fail" ] || { echo "HTTP 401: Bad credentials" >&2; exit 1; }\nprintf "%%s\\n" "$@" > "$T/gh-args"; echo call >> "$T/gh-calls"\nwhile [ $# -gt 0 ]; do [ "$1" != --repo ] || r=$2; [ "$1" != --body-file ] || cat -- "$2" > "$T/gh-body"; shift; done\necho "https://github.com/$r/issues/77"\n' "$T" > "$T/bin/gh"; chmod +x "$T/bin/gh"
+# The Board files through conveyor.sh gh-write on its checkout (CONVEYOR_MAIN, here $T), which reads that checkout's pack.
+mkdir -p "$T/.conveyor" && cp "$HERE/../../../.conveyor/project.json" "$T/.conveyor/"
 PATH=$T/bin:$PATH CONVEYOR_DASHBOARD_AUTH=$T/auth/dashboard-auth.json CONVEYOR_RULING_LOG=$T/rulings.jsonl XDG_CONFIG_HOME=$T/config \
   HOME=$T CONVEYOR_MAIN=$T "$PY" -I - "$HERE/.." "$T" <<'EOF'
 import functools, http.client, io, json, os, re, sys, threading
@@ -124,7 +126,10 @@ URL = 'https://github.com/%s/issues/77' % REPO
 check('files_the_edits', got == 200 and said == URL, (got, said))
 with open(os.path.join(T, 'gh-args')) as f:
     args = f.read().splitlines()
-check('gh_issue_create', args == ['issue', 'create', '--repo', REPO, '--title', 'npm ci runs twice in setup', '--body-file', '-'], args)
+# Bug (#1064): the Board ran gh itself, outside the engine's privacy gate. gh_write hands gh the body as a file it
+# keeps under <state>/privacy, never the Board's standard input.
+check('gh_issue_create', args[:-1] == ['issue', 'create', '--repo', REPO, '--title', 'npm ci runs twice in setup', '--body-file']
+      and args[-1].startswith(os.path.join(T, 'conveyor', 'state', 'privacy') + os.sep), args)
 check('gh_body', text(os.path.join(T, 'gh-body')) == 'edited body\n', text(os.path.join(T, 'gh-body')))
 check('removes_that_note_alone', text(NOTES) == HEAD + A + '\n', text(NOTES))
 check('other_note_unfiled', text(os.path.join(T, 'gh-calls')) == 'call\n', text(os.path.join(T, 'gh-calls')))

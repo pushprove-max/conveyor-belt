@@ -118,7 +118,7 @@ MAX_ANSWER_BODY = 4096
 MAX_TIME_BODY = 64     # POST /time: {"time": "24-hour"}
 MAX_DISMISS_BODY = 16384  # POST /plugin-dismiss and /plugin-preview: {file, line}, one note of plugin-bugs.md
 MAX_FILE_BODY = 65536  # POST /plugin-file: {file, line, title, body}, the note and the issue the owner edited
-GH_LIMIT = 60          # POST /plugin-file: its one gh issue create (gh_write's own timeout, lib/issues.sh)
+GH_LIMIT = 90          # POST /plugin-file: its one conveyor.sh gh-write, whose gh call gh_write stops at 60 s (lib/issues.sh)
 RESTART_COOLDOWN = 60  # seconds between restarts; the stamp is a file because the restart kills this server
 HISTORY_TTL = 60       # GET /history with no live feed gives the kept copy while it is this young (dashboard.sh's HISTORY_TTL)
 STREAM_FRESH = 60      # stream.json older than this: no live feed, so no ledger key (dashboard.sh's STREAM_FRESH)
@@ -1944,8 +1944,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         dismiss removes the first line of file that is line; every other line stays; nothing is filed and gh is not
         run. preview answers the issue the note proposes as JSON {title, body, repo} (note_issue(), plugin_repo()) and writes nothing. file
         files the issue the owner confirmed, with its edited title and body: conveyor/privacy/check.sh first, where a
-        hit files nothing and the reply names each hit (422); then gh issue create on the repository
-        .claude-plugin/plugin.json names; only once gh answers the new issue's link is the note removed, as dismiss
+        hit files nothing and the reply names each hit (422); then the issue is created on the repository
+        .claude-plugin/plugin.json names, through conveyor.sh gh-write (the engine's privacy gate, gh_write(),
+        lib/issues.sh) run on this machine's checkout (board_main()); only once gh answers the new issue's link is the note removed, as dismiss
         removes it, and the reply is that link. A failed gh call leaves the note and the reply is gh's error (502). A note
         that names the issue it was filed as (NOTE_FILED) is neither previewed nor filed (409); it can be dismissed."""
         if not self.own_page():
@@ -1997,15 +1998,21 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if hits:
                 return self.reply(422, 'nothing was filed: the privacy check found %s' % '; '.join(hits))
             try:
-                r = subprocess.run(['gh', 'issue', 'create', '--repo', repo, '--title', body['title'], '--body-file', '-'],
-                                   input=body['body'], capture_output=True, text=True, timeout=GH_LIMIT)
+                main = board_main()
+            except ValueError as e:
+                return self.reply(500, 'nothing was filed: %s' % e)
+            try:
+                r = subprocess.run(['bash', os.path.join(PLUGIN_ROOT, 'conveyor', 'conveyor.sh'), 'gh-write', 'issue', 'create',
+                                    '--repo', repo, '--title', body['title'], '--body-file', '-'],
+                                   cwd=main, env=dict(os.environ, CONVEYOR_MAIN=main), input=body['body'],
+                                   capture_output=True, text=True, timeout=GH_LIMIT)
             except (OSError, subprocess.SubprocessError) as e:
-                return self.reply(502, 'nothing was filed: gh issue create did not run: %s' % (getattr(e, 'strerror', None) or e))
+                return self.reply(502, 'nothing was filed: the issue could not be created: %s' % (getattr(e, 'strerror', None) or e))
             url = next((x for x in reversed(r.stdout.split())
                         if re.fullmatch(r'https://github\.com/%s/issues/[0-9]+' % re.escape(repo), x, re.I)), None)
             if r.returncode or not url:
                 said = (r.stderr.strip() or r.stdout.strip() or 'exit %d' % r.returncode).splitlines()[-1]
-                return self.reply(502, 'nothing was filed: gh issue create failed: %s' % said)
+                return self.reply(502, 'nothing was filed: the issue could not be created: %s' % said)
             print('dashboard: plugin problem filed as %s by %s from %s' % (url, user, self.client_address[0]), file=sys.stderr, flush=True)
         # Read again: gh may have taken a while, and the Foreman may have noted another problem since.
         tmp = '%s.dismiss.%d' % (path, threading.get_ident())
