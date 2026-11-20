@@ -349,6 +349,8 @@ t_setupfresh() {
   local X out; sample; X=$D/conveyor/conveyor.sh; rm "$XDG_CONFIG_HOME/conveyor/host.json" "$T/$CASE/terms"
   # A service whose conveyor.sh is there is no missing piece (as in t_doctor).
   mkdir -p "$XDG_CONFIG_HOME/systemd/user" && printf '[Service]\nExecStart="/bin/bash" "%s" machine\n' "$V/$B/conveyor/conveyor.sh" > "$XDG_CONFIG_HOME/systemd/user/conveyor-machine.service"
+  # The open issues of t_setupheld (heldsample), for the line doctor prints of those setup held, at the end.
+  echo '[{"number":3,"state":"open"},{"number":5,"state":"open"},{"number":6,"state":"closed"}]' > "$G/issues"
   out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --owner Dana --product src/ --test t --survey no --claude-key none --codex-key none 2>&1) \
     || fail "setup on a machine with no host file exited non-zero: $out"
   jq -e --arg m "$S" '.records == [{repo: "sample", main: $m}] and (has("terms") | not)' "$XDG_CONFIG_HOME/conveyor/host.json" >/dev/null && [ -s "$S/.conveyor/project.json" ] \
@@ -356,12 +358,14 @@ t_setupfresh() {
   # The Board started after setup (as setup asks the owner to), so doctor has no warning that it is not running.
   boardup; out=$(cd "$S" && PATH=$T/$CASE/board:$PATH CONVEYOR_DASHBOARD_PORT=8791 bash "$X" doctor 2>&1) || fail "doctor failed after setup with no terms file: $out"
   # Besides ok: lines, doctor prints only each seat's route (builder:, reviewer:) and the progress line of each seat's
-  # check call, which are information, not a check; and the one warning a fresh pack is meant to get: setup sets no
-  # test.fileCommand, so a card with tests stops at its test step. Any other line is a fault.
-  ! grep -vE '^(ok|builder|reviewer): |^conveyor: checking .* with one call \(up to [0-9]+ s\)\.\.\.$' <<<"$out" \
+  # check call (and of the judge's, askcheck()), which are information, not a check; and the one warning a fresh pack
+  # is meant to get: setup sets no test.fileCommand, so a card with tests stops at its test step. Any other line is a fault.
+  ! grep -vE '^(ok|builder|reviewer): |^conveyor: (checking .* with one call|asking the [a-z]+ \(.*\) one question with no tools) \(up to [0-9]+ s\)\.\.\.$' <<<"$out" \
     | grep -qvxF 'warning: a card runs each of its test files alone, and the pack sets no test.fileCommand, and Conveyor cannot run a.test.sh itself: it has no runner for a file of this kind; set test.fileCommand in .conveyor/project.json to a command that runs one test file' \
     && grep -qx 'ok: no terms file (it is optional): the privacy check runs with no word list' <<<"$out" \
     || fail "doctor after setup printed a line that is not ok:, a seat's route or check progress, or the test.list warning, or did not say the terms file is optional: $out"
+  # Bug (#111, t_setupheld): doctor says what the control record setup wrote holds.
+  grep -qxF 'ok: 2 open issues held; release one with `conveyor.sh control release <issue>` or on the Board' <<<"$out" || fail "doctor did not say what is held: $out"
 }
 
 # Bug (#111): setup wrote no control record, so the loop read the defaults (new issues start in the Queue) and queued
@@ -374,21 +378,17 @@ heldsample() { # $X, $st (the sample's state folder) and $out (setup's output)
   st=$(cd "$S" && CONVEYOR_MAIN=$S bash "$X" state-dir) || fail "the state folder"
 }
 t_setupheld() {
-  local X out st doc; heldsample
+  local X out st; heldsample
   jq -e '.start == "held" and .startHeld == [{from: 6, to: null}] and .held == [3, 5]' "$st/control.json" >/dev/null \
     || fail "setup did not write the record with new issues held and 3 and 5 held: $(cat "$st/control.json" 2>&1)"
   grep -qF 'new issues start held; 2 open issues held; release one with `conveyor.sh control release <issue>` or on the Board' <<<"$out" || fail "setup did not say what it held: $out"
-  doc=$(cd "$S" && bash "$X" doctor 2>&1)
-  grep -qxF 'ok: 2 open issues held; release one with `conveyor.sh control release <issue>` or on the Board' <<<"$doc" || fail "doctor did not say what is held: $doc"
+  # What doctor says is held: t_setupfresh; doctor with no record: t_doctormissing, each in its one doctor run.
   # The first pass: the open issues as the loop reads them, with 7 opened after setup. With setup's record the pick
   # takes none; with no record (the defaults, as before) it takes one, so the answer is the record's doing.
   jq -cs . <(issue 3 2026-01-01 P1) <(issue 5 2026-02-01 P0) <(issue 7 2026-03-01 P0) > "$T/$CASE/open.json"
   [ "$(CONVEYOR_MAIN=$S bash "$X" pick --dry --issues "$T/$CASE/open.json" --state "$st")" = '' ] || fail "the loop's first pass after setup picks an issue"
   mkdir -p "$T/$CASE/none" && [ -n "$(CONVEYOR_MAIN=$S bash "$X" pick --dry --issues "$T/$CASE/open.json" --state "$T/$CASE/none")" ] \
     || fail "with no control record the pick takes nothing either, so the case above proves nothing"
-  # With no record, doctor names it missing, so the service is not offered before setup wrote it.
-  rm "$st/control.json"; doc=$(cd "$S" && bash "$X" doctor 2>&1)
-  grep -q "^missing: the control record $st/control.json .*; fix: run /conveyor-belt:setup" <<<"$doc" || fail "doctor with no control record: $doc"
 }
 # A second setup keeps the owner's later choices: new issues to the Queue, and 3 released.
 t_setupheldkept() {
@@ -400,7 +400,7 @@ t_setupheldkept() {
 }
 
 # Bug (#91): setup and doctor said nothing of the project's CLAUDE.md and AGENTS.md, so a project without them gave
-# every card's sessions no project context and no one was told. Each case runs setup, then doctor, which must print
+# every card's sessions no project context and no one was told. The case runs setup, then doctor, which must print
 # the same line for each file; setup must write and change neither file.
 agentlines() { grep -E '^(ok|missing): (CLAUDE|AGENTS)\.md' <<<"$1"; }
 agentsetup() { # <case's word>: $X, $out (setup's output) and $doc (doctor's, which exits 0)
@@ -420,13 +420,7 @@ t_agentfilesmissing() {
   [ "$(grep -c '^missing:' <<<"$doc")" = 2 ] || fail "doctor printed other missing lines: $doc"
   [ ! -e "$S/CLAUDE.md" ] && [ ! -e "$S/AGENTS.md" ] || fail "setup wrote an instruction file"
 }
-t_agentfilesok() {
-  local X out doc; sample; agentsetup present
-  [ "$(agentlines "$out")" = "ok: CLAUDE.md, the project's instructions for Conveyor's Claude sessions (builder, fixer, Foreman, lanes)
-ok: AGENTS.md, the project's instructions for the Codex reviewer" ] || fail "setup did not print an ok: line for each of CLAUDE.md and AGENTS.md: $out"
-  [ "$(cat "$S/CLAUDE.md")" = '# Sample' ] && [ "$(cat "$S/AGENTS.md")" = 'Read CLAUDE.md.' ] && [ -z "$(git -C "$S" status --porcelain -- CLAUDE.md AGENTS.md)" ] \
-    || fail "setup or doctor changed CLAUDE.md or AGENTS.md"
-}
+# Both files there: t_doctor, whose setup and doctor runs are this case's.
 
 # A PATH holding every program this one does but <name>...: a folder of links, so the machine's own copy is gone too.
 # The first of a name on PATH is the one linked; all are made by one ln, not one ln a program (thousands of them).
@@ -451,7 +445,9 @@ uninstalled() { chmod -R u+w "$V/$B" && rm -rf "$V/$B"; }
 # Bugs: doctor passes with a piece missing, or names one without its fix; a missing jq or git stops it before it
 # names the rest.
 t_doctor() {
-  local X out; doctordone
+  local X out said; sample; X=$D/conveyor/conveyor.sh
+  # doctordone's setup, its output kept for its CLAUDE.md and AGENTS.md lines (#91, at the end).
+  said=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --owner Dana --product src/ --test t --survey no --pin 2>&1) || fail "setup exited non-zero: $said"
   # The last card test run recorded test times (times), the one before it none: no word of missing times.
   doctortests '{}' '{times: {"a.test": 1}}'
   # A service whose conveyor.sh is there (the machine's, on the pinned install) is no missing piece.
@@ -469,6 +465,13 @@ t_doctor() {
   ! grep -q '^missing' <<<"$out" && grep -q '^ok: the pinned commit' <<<"$out" && grep -q '^ok: codex' <<<"$out" && grep -q '^ok: the terms file' <<<"$out" \
     && grep -q "^ok: segno, in the Board's virtualenv " <<<"$out" && ! grep -q 'no test times' <<<"$out" \
     && grep -qx 'ok: the plugin mattpocock-skills@claude-plugins-official, for /conveyor-belt:plan' <<<"$out" || fail "doctor with everything in place: $out"
+  # Bug (#91), with both files there: setup prints an ok: line for each of CLAUDE.md and AGENTS.md, doctor the same
+  # lines, and neither changes them.
+  [ "$(agentlines "$said")" = "ok: CLAUDE.md, the project's instructions for Conveyor's Claude sessions (builder, fixer, Foreman, lanes)
+ok: AGENTS.md, the project's instructions for the Codex reviewer" ] || fail "setup did not print an ok: line for each of CLAUDE.md and AGENTS.md: $said"
+  [ "$(agentlines "$said")" = "$(agentlines "$out")" ] || fail "doctor did not print setup's lines for CLAUDE.md and AGENTS.md: setup: $said; doctor: $out"
+  [ "$(cat "$S/CLAUDE.md")" = '# Sample' ] && [ "$(cat "$S/AGENTS.md")" = 'Read CLAUDE.md.' ] && [ -z "$(git -C "$S" status --porcelain -- CLAUDE.md AGENTS.md)" ] \
+    || fail "setup or doctor changed CLAUDE.md or AGENTS.md"
 }
 # The project's card test lines, one for each jq object given, added to its test line (lib/views.sh UNTIMED), in the
 # state folder of the sample (doctor's, as it runs in that checkout; state-dir alone names the plugin copy's).
@@ -502,15 +505,6 @@ t_doctoruntimed() {
     && grep -qxF "warning: the host file $H sets steer, which no longer does anything: card sessions, reviews and test runs run at normal priority; remove it" <<<"$out" \
     || fail "doctor did not say once that the host file's steer does nothing: $out"
 }
-# #152. Bug: doctor's warning did not say which runner setup found or which report option gives the times.
-t_doctorreport() {
-  local X out; doctordone
-  doctortests '{}'
-  jq '.test.report = {runner: "go test", option: "-json"}' "$S/.conveyor/project.json" > "$T/$CASE/p" && mv "$T/$CASE/p" "$S/.conveyor/project.json"
-  out=$(cd "$S" && bash "$X" doctor 2>&1) || fail "doctor failed over test times: $out"
-  grep -qF 'recorded no test times: the test command prints no `TESTRUN sec` lines; conveyor/README.md, Test file times, says how to add them; the test command runs go test, whose report option -json would give them' <<<"$out" \
-    || fail "doctor did not name the runner and its report option: $out"
-}
 t_doctormissing() {
   local X out; doctordone
   # The owner's models.allowed names Codex models (a new pack names none, and follows the CLIs this host has), so the
@@ -525,7 +519,12 @@ t_doctormissing() {
     && mv "$T/$CASE/h" "$XDG_CONFIG_HOME/conveyor/host.json" || fail "the host file was not rewritten"
   # Nothing serves the Board's port: curl gets no page.
   mkdir -p "$T/$CASE/noboard" && printf '#!/bin/sh\nexit 7\n' > "$T/$CASE/noboard/curl" && chmod +x "$T/$CASE/noboard/curl" || fail "the curl stub was not made"
+  # The control record setup wrote (t_setupheld), removed.
+  local st; st=$(cd "$S" && CONVEYOR_MAIN=$S bash "$X" state-dir) && rm "$st/control.json" || fail "the control record was not removed"
   out=$(cd "$S" && PATH=$(PATH=$T/$CASE/noboard:$PATH without codex) bash "$X" doctor 2>&1) && fail "doctor passed with pieces missing: $out"
+  # Bug (#111): with no control record the loop queues every open issue; doctor names it missing, so the service is
+  # not offered before setup wrote it.
+  grep -q "^missing: the control record $st/control.json .*; fix: run /conveyor-belt:setup" <<<"$out" || fail "doctor with no control record: $out"
   # Bug caught (#108): after setup no Board ran, and doctor said nothing of it. It names the Board as not running, at
   # its address, with the fix; a warning, as the Board is optional.
   grep -qxF 'warning: the Board is not running (nothing serves https://localhost:8790/); fix: run /conveyor-belt:setup and answer yes to "Start the Board now?", or conveyor.sh board in the project'"'"'s checkout' <<<"$out" \
@@ -557,24 +556,29 @@ t_doctormissing() {
 }
 # A damaged version folder is refused by install, so a setup rerun alone cannot mend it: the fix removes it first,
 # and the command doctor gives, then the install, leaves the pinned commit installed. Here it holds a folder and
-# neither can be read or searched (mode 000), which a fix that only grants write could not empty.
+# neither can be read or searched (mode 000), which a fix that only grants write could not empty. The command is the
+# owner's to paste: it holds when the data folder has an apostrophe, as here and in t_doctorlink.
 t_doctordamaged() {
-  local X out l; doctordone; uninstalled
-  mkdir -p "$V/$B/sub"; : > "$V/$B/sub/f"; chmod 000 "$V/$B/sub" "$V/$B"; out=$(cd "$S" && bash "$X" doctor 2>&1)
-  ! (cd "$S" && bash "$X" install "$B" >/dev/null 2>&1) || fail "install took a damaged version folder"
+  local X out l q="$T/$CASE/owner's-data" v; doctordone; v=$q/conveyor/versions/$B
+  mkdir -p "$v/sub"; : > "$v/sub/f"; chmod 000 "$v/sub" "$v"; out=$(cd "$S" && XDG_DATA_HOME=$q bash "$X" doctor 2>&1)
+  ! (cd "$S" && XDG_DATA_HOME=$q bash "$X" install "$B" >/dev/null 2>&1) || fail "install took a damaged version folder"
   l=$(grep "^missing: the install of the pinned commit $B (.*); fix: remove it (" <<<"$out") || fail "doctor gave no fix that removes a damaged install: $out"
-  l=${l#*fix: remove it (}; eval "${l%%), then run /conveyor-belt:setup*}" && [ ! -e "$V/$B" ] || fail "doctor's removal did not remove the damaged install: $out"
-  (cd "$S" && bash "$X" install "$B" >/dev/null 2>&1) && uninstalled || fail "the install failed after doctor's fix"
+  l=${l#*fix: remove it (}; eval "${l%%), then run /conveyor-belt:setup*}" && [ ! -e "$v" ] \
+    || fail "doctor's removal did not remove the damaged install under a data folder with an apostrophe: $out"
+  (cd "$S" && XDG_DATA_HOME=$q bash "$X" install "$B" >/dev/null 2>&1) && [ "$(git -C "$v" rev-parse HEAD)" = "$B" ] || fail "the install failed after doctor's fix"
 }
-# The command is the owner's to paste: it holds when the data folder has an apostrophe, and removes a dangling link,
-# which chmod cannot follow, as well as a damaged folder.
-doctorquoted() { # <link | folder>
-  local X out l q="$T/$CASE/owner's-data" k=$1; doctordone
-  mkdir -p "$q/conveyor/versions"; [ $k = link ] && ln -s "$T/$CASE/nowhere" "$q/conveyor/versions/$B" || mkdir "$q/conveyor/versions/$B"
+# The command removes a dangling link, which chmod cannot follow, as well as a damaged folder (t_doctordamaged).
+t_doctorlink() {
+  local X out l q="$T/$CASE/owner's-data"; doctordone
+  mkdir -p "$q/conveyor/versions" && ln -s "$T/$CASE/nowhere" "$q/conveyor/versions/$B" || fail "the dangling link was not made"
+  # #152. Bug: doctor's warning of untimed test runs did not say which runner setup found or which report option
+  # gives the times. Checked in this case's doctor run, which the link does not change, to save a run of its own.
+  doctortests '{}'
+  jq '.test.report = {runner: "go test", option: "-json"}' "$S/.conveyor/project.json" > "$T/$CASE/p" && mv "$T/$CASE/p" "$S/.conveyor/project.json" || fail "the pack"
   out=$(cd "$S" && XDG_DATA_HOME=$q bash "$X" doctor 2>&1)
-  l=$(grep "^missing: the install of the pinned commit $B (.*); fix: remove it (" <<<"$out") || fail "doctor gave no fix that removes a damaged install ($k): $out"
+  grep -qxF 'warning: the last 1 card test run recorded no test times: the test command prints no `TESTRUN sec` lines; conveyor/README.md, Test file times, says how to add them; the test command runs go test, whose report option -json would give them' <<<"$out" \
+    || fail "doctor did not name the runner and its report option: $out"
+  l=$(grep "^missing: the install of the pinned commit $B (.*); fix: remove it (" <<<"$out") || fail "doctor gave no fix that removes a dangling link: $out"
   l=${l#*fix: remove it (}; eval "${l%%), then run /conveyor-belt:setup*}" && [ ! -e "$q/conveyor/versions/$B" ] && [ ! -L "$q/conveyor/versions/$B" ] \
-    || fail "doctor's removal did not remove the damaged install ($k) under a data folder with an apostrophe: $out"
+    || fail "doctor's removal did not remove the dangling link under a data folder with an apostrophe: $out"
 }
-t_doctorlink() { doctorquoted link; }
-t_doctorfolder() { doctorquoted folder; }
