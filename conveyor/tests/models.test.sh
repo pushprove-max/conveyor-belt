@@ -264,11 +264,13 @@ t_opencoderetry() {
     || fail "an OpenCode review the API refused once was not run again with the refused try's usage and cost on its line: $out"
   # OpenCode gone from the host by the time the review runs: the review fails, naming it, and is not run again.
   # The PATH keeps the stubs but no host's own opencode, which would otherwise be found in place of the removed stub.
-  rm "$STUB/opencode"
+  # This host's report listed opencode, so the review first reads the host again SEAT_TRIES times (seatwait(),
+  # lib/control.sh): watchturns notes each SEAT_PAUSE as a line `seatwait` in place of waiting it out (4 x 30 s).
+  rm "$STUB/opencode"; watchturns
   nooc=$(tr ':' '\n' <<< "$PATH" | while IFS= read -r d; do [ "$d" != "$STUB" ] && [ -e "$d/opencode" ] || printf '%s\n' "$d"; done | paste -sd: -)
   out=$(PATH=$nooc rvcall 9)
   [ "$(wc -l < "$STUB/oc-runs")" = 4 ] && grep -q 'the reviewer is set to opencode prov/vendor/m-1, and opencode is not installed on this host' <<<"$out" && [ "$(tail -n 1 <<<"$out")" = 'rc=1 none' ] \
-    || fail "a review with no opencode on the host did not fail naming it: $out"
+    && [ "$(grep -cx seatwait "$TURNS")" = 4 ] || fail "a review with no opencode on the host did not fail naming it after reading the host again four times: $out $(cat "$TURNS")"
 }
 # Bug: the review step's record() (lib/card.sh) drops or misplaces the cost OpenCode reported, so a landed card's
 # timeline shows its review unpriced. A whole card run: t_opencodereview writes the review lines itself, so only a
