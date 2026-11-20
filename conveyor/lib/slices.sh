@@ -318,7 +318,7 @@ growcheck() { # <card> <issue> <worktree> <issue json> <the sessions' prompt>: 0
 # open until the owner's push, and a split's slices are its parts, so its umbrella waited for that push.
 # So is each open issue of the list with no parts (its slices were never attached as its sub-issues) that is the
 # umbrella of a split (a split line with filed slices) whose slices each have a landed line, or a closed line (main
-# already does it: ALREADY-DONE) that is not a shut one (SHUT: the owner closed it by hand).
+# already does it: ALREADY-DONE) that is not a shut one (SHUT: the owner closed it by hand; OWNSHUT: the owner shut the card).
 umbrellas() { # <open issues, a json list>
   local k n s x m
   while IFS=$'\t' read -r k n s; do
@@ -327,8 +327,8 @@ umbrellas() { # <open issues, a json list>
     x=$(gh_write issue close "$n" --comment "$m" 2>&1 >/dev/null) \
       || { echo "conveyor: #$n is $([ "$k" = parts ] && echo "a parent whose parts are all closed or landed" || echo "an umbrella whose follow-ups have all landed or are already done on main"), and it could not be closed (${x:0:300}); the next turn tries again" >&2; continue; }
     locked control release "$n" >/dev/null 2>&1 || :
-  done < <(jq -rs --argjson open "$1" --arg shut "$SHUT" "$DEPS"'landed(.) as $done
-    | ([.[] | select(.step == "landed" or (.step == "closed" and .reason != $shut)) | .issue] | unique) as $landed
+  done < <(jq -rs --argjson open "$1" --arg shut "$SHUT" --arg own "$OWNSHUT" "$DEPS"'landed(.) as $done
+    | ([.[] | select(.step == "landed" or (.step == "closed" and (.reason | IN($shut, $own) | not))) | .issue] | unique) as $landed
     | ($open[] | select((.parts // []) != [] and all(.parts[]; (.open | not) or (.number | IN($done[]))))
       | [.parts[] | select(.open and (.number | IN($done[]))) | .ref] as $l
       | "parts\t\(.number)\t\(.parts | map(.ref) | join(", "))\(if $l == [] then "" else "; landed, not closed yet: \($l | join(", "))" end)"),

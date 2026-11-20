@@ -32,7 +32,7 @@ again() { # <issue | card id> [fresh]
   control release "$1" >/dev/null || { echo "conveyor: issue #$1 is held; release it with \`conveyor.sh control release $1\`" >&2; return 1; }
   echo "conveyor: issue #$1 was held; it is released, so the loop picks it again"
 }
-# An issue's card stuck in flight (its process gone, or no process of its step for the pack's stuck) is ended first,
+# An issue's card stuck in flight (its process gone or stopped, or no process of its step for the pack's stuck) is ended first,
 # blocked with its work kept, outside the lock (unstick(), lib/run.sh): retry then takes it as a blocked card.
 [[ ! $2 =~ ^[0-9]+$ ]] || unstick "$2"
 locked again "$2" ${3:+fresh}

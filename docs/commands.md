@@ -41,9 +41,14 @@
   If the issue is held, `retry` also releases it. If the issue has no card, `retry` names the state folder it read
   and says to release the issue with `conveyor.sh control release <issue>`, which starts a new card. If another
   state folder of the checkout has a card of the issue, `retry` and `conveyor.sh doctor` name that folder too.
-  A card can stop in flight: its process is gone, or no process of its step ran for the pack's `tunables.stuck` plus
-  `tunables.reviewPause`. `retry` first blocks that card and keeps its work, then gives it back. `shut` blocks it the
-  same way before it shuts it. `retry` still refuses a card with a step that runs.
+  A card can stop in flight: its process is gone or was stopped by a signal, or no process of its step ran for the
+  pack's `tunables.stuck` plus `tunables.reviewPause`. `retry` first blocks that card and keeps its work, then gives
+  it back. `retry` refuses a card whose process runs, and says to stop it with `shut` first.
+- `conveyor.sh shut <issue>` or `conveyor.sh shut <card id>` stops an open card. It ends the card's processes, keeps
+  its work as `retry` keeps it, and closes the card with the reason "shut by the owner". It holds nothing, and the
+  loop does not pick the issue again on its own: `retry <issue>` gives the card back. A card in its land step is left
+  to land. `shut` prints what it did. If it did nothing, it says why and exits 1, for example when the issue has no
+  card or its card landed.
 - `conveyor.sh retry <issue> --fresh` gives a blocked card back without its kept work: the next card builds from
   nothing. The kept work moves to a dated folder under `kept-dropped/` in the state folder; it is not deleted.
 - `conveyor.sh unblock <issue> --hold` takes a blocked card off the belt and holds its issue. Its kept work stays.
@@ -92,7 +97,7 @@ The loop:
 Cards:
 
 - `parts <parent> <issue>...` attaches the issues as GitHub sub-issues of the parent ([Issues](#issues)).
-- `retry <issue>` gives a blocked card back; with `--fresh`, its next card builds from nothing. `shut <issue>` shuts a blocked card whose issue was closed. `unblock <issue> --hold` holds a
+- `retry <issue>` gives a blocked card back; with `--fresh`, its next card builds from nothing. `shut <issue>` stops an open card and shuts it, or shuts a blocked card whose issue was closed. `unblock <issue> --hold` holds a
   blocked card's issue and keeps its work. A main-red fix
   card has no issue. It shows as "Main is red (<commit>)". Use `retry <card id>` and `shut <card id>`. `retry 0`
   lists the blocked ones by card id.

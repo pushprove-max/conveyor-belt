@@ -174,7 +174,8 @@ t_retrygone() {
 # three cards' processes run (stand-ins): #7 is in its build with a live record (its session runs), #8 is past its
 # build line with no live record and nothing written for longer than stuck and reviewPause, and #9 too, its issue
 # closed. retry 7 still refuses #7 and leaves it as it is; retry 8 ends #8 and everything under it, blocks it naming
-# its review step, with its work kept, and gives #8 back; shut 9 ends #9 the same way and closes the card.
+# its review step, with its work kept, and gives #8 back; shut 9 ends #9 too, its work kept, and closes the card as
+# shut by the owner. retry 7 names shut, which stops a card whose process runs (#1030).
 t_retrystuck() {
   local p7 p8 p9 out c7=c20260101T000000-t-7 c8=c20260101T000000-t-8 c9=c20260101T000000-t-9 why
   setup "[$(issue 7 2026-01-01), $(issue 8 2026-01-02)]"; tune '.tunables.stuck = 1 | .tunables.reviewPause = 0'
@@ -184,14 +185,14 @@ t_retrystuck() {
   wtchange $c7; wtchange $c8; wtchange $c9; echo '{"step":"build","at":"2026-01-01T00:00:00Z","last":null,"turns":0}' > "$T/$CASE/cards/$c7.live"
   touch -t 202601010000 "$T/$CASE/cards/$c8" "$T/$CASE/cards/$c9"
   out=$(loop retry 7 2>&1) && fail "retry took #7, whose session runs: $out"
-  grep -qF 'issue #7 has a card that is still open; nothing changed' <<<"$out" && kill -0 $p7 && [ "$(st "select(.card == \"$c7\") | .step" | tr '\n' ' ')" = "picked worktree start " ] \
+  grep -qF 'issue #7 has a card that is still open, its process running; nothing changed. To stop it, run `conveyor.sh shut 7` first' <<<"$out" && kill -0 $p7 && [ "$(st "select(.card == \"$c7\") | .step" | tr '\n' ' ')" = "picked worktree start " ] \
     && [ -d "$T/$CASE/cards/$c7" ] || fail "retry touched #7, whose session runs: $out $(st "select(.card == \"$c7\")")"
   out=$(loop retry 8 2>&1) || fail "retry of #8 exited non-zero: $out"
   why="review: no process of this step ran for 1s (the pack's stuck and reviewPause), so the engine stopped the card"
   ! kill -0 $p8 2>/dev/null && [ "$(jq -r --arg c "$c8" 'select(.card == $c and .step == "blocked") | [.reason, .kept] | @tsv' "$ST/retried.jsonl")" = "$why"$'\t'"kept/$c8" ] \
     && grep -qF 'issue #8 can be picked again' <<<"$out" || fail "retry did not end #8, block it naming its step with its work kept, and give it back: $out $(cat "$ST/retried.jsonl" 2>&1)"
   out=$(loop shut 9 2>&1) || fail "shut of #9 exited non-zero: $out"
-  ! kill -0 $p9 2>/dev/null && [ "$(st "select(.card == \"$c9\") | [.step, .reason] | @tsv" | tail -n 2)" = "blocked	$why"$'\n'"closed	the issue was closed by hand while the card was blocked" ] \
+  ! kill -0 $p9 2>/dev/null && [ "$(st "select(.card == \"$c9\") | [.step, .reason] | @tsv" | tail -n 2)" = $'blocked\tshut by the owner\nclosed\tshut by the owner' ] \
     && [ -s "$ST/kept/$c9/$c9.patch" ] || fail "shut did not end #9, block it with its work kept, and close it: $out $(st "select(.card == \"$c9\")")"
   kill $p7; wait $p7 $p8 $p9 2>/dev/null; return 0
 }
@@ -216,4 +217,72 @@ t_gonebatch() {
     || fail "the kept patch is not the card's own change: $(cat "$ST/kept/$c/$c.patch" 2>&1)"
   [ "$(st 'select(.step == "landed") | .issue')" = 7 ] && [ "$(git -C "$R" show main:a.txt | tr '\n' ' ')$(git -C "$R" show main:u.txt)" = "one two new" ] \
     && ! git -C "$R" cat-file -e main:m.txt 2>/dev/null || fail "#7 did not land its own change alone: $(st 'select(.issue == 7) | .step' | tr '\n' ' ') $(git -C "$R" show --stat main)"
+}
+
+# Bug (#1030): `shut <issue>` on a card in its build, its session running (a live record), printed nothing, exited 0
+# and left it running; `shut <card id>` took only an issue-0 card's id. Here #7 and #8 are building (stand-ins for
+# their processes). shut 7 and shut <#8's card id> each end the card's process, block it with its work kept, close it
+# as shut by the owner and say so; no turn gives it back, as its issue is open, but `retry 7` does.
+t_shutopen() {
+  local p7 p8 out c7=c20260101T000000-t-7 c8=c20260101T000000-t-8 c
+  setup "[$(issue 7 2026-01-01), $(issue 8 2026-01-02)]"
+  sleep 600 & p7=$!; sleep 600 & p8=$! # sleep: stand-ins for two cards' processes that run
+  gonecard $c7 7 $p7 "$(p_started $p7)"; gonecard $c8 8 $p8 "$(p_started $p8)"; wtchange $c7; wtchange $c8
+  for c in $c7 $c8; do echo '{"step":"build","at":"2026-01-01T00:00:00Z","last":null,"turns":0}' > "$T/$CASE/cards/$c.live"; done
+  out=$(loop shut 7 2>&1) || fail "shut 7 exited non-zero: $out"
+  grep -qF "card $c7 was open in its build step (its process running, now ended); it is blocked, its work kept" <<<"$out" \
+    && grep -qF "card $c7 was shut by the owner; the card is closed" <<<"$out" || fail "shut 7 did not say it stopped and closed the card: $out"
+  out=$(loop shut $c8 2>&1) || fail "shut $c8 exited non-zero: $out"
+  grep -qF "card $c8 was shut by the owner" <<<"$out" || fail "shut $c8 did not say it closed the card: $out"
+  for c in $c7 $c8; do
+    [ "$(st "select(.card == \"$c\") | [.step, .reason] | @tsv" | tail -n 2)" = $'blocked\tshut by the owner\nclosed\tshut by the owner' ] \
+      && [ "$(git apply --numstat "$ST/kept/$c/$c.patch" | cut -f3)" = a.txt ] || fail "$c was not blocked with its work kept and closed as shut: $(st "select(.card == \"$c\")")"
+  done
+  ! kill -0 $p7 2>/dev/null && ! kill -0 $p8 2>/dev/null || fail "shut left a card's process running"
+  out=$(loop retry 7 2>&1) || fail "retry of #7, shut by the owner, exited non-zero: $out"
+  grep -qF 'issue #7 can be picked again' <<<"$out" && [ -z "$(st "select(.card == \"$c7\")")" ] || fail "retry did not give the shut #7 back: $out"
+  wait $p7 $p8 2>/dev/null; return 0
+}
+
+# Bug (#1030): the command `shut 7` knew its own stop only by the reason of the card's blocked line. When the loop
+# blocked #7 first, with its own reason, as shut stopped its process, the card closed as "closed by hand while it was
+# blocked", not as shut by the owner, and a turn gave the open #7 back. Here the loop's blocked line is written as shut
+# stops the process, before shut looks whether the card is ended: shut must close it as its own stop, by its card id.
+t_shutfirst() {
+  local p7 out c7=c20260101T000000-t-7 real
+  setup "[$(issue 7 2026-01-01)]"; real=$(command -v pgrep) || fail "no pgrep"
+  sleep 600 & p7=$! # sleep: a stand-in for #7's process, running
+  gonecard $c7 7 $p7 "$(p_started $p7)"; wtchange $c7
+  # A pgrep on PATH: freeze() asks it for the stopped process's children, the one point between shut's stop of the
+  # process and its look at the card's lines, so the loop's blocked line lands there every time.
+  jq -cn --arg c "$c7" '{card:$c,issue:7,step:"blocked",time:"2026-01-01T00:00:01Z",tokens:{claude:0,codex:0},result:"blocked",sha:"",reason:"build: the card process ended"}' > "$T/$CASE/loopblock.json"
+  printf '#!/usr/bin/env bash\n[ "$*" != "-P %s" ] || [ -e %q ] || { touch %q; cat %q >> %q; }\nexec %q "$@"\n' \
+    "$p7" "$T/$CASE/loopblock.done" "$T/$CASE/loopblock.done" "$T/$CASE/loopblock.json" "$ST/cards.jsonl" "$real" > "$STUB/pgrep" && chmod +x "$STUB/pgrep"
+  out=$(loop shut 7 2>&1) || fail "shut 7 exited non-zero: $out"
+  [ -e "$T/$CASE/loopblock.done" ] || fail "the loop's blocked line was not written while shut stopped the card: $out"
+  [ "$(st "select(.card == \"$c7\") | [.step, .reason] | @tsv" | tail -n 2)" = $'blocked\tbuild: the card process ended\nclosed\tshut by the owner' ] \
+    && grep -qF "card $c7 was shut by the owner" <<<"$out" || fail "#7, blocked by the loop as shut stopped it, did not close as shut by the owner: $out $(st "select(.card == \"$c7\")")"
+  wait $p7 2>/dev/null; return 0
+}
+
+# Bug (#1030): `retry --fresh` refused a card whose process a signal stopped (ps state T), as one still running, and
+# no command freed it. #7's process is stopped mid-build, its session's live record still there; #8's is gone. retry
+# 7 --fresh ends #7's stopped process, blocks it with its work kept, then gives #7 back with its work dropped, and
+# retry 8 --fresh does the same for #8.
+t_retrystopped() {
+  local p7 gone out c7=c20260101T000000-t-7 c8=c20260101T000000-t-8
+  setup "[$(issue 7 2026-01-01), $(issue 8 2026-01-02)]"
+  sleep 600 & p7=$!; kill -STOP $p7 # sleep: a stand-in for #7's process, stopped by a signal
+  sleep 0 & gone=$!; wait $gone # sleep: a stand-in for #8's process, ended
+  gonecard $c7 7 $p7 "$(p_started $p7)"; gonecard $c8 8 $gone "$(date)"; wtchange $c7; wtchange $c8
+  echo '{"step":"build","at":"2026-01-01T00:00:00Z","last":null,"turns":0}' > "$T/$CASE/cards/$c7.live"
+  out=$(loop retry 7 --fresh 2>&1) || fail "retry 7 --fresh, its card's process stopped, exited non-zero: $out"
+  grep -qF "card $c7 was open with its process stopped; it is blocked, its work kept" <<<"$out" && grep -qF 'issue #7 can be picked again' <<<"$out" \
+    && ! kill -0 $p7 2>/dev/null && [ "$(jq -r --arg c "$c7" 'select(.card == $c and .step == "blocked") | .reason' "$ST/retried.jsonl")" = "build: its process was stopped by a signal, so the engine ended the card" ] \
+    || fail "retry did not end the stopped #7 and give it back: $out $(cat "$ST/retried.jsonl" 2>&1)"
+  out=$(loop retry 8 --fresh 2>&1) || fail "retry 8 --fresh, its card's process gone, exited non-zero: $out"
+  grep -qF "card $c8 was open with its process gone" <<<"$out" && grep -qF 'issue #8 can be picked again' <<<"$out" || fail "retry did not give the gone #8 back: $out"
+  [ ! -e "$ST/kept/$c7" ] && [ ! -e "$ST/kept/$c8" ] && ls "$ST"/kept-dropped/*-7/"$c7"/"$c7".patch "$ST"/kept-dropped/*-8/"$c8"/"$c8".patch >/dev/null 2>&1 \
+    || fail "--fresh did not move the kept work aside: $(ls -R "$ST/kept-dropped" 2>&1)"
+  wait $p7 2>/dev/null; return 0
 }

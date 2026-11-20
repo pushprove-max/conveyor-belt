@@ -119,7 +119,7 @@ pk c1-35 35 worktree; tl c1-35 35 blocked "$(held c1-35)"; shut '[35]' >/dev/nul
 pk c1-40 40; pk c1-45 45
 loop control card 45 builder m2 high >/dev/null; echo "owner $(SEATCARD=45 seat builder | jq -r .model)"
 git -C "$R" worktree add -q --detach "$CARDS/c1-45" && echo x > "$CARDS/c1-45/b.txt"
-# Its process gone before any review: `shut 45` blocks it (unstick(), lib/run.sh), run as its own command, so the
+# Its process gone before any review: `shut 45` blocks it (shutopen(), lib/run.sh), run as its own command, so the
 # block has only the files that command loads, not card()'s.
 sh -c : & d=$!; wait "$d"; tl c1-45 45 worktree "$PICK" "{\"pid\": $d, \"started\": \"x\"}"
 loop shut 45 >/dev/null 2>&1

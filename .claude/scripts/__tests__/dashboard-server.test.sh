@@ -654,7 +654,9 @@ case \$1 in
   health) printf '{"waiting":[{"card":"c1","issue":%s}],"before":[{"issue":%s}]}\n' "\$(cat "$F/waiting" 2>/dev/null || echo 0)" "\$(cat "$F/before" 2>/dev/null || echo 0)" ;;
   control) echo '{"mode":"run"}' ;;
   retry) echo "conveyor: issue #\$2 can be picked again" ;;
-  shut) echo "conveyor: issue #\$2 was closed while card c1 was blocked; the card is closed" ;;
+  shut) [ ! -e "$F/shut-none" ] || { echo "conveyor: issue #\$2 has no card; nothing changed" >&2; exit 1; }
+    [ ! -e "$F/shut-fails" ] || { echo "conveyor: the card records do not check" >&2; exit 3; }
+    echo "conveyor: issue #\$2 was closed while card c1 was blocked; the card is closed" ;;
   machine) echo "conveyor: the machine's Conveyor: \$2" ;;
   # A test action's id (of its file, the last argument), or an issue's address; a file named gone is not main's.
   testaction|testissue) [[ "\$*" != *gone* ]] || { echo "conveyor: the file is not a file of main" >&2; exit 2; }
@@ -686,7 +688,7 @@ ctl() {
 # Every action names the record it is for: here the host file's one record, sample, on its main.
 act() { jq -cn --arg a "$1" '{action: $a, args: $ARGS.positional, repo: "sample"}' --args -- "${@:2}"; }
 yes_act() { act "$@"; }
-fresh_control() { rm -f "$F/conveyor-calls" "$F/gh-calls" "$F/gh-writes" "$F/gh-pwd" "$F/gh-body" "$F/ssh-calls" "$F/conveyor-refuse" "$F/waiting" "$F/before" "$F/ssh-down"; }
+fresh_control() { rm -f "$F/conveyor-calls" "$F/gh-calls" "$F/gh-writes" "$F/gh-pwd" "$F/gh-body" "$F/ssh-calls" "$F/conveyor-refuse" "$F/waiting" "$F/before" "$F/ssh-down" "$F/shut-none" "$F/shut-fails"; }
 calls() { cat "$F/conveyor-calls" 2>/dev/null; }
 
 # control_part <part> <port> -- a part on the control host, max logged in on control-test ($A/ct).
@@ -805,6 +807,14 @@ fresh_control
   && [ "$(cat "$F/gh-calls")" = "$(cat "$F/gh-writes")" ] && [ "$(cat "$F/gh-pwd")" = "$HM" ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM shut 13" ] \
   && grep -q 'issue #13 was closed' "$M/ctl.out" \
   || fail "close_reaches_gh_write_issue_close: answered '$(cat "$M/ctl.out")', wrote '$(cat "$F/gh-writes" 2>&1)', ran '$(calls)'"
+# Close on a pipeline change held there: its issue has no card, so shut shuts nothing and exits 1 (#1030). Bugs: the
+# Board answers that as a failed Close, though GitHub closed the issue; or it hides a shut that failed.
+fresh_control; touch "$F/shut-none"
+[ "$(ctl "$(act close 41)")" = 200 ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM shut 41" ] \
+  || fail "close_of_an_issue_with_no_card_is_no_failure: answered '$(cat "$M/ctl.out")', ran '$(calls)'"
+fresh_control; touch "$F/shut-fails"
+[ "$(ctl "$(act close 41)")" != 200 ] || fail "close_shows_a_shut_that_failed: answered '$(cat "$M/ctl.out")', ran '$(calls)'"
+pass=$((pass + 2))
 # A blocked main-red fix card has no issue (issue 0): Retry and Close take its card id, and Close closes no issue on
 # GitHub, only shuts the card. Bug: control_ok() took only issue numbers, so both buttons of such a card were refused.
 fresh_control

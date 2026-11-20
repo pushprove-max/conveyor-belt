@@ -10,7 +10,7 @@
 # A blocked line whose card's change was kept adds paths: the files it changed, the first 200.
 # A closed line ends a card that changed nothing because its issue was already fixed: it has no commit to name. A
 # closed line whose reason is SHUT ends a blocked card whose issue was closed, for whatever reason, while it waited
-# on the owner (shut()): it fixed and landed nothing, and is counted with neither the landed cards nor the blocked ones.
+# on the owner (shut()), and one whose reason is OWNSHUT a card the owner shut: it fixed and landed nothing, and is counted with neither the landed cards nor the blocked ones.
 # A test line (result pass or fail) adds sec, the seconds its run took, and a zero token split, so the dashboard
 # prices the step at nothing instead of leaving the card unpriced.
 # A review line of a card's change adds visible: the review's USER-VISIBLE answer ("no", or "yes: <what a customer or
@@ -126,7 +126,7 @@ whole() {
 # deps, brief: the steps with no start line; yes: it waits for the owner's yes and failed nothing), took: the seconds since
 # the card's line before it, which for a step with a start line is the time the step ran).
 rows() { # [records file: the retried file's lines are card records too]
-  jq -cs --argjson max "$MAX_REVIEWS" --arg nodeps "$NODEPS" --arg yes "$YES" --arg lintyes "$LINTYES" --arg shut "$SHUT" -f "$HERE/jq/rows.jq" "${1:-$READ}"
+  jq -cs --argjson max "$MAX_REVIEWS" --arg nodeps "$NODEPS" --arg yes "$YES" --arg lintyes "$LINTYES" --arg shut "$SHUT" --arg ownshut "$OWNSHUT" -f "$HERE/jq/rows.jq" "${1:-$READ}"
 }
 cards() {
   local out models url n t titles='{}'

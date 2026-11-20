@@ -82,18 +82,42 @@ t_shutturn() {
 
 # The Board's Close shuts the card itself (`shut`), with no turn of the loop: a stopped loop would leave it under
 # Needs you for good. Bug: #8's card stays blocked until a loop runs, or shut touches the records of an issue with
-# no blocked card. A case of its own on a main of its own, beside t_shut.
+# no blocked card. A case of its own on a main of its own, beside t_shut. shut that shuts nothing says why and exits 1
+# (#1030): bugs, it said nothing and exited 0 for #9, which has no card, or shut #10, whose card landed.
 t_shutboard() {
-  local c8=c0-8
+  local c8=c0-8 out
   setup "[$(issue 8 2026-02-01)]"; shutrec 8
-  before=$(cat "$ST/cards.jsonl"); loop shut 9 >/dev/null || fail "shut of #9, which has no card, exited non-zero"
-  [ "$(cat "$ST/cards.jsonl")" = "$before" ] || fail "shut 9 changed the card records, though #9 has no card"
+  jq -cn '{card:"c0-10",issue:10,time:"2026-01-01T00:00:00Z",tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""} | (. + {step:"picked"}), (. + {step:"landed",sha:"abc1234",product:true})' >> "$ST/cards.jsonl"
+  before=$(cat "$ST/cards.jsonl"); out=$(loop shut 9 2>&1); RC=$?
+  [ "$RC" = 1 ] && grep -qF 'issue #9 has no card; nothing changed' <<<"$out" || fail "shut of #9, which has no card, did not say so and exit 1 (exit $RC): $out"
+  out=$(loop shut 10 2>&1); RC=$?
+  [ "$RC" = 1 ] && grep -qF 'issue #10 has a card that landed' <<<"$out" || fail "shut of #10, whose card landed, was not refused with why (exit $RC): $out"
+  [ "$(cat "$ST/cards.jsonl")" = "$before" ] || fail "shut 9 or shut 10 changed the card records"
   loop shut 8 >/dev/null || fail "shut 8 exited non-zero"
   [ "$(loop health | jq -c '.blocked | map(.issue) | index(8)')" = null ] && [ "$(loop snapshot --fresh | jq -c '[.needsYou.blocked[], .needsYou.waiting[]] | map(.issue) | index(8)')" = null ] \
     || fail "#8 is still under Needs you after shut 8: $(loop health | jq -c '[.blocked, .waiting]')"
   [ "$(st "select(.card == \"$c8\") | [.step, .reason] | join(\"|\")" | tail -n 1)" = 'closed|the issue was closed by hand while the card was blocked' ] \
     || fail "no closed line says #8 was shut: $(grep "$c8" "$ST/cards.jsonl")"
   loop check || fail "the records do not check after shut"
+}
+
+# The owner's stop (`shut`, #1030) is known by the cards shut ended, not by the reason of their blocked line. Bugs:
+# #7, which the loop blocked first with its own reason once shut killed its process, and #8, whose reason block()
+# added to (a comment GitHub refused), closed as shut because their issue was closed, so the turn's reopened() gave
+# both open issues back with no retry; and the stopped land-branch card $b was told to `retry <card id>`, which
+# refuses an issue-0 card that is no main-red fix card. shut() and reopened() are called as shut and a turn call them.
+t_shutown() {
+  local b=c20261120T013602-x-0 out
+  setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-02-01))"; shutrec 7 8
+  jq -cn --arg b "$b" '{card:$b,issue:0,time:"2026-11-01T00:00:00Z",tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""}
+    | (. + {step:"picked",title:"hand",branch:"hand/one"}), (. + {step:"blocked",result:"blocked",reason:"review: the card process ended"})' >> "$ST/cards.jsonl"
+  out=$(jq -c 'if .card == "c0-8" and .step == "blocked" then .reason = "shut by the owner. GitHub refused the comment" else . end' "$ST/cards.jsonl") && printf '%s\n' "$out" > "$ST/cards.jsonl"
+  fx_in "locked shut '[7,8]' '[\"c0-7\"]' && locked shut $b '[\"$b\"]' && reopened '$(cat "$STUB/issues.json")'"
+  [ "$RC" = 0 ] || fail "shut exited $RC: $(cat "$T/$CASE/run.out")"
+  [ "$(st 'select(.step == "closed") | "\(.card) \(.reason)"' | tr '\n' '|')" = "c0-7 shut by the owner|c0-8 shut by the owner|$b shut by the owner|" ] \
+    || fail "a card the owner shut did not close as shut by the owner, or reopened() gave it back: $(st 'select(.step == "closed" or .step == "blocked") | "\(.card) \(.step) \(.reason)"')"
+  grep -qF "card $b was shut by the owner; the card is closed, its kept work where it was, and its branch left as it is" "$T/$CASE/run.out" \
+    && ! grep -qF "retry $b" "$T/$CASE/run.out" || fail "shut of the land-branch card $b named a retry that refuses it: $(cat "$T/$CASE/run.out")"
 }
 
 # A hand change landed by land-branch is a card of issue 0. Blocked by its review, then landed by a second land-branch,

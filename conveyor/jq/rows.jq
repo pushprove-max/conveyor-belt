@@ -1,5 +1,5 @@
 # rows() in conveyor.sh: every card as one row. Arguments: $max (reviews a card), $nodeps, $yes and $lintyes (how those reasons begin),
-# $shut (the reason of the closed line of a card whose issue was closed while it was blocked).
+# $shut (the reason of the closed line of a card whose issue was closed while it was blocked) and $ownshut (that of a card the owner shut).
 map(select(.step != "push")) | group_by(.card) | map(. as $all
       | map(select(.step | IN("start", "filed", "pushed", "issue") | not)) | . as $g
       | (map(select(.step == "review")) | length) as $r
@@ -37,9 +37,9 @@ map(select(.step != "push")) | group_by(.card) | map(. as $all
              review: (if $at == "review" then $r + 1 else null end),
              tokens: {claude: (map(.tokens.claude) | add), codex: (map(.tokens.codex) | add)},
              endAt: ($end.time // null), retriedAt: ($end.retriedAt // null),
-             # When a card whose issue was closed while it was blocked (shut()) was blocked, else null: from then to
-             # its end it waited on the owner, and none of that time is a landing's.
-             blockedAt: (if $end.step == "closed" and $end.reason == $shut then $all | map(select(.step == "blocked")) | last | .time else null end), followups: ($end.followups // []), rollout: ($end.rollout // []), branch: (.[0].branch // null),
+             # When a card whose issue was closed while it was blocked, or that the owner shut (shut()), was blocked,
+             # else null: from then to its end it waited on the owner, and none of that time is a landing's.
+             blockedAt: (if $end.step == "closed" and ($end.reason | IN($shut, $ownshut)) then $all | map(select(.step == "blocked")) | last | .time else null end), followups: ($end.followups // []), rollout: ($end.rollout // []), branch: (.[0].branch // null),
              diff: ($end.diff // null), paths: ($end.paths // null), batch: ($end.batch // null), depth: (map(select(.step == "brief")) | last | .depth // null),
              # The blocked card whose kept patch this card resumes (named by its worktree line), else null.
              from: (map(select(.step == "worktree")) | first | .reason // "" | select(test("built from nothing") | not)

@@ -450,7 +450,7 @@ JUDGEDLINE='select(. != "") | fromjson | objects | select(.step == "review" or (
 snaprows() { # <records file> <kept> <to>
   local k r cs size h1 h2 o s n=-1 src=$1 rf=$3.rows skip=0
   # The key is the same for both files of one snapshot: worked out once, in the snapshot's shell (SNAPROWS_K).
-  [ -n "${SNAPROWS_K:-}" ] || SNAPROWS_K=$({ cksum < "$HERE/jq/rows.jq" && printf '%s\n' "$MAX_REVIEWS" "$NODEPS" "$YES" "$LINTYES" "$SHUT"; } | cksum) || return 1
+  [ -n "${SNAPROWS_K:-}" ] || SNAPROWS_K=$({ cksum < "$HERE/jq/rows.jq" && printf '%s\n' "$MAX_REVIEWS" "$NODEPS" "$YES" "$LINTYES" "$SHUT" "$OWNSHUT"; } | cksum) || return 1
   # The file's sum and size from one cksum: a file not grown since the summary needs no other program to check it.
   k=$SNAPROWS_K && r=$(cksum < "$1") && cs=${r%% *} size=${r##* } && [[ $size =~ ^[0-9]+$ ]] || return 1
   # Read from a copy: a snapshot running beside this one may put a newer summary in its place meanwhile.

@@ -22,9 +22,9 @@ snapsum_engine() {
   HERE=$SRC YES="visible to customers or staff: needs the owner's yes: " OWNER="the owner"
   mkdir -p "$ST" "$D/d" && : > "$D/rows" && : >> "$ST/cards.jsonl" && : >> "$ST/retried.jsonl" || fail "the case's folders could not be made"
   eval "$(sed -n '/^snaprows() {/,/^}/p' "$SRC/lib/snapshot.sh"; sed -n '/^rows() {/,/^}/p' "$SRC/lib/views.sh" | sed '1s/^rows()/snapsum_realrows()/'
-    grep -hE '^(MAX_REVIEWS|NODEPS|SHUT| *LINTYES)=' "$SRC/lib/"{paths,push,issues,prompts}.sh)"
+    grep -hE '^(MAX_REVIEWS|NODEPS|SHUT|OWNSHUT| *LINTYES)=' "$SRC/lib/"{paths,push,issues,prompts}.sh)"
   # Bug (#1012): snaprows() reads LINTYES (#259); with it not set, the cases stopped on an unbound variable.
-  declare -F snaprows snapsum_realrows > /dev/null && [ -n "$MAX_REVIEWS" ] && [ -n "$NODEPS" ] && [ -n "$SHUT" ] && [ -n "${LINTYES:-}" ] || fail "snaprows, rows or their settings were not found in the engine"
+  declare -F snaprows snapsum_realrows > /dev/null && [ -n "$MAX_REVIEWS" ] && [ -n "$NODEPS" ] && [ -n "$SHUT" ] && [ -n "${OWNSHUT:-}" ] && [ -n "${LINTYES:-}" ] || fail "snaprows, rows or their settings were not found in the engine"
   rows() { echo "${1##*/} $(wc -l < "$1")" >> "$D/rows"; snapsum_realrows "$@"; }
 }
 snapsum_snap() { snaprows "$ST/$1" "$ST/$1.rows" "$D/d/$2" || fail "snaprows failed on $1"; } # <records file name> <rows|old>
