@@ -103,5 +103,25 @@
       "fixed-block",
       "review-retry"
     ]
+  },
+  "pick": {
+    "builder": {
+      "claude-opus-5-5": {
+        "min": "medium",
+        "max": "xhigh"
+      }
+    },
+    "reviewer": {
+      "gpt-6.2-sol": {
+        "min": "medium",
+        "max": "high"
+      }
+    },
+    "judge": {
+      "claude-opus-5-5": {
+        "min": "medium",
+        "max": "high"
+      }
+    }
   }
 }
