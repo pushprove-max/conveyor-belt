@@ -42,6 +42,9 @@
     "conveyor/tests/judgeminor.test.sh",
     "conveyor/tests/judgesnap.test.sh"
   ],
+  "conveyor/tests/mainred.test.sh": [
+    "conveyor/tests/mainredproof.test.sh"
+  ],
   "conveyor/tests/models.test.sh": [
     "conveyor/tests/modelsproxy.test.sh"
   ],

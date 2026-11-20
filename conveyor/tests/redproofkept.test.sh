@@ -8,7 +8,7 @@
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
 # Issue 441. Bug it catches: a proof run that gave no result for a case removed its worktree and every file of it, so
-# the block reason said "gave no result" and nothing was left to find why. The fixture is mainred.test.sh's
+# the block reason said "gave no result" and nothing was left to find why. The fixture is mainredproof.test.sh's
 # (redsetup()): the change makes `a.test: one` not run (gone:one), so the run with the change prints no line for it.
 # The check, then block() as card() calls it: the blocked line names the kept output file and quotes its end, and the
 # file is still there once the run's worktree is gone. It also catches a change that renames a failing case (so it

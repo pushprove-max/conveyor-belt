@@ -46,7 +46,7 @@ EOF
   f=$(allfails 0 | jq -c .passcases) || fail "the passed cases could not be read"
   [ "$f" = '[{"file":"f.test.mjs","cases":["a b, c","d e"]}]' ] || fail "node's ✔ and TAP's ok lines are not the file's passed cases: $f"
 }
-# Issue 442: redproof() with a stub runner (mainred.test.sh's redrunner) that prints node's `✔ <case> (<n>ms)` for a
+# Issue 442: redproof() with a stub runner (mainredproof.test.sh's redrunner) that prints node's `✔ <case> (<n>ms)` for a
 # passed case: a fix whose case fails without the change and passes with it was blocked with "gave no result".
 t_redproofnode() {
   redrunner ''; sed -i 's/echo "ok \$c"/echo "✔ $c (12.3ms)"/' "$STUB/mainrun-cmd"
