@@ -20,9 +20,9 @@ t_casetimeout() {
   s=$d/src; mkdir -p "$s/tests" "$d/wt.testlog" || fail "the fixture could not be made"
   export XDG_CONFIG_HOME=$d/config CASETIMEOUT_DIR=$d
   mkdir -p "$XDG_CONFIG_HOME/conveyor" && echo "{\"testSlots\": 1, \"testSlotsDir\": \"$d/slots\"}" > "$XDG_CONFIG_HOME/conveyor/host.json"
-  # The engine as it is, with only the two fixture case files in its tests/.
+  # The engine as it is, with only the two fixture case files in its tests/ (and the stub CLIs lib.sh's setup copies).
   for f in "$SRC"/*; do [ "${f##*/}" = tests ] || ln -s "$f" "$s/"; done
-  ln -s "$SRC/tests/lib.sh" "$SRC/tests/wait.sh" "$s/tests/"
+  ln -s "$SRC/tests/lib.sh" "$SRC/tests/wait.sh" "$SRC/tests/stubs" "$s/tests/"
   printf '%s\n' '# timeout: 2' 't_fxhang() { sleep 60 & sleep 60; }' > "$s/tests/hang.test.sh" # sleep: the fixture case must outlast its 2 s limit
   printf '%s\n' '# timeout: 60' 't_fxquick() { : > "$CASETIMEOUT_DIR/quick.ran"; }' > "$s/tests/quick.test.sh"
   t0=$(date +%s)
