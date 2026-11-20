@@ -94,7 +94,7 @@
 // A project with no file times shows its step figures and one state, "No file times for this project", with what
 // starts the record, and no table.
 // The actions (#521, #73). The Board calls the control record's tests (`conveyor.sh control tests`) "the Tests
-// model": its strip-down test (dashboard.test.sh) keeps the engine's retired word for it out of the page. Judge (Judge
+// model": its strip-down test (dashboard-local.test.sh) keeps the engine's retired word for it out of the page. Judge (Judge
 // this test) and Explain the slowdown are a session on the Tests model (POST control {action: testaction, args:
 // [judge | explain, file]}); Run (Run this file now) is testaction run (no session, no model). Put back a flaky case
 // (its flaky issue closed, test-close: the case runs on cards again) shows beside the file's facts; Keep a case off is

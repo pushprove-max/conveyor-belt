@@ -1,5 +1,7 @@
 {
   ".conveyor/engine-areas.json": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/codex.test.sh",
     "conveyor/tests/models.test.sh",
@@ -9,29 +11,45 @@
     "conveyor/tests/snapexec.test.sh"
   ],
   "commands/setup.md": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   "conveyor/commands/doctor.sh": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   "conveyor/commands/setup.sh": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   "conveyor/conveyor.sh": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   "conveyor/lib/card.sh": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/lib/push.sh": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   "conveyor/lib/setup.sh": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/schema/pack.schema.json": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard-view.focus.test.mjs",
     ".claude/scripts/__tests__/dashboard-view.overview.test.mjs",
     ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
@@ -52,13 +70,19 @@
     "conveyor/tests/pushmerge.test.sh"
   ],
   "conveyor/tests/workdeps.test.sh": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   "docs/commands.md": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   "docs/configuration.md": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard-view.focus.test.mjs",
     ".claude/scripts/__tests__/dashboard-view.overview.test.mjs",
     ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
@@ -66,10 +90,14 @@
     "conveyor/tests/snapexec.test.sh"
   ],
   "docs/setup.md": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   ".claude/dashboard/app.css": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
@@ -86,6 +114,8 @@
     "conveyor/tests/snapexec.test.sh"
   ],
   ".claude/scripts/__tests__/dashboard-server.test.sh": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
@@ -129,6 +159,8 @@
     "conveyor/tests/snapexec.test.sh"
   ],
   ".claude/scripts/dashboard_server.py": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
@@ -187,6 +219,8 @@
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/lib/prompts.sh": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard-view.focus.test.mjs",
     ".claude/scripts/__tests__/dashboard-view.overview.test.mjs",
     ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
@@ -294,6 +328,8 @@
     "conveyor/tests/snapexec.test.sh"
   ],
   "docs/board.md": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
@@ -318,15 +354,23 @@
     "conveyor/tests/proxyroute.test.sh"
   ],
   ".claude/dashboard/panels/declined.js": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   ".claude/scripts/__tests__/dashboard-view.declined.test.mjs": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   ".claude/dashboard/panels/release.js": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   ".claude/scripts/__tests__/dashboard-view.release.test.mjs": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   "docs/belt-3d.gif": [
@@ -354,6 +398,8 @@
     "conveyor/e2e.test.sh"
   ],
   "conveyor/tests/slices.test.sh": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   "conveyor/tests/testfails.test.sh": [
@@ -365,39 +411,63 @@
     ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs"
   ],
   "conveyor/foreman/foreman.sh": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   "conveyor/foreman/lib.sh": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   "conveyor/foreman/plugin-problem.test.sh": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   "conveyor/foreman/stop.sh": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   "docs/foreman.md": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   "conveyor/foreman/waiter.sh": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   "conveyor/foreman/waiter.test.sh": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   "conveyor/tools/closure.sh": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   "conveyor/tools/closure.test.sh": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   "conveyor/commands/release-prep.sh": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   "conveyor/foreman/foreman.test.sh": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   "conveyor/tests/releaseagain.test.sh": [
+    ".claude/scripts/__tests__/dashboard-cards.test.sh",
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   "conveyor/tests/rerun.test.sh": [

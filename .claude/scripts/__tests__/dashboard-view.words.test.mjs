@@ -48,7 +48,7 @@ test('the Board: a rule-skipped card links to Rules, which opens the Rules tab; 
 
 // UX21. Bug: Control's Queue column said a bare "Nothing is queued." with issues held, and the Queue panel's empty
 // state "The loop has no open issue to pick", neither saying whether issues are held. The Queue panel counts what the
-// Board holds (by you, a label, a rule or a wait), as the collector sends it (dashboard.test.sh).
+// Board holds (by you, a label, a rule or a wait), as the collector sends it (dashboard-cards.test.sh).
 test('an empty queue says how many issues are held and links to Held, on Control and in the Queue panel; with none held, that none are', () => {
   const d = withOpen();
   Object.assign(d.panels.board.data, { queue: [], waits: [] });

@@ -33,7 +33,7 @@ test('UX10: the machine, a project and the Board name what each pause stops; Sto
   assert.equal(act(loopP(w), 'stop').textContent, 'Stop now and requeue 3 cards');
   // Bug: the count took in cards the engine's stop leaves running (halt() in conveyor/lib/run.sh): landed and still
   // pushing, filing its follow-ups, landing, or filed them, so the label promised to requeue cards it never would.
-  // The server marks each such card stays (dashboard.test.sh proves it from the snapshot's fields).
+  // The server marks each such card stays (dashboard-cards.test.sh proves it from the snapshot's fields).
   b.building.push({ ...b.building[0], card: 'c9-9', issue: 9, step: 'push', stays: true },
     { ...b.building[0], card: 'c9-12', issue: 12, step: 'landing', stays: true });
   b.review.push({ ...b.review[0], card: 'c9-13', issue: 13, stays: true });

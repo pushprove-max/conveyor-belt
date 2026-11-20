@@ -346,7 +346,7 @@ test('the Board and Rules: a page shown while a change is out has its controls o
 // Bug (#320): a card whose test run had ended and whose live record said fix was shown in Building as "testing", timed
 // from the build's end. The card reads the step the snapshot names (the live record's: snapshot.test.sh t_snapfixlive)
 // and times it from that step's start; a test run says how far it has got (its files and tests reach the Board from
-// the track: dashboard.test.sh, "a card in Building carries its test run's files and tests from its track").
+// the track: dashboard-cards.test.sh, "a card in Building carries its test run's files and tests from its track").
 test("Building shows a fix after failed tests as fixing, timed from the fix's start, and a test run's progress", () => {
   const w = boot({ tab: 'control' });
   const data = full();

@@ -20,7 +20,7 @@ test('the Board: a landed, unpushed issue is counted apart in the split and its 
 
 // Bug: an empty queue said "Holds keep N issues back" with the landed, unpushed issue counted among them, though
 // nothing holds it back: it is done and waits only for the push. The Queue panel's count is the collector's
-// (dashboard.test.sh).
+// (dashboard-cards.test.sh).
 test('the Board: an empty queue does not count a landed, unpushed issue among those holds keep back', () => {
   const d = withOpen({ held: clone(OPEN.held).concat([LANDED]) });
   Object.assign(d.panels.board.data, { queue: [], waits: [] });

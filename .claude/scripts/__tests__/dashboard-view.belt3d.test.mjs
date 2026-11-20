@@ -745,7 +745,7 @@ const readouts = (w) => Array.from(b3(w).querySelectorAll('.b3-ro'), (el) => Arr
 // (the mockup's figures), one left at the last snapshot's value, or a loop called LIVE when it is paused.
 // Issue 413 (UX30): the corners repeated the header strip's counts 40 px below it, and read the host's test-slot pool
 // ("SLOTS 2/16 FREE", then "16/16 FREE") while the head's tile said "5 of 13": four slot figures on one screen. The
-// deck's one slots figure is the head tile's (the collector gives both from one count, dashboard.test.sh), filtered to
+// deck's one slots figure is the head tile's (the collector gives both from one count, dashboard-cards.test.sh), filtered to
 // a project or not, and no corner repeats a count the header strip shows.
 test('belt3d: the deck\'s readouts are the snapshot\'s values, its slots the head tile\'s figure, no header-strip count repeated, and follow each refresh', async () => {
   const data = full();

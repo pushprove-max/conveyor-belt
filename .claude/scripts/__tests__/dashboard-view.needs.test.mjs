@@ -230,7 +230,7 @@ test('Needs you: a long reason with no known shape leads with its first sentence
 });
 
 // Bug: with a push failing and being retried, Health said "Failing" while Needs you showed a green tick and "Nothing
-// needs you", and the card was on the belt and in Landed today at once (the collector's side is dashboard.test.sh).
+// needs you", and the card was on the belt and in Landed today at once (the collector's side is dashboard-cards.test.sh).
 test('Needs you: with nothing to answer, a push failing while it is retried is said under the tick, with its fix card', () => {
   const quiet = () => {
     const d = full();

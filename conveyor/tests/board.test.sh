@@ -12,7 +12,7 @@
 # the project pins, reading that project, and lists the service so prune() keeps the install the Board runs from.
 # Bug caught (#108): with no admin yet, board first asked for a typed admin password, so setup's agent could not start
 # the Board. It now asks for none (No login on this device lets this machine in), starts the service with no terminal
-# and names the address to open. The install's own check (dashboard_server.py can-open) is dashboard.test.sh's.
+# and names the address to open. The install's own check (dashboard_server.py can-open) is dashboard-local.test.sh's.
 t_board() {
   service_start
   tune --arg c "$A" '.plugin.commit = $c'
