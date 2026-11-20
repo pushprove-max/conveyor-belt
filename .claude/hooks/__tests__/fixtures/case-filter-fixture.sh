@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # Three dummy checks and a `w`-style wrapper row behind the shared case filter (lib/case-filter.sh), for the
-# case_filter_runs_only_matching checks in bash-guardrails.test.sh. Every check passes; a selector decides which run.
+# case_filter_runs_only_matching checks in bash-guardrails-refusals.test.sh. Every check passes; a selector decides which run.
 . "$(dirname "${BASH_SOURCE[0]}")/../lib/case-filter.sh"
 cf_refuse_empty
 PASS=0 FAIL=0 ON=1 HITS=$(mktemp); trap 'rm -f "$HITS"' EXIT

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=bash
-# Case filter for shell self-tests, sourced by bash-guardrails.test.sh and by
-# fixtures/case-filter-fixture.sh, which its case_filter_runs_only_matching checks run so each selector variant
-# costs milliseconds, not a run of that file.
+# Case filter for shell self-tests, sourced by bash-guardrails.test.sh, bash-guardrails-refusals.test.sh,
+# bash-guardrails-writes.test.sh and fixtures/case-filter-fixture.sh, which the case_filter_runs_only_matching checks
+# in bash-guardrails-refusals.test.sh run so each selector variant costs milliseconds, not a run of that file.
 #
 # CONVEYOR_SHELL_TEST_CASE=<text>[,<text>] runs only the top-level checks whose text holds one of the texts. It
 # acts on top-level lines only: a line whose first word is `check`, or a function that calls `check` (`g`, `w`,

@@ -64,7 +64,7 @@ A test says why the behaviour matters and fails when it breaks; an existing test
 - The coverage map, `.conveyor/coverage.jsonl`, lists for each function of the engine's shell files, of
   `.claude/scripts/dashboard.sh` and of the hooks the test cases that ran it (engine cases, parts of
   `dashboard.test.sh`, `dashboard-cards.test.sh`, `dashboard-local.test.sh` and of the hooks' tests that `CONVEYOR_SHELL_TEST_CASE` selects in (each check of
-  `bash-guardrails.test.sh`), other test files whole). A change to functions alone that the map holds runs only those cases,
+  `bash-guardrails.test.sh`, `bash-guardrails-refusals.test.sh` and `bash-guardrails-writes.test.sh`), other test files whole). A change to functions alone that the map holds runs only those cases,
   in place of the area. A change outside any function, to a function the map does not hold or lists no case for, or to
   one changed since the map was traced, runs by the area, as above. `bash .conveyor/coverage.sh` traces every case
   once and writes the map; run it by hand and commit the map, never on a card's test step. The map check
