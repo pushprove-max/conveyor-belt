@@ -283,7 +283,7 @@ lines() { # <step>...
 }
 # watch() (lib/session.sh), the engine's own, on a <step> held open until $STUB/go, whose output is <output file> as
 # it stands; its live record is copied to $W.seen once <jq test> holds of it, and it is gone once the step ends.
-watched() { # <output file> <step> <model> <jq test>
+viewswatched() { # <output file> <step> <model> <jq test>
   # shellcheck disable=SC2034 # LIVE and STUCK are read by watch(), defined by the eval
   ( . "$SRC/lib/portable.sh"; eval "$(for f in watch rollout holds; do sed -n "/^$f() {/,/^}/p" "$SRC/lib/session.sh"; done)"; LIVE=0.05 STUCK=600
     (while [ -d "$STUB" ] && [ ! -e "$STUB/go" ]; do sleep 0.05; done) & watch $! "$1" "$W.live" "$2" "$3" ) > "$T/$CASE/run.out" 2>&1 & run=$!
@@ -304,7 +304,7 @@ t_livebuild() { livestart; lines picked worktree deps brief start:build
   answer() { echo "{\"type\":\"assistant\",\"message\":{\"id\":\"$1\",\"usage\":{\"input_tokens\":1000000,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0}}}"; }
   { echo '{"type":"system","subtype":"init"}'; answer m1; answer m1; echo '{"type":"user"}'; answer m2
     echo '{"type":"assistant","message":{"id":"m2","content":[{"type":"tool_use","name":"Bash","input":{"command":"npm test"}}]}}'; } > "$W.out"
-  watched "$W.out" build claude-sonnet-5-5 '.action == "Bash: npm test"'
+  viewswatched "$W.out" build claude-sonnet-5-5 '.action == "Bash: npm test"'
   [ "$(jq -c '[.turns, .usage.input, .action, (.last != null)]' "$W.seen")" = '[2,2000000,"Bash: npm test",true]' ] || fail "the live record of a running session: $(cat "$W.seen")"
   cp "$W.seen" "$W.live"; out=$(loop snapshot --fresh 2>/dev/null) || fail "snapshot of a running session exited non-zero"
   [ "$(jq -c '[(.belt[0] | .usd, .reading, .tokens.claude, .live.turns, .live.action, (.live.lastOutputAt | fromdate > 0), .step), .cost.today]' <<<"$out")" \
@@ -322,7 +322,7 @@ t_livereview() { livestart; lines picked worktree deps brief start:build 'build:
   printf '%s\n' '{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":500000,"cached_input_tokens":0,"output_tokens":0}}}}' \
     '{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000000,"cached_input_tokens":400000,"output_tokens":500}}}}' > "$f"
   [ "$(eval "$(sed -n '/^rollout() {/,/^}/p' "$SRC/lib/session.sh")"; rollout "$W.events")" = "$f" ] || fail "rollout() does not find the review's session file"
-  watched "$W.events" review gpt-6.1-sol '.usage.input == 600000'
+  viewswatched "$W.events" review gpt-6.1-sol '.usage.input == 600000'
   [ "$(jq -c '[.usage, (.last != null)]' "$W.seen")" = '[{"input":600000,"read":400000,"output":500},true]' ] || fail "the live record of a running review: $(cat "$W.seen")"
   cp "$W.seen" "$W.live"
   [ "$(snap '.belt[0] | [.track.label, .tokens.codex, .reading, .tokens.claude, .usd > 0, (.live.lastOutputAt | fromdate > 0)]')" = '["review 1 of 3",600500,true,35,true,true]' ] \

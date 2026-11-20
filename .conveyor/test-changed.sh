@@ -220,6 +220,30 @@ partok() {
 }
 if [ "${1:-}" = --parts ]; then partsof "$2"; exit; fi
 AMAP=$(jq -cs "$AREAS" "$MAP" 2>/dev/null) || AMAP=''
+# FNSCAN, an awk program run with -v q="'" on case files: a line for each function name more than one of them defines,
+# read as sourcing defines them: a `<name>() {` or `<name>() (` line at the left, outside a heredoc. Only a << outside
+# quotes and comments starts a heredoc (a fixture's functions, written into a scratch file, are not the file's own).
+FNSCAN='function opener(s,   i, n, c, t, h) {
+  n = length(s)
+  for (i = 1; i <= n; i++) {
+    c = substr(s, i, 1)
+    if (t == q) { if (c == q) t = ""; continue }
+    if (c == "\\") { i++; continue }
+    if (t == "\"") { if (c == "\"") t = ""; continue }
+    if (c == q || c == "\"") t = c
+    else if (c == "#" && (i == 1 || substr(s, i - 1, 1) ~ /[ \t;|&(]/)) return ""
+    else if (substr(s, i, 3) == "<<<") i += 2
+    else if (match(substr(s, i), "^<<-?[ \t]*[\"" q "\\\\]?[A-Za-z_][A-Za-z0-9_]*")) {
+      h = substr(s, i, RLENGTH); dash = (h ~ /^<<-/); sub(/^<<-?[ \t]*/, "", h); gsub("[\"" q "\\\\]", "", h); return h }
+  }
+  return ""
+}
+FNR == 1 { end = "" }
+end != "" { l = $0; if (dash) sub(/^\t+/, "", l); if (l == end) end = ""; next }
+/^[A-Za-z_][A-Za-z0-9_]*\(\) *[{(]/ { k = $0; sub(/\(.*/, "", k)
+  if (!((k, FILENAME) in seen)) { seen[k, FILENAME] = 1; nf[k]++; at[k] = at[k] (nf[k] > 1 ? ", " : "") FILENAME } }
+{ end = opener($0) }
+END { for (k in nf) if (nf[k] > 1) print k "(): defined in " nf[k] " case files (" at[k] "); the runner sources them all, so one replaces the others in every run: rename it" }'
 mapcheck() {
   local bad
   [ -n "$AMAP" ] && bad=$(git ls-files -co --exclude-standard conveyor | while read -r f; do [ -e "$f" ] && echo "$f"; done \
@@ -249,6 +273,12 @@ mapcheck() {
       | [$m.areas[].tests | arrays[] | select(contains("/") | not)] | unique[] as $n
       | [$ts[] | select(split("/")[-1] == $n)] | select(length > 1)
       | "\($n): named in \($map), but \(length) test files have that name (\(join(", "))); the map cannot tell them apart: rename one"')
+  # A function two case files define (#871: watched() in views.test.sh and stall.test.sh, of other arguments): the
+  # runner, conveyor/conveyor.test.sh, sources every case file before any case runs, so the later file's replaces the
+  # other's for the cases of both.
+  local cf=() f
+  while read -r f; do [ -e "$f" ] && cf+=("$f"); done < <(git ls-files -co --exclude-standard 'conveyor/tests/*.test.sh' | grep -E '^conveyor/tests/[^/]+\.test\.sh$')
+  [ ${#cf[@]} = 0 ] || bad=$bad${bad:+$'\n'}$(awk -v q="'" "$FNSCAN" "${cf[@]}" | sort)
   bad=${bad%$'\n'}
   [ -z "$bad" ] || { echo "engine area map check failed:"; echo "$bad"; return 1; }
 }

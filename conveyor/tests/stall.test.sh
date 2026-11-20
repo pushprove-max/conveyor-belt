@@ -66,7 +66,7 @@ t_stalltwice() {
 # Output, a changed file and a new commit each reset the clock: a session that keeps doing one of them is never ended,
 # however long the others stay still. Each case runs a stub that does one of them alone for at least twice `stuck` (3 s): 6 s,
 # or 8 s for t_stallprogressrare, under
-# the engine's watch() (watched(), below), and checks that watch() returns the stub's own exit and writes no
+# the engine's watch() (stallwatched(), below), and checks that watch() returns the stub's own exit and writes no
 # <worktree>.stalled: a reset that is missed ends the stub at about 3 s with that file. Output that comes less often
 # than the live record is read still counts (it is read before the clock is, or a line 2 s after the last was missed at
 # 3 s), and so does a file git ignores, and a write that keeps an old modification time (`cp -p`), which only the
@@ -104,13 +104,13 @@ for i in $(seq 12); do git commit -q --allow-empty -m "step $i"; sleep 0.5; done
 EOF
 }
 progressing() { # stdin: the shell of the build's one kind of progress, at least twice `stuck` long
-  watched build 3 'exit 7'
+  stallwatched build 3 'exit 7'
   [ "$RC" = 7 ] && [ ! -e "$W.stalled" ] || fail "a session making progress was ended: watch() returned $RC after $TOOK s, stalled: $(cat "$W.stalled" 2>/dev/null)"
 }
 # Runs stdin's shell, then <last shell>, in a fresh worktree (its git folder outside it, as a card's is) under the
 # engine's watch() as step <step>, with STUCK=<stuck> and a live record every 0.2 s (setup's live), its output beside the
 # worktree. Sets W (the worktree), RC (watch()'s exit) and TOOK (its seconds).
-watched() { # <step> <stuck> <last shell>
+stallwatched() { # <step> <stuck> <last shell>
   local p s; p=$(cat); W=$T/$CASE/wt
   git init -q -b main --separate-git-dir "$T/$CASE/git" "$W" && echo one > "$W/a.txt" && git -C "$W" add a.txt \
     && git -C "$W" commit -qm a || fail "the case's worktree could not be made"
@@ -120,6 +120,37 @@ watched() { # <step> <stuck> <last shell>
     # shellcheck disable=SC2034 # LIVE and STUCK are read by watch(), defined by the eval
     LIVE=0.2 STUCK=$2; (cd "$W" && exec bash "$T/$CASE/step.sh") > "$W.out" 2>&1 < /dev/null &
     watch $! "$W.out" "$W.live" "$1" ); RC=$?; TOOK=$((SECONDS - s))
+}
+# The runner (conveyor.test.sh) sources every area file before any case runs, so a function two files define is, in
+# every run, the later file's for the cases of both. Bug it catches (#871): views.test.sh and stall.test.sh each
+# defined a watched() of other arguments, and serve.test.sh an eng() of other arguments than mainred.test.sh's, which
+# five other files call; whichever file came later took the name.
+t_stallownwatched() { ownfuncs stall views; }
+t_stallowneng() { ownfuncs mainred serve; }
+# ownfuncs <area> <area>: with both area files sourced, in either order, each function of each file is the one that
+# file defines when sourced alone, so its cases call their own. It compares the functions' text, not a call: a call of
+# the other file's function can pass (when both take the same arguments) or fail for its own reasons.
+ownfuncs() {
+  local a o order names alone
+  for a in "$1" "$2"; do
+    o=$1; [ "$a" != "$1" ] || o=$2
+    names=$(srcd "$a"; compgen -A function | grep -vx srcd)
+    # shellcheck disable=SC2086 # $names and $order are function and file names, single words
+    alone=$(srcd "$a"; declare -f $names)
+    [ -n "$names" ] || { fail "$a.test.sh, sourced alone, defined no function"; continue; }
+    for order in "$a $o" "$o $a"; do
+      # shellcheck disable=SC2086
+      [ "$(srcd $order; declare -f $names)" = "$alone" ] || fail "with ${order// /.test.sh and }.test.sh sourced in that order, a function of $a.test.sh is another file's"
+    done
+  done
+}
+# srcd <area>...: in this (sub)shell, no function but those the area files define, sourced in that order.
+srcd() {
+  local f
+  # shellcheck disable=SC2046 # function names are single words
+  unset -f $(compgen -A function | grep -vx srcd)
+  # shellcheck disable=SC1090 # the area files the case names
+  for f; do . "$SRC/tests/$f.test.sh" > /dev/null < /dev/null; done
 }
 
 # A card waiting by design (here to land, on a same-file card that lands first) is never ended, however long it waits:
@@ -183,7 +214,7 @@ t_stallpause() {
 # seconds and writes <worktree>.stalled with the time its progress stopped.
 t_stallrollout() {
   export CODEX_HOME=$T/$CASE/codex-home; mkdir -p "$T/$CASE/codex-home/sessions/2026/01/01"
-  watched review 2 'exit 0' <<'EOF'
+  stallwatched review 2 'exit 0' <<'EOF'
 echo '{"type":"thread.started","thread_id":"0aa1-b2"}'
 f=$CODEX_HOME/sessions/2026/01/01/rollout-2026-01-01T00-00-00-0aa1-b2.jsonl
 echo '{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":5,"cached_input_tokens":0,"output_tokens":0}}}}' > "$f"
