@@ -260,6 +260,19 @@ theirs() { # <the commit that was pushed> <the push worktree>
   done <<<"$us"
   [ "$at" != "$1" ] || { echo "main already holds $REMOTE/$BRANCH ($x)"; return 1; }
 }
+# One of main's commit hooks, as `git commit` runs it, on the index and repository the environment names (a landing's
+# and a merge's private index): `git hook run --ignore-missing`. Git before 2.36 (Ubuntu 22.04's 2.34) has no `git
+# hook` (`git hook -h` exits 129 where it is there), so the hook is run here as git runs it: from the hooks folder
+# (`git rev-parse --git-path hooks`: core.hooksPath when set, else the repository's hooks), in the top of the work
+# tree, with no stdin and without the loop's run lock (fd 8, as git() in conveyor.sh), only when it is a file that can
+# be run. Exits as the hook does, 0 when there is none.
+commithook() { # <hook name> [the hook's arguments]
+  git hook -h >/dev/null 2>&1
+  [ $? != 129 ] || { git hook run --ignore-missing "$1" -- "${@:2}"; return; }
+  ( t=$(git rev-parse --show-toplevel) && cd "$t" && h=$(git rev-parse --git-path "hooks/$1") || exit 1
+    [ -f "$h" ] && [ -x "$h" ] || exit 0
+    exec "$h" "${@:2}" < /dev/null 8>&- )
+}
 # The merge a refused push needs, under the lock (landings move main under it too): the remote's main as just
 # fetched, merged into the commit that was pushed. Only a merge git makes with no conflict (merge-tree) is taken;
 # main gets it as landings get theirs: its tree is in a private index, main's commit hooks judge that index and the
@@ -272,7 +285,7 @@ remerge() { # <the commit that was pushed>
   t=$(git merge-tree --write-tree --name-only "$1" "$x" 2>&1) || { echo "$REMOTE/$BRANCH ($x) does not merge with main ($1): ${t#*$'\n'}"; return 1; }
   [ "$(git symbolic-ref -q HEAD)" = "refs/heads/$BRANCH" ] && [ "$(git rev-parse "refs/heads/$BRANCH")" = "$1" ] || { echo "main moved during the push, or its checkout is not on the $BRANCH branch"; return 1; }
   printf '%s\n' "Merge $REMOTE/$BRANCH into $BRANCH" > "$f.msg" && rm -f "$f.index" && GIT_INDEX_FILE="$f.index" git read-tree "$t" || { echo "cannot make the merge's index"; return 1; }
-  err=$(export GIT_INDEX_FILE="$f.index"; git hook run --ignore-missing pre-commit 2>&1 && git hook run --ignore-missing commit-msg -- "$f.msg" 2>&1) || { echo "commit of the merge refused: ${err:0:600}"; return 1; }
+  err=$(export GIT_INDEX_FILE="$f.index"; commithook pre-commit 2>&1 && commithook commit-msg "$f.msg" 2>&1) || { echo "commit of the merge refused: ${err:0:600}"; return 1; }
   [ "$(GIT_INDEX_FILE="$f.index" git write-tree)" = "$t" ] || { echo "main's hooks changed what the merge would commit; it needs $OWNER"; return 1; }
   m=$(git commit-tree "$t" -p "$1" -p "$x" -F "$f.msg" 2>&1) || { echo "cannot make the merge commit: $m"; return 1; }
   git diff --quiet "$1" "$m" || err=$(git diff --binary --no-renames "$1" "$m" | git apply --index 2>&1) || { echo "the merge does not apply to main's checkout: $err"; return 1; }

@@ -190,6 +190,41 @@ t_blankeof() {
   [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] || fail "the commit a hook changed reached main"
 }
 
+# Bug (issue 1022): on git before 2.36 (Ubuntu 22.04's 2.34) there is no `git hook`, so every landing was refused
+# with "git: 'hook' is not a git command". Here a git with no `hook` command lands a card when main has no hooks; with
+# main's hooks it runs pre-commit on the landing's index and commit-msg on its message, and a failing hook refuses the
+# landing with its output. Neither hook gets the loop's run lock (fd 8), which a hook left running would hold open
+# after the loop exits.
+t_oldgithooks() {
+  setup '[]'
+  real=$(command -v git); printf '%s\n' '#!/usr/bin/env bash' \
+    "[ \"\$1\" != hook ] || { echo \"git: 'hook' is not a git command. See 'git --help'.\" >&2; exit 1; }" "exec $real \"\$@\"" > "$STUB/git"; chmod +x "$STUB/git"
+  flcard 7 'echo two >> a.txt'; flland 7
+  [ "$(flout)" = "land: 0" ] && [ "$(st 'select(.issue == 7 and .step == "landed") | .sha')" = "$(git -C "$R" rev-parse HEAD)" ] \
+    || fail "with no git hook command and no hooks, the card did not land: $(cat "$T/$CASE/run.out")"
+  printf '%s\n' '#!/bin/sh' "git diff --cached --name-only > '$STUB/pre'; ! (: >&8) 2>/dev/null || echo pre >> '$STUB/fd8'" > "$R/.git/hooks/pre-commit"
+  printf '%s\n' '#!/bin/sh' "cat \"\$1\" > '$STUB/msg'; ! (: >&8) 2>/dev/null || echo msg >> '$STUB/fd8'; ! grep -q '#8' \"\$1\" || { echo 'no #8 here'; exit 1; }" > "$R/.git/hooks/commit-msg"
+  chmod +x "$R/.git/hooks/pre-commit" "$R/.git/hooks/commit-msg"
+  flcard 8 'echo eight > eight.txt'; head=$(git -C "$R" rev-parse HEAD); flland 8
+  [ "$(cat "$STUB/pre" 2>/dev/null)" = eight.txt ] || fail "pre-commit did not run on the landing's index: $(cat "$STUB/pre" 2>&1)"
+  grep -q 'commit refused: no #8 here' "$T/$CASE/run.out" && [ "$(flout)" = "land: 1" ] && [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] \
+    || fail "a failing commit-msg hook did not refuse the landing with its output: $(cat "$T/$CASE/run.out")"
+  flcard 9 'echo nine > nine.txt'; flland 9 8>"$STUB/lock"
+  [ ! -e "$STUB/fd8" ] || fail "a hook got the loop's run lock (fd 8): $(cat "$STUB/fd8")"
+  [ "$(flout)" = "land: 0" ] && [ "$(cat "$STUB/msg")" = 'title 9 (#9)' ] && [ "$(cat "$STUB/pre")" = nine.txt ] \
+    || fail "with passing hooks the card did not land, or commit-msg did not get its message: $(cat "$T/$CASE/run.out") $(cat "$STUB/msg")"
+}
+
+# Git 2.36 or newer runs main's commit hooks itself, with `git hook run` (issue 1022 keeps that path as it was).
+t_githookrun() {
+  setup '[]'
+  real=$(command -v git); printf '%s\n' '#!/usr/bin/env bash' "[ \"\$1\" != hook ] || echo \"\$*\" >> '$STUB/hookcalls'" "exec $real \"\$@\"" > "$STUB/git"; chmod +x "$STUB/git"
+  flcard 7 'echo two >> a.txt'; flland 7
+  [ "$(flout)" = "land: 0" ] && grep -qx 'hook run --ignore-missing pre-commit --' "$STUB/hookcalls" \
+    && grep -q '^hook run --ignore-missing commit-msg -- .*c7-7\.msg$' "$STUB/hookcalls" \
+    || fail "the landing did not run its hooks with git hook run: $(cat "$STUB/hookcalls" 2>&1) $(cat "$T/$CASE/run.out")"
+}
+
 # Bugs: a card whose diff no longer applies to main is merged by force or leaves main half-applied; when another
 # writer commits in the middle of a landing, the loop undoes part of that writer's commit in main's checkout; when
 # main's checkout is on another branch, or is switched to one mid-landing, that branch moves and the card is

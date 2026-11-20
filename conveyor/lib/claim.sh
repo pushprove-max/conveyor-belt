@@ -1006,7 +1006,7 @@ land() { # <card> <issue> <worktree> <commit message> [extra json for the landed
     # HEAD), main's checkout its files, so its hooks see its own change alone, as if it landed alone.
     g=(); [ "$tip" = "$base" ] || { git worktree remove --force "$3.head" 2>/dev/null; git worktree add -q --detach --no-checkout "$3.head" "$tip" 2>/dev/null \
       && g=("GIT_DIR=$(git -C "$3.head" rev-parse --absolute-git-dir)" "GIT_WORK_TREE=$MAIN"); } || { echo "cannot make the commit before the card's to judge it on"; return 1; }
-    err=$(export GIT_INDEX_FILE="$3.index" "${g[@]}"; git hook run --ignore-missing pre-commit 2>&1 && git hook run --ignore-missing commit-msg -- "$3.msg" 2>&1); h=$?
+    err=$(export GIT_INDEX_FILE="$3.index" "${g[@]}"; commithook pre-commit 2>&1 && commithook commit-msg "$3.msg" 2>&1); h=$? # commithook(): lib/push.sh
     [ "$tip" = "$base" ] || git worktree remove --force "$3.head" 2>/dev/null
     [ $h = 0 ] || { echo "commit refused: ${err:0:600}"; return 1; }
     [ "$(GIT_INDEX_FILE="$3.index" git write-tree)" = "$want" ] || { echo "main's hooks changed what would be committed: it is not exactly the reviewed diff; it needs $OWNER"; return 1; }
