@@ -147,14 +147,15 @@ c1-55 small docs false m m' ] || fail "the trials of the cards picked: $(cat "$T
 }
 
 # Bug caught: a card that starts again for the same issue was picked again, so a restart could move it to another
-# group or choice. The issue's earlier card (blocked) holds a pick of another group and builder than this issue now
-# gets; the new card keeps that pick, with the rule's setting as it is now.
+# group. The issue's earlier card (blocked) holds a pick of another group and builder than this issue now gets; the
+# new card keeps that pick, with the rule's setting as it is now. Bug: in Shadow it also kept the earlier builder (m0
+# at low, the On pick's) as its choice, while it builds on the project's m at medium.
 t_pickrestart() {
   picksetup
   jq -cn '{card: "c0-7", issue: 7, step: "blocked", time: "2026-11-01T00:00:00Z", tokens: {claude: 0, codex: 0}, result: "blocked", sha: "", reason: "tests failed",
     pick: {group: "large code", choice: {model: "m0", effort: "low"}, by: "auto", trial: false, mode: "on"}}' >> "$ST/cards.jsonl"
   fx_in 'SEATCARD=7; PICK=""; modelpick c1-7 7 2>/dev/null; printf "%s %s\n" "$PICKCARD" "$(jq -c "del(.asked)" <<<"$PICK")"'
-  [ "$(cat "$T/$CASE/run.out")" = 'c1-7 {"group":"large code","choice":{"model":"m0","effort":"low"},"by":"auto","trial":false,"mode":"shadow"}' ] \
+  [ "$(cat "$T/$CASE/run.out")" = 'c1-7 {"group":"large code","choice":{"model":"m","effort":"medium"},"by":"auto","trial":false,"mode":"shadow"}' ] \
     || fail "the restarted card did not keep its issue's pick: $(cat "$T/$CASE/run.out")"
 }
 

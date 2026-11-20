@@ -48,11 +48,11 @@
 # (pickjudge(), below), trialEffort: the effort a trial card builds at when the judge's is not its choice's, and on a
 # trial card whose staged change touches pipeline files, pipeline: those files (trialflag(), lib/push.sh; the Board flags it). A
 # later card of the same issue (a retry, or a stop and a new pick) reuses the newest pick that a line of the issue
-# holds, in the card records or the retried lines, so a restart keeps its group; only the owner's setting
+# holds, in the card records or the retried lines, so a restart keeps its group and trial; only the owner's setting
 # is put over it, as that always wins (and a pick the owner had set, whose setting is gone since, takes the rule's
 # choice again), and a trial pick is checked for its trial again, as above. A pick that is no trial nor promoted
 # takes the builder the owner set for the issue, or else the project's, as its choice again, which the judge's new
-# answer then moves when the owner set none. Its pipeline and trialEffort are
+# answer then moves only with the rule On and when the owner set none (pickjudge()). Its pipeline and trialEffort are
 # dropped: each is this card's own, set again when it holds (a retry that is no longer a trial has no trialEffort). An issue that cannot be read gets no
 # pick, and the card goes on.
 PICKTRIAL='{"model":"claude-sonnet-5-5","effort":"medium"}'
@@ -94,9 +94,9 @@ modelpick() { # <card> <issue>: sets card()'s PICK, PICKCARD and PICKSEAT
     if pickpromote "$1" "$2" "$c" "$b"; then :
     elif jq -e .trial <<<"$PICK" >/dev/null; then picktrial "$1" "$2" "$c" "$b"
     # Else the card builds on the builder the owner set for the issue, or the project's ($b), so does its pick, until
-    # the judge's answer moves it (pickjudge(); never the owner's):
-    # a promoted card started again once its group is no longer promoted, and a card whose earlier choice was the
-    # judge's builder, so a judge that fails this time leaves no earlier choice the card does not build on.
+    # the judge's answer moves it (pickjudge(); never the owner's, and only while the rule is On: in Shadow the card
+    # builds on $b): a promoted card started again once its group is no longer promoted, and a card whose earlier
+    # choice was the judge's builder, so a judge that fails this time leaves no earlier choice the card does not build on.
     else
       PICK=$(jq -c --argjson b "$b" '.choice = $b | del(.promoted)' <<<"$PICK") || :
     fi

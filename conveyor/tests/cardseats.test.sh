@@ -259,6 +259,13 @@ t_pickjudgeon() {
   fx_in "N=7; $PJ; jq -r '.choice | \"\(.model) \(.effort)\"' <<<\"\$PICK\""
   [ "$(sed -n '2p;5p' "$T/$CASE/run.out" | paste -sd,)" = 'm high,m high' ] \
     || fail "the retry's failed pick kept a choice that is not the builder it runs on: $(cat "$T/$CASE/run.out")"
+  # Bug: a retry in Shadow took the judge's builder as its choice (from the deps line, or its new answer at
+  # medium), while it builds on the project's m at high.
+  rm -f "$STUB/pick-json"; pjask 'm medium' 'x2 medium' 'j2 high'
+  loop control rules pick=shadow >/dev/null || fail "control rules pick=shadow was refused"
+  fx_in "N=7; $PJ; jq -c '.choice' <<<\"\$PICK\""
+  [ "$(sed -n '2p;5p' "$T/$CASE/run.out" | paste -sd,)" = 'm high,{"model":"m","effort":"high"}' ] \
+    || fail "the retry in Shadow does not record the builder it builds on: $(cat "$T/$CASE/run.out")"
 }
 
 # Bugs: a seat the owner set for the issue (`control card`) was moved to the judge's; a trial card left its challenger
