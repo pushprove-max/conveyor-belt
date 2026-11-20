@@ -10,7 +10,9 @@
 # The Board reads a snapshot again and again, and each program the snapshot starts is a fork and an exec. Before
 # issue 2, one snapshot of this fixture started SNAPEXEC_WAS programs: a basename for each file name, an uname at each
 # system check, a `true` for each test slot counted, a jq for each read of the same control record, and more, where
-# the shell's own expansions, one kept answer or a lock tried on the shell's own descriptor do the same. A shim of
+# the shell's own expansions, one kept answer or a lock tried on the shell's own descriptor do the same. Issue 993:
+# the Claude routes, the models allowed and the host's report worked out again by jq in each of the snapshot's
+# subshells (health, each seat, the guard's accounts), and a jq for each list of test files, took it to 283. A shim of
 # every program on PATH notes its name, then runs the program. Bug it catches: the snapshot starting programs again
 # where bash needs none.
 SNAPEXEC_WAS=269

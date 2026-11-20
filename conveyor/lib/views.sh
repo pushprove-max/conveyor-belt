@@ -138,7 +138,7 @@ cards() {
     t=$(timeout 5 gh issue view "$n" --json title 2>/dev/null | jq -r '.title // "" | .[0:200]' 2>/dev/null) && [ -n "$t" ] || continue
     titles=$(jq -c --arg n "$n" --arg t "$t" '.[$n] = $t' <<<"$titles")
   done
-  jq -c --argjson m "$models" --arg u "$url" --argjson t "$titles" --argjson red "$(redtitles)" '. + {models: $m, repoUrl: (if $u == "" then null else $u end)}
+  jq -c --argjson m "$models" --arg u "$url" --argjson t "$titles" --argjson red "$(redtitles)" '. + {models: $m.models, repoUrl: (if $u == "" then null else $u end)}
     | .cards |= map(.title = ($red[.card] // (if .title == "" then $t[.issue | tostring] // "" else .title end)))' <<<"$out"
 }
 
@@ -343,7 +343,8 @@ health() {
     jq -cn --argjson n "$n" --arg r "$(slot_reserved)" --arg why "$(slot_reserve_why)" \
       '{reserved: ($r | split("\n") | map(select(. != "") | tonumber)), slots: $n, unavailable: (if $why == "" then null else $why end)}') || co=null
   # How the test times are read from the runner's report (the pack's test.report, written by setup), for untimed.
-  tr=$(jq -ce '.test.report | objects' "$PACK" 2>/dev/null) || tr=null
+  # The pack's values as packget keeps them: no program of its own.
+  packget test.report tr 2>/dev/null && [ -n "$tr" ] || tr=null
   # The machine's Conveyor on another commit whose own check refuses this pack (machinerefuses, lib/install.sh).
   so=$(machinerefuses | jq -Rc 'split("\t") | select(length == 3) | {commit: .[0], refused: .[1], project: (.[2] | if . == "" then null else . end)}') \
     && [ -n "$so" ] || so=null
@@ -354,7 +355,7 @@ health() {
   [ -n "$GITHUB" ] || prsync
   jq -cs --argjson loop "$loop" --argjson gh "$gh" --argjson ghr "$ghr" --arg ghwhy "$ghwhy" --arg ghread "$GHREAD" --argjson free "$free" --argjson stuck "$STUCK" --argjson sstuck "$SESSION_STUCK" --argjson casestuck "$CASE_STUCK" --argjson waitlimit "$WAIT_LIMIT" --argjson gone "$gone" --argjson live "${lv:-{\}}" --argjson proof "$(proofs)" --argjson testout "$(testouts)" \
     --arg state "$st" --arg why "$why" --argjson commit "$cm" --argjson ctl "$c" --argjson r "$r" --arg yes "$YES" \
-    --argjson cap "$cap" --argjson bw "$bw" --arg repo "$REPO" --argjson room "$rm" --argjson machine "$mc" --argjson cores "$co" --argjson models "$(inforce '' "$c")" --argjson efforts "$(inforce efforts "$c")" --argjson cycles "$cyc" --slurpfile before <(printf '%s\n' "$bf") --argjson pushing "$pu" --argjson homes "$(homes "$c")" --argjson routes "$(routesnow)" --argjson report "$tr" --argjson serviceold "$so" \
+    --argjson cap "$cap" --argjson bw "$bw" --arg repo "$REPO" --argjson room "$rm" --argjson machine "$mc" --argjson cores "$co" --argjson force "$(inforce "$c")" --argjson cycles "$cyc" --slurpfile before <(printf '%s\n' "$bf") --argjson pushing "$pu" --argjson homes "$(homes "$c")" --argjson routes "$(routesnow)" --argjson report "$tr" --argjson serviceold "$so" \
     --slurpfile old "$hd/old" --slurpfile mh <(jq -c 'objects | {since, card, sha, controls, cases}' "$MACHINEHOLD" 2>/dev/null) --slurpfile lp <(jq -c 'objects | select(.merged == null and .closed == null and (.number | type) == "number") | {number, url, merge}' "$LANDPR" 2>/dev/null) --slurpfile qt <(jq -c 'objects | {line, field, time}' "$QUARANTINE" 2>/dev/null) --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) "$UNTIMED$SPLITM"'
     (($ENV.CONVEYOR_NOW // "" | tonumber?) // now) as $now
     | ($ahead | split("\n") | map(select(. != "")) | INDEX(.)) as $ahead
@@ -421,7 +422,7 @@ health() {
              | select($k != []) | {card, issue, step: "test", since: ($k | map(.since) | min), cases: ($k | map(.name))}])),
        waitingOnCard: [$c[] | select(.end == null and atclaim) | $live[.card] as $v | {card, issue, since: $v.at, waitsOn: holder($v.waits.on)}],
        unpushed: $un, pushError: ($fail | last | if . then {time, sha, reason, kind: (.kind // null), check: (.check // null), card, issue} else null end), pushFailingSince: ($fail[0].time // null), pushFails: ($fail | length), pushing: $pushing,
-       gh: $gh, ghReached: $ghr, ghWhy: (if $gh then null else $ghwhy end), ghRead: $ghread, diskFreeKb: $free, builderCap: $cap, building: $bw.building, waitingCount: $bw.waiting, models: $models, efforts: $efforts, cycles: $cycles, before: $before[0], homes: $homes,
+       gh: $gh, ghReached: $ghr, ghWhy: (if $gh then null else $ghwhy end), ghRead: $ghread, diskFreeKb: $free, builderCap: $cap, building: $bw.building, waitingCount: $bw.waiting, models: $force.models, efforts: $force.efforts, cycles: $cycles, before: $before[0], homes: $homes,
        refused: [.[] | select(.step == "test" and (.refused | type) == "string" and $now - (.time | fromdate) < 86400) | {card, issue, reason: .refused, since: .time}],
        untimed: untimed, split: splitm([.[], $old[]]), report: $report, routes: $routes, quarantined: $qt, serviceOld: $serviceold, machineHold: ($mh[0] // null),
        landingPr: ([.[] | select(.step == "pushed" and (.pr | type) == "number") | {pr, card}] as $pp

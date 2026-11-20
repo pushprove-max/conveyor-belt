@@ -564,16 +564,27 @@ ROUTES=${STATE%/*}/routes.json
 # through the proxy. The subscription's roles: the roles whose sessions run on the subscription login now, so its usage
 # limit and account are theirs alone (subroles()): a role on "subscription", or on "fallback" (each of its sessions starts
 # on the login, proxyroute(), even after a login that failed before); every role when no proxy is set.
+# Worked out in two jq runs (claudeproxy's and this) and kept, keyed on what they read: the host file's text, the
+# pack's models.claudeProxy and ROUTES's text (ROUTES_K), so a subshell started after asks again with no program.
+ROUTES_K=() # the key, then the answer
 routesnow() {
-  local p r; p=$(claudeproxy); [ -n "$p" ] || p=null
+  local p r h='' m='' k a=1
+  [ ! -e "$HOST" ] || { IFS= read -r -d '' h; a=$?; } 2>/dev/null <"$HOST"
+  packget models.claudeProxy m 2>/dev/null || m=''
   { r=$(<"$ROUTES"); } 2>/dev/null || r=null
-  jq -c --argjson p "$p" 'if type == "object" then . else {} end
+  # A host file with a NUL byte (read stops there, exit 0) is read as before and never kept: a bash variable cannot hold it.
+  k=$h$'\037'$m$'\037'$r
+  [ "$a" = 1 ] && [ "${#ROUTES_K[@]}" = 2 ] && [ "${ROUTES_K[0]}" = "$k" ] && { printf '%s\n' "${ROUTES_K[1]}"; return 0; }
+  p=$(claudeproxy); [ -n "$p" ] || p=null
+  p=$(jq -c --argjson p "$p" 'if type == "object" then . else {} end
     | ($p | if . == null then null else [.roles // {} | (.builder, .reviewer) | if IN("subscription", "fallback") then . else "proxy" end] end) as $r
     | ["builder", "reviewer"] as $n
     | (if $r == null then $n else [range(2) | select($r[.] != "proxy") | $n[.]] end) as $on
     | {subscription: ((if $r != null and ($r | all(. == "proxy")) then {state: "not used"} else .subscription // {state: "not checked"} end) + {roles: $on}),
        proxy: (if $p == null then {state: "not set"} else (.proxy // {state: "not checked"})
-         + {baseUrl: $p.baseUrl, roles: {builder: $r[0], reviewer: $r[1]}, route: (if $r | any(. == "fallback") then "fallback" else "proxy" end)} end)}' <<<"$r" 2>/dev/null || echo null
+         + {baseUrl: $p.baseUrl, roles: {builder: $r[0], reviewer: $r[1]}, route: (if $r | any(. == "fallback") then "fallback" else "proxy" end)} end)}' <<<"$r" 2>/dev/null) || p=null
+  [ "$a" != 1 ] || ROUTES_K=("$k" "$p")
+  printf '%s\n' "$p"
 }
 # The roles whose Claude sessions run on the subscription login now (routesnow()), one a line: the guard reads the
 # usage limit of their accounts alone, as a role on an API route has no usage limit (billed per token).
@@ -842,13 +853,14 @@ routes() {
   done
   return $rc
 }
-# The models in force, as the readers name them: {claude: the sessions', codex: the review's, whichever program runs
-# it}; efforts likewise.
-inforce() { # [efforts] [the control record, when the caller has read it]
-  local a c=${2:-}; [ -n "$c" ] || c=$(ctl 2>/dev/null) || c=null
+# The models and efforts in force, as the readers name them, in one jq run: {models: {claude: the sessions', codex:
+# the review's, whichever program runs it}, efforts: the same}.
+inforce() { # [the control record, when the caller has read it]
+  local a c=${1:-}; [ -n "$c" ] || c=$(ctl 2>/dev/null) || c=null
   modelsallowed a || a=null
-  jq -c --argjson c "$c" --arg k "$([ -z "${1:-}" ] && echo model || echo effort)" "$SEATNOW"'(first(seatnow("builder"; $c)) // {}) as $b
-    | (first(seatnow("reviewer"; $c)) // {}) as $r | {claude: ($b[$k] // null), codex: ($r[$k] // null)}' <<<"$a"
+  jq -c --argjson c "$c" "$SEATNOW"'(first(seatnow("builder"; $c)) // {}) as $b
+    | (first(seatnow("reviewer"; $c)) // {}) as $r | {models: {claude: ($b.model // null), codex: ($r.model // null)},
+      efforts: {claude: ($b.effort // null), codex: ($r.effort // null)}}' <<<"$a"
 }
 # The model settings of the two seats, as the Board sets them: {builder, reviewer}, each {model, effort: the
 # ones in force (seat()), modelFrom, effortFrom: "control" when the control record sets it, else "seed" (the seed's,

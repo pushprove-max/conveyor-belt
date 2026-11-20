@@ -502,13 +502,17 @@ snapshot() (
   # The machine's test-slot pool (lib/slots.sh slot_pool) read once, in this shell: health's cores and the slots in
   # use below read it. SLOTSREAD says it was read.
   SLOTSREAD=''; ! slot_pool >/dev/null 2>&1 || SLOTSREAD=1
-  # shellcheck disable=SC2034 # read by health (lib/views.sh), which conveyor.sh sources beside this file
-  h=$(ISSUESJSON=${issues:-null}; health) && printf '%s\n' "$h" > "$d/health" || exit 1
-  snaprows "$READ_OLD" "$RETRIED.rows" "$d/old" 2>/dev/null || { echo "conveyor: $RETRIED does not read as card records; stopping" >&2; exit 1; }
   # A snapshot that reads GitHub itself (no `watch` feed, GITHUB unset: the Board's ssh path) reads the CLIs' models
   # too, as github() does for the feed, when the host's report is missing or CLI_TTL old; else a host the loop has
   # never run on offers each CLI with no models.
   [ -n "$GITHUB" ] || hostclis due >/dev/null 2>&1 || :
+  # The host's report, the models.allowed in force and the Claude routes, worked out once in this shell (HOST_K,
+  # MODELS_K, ROUTES_K; modelsallowed reads the host's report): health, modelsettings, each seat and the guard's
+  # accounts below run in subshells, and each would work them out again with its own jq runs.
+  modelsallowed allowed 2>/dev/null || :; routesnow >/dev/null
+  # shellcheck disable=SC2034 # read by health (lib/views.sh), which conveyor.sh sources beside this file
+  h=$(ISSUESJSON=${issues:-null}; health) && printf '%s\n' "$h" > "$d/health" || exit 1
+  snaprows "$READ_OLD" "$RETRIED.rows" "$d/old" 2>/dev/null || { echo "conveyor: $RETRIED does not read as card records; stopping" >&2; exit 1; }
   models=$(jq -c .models <<<"$h"); settings=$(modelsettings "$control"); ACCT=$(ctlacct "$control")
   # A main-red fix card is titled from its entry as it is now (redtitles()), so a case added while it runs shows.
   # One card a line: the pricing below prices only the lines that changed since the last snapshot.

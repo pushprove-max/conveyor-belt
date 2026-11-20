@@ -336,3 +336,22 @@ t_pxfallbacklimit() {
     || fail "the fallback builder's account was not read after a failed login: $(loop health | jq -c '[.guard, .routes]')"
   [ "$(pxaccts 'map(.uses)')" = '[["build"]]' ] || fail "the snapshot does not give the fallback builder's account alone: $(cat "$T/$CASE/out")"
 }
+# routesnow() keeps its answer in the shell (ROUTES_K), so the snapshot's subshells start no jq for it (t_snapexec).
+# Bug it catches (#993): a kept answer that outlives a change to what it reads (the routes record, the host file's
+# claudeProxy, the pack's) shows a route that the record or the settings no longer hold.
+t_routeskept() {
+  local got
+  setup '[]'; mkdir -p "$ST"
+  # shellcheck source=/dev/null # the snapshot's libraries, by its SNAPLIBS list (commands/snapshot.sh)
+  got=$( ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
+      && eval "$(grep '^SNAPLIBS=' "$SRC/commands/snapshot.sh")" && for l in $SNAPLIBS; do . "$HERE/lib/$l.sh" || exit 1; done
+    # routesnow in this shell, not a pipe's subshell: the answer it keeps is kept here, for the next call.
+    s() { routesnow > "$T/$CASE/routes" && jq -c '[.subscription.state, .proxy.state, .proxy.baseUrl]' "$T/$CASE/routes"; }
+    s; s
+    echo '{"subscription": {"state": "expired", "at": "2026-01-01T00:00:00Z"}}' > "$ROUTES"; s
+    tune --arg b "$PXURL" '.models.claudeProxy = {baseUrl: $b, roles: {builder: "fallback"}}'; s
+    mkdir -p "${HOST%/*}" && jq -cn '{claudeProxy: {baseUrl: "http://192.0.2.2:4141", roles: {builder: "fallback"}}}' > "$HOST"; s ) 2>&1 | tr '\n' ' ')
+  [ "$got" = '["not checked","not set",null] ["not checked","not set",null] ["expired","not set",null] '\
+'["expired","not checked","'"$PXURL"'"] ["expired","not checked","http://192.0.2.2:4141"] ' ] \
+    || fail "routesnow kept an answer after the routes record, the pack or the host file changed: $got"
+}

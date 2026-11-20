@@ -236,9 +236,9 @@ HOLLOW_AWK='function flush() {
   END { flush() }'
 # Each file is given to awk as ./<path>, so a name with = in it is never read as an assignment; xargs gives them in
 # runs that fit the argument limit (awk starts each file afresh).
-testhollow() { # <the test files of main's checkout, a JSON list>
+testhollow() { # <each test file of main's checkout>...
   local f fs=()
-  while IFS= read -r -d '' f; do [ ! -f "$MAIN/$f" ] || fs+=("./$f"); done < <(jq -j --arg re "$HOLLOWFILES" '.[] | select(test($re)) | . + "\u0000"' <<<"$1")
+  for f; do [[ $f =~ $HOLLOWFILES ]] && [ -f "$MAIN/$f" ] && fs+=("./$f"); done
   [ ${#fs[@]} -gt 0 ] || { echo '{}'; return; }
   (cd "$MAIN" && printf '%s\0' "${fs[@]}" | LC_ALL=C xargs -0 awk "$HOLLOW_AWK") \
     | jq -Rnc --rawfile fs <(printf '%s\n' "${fs[@]}") '($fs | split("\n") | map(select(. != "") | {key: .[2:], value: []}) | from_entries) as $all
@@ -332,9 +332,9 @@ PROXY_AWK='function norm(s,  t) {
     for (p = 1; p <= pn; p++) { if ((p, "runs") in mk) mark("runs", p); if ((p, "polls") in mk) mark("polls", p) }
     prev = 0; above = ""; pn = 0; buf = "" }'
 # testproxy prints {file: [{line, kind, text, why}]} for each test file of main's checkout, a file with none [].
-testproxy() { # <the test files of main's checkout, a JSON list>
+testproxy() { # <each test file of main's checkout>...
   local f fs=() run pol c a
-  while IFS= read -r -d '' f; do [ ! -f "$MAIN/$f" ] || fs+=("./$f"); done < <(jq -j '.[] | . + "\u0000"' <<<"$1")
+  for f; do [ ! -f "$MAIN/$f" ] || fs+=("./$f"); done
   [ ${#fs[@]} -gt 0 ] || { echo '{}'; return; }
   packget test.command c test.full a test.pollHelpers pol || return 1
   run=$(printf '%s\n' "$c" "$a" conveyor/conveyor.test.sh .conveyor/test-full.sh)
@@ -453,14 +453,16 @@ rawok() { if [ -f "$1" ] && [ -r "$1" ]; then printf '%s' "$1"; else printf /dev
 JSONL='def jsonl: split("\n") | map(fromjson? | objects);'
 testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   # The caller's defs and refs when it has read them (testowners: the snapshot's), else read here.
-  local si sh rn mn fs fl sf defs=${defs:-} refs=${refs:-} cs ru all ln ch hv px out nv rp cp su
+  local si sh rn mn fs fl sf defs=${defs:-} refs=${refs:-} cs ru all tf=() ln ch hv px out nv rp cp su
   packget test.slowIssues si test.slower.share sh test.slower.runs rn test.slower.minRuns mn test.files fs || return 1
-  all=$(git -C "$MAIN" ls-files -z -- '*.test.*' 2>/dev/null | jq -Rsc 'split("\u0000") | map(select(. != ""))') || all='[]'
+  # The test files once, as names (tf: testhollow and testproxy take them so, with no jq of their own) and as JSON.
+  mapfile -d '' -t tf < <(git -C "$MAIN" ls-files -z -- '*.test.*' 2>/dev/null)
+  all=$(printf '%s\0' "${tf[@]}" | jq -Rsc 'split("\u0000") | map(select(. != ""))') || all='[]'
   fl=$(jq -ce 'objects' "$FLAKY" 2>/dev/null) || fl='{}'
   sf=$(jq -ce 'objects' "$SLOWFILED" 2>/dev/null) || sf='{}'
   ru=$(testrulesettings) || ru=null
-  hv=$(testhollow "$all" 2>/dev/null) && [ -n "$hv" ] || hv='{}'
-  px=$(testproxy "$all" 2>/dev/null) && [ -n "$px" ] || px='{}'
+  hv=$(testhollow "${tf[@]}" 2>/dev/null) && [ -n "$hv" ] || hv='{}'
+  px=$(testproxy "${tf[@]}" 2>/dev/null) && [ -n "$px" ] || px='{}'
   [ -n "$defs" ] && [ -n "$refs" ] || testowners
   # The cases each test file of main's checkout defines, by file (the case scan, CASESCAN).
   cs=$(git -C "$MAIN" grep -lzE '^t_[a-z0-9]+\(\) \{' -- '*.test.*' 2>/dev/null | (cd "$MAIN" && xargs -0 awk -v q="'" "$CASESCAN" 2>/dev/null) \
@@ -551,7 +553,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
        totals: (map(select(.removed | not)) | {files: (map(select(.timedRuns > 0)) | length), slower: (map(select(.slower)) | length)}) + {
          steps: {count: ($wk | length), waitSec: ([$wk[].wait | numbers] | add // 0 | r3), runSec: ([$wk[].run | numbers] | add // 0 | r3)}}}') || return 1
   nv=$(neverwhy "$(jq -c '[.files[] | select(.runsOnRecord == 0 and (.removed | not)) | .file]' <<<"$out")") || nv='{}'
-  rp=$(jq -ce '.test.report | objects' "$PACK" 2>/dev/null) || rp=null
+  packget test.report rp 2>/dev/null && [ -n "$rp" ] || rp=null
   cp=$(cpuplan 2>/dev/null) || cp=null
   jq -c --slurpfile nv <(printf '%s' "$nv") --argjson rp "$rp" --argjson cp "$cp" --rawfile su "$su" "$JSONL"'$nv[0] as $nv | ($su | jsonl) as $su | .files |= map(.neverRun = ($nv[.file] // null))
     | .settings.report = $rp | .settings.cpuTime = $cp
