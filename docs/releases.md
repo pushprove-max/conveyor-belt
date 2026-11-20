@@ -21,8 +21,10 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    the [release notes style](#release-notes). It reads the issues that landed since the last tag, their
    titles and text, and the commit subjects. When the project has no release tag yet, the draft lists no changes:
    it is an overview of what the project does, in sections by area, from the README and the pages in `docs/`, and
-   it reads no commit or issue. The command prints the path of the draft, and says if the draft breaks
-   a rule of the style. The head of `main` on GitHub has no notes yet, so it stops there.
+   it reads no commit or issue. Conveyor checks the draft against the style. When the check refuses some lines, the
+   model rewrites those lines one time. The command prints the path of the draft. If the draft still breaks a rule
+   of the style, the command says so, and a note at the top of the draft lists the lines the check refuses, with
+   their line numbers in the draft as saved. Delete that note when you fix the lines. The head of `main` on GitHub has no notes yet, so it stops there.
 3. Read the draft and change what you need. Commit it as `docs/releases/<version>.md` on `main`, and push it.
 4. You can run `conveyor.sh release-prep <version>` again. It runs the whole test suite (`test.full` in the pack, the
    project's settings, `.conveyor/project.json`) on the head of `main` on GitHub, and posts the result on that commit
@@ -181,6 +183,8 @@ and the GitHub release shows them.
 - The notes name no file, script or function, no path, no issue or pull request number, no commit hash and no
   internal part of the engine, and have no "Closes" line. They can name what a person types or sees: a slash command,
   a setup question, a setting or a button.
+- The notes name no command file, and `conveyor.sh` is one. Name a command by what the user types in Claude Code or
+  clicks on the Board, for example "Conveyor's doctor check".
 - Changes that only touch tests, refactors or tools are not in the notes, or are in one plain line when a user sees
   no change.
 

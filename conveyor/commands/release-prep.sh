@@ -15,8 +15,8 @@
 # state, success, as the suite's pass on the commit it releases. The suite runs only when that head holds
 # docs/releases/<version>.md in the release notes style (tools/notes-check.sh): `release` releases the commit with the
 # notes. When the head has no notes, release-prep has a model write a draft of them in that style (relnotes()), from
-# the issues landed and the commits since the newest vX.Y.Z tag (with no tag, an overview from the README and docs), to <state>/release/<version>.md, prints its path and
-# stops, for the owner to read and the Foreman to commit as docs/releases/<version>.md; the run after the notes are
+# the issues landed and the commits since the newest vX.Y.Z tag (with no tag, an overview from the README and docs), to <state>/release/<version>.md (a draft the style
+# check refuses is rewritten once, relfix()), prints its path and stops, for the owner to read and the Foreman to commit as docs/releases/<version>.md; the run after the notes are
 # pushed runs the suite. It tags and releases nothing. With Land as pr and Merge PR release (lib/push.sh), it runs on
 # the remote's head of the landing branch while that holds a commit the default branch lacks, and `release` checks that
 # head (release-prep's pass is on it) and merges the landing pull request only when every check passed (a refused merge
@@ -102,7 +102,15 @@ RELNOTES_TIMEOUT=600
 # The style of the release notes, docs/releases.md (Release notes); tools/notes-check.sh checks its mechanical rules.
 RELRULES='- No file, script or function names, no paths, no issue or pull request numbers, no commit hashes, no "Closes", no
   internal unit names. Names a person types or sees (a slash command, a setup question, a setting, a button) are
-  allowed.'
+  allowed.
+- No command file either, conveyor.sh included: name a command by what the user types in Claude Code or clicks on
+  the Board (for example "Conveyor'"'"'s doctor check"), not by the file that runs it.'
+# The prompt that has the model rewrite a draft the style check refuses (relfix()); the draft and the check's findings
+# are added after it.
+RELFIX='These release notes break the release notes style: the style check refuses the lines it lists below the notes.
+Rewrite those lines so they keep to the style, and keep every other line as it is.
+'"$RELRULES"'
+Answer with the whole notes alone, in Markdown, and nothing else.'
 RELNOTES='Write the release notes of a new release of this project, from the issues that landed since the last release and
 the subjects of its commits, given below. They are for the people who use the project, not for its developers.
 - Begin with the line "# VERSION", then one sentence that says what this release is about.
@@ -128,7 +136,7 @@ Answer with the notes alone, in Markdown, and nothing else.'
 # warning; its commit's subject is still given. With no last tag (the first release): from <commit>'s README and docs
 # alone (relfirst()), no commit or issue. Fails, with why on stdout, when the model gives no notes.
 relnotes() { # <version> <last tag, or empty> <commit> <file>
-  local subj ns n j iss='[]' p d rc s c
+  local subj ns n j iss='[]' p
   if [ -z "$2" ]; then p=$(relfirst "$1" "$3")
   else
     subj=$(git log --no-merges --format=%s "$2..$3" | sed -E 's/ \(#[0-9]+\)$//') && ns=$(git log --no-merges --format=%B "$2..$3") || { echo "the commits could not be read"; return 1; }
@@ -139,13 +147,40 @@ relnotes() { # <version> <last tag, or empty> <commit> <file>
     p=${RELNOTES//VERSION/$1}$'\n\n'$(jq -r --arg s "$subj" '"# The issues that landed\n\n" + (map("## \(.title // "")\n\n\((.body // "")[0:4000])\n") | join("\n"))
       + "\n# The commit subjects\n\n" + $s' <<<"$iss") || { echo "the issues could not be read"; return 1; }
   fi
+  relask "$p" "$4"
+}
+# The model's answer (askmodel) to <prompt>, written to <file>. Fails, with why on stdout, when it gives no answer.
+relask() { # <prompt> <file>
+  local c d s rc
   c=$(ctl 2>/dev/null) || c=''
   d=$(mktemp -d) || { echo "no scratch folder"; return 1; }
-  s=$(askmodel "$d" "$RELNOTES_TIMEOUT" medium "$c" "$p"); rc=$?
+  s=$(askmodel "$d" "$RELNOTES_TIMEOUT" medium "$c" "$1"); rc=$?
   [ -z "$s" ] || { rm -rf "$d"; echo "$s"; return 1; }
-  [ "$rc" = 0 ] && [ -n "$(tr -d '[:space:]' < "$d/answer" 2>/dev/null)" ] && cp "$d/answer" "$4" \
+  [ "$rc" = 0 ] && [ -n "$(tr -d '[:space:]' < "$d/answer" 2>/dev/null)" ] && cp "$d/answer" "$2" \
     || { rm -rf "$d"; echo "the model gave no notes (exit $rc; 124 is the ${RELNOTES_TIMEOUT}s timeout)"; return 1; }
   rm -rf "$d"
+}
+# The notes draft <file> checked by the style check (tools/notes-check.sh). When the check refuses lines, the model
+# rewrites them once (RELFIX, given the draft and the check's findings), and the rewrite is checked again. Prints
+# nothing when the draft passes; else " The draft breaks the release notes style: <the findings>.", and the draft is
+# kept with those findings in a note at its top.
+relfix() { # <file>
+  local f=$1 out rc why
+  out=$("$HERE/tools/notes-check.sh" "$f"); rc=$?
+  [ "$rc" != 0 ] || return 0
+  if [ "$rc" = 1 ]; then
+    why=$(relask "$RELFIX"$'\n\n# The notes\n\n'"$(cat "$f")"$'\n\n# The lines the style check refuses\n\n'"$out" "$f.fix") \
+      && mv "$f.fix" "$f" || echo "conveyor: release-prep: the draft could not be rewritten to the style: $why" >&2
+    rm -f "$f.fix"
+    out=$("$HERE/tools/notes-check.sh" "$f"); rc=$?
+    [ "$rc" != 0 ] || return 0
+  fi
+  # The note takes its findings' lines and three more at the top: each finding's line number is moved down by as
+  # many, so it names its line in the draft as saved.
+  [ "$rc" != 1 ] || { local k l r; k=$(( $(wc -l <<<"$out") + 3 ))
+    out=$(while IFS= read -r l; do r=${l#"$f:"}; printf '%s:%s:%s\n' "$f" $(( ${r%%:*} + k )) "${r#*:}"; done <<<"$out")
+    { printf '<!-- The release notes style check refuses these lines: rewrite them, then delete this note.\n%s\n-->\n\n' "$out"; cat "$f"; } > "$f.fix" && mv "$f.fix" "$f"; }
+  echo " The draft breaks the release notes style: $(head -n 10 <<<"$out" | paste -sd ';' -)."
 }
 # The prompt of the first release's notes: the overview style, then <commit>'s README.md (its first 12000 bytes) and
 # each Markdown page directly in docs/ (its first 6000), each under a "# <path>" heading.
@@ -428,7 +463,7 @@ releaseprep() { # <version>
   fi
   d=${STATE%/*}/release/$v.md
   mkdir -p "${d%/*}" && rm -f "$d" && out=$(relnotes "$v" "$last" "$sha" "$d") || { echo "conveyor: release-prep: the notes draft could not be written: $out; nothing run" >&2; return 1; }
-  out=$("$HERE/tools/notes-check.sh" "$d") || out=" The draft breaks the release notes style: $(head -n 10 <<<"$out" | paste -sd ';' -)."
+  out=$(relfix "$d")
   local from="from the issues and commits since $last"; [ -n "$last" ] || from='an overview from the README and docs, as no release is tagged yet'
   echo "conveyor: release-prep: the notes draft, $from, is $d.$out ${sha:0:12} ($REMOTE/$BRANCH) has no docs/releases/$v.md, so the suite is not run and no status is posted: read the draft, edit it as needed, commit it as docs/releases/$v.md on $BRANCH, push it, and run release-prep $v again" >&2
   return 1

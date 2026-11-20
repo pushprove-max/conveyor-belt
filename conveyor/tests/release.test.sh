@@ -39,6 +39,12 @@ relsetup() {
 # --output-format json, else only its result.
 RELFMT='{ [[ " $* " == *" --output-format json "* ]] && cat || jq -j .result; }'
 relmodel() { printf '#!/usr/bin/env bash\ncat > "$STUB/notes-prompt"\njq -cn --arg r %q '\''{type: "result", is_error: false, result: ($r + "\\n"), num_turns: 1}'\'' | %s\n' "$1" "$RELFMT" > "$STUB/claude"; }
+# relmodels <first answer> <second answer>: as relmodel, but call n answers its nth answer (the second from then on),
+# counts the calls in $STUB/notes-calls and keeps call n's prompt in $STUB/notes-prompt.<n>.
+relmodels() {
+  rm -f "$STUB"/notes-calls "$STUB"/notes-prompt.*
+  printf '#!/usr/bin/env bash\nn=$(( $(cat "$STUB/notes-calls" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$STUB/notes-calls"\ncat > "$STUB/notes-prompt.$n"\na=(%q %q); r=${a[n > 1 ? 1 : 0]}\njq -cn --arg r "$r" '\''{type: "result", is_error: false, result: ($r + "\\n"), num_turns: 1}'\'' | %s\n' "$1" "$2" "$RELFMT" > "$STUB/claude"
+}
 
 # release-prep on a head with no notes: the project's first release, then, v1.0.0 tagged, its next.
 # Bugs: a project's first release (no tag) is drafted from every commit ever made, an engineering log, rather than as an
@@ -47,8 +53,9 @@ relmodel() { printf '#!/usr/bin/env bash\ncat > "$STUB/notes-prompt"\njq -cn --a
 # posted on a head without the notes (committing the notes then makes a new head, and `release`, which checks the
 # status of the head it releases, runs the suite again); the notes draft is not the model's, or the model is not given
 # the issues landed since the last release (named by "(#N)" or by a Closes line), their bodies, the commit subjects
-# and the style, or is given an issue from before it; a draft that breaks the style is shown as if it were ready to
-# commit; a model that gives no notes leaves an empty draft, or an earlier run's, to be taken for this run's.
+# and the style, or is given an issue from before it; a draft that breaks the style (one naming conveyor.sh, as
+# 1.7.0's did) is left for the owner to edit, not rewritten once by the model from the check's findings; one that
+# still breaks it is shown as if it were ready to commit, or lacks the findings at its top; a model that gives no notes leaves an empty draft, or an earlier run's, to be taken for this run's.
 t_reldraft() {
   local O out s
   relsetup true nonotes notag; printf '#!/usr/bin/env bash\ntee "$STUB/notes-prompt" | jq -Rsc '\''{type: "result", is_error: false, result: ., num_turns: 1}'\'' | %s\n' "$RELFMT" > "$STUB/claude"
@@ -76,10 +83,28 @@ t_reldraft() {
     && grep -q '^- Begin with the line "# 1.1.0"' "$STUB/notes-prompt" && ! grep -q BEFORE-BODY "$STUB/notes-prompt" \
     || fail "the model was not given the issues and subjects since v1.0.0 alone, and the style: $(cat "$STUB/notes-prompt" 2>&1)"
 
-  relmodel $'# 1.1.0\n\n- Cards can wait. Closes #5'
+  # A first answer that names the command file conveyor.sh (release 1.7.0's own draft did): the model is asked once
+  # more, given the check's finding, and its rewrite is the draft, which passes the check.
+  relmodels $'# 1.1.0\n\nCards can wait.\n\n## Setup\n\n- `conveyor.sh doctor` warns when the model lists differ.' \
+    $'# 1.1.0\n\nCards can wait.\n\n## Setup\n\n- Conveyor\'s doctor check warns when the model lists differ.'
   out=$(loop release-prep 1.1.0 2>&1); [ $? = 1 ] || fail "release-prep did not stop on a head with no notes: $out"
-  grep -qF 'The draft breaks the release notes style: ' <<<"$out" && grep -qF '1.1.0.md:3: a Closes line' <<<"$out" \
-    || fail "release-prep does not say the draft breaks the style, naming the rule: $out"
+  [ "$(cat "$STUB/notes-calls" 2>&1)" = 2 ] || fail "the model was not asked once more to rewrite the draft: $(cat "$STUB/notes-calls" 2>&1)"
+  grep -qF '1.1.0.md:7: a path or file name: - `conveyor.sh doctor`' "$STUB/notes-prompt.2" && grep -qF 'No command file' "$STUB/notes-prompt.1" \
+    || fail "the rewrite was not given the check's finding, or the drafter is not told to name no command file: $(cat "$STUB"/notes-prompt.* 2>&1)"
+  "$SRC/tools/notes-check.sh" "$ST/release/1.1.0.md" > /dev/null && grep -qF "Conveyor's doctor check" "$ST/release/1.1.0.md" \
+    || fail "the draft written is not the rewrite that passes the style check: $(cat "$ST/release/1.1.0.md" 2>&1)"
+  ! grep -qF 'The draft breaks' <<<"$out" || fail "release-prep says a draft that passes the check breaks the style: $out"
+
+  # Both answers break the style: the draft is kept, its top lists the check's findings, and release-prep names them.
+  # The note (its two findings, an issue number and a Closes line, and three more lines) moves the Closes line from 3
+  # to 8: the findings name line 8, its line in the draft as saved, not line 3, which holds the note's own text.
+  relmodels $'# 1.1.0\n\n- Cards can wait. Closes #5' $'# 1.1.0\n\n- Cards can wait. Closes #5'
+  out=$(loop release-prep 1.1.0 2>&1); [ $? = 1 ] || fail "release-prep did not stop on a head with no notes: $out"
+  grep -qF 'The draft breaks the release notes style: ' <<<"$out" && grep -qF '1.1.0.md:8: a Closes line' <<<"$out" \
+    || fail "release-prep does not say the draft breaks the style, naming the rule and its line in the saved draft: $out"
+  [ "$(cat "$STUB/notes-calls" 2>&1)" = 2 ] && head -n 1 "$ST/release/1.1.0.md" | grep -qF '<!--' && sed '/^-->$/q' "$ST/release/1.1.0.md" | grep -qF '1.1.0.md:8: a Closes line: - Cards can wait. Closes #5' \
+    && [ "$(sed -n 8p "$ST/release/1.1.0.md")" = '- Cards can wait. Closes #5' ] \
+    || fail "a draft that still breaks the style is not kept with the check's findings at its top, naming their lines in it: $(cat "$ST/release/1.1.0.md" 2>&1)"
 
   printf '#!/usr/bin/env bash\nexit 1\n' > "$STUB/claude"
   echo '# an earlier draft' > "$ST/release/1.1.0.md" || fail "the fixture could not be made"
