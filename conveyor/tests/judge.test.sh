@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
 # Engine cases: the review's judge (judged()), which decides which findings of a review count. Its helpers below
-# (judging(), judgeone(), jf(), jr(), rev()) are also judgesnap.test.sh's and judgeminor.test.sh's.
+# (judging(), judgeone(), jf(), jr(), rev()) are also judgeminor.test.sh's; judgesnap.test.sh uses only judging() and rev().
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
