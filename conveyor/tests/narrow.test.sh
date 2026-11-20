@@ -394,9 +394,9 @@ t_narrowownrunner() {
 }
 # The issue: each per-file process has the file's own time limit, and is ended with everything it started. Bug it
 # catches: a test file that hangs held the card's whole run, and a process it started ran on after the run. a.test.sh
-# says `# timeout: 2`, and its run starts a child in the background and hangs: each of its two runs (the first, and the
-# run again of the file that failed) ends in about 2 s, a.test.sh fails as timed out, its child is gone, and b.test.sh,
-# next on the list, still runs.
+# says `# timeout: 1`, and its run starts a child in the background and hangs: each of its two runs (the first, and the
+# run again of the file that failed) ends in about 1 s, a.test.sh fails as timed out, its child is gone, and b.test.sh,
+# next on the list, still runs. The limit is kept at 1 s, as the case waits it out twice.
 t_narrowfiletimeout() {
   local c
   setup '[]'
@@ -405,13 +405,13 @@ t_narrowfiletimeout() {
   local s=$SECONDS
   # The line ends with a note, as `# timeout: 300 -- about 193s run alone` does. Bug it catches (E9 of #374's review): a
   # limit with words after it was not read, and the file had the run's limit alone.
-  narrowrun 'printf "%s\n" "# timeout: 2 -- a note after the limit" > a.test.sh && echo y > b.test.sh'
+  narrowrun 'printf "%s\n" "# timeout: 1 -- a note after the limit" > a.test.sh && echo y > b.test.sh'
   [ $((SECONDS - s)) -lt 30 ] && [ "$(cat "$T/$CASE/rc")" != 0 ] && [ "$(cat "$STUB/got" 2>&1)" = $'one:a.test.sh\none:b.test.sh\none:a.test.sh' ] \
     || fail "the hanging file was not stopped at its limit, or the next file did not run (exit $(cat "$T/$CASE/rc"), $((SECONDS - s))s): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
   # E3 of #374's review. Bug it catches: the timed-out file was logged as a failed file and the run exited 1, so the
   # check on main counted a timeout there as main's failure, and the mutation check and the Board's Run action, which
   # read exit 124 as timed out, took it for a failure. The run exits 124, and its log leaves the file begun, not failed.
-  [ "$(cat "$T/$CASE/rc")" = 124 ] && grep -qxF 'conveyor: a.test.sh timed out: it ran past its time limit, 2 s, and it was stopped there' "$T/$CASE/cards/c7.test" \
+  [ "$(cat "$T/$CASE/rc")" = 124 ] && grep -qxF 'conveyor: a.test.sh timed out: it ran past its time limit, 1 s, and it was stopped there' "$T/$CASE/cards/c7.test" \
     && ! grep -qxF -- '-- FAIL a.test.sh' "$T/$CASE/cards/c7.test" \
     || fail "the run did not exit 124, or its output does not say a.test.sh timed out, or names it as failed (exit $(cat "$T/$CASE/rc")): $(cat "$T/$CASE/cards/c7.test")"
   c=$(cat "$STUB/child" 2>/dev/null) && [ -n "$c" ] || fail "the file's child never started"
