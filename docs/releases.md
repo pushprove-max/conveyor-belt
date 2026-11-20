@@ -118,8 +118,10 @@ stops with GitHub's reason, and the pull request stays open.
 
 ## Cards during a release
 
-From the start of `release-prep` to the end of `release`, no card lands on `main`, and Conveyor pushes nothing to
-it. When `conveyor.sh release-run` runs the two commands, this is also true between them. Thus `main` does not move
+From the start of `release-prep` to the end of `release`, no card lands on `main`, and Conveyor holds the pushes of
+cards. In that time, only the release itself changes `main` on GitHub. Step 6 pushes the two release commits (the
+version and the marketplace pin) and the tag. With Merge PR `release`, step 5 also merges the pull request.
+When `conveyor.sh release-run` runs the two commands, this is also true between them. Thus `main` does not move
 while the suite runs, and the release does not stop because `main` moved. Cards continue to build, get reviews and run
 their tests. A card that gets to its land step waits there, and the Board shows it as "waiting for the release". A
 branch that you land with `conveyor.sh land-branch` waits in the same way. Merge PR `idle` does not merge the pull
