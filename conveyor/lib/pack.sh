@@ -49,6 +49,9 @@ def errs($s; $p):
 # The plugin is one pinned commit or what it follows (releases or main): a pack naming both, or neither, says which to set.
 def plugin: objects | .plugin | objects | select(has("commit") == has("follow"))
   | ".plugin: \(if has("commit") then "both commit and follow are set" else "neither commit nor follow is set" end): set one, commit (a full commit id: the project runs that commit) or follow: \"releases\" (the project runs the plugin'"'"'s newest release) or \"main\" (the plugin'"'"'s main as it moves)";
+# A lint command is a command to run or the engine'"'"'s size check: one of run and size, never both.
+def lintentry: objects | .lint | objects | .commands | arrays | to_entries[] | .key as $i | .value | objects | select(has("run") == has("size"))
+  | ".lint.commands[\($i)]: \(if has("run") then "both run and size are set" else "neither run nor size is set" end): set one";
 # The effort range of a model in the pick list of a seat (pick.<seat>.<model>) runs from its min up to its max, in the
 # order its enum lists the efforts. Whether the seat allows the model, and its program takes the efforts, rests on
 # models.allowed as the host reads it (with the list Codex reports added), so `conveyor.sh pick models` checks that, and the
@@ -59,7 +62,7 @@ def pickrange($s): objects | .pick | objects | to_entries[] | .key as $k | .valu
   | select($lo != null and $hi != null and $lo > $hi)
   | ".pick.\($k).\($m): min \(.min) comes after max \(.max) (the efforts in order: \($o | join(", ")))";
 [$schema[0] | unknown("")] as $bad
-| if $bad != [] then $bad[] elif length != 1 then "\(length) JSON documents, not one" else .[0] | errs($schema[0]; ""), plugin, pickrange($schema[0]) end'
+| if $bad != [] then $bad[] elif length != 1 then "\(length) JSON documents, not one" else .[0] | errs($schema[0]; ""), plugin, lintentry, pickrange($schema[0]) end'
 
 # get's field ($f) of the pack ($v) by the schema ($s): the field's schema, walked by its keys, and none means the
 # schema does not name it (exit 2).

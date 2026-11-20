@@ -539,6 +539,9 @@ review and before it lands ([Lint](cards.md#lint)). Without a `lint` field, or w
   `{files}` runs on the whole project.
 - `ratchet`: `false` makes every finding of the command count, on any line. The default is `true`.
 - `complexity`: the rule codes of the command that measure size, such as a limit on the length of a function.
+- `size`: in place of `run`, Conveyor's own check of the length of files ([The size entry](#the-size-entry)).
+
+An entry has `run` or `size`, not both.
 
 `lint.policy` is a list of git pathspecs of the files that are lint policy, for example the config files of your
 linters. The `lint` field itself is always lint policy. With the rule Lint check on, a card that changes lint policy
@@ -580,6 +583,33 @@ The four results:
 - Execution error: any other result. For example, another exit code, an exit 127 without that first line, an exit 1
   with no finding, an exit 0 with findings, or a command that runs for longer than 5 minutes.
 
+### The size entry
+
+An entry with `size` in place of `run` checks the length of files. Conveyor does this check itself, with no tool and
+no test slot. `size` has two keys:
+
+- `file`: the most lines that a file can have.
+- `exempt`: the path of the exempt file, from the top of the project.
+
+A file in the entry's scope with more lines than `file` is a finding, unless the exempt file names it. The finding is
+on line `file` + 1, and its text is `size <n> lines, limit <file>`. A last line with no newline is a line. A symbolic
+link or a submodule is not counted.
+
+The exempt file has one line for each file that can have more lines than `file`: the path of the file, from the top
+of the project. A file that the exempt file names can grow. A line can also name a function: the path, a tab, then
+the name of the function. Your own command that checks the length of functions can read these lines. A line for a
+function does not exempt its file. When there is no exempt file, no file is exempt. Conveyor reads the exempt file
+from the card's tree.
+
+The entry gets its files as a command with `{files}` does. The exempt file is always a trigger of the entry, also
+when `triggers` does not name it. So when a card changes the exempt file, Conveyor checks every file of the tree that
+`files` matches. When a card removes the line of a file from the exempt file and that file still has more lines than
+`file`, the card gets a finding for it, also when the card does not change the file.
+
+Every finding of a size entry is the card's, as with `ratchet: false`, and there is no base run. A renamed file has
+its new path. So a renamed exempt file that has more lines than `file` is a finding until the exempt file names its
+new path.
+
 ### The ratchet
 
 The ratchet decides which findings of a card are the card's own. An old finding that the card did not cause does not
@@ -619,7 +649,8 @@ For example:
 ```json
 "lint": {
   "commands": [
-    {"files": ["*.py"], "triggers": ["pyproject.toml"], "complexity": ["C901"], "run": "ruff check --output-format concise {files}"}
+    {"files": ["*.py"], "triggers": ["pyproject.toml"], "complexity": ["C901"], "run": "ruff check --output-format concise {files}"},
+    {"files": ["*.py", ":(exclude)tests/fixtures/*"], "size": {"file": 500, "exempt": ".conveyor/size-exempt"}}
   ]
 }
 ```

@@ -190,16 +190,24 @@
       "additionalProperties": false,
       "properties": {
         "commands": {
-          "description": "The lint commands, in the order they run.",
+          "description": "The lint commands, in the order they run. Each has run or size, not both.",
           "type": "array", "default": [],
           "items": {
-            "type": "object", "additionalProperties": false, "required": ["files", "run"],
+            "type": "object", "additionalProperties": false, "required": ["files"],
             "properties": {
               "files": { "description": "Git pathspecs of the source files the command reads (a * crosses /, :(exclude) works).", "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
               "triggers": { "description": "Git pathspecs of the scripts, configs, manifests and lock files that change the command's result: when one changes, the command runs on every file files matches in the tree (the worktree as git add -A would stage it, a file not tracked yet too). Never passed as sources.", "type": "array", "default": [], "items": { "type": "string", "minLength": 1 } },
               "run": { "description": "A shell command, run at the worktree's top with bash -o pipefail -c and a 5-minute limit. {files} is replaced by the quoted list of the files in its scope; a command without {files} runs on the whole project. Exit 0 with no finding line passes; exit 1 with finding lines (<path>:<line>[:<column>]: <text>) has findings; exit 127 with the first line lint: missing <tool> is skipped; any other end is an execution error.", "type": "string", "minLength": 1 },
               "ratchet": { "description": "false: every finding of the command is the change's, on any line.", "type": "boolean", "default": true },
-              "complexity": { "description": "The rule codes (the first word of a finding's text) that measure size.", "type": "array", "default": [], "items": { "type": "string", "minLength": 1 } }
+              "complexity": { "description": "The rule codes (the first word of a finding's text) that measure size.", "type": "array", "default": [], "items": { "type": "string", "minLength": 1 } },
+              "size": {
+                "description": "The engine's file-length check, in place of run: a file in scope with more lines than file, and no line in the exempt file, is a finding. Every finding is the change's. The exempt file is always a trigger.",
+                "type": "object", "additionalProperties": false, "required": ["file", "exempt"],
+                "properties": {
+                  "file": { "description": "The most lines a file may have.", "type": "integer", "minimum": 1 },
+                  "exempt": { "description": "The path, from the project's top, of the exempt file: one line a file (its path) that may have more lines than file, and one a function (path, a tab, its name) for the project's own function-length command.", "type": "string", "minLength": 1 }
+                }
+              }
             }
           }
         },

@@ -24,7 +24,10 @@
 # each line is matched against the tree's paths (lintfindings), so a path with spaces or colons is read whole. The
 # result (lintresult): pass (exit 0, no finding line), findings (exit 1, a finding line or more), skipped (exit 127
 # with the first line `lint: missing <tool>`), or an execution error: any other end, the time limit too.
+# An entry with `size` in place of `run` is the engine's own file-length check (lintsize), run with no slot.
 LINT_LIMIT=300
+# The jq name of a lint command in its result and the engine's lines: its run, or for a size entry (lintsize) its limit.
+LINTRUN='(.run // "size, limit \(.size.file) lines")'
 
 # A copy of <worktree>'s index in <index file>, with the worktree added as `git add -A` would add it.
 lintindex() { # <worktree> <index file>
@@ -42,19 +45,20 @@ lintfield() { # <worktree> <index> <base>
 
 # The scope of one command: LINT_GO is 1 when it runs, LINT_F the files it is given (none for a command without
 # {files}), LINT_TRIG 1 when the change changed one of its triggers. <full> is 1 when the pack's lint field changed.
+# A size entry is scoped as a command with {files} is, and its exempt file is always one of its triggers.
 # Fails when git cannot list the files.
 lintscope() { # <worktree> <index> <base> <command json> <full> <scratch file>
   local -a fs tr
   local full=$5
   LINT_F=() LINT_GO='' LINT_TRIG=''
   mapfile -d '' -t fs < <(jq -j '.files[] + "\u0000"' <<<"$4")
-  mapfile -d '' -t tr < <(jq -j '(.triggers // [])[] + "\u0000"' <<<"$4")
+  mapfile -d '' -t tr < <(jq -j '((.triggers // []) + [.size.exempt // empty | ":(literal)" + .])[] + "\u0000"' <<<"$4")
   [ ${#fs[@]} != 0 ] || return 0
   if [ ${#tr[@]} != 0 ]; then
     GIT_INDEX_FILE=$2 git -C "$1" diff --cached --no-renames -z --name-only "$3" -- "${tr[@]}" > "$6" || return 1
     [ ! -s "$6" ] || { full=1; LINT_TRIG=1; }
   fi
-  if [[ $(jq -r .run <<<"$4") != *'{files}'* ]]; then
+  if [[ $(jq -r 'if .size then "{files}" else .run end' <<<"$4") != *'{files}'* ]]; then
     if [ -z "$full" ]; then
       GIT_INDEX_FILE=$2 git -C "$1" diff --cached --no-renames -z --name-only "$3" -- "${fs[@]}" > "$6" || return 1
       [ ! -s "$6" ] || full=1
@@ -117,14 +121,45 @@ lintresult() { # <exit> <output file> <finding lines> <over the limit: 1 or empt
   else printf 'error\tit exited %s%s\n' "$1" "${l:+: $l}"; fi
 }
 
+# A size entry's run, in the engine with no slot, giving what a lint command gives: each of <file>... (paths from
+# <worktree>'s top) that has more lines than <limit> and is not a line of <worktree>'s <exempt file> is the finding line
+# `<path>:<limit + 1>: size <n> lines, limit <limit>`, and the exit is 1; else 0. A line exempts the file whose path
+# is the whole line, so a function's line (path, a tab, its name) exempts no file; a missing exempt file exempts
+# nothing. A link or a submodule is not counted. A last line with no newline is a line. When a file cannot be read,
+# the exit is 2 after awk's why.
+lintsize() { # <worktree> <limit> <exempt file> <file>...
+  local w=$1 lim=$2 ex=$3 f n out i=0 rc=0
+  local -a fs=() ns
+  local -A skip=()
+  shift 3
+  if [ -f "$w/$ex" ]; then
+    while IFS= read -r n || [ -n "$n" ]; do n=${n%$'\r'}; [ -z "$n" ] || skip[$n]=1; done < "$w/$ex"
+  fi
+  for f; do [ -f "$w/$f" ] && [ ! -L "$w/$f" ] && [ -z "${skip[$f]:-}" ] && fs+=("$f"); done
+  [ ${#fs[@]} != 0 ] || return 0
+  # One awk for all the files, a count a line in their order (0 for an empty file, which has no first line); each
+  # path after ./, so that awk reads no `name=value` path as a variable.
+  out=$(cd "$w" && printf './%s\0' "${fs[@]}" | xargs -0 awk 'FNR == 1 { if (seen) print n; seen = 1; while (++i < ARGC && ARGV[i] != FILENAME) print 0 }
+    { n = FNR } END { if (seen) print n; while (++i < ARGC) print 0 }') || return 2
+  mapfile -t ns <<<"$out"
+  for f in "${fs[@]}"; do
+    n=${ns[i]:-}; i=$((i + 1))
+    [[ $n =~ ^[0-9]+$ ]] || { echo "lint: the lines of $f could not be counted"; return 2; }
+    [ "$n" -le "$lim" ] || { echo "$f:$((lim + 1)): size $n lines, limit $lim"; rc=1; }
+  done
+  return $rc
+}
+
 # The pack's lint commands run on <worktree>'s tree, the change being from <base> (a commit) to that tree: one JSON
 # line a command, in the pack's order: {n, run, ratchet, complexity, result, why, files, findings, sec, triggered}.
 # result is pass, findings, skipped (why: the tool), error (why: what went wrong) or `no files` (its scope is empty: not
 # called); files is the count it was given (null for a command without {files}); findings its finding lines
-# (lintfindings); sec the seconds it ran; triggered whether the change changed one of its triggers.
+# (lintfindings); sec the seconds it ran; triggered whether the change changed one of its triggers. A size entry
+# (lintsize) is a command whose run is LINTRUN's name for it, with ratchet false (every finding is the change's, so
+# there is no base run), and triggered false (no tool runs as installed).
 # Nothing when the pack has no lint field. Fails, saying why, when the pack or the tree cannot be read.
 lintcheck() { # <worktree> <base>
-  local l t full='' c n=0 rc r why run f
+  local l t full='' c n=0 rc r why run f sz at
   packget lint l || { echo "conveyor lint: the pack's lint field could not be read" >&2; return 1; }
   [ -n "$l" ] || return 0
   t=$(mktemp -d) || return 1
@@ -135,18 +170,24 @@ lintcheck() { # <worktree> <base>
     n=$((n + 1))
     lintscope "$1" "$t/index" "$2" "$c" "$full" "$t/scope" || { rm -rf "$t"; echo "conveyor lint: the files of lint command $n could not be listed" >&2; return 1; }
     if [ -z "$LINT_GO" ]; then
-      jq -c --argjson n $n --argjson g "$([ -n "$LINT_TRIG" ] && echo true || echo false)" '{n: $n, run, ratchet: (.ratchet != false), complexity: (.complexity // []),
-        result: "no files", why: null, files: 0, findings: [], sec: 0, triggered: $g}' <<<"$c" \
+      jq -c --argjson n $n --argjson g "$([ -n "$LINT_TRIG" ] && echo true || echo false)" '{n: $n, run: '"$LINTRUN"', ratchet: (.ratchet != false and .size == null),
+        complexity: (.complexity // []), result: "no files", why: null, files: 0, findings: [], sec: 0, triggered: ($g and .size == null)}' <<<"$c" \
         || { rm -rf "$t"; echo "conveyor lint: the result of lint command $n could not be written" >&2; return 1; }
       continue
     fi
-    run=$(jq -r .run <<<"$c"); f=null; [[ $run != *'{files}'* ]] || f=${#LINT_F[@]}
-    rc=0; lintcall "$1" "$t/index" "$run" "$t/out" "${LINT_F[@]}" || rc=$?
+    run=$(jq -r .run <<<"$c"); sz=$(jq -r '.size // empty | "\(.file | floor)\t\(.exempt)"' <<<"$c"); f=null
+    if [ -n "$sz" ]; then
+      f=${#LINT_F[@]}; at=$SECONDS; LINT_OVER=''; rc=0
+      lintsize "$1" "${sz%%$'\t'*}" "${sz#*$'\t'}" "${LINT_F[@]}" > "$t/out" 2>&1 || rc=$?; LINT_SEC=$((SECONDS - at))
+    else
+      [[ $run != *'{files}'* ]] || f=${#LINT_F[@]}
+      rc=0; lintcall "$1" "$t/index" "$run" "$t/out" "${LINT_F[@]}" || rc=$?
+    fi
     lintfindings "$t/out" "$t/paths" > "$t/found" || : > "$t/found"
     IFS=$'\t' read -r r why < <(lintresult "$rc" "$t/out" "$(wc -l < "$t/found" | tr -d ' ')" "$LINT_OVER")
     jq -c --argjson n $n --arg r "$r" --arg w "$why" --argjson f "$f" --argjson s "$LINT_SEC" --argjson g "$([ -n "$LINT_TRIG" ] && echo true || echo false)" \
-      --slurpfile fd "$t/found" '{n: $n, run, ratchet: (.ratchet != false), complexity: (.complexity // []), result: $r,
-        why: (if $w == "" then null else $w end), files: $f, findings: $fd, sec: $s, triggered: $g}' <<<"$c" \
+      --slurpfile fd "$t/found" '{n: $n, run: '"$LINTRUN"', ratchet: (.ratchet != false and .size == null), complexity: (.complexity // []), result: $r,
+        why: (if $w == "" then null else $w end), files: $f, findings: $fd, sec: $s, triggered: ($g and .size == null)}' <<<"$c" \
       || { rm -rf "$t"; echo "conveyor lint: the result of lint command $n could not be written" >&2; return 1; }
   done < <(jq -c '.commands // [] | .[]' <<<"$l")
   rm -rf "$t"
@@ -388,7 +429,8 @@ lintbrief() {
   packget lint l || return 1
   [ -n "$l" ] || return 0
   printf '# Lint\n%s\n' "The pack's lint commands, each on the files its pathspecs match. Before you finish, run \`bash $HERE/conveyor.sh lint\` in this worktree and fix each finding it lists on the lines your change made. Never change lint policy (the pack's \`lint\` field, a linter's config or a suppression) unless the issue asks for it."
-  jq -r '.commands // [] | to_entries[] | "- lint command \(.key + 1): `\(.value.run)`, on \(.value.files | map("`\(.)`") | join(", "))"' <<<"$l"
+  jq -r '.commands // [] | to_entries[] | "- lint command \(.key + 1): \(.value | if .size then "no file over \(.size.file) lines unless the exempt file `\(.size.exempt)` names it"
+    else "`\(.run)`" end), on \(.value.files | map("`\(.)`") | join(", "))"' <<<"$l"
 }
 LINTFIX=$'# Lint findings: fix them and nothing else\nThe pack\'s lint commands found <n> finding(s) in this card\'s change. The first 50 are below, each after the command that found it. Fix the code each one names. Do not change lint policy (the pack\'s `lint` field, a linter\'s config or a suppression) to make a finding go away, unless the issue asks for it.'
 # The review gate (card(), at the top of each pass of its review loop, with the change staged), with the rule Lint
@@ -525,22 +567,27 @@ lintreport() { # <worktree> <base>
 # doctor's probe of the pack's lint commands, one line each: a command with {files} run on one tracked file of the
 # main checkout that its `files` match, a command without {files} run as it is; `ok`, `findings: <n>`,
 # `missing: <tool>`, `error: <first line>` (or why, when it printed nothing or ran over the limit), or `empty` when no
-# tracked file matches its `files` (it is not called).
+# tracked file matches its `files` (it is not called). A size entry (lintsize) is run on every tracked file it matches.
 lintdoctor() {
-  local l c n=0 t run rc r why f
+  local l c n=0 t run rc r why f sz
   local -a fs one
   packget lint l || { echo "missing: a readable lint field in the pack $PACK; fix: correct it"; return 1; }
   [ -n "$l" ] || return 0
   t=$(mktemp -d) || return 1
   git -C "$MAIN" ls-files -z > "$t/paths" || : > "$t/paths"
   while IFS= read -r c; do
-    n=$((n + 1)); run=$(jq -r .run <<<"$c")
+    n=$((n + 1)); run=$(jq -r "$LINTRUN" <<<"$c"); sz=$(jq -r '.size // empty | "\(.file | floor)\t\(.exempt)"' <<<"$c")
     mapfile -d '' -t fs < <(jq -j '.files[] + "\u0000"' <<<"$c")
     git -C "$MAIN" ls-files -z -- "${fs[@]}" > "$t/m" 2>/dev/null || : > "$t/m"
     mapfile -d '' -t -n 1 one < "$t/m"
     if [ ${#one[@]} = 0 ]; then echo "lint command $n ($run): empty"; continue; fi
-    [[ $run == *'{files}'* ]] || one=()
-    rc=0; lintcall "$MAIN" '' "$run" "$t/out" "${one[@]}" || rc=$?
+    if [ -n "$sz" ]; then
+      mapfile -d '' -t one < "$t/m"
+      LINT_OVER=''; rc=0; lintsize "$MAIN" "${sz%%$'\t'*}" "${sz#*$'\t'}" "${one[@]}" > "$t/out" 2>&1 || rc=$?
+    else
+      [[ $run == *'{files}'* ]] || one=()
+      rc=0; lintcall "$MAIN" '' "$run" "$t/out" "${one[@]}" || rc=$?
+    fi
     lintfindings "$t/out" "$t/paths" > "$t/found" || : > "$t/found"
     f=$(wc -l < "$t/found" | tr -d ' ')
     IFS=$'\t' read -r r why < <(lintresult "$rc" "$t/out" "$f" "$LINT_OVER")

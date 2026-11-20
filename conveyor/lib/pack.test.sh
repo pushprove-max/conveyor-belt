@@ -84,7 +84,19 @@ t_effort() {
     || fail "the schema's efforts are not EFFORTS' order: $(jq -c '.properties.pick' "$SCHEMA")"
 }
 
-ALL="required mismatch get keyword effort"
+# Bugs: a lint command with both run and size, or neither, passes the check, so the engine reads one as the other or
+# runs `null`; a size entry with no limit passes; a good size entry is refused.
+t_lintsize() {
+  pk check "$(edited '.lint = {commands: [{files: ["*.sh"], size: {file: 400, exempt: ".conveyor/size-exempt"}}]}')" >/dev/null || fail "a good size entry was refused"
+  # Each: <the command>|<the failure's text after .lint.commands[0]>.
+  for e in '{files: ["*.sh"], run: "x", size: {file: 4, exempt: "e"}}|: both run and size are set: set one' \
+           '{files: ["*.sh"]}|: neither run nor size is set: set one' '{files: ["*.sh"], size: {exempt: "e"}}|.size.file: missing (required)'; do
+    out=$(pk check "$(edited ".lint = {commands: [${e%%|*}]}")" 2>&1) && fail "a pack with lint command ${e%%|*} passed"
+    grep -qF ": .lint.commands[0]${e#*|}" <<<"$out" || fail "the failure for lint command ${e%%|*} does not say ${e#*|}: $out"
+  done
+}
+
+ALL="required mismatch get keyword effort lintsize"
 SEL=${CONVEYOR_SHELL_TEST_CASE:-$ALL}; SEL=${SEL//,/ }
 for CASE in $SEL; do case " $ALL " in *" $CASE "*) ;; *) echo "unknown case $CASE" >&2; exit 2 ;; esac; done
 for CASE in $SEL; do ( "t_$CASE" ) || exit 1; echo "ok $CASE"; done

@@ -28,7 +28,7 @@ lintsetup() {
     'done < "$f"; done; exit $r' > "$STUB/lint" || fail "the stub linter"
 }
 # The pack's lint.commands set to <commands json>, where $L in a run is the stub linter's command.
-lintcmds() { tune --arg l "bash $STUB/lint" --argjson c "$1" '.lint = {commands: ($c | map(.run |= gsub("\\$L"; $l)))}'; }
+lintcmds() { tune --arg l "bash $STUB/lint" --argjson c "$1" '.lint = {commands: ($c | map(if .run then .run |= gsub("\\$L"; $l) else . end))}'; }
 # Main commits the <file> <content> pairs; card c7's worktree, $W, is made on that commit, with no change yet.
 lintwt() {
   while [ $# -gt 1 ]; do mkdir -p "$(dirname "$R/$1")" && printf '%s\n' "$2" > "$R/$1" && git -C "$R" add -f "$1" || fail "main's $1"; shift 2; done
@@ -275,19 +275,62 @@ t_lintnoratchet() {
     && ! grep -q 'gate decides\|not judged' <<<"$out" || fail "the ratchet: false command's old findings did not fail the lint, each listed (exit $RC): $out"
 }
 
+# The pack's one lint command: the size entry, on *.c, a limit of 3 lines, the exempt file .size-exempt.
+lintsizecmd() { tune '.lint = {commands: [{files: ["*.c"], size: {file: 3, exempt: ".size-exempt"}}]}'; }
+# The gate's run (lintrun) on card c7's change, staged, after the optional code <first>: its exit in RC, its lines in
+# $T/$CASE/res, the reported findings in REP, as lintrat gives them.
+lintsizegate() {
+  git -C "$W" add -A || fail "the card's change could not be staged"
+  # shellcheck disable=SC2016 # expanded in lintin
+  lintin "${1:-}"'lintrun "$W" "$(git -C "$W" rev-parse HEAD)" c7 "$T/$CASE/res"'
+  REP=$(jq -r '[.reported[] | "\(.file):\(.line): \(.text)"] | join("|")' "$T/$CASE/res" 2>/dev/null)
+}
+
+# Bugs: at the gate, a new file of limit + 1 lines (its last line with no newline) or a file grown from limit - 1 to
+# limit + 1 lines is let through; an exempt file that grows is a finding; an exempt file renamed keeps its exemption
+# under its new path; a function's line in the exempt file (path, a tab, its name) exempts its file.
+t_lintsizegate() {
+  lintsetup; lintsizecmd
+  lintwt grow.c "$(printf 'l1\nl2')" old.c "$(printf 'l1\nl2\nl3\nl4\nl5')" mv.c "$(printf 'l1\nl2\nl3\nl4\nl5')" .size-exempt "$(printf 'old.c\nmv.c\nnew.c\tf')"
+  (cd "$W" && printf 'l3\nl4\n' >> grow.c && printf 'l1\nl2\nl3\nl4' > new.c && echo l6 >> old.c && git mv mv.c moved.c) || fail "the card's change"
+  # lintbasewt notes each call in basewt: the gate removes the base worktree before it returns, so what is left cannot show one was made.
+  # shellcheck disable=SC2016 # expanded in lintin
+  lintsizegate 'lintbasewt() { touch "$T/$CASE/basewt"; return 1; }; '
+  [ "$RC" = 1 ] && [ "$REP" = 'grow.c:4: size 4 lines, limit 3|moved.c:4: size 5 lines, limit 3|new.c:4: size 4 lines, limit 3' ] \
+    || fail "the findings are not the grown, the renamed and the new file (exit $RC): $REP $(cat "$T/$CASE/out" "$T/$CASE/res")"
+  [ ! -e "$STUB/lint-args" ] && [ ! -e "$T/$CASE/basewt" ] || fail "the size entry ran a command or made a base worktree: $(lintargs)"
+}
+
+# Bugs: a card that removes a file's line from the exempt file, and does not change that file, gets no finding for it
+# though it is over the limit; the changed exempt file marks the entry triggered, so the gate's lint line says tools
+# ran as installed; the brief names a size entry's run as null.
+t_lintsizeexempt() {
+  lintsetup; lintsizecmd
+  lintwt big.c "$(printf 'l1\nl2\nl3\nl4\nl5')" keep.c "$(printf 'l1\nl2\nl3\nl4\nl5')" small.c l1 .size-exempt "$(printf 'big.c\nkeep.c')"
+  echo keep.c > "$W/.size-exempt"
+  lintsizegate
+  [ "$RC" = 1 ] && [ "$REP" = 'big.c:4: size 5 lines, limit 3' ] && [ "$(jq -r '"\(.files) \(.triggered)"' "$T/$CASE/res")" = '3 false' ] \
+    || fail "the file no longer exempt is not the one finding, of every *.c file, untriggered (exit $RC): $REP $(cat "$T/$CASE/out" "$T/$CASE/res")"
+  lintin 'CARDCTL={} lintbrief'
+  grep -qxF -e '- lint command 1: no file over 3 lines unless the exempt file `.size-exempt` names it, on `*.c`' "$T/$CASE/out" \
+    || fail "the brief does not name the size entry: $(cat "$T/$CASE/out")"
+}
+
 # Bug: doctor says nothing of a lint command that cannot run, or runs one with no file to read. Each of five stub
-# commands gives its line: ok, findings, missing, error, empty. lintdoctor is called alone: doctor's other checks
+# commands gives its line: ok, findings, missing, error, empty; a size entry, run in the engine, its findings on the
+# fixture's two-line .gitignore. lintdoctor is called alone: doctor's other checks
 # need a whole setup, and doctor() only prints what it prints.
 t_lintdoctor() {
   lintsetup
   lintcmds '[{"files": ["*.txt"], "run": "$L {files}"}, {"files": ["*.txt"], "run": "echo a.txt:1: E1 x; echo a.txt:2: E2 y; exit 1"},
     {"files": ["*.txt"], "run": "echo lint: missing ruff; exit 127"}, {"files": ["*.txt"], "run": "echo the config is bad; echo more; exit 2"},
-    {"files": ["*.py"], "run": "$L {files}"}]'
+    {"files": ["*.py"], "run": "$L {files}"}, {"files": [".gitignore"], "size": {"file": 1, "exempt": "none"}}]'
   lintin 'lintdoctor'
   [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/out")" = "$(printf '%s\n' "lint command 1 (bash $STUB/lint {files}): ok" \
     'lint command 2 (echo a.txt:1: E1 x; echo a.txt:2: E2 y; exit 1): findings: 2' 'lint command 3 (echo lint: missing ruff; exit 127): missing: ruff' \
-    'lint command 4 (echo the config is bad; echo more; exit 2): error: the config is bad' "lint command 5 (bash $STUB/lint {files}): empty")" ] \
-    || fail "doctor's lint lines are not ok, findings, missing, error and empty: $(cat "$T/$CASE/out")"
+    'lint command 4 (echo the config is bad; echo more; exit 2): error: the config is bad' "lint command 5 (bash $STUB/lint {files}): empty" \
+    'lint command 6 (size, limit 1 lines): findings: 1')" ] \
+    || fail "doctor's lint lines are not ok, findings, missing, error, empty and the size entry's findings: $(cat "$T/$CASE/out")"
   [ "$(lintargs)" = 'run a.txt' ] || fail "the per-file command was not run on one tracked file alone, or the empty one was run: $(lintargs)"
 }
 
