@@ -350,6 +350,25 @@ t_pickjudgecodex() {
   [ "$(cat "$T/$CASE/run.out")" = '[2.0,[["seats",2.0]]]' ] || fail "the Board does not price the Codex judge's call on the card: $(cat "$T/$CASE/run.out")"
 }
 
+# Issue 1059. Bug: a Codex judge that timed out (124) before its turn completed was recorded with no tokens, though
+# the session file Codex keeps held its running total (1,000,000 input, 400,000 of them cached, and 50,000 output),
+# so the card had no price. The file is kept, as the Board reads Codex's session files for its usage reading and
+# weekly API spend.
+t_pickjudgecodexcut() {
+  seatsetup "[$(issue 7 2026-01-01)]"
+  export CODEX_HOME=$T/$CASE/codex; mkdir -p "$CODEX_HOME/sessions/d"
+  jq -c '.judge = {cli: "codex", model: "x", effort: "low"}' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
+  loop control rules pick=shadow >/dev/null || fail "control rules pick=shadow was refused"
+  pjask 'm2 high' 'x2 low' 'j2 low'; cp "$STUB/pick" "$STUB/codex-answer"; echo 124 > "$STUB/codex-rc"
+  echo '{"type":"thread.started","thread_id":"th1"}' > "$STUB/codex-usage"
+  echo '{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000000,"cached_input_tokens":400000,"output_tokens":50000}}}}' \
+    > "$CODEX_HOME/sessions/d/rollout-1-th1.jsonl"
+  fx_in "N=7; record c1-7 7 picked ok; $PJ"
+  [ "$(st 'select(.step == "seats") | [.result, .tokens.codex, .usage.input, .usage.read, .usage.output] | tostring')" = '["failed",650000,600000,400000,50000]' ] \
+    || fail "the timed-out Codex judge's call has no tokens from its session file: $(st 'select(.step == "seats")') $(cat "$T/$CASE/run.out")"
+  [ -s "$CODEX_HOME/sessions/d/rollout-1-th1.jsonl" ] || fail "the judge's session file was removed, so the Board's usage reading and API spend miss the call"
+}
+
 # Bug: an OpenCode judge's call was recorded with no tokens and no cost (its events went unread), so the card had no
 # price. The shared stub's step costs $0.01, as OpenCode prices it.
 t_pickjudgeoc() {

@@ -961,7 +961,7 @@ cardpick() { # <issue>
 # unread when its output holds no token usage; and PICKWHY, why it failed: exit 1.
 # shellcheck disable=SC2034 # PICKANS, PICKMODEL, PICKUSE and PICKWHY are the caller's, read by cardpick() and pickjudge()
 pickcall() { # <issue json> <control record>
-  local c=$2 issue=$1 a s x size prices pp p d rc ans out effort model agent t0
+  local c=$2 issue=$1 a s x run size prices pp p d rc ans out effort model agent t0
   PICKANS='' PICKMODEL='' PICKUSE='' PICKWHY=''
   modelsallowed a || { PICKWHY="the pack's models.allowed cannot be read"; return 1; }
   size=$(jq -c --arg area "$AREA" "$SPLITSIZE"' | .doneWhen |= length | .files |= length' <<<"$issue") || { PICKWHY="the issue's size cannot be read"; return 1; }
@@ -993,9 +993,13 @@ pickcall() { # <issue json> <control record>
   [ ! -s "$d/model" ] || { model=$(head -n 1 "$d/model"); PICKMODEL=$model; }
   # The call's usage, as a session's line has it: a Claude judge's from its JSON output (askmodel() keeps it in raw),
   # split as sessionread.jq splits a session's; a Codex judge's from its events (err), as codexread.jq reads a
-  # session's; an OpenCode judge's from its events, with OpenCode's cost, as opencoderead.jq reads them.
+  # session's; an OpenCode judge's from its events, with OpenCode's cost, as opencoderead.jq reads them. A Codex
+  # judge cut off before its turn completed (the timeout) has its running total read from the session file Codex
+  # kept (rollout()), as judgecall() (lib/review.sh) reads a review judge's. The file is kept: the Board reads Codex's
+  # session files for its usage reading and API spend.
   case $agent in
-    codex) PICKUSE=$(jq -Rcn --arg m "$model" --arg e "${effort:-medium}" --argjson s $((SECONDS - t0)) --argjson run null "$CODEXREAD"' | {model, effort, sec} + (({tokens, usage} | select(.tokens != null)) // {unread})' "$d/err" 2>/dev/null) ;;
+    codex) run=''; s=$(rollout "$d/err"); [ -z "$s" ] || run=$(grep '"token_count"' "$s" | tail -n 1 | jq -c '.payload.info.total_token_usage | objects' 2>/dev/null)
+      PICKUSE=$(jq -Rcn --arg m "$model" --arg e "${effort:-medium}" --argjson s $((SECONDS - t0)) --argjson run "${run:-null}" "$CODEXREAD"' | {model, effort, sec} + (({tokens, usage} | select(.tokens != null)) // {unread})' "$d/err" 2>/dev/null) ;;
     opencode) PICKUSE=$(jq -Rcn --arg m "$model" --argjson s $((SECONDS - t0)) "$OPENCODEREAD"' | {model, sec} + (({tokens, usage} | select(.tokens != null)) // {unread})' "$d/events" 2>/dev/null) ;;
     *) PICKUSE=$(jq -Rcn --arg m "$model" --arg e "${effort:-medium}" --argjson s $((SECONDS - t0)) '{model: $m, effort: $e, sec: $s}
     + (([inputs | fromjson? | objects | select(has("result") or has("is_error"))] | last | .usage | objects
