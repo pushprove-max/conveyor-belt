@@ -253,27 +253,34 @@ t_pickkept() {
   [ "$(jq -c 'map(.number)' <<<"$out")" = '[6]' ] || fail "the order did not come from the kept summary's lines: $(head -c 400 <<<"$out")"
 }
 
-# `pick effort` saves one seat's effort range of the rule Pick settings in main's pack (models.effort.<seat>, the
-# Board's Pick settings row), keeping the other seats' ranges, and `clear` takes one seat's range off (models.effort
-# goes with the last one). A min after its max, an effort the schema does not list and a seat that is not one are
-# refused, and the pack is left byte for byte as it was. Bug caught: a range set on the Board that never reaches the
-# pack the judge's pick is fitted to, or a reversed range saved, which fits no effort to the seat.
-t_pickeffort() {
+# `pick models` saves the models the rule Pick settings may give one seat, each with its effort range, in main's pack
+# (pick.<seat>, the Board's Pick settings row), keeping the other seats' lists, and `clear` takes one seat's list off
+# (pick goes with the last one). A model the seat does not allow, an effort its model's program does not take (max is
+# Claude's, not Codex's), a min after its max, a seat that is not one and an argument of another shape are refused,
+# and the pack is left byte for byte as it was. Bug caught: a list set on the Board that never reaches the pack the
+# judge's pick is fitted to, or one saved that the seat cannot run.
+t_pickmodels() {
   setup '[]'
-  local out before a
-  loop pick effort builder medium high > /dev/null && loop pick effort judge low low > /dev/null || fail "a good range was not saved"
-  [ "$(jq -c .models.effort "$R/.conveyor/project.json")" = '{"builder":{"min":"medium","max":"high"},"judge":{"min":"low","max":"low"}}' ] \
-    || fail "the pack's ranges: $(jq -c .models.effort "$R/.conveyor/project.json")"
-  before=$(cat "$R/.conveyor/project.json")
-  out=$(loop pick effort reviewer max low 2>&1) && fail "a min after its max was taken"
-  [[ $out == *"min max comes after max low"*"nothing changed"* ]] || fail "a reversed range did not say why: $out"
-  for a in 'reviewer low huge' 'tests low high' 'builder low' 'builder clear now'; do
+  local out before a p=$R/.conveyor/project.json
+  tune '.models.allowed.codex += ["gpt-6-sol"]'
+  loop pick models builder claude-opus-5-5=medium-high claude-sonnet-5-5=-low claude-haiku-5-5 > /dev/null \
+    && loop pick models judge gpt-6-sol=low- > /dev/null || fail "a good list was not saved"
+  [ "$(jq -c .pick "$p")" = '{"builder":{"claude-opus-5-5":{"min":"medium","max":"high"},"claude-sonnet-5-5":{"max":"low"},"claude-haiku-5-5":{}},"judge":{"gpt-6-sol":{"min":"low"}}}' ] \
+    || fail "the pack's lists: $(jq -c .pick "$p")"
+  before=$(cat "$p")
+  out=$(loop pick models builder some-model=low-high 2>&1) && fail "a model the builder does not allow was taken"
+  [[ $out == *"some-model is not one of the models"*"nothing changed"* ]] || fail "a model not allowed did not say why: $out"
+  out=$(loop pick models reviewer gpt-6-sol=low-max 2>&1) && fail "an effort Codex does not take was taken"
+  [[ $out == *"codex takes no effort max"*"nothing changed"* ]] || fail "an effort Codex does not take did not say why: $out"
+  out=$(loop pick models reviewer gpt-6-sol=high-low 2>&1) && fail "a min after its max was taken"
+  [[ $out == *"min high comes after max low"*"nothing changed"* ]] || fail "a reversed range did not say why: $out"
+  for a in 'tests gpt-6-sol' 'builder' 'builder claude-opus-5-5=low' 'builder clear now'; do
     # shellcheck disable=SC2086 # each is the command's words
-    loop pick effort $a > /dev/null 2>&1; [ $? = 2 ] || fail "pick effort $a was not a usage error"
+    loop pick models $a > /dev/null 2>&1; [ $? = 2 ] || fail "pick models $a was not a usage error"
   done
-  [ "$(cat "$R/.conveyor/project.json")" = "$before" ] || fail "a refused range changed the pack"
-  loop pick effort builder clear > /dev/null && [ "$(jq -c .models.effort "$R/.conveyor/project.json")" = '{"judge":{"min":"low","max":"low"}}' ] \
-    || fail "clear did not take the builder's range alone off: $(jq -c .models.effort "$R/.conveyor/project.json")"
-  loop pick effort judge clear > /dev/null && [ "$(jq -c '.models | has("effort")' "$R/.conveyor/project.json")" = false ] \
-    || fail "the last range cleared left models.effort in the pack: $(jq -c .models "$R/.conveyor/project.json")"
+  [ "$(cat "$p")" = "$before" ] || fail "a refused list changed the pack"
+  loop pick models builder clear > /dev/null && [ "$(jq -c .pick "$p")" = '{"judge":{"gpt-6-sol":{"min":"low"}}}' ] \
+    || fail "clear did not take the builder's list alone off: $(jq -c .pick "$p")"
+  loop pick models judge clear > /dev/null && [ "$(jq -c 'has("pick")' "$p")" = false ] \
+    || fail "the last list cleared left pick in the pack: $(jq -c .pick "$p")"
 }

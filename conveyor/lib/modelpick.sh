@@ -115,39 +115,50 @@ modelpick() { # <card> <issue>: sets card()'s PICK, PICKCARD and PICKSEAT
   pickseats "$2" "$c"
   pickjudge "$1" "$2" "$c" "$issue"
 }
-# The judge's fit of its answer to what the pack allows each seat, in jq: effs($r; $e; $s; $g), the efforts seat $s
-# may take on program $g: those $g takes (EFFORTS, $e; none for an OpenCode builder) inside the seat's range
-# (models.effort, $r: {<seat>: {min, max}}, in the order of $e.opencode, which lists every effort); fit(...; $f), the
-# one of them for effort $f: $f itself, else the highest below it, else the lowest (null: the program takes none).
-# clamp($ans; $r; $e; $now), on models.allowed, is the answer fitted: each seat {model, effort, why, asked: {model,
-# effort} as the judge gave them} and, when either was moved, clamp: why and what it was moved to. A model the pack
-# does not allow the seat (okmodels: the builder's, or the review's for the reviewer and the judge), or one of a
-# program with no effort in the range, gives the project's model ($now, the seats in force) when that is allowed,
-# else the first allowed; a seat with no such model at all is {why, asked, clamp}, and the project's seat stands.
+# The judge's fit of its answer to what the pack allows each seat, in jq, with $r the pack's pick lists (pick: {<seat>:
+# {<model>: {min, max}}}; {} when it sets none): effs($r; $e; $s; $g; $m), the efforts seat $s may take on model $m of
+# program $g: those $g takes (EFFORTS, $e; none for an OpenCode builder) inside the model's range in the seat's list
+# (either bound left out: none on that side; in the order of $e.opencode, which lists every effort); chosen($r; $e;
+# $s), on models.allowed, the models the pick may give seat $s, each {model, g: its program, efforts}: those the pack
+# allows the seat (okmodels: the builder's, or the review's for the reviewer and the judge) that its list names (all
+# of them when the seat has no list), less one of a program with no effort in its range; fit(...; $m; $f), the effort
+# for effort $f: $f itself, else the nearest end of the range (null: the program takes none).
+# clamp($ans; $r; $e; $now; $pr), on models.allowed, is the answer fitted: each seat {model, effort, why, asked:
+# {model, effort} as the judge gave them} and, when either was moved, clamp: why and what it was moved to. A model
+# not chosen gives, for a seat with a list, the chosen one nearest in price to it (input and output per million
+# tokens, in the price table $pr: {<model>: {input, output}}, pickcall()'s), else the project's model ($now, the
+# seats in force) when it is chosen, else the first chosen; a seat with none chosen at all is {why, asked, clamp},
+# and the project's seat stands.
 PICKCLAMP="$OKMODELS"'def noeff($s; $g): $s == "builder" and $g == "opencode";
-  def effs($r; $e; $s; $g): (if noeff($s; $g) then [] else $e[$g] // [] end) as $l | $e.opencode as $o
-    | if ($r[$s] | type) != "object" then $l
-      else $r[$s].min as $mn | $r[$s].max as $mx | ($o | index($mn)) as $lo | ($o | index($mx)) as $hi
-        | $l | map(. as $f | ($o | index($f)) as $i | select($i >= $lo and $i <= $hi)) end;
-  def fit($r; $e; $s; $g; $f): effs($r; $e; $s; $g) as $l | $e.opencode as $o
+  def listed($r; $s): ($r[$s] | type) == "object";
+  def effs($r; $e; $s; $g; $m): (if noeff($s; $g) then [] else $e[$g] // [] end) as $l | $e.opencode as $o
+    | (($r[$s] | objects | .[$m] | objects) // {}) as $b | ($o | index($b.min // $o[0])) as $lo | ($o | index($b.max // $o[-1])) as $hi
+    | $l | map(. as $f | ($o | index($f)) as $i | select($lo != null and $hi != null and $i >= $lo and $i <= $hi));
+  def chosen($r; $e; $s): [okmodels(if $s == "builder" then "builder" else "reviewer" end) | to_entries[] | .key as $g | .value[] | . as $m
+    | select((listed($r; $s) | not) or ($r[$s] | has($m))) | {model: $m, g: $g, efforts: effs($r; $e; $s; $g; $m)} | select(noeff($s; .g) or .efforts != [])];
+  def fit($r; $e; $s; $g; $m; $f): effs($r; $e; $s; $g; $m) as $l | $e.opencode as $o
     | if $l == [] then null elif ($l | index($f)) != null then $f
       else (($o | index($f)) // -1) as $i | [$l[] | . as $x | select(($o | index($x)) <= $i)] | last // $l[0] end;
-  def clamp($ans; $r; $e; $now): . as $a | [("builder", "reviewer", "judge") as $s
+  def price($pr): ($pr[.] // $pr[sub("^opencode:"; "")]) | if type == "object" and (.input | type) == "number" and (.output | type) == "number" then .input + .output else null end;
+  def clamp($ans; $r; $e; $now; $pr): . as $a | [("builder", "reviewer", "judge") as $s
     | ($ans[$s] | if type == "object" then . else {} end) as $q
-    | [$a | okmodels(if $s == "builder" then "builder" else "reviewer" end) | to_entries[] | .key as $g | .value[] | {model: ., g: $g}
-       | select(noeff($s; .g) or effs($r; $e; $s; .g) != [])] as $ok
-    | (first($ok[] | select(.model == $q.model)) // first($ok[] | select(.model == $now[$s].model)) // $ok[0]) as $m
+    | ($a | chosen($r; $e; $s)) as $ok
+    | (if listed($r; $s) and ($q.model | type) == "string" then ($q.model | price($pr)) as $p
+        | if $p == null then null else [$ok[] | (.model | price($pr)) as $x | select($x != null) | {m: ., d: ($x - $p | if . < 0 then -. else . end)}] | min_by(.d) | .m? end
+       else null end) as $near
+    | (first($ok[] | select(.model == $q.model)) // $near // first($ok[] | select(.model == $now[$s].model)) // $ok[0]) as $m
     | {why: ($q.why | strings // null), asked: {model: ($q.model // null), effort: ($q.effort // null)}} as $w
-    | {key: $s, value: (if $m == null then $w + {clamp: "the pack allows the \($s) no model with an effort in models.effort.\($s), so the project'"'"'s \($s) stands"}
-        else fit($r; $e; $s; $m.g; (if ($q.effort | type) == "string" then $q.effort else $now[$s].effort end)) as $f
+    | {key: $s, value: (if $m == null then $w + {clamp: (if listed($r; $s) then "pick.\($s) names no model the pack allows the \($s) with an effort its program takes" else "the pack allows the \($s) no model" end) + ", so the project'"'"'s \($s) stands"}
+        else fit($r; $e; $s; $m.g; $m.model; (if ($q.effort | type) == "string" then $q.effort else $now[$s].effort end)) as $f
           | {model: $m.model, effort: $f} + $w
           + (if $m.model == $q.model and $f == $q.effort then {}
              else {clamp: ([if $m.model == $q.model then empty elif ($q.model | type) != "string" then "the answer named no model for the \($s)"
+                   elif listed($r; $s) then "\($q.model) is not one of the models pick.\($s) lets the pick give the \($s)"
                    else "\($q.model) is not a model the pack allows the \($s)" end,
                  if $f == $q.effort then empty
                  elif ($q.effort | type) != "string" then (if $m.model == $q.model then "the answer named no effort for the \($s)" else empty end)
                  elif noeff($s; $m.g) then "\($m.model) takes no effort"
-                 else "\($q.effort) is not one of the efforts the \($s) may take on \($m.model) (\(effs($r; $e; $s; $m.g) | join(", ")))" end]
+                 else "\($q.effort) is not one of the efforts the \($s) may take on \($m.model) (\($m.efforts | join(", ")))" end]
                  | join("; ")) + ": \($m.model) at \($f // "no effort")"} end) end)}] | from_entries;'
 # The judge's pick of the three seats (the rule Pick settings, Shadow or On, on a card modelpick() picked): the judge
 # is asked once, as Pick for me asks it (pickcall(), lib/control.sh), and its answer fitted to the pack (PICKCLAMP)
@@ -160,7 +171,7 @@ PICKCLAMP="$OKMODELS"'def noeff($s; $g): $s == "builder" and $g == "opencode";
 # (PICKSEAT, which then is its choice), except a card the rule keeps on the project's builder (PICKHOLD, modelpick()'s,
 # set by pickpromote() and by modelpick() itself): a promoted group's card in the share, which the snapshot's cost
 # check compares the promoted cards with, and each later card of an issue whose trial card was blocked, which builds
-# on the default; a trial card keeps its challenger, at the judge's effort fitted to the builder's range (fit()), or
+# on the default; a trial card keeps its challenger, at the judge's effort fitted to its range in pick.builder (fit()), or
 # its own effort fitted to the range when the judge fails (picktrial()): its choice stays the challenger, by which the
 # snapshot counts the group's trials, and trialEffort is the effort it builds at when that is another. A card that
 # is not a trial runs its review on the judge's reviewer and judge (PICKSEATS), each one the owner promoted from a
@@ -169,17 +180,20 @@ PICKCLAMP="$OKMODELS"'def noeff($s; $g): $s == "builder" and $g == "opencode";
 # asked.guard says so.
 # shellcheck disable=SC2034 # PICKSEAT and PICKSEATS are card()'s, read by seat() in lib/control.sh
 pickjudge() { # <card> <issue> <control record> [<issue json>]
-  local asked issue=${4:-} a r now x ok=ok s0=${PICKSEAT:-} ss0=${PICKSEATS:-} p0=$PICK PICKANS='' PICKMODEL='' PICKUSE='' PICKWHY=''
+  local asked issue=${4:-} a r k='' now x ok=ok s0=${PICKSEAT:-} ss0=${PICKSEATS:-} p0=$PICK PICKANS='' PICKMODEL='' PICKUSE='' PICKWHY='' PICKPRICES=''
   { [ -n "$issue" ] || issue=$(gh issue view "$2" --json number,title,body,labels 2>/dev/null); } && jq -e 'objects | .number' <<<"$issue" >/dev/null 2>&1 \
     || PICKWHY="the issue could not be read"
-  [ -n "$PICKWHY" ] || pickcall "$issue" "$3" || :
+  # The judge is given only the models the pick may give each seat, each at the efforts of its range (chosen()).
+  packget pick r 2>/dev/null && [ -n "$r" ] || r='{}'
+  ! modelsallowed a || k=$(jq -c --argjson r "$r" --argjson e "$EFFORTS" "$PICKCLAMP"'{builder: chosen($r; $e; "builder"), reviewer: chosen($r; $e; "reviewer"), judge: chosen($r; $e; "judge")}' <<<"$a" 2>/dev/null) || k=''
+  [ -n "$PICKWHY" ] || pickcall "$issue" "$3" "$k" || :
   if [ -z "$PICKWHY" ]; then
     if ! jq -e 'any(.[]; type == "object" and (.model | type == "string"))' <<<"$PICKANS" >/dev/null 2>&1; then PICKWHY="the judge's answer named no model for any seat: ${PICKANS:0:300}"
     else
-      packget models.effort r 2>/dev/null && [ -n "$r" ] || r='{}'
       now=$(for x in builder reviewer judge; do SEATCARD='' seat "$x" "$3" || echo null; done | jq -cs '{builder: .[0], reviewer: .[1], judge: .[2]}')
-      modelsallowed a && asked=$(jq -c --argjson q "$PICKANS" --argjson r "$r" --argjson e "$EFFORTS" --argjson now "$now" --arg m "$PICKMODEL" \
-        "$PICKCLAMP"'clamp($q; $r; $e; $now) + {model: $m}' <<<"$a" 2>/dev/null) && [ -n "$asked" ] \
+      [ -n "$PICKPRICES" ] || PICKPRICES='{}'
+      modelsallowed a && asked=$(jq -c --argjson q "$PICKANS" --argjson r "$r" --argjson e "$EFFORTS" --argjson now "$now" --arg m "$PICKMODEL" --argjson pr "$PICKPRICES" \
+        "$PICKCLAMP"'clamp($q; $r; $e; $now; $pr) + {model: $m}' <<<"$a" 2>/dev/null) && [ -n "$asked" ] \
         || PICKWHY="the judge's answer could not be fitted to the models and efforts the pack allows"
     fi
   fi
@@ -192,10 +206,9 @@ pickjudge() { # <card> <issue> <control record> [<issue json>]
   # Shadow, or a failed ask: the seats stand as modelpick() left them.
   [ "$(jq -r .mode <<<"$PICK")" = on ] && ! jq -e '.asked.failed' <<<"$PICK" >/dev/null 2>&1 || return 0
   if jq -e '.trial == true' <<<"$PICK" >/dev/null && [ -n "${PICKSEAT:-}" ]; then
-    modelsallowed a && packget models.effort r 2>/dev/null && [ -n "$r" ] || r='{}'
-    x=$(jq -c --argjson p "$PICKSEAT" --argjson q "$(jq -c .asked.builder <<<"$PICK")" --argjson r "$r" --argjson e "$EFFORTS" "$PICKCLAMP"'
-      first(okmodels("builder") | to_entries[] | select(.value | index($p.model)) | .key) as $g
-      | fit($r; $e; "builder"; $g; ($q.asked.effort // $p.effort)) as $f | if $f == null then $p else $p + {effort: $f} end' <<<"$a" 2>/dev/null) && [ -n "$x" ] \
+    modelsallowed a && x=$(jq -c --argjson p "$PICKSEAT" --argjson q "$(jq -c .asked.builder <<<"$PICK")" --argjson r "$r" --argjson e "$EFFORTS" "$PICKCLAMP"'
+      first(chosen($r; $e; "builder")[] | select(.model == $p.model)) as $c
+      | fit($r; $e; "builder"; $c.g; $c.model; ($q.asked.effort // $p.effort)) as $f | if $f == null then $p else $p + {effort: $f} end' <<<"$a" 2>/dev/null) && [ -n "$x" ] \
       && PICKSEAT=$x && PICK=$(jq -c --argjson s "$x" 'if .choice.effort == $s.effort then del(.trialEffort) else .trialEffort = $s.effort end' <<<"$PICK") || :
   elif [ -z "${PICKSEAT:-}" ] && [ -z "${PICKHOLD:-}" ] && [ "$(jq -r .by <<<"$PICK")" = auto ]; then
     x=$(jq -c '.asked.builder | select(.model != null) | {model, effort}' <<<"$PICK" 2>/dev/null)
@@ -281,14 +294,15 @@ picktrial() {
   # The challenger the pack allows for the builder, as seat() gives it (else seat() keeps the project's builder), on
   # an account not at the weekly limit guard.
   challenger "$1" "$2" "$3" "$ch" || return 0
-  # A challenger whose program takes no effort in the builder's range (models.effort.builder) has no trial, as it
-  # would build outside the range: the card builds as one that is no trial (pickjudge()). Else the trial builds at
-  # the challenger's effort fitted to the range (fit()), also when the judge fails; pickjudge() then fits the judge's.
-  packget models.effort r 2>/dev/null && [ -n "$r" ] || r='{}'
+  # A challenger that is not one of the builder's chosen models (chosen(): pick.builder, when the pack sets it), or
+  # whose program takes no effort in its range there, has no trial, as it would build outside them: the card builds
+  # as one that is no trial (pickjudge()). Else the trial builds at the challenger's effort fitted to its range
+  # (fit()), also when the judge fails; pickjudge() then fits the judge's.
+  packget pick r 2>/dev/null && [ -n "$r" ] || r='{}'
   if ! { modelsallowed a && f=$(jq -ce --argjson p "$ch" --argjson r "$r" --argjson e "$EFFORTS" "$PICKCLAMP"'
-      first(okmodels("builder") | to_entries[] | select(.value | index($p.model)) | .key) as $g
-      | select($g != null) | fit($r; $e; "builder"; $g; $p.effort) as $f | select($f != null) | $p + {effort: $f}' <<<"$a" 2>/dev/null) && [ -n "$f" ]; }; then
-    echo "conveyor: card $1: no trial: the challenger's program takes no effort in models.effort.builder" >&2; PICKSEAT=''; return 0
+      first(chosen($r; $e; "builder")[] | select(.model == $p.model)) as $c
+      | fit($r; $e; "builder"; $c.g; $c.model; $p.effort) as $f | select($f != null) | $p + {effort: $f}' <<<"$a" 2>/dev/null) && [ -n "$f" ]; }; then
+    echo "conveyor: card $1: no trial: the challenger is not one of the models pick.builder lets the pick give the builder, at an effort its program takes" >&2; PICKSEAT=''; return 0
   fi
   # One trial card in flight: the claim is checked and taken under its lock.
   # shellcheck disable=SC2094 # the claim is read and then written while its lock is held

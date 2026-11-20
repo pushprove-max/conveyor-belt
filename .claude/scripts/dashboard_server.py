@@ -210,7 +210,8 @@ SETUP_PAGE = b'''<!doctype html><meta charset=utf-8><title>Conveyor Board: set y
 # or standing (the Rules tab's Done without asking: one standing kind of routine yes on or off, `conveyor.sh auto standing`),
 # or prices (the Rules tab's Model prices: one model's price set or cleared, a model added or removed, its display name
 # or an alias: `conveyor.sh prices`),
-# or pick-effort (the Rules tab's Pick settings: one seat's effort range set or cleared, `conveyor.sh pick effort`),
+# or pick-models (the Rules tab's Pick settings: one seat's models, each with its effort range, set or cleared,
+# `conveyor.sh pick models`),
 # or testmap (the Tests page's Build the test map and its Stop: `conveyor.sh testmap build | stop`; an admin's alone),
 # or bench (the Benchmarks tab: Start, Stop, List versions, an arm's preflight, an arm saved, Compare, and Archive,
 # Restore and Delete of runs: `conveyor.sh bench swe <n> [--solo | [--arm <arm>]... [--engine <version>]] [--settings
@@ -555,6 +556,21 @@ def kept_history(directory):
     return body, '"%s"' % hashlib.sha256(kept + b'\n' + body).hexdigest()[:32]
 
 
+def pick_model_ok(x):
+    """Whether x is one model of a seat's pick list as `conveyor.sh pick models` takes it: <model>, or
+    <model>=<min>-<max> with either bound empty (none on that side) or an effort word. The command checks that the seat
+    allows the model and that its program takes the efforts."""
+    if not isinstance(x, str):
+        return False
+    m, eq, r = x.partition('=')
+    if MODEL.fullmatch(m) is None:
+        return False
+    if not eq:
+        return True
+    lo, dash, hi = r.partition('-')
+    return dash == '-' and all(e == '' or e in EFFORTS for e in (lo, hi))
+
+
 def control_ok(body):
     """Whether the page's body is one action this route takes, with arguments of the shape conveyor.sh takes. The host
     checks again (a CLI it has not installed is refused there, with its reason)."""
@@ -635,8 +651,8 @@ def control_ok(body):
         return test_settings_ok(v)
     if a == 'standing':  # the Rules tab: one standing kind of routine yes, on or off
         return n == 2 and v[0] in STANDING and v[1] in ('on', 'off')
-    if a == 'pick-effort':  # the Rules tab's Pick settings: one seat's effort range, min and max, or clear
-        return n >= 2 and v[0] in ('builder', 'reviewer', 'judge') and (v[1:] == ['clear'] or (n == 3 and v[1] in EFFORTS and v[2] in EFFORTS))
+    if a == 'pick-models':  # the Rules tab's Pick settings: one seat's models, each <model>[=<min>-<max>], or clear
+        return n >= 2 and v[0] in ('builder', 'reviewer', 'judge') and (v[1:] == ['clear'] or ('clear' not in v[1:] and all(pick_model_ok(x) for x in v[1:])))
     if a == 'prices':  # the Rules tab's Model prices: one model's price, added model, display name or alias
         return n >= 2 and MODEL.fullmatch(v[1]) is not None and (
             (n in (5, 6) and v[0] == 'set' and all(PRICE.fullmatch(x) for x in v[2:]))
@@ -968,9 +984,9 @@ def control_script(action, args, main, today, record=None, user=None):
     if action in ('test-settings', 'prices'):
         # The record's pack (.conveyor/project.json of its main), changed by the engine's own command, which checks it.
         return '%s %s %s' % (conv, action, ' '.join(q(x) for x in args))
-    if action == 'pick-effort':
-        # The record's pack's models.effort: one seat's range set or cleared (conveyor.sh pick effort, which checks it).
-        return '%s pick effort %s' % (conv, ' '.join(q(x) for x in args))
+    if action == 'pick-models':
+        # The record's pack's pick: one seat's list set or cleared (conveyor.sh pick models, which checks it).
+        return '%s pick models %s' % (conv, ' '.join(q(x) for x in args))
     if action == 'standing':
         # The record's pack's auto.standing: one kind on or off (conveyor.sh auto standing, which checks it).
         return '%s auto standing %s %s' % (conv, q(args[0]), q(args[1]))

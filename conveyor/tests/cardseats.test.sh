@@ -221,8 +221,8 @@ pjusd() {
     | python3 "$HERE/../.claude/scripts/dashboard_limit.py" cardlines "$d/all" "$d/kept" "$d/priced" >/dev/null && jq -c "[.usd, [.steps[] | [.step, .usd]]]" "$d/priced"'
 }
 
-# Bugs: with the rule On, the card did not build on the judge's builder, or took an effort outside the builder's range
-# (models.effort.builder, medium to high: the judge's low is medium), or a reviewer model the pack does not allow (zz:
+# Bugs: with the rule On, the card did not build on the judge's builder, or took an effort outside its model's range
+# (pick.builder.m, medium to high: the judge's low is medium), or a reviewer model the pack does not allow (zz:
 # the project's x, at the judge's effort), or the pick did not say what was moved and why; or the call's tokens were
 # not on the card as a step the Board prices (pjusd()); or a restarted card reused the judge's earlier answer and did
 # not ask the judge again (its new answer, reviewer x2 at medium, is not used), or did not fit the new answer to the
@@ -230,7 +230,7 @@ pjusd() {
 # The judge j answers with 1,000,000 input and 500,000 output tokens, at $1 and $2 a million: $2.
 t_pickjudgeon() {
   seatsetup "[$(issue 7 2026-01-01)]"
-  tune '.models.allowed.claude = ["m"] | .models.effort = {builder: {min: "medium", max: "high"}} | .prices = {j: {input: 1, output: 2, cacheRead: 0}}'
+  tune '.models.allowed.claude = ["m"] | .pick = {builder: {m: {min: "medium", max: "high"}}} | .prices = {j: {input: 1, output: 2, cacheRead: 0}}'
   # The project's builder at high, so a card that does not build on the judge's (m at medium) is told apart.
   loop control rules pick=on >/dev/null && loop control model claude m high >/dev/null || fail "control rules pick=on or control model was refused"
   jq -cn --arg r '{"builder": {"model": "m", "effort": "low", "why": "w"}, "reviewer": {"model": "zz", "effort": "low", "why": "r"}, "judge": {"model": "j2", "effort": "high", "why": "j"}}' \
@@ -246,7 +246,7 @@ t_pickjudgeon() {
   recok "$ST/cards.jsonl" "the judge's pick"
   pjusd '{"j": {"input": 1, "output": 2, "cacheRead": 0}}'
   [ "$(cat "$T/$CASE/run.out")" = '[2.0,[["seats",2.0]]]' ] || fail "the Board does not price the judge's call on the card: $(cat "$T/$CASE/run.out")"
-  tune '.models.effort.builder = {min: "low", max: "low"}'
+  tune '.pick.builder.m = {min: "low", max: "low"}'
   rm -f "$STUB/pick-json"; pjask 'm high' 'x2 medium' 'j2 high'
   # The deps line carries the pick with the judge's builder as its choice, as a card's later lines do.
   fx_in "N=7; $PJ; record c1-7 7 deps ok"
@@ -254,7 +254,7 @@ t_pickjudgeon() {
     || fail "the restarted card did not ask the judge again and fit its new answer to the pack as it is now: $(cat "$T/$CASE/run.out") $(wc -l < "$STUB/picks")"
   # Bug: a retry whose judge call failed kept the earlier card's choice (the judge's m low) while it built on the
   # project's builder, so the Board counted the retry under a builder it did not run on.
-  tune '.models.effort.builder = {min: "medium", max: "high"}'
+  tune '.pick.builder.m = {min: "medium", max: "high"}'
   echo '{"type":"result","is_error":true,"result":"overloaded","num_turns":1}' > "$STUB/pick-json"
   fx_in "N=7; $PJ; jq -r '.choice | \"\(.model) \(.effort)\"' <<<\"\$PICK\""
   [ "$(sed -n '2p;5p' "$T/$CASE/run.out" | paste -sd,)" = 'm high,m high' ] \
@@ -268,6 +268,30 @@ t_pickjudgeon() {
     || fail "the retry in Shadow does not record the builder it builds on: $(cat "$T/$CASE/run.out")"
 }
 
+# Bugs (#1067), with the rule On and pick lists for the builder (Opus 5.5 at medium to high, and m at any effort) and
+# the reviewer (x at low only, x2 at high to xhigh), and none for the judge: the judge's Sonnet 5.5 at low did not
+# become the chosen model nearest in price (Opus 5.5, $30 a million to Sonnet's $18, not m's $0.20 nor the project's
+# m), at the nearest end of its range (medium), with both clamps in the record; the reviewer's x2 at high, inside
+# x2's range though outside x's, was moved; the judge's j2 at max, with no list, was moved; or the judge was offered a
+# model the lists leave out, or efforts outside a model's range.
+t_pickjudgelists() {
+  seatsetup "[$(issue 7 2026-01-01)]"
+  tune '.models.allowed.claude += ["claude-opus-5-5", "claude-sonnet-5-5"]
+    | .pick = {builder: {"claude-opus-5-5": {min: "medium", max: "high"}, m: {}}, reviewer: {x: {min: "low", max: "low"}, x2: {min: "high", max: "xhigh"}}}
+    | .prices = {"claude-opus-5-5": {input: 5, output: 25, cacheRead: 0}, "claude-sonnet-5-5": {input: 3, output: 15, cacheRead: 0}, m: {input: 0.1, output: 0.1, cacheRead: 0}}'
+  loop control rules pick=on >/dev/null || fail "control rules pick=on was refused"
+  pjask 'claude-sonnet-5-5 low' 'x2 high' 'j2 max'
+  fx_in "N=7; $PJ"
+  out=$(cat "$T/$CASE/run.out")
+  [ "$(sed -n '2,4p' <<<"$out" | paste -sd,)" = 'claude-opus-5-5 medium,x2 high,j2 max' ] || fail "the card's seats are not the judge's, fitted to the pick lists: $out"
+  [ "$(head -n 1 <<<"$out" | jq -r '.builder.clamp, .reviewer.clamp // "none", .judge.clamp // "none"')" \
+    = $'claude-sonnet-5-5 is not one of the models pick.builder lets the pick give the builder; low is not one of the efforts the builder may take on claude-opus-5-5 (medium, high): claude-opus-5-5 at medium\nnone\nnone' ] \
+    || fail "the record does not name the builder's two clamps alone: $out"
+  grep -qF -- '- claude-opus-5-5 (claude; efforts: medium, high;' "$STUB/pick-asked" && grep -qF -- '- x2 (codex; efforts: high, xhigh;' "$STUB/pick-asked" \
+    && grep -qF -- '- j2 (claude; efforts: low, medium, high, xhigh, max;' "$STUB/pick-asked" && ! grep -q -- '^- claude-sonnet-5-5 ' "$STUB/pick-asked" \
+    || fail "the judge was not given the chosen models of each seat at their ranges: $(cat "$STUB/pick-asked")"
+}
+
 # Bugs: a seat the owner set for the issue (`control card`) was moved to the judge's; a trial card left its challenger
 # for the judge's builder, or did not take the judge's effort fitted to the builder's range (xhigh: high), or its
 # reviewer was moved off the project's (a trial card's review stays at the defaults); or its choice took that effort,
@@ -275,7 +299,7 @@ t_pickjudgeon() {
 # trial share. Also: the pick asked the issue's judge (j2 at high) and recorded the project's (j at medium).
 t_pickjudgeowner() {
   seatsetup "[$(issue 7 2026-01-01),$(issue 10 2026-01-01)]"
-  tune '.models.allowed.claude += ["claude-sonnet-5-5"] | .models.effort = {builder: {min: "medium", max: "high"}}'
+  tune '.models.allowed.claude += ["claude-sonnet-5-5"] | .pick = {builder: {m: {min: "medium", max: "high"}, m2: {}, "claude-sonnet-5-5": {min: "medium", max: "high"}}}'
   loop control rules pick=on >/dev/null && loop control card 7 builder m2 high >/dev/null && loop control card 7 reviewer x2 medium >/dev/null \
     && loop control card 7 judge j2 high >/dev/null || fail "control rules pick=on or control card was refused"
   pjask 'm medium' 'x low' 'j2 low'
@@ -300,20 +324,20 @@ t_pickjudgeowner() {
   recok "$ST/cards.jsonl" "a trial card's pick, and its retry's"
 }
 
-# Bugs (#1056): with a builder range of minimal only, which Claude does not take, issue 10's trial card built on the
-# challenger (Sonnet 5.5) at its own medium, outside models.effort.builder; it is no trial, and builds on the judge's
+# Bugs (#1056, #1067): with a builder list of the Codex model cb alone, at minimal, issue 10's trial card built on the
+# challenger (Sonnet 5.5), which the list does not name, at its own medium; it is no trial, and builds on the judge's
 # Codex builder at minimal.
 t_pickjudgetrialrange() {
   seatsetup "[$(issue 10 2026-01-01),$(issue 15 2026-01-01)]"
-  tune '.models.allowed.claude += ["claude-sonnet-5-5"] | .models.allowed["codex-builder"] = ["cb"] | .models.effort = {builder: {min: "minimal", max: "minimal"}}'
+  tune '.models.allowed.claude += ["claude-sonnet-5-5"] | .models.allowed["codex-builder"] = ["cb"] | .pick = {builder: {cb: {min: "minimal", max: "minimal"}}}'
   loop control rules pick=on >/dev/null || fail "control rules pick=on was refused"
   pjask 'cb minimal' 'x medium' 'j medium'
   fx_in "N=10; $PJ; jq -c '[.trial, .choice, .trialEffort]' <<<\"\$PICK\""
   [ "$(sed -n '2p;5p' "$T/$CASE/run.out" | paste -sd,)" = 'cb minimal,[false,{"model":"cb","effort":"minimal"},null]' ] \
     || fail "the trial card built outside the builder's effort range: $(cat "$T/$CASE/run.out")"
-  # Bug: with a range of high only, which Sonnet 5.5 takes, a judge that failed (here, an answer with no model, which
+  # Bug: with Sonnet 5.5 in the list at high only, a judge that failed (here, an answer with no model, which
   # leaves pickjudge() as a timeout does) left issue 15's trial card at the challenger's medium.
-  tune '.models.effort = {builder: {min: "high", max: "high"}}'
+  tune '.pick = {builder: {"claude-sonnet-5-5": {min: "high", max: "high"}}}'
   printf '%s\n' '{"builder": {"model": null, "effort": "low"}}' > "$STUB/pick"
   fx_in "N=15; $PJ; jq -c '[.trial, .choice, .trialEffort]' <<<\"\$PICK\""
   [ "$(sed -n '2p;5p' "$T/$CASE/run.out" | paste -sd,)" = 'claude-sonnet-5-5 high,[true,{"model":"claude-sonnet-5-5","effort":"medium"},"high"]' ] \
@@ -333,7 +357,7 @@ t_pickjudgeshare() {
 }
 
 # Bugs: with Shadow the judge's pick was not recorded, or moved a seat; with Off the judge was asked. Also: a seat with
-# no range in models.effort did not take every effort its model's program takes (the judge's max is kept, no clamp).
+# no pick list did not take every effort its model's program takes (the judge's max is kept, no clamp).
 t_pickjudgeshadow() {
   seatsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-01)]"
   loop control rules pick=shadow >/dev/null || fail "control rules pick=shadow was refused"

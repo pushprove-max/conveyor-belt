@@ -937,7 +937,7 @@ Fit the choice to the issue: a small, clear change needs no large model or high 
 Weigh the price of each model. Answer with one JSON object and nothing else:
 {"builder": {"model": "...", "effort": "...", "why": "one line"}, "reviewer": {...}, "judge": {...}}'
 cardpick() { # <issue>
-  local n=$1 c s x issue out PICKANS='' PICKMODEL='' PICKUSE='' PICKWHY=''
+  local n=$1 c s x issue out PICKANS='' PICKMODEL='' PICKUSE='' PICKWHY='' PICKPRICES=''
   c=$(ctl) || return 1
   names || return 1
   issue=$(gh issue view "$n" --json number,title,body,labels 2>/dev/null) && jq -e 'objects | .number' <<<"$issue" >/dev/null 2>&1 \
@@ -958,24 +958,33 @@ cardpick() { # <issue>
 # judge}, each {model (null for a blank one), effort (null for none), why} as the judge gave them (nothing else
 # checked) or null; PICKMODEL, the judge's model; PICKUSE once the judge was called, the fields of the call's own card line: {model, effort, sec} and
 # {tokens, usage} as a session's line on its program has them (sessionread.jq, codexread.jq, opencoderead.jq), or
-# unread when its output holds no token usage; and PICKWHY, why it failed: exit 1.
-# shellcheck disable=SC2034 # PICKANS, PICKMODEL, PICKUSE and PICKWHY are the caller's, read by cardpick() and pickjudge()
-pickcall() { # <issue json> <control record>
-  local c=$2 issue=$1 a s x run size prices pp p d rc ans out effort model agent t0
-  PICKANS='' PICKMODEL='' PICKUSE='' PICKWHY=''
+# unread when its output holds no token usage; PICKPRICES, the price table the prompt names ({<model>: {input,
+# output}}); and PICKWHY, why it failed: exit 1. With [<seats' models>] ({builder, reviewer, judge}, each [{model, g:
+# its program, efforts}], chosen() of lib/modelpick.sh: the pick lists), the prompt lists those models and efforts
+# for each seat; else each model the pack allows the seat, at every effort its program takes.
+# shellcheck disable=SC2034 # PICKANS, PICKMODEL, PICKUSE, PICKPRICES and PICKWHY are the caller's, read by cardpick() and pickjudge()
+pickcall() { # <issue json> <control record> [<seats' models>]
+  local c=$2 issue=$1 k=${3:-null} a s x run size prices pp p d rc ans out effort model agent t0
+  PICKANS='' PICKMODEL='' PICKUSE='' PICKWHY='' PICKPRICES=''
   modelsallowed a || { PICKWHY="the pack's models.allowed cannot be read"; return 1; }
   size=$(jq -c --arg area "$AREA" "$SPLITSIZE"' | .doneWhen |= length | .files |= length' <<<"$issue") || { PICKWHY="the issue's size cannot be read"; return 1; }
   packget prices pp 2>/dev/null && [ -n "$pp" ] || pp='{}'
   prices=$(jq -cn --argjson p "$pp" '{cards: [], prices: $p}' | python3 "$HERE/../.claude/scripts/dashboard_limit.py" cards 2>/dev/null \
     | jq -c --argjson p "$pp" '.table | with_entries(.value = {input: .value[0], output: .value[1]}) + ($p | with_entries(select(.value.input != null and .value.output != null) | .value |= {input, output}))' 2>/dev/null) \
     && [ -n "$prices" ] || prices='{}'
+  PICKPRICES=$prices
   s=$(SEATCARD='' seat judge "$c") && jqget "$s" model model effort effort agent agent || { PICKWHY="the project has no judge to ask"; return 1; }
   PICKMODEL=$model
-  p=$PICKASK$'\n\n'$(jq -r --argjson s "$size" --argjson pr "$prices" --argjson e "$EFFORTS" --argjson i "$issue" \
+  [ -n "$k" ] || k=null
+  p=$PICKASK$'\n\n'$(jq -r --argjson s "$size" --argjson pr "$prices" --argjson e "$EFFORTS" --argjson i "$issue" --argjson k "$k" \
       --argjson now "$(for x in builder reviewer judge; do SEATCARD='' seat "$x" "$c" || echo null; done | jq -cs '{builder: .[0], reviewer: .[1], judge: .[2]}')" "$OKMODELS"'
-    def list($s): okmodels($s) | to_entries | map(.key as $g | .value[] | "- \(.) (\($g); efforts: \(if $s == "builder" and $g == "opencode" then "none" else $e[$g] | join(", ") end); "
-      + (($pr[.] // $pr[sub("^opencode:"; "")]) as $x | if $x == null then "no price" else "$\($x.input) input, $\($x.output) output per million tokens" end) + ")") | join("\n");
-    "# Models allowed for the builder\n\(list("builder"))\n\n# Models allowed for the reviewer and the judge\n\(list("reviewer"))\n\n"
+    def models($s): if $k == null then okmodels(if $s == "builder" then "builder" else "reviewer" end) | to_entries | map(.key as $g | .value[]
+        | {model: ., g: $g, efforts: (if $s == "builder" and $g == "opencode" then [] else $e[$g] end)}) else $k[$s] // [] end;
+    def list($s): models($s) | map("- \(.model) (\(.g); efforts: \(if .efforts == [] then "none" else .efforts | join(", ") end); "
+      + (($pr[.model] // $pr[.model | sub("^opencode:"; "")]) as $x | if $x == null then "no price" else "$\($x.input) input, $\($x.output) output per million tokens" end) + ")") | join("\n");
+    "# Models allowed for the builder\n\(list("builder"))\n\n"
+    + (if models("reviewer") == models("judge") then "# Models allowed for the reviewer and the judge\n\(list("reviewer"))\n\n"
+       else "# Models allowed for the reviewer\n\(list("reviewer"))\n\n# Models allowed for the judge\n\(list("judge"))\n\n" end)
     + "# The project'"'"'s settings now\n" + ($now | to_entries | map("- \(.key): \(.value.model // "none") at \(.value.effort // "no effort")") | join("\n"))
     + "\n\n# The issue'"'"'s size\n\($s.doneWhen) Done-when items, \($s.files) file paths named, \($s.areas) areas, \($s.chars) characters; labels: \([$i.labels[]?.name] | join(", "))"
     + "\n\n# The issue\n#\($i.number) \($i.title // "")\n\n\($i.body // "")"' <<<"$a") || { PICKWHY="the judge's prompt could not be made"; return 1; }

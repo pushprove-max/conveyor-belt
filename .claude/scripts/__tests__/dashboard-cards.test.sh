@@ -155,7 +155,7 @@ P=$(snap '{"needsYou": {"waiting": [{"card": "c1-12", "issue": 12, "title": "But
   "control": {"mode": "pause", "cap": null, "guard": 90, "held": [30], "order": [], "rules": {"P0": true, "P1": true, "P2": true, "followups": true, "never": ["area:infra"]}, "model": null, "reviewer": null, "judgeOn": true},
   "modelSettings": {"builder": {"model": "claude-x", "effort": "medium", "modelFrom": "seed", "effortFrom": "seed", "choices": ["claude-x"], "efforts": ["low"]},
     "judge": {"model": "claude-j", "effort": "high", "modelFrom": "seed", "effortFrom": "seed", "choices": ["claude-j"], "efforts": ["high"], "default": "claude-j"}},
-  "areaPrefix": "team/", "packLandAs": "pr", "packPrMerge": "idle", "packEffort": {"builder": {"min": "medium", "max": "high"}}, "standing": ["asked-fix"], "pushCheck": false, "snapshotAt": "2026-11-05T00:00:02Z",
+  "areaPrefix": "team/", "packLandAs": "pr", "packPrMerge": "idle", "packPick": {"lists": {"builder": {"claude-x": {"min": "medium", "max": "high"}}}, "efforts": {"claude": ["low", "medium", "high"]}}, "standing": ["asked-fix"], "pushCheck": false, "snapshotAt": "2026-11-05T00:00:02Z",
   "health": {"state": "paused", "reason": "the loop says why", "guard": {"at": 90, "reading": 42, "readAt": "'"$(ago 60)"'", "missing": false}, "cycles": [[40, 41]],
     "pressure": {"state": "Busy", "cpu": 45.5, "memory": 1.5, "wakeMs": 0.2, "freeMB": null, "why": "CPU pressure 45.5% is at or above 40%"},
     "routes": {"subscription": {"state": "expired", "at": "2026-11-05T00:00:00Z"}, "proxy": {"state": "works", "at": "2026-11-05T00:00:01Z", "baseUrl": "http://127.0.0.1:4141", "route": "fallback"}},
@@ -300,10 +300,10 @@ q '.panels.rules.data.packLandAs == "pr"' "the Rules part gives the pack's push.
 # them the Rules tab shows Button for a pack that merges when idle, and Merge never shows.
 q '.panels.rules.data.packPrMerge == "idle" and .panels.board.data.landingPr == {number: 12, url: "https://github.com/o/r/pull/12", cards: 2, merge: null}
   and .panels.board.data.others.widgetshop.landingPr == null' "the Rules part gives the pack's push.prMerge, and the Board part the open pull request"
-# Pick settings (#1047): without the pack's effort ranges the Rules tab's row cannot show or set them, and without a
-# card's seats its page cannot show what the Judge gave it.
-q '.panels.rules.data.packEffort == {builder: {min: "medium", max: "high"}} and (.panels.board.data.review | map(select(.issue == 801) | .seats)) == [{failed: "the judge timed out"}]' \
-  "the Rules part gives the pack's models.effort, and a Board card the seats of its pick"
+# Pick settings (#1047, #1067): without the pack's pick lists and each program's efforts the Rules tab's row cannot
+# show or set them, and without a card's seats its page cannot show what the Judge gave it.
+q '.panels.rules.data.packPick == {lists: {builder: {"claude-x": {min: "medium", max: "high"}}}, efforts: {claude: ["low", "medium", "high"]}} and (.panels.board.data.review | map(select(.issue == 801) | .seats)) == [{failed: "the judge timed out"}]' \
+  "the Rules part gives the pack's pick lists, and a Board card the seats of its pick"
 # The Rules tab has the loop's state (its tab's count), the models, the limit reading, the waits and every held
 # issue with its labels and reasons, as the Board has them; the pack's push.check false is kept false, not dropped as
 # null (a `//` would drop it, and the Test before a push row would show On).

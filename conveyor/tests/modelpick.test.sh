@@ -207,12 +207,12 @@ t_picktable() {
 }
 
 # The snapshot gives the Board each card's seats (its pick's asked, from its last line with a pick) on the belt, in
-# Needs you and in Landed today, and the pack's effort ranges (packEffort) for the Rules tab's Pick settings row. Bug
-# caught (#1047): a card's page could not show the Judge's seats, their reasons or a clamp, as the snapshot dropped
-# them, or the row could not show the range the pack holds.
+# Needs you and in Landed today, and the pack's pick lists with each program's efforts (packPick) for the Rules tab's
+# Pick settings row. Bug caught (#1047, #1067): a card's page could not show the Judge's seats, their reasons or a
+# clamp, as the snapshot dropped them, or the row could not show the lists the pack holds, nor each model's own efforts.
 t_pickseatsnap() {
   export TZ=UTC; setup '[]'
-  tune '.models.effort = {builder: {min: "medium", max: "high"}}'
+  tune '.pick = {builder: {"claude-opus-5-5": {min: "medium", max: "high"}}}'
   local d m=0 A
   A='{"builder":{"model":"claude-sonnet-5-5","effort":"medium","why":"small","asked":{"model":"claude-sonnet-5-5","effort":"low"},"clamp":"low is out of range: claude-sonnet-5-5 at medium"},
     "reviewer":{"model":"gpt-6.1-sol","effort":"medium","why":"r","asked":{"model":"gpt-6.1-sol","effort":"medium"}},
@@ -234,7 +234,8 @@ t_pickseatsnap() {
     || fail "Needs you has no seats: $(jq -c '.needsYou.blocked' <<<"$s" | head -c 600)"
   [ "$(jq -c '[.belt[] | select(.issue == 9) | .seats]' <<<"$s")" = '[{"failed":"the judge timed out"}]' ] \
     || fail "a card on the belt has no seats: $(jq -c '.belt' <<<"$s" | head -c 600)"
-  [ "$(jq -c .packEffort <<<"$s")" = '{"builder":{"min":"medium","max":"high"}}' ] || fail "the snapshot's packEffort: $(jq -c .packEffort <<<"$s")"
+  [ "$(jq -c '[.packPick.lists, .packPick.efforts.claude, .packPick.efforts.codex]' <<<"$s")" = '[{"builder":{"claude-opus-5-5":{"min":"medium","max":"high"}}},["low","medium","high","xhigh","max"],["minimal","low","medium","high","xhigh"]]' ] \
+    || fail "the snapshot's packPick: $(jq -c .packPick <<<"$s")"
 }
 
 # The cards of #829's cases, all of group small docs, by auto, with the rule On: one line a minute after the one

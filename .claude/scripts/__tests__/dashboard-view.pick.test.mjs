@@ -3,7 +3,7 @@
 // or on) and the Cost panel's table of picked cards by group and builder (cost.cards.picks, one row a group and builder
 // as the snapshot sums them). Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { boot, deliver, next, settle, full, act, rulesP, ruled, panel, cases } from './dashboard-view.helpers.mjs';
+import { boot, deliver, next, settle, full, act, rulesP, ruled, panel, cases, CLAUDE4 } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 
@@ -46,42 +46,58 @@ test('Rules: Pick settings shows the Shadow line for shadow and the trial line f
   assert.doesNotMatch(line(), /builds on its builder as before/, 'On is not the Shadow line');
 });
 
-// Bugs this guards (#1047): the owner could not see or set a seat's effort range of the rule from the Board, nor see
-// which models each seat may be given; Save sent the range in a shape `conveyor.sh pick effort` does not take, Any did
-// not take it off, or the row went on showing the old range after the save; a refresh put back the saved range over a
-// Min and Max picked and not yet saved; saving the reviewer's range gave the focus to the builder's Save.
-test("Rules: Pick settings shows each seat's allowed models and effort range, and saves and clears a range", async () => {
+// The efforts each program takes, as the snapshot's packPick gives them (EFFORTS, conveyor/lib/paths.sh).
+const EFFORTS = { claude: ['low', 'medium', 'high', 'xhigh', 'max'], codex: ['minimal', 'low', 'medium', 'high', 'xhigh'], opencode: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] };
+const picked = (lists) => { const d = rules('on'); d.panels.rules.data.packPick = { lists, efforts: EFFORTS }; return d; };
+
+// Bugs this guards (#1067): the owner could only read each seat's models as text and set one effort range a seat, not
+// choose which models the pick may give it with a range for each; the seat's label and text ran together
+// ("BUILDERmodels: ..."); a model's menus offered efforts its program does not take; Save sent a list in a shape
+// `conveyor.sh pick models` does not take, or the row went on showing the old list after the save or did not show
+// the saved one after a reload; a refresh dropped a model checked and not yet saved; unchecking every model did not
+// take the list off; saving the reviewer's list gave the focus to another seat's Save.
+test('Rules: Pick settings saves the models checked for a seat, each with its own effort range, and shows them after a reload', async () => {
   const w = boot({ tab: 'rules' });
-  const d = rules('on');
-  d.panels.rules.data.packEffort = { builder: { min: 'medium', max: 'high' } };
+  const d = picked({ reviewer: { 'gpt-6.1-sol': { min: 'low', max: 'medium' } } });
   const again = structuredClone(d);
   deliver(w, d);
-  const seat = (k) => ruled(w).querySelector(`[data-rule="pick"] [data-seat="${k}"]`);
-  assert.match(seat('builder').textContent, /models: claude-fable-5-2, claude-opus-5-5/);
-  assert.match(seat('builder').textContent, /effort medium to high/);
-  assert.match(seat('reviewer').textContent, /models: gpt-6\.1-sol, gpt-6-astra/);
-  assert.match(seat('reviewer').textContent, /effort: any its CLI takes/);
-  assert.equal(act(seat('reviewer'), 'pick-effort-clear-reviewer'), null, 'a seat with no range has nothing to take off');
-  const pickAt = (k, which, v) => { const s = act(seat(k), `pick-effort-${which}-${k}`); s.value = v; s.dispatchEvent(new w.Event('change')); };
-  pickAt('reviewer', 'min', 'low'); pickAt('reviewer', 'max', 'medium');
-  const drawn = act(seat('reviewer'), 'pick-effort-min-reviewer');
-  again.panels.rules.data.packEffort.builder.max = 'xhigh';  // a snapshot that differs, so the panel draws again
+  const seat = (k, win = w) => ruled(win).querySelector(`[data-rule="pick"] [data-seat="${k}"]`);
+  const head = (k, win = w) => seat(k, win).querySelector('.rules-pick-head').textContent;
+  const menu = (k, id, which, win = w) => act(seat(k, win), `pick-${which}-${k}-${id}`);
+  const words = (sel) => Array.from(sel.options, (o) => o.value);
+  const choose = (k, id, which, v) => { const s = menu(k, id, which); s.value = v; s.dispatchEvent(new w.Event('change')); };
+  assert.equal(head('builder'), 'Builder All models, any effort', 'a seat with no list says so, with a space after its label');
+  assert.equal(head('reviewer'), 'Reviewer gpt-6.1-sol: low to medium');
+  assert.deepEqual(Array.from(seat('builder').querySelectorAll('.rules-pick-model'), (r) => r.dataset.model), CLAUDE4, "each of the builder's allowed models is a row");
+  assert.equal(menu('builder', 'claude-opus-5-5', 'min'), null, 'a model not checked has no menus');
+  assert.deepEqual(words(menu('reviewer', 'gpt-6.1-sol', 'min')), [''].concat(EFFORTS.codex), "a Codex model's menus hold Codex's efforts alone");
+  act(seat('builder'), 'pick-model-builder-claude-opus-5-5').click();
+  act(seat('builder'), 'pick-model-builder-claude-sonnet-5-5').click();
+  assert.deepEqual(words(menu('builder', 'claude-opus-5-5', 'max')), [''].concat(EFFORTS.claude), "a Claude model's menus hold Claude's efforts alone");
+  choose('builder', 'claude-opus-5-5', 'min', 'medium'); choose('builder', 'claude-opus-5-5', 'max', 'high'); choose('builder', 'claude-sonnet-5-5', 'max', 'low');
+  again.panels.rules.data.modelSettings.builder.effort = 'max';  // a snapshot that differs, so the panel draws again
   next(w, again);
-  assert.notEqual(act(seat('reviewer'), 'pick-effort-min-reviewer'), drawn, 'the refresh drew the row again');
-  assert.deepEqual(['min', 'max'].map((x) => act(seat('reviewer'), `pick-effort-${x}-reviewer`).value), ['low', 'medium'], 'a refresh keeps the range picked and not yet saved');
-  const save = act(seat('reviewer'), 'pick-effort-save-reviewer');
+  assert.equal(act(seat('builder'), 'pick-model-builder-claude-opus-5-5').checked, true, 'a refresh keeps a model checked and not yet saved');
+  assert.equal(menu('builder', 'claude-opus-5-5', 'min').value, 'medium', 'a refresh keeps a range picked and not yet saved');
+  assert.deepEqual(await sent(w, () => act(seat('builder'), 'pick-save-builder').click()),
+    [{ action: 'pick-models', args: ['builder', 'claude-opus-5-5=medium-high', 'claude-sonnet-5-5=-low'], repo: 'sample' }]);
+  await settle();
+  assert.equal(head('builder'), 'Builder claude-opus-5-5: medium to high; claude-sonnet-5-5: low or lower', 'the saved list shows before the next snapshot');
+  act(seat('reviewer'), 'pick-model-reviewer-gpt-6.1-sol').click();
+  const save = act(seat('reviewer'), 'pick-save-reviewer');
   save.focus();
-  assert.deepEqual(await sent(w, () => save.click()), [{ action: 'pick-effort', args: ['reviewer', 'low', 'medium'], repo: 'sample' }]);
+  assert.deepEqual(await sent(w, () => save.click()), [{ action: 'pick-models', args: ['reviewer', 'clear'], repo: 'sample' }], 'no model checked takes the list off');
   await settle();
-  assert.match(seat('reviewer').textContent, /effort low to medium/, 'the saved range shows before the next snapshot');
-  assert.equal(w.document.activeElement, act(seat('reviewer'), 'pick-effort-save-reviewer'), "the focus comes back to the reviewer's Save, not the builder's");
-  assert.deepEqual(await sent(w, () => act(seat('builder'), 'pick-effort-clear-builder').click()), [{ action: 'pick-effort', args: ['builder', 'clear'], repo: 'sample' }]);
-  await settle();
-  assert.match(seat('builder').textContent, /effort: any its CLI takes/, 'the range taken off shows at once');
+  assert.equal(head('reviewer'), 'Reviewer All models, any effort');
+  assert.equal(w.document.activeElement, act(seat('reviewer'), 'pick-save-reviewer'), "the focus comes back to the reviewer's Save");
+  // A reload: a new page given the pack as the save left it.
+  const w2 = boot({ tab: 'rules' });
+  deliver(w2, picked({ builder: { 'claude-opus-5-5': { min: 'medium', max: 'high' }, 'claude-sonnet-5-5': { max: 'low' } } }));
+  assert.deepEqual(Array.from(seat('builder', w2).querySelectorAll('.rules-pick-model input:checked'), (b) => b.closest('.rules-pick-model').dataset.model), ['claude-opus-5-5', 'claude-sonnet-5-5']);
+  assert.deepEqual(['claude-opus-5-5', 'claude-sonnet-5-5'].flatMap((id) => ['min', 'max'].map((x) => menu('builder', id, x, w2).value)), ['medium', 'high', '', 'low']);
   const old = rules('on');
-  delete old.panels.rules.data.packEffort;
-  next(w, old);
-  assert.equal(seat('builder'), null, 'a snapshot with no packEffort (an older engine) shows no range to set');
+  next(w2, old);
+  assert.equal(seat('builder', w2), null, 'a snapshot with no packPick (an older engine) shows no list to set');
 });
 
 // Bugs this guards (#1047): a card's page did not show the seats the Judge gave it, the Judge's reason for each, or

@@ -15,7 +15,7 @@
 // issues start in (Queue or Held), Dependency guard (On or Off; drawn disabled, "needs a newer engine", for a project
 // whose control record has no depGuard), Split large issues (Off, Shadow or On; disabled the same way for a record with
 // no rules.split), Pick settings (Off, Shadow or On; disabled the same way for a record with no rules.pick; and each
-// seat's allowed models and effort range, with Min, Max, Save and Any, for a snapshot with packEffort). Landing
+// seat's allowed models, each with a checkbox and its lowest and highest effort, and Save, for a snapshot with packPick). Landing
 // and push: Push on landing (On or Off; disabled the same way for a record with no rules.push), Land as (Main or Pull
 // request, the record's landAs or else the pack's; disabled the same way for a record with no landAs), Merge PR
 // (Button, Release or Idle, the record's prMerge or else the pack's; disabled the same way for a record with no
@@ -68,7 +68,7 @@
 // Finish sends `onboarded` with the keys confirmed, those confirmed before too. A record with no onboarded key (an
 // older engine, which cannot save it) is never asked.
 // Its part (dashboard.sh, rules): {repo (null: no record is on the host's main), repoUrl, state, control, cap, guard,
-// modelSettings, areaPrefix, packEffort, limit, held, queue (each with areas), skipped, waits, issuesError, building, onBelt, beltSteps,
+// modelSettings, areaPrefix, packPick, limit, held, queue (each with areas), skipped, waits, issuesError, building, onBelt, beltSteps,
 // blocked, forecast, prices, standing, open (with issues: every open issue), repos, others}.
 (function () {
   'use strict';
@@ -106,8 +106,6 @@
   const LAST_KEY = 'conveyor-board-rules-last';  // the last change made here, in this browser
   const DRAFT_KEY = 'conveyor-board-rules-drafts';  // the roles picked here and not yet saved, by project, in this browser
   const ROLES = ['builder', 'reviewer', 'judge'];
-  // The efforts in order, low to high, as the pack's models.effort ranges run (conveyor/schema/pack.schema.json).
-  const EFFORT_ORDER = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
   const OTHER = '*other';  // the model list's Other…: a name it does not list, typed in (no model starts with *: MODEL)
   const BY = [['area', 'Area'], ['priority', 'Priority'], ['label', 'Label']];
   // The part, and the ids of the tab's panels drawn from it (PANELS): Rules is the part's own id.
@@ -116,7 +114,7 @@
     kept: new Map(), at: new Map(), from: PART, heard: new WeakSet(), raw: null, ctx: null, busy: false, area: '', kind: '', keep: null, search: '', by: 'area',
     open: new Set(), armed: null, unarm: null, asking: null, withLabels: false, moved: new Map(), picked: new Set(), waitsOpen: false, dep: null, depText: '',
     drafts: null, priceEdit: null, priceAdd: null, priceFind: '', priceSaved: null, priceThis: new Map(), priceOpen: new Set(),
-    effortSaved: null, effortDraft: new Map(), cores: null, bare: null, bareFor: null, idle: null, shown: new Map(),
+    pickSaved: null, pickDraft: new Map(), cores: null, bare: null, bareFor: null, idle: null, shown: new Map(),
     ruleSet: 'models', ruleFind: '', pinsAll: false, pinMenu: null, dragPin: null };
   // The setup of a repository not yet onboarded (drawOnboard()): its box and the line above the panels, once made; open;
   // later (Later pressed: shut for this visit); repo, the project it is for; keys, the rules it asks for, worked out
@@ -130,9 +128,9 @@
   // drafts: each project's roles picked here and not yet saved (draftOf), as DRAFT_KEY keeps them. Model prices
   // (pricesSection): priceEdit, the row open in Edit as typed; priceAdd, the Add model form as typed; priceFind, the
   // search typed; priceSaved, the pack's prices as the changes saved here left them, until a snapshot read after them (savedShown);
-  // priceThis, the model picked for each ID's This is…; priceOpen, the folded groups opened. effortSaved, the pack's
-  // effort ranges of Pick settings as a change saved here left them, until a snapshot read after it (savedShown);
-  // effortDraft, each project's seat's Min and Max picked and not yet saved ("<repo> <seat>": {min, max}).
+  // priceThis, the model picked for each ID's This is…; priceOpen, the folded groups opened. pickSaved, the pack's
+  // pick lists of Pick settings as a change saved here left them, until a snapshot read after it (savedShown);
+  // pickDraft, each project's seat's models checked and ranges picked, not yet saved ("<repo> <seat>": {<model>: {min, max}}).
   // The Rules panel's index (index()), kept for this page only: ruleSet, the group picked (SETS); ruleFind, the search
   // typed. pinsAll: every pin shown; pinMenu, the pin whose menu is open; dragPin, the place of the pin being dragged.
 
@@ -315,7 +313,7 @@
     if (action === 'force') return `build #${a[0]} before the issues it waits on land`;
     if (action === 'depends') return `#${a[0]} ${a[1] === 'add' ? 'depends on' : 'no longer depends on'} ${a.slice(2).map((n) => `#${n}`).join(', ')}`;
     if (action === 'prices') return priceWords(a);
-    if (action === 'pick-effort') return a[1] === 'clear' ? `${a[0]} effort: any` : `${a[0]} effort ${a[1]} to ${a[2]}`;
+    if (action === 'pick-models') return a[1] === 'clear' ? `${a[0]}: all models, any effort` : `${a[0]}: ${a.slice(1).join(', ')}`;
     if (action === 'standing') return `${(STANDING.find(([k]) => k === a[0]) || [a[0], a[0]])[1]} without asking: ${a[1]}`;
     return action;
   }
@@ -427,11 +425,19 @@
           const [k, o] = list(args);
           S.standingSaved = { repo, for: S.d.standing, at: res.at, over: list(standingShown()).filter((x) => x !== k).concat(o === 'on' ? [k] : []) };
         }
-        // A seat's effort range saved shows at once too, as long (`pick effort`: set or clear one seat's).
-        if (action === 'pick-effort' && repo === S.d.repo) {
-          const [k, mn, mx] = list(args), over = Object.assign({}, effortShown());
-          if (mn === 'clear') delete over[k]; else over[k] = { min: mn, max: mx };
-          S.effortSaved = { repo, for: S.d.packEffort, at: res.at, over };
+        // A seat's pick list saved shows at once too, as long (`pick models`: set or clear one seat's; each model's
+        // word is <model>[=<min>-<max>], either bound empty for none).
+        if (action === 'pick-models' && repo === S.d.repo) {
+          const [k, ...ws] = list(args).map(String), over = Object.assign({}, pickShown());
+          if (ws[0] === 'clear') delete over[k];
+          else {
+            over[k] = {};
+            ws.forEach((w) => {
+              const at = w.indexOf('='), [mn, mx] = at < 0 ? ['', ''] : w.slice(at + 1).split('-');
+              over[k][at < 0 ? w : w.slice(0, at)] = Object.assign({}, mn ? { min: mn } : {}, mx ? { max: mx } : {});
+            });
+          }
+          S.pickSaved = { repo, for: S.d.packPick, at: res.at, over };
         }
         // The values the change replaced, kept from before the first change no snapshot has read yet: a snapshot that
         // still holds one did not read it. A setting the record holds at its old value again waits for nothing.
@@ -1043,43 +1049,70 @@
       b.disabled = pickAt === null;
       return b;
     };
-    // Each seat's models (the pack's models.allowed for it: modelSettings' choices) and its effort range (the pack's
-    // models.effort, effortShown()): Min and Max, saved together by Save (`pick effort`), and Any, which takes the range
-    // off, so the seat takes each effort its model's CLI takes. A snapshot with no packEffort shows none of them.
-    const ranges = effortShown(), ms = d.modelSettings && typeof d.modelSettings === 'object' ? d.modelSettings : {};
+    // Each seat's pick list (the pack's pick.<seat>, pickShown()): each model the pack allows the seat (modelSettings'
+    // allowed, by program) is a row with a checkbox, may the pick give it, and when it is checked its lowest and
+    // highest effort menus in its own program's efforts (packPick.efforts; an OpenCode builder takes none), Any for
+    // no bound on that side. Save sends the checked models with their ranges (`pick models`), or clear when none is
+    // checked, so the pick may give the seat any allowed model at any effort. A snapshot with no packPick shows none.
+    const lists = pickShown(), ms = d.modelSettings && typeof d.modelSettings === 'object' ? d.modelSettings : {};
+    const effs = d.packPick && typeof d.packPick === 'object' && d.packPick.efforts && typeof d.packPick.efforts === 'object' ? d.packPick.efforts : {};
+    const rangeText = (g) => (g.min && g.max ? `${g.min} to ${g.max}` : g.min ? `${g.min} or higher` : g.max ? `${g.max} or lower` : 'any effort');
     const seats = h('div', 'rules-pick-seats');
     ROLES.forEach((k) => {
-      const name = k[0].toUpperCase() + k.slice(1);
-      const one = h('div', 'rules-pick-seat'), models = list((ms[k] || {}).choices).filter((m) => typeof m === 'string' && m);
-      const g = ranges && ranges[k], now = g && EFFORT_ORDER.includes(g.min) && EFFORT_ORDER.includes(g.max) ? g : null;
+      const name = k[0].toUpperCase() + k.slice(1), one = h('div', 'rules-pick-seat');
       one.dataset.seat = k;
-      // A Min or Max picked and not yet saved stays picked when a snapshot redraws the row; Save or Any drops it.
-      // Each control's action names its seat, so a redraw gives the focus back to the same seat's control.
-      const dk = `${S.d.repo} ${k}`, draft = S.effortDraft.get(dk);
-      const pickOne = (which, at) => {
-        const sel = h('select', 'field board-select');
-        sel.dataset.act = `pick-effort-${which}-${k}`; sel.setAttribute('aria-label', `${name}: ${which === 'min' ? 'lowest' : 'highest'} effort`);
-        EFFORT_ORDER.forEach((e) => { const o = h('option', null, e); o.value = e; o.selected = e === at; sel.append(o); });
-        sel.addEventListener('change', () => S.effortDraft.set(dk, { min: lo.value, max: hi.value }));
-        return sel;
+      const saved = lists && lists[k] && typeof lists[k] === 'object' ? lists[k] : null;
+      const allowed = ms[k] && ms[k].allowed && typeof ms[k].allowed === 'object' ? ms[k].allowed : {}, models = [];
+      Object.keys(allowed).forEach((cli) => list(allowed[cli]).forEach((m) => {
+        const id = cli === 'opencode' ? `opencode:${m}` : m;
+        if (typeof m === 'string' && m && !models.some((x) => x.id === id)) {
+          models.push({ id, efforts: k === 'builder' && cli === 'opencode' ? [] : list(effs[cli]).filter((e) => typeof e === 'string' && e) });
+        }
+      }));
+      // The models checked and the ranges picked, not yet saved, stay when a snapshot redraws the row; Save drops
+      // them. Each control's action names its seat and model, so a redraw gives the focus back to the same control.
+      const dk = `${S.d.repo} ${k}`, cur = JSON.parse(JSON.stringify(S.pickDraft.get(dk) || saved || {}));
+      const keep = () => S.pickDraft.set(dk, cur);
+      const head = h('div', 'rules-pick-head');
+      head.append(h('span', 'board-label', name), ' ', h('span', 'board-from rules-pick-now',
+        saved && Object.keys(saved).length ? Object.keys(saved).map((id) => `${id}: ${rangeText(saved[id] || {})}`).join('; ') : 'All models, any effort'));
+      one.append(head);
+      models.forEach(({ id, efforts }) => {
+        const r = h('div', 'rules-pick-model'), box = h('input'), lab = h('label', 'board-from');
+        r.dataset.model = id;
+        box.type = 'checkbox'; box.checked = Object.prototype.hasOwnProperty.call(cur, id); box.dataset.act = `pick-model-${k}-${id}`;
+        box.setAttribute('aria-label', `${name}: the pick may give ${id}`);
+        box.addEventListener('change', () => { if (box.checked) cur[id] = {}; else delete cur[id]; keep(); draw(); });
+        lab.append(box, ' ', id);
+        r.append(lab);
+        if (box.checked && efforts.length) {
+          const g = cur[id] && typeof cur[id] === 'object' ? cur[id] : (cur[id] = {});
+          const menu = (which) => {
+            const sel = h('select', 'field board-select');
+            sel.dataset.act = `pick-${which}-${k}-${id}`; sel.setAttribute('aria-label', `${name}, ${id}: ${which === 'min' ? 'lowest' : 'highest'} effort`);
+            [''].concat(efforts).forEach((e) => { const o = h('option', null, e || 'Any'); o.value = e; o.selected = e === (g[which] || ''); sel.append(o); });
+            sel.addEventListener('change', () => { if (sel.value) g[which] = sel.value; else delete g[which]; keep(); });
+            return sel;
+          };
+          r.append(' ', h('span', 'board-from', 'lowest'), ' ', menu('min'), ' ', h('span', 'board-from', 'highest'), ' ', menu('max'));
+        }
+        one.append(r);
+      });
+      // The command's words for a list: each model, with =<min>-<max> when it has a bound; clear for none.
+      const words = (o, only) => {
+        const ids = Object.keys(o).filter((id) => !only || models.some((x) => x.id === id));
+        return ids.length ? [k].concat(ids.map((id) => { const g = o[id] || {}; return g.min || g.max ? `${id}=${g.min || ''}-${g.max || ''}` : id; })) : [k, 'clear'];
       };
-      const lo = pickOne('min', draft ? draft.min : now ? now.min : EFFORT_ORDER[0]);
-      const hi = pickOne('max', draft ? draft.max : now ? now.max : EFFORT_ORDER[EFFORT_ORDER.length - 1]);
-      const undo = ['pick-effort', now ? [k, now.min, now.max] : [k, 'clear']];
-      const save = button('Save', 'btn-quiet', `pick-effort-save-${k}`, `${name}: save the effort range`, () => { S.effortDraft.delete(dk); send('pick-effort', [k, lo.value, hi.value], null, undo); });
-      const any = now ? button('Any', 'btn-quiet', `pick-effort-clear-${k}`, `${name}: take the effort range off`, () => { S.effortDraft.delete(dk); send('pick-effort', [k, 'clear'], null, undo); }) : null;
-      one.append(h('span', 'board-label', name),
-        h('span', 'board-from rules-pick-models', `models: ${models.length ? models.join(', ') : 'none allowed'}`),
-        h('span', 'board-from rules-pick-range', now ? `effort ${now.min} to ${now.max}` : 'effort: any its CLI takes'),
-        lo, hi, save, ...(any ? [any] : []));
+      const undo = ['pick-models', words(saved || {}, false)];
+      one.append(button('Save', 'btn-quiet', `pick-save-${k}`, `${name}: save the models the pick may give`, () => { S.pickDraft.delete(dk); send('pick-models', words(cur, true), null, undo); }));
       seats.append(one);
     });
-    el.append(row('pick', 'Pick settings', 'code puts each card in a group before its build, and the Judge chooses its builder, reviewer and judge, fitted to the models and effort range of each seat; a seat you set for a card always wins',
+    el.append(row('pick', 'Pick settings', 'code puts each card in a group before its build, and the Judge chooses its builder, reviewer and judge from the models you let it give each seat, each in its effort range; a seat you set for a card always wins',
       seg('Pick settings', pickTo('off', 'Off'), pickTo('shadow', 'Shadow'), pickTo('on', 'On')),
       pickAt === null ? newer(false) : pickAt === 'off' ? offLine(false, 'no pick is recorded')
         : h('span', 'board-from rules-off', pickAt === 'shadow' ? 'shadow: the pick is recorded, and the card builds on its builder as before'
           : 'on: the card builds and is reviewed on the Judge\'s seats. A card of an eligible group can build on the group\'s challenger as a trial, one trial card at a time, and is reviewed on the project\'s reviewer and judge. A seat you set for a card always wins'),
-      ranges === null ? null : seats));
+      lists === null ? null : seats));
     // Reserved cores: the machine's (the host file's reserveCores), shown here and set in the host file, with the
     // line that says where the test limits are.
     const co = S.cores, slots = co && typeof co.slots === 'number' ? `${co.slots} test slot${co.slots === 1 ? '' : 's'}` : 'test slots not read';
@@ -1768,10 +1801,10 @@
   // from a snapshot without them.
   const standingShown = () => (savedShown(S.standingSaved, S.d.standing) ? S.standingSaved.over
     : Array.isArray(S.d.standing) ? S.d.standing : null);
-  // The pack's effort ranges of Pick settings (models.effort: {<seat>: {min, max}}) as shown: as a change saved here
+  // The pack's pick lists of Pick settings (pick: {<seat>: {<model>: {min, max}}}) as shown: as a change saved here
   // left them, until a snapshot read after it comes; null from a snapshot without them.
-  const effortShown = () => (savedShown(S.effortSaved, S.d.packEffort) ? S.effortSaved.over
-    : S.d.packEffort && typeof S.d.packEffort === 'object' ? S.d.packEffort : null);
+  const pickShown = () => (savedShown(S.pickSaved, S.d.packPick) ? S.pickSaved.over
+    : S.d.packPick && typeof S.d.packPick === 'object' && S.d.packPick.lists && typeof S.d.packPick.lists === 'object' ? S.d.packPick.lists : null);
   // The pack's prices as shown: as the changes saved here left them, until a snapshot read after them comes.
   const pricesShown = () => (savedShown(S.priceSaved, S.d.prices) ? S.priceSaved.over
     : S.d.prices && S.d.prices.overrides && typeof S.d.prices.overrides === 'object' ? S.d.prices.overrides : {});
@@ -2493,7 +2526,7 @@
     // nothing while no change, turned-away snapshot, moved row or value saved here (savedShown) waits on that time:
     // drawing it again replaced an open select (Group by) for the same content (issue 294). It is still the part drawn (S.raw).
     const key = bareOf(d);
-    const saved = S.d && (savedShown(S.standingSaved, S.d.standing) || savedShown(S.priceSaved, S.d.prices) || savedShown(S.effortSaved, S.d.packEffort));
+    const saved = S.d && (savedShown(S.standingSaved, S.d.standing) || savedShown(S.priceSaved, S.d.prices) || savedShown(S.pickSaved, S.d.packPick));
     if (drawn && S.d && S.bare === key && view.repo === S.d.repo && !(S.ctl || S.turned || S.moved.size || saved)) {
       S.raw = [d, read, view.repo]; S.d = view; S.read = read; S.ctx = ctx;
       S.idle = d;

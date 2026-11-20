@@ -142,8 +142,8 @@
 #           modelSettings and limit (as the Board's), areaPrefix (the pack's; null from a snapshot without
 #           one), packPrMerge (the pack's push.prMerge, Merge PR while the record's prMerge is null; null from a snapshot
 #           without it), packLandAs (the pack's push.landAs, Land as while the record's landAs is null; null from a snapshot
-#           without it), packEffort (the pack's models.effort, each seat's effort range of Pick settings; null from a
-#           snapshot without it), held, queue (each with its areas), skipped and waits (the snapshot's queue.waiting and, after it,
+#           without it), packPick (the models Pick settings may give each seat, each with its effort range, and the
+#           efforts each program takes; null from a snapshot without it), held, queue (each with its areas), skipped and waits (the snapshot's queue.waiting and, after it,
 #           the held, skipped or yes-gated issues that wait too (keptWaits), each with waitsFor; each null,
 #           with issuesError, when GitHub did not list the issues), building (how many cards are on the belt), onBelt
 #           (their issues), beltSteps (every card on the belt, landed ones too: issue, step, landed; the waiting list
@@ -742,7 +742,7 @@ PANELS_JQ='
   # computes no queue of its own.
   def rulesOf($r): $r.snap as $s
     | {repo: $r.repo, repoUrl: ($r.repoUrl // null), state: $s.health.state, control: $s.control, cap: $s.health.builderCap, guard: $s.health.guard,
-       modelSettings: ($s.modelSettings // null), accounts: ($s.accounts // null), areaPrefix: ($s.areaPrefix // null), packLandAs: ($s.packLandAs // null), packPrMerge: ($s.packPrMerge // null), packEffort: ($s.packEffort // null), limit: limitOf($s),
+       modelSettings: ($s.modelSettings // null), accounts: ($s.accounts // null), areaPrefix: ($s.areaPrefix // null), packLandAs: ($s.packLandAs // null), packPrMerge: ($s.packPrMerge // null), packPick: ($s.packPick // null), limit: limitOf($s),
        held: ($s.queue.holding | if . == null then null else few($r) end),
        queue: ($s.queue.order | if . == null then null else few($r) end),
        skipped: ($s.queue.skipped | if . == null then null else few($r) end),

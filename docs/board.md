@@ -381,8 +381,10 @@ group of each card, the builder that the rule chooses for it, and the Judge's ch
 builds on its builder as before, and the tab says "shadow: the pick is recorded, and the card builds on its builder
 as before". With On, the card builds and is reviewed on the Judge's seats, and a card of an eligible group can build
 on the group's challenger as a trial. A trial card is reviewed on the project's reviewer and judge. A seat that you set for a card always wins. Under the setting, the row shows
-the models that each seat can get and its effort range. Choose the lowest and the highest effort and click **Save**,
-or click **Any** to remove the range ([The judge's choice of seats](configuration.md#the-judges-choice-of-seats)). A
+each seat on its own lines: each model that the seat allows has a checkbox. Select the models that the Judge can
+give the seat, choose the lowest and the highest effort of each one (**Any** for no limit), and click **Save** for the
+seat. With no model selected, **Save** removes the list, and the seat shows **All models, any effort**
+([The judge's choice of seats](configuration.md#the-judges-choice-of-seats)). A
 card with a pick shows **Seats**: open it to see the model, effort and Judge's reason of each seat, and what a limit
 clamped. The **Cost** panel then shows **Pick settings, by group and builder**: one row for each group and
 builder, with its cards, the spend per landed card, the share of cards that landed with no retry, the review rounds

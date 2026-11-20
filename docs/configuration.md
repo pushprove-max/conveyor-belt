@@ -339,21 +339,36 @@ now: the project's builder or your setting for the card, the challenger on a tri
 
 With Shadow or On, Conveyor asks the project's judge one time before each card, as Pick for me does
 ([Settings for one card](#settings-for-one-card)). The judge chooses a model and an effort for the builder, the
-reviewer and the judge of the card. Conveyor then fits each choice to the pack:
+reviewer and the judge of the card. You can set a pick list for each seat: the models that the judge can give the
+seat, each with its own effort range. The judge sees only the models of the list and the efforts in each range.
+Conveyor then fits each choice to the pack:
 
-- A model that `models.allowed` does not list for the seat changes to the project's model for the seat. When the
-  pack does not allow that model either, it changes to the first model that the pack allows.
-- An effort outside the range of the seat in `models.effort` changes to the nearest effort in the range that the
-  model's CLI takes. A seat with no range takes each effort that its model's CLI takes.
+- For a seat with a pick list, a model that the list does not name changes to the model of the list that is
+  nearest in price. When the price of a model is not known, it changes to the project's model for the seat, if the
+  list names it, else to the first model of the list.
+- For a seat with no pick list, a model that `models.allowed` does not list for the seat changes to the project's
+  model for the seat. When the pack does not allow that model either, it changes to the first model that the pack
+  allows. The judge can give the seat any effort that the model's CLI takes.
+- An effort outside the range of the model changes to the nearest end of the range.
 
-Set a range in `.conveyor/project.json` as `models.effort.<builder|reviewer|judge>` = `{"min": "<effort>", "max":
-"<effort>"}`. The efforts in order are `minimal`, `low`, `medium`, `high`, `xhigh` and `max`. For example,
-`"builder": {"min": "medium", "max": "high"}` changes a choice of `low` to `medium`.
+The pick list changes only the judge's choice. `models.allowed` stays the list for the settings that you set by hand,
+the model menus and Pick for me.
 
-On the Board's Rules tab, the **Pick settings** row shows the models that each seat can get and the effort range of
-the seat. To set a range, choose the lowest and the highest effort, then click **Save**. To remove a range, click
-**Any**. `conveyor.sh pick effort <builder|reviewer|judge> <min> <max>` and `conveyor.sh pick effort <seat> clear`
-do the same. Conveyor refuses a lowest effort that comes after the highest effort, and the pack does not change.
+Set a pick list in `.conveyor/project.json` as `pick.<builder|reviewer|judge>`: an object with a key for each model,
+and `{"min": "<effort>", "max": "<effort>"}` as its value. Each model must be one that `models.allowed` lists for the
+seat. Each effort must be one that the model's CLI takes: Claude takes `low`, `medium`, `high`, `xhigh` and `max`, and
+Codex takes `minimal`, `low`, `medium`, `high` and `xhigh`. You can leave out `min` or `max`: then the range has no
+limit on that side. For example, `"builder": {"claude-opus-5-5": {"min": "medium", "max": "high"}}` changes a choice
+of Sonnet 5.5 at `low` to Opus 5.5 at `medium`.
+
+On the Board's Rules tab, the **Pick settings** row shows each seat on its own lines, with its pick list or **All
+models, any effort**. Each model that `models.allowed` lists for the seat has a checkbox. Select the models that the
+judge can give the seat. For each selected model, choose the lowest and the highest effort, or **Any** for no limit.
+Then click **Save** for the seat. When you clear all the checkboxes of a seat and click **Save**, Conveyor removes its
+list. `conveyor.sh pick models <builder|reviewer|judge> <model>[=<min>-<max>]...` and `conveyor.sh pick models
+<seat> clear` do the same, for example `pick models builder claude-opus-5-5=medium-high claude-sonnet-5-5=-low`.
+Conveyor refuses a model that the seat does not allow, an effort that the model's CLI does not take, and a lowest
+effort that comes after the highest effort. Then the pack does not change.
 
 The `pick` field of the card has `asked`: the three seats as Conveyor fitted them, and the judge's model. Each seat
 has the model and effort that the judge gave (`asked`) and its reason. A seat that Conveyor changed has `clamp`,
@@ -365,8 +380,8 @@ clamp.
 With On, the card uses these seats, with these exceptions:
 
 - A seat that you set for the issue (`control card`) keeps your setting.
-- A trial card keeps its challenger as the builder, at the judge's effort fitted to the range of the builder. When
-  the judge fails, the card uses the challenger's own effort fitted to that range. Its reviewer and judge are the
+- A trial card keeps its challenger as the builder, at the judge's effort fitted to the range of the challenger in
+  the builder's pick list. When the judge fails, the card uses the challenger's own effort fitted to that range. Its reviewer and judge are the
   project's. The `choice` of its pick stays the challenger, so the trial counts for the
   challenger. `trialEffort` shows the effort that the card builds at, when it is a different effort.
 - When a seat of the judge's choice runs on a Claude account at the weekly limit guard, the card uses the project's
@@ -383,7 +398,7 @@ the builder of an earlier answer.
 ### Trials
 
 With the rule On, a trial card builds on the challenger, Sonnet 5.5 (`claude-sonnet-5-5`), at the judge's effort
-fitted to the effort range of the builder, and its pick has `trial: true`. Its review and judge use the project's
+fitted to its effort range in the builder's pick list, and its pick has `trial: true`. Its review and judge use the project's
 settings. A card that is not a trial uses the seats above.
 
 - **Eligible cards**: a card is eligible when its group is "small docs" or "small code", or a medium group that you
@@ -401,8 +416,8 @@ settings. A card that is not a trial uses the seats above.
   in the card records are the record of the drop.
 - **No challenger**: there are no trials when the project's builder is the challenger, or when `models.allowed` in
   `.conveyor/project.json` does not allow the challenger for the builder. There is also no trial when the Claude
-  account of the challenger is at the weekly limit guard, or when the CLI of the challenger takes no effort in the
-  range of the builder in `models.effort`. Such a card uses the seats above, as a card that is not a trial.
+  account of the challenger is at the weekly limit guard, or when the builder has a pick list (`pick.builder`) that
+  does not name the challenger. Such a card uses the seats above, as a card that is not a trial.
 
 When the change of a trial card touches a path in `pipelineFiles`, the `pick` field also has `pipeline`: those paths.
 The issue of a trial card names no such path.

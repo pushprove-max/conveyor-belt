@@ -126,8 +126,9 @@
 #   (guardaccts, lib/paths.sh): [{account (null: the default login), uses (build, fix: repairs alone, review), pct, readAt, email (its
 #   login on this machine)}]; null when it could not be read.
 # areaPrefix: the pack's labels.areaPrefix, what an area label and an area rule start with.
-# packEffort: the pack's models.effort, each seat's effort range of the rule Pick settings ({<seat>: {min, max}}; {}
-#   when it sets none), shown and set in the Rules tab's Pick settings row (`conveyor.sh pick effort`).
+# packPick: the models the rule Pick settings may give each seat, shown and set in the Rules tab's Pick settings row
+#   (`conveyor.sh pick models`): {lists: the pack's pick ({<seat>: {<model>: {min, max}}}; {} when it sets none),
+#   efforts: the efforts each program takes (EFFORTS, lib/paths.sh), the words of each model's effort menus}.
 # packLandAs: the pack's push.landAs (main or pr), the rule Land as while the control record's landAs is null; null
 #   when the pack cannot be read.
 # packPrMerge: the pack's push.prMerge (button, release or idle), the rule Merge PR while the control record's prMerge
@@ -633,7 +634,8 @@ snapshot() (
   packget foreman.waitWake ww 2>/dev/null && [[ $ww =~ ^[1-9][0-9]*$ ]] || ww=10
   packget push.landAs pla 2>/dev/null || pla=''
   packget push.prMerge ppm 2>/dev/null || ppm=''
-  packget models.effort pef 2>/dev/null && [ -n "$pef" ] || pef='{}'
+  packget pick pef 2>/dev/null && [ -n "$pef" ] || pef='{}'
+  pef=$(jq -c --argjson e "$EFFORTS" '{lists: ., efforts: $e}' <<<"$pef") || pef=null
   # Each card with its metrics and its runs' sums, then the waits ($d/cards: two arrays, $all[0] and $all[1]), from a
   # summary kept beside the card records ($STATE.cardruns): only the issues whose cards changed are made again.
   printf '%s\n%s\n' "$METRICS" "$CARDRUNS" > "$d/cardruns.jq" \
@@ -949,7 +951,7 @@ snapshot() (
        areaPrefix: $area,
        packLandAs: (if $pla == "" then null else $pla end),
        packPrMerge: (if $ppm == "" then null else $ppm end),
-       packEffort: $pef,
+       packPick: $pef,
        waitWake: $ww,
        forecast: forecast,
        awaitingDeploy: $built,

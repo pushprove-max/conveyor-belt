@@ -2,28 +2,42 @@
 # `conveyor.sh pick --dry --issues <file> --state <dir>`: the issue the loop would pick, from the files given, with
 # nothing written (drypick(), lib/pick.sh). `conveyor.sh pick replay judge <model> [<effort>] [--last <n>]
 # [--estimate]`: the judge replay study (replay(), lib/replay.sh), which calls the judge as a review does.
-# `conveyor.sh pick effort <builder|reviewer|judge> <min> <max> | pick effort <seat> clear`: the effort range of one
-# seat of the rule Pick settings, saved in main's pack as models.effort.<seat> (packset(), lib/testfiles.sh), from
-# the Board's Rules tab (Pick settings), or taken off, so the seat takes each effort its model's CLI takes. A min that
-# comes after its max, in the order the schema lists the efforts, is refused with why, and the pack is left as it
-# was. Sourced by conveyor.sh.
-if [ "${2:-}" = effort ]; then
+# `conveyor.sh pick models <builder|reviewer|judge> <model>[=<min>-<max>]... | pick models <seat> clear`: the models
+# the rule Pick settings may give one seat, each with its effort range (<min> or <max> left empty: no bound on that
+# side), saved in main's pack as pick.<seat> (packset(), lib/testfiles.sh), from the Board's Rules tab (Pick
+# settings), or taken off, so the pick may give the seat any model models.allowed lists for it, at any effort. A
+# model the seat does not allow, an effort its model's program does not take (cardok(), lib/control.sh), or a min
+# that comes after its max, is refused with why, and the pack is left as it was. Sourced by conveyor.sh.
+if [ "${2:-}" = models ]; then
   . "$HERE/lib/prompts.sh" || exit 1
+  . "$HERE/lib/control.sh" || exit 1
   . "$HERE/lib/pick.sh" || exit 1
   . "$HERE/lib/testfiles.sh" || exit 1
   . "$HERE/lib/run.sh" || exit 1
   . "$HERE/lib/machine.sh" || exit 1
   . "$HERE/lib/install.sh" || exit 1
   set -- "${@:3}"
-  effs=$(jq -r '.properties.models.properties.effort.properties.builder.properties.min.enum | join(" ")' "$SCHEMA") && [ -n "$effs" ] || exit 1
-  if [ $# = 2 ] && [ "$2" = clear ] && [[ $1 =~ ^(builder|reviewer|judge)$ ]]; then
-    packset --arg s "$1" 'if .models.effort[$s] == null then . else del(.models.effort[$s]) | if .models.effort == {} then del(.models.effort) else . end end'; exit
+  use="usage: conveyor.sh pick models <builder|reviewer|judge> <model>[=<min>-<max>]... | pick models <builder|reviewer|judge> clear"
+  [ $# -ge 2 ] && [[ $1 =~ ^(builder|reviewer|judge)$ ]] || { echo "$use" >&2; exit 2; }
+  if [ "$2" = clear ]; then
+    [ $# = 2 ] || { echo "$use" >&2; exit 2; }
+    packset --arg s "$1" 'if .pick[$s] == null then . else del(.pick[$s]) | if .pick == {} then del(.pick) else . end end'; exit
   fi
-  [ $# = 3 ] && [[ $1 =~ ^(builder|reviewer|judge)$ ]] && [[ " $effs " == *" $2 "* ]] && [[ " $effs " == *" $3 "* ]] \
-    || { echo "usage: conveyor.sh pick effort <builder|reviewer|judge> <min> <max> | pick effort <builder|reviewer|judge> clear (the efforts: ${effs// /, })" >&2; exit 2; }
-  i=0; for x in $effs; do [ "$x" != "$2" ] || lo=$i; [ "$x" != "$3" ] || hi=$i; i=$((i + 1)); done
-  [ "$lo" -le "$hi" ] || { echo "conveyor: pick effort $1: min $2 comes after max $3 (the efforts in order: ${effs// /, }); nothing changed" >&2; exit 1; }
-  packset --arg s "$1" --arg mn "$2" --arg mx "$3" '.models.effort[$s] = {min: $mn, max: $mx}'; exit
+  s=$1; l='{}'; shift
+  for x in "$@"; do
+    [[ $x =~ ^([^=[:space:]]+)(=([a-z]*)-([a-z]*))?$ ]] || { echo "$use (not <model>[=<min>-<max>]: $x)" >&2; exit 2; }
+    m=${BASH_REMATCH[1]} mn=${BASH_REMATCH[3]} mx=${BASH_REMATCH[4]}
+    for f in - "$mn" "$mx"; do
+      [ -n "$f" ] || continue
+      why=$(cardok "$s" "$m" "${f#-}") || exit 1
+      [ -z "$why" ] || { echo "conveyor: pick models $s: $why; nothing changed" >&2; exit 1; }
+    done
+    if [ -n "$mn" ] && [ -n "$mx" ] && ! jq -en --arg a "$mn" --arg b "$mx" --argjson e "$EFFORTS" '$e.opencode | index($a) <= index($b)' >/dev/null; then
+      echo "conveyor: pick models $s: $m: min $mn comes after max $mx (the efforts in order: $(jq -r '.opencode | join(", ")' <<<"$EFFORTS")); nothing changed" >&2; exit 1
+    fi
+    l=$(jq -c --arg m "$m" --arg a "$mn" --arg b "$mx" '.[$m] = ({} + (if $a == "" then {} else {min: $a} end) + (if $b == "" then {} else {max: $b} end))' <<<"$l") || exit 1
+  done
+  packset --arg s "$s" --argjson l "$l" '.pick[$s] = $l'; exit
 fi
 if [ "${2:-}" = replay ]; then
   . "$HERE/lib/slots.sh" || exit 1

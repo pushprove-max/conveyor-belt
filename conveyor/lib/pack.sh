@@ -49,14 +49,17 @@ def errs($s; $p):
 # The plugin is one pinned commit or what it follows (releases or main): a pack naming both, or neither, says which to set.
 def plugin: objects | .plugin | objects | select(has("commit") == has("follow"))
   | ".plugin: \(if has("commit") then "both commit and follow are set" else "neither commit nor follow is set" end): set one, commit (a full commit id: the project runs that commit) or follow: \"releases\" (the project runs the plugin'"'"'s newest release) or \"main\" (the plugin'"'"'s main as it moves)";
-# The effort range of a seat (models.effort) runs from its min up to its max, in the order its enum lists the efforts.
-def effort($s): objects | .models | objects | .effort | objects | to_entries[] | .key as $k | .value | objects
-  | ($s.properties.models.properties.effort.properties[$k].properties.min.enum // []) as $o
+# The effort range of a model in the pick list of a seat (pick.<seat>.<model>) runs from its min up to its max, in the
+# order its enum lists the efforts. Whether the seat allows the model, and its program takes the efforts, rests on
+# models.allowed as the host reads it (with the list Codex reports added), so `conveyor.sh pick models` checks that, and the
+# pick leaves out a model the seat does not allow (PICKCLAMP, lib/modelpick.sh).
+def pickrange($s): objects | .pick | objects | to_entries[] | .key as $k | .value | objects | to_entries[] | .key as $m | .value | objects
+  | ($s.properties.pick.properties[$k].additionalProperties.properties.min.enum // []) as $o
   | .min as $mn | .max as $mx | ($o | index($mn)) as $lo | ($o | index($mx)) as $hi
   | select($lo != null and $hi != null and $lo > $hi)
-  | ".models.effort.\($k): min \(.min) comes after max \(.max) (the efforts in order: \($o | join(", ")))";
+  | ".pick.\($k).\($m): min \(.min) comes after max \(.max) (the efforts in order: \($o | join(", ")))";
 [$schema[0] | unknown("")] as $bad
-| if $bad != [] then $bad[] elif length != 1 then "\(length) JSON documents, not one" else .[0] | errs($schema[0]; ""), plugin, effort($schema[0]) end'
+| if $bad != [] then $bad[] elif length != 1 then "\(length) JSON documents, not one" else .[0] | errs($schema[0]; ""), plugin, pickrange($schema[0]) end'
 
 # get's field ($f) of the pack ($v) by the schema ($s): the field's schema, walked by its keys, and none means the
 # schema does not name it (exit 2).
