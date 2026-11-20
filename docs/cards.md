@@ -65,7 +65,7 @@ merge onto main still parse, and before the product checks and tests. A merge on
 gate before the review did not see. A pass, a missing tool and an execution error act as above.
 
 - A finding goes to one fix session before any test runs. Its step is `Fix <n>: lint findings`. Then the card goes to
-  a review, and that review is its last review: a `NO-GO` lands with follow-ups. The gate before that review does not
+  a review, and that review is its last review: a `NO-GO` lands with follow-ups, or blocks if it holds a P0. The gate before that review does not
   run again on the fixed change.
 - At the next landing gate, a finding that is still there blocks the card with the reason
   `lint: <n> findings left after its fix session; nothing landed`. If a different session (a test fix, for example)
@@ -146,7 +146,9 @@ of these:
   back blocks the card.
 
 If a finding of the last review is a privacy hit in the card's own change, the card gets one more fix session. The
-findings that are still open when the loop ends become follow-ups. The review that ends the loop and the `filed` step
+findings that are still open when the loop ends become follow-ups. If the last review is a `NO-GO` that holds a P0
+finding, the card does not land and files no follow-ups. It blocks, and the reason names the P0. The card's work and
+reviews are kept, so you can retry it. The review that ends the loop and the `filed` step
 record the reason as `stop`, with `pass` (the reviews of this card) and `rounds` (the reviews of earlier cards). On the
 Board, that review shows "Fix loop ended:" and the reason.
 

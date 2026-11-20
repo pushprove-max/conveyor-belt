@@ -248,19 +248,37 @@ t_retryotherrounds() {
   for c in c20250101T000000-other-7:other-project "c20250102T000000-${repo//[^A-Za-z0-9]/-}-7:$repo"; do for i in 1 2; do
     jq -cn --arg c "${c%%:*}" --arg r "${c#*:}" '{card: $c, issue: 7, step: "review", time: "2025-01-01T00:00:00Z", result: "NO-GO", repo: $r}' >> "$ST/retried.jsonl"
   done; done
-  for i in 1 2 3; do moved "$i" "$NOGO" > "$STUB/review.$i"; done
+  for i in 1 2; do moved "$i" "$NOGO" > "$STUB/review.$i"; done
+  # Issue 1075: a last NO-GO with only P1 and P2 findings files them and lands. Bug: it blocked as one with a P0 does.
+  printf '%s\n' '[P1] a.txt:3 drops the payment' '[P2] c.txt:3 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.3"
   # loop: only card()'s review loop shows a fix session after each NO-GO, the third review ending it, and its filed line
   loop run >/dev/null || fail "run of the retried #7 exited non-zero"
   [ "$(steps)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review NO-GO,fix ok,review NO-GO,test pass,landed ok," ] \
     && [ "$(wc -l < "$STUB/reviews")" = 3 ] && [ "$(wc -l < "$STUB/sessions")" = 4 ] \
     || fail "the retried card did not start at rounds 0 and go fix, review to its third review: $(steps) $(wc -l < "$STUB/sessions") sessions"
   [ "$(st 'select(.issue == 7 and .step == "review") | [.stop, .pass, .rounds] | tojson' | tr '\n' ' ')" = '[null,null,null] [null,null,null] ["max-reviews",3,0] ' ] \
-    && [ "$(st 'select(.issue == 7 and .step == "filed") | [.stop, .pass, .rounds, (.followups | length)] | tojson')" = '["max-reviews",3,0,1]' ] \
+    && [ "$(st 'select(.issue == 7 and .step == "filed") | [.stop, .pass, .rounds, (.followups | length)] | tojson')" = '["max-reviews",3,0,2]' ] \
+    && [ "$(jq -r .title "$STUB/filed" | tr '\n' '|')" = '[P1] a.txt:3 drops the payment|[P2] c.txt:3 a nit|' ] \
     || fail "the review that ended the loop or the filed line does not say why: $(st 'select(.issue == 7 and (.step == "review" or .step == "filed")) | tojson')"
   recok "$ST/cards.jsonl" "a card whose third review ended its loop"
   # The Board's card reads it from the snapshot's reviews.
   [ "$(loop snapshot --fresh | jq -c '.landed[] | select(.issue == 7) | .rounds | map(.loopEnd)')" = '[null,null,{"stop":"max-reviews","own":3,"rounds":0}]' ] \
     || fail "the snapshot does not give why the loop ended: $(loop snapshot --fresh | jq -c '.landed[] | select(.issue == 7) | .rounds')"
+}
+
+# Issue 1075: a third review (the last) that says NO-GO with a P0 blocks the card. Bug: its findings, the P0 among
+# them, were filed as follow-ups and the card landed the P0 on main. Its work and review stay kept for a retry.
+t_lastp0() {
+  setup "[$(issue 7 2026-01-01)]"; head=$(git -C "$R" rev-parse HEAD); steps() { st "select(.issue == 7 and $NOMARK) | \"\(.step) \(.result)\"" | tr '\n' ,; }
+  for i in 1 2; do moved $i "$NOGO" > "$STUB/review.$i"; done
+  printf '%s\n' '[P0] a.txt:3 drops the payment' '[P2] c.txt:3 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.3"
+  # loop: the choice to block is made inline in card() after its last review, which no engine function exposes alone
+  loop run >/dev/null || fail "run exited non-zero"
+  [ "$(st 'select(.issue == 7 and .step == "blocked") | .reason')" = 'review 3 is the last review and still holds a P0 finding, so it files no follow-up: [P0] a.txt:3 drops the payment' ] \
+    && [ ! -e "$STUB/filed" ] && [ -z "$(st 'select(.step == "landed" or .step == "filed")')" ] && [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] \
+    || fail "a last NO-GO with a P0 did not block naming it, or filed or landed: $(steps) $(cat "$STUB/filed" 2>&1)"
+  k=$ST/$(st 'select(.step == "blocked") | .kept'); [ -n "$(cat "$k"/*.patch 2>/dev/null)" ] && grep -q 'drops the payment' "$k"/*.review \
+    || fail "the blocked card's patch or last review was not kept for a retry: $(ls "$k" 2>&1)"
 }
 
 # The declined list: every finding that is not built is one line of the project's state. Bugs: a finding declined by

@@ -11,6 +11,8 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # A line of a build stub: the session that ports a card after its landing conflict moves main's a.txt again, so the
 # card's landing conflicts once more and it blocks for the owner (a case that goes on to `retry` it).
 AGAIN='if grep -q "^# Landing conflict" "$STUB/brief"; then echo TWO > "$R/a.txt"; git -C "$R" commit -qam again; fi'
+# NOGO3 with its P0 made a P1: a last NO-GO that lands with its follow-ups filed (one with a P0 blocks the card).
+PORTNOGO=${NOGO3/\[P0\]/[P1]}
 
 # Bugs: a card that passed its review is thrown away when another change landed on its lines first; the
 # rebuild starts from the card's stale tree, or without the card's patch and the conflict message; its result lands
@@ -49,9 +51,10 @@ t_rebase() {
 # Bug: after a GO on the review of a port whose earlier loop ended on a NO-GO, a test fix and the
 # GO after it landed the card with nothing filed: the earlier loop's findings were lost.
 t_portfix() {
-  setup "[$(issue 8 2026-01-01)]"; for i in 1 2 3; do moved "${i/3/}" "$NOGO3" > "$STUB/review.$i"; done; echo "$GO" > "$STUB/review.4"
+  setup "[$(issue 8 2026-01-01)]"; for i in 1 2 3; do moved "${i/3/}" "$PORTNOGO" > "$STUB/review.$i"; done; echo "$GO" > "$STUB/review.4"
   steps() { st "select(.issue == $1) | \"\(.step) \(.result) \(.reason)\"" | tr '\n' ,; }
   echo "echo two >> a.txt; $AGAIN" > "$STUB/build"; echo 'ONE other' > "$STUB/move"
+  # loop: only a whole card run shows a last review's NO-GO, a landing conflict and the retry that ports it
   loop run >/dev/null; st 'select(.step == "blocked") | .reason' | grep -q '^rebase onto main conflicts' || fail "#8 was not blocked on its landing conflict: $(steps 8)"
   echo "$GO" > "$STUB/review.5"; echo "$GO" > "$STUB/review.6"
   # The third run fails, and its run again too (tests()), so the test fix starts.
@@ -59,7 +62,7 @@ t_portfix() {
   loop retry 8 >/dev/null && loop run >/dev/null || fail "run of the retried #8 exited non-zero"
   [ "$(st 'select(.issue == 8 and '"$NOMARK"') | "\(.step) \(.result)"' | tr '\n' ,)" = "picked ok,worktree ok,brief ok,build ok,review GO,test fail,fix ok,review GO,test pass,landed ok," ] \
     && [ "$(st 'select(.issue == 8 and .step == "landed") | .leftover')" = true ] \
-    && [ "$(tail -n 3 "$STUB/filed" | jq -r .title | tr '\n' '|')" = '[P0] a.txt:1 wrong word|b.txt:22 no mark here|[P2] c.txt:3 a nit|' ] \
+    && [ "$(tail -n 3 "$STUB/filed" | jq -r .title | tr '\n' '|')" = '[P1] a.txt:1 wrong word|b.txt:22 no mark here|[P2] c.txt:3 a nit|' ] \
     || fail "a test fix after the port's GO lost the earlier loop's findings: $(steps 8)"
   [ "$(st 'select(.issue == 8 and .step == "filed") | .followups | length')" = 3 ] || fail "no filed line names the three follow-ups: $(steps 8)"
   recok "$ST/cards.jsonl" "a card that landed on a NO-GO (its filed line, and its landed line with leftover and followups)"
@@ -69,9 +72,10 @@ t_portfix() {
 # it blocks for the owner. A NO-GO on the one review of a port (a finished loop stopped only by a landing conflict)
 # lands with follow-ups as if it were a last review, instead of being fixed and going round the loop as any card's.
 t_port() {
-  setup "[$(issue 8 2026-01-01)]"; for i in 1 2 3; do moved "${i/3/}" "$NOGO3" > "$STUB/review.$i"; done; echo "$GO" > "$STUB/review.4"
+  setup "[$(issue 8 2026-01-01)]"; for i in 1 2 3; do moved "${i/3/}" "$PORTNOGO" > "$STUB/review.$i"; done; echo "$GO" > "$STUB/review.4"
   steps() { st "select(.issue == $1) | \"\(.step) \(.result) \(.reason)\"" | tr '\n' ,; }
   echo "echo two >> a.txt; $AGAIN" > "$STUB/build"; echo 'ONE other' > "$STUB/move"
+  # loop: only a whole card run shows a finished loop stopped by a landing conflict, then the port's own review
   loop run >/dev/null || fail "run of #8 exited non-zero"
   [ "$(st 'select(.issue == 8 and '"$NOMARK"') | "\(.step) \(.result)"' | tr '\n' ,)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review NO-GO,fix ok,review NO-GO,test pass,rebase ok,review GO,test pass,blocked blocked," ] \
     && st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -q '^rebase onto main conflicts: ' && [ "$(wc -l < "$STUB/sessions")" = 4 ] \
@@ -87,8 +91,9 @@ t_port() {
 # A last review's NO-GO whose landing conflicts, and conflicts again after its port: its three follow-ups are
 # withdrawn as not planned each time, their findings kept.
 t_resumeport() {
-  resumesetup 8; for i in 1 2 3; do moved "${i/3/}" "$NOGO3" > "$STUB/review.$i"; done; echo "$GO" | tee "$STUB/review.4" > "$STUB/review.5"
+  resumesetup 8; for i in 1 2 3; do moved "${i/3/}" "$PORTNOGO" > "$STUB/review.$i"; done; echo "$GO" | tee "$STUB/review.4" > "$STUB/review.5"
   echo 'cp "$STUB/brief" "$STUB/brief.$(wc -l < "$STUB/sessions")"; echo two >> a.txt; '"$AGAIN" > "$STUB/build"; echo 'ONE other' > "$STUB/move"
+  # loop: only a whole card run makes the two landing conflicts and the follow-ups withdrawn after each
   loop run >/dev/null || fail "run of #8 exited non-zero"
   st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -q '^rebase onto main conflicts' || fail "#8 was not blocked on its landing conflict: $(steps 8)"
   [ "$(tr '\n' ' ' < "$STUB/closed")" = "100101 100102 100103 100104 100105 100106 " ] && [ "$(grep -c -- '^--reason not planned --comment .*withdrawn.* #8 ' "$STUB/close-comments")" = 6 ] \
@@ -117,7 +122,7 @@ t_resumeport() {
   grep -q 'Change nothing else: that change finished its review loop' "$STUB/brief.$n" \
     || fail "the port session of a finished loop was not told to change nothing else"
   [ "$(st 'select(.issue == 8 and .step == "landed") | [.leftover, .followups] | tojson')" = '[true,[100107,100108,100109]]' ] \
-    && [ "$(tail -n 3 "$STUB/filed" | jq -r .title | tr '\n' '|')" = '[P0] a.txt:1 wrong word|b.txt:22 no mark here|[P2] c.txt:3 a nit|' ] \
+    && [ "$(tail -n 3 "$STUB/filed" | jq -r .title | tr '\n' '|')" = '[P1] a.txt:1 wrong word|b.txt:22 no mark here|[P2] c.txt:3 a nit|' ] \
     || fail "a GO on the port's review did not land with the earlier loop's last NO-GO filed again: $(st 'select(.issue == 8 and .step == "landed")')"
   # Bug: its filed line said the loop ended on the port's GO, not on the blocked card's review 3 whose findings it files.
   [ "$(st 'select(.issue == 8 and .step == "filed") | [.stop, .pass, .rounds] | tojson')" = '["max-reviews",3,0]' ] \
@@ -142,7 +147,7 @@ t_resumeport() {
 # says why the loop whose findings it files ended. Bug: the second retry read only the NO-GO review lines of the
 # card it resumed, and the first port's review was a GO, so the filed line had no stop, pass or rounds.
 t_resumeport2() {
-  resumesetup 8; for i in 1 2 3; do moved "${i/3/}" "$NOGO3" > "$STUB/review.$i"; done; for i in 4 5 6; do echo "$GO" > "$STUB/review.$i"; done
+  resumesetup 8; for i in 1 2 3; do moved "${i/3/}" "$PORTNOGO" > "$STUB/review.$i"; done; for i in 4 5 6; do echo "$GO" > "$STUB/review.$i"; done
   echo 'echo two >> a.txt; '"$AGAIN" > "$STUB/build"; echo 'ONE other' > "$STUB/move"
   # loop: only whole card runs make the chain of two blocked ports whose retried lines the second retry reads
   loop run >/dev/null && loop retry 8 >/dev/null || fail "the first run of #8 or its retry exited non-zero: $(steps 8)"
@@ -190,12 +195,13 @@ EOF
 # port's tests then fits it onto main with the same change, which reuses the port's pass and starts no run. It lands
 # alone, with the earlier loop's findings filed.
 t_autoport() {
-  setup "[$(issue 8 2026-01-01)]"; for i in 1 2 3; do moved "${i/3/}" "$NOGO3" > "$STUB/review.$i"; done; echo "$GO" > "$STUB/review.4"
+  setup "[$(issue 8 2026-01-01)]"; for i in 1 2 3; do moved "${i/3/}" "$PORTNOGO" > "$STUB/review.$i"; done; echo "$GO" > "$STUB/review.4"
   steps() { st "select(.issue == $1 and $NOMARK) | \"\(.step) \(.result)\"" | tr '\n' ,; }
   echo 'echo two >> a.txt' > "$STUB/build"; echo 'ONE other' > "$STUB/move"
   echo '[ "$(wc -l < "$STUB/tests")" != 2 ] || { echo b > "$R/b.txt"; git -C "$R" add b.txt; git -C "$R" commit -qm "main adds b.txt"; }' >> "$STUB/test-cmd"
   sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
   echo '[ ! -e "$PWD.port" ] || { cp "$PWD.port" "$STUB/port"; cp "$PWD.ready" "$STUB/readyatport"; }' > "$STUB/review-cmd"
+  # loop: only a whole card run shows the port's tests, the move on main and the auto-port that reuses its pass
   loop run >/dev/null || fail "run of #8 exited non-zero"
   [ "$(steps 8)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review NO-GO,fix ok,review NO-GO,test pass,rebase ok,review GO,test pass,test pass,landed ok," ] \
     && [ "$(wc -l < "$STUB/sessions")" = 4 ] && [ "$(wc -l < "$STUB/reviews")" = 4 ] \

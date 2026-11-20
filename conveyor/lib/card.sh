@@ -469,7 +469,7 @@ card() { # <card> <issue> [<branch> <tip>]
   prv=$'\n\n'"$PORTREVIEW"$'\n'"The difference is the file $wt.port."; kp=$fromk/$from.patch
   # A NO-GO is fixed and reviewed again; a NO-GO on a last review (review MAX_REVIEWS, counting the rounds a retried
   # card carries, or the one review after a landing conflict, a test fix or the landing gate's lint fix, or one that
-  # repeats a finding after its fix with every finding P2 or P3) lands with follow-ups. A GO card whose landing
+  # repeats a finding after its fix with every finding P2 or P3) lands with follow-ups, or blocks when it holds a P0. A GO card whose landing
   # conflicts goes round once more: rebase, review. A finished loop whose landing still conflicts is ported once, as `retry` would port it.
   # Whatever the review, the changed tests pass here before anything is filed or landed.
   while pass=$((${pass:-0} + 1)); do
@@ -571,15 +571,20 @@ card() { # <card> <issue> [<branch> <tip>]
     # one more fix round, once a card: a follow-up would land the hit on main. Bug: such a finding was filed as a
     # follow-up that the privacy check refused, and the card was blocked.
     # stop: why this review ends the loop (loopstop()), empty when a fix round follows (or the card blocks).
-    priv=''; stop=''
+    # last0: the first P0 finding of a last NO-GO (one that ends the loop): the card blocks with it and files none of
+    # its findings, its work and reviews kept for a retry. Bug: a P0 first found on the last review was filed as a
+    # follow-up and the card landed it on main.
+    priv=''; stop=''; last0=''
     if [ -z "$hard" ]; then
       stop=$(loopstop "$res" "$((pass + rounds))" "$rebased" "$tfix" "$lfix" "$mode" "$rep" "$wt.review")
       [ -z "$stop" ] || [ "$res" = GO ] || [ -n "$privfix" ] || ! priv=$(privown "$wt") || [ -z "$priv" ] || stop=''
+      [ -z "$stop" ] || [ "$res" = GO ] || last0=$(findings "$wt.review" | jq -rs 'map(select(.level == "P0")) | first // empty | .line[:300]')
     fi
     # The review line, and the filed line after it, say why the loop ended: stop, with pass and rounds as they are here.
     ended=$(jq -cn --arg s "$stop" --argjson p "$pass" --argjson r "$rounds" 'if $s == "" then {} else {stop: $s, pass: $p, rounds: $r} end')
     [ -z "$rline" ] || record "$c" "$n" review "$res" "$(jq -c --argjson e "$ended" '. + $e' <<<"$rline")"; rline=''
     [ -z "$hard" ] || { block "$c" "$n" "$wt" "the fix for $hard"; return; }
+    [ -z "$last0" ] || { block "$c" "$n" "$wt" "review $pass is the last review and still holds a P0 finding, so it files no follow-up: $last0"; return; }
     if [ "$res" = GO ] && [ -z "$earlier" ]; then mode=''
     elif [ -n "$stop" ]; then
       # A card whose issue is a follow-up at the depth cap (fudepth(), lib/followups.sh) files none: its findings are
