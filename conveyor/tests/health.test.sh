@@ -43,7 +43,7 @@ t_waitsum() {
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"; for i in 1 2 3 4 5 6; do echo "$GO" > "$STUB/review.$i"; done
   tune '.tunables.live = 3'; jq -c '.order = [9]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
   # #9's change, b.txt alone, runs a test file too: its tests hold b.txt. #7's test is its own seven.test.sh, so its
-  # landing shares no test file with #8 (a shared one runs again first: merge.test.sh).
+  # landing shares no test file with #8 (a shared one runs again first: mergetests.test.sh).
   linkset '{"b.txt": ["a.test.sh"]}'
   cat > "$STUB/build" <<'EOF'
 case $PWD in
@@ -97,7 +97,7 @@ t_waitkept() {
   tune '.tunables.waitLimitMin = 1'
   echo one > "$R/b.txt"; git -C "$R" add b.txt
   # #9's change, b.txt alone, runs a test file too: its tests hold b.txt. #7's test is its own seven.test.sh, so its
-  # landing shares no test file with #8 (a shared one runs again first: merge.test.sh).
+  # landing shares no test file with #8 (a shared one runs again first: mergetests.test.sh).
   linkset '{"b.txt": ["a.test.sh"]}'
   cat > "$STUB/build" <<'EOF'
 case $PWD in
