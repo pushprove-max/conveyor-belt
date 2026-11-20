@@ -45,6 +45,16 @@ rec() { jq -nc --arg s "$1" --arg r "$2" --arg w "${3:-}" --argjson j "${4:-null
 rec picked ok; rec build ok
 # With $SWE_FX/eblock, the card blocks with no change, as an engine whose commit the container's git refuses.
 [ ! -e "$SWE_FX/eblock" ] || { rec blocked blocked "commit: git: 'hook' is not a git command"; exit 0; }
+# With $SWE_FX/ewait, the card stages its fix in its worktree, which starts at main, and commits nothing (the engine
+# commits only to land: card()); its test step fails only what fails on main, and it
+# waits for main to change as the real engine does (its live record and idle mark, mainwait()): it only loops, for
+# 30 s at most, and then ends with nothing landed.
+if [ -e "$SWE_FX/ewait" ]; then
+  git -C "$CONVEYOR_MAIN" worktree add -q --detach "$CONVEYOR_CARDS/c1" main && echo fixed > "$CONVEYOR_CARDS/c1/x.py" && git -C "$CONVEYOR_CARDS/c1" add -A || exit 1
+  rec test fail 'tests/t.py fails on main too'; echo "conveyor: card c1: every case it still fails fails on main too: it waits for main to change"
+  echo '{"step": "test", "action": "waiting for main to change: tests/t.py fail on main at 0123456789ab too"}' > "$CONVEYOR_CARDS/c1.live"
+  i=0; while [ $i -lt 300 ]; do : > "$CONVEYOR_CARDS/c1.idle"; sleep 0.1; i=$((i + 1)); done; rm -f "$CONVEYOR_CARDS/c1.idle"; exit 0 # sleep: the idle loop the trial must end, as the real loop's sleep 30
+fi
 # The project name this checkout's loop takes, as the real engine names it (and its machine slot file after it).
 (set -- run; HERE=$SWE_SRC; . "$SWE_SRC/lib/paths.sh" && echo "$RTAG" > "$SWE_FX/rtag")
 J='{"model":"m","tokens":{"claude":5,"codex":0},"accepted":[],"declined":[]}' # a judge session on the review

@@ -355,7 +355,8 @@ swe_ctl() { # <arm json>
     | .rules += ($p | with_entries(select(.key | test("^P[0-3]$")))) | . + ($p | with_entries(select(.key | IN("judgeOn", "judgeAlways"))))'
 }
 SWE_ASK='Fix this issue in the repository in the current folder. Change the code only; do not commit.'
-# One trial: the arm builds the task in its container. Prints {sessions, tokens, minutes, steps, cost, fired, why}
+# One trial: the arm builds the task in its container. Prints {sessions, tokens, minutes, steps, cost, fired, why}, and
+# ended when a conveyor arm's card only waited and swe_watch ended the trial (its patch is then that card's staged change)
 # (a conveyor arm's steps keep each line's model and token usage, cost is swe_cost of its card's lines, its live
 # records and the reviewer's record swe_watch kept); keeps
 # the patch (and a conveyor arm's loop log) in <sb>.h, the trial's own folder on the host, outside the container's
@@ -363,7 +364,7 @@ SWE_ASK='Fix this issue in the repository in the current folder. Change the code
 # arm. An arm that does not fire (its install, preflight or command failed, or its output shows no use of its method)
 # has fired false and why: that is the arm's failure, never a task not run.
 swe_trial() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor kind>
-  local sb=$2 a=$3 h=$2.h base t0 c rc='' run why='' kind eng='' to b n p=0
+  local sb=$2 a=$3 h=$2.h base t0 c rc='' run why='' kind eng='' to b n p=0 ended='' wc=''
   base=$(jq -r .base <<<"$1"); t0=$(date +%s); kind=$(jq -r .kind <<<"$a"); to=$(swe_set .taskTimeout)
   n=conveyor-swe-${SWE_RUN:-check}-$(jq -r .name <<<"$a")-$(jq -r .id <<<"$1"); c=${n//[^A-Za-z0-9_.-]/-}
   { chmod -R u+w "$h"; rm -rf "$h"; } 2>/dev/null; mkdir -m 700 "$h" && : > "$h/out" || return 1
@@ -389,6 +390,9 @@ swe_trial() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor kind
     # A run's task shows the step the command is at while it runs (swe_watch, bench/swe.sh).
     swe_in "$to" "$c" "$sb/$SWE_MAIN" "$run" "SWE_SB=$sb" "SWE_PROMPT=$sb/prompt" "SWE_MODEL=${SWE_MODEL:-}" "SWE_EFFORT=$(jq -r '.effort | strings' <<<"$a")" < /dev/null > "$h/out" 2> "$h/err" &
     local j=$!; swe_watch "$j" "$c" "$kind" "$sb"; wait "$j"; rc=$?
+    # A card that only waited (swe_watch stopped its command) ended the trial: its change is graded, as a card's that
+    # ended, and ended says why.
+    [ ! -s "$h/waited" ] || { rc=0; ended=$(jq -r '.why | strings' "$h/waited"); wc=$(jq -r '.card | strings' "$h/waited"); }
     # A command stopped at the task's time limit is the arm's own result: its patch is graded. A conveyor arm's
     # command writes to its loop log, so its why is read from that log below.
     [ "$rc" = 0 ] || [ "$rc" = 124 ] || [ "$kind" = conveyor ] || why="its command failed (exit $rc): $(cliwords "$(tail -n 20 "$h/err" 2>/dev/null; jq -rRn "$NOSTARTSAID" "$h/out" 2>/dev/null)" | tail -n 3 | paste -sd ' ' -)"
@@ -397,8 +401,11 @@ swe_trial() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor kind
   # there, so a host read or write could follow its symlink to a host file, and the checkout's .git/config could make
   # the host's git run the arm's code (a clean filter, an external diff).
   swe_ckstep 'Reading its change'; [ -z "${SWE_TASK:-}" ] || swe_phase 'Reading patch'
-  swe_in 600 "$c" "$sb/$SWE_MAIN" 'if [ "$SWE_KIND" = conveyor ]; then git diff --binary --no-ext-diff --no-textconv "$SWE_BASE" refs/heads/main --
-    else git add -A && git diff --binary --no-ext-diff --no-textconv --cached "$SWE_BASE" --; fi' "SWE_SB=$sb" "SWE_BASE=$base" "SWE_KIND=$kind" < /dev/null > "$h/patch" 2> /dev/null || p=1
+  # A card that waited has landed nothing on main: its change is what its worktree (<sb>/cards/<card>) has staged, as
+  # the engine stages the fix before its tests and commits it only to land.
+  swe_in 600 "$c" "$sb/$SWE_MAIN" 'if [ -n "$SWE_CARD" ]; then git -C "$SWE_SB/cards/$SWE_CARD" diff --binary --no-ext-diff --no-textconv --cached "$SWE_BASE" --
+    elif [ "$SWE_KIND" = conveyor ]; then git diff --binary --no-ext-diff --no-textconv "$SWE_BASE" refs/heads/main --
+    else git add -A && git diff --binary --no-ext-diff --no-textconv --cached "$SWE_BASE" --; fi' "SWE_SB=$sb" "SWE_BASE=$base" "SWE_KIND=$kind" "SWE_CARD=$wc" < /dev/null > "$h/patch" 2> /dev/null || p=1
   if [ "$kind" = conveyor ]; then
     swe_in 600 "$c" "$sb" 'cat "$SWE_SB/loop.log"' "SWE_SB=$sb" < /dev/null > "$h/loop.log" 2> /dev/null || rm -f "$h/loop.log"
     [ -z "$rc" ] || [ "$rc" = 0 ] || [ "$rc" = 124 ] \
@@ -430,7 +437,7 @@ swe_trial() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor kind
     b=$(jq -c '. + {cost: {usd: null, state: "unknown", unpriced: .sessions, basis: {}}}' <<<"$b")
     [ -n "$why" ] || jq -e .fired <<<"$b" > /dev/null || why="it did not fire: its output shows no use of its method"
   fi
-  jq -c --arg w "$why" '. + {fired: ($w == ""), why: (if $w == "" then null else $w end)}' <<<"$b"
+  jq -c --arg w "$why" --arg e "$ended" '. + {fired: ($w == ""), why: (if $w == "" then null else $w end)} + (if $e == "" then {} else {ended: $e} end)' <<<"$b"
 }
 # The trivial task of a preflight, as a task's JSON: a repository whose hello.py prints a word misspelt, in the image
 # given (the run's first task's: the same base as the tasks).

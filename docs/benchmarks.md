@@ -95,6 +95,12 @@ tests the card as it does any card. A card that lands is pushed only to the sand
 task's repository, and no issue is filed on GitHub. What lands on the sandbox's main is the final patch. A blocked
 card has none. The harness then grades the patch with the task's hidden tests.
 
+A trial has one card, so main changes only when that card lands. A card can wait for main to change, for example
+when each test it still fails also fails on main. It can also wait on another card or on the machine. If the card
+waits and no session or test of the card runs, the trial ends at that time and does not wait for `taskTimeout`. The
+final patch is then the change the card has staged in its worktree. The task's result and the opened task on the
+Board give the reason the trial ended, for example "its card waited for main to change: ...".
+
 ### Another version
 
 `--engine <version>` builds the tasks with an earlier release (`v1.0.0` and up) or with any full commit id. The

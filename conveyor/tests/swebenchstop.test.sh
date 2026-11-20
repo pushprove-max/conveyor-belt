@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
 # Engine cases: Stop of a SWE-bench run (`conveyor.sh bench swe stop [<run id>]`, bench/swe.sh's swe_stop): in its
-# setup, in a trial and in its grade, of a run whose process is gone, a repeated Stop and a late one. The fixture is
-# swebench.test.sh's swe().
+# setup, in a trial and in its grade, of a run whose process is gone, a repeated Stop and a late one; and the end of a
+# Conveyor arm's trial whose card only waits (swe_watch). The fixture is swebench.test.sh's swe().
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
@@ -126,4 +126,42 @@ t_swestopnext() {
   [ "$(jq -sc --arg id "$id" 'map([.id == $id, .state])' "$B/runs.jsonl")" = '[[true,"stopped"],[false,"done"]]' ] \
     || fail "the new run did not record the end of the run whose process had gone before its own: $(cat "$B/runs.jsonl")"
   [ -z "$(ls "$SWE_FX/boxes")" ] || fail "the gone run's container was left: $(ls "$SWE_FX/boxes")"
+}
+
+# Bug (#1051): a Conveyor arm's card whose every failing case fails on main too waits for main to change, which never
+# changes in a trial, so the trial sat until its time limit (taskTimeout, 4 hours) with nothing running, its task
+# shown at Testing. Here the fake engine's card stages its fix, commits nothing, and then only waits, for 30 s at
+# most: the trial ends while it waits, its card's staged change is graded (its HEAD and main have nothing on them), and
+# the task's record says why it ended.
+# loop: only a whole trial shows its command stopped, the card's staged change read and graded, and the reason kept.
+t_swewaitmain() {
+  swe; local first out t0
+  first=$(sweorder | head -n 1); : > "$SWE_FX/ewait"; t0=$SECONDS
+  out=$(loop bench swe 1 2>&1) || fail "the run failed: $out"
+  [ $((SECONDS - t0)) -lt 25 ] || fail "the trial did not end while its card waited: it took $((SECONDS - t0)) s"
+  jq -e '.resolved == true and .fired == true and .ended == "its card waited for main to change: tests/t.py fail on main at 0123456789ab too"' \
+    "$B"/results/*-"$EB/$first.json" > /dev/null || fail "the waiting card's patch was not graded, or the record does not name the wait: $(cat "$B"/results/*-"$EB/$first.json")"
+  grep -q '^+fixed' "$B"/results/*-"$EB/$first.patch" || fail "the patch is not the card's staged change: $(cat "$B"/results/*-"$EB/$first.patch")"
+  # The run page (bench swe show) carries the reason for the task's cell.
+  out=$(loop bench swe show "$(tail -n 1 "$B/runs.jsonl" | jq -r .id)" 2>&1) && jq -e '[.tasks[].cells[] | .ended | strings] | length == 1' <<<"$out" > /dev/null \
+    || fail "show does not carry why the trial ended: $out"
+}
+
+# Bug (#1051): which card records end a trial. Only a card of the task's issue that has not ended and whose idle mark
+# stands (the engine stands it only while the card sleeps out a wait) ends it: a card in a session (its live record and
+# no idle mark), an idle mark of another card, or a card that ended, does not.
+t_swewaited() {
+  local d=$T/$CASE/cards o
+  # The card records given, then what SWE_IDLE reads of the cards folder, through swe_waited.
+  waited() { (export HERE=$SRC RTAG=x ST=$T/$CASE/state; . "$SRC/bench/swe.sh" && { printf '%s\n' '{"card":"c1","issue":1,"step":"start","result":"ok","of":"test"}' "$@"
+    SWE_CARDS=$d bash -c "$SWE_IDLE"; } | swe_waited); }
+  mkdir -p "$d" && echo '{"step":"build","action":"editing x.py"}' > "$d/c1.live" || fail "the cards folder was not made"
+  o=$(waited) || fail "swe_waited failed: $o"
+  [ -z "$o" ] || fail "a card in a session ended the trial: $o"
+  : > "$d/c0.idle"; o=$(waited)
+  [ -z "$o" ] || fail "another card's idle mark ended the trial: $o"
+  echo '{"step":"test","action":"waiting for main to change: t fail on main at abc too"}' > "$d/c1.live" && : > "$d/c1.idle"; o=$(waited)
+  [ "$o" = '{"card":"c1","why":"its card waited for main to change: t fail on main at abc too"}' ] || fail "the waiting card did not end the trial: $o"
+  o=$(waited '{"card":"c1","issue":1,"step":"landed","result":"ok"}')
+  [ -z "$o" ] || fail "a card that landed ended the trial: $o"
 }

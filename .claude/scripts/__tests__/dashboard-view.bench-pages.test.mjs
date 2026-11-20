@@ -74,12 +74,14 @@ test('A run: tasks by arm with the totals, one task opened with each arm\'s patc
 });
 
 // Bugs it guards: a task of a run stopped between two arms showed the arm it never reached as a harness failure
-// (`bench swe show` gives that arm a null result), and an agent arm's detail said one session whatever it took.
-test('A run: an opened task says an arm was not reached, not that it failed, and an agent arm\'s own sessions', async () => {
+// (`bench swe show` gives that arm a null result), and an agent arm's detail said one session whatever it took; and
+// (#1051) a Conveyor arm's trial the bench ended because its card only waited did not say why it ended.
+test('A run: an opened task says an arm was not reached, not that it failed, an agent arm\'s own sessions and why a trial ended early', async () => {
   const w = boot({ tab: 'bench' });
   BH.open(w, { body: (url) => {
     if (!/&run=/.test(url)) return BH.hist();
     const r = BH.run();
+    r.tasks[1].cells[0].ended = 'its card waited for main to change: tests/t.py fail on main too';
     r.tasks[1].cells[1].sessions = 4;
     r.tasks[1].cells[2] = { arm: 'codex-sol', result: null, reused: false };
     return r;
@@ -88,7 +90,8 @@ test('A run: an opened task says an arm was not reached, not that it failed, and
   act(bp(w), 'open-newest').click();
   await settle();
   act(bp(w), 'task-django__django-15347').click();
-  const [, solo, codex] = bp(w).querySelectorAll('.bench-task .bench-card');
+  const [conv, solo, codex] = bp(w).querySelectorAll('.bench-task .bench-card');
+  assert.equal(text(conv.querySelectorAll('p')[1]), 'The trial ended before its time limit: its card waited for main to change: tests/t.py fail on main too.');
   assert.equal(text(solo.querySelector('p')), 'Patch: 1 file, +3 −1 · a.py · 4 sessions, 8 min, 1.0M tokens');
   assert.equal(text(codex.querySelector('h3')), '– Codex alone (gpt-6.2-sol) not reached');
   assert.deepEqual(Array.from(codex.querySelectorAll('p'), text), ['The run stopped before this arm reached the task.']);

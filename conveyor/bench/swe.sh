@@ -321,7 +321,8 @@ swe_history() {
 # arm, task and phase it is at, and seq, its read revision, swe_live), tasks, each task the run took in its order and
 # then each it plans and has not reached, with its title (the issue's first line) and, for each arm (cells, in cols
 # order), what the run said of it (result, reused), its state (and phase, while active) and, where it ran that arm on
-# the task, its kept result: resolved, fired, why, sessions, tokens, minutes, cost (swe_cost; null in a result kept before it), its steps (a conveyor
+# the task, its kept result: resolved, fired, why, ended (why its trial ended before its command did; null when it
+# did not), sessions, tokens, minutes, cost (swe_cost; null in a result kept before it), its steps (a conveyor
 # arm's card records) and its patch (each file with its lines added and removed; null when none is kept); and tail,
 # the run's event tail (swe_event).
 swe_show() { # <run id>
@@ -359,7 +360,7 @@ swe_show() { # <run id>
            state: (if $t != null then "finished" elif at($run.active; $c; $id) then "active" elif $run.state == "running" then "waiting"
              elif at($l.interrupted; $c; $id) then "interrupted" else "not reached" end)}
           + (if $t == null and at($run.active; $c; $id) then {phase: $run.active.phase} else {} end)
-          + ((if $t == null or ($t.result | tostring | startswith("not run")) then {} else $R["\($c.key)/\($id)"] // {} end) | {resolved, fired, why, sessions, tokens, minutes, cost, steps, patch})
+          + ((if $t == null or ($t.result | tostring | startswith("not run")) then {} else $R["\($c.key)/\($id)"] // {} end) | {resolved, fired, why, ended, sessions, tokens, minutes, cost, steps, patch})
           + {cost: (if $t != null then $t.cost // (if $t.result | tostring | startswith("not run") then null else $R["\($c.key)/\($id)"].cost end)
               elif at($l.interrupted; $c; $id) then $l.interrupted.cost else null end)}]}],
       tail: [$tail[] | objects | {at, arm, task, event} | select(all(.[]; . == null or type == "string"))]}' <<<"$l"
@@ -463,13 +464,35 @@ SWE_LIVES='for f in "$SWE_CARDS"/*.live; do [ ! -f "$f" ] || { echo; head -c 400
     if [ "$f" = "$w.firsttry" ]; then [ ! -f "$f.new" ] || continue; [ ! -s "$w.events" ] || s=true; fi
     printf "\n{\"second\":%s,\"firsttry\":" "$s"; tr -d "\n" < "$f"; printf "}\n"
   done; :'
+# Each card of the cards folder that only waits: its <worktree>.idle mark stands (the engine stands it while the
+# card sleeps out a wait for main to change, on another card, for the machine or for its seat's CLI, and never while
+# a session, check or test of it runs), as {idle: <card>, action: <its live record's action>}.
+SWE_IDLE='for f in "$SWE_CARDS"/*.idle; do [ -e "$f" ] || continue; w=${f%.idle}
+    jq -cn --arg c "${w##*/}" --arg a "$(jq -r ".action | strings" "$w.live" 2>/dev/null)" "{idle: \$c, action: \$a}"; done; :'
+# Whether the trial's card only waits, from the lines on stdin (its card records, and SWE_IDLE's): the newest card of
+# the task's issue has not ended, and its idle mark stands. Prints {card, why} then, why naming the wait from its live
+# record's action (cut to 300 characters); nothing otherwise. A card in a session, check or test has no idle mark.
+swe_waited() {
+  jq -Rsc '[splits("\n") | fromjson? | objects] as $r | ([$r[] | select(has("card") and .issue == 1)] | last) as $s
+    | select($s != null and ($s.step | IN("landed", "blocked", "closed") | not))
+    | [$r[] | select(.idle | strings | . == $s.card)] | last | objects
+    | {card: .idle, why: ("its card waited" + (.action | strings // "" | .[:300]
+        | if startswith("waiting ") then " " + .[8:] elif . == "" then ", with no session or test of it running" else ": " + . end))}'
+}
+# A conveyor card that waits (swe_waited) waits on in a trial for its whole time limit: no other card lands and main
+# never changes there. The trial's command is then stopped (each process under <pid>) and <sb>.h/waited keeps
+# {card, why}: the trial grades that card's change (swe_trial).
 swe_watch() { # <pid> <container> <kind> <sb>
   [ -n "${SWE_TASK:-}" ] || return 0
   [ "$3" = conveyor ] || { swe_phase 'Running agent'; swe_sofar "{\"usd\":null,\"state\":\"unknown\",\"unpriced\":${SWE_SESSIONS:-1}}"; return 0; }
-  local k=0 r was='' v
+  local k=0 r was='' v ps
   while kill -0 "$1" 2>/dev/null; do
-    if [ $((k % 10)) = 0 ] && r=$(swe_in 60 "$2" / 'tail -n 200 "$SWE_SST/cards.jsonl" 2>/dev/null; '"$SWE_LIVES" \
+    if [ $((k % 10)) = 0 ] && r=$(swe_in 60 "$2" / 'tail -n 200 "$SWE_SST/cards.jsonl" 2>/dev/null; '"$SWE_LIVES; $SWE_IDLE" \
         "SWE_SST=$SWE_SST" "SWE_CARDS=$4/cards" < /dev/null); then
+      v=$(swe_waited <<<"$r")
+      if [ -n "$v" ]; then
+        printf '%s\n' "$v" > "$4.h/waited"; mapfile -t ps < <(swe_tree "$1"); kill -TERM "${ps[@]}" 2>/dev/null; break
+      fi
       swe_phase "$(swe_stepof <<<"$r")"
       if [ "$r" != "$was" ]; then
         was=$r

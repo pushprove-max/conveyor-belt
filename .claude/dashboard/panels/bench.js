@@ -589,6 +589,8 @@
       const steps = list(c.steps).filter(obj);
       const kind = isConveyor(col) || steps.length ? '' : ` · ${sessionsWord(c.sessions) ? `${sessionsWord(c.sessions)}, ` : ''}${took(c.minutes)}, ${tokens(c.tokens)} tokens${c.fired === false ? ` · the method did not fire${c.why ? `: ${c.why}` : ''}` : ''}`;
       card.append(h('p', 'board-from', files === null ? `Patch: none kept${kind}` : files.length ? `Patch: ${plural(files.length, 'file')}, +${add} −${del} · ${files.map((f) => f.path).join(', ')}${kind}` : `Patch: empty${kind}`));
+      // A trial the bench ended before its time limit (its card only waited) says why (bench swe show's ended).
+      if (typeof c.ended === 'string' && c.ended) card.append(h('p', 'board-from', `The trial ended before its time limit: ${c.ended}.`));
       if (steps.length) card.append(stepList(steps));
       card.append(h('p', 'board-from', `Harness: ${c.resolved === true ? 'resolved' : c.fired === false ? 'not graded: the arm did not fire' : 'not resolved'}. FAIL_TO_PASS and PASS_TO_PASS counts are not kept yet.`));
       cards.append(card);
