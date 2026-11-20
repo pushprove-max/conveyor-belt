@@ -59,14 +59,25 @@ git -C "$MAIN_TMP" init -q
 printf '{}\n' > "$MAIN_TMP/package.json"
 trap 'rm -rf "$MAIN_TMP"' EXIT
 
-run_hook() { ( cd "$MAIN_TMP" && echo "$1" | "$HOOK" >/dev/null 2>&1; echo $? ); }
+# Outside its own part a call runs no hook, though each $(json ...) and $(run_hook ...) around it still forks a
+# subshell; inside it, one more fork that becomes the hook (no echo or pipe forks).
+run_hook() { [ "$ON" = 1 ] || return 0; ( cd "$MAIN_TMP" && exec "$HOOK" <<<"$1" >/dev/null 2>&1 ); echo $?; }
 check() { [ "$ON" = 1 ] || return 0; if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3)"; fi }
 # Outside its own part a run builds no payload: the parts each paid a jq per case for nothing.
-json() { [ "$ON" = 1 ] || return 0; jq -cn --arg cmd "$1" '{tool_input:{command:$cmd}}'; }
+# Inside it, the payload is escaped in bash: a jq per case cost about a seventh of the case. A control character
+# other than tab, newline and CR takes jq's \u escape, so such a command still goes through jq.
+json() {
+  [ "$ON" = 1 ] || return 0
+  local s=$1 t=${1//[$'\t\n\r']/}
+  if [[ $t == *[[:cntrl:]]* ]]; then jq -cn --arg cmd "$1" '{tool_input:{command:$cmd}}'; return; fi
+  s=${s//\\/\\\\}; s=${s//\"/\\\"}; s=${s//$'\t'/\\t}; s=${s//$'\n'/\\n}; s=${s//$'\r'/\\r}
+  printf '{"tool_input":{"command":"%s"}}\n' "$s"
+}
 # A refusal these guards keep must hand back a concrete command. Take its
 # `Try:` line and replay it in the same seat: it has to pass, or the advice is
 # a placeholder or something another guard blocks.
 check_try() { # label, command, [seat dir]
+  [ "$ON" = 1 ] || return 0
   local DIR=${3:-$MAIN_TMP} OUT TRY
   OUT=$(cd "$DIR" && json "$2" | "$HOOK" 2>&1 >/dev/null; echo "rc=$?")
   check "$1" 2 "${OUT##*rc=}"
@@ -688,15 +699,19 @@ check "a direct local-checks run passes" 0 \
 
 # A linked worktree, where git-dir and git-common-dir differ: a real one rather than a stub, because the stub
 # is the thing most likely to drift.
-WORKER_TMP=$(mktemp -d)
-git -C "$WORKER_TMP" init -q 2>/dev/null
-git -C "$WORKER_TMP" -c user.email=t@t -c user.name=t commit -q --allow-empty -m x 2>/dev/null
-git -C "$WORKER_TMP" worktree add -q "$WORKER_TMP/wt" -b wtb >/dev/null 2>&1
-run_hook_in() { ( cd "$1" 2>/dev/null && echo "$2" | "$HOOK" >/dev/null 2>&1; echo $? ); }
+# Only this part reads it, so only this part builds it.
+WORKER_TMP=/nonexistent
+if [ "$ON" = 1 ]; then
+  WORKER_TMP=$(mktemp -d)
+  git -C "$WORKER_TMP" init -q 2>/dev/null
+  git -C "$WORKER_TMP" -c user.email=t@t -c user.name=t commit -q --allow-empty -m x 2>/dev/null
+  git -C "$WORKER_TMP" worktree add -q "$WORKER_TMP/wt" -b wtb >/dev/null 2>&1
+fi
 
 # --- aws must name a profile in every seat: the default credentials may reach an account no agent may touch
 # The hook reads AWS_PROFILE from its own environment, so each case pins it.
 aws_hook() { # <AWS_PROFILE value or "" for unset> <command> [seat dir]
+  [ "$ON" = 1 ] || return 0
   ( cd "${3:-$MAIN_TMP}" && json "$2" | if [ -n "$1" ]; then AWS_PROFILE=$1 "$HOOK"; else env -u AWS_PROFILE "$HOOK"; fi >/dev/null 2>&1; echo $? )
 }
 SAVED_AWS_PROFILE=${AWS_PROFILE-}; unset AWS_PROFILE
@@ -715,7 +730,7 @@ check "env -i aws blocks even with AWS_PROFILE set" 2 "$(aws_hook sample-dev 'en
 check "aws --version passes" 0 "$(aws_hook '' 'aws --version')"
 check "aws later in a pipeline is still checked" 2 "$(aws_hook '' 'echo x | aws s3 cp - s3://b/k')"
 
-rm -rf "$WORKER_TMP"
+[ "$ON" = 1 ] && rm -rf "$WORKER_TMP"
 
 # The serena-down marker stands the symbols hint down. No session
 # writes it, on an errored serena call; a worker that touches it by hand runs
@@ -1113,6 +1128,7 @@ HUNT_HOME=$(mktemp -d)
 printf '{"mcpServers":{"serena":{}}}\n' > "$HUNT_HOME/.claude.json"
 trap 'rm -rf "$MAIN_TMP" "$HUNT_HOME" /tmp/claude-serena-tracker-$HUNT_SID* /tmp/claude-caller-hunt-$HUNT_SID* /tmp/claude-serena-down-$HUNT_SID*' EXIT
 hunt() { # <session suffix> <command> -- prints hint, quiet, or rc=<n>
+  [ "$ON" = 1 ] || return 0
   local OUT RC
   OUT=$(cd "$MAIN_TMP" && jq -cn --arg cmd "$2" --arg sid "$HUNT_SID-$1" '{session_id:$sid,tool_input:{command:$cmd}}' | env -u CLAUDE_CONFIG_DIR HOME=$HUNT_HOME "$HOOK" 2>/dev/null); RC=$?
   [ "$RC" = 0 ] || { echo "rc=$RC"; return; }
@@ -1135,6 +1151,7 @@ check "a serena error this session stands the hint down" quiet "$(hunt f 'rg -n 
 check "a hinted hunt that another rule refuses still blocks" rc=2 "$(hunt g 'rg -n "otherThing\(" src; node --test x.test.ts')"
 # A profile pane's .claude.json is CLAUDE_CONFIG_DIR/.claude.json; ~/.claude.json is not the file Claude Code reads there.
 profile_hunt() { # <session suffix> <HOME .claude.json text> <profile .claude.json text> -> hint | quiet
+  [ "$ON" = 1 ] || return 0
   local H P OUT; H=$(mktemp -d); P=$(mktemp -d); printf '%s\n' "$2" > "$H/.claude.json"; printf '%s\n' "$3" > "$P/.claude.json"
   OUT=$(cd "$MAIN_TMP" && jq -cn --arg cmd 'rg -n "analyzeRecapture\(" src' --arg sid "$HUNT_SID-$1" '{session_id:$sid,tool_input:{command:$cmd}}' \
     | HOME=$H CLAUDE_CONFIG_DIR=$P "$HOOK" 2>/dev/null); rm -rf "$H" "$P"
