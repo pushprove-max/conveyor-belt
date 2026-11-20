@@ -211,6 +211,17 @@ test('Tests row: opening the Timeline reads the file\'s older runs and test edit
   f3.runs = [{ cpu: 8, sec: 16, card: null, time: iso(T0 - 600000), whole: false, survey: true }].concat((f3.runs || []).slice(0, -1));
   next(w, d3);
   assert.equal(w.olderAsks.length, 3, 'a survey time that pushes a run out of the newest reads the older ones again');
+  // #1045: a newer survey replaces that survey, so the runs on record, the count of runs and the fact that a survey
+  // is there all stay as they were; only the survey's time changes. A stamp that tracks only whether a survey is there
+  // misses this one.
+  await settle(); await settle();
+  const d4 = landed(), f4 = d4.panels.tests.data.tests.files.find((x) => x.file === MERGE);
+  d4.panels.tests.data.tests.edits = [edit(44, 1.5)];
+  f4.runsOnRecord = f3.runsOnRecord;
+  f4.runs = [{ ...f3.runs[0], time: iso(T0 - 60000) }].concat(f3.runs.slice(1));
+  assert.equal(f4.runs.length, f3.runs.length);
+  next(w, d4);
+  assert.equal(w.olderAsks.length, 4, 'a survey that replaces the last survey reads the older ones again');
 });
 
 // Bug it catches (#251): a read of the older runs that failed left the Timeline looking whole, with the oldest
