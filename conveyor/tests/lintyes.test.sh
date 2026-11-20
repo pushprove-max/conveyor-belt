@@ -108,15 +108,22 @@ t_lintyesvisible() {
   loop run > /dev/null || fail "the run after the approval line exited non-zero"
   yeslanded && [ "$(blocks | wc -l)" = 1 ] && [ "$(yesdid)" = build ] || fail "one approval did not land the visible policy change: $(yesdid); $(yessteps)"
 }
-# Bug: with the rule on visible changes off, a visible change that changes lint policy stops for the policy alone, but
-# the Board shows the reviewer's visible sentence in place of the reason, hiding the policy file the yes is for.
+# Bug: with the rule on visible changes off, a visible change that changes lint policy lands with no yes, or stops
+# for its visible change in place of the policy.
 t_lintyesvisibleoff() {
   yessetup 'echo strict > .lintrc; mkdir -p web; echo pay >> web/pay.ts' $'USER-VISIBLE: yes: guests see a new Pay button\nVERDICT: GO'
   loop control rules visible=off > /dev/null || fail "control rules visible=off was refused"
-  # loop: the snapshot reads the blocked line and the review's visible answer that a whole card run writes
+  # loop: the stop is card()'s, after a build and a review that says the change is visible
   loop run > /dev/null || fail "run exited non-zero"
   [ "$(blocks)" = "lint policy: needs Dana's yes: it changes lint policy: .lintrc" ] || fail "the policy change did not stop for the policy alone: $(blocks)"
-  loop snapshot --fresh | jq -e '.needsYou.waiting | any(.issue == 7 and .sentence == "it changes lint policy: .lintrc")' > /dev/null \
+}
+# Bug: for such a stop, the Board shows the reviewer's visible sentence in place of the reason, hiding the policy file
+# the yes is for. Card 14 has the two records the case above writes: a review that says the change is visible, and
+# the stop for the policy.
+t_lintyesvisibleoffboard() { snapshotstart
+  card 14 "$(date -u +%F)" picked worktree brief build 'review:GO:{"visible":"yes: guests see a new Pay button"}' \
+    'blocked:blocked:{"reason":"lint policy: needs Dana'"'"'s yes: it changes lint policy: .lintrc"}'
+  loop snapshot --fresh | jq -e '.needsYou.waiting | any(.issue == 14 and .sentence == "it changes lint policy: .lintrc")' > /dev/null \
     || fail "the snapshot hides the policy file: $(loop snapshot | jq -c '.needsYou.waiting')"
 }
 # Bug: with the rule Lint check off, a policy change still stops for the yes. It lands on its GO.
