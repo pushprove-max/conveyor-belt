@@ -13,13 +13,16 @@
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
 # One engine function, in the loop's shell (conveyor.sh's own engine files, then the ones commands/run.sh loads).
-la_eng() { # <command...>
+la_eng() { la_rec la_loop "$@"; } # <command...>
+la_loop() { eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")"; names || exit 1; "$@"; }
+# One command in the shell of conveyor.sh's own engine files alone (paths.sh, records.sh): all that writing a card's
+# lines needs. The loop's other files and names() were most of each la_eng call's time.
+la_rec() { # <command...>
   local a=("$@")
-  # shellcheck disable=SC2034 # HERE is read by the lines of conveyor.sh and commands/run.sh run by the eval
+  # shellcheck disable=SC2034 # HERE is read by the lines of conveyor.sh (and commands/run.sh: la_loop) run by the eval
   ( HERE=$SRC; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; set --
     eval "$(sed -n '/^\. "\$HERE\/lib\/portable.sh"/,/^\. "\$HERE\/lib\/records.sh"/p' "$SRC/conveyor.sh")"
-    eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")"
-    names || exit 1; "${a[@]}" )
+    "${a[@]}" )
 }
 # `conveyor.sh <args>` as loop runs it, from a copy of the engine with no lib/fulltest.sh: a command that loads a lib it
 # does not use (issue 465: pr.sh loaded lib/fulltest.sh) fails here, at the load.
@@ -34,20 +37,21 @@ la_nofull() { # <args...>
 # names no test, as card() writes it), then later runs that must not hide the cases run before: one that names both
 # files and no case (the cache kept them all), one that ran one case of a third file only, one that selected that file
 # and no case (its times carried from the run before), and one that selected no file. With <fix rounds>, that many
-# fix lines come before the tests.
+# fix lines come before the tests. The lines are made as record() makes them (line()), then appended in one state
+# database call, not one call a line as record() makes.
 la_land() { # <n> [<fix rounds>]
   local sha fx='' i
-  for ((i = 0; i < ${2:-0}; i++)); do fx+="record c$1 $1 fix ok '{}'"$'\n'; done
+  for ((i = 0; i < ${2:-0}; i++)); do fx+="line c$1 $1 fix ok '{}' &&"$'\n'; done
   echo "$1" > "$R/f$1.txt"; git -C "$R" add -A; git -C "$R" commit -qm "card $1"; sha=$(git -C "$R" rev-parse HEAD)
-  la_eng eval "record c$1 $1 picked ok '{\"title\":\"T$1\"}'
-    record c$1 $1 build ok '{\"doneWhen\":{\"items\":2,\"met\":2,\"failed\":[]},\"doneLines\":[\"D1 met: t/a.test.sh case one\",\"D2 met: f$1.txt holds $1\"]}'
-    $fx record c$1 $1 test pass '{\"ended\":\"passed\",\"tests\":{\"passed\":4,\"failed\":0},\"ran\":[\"t/a.test.sh\"],\"why\":{\"t/a.test.sh\":[\"changed\"],\"t/b.test.sh\":[\"passed before with the same inputs\"]},\"ranCases\":{\"t/a.test.sh\":[\"one\",\"two\"]}}'
-    record c$1 $1 test pass '{\"sec\":1,\"usage\":{\"input\":0,\"write\":0,\"write1h\":0,\"read\":0,\"output\":0},\"reused\":true}'
-    record c$1 $1 test pass '{\"ended\":\"passed\",\"tests\":{\"passed\":0,\"failed\":0},\"ran\":[\"t/a.test.sh\",\"t/c.test.sh\"],\"ranCases\":{}}'
-    record c$1 $1 test pass '{\"ended\":\"passed\",\"tests\":{\"passed\":1,\"failed\":0},\"ran\":[\"t/c.test.sh\"],\"ranCases\":{\"t/c.test.sh\":[\"three\"]}}'
-    record c$1 $1 test pass '{\"ended\":\"passed\",\"tests\":{\"passed\":null,\"failed\":null},\"selected\":{\"files\":1,\"filesOf\":null,\"cases\":0,\"casesOf\":12,\"kept\":1},\"carried\":[\"t/c.test.sh\"],\"times\":{\"t/c.test.sh\":1}}'
-    record c$1 $1 test pass '{\"ended\":\"nothing selected\",\"tests\":{\"passed\":0,\"failed\":0},\"selected\":{\"files\":0,\"filesOf\":12,\"cases\":null,\"casesOf\":null}}'
-    record c$1 $1 landed ok '{\"sha\":\"$sha\",\"product\":false}'" \
+  la_rec eval "l=\$(line c$1 $1 picked ok '{\"title\":\"T$1\"}' &&
+    line c$1 $1 build ok '{\"doneWhen\":{\"items\":2,\"met\":2,\"failed\":[]},\"doneLines\":[\"D1 met: t/a.test.sh case one\",\"D2 met: f$1.txt holds $1\"]}' &&
+    $fx line c$1 $1 test pass '{\"ended\":\"passed\",\"tests\":{\"passed\":4,\"failed\":0},\"ran\":[\"t/a.test.sh\"],\"why\":{\"t/a.test.sh\":[\"changed\"],\"t/b.test.sh\":[\"passed before with the same inputs\"]},\"ranCases\":{\"t/a.test.sh\":[\"one\",\"two\"]}}' &&
+    line c$1 $1 test pass '{\"sec\":1,\"usage\":{\"input\":0,\"write\":0,\"write1h\":0,\"read\":0,\"output\":0},\"reused\":true}' &&
+    line c$1 $1 test pass '{\"ended\":\"passed\",\"tests\":{\"passed\":0,\"failed\":0},\"ran\":[\"t/a.test.sh\",\"t/c.test.sh\"],\"ranCases\":{}}' &&
+    line c$1 $1 test pass '{\"ended\":\"passed\",\"tests\":{\"passed\":1,\"failed\":0},\"ran\":[\"t/c.test.sh\"],\"ranCases\":{\"t/c.test.sh\":[\"three\"]}}' &&
+    line c$1 $1 test pass '{\"ended\":\"passed\",\"tests\":{\"passed\":null,\"failed\":null},\"selected\":{\"files\":1,\"filesOf\":null,\"cases\":0,\"casesOf\":12,\"kept\":1},\"carried\":[\"t/c.test.sh\"],\"times\":{\"t/c.test.sh\":1}}' &&
+    line c$1 $1 test pass '{\"ended\":\"nothing selected\",\"tests\":{\"passed\":0,\"failed\":0},\"selected\":{\"files\":0,\"filesOf\":12,\"cases\":null,\"casesOf\":null}}' &&
+    line c$1 $1 landed ok '{\"sha\":\"$sha\",\"product\":false}') && locked append \"\$l\"" \
     || fail "card $1's lines could not be written"
 }
 # gh's pull requests, in front of the shared stub (its issues): each one a file $STUB/pr.<n>, numbered from 7 (one with
@@ -171,7 +175,7 @@ t_prfork() {
   jq -n '{number: 9, head: "conveyor/landing", base: "main", title: "fork", body: "fork", state: "OPEN", cross: true}' > "$STUB/pr.9"
   la_land 2; la_eng push c2 2 || fail "the push of card 2 failed"
   grep -qx 'Closes #2' <(jq -r .body "$STUB/pr.8") && [ "$(jq -r .body "$STUB/pr.9")" = fork ] || fail "the push did not update its own pull request: $(cat "$STUB/pr-calls")"
-  rm -f "$(la_eng eval 'echo "$LANDPR"')"
+  rm -f "$(la_rec eval 'echo "$LANDPR"')"
   [ "$(loop health | jq -c .landingPr.number)" = 8 ] || fail "health does not show Conveyor's pull request: $(loop health | jq -c .landingPr)"
   out=$(loop pr merge 2>&1) || fail "pr merge failed: $out"
   [ "$(la_prst 8)" = MERGED ] && [ "$(la_prst 7)" = OPEN ] && [ "$(la_prst 9)" = OPEN ] || fail "Merge merged a fork's pull request: $(cat "$STUB/pr-calls")"
@@ -206,7 +210,7 @@ t_prrefused() {
   [ "$out" = '7 refused: Pull request is not mergeable: the base branch policy prohibits the merge' ] || fail "health does not show the open pull request with the refusal's reason: $out"
   # Health reads GitHub's state, not only the file the push wrote: a pull request open before that file was kept shows,
   # and one merged on GitHub, not here, is gone.
-  rm -f "$(la_eng eval 'echo "$LANDPR"')"
+  rm -f "$(la_rec eval 'echo "$LANDPR"')"
   out=$(loop health | jq -c '.landingPr | [.number, .url]')
   [ "$out" = '[7,"https://github.com/o/r/pull/7"]' ] || fail "health does not show the pull request GitHub has open: $out"
   # The owner sets Land as to main with it open, then merges it on GitHub: health must still ask GitHub, or the Board
@@ -231,10 +235,10 @@ t_pridle() {
   mkdir -p "$R/lib" && echo good > "$R/lib/m.js" && echo 'grep -qx good lib/m.js' > "$R/lib/m.test.js" || fail "the fixture could not be made"
   la_land 1; la_eng push c1 1 || fail "the push failed"
   sha=$(git -C "$R" rev-parse main); rm -f "$STUB/ran"
-  la_eng record c9 9 picked ok '{}' || fail "card 9's line could not be written"
+  la_rec record c9 9 picked ok '{}' || fail "card 9's line could not be written"
   la_eng idlemerge
   [ "$(la_prst 7)" = OPEN ] && [ ! -e "$STUB/ran" ] || fail "the pull request merged, or its run began, with card 9 on the belt"
-  la_eng record c9 9 closed ok '{}' || fail "card 9's line could not be written"
+  la_rec record c9 9 closed ok '{}' || fail "card 9's line could not be written"
   touch "$STUB/red"; la_eng idlemerge
   [ "$(cat "$STUB/ran" 2>&1)" = "$sha lib/m.test.js" ] || fail "the push run did not run lib/m.test.js alone on the pull request's head: $(cat "$STUB/ran" 2>&1)"
   [ "$(la_prst 7)" = OPEN ] || fail "the pull request merged though its push run failed"
