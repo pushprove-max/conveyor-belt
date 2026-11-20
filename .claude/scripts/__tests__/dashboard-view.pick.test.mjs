@@ -105,7 +105,7 @@ test("Board: a card shows the Judge's seats, each one's reason, and what a limit
   const opened = card(7).querySelector('.board-seats');
   const toggled = new Promise((r) => opened.addEventListener('toggle', r, { once: true }));
   opened.open = true;
-  await toggled;  // jsdom fires the toggle on a later task, as a browser does, after a setImmediate turn
+  await toggled;  // jsdom fires the toggle on a later task (a setTimeout of 0), as a browser does, so wait for the event itself
   const drawn = card(7).querySelector('.board-seats');
   again.panels.board.data.landed[0].usd = 2;  // a snapshot that differs for this card, so its Seats list is drawn again
   next(w, again);
