@@ -219,8 +219,9 @@ and memory limits (the `limits` setting in `conveyor/bench/swe.json`) and the sa
 arms. The container can see the task's sandbox and no other folder of this
 machine, except for a Conveyor arm: its container can also see the folder of the installed Conveyor version,
 read-only. A Conveyor arm's container also runs without Docker's seccomp and AppArmor profiles and with all of `/proc`
-visible, so that Codex's own sandbox can start a command there. Conveyor v1.7.0 and older use that sandbox for their
-reviews. The official harness grades the patch of every arm in the same way.
+visible, so that Codex's own sandbox can start a command there. Conveyor v1.7.0 and older, and the engine commits
+after v1.7.0 that do not yet run Codex without its sandbox in a task container, use that sandbox for their reviews.
+The official harness grades the patch of every arm in the same way.
 
 An arm uses the subscription logins that the cards use. The Claude login is the one of the builder's account
 (`conveyor.sh control account`). The Codex login is the one in `~/.codex`. Conveyor copies the login files into the
@@ -361,8 +362,9 @@ shows. Use `swe 1` and `swe 5` to see that a version works at all, and `swe 50` 
   makes compiled parts can fail there for reasons other than the change.
 - The minutes are those of this machine and depend on the other work on it.
 - The sessions of an arm run in its container and see only the task's sandbox (a Conveyor arm also sees the folder of
-  the installed Conveyor version, read-only). In a Conveyor arm, Conveyor v1.7.0 and older run Codex sessions in
-  Codex's own sandbox, and later versions run them without it. So a Conveyor arm's container has fewer of
+  the installed Conveyor version, read-only). In a Conveyor arm, Conveyor v1.7.0 and older, and the engine commits
+  after v1.7.0 that do not yet run Codex without its sandbox in a task container, run Codex sessions in Codex's own
+  sandbox. Later versions run them without it. So a Conveyor arm's container has fewer of
   Docker's own limits on its commands (see [Containers and logins](#containers-and-logins)). The container is their sandbox. Conveyor also reads the reference
   fixes and hidden tests only to make the task list and to grade a patch, and then removes them.
 - The task images are for x86-64. Each arm installs its tools in each task's container, with the network, so each
