@@ -179,6 +179,54 @@ t_swepresets() {
   [ "$(loop snapshot --fresh | jq -c '.bench.live | [.state, .active]')" = '["stopped",null]' ] || fail "a run whose process is gone is shown running"
 }
 
+# A release of the fixture engine: a new commit on main, tagged <tag> (an annotated tag, which ls-remote lists twice).
+swerelease() { # <tag>
+  local w=$T/$CASE/rel; rm -rf "$w"; git clone -q "$SWE_FX/eng.git" "$w" && git -C "$w" commit -q --allow-empty -m "release $1" \
+    && git -C "$w" tag -a -m "$1" "$1" && git -C "$w" push -q origin main "$1" || fail "the release $1 was not made"
+}
+# Bug (#1014): the snapshot's versions were board.json's, written only by a benchmark run: before any run the
+# Benchmarks tab listed none, and a release made since the last run, or a new main, never showed.
+t_sweversnow() {
+  swe; local o head
+  o=$(loop snapshot --fresh | jq -c .bench) && [ "$o" = "$(jq -nc --arg a "$EA" --arg b "$EB" '{versions: [{name: "main", commit: $b}, {name: "v1.0.0", commit: $a}]}')" ] \
+    || fail "before any run the snapshot's bench part does not list the versions: $o"
+  # A board.json as the last run left it, with that run's list (main at v1.0.0 only): the list now must replace it.
+  mkdir -p "$B" && jq -nc --arg a "$EA" '{presets: [1], live: {state: "done"}, versions: [{name: "main", commit: $a}, {name: "v1.0.0", commit: $a}]}' > "$B/board.json"
+  swerelease v1.1.0; head=$(git -C "$SWE_FX/eng.git" rev-parse main)
+  o=$(loop snapshot --fresh | jq -c '.bench') && [ "$(jq -c '[.presets, .live.state]' <<<"$o")" = '[[1],"done"]' ] && o=$(jq -c .versions <<<"$o") \
+    && [ "$(jq -c 'map(.name)' <<<"$o")" = '["main","v1.1.0","v1.0.0"]' ] \
+    && [ "$o" = "$(loop bench swe versions 2>&1)" ] && [ "$(jq -r '.[0:2] | map(.commit) | unique[]' <<<"$o")" = "$head" ] \
+    || fail "with no run since, the snapshot does not replace the last run's list with the new release, and main at its head, as bench swe versions does, keeping the run's other parts: $o"
+}
+# Bug (#1014): with no source set, the versions are the engine checkout's origin's. The snapshot reads them from the
+# checkout itself, with no network call (its origin here is a URL no test reaches): a release tag made there shows at
+# once, and main is origin/main, not a local main ahead of it. The function is called on a clone standing in for the
+# checkout (HERE).
+t_sweverslocal() {
+  swe; local w=$T/$CASE/eng o
+  git clone -q "$SWE_FX/eng.git" "$w" && mkdir -p "$w/conveyor" && git -C "$w" tag -a -m r v1.1.0 \
+    && git -C "$w" commit -q --allow-empty -m 'not pushed' && git -C "$w" remote set-url origin https://example.com/eng.git || fail "the checkout was not made"
+  o=$(unset CONVEYOR_BENCH_SOURCE; export HERE=$w/conveyor RTAG=x; . "$SRC/bench/swe.sh" && swe_versionsnow) \
+    && [ "$o" = "$(jq -nc --arg a "$EA" --arg b "$EB" '[{name: "main", commit: $b}, {name: "v1.1.0", commit: $b}, {name: "v1.0.0", commit: $a}]')" ] \
+    || fail "the checkout's tags and origin/main were not read: $o"
+}
+# Bug (#1014): the snapshot never read a source named by URL. It reads it now, so the read must stay cheap: the list
+# is kept for the hour and read again after it, and a source that cannot be reached leaves the last list. The URL is
+# rewritten to the fixture's folder (insteadOf), so no network is used.
+t_sweversurl() {
+  swe; local o
+  export CONVEYOR_BENCH_SOURCE=https://example.com/eng.git GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.file://$SWE_FX/eng.git.insteadOf \
+    GIT_CONFIG_VALUE_0=https://example.com/eng.git CONVEYOR_NOW=1700000000
+  o=$(loop snapshot --fresh | jq -c '.bench.versions | map(.name)') && [ "$o" = '["main","v1.0.0"]' ] || fail "the URL source's versions were not read: $o"
+  swerelease v1.1.0
+  o=$(loop snapshot --fresh | jq -c '.bench.versions | map(.name)') && [ "$o" = '["main","v1.0.0"]' ] || fail "the URL source was read again within the hour: $o"
+  o=$(CONVEYOR_NOW=1700003600 loop snapshot --fresh | jq -c '.bench.versions | map(.name)') && [ "$o" = '["main","v1.1.0","v1.0.0"]' ] \
+    || fail "the URL source was not read again in the next hour: $o"
+  mv "$SWE_FX/eng.git" "$SWE_FX/gone.git"
+  o=$(CONVEYOR_NOW=1700007200 loop snapshot --fresh | jq -c '.bench.versions | map(.name)') && [ "$o" = '["main","v1.1.0","v1.0.0"]' ] \
+    || fail "a source that cannot be reached dropped the last list read: $o"
+}
+
 # Bug: the dataset's rows an earlier harness kept (raw.<revision>.jsonl, with the reference fixes and hidden tests)
 # stayed in the state folder, readable by a card's sessions, when the task list of that revision was already made.
 t_sweoldraw() {

@@ -362,6 +362,8 @@ test('Start: the run settings every arm shares show their defaults, refuse a val
   const typed =act(bp(w), 'set-seed');
   assert.notEqual(typed, seed, 'the refresh drew the field again');
   assert.deepEqual([typed.value, w.document.activeElement === typed, typed.selectionStart], ['my-se ed', true, 5], 'the text typed, its focus and caret survive a refresh');
+  // Bug it guards (#1014): a version new in the snapshot (a release since the last run) must be a choice at once, with no reload.
+  assert.deepEqual(Array.from(act(bp(w), 'start-engine').options, (o) => o.value), ['main', 'v1.2.0', 'v1.3.0', 'commit']);
   choose(w, 'set-seed', 'conveyor-swe-1');
   const plan =() => Array.from(bp(w).querySelectorAll('.bench-plan tr[data-arm]'), cells);
   const total = () => Array.from(bp(w).querySelectorAll('.bench-before .figure')[2].children, text);

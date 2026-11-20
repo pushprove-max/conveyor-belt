@@ -165,8 +165,8 @@
 #           testMap (the snapshot's: the Test map part, conveyor/lib/testmap.sh mapboard()); each null from a snapshot
 #           without it.
 #   bench   the Benchmarks tab: each record's (repo null when none is steered; repos and others as the Tests part's)
-#           bench (the snapshot's: the run in progress and the versions, the SWE-bench runs' board.json,
-#           conveyor/bench/swe.sh swe_board()) and drift (the snapshot's: the latest drift watch, conveyor/bench/drift.sh);
+#           bench (the snapshot's: the run in progress, the SWE-bench runs' board.json, conveyor/bench/swe.sh
+#           swe_board(), and the versions now, swe_versionsnow()) and drift (the snapshot's: the latest drift watch, conveyor/bench/drift.sh);
 #           each null from a snapshot without it. The runs and their results are read when shown (--bench).
 #   metrics records (each record's measured totals, today and week) and cards (each card of the 7 days with
 #           its metrics: step timeline, seconds, tokens, dollars, findings; null from a snapshot without them), steps

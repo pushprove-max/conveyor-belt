@@ -41,7 +41,7 @@
 # arms/<id>.json (each saved arm revision, swe_armsave), frozen/<arm> while a run goes (its copy of what a conveyor
 # arm reads of the project, swe_freeze),
 # a line a run in runs.jsonl, the run in progress in live.json, tails/<run>.jsonl (each run's event tail, swe_event),
-# and board.json, what the snapshot carries for the Board's Benchmarks tab (the tab reads the runs and results with
+# versions.json (the last versions read and the key they were read at, swe_versionsnow), and board.json, what the snapshot carries for the Board's Benchmarks tab (the tab reads the runs and results with
 # history and show).
 # The dataset's rows (each task's reference fix and hidden tests) are never kept: the card's sessions have a shell as
 # this account, so the harness reads them into a cache of its own that it removes, for the task list and each grade.
@@ -131,14 +131,44 @@ sys.stdout.write("".join(json.dumps(r) + "\n" for r in rows))' "$(swe_set .seed)
   printf '%s\n' "$f"
 }
 swe_src() { printf '%s' "${CONVEYOR_BENCH_SOURCE:-$(git -C "$HERE" remote get-url origin 2>/dev/null)}"; }
-# The released versions and main, as JSON [{name, commit}], newest release first.
+# The released versions and main, as JSON [{name, commit}], newest release first. Each read is kept in versions.json
+# under its key (swe_vkey), for swe_versionsnow.
 swe_versions() {
-  local src l; src=$(swe_src) && [ -n "$src" ] && l=$(git ls-remote "$src" refs/heads/main 'refs/tags/v*' 2>/dev/null) \
+  local src l vs; src=$(swe_src) && [ -n "$src" ] && l=$(timeout 20 git ls-remote "$src" refs/heads/main 'refs/tags/v*' 2>/dev/null) \
     || { echo "conveyor: the engine's versions could not be read from ${src:-its repository}" >&2; return 1; }
-  awk '{ n = $2; sub(/^refs\/(tags|heads)\//, "", n); p = sub(/\^\{\}$/, "", n); print n "\t" $1 "\t" p }' <<<"$l" \
+  vs=$(swe_vlist <<<"$l") || return 1
+  { mkdir -p "$SWE_DIR" && swe_put "$SWE_DIR/versions.json" "$(jq -nc --arg k "$(swe_vkey "$src")" --argjson v "$vs" '{key: $k, versions: $v}')"; } 2>/dev/null || :
+  printf '%s\n' "$vs"
+}
+# The versions as JSON from lines of `<commit> <ref>` as ls-remote prints them (a tag's peeled commit on a line of
+# its own, its ref ending ^{}).
+swe_vlist() {
+  awk '{ n = $2; sub(/^refs\/(tags|heads)\//, "", n); p = sub(/\^\{\}$/, "", n); print n "\t" $1 "\t" p }' \
     | jq -Rsc 'split("\n") | map(select(. != "") | split("\t") | {name: .[0], commit: .[1], peeled: (.[2] == "1")})
       | map(select(.name == "main" or (.name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")))) | group_by(.name) | map(sort_by(.peeled) | last | del(.peeled))
       | (map(select(.name == "main")) + (map(select(.name != "main")) | sort_by(.name | ltrimstr("v") | split(".") | map(tonumber)) | reverse))'
+}
+swe_vkey() { printf '%s %s\n' "$1" "$(jq -rn '(($ENV.CONVEYOR_NOW // "" | tonumber?) // now) | todate[0:13]')"; } # <source>: it and the hour
+# The versions now, for the snapshot, which runs often: read with no network call from the git folder on this
+# machine when there is one: a source that is a folder (file:// or a path) as ls-remote reads it, and the default
+# source (this engine checkout's origin) from this checkout's release tags and origin/main, as it last fetched them.
+# A source named by URL is read again (swe_versions) only when versions.json's key is not the key now (swe_vkey:
+# another source or hour); a read that fails keeps the last list under the key now, so a source that cannot be
+# reached is not asked again on each snapshot. Prints nothing when no list can be read.
+swe_versionsnow() {
+  local src g m l vs k; src=$(swe_src) && [ -n "$src" ] || return 1; g=${src#file://} m=refs/heads/main
+  [ -d "$g" ] || { [ -z "${CONVEYOR_BENCH_SOURCE:-}" ] && g=$HERE m=refs/remotes/origin/main; } || g=''
+  if [ -n "$g" ]; then
+    l=$(git -C "$g" for-each-ref --format='%(objectname) %(refname)%(if)%(*objectname)%(then)%0a%(*objectname) %(refname)^{}%(end)' 'refs/tags/v*' "$m" 2>/dev/null) || return 1
+    awk -v m="$m" '$2 == m { $2 = "refs/heads/main" } { print }' <<<"$l" | swe_vlist; return
+  fi
+  k=$(swe_vkey "$src") || return 1
+  vs=$(jq -c --arg k "$k" 'select(.key == $k) | .versions | arrays // null' "$SWE_DIR/versions.json" 2>/dev/null) || vs=''
+  if [ -n "$vs" ]; then [ "$vs" != null ] && printf '%s\n' "$vs"; return; fi
+  vs=$(swe_versions 2>/dev/null) && { printf '%s\n' "$vs"; return; }
+  vs=$(jq -c '.versions | arrays' "$SWE_DIR/versions.json" 2>/dev/null) || vs=''
+  { mkdir -p "$SWE_DIR" && swe_put "$SWE_DIR/versions.json" "$(jq -nc --arg k "$k" --argjson v "${vs:-null}" '{key: $k, versions: $v}')"; } 2>/dev/null || :
+  [ -n "$vs" ] && printf '%s\n' "$vs"
 }
 # <main | v<x.y.z> | full commit id>: sets SWE_COMMIT and SWE_VERSION (the release's name, else "main" for main's
 # commit, else "").
@@ -189,7 +219,7 @@ swe_pertask() { # <arm> <conveyor | agent> <the arm's sessions> [<the arm's mode
 swe_solomodel() { seat builder 2>/dev/null | jq -r 'select(.agent == "claude") | .model // empty'; }
 swe_solokey() { local k=solo-${1:-default}; printf '%s\n' "${k//[^A-Za-z0-9._-]/-}"; } # <model>
 # board.json, what the snapshot carries: the run in progress, the solo arm's key now (soloKey), the versions
-# (the last read, SWE_VERSIONS) and the expected figures. The runs and the results are not in it (the snapshot's size):
+# (the last read, SWE_VERSIONS; the snapshot puts swe_versionsnow's in their place) and the expected figures. The runs and the results are not in it (the snapshot's size):
 # the Board reads them when it shows them (swe_history, swe_show).
 swe_board() {
   local vs; vs=$(jq -c '.versions // null' "$SWE_DIR/board.json" 2>/dev/null) || vs=null

@@ -1045,14 +1045,19 @@ snapshot() (
   mapboard "$MAIN" > "$d/testmap" 2>/dev/null && [ -s "$d/testmap" ] || echo null > "$d/testmap"
   # bench: the Benchmarks tab's live part, board.json of `conveyor.sh bench swe` (bench/swe.sh); a run in progress whose process
   # is gone (killed with no end written) is shown stopped, and soloKey is the key of the builder seat in force now
-  # (swe_solokey()), not the one board.json kept from its last write. No program starts before the first run.
+  # (swe_solokey()), not the one board.json kept from its last write.
+  # versions is the list now (swe_versionsnow(): a source on this machine is read from its local refs on each snapshot,
+  # with no network call; a source named by URL is read again only when the hour changes), with no run needed: before
+  # the first run, the part holds the versions alone.
   echo null > "$d/bench"
+  bv=$(. "$HERE/bench/swe.sh" && swe_versionsnow 2>/dev/null) && [ -n "$bv" ] || bv=null
   if [ -s "$ST/bench/swe/board.json" ]; then
     bp=$(jq -r 'objects | .live | objects | select(.state == "running") | .pid | numbers' "$ST/bench/swe/board.json" 2>/dev/null) || bp=''
     bf=objects; [ -z "$bp" ] || kill -0 "$bp" 2>/dev/null || bf='.live.state = "stopped" | .live.current = null | .live.active = null'
     bk=$(. "$HERE/bench/swe.sh" && swe_solokey "$(swe_solomodel)") || bk=''
     jq -c --arg bk "$bk" "$bf"' | if $bk == "" then . else .soloKey = $bk end' "$ST/bench/swe/board.json" > "$d/bench.new" 2>/dev/null && [ -s "$d/bench.new" ] && mv -f "$d/bench.new" "$d/bench"
   fi
+  [ "$bv" = null ] || { jq -c --argjson v "$bv" '(objects // {}) | .versions = $v' "$d/bench" > "$d/bench.new" 2>/dev/null && [ -s "$d/bench.new" ] && mv -f "$d/bench.new" "$d/bench"; } || :
   jq -c --slurpfile bn "$d/bench" --slurpfile tm "$d/testmap" --argjson mv "${moved:-null}" --slurpfile dec "$d/declined" --slurpfile ta <(testacts) --argjson tl "${TESTACTION_TIMEOUT:-null}" --slurpfile tp "$d/tests" --slurpfile pr "$d/prices" --argjson sk "$sk" --argjson pc "$pc" \
     --slurpfile rp <({ tail -n 1 "$REPLAYS" 2>/dev/null || :; } | jq -c 'objects' 2>/dev/null) '$ta[0] as $ta | del(.cols) | .declined = $dec[0].shown | .declinedRest = $dec[0].rest | .prices = $pr[0] | .standing = $sk | .pushCheck = $pc
     | .cost.replay = ($rp[0] // null | if . == null then null else del(.calls) end)
