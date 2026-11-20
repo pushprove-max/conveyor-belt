@@ -541,3 +541,60 @@ t_pack() {
   PATH=${np%:} fx_in clis
   [ "$RC" = 0 ] || fail "a pack that lists Codex models was held for codex with no seat on it: $(cat "$T/$CASE/run.out")"
 }
+
+# Bug: a card() step gives its session or the reviewer a prompt without the rules, with them twice, or out of order.
+# t_rules makes each prompt; a card run shows what build, review, a NO-GO's fix, a test fix and a conflict's rebuild get.
+t_rulesall() {
+  local i s r e; e=$(printf '%s\n\n%s\n\nWEB-AREA-RULE' "$(cat "$SRC/rules/card-core.md")" "$(cat "$SRC/lib/test-card-rules.md")")
+  setup "[$(issue 7 2026-01-01 | jq -c '.body = "It breaks in web/a.tsx."')]"; echo 'WEB-AREA-RULE' > "$R/.conveyor/web.md"; tune '.areas = {"web/**": ".conveyor/web.md"}'
+  echo "$NOGO" > "$STUB/review.1"; for i in 2 3 4 5; do echo "$GO" > "$STUB/review.$i"; done; echo 'ONE other' > "$STUB/move"
+  # The first test run and its re-run fail, so a test-fix session runs; main moves on the next run, so the rebuild runs.
+  s=$(<"$STUB/test-cmd"); printf '%s\n%s\n' '[ "$(cat "$STUB/tests" 2>/dev/null | wc -l)" -ge 2 ] || { echo x >> "$STUB/tests"; echo "FAIL a.test.sh"; exit 1; }' "$s" > "$STUB/test-cmd"
+  echo 'n=$(wc -l < "$STUB/sessions"); cp "$STUB/brief" "$STUB/brief.$n"; if grep -q "^# Landing conflict" "$STUB/brief"; then printf "ONE\nfive\n" > a.txt; else echo "five $n" >> a.txt; fi' > "$STUB/build"
+  sed -i 's|^cat > /dev/null; echo x >> "$STUB/reviews";|echo x >> "$STUB/reviews"; cat > "$STUB/asked.$(wc -l < "$STUB/reviews")";|' "$STUB/codex"; rulecard 7
+  grep -q '^build' "$STUB/brief.1" && grep -q '^# Reviewer findings' "$STUB/brief.2" && grep -q '^# The changed tests fail' "$STUB/brief.3" && grep -q '^# Landing conflict' "$STUB/brief.4" && [ -s "$STUB/asked.4" ] && [ -n "$(st 'select(.step == "landed") | .sha')" ] \
+    || fail "the card did not build, fix, fix its tests, rebuild, have four reviews and land: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
+  for i in "$STUB"/brief.* "$STUB"/asked.*; do s=$(<"$i"); r=${s#*"$e"}
+    [ "$r" != "$s" ] && [[ $r != *"$e"* ]] && [ "$(grep -cxF "$(head -n 1 "$SRC/rules/card-core.md")" "$i")" = 1 ] && [ "$(grep -cxF "$(head -n 1 "$SRC/lib/test-card-rules.md")" "$i")" = 1 ] \
+      && [ "$(grep -cx WEB-AREA-RULE "$i")" = 1 ] || fail "${i##*/} does not hold the core rules, the pack's, then the area rule, each once"
+  done
+}
+
+# Bugs: a missing or blank rules file, or a hooks.json of another shape, lets a card build, or blocks it with no reason;
+# a trailer when that is no valid ERE lets it land. Other cases call the loaders; a card run shows where card() stops.
+t_packstops() {
+  local n p steps why h; setup "[$(issue 7 2026-01-01), $(issue 8 2026-01-02), $(issue 9 2026-01-03), $(issue 10 2026-01-04)]"; printf ' \n\n' > "$T/$CASE/blank.md"; echo "$GO" > "$STUB/review.1"; h=$(git -C "$R" rev-parse HEAD)
+  while IFS='|' read -r n p steps why; do ( eval "$p"; rulecard "$n" ) || exit 1
+    [ "$(st "select(.issue == $n) | .step" | tr '\n' ' ')" = "$steps" ] && st "select(.issue == $n and .step == \"blocked\") | .reason" | grep -qF -- "$why" \
+      || fail "#$n ($p) did not block as $steps with its reason: $(st "select(.issue == $n) | \"\(.step) \(.reason)\"" | tr '\n' ,)"; cp "$SRC/lib/test-hooks.json" "$R/.conveyor/hooks.json"
+  done <<EOS
+7|export CONVEYOR_CARD_RULES=$T/$CASE/none.md|picked worktree deps blocked |brief: the card rules file $T/$CASE/none.md is missing or empty; a card never builds without it
+8|export CONVEYOR_CARD_RULES=$T/$CASE/blank.md|picked worktree deps blocked |brief: the card rules file $T/$CASE/blank.md is missing or empty
+9|jq '. + {permissions: {}}' "\$SRC/lib/test-hooks.json" > "\$R/.conveyor/hooks.json"|picked worktree deps blocked |$R/.conveyor/hooks.json is not {"hooks": {<event>: [...]}}
+10|tune '.commit.trailers = [{"when": "[", "token": "Mutation-verified", "ask": "Say what you broke."}]'|picked worktree deps brief start build start review blocked |the engine could not read the commit trailers that the pack requires
+EOS
+  [ "$(git -C "$R" rev-parse HEAD)" = "$h" ] || fail "a card with an invalid pack input landed: $(git -C "$R" log --oneline)"
+}
+
+# Bug: Needs You lacks the running file, the timeout or the output of a card's timed-out last test run. t_testfails uses
+# fixture runs; a card run joins exit, log and output. Each run prints a failure, then reads a pipe no one writes.
+t_testtimeout() {
+  setup "[$(issue 7 2026-01-01)]"; tune '.tunables.testTimeout = 1'; mkfifo "$STUB/never"; echo "$GO" | tee "$STUB/review.1" > "$STUB/review.2"
+  echo 'echo x >> "$STUB/tests"; echo "FAIL [slow]: no answer yet"; read -r < "$STUB/never"' > "$STUB/test-cmd"; rulecard 7
+  [ "$(st 'select(.step == "blocked") | .reason' | head -n 1)" = "the changed tests failed again after their one fix round (exit 124); nothing landed." ] \
+    || fail "the card was not blocked after its timed-out test runs: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
+  [ "$(loop snapshot --fresh | jq -c '.needsYou.blocked[0].track.records | map(select(.name == "tests failed")) | last | [.why, .failures.timeout.file, (.output | contains("FAIL [slow]: no answer yet"))]')" \
+    = '["exit 124: timed out after 1s in a.test.sh","a.test.sh",true]' ] || fail "Needs You does not show the timed-out run: $(loop snapshot --fresh | jq -c '.needsYou.blocked[0].track.records')"
+}
+
+# Bug: a card starts from main and lands to origin, whatever branch and remote the pack names. t_pack calls land() and
+# push(); the real loop picks, starts and pushes the card, and its empty-queue run pushes to a remote set after that.
+t_packland() {
+  local x; setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"; tune '.remote = "upstream" | .defaultBranch = "master"'
+  git -C "$R" branch -m main master; git -C "$R" remote remove origin; git init -q --bare -b master "$T/$CASE/up"; git -C "$R" remote add upstream "$T/$CASE/up"; git -C "$R" push -q upstream master
+  loop run --only 7 > "$T/$CASE/run.out" 2>&1 || fail "the run of #7 failed: $(tail -n 5 "$T/$CASE/run.out")"; x=$(git -C "$R" rev-parse master)
+  [ "$(st 'select(.step == "landed") | .sha')" = "$x" ] && [ "$(git -C "$T/$CASE/up" rev-parse master)" = "$x" ] && grep -qx two <(git -C "$R" show master:a.txt) \
+    || fail "#7 did not land on master and push to upstream: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
+  echo '[]' > "$STUB/issues.json"; git init -q --bare -b master "$T/$CASE/up2"; git -C "$R" remote add up2 "$T/$CASE/up2"; tune '.remote = "up2"'; loop run > "$T/$CASE/run.out" 2>&1 && [ "$(git -C "$T/$CASE/up2" rev-parse -q --verify master)" = "$x" ] \
+    || fail "a run with an empty queue did not push the landing to the new remote: $(tail -n 5 "$T/$CASE/run.out")"
+}
