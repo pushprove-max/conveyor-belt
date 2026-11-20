@@ -60,15 +60,17 @@ EOF
     || fail "the build line: $(st 'select(.step == "build")')"
   [ ! -e "$STUB/sessions" ] || fail "Claude Code ran for an OpenCode model: $(cat "$STUB/sessions")"
   [ "$(st 'select(.step == "landed") | .issue')" = 7 ] || fail "the card did not land: $(st '"\(.step) \(.reason)"')"
-  # The Rules panel names no effort for the OpenCode builder (it is given none), not the seed's medium.
-  [ "$(loop snapshot --fresh | jq -c '.modelSettings.builder | [.model, .effort, .agent, .efforts]')" = '["opencode:prov/mod-1",null,"opencode",[]]' ] \
-    || fail "the Board's builder settings name an effort OpenCode is not given: $(loop snapshot --fresh | jq -c .modelSettings.builder)"
+  # The Rules panel names no effort for the OpenCode builder (it is given none), not the seed's medium. One snapshot
+  # serves this check and the price check below: each fresh one is made from the whole card records.
+  snap=$(loop snapshot --fresh)
+  [ "$(jq -c '.modelSettings.builder | [.model, .effort, .agent, .efforts]' <<<"$snap")" = '["opencode:prov/mod-1",null,"opencode",[]]' ] \
+    || fail "the Board's builder settings name an effort OpenCode is not given: $(jq -c .modelSettings.builder <<<"$snap")"
   # The OpenCode builder takes no effort, though an OpenCode reviewer takes one (its --variant, models.test.sh).
   out=$(loop control model opencode prov/mod-1 high 2>&1); [ $? = 2 ] && grep -qF 'opencode takes no effort high (it takes none: name the model alone)' <<<"$out" \
     || fail "the OpenCode builder was given an effort: $out"
   # The Board prices the step at the dollars OpenCode reported.
-  [ "$(loop snapshot --fresh | jq -c --arg c "$c" '.metrics.cards[] | select(.card == $c) | [.metrics.timeline[] | select(.step == "build") | .usd]')" = '[0.025]' ] \
-    || fail "the build is not priced at OpenCode's cost: $(loop snapshot --fresh | jq -c --arg c "$c" '.metrics.cards[] | select(.card == $c) | .metrics.timeline')"
+  [ "$(jq -c --arg c "$c" '.metrics.cards[] | select(.card == $c) | [.metrics.timeline[] | select(.step == "build") | .usd]' <<<"$snap")" = '[0.025]' ] \
+    || fail "the build is not priced at OpenCode's cost: $(jq -c --arg c "$c" '.metrics.cards[] | select(.card == $c) | .metrics.timeline' <<<"$snap")"
 }
 
 # Bugs: an OpenCode build that `control stop` ends is read as a Claude stream, so what it used so far (its tokens,
@@ -92,7 +94,10 @@ t_opencodestop() {
 # command they rewrite (an unbounded search) runs as written; a command they allow is refused; a tool with no Claude
 # guard (a subagent) is let through; apply_patch, the file tool GPT models get, is refused outright, or a file of it
 # goes unscreened. The stub loads the plugin as OpenCode does, from the config file the engine
-# wrote, and calls its tool.execute.before hook.
+# wrote, and calls its tool.execute.before hook. The session changes nothing, so its card ends after the build: the
+# hook's answers are all the case reads, and a landing would add its time and prove no more. The case runs the loop
+# because t_opencodeguardrules calls guard.sh directly with settings it writes itself: only a run shows the plugin as
+# the engine wires it for a session (the config file, its settings and the session's environment) screens the calls.
 t_opencodeguard() {
   command -v node >/dev/null || fail "node is needed to load the guard plugin as OpenCode would"
   ocsetup
@@ -110,7 +115,6 @@ for (const [tool, args] of calls) {
   try { await h["tool.execute.before"]({ tool, sessionID: "s1", callID: "c1" }, out); console.log("allowed " + tool + ": " + (out.args.command ?? out.args.patchText.split("\n")[1])) }
   catch (e) { console.log("refused " + tool + ": " + e.message.split("\n")[0]) }
 }' "$p" > "$STUB/oc-guard" 2>&1
-echo two >> a.txt
 echo '{"type":"step_finish","timestamp":1,"sessionID":"s1","part":{"type":"step-finish","cost":0.01,"tokens":{"input":1,"output":1,"reasoning":0,"cache":{"read":0,"write":0}}}}'
 EOF
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
@@ -154,16 +158,21 @@ t_opencodeguardrules() {
   g Glob '{"pattern":"*"}' "$d/nosuch.json" | grep -qz 'cannot be read, so no guard can run on this call: it is refused.*rc=2' || fail "with no settings file a call was allowed"
 }
 
-# Bugs: an OpenCode build starts with the guard plugin missing, or with an OpenCode whose plugin API the plugin is not
-# written for, and runs unguarded; the card is blocked without saying why.
+# Bugs: an OpenCode build starts with the guard plugin missing and runs unguarded; the card is blocked without saying
+# why. It runs the loop: a direct ocready() call shows the refusal text, but not that the loop starts no OpenCode
+# session and records that text as the card's block reason.
 t_opencodenoguard() {
   ocsetup; echo 'echo two >> a.txt' > "$STUB/oc-cmd"
   CONVEYOR_OPENCODE_GUARD=$T/$CASE/nosuch/guard.mjs loop run > "$STUB/log" 2>&1
   [ ! -e "$STUB/oc-run" ] || fail "OpenCode started with the guard plugin missing"
   st 'select(.step == "blocked") | .reason' | grep -qF "the OpenCode guard plugin $T/$CASE/nosuch/guard.mjs (or guard.sh beside it) is missing: an OpenCode session would run without the command guards, so it does not start" \
     || fail "the card was not blocked saying the plugin is missing: $(st 'select(.step == "blocked") | .reason')"
-  # OpenCode 2, whose plugin API is another: refused the same way.
-  CASE=${CASE}v; ocsetup; echo 'echo two >> a.txt' > "$STUB/oc-cmd"; echo 2.3.0 > "$STUB/oc-version"
+}
+
+# Bugs: an OpenCode build starts with an OpenCode whose plugin API the plugin is not written for (OpenCode 2) and runs
+# unguarded; the card is blocked without saying why. It runs the loop for the reason t_opencodenoguard does.
+t_opencodenov2() {
+  ocsetup; echo 'echo two >> a.txt' > "$STUB/oc-cmd"; echo 2.3.0 > "$STUB/oc-version"
   loop run > "$STUB/log" 2>&1
   [ ! -e "$STUB/oc-run" ] && st 'select(.step == "blocked") | .reason' | grep -qF 'OpenCode 2.3.0 is not 1.x' \
     || fail "an OpenCode of another plugin API started, or the block does not say why: $(st 'select(.step == "blocked") | .reason')"
@@ -185,13 +194,17 @@ t_opencodeclaude() {
 }
 
 # Bugs: Claude's weekly limit holds back a card whose builder is OpenCode (with a Codex reviewer, no Claude session
-# runs); or, the other way, it stops holding back a Claude builder's card.
+# runs); or, the other way, it stops holding back a Claude builder's card. The OpenCode session changes nothing, so
+# its card ends after the build: that OpenCode ran is what shows the card was not held, and a landing would add its
+# time and prove no more. The case runs the loop because a direct call of the guard check (lib/pick.sh) shows only
+# its answer: whether the loop then writes no picked line, prints the pause, or goes on to launch OpenCode is decided
+# by the run that reads the seat's builder and acts on that answer, which only a run shows.
 t_opencodelimit() {
-  ocsetup; echo 'echo two >> a.txt; echo "{\"type\":\"step_finish\",\"part\":{\"cost\":0.01,\"tokens\":{\"input\":1,\"output\":1}}}"' > "$STUB/oc-cmd"
+  ocsetup; echo 'echo "{\"type\":\"step_finish\",\"part\":{\"cost\":0.01,\"tokens\":{\"input\":1,\"output\":1}}}"' > "$STUB/oc-cmd"
   tune '.tunables.limitTtl = 0'; export CONVEYOR_LIMIT_CMD='echo "{\"seven_day\":{\"utilization\":95}}"'
   loop control guard 90 >/dev/null
   seatset model m; out=$(loop run 1 2>&1); grep -q 'paused by guard' <<<"$out" && [ -z "$(st 'select(.step == "picked") | .issue')" ] \
     || fail "a Claude builder's card was not held at the limit: $out"
   seatset model opencode:prov/mod-1; out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  [ "$(st 'select(.step == "landed") | .issue')" = 7 ] && [ -e "$STUB/oc-run" ] || fail "Claude's limit held back the OpenCode builder's card: $out"
+  [ "$(st 'select(.step == "picked") | .issue')" = 7 ] && [ -e "$STUB/oc-run" ] || fail "Claude's limit held back the OpenCode builder's card: $out"
 }
