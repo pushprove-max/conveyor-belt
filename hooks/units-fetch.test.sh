@@ -175,4 +175,43 @@ same 'a build machine: every record still has its snapshot' 'gadgetlab bakery' "
 same 'a build machine with the feed: its map still, and no snapshots' \
   "$(printf 'testmap\t{"state":"made","of":"%s"}\nhost\t\tfeed\t0' "$M/bakery")" "$(fetch "$M/dev/bakery" feed | grep -E '^(testmap|host|gadgetlab|bakery)')"
 
+# The short check (issue 1033): `stamp` prints one checksum a record, of its state folder's cards.jsonl, control.json
+# and queue, in one command (one ssh call for every record); `fresh <repo>` asks that record for a snapshot built now.
+# The stub engine names each checkout's state folder, and its snapshot is the kept one ("kept") unless --fresh, then
+# the last line of cards.jsonl. Bugs it catches: a card started showed only at the next minute's fetch, and then from a
+# kept snapshot older than it; a check asked the host once a record, or moved for a record nothing changed in.
+machine stamp
+printf '%s\n' '#!/usr/bin/env bash' 'case $1 in' 'state-dir) echo "$CONVEYOR_MAIN/state" ;;' \
+  'snapshot) if [ "${2-}" = --fresh ]; then tail -n 1 "$CONVEYOR_MAIN/state/cards.jsonl"; else echo kept; fi ;;' '*) exit 2 ;;' 'esac' > "$M/clone/conveyor/conveyor.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'echo x >> "$(dirname "$0")/calls"' 'while [ "$1" = -o ]; do shift 2; done' 'bash -c "$2"' > "$M/bin/ssh" && chmod +x "$M/bin/ssh"
+mkdir -p "$M/bakery/state" "$M/gadgetlab/state" "$M/elsewhere"
+echo '{"step":"landed"}' > "$M/bakery/state/cards.jsonl"
+hostfile --arg c "$M/clone" --arg b "$M/bakery" --arg g "$M/gadgetlab" \
+  '{host: "lab", ssh: "owner@lab", main: $c, records: [{repo: "bakery", main: $b}, {repo: "gadgetlab", main: $g}]}'
+s1=$(fetch "$M/bakery" stamp)
+same 'stamp: a stamps line, then a record line each, here' 'stamps local|bakery|gadgetlab' "$(cut -f1,2 <<<"$s1" | sed 's/\t[0-9].*//' | tr '\t\n' ' |' | sed 's/|$//')"
+same 'stamp: nothing changed, the same checksums' "$s1" "$(fetch "$M/bakery" stamp)"
+echo '{"step":"start","card":"c9"}' >> "$M/bakery/state/cards.jsonl"
+s2=$(fetch "$M/bakery" stamp)
+same 'stamp: a start line moves its record'"'"'s checksum, and only its' 'bakery' "$(diff <(echo "$s1") <(echo "$s2") | sed -n 's/^> \([^\t]*\)\t.*/\1/p')"
+# A step only a live record writes (a proof run between recorded steps, a fix after a GO) moves the checksum too;
+# the live record's other fields, rewritten all through a step, do not. bakery keeps its cards folder's name.
+echo conveyor-cards-bakery > "$M/bakery/state/cards-folder"
+mkdir -p "$M/conveyor-cards-bakery/mainrun"
+echo '{"step":"review","at":"t1","last":"t1","turns":1}' > "$M/conveyor-cards-bakery/c9.live"
+s2=$(fetch "$M/bakery" stamp)
+echo '{"step":"review","at":"t1","last":"t2","turns":5}' > "$M/conveyor-cards-bakery/c9.live"
+same 'stamp: a live record'"'"'s heartbeat moves no checksum' "$s2" "$(fetch "$M/bakery" stamp)"
+echo '{"step":"fix","at":"t3","last":"t3","turns":0}' > "$M/conveyor-cards-bakery/c9.live"
+s3=$(fetch "$M/bakery" stamp)
+same 'stamp: a live record'"'"'s new step moves its record'"'"'s checksum' 'bakery' "$(diff <(echo "$s2") <(echo "$s3") | sed -n 's/^> \([^\t]*\)\t.*/\1/p')"
+echo '{"at":"t4"}' > "$M/conveyor-cards-bakery/mainrun/c9.unfixed.live"
+s4=$(fetch "$M/bakery" stamp)
+same 'stamp: a proof run started moves its record'"'"'s checksum' 'bakery' "$(diff <(echo "$s3") <(echo "$s4") | sed -n 's/^> \([^\t]*\)\t.*/\1/p')"
+s2=$s4
+same 'stamp: over ssh, the same checksums in one call' "$(sed 's/^stamps\tlocal$/stamps\tssh/' <<<"$s2")|x" "$(fetch "$M/elsewhere" stamp)|$(cat "$M/bin/calls")"
+got=$(fetch "$M/bakery" fresh bakery)
+same 'fresh: the changed record'"'"'s snapshot holds the change, the other'"'"'s is the kept one' \
+  "$(printf 'bakery\t{"step":"start","card":"c9"}\ngadgetlab\tkept')" "$(sed -n '/^host/,$p' <<<"$got" | sed 1d)"
+
 [ "$fails" = 0 ] || exit 1

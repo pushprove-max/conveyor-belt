@@ -9,7 +9,8 @@ import type { Research, Seen, State } from './sources'
 
 // Conveyor's board: what needs you, the cards on the belt, the queue, what landed today and the two lanes, as
 // `/units` and a side pane; with the pane on, a toast for a card that newly needs you or lands. One fetch a minute
-// reads it all, and the dashboard collector's live feed, when it is fresh, gives the board as it changes; the mod
+// reads it all, and the dashboard collector's live feed, when it is fresh, gives the board as it changes; with no
+// feed, a short check every few seconds starts the fetch as soon as a record changes; the mod
 // writes nothing: its only state is atoms (what the views draw).
 const state = atom({ plugin: 'conveyor-belt', key: 'state' } as const, null)
 // The belt mark's turn: only the motion clock writes it, never the poll, so a poll keeps the turn.
@@ -31,6 +32,9 @@ const POLL_MS = 60_000
 // at least every 10 s while the Board runs; one older than STREAM_FRESH is no feed.
 const STREAM_MS = 1000
 const STREAM_FRESH = 30_000
+// With no live feed running, the fetch's short check (`stamp`) runs this often, and a record it sees change is fetched
+// at once, its snapshot built fresh; the minute's fetch runs either way.
+const CHECK_MS = 5000
 // A Board file over MAX_DATA is not read, and a line names its size and the cap: never a blank board. 4 MiB is
 // the engine's own cap on a file read and on a command's output: a larger file is refused, larger output cut.
 const MAX_DATA = 4 * 1024 * 1024
@@ -99,6 +103,7 @@ const NO_FEED_DIR = "units: the live feed's folder was not found (no Board job h
 let main: string | undefined
 let stopPoll: { cancel: () => void } | undefined
 let feedClock: { cancel: () => void } | undefined
+let checkClock: { cancel: () => void } | undefined
 let spin: { cancel: () => void } | undefined
 let motion = false
 let seatName: 'main' | 'worker' = 'worker'
@@ -232,8 +237,12 @@ const collect = async ($: EngineInterface, cwd: string): Promise<{ st: State; fe
   if (!feedDir) await nameFeedDir($, cwd)
   const got = await readFeed($).catch(() => null)
   const fed = got && 'board' in got ? got : null
+  // The records the short check saw change since the last fetch began: their snapshots are built fresh.
+  const fresh = [...freshFor]
+  freshFor.clear()
+  const mode = fed ? ['feed'] : fresh.length ? ['fresh', ...fresh] : []
   // The script gives the host 50 s; the engine's own 30 s default would cut a slow answer short.
-  const r = await $.process.run(['bash', await fetchPath($, cwd), ...(fed ? ['feed'] : [])], { cwd, timeoutMs: 75_000 }).catch(() => undefined)
+  const r = await $.process.run(['bash', await fetchPath($, cwd), ...mode], { cwd, timeoutMs: 75_000 }).catch(() => undefined)
   const f = r && r.exitCode === 0 ? parseFetch(r.stdout) : null
   const now = await $.clock.now()
   if (f) own = f.own
@@ -348,6 +357,35 @@ const drawFeed = async ($: EngineInterface, got: { board: Board; at: number; key
   feedKey = got.key
 }
 
+// Every CHECK_MS while no live feed runs (the feed is drawn within the second already): the fetch's `stamp`, one
+// checksum a record (one command, over one ssh call at most). A record whose checksum moved since the last check is
+// fetched at once, fresh; a check that finds none moved fetches nothing. A fetch that prints no stamps (an install
+// older than the check, which takes it for a whole fetch) stops the checks for this load: the minute's fetch stays.
+let checkBusy = false
+let noStamp = false
+let stamps: Map<string, string> | null = null
+const freshFor = new Set<string>()
+const checkTick = ($: EngineInterface) => {
+  if (checkBusy || noStamp || waiting || !main || !anyWanted()) return
+  const cwd = main
+  checkBusy = true
+  void (async () => {
+    const st = feedDir ? await $.fs.stat(`${feedDir}/stream.json`).catch(() => undefined) : undefined
+    if (st && st.size <= MAX_DATA && (await $.clock.now()) - st.mtimeMs <= STREAM_FRESH) return
+    const r = await $.process.run(['bash', await fetchPath($, cwd), 'stamp'], { cwd, timeoutMs: 15_000 }).catch(() => undefined)
+    if (!r || r.exitCode !== 0) return
+    const lines = r.stdout.split('\n').filter(Boolean)
+    if (!lines[0]?.startsWith('stamps\t')) { noStamp = true; return }
+    const now = new Map(lines.slice(1).map(l => [l.slice(0, l.indexOf('\t')), l.slice(l.indexOf('\t') + 1)] as const))
+    const was = stamps
+    stamps = now
+    const moved = was ? [...now].filter(([k, v]) => was.get(k) !== v).map(([k]) => k) : []
+    if (!moved.length) return
+    for (const k of moved) freshFor.add(k)
+    void tick($).catch(() => undefined)
+  })().catch(() => undefined).finally(() => { checkBusy = false })
+}
+
 // A board the feed gave while the fetch ran is newer than the fetch's: the poll then brings only the lanes and the
 // limit, and the board is the feed's newest (feedBoard), whether or not the views hold it yet.
 const poll = async ($: EngineInterface) => {
@@ -429,6 +467,11 @@ const begin = async ($: EngineInterface) => {
   // A session with the pane off (a card's own worktree) never fetches until /units is typed there. The first fetch
   // is not waited for: it asks another machine, and the session must not start late for it.
   stopPoll = $.clock.every(POLL_MS, () => { if (anyWanted()) void tick($).catch(() => undefined) })
+  checkClock?.cancel()
+  noStamp = false
+  stamps = null
+  freshFor.clear()
+  checkClock = $.clock.every(CHECK_MS, () => checkTick($))
   feedClock?.cancel()
   feedClock = undefined
   feedAt = -1

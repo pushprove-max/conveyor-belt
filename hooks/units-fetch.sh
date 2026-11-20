@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# The /units fetch: hooks/units.tsx runs it once a minute in the session's main checkout. It prints the lines that
+# The /units fetch: hooks/units.tsx runs it once a minute in the session's main checkout, and as soon as its short
+# check (stamp, below) sees a record change. It prints the lines that
 # hooks/sources.ts parseFetch reads, one tab-separated line each:
 #   paths <the Research lane's worktree, empty when none is named> <home> <this checkout's record's repo, empty when none>
 #   fast norecord | none | unread | ok <branch> <commits ahead of the default branch> <tracked files changed> <first subject>
@@ -22,11 +23,15 @@
 # ssh to the host file's ssh target. A record whose snapshot fails prints null; the others still print. how: local or
 # ssh, else why nothing was asked: nofile (no host file; the line then names the two paths looked at) or config (it
 # is not understood).
-# Usage: units-fetch.sh [feed]. feed: the Board's live feed is fresh, so the board is the feed's: only the lanes, the
-# Foreman, the test map and the engine are read, and the host line is `host <empty> feed 0`.
+# Usage: units-fetch.sh [feed | fresh <repo>... | stamp]. feed: the Board's live feed is fresh, so the board is the
+# feed's: only the lanes, the Foreman, the test map and the engine are read, and the host line is `host <empty> feed 0`.
+# fresh: the short check saw these records change, so their snapshots are built now (`snapshot --fresh`), not the
+# kept ones. stamp: the short check alone (below), which prints `stamps <local | ssh | none>`, then <repo> <checksum>
+# for every record, and exits 1 when the host did not answer.
 set -uo pipefail
 . "${BASH_SOURCE[0]%/*}/../conveyor/lib/portable.sh" && p_tools
 here=$PWD
+mode=${1:-}; [ $# = 0 ] || shift
 # This machine's host file, else the checkout's committed conveyor/host.json (as the Board reads it).
 mine=${XDG_CONFIG_HOME:-$HOME/.config}/conveyor/host.json cfg=$here/conveyor/host.json
 [ ! -e "$mine" ] || cfg=$mine
@@ -45,6 +50,31 @@ fi
 [[ $fast != "~/"* ]] || fast=$HOME/${fast#"~/"}
 # shellcheck disable=SC2088 # likewise
 [[ $research != "~/"* ]] || research=$HOME/${research#"~/"}
+# Which machine and which checkout, as the Board reads them: hostfile.sh, the one reader of the host file.
+got='' ok=1 host='' main='' engine='' target=''
+if [ -e "$cfg" ]; then
+  got=$(bash "${BASH_SOURCE[0]%/*}/../.claude/scripts/hostfile.sh" "$here"); ok=$?
+  { IFS= read -r -d '' host; IFS= read -r -d '' main; IFS= read -r -d '' engine; IFS= read -r -d '' target; } \
+    < <(jq -j '(.host // ""), "\u0000", (.main // ""), "\u0000", (.engine // ""), "\u0000", (.target // ""), "\u0000"' <<<"$got" 2>/dev/null)
+fi
+# The snapshots are asked over ssh with a build machine, unless this checkout is a record of the host file or its main.
+remote=0; [ "$ok" != 0 ] || [ -z "$target" ] || [ "$rec" = 1 ] || [ "$here" -ef "$main" ] || remote=1
+# stamp: the short check. For every record, in one command where the snapshots are asked (one ssh call at most), a
+# checksum of what a card started, a step, a landing or a block changes: the size and last 4 KiB of its cards.jsonl,
+# its control.json and the queue (snapgh/issues), in its state folder (`conveyor.sh state-dir`), and its live records
+# in its cards folder (lib/paths.sh CARDS: the name kept in the state folder's cards-folder, beside its main): which
+# there are (each card's <card>.live and each bug card's proof run, mainrun/<card>.unfixed.live, views.sh proofs()),
+# and the step and the card waited on that each card's names, as a step that only a live record writes shows (a fix
+# after a GO, a wait, a proof run). A live record's other fields, rewritten as the step runs, are not read.
+if [ "$mode" = stamp ]; then
+  [ -e "$cfg" ] && [ "$ok" = 0 ] || { printf 'stamps\tnone\n'; exit 0; }
+  scmd=$(jq -j --arg e "$engine/conveyor/conveyor.sh" '.records[]
+    | "d=$(CONVEYOR_MAIN=\(.main | @sh) bash \($e | @sh) state-dir 2>/dev/null); k=$(head -n 1 \"$d/cards-folder\" 2>/dev/null); case $k in conveyor-cards|conveyor-cards-*) ;; *) k=conveyor-cards ;; esac; c=\(.main | sub("/+$"; "") | sub("/[^/]*$"; "") | @sh)/$k; printf \"%s\\t%s\\n\" \(.repo | @sh) \"$({ wc -c < \"$d/cards.jsonl\"; tail -c 4096 \"$d/cards.jsonl\"; cat \"$d/control.json\" \"$d/snapgh/issues\"; cd \"$c\" && { ls -1 -- *.live mainrun/*.unfixed.live; grep -o -H -E \"[{,].(step|on).:.[^,}]*\" -- *.live; }; } 2>/dev/null | cksum)\"; "' <<<"$got")
+  if [ "$remote" = 0 ]; then out=$(timeout -k 2 10 bash -c "$scmd"); rc=$?; how=local
+  else out=$(timeout -k 2 10 ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "$scmd" 2>/dev/null); rc=$?; how=ssh; fi
+  [ "$rc" = 0 ] || exit 1
+  printf 'stamps\t%s\n%s\n' "$how" "$out"; exit 0
+fi
 printf 'paths\t%s\t%s\t%s\n' "$research" "$HOME" "$own"
 base=$(jq -r '.defaultBranch // "main"' .conveyor/project.json 2>/dev/null) || base=main
 if [ "$rec" = 0 ]; then printf 'fast\tnorecord\n'
@@ -93,15 +123,6 @@ fi
 # when there is one: pluginbugs <how many> <the file>.
 n=0; [ -z "$fd" ] || n=$(grep -c '^- ' "$fd/plugin-bugs.md" 2>/dev/null) || n=0
 [ "$n" -eq 0 ] || printf 'pluginbugs\t%s\t%s\n' "$n" "$fd/plugin-bugs.md"
-# Which machine and which checkout, as the Board reads them: hostfile.sh, the one reader of the host file.
-got='' ok=1 host='' main='' engine='' target=''
-if [ -e "$cfg" ]; then
-  got=$(bash "${BASH_SOURCE[0]%/*}/../.claude/scripts/hostfile.sh" "$here"); ok=$?
-  { IFS= read -r -d '' host; IFS= read -r -d '' main; IFS= read -r -d '' engine; IFS= read -r -d '' target; } \
-    < <(jq -j '(.host // ""), "\u0000", (.main // ""), "\u0000", (.engine // ""), "\u0000", (.target // ""), "\u0000"' <<<"$got" 2>/dev/null)
-fi
-# The snapshots are asked over ssh with a build machine, unless this checkout is a record of the host file or its main.
-remote=0; [ "$ok" != 0 ] || [ -z "$target" ] || [ "$rec" = 1 ] || [ "$here" -ef "$main" ] || remote=1
 # The test map of this checkout's project (`conveyor.sh testmap`, lib/testmap.sh mapstate()): testmap <its state, one
 # JSON object>, printed only in a checkout with Conveyor's project settings, and read where Conveyor runs for it. Here,
 # by this copy of Conveyor, unless the snapshots come from a build machine: then that machine's, in the same ssh
@@ -123,16 +144,18 @@ if [ -f .conveyor/project.json ]; then
   en=$(CONVEYOR_MAIN=$here timeout -k 2 20 bash "${BASH_SOURCE[0]%/*}/../conveyor/conveyor.sh" take stale 2>/dev/null) \
     && [ -n "$en" ] && printf 'engine\t%s\n' "${en//$'\t'/ }"
 fi
-if [ "${1:-}" = feed ]; then
+if [ "$mode" = feed ]; then
   [ -z "$tmcmd" ] || timeout -k 2 20 ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "$tmcmd" 2>/dev/null | grep -m1 '^testmap'$'\t'
   printf 'host\t\tfeed\t0\n'; exit 0
 fi
 
 [ -e "$cfg" ] || { printf 'host\t\tnofile\t0\t%s\t%s\n' "$mine" "$cfg"; exit 0; }
 [ "$ok" = 0 ] || { printf 'host\t%s\tconfig\t0\n' "$host"; exit 0; }
-# Every name and path is quoted for the shell (@sh), here or on the host.
-cmd=$(jq -j --arg e "$engine/conveyor/conveyor.sh" '.records[]
-  | "printf \"%s\\t\" \(.repo | @sh); { CONVEYOR_MAIN=\(.main | @sh) bash \($e | @sh) snapshot 2>/dev/null || echo null; }; "' <<<"$got")
+# Every name and path is quoted for the shell (@sh), here or on the host. A record `fresh` names is asked for
+# `snapshot --fresh`: its state changed since the kept snapshot may have been built, which a plain read would print.
+[ "$mode" = fresh ] || set --
+cmd=$(jq -j --arg e "$engine/conveyor/conveyor.sh" '$ARGS.positional as $f | .records[]
+  | "printf \"%s\\t\" \(.repo | @sh); { CONVEYOR_MAIN=\(.main | @sh) bash \($e | @sh) snapshot\(.repo as $r | if any($f[]; . == $r) then " --fresh" else "" end) 2>/dev/null || echo null; }; "' --args "$@" <<<"$got")
 if [ "$remote" = 0 ]; then out=$(timeout -k 2 50 bash -c "$cmd"); rc=$?; how=local
 else out=$(timeout -k 2 50 ssh -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$target" "$tmcmd$cmd" 2>/dev/null); rc=$?; how=ssh
   # The build machine's testmap line comes first, and goes before the host line, as parseFetch reads it.

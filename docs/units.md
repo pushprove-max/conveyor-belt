@@ -178,13 +178,22 @@ of each card in the pane's WORKER ACTIVITY `◐ ◓ ◑ ◒` once a second; off,
 ## What it reads
 
 One fetch a minute while the pane is on, and one each time `/units` is typed (a session with the pane off fetches
-nothing until then); a `/units` typed while a fetch is still waiting to start starts none of its own. The fetch is
+nothing until then); a `/units` typed while a fetch is still waiting to start starts none of its own.
+
+How fast the views follow the belt: with the live feed (below) running, a change is in the views within about
+2 seconds. With no live feed, the mod makes a short check every 5 seconds: for each record, one checksum of its
+`cards.jsonl`, `control.json` and queue, and of the step that each of its live cards (and each bug card's proof run)
+is on now, all in one command (one `ssh` call when the records are on a build machine).
+When a record's checksum changes, a fetch starts at once, and that record's snapshot is built new for it
+(`conveyor.sh snapshot --fresh`), so a card started, a step, a landing or a block shows within about 5 seconds, plus
+the time that build takes. A check that finds no change fetches nothing. The fetch is
 `hooks/units-fetch.sh`, run in the main checkout. It reads the machine's host file, `~/.config/conveyor/host.json`
 (under `$XDG_CONFIG_HOME` when that is set; else the checkout's `conveyor/host.json`), as the Board reads it:
 
 - `conveyor.sh snapshot` of every record the host file names, from the clone its `main` names, in one command. The
   command runs on this machine when the session's checkout is a record of the host file, or that clone; else over ssh
-  to the host file's `ssh` target. Each record's snapshot is the last one Conveyor made; when it is more than a minute
+  to the host file's `ssh` target. Each record's snapshot is the last one Conveyor made, or a new one after a check
+  found that record changed; when it is more than a minute
   old, a line under the board says its age and the time it was made.
 - The lanes of the session's checkout: the folders its record names in `lanes.fast.worktree` and
   `lanes.research.worktree` (`conveyor.sh lane ... create` writes them; `~/` is the home folder). Of the Fast lane,

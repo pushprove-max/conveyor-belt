@@ -105,7 +105,9 @@ const pressDetails = async ($: any) => {
   await ui.press({ key: 'details' })
   await ui.unmount()
 }
-const fetches = (w: World) => w.runs.filter(r => r.argv[0] === 'bash' && r.argv[1].endsWith('/hooks/units-fetch.sh'))
+// The short check (`stamp`) is no fetch: it reads one checksum a record, never a snapshot.
+const fetches = (w: World) => w.runs.filter(r => r.argv[0] === 'bash' && r.argv[1]?.endsWith('/hooks/units-fetch.sh') && r.argv[2] !== 'stamp')
+const checks = (w: World) => w.runs.filter(r => r.argv[0] === 'bash' && r.argv[1]?.endsWith('/hooks/units-fetch.sh') && r.argv[2] === 'stamp')
 const CANNOT = 'units: the Conveyor snapshot cannot be read (buildbox is unreachable)'
 
 test('/units prints the header, the four sections and the two lanes from one fetch run in the main checkout', async ($, on) => {
@@ -259,6 +261,42 @@ test('main fetches at the start and once a minute', async ($, on) => {
   await units($)
   await w.clock.settle()
   expect(fetches(w).length).toBe(4)
+})
+
+// With no live feed, the fetch's short check runs every 5 s. Bug it catches: a card that went on the belt showed only
+// at the next minute's fetch, and then from a kept snapshot older than the change; or each check ran a whole fetch.
+test('with no feed, a record whose check moved is fetched at once with its snapshot fresh; a check with nothing moved fetches nothing', async ($, on) => {
+  const w = world(on, 'main', answer(snapshot()))
+  let stamp = 'stamps\tlocal\nbookstore\t4294967295 0\n'
+  const base = w.run
+  w.run = (argv, cwd) => {
+    if (argv[2] !== 'stamp') return base(argv, cwd)
+    w.runs.push({ argv: [...argv], cwd })
+    return { value: { exitCode: 0, stdout: stamp, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  }
+  await start($, 'main')
+  await w.clock.settle()
+  await w.clock.advance(10_000)
+  await w.clock.settle()
+  expect(checks(w).length).toBe(2)
+  expect(fetches(w).map(r => r.argv.slice(2))).toEqual([[]])
+  // A start line in bookstore's cards.jsonl moves its checksum: the next check fetches it, asking for a fresh snapshot.
+  stamp = 'stamps\tlocal\nbookstore\t3962379231 20\n'
+  w.fetch = answer(snapshot({ belt: [BELT] }))
+  await w.clock.advance(5000)
+  await w.clock.settle()
+  expect(fetches(w).map(r => r.argv.slice(2))).toEqual([[], ['fresh', 'bookstore']])
+  expect(await draw($, 'Pane')).toContain('#3863')
+})
+
+// Bug it catches: an install older than the check takes `stamp` for a whole fetch, so every 5 s ran one.
+test('a fetch that prints no stamps (an older install) is checked once, then only the minute\'s fetch runs', async ($, on) => {
+  const w = world(on, 'main', answer(snapshot()))
+  await start($, 'main')
+  await w.clock.settle()
+  await w.clock.advance(20_000)
+  await w.clock.settle()
+  expect(checks(w).length).toBe(1)
 })
 
 // A reload in a running session: the kit loads the module once and has no reload, so the first load is the kit's
@@ -634,6 +672,9 @@ test('with the live feed fresh the board is the feed\'s, no host is asked, and a
   await w.clock.advance(1000)
   expect(await draw($, 'Pane')).toContain('#3863')
   expect(fetches(w).length).toBe(before)
+  // While the feed runs, the short check asks nothing: the feed already gives each change.
+  await w.clock.advance(5000)
+  expect(checks(w)).toEqual([])
 })
 
 test('a live feed that is down still shows its last board, and says the stream is down', async ($, on) => {
@@ -1203,7 +1244,7 @@ const installWorld = (on: On, pack: object, files: Record<string, string>) => {
   on('session.id', () => ({ value: 'me' }))
   const run = w.run
   w.run = (argv, cwd) => {
-    if (argv[0] === 'bash' && argv[1].endsWith('/hooks/units-fetch.sh'))
+    if (argv[0] === 'bash' && argv[1]?.endsWith('/hooks/units-fetch.sh'))
       w.fetch = withForeman(['me', '4242', COMMIT_A, argv[1] === INSTALL ? 'me' : '30156 me', '1', COMMIT_A, UP])
     return run(argv, cwd)
   }
