@@ -1052,14 +1052,21 @@ covof() {
 # The tests of the changed files <file>...: into run (test files), area (engine case files) and all (the whole engine
 # test), then (but in textonly's pick) pick's cases (the engine runner's cases, none for all of them) and run[the runner].
 pick() {
-local f t s named stem dir cov
+local f t s named stem dir cov cpart helpers
 [ -n "$NOTEXT" ] || npart=()
 for f; do
   # A change to its comment and blank lines alone: no test, its linked ones and itself, a test file, too (commentonly).
   [ -n "$NOTEXT" ] || ! commentonly "$f" || continue
+  # A case file: its changed and added cases alone when its shared part is the same (casesof, cpart), else all of them.
+  # Then helpers: the functions its shared part defines, one a line.
+  cpart=; helpers=; case $f in conveyor/tests/*.test.sh) [ ! -f "$f" ] || ! casesof "$f" || { cpart=1
+    helpers=$(awk "$CASES" "$f" | sed -n 's/^S\t\([A-Za-z_][A-Za-z0-9_]*\)() *{.*/\1/p'); } ;; esac
   # Its linked test files (LINKS), whatever else it selects; not in textonly's pick (NOTEXT): its files are not changed.
+  # When its cases alone run (cpart), not a link to a case file that names one of its helpers: that link is for a change
+  # to the helpers it calls (slots.test.sh's slotpool, in slotwhole.test.sh). A link a main-red fix wrote names none.
   [ -z "$LINKS" ] || [ -n "$NOTEXT" ] || while IFS=$'\t' read -r s t; do
     [ "$s" = "$f" ] || continue
+    case $t in conveyor/tests/*.test.sh) [ -z "$helpers" ] || ! grep -qwF -f <(printf '%s\n' "$helpers") -- "$t" || continue ;; esac
     case $t in conveyor/tests/*.test.sh) area[$t]=1 ;; *) run[$t]=1 ;; esac
     linked[$t$'\t'$f]=1
   done <<<"$LINKS"
@@ -1087,8 +1094,7 @@ for f; do
     continue
   fi
   case $f in
-    # A case file: its changed and added cases alone when its shared part is the same (casesof), else all of them.
-    conveyor/tests/*.test.sh) casesof "$f" || area[$f]=1; continue ;;
+    conveyor/tests/*.test.sh) [ -n "$cpart" ] || area[$f]=1; continue ;;
     *.test.sh|*.test.mjs|*.test.ts|*.test.tsx) run[$f]=1; continue ;;
   esac
   # The Board tests that import a changed module or draw a changed panel, before the rules below can end the pick: a

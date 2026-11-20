@@ -677,6 +677,34 @@ p_linked() {
   [ -z "$got" ] && [ "$(cat "$T/rc")" = 0 ] && ! grep -q '^TESTRUN linked' "$T/log/test-changed.log" && ok "D2: a card changing only lib/c.sh does not run tests/l.test.sh" \
     || no "lib/c.sh changed: ran '$got', exit $(cat "$T/rc"): $(cat "$T/out")"
 }
+# Issue 1001. Bugs it catches: a case file linked to the case files that call its helpers (slots.test.sh to
+# slotwhole.test.sh) ran every case of them on a change to one of its cases; and a link a main-red fix wrote (to a
+# case file that calls none of its helpers) was skipped too, so the test that broke main once did not run again.
+p_caselinked() {
+  echo '{"conveyor/tests/a.test.sh": ["conveyor/tests/b.test.sh"]}' > "$R/.conveyor/test-links.json"
+  printf 'aset() {\n  :\n}\nt_aone() {\n  :\n}\nt_atwo() {\n  :\n}\n' > "$R/conveyor/tests/a.test.sh"
+  git -C "$R" add -A && git -C "$R" commit -qm links
+  printf 'aset() {\n  :\n}\nt_aone() {\n  :\n}\nt_atwo() {\n  true\n}\n' > "$R/conveyor/tests/a.test.sh"; got=$(mran2)
+  [ "$got" = "atwo bone" ] && ok "a change to one case runs a linked case file that calls none of its helpers (a main-red link)" \
+    || no "a.test.sh atwo changed, b.test.sh calls no helper: ran '$got': $(cat "$T/out")"
+  printf 't_bone() {\n  aset\n}\n' > "$R/conveyor/tests/b.test.sh"; git -C "$R" commit -qm aset -- conveyor/tests/b.test.sh
+  got=$(mran2)
+  [ "$got" = atwo ] && ok "a change to one case runs that case alone, not a linked case file that calls its helpers" \
+    || no "a.test.sh atwo changed, b.test.sh calls aset: ran '$got': $(cat "$T/out")"
+  printf 'aset() {\n  true\n}\nt_aone() {\n  :\n}\nt_atwo() {\n  :\n}\n' > "$R/conveyor/tests/a.test.sh"; got=$(mran2)
+  [ "$got" = "aone atwo bone" ] && ok "a change to a linked case file's helper runs it whole and the case files that call it" \
+    || no "a.test.sh aset changed: ran '$got': $(cat "$T/out")"
+}
+# Issue 1001. Bug it catches: a case of this checkout's slots.test.sh that the reader of case files (CASES) cannot
+# read (t_slotnoroom's `...; }` on a line of its own body) made a change to one case run the file whole, and so every
+# file it links to. The file is a.test.sh here: the scratch map names a.test.sh.
+p_slotsparse() {
+  cp "$ROOT/conveyor/tests/slots.test.sh" "$R/conveyor/tests/a.test.sh"; git -C "$R" commit -qam slots
+  awk '{ print } /^t_slotleft\(\) \{$/ { print "  true" }' "$ROOT/conveyor/tests/slots.test.sh" > "$R/conveyor/tests/a.test.sh"
+  got=$(mran2)
+  [ "$got" = slotleft ] && ok "a change to t_slotleft in slots.test.sh runs that case alone" \
+    || no "slots.test.sh t_slotleft changed: ran '$got': $(cat "$T/out")"
+}
 
 # This checkout's own map, on a scratch copy of every file it names, each case file holding one case named after it
 # (t_<file>): a change to one engine file runs the case files its area names, not the whole engine test; a change to
@@ -910,7 +938,7 @@ p_mapnames() {
 for p in mtestrun mreview mclaim msnapshot mall mdisp mdispcode mbase mbaserule mbasevalue mmap mmaplib mfuncs mfuncsall \
   mcmds mcmdsusage mcmdsadd mcmdsall mdefaults mdefaultsmode; do part "$p" m; done
 for p in checkout area selected boardcount shellcount ended realstate filter named owned ownedpy deleted mapadd mapmove mapcore emptyarea casefile caseshared scnew scold enginetime cputime \
-  rerun mainrun mainwhole nodecases flakyoff slowoff killed fixengine fixtest mainmoved sharedwhy fixpassed core firstwhy handrun noarea why unlisted badline union cover linked; do part "$p"; done
+  rerun mainrun mainwhole nodecases flakyoff slowoff killed fixengine fixtest mainmoved sharedwhy fixpassed core firstwhy handrun noarea why unlisted badline union cover linked caselinked slotsparse; do part "$p"; done
 part mapnames
 wait
 for p in "${PARTS[@]}"; do

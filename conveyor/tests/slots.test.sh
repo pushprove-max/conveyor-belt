@@ -3,8 +3,8 @@
 # timeout: 300
 # Engine cases: the machine's test slots (lib/slots.sh), one pool that every test run on the machine takes its workers' slots from.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
-# file runs its own cases through the runner. wholerun is slotwhole.test.sh's. A change to either file runs the other
-# and the files that call their helpers, through their links in .conveyor/test-links.json.
+# file runs its own cases through the runner. wholerun is slotwhole.test.sh's. A change to either file's helpers or
+# setup runs the other and the files that call their helpers, through their links in .conveyor/test-links.json.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
@@ -448,4 +448,5 @@ t_casebare() {
 
 # Issue 346. Bug: a free slot was refused while the removed machine room read Strained (its old host file thresholds).
 t_slotnoroom() { slotpool 1; local h=$XDG_CONFIG_HOME/conveyor/host.json; jq '.pressure = {strained: {wakeMs: 0, freeMB: 999999999}}' "$h" > "$h.n" && mv "$h.n" "$h"
-  ( . "$SRC/lib/slots.sh" && slot_pool && slot_try ) || fail "a free test slot was refused under the old machine-room settings: $(cat "$h")"; }
+  ( . "$SRC/lib/slots.sh" && slot_pool && slot_try ) || fail "a free test slot was refused under the old machine-room settings: $(cat "$h")"
+}

@@ -10,7 +10,7 @@
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
 # batchsetup, cardof and batchruns are batch.test.sh's: the runner loads every case file into one shell. A change to
-# batch.test.sh runs this file too, through its link in .conveyor/test-links.json.
+# batch.test.sh's helpers or setup runs this file too, through its link in .conveyor/test-links.json.
 
 # What main gets during the batch's one run, for the cases below: $STUB/during is run once, in main's checkout, by the
 # test run that holds #7's and #8's changes together (the batch's), as a card on other files landing meanwhile would.

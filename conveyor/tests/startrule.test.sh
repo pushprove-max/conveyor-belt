@@ -8,8 +8,8 @@
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
-# drypicks and readopen are deps.test.sh's: the runner loads every case file into one shell. A change to deps.test.sh
-# runs this file too, through its link in .conveyor/test-links.json.
+# drypicks and readopen are deps.test.sh's: the runner loads every case file into one shell. A change to deps.test.sh's
+# helpers or setup runs this file too, through its link in .conveyor/test-links.json.
 
 # Where new issues start. Bugs: a new issue picked while the setting is Held, or not shown as held; a released
 # one held again, also one released before it was first seen; a follow-up, or an issue open before the switch (even

@@ -3,8 +3,8 @@
 # timeout: 300
 # Engine cases: the whole-suite runs' turns of the machine's test slots (lib/slots.sh slot_whole).
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
-# file runs its own cases through the runner. slotpool is slots.test.sh's. A change to either file runs the other and
-# the files that call their helpers, through their links in .conveyor/test-links.json.
+# file runs its own cases through the runner. slotpool is slots.test.sh's. A change to either file's helpers or setup runs the other
+# and the files that call their helpers, through their links in .conveyor/test-links.json.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.

@@ -9,7 +9,7 @@
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
 # rerunsetup, rerunfiles, ran, rerunedit, rerunstep, rerunwt and tline are rerun.test.sh's: the runner loads every case
-# file into one shell. A change to rerun.test.sh runs this file too, through its link in .conveyor/test-links.json.
+# file into one shell. A change to rerun.test.sh's helpers or setup runs this file too, through its link in .conveyor/test-links.json.
 
 # Bug this guards against: a session that brings the change onto another HEAD and edits it where main changed
 # nothing (here a.txt, the card's own file, on a HEAD whose new commit changes no file) has edited it outside any
