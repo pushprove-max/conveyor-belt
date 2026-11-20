@@ -385,5 +385,8 @@
   ],
   "conveyor/tests/batch.test.sh": [
     "conveyor/tests/batchmain.test.sh"
+  ],
+  "conveyor/tests/deps.test.sh": [
+    "conveyor/tests/startrule.test.sh"
   ]
 }

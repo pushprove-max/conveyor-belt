@@ -543,7 +543,7 @@ out=$(jq -cn --arg c "$cmd" '{hook_event_name: "PreToolUse", tool_input: {comman
 [ "$(grep -c 'control start held' "$T/calls")" = 2 ] || fail "not every record starts new issues held before the command runs: $(cat "$T/calls")"
 : > "$T/calls"
 # Issue 330: three issues filed in one command are all held, and each by `control adopt`, which leaves one the owner
-# released before this hook ran released (deps.test.sh t_startadopt), where `control hold` held it again.
+# released before this hook ran released (startrule.test.sh t_startadopt), where `control hold` held it again.
 out=$(jq -cn --arg c "$cmd" '{hook_event_name: "PostToolUse", tool_input: {command: $c},
   tool_response: {stdout: "https://github.com/example/beta/issues/12\nhttps://github.com/example/beta/issues/15\nhttps://github.com/example/alpha/issues/30\n", stderr: ""}}' \
   | bash "$SRC/foreman.sh" filed)
