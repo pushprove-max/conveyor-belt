@@ -46,8 +46,7 @@ t_keptlong() {
   jq -cn '{card:"c20270101T000000-9",issue:9,step:"blocked",time:"2027-01-01T00:00:00Z",tokens:{claude:0,codex:0},result:"blocked",sha:"",reason:"worktree: the engine could not link the dependencies of the main checkout: x",kept:""}' >> "$ST/retried.jsonl"
   echo "$GO" > "$STUB/review.4"; rm "$STUB/review-cmd"
   echo 'cp "$STUB/brief" "$STUB/brief.build"; git diff --cached --name-only > "$STUB/resumed-with"; f=$(grep -o "/[^ ]*\.carried" "$STUB/brief" | head -n 1); cp "$f" "$STUB/carried"' > "$STUB/build"
-  # loop: the cut findings and the file named for them must reach the retried build's brief, which card() makes
-  # (lib/card.sh) and only its run shows; its landing must then leave no file behind
+  # loop: the cut findings and the file named for them must reach the retried build's brief, which card() makes (lib/card.sh) and only its run shows; its landing must then leave no file behind
   loop run >/dev/null || fail "run of the retried #9 exited non-zero"
   st 'select(.issue == 9 and .step == "worktree") | .reason' | grep -q "^resumed from the kept patch of card $old:" && [ "$(cat "$STUB/resumed-with" 2>&1)" = a.txt ] \
     && [ "$(st 'select(.issue == 9 and '"$NOMARK"') | "\(.step) \(.result)"' | tr '\n' ,)" = "picked ok,worktree ok,brief ok,build ok,review GO,test pass,landed ok," ] \
@@ -85,8 +84,7 @@ t_keptleft() {
   [ "$(st 'select(.issue == 11 and .step == "blocked") | .kept + (.reason | sub("^review 2: .*evidence not moved.*"; "left"; "s"))')" = left ] && grep -q 'left beside' "$T/$CASE/cards/$old.review" \
     || fail "#11 was not blocked on its second review with its first review left beside the worktree: $(st 'select(.issue == 11 and .step == "blocked")') $(ls "$T/$CASE/cards")"
   rm "$STUB/review-cmd"; echo "$GO" > "$STUB/review.$((r + 4))"; echo 'cp "$STUB/brief" "$STUB/brief.11"; echo eleven >> e.txt' > "$STUB/build"
-  # loop: the review left beside the old worktree must reach the retried build's brief, which card() makes
-  # (lib/card.sh) and only its run shows
+  # loop: the review left beside the old worktree must reach the retried build's brief, which card() makes (lib/card.sh) and only its run shows
   loop retry 11 >/dev/null && loop run >/dev/null || fail "run of the retried #11 exited non-zero"
   grep -qx '\[P1\] e.txt:1 left beside the worktree' "$STUB/brief.11" && [ -n "$(st 'select(.issue == 11 and .step == "landed") | .sha')" ] \
     || fail "the brief of a retried card lacks the findings of a review left beside the blocked card's worktree: $(tail -n 8 "$STUB/brief.11" 2>&1)"
