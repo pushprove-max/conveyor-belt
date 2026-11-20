@@ -780,13 +780,13 @@ PANELS_JQ='
   # cards stopped for the owner from the records now, which stay current while a new snapshot takes minutes (#1101): its
   # waiting, the cards they hold stopped for the owner'"'"'s yes, and its blocked, those they hold blocked otherwise. A card
   # of the snapshot'"'"'s waiting or blocked that the records no longer hold so is left out (a failing push, push true, is no
-  # card'"'"'s block and stays), and a card stopped since is added, its title the one the snapshot'"'"'s belt gave it, and
+  # card'"'"'s block and stays), and a card stopped since is added, its title the one the records give it (recordsNow), else the snapshot'"'"'s belt, and
   # fromRecords true: it has no track, reviews or changed files, so the page draws it anew once a snapshot gives them.
   # $behind: each such record, {repo, at (its snapshotAt), building (loop.json'"'"'s count now; 0 once no process of the
   # loop lives, as then none builds)}.
   | def nowOf($r): [$r.snap | select(.recordsNewer == true) | .recordsNow | objects | select([.blocked, .waiting] | all(type == "array"))
       | def cards: map(objects | select(.card | type == "string")); {blocked: (.blocked | cards), waiting: (.waiting | cards)}][0];
-    def stopped($r): {card, issue, name, title: (.card as $k | first($r.snap.belt[] | select(.card == $k) | .title) // null), since, fromRecords: true} | tag($r);
+    def stopped($r): {card, issue, name, title: ((.title | strings) // (.card as $k | first($r.snap.belt[] | select(.card == $k) | .title)) // null), since, fromRecords: true} | tag($r);
     ($R // [] | map(. as $r | nowOf($r) as $now
       | (.snap.needsYou.waiting[] | select($now == null or (.card | IN($now.waiting[].card))) | tag($r)),
         ($now.waiting // [] | .[] | select(.card | IN($r.snap.needsYou.waiting[].card) | not) | stopped($r) + {sentence}))) as $waiting

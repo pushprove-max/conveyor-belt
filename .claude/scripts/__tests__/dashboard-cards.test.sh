@@ -821,19 +821,19 @@ mv "$T/host.json" "$MAIN/conveyor/host.json"
 # --- a snapshot behind the card records: Needs you and the belt count from the records and loop.json ---
 # Bug (#1101): the Board read Needs you and the belt's count from the old snapshot alone while a new one took
 # minutes, so it showed nothing blocked and nothing building while cards blocked and built. sample's snapshot holds
-# c1 waiting for the yes, c2 blocked, a failing push, and c5 and c6 on the belt; since it was made c2 was retried,
-# c5 blocked and c6 stopped for the yes, and loop.json counts 4 building (recordsNow). widgetshop's snapshot is up to
+# c1 waiting for the yes, c2 blocked, a failing push, and c5 on the belt; since it was made c2 was retried,
+# c5 blocked and c6 was picked and stopped for the yes, and loop.json counts 4 building (recordsNow). widgetshop's snapshot is up to
 # date, one card on its belt. Bug: c6 was listed blocked, with no Approve, as the cards waiting for the yes were the
-# old snapshot's alone.
+# old snapshot's alone. Bug (#1123): c6 is on no belt of the snapshot, and it was untitled: its title is recordsNow's.
 at=$(ago 120)
 answer "$(snap "$(jq -cn --arg at "$at" '{snapshotAt: $at, recordsNewer: true,
     needsYou: {waiting: [{card: "c1", issue: 12, title: "Button copy", sentence: "Staff see a button.", since: $at}],
       blocked: [{card: "c2", issue: 13, title: "Broken build", reason: "tests failed", tail: "", since: $at},
         {card: "c0", issue: 11, title: "Pushed", reason: "the push failed", tail: "", since: $at, push: true}]},
-    belt: [{card: "c5", issue: 15, title: "Fifteen", step: "build", stepAt: $at}, {card: "c6", issue: 16, title: "Sixteen", step: "build", stepAt: $at}],
+    belt: [{card: "c5", issue: 15, title: "Fifteen", step: "build", stepAt: $at}],
     recordsNow: {building: 4, waitingCount: 0, blocked: [{card: "c5", issue: 15, name: null, reason: "the session made no change", since: $at}],
       waiting: [{card: "c1", issue: 12, name: null, reason: "needs a yes", since: $at, sentence: "a"},
-        {card: "c6", issue: 16, name: null, reason: "needs a yes", since: $at, sentence: "Guests see a new page."}]}}')")" "$P_URL" 1794000000 \
+        {card: "c6", issue: 16, name: null, title: "Sixteen", reason: "needs a yes", since: $at, sentence: "Guests see a new page."}]}}')")" "$P_URL" 1794000000 \
   "$(snap '{"belt": [{"card": "w1", "issue": 3, "title": "Three", "step": "build"}]}')" "$C_URL" 0
 run
 q '.panels.needs.data | (.cards.waiting | map([.card, .repo, .title, .sentence])) == [["c1", "sample", "Button copy", "Staff see a button."], ["c6", "sample", "Sixteen", "Guests see a new page."]]

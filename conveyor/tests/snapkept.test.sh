@@ -268,10 +268,12 @@ t_snapkeptnow() {
   out=$(loop snapshot) || fail "the reader exited non-zero"
   # Bug: c6, stopped for the owner's yes since (the pack's owner, Dana), was one of blocked, so the Board showed it
   # with no Approve and the status named it an ordinary block: the readers' list of those waiting was the old one.
+  # Bug (#1123): c6, picked since, is on no belt of the kept snapshot, and Needs you showed it untitled: its title is
+  # the one its picked line gives (c5 is on no belt and its picked line is older than the snapshot: null).
   jq -e --arg now "$now" '.recordsNewer == true and .recordsNow == {building: 2, waitingCount: 1, blocked: [
-      {card: "c5", issue: 5, name: null, reason: "old block", since: "2026-11-17T10:08:00Z"},
-      {card: "c3", issue: 0, name: "Main is red (abcdef012345)", reason: "the session made no change", since: $now}],
-      waiting: [{card: "c6", issue: 6, name: null, reason: "visible to customers or staff: needs Dana'"'"'s yes: a new button", since: $now, sentence: "a new button"}]}' <<<"$out" > /dev/null \
+      {card: "c5", issue: 5, name: null, title: null, reason: "old block", since: "2026-11-17T10:08:00Z"},
+      {card: "c3", issue: 0, name: "Main is red (abcdef012345)", title: "red", reason: "the session made no change", since: $now}],
+      waiting: [{card: "c6", issue: 6, name: null, title: "six", reason: "visible to customers or staff: needs Dana'"'"'s yes: a new button", since: $now, sentence: "a new button"}]}' <<<"$out" > /dev/null \
     || fail "the reader did not give what the records and loop.json say now: $(jq -c '{recordsNewer, recordsNow}' <<<"$out")"
   dead=$(sh -c 'echo $$'); jq -cn --argjson p "$dead" '{pid: $p, state: "running", building: 2, waiting: 1}' > "$ST/loop.json"
   out=$(loop snapshot) && jq -e '.recordsNow | .building == null and .waitingCount == null' <<<"$out" > /dev/null \

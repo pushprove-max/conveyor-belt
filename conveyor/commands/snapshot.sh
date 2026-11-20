@@ -116,7 +116,7 @@ snapprint() {
 }
 # What the card records and loop.json say now, which stay current while a new build takes minutes: the kept snapshot
 # can show nothing blocked and nothing building while cards block and build (#1101). One object: blocked, each card
-# the records hold blocked now, as {card, issue, name, reason, since}: the kept snapshot's health blocked and waiting,
+# the records hold blocked now, as {card, issue, name, title, reason, since} (title: the belt's, else its picked line's): the kept snapshot's health blocked and waiting,
 # but for a card with a closing line since <snapshotAt> or with no line left (retried), and each card whose last
 # closing line (landed, closed, blocked or pushed) since then is blocked; of those, a card stopped for the owner's yes
 # (its reason starts with YES or LINTYES, yesforms() with the pack's owner.name: block(), lib/card.sh) is in waiting
@@ -139,11 +139,14 @@ recordsnow() { # <snapshotAt>
       # A main-red fix card has no issue: its name, as the belt has it, or as its picked line gives it (views.sh).
       | ([$s.belt | arrays | .[] | objects | select((.card | type) == "string" and (.name | type) == "string") | {key: .card, value: .name}]
          + [$new[] | select(.step == "picked" and (.mainRed | type) == "string") | {key: .card, value: "Main is red (\(.mainRed[0:12]))"}] | from_entries) as $names
+      # Its title, as the belt has it, or as its picked line gives it: a card picked since has no line on the belt.
+      | ([$s.belt | arrays | .[] | objects | select((.card | type) == "string" and (.title | type) == "string") | {key: .card, value: .title}]
+         + [$new[] | select(.step == "picked" and (.title | type) == "string") | {key: .card, value: .title}] | from_entries) as $titles
       | ($new | map(select(.step | IN("landed", "closed", "blocked", "pushed"))) | group_by(.card) | map(last)) as $ends
       | ($ends | INDEX(.card)) as $ended
       | ([$s.health | objects | (.blocked, .waiting) | arrays | .[] | objects | select((.card | type) == "string")
-            | select($have[.card] != null and $ended[.card] == null) | {card, issue, name: (.name // $names[.card]), reason, since}]
-          + [$ends[] | select(.step == "blocked") | {card, issue, name: $names[.card], reason, since: .time}]) as $all
+            | select($have[.card] != null and $ended[.card] == null) | {card, issue, name: (.name // $names[.card]), title: $titles[.card], reason, since}]
+          + [$ends[] | select(.step == "blocked") | {card, issue, name: $names[.card], title: $titles[.card], reason, since: .time}]) as $all
       | def yes: (.reason | type) == "string" and (.reason | startswith($yes) or startswith($lintyes));
         {blocked: [$all[] | select(yes | not)], waiting: [$all[] | select(yes) | . + {sentence: (.reason | if startswith($lintyes) then ltrimstr($lintyes) else ltrimstr($yes) end)}],
          building: $loop.building, waitingCount: $loop.waiting}'
