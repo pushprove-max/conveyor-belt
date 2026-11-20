@@ -35,7 +35,7 @@ kill -ALRM "$pid"; wait "$pid"; rc=$?
 [ -e "$T/run.testlog/cases/ok/fx-a-1" ] || { echo "not ok - the case a still-running file ended is not named in the run's log once the suite timed out: $(cd "$T/run.testlog" && find . -type f)"; exit 1; }
 # Bug (#1007 review): a suite stopped at its timeout left a log naming the file still running, so the engine took it
 # for the run's timeout, and its run alone could pass the release though the suite never ran the rest. A stopped run
-# leaves no log: the timeout is the suite's, and its run alone runs the suite whole. In parallel this fails when the
+# leaves no test-full.log: the timeout is the suite's, and its run alone runs the suite whole. In parallel this fails when the
 # log is written as the run goes and names a file once it starts (the serial case is in test-full.test.sh).
 full=$(jq -r '.test.full' "$HERE/project.json")
 got=$( eval "$(sed -n '/^testfails() {/,/^}/p' "$HERE/../conveyor/lib/testrun.sh"; sed -n '/^testlogs() {/,/^}/p' "$HERE/../conveyor/lib/session.sh")"
