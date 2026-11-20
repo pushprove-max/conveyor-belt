@@ -259,7 +259,7 @@ t_retryotherrounds() {
     || fail "the review that ended the loop or the filed line does not say why: $(st 'select(.issue == 7 and (.step == "review" or .step == "filed")) | tojson')"
   recok "$ST/cards.jsonl" "a card whose third review ended its loop"
   # The Board's card reads it from the snapshot's reviews.
-  [ "$(loop snapshot --fresh | jq -c '.landed[] | select(.issue == 7) | .rounds | map(.loopEnd)')" = '[null,null,{"stop":"max-reviews","pass":3,"rounds":0}]' ] \
+  [ "$(loop snapshot --fresh | jq -c '.landed[] | select(.issue == 7) | .rounds | map(.loopEnd)')" = '[null,null,{"stop":"max-reviews","own":3,"rounds":0}]' ] \
     || fail "the snapshot does not give why the loop ended: $(loop snapshot --fresh | jq -c '.landed[] | select(.issue == 7) | .rounds')"
 }
 

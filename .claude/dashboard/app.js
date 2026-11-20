@@ -163,7 +163,7 @@
     const s = r && Array.isArray(r.survived) ? r.survived.filter((x) => x && typeof x.id === 'string' && num(x.rounds)) : [];
     return s.map((x) => `${x.id} came back after ${x.rounds} ${x.rounds === 1 ? 'fix round' : 'fix rounds'}`).join(', ');
   }
-  // Why the fix loop ended on this review (its loopEnd, {stop, pass, rounds}): "Fix loop ended: review limit reached
+  // Why the fix loop ended on this review (its loopEnd, {stop, own, rounds}): "Fix loop ended: review limit reached
   // (3 reviews, 1 from earlier cards)"; '' on a review after which a fix round came.
   const loopWhy = {
     go: 'the review passed', 'max-reviews': 'review limit reached', rebased: 'one review after a landing conflict',
@@ -173,7 +173,7 @@
   function loopEnd(r) {
     const e = r && r.loopEnd;
     if (!e || !Object.prototype.hasOwnProperty.call(loopWhy, e.stop)) return '';
-    const p = num(e.pass) ? e.pass : 0, k = num(e.rounds) ? e.rounds : 0, all = p + k;
+    const p = num(e.own) ? e.own : 0, k = num(e.rounds) ? e.rounds : 0, all = p + k;
     return `Fix loop ended: ${loopWhy[e.stop]} (${all} ${all === 1 ? 'review' : 'reviews'}${k ? `, ${k} from earlier cards` : ''})`;
   }
   // A review's verdict in words: GO is "passed", NO-GO "changes asked" (the records' codes are never shown on a card).
