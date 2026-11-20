@@ -89,11 +89,14 @@ names() {
   [ -z "$NAMED" ] || return 0
   packget remote REMOTE defaultBranch BRANCH owner.name OWNER labels.built BUILT labels.followup FOLLOWUP labels.type TYPE \
       labels.areaPrefix AREA labels.priorities PRIOS labels.nonProductAreas NONPRODUCT productPaths p review.proof r tests.patterns t \
-    && mapfile -d '' -t x < <(jq -j --argjson t "$t" "$GLOBRX"'(map(rx) | "^(" + join("|") + ")"), join(", "), ($t | globsrx), ($t | join(", ")) | . + "\u0000"' <<<"$p") \
-    && [ "${#x[@]}" = 4 ] || return 1
-  # The test files' expression (TESTRX) and globs (TESTGLOBS), which testpaths() (lib/issues.sh) and bugproof() read.
-  # shellcheck disable=SC2034 # TESTRX and TESTGLOBS are read in lib/issues.sh and lib/testrun.sh
-  PRODUCT=${x[0]} p=${x[1]} TESTRX=${x[2]} TESTGLOBS=${x[3]}
+    && mapfile -d '' -t x < <(jq -nj --argjson t "$t" "$GLOBRX"'input as $p | input as $pk | $p
+      | (map(rx) | "^(" + join("|") + ")"), join(", "), ($t | globsrx), ($t | join(", ")), ($pk.tests.patterns | if type == "array" then "1" else "" end)
+      | . + "\u0000"' <<<"$p"$'\n'"$PACK_T") \
+    && [ "${#x[@]}" = 5 ] || return 1
+  # The test files' expression (TESTRX) and globs (TESTGLOBS), which testpaths() (lib/issues.sh) and bugproof() read,
+  # and TESTOWN, 1 when the pack itself sets tests.patterns (not the schema's default), which haspatterns() reads.
+  # shellcheck disable=SC2034 # TESTRX, TESTGLOBS and TESTOWN are read in lib/issues.sh and lib/testrun.sh
+  PRODUCT=${x[0]} p=${x[1]} TESTRX=${x[2]} TESTGLOBS=${x[3]} TESTOWN=${x[4]}
   # The runner files (SUITERUNNERS, runnerfiles(), which no per-file run runs: filecmd(), lib/testrun.sh), and of
   # them those tests.patterns match (through testpaths() while TESTRUNNERS is empty), which testpaths() leaves out of
   # the test files from then on.

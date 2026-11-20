@@ -300,10 +300,13 @@ HEALTHLINE='select(. != "") | fromjson | {card, issue, step, of, time, result, f
 # gives no time a process stopped: <now> for one not read so before. $STATE.stopped keeps "<pid> TAB <started> TAB
 # <epoch>" for those still stopped, so a stop is dated from the first reading of it, not from the card's last output.
 # Prints "<pid> TAB <card> TAB <epoch>" a line; when the file cannot be written, each reads as stopped since <now>.
+# With none stopped (no line), it empties the file and starts no program: health runs on every snapshot.
 stopsince() { # <now>
-  local f=$STATE.stopped w=$STATE.stopped.$$
-  { [ -f "$f" ] || : > "$f"; } 2>/dev/null || { awk -F'\t' -v OFS='\t' -v now="$1" '{ print $1, $3, now }'; return; }
-  awk -F'\t' -v OFS='\t' -v now="$1" -v f="$f" -v w="$w" 'FILENAME == f { t[$1 FS $2] = $3; next }
+  local f=$STATE.stopped w=$STATE.stopped.$$ l=''
+  IFS= read -r -d '' l || :
+  [ -n "$l" ] || { { : > "$f"; } 2>/dev/null; return 0; }
+  { [ -f "$f" ] || : > "$f"; } 2>/dev/null || { printf '%s' "$l" | awk -F'\t' -v OFS='\t' -v now="$1" '{ print $1, $3, now }'; return; }
+  printf '%s' "$l" | awk -F'\t' -v OFS='\t' -v now="$1" -v f="$f" -v w="$w" 'FILENAME == f { t[$1 FS $2] = $3; next }
     { k = $1 FS $2; if (!(k in t)) t[k] = now; if (!(k in kept)) { kept[k] = 1; print k, t[k] > w } print $1, $3, t[k] }' "$f" - \
     && if [ -f "$w" ]; then mv -f "$w" "$f"; else : > "$f"; fi
 }
@@ -345,17 +348,21 @@ health() {
   en=''
   [ "$loop" = true ] && IFS=$'\t' read -r e t < <(jq -r '[.pid, .started] | @tsv' "$SAYS" 2>/dev/null) && [[ $e =~ ^[0-9]+$ ]] \
     && p_alive "$e" "$t" && p_stopped "$e" && en=$e$'\t'$t
-  [[ ${CONVEYOR_NOW:-} =~ ^[0-9]+$ ]] && n=$CONVEYOR_NOW || n=$(date +%s)
+  [[ ${CONVEYOR_NOW:-} =~ ^[0-9]+$ ]] && n=$CONVEYOR_NOW || printf -v n '%(%s)T' -1
+  # With none stopped, the record is the one jq makes of no line, and no jq starts.
   stopped=$({ [ -z "$en" ] || printf '%s\t\n' "$en"
       while IFS=$'\t' read -r k p t; do
         [ -n "$k" ] && p_alive "$p" "$t" || continue
         [ -z "$en" ] || printf '%s\t%s\n' "$en" "$k"
         ! p_stopped "$p" || printf '%s\t%s\t%s\n' "$p" "$t" "$k"
-      done <<<"$wt"; } | stopsince "$n" | jq -Rcs --arg e "${en%%$'\t'*}" 'split("\n") | map(select(. != "") | split("\t") | {pid: (.[0] | tonumber), card: .[1], since: (.[2] | tonumber | todate)})
+      done <<<"$wt"; } | stopsince "$n") || { rm -rf "$hd"; return 1; }
+  if [ -z "$stopped" ]; then stopped='{"engine":null,"cards":{}}'
+  else
+  stopped=$(jq -Rcs --arg e "${en%%$'\t'*}" 'split("\n") | map(select(. != "") | split("\t") | {pid: (.[0] | tonumber), card: .[1], since: (.[2] | tonumber | todate)})
       | {engine: (map(select(.card == "") | {pid, since}) | first // null),
          cards: (map(select(.card != "")) | group_by(.card) | map((map(select((.pid | tostring) == $e)) | first) as $g
            | (map(select((.pid | tostring) != $e) | {pid, since}) | first) as $o
-           | {key: .[0].card, value: (if $g then {pid: $g.pid, of: "engine", since: $g.since} + (if $o then {own: $o} else {} end) else {pid: $o.pid, of: "card", since: $o.since} end)}) | from_entries)}') || { rm -rf "$hd"; return 1; }
+           | {key: .[0].card, value: (if $g then {pid: $g.pid, of: "engine", since: $g.since} + (if $o then {own: $o} else {} end) else {pid: $o.pid, of: "card", since: $o.since} end)}) | from_entries)}' <<<"$stopped") || { rm -rf "$hd"; return 1; }
   # Each stopped process named (the engine, a card's own) with pids: it and every process under it that is stopped
   # (p_stoppedtree), it first, so the command that resumes it reaches the builder and its timeout wrapper too.
   sp=$(for p in $(jq -r '[.engine.pid?, (.cards[] | .pid, .own.pid?)] | map(numbers) | unique | .[]' <<<"$stopped"); do
@@ -363,6 +370,7 @@ health() {
     && stopped=$(jq -c --argjson sp "$sp" 'def tree: . + {pids: ([.pid] + (($sp[.pid | tostring] // []) - [.pid]))};
       (.engine |= if . then tree else . end) | .cards |= map_values(if .of == "card" then tree else . end | if .own then .own |= tree else . end)' <<<"$stopped") \
     || { rm -rf "$hd"; return 1; }
+  fi
   st=$(state "$c" "$(jq -r '.pct // empty' <<<"$r")")
   # A loop a sign-in failure paused (signinpause()) says why, and what to run.
   [ "$st" != paused ] || why=$(jq -r '.signin // ""' <<<"$c")

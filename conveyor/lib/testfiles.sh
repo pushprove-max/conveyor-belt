@@ -81,10 +81,13 @@ testowners() {
   mapfile -d '' -t tf < <(testtracked -z 2>/dev/null)
   defs='{}' refs='{}'
   [ ${#tf[@]} != 0 ] || return 0
-  defs=$(git -C "$MAIN" --literal-pathspecs grep -oE '^(t_)?[A-Za-z0-9_]+\(\)' -- "${tf[@]}" 2>/dev/null \
-    | jq -cRn '[inputs | capture("^(?<f>.+):(t_)?(?<c>[A-Za-z0-9_]+)\\(\\)$")] | group_by(.c) | map({key: .[0].c, value: [.[].f] | unique}) | from_entries') || defs='{}'
-  refs=$(git -C "$MAIN" --literal-pathspecs grep -oE '[A-Za-z0-9_.-]+\.test\.[A-Za-z0-9]+' -- "${tf[@]}" 2>/dev/null \
-    | jq -cRn '[inputs | capture("^(?<f>[^:]+):(?<n>.+)$")] | group_by(.f) | map({key: .[0].f, value: [.[].n] | unique}) | from_entries') || refs='{}'
+  # Both from one git grep and one jq, as the snapshot reads them each time: a function's match ends in (), a name's
+  # never does (its last character is a letter or a digit), and neither match can hold the other's.
+  local o=()
+  mapfile -t o < <(git -C "$MAIN" --literal-pathspecs grep -oE -e '^(t_)?[A-Za-z0-9_]+\(\)' -e '[A-Za-z0-9_.-]+\.test\.[A-Za-z0-9]+' -- "${tf[@]}" 2>/dev/null \
+    | jq -cRn '[inputs] | (map(capture("^(?<f>.+):(t_)?(?<c>[A-Za-z0-9_]+)\\(\\)$")) | group_by(.c) | map({key: .[0].c, value: [.[].f] | unique}) | from_entries),
+      (map(select(endswith("()") | not) | capture("^(?<f>[^:]+):(?<n>.+)$")) | group_by(.f) | map({key: .[0].f, value: [.[].n] | unique}) | from_entries)')
+  [ ${#o[@]} = 2 ] && defs=${o[0]} refs=${o[1]}
 }
 OWNERS='$defs[0] as $defs | $refs[0] as $refs | def owners($f; $c): ($defs[$c // ""] // []) as $d | ($f | split("/")[-1]) as $n
       | if $c == null or any($d[]; . == $f) then [$f] else [$f] + [$d[] | select(any($refs[.][]?; . == $n))] end;
@@ -502,14 +505,15 @@ rawok() { if [ -f "$1" ] && [ -r "$1" ]; then printf '%s' "$1"; else printf /dev
 JSONL='def jsonl: split("\n") | map(fromjson? | objects);'
 testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   # The caller's defs and refs when it has read them (testowners: the snapshot's), else read here.
-  local si sh rn mn fs fl sf defs=${defs:-} refs=${refs:-} cs ru all tf=() ln ch hv px out nv rp cp su sv
+  local si sh rn mn fs fl sf defs=${defs:-} refs=${refs:-} cs ru tf=() ln ch hv px out nv rp cp su sv
   packget test.slowIssues si test.slower.share sh test.slower.runs rn test.slower.minRuns mn test.files fs || return 1
-  # The test files once, as names (tf: testhollow and testproxy take them so, with no jq of their own) and as JSON:
-  # main's tracked test files (testtracked(), lib/issues.sh; #1036: a project's test-*.mjs files were missing).
+  # The test files once, as names (tf: testhollow and testproxy take them so, with no jq of their own; the part's jq
+  # reads them ended by NULs, all): main's tracked test files (testtracked(), lib/issues.sh; #1036: a project's
+  # test-*.mjs files were missing).
   mapfile -d '' -t tf < <(testtracked -z 2>/dev/null)
-  all=$(printf '%s\0' "${tf[@]}" | jq -Rsc 'split("\u0000") | map(select(. != ""))') || all='[]'
-  fl=$(jq -ce 'objects' "$FLAKY" 2>/dev/null) || fl='{}'
-  sf=$(jq -ce 'objects' "$SLOWFILED" 2>/dev/null) || sf='{}'
+  # The flaky and slow-filed records; a file not there is none, and starts no jq.
+  { [ -s "$FLAKY" ] && fl=$(jq -ce 'objects' "$FLAKY" 2>/dev/null); } || fl='{}'
+  { [ -s "$SLOWFILED" ] && sf=$(jq -ce 'objects' "$SLOWFILED" 2>/dev/null); } || sf='{}'
   ru=$(testrulesettings) || ru=null
   hv=$(testhollow "${tf[@]}" 2>/dev/null) && [ -n "$hv" ] || hv='{}'
   px=$(testproxy "${tf[@]}" 2>/dev/null) && [ -n "$px" ] || px='{}'
@@ -532,10 +536,10 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
       | reduce (split("\u0000")[] | select(. != "")) as $x ({k: null, m: {}}; if $w[$x] then .k = $x | .m[$x] = [] elif .k == null then . else .m[.k] += [$x] end) | .m') || ch='{}'
   out=$(printf '%s\n' "$ln" | jq -cRn --arg since "$1" --arg si "$si" --argjson sh "$sh" --argjson rn "$rn" --slurpfile ch <(printf '%s\n' "$ch") \
     --argjson mn "$mn" --slurpfile fs <(printf '%s' "$fs") --slurpfile fl <(printf '%s' "$fl") --slurpfile sf <(printf '%s' "$sf") --argjson keep "$TESTKEEP" \
-    --slurpfile cs <(printf '%s' "$cs") --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") --argjson ru "$ru" --slurpfile all <(printf '%s' "$all") \
+    --slurpfile cs <(printf '%s' "$cs") --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") --argjson ru "$ru" --rawfile all <(printf '%s\0' "${tf[@]}") \
     --slurpfile hv <(printf '%s' "$hv") --slurpfile px <(printf '%s' "$px") --slurpfile mu <(cat "$MUTS"/*.json 2>/dev/null | jq -c 'objects' 2>/dev/null) --rawfile mq "$(rawok "$MUTS/asked")" --rawfile su "$su" --slurpfile sv <(printf '%s' "$sv") --slurpfile last <(jq -ce 'objects' "$TESTRULES" 2>/dev/null || echo null) \
     --rawfile rl "$(rawok "$TESTRULESLOG")" --argjson shown "$TESTRULES_SHOWN" --rawfile tf "$(rawok "$TAFILED")" \
-    --slurpfile tj <(cat "$TESTACTS"/*.json 2>/dev/null | jq -c 'objects | select(.action == "judge" and .state == "done" and (.file | type) == "string" and (.waits | type) == "array") | {file, end, waits}' 2>/dev/null) '$fs[0] as $fs | $fl[0] as $fl | $sf[0] as $sf | $all[0] as $all | $hv[0] as $hv | $px[0] as $px | '"$JSONL$OWNERS$FAILURE$RUNDEFS"'
+    --slurpfile tj <(cat "$TESTACTS"/*.json 2>/dev/null | jq -c 'objects | select(.action == "judge" and .state == "done" and (.file | type) == "string" and (.waits | type) == "array") | {file, end, waits}' 2>/dev/null) '$fs[0] as $fs | $fl[0] as $fl | $sf[0] as $sf | ($all | split("\u0000") | map(select(. != ""))) as $all | $hv[0] as $hv | $px[0] as $px | '"$JSONL$OWNERS$FAILURE$RUNDEFS"'
     # The rules log and the Board test issues, each read once: the log'"'"'s last $shown lines, newest first (lg), and
     # their filed lines (fd); the test issues with a file and an issue number (ta).
     ($su | jsonl) as $su | ($rl | split("\n") | if .[-1] == "" then .[:-1] else . end | .[-$shown:] | map(fromjson? | objects) | reverse) as $lg

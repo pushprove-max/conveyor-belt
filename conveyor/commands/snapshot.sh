@@ -96,7 +96,8 @@ snapprint() {
   k=$(p_filekey "$KEPT") && k=${k#* } && [[ $k =~ ^([0-9]+)[.,]([0-9]{3}) ]] || { echo "conveyor: cannot read $KEPT" >&2; return 1; }
   s=${BASH_REMATCH[1]} m=$((BASH_REMATCH[1] * 1000 + 10#${BASH_REMATCH[2]}))
   now=${EPOCHREALTIME/[.,]/}; now=$((10#$now / 1000)); m=$((now > m ? now - m : 0))
-  [ -z "$(find "$STATE" "$RETRIED" -maxdepth 0 -newer "$KEPT" -print -quit 2>/dev/null)" ] || newer=true
+  # The shell's own test of the times (to the nanosecond, as find -newer): no program on each read.
+  { [ "$STATE" -nt "$KEPT" ] || [ "$RETRIED" -nt "$KEPT" ]; } && newer=true
   printf '{"snapshotAt":"%s","snapshotAge":%d.%03d,"recordsNewer":%s,' "$(export TZ=UTC; printf '%(%Y-%m-%dT%H:%M:%SZ)T' "$s")" $((m / 1000)) $((m % 1000)) "$newer"
   tail -c +2 "$KEPT"
 }

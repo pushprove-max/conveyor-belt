@@ -345,7 +345,8 @@ testpaths() { # [-v] [-z]
 # 0 when the pack itself sets tests.patterns (not the schema's default): then the files they match (testpaths()) are
 # test files of the Tests page (testspart(), lib/testfiles.sh), of a test file's Run (tafile(), lib/testaction.sh) and
 # of its check with mutants (mutfile(), lib/mutate.sh), beside the files named *.test.* (#1036).
-haspatterns() { packok 2> /dev/null && jq -e '.tests.patterns | arrays' <<<"$PACK_T" > /dev/null 2>&1; }
+# Read by names() (TESTOWN, lib/prompts.sh), with the pack's other names: no program of its own once they are read.
+haspatterns() { names > /dev/null 2>&1 && [ -n "${TESTOWN:-}" ]; }
 # 0 when <path>, one line, is a test file the pack's own tests.patterns match (haspatterns()).
 patterntest() { haspatterns && [ "$(printf '%s\n' "$1" | testpaths 2> /dev/null)" = "$1" ]; } # <path>
 # The one list of the project's test files for every place that looks for one by its path: the tracked files of
@@ -355,15 +356,22 @@ patterntest() { haspatterns && [ "$(printf '%s\n' "$1" | testpaths 2> /dev/null)
 # *.test.* files alone. Each path once, sorted, one a line; with -z, each ended by a NUL. Fails when <checkout> is no
 # git checkout or <commit> is not in it.
 testtracked() { # [-z] [<checkout> [<commit>]]
-  local nul='' d ls=(ls-files -z) fs=()
+  local nul='' d ls=(ls-files -z) fs=() f l='' out=()
   [ "${1:-}" != -z ] || { nul=1; shift; }
   d=${1:-$MAIN}
   [ -z "${2:-}" ] || ls=(ls-tree -r -z --name-only "$2")
   mapfile -d '' -t fs < <(git -C "$d" -c core.quotePath=false "${ls[@]}" 2> /dev/null); wait $! || return 1
   [ ${#fs[@]} != 0 ] || return 0
-  # *.test.* as git's glob takes it (its * also matches a /): a path with .test. in it.
-  { printf '%s\0' "${fs[@]}" | grep -zF .test.
-    ! haspatterns || printf '%s\0' "${fs[@]}" | testpaths -z 2> /dev/null; } | LC_ALL=C sort -zu | if [ -n "$nul" ]; then cat; else tr '\0' '\n'; fi
+  if haspatterns; then
+    # *.test.* as git's glob takes it (its * also matches a /): a path with .test. in it.
+    { printf '%s\0' "${fs[@]}" | grep -zF .test.
+      printf '%s\0' "${fs[@]}" | testpaths -z 2> /dev/null; } | LC_ALL=C sort -zu | if [ -n "$nul" ]; then cat; else tr '\0' '\n'; fi
+    return 0
+  fi
+  # The *.test.* files alone, by the shell (the snapshot reads this list twice): git lists the paths sorted as
+  # `LC_ALL=C sort` sorts them, a path of the index once a stage, so each path is kept once and in that order.
+  for f in "${fs[@]}"; do [[ $f == *.test.* && $f != "$l" ]] && out+=("$f") && l=$f; done
+  [ ${#out[@]} = 0 ] || if [ -n "$nul" ]; then printf '%s\0' "${out[@]}"; else printf '%s\n' "${out[@]}"; fi
 }
 # The JavaScript files <file>... load, each ended by a NUL: each <file>, with the local modules it imports (also by a
 # dynamic import(), as `await import('./x.mjs')`) or requires by a relative path (./ or ../; with no extension, the

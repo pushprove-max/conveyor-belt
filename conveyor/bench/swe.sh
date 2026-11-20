@@ -145,10 +145,12 @@ swe_versions() {
   printf '%s\n' "$vs"
 }
 # The versions as JSON from lines of `<commit> <ref>` as ls-remote prints them (a tag's peeled commit on a line of
-# its own, its ref ending ^{}).
-swe_vlist() {
-  awk '{ n = $2; sub(/^refs\/(tags|heads)\//, "", n); p = sub(/\^\{\}$/, "", n); print n "\t" $1 "\t" p }' \
-    | jq -Rsc 'split("\n") | map(select(. != "") | split("\t") | {name: .[0], commit: .[1], peeled: (.[2] == "1")})
+# its own, its ref ending ^{}). The ref <main> (refs/heads/main by default) is main's. One jq, as the snapshot reads
+# the versions each time.
+swe_vlist() { # [<main>]
+  jq -Rsc --arg m "${1:-refs/heads/main}" 'split("\n") | map([splits("[ \t]+") | select(. != "")] | select(. != [])
+      | (.[1] // "" | if . == $m then "refs/heads/main" else . end | sub("^refs/(tags|heads)/"; "")) as $n
+      | {name: ($n | sub("\\^\\{\\}$"; "")), commit: .[0], peeled: ($n | endswith("^{}"))})
       | map(select(.name == "main" or (.name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")))) | group_by(.name) | map(sort_by(.peeled) | last | del(.peeled))
       | (map(select(.name == "main")) + (map(select(.name != "main")) | sort_by(.name | ltrimstr("v") | split(".") | map(tonumber)) | reverse))'
 }
@@ -164,7 +166,7 @@ swe_versionsnow() {
   [ -d "$g" ] || { [ -z "${CONVEYOR_BENCH_SOURCE:-}" ] && g=$HERE m=refs/remotes/origin/main; } || g=''
   if [ -n "$g" ]; then
     l=$(git -C "$g" for-each-ref --format='%(objectname) %(refname)%(if)%(*objectname)%(then)%0a%(*objectname) %(refname)^{}%(end)' 'refs/tags/v*' "$m" 2>/dev/null) || return 1
-    awk -v m="$m" '$2 == m { $2 = "refs/heads/main" } { print }' <<<"$l" | swe_vlist; return
+    swe_vlist "$m" <<<"$l"; return
   fi
   k=$(swe_vkey "$src") || return 1
   vs=$(jq -c --arg k "$k" 'select(.key == $k) | .versions | arrays // null' "$SWE_DIR/versions.json" 2>/dev/null) || vs=''

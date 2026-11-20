@@ -1054,7 +1054,7 @@ snapshot() (
   # (swe_solokey()), not the one board.json kept from its last write.
   # versions is the list now (swe_versionsnow(): a source on this machine is read from its local refs on each snapshot,
   # with no network call; a source named by URL is read again only when the source or the hour changes), with no run
-  # needed: before the first run, the part holds the versions alone.
+  # needed: before the first run, the part holds the versions alone. It is put in by the jq that adds the part.
   echo null > "$d/bench"
   bv=$(. "$HERE/bench/swe.sh" && swe_versionsnow 2>/dev/null) && [ -n "$bv" ] || bv=null
   if [ -s "$ST/bench/swe/board.json" ]; then
@@ -1063,11 +1063,10 @@ snapshot() (
     bk=$(. "$HERE/bench/swe.sh" && swe_solokey "$(swe_solomodel)") || bk=''
     jq -c --arg bk "$bk" "$bf"' | if $bk == "" then . else .soloKey = $bk end' "$ST/bench/swe/board.json" > "$d/bench.new" 2>/dev/null && [ -s "$d/bench.new" ] && mv -f "$d/bench.new" "$d/bench"
   fi
-  [ "$bv" = null ] || { jq -c --argjson v "$bv" '(objects // {}) | .versions = $v' "$d/bench" > "$d/bench.new" 2>/dev/null && [ -s "$d/bench.new" ] && mv -f "$d/bench.new" "$d/bench"; } || :
-  jq -c --slurpfile bn "$d/bench" --slurpfile tm "$d/testmap" --argjson mv "${moved:-null}" --slurpfile dec "$d/declined" --slurpfile ta <(testacts) --argjson tl "${TESTACTION_TIMEOUT:-null}" --slurpfile tp "$d/tests" --slurpfile pr "$d/prices" --argjson sk "$sk" --argjson pc "$pc" \
+  jq -c --slurpfile bn "$d/bench" --argjson bv "$bv" --slurpfile tm "$d/testmap" --argjson mv "${moved:-null}" --slurpfile dec "$d/declined" --slurpfile ta <(testacts) --argjson tl "${TESTACTION_TIMEOUT:-null}" --slurpfile tp "$d/tests" --slurpfile pr "$d/prices" --argjson sk "$sk" --argjson pc "$pc" \
     --slurpfile rp <({ tail -n 1 "$REPLAYS" 2>/dev/null || :; } | jq -c 'objects' 2>/dev/null) '$ta[0] as $ta | del(.cols) | .declined = $dec[0].shown | .declinedRest = $dec[0].rest | .prices = $pr[0] | .standing = $sk | .pushCheck = $pc
     | .cost.replay = ($rp[0] // null | if . == null then null else del(.calls) end)
-    | .testActions = {seat: (.control // {} | .tests // null), limit: $tl, actions: $ta, allowed: ((.modelSettings | objects | .builder.allowed) // null)} | .tests = $tp[0] | .testMap = $tm[0] | .bench = $bn[0] | def since: . + {since: $mv[.issue | tostring].at};
+    | .testActions = {seat: (.control // {} | .tests // null), limit: $tl, actions: $ta, allowed: ((.modelSettings | objects | .builder.allowed) // null)} | .tests = $tp[0] | .testMap = $tm[0] | .bench = ($bn[0] | if $bv == null then . else (objects // {}) | .versions = $bv end) | def since: . + {since: $mv[.issue | tostring].at};
     if $mv == null then . else (.queue.order, .queue.holding, .queue.waiting) |= (if . == null then null else map(since) end) | .open.held |= map(since) end
     | .cost.unpriced |= (group_by(.time) | reverse | map(.[]))' "$d/out" > "$d/full" || exit 1
   # The lists whole go to HISTORY, by a file of their own beside it and one rename, so a reader never sees half of one;
