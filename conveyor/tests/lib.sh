@@ -145,6 +145,29 @@ turns() { # <n> [<main>]
   local m=${2:-$R} n; n=$(( $(grep -cxF "$m" "$TURNS") + $1 ))
   wait_until "[ \"\$(grep -cxF '$m' '$TURNS')\" -ge $n ]" || fail "the loop of $m did not take $1 more turns"
 }
+# One project of the machine under $T/<case>/<name>: setup() there, polling every second, every review a GO, and
+# a build that marks its card running ($SH/run/<name>-<issue>) and waits for $SH/go-<name>-<issue> (or $SH/go) before
+# it writes a file of its own, so no two cards share a file. Sets P_<name> to its main checkout. For the machine's
+# cases, machine.test.sh and machineend.test.sh.
+project() { # <name> <issues json>
+  local c=$CASE; CASE=$c/$1; setup "$2"; CASE=$c
+  tune '.tunables.idle = 1 | .tunables.poll = 1'
+  for i in $(seq 1 20); do echo "$GO" > "$STUB/review.$i"; done
+  printf 'n=${PWD##*-}; k=%s-$n; echo "$k" >> %q; [ "$n" != 23 ] || exit 1; : > %q/run/$k
+for i in $(seq 600); do [ -e %q/go-$k ] || [ -e %q/go ] && break; sleep 0.1; done; rm -f %q/run/$k; echo "$n" > "f$n.txt"\n' \
+    "$1" "$SH/started" "$SH" "$SH" "$SH" "$SH" > "$STUB/build"
+  printf -v "P_$1" %s "$R"
+}
+# gh, claude and codex as each project's own stubs: the project is the one whose checkout the call runs in (its main
+# checkout, or a card's worktree of it).
+dispatch() {
+  mkdir -p "$SH/bin" "$SH/run"
+  for p in gh claude codex; do
+    printf '#!/usr/bin/env bash\nm=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || exit 9\nm=${m%%/.git}; export STUB=${m%%/main}/stub\nexec "$STUB/%s" "$@"\n' "$p" > "$SH/bin/$p"
+    chmod +x "$SH/bin/$p"
+  done
+  PATH=$SH/bin:$PATH
+}
 seatset() { jq -c --arg k "$1" --arg m "$2" '.[$k].model = $m' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"; } # <model|reviewer> <model>
 GO=$'USER-VISIBLE: no\nVERDICT: GO'
 NOGO=$'[P1] a.txt:1 wrong word\nNEW CARD: b.txt is stale\nUSER-VISIBLE: no\nVERDICT: NO-GO'
@@ -213,7 +236,7 @@ fixture() { # <folder>
   # The CLIs are the shared stubs (stubs/README.md): a case sets their answers with files in $STUB.
   cp "$SRC/tests/stubs/gh" "$SRC/tests/stubs/claude" "$SRC/tests/stubs/codex" "$SRC/tests/stubs/opencode" "$STUB/"
 }
-# FIXTURE is named once, here: a case that runs a case of its own under another scratch folder (machine.test.sh
+# FIXTURE is named once, here: a case that runs a case of its own under another scratch folder (machineend.test.sh
 # t_machineleft: T=$d/in) copies this run's fixture, as $T/fixture is none there.
 FIXTURE=$T/fixture; fixture "$FIXTURE" || { echo "the engine cases' fixture could not be made in $FIXTURE" >&2; exit 1; }
 # A fixture only some cases copy (install.test.sh's code repo, setup.test.sh's sample), made once per run by the first
