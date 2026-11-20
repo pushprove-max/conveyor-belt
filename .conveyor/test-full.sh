@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # This project's full test suite (the pack's test.full, .conveyor/project.json): every test file git lists but the
 # engine's runner (below), each run whole, in the checkout it is started in. release-prep, release and
-# the Board's full test suite run it. Exit 1 if any file fails; each file's result is a line `-- ok <file>` or `-- FAIL <file>`.
+# the Board's full test suite run it. Exit 1 if any file fails; each file's output begins with a line `== <file>`, and
+# its result is a line `-- ok <file>` or `-- FAIL <file>`.
 # With the engine's test log folder (CONVEYOR_TEST_LOG), a file whose runner named none of its cases as ended there
 # (cases/ok, cases/failed) is named there itself, its path's slashes as colons, so a whole-suite run's progress (on the
 # Board and in /units) counts it and its failure.
@@ -42,6 +43,16 @@ tmp=$(mktemp -d) || exit 1
 trap 'trap "" TERM; exit 143' TERM
 trap 'for p in "${!job[@]}"; do [ ! -d "$LOG" ] || casecopy "$tmp/${job[$p]}.log" "$LOG"; done; rm -rf "$tmp"' EXIT
 LOG=${CONVEYOR_TEST_LOG:-} # the run's test log folder; a file run in parallel names its cases in a folder of its own first (runone)
+# The run's own log in that folder, test-full.log: its `TESTRUN cases=|files=` lines and each file's `== <file>` and
+# `-- ok|FAIL <file>` lines, in the order the output prints the files (each file's output begins with its `== <file>`
+# line). The engine reads which file each failed case is of from it (testrun.sh testfails()), so a run of the failed
+# cases alone (fullalone()) names each under its own file: with no such log, every case is under the suite's command,
+# and its run alone runs the suite whole (below). No test's own output can pass for these lines. It is written in $tmp
+# and put in that folder only when every file has ended (ended): a run stopped before then (a timeout) has none, so
+# its failure is the suite's, and its run alone runs the suite whole, never only the file it was in.
+RUNLOG=$tmp/test-full.log
+runlog() { printf '%s\n' "$@" >> "$RUNLOG"; }
+ended() { [ ! -d "$LOG" ] || cp "$RUNLOG" "$LOG/test-full.log" || rc=1; exit $rc; }
 marks() { find "$LOG/cases/ok" "$LOG/cases/failed" -maxdepth 1 -type f "$@" 2>/dev/null | wc -l; }
 mapfile -t files < <(git ls-files '*.test.sh' '*.test.mjs' '*.test.py')
 if [ -n "${CONVEYOR_SUITE_FILES:-}" ]; then
@@ -83,6 +94,7 @@ nodecases() { # <node test file>
 }
 echo "TESTRUN cases=$((engine + other))"
 echo "TESTRUN files=${#files[@]}"
+runlog "TESTRUN cases=$((engine + other))" "TESTRUN files=${#files[@]}"
 # One test file run: its output, then its `TESTRUN sec` and `-- ok|FAIL` lines; exit 1 when it failed. <n> names its
 # scratch files in $tmp.
 runone() { # <test file> <n>
@@ -93,7 +105,7 @@ runone() { # <test file> <n>
     conveyor/conveyor.test.sh) c=(bash "$t"); [ ${#again[@]} = 0 ] || c=(env "CONVEYOR_SHELL_TEST_CASE=$(IFS=,; echo "${again[*]}")" bash "$t") ;;
     *) c=(bash "$t") ;;
   esac
-  n=$(marks); touch "$stamp"
+  n=$(marks); touch "$stamp"; echo "== $t"
   times > "$tt"; s=${EPOCHREALTIME/,/.}
   "${c[@]}" < /dev/null | awk '!/^(TESTRUN (cases|files)=|TESTRUN sec\t|-- (ok|FAIL) )/ { print; fflush() }'
   st=${PIPESTATUS[0]}; e=${EPOCHREALTIME/,/.}; times >> "$tt"
@@ -104,8 +116,8 @@ runone() { # <test file> <n>
   [ "$st" = 0 ]
 }
 if [ "$MODE" = serial ]; then
-  i=0; for t in "${files[@]}"; do i=$((i + 1)); runone "$t" "$i" || rc=1; done
-  exit $rc
+  i=0; for t in "${files[@]}"; do i=$((i + 1)); runlog "== $t"; if runone "$t" "$i"; then runlog "-- ok $t"; else rc=1; runlog "-- FAIL $t"; fi; done
+  ended
 fi
 # Parallel: at most as many files at once as the pool has slots. A file that is no engine runner holds a slot while it
 # runs (the run's home slot or one of the pool, slot_take) and is pinned to its core (slot_mine); the engine's runner,
@@ -151,6 +163,8 @@ reap() { # one file that ended: its output printed, its result counted
   cat "$tmp/${job[$p]}.out"; [ "$st" = 0 ] || rc=1
   # A worker that ended before its file ran (no core to pin it to: slot_mine) printed no result line of it.
   [ "$st" = 0 ] || grep -qxF -e "-- FAIL $t" -e "-- ok $t" "$tmp/${job[$p]}.out" || echo "-- FAIL $t"
+  # Its lines in the run's log once it ended, as its output is printed only then.
+  if [ "$st" = 0 ]; then runlog "== $t" "-- ok $t"; else runlog "== $t" "-- FAIL $t"; fi
   unset "job[$p]"
 }
 i=0
@@ -169,4 +183,4 @@ for t in "${files[@]}"; do
   [ -n "$own" ] || slot_free
 done
 while [ ${#job[@]} -gt 0 ]; do reap; done
-exit $rc
+ended

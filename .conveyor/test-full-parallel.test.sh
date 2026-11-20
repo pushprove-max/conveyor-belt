@@ -4,7 +4,8 @@
 # of two test slots of its own. Bugs: an engine case file that held a slot its cases cannot use while they wait for
 # slots of their own (two such files on a two-slot pool) would wait for ever; a file that reads the pool itself (as
 # conveyor/tools/closure.test.sh does) held a slot, though its cases take their own; files run at once mixed their
-# output lines; and a file's own name in the progress log was left out when another file named its cases meanwhile.
+# output lines; a file's own name in the progress log was left out when another file named its cases meanwhile; and a
+# red run's failed cases were not under their own files.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd -P)
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
@@ -54,4 +55,22 @@ done
 # The progress log names each case of the case files and the other files, which named none of their own, by path.
 got=$(cd "$T/log/cases" && find ok failed -type f 2>/dev/null | sort | tr '\n' ' ')
 [ "$got" = "ok/fx-a-1 ok/fx-a-2 ok/fx-b-1 ok/fx-b-2 ok/lib:fx-x.test.sh ok/tools:fx-spread.test.sh " ] || no "the progress log does not name each case and the files that named none: $got"
+
+# The parallel suite again, as above, into the log folder <dir>.testlog and the output <dir>.test.
+suite() { # <dir>
+  mkdir "$1.testlog" && (cd "$R" && unset CONVEYOR_TEST_SLOT CONVEYOR_CARD CONVEYOR_TEST_WHOLE && XDG_CONFIG_HOME=$T/config CONVEYOR_TEST_POOL=2:$T/pool \
+    CONVEYOR_TEST_SLOTS=$HERE/../conveyor/lib/slots.sh CONVEYOR_TEST_LOG=$1.testlog CONVEYOR_SUITE_MODE=parallel timeout 60 bash .conveyor/test-full.sh) > "$1.test" 2>&1
+}
+full=$(jq -r '.test.full' "$HERE/project.json")
+failsof() { ( eval "$(sed -n '/^testfails() {/,/^}/p' "$HERE/../conveyor/lib/testrun.sh"; sed -n '/^testlogs() {/,/^}/p' "$HERE/../conveyor/lib/session.sh")"
+  packget() { printf -v "$2" '%s' "$full"; } # the pack's test.full
+  TEST_TIMEOUT=600 testfails "$1" "$2" test.full ); } # <output file> <exit>: the engine's failures of a run of the suite
+# Bug (#1007): the engine put each failed case of a red suite under the suite's command, so its run alone ran the
+# suite whole. In parallel, each file's output is printed once it ends: each failed case is still under its own file.
+printf '%s\n' 'echo "FAIL [three]: wrong"; echo "FAIL [four]: wrong"; exit 1' > "$R/conveyor/tests/fx-c.test.sh"
+git -C "$R" add -A && git -C "$R" commit -qm red
+suite "$T/red"
+got=$(failsof "$T/red.test" 1 | jq -c '[.files[] | .file as $f | .cases[] | "\($f) \(.name)"]')
+[ "$got" = '["conveyor/tests/fx-c.test.sh three","conveyor/tests/fx-c.test.sh four"]' ] \
+  || no "a red parallel suite's failed cases are not each under their case file: $got $(cat "$T/red.test")"
 exit $fails

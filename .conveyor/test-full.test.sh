@@ -103,6 +103,43 @@ printf '%s\t%s\t%s\n' pass lib/fx-env.test.sh '' fail lib/fx-pass.test.sh '' fai
 got=$(sort "$R/ran" 2>/dev/null | tr '\n' ' ')
 [ "$got" = "node a pass runner one,two " ] || no "a list's failed cases were not run alone: $got"
 grep -qx 'TESTRUN files=3' "$T/out" && grep -qx 'TESTRUN cases=4' "$T/out" || no "the totals of a run alone are not of its cases: $(grep TESTRUN "$T/out")"
+# Bug (#1007): the suite wrote no log of its files, so the engine (testrun.sh testfails()) put every failed case of a
+# red suite under the suite's command, and each run of one alone (fulltest.sh fullalone()) named the command in its
+# `fail` line: the suite ran whole again for each, and a release with 3 failed cases took an hour. Each failed case of
+# an engine case file is now under that file, and its run alone runs that case only. This runs the real suite twice
+# over (a red whole run, then each case alone) with the engine's own readers: what the engine reads from a real run's
+# log and output is what this proves, which a hand-written log cannot show.
+printf '%s\n' 't_three() { :; }' 't_four() { :; }' 'echo fx-c >> "$(dirname "$0")/../../ran"' \
+  'echo "FAIL [three]: wrong"; echo "FAIL [four]: wrong"; exit 1' > "$R/conveyor/tests/fx-c.test.sh"
+git -C "$R" add -A && git -C "$R" commit -qm red
+W=$T/red; mkdir "$W.testlog"
+(cd "$R" && CONVEYOR_TEST_LOG=$W.testlog bash -c "$full") > "$W.test" 2>&1
+failsof() { ( eval "$(sed -n '/^testfails() {/,/^}/p' "$HERE/../conveyor/lib/testrun.sh"; sed -n '/^testlogs() {/,/^}/p' "$HERE/../conveyor/lib/session.sh")"
+  packget() { printf -v "$2" '%s' "$full"; } # the pack's test.full
+  TEST_TIMEOUT=600 testfails "$1" "$2" test.full ); } # <output file> <exit>: the engine's failures of a run of the suite
+units=$(failsof "$W.test" 1 | jq -c '.files[] | .file as $f | .cases[] | {file: $f, case: .name}')
+[ "$(jq -sc 'map("\(.file) \(.case)")' <<<"$units")" = '["conveyor/tests/fx-c.test.sh three","conveyor/tests/fx-c.test.sh four"]' ] \
+  || no "a red suite's failed cases are not each under their engine case file: $units $(cat "$W.test")"
+while IFS= read -r u; do
+  rm -f "$R/ran"
+  got=$( eval "$(sed -n '/^fullalone() {/,/^}/p' "$HERE/../conveyor/lib/fulltest.sh")"
+    tests() { (cd "$R" && CONVEYOR_TEST_RERUN=$1.rerun bash -c "$full") > "$1.test" 2>&1; }
+    fullalone "$W" '{"files":[]}' "$u" > /dev/null; grep $'^fail\t' "$W.rerun" )
+  c=$(jq -r .case <<<"$u")
+  [ "$got" = "fail"$'\t'"conveyor/tests/fx-c.test.sh"$'\t'"$c" ] || no "the run alone of $c does not name its case file and case: $got"
+  [ "$(cat "$R/ran" 2>&1)" = "runner $c" ] || no "the run alone of $c ran more than that case: $(cat "$R/ran" 2>&1)"
+done <<<"$units"
+git -C "$R" rm -q conveyor/tests/fx-c.test.sh && git -C "$R" commit -qm green
+# Bug (#1007 review): a suite stopped at its timeout left a log naming the file it was in as the one still running, so
+# the engine took that file for the run's timeout, and its run alone (all the others listed as passed) could pass the
+# release though the suite never reached the files after it. A stopped run leaves no log: the timeout is the suite's.
+# This stops the real suite, as the test step's timeout does: what it leaves is what a stop of no function shows.
+echo 'sleep 60' > "$R/lib/fx-slow.test.sh" && git -C "$R" add -A && git -C "$R" commit -qm slow
+W=$T/stop; mkdir "$W.testlog"
+(cd "$R" && CONVEYOR_TEST_LOG=$W.testlog timeout 5 bash -c "$full") > "$W.test" 2>&1
+got=$(failsof "$W.test" 124 | jq -r '.timeout.file')
+[ "$got" = "$full" ] || no "a stopped serial suite's timeout is not the suite's but $got: $(cat "$W.test")"
+git -C "$R" rm -q lib/fx-slow.test.sh && git -C "$R" commit -qm fast
 # A list with no `fail` line (files kept off as passed before) leaves the suite whole. The fixture runner goes first:
 # started whole, the test step's hook would take it for a test file this one runs.
 git -C "$R" rm -q conveyor/conveyor.test.sh && git -C "$R" commit -qm 'no runner'
