@@ -214,6 +214,16 @@ for l in "beta: #30 is stuck: it has waited on other cards for 41 minutes in all
     "beta: #35 is stuck: no new step and no output since 2026-11-11T11:40:00Z (last step: build)"; do
   grep -qF "$l" <<<"$w" || fail "a stuck card's line does not say why ($l): $w"
 done
+}
+
+# The cases wake, wake_relay and wake_engine run side by side, each on its own Foreman, so the file takes about the
+# slowest of them.
+t_wake_relay() {
+CASE=wake-relay
+ready
+# The items of the case wake already reported, so a later poll names only the new ones.
+mkdir -p "$T/ask"; snap '[12,15]' '[7]' > "$T/ask/alpha"; snap '[19]' '[]' > "$T/ask/beta"
+bash "$SRC/watch-conveyor.sh" --once || fail "no wake for four new items"
 # A long reason cuts its own line only; the waiter relays the whole wake, uncut.
 rm -f "$FD"/pending/*.wake
 snap '[12,15,16]' '[7]' "$(printf 'word %.0s' {1..200})" > "$T/ask/alpha"
@@ -232,6 +242,15 @@ compgen -G "$FD/pending/*.wake" >/dev/null && fail "a relayed wake stayed pendin
 got=$(echo '{}' | CONVEYOR_FOREMAN_WATCHERS="echo 'Alert: disk full' > $FD/pending/x.wake"$'\nsleep 30' bash "$SRC/waiter.sh" 2>&1 >/dev/null) # sleep: a stand-in watcher that goes on after its alert
 [ "$got" = 'Alert: disk full' ] || fail "the waiter did not relay a watcher's wake: $got"
 unheld
+}
+
+t_wake_engine() {
+CASE=wake-engine
+ready
+# Nothing waits or is blocked; the watcher's clock is the case's, as in the case wake.
+mkdir -p "$T/ask"; snap '[]' '[]' > "$T/ask/alpha"; snap '[]' '[]' > "$T/ask/beta"
+CONVEYOR_FOREMAN_NOW=$(date +%s)
+export CONVEYOR_FOREMAN_NOW
 # A stuck card whose step the engine ended for no progress and runs once more says what the engine did, and wakes
 # again though the card was already reported stuck.
 rm -f "$FD"/pending/*.wake
@@ -681,18 +700,21 @@ bash "$SRC/watch-conveyor.sh" --once || fail "no wake for the blocked card of th
 grep -qF "beta: #7 is blocked" "$FD"/pending/*.wake || fail "the wake does not name beta's blocked card: $(cat "$FD"/pending/*.wake)"
 }
 
-t_session() {
-CASE=session
-# The Foreman named Ada (as launch names it), the records' snapshots of the case wake, and each record command noted.
+# ada: the Foreman named Ada (as launch names it), each record command noted, and no CONVEYOR_FOREMAN. The cases session,
+# session_fork and session_claims start from it and run side by side.
+ada() {
 ready; fileask
 jq '.foreman.name = "Ada"' "$XDG_CONFIG_HOME/conveyor/host.json" > "$T/h" && mv "$T/h" "$XDG_CONFIG_HOME/conveyor/host.json"
-mkdir -p "$T/ask"; snap '[12,15,16,17,18]' '[7,8]' > "$T/ask/alpha"; snap '[19]' '[]' > "$T/ask/beta"
+unset CONVEYOR_FOREMAN
+rm -f "$FD"/pending/*.wake
+}
+big() { head -c 6000 /dev/zero | tr '\0' x > "$FD/state.md"; }
+t_session() {
+CASE=session
 # The Foreman is marked by session, not by environment: a session started with no CONVEYOR_FOREMAN (claude
 # --continue, an IDE) is the Foreman when /conveyor-belt:foreman marked it, and only then. Losing the mark silently
 # left a Foreman running for hours with no alert.
-unset CONVEYOR_FOREMAN
-rm -f "$FD"/pending/*.wake
-big() { head -c 6000 /dev/zero | tr '\0' x > "$FD/state.md"; }
+ada
 big; out=$(sess s1 | bash "$SRC/stop.sh" state); [ -z "$out" ] || fail "an unmarked session ran the Foreman's stop hook: $out"
 out=$(bash "$SRC/foreman.sh" claim s1) || fail "the claim failed: $out"
 [ "$(head -n 1 <<<"$out")" = "This session is now the Foreman (Ada): its watchers start at the end of this turn." ] || fail "the claim does not say so in one line: $out"
@@ -707,7 +729,7 @@ out=$(sess s2 startup | bash "$SRC/foreman.sh" start); [ -z "$out" ] || fail "an
 # The waiter's output goes through cat, which ends only once nothing the waiter started holds it open.
 rm -f "$FD/waiter.pid"
 # The watcher is slow to stop on TERM: the claim still returns only once it is gone.
-sess s1 | CONVEYOR_FOREMAN_WATCHERS="trap 'sleep 2; exit' TERM; echo \$\$ > $T/w1; while :; do sleep 1; done" bash "$SRC/waiter.sh" 2>&1 | cat > "$T/wout" & cp=$! # sleep: the 2 s the stand-in watcher takes to stop
+sess s1 | CONVEYOR_FOREMAN_WATCHERS="trap 'sleep 1; exit' TERM; echo \$\$ > $T/w1; while :; do sleep 1; done" bash "$SRC/waiter.sh" 2>&1 | cat > "$T/wout" & cp=$! # sleep: the 1 s the stand-in watcher takes to stop, ten of the waiter's 0.1 s checks
 wait_until '[ -s "$FD/waiter.pid" ] && [ -s "$T/w1" ] || ! kill -0 "$cp" 2>/dev/null'
 [ -s "$T/w1" ] || fail "the Foreman's waiter did not start its watchers"
 wp=$(cut -d' ' -f1 "$FD/waiter.pid")
@@ -729,6 +751,12 @@ out=$(sess s1 resume | bash "$SRC/foreman.sh" start)
 [ "$(wc -l <<<"$out")" = 1 ] && jq -e '.systemMessage | contains("no longer the Foreman")' <<<"$out" >/dev/null \
   || fail "the former Foreman's owner was not shown one line at its start: $out"
 out=$(sess s1 resume | bash "$SRC/foreman.sh" start); [ -z "$out" ] || fail "the former Foreman was told twice: $out"
+}
+
+t_session_fork() {
+CASE=session-fork
+ada
+bash "$SRC/foreman.sh" claim s2 > /dev/null || fail "the claim for s2 failed"
 # A fork (--fork-session: source fork, a new id) keeps the role when its transcript is the Foreman's.
 jq -cn '{type: "user", sessionId: "s3", forkedFrom: {sessionId: "s2", messageUuid: "u1"}, message: {content: "watch"}}' > "$T/fork.jsonl"
 out=$(sess s3 fork "$T/fork.jsonl" | bash "$SRC/foreman.sh" start)
@@ -775,6 +803,12 @@ out=$(cd "$T/beta" && env -u CONVEYOR_FOREMAN_DIR -u CONVEYOR_MAIN bash "$SRC/fo
 [ ! -e "$T/beta/conveyor/state/foreman/session" ] || fail "a claim in beta kept a mark of its own outside the group's folder"
 out=$(sess s5 | CONVEYOR_FOREMAN_WATCHERS="echo \$\$ > $T/w5" bash "$SRC/waiter.sh" 2>&1); rc=$?
 [ "$rc" = 0 ] && [ ! -e "$T/w5" ] || fail "a Foreman in another checkout still started its watchers (exit $rc): $out"
+}
+
+t_session_claims() {
+CASE=session-claims
+ada
+bash "$SRC/foreman.sh" claim s6 > /dev/null || fail "the claim for s6 failed"
 # Claims at once each keep their own mark and former: every one succeeds, the mark is one of them, and every other
 # is told at its next start.
 pids=(); for i in $(seq 7 16); do bash "$SRC/foreman.sh" claim "c$i" > "$T/claim.$i" 2>&1 & pids+=($!); done
@@ -788,7 +822,7 @@ done
 grep -qxF s6 "$FD/former" || fail "the Foreman before the claims at once is not told: $(cat "$FD/former")"
 # A session started without the launcher (no CONVEYOR_MAIN) still wakes on an awaited issue landing in its checkout.
 rm -f "$FD"/pending/*.wake; echo 40 >> "$FD/await-alpha.txt"
-jq -c '.pushedCards = [{issue: 40}]' "$T/ask/alpha" > "$T/a" && mv "$T/a" "$T/ask/alpha"
+mkdir -p "$T/ask"; snap '[12,15,16,17,18]' '[7,8]' | jq -c '.pushedCards = [{issue: 40}]' > "$T/ask/alpha"; snap '[19]' '[]' > "$T/ask/beta"
 (cd "$M" && env -u CONVEYOR_MAIN -u CONVEYOR_FOREMAN_DIR CONVEYOR_FOREMAN_ASK="cat $T/ask/\$CONVEYOR_REPO" bash "$SRC/watch-conveyor.sh" --once) || fail "no wake for an awaited issue landing without the launcher"
 grep -qF 'alpha: #40 landed' "$FD"/pending/*.wake || fail "the awaited issue's landing was not named: $(cat "$FD"/pending/*.wake)"
 }
@@ -1119,28 +1153,26 @@ out=$(say "$M" w2 'You are the Foreman')
 [ "$(cut -d' ' -f1 "$FD/session")" = w2 ] || fail "\"You are the Foreman\" did not claim the role: $out"
 }
 
-t_auto() {
-CASE=auto
 # A new session opened in the main checkout takes the role by itself: no mark, or the marked session gone, it claims
 # it; a live one holding it, it claims nothing and asks the owner by the picker. Bug: only /conveyor-belt:foreman or
 # the words claimed it, so for hours no Foreman watched the belts. Never in a worktree (a card's, a lane's) or a
 # session the engine starts for a card or a lane: one would take the role from the owner's Foreman.
+# autohost: the owner's host as the cases auto_skip and auto (side by side) open sessions on, and their helpers.
+autohost() {
 export CONVEYOR_FOREMAN_ASK='exit 3'
 # (A card's own run of this test has CONVEYOR_CARD set: the owner's sessions have none.)
 unset CONVEYOR_MAIN CONVEYOR_FOREMAN_DIR CONVEYOR_FOREMAN CLAUDE_CONFIG_DIR CONVEYOR_CARD CONVEYOR_LANE
 hook=$(jq -r '.hooks.SessionStart[].hooks[].command | select(contains("foreman.sh start"))' "$PLUGIN/hooks/hooks.json")
 [ -n "$hook" ] || fail "hooks.json runs no Foreman start at SessionStart"
+}
 open() { # <folder> <session> [<source>]: the hook as Claude Code runs it at the start of a session in that folder
   sess "$2" "${3:-startup}" | (cd "$1" && CLAUDE_PROJECT_DIR=$1 bash -c "$hook")
 }
 mark() { cut -d' ' -f1 "$FD/session" 2>/dev/null; }
 at() { local d=$1; shift; (cd "$d" && "$@"); }
-# held <session id> <pid> [<transcript age>]: Claude Code's own record of a session, and its transcript written then.
-held() {
-  mkdir -p "$HOME/.claude/sessions" "$HOME/.claude/projects/p"
-  jq -cn --argjson p "$2" --arg s "$1" '{pid: $p, sessionId: $s, startedAt: 1794650400000, kind: "interactive"}' > "$HOME/.claude/sessions/$2.json"
-  touch -d "${3:-now}" "$HOME/.claude/projects/p/$1.jsonl"
-}
+t_auto_skip() {
+CASE=auto-skip
+autohost
 git -C "$M" add .conveyor && git -C "$M" -c user.name=t -c user.email="t${AT:-@}example.com" commit -qm pack
 git -C "$M" worktree add -q "$T/card" && git -C "$M" worktree add -q "$T/alpha-fast"
 for d in "$T/card" "$T/alpha-fast"; do
@@ -1149,6 +1181,17 @@ done
 out=$(CONVEYOR_CARD=c1 open "$M" w1); [ -z "$out" ] && [ -z "$(mark)" ] || fail "a session started for a card claimed or asked: $out"
 out=$(CONVEYOR_LANE=research open "$M" w1); [ -z "$out" ] && [ -z "$(mark)" ] || fail "a lane's session claimed or asked: $out"
 out=$(open "$M" w1 resume); [ -z "$out" ] && [ -z "$(mark)" ] || fail "a resumed session, not a new one, claimed or asked: $out"
+}
+
+t_auto() {
+CASE=auto
+autohost
+# held <session id> <pid> [<transcript age>]: Claude Code's own record of a session, and its transcript written then.
+held() {
+  mkdir -p "$HOME/.claude/sessions" "$HOME/.claude/projects/p"
+  jq -cn --argjson p "$2" --arg s "$1" '{pid: $p, sessionId: $s, startedAt: 1794650400000, kind: "interactive"}' > "$HOME/.claude/sessions/$2.json"
+  touch -d "${3:-now}" "$HOME/.claude/projects/p/$1.jsonl"
+}
 # No mark: the new session claims the role and says so in one line, shown to the owner.
 out=$(open "$M" a1)
 [ "$(mark)" = a1 ] || fail "a new session in the main checkout with no Foreman did not claim the role: $out"
@@ -1199,7 +1242,7 @@ bash "$SRC/../privacy/check.sh" --terms "$TERMS" "$SRC"/* "$SRC/../../commands/"
 
 # Every case at once, each in a subshell on its own fixture; each one's output is shown once all have ended, and the
 # test passes only when each case ran to its end.
-cases=(setup wake pushwake needs alerts state_stop reply_stop filing ask_pin ask_self session stale reopen projects projects_filing projects_groups remote words auto privacy)
+cases=(setup wake wake_relay wake_engine pushwake needs alerts state_stop reply_stop filing ask_pin ask_self session session_fork session_claims stale reopen projects projects_filing projects_groups remote words auto_skip auto privacy)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for one_case in $SEL; do case " ${cases[*]} " in *" $one_case "*) ;; *) echo "unknown case $one_case" >&2; exit 2 ;; esac; done
