@@ -15,8 +15,8 @@
 # state, success, as the suite's pass on the commit it releases. The suite runs only when that head holds
 # docs/releases/<version>.md in the release notes style (tools/notes-check.sh): `release` releases the commit with the
 # notes. When the head has no notes, release-prep has a model write a draft of them in that style (relnotes()), from
-# the issues landed and the commits since the newest vX.Y.Z tag (with no tag, an overview from the README and docs), to <state>/release/<version>.md (a draft the style
-# check refuses is rewritten once, relfix()), prints its path and stops, for the owner to read and the Foreman to commit as docs/releases/<version>.md; the run after the notes are
+# the issues landed and the commits since the newest vX.Y.Z tag (with no tag, an overview from the README and docs), to <state>/release/<version>.md (each line
+# checked against the issues and commits it names, reltrace(); a draft the style check refuses is rewritten once, relfix()), prints its path and stops, for the owner to read and the Foreman to commit as docs/releases/<version>.md; the run after the notes are
 # pushed runs the suite. It tags and releases nothing. With Land as pr and Merge PR release (lib/push.sh), it runs on
 # the remote's head of the landing branch while that holds a commit the default branch lacks, and `release` checks that
 # head (release-prep's pass is on it) and merges the landing pull request only when every check passed (a refused merge
@@ -110,7 +110,16 @@ RELRULES='- No file, script or function names, no paths, no issue or pull reques
 RELFIX='These release notes break the release notes style: the style check refuses the lines it lists below the notes.
 Rewrite those lines so they keep to the style, and keep every other line as it is.
 '"$RELRULES"'
+- A line that ends with its sources in square brackets (for example "[#12]") keeps them as they are: they are not
+  part of the style, and they are taken off before anyone reads the notes.
 Answer with the whole notes alone, in Markdown, and nothing else.'
+# The prompt that has the model check a draft's lines against their sources (reltrace()); each line, numbered, and the
+# text of its sources are added after it.
+RELTRACE='Each numbered line below is a line of release notes, given with the issues and commits it names as its sources.
+Name each line that states a change its sources do not say was made: a feature, check, setting or fix that no source
+describes is not supported, even when a source is about something near it.
+Answer with the numbers of those lines alone, one a line, or with the word none when every line is supported, and
+nothing else.'
 RELNOTES='Write the release notes of a new release of this project, from the issues that landed since the last release and
 the subjects of its commits, given below. They are for the people who use the project, not for its developers.
 - Begin with the line "# VERSION", then one sentence that says what this release is about.
@@ -120,6 +129,10 @@ the subjects of its commits, given below. They are for the people who use the pr
 '"$RELRULES"'
 - Leave out changes that only touch tests, refactors or tooling, or put them in one plain line if they change nothing
   a user sees.
+- End each line that is not a heading with the sources it comes from, in square brackets: the numbers of the issues
+  below (for example "[#12, #15]") or, for a commit that names no issue, its short hash as listed below (for example
+  "[1a2b3c4]"). Write only what an issue or commit below says was changed: a line with no source below is left out.
+  These brackets are the only place for issue numbers, and they are taken off before anyone reads the notes.
 Answer with the notes alone, in Markdown, and nothing else.'
 # The first release (no vX.Y.Z tag yet) has no changes to list: its notes are an overview of the project (relfirst()).
 RELFIRST='Write the release notes of the first release of this project: an overview of what it does, from its README and
@@ -133,21 +146,78 @@ Answer with the notes alone, in Markdown, and nothing else.'
 # The notes draft (<file>), written by a model (askmodel) from the issues the commits since <last tag> up to <commit>
 # name ("(#N)" at a subject's end, or a "Closes #N" line: their titles and bodies, as gh reads them) and those commits'
 # subjects, merges left out, each with its trailing (#N) taken off. An issue gh cannot read is left out, with a
-# warning; its commit's subject is still given. With no last tag (the first release): from <commit>'s README and docs
-# alone (relfirst()), no commit or issue. Fails, with why on stdout, when the model gives no notes.
+# warning; its commit's subject is still given. Each issue is given with its number and each subject with its commit's
+# short hash, which the model names after each line (RELNOTES), and the draft is then traced to them (reltrace()) and
+# checked by the style check (relfix()). With no last tag (the first release): from <commit>'s README and docs alone
+# (relfirst()), no commit or issue, and no trace. Prints the trace's and the style check's words; fails, with why on
+# stdout, when the model gives no notes or the draft cannot be traced.
 relnotes() { # <version> <last tag, or empty> <commit> <file>
-  local subj ns n j iss='[]' p
-  if [ -z "$2" ]; then p=$(relfirst "$1" "$3")
-  else
-    subj=$(git log --no-merges --format=%s "$2..$3" | sed -E 's/ \(#[0-9]+\)$//') && ns=$(git log --no-merges --format=%B "$2..$3") || { echo "the commits could not be read"; return 1; }
-    for n in $(grep -oE '(\(#[0-9]+\)$|^Closes #[0-9]+)' <<<"$ns" | grep -oE '[0-9]+' | sort -un); do
-      j=$(timeout 60 gh issue view "$n" --json number,title,body < /dev/null 2>/dev/null) && iss=$(jq -c --argjson i "$j" '. + [$i]' <<<"$iss" 2>/dev/null) \
-        || echo "conveyor: release-prep: issue #$n could not be read; the notes are written without it" >&2
+  local subj ns n j iss='[]' p nums hs t
+  if [ -z "$2" ]; then relask "$(relfirst "$1" "$3")" "$4" || return 1; relfix "$4"; return 0; fi
+  subj=$(git log --no-merges --format='%h %s' "$2..$3" | sed -E 's/ \(#[0-9]+\)$//') && ns=$(git log --no-merges --format=%B "$2..$3") \
+    && hs=$(git log --no-merges --format=%H "$2..$3") || { echo "the commits could not be read"; return 1; }
+  nums=$(grep -oE '(\(#[0-9]+\)$|^Closes #[0-9]+)' <<<"$ns" | grep -oE '[0-9]+' | sort -un)
+  for n in $nums; do
+    j=$(timeout 60 gh issue view "$n" --json number,title,body < /dev/null 2>/dev/null) && iss=$(jq -c --argjson i "$j" '. + [$i]' <<<"$iss" 2>/dev/null) \
+      || echo "conveyor: release-prep: issue #$n could not be read; the notes are written without it" >&2
+  done
+  p=${RELNOTES//VERSION/$1}$'\n\n'$(jq -r --arg s "$subj" '"# The issues that landed\n\n" + (map("## #\(.number): \(.title // "")\n\n\((.body // "")[0:4000])\n") | join("\n"))
+    + "\n# The commit subjects\n\n" + $s' <<<"$iss") || { echo "the issues could not be read"; return 1; }
+  relask "$p" "$4.raw" || return 1
+  t=$(reltrace "$4.raw" "$4" "$iss" "$hs" "$2") || { rm -f "$4.raw"; echo "$t"; return 1; }
+  printf '%s' "$t"; relfix "$4" "$4.raw" "$iss" "$hs" "$2"; rm -f "$4.raw"
+}
+# The draft <raw> traced to the release's issues (<issues>: those its commits name that gh read, a JSON array of
+# {number, title, body}) and commits (<commit hashes>, one a line) since <last tag>, and written to <file>. Each line
+# that is not blank or a heading must end with its sources in square brackets (RELNOTES): an issue of <issues> (#N) or
+# a commit's hash (7 to 40 of its first hex digits). A source in the range is not enough: the model is given each line
+# with its sources' text (an issue's title and body, a commit's message) and names the lines they do not support
+# (RELTRACE), as 1.8.0's draft named a doctor check beside an issue that made no such check. A line with no source in
+# the range, or one its sources do not support, is left out: it may state a change no commit made. <file> is <raw> with
+# those lines left out and the brackets taken off; <raw> is left with the lines kept and their brackets, line for line
+# with <file>, for the style rewrite (relfix()). The sources of each line kept go to <file>'s side file,
+# <version>.sources.json beside it, a JSON array of {"line", "issues", "commits"}, for the Foreman; it is never part
+# of the notes. Prints nothing when every line is kept; else " The draft leaves out the lines no issue or commit since
+# <last tag> supports: <line>; <line>." Fails, with why on stdout, when the model's check gives no answer it can read
+# or a file cannot be written.
+reltrace() { # <raw> <file> <issues> <commit hashes> <last tag>
+  local raw=$1 f=$2 line tags t c j n i=0 ask='' ans txt iss com out='' keep='' src='[]' gone=()
+  local -a n_bare n_tagged n_ok n_issues n_commits
+  while IFS= read -r line || [ -n "$line" ]; do
+    i=$((i + 1)); n_bare[i]=$line n_tagged[i]=$line n_ok[i]=text
+    if [ -z "${line//[[:space:]]/}" ] || [[ $line == '#'* ]]; then continue; fi
+    n_ok[i]=none tags='' iss='' com='' txt=''
+    if [[ $line =~ ^(.*[^[:space:]])[[:space:]]*\[([^]]*)\][[:space:]]*$ ]]; then n_bare[i]=${BASH_REMATCH[1]} tags=${BASH_REMATCH[2]}; fi
+    for t in ${tags//,/ }; do
+      if [[ $t =~ ^#([0-9]+)$ ]] && n=$((10#${BASH_REMATCH[1]})) && j=$(jq -ce --argjson n "$n" '.[] | select(.number == $n)' <<<"$3" 2>/dev/null); then
+        iss+=$n$'\n' txt+=$(jq -r '"### Issue #\(.number): \(.title // "")\n\n\((.body // "")[0:4000])"' <<<"$j")$'\n\n'
+      elif [[ $t =~ ^[0-9a-f]{7,40}$ ]] && c=$(grep -m 1 "^$t" <<<"$4"); then
+        com+=$c$'\n' txt+="### Commit ${c:0:12}"$'\n\n'$(git log -1 --format=%B "$c")$'\n\n'
+      fi
     done
-    p=${RELNOTES//VERSION/$1}$'\n\n'$(jq -r --arg s "$subj" '"# The issues that landed\n\n" + (map("## \(.title // "")\n\n\((.body // "")[0:4000])\n") | join("\n"))
-      + "\n# The commit subjects\n\n" + $s' <<<"$iss") || { echo "the issues could not be read"; return 1; }
+    [ -n "$iss$com" ] || continue
+    n_ok[i]=traced n_issues[i]=$iss n_commits[i]=$com
+    ask+="## Line $i: ${n_bare[i]}"$'\n\n'$txt
+  done < "$raw"
+  if [ -n "$ask" ]; then
+    ans=$(relask "$RELTRACE"$'\n\n'"$ask" "$raw.check") || { rm -f "$raw.check"; echo "the draft could not be checked against its sources: $ans"; return 1; }
+    ans=$(tr -d ' \t\r' < "$raw.check" | grep -v '^$'); rm -f "$raw.check"
+    if [ "${ans,,}" != none ]; then
+      ! grep -qvxE '[0-9]+' <<<"$ans" || { echo "the draft's check against its sources named no line numbers: $(head -n 1 <<<"$ans")"; return 1; }
+      for n in $ans; do n=$((10#$n)); [ "${n_ok[n]:-}" != traced ] || n_ok[n]=unsupported; done
+    fi
   fi
-  relask "$p" "$4"
+  for ((n = 1; n <= i; n++)); do
+    case ${n_ok[n]} in
+      text|traced) out+=${n_bare[n]}$'\n' keep+=${n_tagged[n]}$'\n' ;;&
+      traced) src=$(jq -c --arg l "${n_bare[n]}" --arg i "${n_issues[n]}" --arg c "${n_commits[n]}" '. + [{line: $l, issues: ($i | split("\n") | map(select(. != "") | tonumber) | unique),
+        commits: ($c | split("\n") | map(select(. != "")) | unique)}]' <<<"$src") || { echo "the draft's sources could not be read"; return 1; } ;;
+      none|unsupported) gone+=("${n_bare[n]}") ;;
+    esac
+  done
+  printf '%s' "$out" > "$f.trace" && mv "$f.trace" "$f" && printf '%s' "$keep" > "$raw" && printf '%s\n' "$src" > "${f%.md}.sources.json" \
+    || { echo "the traced draft could not be written"; return 1; }
+  [ ${#gone[@]} = 0 ] || { t=$(printf '%s; ' "${gone[@]}"); printf ' The draft leaves out the lines no issue or commit since %s supports: %s.' "$5" "${t%; }"; }
 }
 # The model's answer (askmodel) to <prompt>, written to <file>. Fails, with why on stdout, when it gives no answer.
 relask() { # <prompt> <file>
@@ -161,17 +231,26 @@ relask() { # <prompt> <file>
   rm -rf "$d"
 }
 # The notes draft <file> checked by the style check (tools/notes-check.sh). When the check refuses lines, the model
-# rewrites them once (RELFIX, given the draft and the check's findings), and the rewrite is checked again. Prints
-# nothing when the draft passes; else " The draft breaks the release notes style: <the findings>.", and the draft is
-# kept with those findings in a note at its top.
-relfix() { # <file>
+# rewrites them once (RELFIX, given the draft and the check's findings), and the rewrite is checked again. A draft
+# traced to its sources (reltrace(): given <raw>, its lines with their sources, and the trace's issues, commits and last
+# tag) is rewritten from <raw>, and the rewrite is traced again before it is the draft, so a line the rewrite adds or
+# changes is kept only when its sources support it, and the side file names the rewrite's lines. Prints the trace's
+# words on the rewrite, then nothing when the draft passes; else " The draft breaks the release notes style: <the
+# findings>.", and the draft is kept with those findings in a note at its top.
+relfix() { # <file> [<raw> <issues> <commit hashes> <last tag>]
   local f=$1 out rc why
   out=$("$HERE/tools/notes-check.sh" "$f"); rc=$?
   [ "$rc" != 0 ] || return 0
   if [ "$rc" = 1 ]; then
-    why=$(relask "$RELFIX"$'\n\n# The notes\n\n'"$(cat "$f")"$'\n\n# The lines the style check refuses\n\n'"$out" "$f.fix") \
-      && mv "$f.fix" "$f" || echo "conveyor: release-prep: the draft could not be rewritten to the style: $why" >&2
-    rm -f "$f.fix"
+    if [ $# = 1 ]; then
+      why=$(relask "$RELFIX"$'\n\n# The notes\n\n'"$(cat "$f")"$'\n\n# The lines the style check refuses\n\n'"$out" "$f.fix") \
+        && mv "$f.fix" "$f" || echo "conveyor: release-prep: the draft could not be rewritten to the style: $why" >&2
+      rm -f "$f.fix"
+    else
+      why=$(relask "$RELFIX"$'\n\n# The notes\n\n'"$(cat "$2")"$'\n\n# The lines the style check refuses\n\n'"$out" "$2") \
+        && why=$(reltrace "$2" "$f" "$3" "$4" "$5") && printf '%s' "$why" \
+        || echo "conveyor: release-prep: the draft could not be rewritten to the style: $why" >&2
+    fi
     out=$("$HERE/tools/notes-check.sh" "$f"); rc=$?
     [ "$rc" != 0 ] || return 0
   fi
@@ -459,8 +538,9 @@ releaseprep() { # <version>
     relsuite release-prep "$sha"; return
   fi
   d=${STATE%/*}/release/$v.md
-  mkdir -p "${d%/*}" && rm -f "$d" && out=$(relnotes "$v" "$last" "$sha" "$d") || { echo "conveyor: release-prep: the notes draft could not be written: $out; nothing run" >&2; return 1; }
-  out=$(relfix "$d")
+  mkdir -p "${d%/*}" && rm -f "$d" "${d%.md}.sources.json" && out=$(relnotes "$v" "$last" "$sha" "$d") \
+    || { rm -f "$d" "${d%.md}.sources.json"; echo "conveyor: release-prep: the notes draft could not be written: $out; nothing run" >&2; return 1; }
+  [ -z "$last" ] || out+=" The issues and commits each line comes from are in ${d%.md}.sources.json."
   local from="from the issues and commits since $last"; [ -n "$last" ] || from='an overview from the README and docs, as no release is tagged yet'
   echo "conveyor: release-prep: the notes draft, $from, is $d.$out ${sha:0:12} ($REMOTE/$BRANCH) has no docs/releases/$v.md, so the suite is not run and no status is posted: read the draft, edit it as needed, commit it as docs/releases/$v.md on $BRANCH, push it, and run release-prep $v again" >&2
   return 1

@@ -36,14 +36,21 @@ relsetup() {
 
 # relmodel <answer>: the model (the stub claude) keeps its prompt in $STUB/notes-prompt and answers <answer>, as the
 # result of Claude's JSON output. RELFMT, the end of a stub's pipe: as Claude Code does, the JSON output only with
-# --output-format json, else only its result.
+# --output-format json, else only its result. RELCHECK, the start of a stub: it reads the prompt into p, and answers the
+# check of a draft's lines against their sources (reltrace()) itself, its prompt added to $STUB/trace-prompt: with the
+# numbers of the lines that hold the text in $STUB/unsupported, or none.
 RELFMT='{ [[ " $* " == *" --output-format json "* ]] && cat || jq -j .result; }'
-relmodel() { printf '#!/usr/bin/env bash\ncat > "$STUB/notes-prompt"\njq -cn --arg r %q '\''{type: "result", is_error: false, result: ($r + "\\n"), num_turns: 1}'\'' | %s\n' "$1" "$RELFMT" > "$STUB/claude"; }
+RELCHECK='p=$(cat); if grep -q "^Each numbered line below is a line of release notes" <<<"$p"; then printf "%s\n" "$p" >> "$STUB/trace-prompt"
+  r=$(grep -F -- "$(cat "$STUB/unsupported" 2>/dev/null || echo NO-LINE)" <<<"$p" | sed -nE "s/^## Line ([0-9]+): .*/\\1/p")
+  jq -cn --arg r "${r:-none}" '\''{type: "result", is_error: false, result: ($r + "\n"), num_turns: 1}'\'' | '"$RELFMT"'; exit; fi'
+# stub: the drafter, the rewrite and the check are one model call each, answered without a real model
+relmodel() { printf '#!/usr/bin/env bash\n%s\nprintf %%s "$p" > "$STUB/notes-prompt"\njq -cn --arg r %q '\''{type: "result", is_error: false, result: ($r + "\\n"), num_turns: 1}'\'' | %s\n' "$RELCHECK" "$1" "$RELFMT" > "$STUB/claude"; }
 # relmodels <first answer> <second answer>: as relmodel, but call n answers its nth answer (the second from then on),
-# counts the calls in $STUB/notes-calls and keeps call n's prompt in $STUB/notes-prompt.<n>.
+# counts the calls in $STUB/notes-calls and keeps call n's prompt in $STUB/notes-prompt.<n> (the check is not counted).
 relmodels() {
   rm -f "$STUB"/notes-calls "$STUB"/notes-prompt.*
-  printf '#!/usr/bin/env bash\nn=$(( $(cat "$STUB/notes-calls" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$STUB/notes-calls"\ncat > "$STUB/notes-prompt.$n"\na=(%q %q); r=${a[n > 1 ? 1 : 0]}\njq -cn --arg r "$r" '\''{type: "result", is_error: false, result: ($r + "\\n"), num_turns: 1}'\'' | %s\n' "$1" "$2" "$RELFMT" > "$STUB/claude"
+  # stub: as relmodel's, with a second answer for the rewrite
+  printf '#!/usr/bin/env bash\n%s\nn=$(( $(cat "$STUB/notes-calls" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$STUB/notes-calls"\nprintf %%s "$p" > "$STUB/notes-prompt.$n"\na=(%q %q); r=${a[n > 1 ? 1 : 0]}\njq -cn --arg r "$r" '\''{type: "result", is_error: false, result: ($r + "\\n"), num_turns: 1}'\'' | %s\n' "$RELCHECK" "$1" "$2" "$RELFMT" > "$STUB/claude"
 }
 
 # release-prep on a head with no notes: the project's first release, then, v1.0.0 tagged, its next.
@@ -52,8 +59,11 @@ relmodels() {
 # draft, so a commit subject or an issue given to it would show in the draft). Then: the suite ran and its status was
 # posted on a head without the notes (committing the notes then makes a new head, and `release`, which checks the
 # status of the head it releases, runs the suite again); the notes draft is not the model's, or the model is not given
-# the issues landed since the last release (named by "(#N)" or by a Closes line), their bodies, the commit subjects
-# and the style, or is given an issue from before it; a draft that breaks the style (one naming conveyor.sh, as
+# the issues landed since the last release (named by "(#N)" or by a Closes line), their numbers and bodies, the commit
+# subjects with their hashes and the style, or is given an issue from before it; a draft line that no issue or commit
+# since the last release supports (1.8.0's draft named a doctor check no commit made, beside an issue in the range) is
+# kept, or left out without release-prep naming it; a line that traces to one loses its sources, or keeps them in the
+# notes; the style rewrite adds a line no source supports, or leaves the side file naming the lines it replaced; a draft that breaks the style (one naming conveyor.sh, as
 # 1.7.0's did) is left for the owner to edit, not rewritten once by the model from the check's findings; one that
 # still breaks it is shown as if it were ready to commit, or lacks the findings at its top; a model that gives no notes leaves an empty draft, or an earlier run's, to be taken for this run's.
 t_reldraft() {
@@ -70,35 +80,54 @@ t_reldraft() {
 
   # v1.0.0 on origin, on the commit relsetup tags without notag.
   git -C "$R" push -q origin HEAD~3:refs/tags/v1.0.0 || fail "the fixture could not be made"
-  relmodel $'# 1.1.0\n\nCards can wait.\n\n## Cards\n\n- You can hold a card.'
+  # The model's lines: two traced to issues in the range, one to a commit in it (origin's head, O); one names an issue
+  # in the range that does not support it (the check, the stub's RELCHECK, says so, as 1.8.0's doctor check of git's
+  # version named #1022, which made none); one names an issue from before the tag, one an issue no commit names, one a
+  # commit not in the range (main's unpushed head), one nothing.
+  echo 'whether git is too old' > "$STUB/unsupported" || fail "the fixture could not be made"
+  relmodel "# 1.1.0"$'\n\nCards can wait. [#5]\n\n## Cards\n\n- You can hold a card. [#5, #7]\n- '"Faster. [${O:0:9}]"$'\n- The doctor check reports whether git is too old. [#7]\n- An old fix. [#1]\n- A board fix. [#99]\n'"- Not pushed. [$(git -C "$R" rev-parse --short=9 HEAD)]"$'\n- Cards are blue.'
   out=$(loop release-prep 1.1.0 2>&1); [ $? = 1 ] || fail "release-prep did not stop on a head with no notes: $out"
+  grep -qF 'The draft leaves out the lines no issue or commit since v1.0.0 supports: - The doctor check reports whether git is too old.; - An old fix.; - A board fix.; - Not pushed.; - Cards are blue.' <<<"$out" \
+    || fail "release-prep does not name the draft lines no issue or commit in the range supports: $out"
+  grep -qxF '## Line 9: - The doctor check reports whether git is too old.' "$STUB/trace-prompt" && grep -q FAST-BODY "$STUB/trace-prompt" \
+    && grep -qx 'Closes #7' "$STUB/trace-prompt" && ! grep -qE 'An old fix|Cards are blue|BEFORE-BODY' "$STUB/trace-prompt" \
+    || fail "the check is not given each line in the range with its sources' text, the issue's body and the commit's message: $(cat "$STUB/trace-prompt" 2>&1)"
+  [ "$(jq -c . "$ST/release/1.1.0.sources.json" 2>&1)" = '[{"line":"Cards can wait.","issues":[5],"commits":[]},{"line":"- You can hold a card.","issues":[5,7],"commits":[]},{"line":"- Faster.","issues":[],"commits":["'"$O"'"]}]' ] \
+    && grep -qF "are in $ST/release/1.1.0.sources.json." <<<"$out" \
+    || fail "the sources of the draft's lines are not recorded beside it: $(cat "$ST/release/1.1.0.sources.json" 2>&1)"
   [ ! -e "$STUB/full-at" ] || fail "the suite ran on a head with no notes"
   ! grep -q statuses "$STUB/gh-calls" 2>/dev/null || fail "a status was posted on a head with no notes: $(cat "$STUB/gh-calls")"
   grep -qF "the notes draft, from the issues and commits since v1.0.0, is $ST/release/1.1.0.md. " <<<"$out" && grep -q 'run release-prep 1.1.0 again' <<<"$out" \
     || fail "release-prep does not print the draft's path and say to commit the notes and run again: $out"
-  [ "$(cat "$ST/release/1.1.0.md")" = $'# 1.1.0\n\nCards can wait.\n\n## Cards\n\n- You can hold a card.' ] \
+  [ "$(cat "$ST/release/1.1.0.md")" = $'# 1.1.0\n\nCards can wait.\n\n## Cards\n\n- You can hold a card.\n- Faster.' ] \
     || fail "the notes draft is not the model's: $(cat "$ST/release/1.1.0.md" 2>&1)"
-  grep -q HOLD-BODY "$STUB/notes-prompt" && grep -q FAST-BODY "$STUB/notes-prompt" && grep -qx 'fix: A fix' "$STUB/notes-prompt" \
-    && grep -qx 'feat(engine): A new thing' "$STUB/notes-prompt" \
+  grep -q HOLD-BODY "$STUB/notes-prompt" && grep -q FAST-BODY "$STUB/notes-prompt" && grep -qx "${O:0:7}[0-9a-f]* fix: A fix" "$STUB/notes-prompt" \
+    && grep -qE '^[0-9a-f]{7,} feat\(engine\): A new thing$' "$STUB/notes-prompt" && grep -qx '## #5: Hold a card' "$STUB/notes-prompt" \
     && grep -q '^- Begin with the line "# 1.1.0"' "$STUB/notes-prompt" && ! grep -q BEFORE-BODY "$STUB/notes-prompt" \
     || fail "the model was not given the issues and subjects since v1.0.0 alone, and the style: $(cat "$STUB/notes-prompt" 2>&1)"
 
   # A first answer that names the command file conveyor.sh (release 1.7.0's own draft did): the model is asked once
-  # more, given the check's finding, and its rewrite is the draft, which passes the check.
-  relmodels $'# 1.1.0\n\nCards can wait.\n\n## Setup\n\n- `conveyor.sh doctor` warns when the model lists differ.' \
-    $'# 1.1.0\n\nCards can wait.\n\n## Setup\n\n- Conveyor\'s doctor check warns when the model lists differ.'
+  # more, given the check's finding and the lines with their sources, and its rewrite is the draft, which passes the
+  # check. The rewrite is traced as the draft was: the line it adds that its source does not support is left out, and
+  # the side file names the rewrite's lines, not the first answer's.
+  relmodels $'# 1.1.0\n\nCards can wait. [#5]\n\n## Setup\n\n- `conveyor.sh doctor` warns when the model lists differ. [#7]' \
+    $'# 1.1.0\n\nCards can wait. [#5]\n\n## Setup\n\n- Conveyor\'s doctor check warns when the model lists differ. [#7]\n- Conveyor\'s doctor check reports whether git is too old. [#7]'
   out=$(loop release-prep 1.1.0 2>&1); [ $? = 1 ] || fail "release-prep did not stop on a head with no notes: $out"
   [ "$(cat "$STUB/notes-calls" 2>&1)" = 2 ] || fail "the model was not asked once more to rewrite the draft: $(cat "$STUB/notes-calls" 2>&1)"
   grep -qF '1.1.0.md:7: a path or file name: - `conveyor.sh doctor`' "$STUB/notes-prompt.2" && grep -qF 'No command file' "$STUB/notes-prompt.1" \
-    || fail "the rewrite was not given the check's finding, or the drafter is not told to name no command file: $(cat "$STUB"/notes-prompt.* 2>&1)"
-  "$SRC/tools/notes-check.sh" "$ST/release/1.1.0.md" > /dev/null && grep -qF "Conveyor's doctor check" "$ST/release/1.1.0.md" \
+    && grep -qxF -- '- `conveyor.sh doctor` warns when the model lists differ. [#7]' "$STUB/notes-prompt.2" \
+    || fail "the rewrite was not given the check's finding and the lines' sources, or the drafter is not told to name no command file: $(cat "$STUB"/notes-prompt.* 2>&1)"
+  "$SRC/tools/notes-check.sh" "$ST/release/1.1.0.md" > /dev/null && grep -qF "Conveyor's doctor check warns" "$ST/release/1.1.0.md" \
     || fail "the draft written is not the rewrite that passes the style check: $(cat "$ST/release/1.1.0.md" 2>&1)"
+  ! grep -qF 'whether git is too old' "$ST/release/1.1.0.md" && grep -qF "leaves out the lines no issue or commit since v1.0.0 supports: - Conveyor's doctor check reports whether git is too old." <<<"$out" \
+    && [ "$(jq -c . "$ST/release/1.1.0.sources.json" 2>&1)" = '[{"line":"Cards can wait.","issues":[5],"commits":[]},{"line":"- Conveyor'"'"'s doctor check warns when the model lists differ.","issues":[7],"commits":[]}]' ] \
+    || fail "the rewrite is not traced to its sources: $out; $(cat "$ST/release/1.1.0.md" "$ST/release/1.1.0.sources.json" 2>&1)"
   ! grep -qF 'The draft breaks' <<<"$out" || fail "release-prep says a draft that passes the check breaks the style: $out"
 
   # Both answers break the style: the draft is kept, its top lists the check's findings, and release-prep names them.
   # The note (its two findings, an issue number and a Closes line, and three more lines) moves the Closes line from 3
   # to 8: the findings name line 8, its line in the draft as saved, not line 3, which holds the note's own text.
-  relmodels $'# 1.1.0\n\n- Cards can wait. Closes #5' $'# 1.1.0\n\n- Cards can wait. Closes #5'
+  relmodels $'# 1.1.0\n\n- Cards can wait. Closes #5 [#5]' $'# 1.1.0\n\n- Cards can wait. Closes #5 [#5]'
   out=$(loop release-prep 1.1.0 2>&1); [ $? = 1 ] || fail "release-prep did not stop on a head with no notes: $out"
   grep -qF 'The draft breaks the release notes style: ' <<<"$out" && grep -qF '1.1.0.md:8: a Closes line' <<<"$out" \
     || fail "release-prep does not say the draft breaks the style, naming the rule and its line in the saved draft: $out"

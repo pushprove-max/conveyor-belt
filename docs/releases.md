@@ -21,8 +21,13 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    the [release notes style](#release-notes). It reads the issues that landed since the last tag, their
    titles and text, and the commit subjects. When the project has no release tag yet, the draft lists no changes:
    it is an overview of what the project does, in sections by area, from the README and the pages in `docs/`, and
-   it reads no commit or issue. Conveyor checks the draft against the style. When the check refuses some lines, the
-   model rewrites those lines one time. The command prints the path of the draft. If the draft still breaks a rule
+   it reads no commit or issue. Each line of a draft after the first release must name the issues or commits it
+   comes from. Then the model reads each line beside the text of those issues and commits. Conveyor leaves out a
+   line that names no issue or commit since the last tag, and a line that its issues and commits do not support.
+   The command lists the lines it left out. The issues and commits of each line it keeps go in
+   `<version>.sources.json` beside the draft, not in the notes. Conveyor checks the draft against the style. When
+   the check refuses some lines, the model rewrites those lines one time, and Conveyor checks the rewrite against
+   its issues and commits in the same way. The command prints the path of the draft. If the draft still breaks a rule
    of the style, the command says so, and a note at the top of the draft lists the lines the check refuses, with
    their line numbers in the draft as saved. Delete that note when you fix the lines. The head of `main` on GitHub has no notes yet, so it stops there.
 3. Read the draft and change what you need. Commit it as `docs/releases/<version>.md` on `main`, and push it.
