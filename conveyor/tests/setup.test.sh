@@ -245,10 +245,28 @@ t_setuptestpatterns() {
   local X out was; setupdone
   mkdir -p "$S/src" && echo x > "$S/src/test-a.js" && echo x > "$S/src/test-b.js" && git -C "$S" add src && git -C "$S" -c user.name=t -c user.email=t${AT}example.com commit -qm tests || fail "the test files"
   was=$(setupstate); out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no 2>&1); [ $? = 2 ] && [ "$(setupstate)" = "$was" ] \
-    && grep -qF -- '--test-patterns <yes or no: the default test-file patterns miss 2 tracked files that read as tests; set the pack'"'"'s tests.patterns to __tests__/, ' <<<"$out" \
-    && grep -qF -- 't/*.sh, test-*.js, which match 3 tracked files?>' <<<"$out" || fail "setup did not ask for the patterns it found, before changing anything: $out"
+    && grep -qF -- '--test-patterns <yes or no: the default test-file patterns miss 2 tracked files that read as tests; set the pack'"'"'s tests.patterns to __tests__/ (0 tracked files), ' <<<"$out" \
+    && grep -qF -- 't/*.sh (0 tracked files), test-*.js (2 tracked files, by the names of tracked files), which match 3 tracked files?>' <<<"$out" || fail "setup did not ask for the patterns it found, before changing anything: $out"
   out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --test-patterns yes 2>&1) && jq -e '.tests.patterns[-1] == "test-*.js"' "$S/.conveyor/project.json" >/dev/null \
     || fail "setup --test-patterns yes did not write the patterns: $out"
+}
+# #1050. Bug: a project whose Jest testMatch names its test files (checks/*.check.js, which neither the default nor a
+# test word in their names finds) got no tests.patterns from setup. It asks before changing anything, naming the
+# testMatch glob, its count and where it was read; no writes nothing, yes writes that glob (and *.test.sh, the guess
+# from the name of the sample's own test file, which the testMatch misses).
+t_setupjestmatch() {
+  local X out was; setupdone
+  mkdir -p "$S/checks" && echo x > "$S/checks/a.check.js" && echo x > "$S/checks/b.check.js" \
+    && echo '{"jest": {"testMatch": ["<rootDir>/checks/*.check.js"]}}' > "$S/package.json" \
+    && git -C "$S" add checks package.json && git -C "$S" -c user.name=t -c user.email=t${AT}example.com commit -qm tests || fail "the test files"
+  was=$(setupstate); out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no 2>&1); [ $? = 2 ] && [ "$(setupstate)" = "$was" ] \
+    && grep -qF -- "--test-patterns <yes or no: the test command and its runner's config name the project's test files; set the pack's tests.patterns to /checks/*.check.js (2 tracked files, from Jest testMatch in package.json)" <<<"$out" \
+    || fail "setup did not ask for the Jest testMatch glob with its count, before changing anything: $out"
+  # The package.json makes setup ask for the test map too (V8 coverage): answered no, as it is no part of this case.
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --test-map no --test-patterns no 2>&1) && ! jq -e '.tests.patterns' "$S/.conveyor/project.json" >/dev/null \
+    || fail "setup --test-patterns no wrote the patterns: $out"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --test-map no --test-patterns yes 2>&1) && jq -e '.tests.patterns == ["/checks/*.check.js", "*.test.sh"]' "$S/.conveyor/project.json" >/dev/null \
+    || fail "setup --test-patterns yes did not write the Jest testMatch glob: $out"
 }
 # #147. Bug: a project whose test command is a plain `npm test` (here jest, by its package.json script) ran its whole
 # suite on every card, and setup did not say the command could run one test file. It names the runner and asks before

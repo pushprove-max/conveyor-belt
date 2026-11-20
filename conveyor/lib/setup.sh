@@ -28,8 +28,9 @@ PACK0='{labels: {built: "awaiting-deploy", followup: "conveyor-followup", type: 
 # project is in the host file, where its create writes the lane's folder. PACK0's lanes.research is the research
 # lane's model and effort, which its create needs; yes writes it into a pack that has none.
 # The question "Set the pack's tests.patterns?": answered by --test-patterns yes|no, and asked (exit 2, nothing written)
-# while the pack sets no tests.patterns and the default misses tracked files that read as tests (testoffer()), naming
-# the globs and how many tracked files they match; yes writes them as the pack's tests.patterns.
+# while the pack sets no tests.patterns and the test command's runner config names test files, or the default misses
+# tracked files that read as tests (testoffer()), naming each glob, how many tracked files it matches and where it was
+# read; yes writes them as the pack's tests.patterns.
 # The question "Set the pack's test.fileCommand?": answered by --file-command yes|no, and asked (exit 2, nothing
 # written) while the pack sets no test.fileCommand and the test command runs a runner listguess() knows that takes test
 # files as arguments (args), naming it; yes writes the test command as the pack's test.fileCommand, which a card runs
@@ -112,14 +113,21 @@ setup() { # as SETUP_USAGE
       need+=("--link <yes or no: $w>")
     fi
   fi
-  # The project's test files, when the pack sets no tests.patterns and the default misses files that read as tests
-  # (testoffer()): asked, as the lanes are, naming the globs and how many tracked files they match; yes writes them.
+  # The project's test files, when the pack sets no tests.patterns and the runner's config names them or the default
+  # misses files that read as tests (testoffer()): asked, as the lanes are, naming each glob, how many tracked files
+  # it matches and where it was read; yes writes them.
   if [ "$tpa" != no ] && ! jq -e '.tests.patterns' "$PACK" >/dev/null 2>&1; then
     x=$test; [ ! -e "$PACK" ] || packget test.command x 2>/dev/null || x=''
     [ -z "$x" ] || tp=$(testoffer "$x") || tp=''
     if [ -n "$tp" ] && [ -z "$tpa" ]; then
-      tn=$(testcount "$tp") && n=$(testcount "$(jq -c '.properties.tests.properties.patterns.default' "$SCHEMA")") || return 1
-      need+=("--test-patterns <yes or no: the default test-file patterns miss $((tn - n)) tracked files that read as tests; set the pack's tests.patterns to $(jq -r 'join(", ")' <<<"$tp"), which match $tn tracked files?>")
+      tn=$(testcount "$(jq -c 'map(.p)' <<<"$tp")") || return 1
+      if jq -e 'any(.[]; .from == "default")' <<<"$tp" >/dev/null; then
+        n=$(testcount "$(jq -c '.properties.tests.properties.patterns.default' "$SCHEMA")") || return 1
+        w="the default test-file patterns miss $((tn - n)) tracked files that read as tests"
+      else w="the test command and its runner's config name the project's test files"; fi
+      w+="; set the pack's tests.patterns to $(jq -r 'map(.p + " (\(.n) tracked file" + (if .n == 1 then "" else "s" end)
+        + (if .from == "default" then "" elif .from == "names" then ", by the names of tracked files" else ", from \(.from)" end) + ")") | join(", ")' <<<"$tp")"
+      need+=("--test-patterns <yes or no: $w, which match $tn tracked files?>")
     fi
   fi
   # The command a card runs each of its test files alone with, while the pack sets no test.fileCommand and the test
@@ -188,6 +196,7 @@ setup() { # as SETUP_USAGE
     echo "conveyor: wrote the pack's worktree.setup: $ws, run in each card's worktree before its build and tests"
   fi
   if [ "$tpa" = yes ] && [ -n "$tp" ]; then
+    tp=$(jq -c 'map(.p)' <<<"$tp") || return 1
     jq --argjson p "$tp" '.tests.patterns = $p' "$PACK" > "$PACK.new" && pinreads "$p" "$PACK.new" && mv "$PACK.new" "$PACK" \
       || { rm -f "$PACK.new"; echo "conveyor: the pack's tests.patterns could not be written" >&2; return 1; }
     echo "conveyor: wrote the pack's tests.patterns: $(jq -r 'join(", ")' <<<"$tp") ($(testcount "$tp") tracked files)"
@@ -440,17 +449,77 @@ reportguess() { # <test command>
   if [ -n "$f" ]; then jq -cn --arg r "$r" --arg f "$f" --arg p "$p" '{runner: $r, format: $f} + if $p == "" then {} else {path: $p} end'
   else jq -cn --arg r "$r" --arg o "$o" '{runner: $r, option: $o}'; fi
 }
-# The tracked files the test command names (docs/configuration.md, How test files are found): each word of it with a
-# * or ? in it (quotes taken off; of an --option=<value>, the value) read as a glob of paths from the checkout's root,
-# as git reads one. One a line.
+# The globs, in the form of tests.patterns, of the test files the test command runs, from what the project says
+# (docs/setup.md): each word of the command with a * or ? in it (quotes taken off; of an --option=<value>, the value),
+# as a path from the checkout's root, and so of the package.json script the command runs (npm, yarn, pnpm or bun:
+# `npm test`, `npm run <name>`); Jest's testMatch (package.json, jest.config.*); Vitest's include (vitest.config.*,
+# vite.config.*; its coverage block left out); pytest's python_files under each of its testpaths (pytest.ini,
+# pyproject.toml's [tool.pytest.ini_options]; with no python_files, pytest's own: test_*.py and *_test.py); and
+# *_test.go when the checkout tracks a Go test file. A config is read as text from main's checkout, in its root.
+# {a,b} makes one glob of each; a glob of a form tests.patterns cannot say ([...], ?(...), !...) is left out.
+# One `<glob>\t<where it was read>` a line, each glob once.
+runnerglobs() { # <test command>
+  local s=$1 n=test.command w ws=() f k
+  if [[ $1 =~ ^(npm|yarn|pnpm|bun)[[:space:]]+(run[[:space:]]+)?([A-Za-z0-9:_-]+)[[:space:]]*$ ]]; then
+    n="package.json scripts.${BASH_REMATCH[3]}"
+    s=$(jq -r --arg n "${BASH_REMATCH[3]}" '.scripts[$n] | strings' "$MAIN/package.json" 2>/dev/null) || s=''
+  fi
+  {
+    read -ra ws <<<"$s"
+    for w in "${ws[@]}"; do
+      w=${w//[\"\']/}; w=${w%%[;&|)]*}; [[ $w != -*=* ]] || w=${w#*=}; w=${w#./}
+      [[ $w == *[*?]* && $w != -* && $w != *'$'* && $w != /* ]] || continue
+      printf '/%s\t%s\n' "$w" "$n"
+    done
+    for f in package.json jest.config.{js,ts,mjs,cjs,json} vitest.config.{js,ts,mjs,mts,cjs,cts} vite.config.{js,ts,mjs,mts,cjs,cts}; do
+      [ -f "$MAIN/$f" ] || continue
+      if [[ $f == vite* ]]; then k='Vitest include'; else k='Jest testMatch'; fi
+      # The list of key <k> as a JavaScript or JSON text writes it (testMatch: [...], "testMatch": [...]), with each
+      # `coverage: {...}` block, whose include names product files, taken out first; a glob from the root unless it
+      # starts with **/.
+      jq -rRs --arg k "${k#* }" --arg from "$k in $f" '
+        def unblock: (first(match("\\bcoverage[\"'"'"']?\\s*:\\s*\\{")) // null) as $m
+          | if $m == null then . else (.[$m.offset + $m.length:] | explode) as $c
+            | (first(foreach range(0; $c | length) as $i (1; if $c[$i] == 123 then . + 1 elif $c[$i] == 125 then . - 1 else . end;
+                select(. == 0) | $i)) // ($c | length)) as $e
+            | .[:$m.offset] + .[$m.offset + $m.length + $e + 1:] | unblock end;
+        unblock | scan("\\b" + $k + "[\"'"'"']?\\s*:\\s*\\[((?:[^\\]\"'"'"'`]|\"[^\"]*\"|'"'"'[^'"'"']*'"'"'|`[^`]*`)*)\\]")[0]
+        | scan("[\"'"'"'`]([^\"'"'"'`]+)[\"'"'"'`]")[0] | ltrimstr("<rootDir>/") | ltrimstr("./")
+        | (if startswith("**/") then . else "/" + . end) + "\t" + $from' "$MAIN/$f" 2>/dev/null
+    done
+    for f in pytest.ini pyproject.toml; do
+      [ -f "$MAIN/$f" ] || continue
+      [ $f = pytest.ini ] && k=pytest || k=tool.pytest.ini_options
+      # The keys of section [<sec>], an INI's (a value goes on in the indented lines below it) or a TOML's (a list
+      # goes on to its closing ]).
+      jq -rRs --arg sec "$k" --arg from "pytest's testpaths and python_files in $f" '
+        def words: if test("^\\s*\\[") then [scan("[\"'"'"']([^\"'"'"']+)[\"'"'"']")[0]] else sub("\\s[#;].*$"; "") | [splits("\\s+") | select(. != "")] end;
+        (split("\n") | reduce .[] as $l ({s: null, k: null, v: {}};
+          if .k != null and (.v[.k] | test("^\\s*\\[") and (test("\\]") | not)) then .v[.k] += " " + $l
+          elif $l | test("^\\s*\\[[^\\]]*\\]\\s*$") then .s = ($l | capture("\\[(?<n>[^\\]]*)\\]").n) | .k = null
+          elif .s != $sec then .
+          elif $l | test("^[A-Za-z_]+\\s*=") then ($l | capture("^(?<k>[A-Za-z_]+)\\s*=\\s*(?<r>.*)$")) as $c | .k = $c.k | .v[$c.k] = $c.r
+          elif .k != null and ($l | test("^\\s+\\S")) then .v[.k] += " " + $l
+          else .k = null end) | .v) as $v
+        | ($v.python_files // "test_*.py *_test.py" | words) as $f
+        | if $v.testpaths then ($v.testpaths | words | .[] | ltrimstr("./") | rtrimstr("/")) as $d
+            | if $d == "." or $d == "" then $f[] elif $d | endswith(".py") then "/" + $d else "/" + $d + "/**/" + $f[] end
+          else $v.python_files // empty | words | .[] end
+        | . + "\t" + $from' "$MAIN/$f" 2>/dev/null
+    done
+    [ -z "$(git -C "$MAIN" ls-files -- '*_test.go' 2>/dev/null)" ] || printf '*_test.go\tGo test files\n'
+  } | jq -rRn 'def braces: if test("\\{[^{}]*\\}") then capture("^(?<a>[^{]*)\\{(?<b>[^{}]*)\\}(?<c>.*)$") as $m
+      | $m.b | split(",")[] | $m.a + . + $m.c | braces else . end;
+    reduce (inputs | split("\t") | select(length == 2) | .[1] as $f | .[0] | braces
+      | select(test("[\\[\\]()!{}$]|^/?$") | not) | [., $f]) as $x ([]; if any(.[]; .[0] == $x[0]) then . else . + [$x] end)
+    | .[] | join("\t")'
+}
+# The tracked files the test command runs (runnerglobs()), one a line.
 cmdtests() { # <test command>
-  local w ws=()
-  read -ra ws <<<"$1"
-  for w in "${ws[@]}"; do
-    w=${w//[\"\']/}; w=${w%%[;&|)]*}; [[ $w != -*=* ]] || w=${w#*=}; w=${w#./}
-    [[ $w == *[*?]* && $w != -* && $w != *'$'* && $w != /* ]] || continue
-    git -C "$MAIN" -c core.quotePath=false ls-files -- ":(glob)$w" 2>/dev/null
-  done | LC_ALL=C sort -u
+  local g=()
+  mapfile -t g < <(runnerglobs "$1" | cut -f1)
+  [ ${#g[@]} != 0 ] || return 0
+  git -C "$MAIN" -c core.quotePath=false ls-files 2>/dev/null | grep -E -- "$(jq -rn "$GLOBRX"'$ARGS.positional | globsrx' --args "${g[@]}")" || :
 }
 # The tracked files the test-file globs <patterns> (a JSON list, as tests.patterns) match, counted.
 testcount() { # <patterns>
@@ -459,29 +528,35 @@ testcount() { # <patterns>
   git -C "$MAIN" -c core.quotePath=false ls-files | { grep -cE -- "$rx" || :; }
 }
 # Setup's guess at the test files <patterns> (a JSON list) miss: of the tracked files that are not documents or data,
-# those the test command names (cmdtests()) and those whose own name reads as a test's (it starts with test or spec and
-# a - or _, or ends so, or with Test, Tests or Spec, before its extension), each made a glob: its test word kept, the
-# rest a *, in any folder; a file the command names whose name has no test word, its folder's files of its extension.
-# Prints the globs that match a file <patterns> misses, one a line.
-testguess() { # <test command> <patterns>
+# those whose own name reads as a test's (it starts with test or spec and a - or _, or ends so, or with Test, Tests or
+# Spec, before its extension), each made a glob: its test word kept, the rest a *, in any folder. Prints the globs
+# that match a file <patterns> misses, one a line.
+testguess() { # <patterns>
   local rx
-  rx=$(jq -r "$GLOBRX"'globsrx' <<<"$2") || return 1
-  git -C "$MAIN" -c core.quotePath=false ls-files | jq -rRn --arg rx "$rx" --rawfile cf <(cmdtests "$1") '
-    ($cf | split("\n") | map(select(. != ""))) as $cf
-    | [inputs | select(test($rx) | not) | select(test("\\.(md|txt|json|ya?ml|snap|lock|csv|html|css|svg|png|jpe?g|gif)$"; "i") | not)
-      | . as $p | split("/")[-1] as $b | ($b | capture("(?<x>\\.[^.]+)$").x // "") as $e
+  rx=$(jq -r "$GLOBRX"'globsrx' <<<"$1") || return 1
+  git -C "$MAIN" -c core.quotePath=false ls-files | jq -rRn --arg rx "$rx" '
+    [inputs | select(test($rx) | not) | select(test("\\.(md|txt|json|ya?ml|snap|lock|csv|html|css|svg|png|jpe?g|gif)$"; "i") | not)
+      | split("/")[-1] as $b | ($b | capture("(?<x>\\.[^.]+)$").x // "") as $e
       | if $b | test("^(?i:test|spec)s?[-_]") then ($b | capture("^(?<w>(?i:test|spec)s?[-_])").w) + "*" + $e
         elif $b | test("[-_.](?i:test|spec)s?\\.[^.]+$") then "*" + ($b | capture("(?<w>[-_.](?i:test|spec)s?)\\.[^.]+$").w) + $e
         elif $b | test("(Test|Tests|Spec)\\.[^.]+$") then "*" + ($b | capture("(?<w>Test|Tests|Spec)\\.[^.]+$").w) + $e
-        elif IN($cf[]; $p) and ($p | contains("/")) then "/" + ($p | split("/")[:-1] | join("/")) + "/*" + $e
         else empty end] | unique[]'
 }
-# What setup offers for a pack with no tests.patterns of its own (setup()): the default and testguess()'s globs, as
-# the setting (a JSON list); nothing when the default misses no file that reads as a test.
+# What setup offers for a pack with no tests.patterns of its own (setup()): the globs the test command runs
+# (runnerglobs()) that match a tracked file or, with none, the default; then testguess()'s globs of the files those
+# miss. A JSON list of {p: <glob>, from: <where it was read>, n: <the tracked files it matches>}, from "default" for
+# the default's and "names" for testguess()'s; nothing when no runner glob matches a file and testguess() finds none.
 testoffer() { # <test command>
-  local d g=()
-  d=$(jq -c '.properties.tests.properties.patterns.default' "$SCHEMA") && mapfile -t g < <(testguess "$1" "$d") || return 1
-  [ ${#g[@]} = 0 ] || jq -cn --argjson d "$d" '$d + $ARGS.positional' --args "${g[@]}"
+  local d r o g=() cnt
+  # cnt: each glob of the list given its count of the tracked files (the program's input lines) it matches.
+  cnt="$GLOBRX"'[inputs] as $fs | def cnt: map(.n = ((.p | globrx) as $x | [$fs[] | select(test($x))] | length));'
+  d=$(jq -c '.properties.tests.properties.patterns.default' "$SCHEMA") \
+    && r=$(runnerglobs "$1" | jq -cRn '[inputs | split("\t") | {p: .[0], from: .[1]}]') \
+    && o=$(git -C "$MAIN" -c core.quotePath=false ls-files | jq -cRn --argjson r "$r" --argjson d "$d" "$cnt"'$r | cnt | map(select(.n > 0))
+      | if . == [] then $d | map({p: ., from: "default"}) | cnt else . end') \
+    && mapfile -t g < <(testguess "$(jq -c 'map(.p)' <<<"$o")") || return 1
+  [ ${#g[@]} != 0 ] || jq -e 'any(.[]; .from != "default")' <<<"$o" >/dev/null || return 0
+  git -C "$MAIN" -c core.quotePath=false ls-files | jq -cRn --argjson o "$o" "$cnt"'$o + ($ARGS.positional | map({p: ., from: "names"}) | cnt)' --args "${g[@]}"
 }
 # How a test command takes test files, and the runner it runs, as one line `<mode> <runner>` (testrunner(), in main;
 # setup() offers the command as test.fileCommand for args): nothing for a runner it does not know, or for a command
@@ -492,7 +567,7 @@ listguess() { # <test command>
   [[ $g == named* ]] || printf '%s\n' "$g"
 }
 # What doctor says of the pack's tests.patterns: a `missing:` line when they match no tracked file, or miss a file the
-# test command names (cmdtests()); else an `ok:` line with the count. Fails with a `missing:` line.
+# test command runs, by its words or its runner's config (cmdtests()); else an `ok:` line with the count. Fails with a `missing:` line.
 testcheck() {
   local p c n m=()
   packget tests.patterns p test.command c || return 1
@@ -501,7 +576,7 @@ testcheck() {
   if [ "$n" = 0 ]; then
     echo "missing: test files the pack's tests.patterns match (they match no tracked file: $(jq -r 'join(", ")' <<<"$p")); fix: set tests.patterns in .conveyor/project.json to globs of the project's test files (docs/configuration.md, How test files are found)"; return 1
   elif [ ${#m[@]} != 0 ]; then
-    echo "missing: tests.patterns that match the ${#m[@]} file$([ ${#m[@]} = 1 ] || echo s) the test command names, such as ${m[0]}; fix: add a glob of them to tests.patterns in .conveyor/project.json (docs/configuration.md, How test files are found)"; return 1
+    echo "missing: tests.patterns that match the ${#m[@]} file$([ ${#m[@]} = 1 ] || echo s) the test command runs, such as ${m[0]}; fix: add a glob of them to tests.patterns in .conveyor/project.json (docs/configuration.md, How test files are found)"; return 1
   fi
   echo "ok: the pack's tests.patterns match $n tracked file$([ "$n" = 1 ] || echo s)"
 }

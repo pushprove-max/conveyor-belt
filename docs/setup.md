@@ -91,10 +91,24 @@ again. To ask for a survey later, run
 `/conveyor-belt:setup --survey`, or `setup --survey yes` from a shell.
 
 Setup also reads the names of your project's tracked files and your test command, to find how your test files are
-named ([How test files are found](configuration.md#how-test-files-are-found)). When the default test-file patterns
-miss files that look like tests, setup shows the patterns that it found and how many tracked files they match. Then it
-asks if it can write them in the pack as `tests.patterns` (`--test-patterns yes|no`). If your pack already sets
-`tests.patterns`, setup does not ask.
+named ([How test files are found](configuration.md#how-test-files-are-found)). It also reads the config of your test
+runner in the root of the main checkout:
+
+- the globs in your test command, and in the `package.json` script that it runs, for example `npm test`
+- Jest's `testMatch`, in `package.json` or a `jest.config` file
+- Vitest's `include`, in a `vitest.config` or `vite.config` file (not the `include` of its `coverage` block)
+- pytest's `testpaths` and `python_files`, in `pytest.ini` or in the `[tool.pytest.ini_options]` table of
+  `pyproject.toml`
+- `*_test.go`, when the project has Go test files.
+
+Setup uses each of these patterns that matches a tracked file. A Jest or Vitest pattern with `[...]`, `?(...)` or
+`!` has no form in `tests.patterns`, so setup does not use it. When no pattern of the runner's config matches a file,
+setup uses the default patterns. Then it adds patterns for files that look like tests and that those patterns miss.
+
+Setup shows each pattern that it found, how many tracked files it matches, and where setup found it. Then it asks if
+it can write them in the pack as `tests.patterns` (`--test-patterns yes|no`). With `no`, setup does not write `tests.patterns`. Setup
+does not ask when your pack already sets `tests.patterns`, or when it found no pattern of your runner's config and the
+default patterns miss no file that looks like a test.
 
 Setup also finds the test runner that your test command starts. For `npm test` and the other package scripts, it
 reads the script in `package.json`. For node --test, vitest, jest, mocha, pytest and rspec, it asks if it can set

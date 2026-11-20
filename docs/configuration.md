@@ -127,9 +127,10 @@ result that the review sees says so, and `conveyor.sh doctor` shows a `warning:`
 `test.fileCommand`. When your test files run alone as plain scripts, for example `node <file>`, they name the value
 to use. Setup also suggests that value when the pack has no `test.fileCommand`.
 
-Setup suggests patterns when the default misses your test files ([Setup](setup.md#setup)). `conveyor.sh doctor`
-shows a `missing:` line when the patterns match no tracked file, or when they miss test files that your test command
-names.
+Setup suggests patterns from the config of your test runner, or when the default misses your test files
+([Setup](setup.md#setup)). `conveyor.sh doctor` shows a `missing:` line when the patterns match no tracked file. It
+also shows one when they miss a file that your test command runs: a file that a glob in the command, or in the
+runner's config that setup reads, matches.
 
 ## Tests inside product files
 

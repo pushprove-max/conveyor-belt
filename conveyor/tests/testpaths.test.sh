@@ -68,15 +68,14 @@ t_testpathsone() {
 
 # Bug it catches: setup wrote no pattern for a project whose tests the default misses. Its guess, from the names of
 # the tracked files, is each convention's glob: test-*.mjs from src/test-a.mjs and src/test-b.mjs (here against the old
-# fixed patterns, which miss them), never a document's (docs/test-plan.md); a file the test command names by a glob
-# with no test word in its name gives its folder's glob. With the default, which covers test-*.mjs, it offers nothing.
+# fixed patterns, which miss them), never a document's (docs/test-plan.md) or a file with no test word in its name
+# (checks/one.js). With the default, which covers test-*.mjs, it offers nothing.
 # The fixture's own stub test file (a.test.sh, filemode() in tests/lib.sh) is covered by *.test.* in each list.
 t_testguess() {
   setup '[]'; tpfiles src/test-a.mjs src/test-b.mjs src/a.mjs docs/test-plan.md checks/one.js
   local out
-  out=$(tpeng 'testguess "npm test" "[\"__tests__/\", \"*.test.*\", \"*.spec.*\"]"; echo --; testguess "node --test '\''checks/*.js'\''" "[\"test-*.mjs\", \"*.test.*\"]"
-    echo --; testoffer "npm test"') || fail "the guess failed: $out"
-  [ "$out" = $'test-*.mjs\n--\n/checks/*.js\n--' ] || fail "setup's guess is not each convention's glob: $out"
+  out=$(tpeng 'testguess "[\"__tests__/\", \"*.test.*\", \"*.spec.*\"]"; echo --; testoffer "npm test"') || fail "the guess failed: $out"
+  [ "$out" = $'test-*.mjs\n--' ] || fail "setup's guess is not each convention's glob: $out"
 }
 
 # Bug it catches: doctor said nothing of patterns that find no test file, or miss the files the test command runs, so
@@ -88,9 +87,48 @@ t_testcheck() {
   out=$(tuned '.tests.patterns = ["nothing/"]' tpeng testcheck) && fail "doctor passed patterns that match no file: $out"
   [[ $out == "missing: test files the pack's tests.patterns match (they match no tracked file: nothing/); fix: set tests.patterns in .conveyor/project.json"* ]] || fail "the no-match line: $out"
   out=$(tuned '.test.command = "node --test checks/*.js"' tpeng testcheck) && fail "doctor passed patterns that miss the command's files: $out"
-  [[ $out == "missing: tests.patterns that match the 1 file the test command names, such as checks/one.js; fix: "* ]] || fail "the command's files line: $out"
+  [[ $out == "missing: tests.patterns that match the 1 file the test command runs, such as checks/one.js; fix: "* ]] || fail "the command's files line: $out"
   out=$(tuned '.test.command = "node --test checks/*.js" | .tests.patterns = ["checks/", "*.test.*"]' tpeng testcheck) && [ "$out" = 'ok: the pack'"'"'s tests.patterns match 2 tracked files' ] \
     || fail "patterns that match the project's tests were not ok: $out"
+  # #1050. Bug it catches: doctor read only the test command's words, so patterns that miss the files Jest's testMatch
+  # runs (npm test names no file) passed.
+  echo '{"scripts": {"test": "jest"}, "jest": {"testMatch": ["**/checks/*.js"]}}' > "$R/package.json"
+  out=$(tuned '.test.command = "npm test" | .tests.patterns = ["*.test.*"]' tpeng testcheck) && fail "doctor passed patterns that miss the files Jest's testMatch runs: $out"
+  [[ $out == "missing: tests.patterns that match the 1 file the test command runs, such as checks/one.js; fix: "* ]] || fail "the runner config's files line: $out"
+}
+
+# #1050. Bug it catches: setup proposed tests.patterns only from the names of tracked files and the test command's own
+# words, never from what the runner's config says it runs. Each source gives its globs, as tests.patterns writes them:
+# the package.json script's word anchored at the root, Jest's testMatch with {a,b} made two globs and <rootDir>/ taken
+# off (its default's extglob form, which tests.patterns cannot say, left out), Vitest's include but not its coverage
+# block's (product files), pytest's python_files under each testpaths folder of pytest.ini and pyproject.toml (with
+# pytest's own python_files when none is set), and *_test.go for a tracked Go test file. testoffer() keeps those that
+# match a tracked file, each with its count, and no default glob; then the guess from names for the file they miss
+# (the fixture's own a.test.sh: *.test.sh).
+t_runnerglobs() {
+  setup '[]'; tpfiles checks/a.js src/__tests__/b.ts src/x.check.js tests/unit/check_a.py pkg/a_test.go
+  echo '{"scripts": {"test": "jest '\''checks/*.js'\''"}, "jest": {"testMatch": ["**/__tests__/**/*.{js,ts}", "<rootDir>/src/**/*.check.js", "**/?(*.)+(spec|test).[jt]s?(x)"]}}' > "$R/package.json"
+  echo "export default defineConfig({ test: { coverage: { include: ['src/**'], thresholds: { lines: 1 } }, include: [\"e2e/*.ts\"] } })" > "$R/vitest.config.ts"
+  printf '[pytest]\ntestpaths = tests\n    other\npython_files = check_*.py\n' > "$R/pytest.ini"
+  printf '[tool.pytest.ini_options]\ntestpaths = [\n  "tests",\n]\n' > "$R/pyproject.toml"
+  local out
+  out=$(tpeng 'runnerglobs "npm test"; testoffer "npm test" | jq -c ".[] | [.p, .n]"') || fail "the runner's globs failed: $out"
+  [ "$out" = "/checks/*.js	package.json scripts.test
+**/__tests__/**/*.js	Jest testMatch in package.json
+**/__tests__/**/*.ts	Jest testMatch in package.json
+/src/**/*.check.js	Jest testMatch in package.json
+/e2e/*.ts	Vitest include in vitest.config.ts
+/tests/**/check_*.py	pytest's testpaths and python_files in pytest.ini
+/other/**/check_*.py	pytest's testpaths and python_files in pytest.ini
+/tests/**/test_*.py	pytest's testpaths and python_files in pyproject.toml
+/tests/**/*_test.py	pytest's testpaths and python_files in pyproject.toml
+*_test.go	Go test files
+[\"/checks/*.js\",1]
+[\"**/__tests__/**/*.ts\",1]
+[\"/src/**/*.check.js\",1]
+[\"/tests/**/check_*.py\",1]
+[\"*_test.go\",1]
+[\"*.test.sh\",1]" ] || fail "the runner's config did not give its globs: $out"
 }
 
 # #140. Bug it catches: the kinds of inline tests were fixed in the engine, so a project with another kind could not
