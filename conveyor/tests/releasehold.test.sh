@@ -136,6 +136,18 @@ rh_boardpush() { # <the Board's push, as loop arguments...>
 }
 t_relholdnow() { rh_boardpush push-now; }
 t_relholdanyway() { rh_boardpush full-test anyway 0123456789ab; }
+# Bug (#1125): Push landed's result (fullpush(), the run line's pushed) lost the release's refusal: push() writes no
+# push line when a release run refuses it (exit 3), so the result fell back to "the push did not reach origin". Under
+# the run's stand-in, the result is the release's reason, and nothing is pushed.
+t_relholdfullpush() {
+  setup "[$(issue 7 2026-01-01)]"; ftland
+  rh_hold
+  rh_eng "$T/$CASE/fullpush.out" 's=$(git rev-parse main); read -r c n <<<"$(fullowed "$s")"; fullpush "$s" "$c" "$n"'
+  touch "$STUB/letgo"
+  [ "$(cat "$T/$CASE/fullpush.out")" = '{"ok":false,"reason":"a release run is under way, so nothing is pushed until it ends"}' ] \
+    || fail "Push landed's result under a release run does not give the release's reason: $(cat "$T/$CASE/fullpush.out")"
+  [ "$(ftorigin)" != "$(ftmain)" ] || fail "Push landed pushed during a release run"
+}
 # Bug (#1076 review): stop (halt(), lib/run.sh) left a card that waited for a release run, as its wait opened with a
 # land start line, and the card landed once the run ended. Its follow-ups, filed before the hold refused its landing,
 # were withdrawn: their filed line does not keep it either.
