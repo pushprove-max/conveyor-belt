@@ -23,9 +23,11 @@ loopend() { # [pid]
 # serveeng <engine folder> <commands>: the commands (shell text), in a shell of their own that has loaded that engine as
 # `serve` loads it (conveyor.sh's start, then codeload(), lib/card.sh), for the case's main checkout and cards folder.
 # The case calls the loop's own functions there, run() among them, with no loop process to wait on. The shell's
-# output is its own; when servefor ends it, the case's shell does not report it ("Killed").
+# output is its own; when a case's KILL ends it (t_serve), the case's shell does not report it ("Killed").
 serveeng() {
   { ( exec 2>&3 3>&-; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; set -o pipefail
+      # Not a loop's: the t_ functions, half the shell's, each read twice by a code switch (codediff(), lib/card.sh).
+      mapfile -t fs < <(compgen -A function t_); unset -f "${fs[@]}"
       eval "$(sed -n '/^envof() {/,/^}/p' "$1/conveyor.sh")"; envof < <(env -0)
       eval "$(sed -n '/^codeload() {/,/^}/p' "$SRC/lib/card.sh")"
       # shellcheck disable=SC2034 # LOGFD is read by the engine code codeload() loads (its log lines go to it)
@@ -38,16 +40,11 @@ serveeng() {
 # In serveeng(): the jobs a loop starts beside its cards at a turn (the whole test on main, the idle mutation checks, a
 # red release run's fix cards, Merge PR idle) do nothing. None is under test, and each would outlive the shell.
 nojobs() { maintest() { :; }; mutnext() { :; }; relfixes() { :; }; idlemerge() { :; }; }
-# servefor <turns>, in serveeng(): `serve` (run '' serve), with no jobs beside its cards (nojobs), ended with a KILL at the
-# wait that ends its <turns>th turn: a serve of a set number of turns, in the case's own shell. Its turns are counted
-# in $STUB/served. A KILL, which nothing in that shell can catch or put off. The count and the kill ignore the TERM
-# with which a turn ends a wait that is no longer needed (`kill "$timer"`, run()): it came first, a wait cut short
-# went uncounted, and the serve took turns past its end.
-servefor() {
-  local sf_me=$BASHPID sf_n=$1; : > "$STUB/served"; nojobs
-  sleep() { [ "${FUNCNAME[1]:-}" != run ] || [ "$1" = 0.1 ] || { trap '' TERM; echo >> "$STUB/served"; [ "$(wc -l < "$STUB/served")" -lt "$sf_n" ] || kill -KILL "$sf_me"; trap - TERM; }; command sleep "$@"; } # sleep: the engine's own, passed on as called
-  run '' serve
-}
+# stubland <n> [file], in serveeng(): card c<n> of issue <n> lands with no card run, as land() (lib/claim.sh) leaves it:
+# a commit on main adding the line <n> to the file (f<n>), and picked, review (GO) and landed lines (dashboard stage 5).
+# For the cases of a push, not of the card (whole cards land #7 in t_serve and the three cards of t_heldpush).
+stubland() { echo "$1" >> "$R/${2:-f$1}" && git -C "$R" add "${2:-f$1}" && git -C "$R" commit -qm "$1" \
+  && record "c$1" "$1" picked ok && record "c$1" "$1" review GO && record "c$1" "$1" landed ok "$(jq -cn --arg s "$(git -C "$R" rev-parse HEAD)" '{sha: $s, product: false}')"; }
 # The program a restart starts in serveeng() with BASH set to it (run()'s exec "$BASH" <the new conveyor.sh> serve): it
 # writes the arguments it was given to $STUB/newloop.args, in place of a new loop.
 newloop() { printf '#!/bin/sh\necho "$*" > "%s/newloop.args"\n' "$STUB" > "$STUB/newloop" && chmod +x "$STUB/newloop"; }
@@ -94,11 +91,11 @@ t_restart() {
 
 # Bugs: a `serve` run straight from a checkout (no install, so no pin to follow) runs the code it started on for good
 # after new commits land in that checkout; it restarts with no new commit; a restart names the wrong commit for a card
-# in flight; each restart keeps a copy of stderr; health does not say which commit the loop runs; doctor does not warn
-# of a loop on old code. (The cards in flight at a restart: adopt.test.sh.)
+# in flight; each restart keeps a copy of stderr, or health does not say which commit the loop runs (t_followexec);
+# doctor does not warn of a loop on old code (t_followdoctor). (The cards in flight at a restart: adopt.test.sh.)
+servefollowsetup() { setup '[]'; S=$ST; coderepo; trap 'kill $pid $z 2>/dev/null; chmod -R u+w "$T/$CASE"' EXIT; pid='' z=''; }
 t_follow() {
-  setup '[]'; S=$ST; coderepo; trap 'kill $pid $z 2>/dev/null; chmod -R u+w "$T/$CASE"' EXIT; pid='' z=''
-  git -C "$D" reset -q --hard "$A" || fail "the checkout was not put back on $A"; newloop
+  servefollowsetup; git -C "$D" reset -q --hard "$A" || fail "the checkout was not put back on $A"; newloop
   # The checkout's engine, loaded once at $A: a `serve` of it (FOLLOW) is not stale until $B lands in the checkout,
   # and then is; a `run` of it is not, as its own landings move HEAD. The commit a card in flight runs (cardcode()),
   # which a restart names and hands on: the one its last start line names (it switched to new code), else the one it
@@ -120,13 +117,14 @@ t_follow() {
   grep -qxF "conveyor: the checkout has moved on from this loop's $A; nothing new is picked, and the loop restarts on the checkout's new code once its push is done" <<<"$out" \
     && grep -qxF "conveyor: restarting on the new code; 0 cards in flight carry on on $A" <<<"$out" \
     && [ "$(cat "$STUB/newloop.args" 2>&1)" = "$D/conveyor/conveyor.sh serve" ] || fail "the loop did not restart on the checkout's new code, saying why: $out $(cat "$STUB/newloop.args" 2>&1)"
+}
+t_followexec() {
   # One real re-exec, for what only a loop's own process shows: the files it holds open (/proc, so Linux alone). Bug:
-  # each restart kept its copy of stderr (LOGFD), so after some hundreds of restarts every card's test runner got fd
-  # 255, bash's own, and its slot and lock cases failed. The case waits for the loop's word (loop.json, written each
-  # turn) that it runs $A, then $B. copies: the fds of the loop open on its output, fewest of 5 looks (a builtin's
-  # redirection holds one more for a moment).
+  # each restart kept its copy of stderr (LOGFD), so after hundreds of restarts each card's test runner got fd 255,
+  # bash's own, and its slot and lock cases failed. The case waits for loop.json, written each turn, to say it runs $A,
+  # then $B. copies: the loop's fds on its output, fewest of 5 looks (a builtin's redirection briefly holds one more).
   if [ -d /proc/self/fd ]; then
-    git -C "$D" reset -q --hard "$A" || fail "the checkout was not put back on $A"
+    servefollowsetup; git -C "$D" reset -q --hard "$A" || fail "the checkout was not put back on $A"
     tune '.tunables.idle = 1 | .tunables.poll = 1'; rm -f "$S/loop.json"
     mkdir -p "$ST/testactions/mutations" && git -C "$R" rev-parse HEAD > "$ST/testactions/mutations/idle" # the idle mutation check has nothing to do (mutate.test.sh)
     ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
@@ -141,17 +139,18 @@ t_follow() {
       || fail "the loop restarted more than once, or health does not name its new commit: $(cat "$STUB/serve.out") $(loop health | jq -c .commit)"
     loopend $pid
   fi
+}
+t_followdoctor() {
   # doctor warns of a running loop behind its checkout's HEAD, or, from an install, behind the pin; not of one on it.
-  # It runs in main's checkout: from the case's folder, not a checkout, doctor stops before this check.
-  sleep 60 & z=$!; t=$(p_started $z) # sleep: a stand-in for a running loop's process
+  # It runs in main's checkout: from the case's folder, not a checkout, doctor stops before this check. Each doctor
+  # costs seconds (it looks at every process of the machine), so the checkout behind is one whose path holds a
+  # backslash: the one look shows both that it warns and that it reads such a path. The checkout is at $B (coderepo).
+  servefollowsetup; sleep 60 & z=$!; t=$(p_started $z) # sleep: a stand-in for a running loop's process
   says() { jq -n --argjson p "$z" --arg t "$t" --arg c "$1" --arg h "$2" '{pid: $p, started: $t, state: "running", commit: $c, checkout: (if $h == "" then null else $h end)}' > "$S/loop.json"; }
-  says "$A" "$D"; out=$(cd "$R" && loop doctor 2>&1)
-  grep -qx "warning: the running loop started on Conveyor commit $A, and its checkout is at $B: it runs old code until it restarts" <<<"$out" \
-    || fail "doctor did not warn of a loop behind its checkout: $out"
   says "$B" "$D"; out=$(cd "$R" && loop doctor 2>&1); ! grep -q '^warning: the running loop' <<<"$out" || fail "doctor warned of a loop on its checkout's HEAD: $out"
   ln -s "$D" "$T/$CASE/code\\repo"; says "$A" "$T/$CASE/code\\repo"; out=$(cd "$R" && loop doctor 2>&1)
   grep -qx "warning: the running loop started on Conveyor commit $A, and its checkout is at $B: it runs old code until it restarts" <<<"$out" \
-    || fail "doctor did not warn of a loop behind a checkout whose path holds a backslash: $out"
+    || fail "doctor did not warn of a loop behind its checkout, one whose path holds a backslash: $out"
   tune --arg c "$B" '.plugin.commit = $c'; says "$A" ''; out=$(cd "$R" && loop doctor 2>&1)
   grep -qx "warning: the running loop started on Conveyor commit $A, and the pack pins $B: it runs old code until it restarts" <<<"$out" \
     || fail "doctor did not warn of a loop behind the pin: $out"
@@ -198,34 +197,34 @@ turn() { pushturn; [ -z "$pusher" ] || wait "$pusher"; pusher=''; }
 # let through by skipping the check; a failed push leaves no line, or is not tried again after the next landing; one
 # that failed its check is tried again on the same main, at once or on the retry timer; one the remote refused is not
 # tried again at once by a new loop, or is tried at every turn, or never on the retry timer; a push line breaks the
-# record check or turns a landed card's dashboard row back into an open one. Each later landing is one `run` on a set
-# clock (CONVEYOR_NOW); when a push is tried again is the loop's push decision (pushturn), at one loop's turns.
+# record check or turns a landed card's dashboard row back into an open one. Each later landing is a stubland, its push
+# one `run` on a set clock (CONVEYOR_NOW); when a push is tried again is pushturn's decision, at one loop's turns.
 t_serve() {
   servesetup; tune '.tunables += {idle: 1, poll: 1}'; export CONVEYOR_NOW; CONVEYOR_NOW=$(date +%s)
-  # An idle serve takes its turns and does not end: the KILL of servefor ends it (137), not its own exit.
-  serveeng "$SRC" 'servefor 2' > "$STUB/serve.out" 2>&1; rc=$?
-  [ "$rc" = 137 ] && [ ! -s "$S/cards.jsonl" ] || fail "an idle serve ended ($rc), or recorded something: $(cat "$STUB/serve.out")"
   # A loop holds the run lock (fd 8): a serve beside it is refused.
   out=$( { flock -n 9 || exit 9; loop serve 9>&- 2>&1; } 9>>"$S/cards.jsonl.run") && fail "a second serve ran beside a loop"
   grep -q 'already running' <<<"$out" || fail "a second serve beside a loop was not refused as one: $out"
-  # Bug: an idle serve never sees a new issue. #7 is added at its first idle wait (no card or push), a KILL ends it at
-  # the first idle wait once #7 has landed and origin is at main: a card that ends after the turn's push decision
-  # leaves its push owed to the next turn, so an idle wait alone does not mean the push is done. After 20 idle waits
-  # with no landing pushed it ends all the same, and the check below fails.
+  # Bugs: a serve with no issue to take ends, or records something; an idle serve never sees a new issue. #7 is added at
+  # its first idle wait (no card or push), where nothing is recorded yet, so a serve that ended with no issue never
+  # added it. A KILL, which nothing in that shell can catch or put off, ends it at the first idle wait once #7 landed
+  # and origin is at main: a card that ends after the turn's push decision leaves its push owed to the next turn, so an
+  # idle wait alone does not mean the push is done. After 20 idle waits with no landing pushed it ends all the same, and
+  # the check below fails. The count and the kill ignore the TERM of a turn's `kill "$timer"` (run()).
   serveeng "$SRC" 'nojobs; me=$BASHPID; sleep() { [ "${FUNCNAME[1]:-}" != run ] || [ "$1" = 0.1 ] || [ "$running" != 0 ] || [ -n "$pusher" ] || { trap "" TERM
-      if [ ! -e "$STUB/added7" ]; then add 7 && : > "$STUB/added7"; else echo >> "$STUB/idle7"
+      if [ ! -e "$STUB/added7" ]; then [ ! -s "$S/cards.jsonl" ] || : > "$STUB/idlerecorded"; add 7 && : > "$STUB/added7"; else echo >> "$STUB/idle7"
         { [ -n "$(landed7 7)" ] && [ "$(originat)" = "$(mainat)" ]; } || [ "$(wc -l < "$STUB/idle7")" -ge 20 ] && kill -KILL "$me"; fi; trap - TERM; }; command sleep "$@"; }; run "" serve' > "$STUB/serve.out" 2>&1; rc=$? # sleep: the engine's own, passed on as called
+  [ ! -e "$STUB/idlerecorded" ] || fail "an idle serve with no issue recorded something: $(cat "$S/cards.jsonl")"
   [ "$rc" = 137 ] && [ -e "$STUB/added7" ] && [ -n "$(landed7 7)" ] && [ "$(originat)" = "$(mainat)" ] || fail "an idle serve did not land and push the issue that appeared while it was idle ($rc): $(cat "$S/cards.jsonl" "$STUB/serve.out")"; loopend
   [ "$(cat "$STUB/pushes")" = "$(st 'select(.step == "landed") | .sha')" ] && [ "$(fails)" = 0 ] && [ "$(cat "$S/pushed")" = "$(mainat) origin main" ] \
     || fail "the push did not pass the pre-push check once, with no push line: $(cat "$S/cards.jsonl")"
   [ "$(git -C "$R" status --porcelain)" = ' M b.txt' ] || fail "main's own edit was disturbed: $(git -C "$R" status --porcelain)"
   # The push fails: a push line under the card that landed, with the commit and the reason; origin stays behind.
-  : > "$STUB/push-fail"; at=$(originat); add 8
+  : > "$STUB/push-fail"; at=$(originat); serveeng "$SRC" 'stubland 8'
   loop run > "$STUB/run.out" 2>&1 && fail "a run whose push failed exited zero: $(cat "$STUB/run.out")"
   [ "$(fails)" = 1 ] && [ "$(st 'select(.step == "push") | [.card, .sha, (.reason | test("the fast checks are red"))] | join(" ")')" = "$(landed7 8) $(mainat) true" ] \
     && [ "$(originat)" = "$at" ] || fail "push line of a failed push: $(st 'select(.step == "push")')"
   # The next landing brings the next try; it fails too, under that card.
-  add 9; loop run > "$STUB/run.out" 2>&1 && fail "a run whose push failed again exited zero: $(cat "$STUB/run.out")"
+  serveeng "$SRC" 'stubland 9'; loop run > "$STUB/run.out" 2>&1 && fail "a run whose push failed again exited zero: $(cat "$STUB/run.out")"
   [ "$(fails)" = 2 ] && [ "$(st 'select(.step == "push") | .card' | tail -n 1)" = "$(landed7 9)" ] && [ -n "$(landed7 9)" ] && [ -z "$(left)" ] \
     || fail "the failed push was not tried again after the next landing, under that card, or the push worktree is left: $(fails) push lines; $(left)"
   # Main stays at the commit whose push failed its check: a new loop's turn does not try it again, at once or once
@@ -233,7 +232,7 @@ t_serve() {
   out=$(serveeng "$SRC" 'pushstub; turn; triedat=$((SECONDS - PUSH_RETRY)); turn; echo "$tried"')
   [ ! -s "$STUB/pushcalls" ] && [ "$out" = "$(landed7 9) 9 $(mainat)" ] || fail "a push that failed its check was tried again on the same main: $out; $(cat "$STUB/pushcalls")"
   # The remote refuses the next landing's push (its own hook: transport, not a check): recorded so, under that card.
-  rm "$STUB/push-fail"; printf '#!/bin/sh\necho "the server is busy" >&2; exit 1\n' > "$O/hooks/pre-receive"; chmod +x "$O/hooks/pre-receive"; add 10
+  rm "$STUB/push-fail"; printf '#!/bin/sh\necho "the server is busy" >&2; exit 1\n' > "$O/hooks/pre-receive"; chmod +x "$O/hooks/pre-receive"; serveeng "$SRC" 'stubland 10'
   loop run > "$STUB/run.out" 2>&1 && fail "a run whose push the remote refused exited zero: $(cat "$STUB/run.out")"
   [ "$(fails)" = 3 ] && [ "$(st 'select(.step == "push") | .kind' | tail -n 1)" = transport ] && [ "$(st 'select(.step == "push") | .card' | tail -n 1)" = "$(landed7 10)" ] \
     || fail "a push the remote refused is not recorded as transport under the card that landed: $(st 'select(.step == "push") | [.card, .kind]')"
@@ -250,9 +249,7 @@ t_serve() {
   CONVEYOR_MAIN=$R bash "$SRC/report.sh" | grep -Eq '^cards landed +4$' || fail "the report miscounts cards that hold a push line"
   # Bug: a landing after a failed push waits for the retry timer. Each run above starts with nothing tried, so one loop's
   # turns (after the counts): c98's push is tried and fails (the stub), the timer holds it, c99 lands and is tried at once.
-  serveeng "$SRC" 'land() { echo "$1" > "$R/f$1"; git -C "$R" add "f$1"; git -C "$R" commit -qm "$1"
-      record "c$1" "$1" landed ok "$(jq -cn --arg s "$(git -C "$R" rev-parse HEAD)" "{sha: \$s, product: false}")"; }
-    pushstub; land 98; turn; turn; echo T >> "$STUB/pushcalls"; land 99; turn'
+  serveeng "$SRC" 'pushstub; stubland 98; turn; turn; echo T >> "$STUB/pushcalls"; stubland 99; turn'
   [ "$(cut -d' ' -f1,2 "$STUB/pushcalls" | paste -sd,)" = "c98 98,T,c99 99" ] \
     || fail "a landing after a failed push in the same loop was not pushed at once, or the failed one was tried again before its timer: $(cat "$STUB/pushcalls")"
 }
@@ -276,10 +273,10 @@ t_pushkind() {
   ! hookfailed "$d/gone" && ! hookfailed "$d/none" || fail "a push that never reached its hook, or one with no trace, is taken for a failed check"
 }
 
-# `run` pushes its landings too: a failed push leaves its line and a failing exit, and the next run pushes first (one
+# `run` pushes the landings too: a failed push leaves its line and a failing exit, and the next run pushes first (one
 # whose check failed, once main has moved).
 t_serverun() {
-  servesetup; : > "$STUB/push-fail"; at=$(originat); add 10
+  servesetup; : > "$STUB/push-fail"; at=$(originat); serveeng "$SRC" 'stubland 10' || fail "card 10 did not land"
   out=$(loop run 2>&1) && fail "a run whose push failed exited zero: $out"
   grep -q 'is not pushed' <<<"$out" && [ "$(fails)" = 1 ] && [ "$(st 'select(.step == "push") | .card' | tail -n 1)" = "$(landed7 10)" ] \
     && [ -n "$(landed7 10)" ] && [ "$(originat)" = "$at" ] || fail "a run's failed push was not recorded under its card: $out $(st 'select(.step == "push")')"
@@ -307,8 +304,7 @@ t_serverun() {
 # asked about in turn under one wait: the other two have their issue line at once, not after the first one's wait
 # (asked one after the other, the last card of a long batch was dropped from the belt before its answer came).
 t_servebatch() {
-  servesetup; : > "$STUB/push-fail"; add 11; add 12; add 13; loop run > /dev/null 2>&1; rm "$STUB/push-fail"; handfix 'the checks pass' # main moves, so the push is made again
-  [ "$(st 'select(.step == "landed" and .issue > 10) | .issue' | wc -l)" = 3 ] || fail "three cards did not land for the batch: $(st 'select(.issue > 10) | "\(.issue) \(.step)"' | tr '\n' ,)"
+  servesetup; serveeng "$SRC" 'stubland 11; stubland 12; stubland 13' || fail "three cards did not land for the batch"
   open=$(st 'select(.step == "landed" and .issue > 10) | .issue' | head -n 1); echo OPEN > "$STUB/state.$open"
   tuned '.tunables.closeWait = 6' loop run > /dev/null 2>&1 || fail "the run that pushes the batch failed"
   [ "$(st 'select(.step == "pushed" and .issue > 10) | .issue' | wc -l)" = 3 ] || fail "the batch push did not mark its three cards pushed"
@@ -372,7 +368,7 @@ t_heldpush() {
 # remote's commits into main and pushes again; one that cannot (they conflict) and fails again on the next try is in
 # Needs you, with git's error and the cards not pushed, until a push works.
 t_pushmerge() {
-  setup "$(jq -cs . <(issue 7 2026-01-01))"; O=$T/$CASE/origin; H=$T/$CASE/hand; for i in 1 2; do echo "$GO" > "$STUB/review.$i"; done
+  setup '[]'; O=$T/$CASE/origin; H=$T/$CASE/hand
   mainat() { git -C "$R" rev-parse refs/heads/main; }; originat() { git -C "$O" rev-parse refs/heads/main; }
   fails() { st 'select(.step == "push" and .result == "fail") | .card' | wc -l; }
   pushitem() { loop snapshot --fresh 2>/dev/null | jq -c '[.needsYou.blocked[] | select(.push)]'; }
@@ -383,6 +379,7 @@ t_pushmerge() {
   git -C "$R" config remote.origin.uploadpack "$STUB/up"
   # By hand, from another clone: a commit to a file the card does not touch.
   git clone -q "$O" "$H"; echo hand > "$H/c.txt"; git -C "$H" add c.txt; git -C "$H" commit -qm 'by hand'; git -C "$H" push -q origin main; hand=$(originat)
+  serveeng "$SRC" 'stubland 7' || fail "card 7 did not land"
   out=$(loop run 2>&1) || fail "the run whose push the remote refused at first failed: $out $(st 'select(.step == "push")')"
   l7=$(st 'select(.step == "landed") | .sha')
   [ "$(originat)" = "$(mainat)" ] && git -C "$O" merge-base --is-ancestor "$hand" main && git -C "$O" merge-base --is-ancestor "$l7" main \
@@ -395,7 +392,7 @@ t_pushmerge() {
   # By hand again, now the line the next card adds too: the two do not merge. The push fails with git's conflict;
   # one failure is the belt's "tried again", not yet the owner's.
   git -C "$H" pull -q; echo other >> "$H/a.txt"; git -C "$H" commit -qam 'by hand, the same line'; git -C "$H" push -q origin main; hand=$(originat)
-  jq -c ". + [$(issue 8 2026-01-02)]" "$STUB/issues.json" > "$STUB/issues.new" && mv "$STUB/issues.new" "$STUB/issues.json"
+  serveeng "$SRC" 'stubland 8 a.txt' || fail "card 8 did not land"
   out=$(loop run 2>&1) && fail "a run whose push could not be merged exited zero: $out"
   c8=$(st 'select(.step == "landed" and .issue == 8) | .card'); l8=$(st 'select(.step == "landed" and .issue == 8) | .sha')
   [ -n "$c8" ] && [ "$(fails)" = 1 ] && [ "$(mainat)" = "$l8" ] && [ "$(originat)" = "$hand" ] && [ "$(pushitem)" = '[]' ] \
@@ -416,7 +413,7 @@ t_pushmerge() {
   # refuses a merge's message: the remote's commit merges, but no merge commit is made, and the push line says why.
   git -C "$H" pull -q; echo hand > "$H/d.txt"; git -C "$H" add d.txt; git -C "$H" commit -qm 'by hand, a third'; git -C "$H" push -q origin main; hand=$(originat)
   printf '%s\n' '#!/usr/bin/env bash' '! grep -q "^Merge " "$1" || { echo "no merge commits here"; exit 1; }' > "$R/.git/hooks/commit-msg"; chmod +x "$R/.git/hooks/commit-msg"
-  echo "$GO" > "$STUB/review.3"; jq -c ". + [$(issue 9 2026-01-03)]" "$STUB/issues.json" > "$STUB/issues.new" && mv "$STUB/issues.new" "$STUB/issues.json"
+  serveeng "$SRC" 'stubland 9' || fail "card 9 did not land"
   out=$(loop run 2>&1) && fail "a run whose merge main's commit-msg hook refuses exited zero: $out"
   l9=$(st 'select(.step == "landed" and .issue == 9) | .sha')
   [ -n "$l9" ] && [ "$(mainat)" = "$l9" ] && [ "$(originat)" = "$hand" ] && [ -z "$(git -C "$R" status --porcelain)" ] \
@@ -430,7 +427,7 @@ t_pushmerge() {
 # URL alone, finds nothing main lacks, and the push keeps failing though the two merge cleanly. The remote's commits
 # are fetched from every URL the push went to.
 t_pushurl() {
-  setup "$(jq -cs . <(issue 7 2026-01-01))"; O=$T/$CASE/origin; B=$T/$CASE/first.git; C=$T/$CASE/second.git; H=$T/$CASE/hand; echo "$GO" > "$STUB/review.1"
+  setup '[]'; O=$T/$CASE/origin; B=$T/$CASE/first.git; C=$T/$CASE/second.git; H=$T/$CASE/hand
   git clone -q --bare "$O" "$B"; git clone -q --bare "$O" "$C"; was=$(git -C "$O" rev-parse refs/heads/main)
   git -C "$R" config remote.origin.pushurl "$B"; git -C "$R" config --add remote.origin.pushurl "$C"
   # The remote names the program that serves its fetches (one of these may need its own): it notes what it served.
@@ -440,7 +437,7 @@ t_pushurl() {
   git -C "$R" config remote.conveyor-pushed.url "$O"; git -C "$R" config remote.conveyor-pushed.uploadpack false
   # By hand, to the second of the two only: a commit to a file the card does not touch.
   git clone -q "$C" "$H"; echo hand > "$H/c.txt"; git -C "$H" add c.txt; git -C "$H" commit -qm 'by hand'; git -C "$H" push -q origin main
-  hand=$(git -C "$C" rev-parse refs/heads/main)
+  hand=$(git -C "$C" rev-parse refs/heads/main); serveeng "$SRC" 'stubland 7' || fail "card 7 did not land"
   out=$(loop run 2>&1) || fail "the run whose push the second push URL refused at first failed: $out $(st 'select(.step == "push")')"
   l7=$(st 'select(.step == "landed") | .sha')
   for x in "$B" "$C"; do
@@ -458,11 +455,11 @@ t_pushurl() {
 # the push is at the second: the fetch after the refusal is made by the remote's name, which reads its first URL
 # alone, finds nothing main lacks, and the push keeps failing though the two merge cleanly. Every URL is fetched.
 t_pushurls() {
-  setup "$(jq -cs . <(issue 7 2026-01-01))"; O=$T/$CASE/origin; C=$T/$CASE/second.git; H=$T/$CASE/hand; echo "$GO" > "$STUB/review.1"
+  setup '[]'; O=$T/$CASE/origin; C=$T/$CASE/second.git; H=$T/$CASE/hand
   git clone -q --bare "$O" "$C"; git -C "$R" config --add remote.origin.url "$C"
   git -C "$R" config remote.origin.pushurl "$O"; git -C "$R" config --add remote.origin.pushurl "$C"
   git clone -q "$C" "$H"; echo hand > "$H/c.txt"; git -C "$H" add c.txt; git -C "$H" commit -qm 'by hand'; git -C "$H" push -q origin main
-  hand=$(git -C "$C" rev-parse refs/heads/main)
+  hand=$(git -C "$C" rev-parse refs/heads/main); serveeng "$SRC" 'stubland 7' || fail "card 7 did not land"
   out=$(loop run 2>&1) || fail "the run whose push the remote's second URL refused at first failed: $out $(st 'select(.step == "push")')"
   l7=$(st 'select(.step == "landed") | .sha')
   for x in "$O" "$C"; do
@@ -479,12 +476,12 @@ t_pushurls() {
 # URL, or takes the path from main's checkout and reads another folder, so a commit only where the push goes is
 # never merged. The URL is looked up, and fetched, as the push is made: under push.env, from the push worktree.
 t_pushurlenv() {
-  setup "$(jq -cs . <(issue 7 2026-01-01))"; O=$T/$CASE/origin; B=$T/$CASE/pushed.git; H=$T/$CASE/hand; echo "$GO" > "$STUB/review.1"
+  setup '[]'; O=$T/$CASE/origin; B=$T/$CASE/pushed.git; H=$T/$CASE/hand
   git clone -q --bare "$O" "$B"; was=$(git -C "$O" rev-parse refs/heads/main)
   # From the push worktree ($T/$CASE/cards/push) the path is $B; from main's checkout it is no repository.
   P=$R/.conveyor/project.json; jq '.push.env = {GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "remote.origin.pushurl", GIT_CONFIG_VALUE_0: "../../pushed.git"}' "$P" > "$P.new" && mv "$P.new" "$P"
   git clone -q "$B" "$H"; echo hand > "$H/c.txt"; git -C "$H" add c.txt; git -C "$H" commit -qm 'by hand'; git -C "$H" push -q origin main
-  hand=$(git -C "$B" rev-parse refs/heads/main)
+  hand=$(git -C "$B" rev-parse refs/heads/main); serveeng "$SRC" 'stubland 7' || fail "card 7 did not land"
   out=$(loop run 2>&1) || fail "the run whose push the push URL of push.env refused at first failed: $out $(st 'select(.step == "push")')"
   l7=$(st 'select(.step == "landed") | .sha')
   [ "$(git -C "$B" rev-parse refs/heads/main)" = "$(git -C "$R" rev-parse refs/heads/main)" ] && git -C "$B" merge-base --is-ancestor "$hand" main \
