@@ -282,6 +282,12 @@ jq -n --arg p "$PIN2" '{plugin: {commit: $p}}' > "$T/gamma/.conveyor/project.jso
 askg() { env -u CONVEYOR_FOREMAN_ASK CONVEYOR_FOREMAN_DIR="$FD" bash -c '. "$1/lib.sh" && ask gamma "$2" health' _ "$SRC" "$T/gamma"; }
 out=$(askg 2>&1)
 [ "$out" = "ran versions/$PIN2 health" ] || fail "a full commit pin did not run its install: $out"
+# Bug caught (#961): testissue run over ssh, or for another project of the group, could not see the Foreman's mark
+# file, so the issue it filed was queued at once. ask adds the mark to testissue alone (the case clears the inherited
+# one first): a card session would claim the role.
+printf '#!/usr/bin/env bash\necho "$1 mark=${CONVEYOR_FOREMAN:-}"\n' > "$XDG_DATA_HOME/conveyor/versions/$PIN2/conveyor/conveyor.sh"
+for c in testissue health; do out=$(env -u CONVEYOR_FOREMAN -u CONVEYOR_FOREMAN_ASK CONVEYOR_FOREMAN_DIR="$FD" bash -c '. "$1/lib.sh" && ask gamma "$2" "$3" x' _ "$SRC" "$T/gamma" "$c" 2>&1); echo "$out"; done > "$T/marks"
+[ "$(cat "$T/marks")" = $'testissue mark=1\nhealth mark=' ] || fail "the Foreman's mark did not reach testissue alone: $(cat "$T/marks")"
 for pin in ../escape "../escape/../versions/$PIN2" "${PIN2^^}" 7; do
   jq -n --arg p "$pin" '{plugin: {commit: $p}}' > "$T/gamma/.conveyor/project.json"
   out=$(askg 2>&1) \

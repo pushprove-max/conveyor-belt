@@ -103,9 +103,14 @@ TAEXPLAIN="Explain the slowdown of one test file of this project. From its recor
 # checks", each checked by optproof(), or a speed-up; the owner read and edited the title and body), filed through the GitHub write path with the pack's
 # type and its last priority. Each one filed is kept in $TAFILED, one line {time, event: filed, file, issue}, so the
 # file's row has its issue (testspart(): the Board's Close its issue as done). It prints the issue's address.
+# Run for a Foreman session (the launcher's CONVEYOR_FOREMAN=1, or the session the Foreman's mark, $ST/foreman/session,
+# names: Claude Code gives a session's commands its id, CLAUDE_CODE_SESSION_ID), or while the control record's new
+# issues start held (or the record cannot be read), it holds the issue in the control record, as the Foreman's
+# filing hooks do, which do not see an issue filed here, and says so on stderr: a Foreman's issue is not built
+# before the owner's yes.
 TAFILED=$TESTACTS/filed.jsonl
 testissue() { # <test file> <title> <body>
-  local out n
+  local out n s='' why=''
   [ $# = 3 ] && [[ -n ${2//[[:space:]]/} && $2 != *$'\n'* && -n ${3//[[:space:]]/} ]] || { echo "usage: conveyor.sh testissue <test file> <title> <body>" >&2; return 2; }
   [[ -n $1 && $1 != /* && /$1/ != */../* && /$1/ != */./* && $1 != *$'\n'* ]] && [ "$(git -C "$MAIN" cat-file -t "refs/heads/$BRANCH:$1" 2>/dev/null)" = blob ] \
     || { echo "conveyor: $1 is not a file of $BRANCH; nothing filed" >&2; return 2; }
@@ -114,6 +119,13 @@ testissue() { # <test file> <title> <body>
   [ -n "$n" ] || { echo "conveyor: the issue about $1 could not be filed: $out" >&2; return 1; }
   jq -cn --arg t "$(clock)" --arg f "$1" --argjson n "$n" '{time: $t, event: "filed", file: $f, issue: $n}' >> "$TAFILED" \
     || echo "conveyor: #$n is filed, but its record could not be written: the row of $1 does not show it" >&2
+  read -r s _ 2>/dev/null < "$ST/foreman/session"
+  if [ "${CONVEYOR_FOREMAN:-}" = 1 ] || { [ -n "$s" ] && [ "${CLAUDE_CODE_SESSION_ID:-}" = "$s" ]; }; then why='it was filed for a Foreman session'
+  else case $(ctl 2>/dev/null | jq -r '.start // empty' 2>/dev/null) in queue) ;; held) why='new issues start held' ;; *) why='the control record cannot be read' ;; esac; fi
+  if [ -n "$why" ]; then
+    if locked control hold "$n" > /dev/null 2>&1; then echo "conveyor: #$n is held, as $why: release it (conveyor.sh control release $n) once the owner says yes" >&2
+    else echo "conveyor: #$n is filed, but could not be held ($why): hold it (conveyor.sh control hold $n) unless the owner has said yes to it" >&2; fi
+  fi
   grep -oE '[^[:space:]]*/issues/[0-9]+' <<<"$out" | tail -n 1
 }
 taput() { printf '%s\n' "$2" > "$1.new" && mv -f "$1.new" "$1" || { rm -f "$1.new"; return 1; }; } # <file> <record>

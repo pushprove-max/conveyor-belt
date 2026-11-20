@@ -660,6 +660,7 @@ case \$1 in
   machine) echo "conveyor: the machine's Conveyor: \$2" ;;
   # A test action's id (of its file, the last argument), or an issue's address; a file named gone is not main's.
   testaction|testissue) [[ "\$*" != *gone* ]] || { echo "conveyor: the file is not a file of main" >&2; exit 2; }
+    [ "\$1" != testissue ] || echo "\${CONVEYOR_FOREMAN-unset}:\${CLAUDE_CODE_SESSION_ID-unset}" >> "$F/testissue-mark"
     if [ "\$1" = testaction ]; then l=\${*: -1}; echo "id-\${l##*/}"; else echo "https://github.com/o/r/issues/\$(grep -c . "$F/conveyor-calls")"; fi ;;
 esac
 STUB
@@ -688,7 +689,7 @@ ctl() {
 # Every action names the record it is for: here the host file's one record, sample, on its main.
 act() { jq -cn --arg a "$1" '{action: $a, args: $ARGS.positional, repo: "sample"}' --args -- "${@:2}"; }
 yes_act() { act "$@"; }
-fresh_control() { rm -f "$F/conveyor-calls" "$F/gh-calls" "$F/gh-writes" "$F/gh-pwd" "$F/gh-body" "$F/ssh-calls" "$F/conveyor-refuse" "$F/waiting" "$F/before" "$F/ssh-down" "$F/shut-none" "$F/shut-fails"; }
+fresh_control() { rm -f "$F/testissue-mark" "$F/conveyor-calls" "$F/gh-calls" "$F/gh-writes" "$F/gh-pwd" "$F/gh-body" "$F/ssh-calls" "$F/conveyor-refuse" "$F/waiting" "$F/before" "$F/ssh-down" "$F/shut-none" "$F/shut-fails"; }
 calls() { cat "$F/conveyor-calls" 2>/dev/null; }
 
 # control_part <part> <port> -- a part on the control host, max logged in on control-test ($A/ct).
@@ -720,7 +721,8 @@ grep -q "dashboard: control model default by max from 127.0.0.1" "$M/server.err"
 done_part
 ) & started actions
 
-( control_part control "${PORTS[5]}"
+# This part's Board runs with the Foreman's mark, as one the Foreman's claim started does (test_issue_and_close_reach_conveyor).
+( export CONVEYOR_FOREMAN=1 CLAUDE_CODE_SESSION_ID=foreman-1; control_part control "${PORTS[5]}"
 control_actions 'pause' 'resume' 'stop' 'cap 3' 'cap 9' 'cap 100' 'cap off' 'guard 90' 'guard off' 'hold 12 13' 'release 12' 'order 13 12' 'order' 'unpin 13'
 # POST /machine pauses or resumes the whole machine: `conveyor.sh machine pause|resume` on the host's main, over the
 # same ssh. It is its own control: it names no project, and a project's action is never taken without its project.
@@ -949,7 +951,8 @@ fresh_control
   && [ "$(calls)" = "CONVEYOR_MAIN=$HM testissue conveyor/tests/merge.test.sh Speed up conveyor/tests/merge.test.sh Measured: 12 CPU s.
 
 Verdict: split" ] && [ "$(cat "$F/gh-writes")" = "issue close 480 --comment Done: before 12 CPU s, after 6 CPU s." ] \
-  || fail "test_issue_and_close_reach_conveyor: $(cat "$M/ctl.out") ran '$(calls)' wrote '$(cat "$F/gh-writes" 2>&1)'"
+  && [ "$(cat "$F/testissue-mark")" = : ] \
+  || fail "test_issue_and_close_reach_conveyor: $(cat "$M/ctl.out") ran '$(calls)' wrote '$(cat "$F/gh-writes" 2>&1)' with the mark '$(cat "$F/testissue-mark" 2>&1)'"
 fresh_control
 for a in 'testaction judge' 'testaction stop 12' 'testaction judge -x.test.sh' 'testaction delete a.test.sh' 'testaction explain --time ../zone 12-hour a.test.sh' 'testaction explain --time :/etc/zone 12-hour a.test.sh' 'testaction explain --time UTC 13-hour a.test.sh' 'testaction judge --time UTC 12-hour a.test.sh' 'testrules guard perDay off' 'testrules set r limit' 'testrules add r budget 1 3 3' 'testrules set r measure budget' 'tests codex' 'test-close x done' 'flaky-off a.test.sh why'; do
   # shellcheck disable=SC2086 # each word an argument

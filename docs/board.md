@@ -770,6 +770,10 @@ the end of its text. Edit it, then click "File this issue". Cancel files nothing
 Mutation check, Split it, Keep a case off, Close its issue as done and Mark as slow on purpose
 (`conveyor.sh test-settings`). Use the arrow keys to move in the More menu, and Escape to close it.
 
+An issue that you file from the Tests page goes to the queue. When the Rules tab's New issues start in is Held, the
+issue is held. `conveyor.sh testissue <test file> <title> <body>` files the same issue from a shell. When a Foreman
+session runs it, the issue is held too, and the command says so.
+
 Split it shows the issue first, with the title "Split the test file <file>". Its text asks for two or more test files
 of the same area, with each case kept once and unchanged, each new file under 600 lines, and
 `.conveyor/engine-areas.json` and the test map updated. When the newest verdict of Judge is split, the text also gives

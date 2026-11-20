@@ -109,6 +109,11 @@ is for the repository, the Foreman tells you the repository, the records it look
 the project's record in the host file to its main checkout on this machine, or run `conveyor.sh setup` in that
 checkout.
 
+The Foreman can also file an issue about a test file with `conveyor.sh testissue`, the Tests page's command. This
+command holds the issue in the project's record and says so. It does this for a Foreman session, and also when the
+project's New issues start in is Held. The Foreman runs it with `foreman.sh ask <project> testissue`, so the issue is
+held also when the project is on a host, or is another project of the Foreman's group.
+
 A card that moves from one step to the next, as from build to review, gives no wake.
 
 The Foreman's reply to a wake says only what needs you. If nothing needs you, the reply is the one word Idle. A

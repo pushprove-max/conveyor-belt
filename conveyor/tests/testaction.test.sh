@@ -210,6 +210,31 @@ t_taissue() {
   [ "$(jq -c '[.title, (.labels | map(.name))]' "$STUB/filed")" = '["Speed up tests/x.test.sh",["bug","P2"]]' ] || fail "the issue filed: $(cat "$STUB/filed")"
   [ "$(jq -c '[.event, .file, .issue]' "$ST/testactions/filed.jsonl")" = '["filed","tests/x.test.sh",100101]' ] || fail "the issue is not kept for the file: $(cat "$ST/testactions/filed.jsonl" 2>&1)"
   loop testissue tests/gone.test.sh t b 2> /dev/null; [ $? = 2 ] && [ "$(wc -l < "$STUB/filed")" = 1 ] || fail "testissue of a file main lacks did not refuse"
+  # The Board's filing, with new issues starting in the queue, leaves the issue queued (#961: the owner pressed the button).
+  [ "$(loop control | jq -c '[.start, .held]')" = '["queue",[]]' ] || fail "an issue the owner filed with new issues in the queue was held: $(loop control)"
+}
+# Bug this guards (#961): an issue a Foreman session filed through testissue was not held, as the Foreman's filing
+# hooks never see it, so it was built before the owner's yes. Both of the Foreman's marks: the session the mark file
+# names, and the launcher's CONVEYOR_FOREMAN=1.
+t_taissuefm() {
+  tasetup; local out
+  mkdir -p "$ST/foreman" && echo "fm-1 2026-11-20T00:00:00Z" > "$ST/foreman/session"
+  out=$(CLAUDE_CODE_SESSION_ID=fm-1 loop testissue tests/x.test.sh "Speed up tests/x.test.sh" "Measured: 12 CPU s." 2> "$STUB/ti.err") || fail "testissue failed: $out"
+  [ "$out" = https://github.com/o/r/issues/100101 ] || fail "testissue does not print the issue's address alone: $out"
+  [ "$(loop control | jq -c .held)" = '[100101]' ] || fail "the issue the marked Foreman session filed is not held: $(loop control)"
+  grep -q '#100101 is held, as it was filed for a Foreman session' "$STUB/ti.err" || fail "testissue did not say it held the issue: $(cat "$STUB/ti.err")"
+  loop control release 100101 > /dev/null || fail "the release was refused"
+  CONVEYOR_FOREMAN=1 loop testissue tests/x.test.sh t b > /dev/null 2>&1 || fail "testissue with CONVEYOR_FOREMAN=1 failed"
+  [ "$(loop control | jq -c .held)" = "[$(jq -s '.[-1].issue' "$ST/testactions/filed.jsonl")]" ] || fail "the issue filed with CONVEYOR_FOREMAN=1 is not held: $(loop control)"
+}
+# Bug this guards (#961): with New issues start in set to Held, an issue filed from the Tests page was queued and
+# picked at once.
+t_taissueheld() {
+  tasetup
+  loop control start held > /dev/null 2>&1 || fail "start held was refused"
+  loop testissue tests/x.test.sh "Speed up tests/x.test.sh" "Measured: 12 CPU s." > /dev/null 2> "$STUB/ti.err" || fail "testissue failed: $(cat "$STUB/ti.err")"
+  [ "$(loop control | jq -c .held)" = '[100101]' ] || fail "the issue filed while new issues start held is not held: $(loop control)"
+  grep -q '#100101 is held, as new issues start held' "$STUB/ti.err" || fail "testissue did not say it held the issue: $(cat "$STUB/ti.err")"
 }
 
 # Bug this guards: a Tests seat set to a model its CLI does not list (the Board's Other…) ran on another model; a

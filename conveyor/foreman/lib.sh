@@ -190,17 +190,21 @@ waiter_state() {
 
 # ask <repo> <main> <command> [<argument>...]: one Conveyor command (snapshot, health, control ...) of a record, by
 # the commit its own pack pins (or its current engine, for a pack that follows the plugin's main), run over ssh at
-# the host file's ssh target when it names one, else on this machine.
+# the host file's ssh target when it names one, else on this machine. testissue runs with the Foreman's mark,
+# CONVEYOR_FOREMAN=1, so it holds the issue it files: the engine on the host, or of another project of the group,
+# cannot see this machine's mark file. ask adds the mark to no other command: a session one starts (a card's) would
+# claim the role. A command run on this machine still inherits the Foreman session's own environment, mark included.
 # CONVEYOR_FOREMAN_ASK, when set, runs in its place with CONVEYOR_REPO, CONVEYOR_MAIN and CONVEYOR_CMD (the command
 # and its arguments, space-separated) set (the tests' seam).
 ask() {
-  local cmd target
+  local cmd target fm=
+  [ "$3" != testissue ] || fm='CONVEYOR_FOREMAN=1 '
   if [ -n "${CONVEYOR_FOREMAN_ASK:-}" ]; then CONVEYOR_REPO=$1 CONVEYOR_MAIN=$2 CONVEYOR_CMD="${*:3}" bash -c "$CONVEYOR_FOREMAN_ASK" < /dev/null; return; fi
   # A pin names a version folder, so only a full commit id may (as the shim requires): anything else could name a
   # path outside versions/. A pack that follows the plugin's main runs that machine's current engine (as the shim). A
   # pack with no plugin key (the plugin's own checkout) runs the engine of the checkout itself, as its loop does.
-  printf -v cmd 'cd %q && if jq -e ".plugin == null" .conveyor/project.json >/dev/null 2>&1; then e=$PWD/conveyor/conveyor.sh; else p=$(if jq -e .plugin.follow .conveyor/project.json >/dev/null 2>&1; then jq -er %q .git/conveyor-engine.json; else jq -er %q .conveyor/project.json; fi) && e=${XDG_DATA_HOME:-$HOME/.local/share}/conveyor/versions/$p/conveyor/conveyor.sh; fi && CONVEYOR_MAIN=%q bash "$e"' \
-    "$2" '.commit | select(type == "string" and test("^[0-9a-f]{40}$"))' '.plugin.commit | select(type == "string" and test("^[0-9a-f]{40}$"))' "$2"
+  printf -v cmd 'cd %q && if jq -e ".plugin == null" .conveyor/project.json >/dev/null 2>&1; then e=$PWD/conveyor/conveyor.sh; else p=$(if jq -e .plugin.follow .conveyor/project.json >/dev/null 2>&1; then jq -er %q .git/conveyor-engine.json; else jq -er %q .conveyor/project.json; fi) && e=${XDG_DATA_HOME:-$HOME/.local/share}/conveyor/versions/$p/conveyor/conveyor.sh; fi && %sCONVEYOR_MAIN=%q bash "$e"' \
+    "$2" '.commit | select(type == "string" and test("^[0-9a-f]{40}$"))' '.plugin.commit | select(type == "string" and test("^[0-9a-f]{40}$"))' "$fm" "$2"
   printf -v cmd '%s%s' "$cmd" "$(printf ' %q' "${@:3}")"
   target=$(jq -er '.ssh | select(type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._@-]*$"))' "$HOSTF" 2>/dev/null) || target=''
   if [ -n "$target" ]; then

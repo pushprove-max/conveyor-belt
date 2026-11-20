@@ -1026,7 +1026,9 @@ def control_script(action, args, main, today, record=None, user=None):
         return 'cd %s || exit 1; %s gh-write issue close %s --comment %s' % (q(record or main), conv, q(args[0]), q(args[1]))
     if action == 'test-issue':
         # The engine files it (the pack's type and last priority) and keeps it for the file's row: Close its issue as done.
-        return 'cd %s || exit 1; %s testissue %s %s %s' % (q(record or main), conv, q(args[0]), q(args[1]), q(args[2]))
+        # The owner pressed the button: the Foreman's mark that a Board started from a Foreman session inherits is
+        # dropped, so testissue holds the issue only when the record's new issues start held.
+        return 'cd %s || exit 1; CONVEYOR_FOREMAN= CLAUDE_CODE_SESSION_ID= %s testissue %s %s %s' % (q(record or main), conv, q(args[0]), q(args[1]), q(args[2]))
     if action == 'unlabel':
         return 'cd %s || exit 1; %s gh-write issue edit %s %s >/dev/null && %s control release %s' % (
             q(record or main), conv, q(args[0]), ' '.join('--remove-label %s' % q(x) for x in args[1:]), conv, q(args[0]))
