@@ -955,7 +955,8 @@ does not run it. While the loop runs, Needs you shows one line that counts these
 Add the price on the Rules tab (Model prices), or with `conveyor.sh prices add`. At its next check, the loop takes the
 model off the count. Conveyor does not file an issue in your repository for a missing price. When the belt runs a Claude or Codex
 model that has no built-in price, Conveyor also adds one note for it to the Plugin problems pane on the Overview tab. From
-that pane, you can file the note in the plugin's repository. A Codex family name, such as `sol`, is not a model ID:
+that pane, you can file the note in the plugin's repository. After you file or dismiss the note, Conveyor does not add
+it again, from this project or from another project in its Foreman group. A Codex family name, such as `sol`, is not a model ID:
 the check uses the model that Codex runs for it. An OpenCode model does not need a price: the Board shows the cost
 that OpenCode reports.
 

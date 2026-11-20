@@ -174,8 +174,11 @@ t_noprice() {
 # group after alpha, and the pack pricing the builder's claude-new-9, the Board lists only m and x, and the note for
 # claude-new-9 is in alpha's Foreman folder, not this project's. Bug (review of #1074): with a name no record has
 # (gone) first in the group, the note went to this project's folder, though lib.sh and the Board pass gone over and
-# read alpha's. Bug too: each project of a group kept its own noted, so each noted the model in the shared file: the
-# second look here, with noprice.json gone as in another project of the group, adds no second note.
+# read alpha's. Bug too: each project of a group kept its own noted, so each noted the model in the shared file. Bug
+# (#1116): filing or dismissing the note on the Board takes its line out of plugin-bugs.md, so another project of the
+# group, with no noted of its own, noted the model again. The line is taken out (as the Board's dismiss takes it out)
+# right after the first look, before any look finds it there, so a change that kept the model only when a look found
+# its note fails too: the second look, with noprice.json gone as in another project of the group, adds no note.
 t_nopricegroup() {
   setup '[]'; unset CONVEYOR_NOPRICE_CMD
   local a=$T/$CASE/alpha; mkdir -p "$a" "$XDG_CONFIG_HOME/conveyor"
@@ -183,12 +186,16 @@ t_nopricegroup() {
     > "$XDG_CONFIG_HOME/conveyor/host.json"
   tune '.models.allowed.claude += ["claude-new-9"] | .prices = {"claude-new-9": {input: 3, output: 15, cacheRead: 0.3}}'
   loop control model claude claude-new-9 >/dev/null || fail "the builder's seat was not set"
-  looks 'noprice && rm "$NOPRICE" && NOPRICE_K="" && noprice'
+  local n=$a/conveyor/state/foreman/plugin-bugs.md
+  looks 'noprice'
   out=$(missing); [ "$out" = '["m","x"]' ] || fail "the models with no price, the pack's price put over the table: $out"
-  [ "$(grep -c 'No built-in price for claude-new-9: ' "$a/conveyor/state/foreman/plugin-bugs.md" 2>&1)" = 1 ] \
-    || fail "not one note for a seat's model the built-in table does not price, in the group's Foreman folder: $(cat "$a/conveyor/state/foreman/plugin-bugs.md" 2>&1)"
-  [ "$(jq -c .noted "$ST/noprice.json")" = '["claude-new-9"]' ] || fail "a model another project noted is not on noted: $(cat "$ST/noprice.json")"
+  [ "$(grep -c 'No built-in price for claude-new-9: ' "$n" 2>&1)" = 1 ] \
+    || fail "not one note for a seat's model the built-in table does not price, in the group's Foreman folder: $(cat "$n" 2>&1)"
   [ ! -e "$ST/foreman/plugin-bugs.md" ] || fail "the note went to this project's own folder: $(cat "$ST/foreman/plugin-bugs.md")"
+  grep -v 'No built-in price for claude-new-9: ' "$n" > "$n.new"; mv "$n.new" "$n"
+  looks 'rm "$NOPRICE" && noprice'
+  ! grep -q 'No built-in price for claude-new-9: ' "$n" || fail "a note filed or dismissed on the Board was noted again: $(cat "$n")"
+  [ "$(jq -c .noted "$ST/noprice.json")" = '["claude-new-9"]' ] || fail "a model another project noted is not on noted: $(cat "$ST/noprice.json")"
 }
 # Bug: a project with no judge (a Claude-only one: the judge needs another CLI than the reviewer's) listed no model at
 # all, as the judge's seat, unset, failed the look.

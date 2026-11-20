@@ -252,7 +252,8 @@ modelsallowed() { # <variable>
 # seat's or the research lane's, not one only offered) that the built-in table does not price, whatever the pack's
 # prices, is also noted as a plugin problem, in the Foreman's plugin-bugs.md (foremandir(); foreman/stop.sh's form),
 # which the Overview's Plugin problems pane files to the plugin's repository on the owner's yes: once for each model
-# whatever the loop's turns or restarts ($NOPRICE's noted) and the projects of its group (a note in that file counts).
+# whatever the loop's turns or restarts ($NOPRICE's noted), the projects of its group (a note in that file counts) and
+# a note filed or dismissed since (that folder's noprice-noted).
 # The
 # models: those of the models.allowed in force (modelsallowed(), the list the Board's "Offered with no price" takes:
 # the pack's when it sets one, with the host's Codex models added to a codex list it has with a model in it), and those
@@ -345,17 +346,20 @@ noprice_() {
   # A Claude or Codex model run with no built-in price and no note yet: one plugin problem each, in stop.sh's form,
   # under the header stop.sh writes, in the Foreman's folder (foremandir()). Only an ID of the built-in table's form is
   # noted: a note is one line. The projects of a group share that file, so a model another one noted there already
-  # gets no second note (it is put on noted all the same); the look and the note are made under a lock of the folder,
-  # so two loops of a group never both note one model.
+  # gets no second note (it is put on noted all the same). Filing or dismissing a note on the Board takes it out of
+  # that file, so each model noted is also kept in noprice-noted in the same folder, one ID a line: a model on it gets
+  # no second note either, though the group's other projects have it on no noted of their own. The look and the note
+  # are made under a lock of the folder, so two loops of a group never both note one model.
   notes=$(foremandir)/plugin-bugs.md || return 1
   y=$(jq -r --argjson st "$st" '.[] | select(test("^(claude|gpt)-[A-Za-z0-9._\\[\\]-]+$")) | select(. as $m | $st.noted | arrays // [] | index([$m]) | not)' <<<"$gaps") || return 1
   if [ -n "$y" ]; then
     out=$(mkdir -p "${notes%/*}" 2>/dev/null && { flock -w 30 9 || exit 1
       while IFS= read -r m; do
-        grep -qF -- " · No built-in price for $m: " "$notes" 2>/dev/null \
+        grep -qxF -- "$m" "${notes%/*}/noprice-noted" 2>/dev/null || grep -qF -- " · No built-in price for $m: " "$notes" 2>/dev/null \
           || { { [ -s "$notes" ] || printf '# Plugin problems the Foreman noted (for the conveyor-belt repo)\n\n'
             printf -- '- %s · card - · No built-in price for %s: the belt runs or offers this %s model, and the built-in price table (dashboard_limit.py) has no price for it, so the Board cannot show what it costs · evidence: -\n' \
               "$(clock)" "$m" "$([[ $m == claude-* ]] && echo Claude || echo Codex)"; } >> "$notes"; } 2>/dev/null || continue
+        grep -qxF -- "$m" "${notes%/*}/noprice-noted" 2>/dev/null || { printf '%s\n' "$m" >> "${notes%/*}/noprice-noted"; } 2>/dev/null || continue
         printf '%s\n' "$m"
       done <<<"$y"; } 9>>"${notes%/*}/noprice.lock")
     [ -z "$out" ] || mapfile -t noted <<<"$out"
