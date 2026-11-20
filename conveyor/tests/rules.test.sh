@@ -434,10 +434,10 @@ t_since() {
   # so #2, released first, has waited longer than the older #1.
   on 2026-11-17 control release 2 >/dev/null; on 2026-11-18 control release 1 >/dev/null
   out=$(at 2026-11-19); [ "$(col .queue.order <<<"$out")" = '[[1,"2026-11-18T00:00:00Z"],[2,"2026-11-17T00:00:00Z"]]' ] || fail "released: $out"
-  # A snapshot that listed #2 in Queue, before a hold that came while it ran, does not write its older sight over
-  # the hold (the pack's progress command, which a snapshot runs after it copies the control record, holds it).
+  # A snapshot that listed #2 in Queue, before a hold that came while it ran (the pack's progress command holds it),
+  # does not write its older sight over the hold in moved.json, which each later snapshot dates Held from.
   tuned '.checks = {run: [], progress: "CONVEYOR_NOW=$(date -u -d 2026-11-21 +%s) bash '"$SRC"'/conveyor.sh control hold 2 >/dev/null"}' at 2026-11-20 >/dev/null
-  out=$(at 2026-11-22); [ "$(col .open.held <<<"$out")" = '[[2,"2026-11-21T00:00:00Z"]]' ] || fail "an older sight written over a hold: $out"
+  [ "$(jq -c '."2" | [.col, .at]' "$ST/moved.json")" = '["held","2026-11-21T00:00:00Z"]' ] || fail "an older sight written over a hold: $(cat "$ST/moved.json")"
   # Something besides your hold keeps #2 in Held (a rule): released and held again, it never left Held.
   on 2026-11-23 control rules P3=off >/dev/null; at 2026-11-24 >/dev/null
   on 2026-11-25 control release 2 >/dev/null; on 2026-11-26 control hold 2 >/dev/null
