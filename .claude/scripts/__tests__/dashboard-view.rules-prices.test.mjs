@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { boot, deliver, settle, full, act, panel, pricesP, cases } from './dashboard-view.helpers.mjs';
+import { boot, deliver, next, settle, full, act, panel, pricesP, cases, T0 } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const type = (el, v) => { el.value = v; el.dispatchEvent(new el.ownerDocument.defaultView.Event('input')); };
@@ -126,6 +126,23 @@ test('Rules: Reset to built-in removes the override, and its Undo puts it back',
   act(said(w), 'undo').click();
   await settle();
   assert.deepEqual(posted(w), [['set', 'claude-opus-5-5', '1', '5', '0.1']]);
+});
+
+// Issue 1034: the pack is not an input of the snapshot, so the snapshot kept from before a save is served for a while
+// after it. Bug: the next frame of that old snapshot put the old price back. The saved price stays until a snapshot
+// read at or after the host's answer, which then shows what it holds.
+test('Rules: a price saved stays through frames read before the save, and a frame read after shows the snapshot', async () => {
+  const frame = (readAt) => { const d = full(); Object.assign(d.panels.rules.data, { prices: JSON.parse(JSON.stringify(PRICES)), readAt: new Date(readAt).toISOString() }); return d; };
+  const w = boot({ tab: 'rules' });
+  deliver(w, frame(T0 - 20000));
+  w.reply = { ok: true, status: 200, headers: { get: (k) => (k === 'X-Answered-At' ? String(T0 / 1000) : null) }, text: () => Promise.resolve('conveyor: prices: cleared') };
+  act(rowOf(w, 'claude-opus-5-5'), 'price-reset').click();
+  await settle();
+  assert.equal(cells(rowOf(w, 'claude-opus-5-5'))[4], 'built in');
+  next(w, frame(T0 - 10000));
+  assert.equal(cells(rowOf(w, 'claude-opus-5-5'))[4], 'built in', 'a frame of the snapshot read before the save keeps the saved price');
+  next(w, frame(T0 + 1000));
+  assert.deepEqual(cells(rowOf(w, 'claude-opus-5-5')).slice(0, 3), ['$1', '$5', '$0.1'], 'a snapshot read after the save shows what it holds');
 });
 
 // Bug: a fast mode's price could not be changed or reset: Edit and Reset acted only on the model's own ID. Edit :fast

@@ -126,7 +126,7 @@
   // the snapshot says ({reserved, slots, unavailable}; null: an engine that does not say).
   // drafts: each project's roles picked here and not yet saved (draftOf), as DRAFT_KEY keeps them. Model prices
   // (pricesSection): priceEdit, the row open in Edit as typed; priceAdd, the Add model form as typed; priceFind, the
-  // search typed; priceSaved, the pack's prices as the changes saved here left them, until the next snapshot;
+  // search typed; priceSaved, the pack's prices as the changes saved here left them, until a snapshot read after them (savedShown);
   // priceThis, the model picked for each ID's This is…; priceOpen, the folded groups opened.
   // The Rules panel's index (index()), kept for this page only: ruleSet, the group picked (SETS); ruleFind, the search
   // typed. pinsAll: every pin shown; pinMenu, the pin whose menu is open; dragPin, the place of the pin being dragged.
@@ -412,12 +412,14 @@
         moves(res.ok ? { at: res.at, rec: res.rec } : { error: `${MOVES[action]}: ${S.ctx.refusal(res.said)}` });
         if (!res.ok) { back(res.said, res.at); tell(`Not done: ${S.ctx.refusal(res.said)}${steps.length > 1 ? ` (${i - 1} of ${steps.length} sent)` : ''}`); return false; }
         put({ guessed: false });
-        // A model price saved shows at once (pricesSection), its Undo's too.
-        if (action === 'prices' && repo === S.d.repo) S.priceSaved = { for: S.d.prices, over: applied(pricesShown(), list(args)) };
-        // A standing kind saved shows at once too, until the next snapshot.
+        // A model price saved shows at once (pricesSection), its Undo's too. It stands until a snapshot begun at or
+        // after the answer (savedShown): the pack is not an input of the snapshot, so one kept from before the change
+        // is served for a while after it.
+        if (action === 'prices' && repo === S.d.repo) S.priceSaved = { repo, for: S.d.prices, at: res.at, over: applied(pricesShown(), list(args)) };
+        // A standing kind saved shows at once too, as long.
         if (action === 'standing' && repo === S.d.repo) {
           const [k, o] = list(args);
-          S.standingSaved = { for: S.d.standing, over: list(standingShown()).filter((x) => x !== k).concat(o === 'on' ? [k] : []) };
+          S.standingSaved = { repo, for: S.d.standing, at: res.at, over: list(standingShown()).filter((x) => x !== k).concat(o === 'on' ? [k] : []) };
         }
         // The values the change replaced, kept from before the first change no snapshot has read yet: a snapshot that
         // still holds one did not read it. A setting the record holds at its old value again waits for nothing.
@@ -1714,12 +1716,15 @@
   const byFamily = (a, b) => familyRank(a) - familyRank(b) || newer(a, b);
   const usd = (v) => (num(v) !== null ? `$${+v.toFixed(6)}` : '—');
   const writeOf = (r) => (num(r.cacheWrite) !== null ? r.cacheWrite : num(r.input) !== null ? r.input * 1.25 : null);
-  // The pack's standing kinds as shown: as a change saved here left them, until a new snapshot comes; null from a
-  // snapshot without them.
-  const standingShown = () => (S.standingSaved && S.standingSaved.for === S.d.standing ? S.standingSaved.over
+  // Whether a value saved here ({repo, for, at, over}) still shows: for its project, until a snapshot begun at or after
+  // the host's answer (at); with no answer time or no snapshot time, until the next snapshot (now is not for).
+  const savedShown = (s, now) => !!s && s.repo === S.d.repo && (s.at !== null && S.read !== null ? S.read < s.at : s.for === now);
+  // The pack's standing kinds as shown: as a change saved here left them, until a snapshot read after it comes; null
+  // from a snapshot without them.
+  const standingShown = () => (savedShown(S.standingSaved, S.d.standing) ? S.standingSaved.over
     : Array.isArray(S.d.standing) ? S.d.standing : null);
-  // The pack's prices as shown: as the changes saved here left them, until a new snapshot comes.
-  const pricesShown = () => (S.priceSaved && S.priceSaved.for === S.d.prices ? S.priceSaved.over
+  // The pack's prices as shown: as the changes saved here left them, until a snapshot read after them comes.
+  const pricesShown = () => (savedShown(S.priceSaved, S.d.prices) ? S.priceSaved.over
     : S.d.prices && S.d.prices.overrides && typeof S.d.prices.overrides === 'object' ? S.d.prices.overrides : {});
   // The pack's prices after `prices <a>`, as the engine writes them (conveyor/commands/prices.sh).
   function applied(o, a) {
@@ -2436,10 +2441,11 @@
       draw(id || undefined); return;
     }
     // A part that differs from the one drawn only in when its records were read (readAt, new on every refresh) draws
-    // nothing while no change, turned-away snapshot or moved row waits on that time: drawing it again replaced an open
-    // select (Group by) for the same content (issue 294). It is still the part drawn (S.raw).
+    // nothing while no change, turned-away snapshot, moved row or value saved here (savedShown) waits on that time:
+    // drawing it again replaced an open select (Group by) for the same content (issue 294). It is still the part drawn (S.raw).
     const key = bareOf(d);
-    if (drawn && S.d && S.bare === key && view.repo === S.d.repo && !(S.ctl || S.turned || S.moved.size)) {
+    const saved = S.d && (savedShown(S.standingSaved, S.d.standing) || savedShown(S.priceSaved, S.d.prices));
+    if (drawn && S.d && S.bare === key && view.repo === S.d.repo && !(S.ctl || S.turned || S.moved.size || saved)) {
       S.raw = [d, read, view.repo]; S.d = view; S.read = read; S.ctx = ctx;
       S.idle = d;
       return;
