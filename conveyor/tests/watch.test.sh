@@ -18,7 +18,9 @@ watchstart() {
     '{card:$c,issue:$i,step:$s,time:$t,tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""} * $x' >> "$S/cards.jsonl"; }
   rec c1 1 picked '{"title":"T1"}'; rec c1 1 worktree; rec c1 1 start '{"of":"build"}'
   # Every gh call says so ($STUB/slowed) and waits for as long as $STUB/slow is there: GitHub that does not answer.
-  mkdir -p "$STUB/slowbin"; printf '#!/usr/bin/env bash\n[ ! -e "%s/slow" ] || { : > "%s/slowed"; while [ -e "%s/slow" ]; do sleep 0.1; done; }\nexec "%s/gh" "$@"\n' \
+  # `gh auth token` is not held: it reads the token without the network (ghok, lib/issues.sh), and held, each snapshot
+  # waited out its 20 s timeout.
+  mkdir -p "$STUB/slowbin"; printf '#!/usr/bin/env bash\n[ "$1 $2" = "auth token" ] || [ ! -e "%s/slow" ] || { : > "%s/slowed"; while [ -e "%s/slow" ]; do sleep 0.1; done; }\nexec "%s/gh" "$@"\n' \
     "$STUB" "$STUB" "$STUB" "$STUB" > "$STUB/slowbin/gh"; chmod +x "$STUB/slowbin/gh"
   # No wait here is a number of seconds (a bug: on a busy machine a line that was on its way missed a 4 s window, and
   # a record written 0.5 s after the stream's launch was there before the stream first looked, so it was no change).
@@ -30,14 +32,15 @@ watchstart() {
       wait; wait; echo '{"type":"end"}' >> "$W" ) & pid=$!
   }
   ev() { jq -c "select($1)" "$W" 2>/dev/null | tail -n 1; }
+  # Each look starts one jq at most: the end marker, always the file's last line, is read with no program.
   till() { # <what> <command...>: until the command is true; the end marker there before it is, the case fails
-    local what=$1 e; shift
+    local what=$1 e L=(); shift
     while :; do
-      e=$(ev '.type == "end"'); "$@" && return
-      [ -z "$e" ] || fail "$what did not come before the stream ended: $(tail -c 600 "$W") $(cat "$W.err")"; sleep 0.05
+      L=(); mapfile -t L 2>/dev/null < "$W"; e=; [ ${#L[@]} = 0 ] || e=${L[-1]}; "$@" && return
+      [ "$e" != '{"type":"end"}' ] || fail "$what did not come before the stream ended: $(tail -c 600 "$W") $(cat "$W.err")"; sleep 0.05
     done; }
-  line() { [ -n "$(ev "$1")" ]; }
-  last() { [ "$(jq -c "$1" "$W" 2>/dev/null | tail -n 1)" = "$2" ]; } # <jq filter> <its last output>
+  line() { jq -ne "any(inputs; $1)" "$W" >/dev/null 2>&1; }
+  last() { [ "$(jq -nc "[inputs | $1] | last" "$W" 2>/dev/null)" = "$2" ]; } # <jq filter> <its last output>
   come() { till "$2" line "$1"; } # <jq test> <what>: a line of the stream
 }
 
@@ -48,11 +51,12 @@ watchstart() {
 t_watch() {
   watchstart
   # The snapshot sums its records with cksum (snaprows): while $STUB/snapslow is there, each call waits its seconds, a
-  # time drawn here, so the first snapshot takes at least that long.
+  # time drawn here (0.2 to 0.6 s: the snapshot makes several calls, and each one waits), so the first snapshot takes
+  # at least that long.
   mkdir -p "$STUB/snapbin"
   printf '#!/usr/bin/env bash\n[ ! -s "%s/snapslow" ] || sleep "$(cat "%s/snapslow" 2>/dev/null)" 2>/dev/null\nexec "%s" "$@"\n' "$STUB" "$STUB" "$(command -v cksum)" > "$STUB/snapbin/cksum" # sleep: a stand-in for a slow snapshot read
   chmod +x "$STUB/snapbin/cksum"
-  local x=$((RANDOM % 10 + 5)) slow t0 wall; slow=$((x / 10)).$((x % 10)); echo "$slow" > "$STUB/snapslow"
+  local x=$((RANDOM % 5 + 2)) slow t0 wall; slow=$((x / 10)).$((x % 10)); echo "$slow" > "$STUB/snapslow"
   t0=${EPOCHREALTIME//[!0-9]/}
   stream 90 "$T/$CASE/watch.out" "PATH=$STUB/snapbin:$STUB/slowbin:$PATH" CONVEYOR_WATCH_GITHUB=1
   trap 'kill $pid 2>/dev/null' EXIT
