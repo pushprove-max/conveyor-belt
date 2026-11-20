@@ -22,6 +22,9 @@ cwfree() { kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null; } # the holde
 # there, with no CPU used and no polling, until the case lets it go (ungate) or the case ends (its lock goes with it).
 gate() { local g; exec {g}>"$STUB/$1.gate" && flock "$g" && printf -v "gate_$1" %s "$g"; }
 ungate() { local v=gate_$1 g; g=${!v:-}; [ -z "$g" ] || exec {g}>&-; printf -v "$v" %s ''; }
+# The cases run the real loop: what they check is the loop's pick as live cards stand and take away their .idle marks
+# from their own processes (lib/claim.sh) at a wait. A direct call to the count (lib/run.sh) reads only marks the case
+# wrote, so it cannot show that a card's wait sets them, nor that the pick follows them turn by turn.
 # The loop's shell lets go of the case's gates: a stub under it that kept one open would wait on its own lock for ever.
 capwaitrun() { ( local v g; for v in ${!gate_@}; do g=${!v}; [ -z "$g" ] || exec {g}>&-; done; loop run > "$STUB/run.out" 2>&1 ) & lp=$!; }
 cwwaits() { jq -e '.waits.on' "$T/$CASE/cards/"*-"$1".live >/dev/null 2>&1; } # <issue>: its card waits on another card now
@@ -31,10 +34,6 @@ cwcounts() { loop health | jq -r '"\(.building) \(.waitingCount)"'; }
 # The holder goes before the loop is waited for: a card that waits on it ends only once it is gone, so the loop's stop
 # waited out the holder's 300 s, the case's whole limit (its file's `# timeout:` line).
 capwaitend() { loop control stop >/dev/null; cwfree; wait "$lp" 2>/dev/null; }
-# CPU load from other processes: two busy loops beside the loop, on the case's slot core (slot_mine, where the runner
-# pins it), so the engine gets about a third of it. Started before any gate, so no loop holds a gate's lock.
-cwload() { local i; cwloads=(); for i in 1 2; do ( while :; do :; done ) & cwloads+=("$!"); done; }
-cwunload() { kill "${cwloads[@]}" 2>/dev/null; wait "${cwloads[@]}" 2>/dev/null; cwloads=(); }
 
 # Bug it catches: a card that waited on a same-file card for minutes, using no CPU, still took one of the cap's slots,
 # so one fewer issue was built. With the cap at 1, #15 waits on c6-16, and #17 is picked meanwhile. Once the wait ends
@@ -89,6 +88,9 @@ t_capwaitmany() {
 # Bug it catches: a card that runs its own checks and tests while it waits (a GO with batches on) uses CPU and test
 # slots, so it counts as running then. #15 waits on c6-16 and runs its tests in the wait: #17 is not picked while
 # they run, and is picked once they have passed and #15 only waits again.
+# It runs the real loop: the bug is in when a card's claim wait (lib/claim.sh) takes its .idle mark away for its tests
+# and stands it again after, while the loop's count (lib/run.sh) is read in another process. A direct call to the count
+# reads only the marks the case wrote itself, so it cannot show that the card's own wait sets them at those times.
 t_capwaittests() {
   capwaitsetup "$(jq -cs . <(issue 15 2026-01-01) <(issue 16 2026-01-02) <(issue 17 2026-01-03))"; tune '.landBatch = 8'
   echo 'case $PWD in *-15) echo fifteen >> a.txt ;; *) echo seventeen > f17.txt ;; esac' > "$STUB/build"
@@ -96,11 +98,10 @@ t_capwaittests() {
   # its live record does not: the test run writes over it as it starts, which on a busy machine came before this read.
   echo 'case $PWD in *-15) [ -e "$STUB/intests15" ] || { ! jq -e ".held == false" "$PWD.claim" >/dev/null 2>&1 || : > "$STUB/inwait15"; : > "$STUB/intests15"; flock "$STUB/go15.gate" true; } ;; esac' >> "$STUB/test-cmd"
   # Under CPU load (the 1.4.0 release run, a load of 36), #15 reached its tests before it waited and the case failed:
-  # the holder's claim, not the cards' speed, makes #15 wait, so the load changes nothing. It ends once #15 is in its
-  # tests, the window that race was in.
-  cwload; gate go15; capwaitrun
+  # the holder's claim, not the cards' speed, makes #15 wait, so a load changes nothing, and the case adds none: the
+  # inwait15 check below fails whatever the cause that sends #15 to its tests before its wait.
+  gate go15; capwaitrun
   wait_until '[ -e "$STUB/intests15" ]' 'cat "$STUB/run.out"' || fail "#15 did not run its tests"
-  cwunload
   [ -e "$STUB/inwait15" ] || fail "#15 ran its tests before it waited: the case proves nothing"
   turns 3 # each would have picked #17, were #15 left out of the count while its tests ran
   cwpicked 17 && fail "#17 was picked while #15 ran its tests in its wait"
