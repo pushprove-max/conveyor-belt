@@ -192,17 +192,15 @@ gonecard() {
     | (. + {step:"picked"}), (. + {step:"worktree",pid:$p,started:$s}), (. + {step:"start",of:$o})' >> "$ST/cards.jsonl"
 }
 
-# switchrun [<sed script>]: N, a commit after $B, installed: its redbrief() (lib/card.sh, called as the land step
+# switchrun: N, a commit after $B, installed: its redbrief() (lib/card.sh, called as the land step
 # begins) writes the commit the card runs to $STUB/newcode, the card's settings file to $STUB/settings, and to
 # $STUB/prompt card()'s sprompt (made before the switch, as the copies other functions are handed are) as session()
-# and review() send it (newtexts(), lib/session.sh); its card rules (rules/card-core.md) end with a line of its own; <sed script>, run on
-# its lib/card.sh, changes it more. #5 then started on $A, the pin moved to N while #5 is in its test step, and #5 let
-# go on to its end.
+# and review() send it (newtexts(), lib/session.sh); its card rules (rules/card-core.md) end with a line of its own.
+# #5 then started on $A, the pin moved to N while #5 is in its test step, and #5 let go on to its end.
 switchrun() {
   adoptsetup "[$(issue 5 2026-01-01)]"; linkset '{"a.txt": ["a.test.sh"], "f5.txt": ["a.test.sh"]}' # #5's test step runs the stub
   printf '%s\n' 'eval "old$(declare -f redbrief)"; redbrief() { echo "$RAN" >> "$STUB/newcode"; cp "$wt.settings" "$STUB/settings"; local p=$sprompt; newtexts p; printf %s "$p" > "$STUB/prompt"; oldredbrief "$@"; }' >> "$D/conveyor/lib/card.sh"
   echo 'A rule of commit N.' >> "$D/conveyor/rules/card-core.md"
-  [ -z "${1:-}" ] || sed -i "$1" "$D/conveyor/lib/card.sh"
   git -C "$D" commit -qam N && N=$(git -C "$D" rev-parse HEAD) && git -C "$D" push -q origin main \
     && bash "$D/conveyor/conveyor.sh" install "$N" >/dev/null || fail "the new commit was not installed"
   echo 'echo two >> f5.txt' > "$STUB/build"
@@ -241,22 +239,34 @@ t_switchcode() {
 # Bug (#449): a card switches to new code that reads another form of step files than its old code saved, or does not
 # say why it stays on its old code.
 t_switchkeep() {
-  switchrun "s/^STEPFILES=.*/STEPFILES=2/"
-  grep -qF "conveyor: card $(card 5): Conveyor took commit $N; the card goes on with its old code, commit $A: the new code cannot read the step files that the old code saved (form 1; the new code reads form 2)" "$STUB/serve.out" \
-    || fail "#5 did not say why it kept its old code: $(cat "$STUB/serve.out")"
-  [ ! -e "$STUB/newcode" ] || fail "#5 ran $N's code: $(cat "$STUB/newcode")"
-  kill $pid; wait $pid 2>/dev/null; return 0
+  local out; out=$(switchtry "s/^STEPFILES=.*/STEPFILES=2/")
+  grep -qxF "conveyor: card c-5: Conveyor took commit new2; the card goes on with its old code, commit old1: the new code cannot read the step files that the old code saved (form 1; the new code reads form 2)" <<<"$out" \
+    || fail "c-5 did not say why it kept its old code: $out"
+  grep -qx 'none of the new code loaded' <<<"$out" || fail "c-5 loaded new2's code: $out"
+}
+
+# switchtry <sed script>: what switchcode() (lib/card.sh) says, called from a function named card() as began() is, in
+# a shell that loaded this engine as `serve` does (serveeng, serve.test.sh), for card c-5 at its land step; it runs
+# commit old1 (this engine folder, as an install's own), and loop.json says the loop runs commit new2 from a copy of
+# it, its lib/card.sh changed by <sed script> and given a function newmark() of its own. card()'s texts (issue..vrule)
+# are set, so new code that changes nothing the card runs in is switched to. Then whether newmark() was loaded. The
+# switch itself, in a card the loop runs: t_switchcode.
+switchtry() {
+  local new=$T/$CASE/new
+  setup '[]'; mkdir -p "$new" && cp -a "$SRC/." "$new/" && sed -i "$1" "$new/lib/card.sh" && echo 'newmark() { :; }' >> "$new/lib/card.sh" \
+    || fail "no copy of the engine to switch to"
+  serveeng "$SRC" "OWN=1 RAN=old1; jq -n --argjson p \$\$ --arg d '$new' '{pid: \$p, commit: \"new2\", checkout: \$d}' > \"\$SAYS\" || exit 1
+    issue='{\"number\":5,\"title\":\"five\",\"body\":\"\"}' hdr=h rules=r vrule=on; card() { switchcode c-5 land; }; card; declare -F newmark >/dev/null || echo 'none of the new code loaded'" 2>&1
 }
 
 # Bug (#449 review): a card switches while it runs in a function the new code changes, so the rest of that function
 # runs its old body beside the new code's other functions (a fix inside card() never reaches it); or its log does not
 # say why it stays on its old code.
 t_switchbusy() {
-  switchrun '/^card() {/a :'
-  grep -qF "conveyor: card $(card 5): Conveyor took commit $N; the card goes on with its old code, commit $A: the new code changes card(), which the card is running in" "$STUB/serve.out" \
-    || fail "#5 did not say why it kept its old code: $(cat "$STUB/serve.out")"
-  [ ! -e "$STUB/newcode" ] || fail "#5 ran $N's code: $(cat "$STUB/newcode")"
-  kill $pid; wait $pid 2>/dev/null; return 0
+  local out; out=$(switchtry '/^card() {/a :')
+  grep -qxF "conveyor: card c-5: Conveyor took commit new2; the card goes on with its old code, commit old1: the new code changes card(), which the card is running in" <<<"$out" \
+    || fail "c-5 did not say why it kept its old code: $out"
+  grep -qx 'none of the new code loaded' <<<"$out" || fail "c-5 loaded new2's code: $out"
 }
 
 # The owner, 2026-11-14: a power cut left five cards open for good, each listed stuck, the restarted loop not picking
@@ -331,6 +341,8 @@ EOF
 t_killedtest() {
   local lp c tp r
   setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"; echo 'echo two >> a.txt' > "$STUB/build"
+  # A turn a second, not the pack's 30 s: `turns 2` below waits out two of the loop's waits with the card running.
+  tune '.tunables.poll = 1'
   echo 'git add -A && git diff --cached --binary --no-renames > "$PWD.bpatch" && git rev-parse HEAD > "$PWD.lent" && git reset -q --hard && echo eight > m.txt && git add -A
     echo $$ > "$STUB/testpid"; exec sleep 600' > "$STUB/test-cmd" # sleep: a test run under way when the card is killed
   watchturns; ( loop run > "$STUB/run.out" 2>&1 ) & lp=$!
