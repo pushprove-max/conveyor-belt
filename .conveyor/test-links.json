@@ -492,9 +492,15 @@
   "conveyor/tests/visible.test.sh": [
     "conveyor/tests/visiblebefore.test.sh"
   ],
+  "conveyor/tests/review.test.sh": [
+    "conveyor/tests/fail.test.sh",
+    "conveyor/tests/judge.test.sh",
+    "conveyor/tests/reviewback.test.sh"
+  ],
   "conveyor/tests/port.test.sh": [
     "conveyor/tests/kept.test.sh",
     "conveyor/tests/rerunkept.test.sh",
+    "conveyor/tests/reviewback.test.sh",
     "conveyor/tests/visible.test.sh",
     "conveyor/tests/visibleinherit.test.sh"
   ],

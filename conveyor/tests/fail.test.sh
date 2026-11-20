@@ -123,16 +123,18 @@ t_contra() {
 }
 
 # Bugs: a review that says the same verdict twice (once mid-way, once at the end, its findings repeated) blocks as
-# having no clear verdict; a finding the review repeats word for word is filed as two follow-ups.
+# having no clear verdict; a finding the review repeats word for word is filed as two follow-ups. Such a review as
+# the card's third (the last), with no card run (afterrun, review.test.sh): it lands, and card() files its findings
+# with followups(), as called here.
 t_repeat() {
-  setup "[$(issue 8 2026-02-01)]"
+  setup "[$(issue 8 2026-02-01)]"; fx_wt 'echo two >> a.txt' b.txt base
   F='[P2] a.txt:1 wrong word. Proof: a.txt line 2 reads "two"'
-  for i in 1 2 3; do f=$(moved "${i/3/}" "$F"); printf '%s\n' "$f" 'VERDICT: NO-GO' "  $f" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.$i"; done
-  loop run 1 >/dev/null
-  [ "$(st 'select(.issue == 8 and .step == "review") | "\(.result) \(.counts.P2)"' | tr '\n' ,)" = 'NO-GO 1,NO-GO 1,NO-GO 1,' ] \
-    || fail "a review that said NO-GO twice was not a NO-GO, or its repeated finding counted twice: $(st 'select(.issue == 8 and .step == "review")')"
+  printf '%s\n' "$F" 'VERDICT: NO-GO' "  $F" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
+  afterrun "$(issue 8 2026-02-01)" 'pass=3' 'counts "$wt.review" | jq .P2 > "$T/$CASE/p2"; [ -n "$isfu" ] || followups c7 "$issue" "$wt.review" > "$T/$CASE/ups"'
+  [ "$AFTER" = '{"res":"NO-GO","after":"last","last":"1","stop":"max-reviews","hard":"","last0":"","isfu":"","priv":"","why":""}' ] && [ "$(cat "$T/$CASE/p2")" = 1 ] \
+    || fail "a last review that said NO-GO twice was not a NO-GO that lands with follow-ups, or its repeated finding counted twice: $AFTER P2 $(cat "$T/$CASE/p2")"
   [ "$(jq -s 'length' "$STUB/filed")" = 1 ] && [ "$(jq -r .title "$STUB/filed")" = "$F" ] \
-    && [ "$(st 'select(.issue == 8 and .step == "landed") | .followups | tojson')" = '[100101]' ] || fail "a repeated finding was not filed once: $(cat "$STUB/filed")"
+    && [ "$(cat "$T/$CASE/ups")" = '[100101]' ] || fail "a repeated finding was not filed once: $(cat "$STUB/filed")"
 }
 
 # The landing cases call land() (lib/claim.sh), as card() calls it once a card passed its review and tests, on a card

@@ -9,6 +9,39 @@
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
+# What card() does after a review (afterreview(), lib/card.sh) on fixture state, with no card run: card c7's staged
+# change in $FXWT (fx_wt), its review in $FXWT.review, <issue json> as card() holds it, and the state card() holds
+# after its first review (pass 1: no carried rounds, rebase, test fix, lint fix, mode or privacy fix round) unless
+# <before> changes it (pass=3, a fix round: told). <after> runs once it has decided, in the same shell. The outcome
+# card() acts on is $AFTER: {res, after, last, stop, hard, last0, isfu, priv, why}; last is the one card() reads to
+# land a last review with its follow-ups filed or declined. AFTERREVIEW, the call, also runs on the
+# card that takes up kept work, after resumeplan (resumed, port.test.sh). Used by the cases of reviewback, fail and
+# judge too (the runner loads every case file into one shell; .conveyor/test-links.json runs them when this file
+# changes).
+AFTERREVIEW='res=$(verdict "$wt.review"); afterreview
+  jq -cn --arg res "$res" --arg after "$after" --arg last "$last" --arg stop "$stop" --arg hard "$hard" --arg last0 "$last0" --arg isfu "$isfu" --arg priv "$priv" --arg why "$why" \
+    "{\$res, \$after, \$last, \$stop, \$hard, \$last0, \$isfu, \$priv, \$why}" > "$T/$CASE/after.json" || exit 3'
+# The state card() holds at its first review that AFTERREVIEW reads, apart from what resumeplan sets (mode, rounds,
+# fin, finend).
+FIRSTPASS='pass=1 finrev="" earlier="" rebased="" tfix="" lfix="" privfix="" isfu="" why=""'
+afterrun() { # <issue json> [<before>] [<after>]
+  rm -f "$T/$CASE/after.json"
+  ISSUE=$1 fx_in 'wt=$FXWT issue=$ISSUE mode="" rounds=0 fin="" finend="{}"; '"$FIRSTPASS"'
+    '"${2:-}"'
+    '"$AFTERREVIEW"'
+    '"${3:-}"
+  AFTER=$(cat "$T/$CASE/after.json" 2>/dev/null)
+  [ "$RC" = 0 ] && [ -n "$AFTER" ] || fail "afterreview could not be called, or the commands around it failed: $(cat "$T/$CASE/run.out")"
+}
+# Fix round <round> of card c7 ($FXWT) as card() records it, in afterrun's <before>: the findings of its review with
+# their ids (numbered()), its fix <change> made and staged, and the round's findings and diff kept (rounded()), which
+# the review after it reads (repeats()).
+told() { # <round> <change>
+  local ids old w=$FXWT
+  ids=$(numbered "$w") && old=$(git -C "$w" write-tree) && (cd "$w" && eval "$2") && git -C "$w" add -A && mkdir -p "$w.rounds" \
+    && git -C "$w" diff "$old" "$(git -C "$w" write-tree)" > "$w.rounds/$1.diff" && rounded "$w" "$1" "$ids"
+}
+
 # Bugs: a GO card that never reaches main or lands with no record line; cached tokens counted as fresh; a huge issue
 # body cut from the brief; the brief carrying another area's rulings or none.
 t_land() {
@@ -36,6 +69,7 @@ t_land() {
 t_nogo() {
   setup "[$(issue 7 2026-01-01 area:billing)]"; echo "$NOGO" > "$STUB/review.1"; moved 2 "$NOGO" > "$STUB/review.2"; echo "$GO" > "$STUB/review.3"
   { printf 'a%.0s' {1..1500}; echo; cat "$STUB/review.1"; } > "$STUB/review.0"; mv "$STUB/review.0" "$STUB/review.1"
+  # loop: each review's line (its tail, counts, excerpts and reason) is written inline in card(), and the fix sessions' flags are session()'s: afterreview gives neither
   loop run >/dev/null || fail "run exited non-zero"
   # A NO-GO keeps its findings whole in its line's tail (the Board's output of that step): a long line before them in
   # the review does not cut them off, as the reason's length cap would.
@@ -88,15 +122,14 @@ t_proven() {
   [ "$RC" = 0 ] && [ "$(tr '\n' ' ' < "$T/$CASE/run.out")" = 'NO-GO 1 [100101] ' ] \
     || fail "a proven finding beside a GO did not make it a NO-GO, or the UNPROVEN line was counted or filed: $(cat "$T/$CASE/run.out")"
   [ "$(jq -r .title "$STUB/filed")" = "$F" ] || fail "follow-ups filed after the last NO-GO are not the proven finding alone: $(cat "$STUB/filed")"
-  # The fix session is given the proven finding, with its id, under the same-mistake instruction. A loop run
-  # (that review, then a GO): the fix brief is put together inline in card() (card.sh) and given to session(), which
-  # no engine function returns alone.
-  cp "$STUB/r.review" "$STUB/review.1"; echo "$GO" > "$STUB/review.2"; rm -f "$STUB/filed"
-  loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
-  [ "$(wc -l < "$STUB/sessions")" = 2 ] || fail "not one build and one fix session: $(cat "$STUB/sessions")"
-  grep -qx '# Reviewer findings: fix these findings, and every other place in this change that makes the same mistake; nothing else' "$STUB/brief" \
-    && grep -qxF "E1 $F" "$STUB/brief" \
-    || fail "the fix session's brief lacks the same-mistake instruction or the proven finding: $(grep -n -e '^# Reviewer findings' -e 'wrong word' "$STUB/brief")"
+  # That review as the card's first goes to a fix round, whose brief (fixprompt() of the findings with their ids,
+  # fixlines(), as card() gives it to session()) has the proven finding, with its id, under the same-mistake instruction.
+  fx_wt 'echo two >> a.txt' b.txt base; cp "$STUB/r.review" "$FXWT.review"
+  afterrun "$(jq -c '.[0]' "$STUB/issues.json")" '' 'fixprompt "" "$(fixlines "$wt" "$(numbered "$wt")")" > "$T/$CASE/fix"'
+  [ "$AFTER" = '{"res":"NO-GO","after":"fix","last":"","stop":"","hard":"","last0":"","isfu":"","priv":"","why":""}' ] || fail "a proven finding beside a GO on the first review did not go to a fix round: $AFTER"
+  grep -qx '# Reviewer findings: fix these findings, and every other place in this change that makes the same mistake; nothing else' "$T/$CASE/fix" \
+    && grep -qxF "E1 $F" "$T/$CASE/fix" \
+    || fail "the fix session's brief lacks the same-mistake instruction or the proven finding: $(grep -n -e '^# Reviewer findings' -e 'wrong word' "$T/$CASE/fix")"
 }
 
 # Bug (#1020): a NO-GO with no finding, only an UNPROVEN line, blocked with "the engine could not give the review's
@@ -216,37 +249,32 @@ t_privfix() {
   [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = "[P0] a.txt:3 flags $HX/bench
 ---" ] || fail "the privacy finding on the card's own line is not found as one, or one on a line the card did not add is: $(cat "$T/$CASE/run.out")"
 }
-# Bug: card() does not join privown() to the fix round: a last-review privacy hit on a line the card added is filed as
-# a follow-up (landing the hit on main), or its fix round is not given, or the hit lands. A loop run: the choice of one
-# more fix round is made inline in card() after its last review, which no engine function exposes alone. The build stub
-# knows its fix session by the file its first session writes; it drops the line only when the fix brief names the hit.
+# Bug: afterreview() does not join privown() to the fix round: a last-review privacy hit on a line the card added is
+# filed as a follow-up (landing the hit on main) or blocks the card as a last P0, or its fix round is not given, or
+# that round is not told the hit. The third review (the last) of a card whose change adds the line.
 t_privfixrun() {
-  setup "[$(issue 7 2026-01-01)]"; export HX
-  echo 'if [ -e "$STUB/built" ]; then echo fix >> a.txt; ! grep -qF "$HX/bench" "$STUB/brief" || { grep -vF "$HX/bench" a.txt > a.new; mv a.new a.txt; }
-    else : > "$STUB/built"; printf "two\ncd %s/bench\n" "$HX" >> a.txt; fi' > "$STUB/build"
-  for i in 1 2; do moved $i "$NOGO" > "$STUB/review.$i"; done; echo "$GO" > "$STUB/review.4"
-  printf '%s\n' "[P0] a.txt:3 flags $HX/bench" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.3"
-  loop run >/dev/null || fail "run exited non-zero"
-  [ "$(st 'select(.step == "review") | .result' | tr '\n' ' ')" = "NO-GO NO-GO NO-GO GO " ] && [ ! -e "$STUB/filed" ] \
-    || fail "the privacy finding on the card's own line did not go to a fix round: $(st 'select(.step == "review") | .result' | tr '\n' ' ') $(cat "$STUB/filed" 2>&1)"
-  [ -n "$(st 'select(.step == "landed") | .sha')" ] && ! grep -qF "$HX" "$R/a.txt" && grep -qx fix "$R/a.txt" \
-    || fail "the card did not land the corrected change only: $(cat "$R/a.txt")"
+  setup "[$(issue 7 2026-01-01)]"; fx_wt "printf 'two\ncd %s/bench\n' '$HX' >> a.txt" b.txt base
+  printf '%s\n' "[P0] a.txt:3 flags $HX/bench" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
+  afterrun "$(issue 7 2026-01-01)" 'pass=3' 'fixlines "$wt" "$(numbered "$wt")" > "$T/$CASE/fix"'
+  [ "$AFTER" = "$(jq -cn --arg p "[P0] a.txt:3 flags $HX/bench" '{res: "NO-GO", after: "fix", last: "", stop: "", hard: "", last0: "", isfu: "", priv: $p, why: ""}')" ] \
+    || fail "the privacy finding on the card's own line on its last review did not go to a fix round: $AFTER"
+  grep -qxF "E1 [P0] a.txt:3 flags $HX/bench" "$T/$CASE/fix" || fail "the fix round is not told the privacy finding: $(cat "$T/$CASE/fix")"
 }
 
 # Bug: a follow-up chain goes past the cap: a card whose issue is a follow-up at the cap (MAX_DEPTH, 2) files another
 # level on its last NO-GO, or its leftover finding is in no declined list, or its reason does not name the cap.
-# Its last NO-GO is a P2 back after its one fix round (card.sh: the last review, as a third NO-GO is), in two reviews.
+# Its last NO-GO is a P2 back after its one fix round (afterreview(): the last review, as a third NO-GO is), in two
+# reviews; card() declines the findings of a card at the cap (isfu) with decline(), as called here.
 t_deep() {
   setup "[$(issue 7 2026-01-01 conveyor-followup bug P1 | jq -c '.body = "Follow-up to #5.\n\nFollow-up depth: 2"')]"
   # The second review names a.txt:12, where the fix's one appended line moves a.txt:11 (rounded()), so it is the same
   # finding back; its text differs from the first's, so the declined one is known to come from the last review.
-  for i in 1 2; do printf '%s\n' "[P2] a.txt:1$i wrong word" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.$i"; done; provenbug
-  mkdir -p "$ST"; landed 5 '[7]' > "$ST/cards.jsonl"
-  # A loop run: the choice to decline rather than file at the cap is made inline in card() (card.sh, after its last
-  # review), which no engine function exposes alone; fudepth() and decline() are checked directly in the cases below.
-  loop run >/dev/null || fail "run exited non-zero"
-  [ "$(st 'select(.issue == 7 and .step == "landed") | [.leftover, .followups] | tojson')" = '[true,[]]' ] && [ ! -e "$STUB/filed" ] \
-    || fail "a depth-2 card did not land, or filed a follow-up: $(st 'select(.issue == 7 and (.step | IN("landed", "blocked")))')"
+  fx_wt 'echo two >> a.txt' b.txt base
+  for i in 1 2; do printf '%s\n' "[P2] a.txt:1$i wrong word" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.$i"; done; cp "$STUB/review.1" "$FXWT.review"
+  afterrun "$(jq -c '.[0]' "$STUB/issues.json")" 'told 1 "echo two >> a.txt" && cp "$STUB/review.2" "$wt.review" && pass=2' \
+    '[ -z "$isfu" ] || leftovers "$wt.review" | decline c7 7 "$FUCAP"'
+  [ "$AFTER" = '{"res":"NO-GO","after":"last","last":"1","stop":"repeat","hard":"","last0":"","isfu":"1","priv":"","why":""}' ] \
+    || fail "a depth-2 card's last review did not land with its findings declined, not filed: $AFTER"
   [ "$(jq -c '[.issue, .finding, .by, .why]' "$ST/declined.jsonl")" = '[7,"[P2] a.txt:12 wrong word","code","its issue is a follow-up at the depth cap of 2, so no deeper follow-up is filed"]' ] \
     || fail "the depth-2 card's leftover finding is not in the declined list once, with who and why: $(cat "$ST/declined.jsonl" 2>&1)"
 }
@@ -286,6 +314,7 @@ t_declinefailrun() {
   setup "[$(issue 7 2026-01-01 conveyor-followup bug P1 | jq -c '.body = "Follow-up depth: 2"')]"; provenbug
   for i in 1 2; do printf '%s\n' '[P2] a.txt:1 wrong word' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.$i"; done
   mkdir -p "$ST/declined.jsonl"
+  # loop: the order of the landing, decline() and the block that keeps the review is card()'s own, after afterreview
   loop run >/dev/null 2>&1 || fail "run exited non-zero"
   [ "$(st 'select(.step | IN("landed", "blocked")) | .step' | tr '\n' ' ')" = 'landed blocked ' ] \
     && st 'select(.step == "blocked") | .reason' | grep -q 'could not write its leftover findings to the declined list' || fail "a card whose findings could not be declined did not end landed, then blocked saying so: $(st 'select(.step | IN("landed", "blocked"))')"

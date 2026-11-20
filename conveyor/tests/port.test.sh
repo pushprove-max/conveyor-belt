@@ -277,7 +277,7 @@ resumesetup() { # <issue>: a fresh main with that one issue; YES, a review's vis
 # no section naming a change, so none is held to one: heldto is empty). Its outcome, as card() acts on it, in
 # $RESUMED: {rc, err, mode, note, from, fin, finend, pro, rounds, staged (the worktree's staged files), beside (the
 # files beside the worktree, by their ending)}. <commands> run after it, in its shell (wt is that worktree).
-# Used by the resume cases of kept, rerunkept, visible and visibleinherit too (the runner loads every case
+# Used by the resume cases of kept, rerunkept, reviewback, visible and visibleinherit too (the runner loads every case
 # file into one shell; .conveyor/test-links.json runs them when this file changes).
 resumed() {
   # FXWT, a fix card's worktree that fx_in reads, names none here.

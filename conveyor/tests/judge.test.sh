@@ -138,22 +138,26 @@ t_ste80pin() {
 }
 
 # Bugs: an accepted finding causes no fix; the fix session is told the findings the judge declined too; a finding
-# declined earlier on the issue is not given to the next judge.
+# declined earlier on the issue is not given to the next judge. Card c7's two reviews, each judged as card() judges
+# it (judged(), then minor()) and then decided (afterrun, review.test.sh), with no card run: the first goes to a fix
+# round, told its findings with their ids (fixlines()); the second, its one finding declined, lands with none filed.
 t_judgeaccept() {
-  judging "[$(issue 7 2026-01-01)]"
-  printf '%s\n' '[P1] a.txt:1 wrong word' '[P2] a.txt:2 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
+  local j='judged c7 7 "$wt" "body of 7" "{}" > "$T/$CASE/judged.$pass" && minor "$wt" && counts "$wt.review" > "$T/$CASE/counts.$pass"'
+  judging "[$(issue 7 2026-01-01)]"; fx_wt 'echo two >> a.txt' c.txt base
+  printf '%s\n' '[P1] a.txt:1 wrong word' '[P2] a.txt:2 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
   printf '%s\n' '[P1] a.txt:12 another word' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
   printf '%s\n' 'F1 ACCEPT: the word is wrong for every reader. Cost to every card: one more test run' 'F2 DECLINE: a matter of taste' > "$STUB/judge.1"
   echo 'F1 DECLINE: no such line' > "$STUB/judge.2"
-  loop run >/dev/null || fail "run exited non-zero"
-  [ "$(rev 7 .result | tr '\n' ' ')" = "NO-GO GO " ] && [ "$(wc -l < "$STUB/sessions")" = 2 ] || fail "an accepted finding did not send the card to one fix: $(rev 7 .result | tr '\n' ' ')"
-  grep -qxF 'E1 [P1] a.txt:1 wrong word' "$STUB/brief" && ! grep -q 'a nit' "$STUB/brief" || fail "the fix prompt does not hold the accepted finding alone: $(grep 'a.txt:' "$STUB/brief")"
-  [ "$(rev 7 '.judge.accepted[0] | [.reason, .cost] | join(" | ")' | head -n 1)" = "the word is wrong for every reader | one more test run" ] && [ "$(rev 7 '.counts | tojson' | head -n 1)" = '{"P0":0,"P1":1,"P2":0,"P3":0}' ] \
-    || fail "the accepted finding's reason and cost are not recorded, or the declined one is counted: $(rev 7 '.judge | tojson' | head -n 1)"
+  afterrun "$(issue 7 2026-01-01)" "$j" 'fixlines "$wt" "$(numbered "$wt")" > "$T/$CASE/fix"'
+  [ "$(jq -c '[.res, .after, .last]' <<<"$AFTER")" = '["NO-GO","fix",""]' ] || fail "an accepted finding did not send the card to a fix round: $AFTER"
+  grep -qxF 'E1 [P1] a.txt:1 wrong word' "$T/$CASE/fix" && ! grep -q 'a nit' "$T/$CASE/fix" || fail "the fix prompt does not hold the accepted finding alone: $(grep 'a.txt:' "$T/$CASE/fix")"
+  [ "$(jq -r '.judge.accepted[0] | [.reason, .cost] | join(" | ")' "$T/$CASE/judged.1")" = "the word is wrong for every reader | one more test run" ] && [ "$(jq -c . "$T/$CASE/counts.1")" = '{"P0":0,"P1":1,"P2":0,"P3":0}' ] \
+    || fail "the accepted finding's reason and cost are not recorded, or the declined one is counted: $(cat "$T/$CASE/judged.1" "$T/$CASE/counts.1")"
+  cp "$STUB/review.2" "$FXWT.review"; afterrun "$(issue 7 2026-01-01)" "pass=2; $j"
+  [ "$(jq -c '[.res, .after, .last]' <<<"$AFTER")" = '["GO","go",""]' ] || fail "a review whose one finding the judge declined did not land the card with nothing filed: $AFTER"
   grep -qxF -- '- [P2] a.txt:2 a nit (declined: a matter of taste)' "$STUB/judge-asked" || fail "the second judge was not given the finding declined before on this issue"
   [ "$(jq -r '"\(.by): \(.finding)"' "$ST/declined.jsonl" | tr '\n' ,)" = 'judge: [P2] a.txt:2 a nit,judge: [P1] a.txt:12 another word,' ] \
     || fail "the declined list does not hold the declined findings alone, each once: $(cat "$ST/declined.jsonl" 2>&1)"
-  [ -n "$(st 'select(.step == "landed") | .sha')" ] && [ ! -e "$STUB/filed" ] || fail "the card did not land, or a declined finding was filed as a follow-up"
 }
 
 # Bugs: a line the reviewer itself starts with `DECLINED:` is taken as a finding the judge declined: it counts for
