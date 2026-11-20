@@ -172,6 +172,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local repaired='' lane # repaired: the repair lane passed its test step (repairlane()), saying how; lane: its exit
   local ins rr # ins, rr: the review's instructions, and fix when it reviews the fix alone (rereview())
   local kw='' # kw: keptway()'s answer for a kept patch
+  local ph pf pb # ph, pf: the hash and the files of the change's lint policy diff (lintpolicy()); pb: the body kept by the card it resumes
   local shared sb # shared: this test step runs its shared test files again (sharedtests()); sb: the commit its last tests ran on
   # shellcheck disable=SC2034 # SEATCARD is read by seat() in lib/control.sh
   local SEATCARD=$n # every step of this card, its split check too, runs on the seats the control record keeps for its issue (seat(), lib/control.sh)
@@ -575,12 +576,22 @@ card() { # <card> <issue> [<branch> <tip>]
     # saying nothing visible changes is no yes: a visible change stops as it would with no section. With the rule
     # "visible changes need the owner's yes" off, none of this holds a card.
     # A card that stops here keeps the issue body this review read (.body; keptway(): its retry lands only on it).
-    yesfrom=''
+    # A change of lint policy (lintpolicy(), lib/lint.sh) needs the owner's yes too, with the rule Lint check on,
+    # whatever the rule on visible changes says. The card that stops for it keeps the hash of its policy diff in its
+    # .body (policy), and the yes covers that diff only (lintyes()): an approval line after that stop. A card that
+    # stops for a visible change as well stops once, its reason naming the policy files (pf) too.
+    yesfrom='' ph='' pf=''
+    if lintrule; then
+      { packget lint pf && pf=$(lintpolicy "$wt" "$(git -C "$wt" rev-parse HEAD)" "$pf"); } || { block "$c" "$n" "$wt" "lint: the engine could not read the lint policy files that the change changes, so nothing landed"; return; }
+      ph=${pf%%$'\n'*}; pf=$(tail -n +2 <<<"$pf" | jq -Rrs 'split("\n") | map(select(. != "")) | join(", ")')
+      pb=$fromk/$from.body; [ -n "$from" ] && [ -e "$pb" ] || pb=$CARDS/$from.body
+      [ -z "$pf" ] || [ -z "$from" ] || ! lintyes "$issue" "$pb" "$ph" || { echo "conveyor: card $c: its lint policy change is the one $OWNER approved"; pf=''; }
+    fi
     if [ -n "$heldto" ] && git -C "$wt" diff --cached --no-renames --name-only | productpaths; then
       case $vis in
         matches) echo "conveyor: card $c: what it shows matches the change $OWNER approved before the build" ;;
-        "differs: "*) printf '%s\n' "$nyes" > "$wt.approvals"; jq -c '{body}' <<<"$issue" > "$wt.body"; block "$c" "$n" "$wt" "${YES}it differs from the change approved before the build: ${vis#differs: }" post; return ;;
-        *) printf '%s\n' "$nyes" > "$wt.approvals"; jq -c '{body}' <<<"$issue" > "$wt.body"; block "$c" "$n" "$wt" "${YES}the review did not say whether it matches the change approved before the build" post; return ;;
+        "differs: "*) printf '%s\n' "$nyes" > "$wt.approvals"; jq -c --arg p "$ph" '{body} + (if $p == "" then {} else {policy: $p} end)' <<<"$issue" > "$wt.body"; block "$c" "$n" "$wt" "${YES}it differs from the change approved before the build: ${vis#differs: }${pf:+; it also changes lint policy: $pf}" post; return ;;
+        *) printf '%s\n' "$nyes" > "$wt.approvals"; jq -c --arg p "$ph" '{body} + (if $p == "" then {} else {policy: $p} end)' <<<"$issue" > "$wt.body"; block "$c" "$n" "$wt" "${YES}the review did not say whether it matches the change approved before the build${pf:+; it also changes lint policy: $pf}" post; return ;;
       esac
     elif [ "$vrule" = on ] && [ -z "$heldto" ] && [ "$vis" != no ] && git -C "$wt" diff --cached --no-renames --name-only | productpaths \
       && { [ "$nyes" = 0 ] || { [ "$seen" = nothing ] && [ "$nyes" -le "$ybase" ]; }; }; then
@@ -593,9 +604,10 @@ card() { # <card> <issue> [<branch> <tip>]
           *) more=" (the review did not say whether it is part of the yes of #$old)" ;;
         esac
       fi
-      [ -n "$yesfrom" ] || { [ "$seen" != nothing ] || printf '%s\n' "$nyes" > "$wt.approvals"; jq -c '{body}' <<<"$issue" > "$wt.body"; block "$c" "$n" "$wt" "$YES${vis#yes: }$more" post; return; }
+      [ -n "$yesfrom" ] || { [ "$seen" != nothing ] || printf '%s\n' "$nyes" > "$wt.approvals"; jq -c --arg p "$ph" '{body} + (if $p == "" then {} else {policy: $p} end)' <<<"$issue" > "$wt.body"; block "$c" "$n" "$wt" "$YES${vis#yes: }$more${pf:+; it also changes lint policy: $pf}" post; return; }
       echo "conveyor: card $c: its visible change is part of the change $OWNER approved in #$yesfrom: the yes is inherited"
     fi
+    [ -z "$pf" ] || { jq -c --arg p "$ph" '{body, policy: $p}' <<<"$issue" > "$wt.body"; block "$c" "$n" "$wt" "${LINTYES}it changes lint policy: $pf" post; return; }
     # The trailers the pack requires of the files this change adds (commit.trailers): one session per card writes
     # those the card has not; still missing, the card blocks, never committing without them. A session that changed
     # the change or its trailers goes round to be reviewed again.

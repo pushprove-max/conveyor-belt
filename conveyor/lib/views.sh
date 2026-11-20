@@ -126,7 +126,7 @@ whole() {
 # deps, brief: the steps with no start line; yes: it waits for the owner's yes and failed nothing), took: the seconds since
 # the card's line before it, which for a step with a start line is the time the step ran).
 rows() { # [records file: the retried file's lines are card records too]
-  jq -cs --argjson max "$MAX_REVIEWS" --arg nodeps "$NODEPS" --arg yes "$YES" --arg shut "$SHUT" -f "$HERE/jq/rows.jq" "${1:-$READ}"
+  jq -cs --argjson max "$MAX_REVIEWS" --arg nodeps "$NODEPS" --arg yes "$YES" --arg lintyes "$LINTYES" --arg shut "$SHUT" -f "$HERE/jq/rows.jq" "${1:-$READ}"
 }
 cards() {
   local out models url n t titles='{}'
@@ -149,7 +149,7 @@ cards() {
 # checkout's loop lock; asking takes that lock for an instant); commit (the Conveyor commit that loop started on, as
 # its loop.json names it; null with no loop, or one that names none); newest (the time of the last line in the records);
 # blocked (card, issue, reason, since) and, apart from those, waiting: the cards blocked for the owner's yes to a visible
-# change; stuck (card, issue, step: the last one recorded or begun, since): every open card with neither a new line
+# change or a lint policy change; stuck (card, issue, step: the last one recorded or begun, since): every open card with neither a new line
 # nor, from the step it is running, any output (its live record's `last`, which a card waiting at its claim brings up
 # to date each poll, and a session its `progress`: a file or commit of its worktree, watch(); a test run's, its start and
 # its cases beginning or ending; in its test step, its .test file and the run again of its failed tests on main,
@@ -354,7 +354,7 @@ health() {
   # The landing pull request as GitHub has it (prsync(), lib/push.sh); under `watch`, its slower timer asks (github()).
   [ -n "$GITHUB" ] || prsync
   jq -cs --argjson loop "$loop" --argjson gh "$gh" --argjson ghr "$ghr" --arg ghwhy "$ghwhy" --arg ghread "$GHREAD" --argjson free "$free" --argjson stuck "$STUCK" --argjson sstuck "$SESSION_STUCK" --argjson casestuck "$CASE_STUCK" --argjson waitlimit "$WAIT_LIMIT" --argjson gone "$gone" --argjson live "${lv:-{\}}" --argjson proof "$(proofs)" --argjson testout "$(testouts)" \
-    --arg state "$st" --arg why "$why" --argjson commit "$cm" --argjson ctl "$c" --argjson r "$r" --arg yes "$YES" \
+    --arg state "$st" --arg why "$why" --argjson commit "$cm" --argjson ctl "$c" --argjson r "$r" --arg yes "$YES" --arg lintyes "$LINTYES" \
     --argjson cap "$cap" --argjson bw "$bw" --arg repo "$REPO" --argjson room "$rm" --argjson machine "$mc" --argjson cores "$co" --argjson force "$(inforce "$c")" --argjson cycles "$cyc" --slurpfile before <(printf '%s\n' "$bf") --argjson pushing "$pu" --argjson homes "$(homes "$c")" --argjson routes "$(routesnow)" --argjson report "$tr" --argjson serviceold "$so" \
     --slurpfile old "$hd/old" --slurpfile mh <(jq -c 'objects | {since, card, sha, controls, cases}' "$MACHINEHOLD" 2>/dev/null) --slurpfile lp <(jq -c 'objects | select(.merged == null and .closed == null and (.number | type) == "number") | {number, url, merge}' "$LANDPR" 2>/dev/null) --slurpfile qt <(jq -c 'objects | {line, field, time}' "$QUARANTINE" 2>/dev/null) --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) "$UNTIMED$SPLITM"'
     (($ENV.CONVEYOR_NOW // "" | tonumber?) // now) as $now
@@ -393,7 +393,7 @@ health() {
       def also($more): reduce $more[] as $m (.; (map(.card) | index($m.card)) as $i | if $i == null then . + [$m] else .[$i] += $m end);
     {time: ($now | todate), repo: $repo, loop: $loop, room: $room, machine: $machine, cores: $cores, commit: $commit, state: $state, reason: (if $why == "" then null else $why end),
        guard: {at: $ctl.guard, reading: $r.pct, readAt: $r.time, missing: ($ctl.guard != null and $r == null)}, start: $ctl.start, newest: (last.time // null),
-       blocked: ($b | map(select(.reason | startswith($yes) | not))), waiting: ($b | map(select(.reason | startswith($yes)))),
+       blocked: ($b | map(select(.reason | startswith($yes) or startswith($lintyes) | not))), waiting: ($b | map(select(.reason | startswith($yes) or startswith($lintyes)))),
        stuck: ($c | map(select(.end == null) | . + {since: ([.last.time, .out // ""] | max)}
            # A session (build, fix, rebase) that says nothing is listed after SESSION_STUCK, when that is sooner.
            | select((.card | IN($gone[])) or $now - (.since | fromdate) >= (if .last.step == "start" and (.last.of | IN("build", "fix", "rebase")) then [$stuck, $sstuck] | min else $stuck end))

@@ -1554,3 +1554,4 @@
 {"area": "lint", "test": "lint.test.sh"}
 {"area": "lint", "test": "lintgate.test.sh"}
 {"area": "lint", "test": "lintwait.test.sh"}
+{"area": "lint", "test": "lintyes.test.sh"}

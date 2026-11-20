@@ -62,7 +62,7 @@ packget() { # <field> <variable> [<field> <variable>]...: sets each variable to 
 # The pack's names: the remote and branch a card lands on and the loop pushes to (REMOTE, BRANCH), the labels
 # (BUILT, FOLLOWUP, TYPE, PRIOS, AREA, NONPRODUCT), the owner whose yes a visible change needs (OWNER), and what is
 # made of them, of the product paths, of the test files' globs (tests.patterns) and of review.proof: PRODUCT, TESTRX,
-# TESTGLOBS, YES, REVIEW and REVIEWOFF. Read at the start of every
+# TESTGLOBS, YES, LINTYES, REVIEW and REVIEWOFF. Read at the start of every
 # command that uses them and again at every turn of the loop, so a pack a card changed counts from the next turn; a
 # pack that fails the check fails that command, or holds that turn's push and pick.
 # BUILT is built and merged, open until the owner deploys it: such an issue looks like work not started, so it
@@ -103,6 +103,9 @@ names() {
   # shellcheck disable=SC2034
   TESTRUNNERS=$(testpaths <<<"$SUITERUNNERS"); NAMED_PJ=$pj
   YES="visible to customers or staff: needs $OWNER's yes: "
+  # The other stop for the owner's yes: a change of lint policy (lintpolicy(), lib/lint.sh) and no visible change.
+  # shellcheck disable=SC2034 # LINTYES is read in lib/card.sh and lib/issues.sh
+  LINTYES="lint policy: needs $OWNER's yes: "
   [ "$r" = real ] && r=$REALPROOF || r=''
   REVIEW=${REVIEWT//'<owner>'/"$OWNER"}; REVIEW=${REVIEW//'<product paths>'/"$p"}; REVIEW=${REVIEW//'<real proof>'/"$r"}
   REVIEWOFF=${REVIEW//'<yes>'/"$NOYESREVIEW"}; y=${YESREVIEW//'<owner>'/"$OWNER"}; REVIEW=${REVIEW//'<yes>'/"${y//'<product paths>'/"$p"}"}

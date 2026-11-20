@@ -460,8 +460,10 @@ review and before it lands ([Lint](cards.md#lint)). Without a `lint` field, or w
 - `ratchet`: `false` makes every finding of the command count, on any line. The default is `true`.
 - `complexity`: the rule codes of the command that measure size, such as a limit on the length of a function.
 
-`lint.policy` is a list of git pathspecs of the files that are lint policy. The `lint` field itself is always lint
-policy.
+`lint.policy` is a list of git pathspecs of the files that are lint policy, for example the config files of your
+linters. The `lint` field itself is always lint policy. With the rule Lint check on, a card that changes lint policy
+stops for your yes after its review ([Lint](cards.md#lint)). Conveyor reads `lint.policy` from the pack of your main
+checkout, not from the card's change.
 
 Git matches the pathspecs. A `*` also matches a `/`, and `:(exclude)<pathspec>` leaves files out.
 

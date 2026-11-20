@@ -86,16 +86,20 @@ retry() { # <issue, or the card id of a main-red fix card> [fresh: an issue's ne
   p=$(prior "$n"); ends=$(jq -r 'select(.kept != "") | "\(.kept)/\(.card).patch"' <<<"$p")
   [ -n "$ends" ] && [ -s "$ends" ] || return 0
   # A patch stopped for the owner's yes: what card() does with it, by the issue as it is now (keptway()), and by the
-  # check card() makes after it: with the rule "visible changes need the owner's yes" off, nothing waits for the yes;
-  # on, a yes with a condition has the kept patch reviewed against it with no build.
+  # check card() makes after it: with the rule "visible changes need the owner's yes" off, nothing waits for the yes,
+  # but for a lint policy change (the body kept its policy hash: lintyes()) with the rule Lint check on; on, a yes with
+  # a condition has the kept patch reviewed against it with no build. A card stopped for its lint policy change alone
+  # (LINTYES) waits for no yes once the rule Lint check is off.
   if names 2>/dev/null && yeskept "$p" && l=$(gh issue view "$n" --json number,title,body,labels,milestone 2>/dev/null); then
     what=$(keptway "$l" "${ends%.patch}.body")
-    if ! yesrule; then [ "$what" != wait ] && [ "$what" != land ] || what=off
+    if ! yesrule && { ! lintrule || ! jq -e '.policy | strings' "${ends%.patch}.body" >/dev/null 2>&1; }; then [ "$what" != wait ] && [ "$what" != land ] || what=off
+    elif [ "$what" = wait ] && ! lintrule && [[ $(jq -r .reason <<<"$p") == "$LINTYES"* ]]; then what=lintoff
     elif [ "$what" = land ] && yesrule && conditional "$l"; then what=held
     fi
     case $what in
       held) echo "conveyor: its next card reviews the kept patch $ends against $OWNER's yes as the issue now gives it, with no build: the patch lands only after that review"; return 0 ;;
       off) echo "conveyor: its next card lands from the kept patch $ends, with no build and no review while it still applies to main: the rule \"visible changes need the owner's yes\" is off, and the issue is the one its review read"; return 0 ;;
+      lintoff) echo "conveyor: its next card lands from the kept patch $ends, with no build and no review while it still applies to main: the rule Lint check is off, so its lint policy change waits for no yes, and the issue is the one its review read"; return 0 ;;
       land) echo "conveyor: its next card lands from the kept patch $ends, with no build and no review while it still applies to main: an approval line has come since its review, and the issue is the one that review read"; return 0 ;;
       wait) echo "conveyor: its next card stops again for $OWNER's yes on the kept patch $ends: the issue is the one its review read, with no approval line since"; return 0 ;;
       review) echo "conveyor: its next card starts from the kept patch $ends, with one session, then a review against the issue as it is now: the issue changed since that patch was reviewed"; return 0 ;;
@@ -147,7 +151,7 @@ reopened() { # <open issues, a json list>
     | group_by(.card) | max_by(.[0].time) | select(any(.step == "closed" and .reason == $shut)) | .[0].issue' < <(turncards) 2>/dev/null)
 }
 # At a turn of the loop, outside the lock: an issue of the open list given whose newest card stopped for the owner's
-# yes is given back with `retry` (under the lock) once its body, as the list has it, holds more approval lines than
+# yes (to a visible change, YES, or to a lint policy change, LINTYES) is given back with `retry` (under the lock) once its body, as the list has it, holds more approval lines than
 # the body that card's review read (the .body file it kept: keptway()): a line added after the stop. The next card
 # then takes up the kept patch as `retry` would have it. A card that kept no body is left for `retry`.
 approved() { # <open issues, a json list>
@@ -158,10 +162,10 @@ approved() { # <open issues, a json list>
       ($open | map(select(.number == $n)) | first) as $now | $now != null and ($was[0] | type) == "object"
       and ($now | approvals) > ($was[0] | approvals)' >/dev/null 2>&1 || continue
     { locked retry "$n"; stdbkeeps; } || true
-  done < <(jq -rs --arg yes "$YES" --argjson open "$1" 'map(select(.step != "push")) | group_by(.issue)[]
+  done < <(jq -rs --arg yes "$YES" --arg lintyes "$LINTYES" --argjson open "$1" 'map(select(.step != "push")) | group_by(.issue)[]
     | select((.[0].issue | IN($open[].number)) and all(.step != "landed" and .step != "pushed" and .step != "closed"))
     | group_by(.card) | max_by(.[0].time) | map(select(.step == "blocked")) | last | select(. != null)
-    | select((.reason | startswith($yes)) and (.kept // "") != "") | "\(.issue) \(.card) \(.kept)"' < <(turncards) 2>/dev/null)
+    | select((.reason | startswith($yes) or startswith($lintyes)) and (.kept // "") != "") | "\(.issue) \(.card) \(.kept)"' < <(turncards) 2>/dev/null)
 }
 # At a turn of the loop, outside the lock: an issue of the open list given whose newest card was blocked by a session
 # or review that never began its work (nostart(): its spent names the seat, CLI, model and account it ran on) is given
@@ -228,12 +232,12 @@ prior() { # <issue>
   jq -cn --argjson p "${patch:-null}" --arg r "$rev" '{card: ($p.card // ""), kept: ($p.kept // ""), reason: ($p.reason // ""), review: $r}'
 }
 # Whether the kept patch of prior() ($1) is one card() would land with no build and no review: its card stopped for
-# the owner's yes after a review of that patch (the kept review is that card's own) that gave a verdict and said
-# whether the change is visible.
+# the owner's yes (YES or LINTYES) after a review of that patch (the kept review is that card's own) that gave a
+# verdict and said whether the change is visible.
 yeskept() { # <prior json>
   local from was rev
   from=$(jq -r .card <<<"$1"); was=$(jq -r .reason <<<"$1"); rev=$(jq -r .review <<<"$1")
-  [ -n "$from" ] && [[ $was == "$YES"* ]] && { [ "$rev" = "$(jq -r .kept <<<"$1")/$from.review" ] || [ "$rev" = "$CARDS/$from.review" ]; } \
+  [ -n "$from" ] && [[ $was == "$YES"* || $was == "$LINTYES"* ]] && { [ "$rev" = "$(jq -r .kept <<<"$1")/$from.review" ] || [ "$rev" = "$CARDS/$from.review" ]; } \
     && [ -s "$rev" ] && [ "$(verdict "$rev")" != none ] && [ -n "$(visible "$rev" any)" ]
 }
 # How the next card takes up such a kept patch, from the issue as it is now ($1, its json) and the issue as the

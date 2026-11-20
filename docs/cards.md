@@ -87,8 +87,21 @@ Each gate run writes a `lint` line to the card's records, with each command's re
 changed a trigger of a command that ran, the line says `tools ran as installed`: the tools ran as installed on this
 host, not as the change would install them.
 
+A change of lint policy needs your yes. Lint policy is each file that the pack's `lint.policy` matches, and the pack's
+`lint` field ([Lint](configuration.md#lint)). When a review lets such a card land, the card stops with the reason
+`lint policy: needs <owner>'s yes: it changes lint policy: <files>`, and the reason goes on the issue. If the card
+also stops for a visible change, it stops only once. That reason then names the policy files too, and one yes
+covers both. A change that only removes lines from a policy file that the `files` of a `ratchet: false` command
+match makes a rule stricter, so it does not stop.
+
+To approve, add a `Visible change approved:` line to the issue, as for a visible change. The next turn of the loop
+then gives the card back. Its next card lands the kept patch with no build and no review. A retry with no new
+approval line stops again, with no build. Your yes covers that one policy change. If a later session of the card
+changes a policy file, the card stops again for a new yes. This stop is not controlled by the rule "visible changes
+need the owner's yes". It waits for your yes when that rule is off too. To say no, hold the issue.
+
 The rule Lint check is on by default. `conveyor.sh control rules lint=off` turns it off. Then no lint command runs in a
-card, and the brief has no `# Lint` section.
+card, the brief has no `# Lint` section, and a change of lint policy does not stop for your yes.
 
 ## Review and the judge
 

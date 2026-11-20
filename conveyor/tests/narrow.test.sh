@@ -308,7 +308,7 @@ t_narrowcap() {
 # card's row (jq/rows.jq, its log) and then its track (jq/track.jq), as the snapshot draws it.
 trackwhy() {
   jq -c '{card: "c7", issue: 7, step: "picked", time: "2026-11-17T11:00:00Z"}, ({card: "c7", issue: 7, step: "test", result: "pass", time: "2026-11-17T12:00:00Z"} + .)' "$T/$CASE/cards/c7.rec" \
-    | jq -cs --argjson max 3 --arg nodeps x --arg yes x --arg shut x -f "$SRC/jq/rows.jq" \
+    | jq -cs --argjson max 3 --arg nodeps x --arg yes x --arg lintyes x --arg shut x -f "$SRC/jq/rows.jq" \
     | jq -r "$(<"$SRC/jq/track.jq")"' .[0] | track(null; null) | .records[] | select(.name == "tests passed") | .why'
 }
 

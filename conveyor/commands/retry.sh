@@ -14,6 +14,8 @@
 . "$HERE/lib/push.sh" || exit 1
 . "$HERE/lib/followups.sh" || exit 1
 . "$HERE/lib/control.sh" || exit 1
+# The rule Lint check (lintrule()), which retry() reads of a card stopped for its lint policy change.
+. "$HERE/lib/lint.sh" || exit 1
 . "$HERE/lib/run.sh" || exit 1
 . "$HERE/lib/machine.sh" || exit 1
 . "$HERE/lib/install.sh" || exit 1

@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# timeout: 240
+# Engine cases: the stop for the owner's yes on a change of lint policy (lintpolicy() and lintyes(),
+# conveyor/lib/lint.sh, and the stop in card()): what is policy, the stop, its approval line, a yes that covers one
+# policy diff, one stop with a visible change, and the rule Lint check off.
+# The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
+# file runs its own cases through the runner.
+[ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
+  exec bash "$(dirname "$0")/../conveyor.test.sh"
+
+# The lint field of the lintpolicy() cases: .lintrc and the exempt file .size-exempt (the file the ratchet: false
+# command names) are policy.
+POLICY='{"commands": [{"files": ["*.txt"], "run": "true"}, {"files": [".size-exempt"], "run": "true", "ratchet": false}], "policy": [".lintrc", ".size-exempt"]}'
+# What lintpolicy() prints for card c7's staged change ($FXWT, made by fx_wt), in $T/$CASE/run.out.
+policyof() { fx_in "lintpolicy \"\$FXWT\" \"\$(git -C \"\$FXWT\" rev-parse HEAD)\" '$POLICY'"; [ "$RC" = 0 ] || fail "lintpolicy failed: $(cat "$T/$CASE/run.out")"; }
+
+# Bugs: a change that only removes lines from the exempt file (it only tightens) stops for the yes; a change of a
+# file that is no policy (a.txt) is taken for policy. lintpolicy() prints nothing, so the card does not stop.
+t_lintpolicytighten() {
+  setup '[]'
+  # The lint field given lintpolicy() is one the pack check takes: an exempt file the pack cannot name proves nothing.
+  jq --argjson l "$POLICY" '.lint = $l' "$R/.conveyor/project.json" > "$STUB/policy.json" \
+    && bash "$SRC/lib/pack.sh" check "$STUB/policy.json" || fail "the pack check refused the cases' lint field"
+  fx_wt 'printf "a.sh\n" > .size-exempt && echo two >> a.txt' .size-exempt $'a.sh\nb.sh' .lintrc old
+  policyof
+  [ ! -s "$T/$CASE/run.out" ] || fail "a tightening of the exempt file or a change of a.txt was taken for lint policy: $(cat "$T/$CASE/run.out")"
+}
+# Bugs: a policy file, an exempt file that gets a line (it loosens), or the pack's lint field is not listed, so its
+# change lands without the owner's yes. Each is listed, after the hash of the diff. (Main's commit has no pack, which
+# the fixture's .gitignore leaves out, so the pack the change adds changes the lint field.)
+t_lintpolicylisted() {
+  setup '[]'
+  fx_wt 'echo c.sh >> .size-exempt && echo new > .lintrc && echo "{\"lint\": {\"commands\": []}}" > .conveyor/project.json && git add -f .conveyor/project.json' \
+    .size-exempt a.sh .lintrc old
+  policyof
+  [ "$(sed -n '2,$p' "$T/$CASE/run.out" | paste -sd' ')" = '.conveyor/project.json .lintrc .size-exempt' ] && [[ $(head -n 1 "$T/$CASE/run.out") =~ ^[0-9a-f]{40,64}$ ]] \
+    || fail "the policy files or their hash were not listed: $(cat "$T/$CASE/run.out")"
+}
+
+# Card #7 on a main whose pack makes .lintrc lint policy, with a lint command that passes: its build runs <build>
+# and notes `build` in $STUB/did; review 1 is <review> (a GO by default).
+yessetup() { # <build> [<review>]
+  setup "[$(issue 7 2026-01-01)]"
+  tune '.lint = {commands: [{files: ["*.txt"], run: "true"}], policy: [".lintrc"]}'
+  printf '%s\n' "${2:-$GO}" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
+  printf '%s\n' 'echo build >> "$STUB/did"' "$1" > "$STUB/build"
+}
+yesdid() { paste -sd' ' "$STUB/did" 2>/dev/null; }
+yessteps() { st 'select(.issue == 7) | "\(.step) \(.result) \(.reason // "" | .[0:200])"' | paste -sd, -; }
+# The reasons of #7's blocked lines, those `retry` moved out of the card records first.
+blocks() { cat "$ST/retried.jsonl" "$ST/cards.jsonl" 2>/dev/null | jq -r 'select(.issue == 7 and .step == "blocked") | .reason'; }
+approve() { issue 7 2026-01-01 | jq -c --arg a "${1:-}" '[.body += "\n\(if $a == "" then "" else $a + "\n" end)\nVisible change approved: Dana 2026-01-02 (yes)\n"]' > "$STUB/issues.json"; } # [another line of the ask]
+# Named apart from lib.sh's landed(), which the runner's other case files call after sourcing this one.
+yeslanded() { [ "$(st 'select(.issue == 7 and .step == "landed") | .sha')" = "$(git -C "$R" rev-parse HEAD)" ]; }
+
+# Bugs: a change of a lint.policy file lands on its review's GO with no yes; a retry with no approval line lands it,
+# or builds it again; the approval line does not land the kept patch, with no build and no review, when the rule
+# "visible changes need the owner's yes" is off.
+t_lintyes() {
+  yessetup 'echo strict > .lintrc; echo two >> a.txt'
+  # loop: the stop, the kept patch, retry, the approval line and the landing are a card's path over turns, carried in the records and the kept folder; no one engine function holds that path
+  loop run > /dev/null || fail "run exited non-zero"
+  [ "$(blocks)" = "lint policy: needs Dana's yes: it changes lint policy: .lintrc" ] && ! yeslanded \
+    || fail "the policy change did not stop for Dana's yes naming .lintrc: $(blocks)"
+  # Bug: health lists the stop as a failed card (blocked), so the Board's Approve and Decline, which look in waiting,
+  # refuse it, and the Board's Needs you shows it as failed. It is in waiting alone, in both.
+  loop health | jq -e '(.waiting | any(.issue == 7)) and (.blocked | all(.issue != 7))' > /dev/null \
+    || fail "health does not list the policy stop as waiting for the yes: $(loop health | jq -c '{waiting, blocked}')"
+  loop snapshot --fresh | jq -e '.needsYou | (.waiting | any(.issue == 7 and .sentence == "it changes lint policy: .lintrc")) and (.blocked | all(.issue != 7))' > /dev/null \
+    || fail "the snapshot does not list the policy stop as waiting for the yes: $(loop snapshot | jq -c '.needsYou | {waiting, blocked}')"
+  # loop: as above, a retry with no approval line is a turn of its own
+  loop retry 7 > /dev/null && loop run > /dev/null || fail "the retry with no approval line exited non-zero"
+  [ "$(blocks | sort -u)" = "lint policy: needs Dana's yes: it changes lint policy: .lintrc" ] && [ "$(blocks | wc -l)" = 2 ] \
+    && [ "$(yesdid)" = build ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] && ! yeslanded \
+    || fail "a retry with no approval line did not stop again with no build and no review: $(yesdid); $(yessteps)"
+  approve; loop control rules visible=off > /dev/null || fail "control rules visible=off was refused"
+  # loop: as above, the turn that finds the approval line gives the card back by itself
+  loop run > /dev/null || fail "the run after the approval line exited non-zero"
+  yeslanded && [ "$(yesdid)" = build ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] && [ "$(git -C "$R" show HEAD:.lintrc)" = strict ] \
+    || fail "the approved policy change did not land its kept patch with no build and no review: $(yesdid); $(yessteps)"
+}
+# Bug: a yes covers more than the policy diff it was given for: a session after the yes (the issue's ask changed, so
+# the kept patch gets one) edits .lintrc again, and the card lands on the old yes. It stops again.
+t_lintyesagain() {
+  yessetup 'echo strict >> .lintrc; echo two >> a.txt'
+  # loop: the yes, the next card's session and its stop are turns of a card's path, as in t_lintyes
+  loop run > /dev/null || fail "run exited non-zero"
+  approve 'Keep a.txt short.'
+  # loop: as above
+  loop run > /dev/null || fail "the run after the approval line exited non-zero"
+  [ "$(yesdid)" = 'build build' ] && [ "$(blocks | wc -l)" = 2 ] && [ "$(blocks | tail -n 1)" = "lint policy: needs Dana's yes: it changes lint policy: .lintrc" ] && ! yeslanded \
+    || fail "a policy file edited after the yes did not stop the card again: $(yesdid); $(yessteps)"
+}
+# Bug: a card whose change is visible and changes lint policy stops twice, or one approval does not land it. It
+# stops once, its reason naming the policy file, and one approval line lands its kept patch.
+t_lintyesvisible() {
+  yessetup 'echo strict > .lintrc; mkdir -p web; echo pay >> web/pay.ts' $'USER-VISIBLE: yes: guests see a new Pay button\nVERDICT: GO'
+  # loop: the stop, the approval line and the landing are turns of a card's path, as in t_lintyes
+  loop run > /dev/null || fail "run exited non-zero"
+  [ "$(blocks)" = "visible to customers or staff: needs Dana's yes: guests see a new Pay button; it also changes lint policy: .lintrc" ] \
+    || fail "the visible policy change did not stop once naming both: $(blocks)"
+  # Bug: the Board shows the reviewer's sentence alone, so the policy file the yes covers is hidden.
+  loop snapshot --fresh | jq -e '.needsYou.waiting | any(.issue == 7 and .sentence == "guests see a new Pay button; it also changes lint policy: .lintrc")' > /dev/null \
+    || fail "the snapshot does not name the policy file beside the visible change: $(loop snapshot | jq -c '.needsYou.waiting')"
+  approve
+  # loop: as above
+  loop run > /dev/null || fail "the run after the approval line exited non-zero"
+  yeslanded && [ "$(blocks | wc -l)" = 1 ] && [ "$(yesdid)" = build ] || fail "one approval did not land the visible policy change: $(yesdid); $(yessteps)"
+}
+# Bug: with the rule on visible changes off, a visible change that changes lint policy stops for the policy alone, but
+# the Board shows the reviewer's visible sentence in place of the reason, hiding the policy file the yes is for.
+t_lintyesvisibleoff() {
+  yessetup 'echo strict > .lintrc; mkdir -p web; echo pay >> web/pay.ts' $'USER-VISIBLE: yes: guests see a new Pay button\nVERDICT: GO'
+  loop control rules visible=off > /dev/null || fail "control rules visible=off was refused"
+  # loop: the snapshot reads the blocked line and the review's visible answer that a whole card run writes
+  loop run > /dev/null || fail "run exited non-zero"
+  [ "$(blocks)" = "lint policy: needs Dana's yes: it changes lint policy: .lintrc" ] || fail "the policy change did not stop for the policy alone: $(blocks)"
+  loop snapshot --fresh | jq -e '.needsYou.waiting | any(.issue == 7 and .sentence == "it changes lint policy: .lintrc")' > /dev/null \
+    || fail "the snapshot hides the policy file: $(loop snapshot | jq -c '.needsYou.waiting')"
+}
+# Bug: with the rule Lint check off, a policy change still stops for the yes. It lands on its GO.
+t_lintyesoff() {
+  yessetup 'echo strict > .lintrc; echo two >> a.txt'
+  jq '.rules.lint = false' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json" || fail "the rule off"
+  # loop: only a whole card run shows that card() does not stop it between its review and its landing
+  loop run > /dev/null || fail "run exited non-zero"
+  yeslanded && [ -z "$(blocks)" ] || fail "a policy change stopped with the rule Lint check off: $(blocks)"
+}
+# Bug: once the owner turns the rule Lint check off, `retry` of a card stopped for its policy change alone says its next
+# card stops again for the yes, while that card lands the kept patch. It says the card lands, and the card does, with
+# no build and no review.
+t_lintyesretryoff() {
+  local out
+  yessetup 'echo strict > .lintrc; echo two >> a.txt'
+  # loop: the stop, the rule's change, retry and the landing are a card's path over turns, as in t_lintyes
+  loop run > /dev/null || fail "run exited non-zero"
+  loop control rules lint=off > /dev/null || fail "control rules lint=off was refused"
+  out=$(loop retry 7) || fail "the retry exited non-zero: $out"
+  [[ $out == *"the rule Lint check is off, so its lint policy change waits for no yes"* ]] || fail "retry did not say the card lands with Lint check off: $out"
+  # loop: as above
+  loop run > /dev/null || fail "the run after the retry exited non-zero"
+  yeslanded && [ "$(yesdid)" = build ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] \
+    || fail "the kept policy change did not land with no build and no review after Lint check was turned off: $(yesdid); $(yessteps)"
+}

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # The lint check (docs/configuration.md, Lint): the pack's lint.commands, each run on the files of a change it reads,
-# and its result. Sourced, never run: by commands/lint.sh (conveyor.sh lint), commands/doctor.sh (lintdoctor) and
-# lib/card.sh (the review and landing gates, lintgate; lintwait, the gate for a waiting card, is called by settle() in
-# lib/claim.sh, in a card's shell). It uses packget (lib/prompts.sh) and the test slots
+# and its result. Sourced, never run: by commands/lint.sh (conveyor.sh lint), commands/doctor.sh (lintdoctor),
+# commands/retry.sh (lintrule) and lib/card.sh (the review and landing gates, lintgate; lintwait, the gate for a
+# waiting card, is called by settle() in lib/claim.sh, in a card's shell). It uses packget (lib/prompts.sh) and the test slots
 # (lib/slots.sh), sourced before it; lintratchet also uses depdirs (lib/push.sh) and CARDS (lib/paths.sh); lintgate
 # the card's steps (block, session, checked, record, giveway, cardpatch), which a card's shell has.
 #
@@ -343,6 +343,43 @@ lintline() { # <card> <issue> <output file> <lintrun's exit>
 # The rule Lint check (rules.lint of the control record the card started on, CARDCTL, else the one in force): on
 # unless it is false.
 lintrule() { [ "$(jq -r '.rules.lint' <<<"${CARDCTL:-$(ctl 2>/dev/null)}" 2>/dev/null)" != false ]; }
+
+# The lint policy that <worktree>'s staged change changes from <base>: the hash of that policy diff (its index lines
+# left out, so a kept patch on a newer main hashes the same), then its paths, one a line: each file that the
+# lint.policy pathspecs of <lint field> (main's pack's) match, and .conveyor/project.json when its lint field changed
+# (lintfield). A change that only removes lines from an exempt file (one that the files of a `ratchet: false`
+# command match) only tightens, so it is left out. Nothing when no path is left. Fails when the change cannot be read.
+lintpolicy() { # <worktree> <base> <lint field>
+  local a f ix t h ex='' i
+  local -a ps xs fs=()
+  mapfile -d '' -t ps < <(jq -j '(.policy // [])[] + "\u0000"' <<<"${3:-null}")
+  if [ ${#ps[@]} != 0 ]; then
+    t=$(git -C "$1" diff --cached --no-renames -z --numstat "$2" -- "${ps[@]}" | tr '\0' '\n'; exit "${PIPESTATUS[0]}") || return 1
+    # The changed paths that each ratchet: false command's own pathspecs match (each command's set alone, so that its
+    # :(exclude) entries apply only to it), one a line.
+    for i in $(jq -r '(.commands // []) | to_entries[] | select(.value.ratchet == false) | .key' <<<"${3:-null}"); do
+      mapfile -d '' -t xs < <(jq -j --argjson i "$i" '.commands[$i].files[] + "\u0000"' <<<"$3")
+      ex+=$(git -C "$1" diff --cached --no-renames -z --name-only "$2" -- "${xs[@]}" | tr '\0' '\n'; exit "${PIPESTATUS[0]}")$'\n' || return 1
+    done
+    while IFS=$'\t' read -r a _ f; do
+      [ -n "$f" ] || continue
+      if [ "$a" != 0 ] || ! grep -qxF -- "$f" <<<"$ex"; then fs+=("$f"); fi
+    done <<<"$t"
+  fi
+  ix=$(git -C "$1" rev-parse --path-format=absolute --git-path index) || return 1
+  lintfield "$1" "$ix" "$2" && f=.conveyor/project.json || f=''
+  [ ${#fs[@]} != 0 ] || [ -n "$f" ] || return 0
+  h=$({ [ ${#fs[@]} = 0 ] || git -C "$1" diff --cached --no-renames --binary "$2" -- "${fs[@]}" | sed '/^index /d'
+    [ -z "$f" ] || git -C "$1" show ":$f" | jq -c .lint; } | git -C "$1" hash-object --stdin) && [ -n "$h" ] || return 1
+  printf '%s\n' "$h"; printf '%s\n' "${fs[@]}" ${f:+"$f"} | sort -u
+}
+# Whether the owner's yes covers the policy diff hashed <hash>: the card that stopped for it kept that hash in its
+# <kept body file> (policy), and the issue now holds more approval lines than that body did. A yes covers one diff:
+# a change to a policy file after it gives another hash.
+lintyes() { # <issue json> <kept body file> <hash>
+  [ -n "$3" ] && jq -en --argjson now "$1" --slurpfile was "$2" --arg h "$3" "$SEE"'
+    ($was[0] | objects) as $w | $w.policy == $h and ($now | approvals) > ($w | approvals)' >/dev/null 2>&1
+}
 # The brief's # Lint section, with the rule Lint check on and a pack that sets lint commands; nothing otherwise.
 lintbrief() {
   local l

@@ -2,8 +2,8 @@
 # The snapshot (the strip-down to Conveyor): one JSON object holding everything the Conveyor
 # views show, so the dashboard and /units read one record and cannot disagree. Every object in it that names a
 # main-red fix card (card), which has no issue (issue 0), also has name: "Main is red (<commit>)" (rows.jq). It holds:
-# needsYou: waiting (the cards blocked for the owner's yes to a visible change: card, issue, title, sentence: the
-#   reviewer's, since, files: {count, paths: the first 200 its blocked line names, or null}, shots: the project's own
+# needsYou: waiting (the cards blocked for the owner's yes to a visible change or a lint policy change: card, issue, title, sentence: the
+#   reviewer's, with the lint policy files it changes, or the policy files alone for a lint policy stop, since, files: {count, paths: the first 200 its blocked line names, or null}, shots: the project's own
 #   screenshots it kept, {patch: the hash of the patch they were kept for, shots: [{file, caption}]}, and patch: the
 #   hash of its kept patch now; both null when it kept none) and blocked
 #   (every other blocked card: card, issue, title, reason: the sentence, onMain: true on a land-branch card whose
@@ -450,7 +450,7 @@ JUDGEDLINE='select(. != "") | fromjson | objects | select(.step == "review" or (
 snaprows() { # <records file> <kept> <to>
   local k r cs size h1 h2 o s n=-1 src=$1 rf=$3.rows skip=0
   # The key is the same for both files of one snapshot: worked out once, in the snapshot's shell (SNAPROWS_K).
-  [ -n "${SNAPROWS_K:-}" ] || SNAPROWS_K=$({ cksum < "$HERE/jq/rows.jq" && printf '%s\n' "$MAX_REVIEWS" "$NODEPS" "$YES" "$SHUT"; } | cksum) || return 1
+  [ -n "${SNAPROWS_K:-}" ] || SNAPROWS_K=$({ cksum < "$HERE/jq/rows.jq" && printf '%s\n' "$MAX_REVIEWS" "$NODEPS" "$YES" "$LINTYES" "$SHUT"; } | cksum) || return 1
   # The file's sum and size from one cksum: a file not grown since the summary needs no other program to check it.
   k=$SNAPROWS_K && r=$(cksum < "$1") && cs=${r%% *} size=${r##* } && [[ $size =~ ^[0-9]+$ ]] || return 1
   # Read from a copy: a snapshot running beside this one may put a newer summary in its place meanwhile.
@@ -480,6 +480,7 @@ snaprows() { # <records file> <kept> <to>
 }
 snapshot() (
   next=null; held=null; built=null; queue=null; yes=$YES
+  lintyes=$LINTYES
   # A stop (TERM, INT, HUP) ends the snapshot once the command it runs has ended. A reader's timeout sends TERM to the
   # whole process group; one that comes as the shell starts a command reaches the shell after the fork and never the
   # new command. With no trap of its own, the shell then runs the EXIT trap at once, and the scratch folder is removed
@@ -636,7 +637,7 @@ snapshot() (
   jq -cn --slurpfile all "$d/cards" --slurpfile hs "$d/health" --slurpfile allp "$d/paths" --slurpfile shots "$d/shots" --slurpfile onm "$d/onmain" --argjson mt "$mt" --slurpfile fl <(printf '%s' "$fl") --slurpfile so <(printf '%s' "$so") --slurpfile ft <(printf '%s' "$ft") --slurpfile su <(printf '%s' "$su") --argjson rl "$rl" --argjson dr "$dr" --argjson eng "$eng" --argjson tr "$tr" --argjson m "$models" --argjson next "$next" --slurpfile built <(printf '%s' "$built") \
     --slurpfile iss "$d/issues" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" --arg pla "$pla" --arg ppm "$ppm" \
     --argjson control "$control" --argjson settings "$settings" --argjson accts "$(acctnames)" --argjson ga "$ga" --slurpfile q <(printf '%s' "$queue") --slurpfile lim "$d/limit" --slurpfile smp "$d/samples" --slurpfile pu "$d/pushes" --argjson every "$SAMPLE" --argjson priced "$pricedok" --argjson cr "$cr" --argjson ts "$ts" \
-    --argjson max "$MAX_REVIEWS" --argjson wait "$((CLOSE_WAIT + 300))" --arg yes "$yes" --arg day "$day" --arg since "$since" --arg prev "$prev" \
+    --argjson max "$MAX_REVIEWS" --argjson wait "$((CLOSE_WAIT + 300))" --arg yes "$yes" --arg lintyes "$lintyes" --arg day "$day" --arg since "$since" --arg prev "$prev" \
     --argjson t0d "$t0d" --argjson t0w "$t0w" --argjson t0p "$t0p" '$fl[0] as $fl | $so[0] as $so | $ft[0] as $ft | $su[0] as $su | $built[0] as $built | $q[0] as $q | '"$DEPS$LEVEL$INSIDE"'
     def day: fromdate | strflocaltime("%Y-%m-%d");
     def usd: if length == 0 then 0 elif any(.usd == null) then null else map(.usd) | add * 10000 | round / 10000 end;
@@ -809,7 +810,7 @@ snapshot() (
         | ($up // [] | map(select(.number == $n)) | .[0]) as $e
         | if $k != null and $k.result == "" then "building"
           elif $n | IN(($control // {} | .held // [])[]) then "held"
-          elif $k != null and $k.step == "blocked" then (if $k.reason // "" | startswith($yes) then "waiting for a yes" else "blocked" end)
+          elif $k != null and $k.step == "blocked" then (if $k.reason // "" | startswith($yes) or startswith($lintyes) then "waiting for a yes" else "blocked" end)
           elif $open // [] | any(.[]; .number == $n and any(.labels[]; .name == $builtl)) then "held"
           elif $e.rule != null then "skipped by a rule"
           elif $e.before then "waiting for a yes"
@@ -862,15 +863,18 @@ snapshot() (
               else "choose keep or drop for the group: conveyor.sh control pick \(.group) keep or drop." end else . end)) as $pg
     | {time: $h.time, day: $day, repo: $h.repo,
        needsYou: {
-         waiting: [$c[] | select(.step == "blocked" and (.reason | startswith($yes)))
-           | {card, issue, title, sentence: ((.x.visible | select(startswith("yes: ")) | .[5:]) // (.reason | ltrimstr($yes))), since: .x.endAt, parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split, stalls: .x.stalls,
+         waiting: [$c[] | select(.step == "blocked" and (.reason | startswith($yes) or startswith($lintyes)))
+           # A stop for a lint policy change alone says so, whatever the reviewer said is visible (the rule on visible
+           # changes off); a visible stop that changes lint policy too keeps the policy files after the sentence of the review.
+           | {card, issue, title, sentence: (if .reason | startswith($lintyes) then .reason | ltrimstr($lintyes)
+               else .reason as $r | (.x.visible | select(startswith("yes: ")) | .[5:] + (($r | capture("(?<p>; it also changes lint policy: [^;]*)$").p) // "")) // (.reason | ltrimstr($yes)) end), since: .x.endAt, parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split, stalls: .x.stalls,
               files: (($allp[0][.card] // .x.paths) as $p | {count: (.x.diff.files // ($p | if . == null then null else length end)), paths: $p})}
              # The screenshots it kept, beside the hash of its kept patch now (the Board shows them while the two are one).
              + ($shots[0][.card] // {patch: null, shots: null})
              # A follow-up whose change goes beyond the yes up its chain: what goes beyond, as its reviewer said (the ask).
              + ((.reason | capture("\\(it goes beyond the yes of #(?<from>[0-9]+): (?<what>.*)\\)") | {beyond: {from: (.from | tonumber), what}}) // {})
              + times],
-         blocked: [$c[] | select(.step == "blocked" and (.reason | startswith($yes) | not))
+         blocked: [$c[] | select(.step == "blocked" and (.reason | startswith($yes) or startswith($lintyes) | not))
              | {card, issue, title, reason, tail, since: .x.endAt, parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split, stalls: .x.stalls}
              # A land-branch card with the change of its branch already on main ($onm) says so apart from its reason,
              # which the Board reads by its form (the finding of a review, the failing tests): shut is all it needs.

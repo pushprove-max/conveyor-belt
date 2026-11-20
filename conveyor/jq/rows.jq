@@ -1,4 +1,4 @@
-# rows() in conveyor.sh: every card as one row. Arguments: $max (reviews a card), $nodeps, $yes (how those reasons begin),
+# rows() in conveyor.sh: every card as one row. Arguments: $max (reviews a card), $nodeps, $yes and $lintyes (how those reasons begin),
 # $shut (the reason of the closed line of a card whose issue was closed while it was blocked).
 map(select(.step != "push")) | group_by(.card) | map(. as $all
       | map(select(.step | IN("start", "filed", "pushed", "issue") | not)) | . as $g
@@ -80,7 +80,7 @@ map(select(.step != "push")) | group_by(.card) | map(. as $all
                # A build, fix or rebase line whose Done-when check failed items: the fix that starts next is the reply
                # check's (testrun.sh checked()), which the track draws on the step of the session it checks.
                checkFailed: (if (.step | IN("build", "fix", "rebase")) and ((.doneWhen.failed? // []) | length > 0) then true else null end),
-               stop: (if .step != "blocked" then null else .reason | if startswith($nodeps) then "deps" elif startswith("worktree:") then "worktree" elif startswith("brief:") then "brief" elif startswith($yes) then "yes" else null end end),
+               stop: (if .step != "blocked" then null else .reason | if startswith($nodeps) then "deps" elif startswith("worktree:") then "worktree" elif startswith("brief:") then "brief" elif startswith($yes) or startswith($lintyes) then "yes" else null end end),
                # A review's judge: {ran: true, accepted, declined (how many findings it accepted and declined), go (the
                # review's GO came from the judge declining every finding)}; {ran: false, why} for a review it did not
                # read: its call failed or its answer was not read (why says), the review ended with no verdict or held
