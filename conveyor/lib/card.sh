@@ -170,7 +170,7 @@ failline() { # <worktree> <exit> <seconds> <failures json, or null> <verdicts js
 }
 card() { # <card> <issue> [<branch> <tip>]
   local c=$1 n=$2 br=${3:-} tip=${4:-} wt=$CARDS/$1 issue b t pass res vis unclear msg d err isfu='' dec='' why ups='' left='' rebased='' tfix='' last rc sec out merged away
-  local from='' fromk='' was='' mode='' note='' old more base inh='' rv=$REVIEW yesfrom='' said extra
+  local from='' fromk='' was='' mode='' note='' old more base inh='' rv=$REVIEW yesfrom='' extra
   local yfile='' # yfile: ybase is written beside the worktree, as .approvals
   local me cc seen=none sect='' nyes=0 heldto='' vmode='' ybase rules sprompt hdr fin='' finrev earlier='' prv='' caught='' owe tsess='' cmsg rtr rrev ro='[]' pro='[]' rmsg ported='' kp='' mates=() t5=() trc ran apart='' back='' rf sf='' sk='' mk='' pk='' pt=''
   local vrule=on rounds=0 rep hard refix='' waitsec=0 behind='[]' cpid chead cseen own kept='' docpass='' docs parsecheck='' pfix='' # waitsec, behind: the seconds it has waited on other cards, and those cards (settle())
@@ -209,28 +209,8 @@ card() { # <card> <issue> [<branch> <tip>]
   # The test file of a speed-up or Optimize card (a bug card whose issue speedfile() names): its build is told the
   # target (speedbrief()).
   [ -z "$issue" ] || ! jq -e --arg t "$TYPE" 'any(.labels[]?; .name == $t)' <<<"$issue" >/dev/null || sf=$(speedfile "$issue") || sf=$(speedfile "$issue" "$OPTIMIZE") || sf=$(speedfile "$issue" "$REWRITE") || sf=''
-  # Approve before build (the rule at the top): an issue whose section names a change and that has an approval
-  # line holds the card to that section (heldto).
-  if [ -n "$issue" ] && [ "$vrule" = on ]; then
-    seen=$(jq -r "$SEE"' seen' <<<"$issue" 2>/dev/null) || seen=none
-    nyes=$(jq -r "$SEE"' approvals' <<<"$issue" 2>/dev/null) || nyes=0
-    sect=$(jq -r "$SEE"' section // ""' <<<"$issue" 2>/dev/null) || sect=''
-  fi
-  # An approval line is the owner's yes to what a card shows only when it was written after a card of the issue stopped
-  # for that yes. ybase is the count of approval lines when the last one stopped (kept beside its card, carried by
-  # every card after it). A section saying nothing visible changes: with no such stop, the lines there are now.
-  # A section naming a change: it holds the card until a card stopped for differing from it (or for not
-  # saying whether it matches) and an approval line has come since; however many lines it had before any such stop,
-  # they are all yeses to the section, not to something else a build shows.
-  ybase=$nyes
-  if [ "$seen" = nothing ]; then
-    ybase=$(yesbase "$n"); [[ $ybase =~ ^[0-9]{1,3}$ ]] || ybase=$nyes
-    yfile=1
-  elif [ "$seen" = change ] && [[ $nyes =~ ^[0-9]+$ ]] && [ "$nyes" -ge 1 ]; then
-    ybase=$(yesbase "$n")
-    if [[ $ybase =~ ^[0-9]{1,3}$ ]]; then yfile=1; else ybase=''; fi
-    [ -n "$ybase" ] && [ "$nyes" -gt "$ybase" ] || { heldto=1; vmode=held; }
-  fi
+  # The visible-change gate before the build: seen, nyes, sect, ybase, heldto, vmode and yfile (visplan()).
+  visplan
   # A follow-up whose parent (or an issue up its chain) has the owner's yes (inherit()).
   [ "$n" = 0 ] || [ -z "$issue" ] || [ "$vrule" = off ] || inh=$(inherit "$issue")
   # The resume of a retried card: how it takes up the kept patch of its issue's blocked cards.
@@ -537,26 +517,8 @@ card() { # <card> <issue> [<branch> <tip>]
       pb=$fromk/$from.body; [ -n "$from" ] && [ -e "$pb" ] || pb=$CARDS/$from.body
       [ -z "$pf" ] || [ -z "$from" ] || ! lintyes "$issue" "$pb" "$ph" || { echo "conveyor: card $c: its lint policy change is the one $OWNER approved"; pf=''; }
     fi
-    if [ -n "$heldto" ] && git -C "$wt" diff --cached --no-renames --name-only | productpaths; then
-      case $vis in
-        matches) echo "conveyor: card $c: what it shows matches the change $OWNER approved before the build" ;;
-        "differs: "*) printf '%s\n' "$nyes" > "$wt.approvals"; jq -c --arg p "$ph" '{body} + (if $p == "" then {} else {policy: $p} end)' <<<"$issue" > "$wt.body"; block "$c" "$n" "$wt" "${YES}it differs from the change approved before the build: ${vis#differs: }${pf:+; it also changes lint policy: $pf}" post; return ;;
-        *) printf '%s\n' "$nyes" > "$wt.approvals"; jq -c --arg p "$ph" '{body} + (if $p == "" then {} else {policy: $p} end)' <<<"$issue" > "$wt.body"; block "$c" "$n" "$wt" "${YES}the review did not say whether it matches the change approved before the build${pf:+; it also changes lint policy: $pf}" post; return ;;
-      esac
-    elif [ "$vrule" = on ] && [ -z "$heldto" ] && [ "$vis" != no ] && git -C "$wt" diff --cached --no-renames --name-only | productpaths \
-      && { [ "$nyes" = 0 ] || { [ "$seen" = nothing ] && [ "$nyes" -le "$ybase" ]; }; }; then
-      more=''
-      if [ -n "$inh" ]; then
-        said=$(inheritance "$wt.review"); old=$(jq -r .from <<<"$inh")
-        case $said in
-          part) yesfrom=$old ;;
-          "beyond: "*) more=" (it goes beyond the yes of #$old: ${said#beyond: })" ;;
-          *) more=" (the review did not say whether it is part of the yes of #$old)" ;;
-        esac
-      fi
-      [ -n "$yesfrom" ] || { [ "$seen" != nothing ] || printf '%s\n' "$nyes" > "$wt.approvals"; jq -c --arg p "$ph" '{body} + (if $p == "" then {} else {policy: $p} end)' <<<"$issue" > "$wt.body"; block "$c" "$n" "$wt" "$YES${vis#yes: }$more${pf:+; it also changes lint policy: $pf}" post; return; }
-      echo "conveyor: card $c: its visible change is part of the change $OWNER approved in #$yesfrom: the yes is inherited"
-    fi
+    # The visible-change gate after the review (visgate()): a stop blocks the card, its reason in err.
+    visgate || { block "$c" "$n" "$wt" "$err" post; return; }
     [ -z "$pf" ] || { jq -c --arg p "$ph" '{body, policy: $p}' <<<"$issue" > "$wt.body"; block "$c" "$n" "$wt" "${LINTYES}it changes lint policy: $pf" post; return; }
     # The trailers the pack requires of the files this change adds (commit.trailers): one session per card writes
     # those the card has not; still missing, the card blocks, never committing without them. A session that changed
@@ -1064,6 +1026,64 @@ resumeplan() {
     # Rounds still beside the old worktree are the ones its block could not move (a folder of that name in the kept
     # folder stopped it, so that one is not the history): those are copied.
     if [ -d "$CARDS/$from.rounds" ]; then cp -R "$CARDS/$from.rounds" "$wt.rounds" 2>/dev/null; else cp -R "$fromk/$from.rounds" "$wt.rounds" 2>/dev/null; fi
+  fi
+  return 0
+}
+# The visible-change gate before the build (card()). Approve before build (the rule at the top): an issue whose
+# section names a change and that has an approval line holds the card to that section (heldto).
+# An approval line is the owner's yes to what a card shows only when it was written after a card of the issue stopped
+# for that yes. ybase is the count of approval lines when the last one stopped (kept beside its card, carried by
+# every card after it). A section saying nothing visible changes: with no such stop, the lines there are now.
+# A section naming a change: it holds the card until a card stopped for differing from it (or for not
+# saying whether it matches) and an approval line has come since; however many lines it had before any such stop,
+# they are all yeses to the section, not to something else a build shows.
+# It reads card()'s n, issue and vrule, and sets its seen, nyes, sect, ybase, heldto, vmode and yfile.
+visplan() {
+  if [ -n "$issue" ] && [ "$vrule" = on ]; then
+    seen=$(jq -r "$SEE"' seen' <<<"$issue" 2>/dev/null) || seen=none
+    nyes=$(jq -r "$SEE"' approvals' <<<"$issue" 2>/dev/null) || nyes=0
+    sect=$(jq -r "$SEE"' section // ""' <<<"$issue" 2>/dev/null) || sect=''
+  fi
+  ybase=$nyes
+  if [ "$seen" = nothing ]; then
+    ybase=$(yesbase "$n"); [[ $ybase =~ ^[0-9]{1,3}$ ]] || ybase=$nyes
+    yfile=1
+  elif [ "$seen" = change ] && [[ $nyes =~ ^[0-9]+$ ]] && [ "$nyes" -ge 1 ]; then
+    ybase=$(yesbase "$n")
+    if [[ $ybase =~ ^[0-9]{1,3}$ ]]; then yfile=1; else ybase=''; fi
+    [ -n "$ybase" ] && [ "$nyes" -gt "$ybase" ] || { heldto=1; vmode=held; }
+  fi
+  return 0
+}
+# The visible-change gate after a review that would let the card land (card(); the rule is told there). A card held to
+# the approved section (heldto) goes on when the review says its change matches it, and stops when it differs or the
+# review did not say. One not held to a section stops for a visible change in product code with no yes of its own,
+# unless its reviewer says the change is part of an inherited yes (inh): then yesfrom names the issue whose yes it lands on.
+# It reads card()'s c, wt, issue, vrule, heldto, vis, nyes, seen, ybase, inh, ph and pf, and sets its yesfrom, more
+# and old. It fails when the card must stop, with the reason in err and the issue body this review read written to
+# .body beside the worktree (with the lint policy hash when ph is set). The approval count goes to .approvals beside it
+# on a held card's stop, and on a stop of one not held only when its section said nothing visible changes (seen=nothing).
+visgate() {
+  local said # said: the review's answer on the inherited yes (inheritance())
+  if [ -n "$heldto" ] && git -C "$wt" diff --cached --no-renames --name-only | productpaths; then
+    case $vis in
+      matches) echo "conveyor: card $c: what it shows matches the change $OWNER approved before the build" ;;
+      "differs: "*) printf '%s\n' "$nyes" > "$wt.approvals"; jq -c --arg p "$ph" '{body} + (if $p == "" then {} else {policy: $p} end)' <<<"$issue" > "$wt.body"; err="${YES}it differs from the change approved before the build: ${vis#differs: }${pf:+; it also changes lint policy: $pf}"; return 1 ;;
+      *) printf '%s\n' "$nyes" > "$wt.approvals"; jq -c --arg p "$ph" '{body} + (if $p == "" then {} else {policy: $p} end)' <<<"$issue" > "$wt.body"; err="${YES}the review did not say whether it matches the change approved before the build${pf:+; it also changes lint policy: $pf}"; return 1 ;;
+    esac
+  elif [ "$vrule" = on ] && [ -z "$heldto" ] && [ "$vis" != no ] && git -C "$wt" diff --cached --no-renames --name-only | productpaths \
+    && { [ "$nyes" = 0 ] || { [ "$seen" = nothing ] && [ "$nyes" -le "$ybase" ]; }; }; then
+    more=''
+    if [ -n "$inh" ]; then
+      said=$(inheritance "$wt.review"); old=$(jq -r .from <<<"$inh")
+      case $said in
+        part) yesfrom=$old ;;
+        "beyond: "*) more=" (it goes beyond the yes of #$old: ${said#beyond: })" ;;
+        *) more=" (the review did not say whether it is part of the yes of #$old)" ;;
+      esac
+    fi
+    [ -n "$yesfrom" ] || { [ "$seen" != nothing ] || printf '%s\n' "$nyes" > "$wt.approvals"; jq -c --arg p "$ph" '{body} + (if $p == "" then {} else {policy: $p} end)' <<<"$issue" > "$wt.body"; err="$YES${vis#yes: }$more${pf:+; it also changes lint policy: $pf}"; return 1; }
+    echo "conveyor: card $c: its visible change is part of the change $OWNER approved in #$yesfrom: the yes is inherited"
   fi
   return 0
 }
