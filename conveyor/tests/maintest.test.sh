@@ -80,10 +80,10 @@ t_maintestneeds() {
   touch "$STUB/list-filed"; tune 'del(.test.main)'
   [ "$(loop snapshot --fresh | jq -c .mainTest)" = null ] || fail "the snapshot names a failure with no test.main in the pack: $(loop snapshot --fresh | jq -c .mainTest)"
 }
-# From the failure t_maintest ends on: the same cases fail again, then other cases, then the first again
-# (t_maintestagain); a pass clears it (t_maintestclear).
+# From the failure maintest_failed keeps: the same cases fail again, then other cases, then the first again; then a
+# pass clears it.
 t_maintestagain() {
-  maintest_start; local B C D F
+  maintest_start; local B C D E F
   maintest_failed
   # The same cases fail again on a later commit, the issue still open: a comment on it, and no second issue.
   echo OPEN > "$STUB/state.100101"; C=$(move "move c"); mt $((T0 + 7200)); [ "$(runs)" = 1 ] || fail "the whole test did not run again: $(rec .)"
@@ -103,13 +103,9 @@ t_maintestagain() {
   [ "$(wc -l < "$STUB/filed")" = 2 ] || fail "cases whose issue is open were filed again after another failure: $(jq -c '[.number, .title]' "$STUB/filed")"
   grep -q "^100101 --body .*failed again, with the same cases, at ${F:0:12}" "$STUB/comments" && [ "$(rec .fail.issue)" = 100101 ] \
     || fail "the cases' open issue was not added to after another failure: $(cat "$STUB/comments" 2>&1) $(rec .)"
-}
-t_maintestclear() {
-  maintest_start; local B E
-  maintest_failed
   # A pass clears it: Needs you no longer lists it, and the next failure's commits are counted from here.
   echo 'echo "x$CONVEYOR_TEST_RERUN" >> "$STUB/mains"' > "$STUB/main-cmd"
-  E=$(move "move e"); mt $((T0 + 7200))
+  E=$(move "move e"); mt $((T0 + 18000))
   [ "$(rec '[.pass, .fail]')" = "[\"$E\",null]" ] && [ "$(loop snapshot --fresh | jq -c .mainTest)" = null ] || fail "a pass did not clear the failure: $(rec .)"
 }
 # A try that tested nothing, or whose failure reached no one, is tried again: from a pass at A.
