@@ -63,17 +63,25 @@ guard s2 'bash t/slow.test.sh 1.2'
 # failure and the log's path, not the 2,000 lines of noise, and the command's own exit status.
 printf '%s\n' 'for i in $(seq 2000); do echo "noise $i"; done; echo "FAIL [one]: broke"; exit 3' > "$T/p/t/long.test.sh"
 guard s4 'bash t/long.test.sh'
-grep -qF 'conveyor/tools/testbrief.sh'"'"' -- sh -c' <<<"$(jq -r '.hookSpecificOutput.updatedInput.command' <<<"$OUT")" \
+WRAPPED=$(jq -r '.hookSpecificOutput.updatedInput.command' <<<"$OUT")
+grep -qF 'conveyor/tools/testbrief.sh'"'"' --from "$__cv_t" --rc "$__cv_r"' <<<"$WRAPPED" \
   || fail "a plain test command was not rewritten to go through testbrief.sh: $OUT"
+# Bug caught (issue #967): the rewrite handed its output file to testbrief.sh through `sh -c '...; rm -f "$1"; ...'`,
+# and Claude Code refuses a `sh -c` script that runs rm, so no test call ran. The call has no `sh -c`, and the wrapper
+# (from `__cv_test() {` on; the budget's EXIT trap above it is plain shell text) has no rm.
+{ ! grep -qF 'sh -c' <<<"$WRAPPED" && ! sed -n '/^__cv_test() {$/,$p' <<<"$WRAPPED" | sed 1,2d | grep -qE '(^|[^[:alnum:]_])rm( |$)'; } \
+  || fail "the rewritten test call has a sh -c script or an rm in its wrapper: $WRAPPED"
 # Bug caught (issue #873): the rewrite ran the call as an `export -f` function in a child bash. zsh, the session's
 # shell on macOS, exports no function, so every test call failed with `__cv_test: command not found` (127). The
 # rewritten call must run, with the call's exit code, under bash, under sh (which has no `export -f` either) and
-# under zsh when it is installed.
+# under zsh when it is installed. Each run has its own $TMPDIR, which must hold only the brief's log after it (#967:
+# testbrief.sh --from removes the output file the session's shell wrote).
 for sh in bash sh zsh; do
   command -v "$sh" > /dev/null || { echo "skip $sh is not installed"; continue; }
-  run "$sh"
-  { [ "$RUN_RC" = 3 ] && grep -qxF '2001:FAIL [one]: broke' "$T/run.out" && grep -q '^testbrief: exit 3; the whole output (2001 lines) is in /' "$T/run.out" \
+  mkdir "$T/tmp-$sh"; TMPDIR=$T/tmp-$sh run "$sh"
+  { [ "$RUN_RC" = 3 ] && grep -qxF '2001:FAIL [one]: broke' "$T/run.out" && grep -q "^testbrief: exit 3; the whole output (2001 lines) is in $T/tmp-$sh/testbrief\." "$T/run.out" \
     && [ "$(wc -l < "$T/run.out")" -le 20 ]; } || fail "the wrapped test run under $sh (exit $RUN_RC) did not run the call and print only the brief: $(head -c 600 "$T/run.out")"
+  [ -z "$(find "$T/tmp-$sh" -mindepth 1 ! -name 'testbrief.*')" ] || fail "the wrapped test run under $sh left a file under \$TMPDIR besides the brief's log: $(ls "$T/tmp-$sh")"
 done
 # One already through the engine's wrapper is not wrapped again, and its time still counts to the budget.
 TB=$(cd "$(dirname "$0")/../../../conveyor/tools" && pwd -P)/testbrief.sh

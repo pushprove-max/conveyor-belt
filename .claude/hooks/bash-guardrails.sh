@@ -1069,7 +1069,7 @@ Instead: run it once, and after it name the cases or test files you changed sinc
   if [ "$WR_PLAIN" = 1 ] && [[ $WR_BG != *'&'* ]] && [ -x "$WR_TB" ]; then
     WR_RUN="__cv_test() {"$'\n'"$CMD"$'\n'"}"$'\n'"if __cv_t=\$(mktemp \"\${TMPDIR:-/tmp}/testrun.XXXXXX\"); then"$'\n'
     WR_RUN+="( __cv_test ) > \"\$__cv_t\" 2>&1; __cv_r=\$?"$'\n'
-    WR_RUN+="$(shq "$WR_TB") -- sh -c 'cat \"\$1\"; rm -f \"\$1\"; exit \"\$2\"' sh \"\$__cv_t\" \"\$__cv_r\""$'\n'
+    WR_RUN+="$(shq "$WR_TB") --from \"\$__cv_t\" --rc \"\$__cv_r\""$'\n'
     WR_RUN+="else __cv_test; fi"
   fi
   # A call with no test command is run with its output (both streams) in a file under $TMPDIR, then through
