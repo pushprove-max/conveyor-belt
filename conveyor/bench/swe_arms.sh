@@ -370,8 +370,9 @@ swe_trial() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor kind
     # A run's task shows the step the command is at while it runs (swe_watch, bench/swe.sh).
     swe_in "$to" "$c" "$sb/$SWE_MAIN" "$run" "SWE_SB=$sb" "SWE_PROMPT=$sb/prompt" "SWE_MODEL=${SWE_MODEL:-}" "SWE_EFFORT=$(jq -r '.effort | strings' <<<"$a")" < /dev/null > "$h/out" 2> "$h/err" &
     local j=$!; swe_watch "$j" "$c" "$kind" "$sb"; wait "$j"; rc=$?
-    # A command stopped at the task's time limit is the arm's own result: its patch is graded.
-    [ "$rc" = 0 ] || [ "$rc" = 124 ] || why="its command failed (exit $rc): $(cliwords "$(tail -n 20 "$h/err" 2>/dev/null; jq -rRn "$NOSTARTSAID" "$h/out" 2>/dev/null)" | tail -n 3 | paste -sd ' ' -)"
+    # A command stopped at the task's time limit is the arm's own result: its patch is graded. A conveyor arm's
+    # command writes to its loop log, so its why is read from that log below.
+    [ "$rc" = 0 ] || [ "$rc" = 124 ] || [ "$kind" = conveyor ] || why="its command failed (exit $rc): $(cliwords "$(tail -n 20 "$h/err" 2>/dev/null; jq -rRn "$NOSTARTSAID" "$h/out" 2>/dev/null)" | tail -n 3 | paste -sd ' ' -)"
   fi
   # What the arm left in the sandbox is read in its container, never by the host: the arm could write every file
   # there, so a host read or write could follow its symlink to a host file, and the checkout's .git/config could make
@@ -381,6 +382,8 @@ swe_trial() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor kind
     else git add -A && git diff --binary --no-ext-diff --no-textconv --cached "$SWE_BASE" --; fi' "SWE_SB=$sb" "SWE_BASE=$base" "SWE_KIND=$kind" < /dev/null > "$h/patch" 2> /dev/null || p=1
   if [ "$kind" = conveyor ]; then
     swe_in 600 "$c" "$sb" 'cat "$SWE_SB/loop.log"' "SWE_SB=$sb" < /dev/null > "$h/loop.log" 2> /dev/null || rm -f "$h/loop.log"
+    [ -z "$rc" ] || [ "$rc" = 0 ] || [ "$rc" = 124 ] \
+      || why="its command failed (exit $rc): $(cliwords "$(tail -n 20 "$h/loop.log" 2>/dev/null)" | tail -n 3 | paste -sd ' ' -)"
     swe_in 600 "$c" "$sb" 'cat "$SWE_SST/cards.jsonl"' "SWE_SST=$SWE_SST" < /dev/null > "$h/cards.jsonl" 2> /dev/null || rm -f "$h/cards.jsonl"
     # The live records too: a session the time limit ended before its line was written is priced from them.
     swe_in 600 "$c" / "$SWE_LIVES" "SWE_CARDS=$sb/cards" < /dev/null > "$h/live" 2> /dev/null || rm -f "$h/live"

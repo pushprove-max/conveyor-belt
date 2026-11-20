@@ -16,8 +16,8 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
 # The fixture, made once per run (template) and copied: in <folder>/task.git a task repository whose base commit
 # holds x.py "bug"; in <folder>/eng.git an engine with commits A (tagged v1.0.0) and B (main, its review stage
-# changed): each one's `run` notes "<version> <issue title>" in $SWE_FX/log, waits while $SWE_FX/hold is there, and
-# writes the card's records; A lands "fixed" in x.py for every task, B blocks the task proj__a-1 after two NO-GO
+# changed): each one's `run` notes "<version> <issue title>" in $SWE_FX/log, waits while $SWE_FX/hold is there, exits 1 while
+# $SWE_FX/efail is there, and writes the card's records; A lands "fixed" in x.py for every task, B blocks the task proj__a-1 after two NO-GO
 # reviews, each read by the judge. <folder>/py is the stub harness: the two tasks, an image fetch that waits while
 # $SWE_FX/ihold is there and fails when $SWE_FX/broken names it, and a grade that resolves a patch holding "fixed" unless $SWE_FX/wrong names the task.
 swemake() { # <folder>
@@ -33,6 +33,7 @@ EOF
 V=A
 t=$(gh issue list --json title | jq -r '.[0].title'); echo "$V $t" >> "$SWE_FX/log"; echo $$ > "$SWE_FX/pid"
 while [ -e "$SWE_FX/hold" ]; do sleep 0.1; done
+[ ! -e "$SWE_FX/efail" ] || { echo ENGINE-FAIL-SAID; exit 1; }
 # The real loop starts no card unless its queue takes the task's issue: the dry pick on the sandbox's pack, control
 # record and issue, by the engine under test (a fake that skipped it missed an arm's policy keeping the issue off).
 # The issue is opened by the owner, as openissues() reads it from GitHub.

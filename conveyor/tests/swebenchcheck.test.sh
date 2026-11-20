@@ -116,3 +116,13 @@ t_swecheckstale() {
       ["stub-b","failed","the check stopped before it ended"],["stub-quiet","ready",null],["stub-seed","changed",null]]')" ] \
     || fail "history reads an arm ready on a pass the run would not take: $(jq -c '[.arms[] | [.name, .state, .why]]' <<<"$o")"
 }
+
+# Bug (#1016): a conveyor arm's engine run writes to its loop log, not to the command's stderr, so when it exited 1
+# the reason read the empty stderr and said nothing of why. Here the fixture engine exits 1 with a line in its log.
+t_swecheckenginefail() {
+  swe; local o
+  : > "$SWE_FX/efail" || fail "the failing engine was not set"
+  o=$(loop bench swe arms check conveyor 2>&1) && fail "the check passed with an engine run that exited 1: $o"
+  grep -q "^conveyor: failed: on the trivial task, its command failed (exit 1): ENGINE-FAIL-SAID" <<<"$o" \
+    || fail "the reason does not hold the last line of the engine's loop log: $o"
+}
