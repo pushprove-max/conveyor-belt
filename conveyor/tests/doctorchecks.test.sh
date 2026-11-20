@@ -4,9 +4,10 @@
 # Engine cases: doctor's checks of the pin, the Board's virtualenv, gh, the host file, the pack and the tools. Its own
 # file, to keep setup.test.sh under the 600 lines a case file may have. The helpers are doctor.test.sh's (doctordone,
 # without, uninstalled) and setup.test.sh's (sample). A case that checks only lines no setup run changes (the tools,
-# gh, the pack itself, and the Board, whose pin check reads the pack and, with none, finds no older Board) starts
-# from the sample with no setup run: doctordone's setup --pin added about 5 s of CPU to each and changed none of
-# those lines. A case that checks doctor fails for its one fault
+# gh, and the Board, whose pin check reads the pack and, with none, finds no older Board) starts from the sample with
+# no setup run: doctordone's setup --pin added about 5 s of CPU to each and changed none of those lines. The
+# missing-pack case also starts from the sample, as it needs no pack, and setup --pin writes one. A case that checks
+# doctor fails for its one fault
 # keeps doctordone (or proves no other line is missing), as the missing pack alone fails doctor.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
