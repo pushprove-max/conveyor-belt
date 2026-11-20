@@ -81,13 +81,13 @@ t_bugpasses() {
 }
 
 # Bug it catches: the proof run had no time limit for one hung test, so a new test that waits for what the unfixed
-# code never writes held its card until stopped by hand. Here it hangs on main's code; its file's `# timeout: 2` line
+# code never writes held its card until stopped by hand. Here it hangs on main's code; its file's `# timeout: 1` line
 # stops the file there, far before the run's own limit (testTimeout 15 s, the limit a file with no such line has, as in
-# t_bughungdefault): the result names a.test.sh as timed out at 2 s, not 15 s, and it counts as failing without the
+# t_bughungdefault): the result names a.test.sh as timed out at 1 s, not 15 s, and it counts as failing without the
 # fix (the check holds).
 t_bughung() {
-  TUNE='.tunables.testTimeout = 15' bugtest $'# timeout: 2\nuntil grep -qx two a.txt; do sleep 0.2; done' # sleep: the new test's own wait, which never ends on main's code
-  hungsaid 2 'it was stopped there' 124 # 124: a file past its own limit ends the run as timed out (filecmd())
+  TUNE='.tunables.testTimeout = 15' bugtest $'# timeout: 1\nuntil grep -qx two a.txt; do sleep 0.2; done' # sleep: the new test's own wait, which never ends on main's code
+  hungsaid 1 'it was stopped there' 124 # 124: a file past its own limit ends the run as timed out (filecmd())
 }
 # The checks of t_bughung and t_bughungdefault: the result says a.test.sh timed out at <seconds> (the output's line
 # ends `and <stop>`; the run's exit <exit>), counted as failing without the fix, and the check holds.
@@ -100,11 +100,11 @@ hungsaid() { # <seconds> <stop> <exit>
 }
 
 # Bug it catches: a hung new test whose file has no `# timeout:` line was stopped by the run's own limit (testTimeout,
-# 4 s here) with nothing naming it, so the run gave no failing file and did not count as proof; the card went back to
+# 2 s here) with nothing naming it, so the run gave no failing file and did not count as proof; the card went back to
 # build. The file is named as timed out at the testTimeout limit and counts as failing without the fix.
 t_bughungdefault() {
-  TUNE='.tunables.testTimeout = 4' bugtest 'until grep -qx two a.txt; do sleep 0.2; done' # sleep: the new test's own wait, which never ends on main's code
-  hungsaid 4 'the run was stopped there' 124
+  TUNE='.tunables.testTimeout = 2' bugtest 'until grep -qx two a.txt; do sleep 0.2; done' # sleep: the new test's own wait, which never ends on main's code
+  hungsaid 2 'the run was stopped there' 124
 }
 
 # Bug it catches: a runner that runs another file's cases logs them under its own name (the engine's runner,
@@ -183,14 +183,15 @@ t_bugcommentsyntax() {
   printf '%s\n' "cat <<'E'" '# STANDING YES' 'E' > "$r/rules.sh"
   printf '%s\n' 'ok();' > "$r/a.test.js"
   git -C "$r" add -A && git -C "$r" commit -qm main || fail "the fixture commit"
+  # The engine's functions commentsonly() calls, read once for every try.
+  local fns; fns=$(sed -n '/^testpaths() {/,/^}/p' "$SRC/lib/issues.sh"; sed -n '/^uncomment() {/,/^}/p; /^commentsonly() {/,/^}/p' "$SRC/lib/testrun.sh")
   # <name> <file> <sed script> [notest]: the file changed so and, unless notest, a.test.js changed, staged; notes
   # "<name>=<0 when comments only>".
   try() {
     sed -i "$3" "$r/$2" && { [ "${4-}" = notest ] || echo 'ok(1);' >> "$r/a.test.js"; } && git -C "$r" add -A || fail "staging $1"
     # shellcheck disable=SC2034 # TESTRX and TESTRUNNERS are read by testpaths(), loaded below
     got+=" $1=$( . "$SRC/lib/portable.sh"; TESTRX='\.test\.' TESTRUNNERS=''
-      eval "$(sed -n '/^testpaths() {/,/^}/p' "$SRC/lib/issues.sh"; sed -n '/^uncomment() {/,/^}/p; /^commentsonly() {/,/^}/p' "$SRC/lib/testrun.sh")"
-      commentsonly "$r"; echo $?)"
+      eval "$fns"; commentsonly "$r"; echo $?)"
     git -C "$r" reset -q --hard
   }
   try js app.js 's|x is two|x is one|'
@@ -501,12 +502,13 @@ EOF
 }
 # optproof() called as card() calls it, on card c7 of the Optimize issue for f.test.sh, whose change runs <change> in
 # its worktree on main (optmain's). When the check fails, the card is blocked as card() blocks it (lib/card.sh:
-# SPEEDCHECKED set). The check's exit is in $RC.
+# SPEEDCHECKED set). The check's exit is in $RC; the review's prompt of an Optimize card (OPTREVIEW) in
+# $T/$CASE/optreview, from the same load of the engine.
 optwt() { # <change> <cpu of f> [<cpu of f1> <cpu of f2>]
   local b=$1; shift
   optmain "$@"
   fx_wt "$b" f.test.sh 'echo slow' g.test.sh 'echo other'
-  fx_in 'optproof c7 "$FXWT" "{\"number\": 7, \"title\": \"Optimize the test file f.test.sh\"}" f.test.sh \
+  fx_in 'printf "%s\n" "$OPTREVIEW" > "$T/$CASE/optreview"; optproof c7 "$FXWT" "{\"number\": 7, \"title\": \"Optimize the test file f.test.sh\"}" f.test.sh \
     || { r=$?; SPEEDCHECKED=$SPEEDCHECK block c7 7 "$FXWT" "build: $(<"$FXWT.unfixed")"; exit $r; }'
 }
 
@@ -523,8 +525,7 @@ t_optkeep() {
   # flagged a merge the engine passes at the file's figure plus the merged file's (t_optmergeinto). The whole rule is
   # matched, so a second, unconditional "less than that figure" limit for a kept file also fails it. The review's
   # prompt (OPTREVIEW, which card() gives the review of an Optimize card) is text with no behaviour to run, so it is read.
-  fx_in 'printf "%s\n" "$OPTREVIEW"'
-  tr '\n' ' ' < "$T/$CASE/run.out" | grep -qF 'A file kept must cost less than that figure; for stabilise, no more than it; and, when another test file is merged into it, no more than that figure plus the median on record of each test file merged into it. The files of a split' \
+  tr '\n' ' ' < "$T/$CASE/optreview" | grep -qF 'A file kept must cost less than that figure; for stabilise, no more than it; and, when another test file is merged into it, no more than that figure plus the median on record of each test file merged into it. The files of a split' \
     || fail "the review is not told one limit for a kept file, with the limit of a merge into it"
 }
 
