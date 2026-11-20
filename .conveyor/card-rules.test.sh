@@ -27,4 +27,8 @@ for f in .conveyor/card-rules.md conveyor/tests/speed/README.md; do
   rule "$f" 'A case that proves one engine function calls that function; a whole card run is kept for what only a whole card proves' \
     'pays for the loop' '`testfails`' '76% cut' '#362' '`testrec`' '89%' '#371'
 done
+# Issue #1009. Bug it catches: the rule dropped, or left without its files, its cost or the reviewer's finding, so a
+# card again puts a fix in the suite's runner the issue did not name and the next release runs every test file.
+rule .conveyor/card-rules.md 'only when its issue names that file or setting' '`.conveyor/test-full.sh`' \
+  '`conveyor/conveyor.test.sh`' "pack's \`test\` settings" 'next release run every test file' 'why no other place works' 'P2 finding'
 exit $rc

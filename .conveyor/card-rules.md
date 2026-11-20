@@ -24,6 +24,11 @@
 - Run `.conveyor/test-changed.sh` at most once in a session, and only when the change touches code shared across areas
   of the engine. Do not run the whole `conveyor/conveyor.test.sh` or `conveyor/tools/closure.test.sh`: the Test step
   runs what the change touches before the card lands.
+- A card changes the suite's runner `.conveyor/test-full.sh`, the engine's runner `conveyor/conveyor.test.sh` or the
+  pack's `test` settings only when its issue names that file or setting: such a change makes the next release run
+  every test file, not only the files that changed or failed (`conveyor/commands/release-prep.sh`). When the card must
+  make one, its reply says why no other place works. The reviewer reports a change to one of them that the issue does
+  not name as a P2 finding.
 - A new engine source file goes in exactly one area of `.conveyor/engine-areas.json` (each engine source file to its
   case files), or the test run fails. The map is one fact a line (`{"area": "<area>", "file": "<path>"}`, or `"test":
   "<case file>"`): add a line, never a list.
