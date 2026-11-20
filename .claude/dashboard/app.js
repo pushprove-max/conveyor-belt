@@ -1162,7 +1162,7 @@
     return r;
   }
   // The page's only writes: an answer to an open decision, a control action, the collector restart, the Time set in
-  // Customize and the Dismiss of a plugin problem, all to its own host.
+  // Customize, and the Dismiss, preview and filing of a plugin problem, all to its own host.
   function post(path, body) {
     return window.fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(goLogin);
   }

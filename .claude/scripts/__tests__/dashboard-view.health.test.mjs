@@ -155,6 +155,70 @@ test('Health: the Plugin problems pane lists each note with its time, card and t
   assert.equal(pane(), null);
 });
 
+// Issue 1043: File on GitHub. Bugs it catches: a note filed with no preview or with the proposed text, not the owner's
+// edits; edits lost when the live feed draws the panel again; a second note filed with the first; a refused or failed
+// filing that dropped the note or its preview with no reason; a filed note left in the list, or its link not shown.
+test('Health: File on GitHub previews the issue, files only the confirmed note with its edits, and keeps it on a refusal', async () => {
+  const w = page('health');
+  const data = full(), file = '/srv/sample/conveyor/state/foreman/plugin-bugs.md';
+  const notes = [
+    { at: '2026-11-09T16:00:00Z', card: '-', text: 'setup never sets linkFromMain · evidence: -', line: '- 2026-11-09T16:00:00Z · card - · setup never sets linkFromMain · evidence: -' },
+    { at: '2026-11-09T16:10:00Z', card: '-', text: 'npm ci runs twice · evidence: -', line: '- 2026-11-09T16:10:00Z · card - · npm ci runs twice · evidence: -' },
+    { at: '2026-11-09T16:20:00Z', card: '-', text: 'running cards keep the old engine code, filed as #449 · evidence: -', line: '- 2026-11-09T16:20:00Z · card - · running cards keep the old engine code, filed as #449 · evidence: -' }];
+  data.panels.health.data.pluginBugs = [{ repo: 'sample', projects: ['sample'], count: 3, file, url: 'plugin-bugs/sample.txt', notes }];
+  deliver(w, data);
+  const pane = () => panel(w, 'health').querySelector('section.plugin-problems');
+  const rows = () => Array.from(pane().querySelectorAll('li.row'));
+  // Bug (E2): a note the Foreman marked "filed as #<n>" offered File on GitHub, so it could be filed a second time.
+  assert.deepEqual(rows().map((li) => !!li.querySelector('[data-act="plugin-file-open"]')), [true, true, false], 'a note that names its issue is not offered for filing');
+  assert.ok(rows()[2].querySelector('[data-act="plugin-dismiss"]'), 'it can still be dismissed');
+  const answer = (status, text) => ({ ok: status === 200, status, text: () => Promise.resolve(text) });
+  w.replies = { 'plugin-preview': answer(200, JSON.stringify({ title: 'npm ci runs twice', body: 'npm ci runs twice · evidence: -\n\nPlugin version: 1.7.0\n', repo: 'owner/plugin' })) };
+  rows()[1].querySelector('[data-act="plugin-file-open"]').click();
+  await settle(); await settle();
+  assert.deepEqual(w.posts, [{ url: 'plugin-preview', body: { file, line: notes[1].line } }], 'the preview is asked for that note; nothing is filed yet');
+  assert.equal(rows()[0].querySelector('.plugin-preview'), null, 'the other note has no preview');
+  const title = () => rows()[1].querySelector('input.plugin-title'), body = () => rows()[1].querySelector('textarea.plugin-body');
+  assert.equal(title().value, 'npm ci runs twice');
+  assert.match(body().value, /Plugin version: 1\.7\.0/);
+  assert.match(rows()[1].querySelector('.plugin-preview').textContent, /owner\/plugin on GitHub/);
+  title().value = 'npm ci runs twice in setup';
+  body().value = 'npm ci runs twice in setup, edited\n';
+  next(w, clone(data));
+  assert.equal(title().value, 'npm ci runs twice in setup', 'an edit stays when the panel is drawn again');
+  assert.equal(body().value, 'npm ci runs twice in setup, edited\n', 'a body edit stays when the panel is drawn again');
+  // Refused by the privacy check: the preview stays, and names the hit.
+  w.replies['plugin-file'] = answer(422, 'nothing was filed: the privacy check found body line 3: home path');
+  rows()[1].querySelector('[data-act="plugin-file"]').click();
+  await settle(); await settle();
+  assert.equal(rows().length, 3);
+  assert.match(rows()[1].querySelector('.plugin-preview .warn-note').textContent, /^Not filed: .*body line 3: home path\.$/);
+  // gh failed: the note stays, with gh's error.
+  w.replies['plugin-file'] = answer(502, 'nothing was filed: gh issue create failed: HTTP 401');
+  rows()[1].querySelector('[data-act="plugin-file"]').click();
+  await settle(); await settle();
+  assert.equal(rows().length, 3);
+  assert.match(rows()[1].querySelector('.plugin-preview .warn-note').textContent, /gh issue create failed: HTTP 401/);
+  // Filed, but the note could not be removed: it says so, not "Not filed".
+  w.replies['plugin-file'] = answer(500, 'filed as https://github.com/owner/plugin/issues/8, but the note could not be removed: Permission denied');
+  rows()[1].querySelector('[data-act="plugin-file"]').click();
+  await settle(); await settle();
+  assert.match(rows()[1].querySelector('.plugin-preview .warn-note').textContent, /^Filed as https:\/\/github\.com\/owner\/plugin\/issues\/8, but the note could not be removed/);
+  w.replies['plugin-file'] = answer(200, 'https://github.com/owner/plugin/issues/9');
+  rows()[1].querySelector('[data-act="plugin-file"]').click();
+  await settle(); await settle();
+  const filed = w.posts.filter((p) => p.url === 'plugin-file');
+  assert.equal(filed.length, 4);
+  // Bug (E3): the proposed body was sent in place of the owner's edited one.
+  assert.ok(filed.every((p) => p.body.line === notes[1].line && p.body.title === 'npm ci runs twice in setup'
+    && p.body.body === 'npm ci runs twice in setup, edited\n'), 'only that note, with the edited title and body');
+  assert.deepEqual(rows().map((li) => li.querySelector('.title').textContent), [notes[0].text, notes[2].text], 'the filed note leaves; the other notes stay');
+  assert.ok(rows()[0].querySelector('[data-act="plugin-file-open"]'), 'the note not approved stays unfiled: it is still offered for filing');
+  assert.equal(pane().querySelector('.plugin-filed a').getAttribute('href'), 'https://github.com/owner/plugin/issues/9');
+  next(w, clone(data));
+  assert.equal(pane().querySelector('.plugin-filed a').getAttribute('href'), 'https://github.com/owner/plugin/issues/9', 'the link stays for the session');
+});
+
 // Bug: the live feed rewrites the stream every 10 s and the panel is drawn again on each write, so an opened "Show
 // output" or "checks fine" closed under the owner while they read it. What was open stays open; what was not, stays shut.
 // Bug (#557): the push's output was a new box at each draw, so a reader scrolled in it went back to its top.

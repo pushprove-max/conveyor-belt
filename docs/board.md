@@ -212,7 +212,19 @@ cursor goes to the heading of that group.
 - **Plugin problems** in Health shows when a Foreman noted a problem in Conveyor itself, in `plugin-bugs.md` in its
   folder. Each note is one row: the time, the card and what the Foreman saw. Fix the problem, or file it as an issue
   in the repository of Conveyor. Then click **Dismiss** to remove that note from `plugin-bugs.md`. Dismiss does not file
-  an issue, and it keeps the other notes. When no note is left, the pane goes away.
+  an issue, and it keeps the other notes. When no note is left and no link to a filed issue shows, the pane goes away.
+- To file a note, click **File on GitHub** in its row. A preview opens below the note. The title is the first clause
+  of the note. The body holds the note, the plugin version, the engine commit and the system. The card name names
+  your project, so the body shows it as `<card>`. You can change the
+  title and the body. Nothing is filed until you click **File the issue**. The issue goes to the repository that
+  `.claude-plugin/plugin.json` names. Click **Cancel** to close the preview. A note that names its issue, as in
+  "filed as #449", is filed already, so it has no **File on GitHub**.
+- Before the Board files the issue, `conveyor/privacy/check.sh` reads the title and the body. If it finds a home path,
+  a private address or another private text, the Board files nothing. The preview names each hit by its line, for
+  example "body line 3: home path". Change that line and click **File the issue** again.
+- When the issue is filed, the note leaves the list and `plugin-bugs.md`, and the pane shows a link to the new issue
+  until you load the page again. If `gh` fails, the note stays, and the preview shows its error. Each
+  note is filed only from its own preview. The other notes stay as they are.
 - A Health row whose error is one line says what failed in a short sentence, for example "The Board could not get
   main from GitHub." Click **Raw error** to read the error as it came, with **Copy output** to copy it.
 - **Work now**, at the foot of Health, shows what keeps the Conveyor machine busy now. Open it to read the machine.

@@ -93,6 +93,7 @@ import ipaddress
 import json
 import math
 import os
+import platform
 import re
 import secrets
 import shlex
@@ -115,7 +116,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # whose ledger holds the decision.
 MAX_ANSWER_BODY = 4096
 MAX_TIME_BODY = 64     # POST /time: {"time": "24-hour"}
-MAX_DISMISS_BODY = 16384  # POST /plugin-dismiss: {file, line}, one note of plugin-bugs.md
+MAX_DISMISS_BODY = 16384  # POST /plugin-dismiss and /plugin-preview: {file, line}, one note of plugin-bugs.md
+MAX_FILE_BODY = 65536  # POST /plugin-file: {file, line, title, body}, the note and the issue the owner edited
+GH_LIMIT = 60          # POST /plugin-file: its one gh issue create (gh_write's own timeout, lib/issues.sh)
 RESTART_COOLDOWN = 60  # seconds between restarts; the stamp is a file because the restart kills this server
 HISTORY_TTL = 60       # GET /history with no live feed gives the kept copy while it is this young (dashboard.sh's HISTORY_TTL)
 STREAM_FRESH = 60      # stream.json older than this: no live feed, so no ledger key (dashboard.sh's STREAM_FRESH)
@@ -768,16 +771,93 @@ def board_main():
     return common[:-5] if common.endswith('/.git') else common
 
 
-def host_file():
-    """conveyor/host.json as dashboard.sh reads it: this machine's host file when there is one, else the committed one
-    of this machine's checkout (board_main()). ValueError when it does not read."""
+def host_path():
+    """The conveyor/host.json dashboard.sh reads: this machine's host file when there is one (dashboard.sh's conveyor()
+    rule), else the committed one of this machine's checkout (board_main()). ValueError when no checkout is found."""
     host_file = os.path.join(os.environ.get('XDG_CONFIG_HOME') or os.path.expanduser('~/.config'), 'conveyor', 'host.json')
+    return host_file if os.path.exists(host_file) else os.path.join(board_main(), 'conveyor', 'host.json')
+
+
+def host_file():
+    """conveyor/host.json as dashboard.sh reads it (host_path()). ValueError when it does not read."""
     try:
-        # This machine's host file when there is one (dashboard.sh's conveyor() rule), else main's conveyor/host.json.
-        with open(host_file if os.path.exists(host_file) else os.path.join(board_main(), 'conveyor', 'host.json')) as f:
+        with open(host_path()) as f:
             return json.load(f)
     except (OSError, ValueError) as e:
         raise ValueError('conveyor/host.json is missing or not understood') from e
+
+
+PLUGIN_ROOT = os.path.dirname(os.path.dirname(HERE))  # the checkout this Board runs from
+NOTE_LINE = re.compile(r'- (?P<at>\S+) · card (?P<card>\S+) · (?P<text>.*)')  # a plugin-bugs.md note (foreman/stop.sh)
+# A note that names the issue it was filed as (foreman/stop.sh's and foreman.sh's test): it is not filed again.
+NOTE_FILED = re.compile(r' filed as #[1-9][0-9]*\s*\.? · evidence: ', re.I)
+
+
+def note_issue(line):
+    """The issue a Plugin problems note proposes, as (title, body): the title is the note's first clause (its text before
+    the first ' · ', cut at the first , ; : or . that ends a clause); the body is the note, then the plugin's version,
+    the engine commit and the system of the checkout this Board runs from. The card id stays out: it names a project,
+    so each time the note's text says it (its finding, its evidence path) it is <card> in the body."""
+    m = NOTE_LINE.fullmatch(line)
+    text = m.group('text') if m else line[2:]
+    if m and m.group('card') != '-':
+        text = text.replace(m.group('card'), '<card>')
+    title = re.split(r'[,;:.](?=\s|$)', text.split(' · ')[0], maxsplit=1)[0].strip() or 'Plugin problem'
+    try:
+        with open(os.path.join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'), encoding='utf-8') as f:
+            version = json.load(f).get('version')
+    except (OSError, ValueError, AttributeError):
+        version = None
+    try:
+        commit = subprocess.run(['git', '-C', PLUGIN_ROOT, 'rev-parse', 'HEAD'], capture_output=True, text=True,
+                                timeout=10, check=True).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        commit = ''
+    body = '%s\n\n%sPlugin version: %s\nEngine commit: %s\nSystem: %s %s %s\n' % (
+        text, 'Noted: %s\n' % m.group('at') if m else '', version if isinstance(version, str) and version else 'not known',
+        commit or 'not known', platform.system(), platform.release(), platform.machine())
+    return title, body
+
+
+def plugin_repo():
+    """The owner/name of the GitHub repository .claude-plugin/plugin.json names (its repository), where a plugin
+    problem is filed. ValueError when it names none."""
+    try:
+        with open(os.path.join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'), encoding='utf-8') as f:
+            url = json.load(f).get('repository')
+    except (OSError, ValueError, AttributeError) as e:
+        raise ValueError('.claude-plugin/plugin.json does not read') from e
+    m = re.fullmatch(r'https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?', url) if isinstance(url, str) else None
+    if not m:
+        raise ValueError('.claude-plugin/plugin.json names no GitHub repository')
+    return m.group(1)
+
+
+def privacy_hits(title, body):
+    """conveyor/privacy/check.sh on the title (line 1) and the body (the lines after it), with the host file's terms
+    file as gh_write reads it (lib/issues.sh): each hit as 'the title: <pattern>' or 'body line <n>: <pattern>', never
+    the matched text. ValueError when the check could not be made, which files nothing either. As in gh_write, a host
+    file that is there but does not read may name a terms file, so it fails the check; only a missing one means no terms."""
+    try:
+        cfg = host_file()
+    except ValueError:
+        if os.path.exists(host_path()):
+            raise ValueError("the host file does not read, so its terms file cannot be read") from None
+        cfg = None
+    terms = cfg.get('terms') if isinstance(cfg, dict) else None
+    if terms:
+        terms = os.path.expanduser(terms) if isinstance(terms, str) and terms.startswith('~/') else terms
+        if not (isinstance(terms, str) and os.path.isfile(terms) and os.access(terms, os.R_OK)):
+            raise ValueError("the host file's terms file cannot be read")
+    try:
+        r = subprocess.run(['bash', os.path.join(PLUGIN_ROOT, 'conveyor', 'privacy', 'check.sh')] + (['--terms', terms] if terms else []),
+                           input=title + '\n' + body + '\n', capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise ValueError('the privacy check could not run') from e
+    hits = [re.fullmatch(r'-:([0-9]+): (.+)', x) for x in r.stdout.splitlines()]
+    if r.returncode not in (0, 1) or not all(hits) or (r.returncode == 1) != bool(hits):
+        raise ValueError('the privacy check failed')
+    return ['the title: %s' % h.group(2) if h.group(1) == '1' else 'body line %d: %s' % (int(h.group(1)) - 1, h.group(2)) for h in hits]
 
 
 def record_ledger(repo):
@@ -1846,21 +1926,30 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         print('dashboard: Time set to %s by %s from %s' % (body['time'], user, self.client_address[0]), file=sys.stderr, flush=True)
         self.reply(200, 'kept')
 
-    def plugin_dismiss(self):
-        """POST /plugin-dismiss {file, line}: the Plugin problems pane's Dismiss. The first line of file that is line,
-        whole, is removed; every other line stays. Same checks and order as /answer. file must be a plugin-bugs.md the
-        Board read (the Health part of data.js names it), so no other file can be written; nothing is filed and gh
-        is not run."""
+    def plugin_note(self, act):
+        """POST /plugin-dismiss, /plugin-preview or /plugin-file, each {file, line}, /plugin-file with {title, body} too:
+        one note of the Plugin problems pane. file must be a plugin-bugs.md the Board read (the Health part of data.js
+        names it), so no other file can be read or written; line is the note, whole. Same checks and order as /answer.
+        dismiss removes the first line of file that is line; every other line stays; nothing is filed and gh is not
+        run. preview answers the issue the note proposes as JSON {title, body, repo} (note_issue(), plugin_repo()) and writes nothing. file
+        files the issue the owner confirmed, with its edited title and body: conveyor/privacy/check.sh first, where a
+        hit files nothing and the reply names each hit (422); then gh issue create on the repository
+        .claude-plugin/plugin.json names; only once gh answers the new issue's link is the note removed, as dismiss
+        removes it, and the reply is that link. A failed gh call leaves the note and the reply is gh's error (502). A note
+        that names the issue it was filed as (NOTE_FILED) is neither previewed nor filed (409); it can be dismissed."""
         if not self.own_page():
             return self.send_error(403)
         user = self.authed()
         if not user:
-            return self.reply(401, 'log in to dismiss a note')
-        body = self.json_body(MAX_DISMISS_BODY)
+            return self.reply(401, 'log in to %s a note' % act)
+        body = self.json_body(MAX_FILE_BODY if act == 'file' else MAX_DISMISS_BODY)
         if body is None:
             return None
-        if set(body) != {'file', 'line'} or not all(isinstance(body[k], str) for k in body) \
+        if set(body) != ({'file', 'line', 'title', 'body'} if act == 'file' else {'file', 'line'}) \
+                or not all(isinstance(body[k], str) for k in body) \
                 or not body['line'].startswith('- ') or '\n' in body['line'] or '\r' in body['line']:
+            return self.send_error(400)
+        if act == 'file' and (not body['title'].strip() or '\n' in body['title'] or '\r' in body['title']):
             return self.send_error(400)
         try:
             with open(os.path.join(self.directory, 'data.js'), encoding='utf-8') as f:
@@ -1872,13 +1961,49 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         path = body['file']
         if path not in files:
             return self.reply(409, 'the Board did not read plugin problems from that file; nothing was changed')
+        try:
+            with open(path, encoding='utf-8') as f:
+                held = any(x.rstrip('\n') == body['line'] for x in f)
+        except (OSError, ValueError) as e:  # ValueError: a file that is not UTF-8
+            return self.reply(500, 'the note could not be read: %s' % (getattr(e, 'strerror', None) or e))
+        if not held:
+            return self.reply(409, 'that note is no longer in the file; nothing was changed')
+        if act != 'dismiss' and NOTE_FILED.search(body['line']):
+            return self.reply(409, 'that note names the issue it was filed as; nothing was filed')
+        if act == 'preview':
+            try:
+                repo = plugin_repo()
+            except ValueError as e:
+                return self.reply(500, 'the note cannot be filed: %s' % e)
+            title, text = note_issue(body['line'])
+            return self.reply(200, json.dumps({'title': title, 'body': text, 'repo': repo}))
+        url = None
+        if act == 'file':
+            try:
+                repo, hits = plugin_repo(), privacy_hits(body['title'], body['body'])
+            except ValueError as e:
+                return self.reply(500, 'nothing was filed: %s' % e)
+            if hits:
+                return self.reply(422, 'nothing was filed: the privacy check found %s' % '; '.join(hits))
+            try:
+                r = subprocess.run(['gh', 'issue', 'create', '--repo', repo, '--title', body['title'], '--body-file', '-'],
+                                   input=body['body'], capture_output=True, text=True, timeout=GH_LIMIT)
+            except (OSError, subprocess.SubprocessError) as e:
+                return self.reply(502, 'nothing was filed: gh issue create did not run: %s' % (getattr(e, 'strerror', None) or e))
+            url = next((x for x in reversed(r.stdout.split())
+                        if re.fullmatch(r'https://github\.com/%s/issues/[0-9]+' % re.escape(repo), x, re.I)), None)
+            if r.returncode or not url:
+                said = (r.stderr.strip() or r.stdout.strip() or 'exit %d' % r.returncode).splitlines()[-1]
+                return self.reply(502, 'nothing was filed: gh issue create failed: %s' % said)
+            print('dashboard: plugin problem filed as %s by %s from %s' % (url, user, self.client_address[0]), file=sys.stderr, flush=True)
+        # Read again: gh may have taken a while, and the Foreman may have noted another problem since.
         tmp = '%s.dismiss.%d' % (path, threading.get_ident())
         try:
             with open(path, encoding='utf-8') as f:
                 lines = f.read().splitlines(keepends=True)
             at = next((i for i, x in enumerate(lines) if x.rstrip('\n') == body['line']), None)
-            if at is None:
-                return self.reply(409, 'that note is no longer in the file; nothing was changed')
+            if at is None:  # filed, then dismissed from another page meanwhile: the issue is still the reply
+                return self.reply(200, url) if url else self.reply(409, 'that note is no longer in the file; nothing was changed')
             del lines[at]
             with open(tmp, 'w', encoding='utf-8') as f:
                 f.writelines(lines)
@@ -1889,7 +2014,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 os.remove(tmp)
             except OSError:
                 pass
-            return self.reply(500, 'the note could not be removed: %s' % (getattr(e, 'strerror', None) or e))
+            return self.reply(500, '%sthe note could not be removed: %s' % (
+                'filed as %s, but ' % url if url else '', getattr(e, 'strerror', None) or e))
+        if url:
+            return self.reply(200, url)
         print('dashboard: plugin problem dismissed by %s from %s in %s' % (user, self.client_address[0], path), file=sys.stderr, flush=True)
         self.reply(200, 'dismissed')
 
@@ -2481,8 +2609,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.users_post(self.path)
         if self.path == '/time':
             return self.set_time()
-        if self.path == '/plugin-dismiss':
-            return self.plugin_dismiss()
+        if self.path in ('/plugin-dismiss', '/plugin-preview', '/plugin-file'):
+            return self.plugin_note(self.path[len('/plugin-'):])
         if self.path != '/answer' or not self.own_page():
             return self.send_error(403)
         user = self.authed()

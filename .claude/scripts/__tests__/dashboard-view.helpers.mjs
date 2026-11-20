@@ -208,11 +208,12 @@ export function boot({ store = {}, reducedMotion = false, list = LIST, extra = '
       const b = w.benchBody ? w.benchBody(url) : null;
       return Promise.resolve(b ? { ok: true, status: 200, json: () => Promise.resolve(b) } : { ok: false, status: 502, text: () => Promise.resolve(w.benchError || 'no benchmarks') });
     }
-    assert.ok(['answer', 'restart', 'control', 'machine', 'time', 'plugin-dismiss'].includes(url), `the page writes to nothing but its own answer, restart, control, machine, time and plugin-dismiss addresses: ${url}`);
+    assert.ok(['answer', 'restart', 'control', 'machine', 'time', 'plugin-dismiss', 'plugin-preview', 'plugin-file'].includes(url), `the page writes to nothing but its own answer, restart, control, machine, time and plugin-dismiss, plugin-preview and plugin-file addresses: ${url}`);
     assert.equal(opt.method, 'POST');
     assert.equal(opt.headers['Content-Type'], 'application/json');
     w.posts.push({ url, body: JSON.parse(opt.body) });
-    return Promise.resolve(w.reply || { ok: true, status: 200, text: () => Promise.resolve('sent to main') });
+    // w.replies: the server's answer by address, where a test needs one other than w.reply.
+    return Promise.resolve((w.replies && w.replies[url]) || w.reply || { ok: true, status: 200, text: () => Promise.resolve('sent to main') });
   };
   // jsdom lays nothing out: with `rects` every panel is given a box by its place in the grid, so a move is a move.
   if (rects) {

@@ -423,16 +423,61 @@ window.DASH_APP.panel({
 // text, and Dismiss, which removes that one line from the file (POST plugin-dismiss) and files nothing. With no note,
 // there is no pane (null). A note dismissed here stays out until the next snapshot no longer has it, so it does not
 // come back for a minute; one that failed says why in its row until the next try.
+// File on GitHub (issue 1043; not on a note that names the issue it was filed as) asks the server for the issue the note proposes (POST plugin-preview) and opens it under
+// the note, its title and body editable; File the issue sends the edited title and body (POST plugin-file), which the
+// server checks for private text before gh runs. Only the note whose preview was confirmed is filed. A filed note
+// leaves the list as a dismissed one does, and the new issue's link stays in the pane until the page loads again. A
+// refused or failed filing keeps the preview open with the reason. The preview's fields are the same nodes at each
+// redraw (the live feed draws the panel every few seconds), so the owner's edits, focus and caret stay.
 const PLUGIN_DISMISSED = new Set();
 const PLUGIN_FAILED = new Map();
+const PLUGIN_PREVIEW = new Map();
+const PLUGIN_FILED = [];
+function pluginPreview(n, k, ctx) {
+  const h = ctx.h, p = PLUGIN_PREVIEW.get(k);
+  const box = h('div', 'plugin-preview');
+  const doc = p.title.ownerDocument, on = [p.title, p.body].find((x) => x === doc.activeElement);
+  const caret = on ? [on.selectionStart, on.selectionEnd] : null;
+  const send = h('button', 'btn', p.busy ? 'Filing…' : 'File the issue');
+  send.type = 'button'; send.dataset.act = 'plugin-file'; send.disabled = p.busy;
+  send.addEventListener('click', () => {
+    p.busy = true; p.error = null;
+    ctx.redraw();
+    ctx.post('plugin-file', { file: n.file, line: n.line, title: p.title.value, body: p.body.value })
+      .then((r) => r.text().then((t) => [r.ok, String(t).trim() || `the Board answered ${r.status}`]), () => [false, 'the Board did not answer'])
+      .then(([ok, said]) => {
+        p.busy = false;
+        if (ok) {
+          PLUGIN_PREVIEW.delete(k); PLUGIN_DISMISSED.add(k);
+          PLUGIN_FILED.push({ title: p.title.value, url: said });
+        } else {
+          // "filed as <link>, but the note could not be removed": filed all the same, so not "Not filed".
+          const s = said.replace(/\.$/, '');
+          p.error = /^filed as /.test(s) ? `F${s.slice(1)}.` : `Not filed: ${s}.`;
+        }
+        ctx.redraw();
+      });
+  });
+  const stop = h('button', 'btn btn-quiet', 'Cancel');
+  stop.type = 'button'; stop.dataset.act = 'plugin-file-cancel'; stop.disabled = p.busy;
+  stop.addEventListener('click', () => { PLUGIN_PREVIEW.delete(k); ctx.redraw(); });
+  const field = (label, el) => { const l = h('label', 'plugin-field', label); l.append(el); return l; };
+  box.append(h('p', 'row-meta', `Read the title and the body, and change them as necessary. File the issue files them in ${p.repo} on GitHub.`),
+    field('Title', p.title), field('Body', p.body));
+  if (p.error) box.append(h('p', 'warn-note', p.error));
+  box.append(send, stop);
+  if (on) window.queueMicrotask(() => { if (on.isConnected) { on.focus({ preventScroll: true }); on.setSelectionRange(...caret); } });
+  return box;
+}
 function pluginPane(bugs, ctx) {
   const h = ctx.h, key = (n) => `${n.file}\n${n.line}`;
   const all = bugs.flatMap((b) => (Array.isArray(b.notes) ? b.notes : [])
     .filter((n) => n && typeof n.line === 'string' && typeof n.text === 'string').map((n) => ({ ...n, file: b.file })));
   const now = new Set(all.map(key));
   PLUGIN_DISMISSED.forEach((k) => { if (!now.has(k)) PLUGIN_DISMISSED.delete(k); });
+  PLUGIN_PREVIEW.forEach((p, k) => { if (!now.has(k) && !p.busy) PLUGIN_PREVIEW.delete(k); });
   const notes = all.filter((n) => !PLUGIN_DISMISSED.has(key(n)));
-  if (!notes.length) return null;
+  if (!notes.length && !PLUGIN_FILED.length) return null;
   const pane = h('section', 'plugin-problems'), ul = h('ul', 'rows');
   notes.forEach((n) => {
     const li = h('li', 'row'), head = h('div', 'row-main'), meta = h('p', 'row-meta'), k = key(n);
@@ -450,12 +495,45 @@ function pluginPane(bugs, ctx) {
           ctx.redraw();
         });
     });
-    li.append(head, meta, off);
+    const file = h('button', 'btn btn-quiet', 'File on GitHub');
+    file.type = 'button'; file.dataset.act = 'plugin-file-open'; file.disabled = PLUGIN_PREVIEW.has(k);
+    file.addEventListener('click', () => {
+      file.disabled = true;
+      PLUGIN_FAILED.delete(k);
+      ctx.post('plugin-preview', { file: n.file, line: n.line })
+        .then((r) => r.text().then((t) => [r.ok, String(t).trim() || `the Board answered ${r.status}`]), () => [false, 'the Board did not answer'])
+        .then(([ok, said]) => {
+          let got = null;
+          try { got = ok ? JSON.parse(said) : null; } catch (e) { said = 'the Board sent no issue to preview'; }
+          if (got && typeof got.title === 'string' && typeof got.body === 'string' && typeof got.repo === 'string') {
+            const title = h('input', 'plugin-title'), body = h('textarea', 'plugin-body');
+            title.type = 'text'; title.value = got.title; body.rows = 8; body.value = got.body;
+            PLUGIN_PREVIEW.set(k, { title, body, repo: got.repo, busy: false, error: null });
+          } else PLUGIN_FAILED.set(k, `Not filed: ${(got ? 'the Board sent no issue to preview' : said).replace(/\.$/, '')}.`);
+          ctx.redraw();
+        });
+    });
+    // A note that names the issue it was filed as (the Foreman's own test) gets no File on GitHub: it is filed already.
+    if (/ filed as #[1-9][0-9]*\s*\.? · evidence: /i.test(n.line)) li.append(head, meta, off);
+    else li.append(head, meta, file, off);
     if (PLUGIN_FAILED.has(k)) li.append(h('p', 'warn-note', PLUGIN_FAILED.get(k)));
+    if (PLUGIN_PREVIEW.has(k)) li.append(pluginPreview(n, k, ctx));
     ul.append(li);
   });
   pane.append(h('h3', 'group-title', 'Plugin problems'),
-    h('p', 'row-meta', 'The Foreman noted these problems in Conveyor. Dismiss removes a note from its file. It does not file an issue.'), ul);
+    h('p', 'row-meta', 'The Foreman noted these problems in Conveyor. File on GitHub shows the issue first, and files it only when you click File the issue. Dismiss removes a note from its file. It does not file an issue.'));
+  if (notes.length) pane.append(ul);
+  if (PLUGIN_FILED.length) {
+    const done = h('ul', 'plugin-filed');
+    PLUGIN_FILED.forEach((f) => {
+      const a = h('a', null, f.url);
+      if (/^https:\/\/github\.com\/[^\s?#]+\/issues\/\d+$/.test(f.url)) { a.href = f.url; a.target = '_blank'; a.rel = 'noopener'; }
+      const li = h('li', null, `Filed "${f.title}" as `);
+      li.append(a);
+      done.append(li);
+    });
+    pane.append(done);
+  }
   return pane;
 }
 // Work now: what keeps the Conveyor host busy now, as the page server reads it (GET work: `conveyor.sh work` of each
