@@ -1098,8 +1098,16 @@
         pins.append(item);
       });
       const rest = order.length - PINS_SHOWN;
+      // The redraw takes "View remaining" away, so the focus goes to the menu of the first pin it shows.
+      const showRest = (e) => {
+        const box = e.currentTarget.closest('.rules');
+        S.pinsAll = true;
+        draw();
+        const next = box && box.querySelectorAll('[data-rule="order"] .rules-pin-row')[PINS_SHOWN];
+        if (next) next.querySelector('.rules-menu > summary').focus({ preventScroll: true });
+      };
       el.append(row('order', 'Pinned issues', 'Picked first, from top to bottom.', pins,
-        rest > 0 && !S.pinsAll ? button(`View remaining ${plural(rest, 'pin', 'pins')}`, 'btn-quiet', 'pins-all', null, () => { S.pinsAll = true; draw(); }) : null));
+        rest > 0 && !S.pinsAll ? button(`View remaining ${plural(rest, 'pin', 'pins')}`, 'btn-quiet', 'pins-all', null, showRest) : null));
     }
 
     // The six groups (SETS), each with its rows; the index and the search pick which show (index()). The setup takes

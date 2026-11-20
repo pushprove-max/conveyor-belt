@@ -84,7 +84,8 @@ test('Rules: every rule of the old pane is in a group, with the same value and t
 });
 
 // Bugs: a pin showed its number alone, so the pinned list read as a wall of numbers; a drag sent another order than
-// Move down, or none; pins past the first rows were lost instead of behind "View remaining".
+// Move down, or none; pins past the first rows were lost instead of behind "View remaining"; View remaining took the
+// keyboard focus away with it (the redraw removed the focused button), so Tab started again from the top of the page.
 test('Rules: a pinned row shows its title; dragging the first pin onto the second sends what Move down sends', async () => {
   const w = boot({ tab: 'rules' });
   const d = full(), order = [21, 23, 20, 22, 24, 76, 99];
@@ -94,7 +95,10 @@ test('Rules: a pinned row shows its title; dragging the first pin onto the secon
   const pins = () => Array.from(rulesP(w).querySelectorAll('[data-rule="order"] .rules-pin-row'));
   assert.deepEqual(pins().map((p) => p.querySelector('.rules-pin').textContent), ['#21 Later', '#23 Infra thing', '#20 Next up', '#22 Last', '#24 Second half'],
     'the first five, each with its title (#23 is only in the skipped and open issues)');
-  act(rulesP(w), 'pins-all').click();
+  const more = act(rulesP(w), 'pins-all');
+  more.focus();
+  more.click();
+  assert.equal(w.document.activeElement, pins()[5].querySelector('.rules-menu > summary'), 'the focus goes to the menu of the first pin View remaining shows');
   assert.deepEqual(pins().slice(5).map((p) => p.querySelector('.rules-pin').textContent), ['#76 Split the PROD stack', '#99'], 'View remaining shows the rest; no title known: the number');
   const down = await sent(w, () => pins()[0].querySelector('[data-act="pin-down"]').click());
   assert.deepEqual(down, [{ action: 'order', args: ['23', '21', '20', '22', '24', '76', '99'], repo: 'sample' }]);
