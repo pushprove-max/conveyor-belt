@@ -211,9 +211,10 @@ t_swearmgit() {
   out=$(loop bench swe arms check conveyor-oldgit 2>&1) && fail "the preflight passed with git 2.34.1 in the container: $out"
   grep -q "^conveyor-oldgit: failed: on the trivial task, its preflight command failed: .*git version 2\.34\.1: Conveyor needs git 2\.36 or newer" <<<"$out" \
     || fail "the failed preflight does not name the container's git version: $out"
-  # The container Codex's sandbox can start a command in, with the run's limits and mounts kept.
+  # The container Codex's sandbox can start a command in, with the run's limits and mounts kept. Bug (#1027): with the
+  # masks off but no SYS_ADMIN, the sandbox's user namespace still could not map its user, and the review read nothing.
   c=$(grep '^create .*-conveyor-oldgit-' "$SWE_FX/docker.log")
-  [[ $c == *'--security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined '* && $c == *' --cpus '*' --memory '* \
+  [[ $c == *'--security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined --cap-add SYS_ADMIN '* && $c == *' --cpus '*' --memory '* \
     && $(grep -o -- '-v [^ ]*' <<<"$c" | wc -l) = 2 ]] || fail "the conveyor arm's container is not the one Codex's sandbox runs in, with its limits: $c"
 }
 

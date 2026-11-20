@@ -328,7 +328,7 @@ t_swesolo() {
   [ "$(grep '^create ' "$SWE_FX/docker.log" | grep -o -- '-v [^ ]*' | tr '\n' ' ')" = "-v $B/work/$first:$B/work/$first " ] \
     || fail "the container mounts more of the host than the task's sandbox: $(grep '^create ' "$SWE_FX/docker.log")"
   # Docker's own confinement is taken off a conveyor arm's container only, for Codex's sandbox (swe_box).
-  ! grep '^create ' "$SWE_FX/docker.log" | grep -q -- '--security-opt' || fail "the solo arm's container runs with Docker's confinement off: $(grep '^create ' "$SWE_FX/docker.log")"
+  ! grep '^create ' "$SWE_FX/docker.log" | grep -qE -- '--security-opt|--cap-add' || fail "the solo arm's container runs with Docker's confinement off: $(grep '^create ' "$SWE_FX/docker.log")"
   local a; a=$(tail -n 1 "$STUB/sessions")
   [[ $a == *'--permission-mode dontAsk'* && $a == *'--tools Read,Grep,Glob,Edit,Write '* && $a == *"Edit(/$B/work/$first/swe-${R##*/}/**)"* \
     && $a == *'--setting-sources  --strict-mcp-config'* && $a != *bypassPermissions* ]] \

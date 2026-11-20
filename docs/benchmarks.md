@@ -218,9 +218,10 @@ and memory limits (the `limits` setting in `conveyor/bench/swe.json`) and the sa
 `taskTimeout` setting in the same file). The [run settings](#run-settings) of a run change these limits for all of its
 arms. The container can see the task's sandbox and no other folder of this
 machine, except for a Conveyor arm: its container can also see the folder of the installed Conveyor version,
-read-only. A Conveyor arm's container also runs without Docker's seccomp and AppArmor profiles and with all of `/proc`
-visible, so that Codex's own sandbox can start a command there. Conveyor v1.7.0 and older, and the engine commits
-after v1.7.0 that do not yet run Codex without its sandbox in a task container, use that sandbox for their reviews.
+read-only. A Conveyor arm's container also runs without Docker's seccomp and AppArmor profiles, with all of `/proc`
+visible and with the `SYS_ADMIN` capability, so that Codex's own sandbox can start a command there. Conveyor v1.7.0
+and older, and the engine commits after v1.7.0 that do not yet run Codex without its sandbox in a task container, use
+that sandbox for their reviews.
 The official harness grades the patch of every arm in the same way.
 
 An arm uses the subscription logins that the cards use. The Claude login is the one of the builder's account

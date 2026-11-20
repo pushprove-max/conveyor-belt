@@ -227,12 +227,13 @@ swe_logindest() { case $1 in claude) echo .claude/.credentials.json ;; codex) ec
 # passwd line names it) with a home that is in the container only. The logins are copied into that home before the
 # container starts: they are in this one container, gone when it is removed, and never in an image. The home's
 # .gitconfig gives git an identity: the task's image has none, and the engine cannot commit a fix without one.
-# A conveyor arm's container (an engine folder given) also runs with Docker's seccomp, AppArmor and /proc masks off:
-# Codex's own Linux sandbox, which an engine from before CONVEYOR_BENCH_BOX gives its reviews (-s read-only), cannot
-# start a command under them, so that engine's review read nothing. Its CPU, memory and mount limits stay.
+# A conveyor arm's container (an engine folder given) also runs with Docker's seccomp, AppArmor and /proc masks off,
+# and with CAP_SYS_ADMIN: Codex's own Linux sandbox, which an engine from before CONVEYOR_BENCH_BOX gives its reviews
+# (-s read-only), cannot start a command without them (with the masks off but no SYS_ADMIN, `unshare -Ur` still cannot
+# write its uid_map), so that engine's review read nothing. Its CPU, memory and mount limits stay.
 swe_box() { # <container> <image> <sb> <logins, space-separated> [<engine folder>]
   local h l f m=() rc=0
-  [ -z "${5:-}" ] || m=(-v "$5:$5:ro" --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined)
+  [ -z "${5:-}" ] || m=(-v "$5:$5:ro" --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined --cap-add SYS_ADMIN)
   docker create --name "$1" --user "$(id -u):$(id -g)" -e "HOME=$SWE_HOME" --cpus "$(swe_set .cpus)" --memory "$(swe_set .memory)" \
     -v "$3:$3" "${m[@]}" --entrypoint sleep "$2" infinity > /dev/null || return 1
   h=$(mktemp -d) || return 1
