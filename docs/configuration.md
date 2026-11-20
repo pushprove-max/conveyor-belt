@@ -497,6 +497,40 @@ The four results:
 - Execution error: any other result. For example, another exit code, an exit 127 without that first line, an exit 1
   with no finding, an exit 0 with findings, or a command that runs for longer than 5 minutes.
 
+### The ratchet
+
+The ratchet decides which findings of a card are the card's own. An old finding that the card did not cause does not
+count against the card. Base is the commit that the card's worktree is on.
+
+Every finding of a command with `ratchet: false` is the card's. For any other command, the ratchet judges each
+finding:
+
+- A finding on a line that the card added or changed is the card's. Every line of a new file is a changed line.
+- A finding with a `complexity` code on a changed line of a file that base has is an exception. It is the card's only
+  when the base lines that the card's change replaced do not have the same finding.
+- A finding on another line is the card's when base does not have the same finding on that line. Conveyor finds that
+  line of base through the diff, so a line that moved down by one is compared with the line above it in base. A
+  renamed file is compared with the file under its old path in base.
+
+The same finding has the same file, line, rule code and text. A finding with a `complexity` code on a changed line
+can be on any of the base lines that the card's change replaced. The numbers in the text must be equal, but not in a
+finding with a `complexity` code. One base finding matches one finding of the card at most. So two equal findings
+against one base finding give one finding of the card.
+
+Conveyor gets the base findings from one run of the command on base, in a worktree at `cards/mainrun/<card>.lint` in
+the cards folder. A command with `{files}` gets only the files that hold a finding to compare, each under its base
+path. A command without `{files}` runs on the whole project. When no finding needs a base finding, Conveyor makes no
+base run.
+
+Before the base run, Conveyor makes the base worktree's copies of the files that the command's `triggers` and
+`lint.policy` match equal to the card's. It writes each file that the card has and deletes each file that the card
+deleted. The other files stay as base has them, also the trigger files of an earlier command. So a card that makes
+a rule stricter gets no finding for old code that it did not touch.
+
+The base worktree uses the same dependency folders as the card's worktree. Conveyor does not run `worktree.setup`
+there. The base run holds one test slot, as the card's run does. Conveyor removes the base worktree when the run
+ends. When the base run ends in an execution error or as skipped, the result of the command is an execution error.
+
 For example:
 
 ```json

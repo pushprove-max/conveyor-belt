@@ -944,6 +944,18 @@ and a limit of 5 minutes, on one test slot, and reads the result: pass, findings
 reads a finding's path by the paths of the tree, so a path can hold spaces and colons. `conveyor.sh lint` uses it on
 the worktree it is called in, and `conveyor.sh doctor` tries each command once ([Commands](../docs/commands.md)).
 
+The ratchet (`lintratchet`, [The ratchet](../docs/configuration.md#the-ratchet)) decides which findings are the
+card's. A finding on a line the card added or changed is the card's. A `complexity` finding on such a line is the
+card's when the base lines its hunk replaced lack it. A finding on another line is the card's when base lacks it at
+the line that the diff maps it to. Base is the commit the card's worktree is on.
+
+One base run of the command gives base's findings, on the base paths of the files that hold findings to compare. It
+runs in the base worktree
+`cards/mainrun/<card>.lint`, whose trigger and policy files are first made equal to the card's tree. That worktree
+links the dependency folders the card's worktree has, does not run `worktree.setup`, and is removed at the end. A
+`ratchet: false` command gets no base run: every finding is the card's. A base run that does not end in pass or
+findings makes the command's result an execution error.
+
 ## Flaky tests
 
 The flaky-test record (`flaky.json` in the state folder, `lib/flaky.sh`) keeps each time a test case failed and then

@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
 # Engine cases: the lint check's core (conveyor/lib/lint.sh): the pack's lint.commands, the scope each is given, its
-# run and its four results; `conveyor.sh lint` in a card's worktree; doctor's probe (lintdoctor).
+# run and its four results; `conveyor.sh lint` in a card's worktree; doctor's probe (lintdoctor); the ratchet's judgment
+# of a card's findings against its base run (lintratchet).
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -12,13 +13,18 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
 # The case's main ($R, setup) with the stub linter $STUB/lint: it notes each run in $STUB/lint-args, one line `run`
 # and its arguments, each after a space, and prints a finding for each line holding BAD (E1) or BIG (C901, with a
-# column), in each file it is given or, given none, each tracked file; exit 1 with a finding, else 0.
+# column), in each file it is given or, given none, each tracked file; exit 1 with a finding, else 0. For the ratchet's
+# cases: a line holding @size gives `C901 size <the file's line count>`, one holding @num `E3 line count <the same>`,
+# one holding @use `E2 not defined` when no line of its file holds @def, and one holding the word in the top's
+# .lintwords file (its config) `W1 <the word>`.
 lintsetup() {
   setup '[]'
   printf '%s\n' '{ printf run; [ $# = 0 ] || printf " %s" "$@"; echo; } >> "$STUB/lint-args"' \
-    'if [ $# = 0 ]; then mapfile -t a < <(git ls-files); set -- "${a[@]}"; fi' 'r=0' \
-    'for f; do [ -f "$f" ] || continue; n=0; while IFS= read -r l; do n=$((n + 1))' \
-    '  case $l in *BAD*) echo "$f:$n: E1 a bad word"; r=1 ;; *BIG*) echo "$f:$n:1: C901 too big"; r=1 ;; esac' \
+    'if [ $# = 0 ]; then mapfile -t a < <(git ls-files); set -- "${a[@]}"; fi' 'r=0; w=$(cat .lintwords 2>/dev/null)' \
+    'for f; do [ -f "$f" ] || continue; c=$(($(wc -l < "$f"))); d=$(grep -c @def "$f"); n=0; while IFS= read -r l; do n=$((n + 1))' \
+    '  case $l in *BAD*) echo "$f:$n: E1 a bad word"; r=1 ;; *BIG*) echo "$f:$n:1: C901 too big"; r=1 ;;' \
+    '    *@size*) echo "$f:$n: C901 size $c"; r=1 ;; *@num*) echo "$f:$n: E3 line count $c"; r=1 ;;' \
+    '    *@use*) [ "$d" != 0 ] || { echo "$f:$n: E2 not defined"; r=1; } ;; *) [ -z "$w" ] || [[ $l != *"$w"* ]] || { echo "$f:$n: W1 $w"; r=1; } ;; esac' \
     'done < "$f"; done; exit $r' > "$STUB/lint" || fail "the stub linter"
 }
 # The pack's lint.commands set to <commands json>, where $L in a run is the stub linter's command.
@@ -32,7 +38,7 @@ lintwt() {
 # <commands> run in a shell of the engine as conveyor.sh lint loads it, main being $R: output in $T/$CASE/out, exit in RC.
 lintin() {
   ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
-    . "$SRC/conveyor.sh" state-dir > /dev/null && . "$SRC/lib/slots.sh" && . "$SRC/lib/prompts.sh" && . "$SRC/lib/lint.sh" || exit 9
+    . "$SRC/conveyor.sh" state-dir > /dev/null && . "$SRC/lib/slots.sh" && . "$SRC/lib/prompts.sh" && . "$SRC/lib/push.sh" && . "$SRC/lib/lint.sh" || exit 9
     eval "$1" ) > "$T/$CASE/out" 2>&1; RC=$?
   [ "$RC" != 9 ] || fail "the engine could not be loaded: $(cat "$T/$CASE/out")"
 }
@@ -147,6 +153,112 @@ t_lintgate() {
   [ "$RC" = 0 ] && [ "$out" = "$(printf '%s\n' 'lint command 1 (bash '"$STUB"'/lint {files}): findings: 1' \
     'The gate decides these (a size finding on a line this change made):' '  a.c:2:1: C901 too big')" ] \
     || fail "the size finding was not listed under the gate's, with exit 0 (exit $RC): $out"
+}
+
+# lintratchet on card c7's worktree $W, the change being from its commit: its lines in $T/$CASE/out, exit in RC; then
+# each command's reported findings, `<file>:<line>: <text>` joined by `|` and the commands by `;`, in REP.
+lintrat() {
+  # shellcheck disable=SC2016 # expanded in lintin
+  lintin "${1:-}"'lintratchet "$W" "$(git -C "$W" rev-parse HEAD)" c7'
+  REP=$(jq -r '[.reported[] | "\(.file):\(.line): \(.text)"] | join("|")' "$T/$CASE/out" 2>/dev/null | paste -sd';' -)
+}
+# The base worktree is gone, and git lists no worktree of it.
+lintgone() { [ ! -e "$T/$CASE/cards/mainrun" ] && ! git -C "$R" worktree list --porcelain | grep -q 'c7\.lint' || fail "the base worktree is left: $(git -C "$R" worktree list)"; }
+
+# Bugs: a new finding on a line the change did not touch is let through (a definition deleted elsewhere in the file), an
+# old one there is reported, a line after a deleted line is compared with the wrong base line, a renamed file's
+# findings are all new, and two identical findings in a hunk that replaced a line with one are both matched to it.
+t_lintratchet() {
+  lintsetup
+  lintcmds '[{"files": ["*.c"], "complexity": ["C901"], "run": "$L {files}"}]'
+  lintwt a.c "$(printf '@def\nBAD old\n@use\none')" r.c "$(printf 'BAD x\nl2\nl3\nl4\nl5')" b.c 'BIG a'
+  (cd "$W" && printf 'BAD old\n@use\nBAD edit\n' > a.c && git mv r.c s.c && printf 'BAD x\nl2\nl3\nl4\nl5b\n' > s.c && printf 'BIG b\nBIG c\n' > b.c) || fail "the card's change"
+  lintrat
+  [ "$RC" = 0 ] && [ "$REP" = 'a.c:2: E2 not defined|a.c:3: E1 a bad word|b.c:2: C901 too big' ] \
+    || fail "the change's findings are not the lost definition, the edit and one of the two size findings (exit $RC): $REP $(cat "$T/$CASE/out")"
+  [ "$(lintargs)" = 'run a.c b.c s.c|run a.c b.c r.c' ] || fail "the base run was not one run on the base paths: $(lintargs)"
+  lintgone
+}
+
+# Bugs: a size finding on a changed line that base has too is the change's, or is new because its number grew; a
+# correctness finding whose number differs from base's is old.
+t_lintsize() {
+  lintsetup
+  lintcmds '[{"files": ["*.c"], "complexity": ["C901"], "run": "$L {files}"}]'
+  lintwt a.c "$(printf 'f() @size\n@num\nend')" b.c 'f() @size'
+  printf 'g() @size\n@num\nend\nmore\n' > "$W/a.c"; echo 'g() @size' > "$W/b.c"
+  lintrat
+  [ "$RC" = 0 ] && [ "$REP" = 'a.c:2: E3 line count 4' ] || fail "the reported findings are not the E3 alone (exit $RC): $REP $(cat "$T/$CASE/out")"
+}
+
+# Bugs: a card that tightens a rule in a trigger file is given every old line the new rule fails, as the base run reads
+# base's own copy of the file. It reads the tree's. A later command that does not name the file as a trigger reads
+# base's copy in its base run, not the copy the first command's run left, so its new finding on a.c is reported.
+t_linttighten() {
+  lintsetup
+  lintcmds '[{"files": ["*.c"], "triggers": [".lintwords"], "run": "$L {files}"}, {"files": ["*.c"], "run": "$L {files}"}]'
+  lintwt .lintwords xyz a.c "$(printf 'foo\nbar')" b.c foo
+  echo foo > "$W/.lintwords"; echo baz >> "$W/a.c"
+  lintrat
+  [ "$RC" = 0 ] && [ "$REP" = ';a.c:1: W1 foo' ] && [ "$(jq -r .result "$T/$CASE/out" | paste -sd' ' -)" = 'findings findings' ] \
+    && [ "$(lintargs)" = 'run a.c b.c|run a.c|run a.c b.c|run a.c' ] \
+    || fail "old lines the tightened rule fails were reported, a later command's base run read the tightened file, or no base run was made (exit $RC): $REP $(lintargs) $(cat "$T/$CASE/out")"
+}
+
+# Bug: a card that deletes a trigger config gets a base run that still reads it. Each run notes whether it sees one.
+t_lintdeltrigger() {
+  lintsetup
+  lintcmds '[{"files": ["*.c"], "triggers": [".lintwords"], "run": "{ [ -e .lintwords ] && echo has || echo none; } >> '"$STUB"'/seen; $L {files}"}]'
+  lintwt .lintwords foo a.c "$(printf 'foo\nBAD old')"
+  git -C "$W" rm -q .lintwords || fail "the card's change"
+  lintrat
+  [ "$RC" = 0 ] && [ "$REP" = '' ] && [ "$(paste -sd' ' "$STUB/seen")" = 'none none' ] \
+    || fail "the base run read the deleted config (exit $RC): $(paste -sd' ' "$STUB/seen") $REP $(cat "$T/$CASE/out")"
+}
+
+# Bug: a base run that breaks is read as no base finding, so every old finding is reported. It is an execution error.
+t_lintbasefail() {
+  lintsetup
+  lintcmds '[{"files": ["*.c"], "run": "[ -e new.c ] || { echo the base broke; exit 3; }; $L {files}"}]'
+  lintwt a.c "$(printf 'BAD old\none')"
+  printf 'BAD old\ntwo\n' > "$W/a.c"; echo fine > "$W/new.c"
+  lintrat
+  [ "$RC" = 0 ] && [ "$(jq -c '[.result, .why, .reported]' "$T/$CASE/out")" = '["error","the base run: it exited 3: the base broke",[]]' ] \
+    || fail "the failed base run is not an execution error (exit $RC): $(cat "$T/$CASE/out")"
+  lintgone
+}
+
+# Bug: a `ratchet: false` command's old findings are judged against a base run. Each is reported, and none is made.
+t_lintratchetoff() {
+  lintsetup
+  lintcmds '[{"files": ["*.c"], "ratchet": false, "run": "$L {files}"}]'
+  lintwt a.c "$(printf 'BAD old\none')"
+  printf 'BAD old\nBAD new\n' > "$W/a.c"
+  lintrat
+  [ "$RC" = 0 ] && [ "$REP" = 'a.c:1: E1 a bad word|a.c:2: E1 a bad word' ] && [ "$(lintargs)" = 'run a.c' ] \
+    || fail "not every finding was reported, or a base run was made (exit $RC): $REP $(lintargs)"
+  lintgone
+}
+
+# Bugs: the base run lacks the head's dependency folders (main's link, and a folder worktree.setup filled), runs
+# worktree.setup, holds no test slot or more than one, or its worktree is left. Each run notes its folders, the slots
+# held in a pool of two that the case makes its own, and where it ran; worktree.setup would leave a file.
+t_lintbasedeps() {
+  local p=$T/$CASE/pool d
+  lintsetup
+  lintcmds '[{"files": ["*.c"], "run": "bash '"$STUB"'/deps.sh; $L {files}"}]'
+  tune --arg s "touch $STUB/setup-ran" '.linkFromMain = ["node_modules"] | .worktree.setup = $s'
+  printf '%s\n' "h=0; for k in 1 2; do flock -n '$p/'\$k true 2>/dev/null || h=\$((h + 1)); done" \
+    'echo "$(cd node_modules && pwd -P) $(cd vendor && pwd -P) slots=$h $(pwd -P)" >> "'"$STUB"'/deps"' > "$STUB/deps.sh" || fail "the dependency probe"
+  mkdir -p "$R/node_modules" || fail "main's node_modules"
+  lintwt .gitignore "$(printf 'node_modules\nvendor')" a.c "$(printf 'BAD old\none')"
+  ln -s "$R/node_modules" "$W/node_modules" && mkdir "$W/vendor" && echo two >> "$W/a.c" || fail "the card's worktree"
+  lintrat 'unset CONVEYOR_TEST_SLOT; export CONVEYOR_TEST_POOL=2:'"$p"'; '
+  d="$(cd "$R/node_modules" && pwd -P) $(cd "$W/vendor" && pwd -P) slots=1"
+  [ "$RC" = 0 ] && [ "$REP" = '' ] && [ "$(cat "$STUB/deps")" = "$d $(cd "$W" && pwd -P)"$'\n'"$d $(cd "$T/$CASE" && pwd -P)/cards/mainrun/c7.lint" ] \
+    || fail "the base run did not use the head's folders on one slot of its own (exit $RC): $(cat "$STUB/deps") $(cat "$T/$CASE/out")"
+  [ ! -e "$STUB/setup-ran" ] || fail "worktree.setup was run"
+  lintgone
 }
 
 # Bug: a `ratchet: false` command's finding on a line the change did not touch is only counted, so `conveyor.sh lint`
