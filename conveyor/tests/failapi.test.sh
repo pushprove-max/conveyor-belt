@@ -21,26 +21,32 @@ date +%s.%N >> "$STUB/calls"; n=$(cat "$STUB/refuse")
 echo two >> a.txt
 EOT
 }
+# The engine shell (fx_in, lib.sh) on card c7's worktree ($FXWT, fx_wt), with no card run around the call: what
+# <commands> print is in run.out. Each sleep of apitries()'s waits and of apihold()'s holds first adds the live record
+# it sleeps on to $STUB/waits, so a case reads what the card's live record said while it waited, with no watcher.
+apicall() { # <commands>
+  fx_in 'sleep() { case ${FUNCNAME[1]} in apitries|apihold) cat "$FXWT.live" >> "$STUB/waits" ;; esac; command sleep "$@"; }; '"$1" # sleep: the engine's own wait, passed on unchanged
+}
 t_apierror() {
-  setup "[$(issue 7 2026-01-01)]"; printf '%s\n' "$GO" > "$STUB/review.1"; refusing 1; tune '.tunables.apiPause = 1 | .tunables.poll = 1'
-  # While the card waits, its live record says why and when it tries again: kept here as it stood then.
-  ( while [ -d "$STUB" ] && [ ! -e "$STUB/waitlive" ]; do jq -e '.action // "" | startswith("waiting")' "$T/$CASE"/cards/*-7.live >/dev/null 2>&1 && cp "$T/$CASE"/cards/*-7.live "$STUB/waitlive"; sleep 0.1; done ) >/dev/null 2>&1 &
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  # Refused once: the same session ran again, and the card is built and landed, never blocked.
-  [ "$(st 'select(.step | IN("blocked", "landed")) | .step')" = landed ] && [ "$(wc -l < "$STUB/calls")" = 2 ] && grep -qx two "$R/a.txt" \
-    || fail "a session the API refused once did not run again and land its card: $(st '[.step, .reason] | join(" ")' | tr '\n' ,)"
-  jq -e '.step == "build" and (.action | test("^waiting: the model API refused \\(403 Cloudflare\\); trying again at [0-2][0-9]:[0-5][0-9]$"))' "$STUB/waitlive" >/dev/null \
-    || fail "the waiting card's live record does not say what it waits for and until when: $(cat "$STUB/waitlive" 2>&1)"
-  # What the refused try used is on the build's line with the try that worked (4 and 35 tokens).
-  [ "$(st 'select(.step == "build") | [.tokens.claude, .usage.input, .usage.output] | join(" ")')" = "39 13 6" ] || fail "the refused try's tokens are not on the build line: $(st 'select(.step == "build")')"
-  # Refused at every try: the card blocks after the fifth, naming the error, with the API's own words under it.
-  echo "[$(issue 8 2026-01-01)]" > "$STUB/issues.json"; refusing 99; : > "$STUB/calls"; tune '.tunables.apiPause = 0.1'
-  loop run >/dev/null 2>&1
-  [ "$(wc -l < "$STUB/calls")" = 5 ] || fail "a session the API kept refusing ran $(wc -l < "$STUB/calls") times, not 5"
-  st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -q '^build: the model API refused (403 Cloudflare) at each of 5 tries' \
-    || fail "the card the API kept refusing is not blocked naming the error: $(st 'select(.issue == 8) | [.step, .reason] | join(" ")' | tr '\n' ,)"
-  st 'select(.issue == 8 and .step == "blocked") | .tail' | grep -q 'API Error: 403 Attention Required! | Cloudflare' || fail "the blocked line lost the API's own words: $(st 'select(.issue == 8 and .step == "blocked") | .tail')"
-  [ "$(st 'select(.issue == 8 and .step == "blocked") | .spent.tokens.claude')" = 20 ] || fail "the five refused tries' tokens are not on the blocked line: $(st 'select(.issue == 8 and .step == "blocked") | .spent')"
+  setup '[]'; refusing 1; tune '.tunables.apiPause = 0.02'; fx_wt : b.txt one
+  # A build session, as a card's build step starts it: what it prints, then its exit.
+  apicall 'session "$FXWT" "Build the issue."; echo "rc=$?"'
+  # Refused once: the same session ran again and built the change.
+  [ "$(tail -n 1 "$T/$CASE/run.out")" = rc=0 ] && [ "$(wc -l < "$STUB/calls")" = 2 ] && grep -qx two "$FXWT/a.txt" \
+    || fail "a session the API refused once did not run again and build its change: $(wc -l < "$STUB/calls") sessions, $(cat "$T/$CASE/run.out")"
+  # While it waited, the card's live record said why and when it tries again.
+  [ "$(wc -l < "$STUB/waits")" = 1 ] && jq -e '.step == "build" and (.action | test("^waiting: the model API refused \\(403 Cloudflare\\); trying again at [0-2][0-9]:[0-5][0-9]$"))' "$STUB/waits" >/dev/null \
+    || fail "the waiting card's live record does not say what it waits for and until when: $(cat "$STUB/waits" 2>&1)"
+  # What the refused try used is on the build's record with the try that worked (4 and 35 tokens).
+  [ "$(head -n 1 "$T/$CASE/run.out" | jq -r '[.tokens.claude, .usage.input, .usage.output] | join(" ")')" = "39 13 6" ] || fail "the refused try's tokens are not on the build's record: $(cat "$T/$CASE/run.out")"
+  # Refused at every try: the session fails after the fifth, naming the error, with the API's own words under it.
+  refusing 99; : > "$STUB/calls"; : > "$STUB/waits"
+  apicall 'session "$FXWT" "Build the issue."; echo "rc=$?"'
+  [ "$(wc -l < "$STUB/calls")" = 5 ] && [ "$(wc -l < "$STUB/waits")" = 4 ] || fail "a session the API kept refusing ran $(wc -l < "$STUB/calls") times, not 5"
+  [ "$(tail -n 1 "$T/$CASE/run.out")" = rc=1 ] && head -n 1 "$T/$CASE/run.out" | grep -q '^the model API refused (403 Cloudflare) at each of 5 tries' \
+    || fail "the session the API kept refusing did not fail naming the error: $(cat "$T/$CASE/run.out")"
+  grep -qF 'API Error: 403 Attention Required! | Cloudflare' "$T/$CASE/run.out" || fail "the failure lost the API's own words: $(cat "$T/$CASE/run.out")"
+  [ "$(jq -r .tokens.claude "$FXWT.spent")" = 20 ] || fail "the five refused tries' tokens are not in what the failed step used: $(cat "$FXWT.spent")"
 }
 # Which words of a failed session are an API-side error, read as the engine reads them (session.sh's APIERROR, on the
 # session's output and stderr): an error it names is retried as t_apierror's 403 is (and t_apicodexrefused's 429), and
@@ -68,18 +74,25 @@ t_apiwords() {
   # only, as one without a verdict, and marked nothing.
   [ "$(apiread true 'API Error: 429')" = 429 ] || fail "a Codex refusal in plain words was not read as an API error"
 }
-# One outage must not burn through the queue: while a session's API error is fresh (5 times apiPause), the loop picks
-# no card. Two issues, one builder: the first card is refused once and lands; the second card's session starts only
-# once the error is no longer fresh, though the builder was free before that.
+# One outage must not burn through the queue: a session the API refused marks the error fresh for 5 times apiPause
+# (apitries()), apifresh() says it is fresh until then, and while it is, the loop picks no card.
 t_apifresh() {
-  setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; printf '%s\n' "$GO" > "$STUB/review.1"; printf '%s\n' "$GO" > "$STUB/review.2"; refusing 1
-  loop control cap 1 >/dev/null; tune '.tunables.apiPause = 2 | .tunables.poll = 1'
+  setup "[$(issue 7 2026-01-01)]"; printf '%s\n' "$GO" > "$STUB/review.1"; refusing 1; tune '.tunables.apiPause = 0.4 | .tunables.poll = 1'; fx_wt : b.txt one
+  # The refused session (its mark kept), then apifresh() at once, and on a mark in the past, then on no time at all.
+  apicall 'session "$FXWT" "Build the issue." >/dev/null; echo "rc=$?"; cp "$APIERR" "$STUB/marked"
+    for m in refused past none; do apifresh && echo "$m fresh" || echo "$m stale"; [ $m = refused ] && jq -n "now - 1" > "$APIERR" || echo null > "$APIERR"; done'
+  [ "$(tail -n 4 "$T/$CASE/run.out" | tr '\n' ,)" = "rc=0,refused fresh,past stale,none stale," ] && [ "$(wc -l < "$STUB/calls")" = 2 ] \
+    || fail "apifresh() did not say fresh after a refusal and not fresh after its mark: $(cat "$T/$CASE/run.out")"
+  # The refusal marked it fresh for 5 times apiPause (2 s).
+  jq -en --argjson first "$(sed -n 1p "$STUB/calls")" --slurpfile u "$STUB/marked" '$u[0] >= $first + 2 and $u[0] < $first + 4' >/dev/null \
+    || fail "a refused session did not mark the API error fresh for 5 times apiPause: refused at $(sed -n 1p "$STUB/calls"), fresh until $(cat "$STUB/marked")"
+  # The loop's pick (run(), lib/run.sh) is held while the error is fresh: marked fresh for 3 s, the card is picked no sooner.
+  echo 0 > "$STUB/refuse"; jq -n 'now + 3' > "$ST/apierror"; cp "$ST/apierror" "$STUB/marked"
+  # loop: the pick is held inside run()'s turn, which no function call short of the loop runs
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  [ "$(st 'select(.step | IN("blocked", "landed")) | "\(.issue) \(.step)"' | tr '\n' ,)" = "7 landed,8 landed," ] || fail "the two cards did not land: $(st '[.issue, .step, .reason] | join(" ")' | tr '\n' ,)"
-  # The sessions: #7 refused, #7 again, #8. The error was fresh until the time in the state folder's apierror.
-  [ "$(wc -l < "$STUB/calls")" = 3 ] || fail "$(wc -l < "$STUB/calls") sessions ran, not 3"
-  jq -en --argjson s "$(sed -n 3p "$STUB/calls")" --argjson first "$(sed -n 1p "$STUB/calls")" --slurpfile u "$ST/apierror" '$u[0] >= $first + 10 and $s >= $u[0]' >/dev/null \
-    || fail "a new card started a session while the API error was fresh: refused at $(sed -n 1p "$STUB/calls"), fresh until $(cat "$ST/apierror"), next card's session at $(sed -n 3p "$STUB/calls")"
+  [ "$(st 'select(.step | IN("blocked", "landed")) | .step')" = landed ] || fail "the card did not land: $(st '[.step, .reason] | join(" ")' | tr '\n' ,)"
+  jq -en --argjson p "$(st 'select(.step == "picked") | .time | fromdate')" --slurpfile u "$STUB/marked" '$p >= ($u[0] | floor)' >/dev/null \
+    || fail "the loop picked a card while the API error was fresh: fresh until $(cat "$STUB/marked"), picked at $(st 'select(.step == "picked") | .time')"
 }
 # Bug: only the pick was held, so a card picked before the outage started its session into it: the first review here
 # marks an API error fresh for 3 s (as another card's refused session does) and asks for a fix; the fix session
@@ -90,7 +103,9 @@ t_apihold() {
   echo 'date +%s.%N >> "$STUB/calls"; echo two >> a.txt' > "$STUB/build"
   # shellcheck disable=SC2016
   echo '[ -e "$STUB/marked" ] || { jq -n "now + 3" > "$STUB/marked"; cp "$STUB/marked" "$ST/apierror"; }' > "$STUB/review-cmd"
+  # The live record is read by polling it: the card's own loop process writes it, and no call of this shell sees it.
   ( while [ -d "$STUB" ] && [ ! -e "$STUB/waitlive" ]; do jq -e '.action // "" | startswith("waiting")' "$T/$CASE"/cards/*-7.live >/dev/null 2>&1 && cp "$T/$CASE"/cards/*-7.live "$STUB/waitlive"; sleep 0.1; done ) >/dev/null 2>&1 &
+  # loop: the hold meets a card already picked and past its review: only the card's own run puts its fix after that review
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   [ "$(st 'select(.step | IN("blocked", "landed")) | .step')" = landed ] && [ "$(wc -l < "$STUB/calls")" = 2 ] || fail "the card did not land after one fix: $(st '[.step, .reason] | join(" ")' | tr '\n' ,)"
   jq -en --argjson s "$(sed -n 2p "$STUB/calls")" --slurpfile u "$STUB/marked" '$s >= $u[0]' >/dev/null \
@@ -98,76 +113,77 @@ t_apihold() {
   jq -e '.step == "fix" and (.action | test("^waiting: the model API refused a session; starting at [0-2][0-9]:[0-5][0-9]$"))' "$STUB/waitlive" >/dev/null \
     || fail "the held card's live record does not say what it waits for and until when: $(cat "$STUB/waitlive" 2>&1)"
 }
-# Bug: a Codex review started while an API error was fresh: only Claude sessions were held. The build here marks an API
-# error fresh for 3 s; the Codex review after it starts only once the error is no longer fresh, the card's live record
-# saying meanwhile what it waits for.
+# Bug: a Codex review started while an API error was fresh: only Claude sessions were held. An API error marked fresh
+# for 1 s (as another card's refused session marks it); the Codex review starts only once the error is no longer
+# fresh, the card's live record saying meanwhile what it waits for.
 t_apicodex() {
-  setup "[$(issue 7 2026-01-01)]"; printf '%s\n' "$GO" > "$STUB/review.1"
-  # shellcheck disable=SC2016
-  echo 'jq -n "now + 3" > "$STUB/marked"; cp "$STUB/marked" "$ST/apierror"; echo two >> a.txt' > "$STUB/build"
+  setup '[]'; printf '%s\n' "$GO" > "$STUB/review.1"; fx_wt 'echo two >> a.txt' b.txt one
   # shellcheck disable=SC2016
   echo 'date +%s.%N >> "$STUB/rcalls"' > "$STUB/review-cmd"
-  ( while [ -d "$STUB" ] && [ ! -e "$STUB/waitlive" ]; do jq -e '.action // "" | startswith("waiting")' "$T/$CASE"/cards/*-7.live >/dev/null 2>&1 && cp "$T/$CASE"/cards/*-7.live "$STUB/waitlive"; sleep 0.1; done ) >/dev/null 2>&1 &
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  [ "$(st 'select(.step | IN("blocked", "landed")) | .step')" = landed ] && [ "$(wc -l < "$STUB/rcalls")" = 1 ] || fail "the card did not land after one review: $(st '[.step, .reason] | join(" ")' | tr '\n' ,)"
+  mkdir -p "$ST"; jq -n 'now + 1' > "$ST/apierror"; cp "$ST/apierror" "$STUB/marked"
+  apicall 'reviewed "$FXWT" "Build the issue."; echo "rc=$? $(verdict "$FXWT.review")"'
+  [ "$(tail -n 1 "$T/$CASE/run.out")" = "rc=0 GO" ] && [ "$(wc -l < "$STUB/rcalls")" = 1 ] || fail "the review did not answer GO once: $(cat "$T/$CASE/run.out")"
   jq -en --argjson s "$(sed -n 1p "$STUB/rcalls")" --slurpfile u "$STUB/marked" '$s >= $u[0]' >/dev/null \
     || fail "a Codex review started while the API error was fresh: fresh until $(cat "$STUB/marked"), the review at $(sed -n 1p "$STUB/rcalls")"
-  jq -e '.step == "review" and (.action | test("^waiting: the model API refused a session; starting at [0-2][0-9]:[0-5][0-9]$"))' "$STUB/waitlive" >/dev/null \
-    || fail "the held review's live record does not say what it waits for and until when: $(cat "$STUB/waitlive" 2>&1)"
+  [ -s "$STUB/waits" ] && jq -se 'all(.step == "review" and (.action | test("^waiting: the model API refused a session; starting at [0-2][0-9]:[0-5][0-9]$")))' "$STUB/waits" >/dev/null \
+    || fail "the held review's live record does not say what it waits for and until when: $(cat "$STUB/waits" 2>&1)"
 }
 # Bug: a Codex review the API refused (429 at every try) was run again once only, as a review without a verdict is,
 # then blocked its card, and marked no API error, so the loop went on picking cards into the outage. It is an API-side
 # error as a Claude session's is: the same review runs again, up to 5 tries, and each refusal is marked fresh.
 t_apicodexrefused() {
-  # A turn every second: while the API error is fresh the loop starts no card and waits out a whole turn (30 s by default).
-  setup "[$(issue 7 2026-01-01)]"; printf '%s\n' "$GO" > "$STUB/review.3"; echo 2 > "$STUB/refuse"; tune '.tunables.apiPause = 0.1 | .tunables.poll = 1'
+  setup '[]'; printf '%s\n' "$GO" > "$STUB/review.3"; echo 2 > "$STUB/refuse"; tune '.tunables.apiPause = 0.02'; fx_wt 'echo two >> a.txt' b.txt one
+  # reviewed() alone, as a card's review step calls it: what it prints, then its exit and the verdict it left.
+  # shellcheck disable=SC2016 # expanded in the engine shell (apicall)
+  cxreview='reviewed "$FXWT" "Build the issue."; echo "rc=$? $(verdict "$FXWT.review")"'
   # shellcheck disable=SC2016
   echo 'n=$(cat "$STUB/refuse"); [ "$n" -le 0 ] || { echo $((n - 1)) > "$STUB/refuse"; cp "$ST/apierror" "$STUB/marked.$n" 2>/dev/null
     echo "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":100,\"cached_input_tokens\":60,\"output_tokens\":7}}"
     echo "{\"type\":\"error\",\"message\":\"${REFUSAL:-API Error: 429 Too Many Requests}\"}"; exit 1; }' > "$STUB/review-cmd"
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  [ "$(st 'select(.step | IN("blocked", "landed")) | .step')" = landed ] && [ "$(wc -l < "$STUB/reviews")" = 3 ] \
-    || fail "a Codex review the API refused twice did not run a third time and land its card: $(wc -l < "$STUB/reviews") reviews, $(st '[.step, .reason] | join(" ")' | tr '\n' ,)"
+  apicall "$cxreview"
+  [ "$(tail -n 1 "$T/$CASE/run.out")" = "rc=0 GO" ] && [ "$(wc -l < "$STUB/reviews")" = 3 ] \
+    || fail "a Codex review the API refused twice did not run a third time and answer GO: $(wc -l < "$STUB/reviews") reviews, $(cat "$T/$CASE/run.out")"
   # The first refusal marked the error fresh (the second try saw the mark), so no other card starts into the outage.
   jq -e numbers "$STUB/marked.1" >/dev/null 2>&1 && [ ! -e "$STUB/marked.2" ] || fail "a refused Codex review did not mark the API error: $(ls "$STUB")"
-  # One review line, GO, with the refused tries' tokens (47 each) and no first attempt: it was never a review without a verdict.
-  [ "$(st 'select(.step == "review") | [.result, .tokens.codex, .firstTry] | tojson')" = '["GO",141,null]' ] \
-    || fail "the review line lost the refused tries' tokens, or holds a first attempt: $(st 'select(.step == "review")')"
-  # Refused at every try, in Codex's own words for it: the card blocks after the fifth, naming the error.
-  echo "[$(issue 8 2026-01-01)]" > "$STUB/issues.json"; echo 99 > "$STUB/refuse"; : > "$STUB/reviews"
-  REFUSAL='exceeded retry limit, last status: 429 Too Many Requests' loop run >/dev/null 2>&1
+  # One review record with the refused tries' tokens (47 each) and no first attempt: it was never a review without a verdict.
+  [ "$(head -n 1 "$T/$CASE/run.out" | jq -c '[.tokens.codex, .firstTry]')" = '[141,null]' ] \
+    || fail "the review's record lost the refused tries' tokens, or holds a first attempt: $(cat "$T/$CASE/run.out")"
+  # Refused at every try, in Codex's own words for it: the review fails after the fifth, naming the error.
+  echo 99 > "$STUB/refuse"; : > "$STUB/reviews"; rm -f "$ST/apierror"
+  REFUSAL='exceeded retry limit, last status: 429 Too Many Requests' apicall "$cxreview"
   [ "$(wc -l < "$STUB/reviews")" = 5 ] || fail "a Codex review the API kept refusing ran $(wc -l < "$STUB/reviews") times, not 5"
-  st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -q 'the model API refused (429) at each of 5 tries' \
-    || fail "the card whose review the API kept refusing is not blocked naming the error: $(st 'select(.issue == 8) | [.step, .reason] | join(" ")' | tr '\n' ,)"
-  [ "$(st 'select(.issue == 8 and .step == "blocked") | .spent.tokens.codex')" = 235 ] || fail "the five refused tries' tokens are not on the blocked line: $(st 'select(.issue == 8 and .step == "blocked") | .spent')"
+  [[ $(tail -n 1 "$T/$CASE/run.out") == "rc=1 "* ]] && head -n 1 "$T/$CASE/run.out" | grep -q '^the model API refused (429) at each of 5 tries' \
+    && grep -qF 'exceeded retry limit, last status: 429' "$T/$CASE/run.out" || fail "the review the API kept refusing did not fail naming the error in Codex's words: $(cat "$T/$CASE/run.out")"
+  [ "$(jq -r .tokens.codex "$FXWT.spent")" = 235 ] || fail "the five refused tries' tokens are not in what the failed review used: $(cat "$FXWT.spent")"
   # A review that wrote its NO-GO before the API refused it answered: run again, a GO could replace that NO-GO.
-  echo "[$(issue 9 2026-01-01)]" > "$STUB/issues.json"; : > "$STUB/reviews"; printf '%s\n' "$NOGO" > "$STUB/review.1"; printf '%s\n' "$GO" > "$STUB/review.2"
+  : > "$STUB/reviews"; printf '%s\n' "$NOGO" > "$STUB/review.1"; printf '%s\n' "$GO" > "$STUB/review.2"
+  # shellcheck disable=SC2016 # expanded in the codex stub
   echo 'cat "$STUB/review.1" > "$out"; echo "{\"type\":\"error\",\"message\":\"API Error: 429 Too Many Requests\"}"; exit 1' > "$STUB/review-cmd"
-  rm -f "$ST/apierror"; loop run >/dev/null 2>&1
-  [ "$(wc -l < "$STUB/reviews")" = 1 ] && st 'select(.issue == 9 and .step == "blocked") | .reason' | grep -q '^review 1: review failed (exit 1)' \
-    || fail "a Codex review that wrote a verdict and was then refused by the API was run again: $(wc -l < "$STUB/reviews") reviews, $(st 'select(.issue == 9) | [.step, .reason] | join(" ")' | tr '\n' ,)"
+  rm -f "$ST/apierror"; apicall "$cxreview"
+  [ "$(wc -l < "$STUB/reviews")" = 1 ] && [[ $(tail -n 1 "$T/$CASE/run.out") == "rc=1 "* ]] && head -n 1 "$T/$CASE/run.out" | grep -q '^review failed (exit 1)' \
+    || fail "a Codex review that wrote a verdict and was then refused by the API was run again: $(wc -l < "$STUB/reviews") reviews, $(cat "$T/$CASE/run.out")"
   # Bug: that review, kept as answered, marked no API error either, so the queue went on into the outage it met.
   jq -e numbers "$ST/apierror" >/dev/null 2>&1 || fail "a Codex review refused by the API after its verdict did not mark the API error"
   # A refusal Codex prints in plain words is read as one (t_apiwords).
   # Bug: a refusal Codex wrote to stderr alone, its stream empty, was read as no API error either. Refused so at every
-  # try, the review runs 5 times and its card blocks naming the error, with the words stderr held.
-  echo "[$(issue 11 2026-01-01)]" > "$STUB/issues.json"; : > "$STUB/reviews"; rm -f "$ST/apierror"
+  # try, the review runs 5 times and fails naming the error, with the words stderr held.
+  : > "$STUB/reviews"; rm -f "$ST/apierror"
   echo 'echo "API Error: 429" >&2; exit 1' > "$STUB/review-cmd"
-  loop run >/dev/null 2>&1
+  apicall "$cxreview"
   [ "$(wc -l < "$STUB/reviews")" = 5 ] && jq -e numbers "$ST/apierror" >/dev/null 2>&1 || fail "a Codex review refused on stderr ran $(wc -l < "$STUB/reviews") times, not 5, or marked no API error"
-  st 'select(.issue == 11 and .step == "blocked") | .reason + "\n" + (.tail // "")' | tr '\n' ' ' | grep -q 'the model API refused (429) at each of 5 tries.*API Error: 429' \
-    || fail "the card whose review stderr said the API refused is not blocked naming the error: $(st 'select(.issue == 11) | [.step, .reason] | join(" ")' | tr '\n' ,)"
+  tr '\n' ' ' < "$T/$CASE/run.out" | grep -q '^the model API refused (429) at each of 5 tries.*API Error: 429' \
+    || fail "the review whose stderr said the API refused did not fail naming the error: $(cat "$T/$CASE/run.out")"
 }
 # Bug: a Claude review the API refused was run again once only, as a review without a verdict is, then blocked its
 # card; and a refused try whose usage could not be read left a line that looked whole, so part of a step was priced as
 # all of it. The review here is refused twice (the first with no usage), then answers GO.
 t_apireview() {
-  setup "[$(issue 7 2026-01-01)]"; tune --slurpfile real "$SRC/lib/test-pack.json" '.models.allowed = $real[0].models.allowed | .models.allowed.claude += ["m"] | .tunables.apiPause = 0.1'
+  setup '[]'; tune --slurpfile real "$SRC/lib/test-pack.json" '.models.allowed = $real[0].models.allowed | .models.allowed.claude += ["m"] | .tunables.apiPause = 0.02'
   loop control reviewer claude claude-opus-5-5 >/dev/null || fail "a Claude reviewer was not set"
+  fx_wt 'echo two >> a.txt' b.txt one
+  # stub: the shared stub's reviews always answer; this one is refused twice, as Claude Code ends a refused session
   cat > "$STUB/claude" <<'EOF'
 #!/usr/bin/env bash
-case " $* " in *" --tools "*) ;; *) cat > /dev/null; echo two >> a.txt
-  echo '{"type":"result","is_error":false,"usage":{"input_tokens":10,"cache_creation_input_tokens":20,"cache_read_input_tokens":999,"output_tokens":5}}'; exit 0 ;; esac
 cat > /dev/null; echo x >> "$STUB/reviews"
 case $(wc -l < "$STUB/reviews") in
   1) echo '{"type":"result","is_error":true,"result":"Failed to authenticate. API Error: 403 Attention Required! | Cloudflare"}'; exit 1 ;;
@@ -175,21 +191,22 @@ case $(wc -l < "$STUB/reviews") in
 esac
 jq -cn --arg r "$GO" '{type: "result", is_error: false, result: $r, num_turns: 2, usage: {input_tokens: 100, cache_creation_input_tokens: 50, cache_read_input_tokens: 1000, output_tokens: 7}}'
 EOF
-  export GO; out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  [ "$(st 'select(.step | IN("blocked", "landed")) | .step')" = landed ] && [ "$(wc -l < "$STUB/reviews")" = 3 ] \
-    || fail "a review the API refused twice did not run a third time and land its card: $(wc -l < "$STUB/reviews") reviews, $(st '[.step, .reason] | join(" ")' | tr '\n' ,)"
-  # One review line, GO, holding what the tries with a readable usage used (4 and 157 tokens), and unread: the first
+  export GO; apicall 'reviewed "$FXWT" "Build the issue."; echo "rc=$? $(verdict "$FXWT.review")"'
+  [ "$(tail -n 1 "$T/$CASE/run.out")" = "rc=0 GO" ] && [ "$(wc -l < "$STUB/reviews")" = 3 ] \
+    || fail "a review the API refused twice did not run a third time and answer GO: $(wc -l < "$STUB/reviews") reviews, $(cat "$T/$CASE/run.out")"
+  # One review record, holding what the tries with a readable usage used (4 and 157 tokens), and unread: the first
   # try's usage is unknown, so the step is not priced as if this were all of it.
-  [ "$(st 'select(.step == "review") | [.result, .tokens.claude, .usage.input, .unread, .firstTry] | tojson')" = '["GO",161,103,"the session output holds no token usage",null]' ] \
-    || fail "the review line lost a refused try's tokens, or the mark that one's usage is unread: $(st 'select(.step == "review")')"
+  [ "$(head -n 1 "$T/$CASE/run.out" | jq -c '[.tokens.claude, .usage.input, .unread, .firstTry]')" = '[161,103,"the session output holds no token usage",null]' ] \
+    || fail "the review's record lost a refused try's tokens, or the mark that one's usage is unread: $(cat "$T/$CASE/run.out")"
 }
 # Bug: a session the API refused before it wrote any result says so on stderr only ("API Error: 503 Service
 # Unavailable", exit 1, no result line): it blocked its card at once, as a failure of the card's own. It is the same
-# outage: a build and a Claude review that each end so once run again, and the card lands. One that ends so at every
-# try blocks naming the error, the API's own words (stderr's) under it.
+# outage: a build and a Claude review that each end so once run again, and end well. One that ends so at every try
+# fails naming the error, the API's own words (stderr's) under it.
 t_apistderr() {
-  setup "[$(issue 7 2026-01-01)]"; tune --slurpfile real "$SRC/lib/test-pack.json" '.models.allowed = $real[0].models.allowed | .models.allowed.claude += ["m"] | .tunables.apiPause = 0.1 | .tunables.poll = 1'
+  setup '[]'; tune --slurpfile real "$SRC/lib/test-pack.json" '.models.allowed = $real[0].models.allowed | .models.allowed.claude += ["m"] | .tunables.apiPause = 0.02'
   loop control reviewer claude claude-opus-5-5 >/dev/null || fail "a Claude reviewer was not set"
+  fx_wt : b.txt one
   cat > "$STUB/claude" <<'EOF'
 #!/usr/bin/env bash
 cat > /dev/null
@@ -198,14 +215,17 @@ case " $* " in *" --tools "*) f=reviews ;; *) f=builds ;; esac; echo x >> "$STUB
 [ $f = reviews ] || { echo two >> a.txt; echo '{"type":"result","is_error":false,"usage":{"input_tokens":10,"cache_creation_input_tokens":20,"cache_read_input_tokens":999,"output_tokens":5}}'; exit 0; }
 jq -cn --arg r "$GO" '{type: "result", is_error: false, result: $r, num_turns: 2, usage: {input_tokens: 100, cache_creation_input_tokens: 50, cache_read_input_tokens: 1000, output_tokens: 7}}'
 EOF
-  echo 1 > "$STUB/refuse"; export GO; out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  [ "$(st 'select(.step | IN("blocked", "landed")) | .step')" = landed ] && [ "$(wc -l < "$STUB/builds")" = 2 ] && [ "$(wc -l < "$STUB/reviews")" = 2 ] \
-    || fail "a build and a review the API refused on stderr only did not each run again and land the card: $(cat "$STUB/builds" "$STUB/reviews" 2>/dev/null | wc -l) sessions, $(st '[.step, .reason] | join(" ")' | tr '\n' ,)"
-  # Refused so at every try: the card blocks after the fifth, naming the error, with stderr's words under it.
-  echo "[$(issue 8 2026-01-01)]" > "$STUB/issues.json"; echo 99 > "$STUB/refuse"; : > "$STUB/builds"
-  loop run >/dev/null 2>&1
+  # The build, then the review of its change, as a card's steps call them: each one's exit (and the review's verdict).
+  echo 1 > "$STUB/refuse"; export GO
+  apicall 'session "$FXWT" "Build the issue."; echo "build rc=$?"; git -C "$FXWT" add -A; reviewed "$FXWT" "Build the issue."; echo "review rc=$? $(verdict "$FXWT.review")"'
+  grep -qx 'build rc=0' "$T/$CASE/run.out" && grep -qx 'review rc=0 GO' "$T/$CASE/run.out" && grep -qx two "$FXWT/a.txt" \
+    && [ "$(wc -l < "$STUB/builds")" = 2 ] && [ "$(wc -l < "$STUB/reviews")" = 2 ] \
+    || fail "a build and a review the API refused on stderr only did not each run again and end well: $(cat "$STUB/builds" "$STUB/reviews" 2>/dev/null | wc -l) sessions, $(cat "$T/$CASE/run.out")"
+  # Refused so at every try: the build fails after the fifth, naming the error, with stderr's words under it.
+  echo 99 > "$STUB/refuse"; : > "$STUB/builds"; rm -f "$ST/apierror"
+  apicall 'session "$FXWT" "Build the issue."; echo "rc=$?"'
   [ "$(wc -l < "$STUB/builds")" = 5 ] || fail "a session the API kept refusing on stderr ran $(wc -l < "$STUB/builds") times, not 5"
-  st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -q '^build: the model API refused (503) at each of 5 tries' \
-    || fail "the card the API kept refusing on stderr is not blocked naming the error: $(st 'select(.issue == 8) | [.step, .reason] | join(" ")' | tr '\n' ,)"
-  st 'select(.issue == 8 and .step == "blocked") | .tail' | grep -q 'API Error: 503 Service Unavailable' || fail "the blocked line lost the API's own words: $(st 'select(.issue == 8 and .step == "blocked") | .tail')"
+  [ "$(tail -n 1 "$T/$CASE/run.out")" = rc=1 ] && head -n 1 "$T/$CASE/run.out" | grep -q '^the model API refused (503) at each of 5 tries' \
+    || fail "the session the API kept refusing on stderr did not fail naming the error: $(cat "$T/$CASE/run.out")"
+  grep -qF 'API Error: 503 Service Unavailable' "$T/$CASE/run.out" || fail "the failure lost the API's own words: $(cat "$T/$CASE/run.out")"
 }
