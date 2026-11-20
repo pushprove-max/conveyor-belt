@@ -140,14 +140,20 @@ EOF
     || fail "apply_patch was not screened file by file: $g"
 }
 
-# Bugs: a Codex build starts with a Codex that cannot run hooks headless, or with the guard hook missing, and runs
-# unguarded; the card is blocked without saying why.
-t_codexnoguard() {
+# Bugs: a Codex build starts with a Codex that cannot run hooks headless and runs unguarded; the card is blocked
+# without saying why. It runs the loop: a direct cxready() call shows the refusal text, but not that the loop starts no
+# Codex session and records that text as the card's block reason.
+t_codexnohooks() {
   cxsetup; echo 'echo two >> a.txt' > "$STUB/cx-cmd"; : > "$STUB/cx-old"
   loop run > "$STUB/log" 2>&1
   [ ! -e "$STUB/cx-args" ] && st 'select(.step == "blocked") | .reason' | grep -qF 'cannot run hooks in a headless session (its exec has no --dangerously-bypass-hook-trust): a Codex session would run without the command guards, so it does not start' \
     || fail "a Codex that cannot run hooks headless started, or the block does not say why: $(st 'select(.step == "blocked") | .reason')"
-  CASE=${CASE}v; cxsetup; echo 'echo two >> a.txt' > "$STUB/cx-cmd"
+}
+
+# Bugs: a Codex build starts with the guard hook missing and runs unguarded; the card is blocked without saying why.
+# It runs the loop for the reason t_codexnohooks does: a direct cxready() call cannot show the block reason recorded.
+t_codexnoguard() {
+  cxsetup; echo 'echo two >> a.txt' > "$STUB/cx-cmd"
   CONVEYOR_CODEX_GUARD=$T/$CASE/nosuch/guard.mjs loop run > "$STUB/log" 2>&1
   [ ! -e "$STUB/cx-args" ] && st 'select(.step == "blocked") | .reason' | grep -qF "the Codex guard hook $T/$CASE/nosuch/guard.mjs (or opencode/screen.mjs or opencode/guard.sh beside it) is missing" \
     || fail "Codex started with the guard hook missing, or the block does not say why: $(st 'select(.step == "blocked") | .reason')"
@@ -168,16 +174,17 @@ t_codexclaude() {
 }
 
 # Bugs: Claude's weekly limit holds back a card whose builder is Codex (with a Codex reviewer, no Claude session runs);
-# or, the other way, it stops holding back a Claude builder's card.
+# or, the other way, it stops holding back a Claude builder's card. The Codex session changes nothing, so its card ends
+# after the build: that Codex ran is what shows the card was not held, and a landing would add its time and prove no more.
 t_codexlimit() {
-  cxsetup; printf '%s\n' 'echo two >> a.txt' 'echo "{\"type\":\"thread.started\",\"thread_id\":\"th-4\"}"' \
+  cxsetup; printf '%s\n' 'echo "{\"type\":\"thread.started\",\"thread_id\":\"th-4\"}"' \
     'echo "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}"' > "$STUB/cx-cmd"
   tune '.tunables.limitTtl = 0'; export CONVEYOR_LIMIT_CMD='echo "{\"seven_day\":{\"utilization\":95}}"'
   loop control guard 90 >/dev/null
   seatset model m; out=$(loop run 1 2>&1); grep -q 'paused by guard' <<<"$out" && [ -z "$(st 'select(.step == "picked") | .issue')" ] \
     || fail "a Claude builder's card was not held at the limit: $out"
   seatset model cx-1; out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  [ "$(st 'select(.step == "landed") | .issue')" = 7 ] && [ -e "$STUB/cx-args" ] || fail "Claude's limit held back the Codex builder's card: $out"
+  [ "$(st 'select(.step == "picked") | .issue')" = 7 ] && [ -e "$STUB/cx-args" ] || fail "Claude's limit held back the Codex builder's card: $out"
 }
 
 # Bug: a Codex build the API refused (in Codex's own words, "exceeded retry limit, last status: 429") was read as
