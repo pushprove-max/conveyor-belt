@@ -22,9 +22,9 @@ t_gitfence() {
     && mkdir "$w/tmp" && g=$(git -C "$w" rev-parse --absolute-git-dir) || fail "the scratch repo and its worktree could not be made"
   export XDG_CONFIG_HOME=$d/config
   mkdir -p "$XDG_CONFIG_HOME/conveyor" && echo "{\"testSlots\": 1, \"testSlotsDir\": \"$d/slots\"}" > "$XDG_CONFIG_HOME/conveyor/host.json"
-  # The engine as it is, with only the fixture case file in its tests/.
+  # The engine as it is, with only the fixture case file in its tests/ (and the stub CLIs lib.sh's setup copies).
   for f in "$SRC"/*; do [ "${f##*/}" = tests ] || ln -s "$f" "$s/"; done
-  ln -s "$SRC/tests/lib.sh" "$SRC/tests/wait.sh" "$s/tests/"
+  ln -s "$SRC/tests/lib.sh" "$SRC/tests/wait.sh" "$SRC/tests/stubs" "$s/tests/"
   printf '%s\n' '# timeout: 30' 't_fxgit() { git -C "${FX_NOPATH:-}" commit -q --allow-empty -m stray; }' > "$s/tests/fx.test.sh"
   was=$(cat "$d/repo/.git/config"; git -C "$d/repo" for-each-ref; git -C "$w" rev-parse HEAD)
   (cd "$w" && GIT_DIR=$g TMPDIR=$w/tmp timeout 60 bash "$s/conveyor.test.sh") > "$d/run" 2>&1; rc=$?
