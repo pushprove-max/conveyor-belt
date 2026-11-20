@@ -277,7 +277,7 @@ cwp() { python3 -c "import sys; sys.path.insert(0, '${LIM%/*}'); import dashboar
 cws() { python3 -c "import sys, json; sys.path.insert(0, '${LIM%/*}'); import dashboard_limit as d; print(json.dumps(d.cache_writes($1, 1000, $2)))"; }
 C=/w/conveyor-cards/c20261119T100000-alpha-11
 got=$(cws '[[990, "claude-opus-5-5", 0, 40, 60, 100, 0, [990, "claude-fable-5-1", 0, 5, 0, 0, 0]], [995, "claude-opus-5-5", 0, 10, 0, 0, 0], [-90000, "claude-opus-5-5", 0, 9, 9, 0, 0],
-  [995, "claude-opus-5-5", None, 9, 9, 0, 0], [996, "claude-opus-5-5", 0, 7, 0, 0, 0]]' "[('$C/sub', 's1'), ('$C', 's1'), ('$C', 's1'), ('$C', 's1'), ('/home/x', 's2')]")
+  [995, "claude-opus-5-5", None, 9, 9, 0, 0], [996, "claude-opus-5-5", 0, 7, 0, 0, 0]]' "[('$C/sub', 's1'), ('$C', 's1'), ('$C', 's1'), ('$C', 's1'), ('/w/elsewhere', 's2')]")
 [ "$got" = '{"write": 62, "write1h": 60, "cards": [{"card": "c20261119T100000-alpha-11", "model": "claude-opus-5-5", "first": 990, "last": 995, "write": 50, "write1h": 60}, {"card": "c20261119T100000-alpha-11", "model": "claude-fable-5-1", "first": 990, "last": 990, "write": 5, "write1h": 0}]}' ] \
   || fail "cache_writes: $got"
 # A main-red fix card's worktree ends in -0, not an issue number. Bug caught: its writes counted as no card step's.
