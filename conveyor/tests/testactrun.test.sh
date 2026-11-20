@@ -30,6 +30,20 @@ EOF
 }
 trfree() { flock -n "$T/$CASE/slots/1" true; } # the pool's one slot is free
 
+# Bug it catches (#1036): the Tests page lists the files the pack's tests.patterns match, but Run refused each one
+# whose name has no .test. in it. tafile() takes src/test-a.mjs, which the pack's test-*.mjs matches, and still
+# refuses src/helper.mjs, which no pattern matches. The ask itself (taask) is stubbed: what runs is t_tarun's.
+t_tarunpattern() {
+  setup '[]'; tune '.tests.patterns = ["test-*.mjs"]'; local out
+  mkdir -p "$R/src" && echo 'export {};' > "$R/src/test-a.mjs" && cp "$R/src/test-a.mjs" "$R/src/helper.mjs" && git -C "$R" add src \
+    && git -C "$R" commit -qm 'a test file and a helper' || fail "main's files"
+  out=$(export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && . "$SRC/lib/prompts.sh" \
+    && . "$SRC/lib/issues.sh" && . "$SRC/lib/testaction.sh" && names || exit 1
+    taask() { echo "asked"; }
+    for p in src/test-a.mjs src/helper.mjs; do e=$(tafile "$p" 2>&1); echo "$? $p: $e"; done) || fail "the engine could not be loaded: $out"
+  [ "$(grep -oE '^[0-9]+ src/[^:]*' <<<"$out" | paste -sd, -)" = '0 src/test-a.mjs,2 src/helper.mjs' ] || fail "the paths tafile took and refused: $out"
+}
+
 # One case on one fixture (trsetup): its refused paths, then a run that passes, then one that fails. Each case of
 # its own paid the fixture again.
 # Bugs this guards (issue 517): the owner could not time one test file without a card. A run by hand of a path that is

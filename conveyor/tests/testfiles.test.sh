@@ -55,6 +55,47 @@ t_tfpart() {
     || fail "each file's issue, the newest filed for it in any record: $(jq -c '[.files[] | {file, issue}]' <<<"$got")"
 }
 
+# Main's checkout with a project's test-*.mjs files and a hook test x.test.sh (one case, one), all committed, and,
+# with <saved> given, the survey's saved times of src/test-a.mjs in .conveyor/test-times.json, committed at a known time.
+tf_patfiles() { # [saved]
+  mkdir -p "$R/src" "$R/scripts" "$R/.claude/hooks"
+  printf "import test from 'node:test';\ntest('a', () => {});\n" > "$R/src/test-a.mjs"; cp "$R/src/test-a.mjs" "$R/scripts/test-b.mjs"
+  printf 't_one() {\n  :\n}\n' > "$R/.claude/hooks/x.test.sh"
+  # The fixture's .gitignore holds .conveyor; a host project commits its test-times.json.
+  [ -z "${1:-}" ] || { echo '{"files": {"src/test-a.mjs": {"sec": 7.5, "cpu": 6.25}}}' > "$R/.conveyor/test-times.json" && git -C "$R" add -f .conveyor/test-times.json; } \
+    || fail "the saved times"
+  git -C "$R" add src scripts .claude/hooks && GIT_COMMITTER_DATE=2026-11-12T00:00:00Z git -C "$R" commit -qm tests || fail "main's test files"
+}
+# Bug it catches (#1036): the Tests page listed only *.test.* files, so a project whose tests.patterns name its tests
+# test-*.mjs saw none of them. Both test-*.mjs files are listed, beside the *.test.* files; an .mjs file's cases are
+# not counted (null, not an empty list that reads as no case), while the shell file's are; the survey's saved times
+# of src/test-a.mjs are its newest run, marked survey (it was said "a card" on the Board), after its five card runs
+# (two days before), and the oldest card run, which the survey's run pushed out of runs, is in testolder()'s olderRuns
+# (it was dropped from the Timeline).
+t_tfpatterns() {
+  setup '[]'; tune '.tests.patterns = ["test-*.mjs"]'; tf_patfiles saved; tf_runs src/test-a.mjs 1 2 3 4 5
+  got=$(tf_in testspart 2026-11-09) || fail "testspart failed: $got"
+  [ "$(jq -c '[.files[].file] | sort' <<<"$got")" = '[".claude/hooks/x.test.sh","a.test.sh","scripts/test-b.mjs","src/test-a.mjs"]' ] \
+    || fail "the files the patterns match and the *.test.* files: $(jq -c '[.files[].file]' <<<"$got")"
+  [ "$(jq -c '[.files[] | {file, cases}] | sort_by(.file)' <<<"$got")" \
+    = '[{"file":".claude/hooks/x.test.sh","cases":["one"]},{"file":"a.test.sh","cases":[]},{"file":"scripts/test-b.mjs","cases":null},{"file":"src/test-a.mjs","cases":null}]' ] \
+    || fail "each file's cases: $(jq -c '[.files[] | {file, cases}]' <<<"$got")"
+  [ "$(jq -c '.files[] | select(.file == "src/test-a.mjs") | {cpu, survey: .runs[0], cards: [.runs[1:][].cpu], timedRuns, last: .lastRun.survey}' <<<"$got")" \
+    = '{"cpu":6.25,"survey":{"cpu":6.25,"sec":7.5,"card":null,"time":"2026-11-12T00:00:00Z","whole":false,"survey":true},"cards":[5,4,3,2],"timedRuns":6,"last":true}' ] \
+    || fail "the saved times of src/test-a.mjs: $(jq -c '.files[] | select(.file == "src/test-a.mjs")' <<<"$got")"
+  got=$(tf_as history testolder src/test-a.mjs | jq -c '[.olderRuns[] | [.cpu, .card]]')
+  [ "$got" = '[[1,"c-src/test-a.mjs-0"]]' ] || fail "the older runs of src/test-a.mjs: $got"
+}
+# With no tests.patterns in the pack the list is the *.test.* files, as before #1036: not the schema's default
+# patterns, which name test-*.mjs too. Bugs it catches: a list that took the default patterns when the pack sets none;
+# and a survey time saved for src/test-a.mjs (the survey reads the default patterns) that added it to the list.
+t_tfnopatterns() {
+  setup '[]'; tf_patfiles saved
+  got=$(tf_in testspart 2026-11-09) || fail "testspart failed: $got"
+  [ "$(jq -c '[.files[].file] | sort' <<<"$got")" = '[".claude/hooks/x.test.sh","a.test.sh"]' ] \
+    || fail "the *.test.* files alone: $(jq -c '[.files[].file]' <<<"$got")"
+}
+
 # The engine's runner names a failed or flaky case as its own (run.test.sh: rone), while the times name the case file
 # that ran it (cases/r.test.sh, which defines t_rone): the case counts for its case file. Another file's case (rtwo, in
 # cases/q.test.sh) does not, and a step that failed two of its cases counts once. A case file names the runner it runs

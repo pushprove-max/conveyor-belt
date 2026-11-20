@@ -19,8 +19,10 @@
 #   now first, a file with none last: file, cpu (its newest run's that has CPU seconds; null with none), median (of
 #   every run on record with CPU seconds), change (cpu against median, as a share: 0.5 is 50% over; null when the
 #   median is 0 or null), runs (its last TESTKEEP runs, newest first: {cpu, sec: clock seconds, null on a line that
-#   gives none; card (null for a whole-suite run), time, whole (a whole-suite run), and a whole-suite run's result: ok,
-#   fail or null}; [] for a file never run), lastRun ({sec, cpu, clockPerCpu, time, whole} of its newest run; null with
+#   gives none; card (null for a whole-suite run and for a time the test-speed survey saved), time, whole (a
+#   whole-suite run), a whole-suite run's result: ok, fail or null, and a survey time's survey: true}; [] for a file never
+#   run; a survey time of a file that is not listed is left out), lastRun ({sec, cpu, clockPerCpu, time, whole, and
+#   survey: true when it is a survey time} of its newest run; null with
 #   none), timedRuns (its runs with CPU seconds), runsOnRecord (its runs on record; its older runs and test edits are
 #   not here but in testolder(), below, so the part does not grow with every run), wholeOnly (its test.files entry's wholeOnly), failedSteps (the test steps
 #   that failed with it among the failed files, or with a case it defines that its runner named, or timed out in it;
@@ -49,9 +51,9 @@
 #   mutation: its newest mutation check (lib/mutate.sh), {file, at, sha, seed, state, reason, of (its mutants), tried,
 #   killed, survived ([{source, line, kind, before, after}]), noresult, notMutated, end}; null when none was made;
 #   mutationPlace: its place in the mutation checks' asked list ($MUTS/asked, mutask()), 1 first; null when not asked;
-#   cases: the names of the cases it defines in main's checkout (its `t_<case>() {` lines the runner selects, not its
-#   helpers or a heredoc's lines), A to Z, []
-#   with none; the Board's search matches them;
+#   cases: the names of the cases a shell file (.sh, .bash) defines in main's checkout (its `t_<case>() {` lines the
+#   runner selects, not its helpers or a heredoc's lines), A to Z, [] with none; null for a file of another kind, whose
+#   cases the engine does not count; the Board's search matches them;
 #   waits: the waits its newest judge that ended done named on WAIT lines (lib/testaction.sh tawaits()), [{case, kind,
 #   at, reason}]; null when no judge of it named waits or none (a judge from before WAIT lines were asked for);
 #   neverRun: why a file of main's checkout with no run on record never ran, when the engine can tell (neverwhy(),
@@ -386,10 +388,21 @@ RUNDEFS='def testruns($ls; $su): ($ls[] | . as $l | (.times | objects) as $t | (
 testolder() {
   local ln
   ln=$(testlines) || return 1
-  printf '%s\n' "$ln" | jq -cRn --arg f "$1" --argjson keep "$TESTKEEP" --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) "$RUNDEFS"'
+  printf '%s\n' "$ln" | jq -cRn --arg f "$1" --argjson keep "$TESTKEEP" --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) --slurpfile sv <(testsurvey) "$RUNDEFS"'
     [inputs | fromjson? | objects] | sort_by(.time) | . as $cr | map(select(.step == "test")) as $ls
-    | [testruns($ls; $su) | select(.file == $f)] | sort_by(.time) as $r
+    | [testruns($ls; $su), $sv[0][] | select(.file == $f)] | sort_by(.time) as $r
     | {file: $f, olderRuns: ($r[:-$keep] | reverse | map(del(.file))), olderEdits: ([alledits($cr)[] | select(.file == $f)][$keep:])}'
+}
+# The times the latest test-speed survey saved in main's .conveyor/test-times.json (lib/survey.sh), each as a run of
+# its file dated by the commit that last wrote it, with no card, as the Tests part and testolder() read them: [{file,
+# cpu, sec, card: null, time, whole: false, survey: true}]; [] with none.
+testsurvey() {
+  local t sv
+  t=$(git -C "$MAIN" log -1 --format=%ct -- .conveyor/test-times.json 2>/dev/null)
+  [ -n "$t" ] && sv=$(git -C "$MAIN" show HEAD:.conveyor/test-times.json 2>/dev/null | jq -c --argjson t "$t" '[.files | objects | to_entries[]
+      | select(.value | type == "object") | {file: .key, cpu: ((.value.cpu | numbers) // null), sec: ((.value.sec | numbers) // null), card: null,
+        time: ($t | todate), whole: false, survey: true} | select(.cpu != null or .sec != null)]' 2>/dev/null) && [ -n "$sv" ] || sv='[]'
+  printf '%s\n' "$sv"
 }
 # The case scan of test files (testspart(): the cases each file defines; owncases(), lib/testrun.sh: the cases a card's
 # change adds or changes), an awk program run with -v q="'": a line for each case, <file><TAB><case><TAB><first
@@ -453,10 +466,13 @@ rawok() { if [ -f "$1" ] && [ -r "$1" ]; then printf '%s' "$1"; else printf /dev
 JSONL='def jsonl: split("\n") | map(fromjson? | objects);'
 testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   # The caller's defs and refs when it has read them (testowners: the snapshot's), else read here.
-  local si sh rn mn fs fl sf defs=${defs:-} refs=${refs:-} cs ru all tf=() ln ch hv px out nv rp cp su
+  local si sh rn mn fs fl sf defs=${defs:-} refs=${refs:-} cs ru all tf=() ln ch hv px out nv rp cp su sv
   packget test.slowIssues si test.slower.share sh test.slower.runs rn test.slower.minRuns mn test.files fs || return 1
-  # The test files once, as names (tf: testhollow and testproxy take them so, with no jq of their own) and as JSON.
-  mapfile -d '' -t tf < <(git -C "$MAIN" ls-files -z -- '*.test.*' 2>/dev/null)
+  # The test files once, as names (tf: testhollow and testproxy take them so, with no jq of their own) and as JSON: the
+  # tracked *.test.* files and those the pack's tests.patterns match (testpaths()), when it sets them (#1036: a
+  # project's test-*.mjs files were missing); with none set, not the schema's default patterns: the *.test.* files alone.
+  mapfile -d '' -t tf < <({ git -C "$MAIN" ls-files -z -- '*.test.*'
+    ! haspatterns || git -C "$MAIN" -c core.quotePath=false ls-files -z | testpaths -z; } 2>/dev/null | LC_ALL=C sort -zu)
   all=$(printf '%s\0' "${tf[@]}" | jq -Rsc 'split("\u0000") | map(select(. != ""))') || all='[]'
   fl=$(jq -ce 'objects' "$FLAKY" 2>/dev/null) || fl='{}'
   sf=$(jq -ce 'objects' "$SLOWFILED" 2>/dev/null) || sf='{}'
@@ -464,11 +480,14 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   hv=$(testhollow "${tf[@]}" 2>/dev/null) && [ -n "$hv" ] || hv='{}'
   px=$(testproxy "${tf[@]}" 2>/dev/null) && [ -n "$px" ] || px='{}'
   [ -n "$defs" ] && [ -n "$refs" ] || testowners
-  # The cases each test file of main's checkout defines, by file (the case scan, CASESCAN).
-  cs=$(git -C "$MAIN" grep -lzE '^t_[a-z0-9]+\(\) \{' -- '*.test.*' 2>/dev/null | (cd "$MAIN" && xargs -0 awk -v q="'" "$CASESCAN" 2>/dev/null) \
+  # The cases each shell test file of main's checkout defines, by file (the case scan, CASESCAN); the paths taken as
+  # they are, not as globs. No file, no search: git grep with no path searches the whole checkout.
+  cs='{}'
+  [ ${#tf[@]} = 0 ] || cs=$(git -C "$MAIN" --literal-pathspecs grep -lzE '^t_[a-z0-9]+\(\) \{' -- "${tf[@]}" 2>/dev/null | (cd "$MAIN" && xargs -0 awk -v q="'" "$CASESCAN" 2>/dev/null) \
     | jq -cRn '[inputs | split("\t") | {f: .[0], c: .[1]}] | group_by(.f) | map({key: .[0].f, value: [.[].c] | unique}) | from_entries') || cs='{}'
   ln=$(testlines) || return 1
   su=$(rawok "$SUITERUNS")
+  sv=$(testsurvey)
   # The files each landed commit of a card with a failed test step changed, by its sha: {sha: [file...]}, from one git
   # call (a commit main's checkout does not have is left out). A path is a commit's key only when it is one of the
   # commits asked for.
@@ -480,7 +499,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   out=$(printf '%s\n' "$ln" | jq -cRn --arg since "$1" --arg si "$si" --argjson sh "$sh" --argjson rn "$rn" --slurpfile ch <(printf '%s\n' "$ch") \
     --argjson mn "$mn" --slurpfile fs <(printf '%s' "$fs") --slurpfile fl <(printf '%s' "$fl") --slurpfile sf <(printf '%s' "$sf") --argjson keep "$TESTKEEP" \
     --slurpfile cs <(printf '%s' "$cs") --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") --argjson ru "$ru" --slurpfile all <(printf '%s' "$all") \
-    --slurpfile hv <(printf '%s' "$hv") --slurpfile px <(printf '%s' "$px") --slurpfile mu <(cat "$MUTS"/*.json 2>/dev/null | jq -c 'objects' 2>/dev/null) --rawfile mq "$(rawok "$MUTS/asked")" --rawfile su "$su" --slurpfile last <(jq -ce 'objects' "$TESTRULES" 2>/dev/null || echo null) \
+    --slurpfile hv <(printf '%s' "$hv") --slurpfile px <(printf '%s' "$px") --slurpfile mu <(cat "$MUTS"/*.json 2>/dev/null | jq -c 'objects' 2>/dev/null) --rawfile mq "$(rawok "$MUTS/asked")" --rawfile su "$su" --slurpfile sv <(printf '%s' "$sv") --slurpfile last <(jq -ce 'objects' "$TESTRULES" 2>/dev/null || echo null) \
     --rawfile rl "$(rawok "$TESTRULESLOG")" --argjson shown "$TESTRULES_SHOWN" --rawfile tf "$(rawok "$TAFILED")" \
     --slurpfile tj <(cat "$TESTACTS"/*.json 2>/dev/null | jq -c 'objects | select(.action == "judge" and .state == "done" and (.file | type) == "string" and (.waits | type) == "array") | {file, end, waits}' 2>/dev/null) '$fs[0] as $fs | $fl[0] as $fl | $sf[0] as $sf | $all[0] as $all | $hv[0] as $hv | $px[0] as $px | '"$JSONL$OWNERS$FAILURE$RUNDEFS"'
     # The rules log and the Board test issues, each read once: the log'"'"'s last $shown lines, newest first (lg), and
@@ -522,14 +541,14 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
         | failedfiles[] | [., IN($d[])]) as [$f, $ed] ({}; if $ed then .[$f].changed += 1 else .[$f].caught += 1 end)) as $catch
     | (reduce ($fl.entries | arrays | .[] | objects | .case | strings | caseowners[]) as $f ({}; .[$f] += 1)) as $flaky
     | alledits($cr) as $alledits
-    | [testruns($ls; $su), ($all[], $ta[].file | {file: ., none: true})]
+    | [testruns($ls; $su), ($sv[0][] | select(.file | IN($all[]))), ($all[], $ta[].file | {file: ., none: true})]
     | group_by(.file)
     | map(.[0].file as $f | map(select(.none != true)) | sort_by(.time) as $r | [$r[].cpu | numbers] as $c | ($c | median) as $m | $c[-1] as $now
         | ($fs[$f] // {}) as $own | ($own.wholeOnly == true) as $wo
         | (if ($c | length) >= $mn and ($c | length) > $rn then $c[:-$rn] | median else null end) as $usual
         | {file: $f, cpu: $now, median: ($m | r3), change: (if $m > 0 then ($now - $m) / $m | r3 else null end),
            runs: ($r[-$keep:] | reverse | map(del(.file))),
-           lastRun: (if $r == [] then null else $r[-1] | {sec, cpu, clockPerCpu: (if .sec != null and .cpu > 0 then .sec / .cpu | r3 else null end), time, whole} end),
+           lastRun: (if $r == [] then null else $r[-1] | {sec, cpu, clockPerCpu: (if .sec != null and .cpu > 0 then .sec / .cpu | r3 else null end), time, whole} + (if .survey == true then {survey: true} else {} end) end),
            timedRuns: ($c | length), runsOnRecord: ($r | length), wholeOnly: $wo, failedSteps: ($failed[$f] // [] | length),
            failures: ($failed[$f] // [] | to_entries | map(.value + if .key < $keep then {} else {tail: null} end)),
            caught: ($catch[$f].caught // 0), changedToPass: ($catch[$f].changed // 0),
@@ -539,7 +558,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
            slower: ($wo | not) and $usual != null and all($c[-$rn:][]; . > $usual * (1 + $sh)), hollow: ($hv[$f] // null), proxy: ($px[$f] // null),
            mutation: ([$mu[] | select(.file == $f)] | max_by(.at) | if . == null then null
              else {file, at, sha, seed, state, reason, of: (.mutants | length), tried, killed, survived, noresult, notMutated, end} end),
-           mutationPlace: ($place[$f] // null), cases: ($cs[0][$f] // []),
+           mutationPlace: ($place[$f] // null), cases: (if $f | test("\\.(sh|bash)$") then $cs[0][$f] // [] else null end),
            waits: ([$tj[] | select(.file == $f)] | max_by(.end // "") | if . == null or .waits == [] then null else .waits end)}
         | .optimize = ([$ta[] | select(.file == $f)] | unique_by(.issue) | sort_by(.time) | reverse | map(optimize($r)))
         | .removed = (($f | IN($all[]) | not) and any(.optimize[]; .state == "landed" and (.fix | IN("deleted", "merged")))))

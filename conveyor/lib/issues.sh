@@ -342,6 +342,12 @@ testpaths() { # [-v] [-z]
     [ -n "$t" ] || if [ ${#z[@]} = 0 ]; then printf '%s\n' "$l"; else printf '%s\0' "$l"; fi
   done
 }
+# 0 when the pack itself sets tests.patterns (not the schema's default): then the files they match (testpaths()) are
+# test files of the Tests page (testspart(), lib/testfiles.sh), of a test file's Run (tafile(), lib/testaction.sh) and
+# of its mutation check (mutfile(), lib/mutate.sh), beside the files named *.test.* (#1036).
+haspatterns() { packok 2> /dev/null && jq -e '.tests.patterns | arrays' <<<"$PACK_T" > /dev/null 2>&1; }
+# 0 when <path>, one line, is a test file the pack's own tests.patterns match (haspatterns()).
+patterntest() { haspatterns && [ "$(printf '%s\n' "$1" | testpaths 2> /dev/null)" = "$1" ]; } # <path>
 # The JavaScript files <file>... load, each ended by a NUL: each <file>, with the local modules it imports (also by a
 # dynamic import(), as `await import('./x.mjs')`) or requires by a relative path (./ or ../; with no extension, the
 # .js, .mjs or .cjs file of that name), and theirs in turn, each once. A <file> is a path with a /.

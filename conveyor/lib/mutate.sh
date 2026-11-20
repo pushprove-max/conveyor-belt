@@ -79,12 +79,13 @@ mutheld() { # [steps, as an extended pattern: build|test]
 # The test file <file> run alone in <worktree> as it is now, on a test slot, as `testaction run` runs one (tests());
 # MUT_RES is killed, survived, noresult or stopped: a card asked for a slot while it ran (MUT_WHY says which), and it
 # was ended at once, with every process it started, so the slot is free for the card. Its list names every other test
-# file of the worktree as passed, so no test the mutant's change selects runs beside it, and only <file> can kill it.
-# The run makes no ask (MUT_RUN, tests()), so it does not hold back itself or another project's check.
+# file of the worktree (those mutfile() takes) as passed, so no test the mutant's change selects runs beside it, and
+# only <file> can kill it. The run makes no ask (MUT_RUN, tests()), so it does not hold back itself or another project's check.
 mutone() { # <worktree> <file>
-  local wt=$1 tp x s
+  local wt=$1 tp x s; local -A pt=()
+  ! haspatterns || while IFS= read -r x; do [ -z "$x" ] || pt[$x]=1; done < <(git -C "$wt" -c core.quotePath=false ls-files | testpaths 2>/dev/null)
   { printf 'fail\t%s\n' "$2" && git -C "$wt" -c core.quotePath=false ls-files \
-      | while IFS= read -r x; do [[ $x != "$2" && ${x##*/} =~ \.(test|spec)\. ]] || continue; printf 'pass\t%s\n' "$x"; done; } > "$wt.rerun" \
+      | while IFS= read -r x; do [[ $x != "$2" ]] && [[ ${x##*/} =~ \.(test|spec)\. || -n ${pt[$x]:-} ]] || continue; printf 'pass\t%s\n' "$x"; done; } > "$wt.rerun" \
     && rm -f "$wt.res" || { MUT_RES=noresult; return; }
   # shellcheck disable=SC2034 # MUT_RUN is read by tests() in lib/testrun.sh
   ( MUT_RUN=1; tests "$wt" test.fileCommand alone; x=$?; printf '%s\t%s\n' "$x" "$TEST_RUN" > "$wt.res" ) & tp=$!
@@ -103,10 +104,11 @@ mutrecs() { # every check's record, a JSON list
   [ -e "${fs[0]:-}" ] || { echo '[]'; return; }
   jq -cs 'map(objects)' "${fs[@]}" 2>/dev/null || echo '[]'
 }
-# 0 when <file> is a test file of main's <commit>: a tracked file whose own name has .test. or .spec. in it.
+# 0 when <file> is a test file of main's <commit>: a tracked file whose own name has .test. or .spec. in it, or one the
+# pack's own tests.patterns match (patterntest(), lib/issues.sh).
 mutfile() { # <file> <main's commit>
   local f=$1
-  [[ -n $2 && -n $f && $f != /* && /$f/ != */../* && /$f/ != */./* && $f != *$'\n'* && ${f##*/} =~ \.(test|spec)\. ]] \
+  [[ -n $2 && -n $f && $f != /* && /$f/ != */../* && /$f/ != */./* && $f != *$'\n'* ]] && { [[ ${f##*/} =~ \.(test|spec)\. ]] || patterntest "$f"; } \
     && [ "$(git -C "$MAIN" cat-file -t "$2:$f" 2>/dev/null)" = blob ]
 }
 # `conveyor.sh mutate <test file>`: one check of a test file of main, now, in this process; a check of it that

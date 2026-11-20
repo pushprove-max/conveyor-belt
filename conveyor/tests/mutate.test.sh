@@ -52,6 +52,28 @@ mufree() { flock -n "$T/$CASE/slots/1" true; } # the pool's one slot is free
 mu_in() { ( unset SLOT_DIR; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
   && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/serve.sh")" && "$@" ); }
 
+# Bug it catches (#1036): the Tests page lists the files the pack's tests.patterns match, but Mutation check refused
+# each one whose name has no .test. in it, and a check of one named the project's other such test files as not passed,
+# so a runner that selects tests by the change ran them beside it. mutfile() takes src/test-a.mjs (test-*.mjs) and
+# refuses src/helper.mjs; mutone()'s list names src/test-b.mjs passed, and not the helper. The test run is stubbed:
+# what it runs is the other cases'.
+t_mupattern() {
+  setup '[]'; tune '.tests.patterns = ["test-*.mjs"]'; local out
+  mkdir -p "$R/src" && echo 'export {};' > "$R/src/test-a.mjs" && cp "$R/src/test-a.mjs" "$R/src/test-b.mjs" && cp "$R/src/test-a.mjs" "$R/src/helper.mjs" \
+    && git -C "$R" add src && git -C "$R" commit -qm 'two test files and a helper' || fail "main's files"
+  mupatcheck() {
+    local sha p; sha=$(git -C "$R" rev-parse HEAD)
+    for p in src/test-a.mjs src/helper.mjs; do mutfile "$p" "$sha"; echo "$? $p"; done
+    tests() { :; }; mutheld() { return 1; }
+    mutone "$R" src/test-a.mjs && cat "$R.rerun"
+  }
+  out=$(mu_in mupatcheck 2>&1) || fail "the engine's functions failed: $out"
+  [ "$(head -2 <<<"$out" | paste -sd, -)" = '0 src/test-a.mjs,1 src/helper.mjs' ] || fail "the paths mutfile took and refused: $out"
+  out=$(tail -n +3 <<<"$out")
+  grep -qx $'fail\tsrc/test-a.mjs' <<<"$out" && grep -qx $'pass\tsrc/test-b.mjs' <<<"$out" && grep -qx $'pass\ta.test.sh' <<<"$out" \
+    && ! grep -q 'helper' <<<"$out" || fail "the check's list: $out"
+}
+
 # D2. Bugs this guards: a mutant started while a card is in its test step, a test run of another project (which shares
 # the test slots) asks for a slot; a mutant that went on, or kept the test
 # slot, when another project's card asked for one; a check that began again from its first mutant, or drew new ones,

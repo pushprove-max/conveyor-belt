@@ -133,17 +133,20 @@ test('Tests row: Optimize with this verdict scrolls to the preview, puts the cur
   assert.equal(opened(w, MERGE).querySelector('.tests-preview-verdict .chip').textContent, 'delete');
 });
 
-// Bug it catches (owner, 2026-11-16): a whole-suite run was "card null" in the preview's Last runs.
-test('Tests row: the preview\'s Last runs say "whole suite, passed" or "whole suite, failed", and a card run its issue', () => {
+// Bug it catches (owner, 2026-11-16): a whole-suite run was "card null" in the preview's Last runs; and (#1036) a
+// survey's saved time was "a card".
+test('Tests row: the preview\'s Last runs say "whole suite, passed" or "whole suite, failed", a card run its issue, and a survey time the survey', () => {
   const d = snap();
   d.panels.tests.data.tests.files.find((f) => f.file === MERGE).runs = [
     { cpu: 12, sec: 30, card: null, time: iso(T0 - 3600000), whole: true, result: 'ok' },
     { cpu: 11, sec: 28, card: null, time: iso(T0 - 7200000), whole: true, result: 'fail' },
-    { cpu: 10, sec: 20, card: 'c3-509', issue: 509, url: `${P}/509`, time: iso(T0 - 10800000), whole: false }];
+    { cpu: 10, sec: 20, card: 'c3-509', issue: 509, url: `${P}/509`, time: iso(T0 - 10800000), whole: false },
+    // #1036: a time the test-speed survey saved has no card and is no whole-suite run; it was said "a card".
+    { cpu: 9, sec: 18, card: null, time: iso(T0 - 14400000), whole: false, survey: true }];
   const w = show(d);
   act(open(w, MERGE), 'optimize').click();
   const body = act(opened(w, MERGE), 'issue-body').value;
-  assert.ok(body.includes('- Last runs, newest first: 12.0 CPU s (whole suite, passed), 11.0 CPU s (whole suite, failed), 10.0 CPU s (card #509)'), body);
+  assert.ok(body.includes('- Last runs, newest first: 12.0 CPU s (whole suite, passed), 11.0 CPU s (whole suite, failed), 10.0 CPU s (card #509), 9.0 CPU s (test-speed survey)'), body);
   assert.doesNotMatch(body, /card null|c3-509/);
 });
 
@@ -199,6 +202,15 @@ test('Tests row: opening the Timeline reads the file\'s older runs and test edit
   f2.runsOnRecord = (f2.runsOnRecord || 0) + 1;
   next(w, d2);
   assert.equal(w.olderAsks.length, 2, 'a run pushed out of the newest reads the older ones again');
+  // #1036: a new survey time replaces the last one, so the runs on record stay as they were, but it pushes a card run
+  // out of the newest five: the older ones are read again, else that run would be on neither list.
+  await settle(); await settle();
+  const d3 = landed(), f3 = d3.panels.tests.data.tests.files.find((x) => x.file === MERGE);
+  d3.panels.tests.data.tests.edits = [edit(44, 1.5)];
+  f3.runsOnRecord = f2.runsOnRecord;
+  f3.runs = [{ cpu: 8, sec: 16, card: null, time: iso(T0 - 600000), whole: false, survey: true }].concat((f3.runs || []).slice(0, -1));
+  next(w, d3);
+  assert.equal(w.olderAsks.length, 3, 'a survey time that pushes a run out of the newest reads the older ones again');
 });
 
 // Bug it catches (#251): a read of the older runs that failed left the Timeline looking whole, with the oldest

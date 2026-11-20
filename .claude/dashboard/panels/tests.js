@@ -825,10 +825,10 @@
         : 'Conveyor cannot tell whether a wrapper can give it.';
     return `${no} No action: ${why}`;
   }
-  // What ran a run, in words (#130): a whole-suite run with its result, as the Runs list says it, or the card's issue;
-  // never a card's id, nor "card null".
+  // What ran a run, in words (#130): a whole-suite run with its result, as the Runs list says it, a time the test-speed
+  // survey saved (#1036: no card ran it), or the card's issue; never a card's id, nor "card null".
   const runBy = (r) => (r.whole === true ? `whole suite${r.result === 'fail' ? ', failed' : r.result === 'ok' ? ', passed' : ''}`
-    : num(r.issue) !== null ? `card #${r.issue}` : 'a card');
+    : r.survey === true ? 'test-speed survey' : num(r.issue) !== null ? `card #${r.issue}` : 'a card');
   const asking = (kind, file) => S.ask && S.ask.repo === S.d.repo && S.ask.kind === kind && (file === undefined || S.ask.file === file);
   function field(act, label, value, set, o = {}) {
     const x = S.ctx.h(o.area ? 'textarea' : 'input', `field rules-field tests-field${o.area ? ' tests-body' : ''}`);
@@ -1588,9 +1588,11 @@
   // A file's runs and test edits are its newest few (runs, the snapshot's edits) and the older ones on record, which
   // the snapshot does not carry (#251): read from the page server (GET older: `conveyor.sh history test <file>` on the
   // build machine) when its Timeline is opened, and again when a newer run or edit pushes one of the newest out (the
-  // stamp: its runs on record and the cards of its newest edits). A failed read is tried again when the Timeline is
-  // opened again.
-  const olderStamp = (f) => [f.runsOnRecord].concat(editsOf().filter((e) => e.file === f.file).map((e) => e.card)).join('|');
+  // stamp: its runs on record, the times of its newest runs, and the cards of its newest edits; #1036: a new survey
+  // time replaces the last one, so the count of runs stays and only the newest runs' times change). A failed read is
+  // tried again when the Timeline is opened again.
+  const olderStamp = (f) => [f.runsOnRecord].concat(list(f.runs).map((r) => (obj(r) ? r.time : '')),
+    editsOf().filter((e) => e.file === f.file).map((e) => e.card)).join('|');
   function readOlder(f) {
     const key = dk(f.file), repo = S.d.repo, was = S.older.get(key), stamp = olderStamp(f);
     if (typeof repo !== 'string' || (was && (was.busy || was.stamp === stamp))) return;
@@ -1915,7 +1917,7 @@
         // The newest run's clock time, with its date and time on hover.
         const took = cell(clockTook(last.sec), 'tests-num');
         if (num(last.sec) !== null && typeof last.time === 'string' && !Number.isNaN(Date.parse(last.time))) {
-          took.title = `${S.ctx.stamp(Date.parse(last.time), { date: true, seconds: true })}, ${last.whole === true ? 'whole suite' : 'card'}`;
+          took.title = `${S.ctx.stamp(Date.parse(last.time), { date: true, seconds: true })}, ${last.whole === true ? 'whole suite' : last.survey === true ? 'test-speed survey' : 'card'}`;
         }
         const count = COLS.find((c) => c[0] === 'count')[2](f);
         const caught = cell(num(f.caught) === null ? '—' : String(f.caught), 'tests-num tests-caught');

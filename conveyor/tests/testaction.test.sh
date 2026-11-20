@@ -175,6 +175,19 @@ t_tacarried() {
   [ "$out" = '[{"time":"2026-11-09T00:00:00Z","run":"the test step of card c7-12 (#12)","result":"passed"},[["suite",false,1],["c7-12",true,1]],[{"card":"c7-12","issue":12}]]' ] \
     || fail "the newest run is not the failed step that passed the file, or the carried times are lost or not marked as carried: $out"
 }
+# Bug it catches (#1036): the Tests page showed the time the test-speed survey saved in .conveyor/test-times.json as
+# the file's newest run, but Judge and Explain were given only the card runs, so they judged a time the page did not
+# show. The survey's time is one of the runs, marked survey, dated by the commit that wrote it.
+t_tasurvey() {
+  tasetup; local out
+  jq -cn '{card: "c7-12", issue: 12, step: "test", time: "2026-11-08T00:00:00Z", result: "pass", times: {"tests/x.test.sh": 1}}' >> "$ST/cards.jsonl"
+  mkdir -p "$R/.conveyor" && echo '{"files": {"tests/x.test.sh": {"sec": 7.5, "cpu": 6.25}}}' > "$R/.conveyor/test-times.json" \
+    && git -C "$R" add -f .conveyor/test-times.json && GIT_COMMITTER_DATE=2026-11-12T00:00:00Z git -C "$R" commit -qm times || fail "the saved times"
+  out=$( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/testaction.sh")" \
+    && testfacts tests/x.test.sh | jq -c '.runs')
+  [ "$out" = '[{"card":"c7-12","issue":12,"time":"2026-11-08T00:00:00Z","times":1},{"time":"2026-11-12T00:00:00Z","survey":true,"cpu":6.25,"sec":7.5}]' ] \
+    || fail "the survey's saved time is not one of the runs Judge and Explain are given: $out"
+}
 # Bug it catches (#342): a passing release-suite run and a failing run of the file on its own that ended in the same
 # second (times are to the second) were told to the judge as one of them, the suite's pass, picked by its place in
 # the list: both are named, with how each ended, and that which ran last is not known.

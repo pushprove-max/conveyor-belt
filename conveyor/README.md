@@ -763,16 +763,18 @@ and the test files of main's checkout, and holds:
 - `rules`: the test rules (Test rules, below): `on`, `perDay`, `maxOpen`, `quietDays`, `burst` and `list`, as the
   pack holds them with their defaults, and `last`, the list of the last pass (`{time, on, matches, burst}`), null
   before the first;
-- `files`: every test file of main's checkout (each file git lists with `.test.` in its name), and each other file
-  with a run on record, the highest CPU seconds first and the files with none last. A run on record is a card's test
-  line (`times`) or a whole-suite run: the full test suite (Run full test suite and Push landed on the Board) and
+- `files`: every test file of main's checkout (each file git lists with `.test.` in its name, and each file the pack's
+  `tests.patterns` match when the pack sets them), and each other file with a run on record, the
+  highest CPU seconds first and the files with none last. A run on record is a card's test
+  line (`times`), a whole-suite run or a time the test-speed survey saved in `.conveyor/test-times.json` (dated by the
+  commit that last wrote it, with no card; a test file of main only): the full test suite (Run full test suite and Push landed on the Board) and
   the suite of `release-prep` and `release` each keep, as they end, the result (`-- ok|FAIL <file>`) and the `TESTRUN sec` line of each file
   they ran. Each file has `file`, `cpu` (its newest run with CPU seconds; null with none), `median` (of every run on
   record with CPU seconds), `change` (`cpu` against `median`, as a share: 0.5 is 50% over; null when the median is 0
   or null), `runs` (its last 5 runs, newest first, empty for a file never run: `cpu`, `sec`, the clock seconds, null
-  on a line written before the test line held `clocks`; `card`, null for a whole-suite run; `time`; `whole`, true for
-  a whole-suite run; and a whole-suite run's `result`, `ok` or `fail`), `lastRun` (`sec`, `cpu`, `clockPerCpu`, `time`
-  and `whole` of its newest run; null with none), `timedRuns` (its runs with CPU seconds), `runsOnRecord` (all its
+  on a line written before the test line held `clocks`; `card`, null for a whole-suite run and a survey's time; `time`; `whole`, true for
+  a whole-suite run; a whole-suite run's `result`, `ok` or `fail`; and `survey`, true for a survey's time), `lastRun` (`sec`, `cpu`, `clockPerCpu`, `time`,
+  and `whole` of its newest run, and `survey: true` when it is a survey's time; null with none), `timedRuns` (its runs with CPU seconds), `runsOnRecord` (all its
   runs on record), `wholeOnly` (its
   `test.files` entry has `wholeOnly: true`), `failedSteps` (the card test steps that failed in it: it was a failed file, a runner such as
   `conveyor/conveyor.test.sh` named a failed case that the file defines (`t_<case>()` or `<case>()` in main's
@@ -788,8 +790,9 @@ and the test files of main's checkout, and holds:
   entries a runner names as its own among them), `issue` (the issue last
   filed for it, the highest number of the old "Slow test" filings, the test rules' log and the Board's
   `conveyor.sh testissue`, else null), `slowOnPurpose`
-  (the reason of its mark, else null), `cases` (the names of the cases it defines in main's checkout, its `t_<case>() {`
-  lines that the runner selects, not its helpers or the lines of a heredoc, A to Z; empty with none: the Board's Tests search matches them), `usual` and `slower` (below).
+  (the reason of its mark, else null), `cases` (the names of the cases a shell file (`.sh`, `.bash`) defines in main's checkout, its `t_<case>() {`
+  lines that the runner selects, not its helpers or the lines of a heredoc, A to Z; empty with none; null for a file
+  of another kind, whose cases Conveyor does not count: the Board's Tests search matches them), `usual` and `slower` (below).
   A `wholeOnly` file starts other test files whole, so its CPU seconds are the sum of theirs, each of them timed on
   its own. Its `slower` is false. Each file also has `optimize`: each issue the Board filed for it (`testactions/filed.jsonl`: the Optimize
   issues, and the older speed-up issues), newest first. Each has `issue`, `time` (when it was filed), `state` (`open`:
@@ -1317,8 +1320,8 @@ It is an engine command, not a session, so it needs no Tests seat. It runs the f
 machine's test slots: it waits for a slot as a card's test step does, and holds one slot while it runs, so cards wait
 on it no more than on a second card. The run's `CONVEYOR_TEST_RERUN` list names the file alone, as a `fail` line
 with no case: `test.fileCommand` runs that file and no other. A path that is not a test file of main
-(a file whose own name has `.test.` or `.spec.` in it; a helper or fixture in a `__tests__` folder is not one) is
-refused (exit 2), and nothing runs. The
+(a file whose own name has `.test.` or `.spec.` in it, or a file the pack's own `tests.patterns` match; a helper or
+fixture in a `__tests__` folder is not one) is refused (exit 2), and nothing runs. The
 command returns the action's id once the run has started, or once it is queued. Its `<id>.txt` is the command's output, written as the
 command writes it and kept when the run ends. Its `<id>.json` holds `id`, `action` (run), `file`, `project`, `commit` (the commit of main at the ask, which it runs, also when it is queued), `start`,
 `asked`, `end`, `state` (queued, running, done, stopped, failed or timed out), `load` (the machine's 1-minute load at the ask),
@@ -1382,7 +1385,7 @@ the source files the test file covers, runs the test file on each one, and recor
 caught. Mutation checks never run in a card's steps, and never slow a card's test step.
 
 `conveyor.sh mutate <test file>` checks one test file of main now. A path that is not a test file of main (a file
-whose own name has `.test.` or `.spec.` in it) is refused (exit 2), and so is a second check while one runs. One
+whose own name has `.test.` or `.spec.` in it, or a file the pack's own `tests.patterns` match) is refused (exit 2), and so is a second check while one runs. One
 check:
 
 - It finds the source files the test file covers: the files it imports (JavaScript or TypeScript: `from`, `import`

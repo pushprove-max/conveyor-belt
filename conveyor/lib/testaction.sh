@@ -205,7 +205,7 @@ tastart() { # <id>
     if [ "$how" = judge ]; then p=$TAJUDGE; else p=$TAEXPLAIN; fi
     p+=$'\n\n'"$(jq -r --arg f "$t" '"Test file: \($f)\n\nIts newest run, from the card test steps, the whole-suite runs (the release suite'"'"'s too) and its runs on its own: "
       + (if .newest == null then "none recorded" else "\(.newest.run), \(.newest.time): \(.newest.result). When you say how its newest run ended, say it of this run and name it" end)
-      + ".\n\nIts recorded times, from the test lines of the card records and the whole-suite runs, oldest first (times: its CPU seconds in a card run; clocks: its seconds on the clock in that run; timed: its seconds and CPU seconds in a run of a card that changed it; carried: true, that card step kept it as passed and did not run it, its times are those of an earlier step of that card; whole: true, a whole-suite run, with its CPU seconds (cpu), seconds on the clock (sec) and result):\n"
+      + ".\n\nIts recorded times, from the test lines of the card records, the whole-suite runs and the test-speed survey, oldest first (times: its CPU seconds in a card run; clocks: its seconds on the clock in that run; timed: its seconds and CPU seconds in a run of a card that changed it; carried: true, that card step kept it as passed and did not run it, its times are those of an earlier step of that card; whole: true, a whole-suite run, with its CPU seconds (cpu), seconds on the clock (sec) and result; survey: true, the time the test-speed survey saved for it, with its cpu and sec and no result):\n"
       + (if .runs == [] then "none recorded" else .runs | map(tojson) | join("\n") end)
       + "\n\nThe cards that ran it: " + (if .cards == [] then "none recorded" else .cards | map("\(.card) (#\(.issue))") | join(", ") end)
       + "\n\nIts flaky entries (a case of it failed and then passed when run again):\n" + (if .flaky == [] then "none" else .flaky | map(tojson) | join("\n") end)
@@ -228,7 +228,8 @@ tafail() { # <id> <why>: a queued action that could not start, failed
 # What the session is given of <file>: {runs: each run that timed it, oldest first, the runs the Tests page shows: each
 # test line of a card, {card, issue, time} and its times, clocks (its seconds on the clock), and timed parts for
 # the file, and carried: true on a line that kept it as passed and did not run it, its times an earlier step's of the
-# same card (carriedrec(); a failed step saves none, so they may be the only ones of that run), and each whole-suite run of $SUITERUNS (suiterec()), {time, whole: true, how, cpu, sec, result}; cards: the
+# same card (carriedrec(); a failed step saves none, so they may be the only ones of that run), and each whole-suite run of $SUITERUNS (suiterec()), {time, whole: true, how, cpu, sec, result}, and the time the test-speed
+# survey saved for it (testsurvey(), lib/testfiles.sh), {time, survey: true, cpu, sec}; cards: the
 # cards of the test lines, {card, issue}; flaky: the entries of the flaky-test record for it or a case of it ("<file>: <case>");
 # failures: its newest TAFAILS failed test steps (those that passed on re-run too), newest first, as the Tests page has
 # them (FAILURE and failedrun, lib/testfiles.sh):
@@ -246,12 +247,13 @@ testfacts() { # <file>
   fl=$(jq -c --arg f "$1" '[.entries | arrays | .[] | objects | select(.case == $f or ((.case | strings) | startswith($f + ": ")))]' "$FLAKY" 2>/dev/null) || fl='[]'
   testowners
   { olds; recs; } 2>/dev/null | jq -cRn --arg f "$1" --slurpfile fl <(printf '%s' "$fl") --argjson n "$TAFAILS" --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") \
-    --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) \
+    --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) --slurpfile sv <(testsurvey) \
     --slurpfile ta <(cat "$TESTACTS"/*.json 2>/dev/null | jq -cR --arg f "$1" 'fromjson? | objects | select(.action == "run" and .file == $f and (.result | strings) and (.end | strings))' 2>/dev/null) '$fl[0] as $fl | '"$OWNERS$FAILURE"'[inputs | fromjson? | objects | select(.step == "test")] as $ls
     | ([$ls[] | failedrun | select(any(failedfiles[]; . == $f)) | failure($f)] | sort_by(.time) | reverse | .[:$n]) as $fails
     | [$ls[] | {card, issue, time, times: ((.times | objects | .[$f]) // null), clocks: ((.clocks | objects | .[$f]) // null), timed: ([.timed | arrays | .[] | objects | select(.file == $f)] | first), carried: (if any(.carried | arrays | .[]; . == $f) then true else null end)}
          | select(.times != null or .clocks != null or .timed != null) | del(.[] | nulls)] as $c
     | [$su[] | . as $w | .files | objects | .[$f] | objects | {time: $w.time, whole: true, how: $w.how, cpu, sec, result} | del(.[] | nulls)] as $w
+    | [$sv[0][] | select(.file == $f) | {time, survey: true, cpu, sec} | del(.[] | nulls)] as $v
     | [[$ls | to_entries[] | select(.value.reused != true)] | group_by(.value.card)[] | . as $g
         | range(0; length - 1) | select(any($g[. + 1].value.carried | arrays | .[]; . == $f)) | $g[.].key] as $ranat
     | ([$ls | to_entries[] | .key as $i | .value | .result as $r | [if $r == "held" then .result = "fail" else . end | failedrun | select(any(failedfiles[]; . == $f))] as $x
@@ -271,7 +273,7 @@ testfacts() { # <file>
        | if length < 2 then first
          else {time: $t, run: ((map(.run) | join(" and ")) + ", which ended in the same second, so which of them ran last is not known"),
            result: (if (map(.result) | unique | length) == 1 then .[0].result else map("\(.result) on \(.run)") | join("; ") end)} end) as $nw
-    | {runs: ($c + $w | sort_by(.time)), cards: ($c | map({card, issue}) | unique_by(.card)), flaky: $fl, failures: $fails, newest: $nw}'
+    | {runs: ($c + $w + $v | sort_by(.time)), cards: ($c | map({card, issue}) | unique_by(.card)), flaky: $fl, failures: $fails, newest: $nw}'
 }
 # A jq def, when: a record's UTC time (2026-11-19T01:26:07Z) or seconds since 1970, in the time zone of TZ (an explain
 # asked from the Board: the zone of its browser) on a clock of <hours> (its Time setting: 24-hour, else 12-hour), as
@@ -400,7 +402,8 @@ tarun() { # <the record> <worktree> <prompt>
 # machine's test slots, waited for as a card's test step waits for one (tests()). It is no session: it needs no seat.
 # The run's CONVEYOR_TEST_RERUN list names the file alone, a `fail` line with no case: test.fileCommand runs that file
 # whole and nothing else (with none set, the run fails naming it). A path that is not a test file of main (a file whose own name has
-# `.test.` or `.spec.`; a helper in a __tests__ folder is not one) is refused (exit 2), and nothing runs. Its record in $TESTACTS/<id>.json, as a session's: {id, action: "run", file, project, commit, start,
+# `.test.` or `.spec.`, or one the pack's own tests.patterns match, patterntest(); a helper in a __tests__ folder is not
+# one) is refused (exit 2), and nothing runs. Its record in $TESTACTS/<id>.json, as a session's: {id, action: "run", file, project, commit, start,
 # end, state (queued, running, done, stopped, failed or timed out), load (the machine's 1-minute load at the ask), limit
 # (TEST_TIMEOUT, the seconds the test run may run once it has its slot, as a card's test step), result (pass
 # or fail; null until it ends, and when it did not run), sec (the file's clock seconds as its runner timed it, else the
@@ -412,7 +415,7 @@ tafile() { # <test file>
   local f=$1 id sha
   # sha: the commit of main at the ask, the one the run runs, even when it is queued.
   sha=$(git -C "$MAIN" rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)
-  [[ -n $sha && -n $f && $f != /* && /$f/ != */../* && /$f/ != */./* && $f != *$'\n'* && ${f##*/} =~ \.(test|spec)\. ]] \
+  [[ -n $sha && -n $f && $f != /* && /$f/ != */../* && /$f/ != */./* && $f != *$'\n'* ]] && { [[ ${f##*/} =~ \.(test|spec)\. ]] || patterntest "$f"; } \
     && [ "$(git -C "$MAIN" cat-file -t "$sha:$f" 2>/dev/null)" = blob ] \
     || { echo "conveyor: $f is not a test file of $BRANCH; nothing run" >&2; return 2; }
   id=$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')

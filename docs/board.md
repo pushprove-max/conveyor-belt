@@ -588,7 +588,8 @@ slower than usual or that wait, and the table shows those files only, as their f
 The table shows every test file of the project: each file's CPU seconds, its median, its last runs, the clock time of
 its newest run (Last run took; point at it to see when that run was) and its status (Slower than usual, Waits,
 Flaky and others). A file with an issue shows a link to it, "#NN". The runs are those of card Test steps and of
-whole-suite runs (Run full test suite, Push landed, and the suite of a release). A file with no time yet shows
+whole-suite runs (Run full test suite, Push landed, and the suite of a release), and the times the test-speed survey
+saved in `.conveyor/test-times.json`. A file with no time yet shows
 "Not timed yet" in place of its figures and comes after the timed files. A file with clock times only shows "Wall
 only": its test runner's report gives no CPU seconds, so its CPU columns are empty. A file that only whole-suite runs run
 (`wholeOnly` in the pack's `test.files`) shows "Whole suite only". Such a file starts other test files, and each of
@@ -727,8 +728,8 @@ caught and the mutants caught (or "not checked"). Point at a bar, or move the ke
 seconds. The failures of the file come next, when it has any. Last, the 3 latest events, with a button that opens
 the Timeline.
 
-The Timeline lists every event of the file, newest first: its runs (each with its card's issue, or "whole suite" and
-its result), its Optimize issues, the test edits of landed cards and the runs of Judge. The filter chips All, Runs,
+The Timeline lists every event of the file, newest first: its runs (each with its card's issue, "whole suite" and
+its result, or "test-speed survey"), its Optimize issues, the test edits of landed cards and the runs of Judge. The filter chips All, Runs,
 Optimize, Test edits and Judge show one kind of event. A test edit shows the issue of its card, as a link, and its
 time. A weakened edit has the chip "Weakened". When you open the Timeline, the Board reads the older runs and test
 edits of the file from the machine Conveyor runs on, and adds them below the newest. While it reads, the Timeline says
