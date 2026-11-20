@@ -29,6 +29,7 @@ own), each for what the shared stub cannot do:
 - `records.test.sh` (`t_retryturn`): two sessions that wait for each other, by issue.
 - `release.test.sh`, `releaseminver.test.sh`: a notes model that keeps its prompt and answers per call, a `claude`
   that fails, and the machine's own newer `claude`.
+- `requires.test.sh`: a machine's own system folder (`$R/os`), whose `claude` and `codex` only print a version line.
 - `review.test.sh` (`t_chain`): a session that waits and fails for one issue and builds for another.
 - `reviewacct.test.sh`: calls that keep the account they ran on, and a build that waits until the case lets it go.
 - `rules.test.sh`: a `codex` taken off `PATH`.
