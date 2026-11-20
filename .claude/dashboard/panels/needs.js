@@ -135,10 +135,10 @@ window.DASH_APP.panel({
     // snapshot that drops the card) waits for its new card: it is drawn anew, with no buttons, until that snapshot.
     const retried = new Set((Array.isArray(d.retried) ? d.retried : []).filter((x) => x && typeof x.card === 'string').map((x) => `${x.repo}\n${x.card}`));
     const isRetried = (c) => retried.has(`${c.repo}\n${c.card}`);
-    // The blocked cards whose <details> (.block-more) the owner left open: a row whose key changes (its card retried)
-    // is drawn anew, and opens it again (blockedRow).
+    // The blocked cards whose <details> (.block-more) the owner left open: a row whose key changes (its card retried,
+    // or the change of its branch now on main) is drawn anew, and opens it again (blockedRow).
     const opened = new Set(Array.from(el.querySelectorAll('li[data-card]'), (li) => (li.querySelector(':scope > details.block-more[open]') ? li.dataset.card : null)).filter(Boolean));
-    const keyOf = { tests:(x) => `tests:${x.repo}`, engines: (x) => `engine:${x.repo}@${x.commit}`, testRules: (x) => `testrules:${x.repo}@${x.time}`, before: (x) => `before:${x.repo}#${x.issue}`, pipeline: (x) => `pipeline:${x.repo}#${x.issue}`, farDeps: (x) => `fardep:${x.repo}#${x.issue}:${x.ref}`, waiting: (c) => `waiting:${c.card}`, blocked: (c) => `blocked:${c.card}${isRetried(c) ? ':retried' : ''}`, decisions: (x) => `decision:${x.repo}:${x.id}@${x.askedAt}` };
+    const keyOf = { tests:(x) => `tests:${x.repo}`, engines: (x) => `engine:${x.repo}@${x.commit}`, testRules: (x) => `testrules:${x.repo}@${x.time}`, before: (x) => `before:${x.repo}#${x.issue}`, pipeline: (x) => `pipeline:${x.repo}#${x.issue}`, farDeps: (x) => `fardep:${x.repo}#${x.issue}:${x.ref}`, waiting: (c) => `waiting:${c.card}`, blocked: (c) => `blocked:${c.card}${isRetried(c) ? ':retried' : ''}${c.onMain === true ? ':on-main' : ''}`, decisions: (x) => `decision:${x.repo}:${x.id}@${x.askedAt}` };
     const items = itemsOf(d);
     // An entry of a kind with no row of its own (entryRow) is drawn once for its key, so the key holds its title and
     // reason: an entry whose text changes under the same since (the counts of a Pick settings decision) is drawn anew.
@@ -211,6 +211,8 @@ window.DASH_APP.panel({
         : c.push ? 'Conveyor pushes again by itself when the cause has a fix. You do not need to retry.'
           : again ? `${n} is back in the queue. A new card builds it in its turn.` : `Retry puts ${n} back in the queue, and a new card builds it in its turn.`);
       li.append(head, lead);
+      // A land-branch card whose branch's change another card landed (the snapshot's onMain): shut is all it needs.
+      if (c.onMain === true) li.append(h('p', 'hint on-main', `The change of its branch is already on main. Another card landed it. To close this card, run conveyor.sh shut ${c.card}.`));
       const more = h('details', 'block-more');
       more.append(h('summary', null, 'The full reason and every step'));
       if (rest) more.append(rest);

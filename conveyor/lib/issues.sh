@@ -111,23 +111,26 @@ retry() { # <issue, or the card id of a main-red fix card> [fresh: an issue's ne
 # Once the issue is opened again, a turn of the loop gives it back as `retry` does (reopened()), the new card starting
 # from that work.
 # A main-red fix card (issue 0, redpick()), which has no issue to close, is shut by its card id: its main commit then
-# starts no card again, and `retry <card id>` gives it back.
+# starts no card again, and `retry <card id>` gives it back. So is a land-branch card of issue 0 (landbranch(), a
+# branch that names no issue), whose change landed some other way: its kept work stays where block() put it, and its
+# branch is left alone.
 SHUT='the issue was closed by hand while the card was blocked'
-shut() { # <closed issue numbers, a json array, or the card id of a main-red fix card>
-  local closed=$1 c n l t='.[0].issue | IN($closed[])' found=''
+shut() { # <closed issue numbers, a json array, or the card id of a main-red fix card or of a land-branch card of issue 0>
+  local closed=$1 c n b l t='.[0].issue | IN($closed[])' found=''
   check || return 1
-  [[ $1 == '['* ]] || { closed=$(jq -cn --arg c "$1" '$c'); t='.[0].card == $closed and any(.[]; .step == "picked" and .mainRed)'; }
-  while read -r c n; do
+  [[ $1 == '['* ]] || { closed=$(jq -cn --arg c "$1" '$c'); t='.[0].card == $closed and .[0].issue == 0 and any(.[]; .step == "picked" and (.mainRed or .branch))'; }
+  while read -r c n b; do
     l=$(line "$c" "$n" closed ok "$(jq -cn --arg r "$SHUT" '{reason: $r}')") && append "$l" || return 1
     found=1
-    if [ "$n" = 0 ]; then echo "conveyor: card $c was shut while it was blocked; the card is closed, and \`retry $c\` takes it again"
+    if [ "$b" = branch ]; then echo "conveyor: card $c was shut while it was blocked; the card is closed, its kept work where it was, and its branch left as it is"
+    elif [ "$n" = 0 ]; then echo "conveyor: card $c was shut while it was blocked; the card is closed, and \`retry $c\` takes it again"
     else echo "conveyor: issue #$n was closed while card $c was blocked; the card is closed, its kept work where it was, and the issue is picked again once it is open"; fi
   done < <(jq -rs --argjson closed "$closed" 'map(select(.step != "push")) | group_by(.card)[]
     | select((map(select(.step | IN("landed", "closed", "blocked", "pushed"))) | . as $e
         | [range(length) as $i | $e[$i] | select(.step != "pushed" and (.step != "blocked" or ($e[$i + 1:] | all(.step == "blocked"))))] | last | .step) == "blocked"
       and ('"$t"'))
-    | "\(.[0].card) \(.[0].issue)"' < <(stdb ask lines cards))
-  [[ $1 == '['* ]] || [ -n "$found" ] || { echo "conveyor: card $1 is no blocked main-red fix card; nothing changed" >&2; return 1; }
+    | "\(.[0].card) \(.[0].issue) \(if .[0].issue == 0 and any(.[]; .step == "picked" and .branch) then "branch" else "-" end)"' < <(stdb ask lines cards))
+  [[ $1 == '['* ]] || [ -n "$found" ] || { echo "conveyor: card $1 is no blocked main-red fix card or land-branch card of issue 0; nothing changed" >&2; return 1; }
 }
 # At a turn of the loop, outside the lock: an issue of the open list given whose newest card was shut (above) is given
 # back with `retry` (under the lock) once GitHub says the issue itself is open: a stale open list alone gives nothing

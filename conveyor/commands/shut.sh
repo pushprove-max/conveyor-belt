@@ -16,9 +16,9 @@
 . "$HERE/lib/run.sh" || exit 1
 . "$HERE/lib/machine.sh" || exit 1
 . "$HERE/lib/install.sh" || exit 1
-# A main-red fix card, which has no issue, is shut by its card id.
+# A main-red fix card, or a land-branch card of issue 0, which has no issue, is shut by its card id.
 if [[ ${2:-} =~ ^c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0$ ]]; then locked shut "$2"; exit; fi
-[[ ${2:-} =~ ^[0-9]+$ ]] || { echo "usage: conveyor.sh shut <issue | the card id of a main-red fix card>" >&2; exit 2; }
+[[ ${2:-} =~ ^[0-9]+$ ]] || { echo "usage: conveyor.sh shut <issue | the card id of a main-red fix card or of a land-branch card of issue 0>" >&2; exit 2; }
 # The issue's card stuck in flight (its process gone, or no process of its step for the pack's stuck) is ended first,
 # blocked with its work kept, outside the lock (unstick(), lib/run.sh), so it is shut as a blocked card is.
 unstick "$2"; locked shut "[$2]"

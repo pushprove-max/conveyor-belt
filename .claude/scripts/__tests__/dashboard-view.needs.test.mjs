@@ -78,6 +78,25 @@ test('Needs you: a review block shows its unresolved finding, and a long reason 
   assert.equal(long.querySelector('.show-all'), null);
 });
 
+// Bug #878: the note that a land-branch card's change is already on main was put at the end of its reason, so a review
+// block lost its finding panel (its reason no longer ended "did not hold after N rounds"). The note is its own line,
+// from the snapshot's onMain, and the finding is still drawn. A row drawn before another card landed the change was
+// reused as it was, so the note never came: the next snapshot's onMain draws the row anew, with it.
+test('Needs you: a land-branch card whose change is on main says it can be shut, beside its finding', () => {
+  const w = boot({ list: ['needs'] });
+  const d = full(), b = d.panels.needs.data.cards.blocked;
+  Object.assign(b[0], { issue: 0, card: 'c2-13', reason: 'the fix for [P1] a.txt:1 The word is wrong. Proof: it says two did not hold after 1 round' });
+  b.push({ ...b[0], card: 'c2-14' });
+  deliver(w, d);
+  assert.equal(blockedRow(w).querySelector('.on-main'), null, 'no note before the change is on main');
+  b[0].onMain = true;
+  next(w, d);
+  const li = blockedRow(w, 'c2-13:on-main');
+  assert.equal(li.querySelector('.on-main').textContent, 'The change of its branch is already on main. Another card landed it. To close this card, run conveyor.sh shut c2-13.');
+  assert.equal(li.querySelector(':scope > .why-block .finding-claim').textContent, 'The word is wrong.', 'the finding panel is still drawn');
+  assert.equal(blockedRow(w, 'c2-14').querySelector('.on-main'), null, 'a card without onMain says nothing of main');
+});
+
 // Bug #501: a blocked row showed every finding with its full proof, where it stopped, its track and its reviews before
 // its next step and buttons, so the owner scrolled to act on each card. The first finding, the next step and Retry
 // come first; the other findings are in one closed <details> under them, which a new part leaves as the owner set it.

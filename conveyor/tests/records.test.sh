@@ -299,6 +299,36 @@ t_shutboard() {
   loop check || fail "the records do not check after shut"
 }
 
+# A hand change landed by land-branch is a card of issue 0. Blocked by its review, then landed by a second land-branch,
+# it stayed under Needs you for good: shut took only a main-red fix card's id (#878). Bugs: `shut <its card id>` is
+# refused, or loses its kept patch or moves its branch; Needs you does not say that its branch's change is already on
+# main, or says so of a branch whose change is not; shut takes the id of an issue-0 card that is neither kind.
+t_shutbranch() {
+  local c=c20261120T013602-x-0 b=c20261120T013603-x-0 o=c20261120T013604-x-0 snap before tip
+  setup '[]'; mkdir -p "$ST/kept/$c"
+  # hand/one: its change is on main (made at main's tip). hand/two: a change main does not have.
+  git -C "$R" branch hand/one && git -C "$R" switch -q -c hand/two && echo three >> "$R/a.txt" && git -C "$R" commit -qam three \
+    && git -C "$R" switch -q - && echo two >> "$R/a.txt" && git -C "$R" diff > "$ST/kept/$c/$c.patch" && git -C "$R" reset -q --hard \
+    || fail "the branches and the kept patch of $c"
+  tip=$(git -C "$R" rev-parse hand/one)
+  jq -cn --arg c "$c" --arg b "$b" --arg o "$o" --arg k "kept/$c" '{issue:0,time:"2026-11-01T00:00:00Z",tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""}
+    | (. + {card:$c,step:"picked",title:"hand one",branch:"hand/one"}), (. + {card:$c,step:"blocked",result:"blocked",reason:"NO-GO: review 1.",kept:$k}),
+      (. + {card:$b,step:"picked",title:"hand two",branch:"hand/two"}), (. + {card:$b,step:"blocked",result:"blocked",reason:"NO-GO: review 1."}),
+      (. + {card:$o,step:"picked",title:"neither"}), (. + {card:$o,step:"blocked",result:"blocked",reason:"build: it failed"})' > "$ST/cards.jsonl"
+  snap=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
+  # The reason stays as recorded: the Board reads a review's finding and the failing tests by its form.
+  [ "$(jq -c '.needsYou.blocked | map(select(.onMain == true)) | map(.card)' <<<"$snap")" = "[\"$c\"]" ] \
+    && jq -e --arg c "$c" '.needsYou.blocked[] | select(.card == $c) | .reason == "NO-GO: review 1."' <<<"$snap" >/dev/null \
+    || fail "Needs you does not say that hand/one alone is already on main, or changed its reason: $(jq -c '.needsYou.blocked | map([.card, .onMain, .reason])' <<<"$snap")"
+  before=$(cat "$ST/cards.jsonl")
+  ! loop shut "$o" >/dev/null 2>&1 && [ "$(cat "$ST/cards.jsonl")" = "$before" ] || fail "shut took $o, an issue-0 card that is no main-red fix card and no land-branch card"
+  loop shut "$c" >/dev/null || fail "shut $c exited non-zero"
+  [ "$(st "select(.card == \"$c\") | [.step, .reason] | join(\"|\")" | tail -n 1)" = "closed|the issue was closed by hand while the card was blocked" ] \
+    || fail "no closed line says $c was shut: $(grep "$c" "$ST/cards.jsonl")"
+  [ "$(loop snapshot --fresh | jq -c '.needsYou.blocked | map(.card)')" = "[\"$b\",\"$o\"]" ] || fail "Needs you after shut $c is not the other two cards"
+  [ -s "$ST/kept/$c/$c.patch" ] && [ "$(git -C "$R" rev-parse hand/one)" = "$tip" ] || fail "shut lost the kept patch of $c, or moved its branch"
+}
+
 # A reopened issue is given back by a turn only when its newest card was shut (#599). Bugs: an open issue whose card
 # landed is given back (its lines moved, a new card picked: its work is on main); a shut card whose process is still
 # ending is given back before that process ends (it would write a blocked line after its lines moved, and lose its

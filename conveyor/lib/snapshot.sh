@@ -6,7 +6,8 @@
 #   reviewer's, since, files: {count, paths: the first 200 its blocked line names, or null}, shots: the project's own
 #   screenshots it kept, {patch: the hash of the patch they were kept for, shots: [{file, caption}]}, and patch: the
 #   hash of its kept patch now; both null when it kept none) and blocked
-#   (every other blocked card: card, issue, title, reason: the sentence, tail: the end of the output that failed, with its
+#   (every other blocked card: card, issue, title, reason: the sentence, onMain: true on a land-branch card whose
+#   branch's change is already on main (it can be shut), tail: the end of the output that failed, with its
 #   newlines, "" for none, since; and, while a push of main has failed again on its next try, one item for it:
 #   push true, under the card of the last landing not pushed, reason naming the cards not pushed, unpushed: their
 #   {card, issue}, tail: the push error, since: the first failure), and before (the issues waiting for the owner's yes
@@ -582,6 +583,16 @@ snapshot() (
     jq -c --arg c "$c" --arg p "$(git hash-object -- "$k/$c.patch" 2>/dev/null)" \
       'objects | {($c): {patch: (if $p == "" then null else $p end), shots: {patch, shots}}}' "$k/shots/shots.json" 2>/dev/null
   done < "$d/yes" | jq -cs 'add // {}' > "$d/shots" 2>/dev/null || echo '{}' > "$d/shots"
+  # Each blocked land-branch card of issue 0 whose branch's change is already on main (another card landed the same
+  # change): the branch merged into main gives main's own tree, as landbranch() finds "nothing to land". Needs you says
+  # it can be shut. Only cards of issue 0 are read, a few, and a branch that is gone is not said to be on main.
+  mtree=$(git rev-parse -q --verify "refs/heads/$BRANCH^{tree}" 2>/dev/null) || mtree=''
+  { [ -n "$mtree" ] && stdb ask issue cards 0 2>/dev/null; } | jq -rs 'map(select(.step != "push")) | group_by(.card)[]
+      | select(any(.step == "picked" and (.branch | type) == "string") and (map(select(.step | IN("landed", "closed", "blocked", "pushed"))) | last | .step) == "blocked")
+      | [.[0].card, (map(select(.step == "picked") | .branch | strings) | first)] | @tsv' 2>/dev/null \
+    | while IFS=$'\t' read -r c b; do
+        if t=$(git merge-tree --write-tree "refs/heads/$BRANCH" "refs/heads/$b" 2>/dev/null) && [ "${t%%$'\n'*}" = "$mtree" ]; then printf '%s\n' "$c"; fi
+      done | jq -Rcs 'split("\n") | map(select(. != ""))' > "$d/onmain" 2>/dev/null || echo '[]' > "$d/onmain"
   # Today and the 7 days are reckoned from the health record's time (CONVEYOR_NOW when set), as now is.
   # Each of the three days with its midnight's epoch (t0d, t0w, t0p), from one date program: day by bash's own printf.
   ht=$(jq -r '.time | fromdate' <<<"$h") && [[ $ht =~ ^[0-9]+$ ]] && printf -v day '%(%F)T' "$ht" \
@@ -619,7 +630,7 @@ snapshot() (
   printf '%s\n%s\n' "$METRICS" "$CARDRUNS" > "$d/cardruns.jq" \
     && python3 "$HERE/cardruns.py" "$d/priced" "$STATE.cardruns" "$d/cards" "$d/cardruns.jq" "$d/samples" "$(jq -r '.time | fromdate' "$d/health")" "$SAMPLE" "$yes" \
     || exit 1
-  jq -cn --slurpfile all "$d/cards" --slurpfile hs "$d/health" --slurpfile allp "$d/paths" --slurpfile shots "$d/shots" --argjson mt "$mt" --slurpfile fl <(printf '%s' "$fl") --slurpfile so <(printf '%s' "$so") --slurpfile ft <(printf '%s' "$ft") --slurpfile su <(printf '%s' "$su") --argjson rl "$rl" --argjson dr "$dr" --argjson eng "$eng" --argjson tr "$tr" --argjson m "$models" --argjson next "$next" --slurpfile built <(printf '%s' "$built") \
+  jq -cn --slurpfile all "$d/cards" --slurpfile hs "$d/health" --slurpfile allp "$d/paths" --slurpfile shots "$d/shots" --slurpfile onm "$d/onmain" --argjson mt "$mt" --slurpfile fl <(printf '%s' "$fl") --slurpfile so <(printf '%s' "$so") --slurpfile ft <(printf '%s' "$ft") --slurpfile su <(printf '%s' "$su") --argjson rl "$rl" --argjson dr "$dr" --argjson eng "$eng" --argjson tr "$tr" --argjson m "$models" --argjson next "$next" --slurpfile built <(printf '%s' "$built") \
     --slurpfile iss "$d/issues" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" --arg pla "$pla" --arg ppm "$ppm" \
     --argjson control "$control" --argjson settings "$settings" --argjson accts "$(acctnames)" --argjson ga "$ga" --slurpfile q <(printf '%s' "$queue") --slurpfile lim "$d/limit" --slurpfile smp "$d/samples" --slurpfile pu "$d/pushes" --argjson every "$SAMPLE" --argjson priced "$pricedok" --argjson cr "$cr" --argjson ts "$ts" \
     --argjson max "$MAX_REVIEWS" --argjson wait "$((CLOSE_WAIT + 300))" --arg yes "$yes" --arg day "$day" --arg since "$since" --arg prev "$prev" \
@@ -856,7 +867,11 @@ snapshot() (
              # A follow-up whose change goes beyond the yes up its chain: what goes beyond, as its reviewer said (the ask).
              + ((.reason | capture("\\(it goes beyond the yes of #(?<from>[0-9]+): (?<what>.*)\\)") | {beyond: {from: (.from | tonumber), what}}) // {})
              + times],
-         blocked: [$c[] | select(.step == "blocked" and (.reason | startswith($yes) | not)) | {card, issue, title, reason, tail, since: .x.endAt, parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split, stalls: .x.stalls} + umbrella + times]
+         blocked: [$c[] | select(.step == "blocked" and (.reason | startswith($yes) | not))
+             | {card, issue, title, reason, tail, since: .x.endAt, parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split, stalls: .x.stalls}
+             # A land-branch card with the change of its branch already on main ($onm) says so apart from its reason,
+             # which the Board reads by its form (the finding of a review, the failing tests): shut is all it needs.
+             + (if .card | IN($onm[0][]) then {onMain: true} else {} end) + umbrella + times]
            # A push that failed again on its next try needs the owner, until a push works: one item, under the card
            # of the last landing not pushed, naming every card not pushed; its tail is what git and the hook said.
            # One that failed its check needs the owner at once: it is not tried again until main moves (checkheld()).

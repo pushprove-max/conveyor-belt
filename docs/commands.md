@@ -98,7 +98,8 @@ Cards:
   lists the blocked ones by card id.
 - `land-branch <branch>` lands a branch's tip as one card, reviewed and tested as any card. A branch named as a card
   id (`c<time>-<project>-<issue>`) lands as that issue. Other branches land as issue 0, also when the name has a
-  number in it.
+  number in it. A blocked card of issue 0 is closed with `shut <card id>`. Its kept patch stays, and its branch is
+  not changed. When the branch's change is already on main, Needs you says so.
 - `control [<action>]` changes the control record. `control depends` writes an issue's `Depends on:` line on GitHub.
   `control card <issue> ...` sets an issue's own builder, reviewer and judge, and `control card <issue> pick` asks the
   judge to choose them ([Configuration](configuration.md#settings-for-one-card)).
