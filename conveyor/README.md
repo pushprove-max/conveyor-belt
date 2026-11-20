@@ -1613,7 +1613,8 @@ after the snapshot was made, so its belt can leave out a card that started since
 snapshot idle, and `conveyor.sh foreman status` says the belt can hold more cards than it shows. When a record line, the control record, a card's live record or the
 list of issues changes, one process makes a new snapshot in the background and puts it in place whole. A reader does
 not wait for it, and it does not get a part of a snapshot. `conveyor.sh snapshot --fresh` makes a new snapshot now,
-prints it and keeps it. A project with no snapshot yet gets its first one that way. The Board's Health panel and
+prints it and keeps it. When a snapshot is already being made, it waits until that one is done. Then the calls that
+waited make one new snapshot between them, and each prints it. A project with no snapshot yet gets its first one that way. The Board's Health panel and
 /units show the age of a snapshot that is more than a minute old.
 
 Every snapshot also writes those lists whole to `history.json` in the state folder, and `conveyor.sh history` prints

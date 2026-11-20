@@ -103,6 +103,68 @@ t_snapkeptonce() {
   [ "$(wc -l < "$T/$CASE/asks")" = 1 ] || fail "two readers at once asked GitHub for the issues $(wc -l < "$T/$CASE/asks") times, not once"
 }
 
+# A --fresh call (out0) whose build is held (the python3 shim) until the file go exists, after it read the records,
+# and then a new card (c9) in the records: a call that asks now needs a build that begins after its ask to show it.
+# The builds are noted in builds, one line each.
+snapkept_held() {
+  local g=$T/$CASE/github
+  snapkept_setup; mkdir -p "$g" && loop github "$g" || fail "the stream's GitHub folder could not be filled"
+  snapkept_py "echo build >> '$T/$CASE/builds'; for _ in \$(seq 200); do [ ! -e '$T/$CASE/go' ] || break; sleep 0.1; done" # sleep: the pause between two looks for go, which the case makes when its calls asked
+  CONVEYOR_GITHUB=$g PATH=$T/$CASE/bin:$PATH loop snapshot --fresh > "$T/$CASE/out0" &
+  # wait: the bug is between calls of the real command while one holds the lock; a function call cannot hold a build
+  # open in a second process, so the case polls the running call until its build began
+  wait_until "[ -s '$T/$CASE/builds' ]" || fail "the held call's build did not begin"
+  snapkept_new
+}
+snapkept_fresh() { CONVEYOR_GITHUB=$T/$CASE/github PATH=$T/$CASE/bin:$PATH loop snapshot --fresh > "$T/$CASE/out$1"; }
+snapkept_c9() { jq -e '.belt | map(.card) | index("c9")' "$T/$CASE/out$1" > /dev/null; }
+
+# Bug (#1101): under five starting cards, six `snapshot --fresh` calls ran at once and none replaced the snapshot.
+# Bug: a call that came while a build ran printed that build, which read the records before the caller's change
+# (/units then waited for its next change with the old belt). Six calls at once while a build runs start one build
+# between them after it, and each prints the new card; the held build, from before the card, shows it not.
+t_snapkeptfresh() {
+  local i
+  snapkept_held
+  for i in 1 2 3 4 5 6; do snapkept_fresh "$i" & done
+  # wait: the bug is six processes asking at once while a build runs; only their live markers show each asked before
+  # the held build ends, so the case polls for them rather than calling a function
+  wait_until "m=('$ST'/snapshot.json.*.asked); [ \${#m[@]} -ge 7 ]" || fail "the six calls did not all ask"
+  : > "$T/$CASE/go"; wait
+  [ "$(wc -l < "$T/$CASE/builds")" = 2 ] || fail "six fresh calls at once while a build ran ran $(($(wc -l < "$T/$CASE/builds") - 1)) builds, not one"
+  ! snapkept_c9 0 || fail "the held build read the records after the new card: the case shows nothing"
+  for i in 1 2 3 4 5 6; do
+    snapkept_c9 "$i" || fail "fresh call $i printed a snapshot without the card added before it asked: $(head -c 300 "$T/$CASE/out$i")"
+  done
+}
+
+# Bug: a build removes the asked marker of a pid it cannot signal (gone, or another user's), and a waiting call whose
+# marker was gone took any kept snapshot as begun after its ask (test -nt with no second file): it printed the held
+# build, from before its change. With its marker removed as it waits, the call builds its own.
+t_snapkeptgone() {
+  local held m
+  snapkept_held; held=$(echo "$ST"/snapshot.json.*.asked)
+  # wait: the bug is a running call whose marker is removed while it waits on the lock; a direct call cannot be
+  # paused there, so the case polls until the live call wrote its marker
+  snapkept_fresh 1 & wait_until "m=('$ST'/snapshot.json.*.asked); [ \${#m[@]} -ge 2 ]" || fail "the call did not ask"
+  for m in "$ST"/snapshot.json.*.asked; do [ "$m" = "$held" ] || rm -f -- "$m"; done
+  : > "$T/$CASE/go"; wait
+  snapkept_c9 1 || fail "the call whose marker was removed printed a snapshot without the card added before it asked: $(head -c 300 "$T/$CASE/out1")"
+}
+
+# Bug (#1101): a --fresh call killed at its caller's time limit left its <pid>.asked marker in the state folder, and
+# nothing removed it (25 of them, 24 of gone processes). The next build removes the marker of a pid that is gone and
+# keeps the one of a call still running (here this shell).
+t_snapkeptasked() {
+  local gone
+  snapkept_setup
+  sh -c 'exit 0' & gone=$!; wait "$gone"
+  : > "$ST/snapshot.json.$gone.asked" && : > "$ST/snapshot.json.$$.asked" || fail "the markers could not be written"
+  loop snapshot --fresh | jq -e .belt > /dev/null || fail "the fresh snapshot printed no snapshot"
+  [ ! -e "$ST/snapshot.json.$gone.asked" ] || fail "the build left the asked marker of the gone pid $gone"
+  [ -e "$ST/snapshot.json.$$.asked" ] || fail "the build removed the asked marker of a call still running"
+}
+
 # Bug: a build with no `watch` feed read GitHub from a folder it set as GITHUB, so reading() took it for the feed's
 # build and asked no Claude usage reading: with a guard set and no reading yet, the snapshot said the reading was
 # missing and the loop running while the account was over the guard.

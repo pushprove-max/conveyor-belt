@@ -14,8 +14,10 @@
 # never reads half a file; then it builds again while an input changed meanwhile, at most once every SNAPGAP seconds.
 # With no kept snapshot yet, and with --fresh (a caller that needs the view after its own change, as a test does, or
 # after a change no input shows: the stream's loop process ending), the snapshot is built here, under the same lock,
-# kept and printed. A call that waited for the lock prints
-# the build another call began after this one asked, and makes none of its own.
+# kept and printed. A call that waited for the lock prints the build another call began after this one asked (its
+# asked marker still there: a build that took its pid for gone removed it), and makes none of its own: the calls that
+# came while one build ran make one build between them, after it. One never prints a build that began before it
+# asked: that build can have read the records before the change its caller made (#1101).
 # A build with no `watch` feed (GITHUB unset) reads GitHub's answers, and the Claude usage readings the guard reads,
 # from SNAPGH, asked (github(), lib/issues.sh; guardread()) before the lock is taken: a slow GitHub then never holds
 # the lock, and with it every other writer (the stream's, which has its own GitHub folder), until it answers. One
@@ -64,8 +66,16 @@ snapask() { # <since> [nowait]
 }
 # One build (under the lock), put in place by a rename and dated when it began (KEPT.at, kept: one build at a time
 # dates it, and a file removed is one program more each build, t_snapexec); GitHub as snapask() asked it.
+# The asked marker of a --fresh call whose process is gone is removed first: a call killed at its caller's time limit
+# (watch.py SNAPSHOT_LIMIT) left its marker, and nothing else removes it. kill -0 is a builtin, so a build with no
+# such marker runs no program more. It also fails for a pid it may not signal (another user's): that call, with its
+# marker gone, builds its own after this one.
 snapkeep() {
-  local n=$KEPT.$BASHPID rc GITHUB=${GITHUB:-$SNAPGH}
+  local n=$KEPT.$BASHPID rc GITHUB=${GITHUB:-$SNAPGH} a p
+  for a in "$KEPT".*.asked; do
+    p=${a#"$KEPT".}; p=${p%.asked}
+    [[ $p =~ ^[0-9]+$ ]] && ! kill -0 "$p" 2>/dev/null && rm -f -- "$a"
+  done
   : > "$KEPT.at" && snapshot > "$n" && [ -s "$n" ] && touch -r "$KEPT.at" "$n" && mv -f "$n" "$KEPT"; rc=$?
   [ "$rc" = 0 ] || rm -f "$n"; return "$rc"
 }
@@ -117,7 +127,7 @@ names || exit 1
 asked=$KEPT.$$.asked
 : > "$asked" && snapask "$asked" || { rm -f "$asked"; exit 1; }
 ( flock -w 600 9 || { echo "conveyor: another snapshot build held $KEPT.lock for 600 s" >&2; exit 1; }
-  { [ -s "$KEPT" ] && [ "$KEPT" -nt "$asked" ]; } || snapkeep ) 9>>"$KEPT.lock"; rc=$?
+  { [ -s "$KEPT" ] && [ -e "$asked" ] && [ "$KEPT" -nt "$asked" ]; } || snapkeep ) 9>>"$KEPT.lock"; rc=$?
 rm -f "$asked"
 [ "$rc" = 0 ] || exit "$rc"
 snapprint
