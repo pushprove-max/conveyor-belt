@@ -95,6 +95,18 @@ t_tfnopatterns() {
   [ "$(jq -c '[.files[].file] | sort' <<<"$got")" = '[".claude/hooks/x.test.sh","a.test.sh"]' ] \
     || fail "the *.test.* files alone: $(jq -c '[.files[].file]' <<<"$got")"
 }
+# A file no pattern lists but card runs keep on the page keeps its survey time too. Bug it catches (#1044): the part
+# dropped the survey run of an unlisted file, so its newest run was a card's, while testolder() counted the survey and
+# gave as older the oldest card run, which the part's runs already held: the Timeline showed that run twice.
+t_tfunlistedsurvey() {
+  setup '[]'; tf_patfiles saved; tf_runs src/test-a.mjs 1 2 3 4 5
+  got=$(tf_in testspart 2026-11-09) || fail "testspart failed: $got"
+  [ "$(jq -c '.files[] | select(.file == "src/test-a.mjs") | {survey: .runs[0].survey, cards: [.runs[1:][].card], timedRuns}' <<<"$got")" \
+    = '{"survey":true,"cards":["c-src/test-a.mjs-4","c-src/test-a.mjs-3","c-src/test-a.mjs-2","c-src/test-a.mjs-1"],"timedRuns":6}' ] \
+    || fail "the runs of src/test-a.mjs: $(jq -c '.files[] | select(.file == "src/test-a.mjs")' <<<"$got")"
+  got=$(tf_as history testolder src/test-a.mjs | jq -c '[.olderRuns[].card]')
+  [ "$got" = '["c-src/test-a.mjs-0"]' ] || fail "the older runs of src/test-a.mjs: $got"
+}
 
 # The engine's runner names a failed or flaky case as its own (run.test.sh: rone), while the times name the case file
 # that ran it (cases/r.test.sh, which defines t_rone): the case counts for its case file. Another file's case (rtwo, in

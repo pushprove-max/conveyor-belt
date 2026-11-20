@@ -541,7 +541,10 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
         | failedfiles[] | [., IN($d[])]) as [$f, $ed] ({}; if $ed then .[$f].changed += 1 else .[$f].caught += 1 end)) as $catch
     | (reduce ($fl.entries | arrays | .[] | objects | .case | strings | caseowners[]) as $f ({}; .[$f] += 1)) as $flaky
     | alledits($cr) as $alledits
-    | [testruns($ls; $su), ($sv[0][] | select(.file | IN($all[]))), ($all[], $ta[].file | {file: ., none: true})]
+    # A survey time counts for each file the part has a row for (listed, run or filed), as testolder() counts it, so
+    # a file the patterns do not list keeps it beside its card runs (#1044); it adds no row of its own (#1036).
+    | [testruns($ls; $su)] as $tr | ([$all[], $tr[].file, $ta[].file] | map({key: ., value: true}) | from_entries) as $rows
+    | [$tr[], ($sv[0][] | select($rows[.file] == true)), ($all[], $ta[].file | {file: ., none: true})]
     | group_by(.file)
     | map(.[0].file as $f | map(select(.none != true)) | sort_by(.time) as $r | [$r[].cpu | numbers] as $c | ($c | median) as $m | $c[-1] as $now
         | ($fs[$f] // {}) as $own | ($own.wholeOnly == true) as $wo
