@@ -127,28 +127,31 @@ t_chain() {
   setup "$(jq -cs . <(issue 7 2026-01-01 P1) <(issue 8 2026-01-02 P2))"; : > "$STUB/list-filed"
   # The filing of the second follow-up goes on until #8's card has ended and the loop has taken a whole turn after it
   # (two of its waits begun, lib.sh), the turn in which it would pick #100101.
-  tune '.tunables.poll = 1'; watchturns; provenbug # the follow-ups are bug cards
+  # #7's review is the same P2 and P3 each time: back after its one fix round, it is the last review (card.sh), filed
+  # as a third NO-GO is, in two reviews. The follow-ups need only be picked: their builds change nothing, so each ends
+  # after its build (blocked: no change to review), with no review, tests or landing.
+  tune '.tunables.poll = 1'; watchturns
   cat > "$STUB/create-cmd" <<'EOF'
 [ "$n" != 100102 ] || { while [ -d "$STUB" ]; do jq -e 'select(.issue == 8 and .step == "blocked")' "$ST/cards.jsonl" >/dev/null 2>&1 && break; sleep 0.1; done
   k=$(wc -l < "$TURNS"); while [ -d "$STUB" ] && [ "$(wc -l < "$TURNS")" -lt $((k + 2)) ]; do sleep 0.1; done; }
 EOF
   cat > "$STUB/claude" <<'EOF'
 #!/usr/bin/env bash
-case $(cat) in *'# Issue #8:'*) while [ -d "$STUB" ]; do [ -e "$STUB/filed" ] && break; sleep 0.1; done; exit 1 ;; esac
-. "$STUB/build"
+case $(cat) in *'# Issue #8:'*) while [ -d "$STUB" ]; do [ -e "$STUB/filed" ] && break; sleep 0.1; done; exit 1 ;; *'# Issue #7:'*) . "$STUB/build" ;; esac
 echo '{"type":"result","is_error":false,"usage":{"input_tokens":10,"cache_creation_input_tokens":20,"cache_read_input_tokens":999,"output_tokens":5}}'
 EOF
   cat > "$STUB/codex" <<'EOF'
 #!/usr/bin/env bash
 while [ $# -gt 0 ]; do [ "$1" = -o ] && out=$2; shift; done
-case $(cat) in *'# Issue #7:'*) k=$(echo x >> "$STUB/reviews7"; wc -l < "$STUB/reviews7"); printf '[P1] a.txt:%s1 wrong word\n[P2] a.txt:%s2 a nit\nUSER-VISIBLE: no\nVERDICT: NO-GO\n' "$k" "$k" ;; *) printf 'USER-VISIBLE: no\nVERDICT: GO\n' ;; esac > "$out"
+printf '[P2] a.txt:1 a nit\n[P3] c.txt:3 a style nit\nUSER-VISIBLE: no\nVERDICT: NO-GO\n' > "$out"
 echo '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":60,"output_tokens":7}}'
 EOF
   loop run >/dev/null || fail "run exited non-zero"
   steps=$(st 'select(.step | IN("picked", "landed", "blocked")) | "\(.issue) \(.step)"')
   at() { grep -nx "$1" <<<"$steps" | cut -d: -f1; }
-  [ "$(st 'select(.step == "landed") | [.issue, .followups] | tojson' | sort | tr '\n' ' ')" = '[100101,null] [100102,null] [7,[100101,100102]] ' ] \
-    || fail "the follow-ups were not built in the run that filed them: $(tr '\n' ',' <<<"$steps")"
+  [ "$(st 'select(.step == "landed") | [.issue, .followups] | tojson' | tr '\n' ' ')" = '[7,[100101,100102]] ' ] \
+    && [ "$(st 'select(.step == "picked" and .issue > 100000) | .issue' | sort | tr '\n' ' ')" = '100101 100102 ' ] \
+    || fail "the follow-ups were not picked in the run that filed them: $(tr '\n' ',' <<<"$steps")"
   [ "$(at '8 blocked')" -lt "$(at '7 landed')" ] || fail "the test made no pick while #7's follow-ups were being filed: $(tr '\n' ',' <<<"$steps")"
   [ "$(at '7 landed')" -lt "$(at '100101 picked')" ] || fail "follow-up #100101 was picked before its parent landed: $(tr '\n' ',' <<<"$steps")"
 }
@@ -221,17 +224,20 @@ t_privfixrun() {
 }
 
 # Bug: a follow-up chain goes past the cap: a card whose issue is a follow-up at the cap (MAX_DEPTH, 2) files another
-# level on its third NO-GO, or its leftover finding is in no declined list, or its reason does not name the cap.
+# level on its last NO-GO, or its leftover finding is in no declined list, or its reason does not name the cap.
+# Its last NO-GO is a P2 back after its one fix round (card.sh: the last review, as a third NO-GO is), in two reviews.
 t_deep() {
   setup "[$(issue 7 2026-01-01 conveyor-followup bug P1 | jq -c '.body = "Follow-up to #5.\n\nFollow-up depth: 2"')]"
-  for i in 1 2 3; do moved $i "$NOGO" > "$STUB/review.$i"; done; provenbug
+  # The second review names a.txt:12, where the fix's one appended line moves a.txt:11 (rounded()), so it is the same
+  # finding back; its text differs from the first's, so the declined one is known to come from the last review.
+  for i in 1 2; do printf '%s\n' "[P2] a.txt:1$i wrong word" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.$i"; done; provenbug
   mkdir -p "$ST"; landed 5 '[7]' > "$ST/cards.jsonl"
   # A loop run: the choice to decline rather than file at the cap is made inline in card() (card.sh, after its last
   # review), which no engine function exposes alone; fudepth() and decline() are checked directly in the cases below.
   loop run >/dev/null || fail "run exited non-zero"
   [ "$(st 'select(.issue == 7 and .step == "landed") | [.leftover, .followups] | tojson')" = '[true,[]]' ] && [ ! -e "$STUB/filed" ] \
     || fail "a depth-2 card did not land, or filed a follow-up: $(st 'select(.issue == 7 and (.step | IN("landed", "blocked")))')"
-  [ "$(jq -c '[.issue, .finding, .by, .why]' "$ST/declined.jsonl")" = '[7,"[P1] a.txt:31 wrong word","code","its issue is a follow-up at the depth cap of 2, so no deeper follow-up is filed"]' ] \
+  [ "$(jq -c '[.issue, .finding, .by, .why]' "$ST/declined.jsonl")" = '[7,"[P2] a.txt:12 wrong word","code","its issue is a follow-up at the depth cap of 2, so no deeper follow-up is filed"]' ] \
     || fail "the depth-2 card's leftover finding is not in the declined list once, with who and why: $(cat "$ST/declined.jsonl" 2>&1)"
 }
 
@@ -266,7 +272,9 @@ t_declinefail() {
 # goes with its worktree. A loop run: the landing, then decline(), then the block that keeps the review are joined
 # inline in card(), which no engine function exposes alone.
 t_declinefailrun() {
-  setup "[$(issue 7 2026-01-01 conveyor-followup bug P1 | jq -c '.body = "Follow-up depth: 2"')]"; for i in 1 2 3; do moved $i "$NOGO" > "$STUB/review.$i"; done; provenbug
+  # Its last NO-GO is a P2 back after its one fix round (the last review, as a third NO-GO is), in two reviews.
+  setup "[$(issue 7 2026-01-01 conveyor-followup bug P1 | jq -c '.body = "Follow-up depth: 2"')]"; provenbug
+  for i in 1 2; do printf '%s\n' '[P2] a.txt:1 wrong word' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.$i"; done
   mkdir -p "$ST/declined.jsonl"
   loop run >/dev/null 2>&1 || fail "run exited non-zero"
   [ "$(st 'select(.step | IN("landed", "blocked")) | .step' | tr '\n' ' ')" = 'landed blocked ' ] \
