@@ -23,7 +23,7 @@ no() { echo "not ok - $1"; }
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/tests"
 # The test lint and the browser check, which every run starts, are empty here: no part checks them, and each run of
 # the real ones is time paid ~100 times a file run (test-lint.test.sh checks that a run runs the lint).
-cp "$HERE/test-changed.sh" "$R/.conveyor/"; : > "$R/.conveyor/test-lint.sh"; : > "$R/.conveyor/no-browser-tests.sh"
+cp "$HERE/test-changed.sh" "$HERE/lint-shell.sh" "$R/.conveyor/"; : > "$R/.conveyor/test-lint.sh"; : > "$R/.conveyor/no-browser-tests.sh"
 cat > "$R/.conveyor/engine-areas.json" <<'EOF'
 {"outside": "conveyor/README.md"}
 {"area": "core", "file": "conveyor/core.sh"}
@@ -325,6 +325,12 @@ p_scold() {
   # With no shellcheck on the PATH, the run says so once and goes on.
   mkdir "$T/bin"; for d in ${PATH//:/ }; do ln -s "$d"/* "$T/bin/" 2>/dev/null; done; rm -f "$T/bin/shellcheck"; PATH=$T/bin ran > /dev/null
   [ "$(cat "$T/rc")" = 0 ] && [ "$(grep -c 'shellcheck is not installed' "$T/out")" = 1 ] && ok "a missing shellcheck says so and passes" || no "no shellcheck: exit $(cat "$T/rc"): $(cat "$T/out")"
+  # Bug: a shellcheck that could not check the files (lint-shell.sh exit 2 or more) passed, its error lines dropped
+  # as no finding on a changed line. A shellcheck that exits 3 (bad options) stands in for it.
+  printf '%s\n' '#!/usr/bin/env bash' 'echo "shellcheck: bad option" >&2; exit 3' > "$T/bin/shellcheck"; chmod +x "$T/bin/shellcheck"
+  PATH=$T/bin ran > /dev/null
+  [ "$(cat "$T/rc")" = 1 ] && grep -q 'shellcheck could not check the changed shell files (exit 3)' "$T/out" && grep -q 'bad option' "$T/out" \
+    && ok "a shellcheck that cannot check the files fails the run" || no "shellcheck exit 3: exit $(cat "$T/rc"): $(cat "$T/out")"
 }
 
 # Bug: an engine case file had no time line, so the time of one a card added or slowed was never recorded.
@@ -712,7 +718,7 @@ p_slotsparse() {
 # copy of it (M). A run here loops over every case file of the map, so each of these parts makes one run (two only
 # where both are cheap whole runs), and the parts that start from the same commit build it with one <name>fix function.
 M=$T/m; mkdir -p "$M/.conveyor" "$M/conveyor/tests"
-cp "$HERE/test-changed.sh" "$HERE/engine-areas.json" "$M/.conveyor/"; : > "$M/.conveyor/test-lint.sh"; : > "$M/.conveyor/no-browser-tests.sh"
+cp "$HERE/test-changed.sh" "$HERE/lint-shell.sh" "$HERE/engine-areas.json" "$M/.conveyor/"; : > "$M/.conveyor/test-lint.sh"; : > "$M/.conveyor/no-browser-tests.sh"
 HMAP=$T/here.json; (cd "$ROOT" && bash .conveyor/test-changed.sh --map) > "$HMAP" || echo "not ok - this checkout's map could not be read"
 jq -r '.areas[].files[] | split("/")[:-1] | join("/")' "$HMAP" | sort -u | (cd "$M" && xargs mkdir -p)
 jq -r '.areas[].files[]' "$HMAP" | while read -r f; do echo one > "$M/$f"; done

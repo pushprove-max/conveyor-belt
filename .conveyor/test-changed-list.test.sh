@@ -15,7 +15,7 @@ no() { echo "not ok - $1"; fails=1; }
 # A scratch repo: the real script, a map of an "all" area and two areas of one case file each, a shell test named after
 # its source, and test files that note in $R/ran that they ran.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/tests" "$R/lib"
-cp "$HERE/test-changed.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$R/.conveyor/"
+cp "$HERE/test-changed.sh" "$HERE/lint-shell.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$R/.conveyor/"
 printf '%s\n' '{"area": "core", "file": "conveyor/core.sh"}' '{"area": "core", "tests": "all"}' \
   '{"area": "a", "file": "conveyor/x.sh"}' '{"area": "a", "test": "a.test.sh"}' \
   '{"area": "b", "file": "conveyor/y.sh"}' '{"area": "b", "test": "b.test.sh"}' > "$R/.conveyor/engine-areas.json"

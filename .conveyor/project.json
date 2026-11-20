@@ -123,5 +123,21 @@
         "max": "high"
       }
     }
+  },
+  "lint": {
+    "commands": [
+      {
+        "files": [
+          "*.sh"
+        ],
+        "triggers": [
+          ".conveyor/lint-shell.sh"
+        ],
+        "run": "bash .conveyor/lint-shell.sh {files}"
+      }
+    ],
+    "policy": [
+      ".conveyor/lint-shell.sh"
+    ]
   }
 }

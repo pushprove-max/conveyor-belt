@@ -27,6 +27,9 @@ as the commit's author. To sign off commits you made already, run `git rebase --
   or the HTML doctype where there is one. Vendored files keep their own license. `spdx.test.sh` fails, naming the
   file, on a source file without it.
 - The smallest change that fully solves the issue; no feature flags, no compatibility code for old data.
+- shellcheck is the linter of the shell files: the pack's `lint` field runs `.conveyor/lint-shell.sh` on each changed
+  `.sh` file, and `bash .conveyor/test-changed.sh` fails on a warning on a line the change added or changed. A file
+  with no `#!` line is read as bash.
 - The engine is bash 5.1 and jq; the Board is Python 3's standard library unless an issue names a pinned library.
   Both run on macOS and Linux (`conveyor/lib/portable.sh`).
 - The plugin is generic: no project's own names, paths or labels outside docs that name one as an example.

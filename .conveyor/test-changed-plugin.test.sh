@@ -19,7 +19,7 @@ no() { echo "not ok - $1"; }
 # on PATH whose `plugin test` prints the parts $R/plugin-out holds (as Claude Code's runner prints them: a `<file>:`
 # heading, a `(pass)` or `(fail)` line a test), exits 1 when one says (fail), and counts its runs in $R/runs.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/hooks" "$R/bin"
-cp "$HERE/test-changed.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$R/.conveyor/"
+cp "$HERE/test-changed.sh" "$HERE/lint-shell.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$R/.conveyor/"
 echo '{"outside": "conveyor/README.md"}' > "$R/.conveyor/engine-areas.json"
 for s in a b; do echo "export const $s = 1" > "$R/hooks/$s.ts"; printf "test('%s one', () => {})\ntest('%s two', () => {})\n" "$s" "$s" > "$R/hooks/$s.test.tsx"; done
 # Its `plugin validate` (the checks' run of it on a change to hooks/: issue 604) passes.

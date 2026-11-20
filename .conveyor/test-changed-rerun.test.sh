@@ -22,7 +22,7 @@ no() { echo "not ok - $1"; }
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/tests"
 # The test lint and the browser check, which every run starts, are empty here: no part checks them, and each run of
 # the real ones is time paid ~100 times a file run (test-lint.test.sh checks that a run runs the lint).
-cp "$HERE/test-changed.sh" "$R/.conveyor/"; : > "$R/.conveyor/test-lint.sh"; : > "$R/.conveyor/no-browser-tests.sh"
+cp "$HERE/test-changed.sh" "$HERE/lint-shell.sh" "$R/.conveyor/"; : > "$R/.conveyor/test-lint.sh"; : > "$R/.conveyor/no-browser-tests.sh"
 cat > "$R/.conveyor/engine-areas.json" <<'EOF'
 {"outside": "conveyor/README.md"}
 {"area": "core", "file": "conveyor/core.sh"}

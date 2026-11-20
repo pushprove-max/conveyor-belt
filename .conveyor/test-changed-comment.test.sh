@@ -17,7 +17,7 @@ no() { echo "not ok - $1"; }
 # that holds a `//` line), a JSON file and a shell test file, each source file with a test named after it that writes
 # its name to ran.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/tool"
-cp "$HERE/test-changed.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$R/.conveyor/"
+cp "$HERE/test-changed.sh" "$HERE/lint-shell.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$R/.conveyor/"
 echo '{"outside": "conveyor/README.md"}' > "$R/.conveyor/engine-areas.json"
 printf '#!/usr/bin/env bash\necho s\n' > "$R/tool/s.sh"
 printf 'export const a = 1;\nexport const t = `\n// data\n`;\n' > "$R/tool/a.js"

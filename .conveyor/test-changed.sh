@@ -320,7 +320,7 @@ mapfile -t changed < <({ git diff --name-only HEAD; git ls-files --others --excl
 # validate when the change touches it), printing what they
 # find; exit 1 when one fails. In one-file mode in a test step they run once a tree (below), not on every run.
 checks() {
-local rc=0 scfiles bang nobang keep new f pv pvout moved pvhead pvmain pvp
+local rc=0 scfiles scrc scout keep new f pv pvout moved pvhead pvmain pvp
 mapcheck || rc=1
 covage
 # The test lint, with the map check: a test that sleeps a set time and then checks fails the run (test-lint.sh).
@@ -329,24 +329,27 @@ bash .conveyor/test-lint.sh || rc=1
 bash .conveyor/no-browser-tests.sh || rc=1
 # The shellcheck of each changed .sh file, with the map check too (issue 525): a warning or error (-S warning) on a
 # line the change added or changed (every line of a new file) fails the run, printed with its file and line; one on a line it
-# did not touch does not (the engine's files hold old ones). A file with no #! line is read as bash, as the engine's
-# sourced files are. With no shellcheck, it says so once and the run goes on.
-scfiles=(); bang=(); nobang=()
+# did not touch does not (the engine's files hold old ones). shellcheck runs through .conveyor/lint-shell.sh, the
+# pack's lint command, which reads a file with no #! line as bash. With no shellcheck, it says so once and the run
+# goes on; when shellcheck cannot check the files, the run fails with its output.
+scfiles=()
 for f in "${changed[@]}"; do case $f in *.sh) [ ! -f "$f" ] || scfiles+=("$f") ;; esac; done
-if [ ${#scfiles[@]} -gt 0 ] && ! command -v shellcheck > /dev/null; then
-  echo "shellcheck is not installed: the changed shell lines are not checked"
-elif [ ${#scfiles[@]} -gt 0 ]; then
-  # The lines the change added or changed, <file>:<line> one a line: of each hunk of the diff, +<start>[,<count>]
-  # (count 1 when left out); of a file git does not track, <file>:all.
-  keep=$({ git diff -U0 --no-color --no-ext-diff --no-prefix HEAD -- "${scfiles[@]}" | awk '/^\+\+\+ / { f = substr($0, 5) }
-      /^@@ / { split($3, a, ","); n = (2 in a) ? a[2] : 1; for (i = 0; i < n; i++) print f ":" substr(a[1], 2) + i }'
-    git ls-files -o --exclude-standard -- "${scfiles[@]}" | sed 's/$/:all/'; })
-  for f in "${scfiles[@]}"; do if [ "$(head -c 2 "$f")" = '#!' ]; then bang+=("$f"); else nobang+=("$f"); fi; done
-  new=$({ [ ${#bang[@]} = 0 ] || shellcheck -S warning -f gcc -- "${bang[@]}"
-      [ ${#nobang[@]} = 0 ] || shellcheck -s bash -S warning -f gcc -- "${nobang[@]}"; } 2>&1 \
-    | awk -F: -v k="$keep" 'BEGIN { n = split(k, a, "\n"); for (i = 1; i <= n; i++) keep[a[i]] = 1 }
-      ($1 ":" $2) in keep || ($1 ":all") in keep')
-  [ -z "$new" ] || { echo "shellcheck: a new warning on a line this change added or changed:"; echo "$new"; rc=1; }
+if [ ${#scfiles[@]} -gt 0 ]; then
+  scrc=0; scout=$(bash .conveyor/lint-shell.sh "${scfiles[@]}") || scrc=$?
+  if [ "$scrc" = 127 ] && [ "$scout" = "lint: missing shellcheck" ]; then
+    echo "shellcheck is not installed: the changed shell lines are not checked"
+  elif [ "$scrc" -ge 2 ]; then
+    echo "shellcheck could not check the changed shell files (exit $scrc):"; echo "$scout"; rc=1
+  else
+    # The lines the change added or changed, <file>:<line> one a line: of each hunk of the diff, +<start>[,<count>]
+    # (count 1 when left out); of a file git does not track, <file>:all.
+    keep=$({ git diff -U0 --no-color --no-ext-diff --no-prefix HEAD -- "${scfiles[@]}" | awk '/^\+\+\+ / { f = substr($0, 5) }
+        /^@@ / { split($3, a, ","); n = (2 in a) ? a[2] : 1; for (i = 0; i < n; i++) print f ":" substr(a[1], 2) + i }'
+      git ls-files -o --exclude-standard -- "${scfiles[@]}" | sed 's/$/:all/'; })
+    new=$(printf '%s\n' "$scout" | awk -F: -v k="$keep" 'BEGIN { n = split(k, a, "\n"); for (i = 1; i <= n; i++) keep[a[i]] = 1 }
+        ($1 ":" $2) in keep || ($1 ":all") in keep')
+    [ -z "$new" ] || { echo "shellcheck: a new warning on a line this change added or changed:"; echo "$new"; rc=1; }
+  fi
 fi
 # Claude Code's own check of the plugin, with the map check too (issue 604): a change to the mod (hooks/), its types
 # contract (types/) or its manifest (.claude-plugin/) runs `claude plugin validate` on the worktree. An error
