@@ -41,6 +41,8 @@ its own, and the Board's Rules tab sets them in its Judge row.
   not picked without one. Off, no card or issue waits for that line: the build brief and the review do not ask for it,
   the reviewer still answers the USER-VISIBLE line (kept on the card's review line), and the card lands as any other.
   A visible change landed while it is off was never approved; the Board says so beside the switch.
+- `lint`: the rule Lint check, on by default. On, each card's change goes through the review gate (Lint, below)
+  before each review. Off, no lint command runs in a card and the brief has no `# Lint` section.
 - `split`: the rule Split large issues, `off`, `shadow` or `on` (`conveyor.sh control rules split=<off|shadow|on>`).
   Before a card makes its worktree, code measures its issue against the pack's `split` limits; an issue that reaches
   one goes to the judge one time, which answers keep or 2 or 3 slices. Shadow records the verdict on the card's
@@ -955,6 +957,24 @@ runs in the base worktree
 links the dependency folders the card's worktree has, does not run `worktree.setup`, and is removed at the end. A
 `ratchet: false` command gets no base run: every finding is the card's. A base run that does not end in pass or
 findings makes the command's result an execution error.
+
+The review gate (`lintgate`) is at the top of each pass of the review loop in `card()`: after the change is staged,
+before the choice between a kept review and a review session. With the rule Lint check on, it runs the ratchet on the
+staged change, from the commit the card's worktree is on, and writes the card's `lint` line. A pass or a skipped
+command lets the card go on. An execution error blocks the card, with no fix session. The card's findings go to one
+fix session in the same pass, its reply checked as any fix's reply is. The change is staged again and the gate runs
+again: a finding left then blocks the card, and nothing lands. After that fix, the kept review, a kept patch's review
+(a retry that lands it) and a kept test pass no longer stand: the review session of the same pass reads the fixed
+change. The fix counts as no review. A later fix or rebuild session that adds a finding gets one new fix session at
+the next pass's gate. When a card is split for its size (`growcheck`), the gate runs again after the split's fix
+session, before the review of that pass.
+
+The read-only check (`lintrun`) holds around each gate run. Before the commands, the index tree is kept, and the
+worktree must match the index with no file that git does not track or ignore; else no command runs and nothing is
+put back. After them, also after a time-out, the index tree must be the kept one and the worktree must match it again;
+else the index is read back from the kept tree, the tracked files are written from it and each file that git does not
+track or ignore is deleted. Both are execution errors. The build and fix brief gets a `# Lint` section (`lintbrief`)
+that names the commands and the engine's own `conveyor.sh lint`.
 
 ## Flaky tests
 

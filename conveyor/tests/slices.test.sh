@@ -315,6 +315,25 @@ t_slicesgrownfix() {
     || fail "the card grown in a fix did not land only the core files: $(landedfiles) $(cat "$STUB/filed" 2>/dev/null)"
 }
 
+# On, with a lint command (a stub finding each line with BAD in src/*.sh): the build makes FIVE, clean, and the fix
+# session after the split adds BAD to src/c1.sh. Bug caught: the split's fix changed the change after the review gate,
+# and the card was reviewed and landed with the finding unlinted. The gate runs again after it, a lint fix removes the
+# finding, and the card lands clean. A whole card: only card() shows the gate's place after growcheck().
+t_slicesgrownlint() {
+  grown on; echo 'main s1' > "$R/src/s1.sh"; git -C "$R" add src && git -C "$R" commit -qm s1 || fail "main's src/s1.sh"
+  printf '%s\n' 'r=0; for f; do grep -q BAD "$f" && { echo "$f:1: E1 a bad word"; r=1; }; done; exit $r' > "$STUB/lint"
+  tune --arg r "bash $STUB/lint {files}" '.lint = {commands: [{files: ["src/*.sh"], run: $r}]}'
+  echo "if grep -q '^# Lint findings: fix them' \"\$STUB/brief\"; then echo c1 > src/c1.sh
+    elif grep -q '^# The change was split for its size' \"\$STUB/brief\"; then echo BAD >> src/c1.sh
+    else $FIVE; fi" > "$STUB/build"; echo "$GO" > "$STUB/review.1"
+  # loop: only card() shows the review gate running again after growcheck()'s fix session
+  loop run 1 >/dev/null
+  [ "$(st 'select(.step == "landed") | .issue')" = 7 ] || fail "the card of issue 7 did not land: $(st .step | tr '\n' ' ')"
+  [ "$(st 'select(.step | IN("lint", "grown", "fix", "review")) | "\(.step):\(.result)"' | tr '\n' ' ')" = 'lint:pass grown:split fix:ok lint:findings fix:ok lint:pass review:GO ' ] \
+    && ! git -C "$R" show HEAD:src/c1.sh | grep -q BAD \
+    || fail "the change the split's fix left was not linted before its review: $(st 'select(.step | IN("lint", "grown", "fix", "review")) | "\(.step):\(.result)"' | tr '\n' ' ')"
+}
+
 # Shadow: the judge's answer is recorded on the grown line, and the card lands its change as it was: nothing filed,
 # no fix. Bug caught: Shadow changed what the card lands.
 t_slicesgrownshadow() {

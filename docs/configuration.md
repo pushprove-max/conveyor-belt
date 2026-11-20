@@ -447,7 +447,8 @@ Without `test.checkCommand`, Conveyor runs no such checks.
 ## Lint
 
 The pack's `lint` field lists your project's lint commands. `conveyor.sh lint` runs them on a change, and `conveyor.sh
-doctor` tries each one ([Commands](commands.md)). Without a `lint` field, no lint command runs.
+doctor` tries each one ([Commands](commands.md)). Each card runs them before each review ([Lint](cards.md#lint)).
+Without a `lint` field, no lint command runs.
 
 `lint.commands` is a list. Each entry has these keys:
 

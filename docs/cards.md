@@ -43,6 +43,37 @@ pack, `.conveyor/project.json`). When the check session starts, for example afte
 the card goes back to the queue. This happens once for each issue. A card that
 stops again in the same way stays on Needs you until you retry it.
 
+## Lint
+
+When the pack has a `lint` field ([Lint](configuration.md#lint)), the card's change goes through the lint gate before
+each review. The gate runs the pack's lint commands on the staged change. The brief of the build and fix sessions has a
+`# Lint` section. It names the commands and tells the session to run `conveyor.sh lint` before it finishes.
+
+- A pass lets the card go on. So does a command whose tool is missing: the card's lint line says
+  `skipped: missing <tool>` for it.
+- A finding on the card's change goes to one fix session. The session gets the first 50 findings and their count.
+  Then the gate runs again. A finding that is still there blocks the card with the reason
+  `lint: <n> findings left after its fix session; nothing landed`. The fix uses no review: the review of the same pass
+  reads the fixed change. When the card is split for its size, the gate runs again after the split's fix session.
+  A review that stood for the change, and a kept patch that you approved, do not stand after
+  the fix: a new review session reads the change.
+- Any other end of a command is an execution error. The card blocks with `lint: an execution error, so nothing
+  landed:`, the command and the first line of its output. There is no fix session.
+
+The lint commands must not change the card's work. Before they run, the worktree must have no change that is not
+staged, and no file that git does not track or ignore. If it has one, that is an execution error, and Conveyor changes
+nothing. After they run, the staged change, the worktree and the untracked files must be as before. This is also true
+after a command that ran past its time limit. If they are not as before, that is an execution error. Conveyor then puts
+back the staged change and the tracked files, and deletes each new file that git does not ignore. Conveyor does not
+check the files that git ignores.
+
+Each gate run writes a `lint` line to the card's records, with each command's result and seconds. When the change
+changed a trigger of a command that ran, the line says `tools ran as installed`: the tools ran as installed on this
+host, not as the change would install them.
+
+The rule Lint check is on by default. `conveyor.sh control rules lint=off` turns it off. Then no lint command runs in a
+card, and the brief has no `# Lint` section.
+
 ## Review and the judge
 
 A second model reviews each card, at most three times. Each finding has a level:

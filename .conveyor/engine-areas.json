@@ -1551,3 +1551,4 @@
 {"area": "lint", "file": "conveyor/lib/lint.sh"}
 {"area": "lint", "file": "conveyor/commands/lint.sh"}
 {"area": "lint", "test": "lint.test.sh"}
+{"area": "lint", "test": "lintgate.test.sh"}

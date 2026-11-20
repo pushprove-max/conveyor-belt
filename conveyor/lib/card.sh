@@ -9,6 +9,7 @@
 # lib/modelpick.sh).
 . "$HERE/lib/slices.sh" || exit 1
 . "$HERE/lib/modelpick.sh" || exit 1
+. "$HERE/lib/lint.sh" || exit 1
 began() { # <card> <issue> <what begins>
   local e=''
   switchcode "$1" "$3"; rm -f "$CARDS/$1.firsttry" "$CARDS/$1.firsttry.new"
@@ -345,6 +346,8 @@ card() { # <card> <issue> [<branch> <tip>]
   [ "$old" = '[]' ] || rv+=$'\n\n'${KINDS//'<kinds>'/"$(jq -r 'join(", ")' <<<"$old")"}
   more=$(trailerbrief "$wt") || { block "$c" "$n" "$wt" "brief: the engine could not read the commit trailers of the project pack"; return; }
   b+=$'\n\n'"$more"
+  more=$(lintbrief) || { block "$c" "$n" "$wt" "brief: the engine could not read the lint field of the project pack"; return; }
+  [ -z "$more" ] || b+=$'\n\n'"$more"
   sprompt=$(cardprompt "$c" "$hdr" "$rules" "$b")
   d=$(jq -r '.body // ""' <<<"$issue" | sed -nE 's/^Follow-up depth: ([0-9]+)[[:space:]]*$/\1/p' | head -n 1)
   [ ${#d} -le 3 ] && d=$((10#${d:-0})) || d=''
@@ -448,6 +451,9 @@ card() { # <card> <issue> [<branch> <tip>]
       && ! { [ "$n" = 0 ] && [ -z "$br" ] && linksonly "$c" "$wt" && { git -C "$wt" reset -q --hard HEAD || :; }; } || {
       nochange "$c" "$n" "$wt" "$sprompt"; return; }
     trialflag "$wt" # a trial card's pick names the pipeline files its change touches (lib/push.sh)
+    # The review gate (lintgate(), lib/lint.sh): a fix of lint findings changed the change, so a kept review, a kept
+    # patch's review (land) and a test pass no longer stand for it, and the review of this pass reads all of it.
+    lintgate "$c" "$n" "$wt" "$issue" "$sprompt" "$br"; case $? in 1) return ;; 2) kept=''; docpass=''; refix=''; [ "$mode" != land ] || mode='' ;; esac
     if [ "$mode" = land ]; then
       # Landing from the kept patch: the kept review is this change's review, and it let the card land (a GO, or a
       # last review's NO-GO), so there is no review here and no review line. A review after this is this card's first.
@@ -461,8 +467,10 @@ card() { # <card> <issue> [<branch> <tip>]
       # settle() below), and a card is reviewed again there only when an earlier landing changed the lines it changed,
       # or when an ordered card went past it and main moved meanwhile (then even when its patch still applies).
       # A change grown past the pack's split.growFiles (growcheck(), lib/slices.sh): asked once a card; split, its one
-      # fix session dropped the slices' parts, so this review reads the whole change, not that fix alone.
-      if [ -z "$grown" ] && [ -z "$br" ]; then growcheck "$c" "$n" "$wt" "$issue" "$sprompt"; case $? in 1) return ;; 2) refix='' ;; esac; fi
+      # fix session dropped the slices' parts, so this review reads the whole change, not that fix alone, and the
+      # review gate runs again on what that fix left.
+      if [ -z "$grown" ] && [ -z "$br" ]; then growcheck "$c" "$n" "$wt" "$issue" "$sprompt"; case $? in 1) return ;; 2) refix=''; git -C "$wt" add -A 2>/dev/null
+        lintgate "$c" "$n" "$wt" "$issue" "$sprompt" "$br"; [ $? != 1 ] || return; docpass='' ;; esac; fi
       # A fix or rebase session changed a Fix the waiting, Fix hollow cases, Delete it or Make it run alone card: its check runs again on
       # what this review reads, and the card is blocked when it no longer holds.
       if [ -n "$pk" ] && [ "$(git -C "$wt" write-tree)" != "$pt" ]; then

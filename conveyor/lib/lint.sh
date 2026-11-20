@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # The lint check (docs/configuration.md, Lint): the pack's lint.commands, each run on the files of a change it reads,
-# and its result. Sourced, never run: by commands/lint.sh (conveyor.sh lint) and commands/doctor.sh (lintdoctor).
-# It uses packget (lib/prompts.sh) and the test slots (lib/slots.sh), sourced before it; lintratchet also uses depdirs
-# (lib/push.sh) and CARDS (lib/paths.sh).
+# and its result. Sourced, never run: by commands/lint.sh (conveyor.sh lint), commands/doctor.sh (lintdoctor) and
+# lib/card.sh (the review gate, lintgate). It uses packget (lib/prompts.sh) and the test slots (lib/slots.sh), sourced
+# before it; lintratchet also uses depdirs (lib/push.sh) and CARDS (lib/paths.sh); lintgate the card's steps (block,
+# session, checked, record, giveway), which a card's shell has.
 #
 # The pack is main's ($PACK); the scripts and configs a command loads are the worktree's, as it runs at the worktree's
 # top. A tree is the worktree as `git add -A` would stage it, read through a copy of its index (lintindex), so the
@@ -38,17 +39,18 @@ lintfield() { # <worktree> <index> <base>
 }
 
 # The scope of one command: LINT_GO is 1 when it runs, LINT_F the files it is given (none for a command without
-# {files}). <full> is 1 when the pack's lint field changed. Fails when git cannot list the files.
+# {files}), LINT_TRIG 1 when the change changed one of its triggers. <full> is 1 when the pack's lint field changed.
+# Fails when git cannot list the files.
 lintscope() { # <worktree> <index> <base> <command json> <full> <scratch file>
   local -a fs tr
   local full=$5
-  LINT_F=() LINT_GO=''
+  LINT_F=() LINT_GO='' LINT_TRIG=''
   mapfile -d '' -t fs < <(jq -j '.files[] + "\u0000"' <<<"$4")
   mapfile -d '' -t tr < <(jq -j '(.triggers // [])[] + "\u0000"' <<<"$4")
   [ ${#fs[@]} != 0 ] || return 0
-  if [ -z "$full" ] && [ ${#tr[@]} != 0 ]; then
+  if [ ${#tr[@]} != 0 ]; then
     GIT_INDEX_FILE=$2 git -C "$1" diff --cached --no-renames -z --name-only "$3" -- "${tr[@]}" > "$6" || return 1
-    [ ! -s "$6" ] || full=1
+    [ ! -s "$6" ] || { full=1; LINT_TRIG=1; }
   fi
   if [[ $(jq -r .run <<<"$4") != *'{files}'* ]]; then
     if [ -z "$full" ]; then
@@ -68,18 +70,20 @@ lintscope() { # <worktree> <index> <base> <command json> <full> <scratch file>
 
 # Runs <run> at <worktree>'s top, {files} in it replaced by the files, each quoted for the shell (as test.list's
 # placeholder is), on a test slot, its stdout and stderr in <output file>. Its exit is returned; LINT_OVER is 1 when
-# it ran over LINT_LIMIT. <index> (empty for the worktree's own) is the GIT_INDEX_FILE the command is given.
+# it ran over LINT_LIMIT, LINT_SEC the seconds it ran. <index> (empty for the worktree's own) is the GIT_INDEX_FILE the command is given.
 lintcall() { # <worktree> <index> <run> <output file> [<file>...]
   local wt=$1 ix=$2 c=$3 o=$4 q='' at rc
-  shift 4; LINT_OVER=''
+  shift 4; LINT_OVER='' LINT_SEC=0
   [ $# = 0 ] || { printf -v q '%q ' "$@"; q=${q% }; }
   c=${c//\{files\}/"$q"}
-  slot_pool > "$o" 2>&1 || return 1
+  # No slot pool: the command did not start, an execution error (exit 126) whose first line is the engine's why.
+  slot_pool > "$o" 2>&1 || { q=$(grep -m 1 '^conveyor: ' "$o"); echo "${q:-conveyor: no test slot could be taken}" > "$o"; return 126; }
   [ -n "$SLOT_HOME" ] || until slot_try || slot_wait; do :; done
   at=$SECONDS
   ( [ -n "$SLOT_HOME" ] || slot_mine || exit 1
     cd "$wt" && { [ -z "$ix" ] || export GIT_INDEX_FILE=$ix; } && exec timeout --kill-after=10 "$LINT_LIMIT" bash -o pipefail -c "$c" ) < /dev/null > "$o" 2>&1 8>&-; rc=$?
   [ -n "$SLOT_HOME" ] || slot_free
+  LINT_SEC=$((SECONDS - at))
   [ $((SECONDS - at)) -lt "$LINT_LIMIT" ] || { [ $rc != 124 ] && [ $rc != 137 ]; } || LINT_OVER=1
   return $rc
 }
@@ -112,9 +116,10 @@ lintresult() { # <exit> <output file> <finding lines> <over the limit: 1 or empt
 }
 
 # The pack's lint commands run on <worktree>'s tree, the change being from <base> (a commit) to that tree: one JSON
-# line a command, in the pack's order: {n, run, ratchet, complexity, result, why, files, findings}. result is pass,
-# findings, skipped (why: the tool), error (why: what went wrong) or `no files` (its scope is empty: not called);
-# files is the count it was given (null for a command without {files}); findings its finding lines (lintfindings).
+# line a command, in the pack's order: {n, run, ratchet, complexity, result, why, files, findings, sec, triggered}.
+# result is pass, findings, skipped (why: the tool), error (why: what went wrong) or `no files` (its scope is empty: not
+# called); files is the count it was given (null for a command without {files}); findings its finding lines
+# (lintfindings); sec the seconds it ran; triggered whether the change changed one of its triggers.
 # Nothing when the pack has no lint field. Fails, saying why, when the pack or the tree cannot be read.
 lintcheck() { # <worktree> <base>
   local l t full='' c n=0 rc r why run f
@@ -128,16 +133,19 @@ lintcheck() { # <worktree> <base>
     n=$((n + 1))
     lintscope "$1" "$t/index" "$2" "$c" "$full" "$t/scope" || { rm -rf "$t"; echo "conveyor lint: the files of lint command $n could not be listed" >&2; return 1; }
     if [ -z "$LINT_GO" ]; then
-      jq -c --argjson n $n '{n: $n, run, ratchet: (.ratchet != false), complexity: (.complexity // []), result: "no files", why: null, files: 0, findings: []}' <<<"$c"
+      jq -c --argjson n $n --argjson g "$([ -n "$LINT_TRIG" ] && echo true || echo false)" '{n: $n, run, ratchet: (.ratchet != false), complexity: (.complexity // []),
+        result: "no files", why: null, files: 0, findings: [], sec: 0, triggered: $g}' <<<"$c" \
+        || { rm -rf "$t"; echo "conveyor lint: the result of lint command $n could not be written" >&2; return 1; }
       continue
     fi
     run=$(jq -r .run <<<"$c"); f=null; [[ $run != *'{files}'* ]] || f=${#LINT_F[@]}
     rc=0; lintcall "$1" "$t/index" "$run" "$t/out" "${LINT_F[@]}" || rc=$?
     lintfindings "$t/out" "$t/paths" > "$t/found" || : > "$t/found"
     IFS=$'\t' read -r r why < <(lintresult "$rc" "$t/out" "$(wc -l < "$t/found" | tr -d ' ')" "$LINT_OVER")
-    jq -c --argjson n $n --arg r "$r" --arg w "$why" --argjson f "$f" \
+    jq -c --argjson n $n --arg r "$r" --arg w "$why" --argjson f "$f" --argjson s "$LINT_SEC" --argjson g "$([ -n "$LINT_TRIG" ] && echo true || echo false)" \
       --slurpfile fd "$t/found" '{n: $n, run, ratchet: (.ratchet != false), complexity: (.complexity // []), result: $r,
-        why: (if $w == "" then null else $w end), files: $f, findings: $fd}' <<<"$c"
+        why: (if $w == "" then null else $w end), files: $f, findings: $fd, sec: $s, triggered: $g}' <<<"$c" \
+      || { rm -rf "$t"; echo "conveyor lint: the result of lint command $n could not be written" >&2; return 1; }
   done < <(jq -c '.commands // [] | .[]' <<<"$l")
   rm -rf "$t"
 }
@@ -219,7 +227,7 @@ lintsync() { # <worktree> <index> <base> <base worktree> <scratch file> <record 
 }
 
 # The ratchet: lintcheck's lines for <worktree>'s tree, the change being from <base>, each with `reported`, the
-# findings that are the change's (none unless the result is findings):
+# findings that are the change's (none unless the result is findings), its sec counting its base run too:
 # - every finding of a `ratchet: false` command;
 # - a finding on a line the change added or changed (every line of a file base lacks), but a `complexity` finding on
 #   such a line of a file base has, which is the change's only when base's lines its hunk replaced lack the same one;
@@ -232,7 +240,7 @@ lintsync() { # <worktree> <index> <base> <base worktree> <scratch file> <record 
 # not end in pass or findings makes the command's result an execution error. The base worktree is removed at the end.
 # Fails, saying why, when the pack, the tree or the change cannot be read.
 lintratchet() { # <worktree> <base> <card>
-  local out l c n=0 t bw=$CARDS/mainrun/$3.lint made='' bad='' run rc r why v
+  local out l c n=0 t bw=$CARDS/mainrun/$3.lint made='' bad='' run rc r why v bs
   local -a bf sp
   out=$(lintcheck "$1" "$2") || return 1
   [ -n "$out" ] || return 0
@@ -252,7 +260,7 @@ lintratchet() { # <worktree> <base> <card>
   while IFS= read -r c; do
     n=$((n + 1))
     c=$(jq -c --slurpfile h "$t/hunks" '$h[0] as $h | if .ratchet and .result == "findings" then '"$v"' else . end' <<<"$c") || { bad=1; break; }
-    : > "$t/bfound"; bf=()
+    : > "$t/bfound"; bf=(); bs=0
     [ "$(jq -r '.ratchet and .result == "findings"' <<<"$c")" != true ] \
       || mapfile -d '' -t bf < <(jq -j '[.findings[] | select(.kind != "card") | .base] | unique | .[] + "\u0000"' <<<"$c")
     if [ ${#bf[@]} != 0 ]; then
@@ -264,14 +272,14 @@ lintratchet() { # <worktree> <base> <card>
         && { [ ${#LINT_DEPS[@]} = 0 ] || GIT_INDEX_FILE=$t/bindex git -C "$bw" rm -rq --cached --ignore-unmatch -- "${LINT_DEPS[@]}"; } \
         && GIT_INDEX_FILE=$t/bindex git -C "$bw" ls-files -z > "$t/bpaths"; then
         run=$(jq -r .run <<<"$c"); [[ $run == *'{files}'* ]] || bf=()
-        rc=0; lintcall "$bw" "$t/bindex" "$run" "$t/bout" "${bf[@]}" || rc=$?
+        rc=0; lintcall "$bw" "$t/bindex" "$run" "$t/bout" "${bf[@]}" || rc=$?; bs=$LINT_SEC
         lintfindings "$t/bout" "$t/bpaths" > "$t/bfound" || : > "$t/bfound"
         IFS=$'\t' read -r r why < <(lintresult "$rc" "$t/bout" "$(wc -l < "$t/bfound" | tr -d ' ')" "$LINT_OVER")
         [ "$r" != skipped ] || why="missing $why"
       else why='its base worktree could not be made or given the tree'"'"'s trigger and policy files'; fi
       case $r in pass|findings) ;; *) c=$(jq -c --arg w "the base run: $why" '.result = "error" | .why = $w' <<<"$c") || { bad=1; break; } ;; esac
     fi
-    jq -c --slurpfile b "$t/bfound" 'def nt($cx): if .code | IN($cx[]) then .text | gsub("[0-9]+"; "0") else .text end;
+    jq -c --slurpfile b "$t/bfound" --argjson bs "$bs" '.sec += $bs | def nt($cx): if .code | IN($cx[]) then .text | gsub("[0-9]+"; "0") else .text end;
       .complexity as $cx | def strip: map(del(.kind, .base, .at, .from, .to));
       .reported = (if .result != "findings" then [] elif .ratchet | not then .findings
         else reduce .findings[] as $f ({used: {}, rep: []};
@@ -283,6 +291,94 @@ lintratchet() { # <worktree> <base> <card>
   [ -z "$made" ] || lintbasegone "$1" "$bw"
   rm -rf "$t"
   [ -z "$bad" ] || { echo "conveyor lint: the findings of lint command $n could not be judged" >&2; return 1; }
+}
+
+# The read-only check of a gate (lintrun): true when <worktree> matches its index and holds no file that git neither
+# tracks nor ignores (an empty folder is no file: git cannot stage it).
+lintclean() { # <worktree>
+  local u
+  git -C "$1" diff --quiet 2>/dev/null && u=$(git -C "$1" ls-files --others --exclude-standard --directory --no-empty-directory 2>/dev/null) && [ -z "$u" ]
+}
+# One run of a gate on <worktree>'s staged change, from <base> (the commit it is on): the ratchet's lines
+# (lintratchet) in <output file>. Before the commands, the index tree is kept and lintclean must hold; else no command
+# runs and nothing is put back, so no work is lost. After them (a run over the time limit too) the index tree must be
+# the kept one and lintclean must hold again; else the index is read back from the kept tree, the tracked files are
+# written from it (deleted ones and modes too) and each file git neither tracks nor ignores is deleted. Writes to
+# ignored paths are not checked. 0: the card goes on (each command passed, was skipped, had no files, or found nothing
+# of the change's); 1: findings of the change's (reported); 2: an execution error, LINT_WHY saying what it was.
+lintrun() { # <worktree> <base> <card> <output file>
+  local w=$1 o=$4 tree rc=0
+  LINT_WHY=''; : > "$o"
+  tree=$(git -C "$w" write-tree 2>/dev/null) && lintclean "$w" \
+    || { LINT_WHY="the worktree differs from its staged change, or holds a file git neither tracks nor ignores, so no lint command ran"; return 2; }
+  lintratchet "$w" "$2" "$3" > "$o" 2> "$o.err" || rc=$?
+  if [ "$(git -C "$w" write-tree 2>/dev/null)" != "$tree" ] || ! lintclean "$w"; then
+    if git -C "$w" read-tree "$tree" && { git -C "$w" update-index -q --refresh > /dev/null 2>&1; git -C "$w" checkout-index -a -f; } && git -C "$w" clean -fdq; then
+      LINT_WHY="a lint command changed the worktree or its index; the engine put both back as they were"
+    else LINT_WHY="a lint command changed the worktree or its index, and the engine could not put them back"; fi
+    rm -f "$o.err"; return 2
+  fi
+  [ $rc = 0 ] || { LINT_WHY=$(head -c 600 "$o.err"); rm -f "$o.err"; return 2; }
+  rm -f "$o.err"
+  LINT_WHY=$(jq -rs 'map(select(.result == "error") | "lint command \(.n) (\(.run)): \(.why)") | join("; ")' "$o") || LINT_WHY='the engine could not read the lint results'
+  [ -z "$LINT_WHY" ] || return 2
+  ! jq -se 'any(.[]; .reported != [])' "$o" > /dev/null || return 1
+}
+# A gate's lint line in the card's records, for <output file> of lintrun and its exit: result pass, findings or error;
+# lint.commands each command's {n, run, result, sec, findings: the count of the change's}, a skipped one's result
+# `skipped: missing <tool>`; lint.asInstalled true when a command that ran has a trigger the change changed (the tools
+# ran as installed, not as the change would install them). The reason says the same, and an execution error's why.
+lintline() { # <card> <issue> <output file> <lintrun's exit>
+  local r=pass x
+  case $4 in 1) r=findings ;; 2) r=error ;; esac
+  x=$(jq -cs --arg w "$LINT_WHY" 'map({n, run, result: (if .result == "skipped" then "skipped: missing \(.why)" else .result end), sec, findings: (.reported | length)}) as $c
+    | any(.[]; .triggered and .result != "no files") as $i
+    | {lint: {commands: $c, asInstalled: $i}, reason: ([$c[] | "lint command \(.n) (\(.run)): \(.result)\(if .result == "findings" then ", \(.findings) of this change" else "" end), \(.sec) s"]
+        + (if $i then ["tools ran as installed"] else [] end) + (if $w == "" then [] else [$w] end) | join("; "))}' "$3") \
+    || x=$(jq -cn --arg w "$LINT_WHY" '{lint: {commands: [], asInstalled: false}, reason: $w}')
+  record "$1" "$2" lint "$r" "$x"
+}
+# The rule Lint check (rules.lint of the control record the card started on, CARDCTL, else the one in force): on
+# unless it is false.
+lintrule() { [ "$(jq -r '.rules.lint' <<<"${CARDCTL:-$(ctl 2>/dev/null)}" 2>/dev/null)" != false ]; }
+# The brief's # Lint section, with the rule Lint check on and a pack that sets lint commands; nothing otherwise.
+lintbrief() {
+  local l
+  lintrule || return 0
+  packget lint l || return 1
+  [ -n "$l" ] || return 0
+  printf '# Lint\n%s\n' "The pack's lint commands, each on the files its pathspecs match. Before you finish, run \`bash $HERE/conveyor.sh lint\` in this worktree and fix each finding it lists on the lines your change made. Never change lint policy (the pack's \`lint\` field, a linter's config or a suppression) unless the issue asks for it."
+  jq -r '.commands // [] | to_entries[] | "- lint command \(.key + 1): `\(.value.run)`, on \(.value.files | map("`\(.)`") | join(", "))"' <<<"$l"
+}
+LINTFIX=$'# Lint findings: fix them and nothing else\nThe pack\'s lint commands found <n> finding(s) in this card\'s change. The first 50 are below, each after the command that found it. Fix the code each one names. Do not change lint policy (the pack\'s `lint` field, a linter\'s config or a suppression) to make a finding go away, unless the issue asks for it.'
+# The review gate (card(), at the top of each pass of its review loop, with the change staged), with the rule Lint
+# check on: the pack's lint commands on the card's staged change, from the commit its worktree is on (lintrun), and
+# its lint line (lintline). An execution error blocks the card, with no fix session. Findings of the change's go to
+# one fix session, told them (the first 50, and how many), its reply checked as any fix's is (checked()). The change
+# is staged again and the gate runs again: an execution error or a finding left then blocks the card, and nothing
+# lands. 0: the card goes on, its change as it was; 1: the card ended (blocked); 2: the fix session changed it, so
+# the review of this pass reads it anew: no kept review or test pass stands for it.
+lintgate() { # <card> <issue> <worktree> <issue json> <the sessions' prompt> <branch>
+  local c=$1 n=$2 wt=$3 l base o rc k t
+  lintrule || return 0
+  packget lint l || { block "$c" "$n" "$wt" "lint: the engine could not read the pack's lint field, so nothing landed"; return 1; }
+  [ -n "$l" ] || return 0
+  base=$(git -C "$wt" rev-parse -q --verify HEAD) && o=$(mktemp) || { block "$c" "$n" "$wt" "lint: the engine could not start the lint check, so nothing landed"; return 1; }
+  lintrun "$wt" "$base" "$c" "$o"; rc=$?; lintline "$c" "$n" "$o" $rc
+  [ $rc != 2 ] || { rm -f "$o"; block "$c" "$n" "$wt" "lint: an execution error, so nothing landed: $LINT_WHY"; return 1; }
+  [ $rc = 1 ] || { rm -f "$o"; return 0; }
+  k=$(jq -s '[.[].reported[]] | length' "$o")
+  t=$(jq -rs '[.[] | . as $c | .reported[] | "lint command \($c.n) (\($c.run)): \(.file):\(.line)\(if .column then ":\(.column)" else "" end): \(.text)"] | .[:50][]' "$o")
+  locked giveway "$c" "$wt" fix; began "$c" "$n" fix
+  redbrief "$c" "$n" "$6"; t=$(session "$wt" "$5"$'\n\n'"${LINTFIX//'<n>'/$k}"$'\n'"$t" fix) || { rm -f "$o"; block "$c" "$n" "$wt" "fix: $t"; return 1; }
+  checked "$c" "$n" "$wt" "$4" "$5" fix "$(jq -c --arg r "lint: $k finding(s) of the change" '. + {reason: $r}' <<<"$t")" || { rm -f "$o"; return 1; }
+  git -C "$wt" add -A 2>/dev/null
+  lintrun "$wt" "$base" "$c" "$o"; rc=$?; lintline "$c" "$n" "$o" $rc
+  t=$(jq -rs '[.[] | . as $c | .reported[] | "lint command \($c.n): \(.file):\(.line): \(.text)"] | .[:50][]' "$o" 2>/dev/null); k=$(jq -s '[.[].reported[]] | length' "$o" 2>/dev/null)
+  rm -f "$o"
+  [ $rc != 2 ] || { block "$c" "$n" "$wt" "lint: an execution error after its fix session, so nothing landed: $LINT_WHY"; return 1; }
+  [ $rc != 1 ] || { block "$c" "$n" "$wt" "lint: $k findings left after its fix session; nothing landed"$'\n'"$t"; return 1; }
+  return 2
 }
 
 # `conveyor.sh lint`: the pack's lint commands on <worktree>'s tree, the change being from <base>, with no base run:

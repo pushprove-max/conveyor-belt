@@ -7,8 +7,8 @@ def fails: type == "object" and keys == ["files", "of", "timeout"] and (.of | . 
 def need: ["card", "issue", "reason", "result", "sha", "step", "time", "tokens"];
 def known: ["product", "title", "usage", "kept", "leftover", "followups", "sec", "visible", "branch", "created", "counts", "of", "model", "effort",
   "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "doneWhenItems", "doneWhenHolds", "excerpts", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost", "survived", "answers",
-  "wait", "run", "slotsFree", "selected", "ended", "list", "coverage", "slow", "timed", "times", "clocks", "carried", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "waitSec", "wide", "pr", "doneLines", "ran", "checks", "split", "grown", "rollout", "pick"];
-def steps: ["picked", "split", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof", "grown"];
+  "wait", "run", "slotsFree", "selected", "ended", "list", "coverage", "slow", "timed", "times", "clocks", "carried", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "waitSec", "wide", "pr", "doneLines", "ran", "checks", "split", "grown", "rollout", "pick", "lint"];
+def steps: ["picked", "split", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof", "grown", "lint"];
 # Each required field's own test.
 def needok($k): if $k == "issue" then .issue | type == "number" elif $k == "time" then (try (.time | fromdate | type == "number") catch false)
   elif $k == "tokens" then .tokens | type == "object" and keys == ["claude", "codex"] and all(type == "number")
@@ -151,6 +151,12 @@ def ok: . as $r | (keys - known) == need
           and (.slices // [] | type == "array" and all(type == "object" and keys == ["covers", "dependsOn", "doneWhen", "title"] and (.title | type == "string")
             and ([.covers, .dependsOn] | all(type == "array" and all(type == "number"))) and (.doneWhen | type == "array" and all(type == "string"))))
           and (.filed // [] | type == "array" and all(type == "number")))))
+        # A lint line (lintline(), lib/lint.sh): the gate's result, each command's result, seconds and findings of the
+        # change, and whether the tools ran as installed.
+        and ((.step == "lint") == (.lint != null))
+        and (.lint == null or ((.result | IN("pass", "findings", "error")) and (.lint | type == "object" and keys == ["asInstalled", "commands"]
+          and (.asInstalled | type == "boolean") and (.commands | type == "array" and all(type == "object" and keys == ["findings", "n", "result", "run", "sec"]
+            and ([.findings, .n, .sec] | all(type == "number")) and ([.result, .run] | all(type == "string")))))))
         # A grown line (growcheck(), lib/slices.sh): a change past split.growFiles files, the judge's verdict on it, the
         # slices of a split, the issues filed for them and the files left (On), the answer that broke the rules.
         and ((.step == "grown") == (.grown != null))
