@@ -1020,7 +1020,8 @@
       splitAt === null ? newer(false) : splitAt === 'shadow' ? h('span', 'board-from rules-off', 'shadow: the verdict is recorded, and the issue is built whole')
         : splitAt === 'off' ? offLine(false, 'no issue is checked') : null));
     // Pick settings: Shadow records each card's group and the builder the rule chooses, and builds on the builder as
-    // before; Off (the default) records none. An engine whose record has no rules.pick is sent none of them.
+    // before; On lets a card of an eligible group build on the group's challenger as a trial (lib/modelpick.sh); Off
+    // (the default) records none. An engine whose record has no rules.pick is sent none of them.
     const pickAt = ['off', 'shadow', 'on'].includes(r.pick) ? r.pick : null;
     const pickTo = (v, label) => {
       const b = choice(label, `pick-${v}`, `Pick settings: ${label.toLowerCase()}`, pickAt === v, () => { if (pickAt !== v) send('rules', [`pick=${v}`], null, ['rules', [`pick=${pickAt}`]]); });
@@ -1030,7 +1031,8 @@
     el.append(row('pick', 'Pick settings', 'code puts each card in a group before its build and records the builder it chooses for it; a builder you set for a card always wins',
       seg('Pick settings', pickTo('off', 'Off'), pickTo('shadow', 'Shadow'), pickTo('on', 'On')),
       pickAt === null ? newer(false) : pickAt === 'off' ? offLine(false, 'no pick is recorded')
-        : h('span', 'board-from rules-off', `${pickAt}: the pick is recorded, and the card builds on its builder as before`)));
+        : h('span', 'board-from rules-off', pickAt === 'shadow' ? 'shadow: the pick is recorded, and the card builds on its builder as before'
+          : 'on: a card of an eligible group can build on the group\'s challenger as a trial, one trial card at a time. A builder you set for a card always wins')));
     // Reserved cores: the machine's (the host file's reserveCores), shown here and set in the host file, with the
     // line that says where the test limits are.
     const co = S.cores, slots = co && typeof co.slots === 'number' ? `${co.slots} test slot${co.slots === 1 ? '' : 's'}` : 'test slots not read';

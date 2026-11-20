@@ -3,7 +3,7 @@
 // or on) and the Cost panel's table of picked cards by group and builder (cost.cards.picks, one row a group and builder
 // as the snapshot sums them). Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { boot, deliver, settle, full, act, rulesP, ruled, panel, cases } from './dashboard-view.helpers.mjs';
+import { boot, deliver, next, settle, full, act, rulesP, ruled, panel, cases } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 
@@ -31,6 +31,18 @@ test('Rules: Pick settings sends nothing to an older engine', () => {
   deliver(old, rules('none'));
   assert.ok(['pick-off', 'pick-shadow', 'pick-on'].every((a) => act(rulesP(old), a).disabled), 'an older engine is sent none of them');
   assert.match(ruled(old).querySelector('[data-rule="pick"]').textContent, /needs a newer Conveyor/);
+});
+
+// Bug this guards (#1040): On showed the Shadow line ("the card builds on its builder as before"), though On builds a
+// trial card of an eligible group on the group's challenger.
+test('Rules: Pick settings shows the Shadow line for shadow and the trial line for on', () => {
+  const w = boot({ tab: 'rules' });
+  const line = () => ruled(w).querySelector('[data-rule="pick"]').textContent;
+  deliver(w, rules('shadow'));
+  assert.match(line(), /shadow: the pick is recorded, and the card builds on its builder as before/);
+  next(w, rules('on'));
+  assert.match(line(), /on: a card of an eligible group can build on the group's challenger as a trial, one trial card at a time\. A builder you set for a card always wins/);
+  assert.doesNotMatch(line(), /builds on its builder as before/, 'On is not the Shadow line');
 });
 
 // Bugs this guards: the panel showed a group's whole spend as its spend per landed card (no division by the cards
