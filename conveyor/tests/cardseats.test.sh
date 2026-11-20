@@ -282,9 +282,26 @@ t_pickjudgeowner() {
     || fail "the trial card did not keep its challenger at the judge's effort in range, with the project's review: $(cat "$T/$CASE/run.out")"
   # Bug: the blocked trial's retry, no longer a trial, kept its trialEffort, so the record check set its lines aside.
   fx_in "PICK=\$(jq -c 'select(.card == \"c1-10\") | .pick | objects' \"\$ST/cards.jsonl\" | tail -n 1); PICKCARD=c1-10; record c1-10 10 blocked failed {}
-    PICK=''; PICKCARD=''; PICKSEAT=''; PICKSEATS=''; SEATCARD=10; modelpick c2-10 10 2>/dev/null; jq -c '[.trial, .trialEffort]' <<<\"\$PICK\"; record c2-10 10 deps ok"
-  [ "$(cat "$T/$CASE/run.out")" = '[false,null]' ] || fail "the retry of a blocked trial kept its trialEffort: $(cat "$T/$CASE/run.out")"
+    PICK=''; PICKCARD=''; PICKSEAT=''; PICKSEATS=''; SEATCARD=10; modelpick c2-10 10 2>/dev/null; jq -c '[.trial, .trialEffort, .choice]' <<<\"\$PICK\"; seat builder | jq -r '\"\(.model) \(.effort)\"'; record c2-10 10 deps ok"
+  # Bug (#1055): the retry, which builds on the default, took the judge's builder (m at high) for the project's.
+  [ "$(cat "$T/$CASE/run.out")" = $'[false,null,{"model":"m","effort":"medium"}]\nm medium' ] \
+    || fail "the retry of a blocked trial kept its trialEffort, or did not build on the project's builder: $(cat "$T/$CASE/run.out")"
+  # Bug (#1055): the retry blocked too, so the next one's last pick was no trial and it took the judge's builder.
+  fx_in "PICK=\$(jq -c 'select(.card == \"c2-10\") | .pick | objects' \"\$ST/cards.jsonl\" | tail -n 1); PICKCARD=c2-10; record c2-10 10 blocked failed {}
+    PICK=''; PICKCARD=''; PICKSEAT=''; PICKSEATS=''; SEATCARD=10; modelpick c3-10 10 2>/dev/null; seat builder | jq -r '\"\(.model) \(.effort)\"'; record c3-10 10 deps ok"
+  [ "$(cat "$T/$CASE/run.out")" = 'm medium' ] || fail "the second retry of a blocked trial did not build on the project's builder: $(cat "$T/$CASE/run.out")"
   recok "$ST/cards.jsonl" "a trial card's pick, and its retry's"
+}
+
+# Bug (#1055): with the rule On, the card in the share of a promoted group (issue 15, 1 in 5), which the snapshot's
+# cost check compares with the promoted cards, built on the judge's builder (m2 high), not the project's (m medium).
+t_pickjudgeshare() {
+  seatsetup "[$(issue 15 2026-01-01)]"
+  loop control rules pick=on >/dev/null && loop control pick small code promote >/dev/null || fail "control rules pick=on or control pick was refused"
+  pjask 'm2 high' 'x2 low' 'j2 low'
+  fx_in "N=15; $PJ; jq -c '[.group, .trial, .promoted, .choice]' <<<\"\$PICK\""
+  [ "$(sed -n '2,5p' "$T/$CASE/run.out" | paste -sd,)" = 'm medium,x2 low,j2 low,["small code",false,null,{"model":"m","effort":"medium"}]' ] \
+    || fail "the promoted group's card in the share did not build on the project's builder: $(cat "$T/$CASE/run.out")"
 }
 
 # Bugs: with Shadow the judge's pick was not recorded, or moved a seat; with Off the judge was asked. Also: a seat with

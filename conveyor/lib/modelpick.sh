@@ -6,7 +6,8 @@
 # or the challenger on a trial (below); when the owner set the issue's builder (`control card <issue> builder`), the
 # choice is the owner's, by "owner". Then the judge picks the card's three seats, fitted to the pack (pickjudge(),
 # below), and with the rule On a card that is no trial nor promoted builds on the judge's builder, which is then its
-# choice. In shadow the pick changes nothing about which models run the card: seat() gives the card its seats, as
+# choice, unless the rule keeps it on the project's builder (a promoted group's card in the share, a blocked trial's
+# retry). In shadow the pick changes nothing about which models run the card: seat() gives the card its seats, as
 # with the rule off.
 # The group is "<size> <kind>". size is small when the issue is under each of the pack's split thresholds (SPLITSIZE
 # and split.doneWhen, split.files, split.areas, split.chars, as splitcheck() measures it, lib/slices.sh), else medium
@@ -64,7 +65,7 @@ PICKLADDER='[{"model":"claude-sonnet-5-5","effort":"medium"},{"model":"claude-so
 PICKELIGIBLE='def eligible($c): IN("small docs", "small code") or (startswith("medium ") and ($c.picks[.] | objects) != null);'
 # shellcheck disable=SC2034 # PICK, PICKCARD, PICKSEAT and PICKSEATS are card()'s, read by line() in lib/records.sh and seat() in lib/control.sh
 modelpick() { # <card> <issue>: sets card()'s PICK, PICKCARD and PICKSEAT
-  local c=${CARDCTL:-} rule old b by=auto issue size t1 t2 t3 t4 pipe group back
+  local c=${CARDCTL:-} rule old b by=auto issue size t1 t2 t3 t4 pipe group back PICKHOLD=''
   [ -n "$c" ] || c=$(ctl 2>/dev/null) || return 0
   rule=$(jq -r '.rules.pick // "off"' <<<"$c" 2>/dev/null)
   [ "$rule" = shadow ] || [ "$rule" = on ] || return 0
@@ -81,8 +82,13 @@ modelpick() { # <card> <issue>: sets card()'s PICK, PICKCARD and PICKSEAT
   b=$(seat builder "$c" | jq -c '{model, effort}') && [ -n "$b" ] || { echo "conveyor: card $1: no builder to record in its pick" >&2; return 0; }
   ! jq -e --arg n "$2" '.cards[$n].builder | objects' <<<"$c" >/dev/null 2>&1 || by=owner
   old=$({ stdb ask issue retried "$2" -- issue cards "$2"; } 2>/dev/null | jq -cs --argjson n "$2" \
-    '[.[] | objects | select(.issue == $n and (.pick | type) == "object")] | sort_by(.time) | last | .pick // empty' 2>/dev/null)
+    '[.[] | objects | select(.issue == $n and (.pick | type) == "object")] as $l
+    | ($l | sort_by(.time) | last | .pick // empty) + {hold: any($l[]; .step == "blocked" and .pick.trial == true)}' 2>/dev/null)
   if [ -n "$old" ]; then
+    # Every later card of an issue whose trial card was blocked builds on the project's builder, not the judge's: also
+    # a second retry, whose last pick is no trial, and a retry that picktrial() leaves before its check of the blocks.
+    ! jq -e .hold <<<"$old" >/dev/null || PICKHOLD=1
+    old=$(jq -c 'del(.hold)' <<<"$old") || return 0
     PICK=$(jq -c --arg m "$rule" --arg by "$by" --argjson b "$b" '.mode = $m | del(.pipeline, .trialEffort) | if $by == "owner" or .by == "owner" then .by = $by | .choice = $b | .trial = false | del(.promoted) else . end' <<<"$old") || return 0
     PICKCARD=$1
     if pickpromote "$1" "$2" "$c" "$b"; then :
@@ -151,7 +157,11 @@ PICKCLAMP="$OKMODELS"'def noeff($s; $g): $s == "builder" and $g == "opencode";
 # tokens and usage, or unread), so its tokens and price count on the card. Each card asks the judge: a later card of
 # the issue (a retry or a restart) asks again, and its answer replaces the asked of the pick it reuses.
 # On, a card that is not a trial nor promoted, and whose builder the owner did not set, builds on the judge's builder
-# (PICKSEAT, which then is its choice); a trial card keeps its challenger, at the judge's effort fitted to the
+# (PICKSEAT, which then is its choice), except a card the rule keeps on the project's builder (PICKHOLD, modelpick()'s,
+# set by pickpromote() and by modelpick() itself): a promoted group's card in the share, which the snapshot's cost
+# check compares the promoted cards with, and each later card of an issue whose trial card was blocked, which builds
+# on the default; a trial card
+# keeps its challenger, at the judge's effort fitted to the
 # builder's range (fit()): its choice stays the challenger, by which the snapshot counts the group's trials, and
 # trialEffort is the effort it builds at when that is another. A card that is not a trial runs its review on the
 # judge's reviewer and judge (PICKSEATS), each one the owner promoted from a replay result standing over it. A seat the
@@ -188,7 +198,7 @@ pickjudge() { # <card> <issue> <control record> [<issue json>]
       first(okmodels("builder") | to_entries[] | select(.value | index($p.model)) | .key) as $g
       | fit($r; $e; "builder"; $g; ($q.asked.effort // $p.effort)) as $f | if $f == null then $p else $p + {effort: $f} end' <<<"$a" 2>/dev/null) && [ -n "$x" ] \
       && PICKSEAT=$x && PICK=$(jq -c --argjson s "$x" 'if .choice.effort == $s.effort then . else .trialEffort = $s.effort end' <<<"$PICK") || :
-  elif [ -z "${PICKSEAT:-}" ] && [ "$(jq -r .by <<<"$PICK")" = auto ]; then
+  elif [ -z "${PICKSEAT:-}" ] && [ -z "${PICKHOLD:-}" ] && [ "$(jq -r .by <<<"$PICK")" = auto ]; then
     x=$(jq -c '.asked.builder | select(.model != null) | {model, effort}' <<<"$PICK" 2>/dev/null)
     [ -z "$x" ] || { PICKSEAT=$x; PICK=$(jq -c --argjson s "$x" '.choice = $s' <<<"$PICK") || :; }
   fi
@@ -233,7 +243,7 @@ pickpromote() {
   PICK=$(jq -c --argjson b "$4" '.trial = false | .choice = $b | del(.promoted)' <<<"$PICK") || return 0
   # In a group whose next challenger is on trial (promoted kept: `control pick <group> next`), the card in the share
   # is a trial of it, as picktrial() allows.
-  if [ $(($2 % 5)) = 0 ]; then ! jq -e --argjson c "$3" '$c.picks[.group].promoted' <<<"$PICK" >/dev/null || picktrial "$1" "$2" "$3" "$4"; return 0; fi
+  if [ $(($2 % 5)) = 0 ]; then PICKHOLD=1; ! jq -e --argjson c "$3" '$c.picks[.group].promoted' <<<"$PICK" >/dev/null || picktrial "$1" "$2" "$3" "$4"; return 0; fi
   [ "$4" != "$p" ] && challenger "$1" "$2" "$3" "$p" || return 0
   PICK=$(jq -c --argjson s "$p" '.choice = $s | .promoted = true' <<<"$PICK") || PICKSEAT=''
 }
