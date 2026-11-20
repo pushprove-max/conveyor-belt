@@ -85,6 +85,7 @@ cmd setup setup.sh 'setup [--owner <name>] [--product <path>]... [--test <comman
 cmd setup setup.sh 'setup pack-commit [yes | no]'
 cmd doctor doctor.sh 'doctor'
 cmd lint lint.sh 'lint'
+cmd size size.sh 'size --list'
 cmd wording wording.sh 'wording adversarial | review'
 cmd auto auto.sh 'auto on | narrow | off | status | band | rules | decide | standing [<run> | <kind> on|off] | act <kind> <what>'
 cmd foreman foreman.sh 'foreman [status [<project>] | <claude argument>...]'

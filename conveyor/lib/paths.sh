@@ -13,7 +13,7 @@ RAN=$OWN; [ -n "$OWN" ] || RAN=$(git -C "$HERE" rev-parse -q --verify HEAD 2>/de
 # for these commands: `setup`, `doctor`, `foreman`, `lane`, `take`, `board`, `lint` and `size`, which are for the
 # project they are called in (the plugin copy runs them before the project has an engine, `board` runs from an install,
 # read-only, in the project's checkout, `lane` called in the fast lane acts for that lane's main checkout, and `lint`
-# called in a card's worktree reads that worktree's main checkout; `size`, a command still to come, is named with it),
+# called in a card's worktree reads that worktree's main checkout, as `size` does),
 # and `auto` and
 # `wording`, which the plugin's commands run. It is that checkout for every command too when the engine runs from an
 # install, or from a folder in no git checkout (RAN empty), such as the plugin copy that Claude Code installs from a

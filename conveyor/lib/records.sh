@@ -5,8 +5,8 @@
 # folder's privacy/ for its record of what it checked.) `state-dir` names the folder and makes nothing: the review gate
 # asks it on a machine Conveyor may not run on. `testmap` and `take stale` only read, for /units, which writes nothing, and the Foreman's start; `testmap build` and `stop` write only beside the pack
 # (lib/testmap.sh). `lint` reads the tree of the worktree it was called in (CALLED) and makes no state folder: it changes
-# neither that worktree nor its index, though `git add -A` on its index's copy puts the new files' objects in the repository; `size`, a
-# command still to come, is named with it.
+# neither that worktree nor its index, though `git add -A` on its index's copy puts the new files' objects in the repository.
+# `size --list` reads the worktree it was called in too, and makes no state folder either.
 # `lane research` makes only the lane's own folder in it. CALLED is the folder it was called from.
 CALLED=$PWD
 # Keeps the cards folder's name, and takes the name kept. One command at a time (the flock) keeps the name it chose

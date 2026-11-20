@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # The lint check (docs/configuration.md, Lint): the pack's lint.commands, each run on the files of a change it reads,
-# and its result. Sourced, never run: by commands/lint.sh (conveyor.sh lint), commands/doctor.sh (lintdoctor),
-# commands/retry.sh (lintrule) and lib/card.sh (the review and landing gates, lintgate; lintwait, the gate for a
-# waiting card, is called by settle() in lib/claim.sh, in a card's shell, and lintbatch and lintleave, the gate for a
-# batch, by batch() and rebatch()). It uses packget (lib/prompts.sh) and the test slots
-# (lib/slots.sh), sourced before it; lintratchet also uses depdirs (lib/push.sh) and CARDS (lib/paths.sh); lintgate
+# and its result. Sourced, never run: by commands/lint.sh (conveyor.sh lint), commands/size.sh (lintsizelist),
+# commands/doctor.sh (lintdoctor), commands/retry.sh (lintrule) and lib/card.sh (the review and landing gates,
+# lintgate; lintwait, the gate for a waiting card, is called by settle() in lib/claim.sh, in a card's shell, and
+# lintbatch and lintleave, the gate for a batch, by batch() and rebatch()). It uses packget (lib/prompts.sh) and the
+# test slots (lib/slots.sh), sourced before it; lintratchet also uses depdirs (lib/push.sh) and CARDS (lib/paths.sh); lintgate
 # the card's steps (block, session, checked, record, giveway, cardpatch), which a card's shell has.
 #
 # The pack is main's ($PACK); the scripts and configs a command loads are the worktree's, as it runs at the worktree's
@@ -148,6 +148,31 @@ lintsize() { # <worktree> <limit> <exempt file> <file>...
     [ "$n" -le "$lim" ] || { echo "$f:$((lim + 1)): size $n lines, limit $lim"; rc=1; }
   done
   return $rc
+}
+
+# `conveyor.sh size --list`: the paths, from <worktree>'s top, one a line, sorted, of the files that the pack's size
+# entries match in <worktree>'s tree (a tracked file, or one not tracked and not ignored, as `git add -A` would stage
+# it) and that have more lines than their entry's limit. The exempt file is not read: the list is what it names. Fails,
+# saying why, when the pack or the tree cannot be read or a file cannot be counted.
+lintsizelist() { # <worktree>
+  local l c sz rc out t
+  local -a fs one
+  packget lint l || { echo "conveyor size: the pack's lint field could not be read" >&2; return 1; }
+  t=$(mktemp -d) || return 1
+  : > "$t/list"
+  while IFS= read -r c; do
+    sz=$(jq -r '.size.file | floor' <<<"$c")
+    mapfile -d '' -t fs < <(jq -j '.files[] + "\u0000"' <<<"$c")
+    git -C "$1" ls-files -z --cached --others --exclude-standard -- "${fs[@]}" > "$t/m" \
+      || { rm -rf "$t"; echo "conveyor size: the files of $1 could not be listed" >&2; return 1; }
+    mapfile -d '' -t one < "$t/m"
+    [ ${#one[@]} != 0 ] || continue
+    # No exempt file (an empty name is no file), so every file over the limit is a finding line `<path>:<line>: ...`.
+    rc=0; out=$(lintsize "$1" "$sz" '' "${one[@]}" 2>&1) || rc=$?
+    [ "$rc" -le 1 ] || { rm -rf "$t"; echo "conveyor size: ${out:-the lines could not be counted}" >&2; return 1; }
+    [ -z "$out" ] || sed 's/:[0-9]*: size [0-9]* lines, limit [0-9]*$//' <<<"$out" >> "$t/list"
+  done < <(jq -c '.commands // [] | .[] | select(.size)' <<<"${l:-null}")
+  LC_ALL=C sort -u "$t/list"; rm -rf "$t"
 }
 
 # The pack's lint commands run on <worktree>'s tree, the change being from <base> (a commit) to that tree: one JSON

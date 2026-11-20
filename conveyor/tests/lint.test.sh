@@ -316,6 +316,24 @@ t_lintsizeexempt() {
     || fail "the brief does not name the size entry: $(cat "$T/$CASE/out")"
 }
 
+# Bugs: `conveyor.sh size --list` leaves out a file over the limit (one the exempt file names: the list is what it
+# names; one not tracked yet; one only the worktree it was called in has, not main), lists a file at the limit (edge.c,
+# three lines) or one under an excluded folder, prints more than the path, or makes a state folder. It is called in a
+# subfolder of card c7's worktree, so the paths are from the worktree's top.
+t_lintsizelist() {
+  local out
+  lintsetup
+  tune '.lint = {commands: [{files: ["*.c", ":(exclude)gen/*"], size: {file: 3, exempt: ".size-exempt"}}]}'
+  lintwt big.c "$(printf 'l1\nl2\nl3\nl4\nl5')" at.c "$(printf 'l1\nl2\nl3')" edge.c "$(printf 'l1\nl2\nl3')" \
+    gen/huge.c "$(printf 'l1\nl2\nl3\nl4\nl5')" .size-exempt big.c
+  rm -rf "$ST"
+  (cd "$W" && printf 'l1\nl2\nl3\nl4' > new.c && printf 'l4\n' >> at.c) || fail "the card's change"
+  out=$(cd "$W/gen" && CONVEYOR_CARDS=$T/$CASE/cards bash "$SRC/conveyor.sh" size --list 2>&1); RC=$?
+  [ "$RC" = 0 ] && [ "$out" = "$(printf 'at.c\nbig.c\nnew.c')" ] \
+    || fail "size --list is not the worktree's three files over the limit, the excluded one left out (exit $RC): $out"
+  [ ! -e "$ST" ] && [ ! -e "$T/$CASE/cards/mainrun" ] || fail "conveyor.sh size --list made a state folder: $(ls "$ST" "$T/$CASE/cards" 2>&1)"
+}
+
 # Bug: doctor says nothing of a lint command that cannot run, or runs one with no file to read. Each of five stub
 # commands gives its line: ok, findings, missing, error, empty; a size entry, run in the engine, its findings on the
 # fixture's two-line .gitignore. lintdoctor is called alone: doctor's other checks

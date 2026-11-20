@@ -127,6 +127,11 @@ Tests:
   make it exit 1. A finding with a `complexity` code on such a line is listed under "the gate decides these" and does
   not change the exit code. Findings on other lines are only counted. It exits 2 when a command ends in an execution
   error and no finding made it exit 1.
+- `size --list` prints the files that have more lines than the limit of a size entry in the pack's lint commands
+  ([The size entry](configuration.md#the-size-entry)). It prints one path a line, from the top of the worktree it is
+  called in. It reads that worktree as `conveyor.sh lint` does, so it sees an edit that is not staged and a file that
+  is not tracked. It does not read the exempt file, so it also prints the files that the exempt file names. To make
+  the exempt file, send its output to that file. It changes nothing.
 - `main-test` runs the whole test on main when one is due (the pack's `test.main`).
 - `survey` files the monthly test-speed survey's issue when one is due (the pack's `test.survey`).
 - `flaky add <case> <source> <note>` adds a flaky-test entry. `flaky off` adds one and files no issue.
