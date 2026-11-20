@@ -25,7 +25,13 @@ echo two >> a.txt
 EOF
   echo '[ "$(wc -l < "$STUB/reviews")" != 1 ] || { printf "USER-VISIBLE: no\nVERDICT: GO\n" > "$out"; sleep 60; }' > "$STUB/review-cmd" # sleep: a review that hangs after it wrote its verdict, ended by the engine
   s=$SECONDS; loop run > "$STUB/log" 2>&1 & run=$!
-  for i in $(seq 150); do h=$(loop health 2>/dev/null | jq -c '.stuck'); [[ $h == *'"did":"ended and retried"'* ]] && break; sleep 0.2; done
+  # A poll of the running loop: what health lists while the retried build still runs is only there during the run.
+  # Health is asked only once that build's live record says it was stalled (watch()), which health reads: each
+  # `loop health` is a whole engine start, and asking it every 0.2 s from the run's start cost about a fifth of this
+  # case's CPU.
+  for i in $(seq 150); do
+    grep -qs '"stalled"' "$T/$CASE"/cards/*.live && h=$(loop health 2>/dev/null | jq -c '.stuck') && [[ $h == *'"did":"ended and retried"'* ]] && break; sleep 0.2
+  done
   b=$(loop snapshot --fresh 2>/dev/null | jq -c '[.belt[] | [.step, .stalls]]')
   : > "$STUB/go"; wait $run || fail "run exited non-zero: $(cat "$STUB/log")"
   c=$(st 'select(.step == "picked") | .card')
