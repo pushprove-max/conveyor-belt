@@ -350,10 +350,17 @@ Set a range in `.conveyor/project.json` as `models.effort.<builder|reviewer|judg
 "<effort>"}`. The efforts in order are `minimal`, `low`, `medium`, `high`, `xhigh` and `max`. For example,
 `"builder": {"min": "medium", "max": "high"}` changes a choice of `low` to `medium`.
 
+On the Board's Rules tab, the **Pick settings** row shows the models that each seat can get and the effort range of
+the seat. To set a range, choose the lowest and the highest effort, then click **Save**. To remove a range, click
+**Any**. `conveyor.sh pick effort <builder|reviewer|judge> <min> <max>` and `conveyor.sh pick effort <seat> clear`
+do the same. Conveyor refuses a lowest effort that comes after the highest effort, and the pack does not change.
+
 The `pick` field of the card has `asked`: the three seats as Conveyor fitted them, and the judge's model. Each seat
 has the model and effort that the judge gave (`asked`) and its reason. A seat that Conveyor changed has `clamp`,
 which says what changed and why. When the judge fails, times out or names no model, `asked` has `failed` with the
-reason, and the card uses the project's seats.
+reason, and the card uses the project's seats. On the Board, a card with a pick has a **Seats** line. It says how
+many seats a limit clamped. Open it to see the model and effort of each seat, the judge's reason for it, and the
+clamp.
 
 With On, the card uses these seats, with these exceptions:
 

@@ -38,7 +38,8 @@
 // Under it, each open parent issue is one row of its parts (parents(), below).
 // Its part (dashboard.sh, board): {repo (null: no record is on the host's main), state, reason (why it picks nothing | null), loop, control, cap, guard,
 // modelSettings, limit, held, queue (room on the one the machine holds back: why, as "waiting for a machine slot: ..."), skipped, waits (issues waiting on another, with waitsFor), issuesError,
-// building, review, waiting, blocked, landed (the day's newest; each with batch: the cards it landed with, itself among them | null),
+// building, review, waiting, blocked, landed (the day's newest; each with batch: the cards it landed with, itself among them | null;
+// each card with seats: the seats the rule Pick settings gave it | null),
 // today ({landed, usd}: every card of the day, counted and its usd added up, null when one has none), open ({count, split, held: each with its reasons, umbrellas: each open parent with its parts} | null),
 // unpushed (the landed cards origin lacks | null), fullTest (command, why, running, last | null), and checkRuns
 // (only when a pack names checks.progress: each record's {repo, error}, or its run with repo, counts, done, all and leftSec;
@@ -69,6 +70,7 @@
   const S = { d: null, ctl: null, at: new Map(), from: 'board', heard: new WeakSet(), raw: null, ctx: null, armed: false, unarm: null, dragging: null, busy: false, keep: null, ctlAt: null, moved: new Map(), floor: null, read: null, turned: false, lanesOpen: {}, lanesShown: {},
     groups: new Map(), filter: { text: '' }, text: null, unlabeled: new Set(), released: new Set(),
     dep: null, depText: '', depSaid: new Map(),
+    seatsOpen: new Set(),  // the cards (repo and card) whose Seats list is open, kept open over a redraw
     seats: null, picks: new Map(),  // the card whose Settings is open ({issue, draft}), and each card's Pick for me ({busy}, {data} or {error})
     dw: new Map(), dwOpen: new Set(),  // a card's Done-when items by card and check stamp ({busy, data, error}), and the cards whose line is open
     partsOpen: new Set() };  // the parents whose row of parts is open
@@ -987,7 +989,7 @@
       const r = num(item.reviews);
       el.append(h('p', 'row-meta', item.step === 'closed' ? (splitFiled(item).length ? 'split, not built' : 'already fixed') : `${r === null ? '?' : r} review${r === 1 ? '' : 's'} · ${ctx.money(item.usd)}`));
     }
-    if (col !== 'held' && col !== 'queue') { doneWhen(el, item); stalls(el, item); splitNote(el, item); }
+    if (col !== 'held' && col !== 'queue') { doneWhen(el, item); stalls(el, item); splitNote(el, item); seatsNote(el, item); }
     // A landed card has no step left to run; a main-red fix card has no issue to keep settings by. A card in Needs you
     // has them too, so a blocked card's are set before its Retry; it is still answered in the Needs you panel (issue
     // 407): its settings are no answer. A card of another project is not set from here: its seats are in that project's record.
@@ -1096,6 +1098,34 @@
     const s = item.split, f = splitFiled(item), n = num(s && s.slices);
     if (!s || s.result !== 'split') return;
     el.append(S.ctx.h('p', 'board-from board-split', f.length ? `Split into ${f.map((x) => `#${x}`).join(', ')}` : `Would have split into ${n}`));
+  }
+  // The seats the rule Pick settings gave the card (seats: its pick's asked, lib/modelpick.sh pickjudge()): a line that
+  // opens to each seat's model and effort, the Judge's one-line reason for it, and, when a limit of the pack moved it
+  // (models.allowed or the seat's effort range), what was clamped and why; or the reason the Judge's pick failed. A
+  // card the rule did not pick shows nothing.
+  function seatsNote(el, item) {
+    const h = S.ctx.h, s = item.seats;
+    if (!s || typeof s !== 'object') return;
+    if (typeof s.failed === 'string') { el.append(h('p', 'board-from board-seats', `Seats: the project's, as the Judge's pick failed: ${s.failed}`)); return; }
+    const rows = ['builder', 'reviewer', 'judge'].filter((k) => s[k] && typeof s[k] === 'object').map((k) => [k, s[k]]);
+    if (!rows.length) return;
+    const clamped = rows.filter(([, x]) => typeof x.clamp === 'string' && x.clamp).length;
+    const det = h('details', 'board-seats');
+    const sum = h('summary', null, `Seats: the Judge's pick, ${clamped ? `${clamped} clamped by a limit` : 'none clamped'}`);
+    sum.dataset.act = 'seats';
+    const ul = h('ul', 'board-seats-list');
+    rows.forEach(([k, x]) => {
+      const li = h('li', null, `${k[0].toUpperCase()}${k.slice(1)}: ${typeof x.model === 'string' ? `${x.model} at ${typeof x.effort === 'string' ? x.effort : 'no effort'}` : "the project's"}${typeof x.why === 'string' && x.why ? `. ${x.why}` : ''}`);
+      li.dataset.seat = k;
+      if (typeof x.clamp === 'string' && x.clamp) li.append(h('span', 'board-seats-clamp', ` Clamped: ${x.clamp}`));
+      ul.append(li);
+    });
+    if (typeof s.guard === 'string' && s.guard) ul.append(h('li', null, `Not used: ${s.guard}`));
+    det.append(sum, ul);
+    const key = `${item.repo || ''} ${item.card || item.issue}`;
+    det.open = S.seatsOpen.has(key);
+    det.addEventListener('toggle', () => { if (det.open) S.seatsOpen.add(key); else S.seatsOpen.delete(key); });
+    el.append(det);
   }
   // ---- every column filtered by priority, area and label, and sorted, the choice kept in the address ----
   // A card's priority and labels are its own, else its open issue's (open.issues). A card whose issue is closed

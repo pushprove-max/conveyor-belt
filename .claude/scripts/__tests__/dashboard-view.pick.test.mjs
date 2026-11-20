@@ -34,15 +34,92 @@ test('Rules: Pick settings sends nothing to an older engine', () => {
 });
 
 // Bug this guards (#1040): On showed the Shadow line ("the card builds on its builder as before"), though On builds a
-// trial card of an eligible group on the group's challenger.
+// trial card of an eligible group on the group's challenger, and (#1046) builds and reviews the card on the Judge's seats;
+// (#1047) the line said a trial card was reviewed on the Judge's seats, though it is reviewed on the project's.
 test('Rules: Pick settings shows the Shadow line for shadow and the trial line for on', () => {
   const w = boot({ tab: 'rules' });
   const line = () => ruled(w).querySelector('[data-rule="pick"]').textContent;
   deliver(w, rules('shadow'));
   assert.match(line(), /shadow: the pick is recorded, and the card builds on its builder as before/);
   next(w, rules('on'));
-  assert.match(line(), /on: a card of an eligible group can build on the group's challenger as a trial, one trial card at a time\. A builder you set for a card always wins/);
+  assert.match(line(), /on: the card builds and is reviewed on the Judge's seats\. A card of an eligible group can build on the group's challenger as a trial, one trial card at a time, and is reviewed on the project's reviewer and judge\. A seat you set for a card always wins/);
   assert.doesNotMatch(line(), /builds on its builder as before/, 'On is not the Shadow line');
+});
+
+// Bugs this guards (#1047): the owner could not see or set a seat's effort range of the rule from the Board, nor see
+// which models each seat may be given; Save sent the range in a shape `conveyor.sh pick effort` does not take, Any did
+// not take it off, or the row went on showing the old range after the save; a refresh put back the saved range over a
+// Min and Max picked and not yet saved; saving the reviewer's range gave the focus to the builder's Save.
+test("Rules: Pick settings shows each seat's allowed models and effort range, and saves and clears a range", async () => {
+  const w = boot({ tab: 'rules' });
+  const d = rules('on');
+  d.panels.rules.data.packEffort = { builder: { min: 'medium', max: 'high' } };
+  const again = structuredClone(d);
+  deliver(w, d);
+  const seat = (k) => ruled(w).querySelector(`[data-rule="pick"] [data-seat="${k}"]`);
+  assert.match(seat('builder').textContent, /models: claude-fable-5-2, claude-opus-5-5/);
+  assert.match(seat('builder').textContent, /effort medium to high/);
+  assert.match(seat('reviewer').textContent, /models: gpt-6\.1-sol, gpt-6-astra/);
+  assert.match(seat('reviewer').textContent, /effort: any its CLI takes/);
+  assert.equal(act(seat('reviewer'), 'pick-effort-clear-reviewer'), null, 'a seat with no range has nothing to take off');
+  const pickAt = (k, which, v) => { const s = act(seat(k), `pick-effort-${which}-${k}`); s.value = v; s.dispatchEvent(new w.Event('change')); };
+  pickAt('reviewer', 'min', 'low'); pickAt('reviewer', 'max', 'medium');
+  const drawn = act(seat('reviewer'), 'pick-effort-min-reviewer');
+  again.panels.rules.data.packEffort.builder.max = 'xhigh';  // a snapshot that differs, so the panel draws again
+  next(w, again);
+  assert.notEqual(act(seat('reviewer'), 'pick-effort-min-reviewer'), drawn, 'the refresh drew the row again');
+  assert.deepEqual(['min', 'max'].map((x) => act(seat('reviewer'), `pick-effort-${x}-reviewer`).value), ['low', 'medium'], 'a refresh keeps the range picked and not yet saved');
+  const save = act(seat('reviewer'), 'pick-effort-save-reviewer');
+  save.focus();
+  assert.deepEqual(await sent(w, () => save.click()), [{ action: 'pick-effort', args: ['reviewer', 'low', 'medium'], repo: 'sample' }]);
+  await settle();
+  assert.match(seat('reviewer').textContent, /effort low to medium/, 'the saved range shows before the next snapshot');
+  assert.equal(w.document.activeElement, act(seat('reviewer'), 'pick-effort-save-reviewer'), "the focus comes back to the reviewer's Save, not the builder's");
+  assert.deepEqual(await sent(w, () => act(seat('builder'), 'pick-effort-clear-builder').click()), [{ action: 'pick-effort', args: ['builder', 'clear'], repo: 'sample' }]);
+  await settle();
+  assert.match(seat('builder').textContent, /effort: any its CLI takes/, 'the range taken off shows at once');
+  const old = rules('on');
+  delete old.panels.rules.data.packEffort;
+  next(w, old);
+  assert.equal(seat('builder'), null, 'a snapshot with no packEffort (an older engine) shows no range to set');
+});
+
+// Bugs this guards (#1047): a card's page did not show the seats the Judge gave it, the Judge's reason for each, or
+// that a limit of the pack moved a seat; a failed pick looked like a pick; a refresh shut an open Seats list.
+test("Board: a card shows the Judge's seats, each one's reason, and what a limit clamped", async () => {
+  const w = boot({ tab: 'control' });
+  const d = full(), b = d.panels.board.data;
+  b.landed = [
+    { repo: 'sample', card: 'c5-7', issue: 7, title: 'Picked one', url: null, step: 'landed', usd: 1, reviews: 1, seats: {
+      builder: { model: 'claude-sonnet-5-5', effort: 'medium', why: 'A small docs change.', asked: { model: 'claude-sonnet-5-5', effort: 'low' },
+        clamp: 'low is not one of the efforts the builder may take on claude-sonnet-5-5 (medium, high): claude-sonnet-5-5 at medium' },
+      reviewer: { model: 'gpt-6.1-sol', effort: 'medium', why: 'One file to read.', asked: { model: 'gpt-6.1-sol', effort: 'medium' } },
+      judge: { model: 'claude-opus-5-5', effort: 'medium', why: 'Few findings expected.', asked: { model: 'claude-opus-5-5', effort: 'medium' } },
+      model: 'claude-opus-5-5' } },
+    { repo: 'sample', card: 'c5-8', issue: 8, title: 'Failed pick', url: null, step: 'landed', usd: 1, reviews: 1, seats: { failed: 'the judge timed out' } },
+    { repo: 'sample', card: 'c5-9', issue: 9, title: 'Not picked', url: null, step: 'landed', usd: 1, reviews: 1, seats: null },
+  ];
+  const again = structuredClone(d);
+  deliver(w, d);
+  const card = (n) => panel(w, 'board').querySelector(`.board-col[data-col="landed"] .bcard[data-issue="${n}"]`);
+  const opened = card(7).querySelector('.board-seats');
+  const toggled = new Promise((r) => opened.addEventListener('toggle', r, { once: true }));
+  opened.open = true;
+  await toggled;  // jsdom fires the toggle on a later task, as a browser does, after a setImmediate turn
+  const drawn = card(7).querySelector('.board-seats');
+  again.panels.board.data.landed[0].usd = 2;  // a snapshot that differs for this card, so its Seats list is drawn again
+  next(w, again);
+  const seats = card(7).querySelector('.board-seats');
+  assert.notEqual(seats, drawn, 'the refresh drew the Seats list again');
+  assert.equal(seats.open, true, 'a refresh keeps an open Seats list open');
+  assert.match(seats.querySelector('summary').textContent, /Seats: the Judge's pick, 1 clamped by a limit/);
+  const li = (k) => seats.querySelector(`li[data-seat="${k}"]`).textContent;
+  assert.match(li('builder'), /Builder: claude-sonnet-5-5 at medium\. A small docs change\. Clamped: low is not one of the efforts the builder may take/);
+  assert.match(li('reviewer'), /Reviewer: gpt-6\.1-sol at medium\. One file to read\./);
+  assert.doesNotMatch(li('reviewer'), /Clamped/, 'a seat no limit moved says nothing of a clamp');
+  assert.match(li('judge'), /Judge: claude-opus-5-5 at medium\. Few findings expected\./);
+  assert.match(card(8).textContent, /Seats: the project's, as the Judge's pick failed: the judge timed out/);
+  assert.equal(card(9).querySelector('.board-seats'), null, 'a card the rule did not pick shows no seats');
 });
 
 // Bugs this guards: the panel showed a group's whole spend as its spend per landed card (no division by the cards

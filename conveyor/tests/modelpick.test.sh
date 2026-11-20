@@ -206,6 +206,37 @@ t_picktable() {
     || fail "the snapshot's picks by group and builder: $(loop snapshot | jq -c '.cost.picks')"
 }
 
+# The snapshot gives the Board each card's seats (its pick's asked, from its last line with a pick) on the belt, in
+# Needs you and in Landed today, and the pack's effort ranges (packEffort) for the Rules tab's Pick settings row. Bug
+# caught (#1047): a card's page could not show the Judge's seats, their reasons or a clamp, as the snapshot dropped
+# them, or the row could not show the range the pack holds.
+t_pickseatsnap() {
+  export TZ=UTC; setup '[]'
+  tune '.models.effort = {builder: {min: "medium", max: "high"}}'
+  local d m=0 A
+  A='{"builder":{"model":"claude-sonnet-5-5","effort":"medium","why":"small","asked":{"model":"claude-sonnet-5-5","effort":"low"},"clamp":"low is out of range: claude-sonnet-5-5 at medium"},
+    "reviewer":{"model":"gpt-6.1-sol","effort":"medium","why":"r","asked":{"model":"gpt-6.1-sol","effort":"medium"}},
+    "judge":{"model":"claude-opus-5-5","effort":"medium","why":"j","asked":{"model":"claude-opus-5-5","effort":"medium"}},"model":"claude-opus-5-5"}'
+  d=$(date -u +%F)
+  sl() { # <card> <issue> <step> <result> [<extra json> [<asked json>]]
+    jq -cn --arg c "$1" --argjson i "$2" --arg s "$3" --arg r "$4" --argjson x "${5:-{\}}" --argjson a "${6:-$A}" --arg t "$(printf '%sT00:%02d:00Z' "$d" "$m")" \
+      '{card: $c, issue: $i, step: $s, time: $t, tokens: {claude: 0, codex: 0}, result: $r, sha: "", reason: ""}
+        + if $s == "picked" then {title: "T"} else {pick: {group: "small code", choice: {model: "m", effort: "medium"}, by: "auto", trial: false, mode: "on", asked: $a}} end * $x' >> "$ST/cards.jsonl"
+    m=$((m + 1))
+  }
+  sl c1-7 7 picked ok; sl c1-7 7 build ok; sl c1-7 7 landed ok '{"sha":"abc","product":false}'
+  sl c1-8 8 picked ok; sl c1-8 8 build ok; sl c1-8 8 blocked blocked '{"reason":"tests failed"}'
+  sl c1-9 9 picked ok; sl c1-9 9 build ok '{}' '{"failed":"the judge timed out"}'
+  local s; s=$(loop snapshot) || fail "the snapshot failed"
+  [ "$(jq -c '[.landed[] | select(.issue == 7) | .seats.builder.clamp]' <<<"$s")" = '["low is out of range: claude-sonnet-5-5 at medium"]' ] \
+    || fail "Landed today has no seats: $(jq -c '.landed' <<<"$s" | head -c 600)"
+  [ "$(jq -c '[.needsYou.blocked[] | select(.issue == 8) | .seats.builder.why]' <<<"$s")" = '["small"]' ] \
+    || fail "Needs you has no seats: $(jq -c '.needsYou.blocked' <<<"$s" | head -c 600)"
+  [ "$(jq -c '[.belt[] | select(.issue == 9) | .seats]' <<<"$s")" = '[{"failed":"the judge timed out"}]' ] \
+    || fail "a card on the belt has no seats: $(jq -c '.belt' <<<"$s" | head -c 600)"
+  [ "$(jq -c .packEffort <<<"$s")" = '{"builder":{"min":"medium","max":"high"}}' ] || fail "the snapshot's packEffort: $(jq -c .packEffort <<<"$s")"
+}
+
 # The cards of #829's cases, all of group small docs, by auto, with the rule On: one line a minute after the one
 # before, from 2026-11-01. pcard writes a card's picked line, its build (1M input tokens on <model>) and its end.
 PLM=0

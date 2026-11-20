@@ -85,7 +85,9 @@
 #   and totalSec (priorSec and its own pick-up to its end; null while it is open: the view adds the time since
 #   pickedAt). The time an issue sat queued is in none of them. stalls: how many times a build, fix, rebase or review
 #   of it made no progress for STUCK seconds and was ended (watch()); the card detail shows it. split: what the rule
-#   Split large issues made of its issue ({result, slices, filed}, rows.jq), null when the rule did not check it.
+#   Split large issues made of its issue ({result, slices, filed}, rows.jq), null when the rule did not check it. seats:
+#   the seats the judge gave it under the rule Pick settings (its pick's asked: each seat's model, effort, why and
+#   clamp, or failed: pickjudge(), lib/modelpick.sh), null when the rule did not pick it.
 # repo: the project's name (REPO), as health names it too; health's room is the card the machine holds back (room()),
 #   and its machine the machine's settings (mhost(): {cap, paused}, {unread: true} for a host file that
 #   does not read, null when it sets none), the same for every project of the machine, and
@@ -124,6 +126,8 @@
 #   (guardaccts, lib/paths.sh): [{account (null: the default login), uses (build, fix: repairs alone, review), pct, readAt, email (its
 #   login on this machine)}]; null when it could not be read.
 # areaPrefix: the pack's labels.areaPrefix, what an area label and an area rule start with.
+# packEffort: the pack's models.effort, each seat's effort range of the rule Pick settings ({<seat>: {min, max}}; {}
+#   when it sets none), shown and set in the Rules tab's Pick settings row (`conveyor.sh pick effort`).
 # packLandAs: the pack's push.landAs (main or pr), the rule Land as while the control record's landAs is null; null
 #   when the pack cannot be read.
 # packPrMerge: the pack's push.prMerge (button, release or idle), the rule Merge PR while the control record's prMerge
@@ -629,13 +633,14 @@ snapshot() (
   packget foreman.waitWake ww 2>/dev/null && [[ $ww =~ ^[1-9][0-9]*$ ]] || ww=10
   packget push.landAs pla 2>/dev/null || pla=''
   packget push.prMerge ppm 2>/dev/null || ppm=''
+  packget models.effort pef 2>/dev/null && [ -n "$pef" ] || pef='{}'
   # Each card with its metrics and its runs' sums, then the waits ($d/cards: two arrays, $all[0] and $all[1]), from a
   # summary kept beside the card records ($STATE.cardruns): only the issues whose cards changed are made again.
   printf '%s\n%s\n' "$METRICS" "$CARDRUNS" > "$d/cardruns.jq" \
     && python3 "$HERE/cardruns.py" "$d/priced" "$STATE.cardruns" "$d/cards" "$d/cardruns.jq" "$d/samples" "$(jq -r '.time | fromdate' "$d/health")" "$SAMPLE" "$yes" \
     || exit 1
   jq -cn --slurpfile all "$d/cards" --slurpfile hs "$d/health" --slurpfile allp "$d/paths" --slurpfile shots "$d/shots" --slurpfile onm "$d/onmain" --argjson mt "$mt" --slurpfile fl <(printf '%s' "$fl") --slurpfile so <(printf '%s' "$so") --slurpfile ft <(printf '%s' "$ft") --slurpfile su <(printf '%s' "$su") --argjson rl "$rl" --argjson dr "$dr" --argjson eng "$eng" --argjson tr "$tr" --argjson m "$models" --argjson next "$next" --slurpfile built <(printf '%s' "$built") \
-    --slurpfile iss "$d/issues" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" --arg pla "$pla" --arg ppm "$ppm" \
+    --slurpfile iss "$d/issues" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" --arg pla "$pla" --arg ppm "$ppm" --argjson pef "$pef" \
     --argjson control "$control" --argjson settings "$settings" --argjson accts "$(acctnames)" --argjson ga "$ga" --slurpfile q <(printf '%s' "$queue") --slurpfile lim "$d/limit" --slurpfile smp "$d/samples" --slurpfile pu "$d/pushes" --argjson every "$SAMPLE" --argjson priced "$pricedok" --argjson cr "$cr" --argjson ts "$ts" \
     --argjson max "$MAX_REVIEWS" --argjson wait "$((CLOSE_WAIT + 300))" --arg yes "$yes" --arg lintyes "$lintyes" --arg day "$day" --arg since "$since" --arg prev "$prev" \
     --argjson t0d "$t0d" --argjson t0w "$t0w" --argjson t0p "$t0p" '$fl[0] as $fl | $so[0] as $so | $ft[0] as $ft | $su[0] as $su | $built[0] as $built | $q[0] as $q | '"$DEPS$LEVEL$INSIDE"'
@@ -867,7 +872,7 @@ snapshot() (
            # A stop for a lint policy change alone says so, whatever the reviewer said is visible (the rule on visible
            # changes off); a visible stop that changes lint policy too keeps the policy files after the sentence of the review.
            | {card, issue, title, sentence: (if .reason | startswith($lintyes) then .reason | ltrimstr($lintyes)
-               else .reason as $r | (.x.visible | select(startswith("yes: ")) | .[5:] + (($r | capture("(?<p>; it also changes lint policy: [^;]*)$").p) // "")) // (.reason | ltrimstr($yes)) end), since: .x.endAt, parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split, stalls: .x.stalls,
+               else .reason as $r | (.x.visible | select(startswith("yes: ")) | .[5:] + (($r | capture("(?<p>; it also changes lint policy: [^;]*)$").p) // "")) // (.reason | ltrimstr($yes)) end), since: .x.endAt, parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split, seats: (.x.pick.asked // null), stalls: .x.stalls,
               files: (($allp[0][.card] // .x.paths) as $p | {count: (.x.diff.files // ($p | if . == null then null else length end)), paths: $p})}
              # The screenshots it kept, beside the hash of its kept patch now (the Board shows them while the two are one).
              + ($shots[0][.card] // {patch: null, shots: null})
@@ -875,7 +880,7 @@ snapshot() (
              + ((.reason | capture("\\(it goes beyond the yes of #(?<from>[0-9]+): (?<what>.*)\\)") | {beyond: {from: (.from | tonumber), what}}) // {})
              + times],
          blocked: [$c[] | select(.step == "blocked" and (.reason | startswith($yes) or startswith($lintyes) | not))
-             | {card, issue, title, reason, tail, since: .x.endAt, parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split, stalls: .x.stalls}
+             | {card, issue, title, reason, tail, since: .x.endAt, parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split, seats: (.x.pick.asked // null), stalls: .x.stalls}
              # A land-branch card with the change of its branch already on main ($onm) says so apart from its reason,
              # which the Board reads by its form (the finding of a review, the failing tests): shut is all it needs.
              + (if .card | IN($onm[0][]) then {onMain: true} else {} end) + umbrella + times]
@@ -930,7 +935,7 @@ snapshot() (
            elif .proof then {turns: 0, lastOutputAt: null, action: (.proof.action // null), at: (.proof.at // null)} else null end),
          done: {tokens: .x.tokens, usd, reading: (.steps | any(.step != "test")), step: (.x.log | last | if .step == "start" then .of else null end)},
          # The step that runs now after a stall (stalled, in the live record) has no line yet: its stall is counted here.
-         parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split, stalls: (.x.stalls + (if .live.stalled then 1 else 0 end)),
+         parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split, seats: (.x.pick.asked // null), stalls: (.x.stalls + (if .live.stalled then 1 else 0 end)),
          beyond: (if $landed then null else .x.beyond end)} + umbrella + times],
        queue: {next: ($next | if . == null then null else map(. + {parent: parent} + umbrella + (if $h.room.issue == .issue then {room: $h.room.reason} else {} end)) end), order: ($q.order | if type == "array" then map(. + umbrella + (if $h.room.issue == .issue then {room: $h.room.reason} else {} end)) else null end),
          holding: ($q.holding // null | if . == null then null else map(. + umbrella) end), skipped: ($q.skipped // null | if . == null then null else map(. + umbrella) end),
@@ -944,11 +949,12 @@ snapshot() (
        areaPrefix: $area,
        packLandAs: (if $pla == "" then null else $pla end),
        packPrMerge: (if $ppm == "" then null else $ppm end),
+       packEffort: $pef,
        waitWake: $ww,
        forecast: forecast,
        awaitingDeploy: $built,
        landed: [$week | sort_by(.x.endAt) | reverse[] | select((.x.endAt | day) == $day) | {card, issue, title, step, time: .x.endAt, usd, reviews: .runReviews, followups: .x.followups,
-         parent: parent, rounds: reviews, fixes: .runFixes, track: track($max; $perr), sha, pushed: (if .step == "closed" then null else (.sha | IN($un[]) | not) end), metrics, doneWhen: .x.doneWhen, split: .x.split, stalls: .x.stalls, batch: .x.batch, rollout: .x.rollout} + times],
+         parent: parent, rounds: reviews, fixes: .runFixes, track: track($max; $perr), sha, pushed: (if .step == "closed" then null else (.sha | IN($un[]) | not) end), metrics, doneWhen: .x.doneWhen, split: .x.split, seats: (.x.pick.asked // null), stalls: .x.stalls, batch: .x.batch, rollout: .x.rollout} + times],
        branches: ([$c[] | select(.x.branch != null and (.step | IN("landed", "closed")) and .x.blockedAt == null)] | group_by([.issue, .title])
          | map(max_by(.x.endAt) | {card, issue, title, step, time: .x.endAt})),
        pushedCards: [$c[] | (.x.log | map(select(.step == "pushed")) | last) as $p | select($p != null and ($p.time | day) >= $since)

@@ -252,3 +252,28 @@ t_pickkept() {
   out=$(UPREC=$T/$CASE/hrec UPOLD=$T/$CASE/hold pickfn upnext "$(cat "$STUB/issues.json")" '' all) || fail "upnext failed: $(cat "$T/$CASE/err")"
   [ "$(jq -c 'map(.number)' <<<"$out")" = '[6]' ] || fail "the order did not come from the kept summary's lines: $(head -c 400 <<<"$out")"
 }
+
+# `pick effort` saves one seat's effort range of the rule Pick settings in main's pack (models.effort.<seat>, the
+# Board's Pick settings row), keeping the other seats' ranges, and `clear` takes one seat's range off (models.effort
+# goes with the last one). A min after its max, an effort the schema does not list and a seat that is not one are
+# refused, and the pack is left byte for byte as it was. Bug caught: a range set on the Board that never reaches the
+# pack the judge's pick is fitted to, or a reversed range saved, which fits no effort to the seat.
+t_pickeffort() {
+  setup '[]'
+  local out before a
+  loop pick effort builder medium high > /dev/null && loop pick effort judge low low > /dev/null || fail "a good range was not saved"
+  [ "$(jq -c .models.effort "$R/.conveyor/project.json")" = '{"builder":{"min":"medium","max":"high"},"judge":{"min":"low","max":"low"}}' ] \
+    || fail "the pack's ranges: $(jq -c .models.effort "$R/.conveyor/project.json")"
+  before=$(cat "$R/.conveyor/project.json")
+  out=$(loop pick effort reviewer max low 2>&1) && fail "a min after its max was taken"
+  [[ $out == *"min max comes after max low"*"nothing changed"* ]] || fail "a reversed range did not say why: $out"
+  for a in 'reviewer low huge' 'tests low high' 'builder low' 'builder clear now'; do
+    # shellcheck disable=SC2086 # each is the command's words
+    loop pick effort $a > /dev/null 2>&1; [ $? = 2 ] || fail "pick effort $a was not a usage error"
+  done
+  [ "$(cat "$R/.conveyor/project.json")" = "$before" ] || fail "a refused range changed the pack"
+  loop pick effort builder clear > /dev/null && [ "$(jq -c .models.effort "$R/.conveyor/project.json")" = '{"judge":{"min":"low","max":"low"}}' ] \
+    || fail "clear did not take the builder's range alone off: $(jq -c .models.effort "$R/.conveyor/project.json")"
+  loop pick effort judge clear > /dev/null && [ "$(jq -c '.models | has("effort")' "$R/.conveyor/project.json")" = false ] \
+    || fail "the last range cleared left models.effort in the pack: $(jq -c .models "$R/.conveyor/project.json")"
+}

@@ -57,7 +57,8 @@ its own, and the Board's Rules tab sets them in its Judge row.
   chooses for it, as `pick` on each step line of the card from then on, up to its end. The choice is the project's builder, or the
   card's own builder when you set it (`control card`). The project's judge then chooses the builder, reviewer and
   judge of the card. Conveyor fits each choice to `models.allowed` and to the effort range of the seat in
-  `models.effort`, and records it in `pick` as `asked`. The judge's call has its own `seats` line, which counts in
+  `models.effort` (the Board's Pick settings row, or `conveyor.sh pick effort <seat> <min> <max>`), and records it
+  in `pick` as `asked`. The judge's call has its own `seats` line, which counts in
   the cost of the card. In Shadow, the card builds on its builder as before. In On, the card uses the judge's
   seats, but a seat that you set for the issue keeps your setting. 1 small card in 5 that names no pipeline file is
   a trial on Sonnet 5.5, at the judge's effort fitted to the effort range of the builder. After ten trial cards of a

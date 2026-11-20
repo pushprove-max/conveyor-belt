@@ -203,6 +203,8 @@ Reading the belt:
 - `pick replay judge <model> [<effort>] [--last <n>] [--estimate]` gives the findings that the project's judge ruled
   on to another judge, and compares the rulings ([Judge replay](configuration.md#judge-replay)). `--estimate` prints
   the estimated cost, and calls no model.
+- `pick effort <builder|reviewer|judge> <min> <max>` sets the effort range of a seat for the rule Pick settings, in
+  `models.effort` of the pack. `pick effort <seat> clear` removes it ([Pick settings](configuration.md#the-judges-choice-of-seats)).
 
 GitHub and releases:
 

@@ -377,9 +377,14 @@ and the issue is built whole". On files the slices as follow-ups and as sub-issu
 as their umbrella until all its slices are closed. Off checks no issue ([Split large issues](configuration.md#split-large-issues)).
 
 **Pick settings** has three settings per project: Off, Shadow and On. Off is the default. Shadow and On record the
-group of each card and the builder that the rule chooses for it, and the card builds on its builder as before. The
-tab says "shadow: the pick is recorded, and the card builds on its builder as before". A builder that you set for a
-card always wins. The **Cost** panel then shows **Pick settings, by group and builder**: one row for each group and
+group of each card, the builder that the rule chooses for it, and the Judge's choice of seats. With Shadow, the card
+builds on its builder as before, and the tab says "shadow: the pick is recorded, and the card builds on its builder
+as before". With On, the card builds and is reviewed on the Judge's seats, and a card of an eligible group can build
+on the group's challenger as a trial. A trial card is reviewed on the project's reviewer and judge. A seat that you set for a card always wins. Under the setting, the row shows
+the models that each seat can get and its effort range. Choose the lowest and the highest effort and click **Save**,
+or click **Any** to remove the range ([The judge's choice of seats](configuration.md#the-judges-choice-of-seats)). A
+card with a pick shows **Seats**: open it to see the model, effort and Judge's reason of each seat, and what a limit
+clamped. The **Cost** panel then shows **Pick settings, by group and builder**: one row for each group and
 builder, with its cards, the spend per landed card, the share of cards that landed with no retry, the review rounds
 per landed card and the cards still open. The spend is all the steps of those cards, also the steps of the earlier
 blocked, stopped and retried cards of the same issue. A card is still open when it is on the belt or blocked; a card
