@@ -236,7 +236,7 @@ t_narrowownsetup() {
     || fail "the card did not run only its own setup test files (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" "$T/$CASE/cards/c7.rec" 2>&1)"
 }
 
-# #414. Main holds tests/a.test.sh, tests/b.test.sh and tests/c.test.sh, each a helper (h<x>) and two cases
+# #414. Main holds tests/a.test.sh, tests/b.test.sh, tests/c.test.sh and tests/e.test.sh, each a helper (h<x>) and two cases
 # (t_<x>one, which closes inline on its last line, `  echo one; }`, and t_<x>two), a comment line above each: a case
 # that closes so must not leave its file's other cases unnamed (E1: t_slotnoroom ran slots.test.sh whole, its end not
 # found). t_<x>two holds a quoted string of two lines, the first ending in `}` and the second at the first column
@@ -254,7 +254,7 @@ c=$(printf '%s\n' "${CONVEYOR_TEST_CASES:-}" | awk -F'\t' -v f="$1" '$1 == f {pr
 echo "one:$1|$c" >> "$STUB/got"
 EOF
   mkdir -p "$R/tests"
-  for x in a b c; do
+  for x in a b c e; do
     printf '%s\n' "h$x() { echo $x; }" '' "# $x one." "t_${x}one() {" '  echo 1' '  echo one; }' '' "# $x two." "t_${x}two() {" "  : '{\"x\":1}" "{\"y\":2}'" '  echo 2' '}' > "$R/tests/$x.test.sh"
   done
   git -C "$R" add -A && git -C "$R" commit -qm tests || fail "main's test files could not be committed"
@@ -295,12 +295,14 @@ t_narrowownwhole() {
 # a.test.sh's helper, linked to b.test.sh, c.test.sh and a file that is gone, runs a.test.sh, b.test.sh and c.test.sh
 # whole: b.test.sh, which the card did not change, is added to the list (E2), and c.test.sh, whose case t_ctwo the
 # card also changed, runs whole, not t_ctwo alone (E1: t_cone, which it did not change, can call the helper).
+# e.test.sh, linked to nothing, one case changed, runs that case alone, and the note counts the three files run whole
+# (#1011: it said one, the count taken before the linked files joined the list).
 t_narrowownlinks() {
   ownrun "mkdir -p .conveyor && echo '{\"tests/a.test.sh\": [\"tests/b.test.sh\", \"tests/c.test.sh\", \"tests/gone.test.sh\"]}' > .conveyor/test-links.json \
-    && ownedit tests/a.test.sh 'echo a;' 'echo A;' && ownedit tests/c.test.sh '^  echo 2\$' '  echo 22'"
-  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sort "$STUB/got" 2>&1)" = $'one:tests/a.test.sh|\none:tests/b.test.sh|\none:tests/c.test.sh|' ] \
-    || fail "the changed helper's linked files did not run whole (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
-  [ "$(jq -c '.list | [.files, .cases]' "$T/$CASE/cards/c7.rec")" = '[3,null]' ] \
+    && ownedit tests/a.test.sh 'echo a;' 'echo A;' && ownedit tests/c.test.sh '^  echo 2\$' '  echo 22' && ownedit tests/e.test.sh '^  echo 1\$' '  echo 11'"
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sort "$STUB/got" 2>&1)" = $'one:tests/a.test.sh|\none:tests/b.test.sh|\none:tests/c.test.sh|\none:tests/e.test.sh|eone' ] \
+    || fail "the changed helper's linked files did not run whole, or e.test.sh's case not alone (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
+  [ "$(jq -c '.list | [.files, .cases, .why]' "$T/$CASE/cards/c7.rec")" = '[4,[{"file":"tests/e.test.sh","case":"eone"}],"the card ran 1 changed case of 1 test file, and 3 test files whole"]' ] \
     || fail "the test line's list: $(cat "$T/$CASE/cards/c7.rec")"
 }
 
