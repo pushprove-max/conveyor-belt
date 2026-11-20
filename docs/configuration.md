@@ -397,9 +397,9 @@ the builder of an earlier answer.
 
 ### Trials
 
-With the rule On, a trial card builds on the challenger, Sonnet 5.5 (`claude-sonnet-5-5`), at the judge's effort
-fitted to its effort range in the builder's pick list, and its pick has `trial: true`. Its review and judge use the project's
-settings. A card that is not a trial uses the seats above.
+With the rule On, a trial card builds on the group's challenger. The challenger is Sonnet 5.5 (`claude-sonnet-5-5`)
+until `next` (below) puts another on trial. The card builds at the judge's effort, fitted to its effort range in the
+builder's pick list. Its pick has `trial: true`. Its review and judge use the project's settings. A card that is not a trial uses the seats above.
 
 - **Eligible cards**: a card is eligible when its group is "small docs" or "small code", or a medium group that you
   added (below). The issue names no path in `pipelineFiles`. The cards of a medium group that you did not add use

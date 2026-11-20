@@ -62,8 +62,9 @@ its own, and the Board's Rules tab sets them in its Judge row.
   and records it in `pick` as `asked`. The judge's call has its own `seats` line, which counts in
   the cost of the card. In Shadow, the card builds on its builder as before. In On, the card uses the judge's
   seats, but a seat that you set for the issue keeps your setting. 1 small card in 5 that names no pipeline file is
-  a trial on Sonnet 5.5, at the judge's effort fitted to its range in the builder's pick list. When the builder has a
-  pick list that does not name Sonnet 5.5, no card is a trial. After ten trial cards of a
+  a trial on the group's challenger. The challenger is Sonnet 5.5 at first, then the one that `next` puts on trial.
+  The card builds at the judge's effort, fitted to its range in the builder's pick list. When the builder has a pick
+  list that does not name the group's challenger, no card of the group is a trial. After ten trial cards of a
   group, Needs you asks for your decision: `conveyor.sh control pick <group> <promote|keep|drop>`. Only your
   decision adds a medium group (`add`), tries the next challenger of a promoted group (`next`), or gives the cards a
   reviewer or judge from a replay result (`control pick <reviewer|judge> promote <model>`). When the
