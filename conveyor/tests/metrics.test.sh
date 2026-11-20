@@ -47,7 +47,7 @@ EOF
   [ "$(st 'select(.step == "pushed") | .sec | type')" = number ] || fail "the push's seconds: $(st 'select(.step == "pushed")')"
   [ "$(jq -sc 'map(select(.slots == 0 and .cap == 5 and .state == "running" and (.load | type) == "number" and (.queued | type) == "number" and (keys == ["cap","diskFreeKb","load","memTotalKb","memUsedKb","queued","slots","state","time"]))) | length > 0' "$S/samples.jsonl")" = true ] \
     || fail "the loop's samples: $(cat "$S/samples.jsonl")"
-  loop check || fail "the records with every new field do not check"
+  recok "$S/cards.jsonl" "a card run with every new field"
   out=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
   [ "$(jq -c '.landed[0].metrics | [.depth, .diff.files, .limit, .reviews, .firstReview, (.timeline | map([.step, .sec != null, .model]))]' <<<"$out")" \
     = '[1,1,{"before":40,"after":42.5,"used":2.5},1,"GO",[["build",true,"claude-opus-5-5"],["review",true,"x"],["test",true,null]]]' ] || fail "the landed card's metrics: $(jq -c '.landed[0].metrics' <<<"$out")"
@@ -102,11 +102,21 @@ t_metricstotals() {
   for x in "00:30 4 running 3" "00:31 2 running 3" "05:00 0 paused 2" "05:01 1 running 1"; do read -r t n m k <<<"$x"
     jq -cn --arg t "${d}T$t:00Z" --argjson n "$n" --arg m "$m" --argjson k "$k" '{time:$t,slots:$n,cap:4,state:$m,queued:$k,load:($n + 0.5),memUsedKb:1000,memTotalKb:4000,diskFreeKb:(9000 - $n)}' >> "$S/samples.jsonl"
   done
-  loop check || fail "the fixture does not check"
+  # One push that carried two cards, its pushed lines a second apart (written in turn): one push, its seconds once.
+  # The line with no head (written before heads were) is a push of its own, told apart by its time.
+  for x in "c2 2 02:50:59" "c1 1 02:51:00"; do read -r c i t <<<"$x"
+    jq -cn --arg c "$c" --argjson i "$i" --arg t "${d}T${t}Z" '{card:$c,issue:$i,step:"pushed",time:$t,tokens:{claude:0,codex:0},result:"ok",sha:"",reason:"",sec:50,head:"h2"}' >> "$S/cards.jsonl"
+  done
+  # The 7 days before those, for the change the Board shows: a card landed 9 days ago is in them, never in the week.
+  p=$(date -u -d "$d 9 days ago" +%F)
+  for x in 'picked 10:00 {"title":"T9"}' 'landed 10:30 {"sha":"s9","product":false}'; do read -r st t ex <<<"$x"
+    jq -cn --arg s "$st" --arg t "${p}T$t:00Z" --argjson x "$ex" '{card:"c9",issue:9,step:$s,time:$t,tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""} * $x' >> "$S/cards.jsonl"
+  done
+  recok "$S/cards.jsonl" "the fixture"
   # The snapshot is taken late in the fixture's day, so its steps are all past whatever the hour the test runs at.
   out=$(CONVEYOR_NOW=$now loop snapshot --fresh) || fail "snapshot of the fixture exited non-zero"
   q() { jq -c "$1" <<<"$out"; }
-  [ "$(q '.metrics.today | del(.waitMaxSec)')" = '{"cards":4,"landed":2,"blocked":2,"leadSec":{"p50":7110,"p90":8460},"cycleSec":{"p50":1710,"p90":2160},"firstReviewPass":0.667,"findingsPerCard":1,"followupRate":0.5,"blockRate":0.5,"blocks":{"timeout":1,"visible change":1},"rebuildRate":0,"testFailures":{"card":0,"main":0,"flaky":0,"mainSec":0},"perLanded":{"usd":4.5,"leftOut":0,"tokens":2250000,"tokensLeftOut":0,"byModel":{"claude-sonnet-5-5":{"usd":3,"leftOut":0,"tokens":1500000,"tokensLeftOut":0},"gpt-6.1-sol":{"usd":1.5,"leftOut":0,"tokens":750000,"tokensLeftOut":0}}},"limitPerCard":2,"loop":{"samples":4,"utilisation":0.438,"slotsMax":4,"idleSec":60,"idleUnreadSec":0,"heldSec":60},"pushes":{"ok":1,"failed":1,"sec":{"p50":30,"p90":30},"failSec":{"p50":900,"p90":900}},"host":{"loadMax":4.5,"memUsedMaxKb":1000,"diskFreeMinKb":8996}}' ] \
+  [ "$(q '.metrics.today | del(.waitMaxSec, .pushes)')" = '{"cards":4,"landed":2,"blocked":2,"leadSec":{"p50":7110,"p90":8460},"cycleSec":{"p50":1710,"p90":2160},"firstReviewPass":0.667,"findingsPerCard":1,"followupRate":0.5,"blockRate":0.5,"blocks":{"timeout":1,"visible change":1},"rebuildRate":0,"testFailures":{"card":0,"main":0,"flaky":0,"mainSec":0},"perLanded":{"usd":4.5,"leftOut":0,"tokens":2250000,"tokensLeftOut":0,"byModel":{"claude-sonnet-5-5":{"usd":3,"leftOut":0,"tokens":1500000,"tokensLeftOut":0},"gpt-6.1-sol":{"usd":1.5,"leftOut":0,"tokens":750000,"tokensLeftOut":0}}},"limitPerCard":2,"loop":{"samples":4,"utilisation":0.438,"slotsMax":4,"idleSec":60,"idleUnreadSec":0,"heldSec":60},"host":{"loadMax":4.5,"memUsedMaxKb":1000,"diskFreeMinKb":8996}}' ] \
     || fail "today's totals: $(q '.metrics.today')"
   # Waiting on the owner: the blocked cards, each from its end to the snapshot's time, clipped to the window: card 5,
   # blocked yesterday, counts from midnight today and from its end in the 7 days.
@@ -136,27 +146,16 @@ t_metricstotals() {
   # A card recorded before any of these fields: every measurement it lacks is missing (null), never 0.
   [ "$(q '.belt[] | select(.card == "c6") | .metrics | [.diff, .depth, .limit, .queueSec, .findings, .usd, .unpriced, .timeline[0].usd, .timeline[0].tests, .timeline[0].stats]')" \
     = '[null,null,{"before":null,"after":null,"used":null},null,null,null,1,null,null,null]' ] || fail "a card with no new field: $(q '.belt[] | select(.card == "c6") | .metrics')"
-  # One push that carried two cards, its pushed lines a second apart (written in turn): one push, its seconds once.
-  # The line with no head (written before heads were) is a push of its own, told apart by its time.
-  for x in "c2 2 02:50:59" "c1 1 02:51:00"; do read -r c i t <<<"$x"
-    jq -cn --arg c "$c" --argjson i "$i" --arg t "${d}T${t}Z" '{card:$c,issue:$i,step:"pushed",time:$t,tokens:{claude:0,codex:0},result:"ok",sha:"",reason:"",sec:50,head:"h2"}' >> "$S/cards.jsonl"
-  done
-  loop check || fail "pushed lines with a head do not check"
-  out=$(CONVEYOR_NOW=$now loop snapshot --fresh) || fail "snapshot with a batched push exited non-zero"
+  # The batched push (c1 and c2's lines with head h2) is one push of 50 s, beside card 1's own 30 s one.
+  # Card 2's push failed after 900 s.
   [ "$(q '.metrics.today.pushes | [.ok, .failed]')" = '[2,1]' ] || fail "a batched push counted by its lines' times: $(q .metrics.today.pushes)"
-  [ "$(q '.metrics.today.pushes.sec | [.p50, .p90]')" = '[40,50]' ] || fail "the batched push's seconds: $(q .metrics.today.pushes)"
+  [ "$(q '.metrics.today.pushes | [.sec.p50, .sec.p90, .failSec.p50, .failSec.p90]')" = '[40,50,900,900]' ] || fail "the pushes' seconds: $(q .metrics.today.pushes)"
   # The Board's sparklines and charts: each of the 7 days oldest first (today last: cards 1 and 2 landed in 21 and
   # 36 min, cards 3 and 4 blocked; yesterday card 5 blocked), and today's slots by hour (the mean of its samples).
   [ "$(q '.metrics.days | [length, .[0].day, (.[-2:] | map([.day, .landed, .blocked, .cycleSec, .firstReviewPass, .perLandedUsd]))]')" \
     = "[7,\"$(date -u -d "$d 6 days ago" +%F)\",[[\"$y\",0,1,null,null,null],[\"$d\",2,2,1710,0.667,4.5]]]" ] || fail "the 7 days, day by day: $(q .metrics.days)"
   [ "$(q '.metrics.slots')" = '[{"hour":0,"slots":3,"cap":4},{"hour":5,"slots":0.5,"cap":4}]' ] || fail "today's slots by hour: $(q .metrics.slots)"
-  # The 7 days before those, for the change the Board shows: a card landed 9 days ago is in them, never in the week.
-  p=$(date -u -d "$d 9 days ago" +%F)
-  for x in 'picked 10:00 {"title":"T9"}' 'landed 10:30 {"sha":"s9","product":false}'; do read -r st t ex <<<"$x"
-    jq -cn --arg s "$st" --arg t "${p}T$t:00Z" --argjson x "$ex" '{card:"c9",issue:9,step:$s,time:$t,tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""} * $x' >> "$S/cards.jsonl"
-  done
-  loop check || fail "a card of the 7 days before does not check"
-  out=$(CONVEYOR_NOW=$now loop snapshot --fresh) || fail "snapshot with a card of the 7 days before exited non-zero"
+  # Card 9, landed 9 days ago, is in the 7 days before the week.
   [ "$(q '[.metrics.prev.cards, .metrics.prev.landed, .metrics.prev.cycleSec.p50, .metrics.week.cards]')" = '[1,1,1800,5]' ] || fail "the 7 days before: $(q .metrics.prev)"
 }
 
@@ -180,7 +179,7 @@ EOF
   [ "$(st 'select(.step == "blocked") | [.spent.step, .spent.tokens.claude, .tokens.claude, .spent.usage.input, .spent.usage.output, .spent.stats.tools, (.spent.sec | type), .limit] | tojson')" \
     = '["build",501050,501050,501000,50,{"Bash":1,"Edit":1},"number",34]' ] || fail "the failed build's spend, or no fresh after reading: $(st 'select(.step == "blocked")')"
   [ "$(st 'select(.step == "worktree") | .limit')" = 33 ] || fail "no reading before the first card: $(st 'select(.step == "worktree")')"
-  loop check || fail "a blocked line with spent does not check"
+  recok "$S/cards.jsonl" "a build that timed out (a blocked line with spent)"
   out=$(loop snapshot --fresh) || fail "snapshot after a failed build exited non-zero"
   [ "$(jq -c '[.cost.unpricedSteps, .cost.today > 0, (.needsYou.blocked[0].metrics.timeline | map([.step, .result]))]' <<<"$out")" = '[0,true,[["build","fail"]]]' ] \
     || fail "the failed build is not priced: $(jq -c '[.cost, .needsYou.blocked[0].metrics]' <<<"$out")"
@@ -210,7 +209,7 @@ EOF
     = '[208180,{"input":180,"write":201000,"write1h":0,"read":1050000,"output":7000},125,2,666,{"Bash":1,"Edit":1,"Read":1},["claude-opus-5-5"],null]' ] \
     || fail "a session with two results: $(st 'select(.step != "picked")')"
   [ -n "$(st 'select(.step == "landed")')" ] && [ ! -d "$T/$CASE/cards/$(st 'select(.step == "picked") | .card')" ] || fail "the card did not land: $(st .step | tr '\n' ' ')"
-  loop check || fail "the two-result build line does not check"
+  recok "$ST/cards.jsonl" "a card whose build gave two results"
   out=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
   [ "$(jq -c '[(.landed[0].metrics.timeline | map([.step, .usd, .model])), .cost.unpricedSteps, .cost.weekLeftOut, (.cost.week != null), (.cost.perLanded != null)]' <<<"$out")" \
     = '[[["build",1.3557,"claude-opus-5-5"],["review",0.0002,"gpt-6.1-sol"],["test",0,null]],0,0,true,true]' ] \
@@ -221,6 +220,8 @@ EOF
 # after its last result (cut: a resumed turn after a result that names two models) or of all its answers (early:
 # no result at all) are under the model each answer names, so the step is priced whole and at Opus rates.
 # cut: Opus 100 + 1M in, Sonnet 100 in: $4.0004 + $0.0002. early: Opus 1M in: $4 (4.0, as the snapshot prints it).
+# A whole card runs: only the loop's exit check (lib/session.sh) blocks a step that timed out after a successful
+# result and keeps its spend on the blocked line, and only the snapshot prices that line.
 t_metricscut() { cutoff cut 4.0006 1000100; }
 t_metricsearly() { cutoff early 4.0 1000000; }
 cutoff() { # <cut | early> <the step's dollars> <its Opus input tokens>
@@ -250,7 +251,7 @@ t_metricsunread() {
   [ "$(st 'select(.step == "build") | [.result, .unread, .usage, .tokens.claude, .stats.turns, .model] | tojson')" = '["ok","the session output holds no token usage",null,0,2,"m"]' ] \
     || fail "the unread build: $(st 'select(.step == "build")')"
   [ -n "$(st 'select(.step == "landed")')" ] || fail "the card did not go on: $(st .step | tr '\n' ' ')"
-  loop check || fail "a line with unread does not check"
+  recok "$ST/cards.jsonl" "a card whose build's usage was unread"
   out=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
   # The unpriced steps come newest first: the build and the review fall in one second or two, so their order is not
   # fixed here, and the whys are compared sorted.
@@ -261,21 +262,27 @@ t_metricsunread() {
 
 # A session of two results, the second's usage unreadable: the usage read is kept, but the step says unread, so
 # its tokens show as missing and it is unpriced, never priced as whole. Each model's 1-hour cache writes are read
-# from that model's answers.
+# from that model's answers. The output is read as the loop reads a session's (SESSIONREAD, lib/session.sh), and the
+# line it gives is a landed card's build; t_metricsunread runs a whole card whose session's usage is unread.
 t_metricspartial() {
-  export TZ=UTC; setup "$(issue 7 2026-01-01 area:billing | jq -cs .)"; echo "$GO" > "$STUB/review.1"
-  bash > "$STUB/claude-usage" <<'EOF' # the stream the shared claude stub's session prints
-echo '{"type":"assistant","message":{"id":"m1","model":"claude-opus-5-5","usage":{"input_tokens":5,"output_tokens":1,"cache_creation":{"ephemeral_1h_input_tokens":300}}}}'
-echo '{"type":"assistant","message":{"id":"m2","model":"claude-sonnet-5-5","usage":{"input_tokens":5,"output_tokens":1,"cache_creation":{"ephemeral_1h_input_tokens":0}}}}'
-echo '{"type":"result","is_error":false,"num_turns":1,"usage":{"input_tokens":10,"cache_creation_input_tokens":500,"cache_read_input_tokens":0,"output_tokens":2,"cache_creation":{"ephemeral_1h_input_tokens":300}}}'
-echo '{"type":"result","is_error":false,"num_turns":1,"usage":"n/a","modelUsage":{"claude-opus-5-5":{"inputTokens":5,"outputTokens":1,"cacheCreationInputTokens":400},"claude-sonnet-5-5":{"inputTokens":5,"outputTokens":1,"cacheCreationInputTokens":100}}}'
+  local o f
+  export TZ=UTC; setup '[]'; S=$ST; mkdir -p "$S"; d=$(date -u +%F); y=$d; now=$(date -u -d "${d}T23:59:00Z" +%s); o=$T/$CASE/session.out
+  cat > "$o" <<'EOF'
+{"type":"assistant","message":{"id":"m1","model":"claude-opus-5-5","usage":{"input_tokens":5,"output_tokens":1,"cache_creation":{"ephemeral_1h_input_tokens":300}}}}
+{"type":"assistant","message":{"id":"m2","model":"claude-sonnet-5-5","usage":{"input_tokens":5,"output_tokens":1,"cache_creation":{"ephemeral_1h_input_tokens":0}}}}
+{"type":"result","is_error":false,"num_turns":1,"usage":{"input_tokens":10,"cache_creation_input_tokens":500,"cache_read_input_tokens":0,"output_tokens":2,"cache_creation":{"ephemeral_1h_input_tokens":300}}}
+{"type":"result","is_error":false,"num_turns":1,"usage":"n/a","modelUsage":{"claude-opus-5-5":{"inputTokens":5,"outputTokens":1,"cacheCreationInputTokens":400},"claude-sonnet-5-5":{"inputTokens":5,"outputTokens":1,"cacheCreationInputTokens":100}}}
 EOF
-  loop run >/dev/null || fail "run exited non-zero on a session with a result whose usage could not be read"
-  [ "$(st 'select(.step == "build") | [.unread, .usage, .stats.byModel] | tojson')" \
-    = '["1 of 2 results hold no readable token usage, so the usage recorded is only part of it",{"input":10,"write":200,"write1h":300,"read":0,"output":2},{"claude-opus-5-5":{"input":5,"write":400,"read":0,"output":1,"write1h":300},"claude-sonnet-5-5":{"input":5,"write":100,"read":0,"output":1,"write1h":0}}]' ] \
-    || fail "the partly read build: $(st 'select(.step == "build")')"
-  loop check || fail "a partly read build line does not check"
-  out=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
+  # The build line's fields, as session.sh keeps them of what SESSIONREAD gives. ok is true, so session.sh goes on
+  # with the card (its exit check, run whole in t_metricsunread) rather than blocking it.
+  f=$(jq -cRn --arg m m --arg e medium --argjson s 60 -f "$SRC/jq/sessionread.jq" "$o" | tail -n 1) || fail "the session's output was not read"
+  [ "$(jq -c '[.ok, .unread, .usage, .stats.byModel]' <<<"$f")" \
+    = '[true,"1 of 2 results hold no readable token usage, so the usage recorded is only part of it",{"input":10,"write":200,"write1h":300,"read":0,"output":2},{"claude-opus-5-5":{"input":5,"write":400,"read":0,"output":1,"write1h":300},"claude-sonnet-5-5":{"input":5,"write":100,"read":0,"output":1,"write1h":0}}]' ] \
+    || fail "the partly read build: $f"
+  f=$(jq -c 'del(.ok) | del(.effort)' <<<"$f")
+  l 1 01:00 picked ok '{"title":"T1"}'; l 1 01:10 build ok "$f"; l 1 01:30 landed ok '{"sha":"s1","product":false}'
+  recok "$S/cards.jsonl" "a partly read build"
+  out=$(CONVEYOR_NOW=$now loop snapshot --fresh) || fail "snapshot exited non-zero"
   [ "$(jq -c '.landed[0].metrics | [(.timeline[0] | [.tokens, .usd]), .tokens]' <<<"$out")" = '[[null,null],null]' ] \
     || fail "the partly read build is shown as whole: $(jq -c '.landed[0].metrics' <<<"$out")"
 }
@@ -296,7 +303,7 @@ t_metricsbymodel() {
   l 1 01:00 picked ok '{"title":"T1"}'; l 1 01:10 build ok "$(jq -c '. + {tokens: {claude: 4000000, codex: 0}} | del(.step)' <<<"$two")"
   l 1 01:20 fix ok '{"model":"claude-sonnet-5-5","unread":"the session output holds no token usage"}'
   l 1 01:30 landed ok '{"sha":"s1","product":false}'
-  loop check || fail "the two-model fixture does not check"
+  recok "$S/cards.jsonl" "the two-model fixture"
   out=$(loop snapshot --fresh) || fail "snapshot of the two-model fixture exited non-zero"
   [ "$(jq -c '.metrics.week.perLanded' <<<"$out")" \
     = '{"usd":16.5,"leftOut":1,"tokens":4000000,"tokensLeftOut":1,"byModel":{"claude-opus-5-5":{"usd":12,"leftOut":0,"tokens":2000000,"tokensLeftOut":0},"claude-sonnet-5-5":{"usd":4.5,"leftOut":1,"tokens":2000000,"tokensLeftOut":1}}}' ] \
@@ -313,7 +320,7 @@ t_metricsretried() {
   l 8 09:00 picked ok '{"title":"T8"}'; l 8 10:00 blocked blocked "{\"reason\":\"review 1: no answer\",\"retriedAt\":\"${y}T11:00:00Z\"}"
   mv "$S/cards.jsonl" "$S/retried.jsonl"; : > "$S/cards.jsonl"
   [ "$(loop snapshot --fresh | jq -c '.metrics.week.waitMaxSec')" = 3600 ] || fail "a retried card's wait before its next pick: $(loop snapshot --fresh | jq -c .metrics.week)"
-  l 8 12:00 picked ok '{"title":"T8","card":"c9"}'; loop check || fail "the retried fixture does not check"
+  l 8 12:00 picked ok '{"title":"T8","card":"c9"}'; recok "$S/cards.jsonl" "the retried fixture"; recok "$S/retried.jsonl" "the retried fixture"
   out=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
   [ "$(jq -c '[.metrics.week.waitMaxSec, (.belt[] | select(.issue == 8) | .metrics.waitMaxSec)]' <<<"$out")" = '[3600,3600]' ] \
     || fail "waiting on the owner does not end at the retry: $(jq -c '[.metrics.week, .belt]' <<<"$out")"
@@ -324,7 +331,7 @@ t_metricsretried() {
 t_metricsshut() {
   export TZ=UTC; setup '[]'; S=$ST; mkdir -p "$S"; y=$(date -u -d yesterday +%F)
   l 8 11:00 picked ok "{\"title\":\"T8\",\"created\":\"${y}T10:00:00Z\"}"; l 8 11:30 review NO-GO; l 8 12:00 blocked blocked '{"reason":"review 1: no answer"}'
-  l 8 13:00 closed ok '{"reason":"the issue was closed by hand while the card was blocked"}'; loop check || fail "the shut fixture does not check"
+  l 8 13:00 closed ok '{"reason":"the issue was closed by hand while the card was blocked"}'; recok "$S/cards.jsonl" "the shut fixture"
   out=$(loop snapshot --fresh) || fail "snapshot of the shut fixture exited non-zero"
   [ "$(jq -c '[.metrics.week.waitMaxSec, (.metrics.cards[] | select(.card == "c8") | .state, (.metrics | .waitMaxSec, .landSec, .leadSec, .cycleSec))]' <<<"$out")" = '[3600,"closed",3600,null,null,null]' ] \
     || fail "the wait of a card closed while blocked: $(jq -c '[.metrics.week.waitMaxSec, (.metrics.cards[] | select(.card == "c8"))]' <<<"$out")"
@@ -404,7 +411,7 @@ EOF
   kill $pid; wait $pid 2>/dev/null; kill "$(cat "$STUB/sleeper")" 2>/dev/null
   [ "$(jq -c --arg c "$card" 'select(.card == $c and .step == "review") | [.result, .tokens.codex, .usage.output, (.firstTry.reason | test("exit 3")), .firstTry.spent.tokens.codex]' "$S/retried.jsonl")" = '["stopped",94,14,true,47]' ] \
     || fail "the stopped retry lost the first attempt: $(jq -c --arg c "$card" 'select(.card == $c)' "$S/retried.jsonl") $(cat "$STUB/serve.out")"
-  loop check || fail "the stopped retry's line does not check"
+  recok "$S/retried.jsonl" "the stopped retry"
   [ ! -e "$T/$CASE/cards/$card.firsttry" ] || fail "the first attempt's file was left behind"
 }
 
@@ -429,7 +436,7 @@ t_metricsstoppause() {
   kill $pid; wait $pid 2>/dev/null
   [ "$(jq -c --arg c "$card" 'select(.card == $c and .step == "review") | [.result, .tokens.codex, .usage.output, (.firstTry.reason | test("exit 3")), .firstTry.spent.tokens.codex, .unread]' "$S/retried.jsonl")" = '["stopped",47,7,true,47,null]' ] \
     || fail "the review stopped in its pause lost the first attempt: $(jq -c --arg c "$card" 'select(.card == $c)' "$S/retried.jsonl") $(cat "$STUB/serve.out")"
-  loop check || fail "the paused review's stopped line does not check"
+  recok "$S/retried.jsonl" "the review stopped in its pause"
   [ ! -e "$T/$CASE/cards/$card.firsttry" ] && [ ! -e "$T/$CASE/cards/$card.firsttry.new" ] || fail "the first attempt's file was left behind"
 }
 
@@ -450,7 +457,7 @@ restartedruns() { # [landed]
   l 9 02:00 build ok "$(tk 300000 claude "$B" | jq -c --arg t "${d}T02:03:20Z" '. + {card: "c10", time: $t}')"
   l 9 02:10 review GO "$(tk 100000 codex "$V" | jq -c '.card = "c10"')"
   [ "${1:-}" != landed ] || { l 9 02:15 test pass '{"card":"c10","usage":{"input":0,"write":0,"write1h":0,"read":0,"output":0}}'; l 9 02:20 landed ok '{"card":"c10","sha":"s9","product":false}'; }
-  loop check || fail "the restarted card's fixture does not check"
+  recok "$S/cards.jsonl" "the restarted card's fixture"; recok "$S/retried.jsonl" "the restarted card's fixture"
   out=$(CONVEYOR_NOW=$now loop snapshot --fresh) || fail "snapshot of the restarted card exited non-zero"
 }
 
@@ -477,14 +484,12 @@ t_metricsrunslanded() {
     || fail "the landed restarted card's times: $(jq -c '.landed[] | {totalSec, priorSec, earlier}' <<<"$out")"
 }
 
-# A test run whose root half gives no totals: the counts are missing, not the web half's alone.
+# A test run whose root half gives no totals: the counts are missing, not the web half's alone. The counts are
+# testcounts()'s (lib/records.sh), which the test line holds; t_metrics runs a whole card's test step.
 t_metricstests() {
-  export TZ=UTC; setup "$(issue 7 2026-01-01 area:billing | jq -cs .)"; echo "$GO" > "$STUB/review.1"
-  cat > "$STUB/test-cmd" <<'EOF'
-echo 'test-changed: 2 root test file(s) selected from 1 changed file(s)'; echo 'test-changed: root totals unavailable'
-echo 'test-changed: 1 web test file(s) selected'; echo 'test-changed: web totals: Test Files  1 passed (1); Tests  4 passed (4)'
-EOF
-  loop run >/dev/null || fail "run exited non-zero"
-  [ "$(st 'select(.step == "test") | .tests | tojson')" = '{"files":3,"total":null,"passed":null,"failed":null,"skipped":null}' ] \
-    || fail "a run with no root totals: $(st 'select(.step == "test")')"
+  local o=$T/$CASE/test.out; mkdir -p "$T/$CASE"
+  printf '%s\n' 'test-changed: 2 root test file(s) selected from 1 changed file(s)' 'test-changed: root totals unavailable' \
+    'test-changed: 1 web test file(s) selected' 'test-changed: web totals: Test Files  1 passed (1); Tests  4 passed (4)' > "$o"
+  eval "$(sed -n '/^testcounts() {/,/^}/p' "$SRC/lib/records.sh")"
+  [ "$(testcounts "$o")" = '{"files":3,"total":null,"passed":null,"failed":null,"skipped":null}' ] || fail "a run with no root totals: $(testcounts "$o")"
 }
