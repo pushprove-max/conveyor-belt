@@ -424,7 +424,13 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
       # landed or failed its tests).
       [ -z "$parsecheck" ] || [ ! -e "$3.stack" ] || ! parses "$3" >/dev/null 2>&1 || parsecheck=''
       if [ -z "$parsecheck" ] && [ -e "$3.ready" ] && ! jq -e '.tested == true or .alone == true or .stackred == true' "$3.ready" >/dev/null 2>&1 && packget landBatch b && [ "$b" -gt 1 ]; then
-        rm -f "$3.idle"; sec=$SECONDS; trc=''
+        rm -f "$3.idle"
+        # The gate for a waiting card first (lintwait(), lib/lint.sh): a finding or an execution error removes
+        # <worktree>.ready, so it waits on with no check, test or session, and its landing gate deals with it. Its lint
+        # line goes after the wait's start line: a new start line makes the wait the card's last step again, so the
+        # Board and `health` see the wait and its time limit.
+        lintwait "$1" "$2" "$3" || { began "$1" "$2" "$5"; : > "$3.idle"; sleep "$LIVE"; continue; }
+        sec=$SECONDS; trc=''
         if ! out=$(checks "$3"); then
           trc=1; [ "$(git -C "$3" rev-parse HEAD 2>/dev/null)" = "$(jq -r .base "$3.stack" 2>/dev/null)" ] || { block "$1" "$2" "$3" "a product check failed; nothing landed."$'\n'"$out"; return 1; }
         else began "$1" "$2" test; tests "$3"; trc=$?; fi

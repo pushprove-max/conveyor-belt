@@ -1473,7 +1473,8 @@ blocks.
 
 Cards ready to land land in batches. A card is ready once its review gave a GO and its own product checks and changed
 tests passed: a card that waits to land runs them while it waits, holding nothing (failing tests send it to its fix and a
-failing check blocks it, as at its turn), and the card whose turn comes runs them first. When a ready card's turn to land comes, it takes the
+failing check blocks it, as at its turn; a lint finding or execution error before them runs none and leaves it not
+ready, for its landing gate at its turn), and the card whose turn comes runs them first. When a ready card's turn to land comes, it takes the
 other ready cards waiting to land that share a file with it, or with a card taken before (in turn), up to the pack's
 `landBatch` (8 by default; 1 turns batches off), and holds the files of them all until the batch lands: another card
 waits on it only when its change does not apply together with the whole batch's. The batch is

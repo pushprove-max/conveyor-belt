@@ -71,6 +71,11 @@ gate before the review did not see. A pass, a missing tool and an execution erro
   `lint: <n> findings left after its fix session; nothing landed`. If a different session (a test fix, for example)
   changed the code after the lint fix, a finding gets one new fix session.
 
+With batches on, a card that waits to land after its `GO` runs its own product checks and tests while it waits. The
+same lint commands run first, once in the wait. A pass and a missing tool let its checks and tests run. A finding or an
+execution error stops them, with no fix session. The card is then not ready: no batch takes it, and the lint does not
+run again while it waits. At its turn, its landing gate gives it its fix session, or blocks it on an execution error.
+
 The lint commands must not change the card's work. Before they run, the worktree must have no change that is not
 staged, and no file that git does not track or ignore. If it has one, that is an execution error, and Conveyor changes
 nothing. After they run, the staged change, the worktree and the untracked files must be as before. This is also true
