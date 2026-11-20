@@ -47,9 +47,11 @@
 # (pickjudge(), below), trialEffort: the effort a trial card builds at when the judge's is not its choice's, and on a
 # trial card whose staged change touches pipeline files, pipeline: those files (trialflag(), lib/push.sh; the Board flags it). A
 # later card of the same issue (a retry, or a stop and a new pick) reuses the newest pick that a line of the issue
-# holds, in the card records or the retried lines, so a restart keeps its group and choice; only the owner's setting
+# holds, in the card records or the retried lines, so a restart keeps its group; only the owner's setting
 # is put over it, as that always wins (and a pick the owner had set, whose setting is gone since, takes the rule's
-# choice again), and a trial pick is checked for its trial again, as above. Its pipeline and trialEffort are
+# choice again), and a trial pick is checked for its trial again, as above. A pick that is no trial nor promoted
+# takes the builder the owner set for the issue, or else the project's, as its choice again, which the judge's new
+# answer then moves when the owner set none. Its pipeline and trialEffort are
 # dropped: each is this card's own, set again when it holds (a retry that is no longer a trial has no trialEffort). An issue that cannot be read gets no
 # pick, and the card goes on.
 PICKTRIAL='{"model":"claude-sonnet-5-5","effort":"medium"}'
@@ -85,8 +87,11 @@ modelpick() { # <card> <issue>: sets card()'s PICK, PICKCARD and PICKSEAT
     PICKCARD=$1
     if pickpromote "$1" "$2" "$c" "$b"; then :
     elif jq -e .trial <<<"$PICK" >/dev/null; then picktrial "$1" "$2" "$c" "$b"
-    # A promoted card started again once its group is no longer promoted builds on the project's builder: so does its pick.
-    elif jq -e '.promoted == true' <<<"$PICK" >/dev/null; then
+    # Else the card builds on the builder the owner set for the issue, or the project's ($b), so does its pick, until
+    # the judge's answer moves it (pickjudge(); never the owner's):
+    # a promoted card started again once its group is no longer promoted, and a card whose earlier choice was the
+    # judge's builder, so a judge that fails this time leaves no earlier choice the card does not build on.
+    else
       PICK=$(jq -c --argjson b "$b" '.choice = $b | del(.promoted)' <<<"$PICK") || :
     fi
     pickseats "$2" "$c"; pickjudge "$1" "$2" "$c"; return 0
@@ -143,8 +148,8 @@ PICKCLAMP="$OKMODELS"'def noeff($s; $g): $s == "builder" and $g == "opencode";
 # goes in the pick as asked: {builder, reviewer, judge, model: the judge's}, or {failed: why} when the issue cannot be
 # read or the judge fails, times out or names no model for any seat; the card then builds on the project's seats, as
 # it does in Shadow. The call is a card line of its own, step seats (ok or failed, with the call's model, effort, sec,
-# tokens and usage, or unread), so its tokens and price count on the card. A later card of the issue reuses the
-# judge's answer in the pick's asked, fitted again to the pack as it is then, and asks again only when it failed.
+# tokens and usage, or unread), so its tokens and price count on the card. Each card asks the judge: a later card of
+# the issue (a retry or a restart) asks again, and its answer replaces the asked of the pick it reuses.
 # On, a card that is not a trial nor promoted, and whose builder the owner did not set, builds on the judge's builder
 # (PICKSEAT, which then is its choice); a trial card keeps its challenger, at the judge's effort fitted to the
 # builder's range (fit()): its choice stays the challenger, by which the snapshot counts the group's trials, and
@@ -155,18 +160,10 @@ PICKCLAMP="$OKMODELS"'def noeff($s; $g): $s == "builder" and $g == "opencode";
 # asked.guard says so.
 # shellcheck disable=SC2034 # PICKSEAT and PICKSEATS are card()'s, read by seat() in lib/control.sh
 pickjudge() { # <card> <issue> <control record> [<issue json>]
-  local asked issue=${4:-} a r now x ok=ok fresh='' s0=${PICKSEAT:-} ss0=${PICKSEATS:-} p0=$PICK PICKANS='' PICKMODEL='' PICKUSE='' PICKWHY=''
-  asked=$(jq -c '.asked | objects | select(.failed == null)' <<<"$PICK" 2>/dev/null)
-  if [ -n "$asked" ]; then
-    # A restart's pick: the judge's answer as it gave it, not asked again, fitted again to the pack as it is now.
-    PICKANS=$(jq -c '{builder, reviewer, judge} | map_values(objects | (.asked // {}) + {why})' <<<"$asked" 2>/dev/null) && [ -n "$PICKANS" ] \
-      && PICKMODEL=$(jq -r '.model // ""' <<<"$asked") || PICKWHY="the judge's earlier answer could not be read"
-  else
-    fresh=1
-    { [ -n "$issue" ] || issue=$(gh issue view "$2" --json number,title,body,labels 2>/dev/null); } && jq -e 'objects | .number' <<<"$issue" >/dev/null 2>&1 \
-      || PICKWHY="the issue could not be read"
-    [ -n "$PICKWHY" ] || pickcall "$issue" "$3" || :
-  fi
+  local asked issue=${4:-} a r now x ok=ok s0=${PICKSEAT:-} ss0=${PICKSEATS:-} p0=$PICK PICKANS='' PICKMODEL='' PICKUSE='' PICKWHY=''
+  { [ -n "$issue" ] || issue=$(gh issue view "$2" --json number,title,body,labels 2>/dev/null); } && jq -e 'objects | .number' <<<"$issue" >/dev/null 2>&1 \
+    || PICKWHY="the issue could not be read"
+  [ -n "$PICKWHY" ] || pickcall "$issue" "$3" || :
   if [ -z "$PICKWHY" ]; then
     if ! jq -e 'any(.[]; type == "object" and (.model | type == "string"))' <<<"$PICKANS" >/dev/null 2>&1; then PICKWHY="the judge's answer named no model for any seat: ${PICKANS:0:300}"
     else
@@ -182,7 +179,7 @@ pickjudge() { # <card> <issue> <control record> [<issue json>]
     echo "conveyor: card $1: Pick settings: the card builds on the project's seats: $PICKWHY" >&2
   fi
   PICK=$(jq -c --argjson s "$asked" '.asked = $s' <<<"$PICK") || return 0
-  [ -z "$fresh" ] || [ -z "$PICKUSE" ] || record "$1" "$2" seats "$ok" "$(jq -c --arg w "$PICKWHY" '. + {reason: $w}' <<<"$PICKUSE")"
+  [ -z "$PICKUSE" ] || record "$1" "$2" seats "$ok" "$(jq -c --arg w "$PICKWHY" '. + {reason: $w}' <<<"$PICKUSE")"
   # Shadow, or a failed ask: the seats stand as modelpick() left them.
   [ "$(jq -r .mode <<<"$PICK")" = on ] && ! jq -e '.asked.failed' <<<"$PICK" >/dev/null 2>&1 || return 0
   if jq -e '.trial == true' <<<"$PICK" >/dev/null && [ -n "${PICKSEAT:-}" ]; then

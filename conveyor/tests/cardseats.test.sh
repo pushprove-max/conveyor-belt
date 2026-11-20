@@ -224,8 +224,9 @@ pjusd() {
 # Bugs: with the rule On, the card did not build on the judge's builder, or took an effort outside the builder's range
 # (models.effort.builder, medium to high: the judge's low is medium), or a reviewer model the pack does not allow (zz:
 # the project's x, at the judge's effort), or the pick did not say what was moved and why; or the call's tokens were
-# not on the card as a step the Board prices (pjusd()); or a restarted card took the judge's earlier fit, not one to
-# the pack as it is now (the builder's range moved to low only: m at low, the judge not asked again).
+# not on the card as a step the Board prices (pjusd()); or a restarted card reused the judge's earlier answer and did
+# not ask the judge again (its new answer, reviewer x2 at medium, is not used), or did not fit the new answer to the
+# pack as it is now (the builder's range moved to low only: m at low).
 # The judge j answers with 1,000,000 input and 500,000 output tokens, at $1 and $2 a million: $2.
 t_pickjudgeon() {
   seatsetup "[$(issue 7 2026-01-01)]"
@@ -246,9 +247,18 @@ t_pickjudgeon() {
   pjusd '{"j": {"input": 1, "output": 2, "cacheRead": 0}}'
   [ "$(cat "$T/$CASE/run.out")" = '[2.0,[["seats",2.0]]]' ] || fail "the Board does not price the judge's call on the card: $(cat "$T/$CASE/run.out")"
   tune '.models.effort.builder = {min: "low", max: "low"}'
-  fx_in "N=7; $PJ"
-  [ "$(sed -n 2p "$T/$CASE/run.out")" = 'm low' ] && [ "$(wc -l < "$STUB/picks")" = 1 ] \
-    || fail "the restarted card did not fit the judge's answer to the pack as it is now, once asked: $(cat "$T/$CASE/run.out") $(wc -l < "$STUB/picks")"
+  rm -f "$STUB/pick-json"; pjask 'm high' 'x2 medium' 'j2 high'
+  # The deps line carries the pick with the judge's builder as its choice, as a card's later lines do.
+  fx_in "N=7; $PJ; record c1-7 7 deps ok"
+  [ "$(sed -n '2,3p' "$T/$CASE/run.out" | paste -sd,)" = 'm low,x2 medium' ] && [ "$(wc -l < "$STUB/picks")" = 2 ] \
+    || fail "the restarted card did not ask the judge again and fit its new answer to the pack as it is now: $(cat "$T/$CASE/run.out") $(wc -l < "$STUB/picks")"
+  # Bug: a retry whose judge call failed kept the earlier card's choice (the judge's m low) while it built on the
+  # project's builder, so the Board counted the retry under a builder it did not run on.
+  tune '.models.effort.builder = {min: "medium", max: "high"}'
+  echo '{"type":"result","is_error":true,"result":"overloaded","num_turns":1}' > "$STUB/pick-json"
+  fx_in "N=7; $PJ; jq -r '.choice | \"\(.model) \(.effort)\"' <<<\"\$PICK\""
+  [ "$(sed -n '2p;5p' "$T/$CASE/run.out" | paste -sd,)" = 'm high,m high' ] \
+    || fail "the retry's failed pick kept a choice that is not the builder it runs on: $(cat "$T/$CASE/run.out")"
 }
 
 # Bugs: a seat the owner set for the issue (`control card`) was moved to the judge's; a trial card left its challenger

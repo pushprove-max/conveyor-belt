@@ -366,8 +366,10 @@ With On, the card uses these seats, with these exceptions:
   choice.
 
 The judge's call has a card line of its own, step `seats`, with its tokens. The Board counts its cost in the cost of
-the card. A card that starts again for the same issue uses the same answer of the judge, fitted again to the pack as
-it is then, and asks the judge again only when the call failed.
+the card. A card that starts again for the same issue (a retry or a restart) asks the judge again, as each card does.
+Its `choice` is the builder that you set for the issue, or the challenger of a trial or promoted card, as above.
+Else its `choice` is the project's builder until the judge's new answer changes it, so a failed call does not keep
+the builder of an earlier answer.
 
 ### Trials
 
