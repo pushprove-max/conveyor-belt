@@ -173,13 +173,13 @@ p_named() {
 # dashboard-* test: the page's dashboard-view.* and those of dashboard_server.py (43 of 90 files). A test named
 # <stem>-<rest> is the longest source name's it starts with (`_` read as `-`); the page's dashboard-view names no
 # file (test-changed.sh NAMED). A Board of each kind: dashboard.sh with its own test, a test of it named after
-# nothing else (collector) and two it runs named after dashboard_limit.py and dashboard_server.py (TESTS_OF); one of
+# nothing else (collector) and three it runs named after dashboard_limit.py and dashboard_server.py (TESTS_OF); one of
 # dashboard_server.py's it does not run; two of the page's.
 board463() {
   local s=$R/.claude/scripts f
   mkdir -p "$s/__tests__"
   for f in dashboard.sh dashboard_server.py dashboard_limit.py; do echo one > "$s/$f"; done
-  for f in dashboard dashboard-limit dashboard-server dashboard-server-local; do echo 'exit 0' > "$s/__tests__/$f.test.sh"; done
+  for f in dashboard dashboard-limit dashboard-limit-wait dashboard-server dashboard-server-local; do echo 'exit 0' > "$s/__tests__/$f.test.sh"; done
   for f in dashboard-collector-incremental dashboard-view.needs dashboard-view.page-tabs; do echo '// none' > "$s/__tests__/$f.test.mjs"; done
   git -C "$R" add -A && git -C "$R" commit -qm board
   echo two >> "$s/$1"
@@ -188,7 +188,7 @@ board463() {
 }
 p_owned() {
   got=$(board463 dashboard.sh)
-  [ "$got" = "dashboard-collector-incremental.test.mjs dashboard-limit.test.sh dashboard-server.test.sh dashboard.test.sh " ] \
+  [ "$got" = "dashboard-collector-incremental.test.mjs dashboard-limit-wait.test.sh dashboard-limit.test.sh dashboard-server.test.sh dashboard.test.sh " ] \
     && ok "a change to dashboard.sh selects its own tests and those that run it, not the page's or another source file's" \
     || no "dashboard.sh changed: ran '$got': $(cat "$T/out")"
 }

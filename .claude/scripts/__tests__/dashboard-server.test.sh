@@ -1616,7 +1616,8 @@ done_part
 # records an answer and steers the loop.
 # Bug caught: dashboard.sh died at its first line (`. paths.sh`), then found the host only through test-hosts.json
 # and the checkout's conveyor/host.json, and the page and the job's script only in the checkout; the job it installed
-# lost XDG_CONFIG_HOME.
+# lost XDG_CONFIG_HOME. It must keep XDG_CACHE_HOME too: the job's account reads and their 429 deadline go in the
+# folder the engine's guard and the Foreman's watcher use (issue 1087), and a job without it read another folder's.
 SA=$M/standalone R=$M/standalone/release C=$HM
 mkdir -p "$R/.claude/scripts" "$C/.claude/metrics" "$SA/config/conveyor" "$SA/userhome" "$SA/ws"
 cp "$HERE"/../{dashboard.sh,dashboard_server.py,dashboard_stream.py,dashboard_limit.py,dashboard_alerts.jq,dashboard_needs.json,decision.sh,hostfile.sh} "$R/.claude/scripts/"
@@ -1627,7 +1628,7 @@ dec d-alone "$ASKED" 'Standalone?' > "$C/.claude/metrics/decisions.jsonl"
 : > "$M/rulings.jsonl"; fresh_control
 # An array, not a function: `"${board[@]}" ... & PID=$!` is the command itself, so kill "$PID" stops the loop (a
 # backgrounded function is a subshell, and the loop outlived the test).
-board=(env -u CODEX_HOME CONVEYOR_MAIN="$C" HOME="$SA/userhome" XDG_CONFIG_HOME="$SA/config" PATH="$M/bin:$PATH" CONVEYOR_HOST_OS=Linux
+board=(env -u CODEX_HOME CONVEYOR_MAIN="$C" HOME="$SA/userhome" XDG_CONFIG_HOME="$SA/config" XDG_CACHE_HOME="$SA/cache" PATH="$M/bin:$PATH" CONVEYOR_HOST_OS=Linux
   CONVEYOR_WORKSPACES="$SA/ws" CONVEYOR_SCRATCH="$SA/scratch" CONVEYOR_DASHBOARD_DIR="$SA/out" CONVEYOR_RULING_LOG="$M/rulings.jsonl"
   CONVEYOR_DASHBOARD_PORT="$PORT")
 board() { "${board[@]}" "$@"; }
@@ -1641,6 +1642,7 @@ pass=$((pass + 2))
 board bash "$R/.claude/scripts/dashboard.sh" --install >"$SA/install.out" 2>&1 \
   && grep -qF "ExecStart=\"$BASH\" \"$R/.claude/scripts/dashboard.sh\" --loop" "$SA/userhome/.config/systemd/user/dashboard.service" \
   && grep -qxF "Environment=\"XDG_CONFIG_HOME=$SA/config\"" "$SA/userhome/.config/systemd/user/dashboard.service" \
+  && grep -qxF "Environment=\"XDG_CACHE_HOME=$SA/cache\"" "$SA/userhome/.config/systemd/user/dashboard.service" \
   && grep -qxF "Environment=\"CONVEYOR_MAIN=$C\"" "$SA/userhome/.config/systemd/user/dashboard.service" \
   || fail "standalone_board_installs: $(cat "$SA/install.out") $(cat "$SA/userhome/.config/systemd/user/dashboard.service" 2>/dev/null)"
 pass=$((pass + 1))

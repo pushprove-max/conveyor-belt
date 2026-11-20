@@ -436,14 +436,16 @@ oparts=
 COVTESTS=
 all=
 # A source file's test files that are not named after it (pick), space-separated: Rules' Undo is tested in
-# dashboard-view.needs; dashboard.sh, the collector, is run by dashboard-limit (through the collector) and
-# dashboard-server (--restart, and the standalone Board), named after dashboard_limit.py and dashboard_server.py.
+# dashboard-view.needs; dashboard.sh, the collector, is run by dashboard-limit and dashboard-limit-wait (through the
+# collector) and dashboard-server (--restart, and the standalone Board), named after dashboard_limit.py and
+# dashboard_server.py.
 # The engine's foreman command (conveyor/commands/foreman.sh, outside the map: it starts conveyor/foreman/foreman.sh)
 # is run by the Foreman's tests. The /units mod's views (hooks/units.tsx) are drawn by sources.ts with elements.ts, so
 # units.test.tsx tests them too; its two-project fixture is the fetch's test's and the views' tests'. The area map and
 # the engine's map reader (conveyor/lib/testmap.sh) are checked against each other by test-map-areas.test.sh (#150).
 declare -A TESTS_OF=([.claude/dashboard/panels/rules.js]=.claude/scripts/__tests__/dashboard-view.needs.test.mjs
-  [.claude/scripts/dashboard.sh]=".claude/scripts/__tests__/dashboard-limit.test.sh .claude/scripts/__tests__/dashboard-server.test.sh"
+  [.claude/scripts/dashboard.sh]=".claude/scripts/__tests__/dashboard-limit.test.sh .claude/scripts/__tests__/dashboard-limit-wait.test.sh
+    .claude/scripts/__tests__/dashboard-server.test.sh"
   [conveyor/commands/foreman.sh]="conveyor/foreman/foreman.test.sh conveyor/foreman/foreman-session.test.sh conveyor/foreman/foreman-projects.test.sh"
   [hooks/sources.ts]=hooks/units.test.tsx [hooks/elements.ts]="hooks/sources.test.tsx hooks/units.test.tsx"
   [hooks/fixtures/units-two-projects.ts]="hooks/units-fetch.test.sh hooks/units.test.tsx hooks/sources.test.tsx"

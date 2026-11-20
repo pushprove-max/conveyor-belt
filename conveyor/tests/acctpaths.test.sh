@@ -11,7 +11,7 @@
 # worktree (the session changes into it first), so the guard watches another account than the cards run on; a project
 # on the default login runs and reads the CLAUDE_CONFIG_DIR the engine inherited, which the Board does not mark as the
 # default, so its cards' use shows under another account.
-# Two cases (t_acctpaths, t_acctpathsrel), one card each, so they run side by side.
+# Two cases (t_acctpaths, t_acctpathsrel), one card each, so they run side by side; t_acctguard429, below, runs no card.
 acctpathsetup() {
   export CLAUDE_CONFIG_DIR=$T/$CASE/inherited
   export XDG_CONFIG_HOME=$T/$CASE/config; mkdir -p "$XDG_CONFIG_HOME/conveyor"
@@ -35,6 +35,26 @@ t_acctpaths() {
   loop run --only 5 >/dev/null 2>&1
   [ "$(cat "$STUB/acct")" = default ] && [ "$(sort -u "$STUB/limit-dirs")" = "$HOME/.claude" ] \
     || fail "a card on the default login ran or was guarded on the inherited folder: $(cat "$STUB/acct" "$STUB/limit-dirs" 2>/dev/null)"
+}
+# Issue 1087: the guard read an account's usage with no regard for the wait a 429 named, every limitTtl, so the endpoint
+# kept refusing the account and the Board, which waited the wait out, never had a reading for days. The guard's own
+# read (the engine's LIMIT_CMD, not a stub of it) against a stubbed endpoint: a 429 is waited out, and its deadline is
+# kept in the machine's one folder of account reads, where the Board's reads look.
+t_acctguard429() {
+  setup "$(jq -cs . <(issue 5 2026-01-01))"
+  unset CLAUDE_CONFIG_DIR CONVEYOR_LIMIT_CMD XDG_CACHE_HOME
+  export HOME=$T/$CASE/home CONVEYOR_HOST_OS=Linux PYTHONPATH=$SRC/../.claude/scripts/__tests__/usage-stub \
+    USAGE_STUB_LOG=$T/$CASE/asked USAGE_STUB_ANSWER=$T/$CASE/answer
+  mkdir -p "$HOME/.claude"; printf '{"claudeAiOauth":{"accessToken":"tok"}}' > "$HOME/.claude/.credentials.json"
+  tune '.tunables.limitTtl = 0'; loop control guard 90 >/dev/null 2>&1
+  echo '429 3600' > "$USAGE_STUB_ANSWER"
+  [ "$(loop health | jq -c .guard.reading)" = null ] && [ "$(wc -l < "$USAGE_STUB_LOG")" -eq 1 ] \
+    || fail "the guard's first read was not asked once: $(cat "$USAGE_STUB_LOG" 2>&1)"
+  grep -qF 'rate limited (429); retry after 3600 s' "$HOME"/.cache/conveyor/accounts/account-*.json \
+    || fail "the guard's 429 is not kept in the machine's account folder: $(ls -R "$HOME/.cache" 2>&1)"
+  echo '45' > "$USAGE_STUB_ANSWER"
+  loop health >/dev/null
+  [ "$(wc -l < "$USAGE_STUB_LOG")" -eq 1 ] || fail "the guard asked the account again inside the wait its 429 named"
 }
 t_acctpathsrel() {
   acctpathsetup

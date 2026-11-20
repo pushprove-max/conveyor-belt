@@ -269,6 +269,9 @@ if [ -z "$OUT" ]; then
   OUT=$OUT/dashboard
 fi
 CACHE=$OUT/cache
+# Each Claude account's usage reads and 429 deadline (dashboard_limit.py fetch and accounts): the machine's one folder,
+# which the engine's guard and the Foreman's watcher use too, so no reader asks inside a wait another one was given.
+ACCTS=${XDG_CACHE_HOME:-$HOME/.cache}/conveyor/accounts
 # The Board's files the job runs and the page it copies: a Board in a git checkout takes the primary checkout's when
 # that checkout carries the Board (a worktree's copy goes when the worktree does); a release install, a git clone or
 # not, whose project carries no Board, and one outside any checkout, take their own.
@@ -294,7 +297,9 @@ iso() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; }
 # as JSON replaces the copy; a failed one keeps it. $RUN/st-<key> says which the caller got: fresh, stale (the last
 # good copy) or not-measured (no copy: nothing is printed), and $RUN/why-<key> the reason. A failed read writes
 # $CACHE/<key>.retry ("<retry-at epoch> <reason>"): until then the command is not run, so a 429 is not hit again
-# every cycle. Retry-at is the TTL, or the `retry after <n> s` the command's stderr names when that is longer.
+# every cycle. Retry-at is the `retry after <n> s` the command's stderr names, else the TTL. A shorter named wait is
+# kept as named: dashboard_limit.py fetch names what is left of a 429 wait another reader of the account was given,
+# and raised to the TTL it kept the first collect after that wait from asking.
 cached() {
   local key=$1 f=$CACHE/$1 tmp=$RUN/cache-$1 err=$RUN/err-$1 m=$CACHE/$1.retry at='' why='' rc=0 n st=''
   shift
@@ -308,7 +313,7 @@ cached() {
     [ -n "$why" ] || { [ $rc -eq 0 ] && why='malformed response' || why='read failed'; }
     n=$(grep -oE 'retry after [0-9]+ s' "$err" | tail -n 1 | grep -oE '[0-9]+') || n=0
     n=$((10#${n:-0}))  # a leading zero must not read as octal
-    [ "$n" -gt $TTL ] || n=$TTL
+    [ "$n" -gt 0 ] || n=$TTL
     printf '%s %s\n' $((NOW + n)) "$why" > "$RUN/retry-$key" && mv -f "$RUN/retry-$key" "$m"
   fi
   [ -n "$st" ] || { [ -s "$f" ] && st=stale || st=not-measured; }
@@ -450,7 +455,7 @@ hostaccounts() {
 accounts() {
   local here acc st host main engine target recs why remote
   # The account in use is shown from limit()'s reading, never read a second time (a second read kept it refused, 429).
-  here=$(python3 "$HERE/dashboard_limit.py" accounts "$CACHE" "$CACHE/claude-usage" 2>/dev/null | jq -ce 'arrays') || here=null
+  here=$(python3 "$HERE/dashboard_limit.py" accounts "$ACCTS" "$CACHE/claude-usage" 2>/dev/null | jq -ce 'arrays') || here=null
   # On one machine (the host file names no build machine: hostof) the Conveyor host is this machine: its accounts are
   # the ones just read, listed once, as the host's (no name: the page says "this machine"), so each shows what the
   # cards use it for.
@@ -472,7 +477,7 @@ limit() {
   now_in_use=$(python3 "$HERE/dashboard_limit.py" account | jq -r .folder)
   { [ -z "$have" ] || [ "$have" = "$now_in_use" ]; } || rm -f "$CACHE/claude-usage" "$CACHE/claude-usage.retry"
   # With the cache folder, fetch honours and keeps the account's own 429 deadline, which outlives the switch above.
-  cached claude-usage python3 "$HERE/dashboard_limit.py" fetch "$now_in_use" "$CACHE" > /dev/null
+  cached claude-usage python3 "$HERE/dashboard_limit.py" fetch "$now_in_use" "$ACCTS" > /dev/null
   st=$(cat "$RUN/st-claude-usage")
   acc=$(accounts) || acc=null
   # The pack's model prices, added models and aliases win over the built-in table here too (use_prices); a pack that
@@ -1354,7 +1359,7 @@ install() {
   "$BOARD_PY" "${script%/*}/dashboard_server.py" can-open || return 1
   # Every override set at install time goes into the job; with only PATH and HOME it reads the default folders.
   local k mac="" sysd=""
-  for k in CONVEYOR_DASHBOARD_AUTH CONVEYOR_RULING_LOG CONVEYOR_DASHBOARD_DIR CONVEYOR_MAIN CONVEYOR_WORKSPACES CONVEYOR_SCRATCH XDG_CONFIG_HOME XDG_DATA_HOME; do
+  for k in CONVEYOR_DASHBOARD_AUTH CONVEYOR_RULING_LOG CONVEYOR_DASHBOARD_DIR CONVEYOR_MAIN CONVEYOR_WORKSPACES CONVEYOR_SCRATCH XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME; do
     [ -n "${!k:-}" ] || continue
     mac+="<key>$k</key><string>$(xml "${!k}")</string>"; sysd+="Environment=\"$k=${!k}\""$'\n'
   done

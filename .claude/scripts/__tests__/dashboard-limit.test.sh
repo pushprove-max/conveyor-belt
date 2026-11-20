@@ -15,6 +15,8 @@ trap 'chmod -R u+w "$T" 2>/dev/null; rm -rf "$T"' EXIT
 export CONVEYOR_CODEX_REVIEW_HOME=$T/codex-review
 # The host file is XDG_CONFIG_HOME's when it is set, ahead of the test's HOME: an inherited one is the owner's real host.
 unset XDG_CONFIG_HOME
+# So is the folder of each account's kept reads, XDG_CACHE_HOME's: the test's is under its HOME.
+unset XDG_CACHE_HOME
 fail() { echo "FAIL: $*" >&2; exit 1; }
 MAIN=$T/main BIN=$T/bin OUT=$T/out
 mkdir -p "$MAIN/.claude/metrics" "$BIN" "$T/home" "$T/empty"
@@ -508,8 +510,8 @@ acct_usage() { printf '{"seven_day":{"utilization":33.0,"resets_at":"%s"},"accou
 acct_usage "$HB" noreply-b@example.com
 echo '2000000000 rate limited (429)' > "$AOUT/cache/claude-usage.retry"
 # The first collect's accounts() also read A (no login from the stub) and keeps that failure in A's own file until its
-# `next`, which fetch() honours by design; drop it so only B's deadline could hold A's fetch back.
-rm -f "$AOUT/cache/account-$(folder_hash "$HA").json"
+# `next`. fetch() asks all the same: only a 429 is waited out (issue 1087: a kept network error held the guard's
+# fresh read back).
 touch "$HA/.claude.json"; : > "$T/security-calls"; arun
 asked "Claude Code-credentials-$(folder_hash "$HA")" || fail "limit_follows_active_profile: after a switch the fetch must ask for A's item, not wait out B's retry deadline: $(cat "$T/security-calls")"
 q '.limit.usedPct == null and .limit.account == null' "limit_follows_active_profile: B's cached reading must not be shown as A's"
@@ -520,8 +522,8 @@ q '.limit.usedPct == 33 and .limit.account == {folder: "'"$HA"'", email: "norepl
 # F05: the default folder's metadata is $HOME/.claude.json (there is no ~/.claude/.claude.json); newer than every profile's, it wins,
 # and its credentials are the unsuffixed item.
 printf '{"oauthAccount":{"emailAddress":"noreply-d@example.com"}}' > "$AHOME/.claude.json"
-# As above, the default folder's own kept failed read (from accounts()) is dropped too.
-rm -f "$AOUT/cache/claude-usage" "$AOUT/cache/claude-usage.retry" "$AOUT/cache/account-$(folder_hash "$AHOME/.claude").json"
+# As above, the default folder's own kept failed read (from accounts(): no login) does not hold its fetch back.
+rm -f "$AOUT/cache/claude-usage" "$AOUT/cache/claude-usage.retry"
 : > "$T/security-calls"; arun
 asked "Claude Code-credentials" || fail "limit_switch_back_to_default: the default folder's item is the unsuffixed one: $(cat "$T/security-calls")"
 acct=$(HOME="$AHOME" CONVEYOR_CLAUDE_PROFILES="$PROF" python3 "$LIM" account)

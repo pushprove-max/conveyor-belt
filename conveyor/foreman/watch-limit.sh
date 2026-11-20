@@ -15,7 +15,9 @@ SEEN=$FD/limit-seen.txt
 mkdir -p "$FD" && touch "$SEEN" || exit 1
 read_limit() {
   if [ -n "${CONVEYOR_FOREMAN_LIMIT_CMD:-}" ]; then bash -c "$CONVEYOR_FOREMAN_LIMIT_CMD"
-  else timeout -k 2 30 python3 "$FHERE/../../.claude/scripts/dashboard_limit.py" fetch; fi
+  # The account in use (no folder), its 429 deadline kept and honoured in the machine's one folder the Board and the
+  # engine's guard use too: a poll every 5 minutes that ignored it kept the account refused for days.
+  else timeout -k 2 30 python3 "$FHERE/../../.claude/scripts/dashboard_limit.py" fetch "" "${XDG_CACHE_HOME:-$HOME/.cache}/conveyor/accounts"; fi
 }
 poll() { # 0 when a wake was put in pending
   local r used reset hour key

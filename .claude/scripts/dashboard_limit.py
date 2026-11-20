@@ -7,8 +7,11 @@
       exit 1 with no output when there is no login token or the read fails, and
       the cause as one stderr line (dashboard.sh shows it and honours its
       `retry after <n> s`). The reading is the account in use's (with a folder: that folder's account; the
-      engine's guard names the account a project's cards use) and carries it as `account`. With a cache folder
-      the account's 429 deadline is the one `accounts` keeps for it: both honour it and both keep their reads there.
+      engine's guard names the account a project's cards use; an empty folder is the account in use) and carries it
+      as `account`. With a cache folder the account's 429 deadline is the one `accounts` keeps for it: both honour it
+      and both keep their reads there. Every reader on a machine (the Board, the engine's guard, the Foreman's
+      watcher) passes the machine's one folder, ${XDG_CACHE_HOME:-~/.cache}/conveyor/accounts: a reader that kept its
+      own, or none, asked again inside the wait another reader's 429 named, and the account stayed refused for days.
   dashboard_limit.py account
       {folder, email} of the Claude account in use: the config folder whose metadata file was written last.
   dashboard_limit.py accounts <cache-dir> [<usage-file>]
@@ -40,6 +43,7 @@ history, so each new sample is appended to <cache-dir>/limit-history.jsonl and
 the chart draws from that file.
 """
 import email.utils
+import fcntl
 import glob
 import hashlib
 import json
@@ -72,6 +76,7 @@ USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 HISTORY_KEEP = 14 * 86400
 ACCOUNT_TTL = 300  # accounts(): each account's usage is read again once its last answer is this old (dashboard.sh's TTL),
 # and after a failed read not before the `retry after <n> s` it named when that is longer
+RATE_LIMITED = "rate limited (429)"  # how usage() begins the reason of a 429: the one failure fetch() and note() wait out
 
 
 def iso(t):
@@ -169,13 +174,15 @@ def fetch(folder=None, cache_dir=None):
     account = active_folder() if folder is None else {"folder": folder, "email": account_email(metadata(folder))}
     # With a cache folder (dashboard.sh's), the account's 429 deadline is the one accounts() keeps for it
     # (account_reading()), whichever of the two was refused: dashboard.sh drops its own deadline on a switch, so an
-    # account switched to or from was asked again at once. Each read here is kept there too. Any refused read is
-    # honoured until its kept `next`, a 429 with no (or a malformed) Retry-After too (note() keeps ACCOUNT_TTL for it).
+    # account switched to or from was asked again at once. Each read here is kept there too. A 429 is honoured until
+    # its kept `next`, one with no (or a malformed) Retry-After too (note() keeps ACCOUNT_TTL for it). Any other failed
+    # read (a network error, no login token) is not: it says nothing of the endpoint's wait, and honoured it kept the
+    # guard's fresh read after a card lands, and the Foreman's watcher's polls, from asking once the cause was gone.
     if cache_dir:
         now = time.time()
         cache, kept = account_cache(cache_dir, account["folder"])
         err = kept.get("error") if isinstance(kept.get("error"), str) else ""
-        if err and isinstance(kept.get("next"), (int, float)) and now < kept["next"]:
+        if err.startswith(RATE_LIMITED) and isinstance(kept.get("next"), (int, float)) and now < kept["next"]:
             err = re.sub(r"; retry after [0-9]+ s$", "", err)
             print("%s; retry after %d s" % (err, math.ceil(kept["next"] - now)), file=sys.stderr)
             return 1
@@ -208,7 +215,7 @@ def usage(folder):
     except urllib.error.HTTPError as e:
         why = f"HTTP {e.code}"
         if e.code == 429:
-            why = "rate limited (429)"
+            why = RATE_LIMITED
             wait = (e.headers.get("Retry-After") or "") if e.headers else ""
             if not wait.isdigit():
                 # The header may also be an HTTP-date (RFC 9110): seconds from now, rounded up.
@@ -370,20 +377,34 @@ def account_cache(cache_dir, folder):
 
 
 def note(cache, kept, now, body, why):
-    """Writes one read of the account (usage()'s answer) over `kept` into `cache`, as account_reading() keeps it."""
-    if body is not None:
-        kept = {"at": now, "next": now + ACCOUNT_TTL, "body": body, "bodyAt": now, "error": None}
-    else:
-        wait = re.search(r"retry after ([0-9]+) s", why)
-        kept = {"at": now, "next": now + max(ACCOUNT_TTL, int(wait.group(1)) if wait else 0),
-                "body": kept.get("body") if isinstance(kept.get("body"), dict) else None,
-                "bodyAt": kept.get("bodyAt") if isinstance(kept.get("bodyAt"), (int, float)) else None, "error": why}
+    """Writes one read of the account (usage()'s answer) over `kept` into `cache`, as account_reading() keeps it.
+    The file is read again under its lock first: readers of one account (the Board, the guard, the watcher) can ask
+    at once, and a 429 another one saved while this read was out keeps its later deadline and reason, whatever this
+    read got. Written over, that 429's wait was lost and the account asked again inside it."""
     os.makedirs(os.path.dirname(cache), exist_ok=True)
-    tmp = "%s.%d" % (cache, os.getpid())
-    with open(tmp, "w") as f:
-        json.dump(kept, f)
-    os.replace(tmp, cache)
-    return kept
+    with open(cache + ".lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            with open(cache) as f:
+                held = json.load(f)
+            kept = held if isinstance(held, dict) else kept
+        except (OSError, ValueError):
+            pass
+        if body is not None:
+            new = {"at": now, "next": now + ACCOUNT_TTL, "body": body, "bodyAt": now, "error": None}
+        else:
+            wait = re.search(r"retry after ([0-9]+) s", why)
+            new = {"at": now, "next": now + max(ACCOUNT_TTL, int(wait.group(1)) if wait else 0),
+                   "body": kept.get("body") if isinstance(kept.get("body"), dict) else None,
+                   "bodyAt": kept.get("bodyAt") if isinstance(kept.get("bodyAt"), (int, float)) else None, "error": why}
+        err, nxt = kept.get("error"), kept.get("next")
+        if isinstance(err, str) and err.startswith(RATE_LIMITED) and isinstance(nxt, (int, float)) and nxt > new["next"]:
+            new.update(next=nxt, error=err)
+        tmp = "%s.%d" % (cache, os.getpid())
+        with open(tmp, "w") as f:
+            json.dump(new, f)
+        os.replace(tmp, cache)
+    return new
 
 
 def pace(used, reset, now):
@@ -1649,7 +1670,7 @@ def model_calls(rows):
 
 def main(argv):
     if argv[1:2] == ["fetch"] and len(argv) <= 4:
-        return fetch(argv[2] if len(argv) >= 3 else None, argv[3] if len(argv) == 4 else None)
+        return fetch(argv[2] if len(argv) >= 3 and argv[2] else None, argv[3] if len(argv) == 4 else None)
     if len(argv) in (3, 4) and argv[1] == "accounts":
         json.dump(accounts(argv[2], time.time(), argv[3] if len(argv) == 4 else None), sys.stdout)
         return 0

@@ -158,8 +158,11 @@ MOVED=${STATE%/*}/moved.json
 # shellcheck disable=SC2034 # read by lib/snapshot.sh, which conveyor.sh sources beside this file
 HISTORY=${STATE%/*}/history.json
 LIMIT=${STATE%/*}/limit.jsonl     # the Claude weekly limit readings taken for the guard: {time, pct}
-# The reading is the account's whose folder reading() sets CLAUDE_CONFIG_DIR to (ACCT's, else the default login's).
-LIMIT_CMD=${CONVEYOR_LIMIT_CMD:-python3 $(printf %q "$HERE/../.claude/scripts/dashboard_limit.py") fetch '"$CLAUDE_CONFIG_DIR"'}
+# The reading is the account's whose folder reading() sets CLAUDE_CONFIG_DIR to (ACCT's, else the default login's). It
+# keeps and honours the account's 429 deadline in the machine's one folder the Board's reads use too: asked with none,
+# every LIMIT_TTL whatever wait a 429 named, it kept the account refused for days, the Board's reads with it.
+# shellcheck disable=SC2034 # read by lib/control.sh (reading()), which conveyor.sh sources beside this file
+LIMIT_CMD=${CONVEYOR_LIMIT_CMD:-python3 $(printf %q "$HERE/../.claude/scripts/dashboard_limit.py") fetch '"$CLAUDE_CONFIG_DIR" "${XDG_CACHE_HOME:-$HOME/.cache}/conveyor/accounts"'}
 # The Claude accounts of this host: the host file's accounts, each {name, configDir}, a Claude config folder already
 # signed in on this host (CLAUDE_CONFIG_DIR=<folder> claude, then sign in). The control record's account (the
 # builder's) and reviewAccount (a Claude reviewer's; none: the builder's) name one; none is the host's default login.
