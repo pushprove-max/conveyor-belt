@@ -174,6 +174,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local me cc seen=none sect='' nyes=0 heldto='' vmode='' ybase rules sprompt hdr fin='' finrev earlier='' prv='' caught='' owe tsess='' cmsg rtr rrev ro='[]' pro='[]' rmsg ported='' kp='' mates=() t5=() trc ran apart='' back='' rf sf='' sk='' mk='' pk='' pt=''
   local vrule=on rounds=0 rep hard refix='' waitsec=0 behind='[]' cpid chead cseen own kept='' docpass='' docs parsecheck='' pfix='' # waitsec, behind: the seconds it has waited on other cards, and those cards (settle())
   local sv an ex ids fl # sv, an, ex: a review's survived findings, its answers and the lines it cites (repeats(), answers(), excerpts()); ids, fl: the fix round's numbered findings and its lines (numbered(), fixlines())
+  local crev='[]' # crev: the review lines of the kept-patch chain this card carries (pro and rounds are read from them)
   local grown='' # grown: the judge was asked about the size of its change (growcheck(), lib/slices.sh)
   local rline='' ended='{}' stop='' finend='{}' earlyend='' fe # rline, ended, stop: a review's line before it is written, and why the loop ended (loopstop()); finend, earlyend, fe: why the loop of a port's kept review ended, and the stop the filed line carries
   local lfix='' # lfix: the change the landing gate's lint fix left, its cardpatch() (lintgate(), lib/lint.sh)
@@ -308,12 +309,14 @@ card() { # <card> <issue> [<branch> <tip>]
   # to one built from nothing. `retry` moved those review lines out of its card records, and a new review replaces the
   # kept one, so its landing reads them here (ro, below). Bug: every retried card of the issue was read, so a patch
   # `retry --fresh` discarded brought its rollout action back into the commit.
+  # One read gives the chain's review lines (crev): pro is their rollout actions, and rounds (below) counts them.
   if [ -n "$from" ] && [ -n "$mode" ] && [ "$mode" != stale ]; then
-    pro=$(stdb ask issue retried "$n" | jq -cs --argjson n "$n" --arg f "$from" 'map(select(.issue == $n)) as $l
+    crev=$(stdb ask issue retried "$n" | jq -cs --argjson n "$n" --arg f "$from" 'map(select(.issue == $n)) as $l
       | def up: . as $c | ($l | map(select(.card == $c and .step == "worktree")) | first | .reason // ""
           | select(test("built from nothing") | not) | capture("kept patch of card (?<c>c[A-Za-z0-9-]+)").c) // null;
       [limit(100; $f | recurse(up; . != null))] as $chain
-      | [$l[] | select(.step == "review" and (.card | IN($chain[]))) | .rollout // [] | .[]]') \
+      | [$l[] | select(.step == "review" and (.card | IN($chain[])))]') \
+      && pro=$(jq -c '[.[] | .rollout // [] | .[]]' <<<"$crev") \
       || { block "$c" "$n" "$wt" "worktree: the engine could not read the rollout actions of the retried cards of the issue"; return; }
   fi
   # A card that takes up the kept patch of a loop that did not finish carries that loop's review rounds: the round
@@ -321,16 +324,12 @@ card() { # <card> <issue> [<branch> <tip>]
   # with no build: a NO-GO there is fixed and goes round the loop. Not the port of a finished loop: its loop ended,
   # and this review checks something new.
   # Its fix rounds' findings and diffs come with them, so a finding that comes back is known as one (repeats()).
-  # Only the reviews of that loop count: those of the cards whose kept patch this card carries (the chain, as pro
-  # reads it). A card's id is its own, so another project's cards are not in the chain; the lines' repo is not read, as
-  # a project renamed in host.json keeps its chain. Bug (issue 1071): every review line of the issue in the retried
-  # file was counted, another chain's and another project's too, so a card's first NO-GO could be its last review.
+  # Only the reviews of that loop count: those of the cards whose kept patch this card carries (crev, the lines pro
+  # is read from). A card's id is its own, so another project's cards are not in the chain; the lines' repo is not
+  # read, as a project renamed in host.json keeps its chain. Bug (issue 1071): every review line of the issue in the
+  # retried file was counted, another chain's and another project's too, so a card's first NO-GO could be its last review.
   if [ "$mode" = session ] || [ "$mode" = review ] || { [ "$mode" = port ] && [ -z "$fin" ]; }; then
-    rounds=$(stdb ask issue retried "$n" 2>/dev/null | jq -s --argjson n "$n" --arg f "$from" 'map(select(.issue == $n)) as $l
-      | def up: . as $c | ($l | map(select(.card == $c and .step == "worktree")) | first | .reason // ""
-          | select(test("built from nothing") | not) | capture("kept patch of card (?<c>c[A-Za-z0-9-]+)").c) // null;
-      [limit(100; $f | recurse(up; . != null))] as $chain
-      | [$l[] | select(.step == "review" and (.card | IN($chain[])))] | length' 2>/dev/null) || rounds=0
+    rounds=$(jq 'length' <<<"$crev" 2>/dev/null) || rounds=0
     [[ $rounds =~ ^[0-9]+$ ]] || rounds=0
     # Rounds still beside the old worktree are the ones its block could not move (a folder of that name in the kept
     # folder stopped it, so that one is not the history): those are copied.
