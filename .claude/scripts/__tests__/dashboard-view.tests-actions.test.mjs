@@ -175,11 +175,15 @@ test('Tests actions: the Tests model: Other… shows a text field and Save posts
   assert.ok(other, 'Other… shows a text field');
   type(other, 'claude-new-model');
   assert.ok(!act(model(w), 'tmodel-save').hidden && model(w).textContent.includes('Unsaved'));
+  // #1088: In force shows only while the selects differ from it, saying what is saved.
+  const inForce = () => model(w).querySelector('.tests-in-force');
+  assert.ok(!inForce().hidden && inForce().textContent === 'In force: claude · claude-sonnet-5-5 · medium', 'unsaved: In force shows the saved one');
   assert.deepEqual(w.posts, [], 'a pick sends nothing');
   act(model(w), 'tmodel-save').click();
   await settle();
   assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'tests', args: ['claude', 'claude-new-model', 'medium'], repo: 'sample' } }]);
-  assert.match(model(w).textContent, /In force: claude · claude-new-model · medium/);
+  assert.equal(inForce().textContent, 'In force: claude · claude-new-model · medium');
+  assert.ok(inForce().hidden, 'saved: In force would repeat the selects, so it is hidden');
   assert.ok(act(model(w), 'tmodel-save').hidden, 'saved: no longer Unsaved');
 });
 

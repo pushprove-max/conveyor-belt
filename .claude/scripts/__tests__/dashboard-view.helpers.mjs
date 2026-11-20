@@ -109,6 +109,7 @@ export const clone = (x) => JSON.parse(JSON.stringify(x));
 export const SPLIT = {
   board: [['board-loop', 'Loop'], ['board-push', 'Push landed and full test suite'], ['board', 'Board']],
   rules: [['rules', 'Rules'], ['rules-produce', 'What these rules produce'], ['rules-prices', 'Model prices'], ['rules-held', 'Held by you or a label'], ['rules-issues', 'Open issues']],
+  tests: [['tests', 'Tests'], ['tests-settings', 'Test settings']],
 };
 // The panels drawn from one part of the list: the part's own panel, or each one SPLIT names for it.
 export const family = (id) => (SPLIT[id] ? SPLIT[id].map(([x]) => x) : [id]);
@@ -120,7 +121,8 @@ export const RULES_IDS = family('rules');
 export const CONTROL_SIZES = { machine: 'full', 'board-loop': 'full', 'board-push': 'full', board: 'full' };
 export const RULES_SIZES = { rules: 'full', 'rules-produce': 'small', 'rules-prices': 'full', 'rules-held': 'full', 'rules-issues': 'full' };
 export const BELT3D_IDS = ['belt3d'];
-export const TESTS_IDS = ['tests'];
+export const TESTS_IDS = family('tests');
+export const TESTS_SIZES = { tests: 'full', 'tests-settings': 'full' };
 export const BENCH_IDS = ['bench'];
 export const TAB = (id) => (CONTROL_IDS.includes(id) ? 'control' : RULES_IDS.includes(id) ? 'rules' : BELT3D_IDS.includes(id) ? 'belt3d' : TESTS_IDS.includes(id) ? 'tests'
   : BENCH_IDS.includes(id) ? 'bench' : 'overview');
@@ -774,17 +776,18 @@ export const TA = (() => {
     t.flaky = [{ case: 'conveyor/conveyor.test.sh: mergeclean', count: 2, issue: 490, files: ['conveyor/conveyor.test.sh', MERGE] }];
     return d;
   }
-  const tp = (w) => panel(w, 'tests');
+  const tp = (w) => panel(w, 'tests'), sp = (w) => panel(w, 'tests-settings');  // the Tests panel; Test settings (#1088)
   const rowOf = (w, f) => Array.from(tp(w).querySelectorAll('.tests-row')).find((r) => r.dataset.file === f);
   const opened = (w, f) => Array.from(tp(w).querySelectorAll('.tests-open')).find((r) => r.dataset.file === f);
   const results = (w) => tp(w).querySelector('.tests-results');
-  return { MERGE, X, ID1, ID2, RULES, NO_RULES, rec, snap, tp, rowOf, opened,
+  return { MERGE, X, ID1, ID2, RULES, NO_RULES, rec, snap, tp, sp, rowOf, opened,
     open: (w, f) => { if (!opened(w, f)) act(rowOf(w, f), 'open').click(); return opened(w, f); },
     type: (el, v) => { el.value = v; el.dispatchEvent(new el.ownerDocument.defaultView.Event('input')); },
     pick: (el, v) => { el.value = v; el.dispatchEvent(new el.ownerDocument.defaultView.Event('change')); },
     said: (w) => tp(w).querySelector('.tests-note').textContent,
-    auto: (w) => tp(w).querySelector('.tests-auto'),
-    model: (w) => tp(w).querySelector('.tests-actions'),
+    setSaid: (w) => sp(w).querySelector('.tests-note').textContent,
+    auto: (w) => sp(w).querySelector('.tests-auto'),
+    model: (w) => sp(w).querySelector('.tests-actions'),
     results,
     resultRow: (w, id) => Array.from(results(w).querySelectorAll('.tests-result-row')).find((r) => r.dataset.id === id),
     reply: (text) => ({ ok: true, status: 200, text: () => Promise.resolve(text) }) };

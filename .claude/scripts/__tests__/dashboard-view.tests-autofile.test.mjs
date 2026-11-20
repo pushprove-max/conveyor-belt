@@ -96,6 +96,34 @@ test('Tests actions: a rule field shows Unsaved when changed, and Save posts the
   assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'testrules', args: ['set', 'over usual', 'limit', '1.5'], repo: 'sample' } }]);
 });
 
+// Bug it guards: the guard and rule rows showed their setting key (perDay, maxOpen, on) as their help, so a row did not
+// say what it does, and the rule's On row did not say what On and Off each do.
+test('Tests actions: each Auto-file guard and rule row says what it does in a sentence, not its setting key', () => {
+  const w = boot({ tab: 'tests' });
+  deliver(w, snap());
+  const rows = [...auto(w).querySelectorAll('.tests-auto-guards .rules-row, .tests-auto-rules .rules-row')];
+  assert.ok(rows.length >= 8, `guards and rule fields shown: ${rows.length}`);
+  for (const r of rows) {
+    const key = r.dataset.limit.replace(/^(guard|rule)-/, ''), help = r.querySelector('.rules-what').textContent;
+    assert.notEqual(help, key, `${r.dataset.limit} shows its key as help`);
+    assert.match(help, /^[A-Z].*\.$/, `${r.dataset.limit} help is a sentence: ${help}`);
+  }
+  const on = auto(w).querySelector('[data-rule="over usual"] [data-limit="rule-on"] .rules-what').textContent;
+  assert.match(on, /On: .*Off: /);
+});
+
+// Bug it guards: a flaky or failed rule's help said a file matches over its limit and when its last runs in a row are
+// all over it, but the engine matches a count at its limit and never looks at runs in a row (testrulesmatches()).
+test('Tests actions: a count rule says it matches at its limit and does not use Runs in a row; a CPU rule says over', () => {
+  const w = boot({ tab: 'tests' });
+  deliver(w, snap({ rules: { ...TA.RULES, list: [...TA.RULES.list, { name: 'flaky twice', on: true, measure: 'flaky', limit: 2, runs: 3, minRuns: 0, days: 7 }] } }));
+  const help = (rule, k) => auto(w).querySelector(`[data-rule="${rule}"] [data-limit="rule-${k}"] .rules-what`).textContent;
+  assert.equal(help('flaky twice', 'limit'), 'A file matches when its count in those days is this limit or more.');
+  assert.equal(help('flaky twice', 'runs'), 'This rule does not use this setting.');
+  assert.equal(help('over usual', 'limit'), 'A file matches when its measure is over this limit.');
+  assert.match(help('over usual', 'runs'), /last runs, this many, are all over the limit/);
+});
+
 // Bug it guards: a value saved here stood until a snapshot named it, so when another Board saved 4 just after this
 // one's 2, every snapshot said 4 and the field said 2 for good. A snapshot begun before the Save was answered did not
 // read it, and one the live feed republishes with a new time still names the value replaced: neither undoes the Save; one begun

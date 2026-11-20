@@ -630,7 +630,8 @@ issue number, as a link, and the issue title.
 ## Tests page
 
 The Tests tab shows, from top to bottom: the Test map, a line with a link to the [Benchmarks tab](#benchmarks-tab), the
-figures, the table of test files, Test edits by cards, Removed by Optimize, Recent actions, and Settings.
+figures, the table of test files, Test edits by cards, Removed by Optimize, and Recent actions. The settings of the
+tests are in the Test settings panel, after the Tests panel on the same tab.
 
 The Test map part shows the state of the [test map](configuration.md#the-test-map). A made map shows how many source
 files and test files it maps, how many commits it is behind main, when it was made and how long its run took. It
@@ -899,10 +900,16 @@ test that still covers each case of the file. Each file of an action on many fil
 its own answer. At most 3 test actions run at once. The others wait as queued and start in the order asked. Stop
 takes a queued one off before it starts.
 
-Settings is closed until you open it. It holds "Model for Tests actions" (Judge and Explain the slowdown need it),
-Test limits (the files slow on purpose in the pack), and Auto-file,
-which shows the test rules (`conveyor.sh testrules`) and the log of what they filed (`conveyor/README.md`, Test
-actions).
+The Test settings panel, on the Tests tab after the Tests panel, has three sections. Each section says once where its
+settings are saved:
+
+- **Test actions**: "Model for Tests actions", the CLI, model and effort that Judge and Explain the slowdown use. It
+  is saved in the control record. "In force" shows the saved model only while you have a change that is not saved.
+- **Test limits**: the files slow on purpose, and "Take a file off card runs" when the pack has it. They are saved in
+  the pack file.
+- **Auto-file**: the switch for the test rules (`conveyor.sh testrules`), their guards and their fields, saved in the
+  pack file. The preview of what the rules matched is under the switch, and the log of what they filed is at the end.
+  Each is in a box of its own (`conveyor/README.md`, Test actions).
 
 ## Benchmarks tab
 

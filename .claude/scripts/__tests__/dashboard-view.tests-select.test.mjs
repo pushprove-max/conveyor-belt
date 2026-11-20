@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // The Tests page's layout and its selection (issue 73): the checkboxes, the bar of the files selected with Judge,
 // Optimize and Run on all of them in one POST, the answer for each file and the files left out with why; the figures
-// that filter; the column hints; and the Settings section. Shared setup: dashboard-view.helpers.mjs (TA.snap(): the
+// that filter; and the column hints. The Test settings panel is in dashboard-view.tests-limits.test.mjs. Shared setup: dashboard-view.helpers.mjs (TA.snap(): the
 // three files of TESTS, with the Tests model and the actions).
 import assert from 'node:assert/strict';
 import { boot, deliver, next, settle, act, cases, clone, css, iso, T0, TA } from './dashboard-view.helpers.mjs';
@@ -165,19 +165,4 @@ test('Tests select: each column heading has a hint, tied to its button', () => {
   assert.equal(hint('clock').textContent, 'Wall time divided by CPU time. Above 2× the file waits more than it works.');
   // jsdom lays nothing out, so the stylesheet is read: the hint shows on hover and on keyboard focus of its heading.
   assert.match(css, /\.tests-table th:hover \.tests-hint, \.tests-table th:focus-within \.tests-hint \{ display: block; \}/);
-});
-
-// Bug it guards (D5): the settings above the table, pushing the files the owner came for off the screen; or a section
-// that closed again at each snapshot.
-test('Tests select: Settings comes after the table, starts collapsed, holds the Tests model, Test limits and Auto-file, and stays open', () => {
-  const w = show();
-  const set = () => tp(w).querySelector('details.tests-settings');
-  assert.equal(set().open, false);
-  assert.equal(set().querySelector('summary').textContent, 'Settings');
-  assert.deepEqual(['.tests-actions', '.tests-limits', '.tests-auto'].map((s) => !!set().querySelector(s)), [true, true, true]);
-  const order = ['.tests-figs', '.tests-files', '.tests-results', '.tests-settings'].map((s) => tp(w).querySelector(s));
-  order.slice(1).forEach((el, i) => assert.ok(order[i].compareDocumentPosition(el) & w.Node.DOCUMENT_POSITION_FOLLOWING, `${i}`));
-  set().open = true;
-  next(w, four());
-  assert.equal(set().open, true, 'a new snapshot keeps it open');
 });

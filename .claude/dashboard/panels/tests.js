@@ -3,8 +3,9 @@
 // after Rules. It shows one project at a time: with more than one on the host, the machine head's Show picks it, as
 // on the Rules tab, and the heading names it ("Tests: sample").
 // The page, top to bottom (#73, #74, #178): the Test map part, the figures, the table with its search and filters, Test edits by cards (#76),
-// Removed by Optimize, the bar of the files selected, Recent actions, and one section "Settings", collapsed until
-// opened, with the Tests model, Test limits and Auto-file.
+// Removed by Optimize, the bar of the files selected and Recent actions. Its settings (#1088) are a panel of their own
+// on the tab, Test settings: Test actions (the Tests model), Test limits and Auto-file. Each section says once where
+// its rows save. One state S draws both panels; each panel has its own note, which says what its own controls did.
 // The figures: Timed files, files slower than usual, files that wait more than they work (their
 // last run took more than twice its CPU time on the clock: WAITS), and the card test steps of the 7 days: their slot
 // wait and their run time. A figure that counts the files of a status is a button that shows that status alone, as
@@ -83,7 +84,7 @@
 // Its More menu holds Explain the slowdown, Mutation check, Split it (#768: the preview Optimize opens, of an issue to split
 // the file; disabled on a runner; a button of the row, primary, when the judge's newest verdict is split), Keep a case off,
 // Close its issue as done and Mark as slow on purpose (it asks for the reason).
-// Settings, Test limits. Each row names where it saves, the pack file (this project): the files slow on purpose (a
+// Test settings, Test limits. Its rows save to the pack file (this project): the files slow on purpose (a
 // list), and, only when the snapshot names them, the hard box of each test file (settings.box: {on}) and "Take a
 // file off card runs" (settings.slowIssues, #457).
 // Every value is typed or picked first: the row says Unsaved, with Save and Cancel, as on the Rules tab, and only Save
@@ -138,11 +139,13 @@
 // all) and Stop (testmap stop); at its end, its result in place.
 (function () {
   'use strict';
+  const PART = 'tests';    // the part both panels draw from: the Tests panel's id; Test settings is `${PART}-settings`
   const REASON_MAX = 300;  // a reason, as dashboard_server.py's said_ok takes it
   const WAITS = 2;         // a file waits more than it works when its last run took more than this times its CPU time
   const FAILS = 2;         // a file fails often when this many test steps or more failed in it, not counting those a card's own change made fail (failsOf())
   const NEVER = 20;        // a file with this many runs on record or more and no catch shows "Never caught anything"
   const PACK = 'Pack file: this project';
+  const CONTROL = 'Control record: this project';  // `conveyor.sh control tests`
   // The status chips, in the order of the filters: key, words, tone, whether a row with it needs a look.
   const MARKS = [
     ['slower', 'Slower than usual', 'warn', true], ['faster', 'Faster', 'ok', false],
@@ -182,7 +185,8 @@
     tl: new Map(),       // the filter of an opened row's Timeline, by dk(file): all (with none), runs, optimize, edits or judge
     older: new Map(),    // a file's older runs and test edits, by dk(file), read when its Timeline is opened: {stamp, busy, data, error}
     uid: 0,              // a counter for the ids that tie a row's tabs to their panes
-    settingsOpen: false };  // the Settings section is open
+    setEl: null,         // the Test settings panel's body, once drawn
+    from: 'tests' };     // the panel whose control was used last (tests or set): its note says what it did
 
   const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
   const list = (v) => (Array.isArray(v) ? v : []);
@@ -248,7 +252,10 @@
       'Its newest mutation check: the mutants (small changes to the code it tests) it caught, of those made. Point at a count to see when the check ran and on which commit.'],
     ['status', 'Status', (f) => (look(f) ? 100 : 0) + marks(f).length, 'What needs a look first, then the other marks of the file.']];
 
-  function say(text) { const n = S.el && S.el.querySelector('.tests-note'); if (n) n.textContent = text; }
+  function say(text) {
+    const at = S.from === 'set' && S.setEl ? S.setEl : S.el, n = at && at.querySelector('.tests-note');
+    if (n) n.textContent = text;
+  }
   function button(text, cls, act, label, fn) {
     const b = S.ctx.h('button', `btn ${cls || ''}`.trim(), text);
     b.type = 'button'; b.dataset.act = act; b.setAttribute('aria-label', label || text);
@@ -262,6 +269,13 @@
     if (where) head.append(h('span', 'tests-where', `Saves to: ${where}`));
     box.append(...kids.filter(Boolean));
     el.append(head, box);
+    return el;
+  }
+  // A section of Test settings: its heading, then where its rows save, said once.
+  function section(cls, name, where) {
+    const h = S.ctx.h, el = h('section', `tests-set-part ${cls}`);
+    el.append(h('h3', 'tests-set-head', name));
+    if (where) el.append(h('p', 'tests-where', `Saves to: ${where}`));
     return el;
   }
 
@@ -1081,15 +1095,16 @@
       });
     });
     const cancel = button('Cancel', 'btn-quiet', 'tmodel-cancel', 'Put the Tests model back as it is in force', () => { S.tmodel.delete(repo); draw(); });
-    function mark() { const on = unsaved(); [flag, save, cancel].forEach((x) => { x.hidden = !on; }); }
+    // In force says what is saved only while the selects show another value (an unsaved change): else it repeats them.
+    const was = h('span', 'board-from tests-in-force', `In force: ${inForce ? `${inForce.cli} · ${inForce.model} · ${inForce.effort || 'default effort'}` : 'none'}`);
+    function mark() { const on = unsaved(); [flag, save, cancel, was].forEach((x) => { x.hidden = !on; }); }
     mark();
-    out.push(effort, flag, save, cancel, h('span', 'board-from', `In force: ${inForce ? `${inForce.cli} · ${inForce.model} · ${inForce.effort || 'default effort'}` : 'none'}`));
+    out.push(effort, flag, save, cancel, was);
     return out;
   }
   function actionsHead() {
-    const h = S.ctx.h, el = h('section', 'tests-actions');
-    el.append(h('h3', 'board-head', 'Test actions'),
-      row('tmodel', 'Model for Tests actions', 'The CLI, model and effort of Judge and Explain the slowdown. Run needs none.', null, ...seatCtl()));
+    const el = section('tests-actions', 'Test actions', CONTROL);
+    el.append(row('tmodel', 'Model for Tests actions', 'Judge and Explain the slowdown use this CLI, model and effort. Run uses none.', null, ...seatCtl()));
     return el;
   }
 
@@ -1389,7 +1404,7 @@
     return 'Would file';
   }
   function previewTable(r) {
-    const h = S.ctx.h, last = obj(r.last), matches = list(last && last.matches).filter(obj), el = h('div', 'tests-auto-preview');
+    const h = S.ctx.h, last = obj(r.last), matches = list(last && last.matches).filter(obj), el = h('div', 'tests-set-box tests-auto-preview');
     el.append(h('p', 'board-head', last ? `Preview: what the rules matched at ${S.ctx.when(last.time)}, with the result of the guards for each match` : 'Preview: the rules did not run yet'));
     if (!matches.length) { el.append(h('p', 'board-from', last ? 'The rules matched no file.' : 'The rules run after each card test step.')); return el; }
     const t = h('table', 'tests-table tests-auto-table'), head = h('tr'), body = h('tbody'), thead = h('thead');
@@ -1404,14 +1419,14 @@
     return el;
   }
   function autofile() {
-    const h = S.ctx.h, r = rules(), el = h('section', 'tests-auto');
-    el.append(h('h3', 'board-head', 'Auto-file'));
-    if (!obj(tests() && tests().rules)) { el.append(h('p', 'board-from', 'The build machine names no auto-file rules. It runs an older Conveyor.')); return el; }
+    const h = S.ctx.h, r = rules(), named = obj(tests() && tests().rules), el = section('tests-auto', 'Auto-file', named ? PACK : null);
+    if (!named) { el.append(h('p', 'board-from', 'The build machine names no auto-file rules. It runs an older Conveyor.')); return el; }
     const on = shown('rules-on') === 'true', confirm = asking('on');
     const sw = on
       ? actBtn('Turn off', 'auto-off', 'Turn auto-file off', () => sendRule('rules-on', ['off'], 'false', 'Auto-file is now Off.'))
       : actBtn('Turn on', 'auto-on', 'Turn auto-file on: shows the preview first', () => { S.ask = { kind: 'on', repo: S.d.repo }; S.keep = { act: 'auto-on-confirm' }; draw(); say('Check the preview. Then click "Turn on: confirm".'); });
-    el.append(row('auto-switch', 'Auto-file test issues', 'One switch for all rules. Off: the rules file no issue.', PACK, h('span', 'board-value', on ? 'On' : 'Off'), confirm ? null : sw));
+    el.append(row('auto-switch', 'Auto-file test issues', 'One switch for all the rules. On: the rules file issues after each card test step. Off: they file none.', null,
+      h('span', 'board-value', on ? 'On' : 'Off'), confirm ? null : sw));
     if (confirm && !on) {
       const c = h('div', 'tests-preview');
       c.dataset.armed = '';
@@ -1424,12 +1439,13 @@
     // The guards.
     const g = h('div', 'tests-auto-guards');
     g.append(h('p', 'board-head', 'Guards for all rules'));
-    [['perDay', 'Most issues in one day', WHOLE1, 'a whole number of 1 or more'], ['maxOpen', 'Most issues open at one time', WHOLE1, 'a whole number of 1 or more'],
-      ['quietDays', 'Days with no issue for a file after its last issue closed', WHOLE0, 'a whole number of 0 or more']].forEach(([k, words, re, what]) => {
-      g.append(row(`guard-${k}`, words, k, PACK, ...setting(`guard:${k}`, { act: `guard-${k}`, label: words, type: 'number',
+    [['perDay', 'Most issues in one day', WHOLE1, 'a whole number of 1 or more', 'The rules file no more issues than this in one day. The rest wait for the next day.'],
+      ['maxOpen', 'Most issues open at one time', WHOLE1, 'a whole number of 1 or more', 'The rules file no issue while this many of their issues are open.'],
+      ['quietDays', 'Days with no issue for a file after its last issue closed', WHOLE0, 'a whole number of 0 or more', 'The rules file no issue about a file for this many days after its last issue closed.']].forEach(([k, words, re, what, help]) => {
+      g.append(row(`guard-${k}`, words, help, null, ...setting(`guard:${k}`, { act: `guard-${k}`, label: words, type: 'number',
         check: checkBy(re, `${words} is ${what}.`), send: (v) => rulesCmd(['guard', k, v]), said: (v) => `${words}: now ${v}` })));
     });
-    g.append(row('guard-burst', 'Stop a burst', 'When one run of the rules matches more files than one day may file, that run files nothing.', PACK, ...setting('guard:burst', { act: 'guard-burst', label: 'Stop a burst', choices: ONOFF,
+    g.append(row('guard-burst', 'Stop a burst', 'On: when one run of the rules matches more files than one day allows, it files nothing. Off: it files up to the day\'s limit.', null, ...setting('guard:burst', { act: 'guard-burst', label: 'Stop a burst', choices: ONOFF,
       check: () => null, send: (v) => rulesCmd(['guard', 'burst', v]), said: (v) => `Stop a burst is now ${v === 'true' ? 'On' : 'Off'}` })));
     el.append(g);
     // The rules, each with its fields.
@@ -1441,15 +1457,17 @@
       const box2 = h('div', 'tests-rule'), name = x.name;
       box2.dataset.rule = name;
       box2.append(h('p', 'board-label', `Rule: ${name}`));
-      const fld = (k, words, o) => box2.append(row(`rule-${k}`, words, k, null, ...setting(`rule:${k}:${name}`, Object.assign({ act: `rule-${k}`, label: `${words} of rule ${name}`,
+      const fld = (k, words, help, o) => box2.append(row(`rule-${k}`, words, help, null, ...setting(`rule:${k}:${name}`, Object.assign({ act: `rule-${k}`, label: `${words} of rule ${name}`,
         send: (v) => rulesCmd(['set', name, k, v]), said: (v) => `rule ${name}: ${k} now ${v}` }, o))));
-      fld('on', 'On', { choices: ONOFF, check: () => null });
-      fld('measure', 'Measure', { choices: MEASURES, check: () => null });
-      fld('limit', 'Limit (times, or a count)', { type: 'number', check: checkBy(LIMIT, 'The limit is a number of 0 or more, as 1 or 1.5.') });
-      fld('runs', 'Runs in a row', { type: 'number', check: checkBy(WHOLE1, 'Runs in a row is a whole number of 1 or more.') });
-      fld('minRuns', 'Least runs on record', { type: 'number', check: checkBy(WHOLE0, 'Least runs on record is a whole number of 0 or more.') });
-      if (x.measure === 'flaky' || x.measure === 'failed') fld('days', 'Days', { type: 'number', check: checkBy(WHOLE1, 'Days is a whole number of 1 or more.') });
-      if (x.measure === 'clock') fld('minClock', 'Least clock s of a run', { type: 'number', check: checkBy(LIMIT, 'Least clock s is a number of 0 or more.') });
+      fld('on', 'On', 'On: this rule files issues. Off: it files none.', { choices: ONOFF, check: () => null });
+      fld('measure', 'Measure', 'What the rule measures in the test runs of each file.', { choices: MEASURES, check: () => null });
+      // A count rule (flaky, failed) matches at its limit and does not use runs in a row (testrulesmatches()).
+      const count = x.measure === 'flaky' || x.measure === 'failed';
+      fld('limit', 'Limit (times, or a count)', count ? 'A file matches when its count in those days is this limit or more.' : 'A file matches when its measure is over this limit.', { type: 'number', check: checkBy(LIMIT, 'The limit is a number of 0 or more, as 1 or 1.5.') });
+      fld('runs', 'Runs in a row', count ? 'This rule does not use this setting.' : 'A file matches only when its last runs, this many, are all over the limit.', { type: 'number', check: checkBy(WHOLE1, 'Runs in a row is a whole number of 1 or more.') });
+      fld('minRuns', 'Least runs on record', 'The rule does not look at a file with fewer runs on record.', { type: 'number', check: checkBy(WHOLE0, 'Least runs on record is a whole number of 0 or more.') });
+      if (count) fld('days', 'Days', 'The rule counts the test steps of this many past days.', { type: 'number', check: checkBy(WHOLE1, 'Days is a whole number of 1 or more.') });
+      if (x.measure === 'clock') fld('minClock', 'Least clock s of a run', 'A file matches only when each of those runs took at least this many clock seconds.', { type: 'number', check: checkBy(LIMIT, 'Least clock s is a number of 0 or more.') });
       rs.append(box2);
     });
     el.append(rs);
@@ -1457,7 +1475,10 @@
     const log = list(r.log).filter(obj), ul = h('ul', 'tests-auto-log');
     log.forEach((l) => ul.append(h('li', 'tests-auto-line', `${S.ctx.when(l.time)} · ${l.event === 'filed' ? `Filed #${l.issue}` : `Stopped by ${l.guard}`} · rule ${l.rule} · ${l.file}${l.why ? ` · ${l.why}` : ''}`)));
     if (!log.length) ul.append(h('li', 'board-from', 'Auto-file filed nothing and stopped nothing yet.'));
-    el.append(h('p', 'board-head', 'What auto-file did'), ul);
+    // The preview and the log are boxes of their own (app.css), apart from the settings rows.
+    const did = h('div', 'tests-set-box tests-auto-did');
+    did.append(h('p', 'board-head', 'What auto-file did'), ul);
+    el.append(did);
     return el;
   }
   // The switch, saved as the other settings are: it shows as saved until a snapshot names it.
@@ -1941,8 +1962,7 @@
 
   // ---- Test limits ----
   function limits() {
-    const h = S.ctx.h, el = h('section', 'tests-limits'), t = tests(), s = settings();
-    el.append(h('h3', 'board-head', 'Test limits'));
+    const h = S.ctx.h, el = section('tests-limits', 'Test limits', PACK), t = tests(), s = settings();
     if (!t) return el;
     const files = Object.entries(obj(s.files) || {}).filter(([, v]) => obj(v));
     const items = (pick, words) => {
@@ -1951,12 +1971,12 @@
       if (!got.length) ul.append(h('li', 'board-from', 'None'));
       return ul;
     };
-    el.append(row('purpose', 'Files slow on purpose', 'No CPU test rule files an issue about them. Each has a reason.', PACK, items((v) => (typeof v.slowOnPurpose === 'string' ? v.slowOnPurpose : null), (r) => r)));
+    el.append(row('purpose', 'Files slow on purpose', 'The CPU test rules file no issue about these files. Mark a file in its row, under More.', null, items((v) => (typeof v.slowOnPurpose === 'string' ? v.slowOnPurpose : null), (r) => r)));
     // #457's rows, only when the snapshot names them.
     const box = obj(s.box);
-    if (box) el.append(row('box', 'Hard box for each test file', 'A test file cannot use more CPU or memory than its test slot gives.', 'the engine (no setting)', h('span', 'board-value', box.on === false ? 'Off' : 'On')));
+    if (box) el.append(row('box', 'Hard box for each test file', 'A test file gets no more CPU or memory than its test slot. The engine sets this. You cannot change it.', null, h('span', 'board-value', box.on === false ? 'Off' : 'On')));
     if (typeof s.slowIssues === 'boolean') {
-      el.append(row('off-card-runs', 'Take a file off card runs', 'It files nothing and takes no file off card runs: the Auto-file rules file issues about test files.', PACK,
+      el.append(row('off-card-runs', 'Take a file off card runs', 'This setting has no effect now, On or Off. The Auto-file rules file the issues about test files.', null,
         ...setting('slowIssues', { act: 'slow-issues', label: 'Take a file off card runs', choices: [['true', 'On'], ['false', 'Off']],
           check: () => null, send: (v) => control(['slow-issues', v]), said: (v) => `Take a file off card runs is now ${v === 'true' ? 'On' : 'Off'}` })));
     }
@@ -2043,15 +2063,72 @@
     return p;
   }
 
-  function draw() {
+  // A control that is used tells which panel's note says what it did (say()).
+  const hooked = new WeakSet();
+  function hook(el, from) {
+    if (hooked.has(el)) return;
+    hooked.add(el);
+    ['click', 'change', 'input', 'keydown'].forEach((e) => el.addEventListener(e, () => { S.from = from; }, true));
+  }
+  // A panel's note, which keeps the text it said over a new draw.
+  function noteOf(el) {
+    const note = S.ctx.h('p', 'board-note tests-note'), was = el.querySelector('.tests-note');
+    note.setAttribute('aria-live', 'polite');
+    if (was) note.textContent = was.textContent;
+    return note;
+  }
+  // While a change waits for its answer, the panel's controls wait too, except those that only show or pick.
+  function still(root) {
+    if (!S.busy) return;
+    root.querySelectorAll('button, input, select, textarea').forEach((b) => {
+      if (!['filter', 'edits-filter', 'open', 'goto', 'copy', 'search', 'select', 'select-all', 'more', 'timeline-all', 'judge-report'].includes(b.dataset.act) && !/^(sort|figure|tab|tl)-/.test(b.dataset.act || '')) b.disabled = true;
+    });
+  }
+  // Both panels, each that is drawn (only: tests or set, the one panel); then the control focused before, or the one
+  // asked for (S.keep), has the focus again.
+  function draw(only) {
+    const els = [S.el, S.setEl].filter(Boolean);
+    const a = document.activeElement && els.some((x) => x.contains(document.activeElement)) && document.activeElement.dataset ? document.activeElement : null;
+    const keep = S.keep || (a && a.dataset.act ? { act: a.dataset.act, file: (a.closest('[data-file]') || { dataset: {} }).dataset.file } : null);
+    S.keep = null;
+    if (S.el && only !== 'set') drawTests();
+    if (S.setEl && only !== 'tests') drawSet();
+    if (!keep) return;
+    const scope = keep.file ? els.flatMap((x) => Array.from(x.querySelectorAll('[data-file]'))).filter((x) => x.dataset.file === keep.file) : els;
+    const again = scope.map((x) => x.querySelector(`[data-act="${keep.act}"]`)).find(Boolean);
+    if (again && !again.disabled) {
+      again.focus({ preventScroll: true });
+      // Asked (Optimize with this verdict, #130): the page scrolls to the preview, and the cursor is at the start of its body.
+      if (keep.scroll) {
+        const to = again.closest('.tests-preview') || again;
+        if (typeof to.scrollIntoView === 'function') to.scrollIntoView({ block: 'start' });
+        if (typeof again.setSelectionRange === 'function') again.setSelectionRange(0, 0);
+      }
+    }
+  }
+  // The Test settings panel (#1088): Test actions, Test limits and Auto-file. With no test figures (the pack does not
+  // read: tests is null) it says so and holds none of them: Test limits and Auto-file read the figures, and the Tests
+  // model is only for Judge and Explain the slowdown, which act on the table's files, and there is no table then.
+  function drawSet() {
+    const el = S.setEl, h = S.ctx.h;
+    hook(el, 'set');
+    if (S.d.repo === null) {
+      el.replaceChildren(S.ctx.state('empty', 'No test settings to show', 'Conveyor did not run on this project on the build machine yet. Pick a project under Show, above the tabs.'));
+      return;
+    }
+    const root = h('div', 'tests tests-set');
+    if (!tests()) root.append(h('p', 'warn-note', 'Conveyor could not read the test settings of this project. Its pack does not read, or the build machine runs an older Conveyor.'));
+    else root.append(actionsHead(), limits(), autofile());
+    el.replaceChildren(root, noteOf(el));
+    still(root);
+  }
+  function drawTests() {
     const el = S.el, h = S.ctx.h;
+    hook(el, 'tests');
     if (S.d.repo === null) {
       el.replaceChildren(S.ctx.state('empty', 'No tests to show', 'Conveyor did not run on this project on the build machine yet. Pick a project under Show, above the tabs.'));
       return;
     }
-    const a = document.activeElement && el.contains(document.activeElement) && document.activeElement.dataset ? document.activeElement : null;
-    const keep = S.keep || (a && a.dataset.act ? { act: a.dataset.act, file: (a.closest('[data-file]') || { dataset: {} }).dataset.file } : null);
-    S.keep = null;
     const t = tests(), every = list(t && t.files).filter((f) => obj(f) && typeof f.file === 'string');
     // A file a landed Optimize deleted or merged (removed) is not in the table: it shows under Removed by Optimize.
     const files = every.filter((f) => f.removed !== true), gone = every.filter((f) => f.removed === true);
@@ -2061,18 +2138,8 @@
     const parts = [];
     if (obj(S.d.testMap)) parts.push(mapPart(S.d.testMap));
     parts.push(benchLink());
-    // Settings: the Tests model, Test limits and Auto-file, collapsed until opened; it stays as it was from one draw to
-    // the next. With no test figures (the pack does not read: tests is null) there is no Settings control: Test limits and
-    // Auto-file read the figures, and the Tests model (read from control and testActions) is only for Judge and Explain
-    // the slowdown, which act on the table's files, and there is no table then.
-    const wasSet = el.querySelector('.tests-settings');
-    if (wasSet) S.settingsOpen = wasSet.open;
     const wasRecent = el.querySelector('.tests-results');
     if (wasRecent) S.recentOpen = wasRecent.open;
-    const set = h('details', 'tests-settings');
-    set.open = S.settingsOpen;
-    set.addEventListener('toggle', () => { S.settingsOpen = set.open; });
-    set.append(h('summary', 'board-head', 'Settings'));
     if (!t) {
       parts.push(h('p', 'warn-note', 'Conveyor could not read the test figures of this project. Its pack does not read, or the build machine runs an older Conveyor.'));
     } else {
@@ -2085,13 +2152,8 @@
       if (gone.length) parts.push(removed(gone));
       if (S.sel.size) parts.push(selBar(files));
       parts.push(recent(files, gone));
-      set.append(actionsHead(), limits(), autofile());
     }
-    if (t) parts.push(set);
-    const note = h('p', 'board-note tests-note');
-    note.setAttribute('aria-live', 'polite');
-    const was = el.querySelector('.tests-note');
-    if (was) note.textContent = was.textContent;
+    const note = noteOf(el);
     const root = h('div', S.sel.size ? 'tests tests-has-selbar' : 'tests');
     root.append(...parts);
     // The table scrolls sideways when wider than the panel (app.css): a new snapshot keeps its place.
@@ -2103,38 +2165,34 @@
     const wide = root.querySelector('.tests-scroll');
     if (wide) wide.scrollLeft = left;
     root.querySelectorAll('.tests-pane').forEach((p) => { const top = read.get(paneKey(p)); if (top) p.scrollTop = top; });
-    if (S.busy) {
-      root.querySelectorAll('button, input, select, textarea').forEach((b) => {
-        if (!['filter', 'edits-filter', 'open', 'goto', 'copy', 'search', 'select', 'select-all', 'more', 'timeline-all', 'judge-report'].includes(b.dataset.act) && !/^(sort|figure|tab|tl)-/.test(b.dataset.act || '')) b.disabled = true;
-      });
-    }
-    if (keep) {
-      const scope = keep.file ? Array.from(el.querySelectorAll('[data-file]')).filter((x) => x.dataset.file === keep.file) : [el];
-      const again = scope.map((x) => x.querySelector(`[data-act="${keep.act}"]`)).find(Boolean);
-      if (again && !again.disabled) {
-        again.focus({ preventScroll: true });
-        // Asked (Optimize with this verdict, #130): the page scrolls to the preview, and the cursor is at the start of its body.
-        if (keep.scroll) {
-          const to = again.closest('.tests-preview') || again;
-          if (typeof to.scrollIntoView === 'function') to.scrollIntoView({ block: 'start' });
-          if (typeof again.setSelectionRange === 'function') again.setSelectionRange(0, 0);
-        }
-      }
-    }
+    still(root);
   }
 
   // A value saved here stands until a snapshot names it, or until one begun at or after the Save was answered (with no
   // time, the next one) names a value other than the one it replaced: a change saved since from elsewhere then shows.
   // The live feed republishes the record it last read, so one still naming the replaced value never ends it.
-  function render(el, d, ctx) {
+  // Both panels draw from the one part: the first to get a snapshot takes it into S and draws both; the other, given
+  // the same snapshot, draws only itself.
+  const render = (which) => (el, d, ctx) => {
     const read = typeof ctx.updatedAt === 'function' ? ctx.updatedAt() : null;
     const view = ctx.project(d);
-    ctx.title(Array.isArray(view.repos) && view.repos.length > 1 && view.repo ? `Tests: ${view.repo}` : null);
+    ctx.title(Array.isArray(view.repos) && view.repos.length > 1 && view.repo ? `${which === 'set' ? 'Test settings' : 'Tests'}: ${view.repo}` : null);
+    if (which === 'set') S.setEl = el; else S.el = el;
+    if (S.raw === d && S.read === read && S.repo === view.repo) {
+      if (S.held) { S.late = true; return; }
+      draw(which);
+      return;
+    }
+    take(d, view, read, ctx);
+    if (S.held) { S.late = true; return; }
+    draw();
+  };
+  function take(d, view, read, ctx) {
     if (S.repo !== undefined && view.repo !== S.repo) {
       S.open.clear(); S.filter = 'all'; S.query = ''; S.refused = null; S.ask = null;
       S.sel.clear(); S.answers = null; S.menu = null; S.edit.clear(); S.mapSent = null; S.mapRefused = null;
     }
-    Object.assign(S, { el, ctx, d: view, read, repo: view.repo });
+    Object.assign(S, { raw: d, ctx, d: view, read, repo: view.repo });
     if (view.repo !== null) {
       const after = (p) => read !== null && (p.at !== null && p.at !== undefined ? read >= p.at : read !== p.read);
       S.pending.forEach((p, k) => {
@@ -2154,13 +2212,11 @@
       S.notes.forEach((n, k) => { if (n.state === 'sending' && !S.busy) S.notes.delete(k); });
       S.stopping.forEach((id) => { if (!actions().some((a) => a.id === id && live(a))) S.stopping.delete(id); });
     }
-    if (S.held) { S.late = true; return; }
-    draw();
   }
   // The panel is drawn whole. A button drawn anew between its press and its release lost the click (the browser gives
   // it to the element pressed, then gone): a row did not open, an action did not start. So a snapshot that comes while
   // the pointer is pressed in the panel is drawn after the release, once its click has run.
-  document.addEventListener('pointerdown', (e) => { S.held = Boolean(S.el && S.el.contains(e.target)); }, true);
+  document.addEventListener('pointerdown', (e) => { S.held = [S.el, S.setEl].some((x) => x && x.contains(e.target)); }, true);
   const release = () => {
     if (!S.held) return;
     S.held = false;
@@ -2171,7 +2227,7 @@
   window.addEventListener('blur', release);
 
   window.DASH_APP.panel({
-    id: 'tests',
+    id: PART,
     title: 'Tests',
     size: 'full',
     tab: 'tests',  // a tab of its own
@@ -2180,11 +2236,29 @@
     isEmpty: (d) => d.repo === null && !(d.others && typeof d.others === 'object' && Object.keys(d.others).length),
     empty(el, ctx) { el.append(ctx.state('empty', 'No tests to show', 'Conveyor did not run on this project on the build machine yet, so it has no test figures. Start Conveyor there, and they show here.')); },
     error(el, message, ctx) { el.append(ctx.state('error', 'The Board could not read the tests', message)); },
-    render,
+    render: render('tests'),
     // A value saved here waits for a snapshot begun after its answer, though the part be the same as the last.
     same(el, d, ctx) {
       const read = typeof ctx.updatedAt === 'function' ? ctx.updatedAt() : null;
-      if (S.pending.size && read !== S.read) render(el, d, ctx);
+      if (S.pending.size && read !== S.read) render('tests')(el, d, ctx);
+    },
+  });
+  // Test settings (#1088): the Tests tab's settings, a panel of their own after the Tests panel, from the same part.
+  window.DASH_APP.panel({
+    id: `${PART}-settings`,
+    title: 'Test settings',
+    size: 'full',
+    tab: 'tests',
+    part: PART,
+    rows: 'all',
+    rowSelector: '.rules-row',
+    isEmpty: (d) => d.repo === null && !(d.others && typeof d.others === 'object' && Object.keys(d.others).length),
+    empty(el, ctx) { el.append(ctx.state('empty', 'No test settings to show', 'Conveyor did not run on this project on the build machine yet, so it has no test settings. Start Conveyor there, and they show here.')); },
+    error(el, message, ctx) { el.append(ctx.state('error', 'The Board could not read the test settings', message)); },
+    render: render('set'),
+    same(el, d, ctx) {
+      const read = typeof ctx.updatedAt === 'function' ? ctx.updatedAt() : null;
+      if (S.pending.size && read !== S.read) render('set')(el, d, ctx);
     },
   });
 }());

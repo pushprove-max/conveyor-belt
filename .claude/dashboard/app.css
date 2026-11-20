@@ -919,8 +919,18 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 /* An opened row's More menu opens on a line of its own, under the actions. */
 .tests-more-menu { display: contents; }
 .tests-menu { flex-basis: 100%; display: flex; flex-direction: column; align-items: flex-start; padding: var(--sp-1); border: 1px solid var(--border); border-radius: var(--radius-sm); }
-.tests-settings > summary { cursor: pointer; }
-.tests-settings > section { margin-top: var(--sp-3); }
+/* Test settings (issue 1088): a section's heading is larger than a row's label; where it saves is said once under it.
+   Every row's label column has one width, so the controls start in one column, and each control is as wide as its
+   value (a number field as wide as a few digits). The preview and the log are boxes apart from the rows. */
+.tests-set-part + .tests-set-part { margin-top: var(--sp-4); }
+.tests-set-head { font-size: var(--fs-lg); font-weight: 650; color: var(--text); }
+.tests-set-part > .tests-where { margin-top: 2px; }
+.tests-set .rules-row { grid-template-columns: 26ch minmax(0, 1fr); }
+.tests-set .rules-ctl .field { flex: 0 0 auto; width: auto; }
+.tests-set .rules-ctl .field.rules-load { width: 10ch; }
+.tests-set-box { margin: var(--sp-3) 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--surface-2); border-radius: var(--radius-sm); background: var(--surface-2); }
+.panel[data-panel="tests-settings"] > .panel-body { container: test-settings / inline-size; }
+@container test-settings (max-width: 520px) { .tests-set .rules-row { grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); } }
 .tests-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 24px; }
 .tests-bar { width: 6px; height: 100%; border-radius: 1px; background: var(--accent); transform-origin: bottom; }
 .tests-more { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); padding: var(--sp-2) 0; }
