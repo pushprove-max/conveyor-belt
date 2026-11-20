@@ -19,7 +19,7 @@ case " $* " in *" --tools  "*) cat > /dev/null
   esac
   exit "$(cat "$STUB/claude-rc" 2>/dev/null || echo 0)" ;; esac
 cat > "$STUB/brief"; echo "$*" >> "$STUB/sessions"; . "$STUB/build"
-# A session asked for no stream (no --output-format stream-json) gets text, as Claude Code prints it.
-case " $* " in *" --output-format stream-json "*) ;; *) echo done; exit 0 ;; esac
+# A session asked for no stream and no JSON gets text, as Claude Code prints it; json prints the one result line.
+case " $* " in *" --output-format stream-json "* | *" --output-format json "*) ;; *) echo done; exit 0 ;; esac
 [ ! -f "$STUB/claude-usage" ] || { cat "$STUB/claude-usage"; exit 0; }
 echo '{"type":"result","is_error":false,"usage":{"input_tokens":10,"cache_creation_input_tokens":20,"cache_read_input_tokens":999,"output_tokens":5}}'

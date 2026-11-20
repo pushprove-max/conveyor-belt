@@ -136,10 +136,11 @@ swe() {
     && jq -c '.account = "bench"' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json" || fail "the logins were not made"
   # The conveyor arm on both engines and Claude alone passed their preflight an hour ago (a case of the preflight runs it),
   # with the logins their seats take (the conveyor arm's builder m is Claude's, its reviewer x Codex's), on the pinned first task's image, swe.json's limits and task set.
-  local k a
+  local k a img lim set now; img=img-$(sweorder | head -n 1); now=$(($(date +%s) - 3600))
+  lim=$(jq -c '{cpus: .limits.cpus, memory: .limits.memory, taskTimeout}' "$SRC/bench/swe.json"); set=$(jq -c '{dataset, revision, seed}' "$SRC/bench/swe.json")
   for k in conveyor/$EA conveyor/$EB solo/solo-m; do a=${k%/*}; mkdir -p "$B/preflight/$a"
-    jq -cn --arg k "${k#*/}" --argjson e "$(($(date +%s) - 3600))" --argjson s "$(jq -cS --arg n "$a" '.name = $n' "$SWE_FX/arms/$a.json")" --arg i "img-$(sweorder | head -n 1)" --argjson lim "$(jq -c '{cpus: .limits.cpus, memory: .limits.memory, taskTimeout}' "$SRC/bench/swe.json")" \
-      --argjson set "$(jq -c '{dataset, revision, seed}' "$SRC/bench/swe.json")" \
+    jq -cn --arg k "${k#*/}" --argjson e "$now" --argjson s "$(jq -cS --arg n "$a" '.name = $n' "$SWE_FX/arms/$a.json")" --arg i "$img" --argjson lim "$lim" \
+      --argjson set "$set" \
       '{arm: $s.name, key: $k, ok: true, why: null, at: "2026-11-17T00:00:00Z", epoch: $e, spec: $s, logins: (if $s.kind == "conveyor" then "claude codex" else "claude" end), image: $i, limits: $lim, set: $set}' \
       > "$B/preflight/$a/${k#*/}.json" || fail "the preflight passes were not kept"
   done
