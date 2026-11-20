@@ -388,5 +388,8 @@
   ],
   "conveyor/tests/deps.test.sh": [
     "conveyor/tests/startrule.test.sh"
+  ],
+  "conveyor/tests/swebench.test.sh": [
+    "conveyor/tests/swebencharms.test.sh"
   ]
 }
