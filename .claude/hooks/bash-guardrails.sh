@@ -1053,9 +1053,12 @@ Instead: run it once, and after it name the cases or test files you changed sinc
   # from a script or `bash -c` text is not seen.
   # A call with a test command the session did not run through the short-summary wrapper (WR_TB,
   # conveyor/tools/testbrief.sh in the engine's checkout) is run through it: the call's whole text becomes the body
-  # of an exported function that the wrapper runs in a child bash. Its whole output goes to a log file and the session
+  # of a function that the session's own shell runs in a subshell, its output (both streams) in a file under $TMPDIR
+  # that the wrapper then reads. No `export -f`: the session's shell is zsh on macOS, which exports no function to a
+  # child bash (issue #873). Its whole output goes to a log file and the session
   # sees only the failures, the summary and the log's path, so a big test log stops filling every later turn (issue
-  # #540). Its exit code is the command's, and its CPU seconds are still this shell's children's. The text stays
+  # #540). Its exit code is the command's, and its CPU seconds are still this shell's children's. If the file cannot
+  # be made, the call runs as written. The text stays
   # unquoted, so a hook after this one that is given the rewritten call (conveyor/opencode/guard.sh) still reads it as
   # commands. A call that leaves a job in the background (an `&` outside quotes that is not part of `&&` or a
   # redirection) is left as it is: its output goes to its own file, and the budget's trap must see its jobs. A call
@@ -1064,7 +1067,10 @@ Instead: run it once, and after it name the cases or test files you changed sinc
   WR_RUN=$CMD
   WR_BG=$(strip_quoted "$CMD" | sed -E 's/&&|[0-9]*>&|&>|<&|\|&//g')
   if [ "$WR_PLAIN" = 1 ] && [[ $WR_BG != *'&'* ]] && [ -x "$WR_TB" ]; then
-    WR_RUN="__cv_test() {"$'\n'"$CMD"$'\n'"}"$'\n'"export -f __cv_test"$'\n'"$(shq "$WR_TB") -- bash -c __cv_test"
+    WR_RUN="__cv_test() {"$'\n'"$CMD"$'\n'"}"$'\n'"if __cv_t=\$(mktemp \"\${TMPDIR:-/tmp}/testrun.XXXXXX\"); then"$'\n'
+    WR_RUN+="( __cv_test ) > \"\$__cv_t\" 2>&1; __cv_r=\$?"$'\n'
+    WR_RUN+="$(shq "$WR_TB") -- sh -c 'cat \"\$1\"; rm -f \"\$1\"; exit \"\$2\"' sh \"\$__cv_t\" \"\$__cv_r\""$'\n'
+    WR_RUN+="else __cv_test; fi"
   fi
   # A call with no test command is run with its output (both streams) in a file under $TMPDIR, then through
   # conveyor/tools/outbrief.sh beside the wrapper: output over 8,000 characters prints its first 60 and last 40 lines,

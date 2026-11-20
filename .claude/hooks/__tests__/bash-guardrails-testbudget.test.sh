@@ -30,8 +30,9 @@ guard() {
   OUT=$(jq -cn --arg c "$2" --arg d "$T/p" --arg s "$1" '{tool_input: {command: $c}, cwd: $d, session_id: $s}' \
     | (cd "$T/p" && CONVEYOR_CARD=c1 CLAUDE_PROJECT_DIR=$T/p CONVEYOR_GUARD_STATE=$STATE HOME=$T/home bash "$HOOK") 2> "$T/err") || RC=$?
 }
-# run: the command as the guard rewrote it, run as the session's shell runs it; what the session sees in $T/run.out.
-run() { RUN_RC=0; (cd "$T/p" && bash -c "$(jq -r '.hookSpecificOutput.updatedInput.command' <<<"$OUT")") > "$T/run.out" 2>&1 || RUN_RC=$?; }
+# run [<shell>]: the command as the guard rewrote it, run by <shell> (bash by default) as the session's shell runs it;
+# what the session sees in $T/run.out.
+run() { RUN_RC=0; (cd "$T/p" && "${1:-bash}" -c "$(jq -r '.hookSpecificOutput.updatedInput.command' <<<"$OUT")") > "$T/run.out" 2>&1 || RUN_RC=$?; }
 refused() { # <session id> <command> <why it matters>
   guard "$1" "$2"
   if [ "$RC" = 2 ] && grep -qF 'over its test budget of 1 CPU s' "$T/err" && grep -qF 'stop and report what you know' "$T/err"; then echo "ok   refused: $2"
@@ -62,11 +63,18 @@ guard s2 'bash t/slow.test.sh 1.2'
 # failure and the log's path, not the 2,000 lines of noise, and the command's own exit status.
 printf '%s\n' 'for i in $(seq 2000); do echo "noise $i"; done; echo "FAIL [one]: broke"; exit 3' > "$T/p/t/long.test.sh"
 guard s4 'bash t/long.test.sh'
-grep -qF 'conveyor/tools/testbrief.sh'"'"' -- bash -c __cv_test' <<<"$(jq -r '.hookSpecificOutput.updatedInput.command' <<<"$OUT")" \
+grep -qF 'conveyor/tools/testbrief.sh'"'"' -- sh -c' <<<"$(jq -r '.hookSpecificOutput.updatedInput.command' <<<"$OUT")" \
   || fail "a plain test command was not rewritten to go through testbrief.sh: $OUT"
-run
-{ [ "$RUN_RC" = 3 ] && grep -qxF '2001:FAIL [one]: broke' "$T/run.out" && grep -q '^testbrief: exit 3; the whole output (2001 lines) is in /' "$T/run.out" \
-  && [ "$(wc -l < "$T/run.out")" -le 20 ]; } || fail "the wrapped test run (exit $RUN_RC) did not print only the brief: $(head -c 600 "$T/run.out")"
+# Bug caught (issue #873): the rewrite ran the call as an `export -f` function in a child bash. zsh, the session's
+# shell on macOS, exports no function, so every test call failed with `__cv_test: command not found` (127). The
+# rewritten call must run, with the call's exit code, under bash, under sh (which has no `export -f` either) and
+# under zsh when it is installed.
+for sh in bash sh zsh; do
+  command -v "$sh" > /dev/null || { echo "skip $sh is not installed"; continue; }
+  run "$sh"
+  { [ "$RUN_RC" = 3 ] && grep -qxF '2001:FAIL [one]: broke' "$T/run.out" && grep -q '^testbrief: exit 3; the whole output (2001 lines) is in /' "$T/run.out" \
+    && [ "$(wc -l < "$T/run.out")" -le 20 ]; } || fail "the wrapped test run under $sh (exit $RUN_RC) did not run the call and print only the brief: $(head -c 600 "$T/run.out")"
+done
 # One already through the engine's wrapper is not wrapped again, and its time still counts to the budget.
 TB=$(cd "$(dirname "$0")/../../../conveyor/tools" && pwd -P)/testbrief.sh
 guard s4 "$TB -- bash t/long.test.sh"
