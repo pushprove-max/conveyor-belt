@@ -7,7 +7,8 @@
 # exits. The problems, each a record's own:
 #   a card waiting on the owner's yes       an issue waiting on the owner's yes before its build (health's before)
 #   a card blocked; one blocked by its review, while the standing kind review-retry is on, the watcher retries itself
-#     and wakes nothing for, unless that retry fails (reviewretry())
+#     and wakes nothing for, unless that retry fails (reviewretry()); a card still blocked 30 minutes after a poll
+#     first listed it, and once an hour after, while no open owner question names its issue (stillblocked())
 #   a card stuck (health's stuck: no new step and no output, its process gone, a wait on other cards past the
 #     limit, with the cards it waited on, or a test case that hangs, by name); one whose step the engine ended
 #     for no progress and runs once more (did) is a new problem, and says so ("ended and retried"); a second stall
@@ -343,6 +344,32 @@ record() { # <repo> <main> <now> <await>
     done < <(jq -r '.health.blocked[] | select((.issue | numbers) > 0 and (.reason | strings
       | test("\\Athe fix for \\[P[0-3]\\][\\s\\S]* did not hold after [0-9]+ rounds?( \\[[\\s\\S]*\\])?\\z"))) | "\(.card)\t\(.issue)"' <<<"$rec" 2>/dev/null)
   }
+  # A blocked card reported and still blocked 30 minutes after a poll first listed it wakes again (#877): a Foreman
+  # turn that neither cleared the block nor asked the owner left it with no reminder. $blockf holds each blocked card
+  # of the last snapshot, its block's since and the poll that first listed it ("<card> TAB <since> TAB <epoch>"); a
+  # card the snapshot no longer lists (retried, unblocked, shut or landed), or one blocked anew (a new since), starts
+  # again. Its key holds the hours past those 30 minutes, so it wakes at 30 minutes and once each hour after. While an
+  # open question of the record's decision ledger (lib.sh ledger) names the card's issue ("#<n>"), the key is kept with
+  # no text: it wakes nothing and stays reported, so that hour gives no wake after the answer either. A card that
+  # review-retry gave back (its line has no text) is left out.
+  stillblocked() {
+    local blockf=$FD/conveyor-blocked-$repo.txt asked out
+    asked=$(d=$(ledger "$repo" "$main") && jq -cs '[group_by(.id)[] | last | select(.answeredAt == null) | .question | strings
+      | scan("#([0-9]+)(?![0-9])") | "#" + .[0]] | unique' "$d/.claude/metrics/decisions.jsonl" 2>/dev/null) || asked='[]'
+    out=$(jq -rRs --argjson now "$now" --argjson asked "$asked" --arg seen "$(cat "$SEEN")" --arg state "$(cat "$blockf" 2>/dev/null)" --arg repo "$repo" "$SUITE"'
+      ($seen | split("\n")) as $seen
+      | ($state | split("\n") | map(split("\t") | select(length == 3) | {key: "\(.[0])\t\(.[1])", value: (.[2] | tonumber? // empty)}) | from_entries) as $first
+      | split("\n")[] | split("\t") | select(length == 4 and (.[0] | startswith("blocked:")) and .[3] != "")
+      | (.[0] | ltrimstr("blocked:")) as $card | .[2] as $ref
+      | (.[3] | capture(" is blocked since (?<t>[0-9T:-]+Z): (?<why>[\\s\\S]*)\\z")) as $b
+      | ($first["\($card)\t\($b.t)"] // $now) as $f
+      | "S\t\($card)\t\($b.t)\t\($f)",
+        (($now - $f - 1800) as $e | select($e >= 0 and ("\($repo)/blocked:\($card)" | IN($seen[]))) | ($e / 3600 | floor) as $n
+          | (if $ref | IN($asked[]) then "" else "\($ref) has been blocked for \($now - ($b.t | fromdate? // $f) | took): \($b.why)" end) as $text
+          | "R\tstillblocked:\($card):\($b.t):\($n)\tstill blocked\t\($ref)\t\($text)")' <<<"$cur" 2>>"$errf") || return 0
+    awk -F'\t' -v OFS='\t' '$1 == "S" { print $2, $3, $4 }' <<<"$out" > "$blockf.tmp" && mv "$blockf.tmp" "$blockf"
+    cur+=$'\n'$(awk -F'\t' -v OFS='\t' '$1 == "R" { print $2, $3, $4, $5 }' <<<"$out")
+  }
   # The outage so far ($down: its first failed poll, its last and how many failed in a row): a gap of more than three
   # polls since the last failed one is a new outage, timed from now. goes: set when the last failed poll's outage goes
   # on, so its reported unreachable key is still this outage's.
@@ -403,6 +430,7 @@ record() { # <repo> <main> <now> <await>
       $1 ~ /^stuck:/ { s = ($1 in t) ? t[$1] : now; print $1 "\t" s > (f ".tmp"); if (now - s < poll) next }
       { print }' "$stuckf" - <<<"$cur") && mv "$stuckf.tmp" "$stuckf"; then cur=$held; fi
     reviewretry
+    stillblocked
   else
     # A failed poll breaks a run of idle polls, of polls that did not reach GitHub, and of polls with gh signed out.
     grep -qxF "$repo/idle" "$SEEN" || rm -f "$idle"

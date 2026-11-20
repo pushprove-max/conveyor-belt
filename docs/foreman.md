@@ -71,6 +71,10 @@ it up:
   whole card records, the watcher reads `conveyor.sh health`. A blocked card, or a change that waits for your yes,
   then wakes the Foreman from health at that poll, and does not wait for the snapshot. With the standing kind
   `review-retry` on, a card that its review blocked gives no wake ([Standing yes](#standing-yes)).
+- A card that is still blocked 30 minutes after its first wake: the wake says "#N has been blocked for <time>" and
+  gives the reason. While the card stays blocked, the next wake comes one hour later, and then each hour. If one of
+  your open questions names the card's issue (`#N`), there is no wake. A card that is retried, unblocked, shut or
+  landed gives no more of these wakes.
 - gh is signed out, GitHub does not answer, or the project gives no snapshot: the wake comes only when three polls in
   a row find it. One or two such polls give no wake.
 - A release or full-test run that ends: the wake names the result and the failed cases.
