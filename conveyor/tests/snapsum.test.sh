@@ -17,12 +17,14 @@
 # such as ran() would replace another file's helper of that name (rerun.test.sh has its own ran()).
 snapsum_engine() {
   D=$T/$CASE; ST=$D/state
-  # shellcheck disable=SC2034 # HERE and YES are read by the engine's snaprows() and rows(), eval'd below
-  HERE=$SRC YES="visible to customers or staff: needs the owner's yes: "
+  # shellcheck disable=SC2034 # HERE and YES are read by the engine's snaprows() and rows(), eval'd below; OWNER by
+  # the LINTYES line taken from lib/prompts.sh
+  HERE=$SRC YES="visible to customers or staff: needs the owner's yes: " OWNER="the owner"
   mkdir -p "$ST" "$D/d" && : > "$D/rows" && : >> "$ST/cards.jsonl" && : >> "$ST/retried.jsonl" || fail "the case's folders could not be made"
   eval "$(sed -n '/^snaprows() {/,/^}/p' "$SRC/lib/snapshot.sh"; sed -n '/^rows() {/,/^}/p' "$SRC/lib/views.sh" | sed '1s/^rows()/snapsum_realrows()/'
-    grep -h '^MAX_REVIEWS=\|^NODEPS=\|^SHUT=' "$SRC/lib/paths.sh" "$SRC/lib/push.sh" "$SRC/lib/issues.sh")"
-  declare -F snaprows snapsum_realrows > /dev/null && [ -n "$MAX_REVIEWS" ] && [ -n "$NODEPS" ] && [ -n "$SHUT" ] || fail "snaprows, rows or their settings were not found in the engine"
+    grep -hE '^(MAX_REVIEWS|NODEPS|SHUT| *LINTYES)=' "$SRC/lib/"{paths,push,issues,prompts}.sh)"
+  # Bug (#1012): snaprows() reads LINTYES (#259); with it not set, the cases stopped on an unbound variable.
+  declare -F snaprows snapsum_realrows > /dev/null && [ -n "$MAX_REVIEWS" ] && [ -n "$NODEPS" ] && [ -n "$SHUT" ] && [ -n "${LINTYES:-}" ] || fail "snaprows, rows or their settings were not found in the engine"
   rows() { echo "${1##*/} $(wc -l < "$1")" >> "$D/rows"; snapsum_realrows "$@"; }
 }
 snapsum_snap() { snaprows "$ST/$1" "$ST/$1.rows" "$D/d/$2" || fail "snaprows failed on $1"; } # <records file name> <rows|old>
