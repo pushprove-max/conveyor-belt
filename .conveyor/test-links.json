@@ -230,7 +230,8 @@
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/tests/bugproof.test.sh": [
-    "conveyor/tests/snapexec.test.sh"
+    "conveyor/tests/snapexec.test.sh",
+    "conveyor/tests/speedproof.test.sh"
   ],
   "conveyor/tests/cardrules.test.sh": [
     "conveyor/tests/snapexec.test.sh"
