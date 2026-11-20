@@ -14,29 +14,25 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 casefile() { echo case1 > "$R/a.test.sh"; git -C "$R" add a.test.sh; git -C "$R" commit -qm "a test file"; }
 
 # Bug (#435: 5 of 11 landing clashes in a day): two cards that both add a case at the end of one test file clashed at
-# landing, and the second went to a merge session. #7 and #8 each add a case; #8, made on main before #7 landed, meets
-# #7's case at its landing: the test file is merged keeping both sides, with no session, and both cases land.
+# landing, and the second went to a merge session. Card c7 (fx_wt), made on main before another card landed, adds
+# case8; that card's case7 lands meanwhile. At c7's landing, where its plain three-way merge conflicts, the test file
+# is merged keeping both sides (unionfit(), its own lines outside the test files being unionx()'s), with no session.
 # Bug (#451: a union merge, which git calls clean, can leave a test file that no longer parses): the union-merged file
-# is checked to parse (parses(), here through the pack's land.parse, which records each file it checks) before its
-# tests run on it. What a file that fails the check leads to is t_mergeparseclean's.
+# is checked to parse (parses(), here through the pack's land.parse, which records each file it checks). What a file
+# that fails the check leads to is t_mergeparseclean's.
 t_mergetests() {
-  setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2; do echo "$GO" > "$STUB/review.$i"; done; casefile
-  cat > "$STUB/build" <<'EOF'
-case $PWD in
-  *-7) while [ -d "$STUB" ]; do ls -d ../*-8 >/dev/null 2>&1 && break; sleep 0.1; done; echo case7 >> a.test.sh ;;
-  *) while [ -d "$STUB" ]; do jq -e 'select(.issue == 7 and .step == "landed")' "$ST/cards.jsonl" >/dev/null 2>&1 && break; sleep 0.1; done; echo case8 >> a.test.sh ;;
-esac
-EOF
+  setup '[]'; fx_wt 'echo case8 >> a.test.sh' a.test.sh case1
   echo "{ tr '\n' ' ' < \"\$1\"; echo; } >> '$STUB/parsed'; exec bash -n \"\$1\"" > "$STUB/parse"
   tune --arg c "sh $STUB/parse" '.land.parse = {"*.test.sh": $c}'
-  echo '[ "$(tr "\n" " " < a.test.sh)" != "case1 case7 case8 " ] || grep -qx "case1 case7 case8 " "$STUB/parsed" 2>/dev/null || : > "$STUB/unparsed"' >> "$STUB/test-cmd"
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  grep -qx 'case1 case7 case8 ' "$STUB/parsed" 2>/dev/null && [ ! -e "$STUB/unparsed" ] \
-    || fail "the union-merged test file was not checked to parse before its tests ran: $(cat "$STUB/parsed" 2>/dev/null)"
-  [ "$(wc -l < "$STUB/sessions")" = 2 ] && [ -z "$(st 'select(.step | IN("rebase", "fix", "blocked")) | .step')" ] \
-    || fail "a session merged the two cards' cases: $(st '"\(.issue) \(.step) \(.reason)"' | tr '\n' ,)"
-  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 8 " ] && [ "$(tr '\n' ' ' < "$R/a.test.sh")" = "case1 case7 case8 " ] \
-    && [ -z "$(git -C "$R" status --porcelain)" ] || fail "both cases did not land, in turn: $(cat "$R/a.test.sh")"
+  echo case7 >> "$R/a.test.sh"; git -C "$R" commit -qam "case7 lands"
+  fx_in 'cd "$FXWT" && tf=$(git diff --cached --name-only --no-renames | testpaths) && ix=$(unionx "$FXWT" "$tf") && echo "tf=$tf" \
+    && git diff --cached --binary --no-renames > "$FXWT.patch" && git reset -q --hard main && ! git apply --3way --index "$FXWT.patch" >/dev/null 2>&1 \
+    && git reset -q --hard main && unionfit "$FXWT" a.test.sh "$tf" "$ix" && parses "$FXWT"'
+  [ "$RC" = 0 ] && grep -qx 'tf=a.test.sh' "$T/$CASE/run.out" \
+    || fail "the two cases' clash in a.test.sh was not merged keeping both, or the merge was found not to parse: $(cat "$T/$CASE/run.out")"
+  [ "$(git -C "$FXWT" show :a.test.sh | tr '\n' ' ')" = "case1 case7 case8 " ] && [ "$(git -C "$FXWT" rev-parse HEAD)" = "$(git -C "$R" rev-parse main)" ] \
+    || fail "the merged test file is not both cases staged on main: $(git -C "$FXWT" show :a.test.sh | tr '\n' ' ')"
+  [ "$(cat "$STUB/parsed" 2>/dev/null)" = 'case1 case7 case8 ' ] || fail "the union-merged test file was not checked to parse: $(cat "$STUB/parsed" 2>/dev/null)"
 }
 
 # The merged test file is run before the card lands, though the card's own lines are the ones that passed: two cases
@@ -50,6 +46,7 @@ t_mergetestsrun() {
 [ -e "$STUB/moved" ] || { : > "$STUB/moved"; echo main-case >> "$R/a.test.sh"; git -C "$R" commit -qam "main adds a case"; }
 ! { grep -qx main-case a.test.sh && grep -qx case7 a.test.sh && ! grep -qx fixed a.test.sh; } || { cp a.test.sh "$STUB/merged"; echo "FAIL a.test.sh: the two cases clash"; printf "%s\n" "== a.test.sh" "-- FAIL a.test.sh" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1; }
 EOF
+  # loop: settle() drops the union merge's pass in its own body, and card() then runs the merged file and sends its failure to the fix: no function shows that order
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   [ "$(tr '\n' ' ' < "$STUB/merged" 2>/dev/null)" = "case1 main-case case7 " ] \
     || fail "the merged test file was not run before the card landed: $(st 'select(.step == "test") | "\(.result) \(.reused)"' | tr '\n' ,)"
@@ -61,43 +58,19 @@ EOF
 
 # Bug (#334: two cards that each added a row to one panel passed their tests alone, and its test file failed on main
 # once both landed): a card whose change still applied to a main that moved landed on the tests it passed before, though
-# the card landed meanwhile touched a test file of its own. #7 changes lib/panel.sh and #8 lib/rows.sh, both tested by
-# lib/view.test.sh, which fails with both changes: the test links give that file to both. #8's tests pass before #7
-# lands; at its landing that test file runs again on main with #7's change, fails, and #8 goes to its fix: it does not
-# land red.
+# the card landed meanwhile touched a test file of its own. Card c7 (fx_wt) changes lib/rows.sh; the card landed
+# meanwhile, lib/panel.sh: the test links give both lib/view.test.sh. Once main holds that landing, sharedtests() names
+# lib/view.test.sh, so the card runs it again on main as it is now (card()) and does not land red; a landing that
+# touches none of the card's test files (a.txt) names none, so the card lands on the run it passed.
 t_mergesharedtests() {
-  setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2 3 4; do echo "$GO" > "$STUB/review.$i"; done
-  mkdir -p "$R/lib"; echo panel > "$R/lib/panel.sh"; echo rows > "$R/lib/rows.sh"; echo case1 > "$R/lib/view.test.sh"
-  git -C "$R" add lib; linkset '{"lib/panel.sh": ["lib/view.test.sh"], "lib/rows.sh": ["lib/view.test.sh"]}'
-  cat > "$STUB/build" <<'EOF'
-case $PWD in
-  *-7) echo seven >> lib/panel.sh ;;
-  *) if grep -q '^# The changed tests fail' "$STUB/brief"; then echo fixed >> lib/rows.sh; else echo eight >> lib/rows.sh; fi ;;
-esac
-EOF
-  # #8's first run ends only once #7 landed. The run fails, naming the test file, on both changes with no fix. As the
-  # project's own command does, it skips the file when its list (CONVEYOR_TEST_RERUN) names it passed and not failed:
-  # #7's change does not select it, so a run again that kept its pass would pass without running it.
-  cat >> "$STUB/test-cmd" <<'EOF'
-case $PWD in *-8) [ -e "$STUB/tested.8" ] || { : > "$STUB/tested.8"
-  while [ -d "$STUB" ]; do jq -e 'select(.issue == 7 and .step == "landed")' "$ST/cards.jsonl" >/dev/null 2>&1 && break; sleep 0.1; done; } ;; esac
-! grep -qx "shared	lib/view.test.sh" "${CONVEYOR_TEST_RERUN:-/dev/null}" || : > "$STUB/shared.8"
-! grep -qx "pass	lib/view.test.sh" "${CONVEYOR_TEST_RERUN:-/dev/null}" || grep -qx "fail	lib/view.test.sh.*" "$CONVEYOR_TEST_RERUN" || exit 0
-echo "== lib/view.test.sh"; printf "%s\n" "== lib/view.test.sh" >> "$CONVEYOR_TEST_LOG/run.log"
-! { grep -qx seven lib/panel.sh && grep -qx eight lib/rows.sh && ! grep -qx fixed lib/rows.sh; } \
-  || { echo "FAIL lib/view.test.sh: the two rows clash"; echo "-- FAIL lib/view.test.sh" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1; }
-printf "%s\n" "-- ok lib/view.test.sh" "TESTRUN sec	lib/view.test.sh	1	1" >> "$CONVEYOR_TEST_LOG/run.log"
-EOF
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  grep -q 'card .*-8: cards landed since its tests ran touch its test files too.*lib/view.test.sh' <<<"$out" \
-    && [ "$(st 'select(.issue == 8 and .step == "test") | .result' | tr '\n' ' ')" = "pass fail pass " ] \
-    || fail "#8 landed on the tests it passed before #7 landed, not run again with #7's change: $(st 'select(.issue == 8) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
-  # #345: the run again's list says the file passed and runs for main's change (a `shared` line), so its log does not
-  # say it did not pass; the list made after main moved (rerunsince()) keeps that line.
-  [ -e "$STUB/shared.8" ] || fail "the run again's list did not name lib/view.test.sh as a file that passed and runs for main's change"
-  grep -q '^# The changed tests fail' "$STUB/brief" && [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 8 " ] \
-    && [ "$(tr '\n' ' ' < "$R/lib/rows.sh")" = "rows eight fixed " ] \
-    || fail "#8's failure on the combined code did not go to its fix before it landed: $(cat "$R/lib/rows.sh")"
+  setup '[]'; mkdir -p "$R/lib"; linkset '{"lib/panel.sh": ["lib/view.test.sh"], "lib/rows.sh": ["lib/view.test.sh"]}'
+  fx_wt 'echo eight >> lib/rows.sh' lib/panel.sh panel lib/rows.sh rows lib/view.test.sh case1
+  # Each landing, then c7's change brought onto main as it is now (settle()), and what sharedtests() prints and returns.
+  fx_in 'cd "$FXWT" && b=$(git rev-parse HEAD) || exit 3
+    for f in a.txt lib/panel.sh; do echo landed >> "$R/$f" && git -C "$R" commit -qam "$f lands" && git diff --cached --binary --no-renames > "$FXWT.patch" \
+      && git reset -q --hard main && git apply --index "$FXWT.patch" || exit 3; t=$(sharedtests "$FXWT" "$b"); echo "$f: $? $t"; done'
+  [ "$RC" = 0 ] && [ "$(tr '\n' ',' < "$T/$CASE/run.out")" = "a.txt: 1 ,lib/panel.sh: 0 lib/view.test.sh," ] \
+    || fail "the test file c7 shares with a card landed since was not named, or one with a landing that touches none was: $(cat "$T/$CASE/run.out")"
 }
 
 # #447: card A (#7) passes; card-b lands touching A's test file lib/view.test.sh; A runs that file again and passes;
@@ -182,6 +155,7 @@ EOF
 [ -e "$STUB/moved" ] || { : > "$STUB/moved"; sed -i '2d;7d' "$R/a.test.mjs"; git -C "$R" commit -qam "main turns the test back on"; }
 node --check a.test.mjs 2>/dev/null || cp a.test.mjs "$STUB/brokenrun"
 EOF
+  # loop: card() runs parses() before the test step, gives its failure to the fix session's brief and runs the tests whole after it: only a card run shows that order
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   [ ! -e "$STUB/brokenrun" ] || fail "a test step ran on the merged file that does not parse: $(cat "$STUB/brokenrun")"
   grep -q 'a\.test\.mjs: `node --check` failed:' "$STUB/parsebrief" 2>/dev/null && grep -q 'SyntaxError' "$STUB/parsebrief" \

@@ -13,79 +13,69 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # on the other (each one's context holds the other's line) and they merge three-way with no conflict.
 nine() { seq 9 | sed 's/^/l/' > "$R/a.txt"; git -C "$R" commit -qam "a.txt of nine lines"; }
 
+# A second card, c8, beside c7 (fx_wt): its worktree on main as it is now ($W8), with <change> made in it and staged.
+# Then, in a shell of the engine (fx_in), c7 and then c8 claim their files (claim(), each as this shell's live pid):
+# what each claim holds, [held, paths], goes to $T/$CASE/claims, one a line, and run.out gets what c8's claim()
+# printed: nothing when it waits on no card.
+claims() { # <c8's change>
+  W8=$T/$CASE/cards/c8; rulewt c8 "$1"
+  # claim() waits only on cards picked and not ended: both picked, c7 first.
+  mkdir -p "$ST"; for n in 7 8; do jq -cn --argjson n $n '{card: "c\($n)", issue: $n, step: "picked", time: "2026-11-01T00:00:00Z", result: "ok"}'; done >> "$ST/cards.jsonl"
+  fx_in 'claim c7 "$FXWT" $$ >/dev/null && claim c8 "'"$W8"'" $$ && for c in c7 c8; do jq -c "[.held, .paths]" "$CARDS/$c.claim"; done > "$T/$CASE/claims"'
+  [ "$RC" = 0 ] || fail "the claims failed: $(cat "$T/$CASE/run.out")"
+}
+
 # Bug: two cards that changed different parts of one file waited one behind the other whenever their changes did not
-# apply together plainly, though they merge three-way with no conflict. #7 changes l4 and #8 l6: both hold a.txt at
-# once (#7's tests end only once #8 holds it, or after 30 s), and neither waits. #8's tests end only once #7 landed;
-# #8 is then merged onto main with no session and no second review, on the tests it passed. No link gives a.txt a test
-# file: each card's test is its own (seven.test.sh, eight.test.sh), so #7's landing shares none with #8.
+# apply together plainly, though they merge three-way with no conflict (together(), through merge3() and fits()). c7
+# changes l4 and c8 l6: both hold a.txt at once, and c8 waits on no card. No link gives a.txt a test file: each card's
+# test is its own (seven.test.sh, eight.test.sh).
 # Bug too (the owner, 2026-11-13: 24 rebuild sessions in a day): a card whose change no longer applied plainly to a main
-# that moved (here, by #7's landing) went to a rebuild session, a new review and its tests again, though main changed
-# other lines of the file. #8 lands with no rebuild session, no second review and no second test run, both lines in
-# main and its checkout clean (a shared test file runs again: t_mergesharedtests).
+# that moved (here, by c7's landing) went to a rebuild session, a new review and its tests again, though main changed
+# other lines of the file. c8's change fits onto that main (fits(): its three-way merge leaves the card's own lines),
+# with both lines, and its tests' pass stands on it (testedhere()): it lands with no session and no second run.
 t_mergetogether() {
-  setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done; nine; linkset '{}'
-  cat > "$STUB/build" <<'EOF'
-case $PWD in
-  *-7) sed -i 's/^l4$/seven/' a.txt; echo x > seven.test.sh ;;
-  *) while [ -d "$STUB" ]; do [ -e "$STUB/inreview.7" ] && break; sleep 0.1; done; sed -i 's/^l6$/eight/' a.txt; echo x > eight.test.sh ;;
-esac
-EOF
-  cat > "$STUB/review-cmd" <<'EOF'
-n=${PWD##*-}; : > "$STUB/inreview.$n"
-[ "$n" = 7 ] || while [ -d "$STUB" ]; do jq -e .held ../*-7.claim >/dev/null 2>&1 && break; sleep 0.1; done
-EOF
-  cat >> "$STUB/test-cmd" <<'EOF'
-case $PWD in
-  *-7) i=0; while [ -d "$STUB" ] && [ $i -lt 300 ]; do jq -e .held ../*-8.claim >/dev/null 2>&1 && { cat ../*-7.claim ../*-8.claim > "$STUB/claims"; break; }; i=$((i + 1)); sleep 0.1; done ;;
-  *) [ -e "$STUB/tested.8" ] || { : > "$STUB/tested.8"
-    while [ -d "$STUB" ]; do jq -e 'select(.issue == 7 and .step == "landed")' "$ST/cards.jsonl" >/dev/null 2>&1 && break; sleep 0.1; done; } ;;
-esac
-EOF
+  setup '[]'; fx_wt "sed -i 's/^l4\$/seven/' a.txt; echo x > seven.test.sh" a.txt "$(seq 9 | sed 's/^/l/')" # main's a.txt as nine() makes it
+  claims "sed -i 's/^l6\$/eight/' a.txt; echo x > eight.test.sh"
+  [ "$(tr '\n' ' ' < "$T/$CASE/claims")" = '[true,["a.txt","seven.test.sh"]] [true,["a.txt","eight.test.sh"]] ' ] && [ ! -s "$T/$CASE/run.out" ] \
+    || fail "c8 waited on c7, whose change merges with its own: $(cat "$T/$CASE/claims" "$T/$CASE/run.out")"
+  # c7 lands; c8's change, its tests passed (tested()), is fitted onto main in its worktree, where it no longer applies plainly.
+  sed -i 's/^l4$/seven/' "$R/a.txt"; echo x > "$R/seven.test.sh"; git -C "$R" add -A; git -C "$R" commit -qm "c7 lands"
+  fx_in 'cd "'"$W8"'" && git diff --cached --binary --no-renames > "$PWD.patch" && id=$(cardpatch "$PWD") && echo "{}" > "$PWD.ready" && tested "$PWD" \
+    && git reset -q --hard main && ! git apply --check --cached "$PWD.patch" 2>/dev/null && fits "$PWD.patch" "$id" && testedhere "$PWD"'
+  [ "$RC" = 0 ] || fail "c8's change, which merges three-way with c7's, did not fit onto main on the tests it passed: $(cat "$T/$CASE/run.out")"
+  [ "$(git -C "$W8" show :a.txt | grep -cx 'seven\|eight')" = 2 ] && [ -z "$(git -C "$R" status --porcelain)" ] \
+    || fail "the fitted change does not hold both lines, or main's checkout is dirty: $(git -C "$W8" show :a.txt | tr '\n' ' ')"
+}
+
+# The same landing as a card sees it (t_mergetogether): #8 changes l6, and while its tests run main takes l4 as c7's
+# landing makes it, so #8's change no longer applies plainly. #8 lands on its first test pass, the second test step
+# reused, with one review and one test run, no session to bring it onto main, both lines in main and its checkout clean.
+t_mergetogethercard() {
+  setup "[$(issue 8 2026-01-02)]"; for i in 1 2; do echo "$GO" > "$STUB/review.$i"; done; nine; linkset '{}'
+  echo "sed -i 's/^l6\$/eight/' a.txt; echo x > eight.test.sh" > "$STUB/build"
+  echo '[ -e "$STUB/moved" ] || { : > "$STUB/moved"; sed -i "s/^l4\$/seven/" "$R/a.txt"; echo x > "$R/seven.test.sh"; git -C "$R" add -A; git -C "$R" commit -qm "c7 lands"; }' >> "$STUB/test-cmd"
+  # loop: the card's steps and its test records (the second test step reused, no rebase or fix) are written only by a card run
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  [ "$(jq -sc 'map([.held, .paths])' "$STUB/claims" 2>/dev/null)" = '[[true,["a.txt","seven.test.sh"]],[true,["a.txt","eight.test.sh"]]]' ] && ! grep -q "waits on card" <<<"$out" \
-    || fail "#8 waited on #7, whose change merges with its own: $(cat "$STUB/claims" 2>/dev/null) $out"
-  [ -z "$(st 'select(.step | IN("rebase", "fix")) | .step')" ] || fail "a session brought a change onto main though it merges: $(st '"\(.issue) \(.step) \(.reason)"' | tr '\n' ,)"
   [ "$(st "select(.issue == 8 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test test landed " ] \
     && [ "$(st 'select(.issue == 8 and .step == "test") | .reused // false' | tr '\n' ' ')" = "false true " ] \
-    || fail "#8, merged onto main with #7's change, did not land on the tests it passed: $(st "select(.issue == 8) | \"\(.step) \(.reused)\"" | tr '\n' ,)"
-  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 8 " ] && [ "$(grep -cx 'seven\|eight' "$R/a.txt")" = 2 ] && [ "$(wc -l < "$STUB/reviews")" = 2 ] \
-    && [ "$(wc -l < "$STUB/tests")" = 2 ] && [ -z "$(git -C "$R" status --porcelain)" ] \
-    || fail "both did not land in turn with one review and one test run each, or main's checkout is dirty: $(cat "$R/a.txt")"
+    || fail "#8, merged onto a main that moved, did not land on the tests it passed: $(st "select(.issue == 8) | \"\(.step) \(.reused)\"" | tr '\n' ,)"
+  [ "$(grep -cx 'seven\|eight' "$R/a.txt")" = 2 ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] && [ "$(wc -l < "$STUB/tests")" = 1 ] \
+    && [ -z "$(git -C "$R" status --porcelain)" ] || fail "#8 was reviewed or tested again, or main lacks a line or is dirty: $(cat "$R/a.txt")"
 }
 
 # Bug (2026-11-13: three of six finished cards waited on another over README.md alone, one for 55 minutes): a
-# documentation file shared by two cards made one wait for the other. #7 and #8 both rewrite README.md's one line, a
-# conflict: neither waits, both holding their claims at once with no file named. #7 lands first; #8 meets the conflict
-# at its landing, and its rebuild session resolves it, as any conflict at landing.
+# documentation file shared by two cards made one wait for the other. c7 and c8 both rewrite README.md's one line, a
+# conflict: neither waits, both holding their claims at once with no file named (claim() leaves out *.md). Once c7
+# landed, c8's change does not fit onto main (ready(), through fits(): the conflict stays), so a session brings it
+# there, as any conflict at landing.
 t_mergedocs() {
-  setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done
-  linkset '{"a.txt": ["a.test.sh"], "README.md": ["a.test.sh"]}' # the cards' test steps run the stub, held below
-  echo title > "$R/README.md"; git -C "$R" add README.md; git -C "$R" commit -qm "a README"
-  cat > "$STUB/build" <<'EOF'
-if grep -q '^# Landing conflict' "$STUB/brief"; then printf 'seven\neight\n' > README.md
-else case $PWD in
-  *-7) echo seven > README.md ;;
-  *) while [ -d "$STUB" ]; do [ -e "$STUB/inreview.7" ] && break; sleep 0.1; done; echo eight > README.md ;;
-esac; fi
-EOF
-  cat > "$STUB/review-cmd" <<'EOF'
-n=${PWD##*-}; : > "$STUB/inreview.$n"
-[ "$n" = 7 ] || [ -e "$STUB/tested.8" ] || while [ -d "$STUB" ]; do jq -e .held ../*-7.claim >/dev/null 2>&1 && break; sleep 0.1; done
-EOF
-  cat >> "$STUB/test-cmd" <<'EOF'
-case $PWD in
-  *-7) i=0; while [ -d "$STUB" ] && [ $i -lt 300 ]; do jq -e .held ../*-8.claim >/dev/null 2>&1 && { cat ../*-7.claim ../*-8.claim > "$STUB/claims"; break; }; i=$((i + 1)); sleep 0.1; done ;;
-  *) [ -e "$STUB/tested.8" ] || { : > "$STUB/tested.8"
-    while [ -d "$STUB" ]; do jq -e 'select(.issue == 7 and .step == "landed")' "$ST/cards.jsonl" >/dev/null 2>&1 && break; sleep 0.1; done; } ;;
-esac
-EOF
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  [ "$(jq -sc 'map([.held, .paths])' "$STUB/claims" 2>/dev/null)" = '[[true,[]],[true,[]]]' ] && ! grep -q "waits on card" <<<"$out" \
-    || fail "#8 waited on #7 over README.md alone: $(cat "$STUB/claims" 2>/dev/null) $out"
-  st 'select(.issue == 8 and .step == "rebase") | .reason' | grep -q '^rebase onto main conflicts' \
-    || fail "#8's conflict in README.md was not resolved by its rebuild session: $(st '"\(.issue) \(.step) \(.reason)"' | tr '\n' ,)"
-  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 8 " ] && [ "$(tr '\n' ' ' < "$R/README.md")" = "seven eight " ] \
-    || fail "both did not land in turn: $(cat "$R/README.md")"
+  setup '[]'; fx_wt 'echo seven > README.md' README.md title
+  claims 'echo eight > README.md'
+  [ "$(tr '\n' ' ' < "$T/$CASE/claims")" = '[true,[]] [true,[]] ' ] && [ ! -s "$T/$CASE/run.out" ] \
+    || fail "c8 waited on c7 over README.md alone: $(cat "$T/$CASE/claims" "$T/$CASE/run.out")"
+  echo seven > "$R/README.md"; git -C "$R" commit -qam "c7 lands"
+  fx_in 'cd "$R" && ready "'"$W8"'"'
+  [ "$RC" = 1 ] || fail "c8's change, which conflicts with c7's in README.md, was taken to fit onto main with no session: $(cat "$T/$CASE/run.out")"
 }
 
 # A three-way merge of a change main holds already is clean, and leaves no change: that is not the card's change. Two
