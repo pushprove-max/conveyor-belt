@@ -280,6 +280,8 @@ MISSING='def bare: if .agent == "opencode" then .model | ltrimstr("opencode:") e
   def missing($h): . as $s | if $s.agent == null then null elif ($h | has($s.agent) | not) then "\($s.agent) is not installed on this host (not on PATH)" else null end;'
 SAMPLES=${STATE%/*}/samples.jsonl # the loop's and the host's samples, one a minute (README.md)
 PUSHED=${STATE%/*}/pushed         # the last push that worked: "<commit> <remote> <branch>"
+# Any push's record (Push now's and Push landed's too), from its start to its end, with its stage and its log too:
+# push() and pushing(), lib/push.sh.
 PUSHING=${STATE%/*}/pushing       # the push in progress: {pid, since, sha}, while the loop's push job runs
 # shellcheck disable=SC2034 # read by lib/push.sh and lib/views.sh, which conveyor.sh sources beside this file
 LANDPR=${STATE%/*}/landingpr.json # the pull request of Land as pr and its last merge (prstate(), lib/push.sh)

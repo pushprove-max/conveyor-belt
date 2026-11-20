@@ -202,6 +202,51 @@ test('ON THE BELT gives each card three lines: its title, start, overall time an
   ])
 })
 
+// Issue 1078: for the whole pre-push hook (a suite of minutes) /units said only "pushing", so a slow push could not be
+// told from a stuck one. Under the belt: the hook running with its commit, process, elapsed time and newest output line;
+// a push whose process is gone as stale, with its log; a failed push with its failed test and log; and a Push now that
+// started no push or left main ahead of the remote.
+test('the push shows the running hook with its elapsed time and newest line, or a stale push, a failure or main still ahead', () => {
+  const sha = 'a1b2c3d4e5f6a7b8', log = '/r/home/state/pushlogs/20261110T043700Z-4242.log'
+  const pushing = (stale: boolean) => ({ health: { pushing: { pid: 4242, since: ago(3), sha, log, sec: 170, line: '12/40 passed', stale } } })
+  expect(beltOf(tableText(board(pushing(false)), 120)).slice(-2)).toEqual([
+    ` push on a1b2c3d4e5f6: pre-push hook running since ${clockOf(NOW - 3 * 60_000)} · pid 4242 · 3m`, '   12/40 passed'])
+  expect(tableText(board(pushing(true)), 200)).toContain(` ✗ push on a1b2c3d4e5f6 is stale: its process (pid 4242) is gone and the push did not end · Log: ${log}`)
+  const last = (l: object) => tableText(board({ health: { unpushed: [{ card: 'c0-7', issue: 7 }], pushLast: { time: ago(2), by: 'now', started: true, sha, ok: false, ahead: 1, check: null, log: null, why: null, ...l } } }), 200)
+  expect(last({ check: 'fast-checks', log })).toContain(` ✗ Push now of a1b2c3d4e5f6 failed: fast-checks failed · Log: ${log} · main is still 1 commit ahead of the remote`)
+  expect(last({ started: false, sha: null, why: 'the push lock could not be taken', ahead: 2 })).toContain(' ✗ Push now started no push: the push lock could not be taken · main is still 2 commits ahead of the remote')
+  expect(last({ ok: true, ahead: 0 })).toContain(' ✓ Push now of a1b2c3d4e5f6 passed 2m ago')
+})
+
+// Issue 1078, review: in the 60-column pane the running line was cut, losing its process and elapsed time, and a log
+// path wider than the line lost its end; and the line said the pre-push hook ran while the tests before the push ran
+// and after the remote held the commit. Each part wraps whole, a long path goes on over lines, and the stage is named.
+test('the push lines keep the process, time and whole log in the 60-column pane, and name the stage that runs', () => {
+  const sha = 'a1b2c3d4e5f6a7b8', log = `/r/home/state/${'deep/'.repeat(12)}pushlogs/20261110T043700Z-4242.log`
+  const pane = (h: object) => paneModel(board({ health: h }), 60, 0).map(plain)
+  const run = (stage: string) => pane({ pushing: { pid: 4242, since: ago(3), sha, log, sec: 170, line: '12/40 passed', stale: false, stage } })
+  const logOf = (l: string[]) => { const i = l.findIndex(x => x.includes('Log: ')), n = l.slice(i + 1).findIndex(x => !x.startsWith('  '))
+    return l.slice(i, n < 0 ? undefined : i + 1 + n).map(x => x.replace(/^ {2}/, '')).join('') }
+  const hook = run('hook')
+  expect(hook.every(l => cols(l) <= 60)).toBe(true)
+  expect(hook.join('\n')).toContain(`push on a1b2c3d4e5f6: pre-push hook running since ${clockOf(NOW - 3 * 60_000)}\n  pid 4242 · 3m\n  12/40 passed`)
+  expect(run('tests').join('\n')).toContain('push on a1b2c3d4e5f6: tests before the push running since')
+  expect(run('pushed').join('\n')).toContain('push on a1b2c3d4e5f6: pushed, waiting for GitHub since')
+  // It said so too while the push waited for its test slot, and after git push ended (these wrap: read as one text).
+  const flat = (l: string[]) => l.join(' ').replace(/\s+/g, ' ')
+  expect(run('ready').every(l => cols(l) <= 60)).toBe(true)
+  expect(flat(run('ready'))).toContain('push on a1b2c3d4e5f6: getting the push ready (worktree, dependencies, test slot) since')
+  expect(flat(run('ended'))).toContain('push on a1b2c3d4e5f6: git push ended, finishing the push since')
+  expect(flat(run('push'))).toContain('push on a1b2c3d4e5f6: push running with no pre-push hook since')
+  expect([...run('tests'), ...run('ready'), ...run('ended'), ...run('pushed')].join('\n')).not.toContain('pre-push hook')
+  const stale = pane({ pushing: { pid: 4242, since: ago(3), sha, log, sec: 170, line: '', stale: true, stage: 'hook' } })
+  expect(stale.every(l => cols(l) <= 60)).toBe(true)
+  expect(logOf(stale)).toBe(`Log: ${log}`)
+  const failed = pane({ unpushed: [{ card: 'c0-7', issue: 7 }], pushLast: { time: ago(2), by: 'now', started: true, sha, ok: false, ahead: null, check: 'fast-checks', log, why: null } })
+  expect(failed.every(l => cols(l) <= 60)).toBe(true)
+  expect(logOf(failed)).toBe(`Log: ${log}`)
+})
+
 test('a card on the belt shows its start and overall time: resumed from a kept patch, the first start and the sum; another day, the date', () => {
   expect(beltCard({ track: track('>.....', 'building') })[0]).toMatch(new RegExp(` ${clockOf(NOW - 40 * 60_000)} · 40m · \\$1\\.25$`))
   const resumed = beltCard({ start: ago(100), priorSec: 1200, track: track('>.....', 'building') })[0]

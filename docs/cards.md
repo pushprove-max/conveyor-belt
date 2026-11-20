@@ -268,6 +268,19 @@ needs `test.fileCommand`, or a `test.list` form that can give the test command o
 on without the run. With `push.check` off, or the Rules tab's **Test before a push** Off, the push goes on without
 the run too ([Which tests a card runs](configuration.md#which-tests-a-card-runs)).
 
+Each push writes the pre-push hook's output, as it comes, to a log of its own: `pushlogs/<time>-<process>.log` in the
+state folder (`conveyor.sh state-dir` prints it). Conveyor keeps the newest 20 logs. Push now also writes the path of
+its push's log to `pushnow.log` in the state folder. While a push runs, the Board (under Push now) and `/units`
+(under the belt) show the commit and what runs: the tests before the push, the wait for the push's worktree,
+dependencies and test slot, the pre-push hook, the end of `git push`, or, after the remote has the commit, the wait
+for GitHub. They also show the push's process, when that part started, the time it has run and the newest line of
+the pre-push hook's output. When that output has a runner's `N/M passed` line, they show that line. When the
+push's process is gone and the push did not end, they show the push as stale, with the path of its log. When the
+push ends, they show if it passed or failed. A failed push shows the failed test (from a `FAILED <name>` line of the
+output, else the pre-push hook) and the path of its log, on the card too. When the remote still does not have all of
+main as it was at the end of the push, or Push now started no push, they say so. A push by hand that puts main on
+the remote removes the "ahead" text.
+
 A push that fails is one of two kinds:
 
 - `check`: the pre-push hook failed (typecheck, tests, lint), or a test file failed in the run before the push. A retry fails the same way, so the loop wakes the

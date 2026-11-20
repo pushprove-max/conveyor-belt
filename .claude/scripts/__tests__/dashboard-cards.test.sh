@@ -161,7 +161,9 @@ P=$(snap '{"needsYou": {"waiting": [{"card": "c1-12", "issue": 12, "title": "But
     "pressure": {"state": "Busy", "cpu": 45.5, "memory": 1.5, "wakeMs": 0.2, "freeMB": null, "why": "CPU pressure 45.5% is at or above 40%"},
     "routes": {"subscription": {"state": "expired", "at": "2026-11-05T00:00:00Z"}, "proxy": {"state": "works", "at": "2026-11-05T00:00:01Z", "baseUrl": "http://127.0.0.1:4141", "route": "fallback"}},
     "unpushed": [{"card": "c5-7", "issue": 7, "sha": "abc", "since": "2026-11-05T00:00:00Z"}],
-    "landingPr": {"number": 12, "url": "https://github.com/o/r/pull/12", "cards": 2, "merge": null}},
+    "landingPr": {"number": 12, "url": "https://github.com/o/r/pull/12", "cards": 2, "merge": null},
+    "pushing": {"pid": 42, "since": "2026-11-05T00:00:00Z", "sha": "abc", "log": "/s/pushlogs/1.log", "sec": 9, "line": "3/9 passed", "stale": false},
+    "pushLast": {"time": "2026-11-05T00:00:00Z", "by": "now", "started": true, "ok": false, "ahead": 1}},
   "forecast": {"cards": 1, "usd": 0.95, "perCard": {"usd": 0.95, "pct": 0.5}, "guard": 90, "reading": 42, "pausesAt": null},
   "fullTest": {"command": true, "why": null, "running": null, "last": {"time": "2026-11-05T01:00:00Z", "kind": "run", "push": true, "sha": "abc", "state": "failed", "exit": 1, "cases": [], "pushed": null}},
   "open": {"count": 6, "split": {"queued": 2, "you": 1, "labelOrRule": 2, "belt": 1}, "held": [{"issue": 30, "title": "Held one", "priority": "P3", "followup": false, "labels": [], "created": null, "parent": null, "reasons": [{"kind": "you"}]},
@@ -310,6 +312,9 @@ q '.panels.rules.data.packLandAs == "pr"' "the Rules part gives the pack's push.
 # them the Rules tab shows Button for a pack that merges when idle, and Merge never shows.
 q '.panels.rules.data.packPrMerge == "idle" and .panels.board.data.landingPr == {number: 12, url: "https://github.com/o/r/pull/12", cards: 2, merge: null}
   and .panels.board.data.others.widgetshop.landingPr == null' "the Rules part gives the pack's push.prMerge, and the Board part the open pull request"
+# The push in progress and the last push (issue 1078): without them the Control tab cannot tell a slow push from a stuck one.
+q '.panels.board.data | .pushing.line == "3/9 passed" and .pushLast.ahead == 1 and .others.widgetshop.pushing == null and .others.widgetshop.pushLast == null' \
+  "the Board part gives the push in progress and the last push"
 # Pick settings (#1047, #1067): without the pack's pick lists and each program's efforts the Rules tab's row cannot
 # show or set them, and without a card's seats its page cannot show what the Judge gave it.
 q '.panels.rules.data.packPick == {lists: {builder: {"claude-x": {min: "medium", max: "high"}}}, efforts: {claude: ["low", "medium", "high"]}} and (.panels.board.data.review | map(select(.issue == 801) | .seats)) == [{failed: "the judge timed out"}]' \

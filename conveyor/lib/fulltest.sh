@@ -205,7 +205,8 @@ fulltest() { # [push | anyway <run id> [--by <who>]]
 # Refused (exit 2), with the reason and nothing changed, when main holds no landed commit origin lacks, while a full
 # test run holds its lock (Run full test suite, Push landed or Push anyway), or while a release run is under way
 # (relshare()). The ask returns once the push has started:
-# it goes on in the background (its output in $PUSHNOW_LOG), so the Board is not kept waiting for the pre-push hook.
+# it goes on in the background (its output in $PUSHNOW_LOG, the pre-push hook's in the push's own log: push()), so the
+# Board is not kept waiting for the pre-push hook.
 PUSHNOW_LOG=${STATE%/*}/pushnow.log
 pushnow() {
   local lk hk sha o c n
@@ -219,9 +220,10 @@ pushnow() {
   # The share of the release hold is taken here, before the answer says main is pushed, and the job keeps it to its
   # end (RELKEPT, push()): a release run that begins meanwhile waits for the push rather than refusing it.
   relshare || return
-  # The push file names this job while it pushes (pushing()); it is cleared at the end only while it still does.
+  # The push file names this job while it pushes (pushing()), and push() clears it and writes the push's result,
+  # by now, at the end (pushlast()); $PUSHNOW_LOG gets push()'s line naming the push's own log at once.
   ( trap '' HUP; exec {LOGFD}>&- && exec {LOGFD}>&2
-    RELKEPT=$hk push "$c" "$n"; [ "$(jq -r '.pid' "$PUSHING" 2>/dev/null)" != "$BASHPID" ] || rm -f "$PUSHING" ) > "$PUSHNOW_LOG" 2>&1 < /dev/null 8>&- &
+    RELKEPT=$hk PUSHBY=now push "$c" "$n" ) > "$PUSHNOW_LOG" 2>&1 < /dev/null 8>&- &
   exec {hk}>&-
   echo "conveyor: main (${sha:0:12}) is being pushed through the pre-push hook, with no full test run"
 }
@@ -249,7 +251,7 @@ fullline() { jq -c --arg t "$(clock)" --arg i "$(od -An -N6 -tx1 /dev/urandom | 
 # or, when a release run refused it (push() exit 3, which writes no push line), that reason (RELNOPUSH).
 fullpush() { # <commit> <card> <issue>
   local rc
-  push "$2" "$3" "$1" > /dev/null 2>&1; rc=$?
+  PUSHBY=full push "$2" "$3" "$1" > /dev/null 2>&1; rc=$?
   if atorigin "$1"; then echo '{"ok":true,"reason":null}'
   elif [ $rc = 3 ]; then jq -cn --arg r "$RELNOPUSH" '{ok: false, reason: $r}'
   else stdb ask card "$2" | jq -cs --arg c "$2" '{ok: false, reason: (map(select(.step == "push" and .card == $c and .result == "fail")) | last | .reason // "the push did not reach origin")}'; fi

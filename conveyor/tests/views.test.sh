@@ -220,6 +220,13 @@ t_snapshotpush() { latestart; cat "$STUB/late" >> "$S/cards.jsonl"; loop retry 8
   # bar without a time draws them all without their clock times and pauses).
   [ "$(q '.belt[] | select(.card == "c5") | .track.records[-1] | [.name, .state, .at[11:16]]')" = '["push failed; it is tried again","failed","00:30"]' ] \
     || fail "a failed push has no time in the card's steps: $(q '.belt[] | select(.card == "c5") | .track.records[-1]')"
+  # Issue 1078: a push whose pre-push hook failed names the failed test and the push's log on the card, not only in
+  # its push line, before its error.
+  jq -cn --arg sha "$ahead" --arg t "${d}T00:45:00Z" '{card:"c5",issue:5,step:"push",time:$t,tokens:{claude:0,codex:0},result:"fail",sha:$sha,
+    reason:"exit 1: the hook said no",kind:"check",check:"fast-checks",log:"/r/state/pushlogs/1.log"}' >> "$S/cards.jsonl"
+  out=$(loop snapshot --fresh 2>/dev/null) || fail "snapshot after a failed check exited non-zero"
+  [ "$(q '.belt[] | select(.card == "c5") | .track.reason')" = '"fast-checks failed. Log: /r/state/pushlogs/1.log. exit 1: the hook said no"' ] \
+    || fail "a failed check does not name its test and the push's log on the card: $(q '.belt[] | select(.card == "c5") | .track')"
   # The push works. Card 5's pushed mark is new: it stays on the belt while GitHub closes its issue. Card 10's is an
   # hour old with no issue line (the loop died before it wrote one): while its issue may still be open (the open
   # issues could not be listed here) it stays on the belt, Push failed, not lost; it leaves once its issue is closed.

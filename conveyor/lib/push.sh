@@ -75,20 +75,57 @@ depsreason() { # <the folders, from depsmissing>
 # RELKEPT: the push keeps that one, so a release run that began meanwhile waits for it rather than refusing it.
 RELNOPUSH="a release run is under way, so nothing is pushed until it ends"
 RELKEPT=''
+# Each push writes its output, as it comes, to a log of its own in $PUSHLOGS (plog; the newest PUSHLOG_KEEP are kept),
+# which the push record ($PUSHING, pushing()) names from the push's start; push() says where it is. At its end the
+# push record is cleared and the push's result written to $PUSHLAST (pushlast(); health reads both, lib/views.sh).
+PUSHLOGS=${STATE%/*}/pushlogs
+PUSHLOG_KEEP=20
+PUSHLAST=${STATE%/*}/pushlast
 push() { # <card> <issue> [<commit>]
-  local lk rc hk=$RELKEPT
-  { exec {lk}>>"$PUSHED.lock"; } 2>/dev/null && flock "$lk" || { echo "conveyor: the push lock could not be taken; nothing pushed" >&2; return 1; }
-  if [ -z "$hk" ]; then
-    holdtake; rc=$?
-    [ $rc = 0 ] || { exec {lk}>&-; if [ $rc = 1 ]; then echo "conveyor: $RELNOPUSH" >&2; return 3
-      else echo "conveyor: the release hold could not be made; nothing pushed" >&2; fi; return 1; }
-    hk=$RELHOLDFD
+  local lk rc hk=$RELKEPT plog f pwhy='' pcheck='' pproc=$BASHPID
+  plog=$PUSHLOGS/$(date -u +%Y%m%dT%H%M%SZ)-$BASHPID.log
+  mkdir -p "$PUSHLOGS" 2>/dev/null && : > "$plog" 2>/dev/null || plog=''
+  f=("$PUSHLOGS"/*.log); [ "${#f[@]}" -le "$PUSHLOG_KEEP" ] || rm -f "${f[@]:0:${#f[@]}-PUSHLOG_KEEP}"
+  echo "conveyor: the push's output is in ${plog:-no log: $PUSHLOGS could not be written}"
+  if { exec {lk}>>"$PUSHED.lock"; } 2>/dev/null && flock "$lk"; then
+    rc=0
+    if [ -z "$hk" ]; then
+      holdtake; rc=$?
+      if [ $rc = 0 ]; then hk=$RELHOLDFD
+      elif [ $rc = 1 ]; then pwhy=$RELNOPUSH; echo "conveyor: $pwhy" >&2; rc=3
+      else pwhy='the release hold could not be made'; echo "conveyor: $pwhy; nothing pushed" >&2; rc=1; fi
+    fi
+    [ $rc != 0 ] || { pushone "$@" {lk}>&- {hk}>&-; rc=$?; }
+  else
+    pwhy='the push lock could not be taken'; echo "conveyor: $pwhy; nothing pushed" >&2; rc=1
   fi
-  pushone "$@" {lk}>&- {hk}>&-; rc=$?; exec {lk}>&-; [ -n "$RELKEPT" ] || exec {hk}>&-; return $rc
+  pushlast "$1" "$2"; [ -z "$lk" ] || exec {lk}>&-; [ -n "$RELKEPT" ] || [ -z "$hk" ] || exec {hk}>&-; return $rc
+}
+# The record of the push that ended ($PUSHLAST), written by push() at its end, with the push record of this shell's
+# push cleared: {time, by (PUSHBY: loop; now for Push now; full for Push landed and Push anyway), card, issue, started (a push record of this push was
+# written: false when it never got as far as main's commit; why then says why, else null), sha, ok (the remote holds
+# that commit), main (main's commit then, else null), ahead (the commits of main the remote lacks then; health counts
+# them again from main, as a push by hand moves the remote: lib/views.sh), check (the failed check of a pre-push hook
+# that failed, else null), log}.
+pushlast() { # <card> <issue>
+  local st=false s='' ok=false a n=() ahead m
+  [ "$(jq -r '.pid' "$PUSHING" 2>/dev/null)" != "$BASHPID" ] || { st=true; s=$(jq -r '.sha // ""' "$PUSHING"); }
+  [ -z "$s" ] || ! atorigin "$s" || ok=true
+  for a in "$(pushed)" "refs/remotes/$REMOTE/$BRANCH"; do
+    [ -z "$a" ] || ! git rev-parse -q --verify "$a^{commit}" >/dev/null 2>&1 || n+=("$a")
+  done
+  m=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null) || m=''
+  ahead=$(git rev-list --count "refs/heads/$BRANCH" --not "${n[@]}" 2>/dev/null) || ahead=null
+  jq -cn --arg by "${PUSHBY:-loop}" --arg c "$1" --argjson i "${2:-0}" --argjson st "$st" --arg s "$s" --argjson ok "$ok" --argjson n "$ahead" \
+    --arg k "$pcheck" --arg l "$plog" --arg w "$pwhy" --arg m "$m" \
+    '{time: (now | todate), by: $by, card: $c, issue: $i, started: $st, why: (if $st or $w == "" then null else $w end), sha: (if $s == "" then null else $s end),
+      ok: $ok, main: (if $m == "" then null else $m end), ahead: $n, check: (if $k == "" then null else $k end), log: (if $l == "" then null else $l end)}' > "$PUSHLAST.new" 2>/dev/null && mv -f "$PUSHLAST.new" "$PUSHLAST" || :
+  # The push record goes once the result is written, so a reader never finds neither.
+  [ "$st" = false ] || rm -f "$PUSHING"
 }
 pushone() { # <card> <issue> [<commit>]
   local wt=$CARDS/push sha out rc=0 a c n s t state round=0 before=() got=() pend=() rest=() took=$SECONDS try m want=${3:-} at la to nv='' ff=() fl='' ho=''; local -A said=()
-  la=$(landas) || { echo "conveyor: the rule Land as could not be read (the pack's push.landAs or the control record); nothing pushed" >&2; return 1; }
+  la=$(landas) || { pwhy="the rule Land as could not be read (the pack's push.landAs or the control record)"; echo "conveyor: $pwhy; nothing pushed" >&2; return 1; }
   to=$BRANCH; [ "$la" != pr ] || to=$LANDING
   for a in "$(pushed)" "refs/remotes/$REMOTE/$BRANCH"; do
     [ -z "$a" ] || ! a=$(git rev-parse -q --verify "$a^{commit}" 2>/dev/null) || before+=("$a")
@@ -97,22 +134,27 @@ pushone() { # <card> <issue> [<commit>]
   # that lands meanwhile waits for the next push. A given commit had the full test run.
   at=${want:-refs/heads/$BRANCH}
   if [ -z "$want" ] && sha=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null); then
-    pushing "$sha"; pushtests "$1" "$2" "$sha" "${before[@]}" || return 1; at=$sha
+    pushing "$sha" tests; pushtests "$1" "$2" "$sha" "${before[@]}" || return 1; at=$sha
   fi
   # A pre-push hook that failed naming test files that each pass alone (hookalone()) failed under load, not in the
   # code: the same commit is pushed again with no hook (nv: --no-verify), and the files go on the flaky-test record
   # (ff, then fl: flakypush(), given the hook's output, ho). A file that fails alone too, or a hook that names none,
   # holds the push as before.
+  # The push record's stage (pushing()) is ready while the push worktree, its dependencies and a test slot are got, then
+  # hook (push, when it is pushed with no hook) for as long as git push runs, then pushed or ended as git push exits.
   while :; do
   for try in 1 2; do
     rm -f "$wt.trace"
-    rc=0; sha=$(git rev-parse "$at" 2>&1) && pushing "$sha" && out=$({
+    # The push's output goes to its log (plog) as it comes, and is kept in out for its push line.
+    rc=0; sha=$(git rev-parse "$at" 2>&1) && pushing "$sha" ready && out=$(exec 8>&-; {
       git worktree remove --force "$wt" 2>/dev/null; rm -rf "$wt"; git worktree prune
       packget push.env e && mapfile -d '' -t e < <(jq -j 'to_entries[] | "\(.key)=\(.value)\u0000"' <<<"$e") \
         && git worktree add -q --detach "$wt" "$sha" && deps "$wt" && cd "$wt" \
         && slot_pool && { [ -n "$SLOT_HOME" ] || { slot_first && slot_mine; }; } \
-        && env "${e[@]}" GIT_TRACE2_EVENT="$wt.trace" timeout --kill-after=30 "$PUSH_TIMEOUT" git push ${nv:+"$nv"} "$REMOTE" "$sha:refs/heads/$to"
-    } 2>&1 < /dev/null 8>&-) && { [ "$la" = pr ] || echo "$sha $REMOTE $BRANCH" > "$PUSHED"; } || rc=$?
+        && pushing "$sha" "$([ -z "$nv" ] && echo hook || echo push)" && {
+          env "${e[@]}" GIT_TRACE2_EVENT="$wt.trace" timeout --kill-after=30 "$PUSH_TIMEOUT" git push ${nv:+"$nv"} "$REMOTE" "$sha:refs/heads/$to"
+          a=$?; pushing "$sha" "$([ $a = 0 ] && echo pushed || echo ended)"; exit $a; }
+    } 2>&1 < /dev/null | tee -a "${plog:-/dev/null}"; exit "${PIPESTATUS[0]}") && { [ "$la" = pr ] || echo "$sha $REMOTE $BRANCH" > "$PUSHED"; } || rc=$?
     # The remote refused the push (git's "[rejected]": its main holds a commit this one lacks): main takes the
     # remote's commits in a merge commit and is pushed again, once, in this same turn. The worktree stays until they
     # are fetched: the fetch is made from it, as the push was.
@@ -127,17 +169,20 @@ pushone() { # <card> <issue> [<commit>]
     at=refs/heads/$BRANCH
   done
   [ $rc != 0 ] && [ -z "$nv" ] && [ $rc != 124 ] && [ $rc != 137 ] && hookfailed "$wt.trace" || break
-  m=$(hookalone "$sha" "$out") || { [ -z "$m" ] || out+=$'\n'"conveyor: $m"; break; }
+  pushing "$sha" tests; m=$(hookalone "$sha" "$out") || { [ -z "$m" ] || out+=$'\n'"conveyor: $m"; break; }
   mapfile -t ff <<<"$m"; ho=$out; nv=--no-verify; at=$sha
   done
   took=$((SECONDS - took))
   # Why it failed (docs/cards.md, Push): check, the pre-push hook exited non-zero (it fails the same way on the same
   # commit, so the loop does not push again until main moves: checkheld()), or transport, anything else (git, the
   # network, the remote, the timeout), which a later try may get past.
+  # A failed check names the test the output names failed (its last "FAILED <name>"), else the pre-push hook (pcheck,
+  # for pushlast()); the push line names the push's log too.
   [ $rc = 0 ] || { a=transport; [ $rc = 124 ] || [ $rc = 137 ] || ! hookfailed "$wt.trace" || a=check; rm -f "$wt.trace"
-    record "$1" "$2" push fail "$(jq -cn --arg s "$([[ $sha =~ ^[0-9a-f]{40,64}$ ]] && echo "$sha")" --argjson t "$took" --arg k "$a" --arg o "$(tail -c 20000 <<<"$out" | tr -d '\000')" \
+    [ $a != check ] || pcheck=$(tail -c 20000 <<<"$out" | tr -d '\000' | jq -Rrs '[scan("(?:^|[^A-Za-z0-9_])FAILED:?[ \t]+(\\S+)")] | last[0] // "the pre-push hook" | .[0:100]')
+    record "$1" "$2" push fail "$(jq -cn --arg s "$([[ $sha =~ ^[0-9a-f]{40,64}$ ]] && echo "$sha")" --argjson t "$took" --arg k "$a" --arg c "$pcheck" --arg l "${plog:-}" \
     --arg r "exit $rc (124 is the ${PUSH_TIMEOUT}s timeout): $(tail -c 1200 <<<"${out:-$sha}" | tr -d '\000')" '{sha:$s,reason:$r,sec:$t,kind:$k}
-      + if $k == "check" then {check: ([$o | scan("(?:^|[^A-Za-z0-9_])FAILED:?[ \t]+(\\S+)")] | last[0] // "the pre-push hook" | .[0:100])} else {} end')"; return; }
+      + (if $k == "check" then {check: $c} else {} end) + (if $l == "" then {} else {log: $l} end)')"; return; }
   rm -f "$wt.trace"
   # Pushed over a hook that failed under load: each pushed line says so (flaky: {files, issues}).
   [ ${#ff[@]} = 0 ] || { fl=$(flakypush "$sha" "$ho" "${ff[@]}") || :; fl=",\"flaky\":${fl:-$(jq -cn '{files: $ARGS.positional, issues: []}' --args "${ff[@]}")}"; }
@@ -553,7 +598,11 @@ idleone() {
   idlenow || return 0
   mergeone idle
 }
-pushing() { jq -cn --argjson p "$BASHPID" --arg s "$1" '{pid:$p,since:(now|todate),sha:$s}' > "$PUSHING" 2>/dev/null || :; }
+# The push record of push()'s push (pproc, its process; else this shell's) of <commit>, since now, at <stage>: tests,
+# the test files run before the push (pushtests(), hookalone()); ready, the push worktree, its dependencies and a test
+# slot being got; hook, git push and its pre-push hook running; push, git push with no hook running; ended, git push
+# failed and the push goes on to its end or to a next try; pushed, the remote holds the commit and the push ends.
+pushing() { jq -cn --argjson p "${pproc:-$BASHPID}" --arg s "$1" --arg g "$2" --arg l "${plog:-}" '{pid:$p,since:(now|todate),sha:$s,stage:$g} + (if $l == "" then {} else {log:$l} end)' > "$PUSHING" 2>/dev/null || :; } # <commit> <stage>
 # Did the push's pre-push hook exit non-zero? Read from git's trace2 events of the push (the file given): the first
 # event is the push's own, and only its own children count (a check that runs git, or pushes in a test of its own,
 # writes its events there too, under another session id). No file, or no such event: no.
@@ -675,7 +724,8 @@ pushturn() {
   checkheld || { push "$c" "$n" & pusher=$!; }
 }
 # A turn's check that the push job (pusher) has ended: then no push runs, and its pushing state goes.
-pushended() { [ -z "$pusher" ] || jobs -rp | grep -qx "$pusher" || { pusher=''; rm -f "$PUSHING"; }; }
+# push() clears the record itself; this clears one its job left (a stub's), never another push's.
+pushended() { [ -z "$pusher" ] || jobs -rp | grep -qx "$pusher" || { [ "$(jq -r '.pid' "$PUSHING" 2>/dev/null)" != "$pusher" ] || rm -f "$PUSHING"; pusher=''; }; }
 
 tidy() { git worktree remove --force "$1" 2>/dev/null; rm -f "$1".events "$1".firsttry "$1".firsttry.new "$1".patch "$1".index "$1".msg "$1".review.new "$1".carried "$1".base "$1".live "$1".live.tmp "$1".idle "$1".claim "$1".claim.new "$1".cpatch "$1".cpatch.new "$1".stack "$1".settings "$1".opencode.json "$1".donewhen "$1".unfixed "$1".covered "$1".stalled "$1".ready "$1".ready.new "$1".batch "$1".batch.new "$1".bpatch "$1".lent "$1".batchtest "$1".batchfirst "$1".first "$1".rerun "$1".rerun.new "$1".sharedran "$1".whole "$1".passed "$1".bpass "$1".oldtimes "$1".times "$1".reported "$1".report "$1".report.[0-9]* "$1".testlist "$1".uncovered "$1".slow "$1".timed "$1".cpus "$1".clocks "$1".oldfiles "$1".before; rm -rf "$1".rv "$1".batchtestlog "$1".covfirst "$1".checks; }
 # The project's own screenshots of a change that waits for the owner's yes, kept local for the Board: the images

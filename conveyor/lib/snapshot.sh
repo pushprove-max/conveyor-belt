@@ -741,7 +741,9 @@ snapshot() (
     # or all of them when the issues were not listed, has no umbrella field.
       ([$iss[0] // [] | .[] | select(.umbrella != null) | {key: (.number | tostring), value: .umbrella}] | from_entries) as $ums
     | def umbrella: $ums[.issue | tostring] | if . == null then {} else {umbrella: .} end;
-      ($h.pushError.reason // null) as $perr
+      # Why the push failed, on the card: the check that failed and the log of the push first, then its error.
+      ($h.pushError // null | if . == null then null
+        else [(.check | strings | "\(.) failed"), (.log | strings | "Log: \(.)"), (.reason // "the push of main failed")] | join(". ") end) as $perr
     | [$all[0][] | .steps[] | select((.time | day) >= $since)] as $steps
     # A card whose issue was closed while it was blocked (x.blockedAt) landed nothing: it is not among the landed.
     | [$c[] | select((.step | IN("landed", "closed")) and .x.blockedAt == null and (.x.endAt | day) >= $since)] as $week
@@ -905,7 +907,7 @@ snapshot() (
            # One that failed its check needs the owner at once: it is not tried again until main moves (checkheld()).
            + [($h.pushError.kind == "check") as $chk | select($h.pushFails >= 2 or $chk) | $h.unpushed as $u | $c[] | select(.card == $u[-1].card)
               | {card, issue, title, reason: ((if $chk then "push blocked: \($h.pushError.check) failed after \($h.pushError | if .issue == 0 then .card else "#\(.issue)" end). A retry will fail too, so the push waits until a fix lands on main"
-                   else "the push of main keeps failing" end) + ". Not pushed: \($u | map(if .issue == 0 then .card else "#\(.issue)" end) | join(", "))"), tail: $h.pushError.reason,
+                   else "the push of main keeps failing" end) + ". Not pushed: \($u | map(if .issue == 0 then .card else "#\(.issue)" end) | join(", "))"), tail: ([($h.pushError.log | strings | "Log: \(.)"), ($h.pushError.reason | strings)] | if . == [] then null else join(". ") end),
                  since: $h.pushFailingSince, push: true, check: (if $chk then $h.pushError.check else null end), unpushed: ($u | map({card, issue})), parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split} + times],
          before: $h.before,
          engine: $eng,

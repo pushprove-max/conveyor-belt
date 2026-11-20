@@ -44,9 +44,12 @@ t_pushslot() {
     eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")"
     names || exit 1; push c1-1 1 ) > "$d/push.out" 2>&1 &
   wait_until 'compgen -G "$P/first/[0-9]*" >/dev/null' "cat '$d/push.out'" || fail "the push did not wait for a test slot"
+  # Review of issue 1078: the views said the pre-push hook ran while the push still waited for its test slot.
+  [ "$(jq -r .stage "$ST/pushing")" = ready ] || fail "a push that waits for a test slot does not say so: $(cat "$ST/pushing")"
   [ ! -e "$d/order" ] || fail "something ran with every slot held: $(cat "$d/order")"
   : > "$d/free1"
   wait_until '[ -s "$d/order" ]' "cat '$d/push.out'" || fail "nothing took the slot given back"
+  [ "$(jq -r .stage "$ST/pushing")" = hook ] || fail "a push whose hook runs does not say so: $(cat "$ST/pushing")"
   [ "$(cat "$d/order")" = push ] || fail "a waiting test unit took the slot given back before the push, or with it: $(cat "$d/order")"
   [ ! -r /proc/self/cgroup ] || [ "$(cat "$d/hookcg")" = "$(cat /proc/self/cgroup)" ] \
     || fail "the push's hook ran in a cgroup of its own (a capped box), not the loop's: $(cat "$d/hookcg")"

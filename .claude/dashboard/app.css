@@ -622,6 +622,10 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .board-label { font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
 .board-value { font-weight: 700; font-variant-numeric: tabular-nums; min-width: 2ch; text-align: center; }
 .board-from { font-size: var(--fs-sm); color: var(--muted); }
+/* The push in progress or the last one, under the Push buttons: one line each, a log path or output line wrapped anywhere. */
+.board-push-state { flex-basis: 100%; display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.board-push-bad { color: var(--bad); }
+.board-push-line { font-family: var(--mono); color: var(--muted); }
 /* Release: a card a project, its three steps as numbered rows (the step's chip and its one line), then the version and
    its one button; each change since the tag is one line, its issue's title cut with an ellipsis. */
 .release-steps, .release-go, .release-changes { margin-top: var(--sp-2); }

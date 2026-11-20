@@ -89,6 +89,18 @@ right-aligned and the title is what gives way.
   so in place of its turns it shows how far the tests are: `142 of 205 tests · 2 failed · last output 23s ago`; while
   the feed gives no test count, the test files run (`3 of 6 test files`); with neither, only its last output. The
   list that the run got comes first: `changed: 7 files`.
+  Under the cards, a line for the push of each project. While the push runs: the commit, what runs and since when,
+  its process and the time it has run (`push on a1b2c3d4e5f6: pre-push hook running since 4:37 AM · pid 4242 · 3m`;
+  before the hook, `tests before the push running`, then `getting the push ready (worktree, dependencies, test
+  slot)`; with no hook, `push running with no pre-push hook`; after a failed `git push`, `git push ended, finishing the
+  push`; after the remote has the commit, `pushed, waiting for GitHub`), then the newest line of the hook's output, or
+  its `N/M passed` line. A part that does not fit the width goes on to the
+  next line, and a long log path continues over lines. A push whose process is gone and that did
+  not end shows as stale, with its log (`✗ push on a1b2c3d4e5f6 is stale: … · Log: <path>`). For an hour after a push
+  ends, and while a failed push leaves landed commits not pushed, the line gives its result: `✓ Push now of
+  a1b2c3d4e5f6 passed 2m ago`, or `✗` with the failed test and the log, or `Push now started no push` and why. When
+  main is still ahead of the remote after it, the line says so (`main is still 1 commit ahead of the remote`). The
+  log is in the state folder ([Push](cards.md#push)).
 - **QUEUE**: `next 5 of 9`: the next five, numbered, the title cut to fit, the priority right-aligned (with
   `follow-up` and `retried`); the issues that wait on another; then the held-back line. With the rule "Push on
   landing" Off, `landed, not pushed:` follows, with each open issue whose card landed and that waits for the push,

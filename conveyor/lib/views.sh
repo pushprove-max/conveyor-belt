@@ -174,10 +174,13 @@ cards() {
 # wait began, waitsOn as stuck's): every open card waiting at its claim (the live record of the step it is running names
 # the card it waits on and was brought up to date within STUCK seconds); unpushed (card, issue, sha, since): the landed commits in main that neither the last push that worked nor
 # origin's main as last seen here holds; pushError (time, sha, reason, kind: check or transport, check: the check that
-# failed, card and issue: the landing it was pushed for; the last failed push since the oldest of those landed, else null), pushFailingSince (the first such failure, else null) and pushFails (how many such failures); pushFlaky (time, card,
+# failed, card and issue, and log, the push's log, when its push line names one: the landing it was pushed for; the last failed push since the oldest of those landed, else null), pushFailingSince (the first such failure, else null) and pushFails (how many such failures); pushFlaky (time, card,
 # issue, files, issues: the last pushed line whose push went on over a pre-push hook that failed naming test files that
 # each passed alone, pushone(), lib/push.sh, in the last 24 hours; else null); pushing (the push in progress,
-# {since, sha}, while the loop's push job runs, else null; a landing during it waits for the next push); gh (signed in); diskFreeKb (free space
+# {pid, since, sha, stage: as pushing() in lib/push.sh writes it, log, sec: the seconds since its stage
+# began, line: the newest line of its log or its last "N/M passed", stale: its process is gone and it did not end},
+# whoever started it, else null; a landing during it waits for the next push); pushLast (the last push that ended, as
+# pushlast() in lib/push.sh writes it, its ahead counted now, else null); gh (signed in); diskFreeKb (free space
 # on the cards folder, null when df gives none); refused (card, issue, reason: "refused full run: <why>", since: the
 # line's time): each test line of the last 24 hours whose run refused a full run (tests()), for the Foreman's watcher;
 # untimed (UNTIMED, below): how many of the last card test runs recorded no test times, 0 when one did; split (SPLITM,
@@ -296,7 +299,7 @@ SPLITM='def splitm($all): [$all | group_by(.card)[] | select(any(.step == "split
 # (DEPS) and the issues before their build (SEE) take of a line, and none other: a line's tail, review and token counts
 # were most of the bytes it read. A test line's times only as whether they are an object (untimed).
 HEALTHLINE='select(. != "") | fromjson | {card, issue, step, of, time, result, followups} + if .step == "worktree" then {pid, started}
-    elif .step == "blocked" then {reason} elif .step == "landed" then {sha} elif .step == "push" then {sha, reason, kind, check} elif .step == "pushed" then {pr, flaky}
+    elif .step == "blocked" then {reason} elif .step == "landed" then {sha} elif .step == "push" then {sha, reason, kind, check, log} elif .step == "pushed" then {pr, flaky}
     elif .step == "picked" then {mainRed} elif .step == "lint" then {skipped: any(.lint.commands[]?; .result | strings | startswith("skipped"))} elif .step == "test" then {refused, reused, ended, selected, times: (if (.times | type) == "object" then {} else null end)}
     else {} end'
 # When health first read each stopped process of the "<pid> TAB <started> TAB <card>" lines on stdin stopped, as ps
@@ -317,7 +320,7 @@ stopsince() { # <now>
 # READCHECKED, when set, says READ is a copy that check() has already passed and nothing appends to (the snapshot's):
 # health does not check it again.
 health() {
-  local wt stopped en e t n loop=true gh=false ghr=null ghwhy='' free a not=() lv c r=null cap bw cyc=null pu=null bf=null st why='' said gone cm rm mc tr sp so co hd rc
+  local wt stopped en e t n loop=true gh=false ghr=null ghwhy='' free a not=() lv c r=null cap bw cyc=null pu=null pl=null pm pn bf=null st why='' said gone cm rm mc tr sp so co hd rc
   { [ -n "${READCHECKED:-}" ] || check; } && lv=${LIVEJSON:-$(live)} || return 1
   # The records and the retried lines, as health reads them (HEALTHLINE).
   hd=$(mktemp -d) || return 1
@@ -382,8 +385,17 @@ health() {
   [ "$loop" = true ] && cm=$(jq -ce '.commit | strings' "$SAYS" 2>/dev/null) || cm=null
   # The running loop's count at its last turn: {building: the cards counted against the cap, waiting: those left out}.
   [ "$loop" = true ] && bw=$(jq -ce 'select((.building | type) == "number" and (.waiting | type) == "number") | {building, waiting}' "$SAYS" 2>/dev/null) || bw='{"building":null,"waiting":null}'
-  if [ "$loop" = true ] && pu=$(jq -ce 'select((.pid | type == "number") and (.since | type == "string")) | {pid, since, sha}' "$PUSHING" 2>/dev/null) \
-    && kill -0 "$(jq -r .pid <<<"$pu")" 2>/dev/null; then pu=$(jq -c 'del(.pid)' <<<"$pu"); else pu=null; fi
+  # The push in progress, whoever started it (the loop, Push now, Push landed): stale when its process is gone and it
+  # did not end (push() clears the record at its end); line, the newest line of its log, or its last "N/M passed".
+  if pu=$(jq -ce 'select((.pid | type == "number") and (.since | type == "string")) | {pid, since, sha, stage: (.stage // null), log: (.log // null)}' "$PUSHING" 2>/dev/null); then
+    kill -0 "$(jq -r .pid <<<"$pu")" 2>/dev/null && a=false || a=true
+    pu=$(jq -c --argjson stale "$a" --rawfile out <(f=$(jq -r '.log // empty' <<<"$pu"); [ -z "$f" ] || tail -c 65536 "$f" 2>/dev/null) '
+      (($ENV.CONVEYOR_NOW // "" | tonumber?) // now) as $now
+      | ($out | gsub("\u001b\\[[0-9;?]*[A-Za-z]"; "") | gsub("\r"; "\n") | split("\n") | map(select(test("\\S")))) as $l
+      | . + {stale: $stale, sec: ([$now - (.since | fromdate), 0] | max | floor),
+             line: (([$l[] | select(test("\\b[0-9]+/[0-9]+ passed\\b"))] | last) // $l[-1] // null | if . then .[0:300] else . end)}' <<<"$pu") || pu=null
+  else pu=null; fi
+  pl=$(jq -ce 'objects | select(.time | type == "string")' "$PUSHLAST" 2>/dev/null) || pl=null
   # Signed in (ghok, read without the network); only then whether GitHub answers (ghreach): null when signed out.
   # Not signed in: why (ghok's GHWHY, health ghWhy), so a wake can say it (#490). ghRead names the GitHub read both
   # answers are from (ghok's GHREAD).
@@ -407,11 +419,15 @@ health() {
   for a in "$(pushed)" "refs/remotes/$REMOTE/$BRANCH"; do
     [ -z "$a" ] || ! git rev-parse -q --verify "$a^{commit}" >/dev/null 2>&1 || not+=("$a")
   done
+  # The last push's ahead, counted now: the commits main had at its end that the remote still lacks (a push by hand
+  # since then moves the remote; a landing since then is not counted).
+  [ "$pl" = null ] || ! pm=$(jq -re '.main | strings' <<<"$pl") || ! pn=$(git rev-list --count "$pm" --not "${not[@]}" 2>/dev/null) \
+    || pl=$(jq -c --argjson n "$pn" '.ahead = $n' <<<"$pl")
   # The landing pull request as GitHub has it (prsync(), lib/push.sh); under `watch`, its slower timer asks (github()).
   [ -n "$GITHUB" ] || prsync
   jq -cs --argjson loop "$loop" --argjson gh "$gh" --argjson ghr "$ghr" --arg ghwhy "$ghwhy" --arg ghread "$GHREAD" --argjson free "$free" --argjson stuck "$STUCK" --argjson sstuck "$SESSION_STUCK" --argjson casestuck "$CASE_STUCK" --argjson waitlimit "$WAIT_LIMIT" --argjson gone "$gone" --argjson stopped "$stopped" --argjson live "${lv:-{\}}" --argjson proof "$(proofs)" --argjson testout "$(testouts)" \
     --arg state "$st" --arg why "$why" --argjson commit "$cm" --argjson ctl "$c" --argjson r "$r" --arg yes "$YES" --arg lintyes "$LINTYES" \
-    --argjson cap "$cap" --argjson bw "$bw" --arg repo "$REPO" --argjson room "$rm" --argjson machine "$mc" --argjson cores "$co" --argjson force "$(inforce "$c")" --argjson cycles "$cyc" --slurpfile before <(printf '%s\n' "$bf") --argjson pushing "$pu" --argjson homes "$(homes "$c")" --argjson routes "$(routesnow)" --argjson report "$tr" --argjson serviceold "$so" \
+    --argjson cap "$cap" --argjson bw "$bw" --arg repo "$REPO" --argjson room "$rm" --argjson machine "$mc" --argjson cores "$co" --argjson force "$(inforce "$c")" --argjson cycles "$cyc" --slurpfile before <(printf '%s\n' "$bf") --argjson pushing "$pu" --argjson pushlast "$pl" --argjson homes "$(homes "$c")" --argjson routes "$(routesnow)" --argjson report "$tr" --argjson serviceold "$so" \
     --slurpfile old "$hd/old" --slurpfile mh <(jq -c 'objects | {since, card, sha, controls, cases}' "$MACHINEHOLD" 2>/dev/null) --slurpfile lp <(jq -c 'objects | select(.merged == null and .closed == null and (.number | type) == "number") | {number, url, merge}' "$LANDPR" 2>/dev/null) --slurpfile qt <(jq -c 'objects | {line, field, time}' "$QUARANTINE" 2>/dev/null) --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) "$UNTIMED$SPLITM"'
     (($ENV.CONVEYOR_NOW // "" | tonumber?) // now) as $now
     | ($ahead | split("\n") | map(select(. != "")) | INDEX(.)) as $ahead
@@ -479,7 +495,7 @@ health() {
          # A card whose process or engine is stopped says which, on each of its entries.
          | map(. + ($stopped.cards[.card] // null | if . then {stopped: .} else {} end))), engineStopped: $stopped.engine,
        waitingOnCard: [$c[] | select(.end == null and atclaim) | $live[.card] as $v | {card, issue, since: $v.at, waitsOn: holder($v.waits.on)}],
-       unpushed: $un, pushError: ($fail | last | if . then {time, sha, reason, kind: (.kind // null), check: (.check // null), card, issue} else null end), pushFailingSince: ($fail[0].time // null), pushFails: ($fail | length), pushing: $pushing,
+       unpushed: $un, pushError: ($fail | last | if . then {time, sha, reason, kind: (.kind // null), check: (.check // null), card, issue} + (if .log then {log} else {} end) else null end), pushFailingSince: ($fail[0].time // null), pushFails: ($fail | length), pushing: $pushing, pushLast: $pushlast,
        pushFlaky: ([.[] | select(.step == "pushed" and (.flaky | type) == "object" and $now - (.time | fromdate) < 86400)] | last | if . then {time, card, issue, files: .flaky.files, issues: .flaky.issues} else null end),
        gh: $gh, ghReached: $ghr, ghWhy: (if $gh then null else $ghwhy end), ghRead: $ghread, diskFreeKb: $free, builderCap: $cap, building: $bw.building, waitingCount: $bw.waiting, models: $force.models, efforts: $force.efforts, cycles: $cycles, before: $before[0], homes: $homes,
        refused: [.[] | select(.step == "test" and (.refused | type) == "string" and $now - (.time | fromdate) < 86400) | {card, issue, reason: .refused, since: .time}],

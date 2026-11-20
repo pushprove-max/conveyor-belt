@@ -133,6 +133,7 @@
 #           unpushed (the landed cards whose commits origin lacks, oldest first, each with since; null from a snapshot
 #           without them), fullTest (the snapshot's: command, why, running, last; null from a snapshot without it) and
 #           landingPr (health's: the open pull request of Land as pr, {number, url, cards, merge}, for Merge; null with none),
+#           pushing and pushLast (health's: the push in progress and the last push that ended; null with none),
 #           for Push landed and Run full test suite.
 #           checkRuns: each record's check run (its snapshot's checkRun, conveyor.sh checkrun(), with its repo), of
 #           every record, steered or not, whose pack names checks.progress and has one to show (repo null too: no
@@ -753,7 +754,7 @@ PANELS_JQ='
        landed: [$s.landed[] | {card, issue, name: (.name // null), title, step, time, usd, reviews, batch: (.batch // null), doneWhen: (.doneWhen // null), split: (.split // null), seats: (.seats // null), stalls: (.stalls // 0)}] | few($r),
        today: {landed: $s.landedCount, usd: $s.landedUsd},
        unpushed: ($s.health.unpushed // null | if . == null then null else map({card, issue, name: (.name // null), since}) | few($r) end), fullTest: ($s.fullTest // null),
-       landingPr: ($s.health.landingPr // null),
+       landingPr: ($s.health.landingPr // null), pushing: ($s.health.pushing // null), pushLast: ($s.health.pushLast // null),
        open: openOf($r)};
   # The Rules of one record: its rules and what they produce: the queue, the held and the skipped, the cards on the
   # belt (building, how many; onBelt, their issues) and the cards blocked, and the snapshot'"'"'s forecast. The page

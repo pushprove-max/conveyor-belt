@@ -101,6 +101,33 @@ test('Control: Push now sits beside Push landed, sends push-now on a second clic
   assert.equal(part(w, 'landed').querySelector('.board-push-why').textContent, 'Cannot work now: nothing that landed waits for a push.');
 });
 
+// Bugs this guards (issue 1078): for the whole pre-push hook the Board showed nothing of the push, so a slow push could
+// not be told from a stuck one; a push whose process was gone, a failed push and a Push now that left main ahead of the
+// remote looked the same. Under the Push buttons: the hook running with its commit, process, elapsed time and newest
+// line; a stale push with its log; a failure with its failed test and log; main still ahead.
+test('Control: the push in progress shows its hook, time and newest line; a stale or failed push and main still ahead say so', () => {
+  const w = boot({ tab: 'control' }), log = '/s/pushlogs/1.log', state = () => part(w, 'landed').querySelector('.board-push-state');
+  const with_ = (o) => { const d = data(); Object.assign(d.panels.board.data, o); return d; };
+  deliver(w, with_({ pushing: { pid: 42, since: '2026-11-14T08:00:00Z', sha: A, log, sec: 9, line: '3/9 passed', stale: false }, pushLast: null }));
+  assert.equal(state().dataset.state, 'running');
+  assert.match(state().textContent, new RegExp(`^Pre-push hook running on ${A.slice(0, 12)} since .+ · pid 42 · .+3/9 passedLog: ${log}$`));
+  assert.ok(state().querySelector('time.since'), 'the elapsed time keeps counting');
+  // Review of issue 1078: the Board said the hook ran while the tests before the push ran and after the remote held the commit.
+  // It said so too while the push waited for its test slot, and after git push ended.
+  for (const [stage, what] of [['tests', 'Tests before the push running'], ['ready', 'Getting the push ready \\(worktree, dependencies, test slot\\)'],
+    ['push', 'Push running with no pre-push hook'], ['ended', 'git push ended, finishing the push'], ['pushed', 'Pushed, waiting for GitHub']]) {
+    next(w, with_({ pushing: { pid: 42, since: '2026-11-14T08:00:00Z', sha: A, stage, log, sec: 9, line: '', stale: false }, pushLast: null }));
+    assert.match(state().textContent, new RegExp(`^${what} on ${A.slice(0, 12)} since `), stage);
+  }
+  next(w, with_({ pushing: { pid: 42, since: '2026-11-14T08:00:00Z', sha: A, log, sec: 9, line: '3/9 passed', stale: true }, pushLast: null }));
+  assert.equal(state().textContent, `The push on ${A.slice(0, 12)} is stale: its process (pid 42) is gone and the push did not end.Log: ${log}`);
+  next(w, with_({ pushing: null, pushLast: { time: '2026-11-14T08:00:00Z', by: 'now', started: true, sha: A, ok: false, ahead: 1, check: 'fast-checks', log } }));
+  assert.equal(state().dataset.state, 'failed');
+  assert.match(state().textContent, new RegExp(`^Push now on ${A.slice(0, 12)} failed: fast-checks failed\\. .+ agoLog: ${log}Main is still 1 commit ahead of the remote\\.$`));
+  next(w, with_({ pushing: null, pushLast: { time: '2026-11-14T08:00:00Z', by: 'now', started: false, why: 'the push lock could not be taken', sha: null, ok: false, ahead: 2 } }));
+  assert.match(state().textContent, /^Push now started no push: the push lock could not be taken\. .+ agoMain is still 2 commits ahead of the remote\.$/);
+});
+
 // Bugs this guards: a project with no full test suite was offered both buttons, and a second press during a run started
 // another (the host refuses it too; its refusal is shown); (UX38) the reason sat under both buttons while neither
 // looked off: each button is disabled, and says why beside it in a sentence.

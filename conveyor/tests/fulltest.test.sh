@@ -244,7 +244,7 @@ ftpushes() { st 'select(.step == "push" or .step == "pushed") | [.step, .result,
 # landed); Push now must push it as the loop's own push does: through the pre-push hook, a failed hook recorded as a
 # check push error under the landed card (Needs you reads it), and never run test.full.
 t_pushnow() {
-  ftnow; local A O0 out
+  ftnow; local A O0 out s l
   A=$(ftmain); O0=$(ftorigin)
   # The hook fails: nothing reaches the remote, and the card has a push line of kind check naming the check.
   : > "$STUB/push-fail"
@@ -252,6 +252,14 @@ t_pushnow() {
   wait_until '[ "$(ftpushes)" = 1 ] && [ ! -e "$ST/pushing" ]' 'cat "$ST/pushnow.log" "$ST/cards.jsonl"'
   [ "$(ftorigin)" = "$O0" ] && [ "$(st 'select(.step == "push") | [.issue, .result, .kind, .check, .sha] | join(" ")')" = "7 fail check fast-checks $A" ] \
     || fail "a push whose pre-push hook failed reached the remote, or is not recorded as a check push error: origin $(ftorigin), $(st 'select(.step == "push")')"
+  # Issue 1078: the failed push names its failed test and its log on the card (Needs you, with push off), not only in
+  # its push line; its result says main is still ahead of the remote; pushnow.log names the log, not left empty.
+  s=$(loop snapshot --fresh); l=$(jq -r '.health.pushLast.log' <<<"$s")
+  [[ $l == "$ST"/pushlogs/*.log ]] && grep -q 'FAILED fast-checks' "$l" && grep -qF "$l" "$ST/pushnow.log" \
+    || fail "the failed push's log is not kept beside the push record with the hook's output, or pushnow.log does not name it: $l, $(cat "$ST/pushnow.log")"
+  [ "$(jq -c --arg l "$l" '[(.needsYou.blocked[] | select(.issue == 7) | [(.reason | test("fast-checks failed")), (.tail | startswith("Log: \($l). "))]),
+      (.health.pushLast | [.by, .started, .ok, .ahead, .check, .sha])]' <<<"$s")" = "[[true,true],[\"now\",true,false,1,\"fast-checks\",\"$A\"]]" ] \
+    || fail "the card does not name the failed test and the log, or the push's result does not say main is still ahead: $(jq -c '[.needsYou.blocked, .health.pushLast]' <<<"$s")"
   # The hook passes: main reaches the remote through it, the card is marked pushed.
   rm "$STUB/push-fail"
   loop push-now > /dev/null || fail "push-now did not start after the check failed"
@@ -261,6 +269,63 @@ t_pushnow() {
   # Nothing is unpushed now: refused with the reason, and nothing is pushed or recorded.
   out=$(loop push-now 2>&1); [ $? = 2 ] && grep -q 'no landed commit' <<<"$out" || fail "push-now with nothing unpushed was not refused: $out"
   [ "$(ftpushes)" = 2 ] && [ "$(wc -l < "$STUB/hookruns")" = 2 ] || fail "push-now with nothing unpushed changed something: $(cat "$STUB/hookruns")"
+}
+
+# Bugs this guards (issue 1078): while the pre-push hook ran (a whole suite, minutes), the snapshot said only that the
+# cards were pushing: no output and no elapsed time, so a slow push could not be told from a stuck one. The hook prints
+# a line and waits, then a runner's count and one more line and waits: the case reads health and the snapshot while the
+# real background push runs, as only a push still running shows what it says before it ends.
+t_pushlive() {
+  ftnow; local A s l
+  A=$(ftmain)
+  printf '%s\n' '#!/usr/bin/env bash' 'echo "running the suite"; until [ -e "$STUB/next" ]; do sleep 0.1; done' \
+    'echo "1/3 passed"; echo "  a.test ok"; until [ -e "$STUB/go" ]; do sleep 0.1; done' > "$R/.git/hooks/pre-push"
+  tune '.tunables.closeWait = 100' # the fixture's 0 would not wait for GitHub to close the issue, below
+  loop push-now > /dev/null || fail "push-now did not start"
+  wait_until '[ "$(loop health | jq -r .pushing.line)" = "running the suite" ]' 'cat "$ST/pushnow.log" "$ST/pushing"' || fail "the hook's newest line is not shown while it runs"
+  : > "$STUB/next"
+  # The runner's N/M passed line is shown over a newer line.
+  wait_until '[ "$(loop health | jq -r .pushing.line)" = "1/3 passed" ]' 'loop health | jq -c .pushing' || fail "the runner's count is not shown while the hook runs"
+  s=$(loop snapshot --fresh); l=$(jq -r '.health.pushing.log' <<<"$s")
+  [ "$(jq -c '.health.pushing | [.sha, .stage, .line, .stale, (.pid | type), (.sec | type), (.since | type)]' <<<"$s")" = "[\"$A\",\"hook\",\"1/3 passed\",false,\"number\",\"number\",\"string\"]" ] \
+    && grep -qF "$l" "$ST/pushnow.log" || fail "the snapshot does not show the running push's commit, stage, process, elapsed time and newest line, or pushnow.log does not name its log: $(jq -c .health.pushing <<<"$s"), $(cat "$ST/pushnow.log")"
+  # Review of issue 1078: once the remote holds the commit, the push that waits for GitHub to close the issue is no
+  # longer the hook's (GitHub shows issue 7 open, then closed: the push waits for it, closeWait set above).
+  echo OPEN > "$STUB/state.7"; : > "$STUB/go"
+  wait_until '[ "$(loop health | jq -r .pushing.stage)" = pushed ]' 'loop health | jq -c .pushing; cat "$ST/pushnow.log"' || fail "a push the remote took still shows its hook running"
+  echo CLOSED > "$STUB/state.7"
+  wait_until '[ ! -e "$ST/pushing" ]' 'cat "$ST/pushnow.log"' || fail "the push did not end"
+  [ "$(loop snapshot --fresh | jq -c '[.health.pushing, (.health.pushLast | [.by, .started, .ok, .ahead, .sha])]')" = "[null,[\"now\",true,true,0,\"$A\"]]" ] \
+    || fail "the ended push is not shown as passed with main at the remote: $(loop snapshot --fresh | jq -c '[.health.pushing, .health.pushLast]')"
+}
+
+# Bug this guards (issue 1078, review): after a Push now failed with main 1 commit ahead, the owner pushed main by hand,
+# yet health and the snapshot kept the count the push saved and said main was still ahead of the remote. The failed
+# push is a real Push now (its hook fails, as in t_pushnow), polled to its end, so the record is the one pushlast()
+# writes: one that keeps no main commit to count from again keeps the old count.
+t_pushahead() {
+  ftnow; local A
+  A=$(ftmain); : > "$STUB/push-fail"
+  loop push-now > /dev/null || fail "push-now did not start"
+  wait_until '[ "$(ftpushes)" = 1 ] && [ ! -e "$ST/pushing" ]' 'cat "$ST/pushnow.log" "$ST/cards.jsonl"' || fail "the failed push did not end"
+  [ "$(loop health | jq -c '.pushLast | [.ok, .main, .ahead]')" = "[false,\"$A\",1]" ] || fail "a failed push that left main ahead does not say so: $(loop health | jq -c .pushLast)"
+  git -C "$R" push -q --no-verify origin "$A:refs/heads/main" && git -C "$R" fetch -q origin || fail "main could not be pushed by hand"
+  [ "$(loop snapshot --fresh | jq .health.pushLast.ahead)" = 0 ] || fail "main pushed by hand still shows as ahead: $(loop snapshot --fresh | jq -c .health.pushLast)"
+}
+
+# Bug this guards (issue 1078): a push whose process was gone showed as pushing for ever, with nothing to say it would
+# not end or where its output was. The case kills the real background push while its hook waits, as only a push that
+# was running can be left behind so.
+t_pushstale() {
+  ftnow; local pid l
+  printf '%s\n' '#!/usr/bin/env bash' 'echo started; until [ -e "$STUB/go" ]; do sleep 0.1; done; : > "$STUB/hookdone"; exit 1' > "$R/.git/hooks/pre-push"
+  loop push-now > /dev/null || fail "push-now did not start"
+  wait_until 'grep -q started "$(jq -r .log "$ST/pushing" 2>/dev/null)"' 'cat "$ST/pushnow.log" "$ST/pushing"' || fail "the hook did not start"
+  pid=$(jq .pid "$ST/pushing"); l=$(jq -r .log "$ST/pushing"); kill -9 "$pid"
+  wait_until '! kill -0 '"$pid"' 2>/dev/null' || fail "the push's process did not end"
+  [ "$(loop snapshot --fresh | jq -c '.health.pushing | [.stale, .pid, .log]')" = "[true,$pid,\"$l\"]" ] \
+    || fail "a push whose process is gone is not shown as stale with its log: $(loop snapshot --fresh | jq -c .health.pushing)"
+  : > "$STUB/go"; wait_until '[ -e "$STUB/hookdone" ]' || fail "the orphaned hook did not end"
 }
 
 # Bug this guards (issue 240): a run whose process was killed left its running marker, nothing recorded it, and the

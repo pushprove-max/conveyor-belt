@@ -328,7 +328,7 @@ t_slowpush() {
   setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-01-02) <(issue 9 2026-01-03))"; mkfifo "$STUB/held"
   serveeng "$SRC" 'exec 7>>"$STATE.run" && flock -n 7 || exit 1; nopack="" pusher="" new="" tried="" triedat=0 owed=""
     serve="" waits="" prober="" running=0; declare -A took=()
-    push() { echo "start $2 ${owed##* }" >> "$STUB/order"; pushing "${owed##* }"; read -r -t 20 _ <> "$STUB/held"
+    push() { echo "start $2 ${owed##* }" >> "$STUB/order"; pushing "${owed##* }" hook; read -r -t 20 _ <> "$STUB/held"
       git -C "$R" push -q --no-verify origin "${owed##* }:refs/heads/main"; echo "end $2" >> "$STUB/order"; }
     next() { local c n; read -r c n _ < <(locked pick "" "" "$(asked)"); echo "pick $n" >> "$STUB/order"; echo "$n" > "$R/f$n"
       git -C "$R" add -A; git -C "$R" commit -qm "$n"; record "$c" "$n" landed ok "$(jq -cn --arg s "$(git -C "$R" rev-parse HEAD)" "{sha: \$s, product: false}")"; }

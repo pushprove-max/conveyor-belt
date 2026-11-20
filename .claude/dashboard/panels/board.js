@@ -478,6 +478,42 @@
     }
     return box;
   }
+  // What runs at each stage of a push (pushing() in conveyor/lib/push.sh); a record with no stage is the hook's.
+  const PUSH_STAGE = { tests: 'Tests before the push running', ready: 'Getting the push ready (worktree, dependencies, test slot)',
+    hook: 'Pre-push hook running', push: 'Push running with no pre-push hook', ended: 'git push ended, finishing the push', pushed: 'Pushed, waiting for GitHub' };
+  // The push (health's pushing and pushLast), so a slow push is told from a stuck one. In progress: what runs (its
+  // stage, PUSH_STAGE), since when, on which commit, its process and the time it has taken, then the newest line of
+  // the pre-push hook's output; stale, with its log, when its process is gone and it did not end. Else the last push
+  // that ended: passed, or failed with the failed check and its log, or started no push; and main still ahead of the
+  // remote after it. null: none.
+  function pushState() {
+    const h = S.ctx.h, r = S.d.pushing && typeof S.d.pushing === 'object' ? S.d.pushing : null, l = S.d.pushLast && typeof S.d.pushLast === 'object' ? S.d.pushLast : null;
+    const str = (v) => (typeof v === 'string' ? v : ''), on = (sha) => (str(sha) ? ` on ${short(sha)}` : '');
+    const box = h('div', 'board-push-state'), log = (f) => (str(f) ? [h('span', 'board-from', `Log: ${f}`)] : []);
+    if (r) {
+      box.dataset.state = r.stale === true ? 'stale' : 'running';
+      const pid = num(r.pid) !== null ? `pid ${r.pid}` : '';
+      if (r.stale === true) {
+        box.append(h('span', 'board-push-bad', `The push${on(r.sha)} is stale: its process${pid ? ` (${pid})` : ''} is gone and the push did not end.`), ...log(r.log));
+        return box;
+      }
+      const what = (typeof r.stage === 'string' && Object.prototype.hasOwnProperty.call(PUSH_STAGE, r.stage) ? PUSH_STAGE[r.stage] : '') || PUSH_STAGE.hook;
+      const head = h('span', 'board-from', `${what}${on(r.sha)}${typeof r.since === 'string' ? ` since ${S.ctx.clock(r.since)}` : ''}${pid ? ` · ${pid}` : ''}`);
+      if (typeof r.since === 'string') head.append(' · ', S.ctx.since(r.since, ''));
+      box.append(head, ...(str(r.line) ? [h('span', 'board-push-line', r.line)] : []), ...log(r.log));
+      return box;
+    }
+    if (!l) return null;
+    const who = l.by === 'now' ? 'Push now' : l.by === 'full' ? 'Push landed' : 'The push';
+    const ahead = num(l.ahead) ? [h('span', 'board-push-bad', `Main is still ${l.ahead} ${l.ahead === 1 ? 'commit' : 'commits'} ahead of the remote.`)] : [];
+    box.dataset.state = l.started === false ? 'none' : l.ok === true ? 'passed' : 'failed';
+    const text = l.started === false ? `${who} started no push${str(l.why) ? `: ${l.why}` : ''}.`
+      : l.ok === true ? `${who}${on(l.sha)} passed.` : `${who}${on(l.sha)} failed${str(l.check) ? `: ${l.check} failed` : ''}.`;
+    const head = h('span', l.ok === true && l.started !== false ? 'board-from' : 'board-push-bad', text);
+    if (typeof l.time === 'string') head.append(' ', S.ctx.since(l.time, ' ago'));
+    box.append(head, ...(l.ok === true ? [] : log(l.log)), ...ahead);
+    return box;
+  }
   // The two actions, with what they act on: the landed cards origin lacks, each by its issue, and the suite's run.
   function pushTest() {
     const h = S.ctx.h, el = h('section', 'board-push'), un = unpushed(), f = fullOf(), off = fullOff();
@@ -498,6 +534,8 @@
     const whyNot = [...new Set([off, nothing, nowOff].filter(Boolean))];
     landed.append(h('span', 'board-label', 'Landed, not pushed'), h('span', 'board-value', un === null ? 'not known' : `${un.length} landed, not pushed`),
       ...(un && un.length ? [cards] : []), push, pushNow, ...whyNot.map(why));
+    const ps = pushState();
+    if (ps) landed.append(ps);
     const full = h('div', 'board-ctl');
     full.dataset.push = 'full-test';
     const runBtn = guarded('full-test', 'spend', 'Run full test suite', 'Click again to run the full suite', 'full-test','Run the full test suite on main; it pushes nothing', () => send('full-test', []));

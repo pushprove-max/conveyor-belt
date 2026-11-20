@@ -102,8 +102,17 @@ export type Landed = Card & Times & { closed: boolean; at: number | null; usd: n
 // cards on the belt; landing: those of them landed, in Push (the loop's building leaves them out).
 export type Loop = { repo: string; state: string; reason: string; loop: boolean | null; building: number | null; waiting: number | null; cap: number | null; onBelt: number; landing: number }
 export type Suite = { repo: string; kind: string; version: string; sha: string; since: number | null; ended: number | null; state: string; done: number | null; failed: number | null }
+// A project's push (the snapshot's health): running, the push in progress (pushing: stale when its process is gone and
+// it did not end; stage, a key of PUSH_STAGE; line, the newest line of its log), last, the last push that ended
+// (pushLast: by loop, now for Push now, full for Push landed; started false when it never reached a commit, why then;
+// ahead, the commits of main at its end the remote still lacks), and unpushed, how many landed commits wait for a push.
+export type Push = {
+  repo: string; unpushed: number
+  running: { since: number | null; sha: string; stage: string; pid: number | null; log: string; line: string; sec: number | null; stale: boolean } | null
+  last: { at: number | null; by: string; started: boolean; why: string; sha: string; ok: boolean; ahead: number | null; check: string; log: string } | null
+}
 // own: the session's own project, whose cards carry no project name ('' or absent: none is).
-export type Snap = { own?: string; loops: Loop[]; needs: Need[]; belt: Belt[]; queue: Queued[] | null; queueMore: boolean; waits: Waiting[]; held: [string, number][]; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut?: number; judgeDeclined: number[]; suites?: Suite[]; umbrellas: Umbrella[]; unpushed?: { repo: string; issue: number }[] }
+export type Snap = { own?: string; pushes?: Push[]; loops: Loop[]; needs: Need[]; belt: Belt[]; queue: Queued[] | null; queueMore: boolean; waits: Waiting[]; held: [string, number][]; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut?: number; judgeDeclined: number[]; suites?: Suite[]; umbrellas: Umbrella[]; unpushed?: { repo: string; issue: number }[] }
 export type Fast = { state: 'none' | 'unread' | 'norecord' } | { state: 'ok'; branch: string; ahead: number; dirty: number; subject: string }
 export type Research = { state: 'none' } | { state: 'ok'; lastAt: number | null }
 export type Limit = { pct: number; resetsAt: number }
@@ -216,7 +225,15 @@ const umbrellaOf = (x: any) => { const n = num(x.umbrella); return n !== null &&
 
 const liveOf = (v: any): Live | null => (v && typeof v === 'object' ? { action: one(v.action), turns: num(v.turns), lastOutputAt: time(v.lastOutputAt) } : null)
 
-type Rec = { loop: Loop; needs: Need[]; belt: Belt[]; queue: Queued[] | null; waits: Waiting[]; held: Record<string, number>; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut: number; judgeDeclined: { id: string; at: number }[]; suites: Suite[]; umbrellas: Umbrella[]; unpushed: number[]; snapshotAt: number | null }
+type Rec = { loop: Loop; needs: Need[]; belt: Belt[]; queue: Queued[] | null; waits: Waiting[]; held: Record<string, number>; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut: number; judgeDeclined: { id: string; at: number }[]; suites: Suite[]; umbrellas: Umbrella[]; unpushed: number[]; push: Push; snapshotAt: number | null }
+const pushOf = (repo: string, h: any): Push => {
+  const r = h?.pushing, l = h?.pushLast
+  return {
+    repo, unpushed: Array.isArray(h?.unpushed) ? h.unpushed.length : 0,
+    running: r && typeof r === 'object' ? { since: time(r.since), sha: one(r.sha), stage: one(r.stage), pid: num(r.pid), log: one(r.log), line: one(r.line), sec: num(r.sec), stale: r.stale === true } : null,
+    last: l && typeof l === 'object' ? { at: time(l.time), by: one(l.by), started: l.started !== false, why: one(l.why), sha: one(l.sha), ok: l.ok === true, ahead: num(l.ahead), check: one(l.check), log: one(l.log) } : null,
+  }
+}
 // One record's snapshot. null: it is not the object `conveyor.sh snapshot` prints, so nothing of it is shown.
 export const parseRecord = (repo: string, json: unknown): Rec | null => {
   let j: any = json
@@ -274,6 +291,7 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
     // day, as landed holds only today's landings.
     unpushed: (Array.isArray(j.open?.held) ? j.open.held : []).filter((x: any) => x && num(x.issue) !== null && Array.isArray(x.reasons)
       && x.reasons.some((r: any) => r && r.kind === 'card' && r.notPushed === true)).map((x: any) => x.issue as number).sort((a: number, b: number) => a - b),
+    push: pushOf(repo, j.health),
     // When the kept snapshot was made (null from a snapshot that does not say).
     snapshotAt: time(j.snapshotAt),
   }
@@ -351,6 +369,7 @@ const boardFrom = (name: string, records: { repo: string; json: unknown }[], own
       held: [...held].sort((a, b) => a[0].localeCompare(b[0])),
       deploy: recs.flatMap(r => r.deploy),
       unpushed: recs.flatMap(r => r.unpushed.map(issue => ({ repo: r.loop.repo, issue }))),
+      pushes: recs.map(r => r.push).filter(p => p.running || p.last),
       landed: recs.flatMap(r => r.landed).sort((a, b) => at(b.at) - at(a.at)),
       landedCount: recs.reduce((n, r) => n + r.landedCount, 0),
       // A record that was not read spent an unknown amount today, so the total is partial, like an unpriced step.
@@ -868,6 +887,55 @@ const unpushedLines = (snap: Snap, w: number, lead: string): Line[] => {
   return l.length ? wrapParts(['landed, not pushed:', ...l.map((x, i) => `${x.repo}#${x.issue}${i < l.length - 1 ? ' ·' : ''}`)], w, lead, ' ', { d: true }) : []
 }
 
+// Each project's push, so a slow push is told from a stuck one. In progress: what runs (its stage, PUSH_STAGE, as
+// pushing() in conveyor/lib/push.sh writes it; none is the hook's), since when, on which commit, its process and the time it
+// has taken, then the newest line of its output; stale, with its log, when its process is gone and it did not end.
+// Else the last push that ended, for an hour, or while landed commits still wait for a push and it did not work:
+// pushed, or failed with the failed check and its log, or started no push; and main still ahead of the remote after
+// it. Each part wraps to a line of its own rather than be cut: a part wider than the line goes on more lines, at its
+// spaces, and a word wider than the line (a log path) is broken.
+const LAST_PUSH_MS = 3_600_000
+const PUSH_STAGE: Record<string, string> = { tests: 'tests before the push running', ready: 'getting the push ready (worktree, dependencies, test slot)',
+  hook: 'pre-push hook running', push: 'push running with no pre-push hook', ended: 'git push ended, finishing the push', pushed: 'pushed, waiting for GitHub' }
+const pushLines =(s: State, snap: Snap, w: number, lead: string): Line[] => (snap.pushes ?? []).flatMap((p): Line[] => {
+  const of = snap.loops.length > 1 ? `${p.repo}: ` : '', r = p.running, l = p.last
+  const room = w - cols(lead) - 2
+  const pieces = (t: string): string[] => {
+    if (room < 1 || cols(t) <= room) return [t]
+    const out: string[] = []
+    let cur = ''
+    for (const word of t.split(' ')) {
+      const next = cur ? `${cur} ${word}` : word
+      if (cols(next) <= room) { cur = next; continue }
+      if (cols(word) <= room) { out.push(cur); cur = word; continue }
+      // A word wider than the line goes on from where the line is.
+      if (cur && cols(cur) < room) cur += ' '
+      else if (cur) { out.push(cur); cur = '' }
+      for (const ch of word) { if (cur && cols(cur + ch) > room) { out.push(cur); cur = '' } cur += ch }
+    }
+    return cur ? [...out, cur] : out
+  }
+  const wrap = (parts: string[], c: string) => wrapParts(parts.flatMap(pieces), w, lead, ' · ', { c })
+  const log = (f: string) => (f ? [`Log: ${f}`] : [])
+  if (r) {
+    const on = r.sha ? ` on ${r.sha.slice(0, 12)}` : '', pid = r.pid === null ? '' : `pid ${r.pid}`
+    if (r.stale) return wrap([`✗ ${of}push${on} is stale: its process${pid ? ` (${pid})` : ''} is gone and the push did not end`, ...log(r.log)], C.bad)
+    const sec = r.since !== null ? (s.now - r.since) / 1000 : r.sec
+    return [
+      ...wrap([`${of}push${on}: ${(Object.prototype.hasOwnProperty.call(PUSH_STAGE, r.stage) ? PUSH_STAGE[r.stage] : '') || PUSH_STAGE.hook}${r.since !== null ? ` since ${clockOf(r.since)}` : ''}`,
+        ...(pid ? [pid] : []), ...(sec !== null ? [fmtStep(sec)] : [])], C.work),
+      ...(r.line ? [fitWidth([{ t: `${lead}  ${r.line}`, d: true }], w)] : []),
+    ]
+  }
+  if (!l || l.at === null || (s.now - l.at >= LAST_PUSH_MS && (l.ok || !p.unpushed))) return []
+  const who = l.by === 'now' ? 'Push now' : l.by === 'full' ? 'Push landed' : 'Push'
+  const ahead = l.ahead ? [`main is still ${l.ahead} ${l.ahead === 1 ? 'commit' : 'commits'} ahead of the remote`] : []
+  if (!l.started) return wrap([`✗ ${of}${who} started no push${l.why ? `: ${l.why}` : ''}`, ...ahead], C.bad)
+  const at = l.sha ? ` ${l.sha.slice(0, 12)}` : ''
+  if (!l.ok) return wrap([`✗ ${of}${who} of${at} failed${l.check ? `: ${l.check} failed` : ''}`, ...log(l.log), ...ahead], C.bad)
+  return wrap([`✓ ${of}${who} of${at} passed ${since(l.at, s.now)} ago`, ...ahead], ahead.length ? C.you : C.ok)
+})
+
 // QUEUE: the next five, numbered, the title cut to fit and the priority right-aligned; then the
 // held-back line.
 const NEXT = 5
@@ -977,7 +1045,7 @@ const board = (s: State, snap: Snap, w: number, short: boolean, frame: number): 
   ...testMapModel(s, w),
   ...suitesModel(s, snap).map(l => (short ? fitWidth(l, w) : l)), [],
   ...needsModel(s, snap, w, short), [],
-  ...beltModel(s, snap, w, short, frame), [],
+  ...beltModel(s, snap, w, short, frame), ...pushLines(s, snap, w, ' '), [],
   ...queueModel(snap, w), [],
   ...(snap.deploy.length ? [...deployModel(s, snap, w), []] : []),
   ...landedModel(s, snap, w, short),
@@ -1174,6 +1242,7 @@ const paneBoard = (s: State, snap: Snap, w: number, frame: number, open: boolean
     ...pickModel(snap, w),
     ...(snap.held.length ? [fitWidth([{ t: `held back: ${snap.held.map(([label, n]) => `${n} ${label}`).join(' · ')}`, d: true }], w)] : []),
     ...unpushedLines(snap, w, ''),
+    ...pushLines(s, snap, w, ''),
     ...(snap.deploy.length ? [[], ...deployModel(s, snap, w)] : []), [],
     ...landedTable(s, snap, w),
     ...(lanes.length ? [[], ...lanes.map(l => fitWidth(l, w))] : []),
