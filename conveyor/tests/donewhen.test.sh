@@ -253,6 +253,22 @@ t_movedmarker() {
   k=$(marked 9 "echo 'TODO again' > n.txt"); [ "$(jq -c .failed <<<"$k")" = '["TODO added in n.txt is not named in the reply"]' ] || fail "a new TODO line passed the reply check unnamed: $k"
 }
 
+# #876. Bug: a D<n> line with a bracketed tag before its colon (`D1 met [uncertain: not run]: ...`), as the card rules
+# invite a session to tag what it did not verify, is not read, so the item fails as having no line and the card is
+# blocked. The untagged forms are read as before. DONEWHEN (lib/testrun.sh) is run as donewhen() runs it.
+t_dwtagged() {
+  setup '[]'
+  local out r=$'Done.\n\n## Done when\nD1 met [uncertain: not run]: evidence in a.txt\nD2 not met [likely]: why\nD3 met: plain evidence\nD4 not met: plain why\nD5 met [likely]:'
+  # shellcheck disable=SC2034 # STATE is read by the sourced lib/testrun.sh (SUITERUNS=${STATE%/*}/...)
+  out=$( ( STATE=$ST/cards.jsonl; . "$SRC/lib/testrun.sh"
+    jq -c --arg r "$r" --argjson m '[]' --arg wt "$T/$CASE" "$DONEWHEN" <<<"$(jq -cn '{body: "## Done when\n- one\n- two\n- three\n- four\n- five"}')" ) ) \
+    || fail "the Done-when check failed to run"
+  [ "$(jq -c '{met, failed}' <<<"$out")" = '{"met":[1,3],"failed":["D5: met, with no evidence"]}' ] \
+    || fail "a tagged D<n> line was not read as its state, or an untagged one changed: $out"
+  [ "$(jq -c '[.detail[].said]' <<<"$out")" = '["D1 met [uncertain: not run]: evidence in a.txt","D2 not met [likely]: why","D3 met: plain evidence","D4 not met: plain why","D5 met [likely]:"]' ] \
+    || fail "the D<n> lines the review sees lost their text or tag: $out"
+}
+
 # Bug: a session's fields that cannot be put on its line (not JSON) leave the line bare with nothing in the log but
 # jq's own error, which names no card and no step. dwfields() (lib/testrun.sh) is called as checked() calls it.
 t_dwfields() {

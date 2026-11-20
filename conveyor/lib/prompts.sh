@@ -519,8 +519,8 @@ the review after this fix names the finding by that id.'
 # The Done-when check (donewhen(), checked()): what the one fix session after a failed check is told, after the brief;
 # the failed items follow it. And what the review is told beside the card's D<n> lines.
 DWFIX='# The Done-when check failed: fix these items, and end your reply with the whole `## Done when` section again
-Each line of the issue'"'"'s `## Done when` needs a line `D<n> met: <evidence>` or `D<n> not met: <why>`, in order. Evidence
-names something checkable: a test (file and case name), a file and line, or a command and its result. Every TODO
+Each line of the issue'"'"'s `## Done when` needs a line `D<n> met: <evidence>` or `D<n> not met: <why>`, in order; a tag such as
+[uncertain] goes after the colon. Evidence names something checkable: a test (file and case name), a file and line, or a command and its result. Every TODO
 or [VERIFY] marker the change adds is named in the reply, on a line with its file.'
 # The project's checks (treecheck(), checked() and the Test step): what the one fix session after they fail is told,
 # after the brief; their output follows it.

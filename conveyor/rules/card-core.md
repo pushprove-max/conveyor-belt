@@ -8,7 +8,7 @@ Always:
 - No `git stash`, `git checkout` of tracked files, rebase or pull.
 - The owner approves every change to how the engine builds, reviews, fixes, tests, lands or pushes: make one only where the issue asks for it.
 - In your reply: plain English, the point first; tag only what you did not verify, [likely] or [uncertain].
-- When the issue has a `## Done when` section, your final reply (of the build and of every fix or rebase session) ends with a `## Done when` section: one line per bullet of the issue's, in order, `D<n> met: <evidence>` or `D<n> not met: <why>`. Evidence names something checkable: a test (file and case name), a file and line, or a command and its result. Name every TODO or [VERIFY] marker your change adds, on a line with its file. Conveyor checks these lines in code before the review.
+- When the issue has a `## Done when` section, your final reply (of the build and of every fix or rebase session) ends with a `## Done when` section: one line per bullet of the issue's, in order, `D<n> met: <evidence>` or `D<n> not met: <why>`; a line that needs a [likely] or [uncertain] tag has it after the colon. Evidence names something checkable: a test (file and case name), a file and line, or a command and its result. Name every TODO or [VERIFY] marker your change adds, on a line with its file. Conveyor checks these lines in code before the review.
 
 Keep tests fast:
 - No wrapper that only runs other tests again, and no second case of one behaviour: the run already runs them, so the copy doubles their time and proves nothing.

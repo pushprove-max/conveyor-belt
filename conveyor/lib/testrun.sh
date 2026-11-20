@@ -2814,7 +2814,8 @@ trailerview() { # <worktree>
 
 # The Done-when check: code, no model. The issue's `## Done when` section (to the next heading of level one or two)
 # has a bullet per item; the session's reply ends with its own `## Done when` section, a line `D<n> met: <evidence>`
-# or `D<n> not met: <why>` per item (card-core.md). Each item needs its line; a met line needs evidence that is not
+# or `D<n> not met: <why>` per item (card-core.md); a bracketed tag, as [uncertain: <why>] or [likely], may stand before
+# the colon as well as after it, and the line, tag and all, is what the review sees. Each item needs its line; a met line needs evidence that is not
 # empty, none, n/a or tbd. A file it names (a path with a folder and an extension, a bare file name with an
 # extension, as missing.c or x.c, but not e.g. or i.e., or any name with a :line after it that has a folder, an
 # extension or a capital first letter, as src/Makefile:1 or missing.c:1; a pytest ::case after a path is dropped) that
@@ -2838,7 +2839,7 @@ DONEWHEN='def sect($t; $atend): [$t | splits("\r?\n")] as $l
   (sect(.body // ""; false) // [] | map(capture("^(?<i>\\s*)[-*+]\\s+(?<t>\\S.*?)\\s*$")) | (map(.i | length) | min // 0) as $min
     | map(select((.i | length) == $min) | .t)) as $texts | ($texts | length) as $items
   | select($items > 0)
-  | [sect($r; true) // [] | .[] | . as $x | capture("^\\s*(?:[-*+]\\s+)?`?D(?<n>[0-9]+)`?\\s+(?<k>met|not met)\\s*:\\s*(?<e>.*?)\\s*$"; "i")
+  | [sect($r; true) // [] | .[] | . as $x | capture("^\\s*(?:[-*+]\\s+)?`?D(?<n>[0-9]+)`?\\s+(?<k>met|not met)\\s*(?:\\[[^\\]]*\\]\\s*)?:\\s*(?<e>.*?)\\s*$"; "i")
       | .n |= tonumber | .k |= ascii_downcase | .line = $x] as $d
   | [range(1; $items + 1) as $n | ([$d[] | select(.n == $n)] | first) as $x
       | if $x == null then {n: $n, why: "D\($n): no `D\($n) met:` or `D\($n) not met:` line in the `## Done when` section that ends the reply"}
