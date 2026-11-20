@@ -15,6 +15,7 @@
 [ "${1:-}" != debug ] || exit 1
 [ "${1:-}" != --version ] || { echo 'codex-cli 0.130.0'; exit 0; }
 [ "${1:-} ${2:-}" != "exec --help" ] || { echo '      --dangerously-bypass-hook-trust'; exit 0; }
+[ "${1:-}" = exec ] || { echo "error: unrecognized subcommand '${1:-}'" >&2; exit 2; } # the engine's calls are all `codex exec`
 json=; case " $* " in *" --json "*) json=1 ;; esac
 out=; while [ $# -gt 0 ]; do [ "$1" = -o ] && out=$2; shift; done
 [ ! -f "$STUB/codex-delay" ] || sleep "$(cat "$STUB/codex-delay")"

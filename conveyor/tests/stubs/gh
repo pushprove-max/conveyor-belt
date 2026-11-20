@@ -5,7 +5,12 @@ issues() { jq -cs '.[0] + .[1:]' "$STUB/issues.json" $([ ! -e "$STUB/list-filed"
 # A label made (gh label create): kept in $STUB/labels, never taken for an issue filed.
 [ "$1" != label ] || { printf '%s\n' "$*" >> "$STUB/labels"; exit 0; }
 case $2 in
-  list) if [ "$4" = closed ]; then echo "$*" >> "$STUB/closed-asked"; [ ! -e "$STUB/closed-fail" ] || exit 1; cat "$STUB/closed-issues.json" 2>/dev/null || echo '[]'; else [ ! -f "$STUB/list-cmd" ] || . "$STUB/list-cmd"
+  # Without --json, gh prints a table, not JSON: so does this stub, as a caller that reads JSON must ask for it.
+  # --json also needs its field list (the next word, not another flag): gh refuses it without.
+  list) j=; for a; do [ "$j" != 1 ] || { j=$a; break; }; [ "$a" != --json ] || j=1; done
+    [ "$j" != 1 ] || { echo 'flag needs an argument: --json' >&2; exit 1; }
+    case $j in ''|-*) printf '#7\tTitle\n'; exit 0 ;; esac
+    if [ "$4" = closed ]; then echo "$*" >> "$STUB/closed-asked"; [ ! -e "$STUB/closed-fail" ] || exit 1; cat "$STUB/closed-issues.json" 2>/dev/null || echo '[]'; else [ ! -f "$STUB/list-cmd" ] || . "$STUB/list-cmd"
     if [ "$4" = all ]; then issues | jq -c "sort_by(-.number) | .[:$6]"; else issues | jq -c ".[:$6]"; fi; fi ;; # all: newest first, as on GitHub
   # Another repository's issue (gh issue view <n> --repo <owner/repo> --json state): $STUB/repo.<owner_repo>.<n> holds
   # its state, else CLOSED; with $STUB/repo-fail.<owner_repo>, that repository cannot be read.
