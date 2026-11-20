@@ -50,7 +50,7 @@ EOS
   # Bug (#779): a card session is not told that a test checks its behaviour directly, and that a proxy check (other
   # test files, the real loop, polling) says why in a comment. This reads the build's prompt, not the rules file: only
   # that prompt shows the rule reaches the session.
-  grep -qxF -- '- A test the card adds or changes checks the behaviour it protects directly. A test that runs other test files or the suite runner, runs the real loop, or polls a real process until a condition holds says why in a comment beside it: what a direct check cannot show. A reviewer flags one with no such comment as P3.' "$d/1" \
+  grep -qxF -- '- A test the card adds or changes checks the behaviour it protects directly. A test that runs other test files or the suite runner, runs the real loop, or polls a real process until a condition holds says why in a comment beside it: what a direct check cannot show. A reviewer flags one with no such comment as P3. The test lint fails a full-loop run the change adds or changes (`loop run` or `loop serve`, `conveyor.sh run` or `conveyor.sh serve`) with no `# loop: <why>` comment on its line or the line above.' "$d/1" \
     || fail "the build session was not given the direct-check rule"
   # A missing, then an empty rules file: the rules loader fails, saying why with the file's name, the reason card()
   # blocks the card with (`brief: <why>`) before any session.

@@ -40,6 +40,11 @@ as the commit's author. To sign off commits you made already, run `git rebase --
 
 A test says why the behaviour matters and fails when it breaks; an existing test is never weakened to pass.
 
+- The test lint (`.conveyor/test-lint.sh`, part of every `bash .conveyor/test-changed.sh` run) fails a test that
+  sleeps a set time and then checks, and a full-loop run (`loop run`, `loop serve`, `conveyor.sh run` or
+  `conveyor.sh serve`) on a line the change added or changed with no `# loop: <why>` comment on that line or the line
+  above. The comment says what only a whole loop run shows. A line the change did not touch is not checked.
+
 - An engine test that needs a `claude`, `codex`, `opencode` or `gh` uses the shared stub in `conveyor/tests/stubs/`
   (`conveyor/tests/lib.sh` puts it on `PATH`), set by files in `$STUB`, and does not write its own: the stub answers
   in the form the engine reads, and `clicontract.test.sh` fails when the engine's reading and the stub part. A stub

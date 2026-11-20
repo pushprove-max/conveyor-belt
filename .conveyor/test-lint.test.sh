@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # The test lint (test-lint.sh): a test that sleeps a set time and then checks fails on a busy machine, where the thing
 # has not happened yet. So such a sleep fails the lint, and with it every test run (test-changed.sh runs the lint);
-# a wait for the condition, a loop's own pause and a sleep that says why pass.
+# a wait for the condition, a loop's own pause and a sleep that says why pass. A full-loop run the change adds with no
+# "# loop: <why>" fails it too.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd -P); ROOT=$(dirname "$HERE")
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
@@ -116,6 +117,54 @@ passes loop-pause-on-a-command-count 'while [ "$(wc -l < "$T/log")" -lt 3 ]; do 
 passes loop-pause-in-an-inner-loop 'for n in 1 2; do' '  until [ -e "$T/$n" ]; do sleep 0.1; done' 'done'
 # Not a sleep: the word in a comment line, a file of that name, a function of that name.
 passes no-sleep '# sleep 2 here would hide a slow start' 'rm "$BIN/sleep"; stub sleep "exit 0"' 'export -f sleep'
+
+# A full-loop run a change adds pays for the loop, its sessions and waits on every run, so the lint fails one with no
+# "# loop: <why>" (on its line or the line above). The change is read from the merge base with main to the worktree:
+# a line the card committed, one not yet committed and a file git does not track all count; a line it did not touch
+# does not. A "# loop:" in quoted text is text the test prints, and clears nothing; a run named in quoted text (a
+# process table row, a rule's text the test looks for, a failure message) or passed as an argument to another command
+# (an editor stand-in) runs nothing, and passes; one after assignments (a quoted value with spaces in it too), exec
+# and bash is a run. Bug: without it, a card's new test ran the whole loop where a call of the function would do, and
+# nothing said so.
+loopcheck() {
+  local L=$T/loop exp got
+  mkdir -p "$L/.conveyor" "$L/conveyor/tests"; cp "$HERE/test-lint.sh" "$L/.conveyor/"
+  printf '%s\n' 't_old() {' '  loop run >/dev/null' '  loop serve &' '}' > "$L/conveyor/tests/old.test.sh"
+  echo ': x' > "$L/conveyor/tests/big.test.sh"
+  printf '%s\n' 't_a() {' '}' > "$L/conveyor/tests/a.test.sh"
+  git -C "$L" init -q -b main && git -C "$L" add -A && git -C "$L" -c user.name=t -c user.email=t@example.com commit -qm init \
+    && git -C "$L" checkout -q -b card || { printf 'no\tloop check: the fixture could not be made'; return; }
+  printf '%s\n' 't_a() {' '  loop run >/dev/null || fail "run failed"' '}' > "$L/conveyor/tests/a.test.sh"
+  git -C "$L" -c user.name=t -c user.email=t@example.com commit -qam card
+  printf '%s\n' 't_a() {' '  loop run >/dev/null || fail "run failed"' '  loop run 1 # loop: only a whole run lands the card' \
+    '  # loop: the service picks the card up' '  loop serve &' "  echo '# loop: x'; loop run" '  out=$("$SRC/conveyor.sh" serve 2>&1)' \
+    '  echo "a # loop: x' '  "; loop run' "  ps='bash conveyor.sh serve'; grep -qxF -- 'the lint fails a \`loop run\`' rules.md" \
+    '  grep -q x <<<"$out" || fail "a card of a loop run did not go on"' '  ( exec sh "$SH/edit.sh" "$SRC/conveyor.sh" run ) &' \
+    '  echo "x; loop run"' '  ( cd "$B" && X=1 exec bash "$SRC/conveyor.sh" serve ) &' \
+    '  CMD=". \"$S/limit\"" loop run 2>&1' '  out=$(A="$d c1 $(git -C "$SRC" rev-parse HEAD) $(date)" loop run 2>&1)' '}' > "$L/conveyor/tests/a.test.sh"
+  echo 'loop run' > "$L/conveyor/tests/new.test.sh"
+  # Over 128 KiB of changed-line keys (the most one argument can hold on Linux): the lint still reads them all.
+  { seq 6000 | sed 's/^/: /'; echo 'loop run'; } > "$L/conveyor/tests/big.test.sh"
+  if (cd "$L" && bash .conveyor/test-lint.sh) > "$T/loop.out" 2>&1; then printf 'no\tloop check: the lint passed'; return; fi
+  exp=$(printf '%s\n' conveyor/tests/a.test.sh:{2,6,7,9,14,15,16} conveyor/tests/big.test.sh:6001 conveyor/tests/new.test.sh:1 | LC_ALL=C sort)
+  got=$(grep -o '^conveyor/tests/[a-z]*\.test\.sh:[0-9]*' "$T/loop.out" | LC_ALL=C sort)
+  if [ "$got" != "$exp" ]; then printf 'no\tloop check: not the lines %s: %s' "$(echo $exp)" "$(cat "$T/loop.out")"
+  elif ! grep -q '"# loop: <why>" comment' "$T/loop.out"; then printf 'no\tloop check: the comment that clears it is not named: %s' "$(cat "$T/loop.out")"
+  else printf 'ok\tfails: a full-loop run the change added with no "# loop:", and only that'; fi
+}
+k=$((k + 1)); loopcheck > "$T/res.$k" &
+# With no merge base with main, the loop check finds nothing, and the sleep check still fails a sleep-then-check.
+nobase() {
+  local N=$T/nobase
+  mkdir -p "$N/.conveyor" "$N/conveyor/tests"; cp "$HERE/test-lint.sh" "$N/.conveyor/"
+  printf '%s\n' 'loop run' 'sleep 2; [ -e x ] || fail "no x"' > "$N/conveyor/tests/a.test.sh"
+  git -C "$N" init -q -b trunk && git -C "$N" add -A || { printf 'no\tno merge base: the fixture could not be made'; return; }
+  if (cd "$N" && bash .conveyor/test-lint.sh) > "$T/nobase.out" 2>&1; then printf 'no\tno merge base: a sleep-then-check passed'
+  elif grep -q 'full-loop\|a.test.sh:1:' "$T/nobase.out" || ! grep -q '^conveyor/tests/a.test.sh:2: ' "$T/nobase.out"; then
+    printf 'no\tno merge base: not the sleep alone: %s' "$(cat "$T/nobase.out")"
+  else printf 'ok\tfails: with no merge base, the sleep-then-check alone'; fi
+}
+k=$((k + 1)); nobase > "$T/res.$k" &
 
 # A file that cannot be read fails, saying so: a lint that read nothing must not pass.
 bash "$HERE/test-lint.sh" "$T/none.test.sh" > "$T/out" 2>&1 && no "a file that is not there passed the lint" \
