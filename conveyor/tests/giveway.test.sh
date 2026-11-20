@@ -69,8 +69,8 @@ t_giveway() {
     || fail "#7 did not give way for its rebase to the waiting #8, counted once: $(cat "$CARDS/c7-7.claim")"
   w=$(gweng claim c8-8 "$CARDS/c8-8" $$) && [ -z "$w" ] && [ "$(gwc 8 .held)" = true ] || fail "#8 did not claim a.txt once #7 gave way: $w $(cat "$CARDS/c8-8.claim")"
   [ "$(gwc 7 '[.held, .away, .gave, .to]')" = '[false,true,1,8]' ] || fail "#7's claim does not name #8, which took its turn: $(cat "$CARDS/c7-7.claim")"
-  out=$(loop snapshot --fresh 2>/dev/null)
-  [ "$(jq -c '.belt[] | select(.issue == 7) | .gaveWay' <<<"$out" 2>/dev/null)" = 8 ] || fail "the snapshot does not say #7 gave way to #8: $(jq -c .belt <<<"$out" 2>&1 | head -c 2000)"
+  # What the snapshot's gaveWay is read from (aways(); t_givewayfix runs the whole snapshot on it).
+  out=$(gweng aways) && [ "$out" = '{"c7-7":{"to":8,"fixing":false}}' ] || fail "the Board's view does not say #7 gave way to #8: $out"
 }
 
 # Bug: a card gave way only to a card already waiting when it began its rebase, so one that came to land during the
@@ -170,7 +170,9 @@ heldpass() { # <test|land>
   gweng settle c7-7 7 "$CARDS/c7-7" '' land '{}'; rc=$?
   [ $rc = 0 ] && [ "$(git -C "$CARDS/c7-7" rev-parse HEAD)" = "$(git -C "$R" rev-parse main)" ] \
     || fail "#7 was not fitted onto the main that moved ($1) with no review again: exit $rc"
-  gweng testedhere "$CARDS/c7-7" && gweng readysince "$CARDS/c7-7" >/dev/null \
+  # shellcheck disable=SC2329 # called by gweng: both in one load of the engine's files
+  gwstands() { testedhere "$1" && readysince "$1" >/dev/null; }
+  gweng gwstands "$CARDS/c7-7" \
     || fail "#7's tests do not stand on the main that moved ($1) in a file it does not touch: $(cat "$CARDS/c7-7.ready")"
   out=$(gweng land c7-7 7 "$CARDS/c7-7" "card 7") || fail "#7 did not land on the main that moved ($1): $out"
   [ "$(git -C "$R" log -1 --format=%s main~1)" = "main adds b.txt" ] && [ "$(head -n 1 "$R/a.txt")" = seven ] && [ "$(st 'select(.step == "landed") | .issue')" = 7 ] \
@@ -205,9 +207,10 @@ t_givewayfix() {
     || fail "#8, stacked on #7 and red there, waited on #7 away for the fix of its tests: $w $(cat "$CARDS/c8-8.claim")"
   [ "$(gwc 7 .to)" = 8 ] || fail "#7's claim does not name #8, which went in front: $(cat "$CARDS/c7-7.claim")"
   gwlive 7; [ "$(jq -c '[.step, .gaveWay]' "$STUB/live" 2>/dev/null)" = '["fix",8]' ] || fail "#7's live record does not name #8: $(cat "$STUB/live" 2>/dev/null)"
+  # The file's one whole snapshot (about 2 s): #7, given way, and #8, which did not, show how snapshot() reads aways().
   out=$(loop snapshot --fresh 2>/dev/null)
-  [ "$(jq -c '.belt[] | select(.issue == 7) | [.gaveWay, .gaveWayFixing]' <<<"$out" 2>/dev/null)" = '[8,true]' ] \
-    || fail "the snapshot does not say #7 gave way to #8 while fixing: $(jq -c .belt <<<"$out" 2>&1 | head -c 2000)"
+  [ "$(jq -c '[.belt[] | select(.issue == 7 or .issue == 8) | [.issue, .gaveWay, .gaveWayFixing]] | sort' <<<"$out" 2>/dev/null)" = '[[7,8,true],[8,null,false]]' ] \
+    || fail "the snapshot does not say #7 gave way to #8 while fixing, and #8 to none: $(jq -c .belt <<<"$out" 2>&1 | head -c 2000)"
 }
 
 # With no card waiting, the fix of failed tests goes as it always did: #7 gives way for it, but no card takes its
@@ -217,9 +220,8 @@ t_givewayfixalone() {
   gweng giveway c7-7 "$CARDS/c7-7" fixing && [ "$(gwc 7 '[.away, .fixing, .for, .to]')" = '[true,true,[],null]' ] \
     || fail "#7's claim names a card for the fix of its failed tests, with none waiting: $(cat "$CARDS/c7-7.claim")"
   gwlive 7; [ "$(jq -c '[.step, .gaveWay]' "$STUB/live" 2>/dev/null)" = '["fix",null]' ] || fail "#7's live record names a card that went in front: $(cat "$STUB/live" 2>/dev/null)"
-  out=$(loop snapshot --fresh 2>/dev/null)
-  [ "$(jq -c '.belt[] | select(.issue == 7) | [.gaveWay, .gaveWayFixing]' <<<"$out" 2>/dev/null)" = '[null,false]' ] \
-    || fail "the snapshot says #7 gave way to a card: $(jq -c .belt <<<"$out" 2>&1 | head -c 2000)"
+  # What the snapshot's gaveWay is read from (aways(); t_givewayfix runs the whole snapshot on it).
+  out=$(gweng aways) && [ "$out" = '{}' ] || fail "the Board's view says #7 gave way to a card: $out"
 }
 
 # Issue 428, through the real loop as gwone() says why (card()'s calls on its main-moved path): #7's first tests fail
