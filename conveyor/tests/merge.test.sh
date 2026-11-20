@@ -13,46 +13,15 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # on the other (each one's context holds the other's line) and they merge three-way with no conflict.
 nine() { seq 9 | sed 's/^/l/' > "$R/a.txt"; git -C "$R" commit -qam "a.txt of nine lines"; }
 
-# Bug (the owner, 2026-11-13: 24 rebuild sessions in a day): a card whose change no longer applied plainly to a main
-# that moved went to a rebuild session, a new review and its tests again, though main changed other lines of the file.
-# #7 changes l4; during its tests main changes l6. Its change merges three-way onto main with no conflict: it lands with
-# no rebuild session, no second review and no second test run, both lines in main. No link gives a.txt a test file, so
-# main's change shares none with #7's, whose test is its own seven.test.sh (a shared one runs again: t_mergesharedtests).
-t_mergeclean() {
-  setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"; nine; linkset '{}'
-  echo "sed -i 's/^l4\$/seven/' a.txt; echo x > seven.test.sh" > "$STUB/build"
-  echo '[ -e "$STUB/moved" ] || { : > "$STUB/moved"; sed -i "s/^l6\$/main6/" "$R/a.txt"; git -C "$R" commit -qam "main moves"; }' >> "$STUB/test-cmd"
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  [ -e "$STUB/moved" ] || fail "main did not move during the card's tests"
-  [ -z "$(st 'select(.step | IN("rebase", "fix")) | .step')" ] && [ "$(wc -l < "$STUB/sessions")" = 1 ] \
-    || fail "a session rebuilt the change though it merges three-way with no conflict: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
-  [ "$(st "select(.issue == 7 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test test landed " ] \
-    && [ "$(st 'select(.issue == 7 and .step == "test") | .reused // false' | tr '\n' ' ')" = "false true " ] \
-    && [ "$(wc -l < "$STUB/reviews")" = 1 ] && [ "$(wc -l < "$STUB/tests")" = 1 ] \
-    || fail "the merged change was reviewed or tested again: $(st "select(.issue == 7) | \"\(.step) \(.reused)\"" | tr '\n' ,)"
-  [ "$(grep -cx 'seven\|main6' "$R/a.txt")" = 2 ] && [ -z "$(git -C "$R" status --porcelain)" ] \
-    || fail "main does not hold both changes, or its checkout is dirty: $(cat "$R/a.txt")"
-}
-
-# The three-way merge is tried only to spare a rebuild: a change whose lines main changed too still goes to the
-# rebuild session. #7 changes l4; during its tests main changes l4 too. The rebuild session brings #7 onto main, and it
-# is reviewed and tested again.
-t_mergeconflict() {
-  setup "[$(issue 7 2026-01-01)]"; for i in 1 2; do echo "$GO" > "$STUB/review.$i"; done; nine
-  echo "if grep -q '^# Landing conflict' \"\$STUB/brief\"; then sed -i 's/^main4\$/seven/' a.txt; else sed -i 's/^l4\$/seven/' a.txt; fi" > "$STUB/build"
-  echo '[ -e "$STUB/moved" ] || { : > "$STUB/moved"; sed -i "s/^l4\$/main4/" "$R/a.txt"; git -C "$R" commit -qam "main moves"; }' >> "$STUB/test-cmd"
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  st 'select(.issue == 7 and .step == "rebase") | .reason' | grep -q '^rebase onto main conflicts' \
-    || fail "the conflicting change did not go to the rebuild session: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
-  [ "$(wc -l < "$STUB/reviews")" = 2 ] && [ "$(wc -l < "$STUB/tests")" = 2 ] && [ "$(st 'select(.step == "landed") | .issue')" = 7 ] \
-    && grep -qx seven "$R/a.txt" && ! grep -q main4 "$R/a.txt" || fail "the rebuilt change was not reviewed and tested again before it landed: $(cat "$R/a.txt")"
-}
-
 # Bug: two cards that changed different parts of one file waited one behind the other whenever their changes did not
 # apply together plainly, though they merge three-way with no conflict. #7 changes l4 and #8 l6: both hold a.txt at
 # once (#7's tests end only once #8 holds it, or after 30 s), and neither waits. #8's tests end only once #7 landed;
 # #8 is then merged onto main with no session and no second review, on the tests it passed. No link gives a.txt a test
 # file: each card's test is its own (seven.test.sh, eight.test.sh), so #7's landing shares none with #8.
+# Bug too (the owner, 2026-11-13: 24 rebuild sessions in a day): a card whose change no longer applied plainly to a main
+# that moved (here, by #7's landing) went to a rebuild session, a new review and its tests again, though main changed
+# other lines of the file. #8 lands with no rebuild session, no second review and no second test run, both lines in
+# main and its checkout clean (a shared test file runs again: t_mergesharedtests).
 t_mergetogether() {
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done; nine; linkset '{}'
   cat > "$STUB/build" <<'EOF'
@@ -80,7 +49,8 @@ EOF
     && [ "$(st 'select(.issue == 8 and .step == "test") | .reused // false' | tr '\n' ' ')" = "false true " ] \
     || fail "#8, merged onto main with #7's change, did not land on the tests it passed: $(st "select(.issue == 8) | \"\(.step) \(.reused)\"" | tr '\n' ,)"
   [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 8 " ] && [ "$(grep -cx 'seven\|eight' "$R/a.txt")" = 2 ] && [ "$(wc -l < "$STUB/reviews")" = 2 ] \
-    || fail "both did not land in turn with one review each: $(cat "$R/a.txt")"
+    && [ "$(wc -l < "$STUB/tests")" = 2 ] && [ -z "$(git -C "$R" status --porcelain)" ] \
+    || fail "both did not land in turn with one review and one test run each, or main's checkout is dirty: $(cat "$R/a.txt")"
 }
 
 # Bug (2026-11-13: three of six finished cards waited on another over README.md alone, one for 55 minutes): a
@@ -322,14 +292,16 @@ t_mergesharedonce() {
 }
 
 # Bug it catches: a card past its one shared run again (#447) landing on that pass when its change no longer applies.
-# card-c changes A's line too: A is fitted onto main as before (its rebuild session), tested again, and lands.
+# card-c changes A's line too: A is fitted onto main as before (its rebuild session), reviewed and tested again, and
+# lands. The three-way merge is tried only to spare a rebuild: a change whose lines main changed too still goes to the
+# rebuild session, and the rebuilt change lands, not main's line.
 t_mergesharedonceconflict() {
   sharedonce conflict
   st 'select(.issue == 7 and .step == "rebase") | .reason' | grep -q '^rebase onto main conflicts' \
     || fail "#7 was not fitted onto main after card-c's conflicting change: $(st 'select(.issue == 7) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
-  [ "$(cat "$STUB/n")" = 3 ] && [ "$(st 'select(.issue == 7 and .step == "landed") | .issue')" = 7 ] \
+  [ "$(cat "$STUB/n")" = 3 ] && [ "$(wc -l < "$STUB/reviews")" = 2 ] && [ "$(st 'select(.issue == 7 and .step == "landed") | .issue')" = 7 ] \
     && [ "$(tr '\n' ' ' < "$R/lib/panel.sh")" = "panelC seven " ] \
-    || fail "#7's fitted change was not tested again before it landed: runs $(cat "$STUB/n"); $(cat "$R/lib/panel.sh")"
+    || fail "#7's fitted change was not reviewed and tested again before it landed: runs $(cat "$STUB/n"), reviews $(wc -l < "$STUB/reviews"); $(cat "$R/lib/panel.sh")"
 }
 
 # Bug (#345): unshare() named a shared file that had passed only as failed, so the run again logged "did not pass" for
