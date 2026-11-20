@@ -68,7 +68,23 @@ t_keyword() {
   done
 }
 
-ALL="required mismatch get keyword"
+# Bugs: a seat's effort range (models.effort) whose min comes after its max, or that names an effort no program
+# takes, or a seat that is none, passed the check; a good range was refused; or the schema's order of the efforts is
+# not the engine's (EFFORTS' opencode list, which holds every effort in order: the judge's pick fits an effort to the
+# range by it, PICKCLAMP in modelpick.sh).
+t_effort() {
+  pk check "$(edited '.models.effort = {builder: {min: "medium", max: "high"}, judge: {min: "low", max: "low"}}')" >/dev/null || fail "a good effort range was refused"
+  out=$(pk check "$(edited '.models.effort = {builder: {min: "high", max: "low"}}')" 2>&1) && fail "a range whose min comes after its max passed"
+  grep -qF '.models.effort.builder: min high comes after max low' <<<"$out" || fail "the reversed range is not named: $out"
+  for e in '{reviewer: {min: "huge", max: "max"}}' '{fixer: {min: "low", max: "max"}}' '{judge: {min: "low"}}'; do
+    pk check "$(edited ".models.effort = $e")" >/dev/null 2>&1 && fail "a pack with models.effort $e passed"
+  done
+  eval "$(grep '^EFFORTS=' "$SRC/paths.sh")"
+  [ "$(jq -c '.properties.models.properties.effort.properties | [.[].properties[].enum] | unique' "$SCHEMA")" = "[$(jq -c .opencode <<<"$EFFORTS")]" ] \
+    || fail "the schema's efforts are not EFFORTS' order: $(jq -c '.properties.models.properties.effort' "$SCHEMA")"
+}
+
+ALL="required mismatch get keyword effort"
 SEL=${CONVEYOR_SHELL_TEST_CASE:-$ALL}; SEL=${SEL//,/ }
 for CASE in $SEL; do case " $ALL " in *" $CASE "*) ;; *) echo "unknown case $CASE" >&2; exit 2 ;; esac; done
 for CASE in $SEL; do ( "t_$CASE" ) || exit 1; echo "ok $CASE"; done

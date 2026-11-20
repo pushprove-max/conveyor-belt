@@ -19,7 +19,8 @@ map(select(.step != "push")) | group_by(.card) | map(. as $all
       | {card: .[0].card, issue: .[0].issue, name: (.[0].mainRed | strings | "Main is red (\(.[0:12]))") // null, title: (.[0].title // ""), step: ($end.step // $at),
          stage: ({picked: 0, build: 1, fix: 3, landing: 5}[$at] // (if $r + (if $l.step == "review" then 0 else 1 end) > 1 then 4 else 2 end)),
          reviews: $r, startedAt: .[0].time, stepAt: last.time,
-         steps: [range(1; length) as $i | .[$i] | select(.step | IN("build", "review", "test", "fix", "rebase"))
+         # seats: the judge's call of the rule Pick settings before the card (pickjudge(), lib/modelpick.sh), priced as a step of its own.
+         steps: [range(1; length) as $i | .[$i] | select(.step | IN("seats", "build", "review", "test", "fix", "rebase"))
            | {step, time, sec: ((.time | fromdate) - ($g[$i - 1].time | fromdate)), tokens, usage} + (if .model then {model} else {} end)
              # judgeWrites: the cache writes of a review's judge session (the review line's judge), {model, write, write1h},
              # when it wrote any. A Claude judge keeps no transcript (--no-session-persistence), so its line is their one record.

@@ -329,10 +329,45 @@ and the pick says that you chose it. Each step line of the card from then on, up
 `group`, `choice` (model and effort), `by` (`owner` or `auto`), `trial` and `mode`. A card that starts again for the same issue, after a retry
 or a stop, keeps the pick that the issue had.
 
-- **Off**: Conveyor records no pick.
-- **Shadow**: Conveyor records the pick, and the card builds on its builder as before.
-- **On**: Conveyor records the pick. Some cards are trials, and the cards of a group that you promote build on the
-  challenger.
+- **Off**: Conveyor records no pick, and asks the judge nothing.
+- **Shadow**: Conveyor records the pick and the judge's choice of seats (below). The card uses the project's seats.
+- **On**: Conveyor records the pick. The card uses the judge's choice of seats. Some cards are trials, and the cards
+  of a group that you promote build on the challenger.
+
+### The judge's choice of seats
+
+With Shadow or On, Conveyor asks the project's judge one time before each card, as Pick for me does
+([Settings for one card](#settings-for-one-card)). The judge chooses a model and an effort for the builder, the
+reviewer and the judge of the card. Conveyor then fits each choice to the pack:
+
+- A model that `models.allowed` does not list for the seat changes to the project's model for the seat. When the
+  pack does not allow that model either, it changes to the first model that the pack allows.
+- An effort outside the range of the seat in `models.effort` changes to the nearest effort in the range that the
+  model's CLI takes. A seat with no range takes each effort that its model's CLI takes.
+
+Set a range in `.conveyor/project.json` as `models.effort.<builder|reviewer|judge>` = `{"min": "<effort>", "max":
+"<effort>"}`. The efforts in order are `minimal`, `low`, `medium`, `high`, `xhigh` and `max`. For example,
+`"builder": {"min": "medium", "max": "high"}` changes a choice of `low` to `medium`.
+
+The `pick` field of the card has `asked`: the three seats as Conveyor fitted them, and the judge's model. Each seat
+has the model and effort that the judge gave (`asked`) and its reason. A seat that Conveyor changed has `clamp`,
+which says what changed and why. When the judge fails, times out or names no model, `asked` has `failed` with the
+reason, and the card uses the project's seats.
+
+With On, the card uses these seats, with these exceptions:
+
+- A seat that you set for the issue (`control card`) keeps your setting.
+- A trial card keeps its challenger as the builder, at the judge's effort fitted to the range of the builder. Its
+  reviewer and judge are the project's. The `choice` of its pick stays the challenger, so the trial counts for the
+  challenger. `trialEffort` shows the effort that the card builds at, when it is a different effort.
+- When a seat of the judge's choice runs on a Claude account at the weekly limit guard, the card uses the project's
+  seats, and `asked` has `guard` with the reason.
+- A promoted card keeps its challenger. A reviewer or judge that you promoted from a replay result keeps your
+  choice.
+
+The judge's call has a card line of its own, step `seats`, with its tokens. The Board counts its cost in the cost of
+the card. A card that starts again for the same issue uses the same answer of the judge, fitted again to the pack as
+it is then, and asks the judge again only when the call failed.
 
 ### Trials
 
@@ -393,8 +428,8 @@ Two more decisions add trials. Conveyor does not make them itself:
 
 ### Reviewer and judge
 
-The reviewer and the judge of a card use the project's settings, until you promote a choice from a replay result
-(see Judge replay, below). Give your decision with `conveyor.sh control pick <reviewer|judge> promote <model>
+With the rule On, the reviewer and the judge of a card use the judge's choice of seats (above), until you promote a
+choice from a replay result (see Judge replay, below). Give your decision with `conveyor.sh control pick <reviewer|judge> promote <model>
 [<effort>]`. Conveyor refuses it when `replays.jsonl` has no result for that seat, model and effort. With the rule
 On, each card that is not a trial then uses that choice, and its `pick` field has `seats`. A trial card keeps the
 project's reviewer and judge. A reviewer or judge that you set for a card (`control card`) keeps your setting.

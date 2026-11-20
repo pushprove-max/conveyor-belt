@@ -176,10 +176,12 @@ FIXSEAT='def fixseat($c; $k; $b): ($c // {})[$k] as $o
 declare -gA SEAT_V=(); SEAT_K=''
 seat() { # <builder|reviewer|judge|fix|testFix> [the control record, when the caller has read it]
   local a c=${2:-} x CTL_V n=${SEATCARD:-}; [ -n "$c" ] || { if ctlread 2>/dev/null; then c=$CTL_V; else c=null; fi; }
-  # A trial card (PICKSEAT, card()'s: picktrial(), lib/modelpick.sh) builds on the rule's challenger, as if the record
-  # set it for the issue's builder, until the owner sets one for the issue (that always wins); its other seats are the record's.
+  # A trial card (PICKSEAT, card()'s: picktrial(), lib/modelpick.sh) builds on the rule's challenger, and a card of the
+  # rule On on the judge's builder (pickjudge()), as if the record set it for the issue's builder, until the owner sets
+  # one for the issue (that always wins); its other seats are the record's.
   [ -z "${PICKSEAT:-}" ] || [ -z "$n" ] || c=$(jq -c --arg n "$n" --argjson p "$PICKSEAT" '.cards[$n].builder //= $p' <<<"$c") || return 1
-  # So does a card's reviewer or judge that the owner promoted from a replay result (PICKSEATS: pickseats()).
+  # So does a card's reviewer or judge that the owner promoted from a replay result, or the judge picked (PICKSEATS:
+  # pickseats(), pickjudge()).
   [ -z "${PICKSEATS:-}" ] || [ -z "$n" ] || c=$(jq -c --arg n "$n" --argjson p "$PICKSEATS" 'reduce ($p | to_entries[]) as $e (.; .cards[$n][$e.key] //= $e.value)' <<<"$c") || return 1
   # A record with no key "<issue>" keeps no seats for the card: the project's, worked out (and kept) once for all cards.
   [[ $c == *"\"$n\":"* ]] || n=''
@@ -935,37 +937,13 @@ Fit the choice to the issue: a small, clear change needs no large model or high 
 Weigh the price of each model. Answer with one JSON object and nothing else:
 {"builder": {"model": "...", "effort": "...", "why": "one line"}, "reviewer": {...}, "judge": {...}}'
 cardpick() { # <issue>
-  local n=$1 c a s x issue size prices pp p d rc ans out effort model
-  c=$(ctl) || return 1; modelsallowed a || { echo "conveyor: the pack's models.allowed cannot be read" >&2; return 1; }
+  local n=$1 c s x issue out PICKANS='' PICKMODEL='' PICKUSE='' PICKWHY=''
+  c=$(ctl) || return 1
   names || return 1
   issue=$(gh issue view "$n" --json number,title,body,labels 2>/dev/null) && jq -e 'objects | .number' <<<"$issue" >/dev/null 2>&1 \
     || { echo "conveyor: issue #$n cannot be read" >&2; return 1; }
-  size=$(jq -c --arg area "$AREA" "$SPLITSIZE"' | .doneWhen |= length | .files |= length' <<<"$issue") || return 1
-  packget prices pp 2>/dev/null && [ -n "$pp" ] || pp='{}'
-  prices=$(jq -cn --argjson p "$pp" '{cards: [], prices: $p}' | python3 "$HERE/../.claude/scripts/dashboard_limit.py" cards 2>/dev/null \
-    | jq -c --argjson p "$pp" '.table | with_entries(.value = {input: .value[0], output: .value[1]}) + ($p | with_entries(select(.value.input != null and .value.output != null) | .value |= {input, output}))' 2>/dev/null) \
-    && [ -n "$prices" ] || prices='{}'
-  s=$(SEATCARD='' seat judge "$c") && jqget "$s" model model effort effort || { echo "conveyor: the project has no judge to ask" >&2; return 1; }
-  p=$PICKASK$'\n\n'$(jq -r --argjson s "$size" --argjson pr "$prices" --argjson e "$EFFORTS" --argjson i "$issue" \
-      --argjson now "$(for x in builder reviewer judge; do SEATCARD='' seat "$x" "$c" || echo null; done | jq -cs '{builder: .[0], reviewer: .[1], judge: .[2]}')" "$OKMODELS"'
-    def list($s): okmodels($s) | to_entries | map(.key as $g | .value[] | "- \(.) (\($g); efforts: \(if $s == "builder" and $g == "opencode" then "none" else $e[$g] | join(", ") end); "
-      + (($pr[.] // $pr[sub("^opencode:"; "")]) as $x | if $x == null then "no price" else "$\($x.input) input, $\($x.output) output per million tokens" end) + ")") | join("\n");
-    "# Models allowed for the builder\n\(list("builder"))\n\n# Models allowed for the reviewer and the judge\n\(list("reviewer"))\n\n"
-    + "# The project'"'"'s settings now\n" + ($now | to_entries | map("- \(.key): \(.value.model // "none") at \(.value.effort // "no effort")") | join("\n"))
-    + "\n\n# The issue'"'"'s size\n\($s.doneWhen) Done-when items, \($s.files) file paths named, \($s.areas) areas, \($s.chars) characters; labels: \([$i.labels[]?.name] | join(", "))"
-    + "\n\n# The issue\n#\($i.number) \($i.title // "")\n\n\($i.body // "")"' <<<"$a") || return 1
-  d=$(mktemp -d) || return 1
-  # The judge is the review's, as judgecall() (lib/review.sh) runs it: on the reviewer's route (proxyroute()) and on
-  # the account a card's review uses (cardaccts(): its second line, the reviewAccount, only with a Claude reviewer;
-  # else the builder's account, as RACCT is then unset).
-  mapfile -t x < <(SEATCARD='' cardaccts "$c")
-  out=$(PROXY_ROLE=reviewer ASKSEAT=judge askmodel "$d" "$PICK_TIMEOUT" "${effort:-medium}" "$(jq -c --arg a "${x[1]-${x[0]-}}" '.account = (if $a == "" then null else $a end)' <<<"$c")" "$p"); rc=$?
-  ans=$(cat "$d/answer" 2>/dev/null); rm -rf "$d"
-  [ "$rc" = 0 ] && [ -z "$out" ] || { echo "conveyor: the judge ($model) did not answer: ${out:-exit $rc; 124 is the ${PICK_TIMEOUT}s timeout}" >&2; return 1; }
-  # The answer's JSON object: from its first { to its last }.
-  out=$(jq -Rsc '(index("{")) as $i | (rindex("}")) as $j | if $i == null or $j == null then error("no JSON object") else .[$i:$j + 1] | fromjson end
-      | {builder, reviewer, judge} | map_values(if type == "object" then {model, effort: (.effort | if . == "" then null else . end), why} else null end)' <<<"$ans" 2>/dev/null) \
-    || { echo "conveyor: the judge's answer held no JSON object of the three seats: ${ans:0:300}" >&2; return 1; }
+  pickcall "$issue" "$c" || { echo "conveyor: $PICKWHY" >&2; return 1; }
+  out=$PICKANS
   for x in builder reviewer judge; do
     jqget "$out" "$x" s || return 1
     jq -e '(.model | type == "string") and (.effort == null or (.effort | type == "string")) and (.why | type == "string" and test("\\S")) and (.why | test("\n") | not)' <<<"$s" >/dev/null 2>&1 \
@@ -973,7 +951,67 @@ cardpick() { # <issue>
     s=$(cardok "$x" "$(jq -r .model <<<"$s")" "$(jq -r '.effort // ""' <<<"$s")") || return 1
     [ -z "$s" ] || { echo "conveyor: the judge's choice for the $x is refused: $s" >&2; return 1; }
   done
-  jq -c --argjson n "$n" --arg m "$model" '{issue: $n} + . + {model: $m}' <<<"$out"
+  jq -c --argjson n "$n" --arg m "$PICKMODEL" '{issue: $n} + . + {model: $m}' <<<"$out"
+}
+# The judge's call of Pick for me (cardpick()) and of the rule Pick settings (pickjudge(), lib/modelpick.sh), on the
+# issue <issue json> ({number, title, body, labels}). Sets the caller's PICKANS, the answer: {builder, reviewer,
+# judge}, each {model, effort (null for none), why} as the judge gave them (nothing checked) or null; PICKMODEL, the
+# judge's model; PICKUSE once the judge was called, the fields of the call's own card line: {model, effort, sec} and
+# {tokens, usage} as a session's line on its program has them (sessionread.jq, codexread.jq, opencoderead.jq), or
+# unread when its output holds no token usage; and PICKWHY, why it failed: exit 1.
+# shellcheck disable=SC2034 # PICKANS, PICKMODEL, PICKUSE and PICKWHY are the caller's, read by cardpick() and pickjudge()
+pickcall() { # <issue json> <control record>
+  local c=$2 issue=$1 a s x size prices pp p d rc ans out effort model agent t0
+  PICKANS='' PICKMODEL='' PICKUSE='' PICKWHY=''
+  modelsallowed a || { PICKWHY="the pack's models.allowed cannot be read"; return 1; }
+  size=$(jq -c --arg area "$AREA" "$SPLITSIZE"' | .doneWhen |= length | .files |= length' <<<"$issue") || { PICKWHY="the issue's size cannot be read"; return 1; }
+  packget prices pp 2>/dev/null && [ -n "$pp" ] || pp='{}'
+  prices=$(jq -cn --argjson p "$pp" '{cards: [], prices: $p}' | python3 "$HERE/../.claude/scripts/dashboard_limit.py" cards 2>/dev/null \
+    | jq -c --argjson p "$pp" '.table | with_entries(.value = {input: .value[0], output: .value[1]}) + ($p | with_entries(select(.value.input != null and .value.output != null) | .value |= {input, output}))' 2>/dev/null) \
+    && [ -n "$prices" ] || prices='{}'
+  s=$(SEATCARD='' seat judge "$c") && jqget "$s" model model effort effort agent agent || { PICKWHY="the project has no judge to ask"; return 1; }
+  PICKMODEL=$model
+  p=$PICKASK$'\n\n'$(jq -r --argjson s "$size" --argjson pr "$prices" --argjson e "$EFFORTS" --argjson i "$issue" \
+      --argjson now "$(for x in builder reviewer judge; do SEATCARD='' seat "$x" "$c" || echo null; done | jq -cs '{builder: .[0], reviewer: .[1], judge: .[2]}')" "$OKMODELS"'
+    def list($s): okmodels($s) | to_entries | map(.key as $g | .value[] | "- \(.) (\($g); efforts: \(if $s == "builder" and $g == "opencode" then "none" else $e[$g] | join(", ") end); "
+      + (($pr[.] // $pr[sub("^opencode:"; "")]) as $x | if $x == null then "no price" else "$\($x.input) input, $\($x.output) output per million tokens" end) + ")") | join("\n");
+    "# Models allowed for the builder\n\(list("builder"))\n\n# Models allowed for the reviewer and the judge\n\(list("reviewer"))\n\n"
+    + "# The project'"'"'s settings now\n" + ($now | to_entries | map("- \(.key): \(.value.model // "none") at \(.value.effort // "no effort")") | join("\n"))
+    + "\n\n# The issue'"'"'s size\n\($s.doneWhen) Done-when items, \($s.files) file paths named, \($s.areas) areas, \($s.chars) characters; labels: \([$i.labels[]?.name] | join(", "))"
+    + "\n\n# The issue\n#\($i.number) \($i.title // "")\n\n\($i.body // "")"' <<<"$a") || { PICKWHY="the judge's prompt could not be made"; return 1; }
+  d=$(mktemp -d) || { PICKWHY="no scratch folder for the judge's call"; return 1; }
+  # The judge is the review's, as judgecall() (lib/review.sh) runs it: on the reviewer's route (proxyroute()) and on
+  # the account a card's review uses (cardaccts(): its second line, the reviewAccount, only with a Claude reviewer;
+  # else the builder's account, as RACCT is then unset).
+  mapfile -t x < <(SEATCARD='' cardaccts "$c")
+  t0=$SECONDS
+  # The project's judge, as the prompt names it: never the issue's own (SEATCARD empty), whose model the line would misname.
+  out=$(SEATCARD='' PROXY_ROLE=reviewer ASKSEAT=judge askmodel "$d" "$PICK_TIMEOUT" "${effort:-medium}" "$(jq -c --arg a "${x[1]-${x[0]-}}" '.account = (if $a == "" then null else $a end)' <<<"$c")" "$p"); rc=$?
+  ans=$(cat "$d/answer" 2>/dev/null)
+  # A Codex judge set by family name runs on the model id askmodel() resolved it to: the line names that one, which
+  # the Board has a price for.
+  [ ! -s "$d/model" ] || { model=$(head -n 1 "$d/model"); PICKMODEL=$model; }
+  # The call's usage, as a session's line has it: a Claude judge's from its JSON output (askmodel() keeps it in raw),
+  # split as sessionread.jq splits a session's; a Codex judge's from its events (err), as codexread.jq reads a
+  # session's; an OpenCode judge's from its events, with OpenCode's cost, as opencoderead.jq reads them.
+  case $agent in
+    codex) PICKUSE=$(jq -Rcn --arg m "$model" --arg e "${effort:-medium}" --argjson s $((SECONDS - t0)) --argjson run null "$CODEXREAD"' | {model, effort, sec} + (({tokens, usage} | select(.tokens != null)) // {unread})' "$d/err" 2>/dev/null) ;;
+    opencode) PICKUSE=$(jq -Rcn --arg m "$model" --argjson s $((SECONDS - t0)) "$OPENCODEREAD"' | {model, sec} + (({tokens, usage} | select(.tokens != null)) // {unread})' "$d/events" 2>/dev/null) ;;
+    *) PICKUSE=$(jq -Rcn --arg m "$model" --arg e "${effort:-medium}" --argjson s $((SECONDS - t0)) '{model: $m, effort: $e, sec: $s}
+    + (([inputs | fromjson? | objects | select(has("result") or has("is_error"))] | last | .usage | objects
+       | {i: (.input_tokens | numbers), w: (.cache_creation_input_tokens | numbers), r: (.cache_read_input_tokens | numbers), o: (.output_tokens | numbers),
+          h: ((.cache_creation | objects | .ephemeral_1h_input_tokens | numbers) // 0)}
+       | select(.i != null and .w != null and .r != null and .o != null)
+       | {tokens: {claude: (.i + .w + .o), codex: 0}, usage: {input: .i, write: (.w - .h), write1h: .h, read: .r, output: .o}})
+       // {unread: "the judge'"'"'s answer holds no token usage"})' "$d/raw" 2>/dev/null) ;;
+  esac
+  [ -n "$PICKUSE" ] || PICKUSE=$(jq -cn --arg m "$model" --arg e "${effort:-medium}" --argjson s $((SECONDS - t0)) '{model: $m, effort: $e, sec: $s, unread: "the judge'"'"'s answer holds no token usage"}')
+  rm -rf "$d"
+  [ "$rc" = 0 ] && [ -z "$out" ] || { PICKWHY="the judge ($model) did not answer: ${out:-exit $rc; 124 is the ${PICK_TIMEOUT}s timeout}"; return 1; }
+  # The answer's JSON object: from its first { to its last }.
+  PICKANS=$(jq -Rsc '(index("{")) as $i | (rindex("}")) as $j | if $i == null or $j == null then error("no JSON object") else .[$i:$j + 1] | fromjson end
+      | {builder, reviewer, judge} | map_values(if type == "object" then {model, effort: (.effort | if . == "" then null else . end), why} else null end)' <<<"$ans" 2>/dev/null) \
+    || { PICKANS=''; PICKWHY="the judge's answer held no JSON object of the three seats: ${ans:0:300}"; return 1; }
 }
 # The cap in force: the control record's, else the seed's (CAP0); nothing when the record does not read.
 capnow() { # [the control record, when the caller has read it]

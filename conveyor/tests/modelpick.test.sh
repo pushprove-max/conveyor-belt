@@ -28,7 +28,8 @@ t_pickshadow() {
   loop run 1 >/dev/null
   want='{"group":"small docs","choice":{"model":"m","effort":"medium"},"by":"auto","trial":false,"mode":"shadow"}'
   [ "$(st 'select(.step == "landed") | .issue')" = 7 ] || fail "the card did not land: $(st .step | tr '\n' ' ')"
-  [ "$(jq -sc --argjson w "$want" '(map(.step) | index("worktree")) as $i | [.[$i:][] | select(.step | IN("push", "pushed", "issue") | not) | .pick == $w] | unique' "$ST/cards.jsonl")" = '[true]' ] \
+  # The judge's pick of the seats (asked) is checked by the cases of cardseats.test.sh.
+  [ "$(jq -sc --argjson w "$want" '(map(.step) | index("worktree")) as $i | [.[$i:][] | select(.step | IN("push", "pushed", "issue") | not) | .pick | del(.asked) == $w] | unique' "$ST/cards.jsonl")" = '[true]' ] \
     || fail "a line of the card from its worktree on does not carry its pick $want: $(st '[.step, .pick] | tostring' | tr '\n' ' ')"
   [ "$(st 'select(.step == "build") | "\(.model) \(.effort)"')" = 'm medium' ] || fail "the card did not build on the project's builder: $(st 'select(.step == "build")')"
   recok "$ST/cards.jsonl" "a picked card"
@@ -45,7 +46,7 @@ t_pickgroups() {
   setup "[$(issue 8 2026-01-01 | jq -c '.body = "Change conveyor/lib/run.sh."'),$(issue 9 2026-01-01 | jq -c '.body = "Change src/a.js.\n\nDone when:\n- one\n- two\n- three"'),$(issue 10 2026-01-01 documentation | jq -c '.body = "Change src/a.js."'),$(issue 11 2026-01-01 | jq -c '.body = "Change how the scripts in **conveyor/lib/** log."'),$(issue 12 2026-01-01 | jq -c '.body = "Change src/a.js.\n\nDone when:\n- one\n- two\n- three\n- four\n- five\n- six"')]"
   tune '.split.doneWhen = 3 | .pipelineFiles = ["conveyor/lib/"]'
   loop control rules pick=on >/dev/null || fail "control rules pick=on was refused"
-  fx_in 'for n in 8 9 10 11 12; do SEATCARD=$n PICK=""; modelpick c1-$n $n; jq -r "\"\(.group) \(.mode)\"" <<<"$PICK"; done'
+  fx_in 'for n in 8 9 10 11 12; do SEATCARD=$n PICK=""; modelpick c1-$n $n 2>/dev/null; jq -r "\"\(.group) \(.mode)\"" <<<"$PICK"; done'
   [ "$(cat "$T/$CASE/run.out")" = $'small pipeline on\nmedium code on\nsmall docs on\nsmall pipeline on\nlarge code on' ] || fail "the groups of a pipeline, a medium, a documentation, a pipeline-directory and a large issue: $(cat "$T/$CASE/run.out")"
 }
 
@@ -54,7 +55,7 @@ t_pickgroups() {
 t_pickowner() {
   picksetup; tune '.models.allowed.claude += ["m2"]'
   loop control card 7 builder m2 high >/dev/null || fail "control card did not take #7's builder"
-  fx_in 'SEATCARD=7; PICK=""; modelpick c1-7 7; printf "%s\n" "$PICK"; seat builder | jq -c "{model, effort}"'
+  fx_in 'SEATCARD=7; PICK=""; modelpick c1-7 7 2>/dev/null; jq -c "del(.asked)" <<<"$PICK"; seat builder | jq -c "{model, effort}"'
   [ "$(cat "$T/$CASE/run.out")" = $'{"group":"small docs","choice":{"model":"m2","effort":"high"},"by":"owner","trial":false,"mode":"shadow"}\n{"model":"m2","effort":"high"}' ] \
     || fail "the pick of a card the owner set the builder of is not by owner on m2 high, or the card's builder moved: $(cat "$T/$CASE/run.out")"
 }
@@ -152,7 +153,7 @@ t_pickrestart() {
   picksetup
   jq -cn '{card: "c0-7", issue: 7, step: "blocked", time: "2026-11-01T00:00:00Z", tokens: {claude: 0, codex: 0}, result: "blocked", sha: "", reason: "tests failed",
     pick: {group: "large code", choice: {model: "m0", effort: "low"}, by: "auto", trial: false, mode: "on"}}' >> "$ST/cards.jsonl"
-  fx_in 'SEATCARD=7; PICK=""; modelpick c1-7 7; printf "%s %s\n" "$PICKCARD" "$PICK"'
+  fx_in 'SEATCARD=7; PICK=""; modelpick c1-7 7 2>/dev/null; printf "%s %s\n" "$PICKCARD" "$(jq -c "del(.asked)" <<<"$PICK")"'
   [ "$(cat "$T/$CASE/run.out")" = 'c1-7 {"group":"large code","choice":{"model":"m0","effort":"low"},"by":"auto","trial":false,"mode":"shadow"}' ] \
     || fail "the restarted card did not keep its issue's pick: $(cat "$T/$CASE/run.out")"
 }
@@ -308,9 +309,10 @@ t_pickback() {
 # Bugs caught (#766): a card of a medium group in the share was a trial before the owner added the group, or was not
 # one after; `control pick medium code add` was taken before the owner's decision on the small code trial result, or
 # twice; a decision on a medium group was taken before it was added. Issue 30 (three Done-when items, split.doneWhen 3)
-# is medium code.
+# is medium code; so is issue 35, picked after the owner added the group: issue 30's card has a line with its pick
+# (the judge's seats line, pickjudge()), so a second pick of issue 30 would keep it, as a restart does.
 t_pickaddgroup() {
-  setup "[$(issue 30 2026-01-01 | jq -c '.body = "Change src/a.js.\n\nDone when:\n- one\n- two\n- three"')]"
+  setup "[$(for n in 30 35; do issue $n 2026-01-01 | jq -c '.body = "Change src/a.js.\n\nDone when:\n- one\n- two\n- three"'; done | paste -sd, -)]"
   tune '.split.doneWhen = 3 | .models.allowed.claude += ["claude-sonnet-5-5"]'
   loop control rules pick=on >/dev/null || fail "control rules pick=on was refused"
   loop control pick medium code add >/dev/null 2>&1 && fail "control pick medium code add was taken before a decision on small code"
@@ -320,7 +322,7 @@ t_pickaddgroup() {
   [ "$(cat "$T/$CASE/run.out")" = $'medium code false m\nm' ] || fail "a card of a medium group not added did not get the defaults: $(cat "$T/$CASE/run.out")"
   loop control pick small code keep >/dev/null && loop control pick medium code add >/dev/null || fail "control pick medium code add was refused after a decision on small code"
   loop control pick medium code add >/dev/null 2>&1 && fail "control pick medium code add was taken twice"
-  fx_in "$pk"
+  fx_in "${pk//30/35}"
   [ "$(cat "$T/$CASE/run.out")" = $'medium code true claude-sonnet-5-5\nclaude-sonnet-5-5' ] || fail "the card in the share of an added medium group is no trial: $(cat "$T/$CASE/run.out")"
 }
 
@@ -342,7 +344,8 @@ t_picknext() {
   [ "$(cat "$T/$CASE/run.out")" = $'21 false true medium claude-sonnet-5-5 medium\n25 true false low claude-sonnet-5-5 low' ] || fail "the cards of a group with its next challenger on trial: $(cat "$T/$CASE/run.out")"
   pcard c1-101 101 trial claude-sonnet-5-5 landed
   x='{"pick":{"choice":{"effort":"low"}}}'; pl c1-102 102 picked trial; pl c1-102 102 build trial ok "$x"; pl c1-102 102 landed trial ok '{"sha":"s102","product":false,"pick":{"choice":{"effort":"low"}}}'
-  [ "$(loop snapshot --fresh | jq -c '.cost.trials.groups | map([.model, .effort, .trial.cards])')" = '[["claude-sonnet-5-5","low",1]]' ] \
+  # The trial cards at low effort: c1-102 and c1-25, whose pick above wrote its line (the judge's seats line, pickjudge()).
+  [ "$(loop snapshot --fresh | jq -c '.cost.trials.groups | map([.model, .effort, .trial.cards])')" = '[["claude-sonnet-5-5","low",2]]' ] \
     || fail "the snapshot's group does not show the next challenger and its trial cards only: $(loop snapshot | jq -c .cost.trials.groups)"
   loop control pick small docs drop >/dev/null || fail "control pick small docs drop was refused"
   fx_in "$pk"

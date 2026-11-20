@@ -262,7 +262,10 @@ askmodel() { # <folder> <seconds> <effort> <the control record, or ""> <prompt>
       (cd "$d" && proxyenv && acctrun "$acct" && exec timeout --kill-after=10 "$2" claude -p --model "$model" --effort "$3" --tools "" \
         --setting-sources "" --strict-mcp-config --no-session-persistence --output-format json <<<"$p" > "$d/raw" 2> "$d/err" 8>&- 9>&-); rc=$? ;;
     codex) model=$(codexmodel "$model") || { echo "$model"; return 1; }
-      (cd "$d" && codexargs && exec timeout --kill-after=10 "$2" codex exec --skip-git-repo-check -s read-only "${CODEX_PX[@]}" -m "$model" -c "model_reasoning_effort=\"$3\"" \
+      # The model id a family name resolved to, for a caller that records the call by the model it ran on (pickcall()).
+      printf '%s\n' "$model" > "$d/model"
+      # --json: its events go to err, the usage of each turn among them (codexread.jq), for a caller that records the call (pickcall()).
+      (cd "$d" && codexargs && exec timeout --kill-after=10 "$2" codex exec --json --skip-git-repo-check -s read-only "${CODEX_PX[@]}" -m "$model" -c "model_reasoning_effort=\"$3\"" \
         -o "$d/answer" - <<<"$p" > "$d/err" 2>&1 8>&- 9>&-); rc=$? ;;
     opencode) (REVIEW_TIMEOUT=$2 ocrun "$d" "$model" "$3" <<<"$p" > "$d/events" 2>/dev/null 8>&- 9>&-); rc=$?
       [ $rc != 0 ] || jq -Rrn "$OPENCODEANSWER" "$d/events" > "$d/answer" 2>/dev/null || rc=1 ;;

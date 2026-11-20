@@ -11,7 +11,7 @@
 # The setup: the pack allows the builder m and m2 (Claude), the review x and x2 (Codex) and j and j2 (Claude), so the
 # project's seats are m, x and the judge j, each at medium. A Claude call with the review's read-only tools is the
 # judge: its arguments are kept in $STUB/judges and its answer is $STUB/judge; a Claude call with no tools (askmodel)
-# is Pick for me, once $STUB/pick or $STUB/pick-json is there (before, it is a card run's same-file check, answered NONE): its prompt is kept in $STUB/pick-asked, its account folder and route in $STUB/pick-env, and its answer is $STUB/pick (or the whole JSON output $STUB/pick-json); any other is a session.
+# is Pick for me or the judge's pick of the rule Pick settings, once $STUB/pick or $STUB/pick-json is there (before, it is a card run's same-file check, answered NONE): its prompt is kept in $STUB/pick-asked, its account folder and route in $STUB/pick-env, and its answer is $STUB/pick (or the whole JSON output $STUB/pick-json); any other is a session.
 seatsetup() { # <issues json>
   setup "$1"
   tune '.models.allowed = {claude: ["m", "m2"], codex: ["x", "x2"], "claude-reviewer": ["j", "j2"]}'
@@ -24,6 +24,7 @@ case "$*" in
     exit ;;
   *"--tools  "*) if [ -f "$STUB/pick" ] || [ -f "$STUB/pick-json" ]; then
       cat > "$STUB/pick-asked"; echo "$*" >> "$STUB/picks"; echo "${CLAUDE_CONFIG_DIR:-default} ${ANTHROPIC_BASE_URL:-login}" > "$STUB/pick-env"
+      [ ! -f "$STUB/pick-delay" ] || sleep "$(cat "$STUB/pick-delay")" # sleep: a judge slower than PICK_TIMEOUT, so the call times out
       # $STUB/pick-json, when it is there, is the JSON output as it is; else $STUB/pick is its result.
       j=$(cat "$STUB/pick-json" 2>/dev/null || jq -cn --rawfile r "$STUB/pick" '{type: "result", is_error: false, subtype: "success", result: $r, num_turns: 1}')
     else cat > /dev/null; j='{"type":"result","is_error":false,"result":"NONE","num_turns":1}'; fi # a same-file check of a card run (overlapcall())
@@ -202,4 +203,162 @@ t_cardpickroute() {
   loop control reviewer claude j2 >/dev/null && loop control judge claude j >/dev/null || fail "a Claude reviewer and judge were refused"
   out=$(loop control card 7 pick 2>&1) || fail "Pick for me failed: $out"
   [ "$(cat "$STUB/pick-env")" = "$T/$CASE/acct2 login" ] || fail "with a Claude reviewer, the judge was not called on the reviewAccount: $(cat "$STUB/pick-env")"
+}
+
+# The judge's pick of the rule Pick settings (pickjudge(), lib/modelpick.sh), called as card() calls modelpick():
+# PJ prints the pick's asked, then the builder, reviewer and judge the card's steps get (seat()), one line each.
+PJ='SEATCARD=$N; PICK=""; PICKCARD=""; PICKSEAT=""; PICKSEATS=""; modelpick c1-$N $N 2>/dev/null; jq -c ".asked" <<<"${PICK:-null}"
+  for s in builder reviewer judge; do seat $s | jq -r "\"\(.model) \(.effort)\""; done'
+pjask() { # <builder> <reviewer> <judge>: the judge's answer, each seat "<model> <effort>"
+  jq -cn --arg b "$1" --arg r "$2" --arg j "$3" 'def s($x): $x | split(" ") | {model: .[0], effort: .[1], why: "w"};
+    {builder: s($b), reviewer: s($r), judge: s($j)}' > "$STUB/pick"
+}
+# The card's price and its steps' as the Board prices them (rows(), then dashboard_limit.py cardlines, as the
+# snapshot does), at the prices <prices json>: [usd, [[step, usd], ...]] in $T/$CASE/run.out.
+pjusd() {
+  # shellcheck disable=SC2016 # expanded in the engine shell
+  fx_in 'd=$T/$CASE/priced && mkdir -p "$d" && rows "$STATE" | jq -c ".[]" > "$d/all" && jq -cn --argjson p '"'$1'"' "{prices: \$p, since: (now - 86400 | todate)}" \
+    | python3 "$HERE/../.claude/scripts/dashboard_limit.py" cardlines "$d/all" "$d/kept" "$d/priced" >/dev/null && jq -c "[.usd, [.steps[] | [.step, .usd]]]" "$d/priced"'
+}
+
+# Bugs: with the rule On, the card did not build on the judge's builder, or took an effort outside the builder's range
+# (models.effort.builder, medium to high: the judge's low is medium), or a reviewer model the pack does not allow (zz:
+# the project's x, at the judge's effort), or the pick did not say what was moved and why; or the call's tokens were
+# not on the card as a step the Board prices (pjusd()); or a restarted card took the judge's earlier fit, not one to
+# the pack as it is now (the builder's range moved to low only: m at low, the judge not asked again).
+# The judge j answers with 1,000,000 input and 500,000 output tokens, at $1 and $2 a million: $2.
+t_pickjudgeon() {
+  seatsetup "[$(issue 7 2026-01-01)]"
+  tune '.models.allowed.claude = ["m"] | .models.effort = {builder: {min: "medium", max: "high"}} | .prices = {j: {input: 1, output: 2, cacheRead: 0}}'
+  # The project's builder at high, so a card that does not build on the judge's (m at medium) is told apart.
+  loop control rules pick=on >/dev/null && loop control model claude m high >/dev/null || fail "control rules pick=on or control model was refused"
+  jq -cn --arg r '{"builder": {"model": "m", "effort": "low", "why": "w"}, "reviewer": {"model": "zz", "effort": "low", "why": "r"}, "judge": {"model": "j2", "effort": "high", "why": "j"}}' \
+    '{type: "result", is_error: false, result: $r, num_turns: 1, usage: {input_tokens: 1000000, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 500000}}' > "$STUB/pick-json"
+  fx_in "N=7; record c1-7 7 picked ok; $PJ"
+  out=$(cat "$T/$CASE/run.out")
+  [ "$(sed -n '2,4p' <<<"$out" | paste -sd,)" = 'm medium,x low,j2 high' ] || fail "the card's seats are not the judge's, fitted to the pack: $out"
+  [ "$(head -n 1 <<<"$out" | jq -r '.builder.clamp, .reviewer.clamp, .judge.clamp // "none", .model')" \
+    = $'low is not one of the efforts the builder may take on m (medium, high): m at medium\nzz is not a model the pack allows the reviewer: x at low\nnone\nj' ] \
+    || fail "the pick does not name each clamp: $out"
+  [ "$(st 'select(.step == "seats") | [.result, .model, .tokens.claude, .usage.output, (.pick.asked.builder.effort)] | tostring')" = '["ok","j",1500000,500000,"medium"]' ] \
+    || fail "the judge's call has no seats line with its tokens: $(st 'select(.step == "seats")')"
+  recok "$ST/cards.jsonl" "the judge's pick"
+  pjusd '{"j": {"input": 1, "output": 2, "cacheRead": 0}}'
+  [ "$(cat "$T/$CASE/run.out")" = '[2.0,[["seats",2.0]]]' ] || fail "the Board does not price the judge's call on the card: $(cat "$T/$CASE/run.out")"
+  tune '.models.effort.builder = {min: "low", max: "low"}'
+  fx_in "N=7; $PJ"
+  [ "$(sed -n 2p "$T/$CASE/run.out")" = 'm low' ] && [ "$(wc -l < "$STUB/picks")" = 1 ] \
+    || fail "the restarted card did not fit the judge's answer to the pack as it is now, once asked: $(cat "$T/$CASE/run.out") $(wc -l < "$STUB/picks")"
+}
+
+# Bugs: a seat the owner set for the issue (`control card`) was moved to the judge's; a trial card left its challenger
+# for the judge's builder, or did not take the judge's effort fitted to the builder's range (xhigh: high), or its
+# reviewer was moved off the project's (a trial card's review stays at the defaults); or its choice took that effort,
+# so the snapshot, which counts a group's trials by the challenger's model and effort, left it out. Issue 10 is in the
+# trial share. Also: the pick asked the issue's judge (j2 at high) and recorded the project's (j at medium).
+t_pickjudgeowner() {
+  seatsetup "[$(issue 7 2026-01-01),$(issue 10 2026-01-01)]"
+  tune '.models.allowed.claude += ["claude-sonnet-5-5"] | .models.effort = {builder: {min: "medium", max: "high"}}'
+  loop control rules pick=on >/dev/null && loop control card 7 builder m2 high >/dev/null && loop control card 7 reviewer x2 medium >/dev/null \
+    && loop control card 7 judge j2 high >/dev/null || fail "control rules pick=on or control card was refused"
+  pjask 'm medium' 'x low' 'j2 low'
+  fx_in "N=7; $PJ"
+  [ "$(sed -n '2,4p' "$T/$CASE/run.out" | paste -sd,)" = 'm2 high,x2 medium,j2 high' ] || fail "the owner's seats did not stand over the judge's: $(cat "$T/$CASE/run.out")"
+  grep -q -- '--model j --effort medium ' "$STUB/picks" && [ "$(st 'select(.step == "seats") | "\(.model) \(.effort)"')" = 'j medium' ] \
+    || fail "the pick did not ask the project's judge, the one its line names: $(cat "$STUB/picks") $(st 'select(.step == "seats")')"
+  pjask 'm xhigh' 'x2 low' 'j2 low'
+  fx_in "N=10; $PJ; jq -c '[.trial, .choice, .trialEffort]' <<<\"\$PICK\"; record c1-10 10 deps ok"
+  [ "$(sed -n '2,5p' "$T/$CASE/run.out" | paste -sd,)" = 'claude-sonnet-5-5 high,x medium,j medium,[true,{"model":"claude-sonnet-5-5","effort":"medium"},"high"]' ] \
+    || fail "the trial card did not keep its challenger at the judge's effort in range, with the project's review: $(cat "$T/$CASE/run.out")"
+  # Bug: the blocked trial's retry, no longer a trial, kept its trialEffort, so the record check set its lines aside.
+  fx_in "PICK=\$(jq -c 'select(.card == \"c1-10\") | .pick | objects' \"\$ST/cards.jsonl\" | tail -n 1); PICKCARD=c1-10; record c1-10 10 blocked failed {}
+    PICK=''; PICKCARD=''; PICKSEAT=''; PICKSEATS=''; SEATCARD=10; modelpick c2-10 10 2>/dev/null; jq -c '[.trial, .trialEffort]' <<<\"\$PICK\"; record c2-10 10 deps ok"
+  [ "$(cat "$T/$CASE/run.out")" = '[false,null]' ] || fail "the retry of a blocked trial kept its trialEffort: $(cat "$T/$CASE/run.out")"
+  recok "$ST/cards.jsonl" "a trial card's pick, and its retry's"
+}
+
+# Bugs: with Shadow the judge's pick was not recorded, or moved a seat; with Off the judge was asked. Also: a seat with
+# no range in models.effort did not take every effort its model's program takes (the judge's max is kept, no clamp).
+t_pickjudgeshadow() {
+  seatsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-01)]"
+  loop control rules pick=shadow >/dev/null || fail "control rules pick=shadow was refused"
+  pjask 'm2 high' 'x2 low' 'j2 max'
+  fx_in "N=7; $PJ"
+  [ "$(head -n 1 "$T/$CASE/run.out" | jq -r '[.builder, .reviewer, .judge] | map("\(.model) \(.effort) \(.clamp // "")") | join(",")')" = 'm2 high ,x2 low ,j2 max ' ] \
+    || fail "the judge's pick is not recorded in Shadow: $(cat "$T/$CASE/run.out")"
+  [ "$(sed -n '2,4p' "$T/$CASE/run.out" | paste -sd,)" = 'm medium,x medium,j medium' ] || fail "Shadow moved the card off the project's seats: $(cat "$T/$CASE/run.out")"
+  loop control rules pick=off >/dev/null || fail "control rules pick=off was refused"
+  fx_in "N=8; $PJ"
+  [ "$(wc -l < "$STUB/picks")" = 1 ] && [ "$(head -n 1 "$T/$CASE/run.out")" = null ] || fail "with Off the judge was asked: $(cat "$STUB/picks")"
+}
+
+# Bugs: a judge that failed, timed out or named no model blocked the card or moved a seat, or left no reason. Each
+# answer is asked again for the same issue: a failed pick is asked again, not reused.
+t_pickjudgefail() {
+  seatsetup "[$(issue 7 2026-01-01)]"
+  loop control rules pick=on >/dev/null || fail "control rules pick=on was refused"
+  echo '{"type":"result","is_error":true,"result":"overloaded","num_turns":1}' > "$STUB/pick-json"
+  fx_in "N=7; $PJ"
+  out=$(cat "$T/$CASE/run.out"); rm -f "$STUB/pick-json"
+  pjask 'm2 high' 'x2 low' 'j2 low'; echo 3 > "$STUB/pick-delay"
+  fx_in "N=7; PICK_TIMEOUT=1; $PJ"
+  out+=$'\n'$(cat "$T/$CASE/run.out"); rm -f "$STUB/pick-delay"
+  echo '{"builder": "fast", "reviewer": null}' > "$STUB/pick"
+  fx_in "N=7; $PJ"
+  out+=$'\n'$(cat "$T/$CASE/run.out")
+  [ "$(grep -c -x 'm medium\|x medium\|j medium' <<<"$out")" = 9 ] || fail "a failed pick moved a seat off the project's: $out"
+  [ "$(grep '^{' <<<"$out" | jq -r .failed)" = "the judge (j) did not answer: the judge sent back an error (exit 0, 1 turn): overloaded; no error output
+the judge (j) did not answer: exit 124; 124 is the 1s timeout
+the judge's answer named no model for any seat: {\"builder\":null,\"reviewer\":null,\"judge\":null}" ] || fail "a failed pick does not say why: $out"
+  [ "$(st 'select(.step == "seats") | .result' | sort -u)" = failed ] || fail "the failed calls have no failed seats line: $(st 'select(.step == "seats")')"
+  recok "$ST/cards.jsonl" "a failed pick"
+}
+
+# Bug: with a Codex reviewer, pick read the guard on the builder's account alone; a judge that picked a Claude
+# reviewer (j2) moved the card's review onto the reviewAccount, which is at the weekly limit guard (95 over 90).
+t_pickjudgeguard() {
+  export XDG_CONFIG_HOME=$T/$CASE/config; mkdir -p "$XDG_CONFIG_HOME/conveyor" "$T/$CASE/acct1" "$T/$CASE/acct2"
+  jq -cn --arg a "$T/$CASE/acct1" --arg b "$T/$CASE/acct2" '{accounts: [{name: "first", configDir: $a}, {name: "second", configDir: $b}]}' > "$XDG_CONFIG_HOME/conveyor/host.json"
+  seatsetup "[$(issue 7 2026-01-01)]"
+  loop control rules pick=on >/dev/null && loop control account first >/dev/null && loop control review-account second >/dev/null && loop control guard 90 >/dev/null \
+    || fail "control rules, account or guard was refused"
+  jq -cn '{time: (now | todate), pct: 95, account: "second"}' >> "$ST/limit.jsonl"
+  pjask 'm2 high' 'j2 low' 'j2 low'
+  fx_in "N=7; $PJ; record c1-7 7 deps ok"
+  [ "$(sed -n '2,4p' "$T/$CASE/run.out" | paste -sd,)" = 'm medium,x medium,j medium' ] && head -n 1 "$T/$CASE/run.out" | jq -e '.guard | test("weekly limit guard")' >/dev/null \
+    || fail "the judge's seats moved the card onto an account at the guard, or the pick does not say why not: $(cat "$T/$CASE/run.out")"
+  recok "$ST/cards.jsonl" "a pick held by the guard"
+}
+
+# Bug: a Codex judge's call was recorded with no tokens (its output went unread), so the card had no price. Its
+# events give 1,000,000 input and 500,000 output tokens, at $1 and $2 a million: $2. Also: a judge set by its family
+# name (sol) was recorded as sol, which has no price, not as the model id it ran on (gpt-6.2-sol).
+t_pickjudgecodex() {
+  seatsetup "[$(issue 7 2026-01-01)]"
+  export CODEX_HOME=$T/$CASE/codex; mkdir -p "$CODEX_HOME" && echo '{"models":[{"slug":"gpt-6.2-sol","visibility":"list"}]}' > "$CODEX_HOME/models_cache.json"
+  tune '.models.allowed.codex += ["sol"]'
+  jq -c '.judge = {cli: "codex", model: "sol", effort: "low"}' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
+  loop control rules pick=shadow >/dev/null || fail "control rules pick=shadow was refused"
+  pjask 'm2 high' 'x2 low' 'j2 low'; cp "$STUB/pick" "$STUB/codex-answer"
+  echo '{"type":"turn.completed","usage":{"input_tokens":1000000,"cached_input_tokens":0,"output_tokens":500000}}' > "$STUB/codex-usage"
+  fx_in "N=7; record c1-7 7 picked ok; $PJ"
+  [ "$(st 'select(.step == "seats") | [.result, .model, .tokens.codex, .usage.output] | tostring')" = '["ok","gpt-6.2-sol",1500000,500000]' ] \
+    || fail "the Codex judge's call has no seats line with its tokens and its model id: $(st 'select(.step == "seats")') $(cat "$T/$CASE/run.out")"
+  pjusd '{"gpt-6.2-sol": {"input": 1, "output": 2, "cacheRead": 0}}'
+  [ "$(cat "$T/$CASE/run.out")" = '[2.0,[["seats",2.0]]]' ] || fail "the Board does not price the Codex judge's call on the card: $(cat "$T/$CASE/run.out")"
+}
+
+# Bug: an OpenCode judge's call was recorded with no tokens and no cost (its events went unread), so the card had no
+# price. The shared stub's step costs $0.01, as OpenCode prices it.
+t_pickjudgeoc() {
+  seatsetup "[$(issue 7 2026-01-01)]"
+  tune '.models.allowed.opencode = ["opencode:prov/mod-1"]'
+  jq -c '.judge = {cli: "opencode", model: "opencode:prov/mod-1", effort: "high"}' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
+  loop control rules pick=shadow >/dev/null || fail "control rules pick=shadow was refused"
+  pjask 'm2 high' 'x2 low' 'j2 low'; cp "$STUB/pick" "$STUB/opencode-answer"
+  fx_in "N=7; record c1-7 7 picked ok; $PJ"
+  [ "$(st 'select(.step == "seats") | [.result, .tokens.claude, .usage.cost] | tostring')" = '["ok",170,0.01]' ] \
+    || fail "the OpenCode judge's call has no seats line with its tokens and cost: $(st 'select(.step == "seats")') $(cat "$T/$CASE/run.out")"
+  pjusd '{}'
+  [ "$(cat "$T/$CASE/run.out")" = '[0.01,[["seats",0.01]]]' ] || fail "the Board does not price the OpenCode judge's call on the card: $(cat "$T/$CASE/run.out")"
 }

@@ -8,7 +8,7 @@ def need: ["card", "issue", "reason", "result", "sha", "step", "time", "tokens"]
 def known: ["product", "title", "usage", "kept", "leftover", "followups", "sec", "visible", "branch", "created", "counts", "of", "model", "effort",
   "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "doneWhenItems", "doneWhenHolds", "excerpts", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost", "survived", "answers",
   "wait", "run", "slotsFree", "selected", "ended", "list", "coverage", "slow", "timed", "times", "clocks", "carried", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "waitSec", "wide", "pr", "doneLines", "ran", "checks", "split", "grown", "rollout", "pick", "lint"];
-def steps: ["picked", "split", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof", "grown", "lint"];
+def steps: ["picked", "split", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof", "grown", "lint", "seats"];
 # Each required field's own test.
 def needok($k): if $k == "issue" then .issue | type == "number" elif $k == "time" then (try (.time | fromdate | type == "number") catch false)
   elif $k == "tokens" then .tokens | type == "object" and keys == ["claude", "codex"] and all(type == "number")
@@ -133,8 +133,18 @@ def ok: . as $r | (keys - known) == need
         # builder chosen, by whom, whether it is a trial, and the rule's setting; on a trial card, the pipeline files its
         # change touches (trialflag()), when there are any; on a card of a promoted group on the challenger
         # (pickpromote()), promoted: true; on a card of the rule On that is not a trial, the reviewer and judge seats
-        # the owner promoted from a replay result (pickseats()), seats.
-        and (.pick == null or (.pick | type == "object" and (keys - ["pipeline", "promoted", "seats"]) == ["by", "choice", "group", "mode", "trial"] and (.group | type == "string")
+        # the owner promoted from a replay result (pickseats()), seats; asked, the judge's pick of the three seats
+        # (pickjudge()): {failed: why}, or each seat {model, effort, why, asked: {model, effort} as the judge gave them,
+        # clamp: why the pack moved it} or {why, asked, clamp} (no model allowed), model, the judge's, and guard, why
+        # the card kept its seats (at the weekly limit guard); on a trial card, trialEffort, the effort it builds at.
+        and (.pick == null or (.pick | type == "object" and (keys - ["pipeline", "promoted", "seats", "asked", "trialEffort"]) == ["by", "choice", "group", "mode", "trial"] and (.group | type == "string")
+          and ((has("asked") | not) or (.asked | type == "object" and (if has("failed") then keys == ["failed"] and (.failed | type == "string")
+            else (keys - ["guard"]) == ["builder", "judge", "model", "reviewer"] and (.model | type == "string") and (.guard == null or (.guard | type == "string"))
+              and all(.builder, .reviewer, .judge; type == "object"
+              and (if has("model") then (keys - ["clamp"]) == ["asked", "effort", "model", "why"] and (.model | type == "string") and (.effort == null or (.effort | type == "string"))
+                and (.why == null or (.why | type == "string")) and (.asked | type == "object" and keys == ["effort", "model"])
+                and (.clamp == null or (.clamp | type == "string")) else keys == ["asked", "clamp", "why"] and (.clamp | type == "string") end)) end)))
+          and ((has("trialEffort") | not) or (.trial == true and (.trialEffort | type == "string")))
           and (.pipeline == null or (.trial and (.pipeline | type == "array" and length > 0 and all(type == "string"))))
           and ((has("promoted") | not) or (.promoted == true and .trial == false))
           and ((has("seats") | not) or (.trial == false and .mode == "on" and (.seats | type == "object" and length > 0 and all(keys[]; IN("reviewer", "judge"))

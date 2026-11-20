@@ -242,6 +242,19 @@
             }
           }
         },
+        "effort": {
+          "description": "The efforts the rule Pick settings may give each seat (docs/configuration.md, Pick settings), as {min, max}, in the order of the efforts (minimal, low, medium, high, xhigh, max): the judge's pick of an effort outside the range is moved to the nearest one in it that the model's program takes. A seat with no range takes any effort its model's program takes.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "builder": { "type": "object", "required": ["min", "max"], "additionalProperties": false, "properties": {
+              "min": { "enum": ["minimal", "low", "medium", "high", "xhigh", "max"] }, "max": { "enum": ["minimal", "low", "medium", "high", "xhigh", "max"] } } },
+            "reviewer": { "type": "object", "required": ["min", "max"], "additionalProperties": false, "properties": {
+              "min": { "enum": ["minimal", "low", "medium", "high", "xhigh", "max"] }, "max": { "enum": ["minimal", "low", "medium", "high", "xhigh", "max"] } } },
+            "judge": { "type": "object", "required": ["min", "max"], "additionalProperties": false, "properties": {
+              "min": { "enum": ["minimal", "low", "medium", "high", "xhigh", "max"] }, "max": { "enum": ["minimal", "low", "medium", "high", "xhigh", "max"] } } }
+          }
+        },
         "claudeProxy": {
           "description": "The API proxy Claude card sessions run through, as its roles set: its base URL and the NAME of the environment variable that holds its key (never the key). toolSearch is ENABLE_TOOL_SEARCH for a base URL that is not api.anthropic.com (true when left out). The host file's claudeProxy, when it names one, is used instead.",
           "type": "object",
