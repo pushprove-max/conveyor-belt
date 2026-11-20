@@ -153,3 +153,20 @@ test('Rules: the pressed part of a segmented control draws its focus outline in 
   assert.ok(themes.length >= 2, 'the themes are read');
   for (const [, accent, on] of themes) assert.notEqual(on.toLowerCase(), accent.toLowerCase());
 });
+
+// Bug: a Build issues part armed for its second click is pressed and has board-danger, so its fill is --bad-bg, but
+// its outline stayed --on-accent: #ffffff on #fde6e4 in the light theme, near unseen. A stylesheet test (jsdom draws no
+// layout): the armed part's outline is --bad, set after the pressed rule of the same weight so it wins, and --bad
+// stands 3:1 apart from --bad-bg in each theme.
+test('Rules: an armed part of a segmented control draws its focus outline in a color apart from its fill', () => {
+  const armed = css.indexOf('.rules-seg > .rules-tog.board-danger:focus-visible { outline-color: var(--bad); }');
+  assert.ok(armed > css.indexOf('.rules-seg > .rules-tog[aria-pressed="true"]:focus-visible {'), 'the armed rule comes after the pressed one');
+  const lum = (hex) => { const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
+  const themes = Array.from(css.matchAll(/--bad: (#[0-9a-f]{6}); --bad-bg: (#[0-9a-f]{6});/gi));
+  assert.ok(themes.length >= 2, 'the themes are read');
+  for (const [, bad, bg] of themes) {
+    const [hi, lo] = [lum(bad), lum(bg)].sort((x, y) => y - x);
+    assert.ok((hi + 0.05) / (lo + 0.05) >= 3, `--bad ${bad} on --bad-bg ${bg}`);
+  }
+});
