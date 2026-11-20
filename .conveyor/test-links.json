@@ -3,6 +3,7 @@
     ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/codex.test.sh",
     "conveyor/tests/models.test.sh",
+    "conveyor/tests/modelsproxy.test.sh",
     "conveyor/tests/opencode.test.sh",
     "conveyor/tests/proxyroute.test.sh",
     "conveyor/tests/snapexec.test.sh"
@@ -40,6 +41,9 @@
   "conveyor/tests/judge.test.sh": [
     "conveyor/tests/judgeminor.test.sh",
     "conveyor/tests/judgesnap.test.sh"
+  ],
+  "conveyor/tests/models.test.sh": [
+    "conveyor/tests/modelsproxy.test.sh"
   ],
   "conveyor/tests/serve.test.sh": [
     "conveyor/tests/pushmerge.test.sh"
@@ -208,6 +212,7 @@
     ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
     "conveyor/tests/codex.test.sh",
     "conveyor/tests/models.test.sh",
+    "conveyor/tests/modelsproxy.test.sh",
     "conveyor/tests/opencode.test.sh",
     "conveyor/tests/proxyroute.test.sh",
     "conveyor/tests/snapexec.test.sh"
@@ -305,6 +310,7 @@
   "conveyor/tests/redpickbig.test.sh": [
     "conveyor/tests/codex.test.sh",
     "conveyor/tests/models.test.sh",
+    "conveyor/tests/modelsproxy.test.sh",
     "conveyor/tests/opencode.test.sh",
     "conveyor/tests/proxyroute.test.sh"
   ],
