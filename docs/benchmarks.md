@@ -354,6 +354,26 @@ Each `cost` has `usd` and `state`:
 - `unknown`: no session can be priced, and `usd` is null. Runs and results from before costs were recorded show
   unknown, not $0.
 
+### Archive and delete runs
+
+`conveyor.sh bench swe runs archive <run>...` archives one or more runs. An archived run keeps its records: its line,
+its event log and its results. `bench swe history` and `bench swe show <run>` give it with `archived`, the time it
+was archived. `conveyor.sh bench swe runs restore <run>...` takes that mark off again.
+
+`conveyor.sh bench swe runs delete <run>...` deletes one or more runs: the line of each run in `runs.jsonl`, its event
+log (`tails/<run>.jsonl`) and the results that it shows, with their patches and logs. A result that another run shows,
+for example a later run that reused it, is not deleted. That run still shows it. Delete says how many results stay.
+`bench swe history` gives each run's `shared`: each of its results that other runs show, with the IDs of those runs.
+
+A run that has not ended cannot be archived or deleted. This includes a run whose process stopped with no end
+recorded. Stop the run first. When one run of the list is refused, nothing changes.
+
+On the Benchmarks tab, Archive and Delete are on the page of a run, on Compare and on the Infographic, for the runs
+that each page shows. In History, tick the runs, then use Archive or Delete in the bar at the foot of the screen. An
+archived run is not in History, in the choices of Compare, in the infographic or in the figures of the newest run. The
+Archived list on the overview shows each archived run, with Restore and Delete. Delete asks for a second click, which
+names the runs and says how many results stay because a run that you do not delete shows them.
+
 ## What the numbers mean
 
 The resolved count is the number of tasks whose final patch passes the task's hidden tests, as the official harness

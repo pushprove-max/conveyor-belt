@@ -10,6 +10,9 @@
 #   bench swe arms save <name> <spec>  keeps a saved arm's choices as a new revision and prints its ID (swe_armsave)
 #   bench swe arms show <id>           a saved revision as it was saved
 #   bench swe stop [<run id>]          ends the run of that ID, or with none the run in progress (swe_stop)
+#   bench swe runs archive | restore | delete <run>...
+#                                      archives runs, restores them, or deletes their lines, tails and the results
+#                                      no other run shows (swe_runs); a run that has not ended is refused
 #   bench swe results [--json]         the results of every arm and version so far, side by side
 #   bench swe history                  every run newest first with each arm's figures, and every arm's state, as JSON
 #                                      (the Board's Benchmarks tab; swe_history says what it holds)
@@ -40,7 +43,7 @@
 # sessions, tokens, minutes, its cost at list prices (swe_cost), a card's records, the inputs) and .patch, preflight/<arm>/<key>.json (key: swe_armkey(); each check's record, from its start, swe_ckopen) and its lock,
 # arms/<id>.json (each saved arm revision, swe_armsave), frozen/<arm> while a run goes (its copy of what a conveyor
 # arm reads of the project, swe_freeze),
-# a line a run in runs.jsonl, the run in progress in live.json, tails/<run>.jsonl (each run's event tail, swe_event),
+# a line a run in runs.jsonl (changed under runs.lock, swe_runlog), the run in progress in live.json, tails/<run>.jsonl (each run's event tail, swe_event),
 # versions.json (the last versions read and the key they were read at, swe_versionsnow), and board.json, what the snapshot carries for the Board's Benchmarks tab (the tab reads the runs and results with
 # history and show).
 # The dataset's rows (each task's reference fix and hidden tests) are never kept: the card's sessions have a shell as
@@ -265,7 +268,7 @@ swe_lines() {
     | jq -Rc --argjson a "$([ -n "$p" ] && kill -0 "$p" 2>/dev/null && echo true || echo false)" 'fromjson? | objects | select(.id | strings) | if .state == "running" then .alive = $a else . end'
 }
 # `bench swe history`: what the Board's Benchmarks tab reads when it is shown, as one JSON object: runs, every run
-# newest first (runsum); arms, every arm with its state (swe_checkstate: checking, ready, failed, expired, changed
+# newest first (runsum; an archived run with archived, its time, and each run's shared: each of its results another run shows, with their IDs, swe_runs); arms, every arm with its state (swe_checkstate: checking, ready, failed, expired, changed
 # since its check, unchecked, not offered), why, the step a check that runs is at, its check's ID (check) and time (at), the guard that holds it back (swe_guards), its results key on swe.json's
 # settings (swe_reskey; null for a conveyor arm, whose key ends with its engine's commit: keyPrefix and the commit)
 # and its sessions, minutes and a session's dollars (swe_pertask); keys, each results key with the places of its tasks
@@ -310,11 +313,14 @@ swe_history() {
   c=$(swe_ctl '{}' 2>/dev/null) && df=$(for x in builder reviewer judge fix testFix; do seat "$x" "$c" || echo null; done | jq -sc --argjson c "$c" '
     {seats: {model: .[0], reviewer: .[1], judge: .[2], fix: (if $c.fix == null then null else .[3] end), testFix: (if $c.testFix == null then null else .[4] end)},
      judgeOwn: ($c.judge.model != null), judgeOn: ($c.judgeOn == true), judgeAlways: ($c.judgeAlways // [])}') || df=null
+  # Each run's shared: each result it shows that another run shows too, with those runs' IDs; a delete keeps it unless
+  # it deletes them all (swe_runs).
   swe_lines | jq -sc --argjson arms "$arms" --argjson gc "$gc" --argjson ga "$ga" --argjson ch "$ch" --argjson df "$df" --slurpfile res <(cat "$SWE_DIR"/results/*/*.json 2>/dev/null) \
-    --slurpfile order <(jq -c .id "$(swe_list "$(swe_set .revision)" "$(swe_set .seed)")" 2>/dev/null) --argjson set "$SWE_SET" "$SWE_RUNSUM"'
+    --slurpfile order <(jq -c .id "$(swe_list "$(swe_set .revision)" "$(swe_set .seed)")" 2>/dev/null) --argjson set "$SWE_SET" "$SWE_RUNSUM$SWE_MADE"'
     ($res | map({key: "\(.key)/\(.task)", value: .}) | from_entries) as $R | ($order | to_entries | map({key: .value, value: .key}) | from_entries) as $pos
+    | (map(. as $l | results[] | {p: ., id: $l.id}) | group_by(.p) | map({key: .[0].p, value: map(.id)}) | from_entries) as $S
     | {set: ($set | {dataset, revision, seed}), limits: ($set | {cpus, memory, taskTimeout}), guard: {conveyor: $gc, agent: $ga}, arms: $arms, choices: $ch, defaults: $df,
-       runs: (sort_by(.started // "") | reverse | map(runsum($R))),
+       runs: (sort_by(.started // "") | reverse | map(. as $l | runsum($R) + {shared: ([$l | results[] | {key: ., value: (($S[.] // []) - [$l.id])} | select(.value | length > 0)] | from_entries)})),
        keys: ($res | group_by(.key) | map({key: .[0].key, at: (map($pos[.task] // empty) | sort)}))}'
 }
 # `bench swe show <run>`: one run as the Board's run page shows it: run, its line (runsum: a run going has active, the
@@ -373,7 +379,7 @@ swe_live() { # [jq options] <jq filter>
   l=$(jq -c --arg _at "$(swe_now)" "${a[@]}" "($f) | .seq = ((.seq // 0) + 1) | .updated = \$_at" "$SWE_DIR/live.json") && swe_put "$SWE_DIR/live.json" "$l" && swe_board
 }
 # The run's event tail, tails/<run>.jsonl: one line an event, {at, arm, task, event} and nothing else; a file of more
-# than twice SWE_TAILN lines is cut to its last SWE_TAILN, and show gives the last SWE_TAILN. Kept after the run ends (swe_end removes the run's work, not its tail). An event is a phase
+# than twice SWE_TAILN lines is cut to its last SWE_TAILN, and show gives the last SWE_TAILN. Kept after the run ends (swe_end removes the run's work, not its tail), until the run is deleted (swe_runs). An event is a phase
 # (swe_phase) or a result word of the run's own; never text a container wrote.
 SWE_TAILN=200
 swe_event() { # <event> [<arm>] [<task>]
@@ -577,6 +583,23 @@ swe_use() { # <run context>
 # Whether the kept result of the arm in use on a task can be reused: it is there, and its recorded inputs are the
 # arm's now (a result kept before inputs were recorded has none, and is run again).
 swe_reused() { jq -e --argjson i "$SWE_INPUTS" '.inputs == $i' "$SWE_DIR/results/$SWE_KEY/$1.json" > /dev/null 2>&1; } # <task id>
+# The run reuses a task's kept result: under runs.lock, so a delete (swe_runs) never removes the result between the
+# check and live.json's line of it. Sets r (resolved or unresolved); fails when the result is not there to reuse.
+# A Stop (TERM or INT) that comes while it holds the lock waits until the lock is let go, then is raised again: its
+# trap (swe_stopping) writes the run's end, and appends its line under runs.lock (swe_runlog), which it would wait on
+# here until Stop killed the run with no end written.
+swe_reuse() { # <task id>
+  local f rc=1 t q=''; exec {f}>>"$SWE_DIR/runs.lock" || return 1
+  t=$(trap -p TERM INT); trap 'q=TERM' TERM; trap 'q=INT' INT
+  if flock -w 60 "$f" && swe_reused "$1"; then
+    r=$(jq -r 'if .resolved then "resolved" else "unresolved" end' "$SWE_DIR/results/$SWE_KEY/$1.json") \
+      && swe_live --arg t "$1" --arg a "$SWE_ARM" --arg r "$r" '.tasks += [{id: $t, arm: $a, result: $r, reused: true}] | .done += 1 | .active = null | .resolved += (if $r == "resolved" then 1 else 0 end)'
+    rc=$?
+  fi
+  exec {f}>&-; trap - TERM INT; eval "$t"
+  [ -z "$q" ] || kill -s "$q" "$BASHPID"
+  return $rc
+}
 # What a run's lines (runname) and the results (resname) call an arm, from a run context or a result. A result of
 # an arm on the builder's model names its model, as each model's results are kept under a key of their own (its
 # recorded arm takes the builder's model; a result kept with no inputs: its key is not its name); an arm of a fixed
@@ -623,7 +646,7 @@ swe_end() { # <state> [gone: its process had ended with no end written]
   # cost and its arm's wall count them. gone: the end of a run whose process had ended (the Board says interrupted).
   local l f; l=$(jq -c --arg s "$1" --arg g "${2:-}" --arg at "$(swe_now)" "$SWE_WALL"'(if $s == "stopped" and (.active.task | type) == "string" then {interrupted: (wall as $w | .active | {arm, task, cost: (.cost // {usd: 0, state: "known", unpriced: 0}), minutes: $w})} else {} end) as $i
     | .state = $s | .ended = $at | .current = null | .active = null | .seq = ((.seq // 0) + 1) | .updated = $at | del(.pid) + $i + (if $g == "" then {} else {gone: true} end)' "$SWE_DIR/live.json") && swe_put "$SWE_DIR/live.json" "$l" \
-    && printf '%s\n' "$l" >> "$SWE_DIR/runs.jsonl"
+    && swe_runlog "$l"
   swe_event "Run ${1/guard/stopped by the usage guard}"
   for f in "$SWE_DIR"/work/*/box "$SWE_DIR"/check/*/box; do
     case $(cat "$f" 2>/dev/null) in "conveyor-swe-$SWE_RUN-"?*) docker rm -f "$(cat "$f")" > /dev/null 2>&1 ;; esac
@@ -661,7 +684,7 @@ swe_run() { # <n> <engine> <arm>...
          cols: map({arm: .name, key: null, label: (.label // .name), kind}
            + (if .kind == "conveyor" then {engine: (if $c then $e else null end), version: (if $c then null else $e end)} else {} end)),
          set: ($set | {dataset, revision, seed}), limits: ($set | {cpus, memory, taskTimeout}), done: 0, resolved: 0, current: null, started: $at, ended: $at, state: "refused", tasks: [], why: $w}') \
-      && swe_put "$SWE_DIR/live.json" "$l" && printf '%s\n' "$l" >> "$SWE_DIR/runs.jsonl"; swe_board; return 1; }
+      && swe_put "$SWE_DIR/live.json" "$l" && swe_runlog "$l"; swe_board; return 1; }
   tf=$(swe_tasks) || return 1; all=$(wc -l < "$tf")
   [ "$n" -le "$all" ] || { echo "conveyor: the task list holds $all tasks: n is 1 to $all" >&2; return 2; }
   rm -rf "$SWE_DIR/frozen"; for x; do swe_context "$x" "$eng0" || return 1; ctxs+=("$SWE_CTX"); done
@@ -699,9 +722,8 @@ swe_run() { # <n> <engine> <arm>...
     for x in "${ctxs[@]}"; do
       swe_use "$x"; tag=''; [ ${#ctxs[@]} = 1 ] || tag=" [$SWE_ARM]"; SWE_TASK=''
       [ "$(cat "$SWE_DIR/stop" 2>/dev/null)" != "$SWE_RUN" ] || { trap - TERM INT; swe_stopping; return 0; }
-      if swe_reused "$id"; then
-        r=$(jq -r 'if .resolved then "resolved" else "unresolved" end' "$SWE_DIR/results/$SWE_KEY/$id.json"); echo "$i/$n $id$tag: $r (reused)"
-        swe_live --arg t "$id" --arg a "$SWE_ARM" --arg r "$r" '.tasks += [{id: $t, arm: $a, result: $r, reused: true}] | .done += 1 | .active = null | .resolved += (if $r == "resolved" then 1 else 0 end)'
+      if swe_reuse "$id"; then
+        echo "$i/$n $id$tag: $r (reused)"
         swe_event "Reused: ${r^}" "$SWE_ARM" "$id"
         continue
       fi
@@ -783,6 +805,56 @@ swe_said() { # <run id> <non-empty: its process was gone when Stop came>
     '') echo "conveyor: no SWE-bench run $1" >&2; return 1 ;;
     *) echo "conveyor: run $1 did not end: read its state again" >&2; return 1 ;;
   esac
+}
+# runs.jsonl changes under runs.lock: a run's end appended (swe_end, a refused run's) and the file written whole
+# (swe_runs) never cross, so neither loses the other's line.
+swe_runlog() { # <line>
+  local f rc; exec {f}>>"$SWE_DIR/runs.lock" || return 1
+  flock -w 60 "$f" && printf '%s\n' "$1" >> "$SWE_DIR/runs.jsonl"; rc=$?; exec {f}>&-; return $rc
+}
+# The kept results a run's line shows, each "<key>/<task>": those it made and those it reused. A task not run keeps
+# none; a line with no results key (one written before cols) names none.
+SWE_MADE='def results: . as $l | [.tasks[]? | select(.result | tostring | startswith("not run") | not)
+  | . as $t | ([$l.cols[]? | select(.arm == $t.arm) | .key | strings] | first) as $k | select($k != null) | "\($k)/\($t.id)"] | unique;'
+# `bench swe runs archive | restore | delete <run>...`, under runs.lock. Archive puts archived (its time) on each run's
+# line and restore takes it off: the line, its tail and its results stay (the Board leaves an archived run out of its
+# lists, Compare and the infographic). Delete removes each run's line, its tail and the results it shows (results/<key>/
+# <task>.json, .patch and .log: those it made, and those it reused from a run deleted before), but not a result another run shows (a later run reused it): that one stays, and its
+# run still shows it. A run that has not ended (live.json's running, its process there or gone) is refused: Stop
+# records its end first. Nothing changes when one run named is refused. It prints one line of what it did.
+swe_runs() { # archive | restore | delete <run>...
+  local v=$1 id ids s rc; shift
+  for id; do [[ $id =~ ^r[0-9]{8}T[0-9]{6}-[0-9]+$ ]] || { echo "conveyor: no SWE-bench run $id" >&2; return 1; }; done
+  ids=$(printf '%s\n' "$@" | jq -Rsc 'split("\n") | map(select(. != "")) | unique')
+  mkdir -p "$SWE_DIR" && exec {s}>>"$SWE_DIR/runs.lock" || return 1
+  flock -w 60 "$s" || { exec {s}>&-; echo "conveyor: the runs are being changed: try again" >&2; return 1; }
+  swe_runsdo "$v" "$ids"; rc=$?; exec {s}>&-; return $rc
+}
+swe_runsdo() { # archive | restore | delete <ids json>
+  local v=$1 ids=$2 id l p gone=() said
+  id=$(jq -r --argjson ids "$ids" 'select(.state == "running" and (.id | IN($ids[]))) | .id' "$SWE_DIR/live.json" 2>/dev/null | head -n 1)
+  [ -z "$id" ] || { echo "conveyor: run $id has not ended: stop it first (\`conveyor.sh bench swe stop $id\`)" >&2; return 1; }
+  id=$({ cat "$SWE_DIR/runs.jsonl" 2>/dev/null; :; } | jq -Rnr --argjson ids "$ids" '$ids - [inputs | fromjson? | objects | .id] | first // empty')
+  [ -z "$id" ] || { echo "conveyor: no SWE-bench run $id" >&2; return 1; }
+  # Every other line is kept as it is.
+  l=$(jq -Rr --argjson ids "$ids" --arg v "$v" --arg at "$(swe_now)" '. as $raw | (fromjson? // null) as $j
+    | if ($j | type) == "object" and ($j.id | IN($ids[])) then (if $v == "delete" then empty elif $v == "archive" then $j | .archived = (.archived // $at) | tojson else $j | del(.archived) | tojson end)
+      else $raw end' "$SWE_DIR/runs.jsonl") || return 1
+  if [ "$v" != delete ]; then swe_put "$SWE_DIR/runs.jsonl" "$l" || return 1
+    echo "conveyor: $([ "$v" = archive ] && echo archived || echo restored) $(jq -r 'join(", ")' <<<"$ids")."; return
+  fi
+  # Every result the runs show (made or reused: a reused one whose maker was deleted first is theirs now), less those
+  # another run shows: those stay for it. The other runs are runs.jsonl's and live.json's in any state: a run that has
+  # written its end there and waits on runs.lock to append its line (swe_end) keeps the results it reused.
+  said=$({ swe_lines; jq -c . "$SWE_DIR/live.json" 2>/dev/null; :; } | jq -sc --argjson ids "$ids" "$SWE_MADE"'(map(select(.id | IN($ids[]) | not) | results[]) | unique) as $keep
+    | ([.[] | select(.id | IN($ids[])) | results[]] | unique) as $made | {gone: ($made - $keep), kept: ($made - ($made - $keep) | length)}') || return 1
+  mapfile -t gone < <(jq -r '.gone[]' <<<"$said" | grep -E '^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$')
+  if [ -z "$l" ]; then rm -f "$SWE_DIR/runs.jsonl"; else swe_put "$SWE_DIR/runs.jsonl" "$l"; fi || return 1
+  for p in "${gone[@]}"; do rm -f "$SWE_DIR/results/$p.json" "$SWE_DIR/results/$p.patch" "$SWE_DIR/results/$p.log"; rmdir "$SWE_DIR/results/${p%/*}" 2>/dev/null; done
+  for id in $(jq -r '.[]' <<<"$ids"); do rm -f "$SWE_DIR/tails/$id.jsonl"; done
+  # live.json of a deleted run that ended (the last run) goes too, so Stop and the Board no longer name it.
+  ! jq -e --argjson ids "$ids" '.id | IN($ids[])' "$SWE_DIR/live.json" > /dev/null 2>&1 || { rm -f "$SWE_DIR/live.json"; swe_board; }
+  jq -r --argjson ids "$ids" '"conveyor: deleted \($ids | join(", "))\(if .kept > 0 then "; \(.kept) result\(if .kept > 1 then "s" else "" end) stay\(if .kept > 1 then "" else "s" end): another run shows \(if .kept > 1 then "them" else "it" end)" else "" end)."' <<<"$said"
 }
 # Each key's results, side by side: one line each, then the noise line for the tasks every key ran.
 swe_results() { # [--json]
@@ -894,6 +966,7 @@ swe_main() {
     versions) [ $# = 1 ] && { SWE_VERSIONS=$(swe_versions) && swe_board && printf '%s\n' "$SWE_VERSIONS"; return; } ;;
     diff) { [ $# = 3 ] || { [ $# = 4 ] && [ "$4" = --json ]; }; } && { swe_diff "$2" "$3" "${4:-}"; return; } ;;
     arms) shift; swe_arms "$@"; return ;;
+    runs) [ $# -ge 3 ] && [[ $2 =~ ^(archive|restore|delete)$ ]] && { shift; swe_runs "$@"; return; } ;;
   esac
   [[ ${1:-} =~ ^[1-9][0-9]{0,2}$ ]] && [ "$1" -le "$(swe_conf .tasks)" ] && n=$1 && shift || n=''
   while [ -n "$n" ] && [ $# -gt 0 ]; do case $1 in --solo) arms+=(solo); shift ;; --arm) [ $# -ge 2 ] && arms+=("$2") && shift 2 || n='' ;;
@@ -904,7 +977,7 @@ swe_main() {
   if [ -n "$n" ] && [ -n "$named" ]; then
     k=''; for a in "${arms[@]}"; do [ "$(swe_arm "$a" | jq -r .kind)" = agent ] || k=1; done; [ -n "$k" ] || n=''
   fi
-  [ -n "$n" ] || { echo "usage: conveyor.sh bench swe <1-$(swe_conf .tasks)> [--arm <arm>]... [--solo] [--engine <version | commit>] [--settings <json>] | bench swe arms [check [--settings <json>] <arm>...] | bench swe arms save <name> <spec json> | bench swe arms show <id> | bench swe stop [<run id>] | bench swe results [--json] | bench swe history | bench swe show <run> | bench swe diff <A> <B> [--json] | bench swe versions" >&2; return 2; }
+  [ -n "$n" ] || { echo "usage: conveyor.sh bench swe <1-$(swe_conf .tasks)> [--arm <arm>]... [--solo] [--engine <version | commit>] [--settings <json>] | bench swe arms [check [--settings <json>] <arm>...] | bench swe arms save <name> <spec json> | bench swe arms show <id> | bench swe stop [<run id>] | bench swe runs archive|restore|delete <run>... | bench swe results [--json] | bench swe history | bench swe show <run> | bench swe diff <A> <B> [--json] | bench swe versions" >&2; return 2; }
   swe_settings "$set" || return
   mapfile -t arms < <(printf '%s\n' "${arms[@]}" | awk '!seen[$0]++')
   swe_run "$n" "$eng" "${arms[@]}"

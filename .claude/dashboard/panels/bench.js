@@ -11,7 +11,10 @@
 //     last run ended: stopped, at the usage guard, an arm's preflight failed; or nothing yet), History (every run newest
 //     first, grouped by task set, each with a box to tick: up to 6, for Compare and the infographic), Arms (how many are
 //     ready, checking with its step, failing their preflight, not checked, not offered) and Drift watch, folded. With runs ticked, a bar at the
-//     foot of the screen offers Compare, Generate infographic and Clear.
+//     foot of the screen offers Compare, Generate infographic, Archive, Delete and Clear. Archived (shown when a run is
+//     archived): each archived run with Restore and Delete; an archived run is in no other list, Compare or infographic.
+//   Archive and Delete (runActs) are also on A run, Compare and Infographic, for the runs each shows: `bench swe runs
+//     archive | restore | delete <id>...`; Delete takes a second click whose words name the runs.
 //   A run: its first line (state, wall time and, while it goes, Stop run, with Stop's answer under it); while it goes,
 //     the arm, task and step now, the pairs finished, resolved, reused and not run, the cost so far and each arm's;
 //     each arm a column and each task a row (resolved or not, sessions, minutes, cost; or the step, waiting,
@@ -163,7 +166,11 @@
     return o;
   }
   const hist = () => obj(B.hist && B.hist.data) || null;
-  const runsOf = () => list(hist() && hist().runs).filter((r) => obj(r) && typeof r.id === 'string');
+  const allRuns = () => list(hist() && hist().runs).filter((r) => obj(r) && typeof r.id === 'string');
+  // An archived run (bench swe's archived, its time) is in the Archived view alone: not in the lists, Compare, the
+  // infographic or the figures.
+  const runsOf = () => allRuns().filter((r) => typeof r.archived !== 'string');
+  const archivedOf = () => allRuns().filter((r) => typeof r.archived === 'string');
   const armsOf = () => list(hist() && hist().arms).filter((a) => obj(a) && typeof a.name === 'string');
   const colsOf = (r) => list(r && r.cols).filter(obj);
   // A run's place while the history is read, or why it could not be.
@@ -317,6 +324,35 @@
     b.disabled = out;
     return b;
   }
+  // Archive (Restore, for runs archived) and Delete of the runs given: `bench swe runs archive | restore | delete
+  // <id>...`, one request for them all. Delete takes a second click (ctx.twice) whose words name the runs and say how
+  // many of their results stay because a run not deleted with them shows them too (history's shared: each result a run
+  // shows that other runs show, with their IDs; a result only the runs deleted show goes with them). A run that has not
+  // ended (going, or its process gone with no end written) has both off, with the reason: Stop first. The answer is
+  // kept under RUNS_SAID.
+  const RUNS_SAID = 'runs';
+  const unended = (r) => r.state === 'running' || (r.gone === true && !r.ended);
+  function runActs(runs) {
+    const ids = runs.map((r) => r.id), names = ids.join(' and '), back = runs.every((r) => typeof r.archived === 'string');
+    const stays = new Set(runs.flatMap((r) => Object.entries(r.shared && typeof r.shared === 'object' ? r.shared : {})
+      .filter(([, by]) => Array.isArray(by) && by.some((x) => !ids.includes(x))).map(([k]) => k)));
+    const shared = stays.size, going = runs.filter(unended);
+    const verb = back ? 'restore' : 'archive', word = back ? 'Restore' : 'Archive';
+    const arch = button(word, 'btn-quiet btn-sm', `${verb}-runs`, `${word} ${names}`, () => changeRuns(verb, ids));
+    const del = button('Delete', 'btn-quiet btn-sm', 'delete-runs', `Delete ${names}`, () => {});
+    B.ctx.twice(del, 'final', `Click again: delete ${names}${shared ? ` (${plural(shared, 'result')} another run shows ${shared === 1 ? 'stays' : 'stay'}; the rest goes)` : ''}`, () => changeRuns('delete', ids));
+    if (!going.length) return [arch, del];
+    arch.disabled = true; del.disabled = true;
+    return [arch, del, h('span', 'board-from', `${going.map((r) => r.id).join(' and ')} ${going.length === 1 ? 'has' : 'have'} not ended: stop ${going.length === 1 ? 'it' : 'them'} first to archive or delete.`)];
+  }
+  function changeRuns(verb, ids) {
+    send(RUNS_SAID, ['runs', verb, ...ids], (t) => t.replace(/^conveyor: /, '').replace(/^./, (c) => c.toUpperCase()), () => {
+      ids.forEach((id) => { const o = B.runs.get(`${B.repo}|${id}`); if (o) o.stamp = null; });
+      if (verb !== 'restore') B.sel = B.sel.filter((x) => !ids.includes(x));
+      if (verb === 'delete') { ids.forEach((id) => B.runs.delete(`${B.repo}|${id}`)); if (ids.includes(B.open)) { B.open = null; B.task = null; B.page = 'overview'; } }
+      dropCmp(); readHist(true);
+    });
+  }
   // The run in progress: the snapshot's live record (tasks done a arm, the task now) with Stop run.
   function running(l, r) {
     const box = h('div', 'bench-running'), arms = list(l.arms).length ? list(l.arms) : [l.arm], n = Math.floor((num(l.n) || 0) / Math.max(arms.length, 1));
@@ -331,8 +367,9 @@
     return box;
   }
   function history() {
-    const runs = runsOf(), s = section('bench-history', 'History', runs.length, 'Every run, newest first. Tick runs, then Compare or Generate infographic. Runs of the same task set and n can be read side by side.');
+    const runs = runsOf(), s = section('bench-history', 'History', runs.length, 'Every run not archived, newest first. Tick runs, then Compare, Generate infographic, Archive or Delete. Runs of the same task set and n can be read side by side.');
     if (!hist()) { s.append(reading('the runs')); return s; }
+    s.append(saidAt(RUNS_SAID));
     if (!runs.length) { s.append(h('p', 'board-from', 'No run yet.')); return s; }
     const shown = B.older ? runs : runs.slice(0, 20), sets = new Map();
     shown.forEach((r) => { const k = obj(r.set) ? `${r.set.dataset} at ${String(r.set.revision || '').slice(0, 7)}` : 'task set not recorded'; if (!sets.has(k)) sets.set(k, []); sets.get(k).push(r); });
@@ -433,8 +470,28 @@
     bar.append(h('strong', null, `${plural(B.sel.length, 'run')} selected`), h('span', 'board-from', `Up to ${MAX_SEL}. Runs of different n get their own panel on the infographic.`),
       button('Compare', '', 'sel-compare', 'Compare arms of the runs selected', () => { dropCmp(); go('compare'); }),
       button('Generate infographic', 'btn-primary', 'sel-infographic', 'Generate the infographic of the runs selected', () => go('infographic')),
+      ...runActs(runsOf().filter((r) => B.sel.includes(r.id))),
       button('Clear', 'btn-quiet', 'sel-clear', 'Clear the selection', () => { B.sel = []; draw(); }));
     return bar;
+  }
+  // The Archived view: each run archived, newest first, with Restore and Delete. Shown when a run is archived.
+  function archivedPart() {
+    const runs = archivedOf();
+    if (!hist() || !runs.length) return '';
+    const s = section('bench-archived', 'Archived', runs.length, 'Runs left out of History, Compare, the infographic and the figures. Their records are kept until deleted.');
+    const t = h('table', 'tests-table'), head = h('tr');
+    ['Run', 'When', 'Arms and versions', 'State', 'Archived', ''].forEach((x) => head.append(h('th', null, x)));
+    t.append(head);
+    runs.forEach((r) => {
+      const tr = h('tr'), id = h('td'), st = h('td'), acts = h('td', 'bench-tools'), [word, tone] = stateOf(r);
+      tr.dataset.run = r.id;
+      id.append(button(r.id, 'btn-link mono', `run-${r.id}`, `Open the run ${r.id}`, () => { B.open = r.id; B.task = null; go('run'); }));
+      st.append(B.ctx.chip(word, tone)); acts.append(...runActs([r]));
+      tr.append(id, h('td', null, B.ctx.when(r.started)), h('td', 'bench-arms-cell', colsOf(r).map(colName).join(' · ')), st, h('td', null, B.ctx.when(r.archived)), acts);
+      t.append(tr);
+    });
+    const wrap = h('div', 'tests-scroll'); wrap.append(t); s.append(wrap);
+    return s;
   }
 
   // ---- A run ----
@@ -456,15 +513,18 @@
     const wall = h('span', 'board-from bench-wall', 'Elapsed ');
     wall.append(going && Number.isFinite(Date.parse(r.started)) ? B.ctx.since(r.started, '') : took(elapsed(r)));
     hd.append(B.ctx.chip(word, tone), wall);
+    if (typeof r.archived === 'string') hd.append(B.ctx.chip('Archived', 'quiet'));
     if (going || unended) hd.append(stopRun(r.id, typeof r.stopping === 'string'));
     const last = latest(r.id);
     if (last) hd.append(last);
     const tools = h('div', 'bench-tools');
     tools.append(button('Back', 'btn-quiet', 'back', 'Back to the overview', () => go('overview')),
       button('Compare two arms', '', 'run-compare', 'Compare two arms of this run', () => { B.sel = B.sel.includes(r.id) ? B.sel : [r.id]; dropCmp(); go('compare'); }),
-      button('Export figures', '', 'export', 'Export the figures as one JSON file', () => exportRun(o.data)));
+      button('Export figures', '', 'export', 'Export the figures as one JSON file', () => exportRun(o.data)),
+      // The history's line of the run has its shared results; the run's own, read first, stands in until it is read.
+      ...runActs([allRuns().find((x) => x.id === r.id) || r]));
     hd.append(tools);
-    s.append(saidAt(`stop-${r.id}`));
+    s.append(saidAt(`stop-${r.id}`), saidAt(RUNS_SAID));
     if (going) s.append(...progress(r, tasks, cols, n));
     // A read that got no answer keeps the last update on the page, and says so.
     if (o.error) {
@@ -643,19 +703,24 @@
   // Compare's answer belongs to one request (ask, keyed compare-<n>-<a>-<b>): dropping the results drops the answer with
   // them, so a pair chosen again, or a reply that comes after the pair changed, never reads "Compared." beside no results.
   function dropCmp() { B.cmp.data = null; B.cmp.text = null; B.cmp.ask = null; }
+  // The runs Compare reads: those ticked, else the run open, else the newest.
+  function cmpRuns() {
+    const runs = runsOf();
+    return B.sel.length ? runs.filter((r) => B.sel.includes(r.id)) : runs.filter((r) => r.id === (B.open || (runs[0] && runs[0].id)));
+  }
   function sidesOf() {
-    const runs = runsOf(), picked = B.sel.length ? runs.filter((r) => B.sel.includes(r.id)) : runs.filter((r) => r.id === (B.open || (runs[0] && runs[0].id)));
     const seen = new Map();
-    picked.forEach((r) => colsOf(r).forEach((c) => { if (typeof c.key === 'string' && c.key && !seen.has(c.key)) seen.set(c.key, c); }));
+    cmpRuns().forEach((r) => colsOf(r).forEach((c) => { if (typeof c.key === 'string' && c.key && !seen.has(c.key)) seen.set(c.key, c); }));
     return Array.from(seen.values());
   }
   // A side's cost for each task it resolved (`bench swe diff`'s totals.cost), recorded, in part or unknown as its cost is.
   const perResolved = (x) => { const k = costOf(x.cost); return !num(x.resolved) ? '–' : costSaid(k.usd === null ? k : { ...k, usd: k.usd / x.resolved }); };
   function comparePage() {
     if (!hist()) return [reading('the runs')];
-    const sides = sidesOf(), s = section('bench-compare', 'Compare');
+    const sides = sidesOf(), s = section('bench-compare', 'Compare'), picked = cmpRuns();
     const tools = h('div', 'bench-tools');
-    tools.append(button('Back', 'btn-quiet', 'back', 'Back to the overview', () => go('overview')));
+    tools.append(button('Back', 'btn-quiet', 'back', 'Back to the overview', () => go('overview')), ...(picked.length ? runActs(picked) : []));
+    s.append(saidAt(RUNS_SAID));
     if (sides.length < 2) {
       s.querySelector('.bench-head').append(tools);
       s.append(h('p', 'board-from', 'Compare needs two arms with results: tick runs on the Overview\'s History, or open a run with two arms or more.'));
@@ -1275,7 +1340,8 @@
     const runs = runsOf().filter((r) => B.sel.includes(r.id));
     const s = section('bench-infographic', 'Infographic');
     const tools = h('div', 'bench-tools');
-    tools.append(button('Back', 'btn-quiet', 'back', 'Back to the overview', () => go('overview')));
+    tools.append(button('Back', 'btn-quiet', 'back', 'Back to the overview', () => go('overview')), ...(runs.length ? runActs(runs) : []));
+    s.append(saidAt(RUNS_SAID));
     if (!runs.length) {
       s.querySelector('.bench-head').append(tools);
       s.append(h('p', 'board-from', `Tick up to ${MAX_SEL} runs on the Overview's History, then Generate infographic.`));
@@ -1324,7 +1390,7 @@
     const root = h('div', B.sel.length && B.page === 'overview' ? 'bench bench-has-selbar' : 'bench');
     root.append(pages());
     if (B.page === 'overview') {
-      root.append(newest(), history(), armsPart(), drift());
+      root.append(newest(), history(), archivedPart(), armsPart(), drift());
       if (B.sel.length) root.append(selbar());
     } else if (B.page === 'run') root.append(...runPage());
     else if (B.page === 'compare') root.append(...comparePage());

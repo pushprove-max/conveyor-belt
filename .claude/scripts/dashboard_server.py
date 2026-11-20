@@ -211,8 +211,9 @@ SETUP_PAGE = b'''<!doctype html><meta charset=utf-8><title>Conveyor Board: set y
 # or prices (the Rules tab's Model prices: one model's price set or cleared, a model added or removed, its display name
 # or an alias: `conveyor.sh prices`),
 # or testmap (the Tests page's Build the test map and its Stop: `conveyor.sh testmap build | stop`; an admin's alone),
-# or bench (the Benchmarks tab: Start, Stop, List versions, an arm's preflight, an arm saved and Compare: `conveyor.sh
-# bench swe <n> [--solo | [--arm <arm>]... [--engine <version>]] [--settings <json>] | stop [<run id>] | versions | arms check
+# or bench (the Benchmarks tab: Start, Stop, List versions, an arm's preflight, an arm saved, Compare, and Archive,
+# Restore and Delete of runs: `conveyor.sh bench swe <n> [--solo | [--arm <arm>]... [--engine <version>]] [--settings
+# <json>] | stop [<run id>] | runs archive|restore|delete <run id>... | versions | arms check
 # [--settings <json>] <arm>... | arms save <name> <spec json> | diff <A> <B> [--json]`, an arm being a host arm's name or
 # a saved revision's ID; Start and a check answer their receipt; an admin's alone),
 # or the Tests page's actions: testaction (`conveyor.sh testaction`: judge, explain or run one file, stop one; an
@@ -260,6 +261,7 @@ BENCH_SIDE = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,119}')
 BENCH_ARM = re.compile(r'[a-z0-9][a-z0-9-]{0,63}')  # an arm's name, as bench swe's swe_arm takes it
 BENCH_ARMS_MAX = 20  # the arms one Start or one preflight check names
 BENCH_RUN = re.compile(r'r[0-9]{8}T[0-9]{6}-[0-9]{1,10}')  # a run's id, as bench swe show takes it (GET /bench)
+BENCH_RUNS_MAX = 100  # the runs one Archive, Restore or Delete names
 BENCH_ARMID = re.compile(r'arm-[0-9a-f]{12}')  # a saved arm's revision ID, as bench swe arms save prints it
 # A Start's or a check's --settings and a saved arm's spec are each one JSON object sent as one argument, of at most
 # BENCH_JSON_MAX characters. Their fields are checked here as bench swe's swe_settings and swe_armsave check their shape;
@@ -653,6 +655,9 @@ def control_ok(body):
             return True
         if v[:1] == ['stop']:  # Stop of the run the tab shows, by its id: a late one never stops the run after it
             return n == 2 and BENCH_RUN.fullmatch(v[1]) is not None
+        if v[:1] == ['runs']:  # Archive, Restore and Delete of the runs named (one, or the runs selected)
+            return (3 <= n <= 2 + BENCH_RUNS_MAX and v[1] in ('archive', 'restore', 'delete')
+                    and all(BENCH_RUN.fullmatch(x) for x in v[2:]))
         if v[:1] == ['diff']:
             return n in (3, 4) and all(BENCH_SIDE.fullmatch(x) for x in v[1:3]) and v[3:] in ([], ['--json'])
         if v[:2] == ['arms', 'save']:

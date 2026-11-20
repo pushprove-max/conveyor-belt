@@ -40,10 +40,10 @@ test('Overview: the newest run per arm with its noise, every run in History, the
   assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-arms tr'), (r) => [text(r.children[0]), ...Array.from(r.children[1].children, text)]),
     [['Ready', '3'], ['Checking', '0'], ['Preflight failing', '1', 'Claude with Superpowers: it did not fire: its output shows no use of its method'], ['Not checked', '1', 'Claude with Chisle'],
       ['Not offered', '1', 'OpenHands: it needs an API key']]);
-  // Ticking runs shows the bar at the foot of the screen with Compare and Generate infographic.
+  // Ticking runs shows the bar at the foot of the screen with Compare, Generate infographic, Archive and Delete (#1053).
   for (const id of [NEW, OLD]) { const b = act(bp(w), `pick-${id}`); b.checked = true; b.dispatchEvent(new w.Event('change')); }
   assert.deepEqual(Array.from(bp(w).querySelector('.bench-selbar').children, text),
-    ['2 runs selected', 'Up to 6. Runs of different n get their own panel on the infographic.', 'Compare', 'Generate infographic', 'Clear']);
+    ['2 runs selected', 'Up to 6. Runs of different n get their own panel on the infographic.', 'Compare', 'Generate infographic', 'Archive', 'Delete', 'Clear']);
   act(bp(w), 'sel-clear').click();
   assert.equal(bp(w).querySelector('.bench-selbar'), null);
 });

@@ -87,6 +87,16 @@ check('stop_takes_a_run_id', ok(['stop', 'r20261119T130010-1234'])
       ds.control_script('bench', ['stop', 'r20261119T130010-1234'], MAIN, '2026-11-19'))
 for args in (['stop', 'r1'], ['stop', 'r20261119T130010-1;id'], ['stop', '-r20261119T130010-1'], ['stop', 'r20261119T130010-1', 'r20261119T130010-2']):
     check('stop_refuses_%s' % '_'.join(args)[:40], not ok(args), args)
+# Bug (#1053): a run could not be archived, restored or deleted from the Board. Each takes one run id or several (the
+# runs selected), and the host runs `bench swe runs <verb> <id>...`; another verb, no id, or an id of another shape
+# never reaches the host.
+R1, R2 = 'r20261119T130010-1', 'r20261120T090000-22'
+check('runs_delete_takes_two_ids', ok(['runs', 'delete', R1, R2]) and ok(['runs', 'archive', R1]) and ok(['runs', 'restore', R1])
+      and ds.control_script('bench', ['runs', 'delete', R1, R2], MAIN, '2026-11-19').endswith(' bench swe runs delete %s %s' % (R1, R2)),
+      ds.control_script('bench', ['runs', 'delete', R1, R2], MAIN, '2026-11-19'))
+for args in (['runs', 'delete'], ['runs', 'purge', R1], ['runs', 'delete', R1, 'r1'], ['runs', 'archive', '%s;id' % R1], ['runs', 'delete', '--all'],
+             ['runs', 'delete'] + [R1] * (ds.BENCH_RUNS_MAX + 1)):
+    check('runs_refuses_%s' % '_'.join(args)[:40], not ok(args), args)
 # Bug (#640): Start and Check send the shared settings (--settings), a saved arm's revision ID as an arm, and the arm
 # editor saves an arm (arms save <name> <spec>); none was taken. Each JSON field is checked as the engine checks its
 # shape, so a field it would refuse, or one of no size limit, never reaches the host's shell.
