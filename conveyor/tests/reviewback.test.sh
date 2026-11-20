@@ -123,7 +123,12 @@ t_retryrounds() {
   # The fix session after the second review fails: the card blocks after two rounds, its patch kept.
   echo '[ "$(wc -l < "$STUB/sessions")" != 3 ] || exit 1; echo two >> a.txt' > "$STUB/build"
   loop run >/dev/null; st 'select(.step == "blocked") | .reason' | grep -q '^fix: ' || fail "#7 was not blocked on its failed fix: $(steps)"
-  loop retry 7 >/dev/null && loop run >/dev/null || fail "run of the retried #7 exited non-zero"
+  loop retry 7 >/dev/null || fail "retry of #7 exited non-zero"
+  # Its retried lines carry another project name, as they do after the project is renamed in host.json. Bug: the round
+  # count read only lines of the project's current name, so the rename gave the retried card three reviews again.
+  jq -c '.repo = "old-name"' "$ST/retried.jsonl" > "$T/$CASE.retried" && mv "$T/$CASE.retried" "$ST/retried.jsonl"
+  # loop: only a whole card run of the retry shows its round count, read from the renamed retried lines, leaving one review
+  loop run >/dev/null || fail "run of the retried #7 exited non-zero"
   # One round left: the resumed session, one review whose NO-GO is the last, and it lands with its finding filed.
   [ "$(steps)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,test pass,landed ok," ] && [ "$(wc -l < "$STUB/reviews")" = 3 ] && [ "$(wc -l < "$STUB/sessions")" = 4 ] \
     || fail "the retried card did not have one review round left: $(steps)"
@@ -225,6 +230,37 @@ t_reviewlimit() {
   [ "$(steps)" = "picked ok,worktree ok,brief ok,review NO-GO,test pass,landed ok," ] && [ "$(wc -l < "$STUB/sessions")" = 2 ] && [ "$(wc -l < "$STUB/reviews")" = 3 ] \
     && [ "$(jq -r .title "$STUB/filed")" = '[P1] b.txt:2 another word' ] \
     || fail "a kept patch reviewed again did not count its loop's reviews: $(steps) $(wc -l < "$STUB/sessions") sessions $(cat "$STUB/filed" 2>&1)"
+}
+
+# Issue 1071: a card that resumes a kept patch counts only the reviews of the cards whose kept patch it carries. Bug:
+# every review line of the issue in the retried file counted, another project's in the same state and another card's
+# of the same number too, so a card's first NO-GO was its last review and its findings, a P0 among them, were filed
+# as follow-ups with no fix session. The review that ends the loop, and the filed line, say why it ended.
+t_retryotherrounds() {
+  setup "[$(issue 7 2026-01-01)]"; steps() { st "select(.issue == 7 and $NOMARK) | \"\(.step) \(.result)\"" | tr '\n' ,; }
+  # The build writes its change and fails: the card blocks with its patch kept and no review of its own.
+  echo '[ "$(wc -l < "$STUB/sessions")" != 1 ] || { echo one >> a.txt; exit 1; }; echo "fix$(wc -l < "$STUB/sessions")" >> a.txt' > "$STUB/build"
+  # loop: the kept patch the retry resumes, and the retried lines it reads, are made only by a whole first card run
+  loop run >/dev/null; k=$(st 'select(.step == "blocked") | .kept // ""'); repo=$(st 'select(.step == "blocked") | .repo')
+  [ -n "$k" ] || fail "#7 was not blocked with its patch kept: $(steps) $(st 'select(.step == "blocked") | .reason')"
+  loop retry 7 >/dev/null || fail "retry of #7 exited non-zero"
+  # Two reviews of #7 by another project's card, and two by another card of this project not in the kept patch's chain.
+  for c in c20250101T000000-other-7:other-project "c20250102T000000-${repo//[^A-Za-z0-9]/-}-7:$repo"; do for i in 1 2; do
+    jq -cn --arg c "${c%%:*}" --arg r "${c#*:}" '{card: $c, issue: 7, step: "review", time: "2025-01-01T00:00:00Z", result: "NO-GO", repo: $r}' >> "$ST/retried.jsonl"
+  done; done
+  for i in 1 2 3; do moved "$i" "$NOGO" > "$STUB/review.$i"; done
+  # loop: only card()'s review loop shows a fix session after each NO-GO, the third review ending it, and its filed line
+  loop run >/dev/null || fail "run of the retried #7 exited non-zero"
+  [ "$(steps)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review NO-GO,fix ok,review NO-GO,test pass,landed ok," ] \
+    && [ "$(wc -l < "$STUB/reviews")" = 3 ] && [ "$(wc -l < "$STUB/sessions")" = 4 ] \
+    || fail "the retried card did not start at rounds 0 and go fix, review to its third review: $(steps) $(wc -l < "$STUB/sessions") sessions"
+  [ "$(st 'select(.issue == 7 and .step == "review") | [.stop, .pass, .rounds] | tojson' | tr '\n' ' ')" = '[null,null,null] [null,null,null] ["max-reviews",3,0] ' ] \
+    && [ "$(st 'select(.issue == 7 and .step == "filed") | [.stop, .pass, .rounds, (.followups | length)] | tojson')" = '["max-reviews",3,0,1]' ] \
+    || fail "the review that ended the loop or the filed line does not say why: $(st 'select(.issue == 7 and (.step == "review" or .step == "filed")) | tojson')"
+  recok "$ST/cards.jsonl" "a card whose third review ended its loop"
+  # The Board's card reads it from the snapshot's reviews.
+  [ "$(loop snapshot --fresh | jq -c '.landed[] | select(.issue == 7) | .rounds | map(.loopEnd)')" = '[null,null,{"stop":"max-reviews","pass":3,"rounds":0}]' ] \
+    || fail "the snapshot does not give why the loop ended: $(loop snapshot --fresh | jq -c '.landed[] | select(.issue == 7) | .rounds')"
 }
 
 # The declined list: every finding that is not built is one line of the project's state. Bugs: a finding declined by

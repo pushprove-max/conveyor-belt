@@ -87,8 +87,8 @@ window.DASH_APP.panel({
         const left = rounds[rounds.length - 1].verdict === 'NO-GO' && Array.isArray(c.followups) && c.followups.length;
         const line = h('p', 'row-meta');
         rounds.forEach((r) => {
-          const f = ctx.findings(r), s = ctx.survived(r);
-          line.append(h('span', null, `Review ${r.round}: ${ctx.verdictSaid(r.verdict)}${f ? `, ${f}` : ''}${s ? `, ${s}` : ''}`));
+          const f = ctx.findings(r), s = ctx.survived(r), e = ctx.loopEnd(r);
+          line.append(h('span', null, `Review ${r.round}: ${ctx.verdictSaid(r.verdict)}${f ? `, ${f}` : ''}${s ? `, ${s}` : ''}${e ? `, ${e}` : ''}`));
           const j = ctx.judged(r, c.card);
           if (j) line.append(j);
         });

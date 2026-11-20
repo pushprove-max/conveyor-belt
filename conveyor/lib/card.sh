@@ -123,6 +123,20 @@ cardprompt() { # <card> <header> <rules> <brief>
 fixprompt() { # <card prompt> <the findings, each led by its id, and what follows them>
   printf '%s' "$1"$'\n\n'"$FIX"$'\n'"$2"
 }
+# Why a review ends the fix loop, the first that holds: go (a GO), max-reviews (it is review MAX_REVIEWS, counting the
+# rounds a retried card carries), rebased (the one review after a landing conflict), test-fix (after the one test fix),
+# lint-fix (after the landing gate's lint fix), land (the kept review of a kept patch landed with no review), repeat (a
+# NO-GO that repeats a fixed finding, every finding P2 or P3). Prints nothing when a fix round follows.
+loopstop() { # <verdict> <reviews so far: pass + rounds> <rebased> <tfix> <lfix> <mode> <repeats() lines> <review file>
+  if [ "$1" = GO ]; then echo go
+  elif [ "$2" -ge "$MAX_REVIEWS" ]; then echo max-reviews
+  elif [ -n "$3" ]; then echo rebased
+  elif [ -n "$4" ]; then echo test-fix
+  elif [ -n "$5" ]; then echo lint-fix
+  elif [ "$6" = land ]; then echo land
+  elif [ -n "$7" ] && [ "$(counts "$8" | jq '.P0 + .P1')" = 0 ]; then echo repeat
+  fi
+}
 testfixprompt() { # <card prompt> <worktree> <the test run's exit>
   printf '%s' "$1"$'\n\n# The changed tests fail (exit '"$3"$'): fix that and nothing else. The end of the test output:\n'"$(tail -n 200 "$2.test" 2>/dev/null | tr -d '\000')"
 }
@@ -161,6 +175,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local vrule=on rounds=0 rep hard refix='' waitsec=0 behind='[]' cpid chead cseen own kept='' docpass='' docs parsecheck='' pfix='' # waitsec, behind: the seconds it has waited on other cards, and those cards (settle())
   local sv an ex ids fl # sv, an, ex: a review's survived findings, its answers and the lines it cites (repeats(), answers(), excerpts()); ids, fl: the fix round's numbered findings and its lines (numbered(), fixlines())
   local grown='' # grown: the judge was asked about the size of its change (growcheck(), lib/slices.sh)
+  local rline='' ended='{}' stop='' finend='{}' earlyend='' fe # rline, ended, stop: a review's line before it is written, and why the loop ended (loopstop()); finend, earlyend, fe: why the loop of a port's kept review ended, and the stop the filed line carries
   local lfix='' # lfix: the change the landing gate's lint fix left, its cardpatch() (lintgate(), lib/lint.sh)
   local fixtree='' # fixtree: the tree before the last fix round, which holds the lines that fix deleted (excerpts())
   local priv privfix='' # priv: a last-review finding that is a privacy hit in the card's own change (privown()); privfix: its fix round was given
@@ -208,6 +223,10 @@ card() { # <card> <issue> [<branch> <tip>]
         if [[ $was == "rebase onto main conflicts: "* ]] && { [ "$rev" = "$fromk/$from.review" ] || [ "$rev" = "$CARDS/$from.review" ]; } \
           && [ -s "$wt.review" ] && fin=$(verdict "$wt.review") && [ "$fin" != none ]; then
           note="the kept patch of card $from finished its review loop and no longer applies to main: one session brings it onto main, then one review of that port alone"
+          # finend: why that loop ended, for the filed line: from the blocked card's last NO-GO review that ended a loop,
+          # or its filed line, which says it for a port that blocked again (its review a GO, the loop an earlier card's).
+          finend=$(stdb ask issue retried "$n" 2>/dev/null | jq -cs --arg f "$from" 'map(select(.card == $f and .stop != null and (.step == "filed" or (.step == "review" and .result == "NO-GO")))) | last // {} | with_entries(select(.key == "stop" or .key == "pass" or .key == "rounds"))' 2>/dev/null) || finend='{}'
+          [ -n "$finend" ] || finend='{}'
         else fin=''; fi
       else
         mode=stale; note="the kept patch of card $from cannot be read: built from nothing"
@@ -302,8 +321,17 @@ card() { # <card> <issue> [<branch> <tip>]
   # with no build: a NO-GO there is fixed and goes round the loop. Not the port of a finished loop: its loop ended,
   # and this review checks something new.
   # Its fix rounds' findings and diffs come with them, so a finding that comes back is known as one (repeats()).
+  # Only the reviews of that loop count: those of the cards whose kept patch this card carries (the chain, as pro
+  # reads it). A card's id is its own, so another project's cards are not in the chain; the lines' repo is not read, as
+  # a project renamed in host.json keeps its chain. Bug (issue 1071): every review line of the issue in the retried
+  # file was counted, another chain's and another project's too, so a card's first NO-GO could be its last review.
   if [ "$mode" = session ] || [ "$mode" = review ] || { [ "$mode" = port ] && [ -z "$fin" ]; }; then
-    rounds=$(stdb ask issue retried "$n" 2>/dev/null | jq -s --argjson n "$n" 'map(select(.issue == $n and .step == "review")) | length' 2>/dev/null) || rounds=0
+    rounds=$(stdb ask issue retried "$n" 2>/dev/null | jq -s --argjson n "$n" --arg f "$from" 'map(select(.issue == $n)) as $l
+      | def up: . as $c | ($l | map(select(.card == $c and .step == "worktree")) | first | .reason // ""
+          | select(test("built from nothing") | not) | capture("kept patch of card (?<c>c[A-Za-z0-9-]+)").c) // null;
+      [limit(100; $f | recurse(up; . != null))] as $chain
+      | [$l[] | select(.step == "review" and (.card | IN($chain[])))] | length' 2>/dev/null) || rounds=0
+    [[ $rounds =~ ^[0-9]+$ ]] || rounds=0
     # Rounds still beside the old worktree are the ones its block could not move (a folder of that name in the kept
     # folder stopped it, so that one is not the history): those are copied.
     if [ -d "$CARDS/$from.rounds" ]; then cp -R "$CARDS/$from.rounds" "$wt.rounds" 2>/dev/null; else cp -R "$fromk/$from.rounds" "$wt.rounds" 2>/dev/null; fi
@@ -525,28 +553,36 @@ card() { # <card> <issue> [<branch> <tip>]
       # (excerpts(), lib/review.sh), which the Board reads on demand too (history excerpts); after a fix round, also
       # from the tree before that fix (fixtree), which holds the lines the fix deleted.
       ex=$(excerpts "$wt" "$fixtree"); fixtree=''
-      record "$c" "$n" review "$res" "$(grep -Ev "$UNRECORDED" "$wt.review" | jq -cRs --arg res "$res" --argjson t "$t" --arg v "$vis" --argjson k "$(counts "$wt.review")" --arg p "$cpid" --arg m "$chead" --arg s "$cseen" --argjson sv "${sv:-[]}" --argjson an "${an:-[]}" \
+      # The line is written once the loop's end is known (stop, below); a review with no verdict blocks with it here.
+      rline=$(grep -Ev "$UNRECORDED" "$wt.review" | jq -cRs --arg res "$res" --argjson t "$t" --arg v "$vis" --argjson k "$(counts "$wt.review")" --arg p "$cpid" --arg m "$chead" --arg s "$cseen" --argjson sv "${sv:-[]}" --argjson an "${an:-[]}" \
         --argjson ro "$(rollouts "$wt.review" ROLLOUT)" --argjson h "$(sed -n 's/^DONE-WHEN: D\([0-9][0-9]*\) holds[[:space:]]*$/\1/p' "$wt.review" | jq -sc 'unique')" --argjson ex "${ex:-[]}" \
-        'sub("\n+$"; "") as $r | $t + {reason:$r,visible:$v,counts:$k,patch:$p,main:$m,seen:$s} + (if $res == "NO-GO" then {tail: $r} else {} end) + (if $sv == [] then {} else {survived: $sv} end) + (if $an == [] then {} else {answers: $an} end) + (if $h == [] then {} else {doneWhenHolds: $h} end) + (if $ro != [] then {rollout: $ro} else {} end) + (if $ex == [] then {} else {excerpts: $ex} end)')"
-      [ "$res" != none ] || { block "$c" "$n" "$wt" "review $pass ended without one clear verdict$unclear"; return; }
+        'sub("\n+$"; "") as $r | $t + {reason:$r,visible:$v,counts:$k,patch:$p,main:$m,seen:$s} + (if $res == "NO-GO" then {tail: $r} else {} end) + (if $sv == [] then {} else {survived: $sv} end) + (if $an == [] then {} else {answers: $an} end) + (if $h == [] then {} else {doneWhenHolds: $h} end) + (if $ro != [] then {rollout: $ro} else {} end) + (if $ex == [] then {} else {excerpts: $ex} end)')
+      [ -n "$rline" ] || rline='{}' # the grep finds no line in a review of only unrecorded lines: that is no failure
+      [ "$res" != none ] || { record "$c" "$n" review "$res" "$rline"; block "$c" "$n" "$wt" "review $pass ended without one clear verdict$unclear"; return; }
     fi
     # A GO on the review of a port lands with the earlier loop's outcome: after its last NO-GO, that review's
     # findings are filed again, whatever the reviews after a test fix say. A NO-GO on it is fixed and goes round the
     # loop as any card's.
-    last=''; [ "$fin" != NO-GO ] || [ "$res" != GO ] || earlier=$finrev; fin=''
+    last=''; [ "$fin" != NO-GO ] || [ "$res" != GO ] || { earlier=$finrev; earlyend=$finend; }; fin=''
     # A NO-GO that repeats a finding a fix round was told to fix (repeats()) spends no more rounds on it: when every
     # finding of the review is P2 or P3 this is the last review; when a repeated one is P0 or P1 the card blocks.
     rep=''; [ "$res" != NO-GO ] || rep=$(repeats "$wt")
     hard=$(jq -rs 'map(select(.level == "P0" or .level == "P1")) | first // empty | "\(.line[:300]) did not hold after \(.rounds) round\(if .rounds == 1 then "" else "s" end)"' <<<"$rep")
-    [ -z "$hard" ] || { block "$c" "$n" "$wt" "the fix for $hard"; return; }
     # A last NO-GO with a finding that is a privacy hit in the card's own change (privown(), lib/followups.sh) gets
     # one more fix round, once a card: a follow-up would land the hit on main. Bug: such a finding was filed as a
     # follow-up that the privacy check refused, and the card was blocked.
-    priv=''
+    # stop: why this review ends the loop (loopstop()), empty when a fix round follows (or the card blocks).
+    priv=''; stop=''
+    if [ -z "$hard" ]; then
+      stop=$(loopstop "$res" "$((pass + rounds))" "$rebased" "$tfix" "$lfix" "$mode" "$rep" "$wt.review")
+      [ -z "$stop" ] || [ "$res" = GO ] || [ -n "$privfix" ] || ! priv=$(privown "$wt") || [ -z "$priv" ] || stop=''
+    fi
+    # The review line, and the filed line after it, say why the loop ended: stop, with pass and rounds as they are here.
+    ended=$(jq -cn --arg s "$stop" --argjson p "$pass" --argjson r "$rounds" 'if $s == "" then {} else {stop: $s, pass: $p, rounds: $r} end')
+    [ -z "$rline" ] || record "$c" "$n" review "$res" "$(jq -c --argjson e "$ended" '. + $e' <<<"$rline")"; rline=''
+    [ -z "$hard" ] || { block "$c" "$n" "$wt" "the fix for $hard"; return; }
     if [ "$res" = GO ] && [ -z "$earlier" ]; then mode=''
-    elif { [ "$res" = GO ] || [ $((pass + rounds)) -ge "$MAX_REVIEWS" ] || [ -n "$rebased" ] || [ -n "$tfix" ] || [ -n "$lfix" ] || [ "$mode" = land ] \
-      || { [ -n "$rep" ] && [ "$(counts "$wt.review" | jq '.P0 + .P1')" = 0 ]; }; } \
-      && { [ "$res" = GO ] || [ -n "$privfix" ] || ! priv=$(privown "$wt") || [ -z "$priv" ]; }; then
+    elif [ -n "$stop" ]; then
       # A card whose issue is a follow-up at the depth cap (fudepth(), lib/followups.sh) files none: its findings are
       # declined. A depth that cannot be read counts as the cap.
       mode=''; last=1; isfu=1; d=$(fudepth "$issue") && [ "$d" -lt "$MAX_DEPTH" ] && isfu=''
@@ -930,7 +966,9 @@ card() { # <card> <issue> [<branch> <tip>]
           else
             began "$c" "$n" file
             ups=$(followups "$c" "$issue" "$wt.review") || { block "$c" "$n" "$wt" "$ups"; return; }
-            left="{\"leftover\":true,\"followups\":$ups}"; record "$c" "$n" filed ok "{\"followups\":$ups}"
+            # Its filed line says why the loop whose findings it files ended: after a GO on a port, the earlier loop's.
+            fe=$ended; [ "$res" != GO ] || [ -z "$earlyend" ] || fe=$earlyend
+            left="{\"leftover\":true,\"followups\":$ups}"; record "$c" "$n" filed ok "$(jq -c --argjson u "$ups" '. + {followups: $u}' <<<"${fe:-"{}"}")"
           fi
         fi
         # A case that joined during its last test run stages its links before it lands (redbrief()).
@@ -990,6 +1028,7 @@ card() { # <card> <issue> [<branch> <tip>]
     # conflict after the port blocks for the owner.
     if [ -z "$ported" ] && [[ $t == "rebase onto main conflicts: "* ]] && [[ $was != "rebase onto main conflicts: "* ]] && [ -s "$wt.patch" ]; then
       ported=1; caught=1; pass=0; rounds=0; rm -rf "$wt.rounds"; rebased=''; tfix=''; locked giveway "$c" "$wt"; why=$t; fin=$res; kp=$wt.patch; old=$(git -C "$wt" rev-parse HEAD 2>/dev/null); printf '%s\n' "$old" > "$wt.base"
+      finend=$ended
       [ -z "$ups" ] || unfile "$n" "$wt.review" $(jq -r '.[]' <<<"$ups"); ups=''; left=''; dec=''
       err=$(git -C "$wt" reset -q --hard "refs/heads/$BRANCH" 2>&1) \
         || { block "$c" "$n" "$wt" "$why [the engine could not reset the worktree to main for the port:${err:0:300}]"; return; }

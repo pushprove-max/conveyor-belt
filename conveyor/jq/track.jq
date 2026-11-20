@@ -2,7 +2,7 @@
 
     def reviews: .x.log as $log | [$log | to_entries[] | select(.value.step == "review")] as $rv
       | [range(0; $rv | length) as $i | $rv[$i] as $e | {round: ($i + 1), verdict: $e.value.result, counts: ($e.value.counts // null), sec: ($e.value.took // null), judge: ($e.value.judge // null),
-          survived: ($e.value.survived // []),
+          survived: ($e.value.survived // []), loopEnd: ($e.value.loopEnd // null),
           fixed: ($log[$e.key + 1:($rv[$i + 1].key // ($log | length))] | any(.step == "fix" or (.step == "start" and .of == "fix")))}];
     # Where a step of this kind is drawn, from the state the card is in: after failed tests (tfix) the fix, its review
     # and the tests again are the tests step; from a rebuild on, everything is the landing step.

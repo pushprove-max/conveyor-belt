@@ -215,6 +215,9 @@
           // The findings that came back after their fix rounds (ctx.survived).
           const s = ctx.survived(r);
           if (s) row.append(h('span', 'survived', s));
+          // Why the fix loop ended on this review (ctx.loopEnd).
+          const e = ctx.loopEnd(r);
+          if (e) row.append(h('span', 'loop-end', e));
           // What the judge made of it (ctx.judged).
           const j = ctx.judged(r, c.card);
           if (j) row.append(j);

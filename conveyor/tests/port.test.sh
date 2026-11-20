@@ -119,6 +119,9 @@ t_resumeport() {
   [ "$(st 'select(.issue == 8 and .step == "landed") | [.leftover, .followups] | tojson')" = '[true,[100107,100108,100109]]' ] \
     && [ "$(tail -n 3 "$STUB/filed" | jq -r .title | tr '\n' '|')" = '[P0] a.txt:1 wrong word|b.txt:22 no mark here|[P2] c.txt:3 a nit|' ] \
     || fail "a GO on the port's review did not land with the earlier loop's last NO-GO filed again: $(st 'select(.issue == 8 and .step == "landed")')"
+  # Bug: its filed line said the loop ended on the port's GO, not on the blocked card's review 3 whose findings it files.
+  [ "$(st 'select(.issue == 8 and .step == "filed") | [.stop, .pass, .rounds] | tojson')" = '["max-reviews",3,0]' ] \
+    || fail "the filed line after a retried port does not say why the earlier loop ended: $(st 'select(.issue == 8 and .step == "filed") | tojson')"
   grep -q -- '--state closed .*--label conveyor-followup .*Follow-up to #8' "$STUB/closed-asked" && grep -qx '#55 \[P1\] old.txt:9 an old finding' "$STUB/brief.$n" \
     && [ "$(grep -c '^#100102 ' "$STUB/brief.$n")" = 1 ] && ! grep -Eq '^#(56|57) ' "$STUB/brief.$n" \
     || fail "the rebuild's brief lacks a follow-up withdrawn before any .withdrawn file, or holds one twice, a landed one or another issue's: $(grep '^#' "$STUB/brief.$n")"
@@ -133,6 +136,27 @@ t_resumeport() {
     && ! grep -q 'from nothing\.\? *$\|Build the issue' "$STUB/brief.$n" \
     || fail "the brief of a card whose kept patch conflicts with main does not name the patch and the commit it was built on: $(tail -n 6 "$STUB/brief.$n")"
   ! grep -q 'NEW CARD: b.txt is stale' "$STUB/brief.$n" || fail "a NEW CARD line was carried into the rebuild's brief as a finding"
+}
+
+# A finished loop's port whose landing conflicts again (its review a GO), retried once more: its filed line still
+# says why the loop whose findings it files ended. Bug: the second retry read only the NO-GO review lines of the
+# card it resumed, and the first port's review was a GO, so the filed line had no stop, pass or rounds.
+t_resumeport2() {
+  resumesetup 8; for i in 1 2 3; do moved "${i/3/}" "$NOGO3" > "$STUB/review.$i"; done; for i in 4 5 6; do echo "$GO" > "$STUB/review.$i"; done
+  echo 'echo two >> a.txt; '"$AGAIN" > "$STUB/build"; echo 'ONE other' > "$STUB/move"
+  # loop: only whole card runs make the chain of two blocked ports whose retried lines the second retry reads
+  loop run >/dev/null && loop retry 8 >/dev/null || fail "the first run of #8 or its retry exited non-zero: $(steps 8)"
+  # Main moves again during the first retry's tests, so that port's landing conflicts too.
+  echo 'THREE third' > "$STUB/move"
+  # loop: as above, the first retry's port must block on its own landing conflict
+  loop run >/dev/null || fail "run of the retried #8 exited non-zero: $(steps 8)"
+  [ ! -e "$STUB/move" ] && [ "$(st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -c '^rebase onto main conflicts')" = 1 ] \
+    || fail "the first retry's port did not block on a second landing conflict: $(steps 8)"
+  # loop: only a whole card run of the second retry writes the filed line under test
+  loop retry 8 >/dev/null && loop run >/dev/null || fail "run of the twice retried #8 exited non-zero: $(steps 8)"
+  [ "$(st 'select(.issue == 8 and .step == "landed") | .leftover')" = true ] \
+    && [ "$(st 'select(.issue == 8 and .step == "filed") | [.stop, .pass, .rounds] | tojson')" = '["max-reviews",3,0]' ] \
+    || fail "the filed line after a second retried port does not say why the earlier loop ended: $(st 'select(.issue == 8 and (.step == "filed" or .step == "landed")) | tojson')"
 }
 
 # Bug: the rebuild of a card whose diff is larger than a prompt may be fails at once with "Prompt is too
@@ -188,6 +212,10 @@ t_autoport() {
     && grep -qx -- '+ ONE' "$STUB/port" && grep -qx -- ' +two' "$STUB/port" || fail "the review after the port was not of the port alone: $(cat "$STUB/port" 2>&1)"
   [ "$(tr '\n' ' ' < "$STUB/closed")" = "100101 100102 100103 " ] && [ "$(st 'select(.issue == 8 and .step == "landed") | [.leftover, .followups] | tojson')" = '[true,[100104,100105,100106]]' ] \
     && [ "$(tr '\n' ' ' < "$R/a.txt")" = "ONE two " ] || fail "the port did not withdraw the follow-ups and file the loop's findings again at its landing: $(st 'select(.issue == 8 and .step == "landed")')"
+  # Bug: the filed line after the port's GO said the loop ended on that GO, not on review 3's max-reviews whose
+  # findings it files.
+  [ "$(st 'select(.issue == 8 and .step == "filed") | [.stop, .pass, .rounds] | tojson' | tr '\n' ' ')" = '["max-reviews",3,0] ["max-reviews",3,0] ' ] \
+    || fail "a filed line does not say why the loop whose findings it files ended: $(st 'select(.issue == 8 and .step == "filed") | tojson')"
   [ "$(loop cards | jq -c '.cards[0] | [.step, (.steps | map(.step) | join(" "))]')" = '["landed","build review fix review fix review test rebase review test test"]' ] \
     && [ -z "$(st 'select(.step == "blocked")')" ] && [ ! -s "$ST/retried.jsonl" ] && loop check || fail "the port is not a step of the card's row, or it blocked or was retried: $(loop cards | jq -c '.cards[0]')"
 }

@@ -129,6 +129,27 @@ holds the verdict. A security finding needs only a proof that can be reproduced.
 A review after a fix gets the findings that the fix was told to fix and the findings declined so far. It says for each
 earlier finding whether the fix holds. It raises a declined finding again only with a new, concrete reason.
 
+### When the fix loop ends
+
+After a `NO-GO`, a fix session fixes the findings, and the card goes to its next review. The loop ends at the first
+of these:
+
+- `go`: a review says `GO`.
+- `max-reviews`: the card has had three reviews. A card that starts from the kept patch of a blocked card also counts
+  the reviews of that card and of the cards whose kept patch it took. It does not count the reviews of other cards of
+  the same issue.
+- `rebased`: the one review after a conflict with main at landing.
+- `test-fix`: the one review after the fix of failed tests.
+- `lint-fix`: the one review after the fix of lint findings at the landing gate.
+- `land`: the card lands from a kept patch on its kept review, with no new review.
+- `repeat`: a finding comes back after its fix, and each finding of the review is P2 or P3. A P0 or P1 that comes
+  back blocks the card.
+
+If a finding of the last review is a privacy hit in the card's own change, the card gets one more fix session. The
+findings that are still open when the loop ends become follow-ups. The review that ends the loop and the `filed` step
+record the reason as `stop`, with `pass` (the reviews of this card) and `rounds` (the reviews of earlier cards). On the
+Board, that review shows "Fix loop ended:" and the reason.
+
 The judge, when it is on (`conveyor.sh control judge on`), reads each review and declines a finding that does not earn
 its place. A declined finding causes no fix and no follow-up (`conveyor/README.md`, The judge).
 

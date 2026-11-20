@@ -163,6 +163,19 @@
     const s = r && Array.isArray(r.survived) ? r.survived.filter((x) => x && typeof x.id === 'string' && num(x.rounds)) : [];
     return s.map((x) => `${x.id} came back after ${x.rounds} ${x.rounds === 1 ? 'fix round' : 'fix rounds'}`).join(', ');
   }
+  // Why the fix loop ended on this review (its loopEnd, {stop, pass, rounds}): "Fix loop ended: review limit reached
+  // (3 reviews, 1 from earlier cards)"; '' on a review after which a fix round came.
+  const loopWhy = {
+    go: 'the review passed', 'max-reviews': 'review limit reached', rebased: 'one review after a landing conflict',
+    'test-fix': 'one review after the test fix', 'lint-fix': 'one review after the lint fix',
+    land: 'landed on the kept review', repeat: 'a fixed finding came back, all findings P2 or P3',
+  };
+  function loopEnd(r) {
+    const e = r && r.loopEnd;
+    if (!e || !Object.prototype.hasOwnProperty.call(loopWhy, e.stop)) return '';
+    const p = num(e.pass) ? e.pass : 0, k = num(e.rounds) ? e.rounds : 0, all = p + k;
+    return `Fix loop ended: ${loopWhy[e.stop]} (${all} ${all === 1 ? 'review' : 'reviews'}${k ? `, ${k} from earlier cards` : ''})`;
+  }
   // A review's verdict in words: GO is "passed", NO-GO "changes asked" (the records' codes are never shown on a card).
   const verdictSaid = (v) => (v === 'GO' ? 'passed' : v === 'NO-GO' ? 'changes asked' : 'no verdict');
   // A finished review on a card: "Review 2: changes asked", its chip toned by the verdict.
@@ -1954,7 +1967,7 @@
       ro.observe(head); ro.observe(body);
     }
     p.ctx = {
-      h, chip, icon, tip, unread, get retry() { return retryText(); }, restartButton: restartHere, faults: panelFaults, get machine() { return machineWord(); }, get answerer() { return answerer(); }, details, since, clock, when, stamp, dur, took, money, modelName, findings, survived, judged, reviewChip, verdictSaid, output, issueLink, depRef, list, post, fresh, motion, state: stateBlock, track, trackDetail, trackShell, earlierTip, testProgress, fixNow,
+      h, chip, icon, tip, unread, get retry() { return retryText(); }, restartButton: restartHere, faults: panelFaults, get machine() { return machineWord(); }, get answerer() { return answerer(); }, details, since, clock, when, stamp, dur, took, money, modelName, findings, survived, loopEnd, judged, reviewChip, verdictSaid, output, issueLink, depRef, list, post, fresh, motion, state: stateBlock, track, trackDetail, trackShell, earlierTip, testProgress, fixNow,
       param, params, pickRepo, project, now, tag, setTab, restart, goTo, panelHref: (id) => panelHref(id), failure, failureLine, failureShort, twice, undoLine, text: findingText,
       pausedSaid, refusal, depPicked,
       // Whether the lists are sorted by project (the machine head's sort): a panel that orders a list itself keeps each

@@ -59,6 +59,7 @@
 #   each), go (its GO came from the judge declining every finding)}, or {ran: false, why} for a review the judge did
 #   not read (its call failed, the judge is off, or the review held no finding or no verdict). survived: the findings
 #   of a NO-GO that came back after a fix round told to fix them, each {id, rounds: how many fix rounds}, else [].
+#   loopEnd: on the review that ended the fix loop, {stop: why (card.sh loopstop()), pass, rounds}, else null.
 # track (the same two, and a card in needsYou): steps, the six steps every card is drawn with, Build, Review,
 #   Fix, Test, Land, Push, each {name, state, sec}: done, now, skipped (the card did not need it: Fix after a GO, Build
 #   of a card landed from a kept patch), failed or todo, with its measured seconds. Build is the set-up (worktree,
