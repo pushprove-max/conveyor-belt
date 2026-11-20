@@ -3,7 +3,7 @@
 # timeout: 300
 # Engine cases: the closure test takes no whole-suite turn (tools/closure.test.sh, lib/slots.sh slot_whole).
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
-# file runs its own cases through the runner. slotpool and wholerun are slots.test.sh's.
+# file runs its own cases through the runner. slotpool is slots.test.sh's and wholerun slotwhole.test.sh's.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.

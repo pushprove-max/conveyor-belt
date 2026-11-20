@@ -484,5 +484,15 @@
   ],
   "conveyor/tests/metrics.test.sh": [
     "conveyor/tests/metricsstop.test.sh"
+  ],
+  "conveyor/tests/slots.test.sh": [
+    "conveyor/tests/closuremiss.test.sh",
+    "conveyor/tests/closurereach.test.sh",
+    "conveyor/tests/closureturn.test.sh",
+    "conveyor/tests/slotwhole.test.sh"
+  ],
+  "conveyor/tests/slotwhole.test.sh": [
+    "conveyor/tests/closureturn.test.sh",
+    "conveyor/tests/slots.test.sh"
   ]
 }

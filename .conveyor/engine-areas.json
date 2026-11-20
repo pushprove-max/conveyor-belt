@@ -24,6 +24,7 @@
 {"area": "wait", "test": "wait.test.sh"}
 {"area": "wait", "why": "wait.sh, what these cases test, is in core (every case waits through it); this area names the case file so a change to it alone runs it"}
 {"area": "slots", "test": "slots.test.sh"}
+{"area": "slots", "test": "slotwhole.test.sh"}
 {"area": "slots", "test": "caseslot.test.sh"}
 {"area": "slots", "test": "pushslot.test.sh"}
 {"area": "slots", "test": "maintest.test.sh"}
@@ -373,6 +374,7 @@
 {"area": "testrun", "test": "visiblebefore.test.sh"}
 {"area": "testrun", "test": "visibleinherit.test.sh"}
 {"area": "testrun", "test": "slots.test.sh"}
+{"area": "testrun", "test": "slotwhole.test.sh"}
 {"area": "testrun", "test": "health.test.sh"}
 {"area": "testrun", "test": "batch.test.sh"}
 {"area": "testrun", "test": "batchmain.test.sh"}
