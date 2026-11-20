@@ -14,6 +14,15 @@ ftorigin() { git -C "$T/$CASE/origin" rev-parse refs/heads/main; }
 # The helpers are named ft*: every case file is sourced into one shell, so a name another file uses would replace its.
 ftl() { jq -c "$1" "$ST/fulltest.jsonl" 2>/dev/null; }                                    # <jq filter>: of each line of the full test's record
 ftlines() { cat "$ST/fulltest.jsonl" 2>/dev/null | wc -l | tr -d ' '; }
+# Issue 7's card has landed with the push rule off, as a card run lands it (t_landonly runs one whole): main gains its
+# commit (the build stub's line in a.txt) and the card record its landed line naming that commit; origin lacks it.
+# A whole card run here only paid for the loop, its sessions and waits before what these cases test.
+ftland() {
+  loop control rules push=off > /dev/null || fail "the push rule could not be turned off"
+  echo two >> "$R/a.txt"; git -C "$R" commit -qam 'Card of issue 7 (#7)' || fail "the landing could not be committed"
+  landed 7 | jq -c --arg s "$(ftmain)" '.sha = $s' >> "$ST/cards.jsonl"
+  [ "$(ftorigin)" != "$(ftmain)" ] || fail "the landing is at origin already"
+}
 ftended() { wait_until "[ \"\$(ftlines)\" = $1 ] && [ ! -e \"\$ST/fulltest.jsonl.running\" ]" 'cat "$ST/fulltest.jsonl.log" "$ST/fulltest.jsonl" 2>&1'; } # <lines>: the run or push asked for has ended
 
 # Bugs this guards: a new install (a record that names no push rule) pushed every landing with nobody asked; with
@@ -39,7 +48,7 @@ t_landonly() {
 # Bugs this guards: Push landed pushed a commit its run did not test (main moved on during the run); a second press
 # started a second run beside the first; a project with no full test suite was offered one.
 t_fullpush() {
-  setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"
+  setup "[$(issue 7 2026-01-01)]"
   local A B out s
   # No test.full: both are refused with the reason, and the snapshot says it.
   out=$(loop full-test 2>&1); [ $? = 2 ] && grep -q 'names no full test suite' <<<"$out" || fail "a full test with no test.full was not refused: $out"
@@ -50,8 +59,7 @@ t_fullpush() {
   tune '.test.full = ". \"$STUB/full-cmd\""'
   echo 'git rev-parse HEAD >> "$STUB/full-at"; until [ -e "$STUB/go" ]; do sleep 0.1; done' > "$STUB/full-cmd"
   # A card lands, land only: one landed commit is unpushed.
-  loop control rules push=off > /dev/null; loop run 1 > "$STUB/run.out" 2>&1 || fail "the run failed: $(cat "$STUB/run.out")"
-  A=$(ftmain); [ "$(ftorigin)" != "$A" ] || fail "the landing was pushed with land only"
+  ftland; A=$(ftmain)
   # Run full test suite: it runs on main, and a second press while it runs is refused, starting nothing.
   out=$(loop full-test 2>&1) || fail "full-test did not start: $out"
   wait_until '[ -s "$STUB/full-at" ]' || fail "the full test suite did not start"
@@ -96,13 +104,13 @@ exit $rc
 EOF
 }
 # Bugs this guards: a red suite pushed anyway; a failed case was filed without being run alone, so a flaky or a
-# machine's failure became a fix card; a case that failed again got a second fix card; the cause named no commit.
+# machine's failure became a fix card; the cause named no commit. (A second fix card: t_fullredagain; Push anyway:
+# t_fullanyway.)
 t_fullred() {
-  setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"
+  setup "[$(issue 7 2026-01-01)]"
   local A O0 c s
   tune '.test.full = ". \"$STUB/full-cmd\""'; ftsuite
-  loop control rules push=off > /dev/null; loop run 1 > "$STUB/run.out" 2>&1 || fail "the run failed: $(cat "$STUB/run.out")"
-  A=$(ftmain); O0=$(ftorigin); [ "$O0" != "$A" ] || fail "the landing was pushed with land only"
+  ftland; A=$(ftmain); O0=$(ftorigin)
   loop full-test push > /dev/null || fail "push landed did not start"; ftended 1
   # The full test suite is a full run the owner allows (issue 461): its run is given no list, so it runs whole.
   [ "$(head -n 1 "$STUB/fulls")" = "$A " ] || fail "the full test suite's run was not of the whole suite: $(cat "$STUB/fulls")"
@@ -135,29 +143,49 @@ t_fullred() {
   # Bug: the red run's result is not shown as a release's suite is, with its failed cases by name.
   [ "$(jq -c '[.suites[] | select(.kind == "full test") | [.state, .sha, .failed, .cases, (.ended != null)]]' <<<"$s")" \
     = "[[\"failed\",\"$A\",4,[\"code.test: breaks\",\"flaky.test: flips\",\"net.test: fetch\",\"old.test: old\"],true]]" ] || fail "the snapshot's suites do not show the red run: $(jq -c .suites <<<"$s")"
-  # Red again with both fix cards open: they are reused, a comment each, and no second card is filed.
-  echo OPEN > "$STUB/state.100101"; echo OPEN > "$STUB/state.100102"
+}
+# <id> <commit>: the line t_fullred's red run writes at <commit> (its id given), its fix cases filed as 100101 and 100102.
+ftredline() {
+  jq -cn --arg i "$1" --arg s "$2" '{time: "2026-11-01T00:00:00Z", id: $i, kind: "run", push: true, sha: $s, state: "failed", exit: 1, pushed: null, reused: null,
+    cases: [["code.test: breaks", "fix", 100101, "failed"], ["flaky.test: flips", "flaky", null, "passed"], ["net.test: fetch", "declined", null, "failed"], ["old.test: old", "fix", 100102, "failed"]]
+      | map({case: .[0], line: null, runs: [.[3], .[3], .[3]], verdict: .[1], why: null, issue: .[2], reused: false})}' >> "$ST/fulltest.jsonl"
+}
+
+# Bug this guards: a case that failed again got a second fix card. The run before is t_fullred's red run, as its line.
+t_fullredagain() {
+  setup "[$(issue 7 2026-01-01)]"
+  tune '.test.full = ". \"$STUB/full-cmd\""'; ftsuite
+  ftland; ftredline 0123456789ab "$(ftmain)"
+  # Red again: the open fix card is reused with a comment; one whose state GitHub does not give is not filed again either.
+  echo OPEN > "$STUB/state.100102"; : > "$STUB/state.100101"
+  # ftended polls: `loop full-test` returns once it has started the run in the background (lib/fulltest.sh), and only
+  # the run's own line and its removed .running file show that it has ended; no call returns at its end.
   loop full-test > /dev/null || fail "the second run did not start"; ftended 2
-  [ "$(wc -l < "$STUB/filed")" = 2 ] && [ "$(grep -c '^10010[12] --body It fails again' "$STUB/comments")" = 2 ] \
+  [ ! -e "$STUB/filed" ] && [ "$(grep -c '^100102 --body It fails again' "$STUB/comments")" = 1 ] && [ "$(grep -c '^100101 ' "$STUB/comments")" = 0 ] \
     && [ "$(jq -sc '.[1] | [.cases[] | select(.verdict == "fix") | [.issue, .reused]]' "$ST/fulltest.jsonl")" = '[[100101,true],[100102,true]]' ] \
-    || fail "an open fix card was not reused: $(jq -c '[.number, .title]' "$STUB/filed") $(cat "$STUB/comments" 2>&1)"
-  # One whose state GitHub does not give is not filed again either.
-  : > "$STUB/state.100101"
-  loop full-test > /dev/null || fail "the third run did not start"; ftended 3
-  [ "$(wc -l < "$STUB/filed")" = 2 ] || fail "a fix card GitHub said nothing of was filed again: $(jq -c '[.number, .title]' "$STUB/filed")"
-  # Push anyway names the red run its confirm showed: one that is no longer the last run (a later red run ended since,
-  # its cases not shown) pushes nothing. Bug: it pushed over whichever red run was last.
-  c=$(wc -l < "$STUB/fulls")
-  out=$(loop full-test anyway "$(jq -rs '.[1].id' "$ST/fulltest.jsonl")" 2>&1); [ $? = 2 ] && grep -q 'not the last full test run' <<<"$out" \
-    && [ "$(ftorigin)" = "$O0" ] && [ "$(ftlines)" = 3 ] || fail "push anyway over a red run that is not the last was not refused: $out"
+    || fail "an open fix card, or one GitHub said nothing of, was not reused: $(cat "$STUB/filed" "$STUB/comments" 2>&1) $(jq -sc '.[1].cases' "$ST/fulltest.jsonl")"
+}
+
+# Bug this guards: Push anyway pushed over whichever red run was last, not the one its confirm showed. The red runs are
+# t_fullred's, as their lines: Push anyway runs no suite, so no run is needed to make them.
+t_fullanyway() {
+  setup "[$(issue 7 2026-01-01)]"
+  local A O0 out
+  tune '.test.full = ". \"$STUB/full-cmd\""'; ftsuite
+  ftland; A=$(ftmain); O0=$(ftorigin)
+  ftredline 0123456789ab "$A"; ftredline 0123456789ac "$A"
+  # One that is no longer the last run (a later red run ended since, its cases not shown) pushes nothing.
+  out=$(loop full-test anyway 0123456789ab 2>&1); [ $? = 2 ] && grep -q 'not the last full test run' <<<"$out" \
+    && [ "$(ftorigin)" = "$O0" ] && [ "$(ftlines)" = 2 ] || fail "push anyway over a red run that is not the last was not refused: $out"
   out=$(loop full-test anyway 2>&1); [ $? = 2 ] && grep -q usage <<<"$out" || fail "push anyway naming no red run was not refused: $out"
-  # Push anyway: the commit of the red run, with no run, logged as the owner's push over a red suite.
-  loop full-test anyway "$(ftl 'select(.kind == "run") | .id' | tr -d '"' | tail -n 1)" --by "Board user t" > /dev/null || fail "push anyway did not start"; ftended 4
-  [ "$(ftorigin)" = "$A" ] && [ "$(wc -l < "$STUB/fulls")" = "$c" ] \
+  # Push anyway: the commit of the red run, with no run, logged as the owner's push over a red suite. ftended polls, as
+  # the push runs in the background after `loop full-test anyway` returns (lib/fulltest.sh): only its line shows its end.
+  loop full-test anyway 0123456789ac --by "Board user t" > /dev/null || fail "push anyway did not start"; ftended 3
+  [ "$(ftorigin)" = "$A" ] && [ ! -e "$STUB/fulls" ] \
     && [ "$(ftl 'select(.kind == "anyway") | [.sha, .state, .by, .pushed.ok, (.cases | length)]')" = "[\"$A\",\"failed\",\"Board user t\",true,4]" ] \
-    || fail "push anyway did not push the red run's commit alone, or is not logged: $(cat "$ST/fulltest.jsonl" "$ST/fulltest.jsonl.log")"
+    || fail "push anyway did not push the red run's commit alone, or is not logged: $(cat "$ST/fulltest.jsonl" "$ST/fulltest.jsonl.log" "$STUB/fulls" 2>&1)"
   # It is offered beside a red result only: with the last line not a red run, it is refused.
-  out=$(loop full-test anyway "$(jq -rs '.[2].id' "$ST/fulltest.jsonl")" 2>&1); [ $? = 2 ] && grep -q 'not a red one' <<<"$out" || fail "push anyway with no red run to push over was not refused: $out"
+  out=$(loop full-test anyway 0123456789ac 2>&1); [ $? = 2 ] && grep -q 'not a red one' <<<"$out" || fail "push anyway with no red run to push over was not refused: $out"
 }
 
 # Bug this guards: while a red run's failed case ran alone, the snapshot counted that run's new log folder, so the
@@ -180,13 +208,15 @@ EOF
 }
 
 # Bug this guards: Push landed, refused by a remote whose main holds a commit made there by hand, merged it into the
-# tested commit and pushed the merge, a commit the run did not test.
+# tested commit and pushed the merge, a commit the run did not test. Also: with the push rule set off, the loop still
+# pushed a landing. A whole card run proves that one (t_landonly's has no push rule at all); it runs beside the file's
+# slower cases, so it adds nothing to the file's time.
 t_fullpushdiverged() {
   setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"
   local A H=$T/$CASE/hand hand
   tune '.test.full = "true"'
   loop control rules push=off > /dev/null; loop run 1 > "$STUB/run.out" 2>&1 || fail "the run failed: $(cat "$STUB/run.out")"
-  A=$(ftmain)
+  A=$(ftmain); [ "$(ftorigin)" != "$A" ] || fail "the landing was pushed with land only"
   git clone -q "$T/$CASE/origin" "$H"; echo hand > "$H/c.txt"; git -C "$H" add c.txt; git -C "$H" commit -qm 'by hand'; git -C "$H" push -q origin main; hand=$(ftorigin)
   loop full-test push > /dev/null || fail "push landed did not start"; ftended 1
   [ "$(ftorigin)" = "$hand" ] && [ "$(ftmain)" = "$A" ] && [ "$(ftl '[.state, .sha, .pushed.ok]')" = "[\"passed\",\"$A\",false]" ] \
@@ -198,13 +228,12 @@ t_fullpushdiverged() {
 # fails when $STUB/push-fail exists, with a check's FAILED line as the project's would print; a test.full that would
 # fail and leaves a mark if it is ever run.
 ftnow() {
-  setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"
+  setup "[$(issue 7 2026-01-01)]"
   printf '%s\n' '#!/usr/bin/env bash' 'read -r ref sha rest; echo "$sha" >> "$STUB/hookruns"' \
     '[ ! -e "$STUB/push-fail" ] || { echo "push-checks: FAILED fast-checks" >&2; exit 1; }' > "$R/.git/hooks/pre-push"
   chmod +x "$R/.git/hooks/pre-push"
   echo 'touch "$STUB/full-ran"; exit 1' > "$STUB/full-cmd"; tune '.test.full = ". \"$STUB/full-cmd\""'
-  loop control rules push=off > /dev/null; loop run 1 > "$STUB/run.out" 2>&1 || fail "the run failed: $(cat "$STUB/run.out")"
-  [ "$(ftorigin)" != "$(ftmain)" ] || fail "the landing was pushed with land only"
+  ftland
 }
 ftpushes() { st 'select(.step == "push" or .step == "pushed") | [.step, .result, .kind] | join(" ")' | wc -l | tr -d ' '; }
 
