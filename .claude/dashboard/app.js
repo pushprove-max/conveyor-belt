@@ -805,11 +805,12 @@
   // What started a fix session, as its bar in "Every step" and the card's step pill name it ("Fix 3: main changed under it"): its
   // line's reason when it names one (a failed Done-when check on the reply, main moved, lint findings), else the step
   // before it (a NO-GO review's findings, a failed test run). The fix in progress has no line yet, so it is named only
-  // where the step before it leaves one cause: failed tests; a lint line (lint findings, at either lint gate); a build, rebuild or fix with no reason (the Done-when check on its reply);
-  // tests that passed or a reply-check fix (main moved). After a review it may be the findings, the commit trailers or
-  // main having moved (a GO, or a last NO-GO, still lands), and after a main-moved or trailer fix the reply check or
-  // main moved: "Fix N" alone until its line says. all: the card's recorded steps; i: the place of one in it. null when
-  // it is no fix; why is the reason, on hover.
+  // where the step before it leaves one cause: failed tests; a lint line (lint findings, at either lint gate); a build,
+  // rebuild or fix whose Done-when check failed (checkFailed: the check on its reply); tests that passed (main moved).
+  // After a review it may be the findings, the commit trailers or main having moved (a GO, or a last NO-GO, still
+  // lands), and after a session whose reply passed its check the project's checks (checked(), testrun.sh) or main
+  // moved: "Fix N" alone until its line says. all: the card's recorded steps; i: the place of one in it. null when it
+  // is no fix; why is the reason, on hover.
   const FIX_CAUSE = [[/^the Done-when check failed/, 'reply check'], [/^main moved/, 'main moved'], [/^lint: /, 'lint findings']];
   // A cause as the fix's name spells it: "Fix 3: main changed under it", never the record's short "main moved".
   const FIX_NAME = { 'main moved': 'main changed under it' };
@@ -838,8 +839,7 @@
     const said = (x) => (typeof x.reason === 'string' ? x.reason : ''), causeOf = (r) => (FIX_CAUSE.find(([re]) => re.test(r)) || [])[1] || null;
     const reason = said(s), p = i > 0 ? all[i - 1] : { name: '' }, prev = p.name;
     const cause = !running ? causeOf(reason) || (reason ? null : prev === 'tests failed' ? 'tests failed' : /^review \d+ \(NO-GO\)$/.test(prev) ? 'review findings' : null)
-      : prev === 'tests failed' ? 'tests failed' : prev === 'lint' ? 'lint findings' : prev === 'tests passed' ? 'main moved' : /^(building|rebuild)$/.test(prev) ? 'reply check'
-        : !/^fix \d+$/.test(prev) ? null : !said(p) ? 'reply check' : causeOf(said(p)) === 'reply check' ? 'main moved' : null;
+      : p.checkFailed === true ? 'reply check' : prev === 'tests failed' ? 'tests failed' : prev === 'lint' ? 'lint findings' : prev === 'tests passed' ? 'main moved' : null;
     const why = reason || (cause ? FIX_SAID[cause] : ''), { rounds, last } = roundsTo(all, i);
     const gate = m ? gateOf(all, i) : prev === 'lint' ? p.gate || null : null;
     if (gate === 'review' || cause === 'reply check') {

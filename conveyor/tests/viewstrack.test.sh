@@ -157,6 +157,10 @@ EOF
   # The note /units and the Board draw on Build for a reply-check fix: running, done, and none without one.
   [ "$(jq -c '[.belt[] | select(.card | IN("c34", "c35", "c36", "c37")) | [.card, .track.steps[0].replyFix]] | sort' <<<"$out")" = '[["c34","done"],["c35","done"],["c36","now"],["c37",null]]' ] \
     || fail "the reply-check fix on Build: $(jq -c '[.belt[] | select(.card | IN("c34", "c35", "c36", "c37")) | [.card, .track.steps[0]]]' <<<"$out")"
+  # Issue 1118: the Board names a fix in progress the reply check's only from the line before it whose check failed:
+  # the build's on 36, none on 37's review findings fix.
+  [ "$(jq -c '[.belt[] | select(.card | IN("c36", "c37")) | [.card, [.track.records[] | select(.checkFailed) | .name]]] | sort' <<<"$out")" = '[["c36",["building"]],["c37",[]]]' ] \
+    || fail "the records do not mark the line whose Done-when check failed: $(jq -c '[.belt[] | select(.card | IN("c36", "c37")) | .track.records]' <<<"$out")"
   # Build is the set-up and the build, never the hour the issue sat queued; a failed test run is run again after its
   # fix (to come, not failed); a rebuild and the landing it follows are both Land's; the follow-ups filed are named on Push.
   [ "$(b 22 '.track.steps[0].sec')" = 180 ] && [ "$(b 25 '.track.steps[3] | [.state, .sec] | tojson')" = '"[\"todo\",60]"' ] \

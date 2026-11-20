@@ -49,10 +49,19 @@ test('a fix session is labelled with what started it, its reason on hover, never
   assert.deepEqual(pillOf([...start, { name: 'review 1 (GO)', state: 'done', sec: 120 }], 'fix after review 1'), ['Fix 1', ''], 'a fix after a GO: no cause claimed');
   assert.deepEqual(pillOf([...start, { name: 'fix 1', state: 'done', sec: 60, reason: 'missing commit trailers: Spec' }], 'fix after review 0'), ['Fix 2', ''],
     'after a trailer fix: the reply check or main moved, no cause claimed');
-  assert.deepEqual(pillOf(start, 'fix after review 0'), ['Build · reply check fix', 'the Done-when check on the reply failed'], "a fix just after the build's line: the reply check");
-  assert.deepEqual(pillOf(recs.slice(0, 6), 'fix after review 1'), ['Fix 1: reply check', 'the Done-when check on the reply failed'], 'just after a findings fix: the reply check');
-  assert.deepEqual(pillOf(recs.slice(0, 4), 'fix after review 0'), ['Fix 1: main changed under it', 'main moved after the card made its change, and the change no longer applied to it'],
-    'just after a reply-check fix: main moved');
+  // Issue 1118: the reply check's fix is named only after a line whose Done-when check failed (checkFailed), as the
+  // strip names it; after one whose check passed, the fix is the project's checks' (t_checkfix) or main moved.
+  const failed = (r) => ({ ...r, checkFailed: true });
+  assert.deepEqual(pillOf([...start.slice(0, -1), failed(start[2])], 'fix after review 0'), ['Build · reply check fix', 'the Done-when check on the reply failed'],
+    "a fix just after the build's line whose check failed: the reply check");
+  assert.deepEqual(pillOf(start, 'fix after review 0'), ['Fix 1', ''], "a fix just after the build's line whose check passed: the project's checks, a Fix round");
+  assert.deepEqual(pillOf([...recs.slice(0, 5), failed(recs[5])], 'fix after review 1'), ['Fix 1: reply check', 'the Done-when check on the reply failed'],
+    'just after a findings fix whose check failed: the reply check');
+  assert.deepEqual(pillOf(recs.slice(0, 4), 'fix after review 0'), ['Fix 1', ''], "just after a reply-check fix: the project's checks or main moved, no cause claimed");
+  // The review gate's lint fix after the build, when that fix's reply fails its Done-when check (lintgate() then calls
+  // checked()): Build's reply check, not Fix 1.
+  assert.deepEqual(pillOf([...start, { name: 'lint', state: 'done', sec: 5, gate: 'review' }, failed({ name: 'fix 1', state: 'done', sec: 60, reason: 'lint: 1 finding(s) of the change' })],
+    'fix after review 0'), ['Build · reply check fix', 'the Done-when check on the reply failed'], 'just after the lint fix whose check failed: the reply check on Build');
   assert.deepEqual(pillOf([...recs, { name: 'tests passed', state: 'done', sec: 60 }], 'fix after review 3'), ['Fix 4: main changed under it', 'main moved after the card made its change, and the change no longer applied to it'],
     'just after tests that passed: main moved');
   assert.deepEqual(pillOf(recs.slice(0, -1), 'fix after failed tests'), ['Fix 3: tests failed', 'the changed tests failed']);

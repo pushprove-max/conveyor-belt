@@ -194,6 +194,9 @@
                     # A test run's changed lines no test reached, from its coverage report (uncovered(), testrun.sh).
                     coverage: (if $l.step == "test" then $l.coverage else null end),
                     reason: (if $l.step == "fix" then $l.reason else null end),
+                    # A build, fix or rebase line whose Done-when check failed items (rows.jq checkFailed): the Board
+                    # names the fix that starts next the reply check's, as the six steps do (rc), and no other one so.
+                    checkFailed: $l.checkFailed,
                     # A lint line's gate (rows.jq gate): the Board numbers the lint fix after it as the six steps do.
                     gate: (if $l.step == "lint" then $l.gate else null end)}
                    | with_entries(select(.value != null and .value != "")))]
