@@ -147,7 +147,24 @@ t_proxydown() {
   pxeng "$PXBUILD"; pxbuilt 1
   [ "$(jq -r .proxy.state "$ST/routes.json")" = fails ] || fail "the routes still record a stopped proxy working: $(cat "$ST/routes.json")"
   [ "$(loop health | jq -r '.routes.proxy.state')" = fails ] || fail "health still shows a stopped proxy working: $(loop health | jq -c .routes)"
+  # A kill (t_pxkill9) is told apart by its exit alone: any other exit through the proxy still names the proxy.
+  pxblocked | jq -r .reason | grep -qF "build: the call through the proxy at $PXURL failed (exit 1): check the proxy" \
+    || fail "a builder that stopped with exit 1 through the proxy is not blocked with the proxy's reason: $(pxblocked)"
 }
+# Bug: builders killed by signal 9 on a proxy route were blocked with "the call through the proxy ... failed (exit 137):
+# check the proxy", while the proxy answered. A builder that a signal ended, with no turn, through the proxy is blocked
+# as killed, and its reason names no proxy URL and no proxy to check.
+pxkilled() { # <exit> <the cause the reason starts with>
+  pxsetup; tune --arg b "$PXURL" '.models.claudeProxy = {baseUrl: $b, roles: {builder: "proxy", reviewer: "proxy"}}'
+  echo "exit $1" > "$STUB/build"
+  pxeng "$PXBUILD"; pxbuilt 1
+  local r; r=$(pxblocked | jq -r .reason)
+  grep -qF "build: the claude CLI $2, not by the proxy or the API (exit $1): check for an out-of-memory kill or a stop" <<<"$r" \
+    || fail "a builder ended by exit $1 through the proxy is not blocked as $2: $r"
+  ! grep -qF -e "$PXURL" -e 'check the proxy' -e 'call through' <<<"$r" || fail "the reason of a builder ended by exit $1 still blames the proxy: $r"
+}
+t_pxkill9() { pxkilled 137 'was killed (signal 9)'; }
+t_pxkill15() { pxkilled 143 'ended (signal 15)'; }
 # Bug: card() records its build and review lines without the route session() and review() give, so the Board's
 # timeline of a landed card shows the subscription for sessions that ran through the proxy. A loop run: the cases above
 # call the sessions alone and write no build or landing lines, and only card() joins the sessions' fields to those lines.

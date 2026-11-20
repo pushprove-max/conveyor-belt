@@ -692,7 +692,8 @@ cliwords() { # <text>
 }
 # A session or review that failed (its exit not 0 and not the timeout's 124) with no turn past its first and no token
 # never began its work: its CLI stopped before it (not logged in, a model this account does not have, a settings
-# error). Sets NOSTART_WHY to its reason: the cause, named from the CLI's own words (a session through a proxy or the
+# error, a kill). Sets NOSTART_WHY to its reason: the cause, named from its exit (137 or 143: a signal ended it, on any
+# route) or else from the CLI's own words (a session through a proxy or the
 # API: that route at its base URL, never a sign-in to it), its exit and what to do; under it those words (NOSTARTSAID,
 # then the last lines of its stderr) as cliwords() keeps them. Sets NOSTART_START to the seat (builder or reviewer),
 # CLI, model and account it ran on: a check session on that seat as it is set then runs before the card is put back
@@ -714,7 +715,11 @@ nostart() { # <exit> <the step's fields> <output file> <stderr file> <cli> <mode
     if [ "$5" = codex ]; then p=$(codexproxyset); else p=$(claudeproxy); fi
     px=$(jq -r '"the \(if .kind == "api" then "API" else "proxy" end) at \(.baseUrl // "https://api.anthropic.com")"' <<<"$p")
   fi
-  if [ "$1" = 127 ] || grep -Eqi "(^|[^a-z])$5: (command )?not found" <<<"$raw"; then
+  # Exit 137 or 143: a signal (9 or 15) ended the CLI, on any route; its proxy or the API did not.
+  if [ "$1" = 137 ] || [ "$1" = 143 ]; then
+    if [ "$1" = 137 ]; then cause="the $5 CLI was killed (signal 9)"; else cause="the $5 CLI ended (signal 15)"; fi
+    cause+=", not by the proxy or the API"; todo="check for an out-of-memory kill or a stop"
+  elif [ "$1" = 127 ] || grep -Eqi "(^|[^a-z])$5: (command )?not found" <<<"$raw"; then
     cause="the $5 CLI is not installed"; todo="install it, or set the $7 to a CLI this host has (conveyor.sh control, or Rules on the Board)"
   elif grep -Eqi "$LOGINSAID" <<<"$raw"; then
     NOSTART_LOGIN='not set'; ! grep -Eqi 'expired|refresh|revoked|refused' <<<"$raw" || NOSTART_LOGIN=expired
