@@ -130,8 +130,8 @@ stallwatched() { # <step> <stuck> <last shell>
 # The runner (conveyor.test.sh) sources every area file before any case runs, so a function two files define is, in
 # every run, the later file's for the cases of both. Bug it catches (#871): views.test.sh and stall.test.sh each
 # defined a watched() of other arguments, and serve.test.sh an eng() of other arguments than mainred.test.sh's, which
-# five other files call; whichever file came later took the name.
-t_stallownwatched() { ownfuncs stall views; }
+# five other files call; whichever file came later took the name. The views watch is viewslive.test.sh's now.
+t_stallownwatched() { ownfuncs stall viewslive; }
 t_stallowneng() { ownfuncs mainred serve; }
 # ownfuncs <area> <area>: with both area files sourced, in either order, each function of each file is the one that
 # file defines when sourced alone, so its cases call their own. It compares the functions' text, not a call: a call of
