@@ -31,6 +31,10 @@ dispatch() {
   done
   PATH=$SH/bin:$PATH
 }
+# doctor's line on the loops of this machine, and its exit status: doctorloops() (lib/setup.sh) called in <main> with
+# the engine read as commands/doctor.sh reads it. The whole doctor took a case 5 to 30 s a call, in checks (the Board,
+# the pack, the CLIs) that these cases do not look at; t_machinecap runs it whole once, for its line among the rest.
+loopline() { (cd "$1" && export CONVEYOR_MAIN=$1 && . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/doctor.sh")" && doctorloops) 2>&1; } # <main>
 picked() { jq -e --argjson n "$2" 'select(.step == "picked" and .issue == $n)' "$3/conveyor/state/cards.jsonl" >/dev/null 2>&1; } # <name> <issue> <main>
 # The cards in flight now across the projects: picked and not landed, closed or blocked.
 inflight() { cat "$@" 2>/dev/null | jq -s '[group_by(.card)[] | select(all(.step | IN("landed", "closed", "blocked") | not))] | length'; }
@@ -96,23 +100,26 @@ t_machinecap() {
   wait_until '[ "$(git -C "$T/$CASE/alpha/origin" ls-tree --name-only main | grep "^f" | tr "\n" " ")" = "f1.txt f2.txt " ]' \
     && wait_until '[ "$(git -C "$T/$CASE/beta/origin" ls-tree --name-only main | grep "^f" | tr "\n" " ")" = "f21.txt f22.txt " ]' \
     || fail "a push went to another project's repo: $(git -C "$T/$CASE/alpha/origin" ls-tree --name-only main) / $(git -C "$T/$CASE/beta/origin" ls-tree --name-only main)"
+  # doctor names the machine's as the one loop (read below): run whole while the Foremen are checked, as each takes
+  # seconds and neither starts a loop.
+  (cd "$A" && exec bash "$SRC/conveyor.sh" doctor > "$SH/doctor.out" 2>&1) & dp=$!
   # beta's blocked card wakes beta's Foreman, never alpha's.
   export CONVEYOR_FOREMAN_ASK="cd \"\$CONVEYOR_MAIN\" && bash $SRC/conveyor.sh \$CONVEYOR_CMD"
   (cd "$A" && CONVEYOR_MAIN=$A bash "$SRC/foreman/watch-conveyor.sh" --once >/dev/null 2>&1)
   (cd "$B" && CONVEYOR_MAIN=$B bash "$SRC/foreman/watch-conveyor.sh" --once >/dev/null 2>&1) || fail "beta's blocked card woke nothing"
   grep -qF '#23 is blocked' "$B"/conveyor/state/foreman/pending/*.wake 2>/dev/null || fail "beta's Foreman was not woken by its blocked card"
   ! grep -qs '#23\|beta' "$A"/conveyor/state/foreman/pending/*.wake || fail "beta's blocked card woke alpha's Foreman"
-  # One loop per machine: a second machine loop is refused, and doctor names the machine's as the one loop.
+  # One loop per machine: doctor names the machine's as the one loop, and a second machine loop is refused.
+  wait "$dp"; out=$(cat "$SH/doctor.out")
+  grep -qx "ok: one Conveyor loop on this machine: the machine's Conveyor (pid $mp)" <<<"$out" || fail "doctor did not name the machine's loop: $out"
   (cd "$B" && CONVEYOR_MAIN=$B exec bash "$SRC/conveyor.sh" machine > "$SH/second.out" 2>&1); [ $? != 0 ] && grep -q "the machine's Conveyor already runs" "$SH/second.out" \
     || fail "a second machine loop started: $(cat "$SH/second.out")"
-  out=$(cd "$A" && bash "$SRC/conveyor.sh" doctor 2>&1)
-  grep -qx "ok: one Conveyor loop on this machine: the machine's Conveyor (pid $mp)" <<<"$out" || fail "doctor did not name the machine's loop: $out"
   # The projects' loops running on their own (the machine's gone, as with per-project services): doctor names the second.
   kill -KILL $mp; wait $mp 2>/dev/null
-  out=$(cd "$A" && bash "$SRC/conveyor.sh" doctor 2>&1)
+  out=$(loopline "$A"); rc=$?
   kill -TERM "$(jq -r .pid "$A/conveyor/state/loop.json")" "$(jq -r .pid "$B/conveyor/state/loop.json")" 2>/dev/null
-  grep -q "^missing: one Conveyor loop on this machine: a loop of beta on its own (pid [0-9]*) runs beside a loop of alpha on its own" <<<"$out" \
-    || fail "doctor did not name the second loop: $out"
+  [ "$rc" = 1 ] && grep -q "^missing: one Conveyor loop on this machine: a loop of beta on its own (pid [0-9]*) runs beside a loop of alpha on its own" <<<"$out" \
+    || fail "doctor did not name the second loop, or did not count it as missing (exit $rc): $out"
 }
 
 # Bugs: a project's loop killed with its cards still building frees their machine slots, so another project starts
@@ -216,17 +223,17 @@ t_machinestray() {
   trap 'kill -TERM $mp $bp $ep 2>/dev/null; wait $mp $bp $ep 2>/dev/null' EXIT
   wait_until 'kill -0 "$(jq -er .pid "$A/conveyor/state/loop.json" 2>/dev/null)" 2>/dev/null && [ "$(jq -er .pid "$B/conveyor/state/loop.json" 2>/dev/null)" = "$bp" ]' \
     || fail "the two loops did not start: $(cat "$SH/machine.out" "$SH/beta.out")"
-  out=$(cd "$A" && CONVEYOR_MAIN=$A bash "$SRC/conveyor.sh" doctor 2>&1)
+  out=$(loopline "$A")
   grep -qxF "missing: one Conveyor loop on this machine: a loop of $B, no record of the host file, on its own (pid $bp) runs beside the machine's Conveyor (pid $mp); fix: stop every loop but the machine's (a per-project service: systemctl --user disable --now conveyor-<name>.service, or launchctl bootout gui/\$(id -u)/conveyor.<name>), then run install-service once" <<<"$out" \
     || fail "doctor did not name the loop of the project that is no record: $out"
   # Once that loop is stopped, what it left in the machine's folder names no loop: the machine's is the one.
   kill -TERM $bp; wait $bp 2>/dev/null
-  out=$(cd "$A" && CONVEYOR_MAIN=$A bash "$SRC/conveyor.sh" doctor 2>&1)
+  out=$(loopline "$A")
   grep -qx "ok: one Conveyor loop on this machine: the machine's Conveyor (pid $mp)" <<<"$out" || fail "doctor named a loop that no longer runs, or a process that is no loop (pid $ep): $out"
   # A loop of another host file is another machine's, as every other test's loops are: it is not counted here.
   ( cd "$B" && unset CONVEYOR_CARDS && XDG_CONFIG_HOME=$T/$CASE/other CONVEYOR_MAIN=$B exec bash "$SRC/conveyor.sh" serve > "$SH/beta.out" 2>&1 ) & bp=$!
   wait_until '[ "$(jq -er .pid "$B/conveyor/state/loop.json" 2>/dev/null)" = "$bp" ]' || fail "the loop of another host file did not start: $(cat "$SH/beta.out")"
-  out=$(cd "$A" && CONVEYOR_MAIN=$A bash "$SRC/conveyor.sh" doctor 2>&1)
+  out=$(loopline "$A")
   grep -qx "ok: one Conveyor loop on this machine: the machine's Conveyor (pid $mp)" <<<"$out" || fail "doctor counted a loop of another host file: $out"
 }
 

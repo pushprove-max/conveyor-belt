@@ -722,6 +722,45 @@ doctordeps() {
     return 1
   else [ -z "$t" ] || rm -rf "$t"; echo "not checked: the dependencies of a card's worktree: a test worktree of $MAIN could not be made"; fi
 }
+# doctor's line on one Conveyor per machine: the machine's loop (`machine`), and no loop of a project beside it that it
+# did not start (a per-project service left from before, or a `serve` started by hand). Each loop alive names its pid.
+# Returns 1 when a second loop runs. Needs jq.
+doctorloops() {
+  local loops=() mains=() v=() mp='' e t r m s q a is='^([^ ]*/)?bash (.*/)?conveyor\.sh (serve|run( .*)?)$'; local -A up=() loop=()
+  IFS=$'\t' read -r e t < <(jq -r '[.pid, .started] | @tsv' "$MACH/loop.json" 2>/dev/null) && [ -n "$e" ] && p_alive "$e" "$t" && mp=$e
+  [ -z "$mp" ] || loops+=("the machine's Conveyor (pid $mp)")
+  while IFS=$'\t' read -r r m _; do
+    mains+=("$m")
+    s=$(CONVEYOR_MAIN=$m bash "$HERE/conveyor.sh" state-dir 2>/dev/null) && [ -e "$s/cards.jsonl.run" ] || continue
+    ! ( flock -n 9 ) 9>>"$s/cards.jsonl.run" 2>/dev/null || continue # no loop holds it
+    IFS=$'\t' read -r e t < <(jq -r '[.pid, .started] | @tsv' "$s/loop.json" 2>/dev/null) && [ -n "$e" ] && p_alive "$e" "$t" || e='?'
+    [ -n "$mp" ] && [ "$(ps -o ppid= -p "$e" 2>/dev/null | tr -d ' ')" = "$mp" ] || loops+=("a loop of $r on its own (pid $e)")
+  done < <(projects 2>/dev/null)
+  # Then the loops of projects that are no record of the host file (a `serve` started by hand, a service left from
+  # before), found among the machine's processes, so by nothing a loop writes: one on older code is found too.
+  # A loop is a bash that runs conveyor.sh with `run` or `serve` (an editor with the file open, or a script handed its
+  # path, is none) on this host file (its own environment names it, by any path that reaches the same file) under no
+  # other loop and not under the machine's; the folder it runs in is its checkout. One in a record's checkout was
+  # looked at above.
+  while read -r q e t; do
+    up[$q]=$e
+    [[ $t =~ $is ]] && mapfile -d '' -t v < <(p_argv "$q") || continue
+    [ ${#v[@]} = 0 ] || [[ ${v[0]##*/} = bash && ${v[1]:-} =~ (^|/)conveyor\.sh$ && ${v[2]:-} =~ ^(serve|run)$ ]] || continue
+    s=$(p_env "$q" XDG_CONFIG_HOME) && a=$(p_env "$q" HOME) && s=${s:-$a/.config}/conveyor/host.json || continue
+    [ "$s" = "$HOST" ] || [ "$s" -ef "$HOST" ] || continue
+    loop[$q]=1
+  done < <(p_procs)
+  for q in "${!loop[@]}"; do
+    a=${up[$q]:-}; while [ -n "$a" ]; do [ "$a" != "$mp" ] && [ -z "${loop[$a]:-}" ] || continue 2; a=${up[$a]:-}; done
+    s=$(p_cwd "$q") && [ -n "$s" ] || continue
+    for m in "${mains[@]}"; do [ ! "$m" -ef "$s" ] || continue 2; done
+    loops+=("a loop of $s, no record of the host file, on its own (pid $q)")
+  done
+  if [ ${#loops[@]} -gt 1 ]; then
+    echo "missing: one Conveyor loop on this machine: ${loops[1]} runs beside ${loops[0]}; fix: stop every loop but the machine's (a per-project service: systemctl --user disable --now conveyor-<name>.service, or launchctl bootout gui/\$(id -u)/conveyor.<name>), then run install-service once"
+    return 1
+  elif [ ${#loops[@]} = 1 ]; then echo "ok: one Conveyor loop on this machine: ${loops[0]}"; fi
+}
 # conveyor.sh doctor: each thing Conveyor needs on this machine for the project it is called in, one line each, "ok: ..."
 # or "missing: <what>; fix: <how>", and "warning: ..." for a running loop on old code or a Board not running. Exit 1 when anything is missing,
 # but for the project's instruction files (agentfiles(), which sessions run without). bash older than 5.1 stops at require_bash, above,
@@ -805,7 +844,7 @@ askcheck() {
   return $rc
 }
 doctor() {
-  local bad=0 p e t c h f
+  local bad=0 p e t c h f s
   ok() { echo "ok: $1"; }; no() { echo "missing: $1; fix: $2"; bad=1; }
   # Each requirement at its minimum version, as the engine runs it: the version found, and where (lib/requires.sh).
   req_report || bad=1
@@ -846,43 +885,7 @@ doctor() {
     [ "$(jq 'has("steer")' "$HOST" 2>/dev/null)" != true ] \
       || echo "warning: the host file $HOST sets steer, which no longer does anything: card sessions, reviews and test runs run at normal priority; remove it"
   fi
-  # One Conveyor per machine: the machine's loop (`machine`), and no loop of a project beside it that it did not start
-  # (a per-project service left from before, or a `serve` started by hand). Each loop alive names its pid.
-  if command -v jq >/dev/null; then
-    local loops=() mains=() v=() mp='' r m s q a is='^([^ ]*/)?bash (.*/)?conveyor\.sh (serve|run( .*)?)$'; local -A up=() loop=()
-    IFS=$'\t' read -r e t < <(jq -r '[.pid, .started] | @tsv' "$MACH/loop.json" 2>/dev/null) && [ -n "$e" ] && p_alive "$e" "$t" && mp=$e
-    [ -z "$mp" ] || loops+=("the machine's Conveyor (pid $mp)")
-    while IFS=$'\t' read -r r m _; do
-      mains+=("$m")
-      s=$(CONVEYOR_MAIN=$m bash "$HERE/conveyor.sh" state-dir 2>/dev/null) && [ -e "$s/cards.jsonl.run" ] || continue
-      ! ( flock -n 9 ) 9>>"$s/cards.jsonl.run" 2>/dev/null || continue # no loop holds it
-      IFS=$'\t' read -r e t < <(jq -r '[.pid, .started] | @tsv' "$s/loop.json" 2>/dev/null) && [ -n "$e" ] && p_alive "$e" "$t" || e='?'
-      [ -n "$mp" ] && [ "$(ps -o ppid= -p "$e" 2>/dev/null | tr -d ' ')" = "$mp" ] || loops+=("a loop of $r on its own (pid $e)")
-    done < <(projects 2>/dev/null)
-    # Then the loops of projects that are no record of the host file (a `serve` started by hand, a service left from
-    # before), found among the machine's processes, so by nothing a loop writes: one on older code is found too.
-    # A loop is a bash that runs conveyor.sh with `run` or `serve` (an editor with the file open, or a script handed its
-    # path, is none) on this host file (its own environment names it, by any path that reaches the same file) under no
-    # other loop and not under the machine's; the folder it runs in is its checkout. One in a record's checkout was
-    # looked at above.
-    while read -r q e t; do
-      up[$q]=$e
-      [[ $t =~ $is ]] && mapfile -d '' -t v < <(p_argv "$q") || continue
-      [ ${#v[@]} = 0 ] || [[ ${v[0]##*/} = bash && ${v[1]:-} =~ (^|/)conveyor\.sh$ && ${v[2]:-} =~ ^(serve|run)$ ]] || continue
-      s=$(p_env "$q" XDG_CONFIG_HOME) && a=$(p_env "$q" HOME) && s=${s:-$a/.config}/conveyor/host.json || continue
-      [ "$s" = "$HOST" ] || [ "$s" -ef "$HOST" ] || continue
-      loop[$q]=1
-    done < <(p_procs)
-    for q in "${!loop[@]}"; do
-      a=${up[$q]:-}; while [ -n "$a" ]; do [ "$a" != "$mp" ] && [ -z "${loop[$a]:-}" ] || continue 2; a=${up[$a]:-}; done
-      s=$(p_cwd "$q") && [ -n "$s" ] || continue
-      for m in "${mains[@]}"; do [ ! "$m" -ef "$s" ] || continue 2; done
-      loops+=("a loop of $s, no record of the host file, on its own (pid $q)")
-    done
-    if [ ${#loops[@]} -gt 1 ]; then no "one Conveyor loop on this machine: ${loops[1]} runs beside ${loops[0]}" \
-      "stop every loop but the machine's (a per-project service: systemctl --user disable --now conveyor-<name>.service, or launchctl bootout gui/\$(id -u)/conveyor.<name>), then run install-service once"
-    elif [ ${#loops[@]} = 1 ]; then ok "one Conveyor loop on this machine: ${loops[0]}"; fi
-  fi
+  ! command -v jq >/dev/null || doctorloops || bad=1
   # The cores kept for the user (the host file's reserveCores, lib/slots.sh slot_reserved), and the test slots left.
   local sl='the test-slot pool cannot be read'
   ! slot_pool >/dev/null 2>&1 || sl="the test-slot pool has $SLOT_N slots"
