@@ -34,6 +34,7 @@ t_inheritpart() {
   # with no line of its own, and its landed line names #7.
   printf '%s\n' '[P1] a.txt:1 wrong word' 'INHERITED: part' 'USER-VISIBLE: yes: admins see the Pay button in red' 'VERDICT: NO-GO' > "$STUB/review.1"
   printf '%s\n' 'INHERITED: part' 'USER-VISIBLE: yes: admins see the Pay button in red' 'VERDICT: GO' > "$STUB/review.2"
+  # loop: besides the gate's inherited yes, the case checks the review prompt, the fix brief, the review line's counts and the landed line's yesFrom, which only a card writes
   loop run --only 100101 > "$STUB/run1.out" || fail "run of #100101 exited non-zero"
   [ "$(st 'select(.issue == 100101 and .step == "landed") | [.sha, .yesFrom] | tojson')" = "[\"$(git -C "$R" rev-parse HEAD)\",7]" ] \
     || fail "a follow-up whose change is part of its parent's yes did not land on it, or its record does not say so: $(steps 100101)"

@@ -72,6 +72,7 @@ t_runlandyes() {
   echo 'echo never' > "$R/f.test.sh" && git -C "$R" add f.test.sh && git -C "$R" commit -qm 'a test' && git -C "$R" push -q origin main || fail "main's file"
   echo 'echo two >> a.txt; mkdir -p web; echo pay >> web/pay.ts' > "$STUB/build"
   printf '%s\n' 'USER-VISIBLE: yes: guests see a new Pay button' 'VERDICT: GO' > "$STUB/review.1"
+  # loop: the bug is in the retry's landing from its kept patch (resumeplan, the test step and its proof checks), not in the gate's outcome: visplan and visgate cannot show it
   loop run > /dev/null || fail "first run exited non-zero"
   st 'select(.step == "blocked") | .reason' | grep -q "^visible to customers or staff: needs .*'s yes" || fail "the card did not stop for the yes: $(st 'select(.step | IN("blocked", "landed"))')"
   issue 7 2026-01-01 bug | jq -c '[.title = "Make the test file f.test.sh run" | .body += "\n\nVisible change approved: Dana 2026-01-02 (yes)\n"]' > "$STUB/issues.json"

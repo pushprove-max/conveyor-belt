@@ -19,8 +19,8 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # when it blocks for the yes, so the approved card lands from its kept patch without them.
 # Bugs: a card that touches no product code stops for the owner's yes; one that touches product code (alone, or
 # with anything else) does not. Each card here changes web/pay.ts as well as a.txt, unless a case says otherwise.
-# Each case is a card of its own on a main of its own (visiblestart, or a copy of the one card blocked makes): one
-# after another on one main, they made one case of 24 s.
+# Each case that runs a card has a main of its own (visiblestart, or a copy of the one card blocked makes): one
+# after another on one main, they made one case of 24 s. The gate's own cases call visplan and visgate (visrun).
 visiblestart() { # <issue>
   setup "[$(issue "$1" 2026-01-01)]"; YES='USER-VISIBLE: yes: guests see a new Pay button'
   echo 'echo two >> a.txt; mkdir -p web; echo pay >> web/pay.ts' > "$STUB/build"
@@ -56,14 +56,29 @@ blocked() {
   PATH=$STUB:$PATH; YES='USER-VISIBLE: yes: guests see a new Pay button'
   steps() { st "select(.issue == $1) | \"\(.step) \(.result) \(.reason)\"" | tr '\n' ,; }
 }
+# The visible-change gate of card() on fixture state, with no card run (visiblebefore.test.sh calls it too): visplan
+# on <issue> under the control record's rule (yesrule()), the review's USER-VISIBLE answer read as card() reads it,
+# then visgate on card c7's staged change in $FXWT (fx_wt), as card() calls them. GATE is the outcome: what visplan
+# set, the answer (vis), and rc: visgate's exit, or "unclear" for no clear answer, on which card() blocks before the
+# gate. What the gate said is in run.out; its .approvals and .body are beside $FXWT.
+visrun() { # <issue json> <review line>...
+  printf '%s\n' "${@:2}" > "$FXWT.review"
+  ISSUE=$1 fx_in 'c=c7 n=$(jq .number <<<"$ISSUE") wt=$FXWT issue=$ISSUE vrule=on seen=none sect="" nyes=0 heldto="" vmode="" yfile="" ybase="" inh="" ph="" pf="" yesfrom="" err=""
+    yesrule || vrule=off
+    visplan; vis=$(visible "$wt.review" "$vmode")
+    if [ -n "$vis" ]; then visgate; rc=$?; else rc=unclear; fi
+    jq -cn --arg seen "$seen" --arg nyes "$nyes" --arg ybase "$ybase" --arg heldto "$heldto" --arg vmode "$vmode" --arg yfile "$yfile" --arg vis "$vis" --arg rc "$rc" --arg err "$err" --arg yesfrom "$yesfrom" \
+      "{\$seen, \$nyes, \$ybase, \$heldto, \$vmode, \$yfile, \$vis, \$rc, \$err, \$yesfrom}" > "$T/$CASE/gate.json"'
+  [ "$RC" = 0 ] || fail "visplan and visgate could not be run: $(cat "$T/$CASE/run.out")"
+  GATE=$(cat "$T/$CASE/gate.json")
+}
+# The staged change of each gate case but t_visibletooling, after setup: a.txt and the product file web/pay.ts.
+paychange() { fx_wt 'echo two >> a.txt; mkdir -p web; echo pay >> web/pay.ts' b.txt base; }
+# Bug: a change nobody would see (USER-VISIBLE: no) is held for the owner's yes.
 t_visible() {
-  visiblestart 7; rm "$STUB/comments"
-  # A GO with `no` lands, and the review line says so.
-  echo "$GO" > "$STUB/review.1"; loop run >/dev/null || fail "run exited non-zero"
-  [ "$(st 'select(.step == "landed") | .sha')" = "$(git -C "$R" rev-parse HEAD)" ] && [ "$(st 'select(.step == "review") | .visible')" = no ] \
-    || fail "a GO with USER-VISIBLE: no did not land, or its review line lacks the answer: $(steps 7)"
-  grep -q 'USER-VISIBLE: no' "$STUB/asked" && grep -q 'USER-VISIBLE: yes: <one sentence' "$STUB/asked" || fail "the review instructions do not ask the USER-VISIBLE question"
-  [ ! -e "$STUB/comments" ] || fail "a card nobody would see commented on its issue"
+  setup '[]'; paychange; visrun "$(issue 7 2026-01-01)" 'USER-VISIBLE: no' 'VERDICT: GO'
+  [ "$GATE" = '{"seen":"none","nyes":"0","ybase":"0","heldto":"","vmode":"","yfile":"","vis":"no","rc":"0","err":"","yesfrom":""}' ] && [ ! -e "$FXWT.body" ] \
+    || fail "a review with USER-VISIBLE: no did not pass the gate: $GATE"
 }
 # A GO with `yes` and no approval line: blocked, nothing lands, no test run, the sentence posted on the issue.
 t_visibleyes() {
@@ -73,6 +88,7 @@ t_visibleyes() {
   # With the rule on, the brief and the review speak of the approval line; an issue with no section of what
   # customers or staff will see is reviewed against none, and stops as above.
   grep -q 'Visible change approved:' "$STUB/brief" && grep -q 'Visible change approved:' "$STUB/asked" || fail "with the rule on, the brief or the review does not speak of the approval line"
+  grep -q 'USER-VISIBLE: no' "$STUB/asked" && grep -q 'USER-VISIBLE: yes: <one sentence' "$STUB/asked" || fail "the review instructions do not ask the USER-VISIBLE question"
   ! grep -q '^# The approved visible change$' "$STUB/asked" || fail "an issue with no section was reviewed against one"
   [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] && [ -z "$(git -C "$R" status --porcelain)" ] && [ -z "$(ls "$T/$CASE/cards")" ] && [ "$(wc -l < "$STUB/tests")" = "$runs" ] \
     || fail "a visible GO with no approval landed, ran the tests or left its worktree"
@@ -186,7 +202,9 @@ t_visibleinline() {
 # with no card run.
 t_unclearnogo() {
   local head; visiblestart 10; head=$(git -C "$R" rev-parse HEAD)
-  printf '%s\n' '[P1] a.txt:1 wrong word' 'VERDICT: NO-GO' > "$STUB/review.1"; loop run >/dev/null
+  printf '%s\n' '[P1] a.txt:1 wrong word' 'VERDICT: NO-GO' > "$STUB/review.1"
+  # loop: the block for no clear answer is card()'s, before the gate (visgate never sees it), and so is the fix round it must not get
+  loop run >/dev/null
   st 'select(.issue == 10 and .step == "blocked") | .reason' | grep -q "review 1 ended without one clear verdict.*USER-VISIBLE" || fail "a NO-GO with no USER-VISIBLE line was taken as a clear answer: $(steps 10)"
   [ "$(st 'select(.issue == 10 and .step == "review") | [.result, .visible] | join("|")')" = "none|" ] || fail "review line of a NO-GO with no USER-VISIBLE line: $(st 'select(.issue == 10 and .step == "review")')"
   [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] && [ "$(wc -l < "$STUB/sessions")" = 1 ] || fail "a review with no clear USER-VISIBLE answer landed or got a fix round"
@@ -222,20 +240,18 @@ t_unclearspaces() {
 t_visiblecap() {
   visiblestart 20; head=$(git -C "$R" rev-parse HEAD)
   for i in 1 2 3; do printf '%s\n' "$(moved $i '[P1] a.txt:1 wrong word')" "$YES" 'VERDICT: NO-GO' > "$STUB/review.$i"; done; runs=$(wc -l < "$STUB/tests")
+  # loop: that the last NO-GO reaches the gate, and the gate comes before its tests and its follow-ups, is card()'s order
   loop run >/dev/null || fail "cap run exited non-zero"
   [ "$(st 'select(.issue == 20) | .step' | tr '\n' ' ')" = "picked worktree deps brief start build start review start fix start review start fix start review blocked " ] || fail "steps of a visible card at the cap: $(steps 20)"
   [ "$(st 'select(.issue == 20 and .step == "blocked") | .reason')" = "visible to customers or staff: needs Dana's yes: guests see a new Pay button" ] || fail "a visible NO-GO at the cap was not blocked for Dana's yes: $(steps 20)"
   [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] && [ ! -e "$STUB/filed" ] && [ ! -e "$STUB/closed" ] && [ "$(wc -l < "$STUB/tests")" = "$runs" ] || fail "a visible NO-GO at the cap landed, filed follow-ups or ran the tests"
   grep -q "^20 --body .*needs Dana's yes: guests see a new Pay button" "$STUB/comments" && grep -q 'wrong word' "$STUB/comments" || fail "the cap card's sentence and findings were not posted: $(cat "$STUB/comments")"
 }
-# With the approval line the same NO-GO at the cap lands with its follow-up, as before.
+# With the approval line the same NO-GO at the cap passes the gate, so it lands with its follow-up as any last NO-GO.
 t_visiblecapyes() {
-  visiblestart 21
-  issue 21 2026-01-01 | jq -c '[.body = "Visible change approved: r-10\nbody"]' > "$STUB/issues.json"
-  for i in 1 2 3; do printf '%s\n' "$(moved $i '[P1] a.txt:1 wrong word')" "$YES" 'VERDICT: NO-GO' > "$STUB/review.$i"; done
-  loop run >/dev/null || fail "approved cap run exited non-zero"
-  grep -qx 'Visible change approved: r-10' "$STUB/brief" && grep -qx 'Visible change approved: r-10' "$STUB/asked" || fail "the approval line was not shown to the build session and the reviewer"
-  [ "$(st 'select(.issue == 21 and .step == "landed") | [.sha, .followups] | tojson')" = "[\"$(git -C "$R" rev-parse HEAD)\",[100101]]" ] || fail "an approved NO-GO at the cap did not land with its follow-up: $(steps 21)"
+  setup '[]'; paychange; visrun "$(issue 21 2026-01-01 | jq -c '.body = "Visible change approved: r-10\nbody"')" '[P1] a.txt:1 wrong word' 'USER-VISIBLE: yes: guests see a new Pay button' 'VERDICT: NO-GO'
+  [ "$GATE" = '{"seen":"none","nyes":"1","ybase":"1","heldto":"","vmode":"","yfile":"","vis":"yes: guests see a new Pay button","rc":"0","err":"","yesfrom":""}' ] && [ ! -e "$FXWT.body" ] \
+    || fail "a visible change with an approval line did not pass the gate: $GATE"
 }
 # The control record's rule "visible changes need the owner's yes" (rules.visible). What a card does with the rule
 # on is t_visibleyes (setup seeds it on); with it off, t_visibleoff, whose card reads the rule `control rules` sets.
@@ -254,6 +270,7 @@ t_visibleoff() {
   printf '%s\n' "$YES" 'VERDICT: GO' > "$STUB/review.1"
   # Bug: the review given the rule-off instructions is no longer told what not to raise.
   loop declined add c1-6 6 judge 'out of scope here' '[P2] x.txt:1 a nit' || fail "the declined line was not added"
+  # loop: the build brief and the review prompt with the rule off are what a card writes, and no other case has them
   loop run >/dev/null || fail "run exited non-zero"
   grep -qx '# Do not raise these' "$STUB/asked" || fail "with the rule off, the review is not told what not to raise"
   [ "$(st 'select(.issue == 8 and .step == "landed") | .sha')" = "$(git -C "$R" rev-parse HEAD)" ] && [ -z "$(st 'select(.step == "blocked")')" ] \
@@ -265,17 +282,13 @@ t_visibleoff() {
     || fail "with the rule off, the review still asks about the approval line, or no longer asks the USER-VISIBLE question"
   loop check || fail "the record check refuses the lines of a card landed with the rule off"
 }
-# A card that changes only .claude/ (and a test under web/, tests aside), reviewed `yes`, lands with no approval
-# line: no stop, no comment, and its review line still keeps the answer.
+# A card that changes only .claude/ (and a test under web/, tests aside), reviewed `yes`, passes the gate with no
+# approval line: no stop, so no comment.
 t_visibletooling() {
-  visiblestart 22
-  echo 'mkdir -p .claude/dashboard web/__tests__; echo panel >> .claude/dashboard/x.js; echo t >> web/__tests__/pay.test.ts' > "$STUB/build"
-  printf '%s\n' "$YES" 'VERDICT: GO' > "$STUB/review.1"; comments=$(wc -l < "$STUB/comments")
-  loop run >/dev/null || fail "run of a tooling-only card exited non-zero"
-  [ "$(st 'select(.issue == 22 and .step == "landed") | .sha')" = "$(git -C "$R" rev-parse HEAD)" ] && [ "$(cat "$R/.claude/dashboard/x.js")" = panel ] \
-    && [ "$(wc -l < "$STUB/comments")" = "$comments" ] || fail "a visible card that touches no product code did not land without Dana's yes: $(steps 22)"
-  [ "$(st 'select(.issue == 22 and .step == "review") | .visible')" = "yes: guests see a new Pay button" ] || fail "the tooling card's review line lost its USER-VISIBLE answer: $(steps 22)"
-  loop check || fail "the record check refuses the lines of a tooling card that landed on a yes"
+  setup '[]'; fx_wt 'mkdir -p .claude/dashboard web/__tests__; echo panel >> .claude/dashboard/x.js; echo t >> web/__tests__/pay.test.ts' b.txt base
+  visrun "$(issue 222026-01-01)" 'USER-VISIBLE: yes: guests see a new Pay button' 'VERDICT: GO'
+  [ "$GATE" = '{"seen":"none","nyes":"0","ybase":"0","heldto":"","vmode":"","yfile":"","vis":"yes: guests see a new Pay button","rc":"0","err":"","yesfrom":""}' ] && [ ! -e "$FXWT.body" ] \
+    || fail "a visible change that touches no product code did not pass the gate without Dana's yes: $GATE"
 }
 # A card whose change names only a file under web/, or files under both .claude/ and web/, touches product code: it
 # stops for Dana's yes as t_visibleyes's card does (a.txt beside web/pay.ts). Read as the loop reads a card's
