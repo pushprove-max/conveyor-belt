@@ -116,7 +116,9 @@ t_controlpick() {
   [ "$(loop health | jq -c '[.state, .guard.reading, .guard.missing]')" = '["running",null,true]' ] || fail "no reading paused the loop, or health did not say it is missing: $(loop health)"
   echo '{"seven_day":{"utilization":49}}' > "$STUB/limit"; loop run >/dev/null 2>&1 || fail "run exited non-zero"
   [ "$(picks)" = "9 5 " ] || fail "picks under the guard with #9 ordered first, #8 held and P1 off: $(picks)"
-  # Area labels never built: #6 is P1 and billing; P1 on again, billing still off.
+  # Area labels never built: #6 is P1 and billing; P1 on again, billing still off. This is a real loop run, as only
+  # one shows that a run, which asks GitHub (the stub) for the open issues with their labels, writes no picked line
+  # for #6; the dry pick reads a file of issues and writes nothing. Nothing is picked, so it builds no card.
   ctl rules P1=on area:billing=off >/dev/null; loop run >/dev/null 2>&1; [ "$(picks)" = "9 5 " ] || fail "an issue of an area never built was picked: $(picks)"
   out=$(loop snapshot --fresh)
   [ "$(jq -c '.queue.skipped | map([.issue, .rule])' <<<"$out")" = '[[6,"area:billing"]]' ] || fail "the skipped rule of #6: $(jq -c .queue <<<"$out")"
