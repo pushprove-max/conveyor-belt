@@ -29,14 +29,17 @@
 # has begun filing its follow-ups or landing is left to finish: stopped there, it could leave filed issues with no
 # landing. So is a card that has begun filing the slices of a split (splitcheck(), growcheck(): lib/slices.sh) or has
 # filed them: stopped, its issue would go back to the queue with its slices open. Under the lock, none of them can
-# begin either while this asks. Each card that ends has its processes killed here, all of them (the card, its session
+# begin either while this asks. A card that waits at its land step for a release run (releasewait(), lib/push.sh)
+# has begun neither (a follow-up it filed before the hold refused its landing was withdrawn), and ends (bug #1076:
+# left, it landed after the stop once the run ended). Each card that ends has its processes killed here, all of them (the card, its session
 # or review, the timeout around it), and prints its card id.
 halt() { # <pid> <card> lines
   local p c
   while read -r p c; do
     [ -n "$p" ] && kill -0 "$p" 2>/dev/null || continue
-    stdb ask card "$c" 2>/dev/null | jq -es --arg c "$c" 'map(select(.card == $c)) | any(.step | IN("filed", "landed", "closed", "blocked"))
-      or any(.[]; (.split, .grown) | objects | .filed | type == "array" and length > 0) or (last | .step == "start" and (.of | IN("file", "land")))' >/dev/null 2>&1 && continue
+    stdb ask card "$c" 2>/dev/null | jq -es --arg c "$c" 'map(select(.card == $c)) | (last | .step == "start" and .waitFor == "release") as $w
+      | ($w | not) and (any(.step | IN("filed", "landed", "closed", "blocked")) or (last | .step == "start" and (.of | IN("file", "land"))))
+      or any(.[]; (.split, .grown) | objects | .filed | type == "array" and length > 0)' >/dev/null 2>&1 && continue
     kill -TERM $(tree "$p") 2>/dev/null; echo "$p $c"
   done
 }

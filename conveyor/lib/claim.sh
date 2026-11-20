@@ -975,7 +975,18 @@ PASSED="an ordered or ready card went past it since its claim; nothing was lande
 # first; one that merges so is only this (settle() fits it with the same merge).
 STALE="main moved since its checks and tests ran; nothing was landed"
 NOTWORK="the main checkout is not a working checkout (core.bare is true): set core.bare to false" # what land() prints for that
+# What land() prints while a release run is under way (relhold(), lib/push.sh): card() waits for it to end (releasewait()).
+RELHELD="a release run is under way, so no card lands on main until it ends; nothing was landed"
+# The landing holds its share of RELLANDING (holdtake(), lib/push.sh) throughout, so a release run that begins
+# meanwhile waits for it to end before its suite reads main.
 land() { # <card> <issue> <worktree> <commit message> [extra json for the landed line] [those five of each further card of a batch, in its order]
+  local hk rc
+  holdtake; rc=$?
+  [ $rc = 0 ] || { if [ $rc = 1 ]; then echo "$RELHELD"; else echo "the release hold could not be made; nothing was landed"; fi; return 1; }
+  hk=$RELHOLDFD
+  landone "$@" {hk}>&-; rc=$?; exec {hk}>&-; return $rc
+}
+landone() { # <the arguments of land()>
   local err sha l p base tip want x i h b='[]' a=("$@") g=() ls=() wts=() shas=() paths=()
   [ $# -le 5 ] || b=$(for ((i = 0; i < $#; i += 5)); do printf '%s\n' "${a[i]}"; done | jq -Rsc 'split("\n") | map(select(. != ""))')
   onmain() { [ "$(git symbolic-ref -q HEAD)" = "refs/heads/$BRANCH" ] || { echo "main's checkout is not on the $BRANCH branch; nothing was landed"; return 1; }; }

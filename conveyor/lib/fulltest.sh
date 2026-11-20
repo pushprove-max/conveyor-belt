@@ -157,7 +157,7 @@ suiteadd() { # <line>
 }
 FULL_OUTSIDE='ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|Could not resolve host|Network is unreachable|Temporary failure in name resolution|Connection (refused|reset|timed out)|No space left on device|Disk quota exceeded|Cannot allocate memory|out of memory'
 fulltest() { # [push | anyway <run id> [--by <who>]]
-  local how=${1:-run} by=owner cmd lk sha o='' last=null id=${2:-} dead
+  local how=${1:-run} by=owner cmd lk hk='' sha o='' last=null id=${2:-} dead
   case $#:${1:-} in
     0: | 1:push | 2:anyway) ;;
     4:anyway) [ "$3" = --by ] && [[ $4 == *[![:space:]]* && $4 != *$'\n'* ]] || how=bad; by=$4 ;;
@@ -183,13 +183,16 @@ fulltest() { # [push | anyway <run id> [--by <who>]]
     sha=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}") || { echo "conveyor: main could not be read; nothing run" >&2; return 1; }
   fi
   [ "$how" = run ] || o=$(fullowed "$sha") || { echo "conveyor: no landed commit of ${sha:0:12} is unpushed; nothing pushed" >&2; return 2; }
+  # Push anyway pushes at once: its share of the release hold is taken before the answer says it pushes, and its run
+  # keeps it to its end (RELKEPT, push()), so a release run that begins meanwhile waits for the push.
+  [ "$how" != anyway ] || relshare || return
   jq -cn --arg s "$sha" --arg h "$how" --arg t "$(clock)" '{since: $t, sha: $s, how: $h}' > "$FULLTEST.running" || return 1
-  # The run holds the lock (lk) to its end. It is given no other descriptor of this process's: the Board's ssh ends
-  # with this process, not with the run.
+  # The run holds the lock (lk), and Push anyway's share of the release hold (hk), to its end. It is given no other
+  # descriptor of this process's: the Board's ssh ends with this process, not with the run.
   ( trap '' HUP; exec {LOGFD}>&- && exec {LOGFD}>&2
     jq -c --argjson p "$BASHPID" '. + {pid: $p}' "$FULLTEST.running" > "$FULLTEST.running.new" && mv -f "$FULLTEST.running.new" "$FULLTEST.running"
-    fullrun "$how" "$sha" "$cmd" "$o" "$by" "$last"; rm -f "$FULLTEST.running" ) > "$FULLTEST.log" 2>&1 < /dev/null 8>&- &
-  exec {lk}>&-
+    RELKEPT=$hk fullrun "$how" "$sha" "$cmd" "$o" "$by" "$last"; rm -f "$FULLTEST.running" ) > "$FULLTEST.log" 2>&1 < /dev/null 8>&- &
+  exec {lk}>&-; [ -z "$hk" ] || exec {hk}>&-
   case $how in
     run) echo "conveyor: the full test suite is running on ${sha:0:12}; it pushes nothing" ;;
     push) echo "conveyor: the full test suite is running on ${sha:0:12}; green, that commit is pushed" ;;
@@ -199,12 +202,13 @@ fulltest() { # [push | anyway <run id> [--by <who>]]
 # `conveyor.sh push-now` (the Board's "Push now"): what landed and is not pushed, pushed as the loop pushes it while the
 # rule "Push when a card lands" is on, with no full test run: push() of main through the project's pre-push hook, under
 # the card of the newest landing origin lacks, a failure recorded as that card's push line (kind check or transport).
-# Refused (exit 2), with the reason and nothing changed, when main holds no landed commit origin lacks, or while a full
-# test run holds its lock (Run full test suite, Push landed or Push anyway). The ask returns once the push has started:
+# Refused (exit 2), with the reason and nothing changed, when main holds no landed commit origin lacks, while a full
+# test run holds its lock (Run full test suite, Push landed or Push anyway), or while a release run is under way
+# (relshare()). The ask returns once the push has started:
 # it goes on in the background (its output in $PUSHNOW_LOG), so the Board is not kept waiting for the pre-push hook.
 PUSHNOW_LOG=${STATE%/*}/pushnow.log
 pushnow() {
-  local lk sha o c n
+  local lk hk sha o c n
   [ $# = 0 ] || { echo "usage: conveyor.sh push-now" >&2; return 2; }
   mkdir -p "$CARDS/fulltest" && { exec {lk}>>"$FULLTEST.lock"; } 2>/dev/null || { echo "conveyor: the full test's lock could not be made; nothing pushed" >&2; return 1; }
   flock -n "$lk" || { exec {lk}>&-; echo "conveyor: a full test run is under way$(jq -r '" (\(.how), since \(.since), on \(.sha[0:12]))"' "$FULLTEST.running" 2>/dev/null); nothing pushed" >&2; return 2; }
@@ -212,10 +216,24 @@ pushnow() {
   sha=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}") || { echo "conveyor: main could not be read; nothing pushed" >&2; return 1; }
   o=$(fullowed "$sha") || { echo "conveyor: no landed commit of main (${sha:0:12}) is unpushed; nothing pushed" >&2; return 2; }
   read -r c n <<<"$o"
+  # The share of the release hold is taken here, before the answer says main is pushed, and the job keeps it to its
+  # end (RELKEPT, push()): a release run that begins meanwhile waits for the push rather than refusing it.
+  relshare || return
   # The push file names this job while it pushes (pushing()); it is cleared at the end only while it still does.
   ( trap '' HUP; exec {LOGFD}>&- && exec {LOGFD}>&2
-    push "$c" "$n"; [ "$(jq -r '.pid' "$PUSHING" 2>/dev/null)" != "$BASHPID" ] || rm -f "$PUSHING" ) > "$PUSHNOW_LOG" 2>&1 < /dev/null 8>&- &
+    RELKEPT=$hk push "$c" "$n"; [ "$(jq -r '.pid' "$PUSHING" 2>/dev/null)" != "$BASHPID" ] || rm -f "$PUSHING" ) > "$PUSHNOW_LOG" 2>&1 < /dev/null 8>&- &
+  exec {hk}>&-
   echo "conveyor: main (${sha:0:12}) is being pushed through the pre-push hook, with no full test run"
+}
+# The share of the release hold (holdtake(), lib/push.sh) of a push that the caller starts in the background, in the
+# caller's hk, for the push to keep (RELKEPT, push()). Refused (exit 2, the reason RELNOPUSH) while a release run is
+# under way.
+relshare() {
+  local rc
+  holdtake; rc=$?
+  [ $rc != 0 ] || { hk=$RELHOLDFD; return 0; }
+  [ $rc = 1 ] || { echo "conveyor: the release hold could not be made; nothing pushed" >&2; return 1; }
+  echo "conveyor: $RELNOPUSH" >&2; return 2
 }
 # "<card> <issue>" of the newest landing in <commit> that origin lacks; fails when there is none.
 fullowed() { # <commit>
@@ -227,10 +245,13 @@ fullowed() { # <commit>
   return 1
 }
 fullline() { jq -c --arg t "$(clock)" --arg i "$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')" '{time: $t, id: $i} + .' <<<"$1" >> "$FULLTEST"; } # <the line, without its time and id>
-# The push of <commit> (push()), as {ok, reason}: ok once origin holds it; else the reason of the card's last push line.
+# The push of <commit> (push()), as {ok, reason}: ok once origin holds it; else the reason of the card's last push line,
+# or, when a release run refused it (push() exit 3, which writes no push line), that reason (RELNOPUSH).
 fullpush() { # <commit> <card> <issue>
-  push "$2" "$3" "$1" > /dev/null 2>&1
+  local rc
+  push "$2" "$3" "$1" > /dev/null 2>&1; rc=$?
   if atorigin "$1"; then echo '{"ok":true,"reason":null}'
+  elif [ $rc = 3 ]; then jq -cn --arg r "$RELNOPUSH" '{ok: false, reason: $r}'
   else stdb ask card "$2" | jq -cs --arg c "$2" '{ok: false, reason: (map(select(.step == "push" and .card == $c and .result == "fail")) | last | .reason // "the push did not reach origin")}'; fi
 }
 fullrun() { # <run | push | anyway> <commit> <command> <"card issue" to push under> <who> <the red run's line (anyway)>

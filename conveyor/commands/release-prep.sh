@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # `conveyor.sh release-prep <version>` and `conveyor.sh release <version>`: a release, made on the build machine
 # (docs/releases.md, Making a release). Only the owner decides a release: the Foreman runs `release` only after the
-# owner says yes in chat. One run of either at a time per project ($CARDS/release/lock).
+# owner says yes in chat. One run of either at a time per project ($CARDS/release/lock). While either runs, and through
+# the whole run release-run starts, no card lands on main and nothing is pushed (the release hold, relhold(), lib/push.sh).
 # release-prep runs the pack's whole suite (test.full) on the remote's head of the default branch, in a worktree of
 # that commit alone ($CARDS/release/wt), and posts the result on that commit as the commit status
 # conveyor/release-suite: success when the suite passed, failure when it did not. The whole-suite runs share one
@@ -271,11 +272,13 @@ relfirst() { # <version> <commit>
   done < <(git ls-tree --name-only "$2" docs/ 2>/dev/null | grep '\.md$')
   printf '%s\n' "$p"
 }
-# The release lock (its descriptor RELLK), held until the command ends. 1: it could not be made; 2: another run holds it.
+# The release lock (its descriptor RELLK), held until the command ends, then the release hold (relhold(),
+# lib/push.sh): no card lands on main while the command runs. 1: either could not be made; 2: another run holds the lock.
 RELLK=''
 rellock() { # <command name>
   mkdir -p "$CARDS/release" && { exec {RELLK}>>"$CARDS/release/lock"; } 2>/dev/null || { echo "conveyor: $1: its lock could not be made; nothing run" >&2; return 1; }
   flock -n "$RELLK" || { echo "conveyor: $1: release-prep or release is already running; this one is not started" >&2; return 2; }
+  relhold "$1"
 }
 # The suite's mode, serial unless the command is given --parallel (release-prep, release-run): the record's mode.
 RELMODE=serial
@@ -694,6 +697,10 @@ releasego() { # <version> [prep: release-prep alone | anyway <who>]
     && [ "$ok" = "$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)" ] || ok=''; }
   ( trap '' HUP; exec {LOGFD}>&- && exec {LOGFD}>&2
     export CONVEYOR_RELEASE_PID=$BASHPID
+    # The release hold, from before release-prep to the end of release (also between the two: a card landed there moved
+    # main under the release); they inherit it.
+    relhold release-run || exit 1
+    export CONVEYOR_RELEASE_HOLD=$RELHOLD
     # release is told the commit release-prep's suite passed on, so a main that moved meanwhile is refused, never run
     # and released again without the owner's second press.
     if [ "${2:-}" = anyway ]; then bash "$HERE/conveyor.sh" release "$1" --anyway --by "$3"

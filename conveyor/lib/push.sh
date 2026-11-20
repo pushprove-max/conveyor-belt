@@ -69,10 +69,22 @@ depsreason() { # <the folders, from depsmissing>
 # Given a commit (the Board's Push landed: the one its full test run tested, fulltest()), that commit is pushed, not
 # main as it is then. One the remote refuses for a commit of its own is not merged and pushed again: the merge is a
 # commit the run did not test, so the push fails, saying so, and main is left as it is. One push at a time, the loop's or the Board's: they share the push worktree, so each holds $PUSHED.lock throughout.
+# While a release run is under way nothing is pushed (relhold(), below): the push fails with exit 3, saying so
+# (RELNOPUSH), with no push line, and the loop tries it again later. A caller that said it pushes before this runs
+# (pushnow(), fulltest() anyway: lib/fulltest.sh) took its share of the hold first (holdtake()) and names it in
+# RELKEPT: the push keeps that one, so a release run that began meanwhile waits for it rather than refusing it.
+RELNOPUSH="a release run is under way, so nothing is pushed until it ends"
+RELKEPT=''
 push() { # <card> <issue> [<commit>]
-  local lk rc
+  local lk rc hk=$RELKEPT
   { exec {lk}>>"$PUSHED.lock"; } 2>/dev/null && flock "$lk" || { echo "conveyor: the push lock could not be taken; nothing pushed" >&2; return 1; }
-  pushone "$@" {lk}>&-; rc=$?; exec {lk}>&-; return $rc
+  if [ -z "$hk" ]; then
+    holdtake; rc=$?
+    [ $rc = 0 ] || { exec {lk}>&-; if [ $rc = 1 ]; then echo "conveyor: $RELNOPUSH" >&2; return 3
+      else echo "conveyor: the release hold could not be made; nothing pushed" >&2; fi; return 1; }
+    hk=$RELHOLDFD
+  fi
+  pushone "$@" {lk}>&- {hk}>&-; rc=$?; exec {lk}>&-; [ -n "$RELKEPT" ] || exec {hk}>&-; return $rc
 }
 pushone() { # <card> <issue> [<commit>]
   local wt=$CARDS/push sha out rc=0 a c n s t state round=0 before=() got=() pend=() rest=() took=$SECONDS try m want=${3:-} at la to nv='' ff=() fl='' ho=''; local -A said=()
@@ -513,11 +525,15 @@ prff() { # <origin's default branch, fetched>
 # ($PUSHED.prtested). A run that fails goes to the main-fix card as a push's does and holds the merge until main moves
 # (checkheld()); a merge GitHub refused is not asked again of the same commit. The rule and the belt are read again
 # after that run, which takes minutes: a card the loop picked meanwhile, or the rule changed, holds the merge.
+# Nothing merges while a release run is under way (relhold(), below): the next idle look tries again.
 idlemerge() {
-  local lk rc
+  local lk rc hk
   idlenow || return 0
   { exec {lk}>>"$PUSHED.lock"; } 2>/dev/null && flock "$lk" || return 1
-  idleone {lk}>&-; rc=$?; exec {lk}>&-; return $rc
+  holdtake; rc=$?
+  [ $rc = 0 ] || { exec {lk}>&-; [ $rc = 1 ]; return; }
+  hk=$RELHOLDFD
+  idleone {lk}>&- {hk}>&-; rc=$?; exec {lk}>&- {hk}>&-; return $rc
 }
 # Merge PR idle holds now: the rule is idle, Land as pr, and every card in the card records is closed (filed, landed,
 # closed or blocked).
@@ -580,6 +596,65 @@ relhead() {
     sha=$out
   fi
   echo "$sha"
+}
+# The release hold (issue 1076): from the start of release-prep to the end of release, a release run holds RELHOLD
+# alone (relhold()), and while it does no card lands on main (land(), lib/claim.sh) and nothing is pushed (push(),
+# idlemerge()), so main does not move under the run's suite. A landing or a push holds RELLANDING shared for as long
+# as it runs (holdtake(), with no wait), and the run, once it holds RELHOLD, takes RELLANDING alone too, so it starts
+# only once the landings and pushes under way have ended; none starts after RELHOLD is taken, so a busy belt does not
+# keep the run waiting. Each process of the run keeps the hold it inherited, and the run's end and a stop end them
+# all: it is free once the run has ended in any way (released, failed, refused, stopped or killed). Both files are
+# in the state folder, beside the push lock, so a landing leaves nothing in the cards folder.
+RELHOLD=${STATE%/*}/release.hold
+RELLANDING=${STATE%/*}/release.landing
+# relhold <command name>: both, kept until this process ends, for release-prep and release (rellock()) and for the
+# run release-run starts (releasego()). Its release-prep and release are told by CONVEYOR_RELEASE_HOLD (RELHOLD's
+# path) that the run that started them holds it: they inherit it, and a second hold of their own would wait for ever.
+relhold() {
+  local h l
+  if [ "${CONVEYOR_RELEASE_HOLD:-}" = "$RELHOLD" ]; then unset CONVEYOR_RELEASE_HOLD; return 0; fi
+  { exec {h}>>"$RELHOLD" {l}>>"$RELLANDING"; } 2>/dev/null || { echo "conveyor: $1: the release hold could not be made; nothing run" >&2; return 1; }
+  flock -x "$h" || { echo "conveyor: $1: the release hold could not be taken; nothing run" >&2; return 1; }
+  flock -n -x "$l" && return 0
+  echo "conveyor: $1: a card lands on $BRANCH, or a push runs: the run starts once it ends"
+  flock -x "$l" || { echo "conveyor: $1: the release hold could not be taken; nothing run" >&2; return 1; }
+}
+# A landing's or a push's share of RELLANDING, with no wait, while no release run holds RELHOLD (both read shared, so
+# landings and pushes never stop each other): its descriptor in RELHOLDFD, for the caller to close as it ends.
+# 1: a release run holds RELHOLD; 2: a file could not be made.
+RELHOLDFD=''
+holdtake() {
+  local h
+  RELHOLDFD=''
+  { exec {RELHOLDFD}>>"$RELLANDING" {h}>>"$RELHOLD"; } 2>/dev/null || { RELHOLDFD=''; return 2; }
+  flock -n -s "$RELHOLDFD" && flock -n -s "$h" && { exec {h}>&-; return 0; }
+  exec {RELHOLDFD}>&- {h}>&-; RELHOLDFD=''; return 1
+}
+# Whether a release run holds RELHOLD now.
+relheld() {
+  local h rc=1
+  { exec {h}>>"$RELHOLD"; } 2>/dev/null || return 1
+  flock -n -s "$h" || rc=0
+  exec {h}>&-; return $rc
+}
+# A card at its land step waits while a release run holds RELHOLD, its live record saying so ("waiting for the
+# release", which the Board shows) and brought up to date as it waits, and <worktree>.idle standing, as for a red main
+# (mainwait(), lib/testrun.sh). It goes on to land once the run has ended. Its wait opens with a start line of the land
+# step marked as this wait (waitFor: release): the snapshot shows a card's live record only after a start line of its
+# step, and stop (halt(), lib/run.sh) ends a card that waits, as nothing of its landing has begun. The landing itself
+# opens with its own start line (began(), card()).
+releasewait() { # <card> <issue> <worktree>
+  local at v
+  relheld || return 0
+  record "$1" "$2" start ok '{"of":"land","waitFor":"release"}'
+  at=$(date -u +%FT%TZ)
+  while relheld; do
+    v=$(jq -r '.version // empty' "$CARDS/release/run.json" 2>/dev/null)
+    jq -cn --arg at "$at" --arg v "$v" '{step: "land", at: $at, last: (now | todate), turns: 0, files: {run: 0, of: null}, tests: null,
+      action: "waiting for the release\(if $v == "" then "" else " of \($v)" end): no card lands on main until it ends"}' > "$3.live.tmp" 2>/dev/null && mv -f "$3.live.tmp" "$3.live"
+    : > "$3.idle"; sleep "$LIVE"
+  done
+  rm -f "$3.live" "$3.idle"
 }
 # The push that is owed, as "<card> <issue> <sha>" of the last landing: its commit is in main and not at origin.
 # None while the control record's rule "Push when a card lands" is off (rules.push: land only): the landed commits

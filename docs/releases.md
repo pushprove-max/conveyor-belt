@@ -116,6 +116,20 @@ that commit. When `main` on GitHub has a commit that
 `conveyor/landing` does not have, the release stops before the merge. When GitHub refuses the merge, the release
 stops with GitHub's reason, and the pull request stays open.
 
+## Cards during a release
+
+From the start of `release-prep` to the end of `release`, no card lands on `main`, and Conveyor pushes nothing to
+it. When `conveyor.sh release-run` runs the two commands, this is also true between them. Thus `main` does not move
+while the suite runs, and the release does not stop because `main` moved. Cards continue to build, get reviews and run
+their tests. A card that gets to its land step waits there, and the Board shows it as "waiting for the release". A
+branch that you land with `conveyor.sh land-branch` waits in the same way. Merge PR `idle` does not merge the pull
+request. On the Board, **Push now** and **Push anyway** push nothing and say that a release run is under way.
+When **Push landed** finds the commit green, Conveyor does not push it, and the result gives the same reason. A run that starts while a card lands or a push runs waits until that card or push is done.
+
+When the run ends, the waiting cards land in their usual order. This is true when the release goes out, and also when
+the run fails, when a check stops it, and when you stop it (`conveyor.sh release-run stop`, or **Stop** on the Board).
+When `release-prep` asks for the release notes, the run ends. Thus the commit of the notes in step 3 does not wait.
+
 ## Fix cards of a failed suite
 
 When the suite of step 4 fails, file one fix card for each failure. Put the line `Release fix: <version>` in the body

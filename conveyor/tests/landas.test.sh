@@ -249,6 +249,13 @@ t_pridle() {
   [ "$(cat "$STUB/ran" 2>&1)" = "$sha lib/m.test.js" ] || fail "the push run did not run card 1's test file on the new head: $(cat "$STUB/ran" 2>&1)"
   [ ! -e "$STUB/during" ] && [ "$(la_prst 7)" = OPEN ] || fail "the pull request merged though the rule was set to button while its push run ran"
   loop control pr-merge idle > /dev/null || fail "control pr-merge idle was refused"
+  # Bug (#1076): it merged while a release run was under way, so main moved under the run's suite. A stand-in run
+  # holds the release hold until the case lets it go.
+  local hp
+  ( exec {hp}>>"$ST/release.hold" && flock -x "$hp" && touch "$STUB/held" && while [ ! -e "$STUB/letgo" ]; do sleep 0.1; done ) & hp=$! # sleep: the stand-in run holds the hold until the case lets it go
+  wait_until '[ -e "$STUB/held" ]' || fail "the stand-in run did not take the release hold"
+  la_eng idlemerge; touch "$STUB/letgo"; wait "$hp"
+  [ "$(la_prst 7)" = OPEN ] || fail "the pull request merged while a release run was under way"
   la_eng idlemerge
   [ "$(la_prst 7)" = MERGED ] && git -C "$T/$CASE/origin" merge-base --is-ancestor "$sha" main || fail "the pull request did not merge once the belt was empty and its run passed"
 }

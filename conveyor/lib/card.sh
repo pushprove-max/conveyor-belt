@@ -810,6 +810,9 @@ card() { # <card> <issue> [<branch> <tip>]
       # did not move (its batch run on main as it moved, rebatch(), lands no other card), so it never lands on that finding.
       [ "$apart" != lint ] || continue
       while :; do
+        # While a release run is under way (relhold(), lib/push.sh) it waits here, at its land step, and lands once the
+        # run has ended: on main as the release left it, where it is fitted again (STALE, below).
+        releasewait "$c" "$n" "$wt"
         # An ordered or a ready card went past this one since its claim (it holds its files only from its landing step,
         # so that is where it is passed): it claims again, waits for that card, and is fitted onto main as that card
         # left it. Gone past by an ordered card, it is reviewed again when main moved meanwhile; gone past only by ready
@@ -859,14 +862,14 @@ card() { # <card> <issue> [<branch> <tip>]
         # A batch that did not land. Main moved again before it could: it stays a batch, and its run is found to stand
         # on main as it is now, or it is tested again there (rebatch()). Else its other cards wait on at their claims,
         # and the card is tested alone, then tries alone, in no batch (its batch's run judged it with them).
-        if [ ${#mates[@]} != 0 ] && [ "$t" != "$STALE" ]; then
+        if [ ${#mates[@]} != 0 ] && [ "$t" != "$STALE" ] && [ "$t" != "$RELHELD" ]; then
           unmate
           [[ $t == "landed as "* ]] || { echo "conveyor: card $c: its batch did not land, so it is tested alone: $t"; rm -f "$wt.ready"; continue 2; }
         fi
-        [ "$t" = "$PASSED" ] || [ "$t" = "$STALE" ] || break 2
-        # Passed, or main moved, while it went to land: its follow-ups are withdrawn (filed again when it comes back to
-        # land). Main moved: it is fitted onto main as it is now and its checks run again there, its tests only when the
-        # fitted change is not the one that passed.
+        [ "$t" = "$PASSED" ] || [ "$t" = "$STALE" ] || [ "$t" = "$RELHELD" ] || break 2
+        # Passed, or main moved, or a release run began, while it went to land: its follow-ups are withdrawn (filed again
+        # when it comes back to land). A release run: it waits for its end above, a batch kept. Main moved: it is fitted
+        # onto main as it is now and its checks run again there, its tests only when the fitted change is not the one that passed.
         [ -z "$ups" ] || unfile "$n" "$wt.review" $(jq -r '.[]' <<<"$ups"); ups=''; left=''; dec=''
         [ "$t" != "$STALE" ] || continue 2
       done
