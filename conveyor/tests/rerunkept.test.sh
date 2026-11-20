@@ -8,19 +8,24 @@
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
-# rerunsetup, rerunfiles, ran, rerunedit, rerunstep, rerunwt and tline are rerun.test.sh's: the runner loads every case
+# rerunsetup, rerunfiles, ran, rerunedit, rerunstep and rerunwt are rerun.test.sh's: the runner loads every case
 # file into one shell. A change to rerun.test.sh's helpers or setup runs this file too, through its link in .conveyor/test-links.json.
 # So is resumed port.test.sh's, through that file's link.
 
 # Bug this guards against: a session that brings the change onto another HEAD and edits it where main changed
 # nothing (here a.txt, the card's own file, on a HEAD whose new commit changes no file) has edited it outside any
-# conflict: its passes are not kept, and the run after it is of the whole selection.
+# conflict: its passes are not kept, and the run after it is of the whole selection (tests(): rerunsince() returns 2),
+# not refused. The card's failed test line is in the records, so a whole run taken as one that cannot be kept
+# (rerunsince()'s 1) would be refused and run flaky alone.
 t_rerunmoved() {
-  rerunsetup '1 fail flaky' '2 fail flaky'; rerunfiles
-  echo 'echo two >> a.txt; [ "$(wc -l < "$STUB/sessions")" = 1 ] || git update-ref HEAD "$(git commit-tree "HEAD^{tree}" -p HEAD -m moved)"' > "$STUB/build"
-  loop run 1 > /dev/null || fail "run exited non-zero"
-  [ "$(st 'select(.step == "fix") | .step' | wc -l)" = 1 ] || fail "no fix session ran"
-  [ ! -e "$STUB/rerun.3" ] && [ "$(ran 3)" = "one two flaky three" ] || fail "the run after a session that moved HEAD was not of the whole selection: $(ran 3)"
+  rerunwt 'echo two >> a.txt' '1 fail flaky' '2 fail flaky'
+  ! rerunstep || fail "the first test step passed"
+  echo '{"card":"c7","issue":7,"step":"test","time":"2026-01-01T00:01:00Z","tokens":{"claude":0,"codex":0},"result":"fail","sha":"","reason":"","repo":"main"}' >> "$ST/cards.jsonl"
+  # The fix session: it edits a.txt again and moves HEAD to a commit that changes no file.
+  rerunedit 'echo two >> a.txt; git update-ref HEAD "$(git commit-tree "HEAD^{tree}" -p HEAD -m moved)"' || fail "the fix session's edit could not be made"
+  rerunstep || fail "the step after the session that moved HEAD did not pass: $(ran 3)"
+  [ ! -e "$STUB/rerun.3" ] && [ "$(ran 3)" = "one two flaky three" ] || fail "the run after a session that moved HEAD was not of the whole selection: $(ran 3): $(cat "$STUB/rerun.3" 2>&1)"
+  [ "$(jq -r '.refused // "none"' "$T/$CASE/cards/c7.testrec")" = none ] || fail "the whole run after a session that moved HEAD was refused: $(cat "$T/$CASE/cards/c7.testrec")"
 }
 
 # Issue 461 (#415 ran all 45 of its test files twice on 2026-11-14): a test step that would run the whole selection
@@ -55,40 +60,59 @@ t_rerunrefused() {
     || fail "health does not list the refused run for the Foreman: $(loop health | jq -c .refused)"
 }
 
+# The landing's move of card c7's change onto main as it is now: settle() (lib/claim.sh) at its landing step, as card()
+# calls it, with no card. Main has changed a.txt as the change does, so the change's three-way merge onto main
+# conflicts there, and session() (a stand-in: no model) makes <edit> as the session that brings the change onto main.
+# settle() itself decides from that edit whether the merge is in doubt (inconflicts()) and writes <worktree>.whole for
+# tests(); checked() (the Done-when check of a doubtful merge's reply) passes. run.out ends with "settle: <its exit>".
+rerunfit() { # <the session's edit>
+  fx_in 'cd "$R" || exit 9; caught="" waitsec=0 behind="[]" parsecheck=""
+    session() { (cd "$1" && '"$1"') > /dev/null 2>&1; echo "{}"; }
+    checked() { :; }
+    settle c7 7 "$CONVEYOR_CARDS/c7" "Build the issue." land "$(issue 7 2026-01-01)"; echo "settle: $?"'
+}
+
 # A merge in doubt (the session that brought the change onto main edited it outside the conflicts: here b.txt beside
-# the conflict in a.txt) runs the whole selection, and refuses nothing: the merge may have broken what passed before.
+# the conflict in a.txt, as settle() finds it: inconflicts()) runs the whole selection, and refuses nothing (tests(),
+# given the <worktree>.whole that settle() wrote): the merge may have broken what passed before. The card's test line is in the records, so a
+# run with no list that took no notice of the doubt would be refused.
 t_rerunmergedoubt() {
-  rerunsetup; rerunfiles
-  echo l1 > "$R/a.txt"; git -C "$R" add a.txt; git -C "$R" commit -qm "a.txt"
-  echo "if grep -q '^# Landing conflict' \"\$STUB/brief\"; then sed -i.bak 's/^main1\$/seven/' a.txt; rm -f a.txt.bak; echo b > b.txt; else sed -i.bak 's/^l1\$/seven/' a.txt; rm -f a.txt.bak; fi" > "$STUB/build"
-  echo '[ -e "$STUB/moved" ] || { : > "$STUB/moved"; echo main1 > "$R/a.txt"; git -C "$R" add a.txt; git -C "$R" commit -qm "main moves"; }' > "$STUB/pre"
-  loop run 1 > /dev/null || fail "run exited non-zero"
-  st 'select(.step == "rebase") | .reason' | grep -q '^rebase onto main conflicts' || fail "#7 did not go to the rebuild session: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
+  rerunwt 'echo seven > a.txt'
+  rerunstep || fail "the first test step did not pass: $(ran 1)"
+  echo '{"card":"c7","issue":7,"step":"test","time":"2026-01-01T00:01:00Z","tokens":{"claude":0,"codex":0},"result":"pass","sha":"","reason":"","repo":"main"}' >> "$ST/cards.jsonl"
+  echo main1 > "$R/a.txt"; git -C "$R" commit -qam "main moves" || fail "main could not move"
+  rerunfit 'echo seven > a.txt; echo b > b.txt'
+  [ "$(tail -n 1 "$T/$CASE/run.out")" = "settle: 2" ] || fail "settle() did not bring the change onto main by the session: $(cat "$T/$CASE/run.out")"
+  # settle()'s own finding, apart from tests(): rerunsince() also runs the whole selection for b.txt, a file main did
+  # not change, so the run below would not show a settle() that took the edit as inside the conflict.
+  [ -s "$T/$CASE/cards/c7.whole" ] && [ ! -e "$T/$CASE/cards/c7.rerun" ] \
+    || fail "settle() did not take the session's edit of b.txt, outside the conflict in a.txt, as a merge in doubt: $(cat "$T/$CASE/run.out")"
+  rerunstep || fail "the step after the merge in doubt did not pass: $(ran 2)"
   [ "$(ran 2)" = "one two flaky three" ] && [ ! -e "$STUB/rerun.2" ] || fail "the run after a merge in doubt was not of the whole selection: $(ran 2): $(cat "$STUB/rerun.2" 2>&1)"
-  [ "$(tline 2 '.refused // "none"')" = none ] || fail "a merge in doubt's whole run was refused: $(tline 2 tojson)"
+  [ "$(jq -r '.refused // "none"' "$T/$CASE/cards/c7.testrec")" = none ] || fail "a merge in doubt's whole run was refused: $(cat "$T/$CASE/cards/c7.testrec")"
 }
 
 # Bug (issue 460: #415 ran its whole selection again each time main moved under it, though main's new commits touched
-# almost nothing its tests use). #7 changes a.txt and passes; during its run main changes a.txt's same line, and y.txt,
-# which selects c.test. The rebuild session brings #7 onto main, and the run after it keeps the passes of the first:
-# a.test (main changed its a.txt) and c.test run, b.test, which nothing main changed selects, does not.
+# almost nothing its tests use). #7 changes a.txt and passes; then main changes a.txt too, and y.txt, which selects
+# c.test. The session that brings #7 onto main changes only the conflict (inconflicts()), and the run after it keeps
+# the passes of the first (tests(), rerunsince()): a.test (main changed its a.txt) and c.test run, b.test, which
+# nothing main changed selects, does not.
 t_rerunrebuilt() {
-  rerunsetup; rerunfiles; linkset '{"a.txt": ["a.test", "b.test", "c.test"], "y.txt": ["c.test"]}'
-  echo 'y.txt c.test' >> "$STUB/map"
-  echo l1 > "$R/a.txt"; git -C "$R" add a.txt; git -C "$R" commit -qm "a.txt"
-  echo "if grep -q '^# Landing conflict' \"\$STUB/brief\"; then sed -i 's/^main1\$/seven/' a.txt; else sed -i 's/^l1\$/seven/' a.txt; fi" > "$STUB/build"
-  echo '[ -e "$STUB/moved" ] || { : > "$STUB/moved"; echo main1 > "$R/a.txt"; echo y > "$R/y.txt"; git -C "$R" add a.txt y.txt; git -C "$R" commit -qm "main moves"; }' > "$STUB/pre"
-  loop run 1 > /dev/null || fail "run exited non-zero"
-  st 'select(.step == "rebase") | .reason' | grep -q '^rebase onto main conflicts' || fail "#7 did not go to the rebuild session: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
+  rerunwt 'echo seven > a.txt'; echo 'y.txt c.test' >> "$STUB/map"
+  rerunstep || fail "the first test step did not pass: $(ran 1)"
+  echo main1 > "$R/a.txt"; echo y > "$R/y.txt"; git -C "$R" add a.txt y.txt; git -C "$R" commit -qm "main moves" || fail "main could not move"
+  rerunfit 'echo seven > a.txt'
+  [ "$(tail -n 1 "$T/$CASE/run.out")" = "settle: 2" ] && [ ! -e "$T/$CASE/cards/c7.whole" ] \
+    || fail "settle() did not bring the change onto main by a session that changed only the conflict: $(cat "$T/$CASE/run.out")"
+  rerunstep || fail "the step after the rebuild onto main did not pass: $(ran 2)"
   [ "$(ran 1)" = "one two flaky three" ] && [ "$(ran 2)" = "one two three" ] \
     || fail "the run after the rebuild onto main did not keep b.test's pass: first $(ran 1), then $(ran 2): $(cat "$STUB/rerun.2" 2>&1)"
   [ "$(grep -E $'^(main|changed)\t' "$STUB/rerun.2" | tr '\t\n' ':|')" = "main:a.txt|main:y.txt|" ] || fail "the run was not told what main changed: $(cat "$STUB/rerun.2" 2>&1)"
   # Issue 512: and the main it was on before (`from`, the parent of "main moves"), to read what main changed in each.
   [ "$(sed -n 's/^from\t//p' "$STUB/rerun.2")" = "$(git -C "$R" rev-parse "$(sed -n 's/^base\t//p' "$STUB/rerun.2")~1")" ] \
     || fail "the run was not told the main it was on before: $(cat "$STUB/rerun.2" 2>&1)"
-  [ "$(tline 2 '.why | tojson')" = '{"a.test":["main changed a.txt"],"c.test":["main changed y.txt"]}' ] \
-    || fail "the test line does not say why each file ran: $(tline 2 .why)"
-  [ "$(st 'select(.step == "landed") | .issue')" = 7 ] && grep -qx seven "$R/a.txt" || fail "#7 did not land: $(st '"\(.step) \(.result)"' | tr '\n' ,)"
+  [ "$(jq -c .why "$T/$CASE/cards/c7.testrec")" = '{"a.test":["main changed a.txt"],"c.test":["main changed y.txt"]}' ] \
+    || fail "the test line does not say why each file ran: $(cat "$T/$CASE/cards/c7.testrec")"
 }
 
 # A retried card: #7 fails b.test's case flaky through its fix and blocks, a.test and c.test passed. `retry` starts

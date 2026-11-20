@@ -9,7 +9,8 @@
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
-# The three cases below run cards through the real loop (loop run): the direct checks in samefile.test.sh and
+# The three cases below but t_samepastshared, which calls the engine's functions on t_samepastrun's landing, run cards
+# through the real loop (loop run): the direct checks in samefile.test.sh and
 # sameoff.test.sh show claim(), settle(), land() and urgent() each on its own, but only card() and run() join them (a
 # fix round to the next claim, a pass at the landing step to another review, a wait on the belt to the pick past the
 # cap), and only a run shows that join.
@@ -33,7 +34,7 @@ t_samefixclaim() {
         echo eight > "$R/b.txt" && git -C "$R" add b.txt && git -C "$R" commit -qm "title 8 (#8)" && cat "$STUB/landed8" >> "$ST/cards.jsonl" && rm -f "$CONVEYOR_CARDS/c1-8.claim"
       fi
       command sleep "$@"; } # sleep: the engine's own sleep, passed on as it was called
-    export -f sleep; loop run 2>&1) || fail "run exited non-zero: $out"
+    export -f sleep; loop run 2>&1) || fail "run exited non-zero: $out" # loop: only card() takes the fix round's change to the landing claim, settle()'s wait and land()
   c7=$(st 'select(.issue == 7 and .step == "picked") | .card')
   [ "$(st 'select(.issue == 7 and (.step | IN("review", "fix"))) | "\(.step) \(.result)"' | tr '\n' ,)" = "review NO-GO,fix ok,review GO," ] \
     || fail "#7 was not reviewed, fixed and reviewed again: $(st 'select(.issue == 7) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
@@ -69,7 +70,7 @@ if [ ! -e "$STUB/past" ] && jq -se 'map(select(.issue == 7)) | last | .step == "
 fi
 false
 EOF
-  out=$(CONVEYOR_LIMIT_CMD=". \"$STUB/limit\"" loop run 2>&1) || fail "run exited non-zero: $out"
+  out=$(CONVEYOR_LIMIT_CMD=". \"$STUB/limit\"" loop run 2>&1) || fail "run exited non-zero: $out" # loop: the order of the steps, a second review on #8's commit before the landing and no rebuild session, is card()'s alone
   [ "$(cat "$STUB/claim8" 2>/dev/null)" = "claim: 0" ] && [ "$(cat "$STUB/past7")" = true ] \
     || fail "the ordered #8 did not go past #7 at #7's landing step: $(cat "$STUB/claim8" "$STUB/past7" 2>/dev/null)"
   m8=$(git -C "$R" rev-parse main~1)
@@ -82,6 +83,31 @@ EOF
   # rebuild #7 on #8's tip, a second session that appends case7 again and ends the same way as the lines above.
   [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ -z "$(st 'select(.issue == 7 and (.step == "rebase" or .of == "rebase")) | .step')" ] \
     || fail "#7 was rebuilt in place of being fitted onto #8's commit as passed: $(cat "$STUB/sessions") $(st '"\(.issue) \(.step) \(.of // "")"' | tr '\n' ,)"
+}
+
+# What card() reads of #7 at its landing, once fitted onto #8's commit (t_samepastrun's turn, with no card): #7's tests
+# passed on m0 (tested(), its list based there); #8 lands its case at the end of a.test.sh. settle() fits #7 onto #8's
+# commit with the union merge and no session. Bug it catches: a card whose tests ran before #8 landed its case in the
+# same test file landed on that pass, so a.test.sh never ran with both cases: the merged change is not the one that
+# passed (testedhere() fails), a.test.sh is shared with #8 (sharedtests()), #8 is the card landed since (landedsince()),
+# and the run again lists a.test.sh to run whole, not as passed (unshare()).
+t_samepastshared() {
+  setup "[$(issue 7 2026-01-01)]"; fx_wt 'echo case7 >> a.test.sh' a.test.sh case1; m0=$(git -C "$R" rev-parse main)
+  echo '{"issue":7}' > "$FXWT.ready"; printf 'base\t%s\npass\ta.test.sh\n' "$m0" > "$FXWT.rerun"
+  fx_in 'tested "$FXWT"'; [ "$RC" = 0 ] || fail "#7's pass could not be recorded: $(cat "$T/$CASE/run.out")"
+  echo case8 >> "$R/a.test.sh"; git -C "$R" commit -qam "title 8 (#8)" || fail "#8 could not land"
+  landed 8 | jq -c --arg s "$(git -C "$R" rev-parse main)" '.card = "c8-8" | .sha = $s' >> "$ST/cards.jsonl"
+  fx_in 'cd "$R" || exit 9; caught="" waitsec=0 behind="[]" parsecheck=""
+    session() { echo session >> "$STUB/sessions"; return 1; }
+    settle c7 7 "$FXWT" "Build the issue." land "$(issue 7 2026-01-01)"; echo "settle: $?"
+    if testedhere "$FXWT"; then echo "testedhere: 0"; else echo "testedhere: 1"; fi
+    t=$(sharedtests "$FXWT" "'"$m0"'"); echo "sharedtests: $t"; echo "landedsince: $(landedsince "$FXWT" "'"$m0"'")"
+    unshare "$FXWT" "$t" && grep -v "^base" "$FXWT.rerun" | sort | tr "\t\n" ":,"'
+  [ ! -e "$STUB/sessions" ] && [ "$(git -C "$FXWT" rev-parse HEAD)" = "$(git -C "$R" rev-parse main)" ] \
+    && [ "$(tr '\n' ' ' < "$FXWT/a.test.sh")" = "case1 case8 case7 " ] \
+    || fail "#7 was not fitted onto #8's commit keeping both cases, with no session: $(cat "$T/$CASE/run.out")"
+  [ "$(sed 1d "$T/$CASE/run.out" | tr '\n' '|')" = "testedhere: 1|sharedtests: a.test.sh|landedsince: c8-8|fail:a.test.sh,shared:a.test.sh," ] \
+    || fail "card() would land #7 on its pass from before #8's case, or not run a.test.sh whole again: $(cat "$T/$CASE/run.out")"
 }
 
 # Bug it catches: the turn's pick past the cap (run(): urgent(), then `pick retried` with ONLY) did not take a card
@@ -112,7 +138,7 @@ case $PWD in
   *) : ;;
 esac
 EOF
-  out=$(loop run --only 11,12,16 2>&1) || fail "run exited non-zero: $out"
+  out=$(loop run --only 11,12,16 2>&1) || fail "run exited non-zero: $out" # loop: the pick past the cap is run()'s turn, with a card on the belt waiting on the retried one
   [ -e "$STUB/heard12" ] || fail "the retried #12 was not picked while #11 held the only slot: $(st '"\(.issue) \(.step)"' | tr '\n' ,)"
   [ -z "$(st 'select(.issue == 14 and .step == "picked")')" ] || fail "run --only 11,12,16 picked the retried #14: $(st '"\(.issue) \(.step)"' | tr '\n' ,)"
   # The picked and landed lines in their order, #11's and #12's landings in either order; #16, built to no change,

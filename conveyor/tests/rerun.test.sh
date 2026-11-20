@@ -80,7 +80,7 @@ EOF
 # mainlimit.test.sh's limitjudge; voidrun(), verdicts() and mainred() in voidrun.test.sh's t_voidcommand). A card
 # run (loop run) needs it: given one file there, a stub that reports three is stopped by watch() as a run of files it
 # was not given, whenever watch() looks before the stub ends, as it did under the load of a whole-suite run (issue
-# 769: t_rerunrebuilt's second run stopped, with no test line).
+# 769: a rebuilt card's second run stopped, with no test line).
 rerunfiles() {
   local f
   for f in a.test b.test c.test; do echo "$f" > "$R/$f"; done; git -C "$R" add a.test b.test c.test || fail "main's test files could not be staged"
@@ -93,8 +93,8 @@ ran() { sed -n "s/^$1 //p" "$STUB/ran" | tr '\n' ' ' | sed 's/ $//'; } # <run>: 
 # steps. What tests() alone decides (what a run after a fix keeps, runs and is told) is proved so: a whole card run
 # cost each case about 3 CPU s alone and twice that beside the file's other cases, a main run of its failing cases
 # among it. (What a card adds around tests(): a pass on re-run on its test line and the Board, t_rerunpass; the main
-# run and the fix session, t_rerunfail; a session that moved HEAD, t_rerunmoved; the rebuild, t_rerunrebuilt; the
-# retry, t_rerunretry: the last three in rerunkept.test.sh.)
+# run and the fix session, t_rerunfail; the retry, t_rerunretry, in rerunkept.test.sh. A session that moved HEAD,
+# t_rerunmoved, and the rebuild onto main, t_rerunrebuilt and t_rerunmergedoubt, are tests() on a worktree too.)
 rerunedit() { (cd "$T/$CASE/cards/c7" && eval "$1") && git -C "$T/$CASE/cards/c7" add -A; } # <shell edit in the worktree>: the build's or a fix's edit, staged
 rerunstep() { # exits as tests() returns; its test line's part of the run (testrec()) is in c7.testrec, and a pass leaves its part of the first run, as card() puts it (firstrun()), in c7.firstrun
   ( set -- run; HERE=$SRC; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; local rc
