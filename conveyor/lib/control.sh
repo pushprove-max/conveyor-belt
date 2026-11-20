@@ -955,8 +955,8 @@ cardpick() { # <issue>
 }
 # The judge's call of Pick for me (cardpick()) and of the rule Pick settings (pickjudge(), lib/modelpick.sh), on the
 # issue <issue json> ({number, title, body, labels}). Sets the caller's PICKANS, the answer: {builder, reviewer,
-# judge}, each {model, effort (null for none), why} as the judge gave them (nothing checked) or null; PICKMODEL, the
-# judge's model; PICKUSE once the judge was called, the fields of the call's own card line: {model, effort, sec} and
+# judge}, each {model (null for a blank one), effort (null for none), why} as the judge gave them (nothing else
+# checked) or null; PICKMODEL, the judge's model; PICKUSE once the judge was called, the fields of the call's own card line: {model, effort, sec} and
 # {tokens, usage} as a session's line on its program has them (sessionread.jq, codexread.jq, opencoderead.jq), or
 # unread when its output holds no token usage; and PICKWHY, why it failed: exit 1.
 # shellcheck disable=SC2034 # PICKANS, PICKMODEL, PICKUSE and PICKWHY are the caller's, read by cardpick() and pickjudge()
@@ -1010,7 +1010,7 @@ pickcall() { # <issue json> <control record>
   [ "$rc" = 0 ] && [ -z "$out" ] || { PICKWHY="the judge ($model) did not answer: ${out:-exit $rc; 124 is the ${PICK_TIMEOUT}s timeout}"; return 1; }
   # The answer's JSON object: from its first { to its last }.
   PICKANS=$(jq -Rsc '(index("{")) as $i | (rindex("}")) as $j | if $i == null or $j == null then error("no JSON object") else .[$i:$j + 1] | fromjson end
-      | {builder, reviewer, judge} | map_values(if type == "object" then {model, effort: (.effort | if . == "" then null else . end), why} else null end)' <<<"$ans" 2>/dev/null) \
+      | {builder, reviewer, judge} | map_values(if type == "object" then {model: (.model | if type == "string" and (test("\\S") | not) then null else . end), effort: (.effort | if . == "" then null else . end), why} else null end)' <<<"$ans" 2>/dev/null) \
     || { PICKANS=''; PICKWHY="the judge's answer held no JSON object of the three seats: ${ans:0:300}"; return 1; }
 }
 # The cap in force: the control record's, else the seed's (CAP0); nothing when the record does not read.

@@ -292,7 +292,8 @@ t_pickjudgeshadow() {
   [ "$(wc -l < "$STUB/picks")" = 1 ] && [ "$(head -n 1 "$T/$CASE/run.out")" = null ] || fail "with Off the judge was asked: $(cat "$STUB/picks")"
 }
 
-# Bugs: a judge that failed, timed out or named no model blocked the card or moved a seat, or left no reason. Each
+# Bugs: a judge that failed, timed out or named no model (or only blank ones) blocked the card or moved a seat, or
+# left no reason. Each
 # answer is asked again for the same issue: a failed pick is asked again, not reused.
 t_pickjudgefail() {
   seatsetup "[$(issue 7 2026-01-01)]"
@@ -303,13 +304,14 @@ t_pickjudgefail() {
   pjask 'm2 high' 'x2 low' 'j2 low'; echo 3 > "$STUB/pick-delay"
   fx_in "N=7; PICK_TIMEOUT=1; $PJ"
   out+=$'\n'$(cat "$T/$CASE/run.out"); rm -f "$STUB/pick-delay"
-  echo '{"builder": "fast", "reviewer": null}' > "$STUB/pick"
+  # A blank model name is no model: it once kept the project's builder and moved it to the answer's low effort.
+  echo '{"builder": {"model": "", "effort": "low"}, "reviewer": "fast", "judge": {"model": " ", "effort": "high"}}' > "$STUB/pick"
   fx_in "N=7; $PJ"
   out+=$'\n'$(cat "$T/$CASE/run.out")
   [ "$(grep -c -x 'm medium\|x medium\|j medium' <<<"$out")" = 9 ] || fail "a failed pick moved a seat off the project's: $out"
   [ "$(grep '^{' <<<"$out" | jq -r .failed)" = "the judge (j) did not answer: the judge sent back an error (exit 0, 1 turn): overloaded; no error output
 the judge (j) did not answer: exit 124; 124 is the 1s timeout
-the judge's answer named no model for any seat: {\"builder\":null,\"reviewer\":null,\"judge\":null}" ] || fail "a failed pick does not say why: $out"
+the judge's answer named no model for any seat: {\"builder\":{\"model\":null,\"effort\":\"low\",\"why\":null},\"reviewer\":null,\"judge\":{\"model\":null,\"effort\":\"high\",\"why\":null}}" ] || fail "a failed pick does not say why: $out"
   [ "$(st 'select(.step == "seats") | .result' | sort -u)" = failed ] || fail "the failed calls have no failed seats line: $(st 'select(.step == "seats")')"
   recok "$ST/cards.jsonl" "a failed pick"
 }
