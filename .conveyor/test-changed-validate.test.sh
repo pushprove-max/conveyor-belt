@@ -16,16 +16,28 @@ no() { echo "not ok - $1"; }
 
 # A scratch repo: the real script, the plugin's mod, types contract and manifest as they are here, an engine file in
 # an area, and a `claude` on PATH that notes each run in $R/runs and runs the real one (the check is Claude Code's own).
+# Every part's HEAD is the same commit, so the real validate of HEAD's plugin copy runs once here ($T/head): the
+# `claude` gives a directory with the same files that output, with its path put in, and runs the real one on any
+# other. $R/stub/claude only notes its runs, for the parts that check only whether the check runs.
 CLAUDE=$(command -v claude) || { no "claude is not installed: the plugin's validate cannot be tested"; exit 1; }
-R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/lib" "$R/conveyor/tests" "$R/bin"
+R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/lib" "$R/conveyor/tests" "$R/bin" "$R/stub" "$T/head"
 cp "$HERE/test-changed.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$R/.conveyor/"
 cp -a "$ROOT/hooks" "$ROOT/types" "$ROOT/.claude-plugin" "$R/"
 printf '%s\n' '{"area": "a", "file": "conveyor/lib/x.sh"}' '{"area": "a", "test": "a.test.sh"}' > "$R/.conveyor/engine-areas.json"
 echo 'x() { :; }' > "$R/conveyor/lib/x.sh"; printf 't_aone() {\n  :\n}\n' > "$R/conveyor/tests/a.test.sh"
-printf '%s\n' '#!/usr/bin/env bash' 'echo "$*" >> "$(dirname "$0")/../runs"' "exec $(printf %q "$CLAUDE") \"\$@\"" > "$R/bin/claude"
-chmod +x "$R/bin/claude"
+HC=$(cd "$T/head" && pwd -P)
+printf '%s\n' '#!/usr/bin/env bash' 'echo "$*" >> "$(dirname "$0")/../runs"' \
+  "hc=$(printf %q "$HC")" \
+  'if [ "$1 $2" = "plugin validate" ] && [ $# = 3 ] && [ "$3" != . ] && diff -r -q "$3" "$hc" > /dev/null 2>&1; then' \
+  '  o=$(cat "$hc.out"); printf "%s\n" "${o//"$hc"/"$3"}"; exit "$(cat "$hc.rc")"; fi' \
+  "exec $(printf %q "$CLAUDE") \"\$@\"" > "$R/bin/claude"
+printf '%s\n' '#!/usr/bin/env bash' 'echo "$*" >> "$(dirname "$0")/../runs"' > "$R/stub/claude"
+chmod +x "$R/bin/claude" "$R/stub/claude"
 printf 'runs\n' > "$R/.gitignore"
 git -C "$R" init -q && git -C "$R" add -A && git -C "$R" commit -qm init
+git -C "$R" archive HEAD -- hooks types .claude-plugin | tar -x -C "$HC" || { no "could not copy HEAD's plugin"; exit 1; }
+"$CLAUDE" plugin validate "$HC" > "$HC.out" 2>&1; echo $? > "$HC.rc"
+grep -q "^Validating hooks: $HC/hooks/elements.ts" "$HC.out" || { no "HEAD's validate does not name its files: $(cat "$HC.out")"; exit 1; }
 # A kept value the mod adds: an atom it writes, `conveyor-belt.extra`.
 EXTRA="const extra = atom({ plugin: 'conveyor-belt', key: 'extra' } as const, 0)
 export const bumpExtra = (\$: any) => update(\$, extra, (v: number) => v + 1)"
@@ -56,9 +68,9 @@ p_declared() {
     && ok "the same change with the key declared in the types contract passes the checks" \
     || no "declared extra: exit $(cat "$T/rc"), runs $(runs): $(cat "$T/out")"
 }
-# D3: a change to conveyor/lib/ alone does not run the check.
+# D3: a change to conveyor/lib/ alone does not run the check (the stub notes a run).
 p_lib() {
-  echo 'y() { :; }' >> "$R/conveyor/lib/x.sh"; checks
+  echo 'y() { :; }' >> "$R/conveyor/lib/x.sh"; checks "$R/stub:$PATH"
   [ "$(cat "$T/rc")" = 0 ] && ! grep -q '^plugin validate' "$R/runs" 2>/dev/null \
     && ok "a change to conveyor/lib/ alone does not run claude plugin validate" || no "lib change: exit $(cat "$T/rc"), runs $(runs): $(cat "$T/out")"
 }
@@ -71,15 +83,16 @@ p_noclaude() {
     || no "no claude: exit $(cat "$T/rc"): $(cat "$T/out")"
 }
 
-# A change to types/ alone runs the check (D2's case also edits hooks/, so it does not show this).
+# A change to types/ alone runs the check (D2's case also edits hooks/, so it does not show this). These two parts
+# check only that the check runs, so the stub stands for claude.
 p_types() {
-  echo '// a note' >> "$R/types/index.d.ts"; checks
+  echo '// a note' >> "$R/types/index.d.ts"; checks "$R/stub:$PATH"
   [ "$(cat "$T/rc")" = 0 ] && [ "$(runs)" = 1 ] \
     && ok "a change to types/ alone runs claude plugin validate" || no "types change: exit $(cat "$T/rc"), runs $(runs): $(cat "$T/out")"
 }
 # A file moved out of hooks/ runs the check: git's rename view names only the new path, outside hooks/.
 p_moved() {
-  git -C "$R" mv hooks/units.test.tsx units.test.tsx; checks
+  git -C "$R" mv hooks/units.test.tsx units.test.tsx; checks "$R/stub:$PATH"
   [ "$(runs)" = 1 ] \
     && ok "a file moved out of hooks/ runs claude plugin validate" || no "moved file: exit $(cat "$T/rc"), runs $(runs): $(cat "$T/out")"
 }
