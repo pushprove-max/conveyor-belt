@@ -96,10 +96,11 @@ ran() { sed -n "s/^$1 //p" "$STUB/ran" | tr '\n' ' ' | sed 's/ $//'; } # <run>: 
 # run and the fix session, t_rerunfail; a session that moved HEAD, t_rerunmoved; the rebuild, t_rerunrebuilt; the
 # retry, t_rerunretry.)
 rerunedit() { (cd "$T/$CASE/cards/c7" && eval "$1") && git -C "$T/$CASE/cards/c7" add -A; } # <shell edit in the worktree>: the build's or a fix's edit, staged
-rerunstep() { # exits as tests() returns; a pass leaves its test line's part of the first run, as card() puts it (firstrun()), in c7.firstrun
-  ( set -- run; HERE=$SRC; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
+rerunstep() { # exits as tests() returns; its test line's part of the run (testrec()) is in c7.testrec, and a pass leaves its part of the first run, as card() puts it (firstrun()), in c7.firstrun
+  ( set -- run; HERE=$SRC; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; local rc
     eval "$(sed -n '/^\. "\$HERE\/lib\/portable.sh"/,/^\. "\$HERE\/lib\/records.sh"/p' "$SRC/conveyor.sh"; grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")"
-    names || exit 1; tests "$T/$CASE/cards/c7" || exit; firstrun "$T/$CASE/cards/c7" pass > "$T/$CASE/cards/c7.firstrun" ) > /dev/null 2>&1
+    names || exit 1; tests "$T/$CASE/cards/c7"; rc=$?; testrec "$T/$CASE/cards/c7" "$rc" 0 > "$T/$CASE/cards/c7.testrec"
+    [ $rc = 0 ] || exit $rc; firstrun "$T/$CASE/cards/c7" pass > "$T/$CASE/cards/c7.firstrun" ) > /dev/null 2>&1
 }
 rerunwt() { # <the build's edit> <plan line>...: rerunsetup's main and stubs, and the card's worktree with its change staged
   local b=$1; shift; rerunsetup "$@"
@@ -302,24 +303,33 @@ t_rerunmoved() {
 # Issue 461 (#415 ran all 45 of its test files twice on 2026-11-14): a test step that would run the whole selection
 # again after a fix and review round that changed nothing refuses the full run. Here the fix session leaves the change
 # as it was, and the last run's list names a commit that is none (as a spoilt list would): the run after the round
-# runs only what was not kept as passed (flaky), not a.test and c.test; its line records the refusal and why; health
-# lists it, so the Foreman's watcher wakes on it (conveyor/foreman/foreman.test.sh, t_wake). The first run, before any
-# list, ran the whole selection and refused nothing.
+# runs only what was not kept as passed (flaky), not a.test and c.test; its line records the refusal and why, and the
+# record check takes that line. The first run, before any list, ran the whole selection and refused nothing. Health
+# lists a refused line from the records, so the Foreman's watcher wakes on it: snaplines.test.sh, t_snaplinessame, and
+# conveyor/foreman/foreman.test.sh, t_wake.
 t_rerunrefused() {
-  rerunsetup '1 fail flaky' '2 fail flaky'; rerunfiles
-  cat > "$STUB/build" <<'EOF'
-if [ "$(wc -l < "$STUB/sessions")" = 1 ]; then echo two >> a.txt
-else awk 'BEGIN { FS = OFS = "\t" } $1 == "base" { $2 = "0000000000000000000000000000000000000001" } 1' "$PWD.rerun" > "$STUB/list" && mv "$STUB/list" "$PWD.rerun"; fi
-EOF
-  loop run 1 > /dev/null || fail "run exited non-zero"
-  [ "$(ran 1)" = "one two flaky three" ] && [ "$(tline 1 '.refused // "none"')" = none ] || fail "the first run was not of the whole selection, or refused: $(ran 1): $(tline 1 tojson)"
-  [ "$(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)" = "test fail,fix ok,test pass," ] \
-    || fail "not a failed run, its fix and a run that passed: $(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)"
+  rerunwt 'echo two >> a.txt' '1 fail flaky' '2 fail flaky'
+  ! rerunstep || fail "the first test step passed"
+  [ "$(ran 1)" = "one two flaky three" ] && [ "$(jq -r '.refused // "none"' "$T/$CASE/cards/c7.testrec")" = none ] \
+    || fail "the first run was not of the whole selection, or refused: $(ran 1): $(cat "$T/$CASE/cards/c7.testrec" 2>&1)"
+  # The failed step's test line, as card() records it: the card was tested before (testedbefore()).
+  echo '{"card":"c7","issue":7,"step":"test","time":"2026-01-01T00:01:00Z","tokens":{"claude":0,"codex":0},"result":"fail","sha":"","reason":"","repo":"main"}' >> "$ST/cards.jsonl"
+  # The fix session leaves the change as it was; the list's commit is none.
+  awk 'BEGIN { FS = OFS = "\t" } $1 == "base" { $2 = "0000000000000000000000000000000000000001" } 1' "$T/$CASE/cards/c7.rerun" > "$STUB/list" \
+    && mv "$STUB/list" "$T/$CASE/cards/c7.rerun" || fail "the list's commit could not be spoilt"
+  rerunstep || fail "the step after the fix did not pass: $(ran 3)"
   [ "$(ran 3)" = flaky ] || fail "the refused full run ran more than what was not kept as passed: $(ran 3): $(cat "$STUB/rerun.3" 2>&1)"
-  [ "$(tline 2 .refused)" = "refused full run: the commit last tested on (0000000000000000000000000000000000000001) cannot be compared with HEAD" ] \
-    || fail "the test line does not record the refusal and why: $(tline 2 tojson)"
-  loop check || fail "the record check refuses a test line with a refused full run"
-  [ "$(loop health | jq -c '.refused | map([.issue, (.reason | startswith("refused full run: "))])')" = '[[7,true]]' ] || fail "health does not list the refused run for the Foreman: $(loop health | jq -c .refused)"
+  [ "$(jq -r .refused "$T/$CASE/cards/c7.testrec")" = "refused full run: the commit last tested on (0000000000000000000000000000000000000001) cannot be compared with HEAD" ] \
+    || fail "the test line does not record the refusal and why: $(cat "$T/$CASE/cards/c7.testrec" 2>&1)"
+  # Its test line as card() records a pass: line()'s fields, testrec()'s part and firstrun()'s. Its time is now, as
+  # health lists a refusal of the last day only.
+  jq -cs --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{card: "c7", issue: 7, step: "test", time: $now, tokens: {claude: 0, codex: 0}, result: "pass", sha: "", reason: "", repo: "main"} * .[0] * .[1]' \
+    "$T/$CASE/cards/c7.testrec" "$T/$CASE/cards/c7.firstrun" \
+    > "$STUB/refused.jsonl" || fail "the refused run's test line could not be made"
+  recok "$STUB/refused.jsonl" "a test step with a refused full run"
+  cat "$STUB/refused.jsonl" >> "$ST/cards.jsonl"
+  [ "$(loop health | jq -c '.refused | map([.issue, (.reason | startswith("refused full run: "))])')" = '[[7,true]]' ] \
+    || fail "health does not list the refused run for the Foreman: $(loop health | jq -c .refused)"
 }
 
 # A merge in doubt (the session that brought the change onto main edited it outside the conflicts: here b.txt beside
@@ -360,26 +370,20 @@ t_rerunrebuilt() {
 
 # A retried card: #7 fails b.test's case flaky through its fix and blocks, a.test and c.test passed. `retry` starts
 # the next card from its kept patch (its session leaves it as it was); its run keeps those passes (block() keeps the
-# list with the patch) and runs flaky alone, on the main it was tested on and on one moved since by a commit that
-# changes only z.txt, which none of its tests selects. (Main moving by a file a test selects: t_rerunrebuilt.)
-retried() { # [move main]
+# list with the patch) and runs flaky alone, on a main moved since by a commit that changes only z.txt, which none of
+# its tests selects: it is told what main changed, z.txt, and of no change of its own. (Main moving by a file a test
+# selects: t_rerunrebuilt; told of nothing on the main it was tested on: t_rerunsame, as tests() decides it.)
+t_rerunretry() {
   rerunsetup '1 fail flaky' '2 fail flaky' '3 fail flaky' '4 fail flaky'; rerunfiles
   for i in 4 5; do echo "$GO" > "$STUB/review.$i"; done
   echo 'grep -qx two a.txt || echo two >> a.txt' > "$STUB/build"
   loop run 1 > /dev/null || fail "run exited non-zero"
   [ "$(st 'select(.step == "blocked") | .issue')" = 7 ] && [ "$(ran 4)" = flaky ] || fail "#7 did not block after failing flaky through its fix: $(st '"\(.step) \(.result)"' | tr '\n' ,)"
-  [ -z "${1:-}" ] || { echo z > "$R/z.txt"; git -C "$R" add z.txt; git -C "$R" commit -qm "main moves"; }
+  echo z > "$R/z.txt"; git -C "$R" add z.txt; git -C "$R" commit -qm "main moves"
   loop retry 7 > /dev/null && loop run 1 > /dev/null || fail "the retried #7 did not run"
   [ "$(ran 5)" = flaky ] && [ "$(st 'select(.step == "test") | .result' | tail -n 1)" = pass ] \
     || fail "the retried card did not keep the passes of its last run: $(ran 5): $(cat "$STUB/rerun.5" 2>&1)"
-}
-t_rerunretry() {
-  retried
-  [ -z "$(grep -E $'^(main|changed)\t' "$STUB/rerun.5")" ] || fail "the retried card on the same main was told of changes: $(cat "$STUB/rerun.5")"
-}
-t_rerunretrymoved() {
-  retried move
-  [ "$(grep -E $'^(main|changed)\t' "$STUB/rerun.5" | tr '\t\n' ':|')" = "main:z.txt|" ] || fail "the retried card was not told what main changed: $(cat "$STUB/rerun.5")"
+  [ "$(grep -E $'^(main|changed)\t' "$STUB/rerun.5" | tr '\t\n' ':|')" = "main:z.txt|" ] || fail "the retried card was not told what main changed, and that alone: $(cat "$STUB/rerun.5")"
 }
 
 # Issue 523: c.test is kept off card runs for its CPU seconds (slowoff(): its issue #9 has not landed). Bug it
