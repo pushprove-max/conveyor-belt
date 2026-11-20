@@ -46,7 +46,7 @@ stops again in the same way stays on Needs you until you retry it.
 ## Lint
 
 When the pack has a `lint` field ([Lint](configuration.md#lint)) and the rule Lint check is on, the card's change goes
-through the lint gate before each review. The gate runs the pack's lint commands on the staged change. The brief of the build and fix sessions has a
+through a lint gate before each review, and through the landing gate (below) before it lands. The gate runs the pack's lint commands on the staged change. The brief of the build and fix sessions has a
 `# Lint` section. It names the commands and tells the session to run `conveyor.sh lint` before it finishes.
 
 - A pass lets the card go on. So does a command whose tool is missing: the card's lint line says
@@ -59,6 +59,17 @@ through the lint gate before each review. The gate runs the pack's lint commands
   the fix: a new review session reads the change.
 - Any other end of a command is an execution error. The card blocks with `lint: an execution error, so nothing
   landed:`, the command and the first line of its output. There is no fix session.
+
+The landing gate runs the same commands each time the card is about to land: after the check that the files of a
+merge onto main still parse, and before the product checks and tests. A merge onto main can bring a finding that the
+gate before the review did not see. A pass, a missing tool and an execution error act as above.
+
+- A finding goes to one fix session before any test runs. Its step is `Fix <n>: lint findings`. Then the card goes to
+  a review, and that review is its last review: a `NO-GO` lands with follow-ups. The gate before that review does not
+  run again on the fixed change.
+- At the next landing gate, a finding that is still there blocks the card with the reason
+  `lint: <n> findings left after its fix session; nothing landed`. If a different session (a test fix, for example)
+  changed the code after the lint fix, a finding gets one new fix session.
 
 The lint commands must not change the card's work. Before they run, the worktree must have no change that is not
 staged, and no file that git does not track or ignore. If it has one, that is an execution error, and Conveyor changes

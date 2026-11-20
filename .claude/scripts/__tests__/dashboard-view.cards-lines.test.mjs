@@ -18,10 +18,16 @@ test('a fix session is labelled with what started it, its reason on hover, never
     { name: 'tests failed', state: 'failed', sec: 90, why: 'exit 1' }, { name: 'fix 4', state: 'done', sec: 100 }];
   const w = boot();
   const data = full();
-  data.panels.landed.data.cards[0].track = trackOf('++++++', '', { at: null, since: null, records: [...recs, { name: 'tests passed', state: 'done', sec: 60 }] });
+  // The landing gate's lint fix (lintgate(), lib/lint.sh) after main moved under tests that passed: its line's reason
+  // names it, never "main changed under it" from the tests before it.
+  const LINT = 'lint: 2 finding(s) of the change on main as it is now', lint = { name: 'lint', state: 'done', sec: 5 };
+  data.panels.landed.data.cards[0].track = trackOf('++++++', '', { at: null, since: null, records: [...recs, { name: 'tests passed', state: 'done', sec: 60 }, lint,
+    { name: 'fix 5', state: 'done', sec: 60, reason: LINT }, { name: 'review 4 (GO)', state: 'done', sec: 60 }] });
   deliver(w, data);
   const fixes = Array.from(panel(w, 'landed').querySelectorAll('.timeline > li.tl-item .tl-label')).filter((l) => /^Fix/.test(l.textContent));
-  assert.deepEqual(fixes.map((l) => l.textContent), ['Fix 1: reply check', 'Fix 2: review findings', 'Fix 3: main changed under it', 'Fix 4: tests failed'], 'each fix names what started it, its round kept');
+  assert.deepEqual(fixes.map((l) => l.textContent), ['Fix 1: reply check', 'Fix 2: review findings', 'Fix 3: main changed under it', 'Fix 4: tests failed', 'Fix 5: lint findings'],
+    'each fix names what started it, its round kept');
+  assert.equal(fixes[4].title, LINT, 'the lint fix: its full reason on hover');
   assert.equal(fixes[0].title, DW, 'the reply check: its full reason on hover');
   assert.equal(fixes[2].title, MOVED, 'main moved: its full reason on hover');
   assert.ok(fixes.every((l) => l.title), 'every fix label has its reason on hover');
@@ -50,6 +56,9 @@ test('a fix session is labelled with what started it, its reason on hover, never
   assert.deepEqual(pillOf([...recs, { name: 'tests passed', state: 'done', sec: 60 }], 'fix after review 3'), ['Fix 5: main changed under it', 'main moved after the card made its change, and the change no longer applied to it'],
     'just after tests that passed: main moved');
   assert.deepEqual(pillOf(recs.slice(0, -1), 'fix after failed tests'), ['Fix 4: tests failed', 'the changed tests failed']);
+  // A lint gate's fix in progress: the step before it is the gate's lint line, whatever came before that.
+  assert.deepEqual(pillOf([...recs, { name: 'tests passed', state: 'done', sec: 60 }, lint], 'fix after review 3'), ['Fix 5: lint findings', 'the lint commands found findings in the change'],
+    'just after a lint line: lint findings, not main moved');
   assert.ok(!/fix after review/i.test(panel(w, 'belt').textContent + panel(w, 'landed').textContent), 'no fix label reads "Fix after review"');
 });
 

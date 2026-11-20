@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # The lint check (docs/configuration.md, Lint): the pack's lint.commands, each run on the files of a change it reads,
 # and its result. Sourced, never run: by commands/lint.sh (conveyor.sh lint), commands/doctor.sh (lintdoctor) and
-# lib/card.sh (the review gate, lintgate). It uses packget (lib/prompts.sh) and the test slots (lib/slots.sh), sourced
-# before it; lintratchet also uses depdirs (lib/push.sh) and CARDS (lib/paths.sh); lintgate the card's steps (block,
-# session, checked, record, giveway), which a card's shell has.
+# lib/card.sh (the review and landing gates, lintgate). It uses packget (lib/prompts.sh) and the test slots
+# (lib/slots.sh), sourced before it; lintratchet also uses depdirs (lib/push.sh) and CARDS (lib/paths.sh); lintgate
+# the card's steps (block, session, checked, record, giveway, cardpatch), which a card's shell has.
 #
 # The pack is main's ($PACK); the scripts and configs a command loads are the worktree's, as it runs at the worktree's
 # top. A tree is the worktree as `git add -A` would stage it, read through a copy of its index (lintindex), so the
@@ -358,22 +358,39 @@ LINTFIX=$'# Lint findings: fix them and nothing else\nThe pack\'s lint commands 
 # one fix session, told them (the first 50, and how many), its reply checked as any fix's is (checked()). The change
 # is staged again and the gate runs again: an execution error or a finding left then blocks the card, and nothing
 # lands. 0: the card goes on, its change as it was; 1: the card ended (blocked); 2: the fix session changed it, so
-# the review of this pass reads it anew: no kept review or test pass stands for it.
-lintgate() { # <card> <issue> <worktree> <issue json> <the sessions' prompt> <branch>
-  local c=$1 n=$2 wt=$3 l base o rc k t
+# the review of this pass reads it anew: no kept review or test pass stands for it. A change that is still the one the
+# landing gate's fix left (lfix, below) is not run here: the landing gate decides on it, before any test.
+# The landing gate (card(), with <land> set: after the parse check and before the product checks, each time they
+# run): the same run, lint line, execution-error block and rule, from the commit the card's worktree is on, which a
+# merge onto main moved. Findings of the change's (a merge onto main can bring them) go to one fix session, told them
+# as above, with no run after it: 2, and card() takes the card round to a review, a last review, and back to this gate.
+# There a finding blocks the card while its change is the one that fix left (lfix, card()'s local: its cardpatch()),
+# nothing landing; a change that another session changed since gets one new fix session.
+lintgate() { # <card> <issue> <worktree> <issue json> <the sessions' prompt> <branch> [land]
+  local c=$1 n=$2 wt=$3 land=${7:-} l base o rc k t p=''
   lintrule || return 0
   packget lint l || { block "$c" "$n" "$wt" "lint: the engine could not read the pack's lint field, so nothing landed"; return 1; }
   [ -n "$l" ] || return 0
+  [ -z "${lfix:-}" ] || p=$(cardpatch "$wt") || p=''
+  [ -n "$land" ] || [ -z "$p" ] || [ "$p" != "$lfix" ] || return 0
   base=$(git -C "$wt" rev-parse -q --verify HEAD) && o=$(mktemp) || { block "$c" "$n" "$wt" "lint: the engine could not start the lint check, so nothing landed"; return 1; }
   lintrun "$wt" "$base" "$c" "$o"; rc=$?; lintline "$c" "$n" "$o" $rc
   [ $rc != 2 ] || { rm -f "$o"; block "$c" "$n" "$wt" "lint: an execution error, so nothing landed: $LINT_WHY"; return 1; }
   [ $rc = 1 ] || { rm -f "$o"; return 0; }
   k=$(jq -s '[.[].reported[]] | length' "$o")
   t=$(jq -rs '[.[] | . as $c | .reported[] | "lint command \($c.n) (\($c.run)): \(.file):\(.line)\(if .column then ":\(.column)" else "" end): \(.text)"] | .[:50][]' "$o")
-  locked giveway "$c" "$wt" fix; began "$c" "$n" fix
+  if [ -n "$land" ]; then
+    [ -z "$p" ] || [ "$p" != "$lfix" ] || { rm -f "$o"; block "$c" "$n" "$wt" "lint: $k findings left after its fix session; nothing landed"$'\n'"$t"; return 1; }
+    rm -f "$wt.ready"; locked giveway "$c" "$wt" fixing
+  else locked giveway "$c" "$wt" fix; fi
+  began "$c" "$n" fix
   redbrief "$c" "$n" "$6"; t=$(session "$wt" "$5"$'\n\n'"${LINTFIX//'<n>'/$k}"$'\n'"$t" fix) || { rm -f "$o"; block "$c" "$n" "$wt" "fix: $t"; return 1; }
-  checked "$c" "$n" "$wt" "$4" "$5" fix "$(jq -c --arg r "lint: $k finding(s) of the change" '. + {reason: $r}' <<<"$t")" || { rm -f "$o"; return 1; }
+  # lfix is the lint fix's own change, kept before checked() can run a Done-when or project-check fix session: a
+  # change one of those makes is another session's, and gets a new fix at the next landing gate.
+  [ -z "$land" ] || { git -C "$wt" add -A 2>/dev/null; lfix=$(cardpatch "$wt") || lfix=''; }
+  checked "$c" "$n" "$wt" "$4" "$5" fix "$(jq -c --arg r "lint: $k finding(s) of the change${land:+ on main as it is now}" '. + {reason: $r}' <<<"$t")" || { rm -f "$o"; return 1; }
   git -C "$wt" add -A 2>/dev/null
+  [ -z "$land" ] || { rm -f "$o"; return 2; }
   lintrun "$wt" "$base" "$c" "$o"; rc=$?; lintline "$c" "$n" "$o" $rc
   t=$(jq -rs '[.[] | . as $c | .reported[] | "lint command \($c.n): \(.file):\(.line): \(.text)"] | .[:50][]' "$o" 2>/dev/null); k=$(jq -s '[.[].reported[]] | length' "$o" 2>/dev/null)
   rm -f "$o"

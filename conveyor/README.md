@@ -42,7 +42,7 @@ its own, and the Board's Rules tab sets them in its Judge row.
   the reviewer still answers the USER-VISIBLE line (kept on the card's review line), and the card lands as any other.
   A visible change landed while it is off was never approved; the Board says so beside the switch.
 - `lint`: the rule Lint check, on by default. On, each card's change goes through the review gate (Lint, below)
-  before each review. Off, no lint command runs in a card and the brief has no `# Lint` section.
+  before each review and the landing gate before it lands. Off, no lint command runs in a card and the brief has no `# Lint` section.
 - `split`: the rule Split large issues, `off`, `shadow` or `on` (`conveyor.sh control rules split=<off|shadow|on>`).
   Before a card makes its worktree, code measures its issue against the pack's `split` limits; an issue that reaches
   one goes to the judge one time, which answers keep or 2 or 3 slices. Shadow records the verdict on the card's
@@ -968,6 +968,16 @@ again: a finding left then blocks the card, and nothing lands. After that fix, t
 change. The fix counts as no review. A later fix or rebuild session that adds a finding gets one new fix session at
 the next pass's gate. When a card is split for its size (`growcheck`), the gate runs again after the split's fix
 session, before the review of that pass.
+
+The landing gate (`lintgate` with `land`) is in the landing loop of `card()`, each time the product checks run: after
+the parse check of a merge onto main (`parses`), before the product checks and the changed tests. It uses the same
+ratchet run, from the commit the worktree is on after the merge, the same read-only check, `lint` line,
+execution-error block and rule Lint check. The card's findings go to one fix session, its reply checked as any fix's
+reply is, with no gate run after it. Its fix line's reason starts `lint:`, and the Board names the step
+`Fix <n>: lint findings`. The card then goes round to a review, which is a last review, as after a test fix. The
+review gate of that pass does not run on the change the fix left (`lfix`, its `cardpatch`): the landing gate decides
+on it. At the next landing gate, a finding on that same change blocks the card with `lint: <n> findings left after its
+fix session; nothing landed`. A change that a later session changed (a test fix, a check fix) gets one new fix session.
 
 The read-only check (`lintrun`) holds around each gate run. Before the commands, the index tree is kept, and the
 worktree must match the index with no file that git does not track or ignore; else no command runs and nothing is

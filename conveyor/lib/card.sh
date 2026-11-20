@@ -161,6 +161,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local vrule=on rounds=0 rep hard refix='' waitsec=0 behind='[]' cpid chead cseen own kept='' docpass='' docs parsecheck='' pfix='' # waitsec, behind: the seconds it has waited on other cards, and those cards (settle())
   local sv an ex ids fl # sv, an, ex: a review's survived findings, its answers and the lines it cites (repeats(), answers(), excerpts()); ids, fl: the fix round's numbered findings and its lines (numbered(), fixlines())
   local grown='' # grown: the judge was asked about the size of its change (growcheck(), lib/slices.sh)
+  local lfix='' # lfix: the change the landing gate's lint fix left, its cardpatch() (lintgate(), lib/lint.sh)
   local fixtree='' # fixtree: the tree before the last fix round, which holds the lines that fix deleted (excerpts())
   local priv privfix='' # priv: a last-review finding that is a privacy hit in the card's own change (privown()); privfix: its fix round was given
   local tmain='' # tmain: set once a failed test step has fitted the card onto a main that had moved (#582)
@@ -439,9 +440,9 @@ card() { # <card> <issue> [<branch> <tip>]
   [ "$n" != 0 ] || [ -z "$br" ] || msg=$(jq -r --arg c "$c" --arg b "$br" '"\(.title)\n\nConveyor card \($c), branch \($b)"' <<<"$issue")
   prv=$'\n\n'"$PORTREVIEW"$'\n'"The difference is the file $wt.port."; kp=$fromk/$from.patch
   # A NO-GO is fixed and reviewed again; a NO-GO on a last review (review MAX_REVIEWS, counting the rounds a retried
-  # card carries, or the one review after a landing conflict or after a test fix, or one that repeats a finding after
-  # its fix with every finding P2 or P3) lands with follow-ups. A GO card whose landing conflicts goes round once
-  # more: rebase, review. A finished loop whose landing still conflicts is ported once, as `retry` would port it.
+  # card carries, or the one review after a landing conflict, a test fix or the landing gate's lint fix, or one that
+  # repeats a finding after its fix with every finding P2 or P3) lands with follow-ups. A GO card whose landing
+  # conflicts goes round once more: rebase, review. A finished loop whose landing still conflicts is ported once, as `retry` would port it.
   # Whatever the review, the changed tests pass here before anything is filed or landed.
   while pass=$((${pass:-0} + 1)); do
     redbrief "$c" "$n" "$br"
@@ -542,7 +543,7 @@ card() { # <card> <issue> [<branch> <tip>]
     # follow-up that the privacy check refused, and the card was blocked.
     priv=''
     if [ "$res" = GO ] && [ -z "$earlier" ]; then mode=''
-    elif { [ "$res" = GO ] || [ $((pass + rounds)) -ge "$MAX_REVIEWS" ] || [ -n "$rebased" ] || [ -n "$tfix" ] || [ "$mode" = land ] \
+    elif { [ "$res" = GO ] || [ $((pass + rounds)) -ge "$MAX_REVIEWS" ] || [ -n "$rebased" ] || [ -n "$tfix" ] || [ -n "$lfix" ] || [ "$mode" = land ] \
       || { [ -n "$rep" ] && [ "$(counts "$wt.review" | jq '.P0 + .P1')" = 0 ]; }; } \
       && { [ "$res" = GO ] || [ -n "$privfix" ] || ! priv=$(privown "$wt") || [ -z "$priv" ]; }; then
       # A card whose issue is a follow-up at the depth cap (fudepth(), lib/followups.sh) files none: its findings are
@@ -687,6 +688,9 @@ card() { # <card> <issue> [<branch> <tip>]
             continue 2
           fi
         fi
+        # The landing gate (lintgate(), lib/lint.sh), before any check or test: a fix of lint findings goes round to a
+        # review, a last review (lfix), and back here, where a finding left on the change that fix left blocks.
+        lintgate "$c" "$n" "$wt" "$issue" "$sprompt" "$br" land; case $? in 1) return ;; 2) kept=''; docpass=''; continue 2 ;; esac
         # The product checks, on every pass that would land: a failure blocks the card, never a finding to fix. Not on
         # the pass that runs again on main as it is now what failed in a red run (tmain): there a failing check is that
         # red run failing again, as a check that fails on a batch's change is a red run (batch()), and goes to the one

@@ -318,7 +318,7 @@ t_slicesgrownfix() {
 # On, with a lint command (a stub finding each line with BAD in src/*.sh): the build makes FIVE, clean, and the fix
 # session after the split adds BAD to src/c1.sh. Bug caught: the split's fix changed the change after the review gate,
 # and the card was reviewed and landed with the finding unlinted. The gate runs again after it, a lint fix removes the
-# finding, and the card lands clean. A whole card: only card() shows the gate's place after growcheck().
+# finding, and the card lands clean (its last lint line the landing gate's). A whole card: only card() shows the gate's place after growcheck().
 t_slicesgrownlint() {
   grown on; echo 'main s1' > "$R/src/s1.sh"; git -C "$R" add src && git -C "$R" commit -qm s1 || fail "main's src/s1.sh"
   printf '%s\n' 'r=0; for f; do grep -q BAD "$f" && { echo "$f:1: E1 a bad word"; r=1; }; done; exit $r' > "$STUB/lint"
@@ -329,7 +329,7 @@ t_slicesgrownlint() {
   # loop: only card() shows the review gate running again after growcheck()'s fix session
   loop run 1 >/dev/null
   [ "$(st 'select(.step == "landed") | .issue')" = 7 ] || fail "the card of issue 7 did not land: $(st .step | tr '\n' ' ')"
-  [ "$(st 'select(.step | IN("lint", "grown", "fix", "review")) | "\(.step):\(.result)"' | tr '\n' ' ')" = 'lint:pass grown:split fix:ok lint:findings fix:ok lint:pass review:GO ' ] \
+  [ "$(st 'select(.step | IN("lint", "grown", "fix", "review")) | "\(.step):\(.result)"' | tr '\n' ' ')" = 'lint:pass grown:split fix:ok lint:findings fix:ok lint:pass review:GO lint:pass ' ] \
     && ! git -C "$R" show HEAD:src/c1.sh | grep -q BAD \
     || fail "the change the split's fix left was not linted before its review: $(st 'select(.step | IN("lint", "grown", "fix", "review")) | "\(.step):\(.result)"' | tr '\n' ' ')"
 }

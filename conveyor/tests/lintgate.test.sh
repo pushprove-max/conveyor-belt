@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 240
-# Engine cases: the lint check's review gate (lintgate(), conveyor/lib/lint.sh): its read-only check and put-back
-# (lintrun), its fix session, its blocks and its lint line in a card's run, and the rule Lint check.
+# Engine cases: the lint check's review and landing gates (lintgate(), conveyor/lib/lint.sh): the read-only check and
+# put-back (lintrun), their fix sessions, their blocks and the lint line in a card's run, and the rule Lint check.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -129,6 +129,21 @@ t_lintgateunstaged() {
     && [ "$(cat "$FXWT/a.txt")" = "$(printf 'one\ntwo\nthree')" ] || fail "the unstaged edit was linted or lost: $(cat "$T/$CASE/run.out"; cat "$FXWT/a.txt")"
 }
 
+# Bug: a finding that a Done-when or project-check fix session (run by checked() after the landing gate's lint fix)
+# adds counts as one the lint fix left, so the next landing gate blocks the card. lfix is the lint fix's own change:
+# the next landing gate gives the changed change one new fix session. checked() is stubbed as such a fix session.
+t_lintgatemergeagain() {
+  gatesetup '[]'
+  fx_wt 'echo BAD >> a.txt' b.txt base
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  fx_in 'session() { echo lintfix >> "$STUB/did"; (cd "$1" && sed -i "/BAD/d" a.txt && echo fixed >> a.txt); echo "{}"; }
+    checked() { [ -e "$STUB/checkfix" ] || { : > "$STUB/checkfix"; echo "BAD from the check fix" >> "$3/a.txt"; }; }
+    lfix=""; lintgate c7 7 "$FXWT" "{}" prompt br land; echo "rc1=$?"
+    lintgate c7 7 "$FXWT" "{}" prompt br land; echo "rc2=$?"'
+  [ "$(grep '^rc' "$T/$CASE/run.out" | paste -sd' ')" = 'rc1=2 rc2=2' ] && [ "$(did)" = 'lintfix lintfix' ] && [ -z "$(st 'select(.step == "blocked")')" ] \
+    || fail "the check fix's finding did not get a new lint fix at the next landing gate: $(cat "$T/$CASE/run.out"); $(did); $(st 'select(.step == "blocked") | .reason')"
+}
+
 # The cases below run card #7 whole (loop run): what they check is where the gate sits in card()'s review loop, which
 # sessions and reviews follow it and what lands, which no call of lintgate() alone shows.
 
@@ -141,10 +156,11 @@ t_lintgatefix() {
   gatesessions 'echo BAD >> a.txt' "sed -i '/BAD/d' a.txt; echo good >> a.txt" 'echo "BAD again" >> a.txt'
   # loop: only card()'s review loop shows a lint fix before each pass's review and the count of reviews kept at three
   loop run > /dev/null || fail "run exited non-zero"
+  # The last lint line is the landing gate's, on the change the last review read.
   [ "$(did)" = 'build lintfix fix lintfix fix lintfix' ] && [ "$(wc -l < "$STUB/reviews")" = 3 ] \
     || fail "not one lint fix before each of the three reviews, and three reviews: $(did), $(wc -l < "$STUB/reviews") reviews"
   [ "$(st 'select(.step | IN("lint", "fix", "review")) | "\(.step):\(.result)"' | tr '\n' ' ')" \
-    = "$(for i in 1 2 3; do printf 'lint:findings fix:ok lint:pass review:NO-GO '; [ $i = 3 ] || printf 'fix:ok '; done)" ] \
+    = "$(for i in 1 2 3; do printf 'lint:findings fix:ok lint:pass review:NO-GO '; [ $i = 3 ] || printf 'fix:ok '; done)lint:pass " ] \
     || fail "the steps are not lint, its fix, lint again and the review in each pass: $(st 'select(.step | IN("lint", "fix", "review")) | "\(.step):\(.result)"' | tr '\n' ' ')"
   [ -n "$(st 'select(.step == "landed") | .sha')" ] && ! grep -q BAD "$R/a.txt" || fail "the card did not land without the findings: $(cat "$R/a.txt")"
   st 'select(.step == "fix") | .reason' | grep -qx 'lint: 1 finding(s) of the change' || fail "the lint fix's line does not say why it ran: $(st 'select(.step == "fix") | .reason')"
@@ -223,7 +239,8 @@ t_lintgateskip() {
   echo "$GO" > "$STUB/review.1"
   # loop: only a whole card run shows that a missing tool lets the card land with a skipped lint line in its record
   loop run > /dev/null || fail "run exited non-zero"
-  [ -n "$(st 'select(.step == "landed") | .sha')" ] && [ "$(st 'select(.step == "lint") | .lint.commands[0].result')" = 'skipped: missing shellcheck' ] \
+  # Two lint lines: the review gate's and the landing gate's.
+  [ -n "$(st 'select(.step == "landed") | .sha')" ] && [ "$(st 'select(.step == "lint") | .lint.commands[0].result' | paste -sd,)" = 'skipped: missing shellcheck,skipped: missing shellcheck' ] \
     && st 'select(.step == "lint") | .reason' | grep -qF 'lint command 1 (echo "lint: missing shellcheck"; exit 127): skipped: missing shellcheck' \
     || fail "the card with a missing tool did not land with its skipped lint line: $(st 'select(.step | IN("lint", "blocked")) | .reason')"
 }
@@ -239,3 +256,44 @@ t_lintgateoff() {
   [ ! -e "$STUB/lint-args" ] && [ -n "$(st 'select(.step == "landed") | .sha')" ] && [ -z "$(st 'select(.step == "lint")')" ] && ! grep -q '^# Lint$' "$STUB/brief" \
     || fail "a lint command ran with the rule off: $(cat "$STUB/lint-args" 2>&1)"
 }
+
+# The landing gate's card #7: the build adds a line and a BAD line to a.txt, which the lint command finds only in a tree that holds
+# gone.txt, so the review gate passes it. The card's first test run puts gone.txt on main, so the merge onto main
+# brings the finding to the landing gate. The lint fix runs <lint fix>; review 1 is a GO, review 2 <review 2>.
+landgate() { # <lint fix> <review 2> [<build>]
+  gatesetup "[$(issue 7 2026-01-01)]" '[ ! -e gone.txt ] || $L {files}'
+  echo "$GO" > "$STUB/review.1"; printf '%s\n' "$2" > "$STUB/review.2"
+  gatesessions "${3:-echo seven >> a.txt; echo BAD >> a.txt}" "$1"
+  echo '[ -e "$STUB/moved" ] || { : > "$STUB/moved"; echo gone > "$R/gone.txt"; git -C "$R" add gone.txt; git -C "$R" commit -qm "main moves"; }' >> "$STUB/test-cmd"
+}
+# The card's steps from its first lint line on, the marks (start, deps, filed) left out.
+gatesteps() { st 'select(.step | IN("lint", "review", "fix", "test", "landed", "blocked")) | .step' | sed -n '/^lint$/,$p' | paste -sd' '; }
+
+# Bug: a finding that a merge onto main brings lands, or goes to its tests unfixed, as the review gate passed the
+# change before the merge. It gets one fix session at the landing gate before any test, then a last review: that
+# review's NO-GO lands with its follow-up and no review fix, and the fixed change lands.
+t_lintgatemerge() {
+  landgate "sed -i '/BAD/d' a.txt" $'[P2] a.txt:1 a nit\nUSER-VISIBLE: no\nVERDICT: NO-GO'
+  # loop: the merge onto main between the card's tests and its landing comes only from a whole card run
+  loop run > /dev/null || fail "run exited non-zero"
+  [ "$(gatesteps)" = 'lint review lint test lint fix review lint test landed' ] && [ "$(did)" = 'build lintfix' ] \
+    || fail "the merge's finding did not get one fix before any test and then a review: $(gatesteps); $(did)"
+  [ "$(st 'select(.step == "fix") | .reason')" = 'lint: 1 finding(s) of the change on main as it is now' ] \
+    || fail "the fix line does not say it fixed lint findings: $(st 'select(.step == "fix")')"
+  [ "$(st 'select(.step == "landed") | .followups | length')" = 1 ] && [ -e "$R/gone.txt" ] && ! grep -q BAD "$R/a.txt" \
+    || fail "the review after the lint fix was no last review, or the fixed change did not land: $(st 'select(.step == "landed")'); a.txt: $(cat "$R/a.txt")"
+}
+
+# Bug: a finding left after the landing gate's fix goes to a second lint fix (the review gate of the next pass) or
+# lands. The next landing gate blocks the card, and nothing lands.
+t_lintgatemergeleft() {
+  landgate 'echo "still BAD" >> a.txt' "$GO"
+  # loop: the merge onto main between the card's tests and its landing comes only from a whole card run
+  loop run > /dev/null || fail "run exited non-zero"
+  [ "$(gatesteps)" = 'lint review lint test lint fix review lint blocked' ] && [ "$(did)" = 'build lintfix' ] \
+    || fail "the finding left did not block at the next landing gate: $(gatesteps); $(did)"
+  [ "$(st 'select(.step == "blocked") | .reason' | head -n 1)" = 'lint: 2 findings left after its fix session; nothing landed' ] \
+    && [ -z "$(st 'select(.step == "landed")')" ] && ! grep -q BAD "$R/a.txt" \
+    || fail "the card did not block with nothing landed: $(st 'select(.step | IN("blocked", "landed")) | .reason')"
+}
+
