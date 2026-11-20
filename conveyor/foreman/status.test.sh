@@ -318,18 +318,20 @@ grep -qxF 'alpha: #5 is blocked since 2026-11-15T11:00:00Z: tests failed twice' 
 # command that resumes it; a held card whose own process is stopped too (own) names that command as well, as resuming
 # the engine leaves it stopped; a stuck card with no stopped process reads as before. Their wake comes on the second
 # poll that lists them, a poll apart, not the first, as a stuck one's: one reading can catch a stop a SIGCONT soon ends.
+# Issue 1039: each command names every stopped process of its tree (health's pids), as one to the engine or the card
+# alone left the builder and its timeout wrapper stopped.
 # shellcheck disable=SC2016 # the backquotes are the wake's own text, not an expansion
 t_stopped() {
 CASE=stopped; fixture stopped
-snap '.health.engineStopped = {pid: 4242, since: "2026-11-15T11:40:00Z"}
+snap '.health.engineStopped = {pid: 4242, since: "2026-11-15T11:40:00Z", pids: [4242, 4250]}
   | .health.stuck = [{card: "c5", issue: 5, step: "build", since: "2026-11-15T11:30:00Z", stopped: {pid: 4242, of: "engine", since: "2026-11-15T11:40:00Z"}},
-  {card: "c8", issue: 8, step: "build", since: "2026-11-15T11:30:00Z", stopped: {pid: 4242, of: "engine", since: "2026-11-15T11:40:00Z", own: {pid: 4444, since: "2026-11-15T11:45:00Z"}}},
-  {card: "c6", issue: 6, step: "review", since: "2026-11-15T11:00:00Z", stopped: {pid: 4343, of: "card", since: "2026-11-15T11:31:00Z"}},
+  {card: "c8", issue: 8, step: "build", since: "2026-11-15T11:30:00Z", stopped: {pid: 4242, of: "engine", since: "2026-11-15T11:40:00Z", own: {pid: 4444, since: "2026-11-15T11:45:00Z", pids: [4444, 4450, 4451]}}},
+  {card: "c6", issue: 6, step: "review", since: "2026-11-15T11:00:00Z", stopped: {pid: 4343, of: "card", since: "2026-11-15T11:31:00Z", pids: [4343, 4350]}},
   {card: "c7", issue: 7, step: "build", since: "2026-11-15T11:32:00Z"}]'
 out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the status failed: $out"
-own='; #8'"'"'s own process is stopped too since 2026-11-15T11:45:00Z: `kill -CONT 4444` resumes it'
-for l in "needs you: the engine is stopped (state T) since 2026-11-15T11:40:00Z: \`kill -CONT 4242\` resumes it (it holds #5, #8)$own" \
-    'needs you: #6: its process is stopped (state T) since 2026-11-15T11:31:00Z: `kill -CONT 4343` resumes it' \
+own='; #8'"'"'s own process is stopped too since 2026-11-15T11:45:00Z: `kill -CONT 4444 4450 4451` resumes it'
+for l in "needs you: the engine is stopped (state T) since 2026-11-15T11:40:00Z: \`kill -CONT 4242 4250\` resumes it (it holds #5, #8)$own" \
+    'needs you: #6: its process is stopped (state T) since 2026-11-15T11:31:00Z: `kill -CONT 4343 4350` resumes it' \
     'needs you: #7 is stuck: no new step and no output since 2026-11-15T11:32:00Z (last step: build)'; do
   grep -qxF -- "$l" <<<"$out" || fail "no line '$l' in: $out"
 done
@@ -338,7 +340,7 @@ poll && fail "the first poll to read the stopped engine woke: $(cat "$FD"/pendin
 CONVEYOR_FOREMAN_NOW=$((NOW + 60)) poll || fail "the stopped engine woke nothing on its second poll: $(cat "$T/err")"
 w=$(cat "$FD"/pending/*.wake)
 grep -qxF 'Conveyor: alpha: stuck: #7; stopped: #5 #8 #6' <<<"$w" || fail "the wake's first line does not name the stopped cards: $w"
-grep -qxF "alpha: the engine is stopped (state T) since 2026-11-15T11:40:00Z: \`kill -CONT 4242\` resumes it (it holds #5, #8)$own" <<<"$w" \
+grep -qxF "alpha: the engine is stopped (state T) since 2026-11-15T11:40:00Z: \`kill -CONT 4242 4250\` resumes it (it holds #5, #8)$own" <<<"$w" \
   || fail "the wake does not name the stopped engine and how to resume it: $w"
 }
 

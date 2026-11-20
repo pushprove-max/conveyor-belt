@@ -98,7 +98,10 @@ REF='def ref: (.name | strings) // "#\(.issue)";'
 # anything but a snapshot holding a health record. idle is a candidate here: record() reports it on its second poll.
 # An awaited issue that landed names its commit (the snapshot's or the history's landed line of it); a whole-suite run
 # that ended (snapshot suites) is one item, its line as the status command prints it, the failed cases named.
+# The command that resumes a stopped process health names ({pid, pids}): a SIGCONT to each stopped process of its
+# tree (pids), as one sent to it alone leaves those under it, the builder among them, stopped.
 PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
+  def cont: ([.pids | arrays | .[] | numbers] | if . == [] then null else . end) as $p | "`kill -CONT \($p // [.pid] | map(tostring) | join(" "))`";
   (type == "object" and .belt == [] and (.queue.next // null) == []) as $idle
   | pushed($hist[0]) as $pushed
   | . as $snap
@@ -115,13 +118,13 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
     # A stopped engine is one item, idle or not, naming the cards it holds; a card under it is not listed again.
     # A held card whose own process is stopped too names that one as well: resuming the engine leaves it stopped.
     (([.stuck[] | select(.stopped.of? == "engine")] | unique_by(.card)) as $h | [$h[] | ref] as $held
-      | [$h[] | select((.stopped.own | objects | .pid | numbers) != null) | "; \(ref)'"'"'s own process is stopped too since \(.stopped.own.since): `kill -CONT \(.stopped.own.pid)` resumes it"] as $own
+      | [$h[] | select((.stopped.own | objects | .pid | numbers) != null) | "; \(ref)'"'"'s own process is stopped too since \(.stopped.own.since): \(.stopped.own | cont) resumes it"] as $own
       | .engineStopped | objects | select(.pid | numbers)
-      | ["stopped:engine:\(.pid)", "stopped", ($held | join(" ")), "the engine is stopped (state T) since \(.since): `kill -CONT \(.pid)` resumes it"
+      | ["stopped:engine:\(.pid)", "stopped", ($held | join(" ")), "the engine is stopped (state T) since \(.since): \(cont) resumes it"
         + (if $held == [] then "" else " (it holds \($held | join(", ")))" end) + ($own | join(""))]),
     (.stuck[] | if .stopped.of? == "engine" then empty
       elif ((.stopped | objects | .pid) // null | type) == "number" then ["stopped:\(.card):\(.stopped.pid)", "stopped", ref,
-        "\(ref): its process is stopped (state T) since \(.stopped.since // .since): `kill -CONT \(.stopped.pid)` resumes it"]
+        "\(ref): its process is stopped (state T) since \(.stopped.since // .since): \(.stopped | cont) resumes it"]
       elif .did then ["stuck:\(.card):\(.did)", "stuck", ref, "\(ref) is stuck: no progress since \(.since) at \(.step); the engine \(.did) it"]
       else ["stuck:\(.card)", "stuck", ref, "\(ref) is stuck: " + (
       if (.waitedOn | type) == "array" then "it has waited on other cards for \(.waitedMin) minutes in all (\([.waitedOn[] | objects | ref] | join(", ")))"

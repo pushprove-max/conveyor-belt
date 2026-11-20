@@ -122,6 +122,14 @@ p_alive() { [ -n "$2" ] && [ "$(p_started "$1")" = "$2" ] && [[ $(ps -o stat= -p
 p_stopped() { [[ $(LC_ALL=C ps -o stat= -p "$1" 2>/dev/null) =~ ^[[:space:]]*T ]]; } # <pid>
 # The pids of every process so stopped, one a line.
 p_stoppedpids() { LC_ALL=C ps -A -o pid= -o stat= 2>/dev/null | awk '$2 ~ /^T/ { print $1 }'; }
+# The pids of <pid> and of every process under it so stopped, one a line, <pid> first: a stop signal sent to a whole
+# tree holds each of them, and a SIGCONT to <pid> alone leaves the rest stopped (a builder under its timeout wrapper).
+p_stoppedtree() { # <pid>
+  LC_ALL=C ps -A -o pid= -o ppid= -o stat= 2>/dev/null | awk -v r="$1" '{ p[NR] = $1; pp[NR] = $2; s[NR] = $3 }
+    END { t[r] = 1; do { n = 0; for (i = 1; i <= NR; i++) if ((pp[i] in t) && !(p[i] in t)) { t[p[i]] = 1; n = 1 } } while (n)
+      for (i = 1; i <= NR; i++) if (p[i] == r && s[i] ~ /^T/) print p[i]
+      for (i = 1; i <= NR; i++) if (p[i] != r && (p[i] in t) && s[i] ~ /^T/) print p[i] }'
+}
 
 # Runs <command> as the leader of a session of its own (no controlling terminal, a process group of its own) and
 # exits as it does: setsid on Linux; macOS has no setsid command, so perl's POSIX::setsid there.

@@ -327,38 +327,48 @@ stoppedcard() { # <pid> <now>
      | ($l + {step:"picked",title:"t",created:"2026-01-01T00:00:00Z"}), ($l + {step:"worktree",pid:$p,started:$s}), ($l + {step:"start",of:"build"})' >> "$ST/cards.jsonl"
 }
 # A stand-in for `serve` (holding the loop's lock, its pid in loop.json) with the card's process under a wrapper under
-# it, as the loop runs cardrun() and card() in shells of their own; the stand-in stopped: the card is stuck at once,
-# named with the stopped engine's pid, and health names the engine itself, both since health first read it stopped
-# (not the card's last output, <now>), and still so a minute on; with the card's process stopped too, as when the
-# whole tree is stopped, its entry also names that process (own), as resuming the engine leaves it stopped; once both
-# are resumed, it is not stuck and no engine is stopped, as before.
+# it, as the loop runs cardrun() and card() in shells of their own; the stand-in and the wrapper stopped: the card is
+# stuck at once, named with the stopped engine's pid, and health names the engine itself, both since health first read
+# it stopped (not the card's last output, <now>), and still so a minute on, with each stopped process of its tree (pids:
+# issue 1039, the command resumed the engine alone and left the processes under it stopped); with the card's process
+# stopped too, as when the whole tree is stopped, its entry also names that process (own), as resuming the engine
+# leaves it stopped, and the engine's pids name it as well; once all are resumed, it is not stuck and no engine is
+# stopped, as before.
 t_stoppedengine() {
-  local e w c now h s; setup '[]'; now=$(date +%s); s=$(jq -rn --argjson t $((now + 30)) '$t | todate')
+  local e w c now h s t2 u; setup '[]'; now=$(date +%s); s=$(jq -rn --argjson t $((now + 30)) '$t | todate')
   ( exec 9>>"$ST/cards.jsonl.run"; flock 9; ( sleep 600 & wait ) & wait ) & e=$! # sleep: the card's process under the stand-in, killed below
-  # The stand-in's shells start their children by themselves: wait for the card's process to be there.
+  # Poll: health reads the stopped pids from the real process tree (ps state T), so the test needs real processes under
+  # the stand-in; its shells start their children by themselves, so wait for the card's process to be there.
   for _ in $(seq 50); do w=$(pgrep -P "$e") && c=$(pgrep -P "$w" sleep) && break; sleep 0.1; done
   [ -n "$c" ] || fail "the stand-in's card process did not start"
   jq -cn --argjson p "$e" --arg t "$(p_started "$e")" '{pid: $p, started: $t}' > "$ST/loop.json"
-  stoppedcard "$c" "$now"; kill -STOP "$e"
+  stoppedcard "$c" "$now"; kill -STOP "$e" "$w"
   h=$(CONVEYOR_NOW=$((now + 30)) loop health >/dev/null; CONVEYOR_NOW=$((now + 90)) loop health | jq -c '[.loop, (.stuck | map([.issue, .step, .stopped])), .engineStopped]')
-  [ "$h" = "[true,[[1,\"build\",{\"pid\":$e,\"of\":\"engine\",\"since\":\"$s\"}]],{\"pid\":$e,\"since\":\"$s\"}]" ] \
-    || { kill -CONT "$e"; kill "$c" "$e"; fail "a card under a stopped engine, or the engine, is not named so at once, since it was first read stopped: $h"; }
-  kill -STOP "$c"; h=$(CONVEYOR_NOW=$((now + 150)) loop health | jq -c '.stuck | map(.stopped)'); kill -CONT "$c" "$e"
-  [ "$h" = "[{\"pid\":$e,\"of\":\"engine\",\"since\":\"$s\",\"own\":{\"pid\":$c,\"since\":\"$(jq -rn --argjson t $((now + 150)) '$t | todate')\"}}]" ] \
+  [ "$h" = "[true,[[1,\"build\",{\"pid\":$e,\"of\":\"engine\",\"since\":\"$s\"}]],{\"pid\":$e,\"since\":\"$s\",\"pids\":[$e,$w]}]" ] \
+    || { kill -CONT "$w" "$e"; kill "$c" "$e"; fail "a card under a stopped engine, or the engine with each stopped process under it, is not named so at once, since it was first read stopped: $h"; }
+  kill -STOP "$c"; h=$(CONVEYOR_NOW=$((now + 150)) loop health | jq -c '[(.stuck | map(.stopped)), .engineStopped.pids]'); kill -CONT "$c" "$w" "$e"
+  t2=$(jq -rn --argjson t $((now + 150)) '$t | todate'); u=$(printf '%s\n' "$w" "$c" | sort -n | paste -sd, -)
+  [ "$h" = "[[{\"pid\":$e,\"of\":\"engine\",\"since\":\"$s\",\"own\":{\"pid\":$c,\"since\":\"$t2\",\"pids\":[$c]}}],[$e,$u]]" ] \
     || { kill "$c" "$e"; fail "a stopped card process under a stopped engine is not named, so resuming the engine leaves it stopped: $h"; }
   h=$(CONVEYOR_NOW=$((now + 150)) loop health | jq -c '[.loop, .stuck, .engineStopped]'); kill "$c" "$e"
   [ "$h" = '[true,[],null]' ] || fail "a card under a running engine is stuck, or the engine reads as stopped: $h"
 }
-# The card's own process stopped, no loop running: stuck at once, named with its pid; resumed, it is not stuck; ended
-# (missing), it is stuck at once as gone, with no stopped process named.
+# The card's own process stopped with the process under it (a builder under its timeout wrapper, as card() runs it),
+# no loop running: stuck at once, named with its pid and both pids (issue 1039: the command named the card's process
+# alone and left the builder stopped); resumed, it is not stuck; ended (missing), it is stuck at once as gone, with no
+# stopped process named.
 t_stoppedcard() {
-  local p now h; setup '[]'; now=$(date +%s)
-  sleep 600 & p=$! # sleep: the card's process, stopped, resumed and then killed below
-  stoppedcard "$p" "$now"; kill -STOP "$p"
-  h=$(CONVEYOR_NOW=$((now + 30)) loop health | jq -c '[(.stuck | map([.issue, .stopped])), .engineStopped]'); kill -CONT "$p"
-  [ "$h" = "[[[1,{\"pid\":$p,\"of\":\"card\",\"since\":\"$(jq -rn --argjson t $((now + 30)) '$t | todate')\"}]],null]" ] \
-    || { kill "$p"; fail "a stopped card process is not named so at once, or no loop reads as a stopped engine: $h"; }
-  h=$(CONVEYOR_NOW=$((now + 30)) loop health | jq -c .stuck); kill "$p"; wait "$p" 2>/dev/null
+  local p b now h; setup '[]'; now=$(date +%s)
+  ( sleep 600 & wait ) & p=$! # sleep: the builder under the card's process, stopped, resumed and then killed below
+  # Poll: health reads the stopped pids from the real process tree (ps state T), so the test needs a real stopped child
+  # under the card's process; a direct check cannot fake one, and the subshell starts it by itself, so wait for it.
+  for _ in $(seq 50); do b=$(pgrep -P "$p" sleep) && break; sleep 0.1; done
+  [ -n "$b" ] || fail "the card's builder did not start"
+  stoppedcard "$p" "$now"; kill -STOP "$p" "$b"
+  h=$(CONVEYOR_NOW=$((now + 30)) loop health | jq -c '[(.stuck | map([.issue, .stopped])), .engineStopped]'); kill -CONT "$b" "$p"
+  [ "$h" = "[[[1,{\"pid\":$p,\"of\":\"card\",\"since\":\"$(jq -rn --argjson t $((now + 30)) '$t | todate')\",\"pids\":[$p,$b]}]],null]" ] \
+    || { kill "$p" "$b"; fail "a stopped card process, with the stopped builder under it, is not named so at once, or no loop reads as a stopped engine: $h"; }
+  h=$(CONVEYOR_NOW=$((now + 30)) loop health | jq -c .stuck); kill "$p" "$b"; wait "$p" 2>/dev/null
   [ "$h" = '[]' ] || fail "a card whose process runs is stuck: $h"
   [ "$(CONVEYOR_NOW=$((now + 30)) loop health | jq -c '.stuck | map([.issue, .stopped])')" = '[[1,null]]' ] \
     || fail "a card whose process is gone is not stuck at once, as before, or names a stopped process: $(CONVEYOR_NOW=$((now + 30)) loop health | jq -c .stuck)"

@@ -159,7 +159,8 @@ cards() {
 # card whose process (the pid and start its worktree line names) is gone, as nothing is left to write its line (but for
 # a card in its land step while the loop runs: the loop lands it, and STUCK holds), or whose process or engine is
 # stopped by a stop signal (state T), as nothing of it moves (stopped: {pid, of: "engine" or "card", since: when health
-# first read it stopped, own: {pid, since} when of is "engine" and the card's own process is stopped too}, on every
+# first read it stopped, own: {pid, since, pids} when of is "engine" and the card's own process is stopped too, pids
+# when of is "card": that process and each stopped one under it, which a SIGCONT must each reach}, on every
 # stuck entry of such a card) (step
 # waiting and waitsOn for a card waiting on a same-file card, never the landing it waits to begin), and
 # every open card that has waited STUCK seconds on a same-file card that is not alive (not on the belt, or its process
@@ -168,7 +169,7 @@ cards() {
 # fix, rebase) has had no output for SESSION_STUCK seconds, every open card that has waited on other cards for more
 # than WAIT_LIMIT minutes in all (step waiting, since and waitsOn as above, waitedMin: the whole minutes of all its
 # waits, waitedOn: each card it waited on, in order, as waitsOn), and every open card whose test step has a case
-# running for CASE_STUCK seconds (step test, cases: their names, since: when the first of them started; testcases()); engineStopped ({pid, since}: the
+# running for CASE_STUCK seconds (step test, cases: their names, since: when the first of them started; testcases()); engineStopped ({pid, since, pids: it and each stopped process under it}: the
 # loop's own process, as loop.json names it, while a stop signal holds it, with or without cards; else null); waitingOnCard (card, issue, since: when the
 # wait began, waitsOn as stuck's): every open card waiting at its claim (the live record of the step it is running names
 # the card it waits on and was brought up to date within STUCK seconds); unpushed (card, issue, sha, since): the landed commits in main that neither the last push that worked nor
@@ -310,7 +311,7 @@ stopsince() { # <now>
 # READCHECKED, when set, says READ is a copy that check() has already passed and nothing appends to (the snapshot's):
 # health does not check it again.
 health() {
-  local wt stopped en e t n loop=true gh=false ghr=null ghwhy='' free a not=() lv c r=null cap bw cyc=null pu=null bf=null st why='' said gone cm rm mc tr so co hd rc
+  local wt stopped en e t n loop=true gh=false ghr=null ghwhy='' free a not=() lv c r=null cap bw cyc=null pu=null bf=null st why='' said gone cm rm mc tr sp so co hd rc
   { [ -n "${READCHECKED:-}" ] || check; } && lv=${LIVEJSON:-$(live)} || return 1
   # The records and the retried lines, as health reads them (HEALTHLINE).
   hd=$(mktemp -d) || return 1
@@ -337,10 +338,10 @@ health() {
   ( flock -n 9 ) 9>>"$STATE.run" && loop=false
   # The engine (the loop's own process, as loop.json names it, idle or running cards) while the loop runs, and each
   # open card's process, when a stop signal holds it (state T, p_stopped): nothing of theirs moves until it is given
-  # SIGCONT, and the loop's own stall watcher stops with it. {engine: {pid, since} or null, cards: {"<card>": {pid, of:
-  # "engine" or "card", since, own}}}: each live card of a stopped engine names the engine, as its own process resumed
-  # under it still moves nothing, and own ({pid, since}) when its own process is stopped too, as resuming the engine
-  # leaves that one stopped. since: when health first read it stopped (stopsince()).
+  # SIGCONT, and the loop's own stall watcher stops with it. {engine: {pid, since, pids} or null, cards: {"<card>": {pid,
+  # of: "engine" or "card", since, own, pids (of "card")}}}: each live card of a stopped engine names the engine, as its
+  # own process resumed under it still moves nothing, and own ({pid, since, pids}) when its own process is stopped too,
+  # as resuming the engine leaves that one stopped. since: when health first read it stopped (stopsince()).
   en=''
   [ "$loop" = true ] && IFS=$'\t' read -r e t < <(jq -r '[.pid, .started] | @tsv' "$SAYS" 2>/dev/null) && [[ $e =~ ^[0-9]+$ ]] \
     && p_alive "$e" "$t" && p_stopped "$e" && en=$e$'\t'$t
@@ -355,6 +356,13 @@ health() {
          cards: (map(select(.card != "")) | group_by(.card) | map((map(select((.pid | tostring) == $e)) | first) as $g
            | (map(select((.pid | tostring) != $e) | {pid, since}) | first) as $o
            | {key: .[0].card, value: (if $g then {pid: $g.pid, of: "engine", since: $g.since} + (if $o then {own: $o} else {} end) else {pid: $o.pid, of: "card", since: $o.since} end)}) | from_entries)}') || { rm -rf "$hd"; return 1; }
+  # Each stopped process named (the engine, a card's own) with pids: it and every process under it that is stopped
+  # (p_stoppedtree), it first, so the command that resumes it reaches the builder and its timeout wrapper too.
+  sp=$(for p in $(jq -r '[.engine.pid?, (.cards[] | .pid, .own.pid?)] | map(numbers) | unique | .[]' <<<"$stopped"); do
+      p_stoppedtree "$p" | jq -Rcs --arg p "$p" '{($p): split("\n") | map(select(. != "") | tonumber)}'; done | jq -cs 'add // {}') \
+    && stopped=$(jq -c --argjson sp "$sp" 'def tree: . + {pids: ([.pid] + (($sp[.pid | tostring] // []) - [.pid]))};
+      (.engine |= if . then tree else . end) | .cards |= map_values(if .of == "card" then tree else . end | if .own then .own |= tree else . end)' <<<"$stopped") \
+    || { rm -rf "$hd"; return 1; }
   st=$(state "$c" "$(jq -r '.pct // empty' <<<"$r")")
   # A loop a sign-in failure paused (signinpause()) says why, and what to run.
   [ "$st" != paused ] || why=$(jq -r '.signin // ""' <<<"$c")
