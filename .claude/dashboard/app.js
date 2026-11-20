@@ -828,7 +828,8 @@
     });
     return { rounds, last };
   }
-  // A fix is numbered by its Fix round, as the strip numbers it, so a fix and its lint fix share a number. A fix that is
+  // A fix is numbered by its Fix round, as the strip numbers it, so a fix and the review gate's lint fix after it share a
+  // number; the landing gate's lint fix is a new round (track.jq). A fix that is
   // no round keeps the name the six steps give it (track.jq): the step of the session before it ("Build · lint fix",
   // "Fix 2: lint findings", "Land · reply check fix").
   function fixOf(all, i) {
