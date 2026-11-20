@@ -2333,7 +2333,7 @@
   // The tab's panels, in their default order, each drawn from the one Rules part: [id, title, width, its sections].
   // Each has its own line (.rules-note: say) under its sections.
   const PANELS = [
-    [PART, 'Rules', 'wide', (all) => [head(), index(rules(all))]],
+    [PART, 'Rules', 'full', (all) => [head(), index(rules(all))]],
     [`${PART}-produce`, 'What these rules produce', 'small', (all) => [produce(all)]],
     [`${PART}-prices`, 'Model prices', 'full', () => [pricesSection()]],
     [HELD_P, HELD, 'full', (all) => [heldSection(all)]],
@@ -2473,6 +2473,9 @@
     size,
     tab: 'rules',  // a tab of its own
     part: PART,
+    // The Rules panel takes the grid's whole width: in a column beside another panel its label columns left a rule's
+    // help a word a line (#1038). A kept layout's other width for it is read as full.
+    widths: id === PART ? ['full'] : undefined,
     rows: 'all',
     // Its rows: each rule, the figures, the next issues and each group of the held issues (so its length can be set).
     rowSelector: '.rules-row, .rules-stats, .rules-next, .rules-group',

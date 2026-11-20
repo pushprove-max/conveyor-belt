@@ -118,7 +118,7 @@ export const CONTROL_IDS = ['machine', ...family('board')];
 export const RULES_IDS = family('rules');
 // Their default widths: the rules beside what they produce, every other one the tab's width.
 export const CONTROL_SIZES = { machine: 'full', 'board-loop': 'full', 'board-push': 'full', board: 'full' };
-export const RULES_SIZES = { rules: 'wide', 'rules-produce': 'small', 'rules-prices': 'full', 'rules-held': 'full', 'rules-issues': 'full' };
+export const RULES_SIZES = { rules: 'full', 'rules-produce': 'small', 'rules-prices': 'full', 'rules-held': 'full', 'rules-issues': 'full' };
 export const BELT3D_IDS = ['belt3d'];
 export const TESTS_IDS = ['tests'];
 export const BENCH_IDS = ['bench'];

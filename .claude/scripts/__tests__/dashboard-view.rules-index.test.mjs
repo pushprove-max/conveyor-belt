@@ -4,7 +4,7 @@
 // its menu. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { boot, deliver, settle, full, act, rulesP, record, css, cases } from './dashboard-view.helpers.mjs';
+import { boot, deliver, settle, full, act, rulesP, record, css, cases, STORE } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const sent = async (w, fn) => { fn(); await settle(); return w.posts.splice(0).map((p) => p.body); };
@@ -191,3 +191,19 @@ test('Rules: docs/board.md names the two lines at the top of the panel in the or
   assert.ok(dSaves >= 0 && dLast >= 0, top);
   assert.equal(dSaves < dLast, saves < last, `the page: ${top}`);
 });
+
+// Bug (#1038): the Rules panel took two of three columns, beside What these rules produce, and a layout kept with it
+// at that width kept it there; its group list and label columns then left a rule's help a word a line.
+// One case a width and layout, so each Board fixture runs in its own case.
+const keptWide = JSON.stringify({ tabs: { rules: { order: ['rules', 'rules-produce'], sizes: { rules: 'wide', 'rules-produce': 'small' }, lengths: {}, collapsed: [], hidden: [] } } });
+for (const [width, cols] of [[1440, 3], [900, 2]]) {
+  for (const [layout, store] of [['the default layout', {}], ['a kept narrower width', { [STORE]: keptWide }]]) {
+    test(`Rules: at ${cols} grid columns the Rules panel spans every column, with ${layout}`, () => {
+      const w = boot({ tab: 'rules', width, store });
+      deliver(w, full());
+      assert.equal(w.document.getElementById('grid').dataset.cols, String(cols));
+      assert.equal(rulesP(w).style.gridColumn, `1 / span ${cols}`);
+      assert.deepEqual(Array.from(w.document.getElementById('size-rules').options, (o) => o.value), ['full'], 'no narrower width is offered');
+    });
+  }
+}

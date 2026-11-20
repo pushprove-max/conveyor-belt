@@ -728,6 +728,16 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .rules-set-what { margin: 0; font-size: var(--fs-sm); color: var(--muted); }
 .rules-row { display: grid; grid-template-columns: minmax(16ch, 26ch) minmax(0, 1fr); align-items: center; gap: var(--sp-3); padding: var(--sp-3) 0; border-top: 1px solid var(--surface-2); }
 .rules-key { display: grid; }
+/* A narrow Rules panel (by its own width, not the window's): the groups above the group, then each rule's label and
+   help above its control, so the two first columns no longer leave the rule's text a word a line. */
+.panel[data-panel="rules"] > .panel-body { container: rules-panel / inline-size; }
+@container rules-panel (max-width: 760px) {
+  .rules-indexed { grid-template-columns: minmax(0, 1fr); }
+  .rules-pick { position: static; }
+}
+@container rules-panel (max-width: 520px) {
+  .rules-row { grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); }
+}
 /* A rule's label in plain sentence case, its help one short line under it. */
 .rules-row .rules-key > .board-label { font-size: var(--fs-sm); text-transform: none; letter-spacing: 0; color: var(--text); }
 .rules-what { font-size: var(--fs-xs); color: var(--muted); }
@@ -1377,9 +1387,6 @@ html.b3-filling, html.b3-filling body { overflow: hidden; }
   .panel[data-panel="belt3d"]:fullscreen .b3-phone { display: none; }
   .board-today { margin-left: 0; }
   .rules-produce { max-height: none; overflow-y: visible; }
-  .rules-row { grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); }
-  .rules-indexed { grid-template-columns: minmax(0, 1fr); }
-  .rules-pick { position: static; }
   /* Builder, Reviewer and Judge lay out alike: CLI, model and effort each a full-width line, so no model is cut. */
   .rules-model { display: grid; grid-template-columns: minmax(0, 1fr); flex: 1 1 100%; }
   .rules-model > .field { width: 100%; }
