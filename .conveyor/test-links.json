@@ -379,5 +379,8 @@
   ],
   "conveyor/tests/releaseagain.test.sh": [
     ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "conveyor/tests/batch.test.sh": [
+    "conveyor/tests/batchmain.test.sh"
   ]
 }
