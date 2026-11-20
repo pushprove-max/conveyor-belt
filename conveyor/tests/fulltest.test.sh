@@ -181,7 +181,8 @@ t_fullanyway() {
     && [ "$(ftorigin)" = "$O0" ] && [ "$(ftlines)" = 2 ] || fail "push anyway over a red run that is not the last was not refused: $out"
   out=$(loop full-test anyway 2>&1); [ $? = 2 ] && grep -q usage <<<"$out" || fail "push anyway naming no red run was not refused: $out"
   # Push anyway: the commit of the red run, with no run, logged as the owner's push over a red suite. ftended polls, as
-  # the push runs in the background after `loop full-test anyway` returns (lib/fulltest.sh): only its line shows its end.
+  # the push runs in the background after `loop full-test anyway` returns (lib/fulltest.sh): its end shows as its line
+  # in the record and its .running file gone, which the background run removes after it writes that line.
   loop full-test anyway 0123456789ac --by "Board user t" > /dev/null || fail "push anyway did not start"; ftended 3
   [ "$(ftorigin)" = "$A" ] && [ ! -e "$STUB/fulls" ] \
     && [ "$(ftl 'select(.kind == "anyway") | [.sha, .state, .by, .pushed.ok, (.cases | length)]')" = "[\"$A\",\"failed\",\"Board user t\",true,4]" ] \
