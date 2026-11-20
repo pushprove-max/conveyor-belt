@@ -144,14 +144,16 @@ t_fullred() {
   [ "$(jq -c '[.suites[] | select(.kind == "full test") | [.state, .sha, .failed, .cases, (.ended != null)]]' <<<"$s")" \
     = "[[\"failed\",\"$A\",4,[\"code.test: breaks\",\"flaky.test: flips\",\"net.test: fetch\",\"old.test: old\"],true]]" ] || fail "the snapshot's suites do not show the red run: $(jq -c .suites <<<"$s")"
 }
-# <id> <commit>: the line t_fullred's red run writes at <commit> (its id given), its fix cases filed as 100101 and 100102.
+# <id> <commit>: a red run's line at <commit> (its id given), with t_fullred's cases and verdicts, its fix cases filed as
+# 100101 and 100102. Each case's why is null, so it is not the line t_fullred writes: there fulljudge() gives the
+# flaky and the declined case a why. t_fullredagain and t_fullanyway check no why.
 ftredline() {
   jq -cn --arg i "$1" --arg s "$2" '{time: "2026-11-01T00:00:00Z", id: $i, kind: "run", push: true, sha: $s, state: "failed", exit: 1, pushed: null, reused: null,
     cases: [["code.test: breaks", "fix", 100101, "failed"], ["flaky.test: flips", "flaky", null, "passed"], ["net.test: fetch", "declined", null, "failed"], ["old.test: old", "fix", 100102, "failed"]]
       | map({case: .[0], line: null, runs: [.[3], .[3], .[3]], verdict: .[1], why: null, issue: .[2], reused: false})}' >> "$ST/fulltest.jsonl"
 }
 
-# Bug this guards: a case that failed again got a second fix card. The run before is t_fullred's red run, as its line.
+# Bug this guards: a case that failed again got a second fix card. The run before is a red run with t_fullred's cases (ftredline).
 t_fullredagain() {
   setup "[$(issue 7 2026-01-01)]"
   tune '.test.full = ". \"$STUB/full-cmd\""'; ftsuite
@@ -167,7 +169,7 @@ t_fullredagain() {
 }
 
 # Bug this guards: Push anyway pushed over whichever red run was last, not the one its confirm showed. The red runs are
-# t_fullred's, as their lines: Push anyway runs no suite, so no run is needed to make them.
+# lines with t_fullred's cases (ftredline): Push anyway runs no suite, so no run is needed to make them.
 t_fullanyway() {
   setup "[$(issue 7 2026-01-01)]"
   local A O0 out
