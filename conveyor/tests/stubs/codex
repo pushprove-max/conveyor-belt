@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # The shared codex stub. `codex debug models` fails (a Codex that offers no list); --version is doctor's check;
 # `codex exec --help` names --dangerously-bypass-hook-trust, as the Codex a build session needs does (cxready()).
-# `codex exec ... -o <file>` writes the answer to <file> and prints the usage event on stdout. A call with no -o (a
-# build session) prints, with --json, its events (the usage event alone), else, as Codex does, the answer as text.
+# `codex exec ... -o <file>` writes the answer to <file>; with --json it prints the usage event on stdout, as Codex
+# prints its events only with --json. A call with no -o (a build session) prints, with --json, its events (the usage
+# event alone), else, as Codex does, the answer as text.
 # A case sets it with files in $STUB:
 #   codex-answer  the answer, for every call (askmodel); else a review: $STUB/review.<n>, n counting the calls
 #   review-cmd    shell run before a review answers (a case's own change to the run), and before a call with no -o and
@@ -24,5 +25,5 @@ elif [ -f "$STUB/codex-answer" ]; then cat > /dev/null; cat "$STUB/codex-answer"
 else
 cat > /dev/null; echo x >> "$STUB/reviews"; [ ! -f "$STUB/review-cmd" ] || . "$STUB/review-cmd"; cat "$STUB/review.$(wc -l < "$STUB/reviews")" > "$out" || exit 1
 fi
-cat "$STUB/codex-usage" 2>/dev/null || echo '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":60,"output_tokens":7}}'
+[ -z "$json" ] || cat "$STUB/codex-usage" 2>/dev/null || echo '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":60,"output_tokens":7}}'
 exit "$(cat "$STUB/codex-rc" 2>/dev/null || echo 0)"

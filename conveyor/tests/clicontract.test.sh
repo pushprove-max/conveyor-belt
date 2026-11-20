@@ -72,6 +72,15 @@ t_contractusagecodex() {
   [ "$(jq -c '{input, read, output}' "$T/$CASE/out" 2>&1)" = '{"input":40,"read":60,"output":7}' ] \
     || fail "the session's usage is not the codex stub's: $(cat "$T/$CASE/out")"
 }
+# Bug: a Codex review's usage is read from the events `codex exec --json` prints (REVIEWREAD), its verdict from the -o
+# file; a codexreview() that drops --json gets the verdict but no usage, and the review fails as one that reported none.
+t_contractusagecodexreview() {
+  cread 'echo GO > "$STUB/review.1" && w=$CONVEYOR_CARDS/c7 && git -C "$R" worktree add -q --detach "$w" \
+    && REVIEW_TIMEOUT=60 codexreview "$w" brief instructions cx-1 low | jq -c ".usage"' \
+    || fail "the review failed: $(cat "$T/$CASE/out")"
+  [ "$(jq -c '{input, read, output}' "$T/$CASE/out" 2>&1)" = '{"input":40,"read":60,"output":7}' ] \
+    || fail "the review's usage is not the codex stub's: $(cat "$T/$CASE/out")"
+}
 # Bug: an OpenCode build session starts only past ocready() (`opencode --version` is 1.x) and its usage is read from
 # the events `opencode run --format json` prints (OPENCODEREAD); out of step, an OpenCode card is unbuilt or unread.
 t_contractusageopencode() {
