@@ -69,31 +69,38 @@ t_reviewretry() {
   [ "$(st 'select(.issue == 8 and .step == "blocked") | [.spent.step, (.spent.firstTry.reason | test("exit 3")), (.spent.firstTry.spent.sec | type)] | tojson')" = '["review",true,"number"]' ] && loop check \
     && [ "$(loop snapshot --fresh | jq -c '[.needsYou.blocked[] | select(.issue == 8) | .track.detail[] | select(.state == "failed") | .name]')" = '["review 1"]' ] \
     || fail "a card that failed its review twice is not shown failed at review 1 with both attempts: $(st 'select(.issue == 8 and .step == "blocked")')"
+  # The reviews below call reviewed() (lib/review.sh) as card() calls it (flreview): the two cards above show that its
+  # answer reaches the card's record and blocked line.
+  rm "$STUB/review-cmd"; flcard 11 'echo two >> a.txt'
   # An answer with no verdict, the reviewer's exit clean, is no verdict too: it runs once more.
-  echo "[$(issue 11 2026-01-01)]" > "$STUB/issues.json"; : > "$STUB/reviews"; rm "$STUB/review-cmd"; echo 'Review interrupted' > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
-  loop run >/dev/null || fail "run of #11 exited non-zero"
-  [ "$(wc -l < "$STUB/reviews")" = 2 ] && [ "$(st 'select(.issue == 11 and .step == "review") | "\(.result) \(.firstTry.reason)"')" = "GO the review ended without one clear verdict" ] \
-    && [ -n "$(st 'select(.issue == 11 and .step == "landed") | .sha')" ] || fail "an answer with no verdict was not run again: $(st 'select(.issue == 11)')"
+  echo 'Review interrupted' > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"; flreview 11
+  [ "$(wc -l < "$STUB/reviews")" = 2 ] && [ "$(flout)" = "reviewed: 0 GO" ] && [ "$(head -n 1 "$T/$CASE/run.out" | jq -r .firstTry.reason)" = "the review ended without one clear verdict" ] \
+    || fail "an answer with no verdict was not run again: $(cat "$T/$CASE/run.out")"
   # The same, the answer's events holding no usage either: it runs once more.
-  echo "[$(issue 12 2026-01-01)]" > "$STUB/issues.json"; : > "$STUB/reviews"; echo "$GO" > "$STUB/review.2"
-  echo '[ "$(wc -l < "$STUB/reviews")" != 1 ] || { echo "Review interrupted" > "$out"; exit 0; }' > "$STUB/review-cmd"
-  loop run >/dev/null || fail "run of #12 exited non-zero"; rm "$STUB/review-cmd"
-  [ "$(wc -l < "$STUB/reviews")" = 2 ] && [ "$(st 'select(.issue == 12 and .step == "review") | "\(.result) \(.firstTry.reason)"')" = "GO review reported no token usage" ] \
-    && [ -n "$(st 'select(.issue == 12 and .step == "landed") | .sha')" ] || fail "an answer with no verdict and no usage was not run again: $(st 'select(.issue == 12)')"
+  echo '[ "$(wc -l < "$STUB/reviews")" != 1 ] || { echo "Review interrupted" > "$out"; exit 0; }' > "$STUB/review-cmd"; flreview 11; rm "$STUB/review-cmd"
+  [ "$(wc -l < "$STUB/reviews")" = 2 ] && [ "$(flout)" = "reviewed: 0 GO" ] && [ "$(head -n 1 "$T/$CASE/run.out" | jq -r .firstTry.reason)" = "review reported no token usage" ] \
+    || fail "an answer with no verdict and no usage was not run again: $(cat "$T/$CASE/run.out")"
   # A NO-GO is a verdict: that review runs once, and the fix goes to the next review (port.test.sh t_autoport: three
   # NO-GOs and a GO are four reviews).
   # A review that wrote its NO-GO and then exited non-zero gave a verdict: it is not run again.
-  echo "[$(issue 10 2026-01-01)]" > "$STUB/issues.json"; : > "$STUB/reviews"; echo "$NOGO" > "$STUB/review.1"; echo 'cat "$STUB/review.1" > "$out"; exit 3' > "$STUB/review-cmd"
-  loop run >/dev/null
-  [ "$(wc -l < "$STUB/reviews")" = 1 ] && st 'select(.issue == 10 and .step == "blocked") | .reason' | grep -q '^review 1: review failed (exit 3)' \
-    || fail "a review that wrote a verdict and exited non-zero was run again: $(wc -l < "$STUB/reviews") reviews, $(st 'select(.issue == 10)')"
+  echo "$NOGO" > "$STUB/review.1"; echo 'cat "$STUB/review.1" > "$out"; exit 3' > "$STUB/review-cmd"; flreview 11; rm "$STUB/review-cmd"
+  [ "$(wc -l < "$STUB/reviews")" = 1 ] && [[ $(flout) == "reviewed: 1 "* ]] && head -n 1 "$T/$CASE/run.out" | grep -q '^review failed (exit 3)' \
+    || fail "a review that wrote a verdict and exited non-zero was run again: $(wc -l < "$STUB/reviews") reviews, $(cat "$T/$CASE/run.out")"
   # The reviewer's model changed between the attempts: one model cannot price both attempts' usage, so the step is
   # unpriced, never priced whole at the second's model.
-  echo "[$(issue 13 2026-01-01)]" > "$STUB/issues.json"; : > "$STUB/reviews"; echo "$GO" > "$STUB/review.2"
+  echo "$GO" > "$STUB/review.2"
   echo '[ "$(wc -l < "$STUB/reviews")" != 1 ] || { jq -c ".reviewer.model = \"gpt-6-astra\"" "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"; exit 3; }' > "$STUB/review-cmd"
-  loop run >/dev/null || fail "run of #13 exited non-zero"; rm "$STUB/review-cmd"
-  [ "$(st 'select(.issue == 13 and .step == "review") | [.result, .model, .firstTry.spent.model, (.unread | test("another model \\(x\\)"))] | tojson')" = '["GO","gpt-6-astra","x",true]' ] \
-    || fail "a retried review whose model changed between its attempts is priced at one model: $(st 'select(.issue == 13 and .step == "review")')"
+  flreview 11; rm "$STUB/review-cmd"
+  [ "$(flout)" = "reviewed: 0 GO" ] && [ "$(head -n 1 "$T/$CASE/run.out" | jq -c '[.model, .firstTry.spent.model, (.unread | test("another model \\(x\\)"))]')" = '["gpt-6-astra","x",true]' ] \
+    || fail "a retried review whose model changed between its attempts is priced at one model: $(cat "$T/$CASE/run.out")"
+}
+# flreview <issue>: reviewed() of that card's worktree (flcard, below) in the engine shell (fx_in, lib.sh), its review
+# count ($STUB/reviews) from 0: run.out holds what it printed on one line, then "reviewed: <its exit> <the verdict of
+# the answer it left>".
+flreview() {
+  # shellcheck disable=SC2034 # read by the commands fx_in runs
+  FLN=$1; : > "$STUB/reviews"
+  fx_in 'w=$CARDS/c$FLN-$FLN; cd "$R" && t=$(reviewed "$w" "Build the issue."); rc=$?; printf "%s\n" "$t" | tr "\n" " "; echo; echo "reviewed: $rc $(verdict "$w.review")"'
 }
 
 # Bugs: a review that answers both ways, or says GO beside an open finding (in the asked format or any other, here
@@ -128,21 +135,42 @@ t_repeat() {
     && [ "$(st 'select(.issue == 8 and .step == "landed") | .followups | tojson')" = '[100101]' ] || fail "a repeated finding was not filed once: $(cat "$STUB/filed")"
 }
 
+# The landing cases call land() (lib/claim.sh), as card() calls it once a card passed its review and tests, on a card
+# worktree made here, with no loop run: card() blocks a card with what land() printed (t_barelanding runs that whole).
+# flcard <issue> <change>: card c<issue>-<issue>'s worktree on main as main is now, <change> made in it and staged,
+# its picked line in the card records.
+flcard() {
+  CARDS=$T/$CASE/cards; mkdir -p "$CARDS"
+  git -C "$R" worktree add -q --detach "$CARDS/c$1-$1" refs/heads/main && (cd "$CARDS/c$1-$1" && eval "$2") && git -C "$CARDS/c$1-$1" add -A \
+    || fail "the change of card $1 could not be staged"
+  landed "$1" | jq -c --arg c "c$1-$1" '.card = $c | .step = "picked"' >> "$ST/cards.jsonl"
+}
+# flland <issue>: land() of that card in the engine shell (fx_in, lib.sh); run.out ends with "land: <its exit>". The
+# shell forgets where it found git (hash -r), so a $STUB/git a case wrote since is the git land() runs.
+flland() {
+  # shellcheck disable=SC2034 # read by the commands fx_in runs
+  FLN=$1
+  fx_in 'hash -r; cd "$R" && land "c$FLN-$FLN" "$FLN" "$CARDS/c$FLN-$FLN" "title $FLN (#$FLN)"; echo "land: $?"'
+}
+flout() { tail -n 1 "$T/$CASE/run.out"; }
+
 # Bugs: a change another writer staged in main, or wrote to a card file during the landing, is committed inside a
 # card's landing; a commit that is not exactly the reviewed diff reaches main.
 t_index() {
-  setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-02-01) <(issue 9 2026-03-01))"; echo "$GO" | tee "$STUB/review.1" "$STUB/review.2" > "$STUB/review.3"
-  echo other > "$R/other.txt"; git -C "$R" add other.txt
-  loop run 1 >/dev/null
-  [ "$(git -C "$R" show --name-only --format= HEAD)" = a.txt ] || fail "landing commit holds: $(git -C "$R" show --name-only --format= HEAD | tr '\n' ' ')"
+  setup '[]'; echo other > "$R/other.txt"; git -C "$R" add other.txt
+  flcard 7 'echo two >> a.txt'; flland 7
+  [ "$(flout)" = "land: 0" ] && [ "$(git -C "$R" show --name-only --format= HEAD)" = a.txt ] \
+    || fail "landing commit holds: $(git -C "$R" show --name-only --format= HEAD | tr '\n' ' ') $(cat "$T/$CASE/run.out")"
   [ "$(git -C "$R" status --porcelain)" = 'A  other.txt' ] || fail "the other writer's staged file was disturbed: $(git -C "$R" status --porcelain)"
   printf '%s\n' '#!/bin/sh' 'echo x > sneak.txt; git add sneak.txt' > "$R/.git/hooks/pre-commit"; chmod +x "$R/.git/hooks/pre-commit"
-  head=$(git -C "$R" rev-parse HEAD); loop run 1 >/dev/null; rm "$R/.git/hooks/pre-commit"
-  st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -q 'not exactly the reviewed diff' || fail "a commit holding more than the reviewed diff was not refused"
+  flcard 8 'echo two >> a.txt'; head=$(git -C "$R" rev-parse HEAD); flland 8; rm "$R/.git/hooks/pre-commit"
+  grep -q 'not exactly the reviewed diff' "$T/$CASE/run.out" && [ "$(flout)" = "land: 1" ] || fail "a commit holding more than the reviewed diff was not refused: $(cat "$T/$CASE/run.out")"
   [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] || fail "the commit holding more than the reviewed diff reached main"
   # Another writer edits a card file in main's checkout at the moment of the commit.
+  flcard 9 'echo two >> a.txt'
   real=$(command -v git); printf '%s\n' '#!/usr/bin/env bash' 'case " $* " in *" commit "*|*" update-ref "*) [ -f "$STUB/raced" ] || { : > "$STUB/raced"; echo unreviewed >> "$R/a.txt"; } ;; esac' "exec $real \"\$@\"" > "$STUB/git"; chmod +x "$STUB/git"
-  loop run 1 >/dev/null; rm "$STUB/git"
+  flland 9; rm "$STUB/git"
+  [ -f "$STUB/raced" ] || fail "the other writer's edit was never made, so this part proves nothing"
   git -C "$R" show HEAD:a.txt | grep -q unreviewed && fail "the other writer's unreviewed line was committed to main"
   [ "$(st 'select(.issue == 9 and .step == "landed") | .sha')" = "$(git -C "$R" rev-parse HEAD)" ] && [ "$(git -C "$R" show HEAD:a.txt | tr '\n' ' ')" = "one two two " ] || fail "the reviewed diff did not land as it was reviewed"
   [ "$(git -C "$R" diff HEAD -- a.txt | grep '^[+-][^+-]')" = +unreviewed ] || fail "main's checkout does not hold exactly the other writer's edit on top of the landing"
@@ -152,16 +180,13 @@ t_index() {
 # card no hook touched was blocked as "hooks changed what would be committed". A hook that does change the index
 # still blocks the card.
 t_blankeof() {
-  setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-02-01))"; echo "$GO" | tee "$STUB/review.1" > "$STUB/review.2"
-  printf '%s\n' 'printf "x\n\n" > blank.jq' > "$STUB/build"
-  loop run 1 >/dev/null
-  [ -z "$(st 'select(.issue == 7 and .step == "blocked") | .reason')" ] || fail "blocked: $(st 'select(.issue == 7 and .step == "blocked") | .reason')"
+  setup '[]'; flcard 7 'printf "x\n\n" > blank.jq'; flland 7
+  [ "$(flout)" = "land: 0" ] || fail "not landed: $(cat "$T/$CASE/run.out")"
   [ "$(st 'select(.issue == 7 and .step == "landed") | .sha')" = "$(git -C "$R" rev-parse HEAD)" ] && [ "$(git -C "$R" show HEAD:blank.jq | wc -l)" = 2 ] \
     || fail "the card adding a file that ends in a blank line did not land"
-  printf '%s\n' 'printf "y\n\n" > blank2.jq' > "$STUB/build"
   printf '%s\n' '#!/bin/sh' 'echo x > sneak.txt; git add sneak.txt' > "$R/.git/hooks/pre-commit"; chmod +x "$R/.git/hooks/pre-commit"
-  head=$(git -C "$R" rev-parse HEAD); loop run 1 >/dev/null; rm "$R/.git/hooks/pre-commit"
-  st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -q "main's hooks changed what would be committed" || fail "a hook that changed the index did not block the card"
+  flcard 8 'printf "y\n\n" > blank2.jq'; head=$(git -C "$R" rev-parse HEAD); flland 8; rm "$R/.git/hooks/pre-commit"
+  grep -q "main's hooks changed what would be committed" "$T/$CASE/run.out" && [ "$(flout)" = "land: 1" ] || fail "a hook that changed the index did not block the card: $(cat "$T/$CASE/run.out")"
   [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] || fail "the commit a hook changed reached main"
 }
 
@@ -175,17 +200,19 @@ t_conflict() {
   echo 'echo card > a.txt; date +%N > "$R/a.txt"; git -C "$R" commit -qam other' > "$STUB/build"
   loop run >/dev/null; st 'select(.step == "blocked") | .reason' | grep -q '^rebase onto main conflicts' || fail "conflict not blocked"
   [ "$(git -C "$R" log -1 --format=%s)" = other ] && [ -z "$(git -C "$R" status --porcelain)" ] || fail "main moved or is left dirty"
-  echo "[$(issue 8 2026-01-01)]" > "$STUB/issues.json"; echo 'echo two >> a.txt' > "$STUB/build"
+  # The landings below call land() (flland, above): only the conflict above needs card()'s rebuild.
+  flcard 8 'echo two >> a.txt'
   real=$(command -v git); printf '%s\n' '#!/usr/bin/env bash' "case \" \$* \" in *' update-ref '*) $real -C \"\$R\" commit -qm racer ;; esac" "exec $real \"\$@\"" > "$STUB/git"; chmod +x "$STUB/git"
-  loop run >/dev/null; rm "$STUB/git"
-  st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -q 'main moved' || fail "a landing onto a moved main was not blocked"
+  flland 8; rm "$STUB/git"
+  grep -q 'main moved' "$T/$CASE/run.out" && [ "$(flout)" = "land: 1" ] || fail "a landing onto a moved main was not refused: $(cat "$T/$CASE/run.out")"
   [ "$(git -C "$R" log -1 --format=%s)" = racer ] && [ -z "$(git -C "$R" status --porcelain)" ] || fail "the other writer's commit was undone in main's checkout: $(git -C "$R" status --porcelain)"
-  echo "[$(issue 9 2026-01-01)]" > "$STUB/issues.json"
+  flcard 9 'echo two >> a.txt'
   printf '%s\n' '#!/usr/bin/env bash' "case \" \$* \" in *' update-ref '*) $real -C \"\$R\" switch -q -c side ;; esac" "exec $real \"\$@\"" > "$STUB/git"; chmod +x "$STUB/git"
-  loop run >/dev/null; rm "$STUB/git"; landed=$(st 'select(.issue == 9 and .step == "landed") | .sha')
+  flland 9; rm "$STUB/git"; landed=$(st 'select(.issue == 9 and .step == "landed") | .sha')
+  [ "$(git -C "$R" branch --show-current)" = side ] || fail "main's checkout was not switched mid-landing, so this part proves nothing"
   [ -n "$landed" ] && [ "$landed" = "$(git -C "$R" rev-parse refs/heads/main)" ] || fail "recorded landed ($landed) but main is at $(git -C "$R" rev-parse refs/heads/main)"
-  echo "[$(issue 10 2026-01-01)]" > "$STUB/issues.json"; loop run >/dev/null
-  st 'select(.issue == 10 and .step == "blocked") | .reason' | grep -q 'not on the main branch' && [ "$(git -C "$R" rev-parse refs/heads/main)" = "$landed" ] || fail "a landing ran with main's checkout on another branch"
+  flcard 10 'echo two >> a.txt'; flland 10
+  grep -q 'not on the main branch' "$T/$CASE/run.out" && [ "$(flout)" = "land: 1" ] && [ "$(git -C "$R" rev-parse refs/heads/main)" = "$landed" ] || fail "a landing ran with main's checkout on another branch: $(cat "$T/$CASE/run.out")"
 }
 
 # Bug (#254): a main checkout set to bare (core.bare=true) fails each git command that needs a work tree, and the landing read the
@@ -202,11 +229,13 @@ t_barelanding() {
 # Bug (#254): a git diff that failed in the landing's check for main's own changes was read as a change, so its error
 # was lost behind "changes of its own".
 t_diffcheckfails() {
-  setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"; echo 'echo two >> a.txt' > "$STUB/build"
+  setup '[]'; flcard 7 'echo two >> a.txt'; head=$(git -C "$R" rev-parse HEAD)
   real=$(command -v git); printf '%s\n' '#!/usr/bin/env bash' 'case " $* " in *" diff --quiet "*) echo "fatal: index file corrupt" >&2; exit 128 ;; esac' "exec $real \"\$@\"" > "$STUB/git"; chmod +x "$STUB/git"
-  loop run >/dev/null; rm "$STUB/git"; why=$(st 'select(.step == "blocked") | .reason')
-  [[ $why == *"git diff failed (exit 128): fatal: index file corrupt"* && $why != *"changes of its own to"* ]] \
-    || fail "a failed git diff in the landing's check was not blocked with its own error: $why"
+  flland 7; rm "$STUB/git"; why=$(cat "$T/$CASE/run.out")
+  # land() failing is what makes card() block the card with this text; a success would land it instead.
+  [[ $why == *"git diff failed (exit 128): fatal: index file corrupt"* && $why != *"changes of its own to"* ]] && [ "$(flout)" = "land: 1" ] \
+    || fail "a failed git diff in the landing's check was not refused with its own error: $why"
+  [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] || fail "the card landed although the landing's check of main failed"
 }
 
 # Bugs (#157): a line that does not parse, or parses but is not a whole record of a known step (a landing with no
