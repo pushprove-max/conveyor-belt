@@ -454,9 +454,9 @@ nochange() { # <card> <issue> <worktree> <brief>
 }
 
 # The evidence a DONE-OUTSIDE line names, as its reviewer is given it: a Claude or OpenCode reviewer has no shell or
-# web, and reads no folder outside the worktree. Each issue it names (#<n>, the card's own left out, the first 30) as
-# GitHub gives it, its body cut to 2000 characters; a range (#<a> to #<b>, through, - or .., of at most 50) is each
-# issue in it. Each path under conveyor/state/ it names (a file, or a folder's files), read from the state folder,
+# web, and reads no folder outside the worktree. Each issue it names (#<n>, of the first 50 distinct numbers, the
+# card's own then left out) as GitHub gives it, its body cut to 2000 characters; a range (#<a> to #<b>, through, - or
+# .., of at most 50) is each issue in it. Each path under conveyor/state/ it names (a file, or a folder's files), read from the state folder,
 # 4000 characters a file and 40000 in all: the files the session changed (at or after its start, the time of the
 # <worktree>.before that session() writes as it begins) first, the smallest first, so the records it wrote come
 # before older files and session logs; the files the limit leaves out are counted. What cannot be read says so.
