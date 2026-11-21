@@ -50,17 +50,13 @@ t_fail() {
 # Bug: a review that ended with no verdict (a timeout, a reviewer's network fault) blocked its card at once, though
 # the same review run again went on; a review that gave a verdict must never run twice.
 t_reviewretry() {
-  setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.2"
-  echo '[ "$(wc -l < "$STUB/reviews")" != 1 ] || exec sleep 30' > "$STUB/review-cmd" # sleep: a first review that hangs, cut by reviewTimeout
-  tuned '.tunables.reviewTimeout = 1' loop run >/dev/null || fail "run exited non-zero"
-  [ "$(wc -l < "$STUB/reviews")" = 2 ] && [ "$(st 'select('"$NOMARK"') | "\(.step) \(.result)"' | tr '\n' ,)" = "picked ok,worktree ok,brief ok,build ok,review GO,test pass,landed ok," ] \
-    || fail "a review that timed out once was not run again, or the card did not go on: $(st 'select('"$NOMARK"') | "\(.step) \(.result)"' | tr '\n' ,)"
-  [ "$(st 'select(.step == "review") | .firstTry | [(.reason | test("review failed \\(exit 124")), .spent.model, (.spent.sec | type)] | tojson')" = '[true,"x","number"]' ] && loop check \
-    || fail "the failed attempt is not on the card's record with its reason and what it spent: $(st 'select(.step == "review")')"
+  setup "[$(issue 8 2026-01-01)]"
   # Twice with no verdict: the card blocks at its first review round, with both reasons and both attempts' spending.
   # The second attempt fails otherwise, with more output than the line keeps: the reason still names both failures.
-  echo "[$(issue 8 2026-01-01)]" > "$STUB/issues.json"; : > "$STUB/reviews"
+  : > "$STUB/reviews"
   echo '[ "$(wc -l < "$STUB/reviews")" = 1 ] && exit 3; seq 1 70 >&2; exit 4' > "$STUB/review-cmd"
+  # The reviews after this call reviewed() itself.
+  # loop: the blocked line card() writes from reviewed()'s two failures, its record check and the Board's failed-step row
   loop run >/dev/null
   [ "$(wc -l < "$STUB/reviews")" = 2 ] && st 'select(.issue == 8 and .step == "blocked") | .reason' \
     | grep -q '^review 1: the codex CLI stopped before any work (exit 3): .*run again after 0s: the codex CLI stopped before any work (exit 4): ' \
@@ -69,9 +65,15 @@ t_reviewretry() {
   [ "$(st 'select(.issue == 8 and .step == "blocked") | [.spent.step, (.spent.firstTry.reason | test("exit 3")), (.spent.firstTry.spent.sec | type)] | tojson')" = '["review",true,"number"]' ] && loop check \
     && [ "$(loop snapshot --fresh | jq -c '[.needsYou.blocked[] | select(.issue == 8) | .track.detail[] | select(.state == "failed") | .name]')" = '["review 1"]' ] \
     || fail "a card that failed its review twice is not shown failed at review 1 with both attempts: $(st 'select(.issue == 8 and .step == "blocked")')"
-  # The reviews below call reviewed() (lib/review.sh) as card() calls it (flreview): the two cards above show that its
-  # answer reaches the card's record and blocked line.
-  rm "$STUB/review-cmd"; flcard 11 'echo two >> a.txt'
+  # The reviews below call reviewed() (lib/review.sh) as card() calls it (flreview): the card above shows that its
+  # answer reaches the card's blocked line. A first review that hangs, cut by reviewTimeout, is run again, and the
+  # GO of the second goes on, the failed attempt in its answer with its reason and what it spent.
+  flcard 11 'echo two >> a.txt'; echo "$GO" > "$STUB/review.2"
+  echo '[ "$(wc -l < "$STUB/reviews")" != 1 ] || exec sleep 30' > "$STUB/review-cmd" # sleep: a first review that hangs, cut by reviewTimeout
+  tuned '.tunables.reviewTimeout = 1' flreview 11; rm "$STUB/review-cmd"
+  [ "$(wc -l < "$STUB/reviews")" = 2 ] && [ "$(flout)" = "reviewed: 0 GO" ] \
+    && [ "$(head -n 1 "$T/$CASE/run.out" | jq -c '.firstTry | [(.reason | test("review failed \\(exit 124")), .spent.model, (.spent.sec | type)]')" = '[true,"x","number"]' ] \
+    || fail "a review that timed out once was not run again, or its failed attempt is not in its answer with its reason and what it spent: $(cat "$T/$CASE/run.out")"
   # An answer with no verdict, the reviewer's exit clean, is no verdict too: it runs once more.
   echo 'Review interrupted' > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"; flreview 11
   [ "$(wc -l < "$STUB/reviews")" = 2 ] && [ "$(flout)" = "reviewed: 0 GO" ] && [ "$(head -n 1 "$T/$CASE/run.out" | jq -r .firstTry.reason)" = "the review ended without one clear verdict" ] \
@@ -138,7 +140,7 @@ t_repeat() {
 }
 
 # The landing cases call land() (lib/claim.sh), as card() calls it once a card passed its review and tests, on a card
-# worktree made here, with no loop run: card() blocks a card with what land() printed (t_barelanding runs that whole).
+# worktree made here, with no loop run: card() blocks a card with what land() printed.
 # flcard <issue> <change>: card c<issue>-<issue>'s worktree on main as main is now, <change> made in it and staged,
 # its picked line in the card records.
 flcard() {
@@ -232,12 +234,11 @@ t_githookrun() {
 # main's checkout is on another branch, or is switched to one mid-landing, that branch moves and the card is
 # recorded landed though main never got it.
 t_conflict() {
-  setup "[$(issue 7 2026-01-01)]"; for i in $(seq 8); do echo "$GO" > "$STUB/review.$i"; done
-  # Main changes the card's line during the build and again during the one rebuild (t_rebase has the rest).
-  echo 'echo card > a.txt; date +%N > "$R/a.txt"; git -C "$R" commit -qam other' > "$STUB/build"
-  loop run >/dev/null; st 'select(.step == "blocked") | .reason' | grep -q '^rebase onto main conflicts' || fail "conflict not blocked"
+  setup '[]'
+  # Main changed the card's line since the card was made: land() refuses it (card()'s rebuild after that is t_rebase's).
+  flcard 7 'echo card > a.txt'; echo other > "$R/a.txt"; git -C "$R" commit -qam other; flland 7
+  [ "$(head -n 1 "$T/$CASE/run.out" | cut -d: -f1)" = "rebase onto main conflicts" ] && [ "$(flout)" = "land: 1" ] || fail "conflict not refused: $(cat "$T/$CASE/run.out")"
   [ "$(git -C "$R" log -1 --format=%s)" = other ] && [ -z "$(git -C "$R" status --porcelain)" ] || fail "main moved or is left dirty"
-  # The landings below call land() (flland, above): only the conflict above needs card()'s rebuild.
   flcard 8 'echo two >> a.txt'
   real=$(command -v git); printf '%s\n' '#!/usr/bin/env bash' "case \" \$* \" in *' update-ref '*) $real -C \"\$R\" commit -qm racer ;; esac" "exec $real \"\$@\"" > "$STUB/git"; chmod +x "$STUB/git"
   flland 8; rm "$STUB/git"
@@ -255,11 +256,10 @@ t_conflict() {
 # Bug (#254): a main checkout set to bare (core.bare=true) fails each git command that needs a work tree, and the landing read the
 # failed git diff as the checkout's own changes, so the card was blocked for changes that did not exist.
 t_barelanding() {
-  setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"; head=$(git -C "$R" rev-parse HEAD)
-  echo 'echo two >> a.txt; git -C "$R" config core.bare true' > "$STUB/build"
-  loop run >/dev/null; git -C "$R" config core.bare false
-  [ "$(st 'select(.step == "blocked") | .reason')" = "the main checkout is not a working checkout (core.bare is true): set core.bare to false" ] \
-    || fail "a bare main checkout was not blocked as one: $(st 'select(.step == "blocked") | .reason')"
+  setup '[]'; flcard 7 'echo two >> a.txt'; head=$(git -C "$R" rev-parse HEAD)
+  git -C "$R" config core.bare true; flland 7; git -C "$R" config core.bare false
+  [ "$(head -n 1 "$T/$CASE/run.out")" = "the main checkout is not a working checkout (core.bare is true): set core.bare to false" ] && [ "$(flout)" = "land: 1" ] \
+    || fail "a bare main checkout was not refused as one: $(cat "$T/$CASE/run.out")"
   [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] || fail "the card landed on a bare main checkout"
 }
 
@@ -344,37 +344,49 @@ EOT
 # (exit 1; 124 is the 3600s timeout)": no cause, and a timeout that was not the cause. Its reason now names the cause
 # from the CLI's own words, with no credential and nothing the privacy check's patterns hit, and says what to do;
 # the card is put back once, at the resume of the loop its sign-in failure paused, and only once.
+# The cases below call nostart() on a session's output files and block the card as card() does (nsblk), then put it
+# back as the loop does: signinback() at `control resume`, startagain() (startnow(), startcheck()) at a turn.
+# nsblk <card>: in the engine shell (fx_in), nostart() of a claude build session of issue 7 on the model m that exited
+# 1 with <card>.out and <card>.err in the cards folder, its fields (turns, tokens) read from <card>.out with
+# SESSIONREAD as session() reads them and calls it, and the card blocked with its reason (block(), lib/push.sh), its
+# spent holding the start nostart() set, as session() writes it.
+nsblk() {
+  local w=$CARDS/$1 f
+  f=$(jq -cRn --arg m m --arg e "" --argjson s 2 "$SESSIONREAD" "$w.out" 2>/dev/null | tail -n 1)
+  nostart 1 "$f" "$w.out" "$w.err" claude m builder "" "$w" || { echo "nostart: not a session that never began, on $1: $f"; return 1; }
+  jq -cn --argjson s "$NOSTART_START" '{step: "build", start: $s}' > "$w.spent" && block "$1" 7 "$w" "build: $NOSTART_WHY"
+}
+# nsagain: startagain() at a turn of the loop, issue 7 open.
+nsagain() { fx_in 'startagain "[{\"number\": 7}]"'; }
 t_nostart() {
-  setup "[$(issue 7 2026-01-01)]"; printf '%s\n' "$GO" > "$STUB/review.1"; tune '.tunables.apiPause = 0'
+  setup "[$(issue 7 2026-01-01)]"; tune '.tunables.apiPause = 0'; C=$T/$CASE/cards; mkdir -p "$C"
   # A credential and an address, made here so that this file holds neither.
   printf 'sk-ant-oat01-%s\n' "$(printf 'Ab9x%.0s' {1..10})" > "$STUB/secret"; echo "contact: ops${AT}corp-mail.test" > "$STUB/mail"
-  # A session (bypass mode) fails as Claude Code does when not logged in, or on a bad settings file; a check session
-  # (no mode) fails while not logged in.
-  cat > "$STUB/build" <<'EOT'
-case "$*" in *bypassPermissions*) ;; *) echo x >> "$STUB/checks"; [ ! -e "$STUB/loggedout" ] || exit 1; exit 0 ;; esac
-if [ -e "$STUB/loggedout" ]; then
-  echo '{"type":"result","is_error":true,"result":"Not logged in · Please run /login","num_turns":1,"usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}'
-  { echo "Authorization: Bearer $(cat "$STUB/secret")"; cat "$STUB/mail"; } >&2; exit 1
-fi
-[ ! -e "$STUB/badsettings" ] || { { echo 'Settings error: {"password":"short-secret"}'; echo "Settings error in $HOME/.claude/settings.json: permissions.allow is not an array"; } >&2; exit 1; }
-echo two >> a.txt
-EOT
-  touch "$STUB/loggedout"; : > "$STUB/checks"
-  loop run >/dev/null 2>&1
+  # A check session fails while not logged in.
+  echo 'echo x >> "$STUB/checks"; [ ! -e "$STUB/loggedout" ] || exit 1' > "$STUB/build"; touch "$STUB/loggedout"; : > "$STUB/checks"
+  # A session fails as Claude Code does when not logged in.
+  echo '{"type":"result","is_error":true,"result":"Not logged in · Please run /login","num_turns":1,"usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}' > "$C/c20260101T000000-p-7.out"
+  { echo "Authorization: Bearer $(cat "$STUB/secret")"; cat "$STUB/mail"; } > "$C/c20260101T000000-p-7.err"
+  fx_in 'nsblk c20260101T000000-p-7'; [ "$RC" = 0 ] || fail "the card was not blocked: $(cat "$T/$CASE/run.out")"
   b=$(st 'select(.issue == 7 and .step == "blocked")')
   [ "$(jq -r .reason <<<"$b")" = "build: Claude Code's own sign-in is missing (exit 1): run claude /login (or set up the proxy route), then conveyor.sh control resume. The card is put back once by itself on resume" ] \
     || fail "a session that was not logged in is not blocked naming the cause: $(jq -r .reason <<<"$b")"
   [ "$(jq -r .tail <<<"$b")" = $'Not logged in · Please run /login\nAuthorization: Bearer [left out]\n[a line left out: email]' ] \
     || fail "the CLI's words are not kept, or kept with a credential or an address: $(jq -r .tail <<<"$b")"
   ! grep -qF -e "$(cat "$STUB/secret")" -e "corp-mail" <<<"$b" || fail "the blocked line holds the credential or the address"
-  # Not resumed: the card stays blocked.
-  [ ! -s "$ST/retried.jsonl" ] || fail "the card was put back before the loop was resumed"
+  # Not resumed: the card stays blocked, its check session at a turn failing while still not logged in.
+  nsagain
+  [ "$(wc -l < "$STUB/checks")" = 1 ] && [ ! -s "$ST/retried.jsonl" ] || fail "the card was put back before the loop was resumed, or no check session ran: $(wc -l < "$STUB/checks") checks"
   # Logged in and resumed, but the next session stops on a settings error: the card is put back once, and
   # blocked again it says to retry it, and is not put back again.
-  rm "$STUB/loggedout"; touch "$STUB/badsettings"; n=$(wc -l < "$STUB/checks")
-  loop control resume >/dev/null 2>&1; loop run >/dev/null 2>&1
+  rm "$STUB/loggedout"
+  loop control resume >/dev/null 2>&1
   [ "$(jq -r 'select(.issue == 7 and .step == "blocked") | .spent.start | "\(.cli) \(.model)"' "$ST/retried.jsonl")" = "claude m" ] \
     || fail "the card was not put back at the resume: $(cat "$ST/retried.jsonl" 2>&1)"
+  : > "$C/c20260101T000001-p-7.out"
+  { echo 'Settings error: {"password":"short-secret"}'; echo "Settings error in $HOME/.claude/settings.json: permissions.allow is not an array"; } > "$C/c20260101T000001-p-7.err"
+  fx_in 'nsblk c20260101T000001-p-7'; [ "$RC" = 0 ] || fail "the card was not blocked again: $(cat "$T/$CASE/run.out")"
+  n=$(wc -l < "$STUB/checks")
   [ "$(st 'select(.issue == 7 and .step == "blocked") | .reason')" = 'build: the claude CLI stopped on a settings error (exit 1): fix the setting its words below name, then retry the card (conveyor.sh retry 7, or Retry on the Board)' ] \
     || fail "the card put back and blocked again does not say to retry it: $(st 'select(.issue == 7) | [.step, .reason] | join(" ")' | tr '\n' ,)"
   st 'select(.issue == 7 and .step == "blocked") | .tail' | grep -qxF 'Settings error in ~/.claude/settings.json: permissions.allow is not an array' \
@@ -382,27 +394,22 @@ EOT
   # A quoted value (JSON) after password is a credential too: an opening quote does not let it through.
   st 'select(.issue == 7 and .step == "blocked") | .tail' | grep -qxF 'Settings error: {"password":[left out]}' && ! st 'select(.issue == 7)' | grep -qF short-secret \
     || fail "a quoted credential is kept in the reason: $(st 'select(.issue == 7 and .step == "blocked") | .tail')"
-  loop control resume >/dev/null 2>&1
+  loop control resume >/dev/null 2>&1; nsagain
   [ "$(wc -l < "$STUB/checks")" = "$n" ] && [ "$(jq -c 'select(.step == "blocked")' "$ST/retried.jsonl" | wc -l)" = 1 ] \
     || fail "the card was put back more than once, or by a check session: $((n)) checks before, $(wc -l < "$STUB/checks") after"
 }
 t_nostartmodel() {
-  setup "[$(issue 7 2026-01-01)]"; printf '%s\n' "$GO" > "$STUB/review.1"; tune '.tunables.apiPause = 0 | .models.allowed.claude += ["m2"]'
-  # The account has no model m: a session and a check session on it fail; on m2 both run.
-  cat > "$STUB/build" <<'EOT'
-case " $* " in *" --model m "*) bad=1 ;; *) bad='' ;; esac
-case "$*" in *bypassPermissions*) ;; *) echo "$*" >> "$STUB/checks"; [ -z "$bad" ] || exit 1; exit 0 ;; esac
-[ -z "$bad" ] || { echo "API Error: model m is not available on this account" >&2; exit 1; }
-echo two >> a.txt
-EOT
-  : > "$STUB/checks"
-  loop run >/dev/null 2>&1
+  setup "[$(issue 7 2026-01-01)]"; tune '.tunables.apiPause = 0 | .models.allowed.claude += ["m2"]'; mkdir -p "$T/$CASE/cards"
+  # The account has no model m: a session and a check session on it fail; on m2 a check session runs.
+  echo 'echo "$*" >> "$STUB/checks"; case " $* " in *" --model m "*) exit 1 ;; esac' > "$STUB/build"
+  : > "$T/$CASE/cards/c20260101T000000-p-7.out"; echo "API Error: model m is not available on this account" > "$T/$CASE/cards/c20260101T000000-p-7.err"
+  fx_in 'nsblk c20260101T000000-p-7'
   st 'select(.issue == 7 and .step == "blocked") | .reason' | grep -q '^build: the claude CLI cannot run the model m on this account (exit 1): set the builder to a model' \
-    || fail "a session on a model the account lacks is not blocked naming it: $(st 'select(.issue == 7) | .reason')"
+    || fail "a session on a model the account lacks is not blocked naming it: $(st 'select(.issue == 7) | .reason') $(cat "$T/$CASE/run.out")"
   # The owner sets the builder to m2, as the reason says: the check runs on m2, not on the refused m, and the card is
   # put back. Checking the saved model would keep the card blocked whatever the owner set.
   seatset model m2; : > "$STUB/checks"
-  loop run >/dev/null 2>&1
+  nsagain
   grep -qE -- '--model m2( |$)' "$STUB/checks" && ! grep -qE -- '--model m( |$)' "$STUB/checks" && [ -s "$ST/retried.jsonl" ] \
     || fail "the check session did not run on the model set now, or the card was not put back: $(cat "$STUB/checks")"
 }
