@@ -57,10 +57,14 @@ for f in $fs; do
   [ "$RR" = /dev/null ] || { [ -z "$dn" ] || w="${w}did not pass|"; tr '|' '\n' <<<"$w" | awk -v f="$f" 'length { printf "TESTRUN why\t%s\t%s\n", f, $0 }' >> "$L"; }
   for c in $cs; do
     k=$((k + 1)); echo "$n $c" >> "$STUB/ran"
-    # A case that hangs, cut as the test run's clock cuts it once testTimeout has run out: ALRM to `timeout` (the
-    # command's parent, testonce()), which ends the run with exit 124. Sent here at once, so no case sits out the
+    # A case that hangs, cut as the test run's clock cuts it once testTimeout has run out: ALRM to the run's `timeout`
+    # (testonce(); the command's parent, or with $STUB/perfile the parent of filecmd()'s loop, as the file's own
+    # `timeout` is the stub's parent), which ends the run with exit 124. Sent here at once, so no case sits out the
     # clock's seconds; that the clock itself fires at testTimeout is t_rerunkilled's, whose case stalls.
-    ! grep -qxF "$n hang $c" "$STUB/plan" || { kill -ALRM "$PPID"; sleep 30; } # sleep: until timeout ends the run
+    if grep -qxF "$n hang $c" "$STUB/plan"; then
+      t=$PPID; [ -z "$p" ] || t=$(ps -o ppid= -p "$(ps -o ppid= -p "$PPID")")
+      kill -ALRM $t; sleep 30 # sleep: until timeout ends the run
+    fi
     ! grep -qxF "$n stall $c" "$STUB/plan" || sleep 30 # sleep: a case that hangs, ended only by the run's clock (testclock)
     if grep -qxF "$n fail $c" "$STUB/plan"; then echo "FAIL [$c]: wrong"; r=FAIL
     elif grep -qxF "$n bare $c" "$STUB/plan"; then echo "FAIL: wrong"; r=FAIL; else echo "ok $c"; fi
@@ -76,11 +80,12 @@ EOF
 # are files of main, test files by the pack's tests.patterns, each linked to a.txt (the build's file), and the stub
 # runs only the file the run gives it (CONVEYOR_TEST_FILE), its cases' count of its own (of), a run being counted
 # ($STUB/n) at its first file (CONVEYOR_TEST_N). Without it the stub runs the three files at each call: only for a
-# case that calls engine functions itself (tests() in rerunstep, on the worktree rerunwt makes; mainred.sh verdicts() in
-# mainlimit.test.sh's limitjudge; voidrun(), verdicts() and mainred() in voidrun.test.sh's t_voidcommand). A card
-# run (loop run) needs it: given one file there, a stub that reports three is stopped by watch() as a run of files it
-# was not given, whenever watch() looks before the stub ends, as it did under the load of a whole-suite run (issue
-# 769: a rebuilt card's second run stopped, with no test line).
+# case that calls engine functions that give the run no count of files (TEST_GIVEN; mainred.sh verdicts() in
+# mainlimit.test.sh's limitjudge; voidrun(), verdicts() and mainred() in voidrun.test.sh's t_voidcommand). A card's
+# run (loop run, and tests() in rerunstep, on the worktree rerunwt makes) needs it: given one file there, a stub that
+# reports three is stopped by watch() as a run of files it was not given, whenever watch() looks before the stub ends,
+# as it did under the load of a whole-suite run (issue 769: a rebuilt card's second run stopped, with no test line;
+# issue 1241: rerunwt's steps).
 rerunfiles() {
   local f
   for f in a.test b.test c.test; do echo "$f" > "$R/$f"; done; git -C "$R" add a.test b.test c.test || fail "main's test files could not be staged"
@@ -103,7 +108,7 @@ rerunstep() { # exits as tests() returns; its test line's part of the run (testr
     [ $rc = 0 ] || exit $rc; firstrun "$T/$CASE/cards/c7" pass > "$T/$CASE/cards/c7.firstrun" ) > /dev/null 2>&1
 }
 rerunwt() { # <the build's edit> <plan line>...: rerunsetup's main and stubs, and the card's worktree with its change staged
-  local b=$1; shift; rerunsetup "$@"
+  local b=$1; shift; rerunsetup "$@"; rerunfiles
   git -C "$R" worktree add -q --detach "$T/$CASE/cards/c7" || fail "the card's worktree could not be made"
   rerunedit "$b" || fail "the build's edit could not be staged"
 }
@@ -280,11 +285,13 @@ t_rerunfixall() {
 }
 
 # A fix that edits only a test file (c.test, which had passed) runs the case that had failed and that file's cases;
-# a.test, whose file the fix did not touch, is kept as passed.
+# a.test, whose file the fix did not touch, is kept as passed. Bug it catches (issue 1241): the change now has a test
+# file of its own, so the card's list was c.test alone (listcmd(): by own), and b.test, whose case had failed, did not
+# run again: the step passed with flaky not run. The failed file runs after the list's own.
 t_rerunfixtest() {
   rerunwt 'echo two >> a.txt' '1 fail flaky' '2 fail flaky'
   ! rerunstep || fail "the first test step passed"
   rerunedit 'echo x >> c.test'; rerunstep || fail "the step after the fix did not pass: $(ran 3)"
   [ "$(grep $'^changed\t' "$STUB/rerun.3")" = $'changed\tc.test' ] || fail "the run after the fix was not told the one file the fix changed: $(cat "$STUB/rerun.3" 2>&1)"
-  [ "$(ran 3)" = "flaky three" ] || fail "the run after a fix of a test file alone was not of the failed case and that file's cases: $(ran 3)"
+  [ "$(ran 3)" = "three flaky" ] || fail "the run after a fix of a test file alone was not of the failed case and that file's cases: $(ran 3)"
 }

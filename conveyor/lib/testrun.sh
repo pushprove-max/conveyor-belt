@@ -316,6 +316,8 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
     cmd=$LISTCMD
     # No test file linked to the change: nothing runs, and its output says so.
     [ -z "$LISTNONE" ] || { printf 'conveyor: %s\n' "$NONELINKED" > "$1.test"; runnernote "$RUNOFF" >> "$1.test"; TEST_WAIT=0; TEST_RUN=0; return 0; }
+    # The file of a case that failed in the last run runs again, though the card's list holds it no more (testlist.sh failsleft()).
+    failsleft "$1"
   fi
   if [ -z "${2:-}" ]; then
     p=$(git -C "$1" diff --cached --binary --no-renames HEAD 2>/dev/null | git hash-object --stdin)

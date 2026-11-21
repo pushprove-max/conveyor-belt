@@ -230,7 +230,8 @@ says this, and the Board shows the note with the step. If no test file is linked
 test. The card's test line says so.
 
 When a run fails, the card runs again only the files that did not pass. After a fix session that changed the card's
-change, every file of its list runs again.
+change, every file of its list runs again. A test file with a failed case in the run before the fix can also run
+again, though the fix did not change it. This occurs when the card's change links the file to a changed file.
 
 Before each push, Conveyor runs the test files that the test map and `.conveyor/test-links.json` link to the
 landings since the last push. Each file runs alone. If a file fails, Conveyor finds the landing that broke it, files

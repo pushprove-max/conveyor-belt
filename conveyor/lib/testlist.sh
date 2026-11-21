@@ -346,6 +346,23 @@ passlist() { # <worktree>
 testedbefore() { # <worktree>
   [ "$(stdb ask tested "${1##*/}" 2>/dev/null)" = true ]
 }
+# A card's run (tests()): each file of a case the last run's list (<worktree>.rerun) names as failed (a `fail` line with
+# a case), that is still there, that the card's change selects (testsel() narrow) and that is not on the card's list
+# (TEST_FILES), is added to it and to the count of files the run is given (TEST_GIVEN, and <worktree>.testlist's
+# files). A fix that edited only a test file has that file as its list (listcmd(): by own), and without this the case
+# that had failed did not run again. A `fail` line with no case (unshare()) or of a file the card's change does not
+# select (a batch's run, of another card's change) adds nothing.
+failsleft() { # <worktree>
+  local f n=$TEST_GIVEN fs s
+  fs=$(awk -F'\t' '$1 == "fail" && $2 != "" && $3 != "" && !s[$2]++ { print $2 }' "$1.rerun" 2>/dev/null | grep -vxF -f <(printf '%s\n' "$TEST_FILES")) \
+    && s=$(testsel "$1" narrow 2>/dev/null) || return 0
+  while IFS= read -r f; do
+    [ -f "$1/$f" ] && grep -qxF -- "$f" <<<"${s#*$'\n'}" || continue
+    TEST_FILES+=$'\n'$f; TEST_GIVEN=$((TEST_GIVEN + 1))
+  done <<<"$fs"
+  [ "$n" = "$TEST_GIVEN" ] || { jq -c --argjson n "$TEST_GIVEN" '.files = $n' "$1.testlist" > "$1.testlist.new" && mv -f "$1.testlist.new" "$1.testlist"; } \
+    || rm -f "$1.testlist.new"
+}
 # The files that differ between two trees or commits, one a line (read NUL-separated: a name with spaces is whole).
 treediff() { # <worktree> <from> <to>
   git -C "$1" diff --name-only --no-renames -z "$2" "$3" -- > "$1.rerun.new" 2>/dev/null && tr '\0' '\n' < "$1.rerun.new"
