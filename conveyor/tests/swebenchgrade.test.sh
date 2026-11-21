@@ -291,6 +291,33 @@ t_sweseame() {
     || fail "bench swe runs delete $r2 left its own results or took the first run's: $(ls -R "$B/again" "$B/results" 2>&1)"
 }
 
+# Bug (#1195): an archived run still counted in the Scoreboard's figures: same twice read its line, and a task whose only
+# run was archived still showed as a task with a result. The kept result stays reusable (a new run and Plan a run read
+# it from at), so only live, the places the Scoreboard counts, drops it. Run 1 resolves a task, run 2 (--again) leaves it
+# unresolved (same twice 0). Archive run 2: same twice is null, the task stays. Archive run 1 as well: at keeps the
+# task, live has none; restore run 1 and live has it back.
+t_sweseamearch() {
+  swe; local out first r1 r2
+  first=$(sweorder | head -n 1)
+  loop bench swe 1 --arm stub-a > /dev/null 2>&1 || fail "the first run failed"
+  echo "$first" > "$SWE_FX/wrong"
+  loop bench swe 1 --arm stub-a --again > /dev/null 2>&1 || fail "the run with --again failed"
+  out=$(loop bench swe history) || fail "history failed: $out"
+  r1=$(jq -r '.runs[1].id' <<<"$out"); r2=$(jq -r '.runs[0].id' <<<"$out")
+  [ "$(jq -c '.keys[0].figures.sameTwice' <<<"$out")" = 0 ] || fail "before the archive, same twice is not 0: $(jq -c .keys <<<"$out")"
+  loop bench swe runs archive "$r2" > /dev/null 2>&1 || fail "archive $r2 failed"
+  out=$(loop bench swe history) || fail "history failed: $out"
+  [ "$(jq -c '[.keys[0].figures.sameTwice, (.keys[0].at | length), (.keys[0].live | length)]' <<<"$out")" = '[null,1,1]' ] \
+    || fail "an archived --again run still counts in same twice, or its task left the keys: $(jq -c .keys <<<"$out")"
+  [ "$(loop bench swe results --json | jq -c '.[0].figures.sameTwice')" = null ] || fail "results --json counts the archived run in same twice"
+  loop bench swe runs archive "$r1" > /dev/null 2>&1 || fail "archive $r1 failed"
+  out=$(loop bench swe history) || fail "history failed: $out"
+  [ "$(jq -c '[.keys[0].at, .keys[0].live]' <<<"$out")" = '[[0],[]]' ] \
+    || fail "a task whose only runs are archived is not out of live, or its kept result is out of at (a new run reuses it): $(jq -c .keys <<<"$out")"
+  loop bench swe runs restore "$r1" > /dev/null 2>&1 || fail "restore $r1 failed"
+  [ "$(loop bench swe history | jq -c '.keys[0].live')" = '[0]' ] || fail "a restored run's task is not back in live"
+}
+
 # Bug (#1182): deleting the first run took the kept results of a key while two --again runs still showed it, so same
 # twice vanished from results and history, or (when read from again/) the key was listed though a new run could not reuse
 # it and diff could not read it. Run 1 resolves the first task, runs 2 and 3 (--again) both leave it unresolved; run 1 is

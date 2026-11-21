@@ -883,7 +883,7 @@ export const BH = (() => {
       runOf(ARCHIVED, T0 - 7 * D, [[ARMS[5], () => true]], TASKS.slice(0, 5), { archived: iso(T0 - 6 * D) })];
     const arms = ARMS.map(([name, label, kind, , usd, min, , ses], i) => ({ name, label, kind, state: i === 6 ? 'changed' : i === 4 ? 'expired' : 'ready', why: null, guard: kind === 'conveyor' ? 'conveyor' : /^codex/.test(name) ? null : 'agent',
       perTask: { usual: ses, worst: ses * 2, minutes: min, session: usd / ses }, key: kind === 'conveyor' ? null : name, keyPrefix: kind === 'conveyor' ? `${name}-` : null }));
-    const keys = runs.flatMap((r) => r.line.cols.map((c) => ({ key: c.key, at: Array.from({ length: r.line.n }, (_, i) => i), figures: { sameTwice: (ARMS.find((a) => a[0] === c.arm) || [])[8] ?? null } })));
+    const keys = runs.flatMap((r) => r.line.cols.map((c) => ({ key: c.key, at: Array.from({ length: r.line.n }, (_, i) => i), live: Array.from({ length: r.line.n }, (_, i) => i), figures: { sameTwice: (ARMS.find((a) => a[0] === c.arm) || [])[8] ?? null } })));
     return { hist: { set: SET, limits: { cpus: 4, memory: '8g', taskTimeout: 3600 }, guard: { conveyor: false, agent: false }, arms, runs: runs.map((r) => r.line), keys, order: ORDER },
       shows: Object.fromEntries(runs.map((r) => [r.line.id, r.show])), live: null,
       versions: [{ name: 'main', commit: E('9') }, ...OLDS.map(([v]) => ({ name: v, commit: E(v[3]) })).reverse(), { name: 'v1.9.0', commit: E('9') }],
@@ -927,7 +927,7 @@ export const BH = (() => {
     const arms = names.map((name, i) => ({ name, label: name, kind: i < 2 ? 'conveyor' : 'agent', state: i < 4 ? 'ready' : i === 4 ? 'expired' : 'unchecked', why: null, guard: i < 2 ? 'conveyor' : 'agent',
       perTask: { usual: i < 2 ? 4 : 1, worst: i < 2 ? 8 : 1, minutes: i < 2 ? 21 : 3, session: i < 2 ? 0.48 : 0.31 }, key: i < 2 ? null : name, keyPrefix: i < 2 ? `${name}-` : null }));
     return { hist: { set: SET, limits: { cpus: 4, memory: '8g', taskTimeout: 3600 }, guard: { conveyor: false, agent: false }, arms, runs: [l1, l2],
-      keys: [...l1.cols, ...l2.cols].map((c) => ({ key: c.key, at: [0], figures: { sameTwice: null } })), order: [FEW_TASK, ...ORDER.slice(1)] },
+      keys: [...l1.cols, ...l2.cols].map((c) => ({ key: c.key, at: [0], live: [0], figures: { sameTwice: null } })), order: [FEW_TASK, ...ORDER.slice(1)] },
     shows: { [FEW1]: showOf(l1, C1, t1), [FEW2]: showOf(l2, C2, t2) }, live: null, versions: [{ name: 'main', commit: E('9') }, { name: 'v1.7.0', commit: E('7') }], drift: null };
   }
   // The tab booted with a set served: GET bench gives its history, GET bench&run=<id> that run's tasks.

@@ -280,7 +280,7 @@ SWE_RUNSUM='def costsum: [.[] | objects | .usd | numbers] as $u | all(.[]; type 
 # passToPassBroken (the totals of the tests' counts), clean (how many results are clean), and over the resolved results
 # medians (files, codeAdded, codeRemoved, testAdded, size) and rates (the share, 0 to 1, with lintClean, size at most 2,
 # strays and provesFix true), and tokensPerResolved (all the results' tokens over the resolved count). sameTwice is the
-# share of the tasks the key ran twice (two runs' lines of it that ran the task, neither reused: $runs, swe_lines; a
+# share of the tasks the key ran twice (two runs' lines of it, archived runs left out, that ran the task, neither reused: $runs, swe_lines; a
 # run with --again runs a task again on the same inputs) that got the same resolved or not both times, not rounded (1
 # only when every such task agreed); null when it never ran a task twice.
 SWE_FIGS='def median: sort | if length == 0 then null else (.[((length - 1) / 2) | floor] + .[(length / 2) | floor]) / 2 end;
@@ -297,7 +297,7 @@ SWE_FIGS='def median: sort | if length == 0 then null else (.[((length - 1) / 2)
        rates: (if $ok == [] then null else $ok | {lintClean: rate(.measures.lintClean), size: rate(.measures.size | if . == null then null else . <= 2 end),
          strays: rate(.measures.strays), provesFix: rate(.measures.provesFix)} end),
        tokensPerResolved: (if $ok == [] then null else ($r | map(.tokens // 0) | add) / ($ok | length) | round end),
-       sameTwice: ([$runs[] | (.cols // [] | map(select(.key == $key) | .arm)) as $a | .tasks[]? | select(.arm as $x | $a | index($x))
+       sameTwice: ([$runs[] | select(.archived | type != "string") | (.cols // [] | map(select(.key == $key) | .arm)) as $a | .tasks[]? | select(.arm as $x | $a | index($x))
            | select(.reused != true and (.result | tostring | startswith("not run") | not)) | {id, r: (.result == "resolved")}]
          | group_by(.id) | map(select(length > 1)) | if length == 0 then null else (map(.[0].r as $f | select(all(.[]; .r == $f))) | length) / length end)};'
 # Every run's line (runs.jsonl, then the run in progress), one JSON a line, alive true on a running line whose process is there.
@@ -312,7 +312,8 @@ swe_lines() {
 # since its check, unchecked, not offered), why, the step a check that runs is at, its check's ID (check) and time (at), the guard that holds it back (swe_guards), its results key on swe.json's
 # settings (swe_reskey; null for a conveyor arm, whose key ends with its engine's commit: keyPrefix and the commit)
 # and its sessions, minutes and a session's dollars (swe_pertask); keys, each results key with the places of its tasks
-# in the pinned order (a run reuses them) and its figures (SWE_FIGS); order, every task ID of the set in the pinned
+# in the pinned order (a run reuses them: at), live (the same places less the results only an archived run names: what the
+# Scoreboard counts as tasks with a result) and its figures (SWE_FIGS); order, every task ID of the set in the pinned
 # order of swe.json's settings (the Board's Task map; [] when the task list cannot be read); guard, whether the usage guard
 # holds back a run with a conveyor arm (conveyor) or another arm on the Claude login (agent); set, the task set, and
 # limits, each task container's, of swe.json (what the Board's Plan a run says each container gets);
@@ -362,7 +363,8 @@ swe_history() {
     | (map(. as $l | results[] | {p: ., id: $l.id}) | group_by(.p) | map({key: .[0].p, value: map(.id)}) | from_entries) as $S
     | {set: ($set | {dataset, revision, seed}), limits: ($set | {cpus, memory, taskTimeout}), guard: {conveyor: $gc, agent: $ga}, arms: $arms, choices: $ch, defaults: $df, order: $order,
        runs: (sort_by(.started // "") | reverse | map(. as $l | runsum($R) + {shared: ([$l | results[] | {key: ., value: (($S[.] // []) - [$l.id])} | select(.value | length > 0)] | from_entries)})),
-       keys: (. as $L | $res | group_by(.key) | map({key: .[0].key, at: (map($pos[.task] // empty) | sort), figures: figures($L; .[0].key)}))}'
+       keys: (. as $L | (([$L[] | select(.archived | type == "string") | results[]] | unique) - ([$L[] | select(.archived | type != "string") | results[]] | unique)) as $gone
+         | $res | group_by(.key) | map({key: .[0].key, at: (map($pos[.task] // empty) | sort), live: (map(select((reskey | IN($gone[])) | not) | $pos[.task] // empty) | sort), figures: figures($L; .[0].key)}))}'
 }
 # `bench swe show <run>`: one run as the Board's run page shows it: run, its line (runsum: a run going has active, the
 # arm, task and phase it is at, and seq, its read revision, swe_live), tasks, each task the run took in its order and

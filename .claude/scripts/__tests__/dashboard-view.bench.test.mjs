@@ -102,6 +102,15 @@ test('Scoreboard: the tiers and the verdict follow the sqrt(2n) noise rule: 12 t
     ['1tie', 'Claude alone'], ['1tie', 'Claude, then a review'], ['1tie', 'Codex alone'], ['1tie', 'Claude + Superpowers'], ['2', 'Claude + Caveman']]);
 });
 
+// Bug it guards (#1195): a task whose only run was archived still counted in "Tasks with a result". History's keys keep it
+// in at (a new run reuses its result) but not in live; the Scoreboard counts live.
+test('Scoreboard, 2 runs of 1 task: a task with a kept result but only an archived run is not a task with a result', async () => {
+  const set = BH.few();
+  set.hist.keys.forEach((k) => { k.live = []; });
+  const w = await opened(set);
+  assert.deepEqual(stats(w)[1], ['0 of 500', 'Tasks with a result', '0.0% of the set']);
+});
+
 // Bug it guards: with 2 runs of 1 task, the tab drew the bars and figures as if they said something, and showed a
 // figure the result never kept as 0. The Scoreboard says nothing can be told yet, shows what the runs have, and each
 // figure not kept says so (a patch not kept: its lines; the grade's report: hidden tests, lint, proves the fix).

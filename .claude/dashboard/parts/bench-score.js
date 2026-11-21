@@ -266,7 +266,7 @@
     const s = K.box('Next run to make', 'The run that answers the biggest open question for the least cost.'), ul = h('ul', 'bench-list'), tied = tiedItem(L);
     if (tied) ul.append(tied.li);
     L.rows.filter((r) => r.fired !== null && r.fired < 0.95).forEach((r) => ul.append(K.add(h('li'), [h('b', null, r.a.label), ` fired in only ${K.pct(r.fired)} of tasks. Check its arm before the next run. `, K.chip('arm problem', 'warn')])));
-    const done = new Set(K.keysOf().flatMap((k) => K.list(k.at))), hi = Math.min(K.setSize(), L.n + 50);
+    const done = new Set(K.keysOf().flatMap((k) => K.list(k.live))), hi = Math.min(K.setSize(), L.n + 50);
     if (L.n < hi && !Array.from(done).some((i) => i >= L.n && i < hi)) ul.append(h('li', null, `Tasks ${L.n + 1} to ${hi} have no result yet for any arm.`));
     if (!ul.children.length) ul.append(h('li', null, 'Every arm is told apart and fired: a bigger run of the same arms answers no new question.'));
     s.append(ul, K.button('Plan this run', 'btn-primary', 'plan-next', 'Plan this run', () => { if (tied) Object.assign(K.B.plan, { q: tied.plan.q, n: tied.plan.n, arms: new Set(tied.plan.arms) }); K.go('plan'); }));
@@ -311,7 +311,7 @@
   }
   function fewStats(st, rows) {
     const ns = Array.from(new Set(st.runs.map((r) => K.num(r.n) || 0))), R = st.runs.length, c = convOf(rows);
-    const at = new Set(K.keysOf().flatMap((k) => K.list(k.at))).size, size = K.setSize(), arms = K.armsOf(), ready = arms.filter((a) => a.state === 'ready').length, never = arms.filter((a) => a.state === 'unchecked').length;
+    const at = new Set(K.keysOf().flatMap((k) => K.list(k.live))).size, size = K.setSize(), arms = K.armsOf(), ready = arms.filter((a) => a.state === 'ready').length, never = arms.filter((a) => a.state === 'unchecked').length;
     const runsChip = ns.length === 1 ? `${R === 2 ? 'both' : 'each'} ${K.plural(ns[0], 'task')}` : `${Math.min(...ns)} to ${Math.max(...ns)} tasks`;
     const conv = c ? K.stat(K.usd(c.f.cost), `${c.a.col.label || c.a.label}: cost of its ${c.n === 1 ? 'task' : 'tasks'}`, K.chip(`${K.plural(Math.round(K.sum(c.f.cs.map((x) => K.num(x.sessions) || 0))), 'session')}, ${K.kTok(c.f.tokens)} tokens`, 'quiet'))
       : K.stat('none', 'Conveyor: cost of its task', K.chip('no Conveyor arm ran', 'quiet'));
