@@ -96,6 +96,8 @@ test('Rules: a pinned row shows its title; dragging the first pin onto the secon
   const pins = () => Array.from(rulesP(w).querySelectorAll('[data-rule="order"] .rules-pin-row'));
   assert.deepEqual(pins().map((p) => p.querySelector('.rules-pin').textContent), ['#21 Later', '#23 Infra thing', '#20 Next up', '#22 Last', '#24 Second half'],
     'the first five, each with its title (#23 is only in the skipped and open issues)');
+  // With the search box empty the panel shows one group at a time, and a control in a hidden group cannot take the focus: open the group that holds the pins.
+  act(rulesP(w), 'rules-set-order').click();
   const more = act(rulesP(w), 'pins-all');
   more.focus();
   more.click();
