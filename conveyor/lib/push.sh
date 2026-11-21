@@ -83,7 +83,7 @@ PUSHLOGS=${STATE%/*}/pushlogs
 PUSHLOG_KEEP=20
 PUSHLAST=${STATE%/*}/pushlast
 push() { # <card> <issue> [<commit>]
-  local lk rc hk=$RELKEPT plog logs pwhy='' pcheck='' pproc=$BASHPID
+  local lk rc hk=$RELKEPT plog logs pwhy='' pcheck='' pproc=$BASHPID pstart=''
   plog=$PUSHLOGS/$(date -u +%Y%m%dT%H%M%SZ)-$BASHPID.log
   mkdir -p "$PUSHLOGS" 2>/dev/null && : > "$plog" 2>/dev/null || plog=''
   logs=("$PUSHLOGS"/*.log); [ "${#logs[@]}" -le "$PUSHLOG_KEEP" ] || rm -f "${logs[@]:0:${#logs[@]}-PUSHLOG_KEEP}"
@@ -96,7 +96,8 @@ push() { # <card> <issue> [<commit>]
       elif [ $rc = 1 ]; then pwhy=$RELNOPUSH; echo "conveyor: $pwhy" >&2; rc=3
       else pwhy='the release hold could not be made'; echo "conveyor: $pwhy; nothing pushed" >&2; rc=1; fi
     fi
-    [ $rc != 0 ] || { pushone "$@" {lk}>&- {hk}>&-; rc=$?; }
+    # The push begins once it holds the lock (pstart, the push record's started): a push waited for is not its time.
+    [ $rc != 0 ] || { pstart=$(date -u +%FT%TZ); pushone "$@" {lk}>&- {hk}>&-; rc=$?; }
   else
     pwhy='the push lock could not be taken'; echo "conveyor: $pwhy; nothing pushed" >&2; rc=1
   fi
@@ -477,11 +478,13 @@ idleone() {
   idlenow || return 0
   mergeone idle
 }
-# The push record of push()'s push (pproc, its process; else this shell's) of <commit>, since now, at <stage>: tests,
+# The push record of push()'s push (pproc, its process; else this shell's) of <commit>, since now, at <stage>, with
+# started, when the push began (pstart; else now), which a new stage leaves as it was, and base, the commits the remote
+# held when it began (pushone()'s before), so its cards are known after $PUSHED moves and before their pushed lines: tests,
 # the test files run before the push (pushtests(), hookalone()); ready, the push worktree, its dependencies and a test
 # slot being got; hook, git push and its pre-push hook running; push, git push with no hook running; ended, git push
 # failed and the push goes on to its end or to a next try; pushed, the remote holds the commit and the push ends.
-pushing() { jq -cn --argjson p "${pproc:-$BASHPID}" --arg s "$1" --arg g "$2" --arg l "${plog:-}" '{pid:$p,since:(now|todate),sha:$s,stage:$g} + (if $l == "" then {} else {log:$l} end)' > "$PUSHING" 2>/dev/null || :; } # <commit> <stage>
+pushing() { jq -cn --argjson p "${pproc:-$BASHPID}" --arg s "$1" --arg g "$2" --arg l "${plog:-}" --arg st "${pstart:-}" '(now | todate) as $t | {pid:$p,since:$t,started:(if $st == "" then $t else $st end),sha:$s,stage:$g,base:$ARGS.positional} + (if $l == "" then {} else {log:$l} end)' --args "${before[@]+"${before[@]}"}" > "$PUSHING" 2>/dev/null || :; } # <commit> <stage>
 # Did the push's pre-push hook exit non-zero? Read from git's trace2 events of the push (the file given): the first
 # event is the push's own, and only its own children count (a check that runs git, or pushes in a test of its own,
 # writes its events there too, under another session id). No file, or no such event: no.

@@ -263,3 +263,53 @@ t_snapshotpushoff() { latestart; cat "$STUB/late" >> "$S/cards.jsonl"; loop cont
   [ "$(q '[(.belt | map(select(.landed)) | length), (.health.pushError != null), (.landed[] | select(.card == "c5") | .track.label)]')" \
     = '[0,true,"Landed, waiting for Push landed"]' ] || fail "with push off a failed push puts a landed card back on the belt: $out"
 }
+# Bug (#1279): six cards pushed in one batch, their issues closed, stayed "pushing" in the owner's view while a later
+# push carried the next two, and that push named neither its cards nor how long it had run. After the first push the
+# belt lists only the two, and health's push in progress, as the engine's push() records it, names them with the
+# push's start. Its cards stay named after git push moves $PUSHED and before the push writes their pushed lines (the
+# review of #1279: the Board said the push carried no card while it filed a flaky-test issue in that gap), and the
+# start stays the push's own as its stage changes (the stage's since starts again).
+t_snapshotbatch() {
+  export TZ=UTC; setup '[]'; S=$ST; mkdir -p "$S"; local n t0 t1 shas=() d=$T/$CASE/run st pid
+  for n in 1 2 3 4 5 6 7 8; do echo "$n" > "$R/b$n.txt"; git -C "$R" add -A; git -C "$R" commit -qm "card $n"; shas+=("$(git -C "$R" rev-parse HEAD)"); done
+  t0=$(date -u -d '10 minutes ago' +%FT%TZ); t1=$(date -u -d '2 minutes ago' +%FT%TZ)
+  for n in 1 2 3 4 5 6 7 8; do
+    jq -cn --arg c "c$n" --argjson i "$n" --arg t "$t0" --arg s "${shas[n-1]}" '
+      {card:$c,issue:$i,step:"picked",time:$t,tokens:{claude:0,codex:0},result:"ok",sha:"",reason:"",title:"T\($i)"},
+      {card:$c,issue:$i,step:"landed",time:$t,tokens:{claude:0,codex:0},result:"ok",sha:$s,reason:"",product:false}' >> "$S/cards.jsonl"
+  done
+  # The first push carried cards 1 to 6 (main at card 6) and GitHub closed their issues; 7 and 8 are still open.
+  for n in 1 2 3 4 5 6; do
+    jq -cn --arg c "c$n" --argjson i "$n" --arg t "$t1" --arg s "${shas[n-1]}" --arg h "${shas[5]}" '
+      {card:$c,issue:$i,step:"pushed",time:$t,tokens:{claude:0,codex:0},result:"ok",sha:$s,reason:"",sec:100,head:$h},
+      {card:$c,issue:$i,step:"issue",time:$t,tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""}' >> "$S/cards.jsonl"
+  done
+  git -C "$R" push -q origin "${shas[5]}:refs/heads/main" || fail "the first push's commit could not be put on origin"
+  echo "${shas[5]} origin main" > "$S/pushed"
+  { issue 7 2026-01-01; issue 8 2026-01-01; } | jq -cs . > "$STUB/issues.json"
+  # The second push, of main at card 8, by the loop's push(): its pre-push hook writes nothing and holds until go; the
+  # push then holds before its first pushed line until rows (record, wrapped), with $PUSHED already at card 8.
+  mkdir -p "$d"; printf '#!/usr/bin/env bash\n: > %q/hook\nuntil [ -e %q/go ]; do sleep 0.05; done\n' "$d" "$d" > "$R/.git/hooks/pre-push" && chmod +x "$R/.git/hooks/pre-push" # sleep: the hook's poll for its release
+  # shellcheck disable=SC2034 # HERE is read by the lines of conveyor.sh and commands/run.sh run by the eval
+  ( HERE=$SRC; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
+    eval "$(sed -n '/^\. "\$HERE\/lib\/portable.sh"/,/^\. "\$HERE\/lib\/records.sh"/p' "$SRC/conveyor.sh")"
+    eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")"
+    eval "$(declare -f record | sed '1s/^record /realrecord /')"
+    record() { [ "$3" != pushed ] || { : > "$d/gap"; until [ -e "$d/rows" ]; do sleep 0.05; done; }; realrecord "$@"; } # sleep: the poll for the case's release
+    names || exit 1; push c8 8 ) > "$d/push.out" 2>&1 & pid=$!
+  wait_until '[ -e "$d/hook" ]' "cat '$d/push.out'" || fail "the second push's hook did not start"
+  out=$(loop snapshot --fresh 2>/dev/null) || fail "snapshot during the second push exited non-zero"
+  [ "$(jq -c '[.belt[] | [.card, .step, .track.label]]' <<<"$out")" = '[["c7","push","pushing"],["c8","push","pushing"]]' ] \
+    || fail "after the first push the belt does not list only the two cards of the second: $(jq -c '[.belt[] | [.card, .step, .track.label]]' <<<"$out")"
+  [ "$(jq -c '.health.pushing | [.cards, .stage, (.started | type), has("base")]' <<<"$out")" = '[[{"card":"c7","issue":7},{"card":"c8","issue":8}],"hook","string",false]' ] \
+    || fail "the push in progress does not name its cards or how long it has run: $(jq -c .health.pushing <<<"$out")"
+  st=$(jq -r .health.pushing.started <<<"$out")
+  # The next stage begins in a later second than the push did, so its since and the push's start differ.
+  wait_until "[ \"\$(date -u +%FT%TZ)\" \\> '$st' ]" || fail "the clock did not pass the push's start"
+  : > "$d/go"; wait_until '[ -e "$d/gap" ]' "cat '$d/push.out'" || fail "the second push did not reach its pushed lines"
+  [ "$(cat "$S/pushed")" = "${shas[7]} origin main" ] || fail "the push had not moved \$PUSHED before its pushed lines: $(cat "$S/pushed")"
+  out=$(loop snapshot --fresh 2>/dev/null) || fail "snapshot after the remote took the second push exited non-zero"
+  [ "$(jq -c --arg st "$st" '.health.pushing | [.cards, .stage, .started == $st, .since > $st]' <<<"$out")" = '[[{"card":"c7","issue":7},{"card":"c8","issue":8}],"pushed",true,true]' ] \
+    || fail "a push the remote took does not name the cards it carries before their pushed lines, or not its own start ($st): $(jq -c .health.pushing <<<"$out")"
+  : > "$d/rows"; wait "$pid" || fail "the second push failed: $(cat "$d/push.out")"
+}

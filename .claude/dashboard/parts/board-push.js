@@ -122,8 +122,18 @@
     const what = (typeof r.stage === 'string' && Object.prototype.hasOwnProperty.call(PUSH_STAGE, r.stage) ? PUSH_STAGE[r.stage] : '') || PUSH_STAGE.hook;
     const head = h('span', 'board-from', `${what}${pushOn(r.sha)}${typeof r.since === 'string' ? ` since ${S.ctx.clock(r.since)}` : ''}${pid ? ` · ${pid}` : ''}`);
     if (typeof r.since === 'string') head.append(' · ', S.ctx.since(r.since, ''));
-    box.append(head, ...(pushStr(r.line) ? [h('span', 'board-push-line', r.line)] : []), ...pushLog(r.log));
+    box.append(head, ...pushCarries(r), ...(pushStr(r.line) ? [h('span', 'board-push-line', r.line)] : []), ...pushLog(r.log));
     return box;
+  }
+  // The cards the push in progress r carries (health's pushing.cards) and how long the whole push has run (started):
+  // the time above starts again at each stage, and a hook that writes nothing gives no line. None from a record without them.
+  function pushCarries(r) {
+    const h = S.ctx.h, cards = Array.isArray(r.cards) ? r.cards.filter((c) => c && typeof c === 'object') : null;
+    if (!cards && typeof r.started !== 'string') return [];
+    const names = (cards || []).map((c) => (num(c.issue) ? `#${c.issue}` : pushStr(c.card))).filter(Boolean);
+    const el = h('span', 'board-from', cards ? (names.length ? `Cards in this push: ${names.join(', ')}` : 'No landed card in this push') : '');
+    if (typeof r.started === 'string') el.append(`${cards ? ' · ' : ''}Push started ${S.ctx.clock(r.started)} · `, S.ctx.since(r.started, ''));
+    return [el];
   }
   // The last push that ended, l (pushState), in box.
   function pushEnded(box, l) {

@@ -513,7 +513,8 @@ pre-push hook cover. Use Push landed when you want the whole suite green before 
 Under the buttons, the Board shows the push. While it runs: the commit, what runs ("Tests before the push running",
 "Getting the push ready (worktree, dependencies, test slot)", "Pre-push hook running", "Push running with no pre-push
 hook", "git push ended, finishing the push", or "Pushed, waiting for GitHub") and since when, its process, the time it
-has run and the newest line of the pre-push hook's output. A push whose process is gone and that did not end shows as
+has run and the newest line of the pre-push hook's output. Below that are the cards in the push and when the push
+started, with the time since then, also for a hook that writes nothing. A push whose process is gone and that did not end shows as
 stale, with the path of its log. After the push: passed, or failed with the failed test and the path of its log, or
 "started no push" and why; and "Main is still N commits ahead of the remote" when it is. Each push has its own log in
 the state folder ([Push](cards.md#push)).

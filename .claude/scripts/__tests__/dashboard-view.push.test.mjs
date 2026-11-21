@@ -119,6 +119,14 @@ test('Control: the push in progress shows its hook, time and newest line; a stal
     next(w, with_({ pushing: { pid: 42, since: '2026-11-14T08:00:00Z', sha: A, stage, log, sec: 9, line: '', stale: false }, pushLast: null }));
     assert.match(state().textContent, new RegExp(`^${what} on ${A.slice(0, 12)} since `), stage);
   }
+  // Issue 1279: a push whose hook wrote nothing showed only its stage, so the owner could not see which cards it
+  // carried nor how long the whole push had run (the stage's time starts again at each stage).
+  next(w, with_({ pushing: { pid: 42, since: '2026-11-14T08:01:30Z', started: '2026-11-14T08:00:00Z', sha: A, stage: 'push', log, sec: 9, line: null, stale: false,
+    cards: [{ card: 'c7-7', issue: 7 }, { card: 'c-red', issue: 0 }] }, pushLast: null }));
+  assert.match(state().textContent, /Cards in this push: #7, c-red · Push started .+ · .+Log: /, 'a push with no hook output names its cards and its start');
+  // Both keep counting, the stage's from since and the whole push's from started: a timer on the wrong one shows the other's time.
+  assert.deepEqual([...state().querySelectorAll('time.since')].map((t) => t.dataset.since), ['2026-11-14T08:01:30Z', '2026-11-14T08:00:00Z'],
+    'the stage counts from since and the whole push from started');
   next(w, with_({ pushing: { pid: 42, since: '2026-11-14T08:00:00Z', sha: A, log, sec: 9, line: '3/9 passed', stale: true }, pushLast: null }));
   assert.equal(state().textContent, `The push on ${A.slice(0, 12)} is stale: its process (pid 42) is gone and the push did not end.Log: ${log}`);
   next(w, with_({ pushing: null, pushLast: { time: '2026-11-14T08:00:00Z', by: 'now', started: true, sha: A, ok: false, ahead: 1, check: 'fast-checks', log } }));

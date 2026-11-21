@@ -129,8 +129,9 @@
 # modelSettings: the build and review models and efforts in force, where each comes from and the choices: the CLIs
 #   installed on this host with the models each has registered, and why a seat cannot start (modelsettings()).
 # accounts: the names of the host file's accounts, the choices of the control record's account and reviewAccount.
-# inFlight: the accounts the cards on the belt started on, whatever the control record names now, each pair once:
-#   {account, reviewAccount}, as their worktree lines name them (null: the default login; for a review, its account).
+# inFlight: each open card on the belt with the accounts it started on, whatever the control record names now:
+#   {card, issue, step (its step on the record: rows.jq x.at), account, reviewAccount}, the accounts as its worktree
+#   line names them (null: the default login; for a review, its account).
 # limits: the weekly limit reading of each Claude account a card started on the control record runs on, the guard's
 #   (guardaccts, lib/paths.sh): [{account (null: the default login), uses (build, fix: repairs alone, review), pct, readAt, email (its
 #   login on this machine)}]; null when it could not be read.
@@ -1005,7 +1006,7 @@ snapshot() (
        modelSettings: $settings,
        accounts: $accts,
        limits: $ga,
-       inFlight: ([$c[] | select(.result == "" and .x.accounts != null) | .x.accounts] | unique),
+       inFlight: [$c[] | select(.result == "" and .x.accounts != null) | {card, issue, step: .x.at} + .x.accounts],
        areaPrefix: $area,
        packLandAs: (if $pla == "" then null else $pla end),
        packPrMerge: (if $ppm == "" then null else $ppm end),
