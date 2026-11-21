@@ -10,7 +10,7 @@ const test = cases(import.meta.url);
 test('Rules: one row a rule on the left, what the snapshot says they produce on the right', () => {
   const w = boot({ tab: 'rules' });
   deliver(w, full());
-  assert.deepEqual(Array.from(ruled(w).querySelectorAll('.rules-row'), (r) => r.dataset.rule), ['builder', 'reviewer', 'judge', 'judge-always', 'account', 'review-account', 'cap', 'guard', 'cores',
+  assert.deepEqual(Array.from(ruled(w).querySelectorAll('.rules-row'), (r) => r.dataset.rule), ['builder', 'reviewer', 'judge', 'judge-always', 'account', 'review-account', 'cap', 'guard', 'atonce', 'cores',
     'build', 'never', 'start', 'dep-guard', 'split', 'pick', 'push', 'land-as', 'pr-merge', 'push-check', 'lint', 'visible',
     'standing-asked-fix', 'standing-review-followup', 'standing-release-check', 'standing-fixed-block', 'standing-review-retry', 'held', 'order']);
   assert.deepEqual(['start-queue', 'start-held'].map((a) => act(rulesP(w), a).getAttribute('aria-pressed')), ['true', 'false'], 'New issues start in: Queue, the default');
@@ -470,6 +470,8 @@ test('Rules: a control keeps the keyboard focus through the change it sends', as
   deliver(w, full());
   let answer;
   w.reply = { ok: true, status: 200, text: () => new Promise((r) => { answer = r; }) };
+  // The panel shows one group at a time and a control in a hidden group cannot take the focus: open the toggle's group.
+  act(rulesP(w), 'rules-set-picking').click();
   act(rulesP(w), 'rule-P2').focus();
   act(rulesP(w), 'rule-P2').click();
   assert.equal(w.document.activeElement, act(rulesP(w), 'rule-P2'), 'armed for its second click, it keeps the focus');
@@ -485,6 +487,7 @@ test('Rules: a control keeps the keyboard focus through the change it sends', as
   twice.panels.rules.data.control.order = [21, 22];
   twice.panels.rules.data.control.rules.P2 = false;  // it read the change the host took
   next(w, twice);
+  act(rulesP(w), 'rules-set-order').click();  // the group that holds the pins
   const unpin22 = rulesP(w).querySelector('.rules-item[data-issue="22"] [data-act="unpin"]');
   unpin22.focus();
   w.reply = { ok: false, status: 409, text: () => Promise.resolve('conveyor: the record is locked') };
