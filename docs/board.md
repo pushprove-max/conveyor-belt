@@ -539,7 +539,9 @@ Under the top row are three numbered steps. Each step has a mark: done, failed, 
 1. **Release notes**: `docs/releases/<version>.md` on `main`, "written" or "missing: Draft notes writes them".
 2. **Full suite**: the whole suite on the head of `main`. It shows passed or failed, with the commit and the time, or
    "Not run". While the suite runs, a bar shows the test files done of all the test files, with the names of the files
-   that failed. A test case that ran out of time shows as "<case>: timed out". When the run under way, or the last run,
+   that failed. A test case that ran out of time shows as "<case>: timed out". When release-prep runs the failed
+   cases again, one at a time, the step says which round runs now, of how many, and for which case, with when it last
+   moved. The bar then shows that round's test files, and the result of the first run shows under it as one line. When the run under way, or the last run,
    runs test files, the step says how: one by one or in parallel. A **Release** that uses the suite that passed or
    failed before shows the mode of that suite. It says no mode for a run that runs no test files and keeps the
    passes of an earlier run, on the same commit or an earlier one. A run that runs only some files again, and keeps

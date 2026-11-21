@@ -142,6 +142,21 @@ test('D2: a run under way shows a progress bar of files done of all, the failed 
   assert.deepEqual(await sent(w, () => act(card(w), 'release-stop').click()), [{ action: 'release-run', args: ['stop'], repo: 'plugin' }]);
 });
 
+// Bug (#1240): while the failed cases ran again, the row kept the first run's bar with no sign of the rerun. The
+// rerun's round, case, bar and last move show; the first run's counts are a plain line under it, not the progress.
+test('#1240: while the failed cases run again, the row shows that round\'s case, bar and last move, the first run as a plain line', () => {
+  const w = boot();
+  deliver(w, data({ ...RUN, ended: null, state: 'running', failed: 2, cases: ['code.test: breaks', 'code.test: flips'],
+    files: { done: 140, of: 140, failed: ['code.test'] },
+    rerun: { round: 2, of: 6, case: 'code.test: breaks', since: '2026-11-14T08:20:00Z', at: '2026-11-14T08:21:00Z', done: 3, failed: 1, files: { done: 1, of: 4, failed: ['code.test'] } } }));
+  const re = stepOf(w, 'full-suite').querySelector('[data-figure="rerun"]');
+  assert.match(re.textContent, /^Running the failed cases again: round 2 of 6, code\.test: breaks · last moved .+ ago$/);
+  assert.ok(re.querySelector('time.since'), 'the last move is a live time element');
+  const bars = stepOf(w, 'full-suite').querySelectorAll('progress');
+  assert.deepEqual(Array.from(bars, (b) => [b.value, b.max]), [[1, 4]], 'the one bar is the rerun\'s, not the first run\'s 140 of 140');
+  assert.match(stepOf(w, 'full-suite').querySelector('[data-figure="first-run"]').nextElementSibling.textContent, /^140 files done · 1 failed$/);
+});
+
 // Bug this guards (#791): a press that starts the suite sent no mode, so every release suite ran its files one by one,
 // or sent one the owner did not choose.
 test('#791: Run suite asks one by one or in parallel; in parallel sends --parallel, one by one --serial, Cancel nothing', async () => {

@@ -180,6 +180,20 @@
     return out;
   }
 
+  // A run under way: its progress (counts()). While its failed cases run again alone (the record's rerun), the round that
+  // runs now, its case, its own progress and when it last moved, then the first run's result, not as the progress.
+  function rerunLines(h, ctx, run) {
+    const r = run.rerun && typeof run.rerun === 'object' && num(run.rerun.round) ? run.rerun : null;
+    if (!r) return counts(h, run, true);
+    const p = h('p', 'row-meta');
+    p.dataset.figure = 'rerun';
+    p.append(`Running the failed cases again: round ${r.round}${num(r.of) ? ` of ${r.of}` : ''}${r.case ? `, ${r.case}` : ''}`);
+    if (typeof r.at === 'string') p.append(' · last moved ', ctx.since(r.at, ' ago'));
+    const first = h('p', 'row-meta', 'First run:');
+    first.dataset.figure = 'first-run';
+    return [p, ...counts(h, r, true), first, ...counts(h, run, false)];
+  }
+
   // The failed cases of release-prep's red suite that passed every run alone (the record's alone, verdict flaky): they
   // block nothing, and a suite whose every failed case is one of them passed.
   function flakyList(h, x) {
@@ -287,7 +301,7 @@
       stop.type = 'button'; stop.dataset.act = 'release-stop';
       stop.title = 'End this run\'s processes. Nothing else of Conveyor stops.';
       const moved = run.moved === true ? h('p', 'warn-note', 'Main moved while the suite runs: a card landed, so the suite does not test the new main.') : null;
-      s2 = step(h, 'Full suite', 'now', line, modeLine(h, run, true), ...counts(h, run, true), moved,
+      s2 = step(h, 'Full suite', 'now', line, modeLine(h, run, true), ...rerunLines(h, ctx, run), moved,
         ctx.twice(stop, 'final', 'Click again to stop the run', () => send(ctx, rec.repo, ['stop'], 'The run is stopped.')));
     } else if (s.cur && (s.passed || s.failed || s.moved)) {
       const c = s.cur, line = h('span', null, `${s.failed ? 'Failed' : 'Passed'} on ${short(c.sha)}`);

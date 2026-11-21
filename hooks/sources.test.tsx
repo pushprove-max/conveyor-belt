@@ -112,6 +112,12 @@ test('a release suite under way is one line under the head: its version, short c
   expect(lines[3]).toBe('release 1.2.0 · a1b2c3d · running 12m · 140 cases done · 2 failures')
   expect(tableText(board({ suites: [] }), 80)).not.toMatch(/release|running|cases done/)
 })
+// Bug (#1240): while a release's failed cases ran again, /units kept the first pass's "140 cases done · 2 failures".
+test('a release whose failed cases run again shows that pass, its files done and failed and its last move, not the first pass\'s counts', () => {
+  const rerun = { round: 2, of: 6, case: 'x: a', since: ago(4), at: ago(3), done: 5, failed: 1, files: { done: 1, of: 2, failed: ['x'] } }
+  const line = tableText(board({ suites: [{ ...SUITE, rerun }] }), 100).split('\n')[3]
+  expect(line?.trimEnd()).toBe('release 1.2.0 · a1b2c3d · failed cases again: pass 2 of 6 · 1 file done · 1 failed · moved 3m ago')
+})
 test('an ended run shows its result for a short time, then goes away', () => {
   const ended = { ...SUITE, kind: 'full test', version: '', ended: ago(3), state: 'failed' }
   expect(tableText(board({ suites: [ended] }), 80).split('\n')[3]).toBe('full test · a1b2c3d · failed 3m ago · 2 failures')

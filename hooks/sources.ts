@@ -96,12 +96,15 @@ export type Landed = Card & Times & { closed: boolean; at: number | null; usd: n
 // or "control record unreadable" ("" when the snapshot does not say), reason: why it picks nothing ("" when the
 // snapshot gives none), and loop: whether its process runs. judgeDeclined: when each finding the judge declined was
 // declined, from every record's declined list, each line once. suites: each record's whole-suite runs (the snapshot's
-// suites: a release's suite, the full test), under way (ended null) or ended. building and waiting: the running
+// suites: a release's suite, the full test), under way (ended null) or ended; rerun: while a release's failed cases run
+// again, the pass under way ({pass, of, done: its files done, failed: its files failed, at: when it last moved}), else
+// null. building and waiting: the running
 // loop's cards counted against its builder cap (cap; null with no cap) at its last turn, and its cards left out of that
 // count as they only wait on another card; null when no loop runs or the snapshot does not say. onBelt: the record's
 // cards on the belt; landing: those of them landed, in Push (the loop's building leaves them out).
 export type Loop = { repo: string; state: string; reason: string; loop: boolean | null; building: number | null; waiting: number | null; cap: number | null; onBelt: number; landing: number }
-export type Suite = { repo: string; kind: string; version: string; sha: string; since: number | null; ended: number | null; state: string; done: number | null; failed: number | null }
+export type Suite = { repo: string; kind: string; version: string; sha: string; since: number | null; ended: number | null; state: string; done: number | null; failed: number | null
+  rerun: { pass: number; of: number | null; done: number | null; failed: number; at: number | null } | null }
 // A project's push (the snapshot's health): running, the push in progress (pushing: stale when its process is gone and
 // it did not end; stage, a key of PUSH_STAGE; line, the newest line of its log), last, the last push that ended
 // (pushLast: by loop, now for Push now, full for Push landed; started false when it never reached a commit, why then;
@@ -283,7 +286,9 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
       .map((x: any) => ({ id: one(x.id), at: time(x.time) as number })),
     // A snapshot from an older engine has no suites.
     suites: (Array.isArray(j.suites) ? j.suites : []).filter((x: unknown) => x && typeof x === 'object')
-      .map((x: any): Suite => ({ repo, kind: one(x.kind), version: one(x.version), sha: one(x.sha), since: time(x.since), ended: time(x.ended), state: one(x.state), done: num(x.done), failed: num(x.failed) })),
+      .map((x: any): Suite => ({ repo, kind: one(x.kind), version: one(x.version), sha: one(x.sha), since: time(x.since), ended: time(x.ended), state: one(x.state), done: num(x.done), failed: num(x.failed),
+        rerun: x.rerun && typeof x.rerun === 'object' && num(x.rerun.round) !== null ? { pass: x.rerun.round, of: num(x.rerun.of), done: num(x.rerun.files?.done),
+          failed: Array.isArray(x.rerun.files?.failed) ? x.rerun.files.failed.length : 0, at: time(x.rerun.at) } : null })),
     // Each open parent issue (open.umbrellas); none when GitHub did not list the issues, or from an older engine.
     umbrellas: (Array.isArray(j.open?.umbrellas) ? j.open.umbrellas : []).filter((x: any) => x && typeof x === 'object' && num(x.issue) !== null)
       .map((x: any): Umbrella => ({ repo, issue: x.issue, title: one(x.title), done: num(x.done) ?? 0, all: num(x.all) ?? 0,
@@ -1030,6 +1035,12 @@ export const suitesModel = (s: State, snap: Snap): Line[] => (snap.suites ?? [])
   .map((x): Line => {
     const what = `${x.repo ? `${x.repo} ` : ''}${x.kind === 'release' ? `release ${x.version}` : x.kind}${x.sha ? ` · ${x.sha.slice(0, 7)}` : ''}`
     const failed = x.failed ? [{ t: ` · ${count(x.failed, 'failure')}`, c: C.bad }] : []
+    // While a release's failed cases run again, the pass under way and its own progress, not the first pass's counts.
+    const r = x.rerun
+    if (x.ended === null && r) {
+      return [{ t: what, c: C.work, b: true }, { t: ` · failed cases again: pass ${r.pass}${r.of === null ? '' : ` of ${r.of}`}${r.done === null ? '' : ` · ${count(r.done, 'file')} done`}`, d: true },
+        ...(r.failed ? [{ t: ` · ${r.failed} failed`, c: C.bad }] : []), ...(r.at === null ? [] : [{ t: ` · moved ${fmtSec((s.now - r.at) / 1000)} ago`, d: true }])]
+    }
     if (x.ended === null) {
       return [{ t: what, c: C.work, b: true }, { t: ` · running${x.since === null ? '' : ` ${fmtSec((s.now - x.since) / 1000)}`}${x.done === null ? '' : ` · ${count(x.done, 'case')} done`}`, d: true }, ...failed]
     }

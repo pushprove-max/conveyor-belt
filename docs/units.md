@@ -31,7 +31,10 @@ right-aligned and the title is what gives way.
   Foreman role and no Foreman is set up shows no Foreman line. [Foreman](foreman.md) tells what each reason means.
 - **The whole suite**, in `/units` and the pane, under the head: while a release suite or a full test run is in
   progress, one line for it: the kind (`release 1.2.0` or `full test`), the short commit, the time it has run, the cases
-  done and the failures until now (`release 1.2.0 · a1b2c3d · running 12m · 140 cases done · 2 failures`). When the run
+  done and the failures until now (`release 1.2.0 · a1b2c3d · running 12m · 140 cases done · 2 failures`). While a
+  release runs its failed cases again, the line shows that pass in their place: the pass of all the passes, its test
+  files done and failed, and when it last moved (`release 1.2.0 · a1b2c3d · failed cases again: pass 2 of 6 · 1 file
+  done · 1 failed · moved 3m ago`). When the run
   ends, the line shows the result (`passed 3m ago`) for 10 minutes, then it goes away.
 - **The test map**, in `/units` under the head and in the pane under Machine details: one line. While setup or a whole run on main makes the
   map, the line shows the test files run so far, the time so far and a bar

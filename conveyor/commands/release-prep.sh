@@ -57,9 +57,9 @@
 # names, as at the suite's end; while it runs the snapshot counts them: suiteprog()), timedout (those of them stopped
 # at their time limit, by name), alone (release-prep's red suite: each failed case run alone, as fulljudge() prints it:
 # {case, line, runs, verdict: flaky or failed, why}; a suite passed with every failed case flaky has them here only),
-# counts (only while those runs alone run: the suite's suiteprog(), which the snapshot shows in their place), moved
-# (main moved while the suite
-# ran; while it runs the snapshot compares main's head with main), main (main's head as the suite started), reused
+# counts (only while those runs alone run: the suite's suiteprog(), which the snapshot shows beside them), rerun (the
+# run alone under way, as fulljudge() names it, else null; the snapshot adds its progress), moved (main moved while
+# the suite ran; while it runs the snapshot compares main's head with main), main (main's head as the suite started), reused
 # (null for a whole suite; else {sha and time: the run it reused, ran: the files it reran, none when no test ran, kept:
 # the passes it kept}), reasons
 # (each line the command printed to stderr, its "conveyor: <command>: " taken off), pid (the process whose tree, and
@@ -306,7 +306,7 @@ relstart() { # <command name> <version>
     elif .step == "release" and .state == "refused" then {since, sha, mode, atOnce, done, failed, cases, reused, red} else empty end' "$RELRUN" 2>/dev/null) || was=null
   # by: what started the run when it was not the owner (CONVEYOR_RELEASE_BY: "fixes landed", relfixes(), lib/fulltest.sh).
   jq -cn --arg s "$1" --arg v "$2" --arg t "$(clock)" --argjson p "${CONVEYOR_RELEASE_PID:-$$}" --argjson w "$was" --arg by "${CONVEYOR_RELEASE_BY:-}" \
-    '{kind: "release", step: $s, version: $v, since: $t, ended: null, state: "running", sha: null, mode: null, atOnce: null, done: 0, failed: 0, cases: [], alone: [], moved: false, reused: null, reasons: [], pid: $p, red: null, anyway: null, allowed: null, minver: null, by: (if $by == "" then null else $by end)} + $w' > "$RELRUN.new" \
+    '{kind: "release", step: $s, version: $v, since: $t, ended: null, state: "running", sha: null, mode: null, atOnce: null, done: 0, failed: 0, cases: [], alone: [], rerun: null, moved: false, reused: null, reasons: [], pid: $p, red: null, anyway: null, allowed: null, minver: null, by: (if $by == "" then null else $by end)} + $w' > "$RELRUN.new" \
     && mv -f "$RELRUN.new" "$RELRUN" && RELSTARTED=1
   # Each process the run starts carries its mark (relprocs()). The run's end ends them all: the suite's runner
   # (timeout) is a process group of its own, which a signal to this process never reaches, and each holds the release
@@ -527,7 +527,7 @@ relsuite() { # <command name> <commit>
   fi
   m1=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)
   relrec --argjson p "$p" --argjson mv "$([ "$m0" = "$m1" ] && echo false || echo true)" --arg st "$([ $rc = 0 ] && echo passed || echo failed)" --argjson al "$al" \
-    '. + $p | .moved = $mv | .state = $st | .alone = $al | del(.counts)'
+    '. + $p | .moved = $mv | .state = $st | .alone = $al | .rerun = null | del(.counts)'
   [ "$m0" = "$m1" ] || echo "conveyor: $n: $BRANCH moved while the suite ran, from ${m0:0:12} to ${m1:0:12}: a card landed; the suite tested ${sha:0:12}"
   # The test map is of the suite run alone: a red one, though its failed cases then passed alone, refreshes none.
   if [ $sr = 0 ]; then maprefresh "$wt" || :; else mapstop "$wt" "the release's whole run failed"; fi

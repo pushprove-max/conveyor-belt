@@ -319,13 +319,24 @@ fullalone() { # <worktree> <testfails() of the run> <unit> [field]
 }
 # Each failed case of a red run, judged (above): prints them as a JSON array. With <release> (release-prep's red suite,
 # commands/release-prep.sh: "release <version>"), a flaky entry's source is "<release> <commit>", and a case that failed
-# alone is a verdict failed, which blocks the release: no fix card is filed and no declined line written.
+# alone is a verdict failed, which blocks the release: no fix card is filed and no declined line written. Each run
+# alone of a release is a pass its record names as it begins (rerun: {round, of: every run alone, case, since}; relrec(),
+# commands/release-prep.sh), so the snapshot shows that pass's progress, not the suite's counts (suites(), lib/snapshot.sh).
 fulljudge() { # <worktree> <commit> <command> <testfails() of the run> [release]
-  local wt=$1 sha=$2 u name r runs outside code why cause body x v issue reused out=() run="the full test suite"
+  local wt=$1 sha=$2 u us name r runs outside code why cause body x v issue reused out=() run="the full test suite" pass=0 of
   [ -z "${5:-}" ] || run="the suite run of $5"
+  us=$(jq -c --arg cmd "$3" '(.files | map(.file)) as $fs
+    | [(.files[] | .file as $f | if .cases == [] then {file: $f, case: null, line: (if .at then "the file failed naming no case (at \(.at))" else null end)}
+         else .cases[] | {file: $f, case: .name, line} end),
+       (.timeout.file // empty | select(IN($fs[]) | not) | {file: ., case: null, line: "it ran out of time"})]
+    | unique_by([.file, .case])[] | . + {name: (if .case == null then .file elif .file == $cmd or .file == "" then .case else "\(.file): \(.case)" end)}' <<<"$4")
+  of=$(($(grep -c . <<<"$us") * FULL_ALONE))
   while IFS= read -r u; do
+    [ -n "$u" ] || continue
     name=$(jq -r .name <<<"$u"); runs=(); outside=(); code=''
     for ((x = 0; x < FULL_ALONE; x++)); do
+      pass=$((pass + 1))
+      [ -z "${5:-}" ] || relrec --argjson p $pass --argjson of "$of" --arg c "$name" '.rerun = {round: $p, of: $of, case: $c, since: (now | todate)}'
       r=$(fullalone "$wt" "$4" "$u") || r=failed; runs+=("$r")
       case $r in
         timeout) outside+=("it timed out alone, under load") ;;
@@ -357,11 +368,7 @@ Done when: the case passes alone and in the full test suite."
     fi
     out+=("$(jq -c --arg v "$v" --arg why "$why" --argjson i "${issue:-null}" --argjson re "${reused:-false}" \
       '{case: .name, line, runs: $ARGS.positional, verdict: $v, why: (if $why == "" then null else $why end), issue: $i, reused: $re}' --args "${runs[@]}" <<<"$u")")
-  done < <(jq -c --arg cmd "$3" '(.files | map(.file)) as $fs
-    | [(.files[] | .file as $f | if .cases == [] then {file: $f, case: null, line: (if .at then "the file failed naming no case (at \(.at))" else null end)}
-         else .cases[] | {file: $f, case: .name, line} end),
-       (.timeout.file // empty | select(IN($fs[]) | not) | {file: ., case: null, line: "it ran out of time"})]
-    | unique_by([.file, .case])[] | . + {name: (if .case == null then .file elif .file == $cmd or .file == "" then .case else "\(.file): \(.case)" end)}' <<<"$4")
+  done <<<"$us"
   printf '%s\n' "${out[@]}" | jq -cs '.'
 }
 # Why a case that fails alone in the code fails (fulljudge()): a landed commit origin lacks that plausibly caused it, or

@@ -36,7 +36,8 @@
 #   full test's, in one shape (suites()): {kind ("release" or "full test"), version (a release's), step, sha, since,
 #   ended (null while under way), state, done, failed, cases (the failed cases' names), timedout (a release's: those
 #   of them that timed out, suiteprog()), files ({done, of, failed}),
-#   moved, reasons}: the release
+#   moved, reasons}, and a release's rerun (while its failed cases run alone: {round, of, case, since, done, failed,
+#   files, at: when that pass last moved}; else null): the release
 #   record of commands/release-prep.sh, its cases counted as the suite runs; the full test's run under way, else its
 #   last run. release is main as the Release panel shows it (releasemain()): {tag, count, commits, next, notes, written,
 #   head, releases}, null when main cannot be read. drift is the latest drift watch (driftof(), bench/drift.sh --json):
@@ -363,9 +364,14 @@ suites() {
       if ( flock -n 9 ) 9>>"$CARDS/release/lock" 2>/dev/null; then
         t=$(p_stat "$CARDS/release/run.json") && r=$(jq -c --argjson t "${t#* }" '. + (.counts // {}) | del(.counts) | .state = "stopped" | .ended = ($t | todate)' <<<"$r")
       elif jq -e '.state == "running" and .sha != null' <<<"$r" > /dev/null; then
-        # A card that lands while the suite runs moves main: the panel says so now, not at the suite's end.
+        # A card that lands while the suite runs moves main: the panel says so now, not at the suite's end. While the
+        # failed cases run alone (rerun), the counts are the suite's, and the worktree's progress is the pass under way:
+        # its done, failed and files, and at, when its test run last moved (the live record's progress, not before the pass).
         r=$(jq -c --slurpfile p <(suiteprog "$CARDS/release/wt") --arg h "$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)" \
-          '. + (.counts // $p[0]) | del(.counts) | if .main != null and $h != "" and .main != $h then .moved = true else . end' <<<"$r"); fi
+          --arg at "$(jq -r '.progress // empty' "$CARDS/release/wt.live" 2>/dev/null)" \
+          '(if .counts != null and (.rerun | type) == "object" then .rerun += ($p[0] | {done, failed, files})
+              + {at: ([.rerun.since, $at] | map(select(type == "string" and . != "")) | max)} else . end)
+            | . + (.counts // $p[0]) | del(.counts) | if .main != null and $h != "" and .main != $h then .moved = true else . end' <<<"$r"); fi
     fi
   fi
   # A full test's marker read before and after its lock is found free ended with no result (fulldead()): a run that

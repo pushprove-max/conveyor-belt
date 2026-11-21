@@ -11,14 +11,16 @@
 
 # alsetup <cases>: runsetup with a suite of the cases named, each failing in the whole run: flips (flaky) passes in a run
 # alone, breaks fails there too. A run alone (CONVEYOR_TEST_RERUN set) runs only the case its list names to fail, and
-# notes it in $STUB/alone; given a second argument, the first run alone writes the Release panel's state and counts, as
-# the snapshot gives them then (a whole snapshot: what the panel reads while the release process runs), in
-# $STUB/counts; the whole run prints "the whole run". release-prep 1.1.0 then runs on O; its output is in $T/$CASE.out
+# notes it in $STUB/alone; given a second argument, the first run alone prints a failed alone.test of one file, then
+# writes the Release panel's state and counts, as the snapshot gives them then (a whole snapshot: what the panel reads
+# while the release process runs), in $STUB/counts, and its rerun's pass, of, case, files and the type of its at in
+# $STUB/rerun; the whole run prints "the whole run". release-prep 1.1.0 then runs on O; its output is in $T/$CASE.out
 # and its exit in rc.
 alsetup() { # <flips | breaks | "flips breaks"> [snap]
   runsetup "$(printf '%s\n' '[ -n "${CONVEYOR_TEST_RERUN:-}" ] || echo "the whole run"' "for c in $1; do" \
     '  if [ -n "${CONVEYOR_TEST_RERUN:-}" ]; then awk -F "\t" -v c="$c" '\''$1 == "fail" && $NF == c { f = 1 } END { exit !f }'\'' "$CONVEYOR_TEST_RERUN" || continue; echo "$c" >> "$STUB/alone"' \
-    "${2:+    [ -s \"\$STUB/counts\" ] || bash $SRC/conveyor.sh snapshot --fresh | jq -c '.suites[] | select(.kind == \"release\") | [.state, .failed, .cases]' > \"\$STUB/counts\"}" '  fi' \
+    "${2:+    if [ ! -s \"\$STUB/counts\" ]; then printf '%s\n' 'TESTRUN files=1' '-- FAIL alone.test'; s=\$(bash $SRC/conveyor.sh snapshot --fresh | jq -c '.suites[] | select(.kind == \"release\")')
+      jq -c '[.state, .failed, .cases]' <<<\"\$s\" > \"\$STUB/counts\"; jq -c '.rerun | [.round, .of, .case, .files, (.at | type)]' <<<\"\$s\" > \"\$STUB/rerun\"; fi}" '  fi' \
     '  if [ "$c" = breaks ] || [ -z "${CONVEYOR_TEST_RERUN:-}" ]; then echo "FAIL [$c]: off"; bad=1; fi' \
     'done; [ -z "${bad:-}" ]')"
   loop release-prep 1.1.0 > "$T/$CASE.out" 2>&1; rc=$?
@@ -51,6 +53,11 @@ t_relalonefail() {
   grep -q "its output is in $w.test" "$T/$CASE.out" && grep -q '^the whole run$' "$w.test" || fail "the failed release does not point to the suite's own output: $(cat "$w.test" 2>&1)"
   [ "$(cat "$STUB/counts" 2>&1)" = '["running",1,["breaks"]]' ] || fail "the snapshot did not show the suite's counts while the case ran alone: $(cat "$STUB/counts" 2>&1)"
   jq -e 'has("counts") | not' "$RUN" > /dev/null || fail "the ended record kept the counts of the runs alone: $(cat "$RUN")"
+  # Bug (#1240): while the failed cases ran again, the record and the Board's release row kept the suite's counts with
+  # no sign of the rerun: which pass, how far it was, when it last moved. The run alone printed a failed alone.test.
+  [ "$(cat "$STUB/rerun" 2>&1)" = '[1,3,"breaks",{"done":1,"of":1,"failed":["alone.test"]},"string"]' ] \
+    || fail "the snapshot's release entry did not show the rerun's pass and progress while breaks ran alone: $(cat "$STUB/rerun" 2>&1)"
+  jq -e '.rerun == null' "$RUN" > /dev/null || fail "the ended record still names a rerun under way: $(cat "$RUN")"
 }
 # Bug (#789, D3): with a flaky case beside one that fails alone, the flaky one must not pass the run, nor be said to block it.
 t_relalonemixed() {
