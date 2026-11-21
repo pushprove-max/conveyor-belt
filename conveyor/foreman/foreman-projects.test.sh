@@ -77,7 +77,7 @@ EOF
 chmod +x "$T/bin/claude"
 }
 
-# A health record, a cards record and a snapshot holding them, with the waiting and blocked issues given.
+# A health record and a snapshot holding it, with the waiting and blocked issues given.
 health() { # <waiting issues> <blocked issues> [<reason>]
   jq -cn --argjson w "$1" --argjson b "$2" --arg r "${3:-it changes the sign-in page}" '{time: "2026-11-11T12:00:00Z", loop: true, gh: true,
     state: "running", reason: null, stuck: [], pushError: null, pushFailingSince: null,
@@ -85,7 +85,6 @@ health() { # <waiting issues> <blocked issues> [<reason>]
     blocked: [$b[] | {card: "c\(.)", issue: ., since: "2026-11-11T10:00:00Z", reason: $r}]}'
 }
 snap() { jq -cn --argjson h "$(health "$@")" '{health: $h, belt: [{card: "x"}], queue: {next: []}}'; }
-CARDS='{"cards":[{"issue":3,"step":"build","result":""}]}'
 # The Board's data file with the 7-day limit at the share used given.
 board() { # <usedPct>
   printf 'window.DASH = %s;\n' "$(jq -cn --argjson u "$1" '{updatedAt: "2026-11-11T12:00:00Z", panels: {health: {error: null, data: {limit: {usedPct: $u, goalPct: 50}}}}}')" > "$T/data.js"
@@ -344,10 +343,10 @@ mine_at() { (cd "$1" && bash -c '. "$0/lib.sh" && mine' "$SRC"); }
 git -C "$L" remote set-url origin https://github.com/example/gamma
 [ "$(mine_at "$L")" = "gamma"$'\t'"$O" ] || fail "an https origin with no .git did not match gamma's record: $(mine_at "$L")"
 # The live summary and the watcher ask the host about the record's main, and the Foreman's folder is on this machine.
-export CONVEYOR_FOREMAN_ASK="echo \"\$CONVEYOR_REPO \$CONVEYOR_MAIN \$CONVEYOR_CMD\" >> $T/asked; case \$CONVEYOR_CMD in health) jq -c .health $T/snap ;; cards) echo '$CARDS' ;; snapshot) cat $T/snap ;; esac"
+export CONVEYOR_FOREMAN_ASK="echo \"\$CONVEYOR_REPO \$CONVEYOR_MAIN \$CONVEYOR_CMD\" >> $T/asked; case \$CONVEYOR_CMD in snapshot) cat $T/snap ;; esac"
 snap '[]' '[7]' > "$T/snap"
 out=$(cd "$L" && bash "$SRC/foreman.sh" live) || fail "the live summary failed: $out"
-grep -qxF "gamma $O health" "$T/asked" && grep -qF 'Conveyor gamma (' <<<"$out" && grep -qF 'gamma blocked: #7' <<<"$out" \
+grep -qxF "gamma $O snapshot" "$T/asked" && grep -qF 'Conveyor gamma (' <<<"$out" && grep -qF 'gamma blocked: #7' <<<"$out" \
   || fail "the live summary did not ask the host about gamma's main: $(cat "$T/asked") $out"
 # The ledger the Foreman writes and answers is the clone's, here. Bug: the live summary looked for it under the
 # record's main, not on this machine, and said the decisions were unavailable.

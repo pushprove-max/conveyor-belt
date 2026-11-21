@@ -67,7 +67,7 @@ EOF
 chmod +x "$T/bin/claude"
 }
 
-# A health record, a cards record and a snapshot holding them, with the waiting and blocked issues given.
+# A health record and a snapshot holding it, with the waiting and blocked issues given.
 health() { # <waiting issues> <blocked issues> [<reason>]
   jq -cn --argjson w "$1" --argjson b "$2" --arg r "${3:-it changes the sign-in page}" '{time: "2026-11-11T12:00:00Z", loop: true, gh: true,
     state: "running", reason: null, stuck: [], pushError: null, pushFailingSince: null,
@@ -75,7 +75,6 @@ health() { # <waiting issues> <blocked issues> [<reason>]
     blocked: [$b[] | {card: "c\(.)", issue: ., since: "2026-11-11T10:00:00Z", reason: $r}]}'
 }
 snap() { jq -cn --argjson h "$(health "$@")" '{health: $h, belt: [{card: "x"}], queue: {next: []}}'; }
-CARDS='{"cards":[{"issue":3,"step":"build","result":""}]}'
 # The Board's data file with the 7-day limit at the share used given.
 board() { # <usedPct>
   printf 'window.DASH = %s;\n' "$(jq -cn --argjson u "$1" '{updatedAt: "2026-11-11T12:00:00Z", panels: {health: {error: null, data: {limit: {usedPct: $u, goalPct: 50}}}}}')" > "$T/data.js"
@@ -114,7 +113,7 @@ grep -qx -- '- my note' "$FD/state.md" || fail "a second setup lost the saved st
 
 CASE=launch
 standin
-export CONVEYOR_FOREMAN_ASK='case $CONVEYOR_CMD in health) jq -cn --argjson w "[$([ "$CONVEYOR_REPO" = alpha ] && echo 12 || echo 19)]" "{time: \"2026-11-11T12:00:00Z\", loop: true, state: \"running\", reason: null, blocked: [], waiting: [\$w[] | {issue: ., since: \"x\"}], before: [{issue: 21, title: \"a new page\", since: \"y\"}], pushError: null}" ;; cards) echo '"'$CARDS'"' ;; esac'
+export CONVEYOR_FOREMAN_ASK='case $CONVEYOR_CMD in snapshot) jq -cn --argjson w "[$([ "$CONVEYOR_REPO" = alpha ] && echo 12 || echo 19)]" "{snapshotAt: \"2026-11-11T12:00:00Z\", belt: [{card: \"c3\", issue: 3, step: \"build\"}], health: {time: \"2026-11-11T12:00:00Z\", loop: true, state: \"running\", reason: null, blocked: [], waiting: [\$w[] | {issue: ., since: \"x\"}], before: [{issue: 21, title: \"a new page\", since: \"y\"}], pushError: null}}" ;; esac'
 out=$(cd "$M" && PATH=$T/bin:$PATH bash "$SRC/../conveyor.sh" foreman 2>&1) || fail "conveyor foreman failed: $out"
 grep -qF "cwd=$M foreman=1 ttl=1h" <<<"$out" || fail "claude did not start in the main checkout in Foreman mode with the 1-hour cache: $out"
 grep -qF '# Live summary' <<<"$out" || fail "the session got no live summary: $out"

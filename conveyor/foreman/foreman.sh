@@ -44,7 +44,7 @@
 #   when no session is marked, or the marked one is gone (running), it claims it and says so in one line; when a live
 #   session holds it, it claims nothing and is told to ask the owner by the picker, as its first act, whether to take
 #   it over ("Take over" runs the claim; "Leave it" leaves it a normal session, not asked again in it).
-# live: the live summary, at most 1500 bytes of whole lines, apart from unavailable lines, which always print: for each of the Foreman's records (mine), its Conveyor health (loop, state, in
+# live: the live summary, at most 1500 bytes of whole lines, apart from unavailable lines, which always print: for each of the Foreman's records (mine), its Conveyor snapshot (one read of it, not health and the cards: its time is on the first line; loop, state, in
 #   flight, blocked, waiting on the owner's yes, after a card or before its build, push), and the open decisions of
 #   each of those records' ledgers (.claude/metrics/decisions.jsonl in its main checkout, where its sessions' decision
 #   hooks write; in this checkout for a record matched by its repository whose main is on another machine: lib.sh
@@ -153,12 +153,12 @@ why() {
 BELT='def one: tostring | gsub("\\s+"; " ") | .[0:160];
   # A card by its issue, a main-red fix card (issue 0) by its name, "Main is red (<commit>)".
   def ref: (.name | strings) // "#\(.issue)";
-  if length == 2 and (.[0] | type == "object" and (.loop | type == "boolean") and ([.blocked, .waiting] | all(type == "array")))
-    and (.[1].cards | type == "array")
-  then . else error("not a health and a cards record") end
-  | .[0] as $h | .[1] as $c
-  | "Conveyor \($repo) (\($h.time)): loop \(if $h.loop then "running" else "not running" end), state \($h.state // "unknown")\(if $h.reason then ": " + ($h.reason | one) else "" end)",
-    "\($repo) in flight: \([$c.cards[] | select(.result == "") | "\(ref) \(.step)"] | if length == 0 then "none" else join(", ") end)",
+  if type == "object" and (.health | type == "object" and (.loop | type == "boolean") and ([.blocked, .waiting] | all(type == "array")))
+    and (.belt | type == "array")
+  then . else error("not a snapshot") end
+  | .health as $h | .belt as $b
+  | "Conveyor \($repo) (snapshot as of \(.snapshotAt // "an unknown time")): loop \(if $h.loop then "running" else "not running" end), state \($h.state // "unknown")\(if $h.reason then ": " + ($h.reason | one) else "" end)",
+    "\($repo) in flight: \([$b[] | select(.landed | not) | "\(ref) \(.step)"] | if length == 0 then "none" else join(", ") end)",
     (if ($h.blocked | length) == 0 then "\($repo) blocked: none" else $h.blocked[] | "\($repo) blocked: \(ref) since \(.since): \(.reason | one)" end),
     (($h.before | arrays | map(objects)) // []) as $before
     | (if ($h.waiting | length) + ($before | length) == 0 then "\($repo) waiting on the owner'"'"'s yes: none"
@@ -172,20 +172,20 @@ OPEN='def one: tostring | gsub("\\s+"; " ") | .[0:160];
 live() {
   local tmp i line used=0 need=0 cutting= cut="[live summary cut at $LIVE_CAP bytes]" lines=() must=() recs repo main rc out led
   tmp=$(mktemp -d) || { echo "# Live summary unavailable: no temp folder"; return 0; }
-  lines+=("# Live summary (built at startup from Conveyor and the decision ledger; never saved)")
+  lines+=("# Live summary (built at startup from Conveyor's snapshot and the decision ledger; never saved)")
   recs=$(mine 2>"$tmp/recs.err") || { must+=("${#lines[@]}"); lines+=("Conveyor: unavailable: $(why 1 "$tmp/recs.err")"); }
   i=0
   while IFS=$'\t' read -r repo main; do
     [ -n "$repo" ] || continue
     i=$((i + 1))
-    ( { ASK_LIMIT=10 ask "$repo" "$main" health && ASK_LIMIT=10 ask "$repo" "$main" cards; } > "$tmp/$i.out" 2> "$tmp/$i.err"; echo $? > "$tmp/$i.rc" ) &
+    ( { ASK_LIMIT=10 ask "$repo" "$main" snapshot; } > "$tmp/$i.out" 2> "$tmp/$i.err"; echo $? > "$tmp/$i.rc" ) &
   done <<<"$recs"
   wait
   i=0
   while IFS=$'\t' read -r repo main; do
     [ -n "$repo" ] || continue
     i=$((i + 1)); rc=$(cat "$tmp/$i.rc")
-    if [ "$rc" = 0 ] && out=$(jq -rs --arg repo "$repo" "$BELT" "$tmp/$i.out" 2>"$tmp/$i.err"); then mapfile -t -O "${#lines[@]}" lines <<<"$out"
+    if [ "$rc" = 0 ] && out=$(jq -r --arg repo "$repo" "$BELT" "$tmp/$i.out" 2>"$tmp/$i.err"); then mapfile -t -O "${#lines[@]}" lines <<<"$out"
     else [ "$rc" != 0 ] || rc=1; must+=("${#lines[@]}"); lines+=("Conveyor $repo: unavailable: $(why "$rc" "$tmp/$i.err")"); fi
   done <<<"$recs"
   while IFS=$'\t' read -r repo main; do
