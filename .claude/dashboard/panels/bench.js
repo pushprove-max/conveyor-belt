@@ -99,15 +99,16 @@
     }
     return 'build';
   }
-  // Where a Conveyor arm's unresolved task first went wrong, read from its card's steps: blocked (never landed), build (no
-  // change to review), test step (a test step failed), fix round (a fix round changed it and it is still wrong), else
-  // review (a review passed a wrong change). null when the result keeps no steps.
+  // Where a Conveyor arm's unresolved task first went wrong, read from its card's steps: test step (a test step failed,
+  // also when the card was blocked after its fix round), blocked (never landed, with no test step failed), build (no
+  // change to review), fix round (a fix round changed it and it is still wrong), else review (a review passed a wrong
+  // change). null when the result keeps no steps.
   function lossOf(c) {
     const steps = list(c && c.steps).filter(obj);
     if (!steps.length) return null;
+    if (steps.some((s) => s.step === 'test' && s.result === 'fail')) return 'test step';
     if (steps.some((s) => s.step === 'blocked')) return 'blocked';
     if (!steps.some((s) => s.step === 'review')) return 'build';
-    if (steps.some((s) => s.step === 'test' && s.result === 'fail')) return 'test step';
     return steps.some((s) => s.step === 'fix') ? 'fix round' : 'review';
   }
   // The hidden tests of a cell: [failToPass passed, of, passToPass passed, of], or null when its grade is not kept.

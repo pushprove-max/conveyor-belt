@@ -69,6 +69,18 @@ test('Scoreboard, 7 arms on 50 tasks: the mockup\'s sections in its order, with 
   assert.deepEqual([act(bp(w), 'cmp-a').value, act(bp(w), 'cmp-b').value], ['arm:conveyor', 'arm:solo']);
 });
 
+// Bug it guards: a card whose test step failed, then failed again after its fix round, is blocked at the end; the loss was
+// counted at Blocked, a later step, not at the Test step where it first went wrong. One blocked task of the study gets that
+// card: Blocked drops from 2 to 1 and Test step rises from 3 to 4. A blocked card with no failed test step stays Blocked.
+test('Scoreboard: a card blocked after its tests failed twice is lost at the test step, not at Blocked', async () => {
+  const set = BH.study(), conv = set.shows[BH.STUDY].tasks.map((t) => t.cells.find((c) => c.arm === 'conveyor')).find((c) => c.steps.some((s) => s.step === 'blocked'));
+  const at = (step, result) => ({ step, result, time: conv.steps[0].time });
+  conv.steps = [at('build', 'ok'), at('review', 'GO'), at('test', 'fail'), at('fix', 'ok'), at('test', 'fail'), { ...at('blocked', 'blocked'), reason: 'the changed tests failed again after their one fix round (exit 1); nothing landed.' }];
+  const w = await opened(set);
+  assert.deepEqual(Array.from(box(w, 'Where Conveyor loses tasks').querySelectorAll('.bench-lrow'), text),
+    ['Build: wrong or no change2', 'Review: passed a wrong change3', 'Fix round: broke it again3', 'Test step: tests wrong4', 'Blocked: never landed1']);
+});
+
 // Bug it guards: two arms a few tasks apart were ranked one above the other, as if 50 tasks could tell them apart. An
 // arm closer to the leader of its tier than sqrt(2n) tasks shares that tier: on 50 tasks the noise is 10, so Conveyor
 // (37) and Claude alone (25), 12 apart, are told apart, and Claude alone and Caveman (22), 3 apart, are a tie.
