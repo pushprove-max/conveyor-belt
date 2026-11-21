@@ -936,144 +936,143 @@ settings are saved:
 ## Benchmarks tab
 
 The Benchmarks tab shows the [SWE-bench Verified](benchmarks.md) runs of the project and their arms. A row of buttons
-at its top opens its pages: **Overview**, **A run**, **Compare**, **Start a run** and **Infographic**. The tab reads the
-runs from the build machine when you open it, and again when a run moves on. Only an admin can start, stop or check
-anything here. The Board refuses these buttons to a member. The answer to each button shows beside that button, and
-stays there until you click it again. The answer of one button does not replace that of another. An answer is about
-one project and one run, pair or selection: it does not show for another.
+at its top opens its seven pages: **Scoreboard**, **Versions**, **Compare**, **Live run**, **Task**, **Task map** and
+**Plan a run**. Each page starts with the question that it answers, then a verdict: one sentence that answers the
+question from the figures, and the reason. The tab reads the runs from the build machine when you open it, and again
+when a run moves on. Only an admin can start, stop, check, archive or delete a run. The Board refuses these buttons to
+a member. The answer to each button shows beside that button, and stays there until you click it again.
 
-Each time you open the tab, it opens on the page of the run that goes. When no run goes, it opens on **Start a run**.
-Both pages have **Latest result** beside their heading, which opens the newest run that ended. While a run goes, the
-other pages have **Watch run** in the row of buttons, which opens it.
+Each time you open the tab, it opens on **Live run** while a run goes. When no run goes, it opens on **Scoreboard**.
 
-**Overview** has four parts:
+A difference between two arms is real only when it is larger than the noise. With n shared tasks, a difference under
+about the square root of 2n tasks can come from chance (see [What the numbers mean](benchmarks.md#what-the-numbers-mean)).
+The pages round the noise up to whole tasks, as `bench swe diff` does. With 50 tasks, the noise is 10 tasks. Each arm
+has the same colour on every page. With fewer than 3 shared tasks, the pages say that nothing can be told yet, and
+show what the runs have. A figure that a result did not keep shows "not kept", never 0. For example, a result kept
+before the harness report was kept has no hidden tests, lint or size. A cost that cannot be priced shows "not priced".
 
-- **Newest run**: the resolved tasks of each arm, side by side, as bars. A dashed band around each bar shows the
-  run-to-run noise for that number of tasks. A difference inside the band is not a difference. With 5 tasks, only a
-  total break shows. Under the bars are the cost, sessions, tokens and minutes of each arm, and notes to read the run
-  with. While a run goes, the part shows a bar of tasks done for each arm, the task now, the sessions so far and
-  **Stop run**.
-  It also says when the last run was stopped by you, stopped at the usage guard, was interrupted, or did not start.
-  A run does not
-  start when an arm failed its preflight, or when the build machine has no Docker or no harness of the release it
-  needs. Before the first run, it says so and links to **Start a run**.
-- **History**: every run, newest first, grouped by task set. Each row shows the date, the number of tasks, the arms
-  and versions, the resolved count of each arm, the sessions, tokens, minutes and cost, and the state. A run that did not
-  start shows why, and the page of that run shows it too. Tick up to 6 runs. A
-  bar at the foot of the screen then offers **Compare**, **Generate infographic** and **Clear**.
-- **Arms**: how many arms are ready, are checking, fail their preflight, are not checked, or are not offered, with the
-  reasons. An arm that is checking shows the step that its check is at.
-- **Drift watch**: folded. Open it to see the [drift watch](benchmarks.md#drift-watch): each figure a card, for the
-  cards before and after the last engine change. Each figure shows Moved when the two means are more than two
-  standard errors apart, and In its usual range when they are not. It shows Not read when a group has no spread for
-  the figure, and Too few cards when a group is too small to mean anything.
+**Scoreboard** reads the results of each arm from the runs that ended. The newest run of an arm sets its results key.
+Each other run of the arm on that key adds the tasks that it has, so a short run after a long one keeps the other
+tasks. The page judges the arms on the tasks that every arm graded (the shared tasks). **Compare**, **Task** and **Task
+map** read the arms in the same way. An archived run is not in it.
 
-**A run** shows one run, the newest or the one you opened. Its first line gives the run ID, its state and its elapsed
-time, setup and grading included. While the run goes, the line also has **Stop run**. Under it are the arm, the task
-and the step that the run is at, the arm and task pairs finished of all that the run plans, the resolved, reused and
-not run counts, and the cost so far. A table gives the same figures for each arm, with the work of the arm now and its
-active time: the time of its work in this run, the task that it is on and a task not run included. A reused result
-adds no time. The elapsed time counts on while the run goes. Before the first task, the run checks the preflight of
-each arm, and this check adds no active time. The active time of an arm counts on only while the arm works on a
-task. The page reads the run again when it moves on, also when only the step changes. When
-a read gets no answer, the page keeps the last update, says so, and offers **Read again**.
+- The verdict: the arm that resolves the most tasks, against Claude alone and against the next arm, judged against the
+  noise. It also gives the cheapest arm for each resolved task, and how many fixes are clean.
+- Four figures: the most tasks resolved, with the change from the version before; the Conveyor arm's cost for each
+  resolved task; its median minutes for each task; and the tasks that no arm resolves.
+- **Leaderboard**: the arms in tiers. An arm is in the same tier as the leader of its tier when the difference is
+  under the noise. Each row shows the resolved tasks, the 95% range of the resolve rate, the clean fixes, the tasks
+  where the patch broke other tests, the cost for each resolved task, the median minutes and how often the arm fired.
+  "From tokens" marks the cost of an agent arm, an estimate from its tokens. Click an arm to compare it with Conveyor.
+- **Value: resolve rate against cost**: each arm's resolve rate, with its 95% range, against its cost for each task.
+  A dashed line joins the arms that no other arm beats on both.
+- **Hidden tests**: for each arm, a bar of its tasks by class: resolved, fixed but broke other tests, partial fix, no
+  fix and no patch. A table gives the FAIL_TO_PASS tests that succeeded, the PASS_TO_PASS tests that broke and the
+  partial fixes.
+- **Patch quality**: for the resolved tasks, the clean fixes, and the share of patches that are lint clean, at most
+  twice the size of the reference fix, change a file that the reference fix does not change (strays), and prove the fix.
+- **Lines of code**: the median code lines, test lines and files of the resolved patches, and their size against the
+  reference fix.
+- **Effort and steadiness**: the tokens for each fix, the sessions for each task, the review findings fixed and the fix
+  rounds of a Conveyor arm, the tasks that reached the time limit, and the share of tasks run twice with the same
+  result.
+- **Where Conveyor loses tasks**: the first step where each task that the Conveyor arm did not resolve went wrong: the
+  build, a review, a fix round, the test step, or a block.
+- **What it agrees on**: the shared tasks by how many arms resolve them.
+- **Next run to make**: the run that answers the biggest open question, with its cost and machine time, and each arm
+  that did not always fire. **Plan this run** opens **Plan a run** with that run set.
+- **Run history**: folded at the foot of the page. Each run, newest first, with what ran, its tasks, its state, its
+  start and its cost. An archived run shows "archived". Tick runs to **Archive**, **Restore** or **Delete** them.
 
-**Stop run** stops the whole run: the work in progress and the tasks that it did not reach yet. Finished results stay.
-After you click it, the page says "Stopping run" with the run ID, and the button stays off. When the build machine has
-ended the run and its containers, the answer says "Run stopped". It says "Run finished before Stop" when the run ended
-first, and "Run interrupted" when the process of the run had already stopped. A Stop names its run, so a late Stop
-never stops a newer run. When the run has ended, its first line shows how it ended, with the answer to **Stop run**
-under it. When the process of a run ended with no end recorded, its first line says "Interrupted" and keeps **Stop
-run**, which records the end of the run and removes its containers. After that, the run still shows "Interrupted" on
-its page and in **History**, not "Stopped".
+**Versions** compares the versions of the Conveyor arm in the order of their releases. A version named by a commit
+comes after the releases. Each version reads its runs as **Scoreboard** reads an arm. The verdict judges the newest
+version against the version before it, on the tasks that both versions ran. With fewer than 3 such tasks, it says
+that nothing can be told yet, and the table says "too few tasks". A chart shows the resolve rate of each
+version with its 95% band, and a dashed line for Claude alone. A table gives each version's tasks and resolved count,
+and its change from the version before on the tasks that both ran: better, worse, or noise. **Changed steps** shows,
+for each version after the first, the steps whose engine files changed since the version before, whether a task
+flipped or not. It shows them after you click **Read the commits**. The **Drift watch** compares the project's own cards before and after the last engine change
+(see [Drift watch](benchmarks.md#drift-watch)). Each figure shows **Moved, better** or **Moved, worse** when the two
+means are more than two standard errors apart, and **In its usual range** when they are not. It shows **Not read** when
+a group has no spread for the figure, and **Too few cards** when a group has fewer than 5 cards. Then the verdict says
+that no figure is judged yet. **Tasks that flipped** lists each task that one of the two newest versions resolved and
+the other did not, with the first step where the two runs went apart. **Read the commits** sends `bench swe diff` for
+each version and the version before it, the newest first: then each task shows the engine commits that changed that
+step. The same command also writes the model's short reading of each flipped task. `bench swe diff` reads the kept
+result of a task. A run with `--again` shows its own result, from another try, even when the outcome is the same. A task
+where the result shown is that run's own, or where the two outcomes differ, shows "not of the result shown (a run
+again)" in place of its commits. With one version only, the page says that no version can be
+compared yet.
 
-Each arm is a column and each task is a row: ✓ resolved, ✗ not resolved, or not run, with the sessions, minutes and
-cost. A task that the run has not finished shows its step, waiting, or interrupted (the task that Stop ended). A task
-not run and an interrupted task show the cost of the work done on them. A reused result says so and adds no cost.
-The foot of the table gives the totals of each arm. Click a task to open it. Each
-arm then shows its patch (its files, and the lines added and removed), its steps and the harness result. The steps of
-a Conveyor arm are its build, each review with its first finding, each fix round, the test step and the block reason.
-Under the table, **Recent log** gives the last events of the run: the time, the arm, the task and the event. The log
-stays after the run ends. **Export figures** downloads the run's figures as one JSON file, with the cost of the run,
-of each arm and of each task. The file has no code, no names and no machine names.
+**Compare** sets any two arms, or a version of the Conveyor arm, against each other on the tasks that both graded. The
+verdict says which one is better, when the difference is past the noise, and else how many tasks would show the
+difference. Four boxes put each task in one place: both resolve, only the first, only the second, or neither. They add
+up to the shared tasks. **The flipped tasks** lists the tasks that only one resolved, with the first step where the two
+runs went apart. **Ask for the readings** fills **Why, in short** with the model's reading of each flipped task, from
+`bench swe diff`. The page marks it as the model's reading, not a fact. When `bench swe diff` read another result of a
+task than the one shown (the result shown is a run with `--again`'s own), the task shows "not of the result shown (a run again)" in place of the
+reading. Click a flipped task to open it on **Task**.
+**Cost and time** shows the cost, the cost for each resolved task, the machine time, the tokens and the sessions of the
+two side by side. Under the page are **Archive** and **Delete** for the runs that the two sides come from.
 
-**Compare** offers the arms of the runs you ticked, or of the run open. Pick A and B, then click **Compare**. The page
-shows the totals of both with their cost, how many tasks flipped each way, and whether the difference is within the noise. Each
-flipped task shows where the two went apart, the facts read from the records, and, beside them, a short reading
-written by one model call from those facts only. No task runs again.
+**Live run** shows the run that goes now. The verdict says whether the run is on time and on budget against its
+estimate, with the tasks done, the time left at this pace, the cost so far and the usage guard. A result that the run
+reuses takes no time and costs nothing: the time left and the estimate count only the tasks that the run runs. A run
+with `--again` reuses no result, so they count each of its tasks. Four figures give the
+same. **Tasks by arm** has a row for each task and a column for each arm: resolved, unresolved, not run, waiting, or
+the step and minutes of the work now. **Score so far** gives each arm's resolved count on the tasks that every arm
+finished, with its 95% range. **Events** gives the last events of the run, newest first. **Stop the run** stops the
+whole run: the work in progress and the tasks that it did not reach yet. Finished results stay. After you click it,
+the button says "Stopping the run" and stays off. When the build machine has ended the run and its containers, the
+answer says "Run stopped". It says "Run finished before Stop" when the run ended first, and "Run interrupted" when the
+process of the run had already stopped. A Stop names its run, so a late Stop never stops a newer run. When no run
+goes, the page shows the last run: how it ended, and each arm's result, sessions, tokens, minutes and cost. A task
+that did not start shows "not started", never unresolved. When the build machine refused the run, the verdict says
+that the run did not start, and why. When the
+process of the last run ended with no end recorded, the page says "interrupted" and keeps **Stop the run**, which
+records the end of the run and removes its containers. **Archive** and **Delete** of the run shown are under it. They
+stay off while the run goes.
 
-**Start a run** sets the number of tasks (1, 5, 20, 50, or any number up to 500), the Conveyor version, the run
-settings and the arms. **Run settings** apply to every arm: the dataset revision, the seed of the task order, and the
-CPUs, memory and time limit of each task's container. Each field shows its default, from `conveyor/bench/swe.json`. A
-blank field takes its default. A value that does not read shows why beside its field, and **Start** stays off until you
-correct it. The preflight command has a fixed time limit of its own, and the official harness always grades.
-You can pick only an arm whose preflight passed. An arm that is not checked yet or that changed has **Check**. An arm
-that failed, or whose last pass expired, has **Check again**. Each runs the arm's preflight on the build machine. While
-the check runs, the arm shows **Checking** and the step that the check is at, and the page reads the arms again every
-few seconds until the check ends. The answer to a check shows inside its arm: sending, the reason when it is refused, or the
-ID of the check once the build machine has recorded it. When the check ends, it says that the check passed, or that it
-failed and why. A check runs a session of its own, which the estimate does not count. The arms' checks are read on
-the default run settings. When you change a run setting, each arm that you picked says so, and the run checks it again
-on your settings before its first task.
+**Task** shows one task across every arm. Open it from **Compare**, **Versions**, **Task map** or **Live run**. The
+verdict gives how many arms resolve the task, and what that says: no arm resolves it (look at the task first), every
+arm does (it tells the arms apart only on cost and time), or some do. With fewer than 3 shared tasks, it says that
+nothing can be told yet, and the difficulty shows "not told yet". A table gives each arm's result, minutes, hidden
+tests and a note: the step where a Conveyor arm went wrong, an arm that did not fire, or a task that reached the time
+limit. **Conveyor's card, step by step** shows the card's steps as a bar: the width of each step is its time. **The
+review, in full** is folded. **This task over time** has a dot for each run of the Conveyor arm on the task, by
+version. The facts give the repository, the difficulty, the size of the reference fix and the number of hidden tests.
+**Open the patch** lists the files of each arm's patch.
 
-The answer to **Start** is the ID of the run once the build machine has recorded it, with **Watch run**, which opens
-that run. The answer stays beside **Start** until you click **Start** again. When the build machine refuses the run,
-the answer is the reason. A run whose tasks all have kept results ends before it answers: the page opens its results,
-and the answer has **Open its results**. The build machine refuses a check or a run that names a saved arm it does not
-have.
+**Task map** shows all the tasks of SWE-bench Verified, grouped by repository, a square for each task. A square is
+coloured by how many arms resolve the task, or by the result of one arm that you pick in **Colour by**. A grey square
+has not run yet. Point at a square to see the task. Click a square to open the task on **Task**.
 
-Before you click **Start**, the page shows a row for each arm that you picked, in the order that the run takes them.
-Each row shows the tasks that the arm already ran on that version and settings, which are reused at no cost, and the
-usual and worst-case sessions, the minutes and the cost of the other tasks. It also shows the usage guard that can
-hold the arm back: reached, not reached, or none for an arm that uses no Claude login. With run settings changed, the
-reused tasks show as "not known", and the estimate counts each task. With no arm picked, the page says "Choose an arm
-to see the estimate." and shows no figures. While an arm that you picked is being checked, or is no longer ready, the
-page names that arm and shows no estimate, and **Start** stays off. **Start** never starts a run without an arm that
-you picked. It sends the number of tasks, each arm that you picked, the version and each run setting that you changed.
+**Plan a run** starts with the question: **Does it work at all?** (5 tasks, the Conveyor arm), **Is one better than
+another?** (50 tasks, Conveyor and Claude alone) or **Which arm gives the most per dollar?** (30 tasks, up to 6 ready
+arms). The question sets the tasks and the arms. You can change both after that. **Arms** gives each arm's state, its
+cost and minutes for each task, and the results kept for it, which the run reuses at no cost. The **Tasks** slider sets
+the number of tasks, and shows the smallest difference that this number can show. **Conveyor version** sets the
+version that every Conveyor arm of the run builds with: main, a released version, or a commit by its full ID. **Run
+settings** (folded) sets the dataset revision, the order seed, and the CPUs, memory and time limit of each task's
+container. A blank field takes its default. With a setting changed, the page cannot tell which results the run reuses,
+and the estimate counts each task. **Before you start** gives a
+verdict on the size for your question, the cost at list prices, the machine time, the usual and worst-case sessions,
+the kept results reused, the usage guard, and the command that the run sends. **Start the run** sends that command.
+Its answer is the ID of the run, with **Watch run**. **Start the run** stays off while a run goes, while an arm that
+you picked is not ready, while the usage guard holds an arm that you picked, and while a run setting or the commit ID
+does not read. **Check the arms first** runs the
+preflight of each arm that you picked and that is not ready. The cost is an estimate: each session costs the mean of
+this project's own priced card sessions, or of those on the arm's model when the arm has a model.
 
-The cost is an estimate at list prices: each session costs the mean of this project's own priced card sessions, or of
-those on the arm's model when the arm has a model. An arm with no priced session of its model shows "–" for cost, and
-the total says "Total cost unknown." and names that arm. An arm that reuses every task costs $0.00. **Start** is off
-while the usage guard holds back an arm you picked.
-
-You can make your own arm on **Start a run**. **New Conveyor arm** opens a name field, a rules picker and five seats:
-Builder, Reviewer, Judge, Fix and Test repair. Each seat shows the CLI, model and effort that will run. A seat starts
-on the project's own seat. Fix and Test repair follow the arm's builder, unless the project sets its own seat for them.
-**Use another model** gives the seat its own CLI, model and effort. You can choose only the models that the project
-allows for that seat on that CLI, and the efforts that the CLI takes. When you change the CLI, the model and effort
-lists change with it. The Judge can follow the project's setting, be off, be on with the project's judge model, or
-use a model that you choose. Its row says which kinds of finding the judge always accepts. The rules picker sets
-**Engine rules** or **Engine and project rules**. **New agent arm** opens Name, CLI, Model, Effort and Method. Method
-**None** runs the CLI alone, in one session. The other methods are the recipes on the build machine for that CLI, each
-with the number of sessions that it takes for a task. A CLI that a benchmark container cannot sign in to is shown but
-cannot be chosen. **Edit a copy** on an arm opens the editor with that arm's choices. When the project does not allow
-a choice of the arm, the copy keeps it and marks it "Not allowed". You cannot save the copy until you choose another.
-
-**Save arm** saves the arm on the build machine as a new revision with an ID of its own. It does not start a session.
-The name must have 1 to 80 characters, with no space at either end. When you save a name again with other choices,
-you get a new revision, and the earlier one does not change. Each revision shows under **Saved arms**, on this visit
-and on later ones. Tick it, or click **Check**, to run its preflight. A check belongs to one revision: when it
-passes, it does not pick a revision that you saved after it. When you untick an arm while its check runs, the check
-continues, but the arm stays unpicked when the check passes.
-
-**Infographic** draws the runs you ticked on a fixed template: the resolved tasks of each arm with the noise band, the
-sessions, tokens and minutes, the number of tasks, the dates, the versions and the model IDs. Code fills it. No model
-writes or picks anything. You can type a title. The notes on how to read the graphic stay under any title.
-**Download SVG** and **Download PNG** save it. A table under it gives the same figures. Each download also saves that
-table beside the picture, as a CSV file with the same name.
+**Archive**, **Restore** and **Delete** are in the run history of **Scoreboard**, on **Live run** and on **Compare**.
+An archived run keeps its records, and it is in no figure, **Compare** or plan. **Delete** asks for a second click,
+which names the runs and says how many results stay because a run that you do not delete shows them. A run that has
+not ended cannot be archived or deleted: stop it first.
 
 The cost of a run, an arm or a task is its [cost at list prices](benchmarks.md#results), as the build machine
-recorded it. It shows in one of four ways:
-
-- A sum, such as "$1.20": every session is priced.
-- "$1.20 estimate": an agent arm's tokens, priced as input tokens at its model's list price, as the agent reports no
-  split by kind.
-- "$1.20 recorded, part unknown": some sessions have no usage that can be priced. While a run goes, the run's line
-  says "Cost for the active session is unknown." when that is the session with no price yet.
-- "unknown": no session is priced. Runs from before costs were recorded show unknown, not $0.
-
-The infographic's table and **Export figures** keep the same difference. The harness result shows resolved or not
-resolved. The counts of FAIL_TO_PASS and PASS_TO_PASS tests are not kept.
+recorded it. A cost marked "estimate" is an agent arm's tokens, priced as input tokens at its model's list price, as
+the agent reports no split by kind. "Not priced" means that a session has no usage that can be priced. Runs from
+before costs were recorded are not priced, never $0.
 
 ## Accounts
 

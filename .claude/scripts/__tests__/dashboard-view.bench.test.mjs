@@ -1,366 +1,248 @@
 // SPDX-License-Identifier: Apache-2.0
-// The Benchmarks tab's Overview (#326, the owner's approved mockup, overview.html): its page row, Newest run (each arm's
-// resolved of n side by side with the noise for n, or the run in progress, or how the last run ended), History (every
-// run newest first, ticked for Compare and the infographic), Arms and the Drift watch, folded; the tab opened while a
-// run goes, on that run's page with Stop run, else on Start a run, each time it is shown, and a run whose process is
-// gone (#646); and each place a cost shows, recorded, partial or unknown (#646).
-// The runs come from GET bench, not the snapshot. Shared setup: dashboard-view.helpers.mjs (BH).
+// The Benchmarks tab's Scoreboard and Versions (#1177, the owner's approved mockup): each page's sections in the
+// mockup's order with its headings and the fixture's figures, in the mockup's Sample view (BH.study(), 7 arms on 50
+// tasks) and its "Your data now" view (BH.few(), 2 runs of 1 task kept before the grade's report); the Scoreboard's
+// tiers by the noise of sqrt(2n) tasks; and the page the tab opens on. The runs come from GET bench, not the snapshot.
+// Shared setup: dashboard-view.helpers.mjs (BH).
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { boot, deliver, next, settle, act, cases, full, iso, T0, BH, tick, tabBtn } from './dashboard-view.helpers.mjs';
+import { boot, settle, act, cases, BH, tabBtn, T0, iso } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
-const { bp, heads, pages, NEW, OLD } = BH;
+const { bp, page, heads, pages, TASKS, OLDS } = BH;
 const text = (el) => el.textContent.replace(/\s+/g, ' ').trim();
-// The Newest run's bars: each arm's name (without its line under it) and its figure.
-const bars = (w) => Array.from(bp(w).querySelectorAll('.bench-newest .bench-bar'), (b) => [b.querySelector('.bench-name').firstChild.textContent, b.querySelector('.bench-num').textContent]);
-
-// Bug it guards: the Benchmarks were a small part of the Tests page, with no history, no figures by arm and no run
-// to open, where the approved plan gave them a tab of their own. The overview shows the newest run per arm with the
-// noise for its n, its figures and its notes, every run in History (read from GET bench, not the snapshot), the arms by
-// state and the drift watch; the page row and the sections are the mockup's.
-test('Overview: the newest run per arm with its noise, every run in History, the arms and the drift watch, as the mockup has them', async () => {
+const q = (w, s) => page(w).querySelector(s);
+const rows = (el) => Array.from(el.querySelectorAll('tbody tr'), (r) => Array.from(r.children, text));
+const stats = (w) => Array.from(page(w).querySelectorAll('.bench-stat'), (s) => Array.from(s.children, text));
+const box = (w, title) => Array.from(page(w).querySelectorAll('.bench-box')).find((b) => b.querySelector('.bench-h') && b.querySelector('.bench-h').textContent === title);
+async function opened(set, p) {
   const w = boot({ tab: 'bench' });
-  BH.open(w);
-  assert.match(bp(w).textContent, /Reading the runs…/, 'the runs are read when the tab is shown');
+  BH.open(w, set);
+  await settle(); await settle();
+  if (p) { BH.go(w, p); await settle(); await settle(); }
+  return w;
+}
+
+// Bug it guards: the tab's overview was a pile of bars and figures that answered no question. The Scoreboard is the
+// mockup's: the question, the verdict on the shared tasks, 4 figures, the leaderboard, the value chart, hidden tests,
+// patch quality, lines of code, effort, where Conveyor loses tasks, what the arms agree on, the next run and the run
+// history folded at its foot, each with the fixture's figures.
+test('Scoreboard, 7 arms on 50 tasks: the mockup\'s sections in its order, with the figures of the study', async () => {
+  const w = await opened(BH.study());
+  assert.equal(pages(w).find(([, c]) => c === 'page')[0], 'Scoreboard', 'with no run going the tab opens on the Scoreboard');
+  assert.deepEqual(pages(w).map(([p]) => p), ['Scoreboard', 'Versions', 'Compare', 'Live run', 'Task', 'Task map', 'Plan a run']);
+  assert.equal(text(q(w, '.bench-answers')), 'This page answers: Which way of building a change resolves the most real issues, at what cost, and how sure can you be?');
+  assert.deepEqual(heads(w), ['Verdict on the 50 shared tasks', 'Leaderboard', 'Value: resolve rate against cost', 'Hidden tests', 'Patch quality', 'Lines of code',
+    'Effort and steadiness', 'Where Conveyor loses tasks', 'What it agrees on', 'Next run to make', 'Run history (7 runs, 1 archived)']);
+  assert.equal(text(q(w, '.bench-vv')), 'Conveyor v1.9.0 resolves 37 of 50, 12 more than Claude alone. That gap is larger than the noise (10 tasks), so it is real.');
+  assert.equal(text(q(w, '.bench-vw')), 'It ties with Conveyor, Codex builds v1.9.0 (35 of 50): the difference is inside the noise. Per resolved task, Claude + Caveman is the cheapest at $0.61.'
+    + ' Conveyor v1.9.0 costs $2.59 per resolved task, 4.2 times as much, for 15 more fixes. 30 of its 37 fixes are clean, against 20 of 25 for Claude alone, and its patches broke other tests in 2 tasks, against 6.');
+  assert.deepEqual(stats(w), [['37/50', 'Best resolved (Conveyor v1.9.0)', '+2 on v1.8.0, inside the noise'], ['$2.59', 'Conveyor: cost per resolved task', 'list prices, all sessions'],
+    ['21 min', 'Conveyor: minutes a task', 'median, this machine'], ['13', 'Tasks no arm resolves', 'See them on the task map']]);
+  const lead = rows(q(w, '.bench-leader'));
+  assert.deepEqual(lead[0], ['1', 'Conveyor v1.9.0 Conveyor', '37/50', '', '30', '2', '$2.59', '21', '100%']);
+  assert.deepEqual(lead[6], ['2tie', 'Claude + Caveman', '22/50', '', '18', '6', '$0.61from tokens', '3', '92%'], 'Caveman did not fire on 4 of 50 tasks');
+  // The value chart: a point an arm, and the line of the arms no other arm beats on both (Superpowers is beaten by Codex alone).
+  assert.equal(box(w, 'Value: resolve rate against cost').querySelectorAll('g.bench-pt').length, 7);
+  assert.equal(box(w, 'Value: resolve rate against cost').querySelector('polyline.bench-front').getAttribute('points').split(' ').length, 6);
+  assert.equal(text(box(w, 'Value: resolve rate against cost').querySelector('.bench-callout')), 'Conveyor v1.9.0 buys its 12 extra fixes at $6.71 each over Claude alone.');
+  assert.deepEqual(rows(box(w, 'Hidden tests'))[0], ['Conveyor v1.9.0', '81 of 94 86%', '4 in 2 tasks', '3']);
+  assert.deepEqual(rows(box(w, 'Patch quality'))[0], ['Conveyor v1.9.0', '30/37', '100%', '100%', '19%', '100%']);
+  assert.deepEqual(rows(box(w, 'Lines of code'))[0], ['Conveyor v1.9.0', '+9 −3', '+14', '2.0', '1.3×']);
+  assert.equal(text(box(w, 'Lines of code').querySelector('.bench-hsub')), 'Medians over each arm\'s resolved tasks. The reference fix of a median task is +7 −3 in 1 file.');
+  assert.deepEqual(rows(box(w, 'Effort and steadiness')).map((r) => r.slice(1)), [['554k', '4.0', '1.0', '1.0', '0', '90%'], ['514k', '4.0', '1.0', '1.0', '0', '88%'],
+    ['153k', '2.0', 'no review', '—', '0', '80%'], ['200k', '1.0', 'no review', '—', '0', '78%'], ['276k', '1.0', 'no review', '—', '2', '74%'], ['96k', '1.0', 'no review', '—', '0', '76%'], ['70k', '2.0', 'no review', '—', '0', '70%']]);
+  assert.deepEqual(Array.from(box(w, 'Where Conveyor loses tasks').querySelectorAll('.bench-lrow'), text),
+    ['Build: wrong or no change2', 'Review: passed a wrong change3', 'Fix round: broke it again3', 'Test step: tests wrong3', 'Blocked: never landed2']);
+  assert.deepEqual(Array.from(box(w, 'What it agrees on').querySelectorAll('.bench-col'), (c) => [c.dataset.arms, c.firstChild.textContent]),
+    [['0', '13'], ['1', '2'], ['2', '4'], ['3', '1'], ['4', '1'], ['5', '4'], ['6', '3'], ['7', '22']]);
+  assert.deepEqual(Array.from(box(w, 'Next run to make').querySelectorAll('li'), text), [
+    // The noise of 150 tasks as the engine says it (SWE_NOISED): sqrt(300) = 17.3, rounded up to 18.
+    'Conveyor v1.9.0 against Conveyor, Codex builds v1.9.0: tied at 50 tasks. 100 more tasks (150 in all) show a difference of 18 tasks, 12%. About $330, 65.0 h of machine time. open question',
+    'Claude + Caveman fired in only 92% of tasks. Check its arm before the next run. arm problem', 'Tasks 51 to 100 have no result yet for any arm.']);
+  const hist = q(w, 'details.bench-history');
+  assert.equal(hist.open, false, 'the run history is folded');
+  assert.deepEqual(Array.from(hist.querySelectorAll('tbody tr'), (r) => r.dataset.run), [BH.STUDY, ...OLDS.map(([, id]) => id), BH.ARCHIVED]);
+  // Clicking an arm opens Compare: the Conveyor arm against it.
+  page(w).querySelector('.bench-leader tr[data-cmp="solo"]').click();
   await settle();
-  assert.deepEqual(w.benchAsks, ['bench?repo=sample']);
-  assert.deepEqual(pages(w), [['Overview', 'page'], ['A run', null], ['Compare', null], ['Start a run', null], ['Infographic', null]]);
-  assert.deepEqual(heads(w), ['Newest run', 'History', 'Arms', 'Drift watch']);
-  assert.equal(text(bp(w).querySelector('.bench-headline')), 'Conveyor 1.5.0 resolved 4 of 5; Claude alone (claude-opus-5-5) 2 of 5. With 5 tasks a difference under 4 tasks is within the noise.'
-    + ' Conveyor 1.5.0 against Claude alone (claude-opus-5-5) (4 against 2) is not a difference.');
-  assert.deepEqual(bars(w), [['Conveyor 1.5.0', '4 of 5'], ['Claude alone (claude-opus-5-5)', '2 of 5'], ['Codex alone (gpt-6.2-sol)', '2 of 5']]);
-  const noise = bp(w).querySelector('.bench-newest .bench-noise');
-  assert.deepEqual([noise.style.left, noise.style.width, noise.title], ['0%', '100%', 'noise for n=5'], 'the band is 4 tasks either side of 4 of 5, cut at 0 and 5');
-  assert.deepEqual(Array.from(bp(w).querySelector('.bench-figures .figure').children, text), ['unknown', 'Conveyor 1.5.0: 13 sessions · 15.3M tokens · 1 h 42 min', 'cost at list prices']);
-  assert.match(text(bp(w).querySelector('.bench-care')), /1 task not run for Codex alone \(gpt-6\.2-sol\): .*\(not counted as failed\)/);
-  const rows = Array.from(bp(w).querySelectorAll('.bench-history tr[data-run]'), (r) => Array.from(r.children).slice(1).map(text));
-  assert.deepEqual(rows, [[NEW, '10:00 AM', '5', 'Conveyor 1.5.0 · Claude alone (claude-opus-5-5) · Codex alone (gpt-6.2-sol)', '4 · 2 · 2', '22', '24.4M', '2 h 50 min', 'unknown', 'Done 1 task not run'],
-    [OLD, '11/08/2026, 11:00 AM', '20', 'Conveyor 1.4.0', '8', '30', '40.0M', '4 h 20 min', 'unknown', 'Stopped at the usage guard']], 'every run, newest first');
-  assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-arms tr'), (r) => [text(r.children[0]), ...Array.from(r.children[1].children, text)]),
-    [['Ready', '3'], ['Checking', '0'], ['Preflight failing', '1', 'Claude with Superpowers: it did not fire: its output shows no use of its method'], ['Not checked', '1', 'Claude with Chisle'],
-      ['Not offered', '1', 'Stub off: it needs an API key']]);
-  // Ticking runs shows the bar at the foot of the screen with Compare, Generate infographic, Archive and Delete (#1053).
-  for (const id of [NEW, OLD]) { const b = act(bp(w), `pick-${id}`); b.checked = true; b.dispatchEvent(new w.Event('change')); }
-  assert.deepEqual(Array.from(bp(w).querySelector('.bench-selbar').children, text),
-    ['2 runs selected', 'Up to 6. Runs of different n get their own panel on the infographic.', 'Compare', 'Generate infographic', 'Archive', 'Delete', 'Clear']);
-  act(bp(w), 'sel-clear').click();
-  assert.equal(bp(w).querySelector('.bench-selbar'), null);
+  assert.equal(pages(w).find(([, c]) => c === 'page')[0], 'Compare');
+  assert.deepEqual([act(bp(w), 'cmp-a').value, act(bp(w), 'cmp-b').value], ['arm:conveyor', 'arm:solo']);
 });
 
-// Bug it guards (#540): arms with no shared grade were set against the noise. In a one-task run where the first arm
-// resolved the task and the second did not run it, the headline said 1 against 0 was past the noise, and History
-// read its counts the same way. A count of resolved is set against the noise only when every arm was graded on all n.
-test('Overview: arms not graded on the same tasks are not compared against the noise, in Newest run or History', async () => {
-  const w = boot({ tab: 'bench' });
-  const [c, s] = BH.hist().runs[0].cols, one = { ...BH.hist().runs[0], n: 1, cols: [{ ...c, done: 1, resolved: 1, notRun: 0 }, { ...s, done: 1, resolved: 0, notRun: 1 }] };
-  const solo = { ...one, id: 'r20261109T140000-3', cols: [{ ...s, done: 1, resolved: 0, notRun: 1 }, { ...c, done: 1, resolved: 0, notRun: 0 }] };
-  BH.open(w, { body: () => ({ ...BH.hist(), runs: [one, solo] }) });
-  await settle();
-  assert.equal(text(bp(w).querySelector('.bench-headline')), 'Conveyor 1.5.0 resolved 1 of 1; Claude alone (claude-opus-5-5) 0 of 1. With 1 task only a total break shows: a difference under 1 is within the noise.'
-    + ' Conveyor 1.5.0 against Claude alone (claude-opus-5-5) (1 against 0) is not compared: not every task was graded for both.');
-  // The second run's spread is 0, under its noise of 1: without the check History called it within the noise.
-  assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-history tr[data-run]'), (r) => text(r.lastElementChild)), ['Done 1 task not run', 'Done 1 task not run']);
+// Bug it guards: two arms a few tasks apart were ranked one above the other, as if 50 tasks could tell them apart. An
+// arm closer to the leader of its tier than sqrt(2n) tasks shares that tier: on 50 tasks the noise is 10, so Conveyor
+// (37) and Claude alone (25), 12 apart, are told apart, and Claude alone and Caveman (22), 3 apart, are a tie.
+test('Scoreboard: the tiers and the verdict follow the sqrt(2n) noise rule: 12 tasks apart on 50 is told apart, 3 apart is a tie', async () => {
+  const w = await opened(BH.study());
+  const lead = rows(q(w, '.bench-leader')).map(([tier, arm, k]) => [tier, arm, k]);
+  assert.deepEqual(lead, [['1', 'Conveyor v1.9.0 Conveyor', '37/50'], ['1tie', 'Conveyor, Codex builds v1.9.0 Conveyor', '35/50'], ['1tie', 'Claude, then a review', '31/50'], ['1tie', 'Codex alone', '30/50'],
+    ['1tie', 'Claude + Superpowers', '29/50'], ['2', 'Claude alone', '25/50'], ['2tie', 'Claude + Caveman', '22/50']]);
+  assert.match(text(q(w, '.bench-vv')), /12 more than Claude alone\. That gap is larger than the noise \(10 tasks\), so it is real\.$/);
+  assert.ok(q(w, '.bench-verdict').classList.contains('bench-verdict-ok'));
+  // The same study with Claude alone resolving 9 tasks more (34): 3 under Conveyor, so it shares Conveyor's tier and the
+  // verdict says the gap is not proven; Caveman, 15 under, is the next tier.
+  const set = BH.study();
+  set.shows[BH.STUDY].tasks.forEach((t, i) => { if (i >= 25 && i < 34) Object.assign(t.cells[5], { result: 'resolved', resolved: true, class: 'resolved' }); });
+  const v = await opened(set);
+  assert.equal(text(page(v).querySelector('.bench-vv')), 'Conveyor v1.9.0 resolves 37 of 50, 3 more than Claude alone. That gap is inside the noise (10 tasks): not proven yet.');
+  assert.ok(page(v).querySelector('.bench-verdict').classList.contains('bench-verdict-quiet'));
+  assert.deepEqual(rows(page(v).querySelector('.bench-leader')).map(([tier, arm]) => [tier, arm]), [['1', 'Conveyor v1.9.0 Conveyor'], ['1tie', 'Conveyor, Codex builds v1.9.0 Conveyor'],
+    ['1tie', 'Claude alone'], ['1tie', 'Claude, then a review'], ['1tie', 'Codex alone'], ['1tie', 'Claude + Superpowers'], ['2', 'Claude + Caveman']]);
 });
 
-// Bug it guards: a run in progress showed one bar for all arms, so an arm far behind the others could not be seen;
-// Stop must stop it. Each arm gets its bar of tasks done, with the task now and the sessions so far.
-test('Overview: a run in progress shows a bar of tasks done per arm, the task now, the sessions so far, and Stop', async () => {
-  const w = boot({ tab: 'bench' });
-  const h = BH.hist(), id = 'r20261109T160000-12';
-  h.runs.unshift({ ...h.runs[0], id, state: 'running', ended: null, current: 'pydata__xarray-4094', cols: h.runs[0].cols.slice(0, 2).map((c, i) => ({ ...c, sessions: [6, 1][i] })) });
-  BH.open(w, { body: () => h });
-  const d = full();
-  d.panels.bench.data.bench.live = { id, state: 'running', pid: 1, arms: ['conveyor', 'solo'], n: 10, done: 3, resolved: 2, current: 'pydata__xarray-4094',
-    cols: h.runs[0].cols.map(({ arm, key, label, kind, engine, version, model }) => ({ arm, key, label, kind, engine, version, model })),
-    tasks: [{ id: 'a', arm: 'conveyor', result: 'resolved' }, { id: 'a', arm: 'solo', result: 'resolved' }, { id: 'b', arm: 'conveyor', result: 'unresolved' }] };
-  next(w, d);
-  await settle();
-  const box = bp(w).querySelector('.bench-running');
-  assert.match(text(box), /^Running 2 arms on 5 tasks · now pydata__xarray-4094 Stop run/);
-  assert.deepEqual(Array.from(box.querySelectorAll('.bench-bar'), (b) => [b.querySelector('.bench-name').textContent, b.querySelector('.bench-num').textContent]),
-    [['Conveyor 1.5.0', '2 of 5'], ['Claude alone (claude-opus-5-5)', '1 of 5']]);
-  assert.equal(text(box.querySelector('.board-from')), 'tasks done by each arm · 7 sessions so far, usual for the run 18, worst case 45');
-  // Bug it guards (#646): Stop sent no run ID, so a Stop that came late stopped the run after the one shown.
-  w.reply = BH.reply(`conveyor: run ${id} is stopped. Its finished tasks are kept.`);
-  act(bp(w), 'stop-run').click();
-  assert.deepEqual(w.posts.splice(0).map((p) => p.body), [{ action: 'bench', args: ['stop', id], repo: 'sample' }]);
-  await settle();
-  const said = () => { const p = bp(w).querySelector('.bench-running .bench-said'); return p && text(p); };
-  assert.equal(said(), 'Run stopped. Finished results are kept.');
-  // Bug it guards (#632): a Stop's answer was kept by action only, so the next run's Stop read "Stop sent" unclicked.
-  const d2 = full();
-  d2.panels.bench.data.bench.live = { ...d.panels.bench.data.bench.live, id: 'r20261109T170000-13' };
-  next(w, d2);
-  await settle();
-  assert.match(text(bp(w).querySelector('.bench-running')), /^Running /);
-  assert.equal(said(), null, 'no answer about the last run beside the new run\'s Stop');
+// Bug it guards: with 2 runs of 1 task, the tab drew the bars and figures as if they said something, and showed a
+// figure the result never kept as 0. The Scoreboard says nothing can be told yet, shows what the runs have, and each
+// figure not kept says so (a patch not kept: its lines; the grade's report: hidden tests, lint, proves the fix).
+test('Scoreboard, 2 runs of 1 task: nothing can be told yet, and what the results did not keep says not kept', async () => {
+  const set = BH.few();
+  set.shows[BH.FEW1].tasks[0].cells[1].patch = null;
+  const w = await opened(set);
+  assert.deepEqual(heads(w), ['Verdict on the tasks you have', 'Leaderboard', 'Hidden tests and patch quality', 'Next run to make', 'Run history (2 runs, 0 archived)']);
+  assert.ok(q(w, '.bench-verdict').classList.contains('bench-verdict-quiet'));
+  assert.equal(text(q(w, '.bench-vv')), 'Nothing can be told yet. Every arm resolved the one task it ran.');
+  assert.equal(text(q(w, '.bench-vw')), `Your 2 runs each ran 1 task, ${BH.FEW_TASK}. With 1 task, only a total break shows: the 95% range of an arm that resolves it is 21% to 100%. To tell Conveyor from Claude alone, run 50 tasks or more.`);
+  assert.deepEqual(stats(w), [['2', 'Runs', 'both 1 task'], ['1 of 500', 'Tasks with a result', '0.2% of the set'], ['$0.49', 'Conveyor: cost of its task', '3 sessions, 77k tokens'],
+    ['4 of 15', 'Arms checked and ready', '10 never checked']]);
+  const [lead] = page(w).querySelectorAll('.bench-t');
+  assert.deepEqual(rows(lead).map((r) => [r[0], r[1], r[3], r[4], r[5]]), [['Conveyor, Codex builds v1.7.0', '1/1', '$0.50', '81k', '3.2'], ['Claude + Ponytail', '1/1', 'not priced', '64k', '0.9'],
+    ['Claude, then a review', '1/1', 'not priced', '13k', '0.8'], ['Claude alone', '1/1', 'not priced', '2k', '0.5'], ['Conveyor v1.7.0', '1/1', '$0.49', '77k', '2.9']]);
+  // Each arm its own colour whatever its place (review E12): the mockup's Claude + Ponytail is series 5 and Claude alone
+  // series 4, on the Scoreboard and on Plan a run alike; by place they took 3 and 2.
+  const dots = (el) => Object.fromEntries(Array.from(el.querySelectorAll('tbody tr'), (r) => [text(r).split(/\d/)[0], r.querySelector('.bench-dot').className]));
+  assert.deepEqual([dots(lead)['Claude + Ponytail'], dots(lead)['Claude alone']], ['bench-dot bench-s5', 'bench-dot bench-s4']);
+  BH.go(w, 'plan');
+  assert.equal(page(w).querySelector('.bench-planarms tr[data-arm="solo"] .bench-dot').className, 'bench-dot bench-s4');
+  BH.go(w, 'score');
+  assert.deepEqual(rows(page(w).querySelectorAll('.bench-t')[1]), [['Conveyor, Codex builds v1.7.0', '+1 −1', '+7', '2'], ['Claude + Ponytail', 'not kept', 'not kept', 'not kept'], ['Claude, then a review', '+1 −1', 'none', '1'],
+    ['Claude alone', '+1 −1', 'none', '1'], ['Conveyor v1.7.0', '+1 −1', '+7', '2']], 'the lines come from the patches kept; a patch not kept is not kept, never 0');
+  assert.match(text(q(w, '.bench-callout-warn')), /these results keep resolved yes or no and the patch, not the harness's report\. Their hidden tests, lint clean and proves the fix are not kept\./);
+  assert.deepEqual(Array.from(box(w, 'Next run to make').querySelectorAll('li'), text), ['Is Conveyor better than Claude alone? 50 tasks, 2 arms: about $112 and 20.0 h of machine time. Shows a 10-task difference.',
+    'Does v1.7.0 work at all? 5 tasks, Conveyor only: about $9.60 and 1.8 h of machine time.', '10 arms were never checked. A check costs 1 small task each.']);
 });
 
-// Bug it guards: how the last run ended was a word in a line, so a run stopped at the usage guard read like one the
-// owner stopped, and a refused run did not say which arm's preflight failed. Each state is the mockup's; the history
-// is read again when the run in progress moves on.
-test('Overview: nothing yet, stopped at the usage guard, an arm\'s preflight failing and stopped by you each say what happened', async () => {
-  const w = boot({ tab: 'bench' });
-  let runs = [];
-  BH.open(w, { body: () => ({ ...BH.hist(), runs }) });
+// Bug it guards: nothing told whether a new engine version made Conveyor better or worse. Versions has the mockup's
+// verdict on the newest version against the one before, the resolve rate by version with its band and the Claude alone
+// line, the table with each change judged against the noise, the drift watch and the tasks that flipped, whose commits
+// are read from `bench swe diff --json` on request.
+test('Versions, 6 versions of the Conveyor arm: the verdict, the trend, the table, the drift watch and the flipped tasks with their commits', async () => {
+  const set = BH.study();
+  // v1.9.0's result of TASKS[36] is one a run with --again kept apart (show's again): the diff reads only the kept one.
+  set.shows[BH.STUDY].tasks[36].cells.find((c) => c.arm === 'conveyor').again = BH.STUDY;
+  const w = await opened(set, 'versions');
+  assert.equal(text(q(w, '.bench-answers')), 'This page answers: Did a change to the engine make Conveyor better or worse? Two sources: benchmark runs of each version, and the cards the belt builds anyway (the drift watch, at no cost).');
+  assert.deepEqual(heads(w), ['v1.9.0 against v1.8.0', 'Resolve rate by engine version', 'Drift watch: the belt\'s own cards', 'Tasks that flipped from v1.8.0 to v1.9.0']);
+  assert.equal(text(q(w, '.bench-vv')), 'No regression. v1.9.0 resolves 37 of 50, 2 more than v1.8.0: inside the noise of 10 tasks.');
+  assert.equal(text(q(w, '.bench-vw')), 'On the belt, cards on engine 9999999: minutes waited a card moved better (4 min against 12 min), past the usual range. The other figures stayed in their usual range.');
+  const trend = q(w, 'svg.bench-trend');
+  assert.deepEqual(Array.from(trend.querySelectorAll('text'), (t) => t.textContent).filter((t) => /^v|Claude/.test(t)), ['v1.4.0', 'v1.5.0', 'v1.6.0', 'v1.7.0', 'v1.8.0', 'v1.9.0', 'Claude alone']);
+  assert.equal(trend.querySelectorAll('circle.bench-vdot').length, 6);
+  // Each change is judged on the tasks both versions ran (review E3): v1.4.0 ran the first 20, which v1.5.0 resolves all
+  // of, against 12: 8 tasks of 20, past the noise of 7. On their rates alone (62% against 60%) it read +2 pts, noise.
+  const table = () => rows(q(w, '.bench-versions')).map((r) => [r[0], r[2], r[3], r[4], r[5]]);
+  assert.deepEqual(table(), [['v1.4.0', '20', '12', 'first', '—'], ['v1.5.0', '50', '31', '+40 pts, better', 'not read'],
+    ['v1.6.0', '50', '29', '-4 pts, noise', 'not read'], ['v1.7.0', '50', '34', '+10 pts, noise', 'not read'], ['v1.8.0', '50', '35', '+2 pts, noise', 'not read'], ['v1.9.0', '50', '37', '+4 pts, noise', 'not read']]);
+  assert.deepEqual(Array.from(page(w).querySelectorAll('.bench-drow'), (r) => [r.dataset.figure, text(r.querySelector('.chip'))]),
+    [['landed', 'In its usual range'], ['tokens', 'In its usual range'], ['minutes', 'In its usual range'], ['reviews', 'In its usual range'], ['fixes', 'In its usual range'], ['waits', 'Moved, better']]);
+  const flips = () => rows(q(w, '.bench-flips'));
+  assert.deepEqual(flips(), [[TASKS[34], 'now resolved', 'review', 'not read'], [TASKS[35], 'now resolved', 'review', 'not read'], [TASKS[36], 'now resolved', 'review', 'not read'],
+    [TASKS[37], 'now unresolved', 'review', 'not read']]);
+  // Read the commits reads the diff of each version against the one before it, the newest first, one at a time (review
+  // E5: the rows before the newest had no changed steps), each its own answer. The diff of TASKS[35] read v1.9.0
+  // unresolved, and the one of TASKS[36] read the same outcomes as shown but v1.9.0's shown result is an --again run's,
+  // another trial (E4): the commits of neither are shown. Changed steps are the diff's steps, a task flipped or not:
+  // v1.7.0 to v1.8.0 flipped no task, and its test step changed (E5); a diff that could not map the files says not known.
+  const key = (v) => `conveyor-${v[3].repeat(40)}`, ans = [{ flipped: [{ task: TASKS[34], apart: 'review', a: { resolved: false }, b: { resolved: true }, changes: [{ commit: 'abc1234', title: 'the review reads the test step' }] },
+    { task: TASKS[35], apart: 'review', a: { resolved: false }, b: { resolved: false }, changes: [{ commit: 'def5678', title: 'another result' }] },
+    { task: TASKS[36], apart: 'fix', a: { resolved: false }, b: { resolved: true }, changes: [{ commit: 'fed9876', title: 'the kept trial' }] }, { task: TASKS[37], apart: 'review', a: { resolved: true }, b: { resolved: false }, changes: [] }],
+  steps: ['review'] }, { flipped: [], steps: ['test'] }, { flipped: [], steps: [] }, { flipped: [], steps: null }, { flipped: [], steps: ['build', 'review'] }];
+  w.reply = { ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(ans.shift())) };
+  act(bp(w), 'read-commits').click();
+  for (let i = 0; i < 30; i += 1) await settle();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['8', '9'], ['7', '8'], ['6', '7'], ['5', '6'], ['4', '5']].map(([a, b]) => ['diff', key(`v1.${a}`), key(`v1.${b}`), '--json']),
+    'the two versions\' results keys of each pair');
+  assert.deepEqual(flips().map((r) => r[3]), ['abc1234 the review reads the test step', 'not of the result shown (a run again)', 'not of the result shown (a run again)', 'none']);
+  assert.deepEqual(table().map((r) => r[4]), ['—', 'build, review', 'not known', 'none', 'test', 'review'], 'the steps whose files changed, once read, for each version after the first');
+  page(w).querySelector(`.bench-flips tr[data-task="${TASKS[37]}"]`).click();
   await settle();
-  assert.equal(text(bp(w).querySelector('.bench-newest .bench-empty')), 'No benchmark has run. Start one with 1 task to check the arms work, or 20 for a first reading.');
-  const run = (state, why) => ({ ...BH.hist().runs[0], state, why, cols: BH.hist().runs[0].cols.slice(0, 2).map((c, i) => ({ ...c, done: [5, 3][i] })) });
-  const ended = async (state, why) => {
-    runs = [run(state, why)];
-    const d = full();
-    d.panels.bench.data.bench.live = { id: NEW, state, n: 10, done: 8, tasks: [] };
-    next(w, d);
-    await settle();
-    return text(bp(w).querySelector('.bench-ended'));
-  };
-  assert.equal(await ended('guard'), 'Stopped at the usage guard Claude alone (claude-opus-5-5) did 3 of 5 tasks. Start again later: the rest runs, the done tasks are reused.');
-  assert.equal(await ended('refused', 'the arm superpowers cannot run: its preflight failed: it did not fire on the trivial task'),
-    'superpowers: preflight failed it did not fire on the trivial task. The arm cannot be picked until its preflight succeeds. See arms');
-  assert.equal(await ended('stopped'), 'Stopped by you 3 of 5 tasks done for every arm. The finished tasks are kept and reused.');
-  // Bug (#633): a run the build machine refused (no Docker) said its arm could not be picked until a preflight passed.
-  assert.equal(await ended('refused', 'Docker did not answer on the build machine. Install or start Docker, check that `docker info` works, then check again.'),
-    'Did not start Docker did not answer on the build machine. Install or start Docker, check that `docker info` works, then check again. See arms');
-  assert.equal(w.benchAsks.length, 5, 'read again each time the run moved on');
+  assert.equal(text(q(w, '.bench-vk')), `matplotlib · ${TASKS[37]}`, 'a flipped task opens the Task page');
 });
 
-// Bug it guards (#237, moved from the Tests page): the drift watch was a line of figures, unfolded; a group of 2 cards
-// read as if it meant something. It is folded under its summary, one row a figure, and a small group is called small.
-test('Overview: the drift watch is folded, one row a figure, and a group of 2 cards is called too small', () => {
-  const w = boot({ tab: 'bench' });
-  const g = (engine, cards, x) => ({ engine, cards, landed: cards, blocked: 0, tokens: x, minutes: 14, reviews: 1, fixes: 0.2, waits: null });
-  const d = full();
-  d.panels.bench.data.drift = { before: g('aaaaaaaa1111', 5, 1320), after: g('bbbbbbbb2222', 2, 3000), small: ['after'] };
-  w.benchBody = () => BH.hist();
-  deliver(w, d);
-  act(bp(w), 'page-overview').click();
-  const box = bp(w).querySelector('.bench-drift details');
-  assert.equal(box.open, false, 'folded');
-  assert.equal(box.querySelector('summary').textContent, 'Engine aaaaaaa → bbbbbbb · 5 cards before, 2 since');
-  assert.deepEqual(Array.from(box.querySelectorAll('tr'), (r) => Array.from(r.children, text)), [['Figure, a card', 'Before', 'Since', ''], ['Tokens', '1320', '3000', 'Too few cards'],
-    ['Minutes', '14', '14', 'Too few cards'], ['Reviews to land', '1', '1', 'Too few cards'], ['Fix rounds', '0.2', '0.2', 'Too few cards'], ['Blocked', '0', '0', 'Too few cards'],
-    ['Minutes waited', '-', '-', 'Too few cards']]);
-  assert.deepEqual(Array.from(box.querySelectorAll('.warn-note'), (p) => p.textContent), ['The after group holds 2 cards: too small to mean anything (fewer than 5 cards).']);
-  // Bug it guards (#326): the mockup's status column was left out, so a figure that moved read the same as one in
-  // its usual range. A figure moved when its means are more than two standard errors apart (minutes: 9 apart, 2.8 a
-  // standard error); with no spread read (minutes waited before), it says so.
-  const sp = (tokens, minutes, reviews, fixes, waits) => ({ tokens, minutes, reviews, fixes, waits });
-  d.panels.bench.data.drift = {
-    before: { engine: 'aaaaaaaa1111', cards: 20, landed: 18, blocked: 2, tokens: 1320, minutes: 31, reviews: 1.6, fixes: 0.7, waits: 6, spread: sp(400, 8, 0.5, 0.5, null) },
-    after: { engine: 'bbbbbbbb2222', cards: 18, landed: 16, blocked: 2, tokens: 1250, minutes: 22, reviews: 1.5, fixes: 0.6, waits: 5, spread: sp(380, 9, 0.6, 0.5, 3) }, small: [] };
-  next(w, d);
-  const box2 = bp(w).querySelector('.bench-drift details');
-  assert.equal(box2.querySelector('summary').textContent, 'Engine aaaaaaa → bbbbbbb · 20 cards before, 18 since · 1 figure moved');
-  assert.deepEqual(Array.from(box2.querySelectorAll('tr'), (r) => [text(r.children[0]), text(r.children[3])]).slice(1), [['Tokens', 'In its usual range'], ['Minutes', 'Moved'],
-    ['Reviews to land', 'In its usual range'], ['Fix rounds', 'In its usual range'], ['Blocked', 'In its usual range'], ['Minutes waited', 'Not read']]);
+// Bug it guards: with one version run, the page drew a trend of one point and a drift watch that never ran as if it
+// meant something. It says no version can be compared yet, how to run the drift watch, and what the page will show.
+test('Versions, 2 runs of 1 task: no version can be compared yet, the drift watch has not run, and what the page will show', async () => {
+  const w = await opened(BH.few(), 'versions');
+  assert.deepEqual(heads(w), ['Versions with results', 'What this page will show']);
+  assert.equal(text(q(w, '.bench-vv')), 'Only v1.7.0 has a result, on 1 task. No version can be compared yet.');
+  assert.equal(text(q(w, '.bench-vw')), 'The drift watch needs no benchmark run: it reads the cards your belt builds. Today it has not run. Run conveyor.sh bench drift on the build machine.');
+  assert.equal(page(w).querySelectorAll('.bench-list li').length, 3);
 });
 
-// Bugs it guards (#646): the run in progress was a line on the Overview: opening the tab showed no step and no figures
-// so far, its page had no Stop, and Stop named no run. The tab opens on the run going. Its first line has its state,
-// its time and Stop run; a step change with the same done count shows; a read with no answer keeps the last update;
-// Stop says Stopping and stays off until the build machine answers; the page then says how the run ended.
-test('A run going: the tab opens on it, its step moves with the same done count, a lost read keeps it, Stop run ends it from its first line', async () => {
-  const w = boot({ tab: 'bench' });
-  const id = 'r20261109T164200-12', [t1, t2, t3, ...rest] = BH.TASKS, [C, S] = BH.hist().runs[0].cols;
-  let phase = 'Building', state = 'running', lost = false, acost = { usd: null, state: 'unknown' }, atask = t3, rcost = { usd: 2, state: 'partial' };
-  const going = () => state === 'running', usd = (v, s = 'known') => ({ usd: v, state: s });
-  const c = (arm, result, o = {}) => ({ arm, result, reused: false, state: result ? 'finished' : going() ? 'waiting' : 'not reached', sessions: 1, minutes: 8, ...o });
-  const show = () => ({
-    run: { id, state, started: iso(T0 - 1080000), ended: going() ? null : iso(T0), updated: iso(T0 - 60000), n: 5, cost: rcost,
-      active: going() ? { arm: 'conveyor', task: atask, phase, since: iso(T0 - 120000), start: iso(T0 - 300000), ...(acost ? { cost: acost } : {}) } : null,
-      cols: [{ ...C, done: 2, resolved: 2, notRun: 0, cost: usd(1.2, 'partial'), wall: 8 }, { ...S, done: 2, resolved: 1, notRun: 0, cost: usd(0.8), wall: 16 }] },
-    tasks: [{ id: t1, cells: [c('conveyor', 'resolved', { reused: true, cost: usd(3) }), c('solo', 'resolved', { cost: usd(0.4) })] },
-      { id: t2, cells: [c('conveyor', 'resolved', { cost: usd(1.2) }), c('solo', 'unresolved', { cost: usd(0.4) })] },
-      { id: t3, cells: [going() ? { arm: 'conveyor', result: null, reused: false, state: 'active', phase } : { arm: 'conveyor', result: null, reused: false, state: 'interrupted', cost: usd(0.4, 'partial') }, c('solo', null)] },
-      ...rest.map((t) => ({ id: t, cells: [c('conveyor', null), c('solo', null)] }))],
-    tail: [{ at: iso(T0 - 1080000), arm: null, task: null, event: 'Run started' }, { at: iso(T0 - 900000), arm: 'conveyor', task: t1, event: 'Reused: Resolved' },
-      { at: iso(T0 - 120000), arm: 'conveyor', task: t3, event: phase }] });
-  w.benchBody = (url) => (!/&run=/.test(url) ? BH.hist() : lost ? null : show());
-  const snap = (seq) => { const d = full(); d.panels.bench.data.bench.live = { id, state, pid: 1, arms: ['conveyor', 'solo'], n: 10, done: 4, resolved: 3, seq, started: iso(T0 - 1080000), tasks: [] }; return d; };
-  deliver(w, snap(1));
-  await settle();
-  assert.deepEqual(heads(w), [`Run ${id}`, 'Tasks by arm', 'Recent log'], 'the tab opens on the run going');
-  assert.equal(pages(w).find(([p]) => p === 'A run')[1], 'page');
-  const head = () => Array.from(bp(w).querySelector('.bench-run-head > .bench-head').children, text).slice(0, 4);
-  assert.deepEqual(head(), [`Run ${id}`, 'Running', 'Elapsed 18 min', 'Stop run']);
-  const now = () => text(bp(w).querySelector('.bench-now'));
-  assert.match(now(), new RegExp(`^Now: Conveyor 1\\.5\\.0 · ${t3} · Building since `));
-  assert.match(text(bp(w).querySelector('.bench-sofar')), /^4 of 10 arm results finished · 3 resolved · 1 reused · 0 not run · \$2\.00 recorded\. Cost for the active session is unknown\. Last update /);
-  // Bug it guards (#646 review E3): the table for each arm had no reused or not run count and no active time, and
-  // then an active time of the finished tasks only. Conveyor's 13 min is its wall of 8 min (bench swe's: a reused
-  // result adds none) and the 5 min since its task in progress began; Claude alone's is its wall.
-  assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-live tr'), (r) => Array.from(r.children, text)),
-    [['Arm', 'Finished', 'Resolved', 'Reused', 'Not run', 'Current work', 'Active time', 'Cost so far'],
-      ['Conveyor 1.5.0', '2 of 5', '2', '1', '0', `${t3} · Building`, '13 min', '$1.20 recorded, part unknown'], ['Claude alone (claude-opus-5-5)', '2 of 5', '1', '0', '0', 'Waiting', '16 min', '$0.80']]);
-  // Bug it guards (#646 review E5): an agent in one phase sends no update, and its elapsed time stood still. It counts
-  // on the Board's clock with no new read, as does the active time of the arm at work.
-  tick(w, 120000);
-  assert.equal(head()[2], 'Elapsed 20 min');
-  assert.equal(text(bp(w).querySelector('.bench-live tr[data-arm="conveyor"]').children[6]), '15 min');
-  assert.equal(act(bp(w), 'latest').textContent, 'Latest result', 'Latest result beside the heading');
-  assert.equal(text(bp(w).querySelector(`tr[data-task="${t1}"] .bench-cell .bench-sub`)), '1 session · 8 min · reused, no new cost');
-  assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-loglines li'), (li) => Array.from(li.children, text).slice(1)),
-    [['Run', '', 'Run started'], ['Conveyor 1.5.0', t1, 'Reused: Resolved'], ['Conveyor 1.5.0', t3, 'Building']]);
-  // The step moves on and no result comes: done stays 4, seq goes up.
-  // Bug it guards (#643): the run page read the run again only when the live run's `done` changed, so a step change
-  // (Building to Reviewing, `seq` up, `done` the same) kept the cached Building cell until a result arrived.
-  const cell = () => text(bp(w).querySelector(`tr[data-task="${t3}"] .bench-cell`));
-  assert.equal(cell(), 'Building');
-  phase = 'Reviewing';
-  next(w, snap(2));
-  await settle();
-  assert.match(now(), / · Reviewing since /, 'the step change read the run again');
-  assert.equal(cell(), 'Reviewing', 'the step change redrew the matrix cell');
-  assert.match(text(bp(w).querySelector('.bench-sofar')), /^4 of 10 arm results finished/);
-  // A read with no answer keeps the last update and says so; Read again reads it.
-  phase = 'Testing'; lost = true;
-  next(w, snap(3));
-  await settle();
-  assert.match(now(), / · Reviewing since /, 'the last update stays');
-  assert.match(text(bp(w).querySelector('.bench-lost')), /^The last read of this run got no answer: no benchmarks\. The page shows the update of .*\. Read again$/);
-  lost = false;
-  act(bp(w), 'run-read-again').click();
-  await settle();
-  assert.match(now(), / · Testing since /);
-  assert.equal(bp(w).querySelector('.bench-lost'), null);
-  // Bug it guards (#646 review E6): a task preparing its image has no session yet, and the line said the cost of the
-  // active session was unknown.
-  phase = 'Preparing image'; acost = null;
-  next(w, snap(4));
-  await settle();
-  assert.match(text(bp(w).querySelector('.bench-sofar')), /\$2\.00 recorded\. Part of the cost is unknown\. Last update /);
-  // Bug it guards (#750): an arm checking its preflight (active with no task) counted its active time up from the
-  // check's start, then dropped back to its wall, which has task work only, once Checking moved to the next arm.
-  // Bug it guards: a run whose cost is an agent arm's estimate said "Cost unknown." on its line.
-  phase = 'Checking'; atask = null; rcost = usd(2, 'estimate');
-  next(w, snap(5));
-  await settle();
-  assert.match(now(), /^Now: Conveyor 1\.5\.0 · Checking since /);
-  assert.match(text(bp(w).querySelector('.bench-sofar')), / · Estimated list price \$2\.00\. Last update /);
-  assert.equal(text(bp(w).querySelector('.bench-live tr[data-arm="conveyor"]').children[6]), '8 min', 'a preflight adds no active time');
-  atask = t3;
-  // Bug it guards (#646 review E1): the tab chose its page once, so a person back from another tab saw the page they
-  // left, not the run going.
-  act(bp(w), 'page-overview').click();
+// Bug it guards (review): with two versions on the one task both ran, the noise of 1 task is 1, so the newer version
+// resolving it read "Better." from one task. Under 3 tasks both ran, nothing is told, in the verdict and the table.
+test('Versions, two versions on 1 task: nothing can be told yet, though only the newer one resolves it', async () => {
+  const set = BH.few(), l2 = set.hist.runs[1], s2 = set.shows[BH.FEW2], id = 'r20261107T100000-5', six = '6'.repeat(40);
+  const line = { ...l2, id, started: iso(T0 - 48 * 3600000), ended: iso(T0 - 47 * 3600000), cols: l2.cols.map((c) => ({ ...c, key: `conveyor-${six}`, engine: six, version: 'v1.6.0', resolved: 0 })) };
+  set.hist.runs.push(line);
+  set.shows[id] = { run: line, tasks: [{ ...s2.tasks[0], cells: s2.tasks[0].cells.map((c) => ({ ...c, result: 'unresolved', resolved: false })) }], tail: [] };
+  const w = await opened(set, 'versions');
+  assert.equal(text(q(w, '.bench-vk')), 'v1.7.0 against v1.6.0');
+  assert.equal(text(q(w, '.bench-vv')), 'Nothing can be told yet from 1 task both ran: v1.7.0 resolves 1, v1.6.0 0.');
+  assert.ok(q(w, '.bench-verdict').classList.contains('bench-verdict-quiet'));
+  assert.deepEqual(rows(q(w, '.bench-versions')).map((r) => r[4]), ['first', '+1 of 1, too few tasks']);
+});
+
+// Bug it guards (review E1): each arm read only its newest run, so a short run after the study (Conveyor and Claude
+// alone on its first task again, the same results keys) hid their other 49 tasks: the shared tasks fell to 1, and the
+// Task map by Claude alone showed 49 tasks not run yet. Every run of an arm on its results key adds its tasks.
+test('A short run after the study keeps the arms\' other tasks on the Scoreboard and the Task map', async () => {
+  const set = BH.study(), study = set.hist.runs[0], show = set.shows[BH.STUDY], id = 'r20261109T160000-11', two = ['conveyor', 'solo'];
+  const line = { ...study, id, started: iso(T0 - 3600000), ended: iso(T0 - 1800000), n: 1, arms: two, cols: study.cols.filter((c) => two.includes(c.arm)).map((c) => ({ ...c, done: 1, resolved: 1 })) };
+  set.hist.runs.unshift(line);
+  set.shows[id] = { run: line, tasks: [{ ...show.tasks[0], cells: show.tasks[0].cells.filter((c) => two.includes(c.arm)) }], tail: [] };
+  const w = await opened(set);
+  assert.equal(text(q(w, '.bench-vk')), 'Verdict on the 50 shared tasks');
+  BH.go(w, 'map');
+  const s = act(bp(w), 'map-by');
+  s.value = 'solo'; s.dispatchEvent(new w.Event('change'));
+  assert.equal(page(w).querySelectorAll('button.bench-sq').length, 50, 'Claude alone has a result on each of the 50 tasks');
+});
+
+// Bug it guards (review E2): Versions put the versions in the order their runs started, so v1.8.0 run after v1.9.0
+// read as the newer release. They go in the order of their releases, whatever order they ran in.
+test('Versions: the versions go in their release order, not the order their runs started', async () => {
+  const set = BH.study(), v18 = set.hist.runs.find((r) => r.id === OLDS[0][1]);
+  v18.started = iso(T0 - 3600000);
+  set.hist.runs = [v18, ...set.hist.runs.filter((r) => r !== v18)];
+  const w = await opened(set, 'versions');
+  assert.equal(text(q(w, '.bench-vk')), 'v1.9.0 against v1.8.0');
+  assert.deepEqual(rows(q(w, '.bench-versions')).map((r) => r[0]), ['v1.4.0', 'v1.5.0', 'v1.6.0', 'v1.7.0', 'v1.8.0', 'v1.9.0']);
+});
+
+// Bug it guards (review E11): with a group of fewer than 5 cards (drift.sh's small), no figure is judged, yet the
+// verdict said every figure stayed in its usual range.
+test('Versions: with too few cards in the drift watch, the verdict says no figure is judged', async () => {
+  const set = BH.study();
+  set.drift.small = ['after'];
+  const w = await opened(set, 'versions');
+  assert.equal(text(q(w, '.bench-vw')), 'On the belt, a group has fewer than 5 cards: no figure is judged yet.');
+  assert.deepEqual(Array.from(page(w).querySelectorAll('.bench-drow .chip'), text), Array(6).fill('Too few cards'));
+});
+
+// Bug it guards (#646): the tab opened on the page left last, so a run going was a click away. It opens on the Live
+// run while a run goes, else on the Scoreboard, each time it is shown.
+test('The tab opens on the Live run while a run goes, else on the Scoreboard, each time it is shown', async () => {
+  const w = await opened(BH.live());
+  assert.equal(pages(w).find(([, c]) => c === 'page')[0], 'Live run');
+  BH.go(w, 'map');
   tabBtn(w, 'overview').click();
   await settle();
   tabBtn(w, 'bench').click();
   await settle();
-  assert.equal(pages(w).find(([p]) => p === 'A run')[1], 'page', 'the tab shown again opens on the run going');
-  // Stop run, from the run's first line: it names the run and stays off until the build machine answers.
-  let answer;
-  w.reply = new Promise((res) => { answer = res; });
-  act(bp(w), 'stop-run').click();
-  assert.deepEqual(w.posts.splice(0).map((p) => p.body), [{ action: 'bench', args: ['stop', id], repo: 'sample' }]);
-  const stop = act(bp(w), 'stop-run'), said = () => text(bp(w).querySelector('.bench-run-head .bench-said'));
-  assert.deepEqual([stop.textContent, stop.disabled, said()], ['Stopping run', true, `Stopping run ${id}. Finished results are kept.`]);
-  state = 'stopped';
-  answer(BH.reply(`conveyor: run ${id} is stopped. Its finished tasks are kept.`));
+  assert.equal(pages(w).find(([, c]) => c === 'page')[0], 'Live run', 'shown again, it opens on the run going');
+  const v = await opened(BH.study(), 'plan');
+  tabBtn(v, 'overview').click();
   await settle();
-  assert.deepEqual(head().slice(0, 3), [`Run ${id}`, 'Stopped', 'Elapsed 18 min'], 'how it ended');
-  assert.equal(act(bp(w), 'stop-run'), null, 'no Stop run once it ended');
-  assert.equal(said(), 'Run stopped. Finished results are kept.');
-  assert.equal(text(bp(w).querySelector('.bench-run-head .bench-ended')), 'Stopped by you 2 of 5 tasks done for every arm. The finished tasks are kept and reused.');
-  assert.equal(text(bp(w).querySelector(`tr[data-task="${t3}"] .bench-cell`)), 'interrupted$0.40 recorded, part unknown');
-  assert.equal(bp(w).querySelector('.bench-now'), null);
-});
-
-// Bug it guards (#752): docs/board.md said the active time counts on while the run goes, though the preflight check
-// before the first task adds none (the case above). A text check, as a guide page has no behaviour to run.
-test('The guide says a preflight adds no active time, as the run page counts it', () => {
-  const guide = readFileSync(new URL('../../../docs/board.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
-  assert.doesNotMatch(guide, /active time counts? on while the run goes/, 'active time does not count on during the preflight check');
-  assert.match(guide, /the run checks the preflight of each arm, and this check adds no active time/);
-  assert.match(guide, /The active time of an arm counts on only while the arm works on a task\./);
-});
-
-// Bug it guards (#646 review E1): with no run going the tab opened on the Overview, so Start a run was a click away,
-// and a person back from another tab saw the page they had left; neither heading linked to the latest result.
-test('No run going: the tab opens on Start a run with Latest result beside its heading, and again when shown again', async () => {
-  const w = boot({ tab: 'bench' });
-  w.benchBody = (url) => (/&run=/.test(url) ? BH.run() : BH.hist());
-  deliver(w, full());
+  tabBtn(v, 'bench').click();
   await settle();
-  assert.equal(pages(w).find(([p]) => p === 'Start a run')[1], 'page');
-  assert.equal(heads(w)[0], 'Start a run');
-  act(bp(w), 'latest').click();
-  await settle();
-  assert.equal(heads(w)[0], `Run ${NEW}`, 'Latest result opens the newest run that ended');
-  assert.equal(act(bp(w), 'latest'), null, 'no link to the run shown');
-  tabBtn(w, 'overview').click();
-  await settle();
-  tabBtn(w, 'bench').click();
-  await settle();
-  assert.equal(heads(w)[0], 'Start a run', 'the tab shown again opens on Start a run');
-});
-
-// Bug it guards (#646 review E2): a run whose process was gone with no end written read as stopped by you, with no
-// Stop run, so its end was never recorded and its containers stayed. It says interrupted and keeps Stop run.
-test('A run whose process is gone: its page says interrupted and keeps Stop run, which records its end', async () => {
-  const w = boot({ tab: 'bench' });
-  const id = 'r20261109T164200-13', r0 = BH.hist().runs[0];
-  let recorded = false;
-  // As bench swe gives it: gone with no ended, then the end Stop recorded, which keeps gone.
-  const run = () => ({ ...r0, id, state: 'stopped', gone: true, ended: recorded ? iso(T0) : null, interrupted: recorded ? { arm: 'conveyor', task: BH.TASKS[0] } : undefined });
-  BH.open(w, { body: (url) => (/&run=/.test(url) ? { run: run(), tasks: [] } : { ...BH.hist(), runs: [run(), ...BH.hist().runs] }) });
-  await settle();
-  assert.match(text(bp(w).querySelector('.bench-newest .bench-ended')), /^Run interrupted Its process ended with no end recorded/);
-  act(bp(w), 'open-newest').click();
-  await settle();
-  const head = () => Array.from(bp(w).querySelector('.bench-run-head > .bench-head').children, text).slice(1, 3);
-  assert.deepEqual(head(), ['Interrupted', 'Elapsed –']);
-  w.reply = BH.reply(`conveyor: run ${id} was interrupted: its process had ended. Its end is recorded, its containers are removed, and its finished tasks are kept.`);
-  act(bp(w), 'stop-run').click();
-  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['stop', id]]);
-  recorded = true;
-  await settle();
-  assert.match(text(bp(w).querySelector('.bench-run-head .bench-said')), /^Run interrupted: its process had ended\./);
-  assert.equal(act(bp(w), 'stop-run'), null, 'no Stop run once its end is recorded');
-  // Bug it guards (#646 review E2, again): once Stop recorded its end, the page said "Stopped by you". It still says
-  // interrupted, on its first line, under it and in History.
-  assert.equal(head()[0], 'Interrupted');
-  assert.match(text(bp(w).querySelector('.bench-run-head .bench-ended')), /^Run interrupted Its process ended before Stop, after \d+ of \d+ tasks for every arm\. Stop recorded its end/);
-  act(bp(w), 'back').click();
-  await settle();
-  assert.match(text(bp(w).querySelector(`.bench-history tr[data-run="${id}"]`).lastElementChild), /^Interrupted/);
-});
-
-// Bug it guards (#646): every cost of a run read "–" (not kept), so a cost recorded in full, one recorded in part and
-// one never recorded looked the same in History, on a run's page, in its export, in Compare and in the infographic's
-// table. A cost never recorded is unknown, never $0.
-test('Costs: History, a run, its export, Compare and the infographic table tell a recorded, a partial and an unknown cost apart', async () => {
-  const w = boot({ tab: 'bench' });
-  // Bug it guards: an agent arm's cost, state "estimate", fell through to unknown in each place.
-  const h = BH.hist(), [r0, r1] = h.runs, known = { usd: 2.5, state: 'known' }, part = { usd: 1.2, state: 'partial' }, est = { usd: 0.2, state: 'estimate' };
-  h.runs = [{ ...r0, cost: part, cols: r0.cols.map((x, i) => ({ ...x, cost: [known, part, null][i] })) }, { ...r1, cost: known }, { ...r1, id: 'r20261107T100000-5', cost: null }, { ...r1, id: 'r20261106T100000-4', cost: est }];
-  const run = BH.run();
-  run.run = h.runs[0];
-  run.tasks[0].cells = run.tasks[0].cells.map((x, i) => ({ ...x, cost: [{ usd: 0.5, state: 'known' }, { usd: 0.1, state: 'partial' }, est][i] }));
-  BH.open(w, { body: (url) => (/&run=/.test(url) ? run : h) });
-  await settle();
-  assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-history tr[data-run]'), (r) => text(r.children[9])), ['$1.20 recorded, part unknown', '$2.50', 'unknown', '$0.20 estimate']);
-  act(bp(w), `run-${NEW}`).click();
-  await settle();
-  assert.deepEqual(Array.from(bp(w).querySelector(`tr[data-task="${BH.TASKS[0]}"]`).querySelectorAll('.bench-cell .bench-sub'), text),
-    ['3 sessions · 20 min · $0.50', '1 session · 8 min · $0.10 recorded, part unknown', '1 session · 8 min · $0.20 estimate']);
-  assert.deepEqual(Array.from(bp(w).querySelector('.bench-mat tfoot tr:last-child').children, text), ['Minutes · cost', '102 · $2.50', '40 · $1.20 recorded, part unknown', '28 · unknown']);
-  act(bp(w), 'export').click();
-  const figs = JSON.parse(decodeURIComponent(w.downloads[0].href.slice(w.downloads[0].href.indexOf(',') + 1)));
-  assert.deepEqual([figs.cost, ...figs.arms.map((a) => a.cost), ...figs.tasks[0].arms.map((a) => a.cost)],
-    [part, known, part, { usd: null, state: 'unknown' }, { usd: 0.5, state: 'known' }, { usd: 0.1, state: 'partial' }, est]);
-  act(bp(w), 'back').click();
-  const box = act(bp(w), `pick-${NEW}`); box.checked = true; box.dispatchEvent(new w.Event('change'));
-  act(bp(w), 'sel-compare').click();
-  w.reply = BH.reply(JSON.stringify({ a: { version: 'A', commit: null, totals: { resolved: 4, sessions: 13, tokens: 1, minutes: 102, cost: part } },
-    b: { version: 'B', commit: null, totals: { resolved: 2, sessions: 5, tokens: 1, minutes: 40, cost: { usd: null, state: 'unknown' } } }, tasks: 5, same: [], flipped: [], withinNoise: true }));
-  act(bp(w), 'compare').click();
-  await settle();
-  assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-compare tr'), (r) => Array.from(r.children, text).slice(5)).slice(1),
-    [['$1.20 recorded, part unknown', '$0.30 recorded, part unknown'], ['unknown', 'unknown']]);
-  act(bp(w), 'back').click();
-  act(bp(w), 'sel-infographic').click();
-  act(bp(w), 'ig-svg').click();
-  const csv = decodeURIComponent(w.downloads[2].href.slice(w.downloads[2].href.indexOf(',') + 1)).trim().split('\r\n');
-  assert.deepEqual(csv.slice(1).map((l) => /"([^"]*)"$/.exec(l)[1]), ['$2.50', '$1.20 recorded, part unknown', 'unknown']);
+  assert.equal(pages(v).find(([, c]) => c === 'page')[0], 'Scoreboard');
 });

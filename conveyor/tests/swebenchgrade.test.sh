@@ -272,10 +272,18 @@ t_sweseame() {
   # Bug: the --again run wrote its result and patch over the first run's, so the first run then showed the --again
   # run's outcome. Each run shows its own, and the kept result (results, figures) stays the first run's.
   local r1 r2; r1=$(jq -r '.runs[2].id' <<<"$out"); r2=$(jq -r '.runs[1].id' <<<"$out")
+  # Bug (#1177): a run's line did not say it ran with --again, so the Board's Live run counted its tasks with a kept
+  # result as reused (no time left, no cost) though the run runs each of them again.
+  [ "$(jq -c '[.runs[] | .again]' <<<"$out")" = '[null,true,null]' ] || fail "history does not mark the --again run, and only it: $(jq -c '[.runs[] | [.id, .again]]' <<<"$out")"
   [ "$(loop bench swe show "$r1" | jq -c --arg t "$first" '[.tasks[] | select(.id == $t) | .cells[0] | .resolved, (.patch | length > 0)]')" = '[true,true]' ] \
     || fail "bench swe show $r1 (the first run) does not show its own resolved result and patch of $first: $(loop bench swe show "$r1" | jq -c '.tasks')"
   [ "$(loop bench swe show "$r2" | jq -c --arg t "$first" '[.tasks[] | select(.id == $t) | .cells[0].resolved]')" = '[false]' ] \
     || fail "bench swe show $r2 (the --again run) does not show its own unresolved result of $first: $(loop bench swe show "$r2" | jq -c '.tasks')"
+  # Bug (#1177): show did not say which cell is a result kept apart, so the Board took diff's reading of the kept one
+  # (results/<key>) as the reading of the --again run's own. The first run's cell is the kept one.
+  [ "$(loop bench swe show "$r2" | jq -c --arg t "$first" '[.tasks[] | select(.id == $t) | .cells[0].again]')" = "[\"$r2\"]" ] \
+    && [ "$(loop bench swe show "$r1" | jq -c --arg t "$first" '[.tasks[] | select(.id == $t) | .cells[0].again]')" = '[null]' ] \
+    || fail "bench swe show does not mark the --again run's own result of $first apart from the kept one: $(loop bench swe show "$r2" | jq -c '.tasks')"
   [ "$(jq -c .resolved "$B"/results/*/"$first.json")" = true ] || fail "the --again run replaced the kept result of $first: $(cat "$B"/results/*/"$first.json")"
   # Deleting the --again run takes its own results and leaves the first run's.
   out=$(loop bench swe runs delete "$r2" 2>&1) || fail "bench swe runs delete $r2 failed: $out"

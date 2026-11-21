@@ -1,101 +1,111 @@
 // SPDX-License-Identifier: Apache-2.0
-// The Benchmarks tab's Archive, Restore and Delete of runs (#1053): sent as `bench swe runs archive | restore | delete
-// <id>...`; an archived run leaves History, Compare's choices and the infographic for the Archived view; Delete of the
-// runs selected takes one confirm that names them; a run that has not ended has both off. Shared setup:
-// dashboard-view.helpers.mjs (BH).
+// The Benchmarks tab's Archive, Restore and Delete of runs (#1053), in their places on the rebuilt tab (#1177): the
+// Scoreboard's run history (folded at its foot), the Live run page and Compare. Each sends `bench swe runs archive |
+// restore | delete <id>...`; an archived run leaves the figures and stays in the run history, marked; Delete takes one
+// confirm that names the runs; a run that has not ended has both off. Shared setup: dashboard-view.helpers.mjs (BH).
 import assert from 'node:assert/strict';
 import { boot, settle, act, cases, BH } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
-const { bp, heads, NEW, OLD } = BH;
+const { bp, page, OLDS, STUDY } = BH;
 const text = (el) => el.textContent.replace(/\s+/g, ' ').trim();
-const pick = (w, a) => { const b = act(bp(w), a); b.checked = !b.checked; b.dispatchEvent(new w.Event('change')); };
-const listed = (w) => Array.from(bp(w).querySelectorAll('.bench-history tr[data-run]'), (r) => r.dataset.run);
-const choices = (w) => Array.from(act(bp(w), 'cmp-a').options, (o) => o.textContent);
-// What GET bench gives, with each run's line changed as `over` says (by run id): the history, or a run's page.
-const body = (over) => {
-  const hist = () => { const x = BH.hist(); x.runs = x.runs.map((r) => ({ ...r, ...(over[r.id] || {}) })); return x; };
-  return (url) => (/&run=/.test(url) ? { ...BH.run(), run: hist().runs.find((r) => url.endsWith(encodeURIComponent(r.id))) } : hist());
-};
-const served = (w, over) => { w.benchBody = body(over); };
-async function opened(over = {}) {
+const tick = (w, id) => { const b = act(bp(w), `pick-${id}`); b.checked = !b.checked; b.dispatchEvent(new w.Event('change')); };
+const V14 = OLDS[4][1];
+async function opened(set, p) {
   const w = boot({ tab: 'bench' });
-  BH.open(w, { body: body(over) });
-  await settle();
+  BH.open(w, set);
+  await settle(); await settle();
+  if (p) { BH.go(w, p); await settle(); await settle(); }
   return w;
 }
+// The runs' lines of the set served changed as `over` says (by run id), as the history reads after an action: BH.open
+// serves the set's history as it is at each read.
+const mark = (set, over) => { set.hist.runs = set.hist.runs.map((r) => ({ ...r, ...(over[r.id] || {}) })); };
 
-// Bug it guards: a failed or test run stayed in History, Compare's choices and the infographic for good. Archive on a
-// run's page sends `bench swe runs archive <id>`; once the history read again marks it, it is in the Archived view
-// alone, and Restore there brings it back to History and to Compare.
-test('Archive: the run leaves History, Compare and the infographic for the Archived view; Restore brings it back', async () => {
-  const w = await opened();
-  pick(w, `pick-${NEW}`); pick(w, `pick-${OLD}`);
-  act(bp(w), 'sel-compare').click();
-  assert.deepEqual(choices(w), ['Conveyor 1.5.0', 'Claude alone (claude-opus-5-5)', 'Codex alone (gpt-6.2-sol)', 'Conveyor 1.4.0']);
-  act(bp(w), 'back').click();
-  act(bp(w), `run-${OLD}`).click();
-  await settle();
-  w.reply = BH.reply(`conveyor: archived ${OLD}.`);
-  act(bp(w), 'archive-runs').click();
-  assert.deepEqual(w.posts.splice(0).map((p) => p.body), [{ action: 'bench', args: ['runs', 'archive', OLD], repo: 'sample' }]);
-  served(w, { [OLD]: { archived: '2026-11-20T10:00:00Z' } });
+// Bug it guards: the rebuilt tab had no History, so a failed or test run stayed in the figures for good. In the
+// Scoreboard's run history (folded, kept open through a redraw), Archive of a run ticked sends `bench swe runs archive
+// <id>`; once the history reads it archived, it is marked there and leaves the Versions trend, and Restore of it brings it back.
+test('Scoreboard run history: Archive takes a run out of the figures and marks it archived; Restore brings it back', async () => {
+  const set = BH.study(), w = await opened(set);
+  const fold = page(w).querySelector('details.bench-history');
+  fold.open = true; fold.dispatchEvent(new w.Event('toggle'));
+  tick(w, V14);
+  const bar = () => page(w).querySelector('.bench-history .bench-selbar');
+  assert.equal(page(w).querySelector('details.bench-history').open, true, 'the fold stays open through the redraw');
+  assert.deepEqual(Array.from(bar().children, text), ['1 run selected', 'Archive', 'Delete', 'Clear']);
+  w.reply = BH.reply(`conveyor: archived ${V14}.`);
+  act(bar(), 'archive-runs').click();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body), [{ action: 'bench', args: ['runs', 'archive', V14], repo: 'sample' }]);
+  mark(set, { [V14]: { archived: '2026-11-09T10:00:00Z' } });
   await settle(); await settle();
-  assert.equal(text(bp(w).querySelector('.bench-run-head .bench-said')), `Archived ${OLD}.`);
-  assert.ok(text(bp(w).querySelector('.bench-run-head .bench-head')).includes('Archived'), 'the archived run\'s page says so');
-  assert.equal(act(bp(w), 'restore-runs').textContent, 'Restore', 'the archived run\'s page offers Restore');
-  act(bp(w), 'back').click();
-  assert.deepEqual(listed(w), [NEW], 'History leaves the archived run out');
-  assert.deepEqual(heads(w), ['Newest run', 'History', 'Archived', 'Arms', 'Drift watch']);
-  assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-archived tr[data-run]'), (r) => r.dataset.run), [OLD]);
-  act(bp(w), 'sel-compare').click();
-  assert.deepEqual(choices(w), ['Conveyor 1.5.0', 'Claude alone (claude-opus-5-5)', 'Codex alone (gpt-6.2-sol)'], 'Compare offers no arm of the archived run');
-  act(bp(w), 'back').click();
-  act(bp(w), 'sel-infographic').click();
-  assert.ok(!text(bp(w)).includes(`Run ${OLD}`), 'the infographic leaves the archived run out');
-  act(bp(w), 'back').click();
-  w.reply = BH.reply(`conveyor: restored ${OLD}.`);
-  bp(w).querySelector(`.bench-archived tr[data-run="${OLD}"] [data-act="restore-runs"]`).click();
-  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['runs', 'restore', OLD]]);
-  served(w, {});
+  assert.equal(text(page(w).querySelector('.bench-history .bench-said')), `Archived ${V14}.`);
+  assert.match(text(page(w).querySelector(`.bench-history tr[data-run="${V14}"]`)), /done archived/);
+  assert.equal(bar(), null, 'the run archived is no longer ticked');
+  BH.go(w, 'versions');
+  assert.ok(!Array.from(page(w).querySelectorAll('.bench-versions tbody tr'), (r) => r.firstChild.textContent).includes('v1.4.0'), 'an archived run is in no figure');
+  BH.go(w, 'score');
+  tick(w, V14);
+  w.reply = BH.reply(`conveyor: restored ${V14}.`);
+  act(bar(), 'restore-runs').click();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['runs', 'restore', V14]], 'an archived run offers Restore');
+  mark(set, { [V14]: { archived: undefined } });
   await settle(); await settle();
-  assert.deepEqual(listed(w), [NEW, OLD], 'the run restored is back in History');
-  assert.equal(bp(w).querySelector('.bench-archived'), null, 'no Archived view with no run archived');
+  BH.go(w, 'versions');
+  assert.equal(page(w).querySelector('.bench-versions tbody tr').firstChild.textContent, 'v1.4.0', 'the run restored is back in the figures');
 });
 
-// Bug it guards: runs could not be deleted, one or several at once. Delete of the two runs selected asks once, in
-// words that name both and say a result another run shows stays (history's shared), then sends one request for both.
-// A result only the selected runs show (OLD made a/t-1, NEW alone reused it) is not counted as staying: the delete
-// removes it, so a confirm that counted each run's shared promised to keep it.
-test('Delete: two runs selected are deleted after one confirm that names them and the result that stays', async () => {
-  const w = await opened({ [OLD]: { shared: { 'a/t-1': [NEW], 'a/t-2': ['r20261101T090000-9'] } }, [NEW]: { shared: { 'a/t-1': [OLD] } } });
-  pick(w, `pick-${NEW}`); pick(w, `pick-${OLD}`);
-  const del = bp(w).querySelector('.bench-selbar [data-act="delete-runs"]');
+// Bug it guards: runs could not be deleted, one or several at once. Delete of two runs ticked asks once, in words that
+// name both and say a result another run shows stays (history's shared), then sends one request for both. A result only
+// the runs ticked show is not counted as staying.
+test('Scoreboard run history: Delete of two runs ticked takes one confirm that names them and the result that stays', async () => {
+  const set = BH.study(), [a, b] = [OLDS[3][1], V14];
+  mark(set, { [a]: { shared: { 'k/t-1': [b], 'k/t-2': [STUDY] } }, [b]: { shared: { 'k/t-1': [a] } } });
+  const w = await opened(set);
+  tick(w, a); tick(w, b);
+  const del = page(w).querySelector('.bench-history .bench-selbar [data-act="delete-runs"]');
   del.click();
   assert.deepEqual(w.posts, [], 'the first click sends nothing');
-  assert.equal(del.textContent, `Click again: delete ${NEW} and ${OLD} (1 result another run shows stays; the rest goes)`);
-  w.reply = BH.reply(`conveyor: deleted ${NEW}, ${OLD}; 1 result stays: another run shows it.`);
+  assert.equal(del.textContent, `Click again: delete ${a} and ${b} (1 result another run shows stays; the rest goes)`);
+  w.reply = BH.reply(`conveyor: deleted ${a}, ${b}; 1 result stays: another run shows it.`);
   del.click();
-  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['runs', 'delete', NEW, OLD]], 'one request deletes both');
-  w.benchBody = () => ({ ...BH.hist(), runs: [] });
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['runs', 'delete', a, b]], 'one request deletes both');
+  set.hist.runs = set.hist.runs.filter((r) => r.id !== a && r.id !== b);
   await settle(); await settle();
-  assert.equal(text(bp(w).querySelector('.bench-history .bench-said')), `Deleted ${NEW}, ${OLD}; 1 result stays: another run shows it.`);
-  assert.deepEqual(listed(w), []);
-  assert.equal(bp(w).querySelector('.bench-selbar'), null, 'the deleted runs are no longer selected');
+  assert.equal(text(page(w).querySelector('.bench-history .bench-said')), `Deleted ${a}, ${b}; 1 result stays: another run shows it.`);
+  assert.deepEqual(Array.from(page(w).querySelectorAll('.bench-history tbody tr'), (r) => r.dataset.run), [STUDY, ...OLDS.slice(0, 3).map(([, id]) => id), BH.ARCHIVED]);
 });
 
-// Bug it guards: a run that has not ended (its process gone with no end written, or going) could be archived or
-// deleted while its process may still write its line and results. Both are off on its page and in the selection
-// bar, with the reason.
-test('A run not ended: Archive and Delete are off on its page and when it is selected, with the reason', async () => {
-  const w = await opened({ [NEW]: { state: 'stopped', gone: true, ended: null } });
-  pick(w, `pick-${NEW}`);
-  const bar = bp(w).querySelector('.bench-selbar');
-  assert.deepEqual(['archive-runs', 'delete-runs'].map((a) => bar.querySelector(`[data-act="${a}"]`).disabled), [true, true]);
-  assert.ok(text(bar).includes(`${NEW} has not ended: stop it first to archive or delete.`), text(bar));
-  act(bp(w), `run-${NEW}`).click();
+// Bug it guards: the Live run page had no way to clear the run it shows. With no run going, Archive and Delete of the
+// last run are under it; while a run goes, both are off with the reason (its process may still write its results).
+test('Live run: Archive and Delete of the run shown, and off with the reason while it goes', async () => {
+  const w = await opened(BH.study(), 'run');
+  w.reply = BH.reply(`conveyor: archived ${STUDY}.`);
+  act(page(w).querySelector('.bench-runacts'), 'archive-runs').click();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['runs', 'archive', STUDY]]);
   await settle();
-  const head = bp(w).querySelector('.bench-run-head');
-  assert.deepEqual(['archive-runs', 'delete-runs'].map((a) => head.querySelector(`[data-act="${a}"]`).disabled), [true, true]);
-  assert.ok(text(head).includes('has not ended: stop it first'), text(head));
+  assert.equal(text(page(w).querySelector('.bench-runacts .bench-said')), `Archived ${STUDY}.`);
+  const del = act(page(w).querySelector('.bench-runacts'), 'delete-runs');
+  del.click();
+  assert.equal(del.textContent, `Click again: delete ${STUDY}`);
+  w.reply = BH.reply(`conveyor: deleted ${STUDY}.`);
+  del.click();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['runs', 'delete', STUDY]]);
+  const v = await opened(BH.live());
+  const acts = page(v).querySelector('.bench-runacts');
+  assert.deepEqual(['archive-runs', 'delete-runs'].map((x) => act(acts, x).disabled), [true, true]);
+  assert.match(text(acts), new RegExp(`${BH.LIVE} has not ended: stop it first to archive or delete\\.$`));
+});
+
+// Bug it guards: Compare read runs that could not be cleared from it. Under the two sides, Archive and Delete name the
+// runs they come from (a version's run and the study's), in one request.
+test('Compare: Archive of the runs of the two sides, in one request', async () => {
+  const w = await opened(BH.study(), 'compare');
+  const s = act(bp(w), 'cmp-a');
+  s.value = 'ver:v1.8.0'; s.dispatchEvent(new w.Event('change'));
+  await settle(); await settle();
+  const acts = page(w).querySelector('.bench-runacts');
+  assert.match(text(acts), new RegExp(`^These runs: ${OLDS[0][1]}, ${STUDY}`));
+  w.reply = BH.reply(`conveyor: archived ${OLDS[0][1]}, ${STUDY}.`);
+  act(acts, 'archive-runs').click();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['runs', 'archive', OLDS[0][1], STUDY]]);
 });

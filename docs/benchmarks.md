@@ -313,14 +313,16 @@ To read older results, give their results key. It shows:
   blocked), with each run's review findings, fix rounds, test result, block reason, tokens and minutes;
 - when both sides are versions of Conveyor, the commits between them that changed the engine files of that step, with
   their titles;
+- when both sides are versions of Conveyor, the steps whose engine files the commits between them changed, whether a
+  task flipped or not (`steps` in `--json`);
 - a short explanation of each flipped task from one model call, given only the facts above, and labelled as the
   model's reading;
 - the totals of each version, and the run-to-run noise for that number of tasks.
 
-On the Board, the [Benchmarks tab](board.md#benchmarks-tab) shows the same runs, results and Compare. It has an
-overview with the history of every run, a page for each run, Compare, Start a run with the expected sessions, minutes
-and cost of each arm, and an infographic of up to 6 runs. `conveyor.sh bench swe history` and `conveyor.sh bench swe show <run>`
-print what the tab reads, as JSON.
+On the Board, the [Benchmarks tab](board.md#benchmarks-tab) shows the same runs, results and Compare on seven pages:
+a scoreboard of the arms, the versions of the Conveyor arm, Compare, the run that goes now, one task across every arm,
+a map of every task of the set, and a planner that shows the cost of a run before it starts it.
+`conveyor.sh bench swe history` and `conveyor.sh bench swe show <run>` print what the tab reads, as JSON.
 
 While a run goes, `bench swe show <run>` gives the arm, the task and the step it is at, before the task has a result.
 The step is one of Checking, Preparing image, Setting up, Running agent, Reading patch, Grading, or for a Conveyor arm
@@ -370,11 +372,11 @@ for example a later run that reused it, or a run with `--again` on the same task
 A run that has not ended cannot be archived or deleted. This includes a run whose process stopped with no end
 recorded. Stop the run first. When one run of the list is refused, nothing changes.
 
-On the Benchmarks tab, Archive and Delete are on the page of a run, on Compare and on the Infographic, for the runs
-that each page shows. In History, tick the runs, then use Archive or Delete in the bar at the foot of the screen. An
-archived run is not in History, in the choices of Compare, in the infographic or in the figures of the newest run. The
-Archived list on the overview shows each archived run, with Restore and Delete. Delete asks for a second click, which
-names the runs and says how many results stay because a run that you do not delete shows them.
+On the Benchmarks tab, Archive, Restore and Delete are in the run history at the foot of the Scoreboard: tick the
+runs, then use the buttons above the list. Archive and Delete are also on the Live run page and on Compare, for the
+runs that each page shows. An archived run stays in the run history, marked archived, and is in no figure, in no
+choice of Compare and in no plan. Delete asks for a second click, which names the runs and says how many results stay
+because a run that you do not delete shows them.
 
 ## What the numbers mean
 
@@ -501,10 +503,10 @@ between the groups does not tell you its cause: the issues of the two groups are
 
 With `--json`, each group also has `spread`: the standard deviation of each mean figure a card.
 
-The Board shows the latest drift watch of a project on the [Benchmarks tab](board.md#benchmarks-tab), folded under
-**Drift watch**. Each figure there shows one of these:
+The Board shows the latest drift watch of a project on the Versions page of the [Benchmarks tab](board.md#benchmarks-tab),
+under **Drift watch**. Each figure there shows one of these:
 
-- **Moved**: the two means are more than two standard errors apart.
+- **Moved, better** or **Moved, worse**: the two means are more than two standard errors apart.
 - **In its usual range**: the two means are closer than that.
 - **Too few cards**: a group has fewer than 5 cards, so no figure is judged.
 - **Not read**: a group has no figure or no spread for it.

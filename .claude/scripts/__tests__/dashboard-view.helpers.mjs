@@ -606,8 +606,8 @@ export const SAYS = {
     empty: 'The floor is empty', failed: 'The Board could not read Belt 3D' },
   tests: { title: 'Tests', count: '', data: ['Timed files', 'conveyor/tests/merge.test.sh', 'Slower than usual', 'Test limits', 'Files slow on purpose'],
     empty: 'No tests to show', failed: 'The Board could not read the tests' },
-  // With no run going the tab opens on Start a run (#646).
-  bench: { title: 'Benchmarks', count: '', data: ['Overview', 'Start a run', 'How many tasks', 'Conveyor version'],
+  // With no run going the tab opens on the Scoreboard (#1177), which reads the runs when it is shown.
+  bench: { title: 'Benchmarks', count: '', data: ['Scoreboard', 'Plan a run', 'This page answers: Which way of building a change resolves the most real issues', 'Reading the runs…'],
     empty: 'No benchmarks to show', failed: 'The Board could not read the benchmarks' },
   queue: { title: 'Queue', count: '2', data: ['Next up', 'P1', 'Follow-up', 'Later', 'Retried', 'Holds keep 2 issues back: see Held.','Built, waiting for your PROD deploy (2)', 'Stack split', '2 d 0 h waiting', 'No label time'], empty: 'The queue is empty', failed: 'The Board could not read the queue' },
   landed: { title: 'Landed today', count: '2', data: ['Landed one', '2 reviews', 'started 10:30 AM', '30 min overall', 'landed 11:00 AM', '$2.50', 'Landed and pushed', 'follow-ups #31', 'Before deploy: Run migration 0004. Without it: the new column is missing. At db/0004.sql:1', 'Fixed before', 'Already fixed', '2 cards, $3.00 at list prices'], empty: 'No card landed today', failed: 'The Board could not read the landed cards' },
@@ -819,49 +819,131 @@ export const TA = (() => {
     reply: (text) => ({ ok: true, status: 200, text: () => Promise.resolve(text) }) };
 })();
 
-// The Benchmarks tab (#326; dashboard-view.bench and bench-pages). BH.hist() is what GET bench gives for the history:
-// the newest run (5 tasks: Conveyor 1.5.0 4 of 5, Claude alone 2, Codex alone 2 with 1 not run) and an older one of 20
-// tasks stopped at the usage guard; the arms (Conveyor, Claude alone and Codex alone ready, Superpowers failing its
-// preflight, Chisle not checked, a fixture arm Stub off not offered); the places of each results key's tasks. BH.run() is the
-// newest run's tasks. BH.open(w) boots the tab with both served, on the Overview; w.downloads lists what the page downloads.
+// The Benchmarks tab (#1177; dashboard-view.bench, bench-pages and bench-runs): what GET bench gives, in three sets.
+// BH.study(): the mockup's Sample view, a 50-task study of 7 arms in one run (STUDY), resolving 37, 35, 31, 30, 29, 25
+// and 22 of the 50 (task i resolved by an arm when i is under its count), with each result's grade, measures and a
+// Conveyor arm's steps; the Conveyor arm's older versions v1.4.0 to v1.8.0 each in a run of its own (v1.8.0 resolves
+// tasks 0 to 33 and 37, so 34, 35 and 36 flip to resolved on v1.9.0 and 37 flips back); an archived run; the drift watch
+// (Minutes waited moved, better); and the set's 500 tasks in their pinned order (order), the study's first.
+// BH.live(): the study with a run of the same 7 arms going (LIVE): 10 tasks finished, the 11th done by 3 arms, the 4th
+// on it. BH.few(): the mockup's "Your data now", the 2 runs of 1 task the build machine had, from before the grade's
+// report was kept (no class, tests, measures or reference fix). BH.open(w, set) boots the tab with the set served.
 export const BH = (() => {
-  const EB = 'b'.repeat(40), EA = 'a'.repeat(40), SET = { dataset: 'princeton-nlp/SWE-bench_Verified', revision: 'c104f840cc67f8b6eec6f759ebc8b2693d585d4a' };
-  const C = { arm: 'conveyor', key: EB, label: 'Conveyor', kind: 'conveyor', engine: EB, version: 'v1.5.0', model: null };
-  const S = { arm: 'solo', key: 'solo-claude-opus-5-5', label: 'Claude alone', kind: 'agent', engine: null, version: null, model: 'claude-opus-5-5' };
-  const X = { arm: 'codex-sol', key: 'codex-sol', label: 'Codex alone (gpt-6.2-sol)', kind: 'agent', engine: null, version: null, model: 'gpt-6.2-sol' };
-  const NEW = 'r20261109T150000-11', OLD = 'r20261108T162000-7';
-  const TASKS = ['astropy__astropy-12907', 'django__django-15347', 'pydata__xarray-4094', 'sympy__sympy-21614', 'sphinx-doc__sphinx-8595'];
-  const hist = () => ({ set: SET, guard: { conveyor: false, agent: false },
-    runs: [{ id: NEW, state: 'done', started: iso(T0 - 7200000), ended: iso(T0 - 3600000), n: 5, set: SET, arms: ['conveyor', 'solo', 'codex-sol'], current: null,
-      cols: [{ ...C, done: 5, resolved: 4, notRun: 0, sessions: 13, tokens: 15300000, minutes: 102 }, { ...S, done: 5, resolved: 2, notRun: 0, sessions: 5, tokens: 5500000, minutes: 40 },
-        { ...X, done: 5, resolved: 2, notRun: 1, sessions: 4, tokens: 3600000, minutes: 28 }] },
-    { id: OLD, state: 'guard', started: iso(T0 - 90000000), ended: iso(T0 - 80000000), n: 20, set: SET, arms: ['conveyor'], current: null,
-      cols: [{ ...C, key: EA, engine: EA, version: 'v1.4.0', done: 12, resolved: 8, notRun: 0, sessions: 30, tokens: 40000000, minutes: 260 }] }],
-    arms: [{ name: 'conveyor', label: 'Conveyor', kind: 'conveyor', state: 'ready', why: null, guard: 'conveyor', perTask: { usual: 2.5, worst: 8, minutes: 20, session: 1.25 }, key: null, keyPrefix: '' },
-      { name: 'solo', label: 'Claude alone', kind: 'agent', state: 'ready', why: null, guard: 'agent', perTask: { usual: 1, worst: 1, minutes: 8, session: 2 }, key: 'solo-claude-opus-5-5', keyPrefix: null },
-      { name: 'codex-sol', label: 'Codex alone (gpt-6.2-sol)', kind: 'agent', state: 'ready', why: null, guard: null, perTask: { usual: 1, worst: 1, minutes: 6 }, key: 'codex-sol', keyPrefix: null },
-      { name: 'superpowers', label: 'Claude with Superpowers', kind: 'agent', state: 'failed', why: 'it did not fire: its output shows no use of its method', guard: 'agent', perTask: { usual: 1, worst: 1, minutes: 8 }, key: 'superpowers-claude-opus-5-5', keyPrefix: null },
-      { name: 'chisle', label: 'Claude with Chisle', kind: 'agent', state: 'unchecked', why: null, guard: 'agent', perTask: { usual: 4, worst: 4, minutes: 8 }, key: 'chisle', keyPrefix: null },
-      { name: 'stub-off', label: 'Stub off', kind: 'agent', state: 'not offered', why: 'it needs an API key', guard: null, perTask: null, key: null, keyPrefix: null }],
-    keys: [{ key: EA, at: [0, 1, 2] }, { key: 'solo-claude-opus-5-5', at: [0, 1, 2, 3, 4] }] });
-  const cell = (arm, r, o = {}) => ({ arm, result: r, reused: false, resolved: r === 'resolved', fired: true, why: null, sessions: 1, tokens: 1000000, minutes: 8, steps: [], patch: [{ path: 'a.py', added: 3, removed: 1 }], ...o });
-  const STEPS = [{ step: 'build', result: 'ok', tokens: { claude: 3100000, codex: 0 } }, { step: 'review', result: 'NO-GO', tail: '[P1] query.py:9 combine() drops the negation when the right side is empty' },
-    { step: 'fix', result: 'ok', tokens: { claude: 900000, codex: 0 } }, { step: 'review', result: 'GO' }, { step: 'test', result: 'fail' }, { step: 'fix', result: 'ok', tokens: { claude: 400000, codex: 0 } }, { step: 'landed', result: 'ok' }];
-  const run = () => ({ run: hist().runs[0], tasks: TASKS.map((id, i) => ({ id, title: i === 1 ? 'Q objects lose their negation when combined with an empty Q' : null,
-    cells: [cell('conveyor', i === 4 ? 'unresolved' : 'resolved', { sessions: 3, minutes: 20, tokens: 4000000, steps: i === 1 ? STEPS : [], patch: i === 1 ? [{ path: 'django/db/models/sql/query.py', added: 30, removed: 5 }, { path: 'tests/queries/test_q.py', added: 8, removed: 1 }] : [] }),
-      cell('solo', [0, 2].includes(i) ? 'resolved' : 'unresolved'),
-      i === 4 ? { arm: 'codex-sol', result: 'not run: its Docker image could not be fetched or built', reused: false } : cell('codex-sol', i < 2 ? 'resolved' : 'unresolved')] })) });
-  function open(w, { body } = {}) {
-    w.benchBody = body || ((url) => (/&run=/.test(url) ? run() : hist()));
-    w.downloads = [];
-    w.HTMLAnchorElement.prototype.click = function () { w.downloads.push({ name: this.download, href: this.href }); };
-    deliver(w, full());
-    // The tab opens on Start a run with no run going (#646); the cases start from the Overview, as a person does who
-    // clicks it. The cases of where the tab opens boot it without BH.open.
-    act(bp(w), 'page-overview').click();
+  const E = (c) => c.repeat(40), H = 3600000, D = 24 * H, SET = { dataset: 'princeton-nlp/SWE-bench_Verified', revision: 'c104f840cc67f8b6eec6f759ebc8b2693d585d4a', seed: 'conveyor' };
+  const REPOS = [['django', 'django', 231], ['sympy', 'sympy', 75], ['sphinx-doc', 'sphinx', 44], ['matplotlib', 'matplotlib', 34], ['scikit-learn', 'scikit-learn', 32], ['astropy', 'astropy', 22],
+    ['pydata', 'xarray', 22], ['pytest-dev', 'pytest', 19], ['pylint-dev', 'pylint', 10], ['psf', 'requests', 8], ['mwaskom', 'seaborn', 2], ['pallets', 'flask', 1]];
+  const ALL = REPOS.flatMap(([o, r, c]) => Array.from({ length: c }, (_, j) => `${o}__${r}-${10000 + j}`));
+  // The pinned order: every tenth task of the set first (50 tasks across the repositories), then the rest.
+  const ORDER = ALL.filter((_, i) => i % 10 === 0).concat(ALL.filter((_, i) => i % 10 !== 0)), TASKS = ORDER.slice(0, 50);
+  const TITLE = 'Missing call make_hashable on through_fields in ManyToManyRel';
+  // Each arm: name, label, kind, resolved of the 50, dollars, minutes, tokens and sessions a task, same twice.
+  const ARMS = [['conveyor', 'Conveyor', 'conveyor', 37, 1.92, 21, 410000, 4, 0.9], ['conveyor-codex-claude', 'Conveyor, Codex builds', 'conveyor', 35, 1.38, 18, 360000, 4, 0.88],
+    ['solo-review', 'Claude, then a review', 'agent', 31, 0.61, 6, 95000, 2, 0.8], ['codex-sol', 'Codex alone', 'agent', 30, 0.44, 5, 120000, 1, 0.78],
+    ['superpowers', 'Claude + Superpowers', 'agent', 29, 0.93, 9, 160000, 1, 0.74], ['solo', 'Claude alone', 'agent', 25, 0.31, 3, 48000, 1, 0.76], ['caveman', 'Claude + Caveman', 'agent', 22, 0.27, 3, 31000, 2, 0.7]];
+  const col = ([arm, label, kind], v = 'v1.9.0') => ({ arm, key: kind === 'conveyor' ? `${arm}-${E(v[3])}` : arm, label, kind, engine: kind === 'conveyor' ? E(v[3]) : null, version: kind === 'conveyor' ? v : null, model: null });
+  // A Conveyor arm's card: resolved, or lost at blocked, build, test step, fix round or review (task i % 5).
+  const LOSS = ['blocked', 'build', 'test', 'fix', 'review'];
+  const STEPS = { yes: ['build', 'review:NO-GO', 'fix', 'review:GO', 'test', 'landed'], blocked: ['build', 'review:NO-GO', 'fix', 'review:NO-GO', 'blocked'], build: ['build'],
+    test: ['build', 'review:GO', 'test:fail', 'fix', 'test', 'landed'], fix: ['build', 'review:NO-GO', 'fix', 'review:GO', 'test', 'landed'], review: ['build', 'review:GO', 'test', 'landed'] };
+  function steps(kind, t0) {
+    return STEPS[kind].map((x, j) => { const [step, result = 'ok'] = x.split(':');
+      return { step, result, time: iso(t0 + (11 + 2 * j) * 60000), tokens: step === 'build' ? { claude: 0, codex: 300000 } : { claude: 20000, codex: 0 },
+        ...(step === 'review' && result === 'NO-GO' ? { tail: '[P1] reverse_related.py:310 through_fields is not made hashable' } : {}), ...(step === 'blocked' ? { reason: 'review: the second review found the same defect' } : {}) }; });
+  }
+  const KINDS = ['broke', 'partial', 'nofix', 'nopatch'];
+  const TESTS = { resolved: [2, 0, 40, 0], broke: [2, 0, 38, 2], partial: [1, 1, 40, 0], nofix: [0, 2, 40, 0] };
+  function cell(a, i, yes, t0) {
+    const [arm, , kind, , usd, min, tok, ses] = a, fired = !(arm === 'caveman' && !yes && i % 7 === 0), loss = kind === 'conveyor' && !yes ? LOSS[i % 5] : null;
+    const cls = yes ? 'resolved' : !fired || loss === 'blocked' ? 'nopatch' : KINDS[i % 4], t = TESTS[cls], st = kind === 'conveyor' ? steps(yes ? 'yes' : loss, t0) : [];
+    const measures = cls === 'nopatch' ? null : yes ? { files: 2, codeAdded: 9, codeRemoved: 3, testAdded: kind === 'conveyor' ? 14 : 0, size: 1.3, strays: i % 5 === 4, lintClean: true, provesFix: kind === 'conveyor', clean: i % 5 !== 4 }
+      : { files: 1, codeAdded: 5, codeRemoved: 1, testAdded: 0, size: 0.8, strays: false, lintClean: true, provesFix: false, clean: false };
+    return { arm, result: yes ? 'resolved' : 'unresolved', reused: false, state: 'finished', resolved: yes, fired, why: fired ? null : 'it did not fire: its output shows no use of its method', ended: null,
+      timedOut: arm === 'superpowers' && (i === 45 || i === 47), sessions: ses, tokens: tok, minutes: min, cost: { usd, state: kind === 'conveyor' ? 'known' : 'estimate' },
+      findingsFixed: kind === 'conveyor' ? st.filter((s, j) => s.result === 'NO-GO' && st[j + 1] && st[j + 1].step === 'fix').length : null, fixRounds: kind === 'conveyor' ? st.filter((s) => s.step === 'fix').length : null,
+      steps: st, patch: [{ path: 'pkg/models.py', added: 9, removed: 3 }].concat(kind === 'conveyor' ? [{ path: 'tests/test_models.py', added: 14, removed: 0 }] : []), class: cls,
+      tests: t ? { failToPass: { passed: t[0], failed: t[1], failedTests: [] }, passToPass: { passed: t[2], failed: t[3], failedTests: [] } } : null,
+      ref: { code: { files: 1, added: 7, removed: 3 }, test: { files: 1, added: 12, removed: 0 } }, measures };
+  }
+  // A run of arms (each [arm, its resolved test, its version]) on the tasks given, its history line and its tasks.
+  function runOf(id, started, arms, ids, more = {}) {
+    const lines = arms.map(([a, yes, v]) => ({ a, c: col(a, v), cells: ids.map((t, i) => cell(a, i, yes(i), started + i * H / 2)) }));
+    const cols = lines.map(({ c, cells }) => ({ ...c, done: ids.length, resolved: cells.filter((x) => x.resolved).length, notRun: 0, sessions: cells.reduce((s, x) => s + x.sessions, 0),
+      tokens: cells.reduce((s, x) => s + x.tokens, 0), minutes: cells.reduce((s, x) => s + x.minutes, 0), classes: null, wall: 0,
+      cost: { usd: Math.round(cells.reduce((s, x) => s + x.cost.usd, 0) * 100) / 100, state: x0(cells) } }));
+    const line = { id, state: 'done', started: iso(started), ended: iso(started + 14 * H), n: ids.length, set: SET, arms: arms.map(([a]) => a[0]), current: null, cols, shared: {},
+      cost: { usd: Math.round(cols.reduce((s, c) => s + c.cost.usd, 0) * 100) / 100, state: cols.some((c) => c.cost.state === 'estimate') ? 'estimate' : 'known' }, ...more };
+    return { line, show: { run: line, tasks: ids.map((t, i) => ({ id: t, title: i === 0 ? TITLE : `Task ${i + 1} of the study`, cells: lines.map((l) => l.cells[i]) })), tail: [] } };
+  }
+  const x0 = (cells) => (cells.some((x) => x.cost.state === 'estimate') ? 'estimate' : 'known');
+  const STUDY = 'r20261109T020000-7', OLDS = [['v1.8.0', 'r20261107T221000-5', 35], ['v1.7.0', 'r20261106T093000-4', 34], ['v1.6.0', 'r20261105T180000-3', 29], ['v1.5.0', 'r20261104T110000-2', 31], ['v1.4.0', 'r20261103T150000-1', 12]];
+  const ARCHIVED = 'r20261102T120000-9', LIVE = 'r20261109T150000-8';
+  function study() {
+    const runs = [runOf(STUDY, T0 - 15 * H, ARMS.map((a) => [a, (i) => i < a[3]]), TASKS),
+      ...OLDS.map(([v, id, k], j) => runOf(id, T0 - (2 + j) * D, [[ARMS[0], v === 'v1.8.0' ? (i) => i < 34 || i === 37 : (i) => i < k, v]], TASKS.slice(0, v === 'v1.4.0' ? 20 : 50))),
+      runOf(ARCHIVED, T0 - 7 * D, [[ARMS[5], () => true]], TASKS.slice(0, 5), { archived: iso(T0 - 6 * D) })];
+    const arms = ARMS.map(([name, label, kind, , usd, min, , ses], i) => ({ name, label, kind, state: i === 6 ? 'changed' : i === 4 ? 'expired' : 'ready', why: null, guard: kind === 'conveyor' ? 'conveyor' : /^codex/.test(name) ? null : 'agent',
+      perTask: { usual: ses, worst: ses * 2, minutes: min, session: usd / ses }, key: kind === 'conveyor' ? null : name, keyPrefix: kind === 'conveyor' ? `${name}-` : null }));
+    const keys = runs.flatMap((r) => r.line.cols.map((c) => ({ key: c.key, at: Array.from({ length: r.line.n }, (_, i) => i), figures: { sameTwice: (ARMS.find((a) => a[0] === c.arm) || [])[8] ?? null } })));
+    return { hist: { set: SET, limits: { cpus: 4, memory: '8g', taskTimeout: 3600 }, guard: { conveyor: false, agent: false }, arms, runs: runs.map((r) => r.line), keys, order: ORDER },
+      shows: Object.fromEntries(runs.map((r) => [r.line.id, r.show])), live: null,
+      versions: [{ name: 'main', commit: E('9') }, ...OLDS.map(([v]) => ({ name: v, commit: E(v[3]) })).reverse(), { name: 'v1.9.0', commit: E('9') }],
+      drift: { before: { engine: E('8'), cards: 61, landed: 49, blocked: 6, tokens: 412000, minutes: 38, reviews: 1.9, fixes: 1.4, waits: 12, spread: { tokens: 120000, minutes: 20, reviews: 0.8, fixes: 1, waits: 8 } },
+        after: { engine: E('9'), cards: 54, landed: 46, blocked: 4, tokens: 455000, minutes: 33, reviews: 1.6, fixes: 1.3, waits: 4, spread: { tokens: 120000, minutes: 20, reviews: 0.8, fixes: 1, waits: 8 } }, small: [] } };
+  }
+  // The study with a run of the 7 arms going on the next 50 tasks of the pinned order (LIVE_TASKS, which no result kept
+  // covers: the run reuses none): tasks 0 to 9 finished, task 10 by the first 3 arms, the 4th (Codex alone) on it for 4
+  // minutes, the rest waiting.
+  const LIVE_TASKS = ORDER.slice(50, 100);
+  function live() {
+    const s = study(), r = runOf(LIVE, T0 - 2 * H, ARMS.map((a) => [a, (i) => i < a[3]]), LIVE_TASKS), active = { arm: 'codex-sol', task: LIVE_TASKS[10], phase: 'Running agent', since: iso(T0 - 2 * 60000), start: iso(T0 - 4 * 60000) };
+    r.show.tasks.forEach((t, i) => t.cells.forEach((c, j) => { if (i < 10 || (i === 10 && j < 3)) return; Object.keys(c).forEach((k) => { if (!['arm', 'state'].includes(k)) delete c[k]; }); c.result = null; c.reused = false; c.state = i === 10 && j === 3 ? 'active' : 'waiting'; if (c.state === 'active') c.phase = 'Running agent'; }));
+    const done = (j) => (j < 3 ? 11 : 10);
+    const line = { ...r.line, state: 'running', ended: null, active, updated: iso(T0 - 60000), cost: { usd: 61.24, state: 'estimate' },
+      cols: r.line.cols.map((c, j) => ({ ...c, done: done(j), resolved: r.show.tasks.slice(0, done(j)).filter((t) => t.cells[j].resolved === true).length })) };
+    r.show.run = line;
+    r.show.tail = [{ at: iso(T0 - 9 * 60000), arm: 'conveyor', task: LIVE_TASKS[10], event: 'Resolved' }, { at: iso(T0 - 6 * 60000), arm: 'solo-review', task: LIVE_TASKS[10], event: 'Unresolved' },
+      { at: iso(T0 - 4 * 60000), arm: 'codex-sol', task: LIVE_TASKS[10], event: 'Running agent' }];
+    s.hist.runs.unshift(line); s.shows[LIVE] = r.show;
+    s.live = { id: LIVE, state: 'running', pid: 1, arms: ARMS.map((a) => a[0]), n: 350, done: 73, resolved: 60, current: LIVE_TASKS[10], seq: 4 };
+    return s;
+  }
+  // The 2 runs of 1 task on the build machine, kept before the grade's report was: each arm resolved it.
+  const FEW_TASK = 'django__django-14672', FEW1 = 'r20261108T195505-1961448', FEW2 = 'r20261108T153632-2395797';
+  function oldCell(arm, tokens, minutes, sessions, cost, patch, conv, t0) {
+    return { arm, result: 'resolved', reused: false, state: 'finished', resolved: true, fired: true, why: null, ended: null, timedOut: null, sessions, tokens, minutes, cost,
+      findingsFixed: null, fixRounds: null, steps: conv ? steps('review', t0).slice(0, 2).concat(steps('review', t0).slice(3)) : [], patch, class: null, tests: null, ref: null, measures: null };
+  }
+  function few() {
+    const fix = { path: 'django/db/models/fields/reverse_related.py', added: 1, removed: 1 }, test = { path: 'tests/model_fields/test_manytomanyfield.py', added: 7, removed: 0 }, t1 = T0 - 21 * H - 5 * 60000, t2 = T0 - 25 * H;
+    const C1 = [['conveyor-codex-claude', 'Conveyor, Codex builds', 'conveyor', 81308, 3.2, 3, { usd: 0.5048, state: 'known' }, [fix, test], 'v1.7.0'], ['ponytail', 'Claude + Ponytail', 'agent', 64488, 0.9, 2, null, [fix]],
+      ['solo-review', 'Claude, then a review', 'agent', 13201, 0.8, 2, null, [fix]], ['solo', 'Claude alone', 'agent', 1789, 0.5, 1, null, [fix]]];
+    const C2 = [['conveyor', 'Conveyor', 'conveyor', 76876, 2.9, 3, { usd: 0.493, state: 'known' }, [fix, test], 'v1.7.0']];
+    const lineOf = (id, started, mins, cs) => ({ id, state: 'done', started: iso(started), ended: iso(started + mins * 60000), n: 1, set: SET, arms: cs.map((c) => c[0]), current: null, shared: {}, cost: null,
+      cols: cs.map(([arm, label, kind, tokens, minutes, sessions, cost, , v]) => ({ arm, key: kind === 'conveyor' ? `${arm}-${E('7')}` : arm, label, kind, engine: kind === 'conveyor' ? E('7') : null, version: v || null, model: null,
+        done: 1, resolved: 1, notRun: 0, sessions, tokens, minutes, classes: null, cost, wall: minutes })) });
+    const showOf = (line, cs, t0) => ({ run: line, tasks: [{ id: FEW_TASK, title: TITLE, cells: cs.map(([arm, , kind, tokens, minutes, sessions, cost, patch]) => oldCell(arm, tokens, minutes, sessions, cost, patch, kind === 'conveyor', t0)) }], tail: [] });
+    const l1 = lineOf(FEW1, t1, 9, C1), l2 = lineOf(FEW2, t2, 6, C2);
+    const names = ['conveyor', 'conveyor-codex-claude', 'solo-review', 'solo', 'ponytail', 'codex-sol', 'superpowers', 'caveman', 'chisle', 'gstack', 'aider', 'opencode-kimi', 'codex-review', 'solo-sonnet', 'superpowers-codex'];
+    const arms = names.map((name, i) => ({ name, label: name, kind: i < 2 ? 'conveyor' : 'agent', state: i < 4 ? 'ready' : i === 4 ? 'expired' : 'unchecked', why: null, guard: i < 2 ? 'conveyor' : 'agent',
+      perTask: { usual: i < 2 ? 4 : 1, worst: i < 2 ? 8 : 1, minutes: i < 2 ? 21 : 3, session: i < 2 ? 0.48 : 0.31 }, key: i < 2 ? null : name, keyPrefix: i < 2 ? `${name}-` : null }));
+    return { hist: { set: SET, limits: { cpus: 4, memory: '8g', taskTimeout: 3600 }, guard: { conveyor: false, agent: false }, arms, runs: [l1, l2],
+      keys: [...l1.cols, ...l2.cols].map((c) => ({ key: c.key, at: [0], figures: { sameTwice: null } })), order: [FEW_TASK, ...ORDER.slice(1)] },
+    shows: { [FEW1]: showOf(l1, C1, t1), [FEW2]: showOf(l2, C2, t2) }, live: null, versions: [{ name: 'main', commit: E('9') }, { name: 'v1.7.0', commit: E('7') }], drift: null };
+  }
+  // The tab booted with a set served: GET bench gives its history, GET bench&run=<id> that run's tasks.
+  function open(w, set) {
+    w.benchBody = (url) => { const m = /&run=([^&]+)$/.exec(url); return m ? set.shows[decodeURIComponent(m[1])] || null : set.hist; };
+    const d = full();
+    Object.assign(d.panels.bench.data.bench, { live: set.live, versions: set.versions });
+    d.panels.bench.data.drift = set.drift;
+    deliver(w, d);
+    return d;
   }
   const bp = (w) => panel(w, 'bench');
-  const heads = (w) => Array.from(bp(w).querySelectorAll('.bench-sec > .bench-head > .board-head'), (x) => x.textContent);
+  const page = (w) => bp(w).querySelector('.bench-page');
+  // Each heading of the page shown, in its order: the verdict's line, then each card's and each fold's.
+  const heads = (w) => Array.from(page(w).querySelectorAll('.bench-vk, .bench-h, details > summary'), (x) => x.textContent);
   const pages = (w) => Array.from(bp(w).querySelectorAll('.bench-pnav button'), (b) => [b.textContent, b.getAttribute('aria-current')]);
-  return { EA, EB, NEW, OLD, TASKS, hist, run, open, bp, heads, pages, reply: TA.reply };
+  const go = (w, p) => act(bp(w), `page-${p}`).click();
+  return { ARMS, TASKS, ORDER, STUDY, OLDS, ARCHIVED, LIVE, LIVE_TASKS, FEW_TASK, FEW1, FEW2, TITLE, study, live, few, open, bp, page, heads, pages, go, reply: TA.reply };
 })();

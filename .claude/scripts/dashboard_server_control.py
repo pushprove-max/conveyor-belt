@@ -104,7 +104,7 @@ def control_ok(body):
             or (n == 2 and v[0] == 'stop' and RUN_ID.fullmatch(v[1]) is not None)
     if a == 'testmap':  # the Tests page's Build the test map, or its Stop
         return v in (['build'], ['stop'])
-    if a == 'bench':  # the Benchmarks tab: Start (n, then --solo, or arms and a version, then the shared settings), Stop, List versions, an arm's preflight, an arm saved, Compare (two versions or results keys)
+    if a == 'bench':  # `bench swe`: Start (n, then --solo, or arms and a version, then the shared settings), Stop, List versions, an arm's preflight, an arm saved, Compare (two versions or results keys); the Benchmarks tab sends Start with n and arms, Stop, preflights, the runs' Archive, Restore and Delete, and Compare
         if v in (['stop'], ['versions']):
             return True
         if v[:1] == ['stop']:  # Stop of the run the tab shows, by its id: a late one never stops the run after it

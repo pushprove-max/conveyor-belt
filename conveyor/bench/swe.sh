@@ -312,12 +312,13 @@ swe_lines() {
 # since its check, unchecked, not offered), why, the step a check that runs is at, its check's ID (check) and time (at), the guard that holds it back (swe_guards), its results key on swe.json's
 # settings (swe_reskey; null for a conveyor arm, whose key ends with its engine's commit: keyPrefix and the commit)
 # and its sessions, minutes and a session's dollars (swe_pertask); keys, each results key with the places of its tasks
-# in the pinned order (a run reuses them) and its figures (SWE_FIGS); guard, whether the usage guard
+# in the pinned order (a run reuses them) and its figures (SWE_FIGS); order, every task ID of the set in the pinned
+# order of swe.json's settings (the Board's Task map; [] when the task list cannot be read); guard, whether the usage guard
 # holds back a run with a conveyor arm (conveyor) or another arm on the Claude login (agent); set, the task set, and
-# limits, each task container's, of swe.json (the defaults the Board's Run settings show);
+# limits, each task container's, of swe.json (what the Board's Plan a run says each container gets);
 # choices, the models and efforts a saved arm may choose (swe_choices; null when the pack does not read).
 # The arms are the host arms and then each saved revision (swe_armsave; one whose recipe is gone is left out), each
-# with revision ({id, name, at, recipe}; null for a host arm), spec (the choices the Board's arm form starts a copy
+# with revision ({id, name, at, recipe}; null for a host arm), spec (the choices a copy of the arm starts
 # from: a saved revision's own; a host conveyor arm's seats, rules and policy; a host agent arm's recipe, CLI and
 # model when it takes a model on one CLI a container signs in to; else null), sessions and effort (a host agent arm's:
 # the sessions a trial takes, and whether its run passes $SWE_EFFORT, so a saved arm on it may choose one).
@@ -359,7 +360,7 @@ swe_history() {
     --slurpfile order <(jq -c .id "$(swe_list "$(swe_set .revision)" "$(swe_set .seed)")" 2>/dev/null) --argjson set "$SWE_SET" "$SWE_RUNSUM$SWE_MADE$SWE_FIGS"'
     ($res + $again | map({key: reskey, value: .}) | from_entries) as $R | ($order | to_entries | map({key: .value, value: .key}) | from_entries) as $pos
     | (map(. as $l | results[] | {p: ., id: $l.id}) | group_by(.p) | map({key: .[0].p, value: map(.id)}) | from_entries) as $S
-    | {set: ($set | {dataset, revision, seed}), limits: ($set | {cpus, memory, taskTimeout}), guard: {conveyor: $gc, agent: $ga}, arms: $arms, choices: $ch, defaults: $df,
+    | {set: ($set | {dataset, revision, seed}), limits: ($set | {cpus, memory, taskTimeout}), guard: {conveyor: $gc, agent: $ga}, arms: $arms, choices: $ch, defaults: $df, order: $order,
        runs: (sort_by(.started // "") | reverse | map(. as $l | runsum($R) + {shared: ([$l | results[] | {key: ., value: (($S[.] // []) - [$l.id])} | select(.value | length > 0)] | from_entries)})),
        keys: (. as $L | $res | group_by(.key) | map({key: .[0].key, at: (map($pos[.task] // empty) | sort), figures: figures($L; .[0].key)}))}'
 }
@@ -394,6 +395,7 @@ swe_show() { # <run id>
   # swe_phase), waiting (the run goes and has not reached it), interrupted (the work a Stop ended) or not reached.
   # Each cell's cost is that of this run's work on it: its task line's (a task not run after its trial ran costs what
   # the trial did), the interrupted work's, else its kept result's (a line written before costs were); null when none.
+  # A cell's again is the run ID of a result this run kept apart (null for a kept result under its key, the one diff reads).
   # tail: the run's event tail (swe_event), its fields only.
   jq -c --slurpfile res "$o" --slurpfile tl <(jq -c '{id, title: (.issue // "" | split("\n") | map(select(test("\\S"))) | first // "" | .[0:160])}' \
     "$(swe_list "$(jq -r --arg d "$(swe_conf .revision)" '(.set.revision | strings | select(test("^[0-9a-f]{40}$"))) // $d' <<<"$l")" "$(jq -r --arg d "$(swe_conf .seed)" '(.set.seed | strings) // $d' <<<"$l")")" 2>/dev/null) \
@@ -408,7 +410,7 @@ swe_show() { # <run id>
            state: (if $t != null then "finished" elif at($run.active; $c; $id) then "active" elif $run.state == "running" then "waiting"
              elif at($l.interrupted; $c; $id) then "interrupted" else "not reached" end)}
           + (if $t == null and at($run.active; $c; $id) then {phase: $run.active.phase} else {} end)
-          + ((if $t == null or ($t.result | tostring | startswith("not run")) then {} else resof($R; $l.id; $c.key; $id) // {} end) | {resolved, fired, why, ended, timedOut, sessions, tokens, minutes, cost, findingsFixed, fixRounds, steps, patch, class, tests, ref, measures})
+          + ((if $t == null or ($t.result | tostring | startswith("not run")) then {} else resof($R; $l.id; $c.key; $id) // {} end) | {resolved, fired, why, ended, timedOut, sessions, tokens, minutes, cost, findingsFixed, fixRounds, steps, patch, class, tests, ref, measures, again})
           + {cost: (if $t != null then $t.cost // (if $t.result | tostring | startswith("not run") then null else resof($R; $l.id; $c.key; $id).cost end)
               elif at($l.interrupted; $c; $id) then $l.interrupted.cost else null end)}]}],
       tail: [$tail[] | objects | {at, arm, task, event} | select(all(.[]; . == null or type == "string"))]}' <<<"$l"
@@ -738,12 +740,13 @@ swe_run() { # <n> <engine> <arm>...
   # the run's recorded end (state refused, with why), which the Board shows once it no longer waits for the answer.
   # cols names each arm's results key (the Board's history and run page read each arm's results by it), set the
   # task set (dataset, revision and seed: runs of one set are read side by side) and limits each trial's (swe_settings).
+  # again: true for a run with --again, which reuses no kept result (the Board's Live run then counts none as reused).
   SWE_RUN=r$(date -u +%Y%m%dT%H%M%S)-$$; rm -f "$SWE_DIR/stop"
-  swe_put "$SWE_DIR/live.json" "$(printf '%s\n' "${ctxs[@]}" | jq -sc --arg id "$SWE_RUN" --argjson pid "$$" --argjson n "$n" --arg at "$(swe_now)" \
+  swe_put "$SWE_DIR/live.json" "$(printf '%s\n' "${ctxs[@]}" | jq -sc --arg id "$SWE_RUN" --argjson pid "$$" --argjson n "$n" --arg at "$(swe_now)" --arg ag "${SWE_AGAIN:-}" \
     --argjson set "$SWE_SET" "$SWE_NAMES"'. as $c | $c[0]
     | {id: $id, pid: $pid, arm, key, engine, version, model, arms: ($c | map(.arm)), label: ($c | map(runname) | join(", ")), n: ($n * ($c | length)),
        cols: ($c | map({arm, key, label, kind, engine, version, model})), set: ($set | {dataset, revision, seed}), limits: ($set | {cpus, memory, taskTimeout}),
-       done: 0, resolved: 0, current: null, active: null, seq: 1, updated: $at, started: $at, state: "running", tasks: []}')"
+       done: 0, resolved: 0, current: null, active: null, seq: 1, updated: $at, started: $at, state: "running", tasks: []} + (if $ag == "" then {} else {again: true} end)')"
   trap 'swe_stopping; exit 143' TERM INT
   swe_board; swe_event 'Run started'
   # The run's receipt, once its record is written: the Board's Start answers it. A run that reuses the saved result
@@ -958,9 +961,11 @@ swe_side() { # <A or B>
 }
 # Two sides that both run an engine are told the engine changes to the stage where their runs went apart; for any
 # other two, changes is null. Each side's totals have cost, the list price of its results on those tasks (costsum: a
-# result kept before costs were has none, so it is unknown, never $0).
+# result kept before costs were has none, so it is unknown, never $0). steps: the stages whose engine files a commit
+# between the two sides changed, a task flipped or not (stagemap.sh's map of B's engine, in the order of a card's
+# stages); null when a side runs no engine or the map cannot be made.
 swe_diff() { # <A> <B> [--json]
-  local ca cb va vb ka kb d da db ids id fa fb st sm files=() flips='[]' ch why n e=''
+  local ca cb va vb ka kb d da db ids id fa fb st sm='' files=() flips='[]' ch why n e='' steps=null
   swe_side "$1" || return 1; ca=$SIDE_COMMIT; va=$SIDE_NAME; ka=$SIDE_KEY; swe_side "$2" || return 1; cb=$SIDE_COMMIT; vb=$SIDE_NAME; kb=$SIDE_KEY
   da=$SWE_DIR/results/$ka; db=$SWE_DIR/results/$kb
   ids=$(comm -12 <(cd "$da" 2>/dev/null && ls -- *.json 2>/dev/null | sort) <(cd "$db" 2>/dev/null && ls -- *.json 2>/dev/null | sort) | sed 's/\.json$//')
@@ -968,13 +973,21 @@ swe_diff() { # <A> <B> [--json]
   if [ -n "$ca" ] && [ -n "$cb" ]; then
     { installed "$cb" || install "$cb" "$(swe_src)" > /dev/null; } && e=$VERSIONS/$cb || { echo "conveyor: engine $2 could not be installed to read its stages" >&2; return 1; }
   fi
+  local mp=''
+  if [ -n "$e" ] && sm=$(bash "$HERE/bench/stagemap.sh" "$e/conveyor" 2>/dev/null); then
+    mp=1; local lg; lg=$(git -C "$e" log --format= --name-only "$ca...$cb" -- conveyor 2>/dev/null) \
+      && steps=$(awk -F '\t' 'NR == FNR { if ($0 != "") c[$0] = 1; next } ("conveyor/" $1) in c { n = split($2, s, ","); for (i = 1; i <= n; i++) print s[i] }' \
+        <(printf '%s\n' "$lg") <(printf '%s\n' "$sm") | jq -Rsc '["build", "review", "fix", "test", "land", "push"] as $o | split("\n") | map(select(. != "")) | unique
+        | sort_by(. as $s | $o | index($s) // 99)') || steps=null
+  else sm=''
+  fi
   d=$SWE_DIR/diff/$ka-$kb; mkdir -p "$d"
   while IFS= read -r id; do
     fa=$(cat "$da/$id.json"); fb=$(cat "$db/$id.json")
     [ "$(jq -n --argjson a "$fa" --argjson b "$fb" '$a.resolved == $b.resolved')" = false ] || continue
     st=$(jq -rn --argjson a "$fa" --argjson b "$fb" "$SWE_STAGE"' apart($a.steps; $b.steps) // "build"')
     # The files of that stage in B's engine (stagemap.sh); null changes when its map cannot be made, or a side runs no engine.
-    ch=null; [ -n "$e" ] && sm=$(bash "$HERE/bench/stagemap.sh" "$e/conveyor" 2>/dev/null) && ch='[]' \
+    ch=null; [ -n "$mp" ] && ch='[]' \
       && mapfile -t files < <(awk -F '\t' -v s="$st" '("," $2 ",") ~ ("," s ",") { print "conveyor/" $1 }' <<<"$sm")
     [ "$ch" = null ] || [ ${#files[@]} = 0 ] || ch=$(git -C "$e" log --format='%h%x09%s' "$ca...$cb" -- "${files[@]}" 2>/dev/null | jq -Rsc 'split("\n") | map(select(. != "") | split("\t") | {commit: .[0], title: .[1]})')
     n=$(jq -nc --arg t "$id" --arg s "$st" --argjson a "$fa" --argjson b "$fb" --argjson ch "$ch" --arg va "$va" --arg vb "$vb" "$SWE_STAGE"'
@@ -987,14 +1000,14 @@ swe_diff() { # <A> <B> [--json]
     fi
     flips=$(jq -c --argjson n "$n" --arg w "$why" '. + [$n + {reading: (if $w == "" then null else $w end)}]' <<<"$flips")
   done <<<"$ids"
-  local j; j=$(jq -n --slurpfile fl <(printf '%s\n' "$flips") --arg va "$va" --arg vb "$vb" --arg ca "$ca" --arg cb "$cb" --arg noise "$(swe_noise "$(wc -l <<<"$ids")")" \
+  local j; j=$(jq -n --slurpfile fl <(printf '%s\n' "$flips") --arg va "$va" --arg vb "$vb" --arg ca "$ca" --arg cb "$cb" --argjson steps "$steps" --arg noise "$(swe_noise "$(wc -l <<<"$ids")")" \
     --slurpfile ra <(for id in $ids; do cat "$da/$id.json"; done) --slurpfile rb <(for id in $ids; do cat "$db/$id.json"; done) "$SWE_RUNSUM$SWE_NOISED"'
     def tot: {resolved: (map(select(.resolved)) | length), sessions: (map(.sessions) | add), tokens: (map(.tokens) | add), minutes: (map(.minutes) | add * 10 | round / 10),
       cost: (map(.cost) | costsum)};
     def c: if . == "" then null else . end; $fl[0] as $f
     | ($ra | length) as $n | ($ra | tot) as $ta | ($rb | tot) as $tb | noised($n) as $dd
     | {a: {version: $va, commit: ($ca | c), totals: $ta}, b: {version: $vb, commit: ($cb | c), totals: $tb}, tasks: $n,
-       same: [$ra[] | .task] - [$f[] | .task], flipped: $f, noise: $noise, withinNoise: ((($ta.resolved - $tb.resolved) | fabs) < $dd)}')
+       same: [$ra[] | .task] - [$f[] | .task], flipped: $f, steps: $steps, noise: $noise, withinNoise: ((($ta.resolved - $tb.resolved) | fabs) < $dd)}')
   [ "${3:-}" != --json ] || { printf '%s\n' "$j"; return; }
   jq -r --arg e "$e" '"\(.a.version) against \(.b.version) on the \(.tasks) tasks both ran:",
     "  \(.a.version): \(.a.totals.resolved) resolved, \(.a.totals.sessions) sessions, \(.a.totals.tokens) tokens, \(.a.totals.minutes) minutes",

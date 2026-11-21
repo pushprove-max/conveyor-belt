@@ -303,6 +303,9 @@ t_swediff() {
     || fail "diff did not name the flipped task, the review step and the totals: $out"
   jq -e --arg c "${EB:0:7}" '.flipped[0].changes | map(.title) == ["review: stricter findings"] and (.[0].commit | startswith($c))' <<<"$out" > /dev/null \
     || fail "diff did not name the engine commit that changed the review stage: $(jq -c .flipped[0].changes <<<"$out")"
+  # Bug (#1177): the Board's Versions said no step changed when no task flipped: diff named a changed step only for a
+  # flipped task. B's commit changes lib/review.sh, which the review stage and the fix stage (rereview) reach.
+  [ "$(jq -c .steps <<<"$out")" = '["review","fix"]' ] || fail "diff does not name the stages whose engine files changed: $(jq -c .steps <<<"$out")"
   # Bug: findings came from the reason alone, which the record cuts short, not the NO-GO review's tail (its second line here).
   jq -e '.flipped[0] | .b.findings == ["[P1] x.py:1 the fix is wrong", "[P1] x.py:1 still wrong\n[P2] y.py:2 past the cut reason"] and .b.fixRounds == 1 and (.reading | startswith("B blocked at review"))' <<<"$out" > /dev/null \
     || fail "the flipped task's facts or the model's reading are missing: $(jq -c .flipped[0] <<<"$out")"
@@ -454,6 +457,8 @@ t_swehistory() {
   [ "$(jq -c 'def fp: if . then gsub("[0-9a-f]{12}"; "F") else . end; [(.arms | map(select(.name | IN("solo", "stub-a", "conveyor"))) | map([.name, .state, (.key | fp), (.keyPrefix | fp)])), (.keys | map([.key, .at]))]' <<<"$o")" \
     = '[[["conveyor","ready",null,"F-"],["solo","ready","solo-m-F",null],["stub-a","unchecked","stub-a-F",null]],[["stub-a",[0,1]],["stub-b",[1]]]]' ] \
     || fail "history does not give each arm's state and key, or each key's places in the pinned order: $(jq -c '[.arms, .keys]' <<<"$o")"
+  # Bug (#1177): the Board's Task map had no list of the set's tasks to show the ones not run yet by repository.
+  [ "$(jq -c .order <<<"$o")" = '["proj__b-2","proj__a-1"]' ] || fail "history does not give every task of the set in the pinned order: $(jq -c .order <<<"$o")"
   o=$(loop bench swe show r20261117T090000-1 2>&1) || fail "show failed: $o"
   [ "$(jq -c '[.run.id, (.tasks | map([.id, .title, (.cells | map([.arm, .result, .resolved, .patch]))]))]' <<<"$o")" \
     = '["r20261117T090000-1",[["proj__a-1","First task",[["stub-a","resolved",true,[{"path":"x.py","added":1,"removed":1}]],["stub-b","unresolved",false,null]]],["proj__b-2","Second line first",[["stub-a","resolved",true,null],["stub-b","not run: its Docker image could not be fetched or built",null,null]]]]]' ] \
