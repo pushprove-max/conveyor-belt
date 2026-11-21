@@ -337,17 +337,19 @@
     return [r.a.label, { v: a === null ? K.NOT_KEPT : [h('span', 'bench-plus', `+${a}`), ' ', h('span', 'bench-minus', `−${d}`)], c: 'r' },
       { v: t === null ? K.NOT_KEPT : t ? `+${t}` : h('span', 'bench-muted', 'none'), c: 'r' }, { v: f === null ? K.NOT_KEPT : String(f), c: 'r' }];
   }
-  // What the kept patches show: that every arm made the same change, and which arm alone added a test. Said only for arms
-  // whose patches are all kept.
+  // What the patch summary shows: that every arm changed the same code files by the same line counts (the summary the
+  // Board reads holds each file's path and line counts, never the code, so the note never says the change itself is the
+  // same; and it says nothing when no arm changed a code file), and which arms added a test. Said only for arms whose
+  // patch summaries are all kept.
   const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
   // The code files of an arm's patches with their line counts, as one text; null when a patch is not kept (a result that
   // keeps only the totals, not the files, cannot say the files are the same).
   const codeOf = (r) => (r.f.cs.every((c) => Array.isArray(c.patch)) ? JSON.stringify(r.f.cs.flatMap((c) => c.patch.filter((f) => !K.isTest(String(f.path))).map((f) => [f.path, f.added, f.removed])).sort()) : null);
   function fewPatchNote(rows) {
     const ls = rows.map((r) => { const v = r.f.cs.map(K.linesOf); return v.some((l) => l === null) ? null : { add: K.sum(v.map((l) => l.add)), del: K.sum(v.map((l) => l.del)), test: K.sum(v.map((l) => l.test)) }; });
-    const say = ['Real, from the patches the results keep.'], code = rows.map(codeOf), same = rows.length > 1 && ls.every((l) => l && l.add === ls[0].add && l.del === ls[0].del) && code.every((x) => x !== null && x === code[0]), t =rows.filter((r, i) => ls[i] && ls[i].test), some = ls.every(Boolean) && t.length > 0 && t.length < rows.length;
-    if (same) say.push(`All ${WORDS[rows.length] || rows.length} made the same ${ls[0].add === 1 && ls[0].del === 1 ? 'one-line' : `+${ls[0].add} −${ls[0].del}`} fix${some ? ';' : '.'}`);
-    if (some) say.push(`${same ? 'only' : 'Only'} ${t.map((r) => r.a.label).join(', ').replace(/, ([^,]*)$/, ' and $1')} added a test${t.length === 1 ? ` (${ls[rows.indexOf(t[0])].test} lines)` : ''}.`);
+    const say = ['Real, from the patches the results keep.'], code = rows.map(codeOf), same = rows.length > 1 && ls.every((l) => l && l.add === ls[0].add && l.del === ls[0].del) && code.every((x) => x !== null && x !== '[]' && x === code[0]), t =rows.filter((r, i) => ls[i] && ls[i].test), some = ls.every(Boolean) && t.length > 0 && t.length < rows.length;
+    if (same) say.push(`All ${WORDS[rows.length] || rows.length} changed the same code files by +${ls[0].add} −${ls[0].del}.`);
+    if (some) say.push(`Only ${t.map((r) => r.a.label).join(', ').replace(/, ([^,]*)$/, ' and $1')} added a test${t.length === 1 ? ` (${ls[rows.indexOf(t[0])].test} lines)` : ''}.`);
     return say.join(' ');
   }
   function fewHidden(rows) {

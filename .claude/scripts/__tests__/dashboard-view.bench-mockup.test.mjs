@@ -68,7 +68,7 @@ test('Scoreboard, 2 runs of 1 task: the mockup\'s leaderboard note, patch note, 
   const notes = Array.from(page(w).querySelectorAll('.bench-note'), text);
   // The table shows "not priced" for these arms and adds no estimate: the note must not say it prices them from tokens.
   assert.ok(notes.includes('"Not priced": agent arms report no usage by model today, so their cost is not priced.'), notes.join(' | '));
-  assert.ok(notes.includes('Real, from the patches the results keep. All five made the same one-line fix; only Conveyor, Codex builds v1.7.0 and Conveyor v1.7.0 added a test.'), notes.join(' | '));
+  assert.ok(notes.includes('Real, from the patches the results keep. All five changed the same code files by +1 −1. Only Conveyor, Codex builds v1.7.0 and Conveyor v1.7.0 added a test.'), notes.join(' | '));
   assert.equal(text(q(w, '.bench-callout-warn')), 'Every arm passed the task\'s hidden tests: that is all the results keep. The run records resolved yes or no and the patch, '
     + 'and the harness report with each fail-to-pass and pass-to-pass test is removed. To show these panels, the engine must keep that report. Size, strays and lint can be read from the patches the results already keep.');
   assert.ok(Array.from(box(w, 'Next run to make').querySelectorAll('li'), text).includes('The other 10 arms were never checked. A check costs 1 small task each.'));
@@ -173,13 +173,25 @@ test('Scoreboard, 2 runs of 1 task with one arm unresolved: the verdict gives th
 });
 
 // Bug it guards: the patch note said the arms made "the same fix" when only the line counts matched, though one arm
-// changed another file; the engine keeps paths and counts, so the same fix means the same code files with the same counts.
+// changed another file. The summary the Board reads holds only each file's path and line counts, never the code, so equal
+// files and counts do not make it the same fix either: the note says "changed the same code files by +1 −1" and never
+// "the same fix".
 test('Scoreboard, 2 runs of 1 task, one arm editing another file with the same counts: the patch note does not claim the same fix', async () => {
   const set = BH.few();
   set.shows[BH.FEW1].tasks[0].cells[1].patch = [{ path: 'django/db/models/other_module.py', added: 1, removed: 1 }];
   const w = await opened(set);
   const notes = Array.from(page(w).querySelectorAll('.bench-note'), text);
   assert.ok(notes.includes('Real, from the patches the results keep. Only Conveyor, Codex builds v1.7.0 and Conveyor v1.7.0 added a test.'), notes.join(' | '));
+});
+
+// Bug it guards: when no arm produced a patch (each result has an empty patch summary), the note said "All five changed
+// the same code files by +0 −0" though no arm changed a file.
+test('Scoreboard, 2 runs of 1 task, no arm with a patch: the patch note does not say the arms changed the same files', async () => {
+  const set = BH.few();
+  for (const id of [BH.FEW1, BH.FEW2]) for (const c of set.shows[id].tasks[0].cells) c.patch = [];
+  const w = await opened(set);
+  const notes = Array.from(page(w).querySelectorAll('.bench-note'), text);
+  assert.ok(notes.includes('Real, from the patches the results keep.'), notes.join(' | '));
 });
 
 // Bug it guards: Compare named both bars "Claude with" when two arms' labels share their first 2 words.
