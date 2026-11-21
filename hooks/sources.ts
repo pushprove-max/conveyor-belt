@@ -945,6 +945,12 @@ const pushLines =(s: State, snap: Snap, w: number, lead: string): Line[] => (sna
 // QUEUE: the next five, numbered, the title cut to fit and the priority right-aligned; then the
 // held-back line.
 const NEXT = 5
+// The next five issues the engine picks, numbered, the title cut to fit and the priority right-aligned. The one the
+// machine holds back says why, with the figure that held it: wrapped at its words, as the figure is last.
+const readyRows = (snap: Snap, w: number): Line[] => (snap.queue ?? []).slice(0, NEXT).flatMap((q, i): Line[] => [titled(q, [{ t: ` ${i + 1} `, d: true }],
+  [{ t: q.priority || 'P3', c: q.priority === 'P0' || q.priority === 'P1' ? C.you : undefined, d: !(q.priority === 'P0' || q.priority === 'P1') },
+    ...(q.followup || q.retried ? [{ t: ` · ${[...(q.followup ? ['follow-up'] : []), ...(q.retried ? ['retried'] : [])].join(' · ')}`, d: true }] : [])], w, false),
+  ...(q.room ? wrapParts(q.room.split(' '), w, '    ', ' ') : [])])
 export const queueModel = (snap: Snap, w: number): Line[] => {
   const next = (snap.queue ?? []).slice(0, NEXT)
   const all = snap.queue?.length ?? 0, more = all > NEXT || snap.queueMore
@@ -954,11 +960,7 @@ export const queueModel = (snap: Snap, w: number): Line[] => {
     ...(snap.queue === null ? [empty('not read: GitHub did not list the issues')] : next.length ? []
       : snap.waits.length ? wrapParts(['nothing can be picked: waiting for', ...waitedOn(snap.waits)], w, '  ', ' ', { d: true })
       : [empty('the queue is empty')]),
-    ...next.flatMap((q, i): Line[] => [titled(q, [{ t: ` ${i + 1} `, d: true }],
-      [{ t: q.priority || 'P3', c: q.priority === 'P0' || q.priority === 'P1' ? C.you : undefined, d: !(q.priority === 'P0' || q.priority === 'P1') },
-        ...(q.followup || q.retried ? [{ t: ` · ${[...(q.followup ? ['follow-up'] : []), ...(q.retried ? ['retried'] : [])].join(' · ')}`, d: true }] : [])], w, false),
-      // The one the machine holds back says why, with the figure that held it: wrapped at its words, as the figure is last.
-      ...(q.room ? wrapParts(q.room.split(' '), w, '    ', ' ') : [])]),
+    ...readyRows(snap, w),
     // The issues that wait on another: not in the pick order, each with what it waits for.
     // A label too long to sit beside the title (with room for 6 columns of it) goes under it, wrapped at its words:
     // beside it, spread would drop the label whole.
@@ -1167,14 +1169,14 @@ export const activityModel = (s: State, snap: Snap, w: number, frame: number): L
   }),
 ]
 
-// PICK ORDER: the issues that wait on another, in the order the engine will pick them, each with the issues it waits
-// for; the count the engine can pick now on the right. The issues it waits for wrap at each one, under the Requires
+// PICK ORDER: the next five issues the engine picks, then the issues that wait on another, in the order the engine will
+// pick them, each with the issues it waits for; on the right, "next 5 of 7" or the count the engine can pick now. The issues it waits for wrap at each one, under the Requires
 // column: cut at the width, a row lost the last of them.
 // The parts of one parent issue are one entry, under the Parent column: the parent's number, its parts done of all,
 // the parts in flight and its title; a part that waits is not a row of its own.
 export const pickModel = (snap: Snap, w: number): Line[] => {
-  const counts = pickCounts(snap)
-  const ready = snap.queue === null ? 'queue not read' : `${counts.ready}${snap.queueMore ? '+' : ''} ready`
+  const all = snap.queue?.length ?? 0
+  const ready = snap.queue === null ? 'queue not read' : all > NEXT || snap.queueMore ? `next ${NEXT} of ${all}${snap.queueMore ? '+' : ''}` : `${all} ready`
   const pidOf = (u: Umbrella): string => (u.repo ? `${u.repo}#${u.issue}` : `#${u.issue}`)
   const pids = snap.umbrellas.map(pidOf)
   // A waiting part whose parent has no entry (the snapshot does not list it) keeps its own row, so it is not lost.
@@ -1192,11 +1194,13 @@ export const pickModel = (snap: Snap, w: number): Line[] => {
   }
   return [
     section('PICK ORDER', ready, w),
+    ...readyRows(snap, w),
     ...(snap.umbrellas.length ? [fitWidth([{ t: `${padR('Parent', idW)}  Parts`, d: true }], w)] : []),
     ...snap.umbrellas.map((u): Line => fitWidth([{ t: `${padR(pidOf(u), idW)}  `, c: C.name, b: true }, { t: `${u.done} of ${u.all} done` },
       ...(u.inFlight.length ? [{ t: ` · ${u.inFlight.map(n => `#${n}`).join(', ')} in flight`, c: C.work }] : []),
       ...(u.title ? [{ t: `  ${shortTitle(u.title)}`, c: C.name }] : [])], w)),
-    ...(waits.length ? [fitWidth([{ t: `${padR('Waiting', idW)}  Requires`, d: true }], w)] : snap.umbrellas.length ? [] : [empty('nothing waiting')]),
+    ...(waits.length ? [fitWidth([{ t: `${padR('Waiting', idW)}  Requires`, d: true }], w)]
+      : snap.queue === null ? [empty('not read: GitHub did not list the issues')] : snap.umbrellas.length ? [] : all ? [empty('nothing waiting')] : [empty('the queue is empty')]),
     ...waits.flatMap((x, i): Line[] => requires(x).map((r, j): Line => fitWidth([
       { t: `${padR(j ? '' : ids[i], idW)}  `, c: C.name, b: true }, { t: r }], w))),
   ]

@@ -814,7 +814,7 @@ test('the pane at 60 columns: no line wider than the pane, and each matrix row e
   expect(cols(matrix[2])).toBe(60)
   expect(matrix[3]).toMatch(/^#3864 +✓ ▶ · · · · +\S+ +\$1\.25  Rebuild \/units for Conveyor$/)
   expect(text).toMatch(/\n◆ #3861 Fast lane lands thro… · your yes: Staff land F… +12m\n✗ #3850 Logo upload · blocked: review 3 was NO-GO: … +1h 30m\n/)
-  expect(text).toMatch(/\nPICK ORDER +10\+ ready\n  nothing waiting\nheld back: 3 dormant\n/)
+  expect(text).toMatch(/\nPICK ORDER +next 5 of 10\+\n( \d #39\d\d Issue \d +P2\n){5}  nothing waiting\nheld back: 3 dormant\n/)
   expect(text).toMatch(/\nLANDED TODAY · 7 +5 most recent of 7\nLanded +Issue +Verdict +Total +Cost\n(\S+ [AP]M +#380\d +2 reviews +– +\$4\.21\n){5}/)
   expect(text).toMatch(/\nFAST LANE      1 commit on fast-lane: A long subject .*…\nRESEARCH LANE  working · last activity 1m ago$/)
 })
@@ -902,7 +902,7 @@ test('a forced issue counts as ready only, and is not in Pick order', () => {
   const waiting = [{ issue: 3, title: 'Forced', waitsFor: [2], forced: true }, { issue: 4, title: 'Waits', waitsFor: [2], forced: false }]
   const text = paneModel(board({ queue: { next: [{ issue: 3, title: 'Forced', waitsFor: [2], forced: true }], held: {}, waiting } }), 72, 0).map(plain).join('\n')
   expect(text).toContain('\n0 ON BELT · 1 READY · 1 WAITING · 0 NEEDS YOU\n')
-  expect(text).toMatch(/\nPICK ORDER +1 ready\nWaiting +Requires\n#4 +#2\n\n/)
+  expect(text).toMatch(/\nPICK ORDER +1 ready\n 1 #3 Forced +P3\nWaiting +Requires\n#4 +#2\n\n/)
 })
 
 // Issue 650. Bug it catches: the parts of a parent issue (its GitHub sub-issues) showed as rows of their own, with no
@@ -927,7 +927,7 @@ test('the parts of one parent count as one in READY, and not in WAITING while a 
   const s = board({ queue: { next, held: {}, waiting: [{ issue: 653, title: 'Part 653', waitsFor: [651], umbrella: 650 }] }, open: { umbrellas } })
   const text = paneModel(s, 72, 0).map(plain).join('\n')
   expect(text).toContain('\n0 ON BELT · 1 READY · 0 WAITING · 0 NEEDS YOU\n')
-  expect(text).toMatch(/\nPICK ORDER +1 ready\nParent +Parts\n#650 +0 of 3 done  Parent\n\n/)
+  expect(text).toMatch(/\nPICK ORDER +2 ready\n 1 #651 Part 651 +P2\n 2 #652 Part 652 +P2\nParent +Parts\n#650 +0 of 3 done  Parent\n\n/)
 })
 
 // Issue 497. Bug it catches: a card's step marks did not follow its track: a done step, a skipped one and the one running.
@@ -1060,4 +1060,54 @@ test('WORKER ACTIVITY: a card in its Test step shows a bar of its tests done of 
   for (const l of rows(62)) expect(cols(l)).toBeLessThanOrEqual(62)
   const narrow = rows(30)[1]
   expect(narrow.startsWith('◐ #3865  ▰') && cols(narrow) <= 30).toBe(true)
+})
+
+// Issue 1272. Bug it catches: the pane's PICK ORDER named no ready issue, only a count, so with every slot full the
+// issues waiting for a slot were named nowhere. It lists the next five in pick order, as /units' QUEUE does.
+test('PICK ORDER lists the next five ready issues of two projects, numbered, with their priorities, above the Waiting table', () => {
+  const next = (n: number, p: string) => Array.from({ length: n }, (_, i) => ({ issue: 10 + i, title: `${p} issue ${i}`, priority: i === 0 ? 'P0' : 'P2', followup: false, retried: false }))
+  const waiting = [{ issue: 90, title: 'Waits', waitsFor: [10] }, { issue: 91, title: 'Waits too', waitsFor: [90] }]
+  const s = state(fetched([['bookstore', snapshot({ queue: { next: next(4, 'Book'), held: {}, waiting } })], ['gadgetlab', snapshot({ queue: { next: next(3, 'Gadget'), held: {} } })]]))
+  const text = paneModel(s, 72, 0).map(plain).join('\n')
+  expect(text).toContain(' 7 READY ')
+  const part = section(text, 'PICK ORDER').split('\n')
+  // Pick order: priority first, then the issue order; the open project's own issues show without its name.
+  expect(part.slice(0, 7)).toEqual([
+    expect.stringMatching(/^PICK ORDER +next 5 of 7$/),
+    expect.stringMatching(/^ 1 #10 Book issue 0 +P0$/),
+    expect.stringMatching(/^ 2 gadgetlab#10 Gadget issue 0 +P0$/),
+    expect.stringMatching(/^ 3 #11 Book issue 1 +P2$/),
+    expect.stringMatching(/^ 4 gadgetlab#11 Gadget issue 1 +P2$/),
+    expect.stringMatching(/^ 5 #12 Book issue 2 +P2$/),
+    expect.stringMatching(/^Waiting +Requires$/),
+  ])
+  expect(part.slice(7).join('\n')).toMatch(/^#90 +#10\n#91 +#90/)
+  expect(text).not.toContain('Gadget issue 2')
+})
+
+// Issue 1272. Bug it catches: the held-back reason, the follow-up and retried marks and the held-back line, which
+// the pane lost with the list.
+test('PICK ORDER says why the machine holds an issue back, marks a follow-up and a retried issue, and keeps the held-back line', () => {
+  const room = 'waiting for a machine slot: 2 of the machine cap 2 in use'
+  const next = [{ ...queued(1)[0], room }, { issue: 3950, title: 'Fix the follow-up', priority: 'P1', followup: true, retried: false }, { issue: 3951, title: 'Try again', priority: 'P2', followup: false, retried: true }]
+  const part = section(paneModel(board({ queue: { next, held: { dormant: 3 } } }), 72, 0).map(plain).join('\n'), 'PICK ORDER').split('\n')
+  expect(part.slice(0, 5)).toEqual([
+    expect.stringMatching(/^PICK ORDER +3 ready$/),
+    expect.stringMatching(/^ 1 #3950 Fix the follow-up +P1 · follow-up$/),
+    expect.stringMatching(/^ 2 #3900 Issue 0 +P2$/),
+    `    ${room}`,
+    expect.stringMatching(/^ 3 #3951 Try again +P2 · retried$/),
+  ])
+  expect(part.at(-1)).toBe('held back: 3 dormant')
+})
+
+// Issue 1272. Bug it catches: with nothing ready the pane said "nothing waiting" for an empty queue, and with only
+// waiting issues it must show no ready rows, only the Waiting table.
+test('PICK ORDER with nothing ready and nothing waiting says the queue is empty; with only waiting issues it shows the Waiting table alone', () => {
+  const empty = paneModel(board(), 72, 0).map(plain).join('\n')
+  expect(section(empty, 'PICK ORDER').split('\n').slice(1)).toEqual(['  the queue is empty'])
+  const waiting = paneModel(board({ queue: { next: [], held: {}, waiting: [{ issue: 5, title: 'Waits', waitsFor: [4] }] } }), 72, 0).map(plain).join('\n')
+  expect(section(waiting, 'PICK ORDER').split('\n').slice(1)).toEqual([expect.stringMatching(/^Waiting +Requires$/), expect.stringMatching(/^#5 +#4$/)])
+  const unread = paneModel(board({ queue: { next: null, held: null } }), 72, 0).map(plain).join('\n')
+  expect(section(unread, 'PICK ORDER').split('\n').slice(1)).toEqual(['  not read: GitHub did not list the issues'])
 })

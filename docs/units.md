@@ -161,10 +161,15 @@ this page says that it wraps.
 - **WORKER ACTIVITY**: one line for each card: its mark, its issue and the command that runs now, made short. A path
   in the card's worktree shows as `worktree` (`cd worktree/x && git add -A`), and any other path shows only its last
   part. On the right: the tool (`Bash`) and the time the step started. A card that runs no command shows its step.
-- **PICK ORDER**: on the right, how many issues the loop can pick now (`2 ready`). Then two columns, `Waiting` and
+- **PICK ORDER**: on the right, `next 5 of 7` when more than five issues are ready (with `+` when a project listed its
+  full ten), else how many the loop can pick now (`2 ready`). Under it, the next five issues in pick order, numbered,
+  each with its issue (and project when the pane shows more than one), its title cut to fit and its priority
+  right-aligned (`P0` and `P1` in the needs-you colour), then `follow-up` or `retried` when it is one. An issue the
+  machine holds back says why on a line under it (`waiting for a machine slot: …`). Then two columns, `Waiting` and
   `Requires`: each issue that waits on other issues and is not forced, and the issues it waits for (`#489  #485  #486  #487  #488`), in
   the order that the loop picks them. When the issues it waits for do not fit on one line, they go on to more lines
-  under `Requires`, so none is lost. The held-back line follows.
+  under `Requires`, so none is lost. With nothing ready and nothing waiting it reads `the queue is empty`, and with a
+  queue GitHub did not list, `not read: GitHub did not list the issues`. The held-back line follows.
 - **LANDED TODAY · 20**: the count of every card landed today; on the right, `5 most recent of 20`. One row for each of the five most recent cards: the time
   it landed, the issue, the last verdict and its round (`✓ GO r2`), its overall time and its cost (or `pushing`,
   `issue open` or `not pushed`).
