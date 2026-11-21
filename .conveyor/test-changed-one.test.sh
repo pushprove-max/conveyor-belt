@@ -135,7 +135,7 @@ PATH=$T/bin:$PATH one tree hooks/h.test.sh > /dev/null
 [ "$(calls)" = 2 ] && [ "$(cat "$T/rc")" = 1 ] || no "a changed tree's one-file run did not run the checks again: shellcheck ran $(calls) time(s), exit $(cat "$T/rc"): $(cat "$T/out")"
 
 # Issue 436: `--checks` is the pack's test.checkCommand: the loop runs it through its own treecheck()
-# (conveyor/lib/donewhen.sh) and puts the result in a test step's log folder (donewhen.sh checkskept()). Bugs: `--checks` runs a
+# (conveyor/lib/donewhen.sh) and puts the result in a test step's log folder (checkskept()). Bugs: `--checks` runs a
 # test file too, or passes on a warning; the loop's key of a tree is not this script's, so each one-file run of the
 # step ran the checks again. The loop's own functions run it here on a new tree (x.sh changed again): shellcheck runs
 # once, the run fails with the warning and runs no test file, and a one-file run given that folder reuses the result.

@@ -411,7 +411,7 @@ redkeep() { # <card> <output file> <without|with|setup>
   mkdir -p "${f%/*}" 2>/dev/null && { tr -d '\000' < "$2" || :; } 2>/dev/null > "$f" && printf '%s\n' "$f"
 }
 # The cases of <verdict> in a run's result (mainred.sh redrun()), as `<case>`, joined by ", ".
-rednames() { # <verdict> <mainred.sh mainred.sh redrun() output>
+rednames() { # <verdict> <mainred.sh redrun() output>
   jq -r --arg v "$1" '[.[] | select(.verdict == $v) | "`\(.name)`"] | join(", ")' <<<"$2"
 }
 # A run of the bug-card check (bugproof()) that is proof: it failed, and a test failed in it. With the runner's logs

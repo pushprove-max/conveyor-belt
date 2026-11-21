@@ -154,9 +154,9 @@ t_dwfixasks() {
     || fail "#13's fix question did not block it before any review: $(wc -l < "$STUB/sessions") session(s), $(st 'select(.issue == 13) | [.step, .reason] | map(strings) | join(" ")' | tr '\n' ,)"
 }
 
-# Bugs (#466): donewhen.sh asks() reads a Claude reply only, so a Codex or OpenCode builder's question goes on to review; and it
+# Bugs (#466): asks() reads a Claude reply only, so a Codex or OpenCode builder's question goes on to review; and it
 # counts a change already in the worktree before the session (a fix after a NO-GO) as the session's. asks()
-# (lib/donewhen.sh) is called on one worktree with each builder's stream in <worktree>.out, as donewhen.sh checked() calls it.
+# (lib/donewhen.sh) is called on one worktree with each builder's stream in <worktree>.out, as checked() calls it.
 t_asksreply() {
   setup '[]'
   local w=$T/$CASE/w q
@@ -266,7 +266,7 @@ t_dwnone() {
 # removes. Bugs: a line holding one moved from one file to another fails a reply that does not name it (a split of a
 # file then costs fix sessions); a new line holding TODO passes unnamed. The check is the engine's own donewhen()
 # (lib/donewhen.sh), called on a card's worktree with the build's edit in it and the session's reply in <worktree>.out,
-# as donewhen.sh checked() calls it after each build: three card runs cost the case about 13 CPU s, for that one function.
+# as checked() calls it after each build: three card runs cost the case about 13 CPU s, for that one function.
 t_movedmarker() {
   setup '[]'
   printf 'TODO later\n' > "$R/t.txt"; printf '[VERIFY] the limit\n' > "$R/v.txt"; git -C "$R" add t.txt v.txt; git -C "$R" commit -qm markers

@@ -148,7 +148,7 @@ fixprompt() { # <card prompt> <the findings, each led by its id, and what follow
 # rounds a retried card carries), rebased (the one review after a landing conflict), test-fix (after the one test fix),
 # lint-fix (after the landing gate's lint fix), land (the kept review of a kept patch landed with no review), repeat (a
 # NO-GO that repeats a fixed finding, every finding P2 or P3). Prints nothing when a fix round follows.
-loopstop() { # <verdict> <reviews so far: pass + rounds> <rebased> <tfix> <lfix> <mode> <donewhen.sh donewhen.sh repeats() lines> <review file>
+loopstop() { # <verdict> <reviews so far: pass + rounds> <rebased> <tfix> <lfix> <mode> <donewhen.sh repeats() lines> <review file>
   if [ "$1" = GO ]; then echo go
   elif [ "$2" -ge "$MAX_REVIEWS" ]; then echo max-reviews
   elif [ -n "$3" ]; then echo rebased
@@ -236,7 +236,7 @@ afterreview() {
 # What the Test step does next, decided with nothing done. Called as `testroute checks <the exit of donewhen.sh treecheck()>`, for
 # the project's checks at the start of the step, it prints block (2: they could not run), checkfix (1: they failed,
 # so one fix session follows) or nothing (another exit, 0 when they pass: the tests run). Called as
-# `testroute verdicts <mainred.sh mainred.sh verdicts() json>`, for a test run that failed, it prints machine (the machine is at fault
+# `testroute verdicts <mainred.sh verdicts() json>`, for a test run that failed, it prints machine (the machine is at fault
 # and no failure is the card's: the repair lane, then the machine hold), main (every failure is main's: the wait for
 # main) or nothing (a failure is the card's). For that failure, called as `testroute <worktree>`, it prints nothing
 # (the repair lane passed this test step: repaired), moved (main moved since the card's commit, and it was not
