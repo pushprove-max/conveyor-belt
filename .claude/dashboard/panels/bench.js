@@ -433,9 +433,9 @@
         ids.forEach((id) => B.runs.delete(`${B.repo}|${id}`));
         // The page does not ask for a run just deleted, whether a receipt opened it or the history is not read again yet.
         if (ids.includes(B.runId)) B.runId = null;
-        // The Start receipt does not offer a run just deleted.
+        // The Start receipt does not offer a run just deleted; its answer stays until Start is clicked again.
         const rc = B.said.get(saidKey('start'));
-        if (rc && ids.includes(rc.run)) B.said.delete(saidKey('start'));
+        if (rc && ids.includes(rc.run)) B.said.set(saidKey('start'), { ...rc, run: null });
         if (hist()) hist().runs = allRuns().filter((r) => !ids.includes(r.id));
       }
       B.cmp.data = null; B.flips.pairs = new Map();

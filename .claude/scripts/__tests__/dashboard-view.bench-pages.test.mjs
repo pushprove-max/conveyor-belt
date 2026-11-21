@@ -462,6 +462,8 @@ test('Plan a run: a run opened from the receipt and deleted is not asked for aga
   BH.go(w, 'plan');
   await settle();
   assert.equal(q(w, '[data-act="watch-run"]'), null, 'the receipt of the deleted run has no button to open it');
+  // Bug it guards (#1202): Delete removed the whole Start answer, which stays until Start is clicked again.
+  assert.match(q(w, '[data-said="start"]').textContent, new RegExp(`Run ${named} ended`), 'the Start answer stays after its run is deleted');
 });
 
 // Bug it guards (review E6): Plan a run had no Conveyor version or run settings, so it could not start an older engine
