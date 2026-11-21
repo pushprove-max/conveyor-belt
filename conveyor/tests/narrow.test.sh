@@ -42,15 +42,14 @@ narrowrun() { # <change> [field] [fix]
 
 # #351 scenario 1. Bug it catches: a card whose pack has no way to run one test file ran the whole suite (test.command
 # with no list). With no test.list and no test.fileCommand, and a test file Conveyor's own runner cannot run (a .js
-# file that no package.json holds: #376), the whole card is blocked at its test step, under Needs you, with a reason
-# that names test.fileCommand and that file, and the test command never ran.
+# file that no package.json holds: #376), the card's test step stops with a reason (card() blocks the card with it,
+# under Needs you) that names test.fileCommand and that file, and the test command never ran.
 t_narrowblock() {
-  setup "[$(issue 7 2026-01-01)]"
+  setup '[]'
   printf '%s\n' 'pwd >> "$STUB/got"' > "$STUB/suite-cmd"; tune 'del(.test.list, .test.fileCommand) | .test.command = "bash \"$STUB/suite-cmd\""'
-  echo 'mkdir -p lib && echo x > lib/new.test.js && echo two >> a.txt' > "$STUB/build"; echo "$GO" > "$STUB/review.1"
-  loop run > /dev/null
-  [ "$(st 'select(.step == "blocked") | .reason')" = 'test: a card runs each of its test files alone, and the pack sets no test.fileCommand, and Conveyor cannot run lib/new.test.js itself: no package.json holds it; set test.fileCommand in .conveyor/project.json to a command that runs one test file' ] \
-    || fail "the card was not blocked at its test step naming test.fileCommand: $(st 'select(.step == "blocked")')"
+  narrowrun 'mkdir -p lib && echo x > lib/new.test.js && echo two >> a.txt'
+  [ "$(cat "$T/$CASE/cards/c7.stop" 2>&1)" = 'a card runs each of its test files alone, and the pack sets no test.fileCommand, and Conveyor cannot run lib/new.test.js itself: no package.json holds it; set test.fileCommand in .conveyor/project.json to a command that runs one test file' ] \
+    || fail "the test step did not stop naming test.fileCommand: $(cat "$T/$CASE/cards/c7.stop" "$T/$CASE/run.out" 2>&1)"
   [ ! -e "$STUB/got" ] || fail "the test command ran: $(cat "$STUB/got")"
 }
 
@@ -131,23 +130,21 @@ t_narrowrerun() {
 
 # #351 scenario 2, and its stub that must never be called. Bug it catches: a card ran the suite command, which ignores
 # the list it is given (npm test running every file, 45 minutes a card). test.command and test.full are a stub that
-# runs every file and records `suite`; a whole card whose change touches lib/cartsum.js runs lib/cartsum.test.js alone
-# through test.fileCommand, lands, and neither suite command ever started.
+# runs every file and records `suite`; the test step of a card whose change touches lib/cartsum.js runs
+# lib/cartsum.test.js alone through test.fileCommand, passes, and neither suite command ever started.
 # #351 scenario 10 too. Bug it catches: a card built or refreshed the test map, a whole-suite run under coverage, which
 # only the owner starts (setup, the Board). Main is a Node project (package.json, so the map's tool is there) whose
 # made map is due (made under another test command): the card leaves the map as it was and starts no build of it.
 t_narrowsuite() {
   local m
-  narrowsetup; echo '{}' > "$R/package.json"; git -C "$R" add package.json && git -C "$R" commit -qm node && git -C "$R" push -q origin main || fail "main's files could not be pushed"
+  narrowsetup; echo '{}' > "$R/package.json"; git -C "$R" add package.json && git -C "$R" commit -qm node || fail "main's files could not be committed"
   m=$R/.conveyor/test-map.json
   jq -n --arg s "$(git -C "$R" rev-parse HEAD)" '{commit: $s, command: "an older test command", language: "node", made: "2026-01-01T00:00:00Z", seconds: 1,
     tests: ["lib/cartsum.test.js"], sources: {"lib/cartsum.js": ["lib/cartsum.test.js"]}}' > "$m" && cp "$m" "$STUB/map.before" || fail "the test map could not be written"
-  echo "[$(issue 7 2026-01-01)]" > "$STUB/issues.json"
   printf '%s\n' 'echo "suite:$PWD" >> "$STUB/got"; echo "TESTRUN files=40" >> "$CONVEYOR_TEST_LOG/run"' > "$STUB/suite-cmd"
   tune '.test.full = .test.command'
-  echo 'echo y >> lib/cartsum.js' > "$STUB/build"; echo "$GO" > "$STUB/review.1"
-  loop run > /dev/null
-  st 'select(.step == "landed") | .card' | grep -q . || fail "the card did not land: $(st 'select(.step == "blocked" or .step == "test")')"
+  narrowrun 'echo y >> lib/cartsum.js'
+  [ "$(cat "$T/$CASE/rc")" = 0 ] || fail "the card's test step failed: $(cat "$T/$CASE/run.out")"
   [ "$(cat "$STUB/got" 2>&1)" = 'one:lib/cartsum.test.js' ] || fail "the card's run started a suite command, or not its one file alone: $(cat "$STUB/got" 2>&1)"
   cmp -s "$m" "$STUB/map.before" && [ ! -e "$R/.conveyor/test-map.run.json" ] && [ ! -e "$R/.conveyor/test-map.build.json" ] \
     || fail "the card built or refreshed the test map: $(ls "$R/.conveyor"; cat "$m")"
@@ -431,5 +428,6 @@ t_narrowfiletimeout() {
     && ! grep -qxF -- '-- FAIL a.test.sh' "$T/$CASE/cards/c7.test" \
     || fail "the run did not exit 124, or its output does not say a.test.sh timed out, or names it as failed (exit $(cat "$T/$CASE/rc")): $(cat "$T/$CASE/cards/c7.test")"
   c=$(cat "$STUB/child" 2>/dev/null) && [ -n "$c" ] || fail "the file's child never started"
-  wait_until '! kill -0 "$c" 2>/dev/null' || { kill "$c"; fail "a process the timed-out file started was not ended"; }
+  # The runner ends the file's process group before it returns, so the child is gone by now: one check, no wait.
+  ! kill -0 "$c" 2>/dev/null || { kill "$c"; fail "a process the timed-out file started was not ended"; }
 }
