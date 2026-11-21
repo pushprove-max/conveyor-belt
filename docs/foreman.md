@@ -87,7 +87,11 @@ belt is slower while the suite runs. The Foreman adds your answer to the command
 A watcher wakes the Foreman when something needs it. The wake holds the outcome, so the Foreman does not have to look
 it up:
 
-- A card that the Foreman waits for lands: the wake names its commit.
+- A card that the Foreman waits for lands: the wake names its commit. While another card that the Foreman waits for
+  is still on the belt and not blocked, the wake is held. When the last of them lands, one wake names each landing and
+  its commit. A card that lands while no other awaited card is on the belt wakes the Foreman at once. A restart of
+  the waiter sends the held landings. Any other wake that the watcher makes from a snapshot names them too. A wake made
+  from `conveyor.sh health` alone, because the snapshot is slow, does not: the landings stay held for the next one.
 - A blocked card: the wake names the reason. When the snapshot fails or is slow, as when it is made anew from the
   whole card records, the watcher reads `conveyor.sh health`. A blocked card, or a change that waits for your yes,
   then wakes the Foreman from health at that poll, and does not wait for the snapshot. With the standing kind
