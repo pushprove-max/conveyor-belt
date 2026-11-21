@@ -367,6 +367,7 @@ turnopen() {
     elif enginepin p 2>/dev/null && installed "$p" ro && machined "$VERSIONS/$p/conveyor/conveyor.sh"; then new=$VERSIONS/$p/conveyor/conveyor.sh; fi
   fi
   packturn
+  [ -n "$nopack" ] || fullreap || : # a full test run's marker whose process is gone (fullreap(), lib/fulltest.sh)
   # The machine hold (mainred.sh machinehold(), issue 221), at every turn: while it stands, this turn picks no card. Said when it
   # changes, as above.
   mhold=''; [ -n "$nopack" ] || mhold=$(machineheld)

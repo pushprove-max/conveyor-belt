@@ -43,8 +43,8 @@
 # the run's process} while the lock is held, and, once a red
 # run's failed cases are run alone, counts: the whole run's suiteprog(). Each run's files, with their results and
 # times, also go to $SUITERUNS (suiterec(), lib/testlist.sh) for the Tests page.
-# A run whose process was killed leaves $FULLTEST.running with the lock free (fulldead()): the next ask records it as
-# an error line with the reason, then starts its own run.
+# A run whose process was killed leaves $FULLTEST.running with the lock free (fulldead()): the loop's next turn (fullreap()) removes
+# the marker and records it as an error line with the reason (as the next ask does), so the end is still on record.
 FULLTEST=${STATE%/*}/fulltest.jsonl
 FULL_ALONE=3
 # The line $FULLTEST keeps (fullline()) for a run that ended with no result: its $FULLTEST.running is left, and the
@@ -57,6 +57,22 @@ fulldead() {
   jq -c --argjson t "${t#* }" '{time: ($t | todate), kind: "run", push: (.how != "run"), sha, state: "error",
     reason: "the run ended without a result: its process\(if .pid then " (\(.pid))" else "" end) is gone, and it left its running marker of \(.since)",
     exit: null, cases: [], pushed: null}' <<<"$m"
+}
+# A marker whose run's process is gone, recorded as an error line (as the next ask does, below) and removed, at each turn
+# of the loop: with no ask, a marker left by a killed run, or by an engine older than this one, stayed for days and the
+# status named that run as the one under way. The line keeps the marker's own time (fulldead()), so the Foreman's wake
+# for that end (the snapshot's suites, which keys it by that time) is the same one a poll before the turn saw, and a run
+# that ended between two polls still wakes it. A free lock is the proof that no run holds it; the lock is held here, so
+# no run starts meanwhile. A line that could not be written leaves the marker.
+fullreap() {
+  local lk dead
+  [ -e "$FULLTEST.running" ] || return 0
+  { exec {lk}>>"$FULLTEST.lock"; } 2>/dev/null || return 1
+  if flock -n "$lk" && dead=$(fulldead 2>/dev/null); then
+    if fullline "$dead" && rm -f "$FULLTEST.running"; then echo "conveyor: $(jq -r .reason <<<"$dead"); it is recorded as an error" >&2
+    else echo "conveyor: a full test run that ended without a result could not be recorded; its marker is left" >&2; fi
+  fi
+  exec {lk}>&-; return 0
 }
 # How far a whole-suite run (this one's, or a release's: commands/release-prep.sh) in <worktree> is, from the cases its
 # runner named as ended (cases/ok and cases/failed of its log folder, session.sh testdone()): {done, failed, cases: the
