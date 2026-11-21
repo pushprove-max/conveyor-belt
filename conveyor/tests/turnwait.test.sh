@@ -36,5 +36,6 @@ t_turnwait() {
   sleep 5 & timer=$!; s=$EPOCHREALTIME # sleep: the turn's timer, which must not be waited out
   turnwait; w=$(( (${EPOCHREALTIME/[.,]/} - ${s/[.,]/}) / 1000 ))
   kill "$timer" 2>/dev/null; wait "$timer" "${!mine[@]}" 2>/dev/null
-  [ "$w" -lt 2000 ] || fail "the turn's wait did not end at once on a card that had ended (${w} ms)"
+  lim=$(loadlimit 2000 5000) # under the timer's 5 s
+  [ "$w" -lt "$lim" ] || fail "the turn's wait did not end at once on a card that had ended (${w} ms; limit $lim ms: 2000 ms times the load factor $CASE_LOAD)"
 }

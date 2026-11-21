@@ -306,6 +306,17 @@ t_cutallow() {
   jq -e --arg a "$a" --arg b "$b" '.state == "released" and .allowed == {by: "the owner", commits: [$b, $a]}' "$T/$CASE/cards/release/run.json" > /dev/null \
     || fail "the release's record does not keep the commits passed over and who said so: $(cat "$T/$CASE/cards/release/run.json")"
 }
+# #1084, E6 of its review. Bug it catches: a failing suite in `release` (which judges no case alone) said only that
+# the suite did not pass, so a failure that printed no message of its own could not be read without a run again. The
+# suite prints a failed TAP case and a stack frame of docs/releases/1.1.0.md, line 1: the refusal names the case with
+# that place and its text.
+t_cutsuiteat() {
+  local O out
+  cutsetup "printf '%s\n' 'not ok 1 - stub' \"    at Object.<anonymous> (\$PWD/docs/releases/1.1.0.md:1:1)\"; false"
+  out=$(loop release 1.1.0 2>&1); [ $? = 1 ] || fail "release was not refused: $out"
+  grep -qxF 'conveyor: release: failed: not ok 1 - stub (at docs/releases/1.1.0.md:1: # 1.1.0)' <<<"$out" \
+    || fail "the refused release does not name the failed case with where it failed: $out"
+}
 # The suite, the last check. Bugs: a release cut on a failing suite, or with the suite run on another commit than the one
 # to release; a commit made in the checkout while the suite ran (a card landed there) tagged and pushed unchecked, or
 # the run's record not saying main moved, so the Board's Release panel offers no run on the new main and shows no

@@ -29,7 +29,8 @@ t_casetimeout() {
   CONVEYOR_TEST_LOG=$d/wt.testlog timeout 60 bash "$s/conveyor.test.sh" > "$d/wt.test" 2>&1; rc=$?
   took=$(( $(date +%s) - t0 ))
   [ $rc = 1 ] || fail "the run with a case past its limit did not end failed (exit $rc, ${took} s): $(cat "$d/wt.test")"
-  [ "$took" -lt 30 ] || fail "the run waited for the hung case, ${took} s: $(cat "$d/wt.test")"
+  lim=$(loadlimit 30 60) # under the hung case's 60 s
+  [ "$took" -lt "$lim" ] || fail "the run waited for the hung case, ${took} s (limit $lim s: 30 s times the load factor $CASE_LOAD): $(cat "$d/wt.test")"
   grep -qx 'FAIL \[fxhang\]: timed out after 2 s .*' "$d/wt.test" || fail "the run does not name the case as timed out: $(cat "$d/wt.test")"
   grep -qx 'ok fxquick' "$d/wt.test" && [ -e "$d/quick.ran" ] || fail "the other file's case did not run after the hung one: $(cat "$d/wt.test")"
   got=$(cd "$d/wt.testlog/cases" && find . -type f | sort | tr '\n' ' ')
@@ -38,4 +39,25 @@ t_casetimeout() {
   source <(sed -n '/^suiteprog() {/,/^}/p' "$SRC/lib/fulltest.sh")
   got=$(suiteprog "$d/wt" | jq -c '{cases, timedout}')
   [ "$got" = '{"cases":["fxhang"],"timedout":["fxhang"]}' ] || fail "the run's progress does not name the case as timed out: $got"
+}
+
+# Bug it catches (#1084): on a busy machine a case 1.5 times past its file's limit failed the run, though it only ran
+# slower. The runner itself runs, as in t_casetimeout: the limit under test is the runner's own keeper's, which no
+# call of one function shows. With the load factor 2 a full run gives it (CONVEYOR_LOAD_FACTOR) and two slots, a case
+# that takes 3 s of its file's 2 s passes; one that would take 8 s is stopped at 4 s, and its failure gives the
+# file's 2 s and the factor.
+t_caseload() {
+  local d=$T/$CASE s f rc
+  s=$d/src; mkdir -p "$s/tests" || fail "the fixture could not be made"
+  export XDG_CONFIG_HOME=$d/config
+  mkdir -p "$XDG_CONFIG_HOME/conveyor" && echo "{\"testSlots\": 2, \"testSlotsDir\": \"$d/slots\"}" > "$XDG_CONFIG_HOME/conveyor/host.json"
+  for f in "$SRC"/*; do [ "${f##*/}" = tests ] || ln -s "$f" "$s/"; done
+  ln -s "$SRC/tests/lib.sh" "$SRC/tests/wait.sh" "$SRC/tests/stubs" "$s/tests/"
+  printf '%s\n' '# timeout: 2' 't_fxslow() { sleep 3; }' > "$s/tests/slow.test.sh" # sleep: 1.5 times its file's 2 s limit
+  printf '%s\n' '# timeout: 2' 't_fxover() { sleep 8; }' > "$s/tests/over.test.sh" # sleep: 4 times its file's 2 s limit
+  CONVEYOR_LOAD_FACTOR=2 timeout 60 bash "$s/conveyor.test.sh" > "$d/out" 2>&1; rc=$?
+  [ $rc = 1 ] || fail "the run with a case 4 times past its limit did not end failed (exit $rc): $(cat "$d/out")"
+  grep -qx 'ok fxslow' "$d/out" || fail "the case 1.5 times past its limit failed at a load factor of 2: $(cat "$d/out")"
+  grep -qxF "FAIL [fxover]: timed out after 4 s (its file's # timeout: line, 2 s, times the load factor 2); the case and its process group were stopped" "$d/out" \
+    || fail "the case 4 times past its limit is not named as timed out at its scaled limit with the factor: $(cat "$d/out")"
 }

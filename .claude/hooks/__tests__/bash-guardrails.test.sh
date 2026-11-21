@@ -55,20 +55,21 @@ MAIN_TMP=$(mktemp -d)
 git -C "$MAIN_TMP" init -q
 printf '{}\n' > "$MAIN_TMP/package.json"
 trap 'rm -rf "$MAIN_TMP"' EXIT
+. "$(dirname "${BASH_SOURCE[0]}")/lib/said.sh" # a FAIL line names the hook's last input (json notes each payload)
 
 # Outside its own part a call runs no hook, though each $(json ...) and $(run_hook ...) around it still forks a
 # subshell; inside it, one more fork that becomes the hook (no echo or pipe forks).
 run_hook() { [ "$ON" = 1 ] || return 0; ( cd "$MAIN_TMP" && exec "$HOOK" <<<"$1" >/dev/null 2>&1 ); echo $?; }
-check() { [ "$ON" = 1 ] || return 0; if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3)"; fi }
+check() { [ "$ON" = 1 ] || return 0; if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3)$(said)"; fi }
 # Outside its own part a run builds no payload: the parts each paid a jq per case for nothing.
 # Inside it, the payload is escaped in bash: a jq per case cost about a seventh of the case. A control character
 # other than tab, newline and CR takes jq's \u escape, so such a command still goes through jq.
 json() {
   [ "$ON" = 1 ] || return 0
   local s=$1 t=${1//[$'\t\n\r']/}
-  if [[ $t == *[[:cntrl:]]* ]]; then jq -cn --arg cmd "$1" '{tool_input:{command:$cmd}}'; return; fi
+  if [[ $t == *[[:cntrl:]]* ]]; then jq -cn --arg cmd "$1" '{tool_input:{command:$cmd}}' | said_tee; return; fi
   s=${s//\\/\\\\}; s=${s//\"/\\\"}; s=${s//$'\t'/\\t}; s=${s//$'\n'/\\n}; s=${s//$'\r'/\\r}
-  printf '{"tool_input":{"command":"%s"}}\n' "$s"
+  printf -v s '{"tool_input":{"command":"%s"}}' "$s"; said_in "$s"; printf '%s\n' "$s"
 }
 
 # --- heap cap on node's test runner (.claude/rules/tests.md, Heap cap) -------

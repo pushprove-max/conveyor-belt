@@ -307,7 +307,9 @@ def internals(name, text, front):
             out.append("%s:%d: names the product %s, not Conveyor" % (name, i, m.group(0)))
     for i, line in enumerate(text.split("\n"), 1):
         for m in re.finditer(r"CONVEYOR_[A-Z_]+|[\w./*-]+\.test\.\w+|conveyor/lib/[\w./-]*", line):
-            out.append("%s:%d: names %s, which a user does not need" % (name, i, m.group(0)))
+            # CONVEYOR_LOAD_FACTOR is read by a user's own tests, to scale a time budget by the machine's load (#1084).
+            if m.group(0) != "CONVEYOR_LOAD_FACTOR":
+                out.append("%s:%d: names %s, which a user does not need" % (name, i, m.group(0)))
         if front:
             for m in re.finditer(r"\bhost files?\b|\bpacks?\b|\bseats?\b", line, re.I):
                 out.append("%s:%d: says %s, a word a new user does not know" % (name, i, m.group(0)))

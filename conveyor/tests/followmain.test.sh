@@ -280,8 +280,9 @@ t_followfetch() {
   [ -d "$V/$NEW" ] || fail "the first take did not install $NEW: $(cat "$STUB/take.out")"
   # A take started during the first ends at once, and the old-engine line says a take runs.
   s=$SECONDS; out=$(CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards timeout 30 bash "$V/$A/conveyor/conveyor.sh" take 2>&1) || fail "the second take failed: $out"
-  [ $((SECONDS - s)) -lt 10 ] && grep -qx "conveyor: another take of the plugin's Conveyor runs now: this one ends" <<<"$out" \
-    || fail "the second take waited for the first, $((SECONDS - s)) s: $out"
+  lim=$(loadlimit 10 30) # under the take's 30 s timeout
+  [ $((SECONDS - s)) -lt "$lim" ] && grep -qx "conveyor: another take of the plugin's Conveyor runs now: this one ends" <<<"$out" \
+    || fail "the second take waited for the first, $((SECONDS - s)) s (limit $lim s: 10 s times the load factor $CASE_LOAD): $out"
   out=$(CONVEYOR_MAIN=$R bash "$V/$A/conveyor/conveyor.sh" take stale 2>&1)
   [ "$out" = "Conveyor takes the plugin's main now: commit ${NEW:0:7}; the project runs commit ${A:0:7} until the take ends" ] \
     || fail "the old-engine line during a take: $out"

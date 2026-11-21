@@ -19,7 +19,7 @@
 # off (adopted() drops each once it lands or its issue closes). landAs is null (the pack's push.landAs) or the rule
 # "Land as", main or pr (landas(), lib/push.sh). prMerge is null (the pack's push.prMerge) or the rule "Merge PR",
 # button, release or idle (prmergerule(), lib/push.sh). pushCheck is null (the pack's push.check holds) or whether the run before a push runs
-# (`control push-check`, over the pack's: pushcheck(), lib/push.sh). signin is null, or why the loop paused itself: a session
+# (`control push-check`, over the pack's: pushcheck(), lib/pushrun.sh). signin is null, or why the loop paused itself: a session
 # whose sign-in failed, with no fallback route left (signinpause()); resume clears it. A key this copy of the engine does not know, at the top
 # or in rules (one a newer copy added, while a card runs on the older copy in its worktree), is passed through
 # unchecked, so a control action keeps it when it writes the record. Anything else is not a record: the reason on
@@ -1136,7 +1136,7 @@ control() { # [action [arguments]]
       [ "$(jq -r .depGuard <<<"$c")" = false ] \
         || { echo "conveyor: the dependency guard is on: #$1 is not built before the issues it depends on; turn the guard off first (control dep-guard off); nothing changed" >&2; return 2; }
       f='.forced = (.forced + ($v | map(tonumber)) | unique)' ;;
-    # The run before a push (pushtests(), lib/push.sh), on or off over the pack's push.check.
+    # The run before a push (pushtests(), lib/pushrun.sh), on or off over the pack's push.check.
     push-check) [ $# = 1 ] && [[ $1 =~ ^(on|off)$ ]] || { bad; return; }; f='.pushCheck = ($v[0] == "on")' ;;
     rules) [ $# != 0 ] || { bad; return; }
       # An area rule is the pack's area prefix and a name; push is whether a card that lands is pushed, visible whether

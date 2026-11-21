@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
-# Engine cases (#1079): a push whose pre-push hook failed naming test files (lib/push.sh hookalone()): each file runs
+# Engine cases (#1079): a push whose pre-push hook failed naming test files (lib/pushrun.sh hookalone()): each file runs
 # alone, once; when each passes, the same commit is pushed with no hook, the files go on the flaky-test record and one
 # held issue holds them (lib/flaky.sh flakypush()); a file that fails alone too, or a hook that failed a check that is
 # no test file, holds the push as before. A file flaky twice within the flaky days reopens the issue of its earlier fix,
@@ -79,6 +79,23 @@ t_pushflakyother() {
   pfix; echo 'push-checks: FAILED fast-checks' >> "$STUB/hook-says"; pnow
   [ "$(origin)" = "$base" ] && [ ! -e "$STUB/ran" ] || fail "a hook that failed more than test files was pushed past: $(cat "$T/$CASE/push.out")"
   [ "$(st 'select(.step == "push") | [.kind, .check] | join(" ")')" = 'check fast-checks' ] || fail "the push line: $(st 'select(.step == "push")')"
+}
+
+# #1084. Bug it catches: a pre-push hook whose test failed with no message of its own (a stack, actual: false, expected:
+# true) held the push with a reason that named no line, so it could not be read without a run again; and the hook's
+# run got no load factor to scale a time budget by. The hook prints a stack frame of its worktree's lib/a.test.sh,
+# line 3, and the file fails alone too: the push line's reason ends with that line and its text, read from the commit
+# (the push worktree is gone by then), and the hook was given CONVEYOR_LOAD_FACTOR.
+t_pushflakyat() {
+  local base l1
+  pfix; touch "$STUB/a-fails"
+  printf '%s\n' '#!/usr/bin/env bash' 'printf %s "${CONVEYOR_LOAD_FACTOR-unset}" > "$STUB/hookfactor"; cat "$STUB/hook-says" >&2' \
+    'echo "    at TestContext.<anonymous> (file://$PWD/lib/a.test.sh:3:7)" >&2; exit 1' > "$R/.git/hooks/pre-push" || fail "the hook could not be written"
+  pnow
+  [ "$(origin)" = "$base" ] || fail "a commit whose test file fails alone too was pushed: $(cat "$T/$CASE/push.out")"
+  st 'select(.step == "push") | .reason' | grep -qxF 'conveyor: a test of the hook failed at lib/a.test.sh:3: [ ! -e "$STUB/a-fails" ]' \
+    || fail "the push line's reason does not end with where the hook's test failed: $(st 'select(.step == "push") | .reason')"
+  [ "$(cat "$STUB/hookfactor" 2>&1)" = 1 ] || fail "the pre-push hook was not given the load factor (lib.sh gives the cases 1): $(cat "$STUB/hookfactor" 2>&1)"
 }
 
 # Done when 3, and the owner's 2026-11-20 ruling: a file recorded flaky twice within 7 days reopens the issue of its

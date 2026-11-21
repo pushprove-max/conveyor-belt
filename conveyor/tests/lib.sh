@@ -31,6 +31,17 @@ unset CONVEYOR_TEST_ONESLOT
 # card that tests at the same time (caselocks.test.sh). Without it, a case's cards folder is beside its own main.
 unset CARDCTL CONVEYOR_CARD_SETTINGS CONVEYOR_OPENCODE_GUARD CONVEYOR_CODEX_GUARD CONVEYOR_CARD_RULES CONVEYOR_CARD CONVEYOR_FOREMAN CLAUDE_CODE_SESSION_ID CONVEYOR_TEST_SLOTS \
   CONVEYOR_MAIN CONVEYOR_FOREMAN_DIR CLAUDE_PROJECT_DIR CONVEYOR_CARDS
+# The load factor of the test run this runner is part of (CONVEYOR_LOAD_FACTOR, lib/loadfactor.sh loadfactor(); 1 when
+# unset) scales each case's time limit (run_case). The cases get 1, which a loop a case runs keeps (loadfactor()): a
+# time limit a case checks is the same on a busy machine as on an idle one.
+CASE_LOAD=$(awk -v f="${CONVEYOR_LOAD_FACTOR:-1}" 'BEGIN { f += 0; if (f < 1) f = 1; if (f > 3) f = 3; print f }')
+export CONVEYOR_LOAD_FACTOR=1
+# A time limit a case checks (seconds, or ms): <limit> times CASE_LOAD, rounded up, and under <below> when it is given,
+# the wait the check tells a run apart from (a hang, a sleep), so on a busy machine the check still fails a run that
+# waited it out; never under <limit>. A failure names the factor: "(limit <it>: <limit> times the load factor <f>)".
+loadlimit() { # <limit> [<below>]
+  awk -v n="$1" -v f="$CASE_LOAD" -v c="${2:-0}" 'BEGIN { x = n * f; x = (x == int(x)) ? x : int(x) + 1; if (c > 0 && x >= c) x = c - 1; if (x < n) x = n; print x }'
+}
 # The Foreman's mark (the session it is) is never this machine's own.
 export XDG_STATE_HOME=$T/state
 # The loop asks for a weekly limit reading while a card runs: never Claude's own here; a case sets its own.
@@ -296,6 +307,8 @@ landed() { # <issue> [follow-ups json]: the landed line of an earlier card for t
 run_case() {
   local k='' s w mark='' end t0 sub=() CASE_WORKER=$BASHPID CASE_MARK=CONVEYOR_TEST_CASE_ID=$BASHPID.$RANDOM$RANDOM
   local CASE_LIMIT=${CASE_LIMITS[$CASE]:-} # its file's `# timeout:` line (the runner), for its keeper (case_keep)
+  local CASE_OWN=$CASE_LIMIT # that line's seconds; CASE_LIMIT is them times the run's load factor (CASE_LOAD), rounded up
+  [ -z "$CASE_LIMIT" ] || [ "$CASE_LOAD" = 1 ] || CASE_LIMIT=$(loadlimit "$CASE_LIMIT")
   slot_mine
   exec {w}> >(slot_watch "$CASE_MARK" > /dev/null 2>&1)
   # In a loop's test step, the case is named as running from here until it ends (conveyor.sh testcases()), so the
@@ -390,7 +403,8 @@ case_keep() {
       command sleep 3 & z=$!; wait "$z"; kill -KILL -- "-$p" 2>/dev/null ) > /dev/null 2>&1 & timer=$!; } # sleep: the grace after TERM
   wait "$p"; rc=$?
   [ -z "$timer" ] || { kill "$timer" 2>/dev/null; wait "$timer" 2>/dev/null; }
-  [ ! -e "$T/$CASE.late" ] || { rc=124; echo "FAIL [$CASE]: timed out after $CASE_LIMIT s (its file's # timeout: line); the case and its process group were stopped" >> "$T/$CASE.out"; }
+  local own="its file's # timeout: line"; [ "$CASE_LIMIT" = "$CASE_OWN" ] || own+=", $CASE_OWN s, times the load factor $CASE_LOAD"
+  [ ! -e "$T/$CASE.late" ] || { rc=124; echo "FAIL [$CASE]: timed out after $CASE_LIMIT s ($own); the case and its process group were stopped" >> "$T/$CASE.out"; }
   echo "$rc" > "$T/$CASE.rc"
   kill "$watch" 2>/dev/null; wait "$watch" 2>/dev/null
   case_end "$p"; exit 0

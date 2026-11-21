@@ -188,7 +188,8 @@ files than the pool has slots (`testSlots` in [the host file](#the-host-file)).
 
 A test file can set its own time limit with a line `# timeout: <seconds>` among the comments at its top. Words after
 the number are a note. Past that limit, Conveyor stops the file and every process that it started, and the output says
-that the file timed out. A file without that line has the time limit of the card's test run (`testTimeout`).
+that the file timed out. A file without that line has the time limit of the card's test run (`testTimeout`). On a
+busy machine, the limit of the line is longer ([The load factor](#the-load-factor)).
 
 If the pack has no `test.fileCommand`, Conveyor runs each test file with the runner of its language, from the folder
 of the package that holds the file: `node --test`, vitest, jest or `bun test` under a `package.json`, `pytest`, `go
@@ -252,6 +253,24 @@ The run before a push and the test map can run one test file with `test.command`
 A test file's run can report more test files than it was given. Then Conveyor stops the run at once, with every
 process that the run started. The card stops at its test step, and the reason names the file that ran the others.
 The check of a bug card on main's code follows the same rule. The full suite of a release has no such limit.
+
+### The load factor
+
+A busy machine runs tests more slowly, so a file can fail only because it ran out of time. To prevent this,
+Conveyor gives a test run more time when the machine is busy. As a card's test step, the push check or a release's
+suite starts, Conveyor reads the 1-minute load average and divides it by the number of cores. This is the load
+factor. The factor is never less than 1 and never more than 3, so a test that becomes more than 3 times slower still
+fails.
+
+Conveyor multiplies the time limit of a test file's `# timeout:` line by the factor. When a file runs past a
+multiplied limit, the output gives the limit of the `# timeout:` line and the factor. The time limit of a card's whole
+test run (`testTimeout`) does not change. The push check runs each file alone with `testTimeout` as its limit, and
+multiplies that limit by the factor too. When a file runs past it, the reason of the held push gives the limit and the
+factor.
+
+Each test run gets the factor in the environment variable `CONVEYOR_LOAD_FACTOR`, for example `1`, `1.5` or `3`. A
+test that checks a time budget of its own can multiply its budget by this value. A run that starts inside another
+test run keeps the factor of that run.
 
 ## Split large issues
 

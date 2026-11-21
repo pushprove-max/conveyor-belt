@@ -18,11 +18,14 @@
 logfails() { # <exit> [<testTimeout>]
   allfails "$@" | jq -c 'del(.passed, .okcases, .passcases)'
 }
+# The readers of a failure's place in a test's output (lib/failat.sh): the frame patterns, their jq, atsource() and
+# wtline(), for eval.
+frameread() { sed -n '/^FRAMERX=/p; /^PYFRAMERX=/p; /^FRAMEJQ=/p; /^atsource() {/,/^}/p; /^wtline() {/,/^}/p' "$SRC/lib/failat.sh"; }
 # logfails() with the files and cases the run passed.
 allfails() { # <exit> [<testTimeout>]
   local w=$T/$CASE/wt; mkdir -p "$w.testlog"
   (cd "$T/$CASE" && CONVEYOR_TEST_LOG=$w.testlog bash cmd > "$w.test" 2>&1 < /dev/null)
-  ( eval "$(sed -n '/^testfails() {/,/^}/p' "$SRC/lib/testrun.sh"; sed -n '/^testlogs() {/,/^}/p' "$SRC/lib/session.sh")"
+  ( eval "$(frameread; sed -n '/^testfails() {/,/^}/p' "$SRC/lib/testrun.sh"; sed -n '/^testlogs() {/,/^}/p' "$SRC/lib/session.sh")"
     packget() { [ -n "${PACKCMD:-}" ] && printf -v "$2" '%s' "$PACKCMD"; } # the pack's test.command: $PACKCMD, else none
     TEST_TIMEOUT=${2:-600} testfails "$w.test" "$1" )
 }
@@ -45,6 +48,62 @@ echo "-- ok f.test.mjs" >> "$CONVEYOR_TEST_LOG/a.log"
 EOF
   f=$(allfails 0 | jq -c .passcases) || fail "the passed cases could not be read"
   [ "$f" = '[{"file":"f.test.mjs","cases":["a b, c","d e"]}]' ] || fail "node's ✔ and TAP's ok lines are not the file's passed cases: $f"
+}
+# Done when 4 (#1084). Bug it catches: a test that fails with no message of its own (node's assert.ok(false): its
+# report printed only `ERR_ASSERTION actual: false expected: true`) gave a failure report with no command or line, so
+# it could not be read without a run again. A real node run of a stub test file in the worktree, whose only assertion
+# is assert.ok(false): its case's line names the file, the line and that line's text, read from the failure's stack.
+t_testfailsat() {
+  mkdir -p "$T/$CASE/wt" && printf '%s\n' "import assert from 'node:assert';" "import test from 'node:test';" \
+    "test('stub', () => {" '  assert.ok(false);' '});' > "$T/$CASE/wt/a.test.mjs" || fail "the stub test file could not be made"
+  cat > "$T/$CASE/cmd" <<'EOF'
+cd wt && echo "== a.test.mjs" | tee -a "$CONVEYOR_TEST_LOG/a.log"
+node --max-old-space-size=4096 --test a.test.mjs; echo "-- FAIL a.test.mjs" >> "$CONVEYOR_TEST_LOG/a.log"; exit 1
+EOF
+  f=$(logfails 1 | jq -r '.files[] | select(.file == "a.test.mjs") | .cases[] | select(.name == "stub") | .line') || fail "the failures could not be read"
+  [[ $f == *" (at a.test.mjs:4: assert.ok(false);)" ]] || fail "the case's line does not give the assertion's file, line and text: $f ($(cat "$T/$CASE/wt.test"))"
+}
+# #1084, E5 of its review. Bug it catches: only JavaScript stacks were read, so a Python test file that failed (python3
+# on a unittest file, as the release's suite runs one; its failure names no case) had no place in its failure report.
+# A real python3 run of a unittest file whose test calls a helper that asserts: the file's at is the helper's line,
+# the traceback's last frame in the worktree (its first frame, the call in the test, is not where it failed).
+t_testfailspy() {
+  mkdir -p "$T/$CASE/wt" && printf '%s\n' 'import unittest' 'def check(x):' '    assert x' 'class T(unittest.TestCase):' \
+    '    def test_x(self):' '        check(False)' 'unittest.main()' > "$T/$CASE/wt/t.py" || fail "the stub test file could not be made"
+  cat > "$T/$CASE/cmd" <<'EOF'
+cd wt && echo "== t.py" | tee -a "$CONVEYOR_TEST_LOG/a.log"
+python3 -I t.py; echo "-- FAIL t.py" >> "$CONVEYOR_TEST_LOG/a.log"; exit 1
+EOF
+  f=$(logfails 1 | jq -c '.files[] | select(.file == "t.py") | [.cases, .at]') || fail "the failures could not be read"
+  [ "$f" = '[[],"t.py:3: assert x"]' ] || fail "the failed file's place is not the helper's assertion: $f ($(cat "$T/$CASE/wt.test"))"
+}
+# #1084, E1 of its review. Bug it catches: the text of a failure's place was read through a symbolic link in the
+# worktree, so a link to a file outside it (committed, or made by a test) put that file's line into a report that may
+# go to a GitHub issue. A frame names a link to a file outside the worktree, another a file under a linked folder: each
+# case's place is named, with no text.
+t_testfailslink() {
+  mkdir -p "$T/$CASE/wt" "$T/$CASE/out" && echo 'the secret' > "$T/$CASE/out/s.txt" && ln -s "$T/$CASE/out/s.txt" "$T/$CASE/wt/l.mjs" \
+    && ln -s "$T/$CASE/out" "$T/$CASE/wt/d" || fail "the fixture could not be made"
+  cat > "$T/$CASE/cmd" <<'EOF'
+cd wt && echo "== a.test.mjs" | tee -a "$CONVEYOR_TEST_LOG/a.log"
+printf '%s\n' 'not ok 1 - one' "    at f ($PWD/l.mjs:1:1)" 'not ok 2 - two' "    at g ($PWD/d/s.txt:1:1)"
+echo "-- FAIL a.test.mjs" >> "$CONVEYOR_TEST_LOG/a.log"; exit 1
+EOF
+  f=$(logfails 1 | jq -c '[.files[] | select(.file == "a.test.mjs") | .cases[].line]') || fail "the failures could not be read"
+  [ "$f" = '["not ok 1 - one (at l.mjs:1)","not ok 2 - two (at d/s.txt:1)"]' ] || fail "a place read through a link shows a line outside the worktree: $f"
+}
+# #1084, E1 and E5 of its review, for the push check's reader (failat(): a pre-push hook's output, and a test file the
+# push check ran). Bugs it catches: a Python traceback gave no place, and a link in the worktree to a file outside it
+# had that file's line read into the push line's reason. A Python traceback (its places: the call in the test, then the
+# helper's assertion) and a JavaScript frame of a link to a file outside the worktree.
+t_failatread() {
+  local w=$T/$CASE/wt f
+  mkdir -p "$w" "$T/$CASE/out" && echo 'the secret' > "$T/$CASE/out/s.txt" && ln -s "$T/$CASE/out/s.txt" "$w/l.mjs" \
+    && printf '%s\n' 'import unittest' 'def check(x):' '    assert x' > "$w/t.py" || fail "the fixture could not be made"
+  f=$( eval "$(frameread; sed -n '/^failat() {/,/^}/p' "$SRC/lib/failat.sh")"
+    printf '%s\n' 'Traceback (most recent call last):' "  File \"$w/t.py\", line 2, in test_x" '    check(False)' \
+      "  File \"$w/t.py\", line 3, in check" '    assert x' 'AssertionError' "    at f ($w/l.mjs:1:1)" | failat "$w" )
+  [ "$f" = $'t.py:3: assert x\nl.mjs:1' ] || fail "failat did not give the traceback's last place, or read a line through a link: $f"
 }
 # Issue 442: redproof() with a stub runner (mainredproof.test.sh's redrunner) that prints node's `✔ <case> (<n>ms)` for a
 # passed case: a fix whose case fails without the change and passes with it was blocked with "gave no result".

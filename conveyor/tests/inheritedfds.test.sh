@@ -39,8 +39,9 @@ t_fdsslotleft() {
   exec {lk}>&-
   # slot_left's process starts with every fd of this shell and closes them in the background: the lock is given 10 s
   # to come free, and the left process must still run after it has, so slot_left's process is still waiting then.
-  for ((i = 0; i < 100; i++)); do flock -n "$T/$CASE.lock" true && break; sleep 0.1; done
-  [ "$i" -lt 100 ] || fail "the lock is still held while slot_left waits: it kept the lock's fd above 255"
+  lim=$(loadlimit 100 300) # tenths of a second, under the left process's 30 s
+  for ((i = 0; i < lim; i++)); do flock -n "$T/$CASE.lock" true && break; sleep 0.1; done
+  [ "$i" -lt "$lim" ] || fail "the lock is still held while slot_left waits: it kept the lock's fd above 255 (waited $lim tenths of a second: 10 s times the load factor $CASE_LOAD)"
   pgrep -g "$g" >/dev/null || fail "the left process ended before the check: the lock may have come free only then"
 }
 

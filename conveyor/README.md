@@ -380,6 +380,8 @@ The engine runs the test step from `lib/testrun.sh`. These files hold its parts:
 - `lib/bugproof.sh`: the bug-card check.
 - `lib/speedproof.sh`: the checks of the fix cards that the Tests page files.
 - `lib/donewhen.sh`: the project's checks, the commit trailers, the Done-when check and the review findings.
+- `lib/failat.sh`: where a test failed, read from the stack traces in its output.
+- `lib/loadfactor.sh`: the load factor that a run's time limits grow by.
 
 Each run of a card's changed tests writes one `test` line to the card records, `pass` or `fail`, holding:
 
@@ -583,7 +585,10 @@ of its list alone, one process a file, through `test.fileCommand`: the card's te
 failure, the bug-card check, the run on main, the main-red check, the checks of Fix hollow cases, Fix the waiting,
 Make it run alone and the speed-up cards, the mutation check and `testaction run`. Each process has the file's own
 time limit (its `# timeout: <seconds>` line, else `testTimeout`). When the file runs past it, Conveyor stops the file
-and every process it started, and the file fails. With no `test.fileCommand`, Conveyor runs each file with the runner
+and every process it started, and the file fails. The `# timeout:` limit is multiplied by the run's load factor, the
+1-minute load average per core, never less than 1 and never more than 3, rounded up to whole seconds. Each run gets
+the factor in `CONVEYOR_LOAD_FACTOR`, and the line that says a file timed out gives the factor when it is over 1
+([configuration.md](../docs/configuration.md#the-load-factor)). With no `test.fileCommand`, Conveyor runs each file with the runner
 of its language, from the folder of its package (`conveyor/lib/filerun.sh`: Node, pytest, Go, Cargo, RSpec, Gradle,
 Maven, dotnet, swift, PHPUnit, mix, CTest and Dart or Flutter). When
 it has no runner for a file to run, the card stops at its test step under Needs you, and the reason names

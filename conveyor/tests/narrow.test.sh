@@ -419,8 +419,9 @@ t_narrowfiletimeout() {
   # The line ends with a note, as `# timeout: 300 -- about 193s run alone` does. Bug it catches (E9 of #374's review): a
   # limit with words after it was not read, and the file had the run's limit alone.
   narrowrun 'printf "%s\n" "# timeout: 1 -- a note after the limit" > a.test.sh && echo y > b.test.sh'
-  [ $((SECONDS - s)) -lt 30 ] && [ "$(cat "$T/$CASE/rc")" != 0 ] && [ "$(cat "$STUB/got" 2>&1)" = $'one:a.test.sh\none:b.test.sh\none:a.test.sh' ] \
-    || fail "the hanging file was not stopped at its limit, or the next file did not run (exit $(cat "$T/$CASE/rc"), $((SECONDS - s))s): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
+  lim=$(loadlimit 30 300) # under the file's 300 s hang
+  [ $((SECONDS - s)) -lt "$lim" ] && [ "$(cat "$T/$CASE/rc")" != 0 ] && [ "$(cat "$STUB/got" 2>&1)" = $'one:a.test.sh\none:b.test.sh\none:a.test.sh' ] \
+    || fail "the hanging file was not stopped at its limit, or the next file did not run (exit $(cat "$T/$CASE/rc"), $((SECONDS - s))s; limit $lim s: 30 s times the load factor $CASE_LOAD): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
   # E3 of #374's review. Bug it catches: the timed-out file was logged as a failed file and the run exited 1, so the
   # check on main counted a timeout there as main's failure, and the mutation check and the Board's Run action, which
   # read exit 124 as timed out, took it for a failure. The run exits 124, and its log leaves the file begun, not failed.

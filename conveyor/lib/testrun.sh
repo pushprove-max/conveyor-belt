@@ -3,13 +3,16 @@
 . "${BASH_SOURCE[0]%/*}/testmap.sh" || return 1
 # The parts of how the engine tests a card that are kept in files of their own: lib/testlist.sh (what a run runs and
 # keeps), lib/mainred.sh (a failure that is main's or the machine's), lib/bugproof.sh (the bug-card check),
-# lib/speedproof.sh (the checks of the Tests page's fix cards) and lib/donewhen.sh (the checks, the commit trailers,
-# the Done-when check and the review's findings).
+# lib/speedproof.sh (the checks of the Tests page's fix cards), lib/donewhen.sh (the checks, the commit trailers,
+# the Done-when check and the review's findings), lib/failat.sh (where a test failed, read from its output's stack
+# traces) and lib/loadfactor.sh (the load factor a run's time limits grow by).
 . "${BASH_SOURCE[0]%/*}/testlist.sh" || return 1
 . "${BASH_SOURCE[0]%/*}/mainred.sh" || return 1
 . "${BASH_SOURCE[0]%/*}/bugproof.sh" || return 1
 . "${BASH_SOURCE[0]%/*}/speedproof.sh" || return 1
 . "${BASH_SOURCE[0]%/*}/donewhen.sh" || return 1
+. "${BASH_SOURCE[0]%/*}/failat.sh" || return 1
+. "${BASH_SOURCE[0]%/*}/loadfactor.sh" || return 1
 # What a failed test run says went wrong: the failing test files, never the passing ones or their `ok` lines. Which
 # files ran and which failed is read from the logs the runner wrote (testlogs), never from the output, where a test's
 # own lines could pass for the runner's: `== <file>` as a file begins (the whole line: a name may have spaces),
@@ -40,8 +43,15 @@
 # passlist()). A run whose command wrote no such
 # log is one file, named by the command (test.command): its cases are that file's, and a timeout is in it. An output
 # that is no run's (norun(): no log folder) names no file.
-testfails() { # <test output file> <exit> [the pack's field of the run's command: test.command]; prints {of, files: [{file, cases: [{name, line}]}], timeout, passed, okcases: [{file, cases}], passcases: [{file, cases}]}
-  local logs=() log cmd='' named
+# A case's line ends with where it failed, ` (at <file>:<line>: <that line's text>)`, when a stack trace follows a
+# failure line of the case in the output: its place in a file of the worktree (<worktree>.test's <worktree>, outside
+# node_modules; FRAMEJQ: a JavaScript stack's first frame there, a Python traceback's last), the text read there
+# (wtline()), trimmed and cut to 120 characters. A failed file whose failure names no case (python3 on a unittest
+# file) has at, `<file>:<line>: <text>`, of the first stack after its `== ` line that no case took. So a failure that
+# prints no message of its own (node's assert.ok(false) under TAP: only actual and expected) still shows the assertion.
+testfails() { # <test output file> <exit> [the pack's field of the run's command: test.command]; prints {of, files: [{file, cases: [{name, line}], at}], timeout, passed, okcases: [{file, cases}], passcases: [{file, cases}]}
+  local logs=() log cmd='' named out wd=${1%.test} wdr=''
+  [ -d "$wd" ] && wd=$(cd "$wd" && pwd) && wdr=$(cd "$wd" && pwd -P) || wd=''
   # A file's name may have spaces, at its end too, and words may follow it on a line that is not its beginning in the
   # logs (a duration, the cases run): the file such a line names is the longest of the files it can be that the line's
   # words begin with. An end can be only of a file begun and not ended: never of a file that is done, whose name the
@@ -61,10 +71,28 @@ testfails() { # <test output file> <exit> [the pack's field of the run's command
         elif $b then .files |= (. + [$b] | unique) | (if .order[-1] | index($b) then . else .order[-1] += [$b] end) | .open[-1] += [$b]
         elif $e then .files |= (. + [$e.f] | unique) | .open[-1] -= [$e.f] | if $e.r == "FAIL" and (.failed | index($e.f) | not) then .failed += [$e.f] else . end
         elif $n then .n += ($n | tonumber) else . end)') || return 1
-  sed 's/\x1b\[[0-9;]*m//g' "$1" 2>/dev/null | tr -d '\000\r' | jq -cRn --arg rc "$2" --arg sec "$TEST_TIMEOUT" --arg cmd "$cmd" --slurpfile log <(printf '%s' "$log") '$log[0] as $log | '"$named"'
+  out=$(sed 's/\x1b\[[0-9;]*m//g' "$1" 2>/dev/null | tr -d '\000\r' | jq -cRn --arg rc "$2" --arg sec "$TEST_TIMEOUT" --arg cmd "$cmd" --slurpfile log <(printf '%s' "$log") \
+    --arg rx "${FRAMERX:-}" --arg pyrx "${PYFRAMERX:-}" --arg wd "$wd" --arg wdr "$wdr" '$log[0] as $log | '"$named ${FRAMEJQ:-def frame: null; def pyend(\$l): false;}"'
     def cut: if length <= 200 then . else (.[0:201] | sub("\\s+\\S*$"; "")) as $w | if ($w | length) > 200 then .[0:200] else $w end end;
+    def failcase: [capture("^FAIL \\[(?<c>[^\\]]+)\\]: "), capture("^\\s*not ok [0-9]+ (- )?(?<c>.*\\S)") , capture("^\\s*✖ (?<c>.+) \\([0-9.]+ms\\)$")][0].c;
     (if $log.files == [] and $cmd != "" then $cmd else null end) as $only
     | [inputs] as $ls | ($log.order | map(length)) as $ns
+    # $at: of each failing case, [file, line] of the first place a stack after a failure line of it names in the
+    # worktree (FRAMEJQ); a passed case line or a `== ` line ends the search of a failure line. $fat: of each file of
+    # the run, the first such place after its `== ` line that no failing case took (a file whose failure names no case,
+    # as python3 runs a unittest file). With no FRAMERX (testfails() read alone, with none of the globals of this
+    # file) there is no place, and stand-ins of the defs of FRAMEJQ, which read no frame, let the program compile.
+    | (if $wd == "" or $rx == "" then {at: {}, fat: {}} else
+        def put($a): if .c then .at[.c] = $a | .c = null elif .f and (.fat[.f] | not) then .fat[.f] = $a else . end;
+        reduce ($ls[], "\u0000") as $l ({c: null, f: null, py: null, at: {}, fat: {}};
+          (if .py and pyend($l) then put(.py) | .py = null else . end)
+          | ($l | failcase) as $c | ($l | frame) as $fr
+          | if $c then .c = (if .at[$c] then null else $c end) | .py = null
+            elif ($l | contains("== ")) then .c = null | .py = null | .f = ([$l | split("== ")[1:][] | named($log.order | flatten) // empty] | last)
+            elif ($l | test("^\\s*(ok |✔ )")) then .c = null
+            elif $fr == null or $fr.f == null then .
+            elif $fr.py then .py = [$fr.f, $fr.n]
+            else put([$fr.f, $fr.n]) end) | {at, fat} end) as {at: $at, fat: $fat}
     # $ts: each `== ` line of a file of the run, as [line, file]: anywhere in the line, since an output that ends
     # without a newline has the next `== ` line of the runner joined to its last line.
     | [$ls | to_entries[] | .key as $k | .value | split("== ")[1:][] | (named($log.order | flatten) // empty) as $f | [$k, $f]] as $ts
@@ -98,7 +126,7 @@ testfails() { # <test output file> <exit> [the pack's field of the run's command
           (select(test("^\\s*ok .*# *(TODO|SKIP)"; "i") | not) | capture("^\\s*ok [0-9]+ (- )?(?<c>.*\\S)"))][0].c
          | . as $n | if $n and $of and ($n == $of or ($n | endswith("/" + $of)) or ($of | endswith("/" + $n))) then null else $n end) as $o
       | (if $o and $of then .oks[$of] += [$o] else . end)
-      | ([$l | capture("^FAIL \\[(?<c>[^\\]]+)\\]: "), capture("^\\s*not ok [0-9]+ (- )?(?<c>.*\\S)") , capture("^\\s*✖ (?<c>.+) \\([0-9.]+ms\\)$")][0].c) as $c
+      | ($l | failcase) as $c
       | (if $c and ($l | test("^\\s*not ok .*# *(TODO|SKIP)"; "i") | not) then
           (if $whole | not then [.cur | select(. == "" or IN($log.failed[]))]
            elif all($pre[$k][]; . == 0) then [$only // ""]
@@ -110,12 +138,15 @@ testfails() { # <test output file> <exit> [the pack's field of the run's command
         else . end)
       | reduce $hs[$k][] as [$r, $i] (.; .seen["\($r) \($i)"] = $k | if $i > .at[$r] then .cur = $log.order[$r][$i] | .at[$r] = $i else . end))
     | ($log.files - $log.failed - ($log.open | flatten)) as $passed | .files as $fs
-    | {of: ($log.n // ($log.files | length | if . == 0 then null else . end)), files,
+    | {of: ($log.n // ($log.files | length | if . == 0 then null else . end)),
+       files: (.files | map((.cases |= map(. + if $at[.name] then {at: $at[.name]} else {} end)) + if .cases == [] and $fat[.file] then {at: $fat[.file]} else {} end)),
        timeout: (if $rc == "124" then {sec: ($sec | tonumber? // $sec), file: ($only // ($log.open | flatten | last))} else null end),
        passed: $passed,
        okcases: [.oks | to_entries[] | .key as $f | select(IN($passed[]; $f) | not)
          | {file: $f, cases: ((.value | unique) - [$fs[] | select(.file == $f) | .cases[].name])} | select(.cases != [])],
-       passcases: [.oks | to_entries[] | select(IN($passed[]; .key)) | {file: .key, cases: (.value | unique)}]}'
+       passcases: [.oks | to_entries[] | select(IN($passed[]; .key)) | {file: .key, cases: (.value | unique)}]}') || return 1
+  [[ $out == *'"at":['* ]] || { printf '%s\n' "$out"; return 0; }
+  atsource "$wd" <<<"$out"
 }
 
 # A test output that is no run's (the loop's own words for why nothing ran): the logs and times of the run before are not its.
@@ -411,7 +442,7 @@ listcmd() { # <worktree> [report args]
   # document; no shared helper, which testsel() does not run as a test either) are the card's tests (#384); with
   # none, the CARDLINKED test files the test map and the links give the change (testsel() narrow), those that failed
   # most recently first (testcap()), and its output says so (LINKED). The run before the push runs the files the map
-  # links to every landing (pushtests(), lib/push.sh).
+  # links to every landing (pushtests(), lib/pushrun.sh).
   mapfile -t fs < <(git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames --diff-filter=AM HEAD -- 2>/dev/null | testpaths \
     | jq -Rr "$SHAREDJQ"'select(. != "" and (shared | not))')
   CAPLEFT=0; CAPNOTE=''
@@ -600,7 +631,9 @@ NOTPASSED='def notpassed: [.failures.files[] | .file as $f | if .cases == [] the
 # The files to run are listed first, and `TESTRUN files=<n>` is logged before the first runs (#433): a file's own run
 # prints its own count, so without it the live record had no count of the files while they ran.
 # Each file runs in a process group of its own (timeout's), with the file's own time limit, its `# timeout: <seconds>`
-# line (FILELIMIT): past it, timeout ends the file and everything it started, and the output says it timed out. Its log
+# line (FILELIMIT), times the run's load factor (CONVEYOR_LOAD_FACTOR: loadfactor(), LOADSCALE, rounded up): past it,
+# timeout ends the file and everything it started, and the output says it timed out, and with a factor over 1, the
+# line's own seconds and the factor. Its log
 # keeps it begun and not ended, and the run, once its other files ran, exits 124, as a run that ran out of time does:
 # testfails() names it as the run's timeout, not as a failed file (which the check on main, verdicts(), would count as
 # main's), and the mutation check and the Board's Run action read the exit as timed out. A file with no such line has the run's limit (testTimeout: testclock()). When the run itself is ended
@@ -628,12 +661,14 @@ filecmd() { # <the pack's test.fileCommand> [files]
     'for f in "${fs[@]}"; do' \
     '  i=$((i + 1)); echo "== $f" | tee -a "$l"' \
     "  n=\$(awk $(printf %q "$FILELIMIT") \"\$f\" 2>/dev/null); [ \"\${n:-0}\" -gt 0 ] 2>/dev/null || n=0" \
-    "  CONVEYOR_TEST_FILE=\$f CONVEYOR_TEST_N=\$i timeout --kill-after=10 \"\$n\" bash -c $q'"' "$CONVEYOR_TEST_FILE"'"' < /dev/null & p=\$!" \
+    "  s=\$n; [ \"\$n\" = 0 ] || s=\$(awk -v n=\"\$n\" -v f=\"\${CONVEYOR_LOAD_FACTOR:-1}\" $(printf %q "$LOADSCALE"))" \
+    "  CONVEYOR_TEST_FILE=\$f CONVEYOR_TEST_N=\$i timeout --kill-after=10 \"\$s\" bash -c $q'"' "$CONVEYOR_TEST_FILE"'"' < /dev/null & p=\$!" \
     '  wait "$p"; x=$?' \
     '  if pgrep -g "$p" >/dev/null 2>&1; then ( for ((d = 3; d < 256; d++)); do eval "exec $d>&-"; done; while pgrep -g "$p" >/dev/null 2>&1; do sleep 0.5; done ) </dev/null >/dev/null 2>&1 & fi' \
     '  p=' \
     '  if [ $x = 0 ]; then echo "-- ok $f" | tee -a "$l"' \
-    '  elif [ $x = 124 ] && [ "$n" != 0 ]; then echo "conveyor: $f timed out: it ran past its time limit, $n s, and it was stopped there"; to=124' \
+    '  elif [ $x = 124 ] && [ "$n" != 0 ]; then w=; [ "$s" = "$n" ] || w="; the limit is its # timeout: line'"'"'s $n s times the load factor $CONVEYOR_LOAD_FACTOR"' \
+    '    echo "conveyor: $f timed out: it ran past its time limit, $s s, and it was stopped there$w"; to=124' \
     '  else echo "-- FAIL $f" | tee -a "$l"; r=1; fi' \
     'done' 'exit ${to:-$r}'
 }
@@ -641,6 +676,8 @@ filecmd() { # <the pack's test.fileCommand> [files]
 # comments the file starts with (as the engine's runner reads it for its cases), words after the number (a note) left
 # out; nothing when it has none.
 FILELIMIT='FNR > 1 && !/^#/ && NF { exit } /^#[[:space:]]*timeout:[[:space:]]*[0-9]+([[:space:]].*)?$/ { sub(/^#[[:space:]]*timeout:[[:space:]]*/, ""); print $0 + 0; exit }'
+# The awk program that prints a time limit n (seconds) times a load factor f, held between 1 and 3, rounded up.
+LOADSCALE='BEGIN { f += 0; if (f < 1) f = 1; if (f > 3) f = 3; x = n * f; printf "%d\n", (x == int(x)) ? x : int(x) + 1 }'
 # A failed run of the bug-card check that gave no result for a file it was given: the runner's logs (testlogs()) name
 # it neither passed nor failed, and name no case of it that passed (testfails()), and no case the run names as passed
 # or failed, under any file, is in its text (a runner that runs another's cases logs them under its own name: the
@@ -689,7 +726,7 @@ voidrun() { # <worktree> <exit>
 # has), which is never a core kept for the user (slot_cpus): slot_keepwords's taskset of the cores left would undo
 # that pin, so it is put before the run only when no slot has a core to pin to.
 # CONVEYOR_TEST_TIME is the path of tools/testtime.sh, for a test command the Board's Record CPU time wrapped in it
-# (cpuplan(), lib/testfiles.sh).
+# (cpuplan(), lib/testfiles.sh). CONVEYOR_LOAD_FACTOR is the machine's load factor as the run starts (loadfactor()).
 # TEST_HARD, when set, is a limit in seconds that timeout itself keeps: the run ends there even while a runner of the
 # command waits for a whole-suite turn, which stops testclock's clock (the check on main, verdicts()).
 testonce() { # <worktree> <cmd>
@@ -697,7 +734,7 @@ testonce() { # <worktree> <cmd>
   [ ! -s "$1.rerun" ] || r=$1.rerun; rm -f "$1.report" "$1".report.[0-9]*
   t0=$(date +%s); [ -n "$SLOT_CPUS" ] || slot_keepwords
   (cd "$1" && { [ -n "$SLOT_HOME" ] || slot_mine; } && { [ ${#REPORT_ENV[@]} = 0 ] || export "${REPORT_ENV[@]}"; } && CONVEYOR_TEST_SLOTS=$HERE/lib/slots.sh CONVEYOR_TEST_LOG=$1.testlog CONVEYOR_TEST_TURNWAIT=$1.turnwait \
-    CONVEYOR_TEST_TIME=$HERE/tools/testtime.sh CONVEYOR_TEST_RERUN=$r CONVEYOR_TEST_FILES=${TEST_FILES:-} CONVEYOR_TEST_CASES=${TEST_CASES:-} exec "${KEEP[@]}" timeout --kill-after=30 "${TEST_HARD:-0}" bash -c "$2" > "$1.test" 2>&1 < /dev/null 8>&-) &
+    CONVEYOR_TEST_TIME=$HERE/tools/testtime.sh CONVEYOR_LOAD_FACTOR=$(loadfactor) CONVEYOR_TEST_RERUN=$r CONVEYOR_TEST_FILES=${TEST_FILES:-} CONVEYOR_TEST_CASES=${TEST_CASES:-} exec "${KEEP[@]}" timeout --kill-after=30 "${TEST_HARD:-0}" bash -c "$2" > "$1.test" 2>&1 < /dev/null 8>&-) &
   pid=$!; testclock $pid "$1.turnwait" & clock=$!
   watch $pid "$1.test" "$1.live" test; rc=$?
   kill $clock 2>/dev/null; wait $clock 2>/dev/null; rm -f "$1.turnwait"

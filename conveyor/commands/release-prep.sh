@@ -484,9 +484,15 @@ relsuite() { # <command name> <commit>
   [ $rc = 0 ] || [ "$(jq .failed <<<"$p")" != 0 ] || p=$(testfails "$wt.test" "$rc" test.full | jq -c --argjson p "$p" --arg cmd "$cmd" \
     '$p + {cases: [.files[]? | .file as $f | if (.cases // []) == [] then $f else .cases[] | if $f == $cmd or $f == "" then .name else "\($f): \(.name)" end end] | unique}
       | .failed = (.cases | length)' 2>/dev/null) || p=$(suiteprog "$wt")
-  sr=$rc
+  sr=$rc f='{"files":[]}'
+  [ $rc = 0 ] || f=$(testfails "$wt.test" "$rc" test.full) || f='{"files":[]}'
+  # `release` judges no case alone: it names each failed case with its line, and each failed file that names no case
+  # with where it failed, read from the output's stacks (testfails()), so the failure can be read with no run again.
+  [ $rc = 0 ] || [ "$n" = release-prep ] || jq -r --arg n "$n" --arg cmd "$cmd" '.files[]? | .file as $f
+    | (if $f == $cmd or $f == "" then "" else "\($f): " end) as $p
+    | if (.cases // []) == [] then "conveyor: \($n): failed: \($f)" + (if .at then " (at \(.at))" else "" end)
+      else .cases[] | "conveyor: \($n): failed: \($p)\(.line)" end' <<<"$f" >&2
   if [ $rc != 0 ] && [ "$n" = release-prep ]; then
-    f=$(testfails "$wt.test" "$rc" test.full) || f='{"files":[]}'
     # A file kept from the reused run passed: each case run alone is told so, as of a file that passed in this run.
     [ -z "$l" ] || f=$(jq -c --slurpfile l <(printf '%s' "$l") --rawfile run "$wt.files" '$l[0] as $l | .passed = ((.passed // []) + ([$l.files | to_entries[] | select(.value == "ok") | .key] - ($run | split("\n"))))' <<<"$f")
     # Each run alone below runs in this worktree, so it clears the suite's log folder and output: the record keeps the

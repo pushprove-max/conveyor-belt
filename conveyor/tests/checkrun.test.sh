@@ -89,7 +89,8 @@ t_checkrunleft() {
   # A command that leaves a child in the background is not waited for past the 5 s.
   mkrun 3 1 2 4 null; tune --arg c "sleep 60 & cat $STUB/run.json" '.checks.progress = $c' # sleep: the child the command leaves in the background
   rm -f "$ST/checkrun.json"; s=$SECONDS; out=$(cr .name)
-  [ $((SECONDS - s)) -lt 10 ] && [ "$out" = '"nightly"' ] || fail "a command that leaves a child in the background: $out after $((SECONDS - s)) s"
+  lim=$(loadlimit 10 60) # under the child's 60 s
+  [ $((SECONDS - s)) -lt "$lim" ] && [ "$out" = '"nightly"' ] || fail "a command that leaves a child in the background: $out after $((SECONDS - s)) s (limit $lim s: 10 s times the load factor $CASE_LOAD)"
 }
 
 # Bad JSON, JSON of another shape, a run or a lane missing a field, a failing and a hanging command: each is said,

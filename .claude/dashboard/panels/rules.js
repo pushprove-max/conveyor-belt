@@ -157,7 +157,7 @@
   const PRMERGE = { button: 'with the Merge button', release: 'at the release', idle: 'when Conveyor is idle' };
   const prNow = (c) => (c && PRMERGE[c.prMerge] ? c.prMerge : (PRMERGE[S.d.packPrMerge] ? S.d.packPrMerge : 'button'));
   const prKnown = () => { const c = ctl(); return !!c && Object.prototype.hasOwnProperty.call(c, 'prMerge'); };
-  // Whether the run before a push runs (pushcheck(), conveyor/lib/push.sh): the record's pushCheck when it sets one,
+  // Whether the run before a push runs (pushcheck(), conveyor/lib/pushrun.sh): the record's pushCheck when it sets one,
   // else the pack's push.check as the snapshot gives it; on when neither says.
   const pushCheckOn = (c) => (c && typeof c.pushCheck === 'boolean' ? c.pushCheck : S.d.pushCheck !== false);
   // The rule that skips an issue, in words.

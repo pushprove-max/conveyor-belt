@@ -27,7 +27,8 @@ t_closurereach() {
     || fail "the install case passed with a file the set misses: $(tail -20 "$d/run.out")"
   grep -qxF 'FAIL [install]: conveyor/commands/hello.sh: closure.sh does not reach it: add an anchored source, or a line to the left-out list' "$d/run.out" \
     || fail "the install case did not name the file the set misses: $(tail -20 "$d/run.out")"
-  [ $((SECONDS - s)) -lt 60 ] || fail "the install case took $((SECONDS - s)) s to fail on a file the set misses"
+  lim=$(loadlimit 60 120) # under the run's 120 s timeout
+  [ $((SECONDS - s)) -lt "$lim" ] || fail "the install case took $((SECONDS - s)) s to fail on a file the set misses (limit $lim s: 60 s times the load factor $CASE_LOAD)"
   ! grep -F extra.md "$d/run.out" || fail "a file on the left-out list failed the check"
   git -C "$c" rm -q conveyor/commands/hello.sh || fail "cannot remove the unreached file"
   [ -z "$(bash "$c/conveyor/tools/closure.sh" --unreached "$c")" ] || fail "the check named a file with only left-out files beyond the set"

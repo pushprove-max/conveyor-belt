@@ -58,7 +58,8 @@ t_runnerstop() {
   tune '.test.fileCommand = "bash \"$STUB/one\""'
   local s=$SECONDS c
   rnrun 'echo y >> tests/other.test.mjs'
-  [ $((SECONDS - s)) -lt 20 ] && [ "$(cat "$T/$CASE/rc")" != 0 ] || fail "the run was not stopped (exit $(cat "$T/$CASE/rc"), $((SECONDS - s))s): $(cat "$T/$CASE/run.out")"
+  lim=$(loadlimit 20 30) # under the run's 30 s
+  [ $((SECONDS - s)) -lt "$lim" ] && [ "$(cat "$T/$CASE/rc")" != 0 ] || fail "the run was not stopped (exit $(cat "$T/$CASE/rc"), $((SECONDS - s))s; limit $lim s: 20 s times the load factor $CASE_LOAD): $(cat "$T/$CASE/run.out")"
   grep -qE '^a card runs each of its test files alone, and the test command, given 1 test file\(s\), reported [23] test files: tests/other\.test\.mjs, run alone by test\.fileCommand, ran test files it is not given, so its run was stopped; ' "$T/$CASE/cards/c7.stop" \
     || fail "the stop does not name the file that ran the rest: $(cat "$T/$CASE/cards/c7.stop" "$T/$CASE/run.out" 2>&1)"
   c=$(cat "$STUB/child" 2>/dev/null) && [ -n "$c" ] || fail "the file's child never started"

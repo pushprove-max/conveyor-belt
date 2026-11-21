@@ -83,7 +83,7 @@ t_swerunsreuselock() {
     # The reuse's shell closes its copy of the lock: with it open, the lock stays held and the reuse fails on its
     # 60 s wait, as it would with no result. The time check tells the two apart.
     (exec {f}>&-; swe_reuse proj__a-1; echo "rc=$?") > "$B/reuse.out" 2>&1 &
-    s=$SECONDS; sleep 1; rm -f "$B/results/stub-a/proj__a-1.json"; exec {f}>&-; wait; cat "$B/reuse.out"; jq -c '.tasks' "$B/live.json"; [ $((SECONDS - s)) -lt 30 ] || echo "waited out the lock") # sleep: no direct check shows a process waiting on a lock
+    s=$SECONDS; sleep 1; rm -f "$B/results/stub-a/proj__a-1.json"; exec {f}>&-; wait; cat "$B/reuse.out"; jq -c '.tasks' "$B/live.json"; lim=$(loadlimit 30 60); [ $((SECONDS - s)) -lt "$lim" ] || echo "waited out the lock (limit $lim s: 30 s times the load factor $CASE_LOAD)") # sleep: no direct check shows a process waiting on a lock
   [ "$o" = $'rc=1\n[]' ] || fail "a reuse did not wait on runs.lock, so it recorded a result a delete removed, or it waited out the lock: $o"
 }
 

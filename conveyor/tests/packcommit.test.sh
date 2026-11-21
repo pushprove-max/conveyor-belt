@@ -82,7 +82,8 @@ t_packcommitslow() {
   pcslowpush; local out rc s=$SECONDS
   out=$(CONVEYOR_PACK_PUSH=1 loop setup pack-commit yes 2>&1); rc=$?
   local took=$((SECONDS - s)) hp; hp=$(cat "$STUB/hook.pid" 2>/dev/null); kill -- "-$E"
-  [ "$rc" = 1 ] && [ "$took" -lt 10 ] || { kill "$hp" 2>/dev/null; fail "pack-commit yes did not end at its push's limit (exit $rc after ${took}s): $out"; }
+  lim=$(loadlimit 10 30) # under the hook's 30 s
+  [ "$rc" = 1 ] && [ "$took" -lt "$lim" ] || { kill "$hp" 2>/dev/null; fail "pack-commit yes did not end at its push's limit (exit $rc after ${took}s; limit $lim s: 10 s times the load factor $CASE_LOAD): $out"; }
   grep -qF "the push took more than 1s, so it was stopped; it goes with main's next push" <<<"$out" && grep -q '^conveyor: committed ' <<<"$out" \
     || fail "it did not say the commit was made and the push stopped: $out"
   [ "$(git -C "$R" log -1 --format=%s)" = 'Add the Conveyor pack' ] && [ "$(git -C "$T/$CASE/origin" rev-parse main)" = "$HEAD0" ] \
@@ -112,7 +113,8 @@ t_packcommitask() {
   while [ -n "$hp" ] && ! pcended "$hp" && [ $((i++)) -lt 30 ]; do sleep 0.1; done
   local left=; [ -n "$hp" ] && pcended "$hp" || { left=1; kill "$hp" 2>/dev/null; }
   st=$(p_stoppedtree "$E"); kill -CONT -- "-$E" 2>/dev/null; kill -- "-$E"
-  [ "$rc" = 124 ] && [ "$took" -lt 9 ] && grep -q '^conveyor: committed ' <<<"$out" || fail "the ask did not end at its limit after the commit (exit $rc after ${took}s): $out"
+  lim=$(loadlimit 9 30) # under the hook's 30 s
+  [ "$rc" = 124 ] && [ "$took" -lt "$lim" ] && grep -q '^conveyor: committed ' <<<"$out" || fail "the ask did not end at its limit after the commit (exit $rc after ${took}s; limit $lim s: 9 s times the load factor $CASE_LOAD): $out"
   [ -z "$left" ] || fail "the push's pre-push hook ran on after the ask ended"
   [ -z "$st" ] || fail "the ask's end left the engine's processes stopped (state T): $st"
 }

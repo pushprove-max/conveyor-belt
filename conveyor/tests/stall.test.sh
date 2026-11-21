@@ -38,7 +38,8 @@ EOF
   [ "$(jq -c '[.[] | [.card, .step, .did]]' <<<"$h")" = "[[\"$c\",\"build\",\"ended and retried\"]]" ] \
     && jq -e '.[0].since | fromdate > 0' <<<"$h" >/dev/null || fail "health did not list the retried build as stuck, with what the engine did: $h"
   [ "$b" = '[["build",1]]' ] || fail "the snapshot does not count the stall of the build that runs again, before its line is written: $b"
-  [ $((SECONDS - s)) -lt 45 ] || fail "the stalled steps were not ended after stuck seconds: the run took $((SECONDS - s)) s"
+  lim=$(loadlimit 45)
+  [ $((SECONDS - s)) -lt "$lim" ] || fail "the stalled steps were not ended after stuck seconds: the run took $((SECONDS - s)) s (limit $lim s: 45 s times the load factor $CASE_LOAD)"
   [ "$(wc -l < "$STUB/sessions")" = 2 ] && [ "$(wc -l < "$STUB/reviews")" = 2 ] || fail "the build and the review did not each run once more: $(wc -l < "$STUB/sessions") sessions, $(wc -l < "$STUB/reviews") reviews"
   [ "$(st 'select(.step == "build") | [.stalls, (.firstTry.reason | test("^stalled at build: no progress since 20[0-9-]+T"))] | tostring')" = '[1,true]' ] \
     || fail "the build line does not count its stall and keep the stalled try: $(st 'select(.step == "build")')"
@@ -242,7 +243,8 @@ t_stallnostep() {
   s=$SECONDS; out=$(loop run --only 7 2>&1) || fail "run exited non-zero: $out"
   [ "$(st 'select(.issue == 7 and .step == "blocked") | .reason')" = "review: no process of this step ran for 4s (the pack's stuck and reviewPause), so the engine stopped the card" ] \
     || fail "#7 was not blocked naming its review step: $(st 'select(.issue == 7) | [.step, .of, .reason] | map(strings) | join(" ")' | tr '\n' ,) $out"
-  [ $((SECONDS - s)) -lt 60 ] || fail "the stuck card was not ended soon after stuck and reviewPause: the run took $((SECONDS - s)) s"
+  lim=$(loadlimit 60 600) # under the checks' 600 s hang
+  [ $((SECONDS - s)) -lt "$lim" ] || fail "the stuck card was not ended soon after stuck and reviewPause: the run took $((SECONDS - s)) s (limit $lim s: 60 s times the load factor $CASE_LOAD)"
   [ ! -e "$STUB/reviews" ] && [ -z "$(st 'select(.issue == 7 and .step == "review")')" ] || fail "#7 was reviewed: $(st 'select(.issue == 7 and .step == "review")')"
   [ -s "$STUB/hang.pid" ] && ! kill -0 "$(cat "$STUB/hang.pid")" 2>/dev/null || fail "the hung checks under the card were left running"
   c=$(st 'select(.step == "picked") | .card')

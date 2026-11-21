@@ -138,7 +138,8 @@ t_swewaitmain() {
   swe; local first out t0
   first=$(sweorder | head -n 1); : > "$SWE_FX/ewait"; t0=$SECONDS
   out=$(loop bench swe 1 2>&1) || fail "the run failed: $out"
-  [ $((SECONDS - t0)) -lt 25 ] || fail "the trial did not end while its card waited: it took $((SECONDS - t0)) s"
+  lim=$(loadlimit 25 30) # under the card's 30 s wait
+  [ $((SECONDS - t0)) -lt "$lim" ] || fail "the trial did not end while its card waited: it took $((SECONDS - t0)) s (limit $lim s: 25 s times the load factor $CASE_LOAD)"
   jq -e '.resolved == true and .fired == true and .ended == "its card waited for main to change: tests/t.py fail on main at 0123456789ab too"' \
     "$B"/results/*-"$EB/$first.json" > /dev/null || fail "the waiting card's patch was not graded, or the record does not name the wait: $(cat "$B"/results/*-"$EB/$first.json")"
   grep -q '^+fixed' "$B"/results/*-"$EB/$first.patch" || fail "the patch is not the card's staged change: $(cat "$B"/results/*-"$EB/$first.patch")"

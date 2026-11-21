@@ -47,7 +47,8 @@ depsreason() { # <the folders, from depsmissing>
 # push, and so the hook, holds a slot of the machine's test pool, taken ahead of every test worker that waits for one
 # (slot_first), on the slot's core (slot_mine): a machine full of test runs gives the
 # project's pre-push checks a test unit's share, not a sliver of what is left (the owner, 2026-11-15). A loop started
-# on a slot it holds already (CONVEYOR_TEST_SLOT: a loop an engine case runs) pushes on that one, as its tests run. When
+# on a slot it holds already (CONVEYOR_TEST_SLOT: a loop an engine case runs) pushes on that one, as its tests run.
+# The push, so the pre-push hook's test run, gets the load factor (CONVEYOR_LOAD_FACTOR: loadfactor(), lib/loadfactor.sh). When
 # it works the commit, the remote and the branch are written to $PUSHED; when it fails, a push line under the given card (the last one landed)
 # holds the commit, the end of what git and the hook said, and why it failed (kind: check or transport; a check
 # failure names the check: the word after the last "FAILED" the hook printed, else the pre-push hook). A hook that
@@ -82,10 +83,10 @@ PUSHLOGS=${STATE%/*}/pushlogs
 PUSHLOG_KEEP=20
 PUSHLAST=${STATE%/*}/pushlast
 push() { # <card> <issue> [<commit>]
-  local lk rc hk=$RELKEPT plog f pwhy='' pcheck='' pproc=$BASHPID
+  local lk rc hk=$RELKEPT plog logs pwhy='' pcheck='' pproc=$BASHPID
   plog=$PUSHLOGS/$(date -u +%Y%m%dT%H%M%SZ)-$BASHPID.log
   mkdir -p "$PUSHLOGS" 2>/dev/null && : > "$plog" 2>/dev/null || plog=''
-  f=("$PUSHLOGS"/*.log); [ "${#f[@]}" -le "$PUSHLOG_KEEP" ] || rm -f "${f[@]:0:${#f[@]}-PUSHLOG_KEEP}"
+  logs=("$PUSHLOGS"/*.log); [ "${#logs[@]}" -le "$PUSHLOG_KEEP" ] || rm -f "${logs[@]:0:${#logs[@]}-PUSHLOG_KEEP}"
   echo "conveyor: the push's output is in ${plog:-no log: $PUSHLOGS could not be written}"
   if { exec {lk}>>"$PUSHED.lock"; } 2>/dev/null && flock "$lk"; then
     rc=0
@@ -152,7 +153,7 @@ pushone() { # <card> <issue> [<commit>]
         && git worktree add -q --detach "$wt" "$sha" && deps "$wt" && cd "$wt" \
         && slot_pool && { [ -n "$SLOT_HOME" ] || { slot_first && slot_mine; }; } \
         && pushing "$sha" "$([ -z "$nv" ] && echo hook || echo push)" && {
-          env "${e[@]}" GIT_TRACE2_EVENT="$wt.trace" timeout --kill-after=30 "$PUSH_TIMEOUT" git push ${nv:+"$nv"} "$REMOTE" "$sha:refs/heads/$to"
+          env "${e[@]}" CONVEYOR_LOAD_FACTOR="$(loadfactor)" GIT_TRACE2_EVENT="$wt.trace" timeout --kill-after=30 "$PUSH_TIMEOUT" git push ${nv:+"$nv"} "$REMOTE" "$sha:refs/heads/$to"
           a=$?; pushing "$sha" "$([ $a = 0 ] && echo pushed || echo ended)"; exit $a; }
     } 2>&1 < /dev/null | tee -a "${plog:-/dev/null}"; exit "${PIPESTATUS[0]}") && { [ "$la" = pr ] || echo "$sha $REMOTE $BRANCH" > "$PUSHED"; } || rc=$?
     # The remote refused the push (git's "[rejected]": its main holds a commit this one lacks): main takes the
@@ -177,11 +178,13 @@ pushone() { # <card> <issue> [<commit>]
   # commit, so the loop does not push again until main moves: checkheld()), or transport, anything else (git, the
   # network, the remote, the timeout), which a later try may get past.
   # A failed check names the test the output names failed (its last "FAILED <name>"), else the pre-push hook (pcheck,
-  # for pushlast()); the push line names the push's log too.
+  # for pushlast()); the push line names the push's log too. A check failure's reason ends with where the hook's tests
+  # failed (failat(), lib/failat.sh: the push worktree's files, read from the commit), one line each.
   [ $rc = 0 ] || { a=transport; [ $rc = 124 ] || [ $rc = 137 ] || ! hookfailed "$wt.trace" || a=check; rm -f "$wt.trace"
     [ $a != check ] || pcheck=$(tail -c 20000 <<<"$out" | tr -d '\000' | jq -Rrs '[scan("(?:^|[^A-Za-z0-9_])FAILED:?[ \t]+(\\S+)")] | last[0] // "the pre-push hook" | .[0:100]')
+    m=''; [ "$a" != check ] || m=$(failat "$wt" "$sha" <<<"$out" | sed 's/^/conveyor: a test of the hook failed at /')
     record "$1" "$2" push fail "$(jq -cn --arg s "$([[ $sha =~ ^[0-9a-f]{40,64}$ ]] && echo "$sha")" --argjson t "$took" --arg k "$a" --arg c "$pcheck" --arg l "${plog:-}" \
-    --arg r "exit $rc (124 is the ${PUSH_TIMEOUT}s timeout): $(tail -c 1200 <<<"${out:-$sha}" | tr -d '\000')" '{sha:$s,reason:$r,sec:$t,kind:$k}
+    --arg r "exit $rc (124 is the ${PUSH_TIMEOUT}s timeout): $(tail -c 1200 <<<"${out:-$sha}" | tr -d '\000')${m:+$'\n'$m}" '{sha:$s,reason:$r,sec:$t,kind:$k}
       + (if $k == "check" then {check: $c} else {} end) + (if $l == "" then {} else {log: $l} end)')"; return; }
   rm -f "$wt.trace"
   # Pushed over a hook that failed under load: each pushed line says so (flaky: {files, issues}).
@@ -217,131 +220,7 @@ pushone() { # <card> <issue> [<commit>]
     record "$c" "$n" issue fail "$(jq -cn --arg r "$([ -n "${said[$c]:-}" ] && echo "GitHub still shows the issue open" || echo "GitHub gave no answer about the issue in the") $((SECONDS - t)) s after the push of $s" '{reason:$r}')"
   done
 }
-# The run before a push of main (pushone(); the owner, 2026-11-18: a card runs only its own test files, listcmd() in
-# lib/testrun.sh, and the files the test map links to its change run here): the test files the test map and the
-# links give each landing since the last push (testsel() narrow, of the landing's own change: the union, in order),
-# each run alone, once: a commit whose run passed ($PUSHED.tested; PUSHTESTED names another such file) is not run again. Never a test runner or the whole
-# suite: testsel() narrow selects neither, and each file runs through a command that runs one file (mapone(),
-# lib/testmap.sh: test.fileCommand, else test.command given it as test.list says); a pack with neither runs none and
-# says so (PUSHNOFILE). The files run in a worktree of the commit ($CARDS/pushtest) on one test slot. The landing
-# that broke a file that fails is found by running the file on the landings in turn, oldest first (one that lacks the
-# file passes it): the first that fails it, else the pushed commit when it is a landing, else none (mainred() looks
-# for it then: brokeby()). Each such file goes to the main-fix card of the commit (mainred(), naming that landing),
-# and the push is held: a push line, result fail, kind check, its check the first file, so the loop pushes again only
-# once main moves (checkheld()). It fails then, and when its worktree or the test slots cannot be had (kind
-# transport, tried again later). With the push check off (pushcheck()), it runs nothing and the push goes on.
-# The start of the reason of a push the run before it failed (checkheld() reads it).
-PUSHRAN='the run before the push failed'
-PUSHNOFILE='the test files linked to the landings did not run before the push: the test command cannot be given one test file; set test.fileCommand in .conveyor/project.json'
-pushtests() { # <card> <issue> <the commit to push> [<a commit origin holds>...]
-  local c=$1 n=$2 sha=$3 wt=$CARDS/pushtest lands=() fs=() bad=() l f s tc fc lm by why='' took=$SECONDS tested=${PUSHTESTED:-$PUSHED.tested}
-  shift 3
-  # Until #395 (the push.check rule): a state folder holding push.check.off runs no test before a push (owner's order).
-  [ ! -f "$ST/push.check.off" ] || return 0
-  pushcheck || { echo "conveyor: the push check is off (push.check, control push-check): no test file runs before the push" >&2; return 0; }
-  [ "$(cat "$tested" 2>/dev/null)" != "$sha" ] || return 0
-  rm -f "$wt.log" "$wt.at.log"
-  packget test.command tc test.fileCommand fc test.list lm 2>/dev/null || return 0
-  if [ -z "$fc" ] && { [ -z "$lm" ] || [ "$lm" = runner ] || [ -n "$(listwhy "$MAIN" "$tc" "$lm")" ]; }; then echo "conveyor: $PUSHNOFILE" >&2; return 0; fi
-  # The landings since the last push, oldest first: "<sha> <card> <issue>".
-  mapfile -t lands < <(stdb ask lines cards 2>/dev/null | jq -rs --rawfile in <(git rev-list --reverse "$sha" --not "$@" 2>/dev/null) '
-    (map(select(.step == "landed" and (.sha | type) == "string" and .sha != "")) | INDEX(.sha)) as $l
-    | $in | split("\n")[] | $l[.] // empty | "\(.sha) \(.card) \(.issue)"')
-  [ ${#lands[@]} != 0 ] || { echo "$sha" > "$tested"; return 0; }
-  pushwt "$wt" "$sha" && slot_pool \
-    || { pushwt "$wt"; record "$c" "$n" push fail "$(jq -cn --arg s "$sha" --argjson t $((SECONDS - took)) '{sha: $s, reason: "the worktree or the test slots of the run before the push could not be had", sec: $t, kind: "transport"}')"; return 1; }
-  names > /dev/null 2>&1 || :
-  mapfile -t fs < <(for l in "${lands[@]}"; do
-      s=$(testsel "$wt" narrow "${l%% *}^" "${l%% *}" 2>/dev/null) && [[ $s == *$'\n'* ]] && printf '%s\n' "${s#*$'\n'}"
-    done | awk 'NF && !seen[$0]++')
-  if [ ${#fs[@]} != 0 ]; then
-    echo "conveyor: before the push of ${sha:0:12}, ${#fs[@]} test file(s) linked to the ${#lands[@]} landing(s) since the last push run, each alone" >&2
-    [ -n "$SLOT_HOME" ] || until slot_try || slot_wait; do :; done
-    for f in "${fs[@]}"; do pushfile "$wt" "$f" || bad+=("$f"); done
-    for f in "${bad[@]}"; do
-      by=''
-      for l in "${lands[@]}"; do
-        s=${l%% *}
-        [ "$s" != "$sha" ] || { by=$l; break; }
-        git cat-file -e "$s:$f" 2>/dev/null || continue
-        if pushwt "$wt.at" "$s" && ! pushfile "$wt.at" "$f"; then by=$l; break; fi
-      done
-      mainred "$c" "$f" "$f" "$sha" "$by" || :
-      read -r s l _ <<<"$by"
-      if [ -n "$s" ]; then why+="${why:+, }$f (broken by the landing ${s:0:12} of $l)"; else why+="${why:+, }$f (the landing that broke it is not known)"; fi
-    done
-    [ -n "$SLOT_HOME" ] || slot_free
-  fi
-  pushwt "$wt"; pushwt "$wt.at"
-  [ ${#bad[@]} != 0 ] || { echo "$sha" > "$tested"; return 0; }
-  record "$c" "$n" push fail "$(jq -cn --arg s "$sha" --argjson t $((SECONDS - took)) --arg f "${bad[0]}" \
-    --arg r "$PUSHRAN ${#bad[@]} test file(s) linked to the landings since the last push: $why. Each goes to the main-fix card of ${sha:0:12}, and main is pushed again once it moves" \
-    '{sha: $s, reason: $r, sec: $t, kind: "check", check: ($f | .[0:100])}')"
-  return 1
-}
-# Whether the run before a push (pushtests()) runs: the control record's pushCheck (`control push-check on|off`) when it
-# sets one, else the pack's push.check; on when neither gives a value (no record or pack read, or no push.check).
-pushcheck() {
-  local v
-  v=$(ctl 2>/dev/null | jq -r '.pushCheck | booleans' 2>/dev/null)
-  [ -n "$v" ] || packget push.check v 2>/dev/null || v=true
-  [ "$v" != false ]
-}
-# A worktree of the run before the push (pushtests()), with main's dependency links, made anew at <commit>; with no
-# commit, removed.
-pushwt() { # <worktree> [<commit>]
-  git worktree remove --force "$1" 2>/dev/null; rm -rf "$1" "$1.testlog"; git worktree prune 2>/dev/null
-  [ -n "${2:-}" ] || return 0
-  git worktree add -q --detach "$1" "$2" > /dev/null 2>&1 && deps "$1" > /dev/null && mkdir -p "$1.testlog"
-}
-# One test file run alone in <worktree> (pushtests(), hookalone()), on the slot it holds, its output added to
-# <worktree>.log, with what a card's test run gives a test command (testonce(), lib/testrun.sh): the slots, its log
-# folder and CONVEYOR_TEST_TIME, which a test.fileCommand the Board's Record CPU time wrapped calls (cputwrap()).
-pushfile() { # <worktree> <test file>
-  local cmd
-  cmd=$(mapone "$1" "$2" '') || return 1
-  { echo "== $2"; ( cd "$1" && { [ -n "$SLOT_HOME" ] || slot_mine; } && CONVEYOR_TEST_SLOTS=$HERE/lib/slots.sh CONVEYOR_TEST_LOG=$1.testlog \
-      CONVEYOR_TEST_TIME=$HERE/tools/testtime.sh exec timeout --kill-after=30 "${TEST_TIMEOUT:-3600}" bash -c "$cmd" < /dev/null 8>&- ); } >> "$1.log" 2>&1
-}
-# The test files a failed pre-push hook names as failing (hookalone()), one a line: each test file of <commit>
-# (testtracked(), lib/issues.sh) that a line of the hook's output names, whole or after a /, on a line that says it
-# failed (FAIL, failed, ✖ or "not ok"). None when the hook says a check FAILED (its words "FAILED <name>", the check a
-# push line names) that is not one of those files (a pytest node id, file::case, is its file): the hook failed for
-# more than these files, so running them alone cannot clear it. A count after FAILED, as Python's unittest ends a
-# failed run ("FAILED (failures=1)"), is no check.
-hookfiles() { # <commit> <the hook's output>
-  local fs
-  fs=$(testtracked "$MAIN" "$1") && [ -n "$fs" ] || return 0
-  printf '%s' "$2" | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\000\r' | jq -rRs --arg fs "$fs" '
-    def esc: gsub("(?<c>[][.+*?()|{}^$\\\\])"; "\\\(.c)");
-    split("\n") as $o | [$fs | split("\n")[] | select(. != "")] as $fs
-    # Each failure line takes the longest paths first, and the text of a path it names is then no other path: the
-    # end of lib/a.test.sh is not the file a.test.sh too.
-    | [$o[] | select(test("FAIL|failed|✖|not ok")) as $l
-        | reduce ($fs | sort_by(-length) | .[]) as $f ({l: $l, hit: []};
-            ("(?<a>^|[^A-Za-z0-9_.-])" + ($f | esc) + "(?<b>$|[^A-Za-z0-9_/-])") as $re
-            | if .l | test($re) then .hit += [$f] | .l |= gsub($re; "\(.a)\u0000\(.b)") else . end) | .hit[]] | unique as $hit
-    | [$o | join("\n") | scan("(?:^|[^A-Za-z0-9_])FAILED:?[ \t]+([^\\s(]\\S*)") | .[0] | sub("::.*$"; "") | sub("[:,.]$"; "")] as $checks
-    | if $hit != [] and all($checks[]; . as $c | any($hit[]; . == $c or ($c | endswith("/" + .)))) then $hit[] else empty end'
-}
-# Each test file a failed pre-push hook names (hookfiles()) run again alone, once, on <commit>, as the run before the
-# push runs one (pushfile(); in a worktree of the commit, $CARDS/pushhook, its output in $CARDS/pushhook.log, on one
-# test slot). Prints the files, one a line, when every one passed alone. Fails when the hook names none (printing
-# nothing), and when a file failed alone too or the worktree or the slots could not be had (printing why).
-hookalone() { # <commit> <the hook's output>
-  local wt=$CARDS/pushhook fs=() f bad=()
-  mapfile -t fs < <(hookfiles "$1" "$2")
-  [ ${#fs[@]} != 0 ] || return 1
-  rm -f "$wt.log"
-  pushwt "$wt" "$1" && slot_pool || { pushwt "$wt"; echo "the test files the pre-push hook named could not be run alone: their worktree or the test slots could not be had"; return 1; }
-  echo "conveyor: the pre-push hook of ${1:0:12} failed naming ${#fs[@]} test file(s); each runs alone, once" >&2
-  [ -n "$SLOT_HOME" ] || until slot_try || slot_wait; do :; done
-  for f in "${fs[@]}"; do pushfile "$wt" "$f" || bad+=("$f"); done
-  [ -n "$SLOT_HOME" ] || slot_free
-  pushwt "$wt"
-  [ ${#bad[@]} = 0 ] || { echo "the pre-push hook named $(printf '%s, ' "${bad[@]}" | sed 's/, $//'), which fails alone too (its output: $wt.log)"; return 1; }
-  printf '%s\n' "${fs[@]}"
-}
+. "$HERE/lib/pushrun.sh" || exit 1 # the run before a push (pushtests()) and a failed hook's files run alone (hookalone())
 # The remote's commits a refused push lacks, merged into main (remerge()). They are fetched as the push was made:
 # with the pack's push.env (what lets the push reach the remote lets the fetch too), from the push worktree (a
 # relative URL names the same repository from there only), and from where the push went: every URL the remote pushes

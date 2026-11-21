@@ -32,7 +32,8 @@ fi
 case "$GIT_SAFETY_TEST_PART" in [1-$PARTS]) ;; *) echo "FAIL no such part: $GIT_SAFETY_TEST_PART (parts: 1 to $PARTS)" >&2; exit 2 ;; esac
 part() { if [ "$1" = "$GIT_SAFETY_TEST_PART" ]; then ON=1; else ON=0; fi; }
 
-check() { [ "$ON" = 1 ] || return 0; if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3)"; fi }
+. "$(dirname "${BASH_SOURCE[0]}")/lib/said.sh" # a FAIL line names the hook's last input
+check() { [ "$ON" = 1 ] || return 0; if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3)$(said)"; fi }
 cmd() { jq -cn --arg c "$1" '{tool_name:"Bash", tool_input:{command:$c}}'; }
 run() { [ "$ON" = 1 ] || return 0; bash "$HOOK" >/dev/null 2>&1 <<<"$(cmd "$1")"; echo $?; }
 

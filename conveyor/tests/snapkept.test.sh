@@ -188,7 +188,8 @@ t_snapkeptrename() {
   t0=${EPOCHREALTIME/[.,]/}
   out=$(PATH=$T/$CASE/bin:$PATH loop snapshot 2>&1) && jq -e .belt <<<"$out" > /dev/null || fail "the reader printed no snapshot: ${out:0:300}"
   t0=$(( (${EPOCHREALTIME/[.,]/} - t0) / 1000 ))
-  [ "$t0" -lt 2000 ] || fail "the reader's output ended ${t0} ms after it began: it waited for the writer's build"
+  lim=$(loadlimit 2000 3000) # under the build's 3 s
+  [ "$t0" -lt "$lim" ] || fail "the reader's output ended ${t0} ms after it began: it waited for the writer's build (limit $lim ms: 2000 ms times the load factor $CASE_LOAD)"
   # Bug (#1032): the old snapshot, its belt without c9, did not say the records changed after it, so the Foreman's
   # watcher took its empty belt for an idle Conveyor while c9 was in flight.
   jq -e '.recordsNewer == true and (.belt | map(.card) | index("c9") | not)' <<<"$out" > /dev/null \

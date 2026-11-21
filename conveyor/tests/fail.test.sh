@@ -38,7 +38,8 @@ t_fail() {
   # leaving the failed review out of the unpriced steps.
   [ "$(st 'select(.issue == 10 and .step == "blocked") | [.spent.step, (.spent.model | type), (.spent.sec | type), (.spent.unread | type), .spent.stats.turns] | tojson')" = '["review","string","number","string",0]' ] \
     || fail "a review that timed out with no usage wrote no spent: $(st 'select(.issue == 10 and .step == "blocked") | .spent')"
-  [ $((SECONDS - start)) -lt 25 ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "a hang was waited out, or a worktree is left: $(ls "$T/$CASE/cards")"
+  lim=$(loadlimit 25 30) # under the review's 30 s hang
+  [ $((SECONDS - start)) -lt "$lim" ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "a hang was waited out ($((SECONDS - start)) s; limit $lim s: 25 s times the load factor $CASE_LOAD), or a worktree is left: $(ls "$T/$CASE/cards")"
   [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] && [ -z "$(git -C "$R" status --porcelain)" ] || fail "main moved after a failed step"
   # Bug: these cards are off the belt, and nothing showed the step each failed in or how long it ran. From
   # the lines card()'s steps wrote above: the build that hung ran its second, and a failed review is the review's step.

@@ -109,8 +109,9 @@ t_slotkill() {
   [ "$(slot_used)" = 1 ] || fail "slots in use while the worker ran: $(slot_used)"
   exec {f}>>"$SLOT_DIR/1"; CONVEYOR_TEST_SLOT=$f slot_pool; [ -z "$SLOT_HOME" ] || fail "a slot another worker holds was taken for a home slot"
   kill -9 $pid; wait $pid 2>/dev/null
-  i=0; until slot_try || [ $i -ge 100 ]; do i=$((i + 1)); sleep 0.1; done
-  [ $i -lt 100 ] || fail "a worker killed mid-case, and its case, did not give the slot back"
+  lim=$(loadlimit 100 300) # tenths of a second, under the case's 30 s
+  i=0; until slot_try || [ $i -ge "$lim" ]; do i=$((i + 1)); sleep 0.1; done
+  [ $i -lt "$lim" ] || fail "a worker killed mid-case, and its case, did not give the slot back (waited $lim tenths of a second: 10 s times the load factor $CASE_LOAD)"
   # The slot is given out here: the case is over (one that has ended and is not waited for yet is).
   [ -z "$(ps -o stat= -p "$(cat "$T/$CASE/nap")" | grep -v Z)" ] || fail "a killed worker's slot was given out while the case it started still ran"
   slot_free
@@ -299,8 +300,9 @@ EOF2
   slot_pool || fail "the pool could not be made"
   ! slot_try || fail "the slot was given out while a process of the card's test command still ran"
   kill "$(cat "$STUB/left")"
-  i=0; until slot_try || [ $i -ge 50 ]; do i=$((i + 1)); sleep 0.1; done
-  [ $i -lt 50 ] || fail "the slot did not come back once the process the test command left had ended"
+  lim=$(loadlimit 50)
+  i=0; until slot_try || [ $i -ge "$lim" ]; do i=$((i + 1)); sleep 0.1; done
+  [ $i -lt "$lim" ] || fail "the slot did not come back once the process the test command left had ended (waited $lim tenths of a second: 5 s times the load factor $CASE_LOAD)"
 }
 
 # An engine case may leave such a process too (a stub it starts through Python's subprocess): its slot then came back
@@ -341,7 +343,8 @@ t_slotcaseterm() {
   slot_free
   until [ -s "$d/left" ]; do sleep 0.05; done
   s=$SECONDS; kill -TERM $pid; wait $pid; [ $? = 143 ] || fail "the case told to end did not end so: $(cat "$d/out")"
-  [ $((SECONDS - s)) -lt 10 ] || fail "the case told to end took $((SECONDS - s)) s to end, not about 3 s and the looks after it"
+  lim=$(loadlimit 10 60) # under the case's 60 s
+  [ $((SECONDS - s)) -lt "$lim" ] || fail "the case told to end took $((SECONDS - s)) s to end, not about 3 s and the looks after it (limit $lim s: 10 s times the load factor $CASE_LOAD)"
   [ -z "$(running "$(cat "$d/left")")" ] || fail "the process of the case that ignores the signal runs on after the case's worker is gone"
   wait_until slot_try || fail "the slot did not come back once the process the case left had ended"
 }

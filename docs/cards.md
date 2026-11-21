@@ -242,6 +242,14 @@ A card's tests run before it lands. When some cases fail, they run once more bef
 re-run passes goes on with no fix, and the Board shows its Test step as "passed on re-run" (`conveyor/README.md`, The
 test step).
 
+Each failing case shows where it failed when the output has a stack trace after its failure line. Its line ends with
+`(at <file>:<line>: <that line's text>)`. For a JavaScript stack, this is the first frame of the stack that is in a
+file of the checkout. For a Python traceback, it is the last such frame. So an assertion with no message of its own,
+such as `assert.ok(false)`, still shows the line that failed. A failed file whose output names no case, such as a
+Python `unittest` file, shows the place of the first stack trace in its output. The push check and a release's suite
+show the same, and a failed push check gives the place in its reason. The text of a line is not shown when the path
+to its file goes through a symbolic link. The tests need no change for this.
+
 A case that fails again runs on main. When it fails there too, Conveyor checks whether main or the machine is at
 fault. Main is at fault only when an input of the case's test file changed since its last recorded pass, and a
 control passed in the same run or no control could run. The controls are the test files that the pack's

@@ -358,7 +358,8 @@ Done when: the case passes alone and in the full test suite."
     out+=("$(jq -c --arg v "$v" --arg why "$why" --argjson i "${issue:-null}" --argjson re "${reused:-false}" \
       '{case: .name, line, runs: $ARGS.positional, verdict: $v, why: (if $why == "" then null else $why end), issue: $i, reused: $re}' --args "${runs[@]}" <<<"$u")")
   done < <(jq -c --arg cmd "$3" '(.files | map(.file)) as $fs
-    | [(.files[] | .file as $f | if .cases == [] then {file: $f, case: null, line: null} else .cases[] | {file: $f, case: .name, line} end),
+    | [(.files[] | .file as $f | if .cases == [] then {file: $f, case: null, line: (if .at then "the file failed naming no case (at \(.at))" else null end)}
+         else .cases[] | {file: $f, case: .name, line} end),
        (.timeout.file // empty | select(IN($fs[]) | not) | {file: ., case: null, line: "it ran out of time"})]
     | unique_by([.file, .case])[] | . + {name: (if .case == null then .file elif .file == $cmd or .file == "" then .case else "\(.file): \(.case)" end)}' <<<"$4")
   printf '%s\n' "${out[@]}" | jq -cs '.'

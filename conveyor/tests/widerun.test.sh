@@ -38,7 +38,8 @@ t_wideofffile() {
   local s=$SECONDS
   # The file command, which the run gives the file as its last word (`: <file>`).
   wideproof 'for i in 1 2 3; do echo "-- ok t$i.test.sh" >> "$CONVEYOR_TEST_LOG/inner"; done; sleep 30; :' # sleep: a long run, which the stop cuts
-  [ $((SECONDS - s)) -lt 25 ] && [ "$(cat "$T/$CASE/rc")" = 2 ] || fail "the proof run was not stopped, or the check did not fail with exit 2 (exit $(cat "$T/$CASE/rc"), $((SECONDS - s))s)"
+  lim=$(loadlimit 25 30) # under the run's 30 s
+  [ $((SECONDS - s)) -lt "$lim" ] && [ "$(cat "$T/$CASE/rc")" = 2 ] || fail "the proof run was not stopped, or the check did not fail with exit 2 (exit $(cat "$T/$CASE/rc"), $((SECONDS - s))s; limit $lim s: 25 s times the load factor $CASE_LOAD)"
   head -n 1 "$T/$CASE/unfixed" | grep -qE '^a card runs each of its test files alone, and the test command, given 1 test file\(s\), reported [23] test files: a\.test\.sh, run alone by test\.fileCommand, ran test files it is not given, so its run was stopped; ' \
     || fail "the check's result does not begin with the reason naming the file: $(cat "$T/$CASE/unfixed")"
 }
