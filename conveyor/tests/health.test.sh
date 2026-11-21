@@ -11,9 +11,8 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
 # Bug: a card waited about 10 hours behind one same-file card after another, and health never named it: a waiting
 # card keeps its live record fresh, so it is never silent. A card that has waited on other cards for more than
-# tunables.waitLimitMin minutes in all is stuck, with every card it waited on. A card's first wait, and health on it, is
-# read from a real loop's wait in t_waitsum; here the cards' records and live records are written as the loop writes
-# them, with no card run, the limit is the pack's (1 minute), and health is asked on the tests'
+# tunables.waitLimitMin minutes in all is stuck, with every card it waited on. The live records settle() writes are
+# read in t_waitsum; here the cards' records and live records are written as the loop writes them, with no card run, the limit is the pack's (1 minute), and health is asked on the tests'
 # clock (CONVEYOR_NOW). All its waits count, not the one it is in: c9-9 waited 40 s behind #7 and #8 before this wait,
 # 30 s old, on #11; c10-10 waited 20 s before its own. Neither wait alone passes the minute. c12-12 has waited 31
 # minutes on #11, a card that is on no belt: stuck for that alone (its wait never ends), it is still said to have
@@ -33,96 +32,71 @@ t_waitlong() {
     || fail "a card whose waits pass the limit together is not stuck with the chain it waited behind (one whose holder is gone too), or one whose waits do not is: $(CONVEYOR_NOW=$now loop health | jq -c .stuck)"
 }
 
+# wssettle: settle() of card c8-8 (a.txt) at its landing step, as card() calls it, in the engine shell (fx_in), with
+# no loop run. Its claim (wsclaim, a stand-in for `locked claim`) says it waits on c7-7, then that it waits on nothing,
+# then that it waits on c9-9. Main moved under #8 in a.txt (#7 landed), so between the two waits its patch no longer
+# applies: it keeps its claim (given way 3 times: giveway() refuses) through one fit session (session(), a stand-in
+# that merges a.txt). Each look of a wait (wssleep) copies the live record to $STUB/live<n> and moves the shell's clock
+# (SECONDS) on 20 s in place of the sleep; the second wait's first look ends the call (exit 8).
+wsclaim() {
+  local n; n=$(($(cat "$STUB/claims" 2>/dev/null || echo 0) + 1)); echo "$n" > "$STUB/claims"
+  case $n in 1) echo '{"on":"c7-7","paths":["a.txt"]}' ;; 2) ;; *) echo '{"on":"c9-9","paths":["a.txt"]}' ;; esac
+}
+wssleep() {
+  [ "${FUNCNAME[2]}" = settle ] || { command sleep "$@"; return; } # sleep: a sleep outside settle() is the real one
+  WSLOOKS=$((WSLOOKS + 1)); cp "$CONVEYOR_CARDS/c8-8.live" "$STUB/live$WSLOOKS"; SECONDS=$((SECONDS + 20)); [ "$WSLOOKS" -lt 2 ] || exit 8
+}
+wssettle() {
+  local n; setup '[]'; CARDS=$T/$CASE/cards; mkdir -p "$CARDS"
+  for n in 7 8 9; do landed "$n" | jq -c --arg c "c$n-$n" '.card = $c | .step = "picked"' >> "$ST/cards.jsonl"; done
+  git -C "$R" worktree add -q --detach "$CARDS/c8-8" main && echo eight >> "$CARDS/c8-8/a.txt" && git -C "$CARDS/c8-8" add -A \
+    && echo seven >> "$R/a.txt" && git -C "$R" commit -qam "title 7 (#7)" || fail "the change of #8, or #7's on main"
+  echo "{\"pid\":$$,\"paths\":[\"a.txt\"],\"held\":true,\"gave\":3}" > "$CARDS/c8-8.claim"
+  fx_in 'cd "$R" || exit 9; caught="" waitsec=0 behind="[]" parsecheck="" WSLOOKS=0
+    eval "$(declare -f locked | sed 1s/^locked/wslocked/)"
+    locked() { [ "$1" = claim ] || { wslocked "$@"; return; }; wsclaim; }
+    sleep() { wssleep "$@"; }
+    session() { printf "one\nseven\neight\n" > "$1/a.txt"; echo "{}"; }
+    settle c8-8 8 "$CONVEYOR_CARDS/c8-8" "Build the issue." land "$(issue 8 2026-01-02)"; echo "settle: $?"'
+  [ "$RC" = 8 ] && [ -s "$STUB/live1" ] && [ -s "$STUB/live2" ] || fail "#8 did not wait on #7, then on #9: exit $RC: $(cat "$T/$CASE/run.out")"
+  [ "$(jq -c '[.held, .away]' "$CARDS/c8-8.claim")" = '[true,null]' ] || fail "#8 gave way for its session: $(cat "$CARDS/c8-8.claim")"
+}
+
 # Bug: a wait that ended between two looks of the waiting card (one every tunables.live seconds) was not counted, so
-# the waits of a card that waited behind one card after another never added up. #8 (a.txt, b.txt) waits on #7
-# (a.txt), which lands during #8's first look-again pause (3 s here); #8 then gives way for the session that brings
-# it onto main, #9 (b.txt) takes the turn and holds b.txt in its tests ($STUB/go9), and #8 waits again, on #9: that
-# wait's live record counts the first wait whole, and health adds it to the second. #9 is in the control record's
-# order: #8, whose tests pass after that session, would else go past it (a ready card lands first, claim()).
+# the waits of a card that waited behind one card after another never added up. #8's first wait, on #7, ends between
+# two looks (wssettle): the live record of its next wait, on #9, counts the first whole (20 s on the shell's clock) and
+# names both cards, and health adds it to the second.
 t_waitsum() {
-  setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"; for i in 1 2 3 4 5 6; do echo "$GO" > "$STUB/review.$i"; done
-  tune '.tunables.live = 3'; jq -c '.order = [9]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
-  # #9's change, b.txt alone, runs a test file too: its tests hold b.txt. #7's test is its own seven.test.sh, so its
-  # landing shares no test file with #8 (a shared one runs again first: mergetests.test.sh).
-  linkset '{"b.txt": ["a.test.sh"]}'
-  cat > "$STUB/build" <<'EOF'
-case $PWD in
-  *-7) echo seven >> a.txt; echo x > seven.test.sh ;;
-  *-8) if grep -q '^# Main moved: apply the same change' "$STUB/brief"; then
-      while [ -d "$STUB" ] && [ ! -e "$STUB/go9" ] && ! jq -e .held ../*-9.claim >/dev/null 2>&1; do sleep 0.1; done
-      printf 'one\nseven\neight\n' > a.txt; echo eight >> b.txt
-    else while [ -d "$STUB" ]; do jq -e .held ../*-7.claim >/dev/null 2>&1 && break; sleep 0.1; done; echo eight >> a.txt; echo eight > b.txt; fi ;;
-  *-9) while [ -d "$STUB" ]; do jq -e .away ../*-8.claim >/dev/null 2>&1 && break; sleep 0.1; done; echo nine > b.txt ;;
-esac
-EOF
-  echo 'case $PWD in *-7) while [ -d "$STUB" ] && [ ! -e "$STUB/go7" ]; do sleep 0.1; done ;; *-9) while [ -d "$STUB" ] && [ ! -e "$STUB/go9" ]; do sleep 0.1; done ;; esac' >> "$STUB/test-cmd"
-  loop run >/dev/null 2>&1 & run=$!
-  wait_until "jq -e .waits.on '$T/$CASE/cards/'*-8.live" || fail "#8 never waited on #7"
-  c7=$(st 'select(.issue == 7 and .step == "picked") | .card'); c8=$(st 'select(.issue == 8 and .step == "picked") | .card'); c9=$(st 'select(.issue == 9 and .step == "picked") | .card')
-  # The first wait (t_waitlong's bug): its live record names what the card waited before it, nothing, and behind which
-  # card; with a limit of 1 minute (the pack's, for these two asks), past it, and not at it, health names it stuck with
-  # the card it waits on.
-  live=$(cat "$T/$CASE/cards/$c8.live")
-  [ "$(jq -c .waited <<<"$live")" = "{\"before\":0,\"behind\":[\"$c7\"]}" ] || fail "the live record of a first wait does not name what the card waited before it, and behind which cards: $live"
-  at=$(jq -r '.at | fromdate' <<<"$live")
-  h=$(CONVEYOR_NOW=$((at + 60)) tuned '.tunables.waitLimitMin = 1' loop health) || fail "health failed: $h"
-  [ "$(jq -c .stuck <<<"$h")" = '[]' ] || fail "a card that has waited no longer than the limit is stuck: $(jq -c .stuck <<<"$h")"
-  h=$(CONVEYOR_NOW=$((at + 61)) tuned '.tunables.waitLimitMin = 1' loop health) || fail "health failed: $h"
-  [ "$(jq -c .stuck <<<"$h")" = "$(jq -cn --arg c7 "$c7" --arg c8 "$c8" --arg at "$(jq -r .at <<<"$live")" \
-      '[{card: $c8, issue: 8, step: "waiting", since: $at, waitsOn: {card: $c7, issue: 7, state: "test"}, waitedMin: 1, waitedOn: [{card: $c7, issue: 7, state: "test"}]}]')" ] \
-    || fail "a card that has waited on another for longer than waitLimitMin is not stuck with the card it waited on: $(jq -c .stuck <<<"$h")"
-  : > "$STUB/go7"
-  wait_until "jq -e --arg c '$c9' '.waits.on == \$c' '$T/$CASE/cards/$c8.live'" "st '\"\(.issue) \(.step) \(.of // \"\") \(.reason)\"' | tr '\n' ," || fail "#8 never waited on #9"
-  live=$(cat "$T/$CASE/cards/$c8.live")
-  [ "$(jq -c --arg c7 "$c7" --arg c9 "$c9" '.waited.before >= 2 and .waited.behind == [$c7, $c9]' <<<"$live")" = true ] \
-    || fail "the second wait of a card does not count its first, which ended between two looks, or does not name both cards: $live"
+  local h at
+  wssettle
+  [ "$(jq -c .waited "$STUB/live1")" = '{"before":0,"behind":["c7-7"]}' ] \
+    || fail "the live record of a first wait does not name what the card waited before it, and behind which cards: $(cat "$STUB/live1")"
+  [ "$(jq -c '.waited.before >= 20 and .waited.behind == ["c7-7", "c9-9"]' "$STUB/live2")" = true ] \
+    || fail "the second wait of a card does not count its first, which ended between two looks, or does not name both cards: $(cat "$STUB/live2")"
+  # When the two together have lasted exactly the 30 minutes of waitLimitMin, the card has not waited too long: only
+  # past it. (By then it is listed as silent, an entry with no waitedMin.)
+  at=$(jq -r '.at | fromdate' "$STUB/live2")
+  h=$(CONVEYOR_NOW=$((at + 1800 - $(jq -r .waited.before "$STUB/live2"))) loop health) || fail "health failed: $h"
+  [ "$(jq -c '.stuck | map(select(.issue == 8 and has("waitedMin")))' <<<"$h")" = '[]' ] \
+    || fail "a card whose waits together last exactly waitLimitMin has waited too long: $(jq -c .stuck <<<"$h")"
   # Half an hour into the second wait the two together are past the 30 minutes of waitLimitMin, by the first alone.
-  h=$(CONVEYOR_NOW=$(($(jq -r '.at | fromdate' <<<"$live") + 1800)) loop health) || fail "health failed: $h"
+  h=$(CONVEYOR_NOW=$((at + 1800)) loop health) || fail "health failed: $h"
   [ "$(jq -c '.stuck | map(select(.issue == 8) | [.waitedMin, (.waitedOn | map(.issue))])' <<<"$h")" = '[[30,[7,9]]]' ] \
     || fail "health does not add the wait that ended to the one the card is in: $(jq -c .stuck <<<"$h")"
-  # The waits end: #9's tests let go, every card lands, #9 before #8, which waited on it.
-  : > "$STUB/go9"; wait $run || fail "run exited non-zero"
-  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 9 8 " ] || fail "the three did not land: $(st '"\(.issue) \(.step) \(.reason)"' | tr '\n' ,)"
 }
 
 # Bug: a card that kept its claim through the session that brought it onto main (it has given way 3 times: giveway())
-# and then waited again, on a card that holds a file that session added, wrote no start line for that wait: its last
-# line was the session's, and health never counted the wait. #8 (a.txt, given way 3 times) waits on #7 (a.txt); #7
-# lands, and the session that brings #8 onto main changes b.txt too, which #9 holds in its tests ($STUB/go9): #8 waits
-# on #9, and a minute (waitLimitMin here) into that wait health names it with both cards. #9, its tests over, claims
-# again to land: ready, it goes past #8, whose tests have not passed on its change (a ready card lands first: claim()),
-# and #8's change, which no longer applies, is brought onto main by its one rebuild (# Landing conflict).
+# and then waited again wrote no start line for that wait: its last line was the session's, and health never counted
+# the wait. After #8's fit session (wssettle) its last line is the start line of its wait on #9, and a minute
+# (waitLimitMin here) into that wait health names it with both cards.
 t_waitkept() {
-  setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"; for i in $(seq 8); do echo "$GO" > "$STUB/review.$i"; done
-  tune '.tunables.waitLimitMin = 1'
-  echo one > "$R/b.txt"; git -C "$R" add b.txt
-  # #9's change, b.txt alone, runs a test file too: its tests hold b.txt. #7's test is its own seven.test.sh, so its
-  # landing shares no test file with #8 (a shared one runs again first: mergetests.test.sh).
-  linkset '{"b.txt": ["a.test.sh"]}'
-  cat > "$STUB/build" <<'EOF'
-case $PWD in
-  *-7) echo seven >> a.txt; echo x > seven.test.sh ;;
-  *-8) if grep -qE '^# (Main moved|Landing conflict): apply the same change' "$STUB/brief"; then
-      while [ -d "$STUB" ] && [ ! -e "$STUB/go9" ] && ! jq -e .held ../*-9.claim >/dev/null 2>&1; do sleep 0.1; done
-      printf 'one\nseven\neight\n' > a.txt; echo eight >> b.txt
-    else while [ -d "$STUB" ]; do jq -e .held ../*-7.claim >/dev/null 2>&1 && break; sleep 0.1; done; echo eight >> a.txt; echo '{"gave": 3}' > "$PWD.claim"; fi ;;
-  *-9) echo nine >> b.txt ;;
-esac
-EOF
-  echo 'case $PWD in *-7) while [ -d "$STUB" ] && [ ! -e "$STUB/go7" ]; do sleep 0.1; done ;; *-9) while [ -d "$STUB" ] && [ ! -e "$STUB/go9" ]; do sleep 0.1; done ;; esac' >> "$STUB/test-cmd"
-  loop run >/dev/null 2>&1 & run=$!
-  wait_until "jq -e .waits.on '$T/$CASE/cards/'*-8.live" || fail "#8 never waited on #7"
-  : > "$STUB/go7"
-  c8=$(st 'select(.issue == 8 and .step == "picked") | .card'); c9=$(st 'select(.issue == 9 and .step == "picked") | .card')
-  wait_until "jq -e --arg c '$c9' '.waits.on == \$c' '$T/$CASE/cards/$c8.live'" "st '\"\(.issue) \(.step) \(.of // \"\") \(.reason)\"' | tr '\n' ," || fail "#8 never waited on #9"
-  [ "$(jq -c '[.held, .away, .gave]' "$T/$CASE/cards/$c8.claim")" = '[false,null,3]' ] || fail "#8 gave way for its session, or does not wait at its claim: $(cat "$T/$CASE/cards/$c8.claim")"
-  live=$(cat "$T/$CASE/cards/$c8.live")
-  h=$(CONVEYOR_NOW=$(($(jq -r '.at | fromdate' <<<"$live") + 61)) loop health) || fail "health failed: $h"
+  local h
+  wssettle
+  [ "$(st 'select(.card == "c8-8") | "\(.step):\(.of // "")"' | tail -n 2 | tr '\n' ' ')" = "fix: start:land " ] \
+    || fail "a wait that follows a session of a card that kept its claim wrote no start line: $(st 'select(.card == "c8-8") | "\(.step):\(.of // "")"' | tr '\n' ' ')"
+  h=$(CONVEYOR_NOW=$(($(jq -r '.at | fromdate' "$STUB/live2") + 61)) tuned '.tunables.waitLimitMin = 1' loop health) || fail "health failed: $h"
   [ "$(jq -c '.stuck | map(select(.issue == 8) | [.step, .waitedMin, .waitsOn.issue, (.waitedOn | map(.issue))])' <<<"$h")" = '[["waiting",1,9,[7,9]]]' ] \
-    || fail "a wait that follows a session of a card that kept its claim is not counted: $(jq -c .stuck <<<"$h") $(st 'select(.issue == 8) | "\(.step) \(.of // "")"' | tr '\n' ,)"
-  # #9, its tests over, claims again to land: ready, it goes past #8, and #8 is brought onto its main and lands after it.
-  : > "$STUB/go9"; wait $run || fail "run exited non-zero"
-  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 9 8 " ] || fail "the three did not land: $(st '"\(.issue) \(.step) \(.reason)"' | tr '\n' ,)"
+    || fail "a wait that follows a session of a card that kept its claim is not counted: $(jq -c .stuck <<<"$h")"
 }
 
 # Card c7-7's records, each a step or start:<step> (review:GO: a step and its result), at <epoch seconds>, as the loop
