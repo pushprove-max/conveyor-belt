@@ -80,6 +80,20 @@ for args in (['run', '5', '--arm', '-x'], ['run', '5', '--arm'], ['run', '5', '-
              ['run', '5', '--engine', 'main', '--arm', 'solo'], ['run', '5'] + ['--arm', 'a'] * 21, ['arms', 'check'], ['arms', 'check', '../x'],
              ['arms', 'check'] + ['a'] * 21, ['arms', 'list'], ['diff', 'a', 'b', '--text'], ['diff', 'a', 'b', '--json', 'x']):
     check('tab_refuses_%s' % '_'.join(args)[:40], not ok(args), args)
+# Bug: the Task page's Run this task again sends the arms that ran the task with a last --again, and the server refused
+# it (HTTP 400), so the button could never queue a run. --again is taken only as the last argument of a run.
+for args in (['run', '7', '--arm', 'conveyor', '--arm', 'solo', '--again'], ['run', '1', '--solo', '--again']):
+    check('again_takes_%s' % '_'.join(args)[:40], ok(args), args)
+# Bug: the Task page's Run this task again sent the task's place n, which runs the first n tasks. It sends n 1 with the
+# task's id (--task), after the arms and before --engine; a task id that starts with - or holds a / or n other than 1 never reaches the host.
+for args in (['run', '1', '--arm', 'conveyor', '--task', 'proj__a-1', '--again'], ['run', '1', '--arm', 'a', '--task', 'proj__a-1', '--engine', 'v1.8.0', '--again'],
+             ['run', '1', '--task', 'proj__a-1']):
+    check('task_takes_%s' % '_'.join(args)[:50], ok(args), args)
+for args in (['run', '2', '--task', 'proj__a-1'], ['run', '1', '--task'], ['run', '1', '--task', '-x'], ['run', '1', '--task', 'a/b'],
+             ['run', '1', '--task', 'a', '--task', 'b'], ['run', '1', '--engine', 'main', '--task', 'a'], ['run', '1', '--task', 'a' * 129]):
+    check('task_refuses_%s' % '_'.join(args)[:50], not ok(args), args)
+for args in (['run', '7', '--again', '--arm', 'solo'], ['run', '7', '--again', '--again'], ['run', '--again'], ['again']):
+    check('again_refuses_%s' % '_'.join(args)[:40], not ok(args), args)
 # Bug (#645): Stop named no run, so a Stop sent for a run that had ended stopped the run started after it. The tab's
 # Stop sends the run's id, and the host runs `bench swe stop <id>`; anything else after stop never reaches the host.
 check('stop_takes_a_run_id', ok(['stop', 'r20261119T130010-1234'])

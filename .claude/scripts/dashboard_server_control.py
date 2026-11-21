@@ -126,6 +126,8 @@ def control_ok(body):
         if not (n >= 2 and v[0] == 'run' and BENCH_N.fullmatch(v[1]) is not None and int(v[1]) <= 500):
             return False
         rest, arms = v[2:], 0
+        if rest[-1:] == ['--again']:  # a task's Run again: its results are kept apart from the saved ones
+            rest = rest[:-1]
         if rest[-2:-1] == ['--settings']:
             if not bench_settings_ok(rest[-1]):
                 return False
@@ -134,6 +136,11 @@ def control_ok(body):
             return True
         while rest[:1] == ['--arm'] and len(rest) >= 2 and BENCH_ARM.fullmatch(rest[1]) is not None:
             rest, arms = rest[2:], arms + 1
+        if rest[:1] == ['--task']:  # a task's Run again: that one task, never the first n (n is then 1)
+            t = rest[1] if len(rest) >= 2 else ''  # an id: ASCII letters, digits, . _ -, up to 120, never starting with -
+            if not (v[1] == '1' and 1 <= len(t) <= 120 and t.isascii() and t[0].isalnum() and all(c.isalnum() or c in '._-' for c in t)):
+                return False
+            rest = rest[2:]
         return arms <= BENCH_ARMS_MAX and (rest == [] or (len(rest) == 2 and rest[0] == '--engine' and BENCH_ENGINE.fullmatch(rest[1]) is not None))
     if a == 'mutate':  # the Tests page's Mutation check: one test file or a list of them, to the front of the idle queue
         return 1 <= n <= TEST_FILES_MAX and all(TEST_FILE.fullmatch(x) for x in v)

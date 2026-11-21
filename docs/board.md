@@ -1021,7 +1021,7 @@ page asks for by itself. The page marks it as the model's reading, not a fact. W
 task than the one shown (the result shown is a run with `--again`'s own), the task shows "not of the result shown (a run again)" in place of the
 reading. Click a flipped task to open it on **Task**.
 **Cost and time** shows the cost, the cost for each resolved task, the machine time, the tokens and the sessions of the
-two side by side. Under the page are **Archive** and **Delete** for the runs that the two sides come from.
+two side by side.
 
 **Live run** shows the run that goes now. The verdict says whether the run is on time and on budget against its
 estimate, with the tasks done, the time left at this pace, the cost so far and the usage guard. A result that the run
@@ -1038,19 +1038,26 @@ process of the run had already stopped. A Stop names its run, so a late Stop nev
 goes, the page shows the last run: how it ended, and each arm's result, sessions, tokens, minutes and cost. A task
 that did not start shows "not started", never unresolved. When the build machine refused the run, the verdict says
 that the run did not start, and why. When the
-process of the last run ended with no end recorded, the page says "interrupted" and keeps **Stop the run**, which
-records the end of the run and removes its containers. **Archive** and **Delete** of the run shown are under it. They
-stay off while the run goes.
+process of the last run ended with no end recorded, the page says "interrupted".
 
 **Task** shows one task across every arm. Open it from **Compare**, **Versions**, **Task map** or **Live run**. The
 verdict gives how many arms resolve the task, and what that says: no arm resolves it (look at the task first), every
-arm does (it tells the arms apart only on cost and time), or some do. With fewer than 3 shared tasks, it says that
-nothing can be told yet, and the difficulty shows "not told yet". A table gives each arm's result, minutes, hidden
-tests and a note: the step where a Conveyor arm went wrong, an arm that did not fire, or a task that reached the time
-limit. **Conveyor's card, step by step** shows the card's steps as a bar: the width of each step is its time. **The
-review, in full** is folded. **This task over time** has a dot for each run of the Conveyor arm on the task, by
-version. The facts give the repository, the difficulty, the size of the reference fix and the number of hidden tests.
-**Open the patch** lists the files of each arm's patch.
+arm does (it tells the arms apart only on cost and time), or some do. A table gives each arm's result, minutes, hidden
+tests and a note: the step where a Conveyor arm went wrong. **Conveyor's card, step by step** shows the card's steps as
+a bar: the width of each step is its time. **The review, in full** is folded. **This task over time** has a dot for each
+run of the Conveyor arm on the task, by version. The facts give the repository, the difficulty, the size of the
+reference fix and the task image, or "not kept" when the results do not keep it. Three buttons are under the facts:
+
+- **Open the patch** shows the files of one patch, with the lines each file adds and removes: the Conveyor arm's, or
+  the first arm's that kept one. Click it again to close it.
+- **Open the logs** shows the end of the log that each arm kept for the task: the output of its run on the task. An
+  arm that kept no log is left out. Click it again to close it.
+- **Run this task again** queues a run of this one task on the arms that ran it, on the engine that they ran, as
+  **Start the run** does, and shows the answer beside the buttons. The run keeps its results apart from the saved
+  ones, and does not replace them. When it ends, the Board reads its result of the task as the newest of each arm, so
+  the pages and the Scoreboard show it. It stays off while a run goes, for a task that is not in the pinned order, and
+  when the Conveyor arms ran the task on two engines, or on one that is not known: a run takes one engine. Only an
+  admin can use it.
 
 **Task map** shows all the tasks of SWE-bench Verified, grouped by repository, a square for each task. A square is
 coloured by how many arms resolve the task, or by the result of one arm that you pick in **Colour by**. A grey square
@@ -1068,7 +1075,7 @@ while the usage guard holds an arm that you picked. **Check the arms first** run
 preflight of each arm that you picked and that is not ready. The cost is an estimate: each session costs the mean of
 this project's own priced card sessions, or of those on the arm's model when the arm has a model.
 
-**Archive**, **Restore** and **Delete** are in the run history of **Scoreboard**, on **Live run** and on **Compare**.
+**Archive**, **Restore** and **Delete** are in the run history of **Scoreboard**.
 An archived run keeps its records, and it is in no figure, **Compare** or plan. **Delete** asks for a second click,
 which names the runs and says how many results stay because a run that you do not delete shows them. A run that has
 not ended cannot be archived or deleted: stop it first.

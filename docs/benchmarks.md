@@ -46,7 +46,8 @@ A task that an arm already ran with the same inputs is not run again: its result
 inputs are the arm and its models and efforts, the engine commit, the control record and pack settings of a Conveyor
 arm, the contents of its card and area rules, the dataset revision, the harness version and the limits. A change to
 one of them gives a new result, and the earlier result stays in the results. A result with no recorded inputs is
-shown, but never used again. `--again` runs each task again, with the same inputs. The new result is kept with
+shown, but never used again. `--again` runs each task again, with the same inputs. `--task <id>`, with n 1, runs that
+one task of the order, not the first one: `swe 1 --task <id> --again` runs it again alone. The new result is kept with
 that run: `bench swe show` of that run shows it, and `bench swe show` of the earlier run still shows the earlier result.
 `results` and the figures below read the earlier result, but `sameTwice` counts both runs. A run reads these inputs once, when it starts. A change to the control record or the
 rules while it runs applies to the next run only.

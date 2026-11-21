@@ -239,16 +239,47 @@
       // The results keep no size of the task's image, so the figure is not kept.
       ['Task image', K.NOT_KEPT]]);
   }
-  // The task's tools: Open the patch shows each arm's patch (kept open through a redraw). The engine serves no task's log
-  // to the Board and runs the first tasks of the pinned order, never one task alone, so those two buttons say so.
+  // The task's tools, as the mockup has them. Open the patch shows the patch of the arm that the card's steps are read
+  // from (the Conveyor arm, else the first arm with a kept patch). Open the logs shows each arm's kept log of the task
+  // (the end of the loop's output: the engine gives the Board no more of it). Run this task again sends
+  // `bench swe 1 --arm <arm>... --task <id> [--engine <commit>] --again`: that one task on the arms that reached it, on the
+  // engine they ran, and --again keeps each result apart from the saved one. One run takes one engine, so the button is
+  // off for arms that ran on two, or on one that is not known. Patch and logs stay open through a redraw.
+  function toggle(label, act, key, open) {
+    const b = K.button(label, '', act, label, () => { if (open) K.B.folds.delete(key); else K.B.folds.add(key); K.draw(); });
+    b.setAttribute('aria-expanded', String(open));
+    return b;
+  }
+  function again(id, all) {
+    // An arm whose cell the run never reached (usage guard, Stop) did not run the task: it is not sent.
+    const arms = all.filter((a) => !['not reached', 'waiting'].includes((a.cells.get(id) || {}).state));
+    const names = Array.from(new Set(arms.map((a) => a.arm))), l = K.live(), inOrder = K.list(K.hist().order).includes(id);
+    const eng = Array.from(new Set(arms.filter((a) => a.kind === 'conveyor').map((a) => (/^[0-9a-f]{40}$/.test(String((a.col || {}).engine)) ? a.col.engine : ''))));
+    const why = !inOrder ? 'The task is not in the pinned order, so no run can reach it.'
+      : !names.length ? 'No arm reached this task, so no arm has run it.'
+      : eng.length > 1 || eng.includes('') ? 'The arms ran this task on more than one engine, or on one that is not known, and one run takes one engine.' : '';
+    const b = K.button('Run this task again', '', 'run-again', 'Run this task again', () => K.send(`again-${id}`,
+      ['run', '1', ...names.flatMap((a) => ['--arm', a]), '--task', id, ...(eng.length ? ['--engine', eng[0]] : []), '--again'],
+      (t) => t.replace(/^conveyor: /, ''), () => K.readHist(true)));
+    b.disabled = Boolean(why) || K.B.busy || Boolean(l && l.state === 'running');
+    b.title = why || `Runs this task alone on ${K.plural(names.length, 'arm')}, and keeps the results apart.`;
+    return b;
+  }
   function tools(id, arms) {
-    const key = `patch-${id}`, open = K.B.folds.has(key), row = h('div', 'bench-row bench-tools'), out = [row];
-    const off = (text, act, why) => { const b = K.button(text, '', act, text, () => {}); b.disabled = true; b.title = why; return b; };
-    row.append(K.button('Open the patch', '', 'open-patch', 'Open the patch', () => { if (open) K.B.folds.delete(key); else K.B.folds.add(key); K.draw(); }),
-      off('Open the logs', 'open-logs', 'The engine does not serve a task\'s log to the Board yet.'), off('Run this task again', 'run-again', 'A run takes the first tasks of the pinned order: one task cannot be run alone yet.'));
-    row.firstChild.setAttribute('aria-expanded', String(open));
-    if (open) arms.forEach((a) => { const p = a.cells.get(id).patch; out.push(K.add(h('p', 'bench-small'), [h('b', null, a.label), `: ${Array.isArray(p) ? (p.length ? p.map((x) => `${x.path} +${x.added} −${x.removed}`).join(', ') : 'empty') : K.NOT_KEPT}`])); });
-    return out;
+    const pk = `patch-${id}`, lk = `logs-${id}`, row = h('div', 'bench-row bench-tools'), out = [row, K.saidAt(`again-${id}`)];
+    const po = K.B.folds.has(pk), lo = K.B.folds.has(lk);
+    row.append(toggle('Open the patch', 'open-patch', pk, po), toggle('Open the logs', 'open-logs', lk, lo), again(id, arms));
+    if (po) {
+      const a = arms.find((x) => x.kind === 'conveyor' && K.list((x.cells.get(id) || {}).steps).length) || arms.find((x) => Array.isArray(x.cells.get(id).patch)), p = a && a.cells.get(id).patch;
+      const files = Array.isArray(p) ? (p.length ? p.map((x) => `${x.path} +${x.added} −${x.removed}`).join(', ') : 'empty') : K.NOT_KEPT;
+      out.push(K.add(h('p', 'bench-small bench-patch'), a ? [h('b', null, a.label), `: ${files}`] : [K.NOT_KEPT]));
+    }
+    if (lo) {
+      const logs = arms.filter((a) => typeof a.cells.get(id).log === 'string' && a.cells.get(id).log);
+      if (!logs.length) out.push(h('p', 'bench-small bench-log', K.NOT_KEPT));
+      logs.forEach((a) => out.push(K.add(h('div', 'bench-small bench-log'), [h('b', null, a.label), h('pre', null, a.cells.get(id).log)])));
+    }
+    return out.filter(Boolean);
   }
   function task() {
     const top = K.answers('What happened on one task, arm by arm, and is the task itself the problem?');

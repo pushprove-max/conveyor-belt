@@ -291,6 +291,34 @@ t_sweseame() {
     || fail "bench swe runs delete $r2 left its own results or took the first run's: $(ls -R "$B/again" "$B/results" 2>&1)"
 }
 
+# Bugs (#1217): no command ran one task of the pinned order alone, so the Board's Run this task again on the second task
+# also ran the first; and show gave no log of a task, though the result keeps one. --task runs that task alone (with n 1,
+# once, a task of the list): the run's one task is it, and show plans no other. show gives the last bytes of the kept
+# log, null where none is kept.
+t_sweonetask() {
+  swe; local out first second r f
+  { read -r first; read -r second; } < <(sweorder)
+  out=$(loop bench swe 1 --arm stub-a --task "$second" 2>&1) || fail "bench swe 1 --task $second failed: $out"
+  grep -q "^1/1 $second: " <<<"$out" && ! grep -q "$first" <<<"$out" || fail "bench swe 1 --task $second did not run $second alone: $out"
+  r=$(loop bench swe history | jq -r '.runs[0].id')
+  [ "$(loop bench swe show "$r" | jq -c '[.tasks[].id]')" = "[\"$second\"]" ] \
+    || fail "bench swe show $r plans a task other than $second, the run's one: $(loop bench swe show "$r" | jq -c '.tasks[].id')"
+  local a; for a in '2 --task x' '1 --task' '1 --task a --task b' '1 --task ../x' '1 --task a/b' '--task x'; do
+    # shellcheck disable=SC2086
+    out=$(loop bench swe $a 2>&1) && fail "bench swe $a was taken: $out"
+    grep -q '^usage: ' <<<"$out" || fail "bench swe $a did not print the usage: $out"
+  done
+  out=$(loop bench swe 1 --task no-such-task 2>&1) && fail "bench swe 1 --task of a task not in the list was taken: $out"
+  grep -q 'no task no-such-task' <<<"$out" || fail "bench swe 1 --task of a task not in the list did not say so: $out"
+  f=$(echo "$B"/results/*/"$second.json"); f=${f%.json}
+  [ "$(loop bench swe show "$r" | jq -c '.tasks[0].cells[0].log')" = null ] || fail "show gave a log for a result with none kept"
+  printf 'one\n' > "$f.log"
+  [ "$(loop bench swe show "$r" | jq -c '.tasks[0].cells[0].log')" = '"one"' ] || fail "show did not give the kept log: $(loop bench swe show "$r" | jq -c '.tasks[0].cells[0]')"
+  { printf 'cut away\n'; head -c 2990 /dev/zero | tr '\0' x; printf 'the end'; } > "$f.log"
+  [ "$(loop bench swe show "$r" | jq -r '.tasks[0].cells[0].log | [length, endswith("the end"), contains("cut away")] | @csv')" = '3000,true,false' ] \
+    || fail "show did not give the last 3000 bytes of a longer log"
+}
+
 # Bug (#1195): an archived run still counted in the Scoreboard's figures: same twice read its line, and a task whose only
 # run was archived still showed as a task with a result. The kept result stays reusable (a new run and Plan a run read
 # it from at), so only live, the places the Scoreboard counts, drops it. Run 1 resolves a task, run 2 (--again) leaves it

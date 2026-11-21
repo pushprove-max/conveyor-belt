@@ -106,8 +106,8 @@ SETUP_PAGE = b'''<!doctype html><meta charset=utf-8><title>Conveyor Board: set y
 # `conveyor.sh pick models`),
 # or testmap (the Tests page's Build the test map and its Stop: `conveyor.sh testmap build | stop`; an admin's alone),
 # or bench (the Benchmarks tab: Start, Stop, List versions, an arm's preflight, an arm saved, Compare, and Archive,
-# Restore and Delete of runs: `conveyor.sh bench swe <n> [--solo | [--arm <arm>]... [--engine <version>]] [--settings
-# <json>] | stop [<run id>] | runs archive|restore|delete <run id>... | versions | arms check
+# Restore and Delete of runs: `conveyor.sh bench swe <n> [--solo | [--arm <arm>]... [--task <id>] [--engine <version>]] [--settings
+# <json>] [--again] | stop [<run id>] | runs archive|restore|delete <run id>... | versions | arms check
 # [--settings <json>] <arm>... | arms save <name> <spec json> | diff <A> <B> [--json]`, an arm being a host arm's name or
 # a saved revision's ID; Start and a check answer their receipt; an admin's alone),
 # or the Tests page's actions: testaction (`conveyor.sh testaction`: judge, explain or run one file, stop one; an

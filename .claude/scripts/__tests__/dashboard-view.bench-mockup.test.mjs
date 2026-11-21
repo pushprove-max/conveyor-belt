@@ -156,17 +156,75 @@ test('Task, 7 arms on one task of the study: the split step, Task image, and the
   assert.deepEqual(kv(box(w, 'This task over time')).map(([k]) => k), ['Repository', 'Difficulty', 'Patch size', 'Task image']);
   assert.deepEqual(kv(box(w, 'This task over time')).find(([k]) => k === 'Task image'), ['Task image', 'not kept'], 'the results keep no image size');
   const tools = Array.from(page(w).querySelectorAll('.bench-tools button'));
-  assert.deepEqual(tools.map((b) => [text(b), b.disabled]), [['Open the patch', false], ['Open the logs', true], ['Run this task again', true]]);
-  assert.match(tools[1].title + tools[2].title, /log.*Board.*one task cannot be run alone/);
+  assert.deepEqual(tools.map((b) => [text(b), b.disabled]), [['Open the patch', false], ['Open the logs', false], ['Run this task again', false]]);
   assert.equal(page(w).querySelectorAll('.bench-box details[data-fold^="patch-"]').length, 0, 'the patch is a button, not a fold');
-  assert.equal(page(w).querySelectorAll('.bench-tools ~ p').length, 0, 'the patches are shut');
+  assert.equal(page(w).querySelectorAll('.bench-patch, .bench-log').length, 0, 'the patch and the logs are shut');
   act(bp(w), 'open-patch').click();
-  const shown = Array.from(page(w).querySelectorAll('.bench-tools ~ p'), text);
-  assert.equal(shown[0], 'Conveyor v1.9.0: pkg/models.py +9 −3, tests/test_models.py +14 −0');
-  assert.equal(shown.length, 7, 'one line for each arm');
+  const shown = Array.from(page(w).querySelectorAll('.bench-patch'), text);
+  assert.deepEqual(shown, ['Conveyor v1.9.0: pkg/models.py +9 −3, tests/test_models.py +14 −0'], 'one patch, not a list of the 7 arms\' patches');
   assert.equal(act(bp(w), 'open-patch').getAttribute('aria-expanded'), 'true');
   act(bp(w), 'open-patch').click();
-  assert.equal(page(w).querySelectorAll('.bench-tools ~ p').length, 0, 'the same button shuts them');
+  assert.equal(page(w).querySelectorAll('.bench-patch').length, 0, 'the same button shuts it');
+});
+
+// Bug it guards: Open the logs and Run this task again were always disabled, and Open the patch listed the patch of each
+// arm. Open the logs opens the kept log of the task (the saved task log, not the card's step summaries); Run this task
+// again sends the arms that ran the task, that one task alone (--task, n 1: n 3 would run the first 3 tasks) on the engine
+// the Conveyor arms ran (without --engine the engine is main), with --again, so the engine keeps a new result apart and
+// runs the task (without it the saved result is reused and nothing runs).
+test('Task, 7 arms on the third task of the study: Open the logs shows the kept log and Run this task again queues that task alone on its engine', async () => {
+  const set = BH.study();
+  const id = set.shows[BH.STUDY].tasks[2].id;
+  set.shows[BH.STUDY].tasks[2].cells.filter((c) => c.arm.startsWith('conveyor')).forEach((c, i) => { c.log = `loop output ${i}\nlast line ${i}`; });
+  const w = await opened(set, 'map');
+  act(bp(w), `sq-${id}`).click();
+  await settle();
+  assert.equal(page(w).querySelectorAll('.bench-log').length, 0, 'the logs are shut');
+  act(bp(w), 'open-logs').click();
+  assert.equal(act(bp(w), 'open-logs').getAttribute('aria-expanded'), 'true');
+  const logs = Array.from(page(w).querySelectorAll('.bench-log'));
+  assert.deepEqual(logs.map((l) => [text(l.querySelector('b')), l.querySelector('pre').textContent]),
+    [['Conveyor v1.9.0', 'loop output 0\nlast line 0'], ['Conveyor, Codex builds v1.9.0', 'loop output 1\nlast line 1']], 'the 2 arms with a kept log, each as saved; the 5 with none are left out');
+  act(bp(w), 'open-logs').click();
+  assert.equal(page(w).querySelectorAll('.bench-log').length, 0, 'the same button shuts them');
+  w.reply = BH.reply('conveyor: run r20261109T170000-9 started');
+  act(bp(w), 'run-again').click();
+  const [sent] = w.posts.splice(0);
+  assert.deepEqual(sent.body, { action: 'bench', args: ['run', '1', '--arm', 'conveyor', '--arm', 'conveyor-codex-claude', '--arm', 'solo-review', '--arm', 'codex-sol', '--arm', 'superpowers', '--arm', 'solo', '--arm', 'caveman', '--task', id, '--engine', '9'.repeat(40), '--again'], repo: 'sample' });
+  await settle();
+  assert.match(text(q(w, '[data-said="again-' + id + '"]')), /run r20261109T170000-9 started/);
+});
+
+// Bug it guards: Run this task again sent the arm names alone, so a task run on an older release was run again on main.
+// One run takes one engine, so a task whose Conveyor arms ran on two is not sent at all: the button is off and says why.
+test('Task, Conveyor arms that ran the task on two engines: Run this task again is off', async () => {
+  const set = BH.study();
+  const id = set.shows[BH.STUDY].tasks[2].id;
+  set.hist.runs[0].cols.find((c) => c.arm === 'conveyor-codex-claude').engine = '8'.repeat(40);
+  const w = await opened(set, 'map');
+  act(bp(w), `sq-${id}`).click();
+  await settle();
+  const b = act(bp(w), 'run-again');
+  assert.equal(b.disabled, true);
+  assert.match(b.title, /more than one engine/);
+  b.click();
+  assert.deepEqual(w.posts, [], 'a disabled button sends nothing');
+});
+
+// Bug it guards: Run this task again sent every arm that has a cell on the task, also one the usage guard stopped before
+// it reached the task (state "not reached"): the rerun then ran an arm that never ran the task.
+test('Task, 2 arms of 7 never reached the task: Run this task again sends only the arms that ran it', async () => {
+  const set = BH.study();
+  const id = set.shows[BH.STUDY].tasks[2].id;
+  set.shows[BH.STUDY].tasks[2].cells.filter((c) => ['solo', 'caveman'].includes(c.arm)).forEach((c) => { c.state = 'not reached'; });
+  const w = await opened(set, 'map');
+  act(bp(w), `sq-${id}`).click();
+  await settle();
+  w.reply = BH.reply('conveyor: run r20261109T170000-9 started');
+  act(bp(w), 'run-again').click();
+  const [sent] = w.posts.splice(0);
+  assert.deepEqual(sent.body.args.filter((a, i, all) => all[i - 1] === '--arm'),
+    ['conveyor', 'conveyor-codex-claude', 'solo-review', 'codex-sol', 'superpowers'], 'the 5 arms that ran it; solo and caveman never reached it');
 });
 
 // Bug it guards: the "Good for arms" text said "differed ... in the last study" and quoted the smallest gap's task count
