@@ -44,18 +44,25 @@ cat > "$MANIFEST" <<'JSON'
 }
 JSON
 
-# Each hook run since the last check, so a failed check names the payload it checked, not only the two values.
-INPUTS="$TMP/inputs"; : > "$INPUTS"
+. "$(dirname "$0")/lib/said.sh" # a FAIL line names the hook inputs of the check (said_in), not only the last call's
+CALLS="$TMP/calls"; : > "$CALLS"
 check() {
-  local in; in=$(cat "$INPUTS"); : > "$INPUTS"
-  if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3; hook input: ${in:-none})"; fi
+  if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3)$(said)"; fi
+  : > "$CALLS"; said_in ''
 }
-# hook: runs $HOOK on the payload on stdin, and logs the hook's name, any approval and the payload.
+# hook: runs $HOOK on the payload on stdin. Each call since the last check is noted as one bracket, with the approval it
+# ran under (said.sh alone names the last call's command, not the approval, the directory or the earlier calls). The
+# payload's cwd is left out when it is the fixture folder, and that folder is written $TMP: said.sh cuts a note at 600
+# characters, and the full path of a temporary folder (long on macOS) would push a later call out.
 hook() {
-  local in; in=$(cat)
-  printf '[%s%s <<< %s]' "${HOOK##*/}" "${CONVEYOR_DEP_APPROVED+ CONVEYOR_DEP_APPROVED=$CONVEYOR_DEP_APPROVED}" "$in" >> "$INPUTS"
-  bash "$HOOK" <<<"$in"
+  local in p; in=$(cat)
+  p=$(jq -c --arg t "$TMP" 'if .cwd == $t then del(.cwd) else . end' <<<"$in" 2>/dev/null) || p=$in
+  printf '[%s%s] ' "${CONVEYOR_DEP_APPROVED+CONVEYOR_DEP_APPROVED=$CONVEYOR_DEP_APPROVED }" "${p//"$TMP"/\$TMP}" >> "$CALLS"
+  said_in "calls $(cat "$CALLS")"
+  command bash "$HOOK" <<<"$in"
 }
+# trim <command> [<awk>]: the name trim of one command, noted as the input, since it runs no hook.
+trim() { said_in "cmd_approved \"$1\"${2:+ under $2}"; cmd_approved "$1" 2>&1; }
 # The hook reads the command's directory from the payload's cwd; the fixture
 # directory has no node_modules, so only the link cases below see one.
 bash_p() { jq -cn --arg c "$1" --arg d "${2:-$TMP}" '{tool_name:"Bash", cwd:$d, tool_input:{command:$c}}'; }
@@ -79,23 +86,30 @@ check "yarn add blocks"                         2 "$(run "$(bash_p "$ADD lodash"
 check "a lockfile-driven install passes"        0 "$(run "$(bash_p "npm ci")")"
 check "an approved install passes"              0 \
   "$(run "$(bash_p "CONVEYOR_DEP_APPROVED=1 $INSTALL lodash")")"
-# Bug: a failed check printed only the two values, never the command, package or approval the hook was given.
-check "a failed check names the payload and approval it checked" 0 \
-  "$( (run_env CONVEYOR_DEP_APPROVED=lodas "$(bash_p "$INSTALL lodash")" >/dev/null
-      cp "$INPUTS" "$TMP/probe.in"; INPUTS=$TMP/probe.in; check probe x y) \
-    | grep -qF "(expected x, got y; hook input: [dependency-addition-guard.sh CONVEYOR_DEP_APPROVED=lodas <<< $(bash_p "$INSTALL lodash")])" && echo 0 || echo 1)"
+# Bug: a failed check printed only the two values, or only its last call, or lost a call to said.sh's 600-character cut
+# when the temporary folder had a long path (macOS). The probe runs four calls with such a folder as cwd, then a
+# failing check on its own copy of the notes: its FAIL line must name the first call and the last, with their cwds.
+check "a failed check names every call it checked, in a folder with a long path" 0 \
+  "$(l=$( (CALLS=$(mktemp); SAID_FILE=$CALLS.said; TMP=$(mktemp -d)/$(printf 'long-folder-%.0s' 1 2 3 4 5 6 7 8)
+      for c in "$INSTALL a" "$INSTALL b" "$INSTALL c" "$INSTALL d"; do
+        CONVEYOR_DEP_APPROVED=a hook >/dev/null 2>&1 <<<"$(bash_p "$c" "$TMP/sub")"
+      done
+      check probe x y; rm -rf "${TMP%/*}" "$CALLS" "$SAID_FILE") 2>&1)
+    # said.sh prints the note as a JSON string, so its quotes are escaped: the four cwds, the first and last command.
+    [ "$(grep -o 'CONVEYOR_DEP_APPROVED=a [^]]*\$TMP/sub[^]]*npm install [ad]\\"' <<<"$l" | grep -c .)" = 2 ] \
+      && [ "$(grep -o '\$TMP/sub' <<<"$l" | grep -c .)" = 4 ] && echo 0 || echo 1)"
 # The name trim, run under the system awk with owner_approved stubbed to print each name. Bug: a cut list holding
 # "[=" is an equivalence class to gawk, which prints "invalid collating element" and trims nothing.
 eval "$(sed -n '/^cmd_approved() {/,/^}/p' "$HOOK")"
 owner_approved() { printf '%s ' "$1"; }
 check "the name trim cuts a pip spec at = [ > ; with no awk error" "pkg pkg pkg pkg ||" \
-  "$(cmd_approved "pip install pkg==1.0 pkg[extra] pkg>=2 pkg;python_version" 2>&1)||"
-check "and at ] < ! ~" "a b c d ||" "$(cmd_approved "pip install a]x b<1 c!=2 d~=3" 2>&1)||"
+  "$(trim "pip install pkg==1.0 pkg[extra] pkg>=2 pkg;python_version")||"
+check "and at ] < ! ~" "a b c d ||" "$(trim "pip install a]x b<1 c!=2 d~=3")||"
 # The system awk may be mawk, which accepts "[="; gawk and busybox awk refuse it as gawk does, so run under them too.
 for A in gawk "busybox awk"; do
   command -v "${A%% *}" >/dev/null || continue
   check "the name trim under $A" "pkg pkg pkg a b ||" \
-    "$(awk() { $A "$@"; }; cmd_approved "pip install pkg==1.0 pkg[extra] pkg>=2 a]x b~=3" 2>&1)||"
+    "$(awk() { $A "$@"; }; trim "pip install pkg==1.0 pkg[extra] pkg>=2 a]x b~=3" "$A")||"
 done
 check "a second install after an approved one blocks" 2 \
   "$(run "$(bash_p "CONVEYOR_DEP_APPROVED=1 $INSTALL lodash && $INSTALL sneaky")")"

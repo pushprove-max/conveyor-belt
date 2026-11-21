@@ -28,22 +28,28 @@ export REVIEW_GATE_BASE_REF
 HOOK="$(cd "$(dirname "$0")/.." && pwd)/adversarial-review-gate.sh"
 HOOK_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 PASS=0 FAIL=0
-# Each hook run since the last check, so a failed check names the input it checked, not only the two values.
-INPUTS=$(mktemp); trap 'rm -f "$INPUTS"' EXIT
-
+. "$(dirname "$0")/lib/said.sh" # a FAIL line names the hook inputs of the check (said_in), not only the last call's
+CALLS=$(mktemp); trap 'rm -f "$CALLS"' EXIT
 check() {
-  local in; in=$(cat "$INPUTS"); : > "$INPUTS"
-  if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3; hook input: ${in:-none})"; fi
+  if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3)$(said)"; fi
+  : > "$CALLS"; said_in ''
 }
-# hook [<mode> <args>]: runs the hook, and logs its arguments or, in hook mode (no arguments), the payload it reads,
-# with each setting the gate takes from the environment and the folder it runs in.
+# hook [<mode> <args>]: runs the hook, and notes each call since the last check as one bracket: its arguments or, in hook
+# mode (no arguments), the command of the payload it reads, then each setting the gate takes from the environment and
+# the folder it runs in. The sandbox, this repository and the pinned base go in as $SANDBOX, $ROOT and $BASE: said.sh
+# cuts a note at 600 characters, and the full path of a temporary folder (long on macOS) would push a later call out.
 hook() {
-  local in="" v env=""; [ $# -gt 0 ] || in=$(cat)
+  local raw="" v env="" note; [ $# -gt 0 ] || raw=$(cat)
   for v in REVIEW_GATE_BASE_REF CONVEYOR_REVIEW_GATE_BYPASS CLAUDE_PROJECT_DIR; do
     [ -z "${!v+x}" ] || env+=" $v=${!v}"
   done
-  printf '[%s%s;%s in %s]' "${*:-<<< }" "$in" "$env" "$PWD" >> "$INPUTS"
-  if [ $# -gt 0 ]; then bash "$HOOK" "$@"; else bash "$HOOK" <<<"$in"; fi
+  note="${*:-<<< $(jq -r '.tool_input.command // .' <<<"$raw" 2>/dev/null || echo "$raw")}$env in $PWD"
+  for v in "BASE:${REVIEW_GATE_BASE_REF:-}" "SANDBOX:${SANDBOX:-}" "ROOT:$HOOK_ROOT"; do
+    [ -z "${v#*:}" ] || note=${note//"${v#*:}"/\$${v%%:*}}
+  done
+  printf '[%s] ' "$note" >> "$CALLS"
+  said_in "calls $(cat "$CALLS")"
+  if [ $# -gt 0 ]; then command bash "$HOOK" "$@" < /dev/null; else command bash "$HOOK" <<<"$raw"; fi
 }
 cmd() { jq -cn --arg c "$1" '{tool_name:"Bash", tool_input:{command:$c}}'; }
 run() { hook >/dev/null 2>&1 <<<"$(cmd "$1")"; echo $?; }
@@ -181,21 +187,25 @@ check "--hash-range of a ref against itself is EMPTY" "EMPTY" \
   "$(hook --hash-range HEAD HEAD)"
 check "--hash-range on an unresolvable base is NO_BASE" "NO_BASE" \
   "$(hook --hash-range no/such/ref HEAD)"
-# Bug: a failed check printed only the two values, never the refs, the payload or the environment settings (base
-# ref, bypass) the hook was run on. The probe's check reads a copy of the log, so this check's own log is kept.
-check "a failed check names the refs, payload and settings it checked" 0 \
-  "$( (unset CLAUDE_PROJECT_DIR; hook --hash-range no/such/ref HEAD >/dev/null
+# Bug: a failed check printed only the two values, or only its last call, or lost a call to said.sh's 600-character cut
+# when the temporary folder had a long path (macOS). The probe runs four calls in such a folder, then a failing check
+# on its own copy of the notes, and its FAIL line must name the first call and the last, with the folder of each.
+check "a failed check names every call it checked, in a folder with a long path" 0 \
+  "$( (CALLS=$(mktemp); SAID_FILE=$CALLS.said; SANDBOX=$(mktemp -d)/$(printf 'long-folder-%.0s' 1 2 3 4 5 6 7 8)
+      mkdir -p "$SANDBOX"; cd "$SANDBOX" || exit 1
+      hook --hash-range no/such/ref HEAD >/dev/null
       CONVEYOR_REVIEW_GATE_BYPASS=1 hook >/dev/null 2>&1 <<<"$(cmd 'npm test')"
-      cp "$INPUTS" "$INPUTS.probe"; INPUTS=$INPUTS.probe; check probe x y; rm -f "$INPUTS") \
-    | grep -qF "(expected x, got y; hook input: [--hash-range no/such/ref HEAD; REVIEW_GATE_BASE_REF=$REVIEW_GATE_BASE_REF in $PWD][<<< $(cmd 'npm test'); REVIEW_GATE_BASE_REF=$REVIEW_GATE_BASE_REF CONVEYOR_REVIEW_GATE_BYPASS=1 in $PWD])" && echo 0 || echo 1)"
-
+      hook --tier-range HEAD HEAD >/dev/null
+      hook --hash-range HEAD HEAD >/dev/null
+      check probe x y; rm -rf "${SANDBOX%/*}" "$CALLS" "$SAID_FILE") 2>&1 \
+    | grep -qF '[--hash-range no/such/ref HEAD REVIEW_GATE_BASE_REF=$BASE in $SANDBOX] [<<< npm test REVIEW_GATE_BASE_REF=$BASE CONVEYOR_REVIEW_GATE_BYPASS=1 in $SANDBOX] [--tier-range HEAD HEAD REVIEW_GATE_BASE_REF=$BASE in $SANDBOX] [--hash-range HEAD HEAD REVIEW_GATE_BASE_REF=$BASE in $SANDBOX]' && echo 0 || echo 1)"
 fi
 # --- change class -------------------------------------------------------------
 # docs / tooling / runtime / cross-file / risky is what decides how many
 # reviewers a diff gets and whether a codex-only marker attests it, so each case
 # names exactly the files it classifies. A throwaway repo is the only way to do
 # that: this repo's own HEAD carries whatever the unit happens to have changed.
-SANDBOX=$(mktemp -d); trap 'rm -rf "$SANDBOX" "$INPUTS"' EXIT
+SANDBOX=$(mktemp -d); trap 'rm -rf "$SANDBOX" "$CALLS"' EXIT
 # An empty host file folder: the state folder is the sandbox's own, never a live stateDir this host names.
 export XDG_CONFIG_HOME="$SANDBOX/config"
 build() {  # build <path>[:<content>] ... -- commit 2 adds them on top of commit 1
@@ -532,7 +542,7 @@ card_base() {  # <card record line>...: the base with those card records
   local d
   rm -rf "$SANDBOX/repo/conveyor" && mkdir -p "$XDG_CONFIG_HOME/conveyor" \
     && jq -n --arg m "$SANDBOX/repo" --arg s "$SANDBOX/state" '{main: $m, stateDir: $s}' > "$XDG_CONFIG_HOME/conveyor/host.json" \
-    && d=$(CONVEYOR_MAIN=$SANDBOX/repo bash "$HOOK_ROOT/conveyor/conveyor.sh" state-dir) \
+    && d=$(CONVEYOR_MAIN=$SANDBOX/repo command bash "$HOOK_ROOT/conveyor/conveyor.sh" state-dir) \
     && mkdir -p "$d" && printf '%s\n' "$@" > "$d/cards.jsonl" && ! [ -e "$SANDBOX/repo/conveyor" ]
   watermark
 }
