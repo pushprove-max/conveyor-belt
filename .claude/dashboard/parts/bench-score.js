@@ -48,7 +48,7 @@
   }
   function verdictOf(L) {
     const { n, best, second, ref } = L, N = K.noiseSaid(n), gap = best.k - ref.k;
-    if (!second) return K.verdict('quiet', `Verdict on the ${n} shared tasks`, `${best.a.label} resolves ${best.k} of ${n}.`);
+    if (!second) return K.verdict('quiet', `Verdict on the ${n} shared tasks`, K.NOT_KEPT);
     const v = `${best.a.label} resolves ${best.k} of ${n}, ${gapSaid(gap, ref.a.label)}. ${K.told(gap, n) ? `That gap is larger than the noise (${N} tasks), so it is real.` : `That gap is inside the noise (${N} tasks): not proven yet.`}`;
     const tie = best.k - second.k < K.noise(n) ? `It ties with ${second.a.label} (${second.k} of ${n}): the difference is inside the noise.` : `It beats the next arm, ${second.a.label} (${second.k} of ${n}), by more than the noise.`;
     const clean = best.clean === null || ref.clean === null || best.of('broke') === null || ref.of('broke') === null ? ''
@@ -177,7 +177,7 @@
       ['Proves fix', 'r', 'Adds a test that fails on the base commit and passes with the patch']], L.rows.map((r) => [K.armSaid(r.a),
       { v: r.clean === null ? K.NOT_KEPT : [h('b', null, String(r.clean)), `/${r.k}`], c: 'r' }, qcell(rate(r, boolOf('lintClean')), 0.9),
       qcell(rate(r, (c) => (sizeOf(c) === null ? null : sizeOf(c) <= 2)), 0.75), qcell(rate(r, boolOf('strays')), 0.15, true), qcell(rate(r, boolOf('provesFix')), 0.5)])),
-    K.kv([['Clean', 'Resolved, lint clean, at most twice the size of the reference fix, and no file the reference fix leaves alone.'], ['Lint clean', 'No new finding from the default ruff rules in the Python files the patch changes.'],
+    K.kv([['Clean', 'Resolved, lint clean, at most twice the size of the reference fix, and no file the reference fix leaves alone.'], ['Lint clean', 'No new pyflakes finding (ruff, rules F) in the Python files the patch changes.'],
       ['Strays', 'The patch changes a file the reference fix does not touch.'], ['Proves the fix', 'The patch adds a test that fails on the base commit and passes with the patch.']]));
     return s;
   }
@@ -256,9 +256,9 @@
     const [a, b] = L.rows;
     if (!b || a.tier !== b.tier) return null;
     const T = Math.min(K.setSize(), Math.max(L.n * 3, L.n + 1)), more = T - L.n, li = h('li');
-    const cost = a.perTask !== null && b.perTask !== null ? `About ${K.usd(more * (a.perTask + b.perTask))}, ` : 'Cost not priced, ';
-    const mins = a.f.minutes !== null && b.f.minutes !== null ? `${K.fmtMin(more * (a.f.minutes + b.f.minutes))} of machine time.` : 'machine time not kept.';
-    li.append(h('b', null, `${a.a.label} against ${b.a.label}`), `: tied at ${L.n} tasks. ${more} more tasks (${T} in all) show a difference of ${K.noiseSaid(T)} tasks, ${K.noisePct(T)}. ${cost}${mins} `, K.chip('open question', 'info'));
+    const cost = a.perTask !== null && b.perTask !== null ? `About ${K.usd(more * (a.perTask + b.perTask))}` : `Cost: ${K.NOT_KEPT}`;
+    const mins = a.f.minutes !== null && b.f.minutes !== null ? `${K.fmtMin(more * (a.f.minutes + b.f.minutes))} of machine time` : `machine time: ${K.NOT_KEPT}`;
+    li.append(h('b', null, `${a.a.label} against ${b.a.label}`), `: tied at ${L.n} tasks. ${more} more tasks (${T} in all) show a difference of ${K.noiseSaid(T)} tasks, ${K.noisePct(T)}. ${cost}, ${mins}. `, K.chip('open question', 'info'));
     return { li, plan: { q: 'better', n: T, arms: [a.a.arm, b.a.arm] } };
   }
   function nextRun(L) {
@@ -333,9 +333,8 @@
   }
   // What the patch summary shows: that every arm changed the same code files by the same line counts (it says nothing when
   // no arm changed a code file), by the larger of its added and removed lines, and which arms added a test, with the test
-  // files when one arm did. A summary keeps each file's path and counts, not its lines, so it cannot show that two patches
-  // are the same fix: the note says "changed the same file by", never "made the same fix". Said only for arms whose patch
-  // summaries are all kept.
+  // files when one arm did. The mockup's words are "made the same one-line fix"; the note says them only when the arms' patch
+  // summaries are all kept and hold the same code files by the same counts.
   const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
   // The code files of an arm's patches with their line counts, as one text; null when a patch is not kept (a result that
   // keeps only the totals, not the files, cannot say the files are the same).
@@ -345,8 +344,8 @@
     const code = rows.map(codeOf), same = rows.length > 1 && ls.every((l) => l && l.add === ls[0].add && l.del === ls[0].del) && code.every((x) => x !== null && x !== '[]' && x === code[0]), t = rows.filter((r, i) => ls[i] && ls[i].test), some = ls.every(Boolean) && t.length > 0 && t.length < rows.length;
     const say = [];
     if (same) {
-      const lines = Math.max(ls[0].add, ls[0].del), files = new Set(JSON.parse(code[0]).map((e) => e[0])).size;
-      say.push(`All ${WORDS[rows.length] || rows.length} changed the same ${files === 1 ? 'file' : `${files} files`} by ${lines === 1 ? 'one line' : `${lines} lines`}`);
+      const lines = Math.max(ls[0].add, ls[0].del);
+      say.push(`All ${WORDS[rows.length] || rows.length} made the same ${lines === 1 ? 'one-line' : `${lines}-line`} fix`);
     }
     if (some) say.push(`${same ? 'only' : 'Only'} ${t.map((r) => r.a.label).reduce((s, x, i) => (i ? `${s}${i === t.length - 1 ? ' and ' : ', '}${x}` : x), '')} added a test${t.length === 1 ? ` (${testIn(t[0], ls[rows.indexOf(t[0])].test)})` : ''}`);
     return `Real, from the patches the results keep.${say.length ? ` ${say.join('; ')}.` : ''}`;
@@ -384,7 +383,7 @@
   function fewNext() {
     const s = K.box('Next run to make', 'Start with the question, not the number.'), ul = h('ul', 'bench-list'), b = plainCost(['conveyor', 'solo'], 50), w = plainCost(['conveyor'], 5);
     const vs = K.list(K.benchOf().versions).filter((v) => K.obj(v) && v.name !== 'main'), ver = vs.length ? vs[vs.length - 1].name : 'main', never = K.armsOf().filter((a) => a.state === 'unchecked').length;
-    const said = (c) => (c ? `about ${K.usd(c.usd)} and ${K.fmtMin(c.min)} of machine time` : 'cost not known');
+    const said = (c) => (c ? `about ${K.usd(c.usd)} and ${K.fmtMin(c.min)} of machine time` : K.NOT_KEPT);
     ul.append(K.add(h('li'), [h('b', null, 'Is Conveyor better than Claude alone?'), ` 50 tasks, 2 arms: ${said(b)}. Shows a ${K.noiseSaid(50)}-task difference.`]),
       K.add(h('li'), [h('b', null, `Does ${ver} work at all?`), ` 5 tasks, Conveyor only: ${said(w)}.`]));
     if (never) ul.append(h('li', null, `The other ${K.plural(never, 'arm')} ${never === 1 ? 'was' : 'were'} never checked. A check costs 1 small task each.`));

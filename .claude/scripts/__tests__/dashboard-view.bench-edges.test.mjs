@@ -38,13 +38,13 @@ function oneArm() {
 }
 
 // ---- Scoreboard ----
-// Bug it guards: with one arm the verdict said "One arm has results: there is no other arm to set it against.", the Value
+// Bug it guards: with one arm the verdict said "Claude alone resolves 25 of 50." (earlier "One arm has results: there is no other arm to set it against."), the Value
 // card said "No arm is priced: the chart needs the cost of each task." and Lines of code said "The size of the reference fix
 // is not kept.", sentences of their own where the mockup has its sections: the mockup's place says not kept. Compare with
 // one arm said "Compare needs two arms with results." and "Plan a run with two arms or more."
 test('Scoreboard and Compare, one arm with results, no price and no reference fix: not kept in the mockup\'s place', async () => {
   const w = await opened(oneArm());
-  assert.equal(text(q(w, '.bench-vv')), 'Claude alone resolves 25 of 50.');
+  assert.equal(text(q(w, '.bench-vv')), 'not kept', 'the verdict\'s place');
   assert.equal(q(w, '.bench-vw'), null, 'no line about another arm');
   assert.equal(text(box(w, 'Value: resolve rate against cost').lastElementChild), 'not kept', 'the chart\'s place');
   assert.equal(text(box(w, 'Lines of code').querySelector('.bench-hsub')), 'Medians over each arm\'s resolved tasks. The reference fix of a median task is not kept.');

@@ -971,7 +971,8 @@ tasks. The page judges the arms on the tasks that every arm graded (the shared t
 map** read the arms in the same way. An archived run is not in it.
 
 - The verdict: the arm that resolves the most tasks, against Claude alone and against the next arm, judged against the
-  noise. It also gives the cheapest arm for each resolved task, and how many fixes are clean.
+  noise. It also gives the cheapest arm for each resolved task, and how many fixes are clean. With one arm that has
+  results, there is nothing to judge it against, and the verdict shows "not kept".
 - Four figures: the most tasks resolved, with the change from the version before; the Conveyor arm's cost for each
   resolved task; its median minutes for each task; and the tasks that no arm resolves.
 - **Leaderboard**: the arms in tiers. An arm is in the same tier as the leader of its tier when the difference is
@@ -985,7 +986,7 @@ map** read the arms in the same way. An archived run is not in it.
   partial fixes.
 - **Patch quality**: for the resolved tasks, the clean fixes, and the share of patches that are lint clean, at most
   twice the size of the reference fix, change a file that the reference fix does not change (strays), and prove the fix.
-  Lint clean means no new finding from the default ruff rules in the Python files that the patch changes.
+  Lint clean means no new pyflakes finding (ruff, rules F) in the Python files that the patch changes.
 - **Lines of code**: the median code lines, test lines and files of the resolved patches, and their size against the
   reference fix.
 - **Effort and steadiness**: the tokens for each fix, the sessions for each task, the review findings fixed and the fix
@@ -994,12 +995,14 @@ map** read the arms in the same way. An archived run is not in it.
 - **Where Conveyor loses tasks**: the first step where each task that the Conveyor arm did not resolve went wrong: the
   build, a review, a fix round, the test step, or a block.
 - **What it agrees on**: the shared tasks by how many arms resolve them.
-- **Next run to make**: the run that answers the biggest open question, with its cost and machine time, and each arm
-  that did not always fire. **Plan this run** opens **Plan a run** with that run set.
+- **Next run to make**: the run that answers the biggest open question, with its cost and machine time ("not kept"
+  where a result did not keep one), and each arm that did not always fire. **Plan this run** opens **Plan a run** with that run set.
 - **Run history**: folded at the foot of the page. Each run, newest first, with what ran, its tasks, its state, its
   start and its cost. A run that you stopped shows "stopped at" and the number of tasks it reached, for example
   "stopped at 31". An archived run shows "archived". Tick runs to **Archive**, **Restore** or **Delete** them. With
-  fewer than 3 shared tasks, the page keeps the same folded run history.
+  fewer than 3 shared tasks, the page keeps the same folded run history. With fewer than 3 shared tasks, the note on
+  the patches says "All five made the same one-line fix" when every arm changed the same code files by the same
+  lines, and shows "not kept" for the cost of the next run when a result did not keep it.
 
 **Versions** compares the versions of the Conveyor arm in the order of their releases. A version named by a commit
 comes after the releases. Each version reads its runs as **Scoreboard** reads an arm. The verdict judges the newest
