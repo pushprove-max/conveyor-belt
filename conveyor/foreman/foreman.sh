@@ -672,6 +672,15 @@ ask_cmd() {
   local repo main
   main=$(mine | awk -F'\t' -v r="$2" '$1 == r { print $2; exit }') && [ -n "$main" ] \
     || { echo "foreman: ask: $2 is not a record of this Foreman" >&2; return 1; }
+  # `foreman status` over ssh ends with the watcher and waiter of the host's Foreman folder, where no Foreman runs: those
+  # two lines are replaced with this Foreman's own.
+  if [ "$3 ${4:-}" = "foreman status" ]; then
+    local out rc
+    out=$(ask "$2" "$main" "${@:3}"); rc=$?
+    [ "$rc" != 0 ] || out=$(grep -v '^\(watcher\|waiter\): ' <<<"$out"; status_tail)
+    [ -z "$out" ] || printf '%s\n' "$out"
+    return "$rc"
+  fi
   ask "$2" "$main" "${@:3}"
 }
 

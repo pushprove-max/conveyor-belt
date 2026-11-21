@@ -276,7 +276,7 @@ unreported() {
 # "<repo>: the last snapshot, made <age> ago (a new one failed: <why>):" in its place, and that snapshot's lines as above. <project> names one
 # record of mine; with none, every one of them. Then the watcher's last poll, from
 # the poll log: "watcher: last poll ended <time>, took <n> s (<outcomes>)", or "watcher: no poll logged yet". Last, the Foreman's
-# waiter: "waiter: listening", "waiter: starting again" or "waiter: down: <why>" (lib.sh waiter_state).
+# waiter: "waiter: listening", "waiter: starting again" or "waiter: down: <why>" (lib.sh status_tail).
 STATUS=$SUITE$REF'def num: if type == "number" then "#\(.)" else tostring end;
   (.belt | if type == "array" then length else 0 end) as $n
   # While the snapshot is behind the card records and the loop runs, the count on the belt is the one of now: loop.json'"'"'s
@@ -384,10 +384,7 @@ if [ "${1:-}" = --status ]; then
     else echo "needs you: unknown, the snapshot holds no health record"; fi
   done <<<"$RECS"
   [ "$n" -gt 0 ] || { echo "foreman status: $2 is none of this Foreman's projects ($(cut -f1 <<<"$RECS" | paste -sd' ' -))" >&2; exit 2; }
-  if read -r _ t1 took rest < <(tail -n 1 "$PLOG" 2>/dev/null); [ -n "${rest:-}" ]; then
-    echo "watcher: last poll ended $t1, took ${took%s} s ($rest)"
-  else echo "watcher: no poll logged yet"; fi
-  echo "waiter: $(waiter_state)"
+  status_tail
   exit 0
 fi
 

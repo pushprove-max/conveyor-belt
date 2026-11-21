@@ -404,7 +404,27 @@ grep -qxF 'alpha: the engine (pid 4242) runs (state S now); the snapshot had it 
   || fail "the status does not say the host's engine runs: $out"
 }
 
-cases=(status wake suite suitedead mainred prmerge building slowlive slowdown nosnapanew nosnapquiet nosnaplast healthwake polllog unreported stopped resumed resumedhost)
+# Bug (#1213): `foreman.sh ask <repo> foreman status` with a host set ran the status over ssh, and its last two lines
+# (watcher, waiter) read the host's Foreman folder, where no Foreman runs: "waiter: down: no waiter has run yet" while
+# this Foreman's waiter listened. Here the ssh stub answers as such a host (its status ends with those two lines) and
+# this side has a live waiter and a poll log: the answer carries this side's lines, and the host's records stay.
+# shellcheck disable=SC2016 # the stub's own text, not an expansion
+t_askhost() {
+CASE=askhost; fixture askhost; unset CONVEYOR_FOREMAN_ASK
+jq '.ssh = "devhost"' "$XDG_CONFIG_HOME/conveyor/host.json" > "$T/host.new" && mv "$T/host.new" "$XDG_CONFIG_HOME/conveyor/host.json" || fail "the host file could not be set"
+mkdir -p "$T/bin" "$FD" && echo '2026-11-15T11:59:00Z 2026-11-15T11:59:47Z 47s alpha: slow, read health; woke' > "$FD/conveyor-polls.log"
+# A live waiter: a process whose argument list names waiter.sh, as waiter_state reads it.
+bash -c 'exec -a "$0/conveyor/foreman/waiter.sh" sleep 30' "$T" & wp=$! # sleep: the stand-in for the live waiter process
+trap 'kill "$wp" 2>/dev/null' EXIT; echo "$wp" > "$FD/waiter.pid"
+# stub: ssh to the host, whose status reads its own empty Foreman folder
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "alpha: 1 on the belt" "watcher: no poll logged yet" "waiter: down: no waiter has run yet; the end of the next turn starts one"\n' > "$T/bin/ssh" && chmod +x "$T/bin/ssh"
+out=$(cd "$M" && PATH=$T/bin:$PATH CONVEYOR_MAIN=$M bash "$SRC/foreman.sh" ask alpha foreman status 2>&1) || fail "ask alpha foreman status failed: $out"
+[ "$out" = "alpha: 1 on the belt
+watcher: last poll ended 2026-11-15T11:59:47Z, took 47 s (alpha: slow, read health; woke)
+waiter: listening" ] || fail "ask alpha foreman status (host devhost, live waiter $wp) did not give this Foreman's watcher and waiter: $out"
+}
+
+cases=(status wake suite suitedead mainred prmerge building slowlive slowdown nosnapanew nosnapquiet nosnaplast healthwake polllog unreported stopped resumed resumedhost askhost)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

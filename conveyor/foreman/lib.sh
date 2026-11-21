@@ -242,6 +242,16 @@ waiter_state() {
   echo "down: ${line#* * ended: }"
 }
 
+# status_tail: the last two lines of the Foreman's status, read from this machine's Foreman folder: the watcher's last
+# poll (conveyor-polls.log) and the waiter (waiter_state).
+status_tail() {
+  local t1 took rest
+  if read -r _ t1 took rest < <(tail -n 1 "$FD/conveyor-polls.log" 2>/dev/null); [ -n "${rest:-}" ]; then
+    echo "watcher: last poll ended $t1, took ${took%s} s ($rest)"
+  else echo "watcher: no poll logged yet"; fi
+  echo "waiter: $(waiter_state)"
+}
+
 # ask <repo> <main> <command> [<argument>...]: one Conveyor command (snapshot, health, control ...) of a record, by
 # the commit its own pack pins (or its current engine, for a pack that follows the plugin's main), run over ssh at
 # the host file's ssh target when it names one, else on this machine. testissue runs with the Foreman's mark,
