@@ -379,12 +379,9 @@ t_fullreap() {
 t_fullreapheld() {
   ftnow
   printf '%s\n' '{"since":"2026-11-15T21:33:43Z","sha":"06bf84a5880dc5e8c9ae9cb38f1565ce7b8f1da6","how":"push"}' > "$ST/fulltest.jsonl.running"
-  # a process that holds the lock, as a running full test does
-  flock "$ST/fulltest.jsonl.lock" sleep 60 & local holder=$! # sleep: a process that only holds the lock until the test kills it
-  wait_until '! ( flock -n 9 ) 9>>"$ST/fulltest.jsonl.lock"' 'ps -ef' || { kill "$holder"; fail "the lock holder did not take the lock"; }
+  # the group holds the lock on its own descriptor, as a running full test does; no process is needed to hold it
   # loop: the marker is cleared by the loop's own turn (turnopen(), lib/run.sh); only a turn shows it keeps a live run's marker
-  loop run 1 > "$STUB/run.out" 2>&1; local rc=$?
-  kill "$holder" 2> /dev/null
+  { flock -n 9 || fail "the case could not take the lock"; loop run 1 9>&- > "$STUB/run.out" 2>&1; } 9>>"$ST/fulltest.jsonl.lock"; local rc=$?
   [ "$rc" = 0 ] || fail "a run with no card to pick failed: $(cat "$STUB/run.out")"
   [ -e "$ST/fulltest.jsonl.running" ] || fail "the loop removed the marker of a run that holds the lock: $(cat "$STUB/run.out")"
   [ ! -s "$ST/fulltest.jsonl" ] || fail "the loop recorded a live run as ended: $(cat "$ST/fulltest.jsonl")"
