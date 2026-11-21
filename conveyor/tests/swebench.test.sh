@@ -412,6 +412,23 @@ t_sweweek() {
   [ "$(loop bench swe history | jq -c .weekLeft.stop)" = '"off"' ] \
     || fail "history does not say the guard is off with stop \"off\": $(loop bench swe history | jq -c '.weekLeft')"
 }
+# Bug (#1225): with a Claude reviewer on an account of its own, shared was false whenever the guard read two accounts. With
+# the builder's account at the higher use, both guards read that account, so the Board took one drop of the week as the use
+# of the Conveyor arms' trials and again as that of the other arms' trials. Shared is true when the guard of the Conveyor
+# arms takes the builder's account, and false when it takes the review account.
+t_sweweekshared() {
+  swe; local out
+  mkdir -p "$T/$CASE/rev" && jq -c --arg r "$T/$CASE/rev" '.accounts += [{name: "rev", configDir: $r}]' "$XDG_CONFIG_HOME/conveyor/host.json" > "$T/$CASE/h.new" \
+    && mv "$T/$CASE/h.new" "$XDG_CONFIG_HOME/conveyor/host.json" && jq -c '.reviewer = {model: "m", cli: "claude"} | .reviewAccount = "rev"' "$ST/control.json" > "$ST/c.new" \
+    && mv "$ST/c.new" "$ST/control.json" && tune '.tunables += {limitTtl: 0}' || fail "the review account was not set"
+  export CONVEYOR_LIMIT_CMD='cat "$CLAUDE_CONFIG_DIR/use.json"'
+  echo '{"seven_day":{"utilization":68}}' > "$T/$CASE/acct/use.json"; echo '{"seven_day":{"utilization":60}}' > "$T/$CASE/rev/use.json"
+  out=$(loop bench swe history 2>&1 | jq -c '.weekLeft | del(.stop)')
+  [ "$out" = '{"conveyor":32,"agent":32,"shared":true}' ] || fail "builder's account 68% used, the review account 60%: the guards do not read one account: $out"
+  echo '{"seven_day":{"utilization":72}}' > "$T/$CASE/rev/use.json"
+  out=$(loop bench swe history 2>&1 | jq -c '.weekLeft | del(.stop)')
+  [ "$out" = '{"conveyor":28,"agent":32,"shared":false}' ] || fail "builder's account 68% used, the review account 72%: the guards read one account: $out"
+}
 # Bug: Claude's usage guard held back an arm with only a Codex login: its preflight and its run refused to start.
 t_swecodexguard() {
   swe; local out

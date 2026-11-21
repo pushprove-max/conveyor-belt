@@ -339,6 +339,12 @@ each task, one figure for the guard of the Conveyor arms and one for the guard o
 login (`conveyor`, `agent`). A figure is null when the guard has no reading or no arm of the run uses it. `shared` is
 true when both guards read one account: the share the run used is then that of the trials of all its arms that have a
 guard together (an arm that uses Codex alone has none).
+The guard of the Conveyor arms reads the builder's account when the builder, a fix seat or a testFix seat uses Claude
+and the `builder` role starts on the CLI's own login. It reads the account of a Claude reviewer when the `reviewer`
+role starts on the CLI's own login. A role starts there when the `roles` of the Claude route (`claudeProxy` in the
+host file, or the pack's `models.claudeProxy`) set it to `subscription` or `fallback`, or when no route is set. A role
+set to `proxy` or `api` has no usage limit, so the guard does not read its account. The guard takes the account with
+the most use. When that is the builder's account, which the other arms use too, `shared` is true.
 Each arm also has `ran`, the tasks it ran: a reused result and a task not run are not counted. `bench swe history` gives
 the share left now as `weekLeft`, with `stop`, the share left at which the guard stops new trials (`"off"` when the guard is off). Each result keeps the size of its task image in bytes, as `imageBytes`. The Board says "not kept" for a run or a result
 from before the engine kept these figures.

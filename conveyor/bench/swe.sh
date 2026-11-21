@@ -208,25 +208,25 @@ swe_guarded() { # [an arm that is not the engine's: any non-empty word]
 swe_pct() { # <control record> [an arm that is not the engine's: any non-empty word]: the week's use the guard reads, "" for none
   if [ -n "${2:-}" ]; then ACCT=$(ctlacct "$1") reading | jq -r '.pct // empty'; else guardread "$1" ask | jq -r '.pct // empty'; fi
 }
-# The share of the week left that a guard reads now (100 less its reading, to a tenth): a number, null when the guard has
-# no reading or the control record does not read. The Board's Live run and Plan say it (swe_weeks keeps it with a run).
-swe_left() { # [an arm that is not the engine's: any non-empty word]
-  local p; ctlread 2>/dev/null || { echo null; return; }
-  p=$(swe_pct "$CTL_V" "${1:-}"); jq -n --arg p "$p" 'if $p == "" then null else (100 - ($p | tonumber)) * 10 | round / 10 end'
-}
 # The share of the week left at which the guard stops new trials (100 less its percent; "off" for no guard, which stops
 # nothing), null when the control record does not read. The Board's Plan keeps a plan's use of the week above it.
 swe_weekstop() {
   ctlread 2>/dev/null || { echo null; return; }
   jq -c 'if .guard == null then "off" else 100 - .guard end' <<<"$CTL_V"
 }
-# {conveyor, agent, shared}: the share left (swe_left) for each guard a run's arms have (swe_guards), null for one they have not;
-# shared, true when both guards read one account (the conveyor arms use only the account the agent arms use), so a drop in
-# the week is the use of the trials of both kinds of arm together and the Board takes it so.
+# {conveyor, agent, shared}: the share of the week left that each guard a run's arms have (swe_guards) reads now (100 less
+# its reading, swe_pct, to a tenth), null for one they have not, one with no reading, or a control record that does not read;
+# shared, true when both guards read one account: the conveyor guard reads the highest of its accounts (guardread), so both
+# read the builder's account when it is one of them and its reading is that highest, though a Claude reviewer has an
+# account of its own. A drop in the week is then the use of the trials of both kinds of arm together and the Board takes it so.
 swe_weeks() { # <conveyor: non-empty when the run has a conveyor arm> <agent: non-empty when it has another arm on the Claude login>
-  local c=null a=null s=false; [ -z "$1" ] || c=$(swe_left); [ -z "$2" ] || a=$(swe_left 1)
-  if [ -n "$1" ] && [ -n "$2" ] && ctlread 2>/dev/null && [ "$(subaccts "$CTL_V" | cut -d ' ' -f 2- | sort -u)" = "$(ctlacct "$CTL_V")" ]; then s=true; fi
-  jq -nc --argjson c "$c" --argjson a "$a" --argjson s "$s" '{conveyor: $c, agent: $a, shared: $s}'
+  local c='' a='' s=false
+  if ctlread 2>/dev/null; then
+    [ -z "$1" ] || c=$(swe_pct "$CTL_V"); [ -z "$2" ] || a=$(swe_pct "$CTL_V" 1)
+    if [ -n "$c" ] && [ "$c" = "$a" ] && [[ $'\n'$(subaccts "$CTL_V" | cut -d ' ' -f 2-)$'\n' == *$'\n'"$(ctlacct "$CTL_V")"$'\n'* ]]; then s=true; fi
+  fi
+  jq -nc --arg c "$c" --arg a "$a" --argjson s "$s" 'def left: if . == "" then null else (100 - tonumber) * 10 | round / 10 end;
+    {conveyor: ($c | left), agent: ($a | left), shared: $s}'
 }
 # How many tasks a difference must reach to be told from run-to-run noise with n tasks: two standard errors of the
 # difference of two resolved counts at a rate of one half, ceil(sqrt(2n)), and never more than n (with so few tasks
