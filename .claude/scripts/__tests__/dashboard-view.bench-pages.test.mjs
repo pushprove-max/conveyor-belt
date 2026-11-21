@@ -111,6 +111,15 @@ test('Compare: the four boxes add up to the shared tasks, and the verdict change
   assert.equal(text(q(w, '.bench-vv')), 'Conveyor v1.8.0 is better: it resolves 10 more of 50. That is past the noise of 10.');
 });
 
+// Bug it guards: when the second arm won, the verdict named it the winner but gave it the first arm's cost and time.
+test('Compare: with the winner in the second picker, the verdict gives the winner\'s cost and time first', async () => {
+  const w = await opened(BH.study(), 'compare');
+  await pick(w, 'cmp-a', 'arm:solo');
+  await pick(w, 'cmp-b', 'ver:v1.9.0');
+  assert.equal(text(q(w, '.bench-vv')), 'Conveyor v1.9.0 is better: it resolves 12 more of 50. That is past the noise of 10.');
+  assert.equal(text(q(w, '.bench-vw')), 'It costs $96.00 against $15.50 for the 50 tasks, and takes 17.5 h against 2.5 h.');
+});
+
 // Bug it guards: with 1 shared task, Compare drew boxes and a verdict as if one task could tell two arms apart.
 test('Compare, 2 runs of 1 task: nothing can be told yet, and only cost and time differ on the one task', async () => {
   const w = await opened(BH.few(), 'compare');
