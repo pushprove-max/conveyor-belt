@@ -51,6 +51,10 @@ cp "$SRC/.claude/dashboard/login.html" "$T/out/"
 PASS=0 FAIL=0
 . "$(dirname "${BASH_SOURCE[0]}")/lib/said.sh" # a FAIL line names the hook's last input (start notes each payload)
 check() { if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3)$(said)"; fi }
+# The limit of the hook's return: 1 s times the load factor (CONVEYOR_LOAD_FACTOR, held between 1 and 3), kept under 2 s,
+# the check's own limit: a hook that waited for the check must still fail.
+LF=$(awk -v f="${CONVEYOR_LOAD_FACTOR:-1}" 'BEGIN { f += 0; if (f < 1) f = 1; if (f > 3) f = 3; print f }')
+LIMIT=$(awk -v f="$LF" 'BEGIN { l = 1000 * f; if (l > 1900) l = 1900; print l }')
 # start <source> <project> [<option value>|-] [<port>]: runs the registered command as a session start in <project>;
 # prints its output and errors, then what the opener was given (one line each, after a moment for the background
 # opener). How long the hook held the start, in milliseconds, is left in $T/took.
@@ -106,8 +110,8 @@ check "a repo with no pack opens nothing and reports no error" "rc=0" "$(start s
 check "another service listening on the port is not the Board: the start is not held for it" \
   "rc=0" "$(start startup "$T/repo" true "$RAW" | paste -sd'|')"
 took=$(<"$T/took")
-check "and the hook returns within a second, not after the check's two-second limit" yes \
-  "$([ "$took" -lt 1000 ] && echo yes || echo "no, $took ms")"
+check "and the hook returns within its limit (1 s times the load factor), not after the check's two-second limit" yes \
+  "$(awk -v t="$took" -v l="$LIMIT" 'BEGIN { exit !(t < l) }' && echo yes || echo "no, $took ms (limit $LIMIT ms, load factor $LF)")"
 sleep 2.5
 check "and nothing opens once its check gives up" no "$([ -f "$T/opened" ] && echo yes || echo no)"
 # Another HTTPS service serving the very same login page, under a certificate of its own, is not the Board either:
@@ -133,8 +137,8 @@ check "the forged service, with the user's curl configuration saying insecure, s
 check "a Board whose accept queue is full does not hold the start" "rc=0" \
   "$(start startup "$T/repo" true "$FULL" | paste -sd'|')"
 took=$(<"$T/took")
-check "and the hook returns within a second, not after the check's two-second limit" yes \
-  "$([ "$took" -lt 1000 ] && echo yes || echo "no, $took ms")"
+check "and the hook returns within its limit (1 s times the load factor), not after the check's two-second limit" yes \
+  "$(awk -v t="$took" -v l="$LIMIT" 'BEGIN { exit !(t < l) }' && echo yes || echo "no, $took ms (limit $LIMIT ms, load factor $LF)")"
 sleep 2.5
 check "and nothing opens once its check gives up" no "$([ -f "$T/opened" ] && echo yes || echo no)"
 
