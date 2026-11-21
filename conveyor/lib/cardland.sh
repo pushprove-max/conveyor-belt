@@ -216,15 +216,16 @@ cardtest() {
   # Its shared files run again once for the change it holds (<worktree>.sharedran: that change's patch-id, once
   # that run passed): on a busy main, each run again let another card land on them, and the card never landed
   # (#447). A failure of the two changes together that this lets onto main is caught there (main red).
+  # Past that run, it has the landing turn once this step passed (turntake(), below).
   shared=''; sb=$(sed -n 's/^base\t//p' "$wt.rerun" 2>/dev/null)
   if [ -z "$own" ] && t=$(sharedtests "$wt" "$sb"); then
     if [ "$(cat "$wt.sharedran" 2>/dev/null)" = "$(cardpatch "$wt")" ]; then
-      echo "conveyor: card $c: cards landed since its shared test files ran again touch them too ($(paste -sd ' ' <<<"$t")); they ran again once, so it lands with no second run again. Cards landed since: $(landedsince "$wt" "$sb")"
+      shared=2; echo "conveyor: card $c: cards landed since its shared test files ran again touch them too ($(paste -sd ' ' <<<"$t")); they ran again once, so it lands with no second run again. Cards landed since: $(landedsince "$wt" "$sb")"
     else own=1; shared=1; unshare "$wt" "$t"; echo "conveyor: card $c: cards landed since its tests ran touch its test files too, so they run again on main as it is now: $(paste -sd ' ' <<<"$t")"; fi
   fi
   [ -z "$own" ] || { ran=1; tests "$wt"; rc=$?; [ $rc != 0 ] || slowtests "$wt" || :; }
   [ $rc != 0 ] || [ -z "$own" ] || tested "$wt"
-  [ $rc != 0 ] || [ -z "$shared" ] || cardpatch "$wt" > "$wt.sharedran" || rm -f "$wt.sharedran"
+  [ $rc != 0 ] || [ "$shared" != 1 ] || cardpatch "$wt" > "$wt.sharedran" || rm -f "$wt.sharedran"
   if [ $rc = 0 ] && [ -z "$away" ] && [ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" = "$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)" ]; then
     out=$(locked gather "$c" "$wt" "$me") || out=''
     # A full run its own run refused (tests()) stays on the line its batch's run writes.
@@ -248,6 +249,10 @@ cardtest() {
   [ -z "$back" ] || { git -C "$wt" reset -q --hard "$back" 2>/dev/null && git -C "$wt" apply --index "$wt.bpatch" 2>/dev/null; } \
     || { block "$c" "$n" "$wt" "the batch of the card landed, but the engine could not put the change of the card back in its worktree. The change is in the patch $wt.bpatch"; return; }
   rm -f "$wt.lent" # its worktree holds its own change again (batch())
+  # Its run again of the shared files passed (now, or before for the change it holds), and its batch's run too when a
+  # batch took it: it takes the landing turn (turntake(), lib/claim.sh), so no other card lands on main before it.
+  # Not before its batch's run: the cards of a batch it broke land without it (above).
+  [ $rc != 0 ] || [ -n "$apart" ] || [ -z "$shared" ] || locked turntake "$c" "$me" || :
   go=''
 }
 # A test run that failed (rc). go: again (the test step again: no result, a wait for main or the machine, or main
@@ -355,6 +360,9 @@ cardland() {
     # While a release run is under way (relhold(), lib/push.sh) it waits here, at its land step, and lands once the
     # run has ended: on main as the release left it, where it is fitted again (STALE, below).
     releasewait "$c" "$n" "$wt"
+    # While another card has the landing turn (turnon(), lib/claim.sh) it waits here too, and lands after that card,
+    # fitted onto main as that card left it (STALE, below). land() reads the turn under the lock (TURNHELD).
+    landwait "$c" "$n" "$wt"
     # An ordered or a ready card went past this one since its claim (it holds its files only from its landing step,
     # so that is where it is passed): it claims again, waits for that card, and is fitted onto main as that card
     # left it. Gone past by an ordered card, it is reviewed again when main moved meanwhile; gone past only by ready
@@ -399,13 +407,14 @@ cardland() {
     # A batch that did not land. Main moved again before it could: it stays a batch, and its run is found to stand
     # on main as it is now, or it is tested again there (rebatch()). Else its other cards wait on at their claims,
     # and the card is tested alone, then tries alone, in no batch (its batch's run judged it with them).
-    if [ ${#mates[@]} != 0 ] && [ "$t" != "$STALE" ] && [ "$t" != "$RELHELD" ]; then
+    if [ ${#mates[@]} != 0 ] && [ "$t" != "$STALE" ] && [ "$t" != "$RELHELD" ] && [ "$t" != "$TURNHELD" ]; then
       unmate
       [[ $t == "landed as "* ]] || { echo "conveyor: card $c: its batch did not land, so it is tested alone: $t"; rm -f "$wt.ready"; go=again; return; }
     fi
-    [ "$t" = "$PASSED" ] || [ "$t" = "$STALE" ] || [ "$t" = "$RELHELD" ] || { go=out; return; }
-    # Passed, or main moved, or a release run began, while it went to land: its follow-ups are withdrawn (filed again
-    # when it comes back to land). A release run: it waits for its end above, a batch kept. Main moved: it is fitted
+    [ "$t" = "$PASSED" ] || [ "$t" = "$STALE" ] || [ "$t" = "$RELHELD" ] || [ "$t" = "$TURNHELD" ] || { go=out; return; }
+    # Passed, or main moved, or a release run began, or another card took the landing turn, while it went to land: its
+    # follow-ups are withdrawn (filed again when it comes back to land). A release run or a landing turn: it waits for
+    # its end above, a batch kept. Main moved: it is fitted
     # onto main as it is now and its checks run again there, its tests only when the fitted change is not the one that passed.
     # shellcheck disable=SC2046 # the filed follow-ups' issue numbers, one word each
     [ -z "$ups" ] || unfile "$n" "$wt.review" $(jq -r '.[]' <<<"$ups"); ups=''; left=''; dec=''

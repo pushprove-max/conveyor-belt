@@ -1028,7 +1028,11 @@ session, before the review of that pass.
 The landing gate (`lintgate` with `land`) is in the landing loop, in `cardtest()`, each time the product checks run: after
 the parse check of a merge onto main (`parses`), before the product checks and the changed tests. It uses the same
 ratchet run, from the commit the worktree is on after the merge, the same read-only check, `lint` line,
-execution-error block and rule Lint check. The card's findings go to one fix session, its reply checked as any fix's
+execution-error block and rule Lint check. After a pass there, a card fitted onto a newer main runs no command at its
+next landing gate while `lintstands` holds: the card's change and the pack's `lint` field are the same as at that
+pass, and main changed none of the change's files, no command's triggers or size exempt file, and no file that a
+command without `{files}` reads (`<worktree>.linted` keeps the pass). That pass stays the card's result, with no new
+`lint` line. The card's findings go to one fix session, its reply checked as any fix's
 reply is, with no gate run after it. Its fix line's reason starts `lint:`, and the Board names the step
 `Fix <n>: lint findings`. The card then goes round to a review, which is a last review, as after a test fix. The
 review gate of that pass does not run on the change the fix left (`lfix`, its `cardpatch`): the landing gate decides

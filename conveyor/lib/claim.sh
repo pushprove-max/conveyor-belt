@@ -297,6 +297,8 @@ docsonly() { # <patch of its change, by its absolute path> <id>
 GIVEWAY=3
 giveway() { # <card> <worktree> [fixing|fix]; under the lock
   local o f='[]' s=false
+  # Gone back for a fit, a review, a fix or a run again, it lands next no more: its landing turn ends (turnon()).
+  turnfree "$1"
   # A card stacked on this one (stackto()) goes on once this one gives way for a fix round (claim()): that give-way is
   # not capped, and a claim already away (given way to be fitted, reviewed or tested again) is marked for that round.
   if [ -n "${3:-}" ] && jq -e --arg c "$1" 'select(.on == $c)' "$CARDS"/*.stack >/dev/null 2>&1; then
@@ -403,7 +405,9 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
     if [ -n "$w" ]; then
       # Each wait begins with its start line, one after a session of this call too (a card that kept its claim through
       # the session that brought it onto main): `health` counts a wait whose start line is the card's last.
-      [ -n "$waited" ] || { waited=$(date -u +%FT%TZ); ws=$SECONDS; wb=$waitsec
+      # A card that waits on another card cannot land next: its landing turn ends (turnon()), or the two would wait
+      # on each other.
+      [ -n "$waited" ] || { waited=$(date -u +%FT%TZ); ws=$SECONDS; wb=$waitsec; locked turnfree "$1"
         began "$1" "$2" "$5"; echo "conveyor: card $1 waits on card $(jq -r '"\(.on), which changes the same files: \(.paths | join(", "))"' <<<"$w")"; }
       # The live record names the card it waits on now: one `retry` gives back is picked first, past the cap (urgent).
       # It names too (waited) what the card waited before this wait (before: the seconds of its waits that ended) and
@@ -977,6 +981,41 @@ STALE="main moved since its checks and tests ran; nothing was landed"
 NOTWORK="the main checkout is not a working checkout (core.bare is true): set core.bare to false" # what land() prints for that
 # What land() prints while a release run is under way (relhold(), lib/push.sh): card() waits for it to end (releasewait()).
 RELHELD="a release run is under way, so no card lands on main until it ends; nothing was landed"
+# The landing turn (issue 1148: a card that shared many test files ran them again on main each time another card
+# landed first, and its lint again, four rounds in 13 minutes). A card whose run again of its shared test files on
+# main passed (card(): sharedtests(), <worktree>.sharedran) takes the turn when no other card has it (turntake()):
+# <cards folder>/land.turn holds {card, pid}. While it has it, no other card lands (land() prints TURNHELD; a batch
+# that holds that card lands), and a card at its land step waits for it (landwait()), so main does not move between
+# that run and its landing. The turn ends when its card lands (land()), gives way (giveway()), waits on another card
+# at its claim (settle()) or blocks (block() removes its claim), and when its process ends.
+TURNHELD="another card has the landing turn, as its run again of the shared test files passed on main; nothing was landed"
+turnon() { # prints the card that has the landing turn; fails when none has it
+  local c p
+  IFS=$'\t' read -r c p < <(jq -r 'objects | "\(.card)\t\(.pid)"' "$CARDS/land.turn" 2>/dev/null) || return 1
+  [ -n "$c" ] && [[ $p =~ ^[0-9]+$ ]] && kill -0 "$p" 2>/dev/null && [ -e "$CARDS/$c.claim" ] && printf '%s\n' "$c"
+}
+turntake() { # <card> <the card's pid>; under the lock: fails when another card has the turn
+  local o
+  ! o=$(turnon) || [ "$o" = "$1" ] || return 1
+  jq -cn --arg c "$1" --argjson p "$2" '{card: $c, pid: $p}' > "$CARDS/land.turn.new" && mv -f "$CARDS/land.turn.new" "$CARDS/land.turn"
+}
+turnfree() { [ "$(jq -r '.card' "$CARDS/land.turn" 2>/dev/null)" != "$1" ] || rm -f "$CARDS/land.turn"; } # <card>; under the lock
+# A card at its land step waits while another card has the landing turn, as for a release run (releasewait(),
+# lib/push.sh): a start line of its land step marked waitFor: turn, its live record naming that card (waits.on: the
+# Board's step line says "waiting on #<its issue>", as for a wait at a claim), brought up to date as it waits, and
+# <worktree>.idle standing.
+landwait() { # <card> <issue> <worktree>
+  local at o
+  o=$(turnon) && [ "$o" != "$1" ] || return 0
+  record "$1" "$2" start ok '{"of":"land","waitFor":"turn"}'
+  at=$(date -u +%FT%TZ)
+  while o=$(turnon) && [ "$o" != "$1" ]; do
+    jq -cn --arg at "$at" --arg o "$o" '{step: "land", at: $at, last: (now | todate), turns: 0, files: {run: 0, of: null}, tests: null, waits: {on: $o, paths: []},
+      action: "waiting for card \($o) to land first: it has the landing turn, as its run again of the shared test files passed on main"}' > "$3.live.tmp" 2>/dev/null && mv -f "$3.live.tmp" "$3.live"
+    : > "$3.idle"; sleep "$LIVE"
+  done
+  rm -f "$3.live" "$3.idle"
+}
 # The landing holds its share of RELLANDING (holdtake(), lib/push.sh) throughout, so a release run that begins
 # meanwhile waits for it to end before its suite reads main.
 land() { # <card> <issue> <worktree> <commit message> [extra json for the landed line] [those five of each further card of a batch, in its order]
@@ -987,7 +1026,9 @@ land() { # <card> <issue> <worktree> <commit message> [extra json for the landed
   landone "$@" {hk}>&-; rc=$?; exec {hk}>&-; return $rc
 }
 landone() { # <the arguments of land()>
-  local err sha l p base tip want x i h b='[]' a=("$@") g=() ls=() wts=() shas=() paths=()
+  local err sha l p base tip want x i h tn b='[]' a=("$@") g=() ls=() wts=() shas=() paths=()
+  # Another card has the landing turn (turnon()): none of this one's cards lands before it.
+  if tn=$(turnon); then for ((i = 0; i < ${#a[@]}; i += 5)); do [ "${a[i]}" != "$tn" ] || tn=''; done; [ -z "$tn" ] || { echo "$TURNHELD"; return 1; }; fi
   [ $# -le 5 ] || b=$(for ((i = 0; i < $#; i += 5)); do printf '%s\n' "${a[i]}"; done | jq -Rsc 'split("\n") | map(select(. != ""))')
   onmain() { [ "$(git symbolic-ref -q HEAD)" = "refs/heads/$BRANCH" ] || { echo "main's checkout is not on the $BRANCH branch; nothing was landed"; return 1; }; }
   # A checkout set to bare (core.bare=true) fails each git command that needs a work tree (status, diff, merge), so it is named as that, first (#254).
@@ -1032,6 +1073,7 @@ landone() { # <the arguments of land()>
   git update-ref -m "conveyor ${a[0]}" "refs/heads/$BRANCH" "$tip" "$base" \
     || { echo "main moved during the landing; nothing was landed, and the card's change is left in main's checkout for $OWNER to sort out"; return 1; }
   for i in "${!wts[@]}"; do
+    turnfree "${a[i * 5]}"
     l=$(line "${a[i * 5]}" "${a[i * 5 + 1]}" landed ok "${ls[i]}") && append "$l" || { echo "landed as ${shas[i]} but the record line failed"; return 1; }
     [ ! -e "${wts[i]}.batch" ] || { jq -c --arg s "${shas[i]}" '. + {landed: $s}' "${wts[i]}.batch" > "${wts[i]}.batch.new" && mv -f "${wts[i]}.batch.new" "${wts[i]}.batch"; }
   done

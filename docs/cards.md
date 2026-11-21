@@ -103,6 +103,9 @@ through a lint gate before each review, and through the landing gate (below) bef
 The landing gate runs the same commands each time the card is about to land: after the check that the files of a
 merge onto main still parse, and before the product checks and tests. A merge onto main can bring a finding that the
 gate before the review did not see. A pass, a missing tool and an execution error act as above.
+When the gate passed and the card is then fitted onto a newer main, the gate does not run the commands again if main
+changed none of the card's files, no file that a lint command reads for all changes, and not the pack's `lint` field.
+The pass stays the card's lint result, and the card gets no new `lint` line.
 
 - A finding goes to one fix session before any test runs. Its step is `Fix <n>: lint findings`. Then the card goes to
   a review, and that review is its last review: a `NO-GO` lands with follow-ups, or blocks if it holds a P0. The gate before that review does not

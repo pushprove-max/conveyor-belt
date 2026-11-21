@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
-# Engine cases: test files at landing: the three-way merge of test files, a test file shared with a card landed since,
-# and the parse check of merged files.
+# Engine cases: test files at landing: the three-way merge of test files, a test file shared with a card landed since
+# and the landing turn its run again gives (lib/claim.sh), and the parse check of merged files.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -76,13 +76,13 @@ t_mergesharedtests() {
 # #447: card A (#7) passes; card-b lands touching A's test file lib/view.test.sh; A runs that file again and passes;
 # card-c lands touching it again (and, given "conflict", A's line of lib/panel.sh too). card-b and card-c stand for
 # cards that landed: a commit on main and its landed line. Each run of A's tests logs the file, and the n-th lands the
-# n-th of them.
-sharedonce() { # [conflict]
+# n-th of them. Given "turn", card B (#8, in $T/$CASE/b8) is ready to land at the same time as A (sharedturn()).
+sharedonce() { # [conflict|turn]
   setup "[$(issue 7 2026-01-01)]"; for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done
   mkdir -p "$R/lib"; echo panel > "$R/lib/panel.sh"; echo case1 > "$R/lib/view.test.sh"
   git -C "$R" add lib; linkset '{"lib/panel.sh": ["lib/view.test.sh"]}' # A's change runs lib/view.test.sh
   echo "if grep -q '^# Landing conflict' \"\$STUB/brief\"; then sed -i 's/^panelC\$/panelC seven/' lib/panel.sh; else sed -i 's/^panel\$/seven/' lib/panel.sh; fi" > "$STUB/build"
-  [ -z "${1:-}" ] || : > "$STUB/conflict"
+  if [ "${1:-}" = turn ]; then sharedturn; elif [ -n "${1:-}" ]; then : > "$STUB/conflict"; fi
   cat >> "$STUB/test-cmd" <<'EOF'
 n=$(( $(cat "$STUB/n" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$STUB/n"
 echo "== lib/view.test.sh"; printf "%s\n" "== lib/view.test.sh" "-- ok lib/view.test.sh" "TESTRUN sec	lib/view.test.sh	1	1" >> "$CONVEYOR_TEST_LOG/run.log"
@@ -90,9 +90,70 @@ c=''; case $n in 1) c=card-b ;; 2) c=card-c ;; esac
 [ -z "$c" ] || { echo "$c" >> "$R/lib/view.test.sh"; [ "$c" != card-c ] || [ ! -e "$STUB/conflict" ] || sed -i 's/^panel$/panelC/' "$R/lib/panel.sh"
   git -C "$R" commit -qam "$c lands"; jq -cn --arg c "$c" --arg s "$(git -C "$R" rev-parse HEAD)" '{card: $c, issue: 90, step: "landed", result: "ok", sha: $s}' >> "$ST/cards.jsonl"; }
 EOF
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
+  # loop: only a whole card run shows card-b and card-c landing between A's test runs and A's run again before it lands
+  out=$(loop run 2>&1); rc=$?; : > "$STUB/runend"; [ $rc = 0 ] || fail "run exited non-zero: $out"
   grep -q 'card .*-7: cards landed since its tests ran touch its test files too.*lib/view.test.sh' <<<"$out" \
     || fail "#7 did not run its test file again after card-b landed on it: $(st 'select(.issue == 7) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+}
+# Card B for sharedonce turn: once a card has the landing turn (land.turn), B's worktree is made on main as it is then,
+# adding a line to A's shared test file, and B tries to land (land(), as card() calls it), its output and exit in
+# $T/$CASE/b.out, then $STUB/btried. Main's pre-commit hook holds a landing made with the turn taken until then (30 s at most), so B tries
+# while A has the turn and is landing. B gives up when the run ends first (no turn was taken).
+sharedturn() {
+  local h=$R/.git/hooks/pre-commit
+  # Only a commit made while a card has the turn waits: card-b's and card-c's commits (test-cmd) come before it.
+  printf '%s\n' '#!/usr/bin/env bash' "[ -s '$T/$CASE/cards/land.turn' ] || exit 0" "for i in \$(seq 300); do [ -e '$STUB/btried' ] && break; sleep 0.1; done" > "$h" && chmod +x "$h" || fail "main's pre-commit hook" # sleep: the landing waits for card B's try
+  # This polls the loop's cards folder: only a card() run takes the turn after its run again of the shared files.
+  ( for i in $(seq 1200); do [ -s "$T/$CASE/cards/land.turn" ] && break; [ ! -e "$STUB/runend" ] || exit 0; sleep 0.1; done # sleep: B waits for A's turn
+    git -C "$R" worktree add -q --detach "$T/$CASE/b8" main && echo eight >> "$T/$CASE/b8/lib/view.test.sh" && git -C "$T/$CASE/b8" add -A || exit 0
+    ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; cd "$R" || exit 9
+      . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names || exit 9
+      land c8-8 8 "$T/$CASE/b8" "eight (#8)"; echo "land: $?" ) > "$T/$CASE/b.out" 2>&1
+    : > "$STUB/btried" ) & BPID=$!
+}
+
+# Bug (#1148): card #1134 passed its run again of its shared test files, and each time it came to land another card had
+# landed first: it was fitted onto main and ran its lint and tests again, four rounds in 13 minutes. A (#7), its run
+# again passed, has the landing turn: B, ready at the same time, tries to land while A lands and is refused, main
+# staying as A's tests left it; A lands with no second run again of its shared file, then B lands on A's commit.
+t_mergesharedturn() {
+  local a
+  sharedonce turn; wait "$BPID"
+  [ "$(cat "$T/$CASE/b.out" 2>&1)" = $'another card has the landing turn, as its run again of the shared test files passed on main; nothing was landed\nland: 1' ] \
+    || fail "card B was not refused while A had the landing turn: $(cat "$T/$CASE/b.out" 2>&1)"
+  a=$(st 'select(.issue == 7 and .step == "landed") | .sha')
+  [ -n "$a" ] && [ "$(cat "$STUB/n")" = 2 ] && [ "$(git -C "$R" log -1 --format=%s "$a^")" = "card-c lands" ] && [ ! -e "$T/$CASE/cards/land.turn" ] \
+    || fail "A did not land on main as its tests left it with no second run, or its turn stayed: runs $(cat "$STUB/n"); $(git -C "$R" log --format=%s | head -4 | paste -sd,)"
+  fx_in 'W=$T/$CASE/b8; git -C "$W" diff --cached --binary > "$W.p" && git -C "$W" reset -q --hard main && git -C "$W" apply --index "$W.p" || exit 3
+    land c8-8 8 "$W" "eight (#8)"; echo "land: $?"'
+  [ "$(tail -n 1 "$T/$CASE/run.out")" = 'land: 0' ] && [ "$(git -C "$R" rev-parse main^)" = "$a" ] && grep -qx eight "$R/lib/view.test.sh" \
+    || fail "B did not land after A once A's turn ended: $(cat "$T/$CASE/run.out")"
+}
+
+# Bug (#1148): a card ready to land while another card has the landing turn landed, or waited saying nothing. c8-8 at
+# its land step waits (landwait()) while c7-7 has the turn: its land step's start line is marked waitFor: turn, its
+# live record names c7-7, the Board's step line says it waits on #7, and it is idle; once the turn ends it goes on.
+t_mergeturnwait() {
+  local s
+  setup '[]'; mkdir -p "$T/$CASE/cards"
+  for n in 7 8; do jq -cn --arg c "c$n-$n" --argjson n "$n" '{card: $c, issue: $n, step: "picked", result: "ok", time: "2026-01-01T00:00:00Z", tokens: {claude: 0, codex: 0}, sha: "", reason: ""}' >> "$ST/cards.jsonl"; done
+  echo "{\"pid\":$$,\"paths\":[\"a.txt\"]}" > "$T/$CASE/cards/c7-7.claim"; echo "{\"card\":\"c7-7\",\"pid\":$$}" > "$T/$CASE/cards/land.turn"
+  # This polls a real wait: what the Board shows comes from the live record landwait() keeps while it waits.
+  fx_in 'landwait c8-8 8 "$CARDS/c8-8"; echo waited' & local p=$!
+  wait_until "jq -e '.waits.on == \"c7-7\" and (.action | startswith(\"waiting for card c7-7 to land first\"))' '$T/$CASE/cards/c8-8.live'" && [ -e "$T/$CASE/cards/c8-8.idle" ] \
+    || { rm -f "$T/$CASE/cards/land.turn"; fail "the card does not say it waits for c7-7's landing turn: $(cat "$T/$CASE/cards/c8-8.live" 2>&1)"; }
+  s=$(loop snapshot --fresh)
+  [ "$(jq -c '[.belt[] | select(.issue == 8) | [.step, .waitsOn.issue]]' <<<"$s")" = '[["waiting",7]]' ] \
+    || { rm -f "$T/$CASE/cards/land.turn"; fail "the Board's step line does not say the card waits on #7: $(jq -c '[.belt[] | {issue, step, waitsOn, live}]' <<<"$s")"; }
+  rm -f "$T/$CASE/cards/land.turn"; wait "$p"
+  grep -qx waited "$T/$CASE/run.out" && [ ! -e "$T/$CASE/cards/c8-8.live" ] && [ ! -e "$T/$CASE/cards/c8-8.idle" ] \
+    && [ "$(st 'select(.card == "c8-8" and .step == "start") | .waitFor')" = turn ] || fail "the wait did not end with the turn, or left its marks: $(cat "$T/$CASE/run.out")"
+  # Bug it catches: stop (halt(), lib/run.sh) left a card in that wait to land after the stop. Nothing of its landing
+  # has begun there, as in a wait for a release run, so it is stopped.
+  sleep 60 & p=$! # sleep: a stand-in for the card's process, until it is killed
+  fx_in "echo '$p c8-8' | halt"; kill -KILL "$p" 2>/dev/null; wait "$p" 2>/dev/null
+  [ "$(cat "$T/$CASE/run.out")" = "$p c8-8" ] || fail "stop left the card that waits for a landing turn: $(cat "$T/$CASE/run.out")"
+  recok "$ST/cards.jsonl" "the wait for a landing turn"
 }
 
 # Bug it catches: after its shared run again passed, card-c landed on the file again and A ran it again, on and on:

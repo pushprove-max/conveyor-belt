@@ -27,8 +27,9 @@ def ok: . as $r | (keys - known) == need
               and (.fix | IN("sped up", "split", "merged", "deleted")) and (.into | type == "array" and all(.[]; type == "string")))))))
         and (.speed == null or .step == "bugproof")
         and (.step != "start" or (.of | IN("build", "review", "fix", "test", "file", "land", "rebase")))
-        # A land step's start line that opens a card's wait for a release run (releasewait(), lib/push.sh).
-        and (.waitFor == null or (.step == "start" and .of == "land" and .waitFor == "release"))
+        # A land step's start line that opens a card's wait for a release run (releasewait(), lib/push.sh) or for
+        # another card's landing turn (landwait(), lib/claim.sh).
+        and (.waitFor == null or (.step == "start" and .of == "land" and (.waitFor | IN("release", "turn"))))
         and (.counts // {P0: 0, P1: 0, P2: 0, P3: 0} | type == "object" and keys == ["P0", "P1", "P2", "P3"] and all(type == "number"))
         and (.created // "" | type == "string")
         and (.step != "landed" or ((.sha | length) > 0 and (.product | type == "boolean")))

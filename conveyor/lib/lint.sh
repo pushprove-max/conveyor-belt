@@ -481,6 +481,27 @@ lintbrief() {
   jq -r '.commands // [] | to_entries[] | "- lint command \(.key + 1): \(.value | if .size then "no file over \(.size.file) lines unless the exempt file `\(.size.exempt)` names it"
     else "`\(.run)`" end), on \(.value.files | map("`\(.)`") | join(", "))"' <<<"$l"
 }
+# The lint pass that stands (issue 1148: a card re-fitted onto main four times ran its lint each time, 2 to 3 minutes,
+# while main changed none of its files). <worktree>.linted holds the change the landing gate's lint passed on (its
+# cardpatch()), the commit it ran from and the hash of the pack's lint field it ran (lintpassed()). True (lintstands())
+# for the same change and lint field on a commit where main changed none of the change's files (both sides of a
+# rename), no command's triggers or size exempt file, and no file a command without {files} reads: lint gives the
+# same result there, so that pass is the card's.
+lintpassed() { printf '%s\t%s\t%s\n' "$(cardpatch "$1")" "$2" "$(git hash-object --stdin <<<"$3")" > "$1.linted"; } # <worktree> <base> <lint field>
+lintstands() { # <worktree> <lint field>
+  local p b k h f i n
+  local -a ps=()
+  { IFS=$'\t' read -r p b k < "$1.linted"; } 2>/dev/null && [ -n "$p" ] && [ "$p" = "$(cardpatch "$1")" ] && [ "$k" = "$(git hash-object --stdin <<<"$2")" ] \
+    && h=$(git -C "$1" rev-parse -q --verify HEAD) || return 1
+  while IFS= read -r -d '' f; do ps+=(":(literal)$f"); done < <(git -C "$1" diff --cached --name-only --no-renames -z HEAD)
+  [ ${#ps[@]} != 0 ] && git -C "$1" diff --quiet "$b" "$h" -- "${ps[@]}" 2>/dev/null && n=$(jq '.commands // [] | length' <<<"$2") || return 1
+  # Each command's pathspecs apart, so that its :(exclude) entries apply only to it.
+  for ((i = 0; i < n; i++)); do
+    mapfile -d '' -t ps < <(jq -j --argjson i "$i" '.commands[$i] | (.triggers // []) + [.size.exempt // empty | ":(literal)" + .]
+      + (if .size == null and (.run | contains("{files}") | not) then .files else [] end) | .[] + "\u0000"' <<<"$2")
+    [ ${#ps[@]} = 0 ] || git -C "$1" diff --quiet "$b" "$h" -- "${ps[@]}" 2>/dev/null || return 1
+  done
+}
 LINTFIX=$'# Lint findings: fix them and nothing else\nThe pack\'s lint commands found <n> finding(s) in this card\'s change. The first 50 are below, each after the command that found it. Fix the code each one names. Do not change lint policy (the pack\'s `lint` field, a linter\'s config or a suppression) to make a finding go away, unless the issue asks for it.'
 # The review gate (card(), at the top of each pass of its review loop, with the change staged), with the rule Lint
 # check on: the pack's lint commands on the card's staged change, from the commit its worktree is on (lintrun), and
@@ -496,6 +517,8 @@ LINTFIX=$'# Lint findings: fix them and nothing else\nThe pack\'s lint commands 
 # as above, with no run after it: 2, and card() takes the card round to a review, a last review, and back to this gate.
 # There a finding blocks the card while its change is the one that fix left (lfix, card()'s local: its cardpatch()),
 # nothing landing; a change that another session changed since gets one new fix session.
+# A pass of the landing gate stands at its next runs while lintstands() holds (a re-fit onto a main that changed none
+# of the card's files): no command runs and no lint line is written, the card's last lint line being its result.
 lintgate() { # <card> <issue> <worktree> <issue json> <the sessions' prompt> <branch> [land]
   local c=$1 n=$2 wt=$3 land=${7:-} l base o rc k t p=''
   lintrule || return 0
@@ -503,10 +526,11 @@ lintgate() { # <card> <issue> <worktree> <issue json> <the sessions' prompt> <br
   [ -n "$l" ] || return 0
   [ -z "${lfix:-}" ] || p=$(cardpatch "$wt") || p=''
   [ -n "$land" ] || [ -z "$p" ] || [ "$p" != "$lfix" ] || return 0
+  [ -z "$land" ] || ! lintstands "$wt" "$l" || { echo "conveyor: card $c: main changed none of its files or lint settings since its lint passed, so that pass stands and lint does not run again"; return 0; }
   base=$(git -C "$wt" rev-parse -q --verify HEAD) && o=$(mktemp) || { block "$c" "$n" "$wt" "lint: the engine could not start the lint check, so nothing landed"; return 1; }
   lintrun "$wt" "$base" "$c" "$o"; rc=$?; lintline "$c" "$n" "$o" $rc "${land:-review}"
   [ $rc != 2 ] || { rm -f "$o"; block "$c" "$n" "$wt" "lint: an execution error, so nothing landed: $LINT_WHY"; return 1; }
-  [ $rc = 1 ] || { rm -f "$o"; return 0; }
+  [ $rc = 1 ] || { rm -f "$o"; [ -z "$land" ] || lintpassed "$wt" "$base" "$l"; return 0; }
   k=$(jq -s '[.[].reported[]] | length' "$o")
   t=$(jq -rs '[.[] | . as $c | .reported[] | "lint command \($c.n) (\($c.run)): \(.file):\(.line)\(if .column then ":\(.column)" else "" end): \(.text)"] | .[:50][]' "$o")
   if [ -n "$land" ]; then

@@ -144,6 +144,33 @@ t_lintgatemergeagain() {
     || fail "the check fix's finding did not get a new lint fix at the next landing gate: $(cat "$T/$CASE/run.out"); $(did); $(st 'select(.step == "blocked") | .reason')"
 }
 
+# Card c7 changes line 1 of b.txt and its landing gate's lint passes; then main changes <file> (a line far below in
+# b.txt, or c.txt, no file of the card's), the change is fitted onto main as settle() fits it, and the gate runs again.
+gaterefit() { # <file main changes>
+  gatesetup '[]'
+  fx_wt 'sed -i "1s/.*/card/" b.txt' b.txt "$(seq 10)" c.txt c
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  fx_in 'lintgate c7 7 "$FXWT" "{}" prompt br land; echo "rc1=$?"
+    echo main >> "$R/'"$1"'" && git -C "$R" commit -qam "main moves" && git -C "$FXWT" diff --cached --binary > "$FXWT.p" \
+      && git -C "$FXWT" reset -q --hard main && git -C "$FXWT" apply --index "$FXWT.p" || exit 3
+    lintgate c7 7 "$FXWT" "{}" prompt br land; echo "rc2=$?"'
+  [ "$(grep '^rc' "$T/$CASE/run.out" | paste -sd' ')" = 'rc1=0 rc2=0' ] || fail "the landing gate did not pass twice: $(cat "$T/$CASE/run.out")"
+}
+# Bug (#1148): a card fitted onto a main that changed none of its files ran its lint again at each fit, 2 to 3 minutes,
+# while other cards landed. The second gate runs no lint command and writes no lint line: the first pass is the card's.
+t_lintgatestands() {
+  gaterefit c.txt
+  [ "$(grep -c '^run ' "$STUB/lint-args")" = 1 ] && [ "$(st 'select(.step == "lint") | "\(.result) \(.lint.gate)"' | paste -sd,)" = 'pass land' ] \
+    && grep -q 'main changed none of its files or lint settings since its lint passed, so that pass stands' "$T/$CASE/run.out" \
+    || fail "lint ran again on a main that changed none of the card's files: $(cat "$STUB/lint-args"); $(st 'select(.step == "lint") | .reason')"
+}
+# Bug it catches: a lint pass standing on a main that changed one of the card's files. Lint runs again, as before.
+t_lintgatefileagain() {
+  gaterefit b.txt
+  [ "$(grep -c '^run ' "$STUB/lint-args")" = 2 ] && [ "$(st 'select(.step == "lint") | .result' | paste -sd,)" = 'pass,pass' ] \
+    || fail "lint did not run again on a main that changed the card's file: $(cat "$STUB/lint-args"); $(st 'select(.step == "lint") | .reason')"
+}
+
 # Bug: a finding left after the review gate's fix session goes to the review, or lands. The gate blocks the card after
 # its one fix session.
 t_lintgateleft() {
@@ -281,8 +308,10 @@ t_lintgatelate() {
 # The landing gate's card #7: the build adds a line and a BAD line to a.txt, which the lint command finds only in a tree that holds
 # gone.txt, so the review gate passes it. The card's first test run puts gone.txt on main, so the merge onto main
 # brings the finding to the landing gate. The lint fix runs <lint fix>; review 1 is a GO, review 2 <review 2>.
+# gone.txt is the command's trigger, as a file that changes its result is: main changes none of the card's files, and a
+# trigger it changes is what keeps the landing gate's earlier pass from standing (lintstands()).
 landgate() { # <lint fix> <review 2> [<build>]
-  gatesetup "[$(issue 7 2026-01-01)]" '[ ! -e gone.txt ] || $L {files}'
+  gatesetup "[$(issue 7 2026-01-01)]" '[ ! -e gone.txt ] || $L {files}'; tune '.lint.commands[0].triggers = ["gone.txt"]'
   echo "$GO" > "$STUB/review.1"; printf '%s\n' "$2" > "$STUB/review.2"
   gatesessions "${3:-echo seven >> a.txt; echo BAD >> a.txt}" "$1"
   echo '[ -e "$STUB/moved" ] || { : > "$STUB/moved"; echo gone > "$R/gone.txt"; git -C "$R" add gone.txt; git -C "$R" commit -qm "main moves"; }' >> "$STUB/test-cmd"

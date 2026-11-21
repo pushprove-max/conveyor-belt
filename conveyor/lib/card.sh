@@ -305,7 +305,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local repaired='' lane # repaired: the repair lane passed its test step (repairlane()), saying how; lane: its exit
   local ins rr # ins, rr: the review's instructions, and fix when it reviews the fix alone (rereview())
   local ph pf pb # ph, pf: the hash and the files of the change's lint policy diff (lintpolicy()); pb: the body kept by the card it resumes
-  local shared sb # shared: this test step runs its shared test files again (sharedtests()); sb: the commit its last tests ran on
+  local shared sb # shared: 1 when this test step runs its shared test files again (sharedtests()), 2 when they ran again before for the change it holds; sb: the commit its last tests ran on
   local go sx # go, sx: what the step that returned says follows (above), and its exit
   # shellcheck disable=SC2034 # SEATCARD is read by seat() in lib/control.sh
   local SEATCARD=$n # every step of this card, its split check too, runs on the seats the control record keeps for its issue (seat(), lib/control.sh)
