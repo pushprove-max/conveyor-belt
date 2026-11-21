@@ -859,10 +859,11 @@ swe_runlog() { # <line>
   local f rc; exec {f}>>"$SWE_DIR/runs.lock" || return 1
   flock -w 60 "$f" && printf '%s\n' "$1" >> "$SWE_DIR/runs.jsonl"; rc=$?; exec {f}>&-; return $rc
 }
-# The kept results a run's line shows, each "<key>/<task>": those it made and those it reused. A task not run keeps
-# none, nor does one an --again run kept apart (again: true; its result is under again/<run id>, the run's own); a
-# line with no results key (one written before cols) names none.
-SWE_MADE='def results: . as $l | [.tasks[]? | select((.result | tostring | startswith("not run") | not) and .again != true)
+# The kept results a run's line shows, each "<key>/<task>": those it made, those it reused and, for a task an --again
+# run kept apart (again: true; that result is under again/<run id>, the run's own), the kept one of its key: so a run
+# deleted before the --again runs of its key leaves the kept result for them. A task not run keeps none; a line with
+# no results key (one written before cols) names none.
+SWE_MADE='def results: . as $l | [.tasks[]? | select(.result | tostring | startswith("not run") | not)
   | . as $t | ([$l.cols[]? | select(.arm == $t.arm) | .key | strings] | first) as $k | select($k != null) | "\($k)/\($t.id)"] | unique;'
 # `bench swe runs archive | restore | delete <run>...`, under runs.lock. Archive puts archived (its time) on each run's
 # line and restore takes it off: the line, its tail and its results stay (the Board leaves an archived run out of its

@@ -283,6 +283,31 @@ t_sweseame() {
     || fail "bench swe runs delete $r2 left its own results or took the first run's: $(ls -R "$B/again" "$B/results" 2>&1)"
 }
 
+# Bug (#1182): deleting the first run took the kept results of a key while two --again runs still showed it, so same
+# twice vanished from results and history, or (when read from again/) the key was listed though a new run could not reuse
+# it and diff could not read it. Run 1 resolves the first task, runs 2 and 3 (--again) both leave it unresolved; run 1 is
+# deleted: the key stays under results/, same twice is 1, and a run with no --again reuses the kept result.
+t_sweseamegone() {
+  swe; local out res first r1 key
+  first=$(sweorder | head -n 1)
+  out=$(loop bench swe 1 --arm stub-a 2>&1) || fail "the first run failed: $out"
+  echo "$first" > "$SWE_FX/wrong"
+  out=$(loop bench swe 1 --arm stub-a --again 2>&1) || fail "the first --again run failed: $out"
+  out=$(loop bench swe 1 --arm stub-a --again 2>&1) || fail "the second --again run failed: $out"
+  r1=$(loop bench swe history | jq -r '.runs[2].id')
+  out=$(loop bench swe runs delete "$r1" 2>&1) || fail "bench swe runs delete $r1 failed: $out"
+  res=$(loop bench swe results --json) || fail "results --json failed: $res"
+  [ "$(jq -c '[length, .[0].n, .[0].figures.sameTwice]' <<<"$res")" = '[1,1,1]' ] \
+    || fail "results --json after deleting the first run does not give one key with 1 task and same twice 1: $(jq -c . <<<"$res")"
+  out=$(loop bench swe history) || fail "history failed: $out"
+  [ "$(jq -c '[.keys | length, .[0].figures.sameTwice]' <<<"$out")" = '[1,1]' ] \
+    || fail "history after deleting the first run does not give one key with same twice 1: $(jq -c .keys <<<"$out")"
+  key=$(jq -r '.[0].key' <<<"$res")
+  out=$(loop bench swe diff "$key" "$key" 2>&1) || fail "bench swe diff $key $key after deleting the first run failed: $out"
+  out=$(loop bench swe 1 --arm stub-a 2>&1) || fail "the run after deleting the first run failed: $out"
+  grep -q "(reused)$" <<<"$out" || fail "a run after deleting the first run did not reuse the kept result: $out"
+}
+
 # Bug: same twice was rounded to two places, so an arm whose result changed on 1 of 201 tasks run twice showed 1, as
 # if every task agreed. Two run lines of key figs run 201 tasks; the last one is resolved only the first time.
 t_swesamenear() {
