@@ -451,7 +451,12 @@ begin "$in"
 sleep 1 # sleep: the hook's first polls, while the session's start hook has not run
 [ ! -e "$FD/waiter.pid" ] && kill -0 "$bp" || fail "CONVEYOR_WAITER_START=1 waiter.sh (input $in, the mark naming the session) started a waiter or ended before the session's start hook ran: $(cat "$FD/waiter.log" 2>/dev/null)"
 echo "$FD-launch" > "$FD/launch"
-echo "$in" | CONVEYOR_FOREMAN_LAUNCH="$FD-launch" bash "$SRC/foreman.sh" start > /dev/null 2>&1
+# claim_ is refused (exit 1) while mine cannot read the records, so the claim needs a host file; without it the start hook
+# claimed nothing and the case passed on the mark it wrote itself.
+mkdir -p "$XDG_CONFIG_HOME/conveyor" "$T/main" && jq -n --arg m "$T/main" '{records: [{repo: "alpha", main: $m}]}' > "$XDG_CONFIG_HOME/conveyor/host.json" || fail "the host file was not made"
+echo "$in" | CONVEYOR_MAIN="$T/main" CONVEYOR_FOREMAN_LAUNCH="$FD-launch" bash "$SRC/foreman.sh" start > /dev/null 2>&1; rc=$?
+[ "$rc" = 0 ] && [ ! -e "$FD/launch" ] && [ "$(read -r s t < "$FD/session"; echo "$s")" = new ] && [ "$(read -r s t < "$FD/session"; echo "$t")" != 2026-01-01T00:00:00Z ] \
+  || fail "the launch claim (foreman.sh start, input $in) did not run: exit $rc, launch file $(cat "$FD/launch" 2>/dev/null), mark $(cat "$FD/session")"
 up "$bp" || fail "CONVEYOR_WAITER_START=1 waiter.sh (input $in) started no waiter once foreman.sh start ended: $(cat "$FD/waiter.log" 2>/dev/null)"
 ! ps -o args= -p "$bp" | grep -q 'waiter\.sh --held' && [ "$(logged 'takes over')" = 0 ] || fail "the launch claim (foreman.sh start, input $in) replaced the waiter $bp of waiter.sh: $(cat "$FD/waiter.log")"
 flock -n "$FD/claim.lock" true || fail "the waiter of CONVEYOR_WAITER_START=1 waiter.sh (input $in) holds claim.lock"
