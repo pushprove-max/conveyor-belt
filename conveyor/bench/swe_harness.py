@@ -16,7 +16,14 @@ Usage:
       fetches the task's image; exit 3 when it cannot be fetched.
   swe_harness.py grade <dataset> <revision> <id> <patch file> <folder> <run id>
       grades the patch with the official harness (its run_evaluation, its Docker images, FAIL_TO_PASS and
-      PASS_TO_PASS) in <folder>, given the task's own dataset row read again; prints {"resolved": true|false};
+      PASS_TO_PASS) in <folder>, given the task's own dataset row read again; prints {resolved, class, tests, ref,
+      measures}: class is resolved, broke (every fail-to-pass test passes and a pass-to-pass test fails), partial
+      (some fail-to-pass tests pass) or nofix (none); tests, each of failToPass and passToPass as {passed, failed,
+      failedTests}, from the harness's report of the instance; ref, the size of the task's reference fix
+      ({code, test}, each {files, added, removed}), and measures, those of the patch ({files, codeAdded, codeRemoved,
+      testAdded, size: its code lines changed over the reference fix's, strays: it changes a code file the reference
+      fix does not}); no text and no path of the reference fix or of a hidden test is in it, only the names of the
+      failed tests;
       its container is named sweb.eval.<id>.conveyor-<run id>-<id>, which the run's end (swe.sh's swe_end) removes;
       exit 3 when the harness could not run the task (the task is not in the dataset, its image could not be
       fetched or built, or the run erred).
@@ -27,6 +34,7 @@ end or are stopped (SIGTERM or SIGHUP), so no copy of a row is on disk while a c
 import glob
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -103,6 +111,71 @@ def image(name):
     return 0 if subprocess.run(['docker', 'pull', '-q', name], stdout=subprocess.DEVNULL).returncode == 0 else 3
 
 
+# A file the task's test command (pytest, or Django's runner) takes as a test: under a tests or test folder, or named
+# test_*.py, *_test.py or conftest.py.
+def is_test(path):
+    name = path.rsplit('/', 1)[-1]
+    return bool(re.search(r'(^|/)tests?/', path)) or name.startswith('test_') or name.endswith('_test.py') or name == 'conftest.py'
+
+
+# {path: [lines added, lines removed]} of a git diff: the lines of each hunk are counted by the hunk's own header, so
+# a removed line that starts with "--" is not read as a file header.
+def diff_files(text):
+    files, cur, old, new = {}, None, 0, 0
+    for line in text.split('\n'):
+        if old > 0 or new > 0:
+            if line.startswith('+'):
+                files[cur][0] += 1
+                new -= 1
+            elif line.startswith('-'):
+                files[cur][1] += 1
+                old -= 1
+            elif not line.startswith('\\'):
+                old -= 1
+                new -= 1
+            continue
+        m = re.match(r'diff --git a/.* b/(.*)$', line)
+        if m:
+            cur = m.group(1)
+            files.setdefault(cur, [0, 0])
+            continue
+        m = re.match(r'@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@', line)
+        if m and cur is not None:
+            old = 1 if m.group(1) is None else int(m.group(1))
+            new = 1 if m.group(2) is None else int(m.group(2))
+    return files
+
+
+# The size of a diff's files, split into code and test files.
+def diff_size(files):
+    r = {k: {'files': 0, 'added': 0, 'removed': 0} for k in ('code', 'test')}
+    for path, (a, d) in files.items():
+        s = r['test' if is_test(path) else 'code']
+        s['files'] += 1
+        s['added'] += a
+        s['removed'] += d
+    return r
+
+
+# The patch's measures against the reference fix's, from the two diffs: only counts and the one flag, no path.
+def measures(patch, fix):
+    mine, ref = diff_files(patch), diff_files(fix)
+    size, rsize = diff_size(mine), diff_size(ref)
+    rcode = rsize['code']['added'] + rsize['code']['removed']
+    return rsize, {'files': len(mine), 'codeAdded': size['code']['added'], 'codeRemoved': size['code']['removed'],
+                   'testAdded': size['test']['added'],
+                   'size': round((size['code']['added'] + size['code']['removed']) / rcode, 2) if rcode else None,
+                   'strays': any(not is_test(p) and p not in ref for p in mine)}
+
+
+# One kind of hidden test of the row (the names it lists) against the harness's report of the instance.
+def tests_of(row, report, kind):
+    names = json.loads(row[kind]) if isinstance(row[kind], str) else list(row[kind])
+    ok = set(report.get('tests_status', {}).get(kind, {}).get('success', []))
+    failed = [n for n in names if n not in ok]
+    return {'passed': len(names) - len(failed), 'failed': len(failed), 'failedTests': failed}
+
+
 def grade(dataset, revision, instance, patch, folder, run, cache):
     from datasets import load_dataset
     rows = [dict(r) for r in load_dataset(dataset, split='test', revision=revision) if r['instance_id'] == instance]
@@ -128,7 +201,18 @@ def grade(dataset, revision, instance, patch, folder, run, cache):
         r = json.load(f)
     if instance in r.get('error_ids', []):
         return 3
-    print(json.dumps({'resolved': instance in r.get('resolved_ids', [])}))
+    # The harness's report of the instance: the tests that passed, in the folder it ran in.
+    found = glob.glob(os.path.join(folder, 'logs', 'run_evaluation', run_id, '*', instance, 'report.json'))
+    if not found:
+        return 3
+    with open(found[0]) as f:
+        report = json.load(f).get(instance, {})
+    resolved = instance in r.get('resolved_ids', [])
+    f2p, p2p = tests_of(rows[0], report, 'FAIL_TO_PASS'), tests_of(rows[0], report, 'PASS_TO_PASS')
+    with open(patch) as f:
+        ref, mine = measures(f.read(), rows[0]['patch'])
+    cls = ('resolved' if resolved else 'broke' if f2p['failed'] == 0 else 'partial' if f2p['passed'] > 0 else 'nofix')
+    print(json.dumps({'resolved': resolved, 'class': cls, 'tests': {'failToPass': f2p, 'passToPass': p2p}, 'ref': ref, 'measures': mine}))
     return 0
 
 

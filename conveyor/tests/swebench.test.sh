@@ -19,7 +19,7 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # changed): each one's `run` notes "<version> <issue title>" in $SWE_FX/log, waits while $SWE_FX/hold is there, exits 1 while
 # $SWE_FX/efail is there, blocks its card with no change while $SWE_FX/eblock is there, and writes the card's records; A lands "fixed" in x.py for every task, B blocks the task proj__a-1 after two NO-GO
 # reviews, each read by the judge. <folder>/py is the stub harness: the two tasks, an image fetch that waits while
-# $SWE_FX/ihold is there and fails when $SWE_FX/broken names it, and a grade that resolves a patch holding "fixed" unless $SWE_FX/wrong names the task.
+# $SWE_FX/ihold is there and fails when $SWE_FX/broken names it, and a grade that resolves a patch holding "fixed" unless $SWE_FX/wrong names the task (or prints $SWE_FX/gradeout, when it is there).
 swemake() { # <folder>
   local F=$1 e=$1/eng
   mkdir -p "$F" && git init -q -b main "$F/task" && echo bug > "$F/task/x.py" && git -C "$F/task" add -A && git -C "$F/task" commit -qm base \
@@ -87,7 +87,8 @@ case $1 in
   # and removed when the grade ends (left when it is killed).
   grade) echo "$2 $3 $4" >> "$SWE_FX/graded"; mkdir -p "$SWE_FX/boxes/sweb.eval.$4.conveyor-$7-$4"
     while [ -e "$SWE_FX/ghold" ]; do sleep 0.1; done; rm -rf "$SWE_FX/boxes/sweb.eval.$4.conveyor-$7-$4"
-    if grep -q fixed "$5" && [ "$(cat "$SWE_FX/wrong" 2>/dev/null)" != "$4" ]; then echo '{"resolved":true}'; else echo '{"resolved":false}'; fi ;;
+    if [ -s "$SWE_FX/gradeout" ]; then cat "$SWE_FX/gradeout"
+    elif grep -q fixed "$5" && [ "$(cat "$SWE_FX/wrong" 2>/dev/null)" != "$4" ]; then echo '{"resolved":true}'; else echo '{"resolved":false}'; fi ;;
 esac
 EOF
   chmod +x "$F/py"
@@ -474,7 +475,7 @@ t_sweharness() {
   mkdir -p "$C/tmp" "$C/home" "$M/datasets" "$M/swebench/harness" || fail "the case's folders were not made"
   printf '%s\n' 'import json, os' 'def load_dataset(name, split, revision):' \
     '    rows = [{"instance_id": "o__p-%d" % i, "repo": "o/p", "version": "1", "base_commit": "c%d" % i, "problem_statement": "issue %d" % i,' \
-    '             "patch": "REFFIX-%d" % i, "test_patch": "HIDDENTEST-%d" % i} for i in (1, 2)]' \
+    '             "patch": "REFFIX-%d" % i, "test_patch": "HIDDENTEST-%d" % i, "FAIL_TO_PASS": "[\"t1\"]", "PASS_TO_PASS": "[]"} for i in (1, 2)]' \
     '    d = os.path.join(os.environ.get("HF_DATASETS_CACHE") or os.path.join(os.environ["HF_HOME"], "datasets"), name); os.makedirs(d, exist_ok=True)' \
     '    open(os.path.join(d, revision + ".json"), "w").write(json.dumps(rows))' \
     '    return rows' > "$M/datasets/__init__.py"
@@ -485,7 +486,9 @@ t_sweharness() {
     '    while os.path.exists(os.environ["SWE_HOLD"]): time.sleep(0.1)' 'rows = [json.loads(l) for l in open(a["--dataset_name"])]' \
     'pred = json.loads(open(a["--predictions_path"]).read())' \
     'ok = a["--dataset_name"].endswith(".jsonl") and [r["instance_id"] for r in rows] == [a["--instance_ids"]] and "fixed" in pred["model_patch"]' \
-    'open("conveyor.%s.json" % a["--run_id"], "w").write(json.dumps({"resolved_ids": [a["--instance_ids"]] if ok else []}))' > "$M/swebench/harness/run_evaluation.py"
+    'open("conveyor.%s.json" % a["--run_id"], "w").write(json.dumps({"resolved_ids": [a["--instance_ids"]] if ok else []}))' \
+    'd = "logs/run_evaluation/%s/conveyor/%s" % (a["--run_id"], a["--instance_ids"]); os.makedirs(d)' \
+    'open(d + "/report.json", "w").write(json.dumps({a["--instance_ids"]: {"tests_status": {"FAIL_TO_PASS": {"success": ["t1"] if ok else []}}}}))' > "$M/swebench/harness/run_evaluation.py"
   h() { env PYTHONPATH="$M" TMPDIR="$C/tmp" HOME="$C/home" HF_HOME="$C/home/hf" HF_DATASETS_CACHE="$C/home/hf/ds" python3 "$SRC/bench/swe_harness.py" "$@"; }
   h tasks o/ds rev1 "$C/list" || fail "tasks failed"
   [ "$(jq -r .id "$C/list" | tr '\n' ' ')" = 'o__p-1 o__p-2 ' ] || fail "the task list is not the dataset's tasks: $(cat "$C/list")"
@@ -498,7 +501,7 @@ t_sweharness() {
     || fail "the task does not name the commands that start its environment: $(head -n 1 "$C/list")"
   ! grep -rlE 'REFFIX|HIDDENTEST' "$C" || fail "a reference fix or hidden test stayed on disk after the task list was made"
   echo fixed > "$C/patch"
-  out=$(h grade o/ds rev1 o__p-2 "$C/patch" "$C/grade" r1) && [ "$out" = '{"resolved": true}' ] \
+  out=$(h grade o/ds rev1 o__p-2 "$C/patch" "$C/grade" r1) && [ "$(jq -c .resolved <<<"$out")" = true ] \
     || fail "the grade did not give the official harness the task's own row as a .jsonl file: $out"
   # Bug (#645): the harness run, and so its container (sweb.eval.<task>.<run id>), did not name the benchmark run, so
   # a Stop of that run could not find the grading container to remove it.

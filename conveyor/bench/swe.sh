@@ -40,13 +40,16 @@
 # arm's command runs on the issue, and its change is the patch. An arm that does not fire is a failed task of it.
 # What is kept, under the state folder's bench/swe: tasks.<revision>.<seed's id>.jsonl (the ordered list, swe_list),
 # results/<key>/<task>.json (key: swe_reskey(), from the trial's effective inputs, swe_inputs; resolved, fired,
-# sessions, tokens, minutes, its cost at list prices (swe_cost), a card's records, the inputs) and .patch, preflight/<arm>/<key>.json (key: swe_armkey(); each check's record, from its start, swe_ckopen) and its lock,
+# sessions, tokens, minutes, its cost at list prices (swe_cost), a card's records, the inputs; and from the grade: class,
+# tests, ref and measures, as swe_harness.py's grade says, with only class kept for a patch that was not graded: none
+# when the result is older than them, which each reader shows as null, not kept) and .patch, preflight/<arm>/<key>.json (key: swe_armkey(); each check's record, from its start, swe_ckopen) and its lock,
 # arms/<id>.json (each saved arm revision, swe_armsave), frozen/<arm> while a run goes (its copy of what a conveyor
 # arm reads of the project, swe_freeze),
 # a line a run in runs.jsonl (changed under runs.lock, swe_runlog), the run in progress in live.json, tails/<run>.jsonl (each run's event tail, swe_event),
 # versions.json (the last versions read and the key they were read at, swe_versionsnow), and board.json, what the snapshot carries for the Board's Benchmarks tab (the tab reads the runs and results with
 # history and show).
-# The dataset's rows (each task's reference fix and hidden tests) are never kept: the card's sessions have a shell as
+# The dataset's rows (each task's reference fix and hidden tests) are never kept (a result keeps the reference fix's size and the
+# names of the hidden tests the patch failed, never their text): the card's sessions have a shell as
 # this account, so the harness reads them into a cache of its own that it removes, for the task list and each grade.
 # A result of the same key and task whose recorded inputs are the trial's now is reused, never run again: another
 # model, rule, engine, task set or limit is another key. A result kept before its inputs were recorded is read, never reused. A task whose image cannot be fetched or built, whose
@@ -239,7 +242,7 @@ swe_board() {
 # A run's line as the Board reads it ($R: each result by "<key>/<task>"): its line without its tasks and pid, n the
 # tasks of each arm, and cols, each arm with the tasks it did (done), resolved and not run, and the sessions, tokens
 # and minutes of its results of the tasks it ran (null when the line names no results key: a line written before
-# cols), and cost, the list price of the work it did in this run (costsum of each task's cost, the interrupted
+# cols), classes, the count of each class of those results (null when one has none: kept before classes), and cost, the list price of the work it did in this run (costsum of each task's cost, the interrupted
 # task's and the active task's so far, the active one's none before its trial's command starts; a reused task adds
 # none, and a task or interrupted line kept with no cost, as one written before costs were, is unknown); the
 # run's cost is that of its cols (null when one is). wall is the wall minutes of the arm's work in this run: each
@@ -258,7 +261,7 @@ SWE_RUNSUM='def costsum: [.[] | objects | .usd | numbers] as $u | all(.[]; type 
     | [$l.tasks[]? | select(.arm == $c.arm)] as $t | [$t[] | select(.result | tostring | startswith("not run") | not)] as $ran
     | [$ran[] | $R["\($c.key)/\(.id)"] // empty] as $r | def sum(f): if $c.key == null then null else $r | map(f // 0) | add // 0 end;
     $c + {done: ($t | length), resolved: ($t | map(select(.result == "resolved")) | length), notRun: (($t | length) - ($ran | length)),
-      sessions: sum(.sessions), tokens: sum(.tokens), minutes: (sum(.minutes) | if . == null then null else . * 10 | round / 10 end),
+      sessions: sum(.sessions), tokens: sum(.tokens), classes: (if $c.key == null or any($r[]; .class == null) then null else $r | map(.class) | group_by(.) | map({key: .[0], value: length}) | from_entries end), minutes: (sum(.minutes) | if . == null then null else . * 10 | round / 10 end),
       cost: (if $c.key == null then null else [($t[] | select(.reused != true) | .cost), ($l.interrupted | objects | select(.arm == $c.arm) | .cost), ($l.active | objects | select(.arm == $c.arm) | .cost | objects)] | costsum end),
       wall: ([($t[] | select(.reused != true) | .minutes), ($l.interrupted | objects | select(.arm == $c.arm) | .minutes) | numbers] | add // 0 | . * 10 | round / 10)}]}
   | .cost = (if any(.cols[]; .cost == null) then null else [.cols[].cost] | costsum end);'
@@ -331,7 +334,8 @@ swe_history() {
 # order), what the run said of it (result, reused), its state (and phase, while active) and, where it ran that arm on
 # the task, its kept result: resolved, fired, why, ended (why its trial ended before its command did; null when it
 # did not), sessions, tokens, minutes, cost (swe_cost; null in a result kept before it), its steps (a conveyor
-# arm's card records) and its patch (each file with its lines added and removed; null when none is kept); and tail,
+# arm's card records), its patch (each file with its lines added and removed; null when none is kept) and its grade's
+# class, tests, ref and measures (null in a result kept before them); and tail,
 # the run's event tail (swe_event).
 swe_show() { # <run id>
   local l k t ks=() ts=() f o
@@ -368,7 +372,7 @@ swe_show() { # <run id>
            state: (if $t != null then "finished" elif at($run.active; $c; $id) then "active" elif $run.state == "running" then "waiting"
              elif at($l.interrupted; $c; $id) then "interrupted" else "not reached" end)}
           + (if $t == null and at($run.active; $c; $id) then {phase: $run.active.phase} else {} end)
-          + ((if $t == null or ($t.result | tostring | startswith("not run")) then {} else $R["\($c.key)/\($id)"] // {} end) | {resolved, fired, why, ended, sessions, tokens, minutes, cost, steps, patch})
+          + ((if $t == null or ($t.result | tostring | startswith("not run")) then {} else $R["\($c.key)/\($id)"] // {} end) | {resolved, fired, why, ended, sessions, tokens, minutes, cost, steps, patch, class, tests, ref, measures})
           + {cost: (if $t != null then $t.cost // (if $t.result | tostring | startswith("not run") then null else $R["\($c.key)/\($id)"].cost end)
               elif at($l.interrupted; $c; $id) then $l.interrupted.cost else null end)}]}],
       tail: [$tail[] | objects | {at, arm, task, event} | select(all(.[]; . == null or type == "string"))]}' <<<"$l"
@@ -625,14 +629,14 @@ swe_task() { # <task json>
   # The trial's cost from all its records replaces what was read of them while it ran: the run counts it even when
   # the task is then not run.
   swe_sofar "$(jq -c .cost <<<"$b")"
-  if ! jq -e .fired <<<"$b" > /dev/null || [ ! -s "$sb.h/patch" ]; then g='{"resolved":false}'
+  if ! jq -e .fired <<<"$b" > /dev/null || [ ! -s "$sb.h/patch" ]; then g='{"resolved":false,"class":"nopatch"}'
   else swe_phase Grading; g=$(swe_h grade "$(swe_set .dataset)" "$(swe_set .revision)" "$id" "$sb.h/patch" "$sb.h/grade" "$SWE_RUN" 2>/dev/null); rc=$?
     [ "$rc" = 0 ] && jq -e '.resolved | type == "boolean"' <<<"$g" > /dev/null 2>&1 || {
       if [ "$rc" = 3 ]; then echo "not run: the harness could not fetch or build its image"; else echo "not run: the harness could not grade it (exit $rc)"; fi; return; }
   fi
   mkdir -p "$out" && cp "$sb.h/patch" "$out/$id.patch" && { [ ! -e "$sb.h/loop.log" ] || cp "$sb.h/loop.log" "$out/$id.log"; } && swe_put "$out/$id.json" "$(jq -c --arg t "$id" --arg a "$SWE_ARM" --arg k "$SWE_KEY" --arg e "${SWE_COMMIT:-}" --arg v "${SWE_VERSION:-}" \
     --arg m "${SWE_MODEL:-}" --arg l "$SWE_LABEL" --argjson g "$g" --arg at "$(swe_now)" --argjson i "$SWE_INPUTS" '{task: $t, arm: $a, label: $l, key: $k, engine: (if $e == "" then null else $e end), version: (if $v == "" then null else $v end),
-    model: (if $m == "" then null else $m end), resolved: $g.resolved, at: $at, inputs: $i} + .' <<<"$b")" || { echo "not run: its result could not be kept"; return; }
+    model: (if $m == "" then null else $m end), resolved: $g.resolved, at: $at, inputs: $i} + ($g | del(.resolved)) + .' <<<"$b")" || { echo "not run: its result could not be kept"; return; }
   chmod -R u+w "$sb" "$sb.h" 2>/dev/null; rm -rf "$sb" "$sb.h"
   if jq -e .resolved <<<"$g" > /dev/null; then echo resolved; elif jq -e .fired <<<"$b" > /dev/null; then echo unresolved; else echo "unresolved ($(jq -r .why <<<"$b"))"; fi
 }
@@ -862,7 +866,8 @@ swe_runsdo() { # archive | restore | delete <ids json>
 swe_results() { # [--json]
   local j; j=$(cat "$SWE_DIR"/results/*/*.json 2>/dev/null | jq -sc 'group_by(.key) | map({key: .[0].key, arm: .[0].arm, label: .[0].label, engine: .[0].engine, version: .[0].version, model: .[0].model, inputs: .[0].inputs,
     n: length, resolved: (map(select(.resolved)) | length), notFired: (map(select(.fired == false)) | length), sessions: (map(.sessions) | add), tokens: (map(.tokens) | add),
-    minutes: (map(.minutes) | add * 10 | round / 10), tasks: map({task, resolved, fired, sessions, tokens, minutes})}) | sort_by(.version // "")')
+    minutes: (map(.minutes) | add * 10 | round / 10), classes: (if all(.[]; .class != null) then (map(.class) | group_by(.) | map({key: .[0], value: length}) | from_entries) else null end),
+    tasks: map({task, resolved, fired, sessions, tokens, minutes, class, tests, ref, measures})}) | sort_by(.version // "")')
   [ "${1:-}" != --json ] || { printf '%s\n' "$j"; return; }
   [ "$j" != '[]' ] || { echo "No SWE-bench results yet."; return; }
   jq -r "$SWE_NAMES"'.[] | "\(resname): \(.resolved) of \(.n) resolved\(if .notFired > 0 then " (\(.notFired) did not fire)" else "" end), \(.sessions) sessions, \(.tokens) tokens, \(.minutes) minutes"' <<<"$j"

@@ -102,6 +102,11 @@ t_swearmquiet() {
     || fail "the trials that did not fire are not the arm's failures: $out"
   [ "$(cat "$B"/results/stub-quiet-*/*.json | jq -sc 'map([.fired, .resolved]) | unique')" = '[[false,false]]' ] && [ ! -e "$SWE_FX/graded" ] \
     || fail "a trial that did not fire was graded, or not kept as failed: $(cat "$B"/results/stub-quiet-*/*.json)"
+  # Bug: a trial that did not fire (it may still have left a patch, which is kept but not graded) was kept as resolved
+  # false only, so a task the arm's method never ran on looked like one it had failed; it is class nopatch with no
+  # tests, ref or measures.
+  [ "$(cat "$B"/results/stub-quiet-*/*.json | jq -sc 'map([.class, .tests, .ref, .measures])')" = '[["nopatch",null,null,null],["nopatch",null,null,null]]' ] \
+    || fail "a trial that did not fire is not class nopatch with no other measure: $(cat "$B"/results/stub-quiet-*/*.json)"
 }
 
 # Bug: after an arm's container exited, the host ran git in the sandbox the arm could write (its clean filter ran on

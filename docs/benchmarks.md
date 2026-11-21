@@ -374,6 +374,22 @@ names the runs and says how many results stay because a run that you do not dele
 The resolved count is the number of tasks whose final patch passes the task's hidden tests, as the official harness
 grades it.
 
+Each result that was graded also keeps what the official harness reported, and these measures:
+
+- `class`: `resolved`, or for an unresolved result, `broke` (every fail-to-pass test passes and a pass-to-pass test
+  fails), `partial` (some fail-to-pass tests pass, not all), `nofix` (none passes) or `nopatch` (the patch is empty,
+  the card blocked, or the arm did not fire). A `nopatch` result keeps no other measure.
+- `tests`: for the fail-to-pass tests (the fix) and the pass-to-pass tests (what must keep working), the passed and
+  failed counts and the names of the failed tests.
+- `ref`: the size of the task's reference fix, as files, lines added and lines removed, for its code files and its
+  test files. A test file is one under a `test` or `tests` folder, or named `test_*.py`, `*_test.py` or `conftest.py`.
+- `measures`: the patch's files changed, code lines added and removed, test lines added, `size` (its code lines added
+  plus removed, over the reference fix's) and `strays` (true when it changes a code file that the reference fix does
+  not change).
+
+`bench swe show`, `history` and `results --json` show them. A result recorded before they were kept shows them as
+`null`, which means not kept, not zero.
+
 A small run tells you little. Two runs of the same version can differ by chance, because the models do not give the
 same answer each time. With n tasks, a difference under about the square root of 2n tasks is within that noise: with 5
 tasks only a difference of 4 tasks shows, with 20 tasks 7, and with 50 tasks 10. With 1 task, only a total break
@@ -390,7 +406,8 @@ shows. Use `swe 1` and `swe 5` to see that a version works at all, and `swe 50` 
 - The sessions of an arm run in its container and see only the task's sandbox (a Conveyor arm also sees the folder of
   the installed Conveyor version, read-only). In a Conveyor arm, Codex sessions run without Codex's own sandbox, at
   every Conveyor version. The container is their sandbox (see [Containers and logins](#containers-and-logins)). Conveyor also reads the reference
-  fixes and hidden tests only to make the task list and to grade a patch, and then removes them.
+  fixes and hidden tests only to make the task list and to grade a patch, and then removes them. A result keeps
+  the size of the reference fix and the names of the failed hidden tests, never their text.
 - The task images are for x86-64. Each arm installs its tools in each task's container, with the network, so each
   task takes more minutes than the build alone, and an install that the network stops makes the arm fail that task.
 - An arm installs the latest version of its plugin or method. Two runs some weeks apart can use different versions.
