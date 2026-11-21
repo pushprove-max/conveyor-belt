@@ -355,7 +355,9 @@ t_heldpush() {
   servesetup; loop control cap 1 >/dev/null; tune '.tunables.poll = 1'; add 7; add 8; add 9; mkfifo "$STUB/held" "$STUB/landed" "$STUB/turn"; exec {l}<> "$STUB/landed"
   printf '#!/usr/bin/env bash\nread -r _ s _; echo "$s" >> "$STUB/pushes"; f=turn; [ "$(wc -l < "$STUB/pushes")" != 1 ] || f=held; read -r -t 120 _ <> "$STUB/$f"\n' > "$R/.git/hooks/pre-push"
   printf '#!/usr/bin/env bash\n[ "$1" = committed ] && grep " refs/heads/main$" >> "$STUB/mains" && [ "$(wc -l < "$STUB/mains")" = 3 ] && echo > "$STUB/landed"; :\n' > "$R/.git/hooks/reference-transaction"
-  chmod +x "$R/.git/hooks/reference-transaction"; sleep() { [ "${FUNCNAME[1]:-}" != run ] || [ "$1" = 0.1 ] || echo 1<> "$STUB/turn"; command sleep "$@"; }; export -f sleep # sleep: the engine's own, passed on as called
+  # `3<> turn >&3`, not `1<> turn`: bash before 5.3 prints `1<>` as `<>` (fd 0) in `export -f` and `declare -f`, so the
+  # turn went to the run's output and push 2 waited its 120 s.
+  chmod +x "$R/.git/hooks/reference-transaction"; sleep() { [ "${FUNCNAME[1]:-}" != run ] || [ "$1" = 0.1 ] || echo 3<> "$STUB/turn" >&3; command sleep "$@"; }; export -f sleep # sleep: the engine's own, passed on as called
   at=$(originat); loop run > "$STUB/run.out" 2>&1 & pid=$!; read -r -t 200 -u "$l" _ || fail "three cards did not land while the first push was held: $(st '"\(.issue) \(.step)"' | tr '\n' ,)"
   [ "$(cat "$STUB/pushes")" = "$(st 'select(.step == "landed") | .sha' | head -n 1)" ] && [ "$(originat)" = "$at" ] || fail "a push was not held for the first landing alone: $(cat "$STUB/pushes")"; echo > "$STUB/held"; wait "$pid"; rc=$?
   [ "$rc" = 0 ] && [ "$(sed -n 2p "$STUB/pushes")" = "$(mainat)" ] && [ "$(originat)" = "$(mainat)" ] && [ "$(wc -l < "$STUB/pushes")" = 2 ] || fail "the run ($rc) did not push the landings made during the held push as one push of main's head: $(cat "$STUB/pushes" "$STUB/run.out")"

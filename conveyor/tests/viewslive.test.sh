@@ -128,16 +128,20 @@ t_live() { livestart
 # alone; these run one card through the loop, as only a run joins them. A stub step says "<step> <worktree>" on the
 # pipe $STUB/held.pipe and waits there until the case writes $STUB/go.pipe: hold <step>. (Not $STUB/go: $STUB is on
 # PATH, and a `go` command looked for there would be the pipe.)
+# A function here writes a pipe as `3<>pipe >&3`, never `1<>pipe`: bash before 5.3 prints `1<>` as `<>` (fd 0) in
+# `declare -f`, which hands each case its functions (run_case, tests/lib.sh), so letgo's go went to the case's output,
+# no hold heard it, and testgated ran to its time limit.
 gatestart() { mkfifo "$STUB/held.pipe" "$STUB/go.pipe" || fail "the pipes"; exec 4<>"$STUB/held.pipe"
   echo 'hold() { exec 3<>"$STUB/go.pipe"; echo "$1 $PWD" 1<>"$STUB/held.pipe"; read -r -t 100 -u 3 _; }' > "$STUB/hold.sh"
   # A run that ends says so on the pipe too, so a card that never reaches a held step fails the case at once.
-  ( loop run 4<&- > "$T/$CASE/loop.out" 2>&1; x=$?; echo "ended $x" 1<>"$STUB/held.pipe"; exit $x ) & run=$!; }
+  # loop: only a run joins a card's build, review and test run to their process, output file and watch (above).
+  ( loop run 4<&- > "$T/$CASE/loop.out" 2>&1; x=$?; echo "ended $x" 3<>"$STUB/held.pipe" >&3; exit $x ) & run=$!; }
 held() { # <step> <jq test of its live record>: the step is held, and watch() has read what its stub wrote
   local s wt; read -r -t 100 -u 4 s wt && [ "$s" = "$1" ] || fail "the $1 never reached its stub: $s $(cat "$T/$CASE/loop.out") $(tail -n 2 "$S/cards.jsonl")"
   # A wait on the real loop: watch() reads the output on its own timer and says nothing when it has.
   wait_until "jq -e '$2' '$wt.live'" "cat '$wt.live'" || fail "the live record of the $1 never held $2"
 }
-letgo() { echo go 1<>"$STUB/go.pipe"; }
+letgo() { echo go 3<>"$STUB/go.pipe" >&3; }
 t_livegated() { livestart
   export CODEX_HOME=$STUB/codex-home; local f=$STUB/codex-home/sessions/2026/01/01/rollout-2026-01-01T00-00-00-0aa1-b2.jsonl
   printf '%s\n' 'echo two >> a.txt; . "$STUB/hold.sh"' \
