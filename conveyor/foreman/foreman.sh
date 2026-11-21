@@ -389,6 +389,8 @@ off() {
 # state.md is swapped for one line that tells the Foreman to Read the file.
 context() {
   local head mid st
+  launcher
+  FQ=$(printf %q "$LAUNCHER")
   head=$(context_head) mid=$(context_mid) st=$(context_state)
   if [ "$(printf '%s\n%s\n%s\n' "$head" "$mid" "$st" | wc -c)" -gt "$CTX_LIMIT" ]; then st=$(context_state_warn; context_read "$FD/state.md"); fi
   printf '%s\n' "$head"
@@ -415,10 +417,10 @@ context_head() {
   cat <<EOF
 # Foreman mode: you are $NAME, the Foreman of this project. You file issues as cards, watch Conveyor, clear blocked cards and take every decision to the owner; you never answer for the owner, and you build no code yourself: the cards do.
 # You are the Foreman of $(mine 2>/dev/null | cut -f1 | paste -sd' ' - | sed 's/ /, /g; s/^$/this project/') only: every other project has its own Foreman. Never read or change another project's Foreman folder, saved state or memory.
-# Filing: file issues only in your own projects; an issue you file starts held (the filing hooks hold it in Conveyor, in its record); release it (conveyor.sh control release <issue>, in that record) only once the owner has said yes to it. File an issue about a test file with bash $FHERE/foreman.sh ask <project> testissue <test file> <title> <body>: it runs where the record is, as the Foreman, so the issue starts held there too.
+# Filing: file issues only in your own projects; an issue you file starts held (the filing hooks hold it in Conveyor, in its record); release it (conveyor.sh control release <issue>, in that record) only once the owner has said yes to it. File an issue about a test file with $FQ ask <project> testissue <test file> <title> <body>: it runs where the record is, as the Foreman, so the issue starts held there too.
 # Questions to the owner go only by the picker (AskUserQuestion), never as a question in your reply.
 # The pack not committed (git status --porcelain -- .conveyor/project.json prints a line in a project's main checkout): there, run conveyor.sh setup pack-commit, and when it prints an ask: line, ask the owner by the picker "Commit the Conveyor pack (.conveyor/project.json) on <default branch> now?" (yes / no), with the change it printed; on yes run conveyor.sh setup pack-commit yes, on no conveyor.sh setup pack-commit no, and say what it printed. Never list a git command for the owner to run.
-# A release's suite: before you run conveyor.sh release-run prep <version> or release-run <version>, ask the owner by the picker "Run the test files one by one or in parallel?" with two options, "One by one" (slower, the least load) and "In parallel (<n> at once)" (faster, more load on the build machine, the belt slower meanwhile), and pass the answer last in the command: --serial for one by one, --parallel for in parallel. <n> is the number bash $FHERE/foreman.sh ask <project> release-run atonce prints for the release's project: the most test files its parallel suite runs at once, where it runs; when it prints no number, the option is "In parallel".
+# A release's suite: before you run conveyor.sh release-run prep <version> or release-run <version>, ask the owner by the picker "Run the test files one by one or in parallel?" with two options, "One by one" (slower, the least load) and "In parallel (<n> at once)" (faster, more load on the build machine, the belt slower meanwhile), and pass the answer last in the command: --serial for one by one, --parallel for in parallel. <n> is the number $FQ ask <project> release-run atonce prints for the release's project: the most test files its parallel suite runs at once, where it runs; when it prints no number, the option is "In parallel".
 # A wake (a watcher's message) gets a reply that says only what needs the owner; when nothing does, reply with the one word Idle.
 # A wake that a card has waited (or is still waiting) for main to change, or on another card: do not only report it. Find why it waits: read the waited-on card's log (<card>.out, .err and .test beside its worktree in the cards folder), the main-red record (mainred.json in the folder conveyor.sh state-dir prints) and the test log (<card>.testlog). Then fix the cause: a hand fix when the belt is blocked and the owner's rules allow it, otherwise file the issue.
 $plug
@@ -483,7 +485,7 @@ context_mid() {
   # this machine, so they reach the record on its host, not the host's engine path here.
   while IFS=$'\t' read -r repo main; do
     [ -n "$repo" ] || continue
-    if err=$(ASK_LIMIT=10 ask "$repo" "$main" auto standing "CONVEYOR_MAIN=$(printf %q "$CONVEYOR_MAIN") bash $(printf %q "$FHERE/foreman.sh") ask $repo" 2>/dev/null); then [ -z "$err" ] || { echo; echo "# $repo"; printf '%s\n' "$err"; }
+    if err=$(ASK_LIMIT=10 ask "$repo" "$main" auto standing "CONVEYOR_MAIN=$(printf %q "$CONVEYOR_MAIN") $FQ ask $repo" 2>/dev/null); then [ -z "$err" ] || { echo; echo "# $repo"; printf '%s\n' "$err"; }
     else echo "# WARNING: the standing kinds of routine yes of $repo could not be read (conveyor.sh auto standing failed), so take none without asking."; fi
   done < <(mine 2>/dev/null)
   # The project runs an old engine here, and why (`conveyor.sh take stale`, from this install: no remote is read).

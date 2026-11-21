@@ -106,9 +106,11 @@ tohosts() {
 }
 # The rules' lines for those records: where the engine's own decisions are logged. Each starts with a newline.
 hostsrules() {
-  local repo
+  local repo l=''
   while IFS= read -r repo; do
-    printf '\n%s' "- The engine on the host of $repo decides that record's open decisions too, by these rules, while this session is not running. When you start, run \`CONVEYOR_MAIN=$(printf %q "$MAIN") bash $(printf %q "$HERE/foreman/foreman.sh") ask $repo auto status\`: it names the log there, and tell the owner what it decided."
+    # The command's file is made by the Foreman's start; a session that began before this engine has not run that start, so make it here.
+    [ -n "$l" ] || l=$(CONVEYOR_MAIN=$MAIN bash -c '. "$1" > /dev/null && launcher && printf %s "$LAUNCHER"' _ "$HERE/foreman/lib.sh") || die "the Foreman's foreman.sh command could not be made"
+    printf '\n%s' "- The engine on the host of $repo decides that record's open decisions too, by these rules, while this session is not running. When you start, run \`CONVEYOR_MAIN=$(printf %q "$MAIN") $(printf %q "$l") ask $repo auto status\`: it names the log there, and tell the owner what it decided."
   done < <(remote)
 }
 

@@ -135,6 +135,10 @@ command holds the issue in the project's record and says so. It does this for a 
 project's New issues start in is Held. The Foreman runs it with `foreman.sh ask <project> testissue`, so the issue is
 held also when the project is on a host, or is another project of the Foreman's group.
 
+The Foreman's start names `foreman.sh` by one command, `conveyor/foreman.sh` in the data folder (`~/.local/share`
+unless `XDG_DATA_HOME` says otherwise). Its path does not change when the engine moves to a new version, and it runs
+`foreman.sh` of the engine the project runs, the one its hooks run. The start makes it when it is not there.
+
 A card that moves from one step to the next, as from build to review, gives no wake.
 
 The Foreman's reply to a wake says only what needs you. If nothing needs you, the reply is the one word Idle. A

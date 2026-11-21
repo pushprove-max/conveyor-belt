@@ -14,6 +14,39 @@ FHERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 . "$FHERE/../lib/portable.sh" && require_bash 5.1 && p_tools || exit 1
 ENGINE=$FHERE/../conveyor.sh
 HOSTF=${XDG_CONFIG_HOME:-$HOME/.config}/conveyor/host.json
+# LAUNCHER: the one command the start text gives for foreman.sh. Its path is the same in every version of the engine
+# (it is not in a version folder, which a prune removes), and it runs foreman.sh of the project's current engine, found as
+# shim.sh finds it: the pack's pin, or the commit of the project's engine record (a following pack), read at each run.
+LAUNCHER=${XDG_DATA_HOME:-$HOME/.local/share}/conveyor/foreman.sh
+# launcher: makes LAUNCHER when it is missing or differs from this engine's text, as the start runs it. The file is made
+# beside its place and moved in, so a run of it never reads half of it. A pack with no plugin key (the plugin's own
+# checkout) runs the checkout's own engine, as ask does.
+launcher() {
+  local t
+  t=$(mktemp "$LAUNCHER.XXXXXX" 2>/dev/null) || { mkdir -p "${LAUNCHER%/*}" && t=$(mktemp "$LAUNCHER.XXXXXX"); } \
+    || { echo "foreman: $LAUNCHER cannot be made: the start's foreman.sh command will not run" >&2; return 1; }
+  cat > "$t" <<'EOF'
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Conveyor's Foreman command (written by the Foreman's start): runs foreman.sh of the engine this project runs.
+set -uo pipefail
+main=${CONVEYOR_MAIN:-}
+[ -n "$main" ] || { main=$(git -C "${CLAUDE_PROJECT_DIR:-.}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) && main=${main%/.git}; } || main=
+pack=$main/.conveyor/project.json
+[ -n "$main" ] && [ -f "$pack" ] || { echo "foreman.sh: run it in a Conveyor project's checkout, or set CONVEYOR_MAIN" >&2; exit 1; }
+if jq -e '.plugin == null' "$pack" > /dev/null 2>&1; then e=$main/conveyor/foreman/foreman.sh
+else
+  if jq -e .plugin.follow "$pack" > /dev/null 2>&1; then c=$(jq -er '.commit | select(type == "string" and test("^[0-9a-f]{40}$"))' "$main/.git/conveyor-engine.json" 2>/dev/null)
+  else c=$(jq -er '.plugin.commit | select(type == "string" and test("^[0-9a-f]{40}$"))' "$pack" 2>/dev/null); fi
+  [ -n "${c:-}" ] || { echo "foreman.sh: $main has no Conveyor engine commit; run /conveyor-belt:setup" >&2; exit 1; }
+  e=${XDG_DATA_HOME:-$HOME/.local/share}/conveyor/versions/$c/conveyor/foreman/foreman.sh
+fi
+[ -f "$e" ] || { echo "foreman.sh: the project's engine $e is not installed; run /conveyor-belt:setup" >&2; exit 1; }
+CONVEYOR_MAIN=$main exec bash "$e" "$@"
+EOF
+  if cmp -s "$t" "$LAUNCHER"; then rm -f "$t"; else chmod 755 "$t" && mv "$t" "$LAUNCHER" \
+    || { rm -f "$t"; echo "foreman: $LAUNCHER cannot be made: the start's foreman.sh command will not run" >&2; return 1; }; fi
+}
 # The main checkout this runs for: the launcher's CONVEYOR_MAIN, else the checkout the session runs in, exported so
 # the Foreman's folder and every watcher are this checkout's in a session started any way.
 export CONVEYOR_MAIN=${CONVEYOR_MAIN:-$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null | sed 's|/\.git$||')}

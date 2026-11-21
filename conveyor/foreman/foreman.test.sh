@@ -137,7 +137,7 @@ grep -qF '# A release'"'"'s suite: before you run conveyor.sh release-run prep <
 # number release-run atonce prints where the release's project runs (t_relatonce checks that command). The rules are
 # text the Foreman's model reads, so their text is the behaviour here.
 grep -qF '"In parallel (<n> at once)" (faster' <<<"$out" \
-  && grep -qF "<n> is the number bash $SRC/foreman.sh ask <project> release-run atonce prints for the release's project" <<<"$out" \
+  && grep -qF "<n> is the number $XDG_DATA_HOME/conveyor/foreman.sh ask <project> release-run atonce prints for the release's project" <<<"$out" \
   || fail "the Foreman's release question does not name, in its parallel option, the number release-run atonce prints for the release's project: $out"
 # Bug (#220): on a wake for a waiting card the Foreman only reported it, and cards waited for hours. Its rules tell it
 # to find the cause and fix it.

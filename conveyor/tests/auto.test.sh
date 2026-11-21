@@ -186,7 +186,7 @@ autohost() { # the Foreman's record "origin", its main on another host
   autoledger; export CALLS=$T/$CASE/calls SENT=$T/$CASE/sent
 }
 t_autohosts() {
-  local out; autohost
+  local out; autohost; export XDG_DATA_HOME=$T/$CASE/data
   # The seam's command: its variables are expanded by the shell that runs it (foreman/lib.sh ask).
   export CONVEYOR_FOREMAN_ASK='echo "$CONVEYOR_REPO $CONVEYOR_CMD" >> "$CALLS"; [ "$CONVEYOR_CMD" != "auto rulings" ] || cat >> "$SENT"; echo "auto ON: until off. Log: /srv/state/auto/a.md"'
   out=$(cd "$R" && loop auto on 2>&1) && grep -qxF 'origin, on its host: auto ON: until off. Log: /srv/state/auto/a.md' <<<"$out" \
@@ -195,6 +195,12 @@ t_autohosts() {
     || fail "auto on did not send the ruling log's picker answers to the host: $(cat "$SENT" 2>&1)"
   out=$(cd "$R" && loop auto rules) && grep -qF "ask origin auto status\`: it names the log there" <<<"$out" \
     || fail "the rules do not name the host's auto log: $out"
+  # Bug: the rules named foreman.sh by its path in the engine's version folder, which is gone once the engine moves on;
+  # and a session open before the engine took the change has not run the Foreman's start, so the command's file must be
+  # made by the rules themselves.
+  grep -qF "$XDG_DATA_HOME/conveyor/foreman.sh ask origin auto status" <<<"$out" && ! grep -qE 'versions/|foreman/foreman\.sh' <<<"$out" \
+    || fail "the rules name foreman.sh by a version-folder path, not the stable command: $out"
+  [ -x "$XDG_DATA_HOME/conveyor/foreman.sh" ] || fail "the rules name $XDG_DATA_HOME/conveyor/foreman.sh but it was not made: $out"
   out=$(cd "$R" && loop auto decide 2>&1) || fail "auto decide failed: $out"
   out=$(cd "$R" && loop auto off 2>&1) && [ "$(cat "$CALLS")" = $'origin auto rulings\norigin auto on\norigin auto rulings\norigin auto off' ] \
     || fail "auto on, decide and off did not send the rulings, then the mode, to the record's host: $out $(cat "$CALLS" 2>&1)"
