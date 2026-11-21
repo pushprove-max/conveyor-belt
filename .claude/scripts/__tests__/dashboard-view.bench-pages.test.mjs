@@ -5,7 +5,7 @@
 // runs of 1 task); Compare's four boxes and verdict as the pickers change; Plan a run's slider, cost and Start; Stop.
 // Shared setup: dashboard-view.helpers.mjs (BH).
 import assert from 'node:assert/strict';
-import { boot, settle, act, cases, BH, tabBtn, refresh, T0, iso } from './dashboard-view.helpers.mjs';
+import { boot, settle, act, cases, BH, T0, iso } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const { bp, page, heads, pages, TASKS } = BH;
@@ -34,7 +34,16 @@ test('Compare, Conveyor against Claude alone on 50 tasks: the verdict, the four 
   const set = BH.study();
   // Claude alone's result of TASKS[27] is one a run with --again kept apart (show's again): the diff reads only the kept one.
   set.shows[BH.STUDY].tasks[27].cells.find((c) => c.arm === 'solo').again = BH.STUDY;
-  const w = await opened(set, 'compare');
+  // The diff reads each side's kept result. For TASKS[26] it read Claude alone resolved, as a run with --again can make
+  // the kept result differ from the one the page shows: that reading explains another result, so it is not shown (E4).
+  // For TASKS[27] it read the outcomes shown, but of the kept trial, not the --again one shown: not shown either.
+  const w = boot({ tab: 'bench' });
+  BH.open(w, set);
+  await settle(); await settle();
+  w.reply = BH.reply(JSON.stringify({ flipped: [{ task: TASKS[25], a: { resolved: true }, b: { resolved: false }, reading: 'The review caught a missed case, and the fix round handled it.' },
+    { task: TASKS[26], a: { resolved: true }, b: { resolved: true }, reading: 'Both resolved it.' }, { task: TASKS[27], a: { resolved: true }, b: { resolved: false }, reading: 'Of the kept trial.' }] }));
+  BH.go(w, 'compare');
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['diff', BH.study().hist.runs[0].cols[0].key, 'solo', '--json']], 'the two arms\' results keys, asked for with no click');
   assert.equal(text(q(w, '.bench-answers')), 'This page answers: Is one arm or version better than another, on the same tasks, and why?');
   assert.deepEqual(heads(w), ['Head to head', 'Where they differ', 'The flipped tasks', 'Cost and time']);
   assert.deepEqual(Array.from(act(bp(w), 'cmp-a').options, (o) => o.textContent), ['Conveyor v1.9.0', 'Conveyor, Codex builds v1.9.0', 'Claude, then a review', 'Codex alone', 'Claude + Superpowers',
@@ -48,13 +57,6 @@ test('Compare, Conveyor against Claude alone on 50 tasks: the verdict, the four 
   assert.deepEqual(Array.from(box(w, 'Cost and time').querySelectorAll('.bench-pair'), (p) => text(p)), ['CostConveyor v1.9.0$96.00Claude alone$15.50', 'Cost per resolved taskConveyor v1.9.0$2.59Claude alone$0.62',
     'Machine timeConveyor v1.9.017.5 hClaude alone2.5 h', 'TokensConveyor v1.9.020.5MClaude alone2.4M', 'Sessions a taskConveyor v1.9.04.0Claude alone1.0']);
   assert.equal(text(box(w, 'Cost and time').querySelector('.bench-callout')), 'Each extra fix of Conveyor v1.9.0 costs $6.71.');
-  // The diff reads each side's kept result. For TASKS[26] it read Claude alone resolved, as a run with --again can make
-  // the kept result differ from the one the page shows: that reading explains another result, so it is not shown (E4).
-  // For TASKS[27] it read the outcomes shown, but of the kept trial, not the --again one shown: not shown either.
-  w.reply = BH.reply(JSON.stringify({ flipped: [{ task: TASKS[25], a: { resolved: true }, b: { resolved: false }, reading: 'The review caught a missed case, and the fix round handled it.' },
-    { task: TASKS[26], a: { resolved: true }, b: { resolved: true }, reading: 'Both resolved it.' }, { task: TASKS[27], a: { resolved: true }, b: { resolved: false }, reading: 'Of the kept trial.' }] }));
-  act(bp(w), 'cmp-read').click();
-  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['diff', BH.study().hist.runs[0].cols[0].key, 'solo', '--json']], 'the two arms\' results keys, once asked');
   await settle(); await settle();
   assert.deepEqual(rows(q(w, '.bench-flips')).slice(0, 3).map((r) => [r[0], r[3]]), [[TASKS[25], 'The review caught a missed case, and the fix round handled it.'],
     [TASKS[26], 'not of the result shown (a run again)'], [TASKS[27], 'not of the result shown (a run again)']]);
@@ -65,22 +67,79 @@ test('Compare, Conveyor against Claude alone on 50 tasks: the verdict, the four 
   assert.equal(text(q(w, '.bench-vk')), `sympy · ${TASKS[25]}`);
 });
 
-// Bug it guards: a click on an arm of the Scoreboard opened Compare for another pair but left the asked-for reading of
-// the pair before, so the reply of that old ask, arriving later, showed the model's reading for the wrong arm.
+// Bug it guards: a click on an arm of the Scoreboard opened Compare for another pair, and the reply of the diff asked for
+// the pair before, arriving later, showed the model's reading for the wrong arm. A reading belongs to its own pair.
 test('Compare: a reading asked for one pair is not shown for the pair a Scoreboard click opens before the reply comes', async () => {
-  const w = await opened(BH.study(), 'compare');
-  let done;
-  w.reply = { ok: true, status: 200, text: () => new Promise((r) => { done = r; }) };
-  act(bp(w), 'cmp-read').click();
+  const w = boot({ tab: 'bench' }), held = [];
+  BH.open(w, BH.study());
+  await settle(); await settle();
+  // Each ask waits for its own answer; this test sends it by hand (held), as a model call takes time.
+  w.reply = { ok: true, status: 200, text: () => new Promise((r) => { held.push(r); }) };
+  BH.go(w, 'compare');
   await settle();
   BH.go(w, 'score');
   await settle();
   page(w).querySelector('.bench-leader tr[data-cmp="caveman"]').click();
   await settle();
   assert.deepEqual([act(bp(w), 'cmp-a').value, act(bp(w), 'cmp-b').value], ['arm:conveyor', 'arm:caveman'], 'another pair, opened from the Scoreboard');
-  done(JSON.stringify({ flipped: [{ task: TASKS[25], a: { resolved: true }, b: { resolved: false }, reading: 'A reading of the old ask.' }] }));
+  assert.equal(held.length, 2, 'the other pair asks at once, whatever the first reply');
+  held[0](JSON.stringify({ flipped: [{ task: TASKS[25], a: { resolved: true }, b: { resolved: false }, reading: 'A reading of the old ask.' }] }));
   await settle(); await settle();
   assert.ok(!text(page(w)).includes('A reading of the old ask.'), 'the old ask\'s reading is not shown');
+});
+
+// Bug it guards: a page that loads its readings by itself asked the model again on each draw. A reading is a model call
+// for each task with none saved: the diff of a pair is asked for once while the Board is open (a redraw, a return to the
+// page, a pair seen before use what it has), once more for a new pair, and a diff that failed is shown as missing and
+// not asked for again by itself.
+test('Compare: the readings are asked for once for a pair, once more when a picker changes, and not again after a failure', async () => {
+  const w = boot({ tab: 'bench' }), sent = () => w.posts.splice(0).map((p) => p.body.args), reading = () => rows(q(w, '.bench-flips'))[0][3];
+  BH.open(w, BH.study());
+  await settle(); await settle();
+  w.reply = BH.reply(JSON.stringify({ flipped: [{ task: TASKS[25], a: { resolved: true }, b: { resolved: false }, reading: 'It read the review.' }] }));
+  BH.go(w, 'compare');
+  await settle(); await settle();
+  assert.deepEqual(sent().map((a) => a.slice(0, 1)), [['diff']], 'the first draw asks once');
+  assert.equal(reading(), 'It read the review.');
+  BH.go(w, 'score'); BH.go(w, 'compare');
+  await settle(); await settle();
+  assert.deepEqual(sent(), [], 'a second draw of the same pair asks for nothing');
+  await pick(w, 'cmp-b', 'arm:caveman');
+  assert.deepEqual(sent().map((a) => a.slice(0, 1)), [['diff']], 'a changed picker asks once more');
+  await pick(w, 'cmp-b', 'arm:solo');
+  assert.deepEqual(sent(), [], 'the pair seen before uses its reading');
+  w.reply = { ok: false, status: 502, text: () => Promise.resolve('conveyor: the model did not answer') };
+  await pick(w, 'cmp-b', 'arm:conveyor-codex-claude');
+  assert.deepEqual(sent().map((a) => a.slice(0, 1)), [['diff']], 'a new pair asks, and the answer is a failure');
+  assert.equal(reading(), 'not read', 'a reading the model did not give shows as missing');
+  BH.go(w, 'score'); BH.go(w, 'compare');
+  await settle(); await settle();
+  assert.deepEqual(sent(), [], 'a failed diff is not asked for again on each draw');
+  // The engine's answer when the model call fails is not an error: the diff comes with reading: null for each flipped task
+  // (swe.sh `diff` saves nothing then), so a check of the data alone would take it for a diff that came. Each ask waits for
+  // its answer (held), so the test reads the flipped task of the pair from the page first.
+  await pick(w, 'cmp-b', 'arm:solo');
+  assert.deepEqual(sent(), [], 'the pair seen before uses its reading');
+  let held = null;
+  w.reply = { ok: true, status: 200, text: () => new Promise((r) => { held = r; }) };
+  await pick(w, 'cmp-b', 'arm:conveyor-codex-claude');
+  assert.deepEqual(sent().map((a) => a.slice(0, 1)), [['diff']], 'a picker returning to the failed pair asks once more');
+  const first = q(w, '.bench-flips tbody tr'), task = first.dataset.task, aWon = text(first.children[1]) === text(act(bp(w), 'cmp-a').selectedOptions[0]);
+  const flip = (r) => JSON.stringify({ flipped: [{ task, a: { resolved: aWon }, b: { resolved: !aWon }, reading: r }] });
+  held(flip(null));
+  await settle(); await settle();
+  assert.equal(reading(), 'no reading', 'a diff that came with no reading shows it as missing');
+  BH.go(w, 'score'); BH.go(w, 'compare');
+  await settle(); await settle();
+  assert.deepEqual(sent(), [], 'a diff with a null reading is not asked for again on each draw');
+  await pick(w, 'cmp-b', 'arm:solo');
+  w.reply = BH.reply(flip('It read the review.'));
+  await pick(w, 'cmp-b', 'arm:conveyor-codex-claude');
+  assert.deepEqual(sent().map((a) => a.slice(0, 1)), [['diff']], 'a picker returning to a pair whose reading was null asks once more');
+  assert.equal(reading(), 'It read the review.', 'the second ask gave the reading');
+  await pick(w, 'cmp-b', 'arm:solo');
+  await pick(w, 'cmp-b', 'arm:conveyor-codex-claude');
+  assert.deepEqual(sent(), [], 'a reading that came is not asked for again');
 });
 
 // Bug it guards: the flipped-tasks table was cut to its first 12 rows, so a pair with more flips than 12 (Conveyor against
@@ -146,7 +205,7 @@ test('Compare, 2 runs of 1 task: nothing can be told yet, and only cost and time
   const w = await opened(BH.few(), 'compare');
   assert.deepEqual(heads(w), ['Head to head', `Cost and time on ${BH.FEW_TASK}`]);
   assert.equal(text(q(w, '.bench-vv')), 'Conveyor v1.7.0 and Claude alone both resolved the one task they share.');
-  assert.equal(text(q(w, '.bench-vw')), 'Nothing can be told yet from 1 task. There is no flipped task to explain. The only difference is cost and time: Conveyor v1.7.0 took 3 sessions, 77k tokens and 2.9 minutes;'
+  assert.equal(text(q(w, '.bench-vw')), 'There is no flipped task to explain. The only difference is cost and time: Conveyor v1.7.0 took 3 sessions, 77k tokens and 2.9 minutes;'
     + ' Claude alone took 1 session, 2k tokens and 0.5 minutes.');
   assert.deepEqual(Array.from(page(w).querySelectorAll('.bench-pair'), (p) => text(p)), ['TokensConveyor v1.7.077kClaude alone2k', 'MinutesConveyor v1.7.02.9 minClaude alone0.5 min', 'SessionsConveyor v1.7.03Claude alone1']);
 });
@@ -345,7 +404,7 @@ test('Task map, 2 runs of 1 task: 1 of 500 tasks has results, its square opens i
 test('Plan a run, the study\'s arms: the questions set the tasks and arms, and Before you start shows the cost and the command', async () => {
   const w = await opened(BH.study(), 'plan');
   assert.equal(text(q(w, '.bench-answers')), 'This page answers: Which run answers my question, and what will it cost? Pick the question first. The planner sets the tasks and arms, and shows the cost before you start.');
-  assert.deepEqual(heads(w), ['Arms', 'Tasks', 'Run settings', 'Before you start']);
+  assert.deepEqual(heads(w), ['Arms', 'Tasks', 'Before you start']);
   assert.deepEqual(Array.from(page(w).querySelectorAll('.bench-q'), (x) => [x.dataset.q, x.getAttribute('aria-pressed')]), [['works', 'false'], ['better', 'true'], ['value', 'false']]);
   assert.deepEqual(rows(q(w, '.bench-planarms')).map((r) => r.slice(1)), [['Conveyor', 'ready', '$1.92', '21', '50'], ['Conveyor, Codex builds', 'ready', '$1.38', '18', '50'], ['Claude, then a review', 'ready', '$0.61', '6', '50'],
     ['Codex alone', 'ready', '$0.44', '5', '50'], ['Claude + Superpowers', 'expired', '$0.93', '9', '50'], ['Claude alone', 'ready', '$0.31', '3', '50'], ['Claude + Caveman', 'changed', '$0.27', '3', '50']]);
@@ -389,109 +448,39 @@ test('Plan a run: the slider changes the difference it can show and the cost, an
   assert.deepEqual(sent.body, { action: 'bench', args: ['run', '100', '--arm', 'conveyor', '--arm', 'solo'], repo: 'sample' });
   assert.equal(shown, `conveyor.sh bench swe ${sent.body.args.slice(1).join(' ')}`, 'the command shown is the one sent');
   await settle();
-  assert.equal(text(q(w, '.bench-said')), 'Run r20261109T170000-9 started. Watch run');
   // An arm not ready holds Start, and Check the arms first sends its preflight.
   act(bp(w), 'arm-caveman').click();
   assert.equal(act(bp(w), 'start').disabled, true);
-  assert.equal(text(q(w, '.bench-why')), 'Start waits for Claude + Caveman, not ready: check it first.');
   w.reply = BH.reply('caveman: checking c1');
   act(bp(w), 'check-arms').click();
   assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['arms', 'check', 'caveman']]);
 });
 
-// Bug it guards (#1191): the Start receipt's button opened the Live run page, which shows the run going or the last one
-// ended, not the run the receipt names: a later run from the CLI was opened in its place. It opens the named run, and
-// the page goes back to the run going or the last ended once another page is opened.
-test('Plan a run: the receipt button opens the run it names, not the last run', async () => {
-  const named = BH.OLDS[0][1], w = await opened(BH.study(), 'plan');
-  w.reply = BH.reply(`conveyor: run ${named} ended`);
-  act(bp(w), 'start').click();
-  await settle();
-  act(bp(w), 'watch-run').click();
-  await settle(); await settle();
-  assert.equal(heads(w)[1], named, 'the run page shows the run the receipt names');
-  BH.go(w, 'plan'); BH.go(w, 'run');
-  await settle(); await settle();
-  assert.equal(heads(w)[1], BH.STUDY, 'opened from the page row, it shows the last run ended again');
-});
-
-// Bug it guards (#1191 review): a run opened from a receipt while a newer run goes (a) said "No run goes now" and "The
-// last run" of the older run, and (b) stayed the page's run when the tab was shown again, hiding the run going.
-test('Plan a run: the receipt opens an ended run while a newer one goes, and it names itself; the tab shown again opens the run going', async () => {
+// Bug it guards (#1197, the owner: none of the extras stay): Plan a run kept a Conveyor version pick and a Run settings
+// fold that the approved mockup does not have, and a Start that could send --engine and --settings. The page has
+// neither, and Start sends the command the page shows, with the engine's default settings.
+test('Plan a run: no Conveyor version pick and no Run settings fold, and Start sends the command the page shows', async () => {
   const w = await opened(BH.study(), 'plan');
-  w.reply = BH.reply(`conveyor: run ${BH.STUDY} ended`);
-  act(bp(w), 'start').click();
-  await settle();
-  refresh(w);
-  BH.open(w, BH.live());   // a run then starts from the command line
-  await settle(); await settle();
-  act(bp(w), 'watch-run').click();
-  await settle(); await settle();
-  assert.equal(heads(w)[0], BH.STUDY, 'the verdict is titled with the run it names, not "No run goes now"');
-  assert.match(text(q(w, '.bench-vv')), /^This run ended /);
-  tabBtn(w, 'overview').click();
-  await settle();
-  tabBtn(w, 'bench').click();
-  await settle(); await settle();
-  assert.ok(heads(w)[0].startsWith(`${BH.LIVE} · `), 'shown again, the page shows the run going');
-});
-
-// Bug it guards (#1191 review): a run opened from a receipt and then deleted stayed the page's run, so the page asked
-// for the deleted run again and showed "Read again"; and the receipt kept its button, so a click asked for the deleted
-// run. The history is not read again here (it answers 502), so the page's last run comes from the history update that
-// Delete makes at once.
-test('Plan a run: a run opened from the receipt and deleted is not asked for again, and its receipt has no button', async () => {
-  // The run named is the newest ended one: only then does the page's last run change when it is deleted.
-  const named = BH.STUDY, next = BH.OLDS[0][1], set = BH.study(), w = await opened(set, 'plan');
-  w.reply = BH.reply(`conveyor: run ${named} ended`);
-  act(bp(w), 'start').click();
-  await settle();
-  act(bp(w), 'watch-run').click();
-  await settle(); await settle();
-  assert.equal(heads(w)[0], named);
-  w.reply = BH.reply(`conveyor: deleted ${named}.`);
-  const body = w.benchBody;
-  w.benchBody = (u) => (/&run=/.test(u) ? body(u) : null);
-  const del = act(q(w, '.bench-runacts'), 'delete-runs');
-  del.click(); del.click();
-  w.benchAsks.length = 0;
-  await settle(); await settle();
-  assert.deepEqual(w.benchAsks.filter((u) => u.endsWith(`&run=${named}`)), [], 'the deleted run is not read again');
-  assert.equal(heads(w)[0], 'No run goes now');
-  assert.equal(heads(w)[1], next, 'the page shows the last run ended that is left');
-  BH.go(w, 'plan');
-  await settle();
-  assert.equal(q(w, '[data-act="watch-run"]'), null, 'the receipt of the deleted run has no button to open it');
-  // Bug it guards (#1202): Delete removed the whole Start answer, which stays until Start is clicked again.
-  assert.match(q(w, '[data-said="start"]').textContent, new RegExp(`Run ${named} ended`), 'the Start answer stays after its run is deleted');
-});
-
-// Bug it guards (review E6): Plan a run had no Conveyor version or run settings, so it could not start an older engine
-// or another seed, as the tab's Start could. The version picked goes in --engine (and its kept results count), a
-// setting changed goes in --settings (and the results it reuses are not known), and Start sends what the page shows.
-test('Plan a run: the Conveyor version and the run settings go in the command Start sends', async () => {
-  const w = await opened(BH.study(), 'plan');
-  const engine = act(bp(w), 'plan-engine');
-  assert.deepEqual(Array.from(engine.options, (o) => o.value), ['main', 'v1.4.0', 'v1.5.0', 'v1.6.0', 'v1.7.0', 'v1.8.0', 'v1.9.0', 'commit']);
-  engine.value = 'v1.4.0'; engine.dispatchEvent(new w.Event('change'));
-  assert.equal(q(w, '.bench-cmd').textContent, 'conveyor.sh bench swe 50 --arm conveyor --arm solo --engine v1.4.0');
-  assert.deepEqual(rows(q(w, '.bench-planarms'))[0].slice(1), ['Conveyor', 'ready', '$1.92', '21', '20'], 'v1.4.0 kept 20 of the 50 tasks');
-  const seed = act(bp(w), 'set-seed');
-  seed.value = 'other'; seed.dispatchEvent(new w.Event('input')); seed.dispatchEvent(new w.Event('change'));
-  assert.equal(q(w, '.bench-cmd').textContent, 'conveyor.sh bench swe 50 --arm conveyor --arm solo --engine v1.4.0 --settings \'{"seed":"other"}\'');
-  assert.equal(kv(q(w, '.bench-before')).find(([k]) => k === 'Kept results')[1], 'not known with run settings changed: the estimate counts each task');
+  assert.equal(q(w, '[data-act="plan-engine"]'), null, 'no Conveyor version pick');
+  assert.equal(q(w, '[data-act="plan-commit"]'), null, 'no commit field');
+  assert.equal(q(w, '[data-fold="plan-settings"]'), null, 'no Run settings fold');
+  assert.equal(page(w).querySelectorAll('input[data-act^="set-"]').length, 0, 'no run setting field');
+  const shown = q(w, '.bench-cmd').textContent;
+  assert.equal(shown, 'conveyor.sh bench swe 50 --arm conveyor --arm solo');
   w.reply = BH.reply('conveyor: run r20261109T170000-9 started');
   act(bp(w), 'start').click();
-  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['run', '50', '--arm', 'conveyor', '--arm', 'solo', '--engine', 'v1.4.0', '--settings', '{"seed":"other"}']]);
-  // Bug it guards (review): with CPUs and Memory changed, the command sent them but the Belt row said swe.json's 4 CPUs and 8g.
-  const typed = (a, v) => { const f = act(bp(w), a); f.value = v; f.dispatchEvent(new w.Event('input')); f.dispatchEvent(new w.Event('change')); };
-  typed('set-cpus', '2'); typed('set-memory', '4g');
-  assert.equal(q(w, '.bench-cmd').textContent, 'conveyor.sh bench swe 50 --arm conveyor --arm solo --engine v1.4.0 --settings \'{"seed":"other","cpus":2,"memory":"4g"}\'');
-  assert.equal(kv(q(w, '.bench-before')).find(([k]) => k === 'Belt')[1], 'Cards and the run share the machine. Each task\'s container gets 2 CPUs and 4g.');
-  const cpus = act(bp(w), 'set-cpus');
-  cpus.value = 'many'; cpus.dispatchEvent(new w.Event('change'));
-  assert.equal(act(bp(w), 'start').disabled, true);
-  assert.equal(text(q(w, '.bench-why')), 'A run setting does not read: correct it beside its field, under Run settings.');
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['run', '50', '--arm', 'conveyor', '--arm', 'solo']], 'the default settings: no --engine and no --settings');
+  await settle();
+  assert.match(text(q(w, '[data-said="start"]')), /run r20261109T170000-9 started/, 'the answer to Start shows beside it');
+  assert.equal(q(w, '.bench-why'), null, 'no why-not note under Start');
+  // Bug it guards: a Start the build machine refuses before it records a run (the usage guard moved since the page read it)
+  // showed nothing, as the page had no place for its answer.
+  w.reply = { ok: false, status: 409, text: () => Promise.resolve('conveyor: the usage guard is reached') };
+  act(bp(w), 'start').click();
+  await settle();
+  assert.match(text(q(w, '[data-said="start"]')), /Not done: .*usage guard is reached/, 'a refused Start says why');
+  act(bp(w), 'arm-caveman').click();
+  assert.equal(act(bp(w), 'start').disabled, true, 'an arm not ready still holds Start');
 });
 
 // Bug it guards: with no kept result on the engine now, the plan counted none to run, and a cost it could not price
@@ -504,4 +493,32 @@ test('Plan a run, 2 runs of 1 task: the arms with their state and kept results, 
   assert.deepEqual(arms.slice(0, 5).map((r) => [r[1], r[2], r[5]]), [['conveyor', 'ready', '0 (new engine)'], ['conveyor-codex-claude', 'ready', '0 (new engine)'], ['solo-review', 'ready', '1'], ['solo', 'ready', '1'], ['ponytail', 'expired', '1']]);
   assert.equal(text(q(w, '.bench-before .bench-callout')), 'Good for arms: a gap of 20% or more shows. A 10-point gap needs 200 tasks.');
   assert.deepEqual(kv(q(w, '.bench-before')).slice(0, 4), [['Cost', '$111 at list prices'], ['Machine time', '19.9 h tasks run one after another'], ['Sessions', '249 usual, 449 at worst'], ['Kept results', '1 task runs reused at no cost']]);
+});
+
+// Bug it guards (#1197, the owner: none of the extras stay): the tab kept buttons, notes and states that the approved
+// mockup does not have: Read the commits, Ask for the readings, the Conveyor version pick, the Run settings fold, the
+// Start receipt and why-not note, and notes such as "Left out, not priced". No page of any fixture has one; Versions and
+// Compare load their commits and readings by themselves. One case for each fixture, as each is paid for once.
+const NOT_THERE = ['Read the commits', 'Ask for the readings', 'builds with it', 'Run settings', 'Left out, not priced', 'Steps not kept', 'No Conveyor arm ran', 'none run twice',
+  'No event yet', 'The task list of the set is not read', 'Nothing can be told yet from 1 task', 'Watch run', 'Open its results'];
+const NO_CONTROL = ['[data-act="read-commits"]', '[data-act="cmp-read"]', '[data-act="plan-engine"]', '[data-act^="set-"]', '[data-fold="plan-settings"]', '[data-act="watch-run"]', '.bench-why'];
+async function noExtras(set) {
+  const w = await opened(set);
+  for (const p of ['score', 'versions', 'compare', 'run', 'task', 'map', 'plan']) {
+    BH.go(w, p);
+    await settle(); await settle();
+    NOT_THERE.forEach((t) => assert.ok(!text(page(w)).includes(t), `the ${p} page has no "${t}"`));
+    NO_CONTROL.forEach((c) => assert.equal(q(w, c), null, `the ${p} page has no ${c}`));
+  }
+}
+test('No extras on any page, 7 arms on 50 tasks', async () => { await noExtras(BH.study()); });
+test('No extras on any page, 2 runs of 1 task', async () => { await noExtras(BH.few()); });
+test('No extras on any page, 7 arms on 50 tasks going', async () => { await noExtras(BH.live()); });
+// The states that the three fixtures above never reach, each of which once drew a note: a run going with no event yet, a
+// set whose task list is not read, an arm with no priced result, a lost task whose steps are not kept.
+test('No extras on any page, with no event, no task list, an unpriced arm and no steps kept', async () => {
+  const set = BH.live();
+  set.hist.order = [];
+  Object.values(set.shows).forEach((s) => { if (s.tail) s.tail = []; s.tasks.forEach((t) => t.cells.forEach((c) => { if (c.arm === 'solo') c.cost = null; if (/^conveyor/.test(c.arm)) c.steps = []; })); });
+  await noExtras(set);
 });

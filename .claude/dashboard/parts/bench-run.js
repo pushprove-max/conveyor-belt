@@ -108,7 +108,6 @@
         /^Resolved/.test(ev) ? K.chip(ev, 'ok') : /^Unresolved/.test(ev) ? K.chip(ev, 'bad') : ev);
       ul.append(li);
     });
-    if (!ul.children.length) ul.append(h('li', 'bench-muted', 'No event yet.'));
     return ul;
   }
   function going(data) {
@@ -128,10 +127,7 @@
     const r = data.run, cols = K.paint(K.colsOf(r).map((c) => ({ ...c }))), n = K.num(r.n) || 0, tasks = K.list(data.tasks).filter(K.obj), took = K.elapsed(r), [word] = K.stateOf(r);
     const all = cols.filter((c) => c.resolved === n && n).length, ran = Math.max(0, ...cols.map((c) => K.num(c.done) || 0)), refused = r.state === 'refused';
     const res = n === 1 ? `${all === cols.length ? `All ${cols.length}` : `${all} of ${cols.length}`} resolved it.` : `${cols.map((c) => `${K.colName(c)} ${K.num(c.resolved) || 0} of ${n}`).join(', ')}.`;
-    // A run opened by name (the Start receipt) may not be the last one, and another run may go: it says "This run", not
-    // "The last run", and its title is its id, not "No run goes now".
-    const asked = Boolean(K.B.runId), The = asked ? 'This' : 'The last';
-    const v = lastLine(r, The, word, took);
+    const v = lastLine(r, 'The last', word, took);
     // A cell with no result was never graded: it says why (not started, stopped), never unresolved.
     const one = (c) => {
       const x = tasks.length === 1 ? K.list(tasks[0].cells).find((y) => K.obj(y) && y.arm === c.arm) : null, k = K.said(x);
@@ -150,12 +146,12 @@
       : `It ran ${ran === n ? K.plural(n, 'task') : `${ran} of ${K.plural(n, 'task')}`} with ${K.plural(cols.length, 'arm')}. ${res}`;
     if (gone) s.append(K.add(h('div', 'bench-row'), [K.stopRun(r.id, typeof r.stopping === 'string'), h('span', 'bench-note', 'Records its end and removes its containers. Keeps the finished tasks.')]));
     s.append(K.saidAt(`stop-${r.id}`));
-    return [K.verdict(refused ? 'bad' : gone ? 'warn' : 'quiet', asked ? r.id : 'No run goes now', v, gone ? `${w} Its process ended with no end recorded.` : w), s, K.runTools([K.allRuns().find((x) => x.id === r.id) || r])];
+    return [K.verdict(refused ? 'bad' : gone ? 'warn' : 'quiet', 'No run goes now', v, gone ? `${w} Its process ended with no end recorded.` : w), s, K.runTools([K.allRuns().find((x) => x.id === r.id) || r])];
   }
   function liveRun() {
     const top = K.answers('What is the run doing now, will it finish in time, and is it on budget?'), l = K.live();
     if (!K.hist()) return [top, K.reading('the runs')];
-    const id = K.B.runId || (l && l.state === 'running' && typeof l.id === 'string' ? l.id : (K.runsOf().find((x) => x.state !== 'running') || {}).id);
+    const id = l && l.state === 'running' && typeof l.id === 'string' ? l.id : (K.runsOf().find((x) => x.state !== 'running') || {}).id;
     if (!id) return [top, K.verdict('quiet', 'No run goes now', 'No run has started yet.', 'Plan a run: it shows here while it goes.')];
     const o = K.readRun(id);
     if (!o || !o.data) return [top, K.reading(`the run ${id}`, o)];
@@ -321,7 +317,7 @@
     [['all', 'How many arms resolve it'], ...st.arms.map((a) => [a.arm, a.label])].forEach(([v, l]) => { const o = h('option', null, l); o.value = v; sel.append(o); });
     sel.value = K.B.by; sel.addEventListener('change', () => { K.B.by = sel.value; K.draw(); });
     const head = K.add(h('div', 'bench-row bench-space'), [h('h3', 'bench-h', `All ${size} tasks of SWE-bench Verified, by repository`), K.add(h('span', 'bench-row bench-small'), [h('span', 'bench-muted', 'Colour by'), sel])]);
-    const card = K.add(h('section', 'bench-box'), [head, mapLegend(K.B.by), ...groups(ids, st, K.B.by), order.length ? '' : K.note('The task list of the set is not read: only the tasks with results show.')]);
+    const card = K.add(h('section', 'bench-box'), [head, mapLegend(K.B.by), ...groups(ids, st, K.B.by)]);
     return [top, K.verdict('warn', 'Coverage', `${ran.length} of ${size} tasks have results. ${none.length} of them no arm resolves.`, w), card];
   }
   window.DASH_APP.part('bench-run', function (shared) {

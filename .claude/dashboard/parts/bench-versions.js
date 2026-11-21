@@ -2,11 +2,11 @@
 // The Benchmarks tab's Versions and Compare (#1177, the owner's mockup). Versions: the verdict on the newest engine
 // version of the Conveyor arm against the one before (versions in their release order, each change on the tasks both
 // ran), its resolve rate by version with each 95% band and the Claude alone line, the table of versions with the change
-// against the one before (noise or not) and, once read, the steps that changed, the drift watch (the belt's
+// against the one before (noise or not) and the steps that changed, the drift watch (the belt's
 // own cards before and after, each figure moved better, moved worse or in its usual range) and the tasks that flipped
-// between the two newest versions, each with the first step apart and, once read (`bench swe diff --json`), the commits
-// that changed that step. Compare: any two arms or versions, head to head on the tasks both graded: the verdict, the four
-// boxes, the flipped tasks (and, once read, the model's short reading of each) and cost and time side by side. Part of
+// between the two newest versions, each with the first step apart and the commits that changed that step (`bench swe diff
+// --json`, which the page asks for by itself). Compare: any two arms or versions, head to head on the tasks both graded: the
+// verdict, the four boxes, the flipped tasks (each with the model's short reading, asked for by itself) and cost and time side by side. Part of
 // panels/bench.js, which asks for it by name (DASH_APP.use) and gives it its kit (K).
 (() => {
   'use strict';
@@ -92,17 +92,28 @@
     if (solo !== null) el.append(K.svg('line', { x1: x(0), x2: x(vs.length - 1), y1: y(solo), y2: y(solo), class: 'bench-solo bench-s4' }), K.svg('text', { x: x(vs.length - 1), y: y(solo) - 6, 'text-anchor': 'end' }, 'Claude alone'));
     return el;
   }
-  // The diff (`bench swe diff --json`) of a version and the one before it, once read; Read the commits reads each.
-  const pairKey = (p, v) => `${p.col.key}|${v.col.key}`;
-  const pairOf = (p, v) => K.obj(K.B.flips.pairs.get(pairKey(p, v)));
-  // The steps whose engine files changed between a version and the one before, a task flipped or not (the diff's
-  // steps); not known when the diff could not map the engine's files to its steps.
+  // The diff (`bench swe diff --json`) of two results keys, once read. It is asked for once for a pair while the Board is
+  // open (K.B.diffs): each reading in it is a model call for a task with none saved, so a redraw uses what it has, and a
+  // diff that failed (no answer, or a flipped task with no reading: `diff` saves none then) stays missing until the Board
+  // starts again, or, for Compare, until the pickers change (change: K.B.cmp.n, which Compare passes) once more. Versions
+  // asks for one at a time (alone): each answer draws the page, which asks for the next. Nothing here draws before the answer.
+  const parse = (text) => { try { return K.obj(JSON.parse(text)) || { flipped: [] }; } catch { return { flipped: [] }; } };
+  const diffOf = (a, b) => { const e = K.B.diffs.get(`${a}|${b}`); return e ? K.obj(e.data) : null; };
+  const missing = (e) => !e.data || K.list(e.data.flipped).some((f) => !K.obj(f) || !f.reading);
+  function wantDiff(a, b, alone, change) {
+    const D = K.B.diffs, k = `${a}|${b}`, old = D.get(k);
+    if (old && (old.busy || change === undefined || old.change === change || !missing(old))) return;
+    if (alone && Array.from(D.values()).some((x) => x.busy)) return;
+    const e = { busy: true, data: old ? old.data : null, change };
+    D.set(k, e);
+    K.ask(['diff', a, b, '--json']).then((text) => { e.busy = false; if (text !== null) e.data = parse(text); if (K.B.diffs === D) K.draw(); });
+  }
+  const pairOf = (p, v) => diffOf(p.col.key, v.col.key);
+  // The steps whose engine files changed between a version and the one before, a task flipped or not (the diff's steps);
+  // a dash when the diff is missing or could not map the engine's files to its steps.
   function stepsChanged(p, v) {
-    const d = pairOf(p, v);
-    if (!d) return 'not read';
-    if (!Array.isArray(d.steps)) return 'not known';
-    const st = d.steps.filter((x) => typeof x === 'string');
-    return st.length ? st.join(', ') : 'none';
+    const d = pairOf(p, v), st = d && Array.isArray(d.steps) ? d.steps.filter((x) => typeof x === 'string') : [];
+    return st.length ? st.join(', ') : '—';
   }
   // The day a version's first run started, without its year, in the Date set in Customize ("11/09" or "09/11").
   function dayOf(t) {
@@ -138,25 +149,6 @@
     return Array.from(Z.cells.keys()).filter((id) => K.graded(A.cells.get(id)) && K.graded(Z.cells.get(id)) && K.said(A.cells.get(id)) !== K.said(Z.cells.get(id)))
       .map((id) => ({ id, now: K.said(Z.cells.get(id)) === 'yes', apart: K.apart(A.cells.get(id).steps, Z.cells.get(id).steps) }));
   }
-  const parse = (text) => { try { return K.obj(JSON.parse(text)) || { flipped: [] }; } catch { return { flipped: [] }; } };
-  function readDiff(state, a, b, key) {
-    const ask = `${key}-${state.n += 1}`;
-    state.ask = ask; state.data = null;
-    K.send(ask, ['diff', a, b, '--json'], () => 'Read.', (text) => { if (state.ask === ask) state.data = parse(text); });
-  }
-  // Read the commits: the diff of each version and the one before it, the newest pair first, one request at a time.
-  function readCommits(vs) {
-    const F = K.B.flips, run = F.run += 1, todo = vs.slice(1).map((v, i) => [vs[i], v]).reverse();
-    F.pairs = new Map();
-    const next = () => {
-      const pr = todo.shift();
-      if (!pr || F.run !== run) return;
-      const ask = `flips-${F.n += 1}`;
-      F.ask = ask;
-      K.send(ask, ['diff', pr[0].col.key, pr[1].col.key, '--json'], () => 'Read.', (text) => { if (F.run !== run) return; F.pairs.set(pairKey(pr[0], pr[1]), parse(text)); next(); });
-    };
-    next();
-  }
   // A flipped task's entry in a diff, when the diff read the results the page shows: a run with --again shows its own
   // result of a task (again/<run id>: the cell's again), and the diff reads only the kept one, another trial even when
   // both resolved it (a reading or a first step apart of it would be of a result the page does not show). a and b: the
@@ -177,9 +169,7 @@
   function flipsBox(vs) {
     const prev = vs[vs.length - 2], last = vs[vs.length - 1], fl = flipsOf(prev, last);
     const s = K.box(`Tasks that flipped from ${prev.v} to ${last.v}`, 'Each with the first step where the runs went apart and the engine commits that changed that step.');
-    const read = K.button('Read the commits', 'btn-quiet btn-sm', 'read-commits', 'Read the commits of each version against the one before it', () => readCommits(vs));
-    s.append(K.add(h('div', 'bench-row'), [read, h('span', 'bench-note', 'It reads the engine\'s history on the build machine for each version against the one before it, and one model call writes a short reading of each flipped task.'),
-      K.B.flips.ask ? K.saidAt(K.B.flips.ask) : '']));
+    vs.slice(1).map((v, i) => [vs[i], v]).reverse().forEach(([p, v]) => wantDiff(p.col.key, v.col.key, true));
     if (!fl.length) { s.append(K.note('No task flipped.')); return s; }
     s.append(K.table(['Task', 'Now', 'First step apart', 'Commits that changed it'], fl.map((f) => [{ v: f.id, c: 'mono' }, K.chip(f.now ? 'now resolved' : 'now unresolved', f.now ? 'ok' : 'bad'), f.apart, { v: commitsOf(prev, last, f.id), c: 'bench-small' }]),
       'bench-flips', (tr, i) => { tr.dataset.task = fl[i].id; tr.classList.add('bench-click'); tr.addEventListener('click', () => K.openTask(fl[i].id)); }));
@@ -224,7 +214,7 @@
     sel.dataset.act = `cmp-${which}`; sel.setAttribute('aria-label', which === 'a' ? 'The first arm' : 'The second arm');
     opts.forEach((o) => { const x = h('option', null, o.label); x.value = o.id; sel.append(x); });
     sel.value = K.B.cmp[which];
-    sel.addEventListener('change', () => { K.B.cmp[which] = sel.value; K.B.cmp.data = null; K.B.cmp.ask = null; K.draw(); });
+    sel.addEventListener('change', () => { K.B.cmp[which] = sel.value; K.B.cmp.n += 1; K.draw(); });
     return sel;
   }
   function defaults(opts) {
@@ -246,7 +236,7 @@
   }
   // The model's reading of a flipped task, only when the diff read the results the page shows (flipIn).
   function readingOf(id, A, Bs) {
-    const d = K.obj(K.B.cmp.data), { f, same } = flipIn(d, id, A.cells.get(id), Bs.cells.get(id));
+    const d = diffOf(A.key, Bs.key), { f, same } = flipIn(d, id, A.cells.get(id), Bs.cells.get(id));
     return !d ? h('span', 'bench-muted', 'not read') : !same ? h('span', 'bench-muted', OTHER) : f && f.reading ? f.reading : h('span', 'bench-muted', 'no reading');
   }
   function boxOf(label, v, tone) { const d = h('div', `bench-four bench-four-${tone}`); d.append(h('div', 'bench-four-n', String(v)), h('div', 'bench-small', label)); return d; }
@@ -279,9 +269,9 @@
   }
   function differ(A, Bs, x) {
     const s = K.box('Where they differ', 'Every task falls in one box. Only the two "only" boxes move the score.'), fl = x.onlyA.map((id) => [id, A, Bs]).concat(x.onlyB.map((id) => [id, Bs, A]));
+    if (fl.length) wantDiff(A.key, Bs.key, false, K.B.cmp.n);
     s.append(K.add(h('div', 'bench-grid bench-g-2 bench-fours'), [boxOf('Both resolve', x.both, 'ok'), boxOf(`Only ${A.label}`, x.onlyA.length, 'info'), boxOf(`Only ${Bs.label}`, x.onlyB.length, 'warn'), boxOf('Neither', x.none, 'quiet')]),
       h('h3', 'bench-h', 'The flipped tasks'),
-      K.add(h('div', 'bench-row'), [K.button('Ask for the readings', 'btn-quiet btn-sm', 'cmp-read', 'Ask for the model\'s reading of each flipped task', () => readDiff(K.B.cmp, A.key, Bs.key, 'compare')), K.B.cmp.ask ? K.saidAt(K.B.cmp.ask) : '']),
       K.table(['Task', 'Resolved by', 'First step apart', 'Why, in short'], fl.map(([id, w, l]) => [{ v: id, c: 'mono' }, K.armSaid(w), whereApart(id, w, l), { v: readingOf(id, A, Bs), c: 'bench-small bench-muted' }]), 'bench-flips',
         (tr, i) => { tr.dataset.task = fl[i][0]; tr.classList.add('bench-click'); tr.addEventListener('click', () => K.openTask(fl[i][0])); }),
       K.note('"Why, in short" is one model call\'s reading of the facts of both runs, and is labelled as such on the Board.'));
@@ -292,7 +282,7 @@
     const v = !n ? `${A.label} and ${Bs.label} share no task they both graded.` : n === 1 && x.both ? `${A.label} and ${Bs.label} both resolved the one task they share.`
       : `On ${K.plural(n, 'task')}: ${A.label} resolved ${fa.k}, ${Bs.label} ${fb.k}.`;
     const took = (f) => `${K.plural(Math.round(K.sum(f.cs.map((c) => K.num(c.sessions) || 0))), 'session')}, ${K.kTok(f.tokens)} tokens and ${f.wall === null ? 'minutes not kept' : `${f.wall} minutes`}`;
-    const w = `Nothing can be told yet from ${K.plural(n, 'task')}. ${x.d ? 'A flipped task is in the table of the full page once there are 3 shared tasks or more.' : 'There is no flipped task to explain.'} The only difference is cost and time: ${A.label} took ${took(fa)}; ${Bs.label} took ${took(fb)}.`;
+    const w = `${x.d ? 'A flipped task is in the table of the full page once there are 3 shared tasks or more.' : 'There is no flipped task to explain.'} The only difference is cost and time: ${A.label} took ${took(fa)}; ${Bs.label} took ${took(fb)}.`;
     s.append(pair('Tokens', fa.tokens, fb.tokens, K.kTok, A, Bs), pair('Minutes', fa.wall, fb.wall, (m) => (K.num(m) === null ? K.NOT_KEPT : `${m} min`), A, Bs),
       pair('Sessions', fa.sessions, fb.sessions, (m) => (K.num(m) === null ? K.NOT_KEPT : String(Math.round(m * 10) / 10)), A, Bs));
     return [K.verdict('quiet', 'Head to head', v, w), s];

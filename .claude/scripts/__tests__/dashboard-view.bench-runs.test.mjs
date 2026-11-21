@@ -11,6 +11,8 @@ const { bp, page, OLDS, STUDY } = BH;
 const text = (el) => el.textContent.replace(/\s+/g, ' ').trim();
 const tick = (w, id) => { const b = act(bp(w), `pick-${id}`); b.checked = !b.checked; b.dispatchEvent(new w.Event('change')); };
 const V14 = OLDS[4][1];
+// The requests sent since the last call, as their args, without the diffs that Versions and Compare ask for by themselves.
+const sent = (w) => w.posts.splice(0).map((p) => p.body.args).filter((a) => a[0] !== 'diff');
 async function opened(set, p) {
   const w = boot({ tab: 'bench' });
   BH.open(w, set);
@@ -47,11 +49,37 @@ test('Scoreboard run history: Archive takes a run out of the figures and marks i
   tick(w, V14);
   w.reply = BH.reply(`conveyor: restored ${V14}.`);
   act(bar(), 'restore-runs').click();
-  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['runs', 'restore', V14]], 'an archived run offers Restore');
+  assert.deepEqual(sent(w), [['runs', 'restore', V14]], 'an archived run offers Restore');
   mark(set, { [V14]: { archived: undefined } });
   await settle(); await settle();
   BH.go(w, 'versions');
   assert.equal(page(w).querySelector('.bench-versions tbody tr').firstChild.textContent, 'v1.4.0', 'the run restored is back in the figures');
+});
+
+// Bug it guards: the Scoreboard for fewer than 3 shared tasks had no run history, so once a run was archived from the Live
+// run page, the one run left kept this page and the archived one could not be restored or deleted from the Board.
+test('Scoreboard of 2 runs of 1 task: the run history is there; Archive, then Restore and Delete of the run archived', async () => {
+  const set = BH.few(), [a, b] = [BH.FEW1, BH.FEW2], w = await opened(set);
+  assert.ok(page(w).querySelector('details.bench-history'), 'the page for fewer than 3 shared tasks has the run history');
+  tick(w, b);
+  w.reply = BH.reply(`conveyor: archived ${b}.`);
+  act(page(w).querySelector('.bench-history .bench-selbar'), 'archive-runs').click();
+  assert.deepEqual(sent(w), [['runs', 'archive', b]]);
+  mark(set, { [b]: { archived: '2026-11-09T10:00:00Z' } });
+  await settle(); await settle();
+  assert.match(text(page(w).querySelector(`.bench-history tr[data-run="${b}"]`)), /archived/, 'the run archived stays in the history, marked');
+  tick(w, b);
+  const bar = page(w).querySelector('.bench-history .bench-selbar');
+  assert.deepEqual(Array.from(bar.children, text), ['1 run selected', 'Restore', 'Delete', 'Clear'], 'an archived run offers Restore and Delete');
+  w.reply = BH.reply(`conveyor: restored ${b}.`);
+  act(bar, 'restore-runs').click();
+  assert.deepEqual(sent(w), [['runs', 'restore', b]]);
+  mark(set, { [b]: { archived: undefined } });
+  await settle(); await settle();
+  tick(w, a);
+  const del = page(w).querySelector('.bench-history .bench-selbar [data-act="delete-runs"]');
+  del.click(); w.reply = BH.reply(`conveyor: deleted ${a}.`); del.click();
+  assert.deepEqual(sent(w), [['runs', 'delete', a]], 'Delete sends the request after its confirm');
 });
 
 // Bug it guards: runs could not be deleted, one or several at once. Delete of two runs ticked asks once, in words that
@@ -107,7 +135,7 @@ test('Compare: Archive of the runs of the two sides, in one request', async () =
   assert.match(text(acts), new RegExp(`^These runs: ${OLDS[0][1]}, ${STUDY}`));
   w.reply = BH.reply(`conveyor: archived ${OLDS[0][1]}, ${STUDY}.`);
   act(acts, 'archive-runs').click();
-  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['runs', 'archive', OLDS[0][1], STUDY]]);
+  assert.deepEqual(sent(w), [['runs', 'archive', OLDS[0][1], STUDY]]);
 });
 
 // Bug it guards: the run history showed the subtotal of a run only some of whose work could be priced (state "partial")

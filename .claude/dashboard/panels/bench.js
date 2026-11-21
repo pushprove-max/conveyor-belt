@@ -24,19 +24,18 @@
     page: 'score',
     hist: null,         // the history read: {repo, stamp, busy, data, error, read (when it ended, by the Board's clock)}
     runs: new Map(),    // each run's tasks read, by `${repo}|${id}`: {stamp, busy, data, error}
-    runId: null,        // the run the Live run page shows when a page asked for one (null: the run going, else the last ended)
     task: null,         // the task the Task page shows (null: the first shared task)
     sel: [],            // the runs ticked in the run history
-    cmp: { a: '', b: '', ask: null, data: null, n: 0 },   // Compare's two sides and the readings read for them
-    flips: { ask: null, run: 0, pairs: new Map(), n: 0 }, // Versions: the diff of each version and the one before, read
-    plan: null,         // Plan a run: the question, the tasks, the arms ticked, the Conveyor version and the run settings typed
+    cmp: { a: '', b: '', n: 0 },   // Compare's two sides, and how many times they changed (a diff that failed is asked again once after a change)
+    diffs: new Map(),   // each pair of results keys' diff (`bench swe diff`), asked once while the Board is open (parts/bench-versions.js)
+    plan: null,         // Plan a run: the question, the tasks and the arms ticked
     by: 'all',          // what the Task map is coloured by
     folds: new Set(),   // the folds opened (fold), by their key, so a redraw keeps them open
     busy: false, held: false, late: false, keep: null,
     landed: false,      // the page the tab opens on was chosen for this showing of the tab
     said: new Map(),    // each action's answer, by its key: {text, tone}, shown beside that action (saidAt)
   };
-  function planNew() { return { q: 'better', n: 50, arms: null, engine: 'main', commit: '', set: {} }; }
+  function planNew() { return { q: 'better', n: 50, arms: null }; }
   B.plan = planNew();
   const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
   const list = (v) => (Array.isArray(v) ? v : []);
@@ -247,7 +246,7 @@
     p.dataset.said = key; p.setAttribute('role', 'status');
     return p;
   }
-  const go = (page, runId) => { Object.assign(B, { page, runId: runId || null }); draw(); };
+  const go = (page) => { B.page = page; draw(); };
   const openTask = (id) => { B.task = id; go('task'); };
 
   // ---- reads from the page server ----
@@ -393,6 +392,13 @@
       say(key, ok ? done(text) : `Not done: ${B.ctx.refusal(text)}`, ok ? 'ok' : 'bad', repo, more);
     });
   }
+  // A read that the page starts by itself (the diff of a pair): the text of the answer, or null when it did not come. It
+  // shares nothing with `send`: it takes no part in B.busy (a click is never refused for it) and says nothing, as the page
+  // has no button to say it by.
+  function ask(args) {
+    const repo = B.repo;
+    return B.ctx.post('control', { action: 'bench', args, repo }).then((r) => r.text().then((t) => (r.ok && repo === B.repo ? String(t) : null)), () => null);
+  }
   // Stop the run: it names the run (`bench swe stop <id>`: a Stop that comes late never stops the run after it), says
   // "Stopping" and stays off until the build machine answers, once the run and its containers ended (swe_stop).
   const STOPPED = [[/ is stopped\./, 'Run stopped. Finished results are kept.'], [/ was interrupted: /, 'Run interrupted: its process had ended. Its end is recorded, its containers are removed and its finished results are kept.'],
@@ -433,14 +439,9 @@
       B.sel = B.sel.filter((x) => !ids.includes(x));
       if (verb === 'delete') {
         ids.forEach((id) => B.runs.delete(`${B.repo}|${id}`));
-        // The page does not ask for a run just deleted, whether a receipt opened it or the history is not read again yet.
-        if (ids.includes(B.runId)) B.runId = null;
-        // The Start receipt does not offer a run just deleted; its answer stays until Start is clicked again.
-        const rc = B.said.get(saidKey('start'));
-        if (rc && ids.includes(rc.run)) B.said.set(saidKey('start'), { ...rc, run: null });
+        // The page does not ask for a run just deleted before the history is read again.
         if (hist()) hist().runs = allRuns().filter((r) => !ids.includes(r.id));
       }
-      B.cmp.data = null; B.flips.pairs = new Map();
       readHist(true);
     });
   }
@@ -466,7 +467,7 @@
   const K = { B, PAGES, NOT_KEPT, num, list, obj, plural, pct, usd, fmtMin, kTok, wilson, noise, noised, noiseSaid, noisePct, told, median, mean, kept, sum,
     said, graded, costOf, costSaid, costSum, apart, lossOf, testsOf, testsSaid, linesOf, isTest, isConveyor, colName, verOf, paint, h, chip, button, add,
     answers, verdict, box, grid, stat, note, callout, dot, armSaid, table, fold, kv, bar, ciBar, svg, say, saidAt, go, openTask, live, readHist,
-    readRun, hist, allRuns, runsOf, armsOf, colsOf, keysOf, benchOf, setSize, reading, studyOf, armOf, figsOf, versionsOf, moved, send,
+    readRun, hist, allRuns, runsOf, armsOf, colsOf, keysOf, benchOf, setSize, reading, studyOf, armOf, figsOf, versionsOf, moved, send, ask,
     stopRun, runActs, runTools, RUNS_SAID, stateOf, elapsed, draw: () => draw() };
   const P = {};
   ['bench-score', 'bench-versions', 'bench-run', 'bench-plan'].forEach((name) => Object.assign(P, window.DASH_APP.use(name, K)));
@@ -489,7 +490,7 @@
     const view = ctx.project(d);
     ctx.title(Array.isArray(view.repos) && view.repos.length > 1 && view.repo ? `Benchmarks: ${view.repo}` : null);
     if (B.repo !== undefined && view.repo !== B.repo) {
-      Object.assign(B, { sel: [], task: null, cmp: { a: '', b: '', ask: null, data: null, n: B.cmp.n }, flips: { ask: null, run: 0, pairs: new Map(), n: B.flips.n }, plan: planNew(), landed: false });
+      Object.assign(B, { sel: [], task: null, cmp: { a: '', b: '', n: 0 }, diffs: new Map(), plan: planNew(), landed: false });
       B.runs.clear();
     }
     Object.assign(B, { el, ctx, d: view, repo: view.repo });
@@ -498,7 +499,6 @@
     // Scoreboard. A run that starts while the tab is shown does not move the page.
     if (!B.landed && typeof view.repo === 'string') {
       B.landed = true;
-      B.runId = null;
       const l = live();
       B.page = l && l.state === 'running' && typeof l.id === 'string' ? 'run' : 'score';
     }

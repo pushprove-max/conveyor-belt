@@ -144,12 +144,25 @@ test('Scoreboard, 2 runs of 1 task: nothing can be told yet, and what the result
 // Bug it guards: nothing told whether a new engine version made Conveyor better or worse. Versions has the mockup's
 // verdict on the newest version against the one before, the resolve rate by version with its band and the Claude alone
 // line, the table with each change judged against the noise, the drift watch and the tasks that flipped, whose commits
-// are read from `bench swe diff --json` on request.
+// are read from `bench swe diff --json`, which the page asks for by itself.
 test('Versions, 6 versions of the Conveyor arm: the verdict, the trend, the table, the drift watch and the flipped tasks with their commits', async () => {
   const set = BH.study();
   // v1.9.0's result of TASKS[36] is one a run with --again kept apart (show's again): the diff reads only the kept one.
   set.shows[BH.STUDY].tasks[36].cells.find((c) => c.arm === 'conveyor').again = BH.STUDY;
-  const w = await opened(set, 'versions');
+  const w = boot({ tab: 'bench' });
+  BH.open(w, set);
+  await settle(); await settle();
+  // The diff of TASKS[35] read v1.9.0
+  // unresolved, and the one of TASKS[36] read the same outcomes as shown but v1.9.0's shown result is an --again run's,
+  // another trial (E4): the commits of neither are shown. Changed steps are the diff's steps, a task flipped or not:
+  // v1.7.0 to v1.8.0 flipped no task, and its test step changed (E5); a diff that could not map the files says not known.
+  const key = (v) => `conveyor-${v[3].repeat(40)}`, ans = [{ flipped: [{ task: TASKS[34], apart: 'review', a: { resolved: false }, b: { resolved: true }, changes: [{ commit: 'abc1234', title: 'the review reads the test step' }] },
+    { task: TASKS[35], apart: 'review', a: { resolved: false }, b: { resolved: false }, changes: [{ commit: 'def5678', title: 'another result' }] },
+    { task: TASKS[36], apart: 'fix', a: { resolved: false }, b: { resolved: true }, changes: [{ commit: 'fed9876', title: 'the kept trial' }] }, { task: TASKS[37], apart: 'review', a: { resolved: true }, b: { resolved: false }, changes: [] }],
+  steps: ['review'] }, { flipped: [], steps: ['test'] }, { flipped: [], steps: [] }, { flipped: [], steps: null }, { flipped: [], steps: ['build', 'review'] }];
+  w.reply = { ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(ans.shift())) };
+  BH.go(w, 'versions');
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['diff', key('v1.8.0'), key('v1.9.0'), '--json']], 'the page asks for the newest pair by itself, and for one at a time');
   assert.equal(text(q(w, '.bench-answers')), 'This page answers: Did a change to the engine make Conveyor better or worse? Two sources: benchmark runs of each version, and the cards the belt builds anyway (the drift watch, at no cost).');
   assert.deepEqual(heads(w), ['v1.9.0 against v1.8.0', 'Resolve rate by engine version', 'Drift watch: the belt\'s own cards', 'Tasks that flipped from v1.8.0 to v1.9.0']);
   assert.equal(text(q(w, '.bench-vv')), 'No regression. v1.9.0 resolves 37 of 50, 2 more than v1.8.0: inside the noise of 10 tasks.');
@@ -160,29 +173,24 @@ test('Versions, 6 versions of the Conveyor arm: the verdict, the trend, the tabl
   // Each change is judged on the tasks both versions ran (review E3): v1.4.0 ran the first 20, which v1.5.0 resolves all
   // of, against 12: 8 tasks of 20, past the noise of 7. On their rates alone (62% against 60%) it read +2 pts, noise.
   const table = () => rows(q(w, '.bench-versions')).map((r) => [r[0], r[2], r[3], r[4], r[5]]);
-  assert.deepEqual(table(), [['v1.4.0', '20', '12', 'first', '—'], ['v1.5.0', '50', '31', '+40 pts, better', 'not read'],
-    ['v1.6.0', '50', '29', '-4 pts, noise', 'not read'], ['v1.7.0', '50', '34', '+10 pts, noise', 'not read'], ['v1.8.0', '50', '35', '+2 pts, noise', 'not read'], ['v1.9.0', '50', '37', '+4 pts, noise', 'not read']]);
+  assert.deepEqual(table(), [['v1.4.0', '20', '12', 'first', '—'], ['v1.5.0', '50', '31', '+40 pts, better', '—'],
+    ['v1.6.0', '50', '29', '-4 pts, noise', '—'], ['v1.7.0', '50', '34', '+10 pts, noise', '—'], ['v1.8.0', '50', '35', '+2 pts, noise', '—'], ['v1.9.0', '50', '37', '+4 pts, noise', '—']]);
   assert.deepEqual(Array.from(page(w).querySelectorAll('.bench-drow'), (r) => [r.dataset.figure, text(r.querySelector('.chip'))]),
     [['landed', 'In its usual range'], ['tokens', 'In its usual range'], ['minutes', 'In its usual range'], ['reviews', 'In its usual range'], ['fixes', 'In its usual range'], ['waits', 'Moved, better']]);
   const flips = () => rows(q(w, '.bench-flips'));
   assert.deepEqual(flips(), [[TASKS[34], 'now resolved', 'review', 'not read'], [TASKS[35], 'now resolved', 'review', 'not read'], [TASKS[36], 'now resolved', 'review', 'not read'],
     [TASKS[37], 'now unresolved', 'review', 'not read']]);
-  // Read the commits reads the diff of each version against the one before it, the newest first, one at a time (review
-  // E5: the rows before the newest had no changed steps), each its own answer. The diff of TASKS[35] read v1.9.0
-  // unresolved, and the one of TASKS[36] read the same outcomes as shown but v1.9.0's shown result is an --again run's,
-  // another trial (E4): the commits of neither are shown. Changed steps are the diff's steps, a task flipped or not:
-  // v1.7.0 to v1.8.0 flipped no task, and its test step changed (E5); a diff that could not map the files says not known.
-  const key = (v) => `conveyor-${v[3].repeat(40)}`, ans = [{ flipped: [{ task: TASKS[34], apart: 'review', a: { resolved: false }, b: { resolved: true }, changes: [{ commit: 'abc1234', title: 'the review reads the test step' }] },
-    { task: TASKS[35], apart: 'review', a: { resolved: false }, b: { resolved: false }, changes: [{ commit: 'def5678', title: 'another result' }] },
-    { task: TASKS[36], apart: 'fix', a: { resolved: false }, b: { resolved: true }, changes: [{ commit: 'fed9876', title: 'the kept trial' }] }, { task: TASKS[37], apart: 'review', a: { resolved: true }, b: { resolved: false }, changes: [] }],
-  steps: ['review'] }, { flipped: [], steps: ['test'] }, { flipped: [], steps: [] }, { flipped: [], steps: null }, { flipped: [], steps: ['build', 'review'] }];
-  w.reply = { ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(ans.shift())) };
-  act(bp(w), 'read-commits').click();
+  // The answers come with no click: each pair's diff, the newest first, one at a time, each its own answer, and the page
+  // asks for the next when one comes (E5: the rows before the newest had no changed steps).
   for (let i = 0; i < 30; i += 1) await settle();
-  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['8', '9'], ['7', '8'], ['6', '7'], ['5', '6'], ['4', '5']].map(([a, b]) => ['diff', key(`v1.${a}`), key(`v1.${b}`), '--json']),
-    'the two versions\' results keys of each pair');
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['7', '8'], ['6', '7'], ['5', '6'], ['4', '5']].map(([a, b]) => ['diff', key(`v1.${a}`), key(`v1.${b}`), '--json']),
+    'the two versions\' results keys of each older pair, one request each');
   assert.deepEqual(flips().map((r) => r[3]), ['abc1234 the review reads the test step', 'not of the result shown (a run again)', 'not of the result shown (a run again)', 'none']);
-  assert.deepEqual(table().map((r) => r[4]), ['—', 'build, review', 'not known', 'none', 'test', 'review'], 'the steps whose files changed, once read, for each version after the first');
+  assert.deepEqual(table().map((r) => r[4]), ['—', 'build, review', '—', '—', 'test', 'review'], 'the steps whose files changed, once read, for each version after the first; a dash for none or not known');
+  BH.go(w, 'score');
+  BH.go(w, 'versions');
+  await settle(); await settle();
+  assert.deepEqual(w.posts.splice(0), [], 'a redraw, or a return to the page, asks for no diff again: each reading is a model call');
   page(w).querySelector(`.bench-flips tr[data-task="${TASKS[37]}"]`).click();
   await settle();
   assert.equal(text(q(w, '.bench-vk')), `matplotlib · ${TASKS[37]}`, 'a flipped task opens the Task page');

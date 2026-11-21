@@ -75,7 +75,7 @@
   // A click on an arm opens Compare: the Conveyor arm against it (against the next arm, for the Conveyor arm itself).
   function toCompare(L, r) {
     const a = L.conv === r ? L.rows.find((x) => x !== r) || r : r;
-    K.B.cmp.a = `arm:${L.conv.a.arm}`; K.B.cmp.b = `arm:${a.a.arm}`; K.B.cmp.data = null; K.B.cmp.ask = null;
+    K.B.cmp.a = `arm:${L.conv.a.arm}`; K.B.cmp.b = `arm:${a.a.arm}`; K.B.cmp.n += 1;
     K.go('compare');
   }
   const sub = (v, s) => [v, s ? h('div', 'bench-tie', s) : ''];
@@ -125,8 +125,6 @@
     const s = K.box('Value: resolve rate against cost', 'Up is better, left is cheaper. The line joins the arms that no other arm beats on both.'), c = L.conv, ref = L.ref, gap = c.k - ref.k;
     s.append(chart(L));
     if (c !== ref && gap > 0 && c.f.cost !== null && ref.f.cost !== null) s.append(K.callout(`${c.a.label} buys its ${gap} extra fixes at ${K.usd((c.f.cost - ref.f.cost) / gap)} each over ${ref.a.label}.`));
-    const out = L.rows.filter((r) => r.perTask === null).map((r) => r.a.label);
-    if (out.length) s.append(K.note(`Left out, not priced: ${out.join(', ')}.`));
     return s;
   }
 
@@ -212,7 +210,7 @@
   }
   function sameOf(r) {
     const k = K.keysOf().find((x) => x.key === r.a.key), v = K.obj(k && k.figures) && k.figures.sameTwice;
-    return K.num(v) === null ? h('span', 'bench-muted', 'none run twice') : K.chip(K.pct(v), v >= 0.85 ? 'ok' : 'warn');
+    return K.num(v) === null ? h('span', 'bench-muted', K.NOT_KEPT) : K.chip(K.pct(v), v >= 0.85 ? 'ok' : 'warn');
   }
   function effortRow(r) {
     const conv = r.a.kind === 'conveyor', m = (f) => { const v = K.kept(r.f.ok, f); return v === null ? null : v.length ? K.mean(v) : 0; };
@@ -236,12 +234,9 @@
   function lossRow(label, v, tot) { const d = h('div', 'bench-lrow'), top = h('div', 'bench-row bench-space'); top.append(h('span', null, label), h('b', null, String(v))); d.append(top, K.bar(tot ? v / tot : 0, 'bench-fill-bad')); return d; }
   function losses(L) {
     const c = L.conv, lost = c.f.cs.filter((x) => K.said(x) === 'no'), by = new Map();
-    lost.forEach((x) => { const w = K.lossOf(x) || K.NOT_KEPT; by.set(w, (by.get(w) || 0) + 1); });
+    lost.forEach((x) => { const w = K.lossOf(x); if (w) by.set(w, (by.get(w) || 0) + 1); });
     const s = K.box('Where Conveyor loses tasks', `The first step where each unresolved task went wrong (${K.plural(lost.length, 'task')}).`);
-    if (c.a.kind !== 'conveyor') { s.append(K.note('No Conveyor arm ran these tasks.')); return s; }
-    s.append(...LOSS.map(([k, l]) => lossRow(l, by.get(k) || 0, lost.length)));
-    if (by.get(K.NOT_KEPT)) s.append(lossRow('Steps not kept', by.get(K.NOT_KEPT), lost.length));
-    s.append(K.note('The biggest bar is where an engine change gains the most.'));
+    if (c.a.kind === 'conveyor') s.append(...LOSS.map(([k, l]) => lossRow(l, by.get(k) || 0, lost.length)), K.note('The biggest bar is where an engine change gains the most.'));
     return s;
   }
   function agree(L) {
