@@ -227,6 +227,22 @@ test('Task, 2 arms of 7 never reached the task: Run this task again sends only t
     ['conveyor', 'conveyor-codex-claude', 'solo-review', 'codex-sol', 'superpowers'], 'the 5 arms that ran it; solo and caveman never reached it');
 });
 
+// Bug it guards: when no arm reached the task, Run this task again stayed on and sent `bench swe 1 --task <id> --again`
+// with no --arm, so the engine would run its default arms on a task the study never ran.
+test('Task, no arm reached the task: Run this task again is off and says so', async () => {
+  const set = BH.study();
+  const id = set.shows[BH.STUDY].tasks[2].id;
+  set.shows[BH.STUDY].tasks[2].cells.forEach((c) => { c.state = 'not reached'; });
+  const w = await opened(set, 'map');
+  act(bp(w), `sq-${id}`).click();
+  await settle();
+  const b = act(bp(w), 'run-again');
+  assert.equal(b.disabled, true);
+  assert.match(b.title, /No arm reached this task/);
+  b.click();
+  assert.deepEqual(w.posts, [], 'a disabled button sends nothing');
+});
+
 // Bug it guards: the "Good for arms" text said "differed ... in the last study" and quoted the smallest gap's task count
 // (2 points, 5000 tasks), where the mockup says "differ by 2 to 10 points: a 10-point gap needs 200 tasks", the largest
 // gap's; the guard chip said "fits in the week left", a forecast the history cannot give (it keeps only whether the guard
