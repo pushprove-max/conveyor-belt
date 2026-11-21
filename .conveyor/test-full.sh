@@ -26,6 +26,8 @@
 # at a time, when unset; parallel runs several at once through the machine's test slots (conveyor/lib/slots.sh, the
 # library CONVEYOR_TEST_SLOTS names, else the checkout's), below. It is this run's: a test file that runs a suite of
 # its own runs it in its default mode.
+# CONVEYOR_SUITE_AT_ONCE (release-prep's: the control record's suiteAtOnce) is the most files parallel mode runs at
+# once, 2 when unset, and at most the pool's slots. Serial mode runs one at a time whatever it is.
 # In parallel mode it starts its files longest first, by CONVEYOR_SUITE_RECORD (release-prep's suite record,
 # suiteruns.jsonl: suiterec() of conveyor/lib/testrun.sh): each file's `sec` in the newest run of the record (its
 # last line that is a run), not in older runs. Files that run did not time start before every timed file, as their time is not known;
@@ -33,6 +35,8 @@
 MODE=${CONVEYOR_SUITE_MODE:-serial}; unset CONVEYOR_SUITE_MODE
 RECORD=${CONVEYOR_SUITE_RECORD:-}; unset CONVEYOR_SUITE_RECORD
 case $MODE in serial | parallel) ;; *) echo "test-full: CONVEYOR_SUITE_MODE is '$MODE', not serial or parallel; nothing run" >&2; exit 2 ;; esac
+AT=${CONVEYOR_SUITE_AT_ONCE:-2}; unset CONVEYOR_SUITE_AT_ONCE
+[[ $AT =~ ^[1-9][0-9]{0,5}$ ]] || { echo "test-full: CONVEYOR_SUITE_AT_ONCE is '$AT', not a whole number from 1; nothing run" >&2; exit 2; }
 rc=0
 tmp=$(mktemp -d) || exit 1
 # A run stopped before its files end (the test step's timeout, testTimeout: testrun.sh testclock(), stops the whole
@@ -119,7 +123,7 @@ if [ "$MODE" = serial ]; then
   i=0; for t in "${files[@]}"; do i=$((i + 1)); runlog "== $t"; if runone "$t" "$i"; then runlog "-- ok $t"; else rc=1; runlog "-- FAIL $t"; fi; done
   ended
 fi
-# Parallel: at most as many files at once as the pool has slots. A file that is no engine runner holds a slot while it
+# Parallel: at most AT files at once, and never more than the pool has slots. A file that is no engine runner holds a slot while it
 # runs (the run's home slot or one of the pool, slot_take) and is pinned to its core (slot_mine); the engine's runner,
 # its case files and any other bash file that reads the pool itself (a line of its own that sources the slots and calls
 # slot_pool, as conveyor/tools/closure.test.sh does) hold none, as each of their cases takes a slot of its own: a file
@@ -129,6 +133,7 @@ fi
 SLOTS=${CONVEYOR_TEST_SLOTS:-conveyor/lib/slots.sh}
 # shellcheck source=/dev/null
 . "$SLOTS" && slot_pool || { echo "test-full: the test slots ($SLOTS) could not be read; nothing run" >&2; exit 1; }
+[ "$AT" -le "$SLOT_N" ] || AT=$SLOT_N
 declare -A job=()
 # Longest first (above): an order the record cannot give (no jq, or a count that is not the files') keeps the suite's.
 # jq's sort is stable, so ties keep the suite's order.
@@ -169,7 +174,7 @@ reap() { # one file that ended: its output printed, its result counted
 }
 i=0
 for t in "${files[@]}"; do
-  while [ ${#job[@]} -ge "$SLOT_N" ]; do reap; done
+  while [ ${#job[@]} -ge "$AT" ]; do reap; done
   i=$((i + 1)); own=''
   case $t in conveyor/conveyor.test.sh | conveyor/tests/*.test.sh) own=1 ;; *.sh) ! grep -q '^\. .*slot_pool' "$t" || own=1 ;; esac
   [ -n "$own" ] || slot_take

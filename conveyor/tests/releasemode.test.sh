@@ -49,6 +49,9 @@ t_relparallel() {
   # release-run starts release-prep in the background and returns: its record is where the run's end shows.
   relwait "the run did not end" '.ended != null'
   jq -e '.state == "passed" and .mode == "parallel"' "$RUN" > /dev/null || fail "the parallel run did not pass with mode parallel in its record: $(cat "$RUN") $(cat "$T/$CASE/cards/release/run.log")"
+  # Bug (#1174): the record did not say how many files ran at once. The control record has no suiteAtOnce: 2, the
+  # default, on a pool of two slots.
+  jq -e '.atOnce == 2' "$RUN" > /dev/null || fail "the parallel run's record does not name the 2 files it ran at once: $(cat "$RUN")"
   for f in 1 2 3 4; do grep -qxF -- "-- ok t/f$f.test.sh" "$wt.test" || fail "the suite's output has no result line of t/f$f.test.sh: $(cat "$wt.test")"; done
   # Two exactly: files ran at once, and never more than the pool's two slots.
   [ "$(atonce)" = 2 ] || fail "the four files did not run two at once on a pool of two slots: $(cat "$STUB/times")"
@@ -67,12 +70,32 @@ t_relparallel() {
 t_relserial() {
   local RUN out SUITE line
   modesetup
+  # Bug (#1174): a setting of files at once reached serial mode. It is 4 here, and serial runs one, its record's atOnce.
+  jq -c '.suiteAtOnce = 4' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json" || fail "the fixture could not be made"
   out=$(unset CONVEYOR_TEST_SLOT; CONVEYOR_TEST_POOL=$POOL loop release-prep 1.1.0 2>&1) || fail "release-prep failed: $out"
-  jq -e '.state == "passed" and .mode == "serial" and .reasons == []' "$RUN" > /dev/null || fail "the serial run did not pass with mode serial and no reason in its record: $(cat "$RUN")"
+  jq -e '.state == "passed" and .mode == "serial" and .atOnce == 1 and .reasons == []' "$RUN" > /dev/null || fail "the serial run did not pass with mode serial, atOnce 1 and no reason in its record: $(cat "$RUN")"
   # Bug: a bash warning on the run's stderr was a passed run's reason, and the Foreman's watcher woke on "release
   # 1.6.0 passed on <commit> at <time>: <the warning>". The watcher's own line for the record ends at the time.
   eval "$(sed -n "/^SUITE='/,/end;'\$/p" "$SRC/foreman/watch-conveyor.sh")"
   line=$(jq -r --argjson now 0 "$SUITE"'suiteline($now)' "$RUN") && [ "$line" = "release 1.1.0 passed on $(jq -r '"\(.sha[0:12]) at \(.ended)"' "$RUN")" ] \
     || fail "the watcher's line for the passed run is not its result, commit and time alone: $line"
   [ "$(atonce)" = 1 ] || fail "two files ran at once in serial mode: $(cat "$STUB/times")"
+}
+# The stored setting of files at once (#1174) reaches a parallel suite, and `release-run atonce` prints it, at most
+# the slots. Bugs: release-prep did not tell the suite the setting, so it ran at the suite's own default of 2; a whole
+# number written 1.0 (or 4.0), which the control record keeps, stopped the run, as bash arithmetic reads no 1.0. A
+# whole release-prep runs here, as only the suite's files running side by side show how many it was told to run at
+# once.
+t_relatonce() {
+  local RUN out
+  modesetup
+  jq -c '.suiteAtOnce = 9' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json" || fail "the fixture could not be made"
+  out=$(unset CONVEYOR_TEST_SLOT; CONVEYOR_TEST_POOL=$POOL loop release-run atonce 2>&1) && [ "$out" = 2 ] \
+    || fail "release-run atonce with suiteAtOnce 9 on a pool of two slots did not print 2: $out"
+  jq -c '.suiteAtOnce = 1.0' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json" || fail "the fixture could not be made"
+  out=$(unset CONVEYOR_TEST_SLOT; CONVEYOR_TEST_POOL=$POOL loop release-run atonce 2>&1) && [ "$out" = 1 ] \
+    || fail "release-run atonce with suiteAtOnce 1.0 did not print 1: $out"
+  out=$(unset CONVEYOR_TEST_SLOT; CONVEYOR_TEST_POOL=$POOL loop release-prep 1.1.0 --parallel 2>&1) || fail "release-prep --parallel with suiteAtOnce 1.0 failed: $out"
+  jq -e '.state == "passed" and .mode == "parallel" and .atOnce == 1' "$RUN" > /dev/null || fail "the parallel run with suiteAtOnce 1.0 did not pass with atOnce 1 in its record: $(cat "$RUN")"
+  [ "$(atonce)" = 1 ] || fail "the parallel run with suiteAtOnce 1.0 ran more than one file at once on a pool of two slots: $(cat "$STUB/times")"
 }

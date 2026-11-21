@@ -15,7 +15,7 @@ relreusesetup() {
   runsetup "$1"
   mkdir -p "$T/$CASE/cards/release" && printf '[{"context":"conveyor/release-suite","state":"success"}]\n' > "$STUB/statuses" \
     && jq -cn --arg o "$O" '{kind: "release", step: "release-prep", version: "1.1.0", since: "2026-11-15T08:00:00Z", ended: "2026-11-15T08:25:00Z",
-      state: "passed", sha: $o, mode: "parallel", done: 3, failed: 0, cases: [], moved: false, main: $o, reasons: [], pid: 1}' > "$RUN" || fail "the fixture could not be made"
+      state: "passed", sha: $o, mode: "parallel", atOnce: 2, done: 3, failed: 0, cases: [], moved: false, main: $o, reasons: [], pid: 1}' > "$RUN" || fail "the fixture could not be made"
 }
 # Bug (#35): the Board's Release ran the whole suite again (release-prep, about 25 min) on the commit whose pass
 # release-prep had just recorded. The suite here fails if called.
@@ -27,7 +27,7 @@ t_relreuse() {
   relwait "the run did not end" '.step == "release" and .ended != null'
   [ ! -e "$STUB/runs" ] || fail "the suite ran again on the commit it passed on: $(cat "$T/$CASE/cards/release/run.log")"
   jq -e --arg o "$O" '.state == "released" and .sha == $o and .done == 3' "$RUN" > /dev/null || fail "release did not release the passed commit $O: $(cat "$RUN") $(cat "$T/$CASE/cards/release/run.log")"
-  jq -e '.mode == "parallel"' "$RUN" > /dev/null || fail "release lost the mode of release-prep's suite it kept: $(cat "$RUN")"
+  jq -e '.mode == "parallel" and .atOnce == 2' "$RUN" > /dev/null || fail "release lost the mode, or the files at once (#1174), of release-prep's suite it kept: $(cat "$RUN")"
   [ -n "$(git -C "$T/$CASE/origin" tag -l v1.1.0)" ] || fail "no tag v1.1.0 was pushed"
 }
 # Bug (#35): a pass on a main that moved since is reused, so a commit no suite tested is released. Here a card lands

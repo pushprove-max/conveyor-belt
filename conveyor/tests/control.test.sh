@@ -328,3 +328,15 @@ t_controlonboarded() {
   jq -c '.onboarded = {at: "x", rules: "build"}' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
   ! loop control >/dev/null 2>&1 || fail "an onboarded entry whose rules are not a list was read"
 }
+# The most test files a release suite runs at once in parallel mode, the stored setting suiteAtOnce (#1174), which
+# release-prep reads (relsuite()). Bugs: a record that leaves it out reads no number, or one other than 2, so the suite
+# runs on every slot of the machine; a value that is no whole number from 1 reads, and the suite is given it.
+t_controlatonce() {
+  local CTL0 v; CTL0=$(jq -c . "$SRC/lib/control-defaults.json")
+  eval "$(sed -n '/^ctlcheck() {/,/^}/p' "$SRC/lib/control.sh")"
+  [ "$(ctlcheck <<<'{}' | jq .suiteAtOnce)" = 2 ] || fail "a record with no suiteAtOnce does not read 2: $(ctlcheck <<<'{}' | jq .suiteAtOnce)"
+  [ "$(ctlcheck <<<'{"suiteAtOnce":4}' | jq .suiteAtOnce)" = 4 ] || fail "the record {\"suiteAtOnce\":4} did not keep its 4"
+  for v in 0 -1 1.5 '"2"' null; do
+    ! ctlcheck <<<"{\"suiteAtOnce\":$v}" >/dev/null || fail "the record {\"suiteAtOnce\":$v} was read, though $v is no whole number from 1"
+  done
+}

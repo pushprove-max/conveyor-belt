@@ -128,6 +128,13 @@ grep -qF 'ask the owner by the picker "Commit the Conveyor pack (.conveyor/proje
 grep -qF '# A release'"'"'s suite: before you run conveyor.sh release-run prep <version> or release-run <version>, ask the owner by the picker "Run the test files one by one or in parallel?"' <<<"$out" \
   && grep -qF 'pass the answer last in the command: --serial for one by one, --parallel for in parallel.' <<<"$out" \
   || fail "the Foreman's start context does not tell it to ask the owner for the suite's mode and pass it: $out"
+# Bug (#1174): the parallel option did not say how many files run at once, so the owner chose it blind; then it named
+# the number of this machine's own record, wrong for a release on the build host or of another project. It names the
+# number release-run atonce prints where the release's project runs (t_relatonce checks that command). The rules are
+# text the Foreman's model reads, so their text is the behaviour here.
+grep -qF '"In parallel (<n> at once)" (faster' <<<"$out" \
+  && grep -qF "<n> is the number bash $SRC/foreman.sh ask <project> release-run atonce prints for the release's project" <<<"$out" \
+  || fail "the Foreman's release question does not name, in its parallel option, the number release-run atonce prints for the release's project: $out"
 # Bug (#220): on a wake for a waiting card the Foreman only reported it, and cards waited for hours. Its rules tell it
 # to find the cause and fix it.
 grep -qF '# A wake that a card has waited (or is still waiting) for main to change, or on another card: do not only report it. Find why it waits' <<<"$out" \

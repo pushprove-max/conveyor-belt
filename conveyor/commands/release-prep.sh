@@ -51,7 +51,9 @@
 # passed (release-prep), released (release), failed (the suite failed), refused (any other refusal) or stopped), sha
 # (the commit the suite runs or ran on, null before it), mode (the suite's mode, serial or parallel, null before it:
 # release-prep's --serial or --parallel, which the suite's command is told as CONVEYOR_SUITE_MODE; a release keeps the
-# mode of the suite whose result it keeps, as relstart() does, and step 2 of the Board shows it), done, failed and cases (the cases ended, those failed and their
+# mode of the suite whose result it keeps, as relstart() does, and step 2 of the Board shows it), atOnce (the most test
+# files the suite runs at once, kept with mode: 1 in serial mode; in parallel the control record's suiteAtOnce, at most
+# the machine's test slots, which the suite's command is told as CONVEYOR_SUITE_AT_ONCE), done, failed and cases (the cases ended, those failed and their
 # names, as at the suite's end; while it runs the snapshot counts them: suiteprog()), timedout (those of them stopped
 # at their time limit, by name), alone (release-prep's red suite: each failed case run alone, as fulljudge() prints it:
 # {case, line, runs, verdict: flaky or failed, why}; a suite passed with every failed case flaky has them here only),
@@ -82,6 +84,7 @@
 # carries the run's mark, in whatever process group), never a whole process group, and its record says stopped; it
 # returns once the release lock is free (exit 1 when it is not). A run that ends in any other way (a KILL too) ends the
 # processes left of it too, so none holds the release lock. Exit 2: refused (a run is already under way; none to stop).
+# `conveyor.sh release-run atonce` prints relatonce(), which the Foreman's release question names.
 # Sourced by conveyor.sh.
 . "$HERE/lib/slots.sh" || exit 1
 . "$HERE/lib/prompts.sh" || exit 1
@@ -298,12 +301,12 @@ relstart() { # <command name> <version>
   # release keeps the suite's commit, mode and cases from release-prep's pass of its version, or from a release of it
   # refused since (a retry takes the pass from the status and runs no suite). From release-prep's failed suite of its
   # version: that suite, and red, the failed run `release --anyway` may go over, kept through a refused release.
-  [ "$1" != release ] || was=$(jq -ce --arg v "$2" 'select(.version == $v and .sha != null) | if .step == "release-prep" and .state == "passed" then {since, sha, mode, done, failed, cases, moved, reused, alone: (.alone // [])}
-    elif .step == "release-prep" and .state == "failed" then {since, sha, mode, done, failed, cases, moved, reused, files, timedout, alone: (.alone // []), red: {sha, files: (.files.failed // []), cases}}
-    elif .step == "release" and .state == "refused" then {since, sha, mode, done, failed, cases, reused, red} else empty end' "$RELRUN" 2>/dev/null) || was=null
+  [ "$1" != release ] || was=$(jq -ce --arg v "$2" 'select(.version == $v and .sha != null) | if .step == "release-prep" and .state == "passed" then {since, sha, mode, atOnce, done, failed, cases, moved, reused, alone: (.alone // [])}
+    elif .step == "release-prep" and .state == "failed" then {since, sha, mode, atOnce, done, failed, cases, moved, reused, files, timedout, alone: (.alone // []), red: {sha, files: (.files.failed // []), cases}}
+    elif .step == "release" and .state == "refused" then {since, sha, mode, atOnce, done, failed, cases, reused, red} else empty end' "$RELRUN" 2>/dev/null) || was=null
   # by: what started the run when it was not the owner (CONVEYOR_RELEASE_BY: "fixes landed", relfixes(), lib/fulltest.sh).
   jq -cn --arg s "$1" --arg v "$2" --arg t "$(clock)" --argjson p "${CONVEYOR_RELEASE_PID:-$$}" --argjson w "$was" --arg by "${CONVEYOR_RELEASE_BY:-}" \
-    '{kind: "release", step: $s, version: $v, since: $t, ended: null, state: "running", sha: null, mode: null, done: 0, failed: 0, cases: [], alone: [], moved: false, reused: null, reasons: [], pid: $p, red: null, anyway: null, allowed: null, minver: null, by: (if $by == "" then null else $by end)} + $w' > "$RELRUN.new" \
+    '{kind: "release", step: $s, version: $v, since: $t, ended: null, state: "running", sha: null, mode: null, atOnce: null, done: 0, failed: 0, cases: [], alone: [], moved: false, reused: null, reasons: [], pid: $p, red: null, anyway: null, allowed: null, minver: null, by: (if $by == "" then null else $by end)} + $w' > "$RELRUN.new" \
     && mv -f "$RELRUN.new" "$RELRUN" && RELSTARTED=1
   # Each process the run starts carries its mark (relprocs()). The run's end ends them all: the suite's runner
   # (timeout) is a process group of its own, which a signal to this process never reaches, and each holds the release
@@ -443,19 +446,29 @@ relminver() { # <command name> <commit>
 # passed every run alone is flaky (the flaky-test record, its source "release <version> <commit>") and blocks nothing:
 # when every failed case is flaky, the suite passes, and its status and the record (cases [], failed 0) say so. Any
 # other blocks the release.
+# The most test files a parallel suite runs at once in this project on this machine: the control record's suiteAtOnce
+# (floor: 4.0 as 4, which bash reads), at most the test slots (slot_pool; relsuite's subshell holds none), as the suite.
+relatonce() { # <command name>
+  local at
+  at=$(ctl | jq -e '.suiteAtOnce | floor') || { echo "conveyor: $1: the control record's suiteAtOnce cannot be read; nothing run" >&2; return 1; }
+  slot_pool >/dev/null && echo $((at < SLOT_N ? at : SLOT_N)) || { echo "conveyor: $1: the test slots cannot be read; nothing run" >&2; return 1; }
+}
 # 0: passed and posted; 1: failed (failure posted), or a step could not be done; 2: the pack names no test.full.
 relsuite() { # <command name> <commit>
-  local n=$1 sha=$2 cmd wt=$CARDS/release/wt out rc sr state desc m0 m1 p l='' u=null f al='[]' fl=''
+  local n=$1 sha=$2 cmd wt=$CARDS/release/wt out rc sr state desc m0 m1 p l='' u=null f al='[]' fl='' at
   packget test.full cmd || return 1
   [ -n "$cmd" ] || { echo "conveyor: $n: the pack names no full test suite (test.full); nothing run" >&2; return 2; }
   # The mod on its oldest Claude Code first: its failure stops the release, as a red test file does.
   relminver "$n" "$sha" || return 1
   # main as the suite starts: a card that lands while it runs moves it (the record's moved).
   m0=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)
-  relrec --arg s "$sha" --arg m "$m0" --arg md "$RELMODE" '.sha = $s | .mode = $md | .done = 0 | .failed = 0 | .cases = [] | .alone = [] | .moved = false | .reused = null | .main = (if $m == "" then null else $m end)'
+  # The most files at once (the record's atOnce): 1 in serial mode; in parallel relatonce().
+  at=1
+  [ "$RELMODE" != parallel ] || at=$(relatonce "$n") || return 1
+  relrec --arg s "$sha" --arg m "$m0" --arg md "$RELMODE" --argjson at "$at" '.sha = $s | .mode = $md | .atOnce = $at | .done = 0 | .failed = 0 | .cases = [] | .alone = [] | .moved = false | .reused = null | .main = (if $m == "" then null else $m end)'
   # The suite's command is told the run's mode (RELMODE), the whole run's and a rerun of some files alike, and the
-  # suite record (SUITERUNS), whose times order its files in parallel mode.
-  export CONVEYOR_SUITE_MODE=$RELMODE CONVEYOR_SUITE_RECORD=$SUITERUNS
+  # suite record (SUITERUNS), whose times order its files in parallel mode, and the most files it runs at once.
+  export CONVEYOR_SUITE_MODE=$RELMODE CONVEYOR_SUITE_RECORD=$SUITERUNS CONVEYOR_SUITE_AT_ONCE=$at
   out=$({ git worktree remove --force "$wt" 2>/dev/null; rm -rf "$wt" "$wt".*; git worktree prune
     git worktree add -q --detach "$wt" "$sha" && deps "$wt"; } 2>&1 < /dev/null) || {
     git worktree remove --force "$wt" 2>/dev/null; echo "conveyor: $n: the worktree of ${sha:0:12} could not be made; nothing run: ${out:0:600}" >&2; return 1; }
@@ -770,13 +783,14 @@ if [ "$CMD_ARG" = release ]; then
   relrun release "$ver"
 elif [ "$CMD_ARG" = release-run ]; then
   if [ "$*" = stop ]; then releasestop
+  elif [ "$*" = atonce ]; then relatonce release-run
   else
     how=; by=
     # The suite's mode, last, for the forms that run release-prep's suite (not anyway, which runs none).
     if [ $# -ge 2 ] && [ "$1" != anyway ] && [[ ${!#} =~ ^--(parallel|serial)$ ]]; then RELMODE=${BASH_REMATCH[1]}; set -- "${@:1:$#-1}"; fi
     if [ $# = 2 ] && [ "$1" = prep ]; then how=prep; shift
     elif [ $# = 4 ] && [ "$1" = anyway ] && [ "$3" = --by ] && [[ $4 == *[![:space:]]* && $4 != *$'\n'* ]]; then how=anyway by=$4; set -- "$2"; fi
-    [ $# = 1 ] && [[ $1 =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "usage: conveyor.sh release-run [prep] <version: X.Y.Z> [--parallel | --serial] | release-run anyway <version: X.Y.Z> --by <who> | release-run stop" >&2; exit 2; }
+    [ $# = 1 ] && [[ $1 =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "usage: conveyor.sh release-run [prep] <version: X.Y.Z> [--parallel | --serial] | release-run anyway <version: X.Y.Z> --by <who> | release-run stop | release-run atonce" >&2; exit 2; }
     mkdir -p "$CARDS/release" && releasego "$1" $how "$by"
   fi
 else

@@ -47,7 +47,8 @@ CTL_K=()
 # verdict on a large issue is recorded, and the issue is built whole, splitcheck()). The rule Pick settings is off
 # (rules.pick: no card's group and builder choice is recorded, modelpick()). No Tests seat is set: no test action starts (testaction()). The project
 # is not onboarded (onboarded null; `control onboarded` sets {at, rules}: when the owner finished the Board's setup and
-# the rules confirmed there), so the Board opens its setup. Empty when
+# the rules confirmed there), so the Board opens its setup. A release suite in parallel mode runs at most suiteAtOnce
+# test files at once, 2 (a whole number from 1; at most the machine's test slots: relsuite(), commands/release-prep.sh). Empty when
 # the file cannot be read, or there is no jq (doctor says so): then no record is read.
 CTL0=$(jq -c . "$HERE/lib/control-defaults.json" 2>/dev/null) || CTL0=
 ctl() { local CTL_V; ctlread || return 1; printf '%s\n' "$CTL_V"; }
@@ -86,6 +87,7 @@ ctlcheck() { # [<file>]: the record on the input, or in the file, whole, or exit
         else (.key | test("^(small|medium) (docs|code)$")) and (.value | type == "object" and (keys - ["challenger", "promoted"]) == ["at", "decision"]
           and (.at | type == "string") and (.decision | IN("promote", "keep", "drop", "add", "next")) and all(.challenger, .promoted | select(. != null); choice)) end))
       and (.pickBack == null or (.pickBack | type == "object" and keys == ["at", "reason"] and all(.[]; type == "string")))
+      and (.suiteAtOnce | type == "number" and . >= 1 and . == floor)
       and ([.account, .reviewAccount] | all(. == null or (type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")))))' \
     "$@" 2>/dev/null
 }

@@ -67,7 +67,8 @@ to put several checks into one command, and to read an image only when you ask o
 
 Before the Foreman starts a release's suite (`conveyor.sh release-run prep <version>` or `conveyor.sh release-run
 <version>`), it asks you by the picker: "Run the test files one by one or in parallel?". **One by one** is slower and
-puts the least load on the build machine. **In parallel** is faster, but puts more load on the build machine, and the
+puts the least load on the build machine. **In parallel** (for example **In parallel (2 at once)**, with the number
+of files that run at once for that project) is faster, but puts more load on the build machine, and the
 belt is slower while the suite runs. The Foreman adds your answer to the command: `--serial` or `--parallel`.
 
 A watcher wakes the Foreman when something needs it. The wake holds the outcome, so the Foreman does not have to look

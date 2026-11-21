@@ -235,3 +235,4 @@ GitHub and releases:
   `release-run prep <version>` is its **Draft notes** and **Run suite**: `release-prep` alone, which releases nothing.
   `release-run anyway <version> --by <who>` is its **Release anyway**: `release --anyway` alone.
   `release-run stop` stops that run ([Releases](releases.md#a-release-from-the-board)).
+  `release-run atonce` prints the most test files a parallel suite runs at once on this machine.

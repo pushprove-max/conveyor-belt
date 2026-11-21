@@ -48,5 +48,6 @@
   "prMerge": null,
   "onboarded": null,
   "picks": {},
-  "pickBack": null
+  "pickBack": null,
+  "suiteAtOnce": 2
 }
