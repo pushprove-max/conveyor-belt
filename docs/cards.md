@@ -23,9 +23,9 @@ The card builds in a fresh git worktree. Claude build, fix and review sessions s
 
 A Claude build or fix session cannot use the tools that schedule work, send messages or start other agents:
 `ScheduleWakeup`, `CronCreate`, `CronDelete`, `CronList`, `Monitor`, `RemoteTrigger`, `PushNotification`,
-`SendMessage`, `ListAgents`, `Workflow` and `Agent`. It can still use `WebFetch` and `WebSearch`. There is no limit
-on turns or on cost. The session ends at its time limit, or sooner when it makes no progress for the pack's
-`tunables.stuck`.
+`SendMessage`, `ListAgents`, `Agent` and the tool that runs a script of steps. It can still use `WebFetch` and
+`WebSearch`. There is no limit on turns or on cost. The session ends at its time limit, or sooner when it makes no
+progress for the pack's `tunables.stuck`.
 
 The card's guard hooks check each Bash, Edit, Write and AskUserQuestion call of a build or fix session. Each guard
 hook that `onFailure: block` marks (all the guards of Conveyor, and each guard of `.conveyor/hooks.json` with that
