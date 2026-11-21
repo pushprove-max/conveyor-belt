@@ -13,7 +13,7 @@
   // Each question: its title, what it compares and the tasks it sets.
   const QS = { works: ['Does it work at all?', 'A new version or a changed arm: one total break shows.', 5], better: ['Is one better than another?', 'Two arms or two versions on the same tasks.', 50],
     value: ['Which arm gives the most per dollar?', 'Every ready arm, on the same tasks.', 30] };
-  // The states the mockup shows; an arm in another state (checking, unchecked) has none kept.
+  // The states the mockup shows; an arm in another state (checking, unchecked, not offered) has none kept.
   const ARM_STATE = { ready: ['ready', 'ok'], changed: ['changed', 'warn'], expired: ['expired', 'quiet'] };
   const offered = () => K.armsOf().filter((a) => a.state !== 'not offered');
   // The arms a question ticks: the Conveyor arm; it and Claude alone; or every ready arm (6 at most).
@@ -61,12 +61,13 @@
   function armRow(a, n) {
     const box = h('input'), [word, tone] = ARM_STATE[a.state] || [K.NOT_KEPT, 'quiet'], k = keptOf(a, n), p = K.obj(a.perTask);
     box.type = 'checkbox'; box.checked = planOf().arms.has(a.name); box.dataset.act = `arm-${a.name}`; box.setAttribute('aria-label', a.label);
+    box.disabled = a.state === 'not offered'; // listed as the mockup does, but no run can use it: it stays unticked
     box.addEventListener('change', () => { if (box.checked) planOf().arms.add(a.name); else planOf().arms.delete(a.name); K.draw(); });
     return [box, K.armSaid({ s: a.s, label: a.label }), K.chip(word, tone), { v: K.usd(perTask(a)), c: 'r' },
       { v: p && K.num(p.minutes) !== null ? String(p.minutes) : K.NOT_KEPT, c: 'r' }, { v: a.kind === 'conveyor' && !k ? '0 (new engine)' : String(k), c: 'r' }];
   }
   function armsTable(n) {
-    const arms = K.paint(offered().map((a) => ({ ...a, arm: a.name })));
+    const arms = K.paint(K.armsOf().map((a) => ({ ...a, arm: a.name })));
     return K.table(['', 'Arm', 'State', ['$ / task', 'r'], ['Min / task', 'r'], ['Kept results', 'r']], arms.map((a) => armRow(a, n)), 'bench-planarms', (tr, i) => { tr.dataset.arm = arms[i].name; });
   }
   // The arms and the tasks. The slider changes the figures it moves in place (moved: Before you start), never the
@@ -159,14 +160,15 @@
   }
   // The usage guard chip: the plan's trials (the arms' parts, in order) times the share one trial used, taken off the share
   // of the week left now, must leave more than the share at which the guard stops (the history's weekLeft.stop; "off" for no guard), for each
-  // login the arms use (both guards, when they read one). Not kept when a share left, the stop or what a trial uses is not kept.
+  // login the arms use (both guards, when they read one). Not kept when a share left is not kept, or, with the guard on, when the stop or
+  // what a trial uses is not kept (with the guard off, what a trial uses does not matter).
   function weekChip(arms, parts) {
     const left = K.obj(K.hist().weekLeft) || {}, stop = K.num(left.stop);
-    // The guard is off (stop "off"): the guard does not stop the run, whatever it uses of the week (staff can still stop it).
-    if (left.stop === 'off') return K.chip('off; the guard will not stop the run', 'ok');
+    const off = left.stop === 'off'; // the guard does not stop the run, whatever it uses of the week: the plan fits, once the share left is kept
     const kinds = [...new Set(arms.map((a) => a.guard).filter(Boolean))];
     const fits = (left.shared === true ? [kinds] : kinds.map((k) => [k])).map((g) => {
       const rate = weekRate(g[0]), l = K.num(left[g[0]]);
+      if (off) return l === null ? null : true;
       return rate === null || l === null || stop === null ? null : l - rate * K.sum(arms.map((a, i) => (g.includes(a.guard) ? parts[i].todo : 0))) > stop;
     });
     if (fits.includes(null)) return K.chip(K.NOT_KEPT, 'quiet');

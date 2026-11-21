@@ -1086,14 +1086,14 @@ has not run yet. Point at a square to see the task. Click a square to open the t
 another?** (50 tasks, Conveyor and Claude alone) or **Which arm gives the most per dollar?** (30 tasks, up to 6 ready
 arms). The question sets the tasks and the arms. You can change both after that. **Arms** gives each arm's state
 (**ready**, **changed** or **expired**; "not kept" for an arm that has no check, or is being checked), its
-cost and minutes for each task, and the results kept for it, which the run reuses at no cost. An arm that the project
-does not offer has no row. The **Tasks** slider sets
+cost and minutes for each task, and the results kept for it, which the run reuses at no cost. Every arm has a row.
+An arm that the project does not offer shows "not kept" and has its box off. The **Tasks** slider sets
 the number of tasks, and shows the smallest difference that this number can show. **Before you start** gives a
 verdict on the size for your question, the cost at list prices, the machine time, the usual and worst-case sessions,
 the kept results reused, the usage guard ("fits in the week left" or "would reach the guard; the run stops there", from
 the share of the week left, the share at which the guard stops and the share that earlier runs used for each task: the
-plan fits when it leaves more than the stop; "off; the guard will not stop the run" when the guard is off; "not kept" when no earlier run kept it,
-or the arms have no guard), the container limits of the belt ("not kept" when they are not kept),
+plan fits when it leaves more than the stop, and it fits whatever it uses when the guard is off; "not kept" when the share left is not kept,
+or the arms have no guard, or, with the guard on, when no earlier run kept the share a task used), the container limits of the belt ("not kept" when they are not kept),
 and the command that the run sends. **Start the run** sends that command,
 with the engine's default settings. It stays off while a run goes, with no arm picked, while an arm that you picked is
 not ready, and while the usage guard holds an arm that you picked. **Check the arms first** runs the

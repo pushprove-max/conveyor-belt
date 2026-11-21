@@ -219,8 +219,8 @@ test('Task, 7 arms on a task the Caveman arm did not fire on: the Note says did 
 });
 
 // ---- Plan a run ----
-// Bug it guards: the arm table showed the engine's other state words ("unchecked", "checking") and the arms it does not
-// offer, where the mockup has ready, changed and expired: an arm in any other state has no state kept. Start and Check the
+// Bug it guards: the arm table showed the engine's other state words ("unchecked", "checking"), where the mockup has
+// ready, changed and expired: an arm in any other state has no state kept. Start and Check the
 // arms first are on where the mockup has them on (ticked arms ready: Check runs again for them), off only with a word of
 // why; the Belt row says not kept when the limits are not kept.
 test('Plan a run, 2 runs of 1 task: the arm table shows the mockup\'s states, both buttons are on, and no why shows', async () => {
@@ -229,8 +229,13 @@ test('Plan a run, 2 runs of 1 task: the arm table shows the mockup\'s states, bo
   set.hist.limits = {};
   const w = await opened(set, 'plan');
   const arms = rows(q(w, '.bench-planarms'));
-  assert.equal(arms.length, 14, 'the arm not offered has no row');
+  // Bug it guards (#1233): the arm not offered had no row; the mockup lists every arm. Its row shows "not kept" for the
+  // state, and its box is off, so no run or check is sent for an arm the project does not offer.
+  assert.equal(arms.length, 15, 'every arm has a row, the arm not offered too');
   assert.deepEqual(Array.from(new Set(arms.map((r) => r[2]))), ['ready', 'expired', 'not kept']);
+  const row = q(w, `.bench-planarms tr[data-arm="${set.hist.arms[5].name}"]`);
+  assert.ok(row, 'the row of the arm not offered');
+  assert.equal(row.querySelector('input[type="checkbox"]').disabled, true, 'the arm not offered cannot be ticked');
   assert.equal(kv(q(w, '.bench-before')).find(([k]) => k === 'Belt')[1], 'not kept');
   assert.deepEqual(['start', 'check-arms'].map((a) => act(bp(w), a).disabled), [false, false]);
   assert.equal(q(w, '.bench-why'), null, 'with both on, the page says nothing of why');

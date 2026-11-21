@@ -303,14 +303,26 @@ test('Plan a run, a plan that fits in the week left but ends past the guard\'s s
 
 // Bug it guards (#1226): with the guard off the engine keeps stop "off", but the chip priced the plan against a stop of 0 and
 // said "would reach the guard; the run stops there" when 3% is left and the plan needs 4%, though the guard is off.
-test('Plan a run, the guard off: the chip does not say the guard stops the run', async () => {
+// Bug it guards (#1233): with the guard off the chip said "off; the guard will not stop the run", a sentence the mockup does
+// not have; it uses "fits in the week left", as the guard cannot stop the plan.
+test('Plan a run, the guard off: the chip says fits in the week left, not the guard will not stop the run', async () => {
   const set = BH.study();
   set.hist.weekLeft = { conveyor: 3, agent: 3, shared: false, stop: 'off' };
   Object.assign(set.hist.runs[0], { weekStart: { conveyor: 40, agent: 40, shared: false }, weekLeft: { conveyor: 31, agent: 35, shared: false } });
   set.hist.runs.forEach((r) => r.cols.forEach((c) => { c.ran = c.done; }));
   const w = await opened(set, 'plan');
   const n = act(bp(w), 'plan-n'); n.value = '50'; n.dispatchEvent(new w.Event('input'));
-  assert.equal(kv(q(w, '.bench-before')).find(([k]) => k === 'Usage guard')[1], 'off; the guard will not stop the run','50 trials at 0.09% need about 4.5% of the 3% left, with no guard');
+  assert.equal(kv(q(w, '.bench-before')).find(([k]) => k === 'Usage guard')[1], 'fits in the week left', 'the guard is off: the plan fits whatever it uses of the 3% left');
+  assert.ok(!text(page(w)).includes('will not stop the run'), 'the removed sentence is nowhere on the page');
+});
+
+// Bug it guards (#1233, review E1): with the guard off and no reading of the week left (the engine keeps null), the chip said
+// "fits in the week left" before it looked at the reading. With no share left kept, it says "not kept".
+test('Plan a run, the guard off and no share of the week left kept: the chip says not kept', async () => {
+  const set = BH.study();
+  set.hist.weekLeft = { conveyor: null, agent: null, shared: false, stop: 'off' };
+  const w = await opened(set, 'plan');
+  assert.equal(kv(q(w, '.bench-before')).find(([k]) => k === 'Usage guard')[1], 'not kept', 'weekLeft {conveyor: null, agent: null, stop: "off"}');
 });
 
 // Bug it guards (#1223, review E2): Conveyor and Claude alone read one login, so a run of both arms that used 9 points
