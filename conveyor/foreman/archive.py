@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """archive.py <state.md> -- the Foreman's saved state kept small with no hand trim (foreman.sh start runs it).
 
-Every item whose line starts `- DONE`, with its indented continuation lines, is appended to
+Every item whose line starts `- DONE` (or starts `- ` and ends ` - DONE`), with its indented continuation lines, is appended to
 state-archive-<YYYY-MM-DD>.md beside state.md under one timestamp line, then state.md is swapped in one step with a
 temp file of the rest (renameat2 RENAME_EXCHANGE on Linux, renamex_np RENAME_SWAP on macOS). The archive is written
 first: a kill between the two repeats an item, never loses one, and state.md is never absent.
@@ -67,7 +67,7 @@ def swap(a, b):
 seen = read(path)
 kept, done, inside = [], [], False
 for line in seen.splitlines(keepends=True):
-    if line.startswith(b"- DONE"):
+    if line.startswith(b"- DONE") or (line.startswith(b"- ") and line.rstrip().endswith(b" - DONE")):
         inside = True
     elif not line.startswith((b" ", b"\t")):
         inside = False

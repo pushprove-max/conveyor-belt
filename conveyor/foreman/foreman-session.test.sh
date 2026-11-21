@@ -89,6 +89,15 @@ t_state_stop_done() {
   { lines 5100 '- open'; lines 3000 '- DONE'; } > "$FD/state.md"
   out=$(echo '{"stop_hook_active": false}' | bash "$SRC/stop.sh" state)
   jq -e '.decision == "block" and (.reason | test("5100 bytes of open lines"))' <<<"$out" >/dev/null || fail "5100 open bytes did not block with that size: $out"
+  jq -e '.reason | test("begin the line of a finished item with .- DONE.")' <<<"$out" >/dev/null || fail "the block text for the input {\"stop_hook_active\": false} does not say the line must begin with - DONE: $out"
+}
+# Bug (issue 1218): finished items whose line ENDS with ' - DONE' were counted as open, so the cap blocked a stop for lines the
+# next start archives.
+t_state_stop_done_end() {
+  local out
+  ready
+  { lines 4000 '- open'; lines 3000 '- shipped item' | sed 's/$/ - DONE/'; printf '  an indented line of it\n'; } > "$FD/state.md"
+  out=$(echo '{"stop_hook_active": false}' | bash "$SRC/stop.sh" state); [ -z "$out" ] || fail "4000 open bytes and 3000 bytes of items ending ' - DONE' blocked the stop; the input was {\"stop_hook_active\": false}: $out"
 }
 # Bug: the stop kept its own copy of the cap, so a change of CAP in foreman.sh left the stop on the old one. The stop runs
 # from a copy of the plugin with a changed CAP.
@@ -496,7 +505,7 @@ out=$(sess s1 resume | bash "$SRC/foreman.sh" start); [[ $out != *'old engine'* 
 
 # Every case at once, each in a subshell on its own fixture; each one's output is shown once all have ended, and the
 # test passes only when each case ran to its end.
-cases=(state_stop state_stop_done state_stop_cap reply_stop filing ask_pin ask_self session session_fork session_claims stale)
+cases=(state_stop state_stop_done state_stop_done_end state_stop_cap reply_stop filing ask_pin ask_self session session_fork session_claims stale)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for one_case in $SEL; do case " ${cases[*]} " in *" $one_case "*) ;; *) echo "unknown case $one_case" >&2; exit 2 ;; esac; done

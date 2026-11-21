@@ -157,11 +157,15 @@ CONVEYOR_FOREMAN_ASK='exit 3' out=$(cd "$M" && PATH=$T/bin:$PATH bash "$SRC/../c
 grep -qF 'Conveyor alpha: unavailable' <<<"$out" || fail "a record that does not answer is not named unavailable: $out"
 
 CASE=archive
-printf '# state\n- DONE shipped the thing\n  with its detail\n- open item\n' > "$FD/state.md"
+# Bug (issue 1218): a session read the start text as "end the line with - DONE", and items so marked were never archived.
+printf '# state\n- DONE shipped the thing\n  with its detail\n- shipped the other thing - DONE\n  with its own detail\n- open item\n' > "$FD/state.md"
 out=$(cd "$M" && PATH=$T/bin:$PATH bash "$SRC/../conveyor.sh" foreman 2>&1)
 grep -q 'DONE' "$FD/state.md" && fail "a DONE item stayed in the state: $(cat "$FD/state.md")"
 grep -qx -- '- open item' "$FD/state.md" || fail "an open item left the state"
 cat "$FD"/state-archive-*.md 2>/dev/null | grep -qx '  with its detail' || fail "the DONE item and its detail were not archived"
+cat "$FD"/state-archive-*.md 2>/dev/null | grep -qx '  with its own detail' || fail "an item ending ' - DONE' and its detail were not archived: $(cat "$FD/state.md")"
+grep -qF 'with its own detail' "$FD/state.md" && fail "the detail of an item ending ' - DONE' stayed in the state: $(cat "$FD/state.md")"
+grep -qF 'begin the line of a finished item with "- DONE"' <<<"$out" || fail "the start text does not say the line must begin with - DONE: $out"
 }
 
 t_wake() {

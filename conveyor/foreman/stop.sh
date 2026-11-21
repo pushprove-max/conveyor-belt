@@ -38,10 +38,10 @@ case ${1:-} in
     [ "$(jq -r '.stop_hook_active // false' <<<"$INPUT" 2>/dev/null)" != true ] || exit 0
     cap=$(sed -n 's/^CAP=\([0-9][0-9]*\)[ ;].*/\1/p' "$(dirname "${BASH_SOURCE[0]}")/foreman.sh" 2>/dev/null)
     [ -n "$cap" ] || { echo "stop.sh: no CAP=<bytes> line in foreman.sh" >&2; exit 2; }
-    # The same split archive.py makes: an item starts at a line beginning '- DONE' and runs over the indented lines after it.
-    n=$(LC_ALL=C awk '/^- DONE/ { skip = 1; next } /^[ \t]/ { if (!skip) print; next } { skip = 0; print }' "$FD/state.md" 2>/dev/null | wc -c | tr -d ' ')
+    # The same split archive.py makes: an item starts at a line beginning '- DONE', or beginning '- ' and ending ' - DONE', and runs over the indented lines after it.
+    n=$(LC_ALL=C awk '/^- DONE/ || /^- .* - DONE[ \t]*$/ { skip = 1; next } /^[ \t]/ { if (!skip) print; next } { skip = 0; print }' "$FD/state.md" 2>/dev/null | wc -c | tr -d ' ')
     [ "${n:-0}" -gt "$cap" ] || exit 0
-    block "state.md has $n bytes of open lines, over its $cap-byte cap: mark finished items '- DONE' (they are archived at the next start) and shorten the rest" ;;
+    block "state.md has $n bytes of open lines, over its $cap-byte cap: begin the line of a finished item with '- DONE', as '- DONE 2026-11-21 08:20 ET: ...' (they are archived at the next start) and shorten the rest" ;;
   reply) ;;
   *) echo "usage: stop.sh state | reply" >&2; exit 2 ;;
 esac

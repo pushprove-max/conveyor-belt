@@ -428,7 +428,7 @@ $plug
 # Run a command that ends in under 2 minutes in the foreground; put several checks into one command; start a background command only for a long run.
 # Read an image (a screenshot, a GIF frame) only when the owner asks or a check needs to see it.
 # To be woken when an issue lands, append its number to $FD/await-<project>.txt, <project> being the one it is in (append only; never rewrite it).
-# Your saved state is $s: keep it current, under $CAP bytes; mark a finished item "- DONE" and it is archived at the next start.
+# Your saved state is $s: keep it current, under $CAP bytes; begin the line of a finished item with "- DONE" (for example "- DONE 2026-11-21 08:20 ET: ...") and it is archived at the next start.
 EOF
   # There, each noted plugin problem that names no issue (no "filed as #<n>"), so an older one is not lost, with the
   # line that marks it filed: in the form, its own text (between its card and its evidence) with the note's card and
