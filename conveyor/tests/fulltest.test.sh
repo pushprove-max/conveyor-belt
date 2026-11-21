@@ -375,7 +375,8 @@ t_fullreap() {
 }
 
 # Bug this guards (issue 1276): the loop's clearing of a marker must not touch the marker of a run that is alive. A run holds
-# the full test's lock while it runs; clearing on the marker's age alone would record a live run as dead and let a second start.
+# the full test's lock while it runs; clearing on the marker's age alone would record a live run as an error and hide its
+# marker, so the status and the Board would show no run under way while it still runs (the lock still refuses a second start).
 t_fullreapheld() {
   ftnow
   printf '%s\n' '{"since":"2026-11-15T21:33:43Z","sha":"06bf84a5880dc5e8c9ae9cb38f1565ce7b8f1da6","how":"push"}' > "$ST/fulltest.jsonl.running"
