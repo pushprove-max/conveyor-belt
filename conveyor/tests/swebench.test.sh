@@ -407,6 +407,10 @@ t_sweweek() {
     || fail "history does not give the share of the week each guard has left (one login for both), the share left at which the guard stops (98% used: 2), or the trials the run's arm ran: $(loop bench swe history | jq -c '.weekLeft')"
   [ "$(loop bench swe show "$(tail -n 1 "$B/runs.jsonl" | jq -r .id)" | jq -c '[.run.weekLeft.conveyor, .tasks[0].cells[0].imageBytes]')" = '[31,4100000000]' ] \
     || fail "show does not give the run's share of the week left and the task's image size"
+  # Bug (#1226): with the guard off history sent stop 0, which the Board read as a guard that stops at 0% left.
+  jq -c '.guard = null' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json"
+  [ "$(loop bench swe history | jq -c .weekLeft.stop)" = '"off"' ] \
+    || fail "history does not say the guard is off with stop \"off\": $(loop bench swe history | jq -c '.weekLeft')"
 }
 # Bug: Claude's usage guard held back an arm with only a Codex login: its preflight and its run refused to start.
 t_swecodexguard() {

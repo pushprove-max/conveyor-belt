@@ -301,6 +301,18 @@ test('Plan a run, a plan that fits in the week left but ends past the guard\'s s
   assert.equal(kv(q(w, '.bench-before')).find(([k]) => k === 'Usage guard')[1], 'would reach the guard; the run stops there', '22 trials at 0.09%: 1.98 of the 3 left, 2 is the stop');
 });
 
+// Bug it guards (#1226): with the guard off the engine keeps stop "off", but the chip priced the plan against a stop of 0 and
+// said "would reach the guard; the run stops there" when 3% is left and the plan needs 4%, though the guard is off.
+test('Plan a run, the guard off: the chip does not say the guard stops the run', async () => {
+  const set = BH.study();
+  set.hist.weekLeft = { conveyor: 3, agent: 3, shared: false, stop: 'off' };
+  Object.assign(set.hist.runs[0], { weekStart: { conveyor: 40, agent: 40, shared: false }, weekLeft: { conveyor: 31, agent: 35, shared: false } });
+  set.hist.runs.forEach((r) => r.cols.forEach((c) => { c.ran = c.done; }));
+  const w = await opened(set, 'plan');
+  const n = act(bp(w), 'plan-n'); n.value = '50'; n.dispatchEvent(new w.Event('input'));
+  assert.equal(kv(q(w, '.bench-before')).find(([k]) => k === 'Usage guard')[1], 'off; the guard will not stop the run','50 trials at 0.09% need about 4.5% of the 3% left, with no guard');
+});
+
 // Bug it guards (#1223, review E2): Conveyor and Claude alone read one login, so a run of both arms that used 9 points
 // kept the same drop for both guards, and the chip priced each Conveyor trial at 9 / 100 instead of 9 / 300 (all trials of
 // the run). With the run's shared: true the rate is 0.03% a trial: 450 trials need about 13%, and 29% is free to use.

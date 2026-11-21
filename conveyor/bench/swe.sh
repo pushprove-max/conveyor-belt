@@ -214,11 +214,11 @@ swe_left() { # [an arm that is not the engine's: any non-empty word]
   local p; ctlread 2>/dev/null || { echo null; return; }
   p=$(swe_pct "$CTL_V" "${1:-}"); jq -n --arg p "$p" 'if $p == "" then null else (100 - ($p | tonumber)) * 10 | round / 10 end'
 }
-# The share of the week left at which the guard stops new trials (100 less its percent; 0 for no guard), null when the
-# control record does not read. The Board's Plan keeps a plan's use of the week above it.
+# The share of the week left at which the guard stops new trials (100 less its percent; "off" for no guard, which stops
+# nothing), null when the control record does not read. The Board's Plan keeps a plan's use of the week above it.
 swe_weekstop() {
   ctlread 2>/dev/null || { echo null; return; }
-  jq -c 'if .guard == null then 0 else 100 - .guard end' <<<"$CTL_V"
+  jq -c 'if .guard == null then "off" else 100 - .guard end' <<<"$CTL_V"
 }
 # {conveyor, agent, shared}: the share left (swe_left) for each guard a run's arms have (swe_guards), null for one they have not;
 # shared, true when both guards read one account (the conveyor arms use only the account the agent arms use), so a drop in

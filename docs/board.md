@@ -1078,7 +1078,7 @@ the number of tasks, and shows the smallest difference that this number can show
 verdict on the size for your question, the cost at list prices, the machine time, the usual and worst-case sessions,
 the kept results reused, the usage guard ("fits in the week left" or "would reach the guard; the run stops there", from
 the share of the week left, the share at which the guard stops and the share that earlier runs used for each task: the
-plan fits when it leaves more than the stop; "not kept" when no earlier run kept it),
+plan fits when it leaves more than the stop; "off; the guard will not stop the run" when the guard is off; "not kept" when no earlier run kept it),
 and the command that the run sends. **Start the run** sends that command,
 with the engine's default settings. It stays off while a run goes, while an arm that you picked is not ready, and
 while the usage guard holds an arm that you picked. **Check the arms first** runs the

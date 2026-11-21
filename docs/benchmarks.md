@@ -340,7 +340,7 @@ login (`conveyor`, `agent`). A figure is null when the guard has no reading or n
 true when both guards read one account: the share the run used is then that of the trials of all its arms that have a
 guard together (an arm that uses Codex alone has none).
 Each arm also has `ran`, the tasks it ran: a reused result and a task not run are not counted. `bench swe history` gives
-the share left now as `weekLeft`, with `stop`, the share left at which the guard stops new trials. Each result keeps the size of its task image in bytes, as `imageBytes`. The Board says "not kept" for a run or a result
+the share left now as `weekLeft`, with `stop`, the share left at which the guard stops new trials (`"off"` when the guard is off). Each result keeps the size of its task image in bytes, as `imageBytes`. The Board says "not kept" for a run or a result
 from before the engine kept these figures.
 
 Each run also keeps a short event log, the last lines of which `bench swe show <run>` gives as `tail`. Each line has

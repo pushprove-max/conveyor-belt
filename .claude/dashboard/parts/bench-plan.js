@@ -145,10 +145,12 @@
     return ran && used > 0 ? used / ran : null;
   }
   // The usage guard chip: the plan's trials (the arms' parts, in order) times the share one trial used, taken off the share
-  // of the week left now, must leave more than the share at which the guard stops (the history's weekLeft.stop), for each
+  // of the week left now, must leave more than the share at which the guard stops (the history's weekLeft.stop; "off" for no guard), for each
   // login the arms use (both guards, when they read one). Not kept when a share left, the stop or what a trial uses is not kept.
   function weekChip(arms, parts) {
     const left = K.obj(K.hist().weekLeft) || {}, stop = K.num(left.stop);
+    // The guard is off (stop "off"): the guard does not stop the run, whatever it uses of the week (staff can still stop it).
+    if (left.stop === 'off') return K.chip('off; the guard will not stop the run', 'ok');
     const kinds = [...new Set(arms.map((a) => a.guard).filter(Boolean))];
     const fits = (left.shared === true ? [kinds] : kinds.map((k) => [k])).map((g) => {
       const rate = weekRate(g[0]), l = K.num(left[g[0]]);
