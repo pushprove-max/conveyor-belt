@@ -48,7 +48,7 @@ mrroute() { # <testroute's arguments>...
 t_mainred() {
   rerunsetup '1 fail flaky' '1 bare three' '2 fail flaky' '2 bare three' '3 fail flaky' '3 bare three' '4 fail flaky' '4 bare three' \
     'main fail flaky' 'main bare three'; rerunfiles
-  local b s v1 v2 mw fl='{"of":null,"files":[{"file":"b.test","cases":[{"name":"flaky","line":"1"}]},{"file":"c.test","cases":[]}],"timeout":null}'
+  local b s v1 v2 mw snap fl='{"of":null,"files":[{"file":"b.test","cases":[{"name":"flaky","line":"1"}]},{"file":"c.test","cases":[]}],"timeout":null}'
   mkdir -p "$R/cases"; echo 't_flaky() { :; }' > "$R/cases/b.test.sh"; git -C "$R" add cases; git -C "$R" commit -qm "the case's file"; b=$(git -C "$R" log -1 --format=%h)
   echo runner > "$R/b.test"; git -C "$R" add b.test; git -C "$R" commit -qm "the runner"; s=$(git -C "$R" rev-parse HEAD)
   git -C "$R" worktree add -q --detach "$T/$CASE/cards/c7" && rerunedit 'echo two >> a.txt' || fail "the card's worktree could not be made"
@@ -70,18 +70,7 @@ t_mainred() {
   [ "$(jq -r '.reds[0].cases[] | select(.case == "b.test: flaky") | "\(.files) \(.last)"' "$ST/mainred.json")" = "[\"cases/b.test.sh\"] $b the case's file" ] \
     || fail "the fix card does not name the last commit of the case's file: $(cat "$ST/mainred.json")"
   [ ! -e "$T/$CASE/cards/mainrun/c7" ] || fail "main's worktree was left behind"
-  # Issue 201: while it only waits for main, its wait mark stands, so the loop counts it against no build slot (idle()).
-  # Issue 220: the snapshot gives when the wait for main began (the belt's live.at), which the Foreman's watcher times
-  # its wake from; without it the wait never wakes the Foreman. The wait is mainred.sh mainwait() itself, polled as it runs: only
-  # a wait under way holds its live record and its mark, and it ends only as main moves (below).
-  # card() begins the wait with the test step's start line, which the snapshot reads the live record by.
-  ( eng 'LIVE=1; began c7 7 test && mainwait "$CONVEYOR_CARDS/c7" '"$s"' c.test "b.test: flaky"; echo "ended $?"' > "$STUB/mw.out" 2>&1 ) & mw=$!
-  wait_until "grep -qs 'waiting for main to change: c.test, b.test: flaky fail on main at ${s:0:12} too' '$T/$CASE/cards/c7.live' && [ -e '$T/$CASE/cards/c7.idle' ]" 'cat "$STUB/mw.out"' \
-    || fail "the card waiting for main did not say so, or did not mark itself waiting: the loop would count it against the cap"
-  [ "$(loop snapshot --fresh 2>/dev/null | jq -r '.belt[] | select(.card == "c7") | .live.at')" = "$(jq -r .at "$T/$CASE/cards/c7.live")" ] \
-    || fail "the snapshot does not give when the wait for main began: $(loop snapshot --fresh 2>/dev/null | jq -c '.belt')"
   echo m > "$R/m.txt"; git -C "$R" add m.txt; git -C "$R" commit -qm "main moves, still red"
-  wait "$mw"; [ "$(cat "$STUB/mw.out")" = "ended 0" ] || fail "the wait did not end once main moved: $(cat "$STUB/mw.out")"
   # The same change on the new main: its passes stand, and what failed runs again (tests(), rerunsince()).
   mrfit; ! rerunstep || fail "the card's test step on the new main passed"
   [ "$(ran 3)" = "flaky three" ] && [ "$(git -C "$T/$CASE/cards/c7" log -1 --format=%s)" = "main moves, still red" ] \
@@ -96,8 +85,23 @@ t_mainred() {
   # The Board's Metrics count each failure by its verdict, and add up the seconds main's runs took: here 7 and 5 (the
   # stub's runs take under a second, so the lines are given those). They count a card once it has ended: its landed line.
   eng 'append "$(line c7 7 landed ok "{\"product\":true,\"sha\":\"$(git rev-parse HEAD)\"}")"' || fail "the card's landed line could not be written"
-  [ "$(loop snapshot --fresh | jq -c '.metrics.today.testFailures')" = '{"card":0,"main":4,"flaky":0,"mainSec":12}' ] \
-    || fail "the snapshot's metrics do not count the failures by verdict, with main's seconds: $(loop snapshot --fresh | jq -c '.metrics.today.testFailures')"
+  # Issue 201: while a card only waits for main, its wait mark stands, so the loop counts it against no build slot (idle()).
+  # Issue 220: the snapshot gives when the wait for main began (the belt's live.at), which the Foreman's watcher times
+  # its wake from; without it the wait never wakes the Foreman. The wait is mainred.sh mainwait() itself, polled as it runs: only
+  # a wait under way holds its live record and its mark, and it ends only as main moves. Card c8 waits here, at the
+  # end, so the one snapshot below shows its live record and c7's metrics: a second snapshot costs about a second.
+  # card() begins the wait with the test step's start line, which the snapshot reads the live record by.
+  s=$(git -C "$R" rev-parse HEAD); eng 'append "$(line c8 8 picked ok "{\"title\":\"title 8\"}")"' || fail "the waiting card's picked line could not be written"
+  ( eng 'LIVE=0.1; began c8 8 test && mainwait "$CONVEYOR_CARDS/c8" '"$s"' d.test "d.test: late"; echo "ended $?"' > "$STUB/mw.out" 2>&1 ) & mw=$!
+  wait_until "grep -qs 'waiting for main to change: d.test, d.test: late fail on main at ${s:0:12} too' '$T/$CASE/cards/c8.live' && [ -e '$T/$CASE/cards/c8.idle' ]" 'cat "$STUB/mw.out"' \
+    || fail "the card waiting for main did not say so, or did not mark itself waiting: the loop would count it against the cap"
+  snap=$(loop snapshot --fresh 2>/dev/null)
+  [ "$(jq -r '.belt[] | select(.card == "c8") | .live.at' <<<"$snap")" = "$(jq -r .at "$T/$CASE/cards/c8.live")" ] \
+    || fail "the snapshot does not give when the wait for main began: $(jq -c ".belt" <<<"$snap")"
+  [ "$(jq -c '.metrics.today.testFailures' <<<"$snap")" = '{"card":0,"main":4,"flaky":0,"mainSec":12}' ] \
+    || fail "the snapshot's metrics do not count the failures by verdict, with main's seconds: $(jq -c '.metrics.today.testFailures' <<<"$snap")"
+  echo o > "$R/o.txt"; git -C "$R" add o.txt; git -C "$R" commit -qm "main moves again"
+  wait "$mw"; [ "$(cat "$STUB/mw.out")" = "ended 0" ] || fail "the wait did not end once main moved: $(cat "$STUB/mw.out")"
 }
 
 # settle() of card c7 at its landing step, as card() calls it after a wait for main or once main moved under its failed
