@@ -28,7 +28,7 @@ msettings() { modelsengine snapshot 'hostclis due >/dev/null 2>&1; modelsettings
 RVWT='w=$CARDS/c$n && git -C "$MAIN" worktree add -q --detach "$w" && echo two >> "$w/a.txt" && git -C "$w" add a.txt'
 # reviewed() alone, as a card's review step calls it, on that worktree: what it prints, then a line of its exit and the
 # verdict it left (rc=<exit> <verdict>). With fix, the review after a fix round follows, as a card's next review is
-# given it: that round's diff in <worktree>.rounds and its re-review section (rereview()) in the brief.
+# given it: that round's diff in <worktree>.rounds and its re-review section (donewhen.sh rereview()) in the brief.
 rvcall() { # <n> [fix]
   # shellcheck disable=SC2016 # expanded in the engine shell (modelsengine)
   modelsengine run "n=$1 f=${2:-}; $RVWT"' && { reviewed "$w" "# Issue: body of the issue"; echo "rc=$? $(verdict "$w.review" 2>/dev/null)"; } \

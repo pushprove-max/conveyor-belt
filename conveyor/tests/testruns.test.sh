@@ -195,7 +195,7 @@ t_trailers() {
   rulewt 7 'echo two >> a.txt; printf "%s\n" "Mutation-verified: broke X, test went red" "not a trailer line" "Co-Authored-By: someone" "-x: no token" > "$PWD.trailers"'
   rulewt 8 'touch b-guard.test.ts'
   rulewt 9 'mkdir -p café; touch café/c-guard.test.ts'
-  # The trailer filter, the brief's section and owing() as card() calls them: first with no pack rule, then with the
+  # The trailer filter, the brief's section and donewhen.sh owing() as card() calls them: first with no pack rule, then with the
   # pack's rule for an added guard-class test, then with a rule whose when grep cannot read.
   fx_in 'owing "$d/10" > "$d/owe.10" && trailerbrief "$d/10" > "$d/brief.10" && trailers "$d/7" > "$d/kept.7" && trailerview "$d/7" > "$d/view.7" || exit 1
     tune '"'"'.commit.trailers = [{"when": "(conformance|guard|parity|coverage)[^/]*\\.test\\.(ts|tsx)$", "token": "Mutation-verified", "ask": "Say what you broke and how the test went red."}]'"'"'
@@ -251,7 +251,7 @@ t_trailermissing() {
 }
 
 # Bug: a path holding a newline escaped the pack's trailer rule: read a line a name, neither half matches the rule's
-# when, so the card owed no trailer and committed without one. owing() (lib/testrun.sh) reads the added names whole.
+# when, so the card owed no trailer and committed without one. owing() (lib/donewhen.sh) reads the added names whole.
 t_trailerpath() {
   local W=$T/$CASE/w out rc
   mkdir -p "$W" && git -C "$W" init -q && touch "$W/$(printf 'e-guard\n.test.ts')" && git -C "$W" add -A || fail "the worktree"

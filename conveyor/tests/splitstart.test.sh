@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
-# Engine cases: the start-up allowance of each file a split adds (splitstart()), measured for each runner the engine
+# Engine cases: the start-up allowance of each file a split adds (speedproof.sh splitstart()), measured for each runner the engine
 # can run a file of with no case selected, or the pack's test.splitAllowance with the reason it was not measured.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
@@ -9,7 +9,7 @@
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
 # Bug these catch (#191): the allowance fell back to the pack's 1 CPU s guess instead of being measured, so an honest
-# split was refused. Each case gives splitstart() a fixture runner whose file costs a known start-up, and wants an
+# split was refused. Each case gives speedproof.sh splitstart() a fixture runner whose file costs a known start-up, and wants an
 # allowance within 20% of it.
 # A fixture runner on PATH, <name>, in $T/$CASE/bin: its start-up takes <start> CPU s; given any arguments but
 # <the arguments of a run with no case>, it also runs its case, one, for 1 CPU s more and says so. It exits <exit>.
@@ -21,10 +21,10 @@ ssrunner() { # <name> <start> <the arguments of a run with no case> [exit]
     "burn $2" "[ \"\$*\" = $(printf %q "$3") ] || { burn 1; echo 'ok one'; }" "exit ${4:-0}" > "$T/$CASE/bin/$1"
   chmod +x "$T/$CASE/bin/$1"
 }
-# splitstart() on <file> of $T/$CASE/wt with <test command> and a test.splitAllowance of 1, its fixture runner first on
+# speedproof.sh splitstart() on <file> of $T/$CASE/wt with <test command> and a test.splitAllowance of 1, its fixture runner first on
 # PATH; its line in $SS.
 ssrun() { # <file> <test command>
-  # shellcheck disable=SC2034 # HERE is read by splitstart(), for tools/testtime.sh
+  # shellcheck disable=SC2034 # HERE is read by speedproof.sh splitstart(), for tools/testtime.sh
   SS=$(eval "$(sed -n '/^NOCASE=/p; /^splitstart() {/,/^}/p' "$SRC/lib/speedproof.sh"; sed -n '/^testrunner() {/,/^}/p' "$SRC/lib/issues.sh")"
     HERE=$SRC; PATH=$T/$CASE/bin:$PATH; splitstart "$T/$CASE/wt" "$1" "$2" 1 'one')
 }

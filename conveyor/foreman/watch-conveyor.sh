@@ -35,7 +35,7 @@
 #   a push that failed its check (health's pushError.kind check), at once and again for each commit it fails on: the
 #     loop does not push again until main moves
 #   a card's test step that refused a full run of its tests (health's refused: the engine's tests()), once a test line
-#   the machine hold (health's machineHold: the engine's machinehold()), once a hold, naming the controls that fail
+#   the machine hold (health's machineHold: the engine's mainred.sh machinehold()), once a hold, naming the controls that fail
 #   a merge of the landing pull request that GitHub refused (health's landingPr.merge), once a refusal, with GitHub's reason
 #   every other entry of the Board's Needs you: .claude/scripts/dashboard_needs.json is the one list of its kinds,
 #     which the Board reads too, each with the snapshot field it is read from (the whole test failing on main, an engine
@@ -191,7 +191,7 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
       | ["pushflaky:\(.time)", "push flaky", ($i | join(" ")),
          "push went on: the pre-push hook failed naming \(.files | arrays | join(", ")), flaky: passed alone\(if $i == [] then "" else "; held for the owner: \($i | join(", "))" end)" | one]),
     (.refused | arrays | .[] | objects | ["refused:\(.card):\(.since)", "full test run refused", ref, "\(ref): the test step \(.reason | one)"]),
-    # The machine hold (health machineHold, conveyor/lib/testrun.sh machinehold()): once a hold, by when it began.
+    # The machine hold (health machineHold, conveyor/lib/mainred.sh machinehold()): once a hold, by when it began.
     (.machineHold | objects | ["machine:\(.since)", "machine held", "",
       "the machine fails \(.controls | arrays | map(tostring) | join(", ")) on main, with no change to main that explains it: the loop picks no card until they pass again (found by \(.card // "a card"))" | one]),
     # A merge of the landing pull request that GitHub refused (health landingPr, conveyor/lib/push.sh mergeone()): once a refusal.
@@ -210,7 +210,7 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
       "issues \(map("#" + .) | join(", ")) depend on each other: none of them will be picked"]),
     # A card that has waited $wake minutes (the pack'"'"'s foreman.waitWake, the snapshot'"'"'s waitWake: read on the belt'"'"'s
     # host, as a remote belt'"'"'s pack is not on this machine; 10 when it gives none) on another card (health waitingOnCard) or
-    # for main to change (its live action, testrun.sh mainwait(); the snapshot'"'"'s belt live.at is when that wait
+    # for main to change (its live action, mainred.sh mainwait(); the snapshot'"'"'s belt live.at is when that wait
     # began): what it waits on, with that card'"'"'s step and last action, or, for main, each main-red fix card open or
     # blocked. Its key holds the wait'"'"'s start and how many times $wake it has lasted, so each wait wakes once, and
     # again ("still waiting") after each further $wake minutes.

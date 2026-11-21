@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
-# Engine cases: a main-red fix card's check (redproof()), verdicts() on a card's own and main's failures, a fix card
-# with no change, and a card that waits for main (mainwait()). Its cases call mainred.test.sh's eng().
+# Engine cases: a main-red fix card's check (bugproof.sh redproof()), mainred.sh verdicts() on a card's own and main's failures, a fix card
+# with no change, and a card that waits for main (mainred.sh mainwait()). Its cases call mainred.test.sh's eng().
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
-# Issue 181: the bug-card check of a main-red fix card (redproof()) is main's own failing cases, not new tests. The
+# Issue 181: the bug-card check of a main-red fix card (bugproof.sh redproof()) is main's own failing cases, not new tests. The
 # fixture's cases: `a.test: one` and the file c.test, failing naming no case; each passes when ok.txt holds its name
 # (`one`, `c.test`), a named case printing `ok <case>`; `gone:one` in ok.txt makes the case not run (as when the change
 # renames it) and its file pass. The run on main is a runner that logs each file a `fail` line of its list names, as the test step's
@@ -35,7 +35,7 @@ redrunner() { # <ok.txt on main, or nothing>
     '  done; echo "-- $r $f" >> "$L"' \
     'done < "$CONVEYOR_TEST_RERUN"' 'exit $rc' > "$STUB/mainrun-cmd"
 }
-# The check alone (bugproof(), which calls redproof()) on a fix card cfix whose worktree holds <ok.txt> staged: its
+# The check alone (bugproof.sh bugproof(), which calls redproof()) on a fix card cfix whose worktree holds <ok.txt> staged: its
 # exit and the first line of its result.
 redcheck() { # <ok.txt in the change>
   local w=$T/$CASE/cards/cfix
@@ -76,7 +76,7 @@ t_redproofgreen() {
   loop check || fail "the record check refuses the closed line"
 }
 
-# Issue 323: verdicts() alone on card c7, its worktree on main with a new test file n.test staged and a comment added
+# Issue 323: mainred.sh verdicts() alone on card c7, its worktree on main with a new test file n.test staged and a comment added
 # to a.test, its last run failing a.test's one and n.test's two and running out of time in c.test. On main a.test's one
 # fails and c.test passes (ok.txt). One run on main, three verdicts:
 # - n.test: two, the card's own new file. Bug it catches: main's run was told to run n.test, which main lacks, its
@@ -114,14 +114,14 @@ t_mainreddoc() {
   [ "$out" = '[{"case":"tests/speed/page.md","verdict":"card","why":"no test file: a selection error"}]' ] \
     || fail "the document's failure is not the card's selection error: $out"
   [ ! -e "$STUB/redlist" ] && [ ! -e "$ST/mainred.json" ] || fail "the document ran on main or went to the main-red record: $(cat "$STUB/redlist" "$ST/mainred.json" 2>&1)"
-  # mainred() takes no document either; an entry an older engine made for a document alone goes at the next pick, so
+  # mainred.sh mainred() takes no document either; an entry an older engine made for a document alone goes at the next pick, so
   # the cards that wait on it run again and no fix card starts for it.
   jq -cn '{reds: [{sha: "1111111111111111111111111111111111111111", cases: [{case: "tests/speed/page.md", file: "tests/speed/page.md", by: "c1", files: [], last: ""}], card: null}]}' > "$ST/mainred.json"
   out=$(eng '! mainred c7 tests/speed/page.md tests/speed/page.md 2222222222222222222222222222222222222222 2>/dev/null && locked redpick') || fail "mainred took a document, or redpick failed: $out"
   [ -z "$out" ] && [ "$(jq -c . "$ST/mainred.json")" = '{"reds":[]}' ] || fail "the document's entry was kept or picked: $out $(cat "$ST/mainred.json")"
 }
 
-# Bug it catches (#344): verdicts() gave the failed cases and their verdicts to jq as arguments, which Linux refuses
+# Bug it catches (#344): mainred.sh verdicts() gave the failed cases and their verdicts to jq as arguments, which Linux refuses
 # over 128 KiB ("Argument list too long"): with many failures, they did not run on main and the card lost every
 # verdict. Card c7's last run fails 300 cases of a.test, each with a long name (about 150 KB); all pass on main, so
 # main runs a.test, whole, once, and each case is the card's.
@@ -141,7 +141,7 @@ t_mainredbigverdicts() {
 # lib/x.sh to a.test, so the engine stages .conveyor/test-links.json in its worktree before the build. Bug it catches:
 # the card was blocked ("the session made no change, so there is nothing to review"), or the staged links were taken
 # for a change and went to review, and main stayed marked red. Its cases run again on main as it is now; they pass, so
-# the card closes as not needed, saying so, nothing lands, and its entry holds main red no more (redopen()).
+# the card closes as not needed, saying so, nothing lands, and its entry holds main red no more (mainred.sh redopen()).
 t_mainrednochange() {
   redsetup $'one\nc.test'
   local s c out
@@ -176,9 +176,9 @@ t_mainrednochangered() {
     || fail "the fix card whose cases still fail on main was not blocked naming the run, or went to review: $out: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
 }
 
-# Issue 358: mainwait() alone, card c9 waiting on `a.test: one` at main's commit, its live record checked every LIVE
+# Issue 358: mainred.sh mainwait() alone, card c9 waiting on `a.test: one` at main's commit, its live record checked every LIVE
 # (2) seconds. The case's entry (redsetup's, which holds c.test too, its fix card not picked) is of main's commit
-# before, as mainred() leaves a case failing at a later commit with that entry: a wait that looked only at main's
+# before, as mainred.sh mainred() leaves a case failing at a later commit with that entry: a wait that looked only at main's
 # commit's entry never saw it go. Sets s, main's commit, and mw, the waiting process; its output goes to $STUB/mw.out.
 mwstart() {
   redsetup ''
@@ -198,7 +198,7 @@ t_mainwaitcleared() {
   WAIT_CEILING=3 wait_until "grep -qx 'ended 0' '$STUB/mw.out'" 'cat "$STUB/mw.out"' || fail "the wait did not end once its case left the main-red record"
   wait "$mw"; [ ! -e "$T/$CASE/cards/c9.live" ] && [ ! -e "$T/$CASE/cards/c9.idle" ] || fail "the ended wait left its live record or wait mark"
 }
-# Bug it catches: the case's fix card closed as already done (its cases pass on main: bugproof(), nochange()) with main
+# Bug it catches: the case's fix card closed as already done (its cases pass on main: bugproof.sh bugproof(), nochange()) with main
 # unchanged, its entry left in the record, and the card waited on. Picked, the fix card holds the wait; closed, it ends
 # within one LIVE interval.
 t_mainwaitfixclosed() {

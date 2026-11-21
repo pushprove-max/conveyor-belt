@@ -167,7 +167,7 @@ commentsonly() { # <worktree>
 # files alone, staged, on a test slot, each of them alone with test.fileCommand (tests()); with none set, the check
 # does not run and fails with exit 2, its result's first line naming test.fileCommand (NARROW). At least one must
 # fail there: a test that passes without the fix does not prove it. A test file that runs past its own time limit
-# there (its `# timeout:` line, else testTimeout: bugrun()) is stopped and fails, and the result says it timed out. A product file whose change adds or changes tests
+# there (its `# timeout:` line, else testTimeout: testlist.sh bugrun()) is stopped and fails, and the result says it timed out. A product file whose change adds or changes tests
 # written inside it (the pack's tests.inline: inlinekinds(), inlinesplit()) is one of those files, staged with its
 # test lines changed and the rest of its change (the fix) taken out; when such a test shares a changed line with the
 # fix and the change has no other test, the check fails with that reason (SHARED), unrun. Writes the result in
@@ -200,7 +200,7 @@ bugproof() { # <card> <worktree> <issue json>
   # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
   git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || return 0
   # A main-red fix card (its entry in the main-red record names it) is proved by main's own failing cases (redproof()).
-  # Its change that is only the links the engine staged (linksonly()) is no change, as above: card() drops it.
+  # Its change that is only the links the engine staged (mainred.sh linksonly()) is no change, as above: card() drops it.
   ! jq -e --arg c "$1" 'any(.reds[]?; .card == $c)' "$MAINRED" >/dev/null 2>&1 || { ! linksonly "$1" "$2" || return 0; redproof "$1" "$2"; return; }
   # A change to test files alone (every changed path, deleted ones too, is a test file: testpaths()) has no fix to take out:
   # its tests would run on the same code and pass, so it is not run. The review is told, and judges the tests.
@@ -242,7 +242,7 @@ bugproof() { # <card> <worktree> <issue json>
   fi
   [ ${#fs[@]} != 0 ] || { [ -n "${TESTGLOBS:-}" ] || names 2>/dev/null; BUGWHY=${NOTEST//'<patterns>'/"${TESTGLOBS:-}"}; }
   # test.fileCommand runs each test file alone, whatever its language, as the list names it; with none set, Conveyor's
-  # own runner does (ownrunner()), and with none for a file, the run stops (tests(): <worktree>.stop, NORUNNER).
+  # own runner does (testlist.sh ownrunner()), and with none for a file, the run stops (tests(): <worktree>.stop, NORUNNER).
   if sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
     && out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
       && git worktree add -q --detach "$mwt" "$sha" && deps "$mwt" \
@@ -349,10 +349,10 @@ bugnamed() { # <card> <worktree> <issue json>
       echo 'The end of the run without the fix:'; echo '```'; tail -n 30 "$mwt.test" 2>/dev/null | tr -d '\000'; echo '```'; } > "$2.unfixed"
   fi
 }
-# The bug-card check of a main-red fix card (bugproof(): a card its entry in $MAINRED names, mainred()). Its proof is
+# The bug-card check of a main-red fix card (bugproof(): a card its entry in $MAINRED names, mainred.sh mainred()). Its proof is
 # main's own failing cases, not new tests: a right fix for a red main (a rename, a fixture fix) often adds none, or one
 # that cannot fail on main's code. Each case its entry holds as it is now runs alone on a test slot, as the test step
-# runs a card's failing cases on main (verdicts(), redrun()), in a worktree of the commit the card was built on (its
+# runs a card's failing cases on main (mainred.sh verdicts(), redrun()), in a worktree of the commit the card was built on (its
 # HEAD), $CARDS/mainrun/<card>.unfixed: first without the change, then with it staged. Each must fail without the
 # change and pass with it. Tests the change adds are not asked for and not run here (the test step runs them). Writes
 # the result in <worktree>.unfixed, which the review is shown; its first line is the reason when the check fails.
@@ -410,14 +410,14 @@ redkeep() { # <card> <output file> <without|with|setup>
   local f=$ST/kept/$1/$1.redrun-$3.out
   mkdir -p "${f%/*}" 2>/dev/null && { tr -d '\000' < "$2" || :; } 2>/dev/null > "$f" && printf '%s\n' "$f"
 }
-# The cases of <verdict> in a run's result (redrun()), as `<case>`, joined by ", ".
-rednames() { # <verdict> <redrun() output>
+# The cases of <verdict> in a run's result (mainred.sh redrun()), as `<case>`, joined by ", ".
+rednames() { # <verdict> <mainred.sh mainred.sh redrun() output>
   jq -r --arg v "$1" '[.[] | select(.verdict == $v) | "`\(.name)`"] | join(", ")' <<<"$2"
 }
 # A run of the bug-card check (bugproof()) that is proof: it failed, and a test failed in it. With the runner's logs
 # (testlogs()), they must name a file that failed (testfails()); an exit of the runner itself with no test failing (its
 # own check refused the run) proves nothing. A command that writes no logs says no more than its exit. A test file
-# stopped at its own time limit (bugrun(): <worktree>.late, the run's exit 124) failed: a test that hangs without the
+# stopped at its own time limit (testlist.sh bugrun(): <worktree>.late, the run's exit 124) failed: a test that hangs without the
 # fix fails without it.
 testfailed() { # <worktree> <exit>
   { [ "$2" = 124 ] && [ -s "$1.late" ]; } && return 0

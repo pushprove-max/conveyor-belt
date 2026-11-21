@@ -115,7 +115,7 @@ if [ "${1:-}" = --file ]; then
   done
 fi
 RERUN=${CONVEYOR_TEST_RERUN:-}; unset CONVEYOR_TEST_RERUN
-# The cases the loop names of the test files it gives (conveyor/lib/testrun.sh owncases(): `<file><TAB><case>` lines),
+# The cases the loop names of the test files it gives (conveyor/lib/testlist.sh owncases(): `<file><TAB><case>` lines),
 # read in one-file mode (below); unset, as the list is, so no test this runs reads the loop's.
 TCASES=${CONVEYOR_TEST_CASES:-}; unset CONVEYOR_TEST_CASES
 # Each engine case file runs as its own test file (issue 214, below), so the list names its cases under it; a list
@@ -405,7 +405,7 @@ return $rc
 treekey() {
   local ix h t r
   h=$(git rev-parse HEAD 2>/dev/null) && ix=$(mktemp) || return 1
-  cp -p "$(git rev-parse --git-path index)" "$ix" 2>/dev/null || rm -f "$ix" # -p: as treeof() (conveyor/lib/testrun.sh), so a same-second rewrite is not read as unchanged
+  cp -p "$(git rev-parse --git-path index)" "$ix" 2>/dev/null || rm -f "$ix" # -p: as treeof() (conveyor/lib/donewhen.sh), so a same-second rewrite is not read as unchanged
   t=$(GIT_INDEX_FILE=$ix git add -A 2>/dev/null && GIT_INDEX_FILE=$ix git write-tree 2>/dev/null); r=$?
   rm -f "$ix"; [ $r = 0 ] && [ -n "$t" ] && echo "$h-$t"
 }
@@ -415,7 +415,7 @@ treekey() {
 # and fails as they did. A changed tree, or a key git cannot give, runs them.
 # `--checks` (issue 436: the pack's test.checkCommand) runs the checks alone and exits as they do. The loop runs it
 # after each session and at the start of a test step, and puts its result for the tree in the step's log folder as
-# checks/<treekey>.out and .rc (conveyor/lib/testrun.sh checkskept()): a one-file run of that tree reuses it, as below.
+# checks/<treekey>.out and .rc (conveyor/lib/donewhen.sh checkskept()): a one-file run of that tree reuses it, as below.
 [ "${1:-}" != --checks ] || { checks; exit; }
 rc=0; ck=
 if [ -n "$ONE" ] && [ -d "${CONVEYOR_TEST_LOG:-}" ] && tk=$(treekey); then ck=$CONVEYOR_TEST_LOG/checks/$tk; fi
@@ -486,7 +486,7 @@ boardtests() {
 }
 # The test links (issue 598): a test that broke main without the card running it is run by later cards that change
 # the files of the landing that broke it. .conveyor/test-links.json, {"<changed file>": ["<test file>", ...]}, written
-# by the engine (conveyor/lib/testrun.sh brokeby(), testlinks()) and committed by the main-red fix card. LINKS holds
+# by the engine (conveyor/lib/mainred.sh brokeby(), testlinks()) and committed by the main-red fix card. LINKS holds
 # one `<changed file><TAB><test file>` a line; a link whose test file no longer exists is dropped as it is read, and a
 # file that cannot be read links nothing. Each test file a link adds to a pick (an engine case file to the engine's
 # runner, as a changed one; a meta-runner by its pack mark, below) the log names: linked, `<test file><TAB><changed file>`.
@@ -1283,14 +1283,14 @@ if [ -s "$RERUN" ]; then
         | while IFS= read -r f; do [ ! -f "$f" ] || sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$f"; done; } \
     | grep -Fxf <(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' conveyor/tests/*.test.sh) | sort -u | tr '\n' ' ')
   # A file the list names failed cases of runs though no change selects it: the loop runs a card's failing cases on
-  # main (conveyor.sh verdicts()), where nothing changed. Of the engine's runner, only when a case it names is one; of
+  # main (mainred.sh verdicts()), where nothing changed. Of the engine's runner, only when a case it names is one; of
   # a node test file, those cases alone (only, below). A `fail` line naming no case (a file that failed naming none, or
   # ran out of time) runs its file whole, the runner too.
   whole=$(awk -F'\t' '$1 == "fail" && $3 == "" {print $2}' "$RERUN")
   while IFS=$'\t' read -r k f c; do
     [ "$k" = fail ] && [ -f "$f" ] && [ -z "${run[$f]:-}" ] || continue
     case $f in conveyor/tests/*.test.sh) ! grep -qxF -- "$f" <<<"$whole" || { [ -z "$again" ] || { run[conveyor/conveyor.test.sh]=1; cases=$again; }; continue; }
-      # A case the file does not have (the split check's run with no case selected, lib/testrun.sh splitstart():
+      # A case the file does not have (the split check's run with no case selected, lib/speedproof.sh splitstart():
       # conveyor-no-case) runs the file's start-up alone: the runner with no case, timed as the file.
       sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$f" | grep -qxF -- "$c" || { run[$f]=1; nocase[$f]=1; continue; } ;;
     esac
@@ -1561,7 +1561,7 @@ slots=
 # a slot of the pool to each beside it), pinned to its slot's core (slot_mine), and its runner runs its cases on that
 # slot and on what more of the pool it gets. With no pool to be had, they start side by side all the same. The cases
 # each one runs are logged as it starts (`TESTRUN case`), so a run that never ends keeps the passes of the cases it did
-# not run (conveyor.sh rerunlist()). Their output is read below once all have ended, so their nested starts (metaran)
+# not run (testlist.sh rerunlist()). Their output is read below once all have ended, so their nested starts (metaran)
 # are whole. Told to end (its timeout), this run tells each to end, as the runner tells its cases, and prints what each
 # not shown yet printed under its own `== ` line, begun and not ended in the log: the cases that passed stay passed,
 # and the run's timeout names the last of them.
@@ -1601,7 +1601,7 @@ for t in "${order[@]}"; do
     if [ -n "$w" ] && [ -z "${cmode[$t]:-}" ]; then
       echo "== $t: not run: every case file of the engine"; metaran "$t" || r=FAIL
     elif [ -n "$cases" ]; then
-      # The cases it runs of the runner, so a run that never ends keeps the passes of the cases it did not run (conveyor.sh rerunlist()).
+      # The cases it runs of the runner, so a run that never ends keeps the passes of the cases it did not run (testlist.sh rerunlist()).
       for c in $cases; do printf 'TESTRUN case\t%s\t%s\n' "$t" "$c" >> "$log"; done
       # Every case file of the engine still runs when the list holds a case of each (enginewhole): the step's record
       # says so as below.

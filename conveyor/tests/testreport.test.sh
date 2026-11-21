@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
 # Engine cases (#152): each test file's clock seconds read from the test runner's own report (the pack's test.report,
-# tools/testreport.py, testrun.sh reported()), so a project whose test command prints no `TESTRUN sec` lines still
+# tools/testreport.py, testlist.sh reported()), so a project whose test command prints no `TESTRUN sec` lines still
 # has test times on the Tests page; how setup finds the runner and its report (setup.sh reportguess()); and what
 # health says of it.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
@@ -22,7 +22,7 @@ rp_main() { # <report json> <file>...
     && mkdir -p "$T/$CASE/wt.testlog" || fail "main's test files"
 }
 # What the Tests page shows of the files the run timed: the run's report read as a run that began a minute ago reads
-# it (reported()), its times on the card's test line (slowtests(), slowrec()), that line among the card records, and
+# it (testlist.sh reported()), its times on the card's test line (testlist.sh slowtests(), slowrec()), that line among the card records, and
 # the snapshot's tests part (testspart()): {file: [the last run's clock seconds, its CPU seconds]}, after the test line's
 # times and clocks, `{"times": ..., "clocks": ...}`, on a line of its own; keys sorted, and each number as jq prints
 # a sum (2, not the 2.0 of the line).
@@ -165,7 +165,7 @@ t_reportfiles() {
 }
 # Bug caught (#164): the full test suite (test.full, which setup gives the card's command; release-prep's suite too)
 # was not asked for the runner's report, so its run, an `npm test` of node --test for one, recorded no file times. The
-# run of test.full (tests()) adds test.report's args with Conveyor's file, and the suite's record (suiterec()) has the
+# run of test.full (tests()) adds test.report's args with Conveyor's file, and the suite's record (testlist.sh suiterec()) has the
 # report's seconds of the file.
 t_reportfull() {
   rp_main '{"runner": "jest", "format": "junit", "args": "<file>"}' t/a.test.js

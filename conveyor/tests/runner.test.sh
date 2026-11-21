@@ -121,7 +121,7 @@ t_runnerdrop() {
 }
 
 # Bug it catches: a main-red entry made before issue 214 names its case under the runner (conveyor/conveyor.test.sh,
-# which test.command names), and the main-red check (redrun()) gave the runner to test.command as the file to run. The
+# which test.command names), and the main-red check (mainred.sh redrun()) gave the runner to test.command as the file to run. The
 # case runs under its own file; a case with no file of its own is left off, the log naming the runner; a list left
 # with nothing to run does not run test.command at all, which given no list would run its whole selection.
 t_runnerred() {
@@ -136,7 +136,7 @@ t_runnerred() {
     || fail "the test log does not name the dropped runner: $(cat "$T/$CASE/both" "$wt.test" 2>&1)"
 }
 
-# E2 of #374's review. Bug it catches: the proof of a main-red fix (redrun()) writes a `fail` line for each failing
+# E2 of #374's review. Bug it catches: the proof of a main-red fix (mainred.sh redrun()) writes a `fail` line for each failing
 # case, and test.fileCommand started the same file once for each line. Two cases of one file: the file starts once.
 t_runnerredonce() {
   rdsetup '.test.fileCommand = "bash \"$STUB/one\""'

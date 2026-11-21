@@ -15,7 +15,7 @@
 #   list of the last pass (testrulespass()), {time, on, matches, burst}, null before the first, and log: the last
 #   TESTRULES_SHOWN lines of the rules' log ($TESTRULESLOG), newest first; null when the pack cannot be read;
 # files: each test file main's checkout tracks (a name with `.test.` in it), and each other file with a run on record:
-#   a card's test line (times, and clocks: a file timed by the clock only, from its runner's report, has cpu null) or a whole-suite run ($SUITERUNS, suiterec() of lib/testrun.sh); the highest CPU seconds
+#   a card's test line (times, and clocks: a file timed by the clock only, from its runner's report, has cpu null) or a whole-suite run ($SUITERUNS, suiterec() of lib/testlist.sh); the highest CPU seconds
 #   now first, a file with none last: file, cpu (its newest run's that has CPU seconds; null with none), median (of
 #   every run on record with CPU seconds), change (cpu against median, as a share: 0.5 is 50% over; null when the
 #   median is 0 or null), runs (its last TESTKEEP runs, newest first: {cpu, sec: clock seconds, null on a line that
@@ -96,7 +96,7 @@ OWNERS='$defs[0] as $defs | $refs[0] as $refs | def owners($f; $c): ($defs[$c //
     def failedfiles: [(.failures.files | arrays | .[] | objects | (.file | strings) as $f
         | if (.cases | arrays | length) > 0 then .cases[] | owners($f; .name | strings)[] else $f end), (.failures.timeout.file? | strings)] | unique;'
 # One failed test line, as a failure of the file $f it counts for (failedfiles), read with OWNERS: {card, issue, time,
-# verdict, cases, tail}. verdict: the test line's verdicts (verdicts(), lib/testrun.sh) of the cases that count for $f,
+# verdict, cases, tail}. verdict: the test line's verdicts (verdicts(), lib/mainred.sh) of the cases that count for $f,
 # main when one of them failed on main too, else flaky when one failed and then passed when run again, else card (the
 # card's own change made it fail: the test did its job); null when the line has none for it (a line written before
 # verdicts were kept). cases: the names of its failing cases that count for $f ([] for a file that failed naming no
@@ -444,7 +444,7 @@ testsurvey() {
         time: ($t | todate), whole: false, survey: true} | select(.cpu != null or .sec != null)]' 2>/dev/null) && [ -n "$sv" ] || sv='[]'
   printf '%s\n' "$sv"
 }
-# The case scan of test files (testspart(): the cases each file defines; owncases(), lib/testrun.sh: the cases a card's
+# The case scan of test files (testspart(): the cases each file defines; owncases(), lib/testlist.sh: the cases a card's
 # change adds or changes), an awk program run with -v q="'": a line for each case, <file><TAB><case><TAB><first
 # line><TAB><last line>. A case is a `t_<case>() {` line the runner selects (conveyor/conveyor.test.sh: a case name of
 # a-z and 0-9 only, so a t_left_stays helper is no case), outside a heredoc (a fixture's cases, written into a scratch
@@ -557,7 +557,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
         | (first($c[] | select(.step == "landed")) // null) as $l
         | ([$c[] | select(.step == "bugproof" and (.speed | type == "object") and ($l == null or .card == $l.card))] | last | .speed // {}) as $p
         # A delete changes no other test file: the files that cover its cases are those its card'"'"'s last review named
-        # on its COVERED-BY lines (optproof()).
+        # on its COVERED-BY lines (speedproof.sh optproof()).
         | ([$c[] | select(.step == "review" and $l != null and .card == $l.card)] | last | (.reason | strings) // ""
            | [split("\n")[] | capture("^COVERED-BY: (?<f>[^\\s:]+): ").f] | unique) as $cov
         | ([$c[] | select(.step != "closed" and .step != "landed" and .step != "review")] | last) as $n

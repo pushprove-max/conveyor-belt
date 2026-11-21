@@ -3,7 +3,7 @@
 # timeout: 60
 # The Foreman's Conveyor watcher, watch-conveyor.sh, on a card that waits: one poll (--once) at a time of a snapshot
 # given by CONVEYOR_FOREMAN_ASK, the clock set by CONVEYOR_FOREMAN_NOW.
-# Bug (#220): a card waiting for main to change (testrun.sh mainwait()) or on another card woke the Foreman only once
+# Bug (#220): a card waiting for main to change (mainred.sh mainwait()) or on another card woke the Foreman only once
 # it was stuck, 30 minutes on, and the wake only stated it; cards waited for hours. Now a wait of the pack's
 # foreman.waitWake minutes (default 10) wakes it once, naming what the card waits on, and again, "still waiting",
 # after each further waitWake minutes.
@@ -29,7 +29,7 @@ poll() { # <repo> <minutes after $AT>: one poll then; 0 with a wake put in pendi
 has() { grep -qF -- "$2" "$T/$1.wake"; } # <repo> <text>
 HEALTH='{time: $at, loop: true, gh: true, blocked: [], waiting: [], stuck: [], pushFailingSince: null, waitingOnCard: []}'
 
-# A card in mainwait() since $AT, its main-red fix card open in its fix step.
+# A card in mainred.sh mainwait() since $AT, its main-red fix card open in its fix step.
 fixture main "$(jq -cn --arg at "$AT" '{queue: {next: []}, health: '"$HEALTH"', belt: [
   {card: "c44", issue: 44, step: "tests", live: {action: "waiting for main to change: serve fail on main at 0123456789ab too", at: $at}},
   {card: "cred", issue: 0, name: "Main is red (0123456789ab)", step: "fix", landed: false, live: {action: "Bash: npm test", at: $at}}]}')" '{}'

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
-# Engine cases: the check of an Optimize card (optproof(), speedproof()) follows the judge's verdict in its issue and
+# Engine cases: the check of an Optimize card (speedproof.sh optproof(), speedproof()) follows the judge's verdict in its issue and
 # holds the file to the median of the recent runs the issue lists, not to its old median on record (#591).
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
@@ -19,7 +19,7 @@ ovissue() { # <verdict>
     "The judge'"'"'s verdict (2026-11-18T00:00:00Z, claude · a-model · medium): \($v).", "", "The end of its text:",
     "CAUSE: relstop | timing | the case sleeps a fixed time and races the stop", "", "VERDICT: \($v)"] | join("\n"))}'
 }
-# optproof() called as card() calls it, on card c7 of the issue ovissue() writes for <verdict>, whose change runs
+# speedproof.sh optproof() called as card() calls it, on card c7 of the issue ovissue() writes for <verdict>, whose change runs
 # <change> in its worktree on main, where f.test.sh (`echo slow`) has a median of 4 CPU s on record (whole-suite runs of
 # 3, 4 and 5) and g.test.sh one of 2. The build's reply is <reply>. Each run under cards/mainrun/ names the case relstop of each file its list
 # names as passed and times it at <cpu> CPU s, noting the file in $STUB/mainran. Main also has each <file> <content>
@@ -115,7 +115,7 @@ t_optdearer() {
 
 # Bug it catches (#615): conveyor/README.md says the median on record is used only when the issue has no "Last runs"
 # line, but the Board writes "- Last runs, newest first: none" for a file with no runs, and "— CPU s" for each run with
-# a clock time only (draftIssue()), and recentcpu() then uses the median on record (4 here). The guide must name both.
+# a clock time only (draftIssue()), and speedproof.sh recentcpu() then uses the median on record (4 here). The guide must name both.
 t_optrecentnone() {
   local c
   setup '[]'
@@ -242,7 +242,7 @@ t_optdirectbar() {
     || fail "the log does not say a DIRECT line with an empty case field was passed over: $(cat "$T/$CASE/run.out")"
 }
 
-# Bugs it catches (#827): directcases() kept only case names of one word, so a JavaScript case whose name has spaces
+# Bugs it catches (#827): speedproof.sh directcases() kept only case names of one word, so a JavaScript case whose name has spaces
 # was never checked and a rewrite could drop it; and it copied the base file to a path built from the issue's file
 # name, so a name with ../ in it wrote outside the copy's directory. The case with spaces is kept, and a file beside
 # the worktree that the ../ name points to is left as it was.
@@ -261,9 +261,9 @@ t_directcases() {
   [ "$(cat "$T/$CASE/out.test.mjs")" = kept ] || fail "a ../ file name in the issue wrote outside the copy's directory"
 }
 
-# Bug it catches (#798): casesgone() read a JavaScript case's name from its unescaped start line, so an escaped quote
+# Bug it catches (#798): speedproof.sh casesgone() read a JavaScript case's name from its unescaped start line, so an escaped quote
 # in it (test('... project\'s', ...)) ended the name early and a case the file still holds was read as gone, which
-# blocked optproof() and hollowproof(). Only the case the file does not hold is gone.
+# blocked speedproof.sh optproof() and hollowproof(). Only the case the file does not hold is gone.
 t_optdirectescape() {
   setup '[]'
   mkdir -p "$T/$CASE/wt"
@@ -273,7 +273,7 @@ t_optdirectescape() {
   [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = 'gone one' ] || fail "cases with escaped quotes in their names were read as gone: exit $RC, $(cat "$T/$CASE/run.out")"
 }
 
-# Bug it catches (#799): card() sends a Rewrite as a direct check card (REWRITE) to optproof(); without that route it
+# Bug it catches (#799): card() sends a Rewrite as a direct check card (REWRITE) to speedproof.sh optproof(); without that route it
 # goes to the bug-card check, which never reads its DIRECT lines, so a build that drops the case relpin they name is
 # not blocked for it. A whole card run, as only it shows which check card() picks for the issue's title.
 t_optdirectcard() {

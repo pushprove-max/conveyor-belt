@@ -47,7 +47,7 @@ rec picked ok; rec build ok
 [ ! -e "$SWE_FX/eblock" ] || { rec blocked blocked "commit: git: 'hook' is not a git command"; exit 0; }
 # With $SWE_FX/ewait, the card stages its fix in its worktree, which starts at main, and commits nothing (the engine
 # commits only to land: card()); its test step fails only what fails on main, and it
-# waits for main to change as the real engine does (its live record and idle mark, mainwait()): it only loops, for
+# waits for main to change as the real engine does (its live record and idle mark, mainred.sh mainwait()): it only loops, for
 # 30 s at most, and then ends with nothing landed.
 if [ -e "$SWE_FX/ewait" ]; then
   git -C "$CONVEYOR_MAIN" worktree add -q --detach "$CONVEYOR_CARDS/c1" main && echo fixed > "$CONVEYOR_CARDS/c1/x.py" && git -C "$CONVEYOR_CARDS/c1" add -A || exit 1

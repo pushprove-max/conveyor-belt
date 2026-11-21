@@ -138,7 +138,7 @@ t_contra() {
 
 # Bugs: a review that says the same verdict twice (once mid-way, once at the end, its findings repeated) blocks as
 # having no clear verdict; a finding the review repeats word for word is filed as two follow-ups. Read as the engine
-# reads such a review (verdict(), above), its findings counted (counts(), lib/testrun.sh) and filed as card() files a
+# reads such a review (verdict(), above), its findings counted (counts(), lib/donewhen.sh) and filed as card() files a
 # last NO-GO review's findings (followups(), lib/followups.sh), with no card run.
 t_repeat() {
   setup '[]'

@@ -84,7 +84,7 @@ t_minorforged() {
 # Bug: an accepted P3 still open after the last review round lands with no follow-up, or one filed above P3: with the
 # test pack's three priorities (P0 to P2, as this project's pack) it was labelled P2. An issue with none of the pack's
 # priorities is P3 (LEVEL), so the follow-up has none. The second review repeats it after its fix, and every finding
-# is P3, so it is the last review (repeats()).
+# is P3, so it is the last review (donewhen.sh repeats()).
 t_minorleft() {
   judging "[$(issue 7 2026-01-01 P1)]" off
   printf '%s\n' "$MINOR3" 'USER-VISIBLE: no' 'VERDICT: NO-GO' | tee "$STUB/review.1" > "$STUB/review.2"

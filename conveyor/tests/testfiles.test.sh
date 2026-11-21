@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
 # Engine cases: the snapshot's tests part (lib/testfiles.sh testspart()), a test file's "slow on purpose" mark, the
-# times a card's run records (testrun.sh slowtests()), and `conveyor.sh test-settings`, which saves the mark and the
+# times a card's run records (testlist.sh slowtests()), and `conveyor.sh test-settings`, which saves the mark and the
 # project's test settings in the pack. No test file has a CPU budget (#349).
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
@@ -167,7 +167,7 @@ t_tfunlistedsurvey() {
 # none of it; solo.test.sh's own flaky rone is its alone. Bugs caught: every engine case file showed no failed step and no flaky entry, as the records' file names
 # did not match; a runner's `setup` failure counted for both tests/setup.test.sh and foreman/foreman.test.sh.
 # The Tests page lists every test file of main's checkout. c.test.sh ran on a card; w.test.sh, wholeOnly in the pack,
-# ran only in a whole-suite run, whose files the run's output names (suiterec(): its `TESTRUN sec` and `-- FAIL` lines);
+# ran only in a whole-suite run, whose files the run's output names (testlist.sh suiterec(): its `TESTRUN sec` and `-- FAIL` lines);
 # n.test.sh never ran. Bug caught: the part was made from card test lines alone, so a whole-only file
 # (conveyor/conveyor.test.sh) and a file never run were missing, and no whole-suite run reached the page.
 t_tfrunner() {
@@ -321,7 +321,7 @@ t_tfnever() {
 }
 
 # #349: no test file has a CPU budget. The pack still holds the old test.fileBudget of 5 and budgets of single files:
-# a.test's 20, b.test's 2. A card's run times each file (slowtests()) and its test line (slowrec()) records each
+# a.test's 20, b.test's 2. A card's run times each file (testlist.sh slowtests()) and its test line (testlist.sh slowrec()) records each
 # file's CPU and clock seconds, which the part reads, and holds no slow note. Bugs caught: a file over the old budget
 # flagged on the test line, or in the part; a file's times not recorded. m.test, marked slow on purpose, keeps its
 # mark in the part (a CPU test rule never files it: testrules.test.sh).

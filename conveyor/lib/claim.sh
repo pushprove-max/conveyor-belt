@@ -448,7 +448,7 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
           trc=''; began "$1" "$2" "$5"; continue
         fi
         [ "$trc" = 0 ] || { waitsec=$((wb + SECONDS - ws)); return 4; }
-        # Its test files' times go on its test line (slowtests()).
+        # Its test files' times go on its test line (testlist.sh slowtests()).
         trc=''; slowtests "$3" || :
         record "$1" "$2" test pass "$(jq -cn --slurpfile x <(testrec "$3" 0 "$sec") --slurpfile r <(firstrun "$3" pass) --slurpfile s <(slowrec "$3") '$x[0] + $r[0] + $s[0]')"
         testrulespass > /dev/null
@@ -550,7 +550,7 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
 # that card's. That card's claim then holds the files of the whole batch (paths) and keeps the batch's
 # change, so no card whose change does not apply with the batch's lands on one of them while the batch is tested (claim()).
 # Its own checks and tests passed on what the card's worktree holds now: it is ready (<worktree>.ready, when it has one),
-# with what that run passed (units and cases, passlist(); none when it left no list) for a batch that takes it (batchkeep()).
+# with what that run passed (units and cases, testlist.sh passlist(); none when it left no list) for a batch that takes it (batchkeep()).
 # The identity of a card's staged change, whatever commit it is on: its own added and removed lines, with no line of
 # context (-U0), so a change merged three-way onto a main that moved around it is the same change (fits(), settle());
 # of the files <pathspec> names when it is given. Empty when the change is.
@@ -579,7 +579,7 @@ readysince() { # <worktree>
 # The test files that the staged change at <worktree> and the change main made from <the commit its tests ran on> to
 # the worktree's HEAD both touch, one a line; fails when there are none, or when HEAD is that commit or none is given.
 # The change's: testsel() narrow of it, and the files its runs passed (the units of <worktree>.ready and .bpass,
-# passlist()); main's: testsel() narrow of main's change, and the files the test lines of the cards landed in it name
+# testlist.sh passlist()); main's: testsel() narrow of main's change, and the files the test lines of the cards landed in it name
 # (times, clocks, why, ranCases): the project's test command may select tests that testsel() does not. Those tests
 # ran on neither change with the other: two cards that each passed alone can fail together on main (#334), so they run
 # again on the combined code before the card lands (card(), once for its change: #447; rebatch()). Lists that cannot be made count as shared, the
@@ -682,7 +682,7 @@ fives() { # <card> <issue> <worktree> <commit message> <extra json> [skip]
   done
 }
 # What a batch run need not run again (the owner, 2026-11-13: a test that passed is not run again; issue #346). Each
-# card of the run brings its passes: its own (the units of <worktree>.ready, passlist(), when they passed on the change
+# card of the run brings its passes: its own (the units of <worktree>.ready, testlist.sh passlist(), when they passed on the change
 # it holds now), and those of the last batch run that passed with it in it (<worktree>.bpass: {cards: each card of
 # that run and its change's patch-id, units, cases, by: each card's units of the run}) when each card of that run that
 # is in this one still holds the change it held there; of such a run a card brings only its own units (by), not those

@@ -15,8 +15,8 @@ def needok($k): if $k == "issue" then .issue | type == "number" elif $k == "time
   elif $k == "step" then .step | IN(steps[]) else .[$k] | type == "string" end;
 def ok: . as $r | (keys - known) == need
         and all(need[]; . as $k | $r | needok($k))
-        # A bugproof line: the bug-card check was skipped (bugproof()), its reason saying why; or a speed-up card's check
-        # held (ok) or not (fail), with its file's CPU seconds on record and now (speedproof(), optproof()), and the fix
+        # A bugproof line: the bug-card check was skipped (bugproof.sh bugproof()), its reason saying why; or a speed-up card's check
+        # held (ok) or not (fail), with its file's CPU seconds on record and now (speedproof.sh speedproof(), optproof()), and the fix
         # it made with the test files it added or changed (a line written before the fix was recorded has neither); or
         # test.command, given the check's test files, ran far more (wide: {given, ran, command}).
         and (.wide == null or (.step == "bugproof" and .result == "wide" and (.wide | type == "object" and keys == ["command", "given", "ran"]
@@ -49,9 +49,9 @@ def ok: . as $r | (keys - known) == need
         and (.speedcheck // 0 | type == "number") and (.retriedWhy // "" | type == "string")
         # waitSec: the seconds a landed or blocked card waited on other cards and for main to change (card(), block()).
         and (.waitSec // 0 | type == "number")
-        # doneLines: the reply's D<n> lines on a session's line with a Done-when check (checked(), lib/testrun.sh).
+        # doneLines: the reply's D<n> lines on a session's line with a Done-when check (checked(), lib/donewhen.sh).
         and (.doneLines // [] | type == "array" and all(type == "string"))
-        # checks: a test line of a Test step the project's checks ended before any test ran (card(), treecheck()).
+        # checks: a test line of a Test step the project's checks ended before any test ran (card(), donewhen.sh treecheck()).
         and (.checks // true | . == true)
         # pr: the pull request a pushed line's push went into, with the rule Land as pr (pushone(), lib/push.sh).
         and (.pr // 0 | type == "number")
@@ -73,7 +73,7 @@ def ok: . as $r | (keys - known) == need
         and (has("stop") | not) == ((has("pass") or has("rounds")) | not)
         and (.stop == null or ((.step | IN("review", "filed")) and (.stop | IN("go", "max-reviews", "rebased", "test-fix", "lint-fix", "land", "repeat"))
           and ([.pass, .rounds] | all(type == "number" and . >= 0))))
-        # A review's answers on the findings fix rounds were told (card.sh, answers()): each its id, answer and first record.
+        # A review's answers on the findings fix rounds were told (card.sh, donewhen.sh answers()): each its id, answer and first record.
         and (.answers // [] | type == "array" and all(.[]; type == "object" and (.id | type == "string") and (.answer | type == "string") and (.first | type == "object")))
         and ([.wait, .run, .slotsFree] | all(. == null or type == "number"))
         and (.selected // {files: null, filesOf: null, cases: null, casesOf: null} | type == "object" and keys - ["kept"] == ["cases", "casesOf", "files", "filesOf"] and all(. == null or type == "number"))
@@ -82,7 +82,7 @@ def ok: . as $r | (keys - known) == need
         # changed tests, how many and by what (the test map or names), with the map's age when known.
         and (.list // {mode: "whole", why: ""} | type == "object" and ((.mode == "whole" and (.why | type == "string"))
           or (.mode == "changed" and (.files | type == "number") and (.by | type == "string") and (.age // 0 | type == "number"))))
-        # The changed lines no test reached, from the run's coverage report (uncovered(), testrun.sh), or why unknown.
+        # The changed lines no test reached, from the run's coverage report (uncovered(), testlist.sh), or why unknown.
         and (.coverage // {unknown: ""} | type == "object" and (if has("unknown") then keys == ["unknown"] and (.unknown | type == "string")
           else keys == ["checked", "count", "uncovered"] and ([.count, .checked] | all(type == "number"))
             and (.uncovered | type == "array" and all(type == "object" and keys == ["file", "lines"] and ([.file, .lines] | all(type == "string")))) end))
@@ -92,11 +92,11 @@ def ok: . as $r | (keys - known) == need
         and (.slow // [] | type == "array" and all(type == "object" and (.file | type == "string") and ([.sec, .budget, .cpu // 0] | all(type == "number"))
           and (.changed | type == "boolean") and (.before // 0 | type == "number") and (.finding // false | type == "boolean")
           and (.from // "" | type == "string") and (keys - ["before", "finding", "cpu", "from"] == ["budget", "changed", "file", "sec"])))
-        # The CPU seconds of every test file the run timed (slowtests()), {file: cpu}: a later card's before.
+        # The CPU seconds of every test file the run timed (testlist.sh slowtests()), {file: cpu}: a later card's before.
         and (.times // {} | type == "object" and all(type == "number"))
-        # The clock seconds of the same files (slowtests()), {file: sec}: the snapshot's tests part.
+        # The clock seconds of the same files (testlist.sh slowtests()), {file: sec}: the snapshot's tests part.
         and (.clocks // {} | type == "object" and all(type == "number"))
-        # The files an earlier step timed and this one kept as passed, not run (carriedrec()).
+        # The files an earlier step timed and this one kept as passed, not run (testlist.sh carriedrec()).
         and (.carried // [] | type == "array" and all(type == "string"))
         # Why each test file ran (testrec()), {file: [reasons]}; wholeSuite: the run ran every engine case file.
         and (.why // {} | type == "object" and all(type == "array" and all(type == "string")))
@@ -109,14 +109,14 @@ def ok: . as $r | (keys - known) == need
         and (.refused // "refused full run: " | type == "string" and startswith("refused full run: "))
         # A picked line's slot beyond the cap (pick(): a main-red fix, issue 612): why it took one.
         and (.beyond // "main is red" | . == "main is red")
-        # The times of the test files the card changed (slowtests()): cpu null when the runner gave none.
+        # The times of the test files the card changed (testlist.sh slowtests()): cpu null when the runner gave none.
         and (.timed // [] | type == "array" and all(type == "object" and keys == ["cpu", "file", "sec"] and (.file | type == "string")
           and (.sec | type == "number") and (.cpu | . == null or type == "number")))
         # A failed push line's kind (push()): its check failed, or anything else did; a check failure names the check.
         # log: the path of the push's own log.
         and (.kind // "transport" | IN("check", "transport")) and (.check // "" | type == "string") and (.log // "" | type == "string")
         and (.failures // {of: null, files: [], timeout: null} | fails)
-        # Each failure's verdict (verdicts()), and the run of the failing cases on main.
+        # Each failure's verdict (mainred.sh verdicts()), and the run of the failing cases on main.
         and (.verdicts // [] | type == "array" and all(type == "object" and keys == ["case", "verdict"] and (.case | type == "string") and (.verdict | IN("card", "main", "machine", "flaky"))))
         and (.mainRun // {sha: "", sec: 0, exit: 0} | type == "object" and keys == ["exit", "sec", "sha"] and (.sha | type == "string") and ([.sec, .exit] | all(type == "number")))
         # A run that went again (tests()): the first run's exit and failures, and the end of its output.
@@ -125,7 +125,7 @@ def ok: . as $r | (keys - known) == need
         and (.doneWhen // {items: 0, met: 0, failed: []} | type == "object" and (keys - ["notes"]) == ["failed", "items", "met"]
           and (.items | type == "number") and (.met | type == "number") and (.failed | type == "array" and all(type == "string"))
           and ((has("notes") | not) or (.notes | type == "array" and all(type == "string"))))
-        # Each Done-when item of the check (donewhen()): the issue's text and the reply's D<n> line; and the D<n> a review
+        # Each Done-when item of the check (donewhen.sh donewhen()): the issue's text and the reply's D<n> line; and the D<n> a review
         # said hold (its DONE-WHEN lines).
         and (.doneWhenItems // [] | type == "array" and all(type == "object" and keys == ["n", "said", "text"] and (.n | type == "number")
           and (.text | type == "string") and (.said | . == null or type == "string")))

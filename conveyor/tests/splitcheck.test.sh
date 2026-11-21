@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
-# Engine cases: the check of an Optimize card's split (speedproof()): its files' CPU seconds summed against the old
+# Engine cases: the check of an Optimize card's split (speedproof.sh speedproof()): its files' CPU seconds summed against the old
 # file's on record and a start-up allowance for each file a split adds. No file is held to a CPU budget (#349). And
 # whose failure the check's reason names when its run fails (#602).
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
@@ -9,7 +9,7 @@
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
-# speedproof() called as card() calls it, on card c7 of #7, whose change runs <change> in its worktree on main, where
+# speedproof.sh speedproof() called as card() calls it, on card c7 of #7, whose change runs <change> in its worktree on main, where
 # f.test.sh (`echo slow`) has a median of 10 CPU s on record (whole-suite runs of 9, 10 and 11) and the pack still
 # holds the old test.fileBudget of 8, which no file is held to. Each run under cards/mainrun/ times each file its list names `fail` at the CPU seconds
 # $STUB/cpu-<file> holds, and names the case one of it as passed; a line that names a case as well (a run with no case
@@ -141,7 +141,7 @@ t_speedownfail() {
 
 # #602, #740. Bug it catches: with g.test.sh failing on the commit the card was built on too and no entry in the
 # main-red record (as snapexec.test.sh failed on #585's base), a check that lets g.test.sh fail runs it again on that
-# commit (speedothers()). With f.test.sh run alone, nothing fails: the check makes one run, with the change.
+# commit (speedproof.sh speedothers()). With f.test.sh run alone, nothing fails: the check makes one run, with the change.
 t_speedotherbase() {
   OTHERFAIL=base splitrun "$SPEEDUP" 4 '' '' ''
   local n; n=$(wc -l < "$STUB/runs")

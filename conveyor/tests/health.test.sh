@@ -177,7 +177,7 @@ t_sessionquiet() {
   [ "$(CONVEYOR_NOW=$((at + 600)) tuned '.tunables.sessionStuck = 900' loop health | jq -c .stuck)" = '[]' ] || fail "the session limit is not the pack's tunables.sessionStuck"
 }
 
-# Issue 366: a main-red fix card's run of main's failing cases after its build (testrun.sh redproof(), redrun()) keeps
+# Issue 366: a main-red fix card's run of main's failing cases after its build (bugproof.sh redproof(), mainred.sh redrun()) keeps
 # its live record in $CARDS/mainrun/<card>.unfixed.live, not <card>.live, and its last line is its build's: health
 # called it stuck 20 minutes after the build while its tests ran. The card's records end with its build, 1300 s ago
 # (past tunables.stuck), and the run is watched as tests() watches it (the engine's own watch()), with no card run.
@@ -199,7 +199,7 @@ t_proofrun() {
   : > "$STUB/end"; wait $run || fail "the watch of the run exited non-zero: $(cat "$T/$CASE/run.out")"
 }
 
-# Issue 611: after a card's tests failed, the run again of its failed tests on main (testrun.sh verdicts(), in
+# Issue 611: after a card's tests failed, the run again of its failed tests on main (mainred.sh verdicts(), in
 # $CARDS/mainrun/<card>) keeps its live record in mainrun/<card>.live; the card's own live record is gone and it writes
 # no line. Health called the card stuck, since its Test step's start, while that run (and its .test file before it)
 # made output. Card c7-7 began its test step 1300 s ago (past tunables.stuck, 1200 s) and has no live record of its own.

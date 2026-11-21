@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # test-changed.sh's run of an engine case file with no case selected: the split check's rerun line
-# `fail<TAB><case file><TAB>conveyor-no-case` (lib/testrun.sh splitstart()), whose CPU seconds are the start-up
+# `fail<TAB><case file><TAB>conveyor-no-case` (lib/speedproof.sh splitstart()), whose CPU seconds are the start-up
 # allowance of each file a split adds. Bug it catches (#191): the case file ran with every one of its cases, through
 # the runner, so the run named cases, the check could not use it, and an honest split was refused against the pack's
 # 1 CPU s guess. The run must run the file's start-up alone (the runner with no case) and time it as that file.

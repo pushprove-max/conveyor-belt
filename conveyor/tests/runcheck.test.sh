@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
-# Engine cases: the checks of the Board's fix cards for a test file that never ran (#189): Make it run (runproof(),
-# and ranproof() after its test step: the step ran the file and it passed) and Delete it (deleteproof(): the change
+# Engine cases: the checks of the Board's fix cards for a test file that never ran (#189): Make it run (speedproof.sh runproof(),
+# and ranproof() after its test step: the step ran the file and it passed) and Delete it (speedproof.sh deleteproof(): the change
 # removes the file, then it is checked as an Optimize delete). fx_in and fx_wt are in lib.sh.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
@@ -22,8 +22,8 @@ t_runcard() {
     || fail "a Make it run card whose test step did not run its file was not blocked: $(st 'select(.step | IN("blocked", "landed"))')"
 }
 
-# What ranproof() reads: a test step that passed a case of the file holds, one that passed other files does not; and
-# runproof() refuses a change that removes the file (that is Delete it).
+# What speedproof.sh ranproof() reads: a test step that passed a case of the file holds, one that passed other files does not; and
+# speedproof.sh runproof() refuses a change that removes the file (that is Delete it).
 t_runproofs() {
   setup '[]'; FXWT=; fx_wt 'rm f.test.sh' f.test.sh 'echo x'
   echo '{"units": ["f.test.sh\tone", "g.test.sh"], "cases": 2}' > "$T/$CASE/ran.passed"; echo '{"units": ["g.test.sh"], "cases": 1}' > "$T/$CASE/not.passed"

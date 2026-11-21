@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
-# Engine cases: the speed-up check (speedproof()) and the Optimize check (optproof()) of a card filed from the Tests
-# page. The file is held to the median of the recent runs its issue lists, else to its median on record (recentcpu());
+# Engine cases: the speed-up check (speedproof.sh speedproof()) and the Optimize check (speedproof.sh optproof()) of a card filed from the Tests
+# page. The file is held to the median of the recent runs its issue lists, else to its median on record (speedproof.sh recentcpu());
 # when the issue's verdict is merge, a change that keeps the file adds to that figure the median on record of each
 # test file the change removes (a change with no verdict adds none). A change that keeps
 # its file must make it faster than that figure (for a stabilise or merge verdict, no slower), and the files of a
@@ -22,7 +22,7 @@ median10() {
     jq -cn --argjson c "$c" '{time: "2026-11-01T00:00:00Z", how: "full", sha: "abc", files: {"f.test.sh": {result: "ok", sec: $c, cpu: $c}}}' >> "$ST/suiteruns.jsonl"
   done
 }
-# speedproof() called as card() calls it, on card c7 of #7, a bug filed from the Tests page to speed up f.test.sh
+# speedproof.sh speedproof() called as card() calls it, on card c7 of #7, a bug filed from the Tests page to speed up f.test.sh
 # (`echo slow` on main, its median on record 10 CPU s: median10), whose change rewrites f.test.sh. The file's run
 # with the change (under cards/mainrun/) notes its folder, the file as it runs and its list in $STUB/mainran, times
 # the file at <cpu> CPU s and exits <exit>. When the check fails, the card is blocked as card() blocks it
@@ -68,7 +68,7 @@ t_speedfails() {
     || fail "a speed-up change whose file fails did not fail the check (exit $RC): $(st 'select(.step == "blocked")')"
 }
 
-# #831 D2. A whole card, for what only it shows: card() picks speedproof() for a Speed up card, blocks on its failure,
+# #831 D2. A whole card, for what only it shows: card() picks speedproof.sh speedproof() for a Speed up card, blocks on its failure,
 # and gives its result to the review (SPEEDREVIEW). Bug it catches: a Speed up card held to the bug check, reviewed
 # when not faster, or reviewed with no word of the speed. Its first build leaves f.test.sh as slow as its median (10
 # CPU s): blocked, no review. Its retry's build makes it fast (4 CPU s): the review sees both numbers, and it lands.
@@ -90,7 +90,7 @@ t_speedcard() {
 # The case folder of an Optimize issue filed from the Tests page for f.test.sh (on main, `echo slow`, with g.test.sh,
 # `echo other`), its median on record 10 CPU s (median10). Each run under cards/mainrun/ runs the files of its list:
 # it notes each, with what it holds there, in $STUB/mainran, names the cases one and two of each as passed, and times
-# each at the CPU seconds $STUB/cpu-<file> holds. The run of f on main for the build's brief (speedbrief(), under
+# each at the CPU seconds $STUB/cpu-<file> holds. The run of f on main for the build's brief (speedproof.sh speedbrief(), under
 # cards/mainrun/<card>.cases) is not noted: ownbudget.test.sh holds that brief to its lines.
 optmain() { # <cpu of f> [<cpu of f1> <cpu of f2>]
   setup '[]'; median10
@@ -102,7 +102,7 @@ f=$CONVEYOR_TEST_FILE
 printf '== %s\n-- ok %s\nTESTRUN sec\t%s\t1\t%s\n' "$f" "$f" "$f" "$(cat "$STUB/cpu-$f")" >> "$CONVEYOR_TEST_LOG/r"
 EOF
 }
-# optproof() called as card() calls it, on card c7 of the Optimize issue for f.test.sh, whose change runs <change> in
+# speedproof.sh optproof() called as card() calls it, on card c7 of the Optimize issue for f.test.sh, whose change runs <change> in
 # its worktree on main (optmain's). When the check fails, the card is blocked as card() blocks it (lib/card.sh:
 # SPEEDCHECKED set). The check's exit is in $RC; the review's prompt of an Optimize card (OPTREVIEW) in
 # $T/$CASE/optreview, from the same load of the engine.
@@ -171,7 +171,7 @@ t_optdelete() {
 }
 
 # #831 D3. A whole card, for what only it shows: card() gives the review an Optimize card's check (OPTREVIEW, with
-# optproof()'s result) and records the review's lines grep -Ev "$UNRECORDED" leaves. Bug it catches: the review of an
+# speedproof.sh optproof()'s result) and records the review's lines grep -Ev "$UNRECORDED" leaves. Bug it catches: the review of an
 # Optimize deletion is not given the removed file's cases, or its COVERED-BY lines are lost from the landed card's
 # record, where the Tests page reads them. The build deletes f.test.sh (cases one and two); the review names g.test.sh.
 t_optdeleteland() {
@@ -191,7 +191,7 @@ t_optdeleteland() {
 
 # Bug it catches (#74): a merge recorded as a delete, so the Tests page could not name the file that took the cases of
 # the file it removed. A change that removes the file and changes another test file is a merge into that file. What
-# it records is the Optimize check's (optproof()) alone: the check is called on such a change in a card's worktree.
+# it records is the Optimize check's (speedproof.sh optproof()) alone: the check is called on such a change in a card's worktree.
 t_optmerge() {
   optmain 4
   fx_wt 'rm f.test.sh; echo "echo slow" >> g.test.sh' f.test.sh 'echo slow' g.test.sh 'echo other'

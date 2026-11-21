@@ -18,7 +18,7 @@ listsetup() { # [test-links.json]
   local f
   setup '[]'
   for f in lib/cartsum.js lib/cartsum.test.js lib/tax.test.js far/cartsum.test.js test/helpers.js; do mkdir -p "$R/${f%/*}" && echo x > "$R/$f"; done
-  # The fixture's .gitignore leaves .conveyor/ out: a project commits its map (testlinks()), so it is added here.
+  # The fixture's .gitignore leaves .conveyor/ out: a project commits its map (mainred.sh testlinks()), so it is added here.
   [ -z "${1:-}" ] || { printf '%s\n' "$1" > "$R/.conveyor/test-links.json" && git -C "$R" add -f .conveyor/test-links.json; } || fail "the map"
   git -C "$R" add -A && git -C "$R" commit -qm files || fail "main's files could not be committed"
   printf '%s\n' 'echo "one:$1" >> "$STUB/got"' > "$STUB/one"

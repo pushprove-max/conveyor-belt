@@ -76,7 +76,7 @@ p_rerun() {
   got=$(CONVEYOR_TEST_LOG=$T/log ran | tr '\n' ' ')
   [ "$got" = "aone atwo w " ] || [ "$got" = "w aone atwo " ] && ok "without it, the whole selection runs" || no "no run again: ran '$got': $(cat "$T/out")"
 }
-# Bug it catches: the loop runs a card's failing cases on main (conveyor.sh verdicts()), a clean tree where no change
+# Bug it catches: the loop runs a card's failing cases on main (conveyor.sh mainred.sh verdicts()), a clean tree where no change
 # selects them; the runner ran nothing, so a case broken on main always read as passing there and the card went to a
 # fix session that could not repair main. The list's failed cases run: of the runner, those alone; a test file named
 # with no failed case of it, or a name that is no case, runs nothing.
@@ -178,7 +178,7 @@ p_fixengine() {
   [ "$(grep -E '^TESTRUN (files|cases|kept)=' "$T/flog/test-changed.log" | sed 's/ of=.*//' | tr '\n' '|')" = "TESTRUN files=1|TESTRUN cases=2|TESTRUN kept=2|" ] \
     && ok "the run after a fix says the cases it ran and the passes it kept" || no "kept count: $(cat "$T/flog/test-changed.log")"
   # And names each case it runs of the runner: a run whose time runs out loses the kept passes of these cases alone, not
-  # of the runner's cases it did not run (conveyor.sh rerunlist()).
+  # of the runner's cases it did not run (conveyor.sh testlist.sh rerunlist()).
   [ "$(sed -n 's/^TESTRUN case\t//p' "$T/flog/test-changed.log" | sort | tr '\t\n' ':|')" = "conveyor/conveyor.test.sh:atwo|conveyor/conveyor.test.sh:bone|" ] \
     && ok "the run after a fix names the runner's cases it runs" || no "case lines: $(cat "$T/flog/test-changed.log")"
   printf 'change\tabc\npass\tlib/w.test.sh\nfail\tconveyor/conveyor.test.sh\tatwo\nchanged\tconveyor/core.sh\n' > "$T/rerun"

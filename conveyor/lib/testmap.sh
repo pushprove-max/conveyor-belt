@@ -254,7 +254,7 @@ mapwrite() { # <dir> <pairs file> <not mapped file, or ""> <language> <seconds> 
     | .sources |= with_entries(select(.value != []))' > "$f.new" && mv -f "$f.new" "$f" || { rm -f "$f.new"; return 1; }
 }
 # What the run that makes the map may cost, as setup asks before it: the time of the last whole-suite run recorded
-# (its files' seconds added up: suiterec(), lib/testrun.sh), or that none is recorded.
+# (its files' seconds added up: suiterec(), lib/testlist.sh), or that none is recorded.
 mapsuitesec() { jq -rs '[.[] | objects | select(.files | type == "object")] | last | select(.) | [.files[].sec | numbers] | add // empty | round' "${STATE%/*}/suiteruns.jsonl" 2>/dev/null; }
 mapcost() {
   local s

@@ -19,7 +19,7 @@
 # lines, lib/prompts.sh) adds rollout: [{action, fails, place}]; a landed line adds the card's own (card()).
 # The picked line of a card made by land-branch adds branch: the branch whose change the card lands.
 # The picked line of a card of the loop adds created: when its issue was opened (the time it waited is the track's
-# first step). A review line adds counts: its findings at each level (counts(), below). A start line adds of.
+# first step). A review line adds counts: its findings at each level (donewhen.sh counts(), below). A start line adds of.
 # A build, fix, rebase or review line adds model and effort: what that session or review ran on.
 # Only the lines no check has passed yet are read: a pick and a snapshot each check, and the records only grow.
 # $STATE.checked holds what checked whole: its bytes, its lines and the checksum of those bytes. A file whose first
@@ -193,7 +193,7 @@ cards() {
 # (commit: the commit the machine's Conveyor runs, refused: the pack fields its schema does not name, or its check's
 # lines, project: the project's commit, or null): the machine's Conveyor on another commit refuses this pack, so it
 # does not serve the project (machinerefuses(), lib/install.sh); null when it reads it; machineHold ({since, card, sha,
-# controls, cases}): the machine hold while it stands (machinehold(), lib/testrun.sh: the loop picks no card), else
+# controls, cases}): the machine hold while it stands (machinehold(), lib/mainred.sh: the loop picks no card), else
 # null, for the Foreman's watcher; landingPr ({number, url, merge, cards}): the open pull request of Land as pr as
 # GitHub last showed it ($LANDPR, prstate() and prsync(), lib/push.sh), with how many cards its pushed lines name and its last merge (a merge
 # GitHub refused gives the reason), for the Board's Merge and the Foreman; null with none open. Every object of it that names a main-red fix card
@@ -233,7 +233,7 @@ live() { # every live record there is, as one object by card
   for f in "$CARDS"/*.live; do c=${f##*/}; [ ! -e "$f" ] || o+=$(jq -c --arg c "${c%.live}" '{($c): .}' "$f" 2>/dev/null)$'\n'; done
   if [ -n "$o" ]; then jq -cs 'add // {}' <<<"$o"; else echo '{}'; fi
 }
-# The live record of each bug-card check that runs now (testrun.sh bugproof(): its run on main's code without the fix,
+# The live record of each bug-card check that runs now (bugproof.sh bugproof(): its run on main's code without the fix,
 # or a main-red fix card's run of main's failing cases, redproof(), in $CARDS/mainrun/<card>.unfixed), as one object by
 # card; the Board shows it as the card's proof, and health counts it as the card's output. That run is no step of the card's records: between its build
 # line and its review's start line, the card's own live record is gone.
@@ -242,7 +242,7 @@ proofs() {
   for f in "$CARDS"/mainrun/*.unfixed.live; do c=${f##*/}; [ ! -e "$f" ] || o+=$(jq -c --arg c "${c%.unfixed.live}" '{($c): .}' "$f" 2>/dev/null)$'\n'; done
   if [ -n "$o" ]; then jq -cs 'add // {}' <<<"$o"; else echo '{}'; fi
 }
-# The output of each card's test run and of the run again of its failed tests on main (testrun.sh verdicts(), in
+# The output of each card's test run and of the run again of its failed tests on main (mainred.sh verdicts(), in
 # $CARDS/mainrun/<card>, whose live record is mainrun/<card>.live), as one object by card: the newest of the card's .test
 # file's write time and that live record's last and progress. Health counts it as the output of a card in its test step:
 # while main's run runs, the card's own live record is gone and the card writes no line. One jq reads all the live

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
-# Engine cases: the checks of two of the Board's other fix cards (#189): Fix the waiting (steadyproof() with WAITRATIO:
-# 3 runs alone, each passing at most 2 times its CPU seconds on the clock) and Fix hollow cases (hollowproof(): the
+# Engine cases: the checks of two of the Board's other fix cards (#189): Fix the waiting (speedproof.sh steadyproof() with WAITRATIO:
+# 3 runs alone, each passing at most 2 times its CPU seconds on the clock) and Fix hollow cases (speedproof.sh hollowproof(): the
 # judge's hollow check of the changed file, and a COVERED-BY line for each deleted case). Make it run and Delete it
 # are in runcheck.test.sh. fx_in and fx_wt are in lib.sh.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
@@ -227,7 +227,7 @@ t_hollowcovered() {
     || fail "the review is not told the result: $(cat "$FXWT.unfixed")"
 }
 
-# Bug it catches: the check again after a fix session (fixproof() in card()) read only the fix's reply, so a case the
+# Bug it catches: the check again after a fix session (speedproof.sh fixproof() in card()) read only the fix's reply, so a case the
 # build deleted with its COVERED-BY line was refused as uncovered. The build's lines are kept for the later check.
 t_hollowrefix() {
   FXWT=; hollowrun "$HOLLOWFIXED; sed -i '/t_two/d' h.test.sh" 'COVERED-BY: g.test.sh: t_three | two' $'No hollow case.\nHOLLOW-CHECK: done'

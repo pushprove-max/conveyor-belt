@@ -22,7 +22,7 @@ t_redcap() {
   tune '.tunables.poll = 1'; watchturns
   # A fix card (its worktree ends -0) is labelled as a P0 bug: the first (its card id in building.0) adds a line to
   # a.txt, and main's red case (the run on main, mainrun-cmd) holds that a.txt has that line, so it fails on main's code
-  # without the change and passes with it (redproof()); the second fails its build at once. Any other build holds until
+  # without the change and passes with it (bugproof.sh redproof()); the second fails its build at once. Any other build holds until
   # let go (go<n>), then fails. The case reads a.txt, not a.test.sh: main has its own stub a.test.sh (filemode), which
   # passes without the change, so the card would close as main no longer red.
   echo "[ \$(wc -l < a.txt) -ge $(($(wc -l < "$R/a.txt") + 1)) ]" > "$STUB/mainrun-cmd"

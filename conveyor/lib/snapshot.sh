@@ -56,7 +56,7 @@
 #   false, and usd null, while neither a finished session or review nor the live record holds a token: "no reading
 #   yet", never $0; atEnd is true when, in that time, the running Claude session's answers all report usage 0 (a route
 #   that streams none): "cost shown when the step ends". live is {turns, lastOutputAt, action, at} of the running step (at: when its live record began; for a
-#   card waiting for main to change, testrun.sh mainwait(), when that wait began), or null. beyond: why it took a slot beyond the
+#   card waiting for main to change, mainred.sh mainwait(), when that wait began), or null. beyond: why it took a slot beyond the
 #   project's cap ("main is red": a main-red fix, redfix()), null once it has landed or when it took none. reviews and
 #   track are as below.
 # reviews (of a belt card and of a landed one): its finished reviews in order: round, verdict (GO, NO-GO, or none),
@@ -531,7 +531,7 @@ snapshot() (
   h=$(ISSUESJSON=${issues:-null}; health) && printf '%s\n' "$h" > "$d/health" || exit 1
   snaprows "$READ_OLD" "$RETRIED.rows" "$d/old" 2>/dev/null || { echo "conveyor: $RETRIED does not read as card records; stopping" >&2; exit 1; }
   models=$(jq -c .models <<<"$h"); settings=$(modelsettings "$control"); ACCT=$(ctlacct "$control")
-  # A main-red fix card is titled from its entry as it is now (redtitles()), so a case added while it runs shows.
+  # A main-red fix card is titled from its entry as it is now (mainred.sh redtitles()), so a case added while it runs shows.
   # One card a line: the pricing below prices only the lines that changed since the last snapshot.
   # A bug card's check of its new tests on main's code (proofs()) runs between two steps, no start line before it: while
   # it runs (its live record there, the card open, its last line no start), it is the card's proof, the step in progress.

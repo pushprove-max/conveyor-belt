@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
-# Engine cases: the bug-card check (bugproof()): a bug card's new tests must fail on main's code without the fix.
+# Engine cases: the bug-card check (bugproof.sh bugproof()): a bug card's new tests must fail on main's code without the fix.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -12,7 +12,7 @@
 # files before the push, pushtests(); with the default pack it runs none).
 nopush() { jq -c '.rules.push = false' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json" || fail "the control record"; }
 
-# One card of #7 with the given labels, run by the loop: the cases of card()'s wiring of bugproof()'s exits (a proven
+# One card of #7 with the given labels, run by the loop: the cases of card()'s wiring of bugproof.sh bugproof()'s exits (a proven
 # card lands, an unproven one goes back to build then is blocked, a card that is not a bug skips the check), which only
 # a whole card shows. Its build fixes a.txt (adds `two`) and adds a.test.sh holding <test>. The run on main (a worktree
 # under cards/mainrun/) notes its folder and staged files in $STUB/mainran and runs a.test.sh; the reviewer's prompt
@@ -27,7 +27,7 @@ bugcard() { # <test> <label>...
   loop run >/dev/null || fail "run exited non-zero"
 }
 
-# bugproof() called as card() calls it, on card c7 of #7 ($ISSUE, when set, is its issue json): its worktree on main
+# bugproof.sh bugproof() called as card() calls it, on card c7 of #7 ($ISSUE, when set, is its issue json): its worktree on main
 # runs <change>, staged, and main holds the <file> <content> pairs first (fx_wt). Each run on main runs
 # $STUB/mainrun-cmd, which the case writes after setup. The check's exit is in $RC, its reason (BUGWHY) in $BW.
 bugwt() { # <change> [<file> <content>]...
@@ -180,12 +180,12 @@ t_bugcommentcode() {
   grep -q '/cards/mainrun/' "$STUB/mainran" || fail "its test was not run on main: $(cat "$STUB/mainran" 2>&1)"
 }
 
-# Bug it catches: commentsonly() reads each changed line alone, so a change that puts code between a /* line and a */
+# Bug it catches: bugproof.sh commentsonly() reads each changed line alone, so a change that puts code between a /* line and a */
 # line (the code no longer runs), or edits a # line in a shell heredoc (text the program prints), is let skip the
 # check; and so are a/**/b in js read as ab, and two .css and .html changes that look like comment fixes but change
 # the page: 16/**/px (two CSS tokens, the rule dropped) read as 16px, and a new <!-- --> in an empty <nav> (a node:
 # the Board sees a first child and draws no tabs). Each change here is staged beside a test file (but notest, staged
-# alone) in a fresh repo and given to commentsonly().
+# alone) in a fresh repo and given to bugproof.sh commentsonly().
 t_bugcommentsyntax() {
   local r=$T/$CASE/r got=''
   mkdir -p "$r" && git -C "$r" init -q && git -C "$r" config user.email t@example.com && git -C "$r" config user.name t \
@@ -196,7 +196,7 @@ t_bugcommentsyntax() {
   printf '%s\n' "cat <<'E'" '# STANDING YES' 'E' > "$r/rules.sh"
   printf '%s\n' 'ok();' > "$r/a.test.js"
   git -C "$r" add -A && git -C "$r" commit -qm main || fail "the fixture commit"
-  # The engine's functions commentsonly() calls, read once for every try.
+  # The engine's functions bugproof.sh commentsonly() calls, read once for every try.
   local fns; fns=$(sed -n '/^testpaths() {/,/^}/p' "$SRC/lib/issues.sh"; sed -n '/^uncomment() {/,/^}/p; /^commentsonly() {/,/^}/p' "$SRC/lib/bugproof.sh")
   # <name> <file> <sed script> [notest]: the file changed so and, unless notest, a.test.js changed, staged; notes
   # "<name>=<0 when comments only>".
@@ -262,11 +262,11 @@ t_bugfilecommand() {
 }
 
 # #711. Bug it catches: the guides said every card with a test file and no test.fileCommand stops at its test step,
-# but a bug card with a fix cannot run its bug-card check (bugproof() exit 2; t_wideoffnolist checks that stop), and
+# but a bug card with a fix cannot run its bug-card check (bugproof.sh bugproof() exit 2; t_wideoffnolist checks that stop), and
 # card() blocks it at Build, while a test-only or comments-only bug card skips the check and stops at its test step.
-# #713. Bug it catches: they said so of comments in any file, but commentsonly() takes only JavaScript and TypeScript
+# #713. Bug it catches: they said so of comments in any file, but bugproof.sh commentsonly() takes only JavaScript and TypeScript
 # files (t_bugcommentsyntax: a # line in a .sh file is a fix), so a bug card that changes a shell comment stops at Build.
-# #872. Bug it catches: they said a js comment fix with no test file is a fix that stops at Build, but commentsonly()
+# #872. Bug it catches: they said a js comment fix with no test file is a fix that stops at Build, but bugproof.sh commentsonly()
 # now takes it with or without a test file (t_bugcommentsyntax notest).
 # The pages and the schema have no behaviour to run, so their text is read.
 t_bugnofilecmd() {
@@ -386,7 +386,7 @@ t_bugcommentnamed() {
   recok "$ST/cards.jsonl" "bugproof()"
 }
 
-# #831 D1. A whole card, for what only it shows: card() hands the reason bugproof() set (BUGWHY) to the build it sends
+# #831 D1. A whole card, for what only it shows: card() hands the reason bugproof.sh bugproof() set (BUGWHY) to the build it sends
 # back, that build's line and the review. Bug it catches: a comment card whose build omits a test is sent back with the
 # default reason ("the new tests pass without the fix"), or the test its issue's Done-when names is not the proof that
 # reaches the review. Main holds src/s.sh with src/s.test.sh (`true`, which s.sh selects by name), and src/w.sh, which

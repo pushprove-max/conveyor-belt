@@ -72,7 +72,7 @@ PY
   [ -z "$(ls -A "$tmp")" ] || fail "a snapshot left its scratch folder: $(ls -A "$tmp")"
 }
 
-# Bug (#281): while a bug card's new tests ran on main's code without its fix (testrun.sh bugproof(), its live record
+# Bug (#281): while a bug card's new tests ran on main's code without its fix (bugproof.sh bugproof(), its live record
 # $CARDS/mainrun/<card>.unfixed.live), the card's records ended with its build line, so the snapshot named the review
 # after it ("review 1 of 3", the reviewer's model) though no review ran. That run is the card's step in progress: proof,
 # on Build, with its files run. Once the review starts, a proof record left behind is not shown over it.

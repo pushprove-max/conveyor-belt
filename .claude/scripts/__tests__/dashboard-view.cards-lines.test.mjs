@@ -59,7 +59,7 @@ test('a fix session is labelled with what started it, its reason on hover, never
     'just after a findings fix whose check failed: the reply check');
   assert.deepEqual(pillOf(recs.slice(0, 4), 'fix after review 0'), ['Fix 1', ''], "just after a reply-check fix: the project's checks or main moved, no cause claimed");
   // The review gate's lint fix after the build, when that fix's reply fails its Done-when check (lintgate() then calls
-  // checked()): Build's reply check, not Fix 1.
+  // donewhen.sh checked()): Build's reply check, not Fix 1.
   assert.deepEqual(pillOf([...start, { name: 'lint', state: 'done', sec: 5, gate: 'review' }, failed({ name: 'fix 1', state: 'done', sec: 60, reason: 'lint: 1 finding(s) of the change' })],
     'fix after review 0'), ['Build · reply check fix', 'the Done-when check on the reply failed'], 'just after the lint fix whose check failed: the reply check on Build');
   assert.deepEqual(pillOf([...recs, { name: 'tests passed', state: 'done', sec: 60 }], 'fix after review 3'), ['Fix 4: main changed under it', 'main moved after the card made its change, and the change no longer applied to it'],

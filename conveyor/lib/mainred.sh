@@ -12,13 +12,13 @@
 # case (the command runs it whole: on main's clean tree nothing else selects it). Each failure's
 # verdict, as notpassed() names it:
 # - main: the same case (or the same file failing naming no case) failed on main too, an input of its file changed
-#   since its last recorded pass (the file has no pass in the test results cache with main's content: cachehits()),
+#   since its last recorded pass (the file has no pass in the test results cache with main's content: testlist.sh cachehits()),
 #   and a control passed beside it, or no control could run (below). A timeout or a kill on main says nothing of the case.
 #   The test command itself (testfails()'s name for a run that logged no file) gets no verdict: it names no test (a
 #   card's run whose only failure it is gave no result: voidrun()).
 # - machine (issue 221): it failed on main too, but its file passed before with the same inputs, or every control failed:
 #   the machine's, not main's (machinehold()). The controls are the files of the pack's test.control that have a
-#   recorded pass on main's content (cachehits()), or all of them when the cache has no pass on main's content at all
+#   recorded pass on main's content (testlist.sh cachehits()), or all of them when the cache has no pass on main's content at all
 #   (a test command that logs no `TESTRUN inputs` lines records none), and are not among the failing files: main's run
 #   runs them too, on the same slot (CONVEYOR_TEST_ONESLOT: a runner of the command runs its workers one at a time on
 #   the run's slot, slot_take), each named `fail` in its list. With no control that could run, nothing tells the
@@ -97,7 +97,7 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
   jq -cn --slurpfile v <(printf '%s' "$v") --slurpfile m <(printf '%s' "$m") '$v[0] as $v | $m[0] as $m | {verdicts: [$v[] | {case, verdict} + if .why then {why} else {} end]} + if $m then {mainRun: $m} else {} end'
 }
 # The machine hold (issue 221): a case that failed on main as on the card, though its inputs did not change since it
-# last passed (cachehits()), or while every control (verdicts()) that ran beside it on the same slot failed, is the
+# last passed (testlist.sh cachehits()), or while every control (verdicts()) that ran beside it on the same slot failed, is the
 # machine's (verdicts(): machine), not main's. $MACHINEHOLD keeps
 # {since, card, sha, controls, cases}: when the hold began, the card and main's commit that found it, the test files
 # that must pass on main again (the controls that failed, and the failing files that passed before with the same
@@ -179,9 +179,9 @@ repairholder() {
   IFS=$'\t' read -r -a h <<<"$h"
   ! p_alive "${h[1]}" "${h[2]}" || printf '%s\n' "${h[0]}"
 }
-# The repair lane's judgement of a card (repairlane()), in the shape of redproof(): the files of the machine hold run
+# The repair lane's judgement of a card (repairlane()), in the shape of bugproof.sh redproof(): the files of the machine hold run
 # in a worktree of the commit the card was built on (its HEAD), $CARDS/mainrun/<card>.repair, each named `fail` in
-# the run's list, each alone through the pack's test.fileCommand (else Conveyor's own runner: ownrunner()): first without the card's change, where they must
+# the run's list, each alone through the pack's test.fileCommand (else Conveyor's own runner: testlist.sh ownrunner()): first without the card's change, where they must
 # fail, then with it staged, where they must pass. The run without the change must fail with a control its logs
 # (testfails()) name failed or out of time: a run that fails for another reason (one that stops before any file runs)
 # proves nothing. The run with the change must name every control passed and at least one case that passed (passcases):
@@ -239,7 +239,7 @@ cleanrun() { # <worktree> <command> [<list>]
   [ ! -f "$1/conveyor/lib/slots.sh" ] || lib=$1/conveyor/lib
   for v in PATH HOME USER LOGNAME LANG LC_ALL TMPDIR XDG_CONFIG_HOME; do [ -z "${!v+x}" ] || e+=("$v=${!v}"); done
   rm -rf "$1.testlog" "$1.report"; mkdir "$1.testlog" 2>"$1.test" || return 1
-  # A suite runner on <list> is taken off it (runnersoff(), #382); a list so left with no `fail` line runs nothing.
+  # A suite runner on <list> is taken off it (testlist.sh runnersoff(), #382); a list so left with no `fail` line runs nothing.
   # The output names each, with those listcmd() took off its command's list (RUNOFF).
   [ -z "${3:-}" ] || { rs=$(runnersoff "$3"); [ -z "$rs" ] || grep -q $'^fail\t' "$3" || { runnernote "$rs" > "$1.test"; return 1; }; }
   rs=$(printf '%s\n' "${RUNOFF:-}" "$rs" | grep . | sort -u)
@@ -248,7 +248,7 @@ cleanrun() { # <worktree> <command> [<list>]
   pid=$!
   watch $pid "$1.test" "$1.live" test; v=$?; runnernote "$rs" >> "$1.test"; return $v
 }
-# One run of redproof(): the cases <cases json> ([{name, file, files, case}], case "" for a file that failed naming no
+# One run of bugproof.sh redproof(): the cases <cases json> ([{name, file, files, case}], case "" for a file that failed naming no
 # case; files, the files that define it, mainred()) alone in <worktree>, each a `fail` line of the run's list
 # (CONVEYOR_TEST_RERUN), as verdicts() runs them on main. A case's result is under its file or, as a run names an
 # engine case file's case under that file where an entry made before issue 214 named the runner, under one of its
@@ -449,7 +449,7 @@ redtitles() {
 # Whether the main-red record (mainred()) holds main red for any of <case>...: an entry of any commit lists one, and
 # its fix card is not picked yet or is still open (redopen()), as mainred() files a case (a case failing at a later
 # commit goes to the open fix card of an earlier one). An entry whose fix card landed, or closed as already done
-# (bugproof(), nochange()), holds it no more.
+# (bugproof.sh bugproof(), nochange()), holds it no more.
 redlisted() { # <case>...
   local card
   while read -r card; do redopen "$card" < /dev/null && return 0; done \

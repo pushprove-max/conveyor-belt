@@ -143,7 +143,7 @@ noshell() { # <worktree> <brief> <instructions>
   p=$3$'\n\n'"You have no shell: the staged change (\`git diff --cached\`) is the file $1.rv/staged.diff. Read it there, in parts if it is large. The file $STE80 is the file $1.rv/ste80.md: read it there."
   [ ! -e "$1.port" ] || { cp "$1.port" "$1.rv/port.diff" && p+=" The difference the review of a port reads (the file $1.port) is the file $1.rv/port.diff: read it there."; } \
     || { echo "the port's difference could not be written for the review"; return 1; }
-  # A review after a fix of review findings names that fix's diff in the card's fix rounds (rereview()).
+  # A review after a fix of review findings names that fix's diff in the card's fix rounds (donewhen.sh rereview()).
   [[ $2 != *"$1.rounds/"* ]] || { cp -R "$1.rounds" "$1.rv/rounds" && p+=" The files of the folder $1.rounds this review names are in the folder $1.rv/rounds: read them there."; } \
     || { echo "the fix rounds could not be written for the review"; return 1; }
   [ ! -f "$1/AGENTS.md" ] || p+=$'\n\n# AGENTS.md\n'"$(cat "$1/AGENTS.md")"
@@ -324,7 +324,7 @@ judgemarks() { # <worktree> <the always-accepted kinds, a JSON array>
 # the staged file has a line at that number. A path that is not one in the repository (it starts with /, or has a . or
 # .. part) gives nothing, as does a line that no tree has. Bounded: EXCERPTS excerpts, EXCERPTLINES lines each, each
 # line cut to 300 characters. Prints a JSON array, [{at (the file and line as cited), side, from (the first line),
-# lines}]; which review kept it is its line's (exdetail(), lib/testrun.sh).
+# lines}]; which review kept it is its line's (exdetail(), lib/donewhen.sh).
 EXCERPTS=20 EXCERPTLINES=20
 excerpts() { # <worktree> [<the tree before the fix round the review follows>]
   local new old fix=${2:-} p a b at side t got del kept out='[]'
@@ -362,7 +362,7 @@ excerpts() { # <worktree> [<the tree before the fix round the review follows>]
 # One judge call, read-only as a review is (claudereview(), codexreview(), opencodereview()): its answer in
 # <worktree>.judge. Prints its fields as one JSON object, {model, effort, sec} and, when they can be read, tokens and
 # usage (an OpenCode judge's holding its cost, usage.cost, when it reports one); one that fails prints them with failed (why) and fails.
-# The check of a Fix hollow cases card (hollowproof(), lib/testrun.sh) runs it on another seat: CALLSEAT, a seat as
+# The check of a Fix hollow cases card (hollowproof(), lib/speedproof.sh) runs it on another seat: CALLSEAT, a seat as
 # seat() prints it, with CALLSTEP and CALLACT the step and action its live record shows.
 judgecall() { # <worktree> <instructions> <the brief and the findings>
   # shellcheck disable=SC2034 # PROXY_ROLE is read by proxyroute() in lib/control.sh
@@ -459,9 +459,9 @@ judged() { # <card> <issue> <worktree> <brief> <the review's fields>
 # The P3 findings the review still holds after the judge (judged()) are handled by the control record's rule P3 (the
 # Rules tab). On, the default, each is a finding as a P2 is: it makes a NO-GO, goes to the fix round and, still open
 # after the last review, is filed as a follow-up of the pack's P3 priority, or of none (followups()). Off, each becomes a line
-# `MINOR: <finding>` of the review: listed on the card's review line and counted there (counts()), but no finding
+# `MINOR: <finding>` of the review: listed on the card's review line and counted there (donewhen.sh counts()), but no finding
 # (NOTFINDING): no fix round and no follow-up, and a review left with no finding is a GO. A finding's level is the
-# first [P<n>] it names, as counts() reads it. A review with no verdict is left as it is.
+# first [P<n>] it names, as donewhen.sh counts() reads it. A review with no verdict is left as it is.
 minor() { # <worktree>
   [ "$(ctl 2>/dev/null | jq -r '.rules.P3' 2>/dev/null)" = false ] && [ "$(verdict "$1.review")" != none ] || return 0
   jq -rRn --arg nf "$NOTFINDING" 'def p3: (test($nf) | not) and (capture("\\[(?<p>P[0-3])\\]").p // "P1") == "P3";

@@ -168,7 +168,7 @@ SPEEDCHECK=6
 # The failures of speedproof()'s run (exit <exit>, read by testfails() from <worktree>.test) of test files other than
 # <file run>...: the run also runs the test files the change selects (a Board test file's links,
 # .conveyor/test-links.json), and a failure of one of them is not the run's own file's (#602). Prints them, each file
-# with its failing cases and each case's first line. A file the main-red record holds red (redlisted(): the file, or
+# with its failing cases and each case's first line. A file the main-red record holds red (mainred.sh redlisted(): the file, or
 # `<file>: <case>`) is named as main's failure; so is one that fails the same way on the commit the card was built on
 # (its HEAD): the change is taken out of the worktree again and the other files the record does not hold run alone
 # there, a file being main's when each of its failing cases fails there too (a file with no case named: when it fails
@@ -204,10 +204,10 @@ speedothers() { # <worktree> <exit> <file run>...
   jq -e '[.files[]?.file, .timeout.file?] | any(.[]; IN($ARGS.positional[]))' --args "${@:3}" <<<"$t" > /dev/null
 }
 # The check of a speed-up card (card(): a bug card whose issue speedfile() names a test file), in place of the bug-card
-# check (bugproof()): a speed-up keeps what the file tests, so its tests pass on main's code by design. The file runs
+# check (bugproof.sh bugproof()): a speed-up keeps what the file tests, so its tests pass on main's code by design. The file runs
 # alone, on a test slot, through the pack's test.fileCommand, in a worktree of the commit the card was built on with the whole
 # staged change ($CARDS/mainrun/<card>.speed). It must pass, and its CPU seconds there (its runner's `TESTRUN sec` line,
-# timed()) must be lower than the figure recentcpu() gives: the median of the recent runs its issue lists, else its
+# testlist.sh timed()) must be lower than the figure recentcpu() gives: the median of the recent runs its issue lists, else its
 # median on record, or, when the issue lists recent runs, lower than the slowest of them (slowestrun(): inside their
 # spread). Under the verdict stabilise (optverdict()) they must be at most that figure, and the build's reply
 # must name the cause of each flaky case and how the change removes it (stabilised()), checked before the run; the
@@ -391,7 +391,7 @@ optproof() { # <card> <worktree> <issue json> <test file>
 # check does not hold.
 # Given a ratio, it is the check of a Fix the waiting card (#189; WAITFIX): the file runs WAITRUNS times in a row, and
 # each run must also take at most that many seconds on the clock for each of its CPU seconds (its runner's `TESTRUN
-# sec` line, timed()); the reason a run does not names it with its clock and CPU seconds.
+# sec` line, testlist.sh timed()); the reason a run does not names it with its clock and CPU seconds.
 # shellcheck disable=SC2034 # FIXFAILS, WAITFIX and WAITRATIO are used in lib/card.sh
 FIXFAILS='Fix the failures of the test file ' STEADYRUNS=10 WAITFIX='Fix the waiting of the test file ' WAITRUNS=3 WAITRATIO=2
 steadyproof() { # <card> <worktree> <test file> [<the most clock seconds a run may take for each CPU second>]
@@ -661,7 +661,7 @@ runproof() { # <worktree> <test file>
   printf 'This issue makes the test file %s run. After this review, the card'"'"'s test step must run it, and it must pass; else the card is blocked.\n' "$2" > "$1.unfixed"
 }
 # After the test step of a Make it run card passed: the step ran the file and it passed, when what the step passed
-# (<worktree>.passed, passlist(): the file whole, or a case of it) names it. Prints why not, and fails, when it does not.
+# (<worktree>.passed, testlist.sh passlist(): the file whole, or a case of it) names it. Prints why not, and fails, when it does not.
 ranproof() { # <worktree> <test file>
   jq -e --arg f "$2" 'any(.units[]?; . == $f or startswith($f + "\t"))' "$1.passed" > /dev/null 2>&1 && return 0
   echo "the card's test step did not run the test file $2: the test command still does not run it, or it ran none of its cases"
@@ -729,7 +729,7 @@ aloneproof() { # <card> <worktree> <test file>
     else
       # Not the file's `-- ok` line: filecmd() writes it on any exit 0 of the command, so a command that runs nothing
       # (as `true`) has it too. A case of the file that passed (in its text), or a time of it the runner gave (a
-      # `TESTRUN sec` line of its logs or its report, reported()). The log `cputime`, which the engine's wrapper
+      # `TESTRUN sec` line of its logs or its report, testlist.sh reported()). The log `cputime`, which the engine's wrapper
       # (cputwrap(), lib/testfiles.sh; the Board's Record CPU time) writes for any command it wraps, counts only when
       # the change leaves main's test.fileCommand: a card's own wrapper around a command that runs nothing writes it too.
       t=$(testfails "$mwt.test" 0 2>/dev/null) x='/cputime$'

@@ -74,7 +74,7 @@
        followupRate: ($l | share(.metrics.followups > 0)), blockRate: ($cs | share(.step == "blocked")),
        blocks: ($b | group_by(.metrics.blockClass) | map({key: .[0].metrics.blockClass, value: length}) | from_entries),
        rebuildRate: ($cs | share(.metrics.rebuilds > 0)),
-       # The test failures by verdict (verdicts()): the card's (to its fix), main's (it waited) or flaky; and mainSec,
+       # The test failures by verdict (mainred.sh verdicts()): the card's (to its fix), main's (it waited) or flaky; and mainSec,
        # the seconds the runs of failing cases on main took, the time that check cost.
        testFailures: ([$cs[].x.log[] | select(.step == "test")] as $t | [$t[].verdicts[]?.verdict] as $v
          | {card: ($v | map(select(. == "card")) | length), main: ($v | map(select(. == "main")) | length),

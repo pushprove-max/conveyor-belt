@@ -433,7 +433,7 @@ relminver() { # <command name> <commit>
   mrec "$min" passed "the commits since ${last:-the start} change ${ch%%$'\n'*}"
 }
 # The whole suite (test.full) on <commit>, in a worktree of it alone, its result posted on it as conveyor/release-suite,
-# its files' results and times kept for the Tests page (suiterec(), lib/testrun.sh) and its results in the whole-suite
+# its files' results and times kept for the Tests page (suiterec(), lib/testlist.sh) and its results in the whole-suite
 # record every whole-suite run shares (suitekeep(), lib/fulltest.sh). release-prep and release reuse that record (suitereuse()):
 # with a pass of every file on <commit> itself (a full test run's, or Push landed's) it runs no test and posts the pass;
 # with results on an ancestor it runs only some files (the suite's command is told the list by the file

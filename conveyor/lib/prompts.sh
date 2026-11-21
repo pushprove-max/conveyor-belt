@@ -93,7 +93,7 @@ names() {
       | (map(rx) | "^(" + join("|") + ")"), join(", "), ($t | globsrx), ($t | join(", ")), ($pk.tests.patterns | if type == "array" then "1" else "" end)
       | . + "\u0000"' <<<"$p"$'\n'"$PACK_T") \
     && [ "${#x[@]}" = 5 ] || return 1
-  # The test files' expression (TESTRX) and globs (TESTGLOBS), which testpaths() (lib/issues.sh) and bugproof() read,
+  # The test files' expression (TESTRX) and globs (TESTGLOBS), which testpaths() (lib/issues.sh) and bugproof.sh bugproof() read,
   # and TESTOWN, 1 when the pack itself sets tests.patterns (not the schema's default), which haspatterns() reads.
   # shellcheck disable=SC2034 # TESTRX, TESTGLOBS and TESTOWN are read in lib/issues.sh and lib/testrun.sh
   PRODUCT=${x[0]} p=${x[1]} TESTRX=${x[2]} TESTGLOBS=${x[3]} TESTOWN=${x[4]}
@@ -510,7 +510,7 @@ the change itself, whatever it touches.'
 # carried, and is not counted. A `DONE-WHEN: D<n> holds` line is the reviewer's word that a Done-when line's evidence
 # holds (DONEWHENREVIEW); one that does not hold is a finding, so no other DONE-WHEN line is let through.
 # An `EARLIER: E<n> holds` line is the reviewer's word that the fix of an earlier finding holds (REREVIEW).
-# A `COVERED-BY: <test file>: <case>` line names the test that covers a case of a file an Optimize deletes (optproof()).
+# A `COVERED-BY: <test file>: <case>` line names the test that covers a case of a file an Optimize deletes (speedproof.sh optproof()).
 # A `ROLLOUT: <the action> | <what fails without it> | <file:line>` line is a step an operator must take, in order, to
 # deploy the change (a migration before the deploy, a new environment value, a flag): no defect, so it holds no
 # verdict, causes no fix round, is never filed or counted, and goes to the judge as no finding. It is kept on its own
@@ -518,7 +518,7 @@ the change itself, whatever it touches.'
 ROLLOUT='[^|]*[^|[:space:]][^|]* \| [^|]*[^|[:space:]][^|]* \| [^|[:space:]]+:[0-9]+[[:space:]]*$'
 NOTFINDING='^(NEW CARD|UNPROVEN|DECLINED|MINOR|COVERED-BY|VERDICT|USER-VISIBLE|INHERITED):|^DONE-WHEN: D[0-9]+ holds[[:space:]]*$|^EARLIER: E[0-9]+ holds[[:space:]]*$|^ROLLOUT: '"$ROLLOUT"'|^[[:space:]]*$'
 # The rollout actions a file names, as a JSON array of {action, fails, place} ([] when none): a review's ROLLOUT lines
-# (prefix ROLLOUT) or a card's `Rollout:` commit trailers (prefix Rollout, trailerbrief()), each of the shape above.
+# (prefix ROLLOUT) or a card's `Rollout:` commit trailers (prefix Rollout, donewhen.sh trailerbrief()), each of the shape above.
 # They are steps in order: each is kept once, where it is first named, and never sorted (ROLLOUTONCE).
 ROLLOUTONCE='reduce .[] as $x ([]; if any(.[]; . == $x) then . else . + [$x] end)'
 rollouts() { # <file> <prefix>
@@ -528,24 +528,24 @@ rollouts() { # <file> <prefix>
 # A `DECLINED:` line is a finding the judge declined (judged()), with the judge's reason: it holds no verdict, causes
 # no fix round and is never filed. A `MINOR:` line is an accepted P3 finding while the control record's rule P3 is
 # off (minor()): it is listed only, holds no verdict, causes no fix round and is never filed, but it is counted
-# (counts()). Only the engine writes either: a line the reviewer starts so is a finding (review()).
+# (donewhen.sh counts()). Only the engine writes either: a line the reviewer starts so is a finding (review()).
 # The lines a review's record line (reason) and a blocked card's comment leave out: the NEW CARD, UNPROVEN,
 # DECLINED, MINOR and COVERED-BY lines stay there, so the dashboard's review text shows them, and the Tests page the
 # test files that cover the cases of a file an Optimize deleted (testspart()).
 # shellcheck disable=SC2034 # used in lib/card.sh, lib/followups.sh and lib/push.sh
 UNRECORDED=${NOTFINDING/NEW CARD|UNPROVEN|DECLINED|MINOR|COVERED-BY|/}
 # What the fix session after a NO-GO is told, after the brief; the review follows it, each finding led by its id
-# (fixlines()).
+# (donewhen.sh fixlines()).
 FIX='# Reviewer findings: fix these findings, and every other place in this change that makes the same mistake; nothing else
 An `UNPROVEN:` line is not a finding: change nothing for it. Each finding starts with its id (E1, E2 and so on):
 the review after this fix names the finding by that id.'
-# The Done-when check (donewhen(), checked()): what the one fix session after a failed check is told, after the brief;
+# The Done-when check (donewhen.sh donewhen(), checked()): what the one fix session after a failed check is told, after the brief;
 # the failed items follow it. And what the review is told beside the card's D<n> lines.
 DWFIX='# The Done-when check failed: fix these items, and end your reply with the whole `## Done when` section again
 Each line of the issue'"'"'s `## Done when` needs a line `D<n> met: <evidence>` or `D<n> not met: <why>`, in order; a tag such as
 [uncertain] goes after the colon. Evidence names something checkable: a test (file and case name), a file and line, or a command and its result. Every TODO
 or [VERIFY] marker the change adds is named in the reply, on a line with its file.'
-# The project's checks (treecheck(), checked() and the Test step): what the one fix session after they fail is told,
+# The project's checks (donewhen.sh treecheck(), checked() and the Test step): what the one fix session after they fail is told,
 # after the brief; their output follows it.
 # shellcheck disable=SC2034 # used in lib/testrun.sh and lib/card.sh
 CHECKFIX='# The project'"'"'s checks failed: fix what they name and nothing else
@@ -556,7 +556,7 @@ The build session ended its reply with these lines, one for each line of the iss
 whether its evidence holds: write `DONE-WHEN: D<n> holds` when it does; a claim that is false (the evidence is not
 there, or does not show the line holds) is a finding, written as any finding is. A `Note:` line names a file a D<n>
 line gives that is not in the worktree: judge whether that line'"'"'s evidence still holds.'
-# The bug-card check (bugproof(), card()): the reasons a bug card goes back to its build session or is blocked (UNFIXED
+# The bug-card check (bugproof.sh bugproof(), card()): the reasons a bug card goes back to its build session or is blocked (UNFIXED
 # only when its test files ran without the fix; NOTEST when the change has none, <patterns> the pack's tests.patterns;
 # SHARED when its only new tests are inline tests that share lines with the fix in <file>;
 # NOTBACK when main's code could not be put back for the run), what
@@ -568,13 +568,13 @@ UNFIXED='the new tests pass without the fix, so they do not prove it'
 NOTEST='no test file found in the change (patterns: <patterns>); set tests.patterns in .conveyor/project.json'
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 SHARED='the new test and the fix are in the same lines of <file>; bugproof cannot take out the fix alone'
-# Why a card's test run, or its bug-card check, did not run or was stopped (narrowstop(), lib/testrun.sh): a card
+# Why a card's test run, or its bug-card check, did not run or was stopped (narrowstop(), lib/testlist.sh): a card
 # runs each of its test files alone, through test.fileCommand, and never the suite command; <why> says what happened,
 # and the rest names the setting that fixes it.
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 NARROW='a card runs each of its test files alone, and <why>; set test.fileCommand in .conveyor/project.json to a command that runs one test file'
 # The <why> of a card's run, or of a run of its files, when the pack sets no test.fileCommand and Conveyor's own runner
-# (lib/filerun.sh) cannot run <file>, one of its files, for <reason> (ownrunner(), lib/testrun.sh); and of doctor's
+# (lib/filerun.sh) cannot run <file>, one of its files, for <reason> (ownrunner(), lib/testlist.sh); and of doctor's
 # warning, <file> one of the project's test files (narrowwarn(), lib/setup.sh).
 # shellcheck disable=SC2034 # used in lib/testrun.sh and lib/setup.sh
 NORUNNER='the pack sets no test.fileCommand, and Conveyor cannot run <file> itself: <reason>'
@@ -589,7 +589,7 @@ CARDLINKED=5
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 LINKED='the change adds or changes no test file, so the card ran <n> of the <all> test files linked to it, those that failed most recently first. The run before the push runs all of them.'
 # What a card's test step says when it ran only the <n> cases its change adds or changes of <m>
-# of its own test files (listcmd(), owncases(): #414), with OWNWHOLE when <w> of them ran whole; <s> is "s" for a
+# of its own test files (listcmd(), testlist.sh owncases(): #414), with OWNWHOLE when <w> of them ran whole; <s> is "s" for a
 # count over 1.
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 OWNCASES='the card ran <n> changed case<s> of <m> test file<s>'
@@ -614,13 +614,13 @@ fix (its test files alone, and the inline tests of its product files without the
 worktree of main). At least one must fail there. A change to test files alone is not
 run, as it has no fix to take out, nor is one whose product files change only comments. A change that selects no test of its own (comments only) is proved by the test
 files its issue'"'"'s Done-when names instead, and is not checked when it names none. Its result:'
-# What the review of a speed-up card (speedproof(), card()) is told before the check's result.
+# What the review of a speed-up card (speedproof.sh speedproof(), card()) is told before the check's result.
 # shellcheck disable=SC2034 # used in lib/card.sh
 SPEEDREVIEW='# The speed-up check
 This issue speeds up one test file and keeps what it tests, so no test must fail on main'"'"'s code without the change.
 After the build, the file was run alone with the change, on a test slot. It must pass, and its CPU seconds must be lower
 than the median of its recent runs (its median on record when the issue lists none), or than the slowest of those runs. Judge whether the file still tests all that it tested before. Its result:'
-# What the review of an Optimize card (optproof(), card()) is told before the check's result.
+# What the review of an Optimize card (speedproof.sh optproof(), card()) is told before the check's result.
 # shellcheck disable=SC2034 # used in lib/card.sh
 OPTREVIEW='# The Optimize check
 This issue optimizes one test file: the change does what the judge'"'"'s verdict in the issue asks (speed it up, keep it,
@@ -632,7 +632,7 @@ the median of the recent runs the issue lists (the file'"'"'s median on record w
 less than that figure, or than the slowest of the recent runs the issue lists; for stabilise, no more than it; and, when another test file is merged into it, no more than
 that figure plus the median on record of each test file merged into it. The files of a split, their CPU seconds summed, must take at most that figure plus a start-up allowance for each file the split adds. Judge whether the tests still test all
 that the file tested before. Its result:'
-# What the review of a Fix failures card (steadyproof(), card()) is told before the check's result.
+# What the review of a Fix failures card (speedproof.sh steadyproof(), card()) is told before the check's result.
 # shellcheck disable=SC2034 # used in lib/card.sh
 STEADYREVIEW='# The Fix failures check
 This issue makes one test file pass reliably and keeps what it tests, so no test must fail on main'"'"'s code without
@@ -672,8 +672,8 @@ runs into test files the runner can list, and keeps what it tests. After the bui
 file wholeOnly, and the file (or the test files the change adds in place of a file it removes) was run alone through
 the pack'"'"'s test.fileCommand, with the change, on a test slot: it must pass. Judge whether the change keeps every check the
 file ran: a check dropped so that the file can run alone is a finding. Its result:'
-# What the review that follows a fix of review findings is told, in its brief (rereview()): REREVIEW, then
-# REREVIEWALL when it reviews the whole change or REREVIEWFIX when it reviews the fix alone (fixonly()); the findings
+# What the review that follows a fix of review findings is told, in its brief (donewhen.sh rereview()): REREVIEW, then
+# REREVIEWALL when it reviews the whole change or REREVIEWFIX when it reviews the fix alone (donewhen.sh fixonly()); the findings
 # that fix was told to fix, its diff's path and the findings declined on this card follow it.
 REREVIEW='# This review follows a fix of the last review'"'"'s findings
 A fix session was told to fix the findings of the last review of this change, given below, each after its id (E1,

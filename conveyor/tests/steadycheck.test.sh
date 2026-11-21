@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
-# Engine cases: the check of a Fix failures card (steadyproof(), #188): its test file runs alone 10 times in a row with
+# Engine cases: the check of a Fix failures card (speedproof.sh steadyproof(), #188): its test file runs alone 10 times in a row with
 # the change, on a test slot, and every run must pass.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
-# steadyproof() called as card() calls it, on card c7 of #7, whose change runs <change> in its worktree on main, where
+# speedproof.sh steadyproof() called as card() calls it, on card c7 of #7, whose change runs <change> in its worktree on main, where
 # f.test.sh is a test file. Each run under cards/mainrun/ counts itself in $STUB/steady-runs and runs the file its list
 # names `fail`: its case one passes, and its case two fails in the run whose number <failing run> gives (none with
 # 0). The check's exit is in $RC, the first line of what the review is shown in $WHY.

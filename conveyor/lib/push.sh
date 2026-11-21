@@ -567,7 +567,7 @@ relheld() {
 }
 # A card at its land step waits while a release run holds RELHOLD, its live record saying so ("waiting for the
 # release", which the Board shows) and brought up to date as it waits, and <worktree>.idle standing, as for a red main
-# (mainwait(), lib/testrun.sh). It goes on to land once the run has ended. Its wait opens with a start line of the land
+# (mainwait(), lib/mainred.sh). It goes on to land once the run has ended. Its wait opens with a start line of the land
 # step marked as this wait (waitFor: release): the snapshot shows a card's live record only after a start line of its
 # step, and stop (halt(), lib/run.sh) ends a card that waits, as nothing of its landing has begun. The landing itself
 # opens with its own start line (began(), card()).
@@ -708,7 +708,7 @@ trialflag() {
 clean() { tidy "$1"; rm -f "$1".out "$1".err "$1".review "$1".test "$1".withdrawn "$1".approvals "$1".spent "$1".trailers; rm -rf "$1".testlog "$1".rounds; }
 # The closing line for a card that does not land. Its worktree goes, once its change is kept as a patch (a
 # patch that cannot be written leaves the worktree where it is, and the reason says so); its session output, error
-# output, last review, last test output, the findings of its withdrawn follow-ups, the issue body its last review read, its commit trailers, its fix rounds (repeats()) and the list of what its tests passed (tests(): a retried card keeps those passes) are moved to a folder beside the cards folder, and the line names that folder. Evidence is never deleted
+# output, last review, last test output, the findings of its withdrawn follow-ups, the issue body its last review read, its commit trailers, its fix rounds (donewhen.sh repeats()) and the list of what its tests passed (tests(): a retried card keeps those passes) are moved to a folder beside the cards folder, and the line names that folder. Evidence is never deleted
 # here: when the folder cannot be made or a file cannot be moved, what did not move stays where it is beside the
 # worktree, the line names no folder, and its reason says where the evidence is; but a line whose patch was kept
 # always names the folder, whatever did not move, so the issue's next card still starts from that patch. A card that
@@ -780,7 +780,7 @@ block() { # <card> <issue> <worktree> <reason> [post the reason on the issue wha
   [ -z "$f${5:-}$patch" ] || [ "$2" = 0 ] || err=$(gh_write issue comment "$2" --body "$body" 2>&1 >/dev/null) || if [ $? = 3 ]; then
     reason="${reason:0:1100} [$([ -n "$f" ] && echo "the review's findings" || echo this) not posted on the issue: ${err:0:600}]"
   else reason="${reason:0:1100} [$([ -n "$f" ] && echo "the review's findings" || echo this) could not be posted on the issue]"; fi
-  # covered: the COVERED-BY lines of its replies (hollowproof()), which a retry that lands its kept patch is checked on.
+  # covered: the COVERED-BY lines of its replies (speedproof.sh hollowproof()), which a retry that lands its kept patch is checked on.
   for f in out err review test testlog withdrawn approvals body trailers rounds rerun covered; do
     [ -e "$3.$f" ] || continue
     if mkdir -p "$k" 2>/dev/null && mv -f "$3.$f" "$k/" 2>/dev/null; then kept=$k; else left=1; fi

@@ -102,10 +102,10 @@ codediff() { # <old engine folder> <new engine folder>
   done
   for n in $(compgen -A function); do d=$(declare -f "$n"); [ "$d" = "${snap[f$n]-}" ] || printf '%s\n' "$d"; done
 }
-# A main-red fix card (issue 0, no branch): a case found failing on its commit while it runs (mainred()) joins its
+# A main-red fix card (issue 0, no branch): a case found failing on its commit while it runs (mainred.sh mainred()) joins its
 # brief. card() calls this right before each session, review, judge, settle() and land, as a case can come at any time
 # (during a review too, with the fix session straight after it). Sets card()'s issue and sprompt. A case that joined
-# brings its links too (issue 615): they are staged in card()'s worktree (testlinks()) to land with the fix, as the
+# brings its links too (issue 615): they are staged in card()'s worktree (mainred.sh testlinks()) to land with the fix, as the
 # links of the cases it started with were; staged again on each call, so one that could not be is tried again.
 redbrief() { # <card> <issue> <branch>
   local red
@@ -114,13 +114,13 @@ redbrief() { # <card> <issue> <branch>
   red=$(redissue "$1") && [ "$red" != "$issue" ] || return 0
   sprompt=${sprompt/"$(issuepart "$issue")"/"$(issuepart "$red")"}; issue=$red
 }
-# A main-red fix card's commit message (card(), before it lands): its cases as its entry holds them now (redissue();
+# A main-red fix card's commit message (card(), before it lands): its cases as its entry holds them now (mainred.sh redissue();
 # the issue it was built from when the entry cannot be read) and main's commit it was picked for (its mainRed).
 redmsg() { # <card> <issue json>
   local t; t=$(redissue "$1") || t=$2
   jq -r --arg c "$1" --arg s "$(stdb ask card "$1" | jq -rs 'map(.mainRed // empty)[0] // ""')" '"fix(product): \(.title) (main \($s[0:12]))\n\nConveyor card \($c)"' <<<"$t"
 }
-# card()'s wait for main to change (mainwait()), its seconds added to card()'s mainsec.
+# card()'s wait for main to change (mainred.sh mainwait()), its seconds added to card()'s mainsec.
 mainwaited() { # <worktree> <main's commit> <case>...
   local mw=$SECONDS; mainwait "$@"; mainsec=$((mainsec + SECONDS - mw))
 }
@@ -148,7 +148,7 @@ fixprompt() { # <card prompt> <the findings, each led by its id, and what follow
 # rounds a retried card carries), rebased (the one review after a landing conflict), test-fix (after the one test fix),
 # lint-fix (after the landing gate's lint fix), land (the kept review of a kept patch landed with no review), repeat (a
 # NO-GO that repeats a fixed finding, every finding P2 or P3). Prints nothing when a fix round follows.
-loopstop() { # <verdict> <reviews so far: pass + rounds> <rebased> <tfix> <lfix> <mode> <repeats() lines> <review file>
+loopstop() { # <verdict> <reviews so far: pass + rounds> <rebased> <tfix> <lfix> <mode> <donewhen.sh donewhen.sh repeats() lines> <review file>
   if [ "$1" = GO ]; then echo go
   elif [ "$2" -ge "$MAX_REVIEWS" ]; then echo max-reviews
   elif [ -n "$3" ]; then echo rebased
@@ -182,7 +182,7 @@ cardsubject() { # <card> <issue json>
 # A failed (or held) test step's line, past its common fields: the run's record (testrec()), its reason (the exit, and
 # the timeout with the file still running when there was one), its failures (testfails()), the last 60 lines of its
 # output (its tail, each line whole), its first-run marks (firstrun()), the verdicts of what ran again on main
-# (verdicts()) and its carried part (carriedrec()).
+# (mainred.sh verdicts()) and its carried part (testlist.sh carriedrec()).
 failline() { # <worktree> <exit> <seconds> <failures json, or null> <verdicts json> <carried json>
   tail -n 60 "$1.test" 2>/dev/null | tr -d '\000' | jq -cRs --slurpfile x <(testrec "$1" "$2" "$3") --slurpfile f <(printf '%s' "$4") --arg rc "$2" --slurpfile r <(firstrun "$1") --slurpfile v <(printf '%s' "$5") --slurpfile o <(printf '%s' "$6") \
     '$x[0] as $x | $f[0] as $f | $r[0] as $r | $v[0] as $v | $o[0] as $o | sub("\n+$"; "") as $t | $x + $o + {
@@ -201,7 +201,7 @@ afterreview() {
   # findings are filed again, whatever the reviews after a test fix say. A NO-GO on it is fixed and goes round the
   # loop as any card's.
   last=''; [ "$fin" != NO-GO ] || [ "$res" != GO ] || { earlier=$finrev; earlyend=$finend; }; fin=''
-  # A NO-GO that repeats a finding a fix round was told to fix (repeats()) spends no more rounds on it: when every
+  # A NO-GO that repeats a finding a fix round was told to fix (donewhen.sh repeats()) spends no more rounds on it: when every
   # finding of the review is P2 or P3 this is the last review; when a repeated one is P0 or P1 the card blocks.
   rep=''; [ "$res" != NO-GO ] || rep=$(repeats "$wt")
   hard=$(jq -rs 'map(select(.level == "P0" or .level == "P1")) | first // empty | "\(.line[:300]) did not hold after \(.rounds) round\(if .rounds == 1 then "" else "s" end)"' <<<"$rep")
@@ -233,10 +233,10 @@ afterreview() {
   else after=fix
   fi
 }
-# What the Test step does next, decided with nothing done. Called as `testroute checks <the exit of treecheck()>`, for
+# What the Test step does next, decided with nothing done. Called as `testroute checks <the exit of donewhen.sh treecheck()>`, for
 # the project's checks at the start of the step, it prints block (2: they could not run), checkfix (1: they failed,
 # so one fix session follows) or nothing (another exit, 0 when they pass: the tests run). Called as
-# `testroute verdicts <verdicts() json>`, for a test run that failed, it prints machine (the machine is at fault
+# `testroute verdicts <mainred.sh mainred.sh verdicts() json>`, for a test run that failed, it prints machine (the machine is at fault
 # and no failure is the card's: the repair lane, then the machine hold), main (every failure is main's: the wait for
 # main) or nothing (a failure is the card's). For that failure, called as `testroute <worktree>`, it prints nothing
 # (the repair lane passed this test step: repaired), moved (main moved since the card's commit, and it was not
@@ -255,12 +255,12 @@ testroute() {
   else echo fix
   fi
 }
-# What a bug card does after its bug-card check (bugproof()), from that check's exit: close (3: every case passes on
+# What a bug card does after its bug-card check (bugproof.sh bugproof()), from that check's exit: close (3: every case passes on
 # main without the change, so the card closes as already done), block (2: the check cannot hold, and a build session
 # cannot mend it), build (another failure: one build session is told why), or nothing (0: on to the review). With
 # again (the check after that build session), exit 2 still prints block, and any other failure prints unproved: the
 # card blocks with the reason the check gave (BUGWHY).
-bugstep() { # <the exit of bugproof()> [again]
+bugstep() { # <the exit of bugproof.sh bugproof()> [again]
   case $1 in
     0) ;;
     2) echo block ;;
@@ -270,7 +270,7 @@ bugstep() { # <the exit of bugproof()> [again]
 }
 # Whether a card's staged change is no change (exit 0), after it stages the whole worktree (git add -A): nothing is
 # staged, or the stage fails, or a main-red fix card (issue 0, no branch) stages only the links the engine staged
-# (linksonly()). The links come with a fix, so with none they are dropped: the worktree is reset to its commit (issue
+# (mainred.sh linksonly()). The links come with a fix, so with none they are dropped: the worktree is reset to its commit (issue
 # 323). Exit 1: a change to review.
 emptychange() { # <card> <issue number> <worktree> <branch, or ''>
   git -C "$3" add -A && ! git -C "$3" diff --cached --quiet || return 0
@@ -289,7 +289,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local yfile='' # yfile: ybase is written beside the worktree, as .approvals
   local me cc seen=none sect='' nyes=0 heldto='' vmode='' ybase rules sprompt hdr fin='' finrev earlier='' prv='' caught='' owe tsess='' cmsg rtr rrev ro='[]' pro='[]' rmsg ported='' kp='' mates=() t5=() trc ran apart='' back='' rf sf='' sk='' mk='' pk='' pt=''
   local vrule=on rounds=0 rep hard refix='' waitsec=0 behind='[]' cpid chead cseen own kept='' docpass='' docs parsecheck='' pfix='' # waitsec, behind: the seconds it has waited on other cards, and those cards (settle())
-  local sv an ex ids fl # sv, an, ex: a review's survived findings, its answers and the lines it cites (repeats(), answers(), excerpts()); ids, fl: the fix round's numbered findings and its lines (numbered(), fixlines())
+  local sv an ex ids fl # sv, an, ex: a review's survived findings, its answers and the lines it cites (donewhen.sh repeats(), answers(); review.sh excerpts()); ids, fl: the fix round's numbered findings and its lines (donewhen.sh numbered(), fixlines())
   local grown='' # grown: the judge was asked about the size of its change (growcheck(), lib/slices.sh)
   local rline='' ended='{}' stop='' finend='{}' earlyend='' fe # rline, ended, stop: a review's line before it is written, and why the loop ended (loopstop()); finend, earlyend, fe: why the loop of a port's kept review ended, and the stop the filed line carries
   local lfix='' # lfix: the change the landing gate's lint fix left, its cardpatch() (lintgate(), lib/lint.sh)
@@ -298,12 +298,12 @@ card() { # <card> <issue> [<branch> <tip>]
   local priv privfix='' # priv: a last-review finding that is a privacy hit in the card's own change (privown()); privfix: its fix round was given
   local tmain='' # tmain: set once a failed test step has fitted the card onto a main that had moved (#582)
   local voids=0 # voids: the test runs in a row that gave no result (voidrun())
-  local held # held: its test step waited for main or the machine (mainwait(), holdwait())
+  local held # held: its test step waited for main or the machine (mainred.sh mainwait(), holdwait())
   local route # route: where a failed test run goes (testroute())
-  local cr # cr: a failed test line's carried part (carriedrec())
-  local mainsec=0 mwon # mwon: main's commit and the cases it waits on there (mainwait()); mainsec: the seconds it has waited for main to change (mainwaited()); its landed line's waitSec adds them to waitsec
-  local repaired='' lane # repaired: the repair lane passed its test step (repairlane()), saying how; lane: its exit
-  local ins rr # ins, rr: the review's instructions, and fix when it reviews the fix alone (rereview())
+  local cr # cr: a failed test line's carried part (testlist.sh carriedrec())
+  local mainsec=0 mwon # mwon: main's commit and the cases it waits on there (mainred.sh mainwait()); mainsec: the seconds it has waited for main to change (mainwaited()); its landed line's waitSec adds them to waitsec
+  local repaired='' lane # repaired: the repair lane passed its test step (mainred.sh repairlane()), saying how; lane: its exit
+  local ins rr # ins, rr: the review's instructions, and fix when it reviews the fix alone (donewhen.sh rereview())
   local ph pf pb # ph, pf: the hash and the files of the change's lint policy diff (lintpolicy()); pb: the body kept by the card it resumes
   local shared sb # shared: 1 when this test step runs its shared test files again (sharedtests()), 2 when they ran again before for the change it holds; sb: the commit its last tests ran on
   local go sx # go, sx: what the step that returned says follows (above), and its exit
@@ -340,14 +340,14 @@ cardopen() {
     || { block "$c" "$n" "$wt" "worktree: branch $br does not merge into main as it stands; rebase it on main and land it again: ${err:0:400}"; return; }
   # Its issue's retried lines, read by prior() and carried(), kept in this shell (stdb, lib/records.sh).
   [ "$n" = 0 ] || stdb ask issue retried "$n" >/dev/null 2>&1 || :
-  # A card of issue 0 with no branch is a main-red fix card (redpick()): its entry in the main-is-red record stands in.
+  # A card of issue 0 with no branch is a main-red fix card (mainred.sh redpick()): its entry in the main-is-red record stands in.
   issue=$(if [ -n "$br" ] && [ "$n" = 0 ]; then branchissue "$br" "$tip"; elif [ "$n" = 0 ]; then redissue "$c"; else gh issue view "$n" --json number,title,body,labels,milestone; fi) || issue=''
   # The control record's rule "visible changes need the owner's yes" (yesrule()), as the card starts. Off, nothing below
   # waits for or asks for a `Visible change approved:` line: no condition, section or inherited yes is held to, the
   # brief and the review leave the approval out, and a visible change lands as any change does.
   yesrule "${CARDCTL:-}" || { vrule=off; rv=$REVIEWOFF; }
-  # The test file of a speed-up or Optimize card (a bug card whose issue speedfile() names): its build is told the
-  # target (speedbrief()).
+  # The test file of a speed-up or Optimize card (a bug card whose issue speedproof.sh speedfile() names): its build is told the
+  # target (speedproof.sh speedbrief()).
   [ -z "$issue" ] || ! jq -e --arg t "$TYPE" 'any(.labels[]?; .name == $t)' <<<"$issue" >/dev/null || sf=$(speedfile "$issue") || sf=$(speedfile "$issue" "$OPTIMIZE") || sf=$(speedfile "$issue" "$REWRITE") || sf=''
   # The visible-change gate before the build: seen, nyes, sect, ybase, heldto, vmode and yfile (visplan()).
   visplan
@@ -356,7 +356,7 @@ cardopen() {
   # The resume of a retried card: how it takes up the kept patch of its issue's blocked cards.
   resumeplan || { block "$c" "$n" "$wt" "$err"; return; }
   # A main-red fix card commits, with its fix, the links from the files of the landing that broke a case to its test
-  # file (issue 598: testlinks()). After resumeplan's check that the new worktree holds no staged change.
+  # file (issue 598: mainred.sh testlinks()). After resumeplan's check that the new worktree holds no staged change.
   testlinks "$c" "$wt" || { block "$c" "$n" "$wt" "the test links of the main-red record could not be staged in .conveyor/test-links.json"; return; }
   # ybase is kept beside the worktree (yesbase() reads it for the next card) once the checks of the new worktree have
   # passed: a card that stops on one of them keeps no count.
@@ -409,8 +409,8 @@ cardopen() {
   record "$c" "$n" brief ok "$([ -z "$d" ] && echo '{}' || echo "{\"depth\":$d}")"
   go=''
 }
-# The findings the resumed session of a retried card is told came back (again()), in card()'s rep: those the kept
-# review repeats (repeats()) when it came after the last of its fix rounds (it is the issue's last review, and that
+# The findings the resumed session of a retried card is told came back (donewhen.sh again()), in card()'s rep: those the kept
+# review repeats (donewhen.sh repeats()) when it came after the last of its fix rounds (it is the issue's last review, and that
 # round followed an earlier one), else none. It reads card()'s wt and rounds (the reviews a retried card carries).
 keptrep() {
   rep=''; [ "$(verdict "$wt.review" 2>/dev/null)" != NO-GO ] || ! jq -se --argjson r "$rounds" 'map(.round) | max < $r' "$wt.rounds/findings.jsonl" >/dev/null 2>&1 \
@@ -438,20 +438,20 @@ cardbuild() {
     redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt$more") || { block "$c" "$n" "$wt" "build: $t"; return; }
     checked "$c" "$n" "$wt" "$issue" "$sprompt" build "$t" || return
     # A bug card (the pack's type label): the tests it adds or changes must fail on main's code without the fix
-    # (bugproof(); a change that selects no test of its own is proved by the test files its issue's Done-when names,
+    # (bugproof.sh bugproof(); a change that selects no test of its own is proved by the test files its issue's Done-when names,
     # and goes on unchecked when it names none). When none does, or it adds none, it goes back to its build session once, told why; when the check
     # still does not hold after it, the card is blocked with that reason and no review. The review is shown the
-    # check's result. A bug card that speeds up one test file (speedfile()) is checked by speedproof() instead, and one
-    # that optimizes one (speedfile() with OPTIMIZE, or REWRITE: Rewrite as a direct check, #778) by optproof(): when the change does not do what its issue's verdict
+    # check's result. A bug card that speeds up one test file (speedproof.sh speedfile()) is checked by speedproof.sh speedproof() instead, and one
+    # that optimizes one (speedproof.sh speedfile() with OPTIMIZE, or REWRITE: Rewrite as a direct check, #778) by speedproof.sh optproof(): when the change does not do what its issue's verdict
     # asks, its file costs more than its recent runs allow, a split takes more
     # CPU seconds than it may, or a file does not pass, the card is blocked with that reason and no review, its blocked line
-    # carrying the check's version (SPEEDCHECK, lib/testrun.sh). One that fixes the failures of one (speedfile() with
-    # FIXFAILS) is checked by steadyproof(): when its file fails in one of its runs in a row, the card is blocked
+    # carrying the check's version (SPEEDCHECK, lib/speedproof.sh). One that fixes the failures of one (speedproof.sh speedfile() with
+    # FIXFAILS) is checked by speedproof.sh steadyproof(): when its file fails in one of its runs in a row, the card is blocked
     # naming that run, with no review. So are the Board's other fix issues (#189): Fix the waiting (WAITFIX), Fix hollow
     # cases (HOLLOWFIX), Delete it (DELFILE) and Make it run alone (#190; ALONEFIX, before Make it run, whose title
-    # starts the same) by fixproof() (pk), here and again before each later review on a change
-    # a fix or rebase session made (pt: the tree it last held on), and Make it run (MAKERUN) by runproof() now and by
-    # ranproof() once its test step passed (mk).
+    # starts the same) by speedproof.sh fixproof() (pk), here and again before each later review on a change
+    # a fix or rebase session made (pt: the tree it last held on), and Make it run (MAKERUN) by speedproof.sh runproof() now and by
+    # speedproof.sh ranproof() once its test step passed (mk).
     if ! jq -e --arg t "$TYPE" 'any(.labels[]?; .name == $t)' <<<"$issue" >/dev/null; then :
     elif sf=$(speedfile "$issue"); then
       speedproof "$c" "$wt" "$issue" "$sf" || { SPEEDCHECKED=$SPEEDCHECK block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
@@ -466,8 +466,8 @@ cardbuild() {
     elif sf=$(speedfile "$issue" "$MAKERUN"); then
       sk=$RUNREVIEW; mk=$sf; runproof "$wt" "$sf" || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
     else
-      # A run on main that gave no result for a test file, twice (bugproof() exit 2), is blocked with that reason: a
-      # build session cannot repair the runner. A main-red fix card is proved by main's failing cases (redproof()):
+      # A run on main that gave no result for a test file, twice (bugproof.sh bugproof() exit 2), is blocked with that reason: a
+      # build session cannot repair the runner. A main-red fix card is proved by main's failing cases (bugproof.sh redproof()):
       # one that does not hold is blocked with that reason (exit 2), and one whose every case passes on main without
       # its change (exit 3) closes as already done, as nochange() closes a card, its change dropped.
       # bugstep() gives what each exit of the check leads to.
@@ -554,10 +554,10 @@ cardreview() {
           <(git -C "$wt" diff --cached --binary --no-renames | sed '/^index /d') > "$wt.port"
         [ $? -le 1 ] || { rm -f "$wt.port"; block "$c" "$n" "$wt" "review $pass: the engine could not compare the port with the kept patch"; return; }
       fi
-      # The review right after a fix of review findings also sees what that fix was told and changed (rereview()):
+      # The review right after a fix of review findings also sees what that fix was told and changed (donewhen.sh rereview()):
       # not part of seen, so a fix that changed nothing still reuses the last review. It reviews the fix alone, its
       # instructions opening with FIXREVIEW in place of REVIEWHEAD, unless the fix touches more than the pack's
-      # review.rereviewWhole share of the change's lines (fixonly()): then it reviews the whole change.
+      # review.rereviewWhole share of the change's lines (donewhen.sh fixonly()): then it reviews the whole change.
       ins=$rv${fin:+$prv}; rr=''
       [ -z "$refix" ] || [[ $ins != "$REVIEWHEAD"* ]] || ! fixonly "$wt" "$refix" || { rr=fix; ins=$FIXREVIEW${ins#"$REVIEWHEAD"}; }
       redbrief "$c" "$n" "$br"; t="the engine could not write the re-review section"; { [ -z "$refix" ] || more+=$'\n\n'"$(rereview "$c" "$wt" "$refix" "$rr")"; } \
@@ -573,7 +573,7 @@ cardreview() {
     [ -n "$vis" ] || { [ "$res" = none ] || unclear=": it does not hold exactly one USER-VISIBLE line, written as asked"; res=none; }
     # A NO-GO's line names the findings that came back after a fix round told to fix them (survived: id, rounds), for the Board.
     # Every review's line keeps its answers on the findings fix rounds were told, each beside its first location
-    # and proof (answers()), so a review that blocks or ends the loop keeps them too.
+    # and proof (donewhen.sh answers()), so a review that blocks or ends the loop keeps them too.
     sv='[]'; [ "$res" != NO-GO ] || sv=$(repeats "$wt" | jq -sc 'map({id, rounds})')
     an=$(answers "$wt")
     # doneWhenHolds: the D<n> its `DONE-WHEN: D<n> holds` lines name, which the reason leaves out (UNRECORDED); the
@@ -608,12 +608,12 @@ cardfix() {
     locked giveway "$c" "$wt" fix; began "$c" "$n" fix
     old=$(git -C "$wt" write-tree); more=''; [ -z "$rep" ] || more=$'\n\n'"$(again "$rep")"
     # The fix is told the accepted findings only: a finding the judge declined (a DECLINED line), a P3 listed only
-    # (a MINOR line, minor()), or a rollout action (a ROLLOUT line, no defect), is not its to fix. Each finding it is told is led by its id (numbered(), fixlines()).
+    # (a MINOR line, minor()), or a rollout action (a ROLLOUT line, no defect), is not its to fix. Each finding it is told is led by its id (donewhen.sh numbered(), fixlines()).
     # It runs on the fix seat (seat(): the builder's unless the control record sets fix).
     ids=$(numbered "$wt") && fl=$(fixlines "$wt" "$ids") || { block "$c" "$n" "$wt" "fix: the engine could not give the review's findings their ids"; return; }
     redbrief "$c" "$n" "$br"; t=$(session "$wt" "$(fixprompt "$sprompt" "$fl$more")" fix fix) || { block "$c" "$n" "$wt" "fix: $t"; return; }
     checked "$c" "$n" "$wt" "$issue" "$sprompt" fix "$t" || return
-    # This fix round's findings, with their ids, and the diff it made, for the review after it (repeats(), rereview()).
+    # This fix round's findings, with their ids, and the diff it made, for the review after it (donewhen.sh repeats(), rereview()).
     mkdir -p "$wt.rounds" && git -C "$wt" add -A && git -C "$wt" diff "$old" "$(git -C "$wt" write-tree)" > "$wt.rounds/$((pass + rounds)).diff" \
       && rounded "$wt" "$((pass + rounds))" "$ids" && refix=$((pass + rounds)) && fixtree=$old
     go=next; return
@@ -659,7 +659,7 @@ resumeplan() {
       else
         mode=stale; note="the kept patch of card $from cannot be read: built from nothing"
       fi
-      # Its commit trailers and the COVERED-BY lines of its replies (hollowproof()) come with its patch (a card that
+      # Its commit trailers and the COVERED-BY lines of its replies (speedproof.sh hollowproof()) come with its patch (a card that
       # lands from it has no session to write them again, and its deleted hollow cases are checked again on them).
       [ "$mode" = stale ] || for t in trailers covered; do cp "$fromk/$from.$t" "$wt.$t" 2>/dev/null || cp "$CARDS/$from.$t" "$wt.$t" 2>/dev/null; done
     fi
@@ -717,7 +717,7 @@ resumeplan() {
   # limit counts every review of the issue's retried cards, not just this card's. So does a kept patch reviewed again
   # with no build: a NO-GO there is fixed and goes round the loop. Not the port of a finished loop: its loop ended,
   # and this review checks something new.
-  # Its fix rounds' findings and diffs come with them, so a finding that comes back is known as one (repeats()).
+  # Its fix rounds' findings and diffs come with them, so a finding that comes back is known as one (donewhen.sh repeats()).
   # Only the reviews of that loop count: those of the cards whose kept patch this card carries (crev, the lines pro
   # is read from). A card's id is its own, so another project's cards are not in the chain; the lines' repo is not
   # read, as a project renamed in host.json keeps its chain. Bug (issue 1071): every review line of the issue in the

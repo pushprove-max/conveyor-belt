@@ -506,7 +506,7 @@ LINTFIX=$'# Lint findings: fix them and nothing else\nThe pack\'s lint commands 
 # The review gate (card(), at the top of each pass of its review loop, with the change staged), with the rule Lint
 # check on: the pack's lint commands on the card's staged change, from the commit its worktree is on (lintrun), and
 # its lint line (lintline). An execution error blocks the card, with no fix session. Findings of the change's go to
-# one fix session, told them (the first 50, and how many), its reply checked as any fix's is (checked()). The change
+# one fix session, told them (the first 50, and how many), its reply checked as any fix's is (donewhen.sh checked()). The change
 # is staged again and the gate runs again: an execution error or a finding left then blocks the card, and nothing
 # lands. 0: the card goes on, its change as it was; 1: the card ended (blocked); 2: the fix session changed it, so
 # the review of this pass reads it anew: no kept review or test pass stands for it. A change that is still the one the
@@ -539,7 +539,7 @@ lintgate() { # <card> <issue> <worktree> <issue json> <the sessions' prompt> <br
   else locked giveway "$c" "$wt" fix; fi
   began "$c" "$n" fix
   redbrief "$c" "$n" "$6"; t=$(session "$wt" "$5"$'\n\n'"${LINTFIX//'<n>'/$k}"$'\n'"$t" fix) || { rm -f "$o"; block "$c" "$n" "$wt" "fix: $t"; return 1; }
-  # lfix is the lint fix's own change, kept before checked() can run a Done-when or project-check fix session: a
+  # lfix is the lint fix's own change, kept before donewhen.sh checked() can run a Done-when or project-check fix session: a
   # change one of those makes is another session's, and gets a new fix at the next landing gate.
   [ -z "$land" ] || { git -C "$wt" add -A 2>/dev/null; lfix=$(cardpatch "$wt") || lfix=''; }
   checked "$c" "$n" "$wt" "$4" "$5" fix "$(jq -c --arg r "lint: $k finding(s) of the change${land:+ on main as it is now}" '. + {reason: $r}' <<<"$t")" || { rm -f "$o"; return 1; }

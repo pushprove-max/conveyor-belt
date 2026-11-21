@@ -352,7 +352,7 @@ class Stream:
             if not isinstance(live, dict) or live.get('step') != done.get('step'):
                 continue  # a live record counts only while the card's last line is the start of that step
             out[card] = self.lay(live, done, models)
-        # A bug card's proof run (testrun.sh bugproof()) has a live record of its own, in mainrun/<card>.unfixed.live;
+        # A bug card's proof run (bugproof.sh bugproof()) has a live record of its own, in mainrun/<card>.unfixed.live;
         # it counts while the last snapshot shows that card's proof (snapshot.sh: no step started, the record there).
         try:
             names = [n for n in os.listdir(os.path.join(self.cards, 'mainrun')) if n.endswith(PROOF_LIVE)]

@@ -96,7 +96,7 @@ test('Tests fixes: a Never run file shows why in its row, and Make it run and De
 // Bug it guards (#778): a judge found that merge.test.sh checks what it protects through a proxy (the verdict
 // indirect, with a DIRECT line), and its row still suggested Run, with no way to file the rewrite. Rewrite as a direct
 // check is the one primary step; its preview's title is the one the engine checks as an Optimize card (REWRITE,
-// optproof()), its body the DIRECT line as that check reads it, and filing it posts one test-issue. Bug it guards too:
+// speedproof.sh optproof()), its body the DIRECT line as that check reads it, and filing it posts one test-issue. Bug it guards too:
 // a runner (wholeOnly, here X) with the verdict indirect was offered the rewrite, whose card's check times the file
 // alone, which a card's Test step never does for a runner, so that card was always refused.
 test('Tests fixes: an indirect verdict makes Rewrite as a direct check the primary step, its preview holding the file and its DIRECT lines', async () => {

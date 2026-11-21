@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // The Tests page's Whole suite only and Wall only statuses (#190). A wholeOnly file says what a change to it costs (the
 // newest whole-suite run's CPU seconds) and has Make it run alone, which opens the issue preview with the Done-when its
-// card's check proves (aloneproof(), conveyor/lib/testrun.sh). A Wall only file says why it has no CPU time, names its
+// card's check proves (aloneproof(), conveyor/lib/speedproof.sh). A Wall only file says why it has no CPU time, names its
 // runner (the pack's test.report), and has Record CPU time where the engine can wrap the test command for it, else says
 // why not. Shared setup: dashboard-view.helpers.mjs (TA.snap()).
 import assert from 'node:assert/strict';

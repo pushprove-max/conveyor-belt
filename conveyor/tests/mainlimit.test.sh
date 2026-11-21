@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
-# Engine cases: the check on main of a card's failing cases (verdicts(), issue 420) runs under the card's test time
+# Engine cases: the check on main of a card's failing cases (mainred.sh verdicts(), issue 420) runs under the card's test time
 # limit, which timeout itself keeps, and with the pack's test.fileCommand each failing file runs alone through it.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
-# verdicts() of card c7 (its worktree on main) for the failing cases <testfails() json>, as card() asks it.
+# mainred.sh verdicts() of card c7 (its worktree on main) for the failing cases <testfails() json>, as card() asks it.
 limitjudge() { # <testfails() json>
   git -C "$R" worktree add -q --detach "$T/$CASE/cards/c7" || fail "the card's worktree could not be made"
   printf '%s\n' "$1" > "$STUB/fails"

@@ -97,7 +97,7 @@ machined() { grep -qE '^(cmd machine |  machine\) )' "$1" 2>/dev/null; }
 # A run with --only takes only the listed ones.
 # How many of the loop's cards in progress only wait now: alive, with <worktree>.idle standing. A card stands it while
 # it sleeps out a wait on a same-file card or on the batch card that took it (settle()), or for main to change on a
-# red main (mainwait()), or for the machine hold to go (holdwait()), or for its seat's CLI to come back (seatwait()); never while it runs its checks or tests. run() leaves at most the cap of them out of its count
+# red main (mainred.sh mainwait()), or for the machine hold to go (mainred.sh holdwait()), or for its seat's CLI to come back (seatwait()); never while it runs its checks or tests. run() leaves at most the cap of them out of its count
 # against the cap: the rest count, so the loop does not start card after card while the old ones pile up waiting.
 idle() { # <the loop's own cards in progress, "<pid> <card>" one a line>
   local p c n=0
@@ -126,12 +126,12 @@ urgent() {
     | [to_entries[] | select((.key | IN($on[])) and (.key | IN($ended[]) | not)) | .value.waits.on // empty
       | select(IN($on[]) | not) | capture("-(?<n>[0-9]+)$").n | tonumber | select($only == null or IN($only[]))] | unique | select(. != [])' 2>/dev/null
 }
-# A red main commit whose fix card is not picked yet, or was given back by `retry` (redpick()): prints its commit;
+# A red main commit whose fix card is not picked yet, or was given back by `retry` (mainred.sh redpick()): prints its commit;
 # nothing when there is none, when one of the loop's own cards in progress is a main-red fix card, or in a run with
 # --only (whose pick takes no fix card). With the cap reached, the loop picks that fix card in one slot beyond it
 # (issue 612): the cards on the belt that fail only what is red on main wait for that fix, and with every slot theirs
 # nothing would move. One such card at a time; once it ends its slot ends with it, as the loop counts its cards
-# again. The machine's cap and room apply as to any card (redpick(): room()).
+# again. The machine's cap and room apply as to any card (mainred.sh redpick(): room()).
 redfix() { # <the loop's own cards in progress, card ids one a line>
   [ -z "${ONLY:-}" ] && [ -s "$MAINRED" ] || return 0
   jq -r --slurpfile s <(turncards) --argjson own "$(jq -Rsc '[splits("\n") | select(. != "")]' <<<"$1")" \
@@ -141,7 +141,7 @@ redfix() { # <the loop's own cards in progress, card ids one a line>
 # The cards an older speed check blocked, at the loop's start: each is retried as `retry <issue> --fresh` retries it
 # (its kept work moved to kept-dropped), with no one asked, and says why (SPEEDWHY) in the log and on its retried line.
 # A card counts when its blocked line is the last end of its issue (no card picked, landed or closed since) and the
-# version of the speed check that blocked it is lower than this engine's (SPEEDCHECK, lib/testrun.sh): its speedcheck,
+# version of the speed check that blocked it is lower than this engine's (SPEEDCHECK, lib/speedproof.sh): its speedcheck,
 # or, on a line that carries none (written before the lines carried it), 1 for the first check's two reasons and 2 for
 # the second's three ("the file is not faster: ...; its budget is ...", "the split does not fit: ..." and "the file is
 # over the budget of its own ..."). Not a card whose issue the owner holds, nor one retried
@@ -171,7 +171,7 @@ speedretry() {
 # card whose worktree line names its process (pid and start) counts, and none of the loop's own (given, card ids one a
 # line): a card that has not written that line yet is still starting. A card whose process runs is never touched.
 # Each is blocked as a card that stops is (block()): its worktree's change, staged, unstaged and untracked, kept as a
-# patch. One stopped in its test run keeps what that run had passed, as a run cut short does (rerunlist()), beside the
+# patch. One stopped in its test run keeps what that run had passed, as a run cut short does (testlist.sh rerunlist()), beside the
 # patch: its next card's run goes on from there (card()); so does a list an earlier run of it left. Then its issue is
 # given back as `retry` gives it, with no one asked, so it is picked again from its kept work, or from the start when
 # its worktree was gone too. One whose change could not be kept stays blocked, its worktree where it is, and so does a
@@ -364,7 +364,7 @@ turnopen() {
     elif enginepin p 2>/dev/null && installed "$p" ro && machined "$VERSIONS/$p/conveyor/conveyor.sh"; then new=$VERSIONS/$p/conveyor/conveyor.sh; fi
   fi
   packturn
-  # The machine hold (machinehold(), issue 221), at every turn: while it stands, this turn picks no card. Said when it
+  # The machine hold (mainred.sh machinehold(), issue 221), at every turn: while it stands, this turn picks no card. Said when it
   # changes, as above.
   mhold=''; [ -n "$nopack" ] || mhold=$(machineheld)
   [ "$mhold" = "$htold" ] || { htold=$mhold; [ -z "$mhold" ] || echo "conveyor: $mhold" >&2; }
@@ -490,7 +490,7 @@ turncount() {
     && idles=$((idles - woke)); } || :
   [ "$idles" -le "$cap" ] || idles=$cap; [ "$idles" -ge 0 ] || idles=0
   building=$((running - idles))
-  # The machine hold's look (machineprobe()), at most once every POLL seconds (as often as a free loop would pick)
+  # The machine hold's look (mainred.sh machineprobe()), at most once every POLL seconds (as often as a free loop would pick)
   # while the hold stands: a job beside the cards, never counted as one, and given no run lock; a `run` does not end
   # while it runs (runends()). Once its files pass on main the hold goes, so the next turn picks again and the cards on
   # hold test again.

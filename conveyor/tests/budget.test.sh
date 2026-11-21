@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
-# Engine cases: the times of the test files a card's run timed (testrun.sh slowtests(), card.sh) are recorded on its
+# Engine cases: the times of the test files a card's run timed (testlist.sh slowtests(), card.sh) are recorded on its
 # test line and shown, and no file is held to a CPU budget (#349); only a test rule files an issue about a test file
 # (testrules.test.sh). Its cases of whole card runs are split, so that they run side by side: budgetrun.test.sh,
 # budgetkept.test.sh and budgetwait.test.sh, which use this file's helpers.

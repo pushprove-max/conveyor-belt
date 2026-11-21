@@ -109,7 +109,7 @@ cardlanding() {
   while :; do
     if [ -n "$trc" ]; then
       # Its own tests failed while it waited, or it broke the tests of the batch that took it: that run's exit and
-      # output are its own. No run of its own tests is on this pass (own: carriedrec(), slowrec()).
+      # output are its own. No run of its own tests is on this pass (own: testlist.sh carriedrec(), slowrec()).
       rc=$trc; trc=''; own=''; rm -f "$wt.ready"
     else
       go=end; cardtest; sx=$?
@@ -127,7 +127,7 @@ cardlanding() {
     # Not run again when they passed on what its worktree still holds (that run has its own line): this line says it
     # reused that pass.
     # A batch's run (batch(): TEST_BATCH) says in selected how many passes it kept, and no case ran when it ran none.
-    # A card the repair lane passed (repairlane()): its line says so, with the clean run of its changed tests.
+    # A card the repair lane passed (mainred.sh repairlane()): its line says so, with the clean run of its changed tests.
     if [ -n "$repaired" ]; then record "$c" "$n" test pass "$(jq -cn --slurpfile x <(testrec "$wt" 0 "$sec") --arg r "$repaired" '$x[0] + {reason: $r}')"
     elif [ -n "$ran" ]; then record "$c" "$n" test pass "$(jq -cn --slurpfile x <(testrec "$wt" 0 "$sec") --slurpfile r <(firstrun "$wt" pass) --argjson b "${TEST_BATCH:-null}" \
       --slurpfile s <([ -z "$own" ] && echo '{}' || slowrec "$wt") '$x[0] + $r[0] + $s[0] | if $b then .selected += $b else . end')"
@@ -192,11 +192,11 @@ cardtest() {
   fi
   # The changed tests, before the follow-ups are filed: a card that fails them twice files nothing.
   began "$c" "$n" test
-  # The project's checks first (treecheck(): kept for the tree the last session's check ran on, so not run again
+  # The project's checks first (donewhen.sh treecheck(): kept for the tree the last session's check ran on, so not run again
   # there). When they fail, the step ends before any test file runs, its line holding one failure that names
   # the check and its output. That is not its tests failing: the one test-fix round (tfix) is kept and the card
-  # is not blocked for it; one fix session is told the output, and checked() runs the checks again on its change.
-  # The line is marked checks: no test ran, so the card's first run of its tests is still its first (testedbefore()).
+  # is not blocked for it; one fix session is told the output, and donewhen.sh checked() runs the checks again on its change.
+  # The line is marked checks: no test ran, so the card's first run of its tests is still its first (testlist.sh testedbefore()).
   out=$(treecheck "$wt"); t=$(testroute checks $?)
   [ "$t" != block ] || { block "$c" "$n" "$wt" "the engine could not run the project's checks: $out"; return; }
   if [ "$t" = checkfix ]; then
@@ -210,7 +210,7 @@ cardtest() {
   fi
   [ -z "$away" ] || away=$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)
   sec=$SECONDS; rc=0; ran=''; own=''; apart=''; repaired=''; TEST_BATCH=''; TEST_REFUSED=''; rm -f "$wt.stop"
-  # The times its own run took go on its test line (slowtests()); only a test rule files an issue about a test
+  # The times its own run took go on its test line (testlist.sh slowtests()); only a test rule files an issue about a test
   # file (testrulespass(), after the test line is recorded).
   testedhere "$wt" || own=1
   # Its shared files run again once for the change it holds (<worktree>.sharedran: that change's patch-id, once
@@ -266,7 +266,7 @@ cardfailed() {
   # loop that adopted the card) proves nothing: nothing of it runs on main, goes to the main-red record, a wait
   # for main or a fix session. Its test line says so, and the test step runs again; the third such run in a row
   # blocks the card (a run with a result, a pass too, starts the count again: above).
-  # Its own run's files kept as passed and not run (carriedrec()): the step that ran them is an earlier one.
+  # Its own run's files kept as passed and not run (testlist.sh carriedrec()): the step that ran them is an earlier one.
   cr='{}'; [ -z "$own" ] || cr=$(carriedrec "$wt")
   if t=$(voidrun "$wt" "$rc"); then
     voids=$((voids + 1))
@@ -277,9 +277,9 @@ cardfailed() {
     go=again; return
   fi
   out=$(testfails "$wt.test" "$rc")
-  # What still did not pass runs on main first (verdicts()): each failure's verdict goes on the test line.
+  # What still did not pass runs on main first (mainred.sh verdicts()): each failure's verdict goes on the test line.
   t=$(verdicts "$c" "$wt" "${out:-null}") || t='{"verdicts":[]}'
-  # Where the failed run goes (testroute()). The machine is at fault (verdicts(): machine, issue 221), with no
+  # Where the failed run goes (testroute()). The machine is at fault (mainred.sh verdicts(): machine, issue 221), with no
   # failure the card's: its test line is `held`, not `fail` (the card's test step is not counted as failed), and it
   # waits for the machine hold (below).
   route=$(testroute verdicts "$t")
@@ -291,10 +291,10 @@ cardfailed() {
   # files (no fix session, no block) until main changes; then it is fitted onto main and tested again, as a card
   # whose main moved during its tests is. It is not put back on its old commit (#582): caught is cleared, so a
   # change that no longer applies there is brought onto main by a session, even after the landing's rebuild.
-  # The machine is at fault (verdicts(): machine, issue 221), with no failure the card's: no fix session, no
-  # block and no wait for main. The card waits, holding no files, until the machine hold goes (holdwait()), then
+  # The machine is at fault (mainred.sh verdicts(): machine, issue 221), with no failure the card's: no fix session, no
+  # block and no wait for main. The card waits, holding no files, until the machine hold goes (mainred.sh holdwait()), then
   # is fitted onto main as it is then and tested again, as after a wait for main. Before it waits, it is judged
-  # in the repair lane (repairlane(), issue 222): a card the lane passes goes on as a card whose tests passed;
+  # in the repair lane (mainred.sh repairlane(), issue 222): a card the lane passes goes on as a card whose tests passed;
   # one that finds the lane held by another card waits until it is free, and is then tested and judged again.
   held=''
   if [ "$route" = machine ]; then

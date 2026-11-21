@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
-# Engine cases: the loop picks a main-red fix card from a big main-is-red record (redpick()).
+# Engine cases: the loop picks a main-red fix card from a big main-is-red record (mainred.sh redpick()).
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
-# Issue 369. Bug it catches: redpick() gave the record, without its document cases, to jq as an argument, which Linux
+# Issue 369. Bug it catches: mainred.sh redpick() gave the record, without its document cases, to jq as an argument, which Linux
 # refuses over 128 KiB ("Argument list too long"): the document's entry stayed and no fix card was picked. The record
 # holds a document's entry and main's entry of 300 cases with long names (about 170 KB): the document's entry goes,
 # and main's commit gets its fix card. eng() is mainred.test.sh's.

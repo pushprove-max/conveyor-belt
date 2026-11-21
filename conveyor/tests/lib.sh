@@ -86,13 +86,13 @@ recok() { # <records file> <what wrote them>
 # A card's lines apart from the marks (deps, start, filed, pushed, issue): what a case reads when it lists the steps of the review rule.
 NOMARK='(.step | IN("deps", "start", "filed", "pushed", "issue") | not)'
 # The changed tests a card runs before it lands are $STUB/test-cmd, the test.command of main's pack (setup): it
-# passes unless a case writes its own. The run of a card's failing cases on main (verdicts(): a worktree under
+# passes unless a case writes its own. The run of a card's failing cases on main (mainred.sh verdicts(): a worktree under
 # cards/mainrun/) runs $STUB/mainrun-cmd, and with none passes, running nothing: a case that fails on a card is the card's
 # to fix, as before main was asked, unless a case writes one. So does the run of a bug card's test files on main without
-# the fix (bugproof(), in the same folder).
+# the fix (bugproof.sh bugproof(), in the same folder).
 # A bug card's build, for a case of a bug card that goes on to review (one whose issue has the label `bug`): it fixes
 # a.txt (one line more) and writes a.test.sh, which holds that a.txt has at least the lines it has with the fix, so the
-# test fails on main's code without the fix, wherever main is (bugproof()). Without it the card is sent back to build
+# test fails on main's code without the fix, wherever main is (bugproof.sh bugproof()). Without it the card is sent back to build
 # and blocked, never reviewed.
 provenbug() { echo 'echo two >> a.txt; echo "[ \$(wc -l < a.txt) -ge $(wc -l < a.txt) ]" > a.test.sh' > "$STUB/build"; echo 'bash a.test.sh' > "$STUB/mainrun-cmd"; }
 # The checks of the Board's fix cards (fixcheck.test.sh, runcheck.test.sh): the engine as the loop loads it, in a shell

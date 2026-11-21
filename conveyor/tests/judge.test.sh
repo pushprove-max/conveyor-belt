@@ -38,7 +38,7 @@ rev() { st "select(.issue == $1 and .step == \"review\") | $2"; } # <issue> <jq 
 # its prompt in $STUB/asked), and the engine shell is made as `conveyor.sh run` makes one. What judged() prints is in
 # <worktree>.fields, with the verdict and counts the card's review line takes from the review after minor(), as
 # card() does; the review it leaves is <worktree>.review, and with fix, for a NO-GO, what its fix round is told, as
-# card() gives it (numbered(), fixlines()), is <worktree>.fix. Called again on the same issue, it keeps the worktree
+# card() gives it (donewhen.sh numbered(), fixlines()), is <worktree>.fix. Called again on the same issue, it keeps the worktree
 # and judges the next review there, as card() judges a card's next review. No case here runs a whole card; the
 # snapshot of judged reviews over a fix round is judgesnap.test.sh's.
 judgeone() { # <issue> <review file | -> [fix]
@@ -149,7 +149,7 @@ t_ste80pin() {
 # Bugs: an accepted finding causes no fix; the fix session is told the findings the judge declined too, or the
 # declined one is counted; a finding declined earlier on the issue is not given to the next judge. Card c7's two
 # reviews, each judged as card() judges it (judgeone: judged(), then minor()), with no card run: the first is a NO-GO
-# whose fix round is told its accepted finding alone (fixlines()); the second, its one finding declined, is a GO.
+# whose fix round is told its accepted finding alone (donewhen.sh fixlines()); the second, its one finding declined, is a GO.
 t_judgeaccept() {
   judging "[$(issue 7 2026-01-01)]"
   printf '%s\n' '[P1] a.txt:1 wrong word' '[P2] a.txt:2 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"

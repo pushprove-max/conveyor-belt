@@ -106,7 +106,7 @@ t_watchlive() {
   kill $pid; wait $pid 2>/dev/null; :
 }
 
-# Bug (#281): a bug card's proof run (its live record mainrun/<card>.unfixed.live, testrun.sh bugproof()) was in no
+# Bug (#281): a bug card's proof run (its live record mainrun/<card>.unfixed.live, bugproof.sh bugproof()) was in no
 # live line, so the reader dropped its action ("waiting for a test slot") and its files run after each snapshot, and
 # the Board said "running tests"; and the run's start waited for the next refresh to show the card's step as proof.
 t_watchproof() {

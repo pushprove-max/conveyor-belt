@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
-# Engine cases: the machine verdict (verdicts(), issue 221). A case that fails on the card and on main is main's only
+# Engine cases: the machine verdict (mainred.sh verdicts(), issue 221). A case that fails on the card and on main is main's only
 # when an input of its file changed since its last recorded pass and a control passes beside it on the same slot;
-# otherwise it is the machine's: no main-red entry, no wait for main, the loop picks no card (machineheld()) until the
-# controls pass on main again (machineprobe()), and the cards on hold test again.
+# otherwise it is the machine's: no main-red entry, no wait for main, the loop picks no card (mainred.sh machineheld()) until the
+# controls pass on main again (mainred.sh machineprobe()), and the cards on hold test again.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -12,7 +12,7 @@
 
 # rerunsetup's three test files and command (tests/rerun.test.sh): a.test, b.test and c.test, whose cases fail as
 # $STUB/plan says; c.test is the pack's control (test.control). b.txt and c.txt are committed on main as the inputs of
-# b.test and c.test. The run of main's look at the hold (machineprobe(), in cards/mainrun/machine) is run `main`, as
+# b.test and c.test. The run of main's look at the hold (mainred.sh machineprobe(), in cards/mainrun/machine) is run `main`, as
 # the run of a card's failing cases on main is, its list in $STUB/rerun.main; it marks each of its runs in $STUB/looks.
 holdsetup() { # <plan lines>...
   rerunsetup "$@"; rerunfiles
@@ -152,7 +152,7 @@ t_machinecard() {
   ( loop run 1 > "$STUB/run.out" 2>&1 ) & lp=$!
   wait_until "$waiting" 'cat "$STUB/run.out"' || fail "the card did not wait for the machine: $(cat "$STUB/run.out")"
   # Bug it catches too: a card the repair lane does not pass (c.test fails in the clean harness with its change too)
-  # not told why. The loop's message (card()) is checked here; t_repairempty checks repairlane()'s other reason.
+  # not told why. The loop's message (card()) is checked here; t_repairempty checks mainred.sh repairlane()'s other reason.
   grep -qF 'the repair lane did not pass it (c.test still failed with the change in a clean harness): it waits until the machine passes its controls again' "$STUB/run.out" \
     || fail "the loop did not say why the lane did not pass the card: $(grep -F 'repair lane' "$STUB/run.out")"
   # Bug it catches too: the machine's failure counted as the card's failed test step (result fail, "tests failed").
@@ -242,7 +242,7 @@ t_repairlands() {
 }
 
 # A card the repair lane does not pass: its change, made by <edit> in its worktree c-7 on main and staged, judged by
-# repairlane() itself under the hold repairsetup's main gives (c.test). It does not pass, says why, and gives the lane
+# mainred.sh repairlane() itself under the hold repairsetup's main gives (c.test). It does not pass, says why, and gives the lane
 # up while its process still runs. (That such a card then waits for the machine and lands once the hold goes, on a
 # test step of its own, is t_machinecard's whole card run, whose card the lane does not pass either.)
 repairheld() { # <edit> <the clean runs, as cleanruns() gives them> <why the lane did not pass it>
@@ -285,7 +285,7 @@ t_repairbaseline() {
     || fail "the lane took the card's own missing test file for the control's failure: $out"
 }
 
-# D1, D4: card c1 takes the repair lane through repairlane() and is judged (a repairproof() that does not end here).
+# D1, D4: card c1 takes the repair lane through mainred.sh repairlane() and is judged (a mainred.sh repairproof() that does not end here).
 # Bugs it catches: two repair cards judged at once, each against a main the other changes; and a lane recorded with
 # the start time of a process other than c1's (c1's process starts over a second before it takes the lane, so the
 # two times differ), which another card takes for a free lane. A second card is refused the lane and waits, saying

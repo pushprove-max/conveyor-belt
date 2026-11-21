@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
-# Engine cases: the check of the Board's Make it run alone card (#190; aloneproof(), conveyor/lib/testrun.sh): the
+# Engine cases: the check of the Board's Make it run alone card (#190; aloneproof(), conveyor/lib/speedproof.sh): the
 # pack as the change leaves it no longer marks the file wholeOnly, and the file runs alone through the pack's
 # test.fileCommand, on a test slot, and passes. fx_in and fx_wt are in lib.sh.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
@@ -105,7 +105,7 @@ t_alonenolist() {
 
 # Bug it catches: a change that moved the file's checks into a new file and removed it ran nothing and passed; and a
 # Make it run alone title was read as Make it run (whose title starts the same). The new test file runs alone in its
-# place, and alonefile() reads only a title that ends "run alone".
+# place, and speedproof.sh alonefile() reads only a title that ends "run alone".
 t_alonemoved() {
   alonerun "$UNMARK; git rm -q w.test.sh; echo 'echo ok ncase' > n.test.sh"
   [ "$RC" = 0 ] && [ "$(cat "$STUB/alone-args")" = 'n.test.sh' ] || fail "the added file did not run in place of the removed one: $RC $WHY $(cat "$STUB/alone-args" 2>&1)"

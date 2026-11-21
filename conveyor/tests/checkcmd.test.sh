@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
-# Engine cases: the project's checks (the pack's test.checkCommand, treecheck()) after each session and at the start
+# Engine cases: the project's checks (the pack's test.checkCommand, donewhen.sh treecheck()) after each session and at the start
 # of a card's Test step.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
@@ -106,9 +106,9 @@ t_checknone() {
   [ $rc = 0 ] && [ -z "$out" ] && [ ! -e "$W.checks" ] || fail "with no test.checkCommand, the checks did not pass silently and keep nothing: exit $rc, '$out', $(ls "$W.checks" 2>&1)"
 }
 
-# Bug (#786, checkblock red now and then): treeof() copied the index with a new time, so git trusted the stat of a file
+# Bug (#786, checkblock red now and then): donewhen.sh treeof() copied the index with a new time, so git trusted the stat of a file
 # staged in the same second as a same-size rewrite of it, and gave the old tree: the checks after a fix session reused
-# the build's kept failure, and asks() could read a fix as no change.
+# the build's kept failure, and donewhen.sh asks() could read a fix as no change.
 t_checkracy() {
   W=$T/$CASE/w; mkdir -p "$W" && git -C "$W" init -q || fail "the worktree"
   local i s

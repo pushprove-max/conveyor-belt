@@ -150,7 +150,7 @@ t_narrowsuite() {
     || fail "the card built or refreshed the test map: $(ls "$R/.conveyor"; cat "$m")"
 }
 
-# #351 scenario 9. Bug it catches: the main-red check (verdicts(): a card's failures run on main) ran the suite
+# #351 scenario 9. Bug it catches: the main-red check (mainred.sh verdicts(): a card's failures run on main) ran the suite
 # command, given the failing cases, which ran every test file. The card's run failed two cases of
 # lib/cartsum.test.js and lib/tax.test.js naming no case: main runs each of the two files once, alone, through
 # test.fileCommand, and nothing else.
@@ -161,7 +161,7 @@ t_narrowmainred() {
   ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
     . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" || exit 1
     names || exit 1
-    # shellcheck disable=SC2034 # TEST_WAIT, TEST_RUN and TEST_FREE are read by verdicts(), defined by the eval
+    # shellcheck disable=SC2034 # TEST_WAIT, TEST_RUN and TEST_FREE are read by mainred.sh verdicts(), defined by the eval
     TEST_WAIT=0 TEST_RUN=0 TEST_FREE=0
     verdicts c7 "$wt" '{"files":[{"file":"lib/cartsum.test.js","cases":[{"name":"adds"},{"name":"rounds"}]},{"file":"lib/tax.test.js","cases":[]}]}' || : ) \
     > "$T/$CASE/run.out" 2>&1 || fail "the check on main could not be run: $(cat "$T/$CASE/run.out")"

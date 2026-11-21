@@ -166,7 +166,7 @@ t_listguess() {
 # is a runner (no folder such as tests, no file that only a pattern matches), as is the file a command of a shell
 # script among them starts (tests/b.test.sh, which ci/full.sh runs; not tests/a.test.mjs, which it only names), and
 # each of test.wholeCommands: the runners that the patterns match are no test files (testpaths(), with -v and -z
-# too, and with -vz, bugproof()'s call: #365, the flags together were not read, so the runners were dropped from the
+# too, and with -vz, bugproof.sh bugproof()'s call: #365, the flags together were not read, so the runners were dropped from the
 # files that are not tests and the NULs lost, and a change with source code was taken as test-only), and the test map names them as not mapped, with the reason.
 t_testpathsrunner() {
   setup '[]'; tpfiles tools/prep.mjs scripts/run-tests.mjs scripts/lint.mjs ci/full.sh tests/a.test.mjs tests/b.test.sh tests/c.test.mjs

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
 # Engine cases: a slow file on main, which a card edits, in whole card runs: its time recorded, and the test rules run
-# after its test step (testrun.sh slowtests(), card.sh, testrules.sh). Its own file, so that it runs beside
+# after its test step (testlist.sh slowtests(), card.sh, testrules.sh). Its own file, so that it runs beside
 # budget.test.sh's cases. The helpers (budgetsetup, reviews, slowof, timesof, landedone) are budget.test.sh's.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.

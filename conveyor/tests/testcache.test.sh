@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
-# Engine cases: the test results cache (tests(): cachekeep(), cacheoff()). A test file that passed with the same
+# Engine cases: the test results cache (tests(): testlist.sh cachekeep(), cacheoff()). A test file that passed with the same
 # inputs is not run again by a later run, of this card or another; one whose inputs changed runs, and so does one
 # whose command names no inputs for it.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this

@@ -42,7 +42,7 @@
 # reused, the files rerun, none when nothing ran, and the passes kept). $FULLTEST.running holds {since, sha, how, pid:
 # the run's process} while the lock is held, and, once a red
 # run's failed cases are run alone, counts: the whole run's suiteprog(). Each run's files, with their results and
-# times, also go to $SUITERUNS (suiterec(), lib/testrun.sh) for the Tests page.
+# times, also go to $SUITERUNS (suiterec(), lib/testlist.sh) for the Tests page.
 # A run whose process was killed leaves $FULLTEST.running with the lock free (fulldead()): the next ask records it as
 # an error line with the reason, then starts its own run.
 FULLTEST=${STATE%/*}/fulltest.jsonl

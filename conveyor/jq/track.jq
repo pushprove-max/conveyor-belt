@@ -73,7 +73,7 @@
       # The loop files the follow-ups before it lands: that filing is part of Land, so the track only ever moves on from
       # left to right (a filing drawn as Push would step back to Land when the landing begins).
       # Each is done, now, skipped, failed or todo, with its seconds.
-      # A fix the Done-when check on a session's reply started (testrun.sh checked(): its start right after a build,
+      # A fix the Done-when check on a session's reply started (donewhen.sh checked(): its start right after a build,
       # fix or rebuild line whose Done-when check failed items (rows.jq checkFailed), its line's reason "the Done-when check failed") is part of the
       # step of the session it checks (last), never a Fix round of its own: after the build it is Build's, with a note
       # (replyFix: now while it runs, done after), so Fix is never ticked before the first review. rc: the start in
@@ -189,11 +189,11 @@
                 + ({why: (if $l.step == "blocked" or ($l.step == "test" and $l.result != "pass") or ($l.step == "issue" and $l.result != "ok")
                       or ($l.step == "review" and ($l.result | IN("fail", "stopped"))) or $l.step == "worktree" or $l.step == "lint" then $l.reason
                       # A test run that left linked test files out (testcap(), testrun.sh), or ran only the changed
-                      # cases of its own test files (owncases(), testrun.sh): its list's note (rows.jq) says so.
+                      # cases of its own test files (owncases(), testlist.sh): its list's note (rows.jq) says so.
                       elif $l.step == "test" and $l.list != null then $l.list.why else null end),
                     output: (if $l.step == "blocked" or ($l.step == "test" and $l.result != "pass") or ($l.step == "review" and $l.result == "NO-GO") then $l.tail else null end),
                     failures: (if $l.step == "test" and $l.result != "pass" then $l.failures else null end),
-                    # A test run's changed lines no test reached, from its coverage report (uncovered(), testrun.sh).
+                    # A test run's changed lines no test reached, from its coverage report (uncovered(), testlist.sh).
                     coverage: (if $l.step == "test" then $l.coverage else null end),
                     reason: (if $l.step == "fix" then $l.reason else null end),
                     # A build, fix or rebase line whose Done-when check failed items (rows.jq checkFailed): the Board

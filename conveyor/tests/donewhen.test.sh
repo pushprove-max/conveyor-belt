@@ -141,7 +141,7 @@ t_dwasks() {
 }
 
 # Bug (#466): a fix session that changes nothing and only asks the owner a question is not caught: the build's change
-# is still in the worktree, so it reads as a change, and the fixes inside checked() never looked. Here the Done-when
+# is still in the worktree, so it reads as a change, and the fixes inside donewhen.sh checked() never looked. Here the Done-when
 # fix asks: the card is blocked with its question, with no review.
 t_dwfixasks() {
   dwsetup "$(issue 13 2026-01-07 | jq -c --arg b "$DW" '.body = $b')"
@@ -154,9 +154,9 @@ t_dwfixasks() {
     || fail "#13's fix question did not block it before any review: $(wc -l < "$STUB/sessions") session(s), $(st 'select(.issue == 13) | [.step, .reason] | map(strings) | join(" ")' | tr '\n' ,)"
 }
 
-# Bugs (#466): asks() reads a Claude reply only, so a Codex or OpenCode builder's question goes on to review; and it
+# Bugs (#466): donewhen.sh asks() reads a Claude reply only, so a Codex or OpenCode builder's question goes on to review; and it
 # counts a change already in the worktree before the session (a fix after a NO-GO) as the session's. asks()
-# (lib/testrun.sh) is called on one worktree with each builder's stream in <worktree>.out, as checked() calls it.
+# (lib/donewhen.sh) is called on one worktree with each builder's stream in <worktree>.out, as donewhen.sh checked() calls it.
 t_asksreply() {
   setup '[]'
   local w=$T/$CASE/w q
@@ -186,7 +186,7 @@ t_dwrebase() {
   grep -qx 'D2 met: a.txt:2 after the rebuild' "$STUB/asked" && ! grep -q 'is the build' "$STUB/asked" || fail "the review after the rebuild had stale D<n> lines: $(cat "$STUB/asked")"
 }
 
-# dwchecked() (lib/testrun.sh), the Done-when part of checked(), called on one worktree as checked() calls it after
+# dwchecked() (lib/donewhen.sh), the Done-when part of donewhen.sh checked(), called on one worktree as donewhen.sh checked() calls it after
 # a build whose reply is in <worktree>.out, with the steps around it stubbed: record() appends the line with the
 # fields the record check needs, session() is the one fix session (its reply $STUB/reply.2, one line in
 # $STUB/sessions), block() keeps its reason in $STUB/blocked. Then reviewseen() (lib/card.sh, with its heading
@@ -194,7 +194,7 @@ t_dwrebase() {
 # whole card run of this cost the case about 4 CPU s more; dwland and dwfix land one.
 dwcall() { # <worktree> <issue json> <the build session's fields>
   # shellcheck disable=SC2034 # STATE is read by the sourced lib/testrun.sh (SUITERUNS=${STATE%/*}/...), DWFIX (the fix
-  # prompt's heading, which dwfix checks) by dwchecked()
+  # prompt's heading, which dwfix checks) by donewhen.sh dwchecked()
   ( STATE=$ST/cards.jsonl DWFIX='# The Done-when check failed'; . "$SRC/lib/testrun.sh"
     eval "$(sed -n "/^DONEWHENREVIEW='/,/'\$/p" "$SRC/lib/prompts.sh"; sed -n '/^reviewseen() {/,/^}/p' "$SRC/lib/card.sh")"
     trailerview() { :; }
@@ -265,8 +265,8 @@ t_dwnone() {
 # The reply check counts a TODO or [VERIFY] marker as added only when the change adds more lines holding it than it
 # removes. Bugs: a line holding one moved from one file to another fails a reply that does not name it (a split of a
 # file then costs fix sessions); a new line holding TODO passes unnamed. The check is the engine's own donewhen()
-# (lib/testrun.sh), called on a card's worktree with the build's edit in it and the session's reply in <worktree>.out,
-# as checked() calls it after each build: three card runs cost the case about 13 CPU s, for that one function.
+# (lib/donewhen.sh), called on a card's worktree with the build's edit in it and the session's reply in <worktree>.out,
+# as donewhen.sh checked() calls it after each build: three card runs cost the case about 13 CPU s, for that one function.
 t_movedmarker() {
   setup '[]'
   printf 'TODO later\n' > "$R/t.txt"; printf '[VERIFY] the limit\n' > "$R/v.txt"; git -C "$R" add t.txt v.txt; git -C "$R" commit -qm markers
@@ -285,7 +285,7 @@ t_movedmarker() {
 
 # #876. Bug: a D<n> line with a bracketed tag before its colon (`D1 met [uncertain: not run]: ...`), as the card rules
 # invite a session to tag what it did not verify, is not read, so the item fails as having no line and the card is
-# blocked. The untagged forms are read as before. DONEWHEN (lib/testrun.sh) is run as donewhen() runs it.
+# blocked. The untagged forms are read as before. DONEWHEN (lib/donewhen.sh) is run as donewhen.sh donewhen() runs it.
 t_dwtagged() {
   setup '[]'
   local out r=$'Done.\n\n## Done when\nD1 met [uncertain: not run]: evidence in a.txt\nD2 not met [likely]: why\nD3 met: plain evidence\nD4 not met: plain why\nD5 met [likely]:'
@@ -300,7 +300,7 @@ t_dwtagged() {
 }
 
 # Bug: a session's fields that cannot be put on its line (not JSON) leave the line bare with nothing in the log but
-# jq's own error, which names no card and no step. dwfields() (lib/testrun.sh) is called as checked() calls it.
+# jq's own error, which names no card and no step. dwfields() (lib/donewhen.sh) is called as donewhen.sh checked() calls it.
 t_dwfields() {
   setup '[]'
   local out err

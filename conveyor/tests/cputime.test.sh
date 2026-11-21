@@ -3,7 +3,7 @@
 # timeout: 120
 # Engine cases: the Board's Record CPU time on a Wall only test file (#190): cpuplan() (lib/testfiles.sh) says whether
 # conveyor/tools/testtime.sh can wrap the pack's test command for the file, `conveyor.sh test-settings cpu-time <file>`
-# saves that command, and a run of it records the file's CPU seconds (timed(), lib/testrun.sh). fx_in and fx_wt are in
+# saves that command, and a run of it records the file's CPU seconds (timed(), lib/testlist.sh). fx_in and fx_wt are in
 # lib.sh.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.

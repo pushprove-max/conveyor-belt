@@ -150,7 +150,7 @@ pick() { # [retried or ""] [the weekly limit reading's percent] [the open issues
   [ -z "${4:-}" ] || [ "$(acctkey "$c")" = "$4" ] || { echo wait; return 0; }
   # No list: the loop asked for none, the record not saying running a moment ago. It asks at its next turn.
   [ -n "$issues" ] || { echo wait; return 0; }
-  # The fix card of a red main commit (redpick(), lib/testrun.sh) goes ahead of the queue, as its P0 issue did; it counts
+  # The fix card of a red main commit (redpick(), lib/mainred.sh) goes ahead of the queue, as its P0 issue did; it counts
   # toward max-cards (not in `pick retried`), and a run limited by --only takes none. One that cannot be picked leaves
   # the queue to go on.
   if [ -z "${1:-}" ] && [ -z "$ONLY" ] && [ -s "${MAINRED:-}" ] && n=$(redpick) && [ -n "$n" ]; then echo "$n"; return 0; fi

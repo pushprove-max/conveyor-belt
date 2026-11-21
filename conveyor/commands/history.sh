@@ -2,8 +2,8 @@
 # `conveyor.sh history`: the lists the snapshot cuts to their newest, whole, as the last snapshot left them (history(),
 # lib/snapshot.sh); `conveyor.sh history test <test file>`: the older runs and test edits of one test file, which the
 # snapshot leaves out (testolder(), lib/testfiles.sh); `conveyor.sh history donewhen <card id>`: a card's last
-# Done-when check item by item, which the snapshot leaves out too (dwdetail(), lib/testrun.sh); `conveyor.sh history
-# excerpts <card id>`: the lines its reviews' findings cite, kept from the reviewed tree (exdetail(), lib/testrun.sh).
+# Done-when check item by item, which the snapshot leaves out too (dwdetail(), lib/donewhen.sh); `conveyor.sh history
+# excerpts <card id>`: the lines its reviews' findings cite, kept from the reviewed tree (exdetail(), lib/donewhen.sh).
 # Sourced by conveyor.sh.
 . "$HERE/lib/slots.sh" || exit 1
 . "$HERE/lib/prompts.sh" || exit 1

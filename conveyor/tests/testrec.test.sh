@@ -60,7 +60,7 @@ t_testrecwhy() {
   printf '%s\n' 'printf "TESTRUN why\tr.test.sh\tthe card changed lib/x.sh\nTESTRUN case\tr.test.sh\ttwo\nTESTRUN case\tr.test.sh\tone\n" > "$CONVEYOR_TEST_LOG/r.log"' > "$T/$CASE/cmd"
   l=$(recline pass) || fail "the test line could not be made"
   jq -e '.why == {"r.test.sh": ["the card changed lib/x.sh"]} and has("wholeSuite") == false' <<<"$l" >/dev/null || fail "a run of chosen cases has wholeSuite, or no why: $l"
-  # Issue 604: its line names the cases it ran (ranCases), so the search for the landing that broke a case (brokeby()) counts it.
+  # Issue 604: its line names the cases it ran (ranCases), so the search for the landing that broke a case (mainred.sh brokeby()) counts it.
   jq -e '.ranCases == {"r.test.sh": ["one", "two"]}' <<<"$l" >/dev/null || fail "a run of chosen cases does not name them in ranCases: $l"
   e=$(refused "$l"); [ -z "$e" ] || fail "$e"
 }

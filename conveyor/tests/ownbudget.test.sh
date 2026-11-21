@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
-# Engine cases: an Optimize card's build told the target (speedbrief()), and no budget of its own for a test file: no
+# Engine cases: an Optimize card's build told the target (speedproof.sh speedbrief()), and no budget of its own for a test file: no
 # test file has a CPU budget (#349), so an OWN-BUDGET line a build ends with stops nothing and sets nothing (card()).
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.

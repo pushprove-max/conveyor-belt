@@ -66,7 +66,7 @@ t_recfailed() {
 }
 
 # A card's test line when its change narrows the run (test.list args): its list is the changed tests, how many and by
-# what. Written as card.sh writes a passing first run: testrec(), firstrun() and slowrec() of the run tests() made,
+# what. Written as card.sh writes a passing first run: testrec(), firstrun() and testlist.sh slowrec() of the run tests() made,
 # through record().
 t_reclist() {
   local wt=$T/$CASE/cards/c7
@@ -86,7 +86,7 @@ t_reclist() {
 
 # The writers no card above reaches, each called as the engine calls it, on one card whose change speeds up f.test.sh:
 # its test line, whose list is its own changed test file (testrec()), the speed-up check's bugproof line with its speed
-# (speedproof(): 10 CPU s on record, 4 now), a push its pre-push hook refuses (push(): kind check, naming the check) and
+# (speedproof.sh speedproof(): 10 CPU s on record, 4 now), a push its pre-push hook refuses (push(): kind check, naming the check) and
 # the closed line of a card main already fixes (closed()).
 t_recother() {
   local wt=$T/$CASE/cards/c7 c

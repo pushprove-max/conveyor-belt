@@ -20,7 +20,7 @@
 # cases of a file it runs only some of (TESTRUN case, as .conveyor/test-changed.sh does for the engine's runner). $STUB/plan says which case fails (`<run>
 # fail <case>`; `<run> bare <case>`: its file fails naming no case), hangs (`<run> hang <case>`, cut at once as the clock cuts it) or hangs until the run's own clock cuts
 # it (`<run> stall <case>`) on which run; $STUB/ran is each case run, as `<run> <case>`; and
-# $STUB/rerun.<run> is what the loop gave that run to go by. A run of a card's failing cases on main (verdicts(), in
+# $STUB/rerun.<run> is what the loop gave that run to go by. A run of a card's failing cases on main (mainred.sh verdicts(), in
 # a worktree under cards/mainrun/) is this command too ($STUB/mainrun-cmd), numbered by no count: its run is `main`
 # (`main fail <case>`, `main <case>`, $STUB/rerun.main); there, as on a clean tree, only the files a `fail` line names run.
 rerunsetup() {
@@ -76,7 +76,7 @@ EOF
 # are files of main, test files by the pack's tests.patterns, each linked to a.txt (the build's file), and the stub
 # runs only the file the run gives it (CONVEYOR_TEST_FILE), its cases' count of its own (of), a run being counted
 # ($STUB/n) at its first file (CONVEYOR_TEST_N). Without it the stub runs the three files at each call: only for a
-# case that calls engine functions itself (tests() in rerunstep, on the worktree rerunwt makes; verdicts() in
+# case that calls engine functions itself (tests() in rerunstep, on the worktree rerunwt makes; mainred.sh verdicts() in
 # mainlimit.test.sh's limitjudge; voidrun(), verdicts() and mainred() in voidrun.test.sh's t_voidcommand). A card
 # run (loop run) needs it: given one file there, a stub that reports three is stopped by watch() as a run of files it
 # was not given, whenever watch() looks before the stub ends, as it did under the load of a whole-suite run (issue
@@ -164,7 +164,7 @@ t_rerunfail() {
   [ "$(wc -l < "$STUB/sessions")" = 2 ] || fail "not a build and one fix session: $(cat "$STUB/sessions")"
   [ "$(tline 1 '[.rerun.exit, (.rerun.failures.files | map(.file)), (.failures.files | map("\(.file):\(.cases | map(.name) | join(","))"))] | tojson')" = '[1,["b.test"],["b.test:flaky"]]' ] \
     || fail "the failed line does not keep both runs: $(tline 1 tojson)"
-  # Before the fix, the case's file ran on main (verdicts()), alone and whole, and passed there: the card's to fix, and
+  # Before the fix, the case's file ran on main (mainred.sh verdicts()), alone and whole, and passed there: the card's to fix, and
   # no P0.
   [ "$(ran main)" = flaky ] && [ "$(sed -n 's/^fail\t//p' "$STUB/rerun.main" | tr '\t\n' ':|')" = "b.test|" ] \
     || fail "the failing case was not run alone on main: $(ran main): $(cat "$STUB/rerun.main" 2>&1)"

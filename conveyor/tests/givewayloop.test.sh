@@ -9,7 +9,7 @@
 
 # The cases below run one card through the real loop (loop run): what they protect is card()'s order of calls on its
 # land step (fit the card onto main as it is now, claim its files again, run its checks again, block or land), and only
-# card() makes those calls; a direct call of settle(), checks() or land() passes with card() skipping one. One card
+# card() makes those calls; a direct call of settle(), donewhen.sh checks() or land() passes with card() skipping one. One card
 # only, with the stub sessions, so no case waits on a second card.
 # #7 (issue 7, every review GO) changes a.txt's last line to seven; its check $STUB/both-check.sh is <check>. With
 # $STUB/broken-build, its build also leaves a file `broken` that fails its tests until its test-fix session removes it.

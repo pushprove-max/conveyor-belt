@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // A card's timeline shows the changed lines no test reached (#309), from the coverage report its test run wrote (the
-// test record's coverage, testrun.sh uncovered()). Shared setup: dashboard-view.helpers.mjs.
+// test record's coverage, testlist.sh uncovered()). Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
 import { T0, iso, boot, panel, deliver, trackOf, full, cases, openEvery } from './dashboard-view.helpers.mjs';
 

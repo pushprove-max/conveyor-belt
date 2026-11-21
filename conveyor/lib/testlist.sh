@@ -111,7 +111,7 @@ cachekeep() { # <worktree>
   exec {lock}>&-
 }
 # The files of $TESTCACHE whose hash in the worktree is a kept one, one a line: each passed before with the inputs it
-# has there (cacheoff(); verdicts(): its inputs did not change since that pass).
+# has there (cacheoff(); mainred.sh verdicts(): its inputs did not change since that pass).
 cachehits() { # <worktree>
   [ -s "$TESTCACHE" ] || return 0
   cut -f2- "$TESTCACHE" | sort -u | cachesums "$1" | awk -F'\t' 'NR == FNR { k[$1] = 1; next } $1 in k { print $2 }' "$TESTCACHE" - | sort -u
@@ -206,7 +206,7 @@ runnernote() { # <paths>
   local x; while IFS= read -r x; do [ -z "$x" ] || echo "conveyor: $x is left off the card's list: $RUNNERFIX"; done <<<"$1"
 }
 # The command a run of the test files <file>... in <worktree> gives each of them (filecmd()) when the pack sets no
-# test.fileCommand (tests(), listcmd(), repairproof()): Conveyor's own runner, lib/filerun.sh, which runs a file with
+# test.fileCommand (tests(), listcmd(), mainred.sh repairproof()): Conveyor's own runner, lib/filerun.sh, which runs a file with
 # its language's runner from its package. Fails when that has no runner for one of them, printing the reason a run
 # stops with (NORUNNER), which names the first such file.
 ownrunner() { # <worktree> <file>...
@@ -221,7 +221,7 @@ ownrunner() { # <worktree> <file>...
 # line of the run's list (CONVEYOR_TEST_RERUN). A file that runs past its own time limit (its `# timeout:` line:
 # filecmd()) is stopped and fails, and the output says so; one still running when the run's own limit (the
 # testTimeout setting) stops the run is named by the run's clock (testclock(), TEST_LATE), and the output ends with a
-# line saying it timed out. Either is named in <worktree>.late, `<seconds><TAB><file>`; testfailed() counts it as
+# line saying it timed out. Either is named in <worktree>.late, `<seconds><TAB><file>`; bugproof.sh testfailed() counts it as
 # failing.
 bugrun() { # <worktree> <file>...
   local w=$1 rc TEST_LATE=1; shift

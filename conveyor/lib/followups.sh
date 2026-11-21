@@ -398,7 +398,7 @@ ncblock() { # <card> <issue> <worktree> <reason> <words>
 # every file the ALREADY-DONE line names is the same on the new main (issue 552: on a busy belt main moves during
 # nearly every review, and a new review only meets the same move again).
 # A main-red fix card (issue 0, its entry in the main-red record) that made no change first runs its cases again on
-# main as it is now (redproof(), issue 323): when every case passes there, main is no longer red for them, and the card
+# main as it is now (bugproof.sh redproof(), issue 323): when every case passes there, main is no longer red for them, and the card
 # closes as not needed, its closed line saying so. Else it is blocked, saying why, whatever its reply says: only that
 # run, not a review of an ALREADY-DONE line, shows main is no longer red.
 # Every reason it blocks with names the card's kept folder, where block() moves the session's output and errors, so

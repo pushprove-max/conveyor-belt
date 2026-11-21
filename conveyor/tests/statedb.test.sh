@@ -38,7 +38,7 @@ statedb_history() { # <state folder>
     '{"time":"2026-03-01T00:01:00Z"}' '{"time":"2026-03-01T00:02:00Z","pct":41.50}' > "$1/limit.jsonl"
 }
 # What the engine read with jq before the database, of the same files, for each question the helper answers
-# (lib/session.sh card and stopped, lib/review.sh reusable, lib/run.sh, lib/testrun.sh testedbefore, and
+# (lib/session.sh card and stopped, lib/review.sh reusable, lib/run.sh, lib/testlist.sh testedbefore, and
 # lib/snapshot.sh: its copy, pushes, the cards waiting for the yes, samples and readings).
 statedb_jq() { # <state folder> <question> [<arg>...]
   local s=$1/cards.jsonl o=$1/retried.jsonl

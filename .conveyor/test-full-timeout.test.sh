@@ -27,7 +27,7 @@ mkdir "$T/run.testlog" "$T/config"
   CONVEYOR_TEST_SLOTS=$HERE/../conveyor/lib/slots.sh CONVEYOR_TEST_LOG=$T/run.testlog CONVEYOR_SUITE_MODE=parallel \
   exec timeout --kill-after=30 60 bash .conveyor/test-full.sh) > "$T/run.test" 2>&1 &
 pid=$!
-# The suite is stopped once its file has ended a case, as the test step's clock (testrun.sh testclock()) stops it, by
+# The suite is stopped once its file has ended a case, as the test step's clock (testlist.sh testclock()) stops it, by
 # SIGALRM to its timeout: only a real stopped run shows what its exit removes and keeps, so this polls the file's mark.
 i=0; while [ ! -e "$R/ready" ] && [ $i -lt 200 ]; do sleep 0.1; i=$((i + 1)); done
 [ -e "$R/ready" ] || { echo "not ok - the case file did not start: $(cat "$T/run.test")"; kill "$pid"; exit 1; }

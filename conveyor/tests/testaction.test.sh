@@ -160,7 +160,7 @@ t_tanewest() {
     || fail "a run again that timed out before the file ran is told as the file passing on it: $out"
 }
 # Bugs it catches (#341): a card's step that kept the file as passed and did not run it, its time of the file carried
-# from the card's earlier step (carried, carriedrec()), was told to the judge as a pass at its own time and as a run of
+# from the card's earlier step (carried, testlist.sh carriedrec()), was told to the judge as a pass at its own time and as a run of
 # it, not marked carried; once it was not, the earlier step that ran it, failed in another file (a failed step saves no times), was not
 # told at all, leaving an older release-suite failure as the newest run; and dropping the carrying line lost the only
 # times of that run and its card from the card list.

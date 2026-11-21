@@ -17,7 +17,7 @@ strays() {
 # or a blocked card's process is still alive. The records are
 # rewritten in place, never replaced: the lock is held on the file itself, and a writer waiting for it must find
 # the same file when its turn comes.
-# A main-red fix card (issue 0, redpick()) is given back by its card id: its lines move out the same way, and the loop
+# A main-red fix card (issue 0, mainred.sh redpick()) is given back by its card id: its lines move out the same way, and the loop
 # picks its main commit's entry again, a new card built from nothing.
 # RETRYWHY, when set, is why the loop retried the card itself (speedretry()): its blocked line keeps it as retriedWhy.
 retry() { # <issue, or the card id of a main-red fix card> [fresh: an issue's next card builds from nothing]
@@ -115,7 +115,7 @@ retry() { # <issue, or the card id of a main-red fix card> [fresh: an issue's ne
 # and pick does not take the issue again from an open list asked before it closed. Its kept work stays where it is:
 # Once the issue is opened again, a turn of the loop gives it back as `retry` does (reopened()), the new card starting
 # from that work.
-# A main-red fix card (issue 0, redpick()), which has no issue to close, is shut by its card id: its main commit then
+# A main-red fix card (issue 0, mainred.sh redpick()), which has no issue to close, is shut by its card id: its main commit then
 # starts no card again, and `retry <card id>` gives it back. So is a land-branch card of issue 0 (landbranch(), a
 # branch that names no issue), whose change landed some other way: its kept work stays where block() put it, and its
 # branch is left alone.
@@ -329,7 +329,7 @@ testpaths() { # [-v] [-z]
   [ -n "${TESTRX:-}" ] || names || { cat > /dev/null; return 1; }
   local a v='' z=() zf=() l rs=() t dx='\.([Mm][Dd]|[Tt][Xx][Tt]|[Rr][Ss][Tt])$'
   local -A rn=()
-  # The flags may come together, as bugproof()'s -vz (#365).
+  # The flags may come together, as bugproof.sh bugproof()'s -vz (#365).
   for a; do [[ $a != -*v* ]] || v=1; [[ $a != -*z* ]] || { z=(-d ''); zf=(-z); }; done
   [ -z "${TESTRUNNERS:-}" ] || while IFS= read -r l; do rn[$l]=1; rs+=(-e "$l"); done <<<"$TESTRUNNERS"
   if [ -z "$v" ]; then

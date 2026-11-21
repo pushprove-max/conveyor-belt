@@ -34,8 +34,8 @@ afterrun() { # <issue json> [<before>] [<after>]
   [ "$RC" = 0 ] && [ -n "$AFTER" ] || fail "afterreview could not be called, or the commands around it failed: $(cat "$T/$CASE/run.out")"
 }
 # Fix round <round> of card c7 ($FXWT) as card() records it, in afterrun's <before>: the findings of its review with
-# their ids (numbered()), its fix <change> made and staged, and the round's findings and diff kept (rounded()), which
-# the review after it reads (repeats()).
+# their ids (donewhen.sh numbered()), its fix <change> made and staged, and the round's findings and diff kept (donewhen.sh rounded()), which
+# the review after it reads (donewhen.sh repeats()).
 told() { # <round> <change>
   local ids old w=$FXWT
   ids=$(numbered "$w") && old=$(git -C "$w" write-tree) && (cd "$w" && eval "$2") && git -C "$w" add -A && mkdir -p "$w.rounds" \
@@ -123,7 +123,7 @@ t_proven() {
     || fail "a proven finding beside a GO did not make it a NO-GO, or the UNPROVEN line was counted or filed: $(cat "$T/$CASE/run.out")"
   [ "$(jq -r .title "$STUB/filed")" = "$F" ] || fail "follow-ups filed after the last NO-GO are not the proven finding alone: $(cat "$STUB/filed")"
   # That review as the card's first goes to a fix round, whose brief (fixprompt() of the findings with their ids,
-  # fixlines(), as card() gives it to session()) has the proven finding, with its id, under the same-mistake instruction.
+  # donewhen.sh fixlines(), as card() gives it to session()) has the proven finding, with its id, under the same-mistake instruction.
   fx_wt 'echo two >> a.txt' b.txt base; cp "$STUB/r.review" "$FXWT.review"
   afterrun "$(jq -c '.[0]' "$STUB/issues.json")" '' 'fixprompt "" "$(fixlines "$wt" "$(numbered "$wt")")" > "$T/$CASE/fix"'
   [ "$AFTER" = '{"res":"NO-GO","after":"fix","last":"","stop":"","hard":"","last0":"","isfu":"","priv":"","why":""}' ] || fail "a proven finding beside a GO on the first review did not go to a fix round: $AFTER"
@@ -267,7 +267,7 @@ t_privfixrun() {
 # reviews; card() declines the findings of a card at the cap (isfu) with decline(), as called here.
 t_deep() {
   setup "[$(issue 7 2026-01-01 conveyor-followup bug P1 | jq -c '.body = "Follow-up to #5.\n\nFollow-up depth: 2"')]"
-  # The second review names a.txt:12, where the fix's one appended line moves a.txt:11 (rounded()), so it is the same
+  # The second review names a.txt:12, where the fix's one appended line moves a.txt:11 (donewhen.sh rounded()), so it is the same
   # finding back; its text differs from the first's, so the declined one is known to come from the last review.
   fx_wt 'echo two >> a.txt' b.txt base
   for i in 1 2; do printf '%s\n' "[P2] a.txt:1$i wrong word" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.$i"; done; cp "$STUB/review.1" "$FXWT.review"

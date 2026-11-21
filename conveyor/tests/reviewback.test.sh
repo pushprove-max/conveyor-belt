@@ -84,7 +84,7 @@ t_camebackp1() {
     'answers "$wt" > "$T/$CASE/an2" || : # its exit is 1 for a review with no EARLIER line, which card() does not read'
   [ "$AFTER" = '{"res":"NO-GO","after":"hard","last":"","stop":"","hard":"[P1] a.txt:1 wrong word. Proof: line 3 reads fix2 did not hold after 1 round","last0":"","isfu":"","priv":"","why":""}' ] \
     || fail "a P1 finding back after its fix did not block the card with the reason: $AFTER"
-  # Issue 306: the review that blocks keeps its answer beside the finding's first location and proof (answers(), on
+  # Issue 306: the review that blocks keeps its answer beside the finding's first location and proof (donewhen.sh answers(), on
   # each review's line when it has one): the first review has none.
   [ "$(cat "$T/$CASE/an1") $(cat "$T/$CASE/an2")" \
     = '[] [{"id":"E1","answer":"[P1] a.txt:1 wrong word. Proof: line 3 reads fix2","first":{"round":1,"at":"a.txt:1","line":"[P1] a.txt:1 wrong word"}}]' ] \
@@ -94,11 +94,11 @@ t_camebackp1() {
 t_camebacktold() {
   backsetup 9
   # #9: a P2 finding comes back beside a new P1: a fix round follows, and its session is told it came back, with the
-  # earlier review's finding and the diff of the fix round after it (fixlines() then again(), as card() tells it).
+  # earlier review's finding and the diff of the fix round after it (donewhen.sh fixlines() then again(), as card() tells it).
   printf '%s\n' '[P2] a.txt:1 a nit. Proof: line 2 reads fix1' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
   printf '%s\n' '[P2] a.txt:1 a nit. Proof: line 3 reads fix2' '[P1] b.txt:2 a new bug' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
   printf '%s\n' 'EARLIER: E2 holds' "$GO" > "$STUB/review.3"
-  # After it: the review line's survived (repeats(), as card() writes it), then fix round 2 and the GO after it, whose
+  # After it: the review line's survived (donewhen.sh repeats(), as card() writes it), then fix round 2 and the GO after it, whose
   # line keeps its answers.
   afterrun "$(issue 9 2026-01-01)" 'told 1 "echo fix2 >> a.txt" && cp "$STUB/review.2" "$wt.review" && pass=2' \
     '{ fixlines "$wt" "$(numbered "$wt")"; again "$rep"; } > "$T/$CASE/fix"; jq -sc "map({id, rounds})" <<<"$rep" > "$T/$CASE/survived"
@@ -180,7 +180,7 @@ t_repeatkept() {
   [ "$(jq -c '[.after, .hard]' <<<"$AFTER")" = "[\"hard\",\"$B did not hold after 1 round\"]" ] || fail "a P1 repeat on the last round did not block: $AFTER"
   # Blocked so after its three reviews (its worktree, fix rounds and last review as afterrun left them), and retried:
   # the resumed session is told the finding came back, with the diff of the fix round told to fix it (keptrep(), then
-  # again(), as card()'s build tells it).
+  # donewhen.sh again(), as card()'s build tells it).
   keptblock 10 3 "the fix for $B did not hold after 1 round"
   resumed 10 'keptrep; again "$rep" > "$T/$CASE/brief"'
   b=$T/$CASE/brief

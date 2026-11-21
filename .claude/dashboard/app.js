@@ -808,7 +808,7 @@
   // where the step before it leaves one cause: failed tests; a lint line (lint findings, at either lint gate); a build,
   // rebuild or fix whose Done-when check failed (checkFailed: the check on its reply); tests that passed (main moved).
   // After a review it may be the findings, the commit trailers or main having moved (a GO, or a last NO-GO, still
-  // lands), and after a session whose reply passed its check the project's checks (checked(), testrun.sh) or main
+  // lands), and after a session whose reply passed its check the project's checks (checked(), donewhen.sh) or main
   // moved: "Fix N" alone until its line says. all: the card's recorded steps; i: the place of one in it. null when it
   // is no fix; why is the reason, on hover.
   const FIX_CAUSE = [[/^the Done-when check failed/, 'reply check'], [/^main moved/, 'main moved'], [/^lint: /, 'lint findings']];

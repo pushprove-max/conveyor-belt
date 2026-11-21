@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
-# Engine cases: the times a card's test line records, in a whole card run with a fix session (testrun.sh slowtests()).
+# Engine cases: the times a card's test line records, in a whole card run with a fix session (testlist.sh slowtests()).
 # Its own file, so that it runs beside budget.test.sh's cases. The helpers (reviews, landedone) are budget.test.sh's.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
-# Bug caught (#344): a passing test line got its times by file (slowrec()) as one jq argument, which Linux refuses over
+# Bug caught (#344): a passing test line got its times by file (testlist.sh slowrec()) as one jq argument, which Linux refuses over
 # 128 KiB ("Argument list too long"), so a run that timed many files landed with no times. The run times s.test and
 # 1500 files of long names (about 200 KB of times): the test line holds the times of every one.
 t_budgetbigrec() {

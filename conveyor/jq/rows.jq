@@ -14,7 +14,7 @@ map(select(.step != "push")) | group_by(.card) | map(. as $all
          elif $l.step == "test" then (if $l.result == "fail" then "fix" else "landing" end)
          elif $l.step != "review" then "picked" elif $l.result == "GO" then "landing"
          elif $l.result != "NO-GO" then "review" elif $r < $max and (any(.step == "rebase" or (.step == "test" and .result == "fail")) | not) then "fix" else "landing" end) as $at
-      # name: what a main-red fix card (issue 0, its picked line naming main's commit: redpick()) is shown as, in place
+      # name: what a main-red fix card (issue 0, its picked line naming main's commit: mainred.sh redpick()) is shown as, in place
       # of an issue number, "Main is red (<commit>)"; null for any other card, which is shown by its issue.
       | {card: .[0].card, issue: .[0].issue, name: (.[0].mainRed | strings | "Main is red (\(.[0:12]))") // null, title: (.[0].title // ""), step: ($end.step // $at),
          stage: ({picked: 0, build: 1, fix: 3, landing: 5}[$at] // (if $r + (if $l.step == "review" then 0 else 1 end) > 1 then 4 else 2 end)),
@@ -70,18 +70,18 @@ map(select(.step != "push")) | group_by(.card) | map(. as $all
                gate: (if .step == "lint" then .lint.gate else null end),
                tail: (if .step == "blocked" or (.step == "test" and .result != "pass") or (.step == "review" and .result == "NO-GO") then .tail else null end),
                failures: (if .step == "test" and .result != "pass" then .failures else null end),
-               # A test line's failures' verdicts (card, main or flaky) and the seconds its run of them on main took (verdicts()).
+               # A test line's failures' verdicts (card, main or flaky) and the seconds its run of them on main took (mainred.sh verdicts()).
                verdicts: (if .step == "test" then .verdicts else null end), mainSec: (if .step == "test" then .mainRun.sec else null end),
                # A test line whose failed cases ran again at once (tests()): two runs (track.jq runs); on a pass line,
                # it passed only when what had not passed ran again.
                rerun: (if .step == "test" and .rerun != null then true else null end),
                # A test line whose list left linked test files out (testcap(), testrun.sh), or ran only the changed cases of
-               # the card's own test files (owncases(), testrun.sh): its note, which the track shows, and how many were left out.
+               # the card's own test files (owncases(), testlist.sh): its note, which the track shows, and how many were left out.
                list: (if .step == "test" and ((.list.left? // 0) > 0 or .list.cases? != null) then {left: .list.left, why: .list.why} else null end),
                # A test line that reused the pass before it (card()): it keeps that pass's rerun on the track.
                reused: (if .step == "test" and .reused == true then true else null end),
                # A build, fix or rebase line whose Done-when check failed items: the fix that starts next is the reply
-               # check's (testrun.sh checked()), which the track draws on the step of the session it checks.
+               # check's (donewhen.sh checked()), which the track draws on the step of the session it checks.
                checkFailed: (if (.step | IN("build", "fix", "rebase")) and ((.doneWhen.failed? // []) | length > 0) then true else null end),
                stop: (if .step != "blocked" then null else .reason | if startswith($nodeps) then "deps" elif startswith("worktree:") then "worktree" elif startswith("brief:") then "brief" elif startswith($yes) or startswith($lintyes) then "yes" else null end end),
                # A review's judge: {ran: true, accepted, declined (how many findings it accepted and declined), go (the

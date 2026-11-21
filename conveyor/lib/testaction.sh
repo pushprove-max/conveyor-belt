@@ -35,7 +35,7 @@ TATEXT='fromjson? // empty | objects | if .type == "assistant" then .message.con
   elif .type == "item.completed" and .item.type == "agent_message" then .item.text | strings | . + "\n"
   elif .type == "text" then .part.text | strings | . + "\n" else empty end'
 # What the judge is asked of the hollow cases; the check of a Fix hollow cases card asks it too (hollowproof(),
-# lib/testrun.sh).
+# lib/speedproof.sh).
 TAHOLLOWASK="name each hollow case of the file, a case that passes without proving anything, on a line of its own: HOLLOW: <case> | <kind> | <one-line reason>. The kind is one of: mock-echo (it only checks that a mock returned what the mock was told to return), text-only (it only checks that a file contains some text), no-assert (it has no assertion), defined-only (it only checks that a value is defined or truthy). Give no HOLLOW line when no case is hollow."
 # What it is asked of the waits (#189): the Tests page marks a file Waits when its last run took more than 2 times its
 # CPU time on the clock (WAITRATIO, lib/testrun.sh).
@@ -72,7 +72,7 @@ tadirect() { # <text file>
     | .cases |= [split(",")[] | gsub("^[\\s`\"\u0027]+|[\\s`\"\u0027]+$"; "") | select(. != "")] | select(.cases != [])]}' "$1"
 }
 # The DIRECT lines of <text file> (tadirect()) as the judged <test file> in <worktree> (the judge's commit) has them
-# (#827): each line keeps only the cases the file defines (casesgone(), lib/testrun.sh) and names the others in
+# (#827): each line keeps only the cases the file defines (casesgone(), lib/speedproof.sh) and names the others in
 # dropped, as a judge may name a case of another test file. A line left with no case is kept: it still names a part.
 tadirectin() { # <text file> <worktree> <test file>
   local d g
@@ -100,7 +100,7 @@ taverdict() { # <text file>
 TAEXPLAIN="Explain the slowdown of one test file of this project. From its recorded times below, find when it became slower, which card's change made it slower, and what in that change is the cause. The window of the rise, from its last run at its usual time to its first slower run, and every commit in that window that changed the test file, a file the test map links to it or a file the map shares with most tests, each with its card, changed files and diff, are in the facts below; you have no git. Weigh every commit in that window: do not blame a card only because its run was the first slower one. Read the repository as you need. Change nothing: do not write or edit a file, do not file an issue, do not change any state."
 # `conveyor.sh testissue <test file> <title> <body>`: the Board's File an issue about one test file (an Optimize issue,
 # "Optimize the test file <file>", or a Rewrite as a direct check issue, "Rewrite the test file <file> as direct
-# checks", each checked by optproof(), or a speed-up; the owner read and edited the title and body), filed through the GitHub write path with the pack's
+# checks", each checked by speedproof.sh optproof(), or a speed-up; the owner read and edited the title and body), filed through the GitHub write path with the pack's
 # type and its last priority. Each one filed is kept in $TAFILED, one line {time, event: filed, file, issue}, so the
 # file's row has its issue (testspart(): the Board's Close its issue as done). It prints the issue's address.
 # Run for a Foreman session (the launcher's CONVEYOR_FOREMAN=1, or the session the Foreman's mark, $ST/foreman/session,
@@ -240,7 +240,7 @@ tafail() { # <id> <why>: a queued action that could not start, failed
 # What the session is given of <file>: {runs: each run that timed it, oldest first, the runs the Tests page shows: each
 # test line of a card, {card, issue, time} and its times, clocks (its seconds on the clock), and timed parts for
 # the file, and carried: true on a line that kept it as passed and did not run it, its times an earlier step's of the
-# same card (carriedrec(); a failed step saves none, so they may be the only ones of that run), and each whole-suite run of $SUITERUNS (suiterec()), {time, whole: true, how, cpu, sec, result}, and the time the test-speed
+# same card (testlist.sh carriedrec(); a failed step saves none, so they may be the only ones of that run), and each whole-suite run of $SUITERUNS (testlist.sh suiterec()), {time, whole: true, how, cpu, sec, result}, and the time the test-speed
 # survey saved for it (testsurvey(), lib/testfiles.sh), {time, survey: true, cpu, sec}; cards: the
 # cards of the test lines, {card, issue}; flaky: the entries of the flaky-test record for it or a case of it ("<file>: <case>");
 # failures: its newest TAFAILS failed test steps (those that passed on re-run too), newest first, as the Tests page has
@@ -484,7 +484,7 @@ tarunfile() { # <the record> <worktree>
   else
     state=failed; why=$(jq -cn --arg r "it did not run: $(tail -n 5 "$wt.test" 2>/dev/null)" '$r[0:600]')
   fi
-  # The file's own times, as its runner timed it (timed()).
+  # The file's own times, as its runner timed it (testlist.sh timed()).
   tm=$(timed "$wt" 2>/dev/null | jq -c --arg t "$t" '.[$t] // {}' 2>/dev/null) || tm='{}'
   { cp -f "$wt.test" "$f.txt.new" 2>/dev/null || : > "$f.txt.new"; } && mv -f "$f.txt.new" "$f.txt"
   taput "$f.json" "$(jq -c --arg t "$(clock)" --arg s "$state" --argjson res "$res" --argjson w "$why" --argjson tm "$tm" --arg sec "$s" --arg wait "$w" \

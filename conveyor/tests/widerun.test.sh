@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
-# Engine cases (#280, #351): the bug-card check (bugproof()) ran the whole suite through a test command that, given a
+# Engine cases (#280, #351): the bug-card check (bugproof.sh bugproof()) ran the whole suite through a test command that, given a
 # bug card's test files, ran far more, for 45 minutes against under a second. It runs each test file alone through
 # test.fileCommand: a file that runs other test files is stopped, a pack with no test.fileCommand runs nothing and
 # says so, and setup suggests the test.fileCommand that fits.

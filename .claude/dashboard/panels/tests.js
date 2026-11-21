@@ -68,10 +68,10 @@
 // newest judge named, the snapshot's waits), and Make it run and Delete it on a file Never run, whose row says why
 // it did not run when the engine can tell (the snapshot's neverRun). Each Done-when is what the card's check proves.
 // #778: a file whose newest judge's verdict is indirect (it checks what it protects through a proxy) has Rewrite as a
-// direct check, its next step: the preview of "Rewrite the test file <file> as direct checks" (REWRITE, lib/testrun.sh:
+// direct check, its next step: the preview of "Rewrite the test file <file> as direct checks" (REWRITE, lib/speedproof.sh:
 // an Optimize card, checked by optproof()), its body built from the judge's DIRECT lines (draftDirect()).
 // #190: a wholeOnly file's status says what a change to it costs (the snapshot's suite: the newest whole-suite run's
-// CPU seconds), and Make it run alone files the issue aloneproof() checks; a Wall only file's status names its runner
+// CPU seconds), and Make it run alone files the issue speedproof.sh aloneproof() checks; a Wall only file's status names its runner
 // (the pack's test.report) and, by the engine's plan (the snapshot's settings.cpuTime), either has Record CPU time,
 // which previews the pack's test command wrapped in conveyor/tools/testtime.sh before an admin saves it
 // (`conveyor.sh test-settings cpu-time <file>`), or says why no action is shown (wallWhy()).
@@ -654,7 +654,7 @@
   }
   // The action a row's box shows: the one started here until the snapshot lists it, else the file's newest.
   const rowAction = (file) => S.started.get(dk(file)) || actions().find((a) => a.file === file) || null;
-  // An Optimize issue's draft: the title the engine knows it by (OPTIMIZE, lib/testrun.sh), the measured numbers, and
+  // An Optimize issue's draft: the title the engine knows it by (OPTIMIZE, lib/speedproof.sh), the measured numbers, and
   // a judge's verdict (the one given, else the file's newest kept) with as much of the end of its text as the body
   // holds. Each line is printable (the server refuses a body with a tab or another control character in a line).
   function draftIssue(f, given) {
@@ -683,10 +683,10 @@
     }
     return { kind: 'issue', repo: S.d.repo, file, title: `Optimize the test file ${file}`, body: lines.join('\n'), verdict: v ? v.verdict : null };
   }
-  // A Fix failures issue's draft (#188): the title the engine knows it by (FIXFAILS, lib/testrun.sh), what to do, its
+  // A Fix failures issue's draft (#188): the title the engine knows it by (FIXFAILS, lib/speedproof.sh), what to do, its
   // failures that no card's change caused (flaky or main) with their failing cases, the cause lines of a judge (the one
   // given, else the file's newest with a verdict), the end of each failure's output as far as the body holds, and the
-  // Done-when that the card's check (steadyproof()) holds it to. Each line is printable, as in draftIssue().
+  // Done-when that the card's check (speedproof.sh steadyproof()) holds it to. Each line is printable, as in draftIssue().
   function draftFix(f, given) {
     const file = f.file, v = given || verdictOf(file), xs = fixable(f), line = (l) => l.replace(/\p{C}/gu, ' ').trimEnd();
     const names = [...new Set(xs.flatMap((x) => list(x.cases).filter((c) => typeof c === 'string')))];
@@ -719,7 +719,7 @@
   }
   // ---- the other fix issues (#189): Fix hollow cases, Fix the waiting, Make it run and Delete it ----
   // Each draft's title is the one the engine knows its card by (HOLLOWFIX, WAITFIX, MAKERUN and DELFILE,
-  // lib/testrun.sh), and its Done-when is how the card's check proves it fixed. A list is cut, as in draftFix(), so the
+  // lib/speedproof.sh), and its Done-when is how the card's check proves it fixed. A list is cut, as in draftFix(), so the
   // body with its Done-when fits BODY_MAX, with a line that counts the rest; each line is printable.
   const printable = (l) => l.replace(/\p{C}/gu, ' ').trimEnd();
   function drafted(what, title, file, head, lists, done) {
@@ -745,7 +745,7 @@
   const waitSaid = (x) => `${x.case} | ${x.kind} | ${typeof x.at === 'string' ? x.at : ''} | ${typeof x.reason === 'string' ? x.reason : ''}`;
   // Why it never ran, when the engine can tell (the snapshot's neverRun: {kind, reason}), else null.
   const neverWhy = (f) => (obj(f.neverRun) && typeof f.neverRun.reason === 'string' && f.neverRun.reason ? f.neverRun.reason : null);
-  // Fix hollow cases: each hollow case (hollowOf()) as a HOLLOW line the card's check reads (hollowproof()).
+  // Fix hollow cases: each hollow case (hollowOf()) as a HOLLOW line the card's check reads (speedproof.sh hollowproof()).
   const draftHollow = (f) => drafted('Fix hollow cases', `Fix the hollow cases of the test file ${f.file}`, f.file,
     ['Make each hollow case of this test file prove something: a hollow case succeeds without proving anything. Make each case below assert the behaviour it names.',
       'Or delete a case when another test already proves that behaviour, and name that test in your reply, on a line of its own: COVERED-BY: <test file>: <its case> | <the deleted case>.'],
@@ -768,7 +768,7 @@
     [neverSaid(f), 'Make the test command run it (or the pack\'s tests.patterns match it), or fix what stops it loading or skips it. Keep what it tests.'], [],
     ['- The card\'s test step runs this file, and it succeeds.']);
   // Rewrite as a direct check (#778): the proxy parts its newest judge with the verdict indirect named on DIRECT lines
-  // (the record's direct: [{protects, check, cases}]), each as a DIRECT line the card's check reads (optproof()); the
+  // (the record's direct: [{protects, check, cases}]), each as a DIRECT line the card's check reads (speedproof.sh optproof()); the
   // recent runs, as draftIssue() lists them, are the figure the check holds the file to.
   const directOf = (file) => {
     const v = verdictOf(file);
@@ -812,7 +812,7 @@
     return cpu === null ? 'A change to it is tested only by a whole-suite run, and no whole-suite run with CPU seconds is on record.'
       : `A change to it is tested only by a whole-suite run: ${one(cpu)} CPU s for the newest whole-suite run on record.`;
   }
-  // Make it run alone: its title is the one the engine knows the card by (MAKERUN and ALONEFIX, lib/testrun.sh
+  // Make it run alone: its title is the one the engine knows the card by (MAKERUN and ALONEFIX, lib/speedproof.sh
   // aloneproof()), and its Done-when is what that check proves.
   const draftAlone = (f) => drafted('Make it run alone', `Make the test file ${f.file} run alone`, f.file,
     ['This test file runs only in whole-suite runs: the pack marks it wholeOnly (test.files in .conveyor/project.json), as it starts other test files and cannot run alone, so a card\'s Test step never runs it.',
@@ -973,7 +973,7 @@
   // has no CPU time to judge, or that runs other test files; judge a file that needs a look and has no verdict; else
   // run it. No test file has a CPU budget (#349), so no step follows from one. A verdict indirect (#778) asks for the
   // rewrite as direct checks first, and a verdict split (#768) for Split it, except on a runner (wholeOnly): its card's
-  // check (optproof()) times the file alone, and a card's Test step never runs a runner alone, so Make it run alone
+  // check (speedproof.sh optproof()) times the file alone, and a card's Test step never runs a runner alone, so Make it run alone
   // comes first; a runner is not split.
   function nextStep(f) {
     if (f.wholeOnly === true) return 'run';

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
 # Engine cases: a review reused when the card's staged change and main are those of its last review (reusable()), and
-# what the review after a fix of review findings is given when it runs (rereview()).
+# what the review after a fix of review findings is given when it runs (donewhen.sh rereview()).
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -52,7 +52,7 @@ t_reuseblock() {
 # A review is reused only when both are the same. Bugs: a fix session that changed the staged change, or a card that
 # now sits on another main commit with the same change, gets the last review again instead of a new one.
 # The review after a fix is also given what that fix was told, what it changed and what was declined on the card
-# (rereview()). Bugs: that review was given exactly the first review's prompt, so it raised its findings at the same
+# (donewhen.sh rereview()). Bugs: that review was given exactly the first review's prompt, so it raised its findings at the same
 # places again and raised a finding just declined on the card again; it was told nothing of a new defect being still
 # welcome; a first review was given the section too; an `EARLIER: E<n> holds` answer was read as a finding.
 t_reusechanged() {

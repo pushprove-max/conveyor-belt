@@ -227,7 +227,7 @@ slot_asked() {
 # A runner's slot for its next worker, waited for: the run's home slot when no other worker of the run is on it
 # (asked five times a second, so the next worker starts as the one before it ends), else a slot of the pool. A run
 # told to keep to one slot (CONVEYOR_TEST_ONESLOT, read by slot_pool: the run of a card's failing cases on main beside
-# the controls, verdicts() in lib/testrun.sh) never takes one of the pool: its workers run one at a time on its home
+# the controls, verdicts() in lib/mainred.sh) never takes one of the pool: its workers run one at a time on its home
 # slot, so a control that passes there passed on the slot of every failing case. A run in a card's session
 # (slot_session) holds a permit of the session's for each slot of the pool it takes, and waits for one before it
 # takes one; a turn on its home slot, a slot it holds already, needs none (a runner a worker of the session's run

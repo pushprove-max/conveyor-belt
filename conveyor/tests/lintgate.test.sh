@@ -129,9 +129,9 @@ t_lintgateunstaged() {
     && [ "$(cat "$FXWT/a.txt")" = "$(printf 'one\ntwo\nthree')" ] || fail "the unstaged edit was linted or lost: $(cat "$T/$CASE/run.out"; cat "$FXWT/a.txt")"
 }
 
-# Bug: a finding that a Done-when or project-check fix session (run by checked() after the landing gate's lint fix)
+# Bug: a finding that a Done-when or project-check fix session (run by donewhen.sh checked() after the landing gate's lint fix)
 # adds counts as one the lint fix left, so the next landing gate blocks the card. lfix is the lint fix's own change:
-# the next landing gate gives the changed change one new fix session. checked() is stubbed as such a fix session.
+# the next landing gate gives the changed change one new fix session. donewhen.sh checked() is stubbed as such a fix session.
 t_lintgatemergeagain() {
   gatesetup '[]'
   fx_wt 'echo BAD >> a.txt' b.txt base

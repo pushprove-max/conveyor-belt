@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # The built-in runner of one test file (#351): the command a card gives each of its test files when the pack sets no
-# test.fileCommand (ownrunner(), lib/testrun.sh). `filerun.sh [args] <file>`, in the checkout, runs <file> (a path
+# test.fileCommand (ownrunner(), lib/testlist.sh). `filerun.sh [args] <file>`, in the checkout, runs <file> (a path
 # from the checkout) alone with the language's own runner, from the package that holds it: the nearest folder, from
 # the file's own up to the checkout, with the manifest the runner reads. In a workspace or monorepo, so, each file runs
 # from its own package. [args] (the pack's test.report.args) go to the runner right after its own words (to a

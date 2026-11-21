@@ -17,7 +17,7 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # the issue closed or still open) is not on the landed card's track; a running review shows no tokens until it ends
 # (its stream names none before then: they are in the session file Codex keeps, which is gone once the review ends).
 # Each case calls the engine functions it proves (watch(), rollout(), testlogs() and testprogress() of lib/session.sh,
-# counts() of lib/testrun.sh, line() of lib/records.sh, the session reading SESSIONREAD) and reads what they give
+# counts() of lib/donewhen.sh, line() of lib/records.sh, the session reading SESSIONREAD) and reads what they give
 # through the snapshot and health, as card c7's records and live record: a whole card run held at each step was most
 # of this file's time.
 livestart() {
@@ -92,7 +92,7 @@ t_live() { livestart
     printf '%s\n' '[P0] a.txt:99 the worst one, past the cut' 'b.txt:1 no mark here' '[P3] c.txt:1 small' 'NEW CARD: b.txt is stale' 'USER-VISIBLE: no' 'VERDICT: NO-GO'; } > "$STUB/review.1"
   for i in 2 3; do moved $i "$NOGO" > "$STUB/review.$i"; done
   printf '%s\n' '{"type":"system","subtype":"init"}' '{"type":"result","is_error":false,"usage":{"input_tokens":10,"cache_creation_input_tokens":20,"cache_read_input_tokens":999,"output_tokens":5}}' > "$STUB/build.out"
-  # The three review lines as the card writes them (lib/card.sh: counts() over the whole review, line()'s cut of
+  # The three review lines as the card writes them (lib/card.sh: donewhen.sh counts() over the whole review, line()'s cut of
   # the reason) and the build line from the session's output (SESSIONREAD, as session1() reads it), one a line.
   # shellcheck disable=SC2016 # expanded where fx_in runs it, with the engine loaded
   cmd='for i in 1 2 3; do line c7 7 review NO-GO "$(grep -Ev "$UNRECORDED" "$STUB/review.$i" | jq -cRs --argjson k "$(counts "$STUB/review.$i")" '\''sub("\n+$"; "") as $r | {reason: $r, counts: $k, tail: $r}'\'')"; done

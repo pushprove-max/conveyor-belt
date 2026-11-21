@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
-# Engine cases: a card's failing cases run on main before any fix session (verdicts()); main red makes the card wait.
-# The fix card's check, verdicts() alone, a fix card with no change and mainwait() are mainredproof.test.sh's cases,
+# Engine cases: a card's failing cases run on main before any fix session (mainred.sh verdicts()); main red makes the card wait.
+# The fix card's check, mainred.sh verdicts() alone, a fix card with no change and mainred.sh mainwait() are mainredproof.test.sh's cases,
 # which use this file's eng().
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
@@ -11,9 +11,9 @@
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
-# Card c7's failed test step, as card() takes it, without the card: verdicts() on its worktree, given its last run's
+# Card c7's failed test step, as card() takes it, without the card: mainred.sh verdicts() on its worktree, given its last run's
 # failures (<failures json>, as testfails() gives them), and its test line as card() writes it (failline()), with
-# <jq> applied to verdicts()'s result for that line only. Prints verdicts()'s result.
+# <jq> applied to mainred.sh verdicts()'s result for that line only. Prints mainred.sh verdicts()'s result.
 mrverdicts() { # <failures json> [jq]
   local fl=$1
   eng 'TEST_WAIT=; TEST_RUN=; TEST_FREE=; v=$(verdicts c7 "$CONVEYOR_CARDS/c7" "$fl") \
@@ -38,7 +38,7 @@ mrfit() {
 # line, so main's clean tree ran nothing for it, the run passed and a file broken on main went to a fix session. c.test
 # fails naming no case beside b.test's flaky, on every run until main is green: main's run is told to run it (a `fail`
 # line with no case), runs it, and the file gets the verdict main and goes to the fix card too.
-# One fixture for all: each step is the engine function card() calls there (tests(), verdicts(), mainwait()).
+# One fixture for all: each step is the engine function card() calls there (tests(), mainred.sh verdicts(), mainwait()).
 t_mainred() {
   rerunsetup '1 fail flaky' '1 bare three' '2 fail flaky' '2 bare three' '3 fail flaky' '3 bare three' '4 fail flaky' '4 bare three' \
     'main fail flaky' 'main bare three'; rerunfiles
@@ -64,7 +64,7 @@ t_mainred() {
   [ ! -e "$T/$CASE/cards/mainrun/c7" ] || fail "main's worktree was left behind"
   # Issue 201: while it only waits for main, its wait mark stands, so the loop counts it against no build slot (idle()).
   # Issue 220: the snapshot gives when the wait for main began (the belt's live.at), which the Foreman's watcher times
-  # its wake from; without it the wait never wakes the Foreman. The wait is mainwait() itself, polled as it runs: only
+  # its wake from; without it the wait never wakes the Foreman. The wait is mainred.sh mainwait() itself, polled as it runs: only
   # a wait under way holds its live record and its mark, and it ends only as main moves (below).
   # card() begins the wait with the test step's start line, which the snapshot reads the live record by.
   ( eng 'LIVE=1; began c7 7 test && mainwait "$CONVEYOR_CARDS/c7" '"$s"' c.test "b.test: flaky"; echo "ended $?"' > "$STUB/mw.out" 2>&1 ) & mw=$!
@@ -94,7 +94,7 @@ t_mainred() {
 
 # settle() of card c7 at its landing step, as card() calls it after a wait for main or once main moved under its failed
 # run, caught cleared (#582). session() stands for the session that brings the change onto main (no model): told main
-# moved, it makes <edit>, and it notes each call in $STUB/sessions; checked() (the Done-when check of its reply)
+# moved, it makes <edit>, and it notes each call in $STUB/sessions; donewhen.sh checked() (the Done-when check of its reply)
 # passes. <more> runs after it in the same engine shell. run.out ends with what <more> prints.
 mrsettle() { # <edit> [more]
   fx_in 'cd "$R" || exit 9; caught="" waitsec=0 behind="[]" parsecheck=""
@@ -162,7 +162,7 @@ t_mainfixedcaught() {
   rerunstep && [ "$(cat "$STUB/head.4")" = "$(git -C "$R" rev-parse HEAD)" ] || fail "the run after the session did not pass on main2's commit: $(cat "$STUB/head.4" 2>&1)"
 }
 # Main failed the case too: the card waited for main to change, and main changed the same line. Its landed line's
-# waitSec counts that wait: card()'s wait (mainwaited(), its mainwait() stubbed to move the shell's clock on 5 s in
+# waitSec counts that wait: card()'s wait (mainwaited(), its mainred.sh mainwait() stubbed to move the shell's clock on 5 s in
 # place of a real wait) and the landed line's extra as card() makes it (landextra()). Bug it catches: the drift watch
 # (bench/drift.sh) had no minutes a card waited for main, as no line recorded them.
 t_mainredcaught() {
@@ -178,8 +178,8 @@ t_mainredcaught() {
 # Issue 598. Bug it catches: a landing broke a test its card did not run, and nothing linked the test to the files it
 # changed, so later cards changing them did not run it either. In a fixture repo, landing L1's card ran
 # tests/b.test.sh; landing A changes lib/a.sh and its card does not run it; landing C after it changes lib/c.sh. b.test
-# fails on main: the case's entry in the main-red record (mainred()) names landing A, not C, and the fix card's
-# worktree (testlinks()) holds .conveyor/test-links.json linking lib/a.sh, and only it, to tests/b.test.sh, staged to
+# fails on main: the case's entry in the main-red record (mainred.sh mainred()) names landing A, not C, and the fix card's
+# worktree (mainred.sh testlinks()) holds .conveyor/test-links.json linking lib/a.sh, and only it, to tests/b.test.sh, staged to
 # land with the fix.
 t_mainredlinks() {
   local w=$T/$CASE r a h got
@@ -196,7 +196,7 @@ t_mainredlinks() {
   got=$( cd "$r" && eval "$(sed -n '/^mainred() {/,/^}/p; /^brokeby() {/,/^}/p; /^landingof() {/,/^}/p; /^testlinks() {/,/^}/p; /^TESTLINK_DEPTH=/p' "$SRC/lib/mainred.sh")"
     stdb() { cat "$w/cards.jsonl"; }
     export MAINRED=$w/mainred.json
-    # The loop's redpick() names the fix card in the entry; here the record is given it.
+    # The loop's mainred.sh redpick() names the fix card in the entry; here the record is given it.
     mainred c9 "tests/b.test.sh: one" tests/b.test.sh "$h" && jq -c '.reds[0].card = "cfix"' "$MAINRED" > "$MAINRED.new" && mv "$MAINRED.new" "$MAINRED" \
       && testlinks cfix "$w/fix" && echo ok ) || fail "mainred or testlinks failed: $got"
   [ "$(jq -c '.reds[0].cases[0] | [.landing, .links]' "$w/mainred.json")" = "[{\"sha\":\"$a\",\"card\":\"ca\",\"issue\":2},{\"lib/a.sh\":[\"tests/b.test.sh\"]}]" ] \
@@ -206,7 +206,7 @@ t_mainredlinks() {
     || fail "D1: the fix card's worktree does not stage the link of lib/a.sh to tests/b.test.sh: $(cat "$w/fix/.conveyor/test-links.json" 2>&1)"
 }
 # Issue 615. Bug it catches: card() staged the test links only as the fix card started, so a case that joined it later
-# (mainred()) changed its brief but its links never landed. The fix card's entry gains a case linking lib/d.sh to
+# (mainred.sh mainred()) changed its brief but its links never landed. The fix card's entry gains a case linking lib/d.sh to
 # tests/d.test.sh after its start; the next redbrief() before a session stages that link beside the first one.
 t_mainredjoin() {
   local w=$T/$CASE got
@@ -223,9 +223,9 @@ t_mainredjoin() {
     && [ "$(git -C "$w/fix" diff --cached --name-only)" = .conveyor/test-links.json ] \
     || fail "the link of the case that joined is not staged: $(cat "$w/fix/.conveyor/test-links.json" 2>&1)"
 }
-# Issue 323: linksonly() after a main-fix card's session, which left its staged .conveyor/test-links.json in the
+# Issue 323: mainred.sh linksonly() after a main-fix card's session, which left its staged .conveyor/test-links.json in the
 # worktree as a symlink to a file outside it, then .conveyor itself as a symlink to a folder outside it. Bug it
-# catches: linksonly() wrote main's copy of the links through the symlink, so the session made the engine overwrite a
+# catches: mainred.sh linksonly() wrote main's copy of the links through the symlink, so the session made the engine overwrite a
 # file outside the worktree. The outside files keep their text; the links still count as the card's only change.
 t_mainredlinksonlylink() {
   local w=$T/$CASE got
@@ -262,7 +262,7 @@ t_mainredpartial() {
   land cc 3 lib/c.sh two; h=$(git -C "$r" rev-parse HEAD)
   got=$( cd "$r" && eval "$(sed -n '/^mainred() {/,/^}/p; /^brokeby() {/,/^}/p; /^landingof() {/,/^}/p; /^TESTLINK_DEPTH=/p' "$SRC/lib/mainred.sh")"
     stdb() { cat "$w/cards.jsonl"; }
-    # Issue 1066: the list of the commit's test files fails here. Bug it catches: mainred() then searched no file for
+    # Issue 1066: the list of the commit's test files fails here. Bug it catches: mainred.sh mainred() then searched no file for
     # the case, took r.test.sh as the case's file, and named no landing.
     testtracked() { return 1; }
     export MAINRED=$w/mainred.json
@@ -276,7 +276,7 @@ t_mainredpartial() {
 # runner r.test.sh (it names it): an open fix card's entry `r.test.sh: one` did not hold `tests/b.test.sh: one`, so a
 # second fix card started for the same case; the landing that broke it was not found, as the card that ran `one` (L1)
 # recorded it under the runner (ranCases), so a later landing (A) that did not run it went unnamed; and the old entry's
-# run on main (redrun()), whose result names tests/b.test.sh, gave no verdict for it.
+# run on main (mainred.sh redrun()), whose result names tests/b.test.sh, gave no verdict for it.
 t_mainredold() {
   local w=$T/$CASE r a h got
   r=$w/r; mkdir -p "$r/tests" "$r/lib"; git -C "$r" init -q
@@ -298,8 +298,8 @@ t_mainredold() {
   [ "$got" = "$a"$'\n'fail ] || fail "the landing that broke it, or the old entry's verdict on main, was not found: '$got'"
 }
 
-# The engine's own functions, sourced as `run` sources them, in main's checkout: what a card's verdicts() and the
-# loop's pick call, without a card run (#597's cases call mainred() and pick() themselves).
+# The engine's own functions, sourced as `run` sources them, in main's checkout: what a card's mainred.sh verdicts() and the
+# loop's pick call, without a card run (#597's cases call mainred.sh mainred() and pick() themselves).
 eng() { ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; cd "$R" && . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names && eval "$1" ); }
 # Issue 597: main-red filed a GitHub issue a case (13 in 9 hours, three by one landing). Bug it catches: two cases
 # failing on one main commit filed two issues. They start one fix card of issue 0, picked ahead of the queue (#7),
@@ -398,15 +398,15 @@ t_mainredretry() {
 }
 
 # Issue 597, the fix card's brief and landing commit, as card() makes them: it is built from its stand-in issue
-# (redissue(): the cases, main's commit, the last commit of each case's file), redbrief() runs before each session and
+# (mainred.sh redissue(): the cases, main's commit, the last commit of each case's file), redbrief() runs before each session and
 # before the landing, and it lands under a commit naming the cases and main's commit (redmsg()). Bug it catches: a
 # card of issue 0 with no branch had no issue to read (branchissue() wants a branch), or closed an issue on GitHub
-# (a Closes line). A case found on main's commit during the review (as mainred() adds it) reaches the fix session
+# (a Closes line). A case found on main's commit during the review (as mainred.sh mainred() adds it) reaches the fix session
 # straight after that review: the brief was read once, or only at the head of each round, so the fix session after
 # the review that saw the case added never heard of it. Issue 615: a case with a test link that joins during the
 # card's last test run lands its link; with no redbrief() before the landing, its link was never staged.
 # Bug it catches too (#374): its runs of its cases write no log of their own, and each file run alone (filecmd()) gave
-# no result for its named case, so the fix card was blocked; such a file's exit is the result of its cases (redrun()).
+# no result for its named case, so the fix card was blocked; such a file's exit is the result of its cases (mainred.sh redrun()).
 t_mainredland() {
   setup "[$(issue 7 2026-01-01)]"
   # The fixture ignores .conveyor/ (setup); a project tracks its links file, as this one does.

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
 # Engine cases (#309): the changed lines no test reached, read from the coverage report a card's test run already
-# writes (the pack's test.coverage, testrun.sh uncovered(), tools/uncovered.py), on the card's test line (testrec()).
+# writes (the pack's test.coverage, testlist.sh uncovered(), tools/uncovered.py), on the card's test line (testrec()).
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \

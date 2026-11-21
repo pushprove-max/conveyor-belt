@@ -39,7 +39,7 @@ void() { # <exit> [<testTimeout>]
 # Issue 442: a passed node case (`✔ <name> (<n>ms)`) or TAP case (`ok <n> - <name>`) was not read as passed, only a
 # line `ok <case>` with no space in its case was: a main-red fix card for a named node case always blocked with "gave
 # no result". Each is a passed case under its file, named as its failure line names it; a skipped TAP case is not,
-# nor node's line for the file itself (a run with a name filter that ran no case, as splitstart() makes, prints it).
+# nor node's line for the file itself (a run with a name filter that ran no case, as speedproof.sh splitstart() makes, prints it).
 t_testfailspassed() {
   mkdir -p "$T/$CASE"; cat > "$T/$CASE/cmd" <<'EOF'
 echo "== f.test.mjs" | tee -a "$CONVEYOR_TEST_LOG/a.log"
@@ -107,7 +107,7 @@ t_failatread() {
       "  File \"$w/t.py\", line 3, in check" '    assert x' 'AssertionError' "    at f ($w/l.mjs:1:1)" | failat "$w" )
   [ "$f" = $'t.py:3: assert x\nl.mjs:1' ] || fail "failat did not give the traceback's last place, or read a line through a link: $f"
 }
-# Issue 442: redproof() with a stub runner (mainredproof.test.sh's redrunner) that prints node's `✔ <case> (<n>ms)` for a
+# Issue 442: bugproof.sh redproof() with a stub runner (mainredproof.test.sh's redrunner) that prints node's `✔ <case> (<n>ms)` for a
 # passed case: a fix whose case fails without the change and passes with it was blocked with "gave no result".
 t_redproofnode() {
   redrunner ''; sed -i 's/echo "ok \$c"/echo "✔ $c (12.3ms)"/' "$STUB/mainrun-cmd"

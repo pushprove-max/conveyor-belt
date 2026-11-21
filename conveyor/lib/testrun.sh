@@ -40,7 +40,7 @@
 # ended ok (tests() runs them no more on the same change); okcases, of each other file, the cases a line `ok <case>`
 # (or node's `✔ <name> (<n>ms)`, or TAP's `ok <n> - <name>`) under it says passed (a runner killed part-way runs
 # them no more); passcases, the same of each file that passed (what a batch that takes the card need not run again:
-# passlist()). A run whose command wrote no such
+# testlist.sh passlist()). A run whose command wrote no such
 # log is one file, named by the command (test.command): its cases are that file's, and a timeout is in it. An output
 # that is no run's (norun(): no log folder) names no file.
 # A case's line ends with where it failed, ` (at <file>:<line>: <that line's text>)`, when a stack trace follows a
@@ -168,11 +168,11 @@ keeprun() { # <worktree> <output file to> <log folder to> <first run's record to
 # why, why each file ran, {file: [reasons]}, from its log lines `TESTRUN why<TAB><file><TAB><reason>`, when it gives
 # any (a first run and a run again alike); wholeSuite (true), when a log says the runner ran every case file of the
 # engine (`TESTRUN whole-suite`); ran, the files the logs name as begun (`== <file>`), sorted: the files it ran (why
-# also names files it kept off, such as those the test cache skipped: cacheoff()); ranCases, the cases it selected of each file it ran only part of, {file: [cases]},
-# from its log lines `TESTRUN case<TAB><file><TAB><case>` (brokeby()); refused, "refused full run: <why>", when
+# also names files it kept off, such as those the test cache skipped: testlist.sh cacheoff()); ranCases, the cases it selected of each file it ran only part of, {file: [cases]},
+# from its log lines `TESTRUN case<TAB><file><TAB><case>` (mainred.sh brokeby()); refused, "refused full run: <why>", when
 # tests() refused the whole selection (TEST_REFUSED); and list, the list of tests the command was given (listcmd():
 # {mode: "changed", files} or {mode: "whole", why}), when the pack sets test.list; and coverage, the changed lines no
-# test reached ({uncovered: [{file, lines}], count, checked} or {unknown: why}: uncovered()), when the pack sets
+# test reached ({uncovered: [{file, lines}], count, checked} or {unknown: why}: testlist.sh uncovered()), when the pack sets
 # test.coverage.
 testrec() { # <worktree> <exit> <seconds>
   local k l logs=()
@@ -247,7 +247,7 @@ slowoff() { # <worktree>
 # A card's run (test.command) that ends with cases that did not pass (failed, or never finished: killed or timed out)
 # runs once more, still holding the slot, for those cases alone (the owner, 2026-11-13: a failure goes to a fix
 # session only when it fails again). What passed is not run again: <worktree>.rerun, which CONVEYOR_TEST_RERUN names
-# to the command (README.md), says it (rerunlist()). The run after a fix session that left the staged change as it was,
+# to the command (README.md), says it (testlist.sh rerunlist()). The run after a fix session that left the staged change as it was,
 # byte for byte (a whitespace edit is a change: cardpatch() is blind to it), runs only what had not passed. The run
 # after a session that changed it on the same HEAD (a fix: the owner, 2026-11-13, only failed tests run again and
 # passes are kept) runs what had not passed and the tests of the files the session changed: the list names each file
@@ -261,14 +261,14 @@ slowoff() { # <worktree>
 # <worktree>.whole). A run that passed keeps what it
 # passed in the list too, for such a run and for a retried card (block() keeps it). The first run's exit and failures (testfails())
 # are in <worktree>.first, {exit, failures, tail: the end of its output, left out when it gave none}, when the run went again, and the files it timed in <worktree>.times
-# (its `TESTRUN sec` lines, slowtests()), and those the runs before it timed in <worktree>.oldtimes when this run keeps
+# (its `TESTRUN sec` lines, testlist.sh slowtests()), and those the runs before it timed in <worktree>.oldtimes when this run keeps
 # their passes (a run after a fix session does not run again a file that passed); the output is the last run's. A run that passed
 # on re-run adds its cases to the flaky-test record (flakyrun()) as it ends, a batch's run (batch()) too; a run again
 # that failed adds the cases that passed in it. A card's run that passed leaves what it passed in <worktree>.passed
-# (passlist()). A card's run is told to keep the cases the flaky-test record keeps off card runs as passed (flakyoff()),
+# (testlist.sh passlist()). A card's run is told to keep the cases the flaky-test record keeps off card runs as passed (flakyoff()),
 # and the files kept off for their CPU seconds (slowoff()), and its run again is told the same. Any run but the full
-# test suite and a run alone is told to keep off the files that passed before with the same inputs (cacheoff()), its
-# log saying so; each run's files that passed whole go to that cache (cachekeep()).
+# test suite and a run alone is told to keep off the files that passed before with the same inputs (testlist.sh cacheoff()), its
+# log saying so; each run's files that passed whole go to that cache (testlist.sh cachekeep()).
 # With alone, the command is told what to run by <worktree>.rerun as the caller wrote it (fulltest()'s run of one
 # failed case alone: every other file listed as passed).
 # A full run (the owner, 2026-11-14; README.md, When a full test run is allowed): a card's run whose list cannot be
@@ -283,7 +283,7 @@ slowoff() { # <worktree>
 # in a process of its own. A card never runs the suite command (test.command): its own run (no field) and every run
 # of a card's files (the fix round's run again, the bug-card check, the run on main, the main-red check, the proofs,
 # the mutation check and the test actions: test.fileCommand alone) are per file. With no test.fileCommand set, each
-# file runs with Conveyor's own runner (ownrunner(): lib/filerun.sh); when that has no runner for one of the files to
+# file runs with Conveyor's own runner (testlist.sh ownrunner(): lib/filerun.sh); when that has no runner for one of the files to
 # run, the run does not run and fails with <worktree>.stop naming test.fileCommand and that file (NORUNNER); a card's run
 # linked to no test file runs nothing and passes, as with it set. Only the suite runs (test.full: the full test
 # suite, Push landed's and the release's; test.main: the whole test on main) run a suite command.
@@ -296,7 +296,7 @@ slowoff() { # <worktree>
 tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alone]
   local cmd at rc r p='' b='' t='' f o l=() w=$SECONDS t0 ob mw off kp ko ka cw='' x RUNOFF='' TEST_BEFORE='' LISTNONE='' CAPNOTE='' TEST_CASES='' TEST_GIVEN=${TEST_GIVEN:-}
   TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; TEST_REFUSED=''; TEST_FILES=''; rm -f "$1.testlist" "$1.stop" "$1.wide"
-  # The files the run before timed (timed()): kept below when this run keeps its passes and so may not run them.
+  # The files the run before timed (testlist.sh timed()): kept below when this run keeps its passes and so may not run them.
   mapfile -t l < <(testlogs "$1"); o=$({ cat "$1.oldtimes" "$1.times" "$1.reported"; [ ${#l[@]} = 0 ] || grep -h '^TESTRUN sec' "${l[@]}"; } 2>/dev/null)
   # The commit the last run's list was tested on, and a merge in doubt (<worktree>.whole: card(), settle()), before
   # either goes.
@@ -325,7 +325,7 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
     rerunsince "$1" "$p" "$b" "$t"; r=$?
     # A card's run that would run its whole selection, and is none of a first run, a merge in doubt or the full test
     # suite (the owner, 2026-11-14): refused. It runs what the list did not keep as passed, and says why on its line.
-    # With no HEAD or tree now, it keeps no list (rerunlist()): the whole selection runs.
+    # With no HEAD or tree now, it keeps no list (testlist.sh rerunlist()): the whole selection runs.
     if [ $r = 1 ] && [ -n "$p" ] && [ -z "$mw" ] && { { [ -n "$ob" ] && [ "$ob" = "$b" ]; } || testedbefore "$1"; }; then
       TEST_REFUSED="refused full run: $RERUN_WHY"
       if [ -s "$1.rerun" ] && [ -n "$b" ] && [ -n "$t" ] && { printf 'change\t%s\nbase\t%s\ntree\t%s\n' "$p" "$b" "$t"; grep -E $'^(pass|ok|fail|shared)\t' "$1.rerun"; } > "$1.rerun.new" \
@@ -336,11 +336,11 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
     # A card's run keeps the flaky cases and the slow files off (flakyoff(), slowoff()): the full suite and the whole
     # test on main run them.
     [ -n "${2:-}" ] || { flakyoff "$1"; slowoff "$1"; }
-    # It keeps off the files that passed before with the same inputs (cacheoff()), its log saying so (cw): not the full
+    # It keeps off the files that passed before with the same inputs (testlist.sh cacheoff()), its log saying so (cw): not the full
     # test suite, which runs whole.
     [ "${2:-}" = test.full ] || { cw=$(cacheoff "$1"); [ -z "$cw" ] || printf '%s\n' "$cw" > "$1.testlog/cache"; }
   fi
-  # A card's list holds no suite runner, wherever it got it (#382): runnersoff() takes each off its list, and the
+  # A card's list holds no suite runner, wherever it got it (#382): testlist.sh runnersoff() takes each off its list, and the
   # run's output names it (RUNOFF, with those listcmd() took off). The release's runs (test.full, test.main) keep theirs.
   # A run alone left with no `fail` line has no file to run: it runs nothing, and fails.
   if [ "${2:-}" != test.full ] && [ "${2:-}" != test.main ]; then
@@ -360,7 +360,7 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
     done
   fi
   TEST_WAIT=$((SECONDS - w)); TEST_FREE=$((SLOT_N - $(slot_used))); w=$SECONDS; t0=$(date +%s)
-  # The `off` lines (flakyoff(), slowoff()), which rerunlist() does not keep: given to the run again too, so it runs no
+  # The `off` lines (flakyoff(), slowoff()), which testlist.sh rerunlist() does not keep: given to the run again too, so it runs no
   # case or file kept off that its list would otherwise select (a case of the runner that did not finish).
   off=$(grep $'^off\t' "$1.rerun" 2>/dev/null)
   # The files its list keeps whole as passed (`pass` lines): not run. A file it runs only some cases of is run.
@@ -372,9 +372,9 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
     # overwrites <worktree>.test, and a pass on re-run is the only record of the flaky failure (FAILURE, testfiles.sh).
     jq -c --argjson rc "$rc" --rawfile t <(tail -n 60 "$1.test" 2>/dev/null | tr -d '\000') \
       '{exit: $rc, failures: del(.passed, .okcases, .passcases)} + ($t | sub("\n+$"; "") | if . == "" then {} else {tail: .} end)' <<<"$f" > "$1.first"
-    # The files the first run timed, which the run again does not run, after those of the runs before it (slowtests()).
+    # The files the first run timed, which the run again does not run, after those of the runs before it (testlist.sh slowtests()).
     mapfile -t l < <(testlogs "$1"); { cat "$1.reported"; [ ${#l[@]} = 0 ] || grep -h '^TESTRUN sec' "${l[@]}"; } >> "$1.times" 2>/dev/null
-    # The first run's coverage report, which the run again may write over: kept for uncovered() (covkeep()).
+    # The first run's coverage report, which the run again may write over: kept (testlist.sh covkeep()) for uncovered(), in the same file.
     covkeep "$1"
     rm -rf "$1.testlog"; if mkdir "$1.testlog" 2>"$1.test"; then
       # The first run's seconds go in the run again's live record (watch(): before), so the views still count them (#433).
@@ -385,10 +385,10 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
     [ $rc = 0 ] || { f=$(testfails "$1.test" "$rc") && rerunlist "$1" "$p" "$f" "$b" "$t"; } || rm -f "$1.rerun"
   fi
   TEST_RUN=$((SECONDS - w))
-  # A card's run: the changed lines its coverage report says no test reached (uncovered()), the first run's report
-  # (covkeep()) and a run again's together.
+  # A card's run: the changed lines its coverage report says no test reached (testlist.sh uncovered()), the first run's report
+  # (testlist.sh covkeep()) and a run again's together.
   [ -n "${2:-}" ] || uncovered "$1" "$t0"; rm -rf "$1.covfirst"
-  # Of those, the files the runs before timed (<worktree>.oldtimes) and this run did not: carried (carriedrec()).
+  # Of those, the files the runs before timed (<worktree>.oldtimes) and this run did not: carried (testlist.sh carriedrec()).
   [ -z "$kp" ] || [ ! -s "$1.oldtimes" ] || { ko=$(timed "$1" own) && ka=$(timed "$1") \
     && jq -cn --argjson o "$ko" --argjson a "$ka" --arg k "$kp" '[$k | split("\n")[] | select($a[.] != null and $o[.] == null)] | unique' > "$1.oldfiles"; } \
     || rm -f "$1.oldfiles"
@@ -420,14 +420,14 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
 # The command of a card's run (tests()) given the list of the tests its change touches (README.md, The list of tests a
 # card's run is given), in LISTCMD: test.fileCommand, which runs each file of the list alone (filecmd() files, the
 # files in TEST_FILES). A card never runs the whole suite: the list is the test files its own change adds or changes
-# (by: "own"), of each only the cases its change adds or changes where owncases() can name them (TEST_CASES; the
+# (by: "own"), of each only the cases its change adds or changes where testlist.sh owncases() can name them (TEST_CASES; the
 # list's cases, [{file, case}], and its why, OWNCASES, say so); with none, testsel()'s narrow one, the test files the
 # test map and the links give the changed files, up to CARDLINKED of them (testcap(); the output says so, LINKED, and
 # the list, {mode: "changed", files, by, left, why}, says how many were left out); notTests, [{file, why}], names each
 # test runner the change touches, RUNNERFIX, which is on no list: #350). <worktree>.testlist says which: {mode:
 # "changed", files: <count>, by: "own", "map" or "name", age: the commits the made test map is behind (only with
 # one)}. A list of none runs nothing (LISTNONE set; the list, {mode: "changed", files: 0, by, why}, says so). With no
-# test.fileCommand set, Conveyor's own runner runs each file (ownrunner()); when it has none for one of them, nothing
+# test.fileCommand set, Conveyor's own runner runs each file (testlist.sh ownrunner()); when it has none for one of them, nothing
 # runs, <worktree>.stop says why (NORUNNER) and it fails. TEST_GIVEN is how many files
 # it got (watch() stops a run that reports more: tests()). <report args> (reportask() files) go after the command,
 # before each file's path.
@@ -437,7 +437,7 @@ listcmd() { # <worktree> [report args]
   # The list that could not be made says why (the error of the command that failed); test.fileCommand is named only
   # while it is not set.
   # A suite runner (SUITERUNNERS) is on no list (#382): testpaths() leaves each off the card's own files, and
-  # runnersout() off those the map and the links give; RUNOFF names those, which tests() names in its output.
+  # testlist.sh runnersout() off those the map and the links give; RUNOFF names those, which tests() names in its output.
   names > /dev/null 2>&1 || :
   # The test files the card's own change adds or changes (the pack's test patterns: testpaths(), so no runner and no
   # document; no shared helper, which testsel() does not run as a test either) are the card's tests (#384); with
@@ -448,7 +448,7 @@ listcmd() { # <worktree> [report args]
     | jq -Rr "$SHAREDJQ"'select(. != "" and (shared | not))')
   CAPLEFT=0; CAPNOTE=''
   if [ ${#fs[@]} != 0 ]; then by='{"by":"own","age":null}'
-    # Of each, only the cases the change adds or changes run (owncases(), #414): TEST_CASES, `<file><TAB><case>`
+    # Of each, only the cases the change adds or changes run (testlist.sh owncases(), #414): TEST_CASES, `<file><TAB><case>`
     # lines, which testonce() gives the command (CONVEYOR_TEST_CASES), and its output says how many (OWNCASES); a
     # file whose cases cannot be named so runs whole.
     for f in "${fs[@]}"; do
@@ -494,7 +494,7 @@ listcmd() { # <worktree> [report args]
   LISTCMD=$(filecmd "$fc${2:+ $2}" files); TEST_FILES=$(printf '%s\n' "${fs[@]}"); TEST_GIVEN=${#fs[@]}
 }
 # Of the test files <file>... linked to a card's change (testsel() narrow: listcmd(); and those of the bug-card check,
-# bugproof()), the ones a card runs, in CAPFILES: all of them up to the
+# bugproof.sh bugproof()), the ones a card runs, in CAPFILES: all of them up to the
 # pack's test.cardFiles (CAPMAX when set: listcmd()'s CARDLINKED); of more, that many: first those that failed most recently in a test step on record (the card
 # records' test lines: FAILURE and failedrun, lib/testfiles.sh), newest first, then the rest in the order given (the
 # test map's). CAPLEFT is how many it left out, CAPNOTE says so (CAPPED), empty when none: the release's run covers them.
@@ -609,7 +609,7 @@ testsel() { # <worktree> [narrow] [<from commit> <to commit>]
 }
 # The part of a test line that says the run went again (tests()): {rerun: {exit, failures, tail}} of the first run, else {};
 # on a pass line, with the reason "passed on re-run: " and what had not passed (each case as <file>: <case>), each
-# of those a failure whose verdict is flaky (verdicts()).
+# of those a failure whose verdict is flaky (mainred.sh verdicts()).
 firstrun() { # <worktree> [pass]
   jq -ce --arg p "${2:-}" "$NOTPASSED"'. as $x | {rerun: $x} + if $p == "" then {} else
     {reason: ("passed on re-run: " + ($x | notpassed | if . == [] then "exit \($x.exit)" else join(", ") end)),
@@ -636,8 +636,8 @@ NOTPASSED='def notpassed: [.failures.files[] | .file as $f | if .cases == [] the
 # timeout ends the file and everything it started, and the output says it timed out, and with a factor over 1, the
 # line's own seconds and the factor. Its log
 # keeps it begun and not ended, and the run, once its other files ran, exits 124, as a run that ran out of time does:
-# testfails() names it as the run's timeout, not as a failed file (which the check on main, verdicts(), would count as
-# main's), and the mutation check and the Board's Run action read the exit as timed out. A file with no such line has the run's limit (testTimeout: testclock()). When the run itself is ended
+# testfails() names it as the run's timeout, not as a failed file (which the check on main, mainred.sh verdicts(), would count as
+# main's), and the mutation check and the Board's Run action read the exit as timed out. A file with no such line has the run's limit (testTimeout: testlist.sh testclock()). When the run itself is ended
 # (TERM, as at that limit), the file's process group is ended with it. A process a file's run leaves running, in that
 # group, is out of the test command's group, which the runner watches to give the slot back (slot_left(),
 # lib/slots.sh): a process of the run's own, that holds no descriptor it inherited, stays in the command's group while
@@ -701,7 +701,7 @@ noresult() { # <worktree> <exit> <file>...
 # itself, not a test, ran out of time), or its runner wrote logs that name nothing it ran (no `TESTRUN`, `== ` or `-- `
 # line), or its only failure is the test command itself (testfails()'s name for a run that logged no file, when its
 # output names no failing case either): the command names no test. The loop's own file in the log folder (cache:
-# cacheoff()) is none of the runner's. Prints why; fails when the run passed or gave a result.
+# testlist.sh cacheoff()) is none of the runner's. Prints why; fails when the run passed or gave a result.
 voidrun() { # <worktree> <exit>
   local l=() f cmd
   [ "$2" != 0 ] || return 1
@@ -729,7 +729,7 @@ voidrun() { # <worktree> <exit>
 # CONVEYOR_TEST_TIME is the path of tools/testtime.sh, for a test command the Board's Record CPU time wrapped in it
 # (cpuplan(), lib/testfiles.sh). CONVEYOR_LOAD_FACTOR is the machine's load factor as the run starts (loadfactor()).
 # TEST_HARD, when set, is a limit in seconds that timeout itself keeps: the run ends there even while a runner of the
-# command waits for a whole-suite turn, which stops testclock's clock (the check on main, verdicts()).
+# command waits for a whole-suite turn, which stops testclock's clock (the check on main, mainred.sh verdicts()).
 testonce() { # <worktree> <cmd>
   local pid clock rc r='' t0 KEEP=()
   [ ! -s "$1.rerun" ] || r=$1.rerun; rm -f "$1.report" "$1".report.[0-9]*
@@ -762,7 +762,7 @@ reportask() { # <worktree> [files]
     | select((.key | test("^[A-Za-z_][A-Za-z0-9_]*$")) and (.value | type == "string"))
     | "\(.key)=\(env[.key] // "" | if . == "" then "" else . + " " end)\(.value | gsub("<file>"; $f) | gsub("<mochatimes>"; $m) | gsub("\n"; " "))"' <<<"$e")
 }
-# The list of the card's last run (rerunlist()) for its run now: kept as it is for the same staged change on the same
+# The list of the card's last run (testlist.sh rerunlist()) for its run now: kept as it is for the same staged change on the same
 # HEAD; for a change made on the same HEAD (a fix session's), with a line `changed\t<file>` for each file whose content
 # differs between the tree last tested and the tree now (the two trees compared, not the two patches), so the command
 # runs their tests beside what had not passed. On another HEAD (the change moved onto a newer main, or a retried card's

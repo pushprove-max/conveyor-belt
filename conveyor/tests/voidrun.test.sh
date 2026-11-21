@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
 # Engine cases: a card's test run that gives no result (voidrun(): killed by a signal, as by the service stopping or
-# restarting) proves nothing; the test command itself is never a case failing on main (verdicts(), mainred()).
+# restarting) proves nothing; the test command itself is never a case failing on main (mainred.sh verdicts(), mainred()).
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -42,7 +42,7 @@ t_voidrun() {
     || fail "the steps are not a rerun after no result, a fix of the result, and three runs with no result: $(voidsteps)"
   [ "$(st 'select(.step == "blocked") | .reason')" = "the changed tests gave no result 3 times in a row (exit 143: the run was killed by a signal); nothing landed." ] \
     || fail "the card did not block saying its runs gave no result: $(st 'select(.step == "blocked") | .reason')"
-  # Main's run is of the failing file alone (verdicts(): its list names each failing file, not its cases).
+  # Main's run is of the failing file alone (mainred.sh verdicts(): its list names each failing file, not its cases).
   [ "$(tline 1 '[.verdicts, .mainRun] | tojson')" = '[null,null]' ] && [ "$(sed -n 's/^fail\t//p' "$STUB/rerun.main" | tr '\t\n' ':|')" = "c.test|" ] \
     || fail "a run with no result ran on main: $(tline 1 tojson): $(cat "$STUB/rerun.main" 2>&1)"
   [ "$(tline 2 '.verdicts | tojson')" = '[{"case":"c.test: three","verdict":"card"}]' ] || fail "a killed run on main gave the case to main: $(tline 2 .verdicts)"
@@ -52,7 +52,7 @@ t_voidrun() {
 # (testfails()); main's run of it, killed, is named so too, and the command went to the main-red record as a case, so
 # the card waited for main (or, with main's run passing, the command was the card's case and went to a fix session).
 # The command names no test: the run gave no result (voidrun()), so card() runs nothing on main, starts no fix session
-# and runs the test step again, as t_voidrun's card does. Neither verdicts() nor mainred(), asked of the command alone,
+# and runs the test step again, as t_voidrun's card does. Neither mainred.sh verdicts() nor mainred.sh mainred(), asked of the command alone,
 # records it as a case. Since #374 a card's run goes through filecmd() (lib/testrun.sh), which logs each file it runs
 # before the file's command starts, so a card's whole run cannot make a run with no log: voidrun() is asked of one.
 # A run whose log names the file it ran and failed (as filecmd() logs it) is a result.
@@ -64,7 +64,7 @@ t_voidcommand() {
   # shellcheck disable=SC2034 # HERE is read by the lines the eval sources
   ( set -- run; HERE=$SRC; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
     eval "$(sed -n '/^\. "\$HERE\/lib\/portable.sh"/,/^\. "\$HERE\/lib\/records.sh"/p' "$SRC/conveyor.sh"; grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")"
-    # shellcheck disable=SC2034 # read by verdicts() and mainred(), defined by the eval
+    # shellcheck disable=SC2034 # read by mainred.sh verdicts() and mainred(), defined by the eval
     names || exit 1; cd "$R" || exit 1; TEST_WAIT=0 TEST_RUN=0 TEST_FREE=0
     [ "$(voidrun "$w" 1)" = "exit 1: the run named no test that failed, only the test command" ] || exit 2
     printf '%s\n' 'TESTRUN files=1' '== a.test.sh' '-- FAIL a.test.sh' > "$w.testlog/files"

@@ -40,7 +40,7 @@ t_rerunrefused() {
   ! rerunstep || fail "the first test step passed"
   [ "$(ran 1)" = "one two flaky three" ] && [ "$(jq -r '.refused // "none"' "$T/$CASE/cards/c7.testrec")" = none ] \
     || fail "the first run was not of the whole selection, or refused: $(ran 1): $(cat "$T/$CASE/cards/c7.testrec" 2>&1)"
-  # The failed step's test line, as card() records it: the card was tested before (testedbefore()).
+  # The failed step's test line, as card() records it: the card was tested before (testlist.sh testedbefore()).
   echo '{"card":"c7","issue":7,"step":"test","time":"2026-01-01T00:01:00Z","tokens":{"claude":0,"codex":0},"result":"fail","sha":"","reason":"","repo":"main"}' >> "$ST/cards.jsonl"
   # The fix session leaves the change as it was; the list's commit is none.
   awk 'BEGIN { FS = OFS = "\t" } $1 == "base" { $2 = "0000000000000000000000000000000000000001" } 1' "$T/$CASE/cards/c7.rerun" > "$STUB/list" \
@@ -64,7 +64,7 @@ t_rerunrefused() {
 # calls it, with no card. Main has changed a.txt as the change does, so the change's three-way merge onto main
 # conflicts there, and session() (a stand-in: no model) makes <edit> as the session that brings the change onto main.
 # settle() itself decides from that edit whether the merge is in doubt (inconflicts()) and writes <worktree>.whole for
-# tests(); checked() (the Done-when check of a doubtful merge's reply) passes. run.out ends with "settle: <its exit>".
+# tests(); donewhen.sh checked() (the Done-when check of a doubtful merge's reply) passes. run.out ends with "settle: <its exit>".
 rerunfit() { # <the session's edit>
   fx_in 'cd "$R" || exit 9; caught="" waitsec=0 behind="[]" parsecheck=""
     session() { (cd "$1" && '"$1"') > /dev/null 2>&1; echo "{}"; }
@@ -140,7 +140,7 @@ t_rerunretry() {
 }
 
 # Issue 523: c.test is kept off card runs for its CPU seconds (slowoff(): its issue #9 has not landed). Bug it
-# catches: the run again's list (rerunlist()) lost the `off` line, so a selection that runs what did not finish (the
+# catches: the run again's list (testlist.sh rerunlist()) lost the `off` line, so a selection that runs what did not finish (the
 # engine's runner, .conveyor/test-changed.sh) ran the slow file again on the run again. The run again is told it too.
 t_rerunslowoff() {
   rerunwt 'echo two >> a.txt' '1 fail flaky'
