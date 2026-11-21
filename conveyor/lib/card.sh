@@ -364,6 +364,13 @@ cardopen() {
   record "$c" "$n" brief ok "$([ -z "$d" ] && echo '{}' || echo "{\"depth\":$d}")"
   go=''
 }
+# The findings the resumed session of a retried card is told came back (again()), in card()'s rep: those the kept
+# review repeats (repeats()) when it came after the last of its fix rounds (it is the issue's last review, and that
+# round followed an earlier one), else none. It reads card()'s wt and rounds (the reviews a retried card carries).
+keptrep() {
+  rep=''; [ "$(verdict "$wt.review" 2>/dev/null)" != NO-GO ] || ! jq -se --argjson r "$rounds" 'map(.round) | max < $r' "$wt.rounds/findings.jsonl" >/dev/null 2>&1 \
+    || rep=$(repeats "$wt")
+}
 # The build, then the checks a bug card's change must pass before its review (or, on a retry with no build, those of
 # one of the Board's fix issues). go: '', or the card ends: blocked, or closed as already fixed on main.
 # shellcheck disable=SC2034 # it declares no variable of its own: mk, as the rest, is card()'s, read in lib/cardland.sh
@@ -379,11 +386,7 @@ cardbuild() {
       more+=" The card was blocked: ${was:0:600}"
     fi
     [ "$mode" != stale ] || more=$'\n\n# The kept patch of blocked card '"$from"$' cannot be read\nBuild the issue\'s change on main as it is now. The patch is the file '"$fromk/$from.patch"$': git cannot parse it, so it was not applied; read what you can of it there for what was already worked out. The card was blocked: '"${was:0:600}"
-    # The kept review came after the last of its fix rounds (it is the issue's last review, and that round followed an
-    # earlier one) and repeats a finding that round was told to fix: the session is told so, with that round's diff.
-    rep=''; [ "$(verdict "$wt.review" 2>/dev/null)" != NO-GO ] || ! jq -se --argjson r "$rounds" 'map(.round) | max < $r' "$wt.rounds/findings.jsonl" >/dev/null 2>&1 \
-      || rep=$(repeats "$wt")
-    [ -z "$rep" ] || more+=$'\n\n'"$(again "$rep")"
+    keptrep; [ -z "$rep" ] || more+=$'\n\n'"$(again "$rep")"
     [ -z "$sf" ] || { t=$(speedbrief "$c" "$wt" "$sf" "$issue") && more+=$'\n\n'"$t"; } \
       || { block "$c" "$n" "$wt" "brief: the engine could not read the project pack for the split allowance of $sf"; return; }
     began "$c" "$n" build
