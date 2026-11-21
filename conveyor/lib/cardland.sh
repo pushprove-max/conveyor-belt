@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # card()'s steps (lib/card.sh) from a review that lets the card land: the gates before it lands (cardready()), its
 # checks, tests and landing (cardlanding(), with cardtest(), cardfailed() and cardland()), and the one rebuild or port
-# of a change whose landing conflicts (cardrebuild()). Each reads and sets card()'s locals (bash's dynamic scope) and
+# of a change whose landing conflicts (landconflict()). Each reads and sets card()'s locals (bash's dynamic scope) and
 # says in its go what card() does next.
 # These steps declare no variable of their own: each one they read or set is card()'s, or a global, which card() and
 # its steps in lib/card.sh set and read too.
@@ -91,7 +91,7 @@ cardready() {
   go=''
 }
 # The checks, tests and landing of a card ready to land, run again until it lands or goes back. go: next (the next
-# pass of the review loop), landed or out (its landing did not land: cardrebuild()). Its own steps say
+# pass of the review loop), landed or out (its landing did not land: landconflict()). Its own steps say
 # again (this loop again) or '' (on).
 cardlanding() {
   # Back from the landing rebuild with its change outside documentation the one that passed its tests (docpass): it
@@ -423,7 +423,7 @@ cardland() {
 }
 # A landing that did not land (its reason in t): the one rebuild of a GO card whose change no longer applies to main,
 # or else the one port of a finished loop; else the card blocks. go: next (review the rebuilt or ported change).
-cardrebuild() {
+landconflict() {
   # The one rebuild: a card that got a GO, whose reviewed change does not apply to main as it is now.
   if [ -z "$rebased" ] && [ -z "$ups" ] && [ -z "$dec" ] && [ -z "$ported" ] && [[ $t == "rebase onto main conflicts: "* ]]; then
     # Its change outside documentation (*.md) as reviewed (docs), and as tested when its tests passed on it (docpass),

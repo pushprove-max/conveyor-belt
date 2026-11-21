@@ -174,16 +174,25 @@ t_asksreply() {
 t_dwrebase() {
   # #11: the landing conflicts and the rebuild's reply has no D<n> line: the rebase line carries the failed check, one
   # fix session is told the items, and the review after it gets that session's D<n> lines, not the build's.
+  # landconflict() (lib/cardland.sh) on card c7 as card() holds it when land() says its change no longer applies to
+  # main, with no card run: its worktree (fx_wt) with the build's change, the build's D<n> lines kept for the review
+  # (<worktree>.donewhen), main's a.txt then changed. What the review after it is shown is reviewseen()'s (lib/card.sh).
   dwsetup "$(issue 11 2026-01-05 | jq -c --arg b "$DW" '.body = $b')"
-  echo "$GO" | tee "$STUB/review.1" > "$STUB/review.2"
-  echo 'if grep -q "^# Landing conflict" "$STUB/brief"; then printf "ONE\nfive\n" > a.txt; else echo five >> a.txt; fi' > "$STUB/build"; echo 'ONE other' > "$STUB/move"
-  printf '## Done when\nD1 met: a.txt holds five\nD2 met: a.txt:1 is the build\n' > "$STUB/reply.1"; echo 'Rebuilt.' > "$STUB/reply.2"
-  printf '## Done when\nD1 met: a.txt holds five\nD2 met: a.txt:2 after the rebuild\n' > "$STUB/reply.3"
-  loop run --only 11 >/dev/null || fail "run of #11 exited non-zero"
-  [ "$(st 'select(.issue == 11 and .step == "rebase") | .doneWhen | [.items, .met, (.failed | length)] | tojson')" = '[2,0,2]' ] && [ "$(wc -l < "$STUB/sessions")" = 3 ] \
-    && [ "$(st 'select(.issue == 11 and .step == "fix") | .doneWhen | tojson')" = '{"items":2,"met":2,"failed":[]}' ] && [ -n "$(st 'select(.issue == 11 and .step == "landed") | .sha')" ] \
-    || fail "the rebuild's reply was not checked, or #11 did not land after its one fix: $(st 'select(.issue == 11)')"
-  grep -qx 'D2 met: a.txt:2 after the rebuild' "$STUB/asked" && ! grep -q 'is the build' "$STUB/asked" || fail "the review after the rebuild had stale D<n> lines: $(cat "$STUB/asked")"
+  echo 'if grep -q "^# Landing conflict" "$STUB/brief"; then printf "ONE\nfive\n" > a.txt; fi' > "$STUB/build"
+  echo 'Rebuilt.' > "$STUB/reply.1"; printf '## Done when\nD1 met: a.txt holds five\nD2 met: a.txt:2 after the rebuild\n' > "$STUB/reply.2"
+  fx_wt 'echo five >> a.txt' b.txt b
+  echo ONE > "$R/a.txt"; git -C "$R" commit -qam other || fail "main could not be moved"
+  fx_in 'cd "$R" || exit 3; n=11 c=c7 br="" wt=$CARDS/c7
+    issue=$(gh issue view 11 --json number,title,body,labels,milestone) || exit 3
+    printf "D1 met: a.txt holds five\nD2 met: a.txt:1 is the build\n" > "$wt.donewhen"; git -C "$wt" diff --cached --binary --no-renames > "$wt.patch" || exit 3
+    sprompt="the card prompt" t="rebase onto main conflicts: CONFLICT (content): Merge conflict in a.txt"
+    was="" res=GO ended="{}" rebased="" ported="" ups="" dec="" left="" tfix="" caught="" pass=1 rounds=0 docs="" docpass="" kept="" parsecheck="" fin="" finend="{}" kp="" why="" old="" err=""
+    go=end; landconflict; echo "$go $rebased" > "$T/$CASE/go"; reviewseen "$wt" proof > "$T/$CASE/seen"'
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/go")" = "next 1" ] || fail "#11's landing conflict after a GO was not rebuilt and sent to review (exit $RC): $(cat "$T/$CASE/go" "$T/$CASE/run.out" 2>&1)"
+  [ "$(st 'select(.issue == 11 and .step == "rebase") | .doneWhen | [.items, .met, (.failed | length)] | tojson')" = '[2,0,2]' ] && [ "$(wc -l < "$STUB/sessions")" = 2 ] \
+    && [ "$(st 'select(.issue == 11 and .step == "fix") | .doneWhen | tojson')" = '{"items":2,"met":2,"failed":[]}' ] \
+    || fail "the rebuild's reply was not checked, or not fixed by one session: $(st 'select(.issue == 11)')"
+  grep -qx 'D2 met: a.txt:2 after the rebuild' "$T/$CASE/seen" && ! grep -q 'is the build' "$T/$CASE/seen" || fail "the review after the rebuild had stale D<n> lines: $(cat "$T/$CASE/seen")"
 }
 
 # dwchecked() (lib/donewhen.sh), the Done-when part of donewhen.sh checked(), called on one worktree as donewhen.sh checked() calls it after

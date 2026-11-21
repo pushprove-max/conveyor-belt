@@ -1011,7 +1011,7 @@ findings makes the command's result an execution error.
 `card()` runs a card in steps: `cardopen()` (the worktree and the brief) and `cardbuild()` (the build and its proof),
 then on each pass of the review loop `cardreview()` (the review), `cardfix()` (a fix round, or on to land),
 `cardready()` (the owner's yes, the trailers and the ready file), `cardlanding()` (the checks, the tests, in
-`cardtest()` and `cardfailed()`, and the land step, in `cardland()`) and `cardrebuild()` (the one rebuild or port of a
+`cardtest()` and `cardfailed()`, and the land step, in `cardland()`) and `landconflict()` (the one rebuild or port of a
 change whose landing conflicts). The steps from `cardready()` on are in `lib/cardland.sh`.
 
 The review gate (`lintgate`) is at the top of each pass of the review loop, in `cardreview()`: after the change is

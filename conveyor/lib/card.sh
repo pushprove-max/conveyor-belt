@@ -278,10 +278,10 @@ emptychange() { # <card> <issue number> <worktree> <branch, or ''>
   git -C "$3" reset -q --hard HEAD || :
 }
 # card()'s steps, in turn: cardopen(), cardbuild(), then on each pass of the review loop cardreview() and cardfix()
-# here, cardready(), cardlanding() and cardrebuild() in lib/cardland.sh. Each reads and sets card()'s locals (bash's
+# here, cardready(), cardlanding() and landconflict() in lib/cardland.sh. Each reads and sets card()'s locals (bash's
 # dynamic scope) and says in go what follows. card() sets go=end before each: a step that returns leaving it so ends
 # the card, with the step's exit as card()'s; else '' (the next step), next (the next pass of the review loop),
-# landed (a batch or its own landing landed it) or out (its landing did not land: cardrebuild()).
+# landed (a batch or its own landing landed it) or out (its landing did not land: landconflict()).
 # shellcheck disable=SC2034 # locals that only its steps in lib/cardland.sh, or settle() (lib/claim.sh), read
 card() { # <card> <issue> [<branch> <tip>]
   local c=$1 n=$2 br=${3:-} tip=${4:-} wt=$CARDS/$1 issue b t pass res vis unclear msg d err isfu='' dec='' why ups='' left='' rebased='' tfix='' last rc sec out merged away
@@ -329,7 +329,7 @@ card() { # <card> <issue> [<branch> <tip>]
     go=end; cardfix; sx=$?; case $go in end) return $sx ;; next) continue ;; esac
     go=end; cardready; sx=$?; case $go in end) return $sx ;; next) continue ;; esac
     go=end; cardlanding; sx=$?; case $go in end) return $sx ;; next) continue ;; landed) break ;; esac
-    go=end; cardrebuild; sx=$?; [ "$go" != end ] || return $sx
+    go=end; landconflict; sx=$?; [ "$go" != end ] || return $sx
   done
   clean "$wt"
 }

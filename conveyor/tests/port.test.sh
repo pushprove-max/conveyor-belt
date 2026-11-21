@@ -18,7 +18,8 @@ PORTNOGO=${NOGO3/\[P0\]/[P1]}
 # rebuild starts from the card's stale tree; its result lands unreviewed, or over the other change; a card is rebuilt
 # and ported more than once; a card with no conflict runs an extra session. Each kind is a case of its own on a main of
 # its own (rebase, rebasetwice, rebaseempty), so they run side by side; a card with no conflict is keptunread's card
-# built from nothing. What the rebuild is handed, and the review after it, are rebasebig's, with no card run.
+# built from nothing. What the rebuild is handed, and the review after it, are rebasebig's, with no card run; so are
+# rebasetwice's and rebaseempty's, which call landconflict() (lib/cardland.sh) on a conflict made by hand (conflicted).
 # rebasesetup <issue>: a fresh main with that one issue, every review a GO; the build adds a line, and its rebuild
 # after a landing conflict ($STUB/rebuild) keeps what it was handed.
 rebasesetup() {
@@ -28,6 +29,26 @@ rebasesetup() {
 if grep -q '^# Landing conflict' "$STUB/brief"; then cat a.txt > "$STUB/started-from"; eval "$(cat "$STUB/rebuild")"
 else echo two >> a.txt; fi
 EOF
+}
+# conflicted <issue> <commands>: card c7 of <issue> as card() holds it when land() (lib/claim.sh) says its change no
+# longer applies to main, with no card run: its worktree ($FXWT, fx_wt) on main's earlier commit with the build's line
+# two staged in a.txt, main's a.txt then changed to ONE, and card()'s locals after a GO that let it land. <commands>
+# run in that shell: land1 is land()'s answer (it writes <worktree>.patch from the staged change, t the conflict), and
+# outcome adds what card() acts on after landconflict() (go, and the rebased, ported, parsecheck, kept and pass it
+# sets) to $OUTCOME, one JSON line a call.
+conflicted() {
+  fx_wt 'echo two >> a.txt' b.txt b
+  echo ONE > "$R/a.txt"; git -C "$R" commit -qam other || fail "main could not be moved"
+  fx_in 'cd "$R" || exit 3; n='"$1"' c=c7 br="" wt=$CARDS/c7
+    issue=$(gh issue view "$n" --json number,title,body,labels,milestone) || exit 3
+    sprompt="the card prompt"
+    was="" res=GO ended="{}" rebased="" ported="" ups="" dec="" left="" tfix="" caught="" pass=1 rounds=0 docs="" docpass="" kept="" parsecheck="" fin="" finend="{}" kp="" why="" old="" err=""
+    land1() { git -C "$wt" add -A && git -C "$wt" diff --cached --binary --no-renames > "$wt.patch"; t="rebase onto main conflicts: CONFLICT (content): Merge conflict in a.txt"; }
+    outcome() { jq -cn --arg go "$go" --arg r "$rebased" --arg p "$ported" --arg pc "$parsecheck" --arg k "$kept" --argjson pass "$pass" \
+      "{go: \$go, rebased: \$r, ported: \$p, parsecheck: \$pc, kept: \$k, pass: \$pass}" >> "$T/$CASE/outcome"; }
+    '"$2"
+  OUTCOME=$(cat "$T/$CASE/outcome" 2>/dev/null)
+  [ "$RC" = 0 ] || fail "landconflict could not be called on #$1, or the commands after it failed (exit $RC): $(cat "$T/$CASE/run.out")"
 }
 t_rebase() {
   rebasesetup 7
@@ -197,6 +218,16 @@ t_rebasebig() {
   grep -qx 'One review of this port alone follows: change nothing else.' "$T/$CASE/port" && ! grep -q 'One review of this port' "$T/$CASE/rebuild" \
     || fail "only the port's session is told that one review of the port alone follows: $(tail -n 8 "$T/$CASE/port")"
   [ "$(tr '\n' , < "$T/$CASE/after")" = "last rebased,fix ," ] || fail "a NO-GO on the review after the rebuild is not a last review that lands with its finding filed: $(tr '\n' , < "$T/$CASE/after")"
+  # A last review's NO-GO, its three follow-ups filed, whose landing conflicts: landconflict() ports it (no rebuild)
+  # and withdraws them; the port's own last NO-GO files three more, its landing conflicts again, and the card blocks
+  # with those withdrawn too.
+  conflicted 11 'printf "%s\n" "$NOGO" > "$wt.review"; res=NO-GO
+    for u in "[100101,100102,100103]" "[100104,100105,100106]"; do ups=$u; land1; go=end; landconflict; outcome; done'
+  [ "$OUTCOME" = '{"go":"next","rebased":"","ported":"1","parsecheck":"1","kept":"","pass":0}
+{"go":"end","rebased":"","ported":"1","parsecheck":"1","kept":"","pass":0}' ] \
+    || fail "a finished loop whose landing conflicted was not ported, then blocked when the port conflicted: $OUTCOME"
+  [ "$(tr '\n' ' ' < "$STUB/closed")" = "100101 100102 100103 100104 100105 100106 " ] && st 'select(.issue == 11 and .step == "blocked") | .reason' | grep -q '^rebase onto main conflicts: ' \
+    || fail "the follow-ups of a conflicting landing were not withdrawn at the port and at the block after it: $(cat "$STUB/closed" 2>&1) $(st 'select(.issue == 11 and .step == "blocked")')"
 }
 
 # Bug: a card whose review loop had finished (a last NO-GO, its follow-ups filed) blocked for the owner when its
@@ -249,27 +280,33 @@ t_autoport() {
 }
 
 # The rebuild conflicts too (main moves again during it), and so does the one port after it: blocked with the
-# conflict message, nothing landed.
+# conflict message, nothing landed: landconflict() on each of the three conflicts, as card() calls it after each land().
 t_rebasetwice() {
   rebasesetup 8
-  echo 'echo again > a.txt; echo "THREE$(wc -l < "$STUB/sessions")" > "$R/a.txt"; git -C "$R" commit -qam third' > "$STUB/rebuild"; echo 'TWO second' > "$STUB/move"
-  loop run 1 >/dev/null || fail "run exited non-zero"
-  [ "$(st 'select(.issue == 8) | .step' | tr '\n' ' ')" = "picked worktree deps brief start build start review start test start start rebase start review start test start start rebase start review start test start blocked " ] || fail "steps of a card that conflicts three times: $(st 'select(.issue == 8) | .step' | tr '\n' ' ')"
-  st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -q '^rebase onto main conflicts: ' || fail "a conflict after the port did not block with the conflict message"
+  echo 'echo again > a.txt; echo "THREE$(wc -l < "$STUB/sessions")" > "$R/a.txt"; git -C "$R" commit -qam third' > "$STUB/rebuild"
+  conflicted 8 'for i in 1 2 3; do land1; go=end; landconflict; outcome; done'
+  [ "$OUTCOME" = '{"go":"next","rebased":"1","ported":"","parsecheck":"1","kept":"","pass":1}
+{"go":"next","rebased":"","ported":"1","parsecheck":"1","kept":"","pass":0}
+{"go":"end","rebased":"","ported":"1","parsecheck":"1","kept":"","pass":0}' ] \
+    || fail "a card that conflicts three times was not rebuilt, then ported, then blocked: $OUTCOME"
+  [ "$(st 'select(.issue == 8 and '"$NOMARK"') | "\(.step) \(.result)"' | tr '\n' ,)" = "rebase ok,rebase ok,blocked blocked," ] \
+    && st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -q '^rebase onto main conflicts: ' || fail "a conflict after the port did not block with the conflict message: $(st 'select(.issue == 8)')"
   [ "$(git -C "$R" log -1 --format=%s)" = third ] && [ -z "$(git -C "$R" status --porcelain)" ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "a conflict after the port landed something, left main dirty or left the worktree"
-  [ "$(wc -l < "$STUB/sessions")" = 3 ] && [ "$(wc -l < "$STUB/reviews")" = 3 ] || fail "a card that conflicts three times was rebuilt or ported more than once"
+  [ "$(wc -l < "$STUB/sessions")" = 2 ] || fail "a card that conflicts three times was rebuilt or ported more than once: $(wc -l < "$STUB/sessions") sessions"
 }
 
 # Bug: a rebuild session that ends well but leaves no change blocks the card with nothing kept: the
-# reviewed change is deleted with the worktree, and retry builds from nothing.
+# reviewed change is deleted with the worktree, and retry builds from nothing. landconflict() rebuilds, and the next
+# pass of the review loop finds no change (emptychange(), then nochange(), as cardreview() calls them).
 t_rebaseempty() {
   rebasesetup 12
-  printf '%s\n' 'if grep -q "^# Landing conflict" "$STUB/brief"; then :' 'else echo ten >> a.txt; fi' > "$STUB/build"; echo 'NINE ninth' > "$STUB/move"
-  loop run 1 >/dev/null || fail "run exited non-zero"
-  [ "$(st 'select(.issue == 12 and '"$NOMARK"') | "\(.step) \(.result)"' | tr '\n' ,)" = "picked ok,worktree ok,brief ok,build ok,review GO,test pass,rebase ok,blocked blocked," ] \
+  echo ':' > "$STUB/rebuild"
+  conflicted 12 'land1; go=end; landconflict; outcome; ! emptychange "$c" "$n" "$wt" "$br" || nochange "$c" "$n" "$wt" "$sprompt"'
+  [ "$OUTCOME" = '{"go":"next","rebased":"1","ported":"","parsecheck":"1","kept":"","pass":1}' ] || fail "a card whose landing conflicted after a GO was not rebuilt: $OUTCOME"
+  [ "$(st 'select(.issue == 12 and '"$NOMARK"') | "\(.step) \(.result)"' | tr '\n' ,)" = "rebase ok,blocked blocked," ] \
     || fail "a rebuild that leaves no change: $(st 'select(.issue == 12) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
   local k c; k=$(st 'select(.issue == 12 and .step == "blocked") | "\($ENV.ST)/\(.kept)"'); c=$(st 'select(.issue == 12 and .step == "blocked") | .card')
-  [ -n "$k" ] && grep -qx '+ten' "$k/$c.patch" && [ "$(cat "$k/$c.base")" = "$(git -C "$R" rev-parse HEAD~1)" ] || fail "a rebuild that left no change did not keep the reviewed change as the card's patch (kept: $k)"
+  [ -n "$k" ] && grep -qx '+two' "$k/$c.patch" && [ "$(cat "$k/$c.base")" = "$(git -C "$R" rev-parse HEAD~1)" ] || fail "a rebuild that left no change did not keep the reviewed change as the card's patch (kept: $k)"
   tail -n 1 "$STUB/comments" | grep -q "Its work is kept as a patch: <state>/kept/${k##*/}/$c.patch (1 files, 1 KB, built on commit " || fail "the block comment does not name the reviewed patch: $(tail -n 1 "$STUB/comments")"
   [ -z "$(ls "$T/$CASE/cards")" ] || fail "a rebuild that left no change left files beside the cards: $(ls "$T/$CASE/cards")"
 }
