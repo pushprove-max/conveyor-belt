@@ -75,7 +75,7 @@
   // A click on an arm opens Compare: the Conveyor arm against it (against the next arm, for the Conveyor arm itself).
   function toCompare(L, r) {
     const a = L.conv === r ? L.rows.find((x) => x !== r) || r : r;
-    K.B.cmp.a = `arm:${L.conv.a.arm}`; K.B.cmp.b = `arm:${a.a.arm}`; K.B.cmp.data = null;
+    K.B.cmp.a = `arm:${L.conv.a.arm}`; K.B.cmp.b = `arm:${a.a.arm}`; K.B.cmp.data = null; K.B.cmp.ask = null;
     K.go('compare');
   }
   const sub = (v, s) => [v, s ? h('div', 'bench-tie', s) : ''];

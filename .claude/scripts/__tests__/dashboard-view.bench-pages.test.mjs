@@ -65,6 +65,24 @@ test('Compare, Conveyor against Claude alone on 50 tasks: the verdict, the four 
   assert.equal(text(q(w, '.bench-vk')), `sympy · ${TASKS[25]}`);
 });
 
+// Bug it guards: a click on an arm of the Scoreboard opened Compare for another pair but left the asked-for reading of
+// the pair before, so the reply of that old ask, arriving later, showed the model's reading for the wrong arm.
+test('Compare: a reading asked for one pair is not shown for the pair a Scoreboard click opens before the reply comes', async () => {
+  const w = await opened(BH.study(), 'compare');
+  let done;
+  w.reply = { ok: true, status: 200, text: () => new Promise((r) => { done = r; }) };
+  act(bp(w), 'cmp-read').click();
+  await settle();
+  BH.go(w, 'score');
+  await settle();
+  page(w).querySelector('.bench-leader tr[data-cmp="caveman"]').click();
+  await settle();
+  assert.deepEqual([act(bp(w), 'cmp-a').value, act(bp(w), 'cmp-b').value], ['arm:conveyor', 'arm:caveman'], 'another pair, opened from the Scoreboard');
+  done(JSON.stringify({ flipped: [{ task: TASKS[25], a: { resolved: true }, b: { resolved: false }, reading: 'A reading of the old ask.' }] }));
+  await settle(); await settle();
+  assert.ok(!text(page(w)).includes('A reading of the old ask.'), 'the old ask\'s reading is not shown');
+});
+
 // Bug it guards: the boxes and the verdict did not follow the pickers. On every pair the four boxes add up to the
 // shared tasks, and the verdict changes with the pair: 2 apart is not told apart, a version 10 above Claude alone is.
 test('Compare: the four boxes add up to the shared tasks, and the verdict changes when the pickers change', async () => {
