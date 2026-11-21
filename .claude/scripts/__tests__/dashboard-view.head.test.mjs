@@ -6,7 +6,7 @@
 // setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { T0, STORE, OVERVIEW, read, boot, panel, deliver, settle, pending, tick, full, fig, tile, act, cases, pickProject, heading, kept } from './dashboard-view.helpers.mjs';
+import { T0, STORE, OVERVIEW, read, boot, bootFiles, panel, deliver, settle, pending, tick, full, fig, tile, act, cases, pickProject, heading, kept } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 
@@ -164,7 +164,7 @@ test('the account page has the Board\'s head: the name, the tiles, the status ma
   w.matchMedia = () => ({ matches: false, addEventListener() {} });
   w.fetch = () => new Promise(() => {});
   Object.defineProperty(w.document, 'hidden', { get: () => false });  // jsdom's page is hidden: this one is in view
-  w.eval(read('app.js')); w.eval(read('head.js')); w.eval(read('boot.js'));
+  w.eval(read('app.js')); w.eval(read('head.js')); bootFiles(w);
   assert.deepEqual(Array.from(w.document.querySelectorAll('#tabs a.tab'), (a) => [a.textContent, a.getAttribute('href')]),
     [['Overview', 'index.html?tab=overview'], ['3D View', 'index.html?tab=belt3d'], ['Control', 'index.html?tab=control'], ['Rules', 'index.html?tab=rules'], ['Tests', 'index.html?tab=tests'], ['Benchmarks', 'index.html?tab=bench']]);
   assert.equal(w.document.querySelectorAll('#stats > .stat').length, 7, 'the seven tiles');
@@ -196,7 +196,7 @@ test('the account page\'s head follows the live feed\'s changes, not only its sn
     emit(type, data) { for (const fn of this.on[type] || []) fn(data === undefined ? { type } : { type, data: JSON.stringify(data) }); }
   };
   Object.defineProperty(w.document, 'hidden', { get: () => false });  // jsdom's page is hidden: this one is in view
-  w.eval(read('app.js')); w.eval(read('head.js')); w.eval(read('boot.js'));
+  w.eval(read('app.js')); w.eval(read('head.js')); bootFiles(w);
   assert.equal(sources.length, 1, 'the account page follows the feed');
   const es = sources[0], needs = () => w.document.querySelector('#stats .stat[data-stat="needs"] .stat-value').textContent;
   es.emit('open');

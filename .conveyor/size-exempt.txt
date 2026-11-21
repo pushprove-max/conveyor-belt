@@ -1,8 +1,4 @@
-.claude/dashboard/app.js
 .claude/dashboard/panels/bench.js
-.claude/dashboard/panels/board.js
-.claude/dashboard/panels/rules.js
-.claude/dashboard/panels/tests.js
 .claude/hooks/bash-guardrails.sh
 .claude/hooks/new-test-file-guard.sh	loadTypeScript
 .claude/hooks/new-test-file-guard.sh	main

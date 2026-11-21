@@ -96,7 +96,9 @@ export const read = (name) => fs.readFileSync(path.join(VIEW, name), 'utf8');
 export const KINDS = JSON.parse(fs.readFileSync(path.join(VIEW, '..', 'scripts', 'dashboard_needs.json'), 'utf8'));
 export const html = read('index.html');
 export const css = read('app.css');
-export const LIST = (() => { const window = {}; new Function('window', read('panels/index.js'))(window); return window.DASH_PANELS; })();
+const PAGE_LISTS = (() => { const window = {}; new Function('window', read('panels/index.js'))(window); return window; })();
+export const LIST = PAGE_LISTS.DASH_PANELS;
+export const PARTS = PAGE_LISTS.DASH_PARTS;
 export const T0 = Date.parse('2026-11-09T17:00:00Z');
 export const STORE = 'conveyor-board-layout';
 export const SEEN = 'conveyor-board-seen';
@@ -128,10 +130,26 @@ export const TAB = (id) => (CONTROL_IDS.includes(id) ? 'control' : RULES_IDS.inc
   : BENCH_IDS.includes(id) ? 'bench' : 'overview');
 export const OVERVIEW = LIST.filter((id) => TAB(id) === 'overview');
 
+// boot.js in page `w`, as a browser runs it: each file it adds runs in its order and then has its load event, which
+// starts the page after the last (one in `failing` fails to load: its error event). jsdom here runs no script file of
+// its own. An error a file throws is kept in w.scriptErrors, and the next file runs, as in a browser.
+export function bootFiles(w, failing = []) {
+  w.scriptErrors = [];
+  const had = new Set(w.document.querySelectorAll('script'));
+  w.eval(read('boot.js'));
+  for (const s of Array.from(w.document.querySelectorAll('script')).filter((x) => !had.has(x))) {
+    const src = s.getAttribute('src'), ok = !failing.includes(src);
+    if (ok) { try { w.eval(read(src)); } catch (e) { w.scriptErrors.push(e.message); } }
+    s.dispatchEvent(new w.Event(ok ? 'load' : 'error'));
+  }
+}
+
 // One page in jsdom. `store` is what an earlier visit left in localStorage; `list` and `extra` stand in for
 // panels/index.js and for panel files of the test's own; `tab` is the tab the address opens (none: the page's own).
 // `session`, when given, is the page's sessionStorage (one a test shares between two pages, or one that throws).
-export function boot({ store = {}, reducedMotion = false, list = LIST, extra = '', rects = false, feed = false, tab = null, query = '', width = 1440, session = null } = {}) {
+// `loader`: the page loads its files as a browser does, panels/index.js and boot.js (bootFiles; list and extra are
+// not used); one in `failing` fails to load.
+export function boot({ store = {}, reducedMotion = false, list = LIST, extra = '', rects = false, feed = false, tab = null, query = '', width = 1440, session = null, loader = false, failing = [] } = {}) {
   const { JSDOM, VirtualConsole } = dom();
   const virtualConsole = new VirtualConsole();
   const w = new JSDOM(html, { url: `https://dash.test/index.html${tab ? `?tab=${tab}` : query}`, runScripts: 'outside-only', virtualConsole }).window;
@@ -236,6 +254,14 @@ export function boot({ store = {}, reducedMotion = false, list = LIST, extra = '
   }
   w.eval(read('app.js'));
   w.eval(read('head.js'));
+  if (loader) {
+    w.eval(read('panels/index.js'));
+    bootFiles(w, failing);
+    return w;
+  }
+  // The parts of app.js (DASH_APP.parts) and of the panel files (panels/index.js DASH_PARTS), before the panels, as
+  // boot.js loads them.
+  for (const f of [...w.DASH_APP.parts, ...PARTS]) w.eval(read(f));
   w.DASH_PANELS = list.slice();
   for (const id of list) if (fs.existsSync(path.join(VIEW, 'panels', `${id}.js`))) w.eval(read(`panels/${id}.js`));
   if (extra) w.eval(extra);
