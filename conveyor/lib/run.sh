@@ -336,11 +336,14 @@ cardsrun() {
 # turn after turn with no wait (issue 881). A job named that ended before is waited no more: bash keeps its status,
 # and a wait on it returns at once at every turn. The prober is named only while it runs, as nothing clears it (the
 # push is cleared at the turn's start, pushended(); a card leaves mine). An adopted card is no job of this shell's;
-# wait passes over it.
+# wait passes over it. A job that has gone from the shell's job table already (a `jobs` or `wait` took it) is no longer
+# found by `wait -n` in bash 5.2: the wait would go on to the timer. So the wait first looks that each of them is alive
+# (kill -0), and returns at once when one is not.
 turnwait() {
-  local j=()
+  local j=() p
   [ -z "$pusher" ] || j+=("$pusher")
   [ -z "$prober" ] || ! jobs -rp | grep -qx "$prober" || j+=("$prober")
+  for p in "${j[@]}" "${!mine[@]}"; do kill -0 "$p" 2>/dev/null || return 0; done
   wait -n "$timer" "${j[@]}" "${!mine[@]}" 2>/dev/null
 }
 # A `run` (not a serve) may end at this turn, read in run()'s own variables: no card of its own runs, no push

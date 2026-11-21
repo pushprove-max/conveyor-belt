@@ -39,3 +39,21 @@ t_turnwait() {
   lim=$(loadlimit 2000 5000) # under the timer's 5 s
   [ "$w" -lt "$lim" ] || fail "the turn's wait did not end at once on a card that had ended (${w} ms; limit $lim ms: 2000 ms times the load factor $CASE_LOAD)"
 }
+
+# Bug (issue 1260): bash's `wait -n` passes over a pid that is no child of the shell, or one the shell has already
+# forgotten, so a card that had ended in that way did not end the turn's wait: it went on to the timer (5 s). An adopted
+# card (started by an earlier loop) is such a pid; the wait must end at once on it, as on a card of this shell's.
+t_turnwaitadopted() {
+  eval "$(sed -n '/^turnwait() {/,/^}/p' "$SRC/lib/run.sh")"
+  declare -f turnwait >/dev/null || fail "no turnwait() in lib/run.sh"
+  local -A mine=()
+  local timer pusher='' prober='' s w lim pid
+  pid=$( (sleep 0.1 & echo $!) ) # sleep: a card of another shell, which ends at once
+  mine[$pid]='c3-3 3'
+  sleep 0.5 # sleep: the card has ended before the wait starts
+  sleep 5 & timer=$!; s=$EPOCHREALTIME # sleep: the turn's timer, which must not be waited out
+  turnwait; w=$(( (${EPOCHREALTIME/[.,]/} - ${s/[.,]/}) / 1000 ))
+  kill "$timer" 2>/dev/null; wait "$timer" 2>/dev/null
+  lim=$(loadlimit 2000 5000) # under the timer's 5 s
+  [ "$w" -lt "$lim" ] || fail "the turn's wait did not end at once on an adopted card that had ended (${w} ms; limit $lim ms: 2000 ms times the load factor $CASE_LOAD)"
+}
