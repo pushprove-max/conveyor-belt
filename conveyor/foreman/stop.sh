@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # stop.sh state | reply -- the Foreman's Stop hooks (the Foreman session only; every other session passes).
-# state: while the saved state ($FD/state.md) is over its 5000-byte cap, the stop is blocked once with its size; the
+# state: while the open lines of the saved state ($FD/state.md: all but the '- DONE' items, with their indented lines,
+#   which the next start archives, archive.py) are over the cap (CAP in foreman.sh), the stop is blocked once with their size; the
 #   second stop (stop_hook_active) passes, so it never loops. A warning at startup alone was ignored.
 # reply: the turn's last reply (every text block after its last tool call or user entry, such as a refused stop's
 #   feedback) is refused once per turn (the turn is its opening entry: the newest user entry that is
@@ -35,8 +36,12 @@ block() {
 case ${1:-} in
   state)
     [ "$(jq -r '.stop_hook_active // false' <<<"$INPUT" 2>/dev/null)" != true ] || exit 0
-    n=$(p_stat "$FD/state.md" | cut -d' ' -f1); [ "${n:-0}" -gt 5000 ] || exit 0
-    block "state.md is $n bytes, over its 5000-byte cap: mark finished items '- DONE' (they are archived at the next start) and shorten the rest" ;;
+    cap=$(sed -n 's/^CAP=\([0-9][0-9]*\)[ ;].*/\1/p' "$(dirname "${BASH_SOURCE[0]}")/foreman.sh" 2>/dev/null)
+    [ -n "$cap" ] || { echo "stop.sh: no CAP=<bytes> line in foreman.sh" >&2; exit 2; }
+    # The same split archive.py makes: an item starts at a line beginning '- DONE' and runs over the indented lines after it.
+    n=$(LC_ALL=C awk '/^- DONE/ { skip = 1; next } /^[ \t]/ { if (!skip) print; next } { skip = 0; print }' "$FD/state.md" 2>/dev/null | wc -c | tr -d ' ')
+    [ "${n:-0}" -gt "$cap" ] || exit 0
+    block "state.md has $n bytes of open lines, over its $cap-byte cap: mark finished items '- DONE' (they are archived at the next start) and shorten the rest" ;;
   reply) ;;
   *) echo "usage: stop.sh state | reply" >&2; exit 2 ;;
 esac

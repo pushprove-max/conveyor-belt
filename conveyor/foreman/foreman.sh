@@ -37,7 +37,7 @@
 #   Foreman session only, the Foreman's rules (with its project's own, $FD/rules.md, and the standing kinds of routine
 #   yes each record's pack turns on, asked of the record: `conveyor.sh auto standing`), then its saved state: the DONE items of state.md archived
 #   (archive.py), a warning line when the project runs an old engine here (`conveyor.sh take stale`), a live summary
-#   built fresh (never saved), then state.md, cut to its 5000-byte cap.
+#   built fresh (never saved), then state.md, cut to its cap.
 #   A session that was the Foreman and no longer is gets one line saying so, once, shown to the owner (systemMessage).
 #   Any other new session (source startup) in a project's main checkout (inmain; never a worktree, as a card's, a
 #   lane's or a reviewer's, nor a session with CONVEYOR_CARD or CONVEYOR_LANE set) takes the role by itself (auto):

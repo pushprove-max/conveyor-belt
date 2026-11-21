@@ -69,7 +69,7 @@ sess() { jq -cn --arg s "$1" --arg src "${2:-startup}" --arg t "${3:-}" '{sessio
 t_state_stop() {
 CASE=state-stop
 ready
-head -c 6000 /dev/zero | tr '\0' x > "$FD/state.md"
+lines 6000 '- open' > "$FD/state.md"
 out=$(echo '{"stop_hook_active": false}' | bash "$SRC/stop.sh" state)
 jq -e '.decision == "block" and (.reason | test("6000 bytes"))' <<<"$out" >/dev/null || fail "a state over its cap did not block the stop: $out"
 out=$(echo '{"stop_hook_active": true}' | bash "$SRC/stop.sh" state)
@@ -78,6 +78,36 @@ echo small > "$FD/state.md"
 out=$(echo '{"stop_hook_active": false}' | bash "$SRC/stop.sh" state); [ -z "$out" ] || fail "a state under its cap blocked: $out"
 out=$(echo '{"stop_hook_active": false}' | CONVEYOR_FOREMAN='' bash "$SRC/stop.sh" state); [ -z "$out" ] || fail "another session was checked"
 }
+
+# Bug: the stop counted the '- DONE' items too, which the next start archives, so a state of open lines under the cap
+# was refused for the DONE lines it carried.
+t_state_stop_done() {
+  local out
+  ready
+  { lines 4000 '- open'; lines 3000 '- DONE'; } > "$FD/state.md"
+  out=$(echo '{"stop_hook_active": false}' | bash "$SRC/stop.sh" state); [ -z "$out" ] || fail "4000 open bytes and 3000 DONE bytes blocked the stop: $out"
+  { lines 5100 '- open'; lines 3000 '- DONE'; } > "$FD/state.md"
+  out=$(echo '{"stop_hook_active": false}' | bash "$SRC/stop.sh" state)
+  jq -e '.decision == "block" and (.reason | test("5100 bytes of open lines"))' <<<"$out" >/dev/null || fail "5100 open bytes did not block with that size: $out"
+}
+# Bug: the stop kept its own copy of the cap, so a change of CAP in foreman.sh left the stop on the old one. The stop runs
+# from a copy of the plugin with a changed CAP.
+t_state_stop_cap() {
+  local out
+  ready
+  mkdir -p "$T/copy/conveyor" && cp -R "$SRC" "$T/copy/conveyor/foreman" && cp -R "$SRC/../lib" "$T/copy/conveyor/lib"
+  sed -i.bak 's/^CAP=5000 /CAP=7000 /' "$T/copy/conveyor/foreman/foreman.sh"
+  grep -q '^CAP=7000 ' "$T/copy/conveyor/foreman/foreman.sh" || fail "the copy of foreman.sh has no CAP=7000"
+  lines 6000 '- open' > "$FD/state.md"
+  out=$(echo '{"stop_hook_active": false}' | bash "$SRC/stop.sh" state)
+  jq -e '.decision == "block" and (.reason | test("5000-byte cap"))' <<<"$out" >/dev/null || fail "6000 open bytes under CAP=5000 did not block: $out"
+  out=$(echo '{"stop_hook_active": false}' | bash "$T/copy/conveyor/foreman/stop.sh" state); [ -z "$out" ] || fail "6000 open bytes blocked under CAP=7000: $out"
+  lines 8000 '- open' > "$FD/state.md"
+  out=$(echo '{"stop_hook_active": false}' | bash "$T/copy/conveyor/foreman/stop.sh" state)
+  jq -e '.decision == "block" and (.reason | test("7000-byte cap"))' <<<"$out" >/dev/null || fail "8000 open bytes under CAP=7000 did not block with that cap: $out"
+}
+# lines <bytes> <prefix>: that many bytes of 50-byte lines (49 characters and a newline), each starting with prefix.
+lines() { local i l; for ((i = 0; i < $1 / 50; i++)); do l="$2 $i"; printf '%s%s\n' "$l" "$(head -c $((49 - ${#l})) /dev/zero | tr '\0' x)"; done; }
 
 t_reply_stop() {
 CASE=reply-stop
@@ -466,7 +496,7 @@ out=$(sess s1 resume | bash "$SRC/foreman.sh" start); [[ $out != *'old engine'* 
 
 # Every case at once, each in a subshell on its own fixture; each one's output is shown once all have ended, and the
 # test passes only when each case ran to its end.
-cases=(state_stop reply_stop filing ask_pin ask_self session session_fork session_claims stale)
+cases=(state_stop state_stop_done state_stop_cap reply_stop filing ask_pin ask_self session session_fork session_claims stale)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for one_case in $SEL; do case " ${cases[*]} " in *" $one_case "*) ;; *) echo "unknown case $one_case" >&2; exit 2 ;; esac; done
