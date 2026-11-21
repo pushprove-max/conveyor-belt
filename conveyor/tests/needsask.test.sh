@@ -214,3 +214,15 @@ t_needsturn() {
     turnopen; wait'
   [ "$(sort "$T/$CASE/jobs" 2>/dev/null | tr '\n' ' ')" = "ask main " ] || fail "the turn's job did not run needsask and needsmain: $(cat "$T/$CASE/jobs" 2>&1) $(head -5 "$T/$CASE/run.out")"
 }
+
+# Bug (#1171): the docs said nothing of which `needs you` items become decisions for `auto decide`, nor what step it picks,
+# so an owner could not tell what auto does with a blocked card or a held main-red issue. docs/foreman.md must name both
+# items and the recommended step of each, as the engine's own option labels read. Text check: a doc page has no behaviour to run.
+t_needsdoc() {
+  local d l; d=$(tr '\n' ' ' < "$SRC/../docs/foreman.md" | tr -s ' ')
+  for l in NEEDSASK_RETRY NEEDSMAIN_RELEASE; do
+    l=$(sed -n "s/.*\b$l='\([^']*\)'.*/\1/p" "$SRC/lib/needsask.sh" | head -1)
+    [ -n "$l" ] || fail "lib/needsask.sh has no recommended-step label to check the docs against"
+    grep -qF "\"$l\"" <<<"$d" || fail "docs/foreman.md does not name the recommended step \"$l\" of an item auto decides"
+  done
+}

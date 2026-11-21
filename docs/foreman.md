@@ -212,6 +212,13 @@ asks the host about the record over ssh. Open decisions for that record come fro
   pack's `auto.reserved` holds (the pack is the project's settings, `.conveyor/project.json`; by default production deploys, deletes, new feature flags, security and password
   settings, configured product values, and licence or consent questions). Those are listed under "Waiting for the
   owner". A band above the prompt shows whether auto is on.
+- Two `needs you` items from the engine are open decisions too, so auto decides them like any other
+  ([Cards](cards.md)). A card that is blocked with its work kept: the recommended step is "Retry keeping the work",
+  which gives the card back as `conveyor.sh retry <issue>` does. An issue that the nightly whole test filed for a test
+  that fails on main, and the engine holds: the recommended step is "Release it, first in the order". On `narrow`, auto
+  decides one only when you gave that answer to the same question before. Auto leaves either one under "Waiting for the owner"
+  when its text holds a word of `auto.reserved`, such as `delete`. A card stopped for your yes, and a main-red fix
+  card, are not decisions, so auto does not touch them.
 - `owner-way.md`: a project can keep a written profile of how its owner decides. Make it from the ruling log, and put
   it in the Foreman's folder, beside `rules.md`: `foreman` in the folder that `conveyor.sh state-dir` prints. For a
   group in `foreman.groups`, use the folder of the first project in the group. The
