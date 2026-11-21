@@ -112,6 +112,25 @@ redbrief() { # <card> <issue> <branch>
   red=$(redissue "$1") && [ "$red" != "$issue" ] || return 0
   sprompt=${sprompt/"$(issuepart "$issue")"/"$(issuepart "$red")"}; issue=$red
 }
+# A main-red fix card's commit message (card(), before it lands): its cases as its entry holds them now (redissue();
+# the issue it was built from when the entry cannot be read) and main's commit it was picked for (its mainRed).
+redmsg() { # <card> <issue json>
+  local t; t=$(redissue "$1") || t=$2
+  jq -r --arg c "$1" --arg s "$(stdb ask card "$1" | jq -rs 'map(.mainRed // empty)[0] // ""')" '"fix(product): \(.title) (main \($s[0:12]))\n\nConveyor card \($c)"' <<<"$t"
+}
+# card()'s wait for main to change (mainwait()), its seconds added to card()'s mainsec.
+mainwaited() { # <worktree> <main's commit> <case>...
+  local mw=$SECONDS; mainwait "$@"; mainsec=$((mainsec + SECONDS - mw))
+}
+# A card's landed line's extra (card(), as it lands): <left> (its filed follow-ups) with waitSec, the seconds it waited
+# on other cards (settle()) and for main to change (mainwaited()), for the drift watch (bench/drift.sh); yesFrom; and
+# rollout, its rollout actions, as its ready file holds them too.
+landextra() { # <left json> <yesfrom json, or none> <rollout json>
+  local x; x=$(jq -c --argjson w "$(waited)" '. + $w' <<<"${1:-"{}"}") || x=$1
+  [ -z "$2" ] || x=$(jq -c --argjson f "$2" '. + {yesFrom: $f}' <<<"${x:-"{}"}")
+  [ "$3" = '[]' ] || x=$(jq -c --argjson r "$3" '. + {rollout: $r}' <<<"${x:-"{}"}")
+  printf '%s\n' "$x"
+}
 # The sessions' and the reviewer's prompt (plan section 10, the reviewer gets the same text): the brief with the
 # rules after the header, before the issue. Each session and review is handed it with its own part after it.
 cardprompt() { # <card> <header> <rules> <brief>
@@ -229,7 +248,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local voids=0 # voids: the test runs in a row that gave no result (voidrun())
   local held # held: its test step waited for main or the machine (mainwait(), holdwait())
   local cr # cr: a failed test line's carried part (carriedrec())
-  local mainsec=0 mw mwon # mwon: main's commit and the cases it waits on there (mainwait()); mainsec: the seconds it has waited for main to change (mainwait()); its landed line's waitSec adds them to waitsec
+  local mainsec=0 mwon # mwon: main's commit and the cases it waits on there (mainwait()); mainsec: the seconds it has waited for main to change (mainwaited()); its landed line's waitSec adds them to waitsec
   local repaired='' lane # repaired: the repair lane passed its test step (repairlane()), saying how; lane: its exit
   local ins rr # ins, rr: the review's instructions, and fix when it reviews the fix alone (rereview())
   local ph pf pb # ph, pf: the hash and the files of the change's lint policy diff (lintpolicy()); pb: the body kept by the card it resumes
@@ -566,8 +585,7 @@ card() { # <card> <issue> [<branch> <tip>]
     cmsg=$(grep -Ev "^Rollout: $ROLLOUT" <<<"$cmsg" || :); cmsg=$cmsg${cmsg:+${rmsg:+$'\n'}}$rmsg
     # A main-red fix card names its cases and main's commit, as its entry holds them now (a case added during its
     # build or a review too).
-    [ "$n" != 0 ] || [ -n "$br" ] || msg=$(t=$(redissue "$c") || t=$issue; jq -r --arg c "$c" --arg s "$(stdb ask card "$c" | jq -rs 'map(.mainRed // empty)[0] // ""')" \
-      '"fix(product): \(.title) (main \($s[0:12]))\n\nConveyor card \($c)"' <<<"$t")
+    [ "$n" != 0 ] || [ -n "$br" ] || msg=$(redmsg "$c" "$issue")
     # The card's commit trailers go into the message after its Closes line (before the card line).
     cmsg=$(jq -rn --arg m "$msg" --arg t "$cmsg" 'if $t == "" then $m else $m | sub("\nConveyor card "; "\n\($t)\nConveyor card ") end')
     # Same-file cards (at settle()): it holds its files from its landing step through its tests and landing, unless
@@ -756,8 +774,7 @@ card() { # <card> <issue> [<branch> <tip>]
           echo "conveyor: card $c: every case it still fails fails on main too: it waits for main to change"
           rm -f "$wt.ready"; locked giveway "$c" "$wt"; began "$c" "$n" test
           mapfile -t mwon < <(jq -r '.mainRun.sha, (.verdicts[] | select(.verdict == "main") | .case)' <<<"$t")
-          mw=$SECONDS; mainwait "$wt" "${mwon[@]}"; held=1
-          mainsec=$((mainsec + SECONDS - mw))
+          mainwaited "$wt" "${mwon[@]}"; held=1
         fi
         if [ -n "$held" ]; then
           unmate; away=''; caught=''
@@ -867,12 +884,7 @@ card() { # <card> <issue> [<branch> <tip>]
         # A case that joined during its last test run stages its links before it lands (redbrief()).
         began "$c" "$n" land; redbrief "$c" "$n" "$br"
         reading fresh >/dev/null 2>&1 # the after reading of the landed line, asked for outside the lock
-        # waitSec: the seconds it waited on other cards (settle()) and for main to change (mainwait()), for the drift
-        # watch (bench/drift.sh).
-        extra=$(jq -c --argjson w "$((waitsec + mainsec))" '. + {waitSec: $w}' <<<"${left:-"{}"}") || extra=$left
-        [ -z "$yesfrom" ] || extra=$(jq -c --argjson f "$yesfrom" '. + {yesFrom: $f}' <<<"${extra:-"{}"}")
-        # rollout: its rollout actions, as its ready file holds them too (above).
-        [ "$ro" = '[]' ] || extra=$(jq -c --argjson r "$ro" '. + {rollout: $r}' <<<"${extra:-"{}"}")
+        extra=$(landextra "$left" "$yesfrom" "$ro")
         if [ ${#mates[@]} != 0 ]; then mapfile -d '' t5 < <(fives "$c" "$n" "$wt" "$cmsg" "$extra"); else t5=("$c" "$n" "$wt" "$cmsg" "$extra"); fi
         # Landed: its declined findings are written; when they cannot be, the card ends blocked, its review kept.
         t=$(locked land "${t5[@]}") && { [ -z "$dec" ] || decline "$c" "$n" "$FUCAP" <<<"$dec" \

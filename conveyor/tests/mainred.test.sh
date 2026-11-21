@@ -11,133 +11,168 @@
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
+# Card c7's failed test step, as card() takes it, without the card: verdicts() on its worktree, given its last run's
+# failures (<failures json>, as testfails() gives them), and its test line as card() writes it (failline()), with
+# <jq> applied to verdicts()'s result for that line only. Prints verdicts()'s result.
+mrverdicts() { # <failures json> [jq]
+  local fl=$1
+  eng 'TEST_WAIT=; TEST_RUN=; TEST_FREE=; v=$(verdicts c7 "$CONVEYOR_CARDS/c7" "$fl") \
+    && record c7 7 test fail "$(failline "$CONVEYOR_CARDS/c7" 1 0 "$fl" "$(jq -c '"'${2:-.}'"' <<<"$v")" "{}")" && printf "%s\n" "$v"'
+}
+# Card c7's change fitted onto main as it is now, as settle() fits a change that still applies there (t_mainfixed
+# calls settle() itself).
+mrfit() {
+  local w=$T/$CASE/cards/c7
+  git -C "$w" diff --cached --binary > "$w.fit" && git -C "$w" reset -q --hard "$(git -C "$R" rev-parse HEAD)" && git -C "$w" apply --index "$w.fit" \
+    || fail "the change could not be fitted onto main"
+}
+
 # Bug it catches: #423 failed on a test main had broken since #442, and went to a fix round a session could not win.
-# b.test's flaky fails on the card's run, its run again and on main: the card waits in its test step (no fix session,
-# no block), the case goes to the fix card of main's commit, with no GitHub issue (#597), and its test line says so.
-# b.test stands for a runner (the engine's conveyor/conveyor.test.sh names its cases' failures as its own): the fix
-# card names the last commit of the file that defines the case, cases/b.test.sh, not that of the runner, changed
-# later. Main moves and still fails it: the card tests again, waits again, and starts no second fix card while the
-# first holds the case. Main moves again, now passing it: the card tests again, on main as it is now, and lands.
+# b.test's flaky fails on the card's run, its run again and on main: every verdict is main (so card() waits, with no
+# fix session and no block), the case goes to the fix card of main's commit, with no GitHub issue (#597), and its test
+# line says so. b.test stands for a runner (the engine's conveyor/conveyor.test.sh names its cases' failures as its
+# own): the fix card names the last commit of the file that defines the case, cases/b.test.sh, not that of the runner,
+# changed later. Main moves and still fails it: the card's run on the new main runs what failed, and starts no second
+# fix card while the first holds the case. Main moves again, now passing it: the run on main as it is now passes.
 # Bug it catches too: a file that failed naming no case (a shell test's `FAIL: ...`) was given to main's run with no
 # line, so main's clean tree ran nothing for it, the run passed and a file broken on main went to a fix session. c.test
 # fails naming no case beside b.test's flaky, on every run until main is green: main's run is told to run it (a `fail`
-# line with no case), runs it, and the file gets the verdict main and goes to the fix card too, so the card waits, not fixes.
-# One card for both: a second card run cost this file about 40% of its CPU seconds (#467).
+# line with no case), runs it, and the file gets the verdict main and goes to the fix card too.
+# One fixture for all: each step is the engine function card() calls there (tests(), verdicts(), mainwait()).
 t_mainred() {
   rerunsetup '1 fail flaky' '1 bare three' '2 fail flaky' '2 bare three' '3 fail flaky' '3 bare three' '4 fail flaky' '4 bare three' \
     'main fail flaky' 'main bare three'; rerunfiles
-  local lp c b waiting='grep -qs "waiting for main to change: c.test, b.test: flaky fail on main" "$T/$CASE/cards/"*.live'
+  local b s v1 v2 mw fl='{"of":null,"files":[{"file":"b.test","cases":[{"name":"flaky","line":"1"}]},{"file":"c.test","cases":[]}],"timeout":null}'
   mkdir -p "$R/cases"; echo 't_flaky() { :; }' > "$R/cases/b.test.sh"; git -C "$R" add cases; git -C "$R" commit -qm "the case's file"; b=$(git -C "$R" log -1 --format=%h)
-  echo runner > "$R/b.test"; git -C "$R" add b.test; git -C "$R" commit -qm "the runner"
-  ( loop run 1 > "$STUB/run.out" 2>&1 ) & lp=$!
-  wait_until "$waiting" 'cat "$STUB/run.out"' || fail "the card did not wait for main: $(cat "$STUB/run.out")"
-  c=$(st 'select(.step == "picked") | .card')
-  # Issue 201: while it only waits for main, its wait mark stands, so the loop counts it against no build slot (idle()).
-  wait_until "[ -e '$T/$CASE/cards/$c.idle' ]" || fail "the card waiting for main did not mark itself waiting: the loop would count it against the cap"
-  # Issue 220: the snapshot gives when the wait for main began (the belt's live.at), which the Foreman's watcher
-  # times its wake from; without it the wait never wakes the Foreman.
-  [ "$(loop snapshot --fresh 2>/dev/null | jq -r --arg c "$c" '.belt[] | select(.card == $c) | .live.at')" = "$(jq -r .at "$T/$CASE/cards/$c.live")" ] \
-    || fail "the snapshot does not give when the wait for main began: $(loop snapshot --fresh 2>/dev/null | jq -c --arg c "$c" '.belt[] | select(.card == $c) | .live')"
+  echo runner > "$R/b.test"; git -C "$R" add b.test; git -C "$R" commit -qm "the runner"; s=$(git -C "$R" rev-parse HEAD)
+  git -C "$R" worktree add -q --detach "$T/$CASE/cards/c7" && rerunedit 'echo two >> a.txt' || fail "the card's worktree could not be made"
+  eng 'append "$(line c7 7 picked ok "{\"title\":\"title 7\"}")"' || fail "the card's picked line could not be written"
+  ! rerunstep || fail "the card's test step passed"
+  v1=$(mrverdicts "$fl" '.mainRun.sec = 7') || fail "verdicts failed: $v1"
   # Each failing file runs on main once, whole, through test.fileCommand, whether it names a case or none.
   [ "$(grep $'^fail\t' "$STUB/rerun.main" | tr '\t\n' ':|')" = "fail:c.test|fail:b.test|" ] && [ "$(ran main)" = "three flaky" ] \
     || fail "main's run was not told to run each failing file once, whole: $(ran main): $(cat "$STUB/rerun.main" 2>&1)"
-  [ "$(tline 1 '[.result, .verdicts, .mainRun.sha] | tojson')" = "[\"fail\",[{\"case\":\"c.test\",\"verdict\":\"main\"},{\"case\":\"b.test: flaky\",\"verdict\":\"main\"}],\"$(git -C "$R" rev-parse HEAD)\"]" ] \
-    || fail "the test line does not give the case's and the file's verdicts and main's run: $(tline 1 tojson)"
-  tline 1 '.mainRun.sec' | grep -qE '^[0-9]+$' || fail "the test line does not give the seconds main's run took: $(tline 1 .mainRun)"
-  # No GitHub issue (#597): the case and the file go to main's commit's one fix card, not picked in a `run 1`.
-  [ ! -s "$STUB/filed" ] && [ "$(jq -c --arg s "$(git -C "$R" rev-parse HEAD)" '[.reds[] | [.sha == $s, .card, [.cases[].case]]]' "$ST/mainred.json")" = '[[true,null,["c.test","b.test: flaky"]]]' ] \
+  [ "$(jq -c '[.verdicts, .mainRun.sha]' <<<"$v1")" = "[[{\"case\":\"c.test\",\"verdict\":\"main\"},{\"case\":\"b.test: flaky\",\"verdict\":\"main\"}],\"$s\"]" ] \
+    && [ "$(tline 1 '[.result, .verdicts, .mainRun.sha] | tojson')" = "$(jq -c '["fail", .verdicts, .mainRun.sha]' <<<"$v1")" ] \
+    || fail "the test line does not give the case's and the file's verdicts and main's run: $v1: $(tline 1 tojson)"
+  jq -r '.mainRun.sec' <<<"$v1" | grep -qE '^[0-9]+$' || fail "verdicts() does not give the seconds main's run took: $v1"
+  # No GitHub issue (#597): the case and the file go to main's commit's one fix card, not picked yet.
+  [ ! -s "$STUB/filed" ] && [ "$(jq -c --arg s "$s" '[.reds[] | [.sha == $s, .card, [.cases[].case]]]' "$ST/mainred.json")" = '[[true,null,["c.test","b.test: flaky"]]]' ] \
     || fail "the case and the file did not go to one fix card of main's commit, with no issue filed: $(cat "$ST/mainred.json" "$STUB/filed" 2>&1)"
   [ "$(jq -r '.reds[0].cases[] | select(.case == "b.test: flaky") | "\(.files) \(.last)"' "$ST/mainred.json")" = "[\"cases/b.test.sh\"] $b the case's file" ] \
     || fail "the fix card does not name the last commit of the case's file: $(cat "$ST/mainred.json")"
-  [ "$(st 'select(.step == "fix" or .step == "blocked") | .step' | wc -l)" = 0 ] || fail "a red main sent the card to fix or blocked it: $(st '"\(.step) \(.result)"' | tr '\n' ,)"
+  [ ! -e "$T/$CASE/cards/mainrun/c7" ] || fail "main's worktree was left behind"
+  # Issue 201: while it only waits for main, its wait mark stands, so the loop counts it against no build slot (idle()).
+  # Issue 220: the snapshot gives when the wait for main began (the belt's live.at), which the Foreman's watcher times
+  # its wake from; without it the wait never wakes the Foreman. The wait is mainwait() itself, polled as it runs: only
+  # a wait under way holds its live record and its mark, and it ends only as main moves (below).
+  # card() begins the wait with the test step's start line, which the snapshot reads the live record by.
+  ( eng 'LIVE=1; began c7 7 test && mainwait "$CONVEYOR_CARDS/c7" '"$s"' c.test "b.test: flaky"; echo "ended $?"' > "$STUB/mw.out" 2>&1 ) & mw=$!
+  wait_until "grep -qs 'waiting for main to change: c.test, b.test: flaky fail on main at ${s:0:12} too' '$T/$CASE/cards/c7.live' && [ -e '$T/$CASE/cards/c7.idle' ]" 'cat "$STUB/mw.out"' \
+    || fail "the card waiting for main did not say so, or did not mark itself waiting: the loop would count it against the cap"
+  [ "$(loop snapshot --fresh 2>/dev/null | jq -r '.belt[] | select(.card == "c7") | .live.at')" = "$(jq -r .at "$T/$CASE/cards/c7.live")" ] \
+    || fail "the snapshot does not give when the wait for main began: $(loop snapshot --fresh 2>/dev/null | jq -c '.belt')"
   echo m > "$R/m.txt"; git -C "$R" add m.txt; git -C "$R" commit -qm "main moves, still red"
-  wait_until "[ \"\$(st 'select(.step == \"test\" and .result == \"fail\") | .card' | wc -l)\" = 2 ] && $waiting" 'cat "$STUB/run.out"' \
-    || fail "the card did not test again and wait once main moved: $(cat "$STUB/run.out")"
+  wait "$mw"; [ "$(cat "$STUB/mw.out")" = "ended 0" ] || fail "the wait did not end once main moved: $(cat "$STUB/mw.out")"
   # The same change on the new main: its passes stand, and what failed runs again (tests(), rerunsince()).
-  [ "$(ran 3)" = "flaky three" ] && [ "$(git -C "$T/$CASE/cards/$c" log -1 --format=%s)" = "main moves, still red" ] \
+  mrfit; ! rerunstep || fail "the card's test step on the new main passed"
+  [ "$(ran 3)" = "flaky three" ] && [ "$(git -C "$T/$CASE/cards/c7" log -1 --format=%s)" = "main moves, still red" ] \
     || fail "the run after main moved was not of the failing case and file, on main as it is now: $(ran 3)"
+  v2=$(mrverdicts "$fl" '.mainRun.sec = 5') && [ "$(jq -c '[.verdicts[].verdict]' <<<"$v2")" = '["main","main"]' ] || fail "main's run on its new commit did not fail both: $v2"
   [ "$(jq '.reds | length' "$ST/mainred.json")" = 1 ] && [ ! -s "$STUB/filed" ] \
     || fail "the new main commit started a second fix card for cases the first, not yet picked, holds: $(cat "$ST/mainred.json" "$STUB/filed" 2>&1)"
   sed -i '/^main /d' "$STUB/plan"
   echo n > "$R/n.txt"; git -C "$R" add n.txt; git -C "$R" commit -qm "main is green"
-  wait "$lp" || fail "run exited non-zero: $(cat "$STUB/run.out")"
-  [ "$(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)" = "test fail,test fail,test pass," ] \
-    || fail "not two waits on main and a pass once main was green: $(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)"
-  [ "$(st 'select(.step == "landed") | .card')" = "$c" ] || fail "the card did not land: $(st '"\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
-  git -C "$R" show HEAD:n.txt > /dev/null 2>&1 || fail "the card did not land on main as it is now"
-  [ ! -e "$T/$CASE/cards/mainrun/$c" ] || fail "main's worktree was left behind"
+  mrfit; rerunstep && [ "$(ran 5)" = "flaky three" ] || fail "the card's run on main as it is now did not run what failed, or did not pass: $(ran 5)"
   loop check || fail "the record check refuses a test line with its verdicts"
   # The Board's Metrics count each failure by its verdict, and add up the seconds main's runs took: here 7 and 5 (the
-  # stub's runs take under a second, so the lines are given those).
-  jq -cn '[inputs] | (map(.step == "test" and .mainRun != null) | indices(true)) as $i | .[$i[0]].mainRun.sec = 7 | .[$i[1]].mainRun.sec = 5 | .[]' \
-    "$ST/cards.jsonl" > "$STUB/cards.new" && mv "$STUB/cards.new" "$ST/cards.jsonl"
+  # stub's runs take under a second, so the lines are given those). They count a card once it has ended: its landed line.
+  eng 'append "$(line c7 7 landed ok "{\"product\":true,\"sha\":\"$(git rev-parse HEAD)\"}")"' || fail "the card's landed line could not be written"
   [ "$(loop snapshot --fresh | jq -c '.metrics.today.testFailures')" = '{"card":0,"main":4,"flaky":0,"mainSec":12}' ] \
     || fail "the snapshot's metrics do not count the failures by verdict, with main's seconds: $(loop snapshot --fresh | jq -c '.metrics.today.testFailures')"
 }
 
-# Issue 582 (#530 tested three times on its old commit, through a fix round that changed nothing, and blocked): main
-# fails b.test's flaky as the card is built on it (M1), and main fixes it (M2) during the card's run again, so main's
-# run of the case passes and the failure is the card's. Bug it catches: the card went to a fix session and tested
-# again on M1, without main's fix. It is brought onto M2 first, the failed case runs again there and passes: no fix.
-t_mainfixed() {
-  rerunsetup '1 fail flaky' '2 fail flaky'; rerunfiles
-  local m2
-  echo '[ "$n" != 2 ] || { echo fixed > "$R/fix.txt"; git -C "$R" add fix.txt; git -C "$R" commit -qm "main fixes flaky"; git -C "$R" rev-parse HEAD > "$STUB/m2"; }
-[ "$n" != 3 ] || git rev-parse HEAD > "$STUB/head.3"' > "$STUB/pre"
-  loop run 1 > /dev/null || fail "run exited non-zero"
-  m2=$(cat "$STUB/m2")
-  [ "$(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)" = "test fail,test pass," ] && [ "$(wc -l < "$STUB/sessions")" = 1 ] \
-    || fail "the card did not test again on main before any fix session: $(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)"
-  [ "$(tline 1 '.verdicts | tojson')" = '[{"case":"b.test: flaky","verdict":"card"}]' ] || fail "the case did not pass on main's run: $(tline 1 tojson)"
-  [ "$(ran 3)" = flaky ] && git -C "$R" merge-base --is-ancestor "$m2" "$(cat "$STUB/head.3")" \
-    || fail "the failed case did not run again alone on a commit holding main's fix: $(ran 3) on $(cat "$STUB/head.3" 2>&1)"
-  [ "$(st 'select(.step == "landed") | .issue')" = 7 ] || fail "the card did not land: $(st '"\(.step) \(.result)"' | tr '\n' ,)"
+# settle() of card c7 at its landing step, as card() calls it after a wait for main or once main moved under its failed
+# run, caught cleared (#582). session() stands for the session that brings the change onto main (no model): told main
+# moved, it makes <edit>, and it notes each call in $STUB/sessions; checked() (the Done-when check of its reply)
+# passes. <more> runs after it in the same engine shell. run.out ends with what <more> prints.
+mrsettle() { # <edit> [more]
+  fx_in 'cd "$R" || exit 9; caught="" waitsec=0 behind="[]" parsecheck=""
+    session() { echo x >> "$STUB/sessions"; grep -q "^# Main moved" <<<"$2" && (cd "$1" && '"$1"') > /dev/null 2>&1; echo "{}"; }
+    checked() { :; }
+    settle c7 7 "$CONVEYOR_CARDS/c7" "Build the issue." land "$(issue 7 2026-01-01)"; echo "settle: $?"; '"${2:-}"
 }
 
-# Issue 582, after the landing's one rebuild (caught): #7 passes on M1, main changes its a.txt line (main1), so the
-# landing rebuilds it there; its run after the rebuild (run 2: main's change selects a.test) and the run again (3)
-# fail a.test's one, and main changes the same line again (main2), so the change no longer applies. Bug it catches:
-# settle() put such a card back on its old commit, as after the rebuild, and run 4 ran there, without main's change.
-# A session brings it onto main as it is now, and run 4 passes there.
-caughtsetup() { # <plan lines>
-  rerunsetup '2 fail one' '3 fail one' "$@"
-  for i in 4 5; do echo "$GO" > "$STUB/review.$i"; done
-  echo l1 > "$R/a.txt"; git -C "$R" add a.txt; git -C "$R" commit -qm "a.txt"
-  echo "if grep -q '^# Main moved' \"\$STUB/brief\"; then sed -i 's/^main2\$/seven/' a.txt; elif grep -q '^# Landing conflict' \"\$STUB/brief\"; then sed -i 's/^main1\$/seven/' a.txt; else sed -i 's/^l1\$/seven/' a.txt; fi" > "$STUB/build"
-  echo '[ "$n" != 1 ] || { echo main1 > "$R/a.txt"; git -C "$R" add a.txt; git -C "$R" commit -qm "main moves"; }
-[ "$n" != 2 ] || [ ! -e "$STUB/move2" ] || { echo main2 > "$R/a.txt"; git -C "$R" add a.txt; git -C "$R" commit -qm "main moves again"; git -C "$R" rev-parse HEAD > "$STUB/m2"; }
-[ "$n" != 4 ] || git rev-parse HEAD > "$STUB/head.4"' > "$STUB/pre"
+# Issue 582 (#530 tested three times on its old commit, through a fix round that changed nothing, and blocked): main
+# fails b.test's flaky as the card is built on it (M1), and main fixes it (M2) before the card's failing case runs on
+# main, so main's run of the case passes and the failure is the card's. Bug it catches: the card went to a fix session
+# and tested again on M1, without main's fix. It is brought onto M2 first (settle()), the failed case runs again
+# there alone and passes: no session.
+t_mainfixed() {
+  rerunsetup '1 fail flaky' '2 fail flaky'; rerunfiles
+  git -C "$R" worktree add -q --detach "$T/$CASE/cards/c7" && rerunedit 'echo two >> a.txt' \
+    || fail "the card's worktree could not be made"
+  local m2 v w=$T/$CASE/cards/c7
+  echo '[ "$n" != 3 ] || git rev-parse HEAD > "$STUB/head.3"' > "$STUB/pre"
+  ! rerunstep || fail "the card's test step passed"
+  echo fixed > "$R/fix.txt"; git -C "$R" add fix.txt; git -C "$R" commit -qm "main fixes flaky"; m2=$(git -C "$R" rev-parse HEAD)
+  v=$(mrverdicts '{"of":null,"files":[{"file":"b.test","cases":[{"name":"flaky","line":"1"}]}],"timeout":null}') || fail "verdicts failed: $v"
+  [ "$(jq -c .verdicts <<<"$v")" = '[{"case":"b.test: flaky","verdict":"card"}]' ] && [ "$(jq -r .mainRun.sha <<<"$v")" = "$m2" ] \
+    || fail "the case did not pass on main's run at M2: $v"
+  mrsettle 'false'
+  [ "$(tail -n 1 "$T/$CASE/run.out")" = "settle: 0" ] && [ "$(git -C "$w" rev-parse HEAD)" = "$m2" ] && [ "$(git -C "$w" diff --cached --name-only HEAD)" = a.txt ] \
+    || fail "settle() did not bring the change onto M2 as it was: $(cat "$T/$CASE/run.out")"
+  rerunstep || fail "the failed case did not pass on M2: $(ran 3)"
+  [ "$(ran 3)" = flaky ] && [ "$(cat "$STUB/head.3")" = "$m2" ] && [ ! -e "$STUB/sessions" ] \
+    || fail "the failed case did not run again alone on main's fix, before any session: $(ran 3) on $(cat "$STUB/head.3" 2>&1)"
 }
-caughtland() { # what the run after main's second move must show
-  st 'select(.step == "rebase") | .reason' | grep -q '^rebase onto main conflicts' || fail "#7 did not go to the landing's rebuild: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
-  git -C "$R" merge-base --is-ancestor "$(cat "$STUB/m2")" "$(cat "$STUB/head.4")" \
-    || fail "the failed case ran again on the old commit, not on main as it is now: $(cat "$STUB/head.4" 2>&1)"
-  [ "$(st 'select(.step == "fix") | .reason')" = "main moved since the card's change was made, and the change no longer applied to it" ] \
-    || fail "not one session bringing the card onto main, and no fix round: $(st 'select(.step == "fix") | .reason')"
-  [ "$(st 'select(.step == "landed") | .issue')" = 7 ] && grep -qx seven "$R/a.txt" || fail "#7 did not land: $(st '"\(.step) \(.result)"' | tr '\n' ,)"
+
+# Issue 582, after the landing's one rebuild (caught): #7's change (a.txt's line to seven) passes on its first main
+# (run 1), main changes that line (main1), and the landing's rebuild brings the change onto main1; then main changes
+# the line again (main2), so the change no longer applies. Bug it catches: settle() put such a card back on its old
+# commit, as after the rebuild, and its run went there, without main's change. With caught cleared, as card() clears
+# it, one session, told main moved, brings it onto main2 (settle() returns 2: it is reviewed again there), with no
+# fix round. Given <plan lines> (the stub's, for runs 2 on), the card's run 1 is made, on its first main.
+caughtsetup() { # [plan lines]
+  local w=$T/$CASE/cards/c7
+  rerunsetup "$@"; rerunfiles
+  git -C "$R" worktree add -q --detach "$w" && rerunedit 'echo seven > a.txt' \
+    || fail "the card's worktree could not be made"
+  [ $# = 0 ] || rerunstep || fail "the card's first run did not pass: $(ran 1)"
+  echo main1 > "$R/a.txt"; git -C "$R" commit -qam "main moves"
+  git -C "$w" reset -q --hard "$(git -C "$R" rev-parse HEAD)" && rerunedit 'echo seven > a.txt' || fail "the landing's rebuild onto main1 could not be made"
 }
-# Main moved during the run (its run of the case passes: the failure is the card's).
+caughtmove() { echo main2 > "$R/a.txt"; git -C "$R" commit -qam "main moves again"; }
+caughtfit() { # what settle() must show
+  local w=$T/$CASE/cards/c7
+  grep -qx "settle: 2" "$T/$CASE/run.out" && [ "$(st 'select(.step == "fix") | .reason')" = "main moved since the card's change was made, and the change no longer applied to it" ] \
+    && [ "$(wc -l < "$STUB/sessions")" = 1 ] || fail "not one session bringing the card onto main, and no fix round: $(cat "$T/$CASE/run.out"): $(st 'select(.step == "fix") | .reason')"
+  [ "$(git -C "$w" rev-parse HEAD)" = "$(git -C "$R" rev-parse ':/^main moves again')" ] && [ "$(git -C "$w" show :a.txt)" = seven ] \
+    || fail "the change was not brought onto main as it is now: $(git -C "$w" log -1 --format=%s) $(git -C "$w" show :a.txt 2>&1)"
+}
+# Main moved under the card's failed run (its run of the case passed there: the failure is the card's): the run after
+# the session goes onto main2's commit. Its run after the rebuild (2: main's change selects a.test) and the run again
+# (3) fail a.test's one. Bug it catches too (#374): a.test, which passed in run 1 and failed in run 2, kept its `pass`
+# line beside its `fail` line, and the run again skipped it, ran no file and "passed on re-run".
 t_mainfixedcaught() {
-  caughtsetup; rerunfiles; : > "$STUB/move2"
-  loop run 1 > /dev/null || fail "run exited non-zero"
-  caughtland
+  caughtsetup '2 fail one' '3 fail one'
+  echo '[ "$n" != 4 ] || git rev-parse HEAD > "$STUB/head.4"' > "$STUB/pre"
+  ! rerunstep && [ "$(ran 3)" = one ] || fail "the run again after the rebuild did not run the case that failed: $(ran 2) | $(ran 3)"
+  caughtmove; mrsettle 'sed -i "s/^main2\$/seven/" a.txt'; caughtfit
+  rerunstep && [ "$(cat "$STUB/head.4")" = "$(git -C "$R" rev-parse HEAD)" ] || fail "the run after the session did not pass on main2's commit: $(cat "$STUB/head.4" 2>&1)"
 }
-# Main fails the case too: the card waits for main to change, and main changes the same line. Its landed line's
-# waitSec counts that wait (at least the 1 s slept here). Bug it catches: the drift watch (bench/drift.sh) had no
-# minutes a card waited for main, as no line recorded them. Each test file runs alone (rerunfiles). Bug it catches
-# too (#374): a.test, which passed in run 1 and failed in run 2, kept its `pass` line beside its `fail` line, and the
-# run again (3) skipped it, ran no file and "passed on re-run", so the case never ran on main.
+# Main failed the case too: the card waited for main to change, and main changed the same line. Its landed line's
+# waitSec counts that wait: card()'s wait (mainwaited(), its mainwait() stubbed to move the shell's clock on 5 s in
+# place of a real wait) and the landed line's extra as card() makes it (landextra()). Bug it catches: the drift watch
+# (bench/drift.sh) had no minutes a card waited for main, as no line recorded them.
 t_mainredcaught() {
-  caughtsetup 'main fail one'; rerunfiles
-  local lp
-  ( loop run 1 > "$STUB/run.out" 2>&1 ) & lp=$!
-  wait_until 'grep -qs "waiting for main to change" "$T/$CASE/cards/"*.live' 'cat "$STUB/run.out"' || fail "the card did not wait for main: $(cat "$STUB/run.out")"
-  sleep 1 # sleep: the card waits for main a whole second at least, so its waitSec is 1 or more
-  sed -i '/^main /d' "$STUB/plan"
-  echo main2 > "$R/a.txt"; git -C "$R" add a.txt; git -C "$R" commit -qm "main moves again"; git -C "$R" rev-parse HEAD > "$STUB/m2"
-  wait "$lp" || fail "run exited non-zero: $(cat "$STUB/run.out")"
-  caughtland
-  [ "$(st 'select(.step == "landed") | .waitSec >= 1')" = true ] || fail "the landed line does not count the wait for main: $(st 'select(.step == "landed") | .waitSec')"
+  caughtsetup; caughtmove
+  mrsettle 'sed -i "s/^main2\$/seven/" a.txt' 'mainsec=0; mainwait() { SECONDS=$((SECONDS + 5)); }
+    mainwaited "$CONVEYOR_CARDS/c7" "$(git rev-parse HEAD)" "a.test: one"
+    locked land c7 7 "$CONVEYOR_CARDS/c7" "title 7 (#7)" "$(landextra "" "" "[]")"; echo "land: $?"'; caughtfit
+  [ "$(tail -n 1 "$T/$CASE/run.out")" = "land: 0" ] && [ "$(git -C "$R" show HEAD:a.txt)" = seven ] || fail "#7 did not land: $(cat "$T/$CASE/run.out")"
+  # 5 s, or 6 when the clock's second turns as it is read.
+  [ "$(st 'select(.step == "landed") | .waitSec | IN(5, 6)')" = true ] || fail "the landed line does not count the wait for main: $(st 'select(.step == "landed")')"
 }
 
 # Issue 598. Bug it catches: a landing broke a test its card did not run, and nothing linked the test to the files it
@@ -362,39 +397,43 @@ t_mainredretry() {
   [ -z "$(eng 'locked redpick')" ] || fail "a shut fix card's commit started a card again"
 }
 
-# Issue 597, the fix card's whole run: it is picked ahead of #7, built from its stand-in issue (the cases, main's
-# commit, the last commit of each case's file) and lands under a commit naming the cases and main's commit. Bug it
-# catches: a card of issue 0 with no branch had no issue to read (branchissue() wants a branch), or closed and
-# commented on an issue on GitHub. A case found on main's commit during the review (as mainred() adds it) reaches the
-# fix session straight after that review: the brief was read once, or only at the head of each round, so the fix
-# session after the review that saw the case added never heard of it. Issue 615: a case with a test link that joins
-# during the card's last test run lands its link; with no redbrief() before the landing, its link was never staged.
-# Bug it catches too (#374): its runs write no log of their own, and each file run alone (filecmd()) gave no result
-# for its named case, so the fix card was blocked; such a file's exit is the result of its cases (redrun()).
+# Issue 597, the fix card's brief and landing commit, as card() makes them: it is built from its stand-in issue
+# (redissue(): the cases, main's commit, the last commit of each case's file), redbrief() runs before each session and
+# before the landing, and it lands under a commit naming the cases and main's commit (redmsg()). Bug it catches: a
+# card of issue 0 with no branch had no issue to read (branchissue() wants a branch), or closed an issue on GitHub
+# (a Closes line). A case found on main's commit during the review (as mainred() adds it) reaches the fix session
+# straight after that review: the brief was read once, or only at the head of each round, so the fix session after
+# the review that saw the case added never heard of it. Issue 615: a case with a test link that joins during the
+# card's last test run lands its link; with no redbrief() before the landing, its link was never staged.
+# Bug it catches too (#374): its runs of its cases write no log of their own, and each file run alone (filecmd()) gave
+# no result for its named case, so the fix card was blocked; such a file's exit is the result of its cases (redrun()).
 t_mainredland() {
   setup "[$(issue 7 2026-01-01)]"
-  printf '%s\n' $'[P1] a.txt:1 wrong word\nUSER-VISIBLE: no\nVERDICT: NO-GO' > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
-  provenbug # labelled as a P0 bug: the bug-card check holds it
-  # No stub a.test.sh on main: main's run (`bash a.test.sh`) must fail there, or the card closes as already done.
-  git -C "$R" rm -q a.test.sh && git -C "$R" commit -qm "no a.test.sh" || fail "main's a.test.sh could not be removed"
-  echo "grep -qs flaky '$ST/mainred.json' || { jq -c '.reds[0].cases += [{case: \"b.test: flaky\", file: \"b.test\", by: \"c9\", files: [], last: \"\"}]' '$ST/mainred.json' > '$STUB/red.new' && mv '$STUB/red.new' '$ST/mainred.json'; }" > "$STUB/review-cmd"
-  # Issue 615: a case with a link joins during the card's last test run, after every session, review and settle().
   # The fixture ignores .conveyor/ (setup); a project tracks its links file, as this one does.
   printf 'conveyor/\n.conveyor/*\n!.conveyor/test-links.json\n' > "$R/.gitignore"; git -C "$R" commit -qam "track the test links"
-  echo "echo x >> '$STUB/tests'; grep -qs d.sh '$ST/mainred.json' || { jq -c '.reds[0].cases += [{case: \"d.test: one\", file: \"d.test\", by: \"c9\", files: [], last: \"\", links: {\"lib/d.sh\": [\"tests/d.test.sh\"]}}]' '$ST/mainred.json' > '$STUB/red.new' && mv '$STUB/red.new' '$ST/mainred.json'; }" > "$STUB/test-cmd"
-  local s c
+  local s c out
   s=$(git -C "$R" rev-parse HEAD)
-  eng 'mainred c1 "a.test: one" a.test '"$s"' && mainred c1 c.test c.test '"$s" || fail "the cases were not recorded"
-  loop run 1 > "$STUB/run.out" 2>&1 || fail "run exited non-zero: $(cat "$STUB/run.out")"
-  c=$(st 'select(.step == "landed") | .card')
-  [[ $c == *-0 ]] && [ "$(st 'select(.step == "picked") | .issue')" = 0 ] || fail "the fix card did not land ahead of #7: $(st '"\(.issue) \(.step) \(.reason)"' | tr '\n' ,)"
-  [ "$(wc -l < "$STUB/sessions")" = 2 ] && grep -qF "These test cases fail on main at ${s:0:12}" "$STUB/brief" && grep -qF -- '- `a.test: one`, found by card c1.' "$STUB/brief" \
-    || fail "the brief does not name main's commit and the cases"
-  grep -qF -- '- `b.test: flaky`, found by card c9.' "$STUB/brief" || fail "the fix session's brief lacks the case added during the review before it"
-  [ "$(git -C "$R" log -1 --format=%B)" = "fix(product): Main is red: a.test: one, c.test, b.test: flaky (main ${s:0:12})"$'\n\n'"Conveyor card $c" ] \
-    || fail "the commit does not name the cases and main's commit: $(git -C "$R" log -1 --format=%B)"
-  [ "$(git -C "$R" show HEAD:.conveyor/test-links.json 2>&1 | jq -c . 2>&1)" = '{"a.txt":["a.test.sh"],"lib/d.sh":["tests/d.test.sh"]}' ] \
-    || fail "the link of the case that joined during the last test run did not land: $(git -C "$R" show HEAD:.conveyor/test-links.json 2>&1)"
+  c=$(eng 'mainred c1 "a.test: one" a.test '"$s"' && mainred c1 c.test c.test '"$s"' && locked redpick') && c=${c%% *} && [[ $c == *-0 ]] \
+    && git -C "$R" worktree add -q --detach "$T/$CASE/cards/$c" || fail "the fix card was not picked: $c"
+  # The briefs before the build, before the fix after the review that adds b.test's flaky, and before the landing
+  # after d.test's one joined: each its own line of the output (as JSON). The message is made after the review, as
+  # card() makes it, before the last test run.
+  out=$(eng 'wt=$CONVEYOR_CARDS/'"$c"'; issue=$(redissue '"$c"') && sprompt=$(issuepart "$issue") || exit 1
+    b() { redbrief '"$c"' 0 "" && jq -Rs . <<<"$sprompt"; }
+    b && mainred c9 "b.test: flaky" b.test '"$s"' && b && redmsg '"$c"' "$issue" > "$STUB/msg" \
+      && jq -c ".reds[0].cases += [{case: \"d.test: one\", file: \"d.test\", by: \"c9\", files: [], last: \"\", links: {\"lib/d.sh\": [\"tests/d.test.sh\"]}}]" "$MAINRED" > "$MAINRED.new" \
+      && mv "$MAINRED.new" "$MAINRED" && b') || fail "the fix card's briefs could not be made: $out"
+  [[ $(sed -n 1p <<<"$out" | jq -r .) == "# Issue #0: Main is red: a.test: one, c.test"$'\n\n'"These test cases fail on main at ${s:0:12}."*'- `a.test: one`, found by card c1.'* ]] \
+    || fail "the build's brief is not the stand-in issue, naming main's commit and the cases: $(sed -n 1p <<<"$out")"
+  sed -n 2p <<<"$out" | jq -r . | grep -qF -- '- `b.test: flaky`, found by card c9.' || fail "the fix session's brief lacks the case added during the review before it: $(sed -n 2p <<<"$out")"
+  [ "$(cat "$STUB/msg")" = "fix(product): Main is red: a.test: one, c.test, b.test: flaky (main ${s:0:12})"$'\n\n'"Conveyor card $c" ] \
+    || fail "the commit does not name the cases and main's commit: $(cat "$STUB/msg")"
+  [ "$(git -C "$T/$CASE/cards/$c" show :.conveyor/test-links.json 2>&1 | jq -c . 2>&1)" = '{"a.txt":["a.test.sh"],"lib/d.sh":["tests/d.test.sh"]}' ] \
+    && [ "$(git -C "$T/$CASE/cards/$c" diff --cached --name-only)" = .conveyor/test-links.json ] || fail "the link of the case that joined during the last test run is not staged to land: $(git -C "$T/$CASE/cards/$c" show :.conveyor/test-links.json 2>&1)"
+  # The run of its cases: a command that writes no log and fails.
+  echo 'exit 1' > "$STUB/test-cmd"
+  out=$(eng 'redrun "$CONVEYOR_CARDS/'"$c"'" "$(jq -c "[.reds[0].cases[] | {name: .case, file, files, case: (.case | sub(\"^[^:]*(: |$)\"; \"\"))}]" "$MAINRED")" | jq -c "map(.verdict)"') \
+    && [ "$out" = '["fail","fail","fail","fail"]' ] || fail "a run that writes no log did not give its exit as each case's result: $out"
   [ ! -e "$STUB/filed" ] && [ ! -e "$STUB/closed" ] && [ ! -e "$STUB/comments" ] || fail "main-red filed, closed or commented on an issue: $(cat "$STUB/filed" "$STUB/closed" "$STUB/comments" 2>&1)"
   loop check || fail "the record check refuses the fix card's picked line"
 }
