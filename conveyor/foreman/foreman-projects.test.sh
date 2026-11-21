@@ -447,6 +447,9 @@ out=$(open "$M" a1)
 # A host file with no foreman.name: the line names no Foreman in brackets; it read "the Foreman (Foreman)" on a fresh install.
 jq -e '(.systemMessage | startswith("This session is now the Foreman: ")) and (.systemMessage | contains("(Foreman)") | not) and (.hookSpecificOutput.additionalContext | contains("Foreman mode: you are Foreman"))' <<<"$out" >/dev/null \
   || fail "the claim at start did not say so in one line and give the Foreman's start: $out"
+# Bug: the line still said the watchers start at the end of the first turn, though the session's start hook starts them (issue 1172).
+jq -e '.systemMessage | (contains("first turn") | not) and contains("start at once")' <<<"$out" >/dev/null \
+  || fail "the claim at start (input a1, no Foreman) gave the old watcher timing: $out"
 # The marked session gone: its Claude process ended (the record Claude Code leaves names a pid no longer running).
 dead=$(bash -c 'echo $$'); held a1 "$dead"
 out=$(open "$M" a2); [ "$(mark)" = a2 ] || fail "a new session did not claim the role from a Foreman whose process ended: $out"

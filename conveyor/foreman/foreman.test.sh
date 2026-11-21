@@ -100,6 +100,11 @@ for h in 'SessionStart foreman.sh start' 'Stop stop.sh state' 'Stop stop.sh repl
     || fail "no plugin hook runs $h"
 done
 jq -e '[.hooks.Stop[].hooks[] | select(.command | endswith("waiter.sh")) | .asyncRewake] == [true]' "$P" >/dev/null || fail "the waiter does not wake the session"
+# Issue 1172: a session started or resumed with no one typing runs no turn, so only SessionStart can start its waiter.
+# Its mode is in CONVEYOR_WAITER_START, with no argument, as an older engine the shim selects refuses --start with a
+# usage error on stderr, which asyncRewake sends to the session as a wake.
+jq -e '[.hooks.SessionStart[] | select(.matcher == null) | .hooks[] | select(.command | test("CONVEYOR_WAITER_START=1 .*shim\\.sh conveyor/foreman/waiter\\.sh$")) | .asyncRewake] == [true]' "$P" >/dev/null \
+  || fail "no SessionStart hook of every source starts the waiter that can wake the session: $(jq -c '.hooks.SessionStart' "$P")"
 jq -e 'has("hooks") | not' "$S" >/dev/null || fail "the launcher's settings repeat the plugin's hooks: $(cat "$S")"
 grep -q '2 record' "$T/setup.out" || fail "setup does not say it watches both records: $(cat "$T/setup.out")"
 echo '- my note' >> "$FD/state.md"; cp "$S" "$T/first.json"

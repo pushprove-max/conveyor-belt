@@ -178,10 +178,14 @@ The waiter wakes the Foreman by ending. Before it ends, it starts a new waiter. 
 Foreman answers the wake. A wake that comes during that turn waits. The Foreman gets it when the turn ends, and gets
 it once.
 
+A Foreman session that Claude Code starts or resumes gets its waiter at once, when the session starts, also when no one
+types into it. That waiter can wake the session. When a waiter that can wake the session already runs, the start
+leaves it running.
+
 When the waiter stops for any other reason, the next prompt or tool call of the Foreman session starts it again. A
 check of the waiter's process runs at each of them. It starts a waiter only when none runs, and only one. A session
-can go on in a new Claude process. The waiter of the old process then stops, and the next stop, prompt or tool call
-starts a waiter for the new one. A wake that the old process did not get stays, and the new process gets it. When the
+can go on in a new Claude process. The waiter of the old process then stops, and the start of the new process, or its
+next stop, prompt or tool call, starts a waiter for the new one. A wake that the old process did not get stays, and the new process gets it. When the
 session is idle, no check runs, and the waiter stays down until your next message. The file `waiter.log` in the
 Foreman's folder (`foreman` in the folder that `conveyor.sh state-dir` prints) has a line each time a waiter starts and each time
 one stops, with the reason. A waiter that was killed has no time to write its reason. Its start line is then the last

@@ -5,7 +5,8 @@
 # project's main checkout that watches that project's Conveyor (or its group's: lib.sh mine) and brings the owner
 # what needs them: it files issues,
 # clears blocked cards and takes every decision to the owner; it builds nothing itself. Its hooks are the plugin's own
-# (hooks/hooks.json, run in every session through the shim): start at SessionStart; stop.sh state, stop.sh reply and
+# (hooks/hooks.json, run in every session through the shim): start and waiter.sh --start (asyncRewake, run as
+# CONVEYOR_WAITER_START=1) at SessionStart; stop.sh state, stop.sh reply and
 # waiter.sh (asyncRewake) at Stop; waiter.sh --check after each prompt and each tool call, which starts the waiter
 # again when none runs; filing before a Bash call and filed after it, failed or not (each through filing-hook.sh,
 # which ends at once, with no shim, for a command that files no issue). Each stands down in
@@ -210,7 +211,15 @@ live() {
   done
 }
 
+# start writes the session to $FD/started when it ends, marked or not, so the waiter's SessionStart hook beside it
+# (waiter.sh --start) reads the mark only once this hook's claim has ended, and ends at once in a session not marked.
 start() {
+  local rc
+  start_; rc=$?
+  [ -z "$SID" ] || { mkdir -p "$FD" && printf '%s\n' "$SID" > "$FD/started.$$" && mv -f "$FD/started.$$" "$FD/started"; } 2>/dev/null
+  return "$rc"
+}
+start_() {
   local src t launched=
   src=$(jq -r '.source // empty | strings' <<<"$IN" 2>/dev/null)
   # The launcher's first start (its launch file, consumed here) marks its session, fresh or opened by --resume or
@@ -285,7 +294,7 @@ auto() {
     return 1
   fi
   if [ -z "$m" ]; then
-    out="This session is now the Foreman$(named): no live session held the role, so it took it at its start; its watchers start at the end of its first turn."
+    out="This session is now the Foreman$(named): no live session held the role, so it took it at its start; its watchers start at once, with no turn needed."
     out+=$'\n\n'$(context)
     jq -cn --arg m "${out%%$'\n'*}" --arg c "$out" '{systemMessage: $m, hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $c}}'
     return

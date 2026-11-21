@@ -7,6 +7,12 @@
           {
             "type": "command",
             "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh conveyor/foreman/foreman.sh start"
+          },
+          {
+            "type": "command",
+            "command": "CONVEYOR_HOOK=1 CONVEYOR_WAITER_START=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh conveyor/foreman/waiter.sh",
+            "asyncRewake": true,
+            "timeout": 86400
           }
         ]
       },

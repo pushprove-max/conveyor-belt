@@ -369,7 +369,113 @@ out=$(echo '{}' | env -u CONVEYOR_FOREMAN_SESSION_PID PATH="$T/ps:$PATH" CONVEYO
 [ "$(wpid)" = "$h" ] && kill -0 "$h" || fail "the waiter $h no longer runs after --check"
 }
 
-cases=(handoff restart why downheld downstop goneblock takeover undelivered takecheck oldpid refused delivered refusedwait claimed noreader stopover reclaim checkquiet)
+# Issue 1172. begin [<hook input>]: the SessionStart hook (CONVEYOR_WAITER_START=1 waiter.sh) in the background, its stderr in
+# $T/wake; its pid in bp. Bug: a session started or resumed with no one typing ran no turn, so no hook started its
+# waiter and nothing could wake it, for hours.
+# The hook runs as hooks.json runs it, with no argument, so an older engine takes it for a stop, not a usage error.
+begin() { echo "${1:-"{}"}" | CONVEYOR_WAITER_START=1 CONVEYOR_FOREMAN_WATCHERS=$W bash "$SRC/waiter.sh" 2> "$T/wake" > /dev/null & bp=$!; }
+# up <pid>: waiter.pid names that waiter and its watcher runs.
+up() { wait_until "[ \"\$(wpid)\" = $1 ] && [ -s $FD/watchers.pid ]"; }
+
+# The Foreman's session starts with no waiter: its start's waiter listens, and wakes the session (exit 2, the wake on
+# stderr), then hands off to a waiter that listens until the next stop.
+t_startwake() {
+fixture startwake
+begin; up "$bp" || fail "the session's start (CONVEYOR_WAITER_START=1 waiter.sh, input {}) started no waiter: $(cat "$FD/waiter.log" 2>/dev/null)"
+[ "$(logged "$bp started from a checkout, at the session's start")" = 1 ] || fail "waiter.log has no start line of the waiter $bp of CONVEYOR_WAITER_START=1 waiter.sh: $(cat "$FD/waiter.log")"
+put 'Alert: one'
+# A poll, as the waiter ends only once its own poll of its watchers finds the wake and its handoff is started; a bare
+# wait would hang the case when it never ends, and the bound fails it.
+WAIT_CEILING=20 wait_until "! kill -0 $bp 2>/dev/null" || fail "the waiter of CONVEYOR_WAITER_START=1 waiter.sh did not end with a wake pending"
+wait "$bp"; rc=$?
+[ "$rc" = 2 ] && [ "$(cat "$T/wake")" = 'Alert: one' ] || fail "CONVEYOR_WAITER_START=1 waiter.sh (input {}) did not wake the session with 'Alert: one' (exit $rc): $(cat "$T/wake")"
+isheld "$(wpid)" || fail "no waiter listens after CONVEYOR_WAITER_START=1 waiter.sh delivered its wake"
+}
+
+# A session that is not the Foreman (another is marked, not the launcher's) gets no waiter, and its hook ends at once
+# when the session's start hook beside it (foreman.sh start, the real one) has ended, not at its 10 s bound.
+t_startother() {
+fixture startother
+echo 's1 2026-01-01T00:00:00Z' > "$FD/session"
+in='{"session_id":"s2","source":"resume"}'
+(echo "$in" | env -u CONVEYOR_FOREMAN CONVEYOR_WAITER_START=1 CONVEYOR_FOREMAN_WATCHERS="$W" bash "$SRC/waiter.sh" > "$T/out" 2>&1; echo $? > "$T/rc") &
+echo "$in" | env -u CONVEYOR_FOREMAN bash "$SRC/foreman.sh" start > /dev/null 2>&1
+WAIT_CEILING=4 wait_until "[ -s $T/rc ]" || fail "CONVEYOR_WAITER_START=1 waiter.sh (input $in, s1 marked) did not end once foreman.sh start ended"
+rc=$(cat "$T/rc"); out=$(cat "$T/out")
+[ "$rc" = 0 ] && [ -z "$out" ] || fail "CONVEYOR_WAITER_START=1 waiter.sh (input $in, s1 marked) did not end with 0 (exit $rc): $out"
+[ ! -e "$FD/waiter.pid" ] && [ ! -e "$FD/waiter.log" ] && [ ! -e "$T/starts" ] || fail "CONVEYOR_WAITER_START=1 waiter.sh (input $in, s1 marked) started a waiter: $(cat "$FD/waiter.log" 2>/dev/null)"
+}
+
+# A start while a waiter of the same session's process runs that can wake it (a stop's): that one runs on, alone.
+t_startlive() {
+fixture startlive
+echo '{}' | CONVEYOR_FOREMAN_WATCHERS=$W bash "$SRC/waiter.sh" > /dev/null 2>&1 & sw=$!
+up "$sw" || fail "the stop (waiter.sh, input {}) started no waiter"
+out=$(echo '{}' | CONVEYOR_WAITER_START=1 CONVEYOR_FOREMAN_WATCHERS="$W" timeout 15 bash "$SRC/waiter.sh" 2>&1); rc=$?
+[ "$rc" = 0 ] && [ -z "$out" ] || fail "CONVEYOR_WAITER_START=1 waiter.sh (input {}) with the stop's waiter $sw running did not end with 0 (exit $rc): $out"
+[ "$(wpid)" = "$sw" ] && kill -0 "$sw" || fail "CONVEYOR_WAITER_START=1 waiter.sh (input {}) replaced the stop's waiter $sw: waiter.pid names $(wpid)"
+[ "$(logged 'started from')" = 1 ] && [ "$(wc -l < "$T/starts")" = 1 ] || fail "CONVEYOR_WAITER_START=1 waiter.sh (input {}) started a second waiter: $(cat "$FD/waiter.log")"
+}
+
+# A start of the session's new process while waiter.lock is held by the waiter of its ended one takes over.
+t_startover() {
+fixture startover
+echo '{}' | CONVEYOR_FOREMAN_LOOK=600 CONVEYOR_FOREMAN_WATCHERS=$W bash "$SRC/waiter.sh" > /dev/null 2>&1 & sw=$!
+paused "$sw"; ended; second
+CONVEYOR_FOREMAN_SESSION_PID=$SP2 begin
+up "$bp" || fail "CONVEYOR_WAITER_START=1 waiter.sh (input {}) of the new process $SP2 started no waiter: $(cat "$FD/waiter.log")"
+kill -0 "$sw" 2>/dev/null && fail "CONVEYOR_WAITER_START=1 waiter.sh (input {}) left the waiter $sw of the ended process $SP running"
+[ "$(logged "the session's start of the session's process $SP2 takes over from the waiter $sw, whose session's process $SP has ended")" = 1 ] \
+  || fail "waiter.log has no takeover by CONVEYOR_WAITER_START=1 waiter.sh (input {}): $(cat "$FD/waiter.log")"
+}
+
+# A start while a waiter that listens until the next stop runs (it cannot wake the session) takes over from it, as a
+# claim of the session at its start (foreman.sh start) may have started that one.
+t_startheld() {
+fixture startheld
+check; h=$(wpid); isheld "$h" || fail "the hook (waiter.sh --check, input {}) started no waiter"
+begin; up "$bp" || fail "CONVEYOR_WAITER_START=1 waiter.sh (input {}) did not take over from the held waiter $h: $(cat "$FD/waiter.log")"
+kill -0 "$h" 2>/dev/null && fail "CONVEYOR_WAITER_START=1 waiter.sh (input {}) left the held waiter $h running"
+[ "$(logged "the session's start takes over from the waiter $h, which listens until the next stop")" = 1 ] || fail "waiter.log has no takeover by CONVEYOR_WAITER_START=1 waiter.sh (input {}): $(cat "$FD/waiter.log")"
+}
+
+# The launcher resumes the Foreman's own session, so the mark names it already, and its start hook (foreman.sh start)
+# claims it again, which replaces a waiter of the session with one that cannot wake it. Bug: the hook accepted the
+# mark at once, started its waiter before that claim, and the claim then replaced it with a held waiter: no wake.
+# The real start hook runs, a second later than the waiter's hook has begun.
+t_startclaim() {
+fixture startclaim
+echo 'new 2026-01-01T00:00:00Z' > "$FD/session"
+in='{"session_id":"new","source":"resume"}'
+begin "$in"
+sleep 1 # sleep: the hook's first polls, while the session's start hook has not run
+[ ! -e "$FD/waiter.pid" ] && kill -0 "$bp" || fail "CONVEYOR_WAITER_START=1 waiter.sh (input $in, the mark naming the session) started a waiter or ended before the session's start hook ran: $(cat "$FD/waiter.log" 2>/dev/null)"
+echo "$FD-launch" > "$FD/launch"
+echo "$in" | CONVEYOR_FOREMAN_LAUNCH="$FD-launch" bash "$SRC/foreman.sh" start > /dev/null 2>&1
+up "$bp" || fail "CONVEYOR_WAITER_START=1 waiter.sh (input $in) started no waiter once foreman.sh start ended: $(cat "$FD/waiter.log" 2>/dev/null)"
+! ps -o args= -p "$bp" | grep -q 'waiter\.sh --held' && [ "$(logged 'takes over')" = 0 ] || fail "the launch claim (foreman.sh start, input $in) replaced the waiter $bp of waiter.sh: $(cat "$FD/waiter.log")"
+flock -n "$FD/claim.lock" true || fail "the waiter of CONVEYOR_WAITER_START=1 waiter.sh (input $in) holds claim.lock"
+}
+
+# A resume that gives the Foreman's session a new id, in a session that is not the launcher's (no CONVEYOR_FOREMAN):
+# the start hook beside this one (foreman.sh start, adopt_, here its stand-in a second later) adopts the mark and ends,
+# and this hook's waiter starts then. Bug: the hook read the mark only at once when CONVEYOR_FOREMAN was not set, so it
+# ended before the adoption and the resumed Foreman had no waiter.
+t_startadopt() {
+fixture startadopt
+echo 'old 2026-01-01T00:00:00Z' > "$FD/session"
+in='{"session_id":"new","source":"resume"}'
+CONVEYOR_FOREMAN='' begin "$in"
+sleep 1 # sleep: the hook's first polls, while the mark names the old id
+kill -0 "$bp" 2>/dev/null || fail "CONVEYOR_WAITER_START=1 waiter.sh (input $in, no CONVEYOR_FOREMAN) ended before foreman.sh start adopted the mark"
+echo 'new 2026-01-01T00:00:01Z' > "$FD/session"
+sleep 1 # sleep: the hook sees the mark while the start hook has not ended
+[ ! -e "$FD/waiter.pid" ] || fail "CONVEYOR_WAITER_START=1 waiter.sh (input $in) started its waiter before foreman.sh start ended"
+echo new > "$FD/started"
+up "$bp" || fail "CONVEYOR_WAITER_START=1 waiter.sh (input $in, no CONVEYOR_FOREMAN) started no waiter once foreman.sh start ended: $(cat "$FD/waiter.log" 2>/dev/null)"
+}
+
+cases=(handoff restart why downheld downstop goneblock takeover undelivered takecheck oldpid refused delivered refusedwait claimed noreader stopover reclaim checkquiet startwake startother startlive startover startheld startclaim startadopt)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

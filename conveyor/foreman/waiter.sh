@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# waiter.sh [--check | --held] -- the Foreman's one waiter (the Foreman session only). It runs every watcher together
+# waiter.sh [--check | --held | --start] -- the Foreman's one waiter (the Foreman session only). It runs every watcher together
 # as its own children and stays alive as their parent across turns. Only one runs per Foreman (waiter.lock).
 # With no argument it is the Stop hook (asyncRewake), the one that can wake the session: when a watcher puts a wake in
 # pending and exits, the waiter stops the rest and exits 2 with every pending wake, whole, on stderr, which wakes the
@@ -19,6 +19,12 @@
 # the same process (Claude Code's /restart) no longer reads its old hook: that hook's waiter ends at the first wake its
 # stderr does not take (deliver), its wake left pending; the next stop of the session replaces it, as a stop takes
 # over from any waiter that runs, and a claim of the session replaces it at once (lib.sh claim).
+# --start is the SessionStart hook (asyncRewake, issue 1172), which hooks.json runs as CONVEYOR_WAITER_START=1 with no
+# argument, so an older engine the shim selects runs it as a stop and never sends a usage error as a wake: a session
+# that Claude Code starts or resumes with no one typing runs no turn, so no other hook would start its waiter. It is the waiter that can wake the session, as the
+# Stop hook's is, when nothing holds waiter.lock, when the waiter that holds it listens until the next stop (held: it
+# cannot wake), or when its session's process has ended; a waiter of a session's process that lives and can wake is
+# left running, and this hook ends.
 # waiter.log, in the Foreman's folder, has a line when a waiter starts and when it ends, with why (lib.sh
 # waiter_state reads it); a waiter killed with no chance to write leaves its start line last.
 # The watchers: watch-conveyor.sh, watch-limit.sh, watch-alerts.sh, watch-idle.sh. One that exits with nothing put
@@ -50,7 +56,9 @@
 # CONVEYOR_FOREMAN_SESSION_PID (the session's process).
 set -u
 MODE=${1:-}
-case $MODE in '' | --check | --held) ;; *) echo "usage: waiter.sh [--check | --held]" >&2; exit 2 ;; esac
+[ -n "$MODE" ] || [ "${CONVEYOR_WAITER_START:-}" != 1 ] || MODE=--start
+unset CONVEYOR_WAITER_START
+case $MODE in '' | --check | --held | --start) ;; *) echo "usage: waiter.sh [--check | --held | --start]" >&2; exit 2 ;; esac
 IN=$(cat)
 SID=$(jq -r '.session_id // empty | strings' <<<"$IN" 2>/dev/null)
 # AFTER: true when this stop follows a stop another hook refused, false when it follows none; empty when the input does
@@ -58,6 +66,18 @@ SID=$(jq -r '.session_id // empty | strings' <<<"$IN" 2>/dev/null)
 AFTER=$(jq -r '.stop_hook_active | booleans' <<<"$IN" 2>/dev/null)
 SELF=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/waiter.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || exit 0
+# The session's own SessionStart hook (foreman.sh start), which runs beside this one, may mark it the Foreman or claim
+# it again (the launcher's session, a resume or fork that adopts the mark, a /clear in the Foreman's process, a new
+# session in the main checkout), and a claim by the session replaces its waiter with one that cannot wake it (lib.sh
+# claim). So --start waits until that hook has ended, however the mark reads: the hook writes the session to
+# $FD/started, read only when written in the 5 s before this began or since, so an earlier start of the session never
+# ends the wait. At most 10 s; then the mark is read once.
+if [ "$MODE" = --start ] && [ -n "$SID" ]; then
+  for _ in $(seq 50); do
+    [ "$(cat "$FD/started" 2>/dev/null)" = "$SID" ] && p_newer "$FD/started" $((SECONDS + 5)) && break
+    sleep 0.2 # sleep: the poll of the file the session's start hook writes
+  done
+fi
 foreman "$SID" || exit 0
 # KEY: the stop this Stop hook runs at (stop_key), kept by a waiter that moved to a new install. Other hooks read none.
 KEY=''
@@ -103,6 +123,10 @@ held() { [[ $1 =~ ^[0-9]+$ ]] && ps -o args= -p "$1" 2>/dev/null | grep -q '/con
 # commit's install. The session is last, as it may be empty. The mark is read again once waiter.pid is written: a claim or off
 # between the first check and then read the old waiter.pid, so it is this waiter that stands down.
 mkdir -p "$FD" || exit 0
+# --start takes waiter.lock under claim.lock (fd 9, closed once waiter.pid names it), as a claim stops and starts the
+# session's waiter under it (lib.sh claim_): a claim beside this hook (foreman.sh start) ends before this reads
+# waiter.pid, or reads the waiter.pid this writes, never one this waiter is stopping.
+[ "$MODE" != --start ] || { exec 9>>"$FD/claim.lock" && flock -w 30 9; } || exit 0
 if [ "$MODE" = --held ]; then
   flock -n 7 2>/dev/null || exit 0 # the lock its starter took, on fd 7: anything else is no lock of a waiter
 else
@@ -110,14 +134,16 @@ else
   if ! flock -n 7; then
     { read -r old _ osp _ < "$FD/waiter.pid"; } 2>/dev/null
     if [[ ${osp:-} =~ ^[0-9]+$ ]] && [ "$osp" != "$CONVEYOR_FOREMAN_SESSION_PID" ] && ! kill -0 "$osp" 2>/dev/null; then
-      log "the $([ -z "$MODE" ] && echo stop || echo hook) of the session's process $CONVEYOR_FOREMAN_SESSION_PID takes over from the waiter $old, whose session's process $osp has ended"
+      log "the $(case $MODE in '') echo stop ;; --start) echo "session's start" ;; *) echo hook ;; esac) of the session's process $CONVEYOR_FOREMAN_SESSION_PID takes over from the waiter $old, whose session's process $osp has ended"
     else
       osp=''
-      [ -z "$MODE" ] || exit 0 # --check: a waiter runs
+      # --check: a waiter runs. --start: one runs that can wake the session.
+      [ -z "$MODE" ] || { [ "$MODE" = --start ] && held "${old:-}"; } || exit 0
       # A stop takes over from any waiter of its session. One that listens until the next stop (held), or one a
       # refused stop started, cannot wake the session; nor can an earlier stop's whose hook the session no longer
       # reads, though its process runs (Claude Code's /restart, issue 594), which nothing here can tell.
-      if held "${old:-}"; then log "the stop takes over from the waiter $old, which listened during the turn"
+      if [ -n "$MODE" ]; then log "the session's start takes over from the waiter $old, which listens until the next stop"
+      elif held "${old:-}"; then log "the stop takes over from the waiter $old, which listened during the turn"
       elif [ "$AFTER" = true ]; then log "the stop that follows a refused stop takes over from the waiter $old"
       else log "the stop takes over from the waiter $old of an earlier stop, whose hook the session may no longer read"; fi
     fi
@@ -171,10 +197,11 @@ fi
 FOREMEN=${VERSIONS%/*}/foremen
 { grep -qxF "$FD" "$FOREMEN" || echo "$FD" >> "$FOREMEN"; } 2>/dev/null
 printf '%s %s %s %s\n' "$$" "${FROM:--}" "$CONVEYOR_FOREMAN_SESSION_PID" "$SID" > "$FD/waiter.pid"
+exec 9>&-
 foreman "$SID" || exit 0
 [ ! -f "$LOG" ] || [ "$(wc -l < "$LOG")" -le 400 ] ||{ tail -n 200 "$LOG" > "$LOG.new" && mv "$LOG.new" "$LOG"; } 2>/dev/null
 why='' sp=''
-log "started from ${FROM:-a checkout}${MODE:+, listening until the next stop}"
+log "started from ${FROM:-a checkout}$(case $MODE in --held) echo ', listening until the next stop' ;; --start) echo ", at the session's start" ;; esac)"
 trap 'log "ended: ${why:-it stopped for no known reason}"' EXIT
 ACK=$(mktemp) || { why='no temporary file could be made'; exit 0; }
 # deliver: 0 when anything pending went to stderr while the session's process was alive. What it relays leaves
@@ -228,7 +255,7 @@ if [ -z "$MODE" ] && [ -n "$AFTER" ]; then
     if [ "$lost" = false ] && [ "${f##*.sent-}" = "$SID" ]; then rm -f "$f"; else mv -f "$f" "${f%.sent-*}"; fi
   done
 fi
-[ -n "$MODE" ] || ! deliver || { rm -f "$ACK"; handoff; exit 2; }
+[ "$MODE" = --held ] || ! deliver || { rm -f "$ACK"; handoff; exit 2; }
 # down <name>: 0 when the waiter that started this one left that watcher out (CONVEYOR_FOREMAN_DOWN).
 down() { [ -n "${CONVEYOR_FOREMAN_DOWN:-}" ] && [ "$1" = "$CONVEYOR_FOREMAN_DOWN" ]; }
 if [ -n "${CONVEYOR_FOREMAN_WATCHERS:-}" ]; then
@@ -251,7 +278,7 @@ end=${CONVEYOR_FOREMAN_END:-$(( $(date +%s) + renew ))}
 while :; do
   left=$(( end - $(date +%s) ))
   live
-  if [ -n "$MODE" ]; then
+  if [ "$MODE" = --held ]; then
     left=$look
   elif [ "$left" -le 0 ]; then
     echo "Renew: $((renew / 3600)) hours with nothing to report; no action needed. Reply: Idle" | pending_put
@@ -259,7 +286,7 @@ while :; do
   fi
   sleep "$(( left < look ? left : look ))" 7>&- & sp=$!
   ended=''; wait -n -p ended "${PID[@]}" "$sp"; kill "$sp" 2>/dev/null
-  [ -n "$MODE" ] || ! deliver || { stop_all; handoff; exit 2; }
+  [ "$MODE" = --held ] || ! deliver || { stop_all; handoff; exit 2; }
   # The install moved: the watchers stop, and the waiter of the new install takes this one's place (its exec 7>>
   # closes this waiter.lock, so its flock takes it; a held one keeps its fd 7), with this one's renew time.
   if new=$(moved); then
@@ -271,18 +298,18 @@ while :; do
   if [ -n "$FROM" ] && [ ! -f "$SELF" ]; then
     echo "WATCHER DOWN: the Conveyor install $VERSIONS/$FROM the Foreman's waiter ran from is gone, and the project's commit is not installed; the watchers stopped. The next hook of this session starts them again; if no wake comes after it, run /conveyor-belt:setup in $CONVEYOR_MAIN" | pending_put
     log "its install $FROM is gone"
-    if [ -z "$MODE" ] && deliver; then why="$why (its install $FROM is gone)"; stop_all; exit 2; fi
+    if [ "$MODE" != --held ] && deliver; then why="$why (its install $FROM is gone)"; stop_all; exit 2; fi
     why="its install $FROM is gone; the wake waits in pending for the next stop"; stop_all; exit 0
   fi
   for w in "${!PID[@]}"; do
     [ "${PID[$w]}" = "${ended:-}" ] || continue
     # A held waiter's watcher that put a wake is started again: the wake waits in pending for the next stop.
-    if [ -n "$MODE" ] && [ "$(wakes)" -gt "$had" ]; then had=$(wakes); sleep 5 7>&-; start "$w"; continue; fi
+    if [ "$MODE" = --held ] && [ "$(wakes)" -gt "$had" ]; then had=$(wakes); sleep 5 7>&-; start "$w"; continue; fi
     now=$(date +%s); kept=()
     for t in ${TRIES[$w]:-}; do [ $((now - t)) -ge 3600 ] || kept+=("$t"); done
     if [ ${#kept[@]} -ge 3 ]; then
       echo "WATCHER DOWN: $w exited with nothing to report 4 times in an hour; it is not started again until the next stop" | pending_put
-      if [ -n "$MODE" ]; then unset 'PID[$w]'; had=$(wakes); log "$w is down until the next stop"; continue; fi
+      if [ "$MODE" = --held ]; then unset 'PID[$w]'; had=$(wakes); log "$w is down until the next stop"; continue; fi
       deliver; why="$why (WATCHER DOWN: $w)"; stop_all; handoff "$w"; exit 2
     fi
     TRIES[$w]="${kept[*]} $now"
