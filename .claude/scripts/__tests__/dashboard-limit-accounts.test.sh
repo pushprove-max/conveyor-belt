@@ -6,7 +6,7 @@
 # the accounts read every 5 min whatever wait the 429 named, and the figures it kept carried no time.
 set -euo pipefail
 SOURCE=$(git rev-parse --show-toplevel)
-T=$(cd "$(mktemp -d /tmp/dashboard-limit-accounts-test.XXXXXX)" && pwd -P)
+T=$(cd "$(mktemp -d "${TMPDIR:-/tmp}"/dashboard-limit-accounts-test.XXXXXX)" && pwd -P)
 trap 'rm -rf "$T"' EXIT
 H=$T/home X=$T/profiles/two/home
 mkdir -p "$H/.claude" "$H/.config/conveyor" "$X" "$T/cache"

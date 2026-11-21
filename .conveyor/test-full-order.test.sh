@@ -17,7 +17,7 @@ no() { echo "not ok - $1"; fails=1; }
 # 99 s, d at 5 s) and a line that is no JSON show that only the newest run counts, for a file it times and for one it
 # does not (bug: a merge of all runs gave d the older 5 s, so it started third), and a bad line is passed over.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/t"
-cp "$HERE/test-full.sh" "$R/.conveyor/"
+cp "$HERE/test-full.sh" "$HERE/test-share.sh" "$R/.conveyor/"
 for f in a b c d; do printf '%s\n' "echo $f >> \"\$(dirname \"\$0\")/../ran\"" > "$R/t/$f.test.sh"; done
 echo ran > "$R/.gitignore"
 git -C "$R" init -q && git -C "$R" add -A && git -C "$R" commit -qm init

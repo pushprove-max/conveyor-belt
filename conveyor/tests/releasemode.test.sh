@@ -19,7 +19,7 @@ modesetup() {
   local i
   runsetup true
   tune '.test.full = "bash .conveyor/test-full.sh"'
-  mkdir -p "$R/t" && cp "$SRC/../.conveyor/test-full.sh" "$R/.conveyor/test-full.sh" || fail "the fixture could not be made"
+  mkdir -p "$R/t" && cp "$SRC/../.conveyor/test-full.sh" "$SRC/../.conveyor/test-share.sh" "$R/.conveyor/" || fail "the fixture could not be made"
   POOL=2:$T/$CASE/pool
   # Each start line also names the pool slot the file was started on, "none" when it holds none: the slot file that
   # CONVEYOR_TEST_SLOT's descriptor is open on (a turn on the run's home slot, <fd>.t, names the home slot's descriptor).
@@ -27,7 +27,7 @@ modesetup() {
     printf '%s\n' "p=${POOL#2:}" 'd=${CONVEYOR_TEST_SLOT:-}; d=${d%%.*}; k=none; for s in 1 2; do [ -n "$d" ] && [ "/dev/fd/$d" -ef "$p/$s" ] && k=$s; done' \
       'echo "$0 start $EPOCHREALTIME $k" >> "$STUB/times"' 'sleep 0.5' 'echo "$0 end $EPOCHREALTIME" >> "$STUB/times"' > "$R/t/f$i.test.sh" # sleep: a stand-in test file that runs a while, so files run at once overlap
   done
-  git -C "$R" add -f .conveyor/test-full.sh t && git -C "$R" commit -qm 'the suite' && git -C "$R" push -q origin main || fail "the fixture could not be made"
+  git -C "$R" add -f .conveyor/test-full.sh .conveyor/test-share.sh t && git -C "$R" commit -qm 'the suite' && git -C "$R" push -q origin main || fail "the fixture could not be made"
 }
 # The most of the four files that ran at once, from $STUB/times; fails unless each file started and ended once.
 atonce() {

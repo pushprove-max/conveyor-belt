@@ -423,6 +423,8 @@ The host file holds the machine's settings. Each is unset by default:
 - `"mode": "pause"` pauses every project. `conveyor.sh machine pause` and `machine resume` write it, and so does the
   Board's machine head.
 - `testSlots`: the size of the machine's pool of test slots, one core each (`conveyor/README.md`, Test slots).
+- `testTmpMB`: 2048 when unset. The share of the temp space, in MB, that each test file of this repository's full
+  suite and of a card's test step can write ([Releases](releases.md)).
 - `reserveCores`: 0 when unset. The cores that card work never uses, so that you always have free cores. A number
   keeps that many of the highest-numbered cores, and a list of core numbers keeps those cores
   ([Cores kept for you](configuration.md#cores-kept-for-you)).

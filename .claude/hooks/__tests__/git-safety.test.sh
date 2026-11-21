@@ -336,7 +336,7 @@ GS_S="" GS_T="" F="" FT="" B="" OUTSIDE=""
 if [ "$ON" = 1 ]; then
   GS_S=gs-s-$$ GS_T=gs-t-$$
   F=/tmp/claude-session-$GS_S FT=/tmp/claude-session-$GS_T
-  B=$(mktemp -d /tmp/gs-b.XXXXXX); OUTSIDE=$(mktemp -d /var/tmp/gs-out.XXXXXX)
+  B=$(mktemp -d "${TMPDIR:-/tmp}"/gs-b.XXXXXX); OUTSIDE=$(mktemp -d /var/tmp/gs-out.XXXXXX)
   mkdir -p "$F" "$FT"
   trap 'rm -rf "$F" "$FT" "/tmp/claude-session-gs-s2-$$" "/tmp/claude-session-gs-s3-$$" "$B" "$OUTSIDE"' EXIT
   G() { env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$B/repo" "$@"; }

@@ -37,7 +37,8 @@ t_tests() {
 # Bugs: a card whose tests pass after their one fix round does not land; a card landing on its last review's NO-GO
 # skips its tests, or files the follow-ups before they have passed; a failed run names a file the test itself logged
 # (`-- FAIL widget.test.ts`) beside the one the runner ran; the build session is not given the card's settings file,
-# or that file is left once the card has landed.
+# or that file is left once the card has landed; the card's briefs folder (CONVEYOR_BRIEFS, where its sessions keep
+# long command output: tools/outbrief.sh) is left once the card has landed (#1238 review: tidy() kept it).
 t_testsland() {
   local p
   setup "[$(issue 7 2026-01-01)]"
@@ -47,6 +48,7 @@ t_testsland() {
   # the run after the test fix passes, marking whether it came before any follow-up was filed.
   cat > "$STUB/build" <<'EOS'
 if [ "$(wc -l < "$STUB/sessions")" = 1 ]; then echo two >> a.txt; a=("$@"); for i in "${!a[@]}"; do [ "${a[i]}" != --settings ] || cp "${a[i+1]}" "$STUB/settings"; done
+  echo "$CONVEYOR_BRIEFS" > "$STUB/briefs"; : > "$CONVEYOR_BRIEFS/outbrief.kept"
 else wc -l < "$STUB/sessions" > fixed.txt; fi
 EOS
   echo 'echo x >> "$STUB/tests"; [ "$(wc -l < "$STUB/tests")" -gt 2 ] || { echo "FAIL widget.test.ts"; exit 1; }; [ -e "$STUB/filed" ] || : > "$STUB/tested-first"' > "$STUB/test-cmd"
@@ -63,6 +65,8 @@ EOS
   p=$T/$CASE/cards/$(st '.card' | head -n 1).settings
   [ "$(sed -n '1s/.*--settings \([^ ]*\) .*/\1/p' "$STUB/sessions")" = "$p" ] && [ -s "$STUB/settings" ] && [ ! -e "$p" ] \
     || fail "the build session was not given the card's settings file, or it was left once the card landed: $(head -n 1 "$STUB/sessions")"
+  [ "$(cat "$STUB/briefs" 2>/dev/null)" = "${p%.settings}.briefs" ] && [ ! -e "${p%.settings}.briefs" ] \
+    || fail "the build session was not given the card's briefs folder, or it was left once the card landed: '$(cat "$STUB/briefs" 2>/dev/null)', $(ls -A "$T/$CASE/cards")"
   recok "$ST/cards.jsonl" "a card that landed after its test fix"
 }
 

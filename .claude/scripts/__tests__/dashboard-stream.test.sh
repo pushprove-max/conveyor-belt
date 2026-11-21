@@ -13,7 +13,7 @@ set -euo pipefail
 
 SOURCE=$(git rev-parse --show-toplevel)
 FEED=$SOURCE/.claude/scripts/dashboard_stream.py
-TOP=$(cd "$(mktemp -d /tmp/dashboard-stream-test.XXXXXX)" && pwd -P)
+TOP=$(cd "$(mktemp -d "${TMPDIR:-/tmp}"/dashboard-stream-test.XXXXXX)" && pwd -P)
 trap 'rm -rf "$TOP"' EXIT
 # The host file is XDG_CONFIG_HOME's when it is set, ahead of the test's HOME: an inherited one is the owner's real host.
 unset XDG_CONFIG_HOME

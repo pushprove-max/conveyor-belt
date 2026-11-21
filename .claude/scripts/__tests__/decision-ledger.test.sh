@@ -6,7 +6,7 @@
 set -euo pipefail
 SOURCE=$(git rev-parse --show-toplevel)
 DECIDE=$SOURCE/.claude/scripts/decision.sh
-T=$(cd "$(mktemp -d /tmp/decision-ledger-test.XXXXXX)" && pwd -P)
+T=$(cd "$(mktemp -d "${TMPDIR:-/tmp}"/decision-ledger-test.XXXXXX)" && pwd -P)
 trap 'rm -rf "$T"' EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 mkdir -p "$T/home"

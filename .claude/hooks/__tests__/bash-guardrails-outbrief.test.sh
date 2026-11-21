@@ -22,7 +22,8 @@ guard() {
 # text after it, in one shell as the session's runs them; what the session sees in $T/run.out, the exit in RUN_RC.
 run() {
   local c; c=$(jq -r '.hookSpecificOutput.updatedInput.command // empty' <<<"$OUT"); c=${c:-$1}
-  RUN_RC=0; (cd "$T/p" && TMPDIR=$T/tmp bash -c "$c${2:+$'\n'$2}") > "$T/run.out" 2>&1 || RUN_RC=$?
+  # CONVEYOR_BRIEFS: the card's own folder for kept outputs, as conveyor/lib/session.sh builder() names it.
+  RUN_RC=0; (cd "$T/p" && TMPDIR=$T/tmp CONVEYOR_BRIEFS=$T/keep bash -c "$c${2:+$'\n'$2}") > "$T/run.out" 2>&1 || RUN_RC=$?
 }
 LONG="seq -f 'line %g' 2000; exit 4"
 seq -f 'line %g' 2000 > "$T/whole"
@@ -48,10 +49,11 @@ guard "seq -f 'line %g' 2000 | wc -l"; run x
 [ "$(tr -d ' ' < "$T/run.out")" = 2000 ] || fail "wc -l after a pipe did not count the whole output: $(head -c 300 "$T/run.out")"
 
 # Bug caught: the session's shell no longer moved with a cd in the call, so its next call ran in the old directory;
-# or a short output was not printed whole, or its files were left behind (only D1's saved file is in $T/tmp).
+# or a short output was not printed whole, or its files were left behind. Bug caught (#1238): D1's kept file was
+# left in $TMPDIR, where nothing removed it (6,402 filled /tmp); it is in the card's folder, $T/keep, alone.
 guard 'cd sub && echo short'; run x 'pwd -P'
-{ [ "$(cat "$T/run.out")" = "short"$'\n'"$(cd "$T/p/sub" && pwd -P)" ] && [ "$(ls "$T/tmp")" = "${SAVED##*/}" ]; } \
-  || fail "a cd in a rewritten call did not move the shell, or the short output was not whole or its file kept: $(cat "$T/run.out"); $(ls "$T/tmp")"
+{ [ "$(cat "$T/run.out")" = "short"$'\n'"$(cd "$T/p/sub" && pwd -P)" ] && [ -z "$(ls -A "$T/tmp")" ] && [ "$SAVED" = "$T/keep/$(ls "$T/keep")" ]; } \
+  || fail "a cd in a rewritten call did not move the shell, the short output was not whole or its file kept, or D1's kept file ($SAVED) is not in the card's folder alone, with none in \$TMPDIR: $(cat "$T/run.out"); tmp: $(ls -A "$T/tmp"); keep: $(ls -A "$T/keep")"
 # Bug caught: a search over the checkout root, which the guard rewrites and exits on before the brief above, printed
 # up to 200 lines of long output and saved no copy. It is shortened the same way, its whole output in the saved file.
 git -C "$T/p" init -q && cp "$T/whole" "$T/p/sub/many.txt"

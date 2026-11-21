@@ -18,7 +18,7 @@ json_multi_peredit() { jq -cn --arg fp "$1" '{tool_name:"MultiEdit", tool_input:
 # A throwaway project dir stands in for the repo root: the hook reads
 # CLAUDE_PROJECT_DIR, so the test never depends on the developer's own
 # worktree state or on a real .claude/bugfix-lock existing there.
-TMP=$(mktemp -d /tmp/bugfix-test-lock-XXXXXX)
+TMP=$(mktemp -d "${TMPDIR:-/tmp}"/bugfix-test-lock-XXXXXX)
 trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/.claude" "$TMP/src/services/__tests__"
 LOCKED_REL="src/services/__tests__/coupon.test.ts"

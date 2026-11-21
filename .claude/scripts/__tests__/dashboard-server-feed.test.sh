@@ -9,7 +9,7 @@ SOURCE=$(git rev-parse --show-toplevel)
 # The server imports the Board's own packages: its virtualenv, as dashboard-server.test.sh runs it.
 PY=${XDG_DATA_HOME:-$HOME/.local/share}/conveyor/board-venv/bin/python3
 "$PY" -c 'import pyotp, segno, cryptography' || { echo "FAIL: the Board's virtualenv $PY lacks its packages: run conveyor.sh setup" >&2; exit 1; }
-T=$(cd "$(mktemp -d /tmp/dashboard-server-feed-test.XXXXXX)" && pwd -P)
+T=$(cd "$(mktemp -d "${TMPDIR:-/tmp}"/dashboard-server-feed-test.XXXXXX)" && pwd -P)
 trap 'rm -rf "$T"' EXIT
 CONVEYOR_DASHBOARD_AUTH=$T/auth/dashboard-auth.json CONVEYOR_RULING_LOG=$T/rulings.jsonl \
   "$PY" - "$SOURCE/.claude/scripts" "$T" <<'EOF'

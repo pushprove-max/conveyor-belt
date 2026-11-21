@@ -12,19 +12,22 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
 # Bugs caught: the wrapper prints the whole log (the session's context fills again), drops a failure line or its line
 # number (the session reruns the tests to find it), passes a failing run (its own exit code), or loses output the
-# session may need to read later (the log is not the whole output). A failing command with 4,500 lines of noise on
-# both streams, two failures in the middle and a summary at the end, exiting 3.
+# session may need to read later (the log is not the whole output), or leaves the log in TMPDIR, where nothing removes
+# it (#1238: 5,909 filled /tmp), not in the card's own folder (CONVEYOR_BRIEFS, conveyor/lib/session.sh builder()). A
+# failing command with 4,500 lines of noise on both streams, two failures in the middle and a summary at the end,
+# exiting 3.
 t_testbrief() {
-  local d=$T/$CASE rc log out; mkdir -p "$d"
+  local d=$T/$CASE rc log out; mkdir -p "$d/tmp"
   local cmd='for i in $(seq 1500); do echo "noise $i"; echo "warn $i" >&2; done; echo "FAIL [one]: the thing broke"
     echo "not ok 7 - two"; for i in $(seq 1500); do echo "late $i"; done; echo "# pass 5"; echo "# fail 2"; exit 3'
   bash -c "$cmd" > "$d/whole" 2>&1
-  TMPDIR=$d "$SRC/tools/testbrief.sh" -- bash -c "$cmd" > "$d/out" 2> "$d/err"; rc=$?
+  TMPDIR=$d/tmp CONVEYOR_BRIEFS=$d/keep "$SRC/tools/testbrief.sh" -- bash -c "$cmd" > "$d/out" 2> "$d/err"; rc=$?
   out=$(cat "$d/out")
   [ $rc = 3 ] || fail "the wrapper exited $rc, not the command's 3"
   [ ! -s "$d/err" ] || fail "the wrapper printed to stderr: $(cat "$d/err")"
   log=$(sed -n 's/.*the whole output (4504 lines) is in \([^;]*\);.*/\1/p' <<<"$out")
   [ -n "$log" ] && [ -f "$log" ] || fail "the brief does not give the path of the whole log: $out"
+  [ "${log%/*}" = "$d/keep" ] && [ -z "$(ls -A "$d/tmp")" ] || fail "the log $log is not in the card's folder, or a file is left in TMPDIR: $(ls -A "$d/tmp")"
   cmp -s "$log" "$d/whole" || fail "the log is not the command's whole output, both streams: $(diff "$log" "$d/whole" | head -5)"
   grep -qxF '3001:FAIL [one]: the thing broke' <<<"$out" && grep -qxF '3002:not ok 7 - two' <<<"$out" \
     || fail "the brief does not give each failure with its line in the log: $out"
@@ -40,7 +43,8 @@ t_outbrief() {
   local d=$T/$CASE rc out; mkdir -p "$d"
   for i in 1 2 3; do printf "$i%.0s" $(seq 5000); echo; done > "$d/whole"
   cp "$d/whole" "$d/saved"
-  out=$("$SRC/tools/outbrief.sh" "$d/saved" 5); rc=$?
+  # CONVEYOR_BRIEFS empty: a card session's own would move the file out of $d (the guard's test covers that move).
+  out=$(CONVEYOR_BRIEFS='' "$SRC/tools/outbrief.sh" "$d/saved" 5); rc=$?
   [ $rc = 5 ] || fail "outbrief exited $rc, not the call's 5"
   [ "$(head -n 3 <<<"$out" | awk '{ print length }' | tr '\n' ' ')" = '400 400 400 ' ] && [ "$(wc -l <<<"$out")" = 4 ] \
     || fail "three lines of 5,000 characters were not each cut at 400: $(head -c 300 <<<"$out")"

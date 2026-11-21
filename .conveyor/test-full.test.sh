@@ -15,7 +15,7 @@ no() { echo "not ok - $1"; fails=1; }
 # A scratch repo with the real script and the real pack's test.full: a passing shell test, a failing Python test, and
 # an untracked test file that would fail. Each test file notes that it ran.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/lib"
-cp "$HERE/test-full.sh" "$R/.conveyor/"
+cp "$HERE/test-full.sh" "$HERE/test-share.sh" "$R/.conveyor/"
 full=$(jq -r '.test.full // empty' "$HERE/project.json")
 [ -n "$full" ] || no "the pack (.conveyor/project.json) names no test.full"
 echo 'echo pass >> "$(dirname "$0")/../ran"' > "$R/lib/fx-pass.test.sh"

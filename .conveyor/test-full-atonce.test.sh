@@ -17,7 +17,7 @@ no() { echo "not ok - $1"; fails=1; }
 # takes its own), so the files at once are the suite's limit alone, not the machine's free cores. Each file marks
 # itself live in $LIVE, pauses, notes how many files are live, and ends.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/tests"
-cp "$HERE/test-full.sh" "$R/.conveyor/"
+cp "$HERE/test-full.sh" "$HERE/test-share.sh" "$R/.conveyor/"
 for i in 1 2 3 4 5 6; do
   # sleep: a stand-in test file that runs a while, so files the suite runs at once overlap
   printf '%s\n' ': > "$LIVE/live.$$"; sleep 0.5' 'find "$LIVE" -name "live.*" | wc -l >> "$LIVE/seen"; rm "$LIVE/live.$$"' > "$R/conveyor/tests/fx-$i.test.sh"

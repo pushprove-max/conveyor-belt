@@ -18,7 +18,7 @@ no() { echo "not ok - $1"; fails=1; }
 # engine's runner does (each case takes a slot, runs on it, and names itself in the test log), and one other file.
 # Each prints two lines; each case notes that it ran.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/tests" "$R/lib"
-cp "$HERE/test-full.sh" "$R/.conveyor/"
+cp "$HERE/test-full.sh" "$HERE/test-share.sh" "$R/.conveyor/"
 for f in fx-a fx-b; do
   printf '%s\n' '. "$CONVEYOR_TEST_SLOTS" && slot_pool || exit 1' "n=$f" \
     'for c in 1 2; do slot_take; ( slot_mine; echo "$n-$c" >> "$(dirname "$0")/../../ran"; mkdir -p "$CONVEYOR_TEST_LOG/cases/ok" && : > "$CONVEYOR_TEST_LOG/cases/ok/$n-$c" ) & slot_free; done; wait' \

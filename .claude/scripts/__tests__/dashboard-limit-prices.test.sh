@@ -8,7 +8,7 @@ set -euo pipefail
 . "$(dirname "$0")/../../../conveyor/lib/portable.sh"; p_tools
 SOURCE=$(git rev-parse --show-toplevel)
 LIM=$SOURCE/.claude/scripts/dashboard_limit.py
-T=$(cd "$(mktemp -d /tmp/dashboard-limit-prices-test.XXXXXX)" && pwd -P)
+T=$(cd "$(mktemp -d "${TMPDIR:-/tmp}"/dashboard-limit-prices-test.XXXXXX)" && pwd -P)
 trap 'rm -rf "$T"' EXIT
 unset XDG_CONFIG_HOME
 fail() { echo "FAIL: $*" >&2; exit 1; }

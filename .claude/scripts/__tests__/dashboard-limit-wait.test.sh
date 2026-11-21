@@ -13,7 +13,7 @@ set -euo pipefail
 . "$(dirname "$0")/../../../conveyor/lib/portable.sh"; p_tools
 SOURCE=$(git rev-parse --show-toplevel)
 LIM=$SOURCE/.claude/scripts/dashboard_limit.py
-T=$(cd "$(mktemp -d /tmp/dashboard-limit-wait-test.XXXXXX)" && pwd -P)
+T=$(cd "$(mktemp -d "${TMPDIR:-/tmp}"/dashboard-limit-wait-test.XXXXXX)" && pwd -P)
 trap 'rm -rf "$T"' EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 # The host file and the account reads' folder are XDG's when set, ahead of the test's HOME: inherited, they are the owner's.

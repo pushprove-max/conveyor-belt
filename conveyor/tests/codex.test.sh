@@ -69,10 +69,10 @@ EOF
   [ "$live" = '{"step":"build","model":"cx-1","turns":1,"action":"command: /bin/bash -lc '"'"'echo two >> a.txt'"'"'","usage":{"input":400,"write":0,"write1h":0,"read":600,"output":40},"last":"string"}' ] \
     || fail "the live record of the Codex build: $live"
   hook=$(grep '^hooks.PreToolUse=' "$STUB/cx-args")
-  [ "$(grep -v '^hooks.PreToolUse=' "$STUB/cx-args")" = "$(printf '%s\n' exec --json -s workspace-write -C "$wt" --add-dir "$T/$CASE/slots" -m cx-1 -c 'model_reasoning_effort="medium"' \
+  [ "$(grep -v '^hooks.PreToolUse=' "$STUB/cx-args")" = "$(printf '%s\n' exec --json -s workspace-write -C "$wt" --add-dir "$T/$CASE/slots" --add-dir "$wt.briefs" -m cx-1 -c 'model_reasoning_effort="medium"' \
       -c 'web_search="disabled"' \
       --enable hooks --dangerously-bypass-hook-trust --disable unified_exec_tty -c -)" ] && [ "$(cat "$STUB/cx-pwd")" = "$wt" ] \
-    || fail "Codex was not run on the model, in the worktree, writing in it, /tmp, \$TMPDIR and the test slots folder, with hooks on and no terminal for its commands: $(cat "$STUB/cx-args" "$STUB/cx-pwd")"
+    || fail "Codex was not run on the model, in the worktree, writing in it, /tmp, \$TMPDIR, the test slots folder and the card's briefs folder, with hooks on and no terminal for its commands: $(cat "$STUB/cx-args" "$STUB/cx-pwd")"
   # The hook is one TOML value (as Codex parses it): one PreToolUse hook on every tool, the guard hook on the card's settings.
   [ "$(python3 -I -c 'import sys, tomllib, json; print(json.dumps(tomllib.loads("h = " + sys.argv[1].split("=", 1)[1])["h"]))' "$hook" | jq -c .)" \
     = "$(jq -cn --arg c "node '$SRC/codex/guard.mjs' '$wt.settings' '$wt'" '[{matcher: "*", hooks: [{type: "command", command: $c, timeout: 600}]}]')" ] \

@@ -18,7 +18,7 @@ no() { n=$((n + 1)); echo "not ok $n - $1"; bad=1; }
 # dashboard.sh with two functions and a test file of two parts that each run one; a hook with a function its whole
 # test file runs and one no test runs.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/lib" "$R/conveyor/tests" "$R/.claude/scripts/__tests__" "$R/.claude/hooks/__tests__"
-cp "$HERE/coverage.sh" "$HERE/test-changed.sh" "$R/.conveyor/"; cp "$ROOT/conveyor/lib/portable.sh" "$R/conveyor/lib/"
+cp "$HERE/coverage.sh" "$HERE/test-changed.sh" "$HERE/test-share.sh" "$R/.conveyor/"; cp "$ROOT/conveyor/lib/portable.sh" "$R/conveyor/lib/"
 printf '%s\n' '{"area": "a", "file": "conveyor/lib/f.sh"}' '{"area": "a", "test": "a.test.sh"}' > "$R/.conveyor/engine-areas.json"
 printf 'fone() {\n  echo one\n}\nftwo() {\n  echo two\n}\n' > "$R/conveyor/lib/f.sh"
 cat > "$R/conveyor/tests/a.test.sh" <<'EOF'

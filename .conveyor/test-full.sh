@@ -37,15 +37,22 @@ RECORD=${CONVEYOR_SUITE_RECORD:-}; unset CONVEYOR_SUITE_RECORD
 case $MODE in serial | parallel) ;; *) echo "test-full: CONVEYOR_SUITE_MODE is '$MODE', not serial or parallel; nothing run" >&2; exit 2 ;; esac
 AT=${CONVEYOR_SUITE_AT_ONCE:-2}; unset CONVEYOR_SUITE_AT_ONCE
 [[ $AT =~ ^[1-9][0-9]{0,5}$ ]] || { echo "test-full: CONVEYOR_SUITE_AT_ONCE is '$AT', not a whole number from 1; nothing run" >&2; exit 2; }
+# The host file's testTmpMB (docs/setup.md) is each test file's share, in MB, of the space its temp files go in (the
+# file system of TMPDIR, else /tmp), 2048 when unset: a file that writes past it fails alone, and the others and the
+# belt keep their space (runone; .conveyor/test-share.sh, which the card's test step uses too).
+# shellcheck source=.conveyor/test-share.sh
+. "${BASH_SOURCE[0]%/*}/test-share.sh" || { echo "test-full: ${BASH_SOURCE[0]%/*}/test-share.sh could not be read; nothing run" >&2; exit 2; }
 rc=0
 tmp=$(mktemp -d) || exit 1
+share_init "$tmp" > "$tmp/share.why" || { echo "test-full: $(cat "$tmp/share.why"); nothing run" >&2; rm -rf "$tmp"; exit 2; }
 # A run stopped before its files end (the test step's timeout, testTimeout: testrun.sh testclock(), stops the whole
 # process group) still names in the run's log the cases that ended in each file run in parallel that is still running
 # (casecopy, below): its own log folder is gone with $tmp. timeout sends its TERM twice (to the suite, then to its
 # process group): the first is caught and the next ignored, so a second one does not stop the copy, nor the copy's own
 # commands.
 trap 'trap "" TERM; exit 143' TERM
-trap 'for p in "${!job[@]}"; do [ ! -d "$LOG" ] || casecopy "$tmp/${job[$p]}.log" "$LOG"; done; rm -rf "$tmp"' EXIT
+# u+w: a file's temp folder may hold read-only folders (an install), which rm cannot empty.
+trap 'for p in "${!job[@]}"; do [ ! -d "$LOG" ] || casecopy "$tmp/${job[$p]}.log" "$LOG"; done; chmod -R u+w "$tmp" 2>/dev/null; rm -rf "$tmp"' EXIT
 LOG=${CONVEYOR_TEST_LOG:-} # the run's test log folder; a file run in parallel names its cases in a folder of its own first (runone)
 # The run's own log in that folder, test-full.log: its `TESTRUN cases=|files=` lines and each file's `== <file>` and
 # `-- ok|FAIL <file>` lines, in the order the output prints the files (each file's output begins with its `== <file>`
@@ -100,9 +107,11 @@ echo "TESTRUN cases=$((engine + other))"
 echo "TESTRUN files=${#files[@]}"
 runlog "TESTRUN cases=$((engine + other))" "TESTRUN files=${#files[@]}"
 # One test file run: its output, then its `TESTRUN sec` and `-- ok|FAIL` lines; exit 1 when it failed. <n> names its
-# scratch files in $tmp.
+# scratch files in $tmp. Its TMPDIR is a folder of its own there, removed when it ends (share_run); a run stopped first
+# (its timeout) removes it with $tmp. It does not start while share_noroom says why (the reason is its output), and a
+# file whose temp folder reaches its share fails with the reason.
 runone() { # <test file> <n>
-  local t=$1 stamp=$tmp/$2.stamp tt=$tmp/$2.times c n st s e r
+  local t=$1 stamp=$tmp/$2.stamp tt=$tmp/$2.times c n st s e r why
   case $t in
     *.mjs) mapfile -t c < <(nodecases "$t"); c=(node --max-old-space-size=4096 --test "${c[@]}" "$t") ;;
     *.py) c=(python3 "$t") ;;
@@ -110,11 +119,16 @@ runone() { # <test file> <n>
     *) c=(bash "$t") ;;
   esac
   n=$(marks); touch "$stamp"; echo "== $t"
-  times > "$tt"; s=${EPOCHREALTIME/,/.}
-  "${c[@]}" < /dev/null | awk '!/^(TESTRUN (cases|files)=|TESTRUN sec\t|-- (ok|FAIL) )/ { print; fflush() }'
-  st=${PIPESTATUS[0]}; e=${EPOCHREALTIME/,/.}; times >> "$tt"
-  awk -v f="$t" -v a="$s" -v b="$e" 'function c(x, a) { sub(/s$/, "", x); split(x, a, "m"); return a[1] * 60 + a[2] } { gsub(/,/, ".") }
-    NR == 2 || NR == 4 { n[NR] = c($1) + c($2) } END { printf "TESTRUN sec\t%s\t%.1f\t%.1f\n", f, b - a, n[4] - n[2] }' "$tt"
+  if why=$(share_noroom "$tmp" 0); then
+    echo "test-full: $t did not start: $why"; st=1
+  else
+    times > "$tt"; s=${EPOCHREALTIME/,/.}
+    share_run "test-full: $t" "$tmp/$2.tmp" "${c[@]}" < /dev/null \
+      | awk '!/^(TESTRUN (cases|files)=|TESTRUN sec\t|-- (ok|FAIL) )/ { print; fflush() }'
+    st=${PIPESTATUS[0]}; e=${EPOCHREALTIME/,/.}; times >> "$tt"
+    awk -v f="$t" -v a="$s" -v b="$e" 'function c(x, a) { sub(/s$/, "", x); split(x, a, "m"); return a[1] * 60 + a[2] } { gsub(/,/, ".") }
+      NR == 2 || NR == 4 { n[NR] = c($1) + c($2) } END { printf "TESTRUN sec\t%s\t%.1f\t%.1f\n", f, b - a, n[4] - n[2] }' "$tt"
+  fi
   if [ "$st" = 0 ]; then echo "-- ok $t"; r=ok; else echo "-- FAIL $t"; r=failed; fi
   [ ! -d "$LOG" ] || [ "$(marks)" != "$n" ] || [ "$(marks -newer "$stamp")" != 0 ] || { mkdir -p "$LOG/cases/$r" && : > "$LOG/cases/$r/${t//\//:}"; }
   [ "$st" = 0 ]
@@ -174,7 +188,9 @@ reap() { # one file that ended: its output printed, its result counted
 }
 i=0
 for t in "${files[@]}"; do
-  while [ ${#job[@]} -ge "$AT" ]; do reap; done
+  # A file waits for one that runs to end while the space cannot hold its share (share_noroom); with none running, it
+  # starts, and runone fails it with the reason when there is still no room.
+  while [ ${#job[@]} -ge "$AT" ] || { [ ${#job[@]} -gt 0 ] && share_noroom "$tmp" ${#job[@]} > /dev/null; }; do reap; done
   i=$((i + 1)); own=''
   case $t in conveyor/conveyor.test.sh | conveyor/tests/*.test.sh) own=1 ;; *.sh) ! grep -q '^\. .*slot_pool' "$t" || own=1 ;; esac
   [ -n "$own" ] || slot_take

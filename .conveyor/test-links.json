@@ -185,6 +185,13 @@
   ".conveyor/test-changed.test.sh": [
     "conveyor/tests/snapexec.test.sh"
   ],
+  ".conveyor/test-share.sh": [
+    ".conveyor/test-changed-files.test.sh",
+    ".conveyor/test-changed-share.test.sh",
+    ".conveyor/test-full-room.test.sh",
+    ".conveyor/test-full-share.test.sh",
+    ".conveyor/test-full-tmp.test.sh"
+  ],
   "CLAUDE.md": [
     "conveyor/tests/snapexec.test.sh"
   ],

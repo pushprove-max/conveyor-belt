@@ -17,7 +17,7 @@ no() { echo "not ok - $1"; }
 # which in its card mode (CONVEYOR_META_STUB set) writes a stub line, else starts lib/inner.test.sh. Each part changes
 # lib/meta.test.sh (so a run selects it alone) in its own copy, with its own pack.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/lib"
-cp "$HERE/test-changed.sh" "$HERE/lint-shell.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$R/.conveyor/"
+cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$R/.conveyor/"
 echo '{"outside": "conveyor/README.md"}' > "$R/.conveyor/engine-areas.json"
 echo 'echo inner >> "$(dirname "$0")/../ran"' > "$R/lib/inner.test.sh"
 echo 'echo "meta:${CONVEYOR_META_STUB:-whole}" >> "$(dirname "$0")/../ran"; [ -n "${CONVEYOR_META_STUB:-}" ] || bash "$(dirname "$0")/inner.test.sh"' > "$R/lib/meta.test.sh"

@@ -495,28 +495,28 @@ newtexts() { # <the name of a variable that holds a prompt>
 # which runs the same settings file's hooks before each call; the project's own OpenCode config is not read, as a
 # Claude session reads no project settings. It runs on no Claude account.
 # Codex (README.md, Codex builder): `codex exec --json` in the worktree, the prompt on stdin, its events as JSON lines,
-# on the model and effort as a Codex review is; its sandbox lets it write in the worktree, /tmp and $TMPDIR (where
-# the brief's background runs and a test run's own scratch folder go) and the machine's test slots folder (slot_pool;
-# the host's testSlotsDir may lie outside /tmp), which a test run takes a slot in, and nowhere else (in a benchmark's
-# task container it has no Codex sandbox, the container being the sandbox: codexsb()); its one
+# on the model and effort as a Codex review is; its sandbox lets it write in the worktree, /tmp and $TMPDIR (where the
+# brief's background runs and a test run's own scratch folder go) and the machine's test slots folder (slot_pool; the
+# host's testSlotsDir may lie outside /tmp), which a test run takes a slot in, and the card's briefs folder, and nowhere
+# else (in a benchmark's task container it has no Codex sandbox, the container being the sandbox: codexsb()); its one
 # PreToolUse hook, on every tool, is the guard hook (cxready()), which runs the same settings file's hooks before each
-# call. Hooks are on, and run without Codex's trust prompt, which a headless session cannot answer;
-# Codex's web search, a tool no hook is given, is off. Its commands get no terminal (unified_exec_tty off), so their input is
-# closed: write_stdin, which types into a command already running and is given no hook, can only wait for output, and
-# Codex refuses keys sent with it (a Codex without the feature fails to start). It runs on no Claude account.
+# call. Hooks are on, and run without Codex's trust prompt, which a headless session cannot answer; Codex's web search,
+# a tool no hook is given, is off. Its commands get no terminal (unified_exec_tty off), so their input is closed:
+# write_stdin, which types into a command already running and is given no hook, can only wait for output, and Codex
+# refuses keys sent with it (a Codex without the feature fails to start). It runs on no Claude account.
 BUILDNOTOOLS=Agent,ScheduleWakeup,CronCreate,CronDelete,CronList,Monitor,RemoteTrigger,PushNotification,SendMessage,ListAgents,Workflow
 sq() { local q="'"; printf "'%s'" "${1//$q/$q\\$q$q}"; } # <word>: it single-quoted for a shell
 builder() { # <worktree> <prompt> <model> <effort> <account folder> <agent: claude, opencode or codex>
   local h a=()
-  cd "$1" || exit 1
-  export CONVEYOR_CARD=${1##*/}
+  cd "$1" && mkdir -p "$1.briefs" || exit 1
+  export CONVEYOR_CARD=${1##*/} CONVEYOR_BRIEFS=$1.briefs # kept long outputs (tools/outbrief.sh), gone with the card
   case $6 in
     codex) export CLAUDE_PROJECT_DIR=$1
       # The hook's command, each word single-quoted for the shell Codex runs it with, as a TOML string (JSON's escapes are TOML's).
       h=$(jq -rn --arg c "node $(sq "$CX_GUARD") $(sq "$1.settings") $(sq "$1")" \
         '"[{matcher = \"*\", hooks = [{type = \"command\", command = \($c | @json), timeout = 600}]}]"') || exit 1
       # A pool that cannot be made is left out: a test run then says why it takes no slot.
-      ! slot_pool >/dev/null 2>&1 || a=(--add-dir "$SLOT_DIR")
+      ! slot_pool >/dev/null 2>&1 || a=(--add-dir "$SLOT_DIR"); a+=(--add-dir "$CONVEYOR_BRIEFS")
       codexargs # its provider, when its route is the proxy
       codexsb workspace-write
       exec "${KEEP[@]}" timeout --kill-after=30 "$BUILD_TIMEOUT" codex exec --json "${CODEX_SB[@]}" -C "$1" "${a[@]}" "${CODEX_PX[@]}" -m "$3" -c "model_reasoning_effort=\"$4\"" \

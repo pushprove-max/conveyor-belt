@@ -3,7 +3,9 @@
 # outbrief.sh <output file> <exit code>: prints a card session's command output, saved whole in <output file>, and
 # exits with <exit code>. Output of 8,000 characters or less prints whole, and the file is removed. Longer output prints
 # its first 60 lines, the number of lines left out, its last 40 lines (each cut at 400 characters) and the file's path,
-# and the file is kept for the session to read by line range or search. A long result stays in every later turn of the
+# and the file is kept for the session to read by line range or search: in CONVEYOR_BRIEFS, the card's own folder
+# that goes with the card (conveyor/lib/session.sh builder()), when it is set, so none is left in TMPDIR (6,402 were
+# in /tmp, #1238); else where it is. A long result stays in every later turn of the
 # session (issue #543). The command guard (.claude/hooks/bash-guardrails.sh) runs a card session's non-test call with
 # its output in the file, then this.
 [ $# = 2 ] && [ -f "$1" ] && [[ $2 =~ ^[0-9]+$ ]] || { echo "usage: outbrief.sh <output file> <exit code>" >&2; exit 2; }
@@ -11,6 +13,10 @@ out=$1 rc=$2
 chars=$(wc -c < "$out" | tr -d ' ')
 if [ "$chars" -le 8000 ]; then
   cat "$out"; rm -f "$out"; exit "$rc"
+fi
+if [ -n "${CONVEYOR_BRIEFS:-}" ] && [ "${out%/*}" != "$CONVEYOR_BRIEFS" ] && mkdir -p "$CONVEYOR_BRIEFS" \
+  && mv -f "$out" "$CONVEYOR_BRIEFS/${out##*/}"; then
+  out=$CONVEYOR_BRIEFS/${out##*/}
 fi
 lines=$(awk 'END { print NR }' "$out")
 if [ "$lines" -gt 100 ]; then

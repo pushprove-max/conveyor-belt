@@ -8,7 +8,7 @@
 set -euo pipefail
 SOURCE=$(git rev-parse --show-toplevel)
 . "$SOURCE/conveyor/lib/portable.sh"; p_tools
-T=$(cd "$(mktemp -d /tmp/dashboard-lanes-test.XXXXXX)" && pwd -P)
+T=$(cd "$(mktemp -d "${TMPDIR:-/tmp}"/dashboard-lanes-test.XXXXXX)" && pwd -P)
 trap 'rm -rf "$T"' EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 eval "$(sed -n '/^latest_cwd() /p; /^lane() {/,/^}/p; /^lanes() {/,/^}/p' "$SOURCE/.claude/scripts/dashboard.sh")"

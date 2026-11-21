@@ -14,7 +14,7 @@ export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t${AT}example.com GIT_COMMITTER_NAME=t
 # A scratch repo with the real script and one engine case file: it names one case as ended in the test log, notes
 # that it did, then runs on until it is stopped.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/tests"
-cp "$HERE/test-full.sh" "$R/.conveyor/"
+cp "$HERE/test-full.sh" "$HERE/test-share.sh" "$R/.conveyor/"
 printf '%s\n' 'mkdir -p "$CONVEYOR_TEST_LOG/cases/ok" && : > "$CONVEYOR_TEST_LOG/cases/ok/fx-a-1"' \
   ': > "$(dirname "$0")/../../ready"; sleep 60' > "$R/conveyor/tests/fx-a.test.sh"
 echo ready > "$R/.gitignore"

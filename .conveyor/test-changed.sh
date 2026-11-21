@@ -1497,7 +1497,15 @@ nodecases() { # <node test file>
     if [ "$k" = ok ] || [ "$k" = off ]; then nargs+=("--test-skip-pattern=$p"); elif [ "$k" = fail ] && [ -n "${only[$1]:-}" ]; then nargs+=("--test-name-pattern=$p"); fi
   done < "$RERUN"
 }
-o=$(mktemp); trap 'rm -f "$o" "$o".* "${rlist:-}"' EXIT
+# No temp file (a full /tmp): it stops before the trap, as an empty $o would make "$o".* every hidden file here.
+o=$(mktemp) && [ -n "$o" ] || { echo "test-changed: no temp file could be made in ${TMPDIR:-/tmp}; nothing run"; exit 1; }
+trap 'chmod -R u+w "$o.tmp" 2>/dev/null; rm -rf "$o" "$o".* "${rlist:-}"' EXIT
+# Each test file runs with a share of the temp space and a TMPDIR of its own in $o.tmp, removed when it ends, and
+# with $o.tmp when this run ends (share_run, .conveyor/test-share.sh, as the full suite runs them): a file that writes
+# past its share fails alone, and one starts only when the space holds its share (#1238).
+# shellcheck source=.conveyor/test-share.sh
+. "${BASH_SOURCE[0]%/*}/test-share.sh" && mkdir "$o.tmp" && share_init "$o.tmp" > "$o.why" \
+  || { echo "test-changed: the test files' temp space could not be set up (${BASH_SOURCE[0]%/*}/test-share.sh, $o.tmp): $(cat "$o.why" 2>/dev/null); nothing run"; exit 1; }
 # A Claude Code plugin test file (*.test.ts, *.test.tsx: the /units mod's, in hooks/) runs under Claude Code's own
 # runner, `claude plugin test` on the plugin, which runs every such file of the plugin in one run. So it runs once, at
 # the first such file, and a file's result is its own part of that run's output: its `<file>:`
@@ -1507,6 +1515,14 @@ plugintest() { # <test file>
   awk -v f="$1:" '$0 == f { on = 1; next } on && /^[^ (].*:$/ { exit } on' "$o.plugin" > "$o.part"
   cat "$o.part"
   grep -q '^(pass)' "$o.part" && ! grep -q '^(fail)' "$o.part"
+}
+# One test file's command, run one at a time after the engine case files (below), with its share of the temp space
+# and its own TMPDIR, $o.tmp/f (share_run); it does not start, and fails with the reason, while the space cannot hold
+# its share.
+fshare() { # <test file> <command>...
+  local nr t=$1; shift
+  if nr=$(share_noroom "$o.tmp" 0); then echo "test-changed: $t did not start: $nr"; return 1; fi
+  share_run "test-changed: $t" "$o.tmp/f" "$@"
 }
 # The meta-runner hook (BASH_ENV, header above): a bash test file of this checkout, started whole under the mark of
 # another, writes `TESTRUN nested` to $o.nested. A test file's own start, and one of a scratch file no path here
@@ -1567,7 +1583,8 @@ slots=
 # and the run's timeout names the last of them.
 declare -A epid=() erc=() eout=() shown=()
 eend() {
-  trap "" TERM INT HUP; [ ${#epid[@]} = 0 ] || kill -TERM "${epid[@]}" 2>/dev/null; wait
+  # Each runs its runner under share_run, a child of its worker, which passes the TERM on to the runner.
+  trap "" TERM INT HUP; [ ${#epid[@]} = 0 ] || pkill -TERM -P "$(IFS=,; echo "${epid[*]}")" 2>/dev/null; wait
   for t in $(printf '%s\n' "${!epid[@]}" | LC_ALL=C sort); do
     [ -z "${shown[$t]:-}" ] || continue
     echo "== $t" >> "$log"; echo "== $t (cases: ${ecases[$t]})"; cat "${eout[$t]}"
@@ -1575,17 +1592,39 @@ eend() {
   exit 143
 }
 trap eend TERM INT HUP
+# One that starts waits for one that runs to end while the space cannot hold a share for each (share_noroom); with
+# none running and still no room, it fails without running, with the reason. erun: the pid of each still running.
+declare -A erun=()
+# One that ended: its exit in erc. One that ended before this wait began is not among the jobs a bash before 5.3 waits
+# for with `wait -n` (p is left unset): its exit is asked for by itself, as test-full.sh reap() does.
+ereap() {
+  local p='' q s
+  for q in "${!erun[@]}"; do kill -0 "$q" 2>/dev/null || { p=$q; break; }; done
+  if [ -n "$p" ]; then wait "$p"; s=$?; else wait -n -p p "${!erun[@]}"; s=$?; fi
+  if [ -z "${p:-}" ]; then
+    for q in "${!erun[@]}"; do kill -0 "$q" 2>/dev/null || { p=$q; break; }; done
+    [ -n "${p:-}" ] || { echo "test-changed: no file it started could be waited for (exit $s); the run ends failed"; exit 1; }
+    wait "$p"; s=$?
+  fi
+  erc[${erun[$p]}]=$s; unset "erun[$p]"
+}
+k=0
 for t in $(printf '%s\n' "${!ecases[@]}" | LC_ALL=C sort); do
+  k=$((k + 1)); eout[$t]=$o.e$k
+  # In a subshell ($(...)), not under a redirect: a TERM then runs eend with this run's own output, not /dev/null.
+  while [ ${#erun[@]} -gt 0 ] && nr=$(share_noroom "$o.tmp" ${#erun[@]}); do
+    ereap
+  done
+  if nr=$(share_noroom "$o.tmp" 0); then echo "test-changed: $t did not start: $nr" > "$o.e$k"; erc[$t]=1; continue; fi
   for c in ${ecases[$t]}; do printf 'TESTRUN case\t%s\t%s\n' "$t" "$c" >> "$log"; done
-  k=${#epid[@]}
   [ -z "$slots" ] || slot_take
   ( [ -z "$slots" ] || slot_mine
-    exec env CONVEYOR_TEST_FILE="$t" BASH_ENV="$o.hook" CONVEYOR_TEST_TIMES="$o.e$k.times" \
+    share_run "test-changed: $t" "$o.tmp/e$k" env CONVEYOR_TEST_FILE="$t" BASH_ENV="$o.hook" CONVEYOR_TEST_TIMES="$o.e$k.times" \
       CONVEYOR_SHELL_TEST_CASE="${ecases[$t]}" bash conveyor/conveyor.test.sh ) > "$o.e$k" 2>&1 < /dev/null &
-  epid[$t]=$!; eout[$t]=$o.e$k
+  epid[$t]=$!; erun[$!]=$t
   [ -z "$slots" ] || slot_free
 done
-for t in "${!epid[@]}"; do wait "${epid[$t]}"; erc[$t]=$?; done
+for p in "${!erun[@]}"; do wait "$p"; erc[${erun[$p]}]=$?; done
 # The engine case files first, as they ran, then each other file.
 mapfile -t order < <(for t in "${!run[@]}"; do if [ -n "${ecases[$t]:-}" ]; then printf '0\t%s\n' "$t"; else printf '1\t%s\n' "$t"; fi; done | LC_ALL=C sort | cut -f2-)
 for t in "${order[@]}"; do
@@ -1606,11 +1645,11 @@ for t in "${order[@]}"; do
       # Every case file of the engine still runs when the list holds a case of each (enginewhole): the step's record
       # says so as below.
       [ -z "$w" ] || echo "TESTRUN whole-suite" >> "$log"
-      echo "== $t (cases: $cases)"; env "${mk[@]}" CONVEYOR_TEST_TIMES="$o.times" CONVEYOR_SHELL_TEST_CASE="$cases" bash "$t" || r=FAIL
+      echo "== $t (cases: $cases)"; fshare "$t" env "${mk[@]}" CONVEYOR_TEST_TIMES="$o.times" CONVEYOR_SHELL_TEST_CASE="$cases" bash "$t" || r=FAIL
     else
       # Every case file of the engine runs: the step's record says so in one field (testrec(): wholeSuite).
       echo "TESTRUN whole-suite" >> "$log"
-      echo "== $t"; env "${mk[@]}" CONVEYOR_TEST_TIMES="$o.times" bash "$t" || r=FAIL
+      echo "== $t"; fshare "$t" env "${mk[@]}" CONVEYOR_TEST_TIMES="$o.times" bash "$t" || r=FAIL
     fi
     # Each case file whose every case it ran, timed by the runner (the sums of its cases' clock and CPU seconds, as
     # they run at once), for the times the loop records of a test file (conveyor/README.md, The test step).
@@ -1633,12 +1672,12 @@ for t in "${order[@]}"; do
     # A meta-runner runs in its card mode (the pack's test.files cardMode, mk above): its own checks, with a stub in
     # place of the files it starts.
     case $t in
-      *.mjs) nodecases "$t"; env "${mk[@]}" node --max-old-space-size=4096 --test "${nargs[@]}" "$t" ;;
-      *.py) env "${mk[@]}" python3 "$t" ;;
-      *.ts|*.tsx) plugintest "$t" ;;
+      *.mjs) nodecases "$t"; fshare "$t" env "${mk[@]}" node --max-old-space-size=4096 --test "${nargs[@]}" "$t" ;;
+      *.py) fshare "$t" env "${mk[@]}" python3 "$t" ;;
+      *.ts|*.tsx) fshare "$t" plugintest "$t" ;;
       # An engine case file's run with no case (nocase, above): a selection of a blank, which the file keeps (it gives
       # the runner all its cases only when none is set) and in which the runner finds no case.
-      *) env "${mk[@]}" ${p:+"CONVEYOR_SHELL_TEST_CASE=$p"} ${nocase[$t]:+"CONVEYOR_SHELL_TEST_CASE= "} bash "$t" ;;
+      *) fshare "$t" env "${mk[@]}" ${p:+"CONVEYOR_SHELL_TEST_CASE=$p"} ${nocase[$t]:+"CONVEYOR_SHELL_TEST_CASE= "} bash "$t" ;;
     esac 2>&1 | tee "$o"; [ "${PIPESTATUS[0]}" = 0 ] || r=FAIL
     marked "$t" || r=FAIL; metaran "$t" || r=FAIL
     times >> "$o.cpu"

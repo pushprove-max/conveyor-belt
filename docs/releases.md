@@ -64,6 +64,18 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    with the same time, or with no time, keep the suite's order. A run that runs only some files again orders them the
    same way. In serial, the files run in the suite's order.
 
+   Each test file writes its temp files in a folder of its own. The suite removes the folder when the file ends,
+   also when the run stops at its time limit. A card's test step runs its test files in the same way. All the files
+   share the space of that folder's file system (`TMPDIR`, else `/tmp`) with each other and with Conveyor. That space
+   is the free space of the file system, or what is left of your user's quota on it when that is less. Each file
+   gets a share of that space: the host file's `testTmpMB`, in MB ([Setup](setup.md#the-host-file)), or 2048 when
+   the host file does not set it. A file that fills its temp folder to its share stops and fails, and its output
+   gives the share and the space. No single file that a test file writes, in any folder, can be larger than the
+   share. The other files run on. Before a file starts, that space must hold a share for each file that runs, one
+   for the new file and one for Conveyor. When files run at the same time, the file waits until a file that runs
+   ends. When no file runs and the space is still too small, the file fails and does not run, and its output gives
+   the space that is free and the space that it needs.
+
    The suite also checks the files that the plugin ships. It makes the list of these files and copies them into an
    empty folder. It fails when the copy does not have a file of the list, or has a file that is not on the list, and
    the output names the file. Then, from the copy, with a new home folder

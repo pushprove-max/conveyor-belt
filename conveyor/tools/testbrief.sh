@@ -9,15 +9,18 @@
 # testbrief.sh --from <file> --rc <code>: the same brief of output already run into <file> with exit code <code>; the
 # file becomes the log, under its own name, so <file> is gone. The guard's rewritten call uses this form, so its text
 # has no `sh -c` script and no `rm`: Claude Code refuses a `sh -c` script that runs rm (issue #967).
+# The log is in CONVEYOR_BRIEFS, the card's own folder that goes with the card (conveyor/lib/session.sh builder()),
+# when it is set, so none is left in TMPDIR (5,909 were in /tmp, #1238); else in TMPDIR.
+dir=${CONVEYOR_BRIEFS:-${TMPDIR:-/tmp}}
 usage() { echo "usage: testbrief.sh -- <command>... | testbrief.sh --from <file> --rc <code>" >&2; exit 2; }
 if [ "${1-}" = --from ]; then
   [ $# = 4 ] && [ "$3" = --rc ] && [ -f "$2" ] && [[ $4 =~ ^[0-9]+$ ]] || usage
-  log=$(mktemp "${TMPDIR:-/tmp}/testbrief.XXXXXX") && mv -f "$2" "$log" || exit 1
+  mkdir -p "$dir" && log=$(mktemp "$dir/testbrief.XXXXXX") && mv -f "$2" "$log" || exit 1
   rc=$4
 else
   [ $# -ge 2 ] && [ "$1" = -- ] || usage
   shift
-  log=$(mktemp "${TMPDIR:-/tmp}/testbrief.XXXXXX") || exit 1
+  mkdir -p "$dir" && log=$(mktemp "$dir/testbrief.XXXXXX") || exit 1
   "$@" > "$log" 2>&1
   rc=$?
 fi

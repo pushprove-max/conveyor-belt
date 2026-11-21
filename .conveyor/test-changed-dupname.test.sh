@@ -16,7 +16,7 @@ no() { echo "not ok - $1"; fails=1; }
 
 # A scratch repo: the real script, one area whose case file is a.test.sh.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/tests" "$R/conveyor/other"
-cp "$HERE/test-changed.sh" "$HERE/lint-shell.sh" "$R/.conveyor/"
+cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$R/.conveyor/"
 printf '%s\n' '{"outside": "conveyor/other/"}' '{"area": "a", "file": "conveyor/x.sh"}' '{"area": "a", "test": "a.test.sh"}' > "$R/.conveyor/engine-areas.json"
 echo 'echo one' > "$R/conveyor/x.sh"; echo ': a' > "$R/conveyor/tests/a.test.sh"
 git -C "$R" init -q && git -C "$R" add -A && git -C "$R" commit -qm init

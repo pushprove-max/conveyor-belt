@@ -65,7 +65,7 @@ check_match() { # label, regex, text
   fi
 }
 
-TMP=$(mktemp -d /tmp/new-test-file-guard-XXXXXX)
+TMP=$(mktemp -d "${TMPDIR:-/tmp}"/new-test-file-guard-XXXXXX)
 trap 'rm -rf "$TMP"' EXIT
 
 # The fixture is a LINKED WORKTREE, because that is where the guard applies: it

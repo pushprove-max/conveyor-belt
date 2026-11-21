@@ -9,7 +9,7 @@ set -euo pipefail
 . "$(dirname "$0")/../../../conveyor/lib/portable.sh"; p_tools
 SOURCE=$(git rev-parse --show-toplevel)
 DASH=$SOURCE/.claude/scripts/dashboard.sh
-T=$(cd "$(mktemp -d /tmp/dashboard-limit-test.XXXXXX)" && pwd -P)
+T=$(cd "$(mktemp -d "${TMPDIR:-/tmp}"/dashboard-limit-test.XXXXXX)" && pwd -P)
 trap 'chmod -R u+w "$T" 2>/dev/null; rm -rf "$T"' EXIT
 # The limit read also walks the review sessions' Codex folder; without this a collect reads the owner's real spend.
 export CONVEYOR_CODEX_REVIEW_HOME=$T/codex-review

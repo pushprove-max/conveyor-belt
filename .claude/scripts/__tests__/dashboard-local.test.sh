@@ -20,7 +20,7 @@ SOURCE=$(git rev-parse --show-toplevel)
 DASH=$SOURCE/.claude/scripts/dashboard.sh
 DECIDE=$SOURCE/.claude/scripts/decision.sh
 VIEW=$SOURCE/.claude/dashboard
-TOP=$(cd "$(mktemp -d /tmp/dashboard-test.XXXXXX)" && pwd -P) # physical spelling: on the Mac /tmp is /private/tmp
+TOP=$(cd "$(mktemp -d "${TMPDIR:-/tmp}"/dashboard-test.XXXXXX)" && pwd -P) # physical spelling: on the Mac the temp folder is a link (/tmp to /private/tmp)
 trap 'chmod -R u+w "$TOP" 2>/dev/null; rm -rf "$TOP"' EXIT
 # The host file is XDG_CONFIG_HOME's when it is set, ahead of the test's HOME: an inherited one is the owner's real host.
 unset XDG_CONFIG_HOME

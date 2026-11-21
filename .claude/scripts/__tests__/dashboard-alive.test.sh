@@ -7,7 +7,7 @@
 set -euo pipefail
 SOURCE=$(git rev-parse --show-toplevel)
 . "$SOURCE/conveyor/lib/portable.sh"; p_tools
-T=$(cd "$(mktemp -d /tmp/dashboard-alive-test.XXXXXX)" && pwd -P)
+T=$(cd "$(mktemp -d "${TMPDIR:-/tmp}"/dashboard-alive-test.XXXXXX)" && pwd -P)
 trap 'rm -rf "$T"' EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 eval "$(sed -n '/^view_files() /p; /^copy_view() {/,/^}/p; /^alive() {/,/^}/p' "$SOURCE/.claude/scripts/dashboard.sh")"

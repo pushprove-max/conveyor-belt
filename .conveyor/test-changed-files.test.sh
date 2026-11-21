@@ -20,7 +20,7 @@ no() { echo "not ok - $1"; fails=1; }
 # the runner does, the time of a case file whose every case it ran (CONVEYOR_TEST_TIMES). A run as the file named in
 # $R/failing fails. With $R/meet, each run waits for the other file's to start: they meet only when side by side.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/tests"
-cp "$HERE/test-changed.sh" "$HERE/lint-shell.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$R/.conveyor/"
+cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$R/.conveyor/"
 printf '%s\n' '{"area": "a", "file": "conveyor/x.sh"}' '{"area": "a", "test": "a.test.sh"}' \
   '{"area": "b", "file": "conveyor/y.sh"}' '{"area": "b", "test": "b.test.sh"}' \
   '{"area": "c", "file": "conveyor/z.sh"}' '{"area": "c", "test": "c.test.sh"}' > "$R/.conveyor/engine-areas.json"
@@ -35,7 +35,7 @@ if [ -e "$d/meet" ]; then
   timeout 20 bash -c 'until [ -e "$1" ]; do sleep 0.05; done' _ "$d/started-$o" || { echo "FAIL [$f]: ran alone"; exit 1; }
 fi
 for c in $CONVEYOR_SHELL_TEST_CASE; do echo "ok $c"; done
-[ ! -e "$d/hang" ] || { : > "$d/hung"; exec sleep 30; } # sleep: a stand-in run, which the step is told to end in
+[ ! -e "$d/hang" ] || { echo "$TMPDIR" > "$d/hung"; exec sleep 30; } # sleep: a stand-in run, which the step is told to end in
 [ "$f:$CONVEYOR_SHELL_TEST_CASE" != "a.test.sh:aone atwo" ] || printf '%s\t1.0\t0.5\n' "$f" > "$CONVEYOR_TEST_TIMES"
 [ "$CONVEYOR_TEST_FILE" != "$(cat "$d/failing" 2>/dev/null)" ]
 EOF
@@ -86,12 +86,17 @@ got=$(run off "$T/list")
 # Told to end (its timeout) while a case file's run goes on, the step prints what each run printed, under its case
 # file's `== ` line, begun and not ended in the log: a case that passed (its `ok` line) stays passed, and the timeout
 # names a case file. Bug it catches: their output, kept until all ended, was lost, and every case ran again.
+# The case file's own temp folder (its TMPDIR, noted in $R/hung) is gone once the step has ended (#1238: test runs
+# left 2,097 temp folders in /tmp), and was no folder of the step's caller.
 rm -f "$R/ran" "$R/hung"; : > "$R/hang"; mkdir -p "$T/term"
-(cd "$R" && exec env CONVEYOR_TEST_LOG="$T/term" bash .conveyor/test-changed.sh) > "$T/out" 2>&1 & p=$!
-i=0; until [ -e "$R/hung" ] || [ $((i += 1)) -gt 400 ]; do sleep 0.05; done
+(cd "$R" && exec env CONVEYOR_TEST_LOG="$T/term" TMPDIR="$T" bash .conveyor/test-changed.sh) > "$T/out" 2>&1 & p=$!
+i=0; until [ -s "$R/hung" ] || [ $((i += 1)) -gt 400 ]; do sleep 0.05; done
+read -r ft < "$R/hung"
+[ -d "$ft" ] && [ "${ft#"$T"/}" != "$ft" ] || no "a case file run by the step had no temp folder of its own in the step's TMPDIR $T while it ran: '$ft'"
 kill -TERM "$p"; wait "$p"; rc=$?; rm -f "$R/hang"
 grep -qxF '== conveyor/tests/a.test.sh (cases: aone atwo)' "$T/out" && grep -qxF 'ok aone' "$T/out" && [ "$rc" = 143 ] \
   && grep -qxF '== conveyor/tests/a.test.sh' "$T/term/test-changed.log" && ! grep -q '^-- ' "$T/term/test-changed.log" \
   || no "a step told to end lost what its case files printed: exit $rc: $(cat "$T/out"): $(cat "$T/term/test-changed.log")"
+[ ! -e "$ft" ] || no "a case file's temp folder $ft is left once the step was told to end: $(ls -A "$T")"
 
 [ $fails = 0 ] && echo "ok - test-changed runs each engine case file on its own" || exit 1
