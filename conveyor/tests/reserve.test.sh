@@ -120,6 +120,10 @@ t_reservedoctor() {
   out=$(loop health | jq -c .cores)
   jq -e --argjson n "$n" '.reserved == [$n - 2, $n - 1] and (.slots | type == "number" and . >= 1 and . <= $n - 2) and .unavailable == null' <<<"$out" >/dev/null \
     || fail "health does not name the kept cores and the slots left: $out"
+  # The snapshot reads the pool once and health takes the kept cores from that read (SLOT_KEPT), not from the host file again.
+  out=$(loop snapshot --fresh | jq -c .health.cores)
+  jq -e --argjson n "$n" '.reserved == [$n - 2, $n - 1] and (.slots | type == "number")' <<<"$out" >/dev/null \
+    || fail "the snapshot's health does not name the kept cores: $out"
   out=$(loop doctor 2>&1)
   grep -q "^ok: cores kept for you (the host file's reserveCores): cores $((n - 2)),$((n - 1)); card sessions and test runs run on cores 0[0-9,]*, and the test-slot pool has [0-9]* slots$" <<<"$out" \
     || fail "doctor does not name the kept cores and the slots left: $(grep -i 'cores' <<<"$out")"

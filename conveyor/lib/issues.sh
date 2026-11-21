@@ -683,7 +683,8 @@ labelled() {
 openissues() { # <json fields> [gh issue list arguments]
   local out f=$1 lim=1000 a; shift
   [ -z "$GITHUB" ] || { [ -s "$GITHUB/issues" ] && cat "$GITHUB/issues"; return; }  # the snapshot's fields, as `github` kept them
-  [[ ,$f, != *,authorAssociation,* ]] || { a=1; f=$(tr ',' '\n' <<<"$f" | grep -vx authorAssociation | paste -sd, -); }
+  # The field is cut out of the list in the shell (no tr, grep and paste start for it).
+  [[ ,$f, != *,authorAssociation,* ]] || { a=1; f=,$f,; while [[ $f == *,authorAssociation,* ]]; do f=${f/,authorAssociation,/,}; done; f=${f#,}; f=${f%,}; }
   while :; do # a full page means there may be more: ask again for ten times as many until the answer is short
     out=$(gh issue list --state open --limit "$lim" --json "$f" "$@") || { echo "conveyor: gh issue list failed" >&2; return 1; }
     [ "$(jq length <<<"$out")" -ge "$lim" ] || break; lim=$((lim * 10))

@@ -25,15 +25,21 @@
 # names only those. The cores kept for the user (slot_reserved) are left out, unless they are all the test may use.
 # Nothing where taskset is not (macOS): no worker is pinned there.
 slot_cpus() {
-  local l r x k kl a=() c=() n
+  slot_cpuset; [ ${#SLOT_CORES[@]} = 0 ] || printf '%s\n' "${SLOT_CORES[@]}"
+}
+# Sets, in the calling shell, SLOT_CORES (the cores slot_cpus prints) and SLOT_KEPT (the cores kept for the user,
+# slot_reserved's), so a caller that needs both asks for the machine's cores and reads the host file once.
+slot_cpuset() {
+  local l r x k a=() c=() n
+  SLOT_CORES=(); SLOT_KEPT=()
   command -v taskset >/dev/null || return 0
   n=$(nproc --all) || n=''
   l=$({ [ -z "$n" ] || taskset -cp "0-$((n - 1))" "$BASHPID"; } >/dev/null 2>&1; taskset -cp "$BASHPID" 2>/dev/null)
   l=${l##*: }; IFS=, read -ra r <<<"$l"
-  mapfile -t kl < <(slot_reserved "$n"); k=" ${kl[*]} "
+  mapfile -t SLOT_KEPT < <(slot_reserved "$n"); k=" ${SLOT_KEPT[*]} "
   for x in "${r[@]}"; do [[ $x =~ ^[0-9]+(-[0-9]+)?$ ]] || continue; for ((l = 10#${x%-*}; l <= 10#${x#*-}; l++)); do a+=("$l"); [[ $k == *" $l "* ]] || c+=("$l"); done; done
   [ ${#c[@]} -gt 0 ] || c=("${a[@]}")
-  [ ${#c[@]} = 0 ] || printf '%s\n' "${c[@]}"
+  SLOT_CORES=("${c[@]}")
 }
 
 # The cores kept for the user (the host file's reserveCores; docs/configuration.md, Cores kept for you), one a line:
@@ -86,7 +92,7 @@ slot_pool() {
   SLOT_DIR=${h[0]:-}; [ -n "$SLOT_DIR" ] \
     || if [[ ${CONVEYOR_TEST_POOL:-} =~ ^([1-9][0-9]{0,5}):(/.*)$ ]]; then p=${BASH_REMATCH[1]} SLOT_DIR=${BASH_REMATCH[2]}; else SLOT_DIR=/tmp/conveyor-test-slots; fi
   # The cores, each followed by a space, read with no program but slot_cpus's own (#532).
-  mapfile -t c < <(slot_cpus); SLOT_CPUS=''; n=${#c[@]}; [ "$n" = 0 ] || printf -v SLOT_CPUS '%s ' "${c[@]}"; [ "$n" -ge 1 ] || n=$(nproc --all)
+  slot_cpuset; c=("${SLOT_CORES[@]}"); SLOT_CPUS=''; n=${#c[@]}; [ "$n" = 0 ] || printf -v SLOT_CPUS '%s ' "${c[@]}"; [ "$n" -ge 1 ] || n=$(nproc --all)
   # A pool larger than the cores would put two slots on one core: it is the cores.
   SLOT_N=${p:-${h[1]:-}} && [ -n "$SLOT_N" ] && [ "$SLOT_N" -le "$n" ] || SLOT_N=$n
   mkdir -p "$SLOT_DIR" || { echo "conveyor: the test slots folder $SLOT_DIR cannot be made: no test can take a slot" >&2; return 1; }

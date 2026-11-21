@@ -52,5 +52,9 @@ t_snapexec() {
   out=$(PATH=$shim loop snapshot --fresh) || fail "the snapshot under the shim exited non-zero"
   [ "$(jq -c '[.belt[].card]' <<<"$out")" = '["c3"]' ] || fail "the snapshot under the shim is not the fixture's: $(jq -c .belt <<<"$out")"
   n=$(wc -l < "$log")
+  # Bugs it catches (issue 1165): the snapshot cut authorAssociation out of the field list with tr, grep and paste, and
+  # read the machine's cores (nproc) again for the cores kept for the user, after the slot pool had read them.
+  [ "$(grep -cx 'paste' "$log")" = 0 ] || fail "the snapshot started paste: the field list is cut in the shell"
+  [ "$(grep -cx 'nproc' "$log")" -le 1 ] || fail "the snapshot started nproc $(grep -cx 'nproc' "$log") times: the pool's read of the cores is kept"
   [ "$n" -lt "$SNAPEXEC_WAS" ] || fail "one snapshot started $n programs, not fewer than the $SNAPEXEC_WAS before issue 2: $(sort "$log" | uniq -c | sort -rn | head -n 12 | tr -s ' \n' ' ')"
 }
