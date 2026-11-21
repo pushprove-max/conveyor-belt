@@ -39,6 +39,10 @@ as the commit's author. To sign off commits you made already, run `git rebase --
   the limit removes its line from the exempt file. The function-length entry's `files` name the exempt file and leave
   out `.conveyor/lint-funcs.sh` and `.conveyor/lint-shell.sh`: a change that only removes lines from a file those
   `files` match needs no owner's yes, which is right for the exempt file and wrong for a linter.
+- ruff is the linter of the Python files: the pack's `lint` field runs `ruff check` on each changed `.py` file, read
+  only (`--no-fix`). Its config, `ruff.toml`, keeps ruff's default rules and adds the complexity rules `C901` and
+  `PLR0915`, with their limits. ruff is a tool of the build machine, not a dependency of the Board or the engine; with
+  no ruff on `PATH`, the command is skipped as `missing ruff`. A change to `ruff.toml` is lint policy.
 - The engine is bash 5.1 and jq; the Board is Python 3's standard library unless an issue names a pinned library.
   Both run on macOS and Linux (`conveyor/lib/portable.sh`).
 - The plugin is generic: no project's own names, paths or labels outside docs that name one as an example.

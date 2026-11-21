@@ -166,13 +166,27 @@
           "file": 800,
           "exempt": ".conveyor/size-exempt.txt"
         }
+      },
+      {
+        "files": [
+          "*.py"
+        ],
+        "triggers": [
+          "ruff.toml"
+        ],
+        "complexity": [
+          "C901",
+          "PLR0915"
+        ],
+        "run": "command -v ruff >/dev/null || { echo 'lint: missing ruff'; exit 127; }; ruff check --no-fix --force-exclude --output-format=concise {files}"
       }
     ],
     "policy": [
       ".conveyor/lint-shell.sh",
       ".conveyor/lint-funcs.sh",
       ".conveyor/lint-funcs.awk",
-      ".conveyor/size-exempt.txt"
+      ".conveyor/size-exempt.txt",
+      "ruff.toml"
     ]
   }
 }

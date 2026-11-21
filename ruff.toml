@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+# The config of ruff, the pack's lint command for the Python files (.conveyor/project.json, lint): ruff's default
+# rules, with the complexity rules C901 (branches of a function) and PLR0915 (statements of a function) and their limits.
+[lint]
+extend-select = ["C901", "PLR0915"]
+
+[lint.mccabe]
+max-complexity = 10
+
+[lint.pylint]
+max-statements = 50
