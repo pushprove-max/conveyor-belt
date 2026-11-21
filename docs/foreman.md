@@ -141,7 +141,8 @@ unless `XDG_DATA_HOME` says otherwise). Its path does not change when the engine
 
 A card that moves from one step to the next, as from build to review, gives no wake.
 
-The Foreman's reply to a wake says only what needs you. If nothing needs you, the reply is the one word Idle. A
+The Foreman's reply to a wake says only what needs you, and the `Done without asking` line for each step it took on a
+standing yes since its last reply. If neither is owed, the reply is the one word Idle. A
 problem that the Foreman finds in Conveyor itself always needs you. Who files it depends on the project:
 
 - In any other project, you file it in the plugin's repository. The Foreman says it on a line of its own:

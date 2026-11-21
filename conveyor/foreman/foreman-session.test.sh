@@ -156,6 +156,14 @@ out=$(turn u3c 'what now' $'May I retry #7?\nWaiting for your answer.'); jq -e '
 printf 'Conveyor: alpha: blocked: #7\nalpha: #7 is blocked\n' > "$FD/last-wake.txt"
 out=$(turn u4 'Stop hook feedback: Conveyor: alpha: blocked: #7' '#5 is still running, nothing needs you.'); jq -e '.decision == "block"' <<<"$out" >/dev/null || fail "play-by-play in a wake reply passed: $out"
 out=$(turn u5 'Stop hook feedback: Conveyor: alpha: blocked: #7' 'Idle'); [ -z "$out" ] || fail "a one-word wake reply was refused: $out"
+# Bug (#1228): the standing-yes rule needs the "Done without asking" line in the next reply, and a wake reply was
+# refused for it as a report, so the Foreman kept one rule or the other. The line passes alone and beside a line that
+# needs the owner; a report beside it is still refused; a line without the id is no such line.
+done_line='Done without asking (review-followup): released #926 so its review could finish; logged as c20261121T1-s-1.'
+out=$(turn u5a 'Stop hook feedback: Conveyor: alpha: blocked: #7' "$done_line"); [ -z "$out" ] || fail "wake reply [$done_line] was refused: $out"
+out=$(turn u5b 'Stop hook feedback: Conveyor: alpha: blocked: #7' "$done_line"$'\n''#7 needs your call: its fix changes the sign-in page.'); [ -z "$out" ] || fail "wake reply [$done_line + a line for the owner] was refused: $out"
+out=$(turn u5c 'Stop hook feedback: Conveyor: alpha: blocked: #7' "$done_line"$'\n''#12 landed successfully.'); jq -e '.decision == "block"' <<<"$out" >/dev/null || fail "wake reply [$done_line + '#12 landed successfully.'] passed: $out"
+out=$(turn u5d 'Stop hook feedback: Conveyor: alpha: blocked: #7' 'Done without asking: #12 landed successfully.'); jq -e '.decision == "block"' <<<"$out" >/dev/null || fail "wake reply [Done without asking: #12 landed successfully.] passed: $out"
 out=$(turn u6 'Stop hook feedback: Conveyor: alpha: blocked: #7' '#12 landed successfully.'); jq -e '.decision == "block"' <<<"$out" >/dev/null || fail "a report in a wake reply passed: $out"
 out=$(turn u7 'Stop hook feedback: Conveyor: alpha: blocked: #7' '#7 needs your call: its fix changes the sign-in page.'); [ -z "$out" ] || fail "a wake reply naming what needs the owner was refused: $out"
 # Bug (#139): a wake reply reporting a defect in Conveyor itself was refused as a status note, so the Foreman wrote
