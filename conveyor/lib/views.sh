@@ -19,7 +19,7 @@
 # lines, lib/prompts.sh) adds rollout: [{action, fails, place}]; a landed line adds the card's own (card()).
 # The picked line of a card made by land-branch adds branch: the branch whose change the card lands.
 # The picked line of a card of the loop adds created: when its issue was opened (the time it waited is the track's
-# first step). A review line adds counts: its findings at each level (donewhen.sh counts(), below). A start line adds of.
+# first step). A review line adds counts: its findings at each level (donewhen.sh counts()). A start line adds of.
 # A build, fix, rebase or review line adds model and effort: what that session or review ran on.
 # Only the lines no check has passed yet are read: a pick and a snapshot each check, and the records only grow.
 # $STATE.checked holds what checked whole: its bytes, its lines and the checksum of those bytes. A file whose first
