@@ -197,9 +197,9 @@ cardtest() {
   # the check and its output. That is not its tests failing: the one test-fix round (tfix) is kept and the card
   # is not blocked for it; one fix session is told the output, and checked() runs the checks again on its change.
   # The line is marked checks: no test ran, so the card's first run of its tests is still its first (testedbefore()).
-  out=$(treecheck "$wt"); t=$?
-  [ $t != 2 ] || { block "$c" "$n" "$wt" "the engine could not run the project's checks: $out"; return; }
-  if [ $t = 1 ]; then
+  out=$(treecheck "$wt"); t=$(testroute checks $?)
+  [ "$t" != block ] || { block "$c" "$n" "$wt" "the engine could not run the project's checks: $out"; return; }
+  if [ "$t" = checkfix ]; then
     packget test.checkCommand t || t=test.checkCommand
     record "$c" "$n" test fail "$(jq -cn --arg k "$t" --arg o "$out" '{reason: "the project'"'"'s checks failed (test.checkCommand: \($k)); no test file ran",
       checks: true, failures: {of: 0, files: [{file: $k, cases: []}], timeout: null}, tail: ($o | .[-4000:])}')"
@@ -274,11 +274,14 @@ cardfailed() {
   out=$(testfails "$wt.test" "$rc")
   # What still did not pass runs on main first (verdicts()): each failure's verdict goes on the test line.
   t=$(verdicts "$c" "$wt" "${out:-null}") || t='{"verdicts":[]}'
-  # The machine is at fault (verdicts(): machine, issue 221), with no failure the card's: its test line is `held`,
-  # not `fail` (the card's test step is not counted as failed), and it waits for the machine hold (below).
-  held=''; jq -e '[.verdicts[] | select(.verdict != "flaky")] | length > 0 and all(.verdict | IN("main", "machine")) and any(.verdict == "machine")' <<<"$t" >/dev/null && held=machine
-  record "$c" "$n" test "$([ -n "$held" ] && echo held || echo fail)" "$(failline "$wt" "$rc" "$sec" "${out:-null}" "$t" "$cr")"
+  # Where the failed run goes (testroute()). The machine is at fault (verdicts(): machine, issue 221), with no
+  # failure the card's: its test line is `held`, not `fail` (the card's test step is not counted as failed), and it
+  # waits for the machine hold (below).
+  route=$(testroute verdicts "$t")
+  record "$c" "$n" test "$([ "$route" = machine ] && echo held || echo fail)" "$(failline "$wt" "$rc" "$sec" "${out:-null}" "$t" "$cr")"
   testrulespass > /dev/null
+  # A failure that is the card's: whether main moved, and the fix round, are read after the test rules ran.
+  [ -n "$route" ] || route=$(testroute "$wt")
   # Main is red: every failure the run again left fails on main too. The card waits in its test step, holding no
   # files (no fix session, no block) until main changes; then it is fitted onto main and tested again, as a card
   # whose main moved during its tests is. It is not put back on its old commit (#582): caught is cleared, so a
@@ -288,18 +291,19 @@ cardfailed() {
   # is fitted onto main as it is then and tested again, as after a wait for main. Before it waits, it is judged
   # in the repair lane (repairlane(), issue 222): a card the lane passes goes on as a card whose tests passed;
   # one that finds the lane held by another card waits until it is free, and is then tested and judged again.
-  if [ "$held" = machine ]; then
+  held=''
+  if [ "$route" = machine ]; then
     lane=0; repairlane "$c" "$wt" || lane=$?
     if [ $lane = 0 ]; then
       echo "conveyor: card $c: a case it still fails is the machine's, and the card repairs it: $REPAIRED"
-      repaired=$REPAIRED; held=''; rc=0; tmain=''
+      repaired=$REPAIRED; rc=0; tmain=''
     else
       if [ $lane = 2 ]; then echo "conveyor: card $c: a case it still fails is the machine's: it waits for the repair lane, which another card holds"
       else echo "conveyor: card $c: a case it still fails is the machine's, not main's, and the repair lane did not pass it ($REPAIRED): it waits until the machine passes its controls again"; fi
       rm -f "$wt.ready"; locked giveway "$c" "$wt"; began "$c" "$n" test
       holdwait "$wt" "$([ $lane != 2 ] || echo lane)"; held=1
     fi
-  elif jq -e '[.verdicts[] | select(.verdict != "flaky")] | length > 0 and all(.verdict == "main")' <<<"$t" >/dev/null; then
+  elif [ "$route" = main ]; then
     echo "conveyor: card $c: every case it still fails fails on main too: it waits for main to change"
     rm -f "$wt.ready"; locked giveway "$c" "$wt"; began "$c" "$n" test
     mapfile -t mwon < <(jq -r '.mainRun.sha, (.verdicts[] | select(.verdict == "main") | .case)' <<<"$t")
@@ -321,7 +325,7 @@ cardfailed() {
   # by a session, not put back on its old commit (settle()), where what failed would only run again as it did.
   # Fitted there (settle() claims its files again), it gives way for that run, as for a fix round (fixing): a card
   # stacked on it (stackto()) is fitted onto main alone and lands, not waiting through this run (claim()).
-  if [ -z "$repaired" ] && [ -z "$tmain" ] && [ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" != "$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)" ]; then
+  if [ "$route" = moved ]; then
     echo "conveyor: card $c: main moved since its commit: its change goes onto main as it is now, and what failed runs again there"
     tmain=1; rm -f "$wt.ready"; unmate; away=''; caught=''
     redbrief "$c" "$n" "$br"; settle "$c" "$n" "$wt" "$sprompt" land "$issue"; rc=$?
@@ -332,9 +336,9 @@ cardfailed() {
     # Away now, it claims its files again (settle()) once that run passes, before it lands, main moved or not.
     locked giveway "$c" "$wt" fixing; ! jq -e '.away == true' "$wt.claim" >/dev/null 2>&1 || away=1; go=again; return
   fi
-  if [ -z "$repaired" ]; then
+  if [ "$route" = block ] || [ "$route" = fix ]; then
     tmain=''
-    [ -z "$tfix" ] || { block "$c" "$n" "$wt" "the changed tests failed again after their one fix round (exit $rc); nothing landed."$'\n'"$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000')"; return; }
+    [ "$route" != block ] || { block "$c" "$n" "$wt" "the changed tests failed again after their one fix round (exit $rc); nothing landed."$'\n'"$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000')"; return; }
     tfix=1; locked giveway "$c" "$wt" fixing; began "$c" "$n" fix
     # On the testFix seat (seat(): the builder's unless the control record sets testFix).
     redbrief "$c" "$n" "$br"; t=$(session "$wt" "$(testfixprompt "$sprompt" "$wt" "$rc")" fix testFix) \

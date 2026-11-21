@@ -233,6 +233,50 @@ afterreview() {
   else after=fix
   fi
 }
+# What the Test step does next, decided with nothing done. Called as `testroute checks <the exit of treecheck()>`, for
+# the project's checks at the start of the step, it prints block (2: they could not run), checkfix (1: they failed,
+# so one fix session follows) or nothing (another exit, 0 when they pass: the tests run). Called as
+# `testroute verdicts <verdicts() json>`, for a test run that failed, it prints machine (the machine is at fault
+# and no failure is the card's: the repair lane, then the machine hold), main (every failure is main's: the wait for
+# main) or nothing (a failure is the card's). For that failure, called as `testroute <worktree>`, it prints nothing
+# (the repair lane passed this test step: repaired), moved (main moved since the card's commit, and it was not
+# fitted onto main yet: tmain), block (the tests failed again after their one test-fix round: tfix) or fix (that
+# round). It reads card()'s repaired, tmain and tfix (bash's dynamic scope).
+testroute() {
+  if [ "$1" = checks ]; then
+    case $2 in 1) echo checkfix ;; 2) echo block ;; esac
+  elif [ "$1" = verdicts ]; then
+    if jq -e '[.verdicts[] | select(.verdict != "flaky")] | length > 0 and all(.verdict | IN("main", "machine")) and any(.verdict == "machine")' <<<"$2" >/dev/null; then echo machine
+    elif jq -e '[.verdicts[] | select(.verdict != "flaky")] | length > 0 and all(.verdict == "main")' <<<"$2" >/dev/null; then echo main
+    fi
+  elif [ -n "$repaired" ]; then :
+  elif [ -z "$tmain" ] && [ "$(git -C "$1" rev-parse HEAD 2>/dev/null)" != "$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)" ]; then echo moved
+  elif [ -n "$tfix" ]; then echo block
+  else echo fix
+  fi
+}
+# What a bug card does after its bug-card check (bugproof()), from that check's exit: close (3: every case passes on
+# main without the change, so the card closes as already done), block (2: the check cannot hold, and a build session
+# cannot mend it), build (another failure: one build session is told why), or nothing (0: on to the review). With
+# again (the check after that build session), exit 2 still prints block, and any other failure prints unproved: the
+# card blocks with the reason the check gave (BUGWHY).
+bugstep() { # <the exit of bugproof()> [again]
+  case $1 in
+    0) ;;
+    2) echo block ;;
+    3) [ -n "${2:-}" ] && echo unproved || echo close ;;
+    *) [ -n "${2:-}" ] && echo unproved || echo build ;;
+  esac
+}
+# Whether a card's staged change is no change (exit 0), after it stages the whole worktree (git add -A): nothing is
+# staged, or the stage fails, or a main-red fix card (issue 0, no branch) stages only the links the engine staged
+# (linksonly()). The links come with a fix, so with none they are dropped: the worktree is reset to its commit (issue
+# 323). Exit 1: a change to review.
+emptychange() { # <card> <issue number> <worktree> <branch, or ''>
+  git -C "$3" add -A && ! git -C "$3" diff --cached --quiet || return 0
+  [ "$2" = 0 ] && [ -z "$4" ] && linksonly "$1" "$3" || return 1
+  git -C "$3" reset -q --hard HEAD || :
+}
 # card()'s steps, in turn: cardopen(), cardbuild(), then on each pass of the review loop cardreview() and cardfix()
 # here, cardready(), cardlanding() and cardrebuild() in lib/cardland.sh. Each reads and sets card()'s locals (bash's
 # dynamic scope) and says in go what follows. card() sets go=end before each: a step that returns leaving it so ends
@@ -255,6 +299,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local tmain='' # tmain: set once a failed test step has fitted the card onto a main that had moved (#582)
   local voids=0 # voids: the test runs in a row that gave no result (voidrun())
   local held # held: its test step waited for main or the machine (mainwait(), holdwait())
+  local route # route: where a failed test run goes (testroute())
   local cr # cr: a failed test line's carried part (carriedrec())
   local mainsec=0 mwon # mwon: main's commit and the cases it waits on there (mainwait()); mainsec: the seconds it has waited for main to change (mainwaited()); its landed line's waitSec adds them to waitsec
   local repaired='' lane # repaired: the repair lane passed its test step (repairlane()), saying how; lane: its exit
@@ -425,20 +470,21 @@ cardbuild() {
       # build session cannot repair the runner. A main-red fix card is proved by main's failing cases (redproof()):
       # one that does not hold is blocked with that reason (exit 2), and one whose every case passes on main without
       # its change (exit 3) closes as already done, as nochange() closes a card, its change dropped.
-      bugproof "$c" "$wt" "$issue"; trc=$?
-      if [ $trc = 3 ]; then
+      # bugstep() gives what each exit of the check leads to.
+      bugproof "$c" "$wt" "$issue"; trc=$(bugstep $?)
+      if [ "$trc" = close ]; then
         t=$(head -n 1 "$wt.unfixed") && out=$(line "$c" "$n" closed ok "$(jq -cn --arg r "$t" --argjson e "$(ending)" --argjson w "$(waited)" '{reason: $r} + $e + $w')") && locked append "$out" \
           || { block "$c" "$n" "$wt" "build: $(head -n 1 "$wt.unfixed" 2>/dev/null) The engine could not write the closed line"; return; }
         clean "$wt"; return
       fi
-      [ $trc != 2 ] || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
-      if [ $trc != 0 ]; then
+      [ "$trc" != block ] || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
+      if [ "$trc" = build ]; then
         began "$c" "$n" build
         redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt$more"$'\n\n'"${BUGBUILD//'<why>'/"$BUGWHY"}"$'\n'"$(<"$wt.unfixed")") || { block "$c" "$n" "$wt" "build: $t"; return; }
         checked "$c" "$n" "$wt" "$issue" "$sprompt" build "$(jq -c --arg r "$BUGWHY" '. + {reason: $r}' <<<"$t")" || return
-        bugproof "$c" "$wt" "$issue"; trc=$?
-        [ $trc != 2 ] || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
-        [ $trc = 0 ] || { block "$c" "$n" "$wt" "build: $BUGWHY"$'\n'"$(<"$wt.unfixed")"; return; }
+        bugproof "$c" "$wt" "$issue"; trc=$(bugstep $? again)
+        [ "$trc" != block ] || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
+        [ "$trc" != unproved ] || { block "$c" "$n" "$wt" "build: $BUGWHY"$'\n'"$(<"$wt.unfixed")"; return; }
       fi
     fi
   elif [ -z "$br" ] && [ -z "$sf" ] && jq -e --arg t "$TYPE" 'any(.labels[]?; .name == $t)' <<<"$issue" >/dev/null 2>&1; then
@@ -460,11 +506,8 @@ cardbuild() {
 # shellcheck disable=SC2034 # it declares no variable of its own: docpass, as the rest, is card()'s, read in lib/cardland.sh
 cardreview() {
   redbrief "$c" "$n" "$br"
-  # A main-red fix card whose staged change is only the links the engine staged (linksonly()) made no change: the
-  # links come with a fix, so with none they are dropped (issue 323).
-  git -C "$wt" add -A && ! git -C "$wt" diff --cached --quiet \
-    && ! { [ "$n" = 0 ] && [ -z "$br" ] && linksonly "$c" "$wt" && { git -C "$wt" reset -q --hard HEAD || :; }; } || {
-    nochange "$c" "$n" "$wt" "$sprompt"; return; }
+  # A staged change that is no change (emptychange(): a main-red fix card's links alone too) goes to nochange().
+  ! emptychange "$c" "$n" "$wt" "$br" || { nochange "$c" "$n" "$wt" "$sprompt"; return; }
   trialflag "$wt" # a trial card's pick names the pipeline files its change touches (lib/push.sh)
   # The review gate (lintgate(), lib/lint.sh): a fix of lint findings changed the change, so a kept review, a kept
   # patch's review (land) and a test pass no longer stand for it, and the review of this pass reads all of it.
