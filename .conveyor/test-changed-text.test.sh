@@ -15,7 +15,7 @@ ok() { echo "ok - $1"; }
 no() { echo "not ok - $1"; }
 
 # A scratch repo: area a is the engine file conveyor/lib/m.sh and case file a.test.sh (aone); area b is conveyor/y.sh
-# and b.test.sh (bone), whose case checks m.sh's first message. y.sh echoes m.sh's second message (m.sh's donewhen.sh again() echoes it too); the Board's app.js
+# and b.test.sh (bone), whose case checks m.sh's first message. y.sh echoes m.sh's second message (m.sh's again() echoes it too); the Board's app.js
 # compares it, and
 # its test (named after it) writes `app` to ran, as the runner stub writes the cases it was asked for (ALL for none).
 # Area c (c.test.sh, cone) no change here selects: aone and bone are then not a case of every case file, which runs the
