@@ -796,7 +796,7 @@ export const TA = (() => {
 // The Benchmarks tab (#326; dashboard-view.bench and bench-pages). BH.hist() is what GET bench gives for the history:
 // the newest run (5 tasks: Conveyor 1.5.0 4 of 5, Claude alone 2, Codex alone 2 with 1 not run) and an older one of 20
 // tasks stopped at the usage guard; the arms (Conveyor, Claude alone and Codex alone ready, Superpowers failing its
-// preflight, Chisle not checked, OpenHands not offered); the places of each results key's tasks. BH.run() is the
+// preflight, Chisle not checked, a fixture arm Stub off not offered); the places of each results key's tasks. BH.run() is the
 // newest run's tasks. BH.open(w) boots the tab with both served, on the Overview; w.downloads lists what the page downloads.
 export const BH = (() => {
   const EB = 'b'.repeat(40), EA = 'a'.repeat(40), SET = { dataset: 'princeton-nlp/SWE-bench_Verified', revision: 'c104f840cc67f8b6eec6f759ebc8b2693d585d4a' };
@@ -816,7 +816,7 @@ export const BH = (() => {
       { name: 'codex-sol', label: 'Codex alone (gpt-6.2-sol)', kind: 'agent', state: 'ready', why: null, guard: null, perTask: { usual: 1, worst: 1, minutes: 6 }, key: 'codex-sol', keyPrefix: null },
       { name: 'superpowers', label: 'Claude with Superpowers', kind: 'agent', state: 'failed', why: 'it did not fire: its output shows no use of its method', guard: 'agent', perTask: { usual: 1, worst: 1, minutes: 8 }, key: 'superpowers-claude-opus-5-5', keyPrefix: null },
       { name: 'chisle', label: 'Claude with Chisle', kind: 'agent', state: 'unchecked', why: null, guard: 'agent', perTask: { usual: 4, worst: 4, minutes: 8 }, key: 'chisle', keyPrefix: null },
-      { name: 'openhands', label: 'OpenHands', kind: 'agent', state: 'not offered', why: 'it needs an API key', guard: null, perTask: null, key: null, keyPrefix: null }],
+      { name: 'stub-off', label: 'Stub off', kind: 'agent', state: 'not offered', why: 'it needs an API key', guard: null, perTask: null, key: null, keyPrefix: null }],
     keys: [{ key: EA, at: [0, 1, 2] }, { key: 'solo-claude-opus-5-5', at: [0, 1, 2, 3, 4] }] });
   const cell = (arm, r, o = {}) => ({ arm, result: r, reused: false, resolved: r === 'resolved', fired: true, why: null, sessions: 1, tokens: 1000000, minutes: 8, steps: [], patch: [{ path: 'a.py', added: 3, removed: 1 }], ...o });
   const STEPS = [{ step: 'build', result: 'ok', tokens: { claude: 3100000, codex: 0 } }, { step: 'review', result: 'NO-GO', tail: '[P1] query.py:9 combine() drops the negation when the right side is empty' },

@@ -229,10 +229,10 @@ test('Start: only the arms whose preflight passed can be picked; the cost before
   assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-seg button'), (b) => [b.textContent, b.getAttribute('aria-pressed')]), [['1', 'false'], ['5', 'false'], ['20', 'true'], ['50', 'false']]);
   assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-arm-pick > .board-label'), text), ['Conveyor', 'Claude, plain', 'Claude + a plugin or method', 'Codex', 'Other agents']);
   assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-arm'), (l) => [l.dataset.arm, l.querySelector('input').disabled, l.querySelector('.chip').textContent]), [
-    ['conveyor', false, 'Ready'], ['solo', false, 'Ready'], ['superpowers', false, 'Preflight failed'], ['chisle', false, 'Not checked'], ['codex-sol', false, 'Ready'], ['openhands', true, 'Not offered']]);
+    ['conveyor', false, 'Ready'], ['solo', false, 'Ready'], ['superpowers', false, 'Preflight failed'], ['chisle', false, 'Not checked'], ['codex-sol', false, 'Ready'], ['stub-off', true, 'Not offered']]);
   // Bug it guards: every agent arm was said to take one session a task; a method arm's spec can set more (chisle: 4).
   assert.deepEqual(['solo', 'chisle'].map((a) => text(bp(w).querySelector(`.bench-arm[data-arm="${a}"] .bench-sub`))), ['one session a task, headless', '4 sessions a task, headless']);
-  assert.deepEqual(['check-superpowers', 'check-chisle', 'check-openhands'].map((a) => (act(bp(w), a) || {}).textContent || null), ['Check again', 'Check', null]);
+  assert.deepEqual(['check-superpowers', 'check-chisle', 'check-stub-off'].map((a) => (act(bp(w), a) || {}).textContent || null), ['Check again', 'Check', null]);
   const plan = () => Array.from(bp(w).querySelectorAll('.bench-plan tr[data-arm]'), cells);
   // Bug it guards (#326): the cost was a dash everywhere. Each session is priced at the arm's mean session dollars
   // (Conveyor's $1.25: 50 usual sessions $62.50, 160 worst $200.00).
@@ -260,10 +260,12 @@ test('Start: only the arms whose preflight passed can be picked; the cost before
   assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['arms', 'check', 'chisle']]);
   await settle();
   // The Claude login at its usage guard: a run with Claude alone does not start; one of Codex alone, which uses no
-  // Claude login, does, and takes no version (it runs no engine).
-  w.benchBody = () => ({ ...BH.hist(), guard: { conveyor: false, agent: true } });
+  // Claude login, does, and takes no version (it runs no engine). The arms read again have none that is not offered.
+  w.benchBody = () => { const h = BH.hist(); return { ...h, arms: h.arms.filter((a) => a.state !== 'not offered'), guard: { conveyor: false, agent: true } }; };
   act(bp(w), 'arms-again').click();
   await settle();
+  // Bug it guards (#1024): the page showed an Other agents group of arms that can never run; with none it shows no group.
+  assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-arm-pick > .board-label'), text), ['Conveyor', 'Claude, plain', 'Claude + a plugin or method', 'Codex']);
   assert.equal(act(bp(w), 'start').disabled, true);
   assert.equal(text(bp(w).querySelector('.bench-why')), 'The usage guard is reached for Claude alone: no run starts while it stands.');
   assert.deepEqual(plan().map((r) => [r[0], r[6]]), [['Conveyor', 'Not reached'], ['Claude alone', 'Reached']], 'each arm says the guard that holds it');
@@ -287,7 +289,7 @@ test('Start: ticking an arm not ready runs its preflight and picks it once it su
   act(bp(w), 'to-start').click();
   const arm = (a) => bp(w).querySelector(`.bench-arm[data-arm="${a}"]`);
   const state = (a) => [arm(a).querySelector('input').checked, arm(a).querySelector('.chip').textContent];
-  assert.equal(act(bp(w), 'arm-openhands').disabled, true, 'a Not offered arm cannot be ticked');
+  assert.equal(act(bp(w), 'arm-stub-off').disabled, true, 'a Not offered arm cannot be ticked');
   pick(w, 'arm-conveyor');
   // Bug it guards (#632): with no arm picked the estimate still showed a table head with no row and "$0.00".
   const est = () => bp(w).querySelector('.bench-before');

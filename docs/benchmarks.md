@@ -148,16 +148,11 @@ arms on the same tasks. With no `--arm`, the run uses the `conveyor` arm.
 | `spec-kit` | Four Claude sessions: `/speckit.specify` with the issue, then `/speckit.plan`, `/speckit.tasks` and `/speckit.implement` | The Claude Code CLI, uv and the `specify` CLI | Claude |
 | `bmad` | One Claude session told to use the BMAD Method's quick flow | Node.js and the Claude Code CLI. The run installs the BMAD Method in the checkout | Claude |
 | `gsd` | One Claude session that runs `/gsd:quick` on the issue | Node.js and the Claude Code CLI. The run installs GSD in the checkout | Claude |
-| `openhands` | Not offered | | |
-| `aider` | Not offered | | |
 
 The Claude arms other than `conveyor` use the model of the builder seat when it is a Claude model. A method that
 asks questions by design gets a fixed script of steps. Its prompt tells it that no one will answer, and to take the
 recommended choice at each point. The files that a method writes for itself (for example `specs/` or `.claude/`) are
 not part of the patch.
-
-OpenHands and Aider are not offered. They run on a model provider's API key, and they cannot run on a subscription
-login. The benchmark uses no API keys.
 
 ### Saved arms
 

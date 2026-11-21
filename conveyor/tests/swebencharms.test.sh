@@ -81,12 +81,16 @@ t_swearmpre() {
   [ ! -d "$B/results" ] && [ -d "$SWE_FX/boxes/chk" ] || fail "a task was run, or a check's container removed, with no Docker"; rm -r "$SWE_FX/nodocker" "$B/check/stub-a.h"
   out=$(loop bench swe history 2>&1); jq -e '.runs[0] | .state == "refused" and (.cols | map(.arm) == ["solo", "conveyor"]) and .cols[1].version == "v1.5.0"
     and (.why | startswith("Docker did not answer on the build machine."))' <<<"$out" > /dev/null || fail "the run history does not keep the Docker refusal: $out"
-  # The engine's own arms: every file is an arm, and one that cannot run on a subscription login says why.
+  # The engine's own arms: every file is an arm, and none is one that can never run here (#1024: Aider and OpenHands
+  # need an API key).
   out=$(CONVEYOR_BENCH_ARMS=$SRC/bench/arms loop bench swe arms 2>&1)
   [ "$(grep -c '' <<<"$out")" = "$(ls "$SRC"/bench/arms/*.json | wc -l)" ] && ! grep -q 'not a JSON object' <<<"$out" \
-    && grep -q "^aider (Aider, agent): not offered: Aider runs on a model provider's API key" <<<"$out" || fail "the engine's arms are not all listed: $out"
-  out=$(CONVEYOR_BENCH_ARMS=$SRC/bench/arms loop bench swe 1 --arm openhands 2>&1) && fail "an arm that is not offered ran: $out"
-  grep -q "the arm openhands is not offered" <<<"$out" || fail "the refusal does not say the arm is not offered: $out"
+    && ! grep -q ': not offered' <<<"$out" || fail "the engine's arms are not all listed, or one is not offered: $out"
+  # An arm marked offered: false is listed as not offered with why, and a run of it is refused.
+  jq -n '{label: "Stub off", kind: "agent", offered: false, why: "it needs an API key"}' > "$SWE_FX/arms/stub-off.json" || fail "the arm could not be written"
+  out=$(loop bench swe arms 2>&1); grep -q "^stub-off (Stub off, agent): not offered: it needs an API key" <<<"$out" || fail "the list does not say the arm is not offered: $out"
+  out=$(loop bench swe 1 --arm stub-off 2>&1) && fail "an arm that is not offered ran: $out"
+  grep -q "the arm stub-off is not offered: it needs an API key" <<<"$out" || fail "the refusal does not say the arm is not offered: $out"
 }
 
 # Bug: a trial whose arm did not fire (its output shows no use of its method) was graded on the change it left, or
