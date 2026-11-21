@@ -260,8 +260,9 @@ Each session runs `codex exec --json` in the card's worktree (`-C`), under the b
 in force, with the same prompt (the brief and the card rules) on stdin as a Claude session. Its sandbox is
 `workspace-write`, so it can write in the worktree, `/tmp` and `$TMPDIR` (where the brief's background runs keep
 their output and status files, and a test run its scratch folder), and, given with `--add-dir`, the machine's test
-slots folder (the host file's `testSlotsDir`, else `/tmp/conveyor-test-slots`), in which a test run takes a slot; a
-command that writes anywhere else fails. Codex reads the user's own `~/.codex` config, as a Codex review does (its
+slots folder (the host file's `testSlotsDir`, else `/tmp/conveyor-test-slots`), in which a test run takes a slot, and
+the card's briefs folder (`CONVEYOR_BRIEFS`, where long command output is kept). A command that writes anywhere else
+fails. Codex reads the user's own `~/.codex` config, as a Codex review does (its
 provider and sign-in are there). Codex's web search is turned off (`web_search="disabled"`): it is a tool Codex runs
 on its side, which no hook is given.
 
