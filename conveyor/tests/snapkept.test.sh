@@ -55,16 +55,21 @@ EOF
   chmod +x "$T/$CASE/bin/jq"
 }
 # Every input of the kept snapshot dated in 2000, and the kept snapshot itself <s> seconds old: none changed since.
+# Its build-start file (snapshot.json.at) is dated the same, as a build that ended leaves it (snapkept_building).
 # GitHub's answers (snapgh/at) too: asked after the kept snapshot's build began, they are taken for a build to come.
 snapkept_quiet() { # <s>
   local t; printf -v t '%(%Y%m%d%H%M.%S)T' $(($(date +%s) - $1))
   touch -c -t 200001010000 "$ST/cards.jsonl" "$ST/retried.jsonl" "$ST/control.json" "$ST/snapgh/at" && mkdir -p "$T/$CASE/cards" && touch -t 200001010000 "$T/$CASE/cards" \
-    && touch -t "$t" "$ST/snapshot.json" || fail "the fixture's times could not be set"
+    && touch -t "$t" "$ST/snapshot.json" "$ST/snapshot.json.at" || fail "the fixture's times could not be set"
 }
-# Waits until no writer holds the kept snapshot's lock and the kept snapshot shows c9.
+# Waits until no build is under way and the kept snapshot shows c9. A build is under way from the time it dates
+# snapshot.json.at (snapkeep) to the rename that dates the kept snapshot the same. Bug (#1242): this wait took the
+# kept lock to see that no writer held it, and a writer that found the lock taken by the wait ended unbuilt (it takes
+# any holder for a writer that builds next), so no snapshot with c9 came under load. No look takes the lock.
+snapkept_building() { [ "$ST/snapshot.json.at" -nt "$ST/snapshot.json" ]; }
 snapkept_built() {
   for _ in $(seq 100); do
-    flock -n "$ST/snapshot.json.lock" true && jq -e '.belt | map(.card) | index("c9")' "$ST/snapshot.json" > /dev/null 2>&1 && return 0
+    ! snapkept_building && jq -e '.belt | map(.card) | index("c9")' "$ST/snapshot.json" > /dev/null 2>&1 && return 0
     sleep 0.2
   done
   fail "no writer put a snapshot with c9 in place in 20 s: $(jq -c '[.belt[].card]' "$ST/snapshot.json" 2>&1)"
@@ -97,7 +102,7 @@ t_snapkeptonce() {
   PATH=$T/$CASE/bin:$PATH loop snapshot > "$T/$CASE/a" & PATH=$T/$CASE/bin:$PATH loop snapshot > "$T/$CASE/b"; wait
   jq -e .belt "$T/$CASE/a" > /dev/null && jq -e .belt "$T/$CASE/b" > /dev/null || fail "a reader printed no snapshot"
   snapkept_built
-  # A second writer, had it built, would hold the lock now or have noted its build: it is given the time to start.
+  # A second writer, had it built, would be building now or have noted its build: it is given the time to start.
   sleep 2; snapkept_built # sleep: a second writer is given time to start; a run that never starts cannot be waited for
   [ "$(wc -l < "$log")" = 1 ] || fail "two readers at once ran $(wc -l < "$log") builds, not one"
   [ "$(wc -l < "$T/$CASE/asks")" = 1 ] || fail "two readers at once asked GitHub for the issues $(wc -l < "$T/$CASE/asks") times, not once"
@@ -194,7 +199,7 @@ t_snapkeptrename() {
   # watcher took its empty belt for an idle Conveyor while c9 was in flight.
   jq -e '.recordsNewer == true and (.belt | map(.card) | index("c9") | not)' <<<"$out" > /dev/null \
     || fail "the old snapshot did not say the records changed after it: $(jq -c '{recordsNewer, belt: [.belt[].card]}' <<<"$out")"
-  wait_until "! flock -n '$ST/snapshot.json.lock' true" || fail "no writer was building after the reader"
+  wait_until snapkept_building || fail "no writer was building after the reader"
   jq -e '.belt | map(.card) | index("c9") | not' "$ST/snapshot.json" > /dev/null || fail "while the writer built, the kept file was not the old snapshot whole"
   loop snapshot | jq -e .belt > /dev/null || fail "while the writer built, a reader did not print a whole snapshot"
   snapkept_built
