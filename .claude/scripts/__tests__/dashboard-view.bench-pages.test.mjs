@@ -83,6 +83,16 @@ test('Compare: a reading asked for one pair is not shown for the pair a Scoreboa
   assert.ok(!text(page(w)).includes('A reading of the old ask.'), 'the old ask\'s reading is not shown');
 });
 
+// Bug it guards: the flipped-tasks table was cut to its first 12 rows, so a pair with more flips than 12 (Conveyor against
+// Claude + Caveman has 15 in the "Only" boxes) hid the rest while the boxes counted them all.
+test('Compare, Conveyor against Claude + Caveman: the table lists every flipped task, more than 12', async () => {
+  const w = await opened(BH.study(), 'compare');
+  await pick(w, 'cmp-b', 'arm:caveman');
+  const flips = fours(w).filter(([name]) => name.startsWith('Only ')).reduce((s, [, v]) => s + v, 0);
+  assert.ok(flips > 12, `the pair has more than 12 flipped tasks, has ${flips}`);
+  assert.equal(rows(q(w, '.bench-flips')).length, flips, 'one table row for each task in the two "Only" boxes');
+});
+
 // Bug it guards: the boxes and the verdict did not follow the pickers. On every pair the four boxes add up to the
 // shared tasks, and the verdict changes with the pair: 2 apart is not told apart, a version 10 above Claude alone is.
 test('Compare: the four boxes add up to the shared tasks, and the verdict changes when the pickers change', async () => {

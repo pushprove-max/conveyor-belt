@@ -261,7 +261,7 @@
     return K.verdict('quiet', 'Head to head', `Not told apart yet. The difference is ${K.plural(Math.abs(d), 'task')}, under the noise of ${N}.`, w);
   }
   function differ(A, Bs, x) {
-    const s = K.box('Where they differ', 'Every task falls in one box. Only the two "only" boxes move the score.'), fl = x.onlyA.map((id) => [id, A, Bs]).concat(x.onlyB.map((id) => [id, Bs, A])).slice(0, 12);
+    const s = K.box('Where they differ', 'Every task falls in one box. Only the two "only" boxes move the score.'), fl = x.onlyA.map((id) => [id, A, Bs]).concat(x.onlyB.map((id) => [id, Bs, A]));
     s.append(K.add(h('div', 'bench-grid bench-g-2 bench-fours'), [boxOf('Both resolve', x.both, 'ok'), boxOf(`Only ${A.label}`, x.onlyA.length, 'info'), boxOf(`Only ${Bs.label}`, x.onlyB.length, 'warn'), boxOf('Neither', x.none, 'quiet')]),
       h('h3', 'bench-h', 'The flipped tasks'),
       K.add(h('div', 'bench-row'), [K.button('Ask for the readings', 'btn-quiet btn-sm', 'cmp-read', 'Ask for the model\'s reading of each flipped task', () => readDiff(K.B.cmp, A.key, Bs.key, 'compare')), K.B.cmp.ask ? K.saidAt(K.B.cmp.ask) : '']),
