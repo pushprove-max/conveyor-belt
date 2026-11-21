@@ -38,8 +38,8 @@ rev() { st "select(.issue == $1 and .step == \"review\") | $2"; } # <issue> <jq 
 # its prompt in $STUB/asked), and the engine shell is made as `conveyor.sh run` makes one. What judged() prints is in
 # <worktree>.fields, with the verdict and counts the card's review line takes from the review after minor(), as
 # card() does; the review it leaves is <worktree>.review, and with fix, for a NO-GO, what its fix round is told, as
-# card() gives it (numbered(), fixlines()), is <worktree>.fix. The cases that need a whole card (its fix round and
-# second review, its landing, the reviewer's brief card() builds, the snapshot) still run one.
+# card() gives it (numbered(), fixlines()), is <worktree>.fix. Only t_judgeoff runs a whole card, for the snapshot of
+# the review lines card() writes; the snapshot of judged reviews over a fix round is judgesnap.test.sh's.
 judgeone() { # <issue> <review file | -> [fix]
   local wt=$T/$CASE/cards/c$1
   mkdir -p "$T/$CASE/cards" && git -C "$R" worktree add -q --detach "$wt" && (cd "$wt" && . "$STUB/build") && git -C "$wt" add -A \
@@ -50,6 +50,14 @@ judgeone() { # <issue> <review file | -> [fix]
     && jq -c --arg v "$(verdict "$wt.review")" --argjson k "$(counts "$wt.review")" '. + {verdict: $v, counts: $k}' <<<"$f" > "$wt.fields" \
     && { [ "${3:-}" != fix ] || [ "$(verdict "$wt.review")" != NO-GO ] || { ids=$(numbered "$wt") && fixlines "$wt" "$ids" > "$wt.fix"; }; } ) \
     || fail "review() or judged() on c$1 failed"
+}
+# What card() adds to the reviewer's instructions for the always-accepted kinds: card()'s own two lines that add them
+# (lib/card.sh), run in the engine shell judgeone() makes, with no card run; with no kind to tag, nothing.
+kindsbrief() {
+  local code; code=$(grep -A1 '^  old=\$(judgeon)' "$SRC/lib/card.sh")
+  [ "$(wc -l <<<"$code")" = 2 ] || fail "card()'s lines that add the kinds to the reviewer's instructions were not found in lib/card.sh"
+  mkdir -p "$T/$CASE/cards" && ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
+    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names && rv='' && eval "$code" && printf '%s' "$rv" )
 }
 jf() { jq -r "$2" "$T/$CASE/cards/c$1.fields"; } # <issue> <jq filter>: of what judged() printed for c<issue> (judgeone)
 jr() { cat "$T/$CASE/cards/c$1.review"; }        # <issue>: the review judged() left for c<issue> (judgeone)
@@ -216,15 +224,21 @@ t_judgefail() {
 }
 
 # Bug: with the judge off, a review is judged all the same (a judge call, a finding declined, the reviewer
-# asked to tag kinds), instead of every finding counting as before.
+# asked to tag kinds), instead of every finding counting as before; the snapshot does not say the judge did not run.
 t_judgeoff() {
+  local out
   judging "[$(issue 7 2026-01-01)]" off security
-  echo "$NOGO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"; echo 'F1 DECLINE: no' > "$STUB/judge.1"
+  echo "$NOGO" > "$STUB/review"; echo 'F1 DECLINE: no' > "$STUB/judge.1"
+  judgeone 7 "$STUB/review" fix
+  [ ! -e "$STUB/judges" ] && [ "$(jf 7 'has("judge")')" = false ] || fail "a judge was asked, or the review's fields hold one, with the judge off: $(jf 7 .)"
+  [ "$(jf 7 .verdict)" = NO-GO ] && cmp -s "$STUB/review" "$T/$CASE/cards/c7.review" && grep -qxF 'E1 [P1] a.txt:1 wrong word' "$T/$CASE/cards/c7.fix" \
+    || fail "with the judge off, a NO-GO did not stand as the reviewer wrote it, with its finding told to the fix: $(jr 7)"
+  out=$(kindsbrief) && [ -z "$out" ] || fail "the reviewer was asked to tag kinds with the judge off: $out"
+  # loop: the review lines the snapshot reads are card()'s own, written inline in it (no function to call): only a
+  # card run shows the reason it records for an unjudged NO-GO and for the GO after its fix round.
+  echo "$NOGO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
   loop run >/dev/null || fail "run exited non-zero"
-  [ ! -e "$STUB/judges" ] && [ "$(rev 7 'has("judge")' | tr '\n' ' ')" = "false false " ] || fail "a judge was asked, or a review line holds one, with the judge off"
-  [ "$(rev 7 .result | tr '\n' ' ')" = "NO-GO GO " ] && [ "$(wc -l < "$STUB/sessions")" = 2 ] && grep -qxF 'E1 [P1] a.txt:1 wrong word' "$STUB/brief" \
-    || fail "with the judge off, a NO-GO did not go to its fix and a second review as before: $(rev 7 .result | tr '\n' ' ')"
-  ! grep -q 'always accepts' "$STUB/asked" && [ -n "$(st 'select(.step == "landed") | .sha')" ] || fail "the reviewer was asked to tag kinds with the judge off, or the card did not land"
+  [ ! -e "$STUB/judges" ] && [ "$(rev 7 .result | tr '\n' ' ')" = "NO-GO GO " ] || fail "the card's run asked a judge, or its reviews were not a NO-GO then a GO"
   [ "$(loop snapshot --fresh | jq -c '.landed[0].rounds | map(.judge)')" = '[{"ran":false,"why":"the judge is off"},{"ran":false,"why":"the review had no finding"}]' ] \
     || fail "the snapshot does not say the judge did not run on the reviews, with why (it is off; no finding)"
 }
@@ -252,26 +266,24 @@ t_judgeswitch() {
 # Bugs: the always-accepted kinds are the pack's, so naming one takes a commit; `control judge always` with no kind
 # leaves the old kinds in force; a kind that is not one word (it would close the tag the reviewer writes) is taken.
 t_judgekinds() {
-  local i
+  local out
   judging "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"
   [ "$(loop control judge always security data security | jq -c .judgeAlways)" = '["security","data"]' ] || fail "control judge always did not write the kinds, each once, to the control record"
-  for i in 1 3; do printf '%s\n' '[P1][security] a.txt:2 the token is logged' '[P1][data] a.txt:2 the rows are dropped' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.$i"; done
-  echo "$GO" > "$STUB/review.2"
+  printf '%s\n' '[P1][security] a.txt:2 the token is logged' '[P1][data] a.txt:2 the rows are dropped' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
   printf '%s\n' 'F1 DECLINE: cannot happen. Cost to every card: none' 'F2 DECLINE: cannot happen. Cost to every card: none' > "$STUB/judge.1"
   printf '%s\n' 'F1 DECLINE: cannot happen' 'F2 DECLINE: cannot happen' > "$STUB/judge.2"
-  # A whole card: card() itself adds the kinds to the reviewer's brief, and its fix brief is what the fix is told.
-  loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
-  grep -q 'always accepts a finding of one of these kinds: security, data\.' "$STUB/asked" || fail "the reviewer was not told the kinds the control record names"
-  [ "$(rev 7 .result | tr '\n' ' ')" = "NO-GO GO " ] && [ "$(rev 7 '.judge // empty | [(.accepted | length), (.declined | length)] | join(" ")')" = "2 0" ] \
-    && grep -qxF 'E1 [P1][security] a.txt:2 the token is logged' "$STUB/brief" && grep -qxF 'E2 [P1][data] a.txt:2 the rows are dropped' "$STUB/brief" \
-    || fail "a finding of a kind control judge always names was not accepted against the judge's decline: $(rev 7 '[.result, .judge] | tojson' | tr '\n' ' ')"
-  # No kind clears them: the same findings are the judge's to decline, and the reviewer is asked for no tag. A whole
-  # card again: card() builds the reviewer's brief inline from what judgeon() gives, so only its run shows that an
-  # empty list adds no tag text while the judge stays on.
+  out=$(kindsbrief) && grep -q 'always accepts a finding of one of these kinds: security, data\.' <<<"$out" || fail "the reviewer was not told the kinds the control record names: $out"
+  judgeone 7 "$STUB/review" fix
+  [ "$(jf 7 '[.verdict, (.judge // empty | (.accepted | length), (.declined | length))] | join(" ")')" = "NO-GO 2 0" ] \
+    && grep -qxF 'E1 [P1][security] a.txt:2 the token is logged' "$T/$CASE/cards/c7.fix" && grep -qxF 'E2 [P1][data] a.txt:2 the rows are dropped' "$T/$CASE/cards/c7.fix" \
+    || fail "a finding of a kind control judge always names was not accepted against the judge's decline, or not told to the fix: $(jf 7 '[.verdict, .judge] | tojson')"
+  # No kind clears them: the same findings are the judge's to decline, and the reviewer is asked for no tag while
+  # the judge stays on.
   [ "$(loop control judge always | jq -c .judgeAlways)" = '[]' ] || fail "control judge always with no kind did not clear the kinds"
-  loop run --only 8 >/dev/null || fail "run of #8 exited non-zero"
-  [ "$(rev 8 '[.result, (.judge.declined | length)] | join(" ")')" = "GO 2" ] && ! grep -q 'always accepts' "$STUB/asked" \
-    || fail "with the kinds cleared, a finding once of one was still accepted whatever the judge said, or the reviewer was asked to tag: $(rev 8 '[.result, .judge] | tojson' | tr '\n' ' ')"
+  out=$(kindsbrief) && [ -z "$out" ] || fail "with the kinds cleared, the reviewer was asked to tag: $out"
+  judgeone 8 "$STUB/review"
+  [ "$(jf 8 '[.verdict, (.judge.declined | length)] | join(" ")')" = "GO 2" ] \
+    || fail "with the kinds cleared, a finding once of one was still accepted whatever the judge said: $(jf 8 '[.verdict, .judge] | tojson')"
   loop control judge always 'a]b' >/dev/null 2>&1; [ $? = 2 ] && [ "$(loop control | jq -c .judgeAlways)" = '[]' ] || fail "control judge always took a kind that is not one word"
   [ "$(cksum < "$R/.conveyor/project.json")" = "$(<"$STUB/pack.sum")" ] || fail "naming the kinds changed the pack"
 }
