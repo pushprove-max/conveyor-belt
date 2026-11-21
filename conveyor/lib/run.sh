@@ -327,11 +327,11 @@ shutopen() { # <issue | card id>
 # run()'s cards in progress (running), set in run()'s own variables: its jobs less the push (pusher) and the other
 # jobs beside the cards, and the cards it took over (took). A push so leaves its builder slot free.
 cardsrun() {
-  running=$(($(jobs -rp | grep -cvx -e "${pusher:-0}" -e "${tester:-0}" -e "${taker:-0}" -e "${muter:-0}" -e "${prober:-0}" -e "${merger:-0}" -e "${fixer:-0}") + ${#took[@]}))
+  running=$(($(jobs -rp | grep -cvx -e "${pusher:-0}" -e "${tester:-0}" -e "${taker:-0}" -e "${muter:-0}" -e "${prober:-0}" -e "${merger:-0}" -e "${fixer:-0}" -e "${asker:-0}") + ${#took[@]}))
 }
 # The wait that ends a turn, in run()'s own variables: until the turn's timer, one of the loop's cards (mine), the
 # push (pusher) or the machine hold's look (prober, which runends() waits for) ends, at once when one of them has
-# ended already. The other jobs beside the cards (take, relfixes, maintest, mutnext, idlemerge) never end it:
+# ended already. The other jobs beside the cards (take, relfixes, needsask, maintest, mutnext, idlemerge) never end it:
 # relfixes, started every IDLE seconds, ended during each turn, so a bare `wait -n` returned at once and the loop ran
 # turn after turn with no wait (issue 881). A job named that ended before is waited no more: bash keeps its status,
 # and a wait on it returns at once at every turn. The prober is named only while it runs, as nothing clears it (the
@@ -379,6 +379,11 @@ turnopen() {
   # cards as take() is; once each has landed and is in the commit release-prep tests (relhead(), lib/push.sh) and no card is open, it starts release-prep again.
   if [ -n "$serve" ] && [ -z "$nopack" ] && [ $((SECONDS - rtried)) -ge "$IDLE" ] && { [ -z "$fixer" ] || ! jobs -rp | grep -qx "$fixer"; }; then
     rtried=$SECONDS; ( relfixes ) 8>&- < /dev/null & fixer=$!
+  fi
+  # The blocked cards with kept work put to the owner as decisions, and the step each answer names (needsask(),
+  # lib/needsask.sh): looked at once every IDLE seconds, a job beside the cards as relfixes() is.
+  if [ -n "$serve" ] && [ -z "$nopack" ] && [ $((SECONDS - atried)) -ge "$IDLE" ] && { [ -z "$asker" ] || ! jobs -rp | grep -qx "$asker"; }; then
+    atried=$SECONDS; ( needsask ) 8>&- < /dev/null & asker=$!
   fi
   # The seats and the host's CLIs are worked out once in this shell (clis, its words dropped), so the check below,
   # the pick and the cards this turn starts find them kept (seat, hostclis, seatready).
@@ -616,7 +621,7 @@ turnpick() {
 run() { # [max-cards] [serve]
   local left=${1:--1} serve=${2:-} cap base='' picked running building idles started=0 c n again timer pusher='' owed tried='' triedat=0 ctl pct now='' p k lim='' waits sampled=-1000000 guard issues='' asking urgent red
   local why say said='' old='' nopack told='' nocli self adopt='' held='' new t tester='' mtried=-1000000 stried=-1000000 taker='' ttook=-1000000 f muter='' utried=-1000000 woke
-  local mhold htold='' prober='' htried=-1000000 gone gs merger='' gtried=-1000000 fixer='' rtried=-1000000
+  local mhold htold='' prober='' htried=-1000000 gone gs merger='' gtried=-1000000 fixer='' rtried=-1000000 asker='' atried=-1000000
   # The loop's own cards in progress: pid -> "card issue"; took: those it adopted at its start -> the commit they run;
   # kids: a card's processes at the last turn, as "<pid> <started>" lines; at a restart, the list the loop
   # before it took just before it restarted (CONVEYOR_KIDS), so a card that ends before this loop's first turn still

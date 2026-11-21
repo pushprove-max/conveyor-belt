@@ -635,6 +635,8 @@
 {"area": "fulltest", "file": "conveyor/lib/fulltest.sh"}
 {"area": "gitfence", "file": "conveyor/lib/gitfence.sh"}
 {"area": "gitfence", "test": "gitfence.test.sh"}
+{"area": "needsask", "file": "conveyor/lib/needsask.sh"}
+{"area": "needsask", "test": "needsask.test.sh"}
 {"area": "survey", "test": "survey.test.sh"}
 {"area": "survey", "file": "conveyor/lib/survey.sh"}
 {"area": "slices", "file": "conveyor/lib/slices.sh"}
@@ -1353,6 +1355,7 @@
 {"area": "cmd-run", "test": "visibleinherit.test.sh"}
 {"area": "cmd-run", "why": "the loop: nearly every case runs `loop run`; and the cases that load the engine as the run command loads it read this file's lib lines"}
 {"area": "cmd-serve", "file": "conveyor/commands/serve.sh"}
+{"area": "cmd-serve", "test": "needsask.test.sh"}
 {"area": "cmd-serve", "test": "adopt.test.sh"}
 {"area": "cmd-serve", "test": "revive.test.sh"}
 {"area": "cmd-serve", "test": "codex.test.sh"}

@@ -14,6 +14,7 @@
 . "$HERE/lib/followups.sh" || exit 1
 . "$HERE/lib/flaky.sh" || exit 1
 . "$HERE/lib/fulltest.sh" || exit 1
+. "$HERE/lib/needsask.sh" || exit 1
 . "$HERE/lib/testaction.sh" || exit 1
 . "$HERE/lib/testfiles.sh" || exit 1
 . "$HERE/lib/mutate.sh" || exit 1
