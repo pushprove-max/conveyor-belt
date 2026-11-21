@@ -351,10 +351,10 @@ test('Live run, with the guard\'s share of the week kept: the mockup\'s percenta
   assert.match(await liveGuard({ weekStart: { conveyor: 40, agent: 40, shared: false }, weekLeft: { conveyor: 31, agent: 33, shared: false } }),
     /The usage guard has 31% of the week left; this run needs about 32% more\.$/, 'the tightest guard, 9 / 22 × 78');
 });
-// Bug it guards (#1223, review E2): on one login the 9 points the run used are the use of the trials of every arm, not of
+// Bug it guards (#1223, review E2): on one login the 9 points the run used are the use of the trials of every arm with a guard, not of
 // the arms of the tightest guard alone: 9 over the 63 trials done by the 6 arms with a guard (22 Conveyor, 41 Claude), times
 // the 237 trials they have left (78 and 159): about 34%, not 32%.
-test('Live run, both guards on one login: the share the run needs is spread over the trials of every arm', async () => {
+test('Live run, both guards on one login: the share the run needs is spread over the trials of every arm that has a guard', async () => {
   const said = await liveGuard({ weekStart: { conveyor: 40, agent: 40, shared: true }, weekLeft: { conveyor: 31, agent: 31, shared: true } });
   assert.match(said, /The usage guard has 31% of the week left; this run needs about 34% more\.$/, said);
 });

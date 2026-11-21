@@ -337,7 +337,8 @@ adds none. The active task gives `start`, the time its work began, so its minute
 Each run keeps the share of the week that the usage guard has left: `weekStart` when the run starts and `weekLeft` after
 each task, one figure for the guard of the Conveyor arms and one for the guard of the other arms that use the Claude
 login (`conveyor`, `agent`). A figure is null when the guard has no reading or no arm of the run uses it. `shared` is
-true when both guards read one account: the share the run used is then that of the trials of all its arms together.
+true when both guards read one account: the share the run used is then that of the trials of all its arms that have a
+guard together (an arm that uses Codex alone has none).
 Each arm also has `ran`, the tasks it ran: a reused result and a task not run are not counted. `bench swe history` gives
 the share left now as `weekLeft`, with `stop`, the share left at which the guard stops new trials. Each result keeps the size of its task image in bytes, as `imageBytes`. The Board says "not kept" for a run or a result
 from before the engine kept these figures.
