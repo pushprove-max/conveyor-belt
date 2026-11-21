@@ -133,6 +133,8 @@
   // Its card landed while push is off and is not pushed yet: done, waiting for the push, not held back.
   const notPushed = (x) => issues(x && x.reasons).some((r) => r && r.kind === 'card' && r.notPushed === true);
   const onlyMine = (x) => kinds(x).length > 0 && kinds(x).every((k) => k === 'you');
+  // In Held only because it waits on another issue: nobody holds it back.
+  const waitsOnly = (x) => kinds(x).length > 0 && kinds(x).every((k) => k === 'waits');
   const labelsOf = (x) => issues(x.reasons).filter((r) => r.kind === 'label').map((r) => r.label);
   // Removing its labels queues it: nothing holds it but labels (and you, which the removal releases too).
   const unlabelable = (x) => labelsOf(x).length > 0 && kinds(x).every((k) => k === 'label' || k === 'you');
@@ -212,8 +214,9 @@
   // A held card dropped on the queue: released when only the owner holds it. A label, a rule or a standing rule is not
   // undone by a drag: the card says what to do instead.
   function dropOnQueue(item, before) {
+    const t = `#${item.issue}`, um = slicesOf(item);
+    if (um.length) { say(`${t} is not built itself: it closes when ${um.map((n) => `#${n}`).join(', ')} land. Queue those instead.`); return; }
     if (onlyMine(item)) { release(item, before); return; }
-    const t = `#${item.issue}`;
     if (unlabelable(item)) say(`A label holds ${t} (${labelsOf(item).join(', ')}): use "Remove the label and queue it" on the card.`);
     else if (kinds(item).includes('standing')) say(`A rule of Conveyor's own skips ${t}: you cannot queue it from the Board.`);
     else if (kinds(item).includes('rule')) say(`A rule skips ${t}. To queue it, change the rule in Rules.`);
@@ -597,6 +600,16 @@
     const open = n === null ? null : issues(S.d.open && S.d.open.issues).find((x) => x && x.issue === n);
     return { state: 'waiting', ...at(col, col && of(col)), title: ((col && of(col)) || open || {}).title };
   }
+  // The slices of an umbrella (a split issue's, or a parent's parts: its held entry's umbrella), as numbers.
+  const slicesOf = (x) => issues(x && x.umbrella).filter((n) => num(n) !== null);
+  // A slice's state on an umbrella's card: landed (closed: no longer an open issue, or its card landed), building,
+  // blocked, held (in Held for a reason other than a wait) or waiting (queued, waiting on another issue, in Queue or in
+  // Held, or waiting for a yes).
+  function sliceState(n, raw) {
+    const open = S.d.open && Array.isArray(S.d.open.issues) ? S.d.open.issues : null;
+    const st = partState(`#${n}`, open && !open.some((x) => x && x.issue === n) ? [`#${n}`] : [], raw);
+    return st.state === 'waiting' && st.col === 'held' && !waitsOnly(st.card) ? 'held' : st.state;
+  }
   // A link to the part's card on the Board: it brings the card into view and gives it the focus. A card the filter or
   // its column's page hides is shown first: the filter is cleared, then the column shows all its cards.
   function cardLink(n, col) {
@@ -673,13 +686,14 @@
   function moves(card, item, col) {
     const h = S.ctx.h, acts = h('div', 'board-moves');
     const t = `#${item.issue}`;
-    const mine = col === 'held' && kinds(item).includes('you');
+    // An umbrella is never picked: a release would clear the hold and build nothing, so it has no Queue.
+    const mine = col === 'held' && kinds(item).includes('you') && !slicesOf(item).length;
     if (mine) acts.append(button('Queue', 'btn-quiet', 'release', `Queue ${t}: release it from your hold`, () => release(item)));
     // A card that waits on another issue is not in the pick order: it can be held, not moved. One held only by that
     // wait is in Held and can still be held by you, so it is not picked once the issue it waits on closes.
     const ordered = col === 'queue' && !waiting(item);
-    const waitsOnly = col === 'held' && kinds(item).length > 0 && kinds(item).every((k) => k === 'waits');
-    if (col === 'queue' || waitsOnly) acts.append(button('Hold', 'btn-quiet', 'hold', `Hold ${t}`, () => hold(item)));
+    const heldWait = col === 'held' && waitsOnly(item);
+    if (col === 'queue' || heldWait) acts.append(button('Hold', 'btn-quiet', 'hold', `Hold ${t}`, () => hold(item)));
     if (ordered) {
       acts.append(button('Move up', 'btn-quiet', 'up', `Move ${t} up`, () => shift(item, -1)),
         button('Move down', 'btn-quiet', 'down', `Move ${t} down`, () => shift(item, 1)));
@@ -691,9 +705,9 @@
     card.append(acts);
     if (open) card.append(depForm(item));
     card.tabIndex = 0;
-    card.setAttribute('aria-label', `${t} ${item.title || ''}: ${col === 'held' ? `held (${chipsOf(item).join(', ')})${mine ? '; the right arrow queues it' : waitsOnly ? '; the left arrow holds it' : ''}` : ordered ? 'queued; the up and down arrows move it, the left arrow holds it' : 'waits for another issue; the left arrow holds it'}`);
+    card.setAttribute('aria-label', `${t} ${item.title || ''}: ${col === 'held' ? `held (${chipsOf(item).join(', ')})${mine ? '; the right arrow queues it' : heldWait ?'; the left arrow holds it' : ''}` : ordered ? 'queued; the up and down arrows move it, the left arrow holds it' : 'waits for another issue; the left arrow holds it'}`);
     card.addEventListener('keydown', (e) => {
-      const fn = col === 'held' ? (mine ? { ArrowRight: () => release(item) }[e.key] : waitsOnly ? { ArrowLeft: () => hold(item) }[e.key] : null)
+      const fn = col === 'held' ? (mine ? { ArrowRight: () => release(item) }[e.key] : heldWait ? { ArrowLeft: () => hold(item) }[e.key] : null)
         : ordered ? { ArrowUp: () => shift(item, -1), ArrowDown: () => shift(item, 1), ArrowLeft: () => hold(item) }[e.key]
           : { ArrowLeft: () => hold(item) }[e.key];
       if (!fn) return;
@@ -775,10 +789,15 @@
   }
   // "Waiting on #12, #15": each issue a link to it, so the card it waits on is one click away; another
   // repository's ("owner/repo#7") is said as that, as text. Each one the snapshot gives a state for (waitsOn) says
-  // why it does not move: "Waiting on #12 (held)".
+  // why it does not move: "Waiting on #12 (held)". One that is an umbrella waits on its slices, and says so:
+  // "Waiting on #12 (its slices #20, #21)".
   function waitingChip(ns, url, on) {
     const c = S.ctx.chip('Waiting on ', 'quiet'), words = c.lastChild;
-    const state = (n) => { const w = issues(on).find((x) => x && x.issue === n); return w && typeof w.state === 'string' && w.state ? ` (${w.state})` : ''; };
+    const state = (n) => {
+      const um = slicesOf(issues(S.d.open && S.d.open.held).find((x) => x && x.issue === n));
+      if (um.length) return ` (its slices ${um.map((x) => `#${x}`).join(', ')})`;
+      const w = issues(on).find((x) => x && x.issue === n); return w && typeof w.state === 'string' && w.state ? ` (${w.state})` : '';
+    };
     ns.forEach((n, i) => {
       if (i) words.append(', ');
       if (typeof n === 'string') { words.append(n); return; }
@@ -1031,9 +1050,19 @@
       if (col === 'queue' && typeof item.room === 'string' && item.room) tags.append(ctx.chip(item.room, 'warn'));
       if (tags.firstChild) el.append(tags);
       if (num(item.next) !== null) el.append(h('p', 'board-from', item.next === 1 ? 'Next in the queue' : `#${item.next} in the queue`));
-      // A split issue (the rule Split large issues On) is held as the umbrella of its slices until each one lands or is already done on main.
-      const um = issues(item.umbrella).filter((x) => num(x) !== null);
-      if (um.length) el.append(h('p', 'board-from board-umbrella', `Umbrella of ${um.map((x) => `#${x}`).join(', ')}: not built itself, and closed when they land or are already done on main`));
+      // A split issue (the rule Split large issues On), or a parent of GitHub sub-issues, is held as the umbrella of its
+      // slices until each one lands or is already done on main: never built itself, so it has no Queue; each slice with its state.
+      const um = slicesOf(item);
+      if (um.length) {
+        el.append(h('p', 'board-from board-umbrella', `Split into ${um.map((x) => `#${x}`).join(', ')}; closes when they land`));
+        const ul = h('ul', 'board-slices'), raw = unshaped();
+        um.forEach((n) => {
+          const st = sliceState(n, raw), li = h('li', 'board-slice', `#${n} ${st}`);
+          li.dataset.slice = String(n); li.dataset.state = st;
+          ul.append(li);
+        });
+        el.append(ul);
+      }
       if (S.released.has(item.issue) && waitsOf(item).length && !(ctl() && issues(ctl().held).includes(item.issue))) {
         const n = h('p', 'board-from', `Released from hold. Still waits on ${waitsOf(item).map((x) => `#${x}`).join(', ')}.`);
         n.setAttribute('role', 'status');

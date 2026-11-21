@@ -430,6 +430,12 @@ it, and the row of its parent issue shows it as landed. The push closes it.
 An issue that someone outside the project opened shows **Opened by someone outside the project: release it to build
 it** in place of **Held by you** ([The control record](configuration.md#the-control-record)).
 
+An issue that [Split large issues](configuration.md#split-large-issues) split is the umbrella of its slices. It stays
+in Held until each slice lands, and then Conveyor closes it. Its card says "Split into #a, #b; closes when they land"
+and lists each slice with its state: landed, building, blocked, waiting or held. The umbrella has no **Queue**, and
+a drag to Queue does not release it: queue its slices, which keep their own **Queue**. An issue that waits on an umbrella says so, as "Waiting on #12 (its slices
+#20, #21)".
+
 On the Rules tab, "waiting on another card" opens the waiting list. It shows each waiting card with the cards it waits
 on, as "waits on #12 (testing), #13 (landed)". The **Dependency guard** row sets the guard On or Off. With it Off,
 each card of the waiting list has **Queue anyway**, which asks once and then sends `control force`.

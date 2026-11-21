@@ -3,7 +3,7 @@
 // shadow or on), what a card shows of the split, the umbrella in Held, and the Health measure of the checked cards.
 // Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { boot, deliver, next, settle, full, act, rulesP, ruled, panel, withOpen, P, cases } from './dashboard-view.helpers.mjs';
+import { boot, deliver, next, settle, full, act, rulesP, ruled, panel, withOpen, dragTo, P, cases } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 
@@ -56,9 +56,8 @@ test('Setup: a project not yet onboarded is asked Split large issues, with Shado
   assert.equal(box.querySelector('[data-rule="split"]').dataset.set, 'true');
 });
 
-// Bugs this guards: the trial's verdict could not be seen on a card; a split issue's closed card read "already fixed";
-// an umbrella sat in Held with nothing saying it waits on its slices.
-test('Board: a card shows "Would have split into N" in shadow and its slices On; the umbrella in Held names them', () => {
+// Bugs this guards: the trial's verdict could not be seen on a card; a split issue's closed card read "already fixed".
+test('Board: a card shows "Would have split into N" in shadow and its slices On', () => {
   const w = boot({ tab: 'control' });
   const d = withOpen({ held: [{ repo: 'sample', issue: 9, title: 'Big one', url: `${P}/9`, priority: 'P2', labels: [], reasons: [{ kind: 'you' }], umbrella: [101, 102] }] });
   const b = d.panels.board.data;
@@ -75,7 +74,39 @@ test('Board: a card shows "Would have split into N" in shadow and its slices On;
   assert.match(landed(9).textContent, /split, not built/);
   assert.doesNotMatch(landed(9).textContent, /already fixed/);
   assert.doesNotMatch(landed(8).textContent, /split/i, 'a kept issue shows nothing');
-  assert.match(inCol('held', 9).textContent, /Umbrella of #101, #102: not built itself, and closed when they land or are already done on main/);
+});
+
+// Bugs this guards (#1130): an umbrella of a split showed as a plain held issue with a Queue button that cleared the
+// hold and built nothing, with no word on why; an issue waiting on it named only the umbrella; and a slice in Held only
+// because it waits on another issue was labelled held.
+test('Board: an umbrella of a split shows its slices with their state and no Queue; a plain held issue keeps its Queue', async () => {
+  const w = boot({ tab: 'control' });
+  // #9 split into #7 (landed today), #63 (in review), #21 (queued), #76 (held by you), #77 (in Held only as it waits on
+  // #76) and #99 (closed on an earlier day).
+  const d = withOpen({ held: [
+    { repo: 'sample', issue: 76, title: 'Split the PROD stack', url: `${P}/76`, priority: 'P2', labels: [], reasons: [{ kind: 'you' }] },
+    { repo: 'sample', issue: 9, title: 'Big one', url: `${P}/9`, priority: 'P2', labels: [], reasons: [{ kind: 'you' }], umbrella: [7, 63, 21, 76, 77, 99] },
+    { repo: 'sample', issue: 77, title: 'After the stack', url: `${P}/77`, priority: 'P2', labels: [], reasons: [{ kind: 'waits', waitsFor: [76] }] },
+    { repo: 'sample', issue: 30, title: 'After the big one', url: `${P}/30`, priority: 'P2', labels: [], reasons: [{ kind: 'waits', waitsFor: [9] }] },
+  ] });
+  const b = d.panels.board.data;
+  b.open.issues = [9, 21, 30, 63, 76, 77].map((issue) => ({ issue, title: `Issue ${issue}`, labels: [] }));
+  b.control = { ...b.control, held: [76, 9] };
+  b.landed.push({ repo: 'sample', card: 'c6-9', issue: 9, title: 'Big one', url: `${P}/9`, step: 'closed', usd: 0, reviews: 0, split: { result: 'split', slices: 6, filed: [7, 63, 21, 76, 77, 99] } });
+  deliver(w, d);
+  const card = (n) => panel(w, 'board').querySelector(`.board-col[data-col="held"] .bcard[data-issue="${n}"]`);
+  assert.match(card(9).querySelector('.board-umbrella').textContent, /^Split into #7, #63, #21, #76, #77, #99; closes when they land$/);
+  assert.deepEqual(Array.from(card(9).querySelectorAll('.board-slice'), (x) => x.textContent),
+    ['#7 landed', '#63 building', '#21 waiting', '#76 held', '#77 waiting', '#99 landed'],
+    'each slice with its state; one in Held only for a wait is waiting, not held');
+  assert.equal(act(card(9), 'release'), null, 'an umbrella has no Queue');
+  assert.ok(act(card(76), 'release'), 'a held issue that is no umbrella (here one of its slices) keeps its Queue');
+  // Dragged to Queue, the umbrella is not released: the Board says to queue its slices.
+  dragTo(w, card(9), panel(w, 'board').querySelector('.board-col[data-col="queue"]'));
+  await settle();
+  assert.deepEqual(w.posts.splice(0), [], 'no release is sent for an umbrella');
+  assert.match(panel(w, 'board').querySelector('.board-note').textContent, /#9 is not built itself: it closes when #7, #63, #21, #76, #77, #99 land\. Queue those instead\./);
+  assert.match(card(30).querySelector('[data-reason="waits"]').textContent, /^Waiting on #9 \(its slices #7, #63, #21, #76, #77, #99\)$/);
 });
 
 // Bug this guards: the shadow trial had no figures: how many were kept or would split, and how their first reviews went.
