@@ -106,3 +106,111 @@ t_needsserve() {
       && needsask ) > "$T/$CASE/run.out" 2>&1 || fail "needsask did not run with the libraries serve loads: $(cat "$T/$CASE/run.out")"
   [ -n "$(nadec c0-7)" ] || fail "serve's libraries did not post the decision blocked-c0-7: $(cat "$T/$CASE/run.out")"
 }
+
+# mmain <issue>...: the nightly whole test's record naming each issue as filed for a failing case ("case <issue>"), the
+# control record holding each one with issue 8 first in `order` (the owner's earlier pick), every issue open on GitHub, and the
+# ledger in the case's folder.
+mmain() {
+  export CONVEYOR_LEDGER=$T/$CASE/decisions.jsonl; mkdir -p "$ST"
+  jq -cn --args '{sha: "abc", filed: [$ARGS.positional[] | {issue: tonumber, cases: ["x.test.sh: case \(.)"]}]}' "$@" > "$ST/maintest.json" || fail "the whole test's record could not be made"
+  echo OPEN > "$STUB/state" # GitHub's state of every issue (the gh stub); a case closes one with state.<issue>
+  loop control hold "$@" > /dev/null && loop control order 8 > /dev/null || fail "the held issues or the order could not be set"
+}
+# nmain: one pass of needsmain(); its output is in run.out.
+nmain() { fx_in needsmain; [ "$RC" = 0 ] || fail "needsmain exited $RC: $(cat "$T/$CASE/run.out")"; }
+# mdec <issue>: the ledger's latest snapshot of the issue's decision, as one JSON line.
+mdec() { jq -cs --arg id "mainred-$1" 'map(select(.id == $id)) | last // empty' "$CONVEYOR_LEDGER" 2>/dev/null; }
+# manswer <issue> <answer>: the owner's answer, as the Board records it.
+manswer() { bash "$SRC/../.claude/scripts/decision.sh" answer "mainred-$1" "$2" > /dev/null || fail "the answer $2 to mainred-$1 was not recorded"; }
+
+# Bug (#1167): an issue the nightly whole test filed for a test that fails on main stayed held until the owner released
+# it by hand, and no ledger decision held it, so `auto decide` had nothing to decide. One pass puts one open decision in
+# the ledger for it, naming the issue, with releasing it first in the order recommended and leaving it held as the other
+# option. A held issue the whole test did not file (#9), and a second pass, add none.
+t_needsmain() {
+  local d
+  setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 9 2026-01-02))"; mmain 7; loop control hold 9 > /dev/null || fail "#9 was not held"
+  nmain; nmain
+  d=$(mdec 7); [ -n "$d" ] || fail "no decision mainred-7 in the ledger: $(cat "$CONVEYOR_LEDGER" 2>&1) $(cat "$T/$CASE/run.out")"
+  jq -e '.answeredAt == null and .proposedDefault == "Release it, first in the order" and .options == ["Release it, first in the order", "Leave it held"]
+    and (.question | contains("#7") and contains("case 7"))' <<<"$d" > /dev/null \
+    || fail "the decision is not open, naming the issue, with the recommended release and the other option: $d"
+  [ "$(jq -sr 'map(.id) | join(" ")' "$CONVEYOR_LEDGER")" = "mainred-7" ] || fail "a pass added a second decision, or one for #9: $(cat "$CONVEYOR_LEDGER")"
+}
+
+# Bug (#1167): the answer did nothing, so the owner's pick was carried out by hand. Answered "Release it, first in the
+# order", the next pass releases #7 and puts it first in `order`, before #8 that was first. Read again, the answer
+# changes nothing more.
+t_needsrelease() {
+  setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-02-01))"; mmain 7
+  nmain; manswer 7 'Release it, first in the order'
+  nmain; nmain
+  [ "$(jq -c '[.held, .order]' "$ST/control.json")" = '[[],[7,8]]' ] \
+    || fail "#7 was not released first in the order: $(cat "$ST/control.json") $(cat "$T/$CASE/run.out")"
+}
+
+# Bug (#1167): "Leave it held" must take no step: #7 stays held, however often the answered decision is read. #8,
+# released by hand before its decision was answered, has the decision closed (the engine's closing text, not a step).
+t_needsmainheld() {
+  setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-02-01))"; mmain 7 8
+  nmain; manswer 7 'Leave it held'; loop control release 8 > /dev/null || fail "the release by hand failed"
+  nmain; nmain
+  [ "$(jq -c '.held' "$ST/control.json")" = '[7]' ] || fail "an answer that leaves it held released it: $(cat "$ST/control.json") $(cat "$T/$CASE/run.out")"
+  jq -e '.answeredAt != null and (.answer | startswith("Closed"))' <<<"$(mdec 8)" > /dev/null || fail "the decision of the issue released by hand was not closed: $(mdec 8)"
+}
+
+# Bug (review of #1170): two answers read in one pass: the second release was built from the record as the pass began, so
+# it dropped the first issue from `order`. With #7 and #9 both answered "Release it, first in the order", both are
+# released and `order` holds both (the later release first), and #8, first before, stays in it.
+t_needstwo() {
+  setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-02-01) <(issue 9 2026-03-01))"; mmain 7 9
+  nmain; manswer 7 'Release it, first in the order'; manswer 9 'Release it, first in the order'
+  nmain
+  [ "$(jq -c '[.held, .order]' "$ST/control.json")" = '[[],[9,7,8]]' ] \
+    || fail "the second release in a pass dropped the first from the order: $(cat "$ST/control.json") $(cat "$T/$CASE/run.out")"
+}
+
+# Bug (review of #1170): the answer stayed "Release it, first in the order" after its step, so when the owner held #7
+# again the next pass read the old answer and released it against the hold. Held again after its release, #7 stays held.
+# The engine does not rewrite the owner's answer to remember this: the Board's digest would report a correction.
+t_needsrehold() {
+  setup "[$(issue 7 2026-01-01)]"; mmain 7
+  nmain; manswer 7 'Release it, first in the order'; nmain
+  [ "$(jq -c '.held' "$ST/control.json")" = '[]' ] || fail "the answer did not release #7: $(cat "$ST/control.json") $(cat "$T/$CASE/run.out")"
+  loop control hold 7 > /dev/null || fail "#7 was not held again"
+  nmain; nmain
+  [ "$(jq -c '.held' "$ST/control.json")" = '[7]' ] || fail "an old answer released #7 against a new hold: $(cat "$ST/control.json") $(cat "$T/$CASE/run.out")"
+  jq -e '.answer == "Release it, first in the order" and (.history // []) == []' <<<"$(mdec 7)" > /dev/null \
+    || fail "the engine changed the owner's answer, so the digest reports a correction: $(mdec 7)"
+}
+
+# Bug (review of #1170): needsmain() read the whole test's `filed` list without the control record's `held`, so an issue
+# the nightly test filed that is already in Queue (released) was put to the owner. #7 is held, #8 released: only #7 has one.
+t_needsqueue() {
+  setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-02-01))"; mmain 7 8
+  loop control release 8 > /dev/null || fail "#8 was not released"
+  nmain
+  [ -n "$(mdec 7)" ] && [ -z "$(mdec 8)" ] || fail "the held issue has no decision, or the issue in Queue has one: $(cat "$CONVEYOR_LEDGER" 2>&1) $(cat "$T/$CASE/run.out")"
+}
+
+# Bug (review of #1170): an issue closed on GitHub stayed in `held`, the only state the pass read, so its decision stayed
+# open (and a closed issue was put as a new one). #7 is closed on GitHub: no decision is put for it, and #8's, open
+# before it closed, is closed with the engine's closing text, not a step (#8 stays held).
+t_needsclosed() {
+  setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-02-01))"; mmain 7 8
+  echo CLOSED > "$STUB/state.7"; nmain; echo CLOSED > "$STUB/state.8"; nmain; nmain
+  [ -z "$(mdec 7)" ] && jq -e '.answeredAt != null and (.answer | startswith("Closed"))' <<<"$(mdec 8)" > /dev/null \
+    || fail "a closed issue has a decision, or #8's decision stays open: $(cat "$CONVEYOR_LEDGER") $(cat "$T/$CASE/run.out")"
+  [ "$(jq -c '.held' "$ST/control.json")" = '[7,8]' ] || fail "the engine took a step for closed issues: $(cat "$ST/control.json")"
+}
+
+# Bug (review of #1170): the loop's job beside the cards called needsask() only, so no held issue was put to the owner.
+# turnopen() (lib/run.sh) is called as the serving loop calls it, with needsask() and needsmain() recording that they ran:
+# the job must run both. A real turn is run: no direct check shows which functions the loop's turn starts.
+t_needsturn() {
+  setup "[$(issue 7 2026-01-01)]"
+  fx_in 'needsask() { echo ask >> "$T/$CASE/jobs"; }; needsmain() { echo main >> "$T/$CASE/jobs"; }
+    serve=1 nopack= IDLE=0 atried=-1000000 asker= pusher= taker= fixer= rtried=0 ttook=0 htold= mhold= told= lim=
+    turnopen; wait'
+  [ "$(sort "$T/$CASE/jobs" 2>/dev/null | tr '\n' ' ')" = "ask main " ] || fail "the turn's job did not run needsask and needsmain: $(cat "$T/$CASE/jobs" 2>&1) $(head -5 "$T/$CASE/run.out")"
+}

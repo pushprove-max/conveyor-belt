@@ -11,6 +11,11 @@ The loop looks for answers after each wait of the `tunables.idle` setting in the
 retry or shut the card by hand first, the loop closes the decision and takes no step.
 A card stopped for your yes, and a main-red fix card, are not put as decisions.
 
+When the nightly whole test files an issue for a test that fails on main and the issue is held, the held issue also shows
+as an open decision, once. The recommended option is "Release it, first in the order": the loop puts the issue first in
+the `order` list and releases it. "Leave it held" changes nothing. If you release the issue by hand, or close it, the
+loop closes the decision.
+
 ## Build
 
 The card builds in a fresh git worktree. Claude build, fix and review sessions start without your account's connectors

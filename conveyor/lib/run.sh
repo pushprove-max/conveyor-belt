@@ -380,10 +380,11 @@ turnopen() {
   if [ -n "$serve" ] && [ -z "$nopack" ] && [ $((SECONDS - rtried)) -ge "$IDLE" ] && { [ -z "$fixer" ] || ! jobs -rp | grep -qx "$fixer"; }; then
     rtried=$SECONDS; ( relfixes ) 8>&- < /dev/null & fixer=$!
   fi
-  # The blocked cards with kept work put to the owner as decisions, and the step each answer names (needsask(),
-  # lib/needsask.sh): looked at once every IDLE seconds, a job beside the cards as relfixes() is.
+  # The blocked cards with kept work, and the held issues the nightly whole test filed, put to the owner as decisions,
+  # and the step each answer names (needsask(), needsmain(), lib/needsask.sh): looked at once every IDLE seconds, a job
+  # beside the cards as relfixes() is.
   if [ -n "$serve" ] && [ -z "$nopack" ] && [ $((SECONDS - atried)) -ge "$IDLE" ] && { [ -z "$asker" ] || ! jobs -rp | grep -qx "$asker"; }; then
-    atried=$SECONDS; ( needsask ) 8>&- < /dev/null & asker=$!
+    atried=$SECONDS; ( needsask; needsmain ) 8>&- < /dev/null & asker=$!
   fi
   # The seats and the host's CLIs are worked out once in this shell (clis, its words dropped), so the check below,
   # the pick and the cards this turn starts find them kept (seat, hostclis, seatready).
