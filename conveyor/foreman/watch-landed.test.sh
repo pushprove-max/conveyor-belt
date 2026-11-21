@@ -29,10 +29,10 @@ snap() { # <repo> <belt issues> <pushed issues> <blocked issues> [<jq filter>]
     health: {time: "2026-11-17T08:00:00Z", loop: true, gh: true, stuck: [], waiting: [], pushFailingSince: null,
       blocked: [$blocked[] | {card: "c\(.)", issue: ., since: "2026-11-17T07:00:00Z", reason: "the review found a flaw"}]}} | '"${5:-.}" > "$T/$1.json"
 }
-poll() { # <repo>: one poll; 0 with a wake put in pending, which goes to $T/<repo>.wake
+poll() { # <repo>: one poll; 0 with a wake put in pending, which goes to $T/<repo>.wake. While $T/<repo>.nohist is there, the history does not read.
   rm -f "$T/$1.fd"/pending/*.wake "$T/$1.wake"; cp "$T/config/conveyor/host-$1.json" "$T/config/conveyor/host.json"
   HOME=$T/home XDG_CONFIG_HOME=$T/config CONVEYOR_MAIN=$T/$1 CONVEYOR_FOREMAN_DIR=$T/$1.fd CONVEYOR_FOREMAN_NOW=1794902400 \
-    CONVEYOR_FOREMAN_ASK="cat $T/$1.json" bash "$SRC/watch-conveyor.sh" --once 2>> "$T/$1.err" && cat "$T/$1.fd"/pending/*.wake > "$T/$1.wake"
+    CONVEYOR_FOREMAN_ASK="[ \"\$CONVEYOR_CMD\" != history ] || [ ! -e $T/$1.nohist ] || exit 1; cat $T/$1.json" bash "$SRC/watch-conveyor.sh" --once 2>> "$T/$1.err" && cat "$T/$1.fd"/pending/*.wake > "$T/$1.wake"
 }
 has() { grep -qxF -- "$2" "$T/$1.wake"; } # <repo> <whole line>
 
@@ -106,6 +106,33 @@ check 'the first snapshot after the restart does not read: no wake' nope poll fa
 snap failed 2 1
 check 'the next snapshot reads: the landing held before the restart wakes at once' poll failed
 check 'the wake names it and its commit' has failed 'failed: #1 landed as 100000000001: your step is due'
+
+# Bug it catches (#1277): a held landing left behind for good once it aged out of the snapshot and its history (they
+# list the 7 days to today), as a read with no row for it kept it as a record that did not read does; and one sent
+# while the history, which can still list it, did not read.
+fixture aged 1 2
+snap aged 2 1
+echo '4001 - 77 sid' > "$T/aged.fd/waiter.pid"
+check 'a landing held under the first waiter: no wake' nope poll aged
+echo '4002 - 77 sid' > "$T/aged.fd/waiter.pid"
+snap aged 2 ''
+touch "$T/aged.nohist"
+check 'restarted, the landing aged out and the history does not read: no wake' nope poll aged
+rm "$T/aged.nohist"
+check 'restarted, the landing aged out of the snapshot and its history: it wakes' poll aged
+check 'the wake names it and its saved commit' has aged 'aged: #1 landed as 100000000001: your step is due'
+
+# Bug it catches (#1277): the same waiter, a held landing aged out while the other awaited issue is still building: it
+# woke alone, or was never sent when the batch ended.
+fixture agedheld 1 2
+snap agedheld 2 1
+check 'a landing held on its day: no wake' nope poll agedheld
+snap agedheld 2 ''
+check 'the landing aged out, the other still building: no wake' nope poll agedheld
+snap agedheld '' 2
+check 'the batch ends: one wake' poll agedheld
+check 'it names the aged-out landing and its saved commit' has agedheld 'agedheld: #1 landed as 100000000001: your step is due'
+check 'and the last landing' has agedheld 'agedheld: #2 landed as 100000000002: your step is due'
 
 # Bug it catches: the saved commit of a held landing erased before its wake was in pending, when the Foreman session's
 # process had ended during the poll: the next waiter then named no commit for it. A dead pid stands for that session.

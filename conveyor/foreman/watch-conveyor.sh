@@ -141,12 +141,17 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
       elif (.cases | type) == "array" then "its test step has had \(.cases | map(tostring) | join(", ") | one) running since \(.since)"
       else "no new step and no output since \(.since) (last step: \(.step))" end)] end),
     # An awaited landing while another awaited issue of this record is on the belt, not blocked, is "held landing": poll() sends
-    # the held ones in one wake once none is left (holdlandings()).
+    # the held ones in one wake once none is left (holdlandings()). A held landing kept in conveyor-held.txt that this
+    # snapshot and its history no longer list (kept, which record() gives unless the history was asked for and did not
+    # read: it landed over 7 days ago) is made again from the kept row, so it still goes.
     (([$snap.belt | arrays | .[] | objects | select(.landed != true) | .issue | numbers | select(IN($await[][0]) and IN($pushed[]) == false)]
         - [$snap.health.blocked | arrays | .[] | objects | .issue | numbers]) as $flying
-      | $await[] | select(.[0] | IN($pushed[])) | .[0] as $i
-      | (first($snap, ($hist[0] | objects) | .landed | arrays | .[] | objects | select(.issue == $i) | .sha | strings | select(. != "")) // "") as $sha
-      | ["landed:\(.[0]):\(.[1])", (if ($flying | length) > 0 then "held landing" else "landed" end), "#\(.[0])", "#\(.[0]) landed\(if $sha == "" then "" else " as \($sha[0:12])" end): your step is due"]),
+      | (if ($flying | length) > 0 then "held landing" else "landed" end) as $kind
+      | ($await[] | select(.[0] | IN($pushed[])) | .[0] as $i
+        | (first($snap, ($hist[0] | objects) | .landed | arrays | .[] | objects | select(.issue == $i) | .sha | strings | select(. != "")) // "") as $sha
+        | ["landed:\(.[0]):\(.[1])", $kind, "#\(.[0])", "#\(.[0]) landed\(if $sha == "" then "" else " as \($sha[0:12])" end): your step is due"]),
+        ([$await[] | select(.[0] | IN($pushed[])) | "landed:\(.[0]):\(.[1])"] as $fresh
+        | $ARGS.named.kept // [] | .[] | select(.key | IN($fresh[]) | not) | [.key, $kind, .issues, .text])),
     ($snap.suites | arrays | .[] | objects | select(.ended != null)
       | ["suite:\(.kind | tostring | gsub("\\s"; "-")):\(.ended)", "suite ended", "", suiteline($now) | gsub("\\s+"; " ")]),
     # The fix cards of a red release run (the release record'"'"'s fixes, each {issue, state}, and restarted, which the
@@ -404,13 +409,19 @@ record() { # <repo> <main> <now> <await>
   local histf=$FD/conveyor-history-$repo.json
   # The history is asked for only when an awaited issue is not pushed by the snapshot alone; one that does not read
   # is left out (null), and the next poll asks again. It goes to jq in a file: a busy day's history is over the
-  # 128 KB a single argument may hold (#544).
+  # 128 KB a single argument may hold (#544). kept: this record's held landings kept in conveyor-held.txt
+  # (holdlandings()), for PROBLEMS to make again those the read no longer lists; none when the history was asked for
+  # and did not read, as a landing it would list then stays held.
   readsnap() { # <ask limit, seconds>: rec, the history file and cur, the problems; nonzero when the record does not read (the ask's exit when it failed)
+    local kept='[]'
     rec=$(ASK_LIMIT=$1 ask "$repo" "$main" snapshot 2>"$errf") || return
     ! jq -e objects <<<"$rec" >/dev/null 2>&1 || { keepsnap "$repo" "$rec"; rec=$(recheck "$repo" "$main" "$rec"); }
-    { jq -e --argjson await "$await" "${PUSHED}"'pushed(null) as $p | any($await[]; .[0] | IN($p[]) | not)' <<<"$rec" >/dev/null 2>&1 \
-      && ASK_LIMIT=$1 ask "$repo" "$main" history 2>>"$errf" | jq -ce objects > "$histf" 2>>"$errf" || echo null > "$histf"; }
-    cur=$(jq -r --argjson push "$PUSH_S" --argjson now "$now" --argjson poll "$POLL" --argjson await "$await" --slurpfile hist "$histf" --slurpfile kinds "$KINDS" "$PROBLEMS" <<<"$rec" 2>>"$errf")
+    if jq -e --argjson await "$await" "${PUSHED}"'pushed(null) as $p | any($await[]; .[0] | IN($p[]) | not)' <<<"$rec" >/dev/null 2>&1; then
+      ASK_LIMIT=$1 ask "$repo" "$main" history 2>>"$errf" | jq -ce objects > "$histf" 2>>"$errf" || { echo null > "$histf"; kept=''; }
+    else echo null > "$histf"; fi
+    [ -z "$kept" ] || [ ! -e "$HELDF" ] || kept=$(awk -F'\t' -v r="$repo" 'NR > 1 && $1 == r' "$HELDF" \
+      | jq -Rsc 'split("\n") | map(select(. != "") | split("\t") | {key: .[1], issues: .[3], text: .[4]})') || kept='[]'
+    cur=$(jq -r --argjson push "$PUSH_S" --argjson now "$now" --argjson poll "$POLL" --argjson await "$await" --argjson kept "${kept:-[]}" --slurpfile hist "$histf" --slurpfile kinds "$KINDS" "$PROBLEMS" <<<"$rec" 2>>"$errf")
   }
   # A snapshot that does not read, or not within the first wait (one made anew from the whole card records takes
   # minutes), is no reason to wake late on a card that needs the owner: `conveyor.sh health` holds the blocked, waiting
@@ -573,7 +584,8 @@ wake() {
 # wake of another project, goes in that poll.
 # conveyor-held.txt keeps, while any is held, the waiter's pid from then and each held row, so its commit is still named
 # when the batch ends after the snapshot's day (the snapshot lists a day's landings); the rows themselves are made again
-# every poll, as nothing reports them yet. A poll with no row for a kept landing (its record did not read) keeps it.
+# every poll, as nothing reports them yet; one its snapshot and history no longer list (it landed over 7 days ago) is
+# made again from the kept row (record(): kept). A poll with no row for a kept landing (its record did not read) keeps it.
 # holdlandings() only reads the file: it sets cur (the held rows left out, or made plain "landed" rows) and hnew (what the
 # file holds next). poll() writes hnew once the wake is in pending, so a wake that is not put (the session's process has
 # ended, pending not written) leaves the file as it was and the next poll sends the same landings.
