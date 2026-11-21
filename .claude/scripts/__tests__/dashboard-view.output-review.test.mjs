@@ -93,12 +93,15 @@ test("a landed card's finding opens the lines its own review read, from the serv
   Object.assign(data.panels.needs.data.cards.blocked[0], { tail: '[P2] a.sh:2–3 slow', track: { ...trackOf('++!...', ''), at: null, records } });
   deliver(w, data);
   const rows = () => Array.from(panel(w, 'landed').querySelectorAll('li.output-finding'));
-  const open = (row) => { const d = row.querySelector('details.finding-lines'); d.open = true; d.dispatchEvent(new w.Event('toggle')); return d; };
+  // Bug it catches: the test fired its own toggle and jsdom queued one more, so under load the page read the card's lines
+  // twice. A reader's toggle is the one jsdom fires on a later turn: wait for that one, as the page's listener runs first.
+  const flip = (d, on) => { const fired = new Promise((r) => d.addEventListener('toggle', r, { once: true })); d.open = on; return fired; };
+  const open = async (row) => { const d = row.querySelector('details.finding-lines'); await flip(d, true); return d; };
   const notes = (d) => Array.from(d.querySelectorAll('.finding-lines-note'), (x) => x.textContent);
   const texts = (d) => Array.from(d.querySelectorAll('pre.finding-lines-text'), (x) => x.textContent);
   assert.equal(rows().length, 4);
   assert.equal(w.excerptsAsks, undefined, 'nothing is read before a place is opened');
-  let d = open(rows()[1]);
+  let d = await open(rows()[1]);
   await settle();
   assert.deepEqual(w.excerptsAsks, ['excerpts?repo=sample&card=c5-7'], "the card's own lines are asked for");
   assert.deepEqual(notes(d), ['The reviewed lines did not come: no reviewed lines'], 'a failed read says so');
@@ -108,25 +111,25 @@ test("a landed card's finding opens the lines its own review read, from the serv
     { review: T2, at: 'a.sh:2-3', side: 'new', from: 2, lines: ['two', 'three'] },
     { review: T2, at: 'a.sh:2-3', side: 'old', from: 2, lines: ['deleted two'] },
     { review: T2, at: 'a.sh:2-3', side: 'fix', from: 2, lines: ['fixed away'] }] }) };
-  d.open = false; d.dispatchEvent(new w.Event('toggle'));
-  d = open(rows()[1]);
+  await flip(d, false);
+  d = await open(rows()[1]);
   await settle();
   assert.equal(w.excerptsAsks.length, 2, 'a failed read is asked again at the next open');
   assert.deepEqual(notes(d), ["Main's side: lines the change deleted"]);
   assert.deepEqual(texts(d), ['4 deleted line']);
-  d = open(rows()[2]);
+  d = await open(rows()[2]);
   await settle();
   assert.equal(w.excerptsAsks.length, 2, "a review's lines are read once for all its places");
   assert.deepEqual(notes(d), ["The change's side", "Main's side: lines the change deleted", 'Before the fix: lines the fix deleted'],
     'a cited deleted line is shown beside the staged one, a line a fix round deleted as the fix\'s, not as main\'s');
   assert.deepEqual(texts(d), ['2 two\n3 three', '2 deleted two', '2 fixed away']);
-  d = open(rows()[0]);
+  d = await open(rows()[0]);
   await settle();
   assert.deepEqual(texts(d), ['2 old two\n3 old three'], "an earlier review shows its own lines, not a later review's of the same place");
-  d = open(rows()[3]);
+  d = await open(rows()[3]);
   await settle();
   assert.deepEqual(notes(d), ['The review kept no lines for this place.']);
-  d = open(panel(w, 'needs').querySelector('li[data-key="blocked:c2-13"] > details.block-more > details.output li.output-finding'));
+  d = await open(panel(w, 'needs').querySelector('li[data-key="blocked:c2-13"] > details.block-more > details.output li.output-finding'));
   await settle();
   assert.deepEqual(texts(d), ['2 two\n3 three', '2 deleted two', '2 fixed away'], "a blocked card's output shows its last review's lines");
 });
