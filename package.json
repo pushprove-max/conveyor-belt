@@ -1,12 +1,14 @@
 {
   "name": "conveyor-belt",
   "private": true,
-  "description": "Test-only dependencies of the Conveyor Belt plugin (the Board view tests render the page in jsdom).",
+  "description": "Test and lint dependencies of the Conveyor Belt plugin (the Board view tests render the page in jsdom; ESLint lints the Board's JavaScript).",
   "license": "Apache-2.0",
   "scripts": {
     "test:files": "node --max-old-space-size=4096 --test"
   },
   "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.15.0",
     "jsdom": "31.0.0",
     "typescript": "6.0.3"
   }

@@ -37,12 +37,18 @@ as the commit's author. To sign off commits you made already, run `git rebase --
   file limit now, and the functions (`<path><TAB><name>`) that are over the function limit or that the linter cannot
   measure (`lint-funcs.sh --list` says `not measured`). A change that splits an exempt file or function so it is in
   the limit removes its line from the exempt file. The function-length entry's `files` name the exempt file and leave
-  out `.conveyor/lint-funcs.sh` and `.conveyor/lint-shell.sh`: a change that only removes lines from a file those
+  out `.conveyor/lint-funcs.sh`, `.conveyor/lint-shell.sh` and `.conveyor/lint-js.sh`: a change that only removes lines from a file those
   `files` match needs no owner's yes, which is right for the exempt file and wrong for a linter.
 - ruff is the linter of the Python files: the pack's `lint` field runs `ruff check` on each changed `.py` file, read
   only (`--no-fix`). Its config, `ruff.toml`, keeps ruff's default rules and adds the complexity rules `C901` and
   `PLR0915`, with their limits. ruff is a tool of the build machine, not a dependency of the Board or the engine; with
   no ruff on `PATH`, the command is skipped as `missing ruff`. A change to `ruff.toml` is lint policy.
+- ESLint is the linter of the Board's JavaScript: the pack's `lint` field runs `.conveyor/lint-js.sh` on each changed
+  `.js` file under `.claude/dashboard` (not the files under `.claude/dashboard/vendor`), read only, and a warning is a
+  finding too. Its config, `eslint.config.js`, keeps ESLint's recommended rules, adds the complexity rules
+  `complexity`, `max-lines-per-function` and `max-depth`, with their limits, and names the globals the Board's files
+  share. ESLint is a dev dependency in `package.json`; with no `node_modules/.bin/eslint` (`npm ci` installs it), the
+  command is skipped as `missing eslint`. A change to `eslint.config.js` or `.conveyor/lint-js.sh` is lint policy.
 - The engine is bash 5.1 and jq; the Board is Python 3's standard library unless an issue names a pinned library.
   Both run on macOS and Linux (`conveyor/lib/portable.sh`).
 - The plugin is generic: no project's own names, paths or labels outside docs that name one as an example.

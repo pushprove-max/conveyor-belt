@@ -140,7 +140,8 @@
           "*.sh",
           ".conveyor/size-exempt.txt",
           ":(exclude).conveyor/lint-funcs.sh",
-          ":(exclude).conveyor/lint-shell.sh"
+          ":(exclude).conveyor/lint-shell.sh",
+          ":(exclude).conveyor/lint-js.sh"
         ],
         "ratchet": false,
         "triggers": [
@@ -179,6 +180,24 @@
           "PLR0915"
         ],
         "run": "command -v ruff >/dev/null || { echo 'lint: missing ruff'; exit 127; }; ruff check --no-fix --force-exclude --output-format=concise {files}"
+      },
+      {
+        "files": [
+          ".claude/dashboard/*.js",
+          ":(exclude).claude/dashboard/vendor"
+        ],
+        "triggers": [
+          ".conveyor/lint-js.sh",
+          "eslint.config.js",
+          "package.json",
+          "package-lock.json"
+        ],
+        "complexity": [
+          "complexity",
+          "max-lines-per-function",
+          "max-depth"
+        ],
+        "run": "bash .conveyor/lint-js.sh {files}"
       }
     ],
     "policy": [
@@ -186,7 +205,9 @@
       ".conveyor/lint-funcs.sh",
       ".conveyor/lint-funcs.awk",
       ".conveyor/size-exempt.txt",
-      "ruff.toml"
+      "ruff.toml",
+      ".conveyor/lint-js.sh",
+      "eslint.config.js"
     ]
   }
 }
