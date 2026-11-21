@@ -146,7 +146,7 @@ machine. Only the release suite moves.
 - `conveyor.sh control suite-machine ssh <user@host> [--dir <folder>]` runs it on that box. The folder is
   `~/conveyor-suite` unless you give one. It can be `~`, a folder under `~/`, or a full path.
 
-The box needs bash 5.1 or later and git. Conveyor connects with ssh and does not ask for a password, so set up an ssh
+The box needs bash 5.1 or later, jq and git. Conveyor connects with ssh and does not ask for a password, so set up an ssh
 key for the box first. The box needs no access to the repository and gets no GitHub token. Conveyor sends it the
 commit under test as a git bundle, and runs the pack's `worktree.setup` there after the checkout. When the commit
 has `.conveyor/test-machine.sh`, Conveyor runs that script on the box first, and runs it again only after the script

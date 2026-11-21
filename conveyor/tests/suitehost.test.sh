@@ -11,7 +11,7 @@
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
 # boxsetup [cpus] [ssh's exit]: an ssh on PATH that runs the command here, in $STUB/box (the box's home), with only
-# HOME, PATH (the box's nproc first: <cpus>, 3 by default) and STUB of this machine's environment, and none of its
+# HOME, PATH (the box's nproc first: <cpus>, 3 by default; then this machine's, or the folder named in $STUB/box/path) and STUB of this machine's environment, and none of its
 # open files but ssh's input and output, as a login there would have: no mark of the release run, no GitHub token and
 # no release lock. It notes each target in $STUB/ssh-calls. With <ssh's
 # exit>, it runs nothing and fails so, as an ssh that cannot reach the box does. BOX is the run's folder there with the
@@ -23,7 +23,7 @@ boxsetup() {
   printf '%s\n' '#!/usr/bin/env bash' 'while [ "${1:-}" = -o ]; do shift 2; done; [ "$1" != -- ] || shift' 'printf "%s\n" "$1" >> "$STUB/ssh-calls"; shift' \
     "${2:+echo 'ssh: connect to host box.example.com port 22: Connection refused' >&2; exit $2}" \
     'for f in /dev/fd/*; do f=${f##*/}; [ "$f" -le 2 ] || eval "exec $f>&-"; done 2> /dev/null' \
-    'cd "$STUB/box" && exec env -i HOME="$STUB/box" PATH="$STUB/box/bin:$PATH" STUB="$STUB" bash -c "$*"' > "$STUB/ssh" && chmod +x "$STUB/ssh" || fail "the fixture could not be made"
+    'cd "$STUB/box" && exec env -i HOME="$STUB/box" PATH="$STUB/box/bin:$(cat "$STUB/box/path" 2> /dev/null || printf %s "$PATH")" STUB="$STUB" bash -c "$*"' > "$STUB/ssh" && chmod +x "$STUB/ssh" || fail "the fixture could not be made"
   BOX=$STUB/box/suite/main
 }
 # boxrule: the control record's suiteMachine, as `control suite-machine ssh` writes it, a box over ssh with its
@@ -93,6 +93,23 @@ t_hostnostart() {
     || fail "a box that ssh cannot reach did not end the run not started with ssh's reason: $(cat "$RUN")"
   [ ! -e "$STUB/runs" ] && [ ! -e "$T/$CASE/cards/release/wt" ] || fail "the suite ran, or its worktree was made, though the box could not start: $(cat "$STUB/runs" 2>&1)"
   ! grep -q -- '-X POST' "$STUB/gh-calls" 2>/dev/null || fail "a run not started posted a status: $(cat "$STUB/gh-calls")"
+}
+# Bug (#1285): a box with no jq was started on: its check named git alone, and slot_pool there ignores a missing jq and
+# falls back to the CPU count, so the suite started where its jq cases cannot run. The box's PATH holds the tools the
+# check needs and no jq: the run ends not started, naming jq, with nothing run.
+t_hostnojq() {
+  local O RUN out t
+  runsetup "$BOXSUITE"; boxsetup 3; boxrule
+  mkdir -p "$STUB/box/nojq" || fail "the fixture could not be made"
+  for t in bash git grep sed cat tr sort tail head wc mkdir dirname uname flock getconf readlink env; do
+    ln -sf "$(command -v "$t")" "$STUB/box/nojq/$t" || fail "the fixture could not be made: $t"
+  done
+  printf %s "$STUB/box/nojq" > "$STUB/box/path"
+  out=$(loop release-run prep 1.1.0 2>&1) || fail "release-run prep did not start the run: $out"
+  # relwait: release-run starts the run in the background and returns; only its record shows when the run has ended.
+  relwait "the run did not end" '.ended != null'
+  jq -e '.state == "not started" and (.machine.reason | test("jq is not installed there")) and .machine.step == "start"' "$RUN" > /dev/null     || fail "a box with no jq did not end the run not started, naming jq: $(cat "$RUN")"
+  [ ! -e "$STUB/runs" ] && [ ! -e "$T/$CASE/cards/release/wt" ] || fail "the suite ran, or its worktree was made, though the box has no jq: $(cat "$STUB/runs" 2>&1)"
 }
 # Bug: a control record with no suiteMachine ran the suite anywhere but here, or reached for ssh. The record leaves the
 # key out, as one written before the rule did.

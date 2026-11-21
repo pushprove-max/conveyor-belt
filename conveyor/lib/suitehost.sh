@@ -5,7 +5,7 @@
 # control suite-machine`. `release-run ... --machine local` runs one run here whatever the rule says (releasego() is
 # given CONVEYOR_RELEASE_MACHINE=local). A run goes through its steps in order, each named in the run's record as it
 # begins (machine.step, then done) with the seconds of each step that ended (machine.secs):
-# - start: local, nothing. ssh: the box answers over ssh with no password asked, has bash 5.1 or later and git, and its
+# - start: local, nothing. ssh: the box answers over ssh with no password asked, has bash 5.1 or later, jq and git, and its
 #   test slots are read (HOSTFACTS): the most files a parallel suite runs at once there (relatonce()).
 # - setup: local, nothing. ssh: the tested commit's .conveyor/test-machine.sh runs there when its blob is not the one the
 #   box last ran (<dir>/<repo>/setup.blob); with no such file it is skipped.
@@ -75,16 +75,17 @@ hostfacts() { # <tool>...
   s="set -- $(printf '%q ' "$@"); $HOSTFACTS"
   if [ "$SH_KIND" = ssh ]; then hostssh "$s" 60 < "$HERE/lib/slots.sh"; else bash -c "$s" < "$HERE/lib/slots.sh"; fi
 }
-# A box over ssh fit to run the suite: it answers, with bash 5.1 or later and git. Sets SH_SLOTS to its test slots, or
+# A box over ssh fit to run the suite: it answers, with bash 5.1 or later, jq and git. Sets SH_SLOTS to its test slots, or
 # SH_WHY to why it is not fit, and fails.
 hostneeds() {
   local f rc v
-  SH_WHY=''; f=$(hostfacts git 2>&1); rc=$?
+  SH_WHY=''; f=$(hostfacts jq git 2>&1); rc=$?
   if [ $rc = 255 ]; then SH_WHY="$SH_TARGET does not answer over ssh: $(grep . <<<"$f" | tail -n 1)"
   elif [ $rc = 124 ]; then SH_WHY="$SH_TARGET did not answer over ssh in 60 s"
   elif [ $rc != 0 ]; then SH_WHY="bash could not run there (exit $rc): $(grep . <<<"$f" | tail -n 1)"
   elif v=$(sed -n 's/^bash\t//p' <<<"$f") && ! { [[ $v =~ ^([0-9]+)\.([0-9]+)$ ]] && { [ "${BASH_REMATCH[1]}" -gt 5 ] || { [ "${BASH_REMATCH[1]}" = 5 ] && [ "${BASH_REMATCH[2]}" -ge 1 ]; }; }; }; then
     SH_WHY="it has bash ${v:-of no version}, not 5.1 or later"
+  elif ! grep -qx $'tool\tjq\tok' <<<"$f"; then SH_WHY="jq is not installed there (slot_pool, and the suite's cases, read JSON with it)"
   elif ! grep -qx $'tool\tgit\tok' <<<"$f"; then SH_WHY="git is not installed there"
   elif ! SH_SLOTS=$(sed -n 's/^slots\t\([1-9][0-9]*\)$/\1/p' <<<"$f") || [ -z "$SH_SLOTS" ]; then SH_WHY="its test slots cannot be read"; fi
   [ -z "$SH_WHY" ]
