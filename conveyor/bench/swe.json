@@ -3,6 +3,7 @@
   "revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
   "seed": "conveyor-swe-1",
   "swebench": "4.1.0",
+  "ruff": "0.17.6",
   "tasks": 500,
   "presets": [1, 5, 20, 50],
   "minutes": {"conveyor": 20, "agent": 8},

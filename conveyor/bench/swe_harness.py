@@ -23,7 +23,11 @@ Usage:
       ({code, test}, each {files, added, removed}), and measures, those of the patch ({files, codeAdded, codeRemoved,
       testAdded, size: its code lines changed over the reference fix's, strays: it changes a code file the reference
       fix does not}); no text and no path of the reference fix or of a hidden test is in it, only the names of the
-      failed tests;
+      failed tests; measures also has lintClean (ruff, at the release swe.json pins, with its default rules and no
+      project settings, finds no problem in the files the patch changes that those files did not have at the base
+      commit) and provesFix (the patch adds or changes a test file, and the test command on those files fails at the
+      base commit with only the patch's test files, and passes with the whole patch), each null when it could not be
+      measured;
       its container is named sweb.eval.<id>.conveyor-<run id>-<id>, which the run's end (swe.sh's swe_end) removes;
       exit 3 when the harness could not run the task (the task is not in the dataset, its image could not be
       fetched or built, or the run erred).
@@ -35,6 +39,7 @@ import glob
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -43,12 +48,30 @@ import tempfile
 
 
 # The swebench release this file is written for and that passed a check on the build machine, as swe.json pins it and
-# docs/benchmarks.md installs it: swebench 5 has no MAP_REPO_VERSION_TO_SPECS, which tasks() reads.
+# docs/benchmarks.md installs it: swebench 5 has no MAP_REPO_VERSION_TO_SPECS, which tasks() reads. RUFF is the ruff
+# release that measures a patch's lint (lint_clean): another release has other rules.
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'swe.json')) as _f:
-    SWEBENCH = json.load(_f)['swebench']
+    _pins = json.load(_f)
+SWEBENCH, RUFF = _pins['swebench'], _pins['ruff']
 
 
-# '' when this Python's swebench is SWEBENCH, else the Board's text: no harness, or the one it has and what to install.
+# A command's result, its output kept as text; its exit status is the caller's to read.
+def run(args, **kw):
+    return subprocess.run(args, capture_output=True, text=True, check=False, **kw)
+
+
+# The release of the ruff this Python runs as a module, or None when it has none.
+def ruff_version():
+    try:
+        r = run([sys.executable, '-m', 'ruff', '--version'])
+    except OSError:
+        return None
+    m = re.match(r'ruff (\S+)', r.stdout)
+    return m.group(1) if r.returncode == 0 and m else None
+
+
+# '' when this Python's swebench is SWEBENCH and its ruff is RUFF, else the Board's text: no harness, or the one it has
+# and what to install.
 def swebench_wrong():
     try:
         import swebench
@@ -63,7 +86,9 @@ def swebench_wrong():
         except Exception:
             v = None
     if v == SWEBENCH:
-        return ''
+        r = ruff_version()
+        has = f'ruff {r}' if r else 'no ruff'
+        return '' if r == RUFF else f'The build machine has {has}. This benchmark needs ruff {RUFF}. Install ruff {RUFF} in the benchmark virtual environment, then check again.'
     need = 'swebench %s' % SWEBENCH
     return ('The build machine has harness %s. This benchmark needs %s. Install %s in the benchmark virtual environment, then check again.'
             % ('swebench %s' % v if v else 'swebench of no known version', need, need))
@@ -176,6 +201,95 @@ def tests_of(row, report, kind):
     return {'passed': len(names) - len(failed), 'failed': len(failed), 'failedTests': failed}
 
 
+# Django's runner takes a test module, not a file: tests/a/b.py is a.b.
+def test_label(repo, path):
+    return re.sub(r'\.py$', '', re.sub(r'^tests/', '', path)).replace('/', '.') if repo == 'django/django' else path
+
+
+# What ruff finds in <paths> of <folder>, as {(path, rule, message): count}: its default rules and no project settings,
+# so that two folders compare by what they hold, not by a config. It runs in <cwd>, not in <folder>: python puts its
+# working folder first on the module path, and a patch that adds ruff.py would run its code as ruff.
+def ruff_findings(folder, paths, cwd):
+    if not paths:
+        return {}
+    r = run([sys.executable, '-m', 'ruff', 'check', '--isolated', '--no-cache', '--output-format', 'json']
+            + [os.path.join(os.path.realpath(folder), p) for p in paths], cwd=cwd)
+    found = {}
+    for x in json.loads(r.stdout):
+        k = (os.path.relpath(x['filename'], os.path.realpath(folder)), x['code'], x['message'])
+        found[k] = found.get(k, 0) + 1
+    return found
+
+
+# True when ruff finds nothing in the patch's python files that those files did not have at the base commit (a line
+# that moved is not new; a file the patch adds starts with nothing). None when it could not be measured.
+def lint_clean(box, patch, py, cache):
+    before, after = tempfile.mkdtemp(prefix='before', dir=cache), tempfile.mkdtemp(prefix='after', dir=cache)
+    for p in py:
+        os.makedirs(os.path.dirname(os.path.join(before, p)), exist_ok=True)
+        os.makedirs(os.path.dirname(os.path.join(after, p)), exist_ok=True)
+        if run(['docker', 'cp', f'{box}:/testbed/{p}', os.path.join(before, p)]).returncode == 0:
+            shutil.copy(os.path.join(before, p), os.path.join(after, p))
+    if run(['git', 'apply', '--include=*.py', patch], cwd=after).returncode != 0:
+        return None
+    old = ruff_findings(before, [p for p in py if os.path.exists(os.path.join(before, p))], cache)
+    new = ruff_findings(after, [p for p in py if os.path.exists(os.path.join(after, p))], cache)
+    return all(n <= old.get(k, 0) for k, n in new.items())
+
+
+# True when the test command on the patch's test files fails at the base commit with only those files of the patch, and
+# passes with the whole patch. False when the patch has no such test file. None when it could not be measured.
+def proves_fix(box, patch, row, tests):
+    if not tests:
+        return False
+    from swebench.harness.constants import MAP_REPO_VERSION_TO_SPECS
+    cmd = MAP_REPO_VERSION_TO_SPECS[row['repo']][row['version']]['test_cmd']
+    cmd = 'source /opt/miniconda3/bin/activate && conda activate testbed && ' + (' && '.join(cmd) if isinstance(cmd, list) else cmd)
+    if run(['docker', 'cp', patch, f'{box}:/tmp/conveyor.patch']).returncode != 0:
+        return None
+    labels = ' '.join(shlex.quote(test_label(row['repo'], p)) for p in tests)
+    rcs = []
+    for flag in ('--include', '--exclude'):
+        apply = 'git apply ' + ' '.join(f'{flag}={shlex.quote(p)}' for p in tests) + ' /tmp/conveyor.patch'
+        a = run(['docker', 'exec', '-w', '/testbed', box, 'bash', '-c', apply])
+        t = run(['docker', 'exec', '-w', '/testbed', box, 'bash', '-c', f'{cmd} {labels}'], timeout=1800)
+        # 125 to 127: docker, or the shell, could not run the command: not a test that failed.
+        if a.returncode != 0 or t.returncode in (125, 126, 127):
+            return None
+        rcs.append(t.returncode)
+    return rcs[0] != 0 and rcs[1] == 0
+
+
+# The patch's lintClean and provesFix, measured in a container of the task's image (the base commit is in /testbed),
+# named box so that the run's end removes it when this process is stopped.
+def checks(row, patch, image, box, cache):
+    with open(patch) as f:
+        files = diff_files(f.read())
+    py = [p for p in files if p.endswith('.py')]
+    out = {'lintClean': True, 'provesFix': False}
+    if not py:
+        return out
+    tests = [p for p in py if is_test(p) and files[p][0] > 0]
+
+    # Each is None when its own step failed: Docker, ruff, git, or a command that ran out of time.
+    def measured(f, *a):
+        try:
+            return f(box, patch, *a)
+        except (OSError, subprocess.SubprocessError, ValueError, KeyError, ImportError):
+            return None
+    try:
+        if run(['docker', 'run', '-d', '--name', box, image, 'sleep', 'infinity']).returncode != 0:
+            return {'lintClean': None, 'provesFix': None}
+        return {'lintClean': measured(lint_clean, py, cache), 'provesFix': measured(proves_fix, row, tests)}
+    except OSError:
+        return {'lintClean': None, 'provesFix': None}
+    finally:
+        try:
+            run(['docker', 'rm', '-f', box])
+        except OSError:
+            pass
+
+
 def grade(dataset, revision, instance, patch, folder, run, cache):
     from datasets import load_dataset
     rows = [dict(r) for r in load_dataset(dataset, split='test', revision=revision) if r['instance_id'] == instance]
@@ -211,6 +325,7 @@ def grade(dataset, revision, instance, patch, folder, run, cache):
     f2p, p2p = tests_of(rows[0], report, 'FAIL_TO_PASS'), tests_of(rows[0], report, 'PASS_TO_PASS')
     with open(patch) as f:
         ref, mine = measures(f.read(), rows[0]['patch'])
+    mine.update(checks(rows[0], patch, image_of(instance), f'sweb.eval.{instance}.{run_id}-check', cache))
     cls = ('resolved' if resolved else 'broke' if f2p['failed'] == 0 else 'partial' if f2p['passed'] > 0 else 'nofix')
     print(json.dumps({'resolved': resolved, 'class': cls, 'tests': {'failToPass': f2p, 'passToPass': p2p}, 'ref': ref, 'measures': mine}))
     return 0

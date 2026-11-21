@@ -14,16 +14,17 @@ it:
 
 ```
 python3 -m venv ~/.local/share/conveyor/swebench-venv
-~/.local/share/conveyor/swebench-venv/bin/pip install swebench==4.1.0
+~/.local/share/conveyor/swebench-venv/bin/pip install swebench==4.1.0 ruff==0.17.6
 ```
 
-Conveyor needs this release of swebench, which `conveyor/bench/swe.json` names as `swebench`. Before a run or an
-arm's check starts, Conveyor checks that Docker answers and that the harness has this release. When one of them fails,
+Conveyor needs these releases of swebench and ruff, which `conveyor/bench/swe.json` names as `swebench` and `ruff`.
+Before a run or an arm's check starts, Conveyor checks that Docker answers and that the harness has these releases.
+When one of them fails,
 the run or check stops and says what to repair:
 
 - No harness: install it with the commands above, then check again.
-- Another release: the message names the release the harness has. Install this release with the `pip install` command
-  above, then check again.
+- Another release of swebench or ruff, or no ruff: the message names the release the harness has. Install the
+  release with the `pip install` command above, then check again.
 - Docker does not answer: install or start Docker, check that `docker info` works, then check again.
 
 The first run reads the task list from the dataset. Each task then fetches its Docker image, which can be several
@@ -384,11 +385,19 @@ Each result that was graded also keeps what the official harness reported, and t
 - `ref`: the size of the task's reference fix, as files, lines added and lines removed, for its code files and its
   test files. A test file is one under a `test` or `tests` folder, or named `test_*.py`, `*_test.py` or `conftest.py`.
 - `measures`: the patch's files changed, code lines added and removed, test lines added, `size` (its code lines added
-  plus removed, over the reference fix's) and `strays` (true when it changes a code file that the reference fix does
-  not change).
+  plus removed, over the reference fix's), `strays` (true when it changes a code file that the reference fix does
+  not change), `lintClean` and `provesFix`.
+- `lintClean`: true when ruff, with its default rules and no project settings, finds no problem in the Python files
+  the patch changes that those files did not have before the patch. A patch that adds an unused import is false.
+- `provesFix`: true when the patch adds or changes a Python test file, and the task's test command on those test files
+  fails on the base commit with only the patch's test files, and passes with the whole patch. A patch whose new test
+  also passes on the base commit is false, as is a patch with no test file.
+
+`lintClean` and `provesFix` are `null` when Docker, ruff or git could not run for the patch.
 
 `bench swe show`, `history` and `results --json` show them. A result recorded before they were kept shows them as
-`null`, which means not kept, not zero.
+`null`, which means not kept, not zero. A result kept before `lintClean` and `provesFix` has no value for them: that
+also means not kept.
 
 A small run tells you little. Two runs of the same version can differ by chance, because the models do not give the
 same answer each time. With n tasks, a difference under about the square root of 2n tasks is within that noise: with 5

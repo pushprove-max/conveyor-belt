@@ -10,8 +10,11 @@
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
 # A stand-in swebench <version> in folder <folder>, as swebench 5 is: no MAP_REPO_VERSION_TO_SPECS in its constants;
-# a stand-in datasets beside it.
-swebenchstub() { # <folder> <version>
+# a stand-in datasets beside it, and a stand-in ruff (a module that prints its release, swe.json's unless a third
+# argument gives another; "none": no ruff).
+swebenchstub() { # <folder> <version> [<ruff release>]
+  local r=${3:-$(jq -r .ruff "$SRC/bench/swe.json")}
+  mkdir -p "$1/ruff" && { [ "$r" = none ] && rm -f "$1/ruff/__main__.py" || printf 'print("ruff %s")\n' "$r" > "$1/ruff/__main__.py"; } || fail "the stand-in ruff was not made"
   mkdir -p "$1/swebench/harness" "$1/datasets" && printf '__version__ = "%s"\n' "$2" > "$1/swebench/__init__.py" \
     && : > "$1/swebench/harness/__init__.py" && echo 'MAP_REPO_VERSION_TO_SPECS_BY_REPO = {}' > "$1/swebench/harness/constants.py" \
     && echo 'def load_dataset(*a, **k): return []' > "$1/datasets/__init__.py" || fail "the stand-in swebench was not made"
@@ -38,6 +41,16 @@ t_sweharnessver() {
   mkdir -p "$C/pin" && cp "$SRC/bench/swe_harness.py" "$C/pin/" && jq '.swebench = "9.9.9"' "$SRC/bench/swe.json" > "$C/pin/swe.json" || fail "the pinned copy was not made"
   out=$(env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$C/m" python3 "$C/pin/swe_harness.py" check 2>&1) && fail "check passed 4.1.0 with 9.9.9 pinned: $out"
   grep -q 'harness swebench 4\.1\.0\. This benchmark needs swebench 9\.9\.9\.' <<<"$out" || fail "check does not name the pinned release: $out"
+  # The ruff release is pinned in swe.json too, as ruff's rules decide a patch's lintClean: another release, or none,
+  # fails the check and says which to install.
+  local pin; pin=$(jq -r .ruff "$SRC/bench/swe.json")
+  swebenchstub "$C/m" 4.1.0 0.0.1
+  out=$(h check 2>&1) && fail "check passed with ruff 0.0.1: $out"
+  grep -qx "The build machine has ruff 0\\.0\\.1\\. This benchmark needs ruff $pin\\. Install ruff $pin in the benchmark virtual environment, then check again\\." <<<"$out" \
+    || fail "check does not name the installed ruff and the pinned one: $out"
+  swebenchstub "$C/m" 4.1.0 none
+  out=$(h check 2>&1) && fail "check passed with no ruff: $out"
+  grep -q '^The build machine has no ruff\.' <<<"$out" || fail "check does not say that ruff is missing: $out"
 }
 
 # Bug (#633): a saved task list hid the harness: a run or an arms check with the list saved never ran the harness
