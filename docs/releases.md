@@ -58,7 +58,8 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    runs more files at once than the pool has slots (`testSlots` in the host file), or more than the **Test files at
    once** setting. The default is 2. Set it on the Board's Rules tab (Capacity), or with `conveyor.sh control atonce <n>`,
    a whole number from 1 to 999. A number above the pool's slots runs at the slots, and the Rules tab says so. On a
-   box over ssh, the limit is the box's test slots, one for each of its CPUs. The
+   box over ssh, the limit is the box's test slots, which can be fewer than its CPUs
+   ([Where the suite runs](#where-the-suite-runs)); the Rules tab shows this machine's slots, not the box's. The
    next parallel run reads the setting. The run's record keeps the number it used as `atOnce`, beside `mode`, and
    `conveyor.sh release-run atonce` prints it. The output shows each file's
    lines together, with its `-- ok` or `-- FAIL` line, when the file ends. In parallel, the suite starts the longest
