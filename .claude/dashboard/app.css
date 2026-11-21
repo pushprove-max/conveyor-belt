@@ -887,7 +887,7 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .bench-t tr.bench-click { cursor: pointer; }
 .bench-t tr.bench-click:hover td { background: var(--surface-2); }
 .bench .r { text-align: right; }
-.bench .mono { font-family: var(--mono); font-size: .92em; white-space: nowrap; }
+.bench .mono { font-family: var(--mono); font-size: var(--fs-xs); white-space: nowrap; }
 .bench .btn-sm { min-height: 28px; padding: 2px var(--sp-2); font-size: var(--fs-sm); }
 .bench .btn-link, .tests-bench-moved .btn-link { padding: 0; min-height: 0; border: 0; background: none; color: var(--accent); text-decoration: underline; cursor: pointer; }
 .bench-muted { color: var(--muted); }
@@ -946,7 +946,7 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .bench-colbar { width: 100%; border-radius: 4px 4px 0 0; }
 /* The charts: drawn by code as SVG, each mark in its arm's series colour. */
 .bench-svg { width: 100%; height: auto; }
-.bench-svg text { fill: var(--muted); font-size: 11px; font-family: var(--font); }
+.bench-svg text { fill: var(--muted); font-size: var(--fs-xs); font-family: var(--font); }
 .bench-svg .bench-gl { stroke: var(--surface-2); }
 .bench-svg .bench-front { fill: none; stroke: var(--muted); stroke-dasharray: 4 3; }
 .bench-svg .bench-pt circle { stroke: var(--surface); stroke-width: 2; }
@@ -979,7 +979,7 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .bench-pv { width: 70px; text-align: right; }
 /* Live run: one row a task and one column an arm. */
 .bench-cellgrid { display: grid; gap: 3px; }
-.bench-cellgrid > div { display: flex; align-items: center; justify-content: center; height: 22px; overflow: hidden; border-radius: 4px; font-size: 10px; white-space: nowrap; }
+.bench-cellgrid > div { display: flex; align-items: center; justify-content: center; height: 22px; overflow: hidden; border-radius: 4px; font-size: var(--fs-xs); white-space: nowrap; }
 .bench-gh, .bench-gt { color: var(--text); }
 .bench-gt { justify-content: flex-start !important; }
 .bench-gc { background: var(--surface-2); color: var(--bg); }
@@ -991,7 +991,7 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .bench-tail li { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 /* Task: the card's steps, each as wide as its time. */
 .bench-swim { position: relative; height: 26px; margin: 4px 0 10px; border-radius: 6px; background: var(--surface-2); }
-.bench-swim span { position: absolute; top: 0; display: flex; align-items: center; height: 26px; padding: 0 6px; overflow: hidden; border-radius: 6px; font-size: 10px; color: var(--bg); white-space: nowrap; }
+.bench-swim span { position: absolute; top: 0; display: flex; align-items: center; height: 26px; padding: 0 6px; overflow: hidden; border-radius: 6px; font-size: var(--fs-xs); color: var(--bg); white-space: nowrap; }
 .bench-dots { gap: 6px; margin: var(--sp-2) 0 var(--sp-3); }
 .bench-vd { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; }
 /* Task map: one square a task, by repository. */

@@ -116,6 +116,7 @@
   ".claude/scripts/__tests__/dashboard-server.test.sh": [
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
     ".claude/scripts/__tests__/dashboard-local.test.sh",
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
     ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
@@ -161,6 +162,7 @@
   ".claude/scripts/dashboard_server.py": [
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
     ".claude/scripts/__tests__/dashboard-local.test.sh",
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
     ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
@@ -168,6 +170,7 @@
     "conveyor/tests/snapexec.test.sh"
   ],
   ".conveyor/test-changed-areas.test.sh": [
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
     "conveyor/tests/snapexec.test.sh"
   ],
   ".conveyor/test-changed-meta.test.sh": [
@@ -180,6 +183,7 @@
     "conveyor/tests/snapexec.test.sh"
   ],
   ".conveyor/test-changed.sh": [
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
     "conveyor/tests/snapexec.test.sh"
   ],
   ".conveyor/test-changed.test.sh": [
@@ -598,5 +602,62 @@
   ],
   "hooks/hooks.json": [
     ".claude/scripts/__tests__/dashboard-local.test.sh"
+  ],
+  ".claude/scripts/__tests__/dashboard-limit-kept.test.sh": [
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs"
+  ],
+  ".claude/scripts/__tests__/dashboard-limit.test.sh": [
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs"
+  ],
+  ".claude/scripts/__tests__/dashboard-local.test.sh": [
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs"
+  ],
+  ".claude/scripts/__tests__/dashboard-parts.test.sh": [
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs"
+  ],
+  ".claude/scripts/dashboard.sh": [
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs"
+  ],
+  ".claude/scripts/dashboard_limit.py": [
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs"
+  ],
+  ".claude/scripts/dashboard_limit_pricing.py": [
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs"
+  ],
+  ".claude/scripts/dashboard_limit_requests.py": [
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs"
+  ],
+  ".claude/scripts/dashboard_limit_usage.py": [
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs"
+  ],
+  ".claude/scripts/dashboard_panels.sh": [
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs"
+  ],
+  ".claude/scripts/dashboard_server_auth.py": [
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs"
+  ],
+  ".claude/scripts/dashboard_server_base.py": [
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs"
+  ],
+  ".claude/scripts/dashboard_server_control.py": [
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs"
+  ],
+  ".claude/scripts/dashboard_server_handler.py": [
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs"
+  ],
+  ".claude/scripts/dashboard_server_pages.py": [
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs"
+  ],
+  ".claude/scripts/dashboard_service.sh": [
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs"
+  ],
+  ".conveyor/size-exempt.txt": [
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs"
+  ],
+  "conveyor/lib/snapshot.sh": [
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs"
+  ],
+  "conveyor/tests/snapsize.test.sh": [
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs"
   ]
 }
