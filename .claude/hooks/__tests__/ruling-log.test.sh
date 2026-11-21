@@ -33,24 +33,26 @@ ask "only after the tests pass" >/dev/null
 check "the owner's own words are logged as typed" "typed" "$(tail -n 1 "$LOG" | jq -r .pick)"
 
 # A message the owner types in the main checkout is logged with a p id; a card session's is the engine's words.
-n=$(wc -l < "$LOG")
-jq -cn --arg cwd "$MAIN" '{hook_event_name:"UserPromptSubmit", session_id:"s1", cwd:$cwd, prompt:"hold the billing work"}' | bash "$HOOK"
+# prompt_rows <cwd> <prompt>: the rows one UserPromptSubmit call added, counted around that call alone, so a wrong
+# result is reported by its own call (the hook's last input) and never carried into the next check.
+prompt_rows() {
+  local b; b=$(wc -l < "$LOG")
+  jq -cn --arg cwd "$1" --arg p "$2" '{hook_event_name:"UserPromptSubmit", session_id:"s1", cwd:$cwd, prompt:$p}' | bash "$HOOK"
+  echo $(( $(wc -l < "$LOG") - b ))
+}
+check "a message typed in the main checkout is logged" 1 "$(prompt_rows "$MAIN" "hold the billing work")"
 check "a message typed in the main checkout is logged with a p id" yes \
   "$(tail -n 1 "$LOG" | jq -r '.id' | grep -qE '^q-[0-9]{8}-[0-9]{6}-p-[0-9a-f]{6}$' && echo yes || echo no)"
-jq -cn --arg cwd "$CARD" '{hook_event_name:"UserPromptSubmit", session_id:"s2", cwd:$cwd, prompt:"build the card"}' | bash "$HOOK"
-jq -cn --arg cwd "$MAIN" '{hook_event_name:"UserPromptSubmit", session_id:"s1", cwd:$cwd, prompt:"<system-reminder>x</system-reminder>"}' | bash "$HOOK"
-check "a card session's message and machine text are not logged" "$((n + 1))" "$(wc -l < "$LOG")"
+check "a card session's message is not logged" 0 "$(prompt_rows "$CARD" "build the card")"
+check "machine text is not logged" 0 "$(prompt_rows "$MAIN" "<system-reminder>x</system-reminder>")"
 # Only the harness's own feedback line is machine text: the owner's words about a hook are a ruling like any other,
 # and dropping them loses it without a word.
 for p in 'Stop hook feedback: Conveyor: blocked' 'PreToolUse:Bash hook error: exit 2'; do
-  jq -cn --arg cwd "$MAIN" --arg p "$p" '{hook_event_name:"UserPromptSubmit", session_id:"s1", cwd:$cwd, prompt:$p}' | bash "$HOOK"
+  check "the harness's hook feedback is not logged" 0 "$(prompt_rows "$MAIN" "$p")"
 done
-check "the harness's hook feedback is not logged" "$((n + 1))" "$(wc -l < "$LOG")"
 for p in 'Fix hook error handling' 'The hook feedback: make it shorter'; do
-  jq -cn --arg cwd "$MAIN" --arg p "$p" '{hook_event_name:"UserPromptSubmit", session_id:"s1", cwd:$cwd, prompt:$p}' | bash "$HOOK"
+  check "the owner's words about a hook are logged" "1|$p" "$(prompt_rows "$MAIN" "$p")|$(tail -n 1 "$LOG" | jq -r .answer)"
 done
-check "the owner's words about a hook are logged" "$((n + 3))|The hook feedback: make it shorter" \
-  "$(wc -l < "$LOG")|$(tail -n 1 "$LOG" | jq -r .answer)"
 
 # ruling-id.sh finds the owner's words in the same log.
 check "ruling-id.sh finds a logged answer by its words" yes \
@@ -93,8 +95,9 @@ answered() { # <PreToolUse input> <question> <answer>: the owner's answer reache
     | bash "$HOOK" >/dev/null
 }
 ask_pre() { bash "$PLUG/.claude/hooks/ask-records-decision.sh" <<<"$1" >"$T/pre.out" 2>"$T/pre.err"; echo "$?|$(wc -c < "$T/pre.out" | tr -d ' ')"; }
-open_for() { CONVEYOR_MAIN=$MAIN bash "$PLUG/.claude/scripts/decision.sh" list | jq -r --arg q "$1" '[.[] | select(.answeredAt == null and .question == $q)] | length'; }
-row_of() { CONVEYOR_MAIN=$MAIN bash "$PLUG/.claude/scripts/decision.sh" list | jq -r --arg id "$1" '.[] | select(.id == $id) | "\(.question)|\(.answer)"'; }
+# The ledger reads run bash itself (command bash): a read is not a hook's input, so a FAIL line still names the hook's.
+open_for() { CONVEYOR_MAIN=$MAIN command bash "$PLUG/.claude/scripts/decision.sh" list | jq -r --arg q "$1" '[.[] | select(.answeredAt == null and .question == $q)] | length'; }
+row_of() { CONVEYOR_MAIN=$MAIN command bash "$PLUG/.claude/scripts/decision.sh" list | jq -r --arg id "$1" '.[] | select(.id == $id) | "\(.question)|\(.answer)"'; }
 
 CONVEYOR_MAIN=$MAIN bash "$PLUG/.claude/scripts/decision.sh" add chat-rollback "Roll back the billing release?" none main >/dev/null 2>&1
 p=$(picker "$(q1 Rollback "Should we roll back the billing release?")")

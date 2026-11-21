@@ -19,7 +19,8 @@ HOOK="$(cd "$(dirname "$0")/.." && pwd)/file-size-cop.sh"
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 PASS=0 FAIL=0
 
-check() { if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3)"; fi }
+. "$(dirname "${BASH_SOURCE[0]}")/lib/said.sh" # a FAIL line names the hook's last input
+check() { if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3)$(said)"; fi }
 run()     { bash "$HOOK" >/dev/null 2>&1 <<<"$1"; echo $?; }
 run_err() { bash "$HOOK" 2>&1 >/dev/null <<<"$1"; }
 
@@ -143,23 +144,23 @@ card_of() { head -c "$1" /dev/zero | tr '\0' 'a' > "$CARD"; }
 PAD30=$(head -c 30 /dev/zero | tr '\0' 'a'); PAD20=$(head -c 20 /dev/zero | tr '\0' 'a')
 # Bug caught: the cap counts characters or lines, not bytes; or compares at <=
 # so exactly 9000 slips; or judges an edit by its new text alone, not disk + net.
+# One check a hook call, so a FAIL line names the payload of the call that failed.
 card_of 8990
-OVER=$(run "$(edit "$CARD" "a" "$PAD30")")                         # 8990 + 29 = 9019
-EXACT=$(run "$(edit "$CARD" "a" "$(head -c 10 /dev/zero | tr '\0' 'a')a")")  # 8990 + 10 = 9000
-MB=$(run "$(edit "$CARD" "a" "ééééé")")                            # 5 chars, 10 bytes: 8990 - 1 + 10 = 8999
-MB2=$(run "$(edit "$CARD" "aa" "ééééé")")                          # 8990 - 2 + 10 = 8998
-MB3=$(run "$(edit "$CARD" "" "ééééé")")                            # 8990 + 10 = 9000, 8995 as characters
-WR=$(run "$(write "$CARD" "$(head -c 9000 /dev/zero | tr '\0' 'a')")")
-check "card_edit_over_limit_blocks" "2 2 0 0 2 2" "$OVER $EXACT $MB $MB2 $MB3 $WR"
+check "card_edit_over_limit_blocks: 8990 + 29 = 9019 bytes" 2 "$(run "$(edit "$CARD" "a" "$PAD30")")"
+check "card_edit_over_limit_blocks: 8990 + 10 = 9000 bytes" 2 \
+  "$(run "$(edit "$CARD" "a" "$(head -c 10 /dev/zero | tr '\0' 'a')a")")"
+check "card_edit_over_limit_blocks: 5 chars, 10 bytes: 8990 - 1 + 10 = 8999 passes" 0 "$(run "$(edit "$CARD" "a" "ééééé")")"
+check "card_edit_over_limit_blocks: 8990 - 2 + 10 = 8998 passes" 0 "$(run "$(edit "$CARD" "aa" "ééééé")")"
+check "card_edit_over_limit_blocks: 8990 + 10 = 9000 bytes, 8995 as characters" 2 "$(run "$(edit "$CARD" "" "ééééé")")"
+check "card_edit_over_limit_blocks: a 9000-byte Write" 2 "$(run "$(write "$CARD" "$(head -c 9000 /dev/zero | tr '\0' 'a')")")"
 # Bug caught: blocking a trim of an already-oversize card, a swap that nets
 # smaller, or a replace_all whose count is unknown (the cop declines those).
 card_of 9500
-SHRINK=$(run "$(edit "$CARD" "$PAD30" "$PAD20")")
+check "card_edit_under_limit_passes: a trim of a 9500-byte card" 0 "$(run "$(edit "$CARD" "$PAD30" "$PAD20")")"
 card_of 8990
-SWAP=$(run "$(edit "$CARD" "$PAD30" "$PAD20")")
-RALL=$(run "$(edit_all "$CARD" "a" "$PAD30")")
-WSMALL=$(run "$(write "$CARD" "$(head -c 8000 /dev/zero | tr '\0' 'a')")")
-check "card_edit_under_limit_passes" "0 0 0 0" "$SHRINK $SWAP $RALL $WSMALL"
+check "card_edit_under_limit_passes: a swap that nets smaller" 0 "$(run "$(edit "$CARD" "$PAD30" "$PAD20")")"
+check "card_edit_under_limit_passes: a replace_all" 0 "$(run "$(edit_all "$CARD" "a" "$PAD30")")"
+check "card_edit_under_limit_passes: an 8000-byte Write" 0 "$(run "$(write "$CARD" "$(head -c 8000 /dev/zero | tr '\0' 'a')")")"
 
 echo
 echo "$PASS passed, $FAIL failed"

@@ -9,7 +9,8 @@ set -u
 HOOK="$(cd "$(dirname "$0")/.." && pwd)/bugfix-test-lock.sh"
 PASS=0 FAIL=0
 
-check() { if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3)"; fi }
+. "$(dirname "${BASH_SOURCE[0]}")/lib/said.sh" # a FAIL line names the hook's last input
+check() { if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3)$(said)"; fi }
 json() { jq -cn --arg tool "$1" --arg fp "$2" '{tool_name:$tool, tool_input:{file_path:$fp}}'; }
 json_multi() { jq -cn --arg fp "$1" '{tool_name:"MultiEdit", tool_input:{file_path:$fp, edits:[{old_string:"a", new_string:"b"}]}}'; }
 json_multi_peredit() { jq -cn --arg fp "$1" '{tool_name:"MultiEdit", tool_input:{edits:[{file_path:$fp, old_string:"a", new_string:"b"}]}}'; }

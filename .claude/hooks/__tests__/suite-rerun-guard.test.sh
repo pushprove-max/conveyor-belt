@@ -28,12 +28,13 @@ echo 'export const a = 1;' > "$REPO/a.ts"
 git -C "$REPO" add a.ts
 git -C "$REPO" -c user.email=t@t -c user.name=t commit -q -m a
 
-run_hook() { echo "$1" | "$HOOK" >/dev/null 2>&1; echo $?; }
+run_hook() { echo "$1" | bash "$HOOK" >/dev/null 2>&1; echo $?; }
 # The PostToolUse half: what marks the attempt as a run that actually happened.
-complete() { echo "$1" | "$HOOK" --record-complete >/dev/null 2>&1; }
+complete() { echo "$1" | bash "$HOOK" --record-complete >/dev/null 2>&1; }
 # One finished run: the PreToolUse pass, then the completion record.
 ran() { run_hook "$1" >/dev/null; complete "$1"; }
-check() { if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3)"; fi }
+. "$(dirname "${BASH_SOURCE[0]}")/lib/said.sh" # a FAIL line names the hook's last input: each call is bash "$HOOK"
+check() { if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3)$(said)"; fi }
 json() { jq -cn --arg cmd "$1" --arg cwd "${2:-$REPO}" '{tool_input:{command:$cmd},cwd:$cwd}'; }
 
 # --- same run, same tree ----------------------------------------------------
@@ -108,7 +109,7 @@ echo 'export const a = 4;' > "$REPO/a.ts"
 INTERRUPTED=$(jq -cn --arg cmd 'npm run test:unit' --arg cwd "$REPO" \
   '{tool_input:{command:$cmd},cwd:$cwd,tool_response:{interrupted:true}}')
 check "an interrupted run passes on the way in"          0 "$(run_hook "$ATTEMPT")"
-echo "$INTERRUPTED" | "$HOOK" --record-complete >/dev/null 2>&1
+echo "$INTERRUPTED" | bash "$HOOK" --record-complete >/dev/null 2>&1
 check "an interrupted run does not block the retry"      0 "$(run_hook "$ATTEMPT")"
 
 # --- the key is the effective directory ---------------------------------------
@@ -229,7 +230,7 @@ check "worktree: coverage gate self-test passes" 0 \
 # runs every test.
 check "worktree: root npm run test:unit -- <file> blocks" 2 \
   "$(run_hook "$(json 'npm run test:unit -- src/x.test.ts' "$WT")")"
-OUT=$(json 'npm run test:unit -- src/x.test.ts' "$WT" | "$HOOK" 2>&1 >/dev/null)
+OUT=$(json 'npm run test:unit -- src/x.test.ts' "$WT" | bash "$HOOK" 2>&1 >/dev/null)
 check "that block names the one-file command" 1 \
   "$([[ $OUT == *"node --max-old-space-size=4096 --test --require ts-node/register <file>"* ]] && echo 1 || echo 0)"
 # The web test:unit integrity wrapper ignores file arguments, so naming one
@@ -237,7 +238,7 @@ check "that block names the one-file command" 1 \
 for C in 'npm --prefix web run test:unit -- src/a.test.tsx' 'cd web && npm run test:unit -- src/a.test.tsx'; do
   check "worktree: web test:unit wrapper with a file blocks: '$C'" 2 "$(run_hook "$(json "$C" "$WT")")"
 done
-OUT=$(json 'npm --prefix web run test:unit -- src/a.test.tsx' "$WT" | "$HOOK" 2>&1 >/dev/null)
+OUT=$(json 'npm --prefix web run test:unit -- src/a.test.tsx' "$WT" | bash "$HOOK" 2>&1 >/dev/null)
 check "that block names the raw one-file command" 1 \
   "$([[ $OUT == *"npm --prefix web run test:unit:raw -- src/x.test.tsx"* ]] && echo 1 || echo 0)"
 check "worktree: bare web test:unit:raw blocks" 2 \
@@ -302,7 +303,7 @@ for C in "bash $TMP/cfp4-lcov.sh" "cd $TMP && bash cfp4-lcov.sh > /tmp/conveyor/
   check "worktree: whole suite, typed or scripted, blocks: '$C'" 2 "$(run_hook "$(json "$C" "$WT")")"
   check "main checkout: '$C' passes" 0 "$(run_hook "$(json "$C" "$REPO")")"
 done
-OUT=$(json "bash $TMP/cfp4-lcov.sh" "$WT" | "$HOOK" 2>&1 >/dev/null)
+OUT=$(json "bash $TMP/cfp4-lcov.sh" "$WT" | bash "$HOOK" 2>&1 >/dev/null)
 check "the scripted block is the coverage gate's rule 3 message" 1 \
   "$([[ $OUT == "BLOCKED: the coverage gate"*"_implementer-tools.md rule 3"* ]] && echo 1 || echo 0)"
 for C in "bash $TMP/cfp4-run.sh" "bash $TMP/cfp4-hist.sh" 'scripts/test-unit-files.sh --unit | wc -l' \
@@ -310,20 +311,20 @@ for C in "bash $TMP/cfp4-run.sh" "bash $TMP/cfp4-hist.sh" 'scripts/test-unit-fil
   check "worktree: targeted coverage or no test run passes: '$C'" 0 "$(run_hook "$(json "$C" "$WT")")"
 done
 
-OUT=$(json 'npm run test:coverage' "$WT" | "$HOOK" 2>&1 >/dev/null)
+OUT=$(json 'npm run test:coverage' "$WT" | bash "$HOOK" 2>&1 >/dev/null)
 check "the coverage block says record and go on" 1 \
   "$([[ $OUT == *"Do not ask main: if you still need that check, record it as a main-only deferred item (one line under ## Main-only (deferred) in the evidence file) and go on." ]] && echo 1 || echo 0)"
 for C in 'npm run test:guards' 'npm run test:unit' 'npm --prefix web run test:unit' 'npx vitest run'; do
   check "the whole-suite block for '$C' says do not ask main" 1 \
-    "$(json "$C" "$WT" | "$HOOK" 2>&1 >/dev/null | grep -c 'Do not ask main: if you still need that check')"
+    "$(json "$C" "$WT" | bash "$HOOK" 2>&1 >/dev/null | grep -c 'Do not ask main: if you still need that check')"
 done
-OUT=$(json 'npm run test:guards' "$WT" | "$HOOK" 2>&1 >/dev/null)
+OUT=$(json 'npm run test:guards' "$WT" | bash "$HOOK" 2>&1 >/dev/null)
 check "the block is one line naming rule 3 and what to run" 1 \
   "$([ "$(printf '%s\n' "$OUT" | wc -l)" = 1 ] && [[ $OUT == *"_implementer-tools.md rule 3"*"Run instead: npm run test:changed"* ]] && echo 1 || echo 0)"
 check "worktree: a quoted mention is text, not a run" 0 \
   "$(run_hook "$(json 'git commit -m "stop npm run test:guards in worktrees"' "$WT")")"
 check "worktree: the PostToolUse half never blocks" 0 \
-  "$(json 'npm run test:guards' "$WT" | "$HOOK" --record-complete >/dev/null 2>&1; echo $?)"
+  "$(json 'npm run test:guards' "$WT" | bash "$HOOK" --record-complete >/dev/null 2>&1; echo $?)"
 check "worktree: RERUN=1 does not excuse a full suite" 2 \
   "$(run_hook "$(json 'RERUN=1 npm run test:guards' "$WT")")"
 
@@ -331,7 +332,7 @@ check "worktree: RERUN=1 does not excuse a full suite" 2 \
 # offers, so a builder never tries the whole web test:unit first.
 NOTE="$(dirname "$HOOK")/../briefs/_implementer-tools.md"
 # The command as the refusal gives it (that it gives one is checked above, by "that block names the raw one-file command").
-WEB_ONE=$(json 'npm --prefix web run test:unit -- src/a.test.tsx' "$WT" | "$HOOK" 2>&1 >/dev/null | sed -n 's/.*one file: \(.* -- \).*/\1/p')
+WEB_ONE=$(json 'npm --prefix web run test:unit -- src/a.test.tsx' "$WT" | bash "$HOOK" 2>&1 >/dev/null | sed -n 's/.*one file: \(.* -- \).*/\1/p')
 check "the tools note gives the same one-file web command" 1 "$([ -n "$WEB_ONE" ] && grep -qF -- "$WEB_ONE" "$NOTE" && echo 1 || echo 0)"
 
 # Python puts the working directory first on sys.path under -c, so a shlex.py in
@@ -340,7 +341,7 @@ PLANT="$TMP/plant"
 mkdir -p "$PLANT"
 printf 'open("%s/pwned", "w").close()\nraise SystemExit(0)\n' "$TMP" > "$PLANT/shlex.py"
 PLANTED=$(json 'npm run test:unit 2>&1 | tail -9')
-PLANT_RC=$(cd "$PLANT" && { echo "$PLANTED" | "$HOOK" >/dev/null 2>&1; echo "$PLANTED" | "$HOOK" --record-complete >/dev/null 2>&1; echo "$PLANTED" | "$HOOK" >/dev/null 2>&1; echo $?; })
+PLANT_RC=$(cd "$PLANT" && { echo "$PLANTED" | bash "$HOOK" >/dev/null 2>&1; echo "$PLANTED" | bash "$HOOK" --record-complete >/dev/null 2>&1; echo "$PLANTED" | bash "$HOOK" >/dev/null 2>&1; echo $?; })
 check "a shlex.py in the working directory is not imported" 1 "$([ ! -e "$TMP/pwned" ] && echo 1 || echo 0)"
 check "the guard still blocks a finished rerun with a shlex.py planted" 2 "$PLANT_RC"
 
@@ -356,7 +357,7 @@ echo 'export const c = 1;' > "$GWT/changed.ts"
 git -C "$GWT" add changed.ts; git -C "$GWT" -c user.email=t@t -c user.name=t commit -q -m work
 echo x > "$GWT/a b.txt"; for i in $(seq -w 1 20); do echo x > "$GWT/f$i.txt"; done
 jsid() { jq -cn --arg cmd "$1" --arg cwd "$2" --arg sid "$3" 'if $sid == "" then {tool_input:{command:$cmd},cwd:$cwd} else {tool_input:{command:$cmd},cwd:$cwd,session_id:$sid} end'; }
-advice() { echo "$1" | "$HOOK" 2>/dev/null | jq -r '.hookSpecificOutput.additionalContext // empty'; }
+advice() { echo "$1" | bash "$HOOK" 2>/dev/null | jq -r '.hookSpecificOutput.additionalContext // empty'; }
 TC='npm run typecheck:backend'
 OUT1=$(advice "$(jsid "$TC" "$GWT" s-one)")
 check "first suite run in a worktree prints the diffstat: the committed change is named" 1 "$(grep -c 'changed.ts' <<<"$OUT1")"
@@ -366,18 +367,19 @@ check "the second suite run of the same session prints nothing" "" "$(advice "$(
 check "a new session prints it again" 1 "$(advice "$(jsid "$TC" "$GWT" s-two)" | grep -c 'changed.ts')"
 check "the advice never blocks" 0 "$(run_hook "$(jsid 'npm run typecheck:infra' "$GWT" s-three)")"
 check "main's checkout prints nothing" "" "$(advice "$(jsid "$TC" "$REPO" s-main)")"
-check "a reviewer pane prints nothing" "" "$(echo "$(jsid "$TC" "$GWT" s-rev)" | CONVEYOR_REVIEWER=1 "$HOOK" 2>/dev/null | jq -r '.hookSpecificOutput.additionalContext // empty')"
+check "a reviewer pane prints nothing" "" "$(echo "$(jsid "$TC" "$GWT" s-rev)" | CONVEYOR_REVIEWER=1 bash "$HOOK" 2>/dev/null | jq -r '.hookSpecificOutput.additionalContext // empty')"
 check "a pane with no session_id (Codex) prints nothing" "" "$(advice "$(jsid "$TC" "$GWT" "")")"
 # Two first runs released together in one session: O_EXCL lets exactly one create the marker. Five rounds, each a fresh
 # session, so a test-then-create marker would show 2 in at least one of them.
-CONC=""
+# One check a round. The rounds send one command and differ only in session id, which a FAIL line does not print, so
+# the round number is in the check's name.
 for r in 1 2 3 4 5; do
   P=$(jsid "$TC" "$GWT" "conc$r")
-  for k in a b; do ( while [ ! -e "$TMP/gate$r" ]; do :; done; echo "$P" | "$HOOK" > "$TMP/conc$r$k" 2>/dev/null ) & done
+  for k in a b; do ( while [ ! -e "$TMP/gate$r" ]; do :; done; echo "$P" | bash "$HOOK" > "$TMP/conc$r$k" 2>/dev/null ) & done
   : > "$TMP/gate$r"; wait
-  CONC="$CONC $(cat "$TMP/conc$r"a "$TMP/conc$r"b | grep -c additionalContext)"
+  check "two first suite runs released at once in one session print the diffstat exactly once (round $r)" 1 \
+    "$(cat "$TMP/conc$r"a "$TMP/conc$r"b | grep -c additionalContext)"
 done
-check "two first suite runs released at once in one session print the diffstat exactly once" " 1 1 1 1 1" "$CONC"
 
 # The post-fix runner is a tracked script (seg_script does not inspect it), so it is keyed only by its npm name.
 echo 'export const a = 5;' > "$REPO/a.ts"
@@ -393,7 +395,7 @@ srg_heredoc_rc() { # command -> the hook's exit status
   root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
   state=$(mktemp -d)
   jq -cn --arg c "$1" --arg cwd "$root" '{cwd:$cwd,tool_input:{command:$c}}' |
-    CONVEYOR_HOOK_FIRE_LOG="$state/fires.jsonl" CONVEYOR_SUITE_RUNS_DIR="$state/state" "$HOOK" >/dev/null 2>&1 || rc=$?
+    CONVEYOR_HOOK_FIRE_LOG="$state/fires.jsonl" CONVEYOR_SUITE_RUNS_DIR="$state/state" bash "$HOOK" >/dev/null 2>&1 || rc=$?
   rm -rf "$state"
   echo "$rc"
 }

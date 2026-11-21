@@ -49,7 +49,8 @@ cp "$SRC/.claude/dashboard/login.html" "$T/out/"
   || { echo "FAIL: the Board's page server on $PY cannot run (does its virtualenv lack its packages? run conveyor.sh setup)" >&2; exit 1; }
 
 PASS=0 FAIL=0
-check() { if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3)"; fi }
+. "$(dirname "${BASH_SOURCE[0]}")/lib/said.sh" # a FAIL line names the hook's last input (start notes each payload)
+check() { if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3)$(said)"; fi }
 # start <source> <project> [<option value>|-] [<port>]: runs the registered command as a session start in <project>;
 # prints its output and errors, then what the opener was given (one line each, after a moment for the background
 # opener). How long the hook held the start, in milliseconds, is left in $T/took.
@@ -58,7 +59,7 @@ start() {
   local t0=${EPOCHREALTIME/./}
   local opt=(); [ "${3:--}" = - ] || opt=("CLAUDE_PLUGIN_OPTION_boardAutoOpen=$3")
   # printf, not jq: the source and the mktemp path hold no character JSON escapes.
-  printf '{"hook_event_name":"SessionStart","source":"%s","cwd":"%s"}' "$1" "$2" \
+  printf '{"hook_event_name":"SessionStart","source":"%s","cwd":"%s"}' "$1" "$2" | said_tee \
     | (cd "$2" && env -u CLAUDE_PLUGIN_OPTION_boardAutoOpen "${opt[@]}" PATH="$T/bin:$PATH" CLAUDE_PROJECT_DIR="$2" \
         CLAUDE_PLUGIN_ROOT="$SRC" XDG_DATA_HOME="$T/data" XDG_CONFIG_HOME="$T/config" CONVEYOR_DASHBOARD_PORT="${4:-$PORT}" \
         bash -c "$CMD" 2>&1)

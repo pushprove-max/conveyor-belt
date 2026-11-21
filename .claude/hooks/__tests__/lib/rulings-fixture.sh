@@ -16,5 +16,6 @@ jq -n --arg s "$T/state" '{stateDir: $s, rulingPrefix: "q"}' > "$T/config/convey
 export XDG_CONFIG_HOME=$T/config
 unset CLAUDE_PROJECT_DIR CONVEYOR_MAIN
 PASS=0 FAIL=0
-check() { if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3)"; fi }
+. "$(dirname "${BASH_SOURCE[0]}")/said.sh" # a FAIL line names the hook's last input
+check() { if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3)$(said)"; fi }
 finish() { echo; echo "$PASS passed, $FAIL failed"; [ "$FAIL" -eq 0 ]; }

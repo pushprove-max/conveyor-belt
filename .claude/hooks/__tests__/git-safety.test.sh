@@ -355,7 +355,8 @@ gs_remove() { # <session> <path> [<flag>]: the forced remove's exit code
 gs_add() { [ "$ON" = 1 ] || return 0; G worktree add -q --detach "$@" >/dev/null 2>&1; }
 gs_edit() { [ "$ON" = 1 ] || return 0; echo t-edit >>"$1/f"; }
 GS_GOT="" GS_WANT=""
-gs_case() { GS_GOT+="$1=$2 " GS_WANT+="$1=$3 "; } # <label> <got> <want>
+# <label> <got> <want>; a case that differs carries the input of its own hook call, as the check names only the last.
+gs_case() { GS_WANT+="$1=$3 "; if [ "$2" = "$3" ]; then GS_GOT+="$1=$2 "; else GS_GOT+="$1=$2$(said) "; fi; }
 
 # Orderings. S's own clean worktree: passes, in every spelling of its path.
 gs_add "$F/own" HEAD

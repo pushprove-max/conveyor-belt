@@ -45,12 +45,15 @@ HOOKS="$(cd "$(dirname "$0")/.." && pwd)"
 HOOK="$HOOKS/new-test-file-guard.sh"
 DISPATCH="$HOOKS/codex-dispatch.sh"
 PASS=0 FAIL=0
+# A FAIL line names the hook's last input. The hook runs under timeout, which lib/said.sh's bash cannot see, so each
+# call notes its payload with said_in.
+. "$(dirname "${BASH_SOURCE[0]}")/lib/said.sh"
 
 check() {
   if [ "$2" = "$3" ]; then
     PASS=$((PASS + 1)); echo "ok   $1"
   else
-    FAIL=$((FAIL + 1)); echo "FAIL $1 (expected $2, got $3)"
+    FAIL=$((FAIL + 1)); echo "FAIL $1 (expected $2, got $3)$(said)"
   fi
 }
 
@@ -58,7 +61,7 @@ check_match() { # label, regex, text
   if printf '%s' "$3" | grep -qE "$2"; then
     PASS=$((PASS + 1)); echo "ok   $1"
   else
-    FAIL=$((FAIL + 1)); echo "FAIL $1 (no /$2/ in: $3)"
+    FAIL=$((FAIL + 1)); echo "FAIL $1 (no /$2/ in: $3)$(said)"
   fi
 }
 
@@ -142,11 +145,15 @@ write() { # file_path, content -> payload
 
 # `timeout` so a guard that reads forever FAILS its case (exit 124) instead of
 # hanging this script and every runner above it.
+guard() { # payload [hook file]: the hook's run on the payload, noted for the FAIL lines
+  said_in "$1"; timeout 20 bash "${2:-$HOOK}" <<<"$1"
+}
+
 run() { # payload -> 0 silent success, 2 visible advisory success, other failure
   local out err rc
   out=$(mktemp "$TMP/native-XXXXXX")
   err=$(mktemp "$TMP/advisory-XXXXXX")
-  CLAUDE_PROJECT_DIR="$REPO" timeout 20 bash "$HOOK" >"$out" 2>"$err" <<<"$1"; rc=$?
+  CLAUDE_PROJECT_DIR="$REPO" guard "$1" >"$out" 2>"$err"; rc=$?
   if [ "$rc" -ne 0 ]; then
     echo 99
   elif [ -s "$out" ]; then
@@ -161,7 +168,7 @@ run() { # payload -> 0 silent success, 2 visible advisory success, other failure
 }
 
 run_err() { # payload -> stderr
-  CLAUDE_PROJECT_DIR="$REPO" timeout 20 bash "$HOOK" 2>&1 >/dev/null <<<"$1"
+  { CLAUDE_PROJECT_DIR="$REPO" guard "$1" >/dev/null; } 2>&1
 }
 
 NEW="$REPO/src/services/__tests__/second-transfer.test.ts"
@@ -182,9 +189,9 @@ MAIN_DUP=$(write "$MAIN/src/services/__tests__/second-transfer.test.ts" \
   "import { createTransfer } from '../transfer-service';
 ")
 check "the same duplicate is allowed from the main checkout" 0 \
-  "$(CLAUDE_PROJECT_DIR="$MAIN" timeout 20 bash "$HOOK" >/dev/null 2>&1 <<<"$MAIN_DUP"; echo $?)"
+  "$(CLAUDE_PROJECT_DIR="$MAIN" guard "$MAIN_DUP" >/dev/null 2>&1; echo $?)"
 check "standing down in the main checkout is SILENT" "" \
-  "$(CLAUDE_PROJECT_DIR="$MAIN" timeout 20 bash "$HOOK" 2>&1 <<<"$MAIN_DUP")"
+  "$(CLAUDE_PROJECT_DIR="$MAIN" guard "$MAIN_DUP" 2>&1)"
 
 # ...but a tree that is NO CHECKOUT AT ALL is not a main checkout. Both git
 # questions answer nothing there, and two empty strings compare equal -- which
@@ -197,13 +204,13 @@ echo 'export const createTransfer = () => 1;' > "$NOGIT/src/services/transfer-se
 printf "import { createTransfer } from '../transfer-service';\n" \
   > "$NOGIT/src/services/__tests__/transfer-service.test.ts"
 check "a duplicate outside any checkout is allowed with advice" 0 \
-  "$(CLAUDE_PROJECT_DIR="$NOGIT" timeout 20 bash "$HOOK" >/dev/null 2>&1 <<<"$(write \
+  "$(CLAUDE_PROJECT_DIR="$NOGIT" guard "$(write \
      "$NOGIT/src/services/__tests__/second-transfer.test.ts" \
      "import { createTransfer } from '../transfer-service';
-")"; echo $?)"
-NOGIT_OUT=$(CLAUDE_PROJECT_DIR="$NOGIT" timeout 20 bash "$HOOK" 2>/dev/null <<<"$(write \
+")" >/dev/null 2>&1; echo $?)"
+NOGIT_OUT=$(CLAUDE_PROJECT_DIR="$NOGIT" guard "$(write \
   "$NOGIT/src/services/__tests__/second-transfer.test.ts" \
-  "import { createTransfer } from '../transfer-service';")")
+  "import { createTransfer } from '../transfer-service';")" 2>/dev/null)
 check "outside-checkout advice is native-visible" true \
   "$(printf '%s' "$NOGIT_OUT" | jq -r '.systemMessage | contains("transfer-service.test.ts")')"
 
@@ -220,7 +227,7 @@ rm -f "$REPO/node_modules"
 ln -sfn "$(cd "$HOOKS/../.." && pwd -P)/node_modules" "$BASE/node_modules"
 check_match "a worktree with no packages advises from the shared checkout" \
   "transfer-service\.test\.ts" \
-  "$(cd "$REPO" && CLAUDE_PROJECT_DIR="$REPO" timeout 20 bash "$WT_HOOK" 2>&1 >/dev/null <<<"$DUP")"
+  "$(cd "$REPO" && CLAUDE_PROJECT_DIR="$REPO" guard "$DUP" "$WT_HOOK" 2>&1 >/dev/null)"
 rm -f "$BASE/node_modules" "$WT_HOOK"
 ln -sfn "$(cd "$HOOKS/../.." && pwd -P)/node_modules" "$REPO/node_modules"
 
@@ -479,11 +486,11 @@ patch_payload() { # add-file path, body -> payload
 }
 
 dispatch() { # payload -> exit code
-  env "CODEX_HOME=$CODEX_HOME_DIR" "XDG_CACHE_HOME=$TMP/cache" \
+  said_in "$1"; env "CODEX_HOME=$CODEX_HOME_DIR" "XDG_CACHE_HOME=$TMP/cache" \
     bash "$DISPATCH" >/dev/null 2>&1 <<<"$1"; echo $?
 }
 dispatch_err() { # payload -> stderr
-  env "CODEX_HOME=$CODEX_HOME_DIR" "XDG_CACHE_HOME=$TMP/cache" \
+  said_in "$1"; env "CODEX_HOME=$CODEX_HOME_DIR" "XDG_CACHE_HOME=$TMP/cache" \
     bash "$DISPATCH" 2>&1 >/dev/null <<<"$1"
 }
 

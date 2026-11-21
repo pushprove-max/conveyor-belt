@@ -7,7 +7,8 @@
 set -u
 HOOK="$(cd "$(dirname "$0")/.." && pwd)/literal-secret-warning.sh"
 PASS=0 FAIL=0
-check() { if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3)"; fi }
+. "$(dirname "${BASH_SOURCE[0]}")/lib/said.sh" # a FAIL line names the hook's last input
+check() { if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3)$(said)"; fi }
 # warn | quiet | rc=<n>: the hook is advisory, so any non-zero exit is its own failure.
 run() { # <file> <content>
   local out rc
