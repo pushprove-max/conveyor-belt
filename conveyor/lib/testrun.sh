@@ -77,18 +77,19 @@ testfails() { # <test output file> <exit> [the pack's field of the run's command
     def failcase: [capture("^FAIL \\[(?<c>[^\\]]+)\\]: "), capture("^\\s*not ok [0-9]+ (- )?(?<c>.*\\S)") , capture("^\\s*✖ (?<c>.+) \\([0-9.]+ms\\)$")][0].c;
     (if $log.files == [] and $cmd != "" then $cmd else null end) as $only
     | [inputs] as $ls | ($log.order | map(length)) as $ns
-    # $at: of each failing case, [file, line] of the first place a stack after a failure line of it names in the
-    # worktree (FRAMEJQ); a passed case line or a `== ` line ends the search of a failure line. $fat: of each file of
-    # the run, the first such place after its `== ` line that no failing case took (a file whose failure names no case,
-    # as python3 runs a unittest file). With no FRAMERX (testfails() read alone, with none of the globals of this
-    # file) there is no place, and stand-ins of the defs of FRAMEJQ, which read no frame, let the program compile.
+    # $at: of each failing case, [file, line] of the first place a stack after its failure line names in the worktree
+    # (FRAMEJQ); a passed case line or a `== ` line of a file of the run (not the `=== ` of an assertion node prints before
+    # the stack) ends the search. $fat: of each file of the run, the first such place after its `== ` line that no
+    # failing case took (a file whose failure names no case, as python3 runs a unittest file). With no FRAMERX (no
+    # globals of this file) there is no place, and stand-ins of the defs of FRAMEJQ, which read no frame, compile.
     | (if $wd == "" or $rx == "" then {at: {}, fat: {}} else
         def put($a): if .c then .at[.c] = $a | .c = null elif .f and (.fat[.f] | not) then .fat[.f] = $a else . end;
         reduce ($ls[], "\u0000") as $l ({c: null, f: null, py: null, at: {}, fat: {}};
           (if .py and pyend($l) then put(.py) | .py = null else . end)
           | ($l | failcase) as $c | ($l | frame) as $fr
+          | ([$l | split("== ")[1:][] | named($log.order | flatten) // empty] | last) as $mf
           | if $c then .c = (if .at[$c] then null else $c end) | .py = null
-            elif ($l | contains("== ")) then .c = null | .py = null | .f = ([$l | split("== ")[1:][] | named($log.order | flatten) // empty] | last)
+            elif $mf then .c = null | .py = null | .f = $mf
             elif ($l | test("^\\s*(ok |✔ )")) then .c = null
             elif $fr == null or $fr.f == null then .
             elif $fr.py then .py = [$fr.f, $fr.n]

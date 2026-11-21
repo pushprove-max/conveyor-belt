@@ -51,17 +51,19 @@ EOF
 }
 # Done when 4 (#1084). Bug it catches: a test that fails with no message of its own (node's assert.ok(false): its
 # report printed only `ERR_ASSERTION actual: false expected: true`) gave a failure report with no command or line, so
-# it could not be read without a run again. A real node run of a stub test file in the worktree, whose only assertion
-# is assert.ok(false): its case's line names the file, the line and that line's text, read from the failure's stack.
+# it could not be read without a run again. #1152: node's reporter prints the failed expression before its stack, and
+# the `== ` in its `=== ` was read as a file line, which ended the case's search: the case had no place. A real node run
+# of a stub test file in the worktree, whose only assertion is assert.ok(1 + 1 === 3): its case's line names the file,
+# the line and that line's text, read from the failure's stack.
 t_testfailsat() {
   mkdir -p "$T/$CASE/wt" && printf '%s\n' "import assert from 'node:assert';" "import test from 'node:test';" \
-    "test('stub', () => {" '  assert.ok(false);' '});' > "$T/$CASE/wt/a.test.mjs" || fail "the stub test file could not be made"
+    "test('stub', () => {" '  assert.ok(1 + 1 === 3);' '});' > "$T/$CASE/wt/a.test.mjs" || fail "the stub test file could not be made"
   cat > "$T/$CASE/cmd" <<'EOF'
 cd wt && echo "== a.test.mjs" | tee -a "$CONVEYOR_TEST_LOG/a.log"
 node --max-old-space-size=4096 --test a.test.mjs; echo "-- FAIL a.test.mjs" >> "$CONVEYOR_TEST_LOG/a.log"; exit 1
 EOF
   f=$(logfails 1 | jq -r '.files[] | select(.file == "a.test.mjs") | .cases[] | select(.name == "stub") | .line') || fail "the failures could not be read"
-  [[ $f == *" (at a.test.mjs:4: assert.ok(false);)" ]] || fail "the case's line does not give the assertion's file, line and text: $f ($(cat "$T/$CASE/wt.test"))"
+  [[ $f == *" (at a.test.mjs:4: assert.ok(1 + 1 === 3);)" ]] || fail "the case's line does not give the assertion's file, line and text: $f ($(cat "$T/$CASE/wt.test"))"
 }
 # #1084, E5 of its review. Bug it catches: only JavaScript stacks were read, so a Python test file that failed (python3
 # on a unittest file, as the release's suite runs one; its failure names no case) had no place in its failure report.
