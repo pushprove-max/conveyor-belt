@@ -105,6 +105,23 @@ t_linttrigger() {
   jq -e -s '[.[].result] == ["pass", "no files", "pass"]' "$T/$CASE/out" > /dev/null || fail "the *.md command's result is not no files: $(cat "$T/$CASE/out")"
 }
 
+# Bug: the lint read refs/heads/main, not the pack's defaultBranch, to list the trigger files main added after the card's
+# base: in a project whose branch is trunk, the files of every command with triggers "could not be listed" and the gate
+# ended in an error. Here main is trunk and adds the trigger file .lintrc after the card's base: the command is skipped, not an error.
+t_lintbranch() {
+  lintsetup
+  lintcmds '[{"files": ["*.c"], "triggers": [".lintrc"], "run": "$L {files}"}]'
+  tune '.defaultBranch = "trunk"'
+  git -C "$R" branch -m main trunk || fail "main's branch was not renamed"
+  lintwt a.c one
+  echo two > "$W/a.c"
+  echo new > "$R/.lintrc" && git -C "$R" add -f .lintrc && git -C "$R" commit -qm trigger || fail "main's trigger file"
+  lintin 'lintcheck "$W" "$(git -C "$W" rev-parse HEAD)"'
+  [ "$RC" = 0 ] || fail "the lint of a project whose branch is trunk ended with exit $RC: $(cat "$T/$CASE/out")"
+  jq -e -s 'length == 1 and .[0].result == "skipped" and (.[0].why | startswith(".lintrc,"))' "$T/$CASE/out" > /dev/null \
+    || fail "the trigger file main added on trunk was not found: $(cat "$T/$CASE/out")"
+}
+
 # Bug: a change to the pack's lint field (a new command, a rule turned on) is checked on the changed files alone. Every
 # command runs on every file of the tree it matches, though the change touches none of them.
 t_lintfield() {

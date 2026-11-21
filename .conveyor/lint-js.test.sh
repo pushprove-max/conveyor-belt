@@ -19,7 +19,7 @@ g() { git -C "$R" "$@"; }
 
 # Main: the test pack with this pack's ESLint command and lint policy, the script and config, panels/landed.js (which
 # has old complexity findings, so the gate makes a base run), and a vendor file.
-mkdir -p "$R/.conveyor" "$R/.claude/dashboard/panels" "$R/.claude/dashboard/vendor" "$T/cards" && g init -q \
+mkdir -p "$R/.conveyor" "$R/.claude/dashboard/panels" "$R/.claude/dashboard/vendor" "$T/cards" && g init -q -b main \
   && g config user.email t@example.com && g config user.name t || exit 1
 jq --slurpfile p "$ROOT/.conveyor/project.json" '.lint = ($p[0].lint | .commands |= map(select(.run // "" | test("lint-js"))))' \
   "$ROOT/conveyor/lib/test-pack.json" > "$R/.conveyor/project.json" || exit 1

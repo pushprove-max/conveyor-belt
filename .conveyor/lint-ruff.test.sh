@@ -20,7 +20,7 @@ fn() { local i; echo "$1"; for ((i = 1; i <= $2; i++)); do printf '    if a == %
 
 # Main: the test pack with this pack's ruff command and lint policy, ruff.toml, dashboard_server.py, and c.py with f
 # under the complexity limit of 10 (complexity 9) and g over it (13).
-mkdir -p "$R/.conveyor" "$R/.claude/scripts" "$T/cards" && g init -q && g config user.email t@example.com && g config user.name t || exit 1
+mkdir -p "$R/.conveyor" "$R/.claude/scripts" "$T/cards" && g init -q -b main && g config user.email t@example.com && g config user.name t || exit 1
 jq --slurpfile p "$ROOT/.conveyor/project.json" '.lint = ($p[0].lint | .commands |= map(select(.run // "" | test("ruff check"))))' \
   "$ROOT/conveyor/lib/test-pack.json" > "$R/.conveyor/project.json" || exit 1
 [ "$(jq '.lint.commands | length' "$R/.conveyor/project.json")" = 1 ] || { echo "not ok - the pack has no one ruff command"; exit 1; }
