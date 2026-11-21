@@ -136,7 +136,7 @@ test('Compare: the readings are asked for once for a pair, once more when a pick
   w.reply = BH.reply(flip('It read the review.'));
   await pick(w, 'cmp-b', 'arm:conveyor-codex-claude');
   assert.deepEqual(sent().map((a) => a.slice(0, 1)), [['diff']], 'a picker returning to a pair whose reading was null asks once more');
-  assert.equal(reading(), 'It read the review.', 'the second ask gave the reading');
+  assert.equal(reading(), 'It read the review.', 'the third ask for the pair gave the reading');
   await pick(w, 'cmp-b', 'arm:solo');
   await pick(w, 'cmp-b', 'arm:conveyor-codex-claude');
   assert.deepEqual(sent(), [], 'a reading that came is not asked for again');
