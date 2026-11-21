@@ -103,7 +103,7 @@ test('Compare: the four boxes add up to the shared tasks, and the verdict change
   assert.deepEqual(fours(w), [['Both resolve', 35], ['Only Conveyor v1.9.0', 2], ['Only Conveyor, Codex builds v1.9.0', 0], ['Neither', 13]]);
   assert.equal(sum(), 50);
   assert.equal(text(q(w, '.bench-vv')), 'Not told apart yet. The difference is 2 tasks, under the noise of 10.');
-  assert.equal(text(q(w, '.bench-vw')), 'If the gap held, about 500 tasks would show it, more than the set has, so treat the two as equal.');
+  assert.equal(text(q(w, '.bench-vw')), 'If the gap held, about 1250 tasks would show it, more than the set has, so treat the two as equal.');
   await pick(w, 'cmp-a', 'ver:v1.8.0');
   await pick(w, 'cmp-b', 'arm:solo');
   assert.deepEqual(fours(w), [['Both resolve', 25], ['Only Conveyor v1.8.0', 10], ['Only Claude alone', 0], ['Neither', 15]]);

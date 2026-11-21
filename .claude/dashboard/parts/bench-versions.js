@@ -257,7 +257,7 @@
     const { n, d } = x, [win, lose] = d > 0 ? [fa, fb] : [fb, fa], N = K.noiseSaid(n), sig = K.told(d, n), size = K.setSize(), need = d ? Math.ceil(2 / ((Math.abs(d) / n) ** 2)) : null;
     if (sig) return K.verdict(d > 0 ? 'ok' : 'bad', 'Head to head', `${d > 0 ? A.label : Bs.label} is better: it resolves ${Math.abs(d)} more of ${n}. That is past the noise of ${N}.`,
       `It costs ${K.usd(win.cost)} against ${K.usd(lose.cost)} for the ${n} tasks, and takes ${K.fmtMin(win.wall)} against ${K.fmtMin(lose.wall)}.`);
-    const w = need === null ? 'They resolve the same number of these tasks.' : `If the gap held, about ${Math.min(need, size)} tasks would show it${need > size ? ', more than the set has, so treat the two as equal' : ''}.`;
+    const w = need === null ? 'They resolve the same number of these tasks.' : `If the gap held, about ${need} tasks would show it${need > size ? ', more than the set has, so treat the two as equal' : ''}.`;
     return K.verdict('quiet', 'Head to head', `Not told apart yet. The difference is ${K.plural(Math.abs(d), 'task')}, under the noise of ${N}.`, w);
   }
   function differ(A, Bs, x) {
