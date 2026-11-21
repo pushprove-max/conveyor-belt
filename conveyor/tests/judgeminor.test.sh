@@ -13,7 +13,7 @@
 MINOR3='[P3] a.txt:1 the name says count but holds a sum. Proof: a.txt:1'
 # Bugs: an accepted P3 with the rule P3 on is listed only (as with the rule off) and causes no fix round, or the fix
 # is not told it, or is told a P3 the judge declined; the record does not count it as a P3. A NO-GO's fix round and
-# landing after it are t_judgeaccept's whole card: here the review is judged alone (judgeone).
+# the GO after it are t_judgeaccept's: here the review is judged alone (judgeone).
 t_minoron() {
   judging "[$(issue 7 2026-01-01 P1)]"
   printf '%s\n' "$MINOR3" '[P3] a.txt:2 odd spacing. Proof: a.txt:2' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"

@@ -38,11 +38,12 @@ rev() { st "select(.issue == $1 and .step == \"review\") | $2"; } # <issue> <jq 
 # its prompt in $STUB/asked), and the engine shell is made as `conveyor.sh run` makes one. What judged() prints is in
 # <worktree>.fields, with the verdict and counts the card's review line takes from the review after minor(), as
 # card() does; the review it leaves is <worktree>.review, and with fix, for a NO-GO, what its fix round is told, as
-# card() gives it (numbered(), fixlines()), is <worktree>.fix. Only t_judgeoff runs a whole card, for the snapshot of
-# the review lines card() writes; the snapshot of judged reviews over a fix round is judgesnap.test.sh's.
+# card() gives it (numbered(), fixlines()), is <worktree>.fix. Called again on the same issue, it keeps the worktree
+# and judges the next review there, as card() judges a card's next review. No case here runs a whole card; the
+# snapshot of judged reviews over a fix round is judgesnap.test.sh's.
 judgeone() { # <issue> <review file | -> [fix]
   local wt=$T/$CASE/cards/c$1
-  mkdir -p "$T/$CASE/cards" && git -C "$R" worktree add -q --detach "$wt" && (cd "$wt" && . "$STUB/build") && git -C "$wt" add -A \
+  mkdir -p "$T/$CASE/cards" && { [ -d "$wt" ] || { git -C "$R" worktree add -q --detach "$wt" && (cd "$wt" && . "$STUB/build") && git -C "$wt" add -A; }; } \
     && { [ "$2" = - ] || cp "$2" "$wt.review"; } || fail "the worktree of c$1 could not be made"
   ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
     && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names && { [ "$2" != - ] || review "$wt" "body of $1" > /dev/null; } \
@@ -145,24 +146,24 @@ t_ste80pin() {
     || fail "rules/ste80-LICENSE does not name commit $c, or does not hold LICENSE of that commit and the notice for the part it adapts"
 }
 
-# Bugs: an accepted finding causes no fix; the fix session is told the findings the judge declined too; a finding
-# declined earlier on the issue is not given to the next judge. Card c7's two reviews, each judged as card() judges
-# it (judged(), then minor()) and then decided (afterrun, review.test.sh), with no card run: the first goes to a fix
-# round, told its findings with their ids (fixlines()); the second, its one finding declined, lands with none filed.
+# Bugs: an accepted finding causes no fix; the fix session is told the findings the judge declined too, or the
+# declined one is counted; a finding declined earlier on the issue is not given to the next judge. Card c7's two
+# reviews, each judged as card() judges it (judgeone: judged(), then minor()), with no card run: the first is a NO-GO
+# whose fix round is told its accepted finding alone (fixlines()); the second, its one finding declined, is a GO.
 t_judgeaccept() {
-  local j='judged c7 7 "$wt" "body of 7" "{}" > "$T/$CASE/judged.$pass" && minor "$wt" && counts "$wt.review" > "$T/$CASE/counts.$pass"'
-  judging "[$(issue 7 2026-01-01)]"; fx_wt 'echo two >> a.txt' c.txt base
-  printf '%s\n' '[P1] a.txt:1 wrong word' '[P2] a.txt:2 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
+  judging "[$(issue 7 2026-01-01)]"
+  printf '%s\n' '[P1] a.txt:1 wrong word' '[P2] a.txt:2 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
   printf '%s\n' '[P1] a.txt:12 another word' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
   printf '%s\n' 'F1 ACCEPT: the word is wrong for every reader. Cost to every card: one more test run' 'F2 DECLINE: a matter of taste' > "$STUB/judge.1"
   echo 'F1 DECLINE: no such line' > "$STUB/judge.2"
-  afterrun "$(issue 7 2026-01-01)" "$j" 'fixlines "$wt" "$(numbered "$wt")" > "$T/$CASE/fix"'
-  [ "$(jq -c '[.res, .after, .last]' <<<"$AFTER")" = '["NO-GO","fix",""]' ] || fail "an accepted finding did not send the card to a fix round: $AFTER"
-  grep -qxF 'E1 [P1] a.txt:1 wrong word' "$T/$CASE/fix" && ! grep -q 'a nit' "$T/$CASE/fix" || fail "the fix prompt does not hold the accepted finding alone: $(grep 'a.txt:' "$T/$CASE/fix")"
-  [ "$(jq -r '.judge.accepted[0] | [.reason, .cost] | join(" | ")' "$T/$CASE/judged.1")" = "the word is wrong for every reader | one more test run" ] && [ "$(jq -c . "$T/$CASE/counts.1")" = '{"P0":0,"P1":1,"P2":0,"P3":0}' ] \
-    || fail "the accepted finding's reason and cost are not recorded, or the declined one is counted: $(cat "$T/$CASE/judged.1" "$T/$CASE/counts.1")"
-  cp "$STUB/review.2" "$FXWT.review"; afterrun "$(issue 7 2026-01-01)" "pass=2; $j"
-  [ "$(jq -c '[.res, .after, .last]' <<<"$AFTER")" = '["GO","go",""]' ] || fail "a review whose one finding the judge declined did not land the card with nothing filed: $AFTER"
+  judgeone 7 "$STUB/review.1" fix
+  [ "$(jf 7 .verdict)" = NO-GO ] && [ -s "$T/$CASE/cards/c7.fix" ] || fail "an accepted finding did not leave the review a NO-GO with a fix round: $(jr 7)"
+  grep -qxF 'E1 [P1] a.txt:1 wrong word' "$T/$CASE/cards/c7.fix" && ! grep -q 'a nit' "$T/$CASE/cards/c7.fix" || fail "the fix prompt does not hold the accepted finding alone: $(grep 'a.txt:' "$T/$CASE/cards/c7.fix")"
+  [ "$(jf 7 '.judge.accepted[0] | [.reason, .cost] | join(" | ")')" = "the word is wrong for every reader | one more test run" ] && [ "$(jf 7 '.counts | tojson')" = '{"P0":0,"P1":1,"P2":0,"P3":0}' ] \
+    || fail "the accepted finding's reason and cost are not recorded, or the declined one is counted: $(jf 7 '[.judge, .counts] | tojson')"
+  # The second review of the same card (judgeone keeps its worktree): its judge is the issue's second.
+  judgeone 7 "$STUB/review.2"
+  [ "$(jf 7 '[.verdict, (.judge.declined | length)] | join(" ")')" = "GO 1" ] || fail "a review whose one finding the judge declined is not a GO: $(jr 7)"
   grep -qxF -- '- [P2] a.txt:2 a nit (declined: a matter of taste)' "$STUB/judge-asked" || fail "the second judge was not given the finding declined before on this issue"
   [ "$(jq -r '"\(.by): \(.finding)"' "$ST/declined.jsonl" | tr '\n' ,)" = 'judge: [P2] a.txt:2 a nit,judge: [P1] a.txt:12 another word,' ] \
     || fail "the declined list does not hold the declined findings alone, each once: $(cat "$ST/declined.jsonl" 2>&1)"
@@ -234,13 +235,14 @@ t_judgeoff() {
   [ "$(jf 7 .verdict)" = NO-GO ] && cmp -s "$STUB/review" "$T/$CASE/cards/c7.review" && grep -qxF 'E1 [P1] a.txt:1 wrong word' "$T/$CASE/cards/c7.fix" \
     || fail "with the judge off, a NO-GO did not stand as the reviewer wrote it, with its finding told to the fix: $(jr 7)"
   out=$(kindsbrief) && [ -z "$out" ] || fail "the reviewer was asked to tag kinds with the judge off: $out"
-  # loop: the review lines the snapshot reads are card()'s own, written inline in it (no function to call): only a
-  # card run shows the reason it records for an unjudged NO-GO and for the GO after its fix round.
-  echo "$NOGO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
-  loop run >/dev/null || fail "run exited non-zero"
-  [ ! -e "$STUB/judges" ] && [ "$(rev 7 .result | tr '\n' ' ')" = "NO-GO GO " ] || fail "the card's run asked a judge, or its reviews were not a NO-GO then a GO"
-  [ "$(loop snapshot --fresh | jq -c '.landed[0].rounds | map(.judge)')" = '[{"ran":false,"why":"the judge is off"},{"ran":false,"why":"the review had no finding"}]' ] \
-    || fail "the snapshot does not say the judge did not run on the reviews, with why (it is off; no finding)"
+  # What the snapshot's rows (rows(), jq/rows.jq) say of the judge on this review: its line is judged()'s fields with
+  # the review's text less its unrecorded lines (VERDICT, USER-VISIBLE) as the reason, as card() writes it (line()),
+  # so only the finding line can make the rows say the judge is off. A GO with no finding is judgesnap.test.sh's.
+  out=$(wt=$T/$CASE/cards/c7; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
+    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names \
+    && line c7 7 review NO-GO "$(jq -c --arg r "$(grep -Ev "$UNRECORDED" "$wt.review")" 'del(.verdict, .counts) + {reason: $r, tail: $r}' "$wt.fields")" > "$wt.line" \
+    && rows "$wt.line" | jq -c '[.. | objects | select(.step? == "review") | .judge] | unique') || fail "rows() could not read the review line"
+  [ "$out" = '[{"ran":false,"why":"the judge is off"}]' ] || fail "the snapshot does not say the judge did not run on the review because it is off: $out"
 }
 
 # Bugs: the judge is switched on or off only by a commit to the pack, so the owner cannot switch it from the Board;
