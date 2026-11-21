@@ -219,7 +219,7 @@ test('Live run, 7 arms on 50 tasks going: the verdict, the figures, the grid wit
   assert.equal(text(q(w, '.bench-answers')), 'This page answers: What is the run doing now, will it finish in time, and is it on budget?');
   assert.deepEqual(heads(w), [`${BH.LIVE} · 50 tasks × 7 arms`, 'Tasks by arm', 'Score so far', 'Events']);
   assert.equal(text(q(w, '.bench-vv')), 'On time and on budget. 73 of 350 task runs done; about 7.6 h left.');
-  assert.equal(text(q(w, '.bench-vw')), 'Spent $61.24 of the $293 estimate. The usage guard is not reached.');
+  assert.equal(text(q(w, '.bench-vw')), 'Spent $61.24 of the $293 estimate. The usage guard\'s week left: not kept.');
   assert.deepEqual(stats(w).map((s) => s.slice(0, 2)), [['73/350', 'Task runs done'], ['7.6 h', 'Left, at this pace'], ['$61.24', 'Spent so far'], ['0', 'Not run']]);
   assert.equal(stats(w)[2][2], '21% of the estimate');
   const cell = (t, a) => page(w).querySelector(`.bench-gc[data-task="${t}"][data-arm="${a}"]`), LT = BH.LIVE_TASKS;
@@ -250,7 +250,7 @@ test('Live run: reused results are no trial in the time left, and cost nothing i
   // The 2 hours and $61.24 spent are the set's, for 73 trials: on 3 trials they are behind time and over budget.
   assert.equal(text(q(w, '.bench-vv')), 'Behind time and over budget. 73 of 350 task runs done; about 184.0 h left.');
   // (1.92 + 1.38 + 0.61 + 0.44 + 0.93 + 0.31 + 0.27) * 40 - 0.31 = $234; pricing every task: $293.
-  assert.equal(text(q(w, '.bench-vw')), 'Spent $61.24 of the $234 estimate. The usage guard is not reached.');
+  assert.equal(text(q(w, '.bench-vw')), 'Spent $61.24 of the $234 estimate. The usage guard\'s week left: not kept.');
 });
 
 // Bug it guards (review E9): a run with --again runs every task again, yet its tasks with a kept result were counted as
@@ -263,7 +263,7 @@ test('Live run: a run with --again counts no kept result as reused', async () =>
   line.again = true; set.shows[BH.LIVE].run.again = true;
   const w = await opened(set);
   assert.equal(text(q(w, '.bench-vv')), 'On time and on budget. 73 of 350 task runs done; about 7.6 h left.');
-  assert.equal(text(q(w, '.bench-vw')), 'Spent $61.24 of the $293 estimate. The usage guard is not reached.');
+  assert.equal(text(q(w, '.bench-vw')), 'Spent $61.24 of the $293 estimate. The usage guard\'s week left: not kept.');
 });
 
 // Bug it guards: a task one arm could not run (its harness could not grade it) counted as a loss in that arm's score and
@@ -284,7 +284,7 @@ test('Live run: a task an arm did not run is left out for every arm, so all are 
 test('Live run, 2 runs of 1 task and none going: the last run, each arm on its task, and its task to open', async () => {
   const w = await opened(BH.few(), 'run');
   assert.deepEqual(heads(w), ['No run goes now', BH.FEW1]);
-  assert.match(text(q(w, '.bench-vv')), /^The last run ended \d{2}\/\d{2}\/\d{4}, \d{1,2}:\d{2} [AP]M, after 9 minutes\.$/);
+  assert.match(text(q(w, '.bench-vv')), /^The last run ended \d{2}\/\d{2}\/\d{4} at \d{1,2}:\d{2} [AP]M, after 9 minutes\.$/);
   assert.equal(text(q(w, '.bench-vw')), 'It ran 1 task with 4 arms. All 4 resolved it.');
   assert.deepEqual(rows(q(w, '.bench-t')), [['Conveyor, Codex builds v1.7.0', 'resolved', '3', '81k', '3.2', '$0.50'], ['Claude + Ponytail', 'resolved', '2', '64k', '0.9', 'not priced'],
     ['Claude, then a review', 'resolved', '2', '13k', '0.8', 'not priced'], ['Claude alone', 'resolved', '1', '2k', '0.5', 'not priced']]);
@@ -293,22 +293,16 @@ test('Live run, 2 runs of 1 task and none going: the last run, each arm on its t
   assert.equal(text(q(w, '.bench-vk')), `django · ${BH.FEW_TASK}`);
 });
 
-// Bug it guards (#646 review E2): a run whose process was gone with no end written read as ended, with no Stop, so its
-// end was never recorded and its containers stayed. It says interrupted and keeps Stop, which records its end.
-test('Live run: a run whose process is gone keeps Stop, which records its end', async () => {
+// Bug it guards (#646 review E2): a run whose process was gone with no end written read as ended. It says interrupted
+// and that no end was recorded. The mockup's Live run page has no Stop for a run that is not going (#1216), so it has none.
+test('Live run: a run whose process is gone says it was interrupted with no end recorded, and has no Stop', async () => {
   const set = BH.few(), r = set.hist.runs[0];
   Object.assign(r, { state: 'stopped', gone: true, ended: null });
   set.shows[BH.FEW1].run = r;
   const w = await opened(set, 'run');
   assert.match(text(q(w, '.bench-vv')), /^The last run is interrupted\./);
   assert.match(text(q(w, '.bench-vw')), /Its process ended with no end recorded\.$/);
-  w.reply = BH.reply(`conveyor: run ${BH.FEW1} was interrupted: its process had ended.`);
-  act(bp(w), 'stop-run').click();
-  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['stop', BH.FEW1]]);
-  Object.assign(r, { ended: iso(T0) });
-  await settle(); await settle();
-  assert.equal(act(bp(w), 'stop-run'), null, 'no Stop once its end is recorded');
-  assert.match(text(q(w, '.bench-said')), /^Run interrupted: its process had ended\./);
+  assert.equal(act(bp(w), 'stop-run'), null, 'a run that is not going has no Stop');
 });
 
 // Bug it guards (review E10): a run the build machine refused (no Docker: swe_run records state refused and why) read
@@ -341,28 +335,23 @@ test('Task, 7 arms on one task of the study: the verdict, each arm, the card\'s 
   assert.deepEqual(spans.map((s) => s.dataset.step), ['build', 'review', 'fix', 'review', 'test', 'landed']);
   assert.deepEqual(spans.map((s) => Math.round(parseFloat(s.style.left))), [0, 52, 62, 71, 81, 90], 'the build took 11 of the 21 minutes, each step after it 2');
   assert.equal(spans[0].textContent, 'build · 300k tok');
-  assert.match(text(q(w, 'details[data-fold^="review-"]')), /Review 1: NO-GO\. \[P1\] reverse_related\.py:310 through_fields is not made hashable/);
+  // The mockup's fold holds the review's own text: no "Review 1:" label; a review with none kept (the GO) says not kept.
+  const reviews = Array.from(q(w, 'details[data-fold^="review-"]').querySelectorAll('p'), text);
+  assert.match(reviews[0], /^\[P1\] reverse_related\.py:310 through_fields is not made hashable/);
+  assert.equal(reviews[1], 'not kept');
   assert.deepEqual(Array.from(page(w).querySelectorAll('.bench-vd'), (d) => d.textContent), ['1.4.0', '1.5.0', '1.6.0', '1.7.0', '1.8.0', '1.9.0']);
-  assert.deepEqual(kv(box(w, 'This task over time')), [['Repository', 'django'], ['Difficulty', 'easy (resolved by 7 of 7 arms)'], ['Patch size', '1 file, +7 −3'], ['Task image', 'not kept'], ['Hidden tests', '2 FAIL_TO_PASS, 40 PASS_TO_PASS']]);
+  assert.deepEqual(kv(box(w, 'This task over time')), [['Repository', 'django'], ['Difficulty', 'easy (resolved by 7 of 7 arms)'], ['Patch size', '1 file, +7 −3'], ['Task image', 'not kept']]);
 });
 
-// Bug it guards: a result kept before the grade's report showed its hidden tests as 0 of 0, and with 1 task run the
-// page called the task easy (review E13). The verdict says nothing can be told yet, and each figure not kept says so.
-test('Task, 2 runs of 1 task: nothing can be told yet of the task, and the hidden tests and the reference fix say not kept', async () => {
+// Bug it guards: a result kept before the grade's report showed its hidden tests as 0 of 0. With 1 task run, the Task
+// page says what the mockup does (the verdict, the Difficulty line) with no "nothing can be told yet"; each figure not
+// kept says not kept.
+test('Task, 2 runs of 1 task: the verdict and Difficulty read as on any page, and the hidden tests and the reference fix say not kept', async () => {
   const w = await opened(BH.few(), 'task');
-  assert.ok(q(w, '.bench-verdict').classList.contains('bench-verdict-quiet'));
-  assert.equal(text(q(w, '.bench-vw')), '5 of 5 arms resolve it. Nothing can be told yet: with 1 task run, there is no other task to set this one against.');
+  assert.ok(q(w, '.bench-verdict').classList.contains('bench-verdict-ok'));
+  assert.equal(text(q(w, '.bench-vw')), '5 of 5 arms resolve it. An easy task: it tells the arms apart only on cost and time.');
   assert.deepEqual(rows(q(w, '.bench-arms')).map((r) => r[3]), ['not kept', 'not kept', 'not kept', 'not kept', 'not kept']);
-  assert.deepEqual(kv(box(w, 'This task over time')).slice(1), [['Difficulty', 'not told yet (resolved by 5 of 5 arms)'], ['Patch size', 'not kept'], ['Task image', 'not kept'], ['Hidden tests', 'not kept']]);
-});
-
-// Bug it guards (review): with 2 tasks every arm graded, the verdict said there was no other task to set this one
-// against. It says the 2 tasks are too few to tell an easy task from a hard one.
-test('Task, 2 runs of 2 tasks: nothing can be told yet, as 2 tasks are too few, not as there is no other', async () => {
-  const set = BH.few();
-  [BH.FEW1, BH.FEW2].forEach((id) => { const t = set.shows[id].tasks; t.push({ ...t[0], id: 'django__django-11001' }); });
-  const w = await opened(set, 'task');
-  assert.equal(text(q(w, '.bench-vw')), '5 of 5 arms resolve it. Nothing can be told yet: 2 tasks every arm graded are too few to tell an easy task from a hard one.');
+  assert.deepEqual(kv(box(w, 'This task over time')).slice(1), [['Difficulty', 'easy (resolved by 5 of 5 arms)'], ['Patch size', 'not kept'], ['Task image', 'not kept']]);
 });
 
 // ---- Task map ----
@@ -392,7 +381,7 @@ test('Task map, 50 of 500 tasks run: the coverage verdict, one square a task by 
 test('Task map, 2 runs of 1 task: 1 of 500 tasks has results, its square opens it, the rest are not run yet', async () => {
   const w = await opened(BH.few(), 'map');
   assert.equal(text(q(w, '.bench-vv')), '1 of 500 tasks have results. 0 of them no arm resolves.');
-  assert.equal(text(q(w, '.bench-vw')), 'Nothing can be told yet of where an arm wins or loses. Django is 46% of the set, so a run of the first 1 task leans on Django.');
+  assert.equal(text(q(w, '.bench-vw')), 'Django is 46% of the set, so a run of the first 1 task leans on Django. The hard tasks are where a new version can gain the most.');
   assert.deepEqual(Array.from(page(w).querySelectorAll('button.bench-sq'), (b) => [b.dataset.t, b.className]), [[BH.FEW_TASK, 'bench-sq bench-sq-all']]);
   assert.equal(page(w).querySelectorAll('span.bench-sq[data-t]').length, 499);
 });
@@ -410,9 +399,9 @@ test('Plan a run, the study\'s arms: the questions set the tasks and arms, and B
     ['Codex alone', 'ready', '$0.44', '5', '50'], ['Claude + Superpowers', 'expired', '$0.93', '9', '50'], ['Claude alone', 'ready', '$0.31', '3', '50'], ['Claude + Caveman', 'changed', '$0.27', '3', '50']]);
   assert.equal(text(q(w, '.bench-pdet')), 'Shows a difference of 10 tasks (20%) or more');
   assert.equal(text(q(w, '.bench-before .bench-hsub')), '2 arms × 50 tasks');
-  assert.equal(text(q(w, '.bench-before .bench-callout')), 'Good for arms: a gap of 20% or more shows, and Conveyor against Claude alone was 24 points in the last study. Two Conveyor versions differed by 2 to 40 points in the last study: a 2-point gap needs 5000 tasks.');
+  assert.equal(text(q(w, '.bench-before .bench-callout')), 'Good for arms: a gap of 20% or more shows, and Conveyor against Claude alone was 24 points in the last study. Two Conveyor versions differ by 2 to 40 points: a 40-point gap needs 13 tasks.');
   assert.deepEqual(kv(q(w, '.bench-before')), [['Cost', '$0.00 at list prices'], ['Machine time', '0 min tasks run one after another'], ['Sessions', '0 usual, 0 at worst'],
-    ['Kept results', '100 task runs reused at no cost'], ['Usage guard', 'not reached'], ['Belt', 'Cards and the run share the machine. Each task\'s container gets 4 CPUs and 8g.']]);
+    ['Kept results', '100 task runs reused at no cost'], ['Usage guard', 'not reached now; the run stops if it is'], ['Belt', 'Cards and the run share the machine. Each task\'s container gets 4 CPUs and 8g.']]);
   assert.equal(q(w, '.bench-cmd').textContent, 'conveyor.sh bench swe 50 --arm conveyor --arm solo');
   act(bp(w), 'q-works').click();
   assert.equal(q(w, '.bench-cmd').textContent, 'conveyor.sh bench swe 5 --arm conveyor');
@@ -471,10 +460,10 @@ test('Plan a run: no Conveyor version pick and no Run settings fold, and Start s
   act(bp(w), 'start').click();
   assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['run', '50', '--arm', 'conveyor', '--arm', 'solo']], 'the default settings: no --engine and no --settings');
   await settle();
-  assert.match(text(q(w, '[data-said="start"]')), /run r20261109T170000-9 started/, 'the answer to Start shows beside it');
+  assert.equal(q(w, '[data-said="start"]'), null, 'the mockup has no receipt under Start when it is accepted');
   assert.equal(q(w, '.bench-why'), null, 'no why-not note under Start');
   // Bug it guards: a Start the build machine refuses before it records a run (the usage guard moved since the page read it)
-  // showed nothing, as the page had no place for its answer.
+  // showed nothing; with the receipts gone, a refusal still says why, so a failed Start is not silent.
   w.reply = { ok: false, status: 409, text: () => Promise.resolve('conveyor: the usage guard is reached') };
   act(bp(w), 'start').click();
   await settle();
@@ -500,8 +489,11 @@ test('Plan a run, 2 runs of 1 task: the arms with their state and kept results, 
 // Start receipt and why-not note, and notes such as "Left out, not priced". No page of any fixture has one; Versions and
 // Compare load their commits and readings by themselves. One case for each fixture, as each is paid for once.
 const NOT_THERE = ['Read the commits', 'Ask for the readings', 'builds with it', 'Run settings', 'Left out, not priced', 'Steps not kept', 'No Conveyor arm ran', 'none run twice',
-  'No event yet', 'The task list of the set is not read', 'Nothing can be told yet from 1 task', 'Watch run', 'Open its results'];
-const NO_CONTROL = ['[data-act="read-commits"]', '[data-act="cmp-read"]', '[data-act="plan-engine"]', '[data-act^="set-"]', '[data-fold="plan-settings"]', '[data-act="watch-run"]', '.bench-why'];
+  'No event yet', 'The task list of the set is not read', 'Nothing can be told yet from 1 task', 'Watch run', 'Open its results',
+  // #1216: the edge-state sentences, notes and run tools the mockup does not have.
+  'its default rules', 'results kept before the grade', 'no Conveyor arm ran', 'No task flipped', 'A flipped task is in the table', 'A group of fewer than 5 cards',
+  'The drift watch has not run. Run', 'No run has started yet', 'The card\'s steps are not kept', 'No review is kept', 'No run of the Conveyor arm has this task', 'is not reached', 'reached: no run starts', 'in the last study: a', 'Every arm is told apart', 'These runs:', 'This run:', 'Records its end and removes'];
+const NO_CONTROL = ['[data-act="read-commits"]', '[data-act="cmp-read"]', '[data-act="plan-engine"]', '[data-act^="set-"]', '[data-fold="plan-settings"]', '[data-act="watch-run"]', '.bench-why', '.bench-runacts'];
 async function noExtras(set) {
   const w = await opened(set);
   for (const p of ['score', 'versions', 'compare', 'run', 'task', 'map', 'plan']) {

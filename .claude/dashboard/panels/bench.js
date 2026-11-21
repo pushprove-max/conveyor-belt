@@ -74,8 +74,8 @@
   // A cost `bench swe` recorded: {usd, state}, known, estimate (an agent arm's tokens at its model's list price), partial
   // or unknown; anything else (a result from before costs were recorded) is unknown, never $0.
   const costOf = (c) => { const o = obj(c); return o && ['known', 'estimate', 'partial'].includes(o.state) && num(o.usd) !== null ? { usd: o.usd, state: o.state } : { usd: null, state: 'unknown' }; };
-  // A cost as a cell shows it: an estimate or a partial (only some work priced, so the figure is a subtotal) says so.
-  const costSaid = (c) => { const k = costOf(c); return `${usd(k.usd)}${k.state === 'estimate' || k.state === 'partial' ? ` ${k.state}` : ''}`; };
+  // A cost as a cell shows it: the figure alone, as the mockup does, whatever its state.
+  const costSaid = (c) => usd(costOf(c).usd);
   // The cost of several cells: usd null when one is not priced in whole (a total that left it out would read as the whole).
   function costSum(cells) {
     let total = 0, est = false;
@@ -445,13 +445,6 @@
       readHist(true);
     });
   }
-  // Archive and Delete of the runs a page shows, with their answer under them.
-  function runTools(runs) {
-    const row = h('div', 'bench-row bench-runacts');
-    if (!runs.length) return '';
-    row.append(h('span', 'bench-note', `${runs.length === 1 ? 'This run' : 'These runs'}: ${runs.map((r) => r.id).join(', ')}`), ...runActs(runs), saidAt(RUNS_SAID));
-    return row;
-  }
 
   // ---- the page row and the panel ----
   function pages() {
@@ -468,7 +461,7 @@
     said, graded, costOf, costSaid, costSum, apart, lossOf, testsOf, testsSaid, linesOf, isTest, isConveyor, colName, verOf, paint, h, chip, button, add,
     answers, verdict, box, grid, stat, note, callout, dot, armSaid, table, fold, kv, bar, ciBar, svg, say, saidAt, go, openTask, live, readHist,
     readRun, hist, allRuns, runsOf, armsOf, colsOf, keysOf, benchOf, setSize, reading, studyOf, armOf, figsOf, versionsOf, moved, send, ask,
-    stopRun, runActs, runTools, RUNS_SAID, stateOf, elapsed, draw: () => draw() };
+    stopRun, runActs, RUNS_SAID, stateOf, elapsed, draw: () => draw() };
   const P = {};
   ['bench-score', 'bench-versions', 'bench-run', 'bench-plan'].forEach((name) => Object.assign(P, window.DASH_APP.use(name, K)));
   function draw() {

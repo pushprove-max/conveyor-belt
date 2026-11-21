@@ -46,7 +46,7 @@ test('Scoreboard, 7 arms on 50 tasks: the mockup\'s texts, no heading chip when 
   assert.deepEqual(Array.from(box(w, 'Patch quality').querySelectorAll('th'), (t) => t.title).filter(Boolean),
     ['At most twice the size of the reference fix', 'Changes a file the reference fix does not touch', 'Adds a test that fails on the base commit and passes with the patch']);
   assert.deepEqual(kv(box(w, 'Patch quality')).filter(([k]) => /^(Lint clean|Proves the fix)$/.test(k)),
-    [['Lint clean', 'No new finding from ruff (its default rules) in the Python files the patch changes.'], ['Proves the fix', 'The patch adds a test that fails on the base commit and passes with the patch.']]);
+    [['Lint clean', 'No new ruff finding in the Python files the patch changes.'], ['Proves the fix', 'The patch adds a test that fails on the base commit and passes with the patch.']]);
   assert.equal(Array.from(q(w, '.bench-leader').querySelectorAll('th')).find((t) => text(t) === 'Broke tests').title, 'Tasks where the patch broke tests that passed before');
   assert.match(text(box(w, 'Leaderboard').querySelector('.bench-note')), /^Click an arm to compare it with Conveyor\. "From tokens"/);
   // Select all ticks every run of the history and shows the selection bar; ticked again, it clears them.
@@ -62,13 +62,13 @@ test('Scoreboard, 7 arms on 50 tasks: the mockup\'s texts, no heading chip when 
 });
 
 // Bug it guards: the Scoreboard of 2 runs of 1 task reworded the mockup's notes (the leaderboard note, the patch note,
-// the callout on what the results keep) and its "never checked" line. The patch note says what the patches kept show.
+// the callout on what the results keep) and its "never checked" line. The patch note says what the patches kept show,
+// in the mockup's form, but says only what the summary shows: the same code files by the same line counts, not "the same fix".
 test('Scoreboard, 2 runs of 1 task: the mockup\'s leaderboard note, patch note, callout and next-run line', async () => {
   const w = await opened(BH.few());
   const notes = Array.from(page(w).querySelectorAll('.bench-note'), text);
-  assert.ok(notes.includes('Real, from the patches the results keep. All five changed the same code files by +1 −1. Only Conveyor, Codex builds v1.7.0 and Conveyor v1.7.0 added a test.'), notes.join(' | '));
-  // The agent arms here are not priced and the table shows no estimate: the note must not say it prices them from tokens.
-  assert.ok(notes.includes('"Not priced": the results keep no usage that can be priced.'), notes.join(' | '));
+  assert.ok(notes.includes('Real, from the patches the results keep. All five changed the same code files by the same line counts; only Conveyor, Codex builds v1.7.0 and Conveyor v1.7.0 added a test.'), notes.join(' | '));
+  assert.ok(notes.includes('"Not priced": agent arms report no usage by model today.'), notes.join(' | '));
   assert.equal(text(q(w, '.bench-callout-warn')), 'Every arm passed the task\'s hidden tests: that is all the results keep. The run records resolved yes or no and the patch, '
     + 'and the harness report with each fail-to-pass and pass-to-pass test is removed. To show these panels, the engine must keep that report. Size, strays and lint can be read from the patches the results already keep.');
   assert.ok(Array.from(box(w, 'Next run to make').querySelectorAll('li'), text).includes('The other 10 arms were never checked. A check costs 1 small task each.'));
@@ -84,25 +84,19 @@ test('Scoreboard, 2 runs of 1 task: the patch note claims only what the kept pat
   assert.ok(notes.includes('Real, from the patches the results keep.'), notes.join(' | '));
 });
 
-// Bug it guards: the leaderboard note said agent arms are not priced because they report no usage by model, while the table
-// above it showed an arm's estimate, priced by the engine from its tokens. The note says only what the Cost column shows.
-const EST_NOTE = '"Estimate": the agent reports no usage by model, so its tokens are priced at the model\'s list price.';
-test('Scoreboard, 2 runs of 1 task, one agent arm priced: the cost note says "estimate" and keeps "not priced" for the arms left unpriced', async () => {
+// Bug it guards: the mockup's Cost cell is the figure alone: the Board added " estimate" to an arm priced from its tokens,
+// and kept a note on "Estimate" for it. The "Not priced" note stays only while an arm in the table shows "not priced".
+test('Scoreboard, 2 runs of 1 task, one agent arm priced from its tokens: its Cost cell is the figure alone, and "Not priced" stays for the others', async () => {
   const set = BH.few();
   set.shows[BH.FEW1].tasks[0].cells.find((c) => c.arm === 'solo').cost = { usd: 0.0123, state: 'estimate' };
-  const notes = Array.from(page(await opened(set)).querySelectorAll('.bench-note'), text);
-  assert.ok(notes.includes(`"Not priced": the results keep no usage that can be priced. ${EST_NOTE}`), notes.join(' | '));
+  const w = await opened(set);
+  const cost = Array.from(q(w, '.bench-leader').querySelectorAll('tbody tr'), (r) => text(r.children[3]));
+  assert.ok(cost.includes('$0.01') && !cost.some((c) => /estimate/.test(c)), cost.join(' | '));
+  const notes = Array.from(page(w).querySelectorAll('.bench-note'), text);
+  assert.ok(notes.includes('"Not priced": agent arms report no usage by model today.') && !notes.some((n) => n.includes('Estimate')), notes.join(' | '));
 });
 
-test('Scoreboard, 2 runs of 1 task, every agent arm priced: the cost note says "estimate" and no "not priced"', async () => {
-  const set = BH.few();
-  set.shows[BH.FEW1].tasks[0].cells.filter((c) => c.arm !== 'conveyor-codex-claude').forEach((c) => { c.cost = { usd: 0.01, state: 'estimate' }; });
-  const notes = Array.from(page(await opened(set)).querySelectorAll('.bench-note'), text);
-  assert.ok(notes.includes(EST_NOTE), notes.join(' | '));
-  assert.ok(!notes.some((n) => n.includes('Not priced')), notes.join(' | '));
-});
-
-// Bug it guards: a cost note shown when no Cost cell reads "estimate" or "not priced" explains a label the table does not show.
+// Bug it guards: a cost note shown when no Cost cell reads "not priced" explains a label the table does not show.
 test('Scoreboard, 2 runs of 1 task, every cost known: no cost note', async () => {
   const set = BH.few();
   Object.values(set.shows).forEach((sh) => sh.tasks[0].cells.forEach((c) => { c.cost = { usd: 0.01, state: 'known' }; }));
@@ -111,15 +105,15 @@ test('Scoreboard, 2 runs of 1 task, every cost known: no cost note', async () =>
 });
 
 // Bug it guards: Versions said "engine <sha>" and a long belt line where the mockup names the version and says what
-// the figure did; its dates were the Board's long stamp where the mockup has month-day.
+// the figure did; its dates were the Board's long stamp where the mockup has month-day with a hyphen ("11-09").
 test('Versions, 6 versions on 50 tasks: the drift subtitle and belt line name the version, and the dates are month-day', async () => {
   const set = BH.study();
   const w = await opened(set, 'versions');
   assert.equal(text(box(w, 'Drift watch: the belt\'s own cards').querySelector('.bench-hsub')), 'Cards that ended on the engine commit before (61 cards) and on v1.9.0 (54 cards).');
   assert.equal(text(q(w, '.bench-vw')), 'On the belt, cards on v1.9.0 waited less (4 min against 12 min a card): that moved past its usual range. The other figures stayed in their usual range.');
-  const day = (iso) => { const d = new Date(iso); return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`; };
+  const day = (iso) => { const d = new Date(iso); return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
   const dates = Array.from(q(w, '.bench-versions').querySelectorAll('tbody tr'), (r) => text(r.children[1]));
-  assert.ok(dates.every((d) => /^\d{2}\/\d{2}$/.test(d)), dates.join(', '));
+  assert.ok(dates.every((d) => /^\d{2}-\d{2}$/.test(d)), dates.join(', '));
   assert.equal(dates[5], day(set.hist.runs[0].started), 'the newest version is dated by the start of its run');
 });
 
@@ -134,17 +128,19 @@ test('Compare, Conveyor against Conveyor, Codex builds: each bar is named by the
   assert.match(text(box(w, 'Where they differ').querySelector('.bench-note')), /and is labelled as such on the Board\.$/);
 });
 
-// Bug it guards: the Not run chip left out the task's pack that could not be set up, the container that could not be
-// made, the failed grading and the result that could not be kept, which the engine (swe_task in conveyor/bench/swe.sh)
-// also counts as "not run", so its list of causes looked complete but was not; the Tasks by arm legend limited the same
-// state to the image.
-test('Live run, a run going with 2 task runs not run: the chip on Not run names every cause the engine counts, and the legend says only Not run', async () => {
+// Bug it guards: the Not run chip listed every cause the engine counts (swe_task in conveyor/bench/swe.sh) whatever
+// failed, where the mockup says the one that did ("image fetch failed · tried again next run"); the legend said "Not run"
+// where the mockup says "Not run (image)".
+test('Live run, a run going with 2 task runs not run (an image and a grading): the chip names those causes in the mockup\'s words, and the legend says Not run (image)', async () => {
   const set = BH.live();
   set.hist.runs[0].cols[0].notRun = 2;
+  const cells = set.shows[BH.LIVE].tasks.slice(0, 2).map((t) => t.cells[0]);
+  Object.assign(cells[0], { resolved: false, result: 'not run: its Docker image could not be fetched or built' });
+  Object.assign(cells[1], { resolved: false, result: 'not run: the harness could not grade it (exit 1)' });
   const w = await opened(set, 'run');
   assert.deepEqual(Array.from(page(w).querySelectorAll('.bench-stat')).map((s) => [text(s.children[0]), text(s.children[1]), text(s.children[2])]).pop(),
-    ['2', 'Not run', 'image, repository, task pack, container, patch, grading or saving the result failed · tried again next run']);
-  assert.deepEqual(Array.from(page(w).querySelectorAll('.bench-legend span')).map(text).pop(), 'Not run');
+    ['2', 'Not run', 'image fetch failed, grading failed · tried again next run']);
+  assert.deepEqual(Array.from(page(w).querySelectorAll('.bench-legend span')).map(text).pop(), 'Not run (image)');
 });
 
 // Bug it guards: the Task page lacked the mockup's first step (split), its Task image fact and its three buttons, said
@@ -157,7 +153,7 @@ test('Task, 7 arms on one task of the study: the split step, Task image, and the
   const spans = Array.from(page(w).querySelectorAll('.bench-swim span'));
   assert.deepEqual([spans[0].dataset.step, text(spans[0]), spans[0].className, spans[1].dataset.step], ['split', 'split', 'bench-s7', 'build']);
   assert.match(text(page(w).querySelector('.bench-hsub')), /^From the real run r\S+ \(Conveyor v1\.9\.0\)\. Width is time\.$/);
-  assert.deepEqual(kv(box(w, 'This task over time')).map(([k]) => k), ['Repository', 'Difficulty', 'Patch size', 'Task image', 'Hidden tests']);
+  assert.deepEqual(kv(box(w, 'This task over time')).map(([k]) => k), ['Repository', 'Difficulty', 'Patch size', 'Task image']);
   assert.deepEqual(kv(box(w, 'This task over time')).find(([k]) => k === 'Task image'), ['Task image', 'not kept'], 'the results keep no image size');
   const tools = Array.from(page(w).querySelectorAll('.bench-tools button'));
   assert.deepEqual(tools.map((b) => [text(b), b.disabled]), [['Open the patch', false], ['Open the logs', true], ['Run this task again', true]]);
@@ -173,29 +169,35 @@ test('Task, 7 arms on one task of the study: the split step, Task image, and the
   assert.equal(page(w).querySelectorAll('.bench-tools ~ p').length, 0, 'the same button shuts them');
 });
 
-// Bug it guards: the "Good for arms" text copied the mockup's "2 to 10 points" and "200 tasks" for two Conveyor
-// versions, where the fixture's own versions differ by 2 to 40 points. The guard chip said the run "fits in the week
-// left" for 50 and 500 tasks alike, a forecast the engine cannot back: it sends only the guard's state as last read
-// (swe_history). The chip now gives that state, short, and for arms with no guard (a Codex arm, swe_guards) says none.
-test('Plan a run: the usage guard chip gives its last state, not a forecast, none for arms with no guard, and the gap between two Conveyor versions is the study\'s own', async () => {
+// Bug it guards: the "Good for arms" text said "differed ... in the last study" and quoted the smallest gap's task count
+// (2 points, 5000 tasks), where the mockup says "differ by 2 to 10 points: a 10-point gap needs 200 tasks", the largest
+// gap's; the guard chip said "fits in the week left", a forecast the history cannot give (it keeps only whether the guard
+// is reached now, and swe.sh checks it again before each trial), so it says "not reached now; the run stops if it is";
+// arms with no guard (a Codex arm, swe_guards) have none to say.
+test('Plan a run: the usage guard chip says the guard is not reached now, none for arms with no guard, and the gap between two Conveyor versions is the study\'s largest', async () => {
   const w = await opened(BH.study(), 'plan');
   const guard = () => kv(q(w, '.bench-before')).find(([k]) => k === 'Usage guard')[1];
   const tick = async (arm, on) => { const b = act(bp(w), `arm-${arm}`); b.checked = on; b.dispatchEvent(new w.Event('change')); await settle(); };
-  assert.equal(guard(), 'not reached');
-  assert.match(text(q(w, '.bench-before .bench-callout')), / Two Conveyor versions differed by 2 to 40 points in the last study: a 2-point gap needs 5000 tasks\.$/);
+  assert.equal(guard(), 'not reached now; the run stops if it is');
+  // A bigger plan does not change the chip: it is the state now, not a forecast of the plan's own use.
+  const n = act(bp(w), 'plan-n'); n.value = '500'; n.dispatchEvent(new w.Event('input'));
+  assert.equal(guard(), 'not reached now; the run stops if it is', 'a plan of 500 tasks: still the state now');
+  n.value = '50'; n.dispatchEvent(new w.Event('input'));
+  assert.equal(text(q(w, '.bench-before .bench-callout')),
+    'Good for arms: a gap of 20% or more shows, and Conveyor against Claude alone was 24 points in the last study. Two Conveyor versions differ by 2 to 40 points: a 40-point gap needs 13 tasks.');
   await tick('conveyor', false); await tick('solo', false); await tick('codex-sol', true);
   assert.equal(guard(), 'none for these arms', 'codex-sol alone: no arm has a guard');
   await tick('conveyor', true);
-  assert.equal(guard(), 'not reached', 'conveyor and codex-sol: Conveyor has a guard');
+  assert.equal(guard(), 'not reached now; the run stops if it is', 'conveyor and codex-sol: Conveyor has a guard');
 });
 
-// Bug it guards: with the guard reached, the chip said the run "would reach the guard; the run stops there" as a
-// forecast, while the guard is a state (the engine sends only reached or not) and Start is off, and no run starts.
-test('Plan a run, the usage guard reached: the chip says it is reached and Start is off', async () => {
+// Bug it guards: with the guard reached, the chip must say so as the state it is ("would reach" was a forecast), and Start
+// must stay off while no run can start.
+test('Plan a run, the usage guard reached: the chip says it is reached now and Start is off', async () => {
   const held = BH.study();
   held.hist.guard.conveyor = true;
   const w = await opened(held, 'plan');
-  assert.deepEqual(kv(q(w, '.bench-before')).find(([k]) => k === 'Usage guard'), ['Usage guard', 'reached: no run starts while it stands']);
+  assert.deepEqual(kv(q(w, '.bench-before')).find(([k]) => k === 'Usage guard'), ['Usage guard', 'reached now: no run starts']);
   assert.equal(act(bp(w), 'start').disabled, true, 'no run starts while the guard stands');
 });
 
@@ -248,12 +250,12 @@ test('Compare, Claude with Superpowers against Claude with Caveman: the bars kee
 test('Live run, Time set to 24-hour and Date to dd/mm/yyyy: the last run\'s end follows', async () => {
   const w = await opened(BH.few(), 'run', { time: '24-hour', date: 'dd/mm/yyyy' });
   const d = new Date(BH.few().hist.runs[0].ended), p2 = (n) => String(n).padStart(2, '0');
-  assert.equal(text(q(w, '.bench-vv')), `The last run ended ${p2(d.getDate())}/${p2(d.getMonth() + 1)}/${d.getFullYear()}, ${p2(d.getHours())}:${p2(d.getMinutes())}, after 9 minutes.`);
+  assert.equal(text(q(w, '.bench-vv')), `The last run ended ${p2(d.getDate())}/${p2(d.getMonth() + 1)}/${d.getFullYear()} at ${p2(d.getHours())}:${p2(d.getMinutes())}, after 9 minutes.`);
 });
 
 // Bug it guards: Versions wrote the month before the day whatever the Date in Customize was.
 test('Versions, Date set to dd/mm/yyyy: each version is dated day before month', async () => {
   const w = await opened(BH.study(), 'versions', { date: 'dd/mm/yyyy' });
   const n = new Date(BH.study().hist.runs[0].started), p2 = (x) => String(x).padStart(2, '0');
-  assert.equal(text(q(w, '.bench-versions').querySelectorAll('tbody tr')[5].children[1]), `${p2(n.getDate())}/${p2(n.getMonth() + 1)}`);
+  assert.equal(text(q(w, '.bench-versions').querySelectorAll('tbody tr')[5].children[1]), `${p2(n.getDate())}-${p2(n.getMonth() + 1)}`);
 });

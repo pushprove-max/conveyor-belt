@@ -60,7 +60,6 @@
       row.append(top, line);
       s.append(row);
     });
-    if (K.list(dr.small).length) s.append(K.note('A group of fewer than 5 cards is too small to mean anything: no figure is judged.'));
     s.append(K.note('A difference does not name its cause: the two groups built different issues.'));
     return s;
   }
@@ -115,10 +114,11 @@
     const d = pairOf(p, v), st = d && Array.isArray(d.steps) ? d.steps.filter((x) => typeof x === 'string') : [];
     return st.length ? st.join(', ') : '—';
   }
-  // The day a version's first run started, without its year, in the Date set in Customize ("11/09" or "09/11").
+  // The day a version's first run started, without its year, in the order of the Date set in Customize, with the
+  // mockup's hyphen ("11-09" or "09-11").
   function dayOf(t) {
     const ms = Date.parse(t || '');
-    return Number.isNaN(ms) ? 'not read' : K.B.ctx.stamp(ms, { date: true, time: false }).slice(0, 5);
+    return Number.isNaN(ms) ? 'not read' : K.B.ctx.stamp(ms, { date: true, time: false }).slice(0, 5).replace('/', '-');
   }
   function versionRow(v, i, vs) {
     const p = vs[i - 1], m = p ? K.moved(p, v) : null;
@@ -170,7 +170,6 @@
     const prev = vs[vs.length - 2], last = vs[vs.length - 1], fl = flipsOf(prev, last);
     const s = K.box(`Tasks that flipped from ${prev.v} to ${last.v}`, 'Each with the first step where the runs went apart and the engine commits that changed that step.');
     vs.slice(1).map((v, i) => [vs[i], v]).reverse().forEach(([p, v]) => wantDiff(p.col.key, v.col.key, true));
-    if (!fl.length) { s.append(K.note('No task flipped.')); return s; }
     s.append(K.table(['Task', 'Now', 'First step apart', 'Commits that changed it'], fl.map((f) => [{ v: f.id, c: 'mono' }, K.chip(f.now ? 'now resolved' : 'now unresolved', f.now ? 'ok' : 'bad'), f.apart, { v: commitsOf(prev, last, f.id), c: 'bench-small' }]),
       'bench-flips', (tr, i) => { tr.dataset.task = fl[i].id; tr.classList.add('bench-click'); tr.addEventListener('click', () => K.openTask(fl[i].id)); }));
     return s;
@@ -193,7 +192,7 @@
       return [K.answers(Q), K.verdict('quiet', 'Versions with results', `${v ? `Only ${v.v} has a result, on ${K.plural(v.n, 'task')}.` : 'No version has a result yet.'} No version can be compared yet.`, w), drift, willShow()].filter(Boolean);
     }
     return [K.answers(Q, 'Two sources: benchmark runs of each version, and the cards the belt builds anyway (the drift watch, at no cost).'), versionVerdict(vs),
-      K.grid('main', trendBox(vs), driftBox() || K.add(K.box('Drift watch: the belt\'s own cards'), K.note('The drift watch has not run. Run conveyor.sh bench drift on the build machine.'))), flipsBox(vs)];
+      K.grid('main', trendBox(vs), driftBox() || K.box('Drift watch: the belt\'s own cards', K.NOT_KEPT)), flipsBox(vs)];
   }
 
   // ---- Compare ----
@@ -282,7 +281,7 @@
     const v = !n ? `${A.label} and ${Bs.label} share no task they both graded.` : n === 1 && x.both ? `${A.label} and ${Bs.label} both resolved the one task they share.`
       : `On ${K.plural(n, 'task')}: ${A.label} resolved ${fa.k}, ${Bs.label} ${fb.k}.`;
     const took = (f) => `${K.plural(Math.round(K.sum(f.cs.map((c) => K.num(c.sessions) || 0))), 'session')}, ${K.kTok(f.tokens)} tokens and ${f.wall === null ? 'minutes not kept' : `${f.wall} minutes`}`;
-    const w = `${x.d ? 'A flipped task is in the table of the full page once there are 3 shared tasks or more.' : 'There is no flipped task to explain.'} The only difference is cost and time: ${A.label} took ${took(fa)}; ${Bs.label} took ${took(fb)}.`;
+    const w = `${x.d ? '' : 'There is no flipped task to explain. '}The only difference is cost and time: ${A.label} took ${took(fa)}; ${Bs.label} took ${took(fb)}.`;
     s.append(pair('Tokens', fa.tokens, fb.tokens, K.kTok, A, Bs), pair('Minutes', fa.wall, fb.wall, (m) => (K.num(m) === null ? K.NOT_KEPT : `${m} min`), A, Bs),
       pair('Sessions', fa.sessions, fb.sessions, (m) => (K.num(m) === null ? K.NOT_KEPT : String(Math.round(m * 10) / 10)), A, Bs));
     return [K.verdict('quiet', 'Head to head', v, w), s];
@@ -299,10 +298,9 @@
     if (!A || !Bs) return [top, K.note('Reading the runs of the two sides…')];
     const ids = Array.from(A.cells.keys()).filter((id) => K.graded(A.cells.get(id)) && K.graded(Bs.cells.get(id))), fa = K.figsOf(A, ids), fb = K.figsOf(Bs, ids);
     const pick = K.add(h('div', 'bench-row bench-pickers'), [picker('a', opts), h('span', 'bench-muted', 'against'), picker('b', opts), h('span', 'bench-muted bench-small', `on the ${K.plural(ids.length, 'task')} both ran`)]);
-    const tools = K.runTools(Array.from(new Set(A.runs.concat(Bs.runs))));
-    if (ids.length < 3) return [top, pick, ...fewCompare(A, Bs, ids, fa, fb), tools];
+    if (ids.length < 3) return [top, pick, ...fewCompare(A, Bs, ids, fa, fb)];
     const x = headToHead(A, Bs, ids);
-    return [top, pick, cmpVerdict(A, Bs, x, fa, fb), K.grid('main', differ(A, Bs, x), costBox(A, Bs, fa, fb, x.n, x.d)), tools];
+    return [top, pick, cmpVerdict(A, Bs, x, fa, fb), K.grid('main', differ(A, Bs, x), costBox(A, Bs, fa, fb, x.n, x.d))];
   }
   window.DASH_APP.part('bench-versions', function (shared) {
     K = shared;

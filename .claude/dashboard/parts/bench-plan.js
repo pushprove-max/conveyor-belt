@@ -13,8 +13,8 @@
   // Each question: its title, what it compares and the tasks it sets.
   const QS = { works: ['Does it work at all?', 'A new version or a changed arm: one total break shows.', 5], better: ['Is one better than another?', 'Two arms or two versions on the same tasks.', 50],
     value: ['Which arm gives the most per dollar?', 'Every ready arm, on the same tasks.', 30] };
-  const ARM_STATE = { ready: ['ready', 'ok'], checking: ['checking', 'quiet'], failed: ['preflight failed', 'bad'], unchecked: ['not checked', 'quiet'], changed: ['changed', 'warn'],
-    expired: ['expired', 'quiet'], 'not offered': ['not offered', 'quiet'] };
+  // The states the mockup shows; the engine's other state words show as the engine gives them.
+  const ARM_STATE = { ready: ['ready', 'ok'], changed: ['changed', 'warn'], expired: ['expired', 'quiet'] };
   const offered = () => K.armsOf().filter((a) => a.state !== 'not offered');
   // The arms a question ticks: the Conveyor arm; it and Claude alone; or every ready arm (6 at most).
   function armsFor(q) {
@@ -62,7 +62,7 @@
     const box = h('input'), [word, tone] = ARM_STATE[a.state] || [String(a.state), 'quiet'], k = keptOf(a, n), p = K.obj(a.perTask);
     box.type = 'checkbox'; box.checked = planOf().arms.has(a.name); box.disabled = a.state === 'not offered'; box.dataset.act = `arm-${a.name}`; box.setAttribute('aria-label', a.label);
     box.addEventListener('change', () => { if (box.checked) planOf().arms.add(a.name); else planOf().arms.delete(a.name); K.draw(); });
-    return [box, K.armSaid({ s: a.s, label: a.label }), [K.chip(word, tone), a.why ? h('span', 'bench-tie', a.why) : ''], { v: K.usd(perTask(a)), c: 'r' },
+    return [box, K.armSaid({ s: a.s, label: a.label }), K.chip(word, tone), { v: K.usd(perTask(a)), c: 'r' },
       { v: p && K.num(p.minutes) !== null ? String(p.minutes) : K.NOT_KEPT, c: 'r' }, { v: a.kind === 'conveyor' && !k ? '0 (new engine)' : String(k), c: 'r' }];
   }
   function armsTable(n) {
@@ -99,12 +99,12 @@
   // What the run can tell, for the question picked.
   function sizeSaid(q, n, arms) {
     const det = K.noised(n) / n, st = K.studyOf(), c = st.arms && st.arms.find((a) => a.arm === 'conveyor'), s = st.arms && st.arms.find((a) => a.arm === 'solo');
-    const was = c && s && st.n >= 3 ? `, and Conveyor against Claude alone was ${Math.round((K.figsOf(c, st.shared).k - K.figsOf(s, st.shared).k) / st.n * 100)} points in the last study` : '';
+    const pts = c && s && st.n >= 3 ? Math.round((K.figsOf(c, st.shared).k - K.figsOf(s, st.shared).k) / st.n * 100) : null;
     if (q === 'works') return n <= 10 ? ['Right size: enough to see a break, cheap.', 'ok'] : ['More than you need to see a break.', 'warn'];
     if (q === 'value') return arms.length < 3 ? ['Pick at least 3 arms to compare value.', 'warn'] : [`Ranks ${arms.length} arms. Arms closer than ${K.noisePct(n, true)} share a tier.`, 'ok'];
-    const g = versionGaps(), vers = !g ? ' A 10-point gap needs 200 tasks.' : ` Two Conveyor versions differed by ${g.min.pts === g.max.pts ? `${g.min.pts} points` : `${g.min.pts} to ${g.max.pts} points`} in the last study: a ${g.min.pts}-point gap needs ${g.min.need} tasks.`;
-    return det <= 0.2 ? [`Good for arms: a gap of ${K.noisePct(n)} or more shows${was}.${vers}`, 'ok']
-      : [`Too small: only a gap of ${K.noisePct(n)} or more shows${was}. Try 50 tasks or more.`, 'warn'];
+    const g = versionGaps(), vers = !g ? ' A 10-point gap needs 200 tasks.' : ` Two Conveyor versions differ by ${g.min.pts === g.max.pts ? `${g.min.pts} points` : `${g.min.pts} to ${g.max.pts} points`}: a ${g.max.pts}-point gap needs ${g.max.need} tasks.`;
+    return det <= 0.2 ? [`Good for arms: a gap of ${K.noisePct(n)} or more shows${pts === null ? '' : `, and Conveyor against Claude alone was ${pts} points in the last study`}.${vers}`, 'ok']
+      : [`Too small: only a gap of ${K.noisePct(n)} or more shows.${pts === null ? '' : ` Conveyor against Claude alone was ${pts} points.`} Try 50 tasks or more.`, 'warn'];
   }
   // The command the page shows and Start sends: the run's arguments after `run`, the tasks and the arms in order.
   const argsOf = (n, arms) => [String(n), ...arms.flatMap((a) => ['--arm', a.name])];
@@ -128,21 +128,24 @@
     b.disabled = !need.length || K.B.busy;
     return b;
   }
+  // The mockup has no line of receipt under Start and Check the arms first: only a refusal shows, so a failed action is not silent.
+  function refused(key) { const p = K.saidAt(key); return p && p.classList.contains('bench-said-bad') ? p : ''; }
   function before(n) {
     const arms = picked(), parts = arms.map((a) => costOf(a, n)), q = planOf().q, [said, tone] = sizeSaid(q, n, arms);
     const lim = K.obj(K.hist().limits) || {};
     const usd = parts.some((p) => p.usd === null) ? null : K.sum(parts.map((p) => p.usd)), mins = K.sum(parts.map((p) => p.minutes)), g = K.obj(K.hist().guard) || {};
     const held = arms.some((a) => a.guard && g[a.guard] === true), b = startButton(n, arms);
-    // The guard's last reported state, not a forecast of the run's usage; an arm with no guard (swe_guards: a Codex arm)
-    // has no state to give. A short chip: the chip keeps its text on one line (app.css .chip).
-    const guardSaid = held ? K.chip('reached: no run starts while it stands', 'bad') : arms.some((a) => a.guard) ? K.chip('not reached', 'ok') : K.chip('none for these arms', 'ok');
+    // The guard's state now, which is all the history keeps: swe.sh checks it again before each new trial, so it says no
+    // more than that (a bigger plan can still reach it). An arm with no guard (swe_guards: a Codex arm) has no state to
+    // give. A short chip: the chip keeps its text on one line (app.css .chip).
+    const guardSaid = held ? K.chip('reached now: no run starts', 'bad') : arms.some((a) => a.guard) ? K.chip('not reached now; the run stops if it is', 'ok') : K.chip('none for these arms', 'ok');
     const s = K.box('Before you start', `${K.plural(arms.length, 'arm')} × ${K.plural(n, 'task')}`, 'bench-before');
     s.append(K.callout(said, tone), K.kv([['Cost', [h('b', null, K.usd(usd)), ' ', h('span', 'bench-muted bench-small', 'at list prices')]], ['Machine time', [h('b', null, K.fmtMin(mins)), ' ', h('span', 'bench-muted bench-small', 'tasks run one after another')]],
       ['Sessions', `${K.sum(parts.map((p) => p.usual))} usual, ${K.sum(parts.map((p) => p.worst))} at worst`],
       ['Kept results', `${K.sum(parts.map((p) => p.reused))} task runs reused at no cost`],
       ['Usage guard', guardSaid],
       ['Belt', `Cards and the run share the machine. Each task's container gets ${K.num(lim.cpus) === null ? 'its' : lim.cpus} CPUs and ${lim.memory || 'its memory'}.`]]),
-    K.add(h('div', 'bench-row'), [b, checkButton(arms)]), K.saidAt('start'), K.saidAt('check'),
+    K.add(h('div', 'bench-row'), [b, checkButton(arms)]), refused('start'), refused('check'),
     K.add(h('p', 'bench-note'), ['The command it runs: ', h('span', 'mono bench-cmd', `conveyor.sh bench swe ${argsOf(n, arms).map(shellSaid).join(' ')}`)]));
     return s;
   }

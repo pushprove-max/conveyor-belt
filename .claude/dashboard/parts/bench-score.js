@@ -3,9 +3,9 @@
 // judged on the tasks every arm graded. With 3 shared tasks or more: the verdict against the noise of sqrt(2n) tasks, 4
 // figures, the leaderboard in tiers, the value chart, Hidden tests, Patch quality, Lines of code, Effort and steadiness,
 // where Conveyor loses tasks, what the arms agree on and the next run to make. With fewer, nothing can be told, and the
-// page shows what the runs have (the mockup's "Your data now"). The run history is folded at its foot, with Archive,
-// Restore and Delete of the runs ticked. Part of panels/bench.js, which asks for it by name (DASH_APP.use) and gives it
-// its kit (K); boot.js loads it before the panels.
+// page shows what the runs have (the mockup's "Your data now"). Either way the run history is folded at the foot, with
+// Archive, Restore and Delete of the runs ticked. Part of panels/bench.js, which asks for it by name (DASH_APP.use) and
+// gives it its kit (K); boot.js loads it before the panels.
 (() => {
   'use strict';
   let K;
@@ -99,15 +99,17 @@
   // that no other arm beats on both. An arm with no price is left out, and the note says so.
   function axes(pts, n) {
     const ys = pts.flatMap((p) => K.wilson(p.r.k, n)), lo = Math.max(0, Math.floor(Math.min(...ys) * 10) / 10), hi = Math.min(1, Math.ceil(Math.max(...ys) * 10) / 10);
-    const mx = Math.max(...pts.map((p) => p.c)) * 1.15 || 1, W = 420, H = 260, P = { l: 40, r: 12, t: 10, b: 32 };
-    return { W, H, P, lo, hi, mx, x: (c) => P.l + c / mx * (W - P.l - P.r), y: (r) => H - P.b - (r - lo) / Math.max(hi - lo, 0.1) * (H - P.t - P.b) };
+    // The cost axis has 4 steps of a round size (1, 2, 2.5 or 5 times a power of ten), so each tick's label is its exact price.
+    const raw = Math.max(...pts.map((p) => p.c)) * 1.15 || 1, mag = 10 ** Math.floor(Math.log10(raw / 4)), step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((m) => m * 4 >= raw), mx = step * 4;
+    const W = 420, H = 260, P = { l: 40, r: 12, t: 10, b: 32 };
+    return { W, H, P, lo, hi, mx, step, x: (c) => P.l + c / mx * (W - P.l - P.r), y: (r) => H - P.b - (r - lo) / Math.max(hi - lo, 0.1) * (H - P.t - P.b) };
   }
   function chart(L) {
     const pts = L.rows.filter((r) => r.perTask !== null).map((r) => ({ r, c: r.perTask, v: r.k / Math.max(r.n, 1) })).sort((p, q) => p.c - q.c);
     if (!pts.length) return K.note('No arm is priced: the chart needs the cost of each task.');
     const A = axes(pts, L.n), el = K.svg('svg', { viewBox: `0 0 ${A.W} ${A.H}`, class: 'bench-svg', role: 'img', 'aria-label': 'Resolve rate against cost a task' });
     for (let i = 0; i <= 4; i += 1) { const r = A.lo + (A.hi - A.lo) * i / 4; el.append(K.svg('line', { class: 'bench-gl', x1: A.P.l, x2: A.W - A.P.r, y1: A.y(r), y2: A.y(r) }), K.svg('text', { x: A.P.l - 6, y: A.y(r) + 4, 'text-anchor': 'end' }, K.pct(r))); }
-    for (let i = 0; i <= 4; i += 1) { const c = A.mx * i / 4; el.append(K.svg('text', { x: A.x(c), y: A.H - A.P.b + 16, 'text-anchor': 'middle' }, `$${c.toFixed(2)}`)); }
+    for (let i = 0; i <= 4; i += 1) { const c = A.step * i; el.append(K.svg('text', { x: A.x(c), y: A.H - A.P.b + 16, 'text-anchor': 'middle' }, `$${Number(c.toFixed(6))}`)); }
     el.append(K.svg('text', { x: (A.W + A.P.l) / 2, y: A.H - 2, 'text-anchor': 'middle' }, 'cost a task'));
     let top = -1;
     const front = pts.filter((p) => { if (p.v <= top) return false; top = p.v; return true; });
@@ -150,10 +152,6 @@
     return [K.armSaid(r.a), { v: t === null ? K.NOT_KEPT : [`${ok} of ${all} `, h('span', 'bench-muted', K.pct(all ? ok / all : null))], c: 'r' },
       { v: t === null ? K.NOT_KEPT : [`${broke} `, h('span', 'bench-muted', `in ${r.of('broke')} tasks`)], c: 'r' }, { v: r.cls === null ? K.NOT_KEPT : String(r.of('partial')), c: 'r' }];
   }
-  function missing(L, what) {
-    const old = L.rows.filter((r) => r.cls === null).map((r) => r.a.label);
-    return old.length ? K.note(`${old.join(', ')}: results kept before the grade's report was, so ${what} ${old.length === 1 ? 'shows' : 'show'} not kept.`) : '';
-  }
   // A chip in a card's heading, with its tip.
   function chipTitled(word, tip) { const c = K.chip(word, 'warn'); c.title = tip; return c; }
   function hidden(L) {
@@ -163,7 +161,7 @@
     const leg = h('div', 'bench-legend');
     CLASSES.forEach(([k, l]) => leg.append(K.add(h('span'), [h('i', `bench-c-${k}`), l])));
     s.append(...L.rows.map(classBar), leg, K.table(['Arm', ['Fail-to-pass passed', 'r'], ['Pass-to-pass broken', 'r'], ['Partial fixes', 'r']], L.rows.map((r) => testsRow(r, L))),
-      K.note('"Fixed, but broke other tests" is the costliest failure: the issue looks fixed, and something else stops working. Conveyor\'s test step runs the touched tests, so it breaks fewer.'), missing(L, 'its hidden tests'));
+      K.note('"Fixed, but broke other tests" is the costliest failure: the issue looks fixed, and something else stops working. Conveyor\'s test step runs the touched tests, so it breaks fewer.'));
     return s;
   }
   // The share of an arm's resolved tasks with a measure true (null: one has not kept it), in a chip that is ok when
@@ -179,8 +177,8 @@
       ['Proves fix', 'r', 'Adds a test that fails on the base commit and passes with the patch']], L.rows.map((r) => [K.armSaid(r.a),
       { v: r.clean === null ? K.NOT_KEPT : [h('b', null, String(r.clean)), `/${r.k}`], c: 'r' }, qcell(rate(r, boolOf('lintClean')), 0.9),
       qcell(rate(r, (c) => (sizeOf(c) === null ? null : sizeOf(c) <= 2)), 0.75), qcell(rate(r, boolOf('strays')), 0.15, true), qcell(rate(r, boolOf('provesFix')), 0.5)])),
-    K.kv([['Clean', 'Resolved, lint clean, at most twice the size of the reference fix, and no file the reference fix leaves alone.'], ['Lint clean', 'No new finding from ruff (its default rules) in the Python files the patch changes.'],
-      ['Strays', 'The patch changes a file the reference fix does not touch.'], ['Proves the fix', 'The patch adds a test that fails on the base commit and passes with the patch.']]), missing(L, 'its patch quality'));
+    K.kv([['Clean', 'Resolved, lint clean, at most twice the size of the reference fix, and no file the reference fix leaves alone.'], ['Lint clean', 'No new ruff finding in the Python files the patch changes.'],
+      ['Strays', 'The patch changes a file the reference fix does not touch.'], ['Proves the fix', 'The patch adds a test that fails on the base commit and passes with the patch.']]));
     return s;
   }
 
@@ -269,8 +267,7 @@
     L.rows.filter((r) => r.fired !== null && r.fired < 0.95).forEach((r) => ul.append(K.add(h('li'), [h('b', null, r.a.label), ` fired in only ${K.pct(r.fired)} of tasks. Check its arm before the next run. `, K.chip('arm problem', 'warn')])));
     const done = new Set(K.keysOf().flatMap((k) => K.list(k.live))), hi = Math.min(K.setSize(), L.n + 50);
     if (L.n < hi && !Array.from(done).some((i) => i >= L.n && i < hi)) ul.append(h('li', null, `Tasks ${L.n + 1} to ${hi} have no result yet for any arm.`));
-    if (!ul.children.length) ul.append(h('li', null, 'Every arm is told apart and fired: a bigger run of the same arms answers no new question.'));
-    s.append(ul, K.button('Plan this run', 'btn-primary', 'plan-next', 'Plan this run', () => { if (tied) Object.assign(K.B.plan, { q: tied.plan.q, n: tied.plan.n, arms: new Set(tied.plan.arms) }); K.go('plan'); }));
+    s.append(...(ul.children.length ? [ul] : []), K.button('Plan this run', 'btn-primary', 'plan-next', 'Plan this run', () => { if (tied) Object.assign(K.B.plan, { q: tied.plan.q, n: tied.plan.n, arms: new Set(tied.plan.arms) }); K.go('plan'); }));
     return s;
   }
 
@@ -321,10 +318,10 @@
     const ns = Array.from(new Set(st.runs.map((r) => K.num(r.n) || 0))), R = st.runs.length, c = convOf(rows);
     const at = new Set(K.keysOf().flatMap((k) => K.list(k.live))).size, size = K.setSize(), arms = K.armsOf(), ready = arms.filter((a) => a.state === 'ready').length, never = arms.filter((a) => a.state === 'unchecked').length;
     const runsChip = ns.length === 1 ? `${R === 2 ? 'both' : 'each'} ${K.plural(ns[0], 'task')}` : `${Math.min(...ns)} to ${Math.max(...ns)} tasks`;
-    const conv = c ? K.stat(K.usd(c.f.cost), `${c.a.col.label || c.a.label}: cost of its ${c.n === 1 ? 'task' : 'tasks'}`, K.chip(`${K.plural(Math.round(K.sum(c.f.cs.map((x) => K.num(x.sessions) || 0))), 'session')}, ${K.kTok(c.f.tokens)} tokens`, 'quiet'))
-      : K.stat('none', 'Conveyor: cost of its task', K.chip('no Conveyor arm ran', 'quiet'));
-    return K.grid('4', K.stat(String(R), 'Runs', K.chip(runsChip, 'quiet')), K.stat(`${at} of ${size}`, 'Tasks with a result', K.chip(`${(at / size * 100).toFixed(1)}% of the set`, 'quiet')),
-      conv, K.stat(`${ready} of ${arms.length}`, 'Arms checked and ready', never ? K.chip(`${never} never checked`, 'warn') : K.chip('every arm checked', 'ok')));
+    // The Conveyor cost stat shows only when a Conveyor arm ran.
+    const conv = c ? [K.stat(K.usd(c.f.cost), `${c.a.col.label || c.a.label}: cost of its ${c.n === 1 ? 'task' : 'tasks'}`, K.chip(`${K.plural(Math.round(K.sum(c.f.cs.map((x) => K.num(x.sessions) || 0))), 'session')}, ${K.kTok(c.f.tokens)} tokens`, 'quiet'))] : [];
+    return K.grid(String(3 + conv.length), K.stat(String(R), 'Runs', K.chip(runsChip, 'quiet')), K.stat(`${at} of ${size}`, 'Tasks with a result', K.chip(`${(at / size * 100).toFixed(1)}% of the set`, 'quiet')),
+      ...conv, K.stat(`${ready} of ${arms.length}`, 'Arms checked and ready', never ? K.chip(`${never} never checked`, 'warn') : K.chip('every arm checked', 'ok')));
   }
   function fewLines(r) {
     const ls = r.f.cs.map(K.linesOf), k = (f) => (ls.some((l) => l === null) ? null : K.sum(ls.map(f)));
@@ -333,8 +330,8 @@
       { v: t === null ? K.NOT_KEPT : t ? `+${t}` : h('span', 'bench-muted', 'none'), c: 'r' }, { v: f === null ? K.NOT_KEPT : String(f), c: 'r' }];
   }
   // What the patch summary shows: that every arm changed the same code files by the same line counts (the summary the
-  // Board reads holds each file's path and line counts, never the code, so the note never says the change itself is the
-  // same; and it says nothing when no arm changed a code file), and which arms added a test. Said only for arms whose
+  // Board reads holds each file's path and line counts only, so it cannot say the lines are the same; it says nothing
+  // when no arm changed a code file), and which arms added a test, with the test files when one arm did. Said only for arms whose
   // patch summaries are all kept.
   const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
   // The code files of an arm's patches with their line counts, as one text; null when a patch is not kept (a result that
@@ -342,10 +339,16 @@
   const codeOf = (r) => (r.f.cs.every((c) => Array.isArray(c.patch)) ? JSON.stringify(r.f.cs.flatMap((c) => c.patch.filter((f) => !K.isTest(String(f.path))).map((f) => [f.path, f.added, f.removed])).sort()) : null);
   function fewPatchNote(rows) {
     const ls = rows.map((r) => { const v = r.f.cs.map(K.linesOf); return v.some((l) => l === null) ? null : { add: K.sum(v.map((l) => l.add)), del: K.sum(v.map((l) => l.del)), test: K.sum(v.map((l) => l.test)) }; });
-    const say = ['Real, from the patches the results keep.'], code = rows.map(codeOf), same = rows.length > 1 && ls.every((l) => l && l.add === ls[0].add && l.del === ls[0].del) && code.every((x) => x !== null && x !== '[]' && x === code[0]), t =rows.filter((r, i) => ls[i] && ls[i].test), some = ls.every(Boolean) && t.length > 0 && t.length < rows.length;
-    if (same) say.push(`All ${WORDS[rows.length] || rows.length} changed the same code files by +${ls[0].add} −${ls[0].del}.`);
-    if (some) say.push(`Only ${t.map((r) => r.a.label).join(', ').replace(/, ([^,]*)$/, ' and $1')} added a test${t.length === 1 ? ` (${ls[rows.indexOf(t[0])].test} lines)` : ''}.`);
-    return say.join(' ');
+    const code = rows.map(codeOf), same = rows.length > 1 && ls.every((l) => l && l.add === ls[0].add && l.del === ls[0].del) && code.every((x) => x !== null && x !== '[]' && x === code[0]), t = rows.filter((r, i) => ls[i] && ls[i].test), some = ls.every(Boolean) && t.length > 0 && t.length < rows.length;
+    const say = [];
+    if (same) say.push(`All ${WORDS[rows.length] || rows.length} changed the same code files by the same line counts`);
+    if (some) say.push(`${same ? 'only' : 'Only'} ${t.map((r) => r.a.label).reduce((s, x, i) => (i ? `${s}${i === t.length - 1 ? ' and ' : ', '}${x}` : x), '')} added a test${t.length === 1 ? ` (${testIn(t[0], ls[rows.indexOf(t[0])].test)})` : ''}`);
+    return `Real, from the patches the results keep.${say.length ? ` ${say.join('; ')}.` : ''}`;
+  }
+  // "7 lines in tests/x.py": an arm's added test lines with the test files its patches change, when they are kept.
+  function testIn(r, lines) {
+    const files = r.f.cs.every((c) => Array.isArray(c.patch)) ? Array.from(new Set(r.f.cs.flatMap((c) => c.patch.filter((f) => K.isTest(String(f.path)) && f.added > 0).map((f) => String(f.path))))) : [];
+    return `${K.plural(lines, 'line')}${files.length ? ` in ${files.join(', ')}` : ''}`;
   }
   function fewHidden(rows) {
     const old = rows.filter((r) => r.cls === null).map((r) => r.a.label);
@@ -354,18 +357,14 @@
     return K.callout(`${won === rows.length ? 'Every arm' : `${won} of ${rows.length} arms`} passed the ${n === 1 ? "task's" : "tasks'"} hidden tests: that is all the results keep. The run records resolved yes or no and the patch, `
       + 'and the harness report with each fail-to-pass and pass-to-pass test is removed. To show these panels, the engine must keep that report. Size, strays and lint can be read from the patches the results already keep.', 'warn');
   }
-  // What the Cost column shows, said only for what it shows: "not priced" for an arm with no usage that can be priced, and
-  // "estimate" for an agent arm whose tokens the engine priced at its model's list price (the agent reports no usage by model).
+  // What the Cost column shows, said only for what it shows: "not priced" for an arm with no usage that can be priced.
   function fewCostNote(rows) {
-    const say = [];
-    if (rows.some((r) => r.f.cost === null)) say.push('"Not priced": the results keep no usage that can be priced.');
-    if (rows.some((r) => r.f.est)) say.push('"Estimate": the agent reports no usage by model, so its tokens are priced at the model\'s list price.');
-    return say.length ? [K.note(say.join(' '))] : [];
+    return rows.some((r) => r.f.cost === null) ? [K.note('"Not priced": agent arms report no usage by model today.')] : [];
   }
   function fewBoard(rows) {
     const n = Math.max(...rows.map((r) => r.n), 0), s = K.box('Leaderboard', n === 1 ? 'One task each. The ranges show how little one task says.' : `${K.plural(n, 'task')} at most each. The ranges show how little so few tasks say.`);
     s.append(K.table(['Arm', ['Resolved', 'r'], 'Resolve rate, 95% range', ['Cost', 'r'], ['Tokens', 'r'], ['Minutes', 'r']], rows.map((r) => [K.armSaid(r.a), { v: `${r.k}/${r.n}`, c: 'r' }, K.ciBar(r.k, r.n, r.a.s),
-      { v: `${K.usd(r.f.cost)}${r.f.est ? ' estimate' : ''}`, c: 'r' }, { v: K.kTok(r.f.tokens), c: 'r' }, { v: r.f.wall === null ? K.NOT_KEPT : String(r.f.wall), c: 'r' }]), 'bench-leader'),
+      { v: K.usd(r.f.cost), c: 'r' }, { v: K.kTok(r.f.tokens), c: 'r' }, { v: r.f.wall === null ? K.NOT_KEPT : String(r.f.wall), c: 'r' }]), 'bench-leader'),
     ...fewCostNote(rows), h('h3', 'bench-h', 'Hidden tests and patch quality'),
     K.table(['Arm', ['Code lines', 'r'], ['Test lines', 'r'], ['Files', 'r']], rows.map(fewLines)), h('p', 'bench-note', fewPatchNote(rows)), fewHidden(rows));
     return s;
@@ -388,6 +387,7 @@
   }
   function fewPage(st) {
     const rows = fewRows(st);
+    // The history is the only place Archive, Restore and Delete are, so the page keeps it, folded.
     return [fewVerdict(st, rows), fewStats(st, rows), K.grid('main', fewBoard(rows), fewNext()), historyFold()];
   }
   function fullPage(st) {
