@@ -163,8 +163,8 @@ test('Compare: the four boxes add up to the shared tasks, and the verdict change
   assert.deepEqual(fours(w), [['Both resolve', 35], ['Only Conveyor v1.9.0', 2], ['Only Conveyor, Codex builds v1.9.0', 0], ['Neither', 13]]);
   assert.equal(sum(), 50);
   assert.equal(text(q(w, '.bench-vv')), 'Not told apart yet. The difference is 2 tasks, under the noise of 10.');
-  // Bug it guards (review E2): the sentence gave the size of the set (500) as the tasks the gap needs; 2 of 50 needs 1250.
-  assert.equal(text(q(w, '.bench-vw')), 'If the gap held, about 1250 tasks would show it, more than the 500 the set has, so treat the two as equal.');
+  // Bug it guards (#1231): the sentence gave 1250, the tasks a gap of 2 of 50 needs, and the size of the set (500) apart; the mockup gives the cap, 500, as the number. (A gap that needs fewer than the set has keeps its own number: the edges test, "9 tasks apart".)
+  assert.equal(text(q(w, '.bench-vw')), 'If the gap held, about 500 tasks would show it, more than the set has, so treat the two as equal.');
   await pick(w, 'cmp-a', 'ver:v1.8.0');
   await pick(w, 'cmp-b', 'arm:solo');
   assert.deepEqual(fours(w), [['Both resolve', 25], ['Only Conveyor v1.8.0', 10], ['Only Claude alone', 0], ['Neither', 15]]);

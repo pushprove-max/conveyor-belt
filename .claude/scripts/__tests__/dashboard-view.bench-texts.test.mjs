@@ -94,7 +94,7 @@ test('Compare, 2 runs of 1 task with a flipped task: no run tools and no sentenc
   const w = await opened(set, 'compare');
   const s = act(bp(w), 'cmp-b'); s.value = 'arm:solo'; s.dispatchEvent(new w.Event('change'));
   await settle(); await settle();
-  assert.match(text(q(w, '.bench-vv')), /^On 1 task: Conveyor v1\.7\.0 resolved 1, Claude alone 0\.$/);
+  assert.equal(text(q(w, '.bench-vv')), 'not kept', 'the mockup has the sentence for one task both resolved only; no sentence of its own for another');
   assert.ok(!/table of the full page|There is no flipped task/.test(text(q(w, '.bench-vw'))), text(q(w, '.bench-vw')));
   assert.equal(q(w, '.bench-runacts'), null, 'no run tools');
   assert.ok(!text(page(w)).includes('These runs:'));

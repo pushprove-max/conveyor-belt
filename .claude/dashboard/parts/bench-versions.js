@@ -66,11 +66,11 @@
   function driftLine() {
     const dr = K.obj(K.B.d && K.B.d.drift);
     if (!dr) return K.NOT_KEPT;
-    const rows = DRIFT.map((x) => driftRow(x, dr)), moved = rows.filter((r) => r.isMoved), judged = rows.filter((r) => r.judged);
-    // A figure not judged (too few cards, or not read) stayed in no range: the line says so, never "every figure".
-    if (!judged.length) return K.NOT_KEPT;
-    if (!moved.length) return judged.length === rows.length ? 'On the belt, every figure stayed in its usual range.' : `On the belt, ${judged.length} of ${rows.length} figures could be judged, and each stayed in its usual range.`;
-    return `On the belt, cards on ${groupName(dr.after)} ${moved.map((r) => r.did).join(', ')}: ${moved.length === 1 ? 'that moved past its usual range' : 'those moved past their usual range'}. The other figures ${judged.length === rows.length ? '' : 'judged '}stayed in their usual range.`;
+    const rows = DRIFT.map((x) => driftRow(x, dr)), moved = rows.filter((r) => r.isMoved);
+    // The mockup has this line only for a figure that moved (it was judged); with none moved it shows "not kept". Its closing
+    // sentence says the rest stayed in range only when every one of them was judged: a figure not judged stayed in no range.
+    if (!moved.length) return K.NOT_KEPT;
+    return `On the belt, cards on ${groupName(dr.after)} ${moved.map((r) => r.did).join(', ')}: ${moved.length === 1 ? 'that moved past its usual range' : 'those moved past their usual range'}.${rows.every((r) => r.judged) ? ' The other figures stayed in their usual range.' : ''}`;
   }
 
   // ---- Versions ----
@@ -136,8 +136,9 @@
     const last = vs[vs.length - 1], prev = vs[vs.length - 2], m = K.moved(prev, last);
     if (!m.shared) return K.verdict('quiet', `${last.v} against ${prev.v}`, K.NOT_KEPT, driftLine());
     const of = m.shared === last.n && m.shared === prev.n ? `of ${m.shared}` : `of the ${m.shared} tasks both ran`;
-    const word = m.sig ? (m.d > 0 ? 'Better.' : 'A regression.') : m.d >= 0 ? 'No regression.' : 'No regression shown.';
-    const v = `${word} ${last.v} resolves ${m.kv} ${of}, ${Math.abs(m.d)} ${m.d >= 0 ? 'more' : 'fewer'} than ${prev.v}: ${m.sig ? 'past' : 'inside'} the noise of ${K.plural(K.noised(m.shared), 'task')}.`;
+    // The mockup's one word is "No regression."; a regression past the noise has no word of its own, the sentence and the red tone say it.
+    const word = m.sig && m.d < 0 ? '' : 'No regression. ';
+    const v = `${word}${last.v} resolves ${m.kv} ${of}, ${Math.abs(m.d)} ${m.d >= 0 ? 'more' : 'fewer'} than ${prev.v}: ${m.sig ? 'past' : 'inside'} the noise of ${K.plural(K.noised(m.shared), 'task')}.`;
     return K.verdict(m.sig && m.d < 0 ? 'bad' : 'ok', `${last.v} against ${prev.v}`, v, driftLine());
   }
   // The tasks that flipped between two versions, read from their runs.
@@ -161,7 +162,8 @@
     if (!d) return K.NOT_KEPT;
     const { f, same } = flipIn(d, id, prev.arm.cells.get(id), last.arm.cells.get(id));
     if (!same) return h('span', 'bench-muted', K.NOT_KEPT);
-    return !f || f.changes === null || f.changes === undefined ? K.NOT_KEPT : K.list(f.changes).length ? K.list(f.changes).map((c) => `${c.commit} ${c.title}`).join(' · ') : 'none';
+    const changes = K.list(f && f.changes);
+    return changes.length ? changes.map((c) => `${c.commit} ${c.title}`).join(' · ') : K.NOT_KEPT;
   }
   function flipsBox(vs) {
     const prev = vs[vs.length - 2], last = vs[vs.length - 1], fl = flipsOf(prev, last);
@@ -186,7 +188,7 @@
     if (vs.length < 2) {
       const v = vs[0], drift = driftBox();
       const w = drift ? 'The drift watch needs no benchmark run: it reads the cards your belt builds.' : ['The drift watch needs no benchmark run: it reads the cards your belt builds. Today it has not run. Run ', h('span', 'mono', 'conveyor.sh bench drift'), ' on the build machine, or let the Board run it after each release.'];
-      return [K.answers(Q), K.verdict('quiet', 'Versions with results', `${v ? `Only ${v.v} has a result, on ${K.plural(v.n, 'task')}.` : 'No version has a result yet.'} No version can be compared yet.`, w), drift, willShow()].filter(Boolean);
+      return [K.answers(Q), K.verdict('quiet', 'Versions with results', v ? `Only ${v.v} has a result, on ${K.plural(v.n, 'task')}. No version can be compared yet.` : K.NOT_KEPT, w), drift, willShow()].filter(Boolean);
     }
     return [K.answers(Q, 'Two sources: benchmark runs of each version, and the cards the belt builds anyway (the drift watch, at no cost).'), versionVerdict(vs),
       K.grid('main', trendBox(vs), driftBox() || K.box('Drift watch: the belt\'s own cards', K.NOT_KEPT)), flipsBox(vs)];
@@ -257,10 +259,10 @@
     return { n, both, onlyA, onlyB, none: n - both - onlyA.length - onlyB.length, d: onlyA.length - onlyB.length };
   }
   function cmpVerdict(A, Bs, x, fa, fb) {
-    const { n, d } = x, [win, lose] = d > 0 ? [fa, fb] : [fb, fa], N = K.noiseSaid(n), sig = K.told(d, n), size = K.setSize(), need = d ? Math.ceil(2 / ((Math.abs(d) / n) ** 2)) : null;
+    const { n, d } = x, [win, lose] = d > 0 ? [fa, fb] : [fb, fa], N = K.noiseSaid(n), sig = K.told(d, n), size = K.setSize(), need = d ? Math.ceil(2 / ((Math.abs(d) / n) ** 2)) : Infinity;
     if (sig) return K.verdict(d > 0 ? 'ok' : 'bad', 'Head to head', `${d > 0 ? A.label : Bs.label} is better: it resolves ${Math.abs(d)} more of ${n}. That is past the noise of ${N}.`,
       `It costs ${K.usd(win.cost)} against ${K.usd(lose.cost)} for the ${n} tasks, and takes ${K.fmtMin(win.wall)} against ${K.fmtMin(lose.wall)}.`);
-    const w = need === null ? 'If the gap held, no number of tasks would show it, so treat the two as equal.' : `If the gap held, about ${need} tasks would show it${need > size ? `, more than the ${size} the set has, so treat the two as equal` : ''}.`;
+    const w = `If the gap held, about ${Math.min(need, size)} tasks would show it${need > size ? ', more than the set has, so treat the two as equal' : ''}.`;
     return K.verdict('quiet', 'Head to head', `Not told apart yet. The difference is ${K.plural(Math.abs(d), 'task')}, under the noise of ${N}.`, w);
   }
   function differ(A, Bs, x) {
@@ -275,8 +277,7 @@
   }
   function fewCompare(A, Bs, ids, fa, fb) {
     const n = ids.length, one = n === 1 ? ids[0] : null, s = K.box(one ? `Cost and time on ${one}` : 'Cost and time on the shared tasks'), x = headToHead(A, Bs, ids);
-    const v = !n ? K.NOT_KEPT : n === 1 && x.both ? `${A.label} and ${Bs.label} both resolved the one task they share.`
-      : `On ${K.plural(n, 'task')}: ${A.label} resolved ${fa.k}, ${Bs.label} ${fb.k}.`;
+    const v = n === 1 && x.both ? `${A.label} and ${Bs.label} both resolved the one task they share.` : K.NOT_KEPT;
     const took = (f) => `${K.plural(Math.round(K.sum(f.cs.map((c) => K.num(c.sessions) || 0))), 'session')}, ${K.kTok(f.tokens)} tokens and ${f.wall === null ? 'minutes not kept' : `${f.wall} minutes`}`;
     const w = `${x.d ? '' : 'There is no flipped task to explain. '}The only difference is cost and time: ${A.label} took ${took(fa)}; ${Bs.label} took ${took(fb)}.`;
     s.append(pair('Tokens', fa.tokens, fb.tokens, K.kTok, A, Bs), pair('Minutes', fa.wall, fb.wall, (m) => (K.num(m) === null ? K.NOT_KEPT : `${m} min`), A, Bs),
@@ -292,7 +293,7 @@
     if (opts.length < 2) return [top, K.verdict('quiet', 'Head to head', K.NOT_KEPT)];
     defaults(opts);
     const oa = opts.find((o) => o.id === K.B.cmp.a), ob = opts.find((o) => o.id === K.B.cmp.b), A = sideOf(oa), Bs = sideOf(ob);
-    if (!A || !Bs) return [top, K.note('Reading the runs of the two sides…')];
+    if (!A || !Bs) return [top, K.verdict('quiet', 'Head to head', K.NOT_KEPT)];
     const ids = Array.from(A.cells.keys()).filter((id) => K.graded(A.cells.get(id)) && K.graded(Bs.cells.get(id))), fa = K.figsOf(A, ids), fb = K.figsOf(Bs, ids);
     const pick = K.add(h('div', 'bench-row bench-pickers'), [picker('a', opts), h('span', 'bench-muted', 'against'), picker('b', opts), h('span', 'bench-muted bench-small', `on the ${K.plural(ids.length, 'task')} both ran`)]);
     if (ids.length < 3) return [top, pick, ...fewCompare(A, Bs, ids, fa, fb)];

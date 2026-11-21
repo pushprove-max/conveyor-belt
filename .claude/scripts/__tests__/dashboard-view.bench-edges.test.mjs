@@ -147,16 +147,92 @@ test('Versions, two versions that ran no task in common, one with no start kept:
 });
 
 // Bug it guards: with a gap of 0 the verdict said "They resolve the same number of these tasks." where the mockup says how
-// many tasks the gap would need. A tie has no such number (a figure of 5000 came from a made-up gap of 1, and a tie on 10
-// tasks would have shown 200, under the set), so it says that no number of tasks would show it.
+// many tasks the gap would need. A tie has no such number, so the mockup's cap applies: the number is the set's size, and
+// the sentence says the set has fewer than it would take (#1231; it said "no number of tasks would show it" before).
 test('Compare, two arms that resolve the same tasks: the mockup\'s sentence for a gap of 0', async () => {
   const set = BH.study();
   set.shows[STUDY].tasks.forEach((t, i) => { const c = t.cells.find((x) => x.arm === 'conveyor-codex-claude'); if (i < 37) Object.assign(c, { resolved: true, result: 'resolved', class: 'resolved' }); });
   const w = await opened(set, 'compare');
   await pickArm(w, 'b', 'arm:conveyor-codex-claude');
   assert.equal(text(q(w, '.bench-vv')), 'Not told apart yet. The difference is 0 tasks, under the noise of 10.');
-  assert.equal(text(q(w, '.bench-vw')), 'If the gap held, no number of tasks would show it, so treat the two as equal.');
-  none(w, 'compare', ['They resolve the same number']);
+  assert.equal(text(q(w, '.bench-vw')), 'If the gap held, about 500 tasks would show it, more than the set has, so treat the two as equal.');
+  none(w, 'compare', ['They resolve the same number', 'no number of tasks would show it']);
+});
+
+// Bug it guards (#1231): the number was capped at the set's size even where the gap needs fewer tasks than the set has;
+// then the sentence gives the number it needs and has no "more than the set has" (the case above has the cap).
+test('Compare, two arms 9 tasks apart: the sentence gives the tasks the gap needs, under the size of the set', async () => {
+  const set = BH.study();
+  set.shows[STUDY].tasks.forEach((t, i) => { const c = t.cells.find((x) => x.arm === 'conveyor-codex-claude'); Object.assign(c, i < 28 ? { resolved: true, result: 'resolved', class: 'resolved' } : { resolved: false, result: 'unresolved', class: 'unresolved' }); });
+  const w = await opened(set, 'compare');
+  await pickArm(w, 'b', 'arm:conveyor-codex-claude');
+  assert.equal(text(q(w, '.bench-vv')), 'Not told apart yet. The difference is 9 tasks, under the noise of 10.');
+  assert.equal(text(q(w, '.bench-vw')), 'If the gap held, about 62 tasks would show it.');
+});
+
+// Bug it guards (#1231): the verdict's belt line said "On the belt, every figure stayed in its usual range." (or "N of 6
+// figures could be judged, and each stayed…") where the mockup has the line only for a figure that moved: with none moved
+// it says not kept.
+test('Versions, 6 versions on 50 tasks, no drift figure moved: the belt line says not kept', async () => {
+  const still = BH.study();
+  still.drift.after = { ...still.drift.before };
+  const w = await opened(still, 'versions');
+  assert.equal(text(q(w, '.bench-vw')), 'not kept');
+  none(w, 'versions', ['every figure stayed', 'could be judged']);
+});
+
+// Bug it guards (#1231, review E1): with a figure moved and another one not judged (the review figure is null),
+// the line said "The other figures stayed in their usual range.", a range the Board never judged the review figure by.
+test('Versions, 6 versions on 50 tasks, one drift figure moved and one not judged: the belt line does not say the others stayed in range', async () => {
+  const some = BH.study();
+  some.drift.after = { ...some.drift.after, reviews: null };
+  const w = await opened(some, 'versions');
+  assert.equal(text(q(w, '.bench-vw')), 'On the belt, cards on v1.9.0 waited less (4 min against 12 min a card): that moved past its usual range.');
+});
+
+// The 12 tasks of the Conveyor arm's resolved ones that the newest version, v1.9.0, resolves no more, or the unresolved ones it resolves.
+const turn = (set, n, to) => set.shows[STUDY].tasks.filter((t) => t.cells.some((c) => c.arm === 'conveyor' && c.resolved === !to)).slice(0, n)
+  .forEach((t) => Object.assign(t.cells.find((c) => c.arm === 'conveyor'), { resolved: to, result: to ? 'resolved' : 'unresolved', class: to ? 'resolved' : 'unresolved' }));
+
+// Bug it guards (#1231): the verdict's first word was "A regression." for a drop past the noise and "No regression shown."
+// for a small drop, where the mockup's one word is "No regression.". A drop past the noise has no such word (it is a
+// regression), and the sentence and the red tone say it.
+test('Versions, 6 versions on 50 tasks, v1.9.0 drops past the noise: the verdict has no "No regression." and is red', async () => {
+  const drop = BH.study();
+  turn(drop, 12, false);
+  const w = await opened(drop, 'versions');
+  assert.equal(text(q(w, '.bench-vv')), 'v1.9.0 resolves 25 of 50, 10 fewer than v1.8.0: past the noise of 10 tasks.');
+  assert.ok(q(w, '.bench-verdict').className.includes('bad'), 'the red tone');
+  none(w, 'versions', ['A regression.', 'Better.', 'No regression shown.', 'No regression.']);
+});
+
+// Bug it guards (#1231): a drop inside the noise said "No regression shown." in place of the mockup's "No regression.".
+test('Versions, 6 versions on 50 tasks, v1.9.0 drops inside the noise: the verdict says No regression.', async () => {
+  const drop = BH.study();
+  turn(drop, 3, false);
+  const w = await opened(drop, 'versions');
+  assert.equal(text(q(w, '.bench-vv')), 'No regression. v1.9.0 resolves 34 of 50, 1 fewer than v1.8.0: inside the noise of 10 tasks.');
+  assert.ok(!q(w, '.bench-verdict').className.includes('bad'), 'not the red tone');
+  none(w, 'versions', ['No regression shown.']);
+});
+
+// Bug it guards (#1231): a gain past the noise said "Better." where the mockup's one word is "No regression.".
+test('Versions, 6 versions on 50 tasks, v1.9.0 gains past the noise: the verdict says No regression., not Better.', async () => {
+  const gain = BH.study();
+  turn(gain, 12, true);
+  const w = await opened(gain, 'versions');
+  assert.equal(text(q(w, '.bench-vv')), 'No regression. v1.9.0 resolves 49 of 50, 14 more than v1.8.0: past the noise of 10 tasks.');
+  none(w, 'versions', ['Better.']);
+});
+
+// Bug it guards (#1231): a flipped task with no commits that changed its step said "none" in the table, and a version
+// list with no version said "No version has a result yet.": each is a sentence the mockup does not have; its place says not kept.
+test('Versions, no version with a result: the verdict says not kept', async () => {
+  const set = BH.study();
+  set.hist.runs = [];
+  const w = await opened(set, 'versions');
+  assert.ok(!text(page(w)).includes('No version has a result yet'), text(page(w)));
+  assert.equal(text(q(w, '.bench-vv')), 'not kept');
 });
 
 // Bug it guards: two arms that share no graded task said "<A> and <B> share no task they both graded." in the verdict.
@@ -168,6 +244,16 @@ test('Compare, 2 runs of 1 task, the two arms share no graded task: the verdict 
   await pickArm(w, 'b', 'arm:solo');
   assert.equal(text(q(w, '.bench-vv')), 'not kept');
   none(w, 'compare', ['share no task']);
+});
+
+// Bug it guards (#1231): while the page has not read the run of an older version picked as a side, Compare said its own
+// sentence or drew a verdict from nothing; the mockup's place says not kept.
+test('Compare, 6 versions on 50 tasks, the run of v1.8.0 is not read: the verdict says not kept', async () => {
+  const set = BH.study();
+  delete set.shows[BH.OLDS[0][1]];
+  const w = await opened(set, 'compare');
+  await pickArm(w, 'a', 'ver:v1.8.0');
+  assert.deepEqual([text(q(w, '.bench-vk')), text(q(w, '.bench-vv'))], ['Head to head', 'not kept']);
 });
 
 // ---- Live run and Task ----

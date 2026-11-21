@@ -1008,25 +1008,27 @@ map** read the arms in the same way. An archived run is not in it.
 comes after the releases. Each version reads its runs as **Scoreboard** reads an arm. The verdict judges the newest
 version against the version before it, on the tasks that both versions ran. With fewer than 3 such tasks, no change
 is past the noise, so the verdict says "inside the noise" and the table says "noise". With no such task, both say
-"not kept". A chart shows the resolve rate of each
+"not kept". The verdict starts with "No regression." unless the newest version resolves fewer tasks by at least the
+noise: then it gives the two counts and no such word. A chart shows the resolve rate of each
 version with its 95% band, and a dashed line for Claude alone. A table gives each version's tasks and resolved count,
 and its change from the version before on the tasks that both ran: better, worse, or noise. **Changed steps** shows,
 for each version after the first, the steps whose engine files changed since the version before, whether a task
 flipped or not. It shows a dash when no step changed, or when the page has not read them. The **Drift watch** compares the project's own cards before and after the last engine change
 (see [Drift watch](benchmarks.md#drift-watch)). Each figure shows **Moved, better** or **Moved, worse** when the two
 means are more than two standard errors apart, and **In its usual range** when they are not. It shows "not kept" when
-a group has no spread for the figure, or fewer than 5 cards. When no figure is judged, or the drift watch has not run,
-the verdict's line about the belt says "not kept". **Tasks that flipped** lists each task that one of the two newest versions resolved and
+a group has no spread for the figure, or fewer than 5 cards. The verdict's line about the belt names the figures that
+moved past their usual range, and adds that the other figures stayed in it only when every figure is judged. When none moved, or the drift watch has not run, the line says "not kept". **Tasks that flipped** lists each task that one of the two newest versions resolved and
 the other did not, with the first step where the two runs went apart. The page sends `bench swe diff` for
 each version and the version before it, the newest first and one at a time: then each task shows the engine commits that
 changed that step. `bench swe diff` reads the kept result of a task. A run with `--again` shows its own result, from another try, even when the outcome is the same. A task
-where the result shown is that run's own, or where the two outcomes differ, shows "not kept" in place of its commits. With one version only, the page says
-that no version can be compared yet.
+where the result shown is that run's own, or where the two outcomes differ, shows "not kept" in place of its commits, also when no commit changed that step. With one version only, the page says
+that no version can be compared yet; with none, the verdict says "not kept".
 
 **Compare** sets any two arms, or a version of the Conveyor arm, against each other on the tasks that both graded. The
 verdict says which one is better, when the difference is past the noise, and else how many tasks would show the
-difference. When that is more than the tasks of the set, it gives the number and the
-size of the set, and says to treat the two as equal. With a gap of 0 tasks, no number of tasks would show it, and it says so. With fewer than two arms that have results, it says "not kept". Four boxes put each task in one place: both resolve, only the first, only the second, or neither. They add
+difference. When that is more than the tasks of the set, it gives the size of the set as the number and says that the
+set has fewer, so treat the two as equal. A gap of 0 tasks is that case. With fewer than two arms that have results, or while the page has not read the two
+sides, it says "not kept". With one shared task, which both resolved, the verdict says so; for any other result on fewer than 3 shared tasks it says "not kept". Four boxes put each task in one place: both resolve, only the first, only the second, or neither. They add
 up to the shared tasks. **The flipped tasks** lists the tasks that only one resolved, with the first step where the two
 runs went apart. The list shows at most 12 tasks. **Why, in short** has the model's reading of each flipped task, from
 `bench swe diff`, which the page asks for by itself. The page marks it as the model's reading, not a fact. When

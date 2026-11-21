@@ -185,7 +185,7 @@ test('Versions, 6 versions of the Conveyor arm: the verdict, the trend, the tabl
   for (let i = 0; i < 30; i += 1) await settle();
   assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['7', '8'], ['6', '7'], ['5', '6'], ['4', '5']].map(([a, b]) => ['diff', key(`v1.${a}`), key(`v1.${b}`), '--json']),
     'the two versions\' results keys of each older pair, one request each');
-  assert.deepEqual(flips().map((r) => r[3]), ['abc1234 the review reads the test step', 'not kept', 'not kept', 'none']);
+  assert.deepEqual(flips().map((r) => r[3]), ['abc1234 the review reads the test step', 'not kept', 'not kept', 'not kept']);
   assert.deepEqual(table().map((r) => r[4]), ['—', 'build, review', '—', '—', 'test', 'review'], 'the steps whose files changed, once read, for each version after the first; a dash for none or not known');
   BH.go(w, 'score');
   BH.go(w, 'versions');
