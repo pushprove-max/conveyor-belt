@@ -15,6 +15,20 @@ A Claude build or fix session cannot use the tools that schedule work, send mess
 on turns or on cost. The session ends at its time limit, or sooner when it makes no progress for the pack's
 `tunables.stuck`.
 
+The card's guard hooks check each Bash, Edit, Write and AskUserQuestion call of a build or fix session. Each guard
+hook that `onFailure: block` marks (all the guards of Conveyor, and each guard of `.conveyor/hooks.json` with that
+field) runs behind Conveyor's guard runner. When such a guard fails to run, the runner refuses the call. The text that
+the session sees names the guard and the cause:
+
+- it crashed: the exit code and the last error line, for example `the guard git-safety.sh failed to run: it crashed with exit 1: <error>`;
+- it ran past its time-out (the hook's `timeout` setting);
+- its file is missing.
+
+When the same guard fails a second time in one session, the session stops at once and the card blocks. The reason
+names the guard and the cause, for example `build: guard git-safety.sh is failing: it crashed with exit 1: <error>`. The card
+shows on the Board's Needs you with that reason, so you see `guard <name> is failing`. Repair the guard, then retry the
+card.
+
 No Claude session of a card uses Claude Code's auto memory. A card does not read notes that an earlier card kept, and
 it keeps no notes for a later card.
 

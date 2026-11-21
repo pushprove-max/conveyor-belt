@@ -149,6 +149,8 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
     # A card that gave way (giveway()): once a card took its turn, the live record names it (gaveWay: its issue).
     new=$(jq -c --argjson st "$st" 'select(.away == true and (.to | type) == "number" and .to != $st.gaveWay) | $st + {gaveWay: .to}' "${out%.live}.claim" 2>/dev/null) \
       && [ -n "$new" ] && st=$new && printf '%s\n' "$st" > "$out.tmp" && mv -f "$out.tmp" "$out"
+    # A guard that failed twice (guardrun.sh) ends the session at once, as OpenCode and Codex ignore "continue": false.
+    [ "$4" = test ] || [ ! -s "$wt.guardfail" ] || ! awk -F'\t' '++n[$1] == 2 { f = 1 } END { exit !f }' "$wt.guardfail" || { kill "$pid" 2>/dev/null; wait "$pid"; rc=$?; break; }
     if [ "$4" = test ]; then
       mapfile -t logs < <(testlogs "${f%.test}")
       now=$(p_stat "$f" "${logs[@]}" | awk '{s = s "," $1; if ($2 > t) t = $2} END {if (NR) print s " " t}')
@@ -572,7 +574,7 @@ session1() {
     codex) read=$CODEXREAD; model=$(codexmodel "$model") || { echo "$model"; return 1; }; f=$(cxready "$1") || { echo "$f"; return 1; } ;;
     *) dir=$(acctenv "$ACCT") || { echo "$dir"; return 1; } ;;
   esac
-  rm -f "$1.spent" "$1.stalled"
+  rm -f "$1.spent" "$1.stalled" "$1.guardfail"
   # The session runs on the cores left for card work (lib/slots.sh slot_keepwords).
   local KEEP bp
   slot_keepwords
@@ -600,6 +602,8 @@ session1() {
   [ -z "$x" ] || f=$(jq -c --argjson f "$x" --argjson n "$([ -e "$1.stalled" ] && echo 2 || echo 1)" "$BOTHTRIES"' | .stalls = $n' <<<"$f")
   [ "$agent" != claude ] || proxypack
   [ "$agent" = opencode ] || f=$(routed "$f" "$agent")
+  s=$(awk -F'\t' '++n[$1] == 2 { print "guard " $1 " is failing: " $2; exit }' "$1.guardfail" 2>/dev/null); rm -f "$1.guardfail" # guardrun.sh: blocks the card
+  [ -z "$s" ] || { [ "$agent" != claude ] || routedone 1; jq -c --arg st "${3:-build}" '{step: $st} + del(.ok)' <<<"$f" > "$1.spent"; printf '%s\n' "$s"; return 1; }
   # A session whose last result says it succeeded goes on, its usage or stats read or not (unread says why not).
   if [ $rc = 0 ] && [ "$(jq -r .ok <<<"$f")" = true ]; then [ "$agent" != claude ] || routedone 1; jq -c 'del(.ok)' <<<"$f"; return 0; fi
   # A session that failed still spent its tokens and seconds: block() records them.

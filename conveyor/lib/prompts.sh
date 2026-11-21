@@ -267,14 +267,21 @@ cardrules() { # <issue json>
 # file of another shape fails. A pack with no hooks.json adds none. The generic hooks run from their pinned path, the
 # engine's own checkout: a generic command starting "$CLAUDE_PROJECT_DIR" starts with that checkout instead, so a
 # project without those hook files still runs them. The pack's hooks are the project's own and stay as written.
+# Then each PreToolUse command hook marked `onFailure: block`, the generic ones and the pack's, runs behind the guard
+# runner, the engine's guardrun.sh: `bash <runner> <its timeout> <its command, quoted>`, so a hook that fails to run
+# refuses the call naming itself and why, and a second failure blocks the card. The runner keeps the hook's timeout (Claude Code's 60 s
+# when it sets none); the hook's own timeout is 10 s longer, so the runner, not Claude Code, ends a hook that hangs.
 cardsettings() { # <file>
   local h=$MAIN/.conveyor/hooks.json p='{"hooks":{}}'
   [ ! -e "$h" ] || p=$(cat "$h") || return 1
-  jq -e --argjson p "$p" --arg root "${HERE%/*}" 'if $p | type == "object" and keys == ["hooks"] and (.hooks | type == "object" and all(.[]; type == "array"))
+  jq -e --argjson p "$p" --arg root "${HERE%/*}" --arg run "$HERE/guardrun.sh" 'if $p | type == "object" and keys == ["hooks"] and (.hooks | type == "object" and all(.[]; type == "array"))
     then .hooks |= ((. // {}) | map_values(map(.hooks |= map(if .type == "command"
           then .command |= (if startswith("\"$CLAUDE_PROJECT_DIR\"") then "\u0027\($root | gsub("\u0027"; "\u0027\\\u0027\u0027"))\u0027" + ltrimstr("\"$CLAUDE_PROJECT_DIR\"") else . end)
           else . end))))
       | .hooks = reduce ($p.hooks | to_entries[]) as $e (.hooks; .[$e.key] = (.[$e.key] // []) + $e.value)
+      | if .hooks.PreToolUse == null then . else .hooks.PreToolUse |= map(.hooks |= map(
+          if .type == "command" and .onFailure == "block" and (.command | type) == "string"
+          then (.timeout // 60) as $t | .command = "bash \($run | @sh) \($t) \(.command | @sh)" | .timeout = $t + 10 else . end)) end
     else error("\($h) is not {\"hooks\": {<event>: [...]}}") end' --arg h "$h" "$CARD_SETTINGS" > "$1"
 }
 # The writing method: the pinned copy of the STE80 Humanizer in this engine (rules/ste80.md, its licence beside it).

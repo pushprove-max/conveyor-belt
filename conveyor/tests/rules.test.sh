@@ -68,7 +68,7 @@ EOS
 # relative to the project, not by its pinned path in the engine's checkout; a pack hooks.json of another shape (one
 # that would set what the generic settings set) is taken, so the card builds.
 t_packrules() {
-  local s=$T/$CASE/settings r x
+  local s=$T/$CASE/settings r x u
   setup "[$(issue 7 2026-01-01 | jq -c '.body = "It breaks in web/src/a.tsx:12, package.json and tools/ too."'), $(issue 8 2026-01-02)]"
   echo 'WEB-AREA-RULE' > "$R/.conveyor/web.md"; echo 'NPM-AREA-RULE' > "$R/.conveyor/npm.md"; echo 'TOOLS-AREA-RULE' > "$R/.conveyor/tools.md"
   tune '.areas = {"infra/**": ".conveyor/none.md", "web/src/**": ".conveyor/web.md", "package.json": ".conveyor/npm.md", "tools/": ".conveyor/tools.md"}'
@@ -79,6 +79,16 @@ t_packrules() {
   [ "$(cat "$T/$CASE/rules.7")" = "$(printf '%s\n\n%s\n\nWEB-AREA-RULE\n\nNPM-AREA-RULE\n\nTOOLS-AREA-RULE' "$(cat "$SRC/rules/card-core.md")" "$(cat "$SRC/lib/test-card-rules.md")")" ] \
     || fail "#7 names web/src/a.tsx, the root file package.json and the top-level directory tools/: its rules are not the core rules, the pack's, then web.md, npm.md and tools.md"
   [ "$(cat "$T/$CASE/rules.8")" = "$(printf '%s\n\n%s' "$(cat "$SRC/rules/card-core.md")" "$(cat "$SRC/lib/test-card-rules.md")")" ] || fail "#8 names no area path and was given an area rule"
+  # Bug: a blocking hook that fails to run refuses with no word of which hook or why (guardrun.t_guardrun). Each hook
+  # marked blocking (the generic seven) runs behind this checkout's guard runner at its own timeout, which Claude Code
+  # is given 10 s more of; the pack's, not marked blocking, run as written. $u: the settings with those unwrapped,
+  # a hook not wrapped so left out of them.
+  u=$T/$CASE/unwrapped
+  jq --arg run "$SRC/guardrun.sh" --arg q "'" '.hooks.PreToolUse |= map(.hooks |= map(if .onFailure == "block" then ("bash \($run | @sh) \(.timeout - 10) ") as $p
+      | select(.command | startswith($p)) | .command |= (ltrimstr($p) | .[1:-1] | gsub($q + "\\\\" + $q + $q; $q)) | .timeout -= 10 else . end))' "$s" > "$u" \
+    && [ "$(jq -c '[.hooks.PreToolUse[].hooks[].timeout]' "$u")" = '[30,30,120,60,60,30,30,null,null,null]' ] \
+    || fail "a blocking hook of the card's settings does not run behind the guard runner at its own timeout: $(jq -c '.hooks.PreToolUse' "$s")"
+  s=$u
   [ "$(jq -c '[.hooks.PreToolUse[] | .matcher as $m | .hooks[] | "\($m) \(.command | split("/")[-1])"]' "$s")" \
     = '["Bash git-safety.sh","Bash bash-guardrails.sh","Bash adversarial-review-gate.sh","Bash dependency-addition-guard.sh","Edit|Write|MultiEdit dependency-addition-guard.sh","Edit|Write|MultiEdit ruling-cite-gate.sh","AskUserQuestion worker-ask-guard.sh","Bash pack-bash-guard.sh","Bash pack-test-guard.sh","Edit|Write|MultiEdit pack-edit-guard.sh"]' ] \
     && [ "$(jq -cS 'del(.hooks)' "$s")" = "$(jq -cS 'del(.hooks)' "$SRC/card-settings.json")" ] \
