@@ -585,5 +585,11 @@
   "conveyor/tests/slotwhole.test.sh": [
     "conveyor/tests/closureturn.test.sh",
     "conveyor/tests/slots.test.sh"
+  ],
+  "conveyor/foreman/foreman-size.test.sh": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh"
+  ],
+  "hooks/hooks.json": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh"
   ]
 }
