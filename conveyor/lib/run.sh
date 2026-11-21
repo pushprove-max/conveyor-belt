@@ -348,6 +348,271 @@ turnwait() {
 runends() {
   [ "$running" = 0 ] && [ -z "$serve" ] && [ -z "$pusher" ] && [ -z "$waits" ] && { [ -z "$prober" ] || ! jobs -rp | grep -qx "$prober"; }
 }
+# The parts of a turn of the loop, called in order by run(), in run()'s own variables (the only locals of their own
+# are turnended()'s frozen and turnrestart()'s on): turnopen(), turnended(), turnside(), turncount(), turnrestart(),
+# turnask() and turnpick().
+# The turn's start, in run()'s own variables: the push that ended, the script a `serve` restarts on (new), the pack
+# (packturn()), the machine hold, the jobs that take a commit and see to a red release run's fix cards, the seats'
+# CLIs, the push, and the control record (cap, guard, pct, now and why).
+turnopen() {
+  stdbkeeps # the turn's readers, and the cards it starts, find the records kept until they change (lib/records.sh)
+  pushended
+  # The script a `serve` restarts on, once no push runs: the pinned commit's install, or the checkout's own (its
+  # new code); no push starts then, as the restart would wait for it (the new loop makes the push).
+  new=''; if [ -z "$pusher" ] && [ -n "$serve" ] && stale; then
+    if [ -n "$FOLLOW" ]; then new=$HERE/conveyor.sh
+    elif enginepin p 2>/dev/null && installed "$p" ro && machined "$VERSIONS/$p/conveyor/conveyor.sh"; then new=$VERSIONS/$p/conveyor/conveyor.sh; fi
+  fi
+  packturn
+  # The machine hold (machinehold(), issue 221), at every turn: while it stands, this turn picks no card. Said when it
+  # changes, as above.
+  mhold=''; [ -n "$nopack" ] || mhold=$(machineheld)
+  [ "$mhold" = "$htold" ] || { htold=$mhold; [ -z "$mhold" ] || echo "conveyor: $mhold" >&2; }
+  # A pack that follows the plugin's main or its releases: its pushed main, or newest release, is looked at once every IDLE seconds (take(),
+  # lib/install.sh), a job beside the cards, never counted as one and given no run lock; a commit it takes is
+  # restarted on at a later turn (stale()).
+  if [ -n "$serve" ] && [ -z "$nopack" ] && [ $((SECONDS - ttook)) -ge "$IDLE" ] && { [ -z "$taker" ] || ! jobs -rp | grep -qx "$taker"; } \
+    && packget plugin.follow f && [ -n "$f" ]; then
+    ttook=$SECONDS; ( take ) 8>&- < /dev/null & taker=$!
+  fi
+  # A red release run's fix cards (relfixes(), lib/fulltest.sh): looked at once every IDLE seconds, a job beside the
+  # cards as take() is; once each has landed and is in the commit release-prep tests (relhead(), lib/push.sh) and no card is open, it starts release-prep again.
+  if [ -n "$serve" ] && [ -z "$nopack" ] && [ $((SECONDS - rtried)) -ge "$IDLE" ] && { [ -z "$fixer" ] || ! jobs -rp | grep -qx "$fixer"; }; then
+    rtried=$SECONDS; ( relfixes ) 8>&- < /dev/null & fixer=$!
+  fi
+  # The seats and the host's CLIs are worked out once in this shell (clis, its words dropped), so the check below,
+  # the pick and the cards this turn starts find them kept (seat, hostclis, seatready).
+  [ -n "$nopack" ] || clis >/dev/null 2>&1 || :
+  nocli=''; [ -n "$nopack" ] || nocli=$(clis && codexready) || : # a seat whose CLI is gone, or a reviewer model family that resolves to no model id, holds this turn's pick
+  pushturn # the push, when one is owed and due (lib/push.sh)
+  # The control record, at every turn: the cap in force, the guard's reading (taken here, outside the lock:
+  # it may go over the network), and a stop, which ends the loop's own cards in progress.
+  # Read in this shell (ctlread), so the turn's subshells and the cards it starts find it kept while it stands.
+  why=''; if ctlread 2>/dev/null; then ctl=$CTL_V; else ctl=''; why=$(notwhole); fi
+  # A record that does not read keeps the last cap read; with none read, nothing is picked. One that names no cap
+  # has the seed's.
+  IFS=, read -r cap guard <<<"$(jq -r --argjson d "$CAP0" '"\(if . == null then "" else .cap // $d end),\(.guard // "")"' <<<"${ctl:-null}" 2>/dev/null)"
+  if [ -n "$cap" ]; then base=$cap; else cap=${base:-0}; fi
+  [ -z "$lim" ] || [ "$cap" -le "$lim" ] || cap=$lim
+  # The guard reads the account the next card will use (a record that does not read keeps the last one read).
+  pct=''; [ -z "$guard" ] || pct=$(guardread "$ctl" ask | jq -r '.pct // empty')
+  now=$(state "$ctl" "$pct")
+}
+# The loop's own cards that ended, or stuck, since the last turn, in run()'s own variables (mine, took, kids), then
+# the other open cards whose process is gone (revive()), and with the control record at stop, the loop's own cards.
+# A card of the loop whose process ended with no closing line (it was killed, or its shell stopped on an error) is
+# recorded blocked, so it is not left open for good and `retry` takes it. Its line and its error output
+# (<worktree>.err, kept with it) say why (cardgone()): its last step and action, and its exit status or signal.
+# One stopped mid-batch has its own change put back first (gonewt()), or is left open when it cannot be.
+# Its session, review or tests outlive it (no longer under it, they are found from the last turn's list) and
+# still use its worktree: they are ended, and gone, before block() takes the worktree away. They are stopped, all
+# under them with them, then killed: one that ignores TERM never holds the loop, and none starts another on TERM
+# that would outlive it unseen.
+turnended() {
+  local frozen=() # the processes of an ended card, stopped and then killed
+  for p in "${!mine[@]}"; do
+    # One alive with no process of its step for STUCK and REVIEW_PAUSE seconds (stuckcard(), #466) is ended and blocked, naming that
+    # step, so `retry` can take it.
+    if kill -0 "$p" 2>/dev/null && [ ! -e "$CARDS/${mine[$p]% *}.live" ] && read -r _ gs gone < <(stuckcard "${mine[$p]% *}" turn) && [ "$gone" = stuck ]; then
+      read -r c n <<<"${mine[$p]}"; unset 'mine[$p]' 'took[$p]' 'kids[$p]'
+      gone=$(stuckwhy "$gs" stuck)
+      endcard "$c" "$n" "$p" "$gs" "$gone" && echo "conveyor: card $c: $gone; it is blocked, and \`retry $n\` takes issue #$n again"
+      wait "$p" 2>/dev/null; rm -f "$CARDS/$c.exit"; stdbkeeps; continue
+    fi
+    if kill -0 "$p" 2>/dev/null; then
+      # Those of the last list still alive are kept: one killed during this look has none under it to be found.
+      kids[$p]=$( { while read -r k t; do [ -n "$k" ] && p_alive "$k" "$t" && echo "$k $t"; done <<<"${kids[$p]:-}"
+        for k in $(tree "$p"); do t=$(p_started "$k") && echo "$k $t"; done; } | sort -u)
+      continue
+    fi
+    read -r c n <<<"${mine[$p]}"; unset 'mine[$p]' 'took[$p]'
+    k=${kids[$p]:-}; unset 'kids[$p]'
+    # Its closing line is looked for in the whole lines only: a last line still being written (check() says why)
+    # made the whole read fail, and a card that had landed was blocked; its push is the loop's, as for any landing.
+    [ "$(stdb ask ended "$c" 2>/dev/null)" = true ] && { rm -f "$CARDS/$c.exit"; continue; }
+    gs=$(cardstep "$c"); gone=$(cardgone "$c" "$gs"); rm -f "$CARDS/$c.exit"
+    # No line left: `retry` ended it (unstick()) and moved its lines out; a blocked line now would stand alone.
+    [ -n "$gs" ] || { stdb ask card "$c" 2>/dev/null | grep -q . || continue; }
+    k=$(while read -r p t; do [ -n "$p" ] && p_alive "$p" "$t" && echo "$p $t"; done <<<"$k")
+    mapfile -t frozen < <(while read -r p t; do [ -z "$p" ] || freeze "$p"; done <<<"$k")
+    kill -KILL "${frozen[@]}" 2>/dev/null
+    while read -r p t; do while [ -n "$p" ] && p_alive "$p" "$t"; do sleep 0.1; done; done <<<"$k"
+    printf 'conveyor: card %s: %s\n' "$c" "$gone" >> "$CARDS/$c.err"
+    gonewt "$c" "$CARDS/$c" "$gs" || continue
+    ( block "$c" "$n" "$CARDS/$c" "$gone" ); stdbkeeps; echo "conveyor: card $c ended without a result: $gone; it is blocked, and \`retry $n\` takes issue #$n again"
+  done
+  # Any other open card whose process is gone (revive()): blocked, its work kept, and picked again.
+  revive "$(for p in "${!mine[@]}"; do echo "${mine[$p]% *}"; done)"
+  if [ "$now" = stopped ] && [ ${#mine[@]} != 0 ]; then
+    while read -r p k; do
+      [ -n "$p" ] || continue
+      # An adopted card is no job of this shell's: wait cannot wait on it, so it is watched until it is gone.
+      wait "$p" 2>/dev/null; while kill -0 "$p" 2>/dev/null; do sleep 0.1; done
+      read -r c n <<<"${mine[$p]}"; unset 'mine[$p]' 'took[$p]' 'kids[$p]'
+      stopped "$c" "$n"; clean "$CARDS/$c"; rm -f "$CARDS/$c.exit"
+      locked moveout '.card == $c' --arg c "$c" && echo "conveyor: stopped card $c; issue #$n is back in the queue" \
+        || echo "conveyor: stopped card $c, but its lines could not be moved out of the card records: retry #$n by hand" >&2
+    done < <(for p in "${!mine[@]}"; do echo "$p ${mine[$p]% *}"; done | locked halt)
+    stdbkeeps
+  fi
+}
+# The jobs a `serve` starts beside the cards once a minute, in run()'s own variables: the whole test on main, the idle
+# mutation checks and the monthly test-speed survey.
+turnside() {
+  # The whole test on main (maintest()), looked at once a minute: a job beside the cards, never counted as one, and
+  # given no run lock (fd 8), so a loop that ends while it runs leaves the checkout free for the next loop.
+  if [ -n "$serve" ] && [ -z "$new" ] && [ -z "$nopack" ] && [ $((SECONDS - mtried)) -ge 60 ] && { [ -z "$tester" ] || ! jobs -rp | grep -qx "$tester"; }; then
+    mtried=$SECONDS; ( maintest ) 8>&- < /dev/null & tester=$!
+  fi
+  # The idle mutation checks (mutnext(), lib/mutate.sh), looked at once a minute: a job beside the cards, never
+  # counted as one, and given no run lock. No card's step runs one.
+  if [ -n "$serve" ] && [ -z "$new" ] && [ -z "$nopack" ] && [ $((SECONDS - utried)) -ge 60 ] && { [ -z "$muter" ] || ! jobs -rp | grep -qx "$muter"; }; then
+    utried=$SECONDS; ( mutnext ) 8>&- < /dev/null & muter=$!
+  fi
+  # The monthly test-speed survey's issue (survey(), lib/survey.sh), looked at once a minute, in the loop itself: a
+  # look is a date and a pack read, and files at most one issue a month. With it, the models with no price (noprice(),
+  # lib/control.sh), in this shell, which keeps what it last looked at: the list Needs you counts, and no issue.
+  if [ -n "$serve" ] && [ -z "$new" ] && [ -z "$nopack" ] && [ $((SECONDS - stried)) -ge 60 ]; then
+    stried=$SECONDS; survey 8>&- < /dev/null; noprice 8>&- < /dev/null || :
+  fi
+}
+# The turn's count of the cards, in run()'s own variables (running, idles, building), the machine hold's look, the
+# loop's notice that its code is stale (old), and what it says of itself (SAYS, loop.json).
+turncount() {
+  cardsrun; waits=''
+  # The cards counted against the builder cap (building): those running, less those that only wait (idle()), at
+  # most as many of them as the cap. running still counts every card: the loop ends only once none is left.
+  # A card that waits for its seat's CLI starts its step again in a free slot once the host lists the CLI (cliwake()).
+  # The free slots are the cap less the cards that do not wait at all: counted after the cap on idle cards, waits
+  # past the cap (the cap lowered while they waited) would fill every slot and none would start again.
+  idles=$(idle "$(for p in "${!mine[@]}"; do echo "$p ${mine[$p]% *}"; done)")
+  [ $((running - idles)) -ge "$cap" ] || { woke=$(cliwake "$(for p in "${!mine[@]}"; do echo "$p ${mine[$p]% *}"; done)" $((cap - running + idles))) \
+    && idles=$((idles - woke)); } || :
+  [ "$idles" -le "$cap" ] || idles=$cap; [ "$idles" -ge 0 ] || idles=0
+  building=$((running - idles))
+  # The machine hold's look (machineprobe()), at most once every POLL seconds (as often as a free loop would pick)
+  # while the hold stands: a job beside the cards, never counted as one, and given no run lock; a `run` does not end
+  # while it runs (runends()). Once its files pass on main the hold goes, so the next turn picks again and the cards on
+  # hold test again.
+  if [ -n "$mhold" ] && [ $((SECONDS - htried)) -ge "$POLL" ] && { [ -z "$prober" ] || ! jobs -rp | grep -qx "$prober"; }; then
+    htried=$SECONDS; ( machineprobe ) 8>&- < /dev/null & prober=$!
+  fi
+  if [ -z "$old" ] && stale; then
+    old=1; enginepin p f 2>/dev/null || f=''
+    if [ -n "$FOLLOW" ]; then echo "conveyor: the checkout has moved on from this loop's $RAN; nothing new is picked, and the loop restarts on the checkout's new code once its push is done"
+    elif [ -n "$f" ]; then echo "conveyor: $([ -n "$p" ] && echo "the project's engine is now Conveyor commit $p, not this loop's $OWN" || echo "the project follows the plugin's $f and has taken no commit of it on this machine yet"); nothing new is picked, and the loop $([ -n "$serve" ] && echo "restarts on the project's engine once its push is done" || echo "ends once its cards and push are done")"
+    else echo "conveyor: the pack pins another Conveyor commit than this loop's $OWN; nothing new is picked, and the loop $([ -n "$serve" ] && echo "restarts on the pinned commit once its push is done" || echo "ends once its cards and push are done")"; fi
+  fi
+  [ -z "$why" ] || [ -z "$old" ] || why+="; the loop $([ -n "$serve" ] && echo "restarts on the $([ -n "$FOLLOW" ] && echo "checkout's new code" || echo "project's Conveyor commit") once its push is done" || echo "ends once its cards and push are done")"
+  # building and waiting: the cards counted against the cap, and those left out as they only wait (health()).
+  say=$(jq -cn --argjson p "$$" --arg t "$self" --arg s "$now" --arg r "$why" --arg c "$RAN" --arg h "$([ -n "$OWN" ] || echo "$HERE")" --argjson b "$building" --argjson w "$idles" \
+    '{pid: $p, started: $t, state: $s, reason: (if $r == "" then null else $r end), commit: (if $c == "" then null else $c end), checkout: (if $h == "" then null else $h end), building: $b, waiting: $w}')
+  [ "$say" = "$said" ] || { printf '%s\n' "$say" > "$SAYS.new" && mv -f "$SAYS.new" "$SAYS" && said=$say; }
+}
+# The restart on the new code (new), at a turn where the loop's code is stale (old), in run()'s own variables; it does
+# not return.
+# Restarted as soon as the push job (if any) has ended, without waiting for the cards in flight: the new loop
+# would start a second push beside one still running, and nothing is picked meanwhile; no other push starts once
+# the restart is due (new, turnopen()), so it never waits for a push of a card that landed meanwhile. The cards carry on in
+# this same process on the code they started with (its install stays as it is) until their next step, which begins
+# on the new code where the card can switch (switchcode(), lib/card.sh), and the new loop adopts them
+# (CONVEYOR_ADOPT, with the run lock on fd 8): it counts them against the cap, keeps their claims (their process
+# lives), sees to their ends and the push as for its own, and records one whose process ends without a result as
+# blocked. A pin that is not installed ends the loop only once nothing of its own runs. A `run` ends then too.
+turnrestart() {
+  # The list of the last turn is kept with what runs under each card now: a card killed since then has none under it.
+  held=$(for k in "${!mine[@]}"; do
+    while read -r p t; do [ -z "$p" ] || echo "$k $p $t"; done <<<"${kids[$k]:-}"
+    for p in $(tree "$k"); do t=$(p_started "$p") && echo "$k $p $t"; done
+  done | sort -u)
+  local -A on=() # the commit each card runs now (cardcode())
+  for k in "${!mine[@]}"; do read -r c _ <<<"${mine[$k]}"; on[$k]=$(cardcode "$c" "${took[$k]:-$RAN}"); done
+  echo "conveyor: restarting on the new code; ${#mine[@]} cards in flight carry on on $( (for k in "${!mine[@]}"; do echo "${on[$k]}"; done; [ ${#mine[@]} != 0 ] || echo "$RAN") | sort -u | paste -sd' ' - | sed 's/ /, /g')"
+  # Without its copy of stderr (LOGFD): the new code makes its own, so each restart kept one more, and after some
+  # hundreds every card's test runner got fd 255, bash's own.
+  CONVEYOR_KIDS=$held CONVEYOR_ADOPT=$(for k in "${!mine[@]}"; do echo "$k ${mine[$k]} ${on[$k]}"; done) exec "$BASH" "$new" serve {LOGFD}>&-
+}
+# What the turn's pick reads, in run()'s own variables: the urgent and main-red cards, whether it asks (asking) and
+# the open issues (issues), the seats' accounts, the machine's count (slotturn()), the blocked cards whose issue was
+# closed (shuts), the cards given back, and the sample of the minute.
+turnask() {
+  # The open issues a pick reads, asked before the sample starts, so the sample reads them from ISSUES and never
+  # asks GitHub itself while the pick holds the records' lock.
+  urgent=''; [ "$cap" -le 0 ] || urgent=$(urgent) || urgent=''
+  red=''; [ "$cap" -le 0 ] || [ "$building" -lt "$cap" ] || red=$(redfix "$(for p in "${!mine[@]}"; do echo "${mine[$p]% *}"; done)") || red=''
+  # While a session's API-side error is fresh (session()), no card is picked: its session would meet the same outage.
+  asking=''; if { [ "$building" -lt "$cap" ] || [ -n "$urgent" ] || [ -n "$red" ]; } && [ -z "$old" ] && [ -z "$nopack" ] && [ -z "$nocli" ] && [ -z "$mhold" ]; then
+    if apifresh; then waits=1; else asking=1; [ "$now" != running ] || issues=$(asked) || asking=failed; fi
+  fi
+  # The accounts of the seats the record keeps for an open issue (`control card`) are asked for too, outside the lock:
+  # pick holds that issue's card alone while one is at the guard (cardheld(), lib/pick.sh); the queue goes on.
+  [ "$asking" != 1 ] || [ "$now" != running ] || [ -z "$guard" ] || [ -z "$issues" ] \
+    || for n in $(jq -r --argjson i "$issues" '.cards // {} | keys[] | select(tonumber | IN($i[].number))' <<<"$ctl" 2>/dev/null); do
+      SEATCARD=$n guardread "$ctl" ask >/dev/null
+    done
+  # The machine's count of this project's cards (room()), the waiting ones left out as here, and no card of it
+  # waiting for a slot when it asks for none.
+  # shellcheck disable=SC2034 # RUNNING is read by room() and slotput, from lib/pick.sh
+  RUNNING=$building; slotturn "$building" "$([ "$asking" = 1 ] && [ "$now" = running ] && echo 1)"
+  # A blocked card whose issue was closed leaves the blocked lists (shut), and the issue leaves the open list this
+  # turn's pick reads. Closed is decided from the issue's own state on GitHub, never from its absence in the open
+  # list (a filter or --only narrows that): each blocked card's issue is asked at every turn until it is seen
+  # closed, so it leaves within one turn of closing; a closed answer is kept (shuts) until its card is shut. No
+  # answer is no answer: nothing moves. The shut card ends closed in the card records, so pick does not take its
+  # issue from an open list asked before it closed; once it is opened again, a later turn gives it back (reopened(),
+  # below). The issue leaves ISSUES too, so the sample does not count it queued.
+  while read -r n; do
+    [ "${n:-0}" != 0 ] && [ -z "${shuts[$n]:-}" ] || continue
+    t=$(timeout 20 gh issue view "$n" --json closed 2>/dev/null | jq -r '.closed' 2>/dev/null) || t=''
+    [ "$t" != true ] || shuts[$n]=1
+  done < <(jq -rs 'map(select(.step != "push")) | group_by(.card)[]
+    | select((map(select(.step | IN("landed", "closed", "blocked", "pushed"))) | . as $e
+        | [range(length) as $i | $e[$i] | select(.step != "pushed" and (.step != "blocked" or ($e[$i + 1:] | all(.step == "blocked"))))] | last | .step) == "blocked")
+    | .[0].issue' < <(turncards) 2>/dev/null | sort -un)
+  if [ ${#shuts[@]} != 0 ]; then
+    t=$(printf '%s\n' "${!shuts[@]}" | jq -cs .)
+    [ -z "$issues" ] || issues=$(jq -c --argjson s "$t" 'map(select(.number | IN($s[]) | not))' <<<"$issues")
+    [ ! -s "$ISSUES" ] || { jq -c --argjson s "$t" 'map(select(.number | IN($s[]) | not))' "$ISSUES" > "$ISSUES.new" && mv -f "$ISSUES.new" "$ISSUES"; } 2>/dev/null
+    ! locked shut "$t" || shuts=(); stdbkeeps
+  fi
+  # A shut card's issue opened again is given back as `retry` gives it, before this turn's pick reads the open list.
+  [ "$asking" != 1 ] || [ -z "$issues" ] || reopened "$issues"
+  # So is a card stopped for the owner's yes whose issue has an approval line added since (approved()).
+  [ "$asking" != 1 ] || [ -z "$issues" ] || approved "$issues"
+  # So is a card blocked by a session that never began its work, once a check session starts (startagain()).
+  [ "$asking" != 1 ] || [ -z "$issues" ] || startagain "$issues"
+  # A parent whose GitHub sub-issues are each closed or landed, and an umbrella of a split issue whose slices have all landed or
+  # are already done on main, is closed (umbrellas(), lib/slices.sh).
+  [ "$asking" != 1 ] || [ -z "$issues" ] || umbrellas "$issues"
+  # The sample of the minute, and while a card is in progress a weekly limit reading (reading() asks at
+  # most every LIMIT_TTL seconds). Both are taken out of the loop's job list (they may take seconds: the sample asks
+  # GitHub for the queue, and a job of the loop's would count as a card).
+  if [ $((SECONDS - sampled)) -ge "$SAMPLE" ]; then
+    sampled=$SECONDS; ( sample "$building" "$cap" "$now" >/dev/null 2>&1 8>&- & )
+    [ "$running" = 0 ] || ( reading >/dev/null 2>&1 8>&- & )
+  fi
+}
+# The pick of a turn where the loop asks (asking), in run()'s own variables; a card it picks is started (mine).
+# Its status is 1 when the turn ends here and the next one begins: a card was started, or the pick found the loop's
+# code stale (the next turn says so and stops picking). It is 0 when nothing was picked.
+turnpick() {
+  # A queued card a card on the belt waits on (urgent) goes first, past the cap; the rest only below the cap.
+  picked=''; [ "$asking" != 1 ] || [ -z "$urgent" ] || { picked=$(ONLY=$urgent locked fresh pick retried "$pct" "${issues:-}" "$(acctkey "$ctl")") && [ "$picked" != wait ]; } || picked=''
+  # With the cap reached, a main-red fix card (red) takes the one slot beyond it; no queued issue does.
+  [ -n "$picked" ] || [ "$asking" != 1 ] || [ -z "$red" ] \
+    || { picked=$(BEYOND='main is red' locked fresh pick "$([ "$left" != 0 ] || echo retried)" "$pct" "${issues:-}" "$(acctkey "$ctl")") && [ "$picked" != wait ]; } || picked=''
+  # Below the cap, the issue it would take is first read beside the cards on the belt (overlap(), outside the lock).
+  [ -n "$picked" ] || [ "$building" -ge "$cap" ] || [ "$asking" != 1 ] || { overlap "${issues:-}" "$([ "$left" != 0 ] || echo retried)" "$ctl"; issues=$OVL; }
+  [ -n "$picked" ] || [ "$building" -ge "$cap" ] \
+    || picked=$([ "$asking" = 1 ] && locked fresh pick "$([ "$left" != 0 ] || echo retried)" "$pct" "${issues:-}" "$(acctkey "$ctl")") || { [ "$running" != 0 ] || [ -n "$serve" ] || [ -n "$pusher" ] || exit 1; picked=''; }
+  [ "$picked" != stale ] || return 1 # the next turn says so and stops picking
+  [ "$picked" != wait ] || { waits=1; picked=''; }
+  [ -n "$picked" ] || return 0
+  read -r c n again <<<"$picked"
+  CARDCTL=$ctl cardrun "$c" "$n" & mine[$!]="$c $n"
+  [ "$again" = true ] || left=$((left - 1)); started=$((started + 1))
+  return 1
+}
 run() { # [max-cards] [serve]
   local left=${1:--1} serve=${2:-} cap base='' picked running building idles started=0 c n again timer pusher='' owed tried='' triedat=0 ctl pct now='' p k lim='' waits sampled=-1000000 guard issues='' asking urgent red
   local why say said='' old='' nopack told='' nocli self adopt='' held='' new t tester='' mtried=-1000000 stried=-1000000 taker='' ttook=-1000000 f muter='' utried=-1000000 woke
@@ -375,166 +640,11 @@ run() { # [max-cards] [serve]
   [ -n "$OWN" ] || [ -z "$RAN" ] || FOLLOW=$serve
   if [ -n "$ONLY" ] && [ -z "$serve" ]; then [ "$left" -le 0 ] || lim=$left; left=-1; onlyreport; fi
   while :; do
-    stdbkeeps # the turn's readers, and the cards it starts, find the records kept until they change (lib/records.sh)
-    pushended
-    # The script a `serve` restarts on, once no push runs: the pinned commit's install, or the checkout's own (its
-    # new code); no push starts then, as the restart would wait for it (the new loop makes the push).
-    new=''; if [ -z "$pusher" ] && [ -n "$serve" ] && stale; then
-      if [ -n "$FOLLOW" ]; then new=$HERE/conveyor.sh
-      elif enginepin p 2>/dev/null && installed "$p" ro && machined "$VERSIONS/$p/conveyor/conveyor.sh"; then new=$VERSIONS/$p/conveyor/conveyor.sh; fi
-    fi
-    packturn
-    # The machine hold (machinehold(), issue 221), at every turn: while it stands, this turn picks no card. Said when it
-    # changes, as above.
-    mhold=''; [ -n "$nopack" ] || mhold=$(machineheld)
-    [ "$mhold" = "$htold" ] || { htold=$mhold; [ -z "$mhold" ] || echo "conveyor: $mhold" >&2; }
-    # A pack that follows the plugin's main or its releases: its pushed main, or newest release, is looked at once every IDLE seconds (take(),
-    # lib/install.sh), a job beside the cards, never counted as one and given no run lock; a commit it takes is
-    # restarted on at a later turn (stale()).
-    if [ -n "$serve" ] && [ -z "$nopack" ] && [ $((SECONDS - ttook)) -ge "$IDLE" ] && { [ -z "$taker" ] || ! jobs -rp | grep -qx "$taker"; } \
-      && packget plugin.follow f && [ -n "$f" ]; then
-      ttook=$SECONDS; ( take ) 8>&- < /dev/null & taker=$!
-    fi
-    # A red release run's fix cards (relfixes(), lib/fulltest.sh): looked at once every IDLE seconds, a job beside the
-    # cards as take() is; once each has landed and is in the commit release-prep tests (relhead(), lib/push.sh) and no card is open, it starts release-prep again.
-    if [ -n "$serve" ] && [ -z "$nopack" ] && [ $((SECONDS - rtried)) -ge "$IDLE" ] && { [ -z "$fixer" ] || ! jobs -rp | grep -qx "$fixer"; }; then
-      rtried=$SECONDS; ( relfixes ) 8>&- < /dev/null & fixer=$!
-    fi
-    # The seats and the host's CLIs are worked out once in this shell (clis, its words dropped), so the check below,
-    # the pick and the cards this turn starts find them kept (seat, hostclis, seatready).
-    [ -n "$nopack" ] || clis >/dev/null 2>&1 || :
-    nocli=''; [ -n "$nopack" ] || nocli=$(clis && codexready) || : # a seat whose CLI is gone, or a reviewer model family that resolves to no model id, holds this turn's pick
-    pushturn # the push, when one is owed and due (lib/push.sh)
-    # The control record, at every turn: the cap in force, the guard's reading (taken here, outside the lock:
-    # it may go over the network), and a stop, which ends the loop's own cards in progress.
-    # Read in this shell (ctlread), so the turn's subshells and the cards it starts find it kept while it stands.
-    why=''; if ctlread 2>/dev/null; then ctl=$CTL_V; else ctl=''; why=$(notwhole); fi
-    # A record that does not read keeps the last cap read; with none read, nothing is picked. One that names no cap
-    # has the seed's.
-    IFS=, read -r cap guard <<<"$(jq -r --argjson d "$CAP0" '"\(if . == null then "" else .cap // $d end),\(.guard // "")"' <<<"${ctl:-null}" 2>/dev/null)"
-    if [ -n "$cap" ]; then base=$cap; else cap=${base:-0}; fi
-    [ -z "$lim" ] || [ "$cap" -le "$lim" ] || cap=$lim
-    # The guard reads the account the next card will use (a record that does not read keeps the last one read).
-    pct=''; [ -z "$guard" ] || pct=$(guardread "$ctl" ask | jq -r '.pct // empty')
-    now=$(state "$ctl" "$pct")
-    # A card of the loop whose process ended with no closing line (it was killed, or its shell stopped on an error) is
-    # recorded blocked, so it is not left open for good and `retry` takes it. Its line and its error output
-    # (<worktree>.err, kept with it) say why (cardgone()): its last step and action, and its exit status or signal.
-    # One stopped mid-batch has its own change put back first (gonewt()), or is left open when it cannot be.
-    # Its session, review or tests outlive it (no longer under it, they are found from the last turn's list) and
-    # still use its worktree: they are ended, and gone, before block() takes the worktree away. They are stopped, all
-    # under them with them, then killed: one that ignores TERM never holds the loop, and none starts another on TERM
-    # that would outlive it unseen.
-    for p in "${!mine[@]}"; do
-      # One alive with no process of its step for STUCK and REVIEW_PAUSE seconds (stuckcard(), #466) is ended and blocked, naming that
-      # step, so `retry` can take it.
-      if kill -0 "$p" 2>/dev/null && [ ! -e "$CARDS/${mine[$p]% *}.live" ] && read -r _ gs gone < <(stuckcard "${mine[$p]% *}" turn) && [ "$gone" = stuck ]; then
-        read -r c n <<<"${mine[$p]}"; unset 'mine[$p]' 'took[$p]' 'kids[$p]'
-        gone=$(stuckwhy "$gs" stuck)
-        endcard "$c" "$n" "$p" "$gs" "$gone" && echo "conveyor: card $c: $gone; it is blocked, and \`retry $n\` takes issue #$n again"
-        wait "$p" 2>/dev/null; rm -f "$CARDS/$c.exit"; stdbkeeps; continue
-      fi
-      if kill -0 "$p" 2>/dev/null; then
-        # Those of the last list still alive are kept: one killed during this look has none under it to be found.
-        kids[$p]=$( { while read -r k t; do [ -n "$k" ] && p_alive "$k" "$t" && echo "$k $t"; done <<<"${kids[$p]:-}"
-          for k in $(tree "$p"); do t=$(p_started "$k") && echo "$k $t"; done; } | sort -u)
-        continue
-      fi
-      read -r c n <<<"${mine[$p]}"; unset 'mine[$p]' 'took[$p]'
-      k=${kids[$p]:-}; unset 'kids[$p]'
-      # Its closing line is looked for in the whole lines only: a last line still being written (check() says why)
-      # made the whole read fail, and a card that had landed was blocked; its push is the loop's, as for any landing.
-      [ "$(stdb ask ended "$c" 2>/dev/null)" = true ] && { rm -f "$CARDS/$c.exit"; continue; }
-      gs=$(cardstep "$c"); gone=$(cardgone "$c" "$gs"); rm -f "$CARDS/$c.exit"
-      # No line left: `retry` ended it (unstick()) and moved its lines out; a blocked line now would stand alone.
-      [ -n "$gs" ] || { stdb ask card "$c" 2>/dev/null | grep -q . || continue; }
-      k=$(while read -r p t; do [ -n "$p" ] && p_alive "$p" "$t" && echo "$p $t"; done <<<"$k")
-      kill -KILL $(while read -r p t; do [ -z "$p" ] || freeze "$p"; done <<<"$k") 2>/dev/null
-      while read -r p t; do while [ -n "$p" ] && p_alive "$p" "$t"; do sleep 0.1; done; done <<<"$k"
-      printf 'conveyor: card %s: %s\n' "$c" "$gone" >> "$CARDS/$c.err"
-      gonewt "$c" "$CARDS/$c" "$gs" || continue
-      ( block "$c" "$n" "$CARDS/$c" "$gone" ); stdbkeeps; echo "conveyor: card $c ended without a result: $gone; it is blocked, and \`retry $n\` takes issue #$n again"
-    done
-    # Any other open card whose process is gone (revive()): blocked, its work kept, and picked again.
-    revive "$(for p in "${!mine[@]}"; do echo "${mine[$p]% *}"; done)"
-    if [ "$now" = stopped ] && [ ${#mine[@]} != 0 ]; then
-      while read -r p k; do
-        [ -n "$p" ] || continue
-        # An adopted card is no job of this shell's: wait cannot wait on it, so it is watched until it is gone.
-        wait "$p" 2>/dev/null; while kill -0 "$p" 2>/dev/null; do sleep 0.1; done
-        read -r c n <<<"${mine[$p]}"; unset 'mine[$p]' 'took[$p]' 'kids[$p]'
-        stopped "$c" "$n"; clean "$CARDS/$c"; rm -f "$CARDS/$c.exit"
-        locked moveout '.card == $c' --arg c "$c" && echo "conveyor: stopped card $c; issue #$n is back in the queue" \
-          || echo "conveyor: stopped card $c, but its lines could not be moved out of the card records: retry #$n by hand" >&2
-      done < <(for p in "${!mine[@]}"; do echo "$p ${mine[$p]% *}"; done | locked halt)
-      stdbkeeps
-    fi
-    # The whole test on main (maintest()), looked at once a minute: a job beside the cards, never counted as one, and
-    # given no run lock (fd 8), so a loop that ends while it runs leaves the checkout free for the next loop.
-    if [ -n "$serve" ] && [ -z "$new" ] && [ -z "$nopack" ] && [ $((SECONDS - mtried)) -ge 60 ] && { [ -z "$tester" ] || ! jobs -rp | grep -qx "$tester"; }; then
-      mtried=$SECONDS; ( maintest ) 8>&- < /dev/null & tester=$!
-    fi
-    # The idle mutation checks (mutnext(), lib/mutate.sh), looked at once a minute: a job beside the cards, never
-    # counted as one, and given no run lock. No card's step runs one.
-    if [ -n "$serve" ] && [ -z "$new" ] && [ -z "$nopack" ] && [ $((SECONDS - utried)) -ge 60 ] && { [ -z "$muter" ] || ! jobs -rp | grep -qx "$muter"; }; then
-      utried=$SECONDS; ( mutnext ) 8>&- < /dev/null & muter=$!
-    fi
-    # The monthly test-speed survey's issue (survey(), lib/survey.sh), looked at once a minute, in the loop itself: a
-    # look is a date and a pack read, and files at most one issue a month. With it, the models with no price (noprice(),
-    # lib/control.sh), in this shell, which keeps what it last looked at: the list Needs you counts, and no issue.
-    if [ -n "$serve" ] && [ -z "$new" ] && [ -z "$nopack" ] && [ $((SECONDS - stried)) -ge 60 ]; then
-      stried=$SECONDS; survey 8>&- < /dev/null; noprice 8>&- < /dev/null || :
-    fi
-    cardsrun; waits=''
-    # The cards counted against the builder cap (building): those running, less those that only wait (idle()), at
-    # most as many of them as the cap. running still counts every card: the loop ends only once none is left.
-    # A card that waits for its seat's CLI starts its step again in a free slot once the host lists the CLI (cliwake()).
-    # The free slots are the cap less the cards that do not wait at all: counted after the cap on idle cards, waits
-    # past the cap (the cap lowered while they waited) would fill every slot and none would start again.
-    idles=$(idle "$(for p in "${!mine[@]}"; do echo "$p ${mine[$p]% *}"; done)")
-    [ $((running - idles)) -ge "$cap" ] || { woke=$(cliwake "$(for p in "${!mine[@]}"; do echo "$p ${mine[$p]% *}"; done)" $((cap - running + idles))) \
-      && idles=$((idles - woke)); } || :
-    [ "$idles" -le "$cap" ] || idles=$cap; [ "$idles" -ge 0 ] || idles=0
-    building=$((running - idles))
-    # The machine hold's look (machineprobe()), at most once every POLL seconds (as often as a free loop would pick)
-    # while the hold stands: a job beside the cards, never counted as one, and given no run lock; a `run` does not end
-    # while it runs (below). Once its files pass on main the hold goes, so the next turn picks again and the cards on
-    # hold test again.
-    if [ -n "$mhold" ] && [ $((SECONDS - htried)) -ge "$POLL" ] && { [ -z "$prober" ] || ! jobs -rp | grep -qx "$prober"; }; then
-      htried=$SECONDS; ( machineprobe ) 8>&- < /dev/null & prober=$!
-    fi
-    if [ -z "$old" ] && stale; then
-      old=1; enginepin p f 2>/dev/null || f=''
-      if [ -n "$FOLLOW" ]; then echo "conveyor: the checkout has moved on from this loop's $RAN; nothing new is picked, and the loop restarts on the checkout's new code once its push is done"
-      elif [ -n "$f" ]; then echo "conveyor: $([ -n "$p" ] && echo "the project's engine is now Conveyor commit $p, not this loop's $OWN" || echo "the project follows the plugin's $f and has taken no commit of it on this machine yet"); nothing new is picked, and the loop $([ -n "$serve" ] && echo "restarts on the project's engine once its push is done" || echo "ends once its cards and push are done")"
-      else echo "conveyor: the pack pins another Conveyor commit than this loop's $OWN; nothing new is picked, and the loop $([ -n "$serve" ] && echo "restarts on the pinned commit once its push is done" || echo "ends once its cards and push are done")"; fi
-    fi
-    [ -z "$why" ] || [ -z "$old" ] || why+="; the loop $([ -n "$serve" ] && echo "restarts on the $([ -n "$FOLLOW" ] && echo "checkout's new code" || echo "project's Conveyor commit") once its push is done" || echo "ends once its cards and push are done")"
-    # building and waiting: the cards counted against the cap, and those left out as they only wait (health()).
-    say=$(jq -cn --argjson p "$$" --arg t "$self" --arg s "$now" --arg r "$why" --arg c "$RAN" --arg h "$([ -n "$OWN" ] || echo "$HERE")" --argjson b "$building" --argjson w "$idles" \
-      '{pid: $p, started: $t, state: $s, reason: (if $r == "" then null else $r end), commit: (if $c == "" then null else $c end), checkout: (if $h == "" then null else $h end), building: $b, waiting: $w}')
-    [ "$say" = "$said" ] || { printf '%s\n' "$say" > "$SAYS.new" && mv -f "$SAYS.new" "$SAYS" && said=$say; }
-    # Restarted as soon as the push job (if any) has ended, without waiting for the cards in flight: the new loop
-    # would start a second push beside one still running, and nothing is picked meanwhile; no other push starts once
-    # the restart is due (new, above), so it never waits for a push of a card that landed meanwhile. The cards carry on in
-    # this same process on the code they started with (its install stays as it is) until their next step, which begins
-    # on the new code where the card can switch (switchcode(), lib/card.sh), and the new loop adopts them
-    # (CONVEYOR_ADOPT, with the run lock on fd 8): it counts them against the cap, keeps their claims (their process
-    # lives), sees to their ends and the push as for its own, and records one whose process ends without a result as
-    # blocked. A pin that is not installed ends the loop only once nothing of its own runs. A `run` ends then too.
-    if [ -n "$old" ] && [ -n "$new" ]; then
-      # The list of the last turn is kept with what runs under each card now: a card killed since then has none under it.
-      held=$(for k in "${!mine[@]}"; do
-        while read -r p t; do [ -z "$p" ] || echo "$k $p $t"; done <<<"${kids[$k]:-}"
-        for p in $(tree "$k"); do t=$(p_started "$p") && echo "$k $p $t"; done
-      done | sort -u)
-      local -A on=() # the commit each card runs now (cardcode())
-      for k in "${!mine[@]}"; do read -r c _ <<<"${mine[$k]}"; on[$k]=$(cardcode "$c" "${took[$k]:-$RAN}"); done
-      echo "conveyor: restarting on the new code; ${#mine[@]} cards in flight carry on on $( (for k in "${!mine[@]}"; do echo "${on[$k]}"; done; [ ${#mine[@]} != 0 ] || echo "$RAN") | sort -u | paste -sd' ' - | sed 's/ /, /g')"
-      # Without its copy of stderr (LOGFD): the new code makes its own, so each restart kept one more, and after some
-      # hundreds every card's test runner got fd 255, bash's own.
-      CONVEYOR_KIDS=$held CONVEYOR_ADOPT=$(for k in "${!mine[@]}"; do echo "$k ${mine[$k]} ${on[$k]}"; done) exec "$BASH" "$new" serve {LOGFD}>&-
-    fi
+    turnopen
+    turnended
+    turnside
+    turncount
+    [ -z "$old" ] || [ -z "$new" ] || turnrestart
     if [ -n "$old" ] && [ "$running" = 0 ] && [ -z "$pusher" ]; then
       # A `run` ends here; a card that landed after this turn's push check is owed a push first, as below.
       [ -n "$serve" ] || { [ -n "$nopack" ] || ! owed=$(owed) || [ "$owed" = "$tried" ] || continue; break; }
@@ -551,80 +661,8 @@ run() { # [max-cards] [serve]
         echo "conveyor: the pack pins Conveyor commit ${p:-(none readable)}, which is not installed and verified: run conveyor install <commit>" >&2; exit 1
       fi
     fi
-    # The open issues a pick reads, asked before the sample starts, so the sample reads them from ISSUES and never
-    # asks GitHub itself while the pick holds the records' lock.
-    urgent=''; [ "$cap" -le 0 ] || urgent=$(urgent) || urgent=''
-    red=''; [ "$cap" -le 0 ] || [ "$building" -lt "$cap" ] || red=$(redfix "$(for p in "${!mine[@]}"; do echo "${mine[$p]% *}"; done)") || red=''
-    # While a session's API-side error is fresh (session()), no card is picked: its session would meet the same outage.
-    asking=''; if { [ "$building" -lt "$cap" ] || [ -n "$urgent" ] || [ -n "$red" ]; } && [ -z "$old" ] && [ -z "$nopack" ] && [ -z "$nocli" ] && [ -z "$mhold" ]; then
-      if apifresh; then waits=1; else asking=1; [ "$now" != running ] || issues=$(asked) || asking=failed; fi
-    fi
-    # The accounts of the seats the record keeps for an open issue (`control card`) are asked for too, outside the lock:
-    # pick holds that issue's card alone while one is at the guard (cardheld(), lib/pick.sh); the queue goes on.
-    [ "$asking" != 1 ] || [ "$now" != running ] || [ -z "$guard" ] || [ -z "$issues" ] \
-      || for n in $(jq -r --argjson i "$issues" '.cards // {} | keys[] | select(tonumber | IN($i[].number))' <<<"$ctl" 2>/dev/null); do
-        SEATCARD=$n guardread "$ctl" ask >/dev/null
-      done
-    # The machine's count of this project's cards (room()), the waiting ones left out as here, and no card of it
-    # waiting for a slot when it asks for none.
-    # shellcheck disable=SC2034 # RUNNING is read by room() and slotput, from lib/pick.sh
-    RUNNING=$building; slotturn "$building" "$([ "$asking" = 1 ] && [ "$now" = running ] && echo 1)"
-    # A blocked card whose issue was closed leaves the blocked lists (shut), and the issue leaves the open list this
-    # turn's pick reads. Closed is decided from the issue's own state on GitHub, never from its absence in the open
-    # list (a filter or --only narrows that): each blocked card's issue is asked at every turn until it is seen
-    # closed, so it leaves within one turn of closing; a closed answer is kept (shuts) until its card is shut. No
-    # answer is no answer: nothing moves. The shut card ends closed in the card records, so pick does not take its
-    # issue from an open list asked before it closed; once it is opened again, a later turn gives it back (reopened(),
-    # below). The issue leaves ISSUES too, so the sample does not count it queued.
-    while read -r n; do
-      [ "${n:-0}" != 0 ] && [ -z "${shuts[$n]:-}" ] || continue
-      t=$(timeout 20 gh issue view "$n" --json closed 2>/dev/null | jq -r '.closed' 2>/dev/null) || t=''
-      [ "$t" != true ] || shuts[$n]=1
-    done < <(jq -rs 'map(select(.step != "push")) | group_by(.card)[]
-      | select((map(select(.step | IN("landed", "closed", "blocked", "pushed"))) | . as $e
-          | [range(length) as $i | $e[$i] | select(.step != "pushed" and (.step != "blocked" or ($e[$i + 1:] | all(.step == "blocked"))))] | last | .step) == "blocked")
-      | .[0].issue' < <(turncards) 2>/dev/null | sort -un)
-    if [ ${#shuts[@]} != 0 ]; then
-      t=$(printf '%s\n' "${!shuts[@]}" | jq -cs .)
-      [ -z "$issues" ] || issues=$(jq -c --argjson s "$t" 'map(select(.number | IN($s[]) | not))' <<<"$issues")
-      [ ! -s "$ISSUES" ] || { jq -c --argjson s "$t" 'map(select(.number | IN($s[]) | not))' "$ISSUES" > "$ISSUES.new" && mv -f "$ISSUES.new" "$ISSUES"; } 2>/dev/null
-      ! locked shut "$t" || shuts=(); stdbkeeps
-    fi
-    # A shut card's issue opened again is given back as `retry` gives it, before this turn's pick reads the open list.
-    [ "$asking" != 1 ] || [ -z "$issues" ] || reopened "$issues"
-    # So is a card stopped for the owner's yes whose issue has an approval line added since (approved()).
-    [ "$asking" != 1 ] || [ -z "$issues" ] || approved "$issues"
-    # So is a card blocked by a session that never began its work, once a check session starts (startagain()).
-    [ "$asking" != 1 ] || [ -z "$issues" ] || startagain "$issues"
-    # A parent whose GitHub sub-issues are each closed or landed, and an umbrella of a split issue whose slices have all landed or
-    # are already done on main, is closed (umbrellas(), lib/slices.sh).
-    [ "$asking" != 1 ] || [ -z "$issues" ] || umbrellas "$issues"
-    # The sample of the minute, and while a card is in progress a weekly limit reading (reading() asks at
-    # most every LIMIT_TTL seconds). Both are taken out of the loop's job list (they may take seconds: the sample asks
-    # GitHub for the queue, and a job of the loop's would count as a card).
-    if [ $((SECONDS - sampled)) -ge "$SAMPLE" ]; then
-      sampled=$SECONDS; ( sample "$building" "$cap" "$now" >/dev/null 2>&1 8>&- & )
-      [ "$running" = 0 ] || ( reading >/dev/null 2>&1 8>&- & )
-    fi
-    if [ -n "$asking" ]; then
-      # A queued card a card on the belt waits on (urgent) goes first, past the cap; the rest only below the cap.
-      picked=''; [ "$asking" != 1 ] || [ -z "$urgent" ] || { picked=$(ONLY=$urgent locked fresh pick retried "$pct" "${issues:-}" "$(acctkey "$ctl")") && [ "$picked" != wait ]; } || picked=''
-      # With the cap reached, a main-red fix card (red) takes the one slot beyond it; no queued issue does.
-      [ -n "$picked" ] || [ "$asking" != 1 ] || [ -z "$red" ] \
-        || { picked=$(BEYOND='main is red' locked fresh pick "$([ "$left" != 0 ] || echo retried)" "$pct" "${issues:-}" "$(acctkey "$ctl")") && [ "$picked" != wait ]; } || picked=''
-      # Below the cap, the issue it would take is first read beside the cards on the belt (overlap(), outside the lock).
-      [ -n "$picked" ] || [ "$building" -ge "$cap" ] || [ "$asking" != 1 ] || { overlap "${issues:-}" "$([ "$left" != 0 ] || echo retried)" "$ctl"; issues=$OVL; }
-      [ -n "$picked" ] || [ "$building" -ge "$cap" ] \
-        || picked=$([ "$asking" = 1 ] && locked fresh pick "$([ "$left" != 0 ] || echo retried)" "$pct" "${issues:-}" "$(acctkey "$ctl")") || { [ "$running" != 0 ] || [ -n "$serve" ] || [ -n "$pusher" ] || exit 1; picked=''; }
-      [ "$picked" != stale ] || continue # the next turn says so and stops picking
-      [ "$picked" != wait ] || { waits=1; picked=''; }
-      if [ -n "$picked" ]; then
-        read -r c n again <<<"$picked"
-        CARDCTL=$ctl cardrun "$c" "$n" & mine[$!]="$c $n"
-        [ "$again" = true ] || left=$((left - 1)); started=$((started + 1))
-        continue
-      fi
-    fi
+    turnask
+    if [ -n "$asking" ]; then turnpick || continue; fi
     # Nothing was picked. With none of the loop's cards running and no push under way, the rule Merge PR idle
     # (idlemerge(), lib/push.sh, which checks the rule and the card records) is looked at once every IDLE seconds: a job
     # beside the cards, never counted as one, and given no run lock.

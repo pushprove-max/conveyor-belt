@@ -105,6 +105,29 @@ and drops a line left with none; the rest of the body is kept byte for byte. It 
 written, for an issue depending on itself, an issue that is not open in the project, a dependency that would make a
 cycle, an add to an issue whose card is already running, and a remove of a number no `Depends on:` line names.
 
+## The loop's turn
+
+`run()` in `lib/run.sh` is the loop of `conveyor.sh run` and `conveyor.sh serve`. It takes the run lock and then
+goes turn after turn. Each turn calls these functions in this order:
+
+- `turnopen` reads the pack, the machine hold and the control record, and starts the push when one is due. It also
+  finds the code that a `serve` restarts on.
+- `turnended` blocks each card of the loop that ended without a result or is stuck. When the control record says
+  stop, it ends the loop's cards, except a card that has begun to land, to file its follow-ups or to file the slices
+  of a split. A card that waits at its land step for a release run is ended, unless it has filed slices.
+- `turnside` starts the jobs that a `serve` runs beside the cards: the whole test on main, the idle mutation checks
+  and the test-speed survey.
+- `turncount` counts the cards that build against the cap and the cards that wait, and writes `loop.json`.
+- `turnrestart` runs only when the loop's code is stale and a new script is known. It restarts the loop on the new
+  code, and the new loop adopts the cards in flight.
+- `turnask` gets what the pick reads: the open issues, the urgent and main-red cards, and the blocked cards whose
+  issue is closed.
+- `turnpick` picks an issue and starts its card. The turn then ends, and the next turn starts.
+
+When the turn picks nothing, it waits (`turnwait`) until a card, the push or the machine hold's check ends, or until
+the turn's timer ends. A `run` ends at the first turn where none of its cards, pushes, machine hold checks or picks
+is left (`runends`).
+
 ## The judge
 
 The judge is set in each project's control record, by `conveyor.sh control judge ...` or in the Judge row of the

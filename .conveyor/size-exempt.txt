@@ -30,7 +30,6 @@ conveyor/lib/control.sh
 conveyor/lib/control.sh	control
 conveyor/lib/install.sh	installservice
 conveyor/lib/push.sh
-conveyor/lib/run.sh	run
 conveyor/lib/session.sh	watch
 conveyor/lib/setup.sh
 conveyor/lib/setup.sh	doctor
