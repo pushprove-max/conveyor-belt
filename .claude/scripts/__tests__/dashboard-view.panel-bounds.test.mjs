@@ -25,10 +25,12 @@ test('at Small, 11 waiting rows with long titles and chips shrink to the Queue p
   assert.equal(q.dataset.size, 'small');
   const lists = Array.from(q.querySelectorAll('.panel-body ul.rows'));
   assert.equal(lists.length, 1);
-  assert.equal(w.getComputedStyle(lists[0]).gridTemplateColumns, 'minmax(0, 1fr)', 'the list\'s one column is no wider than the list');
+  const zero = (v) => /^0(px)?$/.test(v);
+  // jsdom spells the zero minimum "0" or "0px" by version; the column is bounded by the list either way.
+  const col = /^minmax\(\s*([^,\s]+)\s*,\s*1fr\s*\)$/.exec(w.getComputedStyle(lists[0]).gridTemplateColumns);
+  assert.ok(col && zero(col[1]), 'the list\'s one column is no wider than the list');
   const rows = Array.from(lists[0].children);
   assert.equal(rows.length, 11);
-  const zero = (v) => /^0(px)?$/.test(v);
   for (const row of rows) {
     const r = w.getComputedStyle(row);
     assert.ok(['', 'auto'].includes(r.width), `no fixed width: ${r.width}`);
