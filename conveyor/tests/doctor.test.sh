@@ -176,6 +176,20 @@ t_doctordamaged() {
     || fail "doctor's removal did not remove the damaged install under a data folder with an apostrophe: $out"
   (cd "$S" && XDG_DATA_HOME=$q bash "$X" install "$B" >/dev/null 2>&1) && [ "$(git -C "$v" rev-parse HEAD)" = "$B" ] || fail "the install failed after doctor's fix"
 }
+# Bug: on Claude Code before 2.1.329 a card's guard hooks fail open (it ignores card-settings.json's "onFailure":
+# "block"), and doctor said nothing. Doctor names it on 2.1.328 and says nothing of the guards on 2.1.330.
+t_doctorguards() {
+  local X out v c=$T/$CASE/old/claude; doctordone; mkdir -p "$T/$CASE/old"
+  for v in 2.1.328 2.1.330; do
+    # stub: the sample's claude ($G/claude) at the version under test, first on PATH; any other call goes to it.
+    printf '#!/bin/sh\n[ "$1" != --version ] || { echo "%s (Claude Code)"; exit 0; }\nexec "%s" "$@"\n' "$v" "$G/claude" > "$c" && chmod +x "$c" || fail "the claude stub was not made"
+    out=$(cd "$S" && PATH=$T/$CASE/old:$PATH bash "$X" doctor 2>&1)
+    if [ $v = 2.1.328 ]; then
+      grep -qxF "missing: Claude Code 2.1.329 or later for the card guards (found 2.1.328 at $c): card guards need 2.1.329 or later, as an older one lets a tool call through when a guard fails to run; fix: run $c update" <<<"$out" \
+        || fail "doctor did not name 2.1.328 as too old for the card guards: $out"
+    else ! grep -q 'card guards' <<<"$out" || fail "doctor named 2.1.330 as too old for the card guards: $out"; fi
+  done
+}
 # The command removes a dangling link, which chmod cannot follow, as well as a damaged folder (t_doctordamaged).
 t_doctorlink() {
   local X out l q="$T/$CASE/owner's-data"; doctordone

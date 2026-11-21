@@ -23,7 +23,9 @@ found and where.
 - Python 3 with its `venv` module (on Debian or Ubuntu, the `python3-venv` package), for the Board's virtualenv.
 - The GitHub CLI, `gh`, signed in. When it is not signed in, setup starts `gh auth login`.
 - The Claude Code CLI, 2.1.322 or newer, signed in (`npm install -g @anthropic-ai/claude-code`). When it is not
-  signed in, setup starts `claude auth login`.
+  signed in, setup starts `claude auth login`. The card's guard hooks need Claude Code 2.1.329 or newer. On those
+  versions, a guard that fails to run (it crashes, times out or is missing) blocks the call. An older version lets
+  the call through, and `conveyor.sh doctor` says that the card guards need 2.1.329 or later.
 - The Codex CLI, signed in, for the Codex reviewer and the Codex builder models (`npm install -g @openai/codex`). When
   it is not signed in, setup starts `codex login`.
 - For the Board, an `openssl` whose `req` takes `-addext`: OpenSSL 1.1.1 or newer, or the LibreSSL in macOS's `/usr/bin/openssl`. It makes the Board's certificate.

@@ -13,7 +13,7 @@
 # Homebrew's folders first on macOS, as conveyor.sh does. A newer copy further on PATH, or off it, does not count.
 # /conveyor-belt:setup runs this before conveyor.sh, which needs bash 5.1, so it must run in macOS's bash 3.2: no
 # associative arrays, no mapfile, no empty arrays under set -u. Its functions are named req_*; doctor (lib/setup.sh)
-# sources this file for req_report.
+# sources this file for req_report and req_guards.
 REQ_HERE=.; [[ ${BASH_SOURCE[0]} != */* ]] || REQ_HERE=${BASH_SOURCE[0]%/*}
 . "$REQ_HERE/portable.sh" || exit 1
 
@@ -79,6 +79,15 @@ req_report() {
     else echo "missing: $(req_desc "$n") ($REQ_WHY); fix: run /conveyor-belt:setup, which installs it"; bad=1; fi
   done
   return $bad
+}
+# A card's guard hooks (card-settings.json) carry "onFailure": "block", so a guard that fails to run blocks the call;
+# Claude Code before 2.1.329 ignores the field and lets the call through. One missing: line when the claude found is
+# older (none when it is not there: req_report names that); 1 then.
+req_guards() {
+  req_state claude
+  [ -n "$REQ_AT" ] && [ -n "$REQ_VER" ] && ! req_vge "$REQ_VER" 2.1.329 || return 0
+  echo "missing: Claude Code 2.1.329 or later for the card guards (found $REQ_VER at $REQ_AT): card guards need 2.1.329 or later, as an older one lets a tool call through when a guard fails to run; fix: run $REQ_AT update"
+  return 1
 }
 
 # The system's package for a requirement: Homebrew's formula, or apt-get's or dnf's packages; none for the npm ones.

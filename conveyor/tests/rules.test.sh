@@ -102,6 +102,15 @@ t_packrules() {
     || fail "a hooks.json of another shape was taken for the card settings (exit $RC): $(cat "$T/$CASE/run.out")"
 }
 
+# Bug: a card's guard hook with no "onFailure": "block" lets the tool call through when the guard itself fails to run
+# (crashes, times out, is missing), so a broken guard checks nothing. Every PreToolUse hook in card-settings.json
+# carries it.
+t_guardsblock() {
+  local s=$SRC/card-settings.json
+  jq -e '[.hooks.PreToolUse[].hooks[]] | length > 0 and all(.onFailure == "block")' "$s" > /dev/null \
+    || fail "a PreToolUse hook of the card's settings lets a call through when it fails to run: $(jq -c '[.hooks.PreToolUse[] | .matcher as $m | .hooks[] | select(.onFailure != "block") | "\($m) \(.command)"]' "$s")"
+}
+
 # Bugs: a change that fails a product check (here two of the case's own: a baseline raised, a schema added) passes,
 # or the check's own lines are not in what blocks the card: a check's verbose output (more than one command argument
 # can hold) comes before its failing line, and the blocked line's tail keeps the end, so that line is not lost behind
