@@ -217,6 +217,28 @@ ownrunner() { # <worktree> <file>...
   done
   printf 'bash %q\n' "$HERE/lib/filerun.sh"
 }
+# The command tests() gives each test file when the pack sets no test.fileCommand: ownrunner()'s, except on a run that
+# checks whether main fails a file (TEST_PACKONLY set: mainred.sh verdicts(), redrun(); #1275). Such a run marks main
+# red, so it runs the file the way the pack's test command does: test.command given the file as test.list says
+# (args: its path at the end; placeholder: in place of `{files}`; env: in CONVEYOR_TEST_FILES), in the shape
+# filecmd() gives it the path. Conveyor's own runner is not the pack's way (a TypeScript file it gives node without
+# the project's loader fails to load). Fails, printing why, when the test command cannot be given one file
+# (listwhy(), or test.list runner).
+nofilecmd() { # <worktree> <file>...
+  local tc lm why
+  [ -n "${TEST_PACKONLY:-}" ] || { ownrunner "$@"; return; }
+  packget test.command tc test.list lm 2>/dev/null || { echo 'the pack could not be read'; return 1; }
+  why=$(listwhy "$1" "$tc" "$lm")
+  [ -n "$why" ] || [ "$lm" != runner ] || why='test.list is runner, so the test command reads the whole list itself'
+  [ -n "$why" ] || [ -n "$tc" ] || why='the pack sets no test command'
+  [ -z "$why" ] || { printf 'the pack sets no test.fileCommand, and its test command cannot be given one test file (%s), so the file did not run on main the way the pack runs it\n' "$why"; return 1; }
+  case $lm in
+    args) printf '%s\n' "$tc" ;;
+    placeholder) printf 'packfile() {\n%s\n}; packfile\n' "${tc//'{files}'/'"$1"'}" ;;
+    env) printf 'packfile() {\nexport CONVEYOR_TEST_FILES=$1\n%s\n}; packfile\n' "$tc" ;;
+    *) printf 'the pack sets no test.fileCommand, and its test.list, %s, is no form a test file can be given in\n' "$lm"; return 1 ;;
+  esac
+}
 # One run of the bug-card check in <worktree>: the files <file>... each alone through test.fileCommand, each a `fail`
 # line of the run's list (CONVEYOR_TEST_RERUN). A file that runs past its own time limit (its `# timeout:` line:
 # filecmd()) is stopped and fails, and the output says so; one still running when the run's own limit (the

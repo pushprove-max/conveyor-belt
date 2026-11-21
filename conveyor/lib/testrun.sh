@@ -283,8 +283,8 @@ slowoff() { # <worktree>
 # in a process of its own. A card never runs the suite command (test.command): its own run (no field) and every run
 # of a card's files (the fix round's run again, the bug-card check, the run on main, the main-red check, the proofs,
 # the mutation check and the test actions: test.fileCommand alone) are per file. With no test.fileCommand set, each
-# file runs with Conveyor's own runner (testlist.sh ownrunner(): lib/filerun.sh); when that has no runner for one of the files to
-# run, the run does not run and fails with <worktree>.stop naming test.fileCommand and that file (NORUNNER); a card's run
+# file runs with Conveyor's own runner (testlist.sh ownrunner(): lib/filerun.sh), and on a check of main (TEST_PACKONLY) with the
+# pack's test command (testlist.sh nofilecmd()); when it gives none, the run does not run and fails with <worktree>.stop naming test.fileCommand and why (NORUNNER); a card's run
 # linked to no test file runs nothing and passes, as with it set. Only the suite runs (test.full: the full test
 # suite, Push landed's and the release's; test.main: the whole test on main) run a suite command.
 # A card's run (not alone) gives test.fileCommand the tests its change touches (listcmd()), and <worktree>.testlist
@@ -304,7 +304,7 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
   rm -rf "$1.testlog" "$1.turnwait" "$1.first" "$1.passed" "$1.oldtimes" "$1.oldfiles" "$1.times" "$1.reported" "$1.uncovered" "$1.covfirst"; { mkdir "$1.testlog" && checkskept "$1" && packget "${2:-test.fileCommand}" cmd && slot_pool; } 2>"$1.test" || return 1
   if [ "${2:-}" = test.fileCommand ]; then
     [ -n "$cmd" ] || cmd=$(mapfile -t l < <(awk -F'\t' '$1 == "fail" && $2 != "" && !s[$2]++ { print $2 }' "$1.rerun" 2>/dev/null)
-      ownrunner "$1" "${l[@]}") || { narrowstop "$cmd" > "$1.stop"; cat "$1.stop" > "$1.test"; return 1; }
+      nofilecmd "$1" "${l[@]}") || { narrowstop "$cmd" > "$1.stop"; cat "$1.stop" > "$1.test"; return 1; }
     cmd=$(filecmd "$cmd")
   fi
   # A card's run and the full test suite (fulltest(), release-prep's relsuite()) ask for the runner's report: setup

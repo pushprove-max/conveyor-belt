@@ -357,21 +357,27 @@ bugnamed() { # <card> <worktree> <issue json>
 # change and pass with it. Tests the change adds are not asked for and not run here (the test step runs them). Writes
 # the result in <worktree>.unfixed, which the review is shown; its first line is the reason when the check fails.
 # Exit 0 when the check holds; 3 when every case passes without the change (main is no longer red for them: card()
-# closes the card as already done); 2 when a case still fails with the change, a case passes without it while another
+# closes the card as already done), or when the pack's test command cannot run them alone (no test.fileCommand, and
+# nofilecmd() refuses: nothing shows main red the pack's way); 2 when a case still fails with the change, a case passes without it while another
 # fails, a run gave no result for a case, or a run could not be made (card() blocks the card with that first line).
 # The output of each run (redkeep()) stays beside the card's kept work after the run's worktree goes: a reason that a
 # run gave no result, or could not be made, names that file and quotes its end. A check that holds, or a card that
 # closes as already done, keeps none.
 redproof() { # <card> <worktree>
-  local mwt=$CARDS/mainrun/$1.unfixed cs sha='' out wo='' wi='' rc=2 kw='' ki='' kf=''
+  local mwt=$CARDS/mainrun/$1.unfixed cs sha='' out wo='' wi='' rc=2 kw='' ki='' kf='' fc nw
   cs=$(jq -ce --arg c "$1" '[.reds[]? | select(.card == $c) | .cases[] | {name: .case, file, files: [.files[]? | strings], case: (.file as $f
     | if .case == $f then "" elif .case | startswith($f + ": ") then .case[($f | length) + 2:] else .case end)}] | select(. != [])' "$MAINRED" 2>/dev/null) \
     || { echo "the main-red record names no case of this card, so the cases main fails could not be run" > "$2.unfixed"; return 2; }
   if sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
     && out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
       && git worktree add -q --detach "$mwt" "$sha" && deps "$mwt"; } 2>&1 < /dev/null); then
-    wo=$(redrun "$mwt" "$cs") || wo=''; kw=$(redkeep "$1" "$mwt.test" without)
-    if [ -z "$wo" ] || [ -n "$(rednames none "$wo")" ]; then
+    # With no test.fileCommand and a test command that cannot be given one file (testlist.sh nofilecmd(), #1275), no
+    # run shows main red the pack's way (verdicts() marks no case so): the mark has no proof, and the card closes.
+    packget test.fileCommand fc 2>/dev/null && [ -z "$fc" ] && ! nw=$(TEST_PACKONLY=1 nofilecmd "$mwt") || nw=''
+    [ -n "$nw" ] || { wo=$(redrun "$mwt" "$cs") || wo=''; kw=$(redkeep "$1" "$mwt.test" without); }
+    if [ -n "$nw" ]; then
+      out="main is not red for $(jq -r '[.[] | "`\(.name)`"] | join(", ")' <<<"$cs") the pack's way: $nw; main is marked red only when that run fails, so the card closes as already done"; rc=3
+    elif [ -z "$wo" ] || [ -n "$(rednames none "$wo")" ]; then
       out="the run on main's code at $sha without the change gave no result for $(rednames none "${wo:-$cs}" | sed 's/^$/its cases/'), so it proves nothing either way"; kf=$kw
     elif [ -z "$(rednames fail "$wo")" ]; then
       out="main is no longer red for $(rednames pass "$wo"): they pass on main's code at $sha without the change, so the card closes as already done"; rc=3

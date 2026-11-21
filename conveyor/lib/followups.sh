@@ -399,7 +399,8 @@ ncblock() { # <card> <issue> <worktree> <reason> <words>
 # nearly every review, and a new review only meets the same move again).
 # A main-red fix card (issue 0, its entry in the main-red record) that made no change first runs its cases again on
 # main as it is now (bugproof.sh redproof(), issue 323): when every case passes there, main is no longer red for them, and the card
-# closes as not needed, its closed line saying so. Else it is blocked, saying why, whatever its reply says: only that
+# closes as not needed, its closed line saying so; so too when the pack's test command cannot run them alone (no
+# test.fileCommand: #1275), as then nothing shows main red the pack's way. Else it is blocked, saying why, whatever its reply says: only that
 # run, not a review of an ALREADY-DONE line, shows main is no longer red.
 # Every reason it blocks with names the card's kept folder, where block() moves the session's output and errors, so
 # the owner finds why the session stopped (issue 495), and is posted on the issue. A review of an ALREADY-DONE line
@@ -417,7 +418,7 @@ nochange() { # <card> <issue> <worktree> <brief>
       || { ncblock "$c" "$n" "$wt" "$t. The engine could not run its cases again on main: the worktree is not clean or could not be moved to main. ${err:0:400}" "$why"; return; }
     redproof "$c" "$wt"
     [ $? = 3 ] || { ncblock "$c" "$n" "$wt" "$t. Its cases on main as it is now: $(head -n 1 "$wt.unfixed")" "$why"; return; }
-    t="Not needed: the session made no change, and the cases ran again on main. $(head -n 1 "$wt.unfixed")"
+    t="Not needed: the session made no change, and its cases were checked again on main. $(head -n 1 "$wt.unfixed")"
     res=$(line "$c" "$n" closed ok "$(jq -cn --arg r "$t" --argjson e "$(ending)" --argjson w "$(waited)" '{reason: $r} + $e + $w')") && locked append "$res" \
       || { ncblock "$c" "$n" "$wt" "$t The engine could not write the closed line." "$why"; return; }
     clean "$wt"; return

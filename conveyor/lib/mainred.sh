@@ -24,8 +24,8 @@
 #   the run's slot, slot_take), each named `fail` in its list. With no control that could run, nothing tells the
 #   machine from main, and a failure whose inputs changed is main's, as before issue 221.
 # - card: it passed on main, or main's run did not run it (its worktree could not be made, the command did not
-#   select it, or its file is one the card's own change adds, which main does not have: issue 323): the card's to
-#   fix, as before. A file the change edits runs on main in main's version: failing there too, it is main's. A
+#   select it, the pack sets no test.fileCommand and its test command cannot be given one file (#1275), or its file
+#   is one the card's own change adds, which main does not have: issue 323): the card's to fix, as before. A file the change edits runs on main in main's version: failing there too, it is main's. A
 #   document (#367) is no test file and does not run on main: its failure is the card's, with why "no test file: a
 #   selection error".
 # - flaky: it failed on the first run and passed on the run again (PASSEDAGAIN; flakyrun() records it).
@@ -63,13 +63,16 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
         ($um[] | if .case == null then "fail\t\(.file)" else "fail\t\(.file)\t\(.case)" end), ($ctl[] | "fail\t\(.)")' <<<"$3" > "$mwt.rerun"; then
       # Its limit (issue 420): the card's own (testTimeout), never none, kept by timeout itself (TEST_HARD), as a
       # runner waiting for a whole-suite turn stops the run's clock. Each failing file runs alone through
-      # test.fileCommand, as the card's own run does, once however many of its cases failed.
+      # test.fileCommand, as the card's own run does, once however many of its cases failed. With none set, it runs
+      # the way the pack's test command runs it (TEST_PACKONLY: testlist.sh nofilecmd(), #1275), never with Conveyor's
+      # own runner: a file that fails only there is not main's. When the test command cannot be given one file,
+      # nothing runs on main (<worktree>.stop), and each failure is the card's.
       lim=${TEST_TIMEOUT:-}; [[ $lim =~ ^[1-9][0-9]*$ ]] || { packget tunables.testTimeout lim 2>/dev/null && [[ $lim =~ ^[1-9][0-9]*$ ]]; } || lim=3600
       awk -F'\t' -v OFS='\t' '$1 != "fail" { print; next } !s[$2]++ { print "fail", $2 }' "$mwt.rerun" > "$mwt.rerun.new" && mv -f "$mwt.rerun.new" "$mwt.rerun"
-      s=$SECONDS; CONVEYOR_TEST_ONESLOT=1 TEST_HARD=$lim tests "$mwt" test.fileCommand alone; rc=$?; s=$((SECONDS - s))
+      s=$SECONDS; TEST_PACKONLY=1 CONVEYOR_TEST_ONESLOT=1 TEST_HARD=$lim tests "$mwt" test.fileCommand alone; rc=$?; s=$((SECONDS - s))
       # A run that passed failed nothing (testfails() names a command that wrote no log as a file whatever its exit);
-      # one that did not run (no test.fileCommand: <worktree>.stop) ran nothing on main.
-      if [ -s "$mwt.stop" ]; then mf=null; elif [ $rc = 0 ]; then mf='{"files":[]}'; else mf=$(testfails "$mwt.test" "$rc") || mf=null; fi
+      # one that did not run (<worktree>.stop) ran nothing on main.
+      if [ -s "$mwt.stop" ]; then mf=null; echo "conveyor: card $1: its failing cases did not run on main: $(head -n 1 "$mwt.stop")" >&2; elif [ $rc = 0 ]; then mf='{"files":[]}'; else mf=$(testfails "$mwt.test" "$rc") || mf=null; fi
       # The controls that did not pass: each one the run did not end ok (failed, timed out or not run).
       [ $rc = 0 ] || cf=$(jq -c --slurpfile c <(printf '%s' "$ctl") '$c[0] as $c | [.passed // []] as $p | [$c[] | select(IN($p[0][]) | not)]' <<<"${mf:-null}" 2>/dev/null) || cf=$ctl
       m=$(jq -cn --arg sha "$sha" --argjson s "$s" --argjson rc "$rc" '{sha: $sha, sec: $s, exit: $rc}')
@@ -267,8 +270,10 @@ redrun() { # <worktree> <cases json>
   jq -r --arg rn "${SUITERUNNERS:-}" '($rn | split("\n")) as $rn | .[] | [.files[]? | select(IN($rn[]; .) | not)] as $own
     | if .case == "" then "fail\t\(.file)" elif IN($rn[]; .file) and $own != [] then (.case as $c | $own[] | "fail\t\(.)\t\($c)")
       else "fail\t\(.file)\t\(.case)" end' <<<"$2" > "$1.rerun"
-  tests "$1" test.fileCommand alone; rc=$?
-  [ -z "$(testlogs "$1")" ] || t=$(testfails "$1.test" "$rc" | jq -ce objects) || t='{}'
+  # With no test.fileCommand, the way the pack's test command runs a file, as verdicts() runs it (#1275); when that
+  # cannot be given one file, nothing runs (<worktree>.stop), and the run names no case: none.
+  TEST_PACKONLY=1 tests "$1" test.fileCommand alone; rc=$?
+  if [ -s "$1.stop" ]; then t='{}'; elif [ -n "$(testlogs "$1")" ]; then t=$(testfails "$1.test" "$rc" | jq -ce objects) || t='{}'; fi
   local own=false; ! testlogs "$1" | grep -qvxF "$1.testlog/files" || own=true # a log of the runner's own, beside filecmd()'s
   jq -c --slurpfile t <(printf '%s' "$t") --argjson rc "$rc" --argjson own "$own" '$t[0] as $t | def of($x): . == $x.file or ($x.case != "" and IN($x.files[]?; .));
     map(. as $c | . + {verdict: (if $t == null then (if $rc == 0 then "pass" else "fail" end)

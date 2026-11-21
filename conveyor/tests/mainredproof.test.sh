@@ -159,7 +159,7 @@ t_mainrednochange() {
   out=$(eng 'wt=$CONVEYOR_CARDS/cfix issue="" sprompt=""; redbrief cfix 0 "" && echo "staged $(git -C "$wt" diff --cached --name-only)"
     emptychange cfix 0 "$wt" ""; echo "empty $?"; nochange cfix 0 "$wt" brief' 2>&1)
   [[ $out == "staged .conveyor/test-links.json"$'\n'"empty 0"* ]] || fail "the fix card's staged links alone were not taken for no change (emptychange() exit 0): $out"
-  [ "$(st 'select(.step == "closed") | .reason')" = 'Not needed: the session made no change, and the cases ran again on main. Main is no longer red for `a.test: one`, `c.test`: they pass on main'"'"'s code at '"$s"' without the change, so the card closes as already done.' ] \
+  [ "$(st 'select(.step == "closed") | .reason')" = 'Not needed: the session made no change, and its cases were checked again on main. Main is no longer red for `a.test: one`, `c.test`: they pass on main'"'"'s code at '"$s"' without the change, so the card closes as already done.' ] \
     || fail "the fix card with no change did not close as not needed: $out: $(st '"\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
   out=$(eng "redopen cfix && echo open")
   [ -z "$(st 'select(.step | IN("blocked", "landed", "review"))')" ] && [[ $out != *open* ]] && [ "$(git -C "$R" rev-parse HEAD)" = "$s" ] && [ ! -e "$w" ] \
@@ -180,6 +180,91 @@ t_mainrednochangered() {
   [[ $(st 'select(.card == "cfix" and .step == "blocked") | .reason') == "the session made no change, so there is nothing to review. Its cases on main as it is now: "*'`a.test: one`, `c.test` still fails on main'"'"'s code at '*', and there is no change to run them with. Its session'"'"'s output and errors are kept in kept/cfix/. Its last reply: ALREADY-DONE: main fixes it' ]] \
     && [ -z "$(st 'select(.card == "cfix" and (.step | IN("closed", "review", "start")))')" ] \
     || fail "the fix card whose cases still fail on main was not blocked naming the run, or went to review: $out: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
+}
+
+# #1275: a pack that sets no test.fileCommand, its test command `PACK_LOADER=1 node --test` given a file as test.list
+# <form> says. Main's p.test.js loads only with PACK_LOADER set (as a TypeScript file loads only through its project's
+# loader): it passes under the pack's command, and fails to load under Conveyor's own runner (lib/filerun.sh: plain
+# node --test), as it failed on the card's run. Sets s, main's commit.
+packred() { # <test.list: args, or "" for none>
+  setup "[$(issue 7 2026-01-01)]"
+  echo '{"name": "p", "private": true}' > "$R/package.json"
+  printf '%s\n' "if (!process.env.PACK_LOADER) throw new Error('Cannot find module ./gone: loaded without the pack loader');" \
+    "require('node:test')('loads', () => {});" > "$R/p.test.js"
+  git -C "$R" add package.json p.test.js && git -C "$R" commit -qm p.test.js || fail "main's p.test.js could not be committed"
+  tune --arg l "$1" 'del(.test.fileCommand) | .test.command = "PACK_LOADER=1 node --test" | if $l == "" then del(.test.list) else .test.list = $l end'
+  s=$(git -C "$R" rev-parse HEAD)
+}
+# verdicts() on card c7, whose last run failed p.test.js as node --test names a file that fails to load: a case named
+# after the file.
+packverdicts() {
+  git -C "$R" worktree add -q --detach "$T/$CASE/cards/c7" || fail "the card's worktree could not be made"
+  eng 'TEST_WAIT=; TEST_RUN=; TEST_FREE=; verdicts c7 "$CONVEYOR_CARDS/c7" '"'"'{"files":[{"file":"p.test.js","cases":[{"name":"p.test.js","line":1}]}]}'"'"' | jq -c "[.verdicts, .mainRun.exit]"' 2>"$STUB/verdicts.err"
+}
+# Bug it catches: the check on main ran the file with Conveyor's own runner, where it fails to load, not with the
+# pack's test command, where it passes: main was marked red and its fix card blocked ("still fails on main"). The run
+# on main passes (exit 0), the failure is the card's, and the main-red record is not written.
+t_mainredpackcmd() {
+  local out s
+  packred args
+  out=$(packverdicts) || fail "verdicts failed: $out $(cat "$STUB/verdicts.err")"
+  [ "$out" = '[[{"case":"p.test.js: p.test.js","verdict":"card"}],0]' ] && [ ! -e "$ST/mainred.json" ] \
+    || fail "verdicts on p.test.js failing to load on the card (a file that passes under the pack's command) did not run it the pack's way, or marked main red: $out $(cat "$ST/mainred.json" 2>&1)"
+}
+# Bug it catches: a pack whose test command cannot be given one file (no test.list: the pack the bug was found on) ran
+# the file on main with Conveyor's own runner and marked main red for a file that fails only there. Nothing runs on
+# main, the output says why, and the failure is the card's.
+t_mainrednolist() {
+  local out s
+  packred ''
+  out=$(packverdicts) || fail "verdicts failed: $out $(cat "$STUB/verdicts.err")"
+  [ "$(jq -c '.[0]' <<<"$out")" = '[{"case":"p.test.js: p.test.js","verdict":"card"}]' ] && [ ! -e "$ST/mainred.json" ] \
+    && grep -q 'card c7: its failing cases did not run on main: .*test.list is not set' "$STUB/verdicts.err" \
+    || fail "verdicts on p.test.js with no test.list ran it on main another way, marked main red or did not say why: $out $(cat "$STUB/verdicts.err" "$ST/mainred.json" 2>&1)"
+}
+# Bug it catches: a test command that takes the file in place of `{files}` (test.list placeholder) or in
+# CONVEYOR_TEST_FILES (env) got it some other way on main, or got the path filecmd() adds after the command too.
+# testlist.sh nofilecmd() alone, on a check of main (TEST_PACKONLY), its command run as filecmd() runs it, on a
+# path with a space.
+t_mainredpackforms() {
+  local got
+  setup "[$(issue 7 2026-01-01)]"
+  tune 'del(.test.fileCommand) | .test.list = "placeholder" | .test.command = "printf \"[%s]\" {files} > \"$STUB/got\""'
+  got=$(eng 'c=$(TEST_PACKONLY=1 nofilecmd "$PWD" "a b.test.js") && CONVEYOR_TEST_FILE="a b.test.js" bash -c "$c"'"'"' "$CONVEYOR_TEST_FILE"'"'"' && cat "$STUB/got"' 2>&1)
+  [ "$got" = '[a b.test.js]' ] || fail "test.list placeholder, command 'printf \"[%s]\" {files}', file 'a b.test.js': the command got $got"
+  tune '.test.list = "env" | .test.command = "printf \"[%s]\" \"$CONVEYOR_TEST_FILES\" > \"$STUB/got\""'
+  got=$(eng 'c=$(TEST_PACKONLY=1 nofilecmd "$PWD" "a b.test.js") && CONVEYOR_TEST_FILE="a b.test.js" bash -c "$c"'"'"' "$CONVEYOR_TEST_FILE"'"'"' && cat "$STUB/got"' 2>&1)
+  [ "$got" = '[a b.test.js]' ] || fail "test.list env, command 'printf \"[%s]\" \"\$CONVEYOR_TEST_FILES\"', file 'a b.test.js': the command got $got"
+}
+# Bug it catches: main's fix card for p.test.js, its session making no change, ran the file on main with Conveyor's own
+# runner and was blocked ("still fails on main's code"), though the file passes there under the pack's command. Its
+# cases run the pack's way: they pass, so the card closes as not needed (#323), and is not blocked.
+t_mainredpacknochange() {
+  local out s
+  packred args
+  packnochange
+  [[ $(st 'select(.card == "cfix" and .step == "closed") | .reason') == 'Not needed: the session made no change, and its cases were checked again on main. Main is no longer red for `p.test.js: p.test.js`: '* ]] \
+    && [ -z "$(st 'select(.card == "cfix" and .step == "blocked")')" ] \
+    || fail "main's fix card with no change, for p.test.js (which passes under the pack's command), did not close as not needed: $out: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
+}
+# Main's fix card cfix for p.test.js (packred()'s commit s, the case recorded red by c1), its session making no change:
+# nochange() on it. Sets out, its output.
+packnochange() {
+  eng 'mainred c1 "p.test.js: p.test.js" p.test.js '"$s" || fail "p.test.js was not recorded"
+  jq -c '.reds[0].card = "cfix"' "$ST/mainred.json" > "$STUB/red.new" && mv "$STUB/red.new" "$ST/mainred.json" \
+    && git -C "$R" worktree add -q --detach "$T/$CASE/cards/cfix" HEAD || fail "the fix card's worktree could not be made"
+  out=$(eng 'nochange cfix 0 "$CONVEYOR_CARDS/cfix" brief' 2>&1)
+}
+# Bug it catches: on a pack whose test command cannot be given one file (no test.list, no test.fileCommand: the pack
+# the bug was found on), main's fix card with no change skipped its run on main, gave its case no result and was
+# blocked. Nothing shows main red the pack's way, so the card closes as not needed, saying why, and is not blocked.
+t_mainrednolistnochange() {
+  local out s
+  packred ''
+  packnochange
+  [[ $(st 'select(.card == "cfix" and .step == "closed") | .reason') == 'Not needed: the session made no change, and its cases were checked again on main. Main is not red for `p.test.js: p.test.js` the pack'"'"'s way: '*'test.list is not set'*'so the card closes as already done.' ]] \
+    && [ -z "$(st 'select(.card == "cfix" and .step == "blocked")')" ] \
+    || fail "main's fix card with no change, for p.test.js on a pack with no test.list or test.fileCommand, did not close as not needed naming why: $out: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
 }
 
 # Issue 358: mainred.sh mainwait() alone, card c9 waiting on `a.test: one` at main's commit, its live record checked every LIVE
