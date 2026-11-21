@@ -207,6 +207,19 @@ test('Live run: a run with --again counts no kept result as reused', async () =>
   assert.equal(text(q(w, '.bench-vw')), 'Spent $61.24 of the $293 estimate. The usage guard is not reached.');
 });
 
+// Bug it guards: a task one arm could not run (its harness could not grade it) counted as a loss in that arm's score and
+// 95% range, so "Score so far" read 1 of 1 and 0 of 1; docs/benchmarks.md says such a task is not run, never failed.
+// And the arms were then scored on different tasks, so the gap beside the noise note was not a gap on one set of tasks.
+test('Live run: a task an arm did not run is left out for every arm, so all are scored on the same tasks', async () => {
+  const s = BH.live(), cells = s.shows[BH.LIVE].tasks[0].cells;
+  cells[1].result = 'not run: the harness could not grade it'; cells[1].resolved = false;
+  const w = await opened(s), rows = Array.from(box(w, 'Score so far').querySelectorAll('.bench-lrow'), text);
+  assert.equal(rows[0], 'Conveyor v1.9.09 of 9', 'the arm that ran every task drops the task the other did not run');
+  assert.equal(rows[1], 'Conveyor, Codex builds v1.9.09 of 9', 'the arm with one task not run counts 9 shared tasks, not 10');
+  assert.equal(text(box(w, 'Score so far').querySelector('.bench-note')), '9 tasks: only a difference of 5 or more shows.');
+  assert.equal(box(w, 'Score so far').querySelectorAll('.bench-ci')[1].title, '95% range 70% to 100%', 'the range is of 9 tasks, not 10');
+});
+
 // Bug it guards: with no run going the page was empty. It shows the last run, as the mockup's "Your data now" does: how
 // it ended, each arm's result, sessions, tokens, minutes and cost (not priced when none was kept), and its task.
 test('Live run, 2 runs of 1 task and none going: the last run, each arm on its task, and its task to open', async () => {

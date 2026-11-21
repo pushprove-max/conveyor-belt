@@ -83,14 +83,16 @@
   }
   const LEGEND = [['bench-g-ok', 'Resolved'], ['bench-g-bad', 'Unresolved'], ['bench-g-work', 'Working'], ['bench-g-wait', 'Waiting'], ['bench-g-nr', 'Not run (image)']];
   function scoreSoFar(data, cols) {
-    const fin = K.list(data.tasks).filter((t) => K.obj(t) && cols.every((c) => ['yes', 'no', 'nr'].includes(K.said(K.list(t.cells).find((y) => K.obj(y) && y.arm === c.arm)))));
-    const s = h('div');
+    const s = h('div'), cell = (t, c) => K.list(t.cells).find((y) => K.obj(y) && y.arm === c.arm);
+    // A task an arm did not run (image, sandbox or grade failed) is no loss. It is left out for every arm, so all arms are
+    // scored on the same tasks and the gap beside the noise note is a gap on those tasks.
+    const shared = K.list(data.tasks).filter((t) => K.obj(t) && cols.every((c) => K.graded(cell(t, c))));
     cols.forEach((c) => {
-      const k = fin.filter((t) => K.said(K.list(t.cells).find((y) => K.obj(y) && y.arm === c.arm)) === 'yes').length, top = h('div', 'bench-row bench-space');
-      top.append(K.add(h('span'), [K.dot(c.s), K.colName(c)]), h('b', null, `${k} of ${fin.length}`));
-      s.append(K.add(h('div', 'bench-lrow'), [top, K.ciBar(k, fin.length, c.s)]));
+      const k = shared.filter((t) => K.said(cell(t, c)) === 'yes').length, top = h('div', 'bench-row bench-space');
+      top.append(K.add(h('span'), [K.dot(c.s), K.colName(c)]), h('b', null, `${k} of ${shared.length}`));
+      s.append(K.add(h('div', 'bench-lrow'), [top, K.ciBar(k, shared.length, c.s)]));
     });
-    s.append(K.note(`${K.plural(fin.length, 'task')}: only a difference of ${K.noiseSaid(fin.length)} or more shows.`));
+    s.append(K.note(`${K.plural(shared.length, 'task')}: only a difference of ${K.noiseSaid(shared.length)} or more shows.`));
     return s;
   }
   function tail(data, cols) {
@@ -108,7 +110,7 @@
     const r = data.run, cols = K.paint(K.colsOf(r).map((c) => ({ ...c }))), p = pace(r, cols, data), leg = h('div', 'bench-legend');
     LEGEND.forEach(([c, l]) => leg.append(K.add(h('span'), [h('i', c), l])));
     const grid = K.add(K.box('Tasks by arm', 'One row a task, one column an arm. Green resolved, red unresolved, blue working now, grey waiting.'), [cellGrid(data, cols), leg]);
-    const side = K.add(K.box('Score so far', 'Tasks that every arm finished.'), [scoreSoFar(data, cols), h('h3', 'bench-h', 'Events'), tail(data, cols),
+    const side = K.add(K.box('Score so far', 'Tasks that every arm graded.'), [scoreSoFar(data, cols), h('h3', 'bench-h', 'Events'), tail(data, cols),
       K.add(h('div', 'bench-row'), [K.stopRun(r.id, typeof r.stopping === 'string'), h('span', 'bench-note', 'Keeps the finished tasks.')]), K.saidAt(`stop-${r.id}`)]);
     return [liveVerdict(r, cols, p), liveStats(cols, p), K.grid('main', grid, side), K.runTools([K.allRuns().find((x) => x.id === r.id) || r])];
   }

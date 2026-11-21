@@ -1021,7 +1021,7 @@ reuses takes no time and costs nothing: the time left and the estimate count onl
 with `--again` reuses no result, so they count each of its tasks. Four figures give the
 same. **Tasks by arm** has a row for each task and a column for each arm: resolved, unresolved, not run, waiting, or
 the step and minutes of the work now. **Score so far** gives each arm's resolved count on the tasks that every arm
-finished, with its 95% range. **Events** gives the last events of the run, newest first. **Stop the run** stops the
+graded, with its 95% range. A task that an arm did not run is left out for every arm. **Events** gives the last events of the run, newest first. **Stop the run** stops the
 whole run: the work in progress and the tasks that it did not reach yet. Finished results stay. After you click it,
 the button says "Stopping the run" and stays off. When the build machine has ended the run and its containers, the
 answer says "Run stopped". It says "Run finished before Stop" when the run ended first, and "Run interrupted" when the
