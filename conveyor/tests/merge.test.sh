@@ -25,42 +25,48 @@ claims() { # <c8's change>
   [ "$RC" = 0 ] || fail "the claims failed: $(cat "$T/$CASE/run.out")"
 }
 
+# The engine's functions the cases call, from lib/claim.sh: together(), fits(), merge3(), cardpatch(), tested(),
+# testedhere(), docsonly() and inconflicts(), run in this shell.
+claimfns() { eval "$(sed -n '/^together() {/,/^}/p; /^fits() {/,/^}/p; /^merge3() {/,/^}/p; /^docsonly() {/,/^}/p
+  /^inconflicts() {/,/^}/p; /^cardpatch() {/p; /^tested() {/{N;p;}; /^testedhere() {/p' "$SRC/lib/claim.sh")"; }
+
+# A main of its own, $r on branch main, its a.txt nine lines (as nine() makes it), with the cards' worktrees under
+# $CARDS: none of the case's setup is needed by the functions above.
+mainrepo() { # [<file> <content>]...
+  r=$T/$CASE/r; CARDS=$T/$CASE/cards; export BRANCH=main; claimfns; mkdir -p "$CARDS" && git init -q -b main "$r" && seq 9 | sed 's/^/l/' > "$r/a.txt" || fail "no main"
+  while [ $# -gt 1 ]; do printf '%s\n' "$2" > "$r/$1"; shift 2; done
+  git -C "$r" add -A && git -C "$r" commit -qm base || fail "main's files"
+}
+# Card c<n>'s worktree on main, $CARDS/c<n>-<n>, with <change> made in it and staged.
+cardwt() { # <n> <change>
+  git -C "$r" worktree add -q "$CARDS/c$1-$1" -b "card-$1" main && (cd "$CARDS/c$1-$1" && eval "$2") && git -C "$CARDS/c$1-$1" add -A || fail "card $1's change"
+}
+
 # Bug: two cards that changed different parts of one file waited one behind the other whenever their changes did not
 # apply together plainly, though they merge three-way with no conflict (together(), through merge3() and fits()). c7
-# changes l4 and c8 l6: both hold a.txt at once, and c8 waits on no card. No link gives a.txt a test file: each card's
-# test is its own (seven.test.sh, eight.test.sh).
+# changes l4 and c8 l6, and main moves l1 and l9, so neither change applies to it plainly: c8 overlaps c7 on no file
+# (together() names c7). Each card's test is its own (seven.test.sh, eight.test.sh).
 # Bug too (the owner, 2026-11-13: 24 rebuild sessions in a day): a card whose change no longer applied plainly to a main
 # that moved (here, by c7's landing) went to a rebuild session, a new review and its tests again, though main changed
 # other lines of the file. c8's change fits onto that main (fits(): its three-way merge leaves the card's own lines),
 # with both lines, and its tests' pass stands on it (testedhere()): it lands with no session and no second run.
 t_mergetogether() {
-  setup '[]'; fx_wt "sed -i 's/^l4\$/seven/' a.txt; echo x > seven.test.sh" a.txt "$(seq 9 | sed 's/^/l/')" # main's a.txt as nine() makes it
-  claims "sed -i 's/^l6\$/eight/' a.txt; echo x > eight.test.sh"
-  [ "$(tr '\n' ' ' < "$T/$CASE/claims")" = '[true,["a.txt","seven.test.sh"]] [true,["a.txt","eight.test.sh"]] ' ] && [ ! -s "$T/$CASE/run.out" ] \
-    || fail "c8 waited on c7, whose change merges with its own: $(cat "$T/$CASE/claims" "$T/$CASE/run.out")"
-  # c7 lands; c8's change, its tests passed (tested()), is fitted onto main in its worktree, where it no longer applies plainly.
-  sed -i 's/^l4$/seven/' "$R/a.txt"; echo x > "$R/seven.test.sh"; git -C "$R" add -A; git -C "$R" commit -qm "c7 lands"
-  fx_in 'cd "'"$W8"'" && git diff --cached --binary --no-renames > "$PWD.patch" && id=$(cardpatch "$PWD") && echo "{}" > "$PWD.ready" && tested "$PWD" \
-    && git reset -q --hard main && ! git apply --check --cached "$PWD.patch" 2>/dev/null && fits "$PWD.patch" "$id" && testedhere "$PWD"'
-  [ "$RC" = 0 ] || fail "c8's change, which merges three-way with c7's, did not fit onto main on the tests it passed: $(cat "$T/$CASE/run.out")"
-  [ "$(git -C "$W8" show :a.txt | grep -cx 'seven\|eight')" = 2 ] && [ -z "$(git -C "$R" status --porcelain)" ] \
-    || fail "the fitted change does not hold both lines, or main's checkout is dirty: $(git -C "$W8" show :a.txt | tr '\n' ' ')"
-}
-
-# The same landing as a card sees it (t_mergetogether): #8 changes l6, and while its tests run main takes l4 as c7's
-# landing makes it, so #8's change no longer applies plainly. #8 lands on its first test pass, the second test step
-# reused, with one review and one test run, no session to bring it onto main, both lines in main and its checkout clean.
-t_mergetogethercard() {
-  setup "[$(issue 8 2026-01-02)]"; for i in 1 2; do echo "$GO" > "$STUB/review.$i"; done; nine; linkset '{}'
-  echo "sed -i 's/^l6\$/eight/' a.txt; echo x > eight.test.sh" > "$STUB/build"
-  echo '[ -e "$STUB/moved" ] || { : > "$STUB/moved"; sed -i "s/^l4\$/seven/" "$R/a.txt"; echo x > "$R/seven.test.sh"; git -C "$R" add -A; git -C "$R" commit -qm "c7 lands"; }' >> "$STUB/test-cmd"
-  # loop: the card's steps and its test records (the second test step reused, no rebase or fix) are written only by a card run
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  [ "$(st "select(.issue == 8 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test test landed " ] \
-    && [ "$(st 'select(.issue == 8 and .step == "test") | .reused // false' | tr '\n' ' ')" = "false true " ] \
-    || fail "#8, merged onto a main that moved, did not land on the tests it passed: $(st "select(.issue == 8) | \"\(.step) \(.reused)\"" | tr '\n' ,)"
-  [ "$(grep -cx 'seven\|eight' "$R/a.txt")" = 2 ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] && [ "$(wc -l < "$STUB/tests")" = 1 ] \
-    && [ -z "$(git -C "$R" status --porcelain)" ] || fail "#8 was reviewed or tested again, or main lacks a line or is dirty: $(cat "$R/a.txt")"
+  local r a id w8
+  mainrepo; cardwt 7 "sed -i 's/^l4\$/seven/' a.txt; echo x > seven.test.sh"; cardwt 8 "sed -i 's/^l6\$/eight/' a.txt; echo x > eight.test.sh"
+  w8=$CARDS/c8-8; git -C "$CARDS/c7-7" diff --cached --binary --no-renames > "$CARDS/c7-7.cpatch"; git -C "$w8" diff --cached --binary --no-renames > "$w8.patch"
+  id=$(cardpatch "$w8" ':(exclude)*.md'); echo '{}' > "$w8.ready"; tested "$w8"
+  sed -i 's/^l1$/main1/; s/^l9$/main9/' "$r/a.txt"; git -C "$r" commit -qam "main moves"
+  ! (cd "$r" && git apply --check --cached "$CARDS/c7-7.cpatch" 2>/dev/null) && ! (cd "$r" && git apply --check --cached "$w8.patch" 2>/dev/null) \
+    || fail "a card's change still applies to main plainly"
+  a=$(cd "$r" && together "$w8.patch" '["a.txt","eight.test.sh"]' '[{"card":"c7-7","paths":["a.txt","seven.test.sh"]}]' "$id") || fail "together() failed"
+  [ "$a" = '["c7-7"]' ] || fail "c8 overlaps c7, whose change merges with its own: $a"
+  # c7 lands; c8's worktree is reset to that main, where its change no longer applies plainly, and fitted onto it.
+  sed -i 's/^l4$/seven/' "$r/a.txt"; echo x > "$r/seven.test.sh"; git -C "$r" add -A; git -C "$r" commit -qm "c7 lands"
+  git -C "$w8" reset -q --hard main && ! (cd "$w8" && git apply --check --cached "$w8.patch" 2>/dev/null) || fail "c8's change applies plainly to the main c7 landed on"
+  (cd "$w8" && fits "$w8.patch" "$id" 2>/dev/null) || fail "c8's change, which merges three-way with c7's, did not fit onto main"
+  testedhere "$w8" || fail "c8's tests' pass does not stand on its change fitted onto main"
+  [ "$(git -C "$w8" show :a.txt | grep -cx 'seven\|eight')" = 2 ] && [ -z "$(git -C "$r" status --porcelain)" ] \
+    || fail "the fitted change does not hold both lines, or main's checkout is dirty: $(git -C "$w8" show :a.txt | tr '\n' ' ')"
 }
 
 # Bug (2026-11-13: three of six finished cards waited on another over README.md alone, one for 55 minutes): a
@@ -102,101 +108,78 @@ t_mergesame() {
   ! (cd "$R" && BRANCH=main ready "$CARDS/c7-7") || fail "a change main holds already was taken as merged onto it"
 }
 
-# A merge at landing. #7 (its issue has a `## Done when`) changes l4; during its review main changes l4 too, so at its
-# landing claim one session brings #7 onto main (settle()). That session writes a.txt as the merged lines and then
-# runs <its own edit> on it; its reply has no D<n> line. Each session's reply is $STUB/reply.<its number>.
-mergedw() { # <the merge session's own edit>
-  setup "[$(issue 7 2026-01-01 | jq -c '.body = "body of 7\n\n## Done when\n- l4 is seven"')]"; for i in 1 2; do echo "$GO" > "$STUB/review.$i"; done; nine
-  cat > "$STUB/claude" <<'EOF'
-#!/usr/bin/env bash
-cat > "$STUB/brief"; echo "$*" >> "$STUB/sessions"; cp "$STUB/brief" "$STUB/brief.$(wc -l < "$STUB/sessions")"; . "$STUB/build"
-jq -cn --rawfile r "$STUB/reply.$(wc -l < "$STUB/sessions")" '{type: "result", is_error: false, result: $r, usage: {input_tokens: 10, cache_creation_input_tokens: 20, cache_read_input_tokens: 999, output_tokens: 5}}'
-EOF
-  { echo "if grep -q '^# Main moved: apply the same change' \"\$STUB/brief\"; then printf '%s\n' l1 l2 l3 main4 seven l5 l6 l7 l8 l9 > a.txt; $1"
-    echo "else sed -i 's/^l4\$/seven/' a.txt; fi"; } > "$STUB/build"
-  echo '[ -e "$STUB/moved" ] || { : > "$STUB/moved"; sed -i "s/^l4\$/main4/" "$R/a.txt"; git -C "$R" commit -qam "main moves"; }' > "$STUB/review-cmd"
-  printf 'Built.\n\n## Done when\nD1 met: a.txt:4 holds seven\n' > "$STUB/reply.1"; echo 'Merged.' > "$STUB/reply.2"
-  printf 'Fixed.\n\n## Done when\nD1 met: a.txt:5 holds seven\n' > "$STUB/reply.3"
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  grep -q '^# Main moved: apply the same change' "$STUB/brief.2" || fail "#7 was not brought onto main by a session at its landing claim: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
+# A merge at landing, as settle() checks it. A card's change and main both changed l4 of a.txt: $mt is their three-way
+# merge with its conflict markers, a tree, and the merge session's resolution, main4 and then seven, is staged in $w.
+mergedw() {
+  claimfns; w=$T/$CASE/w
+  mkdir -p "$w" && git -C "$w" init -q && printf '%s\n' l1 l2 l3 '<<<<<<< ours' main4 ======= seven '>>>>>>> theirs' l5 l6 l7 l8 l9 > "$w/a.txt" \
+    && git -C "$w" add -A && mt=$(git -C "$w" write-tree) && printf '%s\n' l1 l2 l3 main4 seven l5 l6 l7 l8 l9 > "$w/a.txt" && git -C "$w" add -A \
+    || fail "the merge's fixture"
 }
 
 # Bug (#407 blocked, #305 lost 10.5 minutes): the merge session's reply went through the Done-when check, and a merge
 # reply leaves out the D<n> lines, so the card was sent to a fix session and blocked. A merge that changed only the
-# conflict is not checked: no Done-when fix session, and #7 is reviewed, tested and lands as merged.
+# conflict is not checked (inconflicts() holds).
 t_mergedwconflict() {
-  mergedw :
-  [ "$(wc -l < "$STUB/sessions")" = 2 ] && [ -z "$(st 'select(.step == "blocked") | .reason')" ] \
-    || fail "the merge that changed only the conflict was given the Done-when check: $(st '"\(.step) \(.reason) \(.doneWhen)"' | tr '\n' ,)"
-  [ "$(st "select(.issue == 7 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review fix review test landed " ] \
-    && [ "$(st 'select(.step == "fix") | .doneWhen')" = null ] || fail "steps of #7: $(st "select(.issue == 7) | \"\(.step) \(.doneWhen)\"" | tr '\n' ,)"
-  [ "$(grep -cx 'main4\|seven\|l8' "$R/a.txt")" = 3 ] || fail "main does not hold the merge: $(cat "$R/a.txt")"
+  local w mt; mergedw
+  inconflicts "$w" "$mt" a.txt || fail "a merge that changed only the conflict was taken to change more, so it gets the Done-when check"
 }
 
-# A merge session that also changes a line outside the conflict (l8) is checked as any fix session: its reply with no
-# D<n> line is sent to one Done-when fix session, and #7 then goes through review and test before it lands.
+# A merge session that also changes a line outside the conflict (l8) is checked as any fix session (inconflicts() fails).
 t_mergedwoutside() {
-  mergedw "sed -i 's/^l8\$/eight/' a.txt"
-  [ "$(wc -l < "$STUB/sessions")" = 3 ] && grep -q '^# The Done-when check failed' "$STUB/brief.3" \
-    || fail "the merge that changed a line outside the conflict was not given the Done-when check: $(st '"\(.step) \(.reason) \(.doneWhen)"' | tr '\n' ,)"
-  [ "$(st "select(.issue == 7 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review fix fix review test landed " ] \
-    && [ "$(st 'select(.step == "fix") | .doneWhen.failed | length' | tr '\n' ' ')" = "1 0 " ] && [ "$(wc -l < "$STUB/reviews")" = 2 ] && [ "$(wc -l < "$STUB/tests")" = 1 ] \
-    || fail "#7 did not go through its Done-when fix, review and test: $(st "select(.issue == 7) | \"\(.step) \(.doneWhen)\"" | tr '\n' ,)"
-  grep -qx eight "$R/a.txt" || fail "main does not hold the session's change: $(cat "$R/a.txt")"
+  local w mt; mergedw
+  sed -i 's/^l8$/eight/' "$w/a.txt"; git -C "$w" add -A
+  ! inconflicts "$w" "$mt" a.txt || fail "a merge that also changed l8, outside the conflict, was taken to change only the conflict"
 }
 
 # Bug (review of #434): inconflicts() read only the `@@` lines of the diff, so a merge session that resolved the conflict
 # and also changed the file's mode (`chmod a+x`) was taken to have changed only the conflict and skipped the check.
 t_mergedwmode() {
-  eval "$(sed -n '/^inconflicts() {/,/^}/p' "$SRC/lib/claim.sh")"
-  local w=$T/$CASE/w mt
-  mkdir -p "$w" && git -C "$w" init -q && printf '%s\n' l1 '<<<<<<< ours' main4 ======= seven '>>>>>>> theirs' l5 > "$w/a.txt"
-  git -C "$w" add -A && mt=$(git -C "$w" write-tree) && printf '%s\n' l1 main4 seven l5 > "$w/a.txt" && git -C "$w" add -A
-  inconflicts "$w" "$mt" a.txt || fail "a merge that changed only the conflict was taken to change more"
+  local w mt; mergedw
   chmod a+x "$w/a.txt"; git -C "$w" add -A
   ! inconflicts "$w" "$mt" a.txt || fail "a merge that also changed the file's mode was taken to change only the conflict"
 }
 
-# A clash in a README alone at landing. #7 changes l4 of a.txt and README.md's one line; main rewrites that line while
-# #7 is in <hook> (review-cmd: its review; test-cmd: its tests). One session merges README.md (settle()'s, at its
-# landing claim, or the landing rebuild), writing a.txt as #7 had it, and then runs <its own edit>.
-readme() { # <review-cmd|test-cmd> <the merge session's own edit>
-  setup "[$(issue 7 2026-01-01)]"; for i in 1 2; do echo "$GO" > "$STUB/review.$i"; done; nine
-  echo title > "$R/README.md"; git -C "$R" add README.md; git -C "$R" commit -qm "a README"
-  { echo "if grep -q '^# \(Landing conflict\|Main moved\)' \"\$STUB/brief\"; then sed -i 's/^l4\$/seven/' a.txt; printf '%s\n' main seven > README.md; $2"
-    echo "else sed -i 's/^l4\$/seven/' a.txt; echo seven > README.md; fi"; } > "$STUB/build"
-  echo '[ -e "$STUB/moved" ] || { : > "$STUB/moved"; echo main > "$R/README.md"; git -C "$R" commit -qam "main moves"; }' >> "$STUB/$1"
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  [ "$(st 'select(.step == "landed") | .issue')" = 7 ] && [ "$(tr '\n' ' ' < "$R/README.md")" = "main seven " ] && grep -qx seven "$R/a.txt" \
-    || fail "#7 did not land merged: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
+# A clash in a README alone at landing. Card c7 changes l4 of a.txt and README.md's one line, and its tests pass on
+# that change (tested()); main then rewrites README.md's line, so the change no longer applies. Sets r (main), w7 (its
+# worktree) and docs (its change outside *.md, the id settle() and the landing rebuild keep).
+readme() {
+  mainrepo README.md title; cardwt 7 "sed -i 's/^l4\$/seven/' a.txt; echo seven > README.md"
+  w7=$CARDS/c7-7; git -C "$w7" diff --cached --binary --no-renames > "$w7.patch"; echo '{}' > "$w7.ready"; tested "$w7"
+  docs=$(cardpatch "$w7" ':(exclude)*.md'); [ -n "$docs" ] && testedhere "$w7" || fail "c7's tests did not pass on its change: $docs"
+  echo main > "$r/README.md"; git -C "$r" commit -qam "main moves"
+  ! (cd "$r" && git apply --check --cached "$w7.patch" 2>/dev/null) || fail "c7's change still applies to main"
+}
+# The session that brings c7 onto main: its worktree reset to main, a.txt as c7 had it, README.md merged, then <its own edit>.
+rebuild() { # <the session's own edit>
+  git -C "$w7" reset -q --hard main && (cd "$w7" && sed -i 's/^l4$/seven/' a.txt && printf '%s\n' main seven > README.md && eval "$1") \
+    && git -C "$w7" add -A || fail "the rebuild"
 }
 
 # Bug (#436: two of a day's 11 landing clashes shared only a README, and cost 40.5 minutes): a clash in a README alone
 # after the card's tests passed sent it, after the rebuild session merged the README, to a new review and a new test
-# run. Its change outside documentation is the one reviewed and tested: it lands on that review and that run.
+# run. Its change outside documentation is the one reviewed and tested: the same id after the rebuild, so the review
+# and the test pass stand (kept and docpass in card.sh, dp in settle()).
 t_mergereadme() {
-  readme test-cmd :
-  [ "$(st "select(.issue == 7 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test rebase test landed " ] \
-    && [ "$(st 'select(.step == "test") | .reused // false' | tr '\n' ' ')" = "false true " ] \
-    && [ "$(wc -l < "$STUB/reviews")" = 1 ] && [ "$(wc -l < "$STUB/tests")" = 1 ] \
-    || fail "#7 was reviewed or tested again after a clash in README.md alone: $(st "select(.issue == 7) | \"\(.step) \(.reused)\"" | tr '\n' ,)"
+  local r w7 docs; readme; rebuild :
+  [ "$(cardpatch "$w7" ':(exclude)*.md')" = "$docs" ] || fail "a rebuild that merged README.md alone changed the card's change outside documentation"
 }
 
 # The review and the test pass stand only for the same change: a rebuild session that also changes a line of code (l8)
-# sends #7 to a new review and a new test run.
+# leaves another id outside documentation, and the tests' pass does not stand on it.
 t_mergereadmecode() {
-  readme test-cmd "sed -i 's/^l8\$/eight/' a.txt"
-  [ "$(wc -l < "$STUB/reviews")" = 2 ] && [ "$(wc -l < "$STUB/tests")" = 2 ] && grep -qx eight "$R/a.txt" \
-    || fail "#7's changed code was not reviewed and tested again: $(st "select(.issue == 7) | \"\(.step) \(.reused)\"" | tr '\n' ,)"
+  local r w7 docs; readme; rebuild "sed -i 's/^l8\$/eight/' a.txt"
+  [ "$(cardpatch "$w7" ':(exclude)*.md')" != "$docs" ] || fail "a rebuild that changed l8 kept the id the review and the tests passed on"
+  ! testedhere "$w7" || fail "the tests' pass stands on a change of code they did not run on"
 }
 
-# The same at the landing claim (settle()): a clash in a README alone during the review is merged by one session, and
-# the card goes on to its tests with no second review.
+# The same at the landing claim (settle()): a clash in a README alone is one in documentation alone (docsonly()), so the
+# session's merge keeps the review; once main changes l4 too, the clash is in code, and docsonly() fails.
 t_mergereadmewait() {
-  readme review-cmd :
-  [ "$(st "select(.issue == 7 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review fix test landed " ] \
-    && [ "$(wc -l < "$STUB/reviews")" = 1 ] && [ "$(wc -l < "$STUB/tests")" = 1 ] \
-    || fail "#7 was reviewed again after its landing claim merged README.md alone: $(st "select(.issue == 7) | \"\(.step) \(.reused)\"" | tr '\n' ,)"
+  local r w7 docs; readme
+  (cd "$r" && docsonly "$w7.patch" "$docs") || fail "a clash in README.md alone was taken as one in code"
+  sed -i 's/^l4$/main4/' "$r/a.txt"; git -C "$r" commit -qam "main changes l4"
+  ! (cd "$r" && docsonly "$w7.patch" "$docs") || fail "a clash in a.txt too was taken as one in documentation alone"
 }
 
 # The fast resolver (the owner, 2026-11-18, #381): a card's change and main both changed l4 of a.txt. One judge call
