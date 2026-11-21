@@ -177,7 +177,7 @@ OPEN='def one: tostring | gsub("\\s+"; " ") | .[0:160];
   | if length == 0 then "\($repo) open decisions: none" else "\($repo) open decisions (\(length), newest first):", (.[] | "- \(.id): \(.question | one)") end'
 
 live() {
-  local tmp i line used=0 need=0 cutting= cut="[live summary cut at $LIVE_CAP bytes]" lines=() must=() recs repo main rc out led
+  local tmp i line used=0 need=0 cutting='' cut="[live summary cut at $LIVE_CAP bytes]" lines=() must=() pids=() recs repo main rc out led
   tmp=$(mktemp -d) || { echo "# Live summary unavailable: no temp folder"; return 0; }
   lines+=("# Live summary (built at startup from Conveyor's snapshot and the decision ledger; never saved)")
   recs=$(mine 2>"$tmp/recs.err") || { must+=("${#lines[@]}"); lines+=("Conveyor: unavailable: $(why 1 "$tmp/recs.err")"); }
@@ -186,8 +186,10 @@ live() {
     [ -n "$repo" ] || continue
     i=$((i + 1))
     ( { ASK_LIMIT=10 ask "$repo" "$main" snapshot; } > "$tmp/$i.out" 2> "$tmp/$i.err"; echo $? > "$tmp/$i.rc" ) &
+    pids+=($!)
   done <<<"$recs"
-  wait
+  # Each subshell by its pid: a bare wait also waits for the caller's other background jobs, and can fail without end.
+  for rc in "${pids[@]}"; do wait "$rc"; done
   i=0
   while IFS=$'\t' read -r repo main; do
     [ -n "$repo" ] || continue

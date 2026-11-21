@@ -109,7 +109,22 @@ t_fresh() {
   [ "$(opened)" = "https://localhost:$dead/" ] || fail "the Board started on a fresh install did not open once, on localhost: $(opened)"
 }
 
-cases=(once again off down fresh)
+# The live summary a claim prints while the Board is being started in the background ends, and says "wait: pid N is
+# not a child of this shell" at most once. Bug (#1239): the claim's context runs the live summary in a subshell that
+# inherits the claim's background start, and its bare `wait` then looped on that line for ever and wrote gigabytes.
+# The limit is a timeout, so a loop ends the case; the stderr is cut to 100 lines, so a loop cannot fill the disk.
+t_live() {
+  fixture live
+  local dead rc n; dead=$(free_port)
+  export CONVEYOR_BOARD_START_CMD=true
+  CONVEYOR_DASHBOARD_PORT=$dead timeout 20 bash "$SRC/foreman.sh" claim s1 2>&1 >"$T/live.out" | head -n 100 > "$T/live.err"; rc=${PIPESTATUS[0]}
+  [ "$rc" = 0 ] || fail "the claim with its live summary did not end within its 20 s limit (status $rc): $(head -c 400 "$T/live.err")"
+  n=$(grep -c 'is not a child of this shell' "$T/live.err")
+  [ "$n" -le 1 ] || fail "the live summary printed the wait line $n times: $(head -c 400 "$T/live.err")"
+  grep -q '^# Live summary' "$T/live.out" || fail "the claim did not print the live summary: $(head -c 400 "$T/live.out")"
+}
+
+cases=(once again off down fresh live)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
