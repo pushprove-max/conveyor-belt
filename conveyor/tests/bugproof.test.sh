@@ -124,6 +124,19 @@ t_bugnoresultnested() {
     || fail "noresult() did not take a case logged under the runner as the case file's result: '$got'"
 }
 
+# Bug it catches: at a load factor over 1, a file stopped at its scaled `# timeout:` limit gives a timeout line that
+# ends with its own seconds and the factor (filecmd()); bugrun() read only a line with no such end, so it kept no
+# record of the timeout and latecount() did not say the hung test counts as failing. bugrun() is called on a run
+# whose output has that line (filecmd()'s text at `# timeout: 1` and factor 2).
+t_bugscaledlate() {
+  local w=$T/$CASE/wt got; mkdir -p "$w"
+  local line="conveyor: a.test.sh timed out: it ran past its time limit, 2 s, and it was stopped there; the limit is its # timeout: line's 1 s times the load factor 2"
+  got=$( eval "$(sed -n '/^bugrun() {/,/^}/p; /^latecount() {/,/^}/p' "$SRC/lib/testlist.sh")"
+    tests() { printf '%s\n' "$line" > "$1.test"; return 124; }; bugrun "$w" a.test.sh; latecount "$w" )
+  [ "$got" = "a.test.sh timed out: it ran past its time limit, 2 s, and was stopped. A test that hangs without the fix counts as failing without it." ] \
+    || fail "bugrun() given the output line '$line' kept no timeout for latecount(): '$got'"
+}
+
 # Bug it catches: a bug card whose change is a test file alone (a test fixed for a red main, which passes on main's
 # code too) is blocked, as with no fix to take out its test passes "without the fix". It is not run on main, the check
 # holds, and the result says the change is test-only.

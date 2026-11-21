@@ -228,7 +228,7 @@ bugrun() { # <worktree> <file>...
   rm -f "$w.late"
   printf 'fail\t%s\n' "$@" > "$w.rerun" && tests "$w" test.fileCommand alone; rc=$?
   if [ -s "$w.late" ]; then latesaid "$w" >> "$w.test"
-  else sed -n 's/^conveyor: \(.*\) timed out: it ran past its time limit, \([0-9]*\) s, and it was stopped there$/\2\t\1/p' "$w.test" 2>/dev/null | head -n 1 > "$w.late"
+  else sed -n 's/^conveyor: \(.*\) timed out: it ran past its time limit, \([0-9]*\) s, and it was stopped there\(; the limit is .*\)\{0,1\}$/\2\t\1/p' "$w.test" 2>/dev/null | head -n 1 > "$w.late"
     [ -s "$w.late" ] || rm -f "$w.late"; fi
   return $rc
 }
