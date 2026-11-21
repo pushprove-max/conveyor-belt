@@ -1055,9 +1055,13 @@ reference fix and the task image, or "not kept" when the results do not keep it.
 - **Run this task again** queues a run of this one task on the arms that ran it, on the engine that they ran, as
   **Start the run** does, and shows the answer beside the buttons. The run keeps its results apart from the saved
   ones, and does not replace them. When it ends, the Board reads its result of the task as the newest of each arm, so
-  the pages and the Scoreboard show it. It stays off while a run goes, for a task that is not in the pinned order, and
-  when the Conveyor arms ran the task on two engines, or on one that is not known: a run takes one engine. Only an
-  admin can use it.
+  the pages and the Scoreboard show it. It stays off in these cases:
+  - A run goes.
+  - The task is not in the pinned order.
+  - No arm reached the task.
+  - The Conveyor arms ran the task on two engines, or on one that is not known: a run takes one engine.
+
+  Only an admin can use it.
 
 **Task map** shows all the tasks of SWE-bench Verified, grouped by repository, a square for each task. A square is
 coloured by how many arms resolve the task, or by the result of one arm that you pick in **Colour by**. A grey square
