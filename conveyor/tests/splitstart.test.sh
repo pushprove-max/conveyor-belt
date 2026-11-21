@@ -25,7 +25,7 @@ ssrunner() { # <name> <start> <the arguments of a run with no case> [exit]
 # PATH; its line in $SS.
 ssrun() { # <file> <test command>
   # shellcheck disable=SC2034 # HERE is read by splitstart(), for tools/testtime.sh
-  SS=$(eval "$(sed -n '/^NOCASE=/p; /^splitstart() {/,/^}/p' "$SRC/lib/testrun.sh"; sed -n '/^testrunner() {/,/^}/p' "$SRC/lib/issues.sh")"
+  SS=$(eval "$(sed -n '/^NOCASE=/p; /^splitstart() {/,/^}/p' "$SRC/lib/speedproof.sh"; sed -n '/^testrunner() {/,/^}/p' "$SRC/lib/issues.sh")"
     HERE=$SRC; PATH=$T/$CASE/bin:$PATH; splitstart "$T/$CASE/wt" "$1" "$2" 1 'one')
 }
 # ssnear <want CPU s> <file>: $SS is the allowance measured on <file>, within 20% of <want>.

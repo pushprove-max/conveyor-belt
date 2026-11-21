@@ -61,7 +61,7 @@ t_testpathsone() {
   [ -z "$l" ] || fail "TESTRX is read outside testpaths(): $l"
   grep -q 'testpaths -v | grep -Ec "\$PRODUCT"' "$SRC/lib/issues.sh" && grep -q 'diff --cached --name-only --no-renames 2>/dev/null | testpaths |' "$SRC/lib/claim.sh" \
     || fail "productpaths() or claim.sh does not read testpaths()"
-  ! grep -n '(test|spec)' "$SRC/lib/issues.sh" "$SRC/lib/claim.sh" "$SRC/lib/testrun.sh" | grep -v '^[^:]*:[0-9]*:[[:space:]]*#' \
+  ! grep -n '(test|spec)' "$SRC/lib/issues.sh" "$SRC/lib/claim.sh" "$SRC/lib/testrun.sh" "$SRC"/lib/{bugproof,donewhen,mainred,speedproof,testlist}.sh | grep -v '^[^:]*:[0-9]*:[[:space:]]*#' \
     | grep -vF 'or (base | test("[._](test|spec)\\.[^.]+$"; "i") | not)' \
     || fail "an engine file that finds a change's test files still has a pattern of its own"
 }

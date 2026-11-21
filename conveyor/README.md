@@ -373,6 +373,14 @@ Both take `--json`.
 
 ## The test step
 
+The engine runs the test step from `lib/testrun.sh`. These files hold its parts:
+
+- `lib/testlist.sh`: the times a run records, the test results cache, and what the next run need not run again.
+- `lib/mainred.sh`: the run on main of the tests that did not pass, the machine hold, and the fix cards of a red main.
+- `lib/bugproof.sh`: the bug-card check.
+- `lib/speedproof.sh`: the checks of the fix cards that the Tests page files.
+- `lib/donewhen.sh`: the project's checks, the commit trailers, the Done-when check and the review findings.
+
 Each run of a card's changed tests writes one `test` line to the card records, `pass` or `fail`, holding:
 
 - `sec`: all the step took, and apart from it `wait`, the seconds it waited for a test slot, and `run`, the seconds

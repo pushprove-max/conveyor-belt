@@ -248,6 +248,66 @@
   "conveyor/lib/testrules.sh": [
     "conveyor/tests/snapexec.test.sh"
   ],
+  "conveyor/lib/bugproof.sh": [
+    ".claude/scripts/__tests__/dashboard-view.focus.test.mjs",
+    ".claude/scripts/__tests__/dashboard-view.needs.test.mjs",
+    ".claude/scripts/__tests__/dashboard-view.overview.test.mjs",
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
+    "conveyor/tests/codex.test.sh",
+    "conveyor/tests/models.test.sh",
+    "conveyor/tests/modelsproxy.test.sh",
+    "conveyor/tests/opencode.test.sh",
+    "conveyor/tests/proxyroute.test.sh",
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/lib/donewhen.sh": [
+    ".claude/scripts/__tests__/dashboard-view.focus.test.mjs",
+    ".claude/scripts/__tests__/dashboard-view.needs.test.mjs",
+    ".claude/scripts/__tests__/dashboard-view.overview.test.mjs",
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
+    "conveyor/tests/codex.test.sh",
+    "conveyor/tests/models.test.sh",
+    "conveyor/tests/modelsproxy.test.sh",
+    "conveyor/tests/opencode.test.sh",
+    "conveyor/tests/proxyroute.test.sh",
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/lib/mainred.sh": [
+    ".claude/scripts/__tests__/dashboard-view.focus.test.mjs",
+    ".claude/scripts/__tests__/dashboard-view.needs.test.mjs",
+    ".claude/scripts/__tests__/dashboard-view.overview.test.mjs",
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
+    "conveyor/tests/codex.test.sh",
+    "conveyor/tests/models.test.sh",
+    "conveyor/tests/modelsproxy.test.sh",
+    "conveyor/tests/opencode.test.sh",
+    "conveyor/tests/proxyroute.test.sh",
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/lib/speedproof.sh": [
+    ".claude/scripts/__tests__/dashboard-view.focus.test.mjs",
+    ".claude/scripts/__tests__/dashboard-view.needs.test.mjs",
+    ".claude/scripts/__tests__/dashboard-view.overview.test.mjs",
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
+    "conveyor/tests/codex.test.sh",
+    "conveyor/tests/models.test.sh",
+    "conveyor/tests/modelsproxy.test.sh",
+    "conveyor/tests/opencode.test.sh",
+    "conveyor/tests/proxyroute.test.sh",
+    "conveyor/tests/snapexec.test.sh"
+  ],
+  "conveyor/lib/testlist.sh": [
+    ".claude/scripts/__tests__/dashboard-view.focus.test.mjs",
+    ".claude/scripts/__tests__/dashboard-view.needs.test.mjs",
+    ".claude/scripts/__tests__/dashboard-view.overview.test.mjs",
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
+    "conveyor/tests/codex.test.sh",
+    "conveyor/tests/models.test.sh",
+    "conveyor/tests/modelsproxy.test.sh",
+    "conveyor/tests/opencode.test.sh",
+    "conveyor/tests/proxyroute.test.sh",
+    "conveyor/tests/snapexec.test.sh"
+  ],
   "conveyor/lib/testrun.sh": [
     ".claude/scripts/__tests__/dashboard-view.focus.test.mjs",
     ".claude/scripts/__tests__/dashboard-view.needs.test.mjs",

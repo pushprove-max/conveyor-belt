@@ -35,7 +35,7 @@ speedwt() { # <cpu> [exit]
     || { r=$?; SPEEDCHECKED=$SPEEDCHECK block c7 7 "$FXWT" "build: $(<"$FXWT.unfixed")"; exit $r; }'
 }
 speedline() { st 'select(.step == "bugproof") | "\(.result) \(.speed | tojson)"'; }
-SPEEDV=$(sed -n 's/^SPEEDCHECK=//p' "$SRC/lib/testrun.sh") # the version of the speed check, as testrun.sh sets it
+SPEEDV=$(sed -n 's/^SPEEDCHECK=//p' "$SRC/lib/speedproof.sh") # the version of the speed check, as speedproof.sh sets it
 
 # D1. Bug it catches: a speed-up card, whose tests pass on main by design, is blocked for not failing there, or goes on
 # with no proof that the file is faster. Its file runs alone with the change and is faster than its median on record:

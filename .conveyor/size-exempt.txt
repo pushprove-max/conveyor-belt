@@ -34,8 +34,6 @@ conveyor/lib/setup.sh	setup
 conveyor/lib/snapshot.sh
 conveyor/lib/snapshot.sh	snapshot
 conveyor/lib/testfiles.sh	testspart
-conveyor/lib/testrun.sh
-conveyor/lib/testrun.sh	bugproof
 conveyor/lib/testrun.sh	tests
 conveyor/lib/views.sh	health
 conveyor/tests/kept.test.sh	t_keptgate

@@ -193,7 +193,7 @@ t_mainredlinks() {
   land ca 2 lib/a.sh lib/a.test.sh; a=$(git -C "$r" rev-parse HEAD)
   land cc 3 lib/c.sh lib/c.test.sh; h=$(git -C "$r" rev-parse HEAD)
   git -C "$r" worktree add -q --detach "$w/fix" "$h"
-  got=$( cd "$r" && eval "$(sed -n '/^mainred() {/,/^}/p; /^brokeby() {/,/^}/p; /^landingof() {/,/^}/p; /^testlinks() {/,/^}/p; /^TESTLINK_DEPTH=/p' "$SRC/lib/testrun.sh")"
+  got=$( cd "$r" && eval "$(sed -n '/^mainred() {/,/^}/p; /^brokeby() {/,/^}/p; /^landingof() {/,/^}/p; /^testlinks() {/,/^}/p; /^TESTLINK_DEPTH=/p' "$SRC/lib/mainred.sh")"
     stdb() { cat "$w/cards.jsonl"; }
     export MAINRED=$w/mainred.json
     # The loop's redpick() names the fix card in the entry; here the record is given it.
@@ -213,7 +213,7 @@ t_mainredjoin() {
   mkdir -p "$w/fix/.conveyor"; git -C "$w/fix" init -q
   echo '{"lib/a.sh":["tests/b.test.sh"]}' > "$w/fix/.conveyor/test-links.json"
   jq -n '{reds: [{sha: "s", card: "cfix", cases: [{case: "b", links: {"lib/a.sh": ["tests/b.test.sh"]}}, {case: "d", links: {"lib/d.sh": ["tests/d.test.sh"]}}]}]}' > "$w/mainred.json"
-  got=$( eval "$(sed -n '/^redbrief() {/,/^}/p' "$SRC/lib/card.sh"; sed -n '/^testlinks() {/,/^}/p' "$SRC/lib/testrun.sh")"
+  got=$( eval "$(sed -n '/^redbrief() {/,/^}/p' "$SRC/lib/card.sh"; sed -n '/^testlinks() {/,/^}/p' "$SRC/lib/mainred.sh")"
     # shellcheck disable=SC2034 # wt is read by redbrief(), run by the eval
     MAINRED=$w/mainred.json wt=$w/fix issue='{"title":"Main is red: b"}' sprompt='brief b'
     redissue() { echo '{"title":"Main is red: b, d"}'; }; issuepart() { echo "brief ${1:23:-2}"; }
@@ -233,7 +233,7 @@ t_mainredlinksonlylink() {
   echo '{}' > "$w/fix/.conveyor/test-links.json"; git -C "$w/fix" add -A; git -C "$w/fix" commit -qm links
   echo keep > "$w/out/file"; echo keep > "$w/out/.conveyor/test-links.json"
   jq -n '{reds: [{sha: "s", card: "cfix", cases: [{case: "b", links: {"lib/a.sh": ["tests/b.test.sh"]}}]}]}' > "$w/mainred.json"
-  got=$( eval "$(sed -n '/^testlinks() {/,/^}/p; /^linksonly() {/,/^}/p' "$SRC/lib/testrun.sh")"
+  got=$( eval "$(sed -n '/^testlinks() {/,/^}/p; /^linksonly() {/,/^}/p' "$SRC/lib/mainred.sh")"
     MAINRED=$w/mainred.json
     testlinks cfix "$w/fix" && ln -sf "$w/out/file" "$w/fix/.conveyor/test-links.json" || exit 1
     linksonly cfix "$w/fix" && echo only
@@ -260,7 +260,7 @@ t_mainredpartial() {
   printf 't_one() { :; }\nt_two() { :; }\n' > "$r/tests/b.test.sh"; land l1 1 lib/a.sh one
   land ca 2 lib/a.sh none; a=$(git -C "$r" rev-parse HEAD)
   land cc 3 lib/c.sh two; h=$(git -C "$r" rev-parse HEAD)
-  got=$( cd "$r" && eval "$(sed -n '/^mainred() {/,/^}/p; /^brokeby() {/,/^}/p; /^landingof() {/,/^}/p; /^TESTLINK_DEPTH=/p' "$SRC/lib/testrun.sh")"
+  got=$( cd "$r" && eval "$(sed -n '/^mainred() {/,/^}/p; /^brokeby() {/,/^}/p; /^landingof() {/,/^}/p; /^TESTLINK_DEPTH=/p' "$SRC/lib/mainred.sh")"
     stdb() { cat "$w/cards.jsonl"; }
     # Issue 1066: the list of the commit's test files fails here. Bug it catches: mainred() then searched no file for
     # the case, took r.test.sh as the case's file, and named no landing.
@@ -288,7 +288,7 @@ t_mainredold() {
   printf '# run alone: bash ../r.test.sh\nt_one() { :; }\n' > "$r/tests/b.test.sh"; land l1 1 lib/a.sh one
   land ca 2 lib/a.sh none; a=$(git -C "$r" rev-parse HEAD); h=$a
   jq -cn '{reds: [{sha: "0ld", cases: [{case: "r.test.sh: one", file: "r.test.sh", files: ["tests/b.test.sh"]}], card: null}]}' > "$w/mainred.json"
-  got=$( cd "$r" && eval "$(sed -n '/^mainred() {/,/^}/p; /^redopen() {/,/^}/p; /^brokeby() {/,/^}/p; /^landingof() {/,/^}/p; /^redrun() {/,/^}/p; /^TESTLINK_DEPTH=/p' "$SRC/lib/testrun.sh")"
+  got=$( cd "$r" && eval "$(sed -n '/^mainred() {/,/^}/p; /^redopen() {/,/^}/p; /^brokeby() {/,/^}/p; /^landingof() {/,/^}/p; /^redrun() {/,/^}/p; /^TESTLINK_DEPTH=/p' "$SRC/lib/mainred.sh")"
     stdb() { cat "$w/cards.jsonl"; }
     tests() { :; }; testlogs() { echo log; }; testfails() { echo '{"files": [{"file": "tests/b.test.sh", "cases": [{"name": "one"}]}]}'; }
     export MAINRED=$w/mainred.json

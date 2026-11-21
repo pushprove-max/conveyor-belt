@@ -184,7 +184,7 @@ t_bugcommentsyntax() {
   printf '%s\n' 'ok();' > "$r/a.test.js"
   git -C "$r" add -A && git -C "$r" commit -qm main || fail "the fixture commit"
   # The engine's functions commentsonly() calls, read once for every try.
-  local fns; fns=$(sed -n '/^testpaths() {/,/^}/p' "$SRC/lib/issues.sh"; sed -n '/^uncomment() {/,/^}/p; /^commentsonly() {/,/^}/p' "$SRC/lib/testrun.sh")
+  local fns; fns=$(sed -n '/^testpaths() {/,/^}/p' "$SRC/lib/issues.sh"; sed -n '/^uncomment() {/,/^}/p; /^commentsonly() {/,/^}/p' "$SRC/lib/bugproof.sh")
   # <name> <file> <sed script> [notest]: the file changed so and, unless notest, a.test.js changed, staged; notes
   # "<name>=<0 when comments only>".
   try() {
