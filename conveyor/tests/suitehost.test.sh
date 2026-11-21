@@ -122,6 +122,14 @@ t_hostonce() {
   [ "$(cat "$STUB/full-pwd")" = "$T/$CASE/cards/release/wt" ] && [ ! -e "$STUB/ssh-calls" ] || fail "--machine local reached the box: $(cat "$STUB/ssh-calls" 2>&1)"
   jq -e '.suiteMachine == {kind: "ssh", target: "tester@box.example.com", dir: "~/suite"}' "$ST/control.json" > /dev/null || fail "--machine local changed the rule: $(jq -c .suiteMachine "$ST/control.json")"
 }
+# Bug: `release-run prep <version> --machine local` exports CONVEYOR_RELEASE_MACHINE to the suite it runs, and this
+# project's suite runs these cases: with it set, hostrule took this machine over the fixture's ssh rule and hostcheck failed.
+# A fresh bash (bash -c) sources the shared setup with the variable set, as that suite's environment has it.
+t_hostenv() {
+  local out
+  out=$(CONVEYOR_RELEASE_MACHINE=local bash -c '. "$1/tests/lib.sh"; printf "%s" "${CONVEYOR_RELEASE_MACHINE-unset}"' _ "$SRC" 2>&1)
+  [ "${out##*$'\n'}" = unset ] || fail "tests/lib.sh left CONVEYOR_RELEASE_MACHINE=local set for the cases: $out"
+}
 # Bug: release-run <version> --machine local, after a release-prep of that version passed on the box on main's head,
 # released on the box's pass, so no suite ran here. The run record is that pass; the run must run release-prep here.
 t_hostoncego() {

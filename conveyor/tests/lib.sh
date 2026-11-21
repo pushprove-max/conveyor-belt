@@ -31,6 +31,10 @@ unset CONVEYOR_TEST_ONESLOT
 # card that tests at the same time (caselocks.test.sh). Without it, a case's cards folder is beside its own main.
 unset CARDCTL CONVEYOR_CARD_SETTINGS CONVEYOR_OPENCODE_GUARD CONVEYOR_CODEX_GUARD CONVEYOR_CARD_RULES CONVEYOR_CARD CONVEYOR_FOREMAN CLAUDE_CODE_SESSION_ID CONVEYOR_TEST_SLOTS \
   CONVEYOR_MAIN CONVEYOR_FOREMAN_DIR CLAUDE_PROJECT_DIR CONVEYOR_CARDS
+# `release-run ... --machine local` exports CONVEYOR_RELEASE_MACHINE to the suite it runs, this one included: a case
+# that reads the suiteMachine rule (hostrule) would take this machine, whatever its fixture's rule says. A case that
+# wants it passes `--machine local` to the engine.
+unset CONVEYOR_RELEASE_MACHINE
 # The load factor of the test run this runner is part of (CONVEYOR_LOAD_FACTOR, lib/loadfactor.sh loadfactor(); 1 when
 # unset) scales each case's time limit (run_case). The cases get 1, which a loop a case runs keeps (loadfactor()): a
 # time limit a case checks is the same on a busy machine as on an idle one.
