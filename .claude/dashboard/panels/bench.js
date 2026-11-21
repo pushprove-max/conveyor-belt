@@ -82,14 +82,15 @@
   const tokens = (t) => (num(t) === null ? '–' : t >= 1e6 ? `${(t / 1e6).toFixed(1)}M` : t >= 1e3 ? `${Math.round(t / 1e3)}k` : String(t));
   const took = (m) => { if (num(m) === null) return '–'; const r = Math.round(m); return r < 60 ? `${r} min` : `${Math.floor(r / 60)} h${r % 60 ? ` ${String(r % 60).padStart(2, '0')} min` : ''}`; };
   const COST = '–';  // an estimate with no price data (Start a run)
-  // A cost `bench swe` recorded: {usd, state} with state known (every session priced), partial (usd the priced part)
-  // or unknown; anything else (null: a run or result from before costs were recorded) is unknown, never $0.
-  const costOf = (c) => { const o = obj(c); return o && (o.state === 'known' || o.state === 'partial') && num(o.usd) !== null ? { usd: o.usd, state: o.state } : { usd: null, state: 'unknown' }; };
+  // A cost `bench swe` recorded: {usd, state} with state known (every session priced), estimate (priced from
+  // tokens with no split by kind, as an agent arm's is), partial (usd the priced part) or unknown; anything else (null: a
+  // run or result from before costs were recorded) is unknown, never $0.
+  const costOf = (c) => { const o = obj(c); return o && (o.state === 'known' || o.state === 'estimate' || o.state === 'partial') && num(o.usd) !== null ? { usd: o.usd, state: o.state } : { usd: null, state: 'unknown' }; };
   function costSaid(c) {
     const k = costOf(c);
-    return k.state === 'unknown' ? 'unknown' : k.state === 'partial' ? `${B.ctx.money(k.usd)} recorded, part unknown` : B.ctx.money(k.usd);
+    return k.state === 'unknown' ? 'unknown' : k.state === 'partial' ? `${B.ctx.money(k.usd)} recorded, part unknown` : k.state === 'estimate' ? `${B.ctx.money(k.usd)} estimate` : B.ctx.money(k.usd);
   }
-  const COST_WHY = 'Costs are at list prices. "Part unknown": some sessions have no usage that can be priced.';
+  const COST_WHY = 'Costs are at list prices. "Estimate": an agent reports its tokens with no split, so they are priced as input tokens. "Part unknown": some sessions have no usage that can be priced.';
   // An arm as a run's column names it: a Conveyor arm with its version (main with its commit), another with its model
   // when each model's results are kept apart (its key is not its name).
   const commit7 = (c) => String(c.engine || '').slice(0, 7);
@@ -597,7 +598,8 @@
     const activeOf = (c) => (a && a.arm === c.arm && typeof a.task === 'string' && Number.isFinite(Date.parse(a.start)) ? B.ctx.since(a.start, '', (num(c.wall) || 0) * 60) : took(num(c.wall)));
     // The active session's cost is unknown only once it has one: a task still preparing its image has no session yet.
     const k = costOf(r.cost), price = k.state === 'known' ? `Recorded list price ${B.ctx.money(k.usd)}.`
-      : k.state === 'partial' ? `${B.ctx.money(k.usd)} recorded. ${a && obj(a.cost) && costOf(a.cost).state !== 'known' ? 'Cost for the active session is unknown.' : 'Part of the cost is unknown.'}` : 'Cost unknown.';
+      : k.state === 'estimate' ? `Estimated list price ${B.ctx.money(k.usd)}.`
+      : k.state === 'partial' ? `${B.ctx.money(k.usd)} recorded. ${a && obj(a.cost) && !['known', 'estimate'].includes(costOf(a.cost).state) ? 'Cost for the active session is unknown.' : 'Part of the cost is unknown.'}` : 'Cost unknown.';
     const figs = h('p', 'bench-sofar', `${sum('done')} of ${n * cols.length} arm results finished · ${sum('resolved')} resolved · ${cols.reduce((x, c) => x + reusedOf(c), 0)} reused · ${sum('notRun')} not run · ${price}`);
     if (typeof r.updated === 'string') figs.append(' ', h('span', 'board-from', `Last update ${B.ctx.clock(r.updated)}`));
     const t = h('table', 'tests-table bench-live'), hr = h('tr');

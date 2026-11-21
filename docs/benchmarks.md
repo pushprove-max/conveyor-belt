@@ -46,7 +46,9 @@ A task that an arm already ran with the same inputs is not run again: its result
 inputs are the arm and its models and efforts, the engine commit, the control record and pack settings of a Conveyor
 arm, the contents of its card and area rules, the dataset revision, the harness version and the limits. A change to
 one of them gives a new result, and the earlier result stays in the results. A result with no recorded inputs is
-shown, but never used again. A run reads these inputs once, when it starts. A change to the control record or the
+shown, but never used again. `--again` runs each task again, with the same inputs. The new result is kept with
+that run: `bench swe show` of that run shows it, and `bench swe show` of the earlier run still shows the earlier result.
+`results` and the figures below read the earlier result, but `sameTwice` counts both runs. A run reads these inputs once, when it starts. A change to the control record or the
 rules while it runs applies to the next run only.
 
 ### Run settings
@@ -340,11 +342,15 @@ the cost includes the active task's work so far. Each task's result keeps its `c
 Conveyor arm's sessions are priced from the token usage that its card records for each session, including the judge's
 and that of a session that failed.
 When a session's final record comes, it replaces the figure for that session so far. An agent arm reports no usage by
-model, so its cost is unknown. A reused result adds nothing. The work of a task that Stop interrupted is counted.
+model, so its cost is an estimate: its tokens, as one figure, priced as input tokens at the list price of its model. An
+agent arm with no model, or with no tokens, has an unknown cost. A reused result adds nothing. The work of a task that
+Stop interrupted is counted.
 
 Each `cost` has `usd` and `state`:
 
 - `known`: every session is priced.
+- `estimate`: an agent arm's tokens at the list price of its model, as above. A run or an arm whose results are known
+  or estimates, with at least one estimate, is an estimate.
 - `partial`: some sessions have no usage that can be priced, for example a session that has not reported usage yet.
   `usd` is the cost of the priced sessions only.
 - `unknown`: no session can be priced, and `usd` is null. Runs and results from before costs were recorded show
@@ -393,11 +399,40 @@ Each result that was graded also keeps what the official harness reported, and t
   fails on the base commit with only the patch's test files, and passes with the whole patch. A patch whose new test
   also passes on the base commit is false, as is a patch with no test file.
 
+- `clean` (in `measures`): true when the result is resolved, `lintClean` is true, `size` is at most 2 and `strays` is
+  false. It is false when one of these is false. It is `null` when none is false and one could not be measured.
+
 `lintClean` and `provesFix` are `null` when Docker, ruff or git could not run for the patch.
 
+Each result also keeps:
+
+- `timedOut`: true when the arm's command ran to the task's time limit (`taskTimeout`), and false when it did not.
+- `fixRounds` and `findingsFixed`, for a Conveyor arm: the number of fix rounds its card ran, and the number of review
+  findings in the reviews that a fix round followed. Findings of the last review, which no fix round followed, are not
+  counted. An agent arm has neither.
+
+`bench swe results --json` gives, for each arm's results under one key, `figures`, and `bench swe history` gives the same
+under each of its `keys`:
+
+- `classes`: the count of each class.
+- `failToPassPassed` and `passToPassBroken`: the total of fail-to-pass tests that passed, and of pass-to-pass tests that
+  failed.
+- `clean`: the number of results that are `clean`.
+- `medians`: over the resolved results, the median of `files`, `codeAdded`, `codeRemoved`, `testAdded` and `size`.
+- `rates`: over the resolved results, the share (0 to 1) with `lintClean` true, `size` at most 2, `strays` true and
+  `provesFix` true.
+- `tokensPerResolved`: the tokens of all its results, over the number of resolved results.
+- `sameTwice`: the share of the tasks that the arm ran twice, in two runs with the same inputs and the same results key,
+  that were resolved both times or unresolved both times. A run with `--again` gives the second run. A reused result is
+  not a second run. It is `null` when the
+  arm never ran a task twice. A value under 1 shows that the result of the arm changes from run to run.
+
+A figure is `null` when one of the results it counts has not kept what the figure needs. `medians`, `rates` and
+`tokensPerResolved` are `null` when no result is resolved.
+
 `bench swe show`, `history` and `results --json` show them. A result recorded before they were kept shows them as
-`null`, which means not kept, not zero. A result kept before `lintClean` and `provesFix` has no value for them: that
-also means not kept.
+`null`, which means not kept, not zero. A result kept before `lintClean`, `provesFix` or `clean` has no value for them:
+that also means not kept.
 
 A small run tells you little. Two runs of the same version can differ by chance, because the models do not give the
 same answer each time. With n tasks, a difference under about the square root of 2n tasks is within that noise: with 5
@@ -415,8 +450,9 @@ shows. Use `swe 1` and `swe 5` to see that a version works at all, and `swe 50` 
 - The sessions of an arm run in its container and see only the task's sandbox (a Conveyor arm also sees the folder of
   the installed Conveyor version, read-only). In a Conveyor arm, Codex sessions run without Codex's own sandbox, at
   every Conveyor version. The container is their sandbox (see [Containers and logins](#containers-and-logins)). Conveyor also reads the reference
-  fixes and hidden tests only to make the task list and to grade a patch, and then removes them. A result keeps
-  the size of the reference fix and the names of the failed hidden tests, never their text.
+  fixes and hidden tests only to make the task list and to grade a patch, and then removes them, with the harness's
+  report and logs of the grade. A result keeps the size of the reference fix, the counts of the hidden tests and the
+  names of the failed ones, never the text of a reference fix or of a hidden test, and no part of the harness's report.
 - The task images are for x86-64. Each arm installs its tools in each task's container, with the network, so each
   task takes more minutes than the build alone, and an install that the network stops makes the arm fail that task.
 - An arm installs the latest version of its plugin or method. Two runs some weeks apart can use different versions.

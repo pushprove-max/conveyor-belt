@@ -461,3 +461,16 @@ t_swecostsolo() {
     && tail -n 1 "$B/runs.jsonl" | jq -e '.tasks[0].cost == {usd: null, state: "unknown", unpriced: 1}' > /dev/null \
     || fail "the agent arm's cost is not unknown: $(cat "$B"/results/solo-*/"$first.json" 2>&1) $(tail -n 1 "$B/runs.jsonl")"
 }
+
+# Bug: an agent arm's cost was always unknown, so a run of agent arms gave no dollars. Its tokens (35 here, one figure)
+# are priced at its model's list price, the pack's price over the table (a $1000000 per million input price makes each
+# token $1), and the cost has state "estimate": in the result, the run's task line and the run's own cost.
+t_swecostestimate() {
+  swe; local first o; first=$(sweorder | head -n 1)
+  tune '.prices = {"m": {input: 1000000, output: 2000000, cacheRead: 500000}}'
+  o=$(loop bench swe 1 --solo 2>&1) || fail "the solo run failed: $o"
+  jq -e '.tokens == 35 and .cost.state == "estimate" and .cost.usd == 35 and .cost.unpriced == 0 and .cost.basis.m.input == 1000000' "$B"/results/solo-*/"$first.json" > /dev/null \
+    && tail -n 1 "$B/runs.jsonl" | jq -e '.tasks[0].cost | .state == "estimate" and .usd == 35' > /dev/null \
+    || fail "the agent arm's cost is not an estimate of its tokens at the model's list price: $(cat "$B"/results/solo-*/"$first.json" 2>&1) $(tail -n 1 "$B/runs.jsonl")"
+  o=$(loop bench swe history | jq -c '.runs[0].cost') && [ "$o" = '{"usd":35,"state":"estimate"}' ] || fail "the run's cost is not the estimate: $o"
+}

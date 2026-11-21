@@ -163,11 +163,11 @@ test('Overview: the drift watch is folded, one row a figure, and a group of 2 ca
 test('A run going: the tab opens on it, its step moves with the same done count, a lost read keeps it, Stop run ends it from its first line', async () => {
   const w = boot({ tab: 'bench' });
   const id = 'r20261109T164200-12', [t1, t2, t3, ...rest] = BH.TASKS, [C, S] = BH.hist().runs[0].cols;
-  let phase = 'Building', state = 'running', lost = false, acost = { usd: null, state: 'unknown' }, atask = t3;
+  let phase = 'Building', state = 'running', lost = false, acost = { usd: null, state: 'unknown' }, atask = t3, rcost = { usd: 2, state: 'partial' };
   const going = () => state === 'running', usd = (v, s = 'known') => ({ usd: v, state: s });
   const c = (arm, result, o = {}) => ({ arm, result, reused: false, state: result ? 'finished' : going() ? 'waiting' : 'not reached', sessions: 1, minutes: 8, ...o });
   const show = () => ({
-    run: { id, state, started: iso(T0 - 1080000), ended: going() ? null : iso(T0), updated: iso(T0 - 60000), n: 5, cost: usd(2, 'partial'),
+    run: { id, state, started: iso(T0 - 1080000), ended: going() ? null : iso(T0), updated: iso(T0 - 60000), n: 5, cost: rcost,
       active: going() ? { arm: 'conveyor', task: atask, phase, since: iso(T0 - 120000), start: iso(T0 - 300000), ...(acost ? { cost: acost } : {}) } : null,
       cols: [{ ...C, done: 2, resolved: 2, notRun: 0, cost: usd(1.2, 'partial'), wall: 8 }, { ...S, done: 2, resolved: 1, notRun: 0, cost: usd(0.8), wall: 16 }] },
     tasks: [{ id: t1, cells: [c('conveyor', 'resolved', { reused: true, cost: usd(3) }), c('solo', 'resolved', { cost: usd(0.4) })] },
@@ -232,10 +232,12 @@ test('A run going: the tab opens on it, its step moves with the same done count,
   assert.match(text(bp(w).querySelector('.bench-sofar')), /\$2\.00 recorded\. Part of the cost is unknown\. Last update /);
   // Bug it guards (#750): an arm checking its preflight (active with no task) counted its active time up from the
   // check's start, then dropped back to its wall, which has task work only, once Checking moved to the next arm.
-  phase = 'Checking'; atask = null;
+  // Bug it guards: a run whose cost is an agent arm's estimate said "Cost unknown." on its line.
+  phase = 'Checking'; atask = null; rcost = usd(2, 'estimate');
   next(w, snap(5));
   await settle();
   assert.match(now(), /^Now: Conveyor 1\.5\.0 · Checking since /);
+  assert.match(text(bp(w).querySelector('.bench-sofar')), / · Estimated list price \$2\.00\. Last update /);
   assert.equal(text(bp(w).querySelector('.bench-live tr[data-arm="conveyor"]').children[6]), '8 min', 'a preflight adds no active time');
   atask = t3;
   // Bug it guards (#646 review E1): the tab chose its page once, so a person back from another tab saw the page they
@@ -329,23 +331,24 @@ test('A run whose process is gone: its page says interrupted and keeps Stop run,
 // table. A cost never recorded is unknown, never $0.
 test('Costs: History, a run, its export, Compare and the infographic table tell a recorded, a partial and an unknown cost apart', async () => {
   const w = boot({ tab: 'bench' });
-  const h = BH.hist(), [r0, r1] = h.runs, known = { usd: 2.5, state: 'known' }, part = { usd: 1.2, state: 'partial' };
-  h.runs = [{ ...r0, cost: part, cols: r0.cols.map((x, i) => ({ ...x, cost: [known, part, null][i] })) }, { ...r1, cost: known }, { ...r1, id: 'r20261107T100000-5', cost: null }];
+  // Bug it guards: an agent arm's cost, state "estimate", fell through to unknown in each place.
+  const h = BH.hist(), [r0, r1] = h.runs, known = { usd: 2.5, state: 'known' }, part = { usd: 1.2, state: 'partial' }, est = { usd: 0.2, state: 'estimate' };
+  h.runs = [{ ...r0, cost: part, cols: r0.cols.map((x, i) => ({ ...x, cost: [known, part, null][i] })) }, { ...r1, cost: known }, { ...r1, id: 'r20261107T100000-5', cost: null }, { ...r1, id: 'r20261106T100000-4', cost: est }];
   const run = BH.run();
   run.run = h.runs[0];
-  run.tasks[0].cells = run.tasks[0].cells.map((x, i) => ({ ...x, cost: [{ usd: 0.5, state: 'known' }, { usd: 0.1, state: 'partial' }, undefined][i] }));
+  run.tasks[0].cells = run.tasks[0].cells.map((x, i) => ({ ...x, cost: [{ usd: 0.5, state: 'known' }, { usd: 0.1, state: 'partial' }, est][i] }));
   BH.open(w, { body: (url) => (/&run=/.test(url) ? run : h) });
   await settle();
-  assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-history tr[data-run]'), (r) => text(r.children[9])), ['$1.20 recorded, part unknown', '$2.50', 'unknown']);
+  assert.deepEqual(Array.from(bp(w).querySelectorAll('.bench-history tr[data-run]'), (r) => text(r.children[9])), ['$1.20 recorded, part unknown', '$2.50', 'unknown', '$0.20 estimate']);
   act(bp(w), `run-${NEW}`).click();
   await settle();
   assert.deepEqual(Array.from(bp(w).querySelector(`tr[data-task="${BH.TASKS[0]}"]`).querySelectorAll('.bench-cell .bench-sub'), text),
-    ['3 sessions · 20 min · $0.50', '1 session · 8 min · $0.10 recorded, part unknown', '1 session · 8 min · unknown']);
+    ['3 sessions · 20 min · $0.50', '1 session · 8 min · $0.10 recorded, part unknown', '1 session · 8 min · $0.20 estimate']);
   assert.deepEqual(Array.from(bp(w).querySelector('.bench-mat tfoot tr:last-child').children, text), ['Minutes · cost', '102 · $2.50', '40 · $1.20 recorded, part unknown', '28 · unknown']);
   act(bp(w), 'export').click();
   const figs = JSON.parse(decodeURIComponent(w.downloads[0].href.slice(w.downloads[0].href.indexOf(',') + 1)));
   assert.deepEqual([figs.cost, ...figs.arms.map((a) => a.cost), ...figs.tasks[0].arms.map((a) => a.cost)],
-    [part, known, part, { usd: null, state: 'unknown' }, { usd: 0.5, state: 'known' }, { usd: 0.1, state: 'partial' }, { usd: null, state: 'unknown' }]);
+    [part, known, part, { usd: null, state: 'unknown' }, { usd: 0.5, state: 'known' }, { usd: 0.1, state: 'partial' }, est]);
   act(bp(w), 'back').click();
   const box = act(bp(w), `pick-${NEW}`); box.checked = true; box.dispatchEvent(new w.Event('change'));
   act(bp(w), 'sel-compare').click();

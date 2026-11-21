@@ -40,8 +40,8 @@ while [ -e "$SWE_FX/hold" ]; do sleep 0.1; done
 q=$(mktemp) && gh issue list --json number,title,body,labels,createdAt | jq -c 'map(.authorAssociation = "OWNER")' > "$q" \
   && p=$(bash "$SWE_SRC/conveyor.sh" pick --dry --issues "$q" --state "$CONVEYOR_MAIN/conveyor/state" 2>> "$SWE_FX/pick.err"); rm -f "$q"; [ -n "${p:-}" ] || exit 0
 mkdir -p "$CONVEYOR_MAIN/conveyor/state"
-rec() { jq -nc --arg s "$1" --arg r "$2" --arg w "${3:-}" --argjson j "${4:-null}" --arg t "${5:-}" '{card: "c1", issue: 1, step: $s, result: $r, reason: $w, time: "2026-11-01T00:00:00Z", tokens: {claude: 100, codex: 10}}
-  + (if $j == null then {} else {judge: $j} end) + (if $t == "" then {} else {tail: $t} end)' >> "$CONVEYOR_MAIN/conveyor/state/cards.jsonl"; }
+rec() { jq -nc --arg s "$1" --arg r "$2" --arg w "${3:-}" --argjson j "${4:-null}" --arg t "${5:-}" --argjson k "${6:-null}" '{card: "c1", issue: 1, step: $s, result: $r, reason: $w, time: "2026-11-01T00:00:00Z", tokens: {claude: 100, codex: 10}}
+  + (if $j == null then {} else {judge: $j} end) + (if $t == "" then {} else {tail: $t} end) + (if $k == null then {} else {counts: $k} end)' >> "$CONVEYOR_MAIN/conveyor/state/cards.jsonl"; }
 rec picked ok; rec build ok
 # With $SWE_FX/eblock, the card blocks with no change, as an engine whose commit the container's git refuses.
 [ ! -e "$SWE_FX/eblock" ] || { rec blocked blocked "commit: git: 'hook' is not a git command"; exit 0; }
@@ -58,7 +58,7 @@ fi
 # The project name this checkout's loop takes, as the real engine names it (and its machine slot file after it).
 (set -- run; HERE=$SWE_SRC; . "$SWE_SRC/lib/paths.sh" && echo "$RTAG" > "$SWE_FX/rtag")
 J='{"model":"m","tokens":{"claude":5,"codex":0},"accepted":[],"declined":[]}' # a judge session on the review
-if [ "$V" = B ] && [[ $t == *a-1 ]]; then rec review NO-GO '[P1] x.py:1 the fix is wrong' "$J"; rec fix ok; rec review NO-GO '[P1] x.py:1 still wrong' "$J" $'[P1] x.py:1 still wrong\n[P2] y.py:2 past the cut reason'; rec blocked blocked 'review: the last review said NO-GO'; exit 0; fi
+if [ "$V" = B ] && [[ $t == *a-1 ]]; then rec review NO-GO '[P1] x.py:1 the fix is wrong' "$J" '' '{"P0":0,"P1":2,"P2":1,"P3":0}'; rec fix ok; rec review NO-GO '[P1] x.py:1 still wrong' "$J" $'[P1] x.py:1 still wrong\n[P2] y.py:2 past the cut reason' '{"P0":0,"P1":1,"P2":1,"P3":0}'; rec blocked blocked 'review: the last review said NO-GO'; exit 0; fi
 cp "$CONVEYOR_MAIN/conveyor/state/control.json" "$SWE_FX/control.seen"; cp "$CONVEYOR_MAIN/.conveyor/project.json" "$SWE_FX/pack.seen"; (set -- run; HERE=$SWE_SRC; . "$SWE_SRC/lib/paths.sh" && . "$SWE_SRC/lib/prompts.sh" && cardrules "$(gh issue view 1)") > "$SWE_FX/rules.seen" 2>&1
 cat "$HOME/.codex/auth.json" > "$SWE_FX/codex.seen" 2>/dev/null || :
 # The Codex sandbox the engine under test gives a review in this container (codexsb()).

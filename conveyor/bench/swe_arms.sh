@@ -358,7 +358,9 @@ swe_ctl() { # <arm json>
     | .rules += ($p | with_entries(select(.key | test("^P[0-3]$")))) | . + ($p | with_entries(select(.key | IN("judgeOn", "judgeAlways"))))'
 }
 SWE_ASK='Fix this issue in the repository in the current folder. Change the code only; do not commit.'
-# One trial: the arm builds the task in its container. Prints {sessions, tokens, minutes, steps, cost, fired, why}, and
+# One trial: the arm builds the task in its container. Prints {sessions, tokens, minutes, steps, cost, fired, why,
+# timedOut} (a conveyor arm's also fixRounds and findingsFixed, the fix rounds of its card and the review findings a
+# fix round followed; an agent arm's cost is swe_estimate's), and
 # ended when a conveyor arm's card only waited and swe_watch ended the trial (its patch is then that card's staged change)
 # (a conveyor arm's steps keep each line's model and token usage, cost is swe_cost of its card's lines, its live
 # records and the reviewer's record swe_watch kept); keeps
@@ -422,7 +424,10 @@ swe_trial() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor kind
   local secs=$(( $(date +%s) - t0 ))
   if [ "$kind" = conveyor ]; then
     b=$(jq -sc --argjson m "$secs" 'map(select(.issue == 1 and (.step | IN("start", "picked", "worktree", "deps", "brief") | not))) as $s
-      | {sessions: ($s | map(select(.step | IN("build", "review", "fix", "rebase"))) | length) + ($s | map(select(.judge | type == "object")) | length),
+      | {fixRounds: ($s | map(select(.step == "fix")) | length),
+         findingsFixed: ([range($s | length) as $i | select($s[$i].step == "review" and $s[$i].result == "NO-GO" and ($s[$i + 1:] | any(.step == "fix")))
+           | $s[$i].counts | objects | add // 0] | add // 0),
+         sessions: ($s | map(select(.step | IN("build", "review", "fix", "rebase"))) | length) + ($s | map(select(.judge | type == "object")) | length),
          tokens: ($s | map((.tokens.claude // 0) + (.tokens.codex // 0) + (.judge.tokens.claude // 0) + (.judge.tokens.codex // 0)) | add // 0),
          minutes: ($m / 6 | round / 10), steps: ($s | map({step, result, reason, time, tokens} + if .step == "review" and .result != "GO" and has("tail") then {tail} else {} end
            + ({model, usage, byModel: .stats.byModel?, judge: (.judge | if type == "object" then {model, usage} else null end)} | with_entries(select(.value != null)))))}' "$h/cards.jsonl" 2>/dev/null) \
@@ -436,11 +441,24 @@ swe_trial() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor kind
     b=$(jq -Rsc --argjson m "$secs" --argjson n "$(jq '.sessions // 1' <<<"$a")" "def fired: $(jq -r '.fired // "true"' <<<"$a"); def tok: $(jq -r '.tokens // "0"' <<<"$a");
       [splits(\"\\n\") | fromjson? | objects] as \$o | {sessions: \$n, tokens: ((\$o | tok) // 0), minutes: (\$m / 6 | round / 10), steps: [], fired: ((\$o | fired) == true)}" "$h/out") \
       || { echo "the arm's fired or tokens filter is not valid jq"; return 1; }
-    # An agent reports no usage by model: its cost is unknown.
-    b=$(jq -c '. + {cost: {usd: null, state: "unknown", unpriced: .sessions, basis: {}}}' <<<"$b")
+    b=$(jq -c --argjson k "$(swe_estimate "${SWE_MODEL:-}" "$(jq .tokens <<<"$b")" "$(jq .sessions <<<"$b")")" '. + {cost: $k}' <<<"$b")
     [ -n "$why" ] || jq -e .fired <<<"$b" > /dev/null || why="it did not fire: its output shows no use of its method"
   fi
-  jq -c --arg w "$why" --arg e "$ended" '. + {fired: ($w == ""), why: (if $w == "" then null else $w end)} + (if $e == "" then {} else {ended: $e} end)' <<<"$b"
+  # timedOut: the arm's command ran to the task's time limit (timeout's exit 124).
+  jq -c --arg w "$why" --arg e "$ended" --argjson to "$([ "$rc" = 124 ] && echo true || echo false)" \
+    '. + {fired: ($w == ""), why: (if $w == "" then null else $w end), timedOut: $to} + (if $e == "" then {} else {ended: $e} end)' <<<"$b"
+}
+# An agent arm's cost: it reports no usage by model, so its tokens (one figure, with no split) are priced as input tokens
+# at its model's list price (the table and the pack's prices, as swe_cost uses them), and the cost has state "estimate".
+# With no model or no tokens it is unknown, never $0. Prints {usd, state, unpriced, basis}.
+swe_estimate() { # <model> <tokens> <sessions>
+  local pp k; packget prices pp 2>/dev/null && [ -n "$pp" ] || pp='{}'
+  if [ -n "$1" ] && jq -e 'type == "number" and . > 0' <<<"$2" > /dev/null 2>&1; then
+    k=$(jq -nc --arg m "$1" --argjson n "$2" --argjson p "$pp" '{steps: [{step: "build", model: $m, usage: {input: $n, write: 0, write1h: 0, read: 0, output: 0}}], prices: $p}' \
+      | python3 "$HERE/../.claude/scripts/dashboard_limit.py" work 2>/dev/null) \
+      && jq -e '.state == "known"' <<<"$k" > /dev/null 2>&1 && { jq -c '.state = "estimate"' <<<"$k"; return; }
+  fi
+  jq -nc --argjson s "$3" '{usd: null, state: "unknown", unpriced: $s, basis: {}}'
 }
 # The trivial task of a preflight, as a task's JSON: a repository whose hello.py prints a word misspelt, in the image
 # given (the run's first task's: the same base as the tasks).

@@ -1063,9 +1063,11 @@ writes or picks anything. You can type a title. The notes on how to read the gra
 table beside the picture, as a CSV file with the same name.
 
 The cost of a run, an arm or a task is its [cost at list prices](benchmarks.md#results), as the build machine
-recorded it. It shows in one of three ways:
+recorded it. It shows in one of four ways:
 
 - A sum, such as "$1.20": every session is priced.
+- "$1.20 estimate": an agent arm's tokens, priced as input tokens at its model's list price, as the agent reports no
+  split by kind.
 - "$1.20 recorded, part unknown": some sessions have no usage that can be priced. While a run goes, the run's line
   says "Cost for the active session is unknown." when that is the session with no price yet.
 - "unknown": no session is priced. Runs from before costs were recorded show unknown, not $0.

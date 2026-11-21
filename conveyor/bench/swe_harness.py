@@ -27,7 +27,8 @@ Usage:
       project settings, finds no problem in the files the patch changes that those files did not have at the base
       commit) and provesFix (the patch adds or changes a test file, and the test command on those files fails at the
       base commit with only the patch's test files, and passes with the whole patch), each null when it could not be
-      measured;
+      measured; and clean (resolved, lintClean, size at most 2, no strays: false when one is false, null when none is
+      false and one could not be measured);
       its container is named sweb.eval.<id>.conveyor-<run id>-<id>, which the run's end (swe.sh's swe_end) removes;
       exit 3 when the harness could not run the task (the task is not in the dataset, its image could not be
       fetched or built, or the run erred).
@@ -193,6 +194,14 @@ def measures(patch, fix):
                    'strays': any(not is_test(p) and p not in ref for p in mine)}
 
 
+# Whether the patch is clean: resolved, lint clean, at most twice the reference fix's size, and no strays. False as soon
+# as one of them is false, else None (not known) when one could not be measured (lintClean, or a size when the reference
+# fix changes no code line), else True.
+def is_clean(resolved, m):
+    parts = [resolved, m['lintClean'], None if m['size'] is None else m['size'] <= 2, not m['strays']]
+    return False if any(p is False for p in parts) else None if any(p is None for p in parts) else True
+
+
 # One kind of hidden test of the row (the names it lists) against the harness's report of the instance.
 def tests_of(row, report, kind):
     names = json.loads(row[kind]) if isinstance(row[kind], str) else list(row[kind])
@@ -326,6 +335,7 @@ def grade(dataset, revision, instance, patch, folder, run, cache):
     with open(patch) as f:
         ref, mine = measures(f.read(), rows[0]['patch'])
     mine.update(checks(rows[0], patch, image_of(instance), f'sweb.eval.{instance}.{run_id}-check', cache))
+    mine['clean'] = is_clean(resolved, mine)
     cls = ('resolved' if resolved else 'broke' if f2p['failed'] == 0 else 'partial' if f2p['passed'] > 0 else 'nofix')
     print(json.dumps({'resolved': resolved, 'class': cls, 'tests': {'failToPass': f2p, 'passToPass': p2p}, 'ref': ref, 'measures': mine}))
     return 0
