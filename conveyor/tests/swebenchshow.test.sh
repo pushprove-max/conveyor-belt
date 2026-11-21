@@ -343,20 +343,25 @@ t_swelive() {
 # cases after it check the others: Stop and the retry with no run (swe_end, swe_cost), the solo case one run, and the
 # old-costs case none (it seeds old lines).
 t_swecost() {
-  local o a b one='{"input":1000000}' first p s
+  local o a b n one='{"input":1000000}' first p s
   # (1) The running build's live record, 1M input: $1. (3) The build's line (2M input: $2) replaces its live record;
   # the review (1M cache reads: $0.50) and its judge (1M output: $2) are priced; (2) the fix running has reported no
   # usage yet (zero), so it is unpriced, not $0. (9) The fix stalled and runs again (its live record names the stall),
   # 1M input so far ($1): its first try, which no record the container shows holds, is unpriced, not left out.
+  # (2) A build and a review that ended, each with a line but no usage (an engine that records none, as the fake
+  # engine's rec lines in swebench.test.sh), are two unpriced sessions, not $0: the card's cost stays partial.
   a='{"card":"c1","issue":1,"step":"start","result":"ok","of":"build"}'
   b=$a$'\n{"card":"c1","issue":1,"step":"build","result":"ok","model":"bench-m","usage":{"input":2000000}}'
   b=$b$'\n{"card":"c1","issue":1,"step":"review","result":"GO","model":"bench-m","usage":{"read":1000000},"judge":{"model":"bench-m","usage":{"output":1000000}}}'
+  n=$b$'\n{"card":"c1","issue":1,"step":"build","result":"ok","reason":"","time":"2026-11-01T00:00:00Z","tokens":{"claude":100,"codex":10}}'
+  n=$n$'\n{"card":"c1","issue":1,"step":"review","result":"GO","reason":"","time":"2026-11-01T00:00:00Z","tokens":{"claude":100,"codex":10}}'
   b=$b$'\n{"card":"c1","issue":1,"step":"start","result":"ok","of":"fix"}'
   o=$(swefn 'for x in "$@"; do printf "%s\n" "$x" | swe_cost; done' "$a"$'\n{"step":"build","model":"bench-m","usage":'"$one}" \
-    "$b"$'\n{"step":"fix","model":"bench-m","zero":true,"usage":{"input":0}}' "$b"$'\n{"step":"fix","model":"bench-m","stalled":"2026-11-01T00:00:00Z","usage":'"$one}" 2>&1)
-  jq -se 'map({usd, state, unpriced}) == [{usd: 1, state: "known", unpriced: 0}, {usd: 4.5, state: "partial", unpriced: 1}, {usd: 5.5, state: "partial", unpriced: 1}]
+    "$b"$'\n{"step":"fix","model":"bench-m","zero":true,"usage":{"input":0}}' "$b"$'\n{"step":"fix","model":"bench-m","stalled":"2026-11-01T00:00:00Z","usage":'"$one}" "$n" 2>&1)
+  jq -se 'map({usd, state, unpriced}) == [{usd: 1, state: "known", unpriced: 0}, {usd: 4.5, state: "partial", unpriced: 1}, {usd: 5.5, state: "partial", unpriced: 1},
+        {usd: 4.5, state: "partial", unpriced: 2}]
       and all(.basis == {"bench-m": {input: 1, output: 2, cacheRead: 0.5, cacheWrite: 1.25}})' <<<"$o" > /dev/null \
-    || fail "a running session gave no list price, a step's line did not replace its live figure, or an unpriced or stalled session read as whole: $o"
+    || fail "a running session gave no list price, a step's line did not replace its live figure, or an unpriced, stalled or ended session with no usage read as whole: $o"
   # The cost so far is the active work's (written only when it changed), and the run page's cost counts it while the run goes.
   o=$(swefn 'sweliveseed r20261101T000000-1 "{\"arm\": \"conveyor\", \"task\": \"proj__a-1\", \"phase\": \"Fixing\", \"start\": \"2026-01-01T00:00:00Z\"}" \
     && k=$(printf "%s\n" "$1" | swe_cost) && swe_sofar "$k" && jq -c "[.seq, .active.cost]" "$SWE_DIR/live.json" && swe_sofar "$k" && jq -c .seq "$SWE_DIR/live.json" \
