@@ -55,13 +55,12 @@ test('Scoreboard, 7 arms on 50 tasks, one arm with results that kept no grade: t
 });
 
 // Bug it guards: the few-task Scoreboard's patch note named no test file where the mockup says "only Conveyor added a test
-// (7 lines in <the test file>)". The summary holds only paths and line counts, so the note says the same code files by
-// the same line counts, never "the same fix".
+// (7 lines in <the test file>)".
 test('Scoreboard, 2 runs of 1 task, one arm adding a test: the patch note names its test file', async () => {
   const set = BH.few();
   set.shows[BH.FEW2].tasks[0].cells[0].patch = [{ path: 'django/db/models/fields/reverse_related.py', added: 1, removed: 1 }];
   const w = await opened(set);
-  assert.ok(notes(w).includes('Real, from the patches the results keep. All five changed the same code files by the same line counts; only Conveyor, Codex builds v1.7.0 added a test (7 lines in tests/model_fields/test_manytomanyfield.py).'), notes(w).join(' | '));
+  assert.ok(notes(w).includes('Real, from the patches the results keep. All five changed the same file by one line; only Conveyor, Codex builds v1.7.0 added a test (7 lines in tests/model_fields/test_manytomanyfield.py).'), notes(w).join(' | '));
 });
 
 // Bug it guards: with the history taken off the page of fewer than 3 shared tasks, Archive, Restore and Delete were

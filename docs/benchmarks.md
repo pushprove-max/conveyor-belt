@@ -524,5 +524,4 @@ under **Drift watch**. Each figure there shows one of these:
 
 - **Moved, better** or **Moved, worse**: the two means are more than two standard errors apart.
 - **In its usual range**: the two means are closer than that.
-- **Too few cards**: a group has fewer than 5 cards, so no figure is judged.
-- **Not read**: a group has no figure or no spread for it.
+- **not kept**: a group has fewer than 5 cards, or no figure or no spread for it, so no figure is judged.

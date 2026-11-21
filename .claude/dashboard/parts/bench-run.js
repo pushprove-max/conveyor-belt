@@ -64,7 +64,7 @@
   }
   function liveVerdict(r, cols, p, data) {
     const words = [p.onTime === null ? null : p.onTime ? 'on time' : 'behind time', p.onBudget === null ? null : p.onBudget ? 'on budget' : 'over budget'].filter(Boolean);
-    const v = `${words.length ? `${cap(words.join(' and '))}.` : 'No estimate to judge it by.'} ${p.done} of ${p.T} task runs done; about ${K.fmtMin(p.eta)} left.`;
+    const v = `${cap(words.length ? words.join(' and ') : K.NOT_KEPT)}. ${p.done} of ${p.T} task runs done; about ${K.fmtMin(p.eta)} left.`;
     const tone = words.length && p.onTime !== false && p.onBudget !== false ? 'ok' : words.length ? 'warn' : 'quiet';
     return K.verdict(tone, `${r.id} · ${K.plural(p.n, 'task')} × ${K.plural(cols.length, 'arm')}`, v, `Spent ${K.usd(p.spent)} of the ${K.usd(p.est.usd)} estimate. ${guardSaid(r, cols, data)}`);
   }
@@ -78,9 +78,9 @@
   function liveStats(cols, p, data) {
     const notRun = K.sum(cols.map((c) => K.num(c.notRun) || 0)), causes = causesOf(data), ends = p.eta === null ? null : new Date(K.B.ctx.now() + p.eta * 60000).toISOString();
     return K.grid('4', K.stat(`${p.done}/${p.T}`, 'Task runs done', K.bar(p.T ? p.done / p.T : 0)),
-      K.stat(K.fmtMin(p.eta), 'Left, at this pace', K.chip(ends ? `ends about ${K.B.ctx.clock(ends)}` : 'no task done yet', 'quiet')),
-      K.stat(K.usd(p.spent), 'Spent so far', K.chip(p.est.usd && p.spent !== null ? `${K.pct(p.spent / p.est.usd)} of the estimate` : 'no estimate', p.onBudget === false ? 'warn' : 'ok')),
-      K.stat(String(notRun), 'Not run', K.chip(notRun ? `${causes.length ? causes.join(', ') : K.NOT_KEPT} · tried again next run` : 'none', notRun ? 'warn' : 'quiet')));
+      K.stat(K.fmtMin(p.eta), 'Left, at this pace', K.chip(ends ? `ends about ${K.B.ctx.clock(ends)}` : K.NOT_KEPT, 'quiet')),
+      K.stat(K.usd(p.spent), 'Spent so far', K.chip(p.est.usd && p.spent !== null ? `${K.pct(p.spent / p.est.usd)} of the estimate` : K.NOT_KEPT, p.onBudget === false ? 'warn' : 'ok')),
+      K.stat(String(notRun), 'Not run', notRun ? K.chip(`${causes.length ? causes.join(', ') : K.NOT_KEPT} · tried again next run`, 'warn') : ''));
   }
   const CELL = { yes: ['bench-g-ok', ''], no: ['bench-g-bad', ''], nr: ['bench-g-nr', 'not run'] };
   function cellOf(c, r) {
@@ -132,19 +132,19 @@
     LEGEND.forEach(([c, l]) => leg.append(K.add(h('span'), [h('i', c), l])));
     const grid = K.add(K.box('Tasks by arm', 'One row a task, one column an arm. Green resolved, red unresolved, blue working now, grey waiting.'), [cellGrid(data, cols), leg]);
     const side = K.add(K.box('Score so far', 'Tasks that every arm finished.'), [scoreSoFar(data, cols), h('h3', 'bench-h', 'Events'), tail(data, cols),
-      K.add(h('div', 'bench-row'), [K.stopRun(r.id, typeof r.stopping === 'string'), h('span', 'bench-note', 'Keeps the finished tasks.')]), K.saidAt(`stop-${r.id}`)]);
+      K.add(h('div', 'bench-row'), [K.stopRun(r.id, typeof r.stopping === 'string'), h('span', 'bench-note', 'Keeps the finished tasks.')]), K.refusedAt(`stop-${r.id}`)]);
     return [liveVerdict(r, cols, p, data), liveStats(cols, p, data), K.grid('main', grid, side)];
   }
-  function lastLine(r, The, word, took) {
-    if (r.state === 'refused') return `${The} run did not start. It was asked for ${stampOf(r.started)}.`;
-    if (!r.ended) return `${The} run is ${word}. It started ${stampOf(r.started)}.`;
+  // The mockup's line: when the last run ended, after how long. A run that did not start, or has no end recorded, has neither.
+  function lastLine(r, The, took) {
+    if (r.state === 'refused' || !r.ended) return K.NOT_KEPT;
     return `${The} run ended ${stampOf(r.ended)}, after ${took !== null && took < 90 ? K.plural(Math.round(took), 'minute') : K.fmtMin(took)}.`;
   }
   function lastRun(data) {
-    const r = data.run, cols = K.paint(K.colsOf(r).map((c) => ({ ...c }))), n = K.num(r.n) || 0, tasks = K.list(data.tasks).filter(K.obj), took = K.elapsed(r), [word] = K.stateOf(r);
+    const r = data.run, cols = K.paint(K.colsOf(r).map((c) => ({ ...c }))), n = K.num(r.n) || 0, tasks = K.list(data.tasks).filter(K.obj), took = K.elapsed(r);
     const all = cols.filter((c) => c.resolved === n && n).length, ran = Math.max(0, ...cols.map((c) => K.num(c.done) || 0)), refused = r.state === 'refused';
     const res = n === 1 ? `${all === cols.length ? `All ${cols.length}` : `${all} of ${cols.length}`} resolved it.` : `${cols.map((c) => `${K.colName(c)} ${K.num(c.resolved) || 0} of ${n}`).join(', ')}.`;
-    const v = lastLine(r, 'The last', word, took);
+    const v = lastLine(r, 'The last', took);
     // A cell with no result was never graded: it says why (not started, stopped), never unresolved.
     const one = (c) => {
       const x = tasks.length === 1 ? K.list(tasks[0].cells).find((y) => K.obj(y) && y.arm === c.arm) : null, k = K.said(x);
@@ -156,11 +156,10 @@
       { v: K.num(c.sessions) === null ? K.NOT_KEPT : String(c.sessions), c: 'r' }, { v: K.kTok(c.tokens), c: 'r' }, { v: K.num(c.minutes) === null ? K.NOT_KEPT : String(c.minutes), c: 'r' },
       { v: K.costSaid(c.cost), c: 'r' }])));
     if (tasks.length) s.append(K.button(tasks.length === 1 ? 'Open the task' : 'Open its first task', '', 'open-task', `Open the task ${tasks[0].id}`, () => K.openTask(tasks[0].id)));
-    // A run whose process ended with no end recorded (gone, no ended) says so; the mockup gives it no Stop.
+    // A run whose process ended with no end recorded (gone, no ended) has the verdict's warn tone; the mockup gives it no Stop.
     const gone = r.gone === true && !r.ended;
-    const w = refused ? `The build machine refused it: ${typeof r.why === 'string' && r.why ? r.why : 'no reason was kept'}.`.replace(/\.\.$/, '.')
-      : `It ran ${ran === n ? K.plural(n, 'task') : `${ran} of ${K.plural(n, 'task')}`} with ${K.plural(cols.length, 'arm')}. ${res}`;
-    return [K.verdict(refused ? 'bad' : gone ? 'warn' : 'quiet', 'No run goes now', v, gone ? `${w} Its process ended with no end recorded.` : w), s];
+    const w = refused ? K.NOT_KEPT : `It ran ${ran === n ? K.plural(n, 'task') : `${ran} of ${K.plural(n, 'task')}`} with ${K.plural(cols.length, 'arm')}. ${res}`;
+    return [K.verdict(refused ? 'bad' : gone ? 'warn' : 'quiet', 'No run goes now', v, w), s];
   }
   function liveRun() {
     const top = K.answers('What is the run doing now, will it finish in time, and is it on budget?'), l = K.live();
@@ -185,15 +184,16 @@
     }
     return { arms: [], title: null };
   }
-  // The mockup's Note column says only where a Conveyor arm went wrong.
+  // The mockup's Note column says where an unresolved Conveyor arm went wrong, and "did not fire" for another arm that did not fire.
   function noteOf(a, c) {
-    return K.said(c) === 'no' && a.kind === 'conveyor' ? `went wrong at ${K.lossOf(c) || 'a step not kept'}` : '';
+    if (K.said(c) !== 'no') return '';
+    return a.kind === 'conveyor' ? `went wrong at ${K.lossOf(c) || 'a step not kept'}` : c.fired === false ? 'did not fire' : '';
   }
   function eachArm(id, arms) {
     const s = K.box('Each arm on this task');
     s.append(K.table(['Arm', 'Result', ['Minutes', 'r'], 'Hidden tests', 'Note'], arms.map((a) => {
       const c = a.cells.get(id), k = K.said(c);
-      return [K.armSaid(a), K.chip(k === 'yes' ? 'resolved' : k === 'no' ? 'unresolved' : k === 'nr' ? 'not run' : 'no result', k === 'yes' ? 'ok' : k === 'no' ? 'bad' : 'quiet'),
+      return [K.armSaid(a), K.chip(k === 'yes' ? 'resolved' : k === 'no' ? 'unresolved' : k === 'nr' ? 'not run' : K.NOT_KEPT, k === 'yes' ? 'ok' : k === 'no' ? 'bad' : 'quiet'),
         { v: K.num(c.minutes) === null ? K.NOT_KEPT : String(Math.round(c.minutes)), c: 'r' }, { v: k === 'nr' ? '–' : K.testsSaid(c), c: 'bench-small' }, { v: noteOf(a, c), c: 'bench-small bench-muted' }];
     }), 'bench-arms'));
     return s;
@@ -225,7 +225,7 @@
     const f = K.fold(`review-${id}`, 'The review, in full');
     // The mockup shows the review's own text; a review of which none is kept, or no review, shows as not kept.
     (reviews.length ? reviews : [{}]).forEach((s) => f.append(h('p', 'bench-small', String(s.tail || s.reason || K.NOT_KEPT))));
-    return [h('h3', 'bench-h', 'Conveyor\'s card, step by step'), h('p', 'bench-hsub', `From the real run ${(a.from.get(id) || a.run).id} (${a.label}). ${sw.timed ? 'Width is time.' : 'The step times are not kept: each step has the same width.'}`), sw.d, f];
+    return [h('h3', 'bench-h', 'Conveyor\'s card, step by step'), h('p', 'bench-hsub', `From the real run ${(a.from.get(id) || a.run).id} (${a.label}). Width is time${sw.timed ? '' : `: ${K.NOT_KEPT}`}.`), sw.d, f];
   }
   // This task in each run of the Conveyor arm read (the newest 12 runs with one), oldest first.
   function overTime(id) {
@@ -301,11 +301,10 @@
     const st = K.studyOf();
     if (st.reading !== undefined) return [top, K.reading(`the run ${st.id}`, st.reading)];
     const id = K.B.task || st.shared[0] || st.ids[0];
-    if (!id) return [top, K.verdict('quiet', 'Task', 'No task has a result yet.', 'Plan a run: each task it runs shows here.')];
+    if (!id) return [top, K.verdict('quiet', 'Task', K.NOT_KEPT)];
     const { arms, title } = armsOn(id, st), n = arms.filter((a) => K.said(a.cells.get(id)) === 'yes').length, m = arms.length;
-    const what = !m ? 'No arm read has this task.'
-      : n === 0 ? 'No arm resolves it: look at the task before you blame an arm.' : n === m ? 'An easy task: it tells the arms apart only on cost and time.' : 'A task that tells the arms apart.';
-    const v = K.verdict(n === m && m ? 'ok' : n === 0 ? 'bad' : 'warn', `${repoOf(id)} · ${id}`, title || id, `${n} of ${m} arms resolve it. ${what}`);
+    const what = n === 0 ? 'No arm resolves it: look at the task before you blame an arm.' : n === m ? 'An easy task: it tells the arms apart only on cost and time.' : 'A task that tells the arms apart.';
+    const v = K.verdict(n === m && m ? 'ok' : n === 0 ? 'bad' : 'warn', `${repoOf(id)} · ${id}`, title || id, m ? `${n} of ${m} arms resolve it. ${what}` : K.NOT_KEPT);
     if (!m) return [top, v];
     const left = K.add(eachArm(id, arms), cardSteps(id, arms));
     const right = K.add(K.box('This task over time', 'Each dot is one run of the Conveyor arm on this task.'), [overTime(id), facts(id, arms, n), ...tools(id, arms)]);

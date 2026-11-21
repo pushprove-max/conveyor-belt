@@ -29,8 +29,8 @@
     const b = meanOf(K.obj(dr.before) || {}, k), a = meanOf(K.obj(dr.after) || {}, k), small = K.list(dr.small).some((x) => x === 'before' || x === 'after');
     const ok = !small && b.v !== null && a.v !== null && b.se !== null && a.se !== null, se = ok ? Math.sqrt(b.se * b.se + a.se * a.se) : null;
     const isMoved = ok && Math.abs(a.v - b.v) > 2 * se, better = (a.v > b.v) === up;
-    const word = small ? ['Too few cards', 'quiet'] : !ok ? ['Not read', 'quiet'] : isMoved ? (better ? ['Moved, better', 'ok'] : ['Moved, worse', 'bad']) : ['In its usual range', 'quiet'];
-    const fmt = (x) => (x.v === null ? '–' : k === 'landed' ? `${Math.round(x.v * 100)}${after}` : k === 'tokens' ? `${Math.round(x.v / 1000)}${after}` : `${Math.round(x.v * 10) / 10}${after}`);
+    const word = !ok ? [K.NOT_KEPT, 'quiet'] : isMoved ? (better ? ['Moved, better', 'ok'] : ['Moved, worse', 'bad']) : ['In its usual range', 'quiet'];
+    const fmt = (x) => (x.v === null ? K.NOT_KEPT : k === 'landed' ? `${Math.round(x.v * 100)}${after}` : k === 'tokens' ? `${Math.round(x.v / 1000)}${after}` : `${Math.round(x.v * 10) / 10}${after}`);
     return { label, k, word, b, a, se, fmt, isMoved, better, judged: ok, did: ok ? `${said[a.v > b.v ? 1 : 0]} (${fmt(a)} against ${fmt(b)}${per})` : '' };
   }
   function spark(r) {
@@ -65,10 +65,10 @@
   }
   function driftLine() {
     const dr = K.obj(K.B.d && K.B.d.drift);
-    if (!dr) return 'The drift watch has not run.';
+    if (!dr) return K.NOT_KEPT;
     const rows = DRIFT.map((x) => driftRow(x, dr)), moved = rows.filter((r) => r.isMoved), judged = rows.filter((r) => r.judged);
     // A figure not judged (too few cards, or not read) stayed in no range: the line says so, never "every figure".
-    if (!judged.length) return K.list(dr.small).length ? 'On the belt, a group has fewer than 5 cards: no figure is judged yet.' : 'On the belt, no figure could be read.';
+    if (!judged.length) return K.NOT_KEPT;
     if (!moved.length) return judged.length === rows.length ? 'On the belt, every figure stayed in its usual range.' : `On the belt, ${judged.length} of ${rows.length} figures could be judged, and each stayed in its usual range.`;
     return `On the belt, cards on ${groupName(dr.after)} ${moved.map((r) => r.did).join(', ')}: ${moved.length === 1 ? 'that moved past its usual range' : 'those moved past their usual range'}. The other figures ${judged.length === rows.length ? '' : 'judged '}stayed in their usual range.`;
   }
@@ -118,12 +118,12 @@
   // mockup's hyphen ("11-09" or "09-11").
   function dayOf(t) {
     const ms = Date.parse(t || '');
-    return Number.isNaN(ms) ? 'not read' : K.B.ctx.stamp(ms, { date: true, time: false }).slice(0, 5).replace('/', '-');
+    return Number.isNaN(ms) ? K.NOT_KEPT : K.B.ctx.stamp(ms, { date: true, time: false }).slice(0, 5).replace('/', '-');
   }
   function versionRow(v, i, vs) {
     const p = vs[i - 1], m = p ? K.moved(p, v) : null;
-    const c = !p ? h('span', 'bench-muted', 'first') : !m.shared ? h('span', 'bench-muted', 'no task both ran')
-      : m.few ? K.chip(`${m.d >= 0 ? '+' : ''}${m.d} of ${m.shared}, too few tasks`, 'quiet') : K.chip(`${m.pts >= 0 ? '+' : ''}${m.pts} pts${m.sig ? (m.d > 0 ? ', better' : ', worse') : ', noise'}`, m.sig ? (m.d > 0 ? 'ok' : 'bad') : 'quiet');
+    const c = !p ? h('span', 'bench-muted', 'first') : !m.shared ? h('span', 'bench-muted', K.NOT_KEPT)
+      : K.chip(`${m.pts >= 0 ? '+' : ''}${m.pts} pts${m.sig ? (m.d > 0 ? ', better' : ', worse') : ', noise'}`, m.sig ? (m.d > 0 ? 'ok' : 'bad') : 'quiet');
     if (m && m.shared) c.title =`On the ${K.plural(m.shared, 'task')} both versions ran: ${m.kv} against ${m.kp}`;
     return [{ v: v.v, c: 'mono' }, dayOf(v.date), { v: String(v.n), c: 'r' }, { v: String(v.k), c: 'r' }, c, { v: p ? stepsChanged(p, v) : '—', c: 'bench-muted' }];
   }
@@ -134,13 +134,10 @@
   }
   function versionVerdict(vs) {
     const last = vs[vs.length - 1], prev = vs[vs.length - 2], m = K.moved(prev, last);
-    if (!m.shared) return K.verdict('quiet', `${last.v} against ${prev.v}`, `Not told yet: ${last.v} and ${prev.v} ran no task in common.`, driftLine());
-    if (m.few) {
-      return K.verdict('quiet', `${last.v} against ${prev.v}`, `Nothing can be told yet from ${K.plural(m.shared, 'task')} both ran: ${last.v} resolves ${m.kv}, ${prev.v} ${m.kp}.`, driftLine());
-    }
+    if (!m.shared) return K.verdict('quiet', `${last.v} against ${prev.v}`, K.NOT_KEPT, driftLine());
     const of = m.shared === last.n && m.shared === prev.n ? `of ${m.shared}` : `of the ${m.shared} tasks both ran`;
     const word = m.sig ? (m.d > 0 ? 'Better.' : 'A regression.') : m.d >= 0 ? 'No regression.' : 'No regression shown.';
-    const v = `${word} ${last.v} resolves ${m.kv} ${of}, ${Math.abs(m.d)} ${m.d >= 0 ? 'more' : 'fewer'} than ${prev.v}: ${m.sig ? 'past' : 'inside'} the noise of ${K.noiseSaid(m.shared)} tasks.`;
+    const v = `${word} ${last.v} resolves ${m.kv} ${of}, ${Math.abs(m.d)} ${m.d >= 0 ? 'more' : 'fewer'} than ${prev.v}: ${m.sig ? 'past' : 'inside'} the noise of ${K.plural(K.noised(m.shared), 'task')}.`;
     return K.verdict(m.sig && m.d < 0 ? 'bad' : 'ok', `${last.v} against ${prev.v}`, v, driftLine());
   }
   // The tasks that flipped between two versions, read from their runs.
@@ -158,13 +155,13 @@
     const apart = (c) => Boolean(K.obj(c) && c.again), is = (side, c) => K.obj(side) && side.resolved === (K.said(c) === 'yes');
     return { f: f || null, same: !apart(a) && !apart(b) && (!f || (is(f.a, a) && is(f.b, b))) };
   }
-  const OTHER = 'not of the result shown (a run again)';
+  // The diff's commits or reading of a task that is not of the result the page shows (a run again) are not kept for it.
   function commitsOf(prev, last, id) {
     const d = pairOf(prev, last);
-    if (!d) return 'not read';
+    if (!d) return K.NOT_KEPT;
     const { f, same } = flipIn(d, id, prev.arm.cells.get(id), last.arm.cells.get(id));
-    if (!same) return h('span', 'bench-muted', OTHER);
-    return !f || f.changes === null || f.changes === undefined ? 'none to show' : K.list(f.changes).length ? K.list(f.changes).map((c) => `${c.commit} ${c.title}`).join(' · ') : 'none';
+    if (!same) return h('span', 'bench-muted', K.NOT_KEPT);
+    return !f || f.changes === null || f.changes === undefined ? K.NOT_KEPT : K.list(f.changes).length ? K.list(f.changes).map((c) => `${c.commit} ${c.title}`).join(' · ') : 'none';
   }
   function flipsBox(vs) {
     const prev = vs[vs.length - 2], last = vs[vs.length - 1], fl = flipsOf(prev, last);
@@ -236,7 +233,7 @@
   // The model's reading of a flipped task, only when the diff read the results the page shows (flipIn).
   function readingOf(id, A, Bs) {
     const d = diffOf(A.key, Bs.key), { f, same } = flipIn(d, id, A.cells.get(id), Bs.cells.get(id));
-    return !d ? h('span', 'bench-muted', 'not read') : !same ? h('span', 'bench-muted', OTHER) : f && f.reading ? f.reading : h('span', 'bench-muted', 'no reading');
+    return !d || !same || !(f && f.reading) ? h('span', 'bench-muted', K.NOT_KEPT) : f.reading;
   }
   function boxOf(label, v, tone) { const d = h('div', `bench-four bench-four-${tone}`); d.append(h('div', 'bench-four-n', String(v)), h('div', 'bench-small', label)); return d; }
   function pair(label, a, b, fmt, A, Bs) {
@@ -263,11 +260,11 @@
     const { n, d } = x, [win, lose] = d > 0 ? [fa, fb] : [fb, fa], N = K.noiseSaid(n), sig = K.told(d, n), size = K.setSize(), need = d ? Math.ceil(2 / ((Math.abs(d) / n) ** 2)) : null;
     if (sig) return K.verdict(d > 0 ? 'ok' : 'bad', 'Head to head', `${d > 0 ? A.label : Bs.label} is better: it resolves ${Math.abs(d)} more of ${n}. That is past the noise of ${N}.`,
       `It costs ${K.usd(win.cost)} against ${K.usd(lose.cost)} for the ${n} tasks, and takes ${K.fmtMin(win.wall)} against ${K.fmtMin(lose.wall)}.`);
-    const w = need === null ? 'They resolve the same number of these tasks.' : `If the gap held, about ${need} tasks would show it${need > size ? ', more than the set has, so treat the two as equal' : ''}.`;
+    const w = need === null ? 'If the gap held, no number of tasks would show it, so treat the two as equal.' : `If the gap held, about ${need} tasks would show it${need > size ? `, more than the ${size} the set has, so treat the two as equal` : ''}.`;
     return K.verdict('quiet', 'Head to head', `Not told apart yet. The difference is ${K.plural(Math.abs(d), 'task')}, under the noise of ${N}.`, w);
   }
   function differ(A, Bs, x) {
-    const s = K.box('Where they differ', 'Every task falls in one box. Only the two "only" boxes move the score.'), fl = x.onlyA.map((id) => [id, A, Bs]).concat(x.onlyB.map((id) => [id, Bs, A]));
+    const s = K.box('Where they differ', 'Every task falls in one box. Only the two "only" boxes move the score.'), fl = x.onlyA.map((id) => [id, A, Bs]).concat(x.onlyB.map((id) => [id, Bs, A])).slice(0, 12);
     if (fl.length) wantDiff(A.key, Bs.key, false, K.B.cmp.n);
     s.append(K.add(h('div', 'bench-grid bench-g-2 bench-fours'), [boxOf('Both resolve', x.both, 'ok'), boxOf(`Only ${A.label}`, x.onlyA.length, 'info'), boxOf(`Only ${Bs.label}`, x.onlyB.length, 'warn'), boxOf('Neither', x.none, 'quiet')]),
       h('h3', 'bench-h', 'The flipped tasks'),
@@ -278,7 +275,7 @@
   }
   function fewCompare(A, Bs, ids, fa, fb) {
     const n = ids.length, one = n === 1 ? ids[0] : null, s = K.box(one ? `Cost and time on ${one}` : 'Cost and time on the shared tasks'), x = headToHead(A, Bs, ids);
-    const v = !n ? `${A.label} and ${Bs.label} share no task they both graded.` : n === 1 && x.both ? `${A.label} and ${Bs.label} both resolved the one task they share.`
+    const v = !n ? K.NOT_KEPT : n === 1 && x.both ? `${A.label} and ${Bs.label} both resolved the one task they share.`
       : `On ${K.plural(n, 'task')}: ${A.label} resolved ${fa.k}, ${Bs.label} ${fb.k}.`;
     const took = (f) => `${K.plural(Math.round(K.sum(f.cs.map((c) => K.num(c.sessions) || 0))), 'session')}, ${K.kTok(f.tokens)} tokens and ${f.wall === null ? 'minutes not kept' : `${f.wall} minutes`}`;
     const w = `${x.d ? '' : 'There is no flipped task to explain. '}The only difference is cost and time: ${A.label} took ${took(fa)}; ${Bs.label} took ${took(fb)}.`;
@@ -292,7 +289,7 @@
     const st = K.studyOf();
     if (st.reading !== undefined) return [top, K.reading(`the run ${st.id}`, st.reading)];
     const opts = optionsOf(st);
-    if (opts.length < 2) return [top, K.verdict('quiet', 'Head to head', 'Compare needs two arms with results.', 'Plan a run with two arms or more.')];
+    if (opts.length < 2) return [top, K.verdict('quiet', 'Head to head', K.NOT_KEPT)];
     defaults(opts);
     const oa = opts.find((o) => o.id === K.B.cmp.a), ob = opts.find((o) => o.id === K.B.cmp.b), A = sideOf(oa), Bs = sideOf(ob);
     if (!A || !Bs) return [top, K.note('Reading the runs of the two sides…')];

@@ -178,14 +178,14 @@ test('Versions, 6 versions of the Conveyor arm: the verdict, the trend, the tabl
   assert.deepEqual(Array.from(page(w).querySelectorAll('.bench-drow'), (r) => [r.dataset.figure, text(r.querySelector('.chip'))]),
     [['landed', 'In its usual range'], ['tokens', 'In its usual range'], ['minutes', 'In its usual range'], ['reviews', 'In its usual range'], ['fixes', 'In its usual range'], ['waits', 'Moved, better']]);
   const flips = () => rows(q(w, '.bench-flips'));
-  assert.deepEqual(flips(), [[TASKS[34], 'now resolved', 'review', 'not read'], [TASKS[35], 'now resolved', 'review', 'not read'], [TASKS[36], 'now resolved', 'review', 'not read'],
-    [TASKS[37], 'now unresolved', 'review', 'not read']]);
+  assert.deepEqual(flips(), [[TASKS[34], 'now resolved', 'review', 'not kept'], [TASKS[35], 'now resolved', 'review', 'not kept'], [TASKS[36], 'now resolved', 'review', 'not kept'],
+    [TASKS[37], 'now unresolved', 'review', 'not kept']]);
   // The answers come with no click: each pair's diff, the newest first, one at a time, each its own answer, and the page
   // asks for the next when one comes (E5: the rows before the newest had no changed steps).
   for (let i = 0; i < 30; i += 1) await settle();
   assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['7', '8'], ['6', '7'], ['5', '6'], ['4', '5']].map(([a, b]) => ['diff', key(`v1.${a}`), key(`v1.${b}`), '--json']),
     'the two versions\' results keys of each older pair, one request each');
-  assert.deepEqual(flips().map((r) => r[3]), ['abc1234 the review reads the test step', 'not of the result shown (a run again)', 'not of the result shown (a run again)', 'none']);
+  assert.deepEqual(flips().map((r) => r[3]), ['abc1234 the review reads the test step', 'not kept', 'not kept', 'none']);
   assert.deepEqual(table().map((r) => r[4]), ['—', 'build, review', '—', '—', 'test', 'review'], 'the steps whose files changed, once read, for each version after the first; a dash for none or not known');
   BH.go(w, 'score');
   BH.go(w, 'versions');
@@ -207,7 +207,8 @@ test('Versions, 2 runs of 1 task: no version can be compared yet, the drift watc
 });
 
 // Bug it guards (review): with two versions on the one task both ran, the noise of 1 task is 1, so the newer version
-// resolving it read "Better." from one task. Under 3 tasks both ran, nothing is told, in the verdict and the table.
+// resolving it read "Better." from one task. Under 3 tasks both ran, nothing is told (in the mockup's words: inside the
+// noise, a change of noise in the table).
 test('Versions, two versions on 1 task: nothing can be told yet, though only the newer one resolves it', async () => {
   const set = BH.few(), l2 = set.hist.runs[1], s2 = set.shows[BH.FEW2], id = 'r20261107T100000-5', six = '6'.repeat(40);
   const line = { ...l2, id, started: iso(T0 - 48 * 3600000), ended: iso(T0 - 47 * 3600000), cols: l2.cols.map((c) => ({ ...c, key: `conveyor-${six}`, engine: six, version: 'v1.6.0', resolved: 0 })) };
@@ -215,9 +216,9 @@ test('Versions, two versions on 1 task: nothing can be told yet, though only the
   set.shows[id] = { run: line, tasks: [{ ...s2.tasks[0], cells: s2.tasks[0].cells.map((c) => ({ ...c, result: 'unresolved', resolved: false })) }], tail: [] };
   const w = await opened(set, 'versions');
   assert.equal(text(q(w, '.bench-vk')), 'v1.7.0 against v1.6.0');
-  assert.equal(text(q(w, '.bench-vv')), 'Nothing can be told yet from 1 task both ran: v1.7.0 resolves 1, v1.6.0 0.');
-  assert.ok(q(w, '.bench-verdict').classList.contains('bench-verdict-quiet'));
-  assert.deepEqual(rows(q(w, '.bench-versions')).map((r) => r[4]), ['first', '+1 of 1, too few tasks']);
+  assert.equal(text(q(w, '.bench-vv')), 'No regression. v1.7.0 resolves 1 of 1, 1 more than v1.6.0: inside the noise of 1 task.');
+  assert.doesNotMatch(text(q(w, '.bench-vv')), /Better/);
+  assert.deepEqual(rows(q(w, '.bench-versions')).map((r) => r[4]), ['first', '+100 pts, noise']);
 });
 
 // Bug it guards (review E1): each arm read only its newest run, so a short run after the study (Conveyor and Claude
@@ -253,8 +254,8 @@ test('Versions: with too few cards in the drift watch, the verdict says no figur
   const set = BH.study();
   set.drift.small = ['after'];
   const w = await opened(set, 'versions');
-  assert.equal(text(q(w, '.bench-vw')), 'On the belt, a group has fewer than 5 cards: no figure is judged yet.');
-  assert.deepEqual(Array.from(page(w).querySelectorAll('.bench-drow .chip'), text), Array(6).fill('Too few cards'));
+  assert.equal(text(q(w, '.bench-vw')), 'not kept');
+  assert.deepEqual(Array.from(page(w).querySelectorAll('.bench-drow .chip'), text), Array(6).fill('not kept'));
 });
 
 // Bug it guards (#646): the tab opened on the page left last, so a run going was a click away. It opens on the Live

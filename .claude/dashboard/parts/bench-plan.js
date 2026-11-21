@@ -4,7 +4,7 @@
 // kept for them; the task slider with the difference it can show; and Before you start: the verdict on the size, the cost,
 // machine time, usual and worst sessions, kept results reused, the usage guard and the command it runs. Start sends that
 // command (`bench swe <n> --arm <name>...`, with the engine's default settings; POST control {action: bench, args: [run,
-// ...]}); Check the arms first sends the preflight of each arm ticked that is not ready. Part of panels/bench.js, which
+// ...]}); Check the arms first sends the preflight of each arm ticked that is not ready (of every ticked arm, when all are ready). Part of panels/bench.js, which
 // asks for it by name (DASH_APP.use) and gives it its kit (K).
 (() => {
   'use strict';
@@ -13,7 +13,7 @@
   // Each question: its title, what it compares and the tasks it sets.
   const QS = { works: ['Does it work at all?', 'A new version or a changed arm: one total break shows.', 5], better: ['Is one better than another?', 'Two arms or two versions on the same tasks.', 50],
     value: ['Which arm gives the most per dollar?', 'Every ready arm, on the same tasks.', 30] };
-  // The states the mockup shows; the engine's other state words show as the engine gives them.
+  // The states the mockup shows; an arm in another state (checking, unchecked) has none kept.
   const ARM_STATE = { ready: ['ready', 'ok'], changed: ['changed', 'warn'], expired: ['expired', 'quiet'] };
   const offered = () => K.armsOf().filter((a) => a.state !== 'not offered');
   // The arms a question ticks: the Conveyor arm; it and Claude alone; or every ready arm (6 at most).
@@ -59,14 +59,14 @@
     return q;
   }
   function armRow(a, n) {
-    const box = h('input'), [word, tone] = ARM_STATE[a.state] || [String(a.state), 'quiet'], k = keptOf(a, n), p = K.obj(a.perTask);
-    box.type = 'checkbox'; box.checked = planOf().arms.has(a.name); box.disabled = a.state === 'not offered'; box.dataset.act = `arm-${a.name}`; box.setAttribute('aria-label', a.label);
+    const box = h('input'), [word, tone] = ARM_STATE[a.state] || [K.NOT_KEPT, 'quiet'], k = keptOf(a, n), p = K.obj(a.perTask);
+    box.type = 'checkbox'; box.checked = planOf().arms.has(a.name); box.dataset.act = `arm-${a.name}`; box.setAttribute('aria-label', a.label);
     box.addEventListener('change', () => { if (box.checked) planOf().arms.add(a.name); else planOf().arms.delete(a.name); K.draw(); });
     return [box, K.armSaid({ s: a.s, label: a.label }), K.chip(word, tone), { v: K.usd(perTask(a)), c: 'r' },
       { v: p && K.num(p.minutes) !== null ? String(p.minutes) : K.NOT_KEPT, c: 'r' }, { v: a.kind === 'conveyor' && !k ? '0 (new engine)' : String(k), c: 'r' }];
   }
   function armsTable(n) {
-    const arms = K.paint(K.armsOf().map((a) => ({ ...a, arm: a.name })));
+    const arms = K.paint(offered().map((a) => ({ ...a, arm: a.name })));
     return K.table(['', 'Arm', 'State', ['$ / task', 'r'], ['Min / task', 'r'], ['Kept results', 'r']], arms.map((a) => armRow(a, n)), 'bench-planarms', (tr, i) => { tr.dataset.arm = arms[i].name; });
   }
   // The arms and the tasks. The slider changes the figures it moves in place (moved: Before you start), never the
@@ -110,26 +110,39 @@
   const argsOf = (n, arms) => [String(n), ...arms.flatMap((a) => ['--arm', a.name])];
   // An argument as a shell takes it: quoted when it holds more than a word.
   const shellSaid = (x) => (/^[\w.:/-]+$/.test(x) ? x : `'${x.replace(/'/g, '\'\\\'\'')}'`);
-  // Start stays off while a run goes, with no arm ticked, with a ticked arm not ready, or with its usage guard reached.
-  function cannotStart(arms) {
-    const l = K.live(), g = K.obj(K.hist().guard) || {};
-    return Boolean(l && l.state === 'running') || !arms.length || arms.some((a) => a.state !== 'ready' || (a.guard && g[a.guard] === true));
+  const named = (as) => as.map((a) => a.label).join(', ');
+  // Why Start is off, in words, or '': a run goes, no arm is ticked, a ticked arm is not ready, or its usage guard is reached.
+  // Otherwise Start is on, as in the mockup.
+  function startWhy(arms) {
+    const l = K.live(), g = K.obj(K.hist().guard) || {}, notReady = arms.filter((a) => a.state !== 'ready'), held = arms.filter((a) => a.guard && g[a.guard] === true);
+    if (l && l.state === 'running') return 'Start is off: a run goes now.';
+    if (!arms.length) return 'Start is off: no arm is ticked.';
+    if (notReady.length) return `Start is off: ${named(notReady)} ${notReady.length === 1 ? 'is' : 'are'} not ready.`;
+    return held.length ? 'Start is off: the usage guard is reached.' : '';
   }
+  // The arms a check runs for: the ticked arms that are not ready and not being checked; with none, the ticked arms that
+  // are not being checked (the check runs again, as the mockup's button, which is always on, would).
+  function toCheck(arms) {
+    const idle = arms.filter((a) => a.state !== 'checking'), need = idle.filter((a) => a.state !== 'ready');
+    return need.length ? need : idle;
+  }
+  // Why Check the arms first is off, or '': no arm is ticked, or every ticked arm is being checked.
+  const checkWhy = (arms) => (toCheck(arms).length ? '' : `Check the arms first is off: ${arms.length ? 'the ticked arms are being checked' : 'no arm is ticked'}.`);
   function startButton(n, arms) {
     const b = K.button('Start the run', 'btn-primary', 'start', `Start the run: ${K.plural(arms.length, 'arm')} on ${K.plural(n, 'task')}`,
       () => K.send('start', ['run', ...argsOf(n, arms)], (t) => t.replace(/^conveyor: /, ''), () => K.readHist(true)));
-    b.disabled = cannotStart(arms) || K.B.busy;
+    b.disabled = Boolean(startWhy(arms)) || K.B.busy;
     return b;
   }
   function checkButton(arms) {
-    const need = arms.filter((a) => a.state !== 'ready' && a.state !== 'checking');
-    const b = K.button('Check the arms first', '', 'check-arms', `Check ${need.map((a) => a.label).join(', ') || 'the arms'}`, () => K.send('check', ['arms', 'check', ...need.map((a) => a.name)],
+    const need = toCheck(arms);
+    const b = K.button('Check the arms first', '', 'check-arms', `Check ${named(need) || 'the arms'}`, () => K.send('check', ['arms', 'check', ...need.map((a) => a.name)],
       (t) => `${t.replace(/^conveyor: /, '')}. The arms are read again while their checks run.`, () => K.readHist(true)));
-    b.disabled = !need.length || K.B.busy;
+    b.disabled = Boolean(checkWhy(arms)) || K.B.busy;
     return b;
   }
-  // The mockup has no line of receipt under Start and Check the arms first: only a refusal shows, so a failed action is not silent.
-  function refused(key) { const p = K.saidAt(key); return p && p.classList.contains('bench-said-bad') ? p : ''; }
+  // The page says why a button is off, under the buttons, as one line; with both on, the mockup's page has none.
+  const offWhy = (arms) => { const t = [startWhy(arms), checkWhy(arms)].filter(Boolean).join(' '); return t ? h('p', 'bench-note bench-why', t) : ''; };
   // The share of the week one trial has used on a guard ("conveyor" or "agent"): the runs that kept the guard's share of the
   // week left at their start and after their last trial, the share they used over the trials they ran on arms of that
   // guard (a col's ran). Where both guards read one login (K.weekPool), the share is the use of the trials of both. Null with
@@ -166,14 +179,14 @@
     const held = arms.some((a) => a.guard && g[a.guard] === true), b = startButton(n, arms);
     // A guard reached now would stop the run; else the plan's use of the week against the share left (weekChip). An arm
     // with no guard (swe_guards: a Codex arm) has none to reach. A short chip: the chip keeps its text on one line (app.css .chip).
-    const guardSaid = held ? K.chip('would reach the guard; the run stops there', 'bad') : arms.some((a) => a.guard) ? weekChip(arms, parts) : K.chip('none for these arms', 'ok');
+    const guardSaid = held ? K.chip('would reach the guard; the run stops there', 'bad') : arms.some((a) => a.guard) ? weekChip(arms, parts) : K.chip(K.NOT_KEPT, 'quiet');
     const s = K.box('Before you start', `${K.plural(arms.length, 'arm')} × ${K.plural(n, 'task')}`, 'bench-before');
     s.append(K.callout(said, tone), K.kv([['Cost', [h('b', null, K.usd(usd)), ' ', h('span', 'bench-muted bench-small', 'at list prices')]], ['Machine time', [h('b', null, K.fmtMin(mins)), ' ', h('span', 'bench-muted bench-small', 'tasks run one after another')]],
       ['Sessions', `${K.sum(parts.map((p) => p.usual))} usual, ${K.sum(parts.map((p) => p.worst))} at worst`],
       ['Kept results', `${K.sum(parts.map((p) => p.reused))} task runs reused at no cost`],
       ['Usage guard', guardSaid],
-      ['Belt', `Cards and the run share the machine. Each task's container gets ${K.num(lim.cpus) === null ? 'its' : lim.cpus} CPUs and ${lim.memory || 'its memory'}.`]]),
-    K.add(h('div', 'bench-row'), [b, checkButton(arms)]), refused('start'), refused('check'),
+      ['Belt', K.num(lim.cpus) === null || !lim.memory ? K.NOT_KEPT : `Cards and the run share the machine. Each task's container gets ${lim.cpus} CPUs and ${lim.memory}.`]]),
+    K.add(h('div', 'bench-row'), [b, checkButton(arms)]), offWhy(arms), K.refusedAt('start'), K.refusedAt('check'),
     K.add(h('p', 'bench-note'), ['The command it runs: ', h('span', 'mono bench-cmd', `conveyor.sh bench swe ${argsOf(n, arms).map(shellSaid).join(' ')}`)]));
     return s;
   }

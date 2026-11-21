@@ -53,13 +53,13 @@ test('Compare, Conveyor against Claude alone on 50 tasks: the verdict, the four 
   assert.deepEqual(fours(w), [['Both resolve', 25], ['Only Conveyor v1.9.0', 12], ['Only Claude alone', 0], ['Neither', 13]]);
   const flips = rows(q(w, '.bench-flips'));
   assert.equal(flips.length, 12);
-  assert.deepEqual(flips[0], [TASKS[25], 'Conveyor v1.9.0', 'saved at review', 'not read']);
+  assert.deepEqual(flips[0], [TASKS[25], 'Conveyor v1.9.0', 'saved at review', 'not kept']);
   assert.deepEqual(Array.from(box(w, 'Cost and time').querySelectorAll('.bench-pair'), (p) => text(p)), ['CostConveyor v1.9.0$96.00Claude alone$15.50', 'Cost per resolved taskConveyor v1.9.0$2.59Claude alone$0.62',
     'Machine timeConveyor v1.9.017.5 hClaude alone2.5 h', 'TokensConveyor v1.9.020.5MClaude alone2.4M', 'Sessions a taskConveyor v1.9.04.0Claude alone1.0']);
   assert.equal(text(box(w, 'Cost and time').querySelector('.bench-callout')), 'Each extra fix of Conveyor v1.9.0 costs $6.71.');
   await settle(); await settle();
   assert.deepEqual(rows(q(w, '.bench-flips')).slice(0, 3).map((r) => [r[0], r[3]]), [[TASKS[25], 'The review caught a missed case, and the fix round handled it.'],
-    [TASKS[26], 'not of the result shown (a run again)'], [TASKS[27], 'not of the result shown (a run again)']]);
+    [TASKS[26], 'not kept'], [TASKS[27], 'not kept']]);
   assert.match(text(box(w, 'Where they differ').querySelector('.bench-note')), /is one model call's reading of the facts of both runs, and is labelled as such on the Board\.$/);
   page(w).querySelector(`.bench-flips tr[data-task="${TASKS[25]}"]`).click();
   await settle();
@@ -111,7 +111,7 @@ test('Compare: the readings are asked for once for a pair, once more when a pick
   w.reply = { ok: false, status: 502, text: () => Promise.resolve('conveyor: the model did not answer') };
   await pick(w, 'cmp-b', 'arm:conveyor-codex-claude');
   assert.deepEqual(sent().map((a) => a.slice(0, 1)), [['diff']], 'a new pair asks, and the answer is a failure');
-  assert.equal(reading(), 'not read', 'a reading the model did not give shows as missing');
+  assert.equal(reading(), 'not kept', 'a reading the model did not give shows as missing');
   BH.go(w, 'score'); BH.go(w, 'compare');
   await settle(); await settle();
   assert.deepEqual(sent(), [], 'a failed diff is not asked for again on each draw');
@@ -128,7 +128,7 @@ test('Compare: the readings are asked for once for a pair, once more when a pick
   const flip = (r) => JSON.stringify({ flipped: [{ task, a: { resolved: aWon }, b: { resolved: !aWon }, reading: r }] });
   held(flip(null));
   await settle(); await settle();
-  assert.equal(reading(), 'no reading', 'a diff that came with no reading shows it as missing');
+  assert.equal(reading(), 'not kept', 'a diff that came with no reading shows it as missing');
   BH.go(w, 'score'); BH.go(w, 'compare');
   await settle(); await settle();
   assert.deepEqual(sent(), [], 'a diff with a null reading is not asked for again on each draw');
@@ -142,14 +142,15 @@ test('Compare: the readings are asked for once for a pair, once more when a pick
   assert.deepEqual(sent(), [], 'a reading that came is not asked for again');
 });
 
-// Bug it guards: the flipped-tasks table was cut to its first 12 rows, so a pair with more flips than 12 (Conveyor against
-// Claude + Caveman has 15 in the "Only" boxes) hid the rest while the boxes counted them all.
-test('Compare, Conveyor against Claude + Caveman: the table lists every flipped task, more than 12', async () => {
+// Bug it guards (#1224): the flipped-tasks table listed every flipped task, where the mockup shows at most 12 rows
+// (its `slice(0, 12)`); a pair with more flips than 12 (Conveyor against Claude + Caveman has 15 in the "Only" boxes)
+// ran longer than the mockup's page.
+test('Compare, Conveyor against Claude + Caveman: the table lists at most 12 flipped tasks, as the mockup does', async () => {
   const w = await opened(BH.study(), 'compare');
   await pick(w, 'cmp-b', 'arm:caveman');
   const flips = fours(w).filter(([name]) => name.startsWith('Only ')).reduce((s, [, v]) => s + v, 0);
   assert.ok(flips > 12, `the pair has more than 12 flipped tasks, has ${flips}`);
-  assert.equal(rows(q(w, '.bench-flips')).length, flips, 'one table row for each task in the two "Only" boxes');
+  assert.equal(rows(q(w, '.bench-flips')).length, 12, 'the table stops at 12 rows though the "Only" boxes hold more');
 });
 
 // Bug it guards: the boxes and the verdict did not follow the pickers. On every pair the four boxes add up to the
@@ -162,7 +163,8 @@ test('Compare: the four boxes add up to the shared tasks, and the verdict change
   assert.deepEqual(fours(w), [['Both resolve', 35], ['Only Conveyor v1.9.0', 2], ['Only Conveyor, Codex builds v1.9.0', 0], ['Neither', 13]]);
   assert.equal(sum(), 50);
   assert.equal(text(q(w, '.bench-vv')), 'Not told apart yet. The difference is 2 tasks, under the noise of 10.');
-  assert.equal(text(q(w, '.bench-vw')), 'If the gap held, about 1250 tasks would show it, more than the set has, so treat the two as equal.');
+  // Bug it guards (review E2): the sentence gave the size of the set (500) as the tasks the gap needs; 2 of 50 needs 1250.
+  assert.equal(text(q(w, '.bench-vw')), 'If the gap held, about 1250 tasks would show it, more than the 500 the set has, so treat the two as equal.');
   await pick(w, 'cmp-a', 'ver:v1.8.0');
   await pick(w, 'cmp-b', 'arm:solo');
   assert.deepEqual(fours(w), [['Both resolve', 25], ['Only Conveyor v1.8.0', 10], ['Only Claude alone', 0], ['Neither', 15]]);
@@ -234,7 +236,17 @@ test('Live run, 7 arms on 50 tasks going: the verdict, the figures, the grid wit
     [`Codex alone · ${LT[10]} · Running agent`, `Claude, then a review · ${LT[10]} · Unresolved`, `Conveyor v1.9.0 · ${LT[10]} · Resolved`], 'the newest event first');
   act(bp(w), 'stop-run').click();
   assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['stop', BH.LIVE]]);
-  assert.equal(act(bp(w), 'stop-run').textContent, 'Stopping the run');
+  // Bug it guards (#1224): Stop changed its label to "Stopping the run" and an answer line followed it, where the mockup
+  // has the button "Stop the run" and nothing else. The button stays off while the answer is out.
+  assert.deepEqual([act(bp(w), 'stop-run').textContent, act(bp(w), 'stop-run').disabled], ['Stop the run', true]);
+  await settle();
+  assert.equal(q(w, '[data-said]'), null, 'the answer to Stop is not shown');
+  // Bug it guards (review E1): with the answer line gone, a Stop the build machine refused (a Board member's, 403) showed
+  // nothing, so the run kept going with no word of why. A refusal shows beside the button, as it does for Start.
+  w.reply = { ok: false, status: 403, text: () => Promise.resolve('conveyor: only an owner can stop a run') };
+  act(bp(w), 'stop-run').click();
+  await settle();
+  assert.match(text(q(w, '[data-said]')), /^Not done: .*only an owner can stop a run/, 'a refused Stop says why');
 });
 
 // Bug it guards (review E9): a reused result takes no trial, yet the forecast counted it as work done (so the time left
@@ -293,21 +305,24 @@ test('Live run, 2 runs of 1 task and none going: the last run, each arm on its t
   assert.equal(text(q(w, '.bench-vk')), `django · ${BH.FEW_TASK}`);
 });
 
-// Bug it guards (#646 review E2): a run whose process was gone with no end written read as ended. It says interrupted
-// and that no end was recorded. The mockup's Live run page has no Stop for a run that is not going (#1216), so it has none.
-test('Live run: a run whose process is gone says it was interrupted with no end recorded, and has no Stop', async () => {
+// Bug it guards (#646 review E2): a run whose process was gone with no end written read as ended. The mockup's Live run
+// page has no Stop for a run that is not going (#1216), so it has none, and (#1224) no sentence of its own for the state:
+// the mockup's line of the end says not kept, in the warn tone of a run with no end recorded.
+test('Live run: a run whose process is gone has no end to say (not kept) in the warn tone, and has no Stop', async () => {
   const set = BH.few(), r = set.hist.runs[0];
   Object.assign(r, { state: 'stopped', gone: true, ended: null });
   set.shows[BH.FEW1].run = r;
   const w = await opened(set, 'run');
-  assert.match(text(q(w, '.bench-vv')), /^The last run is interrupted\./);
-  assert.match(text(q(w, '.bench-vw')), /Its process ended with no end recorded\.$/);
+  assert.equal(text(q(w, '.bench-vv')), 'not kept');
+  assert.ok(q(w, '.bench-verdict').classList.contains('bench-verdict-warn'));
+  assert.doesNotMatch(text(q(w, '.bench-verdict')), /interrupted|no end recorded/);
   assert.equal(act(bp(w), 'stop-run'), null, 'a run that is not going has no Stop');
 });
 
 // Bug it guards (review E10): a run the build machine refused (no Docker: swe_run records state refused and why) read
-// "It ran 1 task", with its cell that never started labelled unresolved, and the reason was not shown.
-test('Live run: a refused run says it did not start and why, and its cell is not started, never unresolved', async () => {
+// "It ran 1 task", with its cell that never started labelled unresolved. The mockup has no sentence for a run that did
+// not start (#1224): the end and the second line say not kept.
+test('Live run: a refused run says not kept for its end, and its cell is not started, never unresolved', async () => {
   const set = BH.few(), id = 'r20261109T010000-77', why = 'docker is not running on the build machine';
   const line = { id, state: 'refused', started: iso(T0 - 3600000), ended: iso(T0 - 3600000), n: 1, set: set.hist.runs[0].set, arms: ['conveyor'], current: null, shared: {}, cost: null, why,
     cols: [{ arm: 'conveyor', key: null, label: 'Conveyor', kind: 'conveyor', engine: null, version: 'main', done: 0, resolved: 0, notRun: 0, sessions: null, tokens: null, minutes: null, classes: null, cost: null, wall: 0 }] };
@@ -315,8 +330,8 @@ test('Live run: a refused run says it did not start and why, and its cell is not
   set.shows[id] = { run: line, tasks: [{ id: BH.FEW_TASK, title: BH.TITLE, cells: [{ arm: 'conveyor', result: null, reused: false, state: 'not reached' }] }], tail: [] };
   const w = await opened(set, 'run');
   assert.ok(q(w, '.bench-verdict').classList.contains('bench-verdict-bad'));
-  assert.match(text(q(w, '.bench-vv')), /^The last run did not start\./);
-  assert.equal(text(q(w, '.bench-vw')), `The build machine refused it: ${why}.`);
+  assert.deepEqual([text(q(w, '.bench-vv')), text(q(w, '.bench-vw'))], ['not kept', 'not kept']);
+  assert.doesNotMatch(text(q(w, '.bench-verdict')), /did not start|refused|docker/);
   assert.deepEqual(rows(q(w, '.bench-t')).map((r) => r.slice(0, 2)), [['Conveyor main', 'not started']]);
 });
 
@@ -440,6 +455,8 @@ test('Plan a run: the slider changes the difference it can show and the cost, an
   // An arm not ready holds Start, and Check the arms first sends its preflight.
   act(bp(w), 'arm-caveman').click();
   assert.equal(act(bp(w), 'start').disabled, true);
+  // Bug it guards (#1224): a Start held with no word of why. The page says why, under the buttons, in the mockup's place.
+  assert.equal(text(q(w, '.bench-why')), 'Start is off: Claude + Caveman is not ready.');
   w.reply = BH.reply('caveman: checking c1');
   act(bp(w), 'check-arms').click();
   assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['arms', 'check', 'caveman']]);
@@ -492,8 +509,13 @@ const NOT_THERE = ['Read the commits', 'Ask for the readings', 'builds with it',
   'No event yet', 'The task list of the set is not read', 'Nothing can be told yet from 1 task', 'Watch run', 'Open its results',
   // #1216: the edge-state sentences, notes and run tools the mockup does not have.
   'its default rules', 'results kept before the grade', 'no Conveyor arm ran', 'No task flipped', 'A flipped task is in the table', 'A group of fewer than 5 cards',
-  'The drift watch has not run. Run', 'No run has started yet', 'The card\'s steps are not kept', 'No review is kept', 'No run of the Conveyor arm has this task', 'is not reached', 'reached: no run starts', 'in the last study: a', 'Every arm is told apart', 'These runs:', 'This run:', 'Records its end and removes'];
-const NO_CONTROL = ['[data-act="read-commits"]', '[data-act="cmp-read"]', '[data-act="plan-engine"]', '[data-act^="set-"]', '[data-fold="plan-settings"]', '[data-act="watch-run"]', '.bench-why', '.bench-runacts'];
+  'The drift watch has not run. Run', 'No run has started yet', 'The card\'s steps are not kept', 'No review is kept', 'No run of the Conveyor arm has this task', 'is not reached', 'reached: no run starts', 'in the last study: a', 'Every arm is told apart', 'These runs:', 'This run:', 'Records its end and removes',
+  // #1224: the edge-state sentences of the 7 pages (each state has its own case in dashboard-view.bench-edges.test.mjs).
+  'No new ruff finding', 'estimate, from tokens', 'at most each', 'There is no other arm', 'The harness\'s report is kept', 'Too few cards', 'Not read', 'no task both ran', 'too few tasks',
+  'ran no task in common', 'Compare needs two arms', 'Plan a run with two arms', 'share no task', 'not of the result shown', 'none to show', 'no reading', 'No estimate to judge',
+  'no task done yet', 'no estimate', 'Its process ended with no end recorded', 'The build machine refused', 'Stopping the run', 'No task has a result yet', 'No arm read has',
+  'The step times are not kept', 'none for these arms', 'checking', 'unchecked', 'not offered', 'No run has ended yet'];
+const NO_CONTROL = ['[data-act="read-commits"]', '[data-act="cmp-read"]', '[data-act="plan-engine"]', '[data-act^="set-"]', '[data-fold="plan-settings"]', '[data-act="watch-run"]', '.bench-runacts'];
 async function noExtras(set) {
   const w = await opened(set);
   for (const p of ['score', 'versions', 'compare', 'run', 'task', 'map', 'plan']) {

@@ -940,15 +940,16 @@ at its top opens its seven pages: **Scoreboard**, **Versions**, **Compare**, **L
 **Plan a run**. Each page starts with the question that it answers, then a verdict: one sentence that answers the
 question from the figures, and the reason. The tab reads the runs from the build machine when you open it, and again
 when a run moves on. Only an admin can start, stop, check, archive or delete a run. The Board refuses these buttons to
-a member. The answer to **Start the run**, **Stop the run**, **Check the arms first**, **Archive**, **Restore** and
-**Delete** shows beside that button, and stays there until you click it again.
+a member. The answer to **Archive**, **Restore** and **Delete** shows in the run history, and stays there until you
+click again. A refusal of **Start the run** or **Check the arms first** shows under the two buttons. **Stop the run**
+shows no answer when it works, and shows a refusal beside the button.
 
 Two pages load what they show with no click: the commits on **Versions** and the readings on **Compare**. Each comes
 from `bench swe diff`, which calls the model for each flipped task that has no saved reading. So the page asks for
 the diff of a pair of results once while the Board is open. A redraw, or a return to the page, uses the answer that it
 has. A new pair asks once more: a new version on **Versions**, or a changed picker on **Compare**. A diff or a
 reading that did not come is not asked for again by itself. **Versions** shows a dash in **Changed steps**, and
-**Compare** shows "not read" or "no reading". **Compare** asks once more when you change a picker, and every page asks
+**Compare** shows "not kept". **Compare** asks once more when you change a picker, and every page asks
 again when the Board starts again.
 
 Each time you open the tab, it opens on **Live run** while a run goes. When no run goes, it opens on **Scoreboard**.
@@ -959,6 +960,7 @@ The pages round the noise up to whole tasks, as `bench swe diff` does. With 50 t
 has the same colour on every page. With fewer than 3 shared tasks, the pages say that nothing can be told yet, and
 show what the runs have. A figure that a result did not keep shows "not kept", never 0. For example, a result kept
 before the harness report was kept has no hidden tests, lint or size. A cost that cannot be priced shows "not priced".
+Where a page has no data at all, it shows its section with "not kept" in place of the figure, and says nothing more.
 
 **Scoreboard** reads the results of each arm from the runs that ended. The newest run of an arm sets its results key.
 Each other run of the arm on that key adds the tasks that it has, so a short run after a long one keeps the other
@@ -980,6 +982,7 @@ map** read the arms in the same way. An archived run is not in it.
   partial fixes.
 - **Patch quality**: for the resolved tasks, the clean fixes, and the share of patches that are lint clean, at most
   twice the size of the reference fix, change a file that the reference fix does not change (strays), and prove the fix.
+  Lint clean means no new finding from the default ruff rules in the Python files that the patch changes.
 - **Lines of code**: the median code lines, test lines and files of the resolved patches, and their size against the
   reference fix.
 - **Effort and steadiness**: the tokens for each fix, the sessions for each task, the review findings fixed and the fix
@@ -991,35 +994,38 @@ map** read the arms in the same way. An archived run is not in it.
 - **Next run to make**: the run that answers the biggest open question, with its cost and machine time, and each arm
   that did not always fire. **Plan this run** opens **Plan a run** with that run set.
 - **Run history**: folded at the foot of the page. Each run, newest first, with what ran, its tasks, its state, its
-  start and its cost. An archived run shows "archived". Tick runs to **Archive**, **Restore** or **Delete** them.
+  start and its cost. A run that you stopped shows "stopped at" and the number of tasks it reached, for example
+  "stopped at 31". An archived run shows "archived". Tick runs to **Archive**, **Restore** or **Delete** them. With
+  fewer than 3 shared tasks, the page keeps the same folded run history.
 
 **Versions** compares the versions of the Conveyor arm in the order of their releases. A version named by a commit
 comes after the releases. Each version reads its runs as **Scoreboard** reads an arm. The verdict judges the newest
-version against the version before it, on the tasks that both versions ran. With fewer than 3 such tasks, it says
-that nothing can be told yet, and the table says "too few tasks". A chart shows the resolve rate of each
+version against the version before it, on the tasks that both versions ran. With fewer than 3 such tasks, no change
+is past the noise, so the verdict says "inside the noise" and the table says "noise". With no such task, both say
+"not kept". A chart shows the resolve rate of each
 version with its 95% band, and a dashed line for Claude alone. A table gives each version's tasks and resolved count,
 and its change from the version before on the tasks that both ran: better, worse, or noise. **Changed steps** shows,
 for each version after the first, the steps whose engine files changed since the version before, whether a task
 flipped or not. It shows a dash when no step changed, or when the page has not read them. The **Drift watch** compares the project's own cards before and after the last engine change
 (see [Drift watch](benchmarks.md#drift-watch)). Each figure shows **Moved, better** or **Moved, worse** when the two
-means are more than two standard errors apart, and **In its usual range** when they are not. It shows **Not read** when
-a group has no spread for the figure, and **Too few cards** when a group has fewer than 5 cards. Then the verdict says
-that no figure is judged yet. **Tasks that flipped** lists each task that one of the two newest versions resolved and
+means are more than two standard errors apart, and **In its usual range** when they are not. It shows "not kept" when
+a group has no spread for the figure, or fewer than 5 cards. When no figure is judged, or the drift watch has not run,
+the verdict's line about the belt says "not kept". **Tasks that flipped** lists each task that one of the two newest versions resolved and
 the other did not, with the first step where the two runs went apart. The page sends `bench swe diff` for
 each version and the version before it, the newest first and one at a time: then each task shows the engine commits that
 changed that step. `bench swe diff` reads the kept result of a task. A run with `--again` shows its own result, from another try, even when the outcome is the same. A task
-where the result shown is that run's own, or where the two outcomes differ, shows "not of the result shown (a run
-again)" in place of its commits. With one version only, the page says that no version can be
-compared yet.
+where the result shown is that run's own, or where the two outcomes differ, shows "not kept" in place of its commits. With one version only, the page says
+that no version can be compared yet.
 
 **Compare** sets any two arms, or a version of the Conveyor arm, against each other on the tasks that both graded. The
 verdict says which one is better, when the difference is past the noise, and else how many tasks would show the
-difference. Four boxes put each task in one place: both resolve, only the first, only the second, or neither. They add
+difference. When that is more than the tasks of the set, it gives the number and the
+size of the set, and says to treat the two as equal. With a gap of 0 tasks, no number of tasks would show it, and it says so. With fewer than two arms that have results, it says "not kept". Four boxes put each task in one place: both resolve, only the first, only the second, or neither. They add
 up to the shared tasks. **The flipped tasks** lists the tasks that only one resolved, with the first step where the two
-runs went apart. **Why, in short** has the model's reading of each flipped task, from `bench swe diff`, which the
-page asks for by itself. The page marks it as the model's reading, not a fact. When `bench swe diff` read another result of a
-task than the one shown (the result shown is a run with `--again`'s own), the task shows "not of the result shown (a run again)" in place of the
-reading. Click a flipped task to open it on **Task**.
+runs went apart. The list shows at most 12 tasks. **Why, in short** has the model's reading of each flipped task, from
+`bench swe diff`, which the page asks for by itself. The page marks it as the model's reading, not a fact. When
+`bench swe diff` read another result of a task than the one shown (the result shown is a run with `--again`'s own),
+or gave no reading, the task shows "not kept" in place of the reading. Click a flipped task to open it on **Task**.
 **Cost and time** shows the cost, the cost for each resolved task, the machine time, the tokens and the sessions of the
 two side by side.
 
@@ -1033,20 +1039,20 @@ same. **Tasks by arm** has a row for each task and a column for each arm: resolv
 the step and minutes of the work now. **Score so far** gives each arm's resolved count on the tasks that every arm
 graded, with its 95% range. A task that an arm did not run is left out for every arm. **Events** gives the last events of the run, newest first. **Stop the run** stops the
 whole run: the work in progress and the tasks that it did not reach yet. Finished results stay. After you click it,
-the button says "Stopping the run" and stays off. When the build machine has ended the run and its containers, the
-answer says "Run stopped". It says "Run finished before Stop" when the run ended first, and "Run interrupted" when the
-process of the run had already stopped. A Stop names its run, so a late Stop never stops a newer run.
+the button stays off until the build machine has ended the run and its containers. The page shows no answer to it, only a refusal. A
+Stop names its run, so a late Stop never stops a newer run.
 **Live run** in the page row shows the run that goes, or else the last run. When no run
 goes, the page shows the last run: how it ended, and each arm's result, sessions, tokens, minutes and cost. A task
-that did not start shows "not started", never unresolved. When the build machine refused the run, the verdict says
-that the run did not start, and why. When the
-process of the last run ended with no end recorded, the page says "interrupted".
+that did not start shows "not started", never unresolved. When the run did not start, or its process ended with no end
+recorded, the verdict shows "not kept" for the end, and the run history shows its state ("did not start" or
+"interrupted"). A run with no estimate to judge it by, or a figure that is not known, shows "not kept" in that place.
 
 **Task** shows one task across every arm. Open it from **Compare**, **Versions**, **Task map** or **Live run**. The
 verdict gives how many arms resolve the task, and what that says: no arm resolves it (look at the task first), every
 arm does (it tells the arms apart only on cost and time), or some do. A table gives each arm's result, minutes, hidden
-tests and a note: the step where a Conveyor arm went wrong. **Conveyor's card, step by step** shows the card's steps as
-a bar: the width of each step is its time. **The review, in full** is folded. **This task over time** has a dot for each
+tests and a note: the step where a Conveyor arm went wrong, or "did not fire" for another arm that did not fire.
+**Conveyor's card, step by step** shows the card's steps as a bar: the width of each step is its time ("Width is time:
+not kept" when the steps keep no time). **The review, in full** is folded. **This task over time** has a dot for each
 run of the Conveyor arm on the task, by version. The facts give the repository, the difficulty, the size of the
 reference fix and the task image, for example "4.1 GB, kept", or "not kept" for a result from before the engine kept
 the size. Three buttons are under the facts:
@@ -1072,17 +1078,22 @@ has not run yet. Point at a square to see the task. Click a square to open the t
 
 **Plan a run** starts with the question: **Does it work at all?** (5 tasks, the Conveyor arm), **Is one better than
 another?** (50 tasks, Conveyor and Claude alone) or **Which arm gives the most per dollar?** (30 tasks, up to 6 ready
-arms). The question sets the tasks and the arms. You can change both after that. **Arms** gives each arm's state, its
-cost and minutes for each task, and the results kept for it, which the run reuses at no cost. The **Tasks** slider sets
+arms). The question sets the tasks and the arms. You can change both after that. **Arms** gives each arm's state
+(**ready**, **changed** or **expired**; "not kept" for an arm that has no check, or is being checked), its
+cost and minutes for each task, and the results kept for it, which the run reuses at no cost. An arm that the project
+does not offer has no row. The **Tasks** slider sets
 the number of tasks, and shows the smallest difference that this number can show. **Before you start** gives a
 verdict on the size for your question, the cost at list prices, the machine time, the usual and worst-case sessions,
 the kept results reused, the usage guard ("fits in the week left" or "would reach the guard; the run stops there", from
 the share of the week left, the share at which the guard stops and the share that earlier runs used for each task: the
-plan fits when it leaves more than the stop; "off; the guard will not stop the run" when the guard is off; "not kept" when no earlier run kept it),
+plan fits when it leaves more than the stop; "off; the guard will not stop the run" when the guard is off; "not kept" when no earlier run kept it,
+or the arms have no guard), the container limits of the belt ("not kept" when they are not kept),
 and the command that the run sends. **Start the run** sends that command,
-with the engine's default settings. It stays off while a run goes, while an arm that you picked is not ready, and
-while the usage guard holds an arm that you picked. **Check the arms first** runs the
-preflight of each arm that you picked and that is not ready. The cost is an estimate: each session costs the mean of
+with the engine's default settings. It stays off while a run goes, with no arm picked, while an arm that you picked is
+not ready, and while the usage guard holds an arm that you picked. **Check the arms first** runs the
+preflight of each arm that you picked and that is not ready, or of every arm that you picked when all are ready. It
+stays off with no arm picked, and while the arms that you picked are being checked. When a button is off, one line
+under the buttons says why. The cost is an estimate: each session costs the mean of
 this project's own priced card sessions, or of those on the arm's model when the arm has a model.
 
 **Archive**, **Restore** and **Delete** are in the run history of **Scoreboard**.

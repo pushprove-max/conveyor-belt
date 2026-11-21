@@ -246,6 +246,8 @@
     p.dataset.said = key; p.setAttribute('role', 'status');
     return p;
   }
+  // The mockup has no line of receipt under Start, Check the arms first or Stop: only a refusal shows, so a failed action is not silent.
+  function refusedAt(key) { const p = saidAt(key); return p && p.classList.contains('bench-said-bad') ? p : ''; }
   const go = (page) => { B.page = page; draw(); };
   const openTask = (id) => { B.task = id; go('task'); };
 
@@ -403,13 +405,12 @@
     const repo = B.repo;
     return B.ctx.post('control', { action: 'bench', args, repo }).then((r) => r.text().then((t) => (r.ok && repo === B.repo ? String(t) : null)), () => null);
   }
-  // Stop the run: it names the run (`bench swe stop <id>`: a Stop that comes late never stops the run after it), says
-  // "Stopping" and stays off until the build machine answers, once the run and its containers ended (swe_stop).
-  const STOPPED = [[/ is stopped\./, 'Run stopped. Finished results are kept.'], [/ was interrupted: /, 'Run interrupted: its process had ended. Its end is recorded, its containers are removed and its finished results are kept.'],
-    [/ finished before Stop\./, 'Run finished before Stop.'], [/ at the usage guard before Stop\./, 'Run had stopped at the usage guard before Stop.'], [/ did not start, before Stop\./, 'Run did not start, before Stop.']];
+  // Stop the run: it names the run (`bench swe stop <id>`: a Stop that comes late never stops the run after it) and stays
+  // off until the build machine answers, once the run and its containers ended (swe_stop). The mockup's page has the
+  // button and no answer line, so the label stays; only a refusal is shown (refusedAt), by the page that has the button.
   function stopRun(id, stopping) {
     const key = `stop-${id}`, m = B.said.get(saidKey(key)), out = Boolean(m && m.out) || Boolean(stopping);
-    const b = button(out ? 'Stopping the run' : 'Stop the run', '', 'stop-run', `Stop the run ${id}`, () => send(key, ['stop', id], (t) => { const s = STOPPED.find(([re]) => re.test(t)); return s ? s[1] : t.replace(/^conveyor: /, ''); },
+    const b = button('Stop the run', '', 'stop-run', `Stop the run ${id}`, () => send(key, ['stop', id], (t) => t.replace(/^conveyor: /, ''),
       () => { readHist(true); const o = B.runs.get(`${B.repo}|${id}`); if (o) o.stamp = null; }, null, null, `Stopping run ${id}. Finished results are kept.`));
     b.disabled = out;
     return b;
@@ -463,7 +464,7 @@
   }
   const K = { B, PAGES, NOT_KEPT, num, list, obj, plural, pct, usd, fmtMin, kTok, wilson, noise, noised, noiseSaid, noisePct, told, median, mean, kept, sum,
     said, graded, costOf, costSaid, costSum, apart, lossOf, testsOf, testsSaid, linesOf, isTest, isConveyor, colName, verOf, paint, h, chip, button, add,
-    answers, verdict, box, grid, stat, note, callout, dot, armSaid, table, fold, kv, bar, ciBar, svg, say, saidAt, go, openTask, live, readHist,
+    answers, verdict, box, grid, stat, note, callout, dot, armSaid, table, fold, kv, bar, ciBar, svg, say, saidAt, refusedAt, go, openTask, live, readHist,
     readRun, hist, allRuns, runsOf, armsOf, colsOf, keysOf, benchOf, setSize, reading, studyOf, armOf, figsOf, versionsOf, moved, send, ask,
     stopRun, runActs, RUNS_SAID, stateOf, elapsed, weekPool, draw: () => draw() };
   const P = {};

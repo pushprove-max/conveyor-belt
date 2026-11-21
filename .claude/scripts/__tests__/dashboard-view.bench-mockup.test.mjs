@@ -30,8 +30,8 @@ test('Scoreboard, 7 arms on 50 tasks, one arm with results that kept no grade: t
   set.shows[BH.STUDY].tasks.flatMap((t) => t.cells).filter((c) => c.arm === 'solo').forEach((c) => Object.assign(c, { class: null, tests: null, ref: null, measures: null }));
   const w = await opened(set);
   const chip = (title) => { const c = box(w, title).querySelector('.bench-h .chip'); return c && [text(c), c.title]; };
-  assert.deepEqual(chip('Hidden tests'), ['needs the grader\'s report kept', 'Some results keep only resolved yes or no']);
-  assert.deepEqual(chip('Patch quality'), ['needs the reference fix\'s size kept', 'Some results did not keep the reference fix\'s size']);
+  assert.deepEqual(chip('Hidden tests'), ['needs the grader\'s report kept', 'Today the results keep only resolved yes or no']);
+  assert.deepEqual(chip('Patch quality'), ['needs the reference fix\'s size kept', 'Today the reference fix is removed after grading']);
 });
 
 // Bug it guards: the Scoreboard's run history had no Select all, and the tables, tips and definitions said "succeeds" and
@@ -46,7 +46,7 @@ test('Scoreboard, 7 arms on 50 tasks: the mockup\'s texts, no heading chip when 
   assert.deepEqual(Array.from(box(w, 'Patch quality').querySelectorAll('th'), (t) => t.title).filter(Boolean),
     ['At most twice the size of the reference fix', 'Changes a file the reference fix does not touch', 'Adds a test that fails on the base commit and passes with the patch']);
   assert.deepEqual(kv(box(w, 'Patch quality')).filter(([k]) => /^(Lint clean|Proves the fix)$/.test(k)),
-    [['Lint clean', 'No new ruff finding in the Python files the patch changes.'], ['Proves the fix', 'The patch adds a test that fails on the base commit and passes with the patch.']]);
+    [['Lint clean', 'No new finding from the default ruff rules in the Python files the patch changes.'], ['Proves the fix', 'The patch adds a test that fails on the base commit and passes with the patch.']]);
   assert.equal(Array.from(q(w, '.bench-leader').querySelectorAll('th')).find((t) => text(t) === 'Broke tests').title, 'Tasks where the patch broke tests that passed before');
   assert.match(text(box(w, 'Leaderboard').querySelector('.bench-note')), /^Click an arm to compare it with Conveyor\. "From tokens"/);
   // Select all ticks every run of the history and shows the selection bar; ticked again, it clears them.
@@ -63,11 +63,13 @@ test('Scoreboard, 7 arms on 50 tasks: the mockup\'s texts, no heading chip when 
 
 // Bug it guards: the Scoreboard of 2 runs of 1 task reworded the mockup's notes (the leaderboard note, the patch note,
 // the callout on what the results keep) and its "never checked" line. The patch note says what the patches kept show,
-// in the mockup's form, but says only what the summary shows: the same code files by the same line counts, not "the same fix".
+// as "changed the same file by one line", said only when the arms' patches hold the same code files by the same counts. A
+// patch summary keeps counts, not lines, so it never says "the same fix" (review E3: two patches that replace different lines
+// of one file have the same summary).
 test('Scoreboard, 2 runs of 1 task: the mockup\'s leaderboard note, patch note, callout and next-run line', async () => {
   const w = await opened(BH.few());
   const notes = Array.from(page(w).querySelectorAll('.bench-note'), text);
-  assert.ok(notes.includes('Real, from the patches the results keep. All five changed the same code files by the same line counts; only Conveyor, Codex builds v1.7.0 and Conveyor v1.7.0 added a test.'), notes.join(' | '));
+  assert.ok(notes.includes('Real, from the patches the results keep. All five changed the same file by one line; only Conveyor, Codex builds v1.7.0 and Conveyor v1.7.0 added a test.'), notes.join(' | '));
   assert.ok(notes.includes('"Not priced": agent arms report no usage by model today.'), notes.join(' | '));
   assert.equal(text(q(w, '.bench-callout-warn')), 'Every arm passed the task\'s hidden tests: that is all the results keep. The run records resolved yes or no and the patch, '
     + 'and the harness report with each fail-to-pass and pass-to-pass test is removed. To show these panels, the engine must keep that report. Size, strays and lint can be read from the patches the results already keep.');
@@ -260,15 +262,15 @@ test('Task, no arm reached the task: Run this task again is off and says so', as
 
 // Bug it guards: the "Good for arms" text said "differed ... in the last study" and quoted the smallest gap's task count
 // (2 points, 5000 tasks), where the mockup says "differ by 2 to 10 points: a 10-point gap needs 200 tasks", the largest
-// gap's; arms with no guard (a Codex arm, swe_guards) have none to say.
-test('Plan a run: the gap between two Conveyor versions is the study\'s largest, and arms with no guard say none', async () => {
+// gap's; arms with no guard (a Codex arm, swe_guards) have no state of it kept.
+test('Plan a run: the gap between two Conveyor versions is the study\'s largest, and arms with no guard say not kept', async () => {
   const w = await opened(BH.study(), 'plan');
   const guard = () => kv(q(w, '.bench-before')).find(([k]) => k === 'Usage guard')[1];
   const tick = async (arm, on) => { const b = act(bp(w), `arm-${arm}`); b.checked = on; b.dispatchEvent(new w.Event('change')); await settle(); };
   assert.equal(text(q(w, '.bench-before .bench-callout')),
     'Good for arms: a gap of 20% or more shows, and Conveyor against Claude alone was 24 points in the last study. Two Conveyor versions differ by 2 to 40 points: a 40-point gap needs 13 tasks.');
   await tick('conveyor', false); await tick('solo', false); await tick('codex-sol', true);
-  assert.equal(guard(), 'none for these arms', 'codex-sol alone: no arm has a guard');
+  assert.equal(guard(), 'not kept', 'codex-sol alone: no arm has a guard');
 });
 
 // Bug it guards (#1223): the guard chip said "not reached now; the run stops if it is", a state, where the mockup says
@@ -382,9 +384,8 @@ test('Scoreboard, 2 runs of 1 task with one arm unresolved: the verdict gives th
 });
 
 // Bug it guards: the patch note said the arms made "the same fix" when only the line counts matched, though one arm
-// changed another file. The summary the Board reads holds only each file's path and line counts, never the code, so equal
-// files and counts do not make it the same fix either: the note says "changed the same code files by +1 −1" and never
-// "the same fix".
+// changed another file. "Changed the same file by one line" is said only when the arms hold the same code files by the
+// same counts.
 test('Scoreboard, 2 runs of 1 task, one arm editing another file with the same counts: the patch note does not claim the same fix', async () => {
   const set = BH.few();
   set.shows[BH.FEW1].tasks[0].cells[1].patch = [{ path: 'django/db/models/other_module.py', added: 1, removed: 1 }];
@@ -393,8 +394,18 @@ test('Scoreboard, 2 runs of 1 task, one arm editing another file with the same c
   assert.ok(notes.includes('Real, from the patches the results keep. Only Conveyor, Codex builds v1.7.0 and Conveyor v1.7.0 added a test.'), notes.join(' | '));
 });
 
-// Bug it guards: when no arm produced a patch (each result has an empty patch summary), the note said "All five changed
-// the same code files by +0 −0" though no arm changed a file.
+// Bug it guards (review E3): the note counted its files and lines wrong when the arms changed more than one file: it says
+// how many files and the larger of the added and removed lines, for the patches of every arm alike.
+test('Scoreboard, 2 runs of 1 task, every arm changing two files by the same counts: the patch note says how many files and lines', async () => {
+  const set = BH.few();
+  for (const id of [BH.FEW1, BH.FEW2]) for (const c of set.shows[id].tasks[0].cells) c.patch = [{ path: 'django/db/a.py', added: 2, removed: 1 }, { path: 'django/db/b.py', added: 3, removed: 0 }];
+  const w = await opened(set);
+  const notes = Array.from(page(w).querySelectorAll('.bench-note'), text);
+  assert.ok(notes.some((n) => /^Real, from the patches the results keep\. All five changed the same 2 files by 5 lines/.test(n)), notes.join(' | '));
+});
+
+// Bug it guards: when no arm produced a patch (each result has an empty patch summary), the note said "All five made
+// the same 0-line fix" though no arm changed a file.
 test('Scoreboard, 2 runs of 1 task, no arm with a patch: the patch note does not say the arms changed the same files', async () => {
   const set = BH.few();
   for (const id of [BH.FEW1, BH.FEW2]) for (const c of set.shows[id].tasks[0].cells) c.patch = [];
