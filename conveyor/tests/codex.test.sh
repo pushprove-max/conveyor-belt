@@ -165,7 +165,7 @@ t_codexclaude() {
   cxsetup; seatset model m
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   c=$(st 'select(.step == "picked") | .card')
-  [ "$(cat "$STUB/sessions")" = "-p --model m --effort medium --permission-mode bypassPermissions --disallowedTools Agent --setting-sources  --strict-mcp-config --settings $T/$CASE/cards/$c.settings --output-format stream-json --verbose" ] \
+  [ "$(cat "$STUB/sessions")" = "-p --model m --effort medium --permission-mode bypassPermissions --disallowedTools Agent,ScheduleWakeup,CronCreate,CronDelete,CronList,Monitor,RemoteTrigger,PushNotification,SendMessage,ListAgents,Workflow --setting-sources  --strict-mcp-config --settings $T/$CASE/cards/$c.settings --output-format stream-json --verbose" ] \
     || fail "the Claude build was not launched as before: $(cat "$STUB/sessions")"
   [ ! -e "$STUB/cx-args" ] || fail "Codex ran the Claude build: $(cat "$STUB/cx-args")"
   [ "$(st 'select(.step == "build") | [.model, .effort, .tokens, .usage] | tojson')" = '["m","medium",{"claude":35,"codex":0},{"input":10,"write":20,"write1h":0,"read":999,"output":5}]' ] \

@@ -303,6 +303,7 @@
 {"area": "codex", "file": "conveyor/jq/codexread.jq"}
 {"area": "session", "test": "opencode.test.sh"}
 {"area": "session", "test": "codex.test.sh"}
+{"area": "session", "test": "sessionenv.test.sh"}
 {"area": "session", "test": "clis.test.sh"}
 {"area": "session", "test": "stall.test.sh"}
 {"area": "session", "test": "narrow.test.sh"}

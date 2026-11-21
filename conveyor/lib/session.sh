@@ -485,7 +485,9 @@ newtexts() { # <the name of a variable that holds a prompt>
 # pack's models.allowed lists the model under): OpenCode, Codex or Claude Code. Run in the background (watch() follows it), so it
 # execs the program in its own subshell, which a stall's kill ends, behind the words session1 puts it on the cores left for card work with (KEEP).
 # Claude: bypass mode, as any other mode asks before a write under .claude/, and a headless session cannot answer, so
-# a tooling card ended with no change; the card hooks (the settings file) still run in this mode.
+# a tooling card ended with no change; the card hooks (the settings file) still run in this mode. It has none of the
+# tools that schedule, message or start other agents (BUILDNOTOOLS): a headless run with a wakeup pending waits for
+# it, even past its time limit. WebFetch and WebSearch stay open.
 # OpenCode (README.md, OpenCode builder): `opencode run` in the worktree, the prompt on stdin, its events as JSON
 # lines; --auto approves what nothing denies, as bypass mode does; the config file (ocready()) loads the guard plugin,
 # which runs the same settings file's hooks before each call; the project's own OpenCode config is not read, as a
@@ -500,6 +502,7 @@ newtexts() { # <the name of a variable that holds a prompt>
 # Codex's web search, a tool no hook is given, is off. Its commands get no terminal (unified_exec_tty off), so their input is
 # closed: write_stdin, which types into a command already running and is given no hook, can only wait for output, and
 # Codex refuses keys sent with it (a Codex without the feature fails to start). It runs on no Claude account.
+BUILDNOTOOLS=Agent,ScheduleWakeup,CronCreate,CronDelete,CronList,Monitor,RemoteTrigger,PushNotification,SendMessage,ListAgents,Workflow
 sq() { local q="'"; printf "'%s'" "${1//$q/$q\\$q$q}"; } # <word>: it single-quoted for a shell
 builder() { # <worktree> <prompt> <model> <effort> <account folder> <agent: claude, opencode or codex>
   local h a=()
@@ -520,7 +523,7 @@ builder() { # <worktree> <prompt> <model> <effort> <account folder> <agent: clau
     opencode) export CLAUDE_PROJECT_DIR=$1 CONVEYOR_GUARD_SETTINGS=$1.settings OPENCODE_CONFIG=$1.opencode.json OPENCODE_DISABLE_PROJECT_CONFIG=1
       exec "${KEEP[@]}" timeout --kill-after=30 "$BUILD_TIMEOUT" opencode run --model "${3#opencode:}" --format json --auto <<<"$2" > "$1.out" 2> "$1.err" 8>&- ;;
     *) proxyenv && acctrun "$5" || exit 1
-      exec "${KEEP[@]}" timeout --kill-after=30 "$BUILD_TIMEOUT" claude -p --model "$3" --effort "$4" --permission-mode bypassPermissions --disallowedTools Agent \
+      exec "${KEEP[@]}" timeout --kill-after=30 "$BUILD_TIMEOUT" claude -p --model "$3" --effort "$4" --permission-mode bypassPermissions --disallowedTools "$BUILDNOTOOLS" \
         --setting-sources "" --strict-mcp-config --settings "$1.settings" --output-format stream-json --verbose <<<"$2" > "$1.out" 2> "$1.err" 8>&- ;;
   esac
 }

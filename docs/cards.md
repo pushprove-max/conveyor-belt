@@ -9,6 +9,15 @@ its work kept, until you retry or close it.
 The card builds in a fresh git worktree. Claude build, fix and review sessions start without your account's connectors
 (its MCP servers), so a card never sees your mail, drives or notes.
 
+A Claude build or fix session cannot use the tools that schedule work, send messages or start other agents:
+`ScheduleWakeup`, `CronCreate`, `CronDelete`, `CronList`, `Monitor`, `RemoteTrigger`, `PushNotification`,
+`SendMessage`, `ListAgents`, `Workflow` and `Agent`. It can still use `WebFetch` and `WebSearch`. There is no limit
+on turns or on cost. The session ends at its time limit, or sooner when it makes no progress for the pack's
+`tunables.stuck`.
+
+No Claude session of a card uses Claude Code's auto memory. A card does not read notes that an earlier card kept, and
+it keeps no notes for a later card.
+
 When the issue has a `## Done when` section, Conveyor checks the build or fix session's reply before the review. The
 reply needs a `D<n> met:` or `D<n> not met:` line for each item. It must also name each TODO or [VERIFY] marker that
 the change adds, on a line with its file. On the Board, open a card's `Done when` line to see each item: its text,

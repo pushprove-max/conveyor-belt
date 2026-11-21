@@ -185,7 +185,7 @@ t_opencodeclaude() {
   echo 'echo "${OPENCODE_CONFIG:-none} ${CONVEYOR_GUARD_SETTINGS:-none}" > "$STUB/claude-env"; echo two >> a.txt' > "$STUB/build"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   c=$(st 'select(.step == "picked") | .card')
-  [ "$(cat "$STUB/sessions")" = "-p --model m --effort medium --permission-mode bypassPermissions --disallowedTools Agent --setting-sources  --strict-mcp-config --settings $T/$CASE/cards/$c.settings --output-format stream-json --verbose" ] \
+  [ "$(cat "$STUB/sessions")" = "-p --model m --effort medium --permission-mode bypassPermissions --disallowedTools Agent,ScheduleWakeup,CronCreate,CronDelete,CronList,Monitor,RemoteTrigger,PushNotification,SendMessage,ListAgents,Workflow --setting-sources  --strict-mcp-config --settings $T/$CASE/cards/$c.settings --output-format stream-json --verbose" ] \
     || fail "the Claude build was not launched as before: $(cat "$STUB/sessions")"
   [ "$(cat "$STUB/claude-env")" = 'none none' ] && [ ! -e "$STUB/oc-run" ] || fail "the Claude build was given OpenCode's environment, or OpenCode ran: $(cat "$STUB/claude-env")"
   [ "$(st 'select(.step == "build") | [.model, .effort, .tokens.claude, .usage] | tojson')" = '["m","medium",35,{"input":10,"write":20,"write1h":0,"read":999,"output":5}]' ] \

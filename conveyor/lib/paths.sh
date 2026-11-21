@@ -186,7 +186,9 @@ acctenv() { # <name or "">: the folder a session's CLAUDE_CONFIG_DIR is set to (
 }
 # <folder from acctenv>: sets a session's CLAUDE_CONFIG_DIR to it; with none, the default login (~/.claude), so an
 # inherited CLAUDE_CONFIG_DIR never runs the cards on an account the guard and the Board do not read for them.
-acctrun() { if [ -n "$1" ]; then export CLAUDE_CONFIG_DIR="$1"; else unset CLAUDE_CONFIG_DIR; fi; }
+# Every Claude session a card starts runs through it, so each runs with no auto memory: notes kept under
+# ~/.claude/projects/ would carry from card to card (--setting-sources "" does not turn that off).
+acctrun() { export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1; if [ -n "$1" ]; then export CLAUDE_CONFIG_DIR="$1"; else unset CLAUDE_CONFIG_DIR; fi; }
 # What of the control record decides the accounts a card started on it uses: its account, reviewAccount and reviewer,
 # and the seats it keeps for an issue (cards: a card of that issue runs on them).
 acctkey() { jq -c '[.account, .reviewAccount, .reviewer, .cards]' <<<"${1:-null}" 2>/dev/null; }
