@@ -15,7 +15,7 @@ no() { echo "not ok - $1"; fails=1; }
 # A scratch repo with the real script and four files, all run at once:
 # - fine writes 100 KB in its TMPDIR, waits for many to start and passes;
 # - many writes four files of 400 KB in its TMPDIR (each under the size limit, 1,600 KB in all) and then would sleep
-#   30 s: only the suite's look at its folder while it runs (spaceguard) stops it;
+#   30 s: only the suite's look at its folder while it runs (share_guard) stops it;
 # - quick writes two files of 600 KB in its TMPDIR and exits 0 at once, before that first look: only the look when it
 #   has ended fails it;
 # - big writes one file of 3 MB outside its TMPDIR, where no look sees it, and notes its size: only the size limit
