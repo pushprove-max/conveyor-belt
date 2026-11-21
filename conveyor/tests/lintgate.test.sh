@@ -146,16 +146,42 @@ t_lintgatemergeagain() {
 
 # Card c7 changes line 1 of b.txt and its landing gate's lint passes; then main changes <file> (a line far below in
 # b.txt, or c.txt, no file of the card's), the change is fitted onto main as settle() fits it, and the gate runs again.
-gaterefit() { # <file main changes>
+# With <red run>: before the second gate, the stub linter also finds the card's line `card` (as a linter whose config
+# main changed would, a config no trigger names), and <red run> (in fx_in's shell) is the lint run that finds it so, or the step one calls on it. The
+# lint fix session is a stub that notes `lintfix` in $STUB/did.
+gaterefit() { # <file main changes> [<red run>]
+  local red=''
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  [ -z "${2:-}" ] || red='echo red > "$STUB/red"; '$2
   gatesetup '[]'
+  [ -z "${2:-}" ] || printf '%s\n' 'echo "run $*" >> "$STUB/lint-args"; r=0' \
+    'for f; do n=0; while IFS= read -r l; do n=$((n + 1)); [[ $l != *BAD* && $l:$(cat "$STUB/red" 2>/dev/null) != card:red ]] || { echo "$f:$n: E1 a bad word"; r=1; }; done < "$f"; done; exit $r' \
+    > "$STUB/lint" || fail "the stub linter"
   fx_wt 'sed -i "1s/.*/card/" b.txt' b.txt "$(seq 10)" c.txt c
   # shellcheck disable=SC2016 # expanded in fx_in's shell
-  fx_in 'lintgate c7 7 "$FXWT" "{}" prompt br land; echo "rc1=$?"
+  fx_in 'session() { echo lintfix >> "$STUB/did"; echo "{}"; }; checked() { :; }
+    lintgate c7 7 "$FXWT" "{}" prompt br land; echo "rc1=$?"
     echo main >> "$R/'"$1"'" && git -C "$R" commit -qam "main moves" && git -C "$FXWT" diff --cached --binary > "$FXWT.p" \
       && git -C "$FXWT" reset -q --hard main && git -C "$FXWT" apply --index "$FXWT.p" || exit 3
+    '"$red"'
     lintgate c7 7 "$FXWT" "{}" prompt br land; echo "rc2=$?"'
-  [ "$(grep '^rc' "$T/$CASE/run.out" | paste -sd' ')" = 'rc1=0 rc2=0' ] || fail "the landing gate did not pass twice: $(cat "$T/$CASE/run.out")"
+  [ -n "${2:-}" ] || [ "$(grep '^rc' "$T/$CASE/run.out" | paste -sd' ')" = 'rc1=0 rc2=0' ] || fail "the landing gate did not pass twice: $(cat "$T/$CASE/run.out")"
 }
+# A lint run after the landing gate's pass (<red run>, gaterefit) found the card's change red, on a main that changed
+# none of its files: the gate runs lint again and sends the finding to its fix session, the earlier pass not standing.
+gateredagain() { # <red run>
+  gaterefit c.txt "$1"
+  [ "$(grep '^rc' "$T/$CASE/run.out" | paste -sd' ')" = 'rc1=0 rc2=2' ] && [ "$(did)" = lintfix ] \
+    && ! grep -q 'so that pass stands' "$T/$CASE/run.out" && [ "$(st 'select(.step == "lint" and .lint.gate == "land") | .result' | paste -sd,)" = 'pass,findings' ] \
+    || fail "after '$1' found the change red, the landing gate's earlier pass stood: $(cat "$T/$CASE/run.out"); $(did); $(st 'select(.step == "lint") | .reason')"
+}
+# Bug (batchmovedlint, #1164): the card that runs a batch left it for its lint on main as it moved (lintleave()), and
+# its landing gate let its earlier pass stand, so it landed with the finding.
+t_lintgateleaveagain() { gateredagain 'lintleave c7 "$FXWT" c7'; }
+# Bug it catches: the same for a card the batch took, which leaves it by unbatch.
+t_lintgatetakenagain() { gateredagain 'lintleave c8 "$CARDS/c8" c7'; }
+# Bug it catches: the same for the gate for a waiting card (lintwait()) that found the change red.
+t_lintgatewaitagain() { gateredagain 'lintwait c7 7 "$FXWT"'; }
 # Bug (#1148): a card fitted onto a main that changed none of its files ran its lint again at each fit, 2 to 3 minutes,
 # while other cards landed. The second gate runs no lint command and writes no lint line: the first pass is the card's.
 t_lintgatestands() {

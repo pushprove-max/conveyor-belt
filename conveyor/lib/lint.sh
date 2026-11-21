@@ -486,7 +486,8 @@ lintbrief() {
 # cardpatch()), the commit it ran from and the hash of the pack's lint field it ran (lintpassed()). True (lintstands())
 # for the same change and lint field on a commit where main changed none of the change's files (both sides of a
 # rename), no command's triggers or size exempt file, and no file a command without {files} reads: lint gives the
-# same result there, so that pass is the card's.
+# same result there, so that pass is the card's. A later run that finds the change red (lintwait, lintleave) removes
+# <worktree>.linted: a linter can read a file no trigger names, so that finding, not the earlier pass, decides.
 lintpassed() { printf '%s\t%s\t%s\n' "$(cardpatch "$1")" "$2" "$(git hash-object --stdin <<<"$3")" > "$1.linted"; } # <worktree> <base> <lint field>
 lintstands() { # <worktree> <lint field>
   local p b k h f i n
@@ -556,8 +557,9 @@ lintgate() { # <card> <issue> <worktree> <issue json> <the sessions' prompt> <br
 # The gate for a waiting card (settle(), lib/claim.sh): with batches on, before the product checks and changed tests a
 # ready card runs while it waits. 0: they run (a pass, a missing tool, no lint command or the rule off). 1: a finding
 # of the change's or an execution error, recorded on its lint line: no check, test or session runs, and its
-# <worktree>.ready is removed, so no batch takes it (gather()) and this gate does not run again while it waits. At its
-# turn the landing gate (lintgate) gives it its fix session, or blocks it on an execution error.
+# <worktree>.ready is removed, so no batch takes it (gather()) and this gate does not run again while it waits, and its
+# <worktree>.linted, so no earlier pass of its landing gate stands (lintstands()). At its turn the landing gate
+# (lintgate) gives it its fix session, or blocks it on an execution error.
 lintwait() { # <card> <issue> <worktree>
   local l base o rc
   lintrule || return 0
@@ -566,7 +568,7 @@ lintwait() { # <card> <issue> <worktree>
   base=$(git -C "$3" rev-parse -q --verify HEAD) && o=$(mktemp) || { rm -f "$3.ready"; return 1; }
   lintrun "$3" "$base" "$1" "$o"; rc=$?; lintline "$1" "$2" "$o" $rc wait; rm -f "$o"
   [ $rc != 0 ] || return 0
-  rm -f "$3.ready"
+  rm -f "$3.ready" "$3.linted"
   echo "conveyor: card $1: its lint found $([ $rc = 1 ] && echo findings || echo 'an execution error') while it waits: it runs no check or test, and its landing gate deals with it at its turn"
   return 1
 }
@@ -595,13 +597,14 @@ lintbatch() { # <card> <worktree> <the run's cards>
 # The card a batch's split finds with a lint red run (lintbatch) leaves the batch with no test failure and no test
 # fix: by apart (set to lint, so card() takes it back to its landing gate even on a main that did not move) when it
 # is <card>, the card that runs the batch (batch()'s local), else by unbatch. Its
-# <worktree>.ready is removed, so no batch takes it again; once fitted onto main, its landing gate (lintgate) gives it
-# its fix session there, or blocks it. A card that the batch took leaves <card>'s kept change (<worktree>.cpatch,
+# <worktree>.ready is removed, so no batch takes it again, and its <worktree>.linted, so its landing gate's earlier
+# pass does not stand (lintstands()); once fitted onto main, its landing gate (lintgate) gives it its fix session
+# there, or blocks it. A card that the batch took leaves <card>'s kept change (<worktree>.cpatch,
 # gather()) holding its own: that file is removed, so the card is not stacked onto its own change (stackto()), and a
 # card waits on <card> as on one whose change cannot be read (together()).
 lintleave() { # <card> <worktree> <the card that leaves>
   # shellcheck disable=SC2034 # apart is batch()'s, read by card()
-  if [ "$3" = "$1" ]; then apart=lint; rm -f "$2.ready"; else rm -f "$CARDS/$3.ready" "$2.cpatch"; unbatch "$3"; fi
+  if [ "$3" = "$1" ]; then apart=lint; rm -f "$2.ready" "$2.linted"; else rm -f "$CARDS/$3.ready" "$CARDS/$3.linted" "$2.cpatch"; unbatch "$3"; fi
   echo "conveyor: card $3: the lint check failed on its change in the batch of card $1: it leaves the batch with no test failure, and its landing gate deals with it on main"
 }
 
