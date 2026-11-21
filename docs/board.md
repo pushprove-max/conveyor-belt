@@ -982,7 +982,7 @@ map** read the arms in the same way. An archived run is not in it.
 - **Value: resolve rate against cost**: each arm's resolve rate, with its 95% range, against its cost for each task.
   A dashed line joins the arms that no other arm beats on both.
 - **Hidden tests**: for each arm, a bar of its tasks by class: resolved, fixed but broke other tests, partial fix, no
-  fix and no patch. A table gives the FAIL_TO_PASS tests that succeeded, the PASS_TO_PASS tests that broke and the
+  fix and no patch. A table gives the fail-to-pass tests that succeeded, the pass-to-pass tests that broke and the
   partial fixes.
 - **Patch quality**: for the resolved tasks, the clean fixes, and the share of patches that are lint clean, at most
   twice the size of the reference fix, change a file that the reference fix does not change (strays), and prove the fix.
@@ -1049,14 +1049,14 @@ the button stays off until the build machine has ended the run and its container
 Stop names its run, so a late Stop never stops a newer run.
 **Live run** in the page row shows the run that goes, or else the last run. When no run
 goes, the page shows the last run: how it ended, and each arm's result, sessions, tokens, minutes and cost. A task
-that did not start shows "not started", never unresolved. When the run did not start, or its process ended with no end
+that has no grade shows "not kept", never unresolved. When the run did not start, or its process ended with no end
 recorded, the verdict shows "not kept" for the end, and the run history shows its state ("did not start" or
 "interrupted"). A run with no estimate to judge it by, or a figure that is not known, shows "not kept" in that place.
 
 **Task** shows one task across every arm. Open it from **Compare**, **Versions**, **Task map** or **Live run**. The
 verdict gives how many arms resolve the task, and what that says: no arm resolves it (look at the task first), every
 arm does (it tells the arms apart only on cost and time), or some do. A table gives each arm's result, minutes, hidden
-tests and a note: the step where a Conveyor arm went wrong, or "did not fire" for another arm that did not fire.
+tests (for example "2 of 2 fail-to-pass · 41 of 41 pass-to-pass") and a note: the step where a Conveyor arm went wrong, or "did not fire" for another arm that did not fire.
 **Conveyor's card, step by step** shows the card's steps as a bar: the width of each step is its time ("Width is time:
 not kept" when the steps keep no time). **The review, in full** is folded. **This task over time** has a dot for each
 run of the Conveyor arm on the task, by version. The facts give the repository, the difficulty, the size of the
@@ -1068,13 +1068,16 @@ the size. Three buttons are under the facts:
 - **Open the logs** shows the end of the log that each arm kept for the task: the output of its run on the task. An
   arm that kept no log is left out. Click it again to close it.
 - **Run this task again** queues a run of this one task on the arms that ran it, on the engine that they ran, as
-  **Start the run** does, and shows the answer beside the buttons. The run keeps its results apart from the saved
+  **Start the run** does, and shows no line when it starts. The run keeps its results apart from the saved
   ones, and does not replace them. When it ends, the Board reads its result of the task as the newest of each arm, so
   the pages and the Scoreboard show it. It stays off in these cases:
   - A run goes.
   - The task is not in the pinned order.
   - No arm reached the task.
   - The Conveyor arms ran the task on two engines, or on one that is not known: a run takes one engine.
+
+  When it is off, a line under the buttons says why. When the build machine refuses the run, a line under the buttons
+  gives the refusal.
 
   Only an admin can use it.
 

@@ -322,7 +322,7 @@ test('Live run: a run whose process is gone has no end to say (not kept) in the 
 // Bug it guards (review E10): a run the build machine refused (no Docker: swe_run records state refused and why) read
 // "It ran 1 task", with its cell that never started labelled unresolved. The mockup has no sentence for a run that did
 // not start (#1224): the end and the second line say not kept.
-test('Live run: a refused run says not kept for its end, and its cell is not started, never unresolved', async () => {
+test('Live run: a refused run says not kept for its end, and its cell says not kept, never unresolved', async () => {
   const set = BH.few(), id = 'r20261109T010000-77', why = 'docker is not running on the build machine';
   const line = { id, state: 'refused', started: iso(T0 - 3600000), ended: iso(T0 - 3600000), n: 1, set: set.hist.runs[0].set, arms: ['conveyor'], current: null, shared: {}, cost: null, why,
     cols: [{ arm: 'conveyor', key: null, label: 'Conveyor', kind: 'conveyor', engine: null, version: 'main', done: 0, resolved: 0, notRun: 0, sessions: null, tokens: null, minutes: null, classes: null, cost: null, wall: 0 }] };
@@ -332,7 +332,7 @@ test('Live run: a refused run says not kept for its end, and its cell is not sta
   assert.ok(q(w, '.bench-verdict').classList.contains('bench-verdict-bad'));
   assert.deepEqual([text(q(w, '.bench-vv')), text(q(w, '.bench-vw'))], ['not kept', 'not kept']);
   assert.doesNotMatch(text(q(w, '.bench-verdict')), /did not start|refused|docker/);
-  assert.deepEqual(rows(q(w, '.bench-t')).map((r) => r.slice(0, 2)), [['Conveyor main', 'not started']]);
+  assert.deepEqual(rows(q(w, '.bench-t')).map((r) => r.slice(0, 2)), [['Conveyor main', 'not kept']]);
 });
 
 // ---- Task ----
@@ -345,7 +345,7 @@ test('Task, 7 arms on one task of the study: the verdict, each arm, the card\'s 
   assert.deepEqual(heads(w), [`django · ${TASKS[0]}`, 'Each arm on this task', 'Conveyor\'s card, step by step', 'The review, in full', 'This task over time']);
   assert.equal(text(q(w, '.bench-vv')), BH.TITLE);
   assert.equal(text(q(w, '.bench-vw')), '7 of 7 arms resolve it. An easy task: it tells the arms apart only on cost and time.');
-  assert.deepEqual(rows(q(w, '.bench-arms'))[0], ['Conveyor v1.9.0', 'resolved', '21', '2 of 2 FAIL_TO_PASS · 40 of 40 PASS_TO_PASS', '']);
+  assert.deepEqual(rows(q(w, '.bench-arms'))[0], ['Conveyor v1.9.0', 'resolved', '21', '2 of 2 fail-to-pass · 40 of 40 pass-to-pass', '']);
   const spans = Array.from(page(w).querySelectorAll('.bench-swim span'));
   assert.deepEqual(spans.map((s) => s.dataset.step), ['build', 'review', 'fix', 'review', 'test', 'landed']);
   assert.deepEqual(spans.map((s) => Math.round(parseFloat(s.style.left))), [0, 52, 62, 71, 81, 90], 'the build took 11 of the 21 minutes, each step after it 2');

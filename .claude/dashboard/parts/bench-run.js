@@ -45,8 +45,7 @@
   // the trials left on arms of that guard (both guards' arms, when they read one login: K.weekPool). A run from before the engine kept the share says it is not kept; so does a need
   // no trial has shown yet.
   function guardSaid(r, cols, data) {
-    const g = K.obj(K.hist() && K.hist().guard) || {}, now = K.obj(r.weekLeft) || {}, start = K.obj(r.weekStart) || {};
-    if (cols.some((c) => guardOf(c) && g[guardOf(c)] === true)) return 'The usage guard is reached: the run stops at the end of the task it is on.';
+    const now = K.obj(r.weekLeft) || {}, start = K.obj(r.weekStart) || {};
     const kinds = [...new Set(cols.map(guardOf).filter((k) => K.num(now[k]) !== null))].sort((a, b) => now[a] - now[b]);
     if (!kinds.length) return `The usage guard's week left: ${K.NOT_KEPT}.`;
     const k = kinds[0], mine = cols.filter((c) => K.weekPool(start, k).includes(guardOf(c))), ran = K.sum(mine.map((c) => K.num(c.ran) || 0)), used = K.num(start[k]) === null ? null : start[k] - now[k];
@@ -145,11 +144,11 @@
     const all = cols.filter((c) => c.resolved === n && n).length, ran = Math.max(0, ...cols.map((c) => K.num(c.done) || 0)), refused = r.state === 'refused';
     const res = n === 1 ? `${all === cols.length ? `All ${cols.length}` : `${all} of ${cols.length}`} resolved it.` : `${cols.map((c) => `${K.colName(c)} ${K.num(c.resolved) || 0} of ${n}`).join(', ')}.`;
     const v = lastLine(r, 'The last', took);
-    // A cell with no result was never graded: it says why (not started, stopped), never unresolved.
+    // The mockup's chips are resolved and unresolved: a cell with no result, or not run, was never graded, so it says not kept.
     const one = (c) => {
       const x = tasks.length === 1 ? K.list(tasks[0].cells).find((y) => K.obj(y) && y.arm === c.arm) : null, k = K.said(x);
       if (!x) return `${K.num(c.resolved) || 0} of ${n} resolved`;
-      return k === 'yes' ? K.chip('resolved', 'ok') : k === 'no' ? K.chip('unresolved', 'bad') : k === 'nr' ? K.chip('not run', 'warn') : K.chip(x.state === 'interrupted' ? 'stopped' : 'not started', 'quiet');
+      return k === 'yes' ? K.chip('resolved', 'ok') : k === 'no' ? K.chip('unresolved', 'bad') : K.chip(K.NOT_KEPT, 'quiet');
     };
     const s = K.box(r.id);
     s.append(K.table(['Arm', 'Result', ['Sessions', 'r'], ['Tokens', 'r'], ['Minutes', 'r'], ['Cost', 'r']], cols.map((c) => [K.armSaid({ s: c.s, label: K.colName(c) }), one(c),
@@ -258,7 +257,7 @@
   // (the end of the loop's output: the engine gives the Board no more of it). Run this task again sends
   // `bench swe 1 --arm <arm>... --task <id> [--engine <commit>] --again`: that one task on the arms that reached it, on the
   // engine they ran, and --again keeps each result apart from the saved one. One run takes one engine, so the button is
-  // off for arms that ran on two, or on one that is not known. Patch and logs stay open through a redraw.
+  // off for arms that ran on two, or on one that is not known, and then the page says why under the buttons. Patch and logs stay open through a redraw.
   function toggle(label, act, key, open) {
     const b = K.button(label, '', act, label, () => { if (open) K.B.folds.delete(key); else K.B.folds.add(key); K.draw(); });
     b.setAttribute('aria-expanded', String(open));
@@ -275,14 +274,17 @@
     const b = K.button('Run this task again', '', 'run-again', 'Run this task again', () => K.send(`again-${id}`,
       ['run', '1', ...names.flatMap((a) => ['--arm', a]), '--task', id, ...(eng.length ? ['--engine', eng[0]] : []), '--again'],
       (t) => t.replace(/^conveyor: /, ''), () => K.readHist(true)));
-    b.disabled = Boolean(why) || K.B.busy || Boolean(l && l.state === 'running');
-    b.title = why || `Runs this task alone on ${K.plural(names.length, 'arm')}, and keeps the results apart.`;
-    return b;
+    // The button has no receipt line (the mockup has none): where it is off the page says why under it, in that place, and
+    // a refusal of the build machine shows there too, as under Start and Stop.
+    const off = why || (l && l.state === 'running' ? 'A run goes now: this task can run again when it ends.' : K.B.busy ? 'The Board waits for the answer to the last action.' : '');
+    b.disabled = Boolean(off);
+    b.title = off || `Runs this task alone on ${K.plural(names.length, 'arm')}, and keeps the results apart.`;
+    return [b, off ? h('p', 'bench-small bench-muted bench-again-why', off) : '', K.refusedAt(`again-${id}`)];
   }
   function tools(id, arms) {
-    const pk = `patch-${id}`, lk = `logs-${id}`, row = h('div', 'bench-row bench-tools'), out = [row, K.saidAt(`again-${id}`)];
+    const pk = `patch-${id}`, lk = `logs-${id}`, row = h('div', 'bench-row bench-tools'), [btn, ...why] = again(id, arms), out = [row, ...why];
     const po = K.B.folds.has(pk), lo = K.B.folds.has(lk);
-    row.append(toggle('Open the patch', 'open-patch', pk, po), toggle('Open the logs', 'open-logs', lk, lo), again(id, arms));
+    row.append(toggle('Open the patch', 'open-patch', pk, po), toggle('Open the logs', 'open-logs', lk, lo), btn);
     if (po) {
       const a = arms.find((x) => x.kind === 'conveyor' && K.list((x.cells.get(id) || {}).steps).length) || arms.find((x) => Array.isArray(x.cells.get(id).patch)), p = a && a.cells.get(id).patch;
       const files = Array.isArray(p) ? (p.length ? p.map((x) => `${x.path} +${x.added} −${x.removed}`).join(', ') : 'empty') : K.NOT_KEPT;

@@ -206,8 +206,12 @@ test('Task, 7 arms on the third task of the study: Open the logs shows the kept 
   act(bp(w), 'run-again').click();
   const [sent] = w.posts.splice(0);
   assert.deepEqual(sent.body, { action: 'bench', args: ['run', '1', '--arm', 'conveyor', '--arm', 'conveyor-codex-claude', '--arm', 'solo-review', '--arm', 'codex-sol', '--arm', 'superpowers', '--arm', 'solo', '--arm', 'caveman', '--task', id, '--engine', '9'.repeat(40), '--again'], repo: 'sample' });
+  // Bug it guards: while the Board waits for the answer, the button was off with a hover title alone; the page said nothing of why.
+  assert.equal(act(bp(w), 'run-again').disabled, true);
+  assert.equal(text(q(w, '.bench-again-why')), 'The Board waits for the answer to the last action.');
   await settle();
-  assert.match(text(q(w, '[data-said="again-' + id + '"]')), /run r20261109T170000-9 started/);
+  assert.equal(q(w, '[data-said="again-' + id + '"]'), null, 'the mockup gives Run this task again no answer line');
+  assert.equal(q(w, '.bench-again-why'), null, 'a button that is on gives no reason');
 });
 
 // Bug it guards: Run this task again sent the arm names alone, so a task run on an older release was run again on main.
@@ -222,6 +226,7 @@ test('Task, Conveyor arms that ran the task on two engines: Run this task again 
   const b = act(bp(w), 'run-again');
   assert.equal(b.disabled, true);
   assert.match(b.title, /more than one engine/);
+  assert.match(text(q(w, '.bench-again-why')), /more than one engine/, 'the reason shows on the page, not only in the hover title');
   b.click();
   assert.deepEqual(w.posts, [], 'a disabled button sends nothing');
 });
@@ -254,9 +259,61 @@ test('Task, no arm reached the task: Run this task again is off and says so', as
   const b = act(bp(w), 'run-again');
   assert.equal(b.disabled, true);
   assert.match(b.title, /No arm reached this task/);
+  assert.match(text(q(w, '.bench-again-why')), /No arm reached this task/, 'the reason shows on the page, not only in the hover title');
   b.click();
   assert.deepEqual(w.posts, [], 'a disabled button sends nothing');
 });
+
+// Bug it guards: with no receipt line, a refusal of the build machine (the usage guard reached, a run already going) was hidden
+// too, so a press of Run this task again that failed looked like nothing happened.
+test('Task, the build machine refuses Run this task again: the refusal shows under the buttons', async () => {
+  const set = BH.study();
+  const id = set.shows[BH.STUDY].tasks[2].id;
+  const w = await opened(set, 'map');
+  act(bp(w), `sq-${id}`).click();
+  await settle();
+  w.reply = { ok: false, status: 409, text: () => Promise.resolve('conveyor: the usage guard is reached: no SWE-bench run starts while it stands') };
+  act(bp(w), 'run-again').click();
+  await settle();
+  const said = q(w, '[data-said="again-' + id + '"]');
+  assert.match(text(said), /^Not done: .*usage guard is reached/, text(page(w)));
+  assert.ok(said.classList.contains('bench-said-bad'));
+  assert.equal(act(bp(w), 'run-again').disabled, false, 'a refusal leaves the button on');
+});
+
+// Bug it guards: while a run goes the button was off with a hover title alone; the page said nothing of why.
+test('Task, a run goes now: Run this task again is off and the page says why under the buttons', async () => {
+  const w = await opened(BH.live(), 'task');
+  const b = act(bp(w), 'run-again');
+  assert.equal(b.disabled, true);
+  assert.equal(text(q(w, '.bench-again-why')), 'A run goes now: this task can run again when it ends.');
+  b.click();
+  assert.deepEqual(w.posts, [], 'a disabled button sends nothing');
+});
+
+// Bug it guards (the 50-task fixture): the Live run guard sentence said "The usage guard is reached: the run stops at the end
+// of the task it is on." where the mockup has only the share of the week left and what the run needs.
+test('Live run, the usage guard reached: no sentence of its own, the mockup\'s percentage sentence stands', async () => {
+  const set = BH.live();
+  set.hist.guard.conveyor = true;
+  Object.assign(set.shows[BH.LIVE].run, { weekStart: { conveyor: 40, agent: 40, shared: false }, weekLeft: { conveyor: 31, agent: 33, shared: false } });
+  set.shows[BH.LIVE].run.cols.forEach((c) => { c.ran = c.done; });
+  const said = text(q(await opened(set), '.bench-vw'));
+  assert.doesNotMatch(said, /guard is reached|stops at the end/, said);
+  assert.match(said, /The usage guard has 31% of the week left; this run needs about 32% more\.$/, said);
+});
+
+// Bug it guards: a last run's cell with no grade showed "stopped", "not started" or "not run" chips, which the mockup does not
+// have (it has resolved and unresolved): the cell says not kept.
+for (const [name, cell] of [['stopped by you', { state: 'interrupted' }], ['not run (image)', { result: 'not run: image fetch failed' }]]) {
+  test(`Live run, the last run of one task with a cell ${name}: the chip says not kept`, async () => {
+    const set = BH.few(), run = set.shows[BH.FEW1];
+    Object.assign(run.tasks[0].cells[0], { result: null, resolved: undefined }, cell);
+    const w = await opened(set, 'run');
+    assert.ok(!/stopped|not started|not run/.test(text(q(w, '.bench-t'))), text(q(w, '.bench-t')));
+    assert.equal(text(q(w, '.bench-t tbody tr td:nth-child(2)')), 'not kept');
+  });
+}
 
 // Bug it guards: the "Good for arms" text said "differed ... in the last study" and quoted the smallest gap's task count
 // (2 points, 5000 tasks), where the mockup says "differ by 2 to 10 points: a 10-point gap needs 200 tasks", the largest

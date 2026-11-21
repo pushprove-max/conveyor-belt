@@ -119,7 +119,7 @@
     if (!f || !p || num(f.passed) === null || num(p.passed) === null) return null;
     return [f.passed, f.passed + (num(f.failed) || 0), p.passed, p.passed + (num(p.failed) || 0)];
   }
-  const testsSaid = (c) => { const t = testsOf(c); return t ? `${t[0]} of ${t[1]} FAIL_TO_PASS · ${t[2]} of ${t[3]} PASS_TO_PASS` : NOT_KEPT; };
+  const testsSaid = (c) => { const t = testsOf(c); return t ? `${t[0]} of ${t[1]} fail-to-pass · ${t[2]} of ${t[3]} pass-to-pass` : NOT_KEPT; };
   // A file of a patch is a test file as docs/benchmarks.md says: under a test or tests folder, or test_*.py, *_test.py, conftest.py.
   const isTest = (p) => /(^|\/)tests?\//.test(p) || /(^|\/)(test_[^/]*\.py|[^/]*_test\.py|conftest\.py)$/.test(p);
   // A cell's lines: {code: [added, removed], test, files}, from its measures, else from the patch it keeps; null when neither is kept.
