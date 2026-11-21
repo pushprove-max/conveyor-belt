@@ -144,6 +144,55 @@ t_lintgatemergeagain() {
     || fail "the check fix's finding did not get a new lint fix at the next landing gate: $(cat "$T/$CASE/run.out"); $(did); $(st 'select(.step == "blocked") | .reason')"
 }
 
+# Bug: a finding left after the review gate's fix session goes to the review, or lands. The gate blocks the card after
+# its one fix session.
+t_lintgateleft() {
+  gatesetup '[]'
+  fx_wt 'echo BAD >> a.txt' b.txt base
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  fx_in 'session() { echo lintfix >> "$STUB/did"; echo "still BAD" >> "$1/a.txt"; echo "{}"; }; checked() { :; }
+    lintgate c7 7 "$FXWT" "{}" prompt br; echo "rc=$?"'
+  grep -qx 'rc=1' "$T/$CASE/run.out" && [ "$(did)" = lintfix ] \
+    && [ "$(st 'select(.step == "blocked") | .reason' | head -n 1)" = 'lint: 2 findings left after its fix session; nothing landed' ] \
+    || fail "the finding left did not block the card after one fix session: $(cat "$T/$CASE/run.out"); $(did); $(st 'select(.step == "blocked") | .reason')"
+}
+
+# Bug: a lint command that fails to run (exit 2) at the gate is taken as findings and sent to a fix session, or as a
+# pass. It blocks the card, naming the command, with no fix session.
+t_lintgateerror() {
+  gatesetup '[]' 'echo "lint: config broken"; exit 2'
+  fx_wt 'echo two >> a.txt' b.txt base
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  fx_in 'session() { echo lintfix >> "$STUB/did"; echo "{}"; }; lintgate c7 7 "$FXWT" "{}" prompt br; echo "rc=$?"'
+  grep -qx 'rc=1' "$T/$CASE/run.out" && [ -z "$(did)" ] \
+    && st 'select(.step == "blocked") | .reason' | grep -qF 'lint: an execution error, so nothing landed: lint command 1 (echo "lint: config broken"; exit 2): it exited 2: lint: config broken' \
+    || fail "the execution error did not block the card with no fix session: $(cat "$T/$CASE/run.out"); $(did); $(st 'select(.step == "blocked") | .reason')"
+}
+
+# Bug: a lint tool that is not installed blocks the card or is left out of its record. The gate lets the card go on,
+# its lint line saying the command was skipped and why.
+t_lintgateskip() {
+  gatesetup '[]' 'echo "lint: missing shellcheck"; exit 127'
+  fx_wt 'echo two >> a.txt' b.txt base
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  fx_in 'lintgate c7 7 "$FXWT" "{}" prompt br; echo "rc=$?"'
+  grep -qx 'rc=0' "$T/$CASE/run.out" && [ "$(st 'select(.step == "lint") | .lint.commands[0].result')" = 'skipped: missing shellcheck' ] \
+    && st 'select(.step == "lint") | .reason' | grep -qF 'lint command 1 (echo "lint: missing shellcheck"; exit 127): skipped: missing shellcheck' \
+    || fail "the missing tool did not let the gate go on with a skipped lint line: $(cat "$T/$CASE/run.out"); $(st 'select(.step | IN("lint", "blocked")) | .reason')"
+}
+
+# Bug: with the rule Lint check off, the gate still runs the pack's lint commands. None runs, the brief has no # Lint
+# section, and no lint line is written.
+t_lintgateoff() {
+  gatesetup '[]'
+  fx_wt 'echo BAD >> a.txt' b.txt base
+  jq '.rules.lint = false' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json" || fail "the rule off"
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  fx_in 'lintgate c7 7 "$FXWT" "{}" prompt br; echo "rc=$?"; echo "brief=$(lintbrief)"'
+  grep -qx 'rc=0' "$T/$CASE/run.out" && grep -qx 'brief=' "$T/$CASE/run.out" && [ ! -e "$STUB/lint-args" ] && [ -z "$(st 'select(.step == "lint")' 2>/dev/null)" ] \
+    || fail "a lint command, lint line or # Lint section with the rule off: $(cat "$T/$CASE/run.out" "$STUB/lint-args" 2>&1)"
+}
+
 # The cases below run card #7 whole (loop run): what they check is where the gate sits in card()'s review loop, which
 # sessions and reviews follow it and what lands, which no call of lintgate() alone shows.
 
@@ -208,30 +257,6 @@ t_lintgatekept() {
     || fail "the card did not land the fixed README: $(cat "$R/README.md")"
 }
 
-# Bug: a finding left after the gate's fix session goes to the review, or lands. The card blocks, and nothing lands.
-t_lintgateleft() {
-  local head
-  gatesetup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"; head=$(git -C "$R" rev-parse HEAD)
-  gatesessions 'echo BAD >> a.txt' 'echo "still BAD" >> a.txt'
-  # loop: only a whole card run shows that card() blocks and lands nothing when a finding is left after the fix
-  loop run > /dev/null || fail "run exited non-zero"
-  [ "$(st 'select(.step == "blocked") | .reason' | head -n 1)" = 'lint: 2 findings left after its fix session; nothing landed' ] \
-    && [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] && [ -z "$(st 'select(.step == "landed")')" ] && [ ! -e "$STUB/reviews" ] \
-    || fail "the finding left did not block the card before any review: $(st 'select(.step | IN("blocked", "landed", "review")) | .reason')"
-}
-
-# Bug: a lint command that fails to run (exit 2) at the gate is taken as findings and sent to a fix session, or as a
-# pass. It blocks the card, naming the command, with no fix session, and nothing lands.
-t_lintgateerror() {
-  gatesetup "[$(issue 7 2026-01-01)]" 'echo "lint: config broken"; exit 2'
-  echo "$GO" > "$STUB/review.1"; gatesessions 'echo two >> a.txt' :
-  # loop: only a whole card run shows that an execution error blocks the card with no fix session and nothing lands
-  loop run > /dev/null || fail "run exited non-zero"
-  [ "$(did)" = build ] && [ -z "$(st 'select(.step == "landed")')" ] \
-    && st 'select(.step == "blocked") | .reason' | grep -qF 'lint: an execution error, so nothing landed: lint command 1 (echo "lint: config broken"; exit 2): it exited 2: lint: config broken' \
-    || fail "the execution error did not block the card with no fix session: $(did); $(st 'select(.step | IN("blocked", "landed")) | .reason')"
-}
-
 # Bug: main adds a lint command and its script (the command's trigger) while a card builds, and the review gate runs
 # that command in the card's worktree, made before the script: exit 127, an execution error that blocks the card. The
 # review gate skips it, saying why; the landing gate, on the change fitted onto main, runs it on the change: it lands.
@@ -251,31 +276,6 @@ t_lintgatelate() {
   [ "$(st 'select(.step == "lint") | .lint.commands[1].result' | paste -sd'|')" \
     = 'skipped: missing late.sh, which main added after the commit of this tree: it runs on the change on main as it is now|pass' ] \
     || fail "the review gate did not skip the late command and the landing gate pass it: $(st 'select(.step == "lint") | .reason')"
-}
-
-# Bug: a lint tool that is not installed blocks the card or is left out of its record. The card lands, its lint line
-# saying the command was skipped and why.
-t_lintgateskip() {
-  gatesetup "[$(issue 7 2026-01-01)]" 'echo "lint: missing shellcheck"; exit 127'
-  echo "$GO" > "$STUB/review.1"
-  # loop: only a whole card run shows that a missing tool lets the card land with a skipped lint line in its record
-  loop run > /dev/null || fail "run exited non-zero"
-  # Two lint lines: the review gate's and the landing gate's.
-  [ -n "$(st 'select(.step == "landed") | .sha')" ] && [ "$(st 'select(.step == "lint") | .lint.commands[0].result' | paste -sd,)" = 'skipped: missing shellcheck,skipped: missing shellcheck' ] \
-    && st 'select(.step == "lint") | .reason' | grep -qF 'lint command 1 (echo "lint: missing shellcheck"; exit 127): skipped: missing shellcheck' \
-    || fail "the card with a missing tool did not land with its skipped lint line: $(st 'select(.step | IN("lint", "blocked")) | .reason')"
-}
-
-# Bug: with the rule Lint check off, the gate still runs the pack's lint commands. None runs, the brief has no # Lint
-# section, and the card lands with no lint line.
-t_lintgateoff() {
-  gatesetup "[$(issue 7 2026-01-01)]"
-  echo "$GO" > "$STUB/review.1"; gatesessions 'echo BAD >> a.txt' :
-  jq '.rules.lint = false' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json" || fail "the rule off"
-  # loop: only a whole card run shows that no gate, brief section or record line of card() runs a lint command
-  loop run > /dev/null || fail "run exited non-zero"
-  [ ! -e "$STUB/lint-args" ] && [ -n "$(st 'select(.step == "landed") | .sha')" ] && [ -z "$(st 'select(.step == "lint")')" ] && ! grep -q '^# Lint$' "$STUB/brief" \
-    || fail "a lint command ran with the rule off: $(cat "$STUB/lint-args" 2>&1)"
 }
 
 # The landing gate's card #7: the build adds a line and a BAD line to a.txt, which the lint command finds only in a tree that holds
