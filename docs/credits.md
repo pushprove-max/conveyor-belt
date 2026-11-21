@@ -36,6 +36,10 @@ Conveyor features are built on these works, which Conveyor does not copy:
     view tests.
   - [`typescript`](https://github.com/microsoft/TypeScript) by Microsoft, Apache-2.0 licence: its parser reads test
     files for the new-test-file hook (`.claude/hooks/new-test-file-guard.sh`).
+  - [`eslint`](https://github.com/eslint/eslint) by the ESLint contributors, MIT licence, checks the Board's
+    JavaScript in the lint step (`.conveyor/lint-js.sh`).
+  - [`@eslint/js`](https://github.com/eslint/eslint/tree/main/packages/js) by the ESLint contributors, MIT licence,
+    gives the ESLint configuration (`eslint.config.js`) its recommended rules.
 - The demo's npm packages, from `docs/demo/package.json`:
   - [`hyperframes`](https://github.com/heygen-com/hyperframes) by HeyGen, Apache-2.0 licence, renders the demo to
     video.
