@@ -45,6 +45,30 @@ t_packcommityes() {
     || fail "a changed pack was not committed as an update: $out"
 }
 
+# Bug (E1 of #1157): yes committed the pack alone, so the exempt file of its size entry, which setup writes beside the pack
+# and cards read from main, stayed on this machine and cards stopped on the files that setup had exempted.
+t_packcommitexempt() {
+  packsetup; local out
+  tune '.lint = {commands: [{files: ["*.txt"], size: {file: 3, exempt: ".conveyor/size-exempt.txt"}}]}' && echo big.txt > "$R/.conveyor/size-exempt.txt" || fail "the fixture was not made"
+  out=$(loop setup pack-commit) && grep -q 'size-exempt.txt' <<<"$out" || fail "the ask did not name the exempt file: $out"
+  out=$(loop setup pack-commit yes) || fail "yes failed: $out"
+  [ "$(git -C "$R" diff-tree --no-commit-id --name-only -r main | paste -sd' ')" = '.conveyor/project.json .conveyor/size-exempt.txt' ] \
+    && others || fail "main's commit is not the pack and its exempt file: $(git -C "$R" log -1 --stat main): $out"
+  [ "$(loop setup pack-commit)" = 'ok: the pack is committed' ] || fail "the committed pack and exempt file were asked again"
+  echo more >> "$R/.conveyor/size-exempt.txt"
+  out=$(loop setup pack-commit) && grep -q '^ask:' <<<"$out" || fail "a changed exempt file was not asked: $out"
+}
+
+# Bug (E2 of #1157): a size entry whose exempt file is on no disk and in no commit (the docs allow it) went to git add,
+# which failed with "pathspec did not match", so the pack was never committed.
+t_packcommitnoexempt() {
+  packsetup; local out
+  tune '.lint = {commands: [{files: ["*.txt"], size: {file: 3, exempt: ".conveyor/size-exempt.txt"}}]}' || fail "the fixture was not made"
+  out=$(loop setup pack-commit yes) || fail "yes failed with the exempt file missing: $out"
+  [ "$(git -C "$R" diff-tree --no-commit-id --name-only -r main)" = '.conveyor/project.json' ] \
+    || fail "main's commit is not the pack alone: $(git -C "$R" log -1 --stat main): $out"
+}
+
 # Bug: no commits the pack anyway, or does not say that cards read it from main.
 t_packcommitno() {
   packsetup; local out
@@ -137,9 +161,9 @@ t_packcommitflags() {
   packsetup; local out
   out=$(loop setup pack-commit --foreman 2>&1); [ $? -eq 2 ] || fail "pack-commit took --foreman: $out"
   ! grep -q 'every setup command' "$SRC/../commands/setup.md" || fail "setup.md adds its flags to every setup command"
-  [ "$(grep -c "to each run of step 1's setup command" "$SRC/../commands/setup.md")" -eq 3 ] \
+  [ "$(grep -c "to each run of step 1's setup command" "$SRC/../commands/setup.md")" -eq 4 ] \
     && grep -q '^`setup pack-commit` in step 3: it takes no other argument' "$SRC/../commands/setup.md" \
-    || fail "setup.md does not keep --foreman, --pin and --survey to step 1's setup command"
+    || fail "setup.md does not keep --foreman, --pin, --survey and the --size flags to step 1's setup command"
 }
 
 # Bug: a pack with a conflict is committed with its conflict marks, or a question is asked.

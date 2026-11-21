@@ -20,6 +20,13 @@ setup command. Show setup's line for it: setup tries the command and writes it o
 needs a wrapper script. Show setup's lines for the ready lint entries too: the entries and the `lint.policy` it wrote,
 the one line that names the complexity rules, and the line for a language with no ready entry.
 
+When `.conveyor/project.json` is not there, or has no `lint` field, also ask the user "Limit the length of files?" (the
+most lines a file may have / no), and with a limit, the git pathspecs of the files it reads and "Which folders do you
+leave out?" (folders / none), before step 1. Add `--size <lines>` or `--size no`, `--size-files <pathspec>` once per
+pathspec and `--size-skip <folder>` once per folder, each quoted for the shell, to each run of step 1's setup command.
+Show setup's line for the size entry: it names the exempt file `.conveyor/size-exempt.txt`, which step 3 commits
+with the pack.
+
 First install the requirements, then sign in, before step 1:
 
 - Run `bash "${CLAUDE_PLUGIN_ROOT}/conveyor/lib/requires.sh" install` and show its output. It installs each requirement
@@ -77,8 +84,8 @@ First install the requirements, then sign in, before step 1:
      the settings file, show its message and ask the same question again.
    - Any other failure: show its message, then go on to step 2, where doctor names what is missing and its fix.
 2. Run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" doctor` and show its output.
-3. When `bash "${CLAUDE_PLUGIN_ROOT}/conveyor/lib/requires.sh" run git status --porcelain -- .conveyor/project.json`
-   prints a line (the pack is not committed, or setup changed
+3. When `bash "${CLAUDE_PLUGIN_ROOT}/conveyor/lib/requires.sh" run git status --porcelain -- .conveyor/project.json .conveyor/size-exempt.txt`
+   prints a line (the pack or its exempt file is not committed, or setup changed
    it since its commit), run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" setup pack-commit`. When it exits 1 (the
    default branch is not checked out, or the pack has a conflict), show its message and ask nothing more about the
    pack. When it prints an `ask:` line, ask the user that question with AskUserQuestion ("Commit the Conveyor pack

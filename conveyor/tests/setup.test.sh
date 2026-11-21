@@ -566,3 +566,18 @@ t_setupreadyask() {
     && [ "$(cat "$S/ruff.toml")" = 'line-length = 100' ] \
     || fail "setup --lint-ready yes --lint-shared yes --lint 'exit 0' --lint-files '*.toml' did not write the ruff entry and both configs as lint.policy, and name Go: $(jq -c .lint "$S/.conveyor/project.json") $out"
 }
+# #1157. Bugs: after a yes to sizes, setup left a file already over the limit out of the exempt file (the first card
+# then fails on code it did not touch), named a file in a left-out folder, did not write the entry or put the exempt
+# file in lint.policy, or took --size-files and --size-skip with no limit. A whole setup run, as only it reads the answers:
+# one file over 3 lines, one under, and one over in vendor/, which is left out.
+t_setupsize() {
+  local X out; setupdone
+  printf '1\n2\n3\n4\n5\n' > "$S/big.txt"; printf '1\n' > "$S/small.txt"; mkdir -p "$S/vendor"; printf '1\n2\n3\n4\n5\n' > "$S/vendor/dep.txt"
+  git -C "$S" add big.txt small.txt vendor/dep.txt || fail "the fixture files could not be staged"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --size-files '*.txt' --size-skip vendor/ 2>&1); [ $? = 2 ] \
+    && grep -qF 'usage:' <<<"$out" || fail "setup --size-files with no --size was not refused as a wrong call: $out"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --size 3 --size-files '*.txt' --size-skip vendor/ 2>&1) \
+    && jq -e '.lint.commands == [{files: ["*.txt", ":(exclude)vendor/*"], size: {file: 3, exempt: ".conveyor/size-exempt.txt"}}] and .lint.policy == [".conveyor/size-exempt.txt"]' "$S/.conveyor/project.json" >/dev/null \
+    && [ "$(cat "$S/.conveyor/size-exempt.txt")" = big.txt ] \
+    || fail "setup --size 3 --size-files '*.txt' --size-skip vendor/ did not write the entry, the exempt file (only big.txt) and lint.policy: $(jq -c .lint "$S/.conveyor/project.json") exempt: $(cat "$S/.conveyor/size-exempt.txt" 2>&1) $out"
+}

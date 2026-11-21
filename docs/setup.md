@@ -197,6 +197,20 @@ When your project has files of a language with no ready entry, such as Go or Rus
 reads them, setup says what checks them. When a size entry in the pack's `lint.commands` reads them, only file length
 is measured. When no size entry reads them, nothing checks them. To check more, give your own command as `--lint`.
 
+When the pack has no `lint` field, setup also asks if you want a limit on the length of files, and which folders to
+leave out. The answer is `--size <lines>` (the most lines a file may have) or `--size no`. With a limit, give
+`--size-files <pathspec>` for the files it reads, one for each pathspec, and `--size-skip <folder>` for each folder to
+leave out, such as `vendor`. On a limit, setup writes:
+
+- A size entry in the pack's `lint.commands` ([The size entry](configuration.md#the-size-entry)). Each folder to leave
+  out is an `:(exclude)<folder>/*` pathspec of the entry, so no file under it is read.
+- The exempt file `.conveyor/size-exempt.txt`. It names each file that the entry reads and that is over the limit now,
+  so the limit stops only what grows past it. A file in a folder that you left out is not named. A line that the file
+  already has stays. Setup commits the file with the pack, when you say yes to committing it.
+- The exempt file in the pack's `lint.policy`, so that a card that changes it stops for your yes.
+
+When the pack already has a size entry, setup writes nothing for the limit.
+
 Setup asks these questions again on each run until the pack has a `lint` field.
 
 Setup also looks for a second route for the CLI of each role, the builder and the reviewer, when that CLI has no route
@@ -260,7 +274,7 @@ Then setup writes the pack, sets the project to follow the plugin's releases, in
 project to the host file, adds `/conveyor/state/` to `.git/info/exclude` so that git does not list the state folder,
 creates the labels the pack names and runs `conveyor.sh doctor`. When the pack, `.conveyor/project.json`, is not
 committed or setup changed it, setup shows you the change and asks "Commit the Conveyor pack (.conveyor/project.json)
-on <default branch> now?". On yes, it commits only that file on your default branch, in your main checkout, and
+on <default branch> now?". On yes, it commits only that file, and the exempt file of a size entry, on your default branch, in your main checkout, and
 pushes it when the Rules tab's **Push on landing** rule is On. Your other changes stay as they are. On no, the
 pack stays on this machine: cards read the pack from the default branch, so they do not get it until you commit it.
 When your checkout is on another branch, or the pack has a conflict, setup says so and does not ask. The Foreman asks

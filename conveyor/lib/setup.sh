@@ -48,6 +48,10 @@ PACK0='{labels: {built: "awaiting-deploy", followup: "conveyor-followup", type: 
 # config is asked of apart, --lint-shared, as lint policy (setupready()). A project with files of a language that has
 # no ready entry and no lint command of the pack on them is told what checks them (lintother()): only their length
 # when a size entry covers them, else nothing.
+# The question "Limit the length of files?" (docs/setup.md) is asked by /conveyor-belt:setup, answered by --size <lines>
+# or --size no, with --size-files <pathspec> (one for each) and --size-skip <folder> (one for each, left out). On a
+# limit, setupsize() writes a size entry in the pack's lint.commands, the exempt file .conveyor/size-exempt.txt naming
+# each file the entry reads that is over the limit now, and that file in lint.policy.
 # Before the host file names the project, the control record is written when there is none, with new issues and every
 # open issue held (heldstart()).
 # With --foreman it then sets up Foreman mode (foreman/foreman.sh setup), which `conveyor.sh foreman` starts.
@@ -75,9 +79,9 @@ mpsinstalled() { jq -e --arg p "$MPS" '.plugins[$p] | type == "array" and length
 # project whose cards may change a lockfile needs in place of links to main's folders. Once the pack has either, the
 # question is not asked and a rerun changes neither.
 LOCKFILES=(package-lock.json npm-shrinkwrap.json yarn.lock pnpm-lock.yaml bun.lockb poetry.lock uv.lock Pipfile.lock Gemfile.lock Cargo.lock composer.lock Podfile.lock)
-SETUP_USAGE='setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--file-command yes|no] [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--lint <command> --lint-files <pathspec>...] [--lint-ready yes|no] [--lint-shared yes|no] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]'
+SETUP_USAGE='setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--file-command yes|no] [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--lint <command> --lint-files <pathspec>...] [--lint-ready yes|no] [--lint-shared yes|no] [--size <lines>|no] [--size-files <pathspec>]... [--size-skip <folder>]... [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]'
 setup() { # as SETUP_USAGE
-  local owner='' test='' prods=() need=() b p f have l n x fm='' pin='' sv='' fl='' rl='' br='' rr='' fr='' w first full c lk='' ws='' lf='' wsx='' dds=() lks tp='' tpa='' tn tl='' tla='' tma='' tmt='' tmw='' lc='' lfs=() lra='' lsa='' lro=''
+  local owner='' test='' prods=() need=() b p f have l n x fm='' pin='' sv='' fl='' rl='' br='' rr='' fr='' w first full c lk='' ws='' lf='' wsx='' dds=() lks tp='' tpa='' tn tl='' tla='' tma='' tmt='' tmw='' lc='' lfs=() lra='' lsa='' lro='' sz='' szf=() szs=()
   local -A keyarg=() pxarg=() pkarg=() rcli=() lg=() pxu=() ak=() akf=() pk=() pkf=() as=() kd=(); local clis=()
   local ask='--survey <yes or no: run a first test-speed survey now?>'
   while [ $# -gt 0 ]; do
@@ -94,6 +98,9 @@ setup() { # as SETUP_USAGE
       --worktree-setup) ws=${2-}; [ -n "$ws" ] || { set -- x; break; } ;;
       --lint) lc=${2-}; [ -n "$lc" ] || { set -- x; break; } ;;
       --lint-files) lfs+=("${2-}"); [ -n "${2-}" ] || { set -- x; break; } ;;
+      --size) sz=${2-}; [[ $sz =~ ^([1-9][0-9]*|no)$ ]] || { set -- x; break; } ;;
+      --size-files) szf+=("${2-}"); [ -n "${2-}" ] || { set -- x; break; } ;;
+      --size-skip) szs+=("${2-}"); [[ -n ${2-} && ${2-} != /* && ${2-} != *\** ]] || { set -- x; break; } ;;
       --lint-ready) lra=${2-}; [[ $lra == yes || $lra == no ]] || { set -- x; break; } ;;
       --lint-shared) lsa=${2-}; [[ $lsa == yes || $lsa == no ]] || { set -- x; break; } ;;
       --builder-route) br=${2-}; [[ $br =~ ^(subscription|fallback|proxy|api)$ ]] || { set -- x; break; } ;;
@@ -109,8 +116,11 @@ setup() { # as SETUP_USAGE
   done
   # --lint-files names the files of --lint's command only: given alone, it is a wrong call.
   [ -n "$lc" ] || [ ${#lfs[@]} = 0 ] || set -- x
+  # --size-files and --size-skip belong to --size <lines>: given with no limit, or with no, they are a wrong call.
+  { [ -n "$sz" ] && [ "$sz" != no ]; } || [ $((${#szf[@]} + ${#szs[@]})) = 0 ] || set -- x
   [ $# = 0 ] || { echo "usage: conveyor.sh $SETUP_USAGE" >&2; return 2; }
   [ -z "$lc" ] || [ ${#lfs[@]} -gt 0 ] || need+=("--lint-files <a git pathspec of the files the lint command reads> (one for each)")
+  [ -z "$sz" ] || [ "$sz" = no ] || [ ${#szf[@]} -gt 0 ] || need+=("--size-files <a git pathspec of the files that the size limit reads> (one for each)")
   # The two lanes are asked on every run, before anything is changed: there is no saved answer.
   [ -n "$fl" ] || need+=("--fast-lane <yes or no: make a fast lane, your own worktree for changes made by hand?>")
   [ -n "$rl" ] || need+=("--research-lane <yes or no: make a research lane, a read-only sandboxed worktree?>")
@@ -223,6 +233,10 @@ setup() { # as SETUP_USAGE
   fi
   if [ "$lra" = yes ] && [ -n "$lro" ] && [ "$lro" != '[]' ]; then setupready "$p" "$lro" "$lsa" || return 1; fi
   [ -z "$lc" ] || setuplint "$p" "$lc" "${lfs[@]}" || return 1
+  if [ -n "$sz" ] && [ "$sz" != no ]; then
+    for x in "${szs[@]}"; do szf+=(":(exclude)${x%/}/*"); done
+    setupsize "$p" "$sz" "${szf[@]}" || return 1
+  fi
   # Each run, so a size entry the pack has already is said too (lintother()).
   lintother "$MAIN" || return 1
   if [ "$tpa" = yes ] && [ -n "$tp" ]; then
@@ -318,21 +332,31 @@ heldstart() {
 # `conveyor.sh setup pack-commit [yes | no]`: the pack (.conveyor/project.json) committed on the default branch, in the
 # main checkout, when it is not committed or differs from its commit; /conveyor-belt:setup and the Foreman ask the owner
 # first, so the owner never types a git command. With no answer it commits nothing: it prints `ask: <the question>` and
-# the change, or `ok: the pack is committed` when there is nothing to commit. yes commits only the pack (other
-# changes in the checkout, staged or not, are left as they are), "Add the Conveyor pack" when the default branch has no
-# pack yet, else "Update the Conveyor pack", and pushes it to the pack's remote when the control record's rule "Push
+# the change, or `ok: the pack is committed` when there is nothing to commit. yes commits only the pack and the exempt
+# files of its size entries that are on disk or in the commit (lint.commands[].size.exempt; setupsize() writes one); other changes in the checkout,
+# staged or not, are left as they are. The commit is "Add the Conveyor pack" when the default branch has no
+# pack yet, else "Update the Conveyor pack"; it is pushed to the pack's remote when the control record's rule "Push
 # when a card lands" (rules.push) is on; no commits nothing and says the pack stays on this machine. With the default
 # branch not checked out, or a conflict in the pack, it says so, asks nothing and commits nothing (exit 1). A push
 # that takes more than PACK_PUSH seconds is stopped: the commit stays, and it says so (exit 1).
 # CONVEYOR_PACK_PUSH, when set, is used in place of the 30 s limit (the tests' seam).
 PACK_PUSH=${CONVEYOR_PACK_PUSH:-30}
 packcommit() {
-  local f=.conveyor/project.json st on msg out rc o p
+  local f=.conveyor/project.json st on msg out rc o p x
+  local -a fs
   [ $# -le 1 ] && [[ ${1-ask} =~ ^(ask|yes|no)$ ]] || { echo "usage: conveyor.sh setup pack-commit [yes | no]" >&2; return 2; }
-  st=$(git -C "$MAIN" status --porcelain -- "$f") || return 1
+  # The pack's size entries' exempt files go with it: a card reads them from main (lintsize()), so a pack committed
+  # without its exempt file would stop the cards on the files that setup named in it.
+  fs=("$f")
+  # An exempt file that is not on disk and not in the commit is left out: git add fails on a path it does not know.
+  while IFS= read -r x; do
+    [ -n "$x" ] || continue
+    if [ -e "$MAIN/$x" ] || git -C "$MAIN" cat-file -e "HEAD:$x" 2>/dev/null; then fs+=("$x"); fi
+  done < <(jq -r '.lint.commands[]? | .size.exempt // empty' "$MAIN/$f" 2>/dev/null)
+  st=$(git -C "$MAIN" status --porcelain -- "${fs[@]}") || return 1
   [ -n "$st" ] || { echo "ok: the pack is committed"; return 0; }
   # Before the pack is read (names): a pack with conflict marks in it fails its check.
-  [[ ${st:0:2} =~ ^(DD|AU|UD|UA|DU|AA|UU)$ ]] \
+  [[ $(git -C "$MAIN" status --porcelain -- "$f" | cut -c1-2) =~ ^(DD|AU|UD|UA|DU|AA|UU)$ ]] \
     && { echo "conveyor: $MAIN/$f has a conflict; resolve it, then run /conveyor-belt:setup again: the pack is not committed" >&2; return 1; }
   names || return 1
   on=$(git -C "$MAIN" symbolic-ref -q --short HEAD)
@@ -342,6 +366,7 @@ packcommit() {
       echo "ask: Commit the Conveyor pack ($f) on $BRANCH now?"
       if git -C "$MAIN" cat-file -e "HEAD:$f" 2>/dev/null; then git -C "$MAIN" --no-pager diff HEAD -- "$f"
       else git -C "$MAIN" --no-pager diff --no-index -- /dev/null "$f"; fi
+      [ ${#fs[@]} = 1 ] || echo "and the exempt files of its size entries: ${fs[*]:1}"
       return 0 ;;
     no)
       echo "conveyor: the pack is not committed: cards read the pack from $BRANCH, so it stays on this machine until it is committed"
@@ -349,9 +374,9 @@ packcommit() {
   esac
   git -C "$MAIN" cat-file -e "HEAD:$f" 2>/dev/null && msg='Update the Conveyor pack' || msg='Add the Conveyor pack'
   # A commit with a path commits that path alone (git commit --only): the index's other entries stay staged.
-  out=$(git -C "$MAIN" add -- "$f" 2>&1 && git -C "$MAIN" commit -q -m "$msg" -- "$f" 2>&1) \
+  out=$(git -C "$MAIN" add -- "${fs[@]}" 2>&1 && git -C "$MAIN" commit -q -m "$msg" -- "${fs[@]}" 2>&1) \
     || { echo "conveyor: the pack was not committed: $out" >&2; return 1; }
-  echo "conveyor: committed $f on $BRANCH: $msg ($(git -C "$MAIN" rev-parse --short HEAD))"
+  echo "conveyor: committed ${fs[*]} on $BRANCH: $msg ($(git -C "$MAIN" rev-parse --short HEAD))"
   if [ "$(ctl 2>/dev/null | jq -r '.rules.push')" = true ]; then
     # The push runs under PACK_PUSH seconds, in a process group of its own (timeout's) that is ended whole at the limit,
     # with no terminal prompt and no stdin. The project's pre-push hook can wait minutes for a test slot that the
@@ -458,6 +483,29 @@ setupready() {
   [ "$pol" = '[]' ] || echo "conveyor: wrote the pack's lint.policy: $(jq -r 'join(", ")' <<<"$pol"); a card that changes one stops for your yes"
   jq -r 'map(select(.entry.complexity) | "\(.tool) \(.entry.complexity | join(", "))") | select(. != [])
     | "conveyor: the rules that measure complexity, which the ready entries do not turn on: \(join("; ")); turn them on in the linter'"'"'s own config"' <<<"$o"
+}
+# The size limit's exempt file, and its place in lint.policy.
+SIZE_EXEMPT=.conveyor/size-exempt.txt
+# setupsize <commit> <limit> <pathspec>...: a size entry (the files, the limit and SIZE_EXEMPT) added to the pack's
+# lint.commands, SIZE_EXEMPT added to lint.policy, and SIZE_EXEMPT in the main checkout naming each file the entry
+# reads (a tracked file, or one not tracked and not ignored) that already has more lines than the limit, so the limit
+# stops only what grows past it. A file under a folder that a pathspec excludes is not read, so it is not named. A line already in SIZE_EXEMPT stays. A pack that already has a size entry is left as it is.
+setupsize() {
+  local p=$1 lim=$2 out rc f; shift 2
+  local -a fs
+  jq -e 'any(.lint.commands[]?; .size)' "$PACK" >/dev/null && { echo "conveyor: the pack's lint.commands already has a size entry"; return 0; }
+  mapfile -d '' -t fs < <(git -C "$MAIN" ls-files -z --cached --others --exclude-standard -- "$@") || { echo "conveyor: the files of $MAIN could not be listed for the size limit" >&2; return 1; }
+  rc=0; out=$([ ${#fs[@]} = 0 ] || lintsize "$MAIN" "$lim" '' "${fs[@]}" 2>&1) || rc=$?
+  [ "$rc" -le 1 ] || { echo "conveyor: the size limit was not written: ${out:-the lines could not be counted}" >&2; return 1; }
+  mkdir -p "$MAIN/.conveyor" && touch "$MAIN/$SIZE_EXEMPT" || { echo "conveyor: $SIZE_EXEMPT could not be written" >&2; return 1; }
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    grep -qxF -- "$f" "$MAIN/$SIZE_EXEMPT" || printf '%s\n' "$f" >> "$MAIN/$SIZE_EXEMPT"
+  done < <(sed 's/:[0-9]*: size [0-9]* lines, limit [0-9]*$//' <<<"$out")
+  jq --argjson l "$lim" --arg e "$SIZE_EXEMPT" --argjson fs "$(jq -nc '$ARGS.positional' --args "$@")" '.lint.commands = (.lint.commands // []) + [{files: $fs, size: {file: $l, exempt: $e}}]
+    | .lint.policy = (.lint.policy // [] | if index($e) then . else . + [$e] end)' "$PACK" > "$PACK.new" && pinreads "$p" "$PACK.new" && mv "$PACK.new" "$PACK" \
+    || { rm -f "$PACK.new"; echo "conveyor: the size entry could not be written in the pack's lint.commands" >&2; return 1; }
+  echo "conveyor: wrote a size entry in the pack's lint.commands: no file over $lim lines on $(printf '%s, ' "$@" | sed 's/, $//'); $SIZE_EXEMPT names the files that are over it now (the pack's commit takes it too), and is in the pack's lint.policy, so a card that changes it stops for your yes"
 }
 # lintlangs: the languages with no ready lint entry of the paths on stdin, one a line, as one list "Go, Rust".
 lintlangs() {
