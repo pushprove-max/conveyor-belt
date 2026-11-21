@@ -12,6 +12,13 @@ following the plugin's releases. When they hold `--survey`, ask the user "Run a 
 before step 1, and add `--survey yes` or `--survey no`, as answered, to each run of step 1's setup command. Add none of these to
 `setup pack-commit` in step 3: it takes no other argument.
 
+When `.conveyor/project.json` is not there, or has no `lint` field, ask the user "Which command lints the project, and
+which files does it read?" (a command and its git pathspecs / none) before step 1. With a command, add
+`--lint <command>` and `--lint-files <pathspec>`, once per pathspec, each quoted for the shell, to each run of step 1's
+setup command. Show setup's line for it: setup tries the command and writes it only when the result is `ok` or
+`findings: <n>`. For `missing`, `error` or `empty` the line says why it was not written; for `error`, it says the command
+needs a wrapper script.
+
 First install the requirements, then sign in, before step 1:
 
 - Run `bash "${CLAUDE_PLUGIN_ROOT}/conveyor/lib/requires.sh" install` and show its output. It installs each requirement

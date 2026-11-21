@@ -155,6 +155,19 @@ The question names the lockfiles it finds. In that case, give the install comman
 the build and the tests. Setup asks again on each run until the pack has `linkFromMain` or `worktree.setup`. It never
 changes them after that, so your own edits stay.
 
+When the pack has no `lint` field, setup asks for your project's own lint command and the files it reads
+([Lint](configuration.md#lint)). The answer is `--lint <command>` with `--lint-files <pathspec>`, one for each git
+pathspec. Setup tries the command once, as `conveyor.sh doctor` does, and shows the result:
+
+- `ok` or `findings: <n>`: setup writes the command in the pack's `lint.commands`.
+- `missing: <tool>`: the tool is not installed. Setup writes nothing. Install the tool, then run setup again.
+- `error: <first line>`: the command ends in a way that Conveyor cannot read. Setup writes nothing. Write a wrapper
+  script for it. The script ends 0 with no finding, 1 with finding lines (`<path>:<line>: <text>`), or 127 with the
+  first line `lint: missing <tool>`. Then give the script to setup as `--lint`.
+- `empty`: no tracked file matches `--lint-files`. Setup writes nothing.
+
+When the pack already has the command, setup does not try it again or write it again.
+
 Setup also looks for a second route for the CLI of each role, the builder and the reviewer, when that CLI has no route
 in the host file. For Codex, it looks only when Codex is installed. A second route is one of these:
 
@@ -238,7 +251,7 @@ changes a `CLAUDE.md` or an `AGENTS.md` that is already there.
 - `--pin` pins a new project to the commit of the plugin copy, in place of following releases (below).
 
 From a shell, in your project's checkout, the same steps are
-`conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--file-command yes|no] [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]`,
+`conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--file-command yes|no] [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--lint <command> --lint-files <pathspec>...] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]`,
 then `conveyor.sh doctor`.
 
 ## Following releases or main, or pinning a commit

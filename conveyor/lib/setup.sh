@@ -40,6 +40,9 @@ PACK0='{labels: {built: "awaiting-deploy", followup: "conveyor-followup", type: 
 # maptool()), naming the tool and what the run may cost (mapcost()); yes runs the whole suite under coverage and
 # writes the map (mapbuild()), no writes test.map off. With no such tool, setup says so: a card's tests are found by
 # name.
+# The question "Which command lints the project?" (docs/setup.md): asked by /conveyor-belt:setup while the pack has no
+# lint field, answered by --lint <command> with --lint-files <pathspec> (one for each). The command is probed as doctor
+# probes it (setuplint()) and written in the pack's lint.commands only when the probe says ok or findings.
 # Before the host file names the project, the control record is written when there is none, with new issues and every
 # open issue held (heldstart()).
 # With --foreman it then sets up Foreman mode (foreman/foreman.sh setup), which `conveyor.sh foreman` starts.
@@ -67,9 +70,9 @@ mpsinstalled() { jq -e --arg p "$MPS" '.plugins[$p] | type == "array" and length
 # project whose cards may change a lockfile needs in place of links to main's folders. Once the pack has either, the
 # question is not asked and a rerun changes neither.
 LOCKFILES=(package-lock.json npm-shrinkwrap.json yarn.lock pnpm-lock.yaml bun.lockb poetry.lock uv.lock Pipfile.lock Gemfile.lock Cargo.lock composer.lock Podfile.lock)
-SETUP_USAGE='setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--file-command yes|no] [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]'
+SETUP_USAGE='setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--file-command yes|no] [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--lint <command> --lint-files <pathspec>...] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]'
 setup() { # as SETUP_USAGE
-  local owner='' test='' prods=() need=() b p f have l n x fm='' pin='' sv='' fl='' rl='' br='' rr='' fr='' w first full c lk='' ws='' lf='' wsx='' dds=() lks tp='' tpa='' tn tl='' tla='' tma='' tmt='' tmw=''
+  local owner='' test='' prods=() need=() b p f have l n x fm='' pin='' sv='' fl='' rl='' br='' rr='' fr='' w first full c lk='' ws='' lf='' wsx='' dds=() lks tp='' tpa='' tn tl='' tla='' tma='' tmt='' tmw='' lc='' lfs=()
   local -A keyarg=() pxarg=() pkarg=() rcli=() lg=() pxu=() ak=() akf=() pk=() pkf=() as=() kd=(); local clis=()
   local ask='--survey <yes or no: run a first test-speed survey now?>'
   while [ $# -gt 0 ]; do
@@ -84,6 +87,8 @@ setup() { # as SETUP_USAGE
       --research-lane) rl=${2-}; [[ $rl == yes || $rl == no ]] || { set -- x; break; } ;;
       --link) lk=${2-}; [[ $lk == yes || $lk == no ]] || { set -- x; break; } ;;
       --worktree-setup) ws=${2-}; [ -n "$ws" ] || { set -- x; break; } ;;
+      --lint) lc=${2-}; [ -n "$lc" ] || { set -- x; break; } ;;
+      --lint-files) lfs+=("${2-}"); [ -n "${2-}" ] || { set -- x; break; } ;;
       --builder-route) br=${2-}; [[ $br =~ ^(subscription|fallback|proxy|api)$ ]] || { set -- x; break; } ;;
       --reviewer-route) rr=${2-}; [[ $rr =~ ^(subscription|fallback|proxy|api)$ ]] || { set -- x; break; } ;;
       --fallback-route) fr=${2-}; [[ $fr == proxy || $fr == api ]] || { set -- x; break; } ;;
@@ -95,7 +100,10 @@ setup() { # as SETUP_USAGE
       --codex-proxy-key) pkarg[codex]=${2-}; [ -n "${pkarg[codex]}" ] || { set -- x; break; } ;; *) set -- x; break ;; esac
     [ $# -ge 2 ] || { set -- x; break; }; shift 2
   done
+  # --lint-files names the files of --lint's command only: given alone, it is a wrong call.
+  [ -n "$lc" ] || [ ${#lfs[@]} = 0 ] || set -- x
   [ $# = 0 ] || { echo "usage: conveyor.sh $SETUP_USAGE" >&2; return 2; }
+  [ -z "$lc" ] || [ ${#lfs[@]} -gt 0 ] || need+=("--lint-files <a git pathspec of the files the lint command reads> (one for each)")
   # The two lanes are asked on every run, before anything is changed: there is no saved answer.
   [ -n "$fl" ] || need+=("--fast-lane <yes or no: make a fast lane, your own worktree for changes made by hand?>")
   [ -n "$rl" ] || need+=("--research-lane <yes or no: make a research lane, a read-only sandboxed worktree?>")
@@ -195,6 +203,7 @@ setup() { # as SETUP_USAGE
       || { rm -f "$PACK.new"; echo "conveyor: worktree.setup could not be written in the pack" >&2; return 1; }
     echo "conveyor: wrote the pack's worktree.setup: $ws, run in each card's worktree before its build and tests"
   fi
+  [ -z "$lc" ] || setuplint "$p" "$lc" "${lfs[@]}" || return 1
   if [ "$tpa" = yes ] && [ -n "$tp" ]; then
     tp=$(jq -c 'map(.p)' <<<"$tp") || return 1
     jq --argjson p "$tp" '.tests.patterns = $p' "$PACK" > "$PACK.new" && pinreads "$p" "$PACK.new" && mv "$PACK.new" "$PACK" \
@@ -370,6 +379,26 @@ pinreads() {
   o=$(bash "$VERSIONS/$1/conveyor/lib/pack.sh" check "$2" 2>&1) && return 0
   echo "conveyor: Conveyor commit $1, which the project runs, cannot read the pack with this field (${o//$'\n'/; }); move the project to a newer commit of the plugin (the pack's plugin), or leave the field out, then run setup again" >&2
   return 1
+}
+# setuplint <commit> <command> <pathspec>...: the project's own lint command (--lint, its files --lint-files), probed
+# as doctor probes it (lintprobe(), lib/lint.sh). The probe says ok or findings: the command is added at the end of
+# the pack's lint.commands. It says missing, error or empty: nothing is written, and setup says why and goes on. A
+# command the pack's lint.commands already runs is not probed or written again.
+setuplint() {
+  local p=$1 r=$2 c t o; shift 2
+  jq -e --arg r "$r" 'any(.lint.commands[]?; .run == $r)' "$PACK" >/dev/null && { echo "conveyor: the pack's lint.commands already has the lint command $r"; return 0; }
+  c=$(jq -cn --arg r "$r" '{files: $ARGS.positional, run: $r}' --args "$@") && t=$(mktemp -d) || return 1
+  o=$(lintprobe "$c" "$t"); rm -rf "$t"
+  case $o in
+    ok|findings:*)
+      jq --argjson c "$c" '.lint.commands = (.lint.commands // []) + [$c]' "$PACK" > "$PACK.new" && pinreads "$p" "$PACK.new" && mv "$PACK.new" "$PACK" \
+        || { rm -f "$PACK.new"; echo "conveyor: the lint command $r could not be written in the pack's lint.commands" >&2; return 1; }
+      echo "conveyor: wrote the lint command $r in the pack's lint.commands (the probe says $o)" ;;
+    missing:*) echo "conveyor: the lint command $r was not written: the probe says $o; install it, then run setup again" ;;
+    error:*) echo "conveyor: the lint command $r was not written: the probe says $o; it needs a wrapper script that ends 0 with no finding, 1 with finding lines (<path>:<line>: <text>) or 127 with the first line \`lint: missing <tool>\`: give that script to setup as --lint" ;;
+    empty) echo "conveyor: the lint command $r was not written: the probe says empty: no tracked file matches --lint-files $*" ;;
+    *) echo "conveyor: the lint command $r could not be probed${o:+: $o}" >&2; return 1 ;;
+  esac
 }
 # setuplane fast|research: the lane made by its own create (`conveyor.sh lane <lane> create`, re-runnable: a lane
 # already there is left as it is), its output passed on, with its `made the` line, there only when the lane is new,

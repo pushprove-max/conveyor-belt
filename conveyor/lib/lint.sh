@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # The lint check (docs/configuration.md, Lint): the pack's lint.commands, each run on the files of a change it reads,
 # and its result. Sourced, never run: by commands/lint.sh (conveyor.sh lint), commands/size.sh (lintsizelist),
-# commands/doctor.sh (lintdoctor), commands/retry.sh (lintrule) and lib/card.sh (the review and landing gates,
+# commands/doctor.sh (lintdoctor), commands/setup.sh (lintprobe), commands/retry.sh (lintrule) and lib/card.sh (the review and landing gates,
 # lintgate; lintwait, the gate for a waiting card, is called by settle() in lib/claim.sh, in a card's shell, and
 # lintbatch and lintleave, the gate for a batch, by batch() and rebatch()). It uses packget (lib/prompts.sh) and the
 # test slots (lib/slots.sh), sourced before it; lintratchet also uses depdirs (lib/push.sh) and CARDS (lib/paths.sh); lintgate
@@ -637,40 +637,48 @@ lintreport() { # <worktree> <base>
   return "$rc"
 }
 
-# doctor's probe of the pack's lint commands, one line each: a command with {files} run on one tracked file of the
-# main checkout that its `files` match, a command without {files} run as it is; `ok`, `findings: <n>`,
-# `missing: <tool>`, `error: <first line>` (or why, when it printed nothing or ran over the limit), or `empty` when no
-# tracked file matches its `files` (it is not called). A size entry (lintsize) is run on every tracked file it matches.
-lintdoctor() {
-  local l c n=0 t run rc r why f sz
+# The probe of one lint command <command json>, as doctor and setup run it, its result on one line: a command with
+# {files} run on one tracked file of the main checkout that its `files` match, a command without {files} run as it is;
+# `ok`, `findings: <n>`, `missing: <tool>`, `error: <first line>` (or why, when it printed nothing or ran over the
+# limit), or `empty` when no tracked file matches its `files` (it is not called). A size entry (lintsize) is run on
+# every tracked file it matches. <scratch folder> holds its files: `paths`, the main checkout's tracked paths, is made
+# when it is not there.
+lintprobe() { # <command json> <scratch folder>
+  local c=$1 t=$2 run rc r why f sz l
   local -a fs one
+  [ -e "$t/paths" ] || git -C "$MAIN" ls-files -z > "$t/paths" || : > "$t/paths"
+  run=$(jq -r "$LINTRUN" <<<"$c"); sz=$(jq -r '.size // empty | "\(.file | floor)\t\(.exempt)"' <<<"$c")
+  mapfile -d '' -t fs < <(jq -j '.files[] + "\u0000"' <<<"$c")
+  git -C "$MAIN" ls-files -z -- "${fs[@]}" > "$t/m" 2>/dev/null || : > "$t/m"
+  mapfile -d '' -t -n 1 one < "$t/m"
+  if [ ${#one[@]} = 0 ]; then echo empty; return 0; fi
+  if [ -n "$sz" ]; then
+    mapfile -d '' -t one < "$t/m"
+    LINT_OVER=''; rc=0; lintsize "$MAIN" "${sz%%$'\t'*}" "${sz#*$'\t'}" "${one[@]}" > "$t/out" 2>&1 || rc=$?
+  else
+    [[ $run == *'{files}'* ]] || one=()
+    rc=0; lintcall "$MAIN" '' "$run" "$t/out" "${one[@]}" || rc=$?
+  fi
+  lintfindings "$t/out" "$t/paths" > "$t/found" || : > "$t/found"
+  f=$(wc -l < "$t/found" | tr -d ' ')
+  IFS=$'\t' read -r r why < <(lintresult "$rc" "$t/out" "$f" "$LINT_OVER")
+  case $r in
+    pass) echo ok ;;
+    findings) echo "findings: $f" ;;
+    skipped) echo "missing: $why" ;;
+    *) [ -n "$LINT_OVER" ] || { IFS= read -r l < "$t/out" && [ -n "${l%$'\r'}" ] && why=${l%$'\r'}; }
+       echo "error: $why" ;;
+  esac
+}
+
+# doctor's probe of the pack's lint commands (lintprobe), one line each: `lint command <n> (<run>): <result>`.
+lintdoctor() {
+  local l c n=0 t
   packget lint l || { echo "missing: a readable lint field in the pack $PACK; fix: correct it"; return 1; }
   [ -n "$l" ] || return 0
   t=$(mktemp -d) || return 1
-  git -C "$MAIN" ls-files -z > "$t/paths" || : > "$t/paths"
   while IFS= read -r c; do
-    n=$((n + 1)); run=$(jq -r "$LINTRUN" <<<"$c"); sz=$(jq -r '.size // empty | "\(.file | floor)\t\(.exempt)"' <<<"$c")
-    mapfile -d '' -t fs < <(jq -j '.files[] + "\u0000"' <<<"$c")
-    git -C "$MAIN" ls-files -z -- "${fs[@]}" > "$t/m" 2>/dev/null || : > "$t/m"
-    mapfile -d '' -t -n 1 one < "$t/m"
-    if [ ${#one[@]} = 0 ]; then echo "lint command $n ($run): empty"; continue; fi
-    if [ -n "$sz" ]; then
-      mapfile -d '' -t one < "$t/m"
-      LINT_OVER=''; rc=0; lintsize "$MAIN" "${sz%%$'\t'*}" "${sz#*$'\t'}" "${one[@]}" > "$t/out" 2>&1 || rc=$?
-    else
-      [[ $run == *'{files}'* ]] || one=()
-      rc=0; lintcall "$MAIN" '' "$run" "$t/out" "${one[@]}" || rc=$?
-    fi
-    lintfindings "$t/out" "$t/paths" > "$t/found" || : > "$t/found"
-    f=$(wc -l < "$t/found" | tr -d ' ')
-    IFS=$'\t' read -r r why < <(lintresult "$rc" "$t/out" "$f" "$LINT_OVER")
-    case $r in
-      pass) echo "lint command $n ($run): ok" ;;
-      findings) echo "lint command $n ($run): findings: $f" ;;
-      skipped) echo "lint command $n ($run): missing: $why" ;;
-      *) [ -n "$LINT_OVER" ] || { IFS= read -r l < "$t/out" && [ -n "${l%$'\r'}" ] && why=${l%$'\r'}; }
-         echo "lint command $n ($run): error: $why" ;;
-    esac
+    n=$((n + 1)); echo "lint command $n ($(jq -r "$LINTRUN" <<<"$c")): $(lintprobe "$c" "$t")"
   done < <(jq -c '.commands // [] | .[]' <<<"$l")
   rm -rf "$t"
 }

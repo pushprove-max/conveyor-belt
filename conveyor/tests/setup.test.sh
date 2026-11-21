@@ -416,3 +416,42 @@ t_setupheldkept() {
   out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no 2>&1) || fail "setup run again exited non-zero: $out"
   [ "$(cat "$st/control.json")" = "$was" ] || fail "setup run again changed the control record: $was, now $(cat "$st/control.json")"
 }
+# #1155. Bug: setup had no way to write the project's own lint command, so the owner had to edit the pack by hand.
+# --lint with its --lint-files writes it (the probe says ok); --lint alone asks for the files before anything is
+# changed, and --lint-files alone is a wrong call. The probe's other results: t_setuplintprobe.
+t_setuplint() {
+  local X out was; setupdone
+  was=$(setupstate); out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --lint true 2>&1); [ $? = 2 ] && [ "$(setupstate)" = "$was" ] \
+    && grep -qF -- '--lint-files <a git pathspec of the files the lint command reads> (one for each)' <<<"$out" \
+    || fail "setup --lint true with no --lint-files did not ask for the files before changing anything: $out"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --lint-files '*.sh' 2>&1); [ $? = 2 ] && grep -q '^usage: .*--lint <command> --lint-files <pathspec>' <<<"$out" \
+    || fail "setup --lint-files '*.sh' with no --lint was not refused as a wrong call: $out"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --lint true --lint-files '*.sh' 2>&1) \
+    && jq -e '.lint.commands == [{files: ["*.sh"], run: "true"}]' "$S/.conveyor/project.json" >/dev/null \
+    && grep -qxF "conveyor: wrote the lint command true in the pack's lint.commands (the probe says ok)" <<<"$out" \
+    || fail "setup --lint true --lint-files '*.sh' did not write the command: $(jq -c .lint "$S/.conveyor/project.json") $out"
+}
+# #1155. Bug: setup would write a lint command that cannot run (its tool missing, an end the lint check cannot read,
+# no file to read), which then fails or skips every card's lint check. setuplint probes each as doctor does: ok and
+# findings are written, missing, error and empty are not, each saying why (error: a wrapper is needed); a command the
+# pack runs already is not written twice. setuplint is called alone; pinreads, the project's install reading the new
+# pack, is stubbed, as this main has no install (t_setuplint runs the real one).
+t_setuplintprobe() {
+  local r
+  setup '[]'
+  ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
+    . "$SRC/conveyor.sh" state-dir > /dev/null && . "$SRC/lib/slots.sh" && . "$SRC/lib/prompts.sh" && . "$SRC/lib/push.sh" && . "$SRC/lib/lint.sh" && . "$SRC/lib/setup.sh" || exit 9
+    pinreads() { :; }
+    for r in 'exit 0' 'echo a.txt:1: E1 x; exit 1' 'echo lint: missing ruff; exit 127' 'echo the config is bad; echo more; exit 2'; do setuplint c "$r" '*.txt' || exit 8; done
+    setuplint c true '*.py' && setuplint c 'exit 0' '*.txt' ) > "$T/$CASE/out" 2>&1; r=$?
+  [ "$r" != 9 ] || fail "the engine could not be loaded: $(cat "$T/$CASE/out")"
+  [ "$r" = 0 ] && [ "$(cat "$T/$CASE/out")" = "$(printf '%s\n' "conveyor: wrote the lint command exit 0 in the pack's lint.commands (the probe says ok)" \
+    "conveyor: wrote the lint command echo a.txt:1: E1 x; exit 1 in the pack's lint.commands (the probe says findings: 1)" \
+    'conveyor: the lint command echo lint: missing ruff; exit 127 was not written: the probe says missing: ruff; install it, then run setup again' \
+    'conveyor: the lint command echo the config is bad; echo more; exit 2 was not written: the probe says error: the config is bad; it needs a wrapper script that ends 0 with no finding, 1 with finding lines (<path>:<line>: <text>) or 127 with the first line `lint: missing <tool>`: give that script to setup as --lint' \
+    'conveyor: the lint command true was not written: the probe says empty: no tracked file matches --lint-files *.py' \
+    "conveyor: the pack's lint.commands already has the lint command exit 0")" ] \
+    || fail "setuplint's lines (exit $r) are not ok and findings written, missing, error and empty refused with why, a repeat kept once: $(cat "$T/$CASE/out")"
+  jq -e '.lint.commands == [{files: ["*.txt"], run: "exit 0"}, {files: ["*.txt"], run: "echo a.txt:1: E1 x; exit 1"}]' "$R/.conveyor/project.json" >/dev/null \
+    || fail "setuplint did not write ok and findings alone, once each: $(jq -c .lint "$R/.conveyor/project.json")"
+}
