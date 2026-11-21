@@ -13,7 +13,7 @@ const text = (el) => el.textContent.replace(/\s+/g, ' ').trim();
 const q = (w, s) => page(w).querySelector(s);
 const rows = (el) => Array.from(el.querySelectorAll('tbody tr'), (r) => Array.from(r.children, text));
 const stats = (w) => Array.from(page(w).querySelectorAll('.bench-stat'), (s) => Array.from(s.children, text));
-const box = (w, title) => Array.from(page(w).querySelectorAll('.bench-box')).find((b) => b.querySelector('.bench-h') && b.querySelector('.bench-h').textContent === title);
+const box = (w, title) => Array.from(page(w).querySelectorAll('.bench-box')).find((b) => b.querySelector('.bench-h') && b.querySelector('.bench-h').firstChild.textContent.trim() === title);
 async function opened(set, p) {
   const w = boot({ tab: 'bench' });
   BH.open(w, set);
@@ -121,7 +121,7 @@ test('Scoreboard, 2 runs of 1 task: nothing can be told yet, and what the result
   assert.deepEqual(heads(w), ['Verdict on the tasks you have', 'Leaderboard', 'Hidden tests and patch quality', 'Next run to make', 'Run history (2 runs, 0 archived)']);
   assert.ok(q(w, '.bench-verdict').classList.contains('bench-verdict-quiet'));
   assert.equal(text(q(w, '.bench-vv')), 'Nothing can be told yet. Every arm resolved the one task it ran.');
-  assert.equal(text(q(w, '.bench-vw')), `Your 2 runs each ran 1 task, ${BH.FEW_TASK}. With 1 task, only a total break shows: the 95% range of an arm that resolves it is 21% to 100%. To tell Conveyor from Claude alone, run 50 tasks or more.`);
+  assert.equal(text(q(w, '.bench-vw')), `Your 2 runs each ran 1 task, ${BH.FEW_TASK}. With 1 task, only a total break shows: the 95% range of every arm is 21% to 100%. To tell Conveyor from Claude alone, run 50 tasks or more.`);
   assert.deepEqual(stats(w), [['2', 'Runs', 'both 1 task'], ['1 of 500', 'Tasks with a result', '0.2% of the set'], ['$0.49', 'Conveyor: cost of its task', '3 sessions, 77k tokens'],
     ['4 of 15', 'Arms checked and ready', '10 never checked']]);
   const [lead] = page(w).querySelectorAll('.bench-t');
@@ -136,9 +136,9 @@ test('Scoreboard, 2 runs of 1 task: nothing can be told yet, and what the result
   BH.go(w, 'score');
   assert.deepEqual(rows(page(w).querySelectorAll('.bench-t')[1]), [['Conveyor, Codex builds v1.7.0', '+1 −1', '+7', '2'], ['Claude + Ponytail', 'not kept', 'not kept', 'not kept'], ['Claude, then a review', '+1 −1', 'none', '1'],
     ['Claude alone', '+1 −1', 'none', '1'], ['Conveyor v1.7.0', '+1 −1', '+7', '2']], 'the lines come from the patches kept; a patch not kept is not kept, never 0');
-  assert.match(text(q(w, '.bench-callout-warn')), /these results keep resolved yes or no and the patch, not the harness's report\. Their hidden tests, lint clean and proves the fix are not kept\./);
+  assert.match(text(q(w, '.bench-callout-warn')), /^Every arm passed the task's hidden tests: that is all the results keep\. The run records resolved yes or no and the patch, and the harness report with each fail-to-pass and pass-to-pass test is removed\./);
   assert.deepEqual(Array.from(box(w, 'Next run to make').querySelectorAll('li'), text), ['Is Conveyor better than Claude alone? 50 tasks, 2 arms: about $112 and 20.0 h of machine time. Shows a 10-task difference.',
-    'Does v1.7.0 work at all? 5 tasks, Conveyor only: about $9.60 and 1.8 h of machine time.', '10 arms were never checked. A check costs 1 small task each.']);
+    'Does v1.7.0 work at all? 5 tasks, Conveyor only: about $9.60 and 1.8 h of machine time.', 'The other 10 arms were never checked. A check costs 1 small task each.']);
 });
 
 // Bug it guards: nothing told whether a new engine version made Conveyor better or worse. Versions has the mockup's
@@ -153,7 +153,7 @@ test('Versions, 6 versions of the Conveyor arm: the verdict, the trend, the tabl
   assert.equal(text(q(w, '.bench-answers')), 'This page answers: Did a change to the engine make Conveyor better or worse? Two sources: benchmark runs of each version, and the cards the belt builds anyway (the drift watch, at no cost).');
   assert.deepEqual(heads(w), ['v1.9.0 against v1.8.0', 'Resolve rate by engine version', 'Drift watch: the belt\'s own cards', 'Tasks that flipped from v1.8.0 to v1.9.0']);
   assert.equal(text(q(w, '.bench-vv')), 'No regression. v1.9.0 resolves 37 of 50, 2 more than v1.8.0: inside the noise of 10 tasks.');
-  assert.equal(text(q(w, '.bench-vw')), 'On the belt, cards on engine 9999999: minutes waited a card moved better (4 min against 12 min), past the usual range. The other figures stayed in their usual range.');
+  assert.equal(text(q(w, '.bench-vw')), 'On the belt, cards on v1.9.0 waited less (4 min against 12 min a card): that moved past its usual range. The other figures stayed in their usual range.');
   const trend = q(w, 'svg.bench-trend');
   assert.deepEqual(Array.from(trend.querySelectorAll('text'), (t) => t.textContent).filter((t) => /^v|Claude/.test(t)), ['v1.4.0', 'v1.5.0', 'v1.6.0', 'v1.7.0', 'v1.8.0', 'v1.9.0', 'Claude alone']);
   assert.equal(trend.querySelectorAll('circle.bench-vdot').length, 6);
@@ -194,7 +194,7 @@ test('Versions, 2 runs of 1 task: no version can be compared yet, the drift watc
   const w = await opened(BH.few(), 'versions');
   assert.deepEqual(heads(w), ['Versions with results', 'What this page will show']);
   assert.equal(text(q(w, '.bench-vv')), 'Only v1.7.0 has a result, on 1 task. No version can be compared yet.');
-  assert.equal(text(q(w, '.bench-vw')), 'The drift watch needs no benchmark run: it reads the cards your belt builds. Today it has not run. Run conveyor.sh bench drift on the build machine.');
+  assert.equal(text(q(w, '.bench-vw')), 'The drift watch needs no benchmark run: it reads the cards your belt builds. Today it has not run. Run conveyor.sh bench drift on the build machine, or let the Board run it after each release.');
   assert.equal(page(w).querySelectorAll('.bench-list li').length, 3);
 });
 

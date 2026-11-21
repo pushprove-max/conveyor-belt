@@ -90,9 +90,9 @@
   function leaderboard(L) {
     const s = K.box('Leaderboard', `Arms in the same tier are not told apart by ${L.n} tasks. The bar is the 95% range of the resolve rate.`);
     s.append(K.table(['Tier', 'Arm', ['Resolved', 'r'], 'Resolve rate, 95% range', ['Clean', 'r', 'Resolved, lint clean, at most twice the size of the reference fix, and no file the reference fix leaves alone'],
-      ['Broke tests', 'r', 'Tasks where the patch broke tests that worked before'], ['$ / resolved', 'r'], ['Min', 'r'], ['Fired', 'r']], L.rows.map((r, i) => leaderRow(r, i, L)), 'bench-leader',
+      ['Broke tests', 'r', 'Tasks where the patch broke tests that passed before'], ['$ / resolved', 'r'], ['Min', 'r'], ['Fired', 'r']], L.rows.map((r, i) => leaderRow(r, i, L)), 'bench-leader',
     (tr, i) => { const r = L.rows[i]; tr.dataset.cmp = r.a.arm; tr.classList.add('bench-click'); tr.addEventListener('click', () => toCompare(L, r)); }),
-    K.note(`Click an arm to compare it with ${L.conv.a.label}. "From tokens": the agent arm reports tokens but no usage by model, so its cost is its tokens at the model's list price, an estimate. An arm that did not fire fails the task.`));
+    K.note(`Click an arm to compare it with Conveyor. "From tokens": the agent arm reports tokens but no usage by model, so its cost is its tokens at the model's list price, an estimate. An arm that did not fire fails the task.`));
     return s;
   }
   // The value chart: each arm's resolve rate (with its 95% range) against its cost a task, and the line of the arms
@@ -156,11 +156,15 @@
     const old = L.rows.filter((r) => r.cls === null).map((r) => r.a.label);
     return old.length ? K.note(`${old.join(', ')}: results kept before the grade's report was, so ${what} ${old.length === 1 ? 'shows' : 'show'} not kept.`) : '';
   }
+  // A chip in a card's heading, with its tip.
+  function chipTitled(word, tip) { const c = K.chip(word, 'warn'); c.title = tip; return c; }
   function hidden(L) {
-    const s = K.box('Hidden tests', 'What the official harness found in each arm\'s patch, task by task. A task resolves only when every FAIL_TO_PASS test succeeds and no PASS_TO_PASS test breaks.');
+    // The chip shows only while an arm's results lack the grader's report.
+    const s = K.box(['Hidden tests', ...(L.rows.some((r) => r.cls === null) ? [' ', chipTitled('needs the grader\'s report kept', 'Some results keep only resolved yes or no')] : [])],
+      'What the official harness found in each arm\'s patch, task by task. A task resolves only when every fail-to-pass test passes and no pass-to-pass test breaks.');
     const leg = h('div', 'bench-legend');
     CLASSES.forEach(([k, l]) => leg.append(K.add(h('span'), [h('i', `bench-c-${k}`), l])));
-    s.append(...L.rows.map(classBar), leg, K.table(['Arm', ['FAIL_TO_PASS passed', 'r'], ['PASS_TO_PASS broken', 'r'], ['Partial fixes', 'r']], L.rows.map((r) => testsRow(r, L))),
+    s.append(...L.rows.map(classBar), leg, K.table(['Arm', ['Fail-to-pass passed', 'r'], ['Pass-to-pass broken', 'r'], ['Partial fixes', 'r']], L.rows.map((r) => testsRow(r, L))),
       K.note('"Fixed, but broke other tests" is the costliest failure: the issue looks fixed, and something else stops working. Conveyor\'s test step runs the touched tests, so it breaks fewer.'), missing(L, 'its hidden tests'));
     return s;
   }
@@ -170,13 +174,15 @@
   const qcell = (v, good, low) => ({ v: v === null ? K.NOT_KEPT : K.chip(K.pct(v), (low ? v <= good : v >= good) ? 'ok' : 'warn'), c: 'r' });
   const sizeOf = (c) => { const m = K.obj(c.measures); return m && K.num(m.size) !== null ? m.size : null; };
   function quality(L) {
-    const s = K.box('Patch quality', 'The resolved tasks only: a patch can resolve the task and still be a poor change.');
+    // The chip shows only while an arm's resolved results lack the reference fix's size.
+    const s = K.box(['Patch quality', ...(L.rows.some((r) => K.kept(r.f.ok, sizeOf) === null) ? [' ', chipTitled('needs the reference fix\'s size kept', 'Some results did not keep the reference fix\'s size')] : [])],
+      'The resolved tasks only: a patch can pass the hidden tests and still be a poor change.');
     s.append(K.table(['Arm', ['Clean', 'r'], ['Lint clean', 'r'], ['≤ 2× ref', 'r', 'At most twice the size of the reference fix'], ['Strays', 'r', 'Changes a file the reference fix does not touch'],
-      ['Proves fix', 'r', 'Adds a test that fails on the base commit and succeeds with the patch']], L.rows.map((r) => [K.armSaid(r.a),
+      ['Proves fix', 'r', 'Adds a test that fails on the base commit and passes with the patch']], L.rows.map((r) => [K.armSaid(r.a),
       { v: r.clean === null ? K.NOT_KEPT : [h('b', null, String(r.clean)), `/${r.k}`], c: 'r' }, qcell(rate(r, boolOf('lintClean')), 0.9),
       qcell(rate(r, (c) => (sizeOf(c) === null ? null : sizeOf(c) <= 2)), 0.75), qcell(rate(r, boolOf('strays')), 0.15, true), qcell(rate(r, boolOf('provesFix')), 0.5)])),
-    K.kv([['Clean', 'Resolved, lint clean, at most twice the size of the reference fix, and no file the reference fix leaves alone.'], ['Lint clean', 'No new ruff finding in the Python files the patch changes.'],
-      ['Strays', 'The patch changes a file the reference fix does not touch.'], ['Proves the fix', 'The patch adds a test that fails on the base commit and succeeds with the patch.']]), missing(L, 'its patch quality'));
+    K.kv([['Clean', 'Resolved, lint clean, at most twice the size of the reference fix, and no file the reference fix leaves alone.'], ['Lint clean', 'No new pyflakes finding (ruff, rules F) in the Python files the patch changes.'],
+      ['Strays', 'The patch changes a file the reference fix does not touch.'], ['Proves the fix', 'The patch adds a test that fails on the base commit and passes with the patch.']]), missing(L, 'its patch quality'));
     return s;
   }
 
@@ -280,7 +286,7 @@
     box.addEventListener('change', () => { K.B.sel = box.checked ? K.B.sel.concat(r.id) : K.B.sel.filter((x) => x !== r.id); K.draw(); });
     if (typeof r.archived === 'string') st.push(' ', K.chip('archived', 'quiet'));
     return [box, { v: r.id, c: 'mono' }, cols.length ? `${K.colName(cols[0])}${cols.length > 1 ? ` · ${cols.length} arms` : ''}` : 'no arm', { v: String(K.num(r.n) || 0), c: 'r' }, st,
-      K.B.ctx.when(r.started), { v: `${K.usd(k.usd)}${k.state === 'estimate' ? ' estimate' : k.state === 'partial' ? ', part unknown' : ''}`, c: 'r' }];
+      K.B.ctx.when(r.started), { v: K.usd(k.usd), c: 'r' }];
   }
   function historyFold() {
     const runs = K.allRuns(), arch = runs.filter((r) => typeof r.archived === 'string').length;
@@ -292,7 +298,11 @@
       bar.append(h('strong', null, `${K.plural(picked.length, 'run')} selected`), ...K.runActs(picked), K.button('Clear', 'btn-quiet btn-sm', 'sel-clear', 'Clear the selection', () => { K.B.sel = []; K.draw(); }));
       d.append(bar);
     }
-    d.append(K.table(['', 'Run', 'What ran', ['Tasks', 'r'], 'State', 'Started', ['Cost', 'r']], runs.map(historyRow), 'bench-runs', (tr, i) => { tr.dataset.run = runs[i].id; }),
+    const t = K.table(['', 'Run', 'What ran', ['Tasks', 'r'], 'State', 'Started', ['Cost', 'r']], runs.map(historyRow), 'bench-runs', (tr, i) => { tr.dataset.run = runs[i].id; }), all = h('input');
+    all.type = 'checkbox'; all.checked = runs.length > 0 && picked.length === runs.length; all.dataset.act = 'pick-all'; all.setAttribute('aria-label', 'Select all');
+    all.addEventListener('change', () => { K.B.sel = all.checked ? runs.map((r) => r.id) : []; K.draw(); });
+    t.querySelector('th').append(all);
+    d.append(t,
       K.note('Tick runs to archive, restore or delete them. An archived run is in no figure, Compare or plan. Results of the same arm, version and task are reused, never run again.'));
     return d;
   }
@@ -307,7 +317,10 @@
     const what = all ? `Every arm resolved the ${n === 1 ? 'one task' : 'tasks'} it ran.` : rows.every((r) => !r.k) ? 'No arm resolved a task.' : `${rows.filter((r) => r.k).length} of ${rows.length} arms resolved a task.`;
     const one = st.ids.length === 1 ? [', ', h('span', 'mono', st.ids[0])] : [];
     const ran = `Your ${K.plural(runs.length, 'run')} ${runs.length > 1 && ns.length === 1 ? 'each ' : ''}ran ${ns.length === 1 ? K.plural(n, 'task') : `${Math.min(...ns)} to ${n} tasks`}`;
-    return K.verdict('quiet', 'Verdict on the tasks you have', `Nothing can be told yet. ${what}`, [ran, ...one, `. With ${K.plural(n, 'task')}, only a total break shows: the 95% range of an arm that resolves ${n === 1 ? 'it' : 'them all'} is ${K.pct(K.wilson(n, n)[0])} to 100%. To tell Conveyor from Claude alone, run 50 tasks or more.`]);
+    // Each arm's own 95% range, from what it resolved: the same for every arm only when they all resolved alike.
+    const rg = rows.map((r) => K.wilson(r.k, r.n)), lo = Math.min(...rg.map((x) => x[0])), hi = Math.max(...rg.map((x) => x[1])), alike = rg.every((x) => x[0] === rg[0][0] && x[1] === rg[0][1]);
+    const range = alike ? `the 95% range of every arm is ${K.pct(lo)} to ${K.pct(hi)}` : `the 95% ranges of the arms run from ${K.pct(lo)} to ${K.pct(hi)}`;
+    return K.verdict('quiet', 'Verdict on the tasks you have', `Nothing can be told yet. ${what}`, [ran, ...one, `. With ${K.plural(n, 'task')}, only a total break shows: ${range}. To tell Conveyor from Claude alone, run 50 tasks or more.`]);
   }
   function fewStats(st, rows) {
     const ns = Array.from(new Set(st.runs.map((r) => K.num(r.n) || 0))), R = st.runs.length, c = convOf(rows);
@@ -324,17 +337,32 @@
     return [r.a.label, { v: a === null ? K.NOT_KEPT : [h('span', 'bench-plus', `+${a}`), ' ', h('span', 'bench-minus', `−${d}`)], c: 'r' },
       { v: t === null ? K.NOT_KEPT : t ? `+${t}` : h('span', 'bench-muted', 'none'), c: 'r' }, { v: f === null ? K.NOT_KEPT : String(f), c: 'r' }];
   }
+  // What the kept patches show: that every arm made the same change, and which arm alone added a test. Said only for arms
+  // whose patches are all kept.
+  const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+  // The code files of an arm's patches with their line counts, as one text; null when a patch is not kept (a result that
+  // keeps only the totals, not the files, cannot say the files are the same).
+  const codeOf = (r) => (r.f.cs.every((c) => Array.isArray(c.patch)) ? JSON.stringify(r.f.cs.flatMap((c) => c.patch.filter((f) => !K.isTest(String(f.path))).map((f) => [f.path, f.added, f.removed])).sort()) : null);
+  function fewPatchNote(rows) {
+    const ls = rows.map((r) => { const v = r.f.cs.map(K.linesOf); return v.some((l) => l === null) ? null : { add: K.sum(v.map((l) => l.add)), del: K.sum(v.map((l) => l.del)), test: K.sum(v.map((l) => l.test)) }; });
+    const say = ['Real, from the patches the results keep.'], code = rows.map(codeOf), same = rows.length > 1 && ls.every((l) => l && l.add === ls[0].add && l.del === ls[0].del) && code.every((x) => x !== null && x === code[0]), t =rows.filter((r, i) => ls[i] && ls[i].test), some = ls.every(Boolean) && t.length > 0 && t.length < rows.length;
+    if (same) say.push(`All ${WORDS[rows.length] || rows.length} made the same ${ls[0].add === 1 && ls[0].del === 1 ? 'one-line' : `+${ls[0].add} −${ls[0].del}`} fix${some ? ';' : '.'}`);
+    if (some) say.push(`${same ? 'only' : 'Only'} ${t.map((r) => r.a.label).join(', ').replace(/, ([^,]*)$/, ' and $1')} added a test${t.length === 1 ? ` (${ls[rows.indexOf(t[0])].test} lines)` : ''}.`);
+    return say.join(' ');
+  }
   function fewHidden(rows) {
     const old = rows.filter((r) => r.cls === null).map((r) => r.a.label);
     if (!old.length) return K.callout(`The harness's report is kept for every arm: ${rows.map((r) => `${r.a.label} ${r.of('resolved')} resolved, ${r.of('broke')} broke tests`).join('; ')}.`, 'ok');
-    return K.callout(`${old.join(', ')}: these results keep resolved yes or no and the patch, not the harness's report. Their hidden tests, lint clean and proves the fix are not kept. A run on this engine keeps them.`, 'warn');
+    const won = rows.filter((r) => r.k === r.n).length, n = Math.max(...rows.map((r) => r.n), 0);
+    return K.callout(`${won === rows.length ? 'Every arm' : `${won} of ${rows.length} arms`} passed the ${n === 1 ? "task's" : "tasks'"} hidden tests: that is all the results keep. The run records resolved yes or no and the patch, `
+      + 'and the harness report with each fail-to-pass and pass-to-pass test is removed. To show these panels, the engine must keep that report. Size, strays and lint can be read from the patches the results already keep.', 'warn');
   }
   function fewBoard(rows) {
     const n = Math.max(...rows.map((r) => r.n), 0), s = K.box('Leaderboard', n === 1 ? 'One task each. The ranges show how little one task says.' : `${K.plural(n, 'task')} at most each. The ranges show how little so few tasks say.`);
     s.append(K.table(['Arm', ['Resolved', 'r'], 'Resolve rate, 95% range', ['Cost', 'r'], ['Tokens', 'r'], ['Minutes', 'r']], rows.map((r) => [K.armSaid(r.a), { v: `${r.k}/${r.n}`, c: 'r' }, K.ciBar(r.k, r.n, r.a.s),
       { v: `${K.usd(r.f.cost)}${r.f.est ? ' estimate' : ''}`, c: 'r' }, { v: K.kTok(r.f.tokens), c: 'r' }, { v: r.f.wall === null ? K.NOT_KEPT : String(r.f.wall), c: 'r' }]), 'bench-leader'),
-    K.note('"Not priced": the arm\'s results keep no usage that can be priced. "Estimate": an agent arm\'s tokens at its model\'s list price.'), h('h3', 'bench-h', 'Hidden tests and patch quality'),
-    K.table(['Arm', ['Code lines', 'r'], ['Test lines', 'r'], ['Files', 'r']], rows.map(fewLines)), h('p', 'bench-note', 'From the patches the results keep.'), fewHidden(rows));
+    K.note('"Not priced": agent arms report no usage by model today, so their cost is not priced.'), h('h3', 'bench-h', 'Hidden tests and patch quality'),
+    K.table(['Arm', ['Code lines', 'r'], ['Test lines', 'r'], ['Files', 'r']], rows.map(fewLines)), h('p', 'bench-note', fewPatchNote(rows)), fewHidden(rows));
     return s;
   }
   function plainCost(names, n) {
@@ -349,7 +377,7 @@
     const said = (c) => (c ? `about ${K.usd(c.usd)} and ${K.fmtMin(c.min)} of machine time` : 'cost not known');
     ul.append(K.add(h('li'), [h('b', null, 'Is Conveyor better than Claude alone?'), ` 50 tasks, 2 arms: ${said(b)}. Shows a ${K.noiseSaid(50)}-task difference.`]),
       K.add(h('li'), [h('b', null, `Does ${ver} work at all?`), ` 5 tasks, Conveyor only: ${said(w)}.`]));
-    if (never) ul.append(h('li', null, `${K.plural(never, 'arm')} ${never === 1 ? 'was' : 'were'} never checked. A check costs 1 small task each.`));
+    if (never) ul.append(h('li', null, `The other ${K.plural(never, 'arm')} ${never === 1 ? 'was' : 'were'} never checked. A check costs 1 small task each.`));
     s.append(ul, K.button('Plan a run', 'btn-primary', 'plan-next', 'Plan a run', () => K.go('plan')));
     return s;
   }

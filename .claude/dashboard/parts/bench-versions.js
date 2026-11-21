@@ -16,20 +16,22 @@
   // ---- the drift watch (`conveyor.sh bench drift`, the snapshot's drift) ----
   // Each figure: its label, its key, what follows its number, and whether up is better. A figure moved when the two means are more
   // than two standard errors apart (each group's spread a card; Landed is the share of cards that landed).
-  const DRIFT = [['Landed', 'landed', '%', true], ['Tokens a card', 'tokens', 'k', false], ['Minutes a card', 'minutes', ' min', false], ['Reviews to land', 'reviews', '', false],
-    ['Fix rounds a card', 'fixes', '', false], ['Minutes waited a card', 'waits', ' min', false]];
+  // The belt line says what a moved figure did: its words when it fell and when it rose, and what its number counts.
+  const DRIFT = [['Landed', 'landed', '%', true, ['landed less', 'landed more'], ''], ['Tokens a card', 'tokens', 'k', false, ['used fewer tokens', 'used more tokens'], ' a card'],
+    ['Minutes a card', 'minutes', ' min', false, ['took less time', 'took more time'], ' a card'], ['Reviews to land', 'reviews', '', false, ['needed fewer reviews', 'needed more reviews'], ' a card'],
+    ['Fix rounds a card', 'fixes', '', false, ['needed fewer fix rounds', 'needed more fix rounds'], ' a card'], ['Minutes waited a card', 'waits', ' min', false, ['waited less', 'waited more'], ' a card']];
   function meanOf(g, k) {
     const n = K.num(k === 'reviews' ? g.landed : g.cards), v = k === 'landed' ? (n && K.num(g.landed) !== null ? g.landed / n : null) : K.num(g[k]);
     const sd = k === 'landed' ? (v === null ? null : Math.sqrt(v * (1 - v))) : K.num((K.obj(g.spread) || {})[k]);
     return { n, v, se: !n || sd === null ? null : sd / Math.sqrt(n) };
   }
-  function driftRow([label, k, after, up], dr) {
+  function driftRow([label, k, after, up, said, per], dr) {
     const b = meanOf(K.obj(dr.before) || {}, k), a = meanOf(K.obj(dr.after) || {}, k), small = K.list(dr.small).some((x) => x === 'before' || x === 'after');
     const ok = !small && b.v !== null && a.v !== null && b.se !== null && a.se !== null, se = ok ? Math.sqrt(b.se * b.se + a.se * a.se) : null;
     const isMoved = ok && Math.abs(a.v - b.v) > 2 * se, better = (a.v > b.v) === up;
     const word = small ? ['Too few cards', 'quiet'] : !ok ? ['Not read', 'quiet'] : isMoved ? (better ? ['Moved, better', 'ok'] : ['Moved, worse', 'bad']) : ['In its usual range', 'quiet'];
     const fmt = (x) => (x.v === null ? '–' : k === 'landed' ? `${Math.round(x.v * 100)}${after}` : k === 'tokens' ? `${Math.round(x.v / 1000)}${after}` : `${Math.round(x.v * 10) / 10}${after}`);
-    return { label, k, word, b, a, se, fmt, isMoved, better, judged: ok };
+    return { label, k, word, b, a, se, fmt, isMoved, better, judged: ok, did: ok ? `${said[a.v > b.v ? 1 : 0]} (${fmt(a)} against ${fmt(b)}${per})` : '' };
   }
   function spark(r) {
     const el = K.svg('svg', { viewBox: '0 0 100 14', preserveAspectRatio: 'none', class: 'bench-svg bench-spark', 'aria-hidden': 'true' });
@@ -40,11 +42,16 @@
     return el;
   }
   const sha = (g) => String((K.obj(g) || {}).engine || '').slice(0, 7);
+  // A group of cards by the engine version it ended on (the version whose commit it is), else by the commit.
+  function groupName(g) {
+    const e = String((K.obj(g) || {}).engine || ''), v = e && K.list(K.benchOf().versions).find((x) => K.obj(x) && x.name !== 'main' && x.commit === e);
+    return v ? v.name : `engine ${sha(g)}`;
+  }
   function driftBox() {
     const dr = K.obj(K.B.d && K.B.d.drift);
     if (!dr) return null;
     const b = K.obj(dr.before) || {}, a = K.obj(dr.after) || {};
-    const s = K.box('Drift watch: the belt\'s own cards', `Cards that ended on the engine commit before (engine ${sha(b)}, ${K.plural(K.num(b.cards) || 0, 'card')}) and on engine ${sha(a)} (${K.plural(K.num(a.cards) || 0, 'card')}).`, 'bench-drift');
+    const s = K.box('Drift watch: the belt\'s own cards', `Cards that ended on the engine commit before (${K.plural(K.num(b.cards) || 0, 'card')}) and on ${groupName(a)} (${K.plural(K.num(a.cards) || 0, 'card')}).`, 'bench-drift');
     DRIFT.map((x) => driftRow(x, dr)).forEach((r) => {
       const row = h('div', 'bench-drow'), top = h('div', 'bench-row bench-space'), line = h('div', 'bench-row bench-nowrap');
       row.dataset.figure = r.k;
@@ -64,8 +71,7 @@
     // A figure not judged (too few cards, or not read) stayed in no range: the line says so, never "every figure".
     if (!judged.length) return K.list(dr.small).length ? 'On the belt, a group has fewer than 5 cards: no figure is judged yet.' : 'On the belt, no figure could be read.';
     if (!moved.length) return judged.length === rows.length ? 'On the belt, every figure stayed in its usual range.' : `On the belt, ${judged.length} of ${rows.length} figures could be judged, and each stayed in its usual range.`;
-    const each = moved.map((r) => `${r.label.toLowerCase()} moved ${r.better ? 'better' : 'worse'} (${r.fmt(r.a)} against ${r.fmt(r.b)})`).join(', ');
-    return `On the belt, cards on engine ${sha(dr.after)}: ${each}, past the usual range. The other figures ${judged.length === rows.length ? '' : 'judged '}stayed in their usual range.`;
+    return `On the belt, cards on ${groupName(dr.after)} ${moved.map((r) => r.did).join(', ')}: ${moved.length === 1 ? 'that moved past its usual range' : 'those moved past their usual range'}. The other figures ${judged.length === rows.length ? '' : 'judged '}stayed in their usual range.`;
   }
 
   // ---- Versions ----
@@ -98,12 +104,17 @@
     const st = d.steps.filter((x) => typeof x === 'string');
     return st.length ? st.join(', ') : 'none';
   }
+  // The day a version's first run started, without its year, in the Date set in Customize ("11/09" or "09/11").
+  function dayOf(t) {
+    const ms = Date.parse(t || '');
+    return Number.isNaN(ms) ? 'not read' : K.B.ctx.stamp(ms, { date: true, time: false }).slice(0, 5);
+  }
   function versionRow(v, i, vs) {
     const p = vs[i - 1], m = p ? K.moved(p, v) : null;
     const c = !p ? h('span', 'bench-muted', 'first') : !m.shared ? h('span', 'bench-muted', 'no task both ran')
       : m.few ? K.chip(`${m.d >= 0 ? '+' : ''}${m.d} of ${m.shared}, too few tasks`, 'quiet') : K.chip(`${m.pts >= 0 ? '+' : ''}${m.pts} pts${m.sig ? (m.d > 0 ? ', better' : ', worse') : ', noise'}`, m.sig ? (m.d > 0 ? 'ok' : 'bad') : 'quiet');
     if (m && m.shared) c.title =`On the ${K.plural(m.shared, 'task')} both versions ran: ${m.kv} against ${m.kp}`;
-    return [{ v: v.v, c: 'mono' }, v.date ? K.B.ctx.when(v.date) : 'not read', { v: String(v.n), c: 'r' }, { v: String(v.k), c: 'r' }, c, { v: p ? stepsChanged(p, v) : '—', c: 'bench-muted' }];
+    return [{ v: v.v, c: 'mono' }, dayOf(v.date), { v: String(v.n), c: 'r' }, { v: String(v.k), c: 'r' }, c, { v: p ? stepsChanged(p, v) : '—', c: 'bench-muted' }];
   }
   function trendBox(vs) {
     const s = K.box('Resolve rate by engine version', 'The shaded band is the 95% range of each version\'s rate. Bands that overlap are not told apart.');
@@ -188,7 +199,7 @@
     if (wait) return [K.answers(Q), K.reading(`the run ${wait.wait.id}`, wait.wait.o)];
     if (vs.length < 2) {
       const v = vs[0], drift = driftBox();
-      const w = drift ? 'The drift watch needs no benchmark run: it reads the cards your belt builds.' : ['The drift watch needs no benchmark run: it reads the cards your belt builds. Today it has not run. Run ', h('span', 'mono', 'conveyor.sh bench drift'), ' on the build machine.'];
+      const w = drift ? 'The drift watch needs no benchmark run: it reads the cards your belt builds.' : ['The drift watch needs no benchmark run: it reads the cards your belt builds. Today it has not run. Run ', h('span', 'mono', 'conveyor.sh bench drift'), ' on the build machine, or let the Board run it after each release.'];
       return [K.answers(Q), K.verdict('quiet', 'Versions with results', `${v ? `Only ${v.v} has a result, on ${K.plural(v.n, 'task')}.` : 'No version has a result yet.'} No version can be compared yet.`, w), drift, willShow()].filter(Boolean);
     }
     return [K.answers(Q, 'Two sources: benchmark runs of each version, and the cards the belt builds anyway (the drift watch, at no cost).'), versionVerdict(vs),
@@ -241,8 +252,10 @@
   function boxOf(label, v, tone) { const d = h('div', `bench-four bench-four-${tone}`); d.append(h('div', 'bench-four-n', String(v)), h('div', 'bench-small', label)); return d; }
   function pair(label, a, b, fmt, A, Bs) {
     const d = h('div', 'bench-pair'), m = Math.max(K.num(a) || 0, K.num(b) || 0) || 1;
+    // Each bar is named by the first 2 words of its arm's label, the whole label when those would name both alike.
+    const short = (s) => s.label.split(' ').slice(0, 2).join(' '), same = short(A) === short(Bs), name = (s) => (same ? s.label : short(s));
     d.append(h('div', 'bench-muted bench-small', label));
-    [[A, a, 'bench-fill'], [Bs, b, 'bench-fill-warn']].forEach(([s, v, cls]) => d.append(K.add(h('div', 'bench-row bench-nowrap'), [h('span', 'bench-muted bench-pl', s.label), K.bar((K.num(v) || 0) / m, cls), h('b', 'bench-pv', fmt(v))])));
+    [[A, a, 'bench-fill'], [Bs, b, 'bench-fill-warn']].forEach(([s, v, cls]) => d.append(K.add(h('div', 'bench-row bench-nowrap'), [h('span', 'bench-muted bench-pl', name(s)), K.bar((K.num(v) || 0) / m, cls), h('b', 'bench-pv', fmt(v))])));
     return d;
   }
   function costBox(A, Bs, fa, fb, n, d) {
@@ -271,7 +284,7 @@
       K.add(h('div', 'bench-row'), [K.button('Ask for the readings', 'btn-quiet btn-sm', 'cmp-read', 'Ask for the model\'s reading of each flipped task', () => readDiff(K.B.cmp, A.key, Bs.key, 'compare')), K.B.cmp.ask ? K.saidAt(K.B.cmp.ask) : '']),
       K.table(['Task', 'Resolved by', 'First step apart', 'Why, in short'], fl.map(([id, w, l]) => [{ v: id, c: 'mono' }, K.armSaid(w), whereApart(id, w, l), { v: readingOf(id, A, Bs), c: 'bench-small bench-muted' }]), 'bench-flips',
         (tr, i) => { tr.dataset.task = fl[i][0]; tr.classList.add('bench-click'); tr.addEventListener('click', () => K.openTask(fl[i][0])); }),
-      K.note('"Why, in short" is one model call\'s reading of the facts of both runs: the model\'s reading, not a fact.'));
+      K.note('"Why, in short" is one model call\'s reading of the facts of both runs, and is labelled as such on the Board.'));
     return s;
   }
   function fewCompare(A, Bs, ids, fa, fb) {

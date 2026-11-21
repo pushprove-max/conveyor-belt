@@ -171,10 +171,10 @@
     if (w) d.append(add(h('div', 'bench-vw'), w));
     return d;
   }
-  // A card of the page: its heading, the line under it, then what is appended to it.
+  // A card of the page: its heading (a text, or a text and a chip), the line under it, then what is appended to it.
   function box(title, sub, cls) {
     const s = h('section', `bench-box${cls ? ` ${cls}` : ''}`);
-    if (title) s.append(h('h3', 'bench-h', title));
+    if (title) s.append(add(h('h3', 'bench-h'), title));
     if (sub) s.append(add(h('p', 'bench-hsub'), sub));
     return s;
   }
@@ -462,7 +462,7 @@
     return nav;
   }
   const K = { B, PAGES, NOT_KEPT, num, list, obj, plural, pct, usd, fmtMin, kTok, wilson, noise, noised, noiseSaid, noisePct, told, median, mean, kept, sum,
-    said, graded, costOf, costSum, apart, lossOf, testsOf, testsSaid, linesOf, isConveyor, colName, verOf, paint, h, chip, button, add,
+    said, graded, costOf, costSum, apart, lossOf, testsOf, testsSaid, linesOf, isTest, isConveyor, colName, verOf, paint, h, chip, button, add,
     answers, verdict, box, grid, stat, note, callout, dot, armSaid, table, fold, kv, bar, ciBar, svg, say, saidAt, go, openTask, live, readHist,
     readRun, hist, allRuns, runsOf, armsOf, colsOf, keysOf, benchOf, setSize, reading, studyOf, armOf, figsOf, versionsOf, moved, send,
     stopRun, runActs, runTools, RUNS_SAID, stateOf, elapsed, draw: () => draw() };

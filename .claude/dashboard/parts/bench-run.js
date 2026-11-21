@@ -3,7 +3,7 @@
 // verdict (on time, on budget, the usage guard), 4 figures, the grid of tasks by arm with the step of the working cell,
 // the score so far with its ranges, the event tail and Stop; with no run going, the last run. Task: one task across every
 // arm (its verdict, each arm's result, minutes, hidden tests and note), the Conveyor card's steps as a timeline (width is
-// time), its reviews folded, the task across the Conveyor arm's runs and its facts. Task map: every task of the set
+// time), its reviews folded, the task across the Conveyor arm's runs, its facts and its buttons. Task map: every task of the set
 // (history's order) by repository, one square each, coloured by how many arms resolve it or by one arm's result. Part of
 // panels/bench.js, which asks for it by name (DASH_APP.use) and gives it its kit (K).
 (() => {
@@ -11,6 +11,11 @@
   let K;
   const h = (...a) => K.h(...a);
   const cap = (s) => s.replace(/^./, (c) => c.toUpperCase());
+  // A time with its date, in the Time and Date set in Customize ("11/20/2026, 3:04 PM").
+  function stampOf(t) {
+    const ms = Date.parse(t || '');
+    return Number.isNaN(ms) ? K.B.ctx.when(t) : K.B.ctx.stamp(ms, { date: true });
+  }
 
   // ---- Live run ----
   // What a run is planned to cost and take: each arm's usual sessions at its session's price, and its minutes, for the
@@ -58,7 +63,7 @@
     return K.grid('4', K.stat(`${p.done}/${p.T}`, 'Task runs done', K.bar(p.T ? p.done / p.T : 0)),
       K.stat(K.fmtMin(p.eta), 'Left, at this pace', K.chip(ends ? `ends about ${K.B.ctx.clock(ends)}` : 'no task done yet', 'quiet')),
       K.stat(K.usd(p.spent), 'Spent so far', K.chip(p.est.usd && p.spent !== null ? `${K.pct(p.spent / p.est.usd)} of the estimate` : 'no estimate', p.onBudget === false ? 'warn' : 'ok')),
-      K.stat(String(notRun), 'Not run', K.chip(notRun ? 'image, sandbox or grade failed · tried again next run' : 'none', notRun ? 'warn' : 'quiet')));
+      K.stat(String(notRun), 'Not run', K.chip(notRun ? 'image or repository fetch failed, or patch not read · tried again next run' : 'none', notRun ? 'warn' : 'quiet')));
   }
   const CELL = { yes: ['bench-g-ok', ''], no: ['bench-g-bad', ''], nr: ['bench-g-nr', 'not run'] };
   function cellOf(c, r) {
@@ -114,6 +119,11 @@
       K.add(h('div', 'bench-row'), [K.stopRun(r.id, typeof r.stopping === 'string'), h('span', 'bench-note', 'Keeps the finished tasks.')]), K.saidAt(`stop-${r.id}`)]);
     return [liveVerdict(r, cols, p), liveStats(cols, p), K.grid('main', grid, side), K.runTools([K.allRuns().find((x) => x.id === r.id) || r])];
   }
+  function lastLine(r, The, word, took) {
+    if (r.state === 'refused') return `${The} run did not start. It was asked for ${stampOf(r.started)}.`;
+    if (!r.ended) return `${The} run is ${word}. It started ${stampOf(r.started)}.`;
+    return `${The} run ended ${stampOf(r.ended)}, after ${took !== null && took < 90 ? K.plural(Math.round(took), 'minute') : K.fmtMin(took)}.`;
+  }
   function lastRun(data) {
     const r = data.run, cols = K.paint(K.colsOf(r).map((c) => ({ ...c }))), n = K.num(r.n) || 0, tasks = K.list(data.tasks).filter(K.obj), took = K.elapsed(r), [word] = K.stateOf(r);
     const all = cols.filter((c) => c.resolved === n && n).length, ran = Math.max(0, ...cols.map((c) => K.num(c.done) || 0)), refused = r.state === 'refused';
@@ -121,7 +131,7 @@
     // A run opened by name (the Start receipt) may not be the last one, and another run may go: it says "This run", not
     // "The last run", and its title is its id, not "No run goes now".
     const asked = Boolean(K.B.runId), The = asked ? 'This' : 'The last';
-    const v = refused ? `${The} run did not start. It was asked for ${K.B.ctx.when(r.started)}.` : r.ended ? `${The} run ended ${K.B.ctx.when(r.ended)}, after ${K.fmtMin(took)}.` : `${The} run is ${word}. It started ${K.B.ctx.when(r.started)}.`;
+    const v = lastLine(r, The, word, took);
     // A cell with no result was never graded: it says why (not started, stopped), never unresolved.
     const one = (c) => {
       const x = tasks.length === 1 ? K.list(tasks[0].cells).find((y) => K.obj(y) && y.arm === c.arm) : null, k = K.said(x);
@@ -179,7 +189,7 @@
     }), 'bench-arms'));
     return s;
   }
-  const SWIM = { build: 'bench-s6', review: 'bench-s1', fix: 'bench-s2', rebase: 'bench-s2', test: 'bench-s3', landed: 'bench-s3', blocked: 'bench-fill-bad' };
+  const SWIM = { split: 'bench-s7', build: 'bench-s6', review: 'bench-s1', fix: 'bench-s2', rebase: 'bench-s2', test: 'bench-s3', landed: 'bench-s3', blocked: 'bench-fill-bad' };
   function stepLabel(s) {
     const t = K.obj(s.tokens), tok = t ? (K.num(t.claude) || 0) + (K.num(t.codex) || 0) : 0, more = [s.model, tok ? `${K.kTok(tok)} tok` : null].filter(Boolean);
     const word = s.step === 'landed' ? 'land' : s.step;
@@ -206,7 +216,7 @@
     const f = K.fold(`review-${id}`, 'The review, in full');
     reviews.forEach((s, i) => f.append(h('p', 'bench-small', `Review ${i + 1}: ${s.result || 'no verdict kept'}${s.tail || s.reason ? `. ${String(s.tail || s.reason)}` : '. No finding is kept for a review that said GO.'}`)));
     if (!reviews.length) f.append(h('p', 'bench-small', 'No review is kept for this task.'));
-    return [h('h3', 'bench-h', 'Conveyor\'s card, step by step'), h('p', 'bench-hsub', `From the run ${(a.from.get(id) || a.run).id} (${a.label}). ${sw.timed ? 'Width is time.' : 'The step times are not kept: each step has the same width.'}`), sw.d, f];
+    return [h('h3', 'bench-h', 'Conveyor\'s card, step by step'), h('p', 'bench-hsub', `From the real run ${(a.from.get(id) || a.run).id} (${a.label}). ${sw.timed ? 'Width is time.' : 'The step times are not kept: each step has the same width.'}`), sw.d, f];
   }
   // This task in each run of the Conveyor arm read (the newest 12 runs with one), oldest first.
   function overTime(id) {
@@ -225,13 +235,21 @@
   function facts(id, arms, n, few) {
     const c = arms.map((a) => a.cells.get(id)).find((x) => K.obj(x && x.ref)), code = c && K.obj(c.ref.code), t = arms.map((a) => K.testsOf(a.cells.get(id))).find(Boolean), m = arms.length;
     return K.kv([['Repository', repoOf(id)], ['Difficulty', `${few ? 'not told yet' : n >= 0.8 * m ? 'easy' : n >= 0.4 * m ? 'medium' : 'hard'} (resolved by ${n} of ${m} arms)`],
-      ['Reference fix', code ? `${K.plural(K.num(code.files) || 0, 'file')}, +${K.num(code.added) || 0} −${K.num(code.removed) || 0}` : K.NOT_KEPT],
+      ['Patch size', code ? `${K.plural(K.num(code.files) || 0, 'file')}, +${K.num(code.added) || 0} −${K.num(code.removed) || 0}` : K.NOT_KEPT],
+      // The results keep no size of the task's image, so the figure is not kept.
+      ['Task image', K.NOT_KEPT],
       ['Hidden tests', t ? `${t[1]} FAIL_TO_PASS, ${t[3]} PASS_TO_PASS` : K.NOT_KEPT]]);
   }
-  function patches(id, arms) {
-    const f = K.fold(`patch-${id}`, 'Open the patch');
-    arms.forEach((a) => { const p = a.cells.get(id).patch; f.append(K.add(h('p', 'bench-small'), [h('b', null, a.label), `: ${Array.isArray(p) ? (p.length ? p.map((x) => `${x.path} +${x.added} −${x.removed}`).join(', ') : 'empty') : K.NOT_KEPT}`])); });
-    return f;
+  // The task's tools: Open the patch shows each arm's patch (kept open through a redraw). The engine serves no task's log
+  // to the Board and runs the first tasks of the pinned order, never one task alone, so those two buttons say so.
+  function tools(id, arms) {
+    const key = `patch-${id}`, open = K.B.folds.has(key), row = h('div', 'bench-row bench-tools'), out = [row];
+    const off = (text, act, why) => { const b = K.button(text, '', act, text, () => {}); b.disabled = true; b.title = why; return b; };
+    row.append(K.button('Open the patch', '', 'open-patch', 'Open the patch', () => { if (open) K.B.folds.delete(key); else K.B.folds.add(key); K.draw(); }),
+      off('Open the logs', 'open-logs', 'The engine does not serve a task\'s log to the Board yet.'), off('Run this task again', 'run-again', 'A run takes the first tasks of the pinned order: one task cannot be run alone yet.'));
+    row.firstChild.setAttribute('aria-expanded', String(open));
+    if (open) arms.forEach((a) => { const p = a.cells.get(id).patch; out.push(K.add(h('p', 'bench-small'), [h('b', null, a.label), `: ${Array.isArray(p) ? (p.length ? p.map((x) => `${x.path} +${x.added} −${x.removed}`).join(', ') : 'empty') : K.NOT_KEPT}`])); });
+    return out;
   }
   function task() {
     const top = K.answers('What happened on one task, arm by arm, and is the task itself the problem?');
@@ -250,7 +268,7 @@
     const v = K.verdict(few ? 'quiet' : n === m && m ? 'ok' : n === 0 ? 'bad' : 'warn', `${repoOf(id)} · ${id}`, title || id, `${n} of ${m} arms resolve it. ${what}`);
     if (!m) return [top, v];
     const left = K.add(eachArm(id, arms), cardSteps(id, arms));
-    const right = K.add(K.box('This task over time', 'Each dot is one run of the Conveyor arm on this task.'), [overTime(id), facts(id, arms, n, few), patches(id, arms)]);
+    const right = K.add(K.box('This task over time', 'Each dot is one run of the Conveyor arm on this task.'), [overTime(id), facts(id, arms, n, few), ...tools(id, arms)]);
     return [top, v, K.grid('main', left, right)];
   }
 
@@ -294,7 +312,7 @@
     const ran = st.ids.filter((id) => st.arms.some((a) => K.graded(a.cells.get(id)))), none = ran.filter((id) => !st.arms.some((a) => K.said(a.cells.get(id)) === 'yes'));
     const reps = new Map(); ids.forEach((id) => reps.set(repoOf(id), (reps.get(repoOf(id)) || 0) + 1));
     const [big, bn] = Array.from(reps.entries()).sort((a, b) => b[1] - a[1])[0] || ['', 0];
-    const lean = big ? `${big} is ${K.pct(bn / ids.length)} of the set, so a run of the first ${K.plural(Math.max(st.n, 1), 'task')} leans on ${big}.` : '';
+    const lean = big ? `${cap(big)} is ${K.pct(bn / ids.length)} of the set, so a run of the first ${K.plural(Math.max(st.n, 1), 'task')} leans on ${cap(big)}.` : '';
     // With fewer than 3 tasks every arm graded (the Scoreboard's few), no task is told hard or easy yet.
     const w = st.n < 3 ? `Nothing can be told yet of where an arm wins or loses. ${lean}`.trim() : `${lean} The hard tasks are where a new version can gain the most.`.trim();
     if (!K.B.by || (K.B.by !== 'all' && !st.arms.some((a) => a.arm === K.B.by))) K.B.by = 'all';

@@ -13,7 +13,7 @@ const text = (el) => el.textContent.replace(/\s+/g, ' ').trim();
 const q = (w, s) => page(w).querySelector(s);
 const rows = (el) => Array.from(el.querySelectorAll('tbody tr'), (r) => Array.from(r.children, text));
 const stats = (w) => Array.from(page(w).querySelectorAll('.bench-stat'), (s) => Array.from(s.children, text));
-const box = (w, title) => Array.from(page(w).querySelectorAll('.bench-box')).find((b) => b.querySelector('.bench-h') && b.querySelector('.bench-h').textContent === title);
+const box = (w, title) => Array.from(page(w).querySelectorAll('.bench-box')).find((b) => b.querySelector('.bench-h') && b.querySelector('.bench-h').firstChild.textContent.trim() === title);
 const fours = (w) => Array.from(page(w).querySelectorAll('.bench-four'), (b) => [b.lastChild.textContent, Number(b.firstChild.textContent)]);
 const kv = (el) => Array.from(el.querySelectorAll('dt'), (d) => [d.textContent, text(d.nextElementSibling)]);
 const pick = async (w, a, v) => { const s = act(bp(w), a); s.value = v; s.dispatchEvent(new w.Event('change')); await settle(); await settle(); };
@@ -58,7 +58,7 @@ test('Compare, Conveyor against Claude alone on 50 tasks: the verdict, the four 
   await settle(); await settle();
   assert.deepEqual(rows(q(w, '.bench-flips')).slice(0, 3).map((r) => [r[0], r[3]]), [[TASKS[25], 'The review caught a missed case, and the fix round handled it.'],
     [TASKS[26], 'not of the result shown (a run again)'], [TASKS[27], 'not of the result shown (a run again)']]);
-  assert.match(text(box(w, 'Where they differ').querySelector('.bench-note')), /the model's reading, not a fact/);
+  assert.match(text(box(w, 'Where they differ').querySelector('.bench-note')), /is one model call's reading of the facts of both runs, and is labelled as such on the Board\.$/);
   page(w).querySelector(`.bench-flips tr[data-task="${TASKS[25]}"]`).click();
   await settle();
   assert.equal(pages(w).find(([, c]) => c === 'page')[0], 'Task');
@@ -225,7 +225,7 @@ test('Live run: a task an arm did not run is left out for every arm, so all are 
 test('Live run, 2 runs of 1 task and none going: the last run, each arm on its task, and its task to open', async () => {
   const w = await opened(BH.few(), 'run');
   assert.deepEqual(heads(w), ['No run goes now', BH.FEW1]);
-  assert.match(text(q(w, '.bench-vv')), /^The last run ended .+, after 9 min\.$/);
+  assert.match(text(q(w, '.bench-vv')), /^The last run ended \d{2}\/\d{2}\/\d{4}, \d{1,2}:\d{2} [AP]M, after 9 minutes\.$/);
   assert.equal(text(q(w, '.bench-vw')), 'It ran 1 task with 4 arms. All 4 resolved it.');
   assert.deepEqual(rows(q(w, '.bench-t')), [['Conveyor, Codex builds v1.7.0', 'resolved', '3', '81k', '3.2', '$0.50'], ['Claude + Ponytail', 'resolved', '2', '64k', '0.9', 'not priced'],
     ['Claude, then a review', 'resolved', '2', '13k', '0.8', 'not priced'], ['Claude alone', 'resolved', '1', '2k', '0.5', 'not priced']]);
@@ -274,7 +274,7 @@ test('Live run: a refused run says it did not start and why, and its cell is not
 test('Task, 7 arms on one task of the study: the verdict, each arm, the card\'s timeline, the review, the versions and the facts', async () => {
   const w = await opened(BH.study(), 'task');
   assert.equal(text(q(w, '.bench-answers')), 'This page answers: What happened on one task, arm by arm, and is the task itself the problem?');
-  assert.deepEqual(heads(w), [`django · ${TASKS[0]}`, 'Each arm on this task', 'Conveyor\'s card, step by step', 'The review, in full', 'This task over time', 'Open the patch']);
+  assert.deepEqual(heads(w), [`django · ${TASKS[0]}`, 'Each arm on this task', 'Conveyor\'s card, step by step', 'The review, in full', 'This task over time']);
   assert.equal(text(q(w, '.bench-vv')), BH.TITLE);
   assert.equal(text(q(w, '.bench-vw')), '7 of 7 arms resolve it. An easy task: it tells the arms apart only on cost and time.');
   assert.deepEqual(rows(q(w, '.bench-arms'))[0], ['Conveyor v1.9.0', 'resolved', '21', '2 of 2 FAIL_TO_PASS · 40 of 40 PASS_TO_PASS', '']);
@@ -284,7 +284,7 @@ test('Task, 7 arms on one task of the study: the verdict, each arm, the card\'s 
   assert.equal(spans[0].textContent, 'build · 300k tok');
   assert.match(text(q(w, 'details[data-fold^="review-"]')), /Review 1: NO-GO\. \[P1\] reverse_related\.py:310 through_fields is not made hashable/);
   assert.deepEqual(Array.from(page(w).querySelectorAll('.bench-vd'), (d) => d.textContent), ['1.4.0', '1.5.0', '1.6.0', '1.7.0', '1.8.0', '1.9.0']);
-  assert.deepEqual(kv(box(w, 'This task over time')), [['Repository', 'django'], ['Difficulty', 'easy (resolved by 7 of 7 arms)'], ['Reference fix', '1 file, +7 −3'], ['Hidden tests', '2 FAIL_TO_PASS, 40 PASS_TO_PASS']]);
+  assert.deepEqual(kv(box(w, 'This task over time')), [['Repository', 'django'], ['Difficulty', 'easy (resolved by 7 of 7 arms)'], ['Patch size', '1 file, +7 −3'], ['Task image', 'not kept'], ['Hidden tests', '2 FAIL_TO_PASS, 40 PASS_TO_PASS']]);
 });
 
 // Bug it guards: a result kept before the grade's report showed its hidden tests as 0 of 0, and with 1 task run the
@@ -294,7 +294,7 @@ test('Task, 2 runs of 1 task: nothing can be told yet of the task, and the hidde
   assert.ok(q(w, '.bench-verdict').classList.contains('bench-verdict-quiet'));
   assert.equal(text(q(w, '.bench-vw')), '5 of 5 arms resolve it. Nothing can be told yet: with 1 task run, there is no other task to set this one against.');
   assert.deepEqual(rows(q(w, '.bench-arms')).map((r) => r[3]), ['not kept', 'not kept', 'not kept', 'not kept', 'not kept']);
-  assert.deepEqual(kv(box(w, 'This task over time')).slice(1), [['Difficulty', 'not told yet (resolved by 5 of 5 arms)'], ['Reference fix', 'not kept'], ['Hidden tests', 'not kept']]);
+  assert.deepEqual(kv(box(w, 'This task over time')).slice(1), [['Difficulty', 'not told yet (resolved by 5 of 5 arms)'], ['Patch size', 'not kept'], ['Task image', 'not kept'], ['Hidden tests', 'not kept']]);
 });
 
 // Bug it guards (review): with 2 tasks every arm graded, the verdict said there was no other task to set this one
@@ -313,7 +313,7 @@ test('Task map, 50 of 500 tasks run: the coverage verdict, one square a task by 
   const w = await opened(BH.study(), 'map');
   assert.deepEqual(heads(w), ['Coverage', 'All 500 tasks of SWE-bench Verified, by repository']);
   assert.equal(text(q(w, '.bench-vv')), '50 of 500 tasks have results. 13 of them no arm resolves.');
-  assert.equal(text(q(w, '.bench-vw')), 'django is 46% of the set, so a run of the first 50 tasks leans on django. The hard tasks are where a new version can gain the most.');
+  assert.equal(text(q(w, '.bench-vw')), 'Django is 46% of the set, so a run of the first 50 tasks leans on Django. The hard tasks are where a new version can gain the most.');
   assert.deepEqual(Array.from(page(w).querySelectorAll('.bench-repo'), (g) => text(g.firstChild)).slice(0, 3), ['django 231 tasks · 24 run', 'sympy 75 tasks · 7 run', 'sphinx 44 tasks · 4 run']);
   assert.equal(page(w).querySelectorAll('.bench-sq[data-t]').length, 500);
   assert.equal(page(w).querySelectorAll('button.bench-sq').length, 50);
@@ -333,7 +333,7 @@ test('Task map, 50 of 500 tasks run: the coverage verdict, one square a task by 
 test('Task map, 2 runs of 1 task: 1 of 500 tasks has results, its square opens it, the rest are not run yet', async () => {
   const w = await opened(BH.few(), 'map');
   assert.equal(text(q(w, '.bench-vv')), '1 of 500 tasks have results. 0 of them no arm resolves.');
-  assert.equal(text(q(w, '.bench-vw')), 'Nothing can be told yet of where an arm wins or loses. django is 46% of the set, so a run of the first 1 task leans on django.');
+  assert.equal(text(q(w, '.bench-vw')), 'Nothing can be told yet of where an arm wins or loses. Django is 46% of the set, so a run of the first 1 task leans on Django.');
   assert.deepEqual(Array.from(page(w).querySelectorAll('button.bench-sq'), (b) => [b.dataset.t, b.className]), [[BH.FEW_TASK, 'bench-sq bench-sq-all']]);
   assert.equal(page(w).querySelectorAll('span.bench-sq[data-t]').length, 499);
 });
@@ -351,9 +351,9 @@ test('Plan a run, the study\'s arms: the questions set the tasks and arms, and B
     ['Codex alone', 'ready', '$0.44', '5', '50'], ['Claude + Superpowers', 'expired', '$0.93', '9', '50'], ['Claude alone', 'ready', '$0.31', '3', '50'], ['Claude + Caveman', 'changed', '$0.27', '3', '50']]);
   assert.equal(text(q(w, '.bench-pdet')), 'Shows a difference of 10 tasks (20%) or more');
   assert.equal(text(q(w, '.bench-before .bench-hsub')), '2 arms × 50 tasks');
-  assert.equal(text(q(w, '.bench-before .bench-callout')), 'Good for arms: a gap of 20% or more shows. Conveyor v1.9.0 against Claude alone was 24 points in the last study. A 10-point gap needs 200 tasks.');
+  assert.equal(text(q(w, '.bench-before .bench-callout')), 'Good for arms: a gap of 20% or more shows, and Conveyor against Claude alone was 24 points in the last study. Two Conveyor versions differed by 2 to 40 points in the last study: a 2-point gap needs 5000 tasks.');
   assert.deepEqual(kv(q(w, '.bench-before')), [['Cost', '$0.00 at list prices'], ['Machine time', '0 min tasks run one after another'], ['Sessions', '0 usual, 0 at worst'],
-    ['Kept results', '100 task runs reused at no cost'], ['Usage guard', 'not reached'], ['Belt', 'Cards and the run share the machine. Each task\'s container gets 4 CPUs and 8g.']]);
+    ['Kept results', '100 task runs reused at no cost'], ['Usage guard', 'fits in the week left'], ['Belt', 'Cards and the run share the machine. Each task\'s container gets 4 CPUs and 8g.']]);
   assert.equal(q(w, '.bench-cmd').textContent, 'conveyor.sh bench swe 50 --arm conveyor --arm solo');
   act(bp(w), 'q-works').click();
   assert.equal(q(w, '.bench-cmd').textContent, 'conveyor.sh bench swe 5 --arm conveyor');
@@ -373,7 +373,7 @@ test('Plan a run: the slider changes the difference it can show and the cost, an
   const range = act(bp(w), 'plan-n');
   range.value = '500'; range.dispatchEvent(new w.Event('input'));
   assert.equal(text(q(w, '.bench-pdet')), 'Shows a difference of 32 tasks (7%) or more');
-  assert.match(text(q(w, '.bench-before .bench-callout')), /^Good for arms: a gap of 7% or more shows\./);
+  assert.match(text(q(w, '.bench-before .bench-callout')), /^Good for arms: a gap of 7% or more shows[.,]/);
   range.value = '120'; range.dispatchEvent(new w.Event('input'));
   assert.equal(act(bp(w), 'plan-n'), range, 'the slider dragged is still the one on the page');
   assert.equal(text(q(w, '.bench-pdet')), 'Shows a difference of 16 tasks (14%) or more');

@@ -154,13 +154,24 @@
     s.append(tbl, h('h3', 'bench-h', 'Tasks'), line, range, b, engineRow(), settingsFold());
     return s;
   }
+  // The smallest and the largest gap between neighbouring Conveyor versions in the last study, each on the tasks both
+  // graded (not told of fewer than 3), as {pts, need}: its points and the tasks that show it (2 / gap², as Compare says);
+  // null when no two versions are read with a gap.
+  function versionGaps() {
+    const vs = K.versionsOf(), g = vs.slice(1).map((v, i) => K.moved(vs[i], v)).filter((m) => m && !m.few && m.pts !== 0).map((m) => ({ pts: Math.abs(m.pts), r: Math.abs(m.d) / m.shared }));
+    if (!g.length) return null;
+    const of = (x) => ({ pts: x.pts, need: Math.ceil(2 / (x.r ** 2)) });
+    return { min: of(g.reduce((a, b) => (b.r < a.r ? b : a))), max: of(g.reduce((a, b) => (b.r > a.r ? b : a))) };
+  }
   // What the run can tell, for the question picked.
   function sizeSaid(q, n, arms) {
     const det = K.noised(n) / n, st = K.studyOf(), c = st.arms && st.arms.find((a) => a.arm === 'conveyor'), s = st.arms && st.arms.find((a) => a.arm === 'solo');
-    const was = c && s && st.n >= 3 ? ` ${c.label} against Claude alone was ${Math.round((K.figsOf(c, st.shared).k - K.figsOf(s, st.shared).k) / st.n * 100)} points in the last study.` : '';
+    const was = c && s && st.n >= 3 ? `, and Conveyor against Claude alone was ${Math.round((K.figsOf(c, st.shared).k - K.figsOf(s, st.shared).k) / st.n * 100)} points in the last study` : '';
     if (q === 'works') return n <= 10 ? ['Right size: enough to see a break, cheap.', 'ok'] : ['More than you need to see a break.', 'warn'];
     if (q === 'value') return arms.length < 3 ? ['Pick at least 3 arms to compare value.', 'warn'] : [`Ranks ${arms.length} arms. Arms closer than ${K.noisePct(n, true)} share a tier.`, 'ok'];
-    return det <= 0.2 ? [`Good for arms: a gap of ${K.noisePct(n)} or more shows.${was} A 10-point gap needs 200 tasks.`, 'ok'] : [`Too small: only a gap of ${K.noisePct(n)} or more shows.${was} Try 50 tasks or more.`, 'warn'];
+    const g = versionGaps(), vers = !g ? ' A 10-point gap needs 200 tasks.' : ` Two Conveyor versions differed by ${g.min.pts === g.max.pts ? `${g.min.pts} points` : `${g.min.pts} to ${g.max.pts} points`} in the last study: a ${g.min.pts}-point gap needs ${g.min.need} tasks.`;
+    return det <= 0.2 ? [`Good for arms: a gap of ${K.noisePct(n)} or more shows${was}.${vers}`, 'ok']
+      : [`Too small: only a gap of ${K.noisePct(n)} or more shows${was}. Try 50 tasks or more.`, 'warn'];
   }
   // The command the page shows and Start sends: the run's arguments after `run`, in the order of the arms, then the
   // Conveyor version (a run with a Conveyor arm on another engine than main) and the run settings changed.
@@ -211,7 +222,7 @@
     s.append(K.callout(said, tone), K.kv([['Cost', [h('b', null, K.usd(usd)), ' ', h('span', 'bench-muted bench-small', 'at list prices')]], ['Machine time', [h('b', null, K.fmtMin(mins)), ' ', h('span', 'bench-muted bench-small', 'tasks run one after another')]],
       ['Sessions', `${K.sum(parts.map((p) => p.usual))} usual, ${K.sum(parts.map((p) => p.worst))} at worst`],
       ['Kept results', unknown ? 'not known with run settings changed: the estimate counts each task' : `${K.sum(parts.map((p) => p.reused))} task runs reused at no cost`],
-      ['Usage guard', held ? K.chip('reached: no run starts while it stands', 'bad') : K.chip('not reached', 'ok')],
+      ['Usage guard', held ? K.chip('reached: no run starts while it stands', 'bad') : K.chip('fits in the week left', 'ok')],
       ['Belt', `Cards and the run share the machine. Each task's container gets ${K.num(lim.cpus) === null ? 'its' : lim.cpus} CPUs and ${lim.memory || 'its memory'}.`]]),
     K.add(h('div', 'bench-row'), [b, checkButton(arms)]), why ? K.add(h('p', 'bench-note bench-why'), why) : '', receipt, K.saidAt('check'),
     K.add(h('p', 'bench-note'), ['The command it runs: ', h('span', 'mono bench-cmd', `conveyor.sh bench swe ${argsOf(n, arms).map(shellSaid).join(' ')}`)]));
