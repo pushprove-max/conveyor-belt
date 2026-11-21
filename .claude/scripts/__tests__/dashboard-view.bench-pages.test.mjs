@@ -120,6 +120,27 @@ test('Compare: with the winner in the second picker, the verdict gives the winne
   assert.equal(text(q(w, '.bench-vw')), 'It costs $96.00 against $15.50 for the 50 tasks, and takes 17.5 h against 2.5 h.');
 });
 
+// Bug it guards: Compare offered older versions only for the arm named conveyor, so a run of conveyor-codex-claude on v1.7.0
+// next to its newer v1.9.0 could not be picked. Each Conveyor arm in the study gets its own older versions.
+test('Compare: an older version of a Conveyor arm other than conveyor can be picked', async () => {
+  const set = BH.study(), src = set.hist.runs.find((r) => r.id === BH.OLDS[1][1]), id = 'r20261106T083000-6', arm = 'conveyor-codex-claude';
+  const as = (c) => ({ ...c, arm, label: 'Conveyor, Codex builds', key: c.key.replace(/^conveyor/, arm) });
+  set.hist.runs.push({ ...src, id, cols: src.cols.map(as), arms: [arm] });
+  set.shows[id] = { ...set.shows[BH.OLDS[1][1]], run: set.hist.runs[set.hist.runs.length - 1], tasks: set.shows[BH.OLDS[1][1]].tasks.map((t) => ({ ...t, cells: t.cells.map((c) => ({ ...c, arm })) })) };
+  const w = await opened(set, 'compare'), ids = () => Array.from(act(bp(w), 'cmp-a').options, (o) => o.value);
+  assert.ok(ids().includes(`ver:${arm}:v1.7.0`), `the picker offers the older version of ${arm}: ${ids().join(', ')}`);
+  assert.ok(ids().includes('ver:v1.8.0'), 'the older versions of the conveyor arm are still offered');
+  await pick(w, 'cmp-a', `ver:${arm}:v1.7.0`);
+  assert.equal(act(bp(w), 'cmp-a').value, `ver:${arm}:v1.7.0`);
+  assert.match(fours(w)[1][0], /^Only Conveyor, Codex builds v1\.7\.0$/);
+  // Bug it guards: an older version of another Conveyor arm took the conveyor arm's colour (bench-s1), not its own (bench-s6).
+  await pick(w, 'cmp-b', 'arm:solo');
+  const dots = Array.from(page(w).querySelectorAll('.bench-flips .bench-arm'), (d) => [d.textContent, d.firstChild.className]);
+  const mine = dots.filter(([t]) => t.startsWith('Conveyor, Codex builds'));
+  assert.ok(mine.length > 0, `the flipped tasks table has rows won by the older version: ${JSON.stringify(dots)}`);
+  assert.ok(mine.every(([, c]) => /bench-s6\b/.test(c)), `the older version of ${arm} is drawn in the colour of ${arm}: ${JSON.stringify(mine)}`);
+});
+
 // Bug it guards: with 1 shared task, Compare drew boxes and a verdict as if one task could tell two arms apart.
 test('Compare, 2 runs of 1 task: nothing can be told yet, and only cost and time differ on the one task', async () => {
   const w = await opened(BH.few(), 'compare');

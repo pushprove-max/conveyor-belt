@@ -348,9 +348,10 @@
     if (x && y) return x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
     return x || y ? (x ? -1 : 1) : String(a.date || '').localeCompare(String(b.date || ''));
   }
-  function versionsOf() {
-    const seen = new Map();
-    ended().forEach((r) => colsOf(r).filter((c) => c.arm === 'conveyor').forEach((c) => {
+  // arm: the Conveyor arm to read (the one named conveyor unless Compare asks for another, as conveyor-codex-claude).
+  function versionsOf(arm) {
+    const seen = new Map(), which = arm || 'conveyor';
+    ended().forEach((r) => colsOf(r).filter((c) => c.arm === which).forEach((c) => {
       const v = verOf(c), s = seen.get(v);
       if (!s && (num(c.done) || 0) - (num(c.notRun) || 0) > 0) seen.set(v, { v, run: r, col: c, date: r.started, runs: [r] });
       else if (s && typeof c.key === 'string' && c.key === s.col.key && !s.runs.includes(r)) s.runs.push(r);

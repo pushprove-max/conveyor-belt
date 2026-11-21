@@ -196,14 +196,18 @@
   }
 
   // ---- Compare ----
-  // The sides Compare offers: each arm of the study, then each older version of the Conveyor arm.
+  // The sides Compare offers: each arm of the study, then each older version of each of its Conveyor arms (the one named
+  // conveyor has the ids ver:<version>; another, as conveyor-codex-claude, ver:<arm>:<version>).
   function optionsOf(st) {
-    const out = st.arms.map((a) => ({ id: `arm:${a.arm}`, label: a.label, run: a.run, col: a.col, side: a })), have = new Set(st.arms.filter((a) => a.arm === 'conveyor').map((a) => K.verOf(a.col)));
-    K.versionsOf().filter((v) => !have.has(v.v)).reverse().forEach((v) => out.push({ id: `ver:${v.v}`, label: K.colName(v.col), run: v.run, col: v.col, side: null, ver: v }));
+    const out = st.arms.map((a) => ({ id: `arm:${a.arm}`, label: a.label, run: a.run, col: a.col, side: a }));
+    st.arms.filter((a) => a.kind === 'conveyor').forEach((a) => {
+      const k = a.arm === 'conveyor' ? '' : `${a.arm}:`;
+      K.versionsOf(a.arm).filter((v) => v.v !== K.verOf(a.col)).reverse().forEach((v) => out.push({ id: `ver:${k}${v.v}`, label: K.colName(v.col), run: v.run, col: v.col, side: null, ver: v, s: a.s }));
+    });
     return out;
   }
-  // A version's side: its runs' cells (versionsOf), in the Conveyor arm's colour; null while they are read.
-  const sideOf = (o) => o.side || (o.ver.arm ? { ...o.ver.arm, s: 1, label: o.label } : null);
+  // A version's side: its runs' cells (versionsOf), in the colour of the Conveyor arm it belongs to (o.s); null while they are read.
+  const sideOf = (o) => o.side || (o.ver.arm ? { ...o.ver.arm, s: o.s, label: o.label } : null);
   function picker(which, opts) {
     const sel = h('select', 'field');
     sel.dataset.act = `cmp-${which}`; sel.setAttribute('aria-label', which === 'a' ? 'The first arm' : 'The second arm');
