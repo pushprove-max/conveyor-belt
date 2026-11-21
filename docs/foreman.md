@@ -17,6 +17,10 @@ the Foreman a name in `foreman.name`, the line shows it in brackets: `This sessi
 The session stays the Foreman when you continue or resume it, and after `/clear` in it. `/clear` in another session
 does not give it the role. `/conveyor-belt:foreman off` ends the role, and it stays off after `/clear`.
 
+Claude Code keeps a start text of over 10,000 characters out of the session. So the start keeps its text short. When
+`rules.md` and the saved state do not fit with the rest, the start leaves them out one at a time, `rules.md` first.
+In place of each, it has one line that tells the Foreman to read that file now, with its path.
+
 The Foreman uses the 1-hour prompt cache. `conveyor.sh foreman` starts its session with it. For a session in the main
 checkout, `/conveyor-belt:setup --foreman` sets `CLAUDE_CODE_PROMPT_CACHE_TTL` to `1h` in the `env` of
 `.claude/settings.local.json` there, and keeps the other settings in that file. When that file is not a JSON object,

@@ -98,7 +98,7 @@ case $1 in
     || { [ "$1" = filed ] && [ -n "$SID" ] && grep -qxF "$SID"$'\t'"$FD"$'\t'"$TID" "$SF/in" 2>/dev/null; } || exit 0 ;;
 esac
 MAIN=${CONVEYOR_MAIN:-$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null | sed 's|/\.git$||')}
-CAP=5000 LIVE_CAP=1500
+CAP=5000 LIVE_CAP=1500 CTX_LIMIT=9000
 
 setup() {
   local n pin
@@ -373,8 +373,31 @@ off() {
   echo "Foreman mode is off: no session is the Foreman, and its watchers have stopped."
 }
 
+# context: the start's text, under CTX_LIMIT bytes (Claude Code keeps a hook's output over 10,000 characters out of the
+# context and gives the session a short preview only). It is made in four parts: the fixed text with its warnings, this
+# project's rules.md, the rest (auto's rules, the standing kinds, the live summary) and the saved state. When the whole
+# is over the limit, rules.md and then state.md are each swapped for one line that tells the Foreman to Read the file.
 context() {
-  local err s=$FD/state.md n repo main plug home=
+  local head rules mid st
+  head=$(context_head) rules=$(context_rules) mid=$(context_mid) st=$(context_state)
+  if [ "$(printf '%s\n%s\n%s\n%s\n' "$head" "$rules" "$mid" "$st" | wc -c)" -gt "$CTX_LIMIT" ]; then
+    rules=$(context_read "$FD/rules.md")
+    if [ "$(printf '%s\n%s\n%s\n%s\n' "$head" "$rules" "$mid" "$st" | wc -c)" -gt "$CTX_LIMIT" ]; then st=$(context_state_warn; context_read "$FD/state.md"); fi
+  fi
+  printf '%s\n' "$head"
+  [ -z "$rules" ] || printf '%s\n' "$rules"
+  printf '%s\n' "$mid"
+  [ -z "$st" ] || printf '%s\n' "$st"
+}
+
+# context_read <file>: the line that stands for a file part that did not fit; nothing for a file with no text.
+context_read() {
+  [ -s "$1" ] || return 0
+  printf '\n# %s did not fit in this start (Claude Code cuts a start over 10,000 characters): Read %s now, before you act.' "$1" "$1"
+}
+
+context_head() {
+  local err n plug home='' s=$FD/state.md
   # A plugin problem: in the plugin's own repository (plugin_home) the Foreman files it there itself, as any issue it
   # files, and its line names the issue (stop.sh refuses one that does not); elsewhere the owner files it.
   plug="# A suspected defect in Conveyor itself always needs the owner (only they can fix or file it in the plugin's repository): say it on its own line, \"Plugin problem (for the conveyor-belt repo): <what you saw>, card <card>, evidence <path>\"; it is noted in $FD/plugin-bugs.md."
@@ -417,8 +440,15 @@ EOF
   # An empty state.md still runs archive: only archive reports a late write kept beside it.
   [ ! -e "$s" ] || err=$(python3 -I "$FHERE/archive.py" "$s" 2>&1) \
     || echo "# WARNING: the DONE items of $s were not archived: ${err##*$'\n'}"
-  # This project's (or group's) own rules, from its Foreman folder.
+}
+
+# This project's (or group's) own rules, from its Foreman folder.
+context_rules() {
   if [ -s "$FD/rules.md" ]; then echo; echo "# $FD/rules.md (this project's Foreman rules)"; cat "$FD/rules.md"; fi
+}
+
+context_mid() {
+  local err repo main
   # Auto's rules while it is on (`conveyor.sh auto rules`): the mode is this machine's, set by /conveyor-belt:auto here.
   if err=$(bash "$FHERE/../conveyor.sh" auto rules 2>/dev/null); then [ -z "$err" ] || { echo; printf '%s\n' "$err"; }
   else echo "# WARNING: auto's rules could not be read (conveyor.sh auto rules failed)."; fi
@@ -436,12 +466,26 @@ EOF
   err=$(bash "$FHERE/../conveyor.sh" take stale 2>/dev/null) && [ -n "$err" ] && echo "# WARNING: $err"
   echo
   live
+}
+
+# context_state_warn: the warning for a saved state over its cap; nothing for one that fits. A start that swaps the
+# state for a Read line keeps it.
+context_state_warn() {
+  local n
+  [ -s "$FD/state.md" ] || return 0
+  n=$(p_stat "$FD/state.md" | cut -d' ' -f1)
+  [ "$n" -le "$CAP" ] || echo "# WARNING: $FD/state.md is $n bytes, over its $CAP-byte cap: trim it."
+}
+
+context_state() {
+  local s=$FD/state.md n
   [ -s "$s" ] || return 0
   echo
   echo "# $s (your saved state; keep it current)"
+  n=$(context_state_warn)
+  if [ -z "$n" ]; then cat "$s"; return 0; fi
+  echo "$n"
   n=$(p_stat "$s" | cut -d' ' -f1)
-  if [ "$n" -le "$CAP" ]; then cat "$s"; return 0; fi
-  echo "# WARNING: $s is $n bytes, over its $CAP-byte cap: trim it."
   # Whole lines up to the cap, then a line naming the file.
   LC_ALL=C awk -v cap=$((CAP - 200)) '{ used += length($0) + 1; if (used > cap) exit; print }' "$s"
   echo "[cut to fit $CAP of $n bytes; Read the rest from $s]"
