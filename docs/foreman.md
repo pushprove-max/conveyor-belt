@@ -17,9 +17,18 @@ the Foreman a name in `foreman.name`, the line shows it in brackets: `This sessi
 The session stays the Foreman when you continue or resume it, and after `/clear` in it. `/clear` in another session
 does not give it the role. `/conveyor-belt:foreman off` ends the role, and it stays off after `/clear`.
 
-Claude Code keeps a start text of over 10,000 characters out of the session. So the start keeps its text short. When
-`rules.md` and the saved state do not fit with the rest, the start leaves them out one at a time, `rules.md` first.
-In place of each, it has one line that tells the Foreman to read that file now, with its path.
+Claude Code keeps the output of a hook over 10,000 characters out of the session. So the Foreman's start sends its text
+in two outputs, each kept short. The first holds the fixed text, the rules of auto mode, the standing kinds of routine,
+the live summary and the saved state. When the saved state does not fit with the rest, the start leaves it out and
+has one line in its place that tells the Foreman to read that file now, with its path. The second, a SessionStart
+hook of its own, holds the project's `rules.md` from the Foreman's folder, and only in the Foreman's session: any other
+session gets no rules. A `rules.md` that is too long for its output is cut at a whole line, and the last line names
+the file and tells the Foreman to read the rest. When you make a running session the Foreman, no new start follows, so
+the claim prints `rules.md` after the rest, cut the same way to what the limit leaves. A project whose plugin and
+Conveyor commit are of different versions still gets its rules: when the plugin lacks the second hook, the first
+output holds `rules.md` after the rest, cut the same way. When the Conveyor commit is older than the second hook, its
+start holds `rules.md` before the rest when the whole fits, and otherwise has one line in its place that tells the
+Foreman to read that file now.
 
 The Foreman uses the 1-hour prompt cache. `conveyor.sh foreman` starts its session with it. For a session in the main
 checkout, `/conveyor-belt:setup --foreman` sets `CLAUDE_CODE_PROMPT_CACHE_TTL` to `1h` in the `env` of

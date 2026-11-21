@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 60
-# The Foreman's start (foreman.sh claim, its context) stays under Claude Code's 10,000-character limit on a hook's
-# output; when its files do not fit, it tells the Foreman to Read them.
+# The Foreman's start (foreman.sh start, its context) and its rules hook (foreman.sh rules) each stay under Claude Code's
+# 10,000-character limit on a hook's output; when a file does not fit, the output cuts it at a whole line and tells the
+# Foreman to Read the rest.
 # Bug it catches: a start of 23 KB (a big rules.md and state.md) went over the limit, so Claude Code kept it out of the
 # context and gave the session a 2 KB preview: no rules, no standing kinds, no saved state, and the role looked not started.
+# And a rules.md of 4.5 KB never fitted beside the fixed text, so every start sent only a line telling the Foreman to Read it.
 set -uo pipefail
 SRC=$(cd "$(dirname "$0")" && pwd -P)
 B=$(mktemp -d) || exit 1
@@ -27,45 +29,76 @@ fixture() {
 }
 # text <marker> <lines>: <lines> lines of 60 characters, each starting with <marker>.
 text() { local i; for ((i = 1; i <= $2; i++)); do printf '%s line %04d %s\n' "$1" "$i" "$(printf 'x%.0s' {1..40})"; done; }
-start() { (cd "$M" && bash "$SRC/foreman.sh" claim sA) || fail "the claim failed"; }
+# marked: makes session sA the Foreman (the claim's own output is not under test here).
+marked() { (cd "$M" && bash "$SRC/foreman.sh" claim sA) > /dev/null || fail "the claim failed"; }
+# hook <start|rules> <session> [<argument>...]: the SessionStart hook's output for that session; the plugin's start
+# command passes --rules-apart.
+hook() { jq -cn --arg s "$2" '{session_id: $s, source: "startup", transcript_path: ""}' | (cd "$M" && bash "$SRC/foreman.sh" "$1" "${@:3}") || fail "the $1 hook failed"; }
 
-# Both files over the limit together: the start is under 10,000 characters, and a line names each file left out with
-# its path; the fixed text is still whole.
+# A rules.md of 6000 bytes and a state.md of 1000: the rules are whole in the rules output, the state whole in the start
+# output, and neither has a "did not fit" line.
+t_fit() {
+  local st ru
+  fixture fit
+  text RULESBODY 98 > "$FD/rules.md"; text STATEBODY 16 > "$FD/state.md"
+  marked; st=$(hook start sA --rules-apart); ru=$(hook rules sA)
+  [ "$(grep -c RULESBODY <<<"$ru")" = 98 ] && ! grep -q RULESBODY <<<"$st" || fail "the rules are not whole in the rules output only"
+  [ "$(grep -c STATEBODY <<<"$st")" = 16 ] && ! grep -q STATEBODY <<<"$ru" || fail "the state is not whole in the start output only"
+  ! grep -qE 'did not fit|Read .* now' <<<"$st$ru" || fail "an output that fits has a Read line: $(grep -E 'did not fit' <<<"$st$ru")"
+}
+# A rules.md of 12000 bytes and a state.md over the limit: the rules output is under 10,000 characters, cut at a whole
+# line, with a line that names the file and says to Read the rest; the start is under the limit too, with the fixed
+# text whole and a Read line for the state, and no rules in it.
 t_big() {
-  local out f
+  local st ru last
   fixture big
-  text RULESBODY 120 > "$FD/rules.md"; text STATEBODY 100 > "$FD/state.md"
-  out=$(start)
-  [ "${#out}" -lt 10000 ] || fail "the start is ${#out} characters, not under 10000"
-  grep -qF '# Foreman mode: you are' <<<"$out" && grep -qF 'Live summary' <<<"$out" || fail "the fixed text or the live summary was cut: ${out:0:300}"
-  for f in rules.md state.md; do
-    grep -E "Read $FD/$f now" <<<"$out" | grep -qF "$FD/$f did not fit" || fail "no Read line names $FD/$f in the start"
-  done
-  ! grep -qE 'RULESBODY|STATEBODY' <<<"$out" || fail "a file's text stayed in a start that is over the limit"
+  text RULESBODY 200 > "$FD/rules.md"; text STATEBODY 100 > "$FD/state.md"
+  marked; st=$(hook start sA --rules-apart); ru=$(hook rules sA)
+  [ "${#ru}" -lt 10000 ] || fail "the rules output is ${#ru} characters, not under 10000"
+  last=$(grep RULESBODY <<<"$ru" | tail -1)
+  [ -n "$last" ] && [ "$(grep -c RULESBODY <<<"$ru")" -lt 200 ] && [ "${#last}" = 60 ] || fail "the rules were not cut at a whole line: last line '$last'"
+  grep -qF "Read the rest from $FD/rules.md" <<<"$ru" || fail "no Read line names $FD/rules.md in the rules output"
+  [ "${#st}" -lt 10000 ] || fail "the start is ${#st} characters, not under 10000"
+  grep -qF '# Foreman mode: you are' <<<"$st" && grep -qF 'Live summary' <<<"$st" || fail "the fixed text or the live summary was cut: ${st:0:300}"
+  grep -E "Read $FD/state.md now" <<<"$st" | grep -qF "$FD/state.md did not fit" || fail "no Read line names $FD/state.md in the start"
+  ! grep -qE 'RULESBODY|STATEBODY' <<<"$st" || fail "a file's text stayed in a start that is over the limit"
   # Bug: the Read line for an oversized state.md replaced its over-the-cap warning, so the Foreman was never told to trim it.
-  grep -qF "# WARNING: $FD/state.md is" <<<"$out" || fail "the over-the-cap warning for state.md is not in the start"
+  grep -qF "# WARNING: $FD/state.md is" <<<"$st" || fail "the over-the-cap warning for state.md is not in the start"
 }
-# Only rules.md is too big: it alone is left out, and the saved state, which fits once rules.md is out, stays whole.
-t_rulesonly() {
-  local out
-  fixture rulesonly
-  text RULESBODY 150 > "$FD/rules.md"; text STATEBODY 20 > "$FD/state.md"
-  out=$(start)
-  [ "${#out}" -lt 10000 ] || fail "the start is ${#out} characters, not under 10000"
-  grep -qF "Read $FD/rules.md now" <<<"$out" || fail "no Read line for rules.md"
-  ! grep -qF "Read $FD/state.md now" <<<"$out" && [ "$(grep -c STATEBODY <<<"$out")" = 20 ] || fail "the state that fits was left out or cut"
+# Bug: a session that is not the Foreman was given the project's rules.
+t_other() {
+  local ru
+  fixture other
+  text RULESBODY 5 > "$FD/rules.md"
+  marked; ru=$(hook rules sB)
+  [ -z "$ru" ] || fail "a session that is not the Foreman got a rules output: ${ru:0:200}"
 }
-# Small files: their whole text is in the start, and no Read line.
-t_small() {
-  local out
-  fixture small
-  text RULESBODY 5 > "$FD/rules.md"; text STATEBODY 5 > "$FD/state.md"
-  out=$(start)
-  [ "$(grep -c RULESBODY <<<"$out")" = 5 ] && [ "$(grep -c STATEBODY <<<"$out")" = 5 ] || fail "a small file's text is not whole in the start"
-  ! grep -qE 'did not fit|Read .* now' <<<"$out" || fail "a start that fits has a Read line: $(grep -E 'did not fit' <<<"$out")"
+# Bug: the rules hook runs beside start, so it read the mark before start made the session the Foreman and
+# sent nothing (here auto makes a new session in the main checkout the Foreman). It must wait for start to end.
+t_race() {
+  local ru=$B/race.rules
+  fixture race
+  text RULESBODY 5 > "$FD/rules.md"
+  hook rules sA > "$ru" & local rp=$!
+  sleep 0.5 # sleep: the rules hook is already waiting when start runs
+  hook start sA --rules-apart > /dev/null; wait "$rp"
+  [ "$(grep -c RULESBODY "$ru")" = 5 ] || fail "the rules hook did not wait for start: $(cat "$ru")"
 }
 
-cases=(big rulesonly small)
+# Bug: a plugin from before the rules hook calls start with no --rules-apart and has no rules hook, so a start that
+# always left rules.md out gave that session no project rules at all. Without the flag the rules come in the start, under
+# the limit, whole when they fit and cut at a whole line with the Read line when they do not.
+t_old() {
+  local st
+  fixture old
+  text RULESBODY 10 > "$FD/rules.md"; text STATEBODY 16 > "$FD/state.md"
+  marked; st=$(hook start sA)
+  [ "$(grep -c RULESBODY <<<"$st")" = 10 ] && [ "$(grep -c STATEBODY <<<"$st")" = 16 ] || fail "a start without --rules-apart lacks the rules or the state: ${st:0:300}"
+  text RULESBODY 200 > "$FD/rules.md"; st=$(hook start sA)
+  [ "${#st}" -lt 10000 ] && grep -qF "Read the rest from $FD/rules.md" <<<"$st" || fail "a start without --rules-apart is ${#st} characters or has no Read line"
+}
+
+cases=(fit big other race old)
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
 read -ra cases <<<"$SEL"

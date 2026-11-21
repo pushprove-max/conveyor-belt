@@ -92,7 +92,7 @@ jq -e '.env.CONVEYOR_FOREMAN == "1" and .env.CLAUDE_CODE_PROMPT_CACHE_TTL == "1h
 # launcher's settings hold none, or its session would run each twice.
 P=$SRC/../../hooks/hooks.json
 # filing and filed go through filing-hook.sh, which runs the shim only for a command that files an issue (issue 610).
-for h in 'SessionStart foreman.sh start' 'Stop stop.sh state' 'Stop stop.sh reply' 'Stop waiter.sh' 'PreToolUse filing-hook.sh filing' 'PostToolUse filing-hook.sh filed' 'PostToolUseFailure filing-hook.sh filed' \
+for h in 'SessionStart foreman.sh start --rules-apart' 'SessionStart foreman.sh rules || true' 'Stop stop.sh state' 'Stop stop.sh reply' 'Stop waiter.sh' 'PreToolUse filing-hook.sh filing' 'PostToolUse filing-hook.sh filed' 'PostToolUseFailure filing-hook.sh filed' \
   'UserPromptSubmit waiter.sh --check' 'PostToolUse waiter.sh --check'; do # issue 215: a dead waiter is started again by the session's next prompt or tool call
   s="shim.sh conveyor/foreman/${h#* }"; [[ ${h#* } != filing-hook.sh* ]] || s="}\"/conveyor/foreman/${h#* }"
   jq -e --arg e "${h%% *}" --arg h "$s" '[.hooks[$e][]? | select(($e | test("ToolUse") | not) or .matcher == "Bash" or .matcher == null) | .hooks[].command | endswith($h)] | any' "$P" >/dev/null \

@@ -6,7 +6,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh conveyor/foreman/foreman.sh start"
+            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh conveyor/foreman/foreman.sh start --rules-apart"
+          },
+          {
+            "type": "command",
+            "command": "CONVEYOR_HOOK=1 \"${CLAUDE_PLUGIN_ROOT}\"/shim.sh conveyor/foreman/foreman.sh rules || true"
           },
           {
             "type": "command",

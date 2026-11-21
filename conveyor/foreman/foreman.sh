@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# foreman.sh setup | launch [--new] [<claude argument>...] | claim <session id> | ask <repo> <command> [<argument>...] | off | start | words | live | filing | filed --
+# foreman.sh setup | launch [--new] [<claude argument>...] | claim <session id> | ask <repo> <command> [<argument>...] | off | start | rules | words | live | filing | filed --
 # Foreman mode (plan docs/plans/conveyor-plugin-2026-11-10.md, section 11b). The Foreman is a Claude session in a
 # project's main checkout that watches that project's Conveyor (or its group's: lib.sh mine) and brings the owner
 # what needs them: it files issues,
@@ -34,10 +34,15 @@
 #   marks it the Foreman. A resumed session given a new id whose transcript is the Foreman session's takes the mark
 #   over, unless it is a session that lost the role; so does the new session a /clear starts in the Foreman's own
 #   Claude Code process (cleared_). Then, for the
-#   Foreman session only, the Foreman's rules (with its project's own, $FD/rules.md, and the standing kinds of routine
+#   Foreman session only, the Foreman's rules (with auto's rules and the standing kinds of routine
 #   yes each record's pack turns on, asked of the record: `conveyor.sh auto standing`), then its saved state: the DONE items of state.md archived
 #   (archive.py), a warning line when the project runs an old engine here (`conveyor.sh take stale`), a live summary
 #   built fresh (never saved), then state.md, cut to its cap.
+# start --rules-apart: the start without rules.md (see rules); the plugin's hook passes it. An engine from before the
+#   rules hook ignores it and puts rules.md before the rest when the whole fits, or a Read line in its place when it does
+#   not; a start without it here puts rules.md after the rest, cut to what the limit leaves.
+# rules (SessionStart, a hook of its own): in the Foreman session only, this project's $FD/rules.md, under RULES_LIMIT, cut at
+#   a whole line with a Read line when it is longer; any other session gets nothing. claim prints it in a session already running.
 #   A session that was the Foreman and no longer is gets one line saying so, once, shown to the owner (systemMessage).
 #   Any other new session (source startup) in a project's main checkout (inmain; never a worktree, as a card's, a
 #   lane's or a reviewer's, nor a session with CONVEYOR_CARD or CONVEYOR_LANE set) takes the role by itself (auto):
@@ -68,13 +73,13 @@
 #   research lane (lanes/research.sh) runs these two as well, with CONVEYOR_LANE=research and its own folder as $FD, so an issue it files starts held too.
 set -uo pipefail
 case ${1:-} in
-  setup | launch | start | words | live | filing | filed | off) ;;
+  setup | launch | start | rules | words | live | filing | filed | off) ;;
   claim) [ $# = 2 ] && [[ $2 =~ ^[A-Za-z0-9-]+$ ]] || { echo "usage: foreman.sh claim <session id>" >&2; exit 2; } ;;
   ask) [ $# -ge 3 ] && [[ $2 =~ ^[A-Za-z0-9._-]+$ ]] || { echo "usage: foreman.sh ask <repo> <command> [<argument>...]" >&2; exit 2; } ;;
-  *) echo "usage: foreman.sh setup | launch [--new] [<claude argument>...] | claim <session id> | ask <repo> <command> [<argument>...] | off | start | words | live | filing | filed" >&2; exit 2 ;;
+  *) echo "usage: foreman.sh setup | launch [--new] [<claude argument>...] | claim <session id> | ask <repo> <command> [<argument>...] | off | start | rules | words | live | filing | filed" >&2; exit 2 ;;
 esac
 # A hook's input, and the session it names.
-case $1 in start | words | filing | filed) IN=$(cat); SID=$(jq -r '.session_id // empty | strings' <<<"$IN" 2>/dev/null) ;; esac
+case $1 in start | rules | words | filing | filed) IN=$(cat); SID=$(jq -r '.session_id // empty | strings' <<<"$IN" 2>/dev/null) ;; esac
 # words: every prompt of every session comes here, so any other prompt ends before anything is read; the rest runs in
 # the session's own folder (the hook input's cwd), whose main checkout is the one claimed.
 if [ "$1" = words ]; then
@@ -98,7 +103,9 @@ case $1 in
     || { [ "$1" = filed ] && [ -n "$SID" ] && grep -qxF "$SID"$'\t'"$FD"$'\t'"$TID" "$SF/in" 2>/dev/null; } || exit 0 ;;
 esac
 MAIN=${CONVEYOR_MAIN:-$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null | sed 's|/\.git$||')}
-CAP=5000 LIVE_CAP=1500 CTX_LIMIT=9000
+CAP=5000 LIVE_CAP=1500 CTX_LIMIT=9000 RULES_LIMIT=9000
+# --rules-apart: the start's caller sends rules.md by the rules hook, so the start leaves it out (context).
+RULES_APART=; [ "$1" = start ] && [ "${2:-}" = --rules-apart ] && RULES_APART=1
 
 setup() {
   local n pin
@@ -374,20 +381,20 @@ off() {
 }
 
 # context: the start's text, under CTX_LIMIT bytes (Claude Code keeps a hook's output over 10,000 characters out of the
-# context and gives the session a short preview only). It is made in four parts: the fixed text with its warnings, this
-# project's rules.md, the rest (auto's rules, the standing kinds, the live summary) and the saved state. When the whole
-# is over the limit, rules.md and then state.md are each swapped for one line that tells the Foreman to Read the file.
+# context and gives the session a short preview only). It is made in three parts: the fixed text with its warnings, the
+# rest (auto's rules, the standing kinds, the live summary) and the saved state. This project's rules.md is not part of
+# it when the start is called with --rules-apart (the plugin's hooks.json does): the SessionStart hook `rules` sends it in
+# an output of its own. A call without it (a claim in a running session, which no SessionStart follows, or a plugin from
+# before the rules hook) gets rules.md after the rest, cut to what the limit leaves. When the whole is over the limit,
+# state.md is swapped for one line that tells the Foreman to Read the file.
 context() {
-  local head rules mid st
-  head=$(context_head) rules=$(context_rules) mid=$(context_mid) st=$(context_state)
-  if [ "$(printf '%s\n%s\n%s\n%s\n' "$head" "$rules" "$mid" "$st" | wc -c)" -gt "$CTX_LIMIT" ]; then
-    rules=$(context_read "$FD/rules.md")
-    if [ "$(printf '%s\n%s\n%s\n%s\n' "$head" "$rules" "$mid" "$st" | wc -c)" -gt "$CTX_LIMIT" ]; then st=$(context_state_warn; context_read "$FD/state.md"); fi
-  fi
+  local head mid st
+  head=$(context_head) mid=$(context_mid) st=$(context_state)
+  if [ "$(printf '%s\n%s\n%s\n' "$head" "$mid" "$st" | wc -c)" -gt "$CTX_LIMIT" ]; then st=$(context_state_warn; context_read "$FD/state.md"); fi
   printf '%s\n' "$head"
-  [ -z "$rules" ] || printf '%s\n' "$rules"
   printf '%s\n' "$mid"
   [ -z "$st" ] || printf '%s\n' "$st"
+  [ -n "$RULES_APART" ] || rules_text "$((CTX_LIMIT - $(printf '%s\n%s\n%s\n' "$head" "$mid" "$st" | wc -c)))"
 }
 
 # context_read <file>: the line that stands for a file part that did not fit; nothing for a file with no text.
@@ -442,9 +449,26 @@ EOF
     || echo "# WARNING: the DONE items of $s were not archived: ${err##*$'\n'}"
 }
 
-# This project's (or group's) own rules, from its Foreman folder.
-context_rules() {
-  if [ -s "$FD/rules.md" ]; then echo; echo "# $FD/rules.md (this project's Foreman rules)"; cat "$FD/rules.md"; fi
+# rules (SessionStart, beside start): the Foreman session's project (or group) rules, $FD/rules.md, as an output of their
+# own, so they never share the start's limit. It waits until start has ended, as the waiter does (await_start), so a
+# session that start made the Foreman is seen as one. A session that is not the Foreman gets nothing.
+rules() {
+  [ -z "$SID" ] || await_start "$SID"
+  foreman "$SID" || return 0
+  rules_text "$RULES_LIMIT"
+}
+
+# rules_text <limit>: rules.md in at most <limit> bytes: whole, or cut at a whole line with a line that names the file
+# and says to Read the rest. Nothing for a missing or empty file.
+rules_text() {
+  local r=$FD/rules.md n head
+  [ -s "$r" ] || return 0
+  head="# $r (this project's Foreman rules)"
+  n=$(p_stat "$r" | cut -d' ' -f1)
+  echo; echo "$head"
+  if [ $((${#head} + 3 + n)) -le "$1" ]; then cat "$r"; return 0; fi
+  LC_ALL=C awk -v cap=$(($1 - ${#head} - 300)) '{ used += length($0) + 1; if (used > cap) exit; print }' "$r"
+  echo "[cut to fit $1 bytes, $n in the file; Read the rest from $r]"
 }
 
 context_mid() {

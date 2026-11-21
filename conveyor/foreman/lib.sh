@@ -128,6 +128,16 @@ foreman() {
   [ -n "${1:-}" ] && [ "$1" = "$(marked)" ] && return 0
   [ ! -e "$MARK" ] && [ "${CONVEYOR_FOREMAN:-}" = 1 ]
 }
+# await_start <session id>: waits, at most 10 s, until the session's start hook (foreman.sh start), which runs beside the
+# caller, has ended: that hook writes the session to $FD/started, read only when written in the 5 s before this began or
+# since, so an earlier start of the session never ends the wait.
+await_start() {
+  local _
+  for _ in $(seq 50); do
+    [ "$(cat "$FD/started" 2>/dev/null)" = "$1" ] && p_newer "$FD/started" $((SECONDS + 5)) && break
+    sleep 0.2 # sleep: the poll of the file the session's start hook writes
+  done
+}
 # locked <command> [<argument>...]: runs it holding claim.lock, so two changes of the mark or of former never mix.
 locked() { mkdir -p "$FD" && ( flock -w 30 9 || exit 1; "$@" ) 9>>"$FD/claim.lock"; }
 # former: the sessions that held the role and lost it, one a line: "<id>" until it is told so at its next start, then

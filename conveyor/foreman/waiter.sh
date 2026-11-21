@@ -70,14 +70,8 @@ SELF=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/waiter.sh
 # it again (the launcher's session, a resume or fork that adopts the mark, a /clear in the Foreman's process, a new
 # session in the main checkout), and a claim by the session replaces its waiter with one that cannot wake it (lib.sh
 # claim). So --start waits until that hook has ended, however the mark reads: the hook writes the session to
-# $FD/started, read only when written in the 5 s before this began or since, so an earlier start of the session never
-# ends the wait. At most 10 s; then the mark is read once.
-if [ "$MODE" = --start ] && [ -n "$SID" ]; then
-  for _ in $(seq 50); do
-    [ "$(cat "$FD/started" 2>/dev/null)" = "$SID" ] && p_newer "$FD/started" $((SECONDS + 5)) && break
-    sleep 0.2 # sleep: the poll of the file the session's start hook writes
-  done
-fi
+# $FD/started (lib.sh await_start), at most 10 s; then the mark is read once.
+[ "$MODE" != --start ] || [ -z "$SID" ] || await_start "$SID"
 foreman "$SID" || exit 0
 # KEY: the stop this Stop hook runs at (stop_key), kept by a waiter that moved to a new install. Other hooks read none.
 KEY=''
