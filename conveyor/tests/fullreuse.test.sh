@@ -31,8 +31,10 @@ t_fullreusefail() {
   rm -f "$STUB/ran"
   loop release-prep 1.1.0 > "$T/$CASE.p" 2>&1 || fail "release-prep failed on B: $(cat "$T/$CASE.p")"
   [ ! -e "$STUB/ran" ] || fail "release-prep ran tests on a commit a green full test passed: $(cat "$STUB/ran")"
-  grep -q "statuses/$B -f state=success -f context=conveyor/release-suite -f description=.*reused the green run of " "$STUB/gh-calls" \
-    || fail "no passing status naming the reused run was posted on B: $(cat "$STUB/gh-calls")"
+  # Bug (#1273): the status of a pass reused whole named this run's machine ("on the build machine"), though no test ran
+  # and the run reused may have run on a box over ssh: it names none.
+  grep -q "statuses/$B -f state=success -f context=conveyor/release-suite -f description=The whole suite (test.full) passed: reused the green run of " "$STUB/gh-calls" \
+    || fail "no passing status naming the reused run, and no machine, was posted on B: $(cat "$STUB/gh-calls")"
   jq -e --arg b "$B" '.state == "passed" and .reused.sha == $b and .reused.ran == [] and .reused.kept == 3' "$RUN" > /dev/null \
     || fail "the record does not name the green run it reused: $(cat "$RUN")"
 }

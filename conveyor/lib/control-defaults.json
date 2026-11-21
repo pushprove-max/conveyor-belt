@@ -49,5 +49,6 @@
   "onboarded": null,
   "picks": {},
   "pickBack": null,
-  "suiteAtOnce": 2
+  "suiteAtOnce": 2,
+  "suiteMachine": {"kind": "local"}
 }

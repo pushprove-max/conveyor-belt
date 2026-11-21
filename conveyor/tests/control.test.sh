@@ -354,3 +354,26 @@ t_controlatoncerule() {
       || fail "control atonce '$v' was not refused with its reason and nothing changed: $out"
   done
 }
+# Where a release's whole suite runs, the stored rule suiteMachine (lib/suitehost.sh), which `control suite-machine`
+# writes. Bugs: a record that leaves it out reads no rule, or one other than this machine, so a suite reaches for a box;
+# the ssh form wrote no folder, or wrote a target ssh would read as an option (-oProxyCommand=... runs a command
+# here) or a folder the box cannot place; a refusal changed the record.
+t_controlsuitemachine() {
+  local CTL0 a out; CTL0=$(jq -c . "$SRC/lib/control-defaults.json")
+  eval "$(sed -n '/^ctlcheck() {/,/^}/p' "$SRC/lib/control.sh")"
+  [ "$(ctlcheck <<<'{}' | jq -c .suiteMachine)" = '{"kind":"local"}' ] || fail "a record with no suiteMachine does not read this machine: $(ctlcheck <<<'{}' | jq -c .suiteMachine)"
+  for a in '{"kind":"ssh","target":"-oProxyCommand=x","dir":"~"}' '{"kind":"ssh","target":"h","dir":"rel"}' '{"kind":"ssh","target":"h"}' '{"kind":"box"}' '{"kind":"local","target":"h"}'; do
+    ! ctlcheck <<<"{\"suiteMachine\":$a}" >/dev/null || fail "the record {\"suiteMachine\":$a} was read"
+  done
+  controlsetup '[]'
+  [ "$(ctl suite-machine ssh tester@box.example.com | jq -c .suiteMachine)" = '{"kind":"ssh","target":"tester@box.example.com","dir":"~/conveyor-suite"}' ] \
+    || fail "control suite-machine ssh tester@box.example.com did not write the rule with the folder ~/conveyor-suite: $(jq -c .suiteMachine "$C")"
+  [ "$(ctl suite-machine ssh box --dir /srv/suite | jq -c .suiteMachine)" = '{"kind":"ssh","target":"box","dir":"/srv/suite"}' ] && [ "$(loop control | jq -r .suiteMachine.dir)" = /srv/suite ] \
+    || fail "control suite-machine ssh box --dir /srv/suite did not write that folder: $(jq -c .suiteMachine "$C")"
+  for a in 'ssh -oProxyCommand=x' 'ssh box --dir rel/path' 'ssh' 'ssh box --dir' 'box' 'local x'; do
+    # shellcheck disable=SC2086 # each word an argument
+    out=$(loop control suite-machine $a 2>&1); [ $? = 2 ] && [ "$(jq -c .suiteMachine "$C")" = '{"kind":"ssh","target":"box","dir":"/srv/suite"}' ] \
+      || fail "control suite-machine $a was not refused with nothing changed: $out"
+  done
+  [ "$(ctl suite-machine local | jq -c .suiteMachine)" = '{"kind":"local"}' ] || fail "control suite-machine local did not write this machine: $(jq -c .suiteMachine "$C")"
+}

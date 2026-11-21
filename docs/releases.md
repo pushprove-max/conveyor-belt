@@ -47,6 +47,9 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    In this repository the suite is `.conveyor/test-full.sh`. It runs each area file under `conveyor/tests/`, and
    not the whole engine test, so each engine case runs once.
 
+   The suite runs on this machine, or on a Linux box over ssh
+   ([Where the suite runs](#where-the-suite-runs)).
+
    You choose for each run how the suite runs its test files: `conveyor.sh release-prep <version> --serial` runs them
    one at a time, and `--parallel` runs several at once on the machine's test slots. With neither, the run is serial.
    `conveyor.sh release-run [prep] <version>` takes the same choice at the end, for the `release-prep` it starts.
@@ -54,7 +57,8 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    test slot while it runs, but an engine area file or the install check holds none, because each of its cases takes a slot. The suite never
    runs more files at once than the pool has slots (`testSlots` in the host file), or more than the **Test files at
    once** setting. The default is 2. Set it on the Board's Rules tab (Capacity), or with `conveyor.sh control atonce <n>`,
-   a whole number from 1 to 999. A number above the pool's slots runs at the slots, and the Rules tab says so. The
+   a whole number from 1 to 999. A number above the pool's slots runs at the slots, and the Rules tab says so. On a
+   box over ssh, the limit is the box's test slots, one for each of its CPUs. The
    next parallel run reads the setting. The run's record keeps the number it used as `atOnce`, beside `mode`, and
    `conveyor.sh release-run atonce` prints it. The output shows each file's
    lines together, with its `-- ok` or `-- FAIL` line, when the file ends. In parallel, the suite starts the longest
@@ -131,6 +135,42 @@ to the merged `main` on GitHub. Step 6 then works on top of the merge: the relea
 that commit. When `main` on GitHub has a commit that
 `conveyor/landing` does not have, the release stops before the merge. When GitHub refuses the merge, the release
 stops with GitHub's reason, and the pull request stays open.
+
+## Where the suite runs
+
+The release suite runs on this machine unless you choose a Linux box over ssh. Card test steps always run on this
+machine. Only the release suite moves.
+
+- `conveyor.sh control suite-machine local` runs the suite on this machine. This is the default.
+- `conveyor.sh control suite-machine ssh <user@host> [--dir <folder>]` runs it on that box. The folder is
+  `~/conveyor-suite` unless you give one. It can be `~`, a folder under `~/`, or a full path.
+
+The box needs bash 5.1 or later and git. Conveyor connects with ssh and does not ask for a password, so set up an ssh
+key for the box first. The box needs no access to the repository and gets no GitHub token. Conveyor sends it the
+commit under test as a git bundle, and runs the pack's `worktree.setup` there after the checkout. When the commit
+has `.conveyor/test-machine.sh`, Conveyor runs that script on the box first, and runs it again only after the script
+changes. Use it to install what the tests need. A `# tools: <tool>...` line in it names the tools for the check below.
+
+`conveyor.sh suite-machine check` prints one line for each need of the chosen machine, `ok` or `missing`: ssh reach,
+bash 5.1 or later, jq, git, each tool that `.conveyor/test-machine.sh` names, and the CPU count and test slots.
+`--json` prints the same as JSON. The command exits 1 when a need is missing.
+
+A run on the box takes no test slot on this machine. In parallel mode it runs at most the box's test slots at once.
+The box counts its test slots as this machine does: `testSlots` in the box's own
+[host file](configuration.md#the-host-file), and never more than its cores. A run on the box has the same time limit
+as a run here (`testTimeout`), timed by the box's clock. A run that ends after the limit fails as timed out, also
+when its tests pass. When a run is still going after the limit, Conveyor stops it on the box.
+The suite's output comes back to this machine at least every 10 seconds, so the Board shows its progress as it does
+for a run here. The run's record keeps the machine as `machine`: its kind, its name, the step under way,
+the seconds of each step, and the reason when a step failed. The commit status names the machine. For a box it says
+"a Linux box over ssh" and not the host name, because the status is public. When the suite uses an earlier pass of
+the same commit and runs no test, the status names no machine.
+
+When the box cannot be reached, or its setup or checkout fails, the run ends as `not started` with the reason. No
+test runs, no status is posted, and the suite never moves to another machine by itself. `release-run stop` also
+stops the suite on the box. To run one suite on this machine without a change to the rule, add `--machine local`:
+`conveyor.sh release-run [prep] <version> [--parallel | --serial] --machine local`. That run does not use a pass
+from a box, so the suite runs on this machine.
 
 ## Cards during a release
 

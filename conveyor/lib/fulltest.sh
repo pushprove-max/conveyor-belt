@@ -100,21 +100,23 @@ suiteprog() { # <worktree>
 }
 # The whole-suite results of each commit (issues 43 and 44), shared by every whole-suite run: Run full test suite and
 # Push landed (fullrun()), release-prep and release (relsuite(), commands/release-prep.sh). One line a commit, the
-# newest last: {sha, time, by (the run that made it: full test, push landed, release-prep or release), files: {<file>:
-# ok or fail}}, each test file of <sha> by its result, as of the run's `-- ok|FAIL <file>` lines; a run that reused one
+# newest last: {sha, time, by (the run that made it: full test, push landed, release-prep or release), machine (where
+# it ran: local, or ssh for a release suite on a box over ssh, lib/suitehost.sh), files: {<file>: ok or fail}}, each test file of <sha> by its result, as of the run's `-- ok|FAIL <file>` lines; a run that reused one
 # has that run's results of the files it did not run. Only a run that named a result for every file it selected (its
 # `TESTRUN files=N` lines) is kept. The newest SUITES_KEEP commits are kept.
 SUITES=${STATE%/*}/suites.jsonl
 SUITES_KEEP=50
 # The line of $SUITES on <commit>, else on its nearest ancestor (the fewest commits between), the newest of a tie: a
-# later run on an older commit does not hide the result on <commit> or on a nearer one. Fails with none.
+# later run on an older commit does not hide the result on <commit> or on a nearer one. A run told to run here
+# (`release-run ... --machine local`: CONVEYOR_RELEASE_MACHINE) reuses no line of a box over ssh. Fails with none.
 suitebase() { # <commit>
   local l s d best='' bd=''
   while IFS= read -r l; do
     s=$(jq -r .sha <<<"$l")
     git merge-base --is-ancestor "$s" "$1" 2>/dev/null && d=$(git rev-list --count "$s..$1" 2>/dev/null) || continue
     [ -n "$bd" ] && [ "$d" -ge "$bd" ] || { best=$l; bd=$d; }
-  done < <(jq -cR 'fromjson? | objects | select((.sha | type) == "string" and (.files | type) == "object")' "$SUITES" 2>/dev/null | jq -cs 'reverse[]')
+  done < <(jq -cR 'fromjson? | objects | select((.sha | type) == "string" and (.files | type) == "object")
+    | select(env.CONVEYOR_RELEASE_MACHINE != "local" or .machine != "ssh")' "$SUITES" 2>/dev/null | jq -cs 'reverse[]')
   [ -n "$best" ] && printf '%s\n' "$best"
 }
 # Whether the suite on <commit> reruns some files only (suitebase()'s line is on an ancestor of <commit>, or on it), and
@@ -159,10 +161,10 @@ suitekeep() { # <worktree> <commit> <exit> <by> [reused line]
   of=$(suiteprog "$1"); of=$(jq -r '.files.of // null' <<<"$of" 2>/dev/null) || return 1
   [ "$of" != null ] && [ "$(jq length <<<"$r")" -ge "$of" ] || return 1
   [ "$3" = 0 ] || jq -e 'any(.[]; . == "fail")' <<<"$r" > /dev/null || return 1
-  jq -cn --arg s "$2" --arg t "$(clock)" --arg by "$4" --slurpfile r <(printf '%s' "$r") --slurpfile o <(printf '%s' "${5:-null}") --rawfile tr <(git ls-tree -r --name-only "$2") '
+  jq -cn --arg s "$2" --arg t "$(clock)" --arg by "$4" --arg m "${SH_KIND:-local}" --slurpfile r <(printf '%s' "$r") --slurpfile o <(printf '%s' "${5:-null}") --rawfile tr <(git ls-tree -r --name-only "$2") '
     $r[0] as $r | $o[0] as $o | ($tr | split("\n") | map({(.): true}) | add) as $has
     | (if $o == null then {} else $o.files | with_entries(select(.value == "ok" and $has[.key] and ($r[.key] | not))) end) as $k
-    | {sha: $s, time: $t, by: $by, files: ($k + $r | with_entries(select($has[.key])))},
+    | {sha: $s, time: $t, by: $by, machine: $m, files: ($k + $r | with_entries(select($has[.key])))},
       (if $o == null then null else {sha: $o.sha, time: $o.time, ran: ($r | keys), kept: ($k | length)} end)' \
     | { IFS= read -r f && suiteadd "$f" && IFS= read -r f && printf '%s\n' "$f"; }
 }
@@ -330,7 +332,8 @@ fullalone() { # <worktree> <testfails() of the run> <unit> [field]
   local rc
   jq -r --argjson u "$3" '([.passed[]?, .files[]?.file, .okcases[]?.file, .passcases[]?.file, (.timeout.file // empty)] | unique - [$u.file] | .[] | "pass\t\(.)"),
     ($u | if .case != null then "fail\t\(.file)\t\(.case)" elif .file != null then "fail\t\(.file)" else empty end)' <<<"$2" > "$1.rerun" || return 1
-  tests "$1" "${4:-test.full}" alone; rc=$?
+  # A release suite on a box over ssh runs each case alone there too (lib/suitehost.sh hosttests()).
+  if [ "${SH_KIND:-local}" = ssh ]; then hosttests "$1" "${4:-test.full}" alone; else tests "$1" "${4:-test.full}" alone; fi; rc=$?
   case $rc in 0) echo passed ;; 124) echo timeout ;; *) if [ "$rc" -gt 128 ]; then echo killed; else echo failed; fi ;; esac
 }
 # Each failed case of a red run, judged (above): prints them as a JSON array. With <release> (release-prep's red suite,

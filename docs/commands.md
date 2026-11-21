@@ -235,4 +235,11 @@ GitHub and releases:
   `release-run prep <version>` is its **Draft notes** and **Run suite**: `release-prep` alone, which releases nothing.
   `release-run anyway <version> --by <who>` is its **Release anyway**: `release --anyway` alone.
   `release-run stop` stops that run ([Releases](releases.md#a-release-from-the-board)).
-  `release-run atonce` prints the most test files a parallel suite runs at once on this machine.
+  `release-run atonce` prints the most test files a parallel suite runs at once on the machine it runs on.
+  Add `--machine local` at the end to run that one suite on this machine, whatever `control suite-machine` chose.
+- `control suite-machine local` runs the release suite on this machine, the default.
+  `control suite-machine ssh <user@host> [--dir <folder>]` runs it on a Linux box over ssh
+  ([Where the suite runs](releases.md#where-the-suite-runs)).
+- `suite-machine check [--json]` prints, for the machine the release suite runs on, each need as `ok` or `missing`:
+  ssh reach, bash 5.1 or later, jq, git, each tool that `.conveyor/test-machine.sh` names, and its CPU count and test
+  slots.
