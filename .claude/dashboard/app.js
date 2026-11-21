@@ -262,6 +262,20 @@
     setLength(p, v, `${p.mod.title} shows ${v === 'all' ? `all ${n}` : `${v} of ${n}`} rows`);
     p.grip.focus();
   }
+  // On a phone the tab list scrolls sideways: the selected tab is brought into view inside the list (never the page, so
+  // a wide screen, where all six fit, does not move). Again only when the tab, or the list's width or the room it has,
+  // changed (a count appearing, a turned phone), so a refresh does not undo the reader's own scroll.
+  let shownTab = '';
+  function showTab() {
+    const list = document.querySelector('#tabs .tabs-list'), b = byId(`tab-${tab}`);
+    if (!list || !b) return;
+    const key = `${tab}|${list.scrollWidth}|${list.clientWidth}`;
+    if (key === shownTab) return;
+    shownTab = key;
+    const l = list.getBoundingClientRect(), r = b.getBoundingClientRect();
+    if (r.right > l.right) list.scrollLeft += r.right - l.right;
+    if (r.left < l.left) list.scrollLeft -= l.left - r.left;
+  }
   function drawTabs() {
     const bar = byId('tabs');
     if (!bar || !grid) return;  // a page with the head alone has the tabs as links (startHead)
@@ -299,6 +313,7 @@
     });
     grid.setAttribute('role', 'tabpanel');
     grid.setAttribute('aria-labelledby', `tab-${tab}`);
+    showTab();  // after the counts: they change the tabs' widths
   }
 
   // ---- words a phone can open ----
@@ -616,7 +631,7 @@
       if (tab === was && last) { idsOf(tab).forEach((id) => draw(panels.get(id), last.panels[partOf(id)])); arrangeSoon(); }
       drawHead();
     });
-    window.addEventListener('resize', () => { fitHead(); arrangeSoon(); });
+    window.addEventListener('resize', () => { fitHead(); showTab(); arrangeSoon(); });
     // A restart costs the collector's time: it asks for a second click.
     twice(byId('restart'), 'spend', 'Click again to restart the Board\'s feed', restart);
     tick();

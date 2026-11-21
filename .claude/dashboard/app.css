@@ -261,6 +261,13 @@ h1 { font-size: var(--fs-lg); font-weight: 700; letter-spacing: -0.01em; }
 .tabs { padding: var(--sp-2) var(--sp-5) 0; background: var(--surface); border-bottom: 1px solid var(--border); }
 .tabs:empty { display: none; }
 .tabs-list { display: flex; gap: var(--sp-1); }
+/* The six tabs are wider than a phone: the list scrolls sideways inside the page (no bar drawn) and each tab keeps its
+   name on one line, so the page is never wider than the screen. On a wider screen they all fit and nothing moves. */
+.tabs-list { overflow-x: auto; scrollbar-width: none; }
+/* overflow-x clips up and down too: room for the focus ring (2px and its 2px offset) round a tab, taken back by the margin. */
+.tabs-list { padding: 4px; margin: -4px; }
+.tabs-list::-webkit-scrollbar { display: none; }
+.tab { flex: none; white-space: nowrap; }
 .tab { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 40px; padding: 0 var(--sp-4); font-size: var(--fs-sm); font-weight: 650; color: var(--muted);
   background: transparent; border: 0; border-bottom: 3px solid transparent; border-radius: var(--radius-sm) var(--radius-sm) 0 0; cursor: pointer; }
 .tab:hover { background: var(--surface-2); color: var(--text); }
