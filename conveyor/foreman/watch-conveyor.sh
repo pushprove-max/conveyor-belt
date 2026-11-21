@@ -567,7 +567,10 @@ wake() {
 }
 
 # The landings held (record(): "held landing" rows) wait for the last awaited issue in flight to land and wake in one. They
-# go at once when another wake of the Conveyor watcher goes, or when the waiter has restarted since they were first held.
+# go at once when another new wake of the Conveyor watcher, from any project, goes in the same poll, or when the waiter
+# has restarted since they were first held. Only a fresh row from a landing's own project's snapshot goes: a project whose
+# snapshot did not read makes no held row, so its stored landing stays held, even when a new block from its health, or a
+# wake of another project, goes in that poll.
 # conveyor-held.txt keeps, while any is held, the waiter's pid from then and each held row, so its commit is still named
 # when the batch ends after the snapshot's day (the snapshot lists a day's landings); the rows themselves are made again
 # every poll, as nothing reports them yet. A poll with no row for a kept landing (its record did not read) keeps it.
