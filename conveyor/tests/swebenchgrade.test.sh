@@ -53,7 +53,7 @@ case $1 in
 esac
 EOF
   chmod +x "$C/bin/docker"
-  swebase lib/x.py 'keep\nold\n'
+  swebase lib/x.py 'keep\n# old\n'
   h() { env C="$C" PATH="$C/bin:$PATH" PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$C-mods" TMPDIR="$C/tmp" HOME="$C/home" HF_HOME="$C/home/hf" python3 "$SRC/bench/swe_harness.py" "$@"; }
 }
 # swebase <path> <content>...: the base commit's files, in the repository $C/base (content as printf %b reads it).
@@ -79,7 +79,7 @@ swegrade() {
   SWE_PASSED=$C/passed.json h grade o/ds rev1 o__p-1 "$C/patch" "$C/grade" r1
 }
 # A patch that fixes the code file as the reference fix does (2 code lines), the base of the cases below.
-SWEPATCH=('diff --git a/lib/x.py b/lib/x.py' '--- a/lib/x.py' '+++ b/lib/x.py' '@@ -1,2 +1,2 @@' ' keep' '-old' '+new')
+SWEPATCH=('diff --git a/lib/x.py b/lib/x.py' '--- a/lib/x.py' '+++ b/lib/x.py' '@@ -1,2 +1,2 @@' ' keep' '-# old' '+# new')
 
 # Bug: a result kept only resolved yes or no, so a patch that fixed the task and broke another test looked the same as
 # one that fixed nothing. A patch that makes every fail-to-pass test pass and fails one pass-to-pass test is `broke`,
@@ -92,8 +92,10 @@ t_swegradebroke() {
     || fail "a patch that fixes the task and breaks one other test is not class broke with its counts and the failed test: $out"
   [ "$(jq -c .ref <<<"$out")" = '{"code":{"files":1,"added":1,"removed":1},"test":{"files":1,"added":2,"removed":0}}' ] \
     || fail "the reference fix's size (code and test files) is not kept: $out"
-  # Bug: an unresolved patch was counted clean when its other measures held.
-  [ "$(jq -c .measures.clean <<<"$out")" = false ] || fail "an unresolved patch is not clean false: $out"
+  # Bug: an unresolved patch was counted clean when its other measures held. The patch is a comment swap, so lint, size
+  # and strays all hold, and resolved is the only measure that can make clean false.
+  [ "$(jq -c '.measures | [.lintClean, .strays, .size <= 2, .clean]' <<<"$out")" = '[true,false,true,false]' ] \
+    || fail "an unresolved patch whose lint, size and strays hold is not clean false: $out"
   ! grep -rlE 'REFFIX|HIDDENTEST' "$C" && ! grep -qE 'REFFIX|HIDDENTEST' <<<"$out" || fail "text of the reference fix or a hidden test is in the result or on disk after the grade: $out"
 }
 t_swegradepartial() {
