@@ -141,7 +141,7 @@
     const s = K.box(r.id);
     s.append(K.table(['Arm', 'Result', ['Sessions', 'r'], ['Tokens', 'r'], ['Minutes', 'r'], ['Cost', 'r']], cols.map((c) => [K.armSaid({ s: c.s, label: K.colName(c) }), one(c),
       { v: K.num(c.sessions) === null ? K.NOT_KEPT : String(c.sessions), c: 'r' }, { v: K.kTok(c.tokens), c: 'r' }, { v: K.num(c.minutes) === null ? K.NOT_KEPT : String(c.minutes), c: 'r' },
-      { v: `${K.usd(K.costOf(c.cost).usd)}${K.costOf(c.cost).state === 'estimate' ? ' estimate' : ''}`, c: 'r' }])));
+      { v: K.costSaid(c.cost), c: 'r' }])));
     if (tasks.length) s.append(K.button(tasks.length === 1 ? 'Open the task' : 'Open its first task', '', 'open-task', `Open the task ${tasks[0].id}`, () => K.openTask(tasks[0].id)));
     // A run whose process ended with no end recorded (gone, no ended) keeps Stop: it records the end and removes the
     // containers. Once recorded, it still reads interrupted (stateOf).

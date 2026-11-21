@@ -75,6 +75,8 @@
   // A cost `bench swe` recorded: {usd, state}, known, estimate (an agent arm's tokens at its model's list price), partial
   // or unknown; anything else (a result from before costs were recorded) is unknown, never $0.
   const costOf = (c) => { const o = obj(c); return o && ['known', 'estimate', 'partial'].includes(o.state) && num(o.usd) !== null ? { usd: o.usd, state: o.state } : { usd: null, state: 'unknown' }; };
+  // A cost as a cell shows it: an estimate or a partial (only some work priced, so the figure is a subtotal) says so.
+  const costSaid = (c) => { const k = costOf(c); return `${usd(k.usd)}${k.state === 'estimate' || k.state === 'partial' ? ` ${k.state}` : ''}`; };
   // The cost of several cells: usd null when one is not priced in whole (a total that left it out would read as the whole).
   function costSum(cells) {
     let total = 0, est = false;
@@ -462,7 +464,7 @@
     return nav;
   }
   const K = { B, PAGES, NOT_KEPT, num, list, obj, plural, pct, usd, fmtMin, kTok, wilson, noise, noised, noiseSaid, noisePct, told, median, mean, kept, sum,
-    said, graded, costOf, costSum, apart, lossOf, testsOf, testsSaid, linesOf, isTest, isConveyor, colName, verOf, paint, h, chip, button, add,
+    said, graded, costOf, costSaid, costSum, apart, lossOf, testsOf, testsSaid, linesOf, isTest, isConveyor, colName, verOf, paint, h, chip, button, add,
     answers, verdict, box, grid, stat, note, callout, dot, armSaid, table, fold, kv, bar, ciBar, svg, say, saidAt, go, openTask, live, readHist,
     readRun, hist, allRuns, runsOf, armsOf, colsOf, keysOf, benchOf, setSize, reading, studyOf, armOf, figsOf, versionsOf, moved, send,
     stopRun, runActs, runTools, RUNS_SAID, stateOf, elapsed, draw: () => draw() };

@@ -109,3 +109,14 @@ test('Compare: Archive of the runs of the two sides, in one request', async () =
   act(acts, 'archive-runs').click();
   assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['runs', 'archive', OLDS[0][1], STUDY]]);
 });
+
+// Bug it guards: the run history showed the subtotal of a run only some of whose work could be priced (state "partial")
+// the same way as a fully priced run, so it read as the run's whole cost. A partial cost says "partial", an estimate
+// says "estimate", a known cost has no word.
+test('Scoreboard run history: the cost of a run priced in part says partial, as an estimate says estimate', async () => {
+  const set = BH.study(), [a, b, c] = [OLDS[0][1], OLDS[1][1], OLDS[2][1]];
+  mark(set, { [a]: { cost: { usd: 3.5, state: 'partial' } }, [b]: { cost: { usd: 4.25, state: 'known' } }, [c]: { cost: { usd: 5.75, state: 'estimate' } } });
+  const w = await opened(set);
+  const cost = (id) => text(page(w).querySelector(`.bench-history tr[data-run="${id}"]`).lastElementChild);
+  assert.deepEqual([cost(a), cost(b), cost(c)], ['$3.50 partial', '$4.25', '$5.75 estimate']);
+});

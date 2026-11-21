@@ -1074,8 +1074,10 @@ not ended cannot be archived or deleted: stop it first.
 
 The cost of a run, an arm or a task is its [cost at list prices](benchmarks.md#results), as the build machine
 recorded it. A cost marked "estimate" is an agent arm's tokens, priced as input tokens at its model's list price, as
-the agent reports no split by kind. "Not priced" means that a session has no usage that can be priced. Runs from
-before costs were recorded are not priced, never $0.
+the agent reports no split by kind. A cost marked "partial" is a subtotal: only some of the work could be priced, so
+the figure is not the whole cost of the run. The run history and the table of a finished run show both marks. "Not
+priced" means that a session has no usage that can be priced. Runs from before costs were recorded are not priced,
+never $0.
 
 ## Accounts
 

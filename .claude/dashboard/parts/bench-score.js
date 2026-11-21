@@ -281,12 +281,12 @@
 
   // ---- the run history, folded at the foot ----
   function historyRow(r) {
-    const box = h('input'), cols = K.colsOf(r), [word, tone] = K.stateOf(r), st = [K.chip(word, tone)], k = K.costOf(r.cost);
+    const box = h('input'), cols = K.colsOf(r), [word, tone] = K.stateOf(r), st = [K.chip(word, tone)];
     box.type = 'checkbox'; box.checked = K.B.sel.includes(r.id); box.dataset.act = `pick-${r.id}`; box.setAttribute('aria-label', `Select ${r.id}`);
     box.addEventListener('change', () => { K.B.sel = box.checked ? K.B.sel.concat(r.id) : K.B.sel.filter((x) => x !== r.id); K.draw(); });
     if (typeof r.archived === 'string') st.push(' ', K.chip('archived', 'quiet'));
     return [box, { v: r.id, c: 'mono' }, cols.length ? `${K.colName(cols[0])}${cols.length > 1 ? ` · ${cols.length} arms` : ''}` : 'no arm', { v: String(K.num(r.n) || 0), c: 'r' }, st,
-      K.B.ctx.when(r.started), { v: K.usd(k.usd), c: 'r' }];
+      K.B.ctx.when(r.started), { v: K.costSaid(r.cost), c: 'r' }];
   }
   function historyFold() {
     const runs = K.allRuns(), arch = runs.filter((r) => typeof r.archived === 'string').length;
