@@ -44,15 +44,26 @@ cat > "$MANIFEST" <<'JSON'
 }
 JSON
 
-check() { if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3)"; fi }
+# Each hook run since the last check, so a failed check names the payload it checked, not only the two values.
+INPUTS="$TMP/inputs"; : > "$INPUTS"
+check() {
+  local in; in=$(cat "$INPUTS"); : > "$INPUTS"
+  if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3; hook input: ${in:-none})"; fi
+}
+# hook: runs $HOOK on the payload on stdin, and logs the hook's name, any approval and the payload.
+hook() {
+  local in; in=$(cat)
+  printf '[%s%s <<< %s]' "${HOOK##*/}" "${CONVEYOR_DEP_APPROVED+ CONVEYOR_DEP_APPROVED=$CONVEYOR_DEP_APPROVED}" "$in" >> "$INPUTS"
+  bash "$HOOK" <<<"$in"
+}
 # The hook reads the command's directory from the payload's cwd; the fixture
 # directory has no node_modules, so only the link cases below see one.
 bash_p() { jq -cn --arg c "$1" --arg d "${2:-$TMP}" '{tool_name:"Bash", cwd:$d, tool_input:{command:$c}}'; }
 edit()   { jq -cn --arg fp "$1" --arg o "$2" --arg n "$3" '{tool_name:"Edit", tool_input:{file_path:$fp, old_string:$o, new_string:$n}}'; }
 write()  { jq -cn --arg fp "$1" --arg c "$2" '{tool_name:"Write", tool_input:{file_path:$fp, content:$c}}'; }
-run()    { bash "$HOOK" >/dev/null 2>&1 <<<"$1"; echo $?; }
-run_env() { env "$1" bash "$HOOK" >/dev/null 2>&1 <<<"$2"; echo $?; }
-err()    { bash "$HOOK" 2>&1 >/dev/null <<<"$1"; }
+run()    { hook >/dev/null 2>&1 <<<"$1"; echo $?; }
+run_env() { ( export "${1?}"; hook >/dev/null 2>&1 <<<"$2" ); echo $?; }
+err()    { hook 2>&1 >/dev/null <<<"$1"; }
 
 INSTALL="npm ""install"
 ADD="yarn ""add"
@@ -68,6 +79,11 @@ check "yarn add blocks"                         2 "$(run "$(bash_p "$ADD lodash"
 check "a lockfile-driven install passes"        0 "$(run "$(bash_p "npm ci")")"
 check "an approved install passes"              0 \
   "$(run "$(bash_p "CONVEYOR_DEP_APPROVED=1 $INSTALL lodash")")"
+# Bug: a failed check printed only the two values, never the command, package or approval the hook was given.
+check "a failed check names the payload and approval it checked" 0 \
+  "$( (run_env CONVEYOR_DEP_APPROVED=lodas "$(bash_p "$INSTALL lodash")" >/dev/null
+      cp "$INPUTS" "$TMP/probe.in"; INPUTS=$TMP/probe.in; check probe x y) \
+    | grep -qF "(expected x, got y; hook input: [dependency-addition-guard.sh CONVEYOR_DEP_APPROVED=lodas <<< $(bash_p "$INSTALL lodash")])" && echo 0 || echo 1)"
 # The name trim, run under the system awk with owner_approved stubbed to print each name. Bug: a cut list holding
 # "[=" is an equivalence class to gawk, which prints "invalid collating element" and trims nothing.
 eval "$(sed -n '/^cmd_approved() {/,/^}/p' "$HOOK")"
@@ -103,7 +119,7 @@ check "adding a devDependency blocks"           2 \
 check "bumping an existing dependency passes"   0 \
   "$(run "$(edit "$MANIFEST" '"zod": "^3.22.0"' '"zod": "^3.25.0"')")"
 check "a version bump is SILENT"                "" \
-  "$(bash "$HOOK" 2>&1 <<<"$(edit "$MANIFEST" '"zod": "^3.22.0"' '"zod": "^3.25.0"')")"
+  "$(hook 2>&1 <<<"$(edit "$MANIFEST" '"zod": "^3.22.0"' '"zod": "^3.25.0"')")"
 check "removing a dependency passes"            0 \
   "$(run "$(edit "$MANIFEST" '  "devDependencies": {
     "typescript": "^5.4.0"
@@ -122,7 +138,7 @@ check "a new top-level field is not a package"  0 \
   "$(run "$(edit "$MANIFEST" '"name": "fixture"' '"name": "fixture",
   "license": "UNLICENSED"')")"
 check "a script addition is SILENT"             "" \
-  "$(bash "$HOOK" 2>&1 <<<"$(edit "$MANIFEST" '"build": "tsc"' '"build": "tsc",
+  "$(hook 2>&1 <<<"$(edit "$MANIFEST" '"build": "tsc"' '"build": "tsc",
     "lint": "eslint"')")"
 
 # A manifest the guard cannot parse is blocked plainly, never judged by
@@ -148,7 +164,7 @@ ADD_LODASH=$(edit "$MANIFEST" "$DEPS_OLD" '"dependencies": {
 check "an approved package may be written in"   0 \
   "$(run_env CONVEYOR_DEP_APPROVED=lodash "$ADD_LODASH")"
 check "an approved write is SILENT"             "" \
-  "$(env CONVEYOR_DEP_APPROVED=lodash bash "$HOOK" 2>&1 <<<"$ADD_LODASH")"
+  "$(CONVEYOR_DEP_APPROVED=lodash hook 2>&1 <<<"$ADD_LODASH")"
 check "approval is exact, not a prefix"         2 \
   "$(run_env CONVEYOR_DEP_APPROVED=lodas "$ADD_LODASH")"
 check "approving a different package does not help" 2 \
@@ -294,14 +310,14 @@ mkdir -p "$TMP/ra"; RA="$TMP/ra/package.json"
 printf '{\n  "scripts": {\n    "jest": "jest"\n  },\n  "devDependencies": {\n    "jest": "^29.0.0",\n    "ts-jest": "^29.0.0"\n  }\n}\n' > "$RA"
 edit_all() { jq -cn --arg fp "$1" --arg o "$2" --arg n "$3" '{tool_name:"Edit", tool_input:{file_path:$fp, old_string:$o, new_string:$n, replace_all:true}}'; }
 check "a replace-all rename of a repeated key into a new package blocks" 2 "$(run "$(edit_all "$RA" '"jest":' '"vitest":')")"
-check "the refusal names the package the rename adds" 1 "$(bash "$HOOK" 2>&1 >/dev/null <<<"$(edit_all "$RA" '"jest":' '"vitest":')" | grep -c "'vitest'")"
+check "the refusal names the package the rename adds" 1 "$(hook 2>&1 >/dev/null <<<"$(edit_all "$RA" '"jest":' '"vitest":')" | grep -c "'vitest'")"
 check "a replace-all edit that adds no name passes" 0 "$(run "$(edit_all "$RA" '"^29.0.0"' '"^30.0.0"')")"
 # Old text that is in the file twice cannot be placed: a Codex hunk goes where
 # its anchor says, which this hook never sees, so reading it as the FIRST match
 # passed a rename that really landed in the dependency map. Claude's own Edit
 # refuses such an edit anyway.
 check "a rename whose old text is in the file twice blocks without replace-all" 2 "$(run "$(edit "$RA" '"jest":' '"vitest":')")"
-check "and the refusal says the text is there more than once" 1 "$(bash "$HOOK" 2>&1 >/dev/null <<<"$(edit "$RA" '"jest":' '"vitest":')" | grep -c 'more than once')"
+check "and the refusal says the text is there more than once" 1 "$(hook 2>&1 >/dev/null <<<"$(edit "$RA" '"jest":' '"vitest":')" | grep -c 'more than once')"
 check "the same rename with enough of its line to be the only match passes" 0 "$(run "$(edit "$RA" '"jest": "jest"' '"vitest": "jest"')")"
 # The shape a two-hunk Codex patch arrives in: the second hunk's text is in the
 # script map and the dependency map alike.
@@ -320,7 +336,7 @@ check "a second URL requirement blocks" 2 \
 check "a VCS URL requirement blocks" 2 \
   "$(run "$(edit "$URLREQ" 'requests==2.0' $'requests==2.0\ngit+https://b.example/two.git@v2')")"
 check "the refusal names the URL" 1 \
-  "$(bash "$HOOK" 2>&1 >/dev/null <<<"$(edit "$URLREQ" 'requests==2.0' $'requests==2.0\nhttps://b.example/two-2.0-py3-none-any.whl')" | grep -c "('https://b.example/two-2.0-py3-none-any.whl'")"
+  "$(hook 2>&1 >/dev/null <<<"$(edit "$URLREQ" 'requests==2.0' $'requests==2.0\nhttps://b.example/two-2.0-py3-none-any.whl')" | grep -c "('https://b.example/two-2.0-py3-none-any.whl'")"
 check "another line of a manifest that holds a URL requirement still edits" 0 "$(run "$(edit "$URLREQ" 'requests==2.0' 'requests==2.1')")"
 check "a named URL requirement is still read by its name" 0 \
   "$(run "$(edit "$URLREQ" 'requests==2.0' 'requests @ https://a.example/requests-2.1.whl')")"
@@ -442,7 +458,7 @@ done
 # found that hid an install after the note:
 for E in "<<'END NOTE'" "<<E'OF'" "<<'E'OF" '<<"E""OF"' "<<E\\OF" "<<'END'\\ NOTE" '<<"E\"OF"'; do
   check "an install after a note with the end word $E is refused" 2 \
-    "$(bash "${HOOK%/*}/bash-guardrails.sh" >/dev/null 2>&1 <<<"$(bash_p "$(printf 'cat %s\nnote\nEOF\n%s lodash' "$E" "$INSTALL")")"; echo $?)"
+    "$(HOOK=${HOOK%/*}/bash-guardrails.sh hook >/dev/null 2>&1 <<<"$(bash_p "$(printf 'cat %s\nnote\nEOF\n%s lodash' "$E" "$INSTALL")")"; echo $?)"
 done
 ci_blocks "$(printf "cat <<'EOF'\nnote\nEOF\ncd web && npm ci")" "$(printf "cat <<'EOF'\nnote\nEOF\nnpm ci")" \
   "$(printf "gh issue create --body-file - <<'EOF'\nnote\nEOF\nnpm ci")"
@@ -457,9 +473,9 @@ for C in "bash -c 'npm --prefix \"$TMP/work tree/web\" ci'" "bash -c \"npm --pre
 done
 # Without its quoted-span reader the guard reads every line whole: installs still block, and so does a message that names one.
 mkdir -p "$TMP/nolib"; cp "$HOOK" "$TMP/nolib/"
-check "with its quoted-span reader missing the guard refuses a plain install" 2 "$(bash "$TMP/nolib/dependency-addition-guard.sh" >/dev/null 2>&1 <<<"$(bash_p "$INSTALL lodash")"; echo $?)"
-check "and refuses npm ci at a linked root" 2 "$(bash "$TMP/nolib/dependency-addition-guard.sh" >/dev/null 2>&1 <<<"$(bash_p "npm ci" "$WTX")"; echo $?)"
-check "and blocks a message that names an install, never passes one unread" 2 "$(bash "$TMP/nolib/dependency-addition-guard.sh" >/dev/null 2>&1 <<<"$(bash_p "gh issue create --body 'bash -c \"$INSTALL lodash\"'")"; echo $?)"
+check "with its quoted-span reader missing the guard refuses a plain install" 2 "$(HOOK=$TMP/nolib/dependency-addition-guard.sh hook >/dev/null 2>&1 <<<"$(bash_p "$INSTALL lodash")"; echo $?)"
+check "and refuses npm ci at a linked root" 2 "$(HOOK=$TMP/nolib/dependency-addition-guard.sh hook >/dev/null 2>&1 <<<"$(bash_p "npm ci" "$WTX")"; echo $?)"
+check "and blocks a message that names an install, never passes one unread" 2 "$(HOOK=$TMP/nolib/dependency-addition-guard.sh hook >/dev/null 2>&1 <<<"$(bash_p "gh issue create --body 'bash -c \"$INSTALL lodash\"'")"; echo $?)"
 # Each sender of the hook's list only carries text (gh, rg and decision.sh are run above): a message naming npm ci
 # passes, and the same with a real npm ci chained after it blocks. Bugs: a sender left out of the list refuses a
 # message that only names the install; a chained install riding through behind a sender.

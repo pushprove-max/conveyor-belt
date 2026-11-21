@@ -13,7 +13,9 @@ mkdir -p "$T/tmp" "$T/data"
 mapfile -t CMDS < <(jq -r '.hooks[][].hooks[].command' "$SRC/hooks/hooks.json")
 
 PASS=0 FAIL=0
-check() { if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3)"; fi }
+# check <name> <expected> <actual> <input>: <input> is the hook commands and payloads the value came from, printed on a
+# failure so it can be read without a second run.
+check() { if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3; input: $4)"; fi }
 # input <session> <tool>: a PreToolUse input for <tool> in <session>.
 input() {
   case $2 in
@@ -23,45 +25,54 @@ input() {
   esac
 }
 # every <project> <session>: runs every registered command with each input, side by side as Claude Code runs a tool
-# call's hooks; prints one line per run that exited non-zero or wrote to stderr, then all their stdout.
+# call's hooks; prints one line per run that exited non-zero or wrote to stderr, then all their stdout. What it ran is
+# left in $T/every.in, for the check's failure line (ran prints it).
 every() {
-  local d i=0 c tool; d=$(mktemp -d "$T/runs.XXXXXX")
+  local d i=0 c tool p; d=$(mktemp -d "$T/runs.XXXXXX")
+  { printf 'in %s, each of:' "$1"; printf ' [%s]' "${CMDS[@]}"; printf '; given each of:'; } > "$T/every.in"
   for tool in Bash Edit AskUserQuestion; do
+    p=$(input "$2" "$tool"); printf ' %s' "$p" >> "$T/every.in"
     for c in "${CMDS[@]}"; do
-      i=$((i+1))
-      ( cd "$1" && input "$2" "$tool" | CLAUDE_PROJECT_DIR=$1 bash -c "$c" > "$d/$i.out" 2> "$d/$i.err"; echo $? > "$d/$i.rc" ) &
+      i=$((i+1)); printf '[%s] on %s' "$c" "$p" > "$d/$i.what"
+      ( cd "$1" && printf '%s\n' "$p" | CLAUDE_PROJECT_DIR=$1 bash -c "$c" > "$d/$i.out" 2> "$d/$i.err"; echo $? > "$d/$i.rc" ) &
     done
   done
   wait
   for c in "$d"/*.rc; do
-    [ "$(cat "$c")" = 0 ] && [ ! -s "${c%.rc}.err" ] || echo "BAD exit $(cat "$c"): $(cat "${c%.rc}.err")"
+    [ "$(cat "$c")" = 0 ] && [ ! -s "${c%.rc}.err" ] || echo "BAD $(cat "${c%.rc}.what") exit $(cat "$c"): $(cat "${c%.rc}.err")"
   done
   cat "$d"/*.out
 }
+ran() { cat "$T/every.in"; }
 
 # A git folder with no .conveyor/project.json is no Conveyor project: every hook does nothing, so no tool is blocked.
 git init -q "$T/plain"
 out=$(every "$T/plain" s-plain)
-check "${#CMDS[@]} hooks x 3 tools, no pack: each exits 0 and prints nothing" "" "$out"
+check "${#CMDS[@]} hooks x 3 tools, no pack: each exits 0 and prints nothing" "" "$out" "$(ran)"
+# Bug: a failed check printed only the two values, never the hook commands and payloads that produced them.
+check "a failed check names the hook commands and payloads it ran" 0 \
+  "$(check probe x y "$(ran)" | grep -qF "each of: [${CMDS[0]}]" && check probe x y "$(ran)" | grep -qF "$(input s-plain Edit)" && echo 0 || echo 1)" \
+  "$(ran)"
 
 # Not a git checkout, even with a pack: the same.
 mkdir -p "$T/nogit/.conveyor"; jq -n --arg c "$PIN" '{plugin: {commit: $c}}' > "$T/nogit/.conveyor/project.json"
 out=$(every "$T/nogit" s-nogit)
-check "not a git checkout: each hook exits 0 and prints nothing" "" "$out"
+check "not a git checkout: each hook exits 0 and prints nothing" "" "$out" "$(ran)"
 
 # A Conveyor project whose pinned commit is not installed: no hook blocks, and the user is told once a session, not
 # once per hook or call.
 git init -q "$T/pinned"; mkdir -p "$T/pinned/.conveyor"; cp "$T/nogit/.conveyor/project.json" "$T/pinned/.conveyor/"
 want=$(jq -cn --arg m "$NOTICE" '{systemMessage: $m}')
 out=$(every "$T/pinned" s-one)
-check "pin not installed: no hook fails, and the first session hears it once" "$want" "$out"
+check "pin not installed: no hook fails, and the first session hears it once" "$want" "$out" "$(ran)"
 out=$(every "$T/pinned" s-one)
-check "pin not installed: the same session's next calls stay quiet" "" "$out"
+check "pin not installed: the same session's next calls stay quiet" "" "$out" "$(ran)"
 out=$(every "$T/pinned" s-two)
-check "pin not installed: another session hears it once too" "$want" "$out"
+check "pin not installed: another session hears it once too" "$want" "$out" "$(ran)"
 # A skill's call (no CONVEYOR_HOOK) still fails and says why, so setup and the /auto band see it.
 err=$(cd "$T/pinned" && CLAUDE_PROJECT_DIR=$T/pinned bash "$SRC/shim.sh" conveyor/conveyor.sh health 2>&1 >/dev/null); rc=$?
-check "pin not installed: a skill's call still fails, naming the commit" "1 conveyor: the project's Conveyor commit $PIN is not installed; run /conveyor-belt:setup" "$rc $err"
+check "pin not installed: a skill's call still fails, naming the commit" "1 conveyor: the project's Conveyor commit $PIN is not installed; run /conveyor-belt:setup" "$rc $err" \
+  "in $T/pinned, with no CONVEYOR_HOOK: bash shim.sh conveyor/conveyor.sh health"
 
 # A set-up project (its pin installed): the guards block what they block, through the same commands.
 mkdir -p "$T/data/conveyor/versions/$PIN/.claude/hooks/lib"
@@ -72,8 +83,9 @@ bash_hook() { # <command>: the exit of the registered git-safety hook on a Bash 
   (cd "$T/pinned" && jq -cn --arg c "$1" '{session_id: "s-set", tool_name: "Bash", tool_input: {command: $c}}' \
     | CLAUDE_PROJECT_DIR=$T/pinned bash -c "$gs" >/dev/null 2>&1); echo $?
 }
-check "set up: git-safety still refuses a forced push to main" 2 "$(bash_hook 'git push --force origin main')"
-check "set up: git-safety lets git status through" 0 "$(bash_hook 'git status')"
+check "set up: git-safety still refuses a forced push to main" 2 "$(bash_hook 'git push --force origin main')" \
+  "[$gs] on a Bash call of: git push --force origin main"
+check "set up: git-safety lets git status through" 0 "$(bash_hook 'git status')" "[$gs] on a Bash call of: git status"
 
 # Issue 18: a project that follows the plugin's releases, on a machine that has taken no commit. The first take waits
 # on its lock and on GitHub for longer than a hook's 30 s timeout, so a hook that waits for it blocks the call. Here the
@@ -88,10 +100,10 @@ git init -q "$T/follow"; mkdir -p "$T/follow/.conveyor"
 jq -n '{plugin: {follow: "releases"}}' > "$T/follow/.conveyor/project.json"
 start=$SECONDS
 out=$(CLAUDE_PLUGIN_ROOT=$T/plug every "$T/follow" s-follow)
-check "no commit taken: every hook ends within its timeout, not after the take" yes "$([ $((SECONDS - start)) -lt 30 ] && echo yes || echo "no, $((SECONDS - start)) s")"
-check "no commit taken: no hook fails, and the session hears it once" "$want" "$out"
+check "no commit taken: every hook ends within its timeout, not after the take" yes "$([ $((SECONDS - start)) -lt 30 ] && echo yes || echo "no, $((SECONDS - start)) s")" "$(ran)"
+check "no commit taken: no hook fails, and the session hears it once" "$want" "$out" "$(ran)"
 for i in $(seq 100); do compgen -G "$T/takes/*" >/dev/null && break; sleep 0.1; done
-check "no commit taken: the hooks started the take" yes "$(compgen -G "$T/takes/*" >/dev/null && echo yes || echo no)"
+check "no commit taken: the hooks started the take" yes "$(compgen -G "$T/takes/*" >/dev/null && echo yes || echo no)" "$(ran)"
 touch "$T/go"; for i in $(seq 100); do compgen -G "$T/takes/*" >/dev/null || break; sleep 0.1; done
 
 echo

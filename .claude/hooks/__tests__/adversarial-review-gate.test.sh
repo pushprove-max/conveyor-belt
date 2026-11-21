@@ -28,10 +28,25 @@ export REVIEW_GATE_BASE_REF
 HOOK="$(cd "$(dirname "$0")/.." && pwd)/adversarial-review-gate.sh"
 HOOK_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 PASS=0 FAIL=0
+# Each hook run since the last check, so a failed check names the input it checked, not only the two values.
+INPUTS=$(mktemp); trap 'rm -f "$INPUTS"' EXIT
 
-check() { if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3)"; fi }
+check() {
+  local in; in=$(cat "$INPUTS"); : > "$INPUTS"
+  if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3; hook input: ${in:-none})"; fi
+}
+# hook [<mode> <args>]: runs the hook, and logs its arguments or, in hook mode (no arguments), the payload it reads,
+# with each setting the gate takes from the environment and the folder it runs in.
+hook() {
+  local in="" v env=""; [ $# -gt 0 ] || in=$(cat)
+  for v in REVIEW_GATE_BASE_REF CONVEYOR_REVIEW_GATE_BYPASS CLAUDE_PROJECT_DIR; do
+    [ -z "${!v+x}" ] || env+=" $v=${!v}"
+  done
+  printf '[%s%s;%s in %s]' "${*:-<<< }" "$in" "$env" "$PWD" >> "$INPUTS"
+  if [ $# -gt 0 ]; then bash "$HOOK" "$@"; else bash "$HOOK" <<<"$in"; fi
+}
 cmd() { jq -cn --arg c "$1" '{tool_name:"Bash", tool_input:{command:$c}}'; }
-run() { bash "$HOOK" >/dev/null 2>&1 <<<"$(cmd "$1")"; echo $?; }
+run() { hook >/dev/null 2>&1 <<<"$(cmd "$1")"; echo $?; }
 
 # Case selector: CONVEYOR_SHELL_TEST_CASE=<case>[,<case>] runs only those sections; unset runs all; an unknown name fails.
 CASES=" screens blocks wrapped naming unrelated range class writers marker tooling-deploy watermark "
@@ -54,11 +69,11 @@ if case_on blocks; then
 check "./deploy.sh blocks"                      2 "$(run './deploy.sh dev')"
 check "scripts/deploy.sh blocks"                2 "$(run 'bash scripts/deploy.sh dev')"
 check "the block names who writes the marker, and no recorder" 0 \
-  "$(out=$(bash "$HOOK" 2>&1 >/dev/null <<<"$(cmd './deploy.sh dev')"); grep -qF 'written by .githooks/pre-push' <<<"$out" && ! grep -qF 'record-review-convergence' <<<"$out" && echo 0 || echo 1)"
+  "$(out=$(hook 2>&1 >/dev/null <<<"$(cmd './deploy.sh dev')"); grep -qF 'written by .githooks/pre-push' <<<"$out" && ! grep -qF 'record-review-convergence' <<<"$out" && echo 0 || echo 1)"
 check "the block names the change class"        0 \
-  "$(bash "$HOOK" 2>&1 >/dev/null <<<"$(cmd './deploy.sh dev')" | grep -qE '^class=(docs|tooling|gate-ci|runtime|cross-file|risky)$' && echo 0 || echo 1)"
+  "$(hook 2>&1 >/dev/null <<<"$(cmd './deploy.sh dev')" | grep -qE '^class=(docs|tooling|gate-ci|runtime|cross-file|risky)$' && echo 0 || echo 1)"
 check "the exported bypass permits the deploy"  0 \
-  "$(CONVEYOR_REVIEW_GATE_BYPASS=1 bash "$HOOK" >/dev/null 2>&1 <<<"$(cmd './deploy.sh dev')"; echo $?)"
+  "$(CONVEYOR_REVIEW_GATE_BYPASS=1 hook >/dev/null 2>&1 <<<"$(cmd './deploy.sh dev')"; echo $?)"
 check "the prefix bypass permits the deploy"    0 \
   "$(run 'CONVEYOR_REVIEW_GATE_BYPASS=1 ./deploy.sh dev')"
 # The prefix bypasses ONE command. A second deploy chained after it has to reach
@@ -142,7 +157,7 @@ if case_on naming; then
 # refused as if it shipped code.
 check "grepping the script passes"              0 "$(run 'grep -n Release deploy.sh')"
 check "grepping the script is SILENT"           "" \
-  "$(bash "$HOOK" 2>&1 <<<"$(cmd 'grep -n Release deploy.sh')")"
+  "$(hook 2>&1 <<<"$(cmd 'grep -n Release deploy.sh')")"
 check "reading the script passes"               0 "$(run 'sed -n 1,40p deploy.sh')"
 check "quoting the name in a message passes"    0 \
   "$(run 'git commit -m "document the deploy.sh gate"')"
@@ -151,7 +166,7 @@ fi
 if case_on unrelated; then
 # --- an unrelated command costs nothing ---------------------------------------
 check "an unrelated command passes"             0 "$(run 'npm run test:guards')"
-check "an unrelated command is SILENT"          "" "$(bash "$HOOK" 2>&1 <<<"$(cmd 'npm run test:guards')")"
+check "an unrelated command is SILENT"          "" "$(hook 2>&1 <<<"$(cmd 'npm run test:guards')")"
 
 fi
 if case_on range; then
@@ -159,13 +174,20 @@ if case_on range; then
 # One definition of "the runtime diff" is the whole reason pre-push shells out
 # to this script instead of hashing a diff of its own.
 check "--hash-range prints a sha256"            0 \
-  "$(bash "$HOOK" --hash-range origin/main HEAD | grep -qE '^([0-9a-f]{64}|EMPTY|NO_BASE)$' && echo 0 || echo 1)"
+  "$(hook --hash-range origin/main HEAD | grep -qE '^([0-9a-f]{64}|EMPTY|NO_BASE)$' && echo 0 || echo 1)"
 check "--tier-range prints a tier"              0 \
-  "$(bash "$HOOK" --tier-range origin/main HEAD | grep -qE '^(FULL|LOW|EMPTY)$' && echo 0 || echo 1)"
+  "$(hook --tier-range origin/main HEAD | grep -qE '^(FULL|LOW|EMPTY)$' && echo 0 || echo 1)"
 check "--hash-range of a ref against itself is EMPTY" "EMPTY" \
-  "$(bash "$HOOK" --hash-range HEAD HEAD)"
+  "$(hook --hash-range HEAD HEAD)"
 check "--hash-range on an unresolvable base is NO_BASE" "NO_BASE" \
-  "$(bash "$HOOK" --hash-range no/such/ref HEAD)"
+  "$(hook --hash-range no/such/ref HEAD)"
+# Bug: a failed check printed only the two values, never the refs, the payload or the environment settings (base
+# ref, bypass) the hook was run on. The probe's check reads a copy of the log, so this check's own log is kept.
+check "a failed check names the refs, payload and settings it checked" 0 \
+  "$( (unset CLAUDE_PROJECT_DIR; hook --hash-range no/such/ref HEAD >/dev/null
+      CONVEYOR_REVIEW_GATE_BYPASS=1 hook >/dev/null 2>&1 <<<"$(cmd 'npm test')"
+      cp "$INPUTS" "$INPUTS.probe"; INPUTS=$INPUTS.probe; check probe x y; rm -f "$INPUTS") \
+    | grep -qF "(expected x, got y; hook input: [--hash-range no/such/ref HEAD; REVIEW_GATE_BASE_REF=$REVIEW_GATE_BASE_REF in $PWD][<<< $(cmd 'npm test'); REVIEW_GATE_BASE_REF=$REVIEW_GATE_BASE_REF CONVEYOR_REVIEW_GATE_BYPASS=1 in $PWD])" && echo 0 || echo 1)"
 
 fi
 # --- change class -------------------------------------------------------------
@@ -173,7 +195,7 @@ fi
 # reviewers a diff gets and whether a codex-only marker attests it, so each case
 # names exactly the files it classifies. A throwaway repo is the only way to do
 # that: this repo's own HEAD carries whatever the unit happens to have changed.
-SANDBOX=$(mktemp -d); trap 'rm -rf "$SANDBOX"' EXIT
+SANDBOX=$(mktemp -d); trap 'rm -rf "$SANDBOX" "$INPUTS"' EXIT
 # An empty host file folder: the state folder is the sandbox's own, never a live stateDir this host names.
 export XDG_CONFIG_HOME="$SANDBOX/config"
 build() {  # build <path>[:<content>] ... -- commit 2 adds them on top of commit 1
@@ -189,8 +211,8 @@ build() {  # build <path>[:<content>] ... -- commit 2 adds them on top of commit
     git add -A && git commit -qm tip
   ) >/dev/null 2>&1
 }
-class() { ( cd "$SANDBOX/repo" && bash "$HOOK" --class-range HEAD~1 HEAD ); }
-contract() { ( cd "$SANDBOX/repo" && bash "$HOOK" --contract-range HEAD~1 HEAD >/dev/null 2>&1 ); echo $?; }
+class() { ( cd "$SANDBOX/repo" && hook --class-range HEAD~1 HEAD ); }
+contract() { ( cd "$SANDBOX/repo" && hook --contract-range HEAD~1 HEAD >/dev/null 2>&1 ); echo $?; }
 if case_on class; then
 
 build docs/notes.md
@@ -283,13 +305,13 @@ check "removing a transaction is class risky"         risky      "$(class)"
 build_removal src/services/foo.ts
 ( cd "$SANDBOX/repo" && git rm -q src/services/foo.ts && git commit -qm delete ) >/dev/null 2>&1
 check "deleting a transaction file is class risky"    risky      \
-  "$( cd "$SANDBOX/repo" && bash "$HOOK" --class-range HEAD~2 HEAD )"
+  "$( cd "$SANDBOX/repo" && hook --class-range HEAD~2 HEAD )"
 # The record (working-tree) mode reaches the same answer from the staged index.
 build_removal src/services/foo.ts
 check "removing a transaction is risky when staged"   risky      \
   "$( cd "$SANDBOX/repo" \
       && git reset -q --soft HEAD~1 \
-      && REVIEW_GATE_BASE_REF=$(git rev-parse HEAD) bash "$HOOK" --class-only )"
+      && REVIEW_GATE_BASE_REF=$(git rev-parse HEAD) hook --class-only )"
 # A drift guard is deliberately NOT tooling: weakening one deserves the full loop
 # (the same carve-out LOW tier already makes).
 build src/config/__tests__/thing.guard.test.ts
@@ -304,7 +326,7 @@ build \
   'src/repositories/__tests__/widget.test.ts:writeWidget();'
 check "a repository writer with a writer-only test is refused" 2 "$(contract)"
 check "the refusal names the writer file" 0 \
-  "$(cd "$SANDBOX/repo" && bash "$HOOK" --contract-range HEAD~1 HEAD 2>&1 | grep -q 'widget-repository.ts' && echo 0 || echo 1)"
+  "$(cd "$SANDBOX/repo" && hook --contract-range HEAD~1 HEAD 2>&1 | grep -q 'widget-repository.ts' && echo 0 || echo 1)"
 
 build \
   'src/repositories/widget-repository.ts:export function writeWidget() {}' \
@@ -375,7 +397,7 @@ if case_on marker; then
 # gate and .githooks/pre-push, so the two cannot drift. The callers ask about a
 # marker FILE, which can be hand-edited, so the answer re-derives the whole
 # rule instead of assuming the recorder's own checks ran.
-ok() { bash "$HOOK" --converged-ok "$1" "$2"; echo $?; }
+ok() { hook --converged-ok "$1" "$2"; echo $?; }
 check "codex alone attests a gate-ci diff"            0 "$(ok codex gate-ci)"
 check "codex alone attests a runtime diff"            0 "$(ok codex runtime)"
 # One Codex seat is the outside review at every class,
@@ -414,7 +436,7 @@ if case_on tooling-deploy; then
 deploy_in_sandbox() {  # runs the hook against the sandbox's own two commits
   (
     cd "$SANDBOX/repo" || exit 1
-    REVIEW_GATE_BASE_REF=$(git rev-parse HEAD~1) bash "$HOOK" >/dev/null 2>&1 <<<"$(cmd './deploy.sh dev')"
+    REVIEW_GATE_BASE_REF=$(git rev-parse HEAD~1) hook >/dev/null 2>&1 <<<"$(cmd './deploy.sh dev')"
   )
   echo $?
 }
@@ -436,9 +458,9 @@ parts_marker() {  # <hash>
     > "$SANDBOX/repo/.claude/review-convergence.json"
 }
 parts_deploy() {
-  ( cd "$SANDBOX/repo" && CLAUDE_PROJECT_DIR=$PWD REVIEW_GATE_BASE_REF=$(git rev-parse HEAD~1) bash "$HOOK" 2>&1 <<<"$(cmd './deploy.sh dev')" )
+  ( cd "$SANDBOX/repo" && CLAUDE_PROJECT_DIR=$PWD REVIEW_GATE_BASE_REF=$(git rev-parse HEAD~1) hook 2>&1 <<<"$(cmd './deploy.sh dev')" )
 }
-parts_marker "$( cd "$SANDBOX/repo" && bash "$HOOK" --hash-range HEAD~1 HEAD )"
+parts_marker "$( cd "$SANDBOX/repo" && hook --hash-range HEAD~1 HEAD )"
 check "a PARTS-REVIEWED marker for this diff permits the deploy and shows the unreviewed commits" "0 0" \
   "$(parts_deploy >/dev/null; echo $?) $(parts_deploy | grep -qF 'unreviewed commits: abc123456' && echo 0 || echo 1)"
 parts_marker deadbeef
@@ -455,7 +477,7 @@ watermark() {  # the base the gate resolves in the sandbox
   (
     cd "$SANDBOX/repo" || exit 1
     CLAUDE_PROJECT_DIR=$PWD REVIEW_GATE_BASE_REF= \
-      bash "$HOOK" --base-only 2>/dev/null
+      hook --base-only 2>/dev/null
   )
 }
 # Every commit ahead must be covered, oldest first. origin/main, then MID
@@ -527,7 +549,7 @@ check "a landing with leftovers and no filed follow-up stays unreviewed" "origin
 check "a blocked card and a broken line review nothing" "origin/main" \
   "$(card_base "$(landed c1-7 "$MID" '{"step":"blocked"}')" '{"card":"c1-7","step":"landed","result":"ok","sha":"'"${MID:0:12}"'"}' 'not json')"
 check "--conveyor-reviewed prints the commit and its card" "$MID c1-7" \
-  "$(card_base "$(landed c1-7 "$MID")" >/dev/null; cd "$SANDBOX/repo" && bash "$HOOK" --conveyor-reviewed)"
+  "$(card_base "$(landed c1-7 "$MID")" >/dev/null; cd "$SANDBOX/repo" && hook --conveyor-reviewed)"
 rm -rf "$SANDBOX/state" "$XDG_CONFIG_HOME/conveyor"
 check "no card records at all leaves the base at origin/main" "origin/main" "$(watermark)"
 
