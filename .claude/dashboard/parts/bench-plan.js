@@ -206,7 +206,7 @@
     const usd = parts.some((p) => p.usd === null) ? null : K.sum(parts.map((p) => p.usd)), mins = K.sum(parts.map((p) => p.minutes)), g = K.obj(K.hist().guard) || {};
     const held = arms.some((a) => a.guard && g[a.guard] === true), { b, why } = startButton(n, arms), rc = K.B.said.get(`${K.B.repo}\nstart`), receipt = K.saidAt('start');
     const unknown = parts.some((p) => p.reused === null);
-    if (receipt && rc && rc.run) receipt.append(' ', K.button(rc.ended ? 'Open its results' : 'Watch run', 'btn-sm', 'watch-run', `Open the run ${rc.run}`, () => K.go('run')));
+    if (receipt && rc && rc.run) receipt.append(' ', K.button(rc.ended ? 'Open its results' : 'Watch run', 'btn-sm', 'watch-run', `Open the run ${rc.run}`, () => K.go('run', rc.run)));
     const s = K.box('Before you start', `${K.plural(arms.length, 'arm')} × ${K.plural(n, 'task')}`, 'bench-before');
     s.append(K.callout(said, tone), K.kv([['Cost', [h('b', null, K.usd(usd)), ' ', h('span', 'bench-muted bench-small', 'at list prices')]], ['Machine time', [h('b', null, K.fmtMin(mins)), ' ', h('span', 'bench-muted bench-small', 'tasks run one after another')]],
       ['Sessions', `${K.sum(parts.map((p) => p.usual))} usual, ${K.sum(parts.map((p) => p.worst))} at worst`],

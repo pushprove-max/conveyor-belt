@@ -24,6 +24,7 @@
     page: 'score',
     hist: null,         // the history read: {repo, stamp, busy, data, error, read (when it ended, by the Board's clock)}
     runs: new Map(),    // each run's tasks read, by `${repo}|${id}`: {stamp, busy, data, error}
+    runId: null,        // the run the Live run page shows when a page asked for one (null: the run going, else the last ended)
     task: null,         // the task the Task page shows (null: the first shared task)
     sel: [],            // the runs ticked in the run history
     cmp: { a: '', b: '', ask: null, data: null, n: 0 },   // Compare's two sides and the readings read for them
@@ -244,7 +245,7 @@
     p.dataset.said = key; p.setAttribute('role', 'status');
     return p;
   }
-  const go = (page) => { B.page = page; draw(); };
+  const go = (page, runId) => { Object.assign(B, { page, runId: runId || null }); draw(); };
   const openTask = (id) => { B.task = id; go('task'); };
 
   // ---- reads from the page server ----
@@ -428,7 +429,15 @@
     send(RUNS_SAID, ['runs', verb, ...ids], (t) => t.replace(/^conveyor: /, '').replace(/^./, (c) => c.toUpperCase()), () => {
       ids.forEach((id) => { const o = B.runs.get(`${B.repo}|${id}`); if (o) o.stamp = null; });
       B.sel = B.sel.filter((x) => !ids.includes(x));
-      if (verb === 'delete') ids.forEach((id) => B.runs.delete(`${B.repo}|${id}`));
+      if (verb === 'delete') {
+        ids.forEach((id) => B.runs.delete(`${B.repo}|${id}`));
+        // The page does not ask for a run just deleted, whether a receipt opened it or the history is not read again yet.
+        if (ids.includes(B.runId)) B.runId = null;
+        // The Start receipt does not offer a run just deleted.
+        const rc = B.said.get(saidKey('start'));
+        if (rc && ids.includes(rc.run)) B.said.delete(saidKey('start'));
+        if (hist()) hist().runs = allRuns().filter((r) => !ids.includes(r.id));
+      }
       B.cmp.data = null; B.flips.pairs = new Map();
       readHist(true);
     });
@@ -487,6 +496,7 @@
     // Scoreboard. A run that starts while the tab is shown does not move the page.
     if (!B.landed && typeof view.repo === 'string') {
       B.landed = true;
+      B.runId = null;
       const l = live();
       B.page = l && l.state === 'running' && typeof l.id === 'string' ? 'run' : 'score';
     }

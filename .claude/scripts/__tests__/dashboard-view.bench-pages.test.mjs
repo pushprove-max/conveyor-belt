@@ -5,7 +5,7 @@
 // runs of 1 task); Compare's four boxes and verdict as the pickers change; Plan a run's slider, cost and Start; Stop.
 // Shared setup: dashboard-view.helpers.mjs (BH).
 import assert from 'node:assert/strict';
-import { boot, settle, act, cases, BH, T0, iso } from './dashboard-view.helpers.mjs';
+import { boot, settle, act, cases, BH, tabBtn, refresh, T0, iso } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const { bp, page, heads, pages, TASKS } = BH;
@@ -397,6 +397,71 @@ test('Plan a run: the slider changes the difference it can show and the cost, an
   w.reply = BH.reply('caveman: checking c1');
   act(bp(w), 'check-arms').click();
   assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['arms', 'check', 'caveman']]);
+});
+
+// Bug it guards (#1191): the Start receipt's button opened the Live run page, which shows the run going or the last one
+// ended, not the run the receipt names: a later run from the CLI was opened in its place. It opens the named run, and
+// the page goes back to the run going or the last ended once another page is opened.
+test('Plan a run: the receipt button opens the run it names, not the last run', async () => {
+  const named = BH.OLDS[0][1], w = await opened(BH.study(), 'plan');
+  w.reply = BH.reply(`conveyor: run ${named} ended`);
+  act(bp(w), 'start').click();
+  await settle();
+  act(bp(w), 'watch-run').click();
+  await settle(); await settle();
+  assert.equal(heads(w)[1], named, 'the run page shows the run the receipt names');
+  BH.go(w, 'plan'); BH.go(w, 'run');
+  await settle(); await settle();
+  assert.equal(heads(w)[1], BH.STUDY, 'opened from the page row, it shows the last run ended again');
+});
+
+// Bug it guards (#1191 review): a run opened from a receipt while a newer run goes (a) said "No run goes now" and "The
+// last run" of the older run, and (b) stayed the page's run when the tab was shown again, hiding the run going.
+test('Plan a run: the receipt opens an ended run while a newer one goes, and it names itself; the tab shown again opens the run going', async () => {
+  const w = await opened(BH.study(), 'plan');
+  w.reply = BH.reply(`conveyor: run ${BH.STUDY} ended`);
+  act(bp(w), 'start').click();
+  await settle();
+  refresh(w);
+  BH.open(w, BH.live());   // a run then starts from the command line
+  await settle(); await settle();
+  act(bp(w), 'watch-run').click();
+  await settle(); await settle();
+  assert.equal(heads(w)[0], BH.STUDY, 'the verdict is titled with the run it names, not "No run goes now"');
+  assert.match(text(q(w, '.bench-vv')), /^This run ended /);
+  tabBtn(w, 'overview').click();
+  await settle();
+  tabBtn(w, 'bench').click();
+  await settle(); await settle();
+  assert.ok(heads(w)[0].startsWith(`${BH.LIVE} · `), 'shown again, the page shows the run going');
+});
+
+// Bug it guards (#1191 review): a run opened from a receipt and then deleted stayed the page's run, so the page asked
+// for the deleted run again and showed "Read again"; and the receipt kept its button, so a click asked for the deleted
+// run. The history is not read again here (it answers 502), so the page's last run comes from the history update that
+// Delete makes at once.
+test('Plan a run: a run opened from the receipt and deleted is not asked for again, and its receipt has no button', async () => {
+  // The run named is the newest ended one: only then does the page's last run change when it is deleted.
+  const named = BH.STUDY, next = BH.OLDS[0][1], set = BH.study(), w = await opened(set, 'plan');
+  w.reply = BH.reply(`conveyor: run ${named} ended`);
+  act(bp(w), 'start').click();
+  await settle();
+  act(bp(w), 'watch-run').click();
+  await settle(); await settle();
+  assert.equal(heads(w)[0], named);
+  w.reply = BH.reply(`conveyor: deleted ${named}.`);
+  const body = w.benchBody;
+  w.benchBody = (u) => (/&run=/.test(u) ? body(u) : null);
+  const del = act(q(w, '.bench-runacts'), 'delete-runs');
+  del.click(); del.click();
+  w.benchAsks.length = 0;
+  await settle(); await settle();
+  assert.deepEqual(w.benchAsks.filter((u) => u.endsWith(`&run=${named}`)), [], 'the deleted run is not read again');
+  assert.equal(heads(w)[0], 'No run goes now');
+  assert.equal(heads(w)[1], next, 'the page shows the last run ended that is left');
+  BH.go(w, 'plan');
+  await settle();
+  assert.equal(q(w, '[data-act="watch-run"]'), null, 'the receipt of the deleted run has no button to open it');
 });
 
 // Bug it guards (review E6): Plan a run had no Conveyor version or run settings, so it could not start an older engine
