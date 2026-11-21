@@ -17,7 +17,8 @@ which files does it read?" (a command and its git pathspecs / none) before step 
 `--lint <command>` and `--lint-files <pathspec>`, once per pathspec, each quoted for the shell, to each run of step 1's
 setup command. Show setup's line for it: setup tries the command and writes it only when the result is `ok` or
 `findings: <n>`. For `missing`, `error` or `empty` the line says why it was not written; for `error`, it says the command
-needs a wrapper script.
+needs a wrapper script. Show setup's lines for the ready lint entries too: the entries and the `lint.policy` it wrote,
+the one line that names the complexity rules, and the line for a language with no ready entry.
 
 First install the requirements, then sign in, before step 1:
 
@@ -39,7 +40,7 @@ First install the requirements, then sign in, before step 1:
 
 1. Run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" setup`.
    - When it exits 2 naming what setup needs (`--owner`, `--product`, `--test`, `--survey`, `--test-patterns`, `--file-command`, `--test-map`, `--fast-lane`,
-     `--research-lane`, `--link`, `--builder-route`, `--reviewer-route`, `--fallback-route`, `--claude-proxy`,
+     `--research-lane`, `--link`, `--lint-ready`, `--lint-shared`, `--builder-route`, `--reviewer-route`, `--fallback-route`, `--claude-proxy`,
      `--codex-proxy`, `--claude-key`, `--codex-key`, `--claude-proxy-key`, `--codex-proxy-key`), ask
      the user for exactly those, and nothing else: whose yes a change customers or staff will
      see needs; the path prefixes of product code; the command that runs a change's tests; "Run a first test-speed
@@ -49,7 +50,9 @@ First install the requirements, then sign in, before step 1:
      the tool and the time that setup named; "Make a fast lane (your own worktree for changes made by hand)?" (yes / no); "Make a
      research lane (a read-only sandboxed worktree)?" (yes / no); "Link these dependency folders into each card's
      worktree?", showing the folders and the lockfiles setup named (yes / no / install them in each worktree with a
-     command instead, such as `npm ci`: then pass `--worktree-setup <command>` in place of `--link`); "Which route does the builder use?" and "Which route
+     command instead, such as `npm ci`: then pass `--worktree-setup <command>` in place of `--link`); "Write the ready
+     lint entries for these tools?" (yes / no), with the tools and config files that setup named; "Put pyproject.toml,
+     which holds ruff's config, in the pack's lint.policy?" (yes / no); "Which route does the builder use?" and "Which route
      does the reviewer use?", each offering only the routes that setup offered, with the routes and states that setup
      named (fallback: the CLI's own login first, the second route when it fails / proxy: always the local proxy / api:
      always the provider's API with your own key / subscription: the CLI's own login only); "Which second route does
@@ -64,7 +67,8 @@ First install the requirements, then sign in, before step 1:
      with the answers, each `--product` once per path, `--survey yes` or `--survey no`, `--test-patterns yes` or
      `--test-patterns no`, `--file-command yes` or `--file-command no`, `--test-map yes` or `--test-map no`, `--fast-lane yes` or
      `--fast-lane no`, `--research-lane yes` or `--research-lane no`, `--link yes`, `--link no` or
-     `--worktree-setup <command>`, `--builder-route` and `--reviewer-route` each
+     `--worktree-setup <command>`, `--lint-ready yes` or `--lint-ready no`, `--lint-shared yes` or `--lint-shared no`,
+     `--builder-route` and `--reviewer-route` each
      `fallback`, `proxy`, `api` or `subscription`, `--fallback-route proxy` or `--fallback-route api`,
      `--claude-proxy` or `--codex-proxy` each the base URL chosen, and `--claude-key` or `--codex-key` each `none`,
      `settings` or the key file's path, `--claude-proxy-key` or `--codex-proxy-key` each `settings` or the key

@@ -168,6 +168,37 @@ pathspec. Setup tries the command once, as `conveyor.sh doctor` does, and shows 
 
 When the pack already has the command, setup does not try it again or write it again.
 
+When the pack has no `lint` field, setup also offers a ready entry for each of these tools whose config file your
+checkout tracks at its top:
+
+- shellcheck, for `.shellcheckrc`: on `*.sh` files.
+- ruff, for `ruff.toml`, `.ruff.toml`, or a `pyproject.toml` with a `[tool.ruff]` table: on `*.py` files.
+- ESLint, for `eslint.config.js` (or `.mjs`, `.cjs`, `.ts`, `.mts`, `.cts`): on `*.js`, `*.mjs` and `*.cjs` files.
+
+The question names each tool with its config files. The answer is `--lint-ready yes` or `--lint-ready no`. When your
+project has none of these config files, setup does not ask. On yes, setup writes each entry in the pack's
+`lint.commands`:
+
+- The entry only reads the files. ruff runs with `--no-fix` and `--force-exclude`. ESLint runs with no `--fix`, with
+  `--max-warnings 0`, and gives no finding for a file that its config ignores.
+- When the tool is not installed, the entry's first line is `lint: missing <tool>`, so the check is skipped.
+- The entry adds no rule. Your linter's config sets the rules. Setup does not change the config, and reads no rule from
+  it: it only looks in `pyproject.toml` for a `[tool.ruff]` table. Setup shows the rules that measure complexity, in
+  one line: for ruff `C901` and `PLR0915`, and for ESLint `complexity`, `max-lines-per-function` and `max-depth`. To
+  check them, turn them on in your linter's config.
+- The tool's config files are the entry's `triggers`.
+
+Setup puts each tool's own config files in the pack's `lint.policy`, so that a card that changes one stops for your
+yes. Setup adds nothing to `pipelineFiles`. A `pyproject.toml` also holds settings that are not lint settings, so
+when it holds ruff's config, setup asks before it puts the file in `lint.policy` (`--lint-shared yes` or
+`--lint-shared no`).
+
+When your project has files of a language with no ready entry, such as Go or Rust, and no lint command in the pack
+reads them, setup says what checks them. When a size entry in the pack's `lint.commands` reads them, only file length
+is measured. When no size entry reads them, nothing checks them. To check more, give your own command as `--lint`.
+
+Setup asks these questions again on each run until the pack has a `lint` field.
+
 Setup also looks for a second route for the CLI of each role, the builder and the reviewer, when that CLI has no route
 in the host file. For Codex, it looks only when Codex is installed. A second route is one of these:
 
@@ -251,7 +282,7 @@ changes a `CLAUDE.md` or an `AGENTS.md` that is already there.
 - `--pin` pins a new project to the commit of the plugin copy, in place of following releases (below).
 
 From a shell, in your project's checkout, the same steps are
-`conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--file-command yes|no] [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--lint <command> --lint-files <pathspec>...] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]`,
+`conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--file-command yes|no] [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--lint <command> --lint-files <pathspec>...] [--lint-ready yes|no] [--lint-shared yes|no] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]`,
 then `conveyor.sh doctor`.
 
 ## Following releases or main, or pinning a commit

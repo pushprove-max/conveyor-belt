@@ -43,6 +43,11 @@ PACK0='{labels: {built: "awaiting-deploy", followup: "conveyor-followup", type: 
 # The question "Which command lints the project?" (docs/setup.md): asked by /conveyor-belt:setup while the pack has no
 # lint field, answered by --lint <command> with --lint-files <pathspec> (one for each). The command is probed as doctor
 # probes it (setuplint()) and written in the pack's lint.commands only when the probe says ok or findings.
+# While the pack has no lint field, setup also offers a ready entry for shellcheck, ruff and ESLint, each only when
+# the project tracks that tool's config (lintready()), answered by --lint-ready; a pyproject.toml that holds ruff's
+# config is asked of apart, --lint-shared, as lint policy (setupready()). A project with files of a language that has
+# no ready entry and no lint command of the pack on them is told what checks them (lintother()): only their length
+# when a size entry covers them, else nothing.
 # Before the host file names the project, the control record is written when there is none, with new issues and every
 # open issue held (heldstart()).
 # With --foreman it then sets up Foreman mode (foreman/foreman.sh setup), which `conveyor.sh foreman` starts.
@@ -70,9 +75,9 @@ mpsinstalled() { jq -e --arg p "$MPS" '.plugins[$p] | type == "array" and length
 # project whose cards may change a lockfile needs in place of links to main's folders. Once the pack has either, the
 # question is not asked and a rerun changes neither.
 LOCKFILES=(package-lock.json npm-shrinkwrap.json yarn.lock pnpm-lock.yaml bun.lockb poetry.lock uv.lock Pipfile.lock Gemfile.lock Cargo.lock composer.lock Podfile.lock)
-SETUP_USAGE='setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--file-command yes|no] [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--lint <command> --lint-files <pathspec>...] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]'
+SETUP_USAGE='setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--file-command yes|no] [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--lint <command> --lint-files <pathspec>...] [--lint-ready yes|no] [--lint-shared yes|no] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]'
 setup() { # as SETUP_USAGE
-  local owner='' test='' prods=() need=() b p f have l n x fm='' pin='' sv='' fl='' rl='' br='' rr='' fr='' w first full c lk='' ws='' lf='' wsx='' dds=() lks tp='' tpa='' tn tl='' tla='' tma='' tmt='' tmw='' lc='' lfs=()
+  local owner='' test='' prods=() need=() b p f have l n x fm='' pin='' sv='' fl='' rl='' br='' rr='' fr='' w first full c lk='' ws='' lf='' wsx='' dds=() lks tp='' tpa='' tn tl='' tla='' tma='' tmt='' tmw='' lc='' lfs=() lra='' lsa='' lro=''
   local -A keyarg=() pxarg=() pkarg=() rcli=() lg=() pxu=() ak=() akf=() pk=() pkf=() as=() kd=(); local clis=()
   local ask='--survey <yes or no: run a first test-speed survey now?>'
   while [ $# -gt 0 ]; do
@@ -89,6 +94,8 @@ setup() { # as SETUP_USAGE
       --worktree-setup) ws=${2-}; [ -n "$ws" ] || { set -- x; break; } ;;
       --lint) lc=${2-}; [ -n "$lc" ] || { set -- x; break; } ;;
       --lint-files) lfs+=("${2-}"); [ -n "${2-}" ] || { set -- x; break; } ;;
+      --lint-ready) lra=${2-}; [[ $lra == yes || $lra == no ]] || { set -- x; break; } ;;
+      --lint-shared) lsa=${2-}; [[ $lsa == yes || $lsa == no ]] || { set -- x; break; } ;;
       --builder-route) br=${2-}; [[ $br =~ ^(subscription|fallback|proxy|api)$ ]] || { set -- x; break; } ;;
       --reviewer-route) rr=${2-}; [[ $rr =~ ^(subscription|fallback|proxy|api)$ ]] || { set -- x; break; } ;;
       --fallback-route) fr=${2-}; [[ $fr == proxy || $fr == api ]] || { set -- x; break; } ;;
@@ -156,6 +163,17 @@ setup() { # as SETUP_USAGE
       [ -n "$tma" ] || need+=("--test-map <yes or no: run the whole suite once with $tmt to make the test map (which test files cover which source files), so a card runs only the tests that cover its change? $(mapcost)>")
     else tmw=$tmt; tmt=''; fi
   fi
+  # The ready lint entries, while the pack has no lint field: asked once for all that are offered, naming each tool
+  # and its config; the pyproject.toml that holds ruff's config is asked of apart, for lint.policy. lro is the offer,
+  # [] when no tool's config is there; empty when the pack has a lint field, and nothing is asked.
+  if ! jq -e '.lint' "$PACK" >/dev/null 2>&1; then
+    lro=$(lintready "$MAIN") || return 1
+    if [ "$lro" != '[]' ] && [ "$lra" != no ]; then
+      [ -n "$lra" ] || need+=("--lint-ready <yes or no: write the ready lint entries, $(jq -r 'map("\(.tool) (for \(.entry.triggers | join(", ")))") | join(", ")' <<<"$lro"), in the pack's lint.commands? Each reads the files only, adds no rule, and is skipped while its tool is not installed>")
+      [ -n "$lsa" ] || ! jq -e 'any(.[]; .shared != [])' <<<"$lro" >/dev/null \
+        || need+=("--lint-shared <yes or no: pyproject.toml holds ruff's config: put it in the pack's lint.policy, so that a card that changes it stops for your yes?>")
+    fi
+  fi
   if [ -e "$PACK" ]; then
     [ -n "$sv" ] || { packget test.firstSurvey first || return 1; [ -n "$first" ] || need+=("$ask"); }
     [ ${#need[@]} = 0 ] || { printf 'conveyor: setup needs:%s\n' "$(printf ' %s;' "${need[@]}")" >&2; return 2; }
@@ -203,7 +221,10 @@ setup() { # as SETUP_USAGE
       || { rm -f "$PACK.new"; echo "conveyor: worktree.setup could not be written in the pack" >&2; return 1; }
     echo "conveyor: wrote the pack's worktree.setup: $ws, run in each card's worktree before its build and tests"
   fi
+  if [ "$lra" = yes ] && [ -n "$lro" ] && [ "$lro" != '[]' ]; then setupready "$p" "$lro" "$lsa" || return 1; fi
   [ -z "$lc" ] || setuplint "$p" "$lc" "${lfs[@]}" || return 1
+  # Each run, so a size entry the pack has already is said too (lintother()).
+  lintother "$MAIN" || return 1
   if [ "$tpa" = yes ] && [ -n "$tp" ]; then
     tp=$(jq -c 'map(.p)' <<<"$tp") || return 1
     jq --argjson p "$tp" '.tests.patterns = $p' "$PACK" > "$PACK.new" && pinreads "$p" "$PACK.new" && mv "$PACK.new" "$PACK" \
@@ -399,6 +420,70 @@ setuplint() {
     empty) echo "conveyor: the lint command $r was not written: the probe says empty: no tracked file matches --lint-files $*" ;;
     *) echo "conveyor: the lint command $r could not be probed${o:+: $o}" >&2; return 1 ;;
   esac
+}
+# The ready lint entries' commands: each reads the files only (no --fix; ESLint lets no warning through, and says
+# nothing of a file its config ignores), adds no rule flag, and is skipped (`lint: missing <tool>`, exit 127) while
+# its tool is not installed. ESLint has no built-in format of one line a finding, so its JSON is put in that form.
+READY_SHELLCHECK='command -v shellcheck >/dev/null || { echo '\''lint: missing shellcheck'\''; exit 127; }; shellcheck -S warning -f gcc {files}'
+READY_RUFF='command -v ruff >/dev/null || { echo '\''lint: missing ruff'\''; exit 127; }; ruff check --no-fix --force-exclude --output-format=concise {files}'
+READY_ESLINT='[ -x node_modules/.bin/eslint ] || { echo '\''lint: missing eslint'\''; exit 127; }; node_modules/.bin/eslint --max-warnings 0 --no-warn-ignored --format json {files} | jq -r --arg top "$(pwd -P)/" '\''.[] | (.filePath | ltrimstr($top)) as $f | .messages[] | "\($f):\(.line // 1):\(.column // 1): \(.ruleId // "eslint") \(.message | gsub("[\r\n]+"; " "))"'\'''
+# lintready <dir>: the ready lint entries setup offers, a JSON list of {tool, policy, shared, entry}: one for each
+# tool (shellcheck, ruff, ESLint) whose config <dir> tracks at its top. policy is the tool's own config files there,
+# shared the pyproject.toml that holds ruff's config ([tool.ruff]); the entry's triggers are both. The configs are
+# found by name only: no rule in them is read.
+lintready() {
+  local d=$1 fs py=''
+  fs=$(git -C "$d" ls-files -z -- .shellcheckrc shellcheckrc ruff.toml .ruff.toml eslint.config.js eslint.config.mjs eslint.config.cjs \
+    eslint.config.ts eslint.config.mts eslint.config.cts | jq -Rsc 'split("\u0000") | map(select(. != ""))') || return 1
+  [ -z "$(git -C "$d" ls-files -- pyproject.toml)" ] || ! grep -qE '^\[tool\.ruff(\]|\.)' "$d/pyproject.toml" 2>/dev/null || py=pyproject.toml
+  jq -nc --argjson fs "$fs" --arg py "$py" --arg sc "$READY_SHELLCHECK" --arg rf "$READY_RUFF" --arg es "$READY_ESLINT" '
+    [{tool: "shellcheck", configs: [".shellcheckrc", "shellcheckrc"], shared: [], entry: {files: ["*.sh"], run: $sc}},
+     {tool: "ruff", configs: ["ruff.toml", ".ruff.toml"], shared: [$py | select(. != "")],
+      entry: {files: ["*.py"], run: $rf, complexity: ["C901", "PLR0915"]}},
+     {tool: "ESLint", configs: ["eslint.config.js", "eslint.config.mjs", "eslint.config.cjs", "eslint.config.ts", "eslint.config.mts", "eslint.config.cts"],
+      shared: [], entry: {files: ["*.js", "*.mjs", "*.cjs"], run: $es, complexity: ["complexity", "max-lines-per-function", "max-depth"]}}]
+    | map(.policy = [.configs[] | select(IN($fs[]))] | select(.policy + .shared != []) | .entry.triggers = .policy + .shared | del(.configs))'
+}
+# setupready <commit> <offer> <shared answer>: the entries of <offer> (lintready()) added to the pack's lint.commands,
+# and their tools' own config files to lint.policy, with the shared file only on a yes. No linter's config is
+# changed, and nothing goes in pipelineFiles. Then one line names the complexity rules of the tools written, which
+# their entry does not turn on.
+setupready() {
+  local p=$1 o=$2 s=$3 pol
+  pol=$(jq -c --arg s "$s" '[.[] | .policy[], (if $s == "yes" then .shared[] else empty end)]' <<<"$o") || return 1
+  jq --argjson o "$o" --argjson pol "$pol" '.lint.commands = (.lint.commands // []) + [$o[].entry]
+    | if $pol == [] then . else .lint.policy = (.lint.policy // []) + $pol end' "$PACK" > "$PACK.new" && pinreads "$p" "$PACK.new" && mv "$PACK.new" "$PACK" \
+    || { rm -f "$PACK.new"; echo "conveyor: the ready lint entries could not be written in the pack's lint.commands" >&2; return 1; }
+  jq -r '.[] | "conveyor: wrote the ready lint entry for \(.tool) in the pack'"'"'s lint.commands, on \(.entry.files | join(", "))"' <<<"$o"
+  [ "$pol" = '[]' ] || echo "conveyor: wrote the pack's lint.policy: $(jq -r 'join(", ")' <<<"$pol"); a card that changes one stops for your yes"
+  jq -r 'map(select(.entry.complexity) | "\(.tool) \(.entry.complexity | join(", "))") | select(. != [])
+    | "conveyor: the rules that measure complexity, which the ready entries do not turn on: \(join("; ")); turn them on in the linter'"'"'s own config"' <<<"$o"
+}
+# lintlangs: the languages with no ready lint entry of the paths on stdin, one a line, as one list "Go, Rust".
+lintlangs() {
+  sed -n 's/.*\.\([a-z]*\)$/\1/p' | LC_ALL=C sort -u | awk 'BEGIN { split("go Go rs Rust rb Ruby java Java kt Kotlin swift Swift c C h C cpp C++ cc C++ cs C# php PHP ts TypeScript tsx TypeScript", a, " ")
+      for (i = 1; i in a; i += 2) n[a[i]] = a[i + 1] } ($1 in n) && !s[n[$1]]++ { print n[$1] }' | paste -sd, - | sed 's/,/, /g'
+}
+# lintother <dir>: the languages with no ready lint entry of <dir>'s tracked files that no lint command with a run in
+# the pack covers (its files pathspecs). Those a size entry covers are named in one line: only their length is
+# measured. The others are named in one line: nothing checks them.
+lintother() {
+  local d=$1 c k ps t l
+  t=$(mktemp -d) || return 1
+  : > "$t/run"; : > "$t/size"
+  while IFS= read -r c; do
+    mapfile -d '' -t ps < <(jq -j '.files[] + "\u0000"' <<<"$c")
+    k=$(jq -r 'if .size then "size" else "run" end' <<<"$c")
+    git -C "$d" -c core.quotepath=off ls-files -- "${ps[@]}" >> "$t/$k" || { rm -rf "$t"; return 1; }
+  done < <(jq -c '.lint.commands // [] | .[]' "$PACK")
+  git -C "$d" -c core.quotepath=off ls-files | LC_ALL=C sort -u > "$t/all" || { rm -rf "$t"; return 1; }
+  LC_ALL=C sort -u -o "$t/run" "$t/run"; LC_ALL=C sort -u -o "$t/size" "$t/size"
+  LC_ALL=C comm -23 "$t/all" "$t/run" > "$t/left"
+  l=$(LC_ALL=C comm -12 "$t/left" "$t/size" | lintlangs)
+  [ -z "$l" ] || echo "conveyor: Conveyor has no ready lint entry for $l: for those files, only file length is measured, unless you give setup your own lint command as --lint"
+  l=$(LC_ALL=C comm -23 "$t/left" "$t/size" | lintlangs)
+  [ -z "$l" ] || echo "conveyor: Conveyor has no ready lint entry for $l, and no lint command in the pack checks those files, not even their length: give setup your own lint command as --lint, or add a size entry to the pack's lint.commands"
+  rm -rf "$t"
 }
 # setuplane fast|research: the lane made by its own create (`conveyor.sh lane <lane> create`, re-runnable: a lane
 # already there is left as it is), its output passed on, with its `made the` line, there only when the lane is new,

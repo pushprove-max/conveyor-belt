@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# `conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--file-command yes|no] [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--lint <command> --lint-files <pathspec>...] [--pin] [--foreman]`:
+# `conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--file-command yes|no] [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--lint <command> --lint-files <pathspec>...] [--lint-ready yes|no] [--lint-shared yes|no] [--pin] [--foreman]`:
 # the project set up for Conveyor (setup(), lib/setup.sh), from its checkout; `conveyor.sh setup pack-commit [yes | no]`:
 # the pack committed on the default branch on the owner's yes (packcommit(), lib/setup.sh). Sourced by conveyor.sh.
 . "$HERE/lib/slots.sh" || exit 1

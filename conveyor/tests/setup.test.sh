@@ -430,6 +430,13 @@ t_setuplint() {
     && jq -e '.lint.commands == [{files: ["*.sh"], run: "true"}]' "$S/.conveyor/project.json" >/dev/null \
     && grep -qxF "conveyor: wrote the lint command true in the pack's lint.commands (the probe says ok)" <<<"$out" \
     || fail "setup --lint true --lint-files '*.sh' did not write the command: $(jq -c .lint "$S/.conveyor/project.json") $out"
+  # Bug (#1156): setup said what checks a language with no ready entry only while the pack had no lint field, so a
+  # pack whose size entry reads the Go files was never told that only their length is measured.
+  jq '.lint.commands += [{files: ["*.go"], size: {file: 400, exempt: "x"}}]' "$S/.conveyor/project.json" > "$T/$CASE/p" \
+    && mv "$T/$CASE/p" "$S/.conveyor/project.json" && : > "$S/a.go" && git -C "$S" add a.go || fail "the Go file and size entry"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no 2>&1) \
+    && grep -qxF "conveyor: Conveyor has no ready lint entry for Go: for those files, only file length is measured, unless you give setup your own lint command as --lint" <<<"$out" \
+    || fail "setup on a pack whose lint field has a size entry on *.go did not say that only file length is measured for Go: $out"
 }
 # #1155. Bug: setup would write a lint command that cannot run (its tool missing, an end the lint check cannot read,
 # no file to read), which then fails or skips every card's lint check. setuplint probes each as doctor does: ok and
@@ -454,4 +461,108 @@ t_setuplintprobe() {
     || fail "setuplint's lines (exit $r) are not ok and findings written, missing, error and empty refused with why, a repeat kept once: $(cat "$T/$CASE/out")"
   jq -e '.lint.commands == [{files: ["*.txt"], run: "exit 0"}, {files: ["*.txt"], run: "echo a.txt:1: E1 x; exit 1"}]' "$R/.conveyor/project.json" >/dev/null \
     || fail "setuplint did not write ok and findings alone, once each: $(jq -c .lint "$R/.conveyor/project.json")"
+}
+# The engine's setup functions, loaded for a case that calls them alone; pinreads, the project's install reading the
+# new pack, is stubbed, as the main of setup '[]' has no install (t_setupreadyask runs the real one).
+setupfuncs() {
+  export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
+  . "$SRC/conveyor.sh" state-dir > /dev/null && . "$SRC/lib/slots.sh" && . "$SRC/lib/prompts.sh" && . "$SRC/lib/push.sh" && . "$SRC/lib/lint.sh" && . "$SRC/lib/setup.sh" || exit 9
+  pinreads() { :; }
+}
+# #1156. Bugs: setup had no ready entry for a linter the project has set up, so the owner wrote the command by hand;
+# a ready entry that edits files (--fix), lets warnings through, turns on rules of its own or fails while its tool is
+# not installed; a linter's config left out of lint.policy, so a card could change it with no yes; a pyproject.toml,
+# which holds more than lint config, put in lint.policy with no yes; a linter's config or pipelineFiles changed. In a
+# project with the config of all three tools and a Go file: each is offered with its config, ruff with the
+# pyproject.toml that holds its config as shared; written with --lint-shared no, then (on the same pack) yes.
+t_setupready() {
+  local r o
+  setup '[]'
+  printf 'line-length = 100\n' > "$R/ruff.toml"; printf '[project]\nname = "x"\n\n[tool.ruff.lint]\nselect = ["E"]\n' > "$R/pyproject.toml"
+  printf 'disable=SC1091\n' > "$R/.shellcheckrc"; printf 'export default [];\n' > "$R/eslint.config.mjs"; printf 'package main\n' > "$R/main.go"
+  git -C "$R" add ruff.toml pyproject.toml .shellcheckrc eslint.config.mjs main.go || fail "the configs could not be staged"
+  ( cd "$R" && cat ruff.toml pyproject.toml .shellcheckrc eslint.config.mjs ) > "$T/$CASE/configs"
+  cp "$R/.conveyor/project.json" "$T/$CASE/pack0"
+  ( setupfuncs; o=$(lintready "$R") || exit 8; echo "$o" > "$T/$CASE/offer"
+    setupready c "$o" no > "$T/$CASE/out.no" || exit 8; cp "$R/.conveyor/project.json" "$T/$CASE/pack.no"
+    cp "$T/$CASE/pack0" "$R/.conveyor/project.json"; setupready c "$o" yes > "$T/$CASE/out.yes" || exit 8
+    lintother "$R" > "$T/$CASE/other" || exit 8
+    jq '.lint.commands += [{files: ["*.go"], size: {file: 400, exempt: "x"}}]' "$PACK" > "$T/$CASE/pack.size"
+    PACK=$T/$CASE/pack.size; lintother "$R" > "$T/$CASE/other.size" || exit 8
+    jq '.lint.commands += [{files: ["*.go"], run: "exit 0"}]' "$PACK" > "$T/$CASE/pack.run"
+    PACK=$T/$CASE/pack.run; lintother "$R" > "$T/$CASE/other.run" || exit 8 ) 2>&1; r=$?
+  [ "$r" = 0 ] || fail "lintready, setupready or lintother failed (exit $r)"
+  jq -e 'map({tool, policy, shared, triggers: .entry.triggers}) == [
+      {tool: "shellcheck", policy: [".shellcheckrc"], shared: [], triggers: [".shellcheckrc"]},
+      {tool: "ruff", policy: ["ruff.toml"], shared: ["pyproject.toml"], triggers: ["ruff.toml", "pyproject.toml"]},
+      {tool: "ESLint", policy: ["eslint.config.mjs"], shared: [], triggers: ["eslint.config.mjs"]}]' "$T/$CASE/offer" >/dev/null \
+    || fail "lintready did not offer each tool with its own config, and ruff with pyproject.toml as shared: $(cat "$T/$CASE/offer")"
+  jq -e '[.lint.commands[] | {files, run, complexity}] == [
+      {files: ["*.sh"], run: "command -v shellcheck >/dev/null || { echo '\''lint: missing shellcheck'\''; exit 127; }; shellcheck -S warning -f gcc {files}", complexity: null},
+      {files: ["*.py"], run: "command -v ruff >/dev/null || { echo '\''lint: missing ruff'\''; exit 127; }; ruff check --no-fix --force-exclude --output-format=concise {files}", complexity: ["C901", "PLR0915"]},
+      {files: ["*.js", "*.mjs", "*.cjs"], run: .lint.commands[2].run, complexity: ["complexity", "max-lines-per-function", "max-depth"]}]
+    and (.lint.commands[2].run | startswith("[ -x node_modules/.bin/eslint ] || { echo '\''lint: missing eslint'\''; exit 127; }; node_modules/.bin/eslint --max-warnings 0 --no-warn-ignored --format json {files} | "))
+    and .lint.policy == [".shellcheckrc", "ruff.toml", "eslint.config.mjs"] and .pipelineFiles == null' "$T/$CASE/pack.no" >/dev/null \
+    || fail "setupready with --lint-shared no did not write the three read-only entries and their own configs alone as lint.policy: $(jq -c .lint "$T/$CASE/pack.no")"
+  ! jq -r '.lint.commands[].run' "$T/$CASE/pack.no" | grep -qE -- '--fix|--select|--extend-select|--rule|--ignore|(^| )-[ie] ' \
+    || fail "a ready entry fixes files or sets a rule: $(jq -r '.lint.commands[].run' "$T/$CASE/pack.no")"
+  jq -e '.lint.policy == [".shellcheckrc", "ruff.toml", "pyproject.toml", "eslint.config.mjs"] and .pipelineFiles == null' "$R/.conveyor/project.json" >/dev/null \
+    || fail "setupready with --lint-shared yes did not put pyproject.toml in lint.policy: $(jq -c .lint.policy "$R/.conveyor/project.json")"
+  ( cd "$R" && cat ruff.toml pyproject.toml .shellcheckrc eslint.config.mjs ) | cmp -s - "$T/$CASE/configs" || fail "setupready changed a linter's config file"
+  grep -qxF "conveyor: the rules that measure complexity, which the ready entries do not turn on: ruff C901, PLR0915; ESLint complexity, max-lines-per-function, max-depth; turn them on in the linter's own config" "$T/$CASE/out.no" \
+    && [ "$(grep -c complexity "$T/$CASE/out.no")" = 1 ] || fail "setupready did not name the complexity rules in one line: $(cat "$T/$CASE/out.no")"
+  # Bug: setup said that file length is measured for Go when no size entry reads Go files (pack after the yes);
+  # said nothing when a size entry does; named Go when a lint command with a run reads it.
+  [ "$(cat "$T/$CASE/other")" = "conveyor: Conveyor has no ready lint entry for Go, and no lint command in the pack checks those files, not even their length: give setup your own lint command as --lint, or add a size entry to the pack's lint.commands" ] \
+    || fail "lintother with no size entry on *.go did not say that nothing checks Go files: $(cat "$T/$CASE/other")"
+  [ "$(cat "$T/$CASE/other.size")" = "conveyor: Conveyor has no ready lint entry for Go: for those files, only file length is measured, unless you give setup your own lint command as --lint" ] \
+    || fail "lintother with a size entry on *.go did not say that only file length is measured for Go: $(cat "$T/$CASE/other.size")"
+  [ ! -s "$T/$CASE/other.run" ] || fail "lintother named Go while a lint command with a run reads *.go: $(cat "$T/$CASE/other.run")"
+  # Bug: the ESLint entry's filter lost findings or their place. Its run, with a stub eslint giving two messages of
+  # one file, one with no rule and a newline in its text, must give each as one <path>:<line>:<col>: <rule> <text>.
+  mkdir -p "$T/$CASE/es/node_modules/.bin"
+  cat > "$T/$CASE/es/node_modules/.bin/eslint" <<'STUB'
+#!/bin/sh
+cat <<EOF
+[{"filePath":"$(pwd -P)/a.js","messages":[{"line":3,"column":5,"ruleId":"no-unused-vars","message":"x is unused."},{"ruleId":null,"message":"Parsing error:\\nbad"}]}]
+EOF
+exit 1
+STUB
+  chmod +x "$T/$CASE/es/node_modules/.bin/eslint"
+  o=$(jq -r '.lint.commands[2].run | sub("\\{files\\}"; "a.js")' "$T/$CASE/pack.no")
+  o=$(cd "$T/$CASE/es" && bash -c "$o" 2>&1)
+  [ "$o" = $'a.js:3:5: no-unused-vars x is unused.\na.js:1:1: eslint Parsing error: bad' ] \
+    || fail "the ESLint entry on a stub eslint's two findings of a.js did not give one line for each: $o"
+}
+# #1156. Bug: setup offered a ready entry for a tool whose config the project does not have, or for a pyproject.toml
+# with no ruff config in it. The fixture tracks a .sh file and a pyproject.toml with no [tool.ruff], and no linter
+# config: nothing is offered.
+t_setupreadynone() {
+  local o
+  setup '[]'
+  printf '[project]\nname = "x"\n# [tool.ruff] is set in ruff.toml\n' > "$R/pyproject.toml"; git -C "$R" add pyproject.toml || fail "pyproject.toml could not be staged"
+  [ -n "$(git -C "$R" ls-files -- '*.sh')" ] || fail "the fixture tracks no .sh file"
+  o=$( setupfuncs; lintready "$R" ) || fail "lintready failed: $o"
+  [ "$o" = '[]' ] || fail "lintready offered an entry in a project with no linter config: $o"
+}
+# #1156. Bugs: setup did not ask for the ready entries or for the shared pyproject.toml, wrote one with no yes, or
+# dropped the --lint-shared answer; with its own --lint on other files, it said nothing of the Go files no command
+# reads. A whole setup run, as only it shows the questions asked before anything is changed and the answers read: a
+# project with ruff.toml, a pyproject.toml with [tool.ruff] and a Go file is asked --lint-ready and --lint-shared and
+# nothing changes; with yes to both and --lint on *.toml, the entry and both files in lint.policy are written, and Go
+# is named.
+t_setupreadyask() {
+  local X out was; setupdone
+  printf 'line-length = 100\n' > "$S/ruff.toml"; printf '[tool.ruff]\nline-length = 100\n' > "$S/pyproject.toml"; printf 'package main\n' > "$S/main.go"
+  git -C "$S" add ruff.toml pyproject.toml main.go || fail "the fixture files could not be staged"
+  was=$(setupstate); out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no 2>&1); [ $? = 2 ] && [ "$(setupstate)" = "$was" ] \
+    && grep -qF -- '--lint-ready <yes or no: write the ready lint entries, ruff (for ruff.toml, pyproject.toml), in the pack' <<<"$out" \
+    && grep -qF -- "--lint-shared <yes or no: pyproject.toml holds ruff's config" <<<"$out" \
+    || fail "setup in a project with ruff.toml and pyproject.toml did not ask --lint-ready and --lint-shared before changing anything: $out"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --lint-ready yes --lint-shared yes --lint 'exit 0' --lint-files '*.toml' 2>&1) \
+    && jq -e '[.lint.commands[] | .files] == [["*.py"], ["*.toml"]] and .lint.policy == ["ruff.toml", "pyproject.toml"]' "$S/.conveyor/project.json" >/dev/null \
+    && grep -qxF "conveyor: wrote the ready lint entry for ruff in the pack's lint.commands, on *.py" <<<"$out" \
+    && grep -qF "conveyor: Conveyor has no ready lint entry for Go, and no lint command in the pack checks those files" <<<"$out" \
+    && [ "$(cat "$S/ruff.toml")" = 'line-length = 100' ] \
+    || fail "setup --lint-ready yes --lint-shared yes --lint 'exit 0' --lint-files '*.toml' did not write the ruff entry and both configs as lint.policy, and name Go: $(jq -c .lint "$S/.conveyor/project.json") $out"
 }
