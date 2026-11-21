@@ -145,11 +145,19 @@ test('Task, 7 arms on one task of the study: the split step, Task image, and the
 });
 
 // Bug it guards: the "Good for arms" text copied the mockup's "2 to 10 points" and "200 tasks" for two Conveyor
-// versions, where the fixture's own versions differ by 2 to 40 points; Plan a run also said "not reached" of the guard.
-test('Plan a run: the usage guard fits the week left, and the gap between two Conveyor versions is the study\'s own', async () => {
+// versions, where the fixture's own versions differ by 2 to 40 points. The guard chip said the run "fits in the week
+// left" for 50 and 500 tasks alike, a forecast the engine cannot back: it sends only the guard's state as last read
+// (swe_history). The chip now gives that state, short, and for arms with no guard (a Codex arm, swe_guards) says none.
+test('Plan a run: the usage guard chip gives its last state, not a forecast, none for arms with no guard, and the gap between two Conveyor versions is the study\'s own', async () => {
   const w = await opened(BH.study(), 'plan');
-  assert.deepEqual(kv(q(w, '.bench-before')).find(([k]) => k === 'Usage guard'), ['Usage guard', 'fits in the week left']);
+  const guard = () => kv(q(w, '.bench-before')).find(([k]) => k === 'Usage guard')[1];
+  const tick = async (arm, on) => { const b = act(bp(w), `arm-${arm}`); b.checked = on; b.dispatchEvent(new w.Event('change')); await settle(); };
+  assert.equal(guard(), 'not reached');
   assert.match(text(q(w, '.bench-before .bench-callout')), / Two Conveyor versions differed by 2 to 40 points in the last study: a 2-point gap needs 5000 tasks\.$/);
+  await tick('conveyor', false); await tick('solo', false); await tick('codex-sol', true);
+  assert.equal(guard(), 'none for these arms', 'codex-sol alone: no arm has a guard');
+  await tick('conveyor', true);
+  assert.equal(guard(), 'not reached', 'conveyor and codex-sol: Conveyor has a guard');
 });
 
 // Bug it guards: with the guard reached, the chip said the run "would reach the guard; the run stops there" as a

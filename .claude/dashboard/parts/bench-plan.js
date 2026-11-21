@@ -216,13 +216,16 @@
     const lim = { ...(K.obj(K.hist().limits) || {}), ...(runSet() || {}) };
     const usd = parts.some((p) => p.usd === null) ? null : K.sum(parts.map((p) => p.usd)), mins = K.sum(parts.map((p) => p.minutes)), g = K.obj(K.hist().guard) || {};
     const held = arms.some((a) => a.guard && g[a.guard] === true), { b, why } = startButton(n, arms), rc = K.B.said.get(`${K.B.repo}\nstart`), receipt = K.saidAt('start');
+    // The guard's last reported state, not a forecast of the run's usage; an arm with no guard (swe_guards: a Codex arm)
+    // has no state to give. A short chip: the chip keeps its text on one line (app.css .chip).
+    const guardSaid = held ? K.chip('reached: no run starts while it stands', 'bad') : arms.some((a) => a.guard) ? K.chip('not reached', 'ok') : K.chip('none for these arms', 'ok');
     const unknown = parts.some((p) => p.reused === null);
     if (receipt && rc && rc.run) receipt.append(' ', K.button(rc.ended ? 'Open its results' : 'Watch run', 'btn-sm', 'watch-run', `Open the run ${rc.run}`, () => K.go('run', rc.run)));
     const s = K.box('Before you start', `${K.plural(arms.length, 'arm')} × ${K.plural(n, 'task')}`, 'bench-before');
     s.append(K.callout(said, tone), K.kv([['Cost', [h('b', null, K.usd(usd)), ' ', h('span', 'bench-muted bench-small', 'at list prices')]], ['Machine time', [h('b', null, K.fmtMin(mins)), ' ', h('span', 'bench-muted bench-small', 'tasks run one after another')]],
       ['Sessions', `${K.sum(parts.map((p) => p.usual))} usual, ${K.sum(parts.map((p) => p.worst))} at worst`],
       ['Kept results', unknown ? 'not known with run settings changed: the estimate counts each task' : `${K.sum(parts.map((p) => p.reused))} task runs reused at no cost`],
-      ['Usage guard', held ? K.chip('reached: no run starts while it stands', 'bad') : K.chip('fits in the week left', 'ok')],
+      ['Usage guard', guardSaid],
       ['Belt', `Cards and the run share the machine. Each task's container gets ${K.num(lim.cpus) === null ? 'its' : lim.cpus} CPUs and ${lim.memory || 'its memory'}.`]]),
     K.add(h('div', 'bench-row'), [b, checkButton(arms)]), why ? K.add(h('p', 'bench-note bench-why'), why) : '', receipt, K.saidAt('check'),
     K.add(h('p', 'bench-note'), ['The command it runs: ', h('span', 'mono bench-cmd', `conveyor.sh bench swe ${argsOf(n, arms).map(shellSaid).join(' ')}`)]));
