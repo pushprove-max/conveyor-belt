@@ -9,7 +9,9 @@ T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/p/.conveyor" "$T/p/sub" "$T/tmp"
 printf '%s\n' '{"test": {"command": "bash t/all.sh"}}' > "$T/p/.conveyor/project.json"
 FAIL=0
-fail() { echo "FAIL $1"; FAIL=1; }
+. "$(dirname "${BASH_SOURCE[0]}")/lib/said.sh" # a FAIL line names the hook's last input
+# The input comes first and the line stays one line: a failure log reader takes FAIL lines and cuts them at 400 characters.
+fail() { local m=$1; echo "FAIL$(said) ${m//$'\n'/\\n}"; FAIL=1; }
 # guard <command>: the hook's exit in RC and its stdout in OUT.
 guard() {
   RC=0

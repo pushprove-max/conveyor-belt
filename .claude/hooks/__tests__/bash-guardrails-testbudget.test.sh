@@ -21,7 +21,9 @@ EOF
 # A test file that waits 2 s, over the budget in clock seconds, and uses no CPU.
 printf '%s\n' 'sleep 2' > "$T/p/t/wait.test.sh"
 FAIL=0
-fail() { echo "FAIL $1"; FAIL=1; }
+. "$(dirname "${BASH_SOURCE[0]}")/lib/said.sh" # a FAIL line names the hook's last input
+# The input comes first and the line stays one line: a failure log reader takes FAIL lines and cuts them at 400 characters.
+fail() { local m=$1; echo "FAIL$(said) ${m//$'\n'/\\n}"; FAIL=1; }
 # guard <session id> <command>: the hook's exit in RC, its stdout in OUT, its stderr in $T/err. Its state folder is
 # STATE; an empty STATE gives the hook's default.
 STATE=$T/state

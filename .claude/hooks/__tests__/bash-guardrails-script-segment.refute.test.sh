@@ -7,6 +7,7 @@ set -euo pipefail
 
 ROOT=$(git rev-parse --show-toplevel)
 HOOK=$ROOT/.claude/hooks/bash-guardrails.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/said.sh" # a FAIL line names the hook's last input
 CMD="node -e \"console.log(1)\" && echo \"open('src/x.ts', 'w')\""
 
 set +e
@@ -17,7 +18,7 @@ RC=$?
 set -e
 
 [ "$RC" -eq 0 ] || {
-  echo "FAIL: harmless quoted text was refused with $RC" >&2
+  echo "FAIL: harmless quoted text was refused with $RC$(said)" >&2
   exit 1
 }
 echo "PASS"

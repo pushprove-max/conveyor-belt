@@ -9,6 +9,7 @@ PASS=0 FAIL=0
 # A log directory with no checkout in it. The real /tmp/conveyor can hold git
 # clones, and a folder holding one is rightly refused as a repo walk.
 LOGS=$(mktemp -d); trap 'rm -rf "$LOGS"' EXIT
+. "$(dirname "${BASH_SOURCE[0]}")/lib/said.sh" # a FAIL line names the hook's last input (json notes each payload)
 # Every case below runs from a throwaway MAIN checkout: a worker pane's unbounded path is rewritten (last section),
 # main's is refused, and these cases pin the refusal.
 MAINBOX=$(mktemp -d); trap 'rm -rf "$LOGS" "$MAINBOX"' EXIT
@@ -18,8 +19,9 @@ cd "$MAINBOX" || exit 1
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 
 run_hook() { echo "$1" | env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR "$HOOK" >/dev/null 2>&1; echo $?; }
-check() { if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3)"; fi }
-json() { jq -cn --arg cmd "$1" '{tool_input:{command:$cmd}}'; }
+# A FAIL line gives the input first and stays one line: a failure log reader takes FAIL lines and cuts them at 400 characters.
+check() { if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); local m="$1 (expected $2, got $3)"; echo "FAIL$(said) ${m//$'\n'/\\n}"; fi }
+json() { jq -cn --arg cmd "$1" '{tool_input:{command:$cmd}}' | said_tee; }
 # A refused search must hand back a concrete search that passes: replay the
 # refusal's `Try:` line through the same hook.
 # Main's lone simple search over an unbounded path is never refused (G4): it runs from the checkout root, capped at 200 lines.
@@ -240,9 +242,13 @@ OUT=$(pin_out 'true || F=/tmp/x; rg foo "$F"')
 check "assignment_after_or_never_judges_path" "rc=0 1" "$(printf '%s\n' "$OUT" | tail -1) $(grep -c computed <<<"$OUT")"
 # conditional_reassignment_drops_alias: catches (pass 15) an `&&`/`||` reassignment that kept the earlier alias, so
 # `F=/tmp/x; true && F=.; rg foo "$F"` was judged as /tmp/x while it searches the checkout root.
-OUT=$(pin_out 'F=/tmp/x; true && F=.; rg foo "$F"'); OUT2=$(pin_out 'F=/tmp/x; false || F=.; rg foo "$F"')
-check "conditional_reassignment_drops_alias: after && and after ||, \$F is judged computed, never /tmp/x" "rc=0 1|rc=0 1" \
-  "$(printf '%s\n' "$OUT" | tail -1) $(grep -c computed <<<"$OUT")|$(printf '%s\n' "$OUT2" | tail -1) $(grep -c computed <<<"$OUT2")"
+# One hook call a check, so its FAIL line names the call that failed.
+OUT=$(pin_out 'F=/tmp/x; true && F=.; rg foo "$F"')
+check "conditional_reassignment_drops_alias: after &&, \$F is judged computed, never /tmp/x" "rc=0 1" \
+  "$(printf '%s\n' "$OUT" | tail -1) $(grep -c computed <<<"$OUT")"
+OUT=$(pin_out 'F=/tmp/x; false || F=.; rg foo "$F"')
+check "conditional_reassignment_drops_alias: after ||, \$F is judged computed, never /tmp/x" "rc=0 1" \
+  "$(printf '%s\n' "$OUT" | tail -1) $(grep -c computed <<<"$OUT")"
 # Pin (passes today): a `;` assignment always runs, so it still resolves and the path is judged as named.
 OUT=$(pin_out 'F=/tmp/x; rg foo "$F"')
 check "assignment_after_semicolon_still_resolves" "rc=0 0" "$(printf '%s\n' "$OUT" | tail -1) $(grep -c computed <<<"$OUT")"

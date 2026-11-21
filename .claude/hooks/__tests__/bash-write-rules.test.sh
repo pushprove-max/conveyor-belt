@@ -16,7 +16,9 @@ PASS=0; FAIL=0
 FX=$(mktemp -d); FX=$(cd "$FX" && pwd -P)
 INST=$(mktemp -d); INST=$(cd "$INST" && pwd -P)
 trap 'rm -rf "$FX" "$INST"; rm -f /tmp/claude-bash-rules-*-"$SID"-*' EXIT
-check() { if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3)"; fi; }
+. "$(dirname "${BASH_SOURCE[0]}")/lib/said.sh" # a FAIL line names the hook's last input
+# A FAIL line gives the input first and stays one line: a failure log reader takes FAIL lines and cuts them at 400 characters.
+check() { if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); local m="$1 (expected $2, got $3)"; echo "FAIL$(said) ${m//$'\n'/\\n}"; fi; }
 has() { case "$1" in *"$2"*) echo yes ;; *) echo no ;; esac; }
 
 # The fixture install: the hook and its lib. The fixture project: four rules. backend.md and tests.md each carry a
@@ -138,8 +140,9 @@ check "every rule glob was exercised" 7 "$N"
 OUT=$(ctx fold-a "sed -i.bak -e's/a/b/' src/ra-probe.ts")
 # Each misses a write target, so a real write loses its path rules: sed -i -e'expr', a numbered fd, a spaced sed script.
 check "attached_expression_write_injects" yes "$(has "$OUT" '# API and Data Conventions')"
-check "fd_write_injects" "yes yes" \
-  "$(has "$(ctx fold-fd1 'printf x 1> src/zz-fd-refute.ts')" '# API and Data Conventions') $(has "$(ctx fold-fd2 'printf x 2> src/zz-fd-refute.ts')" '# API and Data Conventions')"
+# One hook call a check, so its FAIL line names the call that failed.
+check "fd_write_injects (1>)" yes "$(has "$(ctx fold-fd1 'printf x 1> src/zz-fd-refute.ts')" '# API and Data Conventions')"
+check "fd_write_injects (2>)" yes "$(has "$(ctx fold-fd2 'printf x 2> src/zz-fd-refute.ts')" '# API and Data Conventions')"
 OUT=$(ctx fold-s "sed -i 's/a b/c/' src/ra-probe.ts")
 check "spaced_sed_write_injects" yes "$(has "$OUT" '# API and Data Conventions')"
 

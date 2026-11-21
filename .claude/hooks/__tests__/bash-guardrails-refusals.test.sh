@@ -55,20 +55,22 @@ MAIN_TMP=$(mktemp -d)
 git -C "$MAIN_TMP" init -q
 printf '{}\n' > "$MAIN_TMP/package.json"
 trap 'rm -rf "$MAIN_TMP"' EXIT
+. "$(dirname "${BASH_SOURCE[0]}")/lib/said.sh" # a FAIL line names the hook's last input (json notes each payload)
 
 # Outside its own part a call runs no hook, though each $(json ...) and $(run_hook ...) around it still forks a
 # subshell; inside it, one more fork that becomes the hook (no echo or pipe forks).
 run_hook() { [ "$ON" = 1 ] || return 0; ( cd "$MAIN_TMP" && exec "$HOOK" <<<"$1" >/dev/null 2>&1 ); echo $?; }
-check() { [ "$ON" = 1 ] || return 0; if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); echo "FAIL $1 (expected $2, got $3)"; fi }
+# A FAIL line gives the input first and stays one line: a failure log reader takes FAIL lines and cuts them at 400 characters.
+check() { [ "$ON" = 1 ] || return 0; if [ "$2" = "$3" ]; then PASS=$((PASS+1)); echo "ok   $1"; else FAIL=$((FAIL+1)); local m="$1 (expected $2, got $3)"; echo "FAIL$(said) ${m//$'\n'/\\n}"; fi }
 # Outside its own part a run builds no payload: the parts each paid a jq per case for nothing.
 # Inside it, the payload is escaped in bash: a jq per case cost about a seventh of the case. A control character
 # other than tab, newline and CR takes jq's \u escape, so such a command still goes through jq.
 json() {
   [ "$ON" = 1 ] || return 0
   local s=$1 t=${1//[$'\t\n\r']/}
-  if [[ $t == *[[:cntrl:]]* ]]; then jq -cn --arg cmd "$1" '{tool_input:{command:$cmd}}'; return; fi
+  if [[ $t == *[[:cntrl:]]* ]]; then jq -cn --arg cmd "$1" '{tool_input:{command:$cmd}}' | said_tee; return; fi
   s=${s//\\/\\\\}; s=${s//\"/\\\"}; s=${s//$'\t'/\\t}; s=${s//$'\n'/\\n}; s=${s//$'\r'/\\r}
-  printf '{"tool_input":{"command":"%s"}}\n' "$s"
+  printf -v s '{"tool_input":{"command":"%s"}}' "$s"; said_in "$s"; printf '%s\n' "$s"
 }
 # A refusal these guards keep must hand back a concrete command. Take its
 # `Try:` line and replay it in the same seat: it has to pass, or the advice is
@@ -109,7 +111,8 @@ guard_refusals_print_try() {
   printf 'gen.json linguist-generated=true\n' > "$TRY_BOX/.gitattributes"; seq 1 300 > "$TRY_BOX/gen.json"
   try_payload() { # tool, text, dir, background
     if [ "$1" = Read ]; then jq -cn --arg f "$2" --arg d "$3" '{tool_name:"Read",tool_input:{file_path:$f},cwd:$d,session_id:"try-row"}'
-    else jq -cn --arg c "$2" --arg d "$3" --argjson b "${4:-false}" '{tool_name:"Bash",tool_input:{command:$c,run_in_background:$b},cwd:$d,session_id:"try-row"}'; fi
+    else jq -cn --arg c "$2" --arg d "$3" --argjson b "${4:-false}" '{tool_name:"Bash",tool_input:{command:$c,run_in_background:$b},cwd:$d,session_id:"try-row"}'; fi \
+      | said_tee
   }
   try_row() { # hook file, refused text, seat, [background], [recorded]
     local H=$HOOKS_DIR/$1 DIR=$MAIN_TMP TOOL=Bash OUT TRY L="$1: $2"
@@ -301,7 +304,7 @@ check "an unrelated touch in /tmp passes" 0 \
 
 # _implementer-tools.md said nothing of the bounded-path rule: one cut lost 10
 # calls to those refusals (2026-09-18). The note names the path rule.
-NOTE="$(dirname "$REAL_HOOK")/../briefs/_implementer-tools.md"
+NOTE="$(dirname "$REAL_HOOK")/../briefs/_implementer-tools.md"; said_in '' # this check gives the hook no input
 check "the tools note states the rg/grep rewrite and cap rule" 1 "$(grep -qE 'rg.*grep -r.*rewritten' "$NOTE" && echo 1 || echo 0)"
 
 part 3
@@ -338,7 +341,7 @@ trap 'rm -rf "$MAIN_TMP" "$HUNT_HOME" /tmp/claude-serena-tracker-$HUNT_SID* /tmp
 hunt() { # <session suffix> <command> -- prints hint, quiet, or rc=<n>
   [ "$ON" = 1 ] || return 0
   local OUT RC
-  OUT=$(cd "$MAIN_TMP" && jq -cn --arg cmd "$2" --arg sid "$HUNT_SID-$1" '{session_id:$sid,tool_input:{command:$cmd}}' | env -u CLAUDE_CONFIG_DIR HOME=$HUNT_HOME "$HOOK" 2>/dev/null); RC=$?
+  OUT=$(cd "$MAIN_TMP" && jq -cn --arg cmd "$2" --arg sid "$HUNT_SID-$1" '{session_id:$sid,tool_input:{command:$cmd}}' | said_tee | env -u CLAUDE_CONFIG_DIR HOME=$HUNT_HOME "$HOOK" 2>/dev/null); RC=$?
   [ "$RC" = 0 ] || { echo "rc=$RC"; return; }
   jq -e '.hookSpecificOutput.hookEventName == "PreToolUse" and (.hookSpecificOutput.additionalContext | contains("find_referencing_symbols"))' <<<"$OUT" >/dev/null 2>&1 && echo hint || echo quiet
 }
@@ -362,7 +365,7 @@ profile_hunt() { # <session suffix> <HOME .claude.json text> <profile .claude.js
   [ "$ON" = 1 ] || return 0
   local H P OUT; H=$(mktemp -d); P=$(mktemp -d); printf '%s\n' "$2" > "$H/.claude.json"; printf '%s\n' "$3" > "$P/.claude.json"
   OUT=$(cd "$MAIN_TMP" && jq -cn --arg cmd 'rg -n "analyzeRecapture\(" src' --arg sid "$HUNT_SID-$1" '{session_id:$sid,tool_input:{command:$cmd}}' \
-    | HOME=$H CLAUDE_CONFIG_DIR=$P "$HOOK" 2>/dev/null); rm -rf "$H" "$P"
+    | said_tee | HOME=$H CLAUDE_CONFIG_DIR=$P "$HOOK" 2>/dev/null); rm -rf "$H" "$P"
   jq -e '.hookSpecificOutput.additionalContext | contains("find_referencing_symbols")' <<<"$OUT" >/dev/null 2>&1 && echo hint || echo quiet
 }
 check "serena configured only in the profile's .claude.json still gets the hint" hint "$(profile_hunt p1 '{}' '{"mcpServers":{"serena":{}}}')"
@@ -386,6 +389,7 @@ check "red-proof.sh still refuses a bare node --test as its test" 2 \
 # against fixtures/case-filter-fixture.sh, which sources the same filter: milliseconds, where a nested run of this
 # file costs minutes. fx prints the fixture's exit status, its ok count and each text it named as unmatched.
 if [ "$ON" = 1 ]; then
+  said_in '' # these checks give the hook no input: their FAIL lines name none, not the last case's
   CF_FIXTURE=$(dirname "${BASH_SOURCE[0]}")/fixtures/case-filter-fixture.sh
   # `chec[k]`: the filter takes a function whose body holds the word for a check, and would skip fx's call.
   fx() { # [selector] -- no argument runs the fixture with the selector unset
@@ -427,14 +431,26 @@ AWS_NEVER=('aws sts get-caller-identity $P; P=--profile=sample-dev' 'aws s3 ls; 
   'AWS_PROFILE="$UNSET_PROFILE" aws s3 ls' 'export AWS_PROFILE=sample-dev; AWS_PROFILE="$UNSET_PROFILE" aws s3 ls'
   "AWS_PROFILE='\$UNSET_PROFILE' aws s3 ls" 'aws --profile "$UNSET_PROFILE" s3 ls' 'aws --profile=$UNSET_PROFILE s3 ls'
   "P='--profile \$X'; aws s3 ls \$P" "export AWS_PROFILE='\$X'; aws s3 ls")
-AWS_GOT=""; for C in "${AWS_NEVER[@]}"; do AWS_GOT+="$(aws_hook '' "$C") "; done
-AWS_GOT+="$(aws_hook sample-dev 'unset AWS_PROFILE; aws s3 ls') $(aws_hook sample-dev 'AWS_PROFILE=; aws s3 ls') $(aws_hook sample-dev "AWS_PROFILE='' aws s3 ls") $(aws_hook '' 'export AWS_PROFILE=sample-dev; env -i aws s3 ls') $(aws_hook sample-dev 'aws --profile "$UNSET_PROFILE" s3 ls') $(aws_hook sample-dev "P='--profile \$X'; aws s3 ls \$P") |"
-AWS_GOT+=" $(aws_hook '' 'P=--profile=sample-dev; aws s3 ls $P') $(aws_hook '' 'P="--profile sample-dev"; aws sts get-caller-identity $P') $(aws_hook '' 'X=1; export AWS_PROFILE=sample-dev && aws s3 ls') $(aws_hook sample-dev 'X=1; aws s3 ls') $(aws_hook sample-dev 'AWS_PROFILE=sample-dev; aws s3 ls') $(aws_hook '' 'aws --profile sample-dev s3 ls') $(aws_hook '' 'AWS_PROFILE="sample-dev" aws s3 ls')"
-check "aws_profile_only_effective_vouches" "2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 | 0 0 0 0 0 0 0" "$AWS_GOT"
+# Rows of <AWS_PROFILE in the hook's environment, empty for unset> <command> <its exit>: one hook call a check, so a
+# FAIL line names the command that failed.
+AWS_ROWS=()
+for C in "${AWS_NEVER[@]}"; do AWS_ROWS+=('' "$C" 2); done
+AWS_ROWS+=(sample-dev 'unset AWS_PROFILE; aws s3 ls' 2  sample-dev 'AWS_PROFILE=; aws s3 ls' 2
+  sample-dev "AWS_PROFILE='' aws s3 ls" 2  '' 'export AWS_PROFILE=sample-dev; env -i aws s3 ls' 2
+  sample-dev 'aws --profile "$UNSET_PROFILE" s3 ls' 2  sample-dev "P='--profile \$X'; aws s3 ls \$P" 2
+  '' 'P=--profile=sample-dev; aws s3 ls $P' 0  '' 'P="--profile sample-dev"; aws sts get-caller-identity $P' 0
+  '' 'X=1; export AWS_PROFILE=sample-dev && aws s3 ls' 0  sample-dev 'X=1; aws s3 ls' 0
+  sample-dev 'AWS_PROFILE=sample-dev; aws s3 ls' 0  '' 'aws --profile sample-dev s3 ls' 0
+  '' 'AWS_PROFILE="sample-dev" aws s3 ls' 0)
+for ((i = 0; i < ${#AWS_ROWS[@]}; i += 3)); do
+  check "aws_profile_only_effective_vouches: AWS_PROFILE='${AWS_ROWS[i]}' exits ${AWS_ROWS[i+2]}" "${AWS_ROWS[i+2]}" \
+    "$(aws_hook "${AWS_ROWS[i]}" "${AWS_ROWS[i+1]}")"
+done
 
 # A block that names no way forward costs a retry. Every BLOCKED message states what to run instead
 # on a line of its own (`Instead:` or `Try:`) within the statement that prints it.
 if [ "$ON" = 1 ]; then
+  said_in '' # this check reads the hook's text and gives it no input
   MISSING=$(awk '/BLOCKED/ && !/^[[:space:]]*#/ { if (n) print n; n = NR; ok = 0 }
     n && /(^|[^A-Za-z])(Instead|Try):/ { n = 0 }
     END { if (n) print n }' "$REAL_HOOK" | tr '\n' ' ')

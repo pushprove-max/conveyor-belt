@@ -7,6 +7,7 @@ set -euo pipefail
 
 ROOT=$(git rev-parse --show-toplevel)
 HOOK=$ROOT/.claude/hooks/bash-guardrails.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/said.sh" # a FAIL line names the hook's last input
 CMD="python3 -c \"from pathlib import Path; Path('src/x.ts').open('w').write('x')\""
 
 set +e
@@ -17,7 +18,7 @@ RC=$?
 set -e
 
 [ "$RC" -eq 2 ] || {
-  echo "FAIL: Path.open write should be refused, got $RC" >&2
+  echo "FAIL: Path.open write should be refused, got $RC$(said)" >&2
   exit 1
 }
 echo "PASS"
