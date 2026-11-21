@@ -190,8 +190,9 @@ check "--hash-range on an unresolvable base is NO_BASE" "NO_BASE" \
 # Bug: a failed check printed only the two values, or only its last call, or lost a call to said.sh's 600-character cut
 # when the temporary folder had a long path (macOS). The probe runs four calls in such a folder, then a failing check
 # on its own copy of the notes, and its FAIL line must name the first call and the last, with the folder of each.
+# The probe unsets CLAUDE_PROJECT_DIR: a Codex card session exports it, and the note would then name it on each call.
 check "a failed check names every call it checked, in a folder with a long path" 0 \
-  "$( (CALLS=$(mktemp); SAID_FILE=$CALLS.said; SANDBOX=$(mktemp -d)/$(printf 'long-folder-%.0s' 1 2 3 4 5 6 7 8)
+  "$( (unset CLAUDE_PROJECT_DIR; CALLS=$(mktemp); SAID_FILE=$CALLS.said; SANDBOX=$(mktemp -d)/$(printf 'long-folder-%.0s' 1 2 3 4 5 6 7 8)
       mkdir -p "$SANDBOX"; cd "$SANDBOX" || exit 1
       hook --hash-range no/such/ref HEAD >/dev/null
       CONVEYOR_REVIEW_GATE_BYPASS=1 hook >/dev/null 2>&1 <<<"$(cmd 'npm test')"
