@@ -1027,25 +1027,28 @@ const declinedTodayText =(s: State, snap: Snap): string => {
   return `judge declined ${n ? count(n, 'finding') : 'no findings'} today`
 }
 
-// A whole-suite run (a release's suite, the full test): one line while it runs, its kind, short commit, time running,
+// A whole-suite run (a release's suite, the full test): one line while it runs (two while a release reruns failed cases), its kind, short commit, time running,
 // cases done and failures so far; once it ended, its result for SUITE_SHOWN_MS, then nothing.
 export const SUITE_SHOWN_MS = 10 * 60 * 1000
 export const suitesModel = (s: State, snap: Snap): Line[] => (snap.suites ?? [])
   .filter(x => x.ended === null || s.now - x.ended < SUITE_SHOWN_MS)
-  .map((x): Line => {
+  .flatMap((x): Line[] => {
     const what = `${x.repo ? `${x.repo} ` : ''}${x.kind === 'release' ? `release ${x.version}` : x.kind}${x.sha ? ` · ${x.sha.slice(0, 7)}` : ''}`
     const failed = x.failed ? [{ t: ` · ${count(x.failed, 'failure')}`, c: C.bad }] : []
     // While a release's failed cases run again, the pass under way and its own progress, not the first pass's counts.
+    // The progress goes on a second line: one line is over 80 columns and the pane would cut off its failures and time.
     const r = x.rerun
     if (x.ended === null && r) {
-      return [{ t: what, c: C.work, b: true }, { t: ` · failed cases again: pass ${r.pass}${r.of === null ? '' : ` of ${r.of}`}${r.done === null ? '' : ` · ${count(r.done, 'file')} done`}`, d: true },
-        ...(r.failed ? [{ t: ` · ${r.failed} failed`, c: C.bad }] : []), ...(r.at === null ? [] : [{ t: ` · moved ${fmtSec((s.now - r.at) / 1000)} ago`, d: true }])]
+      const progress = [...(r.done === null ? [] : [{ t: `${count(r.done, 'file')} done`, d: true }]), ...(r.failed ? [{ t: `${r.failed} failed`, c: C.bad }] : []),
+        ...(r.at === null ? [] : [{ t: `moved ${fmtSec((s.now - r.at) / 1000)} ago`, d: true }])]
+      return [[{ t: what, c: C.work, b: true }, { t: ` · failed cases again: pass ${r.pass}${r.of === null ? '' : ` of ${r.of}`}`, d: true }],
+        ...(progress.length ? [[{ t: '  ', d: true }, ...progress.flatMap((p, i) => (i ? [{ t: ' · ', d: true }, p] : [p]))] as Line] : [])]
     }
     if (x.ended === null) {
-      return [{ t: what, c: C.work, b: true }, { t: ` · running${x.since === null ? '' : ` ${fmtSec((s.now - x.since) / 1000)}`}${x.done === null ? '' : ` · ${count(x.done, 'case')} done`}`, d: true }, ...failed]
+      return [[{ t: what, c: C.work, b: true }, { t: ` · running${x.since === null ? '' : ` ${fmtSec((s.now - x.since) / 1000)}`}${x.done === null ? '' : ` · ${count(x.done, 'case')} done`}`, d: true }, ...failed]]
     }
     const good = x.state === 'passed' || x.state === 'released'
-    return [{ t: what, c: good ? C.ok : C.bad, b: true }, { t: ` · ${x.state || 'ended'} ${fmtSec((s.now - x.ended) / 1000)} ago`, d: true }, ...failed]
+    return [[{ t: what, c: good ? C.ok : C.bad, b: true }, { t: ` · ${x.state || 'ended'} ${fmtSec((s.now - x.ended) / 1000)} ago`, d: true }, ...failed]]
   })
 
 const noteLine = (s: State): Line => [{ t: s.note, c: C.you }]

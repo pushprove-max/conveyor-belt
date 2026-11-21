@@ -113,10 +113,14 @@ test('a release suite under way is one line under the head: its version, short c
   expect(tableText(board({ suites: [] }), 80)).not.toMatch(/release|running|cases done/)
 })
 // Bug (#1240): while a release's failed cases ran again, /units kept the first pass's "140 cases done · 2 failures".
-test('a release whose failed cases run again shows that pass, its files done and failed and its last move, not the first pass\'s counts', () => {
+// Bug (#1249): the pane cut that one line at 80 columns, so its failure count and last-move time never showed.
+test('a release whose failed cases run again shows that pass, its files done and failed and its last move, not the first pass\'s counts, whole at 80 columns', () => {
   const rerun = { round: 2, of: 6, case: 'x: a', since: ago(4), at: ago(3), done: 5, failed: 1, files: { done: 1, of: 2, failed: ['x'] } }
-  const line = tableText(board({ suites: [{ ...SUITE, rerun }] }), 100).split('\n')[3]
-  expect(line?.trimEnd()).toBe('release 1.2.0 · a1b2c3d · failed cases again: pass 2 of 6 · 1 file done · 1 failed · moved 3m ago')
+  const lines = tableText(board({ suites: [{ ...SUITE, rerun }] }), 80).split('\n')
+  expect(lines.slice(3, 5).map(l => l.trimEnd())).toEqual(['release 1.2.0 · a1b2c3d · failed cases again: pass 2 of 6', '  1 file done · 1 failed · moved 3m ago'])
+  const pane = paneModel(board({ suites: [{ ...SUITE, rerun }] }), 80, 0).map(plain).join('\n')
+  expect(pane).toContain('  1 file done · 1 failed · moved 3m ago')
+  expect(pane).not.toContain('…')
 })
 test('an ended run shows its result for a short time, then goes away', () => {
   const ended = { ...SUITE, kind: 'full test', version: '', ended: ago(3), state: 'failed' }
