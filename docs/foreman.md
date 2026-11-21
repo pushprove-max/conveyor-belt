@@ -223,6 +223,15 @@ asks the host about the record over ssh. Open decisions for that record come fro
   decides one only when you gave that answer to the same question before. Auto leaves either one under "Waiting for the owner"
   when its text holds a word of `auto.reserved`, such as `delete`. A card stopped for your yes, and a main-red fix
   card, are not decisions, so auto does not touch them.
+- Auto goes on deciding on the build machine (the host that has the card record) while your machine is off or the
+  Foreman session is not running. Each time the engine posts a new open decision, the engine decides it by the same
+  rules as `auto decide`. It logs each decision in the auto log on that host, then takes the step that the answer
+  names. When `review-retry` is on ([Standing yes](#standing-yes)), the engine also retries a card that its review
+  blocked, and logs that step in the ruling log. When the Foreman runs on your own machine, `/conveyor-belt:auto on`,
+  `narrow` and `off` set the same mode on the host, with a log of its own there. `on` and `narrow` first send your
+  picker answers from the ruling log on your machine to the host, and each `auto decide` of the Foreman sends them
+  again. When the Foreman session starts again, it reads that log and tells you what the engine decided. What
+  `auto.reserved` holds, and anything against one of your rulings, still wait for you.
 - `owner-way.md`: a project can keep a written profile of how its owner decides. Make it from the ruling log, and put
   it in the Foreman's folder, beside `rules.md`: `foreman` in the folder that `conveyor.sh state-dir` prints. For a
   group in `foreman.groups`, use the folder of the first project in the group. The
@@ -247,7 +256,8 @@ asking"). The pack keeps the list as `auto.standing`. A kind works whether `/con
 - `fixed-block`: a fix that landed removed the cause of a blocked card. The Foreman adds `Depends on: #<fix>` to the
   card's issue and runs `conveyor.sh retry <issue> --fresh`.
 - `review-retry`: the review blocked a card, because the fix for a finding did not hold after its fix rounds. The
-  Foreman's watcher runs `conveyor.sh retry <issue>` on the host itself and logs the step in the ruling log. The
+  Foreman's watcher runs `conveyor.sh retry <issue>` on the host itself and logs the step in the ruling log. While
+  auto is on, the engine on the host does this step too, also when the watcher is not running. The
   Foreman gets no wake for that card and does not tell you. If the retry fails, the blocked card wakes the Foreman, and
   the wake gives the reason of the failed retry. A card blocked for another reason wakes the Foreman as before.
 

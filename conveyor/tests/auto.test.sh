@@ -159,3 +159,77 @@ The owner is here. Decide only the formalities; ask them everything else as usua
 }
 t_autoprofile() { autoprofile on; }
 t_autoprofilen() { autoprofile narrow; }
+
+# Bug (#1168): the engine's pass (lib/needsask.sh needsauto) and the Foreman's both start on a new decision; two passes
+# that read it open at once would each log and answer it. Another pass holds decide.lock and answers d-docs while
+# this one waits: this pass then finds it answered and logs no entry for it. The other pass is a real process holding
+# the lock, as only two processes at once show whether the second waits.
+t_autolock() {
+  local out log; autoledger
+  out=$(cd "$R" && loop auto on) || fail "auto on failed: $out"
+  log=$(jq -r .log "$ST/auto/mode.json")
+  ( flock 9 && : > "$T/$CASE/held" && sleep 1 && CONVEYOR_MAIN=$R bash "$SRC/../.claude/scripts/decision.sh" answer d-docs 'yes, merge it' > /dev/null ) 9>>"$ST/auto/decide.lock" & # sleep: the holder keeps the lock while this pass starts and waits on it
+  wait_until '[ -e "$T/$CASE/held" ]' || fail "the other pass never took decide.lock"
+  out=$(cd "$R" && loop auto decide 2>&1); wait
+  [ "$(answer d-docs)" = 'yes, merge it' ] && ! grep -q '^### .* d-docs: ' "$log" \
+    || fail "auto decide did not wait for the pass holding the lock, and decided d-docs again ($out): $(cat "$log")"
+}
+
+# Bug (#1168): auto's mode was only on the Foreman's machine, so the engine on the host that has the record never
+# decided. The Foreman's record "origin" (this checkout's remote) has its main on another host: auto on and off are
+# set there too (foreman.sh ask, its seam CONVEYOR_FOREMAN_ASK), and the rules tell the Foreman to read that host's log.
+# Bug (#1168, review): the host had the mode but not the owner's rulings, which are written on the owner's machine, so
+# it could decide against one. auto on sends the ruling log's picker answers first (`auto rulings`, on stdin), and each
+# `auto decide` of the Foreman sends them again, for the rulings given since.
+autohost() { # the Foreman's record "origin", its main on another host
+  mkdir -p "$XDG_CONFIG_HOME/conveyor" && jq -n '{records: [{repo: "origin", main: "/nonexistent-host/origin"}]}' > "$XDG_CONFIG_HOME/conveyor/host.json"
+  autoledger; export CALLS=$T/$CASE/calls SENT=$T/$CASE/sent
+}
+t_autohosts() {
+  local out; autohost
+  # The seam's command: its variables are expanded by the shell that runs it (foreman/lib.sh ask).
+  export CONVEYOR_FOREMAN_ASK='echo "$CONVEYOR_REPO $CONVEYOR_CMD" >> "$CALLS"; [ "$CONVEYOR_CMD" != "auto rulings" ] || cat >> "$SENT"; echo "auto ON: until off. Log: /srv/state/auto/a.md"'
+  out=$(cd "$R" && loop auto on 2>&1) && grep -qxF 'origin, on its host: auto ON: until off. Log: /srv/state/auto/a.md' <<<"$out" \
+    || fail "auto on did not set the mode on the record's host: $out $(cat "$CALLS" 2>&1)"
+  [ "$(jq -sr 'map("\(.id) \(.answer)") | join(", ")' "$SENT" 2>&1)" = 'x-1 yes, merge it (Recommended), x-2 no' ] \
+    || fail "auto on did not send the ruling log's picker answers to the host: $(cat "$SENT" 2>&1)"
+  out=$(cd "$R" && loop auto rules) && grep -qF "ask origin auto status\`: it names the log there" <<<"$out" \
+    || fail "the rules do not name the host's auto log: $out"
+  out=$(cd "$R" && loop auto decide 2>&1) || fail "auto decide failed: $out"
+  out=$(cd "$R" && loop auto off 2>&1) && [ "$(cat "$CALLS")" = $'origin auto rulings\norigin auto on\norigin auto rulings\norigin auto off' ] \
+    || fail "auto on, decide and off did not send the rulings, then the mode, to the record's host: $out $(cat "$CALLS" 2>&1)"
+}
+# Bug (#1168, review): the mode set on a host the rulings did not reach lets the engine there decide against them. When
+# `auto rulings` fails there, auto on is not set there, and says so.
+t_autohostsno() {
+  local out; autohost
+  export CONVEYOR_FOREMAN_ASK='echo "$CONVEYOR_REPO $CONVEYOR_CMD" >> "$CALLS"; [ "$CONVEYOR_CMD" != "auto rulings" ] || { echo "no route to host" >&2; exit 255; }'
+  out=$(cd "$R" && loop auto on 2>&1)
+  [ "$(cat "$CALLS")" = 'origin auto rulings' ] && grep -qF "origin, on its host: the owner's rulings were not sent there: no route to host" <<<"$out" \
+    || fail "auto on set the mode on a host its rulings did not reach, or did not say so: $out $(cat "$CALLS" 2>&1)"
+}
+
+# Bug (#1168, review): on the host, decide read only that machine's ruling log, so a ruling the owner gave on their own
+# machine was not seen. The local log holds the owner's older yes to "Merge the docs fix now?" (x-1, no time); the
+# rulings sent from the owner's machine hold their later "wait" (x-9): decide leaves d-docs open, against x-9.
+t_autohostrul() {
+  local out log; autoledger
+  out=$(cd "$R" && jq -cn '{id: "x-9", utc: "2026-11-20T10:00:00Z", source: "ask", question: "Merge the docs fix now?", answer: "wait", pick: "option"}' | loop auto rulings) \
+    || fail "auto rulings failed: $out"
+  out=$(cd "$R" && loop auto on && loop auto decide 2>&1) || fail "auto on or decide failed: $out"
+  log=$(jq -r .log "$ST/auto/mode.json")
+  [ "$(answer d-docs)" = open ] && grep -qF -- '- d-docs: Merge the docs fix now? (against the owner'"'"'s latest ruling x-9 on this question)' "$log" \
+    || fail "decide answered d-docs against the ruling x-9 sent from the owner's machine: $(answer d-docs) $(cat "$log")"
+}
+
+# Bug: on the build host, with no ruling log of its own, the reason logged for a decision says the owner's picks are
+# not known, though the owner's machine sent their rulings (auto rulings).
+t_autohostway() {
+  local out log; autoledger; rm -f "$CONVEYOR_RULING_LOG"
+  out=$(cd "$R" && jq -cn '{id: "x-9", utc: "2026-11-20T10:00:00Z", source: "ask", question: "Merge the docs fix now?", answer: "yes, merge it (Recommended)", pick: "recommended"}' | loop auto rulings) \
+    || fail "auto rulings failed: $out"
+  out=$(cd "$R" && loop auto on && loop auto decide 2>&1) || fail "auto on or decide failed: $out"
+  log=$(jq -r .log "$ST/auto/mode.json")
+  [ "$(answer d-docs)" = 'yes, merge it' ] && grep -qF -- '- **Why:** it is the recommended option, and the owner took the recommended option in 1 of their last 1 picker answers.' "$log" \
+    || fail "decide with only the rulings sent from the owner's machine did not log their picks for d-docs: $(answer d-docs) $(cat "$log")"
+}

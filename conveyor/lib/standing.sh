@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # The standing kinds of routine yes: the pack's auto.standing, each kind a step the owner said yes to ahead of time, so
 # the Foreman takes it without asking (and, for review-followup, the engine: followups(), lib/followups.sh). The
-# Foreman's watcher takes review-retry in its place (foreman/watch-conveyor.sh reviewretry()). Each kind
+# Foreman's watcher takes review-retry in its place (foreman/watch-conveyor.sh reviewretry()), and so does the engine's
+# loop while auto is on (lib/needsask.sh needsretry()). Each kind
 # is off until the owner turns it on: setup writes the list empty, and the Board's Rules tab turns a kind on or off
 # (`conveyor.sh auto standing <kind> on|off`). The Foreman is told the kinds that are on, with their limits, at its
 # start (foreman.sh asks each of its records for `conveyor.sh auto standing`, on the host that has the record). Each act under a kind is one row of the

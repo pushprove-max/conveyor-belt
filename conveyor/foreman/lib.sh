@@ -194,6 +194,7 @@ waiter_state() {
 # CONVEYOR_FOREMAN=1, so it holds the issue it files: the engine on the host, or of another project of the group,
 # cannot see this machine's mark file. ask adds the mark to no other command: a session one starts (a card's) would
 # claim the role. A command run on this machine still inherits the Foreman session's own environment, mark included.
+# The command reads nothing, unless ASK_IN names a file: the command then reads that file (`auto rulings`).
 # CONVEYOR_FOREMAN_ASK, when set, runs in its place with CONVEYOR_REPO, CONVEYOR_MAIN and CONVEYOR_CMD (the command
 # and its arguments, space-separated) set (the tests' seam).
 host_ssh() { # the host file's ssh target, empty when it names none (or one that is not a plain host name)
@@ -202,7 +203,7 @@ host_ssh() { # the host file's ssh target, empty when it names none (or one that
 ask() {
   local cmd target fm=
   [ "$3" != testissue ] || fm='CONVEYOR_FOREMAN=1 '
-  if [ -n "${CONVEYOR_FOREMAN_ASK:-}" ]; then CONVEYOR_REPO=$1 CONVEYOR_MAIN=$2 CONVEYOR_CMD="${*:3}" bash -c "$CONVEYOR_FOREMAN_ASK" < /dev/null; return; fi
+  if [ -n "${CONVEYOR_FOREMAN_ASK:-}" ]; then CONVEYOR_REPO=$1 CONVEYOR_MAIN=$2 CONVEYOR_CMD="${*:3}" bash -c "$CONVEYOR_FOREMAN_ASK" < "${ASK_IN:-/dev/null}"; return; fi
   # A pin names a version folder, so only a full commit id may (as the shim requires): anything else could name a
   # path outside versions/. A pack that follows the plugin's main runs that machine's current engine (as the shim). A
   # pack with no plugin key (the plugin's own checkout) runs the engine of the checkout itself, as its loop does.
@@ -211,8 +212,8 @@ ask() {
   printf -v cmd '%s%s' "$cmd" "$(printf ' %q' "${@:3}")"
   target=$(host_ssh)
   if [ -n "$target" ]; then
-    timeout -k 2 "${ASK_LIMIT:-45}" ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "$cmd" < /dev/null
-  else timeout -k 2 "${ASK_LIMIT:-45}" bash -c "$cmd" < /dev/null; fi
+    timeout -k 2 "${ASK_LIMIT:-45}" ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "$cmd" < "${ASK_IN:-/dev/null}"
+  else timeout -k 2 "${ASK_LIMIT:-45}" bash -c "$cmd" < "${ASK_IN:-/dev/null}"; fi
 }
 
 # The pending items (a watcher's wake, owed to the session). $FD/pending holds one file per wake, written as

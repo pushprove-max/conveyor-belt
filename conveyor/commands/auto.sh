@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# `conveyor.sh auto on | narrow | off | status | band | rules | decide | standing [<run> | <kind> on|off] | act <kind> <what>`:
+# `conveyor.sh auto on | narrow | off | status | band | rules | decide | rulings | standing [<run> | <kind> on|off] | act <kind> <what>`:
 # /conveyor-belt:auto, for the project it is called in. While it is on, the Foreman decides the owner's open decisions for them, by the owner's recorded way of
 # deciding, and logs each with its reasons; what the pack reserves (auto.reserved) is never decided and waits for the
 # owner. Sourced by conveyor.sh.
@@ -8,6 +8,9 @@
 #   narrow: the owner is here: decide only the formalities, an open decision whose recommended option the owner
 #   gave in their latest ruling on the same question (in the ruling log). Each starts a log,
 #   <state folder>/auto/<date>-<time>.md: "## Summary", "## Decisions", "## Waiting for the owner". off ends it.
+#   Each of the three is also set on the host of each record of this checkout's Foreman whose main is on another
+#   machine (tohosts), with its own log there: the engine on the machine that has the record runs decide itself
+#   (lib/needsask.sh needsauto), so auto goes on while the owner's machine is off or the Foreman session is not running.
 # - status: one line for the owner. band: {scope: full|narrow|off, since, count} for the plugin's band (hooks/auto.tsx).
 #   rules: what the Foreman is told while it is on; nothing while it is off. When the project keeps owner-way.md, its
 #   written profile of how the owner decides, in the Foreman's folder (beside rules.md), the rules name it.
@@ -21,17 +24,22 @@
 #   line it tells the owner; a kind that is off is refused, so the step goes to the owner.
 # - decide: one pass over the ledger's open decisions (the Board's, .claude/scripts/decision.sh list). Each decided
 #   one gets its log entry (question, pick, why, reversible), written before decision.sh answers it with its
-#   recommended option; each one it leaves gets a line under "## Waiting for the owner", once.
+#   recommended option; each one it leaves gets a line under "## Waiting for the owner", once. The Foreman runs it, and
+#   the engine's loop runs it on a new open decision; one pass at a time (decide.lock), so each is decided once.
+#   The Foreman's pass first sends the owner's rulings to the hosts (hostrulings), so the engine there reads the new ones.
+# - rulings: the owner's picker answers from the ruling log of the Foreman's machine (hostrulings there), read on stdin
+#   and kept as <state folder>/auto/rulings.jsonl, in place of the last ones sent: decide reads them beside this
+#   machine's ruling log.
 # The owner's way of deciding is read from the project's ruling log (.claude/hooks/lib/rulings.sh rulings_log: every
 # picker answer the owner gave, with whether it was the recommended option), never written here.
 # Test seams: CONVEYOR_LEDGER (decision.sh's), CONVEYOR_RULING_LOG (the ruling log).
 . "$HERE/lib/prompts.sh" || exit 1
 . "$HERE/lib/testfiles.sh" || exit 1
 . "$HERE/lib/standing.sh" || exit 1
-{ [ $# = 2 ] && [[ $2 =~ ^(on|narrow|off|status|band|rules|decide|standing)$ ]]; } \
+{ [ $# = 2 ] && [[ $2 =~ ^(on|narrow|off|status|band|rules|decide|rulings|standing)$ ]]; } \
   || { [ $# = 3 ] && [ "$2" = standing ] && [[ $3 == *[![:space:]]* ]]; } \
   || { [ $# = 4 ] && [[ " ${STANDING_KINDS[*]} " == *" $3 "* ]] && { { [ "$2" = standing ] && [[ $4 =~ ^(on|off)$ ]]; } || { [ "$2" = act ] && [[ $4 == *[![:space:]]* ]]; }; }; } \
-  || { echo "usage: conveyor.sh auto on | narrow | off | status | band | rules | decide | standing [<run> | <kind> on|off] | act <kind> <what> (a kind: ${STANDING_KINDS[*]})" >&2; exit 2; }
+  || { echo "usage: conveyor.sh auto on | narrow | off | status | band | rules | decide | rulings | standing [<run> | <kind> on|off] | act <kind> <what> (a kind: ${STANDING_KINDS[*]})" >&2; exit 2; }
 AD=$ST/auto MODE=$ST/auto/mode.json LAST=$ST/auto/last.json DECISION=$HERE/../.claude/scripts/decision.sh
 die() { echo "conveyor: auto: $*" >&2; exit 1; }
 # The mode while on, as JSON: {scope, since, log}; fails while off.
@@ -43,13 +51,17 @@ waiting() { awk '/^## / { on = ($0 == "## Waiting for the owner") } on && (/^###
 m=$(mode) || m=''
 if [ -n "$m" ]; then IFS=$'\t' read -r scope since log < <(jq -r '[.scope, .since, .log] | @tsv' <<<"$m"); fi
 RL=$(rulingslog) || RL=''
-# The owner's way of deciding, from their last 100 picker answers in the ruling log.
+# The owner's rulings: this machine's ruling log and those the Foreman's machine sent (rulings), each that can be read.
+RLS=(); [ -z "$RL" ] || [ ! -r "$RL" ] || RLS+=("$RL"); [ ! -r "$AD/rulings.jsonl" ] || RLS+=("$AD/rulings.jsonl")
+# The owner's way of deciding, from their last 100 picker answers in those rulings (one sent from the owner's machine
+# and also in this machine's log is counted once).
 way() {
-  [ -n "$RL" ] && [ -r "$RL" ] || { echo "the ruling log ${RL:-(none named)} cannot be read, so the owner's picks are not known"; return; }
-  jq -nRr '[inputs | fromjson? | objects | select(.source == "ask" and .void != true)] | .[-100:] | length as $n
+  [ "${#RLS[@]}" != 0 ] || { echo "the ruling log ${RL:-(none named)} cannot be read, so the owner's picks are not known"; return; }
+  jq -nRr '[inputs | fromjson? | objects | select(.source == "ask" and .void != true)]
+    | unique_by([.id, .utc, .question, .answer] | tostring) | sort_by(.utc // "" | tostring) | .[-100:] | length as $n
     | ([.[] | select(.pick == "recommended")] | length) as $k
     | if $n == 0 then "the ruling log holds no picker answer of the owner yet"
-      else "the owner took the recommended option in \($k) of their last \($n) picker answers" end' "$RL"
+      else "the owner took the recommended option in \($k) of their last \($n) picker answers" end' "${RLS[@]}"
 }
 reserved() { packget auto.reserved RES && jq -r 'join(", ")' <<<"$RES"; }
 # The project's written profile of how the owner decides, beside the Foreman's rules.md (the plugin ships none): when
@@ -62,12 +74,49 @@ profile() {
   [ -s "$f" ] || return 0
   printf '\n%s' "- The owner's written profile of how they decide is in $f: read it before you decide. Follow its \"Never decide; ask\" and \"Hard lines\" sections as you follow the pack's auto.reserved."
 }
+# The records of this checkout's Foreman (foreman/lib.sh mine) whose main checkout is not on this machine, one name a
+# line: the belt runs on another host, whose engine decides that record's open decisions (lib/needsask.sh needsauto) by
+# its own auto mode and log.
+remote() {
+  local repo main
+  while IFS=$'\t' read -r repo main; do [ -n "$repo" ] && [ ! -d "$main" ] && printf '%s\n' "$repo"; done \
+    < <(CONVEYOR_MAIN=$MAIN bash -c '. "$1" > /dev/null && mine' _ "$HERE/foreman/lib.sh" 2>/dev/null)
+  return 0
+}
+# hostrulings <repo>: the owner's picker answers of this machine's ruling log sent to the record's host (`auto rulings`
+# there), as the owner answers on this machine and the decide pass there reads their rulings; fails when not sent.
+hostrulings() {
+  local f out rc
+  f=$(mktemp) || return 1
+  [ -z "$RL" ] || [ ! -r "$RL" ] || jq -cR 'fromjson? | objects | select(.source == "ask" and .void != true) | {id, utc, source, question, answer, pick}' "$RL" > "$f"
+  out=$(ASK_IN=$f CONVEYOR_MAIN=$MAIN bash "$HERE/foreman/foreman.sh" ask "$1" auto rulings 2>&1); rc=$?; rm -f "$f"
+  [ "$rc" = 0 ] || echo "conveyor: auto: $1, on its host: the owner's rulings were not sent there: ${out//$'\n'/ }" >&2
+  return "$rc"
+}
+# tohosts <on|narrow|off>: the same mode set on the host of each such record (foreman.sh ask), so the engine there
+# decides while this machine is off or the Foreman session is not running; one line for each host. On or narrow is
+# set only once the owner's rulings are sent there (hostrulings): without them, the engine there could decide against one.
+tohosts() {
+  local repo out
+  while IFS= read -r repo; do
+    if [ "$1" != off ] && ! hostrulings "$repo"; then echo "conveyor: auto: $repo, on its host: auto $1 was not set there, so the engine there keeps its own mode" >&2
+    elif out=$(CONVEYOR_MAIN=$MAIN bash "$HERE/foreman/foreman.sh" ask "$repo" auto "$1" 2>&1); then echo "$repo, on its host: ${out##*$'\n'}"
+    else echo "conveyor: auto: $repo, on its host: auto $1 was not set there, so the engine there keeps its own mode: ${out//$'\n'/ }" >&2; fi
+  done < <(remote)
+}
+# The rules' lines for those records: where the engine's own decisions are logged. Each starts with a newline.
+hostsrules() {
+  local repo
+  while IFS= read -r repo; do
+    printf '\n%s' "- The engine on the host of $repo decides that record's open decisions too, by these rules, while this session is not running. When you start, run \`CONVEYOR_MAIN=$(printf %q "$MAIN") bash $(printf %q "$HERE/foreman/foreman.sh") ask $repo auto status\`: it names the log there, and tell the owner what it decided."
+  done < <(remote)
+}
 
 case $2 in
   on|narrow)
     want=$([ "$2" = on ] && echo full || echo narrow)
     if [ -n "$m" ]; then
-      [ "$scope" = "$want" ] && { echo "auto $2 is already on (since $since). Log: $log"; exit 0; }
+      [ "$scope" = "$want" ] && { echo "auto $2 is already on (since $since). Log: $log"; tohosts "$2"; exit 0; }
       echo "conveyor: auto is on in $scope mode (since $since): run /conveyor-belt:auto off first, then /conveyor-belt:auto $2" >&2; exit 2
     fi
     r=$(reserved) || exit 1
@@ -82,13 +131,15 @@ case $2 in
       printf '## Summary\n\n(nothing yet)\n\n## Decisions\n\n## Waiting for the owner\n'
     } > "$log" && jq -n --arg s "$want" --arg t "$since" --arg l "$log" '{scope: $s, since: $t, log: $l}' > "$MODE.new" && mv "$MODE.new" "$MODE" \
       || die "the log $log or the mode $MODE could not be written"
-    echo "auto $([ "$want" = full ] && echo ON || echo 'NARROW on'): $([ "$want" = full ] && echo 'open decisions are decided for the owner' || echo 'formalities are decided; everything else still goes to the owner') until /conveyor-belt:auto off. Log: $log" ;;
+    echo "auto $([ "$want" = full ] && echo ON || echo 'NARROW on'): $([ "$want" = full ] && echo 'open decisions are decided for the owner' || echo 'formalities are decided; everything else still goes to the owner') until /conveyor-belt:auto off. Log: $log"
+    tohosts "$2" ;;
   off)
-    [ -n "$m" ] || { echo "auto is already off."; exit 0; }
+    [ -n "$m" ] || { echo "auto is already off."; tohosts off; exit 0; }
     n=$(logged "$log") h=$(waiting "$log")
     printf '\n---\nauto turned off at %s.\n' "$(date '+%F %H:%M')" >> "$log"
     jq -n --argjson n "$n" '{count: $n}' > "$LAST" && rm -f "$MODE" || die "the mode $MODE could not be ended"
-    echo "auto OFF after $n decided, $h waiting for the owner: decisions go back to the owner. Log: $log" ;;
+    echo "auto OFF after $n decided, $h waiting for the owner: decisions go back to the owner. Log: $log"
+    tohosts off ;;
   status)
     if [ -n "$m" ]; then echo "auto is $([ "$scope" = full ] && echo ON || echo NARROW) since $since: $(logged "$log") decision(s). Log: $log"
     else echo "auto is OFF. Use /conveyor-belt:auto on, /conveyor-belt:auto narrow or /conveyor-belt:auto off."; fi ;;
@@ -98,7 +149,7 @@ case $2 in
   rules)
     [ -n "$m" ] || exit 0
     r=$(reserved) || exit 1
-    run="bash $(printf %q "$HERE/conveyor.sh") auto decide" p=$(profile)
+    run="bash $(printf %q "$HERE/conveyor.sh") auto decide" p=$(profile)$(hostsrules)
     if [ "$scope" = full ]; then
       cat <<EOF
 # AUTO IS ON (since $since, /conveyor-belt:auto on)
@@ -133,8 +184,19 @@ EOF
     standingon "$3" || { echo "conveyor: auto: the standing kind $3 is not on in the pack (auto.standing), so this step goes to the owner: ask them" >&2; exit 1; }
     id=$(standinglog "$3" "${4//$'\n'/ }") || exit 1
     echo "Done without asking ($3): ${4//$'\n'/ }; logged as $id." ;;
+  rulings)
+    mkdir -p "$AD" && jq -cR 'fromjson? | objects | select(.source == "ask" and .void != true and (.question | type == "string"))' > "$AD/rulings.$$.new" \
+      && mv "$AD/rulings.$$.new" "$AD/rulings.jsonl" || die "the rulings of the owner's machine could not be kept in $AD/rulings.jsonl"
+    echo "auto: $(wc -l < "$AD/rulings.jsonl" | tr -d ' ') ruling(s) of the owner's machine kept in $AD/rulings.jsonl" ;;
   decide)
     [ -n "$m" ] || { echo "conveyor: auto is off; /conveyor-belt:auto on or narrow turns it on" >&2; exit 2; }
+    # The rulings the owner gave since they were last sent go to the hosts first, so the engine there decides by them.
+    while IFS= read -r rep; do hostrulings "$rep" || :; done < <(remote)
+    # One pass at a time: the engine's pass (lib/needsask.sh needsauto) and the Foreman's both start on a new decision,
+    # and two passes that read it open at once would each decide it. The mode is read again once the lock is held.
+    { exec {lk}>>"$AD/decide.lock"; } 2>/dev/null && flock -w 120 "$lk" || die "another auto pass held $AD/decide.lock for 120 s"
+    m=$(mode) || die "auto went off while this pass waited"
+    IFS=$'\t' read -r scope since log < <(jq -r '[.scope, .since, .log] | @tsv' <<<"$m")
     [ -f "$log" ] || die "the log $log is gone"
     packget auto.reserved RES || exit 1
     L=${CONVEYOR_LEDGER:-$MAIN/.claude/metrics/decisions.jsonl}
@@ -158,12 +220,14 @@ EOF
       # The owner's latest ruling on the same question: its id and whether it gave the recommended option ("true" or
       # "false"; empty when there is none). Only the latest counts: an earlier answer the owner later changed is not theirs.
       # The ruling log keeps the label as picked, "(Recommended)" and all; the ledger's default has it cut off.
+      # The rulings are this machine's ruling log and those the Foreman's machine sent (rulings); the latest by its time.
       rid='' same=''
-      if [ -n "$RL" ] && [ -r "$RL" ]; then
+      if [ "${#RLS[@]}" != 0 ]; then
         IFS=$'\x1f' read -r rid same <<<"$(jq -nRr --arg q "$q" --arg d "$def" 'def flat: ascii_downcase | [scan("[a-z0-9]+")] | join(" ");
-          [inputs | fromjson? | objects | select(.source == "ask" and .void != true and ((.question // "") | flat) == ($q | flat))] | last
+          [inputs | fromjson? | objects | select(.source == "ask" and .void != true and ((.question // "") | flat) == ($q | flat))]
+          | sort_by(.utc // "" | tostring) | last
           | select(. != null) | [(.id // "" | tostring), (((.answer // "") | sub("\\s*\\(Recommended\\)\\s*$"; "") | flat) == ($d | flat) | tostring)]
-          | join("\u001f")' "$RL")"
+          | join("\u001f")' "${RLS[@]}")"
       fi
       if [ "$same" = false ]; then hold "$id" "$q" "against the owner's latest ruling${rid:+ $rid} on this question"; continue; fi
       why="it is the recommended option, and $w"

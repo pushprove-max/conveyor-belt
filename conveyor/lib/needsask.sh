@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # The engine's needs-you items as open decisions in the owner's decision ledger (.claude/scripts/decision.sh), and the
 # step an answer names, sourced by the loop (commands/run.sh). Two kinds: a card blocked with its work kept (needsask()),
-# and a held issue of the nightly whole test (needsmain(), below).
+# and a held issue of the nightly whole test (needsmain(), below); and the auto pass that answers them while auto is on
+# (needsauto(), at the end), with the standing review-retry (needsretry()). The loop runs them as one job (needsjob()).
 # needsask() looks at the card records and the ledger once. The loop (`serve`) calls it every IDLE seconds, a job beside
 # the cards.
 #   - Each card blocked with a kept patch (an issue's card, not one stopped for the owner's yes) that has no decision yet
@@ -113,3 +114,41 @@ needsmain() {
   done < <(jq -r '.[] | select(.id | startswith("mainred-")) | [.id, (.answer // ""), .askedAt] | join("\u001f")' <<<"$rows")
   return 0
 }
+
+# The auto pass on the machine that has the record: while /conveyor-belt:auto is on or narrow in this state folder
+# (commands/auto.sh, $ST/auto/mode.json), the engine decides as the Foreman's `auto decide` would, so auto goes on when the
+# Foreman session is not running or the owner's machine is off. needsauto() runs `conveyor.sh auto decide` (its rules, its
+# log, its lock) once when the ledger holds an open decision its log does not list yet (a new one: a decided one is no
+# longer open, and each one left is listed under "Waiting for the owner"), and fails when it did not run it.
+# Test seam: CONVEYOR_LEDGER (decision.sh's).
+needsauto() {
+  local dec=$HERE/../.claude/scripts/decision.sh led=${CONVEYOR_LEDGER:-$MAIN/.claude/metrics/decisions.jsonl} log id new=
+  log=$(jq -re 'select(.scope == "full" or .scope == "narrow") | .log | strings' "$ST/auto/mode.json" 2>/dev/null) && [ -f "$log" ] && [ -e "$led" ] || return 1
+  while IFS= read -r id; do grep -qF -- "- $id: " "$log" || { new=1; break; }; done \
+    < <(CONVEYOR_MAIN=$MAIN bash "$dec" list 2>/dev/null | jq -r '.[] | select(.answeredAt == null) | .id | gsub("[\r\n]+"; " ")' 2>/dev/null)
+  [ -n "$new" ] || return 1
+  bash "$HERE/conveyor.sh" auto decide < /dev/null | sed 's/^/conveyor: /' >&2
+}
+# The standing kind review-retry (lib/standing.sh) while auto is on or narrow here: the Foreman's watcher takes it
+# (foreman/watch-conveyor.sh reviewretry()), and needsretry() takes it too, so it goes on while the watcher is down. Each
+# card blocked by its review (the reason the watcher reads: "the fix for [P1] ... did not hold after <n> rounds", with
+# any notes after it in brackets) is given back with `conveyor.sh retry <issue>`, and the act is logged by `conveyor.sh
+# auto act review-retry`, as the watcher logs it. Each card is tried once ($ST/auto/review-retry.cards): one whose retry
+# failed stays blocked, and needsask() puts it to the owner.
+needsretry() {
+  local cs c n out
+  jq -e 'select(.scope == "full" or .scope == "narrow")' "$ST/auto/mode.json" >/dev/null 2>&1 && standingon review-retry || return 0
+  cs=$(stdb ask lines cards) || { echo "conveyor: the card records could not be read; no card was given back by review-retry" >&2; return 0; }
+  while IFS=$'\t' read -r c n; do
+    ! grep -qxF -- "$c" "$ST/auto/review-retry.cards" 2>/dev/null || continue
+    printf '%s\n' "$c" >> "$ST/auto/review-retry.cards" || continue
+    if out=$(bash "$HERE/conveyor.sh" retry "$n" < /dev/null 2>&1); then
+      bash "$HERE/conveyor.sh" auto act review-retry "retried #$n: its card $c was blocked by its review" < /dev/null 2>&1 | sed 's/^/conveyor: /' >&2
+    else echo "conveyor: the review-retry of #$n (card $c) failed, so it waits for the owner: ${out//$'\n'/ }" >&2; fi
+  done < <(jq -rs 'group_by(.card)[] | select(all(.step != "pushed")) | map(select(.step | IN("landed", "closed", "blocked"))) | last
+    | select(. != null and .step == "blocked" and (.issue | numbers) > 0 and (.reason | strings
+      | test("\\Athe fix for \\[P[0-3]\\][\\s\\S]* did not hold after [0-9]+ rounds?( \\[[\\s\\S]*\\])?\\z"))) | "\(.card)\t\(.issue)"' <<<"$cs")
+}
+# needsjob: the loop's job beside the cards: the standing review-retry, the items put to the owner, the auto pass, and,
+# when it ran, the steps its answers name at once (a second needsask and needsmain), not a turn later.
+needsjob() { needsretry; needsask; needsmain; ! needsauto || { needsask; needsmain; }; }

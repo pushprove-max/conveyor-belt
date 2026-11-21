@@ -206,13 +206,17 @@ t_needsclosed() {
 
 # Bug (review of #1170): the loop's job beside the cards called needsask() only, so no held issue was put to the owner.
 # turnopen() (lib/run.sh) is called as the serving loop calls it, with needsask() and needsmain() recording that they ran:
-# the job must run both. A real turn is run: no direct check shows which functions the loop's turn starts.
+# the job must run both. Bug (#1168): a turn that runs the two alone runs no auto pass (needsauto()) and no standing
+# review-retry (needsretry()), so the engine never decides; both record that they ran too, needsauto() as a pass that
+# did not run. A real turn is run: no direct check shows which functions the loop's turn starts.
 t_needsturn() {
   setup "[$(issue 7 2026-01-01)]"
   fx_in 'needsask() { echo ask >> "$T/$CASE/jobs"; }; needsmain() { echo main >> "$T/$CASE/jobs"; }
+    needsauto() { echo auto >> "$T/$CASE/jobs"; return 1; }; needsretry() { echo retry >> "$T/$CASE/jobs"; }
     serve=1 nopack= IDLE=0 atried=-1000000 asker= pusher= taker= fixer= rtried=0 ttook=0 htold= mhold= told= lim=
     turnopen; wait'
-  [ "$(sort "$T/$CASE/jobs" 2>/dev/null | tr '\n' ' ')" = "ask main " ] || fail "the turn's job did not run needsask and needsmain: $(cat "$T/$CASE/jobs" 2>&1) $(head -5 "$T/$CASE/run.out")"
+  [ "$(sort "$T/$CASE/jobs" 2>/dev/null | tr '\n' ' ')" = "ask auto main retry " ] \
+    || fail "the turn's job did not run needsretry, needsask, needsmain and needsauto once each: $(cat "$T/$CASE/jobs" 2>&1) $(head -5 "$T/$CASE/run.out")"
 }
 
 # Bug (#1171): the docs said nothing of which `needs you` items become decisions for `auto decide`, nor what step it picks,
@@ -225,4 +229,102 @@ t_needsdoc() {
     [ -n "$l" ] || fail "lib/needsask.sh has no recommended-step label to check the docs against"
     grep -qF "\"$l\"" <<<"$d" || fail "docs/foreman.md does not name the recommended step \"$l\" of an item auto decides"
   done
+}
+
+# naauto <on|narrow>: auto turned on in the case's state folder, with an empty ruling log of the case's unless one is
+# written; AUTOLOG is its log. najob: one run of the loop's job beside the cards (needsjob()), as the serving loop runs it.
+naauto() {
+  export CONVEYOR_RULING_LOG=$T/$CASE/rulings.jsonl; touch "$CONVEYOR_RULING_LOG"
+  loop auto "$1" > "$T/$CASE/auto.out" 2>&1 && AUTOLOG=$(jq -r .log "$ST/auto/mode.json") || fail "auto $1 failed: $(cat "$T/$CASE/auto.out")"
+}
+najob() { fx_in needsjob; [ "$RC" = 0 ] || fail "needsjob exited $RC: $(cat "$T/$CASE/run.out")"; }
+# naretried <card>: 0 when the card was given back, as `retry` does.
+naretried() { [ "$(jq -r --arg c "$1" 'select(.card == $c and .step == "blocked") | .retriedAt != null' "$ST/retried.jsonl" 2>/dev/null)" = true ]; }
+
+# Bug (#1168): only the Foreman session ran `auto decide`, so while the owner's machine was off, or the session ran no
+# turn, auto decided nothing for hours. With auto on and no Foreman, one run of the loop's job answers the new decision
+# with its recommended option, logs it under "## Decisions", and retries the card at once. The Foreman's `auto decide`
+# after it finds the decision decided once: one log entry, one answer in the ledger.
+t_needsauto() {
+  local out
+  setup "[$(issue 7 2026-01-01)]"; nainit 7; naauto on
+  najob
+  [ "$(nadec c0-7 | jq -r .answer)" = 'Retry keeping the work' ] || fail "the engine did not answer blocked-c0-7: $(nadec c0-7) $(cat "$T/$CASE/run.out")"
+  awk '/^## Decisions$/ { on = 1 } /^## Waiting for the owner$/ { on = 0 } on' "$AUTOLOG" | grep -q '^### [0-9][0-9]:[0-9][0-9] blocked-c0-7: ' \
+    || fail "the engine's answer is not logged under Decisions: $(cat "$AUTOLOG")"
+  naretried c0-7 || fail "the card was not retried in the same job: $(cat "$T/$CASE/run.out") $(cat "$ST/retried.jsonl" 2>&1)"
+  out=$(loop auto decide 2>&1) || fail "the Foreman's auto decide failed: $out"
+  [ "$(grep -c '^### .* blocked-c0-7: ' "$AUTOLOG")" = 1 ] && grep -qF 'Decided for the owner: 1.' "$AUTOLOG" \
+    && [ "$(jq -s '[.[] | select(.id == "blocked-c0-7" and .answer != null)] | length' "$CONVEYOR_LEDGER")" = 1 ] \
+    || fail "after the engine decided blocked-c0-7, the Foreman's auto decide ($out) decided it again: $(cat "$AUTOLOG") $(cat "$CONVEYOR_LEDGER")"
+}
+
+# Bug (#1168): the engine's pass must honour auto off. Turned on, then off, the job leaves the decision open, writes
+# nothing in the ended log and retries nothing.
+t_needsautooff() {
+  setup "[$(issue 7 2026-01-01)]"; nainit 7; naauto on
+  loop auto off > "$T/$CASE/off.out" 2>&1 || fail "auto off failed: $(cat "$T/$CASE/off.out")"
+  najob
+  [ "$(nadec c0-7 | jq .answeredAt)" = null ] && ! grep -q blocked-c0-7 "$AUTOLOG" && ! naretried c0-7 \
+    || fail "with auto off the engine decided: $(nadec c0-7) $(cat "$AUTOLOG") $(cat "$T/$CASE/run.out")"
+}
+
+# Bug (#1168): the engine's pass on narrow must decide only a formality, as `auto decide` narrow does. The owner gave
+# "Retry keeping the work" to blocked-c0-7's own question before (the ruling log); blocked-c0-8 has no such ruling. Only
+# c0-7 is answered and retried; c0-8 stays open, listed as not a formality.
+t_needsautonarrow() {
+  setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-02-01))"; nainit 7 8; nask; naauto narrow
+  nadec c0-7 | jq -c '{id: "x-1", source: "ask", question, answer: "Retry keeping the work (Recommended)", pick: "recommended"}' > "$CONVEYOR_RULING_LOG"
+  najob
+  [ "$(nadec c0-7 | jq -r .answer)" = 'Retry keeping the work' ] && naretried c0-7 \
+    || fail "narrow did not decide the formality blocked-c0-7: $(nadec c0-7) $(cat "$T/$CASE/run.out")"
+  [ "$(nadec c0-8 | jq .answeredAt)" = null ] && ! naretried c0-8 && grep -q '^- blocked-c0-8: .*(narrow: not a formality' "$AUTOLOG" \
+    || fail "narrow decided blocked-c0-8, which the owner never answered: $(nadec c0-8) $(cat "$AUTOLOG")"
+}
+
+# Bug (#1168): the engine's pass must leave what the pack reserves for the owner. The card's reason names "delete" (the
+# default auto.reserved), so its decision stays open and is listed under "Waiting for the owner". A second job, with no
+# new decision, runs no pass (the log is the same file, not written again) and lists it no second time.
+t_needsautores() {
+  local ino
+  setup "[$(issue 7 2026-01-01)]"; nainit 7
+  jq -c '.reason |= sub("it failed"; "it would delete the old table")' "$ST/cards.jsonl" > "$T/$CASE/cards.new" && mv "$T/$CASE/cards.new" "$ST/cards.jsonl" || fail "the card's reason"
+  naauto on; najob
+  [ "$(nadec c0-7 | jq .answeredAt)" = null ] && ! naretried c0-7 \
+    && awk '/^## Waiting for the owner$/ { on = 1; next } on' "$AUTOLOG" | grep -q '^- blocked-c0-7: .*(reserved: delete)$' \
+    || fail "the reserved decision was answered, or is not waiting for the owner: $(nadec c0-7) $(cat "$AUTOLOG")"
+  ino=$(ls -i "$AUTOLOG"); najob
+  [ "$(ls -i "$AUTOLOG")" = "$ino" ] && [ "$(grep -c '^- blocked-c0-7: ' "$AUTOLOG")" = 1 ] \
+    || fail "a job with no new decision ran the auto pass again: $(cat "$AUTOLOG") $(cat "$T/$CASE/run.out")"
+}
+
+# nareview: the case's blocked card (nainit) blocked by its review instead, as card.sh words that block; auto on, with
+# the standing kind review-retry on in the pack.
+nareview() {
+  jq -c 'if .step == "blocked" then .reason = "the fix for [P1] a.txt:1 drops the line did not hold after 3 rounds" else . end' "$ST/cards.jsonl" > "$T/$CASE/cards.new" \
+    && mv "$T/$CASE/cards.new" "$ST/cards.jsonl" || fail "the card's reason"
+  tune '.auto.standing = ["review-retry"]'; naauto on
+}
+
+# Bug (#1168, review): the engine left the standing review-retry to the Foreman's watcher, so while the watcher was
+# down, a card blocked by its review was put to the owner as a decision, not given back as the owner said ahead of
+# time. With auto on and review-retry on, one job gives the card back, logs the act as `auto act` does (the ruling
+# log, source "standing", kind review-retry, naming #7), and puts no decision to the owner.
+t_needsautoretry() {
+  setup "[$(issue 7 2026-01-01)]"; nainit 7; nareview
+  najob
+  naretried c0-7 || fail "the card blocked by its review was not given back: $(cat "$T/$CASE/run.out") $(cat "$ST/retried.jsonl" 2>&1)"
+  [ "$(jq -sc '[.[] | select(.source == "standing" and .kind == "review-retry" and (.answer | contains("#7")))] | length' "$CONVEYOR_RULING_LOG")" = 1 ] \
+    || fail "the review-retry of #7 is not logged once in the ruling log: $(cat "$CONVEYOR_RULING_LOG")"
+  [ -z "$(nadec c0-7)" ] || fail "the card given back by review-retry was put to the owner too: $(nadec c0-7)"
+}
+
+# Bug (#1168, review): a review-retry that fails (here #7 has a card that landed, so retry refuses) must be tried once,
+# not again in each job every IDLE seconds: the card stays blocked for the owner. The second job tries no retry.
+t_needsretryonce() {
+  setup "[$(issue 7 2026-01-01)]"; nainit 7; landed 7 | jq -c '.card = "c1-7"' >> "$ST/cards.jsonl"; nareview
+  najob
+  grep -q 'the review-retry of #7 (card c0-7) failed' "$T/$CASE/run.out" || fail "the failed review-retry of #7 was not tried and named: $(cat "$T/$CASE/run.out")"
+  najob
+  ! grep -q 'review-retry of #7' "$T/$CASE/run.out" || fail "a second job tried the failed review-retry of #7 again: $(cat "$T/$CASE/run.out")"
 }
