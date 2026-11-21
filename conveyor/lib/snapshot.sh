@@ -357,6 +357,13 @@ CHECKRUN_SHOW='
 # from the counts its record keeps (commands/release-prep.sh relsuite()). A release record left
 # running with its lock free was ended from outside before it could say so: stopped, when the record was last written.
 # A full test's run left so is shown as the line the next ask records for it: an error, with its reason.
+# When the logs of a whole-suite run in <worktree> last changed, epoch seconds: the newest of its output and its log
+# folder (suiteprog() reads both), empty with none. It is the last move of a run that has no live record.
+logmoved() { # <worktree>
+  local logs=()
+  mapfile -d '' logs < <(find "$1.testlog" -print0 2>/dev/null)
+  p_mtimes "$1.test" "${logs[@]}" | sort -rn | sed -n '1s/ .*//p'
+}
 suites() {
   local r fr l t m free
   if r=$(jq -ce 'objects | select(.kind == "release") | del(.pid)' "$CARDS/release/run.json" 2>/dev/null); then
@@ -366,11 +373,11 @@ suites() {
       elif jq -e '.state == "running" and .sha != null' <<<"$r" > /dev/null; then
         # A card that lands while the suite runs moves main: the panel says so now, not at the suite's end. While the
         # failed cases run alone (rerun), the counts are the suite's, and the worktree's progress is the pass under way:
-        # its done, failed and files, and at, when its test run last moved (the live record's progress, not before the pass).
+        # its done, failed and files, and at, when its test run last moved (the live record's progress or its logs' last change, whichever is later; not before the pass).
         r=$(jq -c --slurpfile p <(suiteprog "$CARDS/release/wt") --arg h "$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)" \
-          --arg at "$(jq -r '.progress // empty' "$CARDS/release/wt.live" 2>/dev/null)" \
+          --arg at "$(jq -r '.progress // empty' "$CARDS/release/wt.live" 2>/dev/null)" --arg lg "$(logmoved "$CARDS/release/wt")" \
           '(if .counts != null and (.rerun | type) == "object" then .rerun += ($p[0] | {done, failed, files})
-              + {at: ([.rerun.since, $at] | map(select(type == "string" and . != "")) | max)} else . end)
+              + {at: ([.rerun.since, $at, (if $lg == "" then null else $lg | tonumber | todate end)] | map(select(type == "string" and . != "")) | max)} else . end)
             | . + (.counts // $p[0]) | del(.counts) | if .main != null and $h != "" and .main != $h then .moved = true else . end' <<<"$r"); fi
     fi
   fi

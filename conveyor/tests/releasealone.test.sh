@@ -101,3 +101,19 @@ t_relalonepass() {
   [ "$got" = 'null /,1 /,null p1/p1,2 /,null p2/p2,3 /,null p3/p3' ] \
     || fail "fulljudge on a release's failed case x named a pass beside another pass's logs, or left one named (round logs.test/testlog, each write): $got"
 }
+# Bug (#1248): the test command's exit removes wt.live, and with none the snapshot took the rerun's start as its last
+# move while it still counted the files the logs show done: a pass that had just finished a file looked as if it had not
+# moved since it began. The record here is a pass begun in 2020 with one file done in the logs and no wt.live; the last
+# move is the logs' (now), not 2020. (A release-prep run reaches this state too: wt.live goes when the test command
+# exits, before the rerun is cleared. The fixture sets it up directly, as a run would take minutes to reach it.)
+t_relalonelogs() {
+  local k=$T/$CASE/cards/release h at
+  setup '[]'
+  mkdir -p "$k/wt.testlog/cases/ok" && : > "$k/wt.testlog/cases/ok/a" && printf '%s\n' 'TESTRUN files=1' '-- ok a.test' > "$k/wt.test" \
+    && jq -cn --arg s "$(git -C "$R" rev-parse HEAD)" '{kind: "release", step: "release-prep", version: "1.1.0", since: "2020-01-01T00:00:00Z", ended: null,
+      state: "running", sha: $s, counts: {state: "running", failed: 0, cases: ["x"]}, rerun: {round: 1, of: 3, case: "x", since: "2020-01-01T00:00:00Z"}}' > "$k/run.json" \
+    && exec {h}>>"$k/lock" && flock -n "$h" || fail "the fixture could not be made"
+  at=$(loop snapshot --fresh | jq -r '.suites[] | select(.kind == "release") | .rerun.at')
+  exec {h}>&-
+  [ "${at:0:4}" -gt 2021 ] || fail "the rerun's last move went back to its start while the logs show a file done: at is $at"
+}
