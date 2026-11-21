@@ -48,7 +48,7 @@ CTL_K=()
 # (rules.pick: no card's group and builder choice is recorded, modelpick()). No Tests seat is set: no test action starts (testaction()). The project
 # is not onboarded (onboarded null; `control onboarded` sets {at, rules}: when the owner finished the Board's setup and
 # the rules confirmed there), so the Board opens its setup. A release suite in parallel mode runs at most suiteAtOnce
-# test files at once, 2 (a whole number from 1; at most the machine's test slots: relsuite(), commands/release-prep.sh). Empty when
+# test files at once, 2 (`control atonce <n>`, or Test files at once on the Rules tab; a whole number from 1; at most the machine's test slots: relsuite(), commands/release-prep.sh). Empty when
 # the file cannot be read, or there is no jq (doctor says so): then no record is read.
 CTL0=$(jq -c . "$HERE/lib/control-defaults.json" 2>/dev/null) || CTL0=
 ctl() { local CTL_V; ctlread || return 1; printf '%s\n' "$CTL_V"; }
@@ -1101,7 +1101,7 @@ control() { # [action [arguments]]
   local c a=${1:-} f=. new x ag es top=0 p='' open=''
   c=$(ctl) || return 1
   [ $# = 0 ] || shift
-  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | hold <issue>... | release <issue>... | adopt <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|lint|<areaPrefix><name>>=<on|off>... | rules <split|pick>=<off|shadow|on> | pick <small|medium> <docs|code> <promote|keep|drop|add|next> | pick <reviewer|judge> <promote <model> [effort]|drop> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | start queue filed | dep-guard <on|off> | land-as <main|pr> | pr-merge <button|release|idle> | push-check <on|off> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>... | card <issue> <builder|reviewer|judge> <model> [effort] | card <issue> [builder|reviewer|judge] clear | card <issue> pick]" >&2; return 2; }
+  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | atonce <number> | hold <issue>... | release <issue>... | adopt <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|lint|<areaPrefix><name>>=<on|off>... | rules <split|pick>=<off|shadow|on> | pick <small|medium> <docs|code> <promote|keep|drop|add|next> | pick <reviewer|judge> <promote <model> [effort]|drop> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | start queue filed | dep-guard <on|off> | land-as <main|pr> | pr-merge <button|release|idle> | push-check <on|off> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>... | card <issue> <builder|reviewer|judge> <model> [effort] | card <issue> [builder|reviewer|judge] clear | card <issue> pick]" >&2; return 2; }
   nums() { local x; for x; do [[ $x =~ ^[1-9][0-9]{0,8}$ ]] || return 1; done; }
   # A main-red fix card is of no issue (issue 0), named by its card id: there is nothing of it to hold or release.
   case $a in hold | release) for x; do [[ ! $x =~ ^(0+|c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0)$ ]] || {
@@ -1111,6 +1111,10 @@ control() { # [action [arguments]]
     pause | resume | stop) [ $# = 0 ] || { bad; return; }; f='.mode = {pause: "pause", resume: "run", stop: "stop"}[$a] | if $a == "resume" then .signin = null else . end' ;;
     cap) [ $# = 1 ] && [[ $1 =~ ^(100|[1-9][0-9]?|off)$ ]] || { bad; return; }; f='.cap = ($v[0] | if . == "off" then null else tonumber end)' ;;
     guard) [ $# = 1 ] && [[ $1 =~ ^(100|[1-9][0-9]?|off)$ ]] || { bad; return; }; f='.guard = ($v[0] | if . == "off" then null else tonumber end)' ;;
+    # atonce: the most test files a parallel release suite runs at once (suiteAtOnce; relatonce() caps it at the test slots).
+    atonce) [ $# = 1 ] || { bad; return; }
+      [[ $1 =~ ^[1-9][0-9]{0,2}$ ]] || { echo "conveyor: control atonce: \"$1\" is not a whole number from 1 to 999 (the most test files a parallel release suite runs at once); nothing changed" >&2; return 2; }
+      f='.suiteAtOnce = ($v[0] | tonumber)' ;;
     hold) [ $# != 0 ] && nums "$@" || { bad; return; }; f='.held = (.held + ($v | map(tonumber)) | unique)' ;;
     # adopt: the filing hooks' hold (foreman/foreman.sh filed) of the issues named: each one opened after a span of
     # startHeld began, whether or not it has ended (the owner may select Queue while a command files several), that

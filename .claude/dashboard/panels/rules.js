@@ -8,7 +8,9 @@
 // One row a rule, each with what it does and its control; a choice of two or more is one segmented control (seg).
 // Models: Builder and Reviewer (CLI, model and effort), Judge (on or off, CLI, model and effort), Always accept (the
 // finding kinds the judge always accepts, with the kinds the review prompt names to pick from), Account, Review account.
-// Capacity: Cards at once, Weekly pause (Off, 90%, 95%, 98%, beside the weekly limit's use), Reserved cores (shown, not
+// Capacity: Cards at once, Weekly pause (Off, 90%, 95%, 98%, beside the weekly limit's use), Test files at once (a
+// stepper for the record's suiteAtOnce, 1 to 999; a note when it is above the machine's test slots, which it runs
+// at; "needs a newer Conveyor" for a record without it), Reserved cores (shown, not
 // set here: the machine's reserveCores, the cores it keeps and the test slots left, or why the machine cannot keep
 // cores; with "Test limits are on the Tests page.", #520). Picking: Build issues (P0, P1, P2, P3, Follow-ups), Never
 // build (the labels, each removable, and a field to add one, with the area labels of the open issues to pick from), New
@@ -89,7 +91,7 @@
   // The Rules panel's six groups, in the index's order: key, name, what it holds, the rows (by their rule) it shows.
   const SETS = [
     ['models', 'Models', 'Three seats for each card.', ['builder', 'reviewer', 'judge', 'judge-always', 'account', 'review-account']],
-    ['capacity', 'Capacity', 'Build slots and machine limits.', ['cap', 'guard', 'cores']],
+    ['capacity', 'Capacity', 'Build slots and machine limits.', ['cap', 'guard', 'atonce', 'cores']],
     ['picking', 'Picking', 'Choose which issues enter the belt.', ['build', 'never', 'start', 'dep-guard', 'split', 'pick']],
     ['landing', 'Landing and push', 'Decide how finished cards reach the repository.', ['push', 'land-as', 'pr-merge', 'push-check', 'lint', 'visible']],
     ['standing', 'Done without asking', 'Choose when the Foreman can act on your behalf.', STANDING.map(([k]) => `standing-${k}`)],
@@ -188,6 +190,7 @@
     if (action === 'rules') {
       return ['rules', a.map((x) => { const k = String(x).split('=')[0]; return `${k}=${isArea(k) ? (list(r.never).includes(k) ? 'off' : 'on') : r[k] === false ? 'off' : 'on'}`; })];
     }
+    if (action === 'atonce') return num(c.suiteAtOnce) === null ? null : ['atonce', [String(c.suiteAtOnce)]];
     if (action === 'cap' || action === 'guard') return [action, [num(c[action]) === null ? 'off' : String(c[action])]];
     if (action === 'judge' && (a[0] === 'on' || a[0] === 'off')) return ['judge', [c.judgeOn === true ? 'on' : 'off']];
     if (action === 'judge' && a[0] === 'always') return ['judge', ['always'].concat(list(c.judgeAlways).filter((k) => typeof k === 'string'))];

@@ -71,6 +71,7 @@
     rules: (a) => a.map((x) => { const [k, o] = x.split('='); return isArea(k) ? `${o === 'off' ? 'never build' : 'build'} ${k}` : `${own(RULE_WORDS, k) ? RULE_WORDS[k] : k} ${o}`; }).join(', '),
     cap: (a) => (a[0] === 'off' ? 'at once: the default' : `at once ${a[0]}`),
     guard: (a) => (a[0] === 'off' ? 'pause at: off' : `pause at ${a[0]}%`),
+    atonce: (a) => `parallel suite: ${a[0]} test file${a[0] === '1' ? '' : 's'} at once`,
     model: seatWords,
     reviewer: seatWords,
     judge: (a) => {
@@ -112,6 +113,7 @@
     rules: (r, action, a) => rulesGuess(r, a),
     cap: limitGuess,
     guard: limitGuess,
+    atonce: (r, action, a) => { r.suiteAtOnce = Number(a[0]); return [r, action]; },
     judge: (r, action, a) => {
       if (a[0] === 'on' || a[0] === 'off') { r.judgeOn = a[0] === 'on'; return [r, 'judge']; }
       if (a[0] === 'always') { r.judgeAlways = a.slice(1); return [r, 'judge']; }

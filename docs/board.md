@@ -306,7 +306,10 @@ one control, and the value in force is the selected part.
    saved, the row shows the model in force.
 2. **Capacity**: **Cards at once**. A card that only waits on another card does not count, up to as many waiting
    cards as this setting. The On the belt figure leaves these cards out, and a tap on it says how many wait.
-   **Weekly pause** is the usage at which no new card starts, with the usage now beside it. **Reserved cores**
+   **Weekly pause** is the usage at which no new card starts, with the usage now beside it. **Test files at once**
+   is the most test files a parallel release suite runs together. The default is 2, and the next parallel run reads
+   it. If the number is above the machine's test slots, the row says the suite runs at the slots
+   ([Releases](releases.md#a-release-from-the-board)). **Reserved cores**
    shows the cores that card work does not use. You set them in the host file
    ([Reserved cores](configuration.md#cores-kept-for-you)). The row also links to the Tests page, which holds the test
    limits.

@@ -32,6 +32,8 @@ class Handler(Pages, http.server.SimpleHTTPRequestHandler):
         except ValueError:
             return self.send_error(400)
         if not (machine_ok(body) if machine else control_ok(body)):
+            if not machine and isinstance(body, dict) and body.get('action') == 'atonce':
+                return self.reply(400, 'Test files at once must be a whole number from 1 to 999; nothing changed')
             return self.send_error(400)
         # The test map's build runs the whole suite on the build machine: an admin's to start or stop.
         if not machine and body['action'] == 'testmap' and role_of(read_store(), user) != 'admin':

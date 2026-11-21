@@ -52,8 +52,10 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    `conveyor.sh release-run [prep] <version>` takes the same choice at the end, for the `release-prep` it starts.
    Conveyor tells the suite command the choice, and the run's record keeps it as `mode` (`parallel` or `serial`). A run that runs only some files again uses the same choice. In parallel, a file holds one
    test slot while it runs, but an engine area file or the install check holds none, because each of its cases takes a slot. The suite never
-   runs more files at once than the pool has slots (`testSlots` in the host file), or more than the `suiteAtOnce`
-   setting in the control record. The run's record keeps that number as `atOnce`, beside `mode`, and
+   runs more files at once than the pool has slots (`testSlots` in the host file), or more than the **Test files at
+   once** setting. The default is 2. Set it on the Board's Rules tab (Capacity), or with `conveyor.sh control atonce <n>`,
+   a whole number from 1 to 999. A number above the pool's slots runs at the slots, and the Rules tab says so. The
+   next parallel run reads the setting. The run's record keeps the number it used as `atOnce`, beside `mode`, and
    `conveyor.sh release-run atonce` prints it. The output shows each file's
    lines together, with its `-- ok` or `-- FAIL` line, when the file ends. In parallel, the suite starts the longest
    files first. It takes each file's time from the newest suite run in `suiteruns.jsonl` (in the state

@@ -20,6 +20,8 @@ def control_ok(body):
         return n == 1 and re.fullmatch(r'100|[1-9][0-9]?|off', v[0]) is not None
     if a == 'guard':
         return n == 1 and re.fullmatch(r'100|[1-9][0-9]?|off', v[0]) is not None
+    if a == 'atonce':  # the test files a parallel release suite runs at once
+        return n == 1 and v[0].isascii() and v[0].isdigit() and v[0][0] != '0' and len(v[0]) <= 3
     if a in ('hold', 'release', 'unpin'):
         return issues(1, 50)
     if a == 'order':

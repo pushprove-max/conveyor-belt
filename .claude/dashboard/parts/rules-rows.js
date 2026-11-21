@@ -224,7 +224,7 @@
       return el;
     }
     const r = c.rules && typeof c.rules === 'object' ? c.rules : {};
-    rulesBuild(el, r); rulesNever(el, d, r); rulesCap(el, d, c); rulesGuard(el, d, c); rulesSeats(el, d); rulesJudge(el, c, d);
+    rulesBuild(el, r); rulesNever(el, d, r); rulesCap(el, d, c); rulesGuard(el, d, c); rulesAtOnce(el, c); rulesSeats(el, d); rulesJudge(el, c, d);
     rulesAccounts(el, c); rulesGates(el, c, r); rulesLand(el, c); rulesCheck(el, c, r); rulesLint(el, r); rulesSplit(el, r);
     rulesPick(el, d, r); rulesCores(el); rulesStanding(el); rulesHeld(el, all); rulesPins(el, c, d); rulesIndexed(el);
     return el;
@@ -298,6 +298,13 @@
         capNow > 1, capNow < 100),
       h('span', 'board-from', capSet !== null ? 'set here' : 'the default'),
       capSet !== null ? button('Default', 'btn-quiet', 'cap-off', 'Cards at once: back to the default', () => send('cap', ['off'], null, ['cap', [String(capSet)]])) : null));
+  }
+  function rulesAtOnce(el, c) {
+    const h = S.ctx.h, at = num(c.suiteAtOnce), slots = S.cores && typeof S.cores.slots === 'number' ? S.cores.slots : null;
+    const to = (n) => () => send('atonce', [String(n)], null);
+    el.append(row('atonce', 'Test files at once', 'test files a parallel release suite runs together',
+      at === null ? newer(false) : stepper('test files at once', String(at), to(at - 1), to(at + 1), at > 1, at < 999),
+      at !== null && slots !== null && at > slots ? h('span', 'board-from', `Runs at ${slots}: the machine has ${slots} test slot${slots === 1 ? '' : 's'}.`) : null));
   }
   function rulesGuard(el, d, c) {
     const h = S.ctx.h;

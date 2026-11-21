@@ -723,7 +723,7 @@ done_part
 
 # This part's Board runs with the Foreman's mark, as one the Foreman's claim started does (test_issue_and_close_reach_conveyor).
 ( export CONVEYOR_FOREMAN=1 CLAUDE_CODE_SESSION_ID=foreman-1; control_part control "${PORTS[5]}"
-control_actions 'pause' 'resume' 'stop' 'cap 3' 'cap 9' 'cap 100' 'cap off' 'guard 90' 'guard off' 'hold 12 13' 'release 12' 'order 13 12' 'order' 'unpin 13'
+control_actions 'pause' 'resume' 'stop' 'cap 3' 'cap 9' 'cap 100' 'cap off' 'guard 90' 'guard off' 'atonce 3' 'atonce 999' 'hold 12 13' 'release 12' 'order 13 12' 'order' 'unpin 13'
 # POST /machine pauses or resumes the whole machine: `conveyor.sh machine pause|resume` on the host's main, over the
 # same ssh. It is its own control: it names no project, and a project's action is never taken without its project.
 # Bug: the machine's pause could only be set by hand in the host file; and a pause sent with no project must never be
@@ -1152,6 +1152,12 @@ for b in "$(act frob)" "$(act 'pause;rm')" "$(act pause now)" "$(act cap 101)" "
   '{"action":"hold","args":[12]}' '{"action":"pause"}' '{"action":"pause","args":[],"extra":1}' '{"action":["pause"],"args":[]}' '[]' 'not json'; do
   got=$(ctl "$b")
   [ "$got" = 400 ] || fail "control_bad_value_refused: '$b' answered $got '$(cat "$M/ctl.out")'"
+  pass=$((pass + 1))
+done
+# Bug: an invalid Test files at once value was refused with a bare Bad Request, so the Rules tab could not say why.
+for b in "$(act atonce 0)" "$(act atonce -1)" "$(act atonce 1.5)" "$(act atonce 1000)" "$(act atonce)" "$(act atonce 2 3)"; do
+  got=$(ctl "$b")
+  [ "$got" = 400 ] && grep -q 'must be a whole number from 1 to 999' "$M/ctl.out" || fail "control_atonce_refused_with_reason: '$b' answered $got '$(cat "$M/ctl.out")'"
   pass=$((pass + 1))
 done
 [ ! -e "$F/ssh-calls" ] && [ -z "$(calls)" ] || fail "control_refusals_run_nothing: $(cat "$F/ssh-calls" 2>/dev/null)"

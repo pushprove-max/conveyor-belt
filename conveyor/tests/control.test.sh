@@ -340,3 +340,17 @@ t_controlatonce() {
     ! ctlcheck <<<"{\"suiteAtOnce\":$v}" >/dev/null || fail "the record {\"suiteAtOnce\":$v} was read, though $v is no whole number from 1"
   done
 }
+# `control atonce <n>`, which the Rules tab's Test files at once sends (#1175), writes suiteAtOnce, the record that
+# release-prep reads for a parallel suite (relatonce()). Bugs: the write goes to another key, so the next parallel run
+# still reads 2; 0, a negative number, a fraction or a word is written, or is refused with no reason, or with the
+# record changed.
+t_controlatoncerule() {
+  local v out
+  controlsetup '[]'
+  [ "$(ctl atonce 3 | jq .suiteAtOnce)" = 3 ] && [ "$(jq .suiteAtOnce "$C")" = 3 ] && [ "$(loop control | jq .suiteAtOnce)" = 3 ] \
+    || fail "control atonce 3 did not write suiteAtOnce 3: $(jq -c . "$C")"
+  for v in 0 -1 1.5 two 1000 ''; do
+    out=$(loop control atonce "$v" 2>&1); [ $? = 2 ] && [[ $out == *"is not a whole number from 1"* ]] && [ "$(jq .suiteAtOnce "$C")" = 3 ] \
+      || fail "control atonce '$v' was not refused with its reason and nothing changed: $out"
+  done
+}
