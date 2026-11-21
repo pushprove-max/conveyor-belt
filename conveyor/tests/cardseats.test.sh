@@ -352,7 +352,8 @@ t_pickjudgeshare() {
   seatsetup "[$(issue 15 2026-01-01)]"
   loop control rules pick=on >/dev/null && loop control pick small code promote >/dev/null || fail "control rules pick=on or control pick was refused"
   pjask 'm2 high' 'x2 low' 'j2 low'
-  # judged (null): the Board credits the Judge with a builder only when the pick says the card took it (seatsof()).
+  # judged (null): the Board credits the Judge with a builder only when the pick says the card took it, or its choice
+  # is the Judge's builder (seatsof()); this choice is not.
   fx_in "N=15; $PJ; jq -c '[.group, .trial, .promoted, .choice, .judged]' <<<\"\$PICK\""
   [ "$(sed -n '2,5p' "$T/$CASE/run.out" | paste -sd,)" = 'm medium,x2 low,j2 low,["small code",false,null,{"model":"m","effort":"medium"},null]' ] \
     || fail "the promoted group's card in the share did not build on the project's builder: $(cat "$T/$CASE/run.out")"

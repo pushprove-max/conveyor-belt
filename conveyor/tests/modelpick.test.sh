@@ -227,8 +227,8 @@ t_pickseatsnap() {
   sl c1-7 7 picked ok; sl c1-7 7 build ok; sl c1-7 7 landed ok '{"sha":"abc","product":false}'
   sl c1-8 8 picked ok; sl c1-8 8 build ok; sl c1-8 8 blocked blocked '{"reason":"tests failed"}'
   sl c1-9 9 picked ok; sl c1-9 9 build ok '{}' '{"failed":"the judge timed out"}'
-  # A trial at the Judge's effort, a promoted card with a reviewer the owner promoted, a card the rule kept on the
-  # project's builder that is the builder the Judge chose (no judged: pickpromote()'s share), and a card on the Judge's builder.
+  # A trial at the Judge's effort, a promoted card with a reviewer the owner promoted, a card picked before the pick
+  # said judged (#1133: its choice is the Judge's builder, which it builds on), and a card on the Judge's builder.
   sl c1-10 10 picked ok; sl c1-10 10 build ok '{"pick":{"trial":true,"choice":{"model":"claude-sonnet-5-5","effort":"medium"},"trialEffort":"high"}}'
   sl c1-11 11 picked ok; sl c1-11 11 build ok '{"pick":{"promoted":true,"choice":{"model":"claude-sonnet-5-5","effort":"low"},"seats":{"reviewer":{"model":"gpt-6.2-sol","effort":"high"}}}}'
   sl c1-12 12 picked ok; sl c1-12 12 build ok '{"pick":{"choice":{"model":"claude-sonnet-5-5","effort":"medium"}}}'
@@ -240,8 +240,9 @@ t_pickseatsnap() {
     || fail "Needs you has no seats: $(jq -c '.needsYou.blocked' <<<"$s" | head -c 600)"
   # The seats each card runs on go with the Judge's pick (run, #1086). Bug caught: the Board showed the Judge's seats on
   # a trial (it builds on the challenger at trialEffort, and is reviewed on the project's), on a promoted card (the
-  # challenger, and the reviewer the owner promoted), on a card the rule kept on the project's builder (c1-7, and
-  # c1-12, whose project's builder is the one the Judge chose: the Judge did not set it) and on a failed pick.
+  # challenger, and the reviewer the owner promoted), on a card the rule kept on the project's builder (c1-7: its
+  # choice is not the Judge's builder) and on a failed pick. Bug caught (#1133): a card picked before the pick said
+  # judged (c1-12) builds on the Judge's builder, its choice, but showed the project's and "does not run on it".
   [ "$(jq -c '[.belt[] | select(.issue == 9) | .seats]' <<<"$s")" = '[{"failed":"the judge timed out","mode":"on","run":{"builder":null,"reviewer":null,"judge":null}}]' ] \
     || fail "a card on the belt has no seats: $(jq -c '.belt' <<<"$s" | head -c 600)"
   local j='{"model":"claude-opus-5-5","effort":"medium","by":"judge"}' r='{"model":"gpt-6.1-sol","effort":"medium","by":"judge"}'
@@ -250,8 +251,8 @@ t_pickseatsnap() {
     || fail "a trial's seats: $(jq -c '[.belt[] | select(.issue == 10) | .seats]' <<<"$s")"
   [ "$(jq -c '[.belt[] | select(.issue == 11) | .seats.run]' <<<"$s")" = '[{"builder":{"model":"claude-sonnet-5-5","effort":"low","by":"promoted"},"reviewer":{"model":"gpt-6.2-sol","effort":"high","by":"promoted"},"judge":'"$j"'}]' ] \
     || fail "a promoted card's seats: $(jq -c '[.belt[] | select(.issue == 11) | .seats]' <<<"$s")"
-  [ "$(jq -c '[.belt[] | select(.issue == 12) | .seats.run]' <<<"$s")" = '[{"builder":null,"reviewer":'"$r"',"judge":'"$j"'}]' ] \
-    || fail "a card the rule kept on the project's builder, which the Judge also chose: $(jq -c '[.belt[] | select(.issue == 12) | .seats]' <<<"$s")"
+  [ "$(jq -c '[.belt[] | select(.issue == 12) | .seats.run]' <<<"$s")" = '[{"builder":{"model":"claude-sonnet-5-5","effort":"medium","by":"judge"},"reviewer":'"$r"',"judge":'"$j"'}]' ] \
+    || fail "a card picked before the pick said judged, on the Judge's builder: $(jq -c '[.belt[] | select(.issue == 12) | .seats]' <<<"$s")"
   [ "$(jq -c '[.belt[] | select(.issue == 13) | .seats.run]' <<<"$s")" = '[{"builder":{"model":"claude-sonnet-5-5","effort":"medium","by":"judge"},"reviewer":'"$r"',"judge":'"$j"'}]' ] \
     || fail "a card on the Judge's seats: $(jq -c '[.belt[] | select(.issue == 13) | .seats]' <<<"$s")"
   [ "$(jq -c '[.packPick.lists, .packPick.efforts.claude, .packPick.efforts.codex]' <<<"$s")" = '[{"builder":{"claude-opus-5-5":{"min":"medium","max":"high"}}},["low","medium","high","xhigh","max"],["minimal","low","medium","high","xhigh"]]' ] \

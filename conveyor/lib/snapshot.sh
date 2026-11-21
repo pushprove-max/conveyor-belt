@@ -671,15 +671,16 @@ snapshot() (
     # lib/modelpick.sh), each {model, effort, by}: by card (the owner set the builder), trial (the challenger of the
     # group, at trialEffort when the effort of the Judge moved it), promoted (a promoted challenger, or a seat the owner
     # promoted from a replay) or judge (the seat of the Judge, with the rule On and no failed pick nor guard; for the
-    # builder, only when the pick says judged: a card the rule kept on the builder of the project is not, even when the Judge
-    # chose that builder); null for a seat the rule left at the default of the project.
+    # builder, when the pick says judged, or has no judged and its choice is the builder the Judge chose: a card picked
+    # before the pick said judged builds on its choice; a card the rule kept on another builder, that of the project,
+    # is not); null for a seat the rule left at the default of the project.
     def seatsof: (.x.pick | objects | select(.asked | objects) | . as $p | .asked as $a
       | ($p.mode == "on" and ($a.failed | type) != "string" and ($a.guard | type) != "string") as $on
       | ($p.choice | objects | select(.model | type == "string") | {model, effort}) as $c
       | $a + {mode, run: ({builder: (if $c == null then null elif $p.by == "owner" then $c + {by: "card"}
             elif $p.trial == true then $c + {effort: ($p.trialEffort // $c.effort), by: "trial"}
             elif $p.promoted == true then $c + {by: "promoted"}
-            elif $on and $p.judged == true then $c + {by: "judge"} else null end)}
+            elif $on and ($p.judged == true or ($p.judged == null and $c == (($a.builder | objects | {model, effort}) // null))) then $c + {by: "judge"} else null end)}
           + ([("reviewer", "judge") as $k | {key: $k, value: (if $p.trial == true then null
               elif ($p.seats[$k].model | type) == "string" then ($p.seats[$k] | {model, effort, by: "promoted"})
               elif $on and ($a[$k].model | type) == "string" then ($a[$k] | {model, effort, by: "judge"}) else null end)}] | from_entries))}) // null;
