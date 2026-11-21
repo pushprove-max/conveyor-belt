@@ -31,10 +31,14 @@ t_machinefds() {
   # The loop writes to its reader, never to the machine's output.
   [ "$(copies "$lp")" = 0 ] || fail "the project's loop holds $(copies "$lp") fds on the machine's output, not 0: the machine gave it its copy of stderr"
   # Bug (#213, asked for by #216): each restart of serve kept fds (a copy of stderr, LOGFD), so after hundreds the lock and slot fds of
-  # its cards were above 255. Its count of open fds, fewest of 20 looks over 2 s (a turn holds some for a moment), is
-  # no higher after three restarts.
-  count() { local n m=''; for _ in {1..20}; do n=$(ls "/proc/$lp/fd" 2>/dev/null | wc -l); [ -n "$m" ] && [ "$m" -le "$n" ] || m=$n; sleep 0.1; done; echo "$m"; } # sleep: the looks are spread over 2 s
-  fds=$(count)
+  # its cards were above 255. Its count of open fds that a restart's exec keeps, fewest of 20 looks over 2 s (a turn
+  # holds some for a moment), is no higher after three restarts. Only fds with no close-on-exec flag (O_CLOEXEC, 02000000
+  # in /proc's fdinfo flags) are counted, as only those can be kept: bash's own copy of stderr while a command's stderr
+  # is redirected has the flag and is closed again between commands, so a look that fell between them counted one less
+  # before the restarts than after (#1266).
+  count() { local n m=''; for _ in {1..20}; do n=$(cat "/proc/$lp/fdinfo/"* 2>/dev/null | awk '$1 == "flags:" && substr($2, length($2) - 6, 1) !~ /[2367]/ { n++ } END { print n + 0 }'); [ -n "$m" ] && [ "$m" -le "$n" ] || m=$n; sleep 0.1; done; echo "$m"; } # sleep: the looks are spread over 2 s
+  # At least its stdin, stdout and stderr, which have no close-on-exec flag: fewer, and the flags were not read.
+  fds=$(count); [ "$fds" -ge 3 ] || fail "serve's fds with no close-on-exec flag could not be counted from /proc/$lp/fdinfo: $fds"
   for c in "$B" "$A" "$B"; do
     git -C "$D" reset -q --hard "$c" || fail "the checkout did not move to $c"
     wait_until '[ "$(jq -r .commit "$ST/loop.json" 2>/dev/null)" = "$c" ] && [ "$(jq -r .pid "$ST/loop.json")" = "$lp" ]' \

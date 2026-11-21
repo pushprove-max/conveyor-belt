@@ -61,9 +61,12 @@ share_noroom() {
 
 # share_guard <temp folder> <pid file> <mark>: stops the test file that <pid file> names once its temp folder holds its
 # share or more, as the size limit (ulimit -f, share_run) caps one file but not many: TERM to it and its children,
-# KILL 10 s later. <mark> keeps the folder's size then, for share_run's reason.
+# KILL 10 s later. <mark> keeps the folder's size then, for share_run's reason. It first closes every descriptor from 3
+# up it inherited: its `sleep` runs on for up to 1 s after share_run kills it, and held the test file's slot (the lock
+# its worker inherits, conveyor/lib/slots.sh) that long, so the suite's next file waited for it.
 share_guard() {
-  local p='' k
+  local p='' k f
+  for f in /dev/fd/*; do f=${f##*/}; [[ $f =~ ^[0-9]+$ ]] && [ "$f" -ge 3 ] && eval "exec $f>&-" 2>/dev/null; done
   while sleep 1; do
     [ -n "$p" ] || read -r p < "$2" || continue
     k=$(du -sk "$1" | cut -f1)
