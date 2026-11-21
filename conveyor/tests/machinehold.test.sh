@@ -32,9 +32,10 @@ holdjudge() {
 
 # D1: the control c.test, which passed before with main's content, fails on main beside b.test's flaky, whose input
 # b.txt changed since it last passed. Bug it catches: a broken machine read as a broken main, so each landing opened a
-# main-red fix card and every card behind it waited. The verdict is machine: no main-red entry, the hold names the
-# control (and not b.test, which may fail on main for good), health shows it for the Foreman's wake, and the loop picks
-# nothing: its one look at the hold fails the control again, so `run` ends saying so.
+# main-red fix card and every card behind it waited. The verdict is machine (the Test step goes to the machine hold,
+# testroute()): no main-red entry, the hold names the control (and not b.test, which may fail on main for good),
+# health shows it for the Foreman's wake, and the loop picks nothing: its one look at the hold fails the control
+# again, so `run` ends saying so. No card runs.
 t_machinecontrol() {
   holdsetup 'main fail flaky' 'main fail three'
   local out
@@ -42,6 +43,8 @@ t_machinecontrol() {
   echo b2 > "$R/b.txt"; git -C "$R" commit -qam "b.test's input changes" || fail "main could not move"
   out=$(holdjudge) || fail "verdicts failed: $out"
   [ "$out" = '[{"case":"b.test: flaky","verdict":"machine"}]' ] || fail "a failing control did not give the verdict machine: $out"
+  # The Test step goes to the repair lane, then the machine hold (testroute(): machine), not to the wait for main.
+  [ "$(mrroute verdicts "{\"verdicts\":$out}")" = machine ] || fail "testroute verdicts did not send the card to the machine hold, given {\"verdicts\":$out}: $(mrroute verdicts "{\"verdicts\":$out}")"
   # Each failing file runs on main alone and whole (#374), so the list names b.test, not its case.
   [ "$(grep $'^fail\t' "$STUB/rerun.main" | tr '\t\n' ':|')" = "fail:b.test|fail:c.test|" ] \
     || fail "main's run did not run the control beside the failing case: $(cat "$STUB/rerun.main")"
@@ -49,6 +52,7 @@ t_machinecontrol() {
   [ "$(jq -c '[.card, .controls, .cases]' "$ST/machinehold.json")" = '["c7",["c.test"],["b.test: flaky"]]' ] \
     || fail "the hold does not name the failing control: $(cat "$ST/machinehold.json" 2>&1)"
   [ "$(loop health | jq -c '.machineHold.controls')" = '["c.test"]' ] || fail "health does not show the hold: $(loop health | jq -c .machineHold)"
+  # loop: run() itself refuses to pick while the hold stands (its exit, no picked line, its message); no function gives that, and it runs no card
   out=$(loop run 1 2>&1) && fail "run exited zero while the machine hold stands: $out"
   [ -z "$(st 'select(.step == "picked") | .card')" ] || fail "the loop picked a card while the machine hold stands: $(st '"\(.step) \(.issue)"' | tr '\n' ,)"
   grep -qF 'conveyor: the machine fails c.test on main, with no change to main that explains it' <<<"$out" && grep -qF 'the machine hold stands; nothing recorded' <<<"$out" \
@@ -149,6 +153,7 @@ t_machinecard() {
   local lp waiting='grep -qs "waiting for the machine: the machine fails c.test on main" "$T/$CASE/cards/"*.live'
   tune '.tunables.poll = 1'
   holdpass $'c.test\tc.txt'
+  # loop: card() writes the held test line and its message, then waits for the loop's look to end the hold; no function gives them
   ( loop run 1 > "$STUB/run.out" 2>&1 ) & lp=$!
   wait_until "$waiting" 'cat "$STUB/run.out"' || fail "the card did not wait for the machine: $(cat "$STUB/run.out")"
   # Bug it catches too: a card the repair lane does not pass (c.test fails in the clean harness with its change too)
@@ -183,6 +188,7 @@ t_machineresume() {
   holdsetup
   local out
   eng 'machinehold c1 "$(git rev-parse HEAD)" "[\"c.test\"]" "[\"b.test: flaky\"]"' || fail "the hold could not be written"
+  # loop: the machine's own loop: only run() looks at the hold and picks again once it goes
   out=$(loop run 1 2>&1) || fail "run exited non-zero: $out"
   [ "$(cat "$STUB/looks" 2>&1)" = 'fail:c.test|' ] || fail "the loop did not run the control alone on main: $(cat "$STUB/looks" 2>&1)"
   [ ! -e "$ST/machinehold.json" ] || fail "the hold stayed after the control passed: $(cat "$ST/machinehold.json")"
@@ -226,6 +232,7 @@ t_repairlands() {
   repairsetup
   local out lp
   echo 'echo "harness() { return 0; }" > conveyor/lib/slots.sh' > "$STUB/build"
+  # loop: card() writes the pass line with the lane's reason and lands while the hold stands; no function gives them
   ( loop run 1 > "$STUB/run.out" 2>&1 ) & lp=$!
   # A card the lane does not pass waits for the machine: the control is mended then, so that the run ends.
   wait_until '[ -n "$(st '"'"'select(.step == "landed") | .issue'"'"')" ] || grep -qs "waiting for the machine" "$T/$CASE/cards/"*.live' 'cat "$STUB/run.out"' \

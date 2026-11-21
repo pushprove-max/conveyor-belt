@@ -10,8 +10,8 @@
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
-# Issue 436: a one-line lint warning cost a card a whole Test run, its one test-fix round and then a block. Each card
-# case runs one issue's card with the pack's test.checkCommand set to $STUB/check, a stand-in lint that notes each run
+# Issue 436: a one-line lint warning cost a card a whole Test run, its one test-fix round and then a block. Each case
+# sets the pack's test.checkCommand to $STUB/check, a stand-in lint that notes each run
 # in $STUB/checks and fails naming its line when t.test.sh starts with a bare sleep, or when bad.txt is in the tree.
 # The stub test command notes each run in $STUB/tests and what the step's log folder holds of the kept checks in
 # $STUB/kept. The push after a landing is off: no case here checks it.
@@ -25,6 +25,19 @@ ccsetup() { # <issue number>
 }
 cc() { wc -l < "$STUB/$1" 2>/dev/null | tr -d ' ' || echo 0; } # <stub log>: its lines
 ccsteps() { st "select(.issue == $1 and (.step | IN(\"build\", \"fix\", \"review\", \"test\", \"landed\", \"blocked\"))) | .step" | paste -sd' ' -; } # <issue>
+# Card c7's checks after its build session and at the start of its Test step, on fixture state, as card() takes them
+# (no card runs): its worktree on main ($FXWT, fx_wt) with the build's <change> staged; donewhen.sh checked() after the
+# build; then, as cardland.sh's Test step calls them, treecheck() and testroute checks, and tests() when the route is
+# to run them. session() stands for the one fix session: it notes each call in $STUB/sessions and its prompt in
+# $STUB/brief, and makes <fix>. The Done-when part of checked() (dwchecked()) passes. run.out holds `checked <exit>`,
+# `route <what testroute checks gave>` and, when the tests ran, `tests <exit>`.
+ccstep() { # <change> <fix>
+  fx_wt "$1" ok.txt ok
+  fx_in 'dwchecked() { :; }
+    session() { echo x >> "$STUB/sessions"; printf "%s\n" "$2" > "$STUB/brief"; (cd "$1" && '"$2"') > /dev/null 2>&1; echo "{}"; }
+    checked c7 7 "$FXWT" "$(issue 7 2026-01-01)" brief build "{}"; echo "checked $?"
+    out=$(treecheck "$FXWT"); r=$(testroute checks $?); echo "route $r"; [ -n "$r" ] || { tests "$FXWT" > /dev/null 2>&1; echo "tests $?"; }'
+}
 
 # Bugs: the checks run only in the Test step (a session's warning costs a whole Test run before any session sees it);
 # a failure goes to review or blocks, or its fix session is not told the line; the Test step runs the checks again on
@@ -32,12 +45,10 @@ ccsteps() { st "select(.issue == $1 and (.step | IN(\"build\", \"fix\", \"review
 t_checkfix() {
   ccsetup 7
   # The build leaves t.test.sh with a bare sleep before its check; the fix session leaves a wait in its place.
-  b='if [ "$(wc -l < "$STUB/sessions")" = 1 ]; then printf "sleep 1\n[ -e x ]\n" > t.test.sh' # sleep: the text of the card's test file the check must find; never run
-  printf '%s\n' "$b" 'else printf "until [ -e x ]; do :; done\n" > t.test.sh; fi' > "$STUB/build"
-  echo "$GO" > "$STUB/review.1"
-  loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
-  [ "$(ccsteps 7)" = "build fix review test landed" ] && [ "$(cc sessions)" = 2 ] \
-    || fail "the check's failure did not go to one fix session before any review or test, or #7 did not land: $(ccsteps 7), $(cc sessions) session(s)"
+  ccstep 'printf "sleep 1\n[ -e x ]\n" > t.test.sh' 'printf "until [ -e x ]; do :; done\n" > t.test.sh' # sleep: the text of the card's test file the check must find; never run
+  # checked() goes on (exit 0) after one fix session; the Test step's checks pass (testroute checks: nothing), so its tests run.
+  [ "$(cat "$T/$CASE/run.out")" = $'checked 0\nroute \ntests 0' ] && [ "$(cc sessions)" = 1 ] \
+    || fail "the check's failure did not go to one fix session, then on to the Test step's tests: $(cat "$T/$CASE/run.out"), $(cc sessions) session(s)"
   grep -q "^# The project's checks failed" "$STUB/brief" && grep -qF 't.test.sh:1: test lint: a bare sleep, then a check' "$STUB/brief" \
     || fail "the fix session was not told the check's line: $(cat "$STUB/brief")"
   [ "$(st 'select(.issue == 7 and .step == "fix") | .reason')" = "the project's checks failed (test.checkCommand)" ] || fail "the fix line does not say why: $(st 'select(.issue == 7 and .step == "fix")')"
@@ -49,15 +60,14 @@ t_checkfix() {
 
 # Bugs: checks that still fail after their one fix session send the card round fix sessions for ever, or go to review.
 t_checkblock() {
-  ccsetup 10
-  # Each session leaves t.test.sh with the bare sleep and its own number after it: the fix changes the tree, so the
-  # checks run again on it.
-  b='printf "sleep 1\n[ -e x ]\n# %s\n" "$(wc -l < "$STUB/sessions")" > t.test.sh' # sleep: the text of the card's test file the check must find; never run
-  printf '%s\n' "$b" > "$STUB/build"
-  loop run --only 10 >/dev/null
-  [ "$(ccsteps 10)" = "build fix blocked" ] && [ ! -e "$STUB/reviews" ] && [ "$(cc checks)" = 2 ] \
-    && st 'select(.issue == 10 and .step == "blocked") | .reason' | grep -q "^the project's checks failed again after their one fix session; nothing landed." \
-    || fail "a second check failure did not block #10 before any review: $(ccsteps 10), $(cc checks) check run(s): $(st 'select(.issue == 10 and .step == "blocked") | .reason')"
+  ccsetup 7
+  # The build and the fix each leave t.test.sh with the bare sleep and a number of their own after it: the fix changes
+  # the tree, so the checks run again on it.
+  ccstep 'printf "sleep 1\n[ -e x ]\n# 0\n" > t.test.sh' 'printf "sleep 1\n[ -e x ]\n# 1\n" > t.test.sh' # sleep: the text of the card's test file the check must find; never run
+  # checked() fails (exit 1): card() ends there, before any review.
+  [ "$(head -n 1 "$T/$CASE/run.out")" = "checked 1" ] && [ "$(cc sessions)" = 1 ] && [ "$(cc checks)" = 2 ] \
+    && st 'select(.issue == 7 and .step == "blocked") | .reason' | grep -q "^the project's checks failed again after their one fix session; nothing landed." \
+    || fail "a second check failure did not block #7 before any review: $(cat "$T/$CASE/run.out"), $(cc sessions) session(s), $(cc checks) check run(s): $(st 'select(.issue == 7 and .step == "blocked") | .reason')"
 }
 
 # Bugs: a check that fails at the start of a Test step lets the step's test files run, or fails each of them; the
@@ -69,6 +79,7 @@ t_checkstep() {
   echo 'if [ -e bad.txt ]; then git rm -q bad.txt; else for f in a b c; do echo "# $f" > "$f.test.sh"; done; fi' > "$STUB/build"
   echo "$GO" | tee "$STUB/review.1" > "$STUB/review.2"
   echo '[ "$(wc -l < "$STUB/reviews")" != 1 ] || { echo x > "$R/bad.txt"; git -C "$R" add bad.txt; git -C "$R" commit -qm bad; }' > "$STUB/review-cmd"
+  # loop: the Test step writes its checks line itself (cardland.sh), and only the card's next test run shows it is still its first
   loop run --only 8 >/dev/null || fail "run of #8 exited non-zero"
   # One run of the three files, each alone through test.fileCommand: three test commands, none in the failed step.
   [ "$(ccsteps 8)" = "build review test fix review test landed" ] && [ "$(cc tests)" = 3 ] \
@@ -82,20 +93,16 @@ t_checkstep() {
 }
 
 # Bug: a check failure counted as the changed tests failing, so a card whose test-fix round was used was blocked as
-# "the changed tests failed again after their one fix round".
+# "the changed tests failed again after their one fix round". Card c7's Test step on fixture state, its test-fix round
+# used (card()'s tfix) and already fitted onto main (tmain): its worktree holds bad.txt, so the step's checks fail
+# (treecheck() exit 1), and testroute checks sends it to the checks' one fix session, where a failure of its tests
+# (testroute <worktree>) blocks it.
 t_checkround() {
   ccsetup 9
-  # Its first test run fails, and the run again too: the test-fix round. Main gains bad.txt during the review after
-  # that fix. The card gave way for its fix, so its tests pass first on its own base; fitted onto main then, its next
-  # Test step fails on the check alone, its test-fix round used. The fix session after it takes bad.txt out.
-  echo 'if [ -e bad.txt ]; then git rm -q bad.txt; else echo "$(wc -l < "$STUB/sessions")" >> a.txt; fi' > "$STUB/build"
-  echo "$GO" | tee "$STUB/review.1" "$STUB/review.2" > "$STUB/review.3"
-  echo '[ "$(wc -l < "$STUB/reviews")" != 2 ] || { echo x > "$R/bad.txt"; git -C "$R" add bad.txt; git -C "$R" commit -qm bad; }' > "$STUB/review-cmd"
-  echo 'echo x >> "$STUB/tests"; [ "$(wc -l < "$STUB/tests")" -gt 2 ] && exit 0; echo "FAIL widget.test.ts"; printf "%s\n" "== widget.test.ts" "-- FAIL widget.test.ts" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1' > "$STUB/test-cmd"
-  loop run --only 9 >/dev/null || fail "run of #9 exited non-zero"
-  [ "$(ccsteps 9)" = "build review test fix review test test fix review test landed" ] && [ "$(cc sessions)" = 3 ] \
-    && [ "$(st 'select(.issue == 9 and .step == "test") | [.result, (.checks // false)] | tojson' | paste -sd' ' -)" = '["fail",false] ["pass",false] ["fail",true] ["pass",false]' ] \
-    || fail "a check failure after the test-fix round did not go to a fix session, or blocked #9: $(ccsteps 9): $(st 'select(.issue == 9 and (.step == "test" or .step == "blocked")) | [.result, .reason] | tojson')"
+  fx_wt 'echo x > bad.txt' ok.txt ok
+  fx_in 'tfix=1 tmain=1 repaired=""; out=$(treecheck "$FXWT"); r=$?; echo "checks $r $(testroute checks $r)"; echo "tests $(testroute "$FXWT")"'
+  [ "$(cat "$T/$CASE/run.out")" = $'checks 1 checkfix\ntests block' ] \
+    || fail "a check failure after the test-fix round (tfix=1) did not go to a fix session, unlike a failure of the tests: $(cat "$T/$CASE/run.out")"
 }
 
 # Bug: a pack with no test.checkCommand runs something, fails, or keeps a result: every card would change.

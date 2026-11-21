@@ -26,6 +26,12 @@ mrfit() {
   git -C "$w" diff --cached --binary > "$w.fit" && git -C "$w" reset -q --hard "$(git -C "$R" rev-parse HEAD)" && git -C "$w" apply --index "$w.fit" \
     || fail "the change could not be fitted onto main"
 }
+# Where card()'s Test step goes (card.sh testroute()) given <arguments>, card()'s repaired, tmain and tfix as the
+# caller's environment sets them ('' when unset). mrroute is the subshell form of apiroute.test.sh: no card runs.
+mrroute() { # <testroute's arguments>...
+  local a; printf -v a ' %q' "$@"
+  eng 'repaired=${repaired:-} tmain=${tmain:-} tfix=${tfix:-}; testroute'"$a"
+}
 
 # Bug it catches: #423 failed on a test main had broken since #442, and went to a fix round a session could not win.
 # b.test's flaky fails on the card's run, its run again and on main: every verdict is main (so card() waits, with no
@@ -56,6 +62,8 @@ t_mainred() {
     && [ "$(tline 1 '[.result, .verdicts, .mainRun.sha] | tojson')" = "$(jq -c '["fail", .verdicts, .mainRun.sha]' <<<"$v1")" ] \
     || fail "the test line does not give the case's and the file's verdicts and main's run: $v1: $(tline 1 tojson)"
   jq -r '.mainRun.sec' <<<"$v1" | grep -qE '^[0-9]+$' || fail "verdicts() does not give the seconds main's run took: $v1"
+  # Every verdict main: the Test step waits for main (testroute(): main), with no fix session and no block.
+  [ "$(mrroute verdicts "$v1")" = main ] || fail "testroute verdicts did not send the card to the wait for main, given $v1: $(mrroute verdicts "$v1")"
   # No GitHub issue (#597): the case and the file go to main's commit's one fix card, not picked yet.
   [ ! -s "$STUB/filed" ] && [ "$(jq -c --arg s "$s" '[.reds[] | [.sha == $s, .card, [.cases[].case]]]' "$ST/mainred.json")" = '[[true,null,["c.test","b.test: flaky"]]]' ] \
     || fail "the case and the file did not go to one fix card of main's commit, with no issue filed: $(cat "$ST/mainred.json" "$STUB/filed" 2>&1)"
@@ -119,6 +127,10 @@ t_mainfixed() {
   v=$(mrverdicts '{"of":null,"files":[{"file":"b.test","cases":[{"name":"flaky","line":"1"}]}],"timeout":null}') || fail "verdicts failed: $v"
   [ "$(jq -c .verdicts <<<"$v")" = '[{"case":"b.test: flaky","verdict":"card"}]' ] && [ "$(jq -r .mainRun.sha <<<"$v")" = "$m2" ] \
     || fail "the case did not pass on main's run at M2: $v"
+  # The failure is the card's, and main moved under it: the Test step brings it onto main (testroute(): moved), not to
+  # a fix round; once it has been fitted onto a main that moved (tmain), the same failure goes to the fix round.
+  [ -z "$(mrroute verdicts "$v")" ] && [ "$(mrroute "$w")" = moved ] && [ "$(tmain=1 mrroute "$w")" = fix ] \
+    || fail "testroute did not send the card's failure on M1 onto M2, given $v and the worktree $w: '$(mrroute verdicts "$v")' '$(mrroute "$w")' '$(tmain=1 mrroute "$w")'"
   mrsettle 'false'
   [ "$(tail -n 1 "$T/$CASE/run.out")" = "settle: 0" ] && [ "$(git -C "$w" rev-parse HEAD)" = "$m2" ] && [ "$(git -C "$w" diff --cached --name-only HEAD)" = a.txt ] \
     || fail "settle() did not bring the change onto M2 as it was: $(cat "$T/$CASE/run.out")"
@@ -158,7 +170,10 @@ t_mainfixedcaught() {
   caughtsetup '2 fail one' '3 fail one'
   echo '[ "$n" != 4 ] || git rev-parse HEAD > "$STUB/head.4"' > "$STUB/pre"
   ! rerunstep && [ "$(ran 3)" = one ] || fail "the run again after the rebuild did not run the case that failed: $(ran 2) | $(ran 3)"
-  caughtmove; mrsettle 'sed -i "s/^main2\$/seven/" a.txt'; caughtfit
+  # The failure is the card's (its case passes on main); main moved again since the rebuild: testroute() gives moved,
+  # so the card is fitted onto main2 (settle(), below), with no fix round.
+  caughtmove; [ "$(mrroute "$T/$CASE/cards/c7")" = moved ] || fail "testroute did not send the worktree $T/$CASE/cards/c7, behind main2, onto main: $(mrroute "$T/$CASE/cards/c7")"
+  mrsettle 'sed -i "s/^main2\$/seven/" a.txt'; caughtfit
   rerunstep && [ "$(cat "$STUB/head.4")" = "$(git -C "$R" rev-parse HEAD)" ] || fail "the run after the session did not pass on main2's commit: $(cat "$STUB/head.4" 2>&1)"
 }
 # Main failed the case too: the card waited for main to change, and main changed the same line. Its landed line's
@@ -167,6 +182,10 @@ t_mainfixedcaught() {
 # (bench/drift.sh) had no minutes a card waited for main, as no line recorded them.
 t_mainredcaught() {
   caughtsetup; caughtmove
+  # Main fails the case too, and a case that passed on its run again is flaky: the Test step waits for main
+  # (testroute(): main), as below; a flaky case is no failure of the card's.
+  local v='{"verdicts":[{"case":"a.test: one","verdict":"main"},{"case":"b.test: flaky","verdict":"flaky"}]}'
+  [ "$(mrroute verdicts "$v")" = main ] || fail "testroute verdicts did not send the card to the wait for main, given $v: $(mrroute verdicts "$v")"
   mrsettle 'sed -i "s/^main2\$/seven/" a.txt' 'mainsec=0; mainwait() { SECONDS=$((SECONDS + 5)); }
     mainwaited "$CONVEYOR_CARDS/c7" "$(git rev-parse HEAD)" "a.test: one"
     locked land c7 7 "$CONVEYOR_CARDS/c7" "title 7 (#7)" "$(landextra "" "" "[]")"; echo "land: $?"'; caughtfit

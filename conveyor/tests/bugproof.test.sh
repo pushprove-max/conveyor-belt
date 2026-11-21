@@ -12,19 +12,19 @@
 # files before the push, pushtests(); with the default pack it runs none).
 nopush() { jq -c '.rules.push = false' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json" || fail "the control record"; }
 
-# One card of #7 with the given labels, run by the loop: the cases of card()'s wiring of bugproof.sh bugproof()'s exits (a proven
-# card lands, an unproven one goes back to build then is blocked, a card that is not a bug skips the check), which only
-# a whole card shows. Its build fixes a.txt (adds `two`) and adds a.test.sh holding <test>. The run on main (a worktree
-# under cards/mainrun/) notes its folder and staged files in $STUB/mainran and runs a.test.sh; the reviewer's prompt
-# is kept in $STUB/asked; one GO review. No push (nopush).
+# card.sh cardbuild() on card c7 of #7 with the given labels, its worktree on main, as card() takes it (its locals): a
+# card that is not a bug skips the check (cardbuild() reads the labels), and an unproven card goes back to build with
+# the reason in its brief and its build line, then is blocked. Its build fixes a.txt (adds `two`) and adds a.test.sh
+# holding <test>. The run on main (a worktree under cards/mainrun/) notes its folder and staged files in
+# $STUB/mainran and runs a.test.sh. What cardbuild() leaves in go is the last line of run.out (fx_in).
 bugcard() { # <test> <label>...
-  local t=$1; shift
-  setup "[$(issue 7 2026-01-01 "$@")]"; nopush
-  sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
-  echo "$GO" > "$STUB/review.1"
+  local t=$1 ISSUE; shift
+  setup '[]'; ISSUE=$(issue 7 2026-01-01 "$@")
   echo "echo two >> a.txt; printf '%s\n' '$t' > a.test.sh" > "$STUB/build"
   echo '{ pwd; git diff --cached --name-only; } >> "$STUB/mainran"; bash a.test.sh' > "$STUB/mainrun-cmd"
-  loop run >/dev/null || fail "run exited non-zero"
+  FXWT=$T/$CASE/cards/c7
+  git -C "$R" worktree add -q --detach "$FXWT" || fail "the card's worktree could not be made"
+  fx_in 'c=c7 n=7 br="" mode="" wt=$FXWT issue=$ISSUE sprompt=brief sf="" go=end; cardbuild; echo "go $go"'
 }
 
 # bugproof.sh bugproof() called as card() calls it, on card c7 of #7 ($ISSUE, when set, is its issue json): its worktree on main
@@ -49,20 +49,15 @@ bugtest() { # <test> [<file> <content>]...
 }
 
 # D1. Bug it catches: a bug card whose new test fails without the fix (it proves the fix) is sent back to build, or
-# its test runs on main with the fix in it, or the review is not shown the result. The test runs on main's code with
-# the card's test file alone; one build session; the review sees that it failed there; the card lands.
+# its test runs on main with the fix in it, or the review is not shown the result. The check (bugwt()) runs the test on
+# main's code with the card's test file alone; it holds, so the card goes on to its review (card.sh bugstep(): nothing),
+# not back to build; the result the review is shown (<worktree>.unfixed) says that it failed there.
 t_bugfails() {
-  bugcard 'grep -qx two a.txt' bug
-  [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ "$(st 'select(.step == "build") | .result' | wc -l)" = 1 ] \
-    || fail "a bug card whose new test fails on main went back to build: $(st 'select(.step == "build")')"
+  bugtest 'grep -qx two a.txt'
+  [ "$RC" = 0 ] && [ -z "$(eng "bugstep $RC")" ] || fail "a bug card whose new test fails on main did not go on to its review: the check's exit $RC, bugstep '$(eng "bugstep $RC")': $BW"
   [ "$(sed 1d "$STUB/mainran" | tr '\n' ' ')" = 'a.test.sh ' ] && [[ $(head -1 "$STUB/mainran") == */cards/mainrun/* ]] \
     || fail "the run on main was not of main's code with the card's test file alone: $(cat "$STUB/mainran" 2>&1)"
-  grep -qx '# The bug-card check' "$STUB/asked" && grep -q '^The run failed there (exit 1)' "$STUB/asked" \
-    || fail "the review was not shown that the new test fails on main: $(cat "$STUB/asked")"
-  # The card's test list (<card>.testlist, which the per-file run writes) stays after landing: tidy() does not remove it.
-  local left=() f; for f in "$T/$CASE/cards"/*; do [ -e "$f" ] && [[ $f != *.testlist ]] && left+=("$f"); done
-  [ -n "$(st 'select(.step == "landed") | .sha')" ] && [ "${#left[@]}" = 0 ] \
-    || fail "the card did not land, or left a worktree: $(ls "$T/$CASE/cards")"
+  grep -q '^The run failed there (exit 1)' "$FXWT.unfixed" || fail "the review's result does not say the new test fails on main: $(cat "$FXWT.unfixed" 2>&1)"
 }
 
 # D2. Bug it catches: a bug card whose new test passes on main's code (it proves nothing of the fix) goes on to review
@@ -75,9 +70,9 @@ t_bugpasses() {
   grep -q '^# Back to the build: the new tests pass without the fix, so they do not prove it$' "$STUB/brief" && grep -qx -- '- a.test.sh' "$STUB/brief" \
     || fail "the second build session was not told why, naming the test file: $(tail -n 20 "$STUB/brief")"
   [ "$(grep -c '/cards/mainrun/' "$STUB/mainran")" = 2 ] || fail "the check did not run on main after each build: $(cat "$STUB/mainran" 2>&1)"
-  [ ! -e "$STUB/asked" ] && [ "$(st 'select(.step == "blocked") | .reason')" = "build: the new tests pass without the fix, so they do not prove it" ] \
-    || fail "a bug card whose test still passed on main after its second build was not blocked before review: $(st 'select(.step | IN("review", "blocked"))')"
-  loop check || fail "the record check refuses a build line with the reason"
+  [ "$(tail -n 1 "$T/$CASE/run.out")" = "go end" ] && [ "$(st 'select(.step == "blocked") | .reason')" = "build: the new tests pass without the fix, so they do not prove it" ] \
+    || fail "a bug card whose test still passed on main after its second build was not blocked before review: $(tail -n 3 "$T/$CASE/run.out"): $(st 'select(.step | IN("review", "blocked"))')"
+  recok "$ST/cards.jsonl" "the bug card's builds"
 }
 
 # Bug it catches: the proof run had no time limit for one hung test, so a new test that waits for what the unfixed
@@ -400,6 +395,7 @@ t_bugcommentloop() {
   sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"; echo "$GO" > "$STUB/review.1"
   echo "if [ \"\$(wc -l < \"\$STUB/sessions\")\" = 1 ]; then printf '#!/usr/bin/env bash\n# a new word\n' > src/s.sh; else printf '#!/usr/bin/env bash\n# an old word\n' > src/s.sh; printf '#!/usr/bin/env bash\n# a new word\n' > src/w.sh; fi" > "$STUB/build"
   echo 'bash src/k.test.sh' > "$STUB/mainrun-cmd"
+  # loop: the proof must reach the review's prompt and the card land, and only a whole card goes from its build to its review
   loop run >/dev/null || fail "run exited non-zero"
   local why; why="no test file found in the change (patterns: $(jq -r '.properties.tests.properties.patterns.default | join(", ")' "$SRC/schema/pack.schema.json")); set tests.patterns in .conveyor/project.json"
   [ "$(st 'select(.step == "build") | .reason // ""' | tr '\n' '|')" = "|$why|" ] && grep -qxF "# Back to the build: $why" "$STUB/brief" \
@@ -411,18 +407,23 @@ t_bugcommentloop() {
 }
 
 # Bug it catches: a bug card whose build changed nothing (an ALREADY-DONE, or a session that did nothing) is sent to
-# build again to add a test, in place of going its own way. One session, and the card ends as a card with no change.
+# build again to add a test, in place of going its own way. On fixture state, as card() takes it: the check on a
+# worktree with no change holds (bugstep(): nothing, not build); the staged change is no change (card.sh emptychange()
+# exit 0), so the card ends as a card with no change (nochange(): blocked).
 t_bugnochange() {
-  setup "[$(issue 7 2026-01-01 bug)]"; echo ':' > "$STUB/build"
-  loop run >/dev/null 2>&1
-  [ "$(wc -l < "$STUB/sessions")" = 1 ] && st 'select(.step == "blocked") | .reason' | grep -q 'the session made no change' \
-    || fail "a bug card with no change went back to build: $(st 'select(.step | IN("build", "blocked"))')"
+  setup '[]'
+  ISSUE=$(issue 7 2026-01-01 bug) bugwt ':' a.test.sh true
+  [ "$RC" = 0 ] && [ -z "$(eng "bugstep $RC")" ] || fail "a bug card with no change was sent back to build: the check's exit $RC, bugstep '$(eng "bugstep $RC")': $BW"
+  fx_in 'emptychange c7 7 "$FXWT" ""; echo "empty $?"; nochange c7 7 "$FXWT" brief'
+  [ "$(head -n 1 "$T/$CASE/run.out")" = "empty 0" ] && st 'select(.step == "blocked") | .reason' | grep -q 'the session made no change' \
+    || fail "a bug card with no change did not end as one: $(cat "$T/$CASE/run.out"): $(st 'select(.step | IN("build", "blocked"))')"
 }
 
 # D3. Bug it catches: a card whose issue is not a bug is held to the check. Its test passes on main, and it still has
-# one build session, no run on main, and a review that is not shown the check.
+# one build session, no run on main, and goes on to a review that is not shown the check (card.sh reviewseen() shows
+# it from <worktree>.unfixed, which stays empty).
 t_notbug() {
   bugcard 'grep -qx one a.txt' area:billing
-  [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ ! -e "$STUB/mainran" ] && ! grep -q 'bug-card check' "$STUB/asked" \
-    || fail "a card that is not a bug was checked: $(cat "$STUB/mainran" 2>&1)"
+  [ "$(wc -l < "$STUB/sessions")" = 1 ] && [ ! -e "$STUB/mainran" ] && [ ! -s "$FXWT.unfixed" ] && [ "$(tail -n 1 "$T/$CASE/run.out")" = "go " ] \
+    || fail "a card that is not a bug was checked, or did not go on to its review: $(tail -n 3 "$T/$CASE/run.out"): $(cat "$STUB/mainran" "$FXWT.unfixed" 2>&1)"
 }

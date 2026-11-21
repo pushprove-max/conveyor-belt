@@ -61,19 +61,22 @@ t_redproofstill() {
     || fail "a change that leaves c.test failing was not blocked naming it: $got"
 }
 # Bug it catches: a fix card whose cases pass on main without its change (main is no longer red for them) landed a
-# change that proves nothing, or was blocked. Its whole run: it closes as already done, its closed line naming the
-# cases and carrying its wait (waitSec, which the drift watch's mean wait reads), and nothing lands.
+# change that proves nothing, or was blocked. card.sh cardbuild() on fix card cfix's fixture state, as card() takes it
+# (its locals; waitsec, the card's wait): its build session, then the check (bugstep() close) closes it as already
+# done, its closed line naming the cases and carrying its wait (waitSec, which the drift watch's mean wait reads), its
+# worktree gone, and nothing lands.
 t_redproofgreen() {
   redsetup $'one\nc.test'
-  local s c; s=$(git -C "$R" rev-parse HEAD)
-  loop run 1 > "$STUB/run.out" 2>&1 || fail "run exited non-zero: $(cat "$STUB/run.out")"
-  c=$(st 'select(.step == "closed") | .card')
-  [[ $c == *-0 ]] && [ "$(st 'select(.step == "closed") | .reason')" = 'Main is no longer red for `a.test: one`, `c.test`: they pass on main'"'"'s code at '"$s"' without the change, so the card closes as already done.' ] \
-    || fail "the fix card did not close as already done, naming the cases: $(st '"\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
-  [ "$(st 'select(.step == "closed") | .waitSec | type')" = number ] || fail "the closed line does not carry the card's wait: $(st 'select(.step == "closed")')"
-  [ -z "$(st 'select(.step == "landed" or .step == "blocked")')" ] && [ "$(git -C "$R" rev-parse HEAD)" = "$s" ] && [ ! -e "$T/$CASE/cards/$c" ] \
-    || fail "the fix card landed, was blocked or left its worktree: $(st '"\(.step) \(.result)"' | tr '\n' ,)"
-  loop check || fail "the record check refuses the closed line"
+  local s w=$T/$CASE/cards/cfix out; s=$(git -C "$R" rev-parse HEAD)
+  jq -c '.reds[0].card = "cfix"' "$ST/mainred.json" > "$STUB/red.new" && mv "$STUB/red.new" "$ST/mainred.json"
+  git -C "$R" worktree add -q --detach "$w" HEAD || fail "the fix card's worktree could not be made"
+  out=$(eng 'c=cfix n=0 br="" mode="" wt=$CONVEYOR_CARDS/cfix sprompt=brief sf="" waitsec=4 mainsec=0 go=end; issue=$(redissue cfix) && cardbuild; echo "go $go"' 2>&1)
+  [ "$(tail -n 1 <<<"$out")" = "go end" ] && [ "$(st 'select(.step == "closed") | .reason')" = 'Main is no longer red for `a.test: one`, `c.test`: they pass on main'"'"'s code at '"$s"' without the change, so the card closes as already done.' ] \
+    || fail "the fix card did not close as already done, naming the cases: $out: $(st '"\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+  [ "$(st 'select(.step == "closed") | .waitSec == 4')" = true ] || fail "the closed line does not carry the card's wait as the number 4: $(st 'select(.step == "closed")')"
+  [ -z "$(st 'select(.step == "landed" or .step == "blocked")')" ] && [ "$(git -C "$R" rev-parse HEAD)" = "$s" ] && [ ! -e "$w" ] \
+    || fail "the fix card landed, was blocked or left its worktree: $out: $(st '"\(.step) \(.result)"' | tr '\n' ,)"
+  recok "$ST/cards.jsonl" "the fix card's close"
 }
 
 # Issue 323: mainred.sh verdicts() alone on card c7, its worktree on main with a new test file n.test staged and a comment added
@@ -137,26 +140,29 @@ t_mainredbigverdicts() {
     || fail "the many failures did not run on main or lost their verdicts: ${out:0:300}"
 }
 
-# Issue 323: a main-fix card's whole run, its session making no change, and main now passing its cases. Its entry links
-# lib/x.sh to a.test, so the engine stages .conveyor/test-links.json in its worktree before the build. Bug it catches:
-# the card was blocked ("the session made no change, so there is nothing to review"), or the staged links were taken
-# for a change and went to review, and main stayed marked red. Its cases run again on main as it is now; they pass, so
-# the card closes as not needed, saying so, nothing lands, and its entry holds main red no more (mainred.sh redopen()).
+# Issue 323: a main-fix card cfix's review step on fixture state, as cardreview() takes it: its session made no change,
+# and main now passes its cases. Its entry links lib/x.sh to a.test, so the engine stages .conveyor/test-links.json in
+# its worktree (card.sh redbrief()). Bug it catches: the card was blocked ("the session made no change, so there is
+# nothing to review"), or the staged links were taken for a change and went to review, and main stayed marked red.
+# The links alone are no change (card.sh emptychange() exit 0, the worktree reset), so nochange() runs its cases again
+# on main as it is now; they pass, so the card closes as not needed, saying so, nothing lands, and its entry holds main
+# red no more (mainred.sh redopen()).
 t_mainrednochange() {
   redsetup $'one\nc.test'
-  local s c out
+  local s w=$T/$CASE/cards/cfix out
   # The fixture ignores .conveyor/; a project tracks its links file, so the engine can stage it.
   printf 'conveyor/\n.conveyor/*\n!.conveyor/test-links.json\n' > "$R/.gitignore" && echo '{}' > "$R/.conveyor/test-links.json" \
     && git -C "$R" add .gitignore .conveyor/test-links.json && git -C "$R" commit -qm links || fail "the links file could not be committed"
   s=$(git -C "$R" rev-parse HEAD)
-  jq -c '.reds[0].cases[0].links = {"lib/x.sh": ["a.test"]}' "$ST/mainred.json" > "$STUB/red.new" && mv "$STUB/red.new" "$ST/mainred.json"
-  echo ':' > "$STUB/build"
-  loop run 1 > "$STUB/run.out" 2>&1 || fail "run exited non-zero: $(cat "$STUB/run.out")"
-  c=$(st 'select(.step == "picked") | .card')
+  jq -c '.reds[0].cases[0].links = {"lib/x.sh": ["a.test"]} | .reds[0].card = "cfix"' "$ST/mainred.json" > "$STUB/red.new" && mv "$STUB/red.new" "$ST/mainred.json"
+  git -C "$R" worktree add -q --detach "$w" HEAD || fail "the fix card's worktree could not be made"
+  out=$(eng 'wt=$CONVEYOR_CARDS/cfix issue="" sprompt=""; redbrief cfix 0 "" && echo "staged $(git -C "$wt" diff --cached --name-only)"
+    emptychange cfix 0 "$wt" ""; echo "empty $?"; nochange cfix 0 "$wt" brief' 2>&1)
+  [[ $out == "staged .conveyor/test-links.json"$'\n'"empty 0"* ]] || fail "the fix card's staged links alone were not taken for no change (emptychange() exit 0): $out"
   [ "$(st 'select(.step == "closed") | .reason')" = 'Not needed: the session made no change, and the cases ran again on main. Main is no longer red for `a.test: one`, `c.test`: they pass on main'"'"'s code at '"$s"' without the change, so the card closes as already done.' ] \
-    || fail "the fix card with no change did not close as not needed: $(st '"\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
-  out=$(eng "redopen $c && echo open")
-  [ -z "$(st 'select(.step | IN("blocked", "landed", "review"))')" ] && [[ $out != *open* ]] && [ "$(git -C "$R" rev-parse HEAD)" = "$s" ] && [ ! -e "$T/$CASE/cards/$c" ] \
+    || fail "the fix card with no change did not close as not needed: $out: $(st '"\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+  out=$(eng "redopen cfix && echo open")
+  [ -z "$(st 'select(.step | IN("blocked", "landed", "review"))')" ] && [[ $out != *open* ]] && [ "$(git -C "$R" rev-parse HEAD)" = "$s" ] && [ ! -e "$w" ] \
     || fail "the fix card was blocked, reviewed or landed, its entry still holds main red, or its worktree stayed: $out: $(st '"\(.step) \(.result)"' | tr '\n' ,)"
   recok "$ST/cards.jsonl" "the fix card with no change"
 }
