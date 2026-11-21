@@ -10,14 +10,15 @@
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
 # Bugs: a failed or hung session or review leaves a card with no closing line, waits out the hang, lands anyway, or
-# leaves its worktree.
+# leaves its worktree. Each card's step runs as card() runs it (flfail, below), with no loop run.
 t_fail() {
-  setup "[$(issue 7 2026-01-01)]"; echo '{ echo "FAIL schema mismatch"; printf "a%.0s" {1..300}; echo; } >&2; exit 3' > "$STUB/build"; head=$(git -C "$R" rev-parse HEAD)
-  loop run >/dev/null; st 'select(.step == "blocked") | .reason' | grep -q 'build: .*exit 3' || fail "failed session not blocked with its exit"
+  setup '[]'; echo '{ echo "FAIL schema mismatch"; printf "a%.0s" {1..300}; echo; } >&2; exit 3' > "$STUB/build"; head=$(git -C "$R" rev-parse HEAD)
+  flcard 7 :; flfail 7 build
+  st 'select(.step == "blocked") | .reason' | grep -q 'build: .*exit 3' || fail "failed session not blocked with its exit: $(cat "$T/$CASE/run.out")"
   # The end of a failed session's errors is kept in whole lines: a long last line does not push the failing line out.
   st 'select(.step == "blocked") | .tail' | grep -qx 'FAIL schema mismatch' || fail "a failed session's errors lost their failing line: $(st 'select(.step == "blocked") | .tail')"
-  echo "[$(issue 8 2026-01-01)]" > "$STUB/issues.json"; echo 'exec sleep 30' > "$STUB/build"; start=$SECONDS # sleep: a build that hangs, cut by buildTimeout
-  chmod a-w "$ST/kept"; tuned '.tunables.buildTimeout = 1' loop run >/dev/null; chmod u+w "$ST/kept"
+  echo 'exec sleep 30' > "$STUB/build"; start=$SECONDS # sleep: a build that hangs, cut by buildTimeout
+  flcard 8 :; chmod a-w "$ST/kept"; tuned '.tunables.buildTimeout = 1' flfail 8 build; chmod u+w "$ST/kept"
   # Bug: every failed session's reason said "124 is the 3600s timeout", which misled on an exit 1. The timeout is
   # named only on the timeout's exit.
   st 'select(.issue == 7 and .step == "blocked") | .reason' | grep -q timeout && fail "a failed session's reason names the timeout on exit 3: $(st 'select(.issue == 7 and .step == "blocked") | .reason')"
@@ -26,45 +27,55 @@ t_fail() {
   [ "$(st 'select(.issue == 8 and .step == "blocked") | .kept + (.reason | sub(".*evidence not moved.*"; "left"; "s"))')" = left ] \
     && [ "$(ls "$T/$CASE/cards" | sed 's/.*\.//' | tr '\n' ' ')" = "err out " ] || fail "evidence deleted, or a folder named, when it could not be kept: $(ls "$T/$CASE/cards")"
   rm -f "$T/$CASE"/cards/*.out "$T/$CASE"/cards/*.err
-  echo "[$(issue 9 2026-01-01)]" > "$STUB/issues.json"; echo 'echo two >> a.txt' > "$STUB/build"; echo '{ echo "FAIL schema mismatch"; printf "a%.0s" {1..300}; echo; } >&2; exit 3' > "$STUB/review-cmd"
-  loop run >/dev/null; st 'select(.issue == 9 and .step == "blocked") | .reason' | grep -q 'review 1: .*exit 3' || fail "failed review not blocked with its exit"
+  echo '{ echo "FAIL schema mismatch"; printf "a%.0s" {1..300}; echo; } >&2; exit 3' > "$STUB/review-cmd"
+  flcard 9 'echo two >> a.txt'; flfail 9 review
+  st 'select(.issue == 9 and .step == "blocked") | .reason' | grep -q 'review 1: .*exit 3' || fail "failed review not blocked with its exit: $(cat "$T/$CASE/run.out")"
   st 'select(.issue == 9 and .step == "blocked") | .tail' | grep -qx 'FAIL schema mismatch' || fail "a failed review's errors lost their failing line: $(st 'select(.issue == 9 and .step == "blocked") | .tail')"
-  echo "[$(issue 10 2026-01-01)]" > "$STUB/issues.json"; echo 'exec sleep 30' > "$STUB/review-cmd" # sleep: a review that hangs, cut by reviewTimeout
-  tuned '.tunables.reviewTimeout = 1' loop run >/dev/null
-  st 'select(.issue == 10 and .step == "blocked") | .reason' | grep -q 'review 1: .*exit 124' || fail "hung review not blocked as timed out"
+  echo 'exec sleep 30' > "$STUB/review-cmd" # sleep: a review that hangs, cut by reviewTimeout
+  flcard 10 'echo two >> a.txt'; tuned '.tunables.reviewTimeout = 1' flfail 10 review
+  st 'select(.issue == 10 and .step == "blocked") | .reason' | grep -q 'review 1: .*exit 124' || fail "hung review not blocked as timed out: $(cat "$T/$CASE/run.out")"
   # Bug: a review that timed out with no readable usage wrote no spent, losing its model and seconds and
   # leaving the failed review out of the unpriced steps.
   [ "$(st 'select(.issue == 10 and .step == "blocked") | [.spent.step, (.spent.model | type), (.spent.sec | type), (.spent.unread | type), .spent.stats.turns] | tojson')" = '["review","string","number","string",0]' ] \
     || fail "a review that timed out with no usage wrote no spent: $(st 'select(.issue == 10 and .step == "blocked") | .spent')"
-  [ $((SECONDS - start)) -lt 25 ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "a hang was waited out, or a worktree is left"
+  [ $((SECONDS - start)) -lt 25 ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "a hang was waited out, or a worktree is left: $(ls "$T/$CASE/cards")"
   [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] && [ -z "$(git -C "$R" status --porcelain)" ] || fail "main moved after a failed step"
   # Bug: these cards are off the belt, and nothing showed the step each failed in or how long it ran. From
-  # the lines the loop itself wrote: the build that hung ran its second, and a failed review is the review's step.
+  # the lines card()'s steps wrote above: the build that hung ran its second, and a failed review is the review's step.
   out=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
   [ "$(jq -c '[.needsYou.blocked[] | [.issue, (.track.detail | map(select(.state == "failed") | .name) | join(","))]] | sort' <<<"$out")" = '[[7,"building"],[8,"building"],[9,"review 1"],[10,"review 1"]]' ] \
     && [ "$(jq -c '[.needsYou.blocked[] | select(.issue == 8 or .issue == 10) | .track.detail[] | select(.state == "failed") | .sec >= 1] | all' <<<"$out")" = true ] \
     && [ "$(jq -c '[.needsYou.blocked[] | [.issue, (.track.steps | map(select(.state == "failed") | .name) | join(","))]] | sort' <<<"$out")" = '[[7,"Build"],[8,"Build"],[9,"Review"],[10,"Review"]]' ] \
     && [ "$(jq -c '.belt | length' <<<"$out")" = 0 ] || fail "the failed step of a blocked card, or its seconds: $(jq -c '[.needsYou.blocked[] | [.issue, (.track.detail | map(select(.state != "todo")))]]' <<<"$out")"
 }
+# flfail <issue> <build|review>: that card's (flcard, below) build or first review in the engine shell (fx_in, lib.sh),
+# as card() runs it: its start line (began()), the session (session()) or the review (reviewed()), and the card
+# blocked with what that printed when it fails (block()). run.out ends with "step: <its exit>".
+flfail() {
+  # shellcheck disable=SC2034 # read by the commands fx_in runs
+  FLN=$1 FLS=$2
+  fx_in 'c=c$FLN-$FLN; w=$CARDS/$c; cd "$R" && began "$c" "$FLN" "$FLS" || { echo "began failed"; exit 1; }
+    if [ "$FLS" = build ]; then t=$(session "$w" "Build the issue."); else t=$(reviewed "$w" "Build the issue."); fi; rc=$?
+    [ $rc = 0 ] || block "$c" "$FLN" "$w" "$([ "$FLS" = build ] && echo build || echo "review 1"): $t"; echo "step: $rc"'
+}
 
 # Bug: a review that ended with no verdict (a timeout, a reviewer's network fault) blocked its card at once, though
 # the same review run again went on; a review that gave a verdict must never run twice.
 t_reviewretry() {
-  setup "[$(issue 8 2026-01-01)]"
-  # Twice with no verdict: the card blocks at its first review round, with both reasons and both attempts' spending.
+  setup '[]'
+  # Twice with no verdict: the card blocks at its first review round, with both reasons and both attempts' spending
+  # (flfail: reviewed() and block() as card() runs them; t_fail shows such a card failed at review 1 on the Board).
   # The second attempt fails otherwise, with more output than the line keeps: the reason still names both failures.
   : > "$STUB/reviews"
   echo '[ "$(wc -l < "$STUB/reviews")" = 1 ] && exit 3; seq 1 70 >&2; exit 4' > "$STUB/review-cmd"
-  # The reviews after this call reviewed() itself.
-  # loop: the blocked line card() writes from reviewed()'s two failures, its record check and the Board's failed-step row
-  loop run >/dev/null
+  flcard 8 'echo two >> a.txt'; flfail 8 review
   [ "$(wc -l < "$STUB/reviews")" = 2 ] && st 'select(.issue == 8 and .step == "blocked") | .reason' \
     | grep -q '^review 1: the codex CLI stopped before any work (exit 3): .*run again after 0s: the codex CLI stopped before any work (exit 4): ' \
     && [ "$(st 'select(.issue == 8 and .step == "blocked") | .tail | split("\n") | last')" = 70 ] \
-    || fail "two failed reviews did not block with both reasons and the second's output: $(st 'select(.issue == 8)')"
-  [ "$(st 'select(.issue == 8 and .step == "blocked") | [.spent.step, (.spent.firstTry.reason | test("exit 3")), (.spent.firstTry.spent.sec | type)] | tojson')" = '["review",true,"number"]' ] && loop check \
-    && [ "$(loop snapshot --fresh | jq -c '[.needsYou.blocked[] | select(.issue == 8) | .track.detail[] | select(.state == "failed") | .name]')" = '["review 1"]' ] \
-    || fail "a card that failed its review twice is not shown failed at review 1 with both attempts: $(st 'select(.issue == 8 and .step == "blocked")')"
+    || fail "two failed reviews did not block with both reasons and the second's output: $(st 'select(.issue == 8)') $(cat "$T/$CASE/run.out")"
+  recok "$ST/cards.jsonl" "a card that failed its review twice"
+  [ "$(st 'select(.issue == 8 and .step == "blocked") | [.spent.step, (.spent.firstTry.reason | test("exit 3")), (.spent.firstTry.spent.sec | type)] | tojson')" = '["review",true,"number"]' ] \
+    || fail "a card that failed its review twice is not blocked with both attempts: $(st 'select(.issue == 8 and .step == "blocked")')"
   # The reviews below call reviewed() (lib/review.sh) as card() calls it (flreview): the card above shows that its
   # answer reaches the card's blocked line. A first review that hangs, cut by reviewTimeout, is run again, and the
   # GO of the second goes on, the failed attempt in its answer with its reason and what it spent.
@@ -125,16 +136,17 @@ t_contra() {
 }
 
 # Bugs: a review that says the same verdict twice (once mid-way, once at the end, its findings repeated) blocks as
-# having no clear verdict; a finding the review repeats word for word is filed as two follow-ups. Such a review as
-# the card's third (the last), with no card run (afterrun, review.test.sh): it lands, and card() files its findings
-# with followups(), as called here.
+# having no clear verdict; a finding the review repeats word for word is filed as two follow-ups. Read as the engine
+# reads such a review (verdict(), above), its findings counted (counts(), lib/testrun.sh) and filed as card() files a
+# last NO-GO review's findings (followups(), lib/followups.sh), with no card run.
 t_repeat() {
-  setup "[$(issue 8 2026-02-01)]"; fx_wt 'echo two >> a.txt' b.txt base
+  setup '[]'
   F='[P2] a.txt:1 wrong word. Proof: a.txt line 2 reads "two"'
-  printf '%s\n' "$F" 'VERDICT: NO-GO' "  $F" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
-  afterrun "$(issue 8 2026-02-01)" 'pass=3' 'counts "$wt.review" | jq .P2 > "$T/$CASE/p2"; [ -n "$isfu" ] || followups c7 "$issue" "$wt.review" > "$T/$CASE/ups"'
-  [ "$AFTER" = '{"res":"NO-GO","after":"last","last":"1","stop":"max-reviews","hard":"","last0":"","isfu":"","priv":"","why":""}' ] && [ "$(cat "$T/$CASE/p2")" = 1 ] \
-    || fail "a last review that said NO-GO twice was not a NO-GO that lands with follow-ups, or its repeated finding counted twice: $AFTER P2 $(cat "$T/$CASE/p2")"
+  [ "$(verdictof "$F" 'VERDICT: NO-GO' "  $F" 'USER-VISIBLE: no' 'VERDICT: NO-GO')" = NO-GO ] || fail "a review that said NO-GO twice is not a NO-GO"
+  # shellcheck disable=SC2034 # read by the commands fx_in runs
+  ISSUE=$(issue 8 2026-02-01)
+  fx_in 'counts "$T/$CASE/review" | jq .P2 > "$T/$CASE/p2" && followups c7 "$ISSUE" "$T/$CASE/review" > "$T/$CASE/ups"'
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/p2")" = 1 ] || fail "a repeated finding was counted twice, or could not be filed: P2 $(cat "$T/$CASE/p2") $(cat "$T/$CASE/run.out")"
   [ "$(jq -s 'length' "$STUB/filed")" = 1 ] && [ "$(jq -r .title "$STUB/filed")" = "$F" ] \
     && [ "$(cat "$T/$CASE/ups")" = '[100101]' ] || fail "a repeated finding was not filed once: $(cat "$STUB/filed")"
 }
@@ -358,6 +370,8 @@ nsblk() {
 }
 # nsagain: startagain() at a turn of the loop, issue 7 open.
 nsagain() { fx_in 'startagain "[{\"number\": 7}]"'; }
+# nsback: signinback() under the lock, as `control resume` calls it (control(), lib/control.sh).
+nsback() { fx_in 'locked signinback'; }
 t_nostart() {
   setup "[$(issue 7 2026-01-01)]"; tune '.tunables.apiPause = 0'; C=$T/$CASE/cards; mkdir -p "$C"
   # A credential and an address, made here so that this file holds neither.
@@ -380,7 +394,7 @@ t_nostart() {
   # Logged in and resumed, but the next session stops on a settings error: the card is put back once, and
   # blocked again it says to retry it, and is not put back again.
   rm "$STUB/loggedout"
-  loop control resume >/dev/null 2>&1
+  nsback
   [ "$(jq -r 'select(.issue == 7 and .step == "blocked") | .spent.start | "\(.cli) \(.model)"' "$ST/retried.jsonl")" = "claude m" ] \
     || fail "the card was not put back at the resume: $(cat "$ST/retried.jsonl" 2>&1)"
   : > "$C/c20260101T000001-p-7.out"
@@ -394,7 +408,7 @@ t_nostart() {
   # A quoted value (JSON) after password is a credential too: an opening quote does not let it through.
   st 'select(.issue == 7 and .step == "blocked") | .tail' | grep -qxF 'Settings error: {"password":[left out]}' && ! st 'select(.issue == 7)' | grep -qF short-secret \
     || fail "a quoted credential is kept in the reason: $(st 'select(.issue == 7 and .step == "blocked") | .tail')"
-  loop control resume >/dev/null 2>&1; nsagain
+  nsback; nsagain
   [ "$(wc -l < "$STUB/checks")" = "$n" ] && [ "$(jq -c 'select(.step == "blocked")' "$ST/retried.jsonl" | wc -l)" = 1 ] \
     || fail "the card was put back more than once, or by a check session: $((n)) checks before, $(wc -l < "$STUB/checks") after"
 }
