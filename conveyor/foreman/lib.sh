@@ -141,6 +141,15 @@ told() { awk -v s="$1" '{ print ($0 == s ? s " told" : $0) }' "$FD/former" > "$F
 # (below). Refused while mine is (groups not understood): which folder is the
 # Foreman's cannot be told then, and a mark in the wrong one would make a second Foreman.
 claim() { locked claim_ "${1:-}"; }
+# cc_pid: the Claude Code process this command runs under: the nearest of its ancestors with a sessions/<pid>.json
+# (Claude Code's file for a running session); prints nothing when there is none.
+cc_pid() {
+  local p=$PPID cc=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
+  while [ "${p:-0}" -gt 1 ] && [ ! -f "$cc/sessions/$p.json" ]; do p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' '); done
+  [ "${p:-0}" -gt 1 ] && printf '%s' "$p"
+}
+# claude_rec: records the Claude process of the marked session in $FD/claude.pid (empty when none is found).
+claude_rec() { { cc_pid > "$FD/claude.pid.new" || : ; } && mv "$FD/claude.pid.new" "$FD/claude.pid"; }
 claim_() {
   local old pid sid w3=''
   mine > /dev/null || return 1
@@ -149,6 +158,8 @@ claim_() {
   forget "${1:-}" || return 1
   if [ -n "$1" ]; then printf '%s %s\n' "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$MARK.new"; else : > "$MARK.new"; fi
   mv "$MARK.new" "$MARK" || return 1
+  # The Claude process of the session just marked, so a /clear in it keeps the role (foreman.sh cleared_).
+  claude_rec || return 1
   # A waiter writes waiter.pid, then checks the mark (waiter.sh): one that wrote it after this read sees the new mark.
   # The session is the fourth field, or the third in a waiter.pid of an older engine's waiter (no session's process).
   { read -r pid _ w3 sid < "$FD/waiter.pid"; } 2>/dev/null || return 0

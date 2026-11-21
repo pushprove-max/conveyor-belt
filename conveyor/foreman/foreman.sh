@@ -315,23 +315,40 @@ Then go on with what the owner asked, if anything."
 # adopt_ <session id> <transcript> (under claim.lock, so an off or a claim made meanwhile is never undone): a resume
 # or a fork (--fork-session, source fork) that gave the session a new id takes the mark when its transcript holds the
 # Foreman session's entries, copied (forkedFrom). A session that held the role and lost it (former) gets it back only
-# by a claim.
+# by a claim. The marked session itself reopened in a new Claude process moves the process record to that process
+# only when the recorded process no longer runs it; any other session opened in the recorded process (a /resume
+# there) ends the record, so a /clear after it never takes the role (cleared_).
 adopt_() {
-  local m
-  m=$(marked); [ -n "$m" ] && [ "$m" != "$1" ] && [ -f "$2" ] || return 0
-  ! awk -v s="$1" '$1 == s { f = 1 } END { exit !f }' "$FD/former" 2>/dev/null || return 0
-  jq -en --arg m "$m" 'first(inputs | select(.sessionId == $m or .forkedFrom.sessionId? == $m)) | true' "$2" >/dev/null 2>&1 || return 0
-  claim_ "$1"
+  local m rec=
+  m=$(marked)
+  if [ -n "$m" ] && [ "$m" = "$1" ]; then
+    { read -r rec < "$FD/claude.pid"; } 2>/dev/null
+    # The record stays with a running process that still holds the marked session, so a second process that reopens
+    # it (and may end first) never takes the record from the Foreman.
+    [ -n "$rec" ] && kill -0 "$rec" 2>/dev/null \
+      && jq -e --arg m "$m" --argjson p "$rec" '.pid == $p and .sessionId == $m' "$CC/sessions/$rec.json" >/dev/null 2>&1 || claude_rec
+    return 0
+  fi
+  if [ -n "$m" ] && [ -f "$2" ] && ! awk -v s="$1" '$1 == s { f = 1 } END { exit !f }' "$FD/former" 2>/dev/null \
+    && jq -en --arg m "$m" 'first(inputs | select(.sessionId == $m or .forkedFrom.sessionId? == $m)) | true' "$2" >/dev/null 2>&1; then
+    claim_ "$1"; return
+  fi
+  { read -r rec < "$FD/claude.pid"; } 2>/dev/null
+  [ -z "$rec" ] || [ "$rec" != "$(cc_pid)" ] || rm -f "$FD/claude.pid"
+  return 0
 }
 # cleared_ <session id> (under claim.lock, as adopt_): a /clear (source clear) gives the session a new id in the same
-# Claude Code process; the new one takes the mark when the session it replaces, the one that process's
-# sessions/<pid>.json still names, is the marked Foreman. The process is the nearest of this hook's ancestors with a
-# sessions/<pid>.json. A /clear in any other session, or after off, changes nothing.
+# Claude Code process; the new one takes the mark when that process (cc_pid) holds the marked Foreman: its
+# sessions/<pid>.json still names the marked session, or, as Claude Code writes it before this hook runs, names the
+# new one while the process is the one recorded at the mark ($FD/claude.pid). A /clear in any other process, or after
+# off, changes nothing.
 cleared_() {
-  local m p=$PPID
+  local m p rec=
   m=$(marked); [ -n "$m" ] && [ "$m" != "$1" ] || return 0
-  while [ "${p:-0}" -gt 1 ] && [ ! -f "$CC/sessions/$p.json" ]; do p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' '); done
-  [ "${p:-0}" -gt 1 ] && jq -e --arg m "$m" --argjson p "$p" '.sessionId == $m and .pid == $p' "$CC/sessions/$p.json" >/dev/null 2>&1 || return 0
+  p=$(cc_pid) && [ -n "$p" ] || return 0
+  { read -r rec < "$FD/claude.pid"; } 2>/dev/null
+  jq -e --arg m "$m" --arg n "$1" --arg rec "$rec" --argjson p "$p" \
+    '.pid == $p and (.sessionId == $m or (.sessionId == $n and $rec == ($p | tostring)))' "$CC/sessions/$p.json" >/dev/null 2>&1 || return 0
   claim_ "$1"
 }
 
