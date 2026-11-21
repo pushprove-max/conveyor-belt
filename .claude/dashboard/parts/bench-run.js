@@ -63,7 +63,7 @@
     return K.grid('4', K.stat(`${p.done}/${p.T}`, 'Task runs done', K.bar(p.T ? p.done / p.T : 0)),
       K.stat(K.fmtMin(p.eta), 'Left, at this pace', K.chip(ends ? `ends about ${K.B.ctx.clock(ends)}` : 'no task done yet', 'quiet')),
       K.stat(K.usd(p.spent), 'Spent so far', K.chip(p.est.usd && p.spent !== null ? `${K.pct(p.spent / p.est.usd)} of the estimate` : 'no estimate', p.onBudget === false ? 'warn' : 'ok')),
-      K.stat(String(notRun), 'Not run', K.chip(notRun ? 'image or repository fetch failed, or patch not read · tried again next run' : 'none', notRun ? 'warn' : 'quiet')));
+      K.stat(String(notRun), 'Not run', K.chip(notRun ? 'image, repository, task pack, container, patch, grading or saving the result failed · tried again next run' : 'none', notRun ? 'warn' : 'quiet')));
   }
   const CELL = { yes: ['bench-g-ok', ''], no: ['bench-g-bad', ''], nr: ['bench-g-nr', 'not run'] };
   function cellOf(c, r) {
@@ -86,7 +86,7 @@
     });
     return g;
   }
-  const LEGEND = [['bench-g-ok', 'Resolved'], ['bench-g-bad', 'Unresolved'], ['bench-g-work', 'Working'], ['bench-g-wait', 'Waiting'], ['bench-g-nr', 'Not run (image)']];
+  const LEGEND = [['bench-g-ok', 'Resolved'], ['bench-g-bad', 'Unresolved'], ['bench-g-work', 'Working'], ['bench-g-wait', 'Waiting'], ['bench-g-nr', 'Not run']];
   function scoreSoFar(data, cols) {
     const s = h('div'), cell = (t, c) => K.list(t.cells).find((y) => K.obj(y) && y.arm === c.arm);
     // A task an arm did not run (image, sandbox or grade failed) is no loss. It is left out for every arm, so all arms are

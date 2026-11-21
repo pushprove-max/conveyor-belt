@@ -134,14 +134,17 @@ test('Compare, Conveyor against Conveyor, Codex builds: each bar is named by the
   assert.match(text(box(w, 'Where they differ').querySelector('.bench-note')), /and is labelled as such on the Board\.$/);
 });
 
-// Bug it guards: the Not run chip blamed the image fetch for every task not run, but the engine also records a failed
-// repository fetch and an unreadable patch as "not run".
-test('Live run, a run going with 2 task runs not run: the chip on Not run names each cause the engine counts', async () => {
+// Bug it guards: the Not run chip left out the task's pack that could not be set up, the container that could not be
+// made, the failed grading and the result that could not be kept, which the engine (swe_task in conveyor/bench/swe.sh)
+// also counts as "not run", so its list of causes looked complete but was not; the Tasks by arm legend limited the same
+// state to the image.
+test('Live run, a run going with 2 task runs not run: the chip on Not run names every cause the engine counts, and the legend says only Not run', async () => {
   const set = BH.live();
   set.hist.runs[0].cols[0].notRun = 2;
   const w = await opened(set, 'run');
   assert.deepEqual(Array.from(page(w).querySelectorAll('.bench-stat')).map((s) => [text(s.children[0]), text(s.children[1]), text(s.children[2])]).pop(),
-    ['2', 'Not run', 'image or repository fetch failed, or patch not read · tried again next run']);
+    ['2', 'Not run', 'image, repository, task pack, container, patch, grading or saving the result failed · tried again next run']);
+  assert.deepEqual(Array.from(page(w).querySelectorAll('.bench-legend span')).map(text).pop(), 'Not run');
 });
 
 // Bug it guards: the Task page lacked the mockup's first step (split), its Task image fact and its three buttons, said
