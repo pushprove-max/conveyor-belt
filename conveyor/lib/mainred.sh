@@ -229,7 +229,8 @@ repairproof() { # <card> <worktree>
 }
 # One run of <command> in <worktree> in a clean harness (repairproof()): a session of its own (p_setsid), no file
 # descriptor above 2 of the loop's (closefds), and a minimal environment: the loop's PATH, HOME, USER, LOGNAME, LANG,
-# LC_ALL, TMPDIR and XDG_CONFIG_HOME, and the variables a run is given (README.md). CONVEYOR_TEST_SLOTS names the
+# LC_ALL, TMPDIR and XDG_CONFIG_HOME, and the variables a run is given (README.md), with the load factor
+# (CONVEYOR_LOAD_FACTOR: loadfactor(), lib/loadfactor.sh) as testonce() gives it. CONVEYOR_TEST_SLOTS names the
 # worktree's own conveyor/lib/slots.sh when it has one (the engine's own repository: the harness the change may
 # repair), else the running engine's. It holds no test slot of the loop's: the runners take their own. Output in
 # <worktree>.test, progress logs in <worktree>.testlog; exit as the command's, under the test timeout.
@@ -242,7 +243,7 @@ cleanrun() { # <worktree> <command> [<list>]
   # The output names each, with those listcmd() took off its command's list (RUNOFF).
   [ -z "${3:-}" ] || { rs=$(runnersoff "$3"); [ -z "$rs" ] || grep -q $'^fail\t' "$3" || { runnernote "$rs" > "$1.test"; return 1; }; }
   rs=$(printf '%s\n' "${RUNOFF:-}" "$rs" | grep . | sort -u)
-  (cd "$1" && closefds && p_setsid env -i "${e[@]}" CONVEYOR_TEST_SLOTS="$lib/slots.sh" CONVEYOR_TEST_LOG="$1.testlog" CONVEYOR_TEST_RERUN="${3:-}" \
+  (cd "$1" && closefds && p_setsid env -i "${e[@]}" CONVEYOR_LOAD_FACTOR="$(loadfactor)" CONVEYOR_TEST_SLOTS="$lib/slots.sh" CONVEYOR_TEST_LOG="$1.testlog" CONVEYOR_TEST_RERUN="${3:-}" \
     CONVEYOR_TEST_FILES="${TEST_FILES:-}" CONVEYOR_TEST_CASES="${TEST_CASES:-}" timeout --kill-after=30 "$TEST_TIMEOUT" bash -c "$2") > "$1.test" 2>&1 < /dev/null &
   pid=$!
   watch $pid "$1.test" "$1.live" test; v=$?; runnernote "$rs" >> "$1.test"; return $v

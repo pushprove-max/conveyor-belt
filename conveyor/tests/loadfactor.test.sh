@@ -3,7 +3,7 @@
 # timeout: 120
 # Engine cases (#1084): the load factor of a test run (lib/loadfactor.sh loadfactor()): the load average per core, held
 # between 1 and 3, which scales a test file's own `# timeout:` limit (filecmd(), LOADSCALE) and which each run gets
-# as CONVEYOR_LOAD_FACTOR (testonce()).
+# as CONVEYOR_LOAD_FACTOR (testonce(), cleanrun()).
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -65,4 +65,17 @@ t_loadenv() {
     && p_load() { echo "$((2 * $(nproc --all)))"; } && testonce "$w" 'printf %s "${CONVEYOR_LOAD_FACTOR-unset}" > "$PWD.factor"' ) 2>&1 ) \
     || fail "the run failed: $out $(cat "$w.test" 2>/dev/null)"
   [ "$(cat "$w.factor")" = 2 ] || fail "the test command was not given the factor 2 in CONVEYOR_LOAD_FACTOR: $(cat "$w.factor")"
+}
+
+# Bug it catches (#1154): the clean run that checks a failure on main and runs its controls (cleanrun(), lib/mainred.sh)
+# starts the command with `env -i` and left CONVEYOR_LOAD_FACTOR out, so a file there was held to its unscaled limit.
+t_loadclean() {
+  local w=$T/$CASE/wt out
+  setup '[]'; git -C "$R" worktree add -q --detach "$w" || fail "the worktree"
+  # shellcheck disable=SC2034 # LIVE and STUCK are read by watch(), which cleanrun() runs
+  out=$( ( LIVE=0.2 STUCK=1200 TEST_TIMEOUT=60; unset CONVEYOR_LOAD_FACTOR; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards SLOT_HOME=$T/$CASE/slot
+    cd "$R" && . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/serve.sh")" \
+    && p_load() { echo "$((2 * $(nproc --all)))"; } && cleanrun "$w" 'printf %s "${CONVEYOR_LOAD_FACTOR-unset}" > "$PWD.factor"' ) 2>&1 ) \
+    || fail "the clean run failed: $out $(cat "$w.test" 2>/dev/null)"
+  [ "$(cat "$w.factor")" = 2 ] || fail "the clean run's command was not given the factor 2 in CONVEYOR_LOAD_FACTOR: $(cat "$w.factor")"
 }
