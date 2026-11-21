@@ -202,8 +202,31 @@ swe_resolve() {
 # and route the seats have: guardread reads none for a Codex or OpenCode builder or one on an API route.
 swe_guarded() { # [an arm that is not the engine's: any non-empty word]
   local pct; ctlread 2>/dev/null || return 1
-  if [ -n "${1:-}" ]; then pct=$(ACCT=$(ctlacct "$CTL_V") reading | jq -r '.pct // empty'); else pct=$(guardread "$CTL_V" ask | jq -r '.pct // empty'); fi
+  pct=$(swe_pct "$CTL_V" "${1:-}")
   [ "$(state "$(jq -c '.mode = "run"' <<<"$CTL_V")" "$pct")" = "paused by guard" ]
+}
+swe_pct() { # <control record> [an arm that is not the engine's: any non-empty word]: the week's use the guard reads, "" for none
+  if [ -n "${2:-}" ]; then ACCT=$(ctlacct "$1") reading | jq -r '.pct // empty'; else guardread "$1" ask | jq -r '.pct // empty'; fi
+}
+# The share of the week left that a guard reads now (100 less its reading, to a tenth): a number, null when the guard has
+# no reading or the control record does not read. The Board's Live run and Plan say it (swe_weeks keeps it with a run).
+swe_left() { # [an arm that is not the engine's: any non-empty word]
+  local p; ctlread 2>/dev/null || { echo null; return; }
+  p=$(swe_pct "$CTL_V" "${1:-}"); jq -n --arg p "$p" 'if $p == "" then null else (100 - ($p | tonumber)) * 10 | round / 10 end'
+}
+# The share of the week left at which the guard stops new trials (100 less its percent; 0 for no guard), null when the
+# control record does not read. The Board's Plan keeps a plan's use of the week above it.
+swe_weekstop() {
+  ctlread 2>/dev/null || { echo null; return; }
+  jq -c 'if .guard == null then 0 else 100 - .guard end' <<<"$CTL_V"
+}
+# {conveyor, agent, shared}: the share left (swe_left) for each guard a run's arms have (swe_guards), null for one they have not;
+# shared, true when both guards read one account (the conveyor arms use only the account the agent arms use), so a drop in
+# the week is the use of the trials of both kinds of arm together and the Board takes it so.
+swe_weeks() { # <conveyor: non-empty when the run has a conveyor arm> <agent: non-empty when it has another arm on the Claude login>
+  local c=null a=null s=false; [ -z "$1" ] || c=$(swe_left); [ -z "$2" ] || a=$(swe_left 1)
+  if [ -n "$1" ] && [ -n "$2" ] && ctlread 2>/dev/null && [ "$(subaccts "$CTL_V" | cut -d ' ' -f 2- | sort -u)" = "$(ctlacct "$CTL_V")" ]; then s=true; fi
+  jq -nc --argjson c "$c" --argjson a "$a" --argjson s "$s" '{conveyor: $c, agent: $a, shared: $s}'
 }
 # How many tasks a difference must reach to be told from run-to-run noise with n tasks: two standard errors of the
 # difference of two resolved counts at a rate of one half, ceil(sqrt(2n)), and never more than n (with so few tasks
@@ -246,7 +269,8 @@ swe_board() {
 }
 # A run's line as the Board reads it ($R: each result by "<key>/<task>", reskey, and a result an --again run kept
 # apart by "<run id>/<key>/<task>", which resof gives that run first): its line without its tasks and pid, n the
-# tasks of each arm, and cols, each arm with the tasks it did (done), resolved and not run, and the sessions, tokens
+# tasks of each arm, and cols, each arm with the tasks it did (done), the trials it ran (ran: done, less the reused tasks and those not run; the
+# Board's Plan takes the share of the week one trial used from them), resolved and not run, and the sessions, tokens
 # and minutes of its results of the tasks it ran (null when the line names no results key: a line written before
 # cols), classes, the count of each class of those results (null when one has none: kept before classes), and cost, the list price of the work it did in this run (costsum of each task's cost, the interrupted
 # task's and the active task's so far, the active one's none before its trial's command starts; a reused task adds
@@ -270,7 +294,7 @@ SWE_RUNSUM='def costsum: [.[] | objects | .usd | numbers] as $u | all(.[]; type 
   | del(.tasks, .pid, .alive) + $gone + {n: (((.n // 0) / ([$na, 1] | max)) | floor), cols: [(.cols // ((.arms // [.arm]) | map({arm: ., key: null, label: .})))[] | . as $c
     | [$l.tasks[]? | select(.arm == $c.arm)] as $t | [$t[] | select(.result | tostring | startswith("not run") | not)] as $ran
     | [$ran[] | resof($R; $l.id; $c.key; .id) // empty] as $r | def sum(f): if $c.key == null then null else $r | map(f // 0) | add // 0 end;
-    $c + {done: ($t | length), resolved: ($t | map(select(.result == "resolved")) | length), notRun: (($t | length) - ($ran | length)),
+    $c + {done: ($t | length), ran: ([$ran[] | select(.reused != true)] | length), resolved: ($t | map(select(.result == "resolved")) | length), notRun: (($t | length) - ($ran | length)),
       sessions: sum(.sessions), tokens: sum(.tokens), classes: (if $c.key == null or any($r[]; .class == null) then null else $r | map(.class) | group_by(.) | map({key: .[0], value: length}) | from_entries end), minutes: (sum(.minutes) | if . == null then null else . * 10 | round / 10 end),
       cost: (if $c.key == null then null else [($t[] | select(.reused != true) | .cost), ($l.interrupted | objects | select(.arm == $c.arm) | .cost), ($l.active | objects | select(.arm == $c.arm) | .cost | objects)] | costsum end),
       wall: ([($t[] | select(.reused != true) | .minutes), ($l.interrupted | objects | select(.arm == $c.arm) | .minutes) | numbers] | add // 0 | . * 10 | round / 10)}]}
@@ -316,7 +340,8 @@ swe_lines() {
 # in the pinned order (a run reuses them: at), live (the same places less the results only an archived run names: what the
 # Scoreboard counts as tasks with a result) and its figures (SWE_FIGS); order, every task ID of the set in the pinned
 # order of swe.json's settings (the Board's Task map; [] when the task list cannot be read); guard, whether the usage guard
-# holds back a run with a conveyor arm (conveyor) or another arm on the Claude login (agent); set, the task set, and
+# holds back a run with a conveyor arm (conveyor) or another arm on the Claude login (agent); weekLeft, the share of the
+# week each of those guards has left now (swe_weeks) and stop, the share left at which the guard stops (swe_weekstop); set, the task set, and
 # limits, each task container's, of swe.json (what the Board's Plan a run says each container gets);
 # choices, the models and efforts a saved arm may choose (swe_choices; null when the pack does not read).
 # The arms are the host arms and then each saved revision (swe_armsave; one whose recipe is gone is left out), each
@@ -329,7 +354,7 @@ swe_lines() {
 # whether the project's judge names its model (else it follows the reviewer), and its judgeOn and judgeAlways; null
 # when the control record does not read.
 swe_history() {
-  local arms='[]' n a r p m k i x s gc=false ga=false ch c df
+  local arms='[]' n a r p m k i x s gc=false ga=false ch c df wl
   for n in $(swe_armnames) $(cd "$SWE_DIR/arms" 2>/dev/null && for x in arm-*.json; do [ -e "$x" ] && echo "${x%.json}"; done); do
     a=$(swe_arm "$n") || continue
     s=null; [[ ! $n =~ $SWE_ARMID ]] || s=$(jq -c '.spec' "$SWE_DIR/arms/$n.json") || continue
@@ -351,6 +376,7 @@ swe_history() {
         else null end)}]' <<<"$arms")
   done
   ! swe_guarded || gc=true; ! swe_guarded 1 || ga=true
+  wl=$(swe_weeks 1 1 | jq -c --argjson s "$(swe_weekstop)" '. + {stop: $s}')
   ch=$(swe_choices) || ch=null
   # Each seat read on its own: one the record cannot work out is null, as seat() gives none.
   c=$(swe_ctl '{}' 2>/dev/null) && df=$(for x in builder reviewer judge fix testFix; do seat "$x" "$c" || echo null; done | jq -sc --argjson c "$c" '
@@ -358,11 +384,11 @@ swe_history() {
      judgeOwn: ($c.judge.model != null), judgeOn: ($c.judgeOn == true), judgeAlways: ($c.judgeAlways // [])}') || df=null
   # Each run's shared: each result it shows that another run shows too, with those runs' IDs; a delete keeps it unless
   # it deletes them all (swe_runs).
-  swe_lines | jq -sc --argjson arms "$arms" --argjson gc "$gc" --argjson ga "$ga" --argjson ch "$ch" --argjson df "$df" --slurpfile res <(cat "$SWE_DIR"/results/*/*.json 2>/dev/null) --slurpfile again <(cat "$SWE_DIR"/again/*/*/*.json 2>/dev/null) \
+  swe_lines | jq -sc --argjson arms "$arms" --argjson gc "$gc" --argjson ga "$ga" --argjson wl "$wl" --argjson ch "$ch" --argjson df "$df" --slurpfile res <(cat "$SWE_DIR"/results/*/*.json 2>/dev/null) --slurpfile again <(cat "$SWE_DIR"/again/*/*/*.json 2>/dev/null) \
     --slurpfile order <(jq -c .id "$(swe_list "$(swe_set .revision)" "$(swe_set .seed)")" 2>/dev/null) --argjson set "$SWE_SET" "$SWE_RUNSUM$SWE_MADE$SWE_FIGS"'
     ($res + $again | map({key: reskey, value: .}) | from_entries) as $R | ($order | to_entries | map({key: .value, value: .key}) | from_entries) as $pos
     | (map(. as $l | results[] | {p: ., id: $l.id}) | group_by(.p) | map({key: .[0].p, value: map(.id)}) | from_entries) as $S
-    | {set: ($set | {dataset, revision, seed}), limits: ($set | {cpus, memory, taskTimeout}), guard: {conveyor: $gc, agent: $ga}, arms: $arms, choices: $ch, defaults: $df, order: $order,
+    | {set: ($set | {dataset, revision, seed}), limits: ($set | {cpus, memory, taskTimeout}), guard: {conveyor: $gc, agent: $ga}, weekLeft: $wl, arms: $arms, choices: $ch, defaults: $df, order: $order,
        runs: (sort_by(.started // "") | reverse | map(. as $l | runsum($R) + {shared: ([$l | results[] | {key: ., value: (($S[.] // []) - [$l.id])} | select(.value | length > 0)] | from_entries)})),
        keys: (. as $L | (([$L[] | select(.archived | type == "string") | results[]] | unique) - ([$L[] | select(.archived | type != "string") | results[]] | unique)) as $gone
          | $res | group_by(.key) | map({key: .[0].key, at: (map($pos[.task] // empty) | sort), live: (map(select((reskey | IN($gone[])) | not) | $pos[.task] // empty) | sort), figures: figures($L; .[0].key)}))}'
@@ -373,7 +399,7 @@ swe_history() {
 # order), what the run said of it (result, reused), its state (and phase, while active) and, where it ran that arm on
 # the task, its kept result: resolved, fired, why, ended (why its trial ended before its command did; null when it
 # did not), timedOut, sessions, tokens, minutes, cost (swe_cost; null in a result kept before it), findingsFixed and
-# fixRounds (null in a result kept before them), its steps (a conveyor arm's card records), its patch (each file with its lines added and removed; null when none is kept), its log (the last
+# fixRounds (null in a result kept before them), imageBytes (the size of the task's image; null in a result kept before it), its steps (a conveyor arm's card records), its patch (each file with its lines added and removed; null when none is kept), its log (the last
 # SWE_LOGN bytes of the loop's output on the task; null when none is kept) and its grade's
 # class, tests, ref and measures (null in a result kept before them); and tail,
 # the run's event tail (swe_event). A run with --task plans that one task, never the first of the order.
@@ -416,7 +442,7 @@ swe_show() { # <run id>
            state: (if $t != null then "finished" elif at($run.active; $c; $id) then "active" elif $run.state == "running" then "waiting"
              elif at($l.interrupted; $c; $id) then "interrupted" else "not reached" end)}
           + (if $t == null and at($run.active; $c; $id) then {phase: $run.active.phase} else {} end)
-          + ((if $t == null or ($t.result | tostring | startswith("not run")) then {} else resof($R; $l.id; $c.key; $id) // {} end) | {resolved, fired, why, ended, timedOut, sessions, tokens, minutes, cost, findingsFixed, fixRounds, steps, patch, log, class, tests, ref, measures, again})
+          + ((if $t == null or ($t.result | tostring | startswith("not run")) then {} else resof($R; $l.id; $c.key; $id) // {} end) | {resolved, fired, why, ended, timedOut, sessions, tokens, minutes, cost, findingsFixed, fixRounds, steps, patch, log, class, tests, ref, measures, again, imageBytes})
           + {cost: (if $t != null then $t.cost // (if $t.result | tostring | startswith("not run") then null else resof($R; $l.id; $c.key; $id).cost end)
               elif at($l.interrupted; $c; $id) then $l.interrupted.cost else null end)}]}],
       tail: [$tail[] | objects | {at, arm, task, event} | select(all(.[]; . == null or type == "string"))]}' <<<"$l"
@@ -664,12 +690,14 @@ SWE_NAMES='def runname: if .arm == "solo" then "Claude alone" elif .arm == "conv
 # did not fire is the arm's failed task: kept, never graded, never run again. The result keeps the run's inputs
 # (swe_inputs): a conveyor arm's sandbox reads the run's copy of the project's files (swe_freeze).
 swe_task() { # <task json>
-  local id sb b g rc out=$SWE_DIR/results/$SWE_KEY ag=''; id=$(jq -r .id <<<"$1"); sb=$SWE_DIR/work/$id
+  local id sb b g rc sz out=$SWE_DIR/results/$SWE_KEY ag=''; id=$(jq -r .id <<<"$1"); sb=$SWE_DIR/work/$id
   # A run with --again on a task with a kept result keeps its own apart, under again/<run id>: the kept one stays the
   # earlier run's, which still shows it.
   [ -z "${SWE_AGAIN:-}" ] || [ ! -e "$out/$id.json" ] || { out=$SWE_DIR/again/$SWE_RUN/$SWE_KEY; ag=$SWE_RUN; }
   swe_phase 'Preparing image'
   swe_h image "$(jq -r .image <<<"$1")" > /dev/null 2>&1 || { echo "not run: its Docker image could not be fetched or built"; return; }
+  # The image's size in bytes, kept with the result; null when Docker does not say it.
+  sz=$(docker image inspect --format '{{.Size}}' "$(jq -r .image <<<"$1")" 2>/dev/null | grep -E '^[0-9]+$' | head -n 1)
   swe_phase 'Setting up'
   mkdir -p "$SWE_DIR/work" && swe_sandbox "$1" "$sb" 2> "$SWE_DIR/work/$id.err" \
     || { echo "not run: its repository could not be fetched at the base commit: $(head -c 300 "$SWE_DIR/work/$id.err")"; return; }
@@ -683,8 +711,8 @@ swe_task() { # <task json>
       if [ "$rc" = 3 ]; then echo "not run: the harness could not fetch or build its image"; else echo "not run: the harness could not grade it (exit $rc)"; fi; return; }
   fi
   mkdir -p "$out" && cp "$sb.h/patch" "$out/$id.patch" && { [ ! -e "$sb.h/loop.log" ] || cp "$sb.h/loop.log" "$out/$id.log"; } && swe_put "$out/$id.json" "$(jq -c --arg t "$id" --arg a "$SWE_ARM" --arg k "$SWE_KEY" --arg e "${SWE_COMMIT:-}" --arg v "${SWE_VERSION:-}" \
-    --arg m "${SWE_MODEL:-}" --arg l "$SWE_LABEL" --argjson g "$g" --arg at "$(swe_now)" --argjson i "$SWE_INPUTS" --arg ag "$ag" '{task: $t, arm: $a, label: $l, key: $k, engine: (if $e == "" then null else $e end), version: (if $v == "" then null else $v end),
-    model: (if $m == "" then null else $m end), resolved: $g.resolved, at: $at, inputs: $i} + ($g | del(.resolved)) + . + (if $ag == "" then {} else {again: $ag} end)' <<<"$b")" || { echo "not run: its result could not be kept"; return; }
+    --arg m "${SWE_MODEL:-}" --arg l "$SWE_LABEL" --argjson g "$g" --arg at "$(swe_now)" --argjson i "$SWE_INPUTS" --arg ag "$ag" --argjson z "${sz:-null}" '{task: $t, arm: $a, label: $l, key: $k, engine: (if $e == "" then null else $e end), version: (if $v == "" then null else $v end),
+    model: (if $m == "" then null else $m end), resolved: $g.resolved, at: $at, inputs: $i, imageBytes: $z} + ($g | del(.resolved)) + . + (if $ag == "" then {} else {again: $ag} end)' <<<"$b")" || { echo "not run: its result could not be kept"; return; }
   chmod -R u+w "$sb" "$sb.h" 2>/dev/null; rm -rf "$sb" "$sb.h"
   if jq -e .resolved <<<"$g" > /dev/null; then echo resolved; elif jq -e .fired <<<"$b" > /dev/null; then echo unresolved; else echo "unresolved ($(jq -r .why <<<"$b"))"; fi
 }
@@ -750,12 +778,13 @@ swe_run() { # <n> <engine> <arm>...
   # cols names each arm's results key (the Board's history and run page read each arm's results by it), set the
   # task set (dataset, revision and seed: runs of one set are read side by side) and limits each trial's (swe_settings).
   # again: true for a run with --again, which reuses no kept result (the Board's Live run then counts none as reused).
+  # weekStart and weekLeft: the share of the week the guards of the run's arms (swe_weeks) had left when it started and after its last trial: the Board's Live run says it and what the run needs.
   SWE_RUN=r$(date -u +%Y%m%dT%H%M%S)-$$; rm -f "$SWE_DIR/stop"
   swe_put "$SWE_DIR/live.json" "$(printf '%s\n' "${ctxs[@]}" | jq -sc --arg id "$SWE_RUN" --argjson pid "$$" --argjson n "$n" --arg at "$(swe_now)" --arg ag "${SWE_AGAIN:-}" --arg only "${SWE_ONLY:-}" \
-    --argjson set "$SWE_SET" "$SWE_NAMES"'. as $c | $c[0]
+    --argjson w "$(swe_weeks "$gc" "$ga")" --argjson set "$SWE_SET" "$SWE_NAMES"'. as $c | $c[0]
     | {id: $id, pid: $pid, arm, key, engine, version, model, arms: ($c | map(.arm)), label: ($c | map(runname) | join(", ")), n: ($n * ($c | length)),
        cols: ($c | map({arm, key, label, kind, engine, version, model})), set: ($set | {dataset, revision, seed}), limits: ($set | {cpus, memory, taskTimeout}),
-       done: 0, resolved: 0, current: null, active: null, seq: 1, updated: $at, started: $at, state: "running", tasks: []} + (if $ag == "" then {} else {again: true} end) + (if $only == "" then {} else {only: $only} end)')"
+       weekStart: $w, weekLeft: $w, done: 0, resolved: 0, current: null, active: null, seq: 1, updated: $at, started: $at, state: "running", tasks: []} + (if $ag == "" then {} else {again: true} end) + (if $only == "" then {} else {only: $only} end)')"
   trap 'swe_stopping; exit 143' TERM INT
   swe_board; swe_event 'Run started'
   # The run's receipt, once its record is written: the Board's Start answers it. A run that reuses the saved result
@@ -792,7 +821,7 @@ swe_run() { # <n> <engine> <arm>...
       # The task's cost is its trial's (swe_sofar); a task whose trial never started its command ran no session: $0.
       # Its minutes are the wall time of the arm's work on it (SWE_WALL), a task not run included.
       ag=false; [ ! -e "$SWE_DIR/again/$SWE_RUN/$SWE_KEY/$id.json" ] || ag=true
-      swe_live --arg t "$id" --arg a "$SWE_ARM" --arg r "$r" --argjson ag "$ag" "$SWE_WALL"'.tasks += [{id: $t, arm: $a, result: $r, reused: false, cost: (.active.cost // {usd: 0, state: "known", unpriced: 0}), minutes: wall} + (if $ag then {again: true} else {} end)] | .done += 1 | .current = null | .active = null | .resolved += (if $r == "resolved" then 1 else 0 end)'
+      swe_live --arg t "$id" --arg a "$SWE_ARM" --arg r "$r" --argjson ag "$ag" --argjson w "$(swe_weeks "$gc" "$ga")" "$SWE_WALL"'.weekLeft = $w | .tasks += [{id: $t, arm: $a, result: $r, reused: false, cost: (.active.cost // {usd: 0, state: "known", unpriced: 0}), minutes: wall} + (if $ag then {again: true} else {} end)] | .done += 1 | .current = null | .active = null | .resolved += (if $r == "resolved" then 1 else 0 end)'
       # The event names the result only: the why of a task not run can hold a command's own output.
       case $r in resolved) r=Resolved ;; unresolved) r=Unresolved ;; unresolved*) r='Unresolved: did not fire' ;; *) r='Not run' ;; esac
       swe_event "$r" "$SWE_ARM" "$id"

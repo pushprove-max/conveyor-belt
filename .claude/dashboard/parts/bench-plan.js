@@ -130,15 +130,41 @@
   }
   // The mockup has no line of receipt under Start and Check the arms first: only a refusal shows, so a failed action is not silent.
   function refused(key) { const p = K.saidAt(key); return p && p.classList.contains('bench-said-bad') ? p : ''; }
+  // The share of the week one trial has used on a guard ("conveyor" or "agent"): the runs that kept the guard's share of the
+  // week left at their start and after their last trial, the share they used over the trials they ran on arms of that
+  // guard (a col's ran). Where both guards read one login (K.weekPool), the share is the use of the trials of both. Null with
+  // no run that used any (an older run kept none; a reading that did not move says nothing).
+  function weekRate(kind) {
+    let used = 0, ran = 0;
+    const at = (w) => (K.obj(w) ? K.num(w[kind]) : null);
+    K.runsOf().forEach((r) => {
+      const a = at(r.weekStart), b = at(r.weekLeft), pool = K.weekPool(r.weekStart, kind);
+      const t = K.sum(K.colsOf(r).filter((c) => pool.includes((K.armsOf().find((x) => x.name === c.arm) || {}).guard)).map((c) => K.num(c.ran) || 0));
+      if (a !== null && b !== null && t > 0) { used += Math.max(0, a - b); ran += t; }
+    });
+    return ran && used > 0 ? used / ran : null;
+  }
+  // The usage guard chip: the plan's trials (the arms' parts, in order) times the share one trial used, taken off the share
+  // of the week left now, must leave more than the share at which the guard stops (the history's weekLeft.stop), for each
+  // login the arms use (both guards, when they read one). Not kept when a share left, the stop or what a trial uses is not kept.
+  function weekChip(arms, parts) {
+    const left = K.obj(K.hist().weekLeft) || {}, stop = K.num(left.stop);
+    const kinds = [...new Set(arms.map((a) => a.guard).filter(Boolean))];
+    const fits = (left.shared === true ? [kinds] : kinds.map((k) => [k])).map((g) => {
+      const rate = weekRate(g[0]), l = K.num(left[g[0]]);
+      return rate === null || l === null || stop === null ? null : l - rate * K.sum(arms.map((a, i) => (g.includes(a.guard) ? parts[i].todo : 0))) > stop;
+    });
+    if (fits.includes(null)) return K.chip(K.NOT_KEPT, 'quiet');
+    return fits.every(Boolean) ? K.chip('fits in the week left', 'ok') : K.chip('would reach the guard; the run stops there', 'bad');
+  }
   function before(n) {
     const arms = picked(), parts = arms.map((a) => costOf(a, n)), q = planOf().q, [said, tone] = sizeSaid(q, n, arms);
     const lim = K.obj(K.hist().limits) || {};
     const usd = parts.some((p) => p.usd === null) ? null : K.sum(parts.map((p) => p.usd)), mins = K.sum(parts.map((p) => p.minutes)), g = K.obj(K.hist().guard) || {};
     const held = arms.some((a) => a.guard && g[a.guard] === true), b = startButton(n, arms);
-    // The guard's state now, which is all the history keeps: swe.sh checks it again before each new trial, so it says no
-    // more than that (a bigger plan can still reach it). An arm with no guard (swe_guards: a Codex arm) has no state to
-    // give. A short chip: the chip keeps its text on one line (app.css .chip).
-    const guardSaid = held ? K.chip('reached now: no run starts', 'bad') : arms.some((a) => a.guard) ? K.chip('not reached now; the run stops if it is', 'ok') : K.chip('none for these arms', 'ok');
+    // A guard reached now would stop the run; else the plan's use of the week against the share left (weekChip). An arm
+    // with no guard (swe_guards: a Codex arm) has none to reach. A short chip: the chip keeps its text on one line (app.css .chip).
+    const guardSaid = held ? K.chip('would reach the guard; the run stops there', 'bad') : arms.some((a) => a.guard) ? weekChip(arms, parts) : K.chip('none for these arms', 'ok');
     const s = K.box('Before you start', `${K.plural(arms.length, 'arm')} × ${K.plural(n, 'task')}`, 'bench-before');
     s.append(K.callout(said, tone), K.kv([['Cost', [h('b', null, K.usd(usd)), ' ', h('span', 'bench-muted bench-small', 'at list prices')]], ['Machine time', [h('b', null, K.fmtMin(mins)), ' ', h('span', 'bench-muted bench-small', 'tasks run one after another')]],
       ['Sessions', `${K.sum(parts.map((p) => p.usual))} usual, ${K.sum(parts.map((p) => p.worst))} at worst`],

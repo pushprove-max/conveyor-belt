@@ -115,3 +115,12 @@ t_swerunsrunning() {
   o=$(loop bench swe runs delete r20261120T090000-4 2>&1) && fail "delete of a run whose process is gone, with no end written, was done: $o"
   [ "$(cat "$B/runs.jsonl")" = "$before" ] && [ -e "$B/tails/$R1.jsonl" ] && [ -e "$B/results/stub-a/proj__b-2.json" ] || fail "a refused archive or delete changed a run"
 }
+
+# Bug (#1223, review E3): a col's ran, the trials the Board's Plan and Live run divide the share of the week used by, counted
+# a task not run (no image: its trial never started) as a trial. R1 did three tasks, one of them not run: 2 trials; R2 only
+# reused a result: none; R3: 1.
+t_swerunsran() {
+  swe; swerunsfx
+  [ "$(loop bench swe history | jq -c '.runs | map({key: .id, value: .cols[0].ran}) | from_entries')" = "{\"$R3\":1,\"$R2\":0,\"$R1\":2}" ] \
+    || fail "a col's ran counts a task not run or a reused result: $(loop bench swe history | jq -c '.runs | map([.id, .cols[0].ran])')"
+}

@@ -39,10 +39,19 @@
     });
     return out;
   }
-  function guardSaid(cols) {
-    const g = K.obj(K.hist() && K.hist().guard) || {}, held = cols.filter((c) => { const a = K.armsOf().find((x) => x.name === c.arm); return a && a.guard && g[a.guard] === true; });
-    // The history keeps only whether the guard is reached, not the share of the week left, so that figure shows as not kept.
-    return held.length ? 'The usage guard is reached: the run stops at the end of the task it is on.' : `The usage guard's week left: ${K.NOT_KEPT}.`;
+  const guardOf = (c) => (K.armsOf().find((x) => x.name === c.arm) || {}).guard;
+  // The mockup's sentence: the share of the week left on the tightest guard of the run's arms (r.weekLeft, kept with the run)
+  // and what the run needs: the share its trials so far used (r.weekStart less r.weekLeft) over the trials it ran, times
+  // the trials left on arms of that guard (both guards' arms, when they read one login: K.weekPool). A run from before the engine kept the share says it is not kept; so does a need
+  // no trial has shown yet.
+  function guardSaid(r, cols, data) {
+    const g = K.obj(K.hist() && K.hist().guard) || {}, now = K.obj(r.weekLeft) || {}, start = K.obj(r.weekStart) || {};
+    if (cols.some((c) => guardOf(c) && g[guardOf(c)] === true)) return 'The usage guard is reached: the run stops at the end of the task it is on.';
+    const kinds = [...new Set(cols.map(guardOf).filter((k) => K.num(now[k]) !== null))].sort((a, b) => now[a] - now[b]);
+    if (!kinds.length) return `The usage guard's week left: ${K.NOT_KEPT}.`;
+    const k = kinds[0], mine = cols.filter((c) => K.weekPool(start, k).includes(guardOf(c))), ran = K.sum(mine.map((c) => K.num(c.ran) || 0)), used = K.num(start[k]) === null ? null : start[k] - now[k];
+    const left = K.sum(mine.map((c) => Math.max(0, (K.num(r.n) || 0) - (K.num(c.done) || 0) - reusedOf(data, c)[1])));
+    return `The usage guard has ${Math.round(now[k])}% of the week left; ${ran && used > 0 ? `this run needs about ${Math.round(used / ran * left)}% more` : `what this run needs is ${K.NOT_KEPT}`}.`;
   }
   // The run's pace on the trials it runs: the time so far over the trials done (a reused result is none) forecasts the
   // trials left, and the estimate is of those trials alone.
@@ -53,11 +62,11 @@
     const eta = !left ? 0 : ran && took !== null ? took / ran * left : null, frac = ran + left ? ran / (ran + left) : 1;
     return { n, T, done, est, took, spent, eta, onTime: est.min === null || took === null ? null : took <= est.min * frac * 1.25 + 5, onBudget: est.usd === null || spent === null ? null : spent <= est.usd * frac * 1.25 + 0.5 };
   }
-  function liveVerdict(r, cols, p) {
+  function liveVerdict(r, cols, p, data) {
     const words = [p.onTime === null ? null : p.onTime ? 'on time' : 'behind time', p.onBudget === null ? null : p.onBudget ? 'on budget' : 'over budget'].filter(Boolean);
     const v = `${words.length ? `${cap(words.join(' and '))}.` : 'No estimate to judge it by.'} ${p.done} of ${p.T} task runs done; about ${K.fmtMin(p.eta)} left.`;
     const tone = words.length && p.onTime !== false && p.onBudget !== false ? 'ok' : words.length ? 'warn' : 'quiet';
-    return K.verdict(tone, `${r.id} · ${K.plural(p.n, 'task')} × ${K.plural(cols.length, 'arm')}`, v, `Spent ${K.usd(p.spent)} of the ${K.usd(p.est.usd)} estimate. ${guardSaid(cols)}`);
+    return K.verdict(tone, `${r.id} · ${K.plural(p.n, 'task')} × ${K.plural(cols.length, 'arm')}`, v, `Spent ${K.usd(p.spent)} of the ${K.usd(p.est.usd)} estimate. ${guardSaid(r, cols, data)}`);
   }
   // A task run's "not run: <reason>" (swe_task) in the short words of the mockup's chip; the reason's own words when none fits.
   const CAUSES = [[/image/i, 'image fetch failed'], [/repository/i, 'repository fetch failed'], [/pack/i, 'task pack failed'], [/container/i, 'container failed'], [/grade|harness/i, 'grading failed'],
@@ -124,7 +133,7 @@
     const grid = K.add(K.box('Tasks by arm', 'One row a task, one column an arm. Green resolved, red unresolved, blue working now, grey waiting.'), [cellGrid(data, cols), leg]);
     const side = K.add(K.box('Score so far', 'Tasks that every arm finished.'), [scoreSoFar(data, cols), h('h3', 'bench-h', 'Events'), tail(data, cols),
       K.add(h('div', 'bench-row'), [K.stopRun(r.id, typeof r.stopping === 'string'), h('span', 'bench-note', 'Keeps the finished tasks.')]), K.saidAt(`stop-${r.id}`)]);
-    return [liveVerdict(r, cols, p), liveStats(cols, p, data), K.grid('main', grid, side)];
+    return [liveVerdict(r, cols, p, data), liveStats(cols, p, data), K.grid('main', grid, side)];
   }
   function lastLine(r, The, word, took) {
     if (r.state === 'refused') return `${The} run did not start. It was asked for ${stampOf(r.started)}.`;
@@ -232,12 +241,17 @@
     if (!row.children.length) row.append(h('span', 'bench-muted', K.NOT_KEPT));
     return row;
   }
+  // The task image's size, as the results keep it (imageBytes, in decimal units, the mockup's "4.1 GB, kept"); a result from
+  // before the engine kept it has none.
+  function imageSaid(arms, id) {
+    const c = arms.map((a) => a.cells.get(id)).find((x) => K.obj(x) && K.num(x.imageBytes) !== null), b = c && c.imageBytes;
+    return b === null || b === undefined ? K.NOT_KEPT : `${b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.round(b / 1e6)} MB`}, kept`;
+  }
   function facts(id, arms, n) {
     const c = arms.map((a) => a.cells.get(id)).find((x) => K.obj(x && x.ref)), code = c && K.obj(c.ref.code), m = arms.length;
     return K.kv([['Repository', repoOf(id)], ['Difficulty', `${n >= 0.8 * m ? 'easy' : n >= 0.4 * m ? 'medium' : 'hard'} (resolved by ${n} of ${m} arms)`],
       ['Patch size', code ? `${K.plural(K.num(code.files) || 0, 'file')}, +${K.num(code.added) || 0} −${K.num(code.removed) || 0}` : K.NOT_KEPT],
-      // The results keep no size of the task's image, so the figure is not kept.
-      ['Task image', K.NOT_KEPT]]);
+      ['Task image', imageSaid(arms, id)]]);
   }
   // The task's tools, as the mockup has them. Open the patch shows the patch of the arm that the card's steps are read
   // from (the Conveyor arm, else the first arm with a kept patch). Open the logs shows each arm's kept log of the task

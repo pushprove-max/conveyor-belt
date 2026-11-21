@@ -112,6 +112,7 @@ case $1 in
     n=$1; shift; [ -d "$B/$n" ] || exit 1; [ "$u" != 0 ] || exit 0
     cd "$w" && exec env -u CLAUDE_CONFIG_DIR -u CODEX_HOME -u CONVEYOR_MAIN -u CONVEYOR_CARDS -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL -u EMAIL GIT_CONFIG_PARAMETERS="'user.useconfigonly'='true'" HOME="$B/$n/home" "${e[@]}" "$@" ;;
   rm) shift; [ "$1" != -f ] || shift; [ -d "$B/$1" ] || exit 1; echo "$1" >> "$SWE_FX/removed"; rm -rf "$B/$1" ;;
+  image) [ "$2" = inspect ] && echo 4100000000 ;; # the task image's size: 4.1 GB
   ps) ls "$B" 2>/dev/null ;; # every container, whatever the filter: the caller picks its own by name
   *) exit 1 ;;
 esac
@@ -390,6 +391,22 @@ t_sweguard() {
   # Bug: an explicit preflight started its Claude session on the trivial task past the guard.
   out=$(CONVEYOR_LIMIT_CMD='echo "{\"seven_day\":{\"utilization\":90}}"' loop bench swe arms check solo 2>&1) && fail "a preflight ran at the usage guard: $out"
   grep -q 'the usage guard is reached' <<<"$out" && [ ! -s "$STUB/sessions" ] || fail "the refusal does not name the guard, or a session ran: $out"
+}
+# Bug (#1223): the bench kept only whether the usage guard was reached, and no size of a task's image, so the Board could
+# not say the share of the week left (Live run, Plan) nor the image's size (Task page). A run keeps the guard's share left
+# when it starts and after each trial, history gives it now, and each result keeps its task image's size.
+t_sweweek() {
+  swe; local out first; first=$(sweorder | head -n 1)
+  export CONVEYOR_LIMIT_CMD='echo "{\"seven_day\":{\"utilization\":69}}"'
+  jq -c '.guard = 98' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json"
+  out=$(loop bench swe 1 --arm conveyor 2>&1) || fail "the run failed: $out"
+  [ "$(tail -n 1 "$B/runs.jsonl" | jq -c '[.weekStart, .weekLeft]')" = '[{"conveyor":31,"agent":null,"shared":false},{"conveyor":31,"agent":null,"shared":false}]' ] \
+    || fail "the run's line does not keep the guard's share of the week left (69% used, a conveyor arm only): $(tail -n 1 "$B/runs.jsonl")"
+  [ "$(jq -c .imageBytes "$B"/results/*/"$first.json")" = 4100000000 ] || fail "the result keeps no size of the task's image: $(cat "$B"/results/*/"$first.json")"
+  [ "$(loop bench swe history | jq -c '[.weekLeft, .runs[0].cols[0].ran]')" = '[{"conveyor":31,"agent":31,"shared":true,"stop":2},1]' ] \
+    || fail "history does not give the share of the week each guard has left (one login for both), the share left at which the guard stops (98% used: 2), or the trials the run's arm ran: $(loop bench swe history | jq -c '.weekLeft')"
+  [ "$(loop bench swe show "$(tail -n 1 "$B/runs.jsonl" | jq -r .id)" | jq -c '[.run.weekLeft.conveyor, .tasks[0].cells[0].imageBytes]')" = '[31,4100000000]' ] \
+    || fail "show does not give the run's share of the week left and the task's image size"
 }
 # Bug: Claude's usage guard held back an arm with only a Codex login: its preflight and its run refused to start.
 t_swecodexguard() {

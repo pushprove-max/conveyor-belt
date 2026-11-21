@@ -401,7 +401,7 @@ test('Plan a run, the study\'s arms: the questions set the tasks and arms, and B
   assert.equal(text(q(w, '.bench-before .bench-hsub')), '2 arms × 50 tasks');
   assert.equal(text(q(w, '.bench-before .bench-callout')), 'Good for arms: a gap of 20% or more shows, and Conveyor against Claude alone was 24 points in the last study. Two Conveyor versions differ by 2 to 40 points: a 40-point gap needs 13 tasks.');
   assert.deepEqual(kv(q(w, '.bench-before')), [['Cost', '$0.00 at list prices'], ['Machine time', '0 min tasks run one after another'], ['Sessions', '0 usual, 0 at worst'],
-    ['Kept results', '100 task runs reused at no cost'], ['Usage guard', 'not reached now; the run stops if it is'], ['Belt', 'Cards and the run share the machine. Each task\'s container gets 4 CPUs and 8g.']]);
+    ['Kept results', '100 task runs reused at no cost'], ['Usage guard', 'not kept'], ['Belt', 'Cards and the run share the machine. Each task\'s container gets 4 CPUs and 8g.']]);
   assert.equal(q(w, '.bench-cmd').textContent, 'conveyor.sh bench swe 50 --arm conveyor --arm solo');
   act(bp(w), 'q-works').click();
   assert.equal(q(w, '.bench-cmd').textContent, 'conveyor.sh bench swe 5 --arm conveyor');

@@ -334,6 +334,14 @@ each arm's state: waiting, active, finished, interrupted (the task that Stop end
 `wall`: the minutes of its work in this run, a task not run and the task that Stop ended included. A reused result
 adds none. The active task gives `start`, the time its work began, so its minutes so far are the time since then.
 
+Each run keeps the share of the week that the usage guard has left: `weekStart` when the run starts and `weekLeft` after
+each task, one figure for the guard of the Conveyor arms and one for the guard of the other arms that use the Claude
+login (`conveyor`, `agent`). A figure is null when the guard has no reading or no arm of the run uses it. `shared` is
+true when both guards read one account: the share the run used is then that of the trials of all its arms together.
+Each arm also has `ran`, the tasks it ran: a reused result and a task not run are not counted. `bench swe history` gives
+the share left now as `weekLeft`, with `stop`, the share left at which the guard stops new trials. Each result keeps the size of its task image in bytes, as `imageBytes`. The Board says "not kept" for a run or a result
+from before the engine kept these figures.
+
 Each run also keeps a short event log, the last lines of which `bench swe show <run>` gives as `tail`. Each line has
 a time, an arm, a task and an event: a step, a result (Resolved, Unresolved, Not run or reused), or the start and end
 of the run. The log stays after the run ends. It holds no output of the arms and no text from their containers.

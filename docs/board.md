@@ -1024,7 +1024,9 @@ reading. Click a flipped task to open it on **Task**.
 two side by side.
 
 **Live run** shows the run that goes now. The verdict says whether the run is on time and on budget against its
-estimate, with the tasks done, the time left at this pace, the cost so far and the usage guard. A result that the run
+estimate, with the tasks done, the time left at this pace, the cost so far and the usage guard: the share of the week
+that the guard has left, and the share that the rest of the run needs at the pace of its tasks so far. Both are "not
+kept" for a run from before the engine kept them. A result that the run
 reuses takes no time and costs nothing: the time left and the estimate count only the tasks that the run runs. A run
 with `--again` reuses no result, so they count each of its tasks. Four figures give the
 same. **Tasks by arm** has a row for each task and a column for each arm: resolved, unresolved, not run, waiting, or
@@ -1046,7 +1048,8 @@ arm does (it tells the arms apart only on cost and time), or some do. A table gi
 tests and a note: the step where a Conveyor arm went wrong. **Conveyor's card, step by step** shows the card's steps as
 a bar: the width of each step is its time. **The review, in full** is folded. **This task over time** has a dot for each
 run of the Conveyor arm on the task, by version. The facts give the repository, the difficulty, the size of the
-reference fix and the task image, or "not kept" when the results do not keep it. Three buttons are under the facts:
+reference fix and the task image, for example "4.1 GB, kept", or "not kept" for a result from before the engine kept
+the size. Three buttons are under the facts:
 
 - **Open the patch** shows the files of one patch, with the lines each file adds and removes: the Conveyor arm's, or
   the first arm's that kept one. Click it again to close it.
@@ -1073,7 +1076,10 @@ arms). The question sets the tasks and the arms. You can change both after that.
 cost and minutes for each task, and the results kept for it, which the run reuses at no cost. The **Tasks** slider sets
 the number of tasks, and shows the smallest difference that this number can show. **Before you start** gives a
 verdict on the size for your question, the cost at list prices, the machine time, the usual and worst-case sessions,
-the kept results reused, the usage guard, and the command that the run sends. **Start the run** sends that command,
+the kept results reused, the usage guard ("fits in the week left" or "would reach the guard; the run stops there", from
+the share of the week left, the share at which the guard stops and the share that earlier runs used for each task: the
+plan fits when it leaves more than the stop; "not kept" when no earlier run kept it),
+and the command that the run sends. **Start the run** sends that command,
 with the engine's default settings. It stays off while a run goes, while an arm that you picked is not ready, and
 while the usage guard holds an arm that you picked. **Check the arms first** runs the
 preflight of each arm that you picked and that is not ready. The cost is an estimate: each session costs the mean of

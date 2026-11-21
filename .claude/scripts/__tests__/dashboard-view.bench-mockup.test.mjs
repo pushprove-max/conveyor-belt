@@ -154,7 +154,7 @@ test('Task, 7 arms on one task of the study: the split step, Task image, and the
   assert.deepEqual([spans[0].dataset.step, text(spans[0]), spans[0].className, spans[1].dataset.step], ['split', 'split', 'bench-s7', 'build']);
   assert.match(text(page(w).querySelector('.bench-hsub')), /^From the real run r\S+ \(Conveyor v1\.9\.0\)\. Width is time\.$/);
   assert.deepEqual(kv(box(w, 'This task over time')).map(([k]) => k), ['Repository', 'Difficulty', 'Patch size', 'Task image']);
-  assert.deepEqual(kv(box(w, 'This task over time')).find(([k]) => k === 'Task image'), ['Task image', 'not kept'], 'the results keep no image size');
+  assert.deepEqual(kv(box(w, 'This task over time')).find(([k]) => k === 'Task image'), ['Task image', 'not kept'], 'a result from before the engine kept the image size');
   const tools = Array.from(page(w).querySelectorAll('.bench-tools button'));
   assert.deepEqual(tools.map((b) => [text(b), b.disabled]), [['Open the patch', false], ['Open the logs', false], ['Run this task again', false]]);
   assert.equal(page(w).querySelectorAll('.bench-box details[data-fold^="patch-"]').length, 0, 'the patch is a button, not a fold');
@@ -165,6 +165,21 @@ test('Task, 7 arms on one task of the study: the split step, Task image, and the
   assert.equal(act(bp(w), 'open-patch').getAttribute('aria-expanded'), 'true');
   act(bp(w), 'open-patch').click();
   assert.equal(page(w).querySelectorAll('.bench-patch').length, 0, 'the same button shuts it');
+});
+
+// Bug it guards (#1223): the Task page's Task image row was a hard-coded "not kept". The engine now keeps each task image's
+// size in bytes (imageBytes) with the result, and the row says it as the mockup does: "4.1 GB, kept"; a small image in MB.
+const imageRow = async (bytes) => {
+  const set = BH.study();
+  set.shows[BH.STUDY].tasks[0].cells[0].imageBytes = bytes;
+  const w = await opened(set, 'task');
+  return kv(box(w, 'This task over time')).find(([k]) => k === 'Task image');
+};
+test('Task, a result that keeps a task image of 4.1 GB: the Task image row says 4.1 GB, kept', async () => {
+  assert.deepEqual(await imageRow(4.1e9), ['Task image', '4.1 GB, kept']);
+});
+test('Task, a result that keeps a task image of 650 MB: the Task image row says 650 MB, kept', async () => {
+  assert.deepEqual(await imageRow(650e6), ['Task image', '650 MB, kept']);
 });
 
 // Bug it guards: Open the logs and Run this task again were always disabled, and Open the patch listed the patch of each
@@ -245,34 +260,103 @@ test('Task, no arm reached the task: Run this task again is off and says so', as
 
 // Bug it guards: the "Good for arms" text said "differed ... in the last study" and quoted the smallest gap's task count
 // (2 points, 5000 tasks), where the mockup says "differ by 2 to 10 points: a 10-point gap needs 200 tasks", the largest
-// gap's; the guard chip said "fits in the week left", a forecast the history cannot give (it keeps only whether the guard
-// is reached now, and swe.sh checks it again before each trial), so it says "not reached now; the run stops if it is";
-// arms with no guard (a Codex arm, swe_guards) have none to say.
-test('Plan a run: the usage guard chip says the guard is not reached now, none for arms with no guard, and the gap between two Conveyor versions is the study\'s largest', async () => {
+// gap's; arms with no guard (a Codex arm, swe_guards) have none to say.
+test('Plan a run: the gap between two Conveyor versions is the study\'s largest, and arms with no guard say none', async () => {
   const w = await opened(BH.study(), 'plan');
   const guard = () => kv(q(w, '.bench-before')).find(([k]) => k === 'Usage guard')[1];
   const tick = async (arm, on) => { const b = act(bp(w), `arm-${arm}`); b.checked = on; b.dispatchEvent(new w.Event('change')); await settle(); };
-  assert.equal(guard(), 'not reached now; the run stops if it is');
-  // A bigger plan does not change the chip: it is the state now, not a forecast of the plan's own use.
-  const n = act(bp(w), 'plan-n'); n.value = '500'; n.dispatchEvent(new w.Event('input'));
-  assert.equal(guard(), 'not reached now; the run stops if it is', 'a plan of 500 tasks: still the state now');
-  n.value = '50'; n.dispatchEvent(new w.Event('input'));
   assert.equal(text(q(w, '.bench-before .bench-callout')),
     'Good for arms: a gap of 20% or more shows, and Conveyor against Claude alone was 24 points in the last study. Two Conveyor versions differ by 2 to 40 points: a 40-point gap needs 13 tasks.');
   await tick('conveyor', false); await tick('solo', false); await tick('codex-sol', true);
   assert.equal(guard(), 'none for these arms', 'codex-sol alone: no arm has a guard');
-  await tick('conveyor', true);
-  assert.equal(guard(), 'not reached now; the run stops if it is', 'conveyor and codex-sol: Conveyor has a guard');
 });
 
-// Bug it guards: with the guard reached, the chip must say so as the state it is ("would reach" was a forecast), and Start
-// must stay off while no run can start.
-test('Plan a run, the usage guard reached: the chip says it is reached now and Start is off', async () => {
+// Bug it guards (#1223): the guard chip said "not reached now; the run stops if it is", a state, where the mockup says
+// whether the plan "fits in the week left" or "would reach the guard; the run stops there". The engine now keeps the
+// guard's share of the week left with each run (weekStart, weekLeft, and the trials a col ran) and in history (weekLeft):
+// the chip sets the plan's trials times the share a trial used against the share left. Here a Conveyor trial used 0.09% of
+// the week (9 points over 100 trials) and 31% is left: 50 tasks, all kept, need none; 500 tasks need about 40%.
+test('Plan a run, with the guard\'s share of the week kept: the chip says fits in the week left, or would reach the guard', async () => {
+  const set = BH.study();
+  set.hist.weekLeft = { conveyor: 31, agent: 31, shared: false, stop: 2 };
+  Object.assign(set.hist.runs[0], { weekStart: { conveyor: 40, agent: 40, shared: false }, weekLeft: { conveyor: 31, agent: 35, shared: false } });
+  set.hist.runs.forEach((r) => r.cols.forEach((c) => { c.ran = c.done; }));
+  const w = await opened(set, 'plan');
+  const guard = () => kv(q(w, '.bench-before')).find(([k]) => k === 'Usage guard')[1];
+  assert.equal(guard(), 'fits in the week left', '50 tasks, every result kept: no trial to run');
+  const n = act(bp(w), 'plan-n'); n.value = '500'; n.dispatchEvent(new w.Event('input'));
+  assert.equal(guard(), 'would reach the guard; the run stops there', '450 Conveyor trials at 0.09% each: about 40% of the week, 31% left');
+});
+
+// Bug it guards (#1223, review E1): the chip compared the plan's use with the share left, though the guard stops new trials
+// at its own percent (98 used: 2 left, history's weekLeft.stop), so a plan that fits in the week left but ends under the
+// stop said "fits". Here 3% is left and the guard stops at 2% left: 22 trials at 0.09% (about 2%) leave 1%, under the stop.
+test('Plan a run, a plan that fits in the week left but ends past the guard\'s stop: the chip says would reach the guard', async () => {
+  const set = BH.study();
+  set.hist.weekLeft = { conveyor: 3, agent: 3, shared: false, stop: 2 };
+  Object.assign(set.hist.runs[0], { weekStart: { conveyor: 40, agent: 40, shared: false }, weekLeft: { conveyor: 31, agent: 35, shared: false } });
+  set.hist.runs.forEach((r) => r.cols.forEach((c) => { c.ran = c.done; }));
+  const w = await opened(set, 'plan');
+  const n = act(bp(w), 'plan-n'); n.value = '72'; n.dispatchEvent(new w.Event('input'));
+  assert.equal(kv(q(w, '.bench-before')).find(([k]) => k === 'Usage guard')[1], 'would reach the guard; the run stops there', '22 trials at 0.09%: 1.98 of the 3 left, 2 is the stop');
+});
+
+// Bug it guards (#1223, review E2): Conveyor and Claude alone read one login, so a run of both arms that used 9 points
+// kept the same drop for both guards, and the chip priced each Conveyor trial at 9 / 100 instead of 9 / 300 (all trials of
+// the run). With the run's shared: true the rate is 0.03% a trial: 450 trials need about 13%, and 29% is free to use.
+test('Plan a run, one run of both guards on one login: the share used is spread over the trials of both', async () => {
+  const set = BH.study();
+  set.hist.weekLeft = { conveyor: 31, agent: 31, shared: true, stop: 2 };
+  Object.assign(set.hist.runs[0], { weekStart: { conveyor: 40, agent: 40, shared: true }, weekLeft: { conveyor: 31, agent: 31, shared: true } });
+  set.hist.runs.forEach((r) => r.cols.forEach((c) => { c.ran = c.done; }));
+  const w = await opened(set, 'plan');
+  const n = act(bp(w), 'plan-n'); n.value = '500'; n.dispatchEvent(new w.Event('input'));
+  assert.equal(kv(q(w, '.bench-before')).find(([k]) => k === 'Usage guard')[1], 'fits in the week left', '450 Conveyor trials at 9 / 300 trials: about 13%');
+});
+
+// Bug it guards (#1223): a run from before the engine kept the share of the week left gave the chip nothing to say: it said
+// a state the mockup does not have. With none kept the chip says "not kept", for the history's share and for a trial's use.
+test('Plan a run, no share of the week kept by any run: the chip says not kept', async () => {
+  const set = BH.study();
+  set.hist.weekLeft = { conveyor: 31, agent: 31, shared: false, stop: 2 };
+  const w = await opened(set, 'plan');
+  assert.deepEqual(kv(q(w, '.bench-before')).find(([k]) => k === 'Usage guard'), ['Usage guard', 'not kept'], 'the share left now is kept, what a trial uses is not');
+});
+
+// Bug it guards: with the guard reached, Start must stay off while no run can start; the chip says the mockup's "would
+// reach the guard; the run stops there", not "reached now: no run starts".
+test('Plan a run, the usage guard reached: the chip says would reach the guard and Start is off', async () => {
   const held = BH.study();
   held.hist.guard.conveyor = true;
   const w = await opened(held, 'plan');
-  assert.deepEqual(kv(q(w, '.bench-before')).find(([k]) => k === 'Usage guard'), ['Usage guard', 'reached now: no run starts']);
+  assert.deepEqual(kv(q(w, '.bench-before')).find(([k]) => k === 'Usage guard'), ['Usage guard', 'would reach the guard; the run stops there']);
   assert.equal(act(bp(w), 'start').disabled, true, 'no run starts while the guard stands');
+});
+
+// Bug it guards (#1223): the Live run page said "The usage guard's week left: not kept." though the guard's reading is the
+// run's own to keep. With the run's kept share it says the mockup's sentence: 31% left, and the run needs what its trials so
+// far used (40 less 31: 9 points over the 22 Conveyor-arm trials done) times the 78 left on those arms. A run from before
+// the engine kept it says not kept.
+const liveGuard = async (week) => {
+  const set = BH.live();
+  const line = set.shows[BH.LIVE].run;
+  line.cols.forEach((c) => { c.ran = c.done; });
+  Object.assign(line, week);
+  return text(q(await opened(set), '.bench-vw'));
+};
+test('Live run, a run from before the share of the week was kept: the usage guard sentence says not kept', async () => {
+  assert.match(await liveGuard({}), /Spent \$61\.24 of the \$[\d.]+ estimate\. The usage guard's week left: not kept\.$/);
+});
+test('Live run, with the guard\'s share of the week kept: the mockup\'s percentage sentence', async () => {
+  assert.match(await liveGuard({ weekStart: { conveyor: 40, agent: 40, shared: false }, weekLeft: { conveyor: 31, agent: 33, shared: false } }),
+    /The usage guard has 31% of the week left; this run needs about 32% more\.$/, 'the tightest guard, 9 / 22 × 78');
+});
+// Bug it guards (#1223, review E2): on one login the 9 points the run used are the use of the trials of every arm, not of
+// the arms of the tightest guard alone: 9 over the 63 trials done by the 6 arms with a guard (22 Conveyor, 41 Claude), times
+// the 237 trials they have left (78 and 159): about 34%, not 32%.
+test('Live run, both guards on one login: the share the run needs is spread over the trials of every arm', async () => {
+  const said = await liveGuard({ weekStart: { conveyor: 40, agent: 40, shared: true }, weekLeft: { conveyor: 31, agent: 31, shared: true } });
+  assert.match(said, /The usage guard has 31% of the week left; this run needs about 34% more\.$/, said);
 });
 
 // Bug it guards: the few-task verdict gave every arm the range of an arm that resolved every task (21% to 100%), though
