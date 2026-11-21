@@ -641,13 +641,13 @@
   Object.defineProperty(app, 'layouts', { get: () => layouts, set: (v) => { layouts = v; } });
   Object.defineProperty(app, 'prefs', { get: () => prefs, set: (v) => { prefs = v; } });
   Object.defineProperty(app, 'tab', { get: () => tab, set: (v) => { tab = v; } });
-  Object.defineProperty(app, 'grid', { get: () => grid, set: (v) => { grid = v; } });
+  Object.defineProperty(app, 'grid', { get: () => grid });
   Object.defineProperty(app, 'placed', { get: () => placed, set: (v) => { placed = v; } });
   Object.defineProperty(app, 'loaded', { get: () => loaded, set: (v) => { loaded = v; } });
   Object.defineProperty(app, 'arranging', { get: () => arranging, set: (v) => { arranging = v; } });
   Object.defineProperty(app, 'tipAt', { get: () => tipAt, set: (v) => { tipAt = v; } });
   Object.defineProperty(app, 'queued', { get: () => queued, set: (v) => { queued = v; } });
-  Object.defineProperty(app, 'headMod', { get: () => headMod, set: (v) => { headMod = v; } });
+  Object.defineProperty(app, 'headMod', { get: () => headMod });
   Object.defineProperty(app, 'failedLoads', { get: () => failedLoads, set: (v) => { failedLoads = v; } });
   Object.defineProperty(app, 'headView', { get: () => headView, set: (v) => { headView = v; } });
   Object.defineProperty(app, 'updatedAt', { get: () => updatedAt, set: (v) => { updatedAt = v; } });

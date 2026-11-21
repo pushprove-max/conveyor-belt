@@ -304,6 +304,6 @@
       setTab, pickRepo, project, projectSort, tag, behind, tool, skeleton, machineWord, answerer, retryText,
       restartHere, panelFaults, details, unread, stateBlock, withOlder, shownData, remote, faultsChanged, setProject,
       setProjectSort, closeTip, tabFromAddress, address, wireTips, joined,
-      get histVer() { return histVer; }, set histVer(v) { histVer = v; } };
+      get histVer() { return histVer; } };
   });
 })();
