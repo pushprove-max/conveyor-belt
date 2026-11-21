@@ -12,12 +12,15 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
 # Bugs caught: a wrapped run that fails passes (the helper's own exit code), or loses the test's output, so a project
 # that wraps its files breaks its test step; the CPU seconds are the helper's own `times` read in a subshell, always
-# 0, so no file is ever over the budget. A command that prints to both streams, burns about 0.25 CPU s in a child and
+# 0, so the recorded CPU seconds of every file read 0.0. A command that prints to both streams, spins about 0.3 s in a child and
 # exits 3: the same exit code and text as the command alone, then one `TESTRUN sec` line, its CPU seconds measured.
 t_testtime() {
   local d=$T/$CASE rc; mkdir -p "$d"
-  local cmd='echo "line one"; echo "to stderr" >&2; i=0; while [ $i -lt 80000 ]; do i=$((i + 1)); done; exit 3'
-  "$SRC/tools/testtime.sh" 'tests/a b.test' -- sh -c "$cmd" > "$d/out" 2> "$d/err"; rc=$?
+  # The child spins until 0.3 s of wall time have passed, not for a fixed count: a count that takes 0.25 s on one
+  # machine takes under 0.05 s on a fast one, and the line then reads 0.0 for both clock and CPU seconds.
+  local cmd='echo "line one"; echo "to stderr" >&2; s=${EPOCHREALTIME/[.,]/}
+    while [ $((${EPOCHREALTIME/[.,]/} - s)) -lt 300000 ]; do :; done; exit 3'
+  "$SRC/tools/testtime.sh" 'tests/a b.test' -- bash -c "$cmd" > "$d/out" 2> "$d/err"; rc=$?
   [ $rc = 3 ] || fail "the helper exited $rc, not the command's 3"
   [ "$(cat "$d/err")" = "to stderr" ] || fail "the command's stderr changed: $(cat "$d/err")"
   [ "$(head -n 1 "$d/out")" = "line one" ] && [ "$(wc -l < "$d/out")" = 2 ] || fail "the command's output changed: $(cat "$d/out")"
