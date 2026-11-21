@@ -274,6 +274,22 @@ t_doneoutsidenogo() {
   [ ! -e "$STUB/closed" ] && [ -z "$(st 'select(.issue == 15 and .step == "closed")')" ] || fail "issue #15 was closed over a NO-GO"
 }
 
+# Bug (#1144): a DONE-OUTSIDE line that names a big folder and then a file gave the folder all 40000 characters, so
+# the reviewer never saw the file (the hold in control.json a Done-when line cites) and could not confirm the work.
+# The folder still gets all the file leaves: ten of its twelve 4000-character records (nine whole, one cut), not a
+# share that cuts records the reviewer also needs.
+t_doneoutsidepaths() {
+  setup '[]'; mkdir -p "$ST/testactions"
+  for i in 0 1 2 3 4 5 6 7 8 9 10 11; do head -c 4000 /dev/zero | tr '\0' o > "$ST/testactions/r$i"; done
+  echo '{"hold": {"781": "held by the judge"}}' > "$ST/control.json"
+  fx_in 'outsidefacts "DONE-OUTSIDE: records in conveyor/state/testactions/, the hold in conveyor/state/control.json" 1144'
+  [ "$RC" = 0 ] || fail "outsidefacts exited $RC: $(head -c 400 "$T/$CASE/run.out")"
+  grep -A1 -F '## conveyor/state/control.json' "$T/$CASE/run.out" | grep -qF 'held by the judge' \
+    || fail "the file named after a big folder did not reach the reviewer: $(grep -F 'left out' "$T/$CASE/run.out")"
+  grep -qF 'left out 2 more files of conveyor/state/testactions/' "$T/$CASE/run.out" && [ "$(grep -c '^## conveyor/state/testactions/' "$T/$CASE/run.out")" = 10 ] \
+    || fail "the big folder did not get all the file left of the limit: $(grep -c '^## conveyor/state/testactions/' "$T/$CASE/run.out") records, $(grep -F 'left out' "$T/$CASE/run.out")"
+}
+
 # closed() on card c0-<issue>'s worktree, at main's commit h as the reviewer read it, after main moved to m by
 # <move> during the review. Its exit is in $RC, the reason it prints in run.out.
 donemove() { # <issue> <move>

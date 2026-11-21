@@ -457,9 +457,11 @@ nochange() { # <card> <issue> <worktree> <brief>
 # web, and reads no folder outside the worktree. Each issue it names (#<n>, of the first 50 distinct numbers, the
 # card's own then left out) as GitHub gives it, its body cut to 2000 characters; a range (#<a> to #<b>, through, - or
 # .., of at most 50) is each issue in it. Each path under conveyor/state/ it names (a file, or a folder's files), read from the state folder,
-# 4000 characters a file and 40000 in all: the files the session changed (at or after its start, the time of the
-# <worktree>.before that session() writes as it begins) first, the smallest first, so the records it wrote come
-# before older files and session logs; the files the limit leaves out are counted. What cannot be read says so.
+# 4000 characters a file and 40000 in all: the files it names first, in the order it names them, so a big folder named
+# before a file does not leave the file out, then the folders. In a folder, the files the session changed (at or after
+# its start, the time of the <worktree>.before that session() writes as it begins) first, the smallest first, so the
+# records it wrote come before older files and session logs; the files the limit leaves out are counted. What cannot
+# be read says so.
 outsidefacts() { # <DONE-OUTSIDE line> <the card's issue> [<the session's start, epoch seconds>]
   local w i j f p s m o='' left=40000 more
   for i in $(grep -oE '#[0-9]+( *(to|through|-|–|\.\.) *#?[0-9]+)?' <<<"$1" | awk '{ a = substr($0, 2) + 0; match($0, /[0-9]+$/)
@@ -481,7 +483,9 @@ outsidefacts() { # <DONE-OUTSIDE line> <the card's issue> [<the session's start,
     done < <(find "$p" -type f 2>/dev/null | while IFS= read -r f; do s=$(p_stat "$f") && echo "$s $f"; done \
       | awk -v t="${3:-0}" '{ print ($2 >= t ? 0 : 1), $0 }' | LC_ALL=C sort -k1,1n -k2,2n -k4 | cut -d' ' -f2-)
     [ "$more" = 0 ] || o+=$'\n\n'"The limit of 40000 characters left out $more more files of $w."
-  done < <(grep -oE 'conveyor/state/[^[:space:]`"'"'"',;:)]*' <<<"$1" | awk '!s[$0]++' | head -n 20)
+  done < <(grep -oE 'conveyor/state/[^[:space:]`"'"'"',;:)]*' <<<"$1" | awk '!s[$0]++' | head -n 20 \
+    | while IFS= read -r w; do p=$ST/${w#conveyor/state/}; s=1; [[ $w == *..* ]] || [ ! -f "${p%/}" ] || s=0; echo "$s $w"; done \
+    | LC_ALL=C sort -s -k1,1n | cut -d' ' -f2-)
   [ -z "$o" ] || printf '\n\n# The evidence the line names, read by the engine: the issues from GitHub, the files from the state folder%s' "$o"
 }
 
