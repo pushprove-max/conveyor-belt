@@ -83,6 +83,8 @@ test('Rules: Pick settings saves the models checked for a seat, each with its ow
     [{ action: 'pick-models', args: ['builder', 'claude-opus-5-5=medium-high', 'claude-sonnet-5-5=-low'], repo: 'sample' }]);
   await settle();
   assert.equal(head('builder'), 'Builder claude-opus-5-5: medium to high; claude-sonnet-5-5: low or lower', 'the saved list shows before the next snapshot');
+  // The panel shows one group at a time and a control in a hidden group cannot take the focus: open the pick row's group.
+  act(rulesP(w), 'rules-set-picking').click();
   act(seat('reviewer'), 'pick-model-reviewer-gpt-6.1-sol').click();
   const save = act(seat('reviewer'), 'pick-save-reviewer');
   save.focus();
