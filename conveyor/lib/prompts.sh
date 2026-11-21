@@ -600,7 +600,7 @@ files its issue'"'"'s Done-when names instead, and is not checked when it names 
 SPEEDREVIEW='# The speed-up check
 This issue speeds up one test file and keeps what it tests, so no test must fail on main'"'"'s code without the change.
 After the build, the file was run alone with the change, on a test slot. It must pass, and its CPU seconds must be lower
-than the median of its recent runs (its median on record when the issue lists none). Judge whether the file still tests all that it tested before. Its result:'
+than the median of its recent runs (its median on record when the issue lists none), or than the slowest of those runs. Judge whether the file still tests all that it tested before. Its result:'
 # What the review of an Optimize card (optproof(), card()) is told before the check's result.
 # shellcheck disable=SC2034 # used in lib/card.sh
 OPTREVIEW='# The Optimize check
@@ -610,7 +610,7 @@ DIRECT lines name), and keeps what it tests, so no test must fail on
 main'"'"'s code without the change. A file the change keeps, and the
 test files a split adds, were run alone with the change, on a test slot: they must pass. The figure they are held to is
 the median of the recent runs the issue lists (the file'"'"'s median on record when it lists none). A file kept must cost
-less than that figure; for stabilise, no more than it; and, when another test file is merged into it, no more than
+less than that figure, or than the slowest of the recent runs the issue lists; for stabilise, no more than it; and, when another test file is merged into it, no more than
 that figure plus the median on record of each test file merged into it. The files of a split, their CPU seconds summed, must take at most that figure plus a start-up allowance for each file the split adds. Judge whether the tests still test all
 that the file tested before. Its result:'
 # What the review of a Fix failures card (steadyproof(), card()) is told before the check's result.

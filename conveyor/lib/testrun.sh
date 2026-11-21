@@ -1585,6 +1585,12 @@ recentcpu() { # <issue json> <test file>
   r=$(testspart "$(date +%F)" 2>/dev/null | jq -r --arg f "$2" 'first(.files[]? | select(.file == $f) | .median | numbers) // empty' 2>/dev/null)
   [ -z "$r" ] || printf '%s\tits median on record\n' "$r"
 }
+# The CPU seconds of the slowest of the recent runs an issue lists (recentcpu()'s line), or nothing when it lists none.
+# One run of a file varies a lot while other cards run (#1140): speedproof() takes a run below it as inside the spread.
+slowestrun() { # <issue json>
+  jq -r '[(.body // "") | split("\n")[] | select(test("^[\\s*_>-]*Last runs, newest first:")) | [scan("([0-9]+(?:\\.[0-9]+)?) CPU s") | .[0] | tonumber]]
+    | last // [] | max // empty | . * 1000 | round / 1000' <<<"$1" 2>/dev/null
+}
 # What a stabilise card's build must end its reply with (speedbrief(), speedproof()): one line for each flaky or
 # failing case its issue names on the judge's CAUSE lines (tacauses(), lib/testaction.sh), or at least one line when
 # it names none.
@@ -1649,7 +1655,8 @@ speedbrief() { # <card> <worktree> <test file> <issue json>
 # alone, on a test slot, through the pack's test.fileCommand, in a worktree of the commit the card was built on with the whole
 # staged change ($CARDS/mainrun/<card>.speed). It must pass, and its CPU seconds there (its runner's `TESTRUN sec` line,
 # timed()) must be lower than the figure recentcpu() gives: the median of the recent runs its issue lists, else its
-# median on record. Under the verdict stabilise (optverdict()) they must be at most that figure, and the build's reply
+# median on record, or, when the issue lists recent runs, lower than the slowest of them (slowestrun(): inside their
+# spread). Under the verdict stabilise (optverdict()) they must be at most that figure, and the build's reply
 # must name the cause of each flaky case and how the change removes it (stabilised()), checked before the run; the
 # review is shown those lines to check against the code. Under the verdict merge, the figure is the file's plus the
 # median on record of each test file the change removes (merged into the file), and they must be at most it.
@@ -1657,7 +1664,7 @@ speedbrief() { # <card> <worktree> <test file> <issue json>
 # <worktree>.unfixed, which the review is shown, its first line the reason when the check does not hold, and records a
 # bugproof line (result ok or fail) with speed: {file, before: that figure, after: the CPU seconds now; each null when
 # not known; fix: sped up, or split, with into: the test files the split adds}. Fails when the check does not hold: no figure, a stabilise reply that names no cause, a run that could not be made, failed or gave no
-# CPU seconds, or CPU seconds not lower than the figure (above it, for stabilise and merge). Given the test files a split adds (optproof()), it runs them
+# CPU seconds, or CPU seconds not lower than the figure nor the slowest recent run (above the figure, for stabilise and merge). Given the test files a split adds (optproof()), it runs them
 # too, with the file when the change keeps it: they must all pass, and their CPU
 # seconds summed (after) must be at most that figure plus a start-up allowance for each file the split adds. The
 # allowance (splitstart()) is measured only when the sum is over the figure. The reason names a sum over its limit
@@ -1717,9 +1724,10 @@ splitstart() { # <worktree> <file> <the pack's test.command> <the pack's test.sp
 # ("the file is not faster: <n> CPU s on record, <n> CPU s now" and "the files of the split are not faster: ..."), and
 # version 2's three ("the file is not faster: ...; its budget is ...", "the split does not fit: ..." and "the file is
 # over the budget of its own that the build proposes: ..."). Version 4 holds no file to a CPU budget. Version 5
-# follows the issue's verdict and holds the file to its recent runs (recentcpu()), not its old median.
+# follows the issue's verdict and holds the file to its recent runs (recentcpu()), not its old median. Version 6 lets
+# a file that must be faster pass below the slowest of its recent runs (slowestrun()), inside their spread (#1140).
 # shellcheck disable=SC2034 # read by lib/card.sh and lib/run.sh
-SPEEDCHECK=5
+SPEEDCHECK=6
 # The failures of speedproof()'s run (exit <exit>, read by testfails() from <worktree>.test) of test files other than
 # <file run>...: the run also runs the test files the change selects (a Board test file's links,
 # .conveyor/test-links.json), and a failure of one of them is not the run's own file's (#602). Prints them, each file
@@ -1759,7 +1767,7 @@ speedothers() { # <worktree> <exit> <file run>...
   jq -e '[.files[]?.file, .timeout.file?] | any(.[]; IN($ARGS.positional[]))' --args "${@:3}" <<<"$t" > /dev/null
 }
 speedproof() { # <card> <worktree> <issue json> <test file> [<test file the change adds>...]
-  local mwt=$CARDS/mainrun/$1.speed f=$4 out='' rc='' sha before after='' why='' run=() l sa='' cpus='[]' over='' al='' alf='' lim='' tl='' cs='' cmd oth own v bw miss='' g gb nog=''
+  local mwt=$CARDS/mainrun/$1.speed f=$4 out='' rc='' sha before after='' why='' run=() l sa='' cpus='[]' over='' al='' alf='' lim='' tl='' cs='' cmd oth own v bw miss='' g gb nog='' top=''
   rm -f "$2.unfixed"
   # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
   git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || return 0
@@ -1800,10 +1808,13 @@ speedproof() { # <card> <worktree> <issue json> <test file> [<test file the chan
     elif [ $# = 4 ]; then
       if [ "$rc" != 0 ]; then why="the file $f fails with the change (exit $rc)${oth:+; another test file the change selects fails too: $oth}"
       elif [ -z "$after" ]; then why="the run of $f with the change gave no CPU seconds"
-      # A stabilise or merge card may leave the file as dear as its figure; any other must make it cheaper.
+      # A stabilise or merge card may leave the file as dear as its figure; any other must make it cheaper, or cost less
+      # than the slowest of the recent runs its issue lists (top, kept only then): one run varies that much (#1140).
       elif [ "$v" = stabilise ] || [ "$v" = merge ]; then jq -en --argjson a "$after" --argjson b "$before" '$a <= $b' >/dev/null 2>&1 \
         || why="the file is dearer than $bw ($before CPU s), which the verdict $v does not allow: $after CPU s now"
-      elif ! jq -en --argjson a "$after" --argjson b "$before" '$a < $b' >/dev/null 2>&1; then why="the file is not faster than $bw ($before CPU s), as the verdict $v asks: $after CPU s now"; fi
+      elif top=$(slowestrun "$3"); jq -en --argjson a "$after" --argjson b "$before" '$a < $b' >/dev/null 2>&1; then top=''
+      elif [ -z "$top" ] || ! jq -en --argjson a "$after" --argjson t "$top" '$a < $t' >/dev/null 2>&1; then
+        why="the file is not faster than $bw ($before CPU s), as the verdict $v asks: $after CPU s now"; fi
     elif [ "$rc" != 0 ]; then why="the files of the split, $l, fail with the change (exit $rc)${oth:+; another test file the change selects fails too: $oth}"
     elif [ -z "$after" ]; then why="the run of the files of the split, $l, with the change gave no CPU seconds for each"
     else
@@ -1821,8 +1832,10 @@ speedproof() { # <card> <worktree> <issue json> <test file> [<test file the chan
   else why="the file $f could not be run with the change: ${out:0:300}"; fi
   { if [ -n "$why" ]; then printf '%s\n' "$why"
     elif [ $# = 4 ]; then
-      printf 'This issue %s the test file %s (its verdict: %s), so no test must fail on main'"'"'s code. Run alone with the change, on a test slot, it passed in %s CPU s, %s %s, %s CPU s.\n' \
-        "$(case $v in stabilise) echo stabilises ;; 'speed up') echo speeds up ;; *) echo optimizes ;; esac)" "$f" "$v" "$after" "$([ "$v" = stabilise ] || [ "$v" = merge ] && echo not more than || echo lower than)" "$bw" "$before"
+      printf 'This issue %s the test file %s (its verdict: %s), so no test must fail on main'"'"'s code. Run alone with the change, on a test slot, it passed in %s CPU s, %s %s, %s CPU s%s.\n' \
+        "$(case $v in stabilise) echo stabilises ;; 'speed up') echo speeds up ;; *) echo optimizes ;; esac)" "$f" "$v" "$after" \
+        "$(if [ "$v" = stabilise ] || [ "$v" = merge ]; then echo not more than; elif [ -n "$top" ]; then echo not lower than; else echo lower than; fi)" "$bw" "$before" \
+        "${top:+, but lower than the slowest of those runs, $top CPU s: inside their spread}"
     else printf 'This change splits the test file %s, so no test must fail on main'"'"'s code. Run alone with the change, on a test slot, %s passed in %s CPU s summed (%s of %s is %s CPU s): %s.\n' "$f" "$l" "$after" \
       "$([ "$bw" = 'its median on record' ] && echo the median on record || echo the median of the recent runs)" "$f" "$before" "$(jq -r 'map("\(.file) \(.cpu) CPU s") | join(", ")' <<<"$cpus")"; fi
     # The review checks each cause a stabilise card's reply names against the code.

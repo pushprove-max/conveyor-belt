@@ -9,12 +9,13 @@
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
 # The body the Board writes for an Optimize issue of f.test.sh (draftIssue()): an old median of 4 CPU s, last runs of
-# 20, 24 and 22 CPU s (their median 22), the judge's verdict <verdict>, and a CAUSE line for its flaky case relstop.
+# 20, 24 and 22 CPU s (their median 22; the runs of $OVRUNS, if set), the judge's verdict <verdict>, and a CAUSE line
+# for its flaky case relstop.
 ovissue() { # <verdict>
-  jq -cn --arg v "$1" '{number: 7, title: "Optimize the test file f.test.sh", body: ([
+  jq -cn --arg v "$1" --arg r "${OVRUNS:-20.0 CPU s (card #346), 24.0 CPU s (card #352), 22.0 CPU s (whole suite, passed)}" '{number: 7, title: "Optimize the test file f.test.sh", body: ([
     "Optimize this test file: speed it up, split it, merge it into another test file, or delete it. Keep what it tests.", "",
     "What the Board measured:", "- CPU s in its last run: 20.0", "- Median of its runs: 4.0 CPU s (+400% against its median)",
-    "- Last runs, newest first: 20.0 CPU s (card #346), 24.0 CPU s (card #352), 22.0 CPU s (whole suite, passed)", "",
+    "- Last runs, newest first: \($r)", "",
     "The judge'"'"'s verdict (2026-11-18T00:00:00Z, claude · a-model · medium): \($v).", "", "The end of its text:",
     "CAUSE: relstop | timing | the case sleeps a fixed time and races the stop", "", "VERDICT: \($v)"] | join("\n"))}'
 }
@@ -55,6 +56,27 @@ t_optrecent() {
   [ "$RC" = 0 ] || fail "a speed up card below its recent runs was blocked against its old median: $WHY $(cat "$T/$CASE/run.out")"
   grep -qF 'it passed in 15 CPU s, lower than the median of its recent runs, 22 CPU s.' "$FXWT.unfixed" || fail "the review is not shown the recent figure: $(cat "$FXWT.unfixed")"
   [ "$(st 'select(.step == "bugproof") | "\(.result) \(.speed.before) \(.speed.after)"')" = 'ok 22 15' ] || fail "the bugproof line: $(st 'select(.step == "bugproof")')"
+}
+
+# The recent runs of a noisy file, newest first: 74, 126, 81 and 88 CPU s (their median 84.5, the slowest 126).
+NOISY='74.0 CPU s (card #1), 126.0 CPU s (card #2), 81.0 CPU s (card #3), 88.0 CPU s (whole suite, passed)'
+# #1140 D1. Bug it catches: one run of an "indirect" card's file, taken while other cards run, decided the check, so a
+# rewrite whose run (100 CPU s) is over the median of its recent runs (84.5) but inside their spread (up to 126) was
+# blocked as not faster. It passes, and the review is told it passed inside the spread, not below the median.
+t_optspread() {
+  OVRUNS=$NOISY ovrun indirect 'echo direct > f.test.sh' 100 'Done.'
+  [ "$RC" = 0 ] || fail "an indirect card whose run is inside the spread of its recent runs was blocked: $WHY $(cat "$T/$CASE/run.out")"
+  grep -qF 'it passed in 100 CPU s, not lower than the median of its recent runs, 84.5 CPU s, but lower than the slowest of those runs, 126 CPU s: inside their spread.' "$FXWT.unfixed" \
+    || fail "the review is not told the run passed inside the spread: $(cat "$FXWT.unfixed")"
+  [ "$(st 'select(.step == "bugproof") | "\(.result) \(.speed.before) \(.speed.after)"')" = 'ok 84.5 100' ] || fail "the bugproof line: $(st 'select(.step == "bugproof")')"
+}
+
+# #1140 D2. Bug it catches: the spread lets through a rewrite that is slower than every recent run (130 CPU s against
+# 74 to 126). It is still blocked, with the reason of the median.
+t_optspreadslow() {
+  OVRUNS=$NOISY ovrun indirect 'echo direct > f.test.sh' 130 'Done.'
+  [ "$RC" != 0 ] && [ "$WHY" = 'the file is not faster than the median of its recent runs (84.5 CPU s), as the verdict indirect asks: 130 CPU s now' ] \
+    || fail "an indirect card slower than every recent run was not blocked as not faster: exit $RC, $WHY"
 }
 
 # D2. Bug it catches (#568): a "stabilise" card whose file costs what its recent runs cost was blocked as "not faster".

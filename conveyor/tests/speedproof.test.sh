@@ -127,7 +127,7 @@ t_optkeep() {
   # flagged a merge the engine passes at the file's figure plus the merged file's (t_optmergeinto). The whole rule is
   # matched, so a second, unconditional "less than that figure" limit for a kept file also fails it. The review's
   # prompt (OPTREVIEW, which card() gives the review of an Optimize card) is text with no behaviour to run, so it is read.
-  tr '\n' ' ' < "$T/$CASE/optreview" | grep -qF 'A file kept must cost less than that figure; for stabilise, no more than it; and, when another test file is merged into it, no more than that figure plus the median on record of each test file merged into it. The files of a split' \
+  tr '\n' ' ' < "$T/$CASE/optreview" | grep -qF 'A file kept must cost less than that figure, or than the slowest of the recent runs the issue lists; for stabilise, no more than it; and, when another test file is merged into it, no more than that figure plus the median on record of each test file merged into it. The files of a split' \
     || fail "the review is not told one limit for a kept file, with the limit of a merge into it"
 }
 

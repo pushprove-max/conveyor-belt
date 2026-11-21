@@ -1090,8 +1090,9 @@ there. The file runs alone, with the change, on a test slot, through the pack's 
 seconds must be lower than the median of its recent runs: the runs on the issue's "Last runs, newest first" line, as
 the Tests page writes it. The Tests page writes `none` on that line when the file has no runs, and `— CPU s` for a
 run with a clock time only. When the issue has no such line, or the line gives no CPU seconds, the check uses the
-file's median on record. This is the median the Tests page shows. The card's `bugproof` line (result `ok` or `fail`) names the file and both numbers: `speed: {file, before,
-after}`. When the file is not faster, the card
+file's median on record. This is the median the Tests page shows. One run of a file can take much more or less time
+than the last, so a run that is lower than the slowest of the runs on the "Last runs" line passes too. The card's `bugproof` line (result `ok` or `fail`) names the file and both numbers: `speed: {file, before,
+after}`. When the file is not faster, and not lower than the slowest of those runs, the card
 is blocked with "the file is not faster than <the median of its recent runs, or its median on record> (<before> CPU
 s), as the verdict speed up asks: <after> CPU s now", with no review. When the file
 fails, has no CPU seconds on record, or its run gives none, the card is blocked too, with the reason. The review is
@@ -1104,8 +1105,8 @@ issue: the line "The judge's verdict (...): <verdict>." that the Tests page writ
 issue with no verdict can take any of the changes below, each checked as the list after them says. The change must do
 what the verdict asks, else the card is blocked with a reason that names the verdict:
 
-- speed up: the change keeps the file and adds or removes no other test file, and the file must cost less than its recent runs.
-- keep: the change keeps the file and adds or removes no other test file, and the file must cost less than its recent runs.
+- speed up: the change keeps the file and adds or removes no other test file, and the file must cost less than its recent runs (or less than the slowest of them).
+- keep: the change keeps the file and adds or removes no other test file, and the file must cost less than its recent runs (or less than the slowest of them).
 - stabilise: the change keeps the file and adds or removes no other test file. The build's reply ends with one line
   `STABILISED: <case> | <its cause> | <how the change removes it>` for each case that the issue names on a `CAUSE:`
   line, or at least one line when the issue names none. A case with no line blocks the card before the run. The file
