@@ -972,8 +972,14 @@ links the dependency folders the card's worktree has, does not run `worktree.set
 `ratchet: false` command gets no base run: every finding is the card's. A base run that does not end in pass or
 findings makes the command's result an execution error.
 
-The review gate (`lintgate`) is at the top of each pass of the review loop in `card()`: after the change is staged,
-before the choice between a kept review and a review session. With the rule Lint check on, it runs the ratchet on the
+`card()` runs a card in steps: `cardopen()` (the worktree and the brief) and `cardbuild()` (the build and its proof),
+then on each pass of the review loop `cardreview()` (the review), `cardfix()` (a fix round, or on to land),
+`cardready()` (the owner's yes, the trailers and the ready file), `cardlanding()` (the checks, the tests, in
+`cardtest()` and `cardfailed()`, and the land step, in `cardland()`) and `cardrebuild()` (the one rebuild or port of a
+change whose landing conflicts). The steps from `cardready()` on are in `lib/cardland.sh`.
+
+The review gate (`lintgate`) is at the top of each pass of the review loop, in `cardreview()`: after the change is
+staged, before the choice between a kept review and a review session. With the rule Lint check on, it runs the ratchet on the
 staged change, from the commit the card's worktree is on, and writes the card's `lint` line. A pass or a skipped
 command lets the card go on. An execution error blocks the card, with no fix session. The card's findings go to one
 fix session in the same pass, its reply checked as any fix's reply is. The change is staged again and the gate runs
@@ -983,7 +989,7 @@ change. The fix counts as no review. A later fix or rebuild session that adds a 
 the next pass's gate. When a card is split for its size (`growcheck`), the gate runs again after the split's fix
 session, before the review of that pass.
 
-The landing gate (`lintgate` with `land`) is in the landing loop of `card()`, each time the product checks run: after
+The landing gate (`lintgate` with `land`) is in the landing loop, in `cardtest()`, each time the product checks run: after
 the parse check of a merge onto main (`parses`), before the product checks and the changed tests. It uses the same
 ratchet run, from the commit the worktree is on after the merge, the same read-only check, `lint` line,
 execution-error block and rule Lint check. The card's findings go to one fix session, its reply checked as any fix's

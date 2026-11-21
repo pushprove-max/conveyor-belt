@@ -24,8 +24,6 @@ conveyor/bench/swe.sh
 conveyor/commands/release-prep.sh	release
 conveyor/foreman/foreman-session.test.sh	t_filing
 conveyor/foreman/watch-conveyor.sh	record
-conveyor/lib/card.sh
-conveyor/lib/card.sh	card
 conveyor/lib/claim.sh
 conveyor/lib/claim.sh	settle
 conveyor/lib/control.sh

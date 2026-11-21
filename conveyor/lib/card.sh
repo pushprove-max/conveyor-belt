@@ -10,6 +10,7 @@
 . "$HERE/lib/slices.sh" || exit 1
 . "$HERE/lib/modelpick.sh" || exit 1
 . "$HERE/lib/lint.sh" || exit 1
+. "$HERE/lib/cardland.sh" || exit 1
 began() { # <card> <issue> <what begins>
   local e=''
   switchcode "$1" "$3"; rm -f "$CARDS/$1.firsttry" "$CARDS/$1.firsttry.new"
@@ -32,10 +33,11 @@ STEPFILES=1
 # from the new install), and the card's rules, its header and the engine's review texts in each prompt a session or
 # review is given from then on: switchcode() keeps each old text with its new one (SWAPOLD, SWAPNEW) and session()
 # and review() put the new one in its place (newtexts()), so a copy of the prompt a function was handed before the
-# switch gets them too. The rules and header are the ones card() made (its rules and hdr: began() runs only in card()).
-# A function that is running (card(), and settle() or began() under it) goes on in its old body to its end, as bash
-# runs it: so the card keeps its old code, and says why once, when the new code changes one of them, reads another
-# form of step files (STEPFILES), or its files do not load or do not make the card's rules, header and settings.
+# switch gets them too. The rules and header are the ones card() made (its rules and hdr: began() runs only under
+# card()). A function that is running (card(), the step of card() it is in, and settle() or began() under it) goes on
+# in its old body to its end, as bash runs it: so the card keeps its old code, and says why once, when the new code
+# changes one of them, reads another form of step files (STEPFILES), or its files do not load or do not make the
+# card's rules, header and settings.
 # shellcheck disable=SC2034 # CONVEYOR_MAIN and NAMED: read by paths.sh and names() (lib/prompts.sh)
 switchcode() { # <card> <the step it begins>
   local s p d v old why='' tmp f i k o=() nv=()
@@ -231,6 +233,12 @@ afterreview() {
   else after=fix
   fi
 }
+# card()'s steps, in turn: cardopen(), cardbuild(), then on each pass of the review loop cardreview() and cardfix()
+# here, cardready(), cardlanding() and cardrebuild() in lib/cardland.sh. Each reads and sets card()'s locals (bash's
+# dynamic scope) and says in go what follows. card() sets go=end before each: a step that returns leaving it so ends
+# the card, with the step's exit as card()'s; else '' (the next step), next (the next pass of the review loop),
+# landed (a batch or its own landing landed it) or out (its landing did not land: cardrebuild()).
+# shellcheck disable=SC2034 # locals that only its steps in lib/cardland.sh, or settle() (lib/claim.sh), read
 card() { # <card> <issue> [<branch> <tip>]
   local c=$1 n=$2 br=${3:-} tip=${4:-} wt=$CARDS/$1 issue b t pass res vis unclear msg d err isfu='' dec='' why ups='' left='' rebased='' tfix='' last rc sec out merged away
   local from='' fromk='' was='' mode='' note='' old more base inh='' rv=$REVIEW yesfrom='' extra
@@ -253,12 +261,35 @@ card() { # <card> <issue> [<branch> <tip>]
   local ins rr # ins, rr: the review's instructions, and fix when it reviews the fix alone (rereview())
   local ph pf pb # ph, pf: the hash and the files of the change's lint policy diff (lintpolicy()); pb: the body kept by the card it resumes
   local shared sb # shared: this test step runs its shared test files again (sharedtests()); sb: the commit its last tests ran on
+  local go sx # go, sx: what the step that returned says follows (above), and its exit
   # shellcheck disable=SC2034 # SEATCARD is read by seat() in lib/control.sh
   local SEATCARD=$n # every step of this card, its split check too, runs on the seats the control record keeps for its issue (seat(), lib/control.sh)
   [ -n "$br" ] || [ "$n" = 0 ] || splitcheck "$c" "$n" || return 0
   # shellcheck disable=SC2034 # PICK and PICKCARD are read by line() in lib/records.sh, PICKSEAT and PICKSEATS by seat() in lib/control.sh
   local PICK='' PICKCARD='' PICKSEAT='' PICKSEATS='' # the card's pick (modelpick(), lib/modelpick.sh), which line() puts on each of its lines, a trial's builder and the promoted reviewer and judge
   [ -n "$br" ] || [ "$n" = 0 ] || modelpick "$c" "$n"
+  go=end; cardopen; sx=$?; [ "$go" != end ] || return $sx
+  go=end; cardbuild; sx=$?; [ "$go" != end ] || return $sx
+  msg=$(cardsubject "$c" "$issue")
+  # A branch that names no issue lands under its own first commit's subject, which names no issue to close.
+  [ "$n" != 0 ] || [ -z "$br" ] || msg=$(jq -r --arg c "$c" --arg b "$br" '"\(.title)\n\nConveyor card \($c), branch \($b)"' <<<"$issue")
+  prv=$'\n\n'"$PORTREVIEW"$'\n'"The difference is the file $wt.port."; kp=$fromk/$from.patch
+  # A NO-GO is fixed and reviewed again; a NO-GO on a last review (review MAX_REVIEWS, counting the rounds a retried
+  # card carries, or the one review after a landing conflict, a test fix or the landing gate's lint fix, or one that
+  # repeats a finding after its fix with every finding P2 or P3) lands with follow-ups, or blocks when it holds a P0. A GO card whose landing
+  # conflicts goes round once more: rebase, review. A finished loop whose landing still conflicts is ported once, as `retry` would port it.
+  # Whatever the review, the changed tests pass here before anything is filed or landed.
+  while pass=$((${pass:-0} + 1)); do
+    go=end; cardreview; sx=$?; [ "$go" != end ] || return $sx
+    go=end; cardfix; sx=$?; case $go in end) return $sx ;; next) continue ;; esac
+    go=end; cardready; sx=$?; case $go in end) return $sx ;; next) continue ;; esac
+    go=end; cardlanding; sx=$?; case $go in end) return $sx ;; next) continue ;; landed) break ;; esac
+    go=end; cardrebuild; sx=$?; [ "$go" != end ] || return $sx
+  done
+  clean "$wt"
+}
+# The worktree, its dependencies and the brief (sprompt), with the resume of a retried card (resumeplan()). go: ''.
+cardopen() {
   err=$(git worktree add -q --detach "$wt" "refs/heads/$BRANCH" 2>&1) || { block "$c" "$n" "$wt" "worktree: $err"; return; }
   [ -z "$br" ] || err=$(git -C "$wt" merge -q --squash "$tip" 2>&1) \
     || { block "$c" "$n" "$wt" "worktree: branch $br does not merge into main as it stands; rebase it on main and land it again: ${err:0:400}"; return; }
@@ -331,6 +362,12 @@ card() { # <card> <issue> [<branch> <tip>]
   d=$(jq -r '.body // ""' <<<"$issue" | sed -nE 's/^Follow-up depth: ([0-9]+)[[:space:]]*$/\1/p' | head -n 1)
   [ ${#d} -le 3 ] && d=$((10#${d:-0})) || d=''
   record "$c" "$n" brief ok "$([ -z "$d" ] && echo '{}' || echo "{\"depth\":$d}")"
+  go=''
+}
+# The build, then the checks a bug card's change must pass before its review (or, on a retry with no build, those of
+# one of the Board's fix issues). go: '', or the card ends: blocked, or closed as already fixed on main.
+# shellcheck disable=SC2034 # it declares no variable of its own: mk, as the rest, is card()'s, read in lib/cardland.sh
+cardbuild() {
   if [ -z "$br" ] && [ "$mode" != land ] && [ "$mode" != review ]; then
     more=''
     [ "$mode" != session ] || more=$'\n\n# This card resumes blocked card '"$from"$'\nThe staged change in this worktree is no leftover: it is the kept work of card '"$from"$', an earlier card of this issue, applied to main as it stands. That card was blocked: '"${was:0:600}"$'\nThat change is yours now: keep, change or drop each part of it. Start from it, not from nothing: finish what the issue asks, fix the findings carried over above, and leave alone what is already right. The checks at the end (the bug-card check too) judge the whole staged change as this card\'s, that card\'s tests included.'
@@ -413,544 +450,129 @@ card() { # <card> <issue> [<branch> <tip>]
       sk=$RUNREVIEW; mk=$sf; runproof "$wt" "$sf" || { block "$c" "$n" "$wt" "$mode: $(<"$wt.unfixed")"; return; }
     fi
   fi
-  msg=$(cardsubject "$c" "$issue")
-  # A branch that names no issue lands under its own first commit's subject, which names no issue to close.
-  [ "$n" != 0 ] || [ -z "$br" ] || msg=$(jq -r --arg c "$c" --arg b "$br" '"\(.title)\n\nConveyor card \($c), branch \($b)"' <<<"$issue")
-  prv=$'\n\n'"$PORTREVIEW"$'\n'"The difference is the file $wt.port."; kp=$fromk/$from.patch
-  # A NO-GO is fixed and reviewed again; a NO-GO on a last review (review MAX_REVIEWS, counting the rounds a retried
-  # card carries, or the one review after a landing conflict, a test fix or the landing gate's lint fix, or one that
-  # repeats a finding after its fix with every finding P2 or P3) lands with follow-ups, or blocks when it holds a P0. A GO card whose landing
-  # conflicts goes round once more: rebase, review. A finished loop whose landing still conflicts is ported once, as `retry` would port it.
-  # Whatever the review, the changed tests pass here before anything is filed or landed.
-  while pass=$((${pass:-0} + 1)); do
-    redbrief "$c" "$n" "$br"
-    # A main-red fix card whose staged change is only the links the engine staged (linksonly()) made no change: the
-    # links come with a fix, so with none they are dropped (issue 323).
-    git -C "$wt" add -A && ! git -C "$wt" diff --cached --quiet \
-      && ! { [ "$n" = 0 ] && [ -z "$br" ] && linksonly "$c" "$wt" && { git -C "$wt" reset -q --hard HEAD || :; }; } || {
-      nochange "$c" "$n" "$wt" "$sprompt"; return; }
-    trialflag "$wt" # a trial card's pick names the pipeline files its change touches (lib/push.sh)
-    # The review gate (lintgate(), lib/lint.sh): a fix of lint findings changed the change, so a kept review, a kept
-    # patch's review (land) and a test pass no longer stand for it, and the review of this pass reads all of it.
-    lintgate "$c" "$n" "$wt" "$issue" "$sprompt" "$br"; case $? in 1) return ;; 2) kept=''; docpass=''; refix=''; [ "$mode" != land ] || mode='' ;; esac
-    if [ "$mode" = land ]; then
-      # Landing from the kept patch: the kept review is this change's review, and it let the card land (a GO, or a
-      # last review's NO-GO), so there is no review here and no review line. A review after this is this card's first.
-      res=$(verdict "$wt.review"); vis=$(visible "$wt.review" any); pass=0
-    elif [ -n "$kept" ]; then
-      # Back from the landing rebuild with its change outside documentation (*.md) the one its last review read: that
-      # review stands (kept), with no review session and no review line, and no review is counted.
-      res=$(verdict "$wt.review"); vis=$(visible "$wt.review" "$vmode"); pass=$((pass - 1)); kept=''
+  go=''
+}
+# One pass's review: the review gate and the checks before a review, then a review session and its judge, or the
+# review it reuses or keeps, its verdict in res and its line, still to be written, in rline. go: ''.
+# shellcheck disable=SC2034 # it declares no variable of its own: docpass, as the rest, is card()'s, read in lib/cardland.sh
+cardreview() {
+  redbrief "$c" "$n" "$br"
+  # A main-red fix card whose staged change is only the links the engine staged (linksonly()) made no change: the
+  # links come with a fix, so with none they are dropped (issue 323).
+  git -C "$wt" add -A && ! git -C "$wt" diff --cached --quiet \
+    && ! { [ "$n" = 0 ] && [ -z "$br" ] && linksonly "$c" "$wt" && { git -C "$wt" reset -q --hard HEAD || :; }; } || {
+    nochange "$c" "$n" "$wt" "$sprompt"; return; }
+  trialflag "$wt" # a trial card's pick names the pipeline files its change touches (lib/push.sh)
+  # The review gate (lintgate(), lib/lint.sh): a fix of lint findings changed the change, so a kept review, a kept
+  # patch's review (land) and a test pass no longer stand for it, and the review of this pass reads all of it.
+  lintgate "$c" "$n" "$wt" "$issue" "$sprompt" "$br"; case $? in 1) return ;; 2) kept=''; docpass=''; refix=''; [ "$mode" != land ] || mode='' ;; esac
+  if [ "$mode" = land ]; then
+    # Landing from the kept patch: the kept review is this change's review, and it let the card land (a GO, or a
+    # last review's NO-GO), so there is no review here and no review line. A review after this is this card's first.
+    res=$(verdict "$wt.review"); vis=$(visible "$wt.review" any); pass=0
+  elif [ -n "$kept" ]; then
+    # Back from the landing rebuild with its change outside documentation (*.md) the one its last review read: that
+    # review stands (kept), with no review session and no review line, and no review is counted.
+    res=$(verdict "$wt.review"); vis=$(visible "$wt.review" "$vmode"); pass=$((pass - 1)); kept=''
+  else
+    # Same-file cards review in parallel: no claim and no wait before a review. They line up only to land (at
+    # settle() below), and a card is reviewed again there only when an earlier landing changed the lines it changed,
+    # or when an ordered card went past it and main moved meanwhile (then even when its patch still applies).
+    # A change grown past the pack's split.growFiles (growcheck(), lib/slices.sh): asked once a card; split, its one
+    # fix session dropped the slices' parts, so this review reads the whole change, not that fix alone, and the
+    # review gate runs again on what that fix left.
+    if [ -z "$grown" ] && [ -z "$br" ]; then growcheck "$c" "$n" "$wt" "$issue" "$sprompt"; case $? in 1) return ;; 2) refix=''; git -C "$wt" add -A 2>/dev/null
+      lintgate "$c" "$n" "$wt" "$issue" "$sprompt" "$br"; [ $? != 1 ] || return; docpass='' ;; esac; fi
+    # A fix or rebase session changed a Fix the waiting, Fix hollow cases, Delete it or Make it run alone card: its check runs again on
+    # what this review reads, and the card is blocked when it no longer holds.
+    if [ -n "$pk" ] && [ "$(git -C "$wt" write-tree)" != "$pt" ]; then
+      fixproof "$c" "$wt" "$issue" "$sf" "$pk" || { block "$c" "$n" "$wt" "review $pass: $(<"$wt.unfixed")"; return; }
+      pt=$(git -C "$wt" add -A && git -C "$wt" write-tree)
+    fi
+    began "$c" "$n" review
+    # The review sees the card's commit trailers beside the diff, and the D<n> lines of the last checked reply.
+    more=$(reviewseen "$wt" "$(if [ -n "$sk" ]; then echo "$sk"; elif [ -n "$sf" ]; then echo "$SPEEDREVIEW"; else echo "$BUGREVIEW"; fi)") \
+      || { block "$c" "$n" "$wt" "review $pass: the engine could not read the commit trailers of the card"; return; }
+    # What this review reads, kept on its line: the staged change, the main commit and what it is shown beside the
+    # diff (seen: the trailers and D<n> lines above). A review due on the same three as the card's last review is
+    # that review again (reusable()), with no review session. Not the one review of a port, which reads the port's
+    # difference, not the change alone.
+    cpid=$(cardpatch "$wt"); chead=$(git -C "$wt" rev-parse HEAD 2>/dev/null); cseen=$(git -C "$wt" hash-object --stdin <<<"$more")
+    if [ -z "$fin" ] && t=$(reusable "$c" "$cpid" "$chead" "$cseen"); then
+      echo "conveyor: card $c: its staged change, main, trailers and D<n> lines are those of its last review: that review stands, with no review session"
     else
-      # Same-file cards review in parallel: no claim and no wait before a review. They line up only to land (at
-      # settle() below), and a card is reviewed again there only when an earlier landing changed the lines it changed,
-      # or when an ordered card went past it and main moved meanwhile (then even when its patch still applies).
-      # A change grown past the pack's split.growFiles (growcheck(), lib/slices.sh): asked once a card; split, its one
-      # fix session dropped the slices' parts, so this review reads the whole change, not that fix alone, and the
-      # review gate runs again on what that fix left.
-      if [ -z "$grown" ] && [ -z "$br" ]; then growcheck "$c" "$n" "$wt" "$issue" "$sprompt"; case $? in 1) return ;; 2) refix=''; git -C "$wt" add -A 2>/dev/null
-        lintgate "$c" "$n" "$wt" "$issue" "$sprompt" "$br"; [ $? != 1 ] || return; docpass='' ;; esac; fi
-      # A fix or rebase session changed a Fix the waiting, Fix hollow cases, Delete it or Make it run alone card: its check runs again on
-      # what this review reads, and the card is blocked when it no longer holds.
-      if [ -n "$pk" ] && [ "$(git -C "$wt" write-tree)" != "$pt" ]; then
-        fixproof "$c" "$wt" "$issue" "$sf" "$pk" || { block "$c" "$n" "$wt" "review $pass: $(<"$wt.unfixed")"; return; }
-        pt=$(git -C "$wt" add -A && git -C "$wt" write-tree)
+      # The one review of a port reads what the port changed: the kept patch against the staged change.
+      if [ -n "$fin" ]; then
+        finrev=$(<"$wt.review")
+        diff -u --label kept --label ported <(sed '/^index /d' "$kp") \
+          <(git -C "$wt" diff --cached --binary --no-renames | sed '/^index /d') > "$wt.port"
+        [ $? -le 1 ] || { rm -f "$wt.port"; block "$c" "$n" "$wt" "review $pass: the engine could not compare the port with the kept patch"; return; }
       fi
-      began "$c" "$n" review
-      # The review sees the card's commit trailers beside the diff, and the D<n> lines of the last checked reply.
-      more=$(reviewseen "$wt" "$(if [ -n "$sk" ]; then echo "$sk"; elif [ -n "$sf" ]; then echo "$SPEEDREVIEW"; else echo "$BUGREVIEW"; fi)") \
-        || { block "$c" "$n" "$wt" "review $pass: the engine could not read the commit trailers of the card"; return; }
-      # What this review reads, kept on its line: the staged change, the main commit and what it is shown beside the
-      # diff (seen: the trailers and D<n> lines above). A review due on the same three as the card's last review is
-      # that review again (reusable()), with no review session. Not the one review of a port, which reads the port's
-      # difference, not the change alone.
-      cpid=$(cardpatch "$wt"); chead=$(git -C "$wt" rev-parse HEAD 2>/dev/null); cseen=$(git -C "$wt" hash-object --stdin <<<"$more")
-      if [ -z "$fin" ] && t=$(reusable "$c" "$cpid" "$chead" "$cseen"); then
-        echo "conveyor: card $c: its staged change, main, trailers and D<n> lines are those of its last review: that review stands, with no review session"
-      else
-        # The one review of a port reads what the port changed: the kept patch against the staged change.
-        if [ -n "$fin" ]; then
-          finrev=$(<"$wt.review")
-          diff -u --label kept --label ported <(sed '/^index /d' "$kp") \
-            <(git -C "$wt" diff --cached --binary --no-renames | sed '/^index /d') > "$wt.port"
-          [ $? -le 1 ] || { rm -f "$wt.port"; block "$c" "$n" "$wt" "review $pass: the engine could not compare the port with the kept patch"; return; }
-        fi
-        # The review right after a fix of review findings also sees what that fix was told and changed (rereview()):
-        # not part of seen, so a fix that changed nothing still reuses the last review. It reviews the fix alone, its
-        # instructions opening with FIXREVIEW in place of REVIEWHEAD, unless the fix touches more than the pack's
-        # review.rereviewWhole share of the change's lines (fixonly()): then it reviews the whole change.
-        ins=$rv${fin:+$prv}; rr=''
-        [ -z "$refix" ] || [[ $ins != "$REVIEWHEAD"* ]] || ! fixonly "$wt" "$refix" || { rr=fix; ins=$FIXREVIEW${ins#"$REVIEWHEAD"}; }
-        redbrief "$c" "$n" "$br"; t="the engine could not write the re-review section"; { [ -z "$refix" ] || more+=$'\n\n'"$(rereview "$c" "$wt" "$refix" "$rr")"; } \
-          && t=$(reviewed "$wt" "$sprompt$more" "$ins"); rc=$?; rm -f "$wt.port"
-        [ $rc = 0 ] || { block "$c" "$n" "$wt" "review $pass: $t"; return; }
-        # The judge (judged()): a finding it declines is no finding from here on, and a review left with none is a GO.
-        redbrief "$c" "$n" "$br"; t=$(judged "$c" "$n" "$wt" "$sprompt" "$t")
-        # The P3 findings it leaves, with the rule P3 off, are listed only (minor()).
-        minor "$wt"
-      fi
-      refix=''
-      res=$(verdict "$wt.review"); vis=$(visible "$wt.review" "$vmode"); unclear=''
-      [ -n "$vis" ] || { [ "$res" = none ] || unclear=": it does not hold exactly one USER-VISIBLE line, written as asked"; res=none; }
-      # A NO-GO's line names the findings that came back after a fix round told to fix them (survived: id, rounds), for the Board.
-      # Every review's line keeps its answers on the findings fix rounds were told, each beside its first location
-      # and proof (answers()), so a review that blocks or ends the loop keeps them too.
-      sv='[]'; [ "$res" != NO-GO ] || sv=$(repeats "$wt" | jq -sc 'map({id, rounds})')
-      an=$(answers "$wt")
-      # doneWhenHolds: the D<n> its `DONE-WHEN: D<n> holds` lines name, which the reason leaves out (UNRECORDED); the
-      # Board reads them on demand (history donewhen). excerpts: the lines its findings cite, from the tree it read
-      # (excerpts(), lib/review.sh), which the Board reads on demand too (history excerpts); after a fix round, also
-      # from the tree before that fix (fixtree), which holds the lines the fix deleted.
-      ex=$(excerpts "$wt" "$fixtree"); fixtree=''
-      # The line is written once the loop's end is known (stop, below); a review with no verdict blocks with it here.
-      rline=$(grep -Ev "$UNRECORDED" "$wt.review" | jq -cRs --arg res "$res" --argjson t "$t" --arg v "$vis" --argjson k "$(counts "$wt.review")" --arg p "$cpid" --arg m "$chead" --arg s "$cseen" --argjson sv "${sv:-[]}" --argjson an "${an:-[]}" \
-        --argjson ro "$(rollouts "$wt.review" ROLLOUT)" --argjson h "$(sed -n 's/^DONE-WHEN: D\([0-9][0-9]*\) holds[[:space:]]*$/\1/p' "$wt.review" | jq -sc 'unique')" --argjson ex "${ex:-[]}" \
-        'sub("\n+$"; "") as $r | $t + {reason:$r,visible:$v,counts:$k,patch:$p,main:$m,seen:$s} + (if $res == "NO-GO" then {tail: $r} else {} end) + (if $sv == [] then {} else {survived: $sv} end) + (if $an == [] then {} else {answers: $an} end) + (if $h == [] then {} else {doneWhenHolds: $h} end) + (if $ro != [] then {rollout: $ro} else {} end) + (if $ex == [] then {} else {excerpts: $ex} end)')
-      [ -n "$rline" ] || rline='{}' # the grep finds no line in a review of only unrecorded lines: that is no failure
-      [ "$res" != none ] || { record "$c" "$n" review "$res" "$rline"; block "$c" "$n" "$wt" "review $pass ended without one clear verdict$unclear"; return; }
+      # The review right after a fix of review findings also sees what that fix was told and changed (rereview()):
+      # not part of seen, so a fix that changed nothing still reuses the last review. It reviews the fix alone, its
+      # instructions opening with FIXREVIEW in place of REVIEWHEAD, unless the fix touches more than the pack's
+      # review.rereviewWhole share of the change's lines (fixonly()): then it reviews the whole change.
+      ins=$rv${fin:+$prv}; rr=''
+      [ -z "$refix" ] || [[ $ins != "$REVIEWHEAD"* ]] || ! fixonly "$wt" "$refix" || { rr=fix; ins=$FIXREVIEW${ins#"$REVIEWHEAD"}; }
+      redbrief "$c" "$n" "$br"; t="the engine could not write the re-review section"; { [ -z "$refix" ] || more+=$'\n\n'"$(rereview "$c" "$wt" "$refix" "$rr")"; } \
+        && t=$(reviewed "$wt" "$sprompt$more" "$ins"); rc=$?; rm -f "$wt.port"
+      [ $rc = 0 ] || { block "$c" "$n" "$wt" "review $pass: $t"; return; }
+      # The judge (judged()): a finding it declines is no finding from here on, and a review left with none is a GO.
+      redbrief "$c" "$n" "$br"; t=$(judged "$c" "$n" "$wt" "$sprompt" "$t")
+      # The P3 findings it leaves, with the rule P3 off, are listed only (minor()).
+      minor "$wt"
     fi
-    # What follows this review (afterreview()): the review line is written with why the loop ended (ended), then
-    # card() blocks, lands (go, last) or gives the findings to a fix round.
-    afterreview
-    [ -z "$rline" ] || record "$c" "$n" review "$res" "$(jq -c --argjson e "$ended" '. + $e' <<<"$rline")"; rline=''
-    [ "$after" != hard ] || { block "$c" "$n" "$wt" "the fix for $hard"; return; }
-    [ "$after" != p0 ] || { block "$c" "$n" "$wt" "review $pass is the last review and still holds a P0 finding, so it files no follow-up: $last0"; return; }
-    [ "$after" != nofinding ] || { block "$c" "$n" "$wt" "review $pass is NO-GO with no finding to fix: ${why:0:200}"; return; }
-    if [ "$after" != fix ]; then mode=''
-    else
-      # A card stacked on this one (stackto()) that passed its tests goes on during this round, fitted onto main alone
-      # (giveway(), claim()).
-      [ -z "$priv" ] || { privfix=1; echo "conveyor: card $c: a finding of its last review is a privacy hit in its own change, so it goes to one more fix round: ${priv:0:200}"; }
-      locked giveway "$c" "$wt" fix; began "$c" "$n" fix
-      old=$(git -C "$wt" write-tree); more=''; [ -z "$rep" ] || more=$'\n\n'"$(again "$rep")"
-      # The fix is told the accepted findings only: a finding the judge declined (a DECLINED line), a P3 listed only
-      # (a MINOR line, minor()), or a rollout action (a ROLLOUT line, no defect), is not its to fix. Each finding it is told is led by its id (numbered(), fixlines()).
-      # It runs on the fix seat (seat(): the builder's unless the control record sets fix).
-      ids=$(numbered "$wt") && fl=$(fixlines "$wt" "$ids") || { block "$c" "$n" "$wt" "fix: the engine could not give the review's findings their ids"; return; }
-      redbrief "$c" "$n" "$br"; t=$(session "$wt" "$(fixprompt "$sprompt" "$fl$more")" fix fix) || { block "$c" "$n" "$wt" "fix: $t"; return; }
-      checked "$c" "$n" "$wt" "$issue" "$sprompt" fix "$t" || return
-      # This fix round's findings, with their ids, and the diff it made, for the review after it (repeats(), rereview()).
-      mkdir -p "$wt.rounds" && git -C "$wt" add -A && git -C "$wt" diff "$old" "$(git -C "$wt" write-tree)" > "$wt.rounds/$((pass + rounds)).diff" \
-        && rounded "$wt" "$((pass + rounds))" "$ids" && refix=$((pass + rounds)) && fixtree=$old
-      continue
-    fi
-    # This review would let the card land. A change customers or staff would see needs the owner's yes first, when
-    # the card touches product code: its staged change, both sides of a rename, names a path PRODUCT counts.
-    # A follow-up with no line of its own lands on its parent's yes when its reviewer says its visible change is part
-    # of that approved change; one that goes beyond it stops, and the reason names what goes beyond.
-    # A card held to the section the owner approved before the build lands on a review that says its change matches
-    # that section, with no second ask; one that differs stops, and the ask names the difference only. A section
-    # saying nothing visible changes is no yes: a visible change stops as it would with no section. With the rule
-    # "visible changes need the owner's yes" off, none of this holds a card.
-    # A card that stops here keeps the issue body this review read (.body; keptway(): its retry lands only on it).
-    # A change of lint policy (lintpolicy(), lib/lint.sh) needs the owner's yes too, with the rule Lint check on,
-    # whatever the rule on visible changes says. The card that stops for it keeps the hash of its policy diff in its
-    # .body (policy), and the yes covers that diff only (lintyes()): an approval line after that stop. A card that
-    # stops for a visible change as well stops once, its reason naming the policy files (pf) too.
-    yesfrom='' ph='' pf=''
-    if lintrule; then
-      { packget lint pf && pf=$(lintpolicy "$wt" "$(git -C "$wt" rev-parse HEAD)" "$pf"); } || { block "$c" "$n" "$wt" "lint: the engine could not read the lint policy files that the change changes, so nothing landed"; return; }
-      ph=${pf%%$'\n'*}; pf=$(tail -n +2 <<<"$pf" | jq -Rrs 'split("\n") | map(select(. != "")) | join(", ")')
-      pb=$fromk/$from.body; [ -n "$from" ] && [ -e "$pb" ] || pb=$CARDS/$from.body
-      [ -z "$pf" ] || [ -z "$from" ] || ! lintyes "$issue" "$pb" "$ph" || { echo "conveyor: card $c: its lint policy change is the one $OWNER approved"; pf=''; }
-    fi
-    # The visible-change gate after the review (visgate()): a stop blocks the card, its reason in err.
-    visgate || { block "$c" "$n" "$wt" "$err" post; return; }
-    [ -z "$pf" ] || { jq -c --arg p "$ph" '{body, policy: $p}' <<<"$issue" > "$wt.body"; block "$c" "$n" "$wt" "${LINTYES}it changes lint policy: $pf" post; return; }
-    # The trailers the pack requires of the files this change adds (commit.trailers): one session per card writes
-    # those the card has not; still missing, the card blocks, never committing without them. A session that changed
-    # the change or its trailers goes round to be reviewed again.
-    owe=$(owing "$wt") || { block "$c" "$n" "$wt" "the engine could not read the commit trailers that the pack requires. Each when value must be a valid extended regular expression. Nothing landed"; return; }
-    if [ -n "$owe" ] && [ -z "$tsess" ]; then
-      tsess=1; old=$(git -C "$wt" write-tree); cmsg=$(trailers "$wt") || { block "$c" "$n" "$wt" "the engine could not read the commit trailers of the card, so nothing landed"; return; }
-      began "$c" "$n" fix
-      redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt"$'\n\n# A commit trailer is missing: write it and change nothing else\nThis change adds files that need a line in '"$wt.trailers"$', and that file has none for them:'"$(jq -r '"\n- `\(.token): <text>`: \(.ask) It adds \(.paths | join(", "))."' <<<"$owe")" fix) \
-        || { block "$c" "$n" "$wt" "fix: $t"; return; }
-      checked "$c" "$n" "$wt" "$issue" "$sprompt" fix "$(jq -c --arg r "missing commit trailers: $(jq -r .token <<<"$owe" | paste -sd ' ' -)" '. + {reason: $r}' <<<"$t")" || return
-      git -C "$wt" add -A && [ "$(git -C "$wt" write-tree)" = "$old" ] && [ "$(trailers "$wt")" = "$cmsg" ] || continue
-    fi
-    [ -z "$owe" ] || { block "$c" "$n" "$wt" "a commit trailer the pack requires is missing after its one fix session; nothing landed: $(jq -rs 'map("\(.token) (it adds \(.paths | join(", ")))") | join("; ")' <<<"$owe")"; return; }
-    # The trailers the commit carries are these, read here where they were reviewed and checked: nothing after (the
-    # tests) changes them.
-    cmsg=$(trailers "$wt") || { block "$c" "$n" "$wt" "the engine could not read the commit trailers of the card, so nothing landed"; return; }
-    # Its rollout actions (rollouts()): those its reviews named (its retried cards' review lines' (pro), its own lines', then its kept review's, as a card
-    # that lands from a kept patch has no review line of its own), then its Rollout trailers, each once and in the order
-    # named (ROLLOUTONCE). All go on its landed line (rollout) and, in that order, at the end of the commit message as
-    # Rollout lines in place of its Rollout trailers, so the push carries each one. They are no findings: nothing here
-    # holds the card.
-    rtr=$(rollouts <(printf '%s\n' "$cmsg") Rollout) && rrev=$(rollouts "$wt.review" ROLLOUT) \
-      && ro=$(stdb ask card "$c" | jq -cs --argjson p "$pro" --argjson k "$rrev" --argjson t "$rtr" '[$p[], (.[] | select(.step == "review") | .rollout // [] | .[]), $k[], $t[]] | '"$ROLLOUTONCE") \
-      && rmsg=$(jq -r '.[] | "Rollout: \(.action) | \(.fails) | \(.place)"' <<<"$ro") \
-      || { block "$c" "$n" "$wt" "the engine could not read the rollout actions of the card, so nothing landed"; return; }
-    cmsg=$(grep -Ev "^Rollout: $ROLLOUT" <<<"$cmsg" || :); cmsg=$cmsg${cmsg:+${rmsg:+$'\n'}}$rmsg
-    # A main-red fix card names its cases and main's commit, as its entry holds them now (a case added during its
-    # build or a review too).
-    [ "$n" != 0 ] || [ -n "$br" ] || msg=$(redmsg "$c" "$issue")
-    # The card's commit trailers go into the message after its Closes line (before the card line).
-    cmsg=$(jq -rn --arg m "$msg" --arg t "$cmsg" 'if $t == "" then $m else $m | sub("\nConveyor card "; "\n\($t)\nConveyor card ") end')
-    # Same-file cards (at settle()): it holds its files from its landing step through its tests and landing, unless
-    # it waits here on a card that holds one of them or goes before it. Its patch still applying to main, it goes on
-    # with no second review (unless an ordered card went past it and main moved: then it is reviewed again on main);
-    # a change a session had to bring onto main since is reviewed again, giving way meanwhile (giveway()), unless the
-    # session left its change outside documentation (*.md) as it was (settle(), and the rebuild below). A card that
-    # gave way runs its checks and tests first, holding nothing, and claims only once they passed (ready): its change
-    # applying to main then. Any card lands only on main as its worktree holds it: when main moved since its checks and
-    # tests ran (while it was away, during its tests or before its landing), its change is fitted onto main as it is now,
-    # holding its files, and its product checks run again there, until main stays where they ran; land() checks that
-    # under the lock. Its tests run again only when the fitted change is not the one that passed (testedhere(): a
-    # session changed it, or brought it onto main when it no longer applied, or its test files were merged keeping
-    # both sides; a clean three-way merge onto main is the change that passed, settle(), and so is one a session changed
-    # only in documentation files, settle() and the rebuild marking it tested again), and when the cards landed since
-    # its last run touch a test file its change touches too (sharedtests(): two changes that passed apart can fail
-    # together, #334), once for the change it holds: after that run passed it lands on it (#447). That run keeps the passes of the run before but those of the shared
-    # files, which it runs whole (unshare()), its list naming what main changed (rerunsince()); a failure there goes to
-    # the card's fix, as main alone passes it.
-    # Batches: after a GO it is ready to land once its own checks and tests pass (tested()), and a batch may take it
-    # while it waits (gather()); one with follow-ups to file lands on its own. Holding its files on main as it is now,
-    # its tests passed, it takes the ready cards that share them, and one run judges them all (batch()). Tests that
-    # passed while it waited on what its worktree still holds are not run again (testedhere()). A card that files a
-    # last NO-GO's follow-ups keeps its pass there too, marked alone: no batch takes it or is taken by it.
-    # Its extra's waitSec is what it has waited so far; settle() keeps it up to date while it waits (a batch lands it).
-    rm -f "$wt.ready"; jq -cn --argjson i "$n" --arg m "$cmsg" --argjson y "${yesfrom:-null}" --argjson a "$([ -n "$last" ] && echo true || echo false)" --argjson w "$((waitsec + mainsec))" --argjson ro "$ro" \
-      '{issue: $i, msg: $m, extra: ({waitSec: $w} + (if $y then {yesFrom: $y} else {} end) + if $ro != [] then {rollout: $ro} else {} end)} + (if $a then {alone: true} else {} end)' > "$wt.ready"
-    # Back from the landing rebuild with its change outside documentation the one that passed its tests (docpass): it
-    # lands on that run, with only its product checks run again.
-    [ -z "$docpass" ] || { [ "$docpass" != "$(cardpatch "$wt" ':(exclude)*.md')" ] || tested "$wt"; docpass=''; }
-    away=''; jq -e '.away == true' "$wt.claim" >/dev/null 2>&1 && away=1
-    trc=''
-    if [ -z "$away" ]; then
-      redbrief "$c" "$n" "$br"; settle "$c" "$n" "$wt" "$sprompt" land "$issue"; rc=$?
-      [ $rc != 1 ] || return
-      [ $rc != 3 ] || break # a batch landed it
-      [ $rc = 0 ] || [ $rc = 4 ] || { rm -f "$wt.ready"; locked giveway "$c" "$wt"; continue; }
-    fi
-    merged=''
-    while :; do
-      if [ -n "$trc" ]; then
-        # Its own tests failed while it waited, or it broke the tests of the batch that took it: that run's exit and
-        # output are its own. No run of its own tests is on this pass (own: carriedrec(), slowrec()).
-        rc=$trc; trc=''; own=''; rm -f "$wt.ready"
-      else
-        # After a merge onto main (settle(), the rebuild, the port), before any check or test runs: every file it
-        # changed still parses (parses()). One that does not goes to one fix session, given each such file and its
-        # error; still failing after it, the card blocks. Nothing lands meanwhile. Its tests then run whole, a merge in
-        # doubt (<worktree>.whole, tests()): no pass of the change before the merge is kept (rerunsince()).
-        if [ -n "$parsecheck" ]; then
-          out=$(parses "$wt"); t=$?
-          if [ $t = 0 ]; then parsecheck=''
-          else
-            [ $t = 1 ] || { block "$c" "$n" "$wt" "the engine could not check that the files of the merge onto main parse, so nothing landed: $out"; return; }
-            [ -z "$pfix" ] || { block "$c" "$n" "$wt" "a file the card's merge onto main changed still does not parse after its one fix session; nothing landed."$'\n'"$out"; return; }
-            pfix=1; rm -f "$wt.ready" "$wt.rerun"; echo 'merge in doubt: a file of the merge onto main did not parse' > "$wt.whole"; locked giveway "$c" "$wt" fixing; began "$c" "$n" fix
-            redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt"$'\n\n# A file no longer parses after the card\'s change was merged onto main: fix that and nothing else\nA merge can keep lines of both sides that do not go together. Each file that fails, the check run on it and its output:\n'"$out" fix) \
-              || { block "$c" "$n" "$wt" "fix: $t"; return; }
-            checked "$c" "$n" "$wt" "$issue" "$sprompt" fix "$(jq -c --arg r "a file no longer parses after the merge onto main: $(sed -n 's/: `.*` failed:$//p' <<<"$out" | paste -sd ' ' -)" '. + {reason: $r}' <<<"$t")" || return
-            continue 2
-          fi
-        fi
-        # The landing gate (lintgate(), lib/lint.sh), before any check or test: a fix of lint findings goes round to a
-        # review, a last review (lfix), and back here, where a finding left on the change that fix left blocks.
-        lintgate "$c" "$n" "$wt" "$issue" "$sprompt" "$br" land; case $? in 1) return ;; 2) kept=''; docpass=''; continue 2 ;; esac
-        # The product checks, on every pass that would land: a failure blocks the card, never a finding to fix. Not on
-        # the pass that runs again on main as it is now what failed in a red run (tmain): there a failing check is that
-        # red run failing again, as a check that fails on a batch's change is a red run (batch()), and goes to the one
-        # fix round; on the passes after the fix it blocks again.
-        if ! out=$(checks "$wt"); then
-          [ -n "$tmain" ] || { block "$c" "$n" "$wt" "a product check failed; nothing landed."$'\n'"$out"; return; }
-          norun "$wt" "a product check failed on the change of $c on main as it is now:"$'\n'"$out"; sec=0; trc=1; continue
-        fi
-        # The changed tests, before the follow-ups are filed: a card that fails them twice files nothing.
-        began "$c" "$n" test
-        # The project's checks first (treecheck(): kept for the tree the last session's check ran on, so not run again
-        # there). When they fail, the step ends before any test file runs, its line holding one failure that names
-        # the check and its output. That is not its tests failing: the one test-fix round (tfix) is kept and the card
-        # is not blocked for it; one fix session is told the output, and checked() runs the checks again on its change.
-        # The line is marked checks: no test ran, so the card's first run of its tests is still its first (testedbefore()).
-        out=$(treecheck "$wt"); t=$?
-        [ $t != 2 ] || { block "$c" "$n" "$wt" "the engine could not run the project's checks: $out"; return; }
-        if [ $t = 1 ]; then
-          packget test.checkCommand t || t=test.checkCommand
-          record "$c" "$n" test fail "$(jq -cn --arg k "$t" --arg o "$out" '{reason: "the project'"'"'s checks failed (test.checkCommand: \($k)); no test file ran",
-            checks: true, failures: {of: 0, files: [{file: $k, cases: []}], timeout: null}, tail: ($o | .[-4000:])}')"
-          rm -f "$wt.ready"; locked giveway "$c" "$wt" fixing; began "$c" "$n" fix
-          redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt"$'\n\n'"$CHECKFIX"$'\n'"$out" fix) || { block "$c" "$n" "$wt" "fix: $t"; return; }
-          checked "$c" "$n" "$wt" "$issue" "$sprompt" fix "$(jq -c '. + {reason: "the project'"'"'s checks failed (test.checkCommand)"}' <<<"$t")" || return
-          continue 2
-        fi
-        [ -z "$away" ] || away=$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)
-        sec=$SECONDS; rc=0; ran=''; own=''; apart=''; repaired=''; TEST_BATCH=''; TEST_REFUSED=''; rm -f "$wt.stop"
-        # The times its own run took go on its test line (slowtests()); only a test rule files an issue about a test
-        # file (testrulespass(), after the test line is recorded).
-        testedhere "$wt" || own=1
-        # Its shared files run again once for the change it holds (<worktree>.sharedran: that change's patch-id, once
-        # that run passed): on a busy main, each run again let another card land on them, and the card never landed
-        # (#447). A failure of the two changes together that this lets onto main is caught there (main red).
-        shared=''; sb=$(sed -n 's/^base\t//p' "$wt.rerun" 2>/dev/null)
-        if [ -z "$own" ] && t=$(sharedtests "$wt" "$sb"); then
-          if [ "$(cat "$wt.sharedran" 2>/dev/null)" = "$(cardpatch "$wt")" ]; then
-            echo "conveyor: card $c: cards landed since its shared test files ran again touch them too ($(paste -sd ' ' <<<"$t")); they ran again once, so it lands with no second run again. Cards landed since: $(landedsince "$wt" "$sb")"
-          else own=1; shared=1; unshare "$wt" "$t"; echo "conveyor: card $c: cards landed since its tests ran touch its test files too, so they run again on main as it is now: $(paste -sd ' ' <<<"$t")"; fi
-        fi
-        [ -z "$own" ] || { ran=1; tests "$wt"; rc=$?; [ $rc != 0 ] || slowtests "$wt" || :; }
-        [ $rc != 0 ] || [ -z "$own" ] || tested "$wt"
-        [ $rc != 0 ] || [ -z "$shared" ] || cardpatch "$wt" > "$wt.sharedran" || rm -f "$wt.sharedran"
-        if [ $rc = 0 ] && [ -z "$away" ] && [ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" = "$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)" ]; then
-          out=$(locked gather "$c" "$wt" "$me") || out=''
-          # A full run its own run refused (tests()) stays on the line its batch's run writes.
-          rf=$TEST_REFUSED; [ -z "$out" ] || { t=$ran; ran=1; batch "$c" "$wt" $out; rc=$?; [ -z "$apart" ] || ran=$t; }; TEST_REFUSED=${TEST_REFUSED:-$rf}
-        fi
-        # Main moved during its batch's run: the batch lands on that run when it still stands there (rebatch()). A
-        # product check that fails on its change there is a red run: the batch is run again there, as batch() does one.
-        back=''
-        if [ ${#mates[@]} != 0 ]; then
-          rebatch "$c" "$wt"; t=$?
-          [ $t != 2 ] || { block "$c" "$n" "$wt" "the engine fitted the batch of the card onto main, but it could not put the change of the card back in its worktree. Nothing landed. The change is in the patch $wt.bpatch"; return; }
-          [ $t != 3 ] || { ran=1; batch "$c" "$wt" "${mates[@]}"; rc=$?; }
-        fi
-        sec=$((SECONDS - sec))
-        # It broke its batch, or its patch did not apply on the cards before it there: the cards that passed land without it.
-        if { [ $rc != 0 ] || [ -n "$apart" ]; } && [ ${#mates[@]} != 0 ]; then
-          mapfile -d '' t5 < <(fives "$c" "$n" "$wt" "$cmsg" '' skip)
-          t=$(locked land "${t5[@]}") || { echo "conveyor: card $c: the cards of its batch that passed did not land: $t"; unmate; }
-          mates=()
-        fi
-        [ -z "$back" ] || { git -C "$wt" reset -q --hard "$back" 2>/dev/null && git -C "$wt" apply --index "$wt.bpatch" 2>/dev/null; } \
-          || { block "$c" "$n" "$wt" "the batch of the card landed, but the engine could not put the change of the card back in its worktree. The change is in the patch $wt.bpatch"; return; }
-        rm -f "$wt.lent" # its worktree holds its own change again (batch())
-      fi
-      # Its run did not run (no test.fileCommand), or was stopped, as it would have run more than the tests of its
-      # change (tests(): <worktree>.stop): no run on main and no fix session, as a session cannot change the pack.
-      # The card is blocked with that reason, which names the setting that fixes it.
-      [ ! -s "$wt.stop" ] || { block "$c" "$n" "$wt" "test: $(<"$wt.stop")"; return; }
-      voidrun "$wt" "$rc" > /dev/null || voids=0 # a run with a result, a pass too, starts the count of runs with none again
-      if [ $rc != 0 ]; then
-        # The worktree lacks a dependency folder main has (depsmissing(), lib/push.sh): the failure is the project's
-        # setup, not the change, and no run on main or fix session mends it. The card is blocked saying so, with no
-        # test failures.
-        t=$(depsmissing "$wt"); [ -z "$t" ] || { block "$c" "$n" "$wt" "$(depsreason "$t")"; return; }
-        # A run with no result (voidrun(): killed by a signal, as by the service stopping or restarting, also under a
-        # loop that adopted the card) proves nothing: nothing of it runs on main, goes to the main-red record, a wait
-        # for main or a fix session. Its test line says so, and the test step runs again; the third such run in a row
-        # blocks the card (a run with a result, a pass too, starts the count again: above).
-        # Its own run's files kept as passed and not run (carriedrec()): the step that ran them is an earlier one.
-        cr='{}'; [ -z "$own" ] || cr=$(carriedrec "$wt")
-        if t=$(voidrun "$wt" "$rc"); then
-          voids=$((voids + 1))
-          record "$c" "$n" test fail "$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000' | jq -cRs --slurpfile x <(testrec "$wt" "$rc" "$sec") --slurpfile o <(printf '%s' "$cr") --arg r "no result: $t" \
-            '$x[0] as $x | $o[0] as $o | sub("\n+$"; "") as $t | $x + $o + {reason: $r} + (if $t == "" then {} else {tail: $t} end)')"
-          [ "$voids" -lt 3 ] || { block "$c" "$n" "$wt" "the changed tests gave no result 3 times in a row ($t); nothing landed."; return; }
-          echo "conveyor: card $c: its test run gave no result ($t): the test step runs again"
-          continue
-        fi
-        out=$(testfails "$wt.test" "$rc")
-        # What still did not pass runs on main first (verdicts()): each failure's verdict goes on the test line.
-        t=$(verdicts "$c" "$wt" "${out:-null}") || t='{"verdicts":[]}'
-        # The machine is at fault (verdicts(): machine, issue 221), with no failure the card's: its test line is `held`,
-        # not `fail` (the card's test step is not counted as failed), and it waits for the machine hold (below).
-        held=''; jq -e '[.verdicts[] | select(.verdict != "flaky")] | length > 0 and all(.verdict | IN("main", "machine")) and any(.verdict == "machine")' <<<"$t" >/dev/null && held=machine
-        record "$c" "$n" test "$([ -n "$held" ] && echo held || echo fail)" "$(failline "$wt" "$rc" "$sec" "${out:-null}" "$t" "$cr")"
-        testrulespass > /dev/null
-        # Main is red: every failure the run again left fails on main too. The card waits in its test step, holding no
-        # files (no fix session, no block) until main changes; then it is fitted onto main and tested again, as a card
-        # whose main moved during its tests is. It is not put back on its old commit (#582): caught is cleared, so a
-        # change that no longer applies there is brought onto main by a session, even after the landing's rebuild.
-        # The machine is at fault (verdicts(): machine, issue 221), with no failure the card's: no fix session, no
-        # block and no wait for main. The card waits, holding no files, until the machine hold goes (holdwait()), then
-        # is fitted onto main as it is then and tested again, as after a wait for main. Before it waits, it is judged
-        # in the repair lane (repairlane(), issue 222): a card the lane passes goes on as a card whose tests passed;
-        # one that finds the lane held by another card waits until it is free, and is then tested and judged again.
-        if [ "$held" = machine ]; then
-          lane=0; repairlane "$c" "$wt" || lane=$?
-          if [ $lane = 0 ]; then
-            echo "conveyor: card $c: a case it still fails is the machine's, and the card repairs it: $REPAIRED"
-            repaired=$REPAIRED; held=''; rc=0; tmain=''
-          else
-            if [ $lane = 2 ]; then echo "conveyor: card $c: a case it still fails is the machine's: it waits for the repair lane, which another card holds"
-            else echo "conveyor: card $c: a case it still fails is the machine's, not main's, and the repair lane did not pass it ($REPAIRED): it waits until the machine passes its controls again"; fi
-            rm -f "$wt.ready"; locked giveway "$c" "$wt"; began "$c" "$n" test
-            holdwait "$wt" "$([ $lane != 2 ] || echo lane)"; held=1
-          fi
-        elif jq -e '[.verdicts[] | select(.verdict != "flaky")] | length > 0 and all(.verdict == "main")' <<<"$t" >/dev/null; then
-          echo "conveyor: card $c: every case it still fails fails on main too: it waits for main to change"
-          rm -f "$wt.ready"; locked giveway "$c" "$wt"; began "$c" "$n" test
-          mapfile -t mwon < <(jq -r '.mainRun.sha, (.verdicts[] | select(.verdict == "main") | .case)' <<<"$t")
-          mainwaited "$wt" "${mwon[@]}"; held=1
-        fi
-        if [ -n "$held" ]; then
-          unmate; away=''; caught=''
-          redbrief "$c" "$n" "$br"; settle "$c" "$n" "$wt" "$sprompt" land "$issue"; rc=$?
-          [ $rc != 1 ] || return
-          [ $rc != 3 ] || break 2 # a batch landed it
-          [ $rc != 4 ] || continue
-          [ $rc = 0 ] || { rm -f "$wt.ready"; locked giveway "$c" "$wt"; continue 2; }
-          continue
-        fi
-        # Main moved since the card's commit (#582: it may have fixed what failed there, which the card's run did not
-        # hold): the change is first fitted onto main as it is now and what failed runs again there, before any fix
-        # round. Once before each fix round, so a card whose own change fails does not follow a busy main for ever.
-        # caught is cleared, as after a wait on a red main above: a change that no longer applies on main is brought there
-        # by a session, not put back on its old commit (settle()), where what failed would only run again as it did.
-        # Fitted there (settle() claims its files again), it gives way for that run, as for a fix round (fixing): a card
-        # stacked on it (stackto()) is fitted onto main alone and lands, not waiting through this run (claim()).
-        if [ -z "$repaired" ] && [ -z "$tmain" ] && [ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" != "$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)" ]; then
-          echo "conveyor: card $c: main moved since its commit: its change goes onto main as it is now, and what failed runs again there"
-          tmain=1; rm -f "$wt.ready"; unmate; away=''; caught=''
-          redbrief "$c" "$n" "$br"; settle "$c" "$n" "$wt" "$sprompt" land "$issue"; rc=$?
-          [ $rc != 1 ] || return
-          [ $rc != 3 ] || break 2 # a batch landed it
-          [ $rc != 4 ] || continue
-          [ $rc = 0 ] || { rm -f "$wt.ready"; locked giveway "$c" "$wt"; continue 2; }
-          # Away now, it claims its files again (settle()) once that run passes, before it lands, main moved or not.
-          locked giveway "$c" "$wt" fixing; ! jq -e '.away == true' "$wt.claim" >/dev/null 2>&1 || away=1; continue
-        fi
-        if [ -z "$repaired" ]; then
-          tmain=''
-          [ -z "$tfix" ] || { block "$c" "$n" "$wt" "the changed tests failed again after their one fix round (exit $rc); nothing landed."$'\n'"$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000')"; return; }
-          tfix=1; locked giveway "$c" "$wt" fixing; began "$c" "$n" fix
-          # On the testFix seat (seat(): the builder's unless the control record sets testFix).
-          redbrief "$c" "$n" "$br"; t=$(session "$wt" "$(testfixprompt "$sprompt" "$wt" "$rc")" fix testFix) \
-            || { block "$c" "$n" "$wt" "fix: $t"; return; }
-          checked "$c" "$n" "$wt" "$issue" "$sprompt" fix "$t" || return
-          continue 2
-        fi
-      fi
-      # Not run again when they passed on what its worktree still holds (that run has its own line): this line says it
-      # reused that pass.
-      # A batch's run (batch(): TEST_BATCH) says in selected how many passes it kept, and no case ran when it ran none.
-      # A card the repair lane passed (repairlane()): its line says so, with the clean run of its changed tests.
-      if [ -n "$repaired" ]; then record "$c" "$n" test pass "$(jq -cn --slurpfile x <(testrec "$wt" 0 "$sec") --arg r "$repaired" '$x[0] + {reason: $r}')"
-      elif [ -n "$ran" ]; then record "$c" "$n" test pass "$(jq -cn --slurpfile x <(testrec "$wt" 0 "$sec") --slurpfile r <(firstrun "$wt" pass) --argjson b "${TEST_BATCH:-null}" \
-        --slurpfile s <([ -z "$own" ] && echo '{}' || slowrec "$wt") '$x[0] + $r[0] + $s[0] | if $b then .selected += $b else . end')"
-      else record "$c" "$n" test pass "$(jq -cn --argjson s "$sec" '{sec:$s,usage:{input:0,write:0,write1h:0,read:0,output:0},reused:true}')"; fi
-      # The test rules read the line just recorded (lib/testrules.sh): with their switch off, they file nothing.
-      [ -z "$ran" ] || testrulespass > /dev/null
-      # A Make it run card (#189) holds only when its test step ran its file and the file passed.
-      [ -z "$mk" ] || t=$(ranproof "$wt" "$mk") || { block "$c" "$n" "$wt" "test: $t"; return; }
-      # A card that gave way claims its files now; a card whose change is not on main as it is now (main moved while it
-      # was away or during its tests) is fitted onto it, and its checks run again there, holding its files (its tests
-      # too when the fitted change is not the one that passed: testedhere()).
-      # A change that no longer applies there is put back as it was (caught) and meets the conflict at landing; one
-      # apart from its batch (batch()), which landed, is brought onto main by one session, as a waiting card is.
-      if [ -n "$away" ] || [ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" != "$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)" ]; then
-        [ -n "$away" ] && [ "$away" = "$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)" ] || [ -n "$apart" ] || caught=1
-        t=${#mates[@]}; unmate; old=$(git -C "$wt" rev-parse HEAD 2>/dev/null); away=''
-        redbrief "$c" "$n" "$br"; settle "$c" "$n" "$wt" "$sprompt" land "$issue"; rc=$?
-        [ $rc != 1 ] || return
-        [ $rc != 3 ] || break 2 # a batch landed it
-        [ $rc != 4 ] || continue
-        [ $rc = 0 ] || { rm -f "$wt.ready"; locked giveway "$c" "$wt"; continue 2; }
-        [ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" = "$old" ] && [ "$t" = 0 ] || continue
-      fi
-      # Apart from its batch for its lint (lintleave(), lib/lint.sh): it goes back to its landing gate, also when main
-      # did not move (its batch run on main as it moved, rebatch(), lands no other card), so it never lands on that finding.
-      [ "$apart" != lint ] || continue
-      while :; do
-        # While a release run is under way (relhold(), lib/push.sh) it waits here, at its land step, and lands once the
-        # run has ended: on main as the release left it, where it is fitted again (STALE, below).
-        releasewait "$c" "$n" "$wt"
-        # An ordered or a ready card went past this one since its claim (it holds its files only from its landing step,
-        # so that is where it is passed): it claims again, waits for that card, and is fitted onto main as that card
-        # left it. Gone past by an ordered card, it is reviewed again when main moved meanwhile; gone past only by ready
-        # cards (claim(): fit), only when the fit changed its change, and its tests run again only where the cards that
-        # landed touch its test files (sharedtests()).
-        # land() reads the same mark under the lock, so a card passed after this reading does not land: it comes back here.
-        # A card that tested in a batch is tested again after it.
-        if jq -e '.passed == true' "$wt.claim" >/dev/null 2>&1; then
-          t=${#mates[@]}; unmate; old=$(git -C "$wt" rev-parse HEAD 2>/dev/null)
-          redbrief "$c" "$n" "$br"; settle "$c" "$n" "$wt" "$sprompt" land "$issue"; rc=$?
-          [ $rc != 1 ] || return
-          [ $rc != 3 ] || break 3 # a batch landed it
-          [ $rc != 4 ] || continue 2
-          [ $rc = 0 ] || { rm -f "$wt.ready"; locked giveway "$c" "$wt"; continue 3; }
-          [ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" = "$old" ] && [ "$t" = 0 ] || continue 2
-        fi
-        if [ -n "$last" ]; then
-          # The earlier loop's last NO-GO is filed here, after the checks above read this card's own review: alone after a
-          # GO, its findings before this review's after a NO-GO.
-          [ -n "$merged" ] || [ -z "$earlier" ] || { { if [ "$res" = GO ]; then printf '%s\n' "$earlier"; else grep -Ev "$NOTFINDING" <<<"$earlier"; cat "$wt.review"; fi; } > "$wt.review.new" \
-            && mv -f "$wt.review.new" "$wt.review"; } || { block "$c" "$n" "$wt" "the engine could not put back the last review of the earlier loop, so it could not file the findings of that review"; return; }
-          merged=1
-          if [ -n "$isfu" ]; then
-            dec=$(leftovers "$wt.review"); left='{"leftover":true,"followups":[]}'
-            [ -n "$dec" ] || { block "$c" "$n" "$wt" "the last review said NO-GO and named no finding to file"; return; }
-          else
-            began "$c" "$n" file
-            ups=$(followups "$c" "$issue" "$wt.review") || { block "$c" "$n" "$wt" "$ups"; return; }
-            # Its filed line says why the loop whose findings it files ended: after a GO on a port, the earlier loop's.
-            fe=$ended; [ "$res" != GO ] || [ -z "$earlyend" ] || fe=$earlyend
-            left="{\"leftover\":true,\"followups\":$ups}"; record "$c" "$n" filed ok "$(jq -c --argjson u "$ups" '. + {followups: $u}' <<<"${fe:-"{}"}")"
-          fi
-        fi
-        # A case that joined during its last test run stages its links before it lands (redbrief()).
-        began "$c" "$n" land; redbrief "$c" "$n" "$br"
-        reading fresh >/dev/null 2>&1 # the after reading of the landed line, asked for outside the lock
-        extra=$(landextra "$left" "$yesfrom" "$ro")
-        if [ ${#mates[@]} != 0 ]; then mapfile -d '' t5 < <(fives "$c" "$n" "$wt" "$cmsg" "$extra"); else t5=("$c" "$n" "$wt" "$cmsg" "$extra"); fi
-        # Landed: its declined findings are written; when they cannot be, the card ends blocked, its review kept.
-        t=$(locked land "${t5[@]}") && { [ -z "$dec" ] || decline "$c" "$n" "$FUCAP" <<<"$dec" \
-          || { block "$c" "$n" "$wt" "the card landed, but the engine could not write its leftover findings to the declined list. The findings are in the kept review"; return; }; break 3; }
-        # A batch that did not land. Main moved again before it could: it stays a batch, and its run is found to stand
-        # on main as it is now, or it is tested again there (rebatch()). Else its other cards wait on at their claims,
-        # and the card is tested alone, then tries alone, in no batch (its batch's run judged it with them).
-        if [ ${#mates[@]} != 0 ] && [ "$t" != "$STALE" ] && [ "$t" != "$RELHELD" ]; then
-          unmate
-          [[ $t == "landed as "* ]] || { echo "conveyor: card $c: its batch did not land, so it is tested alone: $t"; rm -f "$wt.ready"; continue 2; }
-        fi
-        [ "$t" = "$PASSED" ] || [ "$t" = "$STALE" ] || [ "$t" = "$RELHELD" ] || break 2
-        # Passed, or main moved, or a release run began, while it went to land: its follow-ups are withdrawn (filed again
-        # when it comes back to land). A release run: it waits for its end above, a batch kept. Main moved: it is fitted
-        # onto main as it is now and its checks run again there, its tests only when the fitted change is not the one that passed.
-        [ -z "$ups" ] || unfile "$n" "$wt.review" $(jq -r '.[]' <<<"$ups"); ups=''; left=''; dec=''
-        [ "$t" != "$STALE" ] || continue 2
-      done
-    done
-    # The one rebuild: a card that got a GO, whose reviewed change does not apply to main as it is now.
-    if [ -z "$rebased" ] && [ -z "$ups" ] && [ -z "$dec" ] && [ -z "$ported" ] && [[ $t == "rebase onto main conflicts: "* ]]; then
-      # Its change outside documentation (*.md) as reviewed (docs), and as tested when its tests passed on it (docpass),
-      # when the clash is in documentation alone (docsonly()).
-      docs=$(cardpatch "$wt" ':(exclude)*.md'); docsonly "$wt.patch" "$docs" || docs=''; docpass=''; ! testedhere "$wt" || docpass=$docs
-      rebased=1; caught=1; locked giveway "$c" "$wt"; why=$t; old=$(git -C "$wt" rev-parse HEAD 2>/dev/null); printf '%s\n' "$old" > "$wt.base"
-      err=$(git -C "$wt" reset -q --hard "refs/heads/$BRANCH" 2>&1) \
-        || { block "$c" "$n" "$wt" "$why [the engine could not reset the worktree to main for the rebuild:${err:0:300}]"; return; }
-      began "$c" "$n" rebase
-      redbrief "$c" "$n" "$br"; t=$(session "$wt" "$(rebaseprompt "$sprompt" "$wt" "$why" "$old")" rebase) || {
-        # The reviewed change goes back into the worktree, in place of the half-made rebuild, so block keeps it.
-        git -C "$wt" reset -q --hard "$old" 2>/dev/null && git -C "$wt" clean -fdq 2>/dev/null && git -C "$wt" apply --index "$wt.patch" 2>/dev/null \
-          || t="${t%%$'\n'*} [the engine could not put the reviewed change back in the worktree. The kept patch is what the failed rebuild left]$([[ $t != *$'\n'* ]] || printf '\n%s' "${t#*$'\n'}")"
-        block "$c" "$n" "$wt" "rebase: $t"; return; }
-      checked "$c" "$n" "$wt" "$issue" "$sprompt" rebase "$(jq -c --arg r "$why" '. + {reason:$r}' <<<"$t")" || return
-      # A clash in documentation alone (a README) and a rebuild that changed nothing outside it: the review and the test
-      # pass stand (kept, docpass), and only the product checks run before it lands. A merge session: its files are
-      # checked to parse before any test runs (parsecheck).
-      parsecheck=1; git -C "$wt" add -A 2>/dev/null; if [ -n "$docs" ] && [ "$(cardpatch "$wt" ':(exclude)*.md')" = "$docs" ]; then kept=1; else docpass=''; fi
-      continue
-    fi
-    # The port `retry` would start, with no owner action: a card whose review loop finished (its one rebuild done, or a
-    # last review's follow-ups filed) and whose landing still conflicts. Its follow-ups are withdrawn; one session
-    # brings the reviewed change (the patch land() wrote) onto main, a rebase step; one review of that port alone
-    # follows, its own loop as on a retried card, then the tests and the landing, which files the loop's last NO-GO
-    # again after a GO. Once a card, and never on a card that is itself the port of an earlier card's conflict: a
-    # conflict after the port blocks for the owner.
-    if [ -z "$ported" ] && [[ $t == "rebase onto main conflicts: "* ]] && [[ $was != "rebase onto main conflicts: "* ]] && [ -s "$wt.patch" ]; then
-      ported=1; caught=1; pass=0; rounds=0; rm -rf "$wt.rounds"; rebased=''; tfix=''; locked giveway "$c" "$wt"; why=$t; fin=$res; kp=$wt.patch; old=$(git -C "$wt" rev-parse HEAD 2>/dev/null); printf '%s\n' "$old" > "$wt.base"
-      finend=$ended
-      [ -z "$ups" ] || unfile "$n" "$wt.review" $(jq -r '.[]' <<<"$ups"); ups=''; left=''; dec=''
-      err=$(git -C "$wt" reset -q --hard "refs/heads/$BRANCH" 2>&1) \
-        || { block "$c" "$n" "$wt" "$why [the engine could not reset the worktree to main for the port:${err:0:300}]"; return; }
-      began "$c" "$n" rebase
-      redbrief "$c" "$n" "$br"; t=$(session "$wt" "$(rebaseprompt "$sprompt" "$wt" "$why" "$old" port)" rebase) || {
-        git -C "$wt" reset -q --hard "$old" 2>/dev/null && git -C "$wt" clean -fdq 2>/dev/null && git -C "$wt" apply --index "$wt.patch" 2>/dev/null \
-          || t="${t%%$'\n'*} [the engine could not put the reviewed change back in the worktree. The kept patch is what the failed port left]$([[ $t != *$'\n'* ]] || printf '\n%s' "${t#*$'\n'}")"
-        block "$c" "$n" "$wt" "rebase: $t"; return; }
-      checked "$c" "$n" "$wt" "$issue" "$sprompt" rebase "$(jq -c --arg r "$why" '. + {reason:$r}' <<<"$t")" || return
-      parsecheck=1; continue
-    fi
-    # A landing that fails after the follow-ups were filed withdraws them, unless main did get the commit.
-    # shellcheck disable=SC2046 # the filed follow-ups' issue numbers, one word each
-    case $t in "landed as "*) [ -z "$dec" ] || decline "$c" "$n" "$FUCAP" <<<"$dec" ;; *) [ -z "$ups" ] || unfile "$n" "$wt.review" $(jq -r '.[]' <<<"$ups") ;; esac
-    block "$c" "$n" "$wt" "$t"; return
-  done
-  clean "$wt"
+    refix=''
+    res=$(verdict "$wt.review"); vis=$(visible "$wt.review" "$vmode"); unclear=''
+    [ -n "$vis" ] || { [ "$res" = none ] || unclear=": it does not hold exactly one USER-VISIBLE line, written as asked"; res=none; }
+    # A NO-GO's line names the findings that came back after a fix round told to fix them (survived: id, rounds), for the Board.
+    # Every review's line keeps its answers on the findings fix rounds were told, each beside its first location
+    # and proof (answers()), so a review that blocks or ends the loop keeps them too.
+    sv='[]'; [ "$res" != NO-GO ] || sv=$(repeats "$wt" | jq -sc 'map({id, rounds})')
+    an=$(answers "$wt")
+    # doneWhenHolds: the D<n> its `DONE-WHEN: D<n> holds` lines name, which the reason leaves out (UNRECORDED); the
+    # Board reads them on demand (history donewhen). excerpts: the lines its findings cite, from the tree it read
+    # (excerpts(), lib/review.sh), which the Board reads on demand too (history excerpts); after a fix round, also
+    # from the tree before that fix (fixtree), which holds the lines the fix deleted.
+    ex=$(excerpts "$wt" "$fixtree"); fixtree=''
+    # The line is written once the loop's end is known (stop, below); a review with no verdict blocks with it here.
+    rline=$(grep -Ev "$UNRECORDED" "$wt.review" | jq -cRs --arg res "$res" --argjson t "$t" --arg v "$vis" --argjson k "$(counts "$wt.review")" --arg p "$cpid" --arg m "$chead" --arg s "$cseen" --argjson sv "${sv:-[]}" --argjson an "${an:-[]}" \
+      --argjson ro "$(rollouts "$wt.review" ROLLOUT)" --argjson h "$(sed -n 's/^DONE-WHEN: D\([0-9][0-9]*\) holds[[:space:]]*$/\1/p' "$wt.review" | jq -sc 'unique')" --argjson ex "${ex:-[]}" \
+      'sub("\n+$"; "") as $r | $t + {reason:$r,visible:$v,counts:$k,patch:$p,main:$m,seen:$s} + (if $res == "NO-GO" then {tail: $r} else {} end) + (if $sv == [] then {} else {survived: $sv} end) + (if $an == [] then {} else {answers: $an} end) + (if $h == [] then {} else {doneWhenHolds: $h} end) + (if $ro != [] then {rollout: $ro} else {} end) + (if $ex == [] then {} else {excerpts: $ex} end)')
+    [ -n "$rline" ] || rline='{}' # the grep finds no line in a review of only unrecorded lines: that is no failure
+    [ "$res" != none ] || { record "$c" "$n" review "$res" "$rline"; block "$c" "$n" "$wt" "review $pass ended without one clear verdict$unclear"; return; }
+  fi
+  go=''
+}
+# What follows the review (afterreview()): its line is written, then the card blocks, goes to a fix round (go: next)
+# or goes on to land (go: '').
+cardfix() {
+  # What follows this review (afterreview()): the review line is written with why the loop ended (ended), then
+  # card() blocks, lands (go, last) or gives the findings to a fix round.
+  afterreview
+  [ -z "$rline" ] || record "$c" "$n" review "$res" "$(jq -c --argjson e "$ended" '. + $e' <<<"$rline")"; rline=''
+  [ "$after" != hard ] || { block "$c" "$n" "$wt" "the fix for $hard"; return; }
+  [ "$after" != p0 ] || { block "$c" "$n" "$wt" "review $pass is the last review and still holds a P0 finding, so it files no follow-up: $last0"; return; }
+  [ "$after" != nofinding ] || { block "$c" "$n" "$wt" "review $pass is NO-GO with no finding to fix: ${why:0:200}"; return; }
+  if [ "$after" != fix ]; then mode=''
+  else
+    # A card stacked on this one (stackto()) that passed its tests goes on during this round, fitted onto main alone
+    # (giveway(), claim()).
+    [ -z "$priv" ] || { privfix=1; echo "conveyor: card $c: a finding of its last review is a privacy hit in its own change, so it goes to one more fix round: ${priv:0:200}"; }
+    locked giveway "$c" "$wt" fix; began "$c" "$n" fix
+    old=$(git -C "$wt" write-tree); more=''; [ -z "$rep" ] || more=$'\n\n'"$(again "$rep")"
+    # The fix is told the accepted findings only: a finding the judge declined (a DECLINED line), a P3 listed only
+    # (a MINOR line, minor()), or a rollout action (a ROLLOUT line, no defect), is not its to fix. Each finding it is told is led by its id (numbered(), fixlines()).
+    # It runs on the fix seat (seat(): the builder's unless the control record sets fix).
+    ids=$(numbered "$wt") && fl=$(fixlines "$wt" "$ids") || { block "$c" "$n" "$wt" "fix: the engine could not give the review's findings their ids"; return; }
+    redbrief "$c" "$n" "$br"; t=$(session "$wt" "$(fixprompt "$sprompt" "$fl$more")" fix fix) || { block "$c" "$n" "$wt" "fix: $t"; return; }
+    checked "$c" "$n" "$wt" "$issue" "$sprompt" fix "$t" || return
+    # This fix round's findings, with their ids, and the diff it made, for the review after it (repeats(), rereview()).
+    mkdir -p "$wt.rounds" && git -C "$wt" add -A && git -C "$wt" diff "$old" "$(git -C "$wt" write-tree)" > "$wt.rounds/$((pass + rounds)).diff" \
+      && rounded "$wt" "$((pass + rounds))" "$ids" && refix=$((pass + rounds)) && fixtree=$old
+    go=next; return
+  fi
+  go=''
 }
 # The resume of a retried card (card()). A retried issue (not issue 0: a branch, or a main-red fix card, which `retry`
 # gives back built from nothing): the last kept review of its blocked cards comes along (its findings go in the brief,
@@ -1036,6 +658,7 @@ resumeplan() {
   # `retry --fresh` discarded brought its rollout action back into the commit.
   # One read gives the chain's review lines (crev): pro is their rollout actions, and rounds (below) counts them.
   if [ -n "$from" ] && [ -n "$mode" ] && [ "$mode" != stale ]; then
+    # shellcheck disable=SC2034 # pro: card()'s, read by cardready() (lib/cardland.sh)
     crev=$(stdb ask issue retried "$n" | jq -cs --argjson n "$n" --arg f "$from" 'map(select(.issue == $n)) as $l
       | def up: . as $c | ($l | map(select(.card == $c and .step == "worktree")) | first | .reason // ""
           | select(test("built from nothing") | not) | capture("kept patch of card (?<c>c[A-Za-z0-9-]+)").c) // null;
