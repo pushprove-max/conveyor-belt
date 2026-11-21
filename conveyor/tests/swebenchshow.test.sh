@@ -368,9 +368,10 @@ t_swecost() {
   # shows what the trial copies out of its container and keeps. The fake engine waits at hold (its pid written first);
   # the case then writes the card's lines (the build and review above, and the next review's start line) and the
   # records that review left: it ran again, so its first attempt's usage (1M input: $1) is on its .firsttry, and its
-  # second attempt has written its events; its judge's live record (no usage yet, unpriced); and the second attempt's
-  # last record (1M input: $1), as swe_watch keeps it in <sb>.h/reviewer. The issue closed, the fake engine ends with
-  # no line of its own. A final read that dropped the first attempt (or the live records) keeps less than $6.50.
+  # second attempt has written its events and its live record (1M input: $1). Once swe_watch has kept that record in
+  # <sb>.h/reviewer, the judge's live record (no usage yet, unpriced) takes its place, so the reviewer's charge is only
+  # in what swe_watch kept (#1138: a swe_watch that skips that write drops it). The issue closed, the fake engine ends
+  # with no line of its own. A final read that dropped the first attempt (or the live records) keeps less than $6.50.
   swe; first=$(sweorder | head -n 1); tune '.prices = {"bench-m": {input: 1, output: 2, cacheRead: 0.5}}'
   : > "$SWE_FX/hold"; rm -f "$SWE_FX/pid"
   loop bench swe 1 > "$T/$CASE/run.out" 2>&1 & p=$! # loop: only a run copies the trial's records out of its container and keeps its cost
@@ -378,11 +379,16 @@ t_swecost() {
   wait_until "[ -s '$SWE_FX/pid' ]" || fail "the first task's engine did not start: $(cat "$T/$CASE/run.out")"
   s='{"card":"c1","issue":1,"step":"start","result":"ok","of":"review","time":"2026-11-01T00:00:00Z"}'
   printf '%s\n' "$b" "$s" | grep -v '"of":"fix"' >> "$(echo "$B/work/$first"/swe-*/conveyor/state)/cards.jsonl" && mkdir -p "$B/work/$first/cards" \
-    && echo '{"step":"review","at":"2026-11-01T00:00:04Z","model":"bench-m","action":"the judge reads the findings","turns":0}' > "$B/work/$first/cards/c1.live" \
     && echo '{"reason":"the review ended without one clear verdict","spent":{"model":"bench-m","usage":{"input":1000000}}}' > "$B/work/$first/cards/c1.firsttry" \
     && echo '{"type":"event"}' > "$B/work/$first/cards/c1.events" \
-    && jq -nc --argjson s "$s" '{reviewer: {of: $s, live: {step: "review", at: "2026-11-01T00:00:03Z", model: "bench-m", usage: {input: 1000000}}, second: true}}' > "$B/work/$first.h/reviewer" \
-    && : > "$B/work/$first/closed" || fail "the card's lines and records were not written"
+    && echo '{"step":"review","at":"2026-11-01T00:00:03Z","model":"bench-m","action":"reads x.py","usage":{"input":1000000}}' > "$B/work/$first/cards/c1.live" \
+    || fail "the card's lines and records were not written"
+  # A poll on the run: swe_watch reads the container every 2 seconds while the trial runs; only its own write shows it kept the record.
+  # 30 s, not the default 120 s: a swe_watch that never writes it fails here, inside the case's own 120 s limit.
+  WAIT_CEILING=30 wait_until "jq -e --argjson s '$s' '. == {reviewer: {of: \$s, live: {step: \"review\", at: \"2026-11-01T00:00:03Z\", model: \"bench-m\", action: \"reads x.py\", usage: {input: 1000000}}, second: true}}' '$B/work/$first.h/reviewer'" \
+    || fail "swe_watch did not keep the second review attempt's live record: $(cat "$B/work/$first.h/reviewer" 2>&1)"
+  echo '{"step":"review","at":"2026-11-01T00:00:04Z","model":"bench-m","action":"the judge reads the findings","turns":0}' > "$B/work/$first/cards/c1.live" \
+    && : > "$B/work/$first/closed" || fail "the judge's record was not written"
   rm -f "$SWE_FX/hold"; wait "$p" || fail "the run failed: $(cat "$T/$CASE/run.out")"
   jq -e '.cost == {usd: 6.5, state: "partial", unpriced: 1, basis: {"bench-m": {input: 1, output: 2, cacheRead: 0.5, cacheWrite: 1.25}}}
       and (.steps | map(select(.usage)) | length) == 2 and .steps[1].judge == {model: "bench-m", usage: {output: 1000000}}' "$B"/results/*/"$first.json" > /dev/null \
