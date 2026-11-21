@@ -353,25 +353,40 @@ t_fulldead() {
   [ "$(jq -c '[.suites[] | select(.kind == "full test") | .state]' <<<"$(loop snapshot --fresh)")" = '["passed"]' ] || fail "the snapshot still shows the killed run"
 }
 
-# Bug this guards (issue 1276): a marker left by a run that died before this engine started (no pid in it, six days old)
-# stayed until someone asked for the next full test, so with no ask the status and the Board named that dead run as the
-# run under way or ended for days. The loop's own turn records the run as an error (the Foreman's wake for that end is
-# kept, keyed by the marker's time) and removes the marker, so nothing shows a running or dead marker after that.
-# The marker is made by hand: only a marker from an older engine, or a machine that stopped, has no live process and no lock held.
-t_fullreap() {
-  ftnow
+# Bug this guards (issue 1276): a marker left by a run that died (no pid in it) stayed until someone asked for the next full
+# test, so with no ask the status and the Board named that dead run as the run under way or ended. The loop's own turn
+# records the run as an error (the Foreman's wake for that end is kept, keyed by the marker's time) and removes the marker.
+# Issue 1280: a marker over a day old is removed with no line, as a line with its old time stayed the last result for days.
+# The markers are made by hand: only a marker from an older engine, or a machine that stopped, has no live process and no lock held.
+fullmark() { # <hours old>
   printf '%s\n' '{"since":"2026-11-15T21:33:43Z","sha":"06bf84a5880dc5e8c9ae9cb38f1565ce7b8f1da6","how":"push"}' > "$ST/fulltest.jsonl.running"
-  touch -d '2026-11-15 21:40:00 UTC' "$ST/fulltest.jsonl.running"
-  [ "$(jq -c '[.suites[] | select(.kind == "full test") | [.state, .ended]]' <<<"$(loop snapshot --fresh)")" = '[["error","2026-11-15T21:40:00Z"]]' ] \
-    || fail "the dead marker is not shown as an error before the loop runs"
+  touch -d "$1 hours ago" "$ST/fulltest.jsonl.running"
+}
+t_fullreap() {
+  ftnow; fullmark 1
+  local was; was=$(date -u -r "$ST/fulltest.jsonl.running" +%Y-%m-%dT%H:%M:%SZ)
   # loop: the marker is cleared by the loop's own turn (turnopen(), lib/run.sh); only a turn shows it runs with no ask
   loop run 1 > "$STUB/run.out" 2>&1 || fail "a run with no card to pick failed: $(cat "$STUB/run.out")"
   [ ! -e "$ST/fulltest.jsonl.running" ] || fail "the loop left the dead run's marker: $(cat "$ST/fulltest.jsonl.running") $(cat "$STUB/run.out")"
-  [ "$(ftl '[.kind, .state, .time, (.reason | test("ended without a result"))]' | paste -sd' ' -)" = '["run","error","2026-11-15T21:40:00Z",true]' ] \
-    || fail "the dead run was not recorded as an error with the marker's time (the Foreman's wake needs it): $(cat "$ST/fulltest.jsonl")"
+  [ "$(ftl '[.kind, .state, .time, (.reason | test("ended without a result"))]' | paste -sd' ' -)" = "[\"run\",\"error\",\"$was\",true]" ] \
+    || fail "the dead run, an hour old, was not recorded as an error with the marker's time (the Foreman's wake needs it): $(cat "$ST/fulltest.jsonl")"
   local snap; snap=$(loop snapshot --fresh)
-  [ "$(jq -c '[.suites[] | select(.kind == "full test") | [.state, .ended, .since]], .fullTest.running' <<<"$snap" | paste -sd' ' -)" = '[["error","2026-11-15T21:40:00Z",null]] null' ] \
-    || fail "the snapshot shows the dead run as under way, or not as the one ended run: $(jq -c '[.suites, .fullTest]' <<<"$snap")"
+  [ "$(jq -c '[[.suites[] | select(.kind == "full test") | [.state, .ended]], .fullTest.running, .fullTest.last.state]' <<<"$snap")" = "[[[\"error\",\"$was\"]],null,\"error\"]" ] \
+    || fail "the snapshot does not show the recent dead run as the one ended run: $(jq -c '[.suites, .fullTest]' <<<"$snap")"
+}
+# Bug this guards (issue 1280): the six-day-old dead run was recorded with its old time, so it was still the suite entry and
+# the Board's last result on every status call after the marker was gone.
+t_fullreapold() {
+  ftnow; fullmark 144
+  [ "$(jq -c '[.suites[] | select(.kind == "full test") | .state]' <<<"$(loop snapshot --fresh)")" = '["error"]' ] \
+    || fail "the dead marker is not shown as an error before the loop runs"
+  # loop: the marker is cleared by the loop's own turn (turnopen(), lib/run.sh); only a turn shows it runs with no ask
+  loop run 1 > "$STUB/run.out" 2>&1 || fail "a run with no card to pick failed: $(cat "$STUB/run.out")"
+  [ ! -e "$ST/fulltest.jsonl.running" ] || fail "the loop left the old dead run's marker: $(cat "$ST/fulltest.jsonl.running") $(cat "$STUB/run.out")"
+  [ ! -s "$ST/fulltest.jsonl" ] || fail "the loop recorded a dead run six days old: $(cat "$ST/fulltest.jsonl")"
+  local snap; snap=$(loop snapshot --fresh)
+  [ "$(jq -c '[[.suites[] | select(.kind == "full test")], .fullTest.running, .fullTest.last]' <<<"$snap")" = '[[],null,null]' ] \
+    || fail "the snapshot still shows the cleared six-day-old dead run: $(jq -c '[.suites, .fullTest]' <<<"$snap")"
 }
 
 # Bug this guards (issue 1276): the loop's clearing of a marker must not touch the marker of a run that is alive. A run holds

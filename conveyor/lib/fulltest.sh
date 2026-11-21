@@ -44,7 +44,8 @@
 # run's failed cases are run alone, counts: the whole run's suiteprog(). Each run's files, with their results and
 # times, also go to $SUITERUNS (suiterec(), lib/testlist.sh) for the Tests page.
 # A run whose process was killed leaves $FULLTEST.running with the lock free (fulldead()): the loop's next turn (fullreap()) removes
-# the marker and records it as an error line with the reason (as the next ask does), so the end is still on record.
+# the marker and records it as an error line with the reason (as the next ask does), so the end is still on record (a marker
+# over a day old is removed with no line: fullreap()).
 FULLTEST=${STATE%/*}/fulltest.jsonl
 FULL_ALONE=3
 # The line $FULLTEST keeps (fullline()) for a run that ended with no result: its $FULLTEST.running is left, and the
@@ -63,13 +64,17 @@ fulldead() {
 # status named that run as the one under way. The line keeps the marker's own time (fulldead()), so the Foreman's wake
 # for that end (the snapshot's suites, which keys it by that time) is the same one a poll before the turn saw, and a run
 # that ended between two polls still wakes it. A free lock is the proof that no run holds it; the lock is held here, so
-# no run starts meanwhile. A line that could not be written leaves the marker.
+# no run starts meanwhile. A line that could not be written leaves the marker. A marker over a day old is removed with no
+# line: its end was news long ago, and a line with its old time would stay the last result, in the status and on the Board,
+# until a later run ends.
 fullreap() {
   local lk dead
   [ -e "$FULLTEST.running" ] || return 0
   { exec {lk}>>"$FULLTEST.lock"; } 2>/dev/null || return 1
   if flock -n "$lk" && dead=$(fulldead 2>/dev/null); then
-    if fullline "$dead" && rm -f "$FULLTEST.running"; then echo "conveyor: $(jq -r .reason <<<"$dead"); it is recorded as an error" >&2
+    if jq -e --arg n "$(clock)" '(.time | fromdate) < ($n | fromdate) - 86400' <<<"$dead" > /dev/null; then
+      rm -f "$FULLTEST.running" && echo "conveyor: $(jq -r .reason <<<"$dead"); that is over a day ago, so it is not recorded" >&2
+    elif fullline "$dead" && rm -f "$FULLTEST.running"; then echo "conveyor: $(jq -r .reason <<<"$dead"); it is recorded as an error" >&2
     else echo "conveyor: a full test run that ended without a result could not be recorded; its marker is left" >&2; fi
   fi
   exec {lk}>&-; return 0
