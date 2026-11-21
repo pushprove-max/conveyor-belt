@@ -5,7 +5,7 @@
 # hooks/sources.ts parseFetch reads, one tab-separated line each:
 #   paths <the Research lane's worktree, empty when none is named> <home> <this checkout's record's repo, empty when none>
 #   fast norecord | none | unread | ok <branch> <commits ahead of the default branch> <tracked files changed> <first subject>
-#   foreman <its role, waiter and watchers> (below), only where a Foreman is expected
+#   foremandir <the Foreman's folder>, then foreman <its role, waiter and watchers> (below), only where a Foreman is expected
 #   pluginbugs <how many> <file>: the plugin problems the Foreman noted (below), only when it noted one
 #   testmap <the test map's state, JSON>: as it is made, or its state, where Conveyor runs for this checkout (below), only
 #   with .conveyor/project.json here
@@ -23,7 +23,8 @@
 # ssh to the host file's ssh target. A record whose snapshot fails prints null; the others still print. how: local or
 # ssh, else why nothing was asked: nofile (no host file; the line then names the two paths looked at) or config (it
 # is not understood).
-# Usage: units-fetch.sh [feed | fresh <repo>... | stamp]. feed: the Board's live feed is fresh, so the board is the
+# Usage: units-fetch.sh [feed | fresh <repo>... | stamp | foreman]. foreman: the Foreman's lines alone, nothing else read.
+# feed: the Board's live feed is fresh, so the board is the
 # feed's: only the lanes, the Foreman, the test map and the engine are read, and the host line is `host <empty> feed 0`.
 # fresh: the short check saw these records change, so their snapshots are built now (`snapshot --fresh`), not the
 # kept ones. stamp: the short check alone (below), which prints `stamps <local | ssh | none>`, then <repo> <checksum>
@@ -32,6 +33,46 @@ set -uo pipefail
 . "${BASH_SOURCE[0]%/*}/../conveyor/lib/portable.sh" && p_tools
 here=$PWD
 mode=${1:-}; [ $# = 0 ] || shift
+# The Foreman (conveyor/foreman/lib.sh FD, the folder its own hooks name): printed only where one is expected, its
+# folder holding a role mark (session) that names a session, or its launcher's settings (settings.json). The line:
+#   foreman <session the mark names> <waiter.pid's pid> <its commit, - from a checkout> <its session> <1 when that pid
+#   runs conveyor/foreman/waiter.sh, else 0> <the commit the project runs now, as waiter.sh moved() reads it, empty when
+#   none> <each watcher, name:up or name:down, while the waiter runs> <the waiter's state: listening, starting again
+#   or down: <why>, as lib.sh waiter_state reads it from waiter.pid and waiter.log>
+# The waiter writes waiter.pid only once it holds waiter.lock, and holds it while it runs, so a live waiter.sh by that
+# pid holds the lock: the lock is not tried here, as a try that held it while a waiter started would make that waiter
+# stand down. A watcher is up while a child of the waiter runs its watch-<name>.sh. Nothing is started or written.
+# foremandir <FD> goes before it: the folder whose role mark (session) and waiter.pid the mod looks at each second
+# (hooks/units.tsx foremanTick). Mode `foreman` prints these two lines alone.
+foreman_line() {
+  fd='' wstate=''
+  { IFS= read -r fd; IFS= read -r wstate; } < <(export CONVEYOR_MAIN=$here
+    . "${BASH_SOURCE[0]%/*}/../conveyor/foreman/lib.sh" > /dev/null 2>&1 && printf '%s\n%s\n' "$FD" "$(waiter_state)")
+  if [ -n "$fd" ] && { [ -s "$fd/session" ] || [ -f "$fd/settings.json" ]; }; then
+    mark='' wpid='' wcommit='' wsid='' live=0 watch='' w3=''
+    { read -r mark _ < "$fd/session"; } 2>/dev/null
+    # "<pid> <commit> <session's process> <session>"; a waiter of an older engine writes "<pid> <commit> <session>": a
+    # third field is the session's process only when a fourth follows or it is a number, as a session id never is.
+    { read -r wpid wcommit w3 wsid < "$fd/waiter.pid"; } 2>/dev/null
+    [ -n "$wsid" ] || [[ $w3 =~ ^[0-9]+$ ]] || wsid=$w3
+    if [[ $wpid =~ ^[0-9]+$ ]]; then
+      procs=$(p_procs)
+      if awk -v p="$wpid" '$1 == p && index($0, "/conveyor/foreman/waiter.sh") { f = 1 } END { exit !f }' <<<"$procs"; then
+        live=1
+        for w in conveyor limit alerts idle; do
+          s=down
+          awk -v p="$wpid" -v n="/watch-$w.sh" '$2 == p && index($0, n) { f = 1 } END { exit !f }' <<<"$procs" && s=up
+          watch="$watch${watch:+ }$w:$s"
+        done
+      fi
+    fi
+    cur=$(jq -r '.plugin.commit // empty | strings' .conveyor/project.json 2>/dev/null)
+    [ -n "$cur" ] || cur=$(jq -r '.commit // empty | strings' .git/conveyor-engine.json 2>/dev/null)
+    printf 'foremandir\t%s\n' "$fd"
+    printf 'foreman\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$mark" "$wpid" "$wcommit" "$wsid" "$live" "$cur" "$watch" "$wstate"
+  fi
+}
+[ "$mode" != foreman ] || { foreman_line; exit 0; }
 # This machine's host file, else the checkout's committed conveyor/host.json (as the Board reads it).
 mine=${XDG_CONFIG_HOME:-$HOME/.config}/conveyor/host.json cfg=$here/conveyor/host.json
 [ ! -e "$mine" ] || cfg=$mine
@@ -85,40 +126,7 @@ else
     && printf 'fast\tok\t%s\t%s\t%s\t%s\n' "$br" "$n" "$((d))" "$(git -C "$fast" log --reverse --format=%s "refs/heads/$base..HEAD" 2>/dev/null | head -n 1 | tr '\t' ' ')" \
     || printf 'fast\tunread\n'
 fi
-# The Foreman (conveyor/foreman/lib.sh FD, the folder its own hooks name): printed only where one is expected, its
-# folder holding a role mark (session) that names a session, or its launcher's settings (settings.json). The line:
-#   foreman <session the mark names> <waiter.pid's pid> <its commit, - from a checkout> <its session> <1 when that pid
-#   runs conveyor/foreman/waiter.sh, else 0> <the commit the project runs now, as waiter.sh moved() reads it, empty when
-#   none> <each watcher, name:up or name:down, while the waiter runs> <the waiter's state: listening, starting again
-#   or down: <why>, as lib.sh waiter_state reads it from waiter.pid and waiter.log>
-# The waiter writes waiter.pid only once it holds waiter.lock, and holds it while it runs, so a live waiter.sh by that
-# pid holds the lock: the lock is not tried here, as a try that held it while a waiter started would make that waiter
-# stand down. A watcher is up while a child of the waiter runs its watch-<name>.sh. Nothing is started or written.
-fd='' wstate=''
-{ IFS= read -r fd; IFS= read -r wstate; } < <(export CONVEYOR_MAIN=$here
-  . "${BASH_SOURCE[0]%/*}/../conveyor/foreman/lib.sh" > /dev/null 2>&1 && printf '%s\n%s\n' "$FD" "$(waiter_state)")
-if [ -n "$fd" ] && { [ -s "$fd/session" ] || [ -f "$fd/settings.json" ]; }; then
-  mark='' wpid='' wcommit='' wsid='' live=0 watch='' w3=''
-  { read -r mark _ < "$fd/session"; } 2>/dev/null
-  # "<pid> <commit> <session's process> <session>"; a waiter of an older engine writes "<pid> <commit> <session>": a
-  # third field is the session's process only when a fourth follows or it is a number, as a session id never is.
-  { read -r wpid wcommit w3 wsid < "$fd/waiter.pid"; } 2>/dev/null
-  [ -n "$wsid" ] || [[ $w3 =~ ^[0-9]+$ ]] || wsid=$w3
-  if [[ $wpid =~ ^[0-9]+$ ]]; then
-    procs=$(p_procs)
-    if awk -v p="$wpid" '$1 == p && index($0, "/conveyor/foreman/waiter.sh") { f = 1 } END { exit !f }' <<<"$procs"; then
-      live=1
-      for w in conveyor limit alerts idle; do
-        s=down
-        awk -v p="$wpid" -v n="/watch-$w.sh" '$2 == p && index($0, n) { f = 1 } END { exit !f }' <<<"$procs" && s=up
-        watch="$watch${watch:+ }$w:$s"
-      done
-    fi
-  fi
-  cur=$(jq -r '.plugin.commit // empty | strings' .conveyor/project.json 2>/dev/null)
-  [ -n "$cur" ] || cur=$(jq -r '.commit // empty | strings' .git/conveyor-engine.json 2>/dev/null)
-  printf 'foreman\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$mark" "$wpid" "$wcommit" "$wsid" "$live" "$cur" "$watch" "$wstate"
-fi
+foreman_line
 # The plugin problems the Foreman noted (conveyor/foreman/stop.sh, one "- " line each in plugin-bugs.md), printed only
 # when there is one: pluginbugs <how many> <the file>.
 n=0; [ -z "$fd" ] || n=$(grep -c '^- ' "$fd/plugin-bugs.md" 2>/dev/null) || n=0

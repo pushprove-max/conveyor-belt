@@ -201,7 +201,13 @@ How fast the views follow the belt: with the live feed (below) running, a change
 is on now, all in one command (one `ssh` call when the records are on a build machine).
 When a record's checksum changes, a fetch starts at once, and that record's snapshot is built new for it
 (`conveyor.sh snapshot --fresh`), so a card started, a step, a landing or a block shows within about 5 seconds, plus
-the time that build takes. A check that finds no change fetches nothing. The fetch is
+the time that build takes. A check that finds no change fetches nothing.
+
+The Foreman row follows the Foreman's folder at once: each second the mod looks at the write times of its role mark
+(`session`) and `waiter.pid`, and when either one changes it reads the Foreman line alone and redraws the row, so a
+`/clear` shows within about a second, not at the next fetch. A second with no change reads nothing.
+
+The fetch is
 `hooks/units-fetch.sh`, run in the main checkout. It reads the machine's host file, `~/.config/conveyor/host.json`
 (under `$XDG_CONFIG_HOME` when that is set; else the checkout's `conveyor/host.json`), as the Board reads it:
 

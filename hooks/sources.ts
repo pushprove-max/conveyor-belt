@@ -140,12 +140,12 @@ const one = (v: unknown) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim
 // own: the repo of the record whose main is this checkout, the session's own project; empty when no record is. `how`
 // is local (one machine, or a record of the host file is this checkout) or ssh, else the reason nothing was asked:
 // nofile (with the paths of the host file looked at) or config. foreman: its line's fields after the word, where a Foreman is
-// expected (the fetch says which); null where none is. pluginBugs: `pluginbugs <how many> <file>`, null when the Foreman
+// expected (the fetch says which); null where none is. foremanDir: the Foreman's folder, empty when none is named. pluginBugs: `pluginbugs <how many> <file>`, null when the Foreman
 // noted none. testMap: `testmap <its state, JSON>` (testMapOf), null with no such line or one not understood. engine:
 // `engine <line>`, the line that says the project runs an old engine on this machine; null when it does not.
-export type Fetched = { research: string; home: string; own: string; fast: Fast; foreman: string[] | null; pluginBugs: PluginBugs | null; testMap: TestMap | null; engine: string | null; host: { name: string; how: string; rc: number; looked: string[] } | null; records: { repo: string; json: unknown }[] }
+export type Fetched = { research: string; home: string; own: string; fast: Fast; foreman: string[] | null; foremanDir: string; pluginBugs: PluginBugs | null; testMap: TestMap | null; engine: string | null; host: { name: string; how: string; rc: number; looked: string[] } | null; records: { repo: string; json: unknown }[] }
 export const parseFetch = (stdout: string): Fetched | null => {
-  const out: Fetched = { research: '', home: '', own: '', fast: { state: 'unread' }, foreman: null, pluginBugs: null, testMap: null, engine: null, host: null, records: [] }
+  const out: Fetched = { research: '', home: '', own: '', fast: { state: 'unread' }, foreman: null, foremanDir: '', pluginBugs: null, testMap: null, engine: null, host: null, records: [] }
   for (const line of stdout.split('\n')) {
     const f = line.split('\t')
     if (out.host) { if (f.length >= 2 && f[0]) out.records.push({ repo: f[0], json: f.slice(1).join('\t') }) }
@@ -154,6 +154,7 @@ export const parseFetch = (stdout: string): Fetched | null => {
     else if (f[0] === 'fast' && f[1] === 'norecord') out.fast = { state: 'norecord' }
     else if (f[0] === 'fast' && f[1] === 'ok' && /^\d+$/.test(f[3] ?? '') && /^\d+$/.test(f[4] ?? '')) out.fast = { state: 'ok', branch: f[2], ahead: Number(f[3]), dirty: Number(f[4]), subject: one(f[5]) }
     else if (f[0] === 'foreman') out.foreman = f.slice(1)
+    else if (f[0] === 'foremandir') out.foremanDir = f[1] ?? ''
     else if (f[0] === 'pluginbugs' && /^[1-9]\d*$/.test(f[1] ?? '') && f[2]) out.pluginBugs = { n: Number(f[1]), path: f[2] }
     else if (f[0] === 'testmap') out.testMap = testMapOf(f.slice(1).join('\t'))
     else if (f[0] === 'engine' && one(f.slice(1).join(' '))) out.engine = one(f.slice(1).join(' '))

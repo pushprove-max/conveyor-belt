@@ -13,7 +13,7 @@ DIR=$(cd "$(dirname "$0")" && pwd -P)
 FETCH=$DIR/units-fetch.sh
 T=$(mktemp -d) || exit 1
 trap 'rm -rf "$T"' EXIT
-fails=0
+fails=0 TAB=$'\t'
 ok() { echo "ok [units-fetch]: $1"; }
 bad() { echo "FAIL [units-fetch]: $1" >&2; fails=$((fails + 1)); }
 same() { # <what> <want> <got>
@@ -110,10 +110,16 @@ waiter() { # [<watcher left out>]: starts the stand-in in a process group of its
   for _ in $(seq 100); do [ -s "$FD/waiter.pid" ] && [ "$(pgrep -P "$WP" | wc -l)" -ge $((4 - $#)) ] && return; sleep 0.05; done
 }
 trap 'kill -- -"${WP:-0}" 2>/dev/null; rm -rf "$T"' EXIT
-foreman() { fetch "$M/bakery" feed | grep '^foreman' || echo 'no foreman line'; }
+foreman() { fetch "$M/bakery" feed | grep "^foreman$TAB" || echo 'no foreman line'; }
 waiter
 same 'D1: the role, a live waiter on the current install and its four watchers' \
   "$(printf 'foreman\ts1\t%s\t%s\ts1\t1\t%s\tconveyor:up limit:up alerts:up idle:up\tlistening' "$WP" "$A" "$A")" "$(foreman)"
+# Mode `foreman` (the mod's once-a-second look at the role mark and waiter.pid, hooks/units.tsx foremanTick) prints the
+# Foreman's folder and line alone, the same line the whole fetch prints. Bug it catches: a mode that reads the host
+# or prints other lines, so a /clear took a whole fetch to show, or a line that differs from the fetch's.
+same 'the foreman mode prints the Foreman folder and the same foreman line as the whole fetch, and nothing else' \
+  "$(printf 'foremandir\t%s\n%s' "$FD" "$(foreman)")" "$(fetch "$M/bakery" foreman)"
+same 'the whole fetch names the Foreman folder' "$(printf 'foremandir\t%s' "$FD")" "$(fetch "$M/bakery" feed | grep '^foremandir')"
 kill -- -"$WP"; wait "$WP" 2>/dev/null
 # Issue 215: and why it ended, from the last line of its log, written over a minute ago.
 echo "2026-11-15T00:00:00Z $WP ended: the session's process 77 has ended" > "$FD/waiter.log"; touch -t 200001010000 "$FD/waiter.log"

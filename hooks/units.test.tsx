@@ -106,7 +106,9 @@ const pressDetails = async ($: any) => {
   await ui.unmount()
 }
 // The short check (`stamp`) is no fetch: it reads one checksum a record, never a snapshot.
-const fetches = (w: World) => w.runs.filter(r => r.argv[0] === 'bash' && r.argv[1]?.endsWith('/hooks/units-fetch.sh') && r.argv[2] !== 'stamp')
+const fetches = (w: World) => w.runs.filter(r => r.argv[0] === 'bash' && r.argv[1]?.endsWith('/hooks/units-fetch.sh') && r.argv[2] !== 'stamp' && r.argv[2] !== 'foreman')
+// The once-a-second look at the Foreman's role mark and waiter.pid reads the Foreman line alone (`foreman` mode), no fetch.
+const foremanReads = (w: World) => w.runs.filter(r => r.argv[0] === 'bash' && r.argv[1]?.endsWith('/hooks/units-fetch.sh') && r.argv[2] === 'foreman')
 const checks = (w: World) => w.runs.filter(r => r.argv[0] === 'bash' && r.argv[1]?.endsWith('/hooks/units-fetch.sh') && r.argv[2] === 'stamp')
 const CANNOT = 'units: the Conveyor snapshot cannot be read (buildbox is unreachable)'
 
@@ -1284,4 +1286,81 @@ test('a snapshot that cannot be read still shows the Foreman indicator in /units
   expect(text.startsWith(`${CANNOT}\nForeman not listening: not the Foreman session\n  role: other · waiter 4242 on aaaaaaa for other · watchers: conveyor up`)).toBe(true)
   expect(await draw($, 'Pane')).toContain('Foreman not listening: not the Foreman session')
   expect(await draw($, 'Pane')).toContain('role: other')
+})
+
+// A /clear gives the Foreman's folder a new role mark, and /units showed it only at the next fetch (a minute, or a slow
+// one's 75 s later). The mod looks at the write times of `session` and waiter.pid each second and, on a change, reads
+// the Foreman line alone. The folder is the one the fetch's foremandir line names.
+const FD = '/r/state/bookstore/foreman'
+const MARK = `${FD}/session`
+const PID = `${FD}/waiter.pid`
+const inFolder = (fields: string[]) => withForeman(fields).replace('\nhost\t', `\nforemandir\t${FD}\nhost\t`)
+const OTHER = inFolder(['other', '4242', COMMIT_A, 'other', '1', COMMIT_A, UP])
+const MINE = inFolder(['me', '4242', COMMIT_A, 'me', '1', COMMIT_A, UP])
+const clearWorld = async ($: any, on: On) => {
+  const w = world(on, 'main', OTHER, { [MARK]: 'other 2026-11-21T00:00:00Z', [PID]: '4242 a other' })
+  on('session.id', () => ({ value: 'me' }))
+  await start($, 'main')
+  await w.clock.settle()
+  // The first fetch names the folder with no earlier look at it, so the next second reads the line once; the cases
+  // below start after that read.
+  await w.clock.advance(1000)
+  expect(foremanReads(w).length).toBe(1)
+  return w
+}
+
+// Bug it catches: the row waited for the minute's fetch, so a /clear showed the new Foreman late.
+test('a role mark that now names this session shows this session as the Foreman within a second, with no fetch', async ($, on) => {
+  const w = await clearWorld($, on)
+  expect(await draw($, 'Pane')).toContain('Foreman not listening: not the Foreman session')
+  const polled = fetches(w).length
+  w.fetch = MINE
+  w.files.set(MARK, { text: 'me 2026-11-21T00:00:01Z', at: NOW + 500 })
+  await w.clock.advance(1000)
+  expect(await draw($, 'Pane')).toContain('Foreman listening')
+  expect(foremanReads(w).length).toBe(2)
+  expect(fetches(w).length).toBe(polled)
+  // The change is read once: the seconds after it read nothing more.
+  await w.clock.advance(3000)
+  expect(foremanReads(w).length).toBe(2)
+})
+
+// Bug it catches: the first fetch (no Foreman folder known yet) read the old role, and the mark's new write time was
+// then saved as already seen, so a /clear during that fetch showed only at the next poll.
+test('a role mark changed while the first fetch runs is read within a second after it', async ($, on) => {
+  const w = world(on, 'main', OTHER, { [MARK]: 'other 2026-11-21T00:00:00Z', [PID]: '4242 a other' })
+  on('session.id', () => ({ value: 'me' }))
+  let release = () => {}
+  w.hold = new Promise<void>(r => { release = r })
+  await start($, 'main')
+  w.files.set(MARK, { text: 'me 2026-11-21T00:00:01Z', at: NOW + 500 })
+  w.hold = undefined
+  w.fetch = OTHER
+  release()
+  await w.clock.settle()
+  w.fetch = MINE
+  await w.clock.advance(1000)
+  expect(await draw($, 'Pane')).toContain('Foreman listening')
+  expect(fetches(w).length).toBe(1)
+})
+
+// Bug it catches: a check that read the Foreman line each second (a process a second) instead of only on a change.
+test('a second with no change to the role mark or waiter.pid reads nothing', async ($, on) => {
+  const w = await clearWorld($, on)
+  const [foreman, reads] = [foremanReads(w).length, w.reads.length]
+  await w.clock.advance(4000)
+  // No Foreman read, no fetch, and neither file read (the short `stamp` check is its own, not under test here).
+  expect(foremanReads(w).length).toBe(foreman)
+  expect(fetches(w).length).toBe(1)
+  expect(w.reads.slice(reads).filter(p => p === MARK || p === PID)).toEqual([])
+})
+
+// Bug it catches: only the role mark was watched, so a waiter that started or ended showed at the next fetch.
+test('a waiter.pid that changes is read within a second as well', async ($, on) => {
+  const w = await clearWorld($, on)
+  w.fetch = inFolder(['me', '4242', COMMIT_A, 'me', '0', COMMIT_A, '', 'down: ended'])
+  w.files.set(PID, { text: '4243 a other', at: NOW + 500 })
+  await w.clock.advance(1000)
+  expect(foremanReads(w).length).toBe(2)
+  expect(await draw($, 'Pane')).toContain('Foreman not listening: waiter down: ended')
 })

@@ -233,6 +233,12 @@ const nameFeedDir = ($: EngineInterface, cwd: string) => (naming ??= (async () =
 // live feed fresh, the board is the feed's and the fetch asks the host for no snapshot (only for a build machine's
 // test map). fedAt: the feed file's write time when the board is the feed's. A feed folder not yet named is asked for
 // again; while it is unnamed the board is the host's, with a note that says so.
+// The Foreman's folder as the last fetch named it, and the write times of its role mark (session) and waiter.pid as the
+// last fetch or Foreman read left them: foremanTick reads the Foreman line again when either time changes.
+let foremanDir = ''
+let foremanSeen: string | null = null
+const foremanKey = async ($: EngineInterface, dir: string) =>
+  (await Promise.all(['session', 'waiter.pid'].map(n => $.fs.stat(`${dir}/${n}`).then(st => String(st.mtimeMs), () => '')))).join(' ')
 const collect = async ($: EngineInterface, cwd: string): Promise<{ st: State; fedAt: number | null; fedKey: string | null }> => {
   if (!feedDir) await nameFeedDir($, cwd)
   const got = await readFeed($).catch(() => null)
@@ -241,11 +247,20 @@ const collect = async ($: EngineInterface, cwd: string): Promise<{ st: State; fe
   const fresh = [...freshFor]
   freshFor.clear()
   const mode = fed ? ['feed'] : fresh.length ? ['fresh', ...fresh] : []
+  // The Foreman's files as they were before the fetch reads them: a change while it runs is read again next second.
+  const dir0 = foremanDir
+  const key0 = dir0 ? await foremanKey($, dir0) : null
   // The script gives the host 50 s; the engine's own 30 s default would cut a slow answer short.
   const r = await $.process.run(['bash', await fetchPath($, cwd), ...mode], { cwd, timeoutMs: 75_000 }).catch(() => undefined)
   const f = r && r.exitCode === 0 ? parseFetch(r.stdout) : null
   const now = await $.clock.now()
-  if (f) own = f.own
+  if (f) {
+    own = f.own
+    foremanDir = f.foremanDir
+    // A folder not known before the fetch has no earlier look: the fetch may have read its role before a change, so the
+    // next second reads the Foreman line once (null is never a write time).
+    foremanSeen = foremanDir === dir0 ? key0 : null
+  }
   // The feed's board again for the own this fetch named, which the feed was read before.
   const board = fed && f ? (feedBoardOf(fed.key) ?? fed.board) : boardOf(f, r?.isStdoutTruncated ? CUT : null)
   // Read whether or not the host answered: a failed fetch must not drop the limit file's not-read line.
@@ -337,6 +352,27 @@ const feedTick = ($: EngineInterface) => {
     // Nothing new in the feed, but a running step's "last output N s ago" counts on: the clock moves each second.
     if (drawn?.snap?.belt.some(b => b.live?.lastOutputAt != null)) await update($, clockNow, () => now0)
   })().catch(() => undefined).finally(() => { feedBusy = false })
+}
+
+// Also once a second: the Foreman's role mark and waiter.pid are in the minute's fetch only, so a /clear (a new
+// session in the mark) showed up to a minute late. When the write time of either changed, the fetch's `foreman` mode
+// reads the Foreman line alone and the Foreman row is drawn at once, the rest of the state as it is. A second with
+// no change reads nothing. A read that fails leaves the row as it is for the minute's fetch.
+let foremanBusy = false
+const foremanTick = ($: EngineInterface) => {
+  if (foremanBusy || !foremanDir || !main || !anyWanted()) return
+  foremanBusy = true
+  const cwd = main
+  void (async () => {
+    const key = await foremanKey($, foremanDir)
+    if (key === foremanSeen) return
+    foremanSeen = key
+    const r = await $.process.run(['bash', await fetchPath($, cwd), 'foreman'], { cwd, timeoutMs: 15_000 }).catch(() => undefined)
+    if (!r || r.exitCode !== 0) return
+    const line = r.stdout.split('\n').find(l => l.startsWith('foreman\t'))
+    const foreman = foremanOf(line ? line.split('\t').slice(1) : null, await $.session.id().catch(() => ''))
+    await publish($, cur => (cur ? { ...cur, foreman } : (cur as unknown as State)))
+  })().catch(() => undefined).finally(() => { foremanBusy = false })
 }
 
 // The feed's board, newer than the one the views hold, laid over the state.
@@ -477,6 +513,8 @@ const begin = async ($: EngineInterface) => {
   feedAt = -1
   feedKey = null
   feedBoard = null
+  foremanDir = ''
+  foremanSeen = null
   dataOver = null
   limitRead = null
   // Where the feed is, learnt here on this machine: waiting for the first fetch to say would leave the feed unread
@@ -484,7 +522,7 @@ const begin = async ($: EngineInterface) => {
   // first poll waits on the same run, and the second's check starts once it answers.
   const at = ++begins
   void nameFeedDir($, main)
-    .then(() => { if (at === begins) feedClock = $.clock.every(STREAM_MS, () => feedTick($)) })
+    .then(() => { if (at === begins) feedClock = $.clock.every(STREAM_MS, () => { feedTick($); foremanTick($) }) })
     .catch(() => (at === begins ? failed($) : undefined))
   if (anyWanted()) void tick($).catch(() => undefined)
 }
