@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # This project's full test suite (.conveyor/test-full.sh) in parallel mode (CONVEYOR_SUITE_MODE=parallel), on a pool
 # of two test slots of its own. Bugs: an engine case file that held a slot its cases cannot use while they wait for
-# slots of their own (two such files on a two-slot pool) would wait for ever; a file that reads the pool itself (as
-# conveyor/tools/closure.test.sh does) held a slot, though its cases take their own; files run at once mixed their
+# slots of their own (two such files on a two-slot pool) would wait for ever; a file that reads the pool itself
+# held a slot, though its cases take their own; files run at once mixed their
 # output lines; a file's own name in the progress log was left out when another file named its cases meanwhile; and a
 # red run's failed cases were not under their own files.
 set -u
@@ -25,7 +25,7 @@ for f in fx-a fx-b; do
     'echo "$n line 1"; echo "$n line 2"' > "$R/conveyor/tests/$f.test.sh"
 done
 printf '%s\n' 'echo "fx-x line 1"; echo "fx-x line 2"' > "$R/lib/fx-x.test.sh"
-# A file outside the engine's case files that reads the pool itself, as conveyor/tools/closure.test.sh does, so its
+# A file outside the engine's case files that reads the pool itself, so its
 # cases take slots of their own: it notes the slot it was started on (CONVEYOR_TEST_SLOT, which a file that holds a
 # slot passes on, slot_mine), "none" when it holds none. Its path ends in no tracked test file's, so the test step does
 # not take this test for a meta-runner.

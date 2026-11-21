@@ -16,8 +16,8 @@ function documented(tab) {
   assert.ok(m, `docs/board.md names the panels of ${tab}`);
   return Array.from(m[1].matchAll(/\*\*(.+?)\*\*/g), (x) => x[1]);
 }
-// The tab's panel titles match the docs where the docs are: an install (closure.test.sh) ships no docs/ folder, so
-// there only the panels themselves are checked. A checkout with docs/ but no board.md still fails.
+// The tab's panel titles match the docs where the docs are: a copy of the Board without a docs/ folder has no page to
+// match, so there only the panels themselves are checked. A checkout with docs/ but no board.md still fails.
 function matchesDocs(titles, tab) {
   if (!fs.existsSync(DOCS)) return;
   assert.deepEqual(titles, documented(tab));

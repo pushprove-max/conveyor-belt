@@ -140,7 +140,7 @@ fi
 # Parallel: at most AT files at once, and never more than the pool has slots. A file that is no engine runner holds a slot while it
 # runs (the run's home slot or one of the pool, slot_take) and is pinned to its core (slot_mine); the engine's runner,
 # its case files and any other bash file that reads the pool itself (a line of its own that sources the slots and calls
-# slot_pool, as conveyor/tools/closure.test.sh does) hold none, as each of their cases takes a slot of its own: a file
+# slot_pool) hold none, as each of their cases takes a slot of its own: a file
 # holding one would keep it from its own cases. Each file's output goes to a file of its own, printed whole once the file has ended, so no two files'
 # lines are mixed. Its case names go to a log folder of its own, copied into the run's once it has ended: a case
 # another file names meanwhile is then never taken for one of this file's (runone's marks check).

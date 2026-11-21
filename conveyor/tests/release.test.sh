@@ -151,7 +151,7 @@ t_reldraft() {
 # still posts a passing status, so `release` would release a red commit without running the suite.
 t_relpass() {
   local O out f=$T/$CASE.md rule line
-  # The 1.0.0 notes are checked where the release notes are: an install (closure.test.sh) ships no docs/releases/
+  # The 1.0.0 notes are checked where the release notes are: an install of the release set ships no docs/releases/
   # folder, though it has the docs/ pages a test of the set reads (issue 769). The fixtures below run in both. A
   # checkout with docs/releases/ but no 1.0.0 notes still fails.
   if [ -d "$SRC/../docs/releases" ]; then

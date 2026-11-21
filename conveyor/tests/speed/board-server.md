@@ -33,7 +33,4 @@ removed files leave it unchanged, and no engine case was renamed, so `conveyor/c
 
 ## Shared helper ideas
 
-- `conveyor/tools/closure.test.sh` (not this card's file): its list of the two `.test.sh` wrappers it leaves out of the
-  set's tests (`dashboard-view.test.sh`, `dashboard-collector-incremental.test.sh`) and the comment above it name files
-  this card removed. The exclusions match nothing now and the check passes; the two names and the comment can go.
 - `conveyor/tests/lib.sh` and `.claude/scripts/__tests__/dashboard-view.helpers.mjs`: none from this group.

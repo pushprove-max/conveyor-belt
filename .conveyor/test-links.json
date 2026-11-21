@@ -527,11 +527,6 @@
     ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
-  "conveyor/tools/closure.test.sh": [
-    ".claude/scripts/__tests__/dashboard-cards.test.sh",
-    ".claude/scripts/__tests__/dashboard-local.test.sh",
-    ".claude/scripts/__tests__/dashboard.test.sh"
-  ],
   "conveyor/commands/release-prep.sh": [
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
     ".claude/scripts/__tests__/dashboard-local.test.sh",
@@ -588,13 +583,9 @@
     "conveyor/tests/metricsstop.test.sh"
   ],
   "conveyor/tests/slots.test.sh": [
-    "conveyor/tests/closuremiss.test.sh",
-    "conveyor/tests/closurereach.test.sh",
-    "conveyor/tests/closureturn.test.sh",
     "conveyor/tests/slotwhole.test.sh"
   ],
   "conveyor/tests/slotwhole.test.sh": [
-    "conveyor/tests/closureturn.test.sh",
     "conveyor/tests/slots.test.sh"
   ],
   "conveyor/foreman/foreman-size.test.sh": [

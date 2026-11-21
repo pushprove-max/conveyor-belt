@@ -17,13 +17,10 @@
 # fails, naming its file, as does a declaration no computed load reads. The project pack (the
 # .conveyor/ folder: the host project's input, read at run time), the area rule files and the startup instructions stay in the host project (section 11): a reference to one is never followed. A page's relative
 # src/href/import, an ES or TS module's relative import (a test's shared helper) and a Python import resolve from the file's
-# folder. closure.test.sh
-# copies this set into an empty directory, fails on a path the copy misses or holds beyond the set, and runs the
-# engine, the Board's server module and a hook from there: a reference this misses fails that check.
+# folder. A reference this misses leaves a file out of the release set.
 # closure.sh --unreached [<checkout>] prints, in place of the set, each tracked file of the engine and the Board
 # (conveyor/, .claude/dashboard/, .claude/scripts/dashboard*; not a test file, *.test.*, nor what stays in the host
-# project) that the set misses and the left-out list below does not name. closure.test.sh runs it first, and fails
-# its cases that copy the set on any such file in seconds, before a test runs from the copy.
+# project) that the set misses and the left-out list below does not name.
 set -euo pipefail
 UNREACHED=''; [ "${1:-}" != --unreached ] || { UNREACHED=1; shift; }
 ROOT=$(cd "${1:-$(dirname "$0")/../..}" && pwd -P)

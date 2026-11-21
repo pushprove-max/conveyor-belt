@@ -324,8 +324,7 @@ t_setuplaneasked() {
   out=$(cd "$S" && bash "$X" setup --fast-lane maybe --research-lane no 2>&1); [ $? = 2 ] && grep -q '^usage: .*--fast-lane yes|no' <<<"$out" || fail "setup took --fast-lane maybe: $out"
 }
 # Bug: yes to a lane left it unmade, or made it otherwise than its own create does; run again, setup failed on a lane
-# that is there, or changed it. The sandbox is stubbed (bwrap, sandbox-exec run the command they are given): the
-# lane's own tests (lanes/research.test.sh) prove the real one.
+# that is there, or changed it. The sandbox is stubbed (bwrap, sandbox-exec run the command they are given).
 lanestubs() {
   printf '#!/usr/bin/env bash\nwhile [ "$1" != -- ]; do shift; done; shift; exec "$@"\n' > "$G/bwrap"
   printf '#!/usr/bin/env bash\nwhile [ "$1" != -p ]; do shift; done; shift 2; exec "$@"\n' > "$G/sandbox-exec"

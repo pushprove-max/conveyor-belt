@@ -218,7 +218,7 @@ test('every panel of the list has its four state cases, each on its own test lin
   const named = new Map();
   const ran = [];
   // test-changed.sh's own filecases(), run on each file: it must count every case the file registers. It is the host
-  // project's runner (.conveyor/), which an install of the release set (closure.test.sh) does not hold: counted only
+  // project's runner (.conveyor/), which an install of the release set does not hold: counted only
   // where it is (issue 769).
   const counter = fileURLToPath(new URL('../../../.conveyor/test-changed.sh', import.meta.url));
   const counts = fs.existsSync(counter);

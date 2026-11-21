@@ -5,8 +5,7 @@
 # by hand): the folder /tmp/conveyor-test-slots, the same whatever the user's environment names, holding one file per
 # slot, 1 to N. N is the host file's testSlots, never more than the machine's cores less those kept for the user
 # (slot_reserved), which it is with none. (The host file's testSlotsDir, else
-# CONVEYOR_TEST_POOL, names another folder: a pool of the engine's own tests; slot_pool.) A test worker (the loop's test run of a card, one engine case, one unit of
-# the closure test) holds a slot while it runs: an flock on the slot's file, through a descriptor the worker and
+# CONVEYOR_TEST_POOL, names another folder: a pool of the engine's own tests; slot_pool.) A test worker (the loop's test run of a card, one engine case) holds a slot while it runs: an flock on the slot's file, through a descriptor the worker and
 # everything it starts inherit, so the slot is held until the last process of the worker has ended, however each ends,
 # and comes back then (a process that closed the descriptor: slot_left, slot_watch). A worker with no slot waits; it does not
 # start. Slot k is the k-th core the machine lets a test use (slot_cpus), so no two slots are one core: a worker and

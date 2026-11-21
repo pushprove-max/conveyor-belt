@@ -10,7 +10,7 @@
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
-# A file whose cases cannot run apart (x.test, as the engine's own closure.test.sh) honours only a `pass` line. #7
+# A file whose cases cannot run apart (x.test) honours only a `pass` line. #7
 # passed x.test, its log naming each case (`ok x1`, `ok x2`, so its units are x.test's two cases), and no other card
 # selects it: batchkeep() keeps both, and s.test's s1, which #8 passed too, it does not keep. The batch's list says
 # x.test (and #8's y.test) passed, as `pass` lines, and names nothing of s.test, so the run runs s.test's shared case
@@ -28,7 +28,7 @@ t_batchreusewhole() {
   [ "$list" = "pass x.test,pass y.test,ok z.test z1," ] || fail "the batch's list is not pass x.test, pass y.test and z.test's kept case z1 alone (it names x.test or y.test by case, names s.test or z2, or leaves one out): $list"
 }
 
-# A file whose cases cannot run apart (x.test, named in $STUB/whole, as the engine's own closure.test.sh) honours only
+# A file whose cases cannot run apart (x.test, named in $STUB/whole) honours only
 # a `pass` line. #7 passed x.test whole, its log naming each case (`ok x1`, `ok x2`), and no other card selects it:
 # the batch's list says x.test passed, so the run runs s.test's shared case alone, which both cards select (a.txt,
 # which both change, selects it), not y.test's, which #8 passed alone; #7's test line says one case ran and four were

@@ -22,7 +22,7 @@
   Chosen engine cases: `timeout 240 bash conveyor/conveyor.test.sh <case> [<case> ...]` (the case is the name after
   `t_`); a Board test by its own file under `.claude/scripts/__tests__/` (`bash`, `node --test` or `python3` on it).
 - Run `.conveyor/test-changed.sh` at most once in a session, and only when the change touches code shared across areas
-  of the engine. Do not run the whole `conveyor/conveyor.test.sh` or `conveyor/tools/closure.test.sh`: the Test step
+  of the engine. Do not run the whole `conveyor/conveyor.test.sh`: the Test step
   runs what the change touches before the card lands.
 - A card changes the suite's runner `.conveyor/test-full.sh`, the engine's runner `conveyor/conveyor.test.sh` or the
   pack's `test` settings only when its issue names that file or setting: such a change makes the next release run

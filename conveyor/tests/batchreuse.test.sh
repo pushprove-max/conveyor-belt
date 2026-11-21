@@ -18,7 +18,7 @@
 # when it ends in .sh), linked to that file: a card runs each alone, through test.fileCommand (#374). Its run runs
 # the cases $STUB/cases gives the test file (`<test file> <case>...`), and does what CONVEYOR_TEST_RERUN asks: a file
 # listed `pass` does not run, a case listed `ok` does not run (unless its file is named in $STUB/whole: a file
-# whose cases cannot run apart, which honours only `pass`, as closure.test.sh does), and a file a `changed` line
+# whose cases cannot run apart, which honours only `pass`), and a file a `changed` line
 # selects runs whole. Each card run writes a line to $STUB/runs, `<card> <cases its files ran>` (a run of no file
 # writes none), and each file's log says how many cases ran and how many it kept.
 # The cards are in the control record's order list in the order they become ready (#8, #9, #7), as batch.test.sh's
