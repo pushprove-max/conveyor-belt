@@ -668,7 +668,7 @@ echo '{}' > "$AHOME4/.config/conveyor/host.json"; : > "$AHOME4/.claude/projects/
 git -C "$WM" init -q && git -C "$WM" -c user.name=test -c user.email=noreply@example.com commit -q --allow-empty -m first \
   && git -C "$WM" worktree add -q --detach "$WL" || fail "accounts_worktree: no linked worktree"
 echo "fore-w 2026-11-12T00:00:00Z" > "$WM/conveyor/state/foreman/session"
-mkdir -p "$WL/.claude/scripts" && cp "$LIM" "$WL/.claude/scripts/"
+mkdir -p "$WL/.claude/scripts" && cp "${LIM%.py}"*.py "$WL/.claude/scripts/"
 got=$(env -u CONVEYOR_CLAUDE_PROFILES -u CLAUDE_CONFIG_DIR -u XDG_CONFIG_HOME -u XDG_STATE_HOME -u GIT_DIR -u GIT_WORK_TREE HOME="$AHOME4" CONVEYOR_HOST_OS=Linux \
   python3 "$WL/.claude/scripts/dashboard_limit.py" accounts "$T/accounts-cache-worktree") || fail "accounts_worktree: the read failed"
 [ "$(jq -c 'map(.foreman)' <<<"$got")" = '[true]' ] || fail "accounts_worktree: the main checkout's Foreman is not found: $got"

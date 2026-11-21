@@ -450,6 +450,19 @@ declare -A TESTS_OF=([.claude/dashboard/panels/rules.js]=.claude/scripts/__tests
   [hooks/sources.ts]=hooks/units.test.tsx [hooks/elements.ts]="hooks/sources.test.tsx hooks/units.test.tsx"
   [hooks/fixtures/units-two-projects.ts]="hooks/units-fetch.test.sh hooks/units.test.tsx hooks/sources.test.tsx"
   [.conveyor/engine-areas.json]=.conveyor/test-map-areas.test.sh [conveyor/lib/testmap.sh]=.conveyor/test-map-areas.test.sh)
+# The parts of the Board's scripts, each with its script: dashboard.sh sources its parts, and dashboard_server.py and
+# dashboard_limit.py run theirs in their own namespace, so a part has its script's tests (pick): those named after the
+# script, its TESTS_OF and its links (LINKS).
+declare -A PART_OF=([.claude/scripts/dashboard_panels.sh]=.claude/scripts/dashboard.sh
+  [.claude/scripts/dashboard_service.sh]=.claude/scripts/dashboard.sh
+  [.claude/scripts/dashboard_server_base.py]=.claude/scripts/dashboard_server.py
+  [.claude/scripts/dashboard_server_control.py]=.claude/scripts/dashboard_server.py
+  [.claude/scripts/dashboard_server_auth.py]=.claude/scripts/dashboard_server.py
+  [.claude/scripts/dashboard_server_pages.py]=.claude/scripts/dashboard_server.py
+  [.claude/scripts/dashboard_server_handler.py]=.claude/scripts/dashboard_server.py
+  [.claude/scripts/dashboard_limit_usage.py]=.claude/scripts/dashboard_limit.py
+  [.claude/scripts/dashboard_limit_pricing.py]=.claude/scripts/dashboard_limit.py
+  [.claude/scripts/dashboard_limit_requests.py]=.claude/scripts/dashboard_limit.py)
 # boardtests <file>: the Board test files a change to a shared test module or to a panel reaches, read from the test
 # files, not from a list (issue 544): a module beside the Board's tests (.claude/scripts/__tests__/, not a test) selects
 # each test file there that imports it (`from './<module>'`), as dashboard-view.helpers.mjs, the page's fixture, is
@@ -1059,7 +1072,7 @@ covof() {
 # The tests of the changed files <file>...: into run (test files), area (engine case files) and all (the whole engine
 # test), then (but in textonly's pick) pick's cases (the engine runner's cases, none for all of them) and run[the runner].
 pick() {
-local f t s named stem dir cov cpart helpers
+local f t s named stem dir cov cpart helpers of
 [ -n "$NOTEXT" ] || npart=()
 for f; do
   # A change to its comment and blank lines alone: no test, its linked ones and itself, a test file, too (commentonly).
@@ -1071,8 +1084,10 @@ for f; do
   # Its linked test files (LINKS), whatever else it selects; not in textonly's pick (NOTEXT): its files are not changed.
   # When its cases alone run (cpart), not a link to a case file that names one of its helpers: that link is for a change
   # to the helpers it calls (slots.test.sh's slotpool, in slotwhole.test.sh). A link a main-red fix wrote names none.
+  # A part of a Board script (PART_OF): the script's links, too.
+  of=${PART_OF[$f]:-$f}
   [ -z "$LINKS" ] || [ -n "$NOTEXT" ] || while IFS=$'\t' read -r s t; do
-    [ "$s" = "$f" ] || continue
+    [ "$s" = "$f" ] || [ "$s" = "$of" ] || continue
     case $t in conveyor/tests/*.test.sh) [ -z "$helpers" ] || ! grep -qwF -f <(printf '%s\n' "$helpers") -- "$t" || continue ;; esac
     case $t in conveyor/tests/*.test.sh) area[$t]=1 ;; *) run[$t]=1 ;; esac
     linked[$t$'\t'$f]=1
@@ -1115,7 +1130,8 @@ for f; do
   # A change to functions of paths.sh, or to commands of conveyor.sh, alone: their callers' tests (issue 514). A change
   # to the control record's defaults: the tests of the code that reads the keys it changed (issue 530).
   [ -n "$NOTEXT" ] || [ -n "$cov" ] || ! { funcsof "$f" || cmdsof "$f" || keysof "$f"; } || continue
-  stem=$(basename "${f%.*}"); dir=$(dirname "$f")
+  # A part of a Board script (of, above): the script's tests.
+  stem=$(basename "${of%.*}"); dir=$(dirname "$of")
   for s in "$stem" "${stem//_/-}"; do
     for t in "$dir/$s".test.* "$dir/$s"-*.test.* "$dir/__tests__/$s".test.* "$dir/__tests__/$s"-*.test.* \
              "$dir/__tests__/$s"*.refute.test.*; do
@@ -1125,7 +1141,7 @@ for f; do
       [ -f "$t" ] && ! owned "$t" "$stem" && { [ -z "$cov" ] || ! grep -qxF -- "$t" <<<"$COVTESTS"; } && run[$t]=1
     done
   done
-  for t in ${TESTS_OF[$f]:-}; do [ ! -f "$t" ] || { [ -n "$cov" ] && grep -qxF -- "$t" <<<"$COVTESTS"; } || run[$t]=1; done
+  for t in ${TESTS_OF[$of]:-}; do [ ! -f "$t" ] || { [ -n "$cov" ] && grep -qxF -- "$t" <<<"$COVTESTS"; } || run[$t]=1; done
   [ -n "$cov" ] || case $f in conveyor/*) areaof "$f" ;; esac
 done
 # A part the coverage map selected runs as a part, unless this pick, or another, selected its file whole (run, here).

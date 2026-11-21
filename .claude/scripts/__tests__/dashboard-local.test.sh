@@ -210,7 +210,7 @@ cp "$T/ledger.ok" "$PPL"
 HF=$T/hostfile; mkdir -p "$HF/conveyor" "$MAIN/.claude/scripts"
 jq -cn --arg l "$PPL" '{host: "devbox", ssh: "user@devbox", main: "/srv/linux-only",
   records: [{repo: "sample", main: "/srv/linux-only", ledger: $l}, {repo: "widgetshop", main: "/srv/cd"}]}' > "$HF/conveyor/host.json"
-cp "$SOURCE"/.claude/scripts/{dashboard.sh,dashboard_limit.py,dashboard_alerts.jq,dashboard_needs.json,decision.sh,hostfile.sh} "$MAIN/.claude/scripts/"
+cp "$SOURCE"/.claude/scripts/{dashboard*.sh,dashboard_limit*.py,dashboard_alerts.jq,dashboard_needs.json,decision.sh,hostfile.sh} "$MAIN/.claude/scripts/"
 quiet; : > "$T/ssh-calls"
 new_cycle
 env -u CONVEYOR_MAIN -u CONVEYOR_HOOK_FIRE_LOG -u CODEX_HOME HOME="$T/userhome" XDG_CONFIG_HOME="$HF" PATH="$BIN:$PATH" CONVEYOR_HOST_OS=Linux \
@@ -495,7 +495,7 @@ rc=0; env HOME="$T/userhome" CONVEYOR_MAIN="$MAIN" CONVEYOR_DASHBOARD_DIR="$OUT"
 # "seat" is not on the list: it now names a card's builder, reviewer and judge (docs/board.md), not the retired workflow.
 # The collector's own tests are three files: this one, dashboard.test.sh and dashboard-cards.test.sh.
 RETIRED='\b([u]nits?|[p]ass(es)?|[m]erge queue|[c]hain)\b'
-found=$(grep -n -i -E "$RETIRED" "$DASH" "$VIEW"/*.* "$VIEW"/panels/*.js "$SOURCE"/.claude/scripts/__tests__/dashboard.test.sh \
+found=$(grep -n -i -E "$RETIRED" "${DASH%.sh}"*.sh "$VIEW"/*.* "$VIEW"/panels/*.js "$SOURCE"/.claude/scripts/__tests__/dashboard.test.sh \
   "$SOURCE"/.claude/scripts/__tests__/dashboard-cards.test.sh "$SOURCE"/.claude/scripts/__tests__/dashboard-local.test.sh \
   "$SOURCE"/.claude/scripts/__tests__/dashboard-view.*.mjs | grep -v -E ':[0-9]+:\[[U]nit\]$' || true)
 # Exempt: the service file's section header, a line that is only that header. Any other line still fails: the
@@ -525,7 +525,7 @@ PL=$PL/Library/LaunchAgents/com.conveyor.dashboard.plist
 mkdir -p "${PL%/*}" "$MAIN/.claude/scripts"
 echo 'previous job' > "$PL"
 cp -R "$VIEW" "$MAIN/.claude/dashboard"
-cp "$SOURCE/.claude/scripts/dashboard.sh" "$SOURCE/.claude/scripts/dashboard_server.py" "$MAIN/.claude/scripts/"
+cp "$SOURCE"/.claude/scripts/dashboard*.sh "$SOURCE"/.claude/scripts/dashboard_server*.py "$MAIN/.claude/scripts/"
 view_list() { (cd "$MAIN/.claude/dashboard" && find . -type f \( -name '*.html' -o -name '*.css' -o -name '*.js' -o -name '*.svg' \) | sed 's|^\./||' | LC_ALL=C sort); }
 for f in scripts/dashboard.sh dashboard/index.html dashboard/app.css dashboard/app.js; do
   mv "$MAIN/.claude/$f" "$T/held"
@@ -605,7 +605,7 @@ grep -q -- '--user restart dashboard.service' "$T/systemctl-calls" || fail "a Li
 REL=$T/release PROJ=$T/project
 mkdir -p "$REL/.claude/scripts" "$PROJ"
 cp -R "$VIEW" "$REL/.claude/dashboard"
-cp "$SOURCE/.claude/scripts/dashboard.sh" "$SOURCE/.claude/scripts/dashboard_server.py" "$REL/.claude/scripts/"
+cp "$SOURCE"/.claude/scripts/dashboard*.sh "$SOURCE"/.claude/scripts/dashboard_server*.py "$REL/.claude/scripts/"
 git -C "$REL" init -q -b main
 env HOME="$T/userhome" PATH="$BIN:$PATH" CONVEYOR_HOST_OS=Linux CONVEYOR_MAIN="$PROJ" CONVEYOR_DASHBOARD_DIR="$OUT" \
   bash "$REL/.claude/scripts/dashboard.sh" --install > "$T/inst.log" 2>&1 \

@@ -172,11 +172,12 @@ p_named() {
 # <stem>-<rest> is the longest source name's it starts with (`_` read as `-`); the page's dashboard-view names no
 # file (test-changed.sh NAMED). A Board of each kind: dashboard.sh with its own test, a test of it named after
 # nothing else (collector) and three it runs named after dashboard_limit.py and dashboard_server.py (TESTS_OF); one of
-# dashboard_server.py's it does not run; two of the page's.
+# dashboard_server.py's it does not run; two of the page's. And a part of dashboard.sh and one of dashboard_server.py,
+# named after no test (test-changed.sh PART_OF).
 board463() {
   local s=$R/.claude/scripts f
   mkdir -p "$s/__tests__"
-  for f in dashboard.sh dashboard_server.py dashboard_limit.py; do echo one > "$s/$f"; done
+  for f in dashboard.sh dashboard_server.py dashboard_limit.py dashboard_panels.sh dashboard_server_auth.py; do echo one > "$s/$f"; done
   for f in dashboard dashboard-limit dashboard-limit-wait dashboard-server dashboard-server-local; do echo 'exit 0' > "$s/__tests__/$f.test.sh"; done
   for f in dashboard-collector-incremental dashboard-view.needs dashboard-view.page-tabs; do echo '// none' > "$s/__tests__/$f.test.mjs"; done
   git -C "$R" add -A && git -C "$R" commit -qm board
@@ -195,6 +196,21 @@ p_ownedpy() {
   [ "$got" = "dashboard-server-local.test.sh dashboard-server.test.sh " ] \
     && ok "a change to dashboard_server.py selects the dashboard-server tests, its by name" \
     || no "dashboard_server.py changed: ran '$got': $(cat "$T/out")"
+}
+# Bug caught: a part of a Board script is named after no test, so a change to it alone selected no test of its script.
+p_partsh() {
+  got=$(board463 dashboard_panels.sh)
+  [ "$got" = "dashboard-collector-incremental.test.mjs dashboard-limit-wait.test.sh dashboard-limit.test.sh dashboard-server.test.sh dashboard.test.sh " ] \
+    && ok "a change to a part of dashboard.sh selects dashboard.sh's tests" \
+    || no "dashboard_panels.sh changed: ran '$got': $(cat "$T/out")"
+}
+# And a test .conveyor/test-links.json links to dashboard_server.py (page-tabs here) was skipped for a change to its part.
+p_partpy() {
+  echo '{".claude/scripts/dashboard_server.py": [".claude/scripts/__tests__/dashboard-view.page-tabs.test.mjs"]}' > "$R/.conveyor/test-links.json"
+  got=$(board463 dashboard_server_auth.py)
+  [ "$got" = "dashboard-server-local.test.sh dashboard-server.test.sh dashboard-view.page-tabs.test.mjs " ] \
+    && ok "a change to a part of dashboard_server.py selects dashboard_server.py's tests and linked tests" \
+    || no "dashboard_server_auth.py changed: ran '$got': $(cat "$T/out")"
 }
 
 # A deleted engine file's area is gone from the map with it (its case file listed by another area, as the check
@@ -372,7 +388,7 @@ p_cputime() {
     && ok "the test step's log gives each file's CPU seconds, next to none for one that sleeps" || no "CPU seconds, file clock CPU: '$got': $(cat "$T/out")"
 }
 
-for p in checkout area selected boardcount shellcount ended realstate filter named owned ownedpy deleted mapadd \
+for p in checkout area selected boardcount shellcount ended realstate filter named owned ownedpy partsh partpy deleted mapadd \
   mapareas mapmove mapcore emptyarea casefile caseshared scnew scold enginetime cputime badline union; do part "$p"; done
 wait
 for p in "${PARTS[@]}"; do

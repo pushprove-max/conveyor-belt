@@ -1140,7 +1140,7 @@ snapshot() (
         | first($o[] | select(.issue == $l.issue and ($l.issue != 0 or .title == $l.title)))] | unique_by(.card) | sort_by(.time) | reverse)
     | .pushedCards |= (sort_by(.time) | reverse | .[:$p])' "$d/full"
 )
-# lanekeys -- what the Board finds the card that landed a lane's change by (dashboard.sh landing()), for each lane of
+# lanekeys -- what the Board finds the card that landed a lane's change by (dashboard_panels.sh landing()), for each lane of
 # MAIN that holds a change (the linked worktrees lanetips counts as lanes): a JSON list of {issue: the issue at the end
 # of a branch named as a card id of this project (landbranch()), else 0; title: the subject of the oldest commit it
 # has that BRANCH has not}.

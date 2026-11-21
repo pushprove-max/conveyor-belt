@@ -32,7 +32,7 @@ t_snapsize() {
   [ "$(jq -c '[.landedCount, .landedUsd, (.landed, .metrics.cards, .cost.cards, .cost.unpriced, .declinedRest, .branches, .pushedCards | length)]' <<<"$out")" = '[110,null,21,20,20,20,20,21,100]' ] \
     || fail "the lists of the snapshot are not cut to their newest: $(jq -c '[.landedCount, .landedUsd, (.landed, .metrics.cards, .cost.cards, .cost.unpriced, .declinedRest, .branches, .pushedCards | length)]' <<<"$out")"
   # Past the cut: the landed card still on the belt (else the Board shows it in Building as landed on an earlier day),
-  # and the lane's own row (else the Board says the lane's change never landed: dashboard.sh landing()).
+  # and the lane's own row (else the Board says the lane's change never landed: dashboard_panels.sh landing()).
   [ "$(jq -c '[.landed[-1].card, (.branches[-1] | [.card, .issue, .title])]' <<<"$out")" = '["c1",["c3",0,"fix(tooling): lane change"]]' ] \
     || fail "the snapshot drops the on-belt landed card or the lane's landing: $(jq -c '[.landed[-1].card, .branches[-1]]' <<<"$out")"
   # The newest of each, never the oldest.

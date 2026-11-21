@@ -12,9 +12,6 @@
 .claude/scripts/__tests__/dashboard-server-feed.test.sh	t.start
 .claude/scripts/__tests__/dashboard-server.test.sh
 .claude/scripts/__tests__/dashboard-stream.test.sh	self.beat
-.claude/scripts/dashboard.sh
-.claude/scripts/dashboard_limit.py
-.claude/scripts/dashboard_server.py
 .conveyor/lint-funcs.test.sh	show
 .conveyor/test-changed.sh
 .conveyor/test-changed.sh	newcmd
