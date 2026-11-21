@@ -232,6 +232,48 @@ t_donenogo() {
   [ ! -e "$STUB/closed" ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] || fail "issue #8 was closed over a NO-GO, or it got a second review"
 }
 
+# Issue 1105: a card whose issue's work is done outside the repository (judge records written, issues filed) changes
+# no tracked file. Bug it catches: such a card blocked with "the session made no change" although it did the work, and
+# its issue stayed open; or it closed on the session's word alone, with no review of the evidence its line names.
+# Also: a Codex (or OpenCode) build's line was not read, as its stream has no Claude result, so the card blocked; the
+# reviewer was not given the issues and state files the line names, which a Claude or OpenCode reviewer, with no
+# shell, web or folder outside the worktree, cannot read itself; the issues inside a range were not given, nor the
+# session's records when older files and session logs used up the limit first.
+OUT='DONE-OUTSIDE: 3 judge records in conveyor/state/testactions/, issues #21 to #23 filed'
+t_doneoutside() {
+  donewt 14 ''; echo "$GO" > "$STUB/review.1"
+  jq -cn --arg r $'I judged 3 files and filed 3 issues.\n\n'"$OUT" '{type: "item.completed", item: {type: "agent_message", text: $r}}' > "$T/$CASE/cards/c0-14.out"
+  jq -c --argjson a "[$(issue 21 2026-01-01)]" '. + $a' "$STUB/issues.json" > "$STUB/i.new" && mv "$STUB/i.new" "$STUB/issues.json"
+  # Older records that sort first by name and fill the limit, then the session's start, a long session log and the
+  # session's own record: the record must still reach the reviewer, and the range must give #22 as well.
+  mkdir -p "$ST/testactions" && for i in 0 1 2 3 4 5 6 7 8 9 10 11; do head -c 4000 /dev/zero | tr '\0' o > "$ST/testactions/0old$i"; done
+  touch -t 202601010000 "$ST/testactions"/0old* && : > "$T/$CASE/cards/c0-14.before"
+  head -c 50000 /dev/zero | tr '\0' e > "$ST/testactions/1.events" && echo '{"verdict": "rewrite a.test.sh"}' > "$ST/testactions/z1"
+  fx_in 'cd "$R" && waitsec=2 && nochange c0-14 14 "$CONVEYOR_CARDS/c0-14" "the brief of # Issue #14:"'
+  [ "$RC" = 0 ] || fail "nochange exited $RC: $(cat "$T/$CASE/run.out")"
+  grep -qF 'did the work outside the repository' "$STUB/asked" && grep -qF 'Done-when line' "$STUB/asked" && [ "$(tail -n 1 "$STUB/asked")" = "$OUT" ] \
+    || fail "the reviewer was not asked to check the evidence the DONE-OUTSIDE line names: $(cat "$STUB/asked")"
+  grep -qF 'body of 21' "$STUB/asked" && grep -A1 -F '## Issue #22' "$STUB/asked" | grep -qF 'GitHub did not give this issue.' \
+    && grep -qF '## Issue #23' "$STUB/asked" && grep -A1 -F '## conveyor/state/testactions/z1' "$STUB/asked" | grep -qF 'rewrite a.test.sh' && ! grep -qF '## Issue #14' "$STUB/asked" \
+    && grep -qE 'left out [0-9]+ more files of conveyor/state/testactions/' "$STUB/asked" \
+    || fail "the reviewer was not given the issues and state files the line names: $(cat "$STUB/asked")"
+  [ "$(st '.step' | tr '\n' ' ')" = "picked start review closed " ] || fail "steps of a card whose work was done outside the repository: $(st '.step' | tr '\n' ' ')"
+  [ "$(st 'select(.step == "closed") | [.result, .reason] | join("|")')" = "ok|Done outside the repository: $OUT" ] || fail "closed line: $(st 'select(.step == "closed")')"
+  [ "$(cat "$STUB/closed" 2>&1)" = 14 ] && grep -qF 'I judged 3 files and filed 3 issues.' "$STUB/close-comments" && grep -qF "$OUT" "$STUB/close-comments" \
+    || fail "issue #14 was not closed with the session's report: $(cat "$STUB/close-comments" 2>&1)"
+  [ -z "$(ls "$T/$CASE/cards")" ] && [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] || fail "something was committed, or the worktree is left: $(ls "$T/$CASE/cards")"
+}
+
+# The reviewer finds the evidence short: blocked, the reason giving the reviewer's finding, the issue left open.
+t_doneoutsidenogo() {
+  donewt 15 "$OUT"; echo "$NOGO" > "$STUB/review.1"
+  fx_in 'cd "$R" && nochange c0-15 15 "$CONVEYOR_CARDS/c0-15" "the brief of # Issue #15:"'
+  [ "$RC" = 0 ] || fail "nochange exited $RC: $(cat "$T/$CASE/run.out")"
+  st 'select(.issue == 15 and .step == "blocked") | .reason' | grep -qF "the session made no change and said that it did the issue's work outside the repository. The reviewer says that the evidence does not show the issue's work done: [P1] a.txt:1 wrong word. Its session's output" \
+    || fail "a NO-GO on DONE-OUTSIDE did not block with the reviewer's reason: $(st 'select(.issue == 15) | "\(.step) \(.reason)"')"
+  [ ! -e "$STUB/closed" ] && [ -z "$(st 'select(.issue == 15 and .step == "closed")')" ] || fail "issue #15 was closed over a NO-GO"
+}
+
 # closed() on card c0-<issue>'s worktree, at main's commit h as the reviewer read it, after main moved to m by
 # <move> during the review. Its exit is in $RC, the reason it prints in run.out.
 donemove() { # <issue> <move>

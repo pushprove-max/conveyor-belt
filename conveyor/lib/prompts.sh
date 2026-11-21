@@ -374,6 +374,18 @@ that claim against the issue. Do not run tests or builds and change nothing. Rep
 that main does not already do, one line each: `[P0|P1|P2] file:line what`. Write no other line: any other line is
 read as a finding. Last line, exactly: `VERDICT: GO` only if main already does what the issue asks, otherwise
 `VERDICT: NO-GO`.'
+# The review of a card whose session changed nothing and said DONE-OUTSIDE: is the issue's work done outside the
+# repository, as the evidence the line names shows?
+# shellcheck disable=SC2034 # used in lib/followups.sh
+OUTSIDE='The build session for the issue below changed nothing in this worktree. It says the issue asks for no change
+to a tracked file, and that it did the work outside the repository (records in the state folder, issues filed); its
+DONE-OUTSIDE line, naming its evidence, is at the end of this message. Check each Done-when line of the issue, and
+what the issue asks, against that evidence: the issues and state files it names, as the engine read them, are in
+the section before that line; read the worktree for anything else. Do not run tests or builds and change nothing.
+Report each thing the issue asks for that the evidence does not show done, or that needs a change to a tracked file,
+one line each: `[P0|P1|P2] <file, issue or record> what`. Write no other line: any other
+line is read as a finding. Last line, exactly: `VERDICT: GO` only if the evidence shows the issue'"'"'s work done,
+otherwise `VERDICT: NO-GO`.'
 # What the session that rebuilds a card after a landing conflict is told, after the brief; the conflict message and
 # the path of the card's patch follow it (the path, never the patch: a prompt must not grow with the diff).
 REBASE='# Landing conflict: apply the same change on top of main as it is now

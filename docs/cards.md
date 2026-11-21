@@ -37,6 +37,20 @@ reply needs a `D<n> met:` or `D<n> not met:` line for each item. It must also na
 the change adds, on a line with its file. On the Board, open a card's `Done when` line to see each item: its text,
 the builder's line for it, and the reviewer's answer when the review gave one.
 
+A main-red fix card whose session changes no file runs its cases again on main. When they pass, the card ends as
+`closed`, and when they fail, the card is blocked. Any other build session that changes no file blocks the card with "the session made no change", unless
+its reply ends with one of two lines:
+
+- `ALREADY-DONE: <where it is fixed>`: main already does what the issue asks. A reviewer checks this against main.
+- `DONE-OUTSIDE: <what it did and where the evidence is>`: the issue asks for no change to a tracked file, and the
+  session did the work outside the repository, for example records in the state folder or issues it filed. A
+  reviewer checks each `Done when` item against the evidence that the line names.
+
+When the reviewer answers GO, Conveyor closes the issue and the card ends as `closed`, not landed. For
+`DONE-OUTSIDE`, the issue's closing comment is the session's report, and the card's reason starts "Done outside
+the repository". When the reviewer answers NO-GO, or gives no clear verdict, the card is blocked, and the reason
+gives what the reviewer found.
+
 Before a build, fix or review session starts, Conveyor checks that the CLI of its seat is on PATH. An update or a
 reinstall can remove a CLI for a short time. So when the CLI is missing, Conveyor reads the host's CLIs again for
 about two minutes. When the CLI is still missing, the card waits in its step and takes no build slot. The Board and

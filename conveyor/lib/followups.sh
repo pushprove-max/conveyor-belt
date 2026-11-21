@@ -372,11 +372,11 @@ visible() { # <review file> [held | any]
 }
 
 # The last reply of a session's stream (a Claude result, a Codex agent_message or an OpenCode text part) that holds
-# more than white space, on one line, cut to 1000 characters; nothing when it has none.
-lastreply() { # <session output>
-  jq -Rrjn '[inputs | fromjson? // empty | objects | if .type == "result" then .result
+# more than white space, on one line, cut to 1000 characters; nothing when it has none. With whole, the reply as it is.
+lastreply() { # <session output> [whole]
+  jq -Rrjn --arg w "${2:-}" '[inputs | fromjson? // empty | objects | if .type == "result" then .result
       elif .type == "item.completed" and .item.type? == "agent_message" then .item.text elif .type == "text" then .part.text? else empty end
-      | strings | select(test("\\S"))] | last // "" | [splits("\\s+")] | map(select(. != "")) | join(" ") | .[0:1000]' "$1" 2>/dev/null
+      | strings | select(test("\\S"))] | last // "" | if $w != "" then . else [splits("\\s+")] | map(select(. != "")) | join(" ") | .[0:1000] end' "$1" 2>/dev/null
 }
 
 # block(), with the given words added at the end of the reason's first line, before the output a reason may carry.
@@ -388,7 +388,11 @@ ncblock() { # <card> <issue> <worktree> <reason> <words>
 
 # The session left no change. If its reply ends with an ALREADY-DONE line and the worktree is untouched, one review
 # confirms that main already does what the issue asks, and on its GO the issue is closed with that line and the
-# card's closing line is `closed`. Anything else blocks the card with the reason; there is no fix round.
+# card's closing line is `closed`. A DONE-OUTSIDE line (the issue asks for no change to a tracked file, and the session
+# did its work outside the repository: records in the state folder, issues filed) goes to one review the same way
+# (OUTSIDE): it checks the issue's Done-when lines against the evidence the line names, and on its GO
+# doneoutside() closes the issue with the session's report; a NO-GO's reason holds the reviewer's findings.
+# Anything else blocks the card with the reason; there is no fix round.
 # The untouched worktree is first moved to main as it stands, so the reviewer reads today's main, not the one the
 # session started from; closed() then refuses a main that has moved on from the commit the reviewer read, unless
 # every file the ALREADY-DONE line names is the same on the new main (issue 552: on a busy belt main moves during
@@ -403,7 +407,7 @@ ncblock() { # <card> <issue> <worktree> <reason> <words>
 # line, also quotes the session's last reply (lastreply()); with none it says so, and the end of the session's error
 # output is the line's tail. A card reaches here only after its session ended well: session() fails on any other exit.
 nochange() { # <card> <issue> <worktree> <brief>
-  local c=$1 n=$2 wt=$3 said t res err kept why r
+  local c=$1 n=$2 wt=$3 said t res err kept why r k ins claim ev=''
   kept=" Its session's output and errors are kept in kept/$c/."; why=$kept
   if r=$(lastreply "$wt.out") && [ -n "$r" ]; then why+=" Its last reply: $r"
   elif [ -e "$wt.out" ]; then why+=" The session ended well (exit 0) but left no reply."$'\n'"$(tail -n 20 "$wt.err" 2>/dev/null)"; fi
@@ -418,26 +422,79 @@ nochange() { # <card> <issue> <worktree> <brief>
       || { ncblock "$c" "$n" "$wt" "$t The engine could not write the closed line." "$why"; return; }
     clean "$wt"; return
   fi
-  said=$(jq -r 'select(.type == "result") | .result // "" | tostring' "$wt.out" 2>/dev/null | grep -v '^[[:space:]]*$' | tail -n 1)
-  [[ $said == "ALREADY-DONE: "*[![:space:]]* ]] && [ -z "$(git -C "$wt" status --porcelain 2>&1)" ] \
+  r=$(lastreply "$wt.out" whole)
+  said=$(grep -v '^[[:space:]]*$' <<<"$r" | tail -n 1)
+  case $said in "ALREADY-DONE: "*[![:space:]]*) k=fixed ;; "DONE-OUTSIDE: "*[![:space:]]*) k=outside ;; *) k='' ;; esac
+  [ -n "$k" ] && [ -z "$(git -C "$wt" status --porcelain 2>&1)" ] \
     || { ncblock "$c" "$n" "$wt" "the session made no change, so there is nothing to review." "$why"; return; }
   said=${said:0:1000}
-  err=$(git -C "$wt" checkout -q --detach "refs/heads/$BRANCH" 2>&1) \
-    || { ncblock "$c" "$n" "$wt" "the session said that main already fixes the issue, but the engine could not move the worktree to main for the review:${err:0:400}." "$kept $said"; return; }
+  if [ $k = fixed ]; then
+    ins=$CONFIRM claim="said that main already fixes the issue"
+    err=$(git -C "$wt" checkout -q --detach "refs/heads/$BRANCH" 2>&1) \
+      || { ncblock "$c" "$n" "$wt" "the session said that main already fixes the issue, but the engine could not move the worktree to main for the review:${err:0:400}." "$kept $said"; return; }
+  else ins=$OUTSIDE claim="said that it did the issue's work outside the repository" ev=$(outsidefacts "$said" "$n" "$(p_stat "$wt.before" | cut -d' ' -f2)"); fi
   began "$c" "$n" review
   kept=" Its session's output and the last error output (of its review, when the review started) are kept in kept/$c/."
-  t=$(reviewed "$wt" "$4"$'\n\n# The session changed nothing and ended its reply with this line\n'"$said" "$CONFIRM") \
-    || { ncblock "$c" "$n" "$wt" "review of the session's ALREADY-DONE line: $t" "$kept"; return; }
+  t=$(reviewed "$wt" "$4$ev"$'\n\n# The session changed nothing and ended its reply with this line\n'"$said" "$ins") \
+    || { ncblock "$c" "$n" "$wt" "review of the session's ${said%%:*} line: $t" "$kept"; return; }
   res=$(verdict "$wt.review")
   record "$c" "$n" review "$res" "$(grep -Ev "$UNRECORDED" "$wt.review" | jq -cRs --arg res "$res" --argjson t "$t" --argjson k "$(counts "$wt.review")" 'sub("\n+$"; "") as $r | $t + {reason:$r,counts:$k} + (if $res == "NO-GO" then {tail: $r} else {} end)')"
   case $res in
     GO) ;;
-    NO-GO) ncblock "$c" "$n" "$wt" "the session made no change and said that main already fixes the issue. The reviewer says that main does not do what the issue asks." "$kept $said"; return ;;
-    *) ncblock "$c" "$n" "$wt" "the session made no change and said that main already fixes the issue. The review of that claim ended without one clear verdict." "$kept $said"; return ;;
+    NO-GO) t="main does not do what the issue asks"
+      # The reviewer's findings, on the reason's first line: what the evidence of work outside the repository lacks.
+      [ $k = fixed ] || t="the evidence does not show the issue's work done: $(grep -Ev "$NOTFINDING" "$wt.review" | tr '\n' ' ' | head -c 600)"
+      ncblock "$c" "$n" "$wt" "the session made no change and $claim. The reviewer says that ${t% }." "$kept $said"; return ;;
+    *) ncblock "$c" "$n" "$wt" "the session made no change and $claim. The review of that claim ended without one clear verdict." "$kept $said"; return ;;
   esac
   reading fresh >/dev/null 2>&1 # the after reading of the closed line, asked for outside the lock
-  err=$(locked closed "$c" "$n" "$wt" "$said") || { ncblock "$c" "$n" "$wt" "$err." "$kept $said"; return; }
+  if [ $k = fixed ]; then err=$(locked closed "$c" "$n" "$wt" "$said")
+  else err=$(locked doneoutside "$c" "$n" "$said" "$r"); fi || { ncblock "$c" "$n" "$wt" "$err." "$kept $said"; return; }
   clean "$wt"
+}
+
+# The evidence a DONE-OUTSIDE line names, as its reviewer is given it: a Claude or OpenCode reviewer has no shell or
+# web, and reads no folder outside the worktree. Each issue it names (#<n>, the card's own left out, the first 30) as
+# GitHub gives it, its body cut to 2000 characters; a range (#<a> to #<b>, through, - or .., of at most 50) is each
+# issue in it. Each path under conveyor/state/ it names (a file, or a folder's files), read from the state folder,
+# 4000 characters a file and 40000 in all: the files the session changed (at or after its start, the time of the
+# <worktree>.before that session() writes as it begins) first, the smallest first, so the records it wrote come
+# before older files and session logs; the files the limit leaves out are counted. What cannot be read says so.
+outsidefacts() { # <DONE-OUTSIDE line> <the card's issue> [<the session's start, epoch seconds>]
+  local w i j f p s m o='' left=40000 more
+  for i in $(grep -oE '#[0-9]+( *(to|through|-|–|\.\.) *#?[0-9]+)?' <<<"$1" | awk '{ a = substr($0, 2) + 0; match($0, /[0-9]+$/)
+      b = substr($0, RSTART) + 0; if (b > a && b - a <= 50) for (; a <= b; a++) print a; else { print a; print b } }' \
+    | awk '!s[$0]++' | head -n 50); do
+    [ "$i" != "$2" ] || continue
+    j=$(timeout 20 gh issue view "$i" --json number,title,state,body 2>/dev/null </dev/null \
+      | jq -er 'objects | select(.number) | "\(.title) (\(.state))\n\(.body // "" | .[0:2000])"' 2>/dev/null) || j="GitHub did not give this issue."
+    o+=$'\n\n## Issue #'"$i"$'\n'"$j"
+  done
+  while IFS= read -r w; do
+    p=$ST/${w#conveyor/state/}; p=${p%/}
+    [[ $w != *..* ]] && [ -e "$p" ] || { o+=$'\n\n## '"$w"$'\nThe state folder has no such file.'; continue; }
+    more=0
+    while read -r s m f; do
+      [ "$left" -gt 0 ] || { more=$((more + 1)); continue; }
+      j=$(head -c 4000 "$f" 2>/dev/null) || j="It cannot be read."; j=${j:0:$left}; left=$((left - ${#j}))
+      o+=$'\n\n## conveyor/state/'"${f#"$ST"/}"$'\n'"$j"
+    done < <(find "$p" -type f 2>/dev/null | while IFS= read -r f; do s=$(p_stat "$f") && echo "$s $f"; done \
+      | awk -v t="${3:-0}" '{ print ($2 >= t ? 0 : 1), $0 }' | LC_ALL=C sort -k1,1n -k2,2n -k4 | cut -d' ' -f2-)
+    [ "$more" = 0 ] || o+=$'\n\n'"The limit of 40000 characters left out $more more files of $w."
+  done < <(grep -oE 'conveyor/state/[^[:space:]`"'"'"',;:)]*' <<<"$1" | awk '!s[$0]++' | head -n 20)
+  [ -z "$o" ] || printf '\n\n# The evidence the line names, read by the engine: the issues from GitHub, the files from the state folder%s' "$o"
+}
+
+# A card whose session did the issue's work outside the repository, and whose reviewer confirmed it: the issue is
+# closed with the session's report as its comment, then the closed line, its reason saying the work was done
+# outside the repository, is written. Prints the reason when it fails.
+doneoutside() { # <card> <issue> <DONE-OUTSIDE line> <the session's report>
+  local err l
+  l=$(line "$1" "$2" closed ok "$(jq -cn --arg r "Done outside the repository: $3" --argjson e "$(ending)" --argjson w "$(waited)" '{reason:$r} + $e + $w')") \
+    || { echo "the engine cannot make the closed line, so it did not close the issue"; return 1; }
+  err=$(gh_write issue close "$2" --comment "Conveyor card $1 changed no tracked file: it did this issue's work outside the repository, and the reviewer confirmed it."$'\n\n'"${4:0:60000}" 2>&1 >/dev/null) \
+    || { echo "the reviewer confirmed that the work was done outside the repository. The engine could not close the issue:${err:0:400}"; return 1; }
+  append "$l" || { echo "the engine closed the issue, but it could not write the closed line"; return 1; }
 }
 
 # Under the lock, as one step, so no Conveyor landing comes between the check and the close: the issue is closed
