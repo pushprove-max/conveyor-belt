@@ -61,7 +61,7 @@
 # run alone under way, as fulljudge() names it, else null; the snapshot adds its progress), moved (main moved while
 # the suite ran; while it runs the snapshot compares main's head with main), main (main's head as the suite started), reused
 # (null for a whole suite; else {sha and time: the run it reused, ran: the files it reran, none when no test ran, kept:
-# the passes it kept}), reasons
+# the passes it kept, machine: the reused line's, ssh when it ran on a box over ssh or kept a box's passes}), reasons
 # (each line the command printed to stderr, its "conveyor: <command>: " taken off), pid (the process whose tree, and
 # the processes that carry its mark, `release-run stop` ends), red (a failed release-prep's suite a release may go over: {sha, files, cases}, else null)
 # and anyway (a release made over it: red with by, else null) and allowed (a release that passed over hits in named
@@ -476,7 +476,7 @@ relsuite() { # <command name> <commit>
   [ $rc != 2 ] || { git worktree remove --force "$wt" 2>/dev/null; echo "conveyor: $n: the worktree of ${sha:0:12} could not be put back on it after the changed-tests selection; nothing run" >&2; return 1; }
   if [ $rc = 3 ]; then
     # A pass of every file on this very commit (a full test run's, or Push landed's): nothing runs.
-    rc=0; u=$(jq -c '{sha, time, ran: [], kept: (.files | length)}' <<<"$l")
+    rc=0; u=$(jq -c '{sha, time, ran: [], kept: (.files | length), machine}' <<<"$l")
     echo "conveyor: $n: reuses the green run of $(jq -r .time <<<"$l") on ${sha:0:12}; no test runs"
   else
     if [ $rc = 0 ]; then
@@ -714,8 +714,8 @@ release() { # <version>
   echo "conveyor: release: v$v is released at ${t:0:12}${red:+, over a failed suite by $RELBY}"
 }
 # The Board's Release: release-prep, then on its pass release, in the background (above). Without prep, when the
-# record (the newest run) is a passed release-prep of <version> on main's head, main not moved since, and of no box
-# with --machine local: release alone, told that commit. With anyway (Release anyway): release --anyway --by <who> alone.
+# record (the newest run) is a passed release-prep of <version> on main's head, main not moved since, and with
+# --machine local of no box, run or reused: release alone, told that commit. With anyway (Release anyway): release --anyway --by <who> alone.
 releasego() { # <version> [prep: release-prep alone | anyway <who>]
   local ok='' lk
   # The release lock, taken here, before run.log is opened, and kept by the run's process (CONVEYOR_RELEASE_LOCK, its
@@ -723,7 +723,7 @@ releasego() { # <version> [prep: release-prep alone | anyway <who>]
   # hold (a push under way), is refused, and does not wait behind it nor write over its run.log.
   { exec {lk}>>"$CARDS/release/lock"; } 2>/dev/null || { echo "conveyor: release-run: its lock could not be made; nothing run" >&2; return 1; }
   flock -n "$lk" || { exec {lk}>&-; echo "conveyor: release-run: release-prep or release is already running; this one is not started" >&2; return 2; }
-  [ -n "${2:-}" ] || { ok=$(jq -er --arg v "$1" 'select(.step == "release-prep" and .state == "passed" and .version == $v and .moved == false and (env.CONVEYOR_RELEASE_MACHINE != "local" or .machine.kind != "ssh")) | .sha | strings' "$RELRUN" 2>/dev/null) \
+  [ -n "${2:-}" ] || { ok=$(jq -er --arg v "$1" 'select(.step == "release-prep" and .state == "passed" and .version == $v and .moved == false and (env.CONVEYOR_RELEASE_MACHINE != "local" or (.machine.kind != "ssh" and ((.reused.kept // 0) == 0 or .reused.machine != "ssh")))) | .sha | strings' "$RELRUN" 2>/dev/null) \
     && [ "$ok" = "$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)" ] || ok=''; }
   ( trap '' HUP; exec {LOGFD}>&- && exec {LOGFD}>&2
     export CONVEYOR_RELEASE_PID=$BASHPID CONVEYOR_RELEASE_LOCK=$lk

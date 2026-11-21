@@ -160,6 +160,32 @@ t_hostoncego() {
   relwait "the run did not end released" '.step == "release" and .ended != null'
   [ "$(cat "$STUB/full-pwd")" = "$T/$CASE/cards/release/wt" ] && [ ! -e "$STUB/ssh-calls" ] || fail "the suite did not run here, or the box was reached: $(cat "$STUB/full-pwd" 2>&1) $(cat "$STUB/ssh-calls" 2>&1)"
 }
+# Bug (#1284): a release-prep with the local rule reused a pass of every file the box had made on the same commit, and
+# its record named this machine alone, so a later release-run --machine local took that pass as one made here. The
+# record's reused must name the box.
+t_hostreusebox() {
+  local O RUN out
+  runsetup "$BOXSUITE"
+  jq -cn --arg o "$O" '{sha: $o, time: "t1", by: "release-prep", machine: "ssh", files: {"t/a.test.sh": "ok", "t/b.test.sh": "ok"}}' > "$ST/suites.jsonl" || fail "the fixture could not be made"
+  out=$(loop release-run prep 1.1.0 2>&1) || fail "release-run prep did not start the run: $out"
+  # relwait: release-run starts the run in the background and returns; only its record shows when the run has ended.
+  relwait "the run did not end" '.ended != null'
+  jq -e --arg o "$O" '.state == "passed" and .machine.kind == "local" and .reused == {sha: $o, time: "t1", ran: [], kept: 2, machine: "ssh"}' "$RUN" > /dev/null \
+    || fail "release-run prep over the box's pass on $O did not reuse it, or its record does not say the pass is the box's: $(cat "$RUN") $(cat "$T/$CASE/cards/release/run.log")"
+}
+# Bug (#1284): release-run <version> --machine local, after a release-prep here that reused the box's pass on main's
+# head, released on that pass, so no suite ran here. The run record is that pass; the run must run release-prep here.
+t_hostreusego() {
+  local O RUN out
+  runsetup "$BOXSUITE"
+  mkdir -p "$T/$CASE/cards/release" && jq -cn --arg o "$O" '{kind: "release", step: "release-prep", version: "1.1.0", state: "passed", sha: $o, moved: false, ended: "t1",
+    machine: {kind: "local", name: "this machine", target: "", dir: "", step: "done", secs: {}, reason: null}, reused: {sha: $o, time: "t0", ran: [], kept: 2, machine: "ssh"}}' > "$RUN" || fail "the fixture could not be made"
+  out=$(loop release-run 1.1.0 --machine local 2>&1) && grep -q 'release-prep 1.1.0 is running, then release 1.1.0' <<<"$out" \
+    || fail "release-run 1.1.0 --machine local did not start release-prep here over the reused box's pass on $O: $out"
+  # relwait: release-run starts the run in the background and returns; only its record shows when the run has ended.
+  relwait "the run did not end released" '.step == "release" and .ended != null'
+  [ "$(cat "$STUB/full-pwd" 2>/dev/null)" = "$T/$CASE/cards/release/wt" ] || fail "release-run 1.1.0 --machine local ran no suite here: $(cat "$T/$CASE/cards/release/run.log")"
+}
 # Bug: release-run stop ended the run here but left its suite running on the box. The box's processes are no child of
 # the run and carry no mark of it (boxsetup), as on a real box, so only a stop sent over ssh ends them.
 t_hoststop() {

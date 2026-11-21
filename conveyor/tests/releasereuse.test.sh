@@ -53,6 +53,8 @@ rrprep() {
 # no suite run.
 # Bug (#44, D2): Push landed ran the whole suite on a commit release-prep had just passed. Before the release, B is made
 # an unpushed landing (origin put back on A, a card's landed line naming B): Push landed runs no test and pushes B.
+# Bug (#1284): release-prep's record (release/run.json, read by release-run --machine local, releasego()) names the
+# machine of the pass it reused; Push landed's line in fulltest.jsonl names it too.
 t_relreusefail() {
   local A B RUN got
   rrsetup
@@ -60,7 +62,7 @@ t_relreusefail() {
   rrprep
   [ "$got" = "t/f1.test.sh t/f3.test.sh" ] || fail "release-prep on B ran '$got', not t/f1 and t/f3 alone: $(cat "$T/$CASE.b")"
   grep -q "statuses/$B -f state=success -f context=conveyor/release-suite " "$STUB/gh-calls" || fail "no passing status was posted on B: $(cat "$STUB/gh-calls")"
-  jq -e --arg a "$A" --arg b "$B" '.state == "passed" and .sha == $b and (.reused | del(.time)) == {sha: $a, ran: ["t/f1.test.sh", "t/f3.test.sh"], kept: 1}' "$RUN" > /dev/null \
+  jq -e --arg a "$A" --arg b "$B" '.state == "passed" and .sha == $b and (.reused | del(.time)) == {sha: $a, ran: ["t/f1.test.sh", "t/f3.test.sh"], kept: 1, machine: "local"}' "$RUN" > /dev/null \
     || fail "the record does not name the run reused and the files rerun: $(cat "$RUN")"
   git -C "$T/$CASE/origin" update-ref refs/heads/main "$A" && git -C "$R" update-ref "refs/remotes/origin/main" "$A" \
     && rm -f "$ST/pushed" && landed 7 | jq -c --arg b "$B" '.sha = $b' >> "$ST/cards.jsonl" || fail "the fixture could not be made"
@@ -68,7 +70,7 @@ t_relreusefail() {
   loop full-test push > "$T/$CASE.p" 2>&1 || fail "push landed did not start: $(cat "$T/$CASE.p")"; ftended 1
   [ ! -e "$STUB/ran" ] || fail "Push landed ran tests on a commit release-prep passed: $(cat "$STUB/ran")"
   [ "$(git -C "$T/$CASE/origin" rev-parse refs/heads/main)" = "$B" ] \
-    && [ "$(ftl '[.state, .pushed.ok, .reused.sha, .reused.ran]')" = "[\"passed\",true,\"$B\",[]]" ] \
+    && [ "$(ftl '[.state, .pushed.ok, .reused.sha, .reused.ran, .reused.machine]')" = "[\"passed\",true,\"$B\",[],\"local\"]" ] \
     || fail "Push landed did not push B on release-prep's pass: $(cat "$ST/fulltest.jsonl" "$ST/fulltest.jsonl.log")"
   loop release 1.1.0 > "$T/$CASE.r" 2>&1 || fail "release did not take the pass on B: $(cat "$T/$CASE.r")"
   [ ! -e "$STUB/ran" ] && [ -n "$(git -C "$T/$CASE/origin" tag -l v1.1.0)" ] || fail "release ran the suite again or released nothing: $(cat "$T/$CASE.r")"
@@ -112,7 +114,7 @@ t_relreuserel() {
   echo 'exit 0 # changed' > "$R/t/f2.test.sh"; echo three >> "$R/src/s3.sh"
   rrrel
   [ "$got" = "t/f2.test.sh t/f3.test.sh" ] || fail "release on C ran '$got', not t/f2 and t/f3 alone: $(cat "$T/$CASE.r")"
-  jq -e --arg b "$B" --arg c "$C" '.step == "release" and .state == "released" and .sha == $c and (.reused | del(.time)) == {sha: $b, ran: ["t/f2.test.sh", "t/f3.test.sh"], kept: 1}' "$RUN" > /dev/null \
+  jq -e --arg b "$B" --arg c "$C" '.step == "release" and .state == "released" and .sha == $c and (.reused | del(.time)) == {sha: $b, ran: ["t/f2.test.sh", "t/f3.test.sh"], kept: 1, machine: "local"}' "$RUN" > /dev/null \
     || fail "release's record does not name the run reused on B and the files rerun: $(cat "$RUN")"
 }
 # Bug (#1069, D2): a test setting changed since B can change what each file's ok means, so release, as release-prep
@@ -139,4 +141,19 @@ t_suitebasenear() {
   got=$(cd "$g" && export STATE=$T/$CASE/cards.jsonl && . "$SRC/lib/fulltest.sh" && suitebase "$B" | jq -r .sha && suitebase "$C" | jq -r .sha && suitebase "$A" | jq -r .sha)
   got=$(paste -sd' ' <<<"$got")
   [ "$got" = "$B $B $A" ] || fail "suitebase took '$got' for B, C and A, not '$B $B $A'"
+}
+# Bug (#1284): a run here that reran some files over the box's line on A kept the box's passes, but its line on B named
+# this machine, so a later run told to run here (--machine local) reused them. suitekeep() of a rerun of t/f1 on B,
+# over A's line of the box, must name the box in B's line and in the reuse it prints.
+t_suitekeepbox() {
+  local g=$T/$CASE/g A B got
+  mkdir -p "$g" && git -C "$g" init -q && touch "$g/f1" "$g/f2" && git -C "$g" add f1 f2 \
+    && git -C "$g" -c user.name=t -c user.email=t@example.com commit -qm A && git -C "$g" -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m B \
+    && printf 'TESTRUN files=1\n-- ok f1\n' > "$T/$CASE/wt.test" || fail "the fixture could not be made"
+  A=$(git -C "$g" rev-parse HEAD~1) B=$(git -C "$g" rev-parse HEAD)
+  # clock (lib/control.sh, which needs the whole engine's setup to load) only dates the line.
+  got=$(cd "$g" && export STATE=$T/$CASE/cards.jsonl HERE=$SRC && . "$SRC/lib/session.sh" && . "$SRC/lib/fulltest.sh" && clock() { echo t2; } \
+    && suitekeep "$T/$CASE/wt" "$B" 0 release-prep "$(jq -cn --arg a "$A" '{sha: $a, time: "t1", by: "release-prep", machine: "ssh", files: {f1: "fail", f2: "ok"}}')" | jq -c '{machine, kept}')
+  [ "$got" = '{"machine":"ssh","kept":1}' ] && jq -e --arg b "$B" '.sha == $b and .machine == "ssh" and .files == {f1: "ok", f2: "ok"}' "$T/$CASE/suites.jsonl" > /dev/null \
+    || fail "suitekeep of a rerun of f1 on B over the box's line on A did not name the box: printed '$got', suites: $(cat "$T/$CASE/suites.jsonl" 2>&1)"
 }

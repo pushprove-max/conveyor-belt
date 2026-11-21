@@ -38,9 +38,10 @@
 # push (asked to push), sha (the commit run or pushed), state (passed, failed or error, with reason), exit, cases (a red
 # run's: each {case, line, runs: each run alone, passed, failed, timeout or killed, verdict: flaky, fix or declined, why,
 # issue, reused}; an anyway line's: those of the red run it pushed over), pushed ({ok, reason}; null: nothing was to be
-# pushed), by (who pushed anyway) and reused (a run's: null for a whole suite, else {sha, time, ran, kept}: the run
-# reused, the files rerun, none when nothing ran, and the passes kept). $FULLTEST.running holds {since, sha, how, pid:
-# the run's process} while the lock is held, and, once a red
+# pushed), by (who pushed anyway) and reused (a run's: null for a whole suite, else {sha, time, ran, kept, machine}: the
+# run reused, the files rerun, none when nothing ran, the passes kept, and the reused line's machine: ssh when that
+# run ran on a box over ssh or kept a box's passes (suitekeep()), else local).
+# $FULLTEST.running holds {since, sha, how, pid: the run's process} while the lock is held, and, once a red
 # run's failed cases are run alone, counts: the whole run's suiteprog(). Each run's files, with their results and
 # times, also go to $SUITERUNS (suiterec(), lib/testlist.sh) for the Tests page.
 # A run whose process was killed leaves $FULLTEST.running with the lock free (fulldead()): the loop's next turn (fullreap()) removes
@@ -155,9 +156,10 @@ suitereuse() { # <worktree> <commit>
 }
 # The line of the suite run in <worktree> on <commit>, made by <by>, added to $SUITES in place of that commit's line,
 # with the files of the line it reused (<reused line>, suitereuse()) that it did not run, and only the files <commit>
-# holds. Prints, for the run's record, null for a whole suite, else {sha, time, ran, kept}: the reused line's commit and
-# time, the files rerun and the passes kept. A run that named no result for a file it selected, or that failed (<exit>
-# not 0) with no file failed, adds no line and fails.
+# holds; a line that keeps a pass of a box over ssh is that box's (machine ssh), as a run told to run here reuses
+# none of it. Prints, for the run's record, null for a whole suite, else {sha, time, ran, kept, machine}: the reused
+# line's commit, time and machine, the files rerun and the passes kept. A run that named no result for a file it
+# selected, or that failed (<exit> not 0) with no file failed, adds no line and fails.
 suitekeep() { # <worktree> <commit> <exit> <by> [reused line]
   local logs=() r of f
   mapfile -t logs < <(testlogs "$1")
@@ -169,8 +171,8 @@ suitekeep() { # <worktree> <commit> <exit> <by> [reused line]
   jq -cn --arg s "$2" --arg t "$(clock)" --arg by "$4" --arg m "${SH_KIND:-local}" --slurpfile r <(printf '%s' "$r") --slurpfile o <(printf '%s' "${5:-null}") --rawfile tr <(git ls-tree -r --name-only "$2") '
     $r[0] as $r | $o[0] as $o | ($tr | split("\n") | map({(.): true}) | add) as $has
     | (if $o == null then {} else $o.files | with_entries(select(.value == "ok" and $has[.key] and ($r[.key] | not))) end) as $k
-    | {sha: $s, time: $t, by: $by, machine: $m, files: ($k + $r | with_entries(select($has[.key])))},
-      (if $o == null then null else {sha: $o.sha, time: $o.time, ran: ($r | keys), kept: ($k | length)} end)' \
+    | {sha: $s, time: $t, by: $by, machine: (if ($k | length) > 0 and $o.machine == "ssh" then "ssh" else $m end), files: ($k + $r | with_entries(select($has[.key])))},
+      (if $o == null then null else {sha: $o.sha, time: $o.time, ran: ($r | keys), kept: ($k | length), machine: $o.machine} end)' \
     | { IFS= read -r f && suiteadd "$f" && IFS= read -r f && printf '%s\n' "$f"; }
 }
 # <line> added to $SUITES in place of its commit's line, under $SUITES.lock: two runs may end at once.
@@ -303,7 +305,7 @@ fullrun() { # <run | push | anyway> <commit> <command> <"card issue" to push und
     return
   elif [ $rc = 3 ]; then
     # A pass of every file on this very commit (a release-prep's, or an earlier run's): nothing runs.
-    rc=0; reused=$(jq -c '{sha, time, ran: [], kept: (.files | length)}' <<<"$l")
+    rc=0; reused=$(jq -c '{sha, time, ran: [], kept: (.files | length), machine}' <<<"$l")
     echo "conveyor: full-test: reuses the green run of $(jq -r .time <<<"$l") on ${sha:0:12}; no test runs"
   else
     if [ $rc = 0 ]; then
