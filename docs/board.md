@@ -1028,8 +1028,7 @@ answer says "Run stopped". It says "Run finished before Stop" when the run ended
 process of the run had already stopped. A Stop names its run, so a late Stop never stops a newer run. The button on the answer to **Start**
 (**Watch run** or **Open its results**) opens the run that the answer names, even when a newer run went since. The
 page then shows that run, titled with its name; for a run that ended, the verdict says "This run", not "The last run".
-**Live run** in the page row shows the run that goes, or else the last run. The tab opened again opens on **Live run**
-when a run goes, and else on **Scoreboard**. When no run
+**Live run** in the page row shows the run that goes, or else the last run. When no run
 goes, the page shows the last run: how it ended, and each arm's result, sessions, tokens, minutes and cost. A task
 that did not start shows "not started", never unresolved. When the build machine refused the run, the verdict says
 that the run did not start, and why. When the
