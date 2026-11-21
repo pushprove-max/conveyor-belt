@@ -213,7 +213,7 @@ t_autoport() {
   steps() { st "select(.issue == $1 and $NOMARK) | \"\(.step) \(.result)\"" | tr '\n' ,; }
   echo 'echo two >> a.txt' > "$STUB/build"; echo 'ONE other' > "$STUB/move"
   echo '[ "$(wc -l < "$STUB/tests")" != 2 ] || { echo b > "$R/b.txt"; git -C "$R" add b.txt; git -C "$R" commit -qm "main adds b.txt"; }' >> "$STUB/test-cmd"
-  echo '[ ! -e "$PWD.port" ] || { cp "$PWD.port" "$STUB/port"; cp "$PWD.ready" "$STUB/readyatport"; }' > "$STUB/review-cmd"
+  echo '[ ! -e "$PWD.port" ] || { cp "$PWD.port" "$STUB/port"; cp "$PWD.ready" "$STUB/readyatport"; echo "$PWD" > "$STUB/portwt"; }' > "$STUB/review-cmd"
   # Each review's prompt is kept, as $STUB/prompt.<n>.
   sed -i 's|^cat > /dev/null; echo x >> "$STUB/reviews";|echo x >> "$STUB/reviews"; cat > "$STUB/prompt.$(wc -l < "$STUB/reviews")";|' "$STUB/codex"
   # loop: only a whole card run shows the port's tests, the move on main and the auto-port that reuses its pass
@@ -232,8 +232,10 @@ t_autoport() {
   # The .port file and the instructions of the port's review are made inside card() (no function makes them), so only
   # this run shows that review is told it reviews a port alone and handed the kept patch against the ported change.
   # Bug: the port's review was given the instructions of any other review (no PORTREVIEW, no .port file named).
+  # Bug: a prompt that names another file (such as <worktree>.patch.port) in place of <worktree>.port, the file the
+  # engine writes, sends the review to a file that is not there: the line must name that exact path.
   grep -qx -- '+ ONE' "$STUB/port" && grep -qx -- ' +two' "$STUB/port" || fail "the review after the port was not handed the kept patch against the port: $(cat "$STUB/port" 2>&1)"
-  grep -qx '# This review is of a port alone' "$STUB/prompt.4" && grep -qx 'The difference is the file .*\.port\.' "$STUB/prompt.4" \
+  grep -qx '# This review is of a port alone' "$STUB/prompt.4" && grep -qxF "The difference is the file $(cat "$STUB/portwt" 2>&1).port." "$STUB/prompt.4" \
     && ! grep -q '^# This review is of a port alone' "$STUB/prompt.3" \
     || fail "the port's review, and it alone, was not told it reviews the port and handed the .port file: $(grep -n 'port' "$STUB/prompt.4" 2>&1 | tail -n 4)"
   [ "$(tr '\n' ' ' < "$STUB/closed")" = "100101 100102 100103 " ] && [ "$(st 'select(.issue == 8 and .step == "landed") | [.leftover, .followups] | tojson')" = '[true,[100104,100105,100106]]' ] \
