@@ -42,6 +42,14 @@ test('Scoreboard, 7 arms on 50 tasks, one arm with results that kept no grade: t
   assert.ok([1, 2, 2.5, 5].some((m) => Math.abs(Math.log10(step / m) % 1) < 1e-9), `the step ${step} is a round size`);
   const costs = Array.from(box(w, 'Value: resolve rate against cost').querySelectorAll('title'), (t) => text(t).match(/\$([\d.]+) a task/)).map((m) => Number(m[1]));
   assert.ok(v[4] >= Math.max(...costs) - 0.005, `the axis ends at ${v[4]}, past the dearest arm ${Math.max(...costs)}`);
+  // Labels and positions tie to each other through the points: read through the axis (the label price at the point's x),
+  // each point's x must give the cost its own title states, so a label that is off by a factor (every label halved, with
+  // the positions right) fails here.
+  box(w, 'Value: resolve rate against cost').querySelectorAll('g.bench-pt').forEach((g) => {
+    const stated = Number(text(g.querySelector('title')).match(/\$([\d.]+) a task/)[1]);
+    const read = (Number(g.querySelector('circle').getAttribute('cx')) - 40) / 368 * v[4];
+    assert.ok(Math.abs(read - stated) <= 0.006, `${g.dataset.arm}: its title says $${stated} a task, the axis (${ticks.join(' ')}) reads $${read.toFixed(3)} at its place`);
+  });
   assert.ok(!notes(w).some((n) => /kept before the grade/.test(n)) && !text(page(w)).includes('kept before the grade'), 'no note on results kept before the grade');
   assert.ok(text(box(w, 'Hidden tests')).includes('not kept'), 'the arm\'s cells say not kept');
 });
