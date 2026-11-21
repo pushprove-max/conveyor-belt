@@ -68,3 +68,19 @@ t_relalonemixed() {
     || fail "the record does not judge flips flaky and breaks the one that blocks: $(cat "$RUN")"
   [ "$(jq -c '[.entries[].case]' "$ST/flaky.json" 2>&1)" = '["flips"]' ] || fail "only flips should be on the flaky-test record: $(cat "$ST/flaky.json" 2>&1)"
 }
+# Bug (#1247): a run alone was named in the release record while the pass before's logs were still in the worktree (the
+# run clears them only as it starts), and the last one was still named as release-prep put the suite's logs back, so
+# the snapshot showed one pass's counts as another's progress. fulljudge() runs with its run alone stubbed: each pass
+# writes its own logs; each write of the record notes the pass it names and the logs then in the worktree.
+t_relalonepass() {
+  local w=$T/$CASE/wt got
+  mkdir -p "$T/$CASE"; got=$( RELRUN=$T/$CASE/run.json; echo '{"rerun":null}' > "$RELRUN"
+    eval "$(sed -n '/^fulljudge() {/,/^}/p' "$SRC/lib/fulltest.sh")"; eval "$(sed -n 's/^relrec() {/relrec0() {/p' "$SRC/commands/release-prep.sh")"
+    relrec() { relrec0 "$@"; echo "$(jq -c '.rerun.round' "$RELRUN") $(cat "$w.test" 2>/dev/null)/$(cat "$w.testlog/l" 2>/dev/null)" >> "$T/$CASE/seen"; }
+    fullalone() { local p; p=p$(jq '.rerun.round' "$RELRUN"); mkdir -p "$1.testlog"; echo "$p" > "$1.testlog/l"; echo "$p" > "$1.test"; echo passed; }
+    flaky() { :; }
+    FULL_ALONE=3 fulljudge "$w" 0123456789abcdef 'bash t' '{"files":[{"file":"a.test","cases":[{"name":"x","line":"x failed"}]}]}' 'release 1.1.0' > /dev/null
+    paste -sd, "$T/$CASE/seen" )
+  [ "$got" = 'null /,1 /,null p1/p1,2 /,null p2/p2,3 /,null p3/p3' ] \
+    || fail "fulljudge on a release's failed case x named a pass beside another pass's logs, or left one named (round logs.test/testlog, each write): $got"
+}

@@ -322,6 +322,7 @@ fullalone() { # <worktree> <testfails() of the run> <unit> [field]
 # alone is a verdict failed, which blocks the release: no fix card is filed and no declined line written. Each run
 # alone of a release is a pass its record names as it begins (rerun: {round, of: every run alone, case, since}; relrec(),
 # commands/release-prep.sh), so the snapshot shows that pass's progress, not the suite's counts (suites(), lib/snapshot.sh).
+# The record names no pass while the logs in the worktree are another's: before each pass and at the end, rerun is null.
 fulljudge() { # <worktree> <commit> <command> <testfails() of the run> [release]
   local wt=$1 sha=$2 u us name r runs outside code why cause body x v issue reused out=() run="the full test suite" pass=0 of
   [ -z "${5:-}" ] || run="the suite run of $5"
@@ -336,7 +337,9 @@ fulljudge() { # <worktree> <commit> <command> <testfails() of the run> [release]
     name=$(jq -r .name <<<"$u"); runs=(); outside=(); code=''
     for ((x = 0; x < FULL_ALONE; x++)); do
       pass=$((pass + 1))
-      [ -z "${5:-}" ] || relrec --argjson p $pass --argjson of "$of" --arg c "$name" '.rerun = {round: $p, of: $of, case: $c, since: (now | todate)}'
+      # The pass before's logs go before this pass is named, so no pass is named beside another's logs.
+      [ -z "${5:-}" ] || { relrec '.rerun = null'; rm -rf "$wt.testlog" "$wt.test"
+        relrec --argjson p $pass --argjson of "$of" --arg c "$name" '.rerun = {round: $p, of: $of, case: $c, since: (now | todate)}'; }
       r=$(fullalone "$wt" "$4" "$u") || r=failed; runs+=("$r")
       case $r in
         timeout) outside+=("it timed out alone, under load") ;;
@@ -369,6 +372,7 @@ Done when: the case passes alone and in the full test suite."
     out+=("$(jq -c --arg v "$v" --arg why "$why" --argjson i "${issue:-null}" --argjson re "${reused:-false}" \
       '{case: .name, line, runs: $ARGS.positional, verdict: $v, why: (if $why == "" then null else $why end), issue: $i, reused: $re}' --args "${runs[@]}" <<<"$u")")
   done <<<"$us"
+  [ -z "${5:-}" ] || relrec '.rerun = null'
   printf '%s\n' "${out[@]}" | jq -cs '.'
 }
 # Why a case that fails alone in the code fails (fulljudge()): a landed commit origin lacks that plausibly caused it, or
