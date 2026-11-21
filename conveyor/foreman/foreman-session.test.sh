@@ -161,7 +161,8 @@ out=$(turn u5 'Stop hook feedback: Conveyor: alpha: blocked: #7' 'Idle'); [ -z "
 # needs the owner; a report beside it is still refused; a line without the id is no such line.
 done_line='Done without asking (review-followup): released #926 so its review could finish; logged as c20261121T1-s-1.'
 out=$(turn u5a 'Stop hook feedback: Conveyor: alpha: blocked: #7' "$done_line"); [ -z "$out" ] || fail "wake reply [$done_line] was refused: $out"
-out=$(turn u5b 'Stop hook feedback: Conveyor: alpha: blocked: #7' "$done_line"$'\n''#7 needs your call: its fix changes the sign-in page.'); [ -z "$out" ] || fail "wake reply [$done_line + a line for the owner] was refused: $out"
+owner_line='#7 needs your call: its fix changes the sign-in page.'
+out=$(turn u5b 'Stop hook feedback: Conveyor: alpha: blocked: #7' "$done_line"$'\n'"$owner_line"); [ -z "$out" ] || fail "wake reply [$done_line + $owner_line] was refused: $out"
 out=$(turn u5c 'Stop hook feedback: Conveyor: alpha: blocked: #7' "$done_line"$'\n''#12 landed successfully.'); jq -e '.decision == "block"' <<<"$out" >/dev/null || fail "wake reply [$done_line + '#12 landed successfully.'] passed: $out"
 out=$(turn u5d 'Stop hook feedback: Conveyor: alpha: blocked: #7' 'Done without asking: #12 landed successfully.'); jq -e '.decision == "block"' <<<"$out" >/dev/null || fail "wake reply [Done without asking: #12 landed successfully.] passed: $out"
 out=$(turn u6 'Stop hook feedback: Conveyor: alpha: blocked: #7' '#12 landed successfully.'); jq -e '.decision == "block"' <<<"$out" >/dev/null || fail "a report in a wake reply passed: $out"
