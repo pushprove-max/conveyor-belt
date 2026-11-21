@@ -36,11 +36,37 @@ t_filedbare() {
   cmd='n=$(gh issue create --title example --body example --label conveyor-followup | grep -oE "[0-9]+$"); echo "$n"'
   out=$(hook filing "$cmd"); [ -z "$out" ] && [ "$(jq -r .start "$C")" = held ] || fail "filing did not set new issues held: $out $(cat "$C")"
   n=$(gh issue create --title example --body example --label conveyor-followup | grep -oE '[0-9]+$') || fail "the stub filed no issue"
-  hook filed "$cmd" "$n"$'\n' >/dev/null
+  out=$(hook filed "$cmd" "$n"$'\n')
   jq -e --argjson n "$n" '.start == "queue" and (.held | index($n))' "$C" >/dev/null || fail "the issue filed (#$n) is not held after filed: $(cat "$C")"
+  # Bug (#1234): with no link in the output filed said nothing, so when the Queue's own hold failed (a record's older
+  # engine, a stale held list), the Foreman never learned the issue was unheld and the loop built it.
+  jq -e '.hookSpecificOutput.additionalContext | test("no link for each issue.*control hold")' <<<"$out" >/dev/null \
+    || fail "filed did not tell the Foreman that the output links no issue (command: $cmd, output: $n): $out"
   # The real loop, not a check of the record: only a pick shows the follow-up is not built, as the pick applies its own
   # rules to the open issues it reads (adopted() and upnext.jq, which leave a follow-up eligible), not only the held list.
   loop run >/dev/null 2>&1; [ "$(st 'select(.step == "picked") | .issue' | tr '\n' ' ')" = "4 " ] || fail "picks after the filing: $(st 'select(.step == "picked") | .issue')"
+}
+# Bug (#1234): one issue link in the output made filed take every issue of the command as linked, so a second
+# `gh issue create` of the same command, printed as a bare number, got no warning. Here the Foreman is told.
+t_filedmixed() {
+  filedsetup
+  cmd='gh issue create --title a --body a && gh issue create --title b --body b | grep -oE "[0-9]+$"'
+  hook filing "$cmd" >/dev/null
+  o=$(gh issue create --title a --body a) || fail "the stub filed no issue"
+  out=$(hook filed "$cmd" "$o"$'\n'"7"$'\n')
+  jq -e '.hookSpecificOutput.additionalContext | test("no link for each issue.*control hold")' <<<"$out" >/dev/null \
+    || fail "filed did not warn that one of two creates shows no link (command: $cmd, output: $o and 7): $out"
+}
+# Bug (#1234): when filed blocks (a linked issue it cannot hold) the block reason must still carry the unlinked-issue
+# warning; without it the Foreman is told of the one failure and never that the other create shows no link.
+t_filedblock() {
+  filedsetup
+  cmd='gh issue create --title a --body a && gh issue create --title b --body b | grep -oE "[0-9]+$"'
+  hook filing "$cmd" >/dev/null
+  o="https://github.com/o/other/issues/9"
+  out=$(hook filed "$cmd" "$o"$'\n'"7"$'\n')
+  jq -e '.decision == "block" and (.reason | test("Not held in Conveyor.*9 of other") and test("no link for each issue.*control hold"))' <<<"$out" >/dev/null \
+    || fail "filed's block did not carry the unlinked-issue warning (command: $cmd, output: $o and 7): $out"
 }
 # With the links in the output, the issue filed is still held, and one the owner released before filed ran (the
 # second, released between the command and its hook) stays released: Queue holds neither again.
@@ -55,6 +81,8 @@ t_filedlink() {
   [ "$(jq -c '[.start, .held, .startSeen]' "$C")" = "[\"queue\",[$a],[$a,$b]]" ] || fail "after filed: $(cat "$C")"
   jq -e --arg a "$a" --arg b "$b" '.hookSpecificOutput.additionalContext | test("Held in Conveyor \\(r: " + $a + "\\)") and test("released already \\(r: " + $b + "\\)")' <<<"$out" >/dev/null \
     || fail "filed did not tell which it held: $out"
+  ! jq -e '.hookSpecificOutput.additionalContext | test("no link for each issue")' <<<"$out" >/dev/null \
+    || fail "filed warned of an unlinked issue though each of the two creates is linked (command: $cmd): $out"
   # filed's Queue that cannot read the open issues changes nothing: closing the span unread could leave a filed issue unheld.
   loop control start held >/dev/null; echo '[ "$4" != open ] || exit 1' > "$STUB/list-cmd"
   out=$(loop control start queue filed 2>&1); [ $? = 1 ] && [ "$(jq -r .start "$C")" = held ] || fail "Queue with the open issues unread: $out $(cat "$C")"

@@ -69,7 +69,8 @@
 #   the queue each record a filing set to held, once no other filing, of any Foreman, is in flight (SF, below), which
 #   holds every open issue opened while it was held, a follow-up too (conveyor.sh control start queue filed), so an
 #   issue the output does not link (`gh issue create ... | grep -oE '[0-9]+$'`) is held too, and one released already
-#   stays released. The
+#   stays released. An output that links fewer issues than the command has `issue create` calls is told to the Foreman,
+#   who holds the issue it filed at once. The
 #   research lane (lanes/research.sh) runs these two as well, with CONVEYOR_LANE=research and its own folder as $FD, so an issue it files starts held too.
 set -uo pipefail
 case ${1:-} in
@@ -617,7 +618,7 @@ ends() {
 }
 
 filed() {
-  local in ev recs gh repo main c rc h r n nums left said=() freed=() bad=()
+  local in ev recs gh repo main c rc h r n nums left made unlinked='' said=() freed=() bad=()
   in=$IN
   files "$in" || return 0
   ev=$(jq -r '.hook_event_name // "PostToolUse"' <<<"$in")
@@ -647,10 +648,17 @@ filed() {
   done < <(awk '{ print $1 }' <<<"$n" | uniq)
   # Only once every issue is held do the records start new issues in the queue again.
   left=$(queue_again | paste -sd' ' -)
+  # An output that links fewer issues than the command has `issue create` calls (`gh issue create ... | grep -oE '[0-9]+$'`
+  # links none; one linked issue does not cover the others) does not tell which issue was filed: say so, so the Foreman
+  # holds it at once, as nothing else in the hook can know the issue is held.
+  made=$(jq -r '.tool_input.command // ""' <<<"$in" | grep -oE '\bissue[[:space:]]+(create|new)\b' | wc -l)
+  if [ -z "$n" ] || [ "$made" -gt "$(wc -l <<<"$n")" ]; then
+    unlinked="The output of the command shows no link for each issue it filed, so Conveyor cannot tell which issue it filed: hold each issue it filed now (conveyor.sh control hold <issue>, in its record) unless the owner has said yes to it. "
+  fi
   if [ ${#bad[@]} != 0 ] || [ -n "$left" ]; then
-    jq -cn --arg r "${bad[*]:+Not held in Conveyor: ${bad[*]}. Hold each issue you filed (conveyor.sh control hold <issue>, in its record) unless the owner has said yes to it. }${left:+New issues of $left still start held: set them back (conveyor.sh control start queue, in each) unless the owner set them held.}" '{decision: "block", reason: $r}'
-  elif [ ${#said[@]} != 0 ] || [ ${#freed[@]} != 0 ]; then
-    jq -cn --arg e "$ev" --arg c "${said[*]:+Held in Conveyor (${said[*]}): not built until you release it (conveyor.sh control release <issue>, in its record), which you do only once the owner has said yes to it. }${freed[*]:+Not held, as released already (${freed[*]}).}" \
+    jq -cn --arg r "${unlinked}${bad[*]:+Not held in Conveyor: ${bad[*]}. Hold each issue you filed (conveyor.sh control hold <issue>, in its record) unless the owner has said yes to it. }${left:+New issues of $left still start held: set them back (conveyor.sh control start queue, in each) unless the owner set them held.}" '{decision: "block", reason: $r}'
+  elif [ -n "$unlinked" ] || [ ${#said[@]} != 0 ] || [ ${#freed[@]} != 0 ]; then
+    jq -cn --arg e "$ev" --arg c "${unlinked}${said[*]:+Held in Conveyor (${said[*]}): not built until you release it (conveyor.sh control release <issue>, in its record), which you do only once the owner has said yes to it. }${freed[*]:+Not held, as released already (${freed[*]}).}" \
       '{hookSpecificOutput: {hookEventName: $e, additionalContext: $c}}'
   fi
 }
