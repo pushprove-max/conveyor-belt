@@ -359,11 +359,19 @@
     return K.callout(`${won === rows.length ? 'Every arm' : `${won} of ${rows.length} arms`} passed the ${n === 1 ? "task's" : "tasks'"} hidden tests: that is all the results keep. The run records resolved yes or no and the patch, `
       + 'and the harness report with each fail-to-pass and pass-to-pass test is removed. To show these panels, the engine must keep that report. Size, strays and lint can be read from the patches the results already keep.', 'warn');
   }
+  // What the Cost column shows, said only for what it shows: "not priced" for an arm with no usage that can be priced, and
+  // "estimate" for an agent arm whose tokens the engine priced at its model's list price (the agent reports no usage by model).
+  function fewCostNote(rows) {
+    const say = [];
+    if (rows.some((r) => r.f.cost === null)) say.push('"Not priced": the results keep no usage that can be priced.');
+    if (rows.some((r) => r.f.est)) say.push('"Estimate": the agent reports no usage by model, so its tokens are priced at the model\'s list price.');
+    return say.length ? [K.note(say.join(' '))] : [];
+  }
   function fewBoard(rows) {
     const n = Math.max(...rows.map((r) => r.n), 0), s = K.box('Leaderboard', n === 1 ? 'One task each. The ranges show how little one task says.' : `${K.plural(n, 'task')} at most each. The ranges show how little so few tasks say.`);
     s.append(K.table(['Arm', ['Resolved', 'r'], 'Resolve rate, 95% range', ['Cost', 'r'], ['Tokens', 'r'], ['Minutes', 'r']], rows.map((r) => [K.armSaid(r.a), { v: `${r.k}/${r.n}`, c: 'r' }, K.ciBar(r.k, r.n, r.a.s),
       { v: `${K.usd(r.f.cost)}${r.f.est ? ' estimate' : ''}`, c: 'r' }, { v: K.kTok(r.f.tokens), c: 'r' }, { v: r.f.wall === null ? K.NOT_KEPT : String(r.f.wall), c: 'r' }]), 'bench-leader'),
-    K.note('"Not priced": agent arms report no usage by model today, so their cost is not priced.'), h('h3', 'bench-h', 'Hidden tests and patch quality'),
+    ...fewCostNote(rows), h('h3', 'bench-h', 'Hidden tests and patch quality'),
     K.table(['Arm', ['Code lines', 'r'], ['Test lines', 'r'], ['Files', 'r']], rows.map(fewLines)), h('p', 'bench-note', fewPatchNote(rows)), fewHidden(rows));
     return s;
   }

@@ -66,9 +66,9 @@ test('Scoreboard, 7 arms on 50 tasks: the mockup\'s texts, no heading chip when 
 test('Scoreboard, 2 runs of 1 task: the mockup\'s leaderboard note, patch note, callout and next-run line', async () => {
   const w = await opened(BH.few());
   const notes = Array.from(page(w).querySelectorAll('.bench-note'), text);
-  // The table shows "not priced" for these arms and adds no estimate: the note must not say it prices them from tokens.
-  assert.ok(notes.includes('"Not priced": agent arms report no usage by model today, so their cost is not priced.'), notes.join(' | '));
   assert.ok(notes.includes('Real, from the patches the results keep. All five changed the same code files by +1 −1. Only Conveyor, Codex builds v1.7.0 and Conveyor v1.7.0 added a test.'), notes.join(' | '));
+  // The agent arms here are not priced and the table shows no estimate: the note must not say it prices them from tokens.
+  assert.ok(notes.includes('"Not priced": the results keep no usage that can be priced.'), notes.join(' | '));
   assert.equal(text(q(w, '.bench-callout-warn')), 'Every arm passed the task\'s hidden tests: that is all the results keep. The run records resolved yes or no and the patch, '
     + 'and the harness report with each fail-to-pass and pass-to-pass test is removed. To show these panels, the engine must keep that report. Size, strays and lint can be read from the patches the results already keep.');
   assert.ok(Array.from(box(w, 'Next run to make').querySelectorAll('li'), text).includes('The other 10 arms were never checked. A check costs 1 small task each.'));
@@ -82,6 +82,32 @@ test('Scoreboard, 2 runs of 1 task: the patch note claims only what the kept pat
   const w = await opened(set);
   const notes = Array.from(page(w).querySelectorAll('.bench-note'), text);
   assert.ok(notes.includes('Real, from the patches the results keep.'), notes.join(' | '));
+});
+
+// Bug it guards: the leaderboard note said agent arms are not priced because they report no usage by model, while the table
+// above it showed an arm's estimate, priced by the engine from its tokens. The note says only what the Cost column shows.
+const EST_NOTE = '"Estimate": the agent reports no usage by model, so its tokens are priced at the model\'s list price.';
+test('Scoreboard, 2 runs of 1 task, one agent arm priced: the cost note says "estimate" and keeps "not priced" for the arms left unpriced', async () => {
+  const set = BH.few();
+  set.shows[BH.FEW1].tasks[0].cells.find((c) => c.arm === 'solo').cost = { usd: 0.0123, state: 'estimate' };
+  const notes = Array.from(page(await opened(set)).querySelectorAll('.bench-note'), text);
+  assert.ok(notes.includes(`"Not priced": the results keep no usage that can be priced. ${EST_NOTE}`), notes.join(' | '));
+});
+
+test('Scoreboard, 2 runs of 1 task, every agent arm priced: the cost note says "estimate" and no "not priced"', async () => {
+  const set = BH.few();
+  set.shows[BH.FEW1].tasks[0].cells.filter((c) => c.arm !== 'conveyor-codex-claude').forEach((c) => { c.cost = { usd: 0.01, state: 'estimate' }; });
+  const notes = Array.from(page(await opened(set)).querySelectorAll('.bench-note'), text);
+  assert.ok(notes.includes(EST_NOTE), notes.join(' | '));
+  assert.ok(!notes.some((n) => n.includes('Not priced')), notes.join(' | '));
+});
+
+// Bug it guards: a cost note shown when no Cost cell reads "estimate" or "not priced" explains a label the table does not show.
+test('Scoreboard, 2 runs of 1 task, every cost known: no cost note', async () => {
+  const set = BH.few();
+  Object.values(set.shows).forEach((sh) => sh.tasks[0].cells.forEach((c) => { c.cost = { usd: 0.01, state: 'known' }; }));
+  const notes = Array.from(page(await opened(set)).querySelectorAll('.bench-note'), text);
+  assert.ok(!notes.some((n) => n.includes('Not priced') || n.includes('"Estimate"')), notes.join(' | '));
 });
 
 // Bug it guards: Versions said "engine <sha>" and a long belt line where the mockup names the version and says what
