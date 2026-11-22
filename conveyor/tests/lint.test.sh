@@ -333,6 +333,49 @@ t_lintsizeexempt() {
     || fail "the brief does not name the size entry: $(cat "$T/$CASE/out")"
 }
 
+# Bug: the gate reads the exempt file from the worktree, so a card lets a new file over the limit through by naming it
+# in an exempt file that git ignores and so never lands.
+t_lintsizeignored() {
+  lintsetup; lintsizecmd
+  lintwt .gitignore .size-exempt small.c l1
+  printf 'l1\nl2\nl3\nl4\n' > "$W/new.c" && echo new.c > "$W/.size-exempt" || fail "the card's change"
+  lintsizegate
+  [ "$RC" = 1 ] && [ "$REP" = 'new.c:4: size 4 lines, limit 3' ] \
+    || fail "the ignored exempt file naming new.c exempted it at the gate (exit $RC): $REP $(cat "$T/$CASE/out" "$T/$CASE/res")"
+}
+
+# Bug: the gate reads a staged exempt file that is a link as its blob, the target's name, so a card exempts a new
+# file over the limit by making the exempt file a link to it.
+t_lintsizelink() {
+  lintsetup; lintsizecmd
+  lintwt small.c l1
+  (cd "$W" && printf 'l1\nl2\nl3\nl4\n' > new.c && ln -s new.c .size-exempt) || fail "the card's change"
+  lintsizegate
+  [ "$RC" = 1 ] && [ "$REP" = 'new.c:4: size 4 lines, limit 3' ] \
+    || fail "the staged .size-exempt link to new.c exempted it at the gate (exit $RC): $REP $(cat "$T/$CASE/out" "$T/$CASE/res")"
+}
+
+# Bug: a tracked absolute link `config` in base, which the card makes a folder holding config/ruff.toml (a trigger),
+# has the base run's copy of ruff.toml written through the link into its target folder, and the next sync deletes
+# there. Calls lintsync twice, as two commands' base runs do: the copy, then putting base back.
+t_lintsynclink() {
+  local tg=$T/$CASE/target
+  lintsetup
+  mkdir -p "$tg" && ln -s "$tg" "$R/config" && git -C "$R" add config || fail "main's link"
+  lintwt a.c one
+  git -C "$R" worktree add -q --detach "$T/$CASE/bw" || fail "the base worktree"
+  (cd "$W" && rm config && mkdir config && echo 'line-length = 1' > config/ruff.toml) || fail "the card's change"
+  # shellcheck disable=SC2016 # expanded in lintin
+  lintin 'lintindex "$W" "$T/$CASE/ix" && b=$(git -C "$W" rev-parse HEAD) && bw=$T/$CASE/bw
+    lintsync "$W" "$T/$CASE/ix" "$b" "$bw" "$T/$CASE/s" "$T/$CASE/rec" config/ruff.toml || exit 3
+    [ ! -L "$bw/config" ] && [ "$(cat "$bw/config/ruff.toml")" = "line-length = 1" ] || exit 4
+    [ -z "$(ls -A "'"$tg"'")" ] || exit 5
+    lintsync "$W" "$T/$CASE/ix" "$b" "$bw" "$T/$CASE/s" "$T/$CASE/rec" || exit 6
+    [ "$(readlink "$bw/config")" = "'"$tg"'" ] || exit 7'
+  [ "$RC" = 0 ] && [ -z "$(ls -A "$tg")" ] \
+    || fail "lintsync config/ruff.toml over base's link config (exit $RC: 3 sync failed, 4 no folder copy, 5 written into the target, 6 put-back failed, 7 link not back) left the target: $(ls -A "$tg") $(cat "$T/$CASE/out")"
+}
+
 # Bugs: `conveyor.sh size --list` leaves out a file over the limit (one the exempt file names: the list is what it
 # names; one not tracked yet; one only the worktree it was called in has, not main), lists a file at the limit (edge.c,
 # three lines) or one under an excluded folder, prints more than the path, or makes a state folder. It is called in a

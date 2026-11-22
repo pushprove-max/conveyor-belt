@@ -140,18 +140,20 @@ lintresult() { # <exit> <output file> <finding lines> <over the limit: 1 or empt
 }
 
 # A size entry's run, in the engine with no slot, giving what a lint command gives: each of <file>... (paths from
-# <worktree>'s top) that has more lines than <limit> and is not a line of <worktree>'s <exempt file> is the finding line
+# <worktree>'s top) that has more lines than <limit> and is not a line of the <exempt file> in <worktree>'s index
+# (GIT_INDEX_FILE when it is set: the gate gives the tree's) is the finding line
 # `<path>:<limit + 1>: size <n> lines, limit <limit>`, and the exit is 1; else 0. A line exempts the file whose path
-# is the whole line, so a function's line (path, a tab, its name) exempts no file; a missing exempt file exempts
-# nothing. A link or a submodule is not counted. A last line with no newline is a line. When a file cannot be read,
-# the exit is 2 after awk's why.
+# is the whole line, so a function's line (path, a tab, its name) exempts no file; an exempt file the index lacks (an
+# ignored one too) or holds as a link (its blob is the target's name) exempts nothing. A link or a submodule is not
+# counted. A last line with no newline is a line. When a file cannot be read, the exit is 2 after awk's why.
 lintsize() { # <worktree> <limit> <exempt file> <file>...
   local w=$1 lim=$2 ex=$3 f n out i=0 rc=0
   local -a fs=() ns
   local -A skip=()
   shift 3
-  if [ -f "$w/$ex" ]; then
-    while IFS= read -r n || [ -n "$n" ]; do n=${n%$'\r'}; [ -z "$n" ] || skip[$n]=1; done < "$w/$ex"
+  n=''; [ -z "$ex" ] || n=$(git -C "$w" ls-files -s -- ":(literal)$ex" 2>/dev/null) || n=''
+  if [[ $n == '100644 '* || $n == '100755 '* ]]; then
+    while IFS= read -r n || [ -n "$n" ]; do n=${n%$'\r'}; [ -z "$n" ] || skip[$n]=1; done < <(git -C "$w" cat-file blob ":$ex" 2>/dev/null)
   fi
   for f; do [ -f "$w/$f" ] && [ ! -L "$w/$f" ] && [ -z "${skip[$f]:-}" ] && fs+=("$f"); done
   [ ${#fs[@]} != 0 ] || return 0
@@ -226,7 +228,7 @@ lintcheck() { # <worktree> <base>
     run=$(jq -r .run <<<"$c"); sz=$(jq -r '.size // empty | "\(.file | floor)\t\(.exempt)"' <<<"$c"); f=null
     if [ -n "$sz" ]; then
       f=${#LINT_F[@]}; at=$SECONDS; LINT_OVER=''; rc=0
-      lintsize "$1" "${sz%%$'\t'*}" "${sz#*$'\t'}" "${LINT_F[@]}" > "$t/out" 2>&1 || rc=$?; LINT_SEC=$((SECONDS - at))
+      GIT_INDEX_FILE=$t/index lintsize "$1" "${sz%%$'\t'*}" "${sz#*$'\t'}" "${LINT_F[@]}" > "$t/out" 2>&1 || rc=$?; LINT_SEC=$((SECONDS - at))
     else
       [[ $run != *'{files}'* ]] || f=${#LINT_F[@]}
       rc=0; lintcall "$1" "$t/index" "$run" "$t/out" "${LINT_F[@]}" || rc=$?
@@ -297,21 +299,32 @@ lintbasegone() { # <worktree> <base worktree>
 # Makes <base worktree>'s copies of the files that <pathspec>... match equal to <worktree>'s tree (<index>), the
 # change being from <base>: each one the tree has is written, each one it deleted is deleted. First, each file an
 # earlier call wrote or deleted (the paths in <record file>) gets base's copy again, or is deleted when base lacks it,
-# so a command's base run reads no other command's triggers; the record then holds this call's paths.
+# so a command's base run reads no other command's triggers; the record then holds this call's paths. A folder of a
+# path that is a link in the base worktree (a tracked link the tree made a folder) is first made a folder there, and
+# noted before the path, so that nothing is written or deleted in the link's target; the next call, putting the record
+# back last path first, deletes that folder and checks the link out again.
 lintsync() { # <worktree> <index> <base> <base worktree> <scratch file> <record file> <pathspec>...
-  local w=$1 ix=$2 b=$3 bw=$4 s=$5 rec=$6 st p
+  local w=$1 ix=$2 b=$3 bw=$4 s=$5 rec=$6 st p d r i
+  local -a ps
   shift 6
   if [ -s "$rec" ]; then
-    while IFS= read -r -d '' p; do
-      rm -f "$bw/$p" || return 1
+    mapfile -d '' -t ps < "$rec"
+    for ((i = ${#ps[@]} - 1; i >= 0; i--)); do
+      p=${ps[i]}
+      if [ -d "$bw/$p" ] && [ ! -L "$bw/$p" ]; then rm -rf "${bw:?}/$p"; else rm -f "$bw/$p"; fi || return 1
       ! git -C "$bw" ls-files --error-unmatch -- ":(literal)$p" > /dev/null 2>&1 \
         || git -C "$bw" checkout-index -f -- "$p" || return 1
-    done < "$rec"
+    done
   fi
   : > "$rec" || return 1
   [ $# != 0 ] || return 0
   GIT_INDEX_FILE=$ix git -C "$w" diff --cached --no-renames -z --name-status "$b" -- "$@" > "$s" || return 1
   while IFS= read -r -d '' st && IFS= read -r -d '' p; do
+    d='' r=$p
+    while [[ $r == */* ]]; do
+      d=${d:+$d/}${r%%/*} r=${r#*/}
+      [ ! -L "$bw/$d" ] || { rm -f "$bw/$d" && mkdir "$bw/$d" && printf '%s\0' "$d" >> "$rec"; } || return 1
+    done
     rm -f "$bw/$p" && printf '%s\0' "$p" >> "$rec" || return 1
     [ "$st" = D ] || { mkdir -p "$(dirname "$bw/$p")" && cp -pP "$w/$p" "$bw/$p"; } || return 1
   done < "$s"
