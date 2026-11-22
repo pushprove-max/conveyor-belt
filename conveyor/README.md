@@ -168,7 +168,7 @@ line the reviewer itself starts with `MINOR:` is a finding. A declined finding c
 follow-up, and a review with no accepted finding is a GO. Each declined finding goes to the declined list, one line
 in `declined.jsonl` of the state folder: its time, card, issue, the finding, who declined it (`judge`) and why. A line
 the reviewer itself starts with `DECLINED:` is a finding, as any other line is. The review's record line holds each finding, the judge's
-reason and, for an accepted one, its "Cost to every card". `conveyor.sh control judge always security data` names
+reason and, for an accepted one, its "Cost to every card" (a finding accepted because the judge's answer held no line for it that could be read has a reason that says so and no cost). `conveyor.sh control judge always security data` names
 the finding kinds that are always accepted, whatever the judge says: the reviewer tags a finding of one with its
 kind, in square brackets right after its level. Each kind is one word; the command names them all, and with no kind
 it clears them.
@@ -179,7 +179,7 @@ family as the reviewer. `conveyor.sh control judge default` leaves it to the fir
 reviewer's that the pack's `models.allowed` lists for the review (Claude Code or OpenCode for a Codex reviewer, and
 so on), at medium effort. The Board's Judge row offers every installed CLI, says "same family as the reviewer" when
 the judge runs on the reviewer's CLI, and shows the model the judge runs on when it is left at default. When the judge cannot run, fails
-or gives an answer that cannot be read, every finding is accepted: no card is blocked by the judge.
+or gives an answer that cannot be read, every finding is accepted: no card is blocked by the judge. An answer with some lines that cannot be read keeps the decisions of the lines that can: a finding with no such line, or named by two lines, is accepted. The judge's line then keeps the last 2,000 characters of the answer and the number of findings decided.
 An issue can have its own judge, builder and reviewer (`conveyor.sh control card`: docs/configuration.md, Settings
 for one card); its card uses them in place of the project's.
 

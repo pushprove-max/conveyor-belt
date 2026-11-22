@@ -266,10 +266,12 @@ claudereview() { # <worktree> <brief> <instructions> <model> <effort>
 # its kind right after its level (KINDS; the same word anywhere else in the finding is no tag), and a tagged finding is accepted whatever the judge says, wherever it is.
 # The judge runs on the seat judgeseat() names (the reviewer's CLI too, when the control record sets it; left at
 # default, another model family than the reviewer's), read-only, as a review does. A judge that
-# cannot run or fails, or whose answer is not read, changes nothing: every finding is accepted, as with the judge
-# off, and the line's judge says why (failed). No card is blocked by it. An answer is read only when it holds exactly
-# one decision line for each finding and none for any other, and each accepted finding's line (an ACCEPT, or any
-# answer for an always-accepted kind) holds a reason and its cost.
+# cannot run or fails, or whose answer holds no decision line that is read, changes nothing: every finding is accepted, as
+# with the judge off, and the line's judge says why (failed). No card is blocked by it. A decision line is read only when
+# it parses whole, names a finding of the review, and is the only line that names it, and an accepted finding's line (an
+# ACCEPT, or any answer for an always-accepted kind) holds a reason and its cost. Each finding with no such line is
+# accepted (a line that names an unknown finding is dropped). An answer that is not read whole leaves the judge's line
+# with failed, decided (the findings decided from it) and raw (its last 2,000 characters).
 JUDGE='You are the judge of a code review. A reviewer read the staged change in this worktree (`git diff --cached`)
 against the issue below and wrote the findings at the end of this message, numbered F1, F2 and so on. Decide for
 each finding whether it counts: accept it, decline it, or mark it outside. Read the change and the code it touches;
@@ -440,23 +442,28 @@ judged() { # <card> <issue> <worktree> <brief> <the review's fields>
   elif [ -z "$before" ] || before="# Findings already declined on the cards of this issue"$'\n'"$before"$'\n\n'
     ! j=$(judgecall "$wt" "$JUDGE" "$4"$'\n\n'"$before# The findings"$'\n'"$(jq -r '.[]
       | "F\(.n) [\({inside: "inside the diff", outside: "outside the diff", none: "no place"}[.place])\(if .kind then "; always accepted: \(.kind)" else "" end)] \(.finding)"' "$wt.judge.marks")"); then :
-  # What it said of each finding: exactly one decision line each and none for any other, an accepted one with its
-  # reason and cost, else its answer is not read. An always-accepted kind beats a decline and an OUTSIDE.
-  elif ! jq -cn --slurpfile m "$wt.judge.marks" --rawfile a "$wt.judge" '($a | split("\n") | map(gsub("^[[:space:]`*-]+|[[:space:]`*]+$"; "") | select(test("^F[0-9]+")))) as $said
-      | ($said | map(capture("^F(?<n>[0-9]+) (?<d>ACCEPT|DECLINE|OUTSIDE):[[:space:]]*(?<r>.*[^[:space:]].*)$"))) as $all
-      | if ($all | length) != ($said | length) or ($all | length) != ($m[0] | length) then error("lines") else . end
-      | $m[0] | map(. as $x | [$all[] | select((.n | tonumber) == $x.n)] as $d
-        | if ($d | length) != 1 then error("F\($x.n)") else $d[0] as $d
+  # What it said of each finding: its one decision line that parses whole, an accepted one with its reason and cost,
+  # else the finding is accepted (a duplicate id, a line that cannot be read, no line). A line for no finding of the
+  # review is dropped. None read at all fails the answer. An always-accepted kind beats a decline and an OUTSIDE.
+  elif ! jq -cn --slurpfile m "$wt.judge.marks" --rawfile a "$wt.judge" 'def rx: "^F(?<n>[0-9]+) (?<d>ACCEPT|DECLINE|OUTSIDE):[[:space:]]*(?<r>.*[^[:space:]].*)$";
+      ($a | split("\n") | map(gsub("^[[:space:]`*-]+|[[:space:]`*]+$"; "") | select(test("^F[0-9]+")))) as $said
+      | ($said | map(capture(rx))) as $all
+      | ($said | map(select([capture(rx)] | length == 0) | capture("^F(?<n>[0-9]+)").n | tonumber)) as $bad
+      | ($m[0] | map(. as $x | [$all[] | select((.n | tonumber) == $x.n)] as $d
+        | ((if ($d | length) == 1 and all($bad[]; . != $x.n) then $d[0] as $d
           | ($d.r | capture("^(?<r>.*?)[[:space:].;|,-]*Cost to every card:[[:space:]]*(?<c>.*[^[:space:]].*)$") // {r: $d.r, c: null}) as $rc
-          | if ($d.d == "ACCEPT" or $x.kind != null) and ($rc.c == null or $rc.r == "") then error("F\($x.n) cost") else . end
-          | {n: $x.n, finding: $x.finding, place: $x.place}
-            + (if $d.d == "ACCEPT" then {accept: true, reason: $rc.r, cost: $rc.c}
-               elif $x.kind != null then {accept: true, reason: "always accepted: a \($x.kind) finding (the judge \(if $d.d == "OUTSIDE" then "found it outside the change" else "declined it" end): \($rc.r))", cost: $rc.c}
-               else {accept: false, outside: ($d.d == "OUTSIDE"), reason: $d.r} end) end)' > "$wt.judge.said" 2>/dev/null; then
-    j=$(jq -c '. + {failed: "the answer of the judge does not hold exactly one line for each finding and no other, each accepted one with its reason and cost"}' <<<"$j")
+          | if ($d.d == "ACCEPT" or $x.kind != null) and ($rc.c == null or $rc.r == "") then null
+            else {n: $x.n, finding: $x.finding, place: $x.place}
+              + (if $d.d == "ACCEPT" then {accept: true, reason: $rc.r, cost: $rc.c}
+                 elif $x.kind != null then {accept: true, reason: "always accepted: a \($x.kind) finding (the judge \(if $d.d == "OUTSIDE" then "found it outside the change" else "declined it" end): \($rc.r))", cost: $rc.c}
+                 else {accept: false, outside: ($d.d == "OUTSIDE"), reason: $d.r} end) end
+          else null end)
+          // {n: $x.n, finding: $x.finding, place: $x.place, accept: true, undecided: true, reason: "the judge gave no line for this finding that could be read", cost: null}))) as $s
+      | if all($s[]; .undecided) then error("none") else {whole: (all($s[]; .undecided | not) and ($all | length) == ($said | length) and ($said | length) == ($s | length)), d: $s} end' > "$wt.judge.said" 2>/dev/null; then
+    j=$(jq -c --rawfile r "$wt.judge" '. + {failed: "the answer of the judge holds no decision line that could be read", decided: 0, raw: ($r | .[-2000:])}' <<<"$j")
   # The review with each declined finding as a DECLINED line and each outside one as an OUTSIDE line; with no finding
   # left, its verdict is GO.
-  elif ! { jq -rRn --slurpfile d "$wt.judge.said" '($d[0] | map(select(.accept | not))) as $no | ($d[0] | all(.accept | not)) as $go
+  elif ! { jq -rRn --slurpfile d "$wt.judge.said" '($d[0].d | map(select(.accept | not))) as $no | ($d[0].d | all(.accept | not)) as $go
       | inputs | . as $l | gsub("^[[:space:]]+|[[:space:]]+$"; "") as $s | ([$no[] | select(.finding == $s)] | first) as $x
       | if $x then "\(if $x.outside then "OUTSIDE" else "DECLINED" end): \($s) (judge: \($x.reason))" elif $go and startswith("VERDICT:") then "VERDICT: GO" else $l end' "$wt.review" > "$wt.review.new" \
       && mv -f "$wt.review.new" "$wt.review"; } 2>/dev/null; then
@@ -465,14 +472,15 @@ judged() { # <card> <issue> <worktree> <brief> <the review's fields>
     # Each declined finding goes to the declined list (declined()).
     while IFS=$'\t' read -r why f; do
       declined "$1" "$2" judge "$why" "$f" || echo "conveyor: cannot write the declined findings of $1 to the declined list" >&2
-    done < <(jq -r '.[] | select((.accept or .outside) | not) | [.reason, .finding] | map(gsub("[[:space:]]+"; " ")) | join("\t")' "$wt.judge.said")
+    done < <(jq -r '.d[] | select((.accept or .outside) | not) | [.reason, .finding] | map(gsub("[[:space:]]+"; " ")) | join("\t")' "$wt.judge.said")
     # Each outside finding goes to <worktree>.outside, {finding, reason} a line, once a finding: the card files them when it lands.
-    ! jq -e 'any(.[]; .outside)' "$wt.judge.said" >/dev/null 2>&1 \
-      || { { cat "$wt.outside" 2>/dev/null; jq -c '.[] | select(.outside) | {finding, reason}' "$wt.judge.said"; } \
+    ! jq -e 'any(.d[]; .outside)' "$wt.judge.said" >/dev/null 2>&1 \
+      || { { cat "$wt.outside" 2>/dev/null; jq -c '.d[] | select(.outside) | {finding, reason}' "$wt.judge.said"; } \
         | jq -cs 'reduce .[] as $x ([]; if any(.[]; .finding == $x.finding) then . else . + [$x] end) | .[]' > "$wt.outside.new" && mv -f "$wt.outside.new" "$wt.outside"; } \
       || echo "conveyor: cannot write the findings of $1 that the judge found outside its change to $wt.outside" >&2
-    j=$(jq -c --slurpfile d "$wt.judge.said" '. + {accepted: ($d[0] | map(select(.accept) | del(.accept, .outside))), declined: ($d[0] | map(select((.accept or .outside) | not) | del(.accept, .outside))),
-      outside: ($d[0] | map(select(.outside) | del(.accept, .outside)))}' <<<"$j")
+    j=$(jq -c --slurpfile d "$wt.judge.said" --rawfile r "$wt.judge" '$d[0] as $s | $s.d as $d | . + {accepted: ($d | map(select(.accept) | del(.accept, .outside, .undecided))), declined: ($d | map(select((.accept or .outside) | not) | del(.accept, .outside))),
+      outside: ($d | map(select(.outside) | del(.accept, .outside)))}
+      + (if $s.whole then {} else {failed: "the answer of the judge does not hold exactly one line for each finding and no other, each accepted one with its reason and cost", decided: ($d | map(select(.undecided | not)) | length), raw: ($r | .[-2000:])} end)' <<<"$j")
   fi
   rm -f "$wt.judge" "$wt.judge.marks" "$wt.judge.said" "$wt.judge.events" "$wt.judge.err" "$wt.review.new" "$wt.outside.new"
   jq -ce --slurpfile j <(printf '%s' "${j:-null}") '. + {judge: $j[0]}' <<<"$5" 2>/dev/null || printf '%s\n' "$5"

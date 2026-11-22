@@ -368,26 +368,60 @@ t_judgealways() {
     || fail "the review does not keep the always-accepted findings, alone, as findings of a NO-GO: $(jr 7)"
 }
 
-# Bugs: an answer that cannot be read is taken in part: one with a decision for a finding the review does not hold
-# makes the review a GO; an ACCEPT with no cost to every card, or a decline of an always-accepted finding with none,
-# is recorded as an accepted finding with no cost; one with no line for a finding is taken for the findings it has a
-# line for. Each leaves every finding accepted (the review as the reviewer wrote it) and says the judge failed.
+# Bug: one line of the judge's answer that cannot be read throws away the decisions of the lines that can, so every
+# finding is accepted (39 real calls so, 153 findings, about 95 of them would have been declined) and the answer is deleted, so the cause cannot be read. Here F2's
+# line is no decision: F1 stays declined, F2 and F3 are accepted, and the judge's line keeps the answer's raw text.
+t_judgepartial() {
+  local raw
+  judging "[$(issue 7 2026-01-01)]"
+  echo "$NOGO3" > "$STUB/review"
+  printf '%s\n' 'F1 DECLINE: a matter of taste' 'F2 MAYBE: not sure' 'F3 ACCEPT: the change breaks it. Cost to every card: none' > "$STUB/judge.1"
+  judgeone 7 "$STUB/review"
+  [ "$(jf 7 '.judge | [.declined[].n, "|", .accepted[].n] | join(" ")')" = "1 | 2 3" ] && jr 7 | grep -qxF 'DECLINED: [P0] a.txt:1 wrong word (judge: a matter of taste)' \
+    && jr 7 | grep -qxF 'b.txt:22 no mark here' && jr 7 | grep -qxF '[P2] c.txt:3 a nit' && [ "$(jf 7 .verdict)" = NO-GO ] \
+    || fail "the decisions that parse were not kept, or the finding with no readable line was not accepted: $(jr 7) $(jf 7 '.judge | tojson')"
+  raw=$(jf 7 '.judge.raw')
+  [ "$raw" = "$(cat "$STUB/judge.1")" ] && [ "$(jf 7 '.judge.decided')" = 2 ] && [ -n "$(jf 7 '.judge.failed // empty')" ] \
+    || fail "the judge's line does not keep the raw answer and the number of findings decided from it: $(jf 7 '.judge | tojson')"
+  [ "$(jq -s 'length' "$ST/declined.jsonl")" = 1 ] || fail "the declined list does not hold the one declined finding: $(cat "$ST/declined.jsonl" 2>&1)"
+}
+
+# Bug: a finding the answer names twice is decided by whichever line is read first or last, so a decline that the judge
+# contradicts stands. Here F1 has two lines (a decline and an accept): it is accepted; F2's one line is read.
+t_judgedup() {
+  judging "[$(issue 7 2026-01-01)]"
+  printf '%s\n' '[P1] a.txt:2 wrong word' '[P2] a.txt:1 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
+  printf '%s\n' 'F1 DECLINE: no' 'F1 ACCEPT: yes. Cost to every card: none' 'F2 DECLINE: a matter of taste' > "$STUB/judge.1"
+  judgeone 7 "$STUB/review"
+  [ "$(jf 7 '.judge | [.accepted[].n, "|", .declined[].n] | join(" ")')" = "1 | 2" ] && jr 7 | grep -qxF '[P1] a.txt:2 wrong word' \
+    && [ "$(jf 7 .verdict)" = NO-GO ] && [ -n "$(jf 7 '.judge.raw // empty')" ] \
+    || fail "a finding named by two lines of the answer was not accepted: $(jr 7) $(jf 7 '.judge | tojson')"
+}
+
+# Bug: a finding with one line that parses and another that does not is decided by the line that parses, so a decline
+# stands that the judge's other line for the same finding left unclear. Here F1 has a decline and a line that is no
+# decision: it is accepted; F2's one line is read.
+t_judgemixed() {
+  judging "[$(issue 7 2026-01-01)]"
+  printf '%s\n' '[P1] a.txt:2 wrong word' '[P2] a.txt:1 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
+  printf '%s\n' 'F1 DECLINE: no' 'F1 MAYBE: not sure' 'F2 DECLINE: a matter of taste' > "$STUB/judge.1"
+  judgeone 7 "$STUB/review"
+  [ "$(jf 7 '.judge | [.accepted[].n, "|", .declined[].n] | join(" ")')" = "1 | 2" ] && jr 7 | grep -qxF '[P1] a.txt:2 wrong word' \
+    && [ "$(jf 7 .verdict)" = NO-GO ] \
+    || fail "a finding with a readable and an unreadable line was not accepted: $(jr 7) $(jf 7 '.judge | tojson')"
+}
+
+# Bug: an answer with no readable decision line is taken for a decision (here an ACCEPT with no cost to every card, and
+# a line for a finding the review does not hold): it must leave every finding accepted as the reviewer wrote it, say
+# the judge failed, with no decided finding, and keep the raw answer.
 t_judgeunread() {
-  local i
-  judging "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03),$(issue 10 2026-01-04)]" on security
-  printf '%s\n' '[P1] a.txt:2 wrong word' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.7"; cp "$STUB/review.7" "$STUB/review.8"
-  printf '%s\n' '[P1][security] a.txt:2 the token is logged' '[P2] a.txt:2 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.9"
-  echo "$NOGO3" > "$STUB/review.10"
-  printf '%s\n' 'F1 DECLINE: unrelated' 'F2 ACCEPT: broken. Cost to every card: none' > "$STUB/judge.1"
-  echo 'F1 ACCEPT: the change breaks its caller' > "$STUB/judge.2"
-  printf '%s\n' 'F1 DECLINE: cannot happen' 'F2 DECLINE: a matter of taste' > "$STUB/judge.3"
-  printf '%s\n' 'F1 DECLINE: no' 'F3 DECLINE: no' > "$STUB/judge.4"
-  for i in 7 8 9 10; do
-    judgeone $i "$STUB/review.$i"
-    cmp -s "$STUB/review.$i" "$T/$CASE/cards/c$i.review" && [ -n "$(jf $i '.judge.failed // empty')" ] && [ "$(jf $i '.judge // empty | has("accepted") or has("declined")')" = false ] \
-      || fail "#$i: a judge's answer that cannot be read (7: a decision too many; 8: an ACCEPT with no cost; 9: an always-accepted finding with no cost; 10: no line for a finding) was taken: $(jr $i) $(jf $i .judge)"
-  done
-  [ "$(wc -l < "$STUB/judges")" = 4 ] && [ ! -s "$ST/declined.jsonl" ] || fail "a judge was not asked each review, or a finding of an answer not read went to the declined list: $(cat "$ST/declined.jsonl" 2>&1)"
+  judging "[$(issue 7 2026-01-01)]"
+  printf '%s\n' '[P1] a.txt:2 wrong word' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
+  printf '%s\n' 'F1 ACCEPT: the change breaks its caller' 'F2 DECLINE: no' > "$STUB/judge.1"
+  judgeone 7 "$STUB/review"
+  cmp -s "$STUB/review" "$T/$CASE/cards/c7.review" && [ -n "$(jf 7 '.judge.failed // empty')" ] && [ "$(jf 7 '.judge | has("accepted") or has("declined")')" = false ] \
+    && [ "$(jf 7 '.judge.decided')" = 0 ] && [ "$(jf 7 '.judge.raw')" = "$(cat "$STUB/judge.1")" ] && [ ! -s "$ST/declined.jsonl" ] \
+    || fail "a judge's answer with no decision that can be read was taken: $(jr 7) $(jf 7 .judge)"
 }
 
 # Bugs: the owner cannot name the judge's CLI and model, or only a model the pack lists; a judge set to the
