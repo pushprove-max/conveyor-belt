@@ -789,7 +789,6 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .rules-pick-table th, .rules-pick-table td { padding: var(--sp-1) var(--sp-1) var(--sp-1) 0; vertical-align: middle; }
 .rules-pick-table td:first-child { overflow-wrap: anywhere; }
 .rules-pick-table .field { width: 100%; min-width: 0; }
-.rules-pick-gone { text-align: right; }
 .rules-pick-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); }
 .rules-would { flex-basis: 100%; font-size: var(--fs-sm); color: var(--warn); }
 .rules-would:empty { display: none; }

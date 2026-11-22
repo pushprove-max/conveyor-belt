@@ -581,7 +581,7 @@
     const listed = models.filter((x) => Object.prototype.hasOwnProperty.call(cur, x.id)), others = models.filter((x) => !listed.includes(x));
     if (listed.length) {
       const table = h('table', 'rules-pick-table'), top = h('tr'), body = h('tbody');
-      ['Model', 'Lowest', 'Highest', 'Remove'].forEach((t) => { const c = h('th', t === 'Remove' ? 'rules-pick-gone' : null, t); c.scope = 'col'; top.append(c); });
+      ['Model', 'Lowest', 'Highest', 'Remove'].forEach((t) => { const c = h('th', null, t); c.scope = 'col'; top.append(c); });
       const thead = h('thead'); thead.append(top);
       listed.forEach((x) => body.append(pickModelRow(k, name, x, cur, keep)));
       table.append(thead, body); one.append(table);
