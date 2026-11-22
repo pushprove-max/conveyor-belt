@@ -75,6 +75,10 @@ environment value, a flag) goes there as one line \`Rollout: <the action> | <wha
 the card shows it apart from the review's findings."
   jq -r '.[] | "\n- When your change adds a file whose path matches the extended regular expression `\(.when)`: \(.ask) Write it as a `\(.token): <text>` line in that file."' <<<"$r"
 }
+# The brief's section that names the precheck command, with the engine's path (the brief of every card has it).
+precheckbrief() {
+  printf '# Precheck\n%s\n' "Before you end, run \`bash $HERE/conveyor.sh precheck <issue number> <file>\` in this worktree, the file holding your reply so far, and fix what it prints. Leave out the issue number and the file to skip the Done-when form."
+}
 # The pack's trailers the staged change owes and the card has not written: one {token, ask, paths} a line. The
 # added paths are read unquoted and NUL-separated (-z), so a path git would quote, or one holding a newline, is matched
 # whole; a when grep cannot read, or paths git cannot list, fails.
@@ -138,15 +142,19 @@ DONEWHEN='def sect($t; $atend): [$t | splits("\r?\n")] as $l
      paths: [$c[] | select(.met) | {n, p: .paths[]}], lines: [$d[] | select(.n <= $items) | .line],
      detail: [range(1; $items + 1) as $n | {n: $n, text: $texts[$n - 1][:500],
        said: ([$d[] | select(.n == $n) | .line | gsub("^\\s+|\\s+$"; "")[:500]] | first)}]}'
-# The check of the last session's reply (its stream in <worktree>.out) against the staged change: prints
-# {items, met, failed} (and notes, the files named that are not there, when there is one), and detail (DONEWHEN's),
-# nothing when it is skipped
-# (no such section, or no change: an ALREADY-DONE goes its own way), and keeps the reply's D<n> lines and those notes
-# in <worktree>.donewhen for the review.
-donewhen() { # <worktree> <issue json>
-  local m k n p t v miss='[]'
-  rm -f "$1.donewhen"
-  git -C "$1" add -A 2>/dev/null && ! git -C "$1" diff --cached --quiet 2>/dev/null || return 0
+# The form of a reply written so far (a file holding its text), as `conveyor.sh precheck` asks it before a session
+# ends: one line each of the issue's Done-when items the reply does not answer with a D<n> line and evidence, and
+# each open-work marker the change (the index in use, addedmarks()) adds that the reply does not name. It keeps nothing.
+dwform() { # <worktree> <issue json> <reply file>
+  local m
+  # No change: the reply is an ALREADY-DONE one line, and the engine checks no form (donewhen()).
+  git -C "$1" diff --cached --quiet 2>/dev/null && return 0
+  m=$(addedmarks "$1") || return 1
+  jq -r --rawfile r "$3" --argjson m "$m" --arg wt "$1" "$DONEWHEN | .failed[]" <<<"$2"
+}
+# The open-work markers the staged change (the index in use) adds, as [<file>, <marker>] pairs in a JSON list.
+addedmarks() { # <worktree>
+  local k p t v
   # A marker counts as added only when the whole change has more added lines holding it than removed ones: a line
   # moved from one file to another adds none. t and v are 1 when TODO and [VERIFY] are added, else 0.
   read -r t v < <(git -C "$1" diff --cached --no-renames --no-color -U0 | awk '/^diff --git / {h = 0; next} /^@@/ {h = 1; next}
@@ -154,10 +162,21 @@ donewhen() { # <worktree> <issue json>
     END {print (a > 0) + 0, (b > 0) + 0}')
   # File by file, the names read NUL-separated (-z) and passed literally, so a name git would quote in a diff header is
   # read whole; the added lines are the + lines after the first hunk header.
-  m=$(git -C "$1" diff --cached --name-only --no-renames --diff-filter=d -z | while IFS= read -r -d '' p; do
+  git -C "$1" diff --cached --name-only --no-renames --diff-filter=d -z | while IFS= read -r -d '' p; do
       k=$(git -C "$1" diff --cached --no-renames --no-color -U0 -- ":(literal)$p" | awk '/^@@/ {h = 1; next} h && /^\+/')
       [[ $t = 0 || $k != *TODO* ]] || printf '%s\0TODO\0' "$p"; [[ $v = 0 || $k != *'[VERIFY]'* ]] || printf '%s\0[VERIFY]\0' "$p"
-    done | jq -Rsc 'split("\u0000") | .[:-1] | [range(0; length; 2) as $i | .[$i:$i + 2]]')
+    done | jq -Rsc 'split("\u0000") | .[:-1] | [range(0; length; 2) as $i | .[$i:$i + 2]]'
+}
+# The check of the last session's reply (its stream in <worktree>.out) against the staged change: prints
+# {items, met, failed} (and notes, the files named that are not there, when there is one), and detail (DONEWHEN's),
+# nothing when it is skipped
+# (no such section, or no change: an ALREADY-DONE goes its own way), and keeps the reply's D<n> lines and those notes
+# in <worktree>.donewhen for the review.
+donewhen() { # <worktree> <issue json>
+  local m k n p miss='[]'
+  rm -f "$1.donewhen"
+  git -C "$1" add -A 2>/dev/null && ! git -C "$1" diff --cached --quiet 2>/dev/null || return 0
+  m=$(addedmarks "$1") || return 1
   # The issue and the reply come on stdin and in a file: either can be more than one argument can hold.
   k=$(jq -c --rawfile r <(jq -Rrjn '[inputs | fromjson? // empty | objects | select(.type == "result") | .result | strings] | last // ""' "$1.out" 2>/dev/null) \
     --argjson m "$m" --arg wt "$1" "$DONEWHEN" <<<"$2") || return 1

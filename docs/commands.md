@@ -129,6 +129,11 @@ Tests:
   `ratchet: false`. These make it exit 1. A finding with a `complexity` code on such a line is listed under "the gate decides these" and does
   not change the exit code. Findings on other lines are only counted. It exits 2 when a command ends in an execution
   error and no finding made it exit 1.
+- `precheck [<issue> <reply file>]` runs, in the worktree it is called in, what the engine checks after a build or fix
+  session: the pack's `test.checkCommand`, the commit trailers that the pack's `commit.trailers` requires of the
+  files the change adds, and, with an issue number and a file that holds the reply so far, the form of the reply's
+  `## Done when` section. It prints each failure and exits 1; with none it prints `precheck: passed`. It exits 2
+  when a check cannot run. A session runs it before it ends, so a failure is mended in that session.
 - `size --list` prints the files that have more lines than the limit of a size entry in the pack's lint commands
   ([The size entry](configuration.md#the-size-entry)). It prints one path a line, from the top of the worktree it is
   called in. It reads that worktree as `conveyor.sh lint` does, so it sees an edit that is not staged and a file that

@@ -400,7 +400,7 @@ cardopen() {
   old=$(judgeon) || old='[]'
   [ "$old" = '[]' ] || rv+=$'\n\n'${KINDS//'<kinds>'/"$(jq -r 'join(", ")' <<<"$old")"}
   more=$(trailerbrief "$wt") || { block "$c" "$n" "$wt" "brief: the engine could not read the commit trailers of the project pack"; return; }
-  b+=$'\n\n'"$more"
+  b+=$'\n\n'"$more"$'\n\n'"$(precheckbrief)"
   more=$(lintbrief) || { block "$c" "$n" "$wt" "brief: the engine could not read the lint field of the project pack"; return; }
   [ -z "$more" ] || b+=$'\n\n'"$more"
   sprompt=$(cardprompt "$c" "$hdr" "$rules" "$b")
