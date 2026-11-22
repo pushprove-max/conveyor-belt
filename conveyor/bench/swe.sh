@@ -166,15 +166,23 @@ swe_vkey() { printf '%s %s\n' "$1" "$(jq -rn '(($ENV.CONVEYOR_NOW // "" | tonumb
 # The versions now, for the snapshot, which runs often: read with no network call from the git folder on this
 # machine when there is one: a source that is a folder (file:// or a path) as ls-remote reads it, and the default
 # source (this engine checkout's origin) from this checkout's release tags and origin/main, as it last fetched them.
-# A source named by URL is read again (swe_versions) only when versions.json's key is not the key now (swe_vkey:
+# The default source's list that swe_versions read this hour (versions.json's key is the key now) is used in place of
+# the checkout's; its tags read in an earlier hour are added to the checkout's, as a tag stays. A source named by URL is read again (swe_versions) only when versions.json's key is not the key now (swe_vkey:
 # another source or hour); a read that fails keeps the last list under the key now, so a source that cannot be
 # reached is not asked again on each snapshot. Prints nothing when no list can be read.
 swe_versionsnow() {
-  local src g m l vs k; src=$(swe_src) && [ -n "$src" ] || return 1; g=${src#file://} m=refs/heads/main
-  [ -d "$g" ] || { [ -z "${CONVEYOR_BENCH_SOURCE:-}" ] && g=$HERE m=refs/remotes/origin/main; } || g=''
+  local src g m l vs k pre='' own=''; src=$(swe_src) && [ -n "$src" ] || return 1; g=${src#file://} m=refs/heads/main
+  [ -d "$g" ] || { [ -z "${CONVEYOR_BENCH_SOURCE:-}" ] && g=$HERE m=refs/remotes/origin/main own=1; } || g=''
   if [ -n "$g" ]; then
+    # The origin's own read (`bench swe versions`) is newer than this checkout's last fetch: a tag it read and the
+    # checkout has not fetched shows, in the hour of the read and after it.
+    if [ -n "$own" ]; then
+      vs=$(jq -c --arg k "$(swe_vkey "$src")" 'select(.key == $k) | .versions | arrays' "$SWE_DIR/versions.json" 2>/dev/null) || vs=''
+      [ -z "$vs" ] || { printf '%s\n' "$vs"; return; }
+      pre=$(jq -r --arg s "$src " 'select(.key | strings | startswith($s)) | .versions | arrays | .[] | select(.name != "main") | "\(.commit) refs/tags/\(.name)"' "$SWE_DIR/versions.json" 2>/dev/null) || pre=''
+    fi
     l=$(git -C "$g" for-each-ref --format='%(objectname) %(refname)%(if)%(*objectname)%(then)%0a%(*objectname) %(refname)^{}%(end)' 'refs/tags/v*' "$m" 2>/dev/null) || return 1
-    swe_vlist "$m" <<<"$l"; return
+    swe_vlist "$m" <<<"${pre:+$pre$'\n'}$l"; return
   fi
   k=$(swe_vkey "$src") || return 1
   vs=$(jq -c --arg k "$k" 'select(.key == $k) | .versions | arrays // null' "$SWE_DIR/versions.json" 2>/dev/null) || vs=''
@@ -274,7 +282,7 @@ swe_board() {
 # and minutes of its results of the tasks it ran (null when the line names no results key: a line written before
 # cols), classes, the count of each class of those results (null when one has none: kept before classes), and cost, the list price of the work it did in this run (costsum of each task's cost, the interrupted
 # task's and the active task's so far, the active one's none before its trial's command starts; a reused task adds
-# none, and a task or interrupted line kept with no cost, as one written before costs were, is unknown); the
+# none, and a task or interrupted line kept with no cost, as one written before costs were, is unknown, as is a col kept with no arm, which no task can be matched to); the
 # run's cost is that of its cols (null when one is). wall is the wall minutes of the arm's work in this run: each
 # task it ran (a reused task adds none) and the interrupted one's (a line kept with no minutes adds none); the active
 # task's minutes so far are the time since its active.start. A run whose process is gone with no end written shows
@@ -296,7 +304,7 @@ SWE_RUNSUM='def costsum: [.[] | objects | .usd | numbers] as $u | all(.[]; type 
     | [$ran[] | resof($R; $l.id; $c.key; .id) // empty] as $r | def sum(f): if $c.key == null then null else $r | map(f // 0) | add // 0 end;
     $c + {done: ($t | length), ran: ([$ran[] | select(.reused != true)] | length), resolved: ($t | map(select(.result == "resolved")) | length), notRun: (($t | length) - ($ran | length)),
       sessions: sum(.sessions), tokens: sum(.tokens), classes: (if $c.key == null or any($r[]; .class == null) then null else $r | map(.class) | group_by(.) | map({key: .[0], value: length}) | from_entries end), minutes: (sum(.minutes) | if . == null then null else . * 10 | round / 10 end),
-      cost: (if $c.key == null then null else [($t[] | select(.reused != true) | .cost), ($l.interrupted | objects | select(.arm == $c.arm) | .cost), ($l.active | objects | select(.arm == $c.arm) | .cost | objects)] | costsum end),
+      cost: (if $c.key == null then null elif $c.arm == null then [null] | costsum else [($t[] | select(.reused != true) | .cost), ($l.interrupted | objects | select(.arm == $c.arm) | .cost), ($l.active | objects | select(.arm == $c.arm) | .cost | objects)] | costsum end),
       wall: ([($t[] | select(.reused != true) | .minutes), ($l.interrupted | objects | select(.arm == $c.arm) | .minutes) | numbers] | add // 0 | . * 10 | round / 10)}]}
   | .cost = (if any(.cols[]; .cost == null) then null else [.cols[].cost] | costsum end);'
 # figures($runs; $key): what one results key's results (the input, an array) add up to, as results --json and history's

@@ -465,6 +465,16 @@ t_swecostold() {
     || fail "an old run stopped on its first task reads as a known cost: $(jq -c '.runs[] | select(.id == "r20261101T000000-2")' <<<"$o" 2>&1 || echo "$o")"
 }
 
+# Bug (#1422, R35): an old stopped line whose cols name a results key and no arm read as a known $0, as no task could
+# be matched to the col. It is unknown. A stopped line whose col has its arm, and no task, is a known $0.
+t_swecostnoarm() {
+  swe; local o
+  jq -nc '{id: "r20261101T000000-1", arms: ["conveyor"], cols: [{key: "old"}], n: 1, started: "2026-11-01T00:00:00Z", state: "stopped", tasks: []},
+    {id: "r20261101T000000-2", arms: ["conveyor"], cols: [{arm: "conveyor", key: "old"}], n: 1, started: "2026-11-01T00:00:00Z", state: "stopped", tasks: []}' >> "$B/runs.jsonl" \
+    || fail "the old runs could not be written"
+  o=$(loop bench swe history 2>&1) && [ "$(jq -c '[.runs | sort_by(.id)[] | .cost]' <<<"$o")" = '[{"usd":null,"state":"unknown"},{"usd":0,"state":"known"}]' ] \
+    || fail "a stopped line with a col of no arm does not read as unknown, or one with its arm and no task as a known \$0: $(jq -c '[.runs[] | [.id, .cost]]' <<<"$o" 2>&1 || echo "$o")"
+}
 # Bug (#644 (7)): an agent arm reports no usage by model, and its cost read as $0: it is unknown.
 t_swecostsolo() {
   swe; local first o; first=$(sweorder | head -n 1)

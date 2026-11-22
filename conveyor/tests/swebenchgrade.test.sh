@@ -371,6 +371,22 @@ t_sweseamegone() {
   grep -q "(reused)$" <<<"$out" || fail "a run after deleting the first run did not reuse the kept result: $out"
 }
 
+# Bug caught: the case above for the solo arm, whose key is solo-<model>-<hash>, not an arm's name. Deleting the first
+# solo run after two --again runs took the key from results --json, or left it with same twice null although two
+# runs still ran the task.
+t_sweseamegonesolo() {
+  swe; local out res first r1
+  first=$(sweorder | head -n 1)
+  out=$(loop bench swe 1 --solo 2>&1) || fail "the first solo run failed: $out"
+  out=$(loop bench swe 1 --solo --again 2>&1) || fail "the first --again solo run failed: $out"
+  out=$(loop bench swe 1 --solo --again 2>&1) || fail "the second --again solo run failed: $out"
+  r1=$(loop bench swe history | jq -r '.runs[2].id')
+  out=$(loop bench swe runs delete "$r1" 2>&1) || fail "bench swe runs delete $r1 failed: $out"
+  res=$(loop bench swe results --json) || fail "results --json failed: $res"
+  [ "$(jq -c '[length, (.[0].key | startswith("solo-")), (.[0].figures.sameTwice | type)]' <<<"$res")" = '[1,true,"number"]' ] \
+    || fail "results --json after deleting the first solo run does not give the solo key with a same twice figure ($first): $(jq -c . <<<"$res") $(cat "$B/runs.jsonl")"
+}
+
 # Bug: same twice was rounded to two places, so an arm whose result changed on 1 of 201 tasks run twice showed 1, as
 # if every task agreed. Two run lines of key figs run 201 tasks; the last one is resolved only the first time.
 t_swesamenear() {

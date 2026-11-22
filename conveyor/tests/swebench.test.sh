@@ -232,6 +232,22 @@ t_sweverslocal() {
     && [ "$o" = "$(jq -nc --arg a "$EA" --arg b "$EB" '[{name: "main", commit: $b}, {name: "v1.1.0", commit: $b}, {name: "v1.0.0", commit: $a}]')" ] \
     || fail "the checkout's tags and origin/main were not read: $o"
 }
+# Bug (#1422, R38): `bench swe versions` read a release tag the checkout had not fetched, and the snapshot (which reads
+# the checkout's own tags) still left it out. The origin is a URL no test reaches, so a git in front of the path sends
+# ls-remote to the fixture's folder; the release is made there after the checkout was cloned. The tag stays in the
+# next UTC hour, when the read's key no longer matches.
+t_sweversfetched() {
+  swe; local w=$T/$CASE/eng o
+  git clone -q "$SWE_FX/eng.git" "$w" && mkdir -p "$w/conveyor" && git -C "$w" remote set-url origin https://example.com/eng.git || fail "the checkout was not made"
+  mkdir -p "$T/$CASE/gitbin" && printf '#!/usr/bin/env bash\n[ "$1" != ls-remote ] || set -- ls-remote "$SWE_FX/eng.git" "${@:3}"\nPATH=${PATH#*gitbin:} exec git "$@"\n' > "$T/$CASE/gitbin/git" \
+    && chmod +x "$T/$CASE/gitbin/git" || fail "the git stand-in was not made"
+  swerelease v1.1.0
+  o=$(unset CONVEYOR_BENCH_SOURCE; export HERE=$w/conveyor RTAG=x CONVEYOR_NOW=1700000000 PATH=$T/$CASE/gitbin:$PATH; . "$SRC/bench/swe.sh" \
+    && swe_versionsnow | jq -c 'map(.name)' && swe_versions > /dev/null && swe_versionsnow | jq -c 'map(.name)' \
+    && CONVEYOR_NOW=1700003600 swe_versionsnow | jq -c 'map(.name)') \
+    && [ "$o" = $'["main","v1.0.0"]\n["main","v1.1.0","v1.0.0"]\n["main","v1.1.0","v1.0.0"]' ] \
+    || fail "the snapshot's versions do not list v1.1.0 after bench swe versions read it (in that hour and the next), though the checkout has not fetched it: $o"
+}
 # Bug (#1014): the snapshot never read a source named by URL. It reads it now, so the read must stay cheap: the list
 # is kept for the hour and read again after it, and a source that cannot be reached leaves the last list. The URL is
 # rewritten to the fixture's folder (insteadOf), so no network is used.
