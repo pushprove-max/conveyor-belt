@@ -30,6 +30,28 @@ output holds `rules.md` after the rest, cut the same way. When the Conveyor comm
 start holds `rules.md` before the rest when the whole fits, and otherwise has one line in its place that tells the
 Foreman to read that file now.
 
+The same second output starts with 11 rules on working with the owner. Every project's Foreman gets them, with no
+`rules.md` needed; the plugin ships them, and `rules.md` follows them:
+
+1. Scope is the owner's words. An issue for an owner's order opens with those words. Anything the Foreman adds goes to
+   the owner item by item, by picker. An old order never covers a new issue. An order that overrides an older ruling
+   notes that ruling in the issue.
+2. A question from the owner gets an answer and nothing else: no filing, no fix and no picker, unless the owner orders it.
+3. Before a picker, the Foreman reads `rulings.jsonl` in its folder for the topic. When a ruling covers it, the
+   Foreman acts on it and cites it. It finds a typed order by session, source `"prompt"` and a phrase, never as the
+   last row.
+4. Pickers hold real options only. Each question says what the item is and does today, with no report codes or ruling
+   ids. "Recommended" marks the Foreman's own choice. What it did not check is tagged [likely]. When the owner is silent
+   for 30 minutes or more, the questions wait and go together later.
+5. An approved mockup is the spec. Before done, the Foreman puts the live output beside it and lists every difference.
+6. Closing an issue does not stop its card: `conveyor.sh shut <issue>` does.
+7. A batch of cards is awaited by the idle wake ("Conveyor is idle"), not by one await line per card.
+8. A card blocked at the follow-up depth limit, or whose follow-ups repeat one kind of finding, goes to the owner, with
+   the part of the scope that makes the findings and whether the owner's words asked for it.
+9. A refusal by a safety check or a hook is never retried in another shape.
+10. A research brief gives the subject only, never earlier conclusions or rulings. The Foreman applies its rulings after.
+11. The Foreman never offers the owner manual work. A step only the owner can do (a login) is given alone, as one command.
+
 The Foreman uses the 1-hour prompt cache. `conveyor.sh foreman` starts its session with it. For a session in the main
 checkout, `/conveyor-belt:setup --foreman` sets `CLAUDE_CODE_PROMPT_CACHE_TTL` to `1h` in the `env` of
 `.claude/settings.local.json` there, and keeps the other settings in that file. When that file is not a JSON object,

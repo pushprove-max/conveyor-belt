@@ -390,17 +390,24 @@ off() {
 # it when the start is called with --rules-apart (the plugin's hooks.json does): the SessionStart hook `rules` sends it in
 # an output of its own. A call without it (a claim in a running session, which no SessionStart follows, or a plugin from
 # before the rules hook) gets rules.md after the rest, cut to what the limit leaves. When the whole is over the limit,
-# state.md is swapped for one line that tells the Foreman to Read the file.
+# state.md is swapped for one line that tells the Foreman to Read the file; when the fixed text and the rest alone leave
+# no room for the owner rules, a line that tells the Foreman to Read owner-rules.md stands for them.
 context() {
-  local head mid st
+  local head mid st left own=0
   launcher
   FQ=$(printf %q "$LAUNCHER")
+  # Without --rules-apart the owner rules come in this output too, so the saved state yields room for them.
+  [ -n "$RULES_APART" ] || [ ! -s "$FHERE/owner-rules.md" ] || own=$(($(p_stat "$FHERE/owner-rules.md" | cut -d' ' -f1) + 1))
   head=$(context_head) mid=$(context_mid) st=$(context_state)
-  if [ "$(printf '%s\n%s\n%s\n' "$head" "$mid" "$st" | wc -c)" -gt "$CTX_LIMIT" ]; then st=$(context_state_warn; context_read "$FD/state.md"); fi
+  if [ "$(printf '%s\n%s\n%s\n' "$head" "$mid" "$st" | wc -c)" -gt "$((CTX_LIMIT - own))" ]; then st=$(context_state_warn; context_read "$FD/state.md"); fi
   printf '%s\n' "$head"
   printf '%s\n' "$mid"
   [ -z "$st" ] || printf '%s\n' "$st"
-  [ -n "$RULES_APART" ] || rules_text "$((CTX_LIMIT - $(printf '%s\n%s\n%s\n' "$head" "$mid" "$st" | wc -c)))"
+  [ -z "$RULES_APART" ] || return 0
+  left=$((CTX_LIMIT - $(printf '%s\n%s\n%s\n' "$head" "$mid" "$st" | wc -c)))
+  # The fixed text and the rest alone may leave no room for the owner rules: a Read line stands for them, never a start over the limit.
+  if [ "$own" -gt 0 ] && [ "$left" -lt "$own" ]; then printf '\n# %s did not fit in this start (Claude Code cuts a start over 10,000 characters): Read it now, before you act.\n' "$FHERE/owner-rules.md"; return 0; fi
+  rules_text "$left"
 }
 
 # context_read <file>: the line that stands for a file part that did not fit; nothing for a file with no text.
@@ -431,7 +438,7 @@ $plug
 # Check status with conveyor.sh foreman status, not your own snapshot reads. A wake already names what changed: a landed card's commit, a blocked card's reason, a suite run's result and failed cases.
 # Run a command that ends in under 2 minutes in the foreground; put several checks into one command; start a background command only for a long run.
 # Read an image (a screenshot, a GIF frame) only when the owner asks or a check needs to see it.
-# To be woken when an issue lands, append its number to $FD/await-<project>.txt, <project> being the one it is in (append only; never rewrite it).
+# To be woken when one card's issue lands, append its number to $FD/await-<project>.txt, <project> being the one it is in (append only; never rewrite it). For a batch of cards do not: the idle wake ("Conveyor is idle") awaits the batch, and each await line costs a full wake turn.
 # Your saved state is $s: keep it current, under $CAP bytes; begin the line of a finished item with "- DONE" (for example "- DONE 2026-11-21 08:20 ET: ...") and it is archived at the next start.
 EOF
   # There, each noted plugin problem that names no issue (no "filed as #<n>"), so an older one is not lost, with the
@@ -465,9 +472,11 @@ rules() {
 }
 
 # rules_text <limit>: rules.md in at most <limit> bytes: whole, or cut at a whole line with a line that names the file
-# and says to Read the rest. Nothing for a missing or empty file.
+# and says to Read the rest. Nothing for a missing or empty file. The plugin's own rules on working with the owner
+# (owner-rules.md, beside this script) come first, whole, and the limit left for rules.md is what they leave.
 rules_text() {
-  local r=$FD/rules.md n head
+  local r=$FD/rules.md n head o=$FHERE/owner-rules.md
+  if [ -s "$o" ]; then echo; cat "$o"; set -- "$(($1 - $(p_stat "$o" | cut -d' ' -f1) - 1))"; fi
   [ -s "$r" ] || return 0
   head="# $r (this project's Foreman rules)"
   n=$(p_stat "$r" | cut -d' ' -f1)

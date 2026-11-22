@@ -98,7 +98,58 @@ t_old() {
   [ "${#st}" -lt 10000 ] && grep -qF "Read the rest from $FD/rules.md" <<<"$st" || fail "a start without --rules-apart is ${#st} characters or has no Read line"
 }
 
-cases=(fit big other race old)
+# A project with no rules.md still gets the plugin's 11 rules on working with the owner, in the rules output, and the
+# start with them stays under the limit; the start's await-file line names the idle wake for a batch of cards.
+# Bug it catches (#1295): the rules lived only in one project's rules.md, so another project's Foreman had none of them,
+# and its await line told it to append every issue, one wake turn for each card of a batch.
+t_owner() {
+  local st ru i
+  local -a phrase=("Scope is the owner's words" "gets an answer and nothing else" "rulings.jsonl" "real options only"
+    "approved mockup is the spec" "conveyor.sh shut <issue>" "not one await line per card" "follow-up depth limit"
+    "Never retry a refusal" "gives the subject only" "Never offer the owner manual work")
+  fixture owner
+  text STATEBODY 16 > "$FD/state.md"
+  marked; st=$(hook start sA --rules-apart); ru=$(hook rules sA)
+  [ ! -e "$FD/rules.md" ] || fail "the fixture has a local rules.md"
+  for i in "${!phrase[@]}"; do
+    grep -qF -- "$((i + 1)). " <<<"$ru" && grep -qF -- "${phrase[i]}" <<<"$ru" || fail "rule $((i + 1)) (${phrase[i]}) is not in the rules output: ${ru:0:300}"
+  done
+  [ "${#st}" -lt 10000 ] || fail "the start is ${#st} characters, not under 10000"
+  grep -F 'await-' <<<"$st" | grep -qF 'idle wake ("Conveyor is idle")' || fail "the await-file line does not name the idle wake for a batch: $(grep -F 'await-' <<<"$st" | cut -c1-300)"
+}
+
+# Bug it catches (#1295): without --rules-apart (a plugin from before the rules hook) the start keeps a state that
+# fits alone (8,500 characters in all), then the 11 rules were added after it: over 10,000, so Claude Code dropped the start.
+t_owner_whole() {
+  local st base n
+  fixture owner_whole
+  marked; base=$(hook start sA --rules-apart); base=${#base}
+  n=$(((8500 - base) / 60)); [ "$n" -gt 0 ] || fail "the start without a state is already $base characters"
+  text STATEBODY "$n" > "$FD/state.md"
+  st=$(hook start sA)
+  [ "${#st}" -lt 10000 ] || fail "a start without --rules-apart is ${#st} characters, not under 10000 ($base without a state)"
+  grep -qF 'gives the subject only' <<<"$st" || fail "a start without --rules-apart lacks the owner rules: ${st:0:300}"
+}
+
+# Bug it catches (#1295): the fixed text and the rest (auto's rules, standing kinds, live summary) alone took 8,300
+# characters, so even with the saved state swapped for a Read line the 1,783 characters of owner rules went the start
+# over 10,000 and Claude Code dropped it. The owner rules then yield to a Read line.
+t_owner_mid() {
+  local st a b len
+  fixture owner_mid
+  marked
+  grow() { jq -n --arg h "$M" --arg n "$(printf 'r%.0s' $(seq 1 "$1"))" '{records: [{repo: "alpha", main: $h}, {repo: $n, main: ($h + "/gone")}], foreman: {groups: [["alpha", $n]]}}' > "$XDG_CONFIG_HOME/conveyor/host.json"; }
+  grow 100; a=$(hook start sA --rules-apart); a=${#a}
+  grow 200; b=$(hook start sA --rules-apart); b=${#b}
+  [ "$b" -gt "$a" ] || fail "a longer repo name did not lengthen the start ($a, $b)"
+  len=$((100 + (8300 - a) * 100 / (b - a))); grow "$len"
+  text STATEBODY 16 > "$FD/state.md"
+  st=$(hook start sA)
+  [ "${#st}" -lt 10000 ] || fail "a start without --rules-apart with $len-character repo name is ${#st} characters, not under 10000"
+  grep -qF "$SRC/owner-rules.md did not fit" <<<"$st" || fail "no Read line names owner-rules.md in a start of ${#st} characters: ${st: -300}"
+}
+
+cases=(fit big other race old owner owner_whole owner_mid)
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
 read -ra cases <<<"$SEL"
