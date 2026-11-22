@@ -127,3 +127,22 @@ t_snapsumshort() {
   [ "$(jq -c '[(map(select(.step == "landed")) | length), map(select(.step != "landed") | .card)]' "$D/d/rows")" = '[77,["c80","c90"]]' ] \
     || fail "the rows of the rewritten file hold a moved card or miss a new one: $(jq -c 'map([.card, .step])' "$D/d/rows")"
 }
+
+# Bug (#1335): a snapshot build read the card records whole each time, so its time grew with every card ever run. A
+# whole `loop snapshot`, with a jq that notes each run of rows.jq and the lines it was given (a whole build is what
+# a direct call to snaprows(), as t_snapsum makes, cannot show: the summary that snapshot() keeps between two builds,
+# $STATE.rows): the first build reads the 398 lines of the 80 cards, the second, after one line of a new card, reads
+# that line alone, never the older ones.
+t_snapbuilds() {
+  local first second
+  setup "[$(issue 1 2026-01-01)]"; mkdir -p "$ST"; D=$T/$CASE; snapsum_history80
+  # stub: a jq that logs the lines of the file each rows.jq run reads (its last argument), then runs the real jq
+  printf '#!/usr/bin/env bash\ncase "$*" in *jq/rows.jq*) echo "$(wc -l < "${@: -1}")" >> "$STUB/rowsruns" ;; esac\nexec %q "$@"\n' "$(command -v jq)" > "$STUB/jq" && chmod +x "$STUB/jq"
+  : > "$STUB/rowsruns"; loop snapshot --fresh > /dev/null || fail "the first build exited non-zero"
+  first=$(paste -sd' ' "$STUB/rowsruns")
+  snapsum_line c81 81 picked 2026-03-02T00:00:00Z ok '' >> "$ST/cards.jsonl"
+  : > "$STUB/rowsruns"; loop snapshot --fresh > /dev/null || fail "the second build exited non-zero"
+  second=$(paste -sd' ' "$STUB/rowsruns"); rm -f "$STUB/jq"
+  [[ " $first " == *" 398 "* ]] || fail "the first build did not read the whole records (lines of each rows.jq run: $first)"
+  [ "$second" = 1 ] || fail "the second build read other than the one new line (lines of each rows.jq run: $second)"
+}
