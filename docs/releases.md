@@ -139,12 +139,16 @@ stops with GitHub's reason, and the pull request stays open.
 
 ## Where the suite runs
 
-The release suite runs on this machine unless you choose a Linux box over ssh. Card test steps always run on this
-machine. Only the release suite moves.
+The release suite runs on this machine unless you choose a Linux box over ssh or a Namespace Devbox. Card test steps
+always run on this machine. Only the release suite moves.
 
 - `conveyor.sh control suite-machine local` runs the suite on this machine. This is the default.
 - `conveyor.sh control suite-machine ssh <user@host> [--dir <folder>]` runs it on that box. The folder is
   `~/conveyor-suite` unless you give one. It can be `~`, a folder under `~/`, or a full path.
+- `conveyor.sh control suite-machine devbox [--size <size>]` runs it on a Namespace Devbox that Conveyor leases for
+  each run. The size is `4x8` unless you give one. Conveyor leases the devbox under the tag
+  `conveyor-suite-<project>`, with the `devbox` command, which must be installed on this machine and logged in to
+  Namespace. The devbox stops by itself after 15 minutes without use.
 
 The box needs bash 5.1 or later, jq and git. Conveyor connects with ssh and does not ask for a password, so set up an ssh
 key for the box first. The box needs no access to the repository and gets no GitHub token. Conveyor sends it the
@@ -152,8 +156,14 @@ commit under test as a git bundle, and runs the pack's `worktree.setup` there af
 has `.conveyor/test-machine.sh`, Conveyor runs that script on the box first, and runs it again only after the script
 changes. Use it to install what the tests need. A `# tools: <tool>...` line in it names the tools for the check below.
 
+A devbox needs the same bash, jq and git, and gets the commit and `.conveyor/test-machine.sh` as a box over ssh does.
+Conveyor starts the run on it with `devbox exec -d`, copies the output back as it does from a box, and gives the lease
+back with `devbox release` when the run ends. It also gives the lease back when a step fails and when you run
+`release-run stop`.
+
 `conveyor.sh suite-machine check` prints one line for each need of the chosen machine, `ok` or `missing`: ssh reach,
 bash 5.1 or later, jq, git, each tool that `.conveyor/test-machine.sh` names, and the CPU count and test slots.
+For a devbox it prints one line, the Namespace login, because Conveyor leases a devbox only for a run.
 `--json` prints the same as JSON. The command exits 1 when a need is missing.
 
 A run on the box takes no test slot on this machine. In parallel mode it runs at most the box's test slots at once.
@@ -163,13 +173,16 @@ as a run here (`testTimeout`), timed by the box's clock. A run that ends after t
 when its tests pass. When a run is still going after the limit, Conveyor stops it on the box.
 The suite's output comes back to this machine at least every 10 seconds, so the Board shows its progress as it does
 for a run here. The run's record keeps the machine as `machine`: its kind, its name, the step under way,
-the seconds of each step, and the reason when a step failed. The commit status names the machine. For a box it says
-"a Linux box over ssh" and not the host name, because the status is public. When the suite uses an earlier pass of
-the same commit and runs no test, the status names no machine.
+the seconds of each step, the devbox lease, and the reason when a step failed. The commit status names the machine.
+For a box it says "a Linux box over ssh" and not the host name, because the status is public. For a devbox it says
+"Namespace Devbox <size>". When the suite uses an earlier pass of the same commit and runs no test, the status names
+no machine.
 
-When the box cannot be reached, or its setup or checkout fails, the run ends as `not started` with the reason. No
+When the box cannot be reached, or its setup or checkout fails, the run ends as `not started` with the reason. When
+the devbox cannot be leased, the reason is "Not logged in to Namespace" for a missing login. No
 test runs, no status is posted, and the suite never moves to another machine by itself. `release-run stop` also
-stops the suite on the box. To run one suite on this machine without a change to the rule, add `--machine local`:
+stops the suite on the box or the devbox. `release-run atonce` does not print a number for a devbox, because Conveyor
+reads its test slots when a run leases it. To run one suite on this machine without a change to the rule, add `--machine local`:
 `conveyor.sh release-run [prep] <version> [--parallel | --serial] --machine local`. That run does not use a pass
 from a box, so the suite runs on this machine.
 

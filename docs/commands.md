@@ -238,8 +238,9 @@ GitHub and releases:
   `release-run atonce` prints the most test files a parallel suite runs at once on the machine it runs on.
   Add `--machine local` at the end to run that one suite on this machine, whatever `control suite-machine` chose.
 - `control suite-machine local` runs the release suite on this machine, the default.
-  `control suite-machine ssh <user@host> [--dir <folder>]` runs it on a Linux box over ssh
+  `control suite-machine ssh <user@host> [--dir <folder>]` runs it on a Linux box over ssh.
+  `control suite-machine devbox [--size <size>]` runs it on a Namespace Devbox that each run leases and gives back
   ([Where the suite runs](releases.md#where-the-suite-runs)).
 - `suite-machine check [--json]` prints, for the machine the release suite runs on, each need as `ok` or `missing`:
   ssh reach, bash 5.1 or later, jq, git, each tool that `.conveyor/test-machine.sh` names, and its CPU count and test
-  slots.
+  slots. For a devbox it prints the Namespace login.

@@ -89,7 +89,10 @@ ctlcheck() { # [<file>]: the record on the input, or in the file, whole, or exit
           and (.at | type == "string") and (.decision | IN("promote", "keep", "drop", "add", "next")) and all(.challenger, .promoted | select(. != null); choice)) end))
       and (.pickBack == null or (.pickBack | type == "object" and keys == ["at", "reason"] and all(.[]; type == "string")))
       and (.suiteAtOnce | type == "number" and . >= 1 and . == floor)
-      and (.suiteMachine | type == "object" and if .kind == "local" then keys == ["kind"] else .kind == "ssh" and keys == ["dir", "kind", "target"]
+      and (.suiteMachine | type == "object" and if .kind == "local" then keys == ["kind"]
+        elif .kind == "devbox" then keys == ["idleStop", "kind", "size", "tag"] and (.size | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]*$"))
+          and (.tag | type == "string" and test("^conveyor-suite-[A-Za-z0-9._-]+$")) and (.idleStop | type == "string" and test("^[1-9][0-9]*[smh]$"))
+        else .kind == "ssh" and keys == ["dir", "kind", "target"]
         and (.target | type == "string" and test("^[A-Za-z0-9._][A-Za-z0-9._@-]*$")) and (.dir | type == "string" and test("^(~$|~/|/)") and (contains("\n") | not)) end)
       and ([.account, .reviewAccount] | all(. == null or (type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")))))' \
     "$@" 2>/dev/null
@@ -1104,7 +1107,7 @@ control() { # [action [arguments]]
   local c a=${1:-} f=. new x ag es top=0 p='' open=''
   c=$(ctl) || return 1
   [ $# = 0 ] || shift
-  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | atonce <number> | suite-machine <local | ssh <target> [--dir <d>]> | hold <issue>... | release <issue>... | adopt <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|lint|<areaPrefix><name>>=<on|off>... | rules <split|pick>=<off|shadow|on> | pick <small|medium> <docs|code> <promote|keep|drop|add|next> | pick <reviewer|judge> <promote <model> [effort]|drop> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | start queue filed | dep-guard <on|off> | land-as <main|pr> | pr-merge <button|release|idle> | push-check <on|off> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>... | card <issue> <builder|reviewer|judge> <model> [effort] | card <issue> [builder|reviewer|judge] clear | card <issue> pick]" >&2; return 2; }
+  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | atonce <number> | suite-machine <local | ssh <target> [--dir <d>] | devbox [--size <s>]> | hold <issue>... | release <issue>... | adopt <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|lint|<areaPrefix><name>>=<on|off>... | rules <split|pick>=<off|shadow|on> | pick <small|medium> <docs|code> <promote|keep|drop|add|next> | pick <reviewer|judge> <promote <model> [effort]|drop> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | start queue filed | dep-guard <on|off> | land-as <main|pr> | pr-merge <button|release|idle> | push-check <on|off> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>... | card <issue> <builder|reviewer|judge> <model> [effort] | card <issue> [builder|reviewer|judge] clear | card <issue> pick]" >&2; return 2; }
   nums() { local x; for x; do [[ $x =~ ^[1-9][0-9]{0,8}$ ]] || return 1; done; }
   # A main-red fix card is of no issue (issue 0), named by its card id: there is nothing of it to hold or release.
   case $a in hold | release) for x; do [[ ! $x =~ ^(0+|c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0)$ ]] || {
@@ -1120,8 +1123,14 @@ control() { # [action [arguments]]
       f='.suiteAtOnce = ($v[0] | tonumber)' ;;
     # suite-machine: where a release's whole suite runs (suiteMachine, lib/suitehost.sh): here, or a Linux box over ssh,
     # its folder there ~/conveyor-suite unless --dir names one (~, a path under ~/, or a full path). A target is
-    # user@host or a host (an ssh config name too), never one that ssh would read as an option.
+    # user@host or a host (an ssh config name too), never one that ssh would read as an option. devbox: a Namespace
+    # Devbox of --size (4x8 unless given), leased under the tag conveyor-suite-<project>, and stopped when idle for 15m.
     suite-machine) if [ "$*" = local ]; then f='.suiteMachine = {kind: "local"}'
+      elif [ "${1:-}" = devbox ] && { [ $# = 1 ] || { [ $# = 3 ] && [ "$2" = --size ]; }; }; then
+        x=${3:-4x8}
+        [[ $x =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "conveyor: control suite-machine: \"$x\" is not a devbox size (such as 4x8); nothing changed" >&2; return 2; }
+        # jq reads a --size among its arguments as its own option: the size alone is given.
+        set -- devbox "$x" "conveyor-suite-${REPO//[^A-Za-z0-9._-]/-}"; f='.suiteMachine = {kind: "devbox", size: $v[1], tag: $v[2], idleStop: "15m"}'
       elif [ "${1:-}" = ssh ] && { [ $# = 2 ] || { [ $# = 4 ] && [ "$3" = --dir ]; }; }; then
         [[ $2 =~ ^[A-Za-z0-9._][A-Za-z0-9._@-]*$ ]] || { echo "conveyor: control suite-machine: \"$2\" is not an ssh target (user@host or a host); nothing changed" >&2; return 2; }
         [ $# = 2 ] || { [[ $4 =~ ^(~$|~/|/) ]] && [[ $4 != *$'\n'* ]]; } || { echo "conveyor: control suite-machine: \"$4\" is not ~, a folder under ~/ or a full path; nothing changed" >&2; return 2; }

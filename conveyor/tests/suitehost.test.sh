@@ -277,3 +277,118 @@ t_hostcheck() {
   out=$(unset CONVEYOR_TEST_SLOT; CONVEYOR_TEST_POOL=1:$T/$CASE/pool loop release-run atonce 2>&1) && [ "$out" = 2 ] \
     || fail "release-run atonce with the ssh rule, suiteAtOnce 9, the box's 3 CPUs and 2 slots and one slot here did not print 2: $out"
 }
+# The stand-in devbox of the cases below: no case reaches a Namespace account. It notes each call in $STUB/devbox-calls,
+# an exec by what its script does (facts, setup, checkout, upload, run, poll or kill: the box's steps), and runs the script in
+# the box's folder as boxsetup's ssh does; a lease it handed out (acquire) is held until release, and an exec or a
+# release of any other lease, or of one given back, fails. A file $STUB/devbox-nologin is a login that has expired.
+DEVBOX='#!/usr/bin/env bash
+L=lease-1274
+note() { printf "%s\n" "$*" >> "$STUB/devbox-calls"; }
+case $1 in
+  auth) note "$@"; [ ! -e "$STUB/devbox-nologin" ] || { echo "not logged in" >&2; exit 1; } ;;
+  acquire) note "$@"; echo "Leasing a devbox"; echo "$L"; : > "$STUB/devbox-leased" ;;
+  release) note "$@"; [ "$2 $3" = "--lease_id $L" ] && [ -e "$STUB/devbox-leased" ] || { echo "no such lease" >&2; exit 1; }; rm -f "$STUB/devbox-leased"; echo "$L" >> "$STUB/devbox-released" ;;
+  exec) shift; d=; [ "${1:-}" != -d ] || { d=-d; shift; }
+    [ "$1 $2 $3" = "--lease_id $L --" ] && [ -e "$STUB/devbox-leased" ] || { echo "no such lease" >&2; exit 1; }
+    shift 3; s=$*
+    case $s in *setup.blob*) t=setup ;; *wt.bundle*) t=checkout ;; *nohup*) t=run ;; *"tar -cf"*) t=poll ;; *"tar -xf"*) t=upload ;; *"kill -TERM"*) t=kill ;; *) t=facts ;; esac
+    note "exec${d:+ -d} $t"
+    [ -z "$d" ] || exec < /dev/null
+    for f in /dev/fd/*; do f=${f##*/}; [ "$f" -le 2 ] || eval "exec $f>&-"; done 2> /dev/null
+    cd "$STUB/box" && exec env -i HOME="$STUB/box" PATH="$STUB/box/bin:$(cat "$STUB/box/path" 2> /dev/null || printf %s "$PATH")" STUB="$STUB" "$@" ;;
+  *) note "$@"; exit 2 ;;
+esac'
+# devboxsetup [cpus]: the release fixture with the stand-in box (boxsetup), the stand-in devbox on PATH and the devbox
+# rule (control suite-machine devbox); BOX is the run's folder, under the box's home. Fails the case when the devbox on
+# PATH is not the stand-in, so a real one is never called.
+devboxsetup() {
+  local out
+  boxsetup "${1:-3}"
+  # stub: a devbox with no Namespace account, which hands out one lease
+  printf '%s\n' "$DEVBOX" > "$STUB/devbox" && chmod +x "$STUB/devbox" || fail "the fixture could not be made"
+  [ "$(command -v devbox)" = "$STUB/devbox" ] || fail "devbox on PATH is not the stand-in: $(command -v devbox)"
+  out=$(loop control suite-machine devbox --size 4x8 2>&1) || fail "control suite-machine devbox --size 4x8 did not set the rule: $out"
+  BOX=$STUB/box/conveyor-suite/main
+}
+# devboxcalls: the calls the stand-in devbox had, each run of equal calls once, joined by ";".
+devboxcalls() { uniq "$STUB/devbox-calls" | paste -sd';' -; }
+# Bugs (D1, D7): a release-run prep with the devbox rule did not lease the devbox with the size and the idle stop, ran a
+# step out of its order (start, setup, checkout, run, results), ran the suite elsewhere than the devbox's checkout of
+# the commit, started the run attached (not `exec -d`), reached for ssh, named another machine in the record or the
+# status, or left the lease held. The stand-in devbox fails an exec on a lease given back.
+t_devboxrun() {
+  local O RUN out
+  runsetup "$BOXSUITE"; devboxsetup 3
+  # The commit carries a .conveyor/test-machine.sh that notes where it ran: only the devbox's own run of it proves the setup step ran.
+  mkdir -p "$R/.conveyor" && printf 'pwd >> "$STUB/setups"\n' > "$R/.conveyor/test-machine.sh" && git -C "$R" add -f .conveyor/test-machine.sh && git -C "$R" commit -qm 'machine setup' \
+    && git -C "$R" push -q origin main && O=$(git -C "$R" rev-parse HEAD) || fail "the fixture could not be made"
+  out=$(loop release-run prep 1.1.0 2>&1) || fail "release-run prep did not start the run: $out"
+  # relwait: release-run starts the run in the background and returns; only its record shows when the run has ended.
+  relwait "the run on the devbox did not end" '.ended != null'
+  jq -e '.state == "passed" and .done == 2 and .failed == 0' "$RUN" > /dev/null || fail "the run did not pass with the devbox's counts: $(cat "$RUN") $(cat "$T/$CASE/cards/release/run.log")"
+  jq -e '.machine | .kind == "devbox" and .name == "Namespace Devbox 4x8" and .lease == "lease-1274" and .target == null and .dir == null and .step == "done" and .reason == null
+    and (.secs | keys_unsorted) == ["start", "setup", "checkout", "run", "results"]' "$RUN" > /dev/null \
+    || fail "the record's machine is not the devbox, done, with each step's seconds in order: $(jq -c .machine "$RUN")"
+  [ "$(devboxcalls)" = 'auth check-login;acquire conveyor-suite-main --size 4x8 --auto_stop_idle_timeout 15m;exec facts;exec setup;exec checkout;exec upload;exec -d run;exec poll;release --lease_id lease-1274' ] \
+    || fail "the devbox's calls are not login, acquire, facts, setup, checkout, upload, run detached, polls, release: $(devboxcalls)"
+  [ "$(cat "$STUB/devbox-released")" = lease-1274 ] && [ ! -e "$STUB/devbox-leased" ] && [ ! -e "$STUB/ssh-calls" ] || fail "the lease was not given back once, or ssh was called: $(cat "$STUB/devbox-released" 2>&1) $(cat "$STUB/ssh-calls" 2>&1)"
+  [ "$(cat "$STUB/setups" 2>&1)" = "$BOX" ] || fail "the commit's .conveyor/test-machine.sh did not run once in the devbox's run folder $BOX: $(cat "$STUB/setups" 2>&1)"
+  [ "$(cat "$STUB/full-pwd")" = "$BOX/wt" ] && [ "$(git -C "$BOX/wt" rev-parse HEAD)" = "$O" ] || fail "the suite did not run on the devbox's checkout of $O: $(cat "$STUB/full-pwd" 2>&1)"
+  grep -q 'description=The whole suite (test.full) passed on Namespace Devbox 4x8$' "$STUB/gh-calls" || fail "the status does not name the machine as Namespace Devbox 4x8: $(cat "$STUB/gh-calls")"
+  out=$(loop snapshot --fresh | jq -c '.suites[] | select(.kind == "release") | .machine.name') && [ "$out" = '"Namespace Devbox 4x8"' ] || fail "the snapshot does not name the run's machine as Namespace Devbox 4x8: $out"
+  # Bug: suite-machine check named no login for the devbox rule, or asked a devbox that is leased for a run only for
+  # bash, tools and slots, so it always read missing.
+  out=$(loop suite-machine check 2>&1) && [ "$out" = "$(printf 'conveyor: suite-machine: the suite runs on Namespace Devbox 4x8\nok: Namespace login: logged in')" ] \
+    || fail "suite-machine check with a login did not report the Namespace login alone as ok: $out"
+  # Bug: release-run atonce printed this machine's cap for the devbox rule, as the box's slots are known only to a run.
+  out=$(loop release-run atonce 2>&1); [ $? = 1 ] && grep -q 'read when a run leases it' <<<"$out" || fail "release-run atonce with the devbox rule did not refuse to print a number: $out"
+}
+# Bug (D5): release-run stop during a run on a devbox ended the run here and left the suite going on the devbox, and the
+# lease held until its idle stop. The suite is a sleep the devbox's processes carry no mark of: only a stop sent to the
+# devbox ends it, and the lease is given back.
+t_devboxstop() {
+  local O RUN out
+  runsetup 'sleep 300 & echo $! > "$STUB/box-sleep"; wait'; devboxsetup 3 # sleep: the devbox's suite, which only the stop ends
+  out=$(loop release-run prep 1.1.0 2>&1) || fail "release-run prep did not start the run: $out"
+  # wait_until: the suite starts on the devbox in the background; only its note there shows when it runs.
+  wait_until '[ -s "$STUB/box-sleep" ]' || fail "the suite did not start on the devbox: $(cat "$T/$CASE/cards/release/run.log" 2>&1)"
+  jq -e '.machine.step == "run" and .machine.lease == "lease-1274"' "$RUN" > /dev/null || fail "the record does not say the devbox's run is under way, with its lease: $(jq -c .machine "$RUN")"
+  [ ! -e "$STUB/devbox-released" ] || fail "the lease was given back while the suite ran: $(cat "$STUB/devbox-released")"
+  out=$(loop release-run stop 2>&1) || fail "the stop failed: $out"
+  # wait_until: a process sent TERM ends a moment later; only a check of it shows when it has.
+  wait_until "! kill -0 $(cat "$STUB/box-sleep") 2>/dev/null" || { kill "$(cat "$STUB/box-sleep")"; fail "the suite still runs on the devbox after release-run stop: $out"; }
+  jq -e '.state == "stopped"' "$RUN" > /dev/null || fail "the record does not say stopped: $(cat "$RUN")"
+  [ "$(cat "$STUB/devbox-released" 2>&1)" = lease-1274 ] && [ ! -e "$STUB/devbox-leased" ] || fail "release-run stop did not give the lease back once: $(cat "$STUB/devbox-released" 2>&1); calls $(devboxcalls)"
+}
+# Bug ("Not logged in to Namespace"): a run with an expired login went on to acquire a devbox, or ended refused or
+# failed, with a status posted, rather than not started with that reason; suite-machine check reported the login ok.
+t_devboxlogin() {
+  local O RUN out
+  runsetup "$BOXSUITE"; devboxsetup 3; : > "$STUB/devbox-nologin"
+  out=$(loop release-run prep 1.1.0 2>&1) || fail "release-run prep did not start the run: $out"
+  # relwait: release-run starts the run in the background and returns; only its record shows when the run has ended.
+  relwait "the run did not end" '.ended != null'
+  jq -e '.state == "not started" and .machine.reason == "Not logged in to Namespace" and .machine.step == "start" and .machine.lease == null
+    and any(.reasons[]; test("the suite was not started on Namespace Devbox 4x8: Not logged in to Namespace"))' "$RUN" > /dev/null \
+    || fail "an expired login did not end the run not started with Not logged in to Namespace: $(cat "$RUN")"
+  [ "$(devboxcalls)" = 'auth check-login' ] && [ ! -e "$STUB/runs" ] && [ ! -e "$T/$CASE/cards/release/wt" ] || fail "the run went on past the login: $(devboxcalls); $(cat "$STUB/runs" 2>&1)"
+  ! grep -q -- '-X POST' "$STUB/gh-calls" 2>/dev/null || fail "a run not started posted a status: $(cat "$STUB/gh-calls")"
+  out=$(loop suite-machine check --json 2>&1); [ $? = 1 ] && jq -e '.kind == "devbox" and .ok == false and .needs == [{need: "Namespace login", ok: false, detail: "Not logged in to Namespace"}]' <<<"$out" > /dev/null \
+    || fail "suite-machine check --json with an expired login did not report the Namespace login as missing: $out"
+}
+# Bug: a devbox leased for a run that then failed to start (here its box has no jq, so the check ends the run not
+# started) stayed leased until its idle stop. The lease is given back once, and nothing runs.
+t_devboxfail() {
+  local O RUN out t
+  runsetup "$BOXSUITE"; devboxsetup 3
+  mkdir -p "$STUB/box/nojq" || fail "the fixture could not be made"
+  for t in bash git grep sed cat tr sort tail head wc mkdir dirname uname flock getconf readlink env; do
+    ln -sf "$(command -v "$t")" "$STUB/box/nojq/$t" || fail "the fixture could not be made: $t"
+  done
+  printf %s "$STUB/box/nojq" > "$STUB/box/path"
+  out=$(loop release-run prep 1.1.0 2>&1) || fail "release-run prep did not start the run: $out"
+  # relwait: release-run starts the run in the background and returns; only its record shows when the run has ended.
+  relwait "the run did not end" '.ended != null'
+  jq -e '.state == "not started" and (.machine.reason | test("jq is not installed there")) and .machine.step == "start"' "$RUN" > /dev/null || fail "a devbox with no jq did not end the run not started, naming jq: $(cat "$RUN")"
+  [ "$(cat "$STUB/devbox-released" 2>&1)" = lease-1274 ] && [ ! -e "$STUB/devbox-leased" ] && [ ! -e "$STUB/runs" ] || fail "the lease was not given back once, or the suite ran: $(cat "$STUB/devbox-released" 2>&1); calls $(devboxcalls)"
+}

@@ -375,5 +375,22 @@ t_controlsuitemachine() {
     out=$(loop control suite-machine $a 2>&1); [ $? = 2 ] && [ "$(jq -c .suiteMachine "$C")" = '{"kind":"ssh","target":"box","dir":"/srv/suite"}' ] \
       || fail "control suite-machine $a was not refused with nothing changed: $out"
   done
+  # The devbox rule (#1274). Bugs: the rule had no size or the idle stop, or a tag that is not the project's, so two
+  # projects share a devbox; a size that jq or the devbox command would read as an option was written; a record whose
+  # devbox rule lacks a key, or has a bad tag, size or idle stop, was read; a refusal changed the record.
+  [ "$(ctl suite-machine devbox | jq -c .suiteMachine)" = '{"kind":"devbox","size":"4x8","tag":"conveyor-suite-main","idleStop":"15m"}' ] \
+    || fail "control suite-machine devbox did not write the rule with the size 4x8, the project's tag and 15m: $(jq -c .suiteMachine "$C")"
+  [ "$(ctl suite-machine devbox --size 8x16 | jq -c .suiteMachine)" = '{"kind":"devbox","size":"8x16","tag":"conveyor-suite-main","idleStop":"15m"}' ] \
+    || fail "control suite-machine devbox --size 8x16 did not write that size: $(jq -c .suiteMachine "$C")"
+  for a in 'devbox --size' 'devbox --size -oX' 'devbox --size a/b' 'devbox 4x8' 'devbox --size 4x8 x' 'devbox --dir ~'; do
+    # shellcheck disable=SC2086 # each word an argument
+    out=$(loop control suite-machine $a 2>&1); [ $? = 2 ] && [ "$(jq -c .suiteMachine "$C")" = '{"kind":"devbox","size":"8x16","tag":"conveyor-suite-main","idleStop":"15m"}' ] \
+      || fail "control suite-machine $a was not refused with nothing changed: $out"
+  done
+  for a in '{"kind":"devbox","size":"4x8","tag":"conveyor-suite-x"}' '{"kind":"devbox","size":"-x","tag":"conveyor-suite-x","idleStop":"15m"}' '{"kind":"devbox","size":"4x8","tag":"x","idleStop":"15m"}' \
+    '{"kind":"devbox","size":"4x8","tag":"conveyor-suite-x","idleStop":"soon"}' '{"kind":"devbox","size":"4x8","tag":"conveyor-suite-x","idleStop":"15m","target":"h"}'; do
+    ! ctlcheck <<<"{\"suiteMachine\":$a}" >/dev/null || fail "the record {\"suiteMachine\":$a} was read"
+  done
+  ctlcheck <<<'{"suiteMachine":{"kind":"devbox","size":"4x8","tag":"conveyor-suite-x","idleStop":"15m"}}' > /dev/null || fail "a record with a whole devbox rule was not read"
   [ "$(ctl suite-machine local | jq -c .suiteMachine)" = '{"kind":"local"}' ] || fail "control suite-machine local did not write this machine: $(jq -c .suiteMachine "$C")"
 }
