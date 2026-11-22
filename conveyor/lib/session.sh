@@ -461,7 +461,7 @@ apitries() { # <worktree> <step> <output file> <command ...>
     [ "$st" != review ] || [ $rc = 2 ] || { printf '%s\n' "$t"; return $rc; }
     [ $try -lt 4 ] || { printf 'the model API refused (%s) at each of 5 tries, made %ss, then 2, 4 and 8 times that, apart\n%s\n' "$api" "$API_PAUSE" "$(jq -rRn --argjson codex "$codex" --rawfile e "$wt.err" "$APISAID" "$said" 2>/dev/null | tail -n 60)"; return 1; }
     read -r w at <<<"$(jq -rn --argjson p "$API_PAUSE" --argjson t "$try" '($p * pow(2; $t)) as $w | "\($w) \(now + $w | floor)"')"
-    try=$((try + 1)); used=$(jq -c 'del(.step)' "$wt.spent"); APIRESUME=''; APIRESUMED=''; jq -e '.resumed' <<<"$used" >/dev/null 2>&1 && APIRESUMED=1; [ $try != 1 ] || APIRESUME=1 # the first retry resumes the refused session (session1()); a resumed try is the step's one resume, so no later try resumes (APIRESUMED)
+    try=$((try + 1)); used=$(jq -c 'del(.step)' "$wt.spent"); APIRESUME=1; APIRESUMED=''; jq -e '.resumed' <<<"$used" >/dev/null 2>&1 && APIRESUMED=1 # each retry of a Claude build resumes the refused session by the id its output names (session1(); other agents and steps run again from nothing), so a try refused before it named one leaves the resume to the next; a resumed try is the step's one resume, so no later try resumes (APIRESUMED)
     jq -cn --arg s "$st" --arg a "waiting: the model API refused ($api); trying again at $(p_date "@$at" +%H:%M)" --slurpfile u "$wt.spent" \
       '{step: $s, at: (now | todate), last: null, turns: 0, model: $u[0].model, action: $a} + (if ($u[0].effort | type) == "string" and $u[0].effort != "" then {effort: $u[0].effort} else {} end)' > "$wt.live.tmp" && mv -f "$wt.live.tmp" "$wt.live"
     sleep "$w"
@@ -580,7 +580,7 @@ session1() {
   local KEEP bp p rid rd=''; slot_keepwords
   # A session that stalls (watch()) is ended and runs once more after REVIEW_PAUSE, as a review with no verdict does
   # (reviewed()), on what it left in the worktree; the stalled try is firstTry on the step's line (BOTHTRIES), and stalls counts the stalls. A second stall fails the step.
-  # A Claude build session cut off by a stall, or by the model API (APIRESUME: apitries()'s first retry), is resumed once by the session id its output names (claude --resume, told RESUMEBRIEF), not run again from nothing: its line has resumed 1.
+  # A Claude build session cut off by a stall, or by the model API (APIRESUME: apitries()'s retries), is resumed once by the session id its output names (claude --resume, told RESUMEBRIEF), not run again from nothing: its line has resumed 1.
   while :; do
     sec=$SECONDS; p=$2 rid=''; [ -z "$rd" ] && [ -z "${APIRESUMED:-}" ] && [ "$agent" = claude ] && [ "${3:-build}" = build ] && [ -n "${APIRESUME:-}$x" ] && rid=$(jq -rRn "$SESSID" "$1.out" 2>/dev/null) && [ -n "$rid" ] && p=$RESUMEBRIEF rd=1
     builder "$1" "$p" "$model" "$effort" "$dir" "$agent" "$rid" & bp=$!

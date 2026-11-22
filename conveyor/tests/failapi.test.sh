@@ -249,6 +249,24 @@ t_apiresume() {
   [ "$(head -n 1 "$T/$CASE/run.out" | jq -r .resumed)" = 1 ] || fail "the build's record does not say it was resumed: $(head -n 1 "$T/$CASE/run.out")"
 }
 
+# Issue 1323. Bug it catches: only the first try after a refusal could resume. A first try refused on stderr alone
+# names no session id, so the second starts from nothing; when that one named its id and was refused too, the third
+# started from nothing again, and the step was never resumed. The first try that can resume does.
+t_apiresumelater() {
+  setup '[]'; tune '.tunables.apiPause = 0.02'; fx_wt : b.txt one
+  cat > "$STUB/build" <<'EOT'
+echo x >> "$STUB/calls"; n=$(wc -l < "$STUB/calls")
+[ "$n" != 1 ] || { printf 'API Error: 503 Service Unavailable\n' >&2; exit 1; }
+[ "$n" != 2 ] || { echo '{"type":"system","session_id":"0aa1-b2"}'; echo '{"type":"result","session_id":"0aa1-b2","is_error":true,"result":"API Error: 503 Service Unavailable","usage":{"input_tokens":3,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}'; exit 1; }
+echo two >> a.txt
+EOT
+  apicall 'session "$FXWT" "Build the issue."; echo "rc=$?"'
+  grep -qx rc=0 "$T/$CASE/run.out" && [ "$(wc -l < "$STUB/sessions")" = 3 ] || fail "a build refused on stderr, then refused after it named its id, did not run 3 times and end well: $(cat "$STUB/sessions") $(cat "$T/$CASE/run.out")"
+  [ "$(grep -c -- '--resume' "$STUB/sessions")" = 1 ] && sed -n 3p "$STUB/sessions" | grep -q -- '--resume 0aa1-b2 ' \
+    || fail "the try after the refused try that named its id did not resume it, or another try resumed: $(cat "$STUB/sessions")"
+  [ "$(head -n 1 "$T/$CASE/run.out" | jq -r .resumed)" = 1 ] || fail "the build's record does not say it was resumed: $(head -n 1 "$T/$CASE/run.out")"
+}
+
 # Issue 1309. Bug it catches: a build that stalled was resumed, and when the API refused that resumed try, the try
 # after the refusal, which stalled again after it named its session, resumed that session too, while its record said
 # resumed 1. One resume a step: the stall's resume is the step's one, so no later try of the step resumes.
