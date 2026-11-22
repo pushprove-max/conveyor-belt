@@ -6,7 +6,7 @@
 # Bug it catches: each such block woke the Foreman, and a whole Foreman turn only ran `conveyor.sh retry <issue>` by
 # the owner's standing rule. With the kind on, the watcher runs the retry on the record's host and logs it in the
 # ruling log, with no wake; with it off, or for another block, the block wakes as before; a retry that fails wakes, with
-# why.
+# why. The kind is read from the pack as it is now, not from the snapshot.
 set -uo pipefail
 SRC=$(cd "$(dirname "$0")" && pwd -P)
 B=$(mktemp -d) || exit 1
@@ -15,10 +15,12 @@ unset CONVEYOR_FOREMAN CONVEYOR_FOREMAN_DIR CONVEYOR_FOREMAN_ASK CONVEYOR_FOREMA
 export ENG=$SRC/../conveyor.sh
 REVIEW='the fix for [P1] conveyor/lib/x.sh:3 The guard can be skipped. Proof: a quoted name passes did not hold after 2 rounds'
 fail() { echo "FAIL [watch-retry-$CASE]: $*" >&2; exit 1; }
-# fixture <case> <kinds> <block reason> <what the retry does>: alpha's record, its pack's auto.standing <kinds> (a json
-# list), its snapshot with card c7 of issue 7 blocked for <block reason>. The ask seam (lib.sh ask): the snapshot is
-# $T/snap; `retry <n>` is listed in $T/retries, then does <what the retry does>; `auto act review-retry <what>` runs the
-# engine on alpha's main, as on its host, into the ruling log $T/rulings.jsonl; any other ask fails.
+# fixture <case> <kinds> <block reason> <what the retry does> [<snapshot kinds>]: alpha's record, its pack's
+# auto.standing <kinds> (a json list), its snapshot with card c7 of issue 7 blocked for <block reason> and the standing
+# <snapshot kinds> (default <kinds>: a kept snapshot can list kinds from before the pack changed). The ask seam (lib.sh
+# ask): the snapshot is $T/snap, or times out (exit 124) while $T/slow is there; health is the snapshot's; `retry <n>`
+# is listed in $T/retries, then does <what the retry does>; `auto standing` and `auto act review-retry <what>` run the
+# engine on alpha's main, as on its host, the act into the ruling log $T/rulings.jsonl; any other ask fails.
 fixture() {
   CASE=$1 T=$B/$1
   export HOME=$T/home XDG_CONFIG_HOME=$T/config XDG_DATA_HOME=$T/data XDG_STATE_HOME=$T/xstate CONVEYOR_RULING_LOG=$T/rulings.jsonl
@@ -26,11 +28,12 @@ fixture() {
   mkdir -p "$HOME" "$XDG_CONFIG_HOME/conveyor" && git init -q "$M" && mkdir -p "$M/.conveyor" \
     && jq --argjson k "$2" '.plugin = {follow: "main"} | .auto.standing = $k' "$SRC/../lib/test-pack.json" > "$M/.conveyor/project.json" \
     && jq -n --arg m "$M" '{records: [{repo: "alpha", main: $m}]}' > "$XDG_CONFIG_HOME/conveyor/host.json" \
-    && jq -cn --argjson k "$2" --arg r "$3" '{belt: [{card: "c9", issue: 9, step: "build"}], queue: {next: []}, standing: $k,
+    && jq -cn --argjson k "${5:-$2}" --arg r "$3" '{belt: [{card: "c9", issue: 9, step: "build"}], queue: {next: []}, standing: $k,
       health: {time: "2026-11-19T10:00:00Z", loop: true, gh: true, ghReached: true, state: "running", reason: null, stuck: [], waiting: [],
         blocked: [{card: "c7", issue: 7, since: "2026-11-19T09:58:00Z", reason: $r}], pushError: null, pushFailingSince: null}}' > "$T/snap" \
     || fail "the fixture was not made"
-  export CONVEYOR_FOREMAN_ASK="case \$CONVEYOR_CMD in snapshot) cat $T/snap ;; 'retry '*) echo \"\$CONVEYOR_CMD\" >> $T/retries; $4 ;;
+  export CONVEYOR_FOREMAN_ASK="case \$CONVEYOR_CMD in snapshot) [ ! -e $T/slow ] || exit 124; cat $T/snap ;; health) jq -c .health $T/snap ;;
+    'retry '*) echo \"\$CONVEYOR_CMD\" >> $T/retries; $4 ;; 'auto standing') cd \"\$CONVEYOR_MAIN\" && bash \"\$ENG\" auto standing ;;
     'auto act review-retry '*) cd \"\$CONVEYOR_MAIN\" && bash \"\$ENG\" auto act review-retry \"\${CONVEYOR_CMD#auto act review-retry }\" ;; *) exit 3 ;; esac"
 }
 # One poll; 0 with a wake put, which $wake holds.
@@ -76,7 +79,28 @@ t_other() {
   [ ! -e "$T/retries" ] || fail "the watcher retried a block that is not a review block: $(cat "$T/retries")"
 }
 
-cases=(on off fails other)
+# A kept snapshot lists the kind on, and the owner has turned it off in the pack since: the blocked wake, and no retry.
+# Bug it catches: the watcher read the kind from the snapshot, so it retried a card the owner meant to see.
+t_stale() {
+  fixture stale '[]' "$REVIEW" 'exit 0' '["review-retry"]'
+  poll || fail "no wake for the review block with the kind turned off since the snapshot: $(cat "$T/err")"
+  grep -qF "$BLOCKED$REVIEW" <<<"$wake" || fail "the wake does not name the block: $wake"
+  [ ! -e "$T/retries" ] || fail "the watcher retried after the kind was turned off: $(cat "$T/retries")"
+}
+# The snapshot times out and health lists the review block, with the kind on: no wake and no retry at that poll; the
+# next poll whose snapshot reads retries #7. Bug it catches: health's block woke the Foreman and was marked reported,
+# so no later poll retried it.
+t_health() {
+  fixture health '["review-retry"]' "$REVIEW" 'echo "conveyor: issue #7 is queued again"'
+  touch "$T/slow"
+  poll && fail "the review block health lists woke the Foreman: $wake"
+  [ ! -e "$T/retries" ] || fail "#7 was retried on a poll whose snapshot did not read: $(cat "$T/retries")"
+  rm -f "$T/slow"
+  poll && fail "the review block woke on the poll whose snapshot read: $wake"
+  [ "$(cat "$T/retries" 2>/dev/null)" = 'retry 7' ] || fail "#7 was not retried when the snapshot read again: $(cat "$T/retries" "$T/err" 2>/dev/null)"
+}
+
+cases=(on off fails other stale health)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

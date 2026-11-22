@@ -345,11 +345,14 @@ keepsnap() { # <repo> <snapshot>
 # recheck <repo> <main> <snapshot>: the snapshot, with only the blocked cards (health.blocked) that `conveyor.sh health`,
 # read from the card records and the retried lines now, still lists blocked, when the records changed after the
 # snapshot was made (recordsNewer) and it lists a blocked card (#1114: a card retried, picked again or building since
-# was named blocked again, and the Foreman acted on it again). When health does not read, the snapshot as it is.
+# was named blocked again, and the Foreman acted on it again). When health does not read, the cards the snapshot's
+# recordsNow (commands/snapshot.sh) holds blocked: a card retried since is not blocked there either. When neither
+# reads, the snapshot as it is.
 recheck() {
   local cards
   if jq -e '.recordsNewer == true and (.health.blocked | arrays | length > 0)' <<<"$3" >/dev/null 2>&1 \
-    && cards=$(ask "$1" "$2" health 2>/dev/null | jq -ce 'select(type == "object" and (.blocked | type == "array")) | [.blocked[] | objects | .card]' 2>/dev/null) \
+    && { cards=$(ask "$1" "$2" health 2>/dev/null | jq -ce 'select(type == "object" and (.blocked | type == "array")) | [.blocked[] | objects | .card]' 2>/dev/null) \
+      || cards=$(jq -ce '.recordsNow | select(type == "object" and (.blocked | type == "array")) | [.blocked[] | objects | .card]' <<<"$3" 2>/dev/null); } \
     && jq -c --argjson c "$cards" '.health.blocked |= map(select(.card | IN($c[])))' <<<"$3" 2>/dev/null; then return; fi
   printf '%s\n' "$3"
 }
@@ -443,23 +446,38 @@ record() { # <repo> <main> <now> <await>
   # A snapshot that does not read, or not within the first wait (one made anew from the whole card records takes
   # minutes), is no reason to wake late on a card that needs the owner: `conveyor.sh health` holds the blocked, waiting
   # and before entries and needs no snapshot. hcur: those problems, as PROBLEMS gives them; nonzero when health does not read.
+  # A card review-retry gives back (retryable) is left out: it wakes nothing, and the next poll whose snapshot reads
+  # retries it (reviewretry).
   readhealth() {
-    local h all
+    local h all skip
     h=$(ask "$repo" "$main" health 2>>"$errf") \
     && all=$(jq -r --argjson push "$PUSH_S" --argjson now "$now" --argjson poll "$POLL" --argjson await '[]' --argjson hist '[null]' --slurpfile kinds "$KINDS" "{health: .} | $PROBLEMS" <<<"$h" 2>>"$errf") \
-    && hcur=$(awk -F'\t' '$1 ~ /^(blocked|waiting|before):/' <<<"$all")
+    && hcur=$(awk -F'\t' '$1 ~ /^(blocked|waiting|before):/' <<<"$all") || return
+    skip=$(retryable "$h" .blocked | cut -f1)
+    [ -z "$skip" ] || hcur=$(awk -F'\t' 'FILENAME == ARGV[1] { s["blocked:" $0]; next } !($1 in s)' <(printf '%s\n' "$skip") - <<<"$hcur")
+    return 0
   }
-  # The standing kind review-retry (lib/standing.sh), while the snapshot's pack turns it on (snapshot standing): each
-  # card blocked by its review (card.sh: "the fix for [P1] ... did not hold after <n> rounds", as the Board's reviewWhy
-  # reads it, with any notes block() adds after it in brackets, lib/push.sh) and not reported yet is given back with `conveyor.sh retry <issue>` on the record's host, and the act is
-  # logged there (`auto act review-retry`: standinglog). Its line then keeps only its key: it wakes nothing, and is not
-  # retried again while a snapshot still lists it. A retry that fails, or an act that is not logged, wakes as the block
-  # does, with why. Another block, or a main-red fix card (no issue), wakes as before.
+  # retryable <record> <jq path to its blocked list>: "<card> TAB <issue>" for each card the standing kind review-retry
+  # (lib/standing.sh) gives back: blocked by its review (card.sh: "the fix for [P1] ... did not hold after <n> rounds",
+  # as the Board's reviewWhy reads it, with any notes block() adds after it in brackets, lib/push.sh), with an issue,
+  # and not reported yet. None unless the kind is on in the pack now, as `conveyor.sh auto standing` on the record's
+  # host reads it: a kept snapshot's standing can be from before the owner turned it off, and health has none.
+  retryable() {
+    local c st
+    c=$(jq -r "$2"' | arrays | .[] | objects | select((.issue | numbers) > 0 and (.reason | strings
+      | test("\\Athe fix for \\[P[0-3]\\][\\s\\S]* did not hold after [0-9]+ rounds?( \\[[\\s\\S]*\\])?\\z"))) | "\(.card)\t\(.issue)"' <<<"$1" 2>/dev/null \
+      | awk -F'\t' -v p="$repo/blocked:" 'FILENAME == ARGV[1] { s[$0]; next } !((p $1) in s)' "$SEEN" -)
+    [ -n "$c" ] && st=$(ask "$repo" "$main" auto standing 2>>"$errf") && grep -q '^- review-retry:' <<<"$st" || return 0
+    printf '%s\n' "$c"
+  }
+  # The standing kind review-retry: each card retryable gives back is given back with `conveyor.sh retry <issue>` on
+  # the record's host, and the act is logged there (`auto act review-retry`: standinglog). Its line then keeps only
+  # its key: it wakes nothing, and is not retried again while a snapshot still lists it. A retry that fails, or an act
+  # that is not logged, wakes as the block does, with why. Another block, or a main-red fix card (no issue), wakes as
+  # before.
   reviewretry() {
     local card issue out rc note
-    jq -e '.standing | arrays | index("review-retry") != null' <<<"$rec" >/dev/null 2>&1 || return 0
     while IFS=$'\t' read -r card issue; do
-      ! grep -qxF "$repo/blocked:$card" "$SEEN" || continue
       out=$(ask "$repo" "$main" retry "$issue" 2>&1); rc=$?
       if [ "$rc" = 0 ]; then
         note=''; out=$(ask "$repo" "$main" auto act review-retry "retried #$issue: its card $card was blocked by its review" 2>&1) \
@@ -468,13 +486,12 @@ record() { # <repo> <main> <now> <await>
       out=$(tr -s '[:space:]' ' ' <<<"$out" | sed 's/^ *//; s/ *$//' | cut -c1-200)
       cur=$(K="blocked:$card" N="$note${note:+: ${out:-exit $rc}}" awk -F'\t' 'BEGIN { OFS = FS }
         $1 == ENVIRON["K"] { if (ENVIRON["N"] == "") { print $1 "\t\t\t"; next } $4 = $4 "; " ENVIRON["N"] } { print }' <<<"$cur")
-    done < <(jq -r '.health.blocked[] | select((.issue | numbers) > 0 and (.reason | strings
-      | test("\\Athe fix for \\[P[0-3]\\][\\s\\S]* did not hold after [0-9]+ rounds?( \\[[\\s\\S]*\\])?\\z"))) | "\(.card)\t\(.issue)"' <<<"$rec" 2>/dev/null)
+    done < <(retryable "$rec" .health.blocked)
   }
   # A blocked card reported and still blocked 30 minutes after a poll first listed it wakes again (#877): a Foreman
   # turn that neither cleared the block nor asked the owner left it with no reminder. $blockf holds each blocked card
-  # of the last snapshot, its block's since and the poll that first listed it ("<card> TAB <since> TAB <epoch>"); a
-  # card the snapshot no longer lists (retried, unblocked, shut or landed), or one blocked anew (a new since), starts
+  # of the last snapshot or health read, its block's since and the poll that first listed it ("<card> TAB <since> TAB <epoch>"); a
+  # card the last read no longer lists (retried, unblocked, shut or landed), or one blocked anew (a new since), starts
   # again. Its key holds the hours past those 30 minutes, so it wakes at 30 minutes and once each hour after. While an
   # open question of the record's decision ledger (lib.sh ledger) names the card's issue ("#<n>"), the key is kept with
   # no text: it wakes nothing and stays reported, so that hour gives no wake after the answer either. A card that
@@ -571,6 +588,8 @@ record() { # <repo> <main> <now> <await>
     # next failed read. A new outage drops it, so its own failed longer read is reported.
     cur=$(awk -v p="$repo/" -v h="$used" -v t="$tried" -v g="$goes" 'index($0, p) == 1 && ($0 != p "unreachable" || (t == "" && g != "")) && !(h == "health" && substr($0, length(p) + 1) ~ /^(blocked|waiting|before):/) { print substr($0, length(p) + 1) "\t\t\t" }' "$SEEN")
     [ -z "$hcur" ] || cur+=$'\n'$hcur
+    # Health lists every blocked card, as a snapshot does, so a block it lists is timed and reminded of as well.
+    [ "$used" != health ] || stillblocked
     err=$(tr -s '[:space:]' ' ' < "$errf" | tail -c 200)
     # The install this watcher runs from, removed under it, fails every poll on its own missing files: the line names
     # that install and the fix, not the file it missed.

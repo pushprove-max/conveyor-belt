@@ -14,7 +14,8 @@ unset CONVEYOR_FOREMAN CONVEYOR_FOREMAN_DIR CONVEYOR_FOREMAN_ASK CONVEYOR_FOREMA
 fail() { echo "FAIL [watch-blocked-$CASE]: $*" >&2; exit 1; }
 T0=$(date -u -d 2026-11-19T10:00:00Z +%s 2>/dev/null || date -ju -f %Y-%m-%dT%H:%M:%SZ 2026-11-19T10:00:00Z +%s)
 REASON='the changed tests failed again after their one fix round (exit 1); nothing landed.'
-# fixture <case>: alpha's record; the ask seam gives the snapshot $T/snap, made by block.
+# fixture <case>: alpha's record; the ask seam gives the snapshot $T/snap, made by block (it times out, exit 124, while
+# $T/slow is there), and health, the snapshot's.
 fixture() {
   CASE=$1 T=$B/$1
   export HOME=$T/home XDG_CONFIG_HOME=$T/config XDG_DATA_HOME=$T/data XDG_STATE_HOME=$T/xstate
@@ -23,13 +24,14 @@ fixture() {
     && jq '.plugin = {follow: "main"}' "$SRC/../lib/test-pack.json" > "$M/.conveyor/project.json" \
     && jq -n --arg m "$M" '{records: [{repo: "alpha", main: $m}]}' > "$XDG_CONFIG_HOME/conveyor/host.json" \
     || fail "the fixture was not made"
-  export CONVEYOR_FOREMAN_ASK="case \$CONVEYOR_CMD in snapshot) cat $T/snap ;; *) exit 3 ;; esac"
+  export CONVEYOR_FOREMAN_ASK="case \$CONVEYOR_CMD in snapshot) [ ! -e $T/slow ] || exit 124; cat $T/snap ;; health) jq -c .health $T/snap ;; *) exit 3 ;; esac"
 }
-# block <since or "">: the snapshot, with card c7 of issue 7 blocked since <since>, or with no card blocked.
+# block <since or ""> [<issue>]: the snapshot, with card c<issue> of issue <issue> (default 7) blocked since <since>,
+# or with no card blocked.
 block() {
-  jq -cn --arg s "$1" --arg r "$REASON" '{belt: [{card: "c9", issue: 9, step: "build"}], queue: {next: []},
+  jq -cn --arg s "$1" --argjson i "${2:-7}" --arg r "$REASON" '{belt: [{card: "c9", issue: 9, step: "build"}], queue: {next: []},
     health: {time: "2026-11-19T10:00:00Z", loop: true, gh: true, ghReached: true, state: "running", reason: null, stuck: [], waiting: [],
-      blocked: (if $s == "" then [] else [{card: "c7", issue: 7, since: $s, reason: $r}] end), pushError: null, pushFailingSince: null}}' > "$T/snap"
+      blocked: (if $s == "" then [] else [{card: "c\($i)", issue: $i, since: $s, reason: $r}] end), pushError: null, pushFailingSince: null}}' > "$T/snap"
 }
 # poll <minutes after T0>: one poll; 0 with a wake put, which $wake holds.
 poll() {
@@ -77,7 +79,18 @@ t_retried() {
   ! poll 54 || fail "a second wake for #7 before 30 minutes of its new block: $wake"
 }
 
-cases=(remind question retried)
+# The snapshot times out at each poll and health lists #948 blocked: the block's wake at minute 0, and a still-blocked
+# wake at minute 30. Bug it catches: reminders ran only on a poll whose snapshot read, so a block health alone listed
+# was never reminded of.
+t_health() {
+  fixture health; block 2026-11-19T09:58:00Z 948; touch "$T/slow"
+  poll 0 || fail "no wake for the block health lists: $(cat "$T/err")"
+  poll 30 || fail "no second wake for #948 still blocked 30 minutes after its report, the snapshot timing out: $(cat "$T/err")"
+  grep -qF 'still blocked: #948' <<<"$wake" && grep -qF "alpha: #948 has been blocked for 32m: $REASON" <<<"$wake" \
+    || fail "the wake does not name #948 as still blocked, with its time and reason: $wake"
+}
+
+cases=(remind question retried health)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

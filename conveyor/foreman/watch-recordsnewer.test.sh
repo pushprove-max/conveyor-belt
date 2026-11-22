@@ -102,5 +102,12 @@ held() {
     && grep -qxF 'not yet reported: blocked #7' <<<"$out"
 }
 check 'a card still blocked in the card records is named blocked, as of the snapshot' held
+# The same snapshot, #7 retried since (its recordsNow lists no card blocked), and health does not read: no wake. Bug
+# it catches: with no health read, the snapshot's own blocked list was used, so #7 woke as blocked.
+nohealth() {
+  blocksnap false; rm -f "$T/health"; wake=
+  jq -c '.recordsNow = {blocked: [], waiting: []}' "$T/snap" > "$T/snap.new" && mv "$T/snap.new" "$T/snap" && ! poll nohealth 0
+}
+check 'a card retried after the snapshot was made is not named blocked when health does not read' nohealth
 
 [ "$fails" = 0 ]
