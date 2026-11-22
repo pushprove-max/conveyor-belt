@@ -362,6 +362,11 @@ swe_ctl() { # <arm json>
     | .rules += ($p | with_entries(select(.key | test("^P[0-3]$")))) | . + ($p | with_entries(select(.key | IN("judgeOn", "judgeAlways"))))'
 }
 SWE_ASK='Fix this issue in the repository in the current folder. Change the code only; do not commit.'
+# The dataset lock is one for the machine's account over every project (beside its host file): the card sessions of
+# each project run as this account, so another project's grade or task list must not put the dataset's rows on disk
+# while a card builds. swe_harness.py's tasks and grade hold it alone (dataset_lock(), which names the same file)
+# while their cache is there (a grade waits for it, tasks fails at once), and each trial (swe_trial) holds it shared.
+SWE_DSLOCK=${XDG_CONFIG_HOME:-$HOME/.config}/conveyor/machine/swe-dataset.lock
 # One trial: the arm builds the task in its container. Prints {sessions, tokens, minutes, steps, cost, fired, why,
 # timedOut} (a conveyor arm's also fixRounds and findingsFixed, the fix rounds of its card and the review findings a
 # fix round followed; an agent arm's cost is swe_estimate's), and
@@ -369,10 +374,18 @@ SWE_ASK='Fix this issue in the repository in the current folder. Change the code
 # (a conveyor arm's steps keep each line's model and token usage, cost is swe_cost of its card's lines, its live
 # records and the reviewer's record swe_watch kept); keeps
 # the patch (and a conveyor arm's loop log) in <sb>.h, the trial's own folder on the host, outside the container's
-# mount; fails (prints why) only when the container could not be made or the patch read, which says nothing of the
-# arm. An arm that does not fire (its install, preflight or command failed, or its output shows no use of its method)
-# has fired false and why: that is the arm's failure, never a task not run.
-swe_trial() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor kind> [<logins>: a check's, fixed at its admission; else swe_logins now]
+# mount; fails (prints why) only when the dataset lock could not be taken, the container could not be made or the
+# patch read, which says nothing of the arm. An arm that does not fire (its install, preflight or command failed, or
+# its output shows no use of its method) has fired false and why: that is the arm's failure, never a task not run.
+# The whole trial holds the dataset lock (SWE_DSLOCK) shared: it starts once no grade or task list of any project on
+# this machine has the dataset's rows on disk, and none starts until it ends.
+swe_trial() { # as swe_trialrun
+  local f rc
+  mkdir -p "${SWE_DSLOCK%/*}" && exec {f}>>"$SWE_DSLOCK" || { echo "the dataset lock $SWE_DSLOCK could not be opened"; return 1; }
+  if flock -s "$f"; then swe_trialrun "$@"; rc=$?; else echo "the dataset lock $SWE_DSLOCK could not be taken"; rc=1; fi
+  exec {f}>&-; return $rc
+}
+swe_trialrun() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor kind> [<logins>: a check's, fixed at its admission; else swe_logins now]
   local sb=$2 a=$3 h=$2.h base t0 c rc='' run why='' kind eng='' to b n p=0 ended='' wc=''
   base=$(jq -r .base <<<"$1"); t0=$(date +%s); kind=$(jq -r .kind <<<"$a"); to=$(swe_set .taskTimeout)
   n=conveyor-swe-${SWE_RUN:-check}-$(jq -r .name <<<"$a")-$(jq -r .id <<<"$1"); c=${n//[^A-Za-z0-9_.-]/-}

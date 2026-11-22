@@ -34,8 +34,12 @@ Usage:
       fetched or built, or the run erred).
 A dataset row holds the task's reference fix and hidden tests, and a card's sessions have a shell as this same
 account: tasks and grade read the dataset into a cache folder of their own (private_cache()) and remove it when they
-end or are stopped (SIGTERM or SIGHUP), so no copy of a row is on disk while a card builds.
+end or are stopped (SIGTERM or SIGHUP), so no copy of a row is on disk while a card builds. Each holds the machine's
+dataset lock alone (dataset_lock()) while that folder is there, and no trial starts until it ends: a grade waits until
+no trial, grade or task list read of any project on this machine holds the lock; tasks fails at once (a conveyor:
+line) while one holds it.
 """
+import fcntl
 import glob
 import json
 import os
@@ -46,7 +50,6 @@ import signal
 import subprocess
 import sys
 import tempfile
-
 
 # The swebench release this file is written for and that passed a check on the build machine, as swe.json pins it and
 # docs/benchmarks.md installs it: swebench 5 has no MAP_REPO_VERSION_TO_SPECS, which tasks() reads. RUFF is the ruff
@@ -108,6 +111,14 @@ def private_cache():
     for k in ('HF_DATASETS_CACHE', 'HF_HUB_CACHE', 'HUGGINGFACE_HUB_CACHE', 'HF_XET_CACHE', 'HF_ASSETS_CACHE'):
         os.environ.pop(k, None)
     return d
+
+
+# The machine's dataset lock file, its folder made: bench/swe_arms.sh's SWE_DSLOCK, the same file beside the host
+# file, which each trial holds shared.
+def dataset_lock():
+    d = os.path.join(os.environ.get('XDG_CONFIG_HOME') or os.path.join(os.path.expanduser('~'), '.config'), 'conveyor', 'machine')
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, 'swe-dataset.lock')
 
 
 def tasks(dataset, revision, out):
@@ -353,11 +364,24 @@ def main(a):
         # `bench swe stop` ends the run with SIGTERM: exit through the finally below, so the cache is removed then too.
         for s in (signal.SIGTERM, signal.SIGHUP):
             signal.signal(s, lambda n, _: sys.exit(128 + n))
-        cache = private_cache()
-        try:
-            return (tasks(*a[1:]) or 0) if a[0] == 'tasks' else grade(*a[1:], cache)
-        finally:
-            shutil.rmtree(cache, ignore_errors=True)
+        # Held alone while the cache is there: a grade waits until no trial, grade or task list read holds it. tasks
+        # does not wait: a run's Start reads the task list before the run is recorded, so a wait for a trial of hours
+        # would outlast the Board's Start and leave no run for Stop to end. The lock does not say which of the three
+        # holds it, so the refusal names all three.
+        with open(dataset_lock(), 'a') as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | (fcntl.LOCK_NB if a[0] == 'tasks' else 0))
+            except BlockingIOError:
+                sys.stderr.write('conveyor: a SWE-bench trial, grade or task list read on this machine uses the dataset, so the task list cannot be read now: start again when it ends\n')
+                return 1
+            cache = private_cache()
+            try:
+                return (tasks(*a[1:]) or 0) if a[0] == 'tasks' else grade(*a[1:], cache)
+            finally:
+                # A signal now would raise inside rmtree and leave the rows on disk: the process ends once they are gone.
+                for s in (signal.SIGTERM, signal.SIGHUP):
+                    signal.signal(s, signal.SIG_IGN)
+                shutil.rmtree(cache, ignore_errors=True)
     sys.stderr.write('usage: swe_harness.py check | tasks <dataset> <revision> <out> | image <image> | grade <dataset> <revision> <id> <patch> <folder> <run id>\n')
     return 2
 

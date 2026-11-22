@@ -427,3 +427,56 @@ EOF
   out=$(loop bench swe 1 --solo 2>&1) || fail "the solo run failed: $out"
   [ "$(jq -c .timedOut "$B"/results/solo-*/*.json)" = true ] || fail "a command that reached the time limit is not timedOut true: $(cat "$B"/results/solo-*/*.json) $out"
 }
+
+# swetrialheld: project A's trial (the real swe_trial; its work, swe_trialrun, a stand-in that holds until $C/release
+# is made and then adds trial to $C/order) in the background, its pid in t, once it holds the dataset lock; and each
+# read of the stand-in dataset makes $C/read.
+swetrialheld() {
+  printf '%s\n' '_load = load_dataset' 'def load_dataset(*a, **k):' '    open(os.environ["C"] + "/read", "w").close()' '    return _load(*a, **k)' \
+    >> "$C-mods/datasets/__init__.py"
+  (export HERE=$SRC RTAG=a ST=$C/a-state; . "$SRC/bench/swe.sh" || exit 9
+    swe_trialrun() { touch "$C/started"; wait_until "[ -e '$C/release' ]" && echo trial >> "$C/order"; }; swe_trial) > "$C/trial.out" 2>&1 & t=$!
+  wait_until "[ -e '$C/started' ]" || fail "project A's trial did not start: $(cat "$C/trial.out")"
+}
+# Bug (#1383 R47): the dataset lock was each project's own, so a grade of one project put the dataset's rows on disk
+# while a card of another project built, its sessions a shell as the same account. Project A's trial and then project
+# B's grade (the real harness): the grade does not read the dataset until the trial ends. A stand-in fcntl.flock marks
+# that the grade asks for the lock (asking), so the trial is let go only once the grade waits there, or has ended; the
+# dataset is not read by then, and order says which ended first. Two processes run at once, as a lock is only seen to
+# hold between two: one call of either side cannot show the wait.
+t_swegradewaits() {
+  local out t g; swegradefx "$T/$CASE"
+  printf '%s\n' 'import fcntl, os' '_f = fcntl.flock' \
+    'def flock(f, op):' '    open(os.environ["C"] + "/asking", "w").close()' '    return _f(f, op)' 'fcntl.flock = flock' > "$C-mods/sitecustomize.py"
+  swetrialheld
+  ( swegrade '["t1","t2","t3","t4"]' "${SWEPATCH[@]}" > "$C/grade.out" 2>&1; echo grade >> "$C/order" ) & g=$!
+  wait_until "[ -e '$C/asking' ] || [ -s '$C/order' ]" || fail "project B's grade neither asked for the lock nor ended: $(cat "$C/grade.out")"
+  [ ! -e "$C/read" ] || fail "project B's grade (h grade o/ds rev1 o__p-1) read the dataset while project A's trial (swe_trial) ran: $(cat "$C/grade.out")"
+  touch "$C/release"; wait "$t"; wait "$g"
+  out=$(paste -sd ' ' "$C/order")
+  [ "$out" = 'trial grade' ] || fail "project B's grade (h grade o/ds rev1 o__p-1) ended before project A's trial (swe_trial) did, not after: order $out; grade: $(cat "$C/grade.out")"
+  jq -e '.resolved == true' "$C/grade.out" > /dev/null || fail "project B's grade (h grade o/ds rev1 o__p-1) after the trial did not grade: $(cat "$C/grade.out")"
+}
+# Bug: the task list's read waited for the dataset lock as a grade does, so a Start of project B with no saved task
+# list waited, before its run was recorded, for project A's trial of up to hours: the Board's Start timed out and Stop
+# found no run. While A's trial runs, tasks fails at once with its conveyor: line, and reads no row. Two processes run
+# at once, as a lock is only seen to hold between two. Bug: that line said a trial ran when another project's grade or
+# task list read held the lock; the line names all three, as the lock does not say which holds it.
+t_swetasksbusy() {
+  local out rc t; swegradefx "$T/$CASE"; swetrialheld
+  out=$(h tasks o/ds rev1 "$C/list" 2>&1); rc=$?
+  touch "$C/release"; wait "$t"
+  [ "$rc" = 1 ] && grep -q '^conveyor: a SWE-bench trial, grade or task list read on this machine uses the dataset' <<<"$out" \
+    || fail "h tasks o/ds rev1 while project A's trial (swe_trial) ran did not fail at once with its conveyor: line: rc $rc; $out; order $(cat "$C/order" 2>/dev/null)"
+  [ ! -e "$C/read" ] && [ ! -e "$C/list" ] || fail "h tasks o/ds rev1 while project A's trial (swe_trial) ran read the dataset: $out"
+}
+# Bug (#1383 R48): the harness's SIGTERM handler raised inside the final rmtree of its cache, so a SIGTERM then left the
+# folder, with the task's rows, on disk. A stand-in shutil.rmtree sends the harness SIGTERM as it starts on the cache.
+t_swegradetermrm() {
+  local out; swegradefx "$T/$CASE"
+  printf '%s\n' 'import os, shutil, signal' '_r = shutil.rmtree' \
+    'def rmtree(p, *a, **k):' '    if os.path.basename(p).startswith("conveyor-swe-"): os.kill(os.getpid(), signal.SIGTERM)' '    return _r(p, *a, **k)' \
+    'shutil.rmtree = rmtree' > "$C-mods/sitecustomize.py"
+  out=$(swegrade '["t1","t2","t3","t4"]' "${SWEPATCH[@]}" 2>&1)
+  ! compgen -G "$C/tmp/conveyor-swe-*" > /dev/null || fail "a SIGTERM during the rmtree of h grade o/ds rev1 o__p-1 left its cache folder: $(ls "$C/tmp"); $out"
+}
