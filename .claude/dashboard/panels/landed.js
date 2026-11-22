@@ -12,6 +12,15 @@
 // A card with no GitHub issue (issue 0) also has body, and filed and filedUrl once File on GitHub filed an issue from it.
 // What File on GitHub asked, by card ("<repo>/<card>"): {busy} while it is out, then {said}, the build machine's answer.
 const FILING = new Map();
+// Draws a row's parts anew. A lint command's name that has the keyboard keeps it (its tip is open on the new name only
+// if it was open).
+function redrawKeeping(li, parts, ctx) {
+  const at = Array.from(li.querySelectorAll('.lint-cmd-word')).indexOf(li.ownerDocument.activeElement);
+  const keep = ctx.focusKeeper();
+  li.replaceChildren(...parts);
+  const back = at >= 0 ? li.querySelectorAll('.lint-cmd-word')[at] : null;
+  if (back) keep(back);
+}
 window.DASH_APP.panel({
   id: 'landed',
   title: 'Landed today',
@@ -131,7 +140,7 @@ window.DASH_APP.panel({
       // A changed card's row is drawn anew: its "Every step" drawn before (still in the panel) keeps it open.
       const was = Array.from(el.querySelectorAll('details.track-detail')).find((x) => x.dataset.card === c.card);
       if (c.track && (Array.isArray(c.track.records) || Array.isArray(c.track.detail))) parts.push(ctx.trackDetail(c.track, c.card, was, c.earlier, ctx.text.repoOf(c), c.repo));
-      li.replaceChildren(...parts);
+      redrawKeeping(li, parts, ctx);
     };
     const rows = (box, cs) => ctx.list(box, cs, keyOf, () => h('li', 'row'), fill);
     // The cards of one batch (batch: the cards that landed together, in one repo) are one landing: one row that

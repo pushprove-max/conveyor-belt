@@ -408,7 +408,14 @@
       ro.observe(head); ro.observe(body);
     }
     p.ctx = {
-      h, chip, icon, tip, unread, get retry() { return retryText(); }, restartButton: restartHere, faults: panelFaults, get machine() { return machineWord(); }, get answerer() { return answerer(); }, details, since, clock, when, stamp, dur, took, money, modelName, findings, survived, loopEnd, judged, reviewChip, verdictSaid, output, issueLink, depRef, list, post, fresh, motion, state: stateBlock, track, trackDetail, trackShell, earlierTip, testProgress, fixNow,
+      h, chip, icon, tip, unread,
+      // Call before a panel draws a part again; the function it returns puts the keyboard back on a name drawn anew
+      // (no scroll). Focus opens a lint command's tip, so a tip the reader had closed (Escape) is shut again.
+      focusKeeper: () => {
+        const open = !!app.tipAt && app.tipAt === doc.activeElement;
+        return (el) => { el.focus({ preventScroll: true }); if (!open) app.closeTip(); };
+      },
+      get retry() { return retryText(); }, restartButton: restartHere, faults: panelFaults, get machine() { return machineWord(); }, get answerer() { return answerer(); }, details, since, clock, when, stamp, dur, took, money, modelName, findings, survived, loopEnd, judged, reviewChip, verdictSaid, output, issueLink, depRef, list, post, fresh, motion, state: stateBlock, track, trackDetail, trackShell, earlierTip, testProgress, fixNow,
       param, params, pickRepo, project, now, tag, behind, setTab, restart, goTo, panelHref: (id) => panelHref(id), failure, failureLine, failureShort, twice, undoLine, text: findingText,
       pausedSaid, refusal, depPicked,
       // Whether the lists are sorted by project (the machine head's sort): a panel that orders a list itself keeps each

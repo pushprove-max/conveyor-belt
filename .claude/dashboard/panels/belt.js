@@ -72,16 +72,19 @@
   // "Every step" of the row's earlier card id, for a row that has none yet.
   function every(li, c, ctx, was) {
     const more = li.children[5], cur = more.firstChild || was;
-    // The places the keyboard can be: a fold, a step's bar.
-    const keys = 'summary, .tl-item';
+    // The places the keyboard can be: a fold, a step's bar, a lint command's name (its tip is open on the new name only if it was open).
+    const keys = 'summary, .tl-item, .lint-cmd-word';
     const at = more.firstChild ? Array.from(more.firstChild.querySelectorAll(keys)).indexOf(li.ownerDocument.activeElement) : -1;
+    const keep = ctx.focusKeeper();
     const t = c.track && typeof c.track === 'object' ? c.track : null;
     const drawn = cur && cur.querySelector(':scope > ol.timeline') ? cur : (cur && cur.held) || null;
     let det;
     if (cur && cur.open) { det = ctx.trackDetail(t, c.card, drawn || cur, c.earlier, ctx.text.repoOf(c), c.repo); det.open = true; }
     else { det = ctx.trackShell(t, c.card, c.earlier); det.held = drawn; }
     more.replaceChildren(det);
-    if (at >= 0 && det.querySelectorAll(keys)[at]) det.querySelectorAll(keys)[at].focus({ preventScroll: true });
+    const back = at >= 0 ? det.querySelectorAll(keys)[at] : null;
+    if (back && back.classList.contains('lint-cmd-word')) keep(back);
+    else if (back) back.focus({ preventScroll: true });
   }
 
   window.DASH_APP.panel({

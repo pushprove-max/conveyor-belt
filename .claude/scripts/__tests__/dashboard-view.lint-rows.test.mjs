@@ -99,6 +99,77 @@ test('an open Show command stays open when the card is drawn again', () => {
   assert.deepEqual(Array.from(again.querySelectorAll('.lint-cmd-show'), (x) => x.open), [false, true]);
 });
 
+// Bug it guards (#1367): a live update (the review ends) drew the card's timeline again and the keyboard fell off the
+// command name, which closed its tip. The focus returns to the same name in the new timeline, with its tip open.
+test('keyboard focus stays on a command name, and its tip stays open, when the card is drawn again', () => {
+  const { w, d, redraw } = shown([{ name: 'lint', state: 'done', sec: 5, at: at(10), why: REASON, lint: [
+    { n: 1, run: SHELL, result: 'pass', sec: 4, findings: 0 }, { n: 2, run: RUFF, result: 'pass', sec: 1, findings: 0 }] }]);
+  const old = d.querySelectorAll('.lint-cmd-word')[1];
+  old.focus();
+  const again = redraw('review 2');
+  const word = again.querySelectorAll('.lint-cmd-word')[1];
+  assert.notEqual(word, old, 'the name was drawn again');
+  assert.equal(w.document.activeElement, word, 'the keyboard is on the same name');
+  const box = w.document.getElementById('tip');
+  assert.ok(!box.hidden && box.textContent === RUFF, 'its tip is open');
+});
+
+// Bug it guards (#1367): the keyboard returning to the name fired focusin, which opened again a tip the reader had
+// closed with Escape. The focus returns and the tip stays shut.
+test('a tip closed with Escape stays shut when the card is drawn again', () => {
+  const { w, d, redraw } = shown([{ name: 'lint', state: 'done', sec: 5, at: at(10), why: REASON, lint: [{ n: 1, run: RUFF, result: 'pass', sec: 1, findings: 0 }] }]);
+  d.querySelector('.lint-cmd-word').focus();
+  w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape' }));
+  const box = w.document.getElementById('tip');
+  assert.equal(box.hidden, true, 'Escape closed the tip');
+  const word = redraw('review 2').querySelector('.lint-cmd-word');
+  assert.equal(w.document.activeElement, word, 'the keyboard is on the same name');
+  assert.equal(box.hidden, true, 'its tip is still shut');
+});
+
+// Bug it guards (#1367): the same in Landed, whose row is drawn again when its push state changes.
+test('in the Landed panel, a tip closed with Escape stays shut when the row is drawn again', () => {
+  const w = boot();
+  const data = full();
+  const card = data.panels.landed.data.cards[0];
+  card.pushed = false;
+  card.track = trackOf('++-++>', 'pushing', { records: [{ name: 'picked', state: 'done', sec: null, at: at(0) },
+    { name: 'lint', state: 'done', sec: 5, at: at(10), why: REASON, lint: [{ n: 1, run: RUFF, result: 'pass', sec: 1, findings: 0 }] }] });
+  deliver(w, data);
+  const row = () => panel(w, 'landed').querySelector(`li[data-key="sample/${card.card}"]`);
+  openEvery(w, row().querySelector('details.track-detail')).querySelector('.lint-cmd-word').focus();
+  w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape' }));
+  const box = w.document.getElementById('tip');
+  assert.equal(box.hidden, true, 'Escape closed the tip');
+  card.pushed = true;
+  next(w, data);
+  assert.equal(w.document.activeElement, row().querySelector('.lint-cmd-word'), 'the keyboard is on the same name');
+  assert.equal(box.hidden, true, 'its tip is still shut');
+});
+
+// Bug it guards (#1367): a landed card's row is drawn again when its push state changes, and the keyboard fell off the
+// command name, which closed its tip.
+test('keyboard focus stays on a command name in the Landed panel when the row is drawn again', () => {
+  const w = boot();
+  const data = full();
+  const card = data.panels.landed.data.cards[0];
+  card.pushed = false;
+  card.track = trackOf('++-++>', 'pushing', { records: [{ name: 'picked', state: 'done', sec: null, at: at(0) },
+    { name: 'lint', state: 'done', sec: 5, at: at(10), why: REASON, lint: [{ n: 1, run: SHELL, result: 'pass', sec: 4, findings: 0 }, { n: 2, run: RUFF, result: 'pass', sec: 1, findings: 0 }] }] });
+  deliver(w, data);
+  const row = () => panel(w, 'landed').querySelector(`li[data-key="sample/${card.card}"]`);
+  const d = openEvery(w, row().querySelector('details.track-detail'));
+  const old = d.querySelectorAll('.lint-cmd-word')[1];
+  old.focus();
+  card.pushed = true;
+  next(w, data);
+  const word = row().querySelectorAll('.lint-cmd-word')[1];
+  assert.notEqual(word, old, 'the name was drawn again');
+  assert.equal(w.document.activeElement, word, 'the keyboard is on the same name');
+  const box = w.document.getElementById('tip');
+  assert.ok(!box.hidden && box.textContent === RUFF, 'its tip is open');
+});
+
 // Bug it guards (#1366): a line written before the commands were recorded has none, and its reason is all there is: it
 // shows as before, as one sentence.
 test('a lint step with no commands shows its reason as before', () => {
