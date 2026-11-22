@@ -370,7 +370,7 @@ stackto() { # <card> <worktree> <claim()'s wait> <issue json>
 # 3 when a batch landed it, 4 when its own tests failed while it waited or it broke a batch's tests (card()'s trc
 # and sec say how), else 0. Each merge here (a clean three-way one, a union one, or the session's) sets parsecheck:
 # card() then checks that the merged files parse (parses()) before any test runs.
-settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to begin> <issue json>; sets card()'s caught, trc, sec, waitsec, behind and parsecheck
+settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to begin> <issue json>; sets card()'s caught, trc, sec, waitsec, behind and parsecheck; reads its ph
   local me=$BASHPID w waited='' ws wb old err t moved=0 away b bl bf bt bs bp out id mt cf tf ix docs dp onto stk
   ! jq -e '.away == true and (.to | type) == "number"' "$3.claim" >/dev/null 2>&1 || caught=''
   while :; do
@@ -468,8 +468,12 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
     [ "$old" != "$(git rev-parse "$onto" 2>/dev/null)" ] || return $moved
     # Stacked, it is reviewed again on the base. A stacked card that waits no more (that card landed, or failed its
     # tests) is not put back on the base it left: a change that no longer applies on main is brought there by a session.
+    # One that leaves its stack's base: its tests passed there with that card's change (tested()), which is no pass of
+    # its change alone (readysince()), so they run again on main before it lands (testedhere(), card()).
     if [ -n "$stk" ]; then moved=2; caught=''
-    elif [ "$old" = "$(jq -r .base "$3.stack" 2>/dev/null)" ]; then caught=''; fi
+    elif [ "$old" = "$(jq -r .base "$3.stack" 2>/dev/null)" ]; then caught=''
+      [ ! -e "$3.ready" ] || { jq -c 'del(.tested)' "$3.ready" > "$3.ready.new" && mv -f "$3.ready.new" "$3.ready"; } || rm -f "$3.ready"
+    fi
     # A card an ordered card went past is reviewed again on main as it is now, even when its patch applies there, and
     # even when that card landed before this claim.
     ! jq -e '.was == true' "$3.claim" >/dev/null 2>&1 || moved=2
@@ -510,6 +514,16 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
     if fastfit "$3" "$cf" "$onto" "$mt"; then
       [ ! -e "$3.ready" ] || { jq -c 'del(.tested)' "$3.ready" > "$3.ready.new" && mv -f "$3.ready.new" "$3.ready"; } || rm -f "$3.ready"
       echo "conveyor: card $1: the fast resolver merged its conflicts with main in $(printf '%s' "$cf" | grep -c .) file(s), with no fitting session; its tests run again on the merged files"
+      # The owner's yes to a lint policy change covers one policy diff (lintyes()), and no landing gate runs after this
+      # merge: a policy diff (lintpolicy()) that is not the one the gate let through (card()'s ph, cardready()) stops
+      # for the yes again, as there, keeping its hash.
+      if lintrule; then
+        { packget lint t && t=$(lintpolicy "$3" "$(git -C "$3" rev-parse HEAD)" "$t"); } || { block "$1" "$2" "$3" "lint: the engine could not read the lint policy files that the change changes, so nothing landed"; return 1; }
+        if [ -n "$t" ] && [ "${t%%$'\n'*}" != "${ph:-}" ]; then
+          jq -c --arg p "${t%%$'\n'*}" '{body, policy: $p}' <<<"$6" > "$3.body"
+          block "$1" "$2" "$3" "${LINTYES}it changes lint policy: $(tail -n +2 <<<"$t" | jq -Rrs 'split("\n") | map(select(. != "")) | join(", ")')" post; return 1
+        fi
+      fi
       parsecheck=1; rm -f "$3.base"; return $moved
     fi
     if [ -n "$caught" ]; then
@@ -820,9 +834,9 @@ batchpass() { # <card> <worktree> <units json> <cases> <the run's cards>
 # failure (lintleave(): by apart when it is the card, else unbatched), its landing gate dealing with it on main. A second half whose first half passed whole
 # is what just failed, so it is split with no run of its own (a single card is still run, for its output). A card red
 # alone on top of what passed is the one that breaks it: a card it took is told its exit, given that run's output
-# (<worktree>.test), and goes to its fix as if its own tests failed. Sets mates (the cards that passed, the card among
+# and coverage (<worktree>.test, .uncovered), and goes to its fix as if its own tests failed. Sets mates (the cards that passed, the card among
 # them, in order; none when no other card passed); the card's worktree is left as it was, the output of the run that
-# judged the card in <worktree>.test, and TEST_BATCH (for the selected of its test line: {cases: 0, kept} when what
+# judged the card in <worktree>.test (its coverage in .uncovered), and TEST_BATCH (for the selected of its test line: {cases: 0, kept} when what
 # judged it ran no case and kept that many passes; {kept} when it ran the rest with batchkeep()'s list, its log
 # saying what it ran; else empty).
 # A run reuses each card's passed tests (the owner, 2026-11-13, issue #346; batchkeep()): it does not run a case a card
@@ -855,7 +869,7 @@ batch() { # <card> <worktree> <the batch's cards, in order, the card among them>
     if [ -n "$lost" ]; then
       unbatch "${good[@]}" "${s[@]}" $(for t in "${todo[@]}"; do echo "${t#* * }"; done)
       git -C "$wt" reset -q --hard && git -C "$wt" apply --index "$wt.bpatch" || { norun "$wt" "the card's change could not be put back in its worktree after its batch's tests"; return 1; }
-      rm -rf "$wt.batchtest" "$wt.batchtestlog" "$wt.batchfirst"; echo "conveyor: card $c: its change no longer applied in its batch, so it is tested alone"; tests "$wt"; return
+      rm -rf "$wt.batchtest" "$wt.batchtestlog" "$wt.batchfirst" "$wt.batchuncovered"; echo "conveyor: card $c: its change no longer applied in its batch, so it is tested alone"; tests "$wt"; return
     fi
     [ ${#in[@]} != 0 ] || continue
     bt=''; TEST_REFUSED=''; lr=''
@@ -887,13 +901,14 @@ batch() { # <card> <worktree> <the batch's cards, in order, the card among them>
     for m in "${in[@]}"; do
       # The card's run's times go with its output (testrec()): a later part's run sets them again.
       if [ -n "$lr" ]; then lintleave "$c" "$wt" "$m"
-      elif [ "$m" = "$c" ]; then lrc=$rc; keeprun "$wt" "$wt.batchtest" "$wt.batchtestlog" "$wt.batchfirst"; bw=$TEST_WAIT br=$TEST_RUN bf=$TEST_FREE bz=$TEST_REFUSED bb=$bt
+      elif [ "$m" = "$c" ]; then lrc=$rc; keeprun "$wt" "$wt.batchtest" "$wt.batchtestlog" "$wt.batchfirst" "$wt.batchuncovered"; bw=$TEST_WAIT br=$TEST_RUN bf=$TEST_FREE bz=$TEST_REFUSED bb=$bt
       elif [ $rc != 0 ]; then
-        keeprun "$wt" "$CARDS/$m.test" "$CARDS/$m.testlog" "$CARDS/$m.first" && jq -c --argjson r "$rc" --argjson s "$t" '. + {fail: $r, sec: $s}' "$CARDS/$m.batch" > "$CARDS/$m.batch.new" && mv -f "$CARDS/$m.batch.new" "$CARDS/$m.batch"
+        keeprun "$wt" "$CARDS/$m.test" "$CARDS/$m.testlog" "$CARDS/$m.first" "$CARDS/$m.uncovered" && jq -c --argjson r "$rc" --argjson s "$t" '. + {fail: $r, sec: $s}' "$CARDS/$m.batch" > "$CARDS/$m.batch.new" && mv -f "$CARDS/$m.batch.new" "$CARDS/$m.batch"
       fi
     done
   done
   git -C "$wt" reset -q --hard && git -C "$wt" apply --index "$wt.bpatch" || { unbatch "${good[@]}"; norun "$wt" "the card's change could not be put back in its worktree after its batch's tests"; return 1; }
+  [ ! -e "$wt.batchtest" ] || { rm -f "$wt.uncovered"; [ ! -e "$wt.batchuncovered" ] || mv -f "$wt.batchuncovered" "$wt.uncovered"; }
   rm -f "$wt.first"; [ ! -e "$wt.batchtest" ] || { rm -rf "$wt.testlog"; mv -f "$wt.batchtest" "$wt.test"; [ ! -d "$wt.batchtestlog" ] || mv -f "$wt.batchtestlog" "$wt.testlog"; [ ! -e "$wt.batchfirst" ] || mv -f "$wt.batchfirst" "$wt.first"; TEST_WAIT=$bw TEST_RUN=$br TEST_FREE=$bf TEST_REFUSED=$bz TEST_BATCH=$bb; }
   [ ${#good[@]} -lt 2 ] && [ "${good[0]:-$c}" = "$c" ] || mates=("${good[@]}")
   [ -z "$apart" ] || return 0

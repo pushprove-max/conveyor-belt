@@ -150,3 +150,29 @@ t_lintyesretryoff() {
   yeslanded && [ "$(yesdid)" = build ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] \
     || fail "the kept policy change did not land with no build and no review after Lint check was turned off: $(yesdid); $(yessteps)"
 }
+
+# Bug (R72): the yes covers one policy diff, checked only at the landing gate (cardready()). An approved retry's
+# change sets .lintrc to strict while main sets the same line to main; at its landing settle() merges the two with the
+# fast resolver (its judge a stub here) and no gate runs after it, so the merged policy diff, which the owner never
+# saw, landed on the old yes. card()'s ph is the hash the gate let through. The card stops again for the yes, its
+# kept body holding the merged diff's hash.
+t_lintyesfastfit() {
+  setup "[$(issue 7 2026-01-01)]"
+  tune '.lint = {commands: [{files: ["*.txt"], run: "true"}], policy: [".lintrc"]}'
+  fx_wt 'echo strict > .lintrc' .lintrc old
+  landed 7 | jq -c '.card = "c7" | .step = "picked"' >> "$ST/cards.jsonl"
+  echo main > "$R/.lintrc" && git -C "$R" commit -qam "main sets .lintrc" || fail "main's change of .lintrc"
+  fx_in 'cd "$R" || exit 9; caught="" waitsec=0 behind="[]" parsecheck=""
+    packget lint l && ph=$(lintpolicy "$FXWT" "$(git -C "$FXWT" rev-parse HEAD)" "$l") && ph=$(head -n 1 <<<"$ph") && [ -n "$ph" ] || exit 7
+    echo "approved: $ph"
+    judgeon() { echo true; }
+    judgecall() { jq -cn "{\"1\": \"main\nstrict\"}" > "$1.judge"; } # judgecall: the stub judge merges both sides
+    settle c7 7 "$FXWT" "Build the issue." land "$(issue 7 2026-01-01)"; echo "settle: $?"'
+  local ph; ph=$(sed -n 's/^approved: //p' "$T/$CASE/run.out")
+  grep -q '^conveyor: card c7: the fast resolver merged its conflicts with main' "$T/$CASE/run.out" \
+    || fail "the fast resolver did not merge the card's .lintrc with main's: exit $RC: $(cat "$T/$CASE/run.out")"
+  [ "$(tail -n 1 "$T/$CASE/run.out")" = 'settle: 1' ] && [ "$(st 'select(.card == "c7" and .step == "blocked") | .reason')" = "lint policy: needs Dana's yes: it changes lint policy: .lintrc" ] \
+    || fail "the merged policy change did not stop for Dana's yes: $(tail -n 1 "$T/$CASE/run.out"), $(st 'select(.card == "c7") | "\(.step) \(.reason)"' | paste -sd,)"
+  jq -e --arg h "$ph" '(.policy | type) == "string" and .policy != $h' "$ST/kept/c7/c7.body" > /dev/null \
+    || fail "the stop's kept body does not hold the merged diff's hash, apart from the approved $ph: $(cat "$ST/kept/c7/c7.body" 2>&1)"
+}

@@ -131,6 +131,23 @@ t_heldtestpass() { heldpass test; }
 # Main moved after the card's tests ended, before its landing.
 t_heldlandpass() { heldpass land; }
 
+# Bug (R77): #8, stacked on #7 (its worktree on main plus #7's change), passed its tests there; #7 then failed its own
+# and holds nothing, so settle() fits #8 onto main alone, where its patch (line 10) applies as it is. Its pass on the
+# stack's base still counted as its own there (testedhere()), so card() ran no test and #8 landed untested on main
+# alone. Its tests now run again before it lands.
+t_stackbasepass() {
+  local rc
+  gwcards 7 8; gwchg 7 1s/.*/seven/
+  (cd "$CARDS/c8-8" && sed -i 1s/.*/seven/ a.txt && git commit -qam "main plus #7's change" && sed -i 10s/.*/eight/ a.txt && git add -A) || fail "#8's change on the stack's base"
+  jq -cn --arg b "$(git -C "$CARDS/c8-8" rev-parse HEAD)" '{on: "c7-7", base: $b, id: "x", restacks: 0}' > "$CARDS/c8-8.stack"
+  echo '{"issue":8}' > "$CARDS/c8-8.ready"; gweng tested "$CARDS/c8-8"
+  gweng testedhere "$CARDS/c8-8" || fail "#8's pass on the stack's base was not recorded: $(cat "$CARDS/c8-8.ready")"
+  gweng settle c8-8 8 "$CARDS/c8-8" '' land '{}'; rc=$?
+  [ $rc = 0 ] && [ "$(git -C "$CARDS/c8-8" rev-parse HEAD)" = "$(git -C "$R" rev-parse main)" ] && [ "$(git -C "$CARDS/c8-8" show :a.txt | sed -n '1p;10p' | paste -sd' ')" = '1 eight' ] \
+    || fail "settle() did not fit #8 alone onto main: exit $rc, $(git -C "$CARDS/c8-8" show :a.txt | sed -n '1p;10p' | paste -sd' ')"
+  ! gweng testedhere "$CARDS/c8-8" || fail "#8, moved off its stack's base onto main, kept the pass it had with #7's change, so it lands untested: $(cat "$CARDS/c8-8.ready")"
+}
+
 # No card is passed forever: #7, whose claim has given way 3 times already, keeps its turn through its rebase (as
 # before give-ways) while #8 waits on it.
 t_givewaykeep() {

@@ -424,3 +424,23 @@ t_batchlintrunner() {
   lintleft 7
   [ "$(sed -n '1p;10p;$p' "$R/a.txt" | tr '\n' ' ')" = "one nine eight " ] || fail "main does not hold #8's and #9's changes alone: $(cat "$R/a.txt")"
 }
+
+# Bug (R136): a batch's test line carried the coverage of another part's run. #7's batch is #7 (7.txt) and #8 (8.txt);
+# tests() is a stand-in that writes each run's coverage (<worktree>.uncovered) naming the files of the run's change,
+# and fails on a change that holds 8.txt. The batch is red and split: #7's part runs first and passes, then #8's on top
+# of it fails. #7's test line (testrec()) named both files, the coverage of #8's later run; #8's, told its failure,
+# had none. Each now carries its own run's coverage; and a test step that ran nothing (norun()) carries none.
+t_batchcoverage() {
+  bmain; bwt 7 'echo seven > 7.txt' 200 true; bwt 8 'echo eight > 8.txt' 100
+  echo '{"by":"c7-7","pid":1}' > "$CARDS/c8-8.batch"
+  bfx 'tests() { git -C "$1" diff --cached --name-only | jq -Rsc "split(\"\n\") | map(select(. != \"\")) | {uncovered: map({file: ., lines: [1]}), count: length, checked: length}" > "$1.uncovered"
+      echo ran > "$1.test"; TEST_WAIT="" TEST_RUN="" TEST_FREE=""; git -C "$1" diff --cached --quiet -- 8.txt; } # tests: a stand-in that writes the run'"'"'s coverage
+    batch c7-7 "$W" c7-7 c8-8; brc=$?; echo "batch: $brc apart=$apart mates=${mates[*]}"
+    echo "lead: $(testrec "$W" "$brc" 0 | jq -c "[.coverage.uncovered[]?.file]")"
+    echo "taken: $(testrec "$CARDS/c8-8" 1 0 | jq -c "[.coverage.uncovered[]?.file]")"
+    norun "$W" "no run"; echo "norun: $(testrec "$W" 1 0 | jq -c .coverage)"'
+  [ "$(bruns)" = 'c7-7 c8-8,c7-7,c7-7 c8-8' ] && bout 'batch: 0 apart= mates=' || fail "the batch was not split, #7's part first, with #7 passing: $(cat "$T/$CASE/run.out")"
+  bout 'lead: ["7.txt"]' || fail "#7's test line does not carry the coverage of its own run (7.txt): $(grep '^lead' "$T/$CASE/run.out")"
+  bout 'taken: ["7.txt","8.txt"]' || fail "#8's test line does not carry the coverage of the run that judged it: $(grep '^taken' "$T/$CASE/run.out")"
+  bout 'norun: null' || fail "a test step that ran nothing kept the coverage of the run before: $(grep '^norun' "$T/$CASE/run.out")"
+}

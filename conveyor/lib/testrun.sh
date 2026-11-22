@@ -156,11 +156,11 @@ testfails() { # <test output file> <exit> [the pack's field of the run's command
 RECJQ='def recs($rec; $log): [$rec[] | objects | select((.case | type) == "string" and IN(.file; $log.files[]) and IN(.result; "ok", "fail"))] as $rd | reduce ([$rd[].file] | unique)[] as $f (.; .oks[$f] = [$rd[] | select(.file == $f and .result == "ok") | .case] | [.files[].cases[]] as $tc | .files |= map(if .file == $f then .cases = ([$rd[] | select(.file == $f and .result == "fail") | .case] | unique | map(. as $c | {name: $c, line: ([$tc[] | select(.name == $c) | .line][0] // "FAIL [\($c)]: its record says it failed")})) else . end));'
 
 # A test output that is no run's (the loop's own words for why nothing ran): the logs and times of the run before are not its.
-norun() { rm -rf "$1.testlog" "$1.first" "$1.testlist" "$1.noresult"; TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; printf '%s\n' "$2" > "$1.test"; } # <worktree> <text>
-# A run's output and the logs it wrote, copied as one: what failed is read from both (testfails()); and its first
-# run's record when it went again (tests()).
-keeprun() { # <worktree> <output file to> <log folder to> <first run's record to>
-  rm -rf "$3" "$4"; cp -f "$1.test" "$2" && { [ ! -d "$1.testlog" ] || cp -R "$1.testlog" "$3"; } && { [ ! -e "$1.first" ] || cp -f "$1.first" "$4"; }
+norun() { rm -rf "$1.testlog" "$1.first" "$1.testlist" "$1.noresult" "$1.uncovered"; TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; printf '%s\n' "$2" > "$1.test"; } # <worktree> <text>
+# A run's output and the logs it wrote, copied as one: what failed is read from both (testfails()); its first run's
+# record when it went again (tests()); and its coverage (<worktree>.uncovered, testrec()), which a later run writes over.
+keeprun() { # <worktree> <output file to> <log folder to> <first run's record to> <coverage to>
+  rm -rf "$3" "$4" "$5"; cp -f "$1.test" "$2" && { [ ! -d "$1.testlog" ] || cp -R "$1.testlog" "$3"; } && { [ ! -e "$1.first" ] || cp -f "$1.first" "$4"; } && { [ ! -e "$1.uncovered" ] || cp -f "$1.uncovered" "$5"; }
 }
 
 # The fields of a test record of a run (README.md, The test step): sec (all the step took), usage (none), tests
