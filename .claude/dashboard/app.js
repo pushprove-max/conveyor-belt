@@ -395,7 +395,7 @@
       if (rest.join() !== l.order.join()) flip(() => { l.order = rest; applyLayout(); });
     });
     el.addEventListener('drop', (e) => e.preventDefault());
-    const p = { mod, el, body, count, tools, foot, rowsNote, showAll, grip, json: undefined, state: 'loading', renders: 0, nums: new Map(), natural: 0 };
+    const p = { mod, el, body, count, tools, foot, rowsNote, showAll, grip, json: undefined, pick: '', state: 'loading', renders: 0, nums: new Map(), natural: 0 };
     showAll.addEventListener('click', () => {
       const all = showAll.textContent === 'Show all';
       setLength(p, all ? 'all' : mod.rows, all ? `${title} shows all its rows` : `${title} shows its first ${mod.rows} rows`);
@@ -414,6 +414,9 @@
       // Whether the lists are sorted by project (the machine head's sort): a panel that orders a list itself keeps each
       // project's rows together then.
       sorted: projectSort,
+      // picking(): true while this panel shows the project choice, not its data (Show at every project, a panel that
+      // holds one project): a panel's own draw (a timer, a reply that came back) draws nothing then.
+      picking: () => app.needsPick(mod),
       // whole: whether this draw is to draw the panel whole (a new time format, project or model name), not only what
       // changed in its part: a panel that keeps its rows as they were draws each again then.
       get whole() { return p.whole === true; },

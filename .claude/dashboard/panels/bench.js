@@ -471,7 +471,7 @@
   ['bench-score', 'bench-versions', 'bench-run', 'bench-plan'].forEach((name) => Object.assign(P, window.DASH_APP.use(name, K)));
   function draw() {
     const el = B.el;
-    if (!el) return;
+    if (!el || B.ctx.picking()) return;  // Show at every project: the page shows the project choice, a reply that came back draws no project over it
     if (B.d.repo === null) { el.replaceChildren(B.ctx.state('empty', 'No benchmarks to show', 'Conveyor did not run on this project on the build machine yet. Pick a project under Show, above the tabs.')); return; }
     readHist(false);
     const a = document.activeElement && el.contains(document.activeElement) && document.activeElement.dataset ? document.activeElement.dataset.act : null;

@@ -78,6 +78,7 @@ test('Rules: the done line\'s Undo kept after another project is picked does not
   d.panels.machine.data.repos = ['sample', 'widgetshop'];
   Object.assign(d.panels.rules.data, { repos: ['sample', 'widgetshop'], others: { widgetshop: { ...clone(d.panels.rules.data), repo: 'widgetshop', queue: [] } } });
   deliver(w, d);
+  pickProject(w, 'sample');
   assert.deepEqual(await sent(w, () => act(rulesP(w), 'rule-P2').click()), [{ action: 'rules', args: ['P2=on'], repo: 'sample' }]);
   pickProject(w, 'widgetshop'); // the one project picker, in the machine head (issue 408)
   assert.deepEqual(await sent(w, () => act(rulesP(w).querySelector('.rules-note'), 'undo').click()), [], 'nothing is sent to sample');
@@ -92,6 +93,7 @@ test('Rules: the done line\'s Undo of a guard change kept after another project 
   d.panels.machine.data.repos = ['sample', 'widgetshop'];
   Object.assign(d.panels.rules.data, { repos: ['sample', 'widgetshop'], others: { widgetshop: { ...clone(d.panels.rules.data), repo: 'widgetshop' } } });
   deliver(w, d);
+  pickProject(w, 'sample');
   w.reply = record({ guard: 95 });
   assert.deepEqual(await sent(w, () => act(rulesP(w), 'guard-95').click()), [{ action: 'guard', args: ['95'], repo: 'sample' }]);
   pickProject(w, 'widgetshop');

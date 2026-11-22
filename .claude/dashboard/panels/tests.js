@@ -637,12 +637,17 @@
     return el.childNodes.length ? el : null;
   }
   const anyIssueUrl = (files) => files.flatMap((x) => list(x.runs)).map((r) => obj(r) && r.url).find((u) => typeof u === 'string' && ISSUE_URL.test(u)) || null;
+  // The action and file of the control that has the focus in one of the panels, or null.
+  function focusedAction(els) {
+    const a = document.activeElement && els.some((x) => x.contains(document.activeElement)) && document.activeElement.dataset ? document.activeElement : null;
+    return a && a.dataset.act ? { act: a.dataset.act, file: (a.closest('[data-file]') || { dataset: {} }).dataset.file } : null;
+  }
   // Both panels, each that is drawn (only: tests or set, the one panel); then the control focused before, or the one
   // asked for (S.keep), has the focus again.
   function draw(only) {
+    if (S.ctx.picking()) return;  // Show at every project: the page shows the project choice, a reply that came back draws no project over it
     const els = [S.el, S.setEl].filter(Boolean);
-    const a = document.activeElement && els.some((x) => x.contains(document.activeElement)) && document.activeElement.dataset ? document.activeElement : null;
-    const keep = S.keep || (a && a.dataset.act ? { act: a.dataset.act, file: (a.closest('[data-file]') || { dataset: {} }).dataset.file } : null);
+    const keep = S.keep || focusedAction(els);
     S.keep = null;
     if (S.el && only !== 'set') drawTests();
     if (S.setEl && only !== 'tests') drawSet();

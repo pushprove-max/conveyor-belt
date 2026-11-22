@@ -398,6 +398,7 @@ test('Rules: the Judge row shows each project\'s judge (on or off, CLI, model, e
   Object.assign(d.panels.rules.data, { repos: ['sample', 'widgetshop'], others: { widgetshop: { ...clone(d.panels.rules.data), repo: 'widgetshop', control: wctl, modelSettings: wmodels } } });
   d.panels.machine.data.repos = ['sample', 'widgetshop'];
   deliver(w, d);
+  pickProject(w, 'sample');
   const row = () => ruled(w).querySelector('[data-rule="judge"]'), kindRow = () => ruled(w).querySelector('[data-rule="judge-always"]');
   const shown = () => ({
     on: ['judge-on', 'judge-off'].map((a) => act(row(), a).getAttribute('aria-pressed')).join(' '),
@@ -645,6 +646,7 @@ test('Rules: a model picked and not saved for one project is not shown for anoth
   Object.assign(d.panels.rules.data, { repos: ['sample', 'widgetshop'], others: { widgetshop: other } });
   d.panels.machine.data.repos = ['sample', 'widgetshop'];
   deliver(w, d);
+  pickProject(w, 'sample');
   const model = () => act(rulesP(w), 'builder-model');
   model().value = 'claude-haiku-5-5'; model().dispatchEvent(new w.Event('change'));
   pickProject(w, 'widgetshop');
@@ -736,6 +738,7 @@ test('Rules: a saved setting keeps its new value through picking another project
   const pick = (repo) => pickProject(w, repo);
   const judge = () => ['judge-on', 'judge-off'].map((a) => act(rulesP(w), a).getAttribute('aria-pressed')).join(' ');
   deliver(w, two());
+  pickProject(w, 'sample');
   let answer;
   w.reply = { ...record({}), text: () => new Promise((r) => { answer = r; }) };
   act(rulesP(w), 'judge-on').click();

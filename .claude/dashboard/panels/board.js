@@ -45,8 +45,8 @@
 // (only when a pack names checks.progress: each record's {repo, error}, or its run with repo, counts, done, all and leftSec;
 // with repo null too, when the Board shows those runs under "No loop to steer"), areaPrefix, repos (every project on
 // the host) and others ({repo: the same part} of every other project)}. With more than one project the machine head's
-// Show picks the one shown (?project=, and ?repo= the one shown last when Show is every project), and the heading names
-// it ("Board: sample"); every change names it. One row filters every column by number or title,
+// Show picks the one shown (?project=, with ?repo=; with Show at every project the Board asks for a project), and the
+// heading names it ("Board: sample"); every change names it. One row filters every column by number or title,
 // priority, area and label and sorts it by priority, number or time in the column, the choices but the text kept in the
 // address too; a column the filter empties says so, with Clear. Landed today shows its newest five, then "Show all (N)".
 // Its one part is drawn as three panels of the Control tab (PANELS): Loop (the control bar), Push landed and full test
@@ -511,6 +511,7 @@
   const PANELS = [[LOOP, 'Loop'], [PUSH, 'Push landed and full test suite'], [PART, 'Board']];
   // Draws the tab's panels (only: the one panel with that id), each in the place the page gave it (S.at).
   function draw(only) {
+    if (S.ctx.picking()) return;  // Show at every project: the page shows the project choice, a timer or a reply draws no project over it
     const h = S.ctx.h, motion = S.ctx.motion(), at = (id) => (!only || only === id ? elOf(id) : null);
     const top = at(LOOP), pushes = at(PUSH), el = at(PART);
     // No record steered, and another record's check run to show: the empty Board, then the runs (in Push landed and

@@ -331,6 +331,7 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .state { display: grid; justify-items: center; gap: var(--sp-1); padding: var(--sp-4) var(--sp-2); text-align: center; }
 .state .ico { width: 28px; height: 28px; color: var(--ok); }
 .state-error .ico { color: var(--bad); }
+.project-pick { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--sp-2); margin-top: var(--sp-2); }
 .state-title { font-weight: 700; }
 .state-detail { font-size: var(--fs-sm); color: var(--muted); overflow-wrap: anywhere; }
 /* A panel's own "Restart the Board's feed", next to the text that names it, with the host's answer beside it. */

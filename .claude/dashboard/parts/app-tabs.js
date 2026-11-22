@@ -31,8 +31,8 @@
       window.history.replaceState(window.history.state, '', u.toString());
     } catch { /* a page opened from a file keeps the choice for this view only */ }
   }
-  // A project picked from a panel (Projects and Foremen's "open its Board") is picked in the machine head's one
-  // picker, which every tab obeys: there is no other.
+  // A project picked from a panel (Projects and Foremen's "open its Board") is set as the machine head's Show sets it,
+  // which every tab obeys. The tabs that hold one project also offer the choice (pickBlock), with Show at every project.
   function pickRepo(repo) { setProject(repo); }
   // A part that holds every project on the host ({repo, ..., repos, others: {repo: part}}, as the Board's and the
   // Rules part are): the part of the project the address picks (?repo=), else the part itself (host.json's main).
@@ -46,9 +46,9 @@
   }
   // ---- every project of the machine in one list: the filter, the sort and the tag ----
   // The machine head's filter (?project=) shows one project only, and its sort (?psort=1) puts each project's rows
-  // together, on every panel that lists rows of more than one project (a module with projects: true). The Board and
-  // the Rules tab show one project at a time already: the filter picks theirs (setProject's ?repo= with it), and with
-  // every project shown they keep the one shown last, their heading naming it (ctx.title).
+  // together, on every panel that lists rows of more than one project (a module with projects: true). The Board, the
+  // Rules, the Tests and the Benchmarks hold one project at a time: the filter picks theirs (setProject's ?repo= with
+  // it), and with every project shown they show a choice of project (pickBlock) and no project's data.
   // The host's projects, in its order: the repos of the part the machine head is drawn from (head.js names it).
   const repoNames = () => { const m = app.last && app.last.panels && app.headMod && app.headMod.machine && app.last.panels[app.headMod.machine.part]; return m && m.data && Array.isArray(m.data.repos) ? m.data.repos.filter((r) => typeof r === 'string') : []; };
   const projectOnly = () => { const p = param('project'); return p && repoNames().includes(p) ? p : null; };
@@ -131,6 +131,35 @@
   function shownData(mod, data) {
     const repo = projectOnly(), sort = projectSort();
     return mod.projects === true && (repo || sort) ? byProject(data, repo, sort) : data;
+  }
+  // A panel that holds one project at a time: one off Overview that does not list every project's rows. With more than
+  // one project on the host and Show at every project, it shows pickBlock in place of its data.
+  const holdsOne = (mod) => tabOf(mod.id) !== 'overview' && mod.projects !== true;
+  const needsPick = (mod) => holdsOne(mod) && !projectOnly() && repoNames().length > 1;
+  // The project choice: the first such panel of its tab that the layout shows names the tab and has a button for each
+  // project (the same filter as the machine head's Show); each other one says where the choice is. A hidden panel
+  // does not count, so the choice is never in a panel the owner hid (change() draws the panels again after a layout change).
+  function pickFirst(mod) {
+    const l = app.layouts[tabOf(mod.id)];
+    return l.order.find((id) => !l.hidden.includes(id) && holdsOne(modules.get(id))) === mod.id;
+  }
+  // What pickBlock(mod) draws, as one string: '' when the panel shows its data. A panel builds the choice again only when
+  // this changes, so a snapshot that keeps the project list leaves the buttons, and the focus on one, as they were; a
+  // change to it draws a panel whose own part did not change (a project joined or left).
+  const pickKey = (mod) => (needsPick(mod) ? JSON.stringify([pickFirst(mod), repoNames()]) : '');
+  function pickBlock(mod) {
+    const first = pickFirst(mod);
+    if (!first) return stateBlock('empty', 'Pick a project to see this panel', 'The choice is at the top of this tab.');
+    const el = stateBlock('empty', `${TABS.find((x) => x[0] === tabOf(mod.id))[1]} holds one project's settings`, 'Pick a project to see them.'), row = h('div', 'project-pick');
+    row.setAttribute('role', 'group'); row.setAttribute('aria-label', 'Pick a project');
+    repoNames().forEach((r) => {
+      const b = h('button', 'btn btn-quiet', r);
+      b.dataset.act = 'pick-project'; b.dataset.project = r;
+      b.addEventListener('click', () => setProject(r));
+      row.append(b);
+    });
+    el.append(row);
+    return el;
   }
   function redrawAll() {
     panels.forEach((p) => { p.json = undefined; });
@@ -302,7 +331,7 @@
     app.bind(bindNames);
     return { params, redrawAll, param, projectOnly, tip, histDue, olderShown, readHistory, placeTip, attention,
       setTab, pickRepo, project, projectSort, tag, behind, tool, skeleton, machineWord, answerer, retryText,
-      restartHere, panelFaults, details, unread, stateBlock, withOlder, shownData, remote, faultsChanged, setProject,
+      restartHere, panelFaults, details, unread, stateBlock, withOlder, shownData, needsPick, pickKey, pickBlock, remote, faultsChanged, setProject,
       setProjectSort, closeTip, tabFromAddress, address, wireTips, joined,
       get histVer() { return histVer; } };
   });

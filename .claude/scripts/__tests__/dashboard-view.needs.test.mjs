@@ -306,9 +306,10 @@ test('the Board and Rules: Undo pressed after another project is picked goes to 
     return d;
   };
   // The one project picker, Show in the machine head (issue 408).
-  const pick = (w) => pickProject(w, 'widgetshop');
+  const pick = (w) => pickProject(w, 'widgetshop'), pick0 = (w) => pickProject(w, 'sample');
   const w = boot({ tab: 'control', list: ['machine', 'board'] });
   deliver(w, two());
+  pick0(w);
   act(bcard(w, 21), 'hold').click();
   await settle();
   w.posts.splice(0);
@@ -318,6 +319,7 @@ test('the Board and Rules: Undo pressed after another project is picked goes to 
   assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'release', args: ['21'], repo: 'sample' } }]);
   const r = boot({ tab: 'rules', list: ['machine', 'rules'] });
   deliver(r, two());
+  pick0(r);
   act(rulesP(r), 'judge-on').click();
   await settle();
   r.posts.splice(0);

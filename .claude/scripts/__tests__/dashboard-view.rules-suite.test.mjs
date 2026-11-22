@@ -258,6 +258,7 @@ test('Rules: Check the box is on for another project picked while a login retry 
   };
   await devboxShown(w, false);
   next(w, two('2026-11-22T00:00:00Z'));
+  pickProject(w, 'sample');  // with two projects and Show at every project, the Rules tab asks for a project (issue 1342)
   await settle();
   w.posts.length = 0;
   let answer = null;

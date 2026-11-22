@@ -123,7 +123,7 @@ test('Needs you: the models with no price show as one line that counts them and 
   assert.equal(group.querySelectorAll('li').length, 1, 'one line, not one a model');
   const row = group.querySelector('li[data-key="prices:widgetshop:claude-new-9,m"]');
   assert.equal(row.querySelector('.row-main').textContent, '2 models have no price, so the Board cannot show what they cost.');
-  assert.match(row.querySelector('a[data-act="prices-see"]').getAttribute('href'), /\?tab=rules&repo=widgetshop#panel-rules-prices$/);
+  assert.match(row.querySelector('a[data-act="prices-see"]').getAttribute('href'), /\?tab=rules&project=widgetshop&repo=widgetshop#panel-rules-prices$/);
   data.panels.needs.data.prices = [{ repo: 'widgetshop', models: [] }];
   next(w, data);
   assert.equal(count(), with1 - 1, 'it is counted with the rest until the prices are added');
@@ -132,7 +132,7 @@ test('Needs you: the models with no price show as one line that counts them and 
   next(w, data);
   tabBtn(w, 'rules').click();
   await settle();
-  assert.equal(panel(w, 'rules').querySelector('.panel-title').textContent, 'Rules: sample', 'the Rules tab is drawn for sample first');
+  assert.equal(panel(w, 'rules').querySelector('.panel-title').textContent, 'Rules', 'the Rules tab asks for a project first');
   tabBtn(w, 'overview').click();
   panel(w, 'needs').querySelector('a[data-act="prices-see"]').click();
   await settle();

@@ -10,13 +10,13 @@
     faultsChanged, goLogin, h, hideable, histDue, icon, idsOf, issueLink, lay, modules, money, motion, namesKey, now,
     num, olderShown, panels, param, params, parse, partOf, pausedSaid, post, project, projectOnly, projectSort,
     readHistory, refusal, remote, reset, restartHere, retitle, retryText, say, setProject, setProjectSort, setTab,
-    shownData, since, stamp, stateBlock, tabOf, tip, toggle, undoLine, unread, when, withOlder;
+    pickBlock, pickKey, shownData, since, stamp, stateBlock, tabOf, tip, toggle, undoLine, unread, when, withOlder;
   const bindNames = () => ({ ALIVE_MS, CLOCKS, DATES, DENSITIES, NOTHING, RETRY_MS, STALE_MS, TABS, THEMES, ago, answerer,
     arrange, arrangeSoon, asks, attention, byId, change, chip, closeTip, counter, depPicked, depRef, details, doc,
     drawTabs, faultsChanged, goLogin, h, hideable, histDue, icon, idsOf, issueLink, lay, modules, money, motion,
     namesKey, now, num, olderShown, panels, param, params, parse, partOf, pausedSaid, post, project, projectOnly,
     projectSort, readHistory, refusal, remote, reset, restartHere, retitle, retryText, say, setProject,
-    setProjectSort, setTab, shownData, since, stamp, stateBlock, tabOf, tip, toggle, undoLine, unread, when,
+    setProjectSort, setTab, pickBlock, pickKey, shownData, since, stamp, stateBlock, tabOf, tip, toggle, undoLine, unread, when,
     withOlder } = app);
   // True when panel p was drawn last from this same part: a panel with same() is then told it came again (draw).
   function drawnFrom(p, part) {
@@ -26,8 +26,9 @@
     if (typeof p.mod.older === 'function' && histDue() && olderShown()) readHistory();
     const older = typeof p.mod.older === 'function' && p.hist !== app.histVer;
     p.hist = app.histVer;
-    // The model names (modelName) are part of what a panel shows: a new alias or name draws it again.
-    const names = namesKey(), json = JSON.stringify(part === undefined ? null : part) + names;
+    // The model names (modelName) and the project choice (pickKey: another part's project list decides it) are part of
+    // what a panel shows: a new alias or name, or a choice that changed, draws it again, whole.
+    const names = namesKey() + pickKey(p.mod), json = JSON.stringify(part === undefined ? null : part) + names;
     if (p.json === json && !older) {
       if (p.state === 'ready' && !p.note && typeof p.mod.same === 'function') {
         try { p.mod.same(p.body, shownData(p.mod, part.data), p.ctx); } catch { /* the next part that differs draws the panel whole */ }
@@ -78,11 +79,27 @@
     p.el.dataset.state = state;
     if (p.mod.id !== 'health') faultsChanged();
   }
+  // The project choice of panel p, built once for each pickKey (see drawBody); the panel's state is then 'empty'.
+  function drawPick(p, pick) {
+    if (p.pick !== pick) {
+      p.pick = '';
+      p.body.replaceChildren(pickBlock(p.mod)); p.ctx.headActs(); p.ctx.title(null);
+      p.count.textContent = ''; p.count.hidden = true;
+      p.pick = pick;
+    }
+    return 'empty';
+  }
   // Draws panel p's body for its part and what is wrong with it (partFault); gives back the state it is drawn in: the
   // state 'error' when the panel threw.
   function drawBody(p, part, { state, message, raw }) {
     const mod = p.mod;
     try {
+      // A panel that holds one project, with every project shown: the project choice, no project's data. Its state is
+      // 'empty', so the next draw of a project builds it whole. The choice is built once for each pickKey: built again
+      // for each new snapshot (its read time differs), it would take the keyboard focus off the button that has it.
+      const pick = pickKey(mod);
+      if (state === 'ready' && pick) return drawPick(p, pick);
+      p.pick = '';
       const data = state === 'ready' ? shownData(mod, withOlder(mod, part.data)) : null;
       if (state === 'ready' && mod.isEmpty(data)) state = 'empty';
       if (state !== 'ready' || p.state !== 'ready') { p.body.replaceChildren(); p.ctx.headActs(); }
@@ -393,8 +410,13 @@
     title();
     if (doc.hidden) return;
     if (known) {
-      const ids = idsOf(app.tab).filter((id) => partOf(id) === msg.id);
-      if (ids.length) { ids.forEach((id) => draw(panels.get(id), msg.part)); arrangeSoon(); }
+      // A panel that holds one project shows the project choice or its data by the project list, which is the machine
+      // part's: a part that came also looks again at each panel that shows the choice, or has to now, with the part that
+      // panel has (draw leaves one whose part and choice did not change as it is). A second project that joins, or all
+      // but one that leave, with the panel's own part sent before, changes the panel the same.
+      const watch = (id) => { const p = panels.get(id); return Boolean(p.pick || pickKey(p.mod)); };
+      const ids = idsOf(app.tab).filter((id) => partOf(id) === msg.id || watch(id));
+      if (ids.length) { ids.forEach((id) => draw(panels.get(id), app.last.panels[partOf(id)])); arrangeSoon(); }
       headSoon();
     }
     status();

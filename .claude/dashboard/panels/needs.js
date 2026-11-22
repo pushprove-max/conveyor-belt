@@ -391,10 +391,10 @@ window.DASH_APP.panel({
       const n = x.models.length;
       head.append(h('span', 'title', `${n} ${n === 1 ? 'model has' : 'models have'} no price, so the Board cannot show what ${n === 1 ? 'it costs' : 'they cost'}.`));
       const a = h('a', 'needs-prices-link', 'View in Model prices');
-      // The Rules tab shows one project (?repo=): the link names this row's, and the click picks it in the head's
+      // The Rules tab shows one project (?project= and ?repo=): the link names this row's, and the click picks it in the head's
       // picker (ctx.pickRepo, as Projects' "open its Board" does), which draws every panel again, so the Rules tab drawn
       // before for another project shows this one's list.
-      a.href = ctx.panelHref('rules-prices').replace('#', `&repo=${encodeURIComponent(x.repo)}#`); a.dataset.act = 'prices-see'; a.title = x.models.join(', ');
+      a.href = ctx.panelHref('rules-prices').replace('#', `&project=${encodeURIComponent(x.repo)}&repo=${encodeURIComponent(x.repo)}#`); a.dataset.act = 'prices-see'; a.title = x.models.join(', ');
       a.addEventListener('click', (e) => { if (e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return; e.preventDefault(); ctx.pickRepo(x.repo); ctx.goTo('rules-prices'); });
       const meta = h('p', 'row-meta');
       meta.append(ctx.tag(x.repo));

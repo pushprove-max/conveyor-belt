@@ -60,9 +60,10 @@ const rows = (w) => Array.from(listP(w).querySelectorAll('.rules-issue'), (r) =>
 test('every project: the Board shows the picked project\'s cards and rules, and a hold from it is sent for that project alone', async () => {
   const w = boot({ tab: 'control' });
   deliver(w, two());
+  pickRepo(w, 'sample');
   assert.equal(act(board(w), 'repo'), null, 'the Board has no picker of its own');
   assert.deepEqual(Array.from(w.document.querySelectorAll('#machine-head [data-act="project"] option'), (o) => o.value), ['', 'sample', 'widgetshop'], 'Show lists every record of the host file');
-  assert.equal(heading(board(w)), 'Board: sample', 'it opens on the main record, and says so');
+  assert.equal(heading(board(w)), 'Board: sample', 'it shows the project Show picks, and says so');
   assert.deepEqual(inCol(w, 'building'), [5]);
   pickRepo(w, 'widgetshop');
   assert.equal(new URL(w.location.href).searchParams.get('repo'), 'widgetshop', 'the choice is kept in the address');
@@ -84,7 +85,7 @@ test('every project: the Board shows the picked project\'s cards and rules, and 
   await settle();
   assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'rules', args: ['P1=off'], repo: 'widgetshop' } }]);
   // A reload, or a link, keeps the project.
-  const again = boot({ query: '?tab=rules&repo=widgetshop' });
+  const again = boot({ query: '?tab=rules&repo=widgetshop&project=widgetshop' });
   deliver(again, two());
   assert.equal(heading(rulesP(again)), 'Rules: widgetshop');
   assert.deepEqual(rows(again).map((r) => r[0]).sort((a, b) => a - b), [5, 41, 42, 43, 44, 45, 46, 47, 48, 49]);
@@ -104,7 +105,7 @@ test('every project: a host file with one record shows no picker and steers that
 });
 
 test('every project: the Rules list shows every open issue with its state; blocked sorted by age is oldest first', () => {
-  const w = boot({ query: '?tab=rules&repo=widgetshop' });
+  const w = boot({ query: '?tab=rules&repo=widgetshop&project=widgetshop' });
   deliver(w, two());
   assert.deepEqual(rows(w).sort((a, b) => a[0] - b[0]), [[5, 'building'], [41, 'blocked'], [42, 'blocked'], [43, 'blocked'], [44, 'you'], [45, 'label'], [46, 'next'], [47, 'waits'], [48, 'rule'], [49, 'next']]);
   const row = (n) => listP(w).querySelector(`.rules-issue[data-issue="${n}"]`);
@@ -134,7 +135,7 @@ test('every project: the Rules list shows every open issue with its state; block
 });
 
 test('every project: three filtered rows held at once, for that project only; select all takes only the rows shown', async () => {
-  const w = boot({ query: '?tab=rules&repo=widgetshop' });
+  const w = boot({ query: '?tab=rules&repo=widgetshop&project=widgetshop' });
   deliver(w, two());
   const pick = (n) => { const b = listP(w).querySelector(`.rules-issue[data-issue="${n}"] [data-act="pick"]`); b.checked = true; b.dispatchEvent(new w.Event('change')); };
   // Select all takes only the filtered rows: the three blocked ones.
@@ -162,7 +163,7 @@ test('every project: three filtered rows held at once, for that project only; se
 
 test('every project: Retry armed for one selection does not retry another: changing the cards asks again', async () => {
   // The bug: the armed key was the same for any selection, so a Retry armed for #41 retried #42 at once.
-  const w = boot({ query: '?tab=rules&repo=widgetshop' });
+  const w = boot({ query: '?tab=rules&repo=widgetshop&project=widgetshop' });
   deliver(w, two());
   const pick = (n, on) => { const b = listP(w).querySelector(`.rules-issue[data-issue="${n}"] [data-act="pick"]`); b.checked = on; b.dispatchEvent(new w.Event('change')); };
   pick(41, true);
@@ -179,7 +180,7 @@ test('every project: Retry armed for one selection does not retry another: chang
 });
 
 test('every project: a held issue that is also blocked can be released from the list', () => {
-  const w = boot({ query: '?tab=rules&repo=widgetshop' });
+  const w = boot({ query: '?tab=rules&repo=widgetshop&project=widgetshop' });
   const d = two();
   d.panels.rules.data.others.widgetshop.control.held = [44, 41];
   deliver(w, d);
@@ -196,7 +197,7 @@ function gated(w) {
 
 test('every project: a change in several requests names the project it began in, whichever is picked before they are answered', async () => {
   // The Board: a held card dropped on a queued one is ordered, then released, both in its project.
-  const w = boot({ query: '?tab=control&repo=widgetshop' });
+  const w = boot({ query: '?tab=control&repo=widgetshop&project=widgetshop' });
   deliver(w, two());
   const open = gated(w);
   dragTo(w, bcard(w, 44), bcard(w, 46));
@@ -205,7 +206,7 @@ test('every project: a change in several requests names the project it began in,
   await settle(); await settle(); await settle();
   assert.deepEqual(w.posts.splice(0).map((p) => p.body), [{ action: 'order', args: ['44', '46'], repo: 'widgetshop' }, { action: 'release', args: ['44'], repo: 'widgetshop' }]);
   // Rules: two retries, one a request.
-  const r = boot({ query: '?tab=rules&repo=widgetshop' });
+  const r = boot({ query: '?tab=rules&repo=widgetshop&project=widgetshop' });
   deliver(r, two());
   [41, 42].forEach((n) => { const b = listP(r).querySelector(`.rules-issue[data-issue="${n}"] [data-act="pick"]`); b.checked = true; b.dispatchEvent(new r.Event('change')); });
   const go = gated(r);
@@ -218,7 +219,7 @@ test('every project: a change in several requests names the project it began in,
 });
 
 test('every project: Order first pins the picked issues in that project\'s order; Move up and down reorder the pins; Unpin removes one', async () => {
-  const w = boot({ query: '?tab=rules&repo=widgetshop' });
+  const w = boot({ query: '?tab=rules&repo=widgetshop&project=widgetshop' });
   deliver(w, two());
   const pick = (n) => { const b = listP(w).querySelector(`.rules-issue[data-issue="${n}"] [data-act="pick"]`); b.checked = true; b.dispatchEvent(new w.Event('change')); };
   pick(49);
@@ -250,7 +251,7 @@ test('every project: Order first pins the picked issues in that project\'s order
 });
 
 test('every project: the Board filters every column by priority, area and label and sorts it, the choice kept in the address', async () => {
-  const w = boot({ query: '?tab=control&repo=widgetshop' });
+  const w = boot({ query: '?tab=control&repo=widgetshop&project=widgetshop' });
   // Two cards building: #5 picked up two hours ago and in its tests for a minute, #50 picked up an hour ago and still
   // in its build. Time in Building is from the pick-up, not the step in progress.
   const d = two();
@@ -312,7 +313,7 @@ test('every project: the Board filters every column by priority, area and label 
 });
 
 test('every project: a stopped card waiting for the owner\'s yes is not blocked and is not offered Retry', () => {
-  const w = boot({ query: '?tab=rules&repo=widgetshop' });
+  const w = boot({ query: '?tab=rules&repo=widgetshop&project=widgetshop' });
   const d = two();
   // #42's card stopped for the owner's yes: Needs you lists it as waiting, not blocked.
   d.panels.rules.data.others.widgetshop.blocked = d.panels.rules.data.others.widgetshop.blocked.filter((x) => x.issue !== 42);
@@ -324,7 +325,7 @@ test('every project: a stopped card waiting for the owner\'s yes is not blocked 
 });
 
 test('every project: Order first is not offered when the order would be longer than the host takes in one request', () => {
-  const w = boot({ query: '?tab=rules&repo=widgetshop' });
+  const w = boot({ query: '?tab=rules&repo=widgetshop&project=widgetshop' });
   const d = two();
   d.panels.rules.data.others.widgetshop.control.order = Array.from({ length: 500 }, (_, i) => 1000 + i);
   deliver(w, d);
@@ -334,22 +335,23 @@ test('every project: Order first is not offered when the order would be longer t
   assert.deepEqual(w.posts, [], 'nothing is sent');
 });
 
-test('every project: a name in the address that is no record of the host file shows the main record', () => {
-  const w = boot({ query: '?tab=control&repo=__proto__' });
+test('every project: a name in the address that is no record of the host file is no filter: the Board asks for a project', () => {
+  const w = boot({ query: '?tab=control&repo=__proto__&project=__proto__' });
   deliver(w, two());
-  assert.equal(heading(board(w)), 'Board: sample');
-  assert.deepEqual(inCol(w, 'building'), [5]);
+  assert.equal(heading(board(w)), 'Board');
+  assert.equal(board(w).querySelector('.bcard'), null, 'no project\'s cards');
+  assert.ok(panel(w, 'board-loop').querySelector('[data-act="pick-project"]'), 'the project choice, in the first panel of the tab');
 });
 
 test('every project: Back to an address with another project shows that project again', () => {
-  const w = boot({ tab: 'control' });
+  const w = boot({ query: '?tab=control&repo=sample&project=sample' });
   deliver(w, two());
   tabBtn(w, 'rules').click();
   pickRepo(w, 'widgetshop');
   tabBtn(w, 'control').click();
   assert.equal(heading(board(w)), 'Board: widgetshop');
-  // Back twice: the Board for the main record, as it was first opened.
-  w.history.replaceState(null, '', 'https://dash.test/index.html?tab=control');
+  // Back twice: the Board for the project it was first opened on.
+  w.history.replaceState(null, '', 'https://dash.test/index.html?tab=control&repo=sample&project=sample');
   w.dispatchEvent(new w.PopStateEvent('popstate'));
   assert.equal(heading(board(w)), 'Board: sample', 'the project the address names');
   assert.deepEqual(inCol(w, 'needs').length, 2, 'its own cards');
@@ -367,7 +369,7 @@ test('every project: the head says how many cards need the owner in each project
 // Bug: the Board kept the released cards by issue number alone and never forgot them, so a card released in one
 // project said "Released from hold" on the card with the same number in another project picked after it.
 test('every project: a card released in one project gives no release notice to the same number in another', async () => {
-  const w = boot({ tab: 'control' });
+  const w = boot({ query: '?tab=control&repo=sample&project=sample' });
   const d = two(), b = d.panels.board.data, wb = b.others.widgetshop;
   b.control = { ...clone(CONTROL), held: [76, 44] };
   b.held = b.held.concat([{ repo: 'sample', card: null, issue: 44, title: 'Second half', url: `${P}/44` }]);

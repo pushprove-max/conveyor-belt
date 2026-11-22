@@ -532,16 +532,21 @@
     [HELD_P, HELD, 'full', (all) => [heldSection(all)]],
     [`${PART}-issues`, 'Open issues', 'full', () => [issuesSection()]],
   ];
-  // Draws the tab's panels (only: the one panel with that id), each in the place the page gave it (S.at).
-  function draw(only) {
-    const h = S.ctx.h, at = Array.from(S.at).filter(([id]) => !only || id === only);
-    // An Undo on a note line armed by undoAsk whose arming ended (timed out, or another armed): the page's reload waits
-    // on each [data-armed].
+  // An Undo on a note line armed by undoAsk whose arming ended (timed out, or another armed): the page's reload waits
+  // on each [data-armed].
+  function disarmOld() {
     [...Array.from(S.at.values(), (p) => p.el), OB.box].forEach((el) => {
       if (el) el.querySelectorAll('.rules-note [data-act="undo"][data-armed]').forEach((b) => {
         if (b.dataset.armed !== S.armed) { delete b.dataset.armed; b.classList.remove('board-danger'); b.textContent = 'Undo'; }
       });
     });
+  }
+  // Draws the tab's panels (only: the one panel with that id), each in the place the page gave it (S.at).
+  function draw(only) {
+    // Show at every project: a panel shows the project choice (its own ctx says so; S.ctx may be the setup's), and no
+    // draw (a reply that came back, the suite machine's check) puts a project over it. The setup is drawn all the same.
+    const h = S.ctx.h, at = Array.from(S.at).filter(([id, p]) => (!only || id === only) && !p.ctx.picking());
+    disarmOld();
     // No record on the host's main, and another to pick (under Show in the machine head): nothing until one is picked.
     if (S.d.repo === null) {
       at.forEach(([, p]) => p.el.replaceChildren(S.ctx.state('empty', 'No rules to show', 'Conveyor did not run on this project on the build machine yet, so it has no rules. Pick a project under Show, above the tabs.')));
@@ -573,6 +578,11 @@
       lock(el.querySelector('.rules'));
       S.shown.set(id, filtersOf(S.ctx));
     });
+    refocus(at, keep, from);
+  }
+  // The control that had the focus (keep) has it again, if it is still in a panel drawn now (at); one in a panel
+  // not drawn now (from is empty) is kept for later.
+  function refocus(at, keep, from) {
     const to = keep && at.find(([id]) => id === keep.panel);
     if (to) {
       const el = to[1].el;

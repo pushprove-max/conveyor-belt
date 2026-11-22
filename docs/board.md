@@ -164,6 +164,12 @@ cursor goes to the heading of that group.
 
 **Show**, in the machine bar, picks the project that every tab shows.
 
+The Control, Rules, Tests and Benchmarks tabs hold one project at a time. With **Show** at **All projects**, each of their
+panels that holds one project shows no project's data. It says that the tab holds one project's settings. The first
+such panel of the tab that is not hidden lists a button for each project; the others say where that choice is. A
+button sets **Show** to that project, the same as picking it in the machine bar. **Projects and Foremen** on Control
+lists every project's rows, so it stays as it is.
+
 ## Needs you
 
 - **A snapshot that is behind.** When a project's card records changed after its last snapshot was made, Needs you

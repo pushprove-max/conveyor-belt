@@ -113,10 +113,11 @@ test('D1: a panel head\'s width control sets its width and the saved layout; Cus
   assert.equal(panel(again, 'belt').hidden, true, 'and keeps the other panel hidden');
 });
 
-// UX34: the bar said "All projects" while the Board and the Rules each showed one project from a picker of their own,
-// so a figure could not be told apart from another. Show in the machine head is the one picker; the Board and the
-// Rules show the project it picks and, showing one while Show says every project, name it in their heading.
-test('one project picker: the Board and the Rules have none, follow Show, and name the project they show', () => {
+// UX34: the bar said "All projects" while the Board and the Rules each showed one project from a select of their own,
+// so a figure could not be told apart from another. Show in the machine head is the one select; the Board and the
+// Rules show the project it picks and name it in their heading. With Show at every project they show a choice of
+// project (buttons that set Show, issue 1342), not a select and not the last project.
+test('one project select: the Board and the Rules have no select of their own, follow Show, and name the project they show', () => {
   const d = full();
   const two = ['sample', 'widgetshop'];
   d.panels.machine.data.repos = two;
@@ -126,7 +127,8 @@ test('one project picker: the Board and the Rules have none, follow Show, and na
   deliver(w, d);
   const show = w.document.querySelector('#machine-head [data-act="project"]');
   assert.equal(show.value, '', 'Show says every project');
-  assert.equal(w.document.querySelectorAll('#grid select[data-act="repo"]').length, 0, 'no picker in a panel');
+  assert.equal(w.document.querySelectorAll('#grid select[data-act="repo"]').length, 0, 'no select of its own in a panel');
+  pickProject(w, 'sample');
   assert.equal(heading(panel(w, 'board')), 'Board: sample', 'the Board names the one project it shows');
   pickProject(w, 'widgetshop');
   assert.equal(heading(panel(w, 'board')), 'Board: widgetshop');

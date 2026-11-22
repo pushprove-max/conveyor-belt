@@ -116,6 +116,7 @@ test('Tests: the project switch changes the rows to that project\'s', () => {
   const shop = { ...clone(TESTS), files: [{ ...clone(TESTS.files[2]), file: 'tests/shop.test.sh' }] };
   Object.assign(d.panels.tests.data, { repos: ['sample', 'widgetshop'], others: { widgetshop: { repo: 'widgetshop', tests: shop, machine: d.panels.tests.data.machine } } });
   deliver(w, d);
+  pickProject(w, 'sample');
   assert.equal(rows(w).length, 3);
   assert.equal(tp(w).querySelector('.panel-title').textContent, 'Tests: sample');
   pickProject(w, 'widgetshop');

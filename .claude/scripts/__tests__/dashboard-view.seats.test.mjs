@@ -115,6 +115,7 @@ test('a project switch drops every pick and open Settings, one still being asked
   Object.assign(d.panels.rules.data, { repos: ['sample', 'widgetshop'], others: { widgetshop: { ...clone(d.panels.rules.data), repo: 'widgetshop' } } });
   d.panels.machine.data.repos = ['sample', 'widgetshop'];
   deliver(w, d);
+  pickProject(w, 'sample');
   w.reply = answer(JSON.stringify(PICK));
   act(bcard(w, 22), 'seats-pick').click();
   await settled();

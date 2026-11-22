@@ -139,6 +139,8 @@
     // A new Time or Date shows at once: each panel's times are written when it is drawn, so every panel is drawn again
     // (the other tabs' when they are opened), with the head and its clock.
     if (`${app.prefs.time} ${app.prefs.date}` !== was) { redrawAll(); tick(); }
+    // The project choice is in the first panel shown (pickBlock): a panel hidden, shown or moved changes which one.
+    else if (idsOf(app.tab).some((id) => app.needsPick(modules.get(id)))) redrawAll();
     // A new Time, from its choice or from Restore, also goes to the server.
     if (!was.startsWith(`${app.prefs.time} `)) sendTime();
     if (message) say(message);
