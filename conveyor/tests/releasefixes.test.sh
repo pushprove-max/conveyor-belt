@@ -80,6 +80,25 @@ t_relfixescard() {
   wait_until "jq -e '.since != \"2026-11-19T09:00:00Z\" and .ended != null' '$RUN' > /dev/null" || fail "the run did not end: $(cat "$RUN")"
   fixrec "the run is not release-prep 1.1.0 started for the fix card, or did not pass" '.step == "release-prep" and .version == "1.1.0" and .state == "passed" and .by == "fixes landed"'
 }
+# R90. Bug it catches: `release` runs the suite when its commit has no passing status, and a failure there leaves step
+# release, state failed, which relfixes() did not read, so Release fix cards for it never started the run again. With
+# every fix card landed (and pushed) the run starts again as release-prep 1.1.0.
+t_relfixesrelease() {
+  relsetup ''
+  fixred
+  jq -c '.step = "release"' "$RUN" > "$RUN.new" && mv "$RUN.new" "$RUN" || fail "the fixture could not be made"
+  # stub: relfixes() reads the issues through `gh issue list`, which the release fixture's gh does not answer; none is filed.
+  printf '%s\n' '[ "$1 $2" != "issue list" ] || echo "[]"' >> "$STUB/gh"
+  loop control rules releaseissues=off > /dev/null && loop card --release 1.1.0 'Fix a.test.sh' 'Make it pass.' > /dev/null 2>&1 || fail "the fix card was not started"
+  local id; id=$(jq -r '.cards[0].id' "$ST/testactions/cards.json")
+  git -C "$R" push -q origin main || fail "the fixture could not be pushed"
+  jq -cn --arg c "$id" --arg s "$(git -C "$R" rev-parse HEAD)" '{card: $c, issue: 0, step: "landed", time: "2026-11-19T12:00:00Z", tokens: {claude: 0, codex: 0}, result: "ok", sha: $s, reason: ""}' >> "$ST/cards.jsonl"
+  fixcall
+  grep -q 'release-prep 1.1.0 is running' "$T/$CASE.fix" || fail "a failed release run with its fix card $id landed did not start release-prep 1.1.0: $(cat "$T/$CASE.fix") $(cat "$RUN")"
+  # wait_until: release-run prep runs as a process of its own after relfixes() returns; only its record shows that it ended and passed.
+  wait_until "jq -e '.since != \"2026-11-19T09:00:00Z\" and .ended != null' '$RUN' > /dev/null" || fail "the run did not end: $(cat "$RUN")"
+  fixrec "the run is not release-prep 1.1.0 started for the fix card" '.step == "release-prep" and .version == "1.1.0" and .by == "fixes landed"'
+}
 # #1365. Bug it catches: a release run that started a notes card (relnotescard(), commands/release-prep.sh) waited on it
 # for ever, or started again before it landed, or in another mode or with no release after it. The run was release-run
 # 1.1.0 --serial on a head with no notes (so then release, mode serial: the run itself records both) and the control

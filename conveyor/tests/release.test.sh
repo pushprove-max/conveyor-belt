@@ -68,15 +68,22 @@ relmodels() {
 # still breaks it is shown as if it were ready to commit, or lacks the findings at its top; a model that gives no notes leaves an empty draft, or an earlier run's, to be taken for this run's.
 t_reldraft() {
   local O out s
-  relsetup true nonotes notag; printf '#!/usr/bin/env bash\ntee "$STUB/notes-prompt" | jq -Rsc '\''{type: "result", is_error: false, result: ., num_turns: 1}'\'' | %s\n' "$RELFMT" > "$STUB/claude"
+  relsetup true nonotes notag; relmodel $'# 1.0.0\n\nCards hold your work.\n\n## Cards\n\n- You can hold a card.'
   out=$(loop release-prep 1.0.0 2>&1); [ $? = 1 ] && grep -qF "the notes draft, an overview from the README and docs, as no release is tagged yet, is $ST/release/1.0.0.md. " <<<"$out" \
     || fail "release-prep did not draft an overview for a project with no release: $out"
-  [ "$(grep '^## ' "$ST/release/1.0.0.md")" = $'## Cards\n## The Board' ] && grep -q README-INTRO "$ST/release/1.0.0.md" \
-    && grep -q '^- Begin with the line "# 1.0.0"' "$ST/release/1.0.0.md" || fail "the draft's sections are not the README's: $(cat "$ST/release/1.0.0.md" 2>&1)"
+  [ "$(grep '^## ' "$STUB/notes-prompt")" = $'## Cards\n## The Board' ] && grep -q README-INTRO "$STUB/notes-prompt" \
+    && grep -q '^- Begin with the line "# 1.0.0"' "$STUB/notes-prompt" || fail "the first release's prompt does not hold the README's sections: $(cat "$STUB/notes-prompt" 2>&1)"
   while IFS= read -r s; do
-    ! grep -qF "${s% (#*}" "$ST/release/1.0.0.md" || fail "the draft takes a line from the commit subject '$s': $(cat "$ST/release/1.0.0.md")"
+    ! grep -qF "${s% (#*}" "$STUB/notes-prompt" || fail "the first release's prompt holds a line from the commit subject '$s': $(cat "$STUB/notes-prompt")"
   done < <(git -C "$R" log --format=%s "$O")
-  ! grep -qE 'BODY|^issue ' "$ST/release/1.0.0.md" "$STUB/gh-calls" 2>/dev/null || fail "issues were read for a first release: $(cat "$STUB/gh-calls" 2>&1)"
+  ! grep -qE 'BODY|^issue ' "$STUB/notes-prompt" "$STUB/gh-calls" 2>/dev/null || fail "issues were read for a first release: $(cat "$STUB/gh-calls" 2>&1)"
+
+  # Bug (R49, first release): the no-tag draft went to main with a heading of the model's own, as the refusal ran only
+  # for a draft traced since a tag.
+  notesshut # the valid draft above started a notes card: closed, the next press drafts again
+  relmodel $'# 1.0.0\n\nCards can wait.\n\n## Doctor checks your Git version\n\n- You can hold a card.'
+  out=$(loop release-prep 1.0.0 2>&1); [ $? = 1 ] && grep -qF 'the draft has headings that name no section of the README: Doctor checks your Git version' <<<"$out" \
+    && [ ! -e "$ST/release/1.0.0.md" ] || fail "a first release's draft with a heading that names no README section was not refused: $out"
 
   # v1.0.0 on origin, on the commit relsetup tags without notag.
   git -C "$R" push -q origin HEAD~3:refs/tags/v1.0.0 || fail "the fixture could not be made"
@@ -105,12 +112,24 @@ t_reldraft() {
     || fail "the model was not given the issues and subjects since v1.0.0 alone, and the style: $(cat "$STUB/notes-prompt" 2>&1)"
   notesshut # the draft passed the style check: its notes card (t_relnotescard) closed, the next press drafts again
 
+  # Bug (R49): a heading is no line the trace checks, so '## Doctor checks your Git version' put a claim no source makes
+  # into the notes. A draft with a heading that names no README section is refused: no draft is kept, and release-prep
+  # names the heading. The fixture README's sections are Cards and The Board.
+  relmodel $'# 1.1.0\n\nCards can wait. [#5]\n\n## Doctor checks your Git version\n\n- You can hold a card. [#5]'
+  out=$(loop release-prep 1.1.0 2>&1); [ $? = 1 ] && grep -qF 'the notes draft could not be written: the draft has headings that name no section of the README: Doctor checks your Git version' <<<"$out" \
+    && [ ! -e "$ST/release/1.1.0.md" ] || fail "a draft with a heading that names no README section was not refused: $out"
+
+  # Bug (R49, level): only "##" headings were read, so a second "#" heading carried the same claim into the notes.
+  relmodel $'# 1.1.0\n\nCards can wait. [#5]\n\n## Cards\n\n- You can hold a card. [#5]\n\n# Doctor checks your Git version\n\n- You can hold a card. [#5]'
+  out=$(loop release-prep 1.1.0 2>&1); [ $? = 1 ] && grep -qF 'name no section of the README: Doctor checks your Git version' <<<"$out" \
+    && [ ! -e "$ST/release/1.1.0.md" ] || fail "a draft with a second '#' heading that names no README section was not refused: $out"
+
   # A first answer that names the command file conveyor.sh (release 1.7.0's own draft did): the model is asked once
   # more, given the check's finding and the lines with their sources, and its rewrite is the draft, which passes the
   # check. The rewrite is traced as the draft was: the line it adds that its source does not support is left out, and
   # the side file names the rewrite's lines, not the first answer's.
-  relmodels $'# 1.1.0\n\nCards can wait. [#5]\n\n## Setup\n\n- `conveyor.sh doctor` warns when the model lists differ. [#7]' \
-    $'# 1.1.0\n\nCards can wait. [#5]\n\n## Setup\n\n- Conveyor\'s doctor check warns when the model lists differ. [#7]\n- Conveyor\'s doctor check reports whether git is too old. [#7]'
+  relmodels $'# 1.1.0\n\nCards can wait. [#5]\n\n## Cards\n\n- `conveyor.sh doctor` warns when the model lists differ. [#7]' \
+    $'# 1.1.0\n\nCards can wait. [#5]\n\n## Cards\n\n- Conveyor\'s doctor check warns when the model lists differ. [#7]\n- Conveyor\'s doctor check reports whether git is too old. [#7]'
   out=$(loop release-prep 1.1.0 2>&1); [ $? = 1 ] || fail "release-prep did not stop on a head with no notes: $out"
   [ "$(cat "$STUB/notes-calls" 2>&1)" = 2 ] || fail "the model was not asked once more to rewrite the draft: $(cat "$STUB/notes-calls" 2>&1)"
   grep -qF '1.1.0.md:7: a path or file name: - `conveyor.sh doctor`' "$STUB/notes-prompt.2" && grep -qF 'No command file' "$STUB/notes-prompt.1" \
@@ -191,6 +210,19 @@ t_relnotescard() {
     || fail "release-prep 1.1.0 with notes card $id closed did not draft again and start a new card with that draft: $out; $(cat "$cards" "$run")"
 }
 
+# R51. Bug: release-prep found a version's notes card only from the last run's record, so release-prep 1.12.0 (card
+# waiting), then 1.13.0, then 1.12.0 again read no card for 1.12.0 and started a second one adding the same file. The
+# third press finds the card in the Tests page's cards and waits on it again: one card titled for 1.12.0.
+t_relnotesother() {
+  local out cards n
+  relsetup true nonotes; cards=$ST/testactions/cards.json
+  relmodel $'# 1.12.0\n\nCards can wait. [#5]\n\n## Cards\n\n- You can hold a card. [#5]'
+  for n in 1.12.0 1.13.0 1.12.0; do
+    out=$(loop release-prep "$n" 2>&1); [ $? = 1 ] || fail "release-prep $n did not stop on a head with no notes: $out"
+  done
+  [ "$(jq -r '[.cards[] | select(.title | startswith("Release notes 1.12.0"))] | length' "$cards")" = 1 ] && grep -q 'is still under way' <<<"$out" \
+    || fail "release-prep 1.12.0 after 1.13.0 did not keep its one notes card: $out; $(cat "$cards")"
+}
 # The release notes style check, then release-prep on a head with notes.
 # Bugs: the style check passes notes that name a file, an issue or a commit, so users read an engineering log; or it
 # refuses the shipped 1.0.0 notes. Each finding names its rule, so the owner knows what to change. The suite runs, and

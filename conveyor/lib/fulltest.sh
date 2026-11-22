@@ -45,8 +45,7 @@
 # run's failed cases are run alone, counts: the whole run's suiteprog(). Each run's files, with their results and
 # times, also go to $SUITERUNS (suiterec(), lib/testlist.sh) for the Tests page.
 # A run whose process was killed leaves $FULLTEST.running with the lock free (fulldead()): the loop's next turn (fullreap()) removes
-# the marker and records it as an error line with the reason (as the next ask does), so the end is still on record (a marker
-# over a day old is removed with no line: fullreap()).
+# the marker and records it as an error line with the reason (as the next ask does), so the end is still on record.
 FULLTEST=${STATE%/*}/fulltest.jsonl
 FULL_ALONE=3
 # The line $FULLTEST keeps (fullline()) for a run that ended with no result: its $FULLTEST.running is left, and the
@@ -64,18 +63,15 @@ fulldead() {
 # of the loop: with no ask, a marker left by a killed run, or by an engine older than this one, stayed for days and the
 # status named that run as the one under way. The line keeps the marker's own time (fulldead()), so the Foreman's wake
 # for that end (the snapshot's suites, which keys it by that time) is the same one a poll before the turn saw, and a run
-# that ended between two polls still wakes it. A free lock is the proof that no run holds it; the lock is held here, so
-# no run starts meanwhile. A line that could not be written leaves the marker. A marker over a day old is removed with no
-# line: its end was news long ago, and a line with its old time would stay the last result, in the status and on the Board,
-# until a later run ends.
+# that ended between two polls still wakes it, however old the marker is: a run killed by an outage of days has its end
+# seen once, not dropped. A free lock is the proof that no run holds it; the lock is held here, so no run starts
+# meanwhile. A line that could not be written leaves the marker.
 fullreap() {
   local lk dead
   [ -e "$FULLTEST.running" ] || return 0
   { exec {lk}>>"$FULLTEST.lock"; } 2>/dev/null || return 1
   if flock -n "$lk" && dead=$(fulldead 2>/dev/null); then
-    if jq -e --arg n "$(clock)" '(.time | fromdate) < ($n | fromdate) - 86400' <<<"$dead" > /dev/null; then
-      rm -f "$FULLTEST.running" && echo "conveyor: $(jq -r .reason <<<"$dead"); that is over a day ago, so it is not recorded" >&2
-    elif fullline "$dead" && rm -f "$FULLTEST.running"; then echo "conveyor: $(jq -r .reason <<<"$dead"); it is recorded as an error" >&2
+    if fullline "$dead" && rm -f "$FULLTEST.running"; then echo "conveyor: $(jq -r .reason <<<"$dead"); it is recorded as an error" >&2
     else echo "conveyor: a full test run that ended without a result could not be recorded; its marker is left" >&2; fi
   fi
   exec {lk}>&-; return 0
@@ -467,6 +463,20 @@ $fence"
     || { echo "conveyor: release-prep: $4, and the notes card could not be started: commit the draft as docs/releases/$v.md on $BRANCH, push it, and run release-prep $v again" >&2; return 1; }
   relnoteswait "$v" "$id" "$3" "notes card $id started: $4, so the card adds the draft as it is"
 }
+# The names of <commit>'s README.md sections ("## " headings), one a line: the only headings a notes draft may have. A
+# heading is no line the trace (reltrace(), commands/release-prep.sh) checks, so a heading of the model's own could carry
+# a claim no source makes into the notes.
+relsections() { # <commit>
+  git show "$1:README.md" 2>/dev/null | sed -nE 's/^##[[:space:]]+(.*[^[:space:]])[[:space:]]*$/\1/p'
+}
+# 0 when every heading of the draft <file> (a line that starts with "#", whatever its level, but the title "# <version>")
+# names a README section of <commit>; else 1, with why on stdout.
+relheadsrefuse() { # <commit> <file> <version>
+  local h
+  h=$(grep -E '^#' "$2" | grep -vxE "#[[:space:]]+${3//./\\.}[[:space:]]*" | sed -E 's/^#+[[:space:]]*(.*[^[:space:]])[[:space:]]*$/\1/' \
+    | grep -vxFf <(relsections "$1") || [ $? = 1 ]) || { echo "the draft's headings could not be read"; return 1; }
+  [ -z "$h" ] || { echo "the draft has headings that name no section of the README: $(paste -sd ';' - <<<"$h")"; return 1; }
+}
 # relnoteskept <version> <card or empty> <then> <commit>: exit 0 when the notes card <card> the last run of <version>
 # waited on is still under way (lib/testaction.sh's cards: none of it has landed, and it is not closed or blocked): the
 # run waits on it again (relnoteswait()) and writes no new draft, as the card holds the draft it adds: a second card
@@ -526,7 +536,7 @@ relstopwaiting() {
 # record's suiteMode then), its record's by "notes landed".
 relfixes() {
   local f=$CARDS/release/run.json r v e s is='[]' cs fx busy lk go='' sha hd nc m a
-  r=$(jq -ce 'select(.kind == "release" and .step == "release-prep" and (.state == "failed" or (.state == "waiting" and (.notes.card | type) == "string"))
+  r=$(jq -ce 'select(.kind == "release" and ((.step | IN("release-prep", "release")) and .state == "failed" or (.step == "release-prep" and .state == "waiting" and (.notes.card | type) == "string"))
     and (.ended | type) == "string" and .restarted == null)' "$f" 2>/dev/null) || return 0
   v=$(jq -r .version <<<"$r") && e=$(jq -r .ended <<<"$r") && s=$(jq -r .since <<<"$r") && nc=$(jq -r '.notes.card // ""' <<<"$r") || return 1
   { [ -n "$nc" ] || is=$(timeout 60 gh issue list --state all --limit 1000 --json number,body,createdAt,state --search "\"Release fix: $v\" in:body" < /dev/null 2>/dev/null); } \

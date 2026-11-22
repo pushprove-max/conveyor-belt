@@ -128,8 +128,7 @@ nothing else.'
 RELNOTES='Write the release notes of a new release of this project, from the issues that landed since the last release and
 the subjects of its commits, given below. They are for the people who use the project, not for its developers.
 - Begin with the line "# VERSION", then one sentence that says what this release is about.
-- Then "## " sections named for what a user does or sees (for example: Cards, The Board, In Claude Code, Setup). No
-  "###" headings.
+- Then "## " sections, each named exactly as a README section below is named. No "###" headings, no heading of your own.
 - Plain-English bullets about the effect for the user, one change per bullet.
 '"$RELRULES"'
 - Leave out changes that only touch tests, refactors or tooling, or put them in one plain line if they change nothing
@@ -158,7 +157,7 @@ Answer with the notes alone, in Markdown, and nothing else.'
 # stdout, when the model gives no notes or the draft cannot be traced.
 relnotes() { # <version> <last tag, or empty> <commit> <file>
   local subj ns n j iss='[]' p nums hs t
-  if [ -z "$2" ]; then relask "$(relfirst "$1" "$3")" "$4" || return 1; relfix "$4"; return 0; fi
+  if [ -z "$2" ]; then relask "$(relfirst "$1" "$3")" "$4" || return 1; relfix "$4"; relheadsrefuse "$3" "$4" "$1"; return; fi
   subj=$(git log --no-merges --format='%h %s' "$2..$3" | sed -E 's/ \(#[0-9]+\)$//') && ns=$(git log --no-merges --format=%B "$2..$3") \
     && hs=$(git log --no-merges --format=%H "$2..$3") || { echo "the commits could not be read"; return 1; }
   nums=$(grep -oE '(\(#[0-9]+\)$|^Closes #[0-9]+)' <<<"$ns" | grep -oE '[0-9]+' | sort -un)
@@ -166,11 +165,11 @@ relnotes() { # <version> <last tag, or empty> <commit> <file>
     j=$(timeout 60 gh issue view "$n" --json number,title,body < /dev/null 2>/dev/null) && iss=$(jq -c --argjson i "$j" '. + [$i]' <<<"$iss" 2>/dev/null) \
       || echo "conveyor: release-prep: issue #$n could not be read; the notes are written without it" >&2
   done
-  p=${RELNOTES//VERSION/$1}$'\n\n'$(jq -r --arg s "$subj" '"# The issues that landed\n\n" + (map("## #\(.number): \(.title // "")\n\n\((.body // "")[0:4000])\n") | join("\n"))
+  p=${RELNOTES//VERSION/$1}$'\n\n# The README sections\n\n'$(relsections "$3" | sed 's/^/- /')$'\n\n'$(jq -r --arg s "$subj" '"# The issues that landed\n\n" + (map("## #\(.number): \(.title // "")\n\n\((.body // "")[0:4000])\n") | join("\n"))
     + "\n# The commit subjects\n\n" + $s' <<<"$iss") || { echo "the issues could not be read"; return 1; }
   relask "$p" "$4.raw" || return 1
   t=$(reltrace "$4.raw" "$4" "$iss" "$hs" "$2") || { rm -f "$4.raw"; echo "$t"; return 1; }
-  printf '%s' "$t"; relfix "$4" "$4.raw" "$iss" "$hs" "$2"; rm -f "$4.raw"
+  printf '%s' "$t"; relfix "$4" "$4.raw" "$iss" "$hs" "$2"; rm -f "$4.raw"; relheadsrefuse "$3" "$4" "$1"
 }
 # The draft <raw> traced to the release's issues (<issues>: those its commits name that gh read, a JSON array of
 # {number, title, body}) and commits (<commit hashes>, one a line) since <last tag>, and written to <file>. Each line
@@ -552,6 +551,7 @@ releaseprep() { # <version>
   [ -n "$cmd" ] || { echo "conveyor: release-prep: the pack names no full test suite (test.full); nothing run" >&2; return 2; }
   rellock release-prep || return $?
   was=$(jq -r --arg v "$v" 'select(.step == "release-prep" and (.state | IN("waiting", "stopped")) and .version == $v) | .notes.card // empty' "$RELRUN" 2>/dev/null) # the last run's notes card (waiting, or stopped while it waited: relstopwaiting()), before relstart()
+  [ -n "$was" ] || was=$( . "$HERE/lib/testaction.sh" && jq -r --arg v "$v" '[.cards[]? | select(.label == "Release notes" and (.title | startswith("Release notes \($v): ")))] | last | .id // empty' "$TACARDS" 2>/dev/null) # another version's run in between leaves the record naming that run's card: the newest notes card of $v is then its one
   relstart release-prep "$v"
   # The commit `release` releases is the remote's head of the branch, and the tags are the remote's; with Merge PR
   # release, the head of LANDING (relhead(), lib/push.sh), which relfixes() (lib/fulltest.sh) reads too.
