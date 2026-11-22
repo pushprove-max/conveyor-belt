@@ -1058,8 +1058,8 @@ const declinedTodayText =(s: State, snap: Snap): string => {
   return `judge declined ${n ? count(n, 'finding') : 'no findings'} today`
 }
 
-// A whole-suite run (a release's suite, the full test): while it runs, a line with its kind, short commit and time running, and a second line with the
-// cases done and failures so far (the second line holds a rerun's progress while a release reruns failed cases); once it ended, one line with its result for SUITE_SHOWN_MS, then nothing.
+// A whole-suite run (a release's suite, the full test): while it runs, a line with its kind, short commit and time running, and, when there are counts to show, a second
+// line with the cases done and failures so far (none while a box is before or after its tests; the second line holds a rerun's progress while a release reruns failed cases); once it ended, one line with its result for SUITE_SHOWN_MS, then nothing.
 export const SUITE_SHOWN_MS = 10 * 60 * 1000
 // A suite on another machine gives minutes and seconds, as the box's steps are short, and names the machine after the commit.
 const BOX_STEP: Record<string, string> = { start: 'starting the box', setup: 'setting up', checkout: 'checking out', results: 'bringing back results' }
