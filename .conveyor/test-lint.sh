@@ -6,7 +6,8 @@
 # the form the engine reads). test-changed.sh runs it on every run (in one-file mode in a test step, once
 # a tree); test-lint.test.sh is its own test.
 # Usage: test-lint.sh [<file>...]   (default: every shell test file under conveyor/ and .claude/scripts/__tests__/:
-# each *.test.sh, and the shared files of conveyor/tests/). Exit 1, naming each line, when a line calls sleep and the
+# each *.test.sh, and the shared files of conveyor/tests/; for the loop and stub checks below, also each *.test.sh
+# under .conveyor/ and hooks/, and each *.sh under .claude/hooks/__tests__/, its lib/ and fixtures/ too). Exit 1, naming each line, when a line calls sleep and the
 # sleep is none of these:
 # - the pause of a loop that checks a condition again: `sleep <n>; done`, or the sleep ends its line and the next
 #   line is the loop's `done`, in a while or until loop with a condition of its own (not `:`, true or false), or in a
@@ -39,7 +40,12 @@ cd "$(dirname "$0")/.." || exit 1
 if [ $# = 0 ]; then
   mapfile -t files < <(git ls-files -co --exclude-standard 'conveyor/*.sh' '.claude/scripts/__tests__/*.sh' \
     | while read -r f; do case $f in *.test.sh|conveyor/tests/*) [ ! -f "$f" ] || echo "$f" ;; esac; done)
-else files=("$@"); fi
+  # The other shell test files, read by the loop and stub checks alone (lines the change added or changed): a stub a
+  # change writes there is as hand-written as one under conveyor/.
+  mapfile -t more < <(git ls-files -co --exclude-standard '.conveyor/*.test.sh' '.claude/hooks/__tests__/*.sh' 'hooks/*.test.sh' \
+    | while read -r f; do [ ! -f "$f" ] || echo "$f"; done)
+  files+=("${more[@]}")
+else files=("$@"); more=(); fi
 [ ${#files[@]} != 0 ] || exit 0
 # The lines the change added or changed, <file>:<line> one a line, for the loop and stub checks: of each hunk of the diff from
 # the merge base with main to the worktree, +<start>[,<count>] (count 1 when left out); of a file git does not track,
@@ -51,8 +57,9 @@ if base=$(git merge-base HEAD main 2>/dev/null); then
     git ls-files -o --exclude-standard -- "${files[@]}" | sed 's/$/:all/'; } 2>/dev/null)
 fi
 # The keys go to awk by a file, not as an argument: one argument holds at most 128 KiB on Linux, and a big diff has more.
-bad=$(awk -v kf=<(printf '%s\n' "$chg") '
-  BEGIN { while ((getline x < kf) > 0) if (x != "") keep[x] = 1; close(kf) }
+bad=$(awk -v kf=<(printf '%s\n' "$chg") -v mf=<(printf '%s\n' "${more[@]}") '
+  BEGIN { while ((getline x < kf) > 0) if (x != "") keep[x] = 1; close(kf)
+    while ((getline x < mf) > 0) if (x != "") nosleep[x] = 1; close(mf) }
   function code(l) { return l !~ /^[ \t]*(#|$)/ }
   # stubname(w): whether the word w (its quotes dropped) names a file claude, codex, opencode or gh.
   function stubname(w) { gsub(/["\047]/, "", w); sub(/.*\//, "", w); return w ~ /^(claude|codex|opencode|gh)$/ }
@@ -180,7 +187,8 @@ bad=$(awk -v kf=<(printf '%s\n' "$chg") '
       if (code(line[i]) && ((name ":" i) in keep || (name ":all") in keep) && !says(cm[i], "stub") \
           && !(i > 1 && says(cm[i - 1], "stub")) && stub(cl[i]))
         printf "stub\t%s:%d: %s\n", name, i, line[i]
-    for (i = 1; i <= n; i++) {
+    # The sleep check reads every line of a file, so not those of the loop and stub checks alone (more, above).
+    for (i = 1; i <= n && !(name in nosleep); i++) {
       l = line[i]
       if (!code(l) || why[i]) continue
       nxt = ""; for (j = i + 1; j <= n; j++) if (code(line[j])) { nxt = line[j]; break }

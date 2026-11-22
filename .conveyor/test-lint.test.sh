@@ -158,13 +158,20 @@ k=$((k + 1)); loopcheck > "$T/res.$k" &
 # "# stub: <why>" on its line or the line above. A file the shared stub reads ($STUB/build, codex-answer) is no stub;
 # a stub named in quoted text, copied from, or moved off PATH is written by nothing; a "# stub:" in quoted text clears
 # nothing; a line the change did not touch is not read. Bug: without it, a card's new test wrote its own stub where
-# the shared one would do, and nothing said so.
+# the shared one would do, and nothing said so. The test files under .conveyor/, .claude/hooks/__tests__/ and hooks/
+# are read too, by this check alone (their old sleep-then-check lines are not the sleep check's). Bug: with no file
+# named, the lint read only conveyor/ and .claude/scripts/__tests__/, so a stub a change wrote there passed. The shell
+# helpers the hook tests source (.claude/hooks/__tests__/lib/) are read as well. Bug: a *.test.sh filter left them out.
 stubcheck() {
   local L=$T/stub exp got
   mkdir -p "$L/.conveyor" "$L/conveyor/tests"; cp "$HERE/test-lint.sh" "$L/.conveyor/"
   printf '%s\n' 't_old() {' '  printf x > "$STUB/codex"' '}' > "$L/conveyor/tests/old.test.sh"
+  printf '%s\n' 'sleep 2; [ -e x ] || exit 1' ':' > "$L/.conveyor/old.test.sh"
   git -C "$L" init -q -b main && git -C "$L" add -A && git -C "$L" -c user.name=t -c user.email=t@example.com commit -qm init \
     && git -C "$L" checkout -q -b card || { printf 'no\tstub check: the fixture could not be made'; return; }
+  printf '%s\n' 'sleep 2; [ -e x ] || exit 1' 'printf x > "$R/bin/claude"' > "$L/.conveyor/old.test.sh"
+  mkdir -p "$L/.claude/hooks/__tests__/lib" "$L/hooks"
+  echo 'cp "$T/c" "$B/gh"' > "$L/.claude/hooks/__tests__/h.test.sh"; echo 'echo x > "$B/claude"' > "$L/.claude/hooks/__tests__/lib/f.sh"; echo 'echo x > "$G/codex"' > "$L/hooks/u.test.sh"
   printf '%s\n' 't_a() {' "  cat > \"\$STUB/codex\" <<'EOF'" 'exit 0' 'EOF' '  # stub: a codex that keeps its arguments' \
     "  printf '#!/bin/sh\\n' > \"\$STUB/claude\"" "  echo x >> \"\$G/opencode\" # stub: setup's own PATH folder" \
     '  echo 1 > "$STUB/build"; echo a > "$STUB/codex-answer"; echo b >"$STUB/gh.out"' '  cp "$SRC/x" "$B/gh"' \
@@ -172,8 +179,9 @@ stubcheck() {
     "  echo \"a > \$STUB/codex\"; cp \"\$STUB/codex\" \"\$T/saved\"" "  echo '# stub: x'; cat >\"\$STUB/gh\"" \
     '  mv "$STUB/codex" "$STUB/codex.off"' '}' > "$L/conveyor/tests/a.test.sh"
   if (cd "$L" && bash .conveyor/test-lint.sh) > "$T/stub.out" 2>&1; then printf 'no\tstub check: the lint passed'; return; fi
-  exp=$(printf '%s\n' conveyor/tests/a.test.sh:{2,9,10,11,12,14} | LC_ALL=C sort)
-  got=$(grep -o '^conveyor/tests/[a-z]*\.test\.sh:[0-9]*' "$T/stub.out" | LC_ALL=C sort)
+  exp=$(printf '%s\n' conveyor/tests/a.test.sh:{2,9,10,11,12,14} .conveyor/old.test.sh:2 .claude/hooks/__tests__/h.test.sh:1 \
+    .claude/hooks/__tests__/lib/f.sh:1 hooks/u.test.sh:1 | LC_ALL=C sort)
+  got=$(grep -oE '^[^: ]+\.sh:[0-9]+' "$T/stub.out" | LC_ALL=C sort)
   if [ "$got" != "$exp" ]; then printf 'no\tstub check: not the lines %s: %s' "$(echo $exp)" "$(cat "$T/stub.out")"
   elif ! grep -q '"# stub: <why>" comment' "$T/stub.out"; then printf 'no\tstub check: the comment that clears it is not named: %s' "$(cat "$T/stub.out")"
   else printf 'ok\tfails: a hand-written stub the change added with no "# stub:", and only that'; fi

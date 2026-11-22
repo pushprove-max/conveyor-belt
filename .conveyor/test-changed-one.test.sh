@@ -32,9 +32,10 @@ echo "$CONVEYOR_TEST_FILE:${CONVEYOR_SHELL_TEST_CASE:-ALL}" >> "$(dirname "$0")/
 for c in $CONVEYOR_SHELL_TEST_CASE; do echo "ok $c"; done
 EOF
 printf '%s\n' 'echo "hooks/h.test.sh:ALL" >> "$(dirname "$0")/../ran"' "[ ! -r /proc/self/cgroup ] || cat /proc/self/cgroup > '$T/h.cgroup'" > "$R/hooks/h.test.sh"
-# A shell test file outside conveyor/tests/ that selects its cases as the runner does; it notes the cases it runs.
+# A shell test file outside conveyor/tests/ that selects its cases as the runner does; it notes the cases it runs. Its
+# two t_ lines make the step count it as two cases when it runs whole.
 mkdir -p "$R/conveyor/lib"
-printf '%s\n' 'ALL="sone stwo"' 'SEL=${CONVEYOR_SHELL_TEST_CASE:-$ALL}; SEL=${SEL//,/ }' \
+printf '%s\n' 'ALL="sone stwo"' 'SEL=${CONVEYOR_SHELL_TEST_CASE:-$ALL}; SEL=${SEL//,/ }' 't_sone() { :; }' 't_stwo() { :; }' \
   'echo "conveyor/lib/s.test.sh:${SEL// /,}" >> "$(dirname "$0")/../../ran"' > "$R/conveyor/lib/s.test.sh"
 printf '%s\n' 'with open("ran", "a") as f: f.write("'"$B"':ALL\n")' > "$R/$B"
 echo one > "$R/conveyor/x.sh"; echo one > "$R/conveyor/y.sh"; echo one > "$R/conveyor/z.sh"
@@ -74,6 +75,13 @@ got=$(one shell conveyor/lib/s.test.sh $'conveyor/lib/s.test.sh\tstwo')
 cp "$T/s.keep" "$R/conveyor/lib/s.test.sh"
 [ "$got" = "conveyor/lib/s.test.sh:stwo" ] && [ "$(cat "$T/rc")" = 0 ] \
   || no "the one-file mode did not run only the case the engine named of a shell test file: '$got', exit $(cat "$T/rc"): $(cat "$T/out")"
+# Issue 1439. Bugs: the run of stwo alone was counted as both cases of the file (TESTRUN cases=2, two records in
+# cases/ok), and its log named no case it ran, so the step's record left the case out and the test cache kept the
+# file as passed whole. One case is counted, one record written, and the case is logged.
+grep -q '^TESTRUN cases=1 ' "$T/shell/test-changed.log" \
+  && [ "$(find "$T/shell/cases" -type f | wc -l)" = 1 ] && [ "$(find "$T/shell/cases/ok" -type f | wc -l)" = 1 ] \
+  && grep -qxF $'TESTRUN case\tconveyor/lib/s.test.sh\tstwo' "$T/shell/test-changed.log" \
+  || no "the run of stwo alone of conveyor/lib/s.test.sh was not counted and logged as one case: records $(find "$T/shell/cases" -type f 2>/dev/null | paste -sd' ' -): $(cat "$T/shell/test-changed.log")"
 
 # A test file outside the engine (the hooks'), which the change does not select: it runs whole, and no case file runs.
 # Issue 348: with the engine's slots library and a pool, it runs in this script's own cgroup (Linux). Bug it catches:

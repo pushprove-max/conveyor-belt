@@ -5,7 +5,8 @@
 # more than 3 times still fails. Up to two decimals, trailing zeros left out (1.5, 2). A run inside another test run
 # (CONVEYOR_LOAD_FACTOR set: a test that runs Conveyor) keeps that run's factor, held between 1 and 3. The engine's
 # own time limits of a run scale by it (filecmd() in lib/testrun.sh, the runner's per-case limits: tests/lib.sh), and
-# each run gets it as CONVEYOR_LOAD_FACTOR (testonce(), cleanrun(), pushfile() in lib/pushrun.sh and the pre-push hook
+# each run gets it as CONVEYOR_LOAD_FACTOR (testonce() in lib/testrun.sh, cleanrun() in lib/mainred.sh, pushfile() in
+# lib/pushrun.sh and the pre-push hook
 # in lib/push.sh).
 loadfactor() {
   local load=${CONVEYOR_LOAD_FACTOR:-} ncpu=1

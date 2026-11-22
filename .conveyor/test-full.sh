@@ -15,7 +15,7 @@
 # Its second line, `TESTRUN files=<n>`, is the number of files it runs, the total of the progress's files (suiteprog()
 # reads that line and the `-- ok|FAIL <file>` lines). Its files' own lines of these forms are left out of its output.
 # Before each file's `-- ok|FAIL` line it prints the file's `TESTRUN sec<TAB><file><TAB><clock s><TAB><CPU s>` (as
-# conveyor/tools/testtime.sh does), which the engine keeps for the Board's Tests page (testrun.sh suiterec()); a file's
+# conveyor/tools/testtime.sh does), which the engine keeps for the Board's Tests page (testlist.sh suiterec()); a file's
 # own `TESTRUN sec` lines, of the files it starts, are left out, so each line is of a file this suite ran.
 # A file named a case when a name was added, or written again (a case file runs cases the runner named already).
 # With CONVEYOR_SUITE_FILES, a file of paths one a line (release-prep's run that reuses the passes of an earlier run,
@@ -29,7 +29,7 @@
 # CONVEYOR_SUITE_AT_ONCE (release-prep's: the control record's suiteAtOnce) is the most files parallel mode runs at
 # once, 2 when unset, and at most the pool's slots. Serial mode runs one at a time whatever it is.
 # In parallel mode it starts its files longest first, by CONVEYOR_SUITE_RECORD (release-prep's suite record,
-# suiteruns.jsonl: suiterec() of conveyor/lib/testrun.sh): each file's `sec` in the newest run of the record (its
+# suiteruns.jsonl: suiterec() of conveyor/lib/testlist.sh): each file's `sec` in the newest run of the record (its
 # last line that is a run), not in older runs. Files that run did not time start before every timed file, as their time is not known;
 # ties keep the suite's order, and so does every file when the record cannot be read. Serial mode keeps the suite's order.
 MODE=${CONVEYOR_SUITE_MODE:-serial}; unset CONVEYOR_SUITE_MODE
@@ -45,7 +45,7 @@ AT=${CONVEYOR_SUITE_AT_ONCE:-2}; unset CONVEYOR_SUITE_AT_ONCE
 rc=0
 tmp=$(mktemp -d) || exit 1
 share_init "$tmp" > "$tmp/share.why" || { echo "test-full: $(cat "$tmp/share.why"); nothing run" >&2; rm -rf "$tmp"; exit 2; }
-# A run stopped before its files end (the test step's timeout, testTimeout: testrun.sh testclock(), stops the whole
+# A run stopped before its files end (the test step's timeout, testTimeout: testlist.sh testclock(), stops the whole
 # process group) still names in the run's log the cases that ended in each file run in parallel that is still running
 # (casecopy, below): its own log folder is gone with $tmp. timeout sends its TERM twice (to the suite, then to its
 # process group): the first is caught and the next ignored, so a second one does not stop the copy, nor the copy's own
@@ -110,9 +110,11 @@ runlog "TESTRUN cases=$((engine + other))" "TESTRUN files=${#files[@]}"
 # scratch files in $tmp. Its TMPDIR is a folder of its own there, removed when it ends (share_run); a run stopped first
 # (its timeout) removes it with $tmp. It does not start while share_noroom says why (the reason is its output) and no
 # file of another run holds a share there (share_others): while one does, share_run waits for room (share_take). A
-# file whose temp folder reaches its share fails with the reason.
+# file whose temp folder reaches its share fails with the reason. With OUTKB (parallel mode, below) its output, which
+# goes to a file in $tmp, is cut at OUTKB KB (ulimit -f), and a file whose output reached it fails with the reason.
+OUTKB=
 runone() { # <test file> <n>
-  local t=$1 stamp=$tmp/$2.stamp tt=$tmp/$2.times c n st s e r why
+  local t=$1 stamp=$tmp/$2.stamp tt=$tmp/$2.times c n st s e r why a ef
   case $t in
     *.mjs) mapfile -t c < <(nodecases "$t"); c=(node --max-old-space-size=4096 --test "${c[@]}" "$t") ;;
     *.py) c=(python3 "$t") ;;
@@ -124,9 +126,15 @@ runone() { # <test file> <n>
     echo "test-full: $t did not start: $why"; st=1
   else
     times > "$tt"; s=${EPOCHREALTIME/,/.}
-    share_run "test-full: $t" "$tmp/$2.tmp" "${c[@]}" < /dev/null \
-      | awk '!/^(TESTRUN (cases|files)=|TESTRUN sec\t|-- (ok|FAIL) )/ { print; fflush() }'
-    st=${PIPESTATUS[0]}; e=${EPOCHREALTIME/,/.}; times >> "$tt"
+    # The size limit is the awk's alone: the file's own lines below still fit after its output is cut. The awk the
+    # limit kills (SIGXFSZ) ends the file's command through its pipe. With the limit, the command's errors go through
+    # the awk too (ef), as they go to the same file: else a file that printed its errors without end had no limit.
+    ef=2; [ -z "$OUTKB" ] || ef=1
+    share_run "test-full: $t" "$tmp/$2.tmp" "${c[@]}" < /dev/null 2>&"$ef" \
+      | { [ -z "$OUTKB" ] || ulimit -f "$OUTKB"; awk '!/^(TESTRUN (cases|files)=|TESTRUN sec\t|-- (ok|FAIL) )/ { print; fflush() }'; }
+    st=${PIPESTATUS[0]} a=${PIPESTATUS[1]}; e=${EPOCHREALTIME/,/.}; times >> "$tt"
+    [ -z "$OUTKB" ] || [ "$a" = 0 ] \
+      || { echo "test-full: $t printed $OUTKB KB or more, or its output could not be written, and its output's share of the space under $SPACE is $OUTKB KB (the host file's testTmpMB, $SHARE MB): its output is cut there, and it fails"; st=1; }
     awk -v f="$t" -v a="$s" -v b="$e" 'function c(x, a) { sub(/s$/, "", x); split(x, a, "m"); return a[1] * 60 + a[2] } { gsub(/,/, ".") }
       NR == 2 || NR == 4 { n[NR] = c($1) + c($2) } END { printf "TESTRUN sec\t%s\t%.1f\t%.1f\n", f, b - a, n[4] - n[2] }' "$tt"
   fi
@@ -143,12 +151,14 @@ fi
 # its case files and any other bash file that reads the pool itself (a line of its own that sources the slots and calls
 # slot_pool) hold none, as each of their cases takes a slot of its own: a file
 # holding one would keep it from its own cases. Each file's output goes to a file of its own, printed whole once the file has ended, so no two files'
-# lines are mixed. Its case names go to a log folder of its own, copied into the run's once it has ended: a case
+# lines are mixed, and removed then. That file is in $tmp, outside the file's temp folder, so its output is cut at
+# its share (OUTKB): a file that printed without end filled the space. Its case names go to a log folder of its own, copied into the run's once it has ended: a case
 # another file names meanwhile is then never taken for one of this file's (runone's marks check).
 SLOTS=${CONVEYOR_TEST_SLOTS:-conveyor/lib/slots.sh}
 # shellcheck source=/dev/null
 . "$SLOTS" && slot_pool || { echo "test-full: the test slots ($SLOTS) could not be read; nothing run" >&2; exit 1; }
 [ "$AT" -le "$SLOT_N" ] || AT=$SLOT_N
+OUTKB=$LIMKB
 declare -A job=()
 # Longest first (above): an order the record cannot give (no jq, or a count that is not the files') keeps the suite's.
 # jq's sort is stable, so ties keep the suite's order.
@@ -185,7 +195,7 @@ reap() { # one file that ended: its output printed, its result counted
   [ "$st" = 0 ] || grep -qxF -e "-- FAIL $t" -e "-- ok $t" "$tmp/${job[$p]}.out" || echo "-- FAIL $t"
   # Its lines in the run's log once it ended, as its output is printed only then.
   if [ "$st" = 0 ]; then runlog "== $t" "-- ok $t"; else runlog "== $t" "-- FAIL $t"; fi
-  unset "job[$p]"
+  rm -f "$tmp/${job[$p]}.out"; unset "job[$p]"
 }
 i=0
 for t in "${files[@]}"; do

@@ -743,13 +743,14 @@ p_mclaim() { marea conveyor/lib/claim.sh; }
 # Bug (#398, issue 543): a change to conveyor/lib/snapshot.sh broke the since case of rules.test.sh, which reads the
 # snapshot's fields, and the change's run never ran it. Each case file here builds a snapshot and reads its fields
 # (setup.test.sh and doctorbudget.test.sh through doctor's Board check, dashboard.sh --check), so a change to
-# snapshot.sh alone must run it.
+# snapshot.sh alone must run it. Issue 1439: lintyes.test.sh checks the waiting sentence snapshot.sh builds for a card
+# that also changes lint policy, and a change to snapshot.sh did not run it.
 p_msnapshot() {
   local c missing
   mgot=''; marea conveyor/lib/snapshot.sh
   missing=$(for c in rules accounts accountsflight boardone budget clis codex fail giveway landas machine machinehold \
     mainred modellist models opencode proxyroute records rerun samefile slices slots snapkept stall standing testmapbuild \
-    testrules transcript watch setup doctorbudget; do
+    testrules transcript watch setup doctorbudget lintyes; do
     [[ " $mgot " == *" $c "* ]] || echo "$c"
   done)
   [ -z "$missing" ] && ok "a change to conveyor/lib/snapshot.sh runs each case file that reads the snapshot's fields" \

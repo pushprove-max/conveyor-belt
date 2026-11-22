@@ -11,7 +11,8 @@
 # that broke a file that fails is found by running the file on the landings in turn, newest first (the pushed commit,
 # when it is a landing, fails it; one that lacks the file passes it), up to the first that passes it: the oldest of
 # the landings after that one, as a file that failed, passed, then failed again was broken by the last change, else
-# none (mainred() looks for it then: brokeby()). Each such file goes to the main-fix card of the commit (mainred(), naming that landing),
+# none (mainred() of lib/mainred.sh looks for it then: brokeby() there). Each such file goes to the main-fix card of
+# the commit (mainred(), naming that landing),
 # and the push is held: a push line, result fail, kind check, its check the first file, its reason naming each file
 # with the landing that broke it and the first place its stack traces say it failed, or the scaled time limit it ran
 # past (pushfile()), so the loop pushes again only

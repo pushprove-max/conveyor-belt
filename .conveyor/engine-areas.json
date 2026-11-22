@@ -184,6 +184,7 @@
 {"area": "snapshot", "test": "testruns.test.sh"}
 {"area": "snapshot", "test": "checkrun.test.sh"}
 {"area": "snapshot", "test": "judge.test.sh"}
+{"area": "snapshot", "test": "lintyes.test.sh"}
 {"area": "snapshot", "test": "judgesnap.test.sh"}
 {"area": "snapshot", "test": "judgeminor.test.sh"}
 {"area": "snapshot", "test": "visible.test.sh"}

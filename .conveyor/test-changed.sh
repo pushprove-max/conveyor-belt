@@ -104,7 +104,8 @@ unset CONVEYOR_SHELL_TEST_CASE
 # the cases CONVEYOR_TEST_CASES names of it, `<file><TAB><case>` lines, when it names any),
 # a shell test file that selects its cases as the runner does with the cases CONVEYOR_TEST_CASES names of it, and
 # any other test file (the Board's under .claude/scripts/__tests__/, the hooks' under hooks/) whole. The checks every
-# run makes (the map check, the test lint, shellcheck) still run, once a tree in a test step (issue 422, below). A
+# run makes (checks(): the map check, the test lint, no browser tests, no records split, shellcheck, the plugin's
+# validate when the change touches it) still run, once a tree in a test step (issue 422, below). A
 # path that is no file fails at once, before any of it, as does a runner of the whole suite (issue 382: the engine's runner, this script and the full test's), which is no
 # test file.
 ONE=
@@ -1427,6 +1428,10 @@ shellcases() { # <shell test files>
   done
   echo $s
 }
+# fparts <test file>: the parts it runs of a file that is no engine case file, comma-separated (CONVEYOR_SHELL_TEST_CASE):
+# those the coverage map selected (covof) when nothing selected it whole, or those the one-file mode runs of it
+# (oparts); none when it runs whole. A file run with parts counts one case a part, not all its cases (issue 1439).
+fparts() { [ -z "$oparts" ] && [ -n "${twhole[$1]:-}" ] || grep . <<<"${oparts:-${tparts[$1]:-}}" | LC_ALL=C sort -u | paste -sd, -; }
 mapfile -t board < <(git ls-files -co --exclude-standard '*.test.mjs' '*.test.py' '*.test.ts' '*.test.tsx')
 [ ${#board[@]} = 0 ] || nc=$((nc + $(filecases "${board[@]}")))
 mapfile -t shell < <(git ls-files -co --exclude-standard '*.test.sh' | grep -v '^conveyor/tests/' | grep -vx conveyor/conveyor.test.sh)
@@ -1435,7 +1440,11 @@ sc=0; [ -z "${run[conveyor/conveyor.test.sh]:-}" ] || if [ -n "$cases" ]; then s
 board=(); shell=()
 for t in "${!run[@]}"; do
   if [ -n "${ecases[$t]:-}" ]; then sc=$((sc + $(wc -w <<<"${ecases[$t]}"))); continue; fi
-  case $t in conveyor/conveyor.test.sh) ;; *.mjs|*.py|*.ts|*.tsx) board+=("$t") ;; *) shell+=("$t") ;; esac
+  case $t in
+    conveyor/conveyor.test.sh) ;;
+    *.mjs|*.py|*.ts|*.tsx) board+=("$t") ;;
+    *) p=$(fparts "$t"); if [ -n "$p" ]; then sc=$((sc + $(tr , '\n' <<<"$p" | grep -c .))); else shell+=("$t"); fi ;;
+  esac
 done
 [ ${#board[@]} = 0 ] || sc=$((sc + $(filecases "${board[@]}")))
 [ ${#shell[@]} = 0 ] || sc=$((sc + $(shellcases "${shell[@]}")))
@@ -1471,10 +1480,14 @@ fi
 # This script writes the records for a Board or other shell test file when the file ends, one for each case counted
 # above. A file that passed gets them all in ok. A failed file gets as many in failed as its runner's summary says
 # (node's `fail N`, python's `FAILED (failures=N, errors=M)`), at least 1 and at most all of them, and the rest in ok.
-ended() { # <test file> <ok|FAIL> <its output>
+# A shell test file run with parts (fparts) gets one record a part, as it was counted.
+ended() { # <test file> <ok|FAIL> <its output> [<its parts, comma-separated>]
   [ -d "${CONVEYOR_TEST_LOG:-}" ] || return 0
   local k f=0 i d=$CONVEYOR_TEST_LOG/cases
-  case $1 in *.mjs|*.py|*.ts|*.tsx) k=$(filecases "$1") ;; *) k=$(shellcases "$1") ;; esac
+  case $1 in
+    *.mjs|*.py|*.ts|*.tsx) k=$(filecases "$1") ;;
+    *) if [ -n "${4:-}" ]; then k=$(tr , '\n' <<<"$4" | grep -c .); else k=$(shellcases "$1"); fi ;;
+  esac
   if [ "$2" = FAIL ]; then
     f=$(sed 's/\x1b\[[0-9;]*m//g' "$3" | awk '/^(ℹ|#) fail [0-9]+$/ { n += $3 }
       /^FAILED \(/ { while (match($0, /(failures|errors)=[0-9]+/)) { split(substr($0, RSTART, RLENGTH), a, "="); n += a[2]; $0 = substr($0, RSTART + RLENGTH) } }
@@ -1684,7 +1697,11 @@ for t in "${order[@]}"; do
     # file's process tree, each process counted as it is waited for.
     # The parts of it the coverage map selected (covof), when nothing selected it whole, or the cases the one-file mode
     # runs of it (oparts): CONVEYOR_SHELL_TEST_CASE.
-    p=; [ -z "$oparts" ] && [ -n "${twhole[$t]:-}" ] || p=$(grep . <<<"${oparts:-${tparts[$t]:-}}" | LC_ALL=C sort -u | paste -sd, -)
+    # Each part it runs is logged as it starts (`TESTRUN case`), as an engine case file's cases are: the step's record
+    # names them (testrun.sh), the test cache does not keep the file as passed whole (testlist.sh cachekeep()), and a
+    # run that never ends keeps the passes of its other cases (testlist.sh rerunlist()).
+    p=$(fparts "$t")
+    [ -z "$p" ] || tr , '\n' <<<"$p" | grep . | while IFS= read -r c; do printf 'TESTRUN case\t%s\t%s\n' "$t" "$c"; done >> "$log"
     echo "== $t${p:+ (parts: $p)}"; s=${EPOCHREALTIME/,/.}; times > "$o.cpu"
     # A meta-runner runs in its card mode (the pack's test.files cardMode, mk above): its own checks, with a stub in
     # place of the files it starts.
@@ -1703,7 +1720,7 @@ for t in "${order[@]}"; do
     [ -n "$p" ] || printf 'TESTRUN sec\t%s\t%s\t%s\n' "$t" "$(awk -v a="$s" -v b="${EPOCHREALTIME/,/.}" 'BEGIN { printf "%.1f", b - a }')" \
       "$(awk 'function c(x, a) { sub(/s$/, "", x); split(x, a, "m"); return a[1] * 60 + a[2] } { gsub(/,/, ".") }
         NR == 2 || NR == 4 { n[NR] = c($1) + c($2) } END { printf "%.1f", n[4] - n[2] }' "$o.cpu")" >> "$log"
-    ended "$t" $r "$o"
+    ended "$t" $r "$o" "$p"
   fi
   echo "-- $r $t" >> "$log"; [ $r = ok ] || rc=1
 done
