@@ -248,7 +248,7 @@ slowoff() { # <worktree>
 # runs once more, still holding the slot, for those cases alone (the owner, 2026-11-13: a failure goes to a fix
 # session only when it fails again). What passed is not run again: <worktree>.rerun, which CONVEYOR_TEST_RERUN names
 # to the command (README.md), says it (testlist.sh rerunlist()). The run after a fix session that left the staged change as it was,
-# byte for byte (a whitespace edit is a change: cardpatch() is blind to it), runs only what had not passed. The run
+# byte for byte (a whitespace edit is a change, and cardpatch() sees it), runs only what had not passed. The run
 # after a session that changed it on the same HEAD (a fix: the owner, 2026-11-13, only failed tests run again and
 # passes are kept) runs what had not passed and the tests of the files the session changed: the list names each file
 # whose content differs between the tree last tested and the tree now (rerunsince()), and the command runs their

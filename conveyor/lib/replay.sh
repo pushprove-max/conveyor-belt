@@ -58,9 +58,9 @@ replayable() { # <case json>
   else [ -n "$kept" ] && [ -s "$kept" ] || return 1; fi
   i=$(mktemp -d) || return 1
   p=$(export GIT_INDEX_FILE=$i/index; git -C "$MAIN" read-tree "$base" 2>/dev/null && replaypatch "$sha" "$kept" | git -C "$MAIN" apply --cached 2>/dev/null \
-    && git -C "$MAIN" diff --cached --binary --no-renames -U0 "$base" 2>/dev/null | git patch-id --stable 2>/dev/null)
+    && git -C "$MAIN" diff --cached --binary --no-renames -U0 "$base" 2>/dev/null | diffid 2>/dev/null)
   rm -rf "$i"
-  [ -n "$p" ] && [ "${p%% *}" = "$patch" ]
+  [ -n "$p" ] && [ "$p" = "$patch" ]
 }
 # The case's change, staged in a new worktree <folder>/wt on the commit its review sat on, as its review read it.
 replaywt() { # <case json> <folder>

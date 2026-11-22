@@ -145,7 +145,7 @@ fits() { # <patch> <id> [git apply option...]
   local t
   git apply --cached "${@:3}" "$1" 2>/dev/null && return 0
   t=$(git write-tree) && merge3 "${@:3}" "$1" || return 1
-  [ -n "$2" ] && { t=$(git diff --cached --binary --no-renames -U0 "$t" | git patch-id --stable); [ "${t%% *}" = "$2" ]; } \
+  [ -n "$2" ] && { t=$(git diff --cached --binary --no-renames -U0 "$t" | diffid); [ "$t" = "$2" ]; } \
     || { echo "its three-way merge does not leave the card's own change: main holds it already, or another like it" >&2; return 1; }
 }
 # git apply --cached --3way onto the index GIT_INDEX_FILE names, with an empty work tree of its own: git writes a file it
@@ -553,8 +553,9 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
 # with what that run passed (units and cases, testlist.sh passlist(); none when it left no list) for a batch that takes it (batchkeep()).
 # The identity of a card's staged change, whatever commit it is on: its own added and removed lines, with no line of
 # context (-U0), so a change merged three-way onto a main that moved around it is the same change (fits(), settle());
-# of the files <pathspec> names when it is given. Empty when the change is.
-cardpatch() { local p r; p=$(git -C "$1" diff --cached --binary --no-renames -U0 HEAD -- "${@:2}" 2>/dev/null | git patch-id --stable 2>/dev/null); r=$?; [ -z "$p" ] || printf '%s\n' "${p%% *}"; return $r; } # <worktree> [pathspec...]
+# of the files <pathspec> names when it is given. Empty when the change is. The id is diffid()'s: whitespace counts, so a
+# change that only re-indents is another change (Python and YAML read indent), and the line numbers do not.
+cardpatch() { local p r; p=$(git -C "$1" diff --cached --binary --no-renames -U0 HEAD -- "${@:2}" 2>/dev/null | diffid 2>/dev/null); r=$?; [ -z "$p" ] || printf '%s\n' "$p"; return $r; } # <worktree> [pathspec...]
 tested() { [ ! -e "$1.ready" ] || { jq -c --arg t "$(git -C "$1" write-tree)" --arg h "$(git -C "$1" rev-parse HEAD)" --arg p "$(cardpatch "$1")" --argjson u "$(jq -ce objects "$1.passed" 2>/dev/null || echo null)" \
   'del(.units, .cases) + {tested: true, tree: $t, head: $h, patch: $p, since: now} + if $u then $u | {units, cases} else {} end' "$1.ready" > "$1.ready.new" && mv -f "$1.ready.new" "$1.ready"; } || rm -f "$1.ready"; } # <worktree>
 # Whether they passed on the change it holds now: the same staged change, on whatever commit (owner, 2026-11-13: a
@@ -703,8 +704,8 @@ bpid() { # <worktree>
   b=$(cat "$1.lent" 2>/dev/null) && [ -n "$b" ] || b=HEAD
   i=$(mktemp) || return 1; rm -f "$i"
   GIT_INDEX_FILE=$i git -C "$1" read-tree "$b" 2>/dev/null && GIT_INDEX_FILE=$i git -C "$1" apply --cached < "$1.bpatch" 2>/dev/null \
-    && p=$(GIT_INDEX_FILE=$i git -C "$1" diff --cached --binary --no-renames -U0 "$b" 2>/dev/null | git patch-id --stable 2>/dev/null); r=$?
-  rm -f "$i"; [ -z "${p:-}" ] || printf '%s\n' "${p%% *}"; return $r
+    && p=$(GIT_INDEX_FILE=$i git -C "$1" diff --cached --binary --no-renames -U0 "$b" 2>/dev/null | diffid 2>/dev/null); r=$?
+  rm -f "$i"; [ -z "${p:-}" ] || printf '%s\n' "$p"; return $r
 }
 batchkeep() { # <card> <worktree> <the run's cards>
   local c=$1 wt=$2 m w ps r t a=()

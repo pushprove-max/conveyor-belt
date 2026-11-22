@@ -27,9 +27,9 @@ replaysetup() {
   { echo zero; cat "$R/a.txt"; } > "$R/a.new"; mv "$R/a.new" "$R/a.txt"; git -C "$R" commit -qam zero
   echo three >> "$R/a.txt"; git -C "$R" commit -qam seven; local sha base=$B0; sha=$(git -C "$R" rev-parse HEAD)
   # The patch-id each review line keeps of the change it read, made as cardpatch() makes it.
-  P7=$(git -C "$R" diff --binary --no-renames -U0 "$sha^" "$sha" | git patch-id --stable | cut -d' ' -f1)
+  P7=$(git -C "$R" diff --binary --no-renames -U0 "$sha^" "$sha" | diffid)
   mkdir -p "$ST/kept/c1-8"; echo four >> "$R/a.txt"; git -C "$R" diff > "$ST/kept/c1-8/c1-8.patch"
-  git -C "$R" add a.txt; P8=$(git -C "$R" diff --cached --binary --no-renames -U0 HEAD | git patch-id --stable | cut -d' ' -f1); git -C "$R" reset -q; git -C "$R" checkout -q -- a.txt
+  git -C "$R" add a.txt; P8=$(git -C "$R" diff --cached --binary --no-renames -U0 HEAD | diffid); git -C "$R" reset -q; git -C "$R" checkout -q -- a.txt
   U='{"input":1000000,"write":0,"write1h":0,"read":0,"output":0}'
   rline() { # <card> <issue> <minute> <patch> <judge json> [<file>]
     jq -cn --arg c "$1" --argjson i "$2" --arg t "2026-11-01T00:0$3:00Z" --arg m "$base" --arg p "$4" --argjson j "$5" --argjson u "$U" \

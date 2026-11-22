@@ -141,3 +141,28 @@ EOF
   [ "$(st 'select(.issue == 8 and .step == "review") | .patch' | sort -u | wc -l)" = 1 ] && [ "$(st 'select(.issue == 8 and .step == "review") | .main' | sort -u | wc -l)" = 2 ] \
     && [ "$(st 'select(.issue == 8 and .step == "review") | .reused // "none"' | sort -u)" = none ] || fail "the review on a moved main did not read the same patch on another main commit"
 }
+
+# The id both a review's reuse (reusable(), card.sh) and a test pass's reuse (testedhere()) key on is cardpatch(). Bugs: a
+# fix that only re-indents Python (the same words in the same lines, so git patch-id gives one id) kept the old test
+# pass and review; the change at other line numbers, on a main that moved above it, lost them. It calls the functions:
+# the two reuses read nothing else of the change. The review line is stubbed to the patch, the main and the seen text
+# the last review kept (stdb), its main being the HEAD asked about, so only the patch decides.
+t_reusereindent() {
+  eval "$(sed -n '/^cardpatch() {/p; /^tested() {/,/} # <worktree>$/p; /^testedhere() {/p' "$SRC/lib/claim.sh"; sed -n '/^reusable() {/,/^}/p' "$SRC/lib/review.sh")"
+  local d=$T/reindent r; mkdir "$d" && git -C "$d" init -q && git -C "$d" config user.email t@example.com && git -C "$d" config user.name t || fail "no repo"
+  printf 'for i in range(3):\n    print(i)\nprint("done")\n' > "$d/f.py"; git -C "$d" add f.py; git -C "$d" commit -qm base
+  r=$d.ready; echo '{}' > "$r"
+  # shellcheck disable=SC2317 # reusable() calls it
+  stdb() { jq -cn --arg p "$KEPT" --arg m "$(git -C "$d" rev-parse HEAD)" '{step: "review", result: "GO", patch: $p, main: $m, seen: "s", time: "t"}'; }
+  reuse() { reusable c "$(cardpatch "$d")" "$(git -C "$d" rev-parse HEAD)" s >/dev/null; } # the last review is reused
+  stage() { printf '%s\n' "$1" >> "$d/f.py"; git -C "$d" add f.py; } # <the added line>
+  stage '    print("inside")'; tested "$d"; KEPT=$(cardpatch "$d")
+  testedhere "$d" && reuse || fail "the test pass or the review was not found on the change it passed on"
+  git -C "$d" reset -q --hard; stage '        print("inside")'
+  ! testedhere "$d" || fail "a change that only re-indented a line kept the old test pass (patch $(cardpatch "$d"))"
+  ! reuse || fail "a change that only re-indented a line kept the old review (patch $(cardpatch "$d"))"
+  git -C "$d" reset -q --hard; stage '    print("inside")'
+  testedhere "$d" && reuse || fail "the same change again did not find its test pass or its review"
+  git -C "$d" reset -q --hard; printf '# one\n# two\n# three\n' | cat - "$d/f.py" > "$d/g" && mv "$d/g" "$d/f.py"; git -C "$d" commit -qam above; stage '    print("inside")'
+  testedhere "$d" && reuse || fail "the same change at other line numbers, on a main that moved, lost its test pass or review (patch $(cardpatch "$d"))"
+}

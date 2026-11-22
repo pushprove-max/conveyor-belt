@@ -104,6 +104,14 @@ p_date() { date -d "$1" "$2"; } # <date> <+format>
 # Each <date> on stdin (one a line, as p_date's) in <format>, one a line, from one date program.
 p_dates() { date -f - "$1"; } # <+format>
 
+# The id of the `git diff -U0` text on stdin: a hash of it without its line-number headers (@@) and blob lines (index),
+# so the same change at other line numbers, or on another commit, has the same id, and a change of whitespace has
+# another (git patch-id ignores whitespace, which Python and YAML read). Prints nothing for an empty diff.
+diffid() { # < diff
+  local f; f=$(mktemp) || return 1
+  LC_ALL=C grep -aEv '^(@@|index )' > "$f"; [ ! -s "$f" ] || git hash-object "$f"; rm -f "$f"
+}
+
 # True when <file> changed in the last <seconds>.
 p_newer() { [ -n "$(find "$1" -newermt "@$(($(date +%s) - $2))" 2>/dev/null)" ]; } # <file> <seconds>
 
