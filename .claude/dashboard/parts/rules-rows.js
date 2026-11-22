@@ -292,7 +292,7 @@
     // with no cap until the rule is set, and a cap just cleared here, both step from a number.
     const capSet = num(c.cap);
     const capNow = capSet !== null ? capSet : ((d.control || {}).cap == null && num(d.cap) !== null ? num(d.cap) : CAP0);
-    el.append(row('cap', 'Cards at once', 'cards building together',
+    el.append(row('cap', 'Cards at once', 'cards building, fixing or rebasing at once; review and tests do not count',
       stepper('cards at once', String(capNow), () => send('cap', [String(capNow - 1)], null, ['cap', [capSet !== null ? String(capSet) : 'off']]),
         () => send('cap', [String(capNow + 1)], null, ['cap', [capSet !== null ? String(capSet) : 'off']]),
         capNow > 1, capNow < 100),

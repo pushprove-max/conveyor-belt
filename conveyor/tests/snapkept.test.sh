@@ -269,7 +269,7 @@ t_snapkeptnow() {
   snapkept_quiet 20; now=$(export TZ=UTC; printf '%(%Y-%m-%dT%H:%M:%SZ)T' -1)
   { snapkept_line c2 2 landed ok 09 "{\"time\": \"$now\", \"sha\": \"abd\", \"product\": false}"; snapkept_line c3 0 blocked blocked 09 "{\"time\": \"$now\", \"reason\": \"the session made no change\"}"
     snapkept_line c6 6 picked ok 09 "{\"time\": \"$now\", \"title\": \"six\"}"; snapkept_line c6 6 blocked blocked 09 "{\"time\": \"$now\", \"reason\": \"visible to customers or staff: needs Dana's yes: a new button\"}"; } >> "$ST/cards.jsonl"
-  jq -cn --argjson p "$$" '{pid: $p, state: "running", building: 2, waiting: 1}' > "$ST/loop.json"
+  jq -cn --argjson p "$$" '{pid: $p, state: "running", building: 2, waiting: 1, running: 4}' > "$ST/loop.json"
   exec {lk}>>"$ST/snapshot.json.lock" && flock "$lk" || fail "the kept lock could not be held"
   out=$(loop snapshot) || fail "the reader exited non-zero"
   # Bug: c6, stopped for the owner's yes since (the pack's owner, Dana), was one of blocked, so the Board showed it
@@ -278,13 +278,15 @@ t_snapkeptnow() {
   # the one its picked line gives (c5 is on no belt and its picked line is older than the snapshot: null).
   # Bug (#1107): the loop's count left out c2, landed since and on the belt until it pushes, so the status said fewer
   # cards on the belt than it held: landed counts it.
-  jq -e --arg now "$now" '.recordsNewer == true and .recordsNow == {building: 2, waitingCount: 1, landed: 1, blocked: [
+  # Bug (#1305): the count left out a card in review or in its Test step (in neither building nor waiting): running
+  # is loop.json's count of every card in progress.
+  jq -e --arg now "$now" '.recordsNewer == true and .recordsNow == {building: 2, waitingCount: 1, running: 4, landed: 1, blocked: [
       {card: "c5", issue: 5, name: null, title: null, reason: "old block", since: "2026-11-17T10:08:00Z"},
       {card: "c3", issue: 0, name: "Main is red (abcdef012345)", title: "red", reason: "the session made no change", since: $now}],
       waiting: [{card: "c6", issue: 6, name: null, title: "six", reason: "visible to customers or staff: needs Dana'"'"'s yes: a new button", since: $now, sentence: "a new button"}]}' <<<"$out" > /dev/null \
     || fail "the reader did not give what the records and loop.json say now: $(jq -c '{recordsNewer, recordsNow}' <<<"$out")"
-  dead=$(sh -c 'echo $$'); jq -cn --argjson p "$dead" '{pid: $p, state: "running", building: 2, waiting: 1}' > "$ST/loop.json"
-  out=$(loop snapshot) && jq -e '.recordsNow | .building == null and .waitingCount == null' <<<"$out" > /dev/null \
+  dead=$(sh -c 'echo $$'); jq -cn --argjson p "$dead" '{pid: $p, state: "running", building: 2, waiting: 1, running: 4}' > "$ST/loop.json"
+  out=$(loop snapshot) && jq -e '.recordsNow | .building == null and .waitingCount == null and .running == null' <<<"$out" > /dev/null \
     || fail "the reader gave the count of a loop whose process is gone: $(jq -c .recordsNow <<<"$out")"
   # One build after the lock is let go: a writer the reads started finds nothing due, so none builds after the case.
   exec {lk}>&-; loop snapshot --fresh > /dev/null || fail "the snapshot after the reads exited non-zero"

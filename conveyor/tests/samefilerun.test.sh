@@ -117,7 +117,7 @@ t_samepastshared() {
 # on c4-16 and went on (its live record names no card). `retry` gave back #12, #14 and #16 before the run. The run
 # picks #11, the oldest; its build session makes c3-13 wait on c4-12, then waits for #12's build (a pipe, 100 s at
 # most): #12 is picked past the cap while #11 holds the only slot. #14 (not in --only) is never picked; #16 only once
-# #11 and #12 have landed. #16's build makes no change, so its card blocks with no review, test or landing: its pick
+# #11 and #12 have ended their builds. #16's build makes no change, so its card blocks with no review, test or landing: its pick
 # is all the case reads of it.
 t_sameoffrun() {
   setup "[$(issue 11 2026-01-01),$(issue 12 2026-01-02),$(issue 14 2026-01-03),$(issue 16 2026-01-04)]"; mkdir -p "$T/$CASE/cards"
@@ -141,9 +141,12 @@ EOF
   out=$(loop run --only 11,12,16 2>&1) || fail "run exited non-zero: $out" # loop: the pick past the cap is run()'s turn, with a card on the belt waiting on the retried one
   [ -e "$STUB/heard12" ] || fail "the retried #12 was not picked while #11 held the only slot: $(st '"\(.issue) \(.step)"' | tr '\n' ,)"
   [ -z "$(st 'select(.issue == 14 and .step == "picked")')" ] || fail "run --only 11,12,16 picked the retried #14: $(st '"\(.issue) \(.step)"' | tr '\n' ,)"
-  # The picked and landed lines in their order, #11's and #12's landings in either order; #16, built to no change,
-  # blocks and never lands.
-  [ "$(jq -rs '[.[] | select((.issue | IN(11, 12, 16)) and (.step | IN("picked", "landed"))) | "\(.issue) \(.step)"] | [.[:2], (.[2:4] | sort), .[4:]] | map(join(",")) | join(" ")' "$ST/cards.jsonl")" \
-    = "11 picked,12 picked 11 landed,12 landed 16 picked" ] \
-    || fail "#16, waited on by nobody now, was picked past the cap, or #11 or #12 did not land: $(st '"\(.issue) \(.step)"' | tr '\n' ,)"
+  # The picked, build and landed lines in their order: #16 is picked last, only once #11 and #12 have both ended their
+  # builds (a card in its review or tests holds no build slot), and #11 and #12 land; #16, built to no change, blocks
+  # and never lands.
+  [ "$(jq -rs '[.[] | select((.issue | IN(11, 12, 16)) and (.step | IN("picked", "build", "landed"))) | "\(.issue) \(.step)"] as $l
+      | ($l | index("16 picked")) as $q | [($l | map(select(endswith(" picked"))) | join(",")),
+        ($q != null and ([$l | index("11 build", "12 build")] | all(. != null and . < $q))), ($l | map(select(IN("11 landed", "12 landed"))) | length)] | @json' "$ST/cards.jsonl")" \
+    = '["11 picked,12 picked,16 picked",true,2]' ] \
+    || fail "#16, waited on by nobody now, was picked past the cap (before #11 and #12 had ended their builds), or #11 or #12 did not land: $(st '"\(.issue) \(.step)"' | tr '\n' ,)"
 }

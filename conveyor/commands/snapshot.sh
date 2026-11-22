@@ -120,8 +120,9 @@ snapprint() {
 # but for a card with a closing line since <snapshotAt> or with no line left (retried), and each card whose last
 # closing line (landed, closed, blocked or pushed) since then is blocked; of those, a card stopped for the owner's yes
 # (its reason starts with YES or LINTYES, yesforms() with the pack's owner.name: block(), lib/card.sh) is in waiting
-# instead, as views.sh splits health's, with its sentence: the reason after that start; building and waitingCount,
-# the running loop's count at its last turn (loop.json, run()), null when no process of that loop lives; landed, the
+# instead, as views.sh splits health's, with its sentence: the reason after that start; building, waitingCount and
+# running, the running loop's count at its last turn (loop.json, run(): running is every card of it in progress, in
+# review and in its Test step too), null when no process of that loop lives; landed, the
 # count of landed cards on the belt for their push, which no loop count holds: those the kept snapshot's belt has
 # landed with no closing line since, and, unless the rule "Push when a card lands" is off, each card whose last
 # closing line since is landed (a card pushed since leaves it, though the belt keeps it until its issue closes). Nothing is
@@ -133,7 +134,7 @@ recordsnow() { # <snapshotAt>
   o=$(jq -er '.owner.name | strings' "$MAIN/.conveyor/project.json" 2>/dev/null) || return 1
   yesforms "$o"
   p=$(jq -r '.pid | numbers' "$SAYS" 2>/dev/null) && [ -n "$p" ] && kill -0 "$p" 2>/dev/null \
-    && b=$(jq -c '{building: (.building | numbers), waiting: (.waiting | numbers)}' "$SAYS" 2>/dev/null) && [ -n "$b" ] || b=null
+    && b=$(jq -c '{building: (.building | numbers), waiting: (.waiting | numbers), running: (.running | numbers)}' "$SAYS" 2>/dev/null) && [ -n "$b" ] || b=null
   LC_ALL=C awk -v t="\"time\":\"$1\"" '{ i = index($0, "\"time\":\""); if (i && substr($0, i, length(t)) >= t) print }' "$STATE" \
     | jq -cnR --slurpfile k "$KEPT" --argjson loop "$b" --arg at "$1" --arg yes "$YES" --arg lintyes "$LINTYES" --rawfile ids <(LC_ALL=C grep -o '^{"card":"[^"]*"' "$STATE") '
       ($ids | split("\n") | map(select(. != "") | .[9:-1]) | INDEX(.)) as $have
@@ -152,7 +153,7 @@ recordsnow() { # <snapshotAt>
           + [$ends[] | select(.step == "blocked") | {card, issue, name: $names[.card], title: $titles[.card], reason, since: .time}]) as $all
       | def yes: (.reason | type) == "string" and (.reason | startswith($yes) or startswith($lintyes));
         {blocked: [$all[] | select(yes | not)], waiting: [$all[] | select(yes) | . + {sentence: (.reason | if startswith($lintyes) then ltrimstr($lintyes) else ltrimstr($yes) end)}],
-         building: $loop.building, waitingCount: $loop.waiting,
+         building: $loop.building, waitingCount: $loop.waiting, running: $loop.running,
          landed: ([$s.belt | arrays | .[] | objects | select(.landed == true and (.card | type) == "string" and $have[.card] != null and $ended[.card] == null) | .card]
            + (if ($s.control | objects | .rules.push?) == false then [] else [$ends[] | select(.step == "landed") | .card] end) | unique | length)}'
 }

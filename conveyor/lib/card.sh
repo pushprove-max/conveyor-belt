@@ -13,7 +13,7 @@
 . "$HERE/lib/cardland.sh" || exit 1
 began() { # <card> <issue> <what begins>
   local e=''
-  switchcode "$1" "$3"; rm -f "$CARDS/$1.firsttry" "$CARDS/$1.firsttry.new"
+  switchcode "$1" "$3"; rm -f "$CARDS/$1.firsttry" "$CARDS/$1.firsttry.new"; capmark "$1" "$3" # capmark(): lib/run.sh
   # A card on the code of a commit it switched to: its start line names that commit, so prune() (inflight(),
   # lib/install.sh) keeps its install while the card runs; its worktree line names the commit it started on.
   [ -z "$RAN" ] || [ "$RAN" != "${CODESEEN:-}" ] || e=",\"engine\":\"$RAN\""

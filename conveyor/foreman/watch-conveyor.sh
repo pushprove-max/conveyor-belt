@@ -291,9 +291,10 @@ unreported() {
 STATUS=$SUITE$REF'def num: if type == "number" then "#\(.)" else tostring end;
   (.belt | if type == "array" then length else 0 end) as $n
   # While the snapshot is behind the card records and the loop runs, the count on the belt is the one of now: loop.json'"'"'s
-  # cards building and waiting, and the landed cards still on the belt for their push (recordsNow), and the line says
-  # the snapshot the card lines below come from is behind (#1107: "0 on the belt" while 5 built).
-  | ([.recordsNow | objects | select(.building | numbers) | .building + (.waitingCount // 0) + (.landed | numbers // 0)][0]) as $live
+  # cards in progress (running: building, waiting, in review or in their Test step), and the landed cards still on the
+  # belt for their push (recordsNow), and the line says the snapshot the card lines below come from is behind (#1107:
+  # "0 on the belt" while 5 built).
+  | ([.recordsNow | objects | select(.running | numbers) | .running + (.landed | numbers // 0)][0]) as $live
   | (if .recordsNewer == true and $live != null then
       "\($repo): \($live) on the belt now, from loop.json and the card records (the snapshot, as of \(.snapshotAt // "an unknown time"), is behind the card records: it lists \($n))"
     else "\($repo): \($n) on the belt"

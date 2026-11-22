@@ -591,7 +591,7 @@ export const SAYS = {
   rules: { title: 'Rules', count: '', data: ['The Board saves a rule when you change it.','Rules', 'Choose a group or search for a rule to edit it in place.',
     'Models', 'Capacity', 'Picking', 'Landing and push', 'Done without asking', 'Issue order', 'Build issues', 'which issues Conveyor may pick', 'P0', 'P1', 'P2', 'P3', 'Follow-ups',
     'Turning P2 off would skip 2 of the 3 queued issues. Turning Follow-ups off would skip 1 of the 3 queued issues.',
-    'Never build', 'labels Conveyor skips', 'area:infra', 'Cards at once', 'cards building together', 'the default', 'Weekly pause', 'pause when the weekly Claude limit reaches', 'Off', '90%', '95%', '98%', '44% used',
+    'Never build', 'labels Conveyor skips', 'area:infra', 'Cards at once', 'cards building, fixing or rebasing at once; review and tests do not count', 'the default', 'Weekly pause', 'pause when the weekly Claude limit reaches', 'Off', '90%', '95%', '98%', '44% used',
     'Builder', 'Builds the card and fixes findings.', 'Reviewer', 'Reviews each round of changes.', 'Held issues', 'View 2 held issues',
     'Pinned issues', '#21 Later', 'Unpin',
     'What these rules produce', 'ready to build', 'waiting on another card', 'held by you or a label', 'skipped by a rule', 'Next up', '#21', 'Later', 'Last', 'Second half', 'waits on #20', 'ready',

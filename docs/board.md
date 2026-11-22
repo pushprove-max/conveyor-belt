@@ -304,8 +304,10 @@ one control, and the value in force is the selected part.
    finding kinds the Judge accepts every time. **Account** and **Review account** pick the accounts
    ([Accounts](#accounts)). A seat is saved only when you press its **Save**. While a seat has a change that is not
    saved, the row shows the model in force.
-2. **Capacity**: **Cards at once**. A card that only waits on another card does not count, up to as many waiting
-   cards as this setting. The On the belt figure leaves these cards out, and a tap on it says how many wait.
+2. **Capacity**: **Cards at once**. It counts the cards that build: a card in its build, fix or rebase step. A card
+   in its review or its Test step does not count, and the machine's test slots limit its tests. A card that only
+   waits on another card does not count either. The On the belt figure leaves these cards out, and a tap on it says
+   how many wait.
    **Weekly pause** is the usage at which no new card starts, with the usage now beside it. **Test files at once**
    is the most test files a parallel release suite runs together. The default is 2, and the next parallel run reads
    it. If the number is above the machine's test slots, the row says the suite runs at the slots

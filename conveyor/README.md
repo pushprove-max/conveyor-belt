@@ -6,16 +6,18 @@
 on the values in `conveyor/lib/control-defaults.json`; a record keeps each value it sets.
 
 `conveyor.sh control cap <1-100|off>` sets the builder cap: how many cards build at once (Cards at once on the Rules
-tab). A card that only waits on another card does not take a build slot. These are the waits that do not count:
+tab). The cap counts the cards in their build, fix or rebase step: these steps run a builder session. A card in its
+review (with the judge), its Test step or its landing does not count. Its tests take the machine's test slots (the
+host file's `testSlots`), which limit them apart from the cap. Its waits do not count either:
 
 - a wait at the landing claim on a card that changes the same files,
 - a wait on the batch card that took the card,
 - a wait in the Test step for main to change, when main is red.
 
-A waiting card that runs its own checks or tests counts while they run, and its tests take test slots as other tests
-do. When the wait ends, the card counts again. The loop leaves out no more waiting cards than the cap. Each waiting
-card past that limit counts, so the loop does not start new cards while old cards wait. The machine's cap counts the
-cards of each project in the same way. `conveyor.sh foreman status`, `/units` and the Board show a waiting card as waiting, and
+A card in its build, fix or rebase step that waits for its seat's CLI does not take a build slot. The loop leaves out
+no more of these waiting cards than the cap. Each one past that limit counts, so the loop does not start new cards
+while old cards wait. The machine's cap counts every card of each project that builds, reviews, tests or lands,
+and leaves out the waiting cards in the same way. `conveyor.sh foreman status`, `/units` and the Board show a waiting card as waiting, and
 give the count of cards that build against the cap without the waiting cards.
 
 `conveyor.sh control judge on|off`, `conveyor.sh control judge always [<kind>...]` and
@@ -117,7 +119,8 @@ goes turn after turn. Each turn calls these functions in this order:
   of a split. A card that waits at its land step for a release run is ended, unless it has filed slices.
 - `turnside` starts the jobs that a `serve` runs beside the cards: the whole test on main, the idle mutation checks
   and the test-speed survey.
-- `turncount` counts the cards that build against the cap and the cards that wait, and writes `loop.json`.
+- `turncount` counts the cards that build against the cap, the cards that wait, and the cards in their review or
+  Test step, and writes `loop.json`.
 - `turnrestart` runs only when the loop's code is stale and a new script is known. It restarts the loop on the new
   code, and the new loop adopts the cards in flight.
 - `turnask` gets what the pick reads: the open issues, the urgent and main-red cards, and the blocked cards whose

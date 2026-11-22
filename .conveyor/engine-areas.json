@@ -541,6 +541,7 @@
 {"area": "followups", "test": "standing.test.sh"}
 {"area": "followups", "test": "cleanup.test.sh"}
 {"area": "card", "test": "review.test.sh"}
+{"area": "card", "test": "capwait.test.sh"}
 {"area": "card", "test": "reviewback.test.sh"}
 {"area": "card", "test": "donewhen.test.sh"}
 {"area": "card", "test": "checkcmd.test.sh"}
