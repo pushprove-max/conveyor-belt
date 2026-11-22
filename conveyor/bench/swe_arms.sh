@@ -385,7 +385,7 @@ swe_trial() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor kind
     # without Codex's own, which cannot start a command there (codexsb(), lib/control.sh).
     run="CONVEYOR_BENCH_BOX=1 CONVEYOR_MAIN=$(printf %q "$sb/$SWE_MAIN") CONVEYOR_CARDS=$(printf %q "$sb/cards") bash $(printf %q "$4") run 1 > $(printf %q "$sb/loop.log") 2>&1"
   else run=$(jq -r .run <<<"$a"); fi
-  printf '%s\n' "$c" > "$h/box"; docker rm -f "$c" > /dev/null 2>&1
+  docker rm -f "$c" > /dev/null 2>&1
   swe_ckstep 'Starting the test container'
   swe_box "$c" "$(jq -r .image <<<"$1")" "$sb" "${5-$(swe_logins "$a")}" "$eng" > "$h/box.err" 2>&1 \
     || { docker rm -f "$c" > /dev/null 2>&1; echo "its container could not be made: $(cliwords "$(cat "$h/box.err")" | tail -n 2 | paste -sd ' ' -)"; return 1; }
@@ -423,7 +423,7 @@ swe_trial() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor kind
     # The live records too: a session the time limit ended before its line was written is priced from them.
     swe_in 600 "$c" / "$SWE_LIVES" "SWE_CARDS=$sb/cards" < /dev/null > "$h/live" 2> /dev/null || rm -f "$h/live"
   fi
-  docker rm -f "$c" > /dev/null 2>&1; rm -f "$h/box"
+  docker rm -f "$c" > /dev/null 2>&1
   [ "$p" = 0 ] || return 1
   local secs=$(( $(date +%s) - t0 ))
   if [ "$kind" = conveyor ]; then

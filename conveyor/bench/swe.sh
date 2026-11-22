@@ -521,13 +521,18 @@ swe_sofar() { # <cost json>
 # no other text of them is shown.
 SWE_STEPS='{"build": "Building", "review": "Reviewing", "fix": "Fixing", "rebase": "Rebasing", "test": "Testing", "land": "Landing", "file": "Filing follow-ups"}'
 SWE_NOSTEP='Running Conveyor. Step unavailable.'
-swe_stepof() {
-  jq -rRs --argjson m "$SWE_STEPS" --arg u "$SWE_NOSTEP" '[splits("\n") | fromjson? | objects] as $r
-    | ([$r[] | select(.step == "start" and (.of | type) == "string")] | last) as $s
+# With <seen>, the start line shown last (swe_watch; null when none was), the step of each start line after it comes
+# first, one a line: a step that started and ended between two reads is still shown. With no <seen>, or one no longer
+# in the lines, only the last step is shown.
+swe_stepof() { # [<seen>]
+  jq -rRs --argjson m "$SWE_STEPS" --arg u "$SWE_NOSTEP" --slurpfile seen <(printf '%s' "${1-}") '[splits("\n") | fromjson? | objects] as $r
+    | [$r[] | select(.step == "start" and (.of | type) == "string")] as $a | ($a | last) as $s
     | if $s == null then $u
-      elif $s.of == "review" and any($r[]; (has("card") | not) and .step == "review" and (.action | strings | startswith("the judge "))
-        and (.at | strings) >= ($s.time | strings)) then "Judging"
-      else $m[$s.of] // $u end'
+      else (if $seen == [null] then -1 else [range($a | length) as $i | select($a[$i] == $seen[0]) | $i] | last // ($a | length - 1) end) as $i
+        | ($a[$i + 1:-1][] | $m[.of] // $u),
+          (if $s.of == "review" and any($r[]; (has("card") | not) and .step == "review" and (.action | strings | startswith("the judge "))
+            and (.at | strings) >= ($s.time | strings)) then "Judging"
+          else $m[$s.of] // $u end) end'
 }
 # While a trial's command runs (<pid>) on a task of the run: the phase it is at (swe_phase). An agent arm's is
 # "Running agent"; a conveyor arm's is its card's step (swe_stepof), read in its container every 2 seconds from its
@@ -548,16 +553,20 @@ SWE_LIVES='for f in "$SWE_CARDS"/*.live; do [ ! -f "$f" ] || { echo; head -c 400
   done; :'
 # Each card of the cards folder that only waits: its <worktree>.idle mark stands (the engine stands it while the
 # card sleeps out a wait for main to change, on another card, for the machine or for its seat's CLI, and never while
-# a session, check or test of it runs), as {idle: <card>, action: <its live record's action>}.
+# a session, check or test of it runs), as {idle: <card>, action: <its live record's action>, model: <its live
+# record's model>}.
 SWE_IDLE='for f in "$SWE_CARDS"/*.idle; do [ -e "$f" ] || continue; w=${f%.idle}
-    jq -cn --arg c "${w##*/}" --arg a "$(jq -r ".action | strings" "$w.live" 2>/dev/null)" "{idle: \$c, action: \$a}"; done; :'
+    jq -cn --arg c "${w##*/}" --arg a "$(jq -r ".action | strings" "$w.live" 2>/dev/null)" --arg m "$(jq -r ".model | strings" "$w.live" 2>/dev/null)" \
+      "{idle: \$c, action: \$a, model: \$m}"; done; :'
 # Whether the trial's card only waits, from the lines on stdin (its card records, and SWE_IDLE's): the newest card of
 # the task's issue has not ended, and its idle mark stands. Prints {card, why} then, why naming the wait from its live
-# record's action (cut to 300 characters); nothing otherwise. A card in a session, check or test has no idle mark.
+# record's action (cut to 300 characters); nothing otherwise. A card in a session, check or test has no idle mark; a
+# mark beside a live record that names a model is a session's own (a session's and the judge's record name their
+# model, a wait's never does): the session can write the cards folder, and it does not end the trial.
 swe_waited() {
   jq -Rsc '[splits("\n") | fromjson? | objects] as $r | ([$r[] | select(has("card") and .issue == 1)] | last) as $s
     | select($s != null and ($s.step | IN("landed", "blocked", "closed") | not))
-    | [$r[] | select(.idle | strings | . == $s.card)] | last | objects
+    | [$r[] | select(.idle | strings | . == $s.card)] | last | objects | select((.model // "") == "")
     | {card: .idle, why: ("its card waited" + (.action | strings // "" | .[:300]
         | if startswith("waiting ") then " " + .[8:] elif . == "" then ", with no session or test of it running" else ": " + . end))}'
 }
@@ -567,15 +576,18 @@ swe_waited() {
 swe_watch() { # <pid> <container> <kind> <sb>
   [ -n "${SWE_TASK:-}" ] || return 0
   [ "$3" = conveyor ] || { swe_phase 'Running agent'; swe_sofar "{\"usd\":null,\"state\":\"unknown\",\"unpriced\":${SWE_SESSIONS:-1}}"; return 0; }
-  local k=0 r was='' v ps
-  while kill -0 "$1" 2>/dev/null; do
-    if [ $((k % 10)) = 0 ] && r=$(swe_in 60 "$2" / 'tail -n 200 "$SWE_SST/cards.jsonl" 2>/dev/null; '"$SWE_LIVES; $SWE_IDLE" \
+  local k=0 r was='' v ps seen=null end=''
+  while :; do
+    # Read once more after the command ended: a step that started since the last read is still shown.
+    kill -0 "$1" 2>/dev/null || end=1
+    if { [ -n "$end" ] || [ $((k % 10)) = 0 ]; } && r=$(swe_in 60 "$2" / 'tail -n 200 "$SWE_SST/cards.jsonl" 2>/dev/null; '"$SWE_LIVES; $SWE_IDLE" \
         "SWE_SST=$SWE_SST" "SWE_CARDS=$4/cards" < /dev/null); then
-      v=$(swe_waited <<<"$r")
-      if [ -n "$v" ]; then
+      [ -n "$end" ] || v=$(swe_waited <<<"$r")
+      if [ -z "$end" ] && [ -n "$v" ]; then
         printf '%s\n' "$v" > "$4.h/waited"; mapfile -t ps < <(swe_tree "$1"); kill -TERM "${ps[@]}" 2>/dev/null; break
       fi
-      swe_phase "$(swe_stepof <<<"$r")"
+      while IFS= read -r v; do swe_phase "$v"; done < <(swe_stepof "$seen" <<<"$r")
+      seen=$(jq -Rsc '[splits("\n") | fromjson? | objects | select(.step == "start" and (.of | type) == "string")] | last' <<<"$r")
       if [ "$r" != "$was" ]; then
         was=$r
         v=$(jq -Rsc '[splits("\n") | fromjson? | objects] as $r | ([$r[] | select(has("card") and .issue == 1)] | last) as $s | select($s.step == "start" and $s.of == "review")
@@ -586,6 +598,7 @@ swe_watch() { # <pid> <container> <kind> <sb>
         swe_sofar "$({ printf '%s\n' "$r"; cat "$4.h/reviewer" 2>/dev/null; } | swe_cost)"
       fi
     fi
+    [ -z "$end" ] || break
     k=$((k + 1)); sleep 0.2
   done
 }
@@ -730,10 +743,8 @@ swe_end() { # <state> [gone: its process had ended with no end written]
     | .state = $s | .ended = $at | .current = null | .active = null | .seq = ((.seq // 0) + 1) | .updated = $at | del(.pid) + $i + (if $g == "" then {} else {gone: true} end)' "$SWE_DIR/live.json") && swe_put "$SWE_DIR/live.json" "$l" \
     && swe_runlog "$l"
   swe_event "Run ${1/guard/stopped by the usage guard}"
-  for f in "$SWE_DIR"/work/*/box "$SWE_DIR"/check/*/box; do
-    case $(cat "$f" 2>/dev/null) in "conveyor-swe-$SWE_RUN-"?*) docker rm -f "$(cat "$f")" > /dev/null 2>&1 ;; esac
-  done
-  # By name, not by a box file: a later check of the arm replaces the box file of a dead run's preflight container.
+  # By name in Docker's list, never by a file: a trial's container can write its sandbox, so a file there could name
+  # any container.
   docker ps -a --filter "name=$SWE_RUN-" --format '{{.Names}}' 2>/dev/null | while IFS= read -r f; do
     case $f in "sweb.eval."*".conveyor-$SWE_RUN-"?*|"conveyor-swe-$SWE_RUN-"?*) docker rm -f "$f" > /dev/null 2>&1 ;; esac
   done
@@ -857,10 +868,11 @@ swe_stopping() {
 # Stop: ends the run <id> (with none, the run going: `bench swe stop` as typed), and says how it ended. Under the stop
 # lock (swe_lock), as is the run lock's start: the run live.json names is the one this Stop acts on, never one that
 # starts while it acts. A run that is going gets SIGTERM, its process tree with it (swe_stopping records its end), and
-# SIGKILL after 30 s; one whose process is gone with no end written gets its end here. A Stop of a run that ended
-# (the same Stop again, or one sent before the run finished) changes nothing, and a run after it goes on.
+# SIGKILL after 30 s; one whose process is gone (its run lock is free) with no end written gets its end here. A Stop
+# of a run that ended (the same Stop again, or one sent before the run finished) changes nothing, and a run after it
+# goes on.
 swe_stop() { # [<run id>]
-  local id=${1:-} s p ps i=0 gone='' rc=0
+  local id=${1:-} s l p ps i=0 gone='' rc=0
   mkdir -p "$SWE_DIR" && exec {s}>>"$SWE_DIR/stop.lock" || return 1
   flock -w 60 "$s" || { exec {s}>&-; echo "conveyor: another Stop is going; read the run's state again" >&2; return 1; }
   [ -n "$id" ] || id=$(jq -r 'select(.state == "running") | .id // empty' "$SWE_DIR/live.json" 2>/dev/null)
@@ -869,6 +881,8 @@ swe_stop() { # [<run id>]
     # Its process, or "gone" for a running record with none (never 0: kill takes 0 as this Stop's own process group).
     p=$(jq -r --arg id "$id" 'select(.id == $id and .state == "running") | if (.pid | type) == "number" and .pid > 1 then .pid else "gone" end' "$SWE_DIR/live.json" 2>/dev/null)
     if [ -n "$p" ]; then
+      # A free run lock: the run's process has ended (swe_lock), and its pid may now be another process's.
+      exec {l}>>"$SWE_DIR/run.lock" && { ! flock -n "$l" || p=gone; exec {l}>&-; }
       if [ "$p" != gone ] && kill -0 "$p" 2>/dev/null; then
         printf '%s\n' "$id" > "$SWE_DIR/stop"; mapfile -t ps < <(swe_tree "$p"); kill -TERM "${ps[@]}" 2>/dev/null
         while kill -0 "$p" 2>/dev/null && [ $i -lt 300 ]; do sleep 0.1; i=$((i + 1)); done

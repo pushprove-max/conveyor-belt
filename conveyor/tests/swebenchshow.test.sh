@@ -330,6 +330,19 @@ t_swelive() {
     && jq -e '(.run.cols[0].wall | type) == "number"' <<<"$o" > /dev/null || fail "a task's or the arm's wall minutes are not kept: $(tail -n 1 "$B/runs.jsonl") $(jq -c .run.cols <<<"$o")"
 }
 
+# Bug (#1383 R33): swe_watch showed only the last start line of each read, every 2 s, and read nothing once the
+# command ended, so a step that started between two reads never reached the run's tail. Here the container's first
+# read has no start line, and its next (once the 1 s command has ended) has the build's and the review's.
+t_sweliveburst() {
+  local o
+  o=$(swefn 'sweliveseed r20261101T000000-1 null && export SWE_RUN=r20261101T000000-1 SWE_ARM=conveyor SWE_TASK=proj__a-1 SWE_SST=x
+    swe_in() { echo >> "$SWE_DIR/reads"; [ "$(wc -l < "$SWE_DIR/reads")" = 1 ] \
+      || printf "%s\n" "{\"card\":\"c1\",\"issue\":1,\"step\":\"start\",\"result\":\"ok\",\"of\":\"build\"}" "{\"card\":\"c1\",\"issue\":1,\"step\":\"start\",\"result\":\"ok\",\"of\":\"review\"}"; }
+    sleep 1 & swe_watch $! box conveyor "$SWE_DIR/sb" && jq -sc "map(.event)" "$SWE_DIR/tails/$SWE_RUN.jsonl"' 2>&1) # sleep: the trial's command, which must end before the second read
+  [ "$o" = '["Running Conveyor. Step unavailable.","Building","Reviewing"]' ] \
+    || fail "with a build and a review start line between two reads of the card, the tail does not show both steps in order: $o"
+}
+
 # Bugs (#644): a benchmark run kept no cost, so the Board could show none. (1) A session's known token usage gave no
 # list price (the pack's prices over the Board's table); (2) a task with only part of its usage priced read as whole,
 # and one with none as $0; (3) a step's final line was added to what its live record had said, not put in its place;

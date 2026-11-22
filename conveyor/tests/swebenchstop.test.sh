@@ -12,6 +12,12 @@ swecheckbox() {
   mkdir -p "$SWE_FX/boxes/conveyor-swe-check-other-x" "$B/check/other.h" && echo conveyor-swe-check-other-x > "$B/check/other.h/box" \
     || fail "the check's container was not made"
 }
+# <shell code> run with bench/swe.sh's functions on the state folder $T/$CASE/bench (no fixture), docker a stand-in
+# that lists no container and logs each call to $T/$CASE/docker.log.
+swedirect() { # <shell code>
+  (export HERE=$SRC RTAG=x ST=$T/$CASE/state; . "$SRC/bench/swe.sh" || exit 9; SWE_DIR=$T/$CASE/bench; mkdir -p "$SWE_DIR" || exit 9
+    docker() { printf '%s\n' "$*" >> "$T/$CASE/docker.log"; }; swe_board() { :; }; eval "$1")
+}
 # A run <id> live.json shows going on the first task, whose process is gone with no end written (killed), with its
 # trial's container left.
 swegone() { # <run id>
@@ -117,6 +123,37 @@ t_swestopgone() {
   [ "$(ls "$SWE_FX/boxes")" = conveyor-swe-check-other-x ] || fail "the run's container was left, or an arms check's removed: $(ls "$SWE_FX/boxes")"
 }
 
+# Bug (#1383 R32): a run's end (swe_end) read box files, which an arm can write, and read each one twice: a file that
+# named the run's container for the check named another for docker rm -f. Here each box file names the run's
+# container, and cat stands in for an arm that rewrites it after its first read: every later read of it gives another
+# container's name. Docker lists the run's container and an arms check's; only the run's goes.
+t_swestopbox() {
+  local id=r20261119T000000-1 d=$T/$CASE/bench out
+  mkdir -p "$d/work/t1" "$d/work/t2.h" && echo "conveyor-swe-$id-a-t1" > "$d/work/t1/box" && echo "conveyor-swe-$id-a-t2" > "$d/work/t2.h/box" \
+    && jq -nc --arg id "$id" '{id: $id, state: "running", active: null}' > "$d/live.json" || fail "the run was not made"
+  swedirect "SWE_RUN=$id"'; cat() { case ${1-} in */box) echo >> "$1.reads"; [ "$(wc -l < "$1.reads")" = 1 ] && command cat "$1" || echo another ;; *) command cat "$@" ;; esac; }
+    docker() { printf "%s\n" "$*" >> "$T/$CASE/docker.log"; [ "$1" != ps ] || printf "%s\n" "conveyor-swe-$SWE_RUN-a-t2" conveyor-swe-check-a-x; }
+    swe_end stopped' > /dev/null 2>&1
+  out=$(grep '^rm ' "$T/$CASE/docker.log" 2>&1)
+  [ "$out" = "rm -f conveyor-swe-$id-a-t2" ] \
+    || fail "the end of run $id, with box files (work/t1/box, work/t2.h/box) that change after their first read and Docker listing conveyor-swe-$id-a-t2 and conveyor-swe-check-a-x, removed other containers than the run's: $out"
+}
+
+# Bug (#1383 R37): Stop trusted kill -0 on live.json's pid, so once the run's process had ended and its pid was another
+# process's, Stop sent that process SIGTERM, and SIGKILL after 30 s. A free run lock says the run's process has ended.
+t_swestopreused() {
+  local id=r20261119T000000-1 d=$T/$CASE/bench p out
+  # Not this shell's child: an ended child left unreaped would still answer kill -0.
+  p=$(sleep 120 > /dev/null 2>&1 & echo $!) # sleep: the unrelated process that holds the reused pid; nothing waits on it
+  mkdir -p "$d" && jq -nc --arg id "$id" --argjson p "$p" '{id: $id, pid: $p, state: "running", active: null}' > "$d/live.json" \
+    || { kill "$p"; fail "the run was not made"; }
+  out=$(swedirect "swe_stop $id" 2>&1)
+  kill -0 "$p" 2>/dev/null || fail "Stop of run $id (live.json pid $p, a sleep of no run, run.lock free) ended that process: $out"
+  kill "$p"
+  [ "$out" = "conveyor: run $id was interrupted: its process had ended. Its end is recorded, its containers are removed, and its finished tasks are kept." ] \
+    || fail "Stop of run $id with its run lock free did not record the end of a run whose process was gone: $out"
+}
+
 # Bug (#645): a run started while live.json still showed a run whose process had gone, so a late Stop of that run,
 # reading it as going, could act on the new run's work. The new run records its end first, under the stop lock.
 t_swestopnext() {
@@ -172,6 +209,10 @@ t_swewaited() {
   [ -z "$o" ] || fail "a card in a session ended the trial: $o"
   : > "$d/c0.idle"; o=$(waited)
   [ -z "$o" ] || fail "another card's idle mark ended the trial: $o"
+  # Bug (#1383 R39): a session stood its own idle mark (`touch $PWD.idle` from its worktree) and ended the trial,
+  # so its half-made change was graded. Its live record, which names its model, says a session runs.
+  echo '{"step":"build","model":"bench-m","action":"editing x.py"}' > "$d/c1.live" && : > "$d/c1.idle"; o=$(waited)
+  [ -z "$o" ] || fail "a card in a session with an idle mark ended the trial (live record $(cat "$d/c1.live")): $o"
   echo '{"step":"test","action":"waiting for main to change: t fail on main at abc too"}' > "$d/c1.live" && : > "$d/c1.idle"; o=$(waited)
   [ "$o" = '{"card":"c1","why":"its card waited for main to change: t fail on main at abc too"}' ] || fail "the waiting card did not end the trial: $o"
   o=$(waited '{"card":"c1","issue":1,"step":"landed","result":"ok"}')
