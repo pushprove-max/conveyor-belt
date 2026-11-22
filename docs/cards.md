@@ -195,8 +195,12 @@ earlier finding whether the fix holds. It raises a declined finding again only w
 
 ### When the fix loop ends
 
-After a `NO-GO`, a fix session fixes the findings, and the card goes to its next review. The loop ends at the first
-of these:
+After a `NO-GO`, a fix session fixes the findings, and the card goes to its next review. The first fix session of a
+card runs at the effort of its seat. The second fix session of the same card, whether it fixes review findings or
+failed tests, runs one effort level above the effort of its seat, and a fix session after it runs at that level too.
+The level never goes above the highest effort that the pack's `pick.builder` list allows for the model, or above the
+highest effort its program takes when the list names no range. A model with no effort, such as an OpenCode builder,
+has no step. The loop ends at the first of these:
 
 - `go`: a review says `GO`.
 - `max-reviews`: the card has had three reviews. A card that starts from the kept patch of a blocked card also counts
@@ -275,6 +279,9 @@ such as `assert.ok(false)`, still shows the line that failed. A failed file whos
 Python `unittest` file, shows the place of the first stack trace in its output. The push check and a release's suite
 show the same, and a failed push check gives the place in its reason. The text of a line is not shown when the path
 to its file goes through a symbolic link. The tests need no change for this.
+
+The test fix session gets the failing cases first, each with its file and the place where it failed, and then the last
+200 lines of the raw output.
 
 A case that fails again runs on main. When it fails there too, Conveyor checks whether main or the machine is at
 fault. Main is at fault only when an input of the case's test file changed since its last recorded pass, and a

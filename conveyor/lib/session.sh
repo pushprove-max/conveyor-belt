@@ -470,8 +470,8 @@ apitries() { # <worktree> <step> <output file> <command ...>
 # The worktree's tree before the session is kept in <worktree>.before (treeof(), lib/donewhen.sh), so donewhen.sh asks() can tell a
 # session that changed nothing from one that found a change already there.
 # The session runs on the seat named (seat(): fix, the repair of review findings, or testFix, the repair of failed
-# changed tests), else the builder's.
-session() { # <worktree> <prompt> [step: build (when none is given), fix or rebase] [seat: builder (the default), fix or testFix]
+# changed tests), else the builder's. With up as its 5th argument it runs one effort level above the seat's (session1()).
+session() { # <worktree> <prompt> [step: build (when none is given), fix or rebase] [seat: builder (the default), fix or testFix] [up]
   local p=$2; newtexts p
   treeof "$1" > "$1.before" 2>/dev/null || rm -f "$1.before"
   apitries "$1" "${3:-build}" "$1.out" session1 "$1" "$p" "${@:3}"
@@ -567,9 +567,9 @@ session1() {
   local model effort agent rc s sec f dir='' x='' read=$SESSIONREAD roll run role=${4:-builder}
   s=$(seat "$role") && jqget "$s" model model effort effort agent agent || { echo "the pack's models.allowed lists no builder model"; return 1; }
   # The CLI the seat names, never another: one that is gone starts no session; one gone for a moment is waited for (seatwait()).
-  f=$(seatwait "$role" "$s" "$1" "${3:-build}") || { echo "$f"; return 1; }
-  # OpenCode takes no effort here (its line names none); OpenCode and Codex run on no Claude account. A Codex model
-  # named by its family is the newest of it, as for a review (codexmodel()).
+  # A second fix round (5th argument up) runs one effort level above the seat's, inside the pack's range (effortup()).
+  f=$(seatwait "$role" "$s" "$1" "${3:-build}") || { echo "$f"; return 1; }; [ "${5:-}" != up ] || [ -z "$effort" ] || effort=$(effortup "$agent" "$model" "$effort")
+  # OpenCode takes no effort here; OpenCode and Codex run on no Claude account. A Codex model named by its family is the newest of it (codexmodel()).
   case $agent in
     opencode) effort=''; read=$OPENCODEREAD; f=$(ocready "$1") || { echo "$f"; return 1; } ;;
     codex) read=$CODEXREAD; model=$(codexmodel "$model") || { echo "$model"; return 1; }; f=$(cxready "$1") || { echo "$f"; return 1; } ;;

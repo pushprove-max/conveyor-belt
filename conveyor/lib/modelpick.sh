@@ -160,6 +160,14 @@ PICKCLAMP="$OKMODELS"'def noeff($s; $g): $s == "builder" and $g == "opencode";
                  elif noeff($s; $m.g) then "\($m.model) takes no effort"
                  else "\($q.effort) is not one of the efforts the \($s) may take on \($m.model) (\($m.efforts | join(", ")))" end]
                  | join("; ")) + ": \($m.model) at \($f // "no effort")"} end) end)}] | from_entries;'
+# The effort one level above <effort> for a builder-seat session on <model> of <program> (a second fix round, session1()):
+# the next effort its program takes, fitted to the range the pack's pick.builder list gives the model (fit()), so it is
+# never above the range's top, even when <effort> is (a control record can set one the pack does not allow).
+effortup() { # <program> <model> <effort>
+  local r; packget pick r 2>/dev/null && [ -n "$r" ] || r='{}'
+  jq -rn --argjson r "$r" --argjson e "$EFFORTS" --arg g "$1" --arg m "$2" --arg f "$3" "$PICKCLAMP"'($e[$g] // []) as $l | ($l | index($f)) as $i
+    | (if $i == null then $f else $l[$i + 1] // $f end) as $t | fit($r; $e; "builder"; $g; $m; $t) // $f' 2>/dev/null || printf '%s\n' "$3"
+}
 # The judge's pick of the three seats (the rule Pick settings, Shadow or On, on a card modelpick() picked): the judge
 # is asked once, as Pick for me asks it (pickcall(), lib/control.sh), and its answer fitted to the pack (PICKCLAMP)
 # goes in the pick as asked: {builder, reviewer, judge, model: the judge's}, or {failed: why} when the issue cannot be

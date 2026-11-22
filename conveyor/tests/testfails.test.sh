@@ -112,6 +112,32 @@ EOF
   f=$(logfails 1 | jq -c '[.files[] | select(.file == "a.test.mjs") | .cases[].line]') || fail "the failures could not be read"
   [ "$f" = '["not ok 1 - one (at l.mjs:1)","not ok 2 - two (at d/s.txt:1)"]' ] || fail "a place read through a link shows a line outside the worktree: $f"
 }
+# #1306. Bug it catches: the test fix's prompt held only the last 200 raw lines of the output, so the fix session
+# searched them for the failures the engine had already read. The prompt now names each failing case with its file
+# and place first, then the raw tail: two cases of a node file (the place of each from its stack), a shell case (no
+# stack: the line of its t_<name>() in its file) and two cases of standalone shell files with no t_ function (the line
+# that prints its `FAIL [<name>]`, and the line that hands its quoted name to the check that prints it), listed before the output's own lines.
+t_testfixprompt() {
+  mkdir -p "$T/$CASE/wt" && printf '%s\n' 'x' 'y' > "$T/$CASE/wt/l.mjs" && printf '%s\n' '#!/bin/bash' '' 't_other() {' ':' '}' 't_boom() {' 'fail x' '}' > "$T/$CASE/wt/s.test.sh" \
+    && printf '%s\n' '#!/bin/bash' 'bad() { echo "FAIL [solo]: $1"; }' 'bad x' > "$T/$CASE/wt/h.test.sh" \
+    && printf '%s\n' '#!/bin/bash' 'check() { echo "FAIL [$1]"; }' "check 'quoted' x" > "$T/$CASE/wt/q.test.sh" || fail "the fixture could not be made"
+  cat > "$T/$CASE/cmd" <<'EOF'
+cd wt && echo "== a.test.mjs" | tee -a "$CONVEYOR_TEST_LOG/a.log"
+printf '%s\n' 'not ok 1 - one' "    at f ($PWD/l.mjs:1:1)" 'not ok 2 - two' "    at g ($PWD/l.mjs:2:1)"
+echo "-- FAIL a.test.mjs" >> "$CONVEYOR_TEST_LOG/a.log"
+echo "== s.test.sh" | tee -a "$CONVEYOR_TEST_LOG/s.log"; echo 'FAIL [boom]: it broke'; echo "-- FAIL s.test.sh" >> "$CONVEYOR_TEST_LOG/s.log"
+echo "== h.test.sh" | tee -a "$CONVEYOR_TEST_LOG/h.log"; echo 'FAIL [solo]: it broke too'; echo "-- FAIL h.test.sh" >> "$CONVEYOR_TEST_LOG/h.log"
+echo "== q.test.sh" | tee -a "$CONVEYOR_TEST_LOG/q.log"; echo 'FAIL [quoted]: it broke as well'; echo "-- FAIL q.test.sh" >> "$CONVEYOR_TEST_LOG/q.log"; exit 1
+EOF
+  local p want got
+  p=$(logfails 1 > "$T/$CASE/fails" && eval "$(sed -n '/^testfixprompt() {/,/^}/p' "$SRC/lib/card.sh")" && testfixprompt 'CARD' "$T/$CASE/wt" 1 "$(cat "$T/$CASE/fails")") || fail "the prompt could not be made: $p"
+  want=$'- a.test.mjs: not ok 1 - one (at l.mjs:1: x)\n- a.test.mjs: not ok 2 - two (at l.mjs:2: y)\n- h.test.sh: FAIL [solo]: it broke too (at h.test.sh:2)\n- q.test.sh: FAIL [quoted]: it broke as well (at q.test.sh:3)\n- s.test.sh: FAIL [boom]: it broke (at s.test.sh:6)'
+  got=$(sed -n '/^# The failing cases/,/^$/p' <<<"$p" | sed '1d;$d')
+  [ "$got" = "$want" ] || fail "the prompt lists these failing cases, not the five with file and line: $got"
+  # They come before the raw output, whose own lines carry no place, under its heading (which testruns.test.sh t_testsfix cuts at).
+  [ "$(grep -n '^# The failing cases' <<<"$p" | cut -d: -f1)" -lt "$(grep -n '^not ok 1 - one$' <<<"$p" | cut -d: -f1)" ] \
+    && grep -q '^# The changed tests fail (exit 1): fix that and nothing else. The end of the test output:$' <<<"$p" || fail "the failing cases are not before the raw output under its heading: $p"
+}
 # #1084, E1 and E5 of its review, for the push check's reader (failat(): a pre-push hook's output, and a test file the
 # push check ran). Bugs it catches: a Python traceback gave no place, and a link in the worktree to a file outside it
 # had that file's line read into the push line's reason. A Python traceback (its places: the call in the test, then the

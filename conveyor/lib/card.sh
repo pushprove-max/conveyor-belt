@@ -140,7 +140,7 @@ cardprompt() { # <card> <header> <rules> <brief>
   printf '%s' "$rhead"$'# Rules\n\n'"$3"$'\n\n'"${4#"$rhead"}"
 }
 # The prompts of the sessions after the build, each the card's prompt (cardprompt()) with its own part after it: a fix
-# of review findings, a fix of the changed tests (the last 200 lines of their output), and a rebuild or a port onto main.
+# of review findings, a fix of the changed tests (the failing cases, then the last 200 lines of their output), and a rebuild or a port onto main.
 fixprompt() { # <card prompt> <the findings, each led by its id, and what follows them>
   printf '%s' "$1"$'\n\n'"$FIX"$'\n'"$2"
 }
@@ -158,8 +158,20 @@ loopstop() { # <verdict> <reviews so far: pass + rounds> <rebased> <tfix> <lfix>
   elif [ -n "$7" ] && [ "$(counts "$8" | jq '.P0 + .P1')" = 0 ]; then echo repeat
   fi
 }
-testfixprompt() { # <card prompt> <worktree> <the test run's exit>
-  printf '%s' "$1"$'\n\n# The changed tests fail (exit '"$3"$'): fix that and nothing else. The end of the test output:\n'"$(tail -n 200 "$2.test" 2>/dev/null | tr -d '\000')"
+testfixprompt() { # <card prompt> <worktree> <the test run's exit> [the failures json of testfails(), as cardfailed() read them]
+  local f='' file name line n
+  # Each failing case with its file and the place it failed, first. A case's line ends with ` (at <file>:<line>: <text>)`
+  # when the output gave a stack; a shell case gives none, so its place is the line of its t_<name>() in its file, or, in a
+  # standalone test file with no such function, the first line that names the case as `[<name>]` or in quotes (where it
+  # prints its FAIL, or hands its name to the check that does). A failed file that names no case has its own at. Then the
+  # raw end of the output, under its own heading.
+  while IFS=$'\037' read -r file name line; do
+    [ -n "$file" ] || continue
+    if [ -n "$name" ] && [[ $line != *" (at "* ]] && n=$(awk -v p="t_$name() {" -v q="[$name]" -v s="'$name'" -v d="\"$name\"" 'index($0, p) == 1 { print NR; t = 1; exit } !m && (index($0, q) || index($0, s) || index($0, d)) { m = NR } END { if (!t && m) print m }' "$2/$file" 2>/dev/null) && [ -n "$n" ]; then line+=" (at $file:$n)"; fi
+    f+="- $file${line:+: $line}"$'\n'
+  done < <([ -z "${4:-}" ] || jq -r '.files[]? | .file as $f | if (.cases // []) != [] then .cases[] | [$f, (.name // ""), .line] elif .at then [$f, "", .at] else [$f, "", ""] end | join("\u001f")' <<<"$4" 2>/dev/null)
+  [ -z "$f" ] || f=$'\n\n# The failing cases of the changed tests, each with its file and the place it failed:\n'"$f"
+  printf '%s' "$1$f"$'\n\n# The changed tests fail (exit '"$3"$'): fix that and nothing else. The end of the test output:\n'"$(tail -n 200 "$2.test" 2>/dev/null | tr -d '\000')"
 }
 rebaseprompt() { # <card prompt> <worktree> <the conflict message> <the commit its patch was made against> [port]
   local p=''; [ -z "${5:-}" ] || p=$'\nOne review of this port alone follows: change nothing else.'
@@ -278,6 +290,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local fixtree='' # fixtree: the tree before the last fix round, which holds the lines that fix deleted (excerpts())
   local after # what follows a review (afterreview())
   local priv privfix='' p1 p1fix='' # priv: a last-review finding that is a privacy hit in the card's own change (privown()); privfix: its fix round was given; p1: the P1 finding that gets one fix round, p1fix: that round was given
+  local fixed=0 # fixed: the fix sessions this card has run, review fixes and test fixes; the second and every later one runs one effort level up (session1())
   local tmain='' # tmain: set once a failed test step has fitted the card onto a main that had moved (#582)
   local voids=0 # voids: the test runs in a row that gave no result (voidrun())
   local held # held: its test step waited for main or the machine (mainred.sh mainwait(), holdwait())
@@ -604,7 +617,8 @@ cardfix() {
     # (a MINOR line, minor()), or a rollout action (a ROLLOUT line, no defect), is not its to fix. Each finding it is told is led by its id (donewhen.sh numbered(), fixlines()).
     # It runs on the fix seat (seat(): the builder's unless the control record sets fix).
     ids=$(numbered "$wt") && fl=$(fixlines "$wt" "$ids") || { block "$c" "$n" "$wt" "fix: the engine could not give the review's findings their ids"; return; }
-    redbrief "$c" "$n" "$br"; t=$(session "$wt" "$(fixprompt "$sprompt" "$fl$more")" fix fix) || { block "$c" "$n" "$wt" "fix: $t"; return; }
+    redbrief "$c" "$n" "$br"; t=$(session "$wt" "$(fixprompt "$sprompt" "$fl$more")" fix fix "$([ "$fixed" = 0 ] || echo up)") || { block "$c" "$n" "$wt" "fix: $t"; return; }
+    fixed=$((fixed + 1))
     checked "$c" "$n" "$wt" "$issue" "$sprompt" fix "$t" || return
     # This fix round's findings, with their ids, and the diff it made, for the review after it (donewhen.sh repeats(), rereview()).
     mkdir -p "$wt.rounds" && git -C "$wt" add -A && git -C "$wt" diff "$old" "$(git -C "$wt" write-tree)" > "$wt.rounds/$((pass + rounds)).diff" \

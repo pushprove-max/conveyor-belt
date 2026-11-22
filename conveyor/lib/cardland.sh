@@ -345,9 +345,10 @@ cardfailed() {
     tmain=''
     [ "$route" != block ] || { block "$c" "$n" "$wt" "the changed tests failed again after their one fix round (exit $rc); nothing landed."$'\n'"$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000')"; return; }
     tfix=1; locked giveway "$c" "$wt" fixing; began "$c" "$n" fix
-    # On the testFix seat (seat(): the builder's unless the control record sets testFix).
-    redbrief "$c" "$n" "$br"; t=$(session "$wt" "$(testfixprompt "$sprompt" "$wt" "$rc")" fix testFix) \
+    # On the testFix seat (seat(): the builder's unless the control record sets testFix); the card's second fix session of any kind runs one effort level up.
+    redbrief "$c" "$n" "$br"; t=$(session "$wt" "$(testfixprompt "$sprompt" "$wt" "$rc" "$out")" fix testFix "$([ "$fixed" = 0 ] || echo up)") \
       || { block "$c" "$n" "$wt" "fix: $t"; return; }
+    fixed=$((fixed + 1))
     checked "$c" "$n" "$wt" "$issue" "$sprompt" fix "$t" || return
     go=next; return
   fi

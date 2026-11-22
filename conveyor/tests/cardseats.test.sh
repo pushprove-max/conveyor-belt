@@ -76,7 +76,8 @@ t_cardseatjudge() {
 
 # Bug: the fix of a review's findings and the fix of failed changed tests ran on the builder's model and effort, when
 # the control record names a fix and a testFix seat of their own. The build stays on the builder (m, medium), the
-# review fix runs on fix (m2, high), the test fix on testFix (m2, low), and the test command calls no model.
+# review fix runs on fix (m2, high), the test fix on testFix (m2, low) one level up, as the card's second fix (medium),
+# and the test command calls no model.
 t_cardseatfix() {
   seatsetup "[$(issue 7 2026-01-01)]"
   jq -c '.fix = {model: "m2", effort: "high"} | .testFix = {model: "m2", effort: "low"}' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
@@ -86,11 +87,54 @@ t_cardseatfix() {
   echo 'echo two >> a.txt; ! grep -q "The changed tests fail" "$STUB/brief" || touch "$STUB/testfixed"' > "$STUB/build"
   echo '[ -e "$STUB/testfixed" ] || { echo "FAIL a.test.sh"; exit 1; }' > "$STUB/test-cmd"
   : > "$STUB/sessions"; loop run >/dev/null || fail "run exited non-zero"
-  [ "$(st 'select(.issue == 7 and (.step | IN("build", "fix"))) | "\(.step) \(.model) \(.effort)"' | tr '\n' ,)" = "build m medium,fix m2 high,fix m2 low," ] \
+  [ "$(st 'select(.issue == 7 and (.step | IN("build", "fix"))) | "\(.step) \(.model) \(.effort)"' | tr '\n' ,)" = "build m medium,fix m2 high,fix m2 medium," ] \
     || fail "the build, review fix and test fix did not run on builder, fix and testFix: $(st 'select(.issue == 7) | [.step, .result, .model, .effort] | tostring' | tr '\n' ' ')"
-  [ "$(cut -d' ' -f1-5 "$STUB/sessions" | tr '\n' ,)" = "-p --model m --effort medium,-p --model m2 --effort high,-p --model m2 --effort low," ] \
+  [ "$(cut -d' ' -f1-5 "$STUB/sessions" | tr '\n' ,)" = "-p --model m --effort medium,-p --model m2 --effort high,-p --model m2 --effort medium," ] \
     || fail "the Claude sessions ran on: $(cut -d' ' -f1-5 "$STUB/sessions")"
   [ "$(st 'select(.step == "landed") | .issue')" = 7 ] || fail "the card did not land"
+}
+
+# #1306. Two NO-GO reviews, then a GO: the card's fix rounds, each on the builder's seat (m at medium) as the control
+# record sets no fix seat, with the jq filter given (when any) applied to the pack. It sets $got to the efforts of the
+# card's sessions, comma-joined (not printed: the setup must stay in the case's shell).
+fixrounds() { # [pack filter]
+  seatsetup "[$(issue 7 2026-01-01)]"; [ -z "${1:-}" ] || tune "$1"
+  printf '%s\n' '[P2] a.txt:1 wrong word' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
+  printf '%s\n' '[P2] a.txt:2 another wrong word' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
+  echo "$GO" > "$STUB/review.3"; echo 'echo "$RANDOM" >> a.txt' > "$STUB/build"
+  : > "$STUB/sessions"; loop run >/dev/null || fail "run exited non-zero" # loop: only a whole card has a second fix round, with its own seat's effort
+  got=$(cut -d' ' -f5 "$STUB/sessions" | tr '\n' ,)
+}
+# Bug it catches: a second fix round on a card ran at the effort of the first, so a round that failed once ran again
+# the same way. The build and the first fix run at medium, the second fix one level up (high).
+t_cardfixup() {
+  fixrounds; [ "$got" = "medium,medium,high," ] || fail "the build, first fix and second fix did not run at medium, medium and high: $(cut -d' ' -f1-5 "$STUB/sessions" | tr '\n' ,)"
+}
+# Bug it catches: the second fix round went above the pack's max for the model (pick.builder.m max medium): it must
+# stay at medium.
+t_cardfixupmax() {
+  fixrounds '.pick.builder.m = {max: "medium"}'; [ "$got" = "medium,medium,medium," ] || fail "the second fix went above the pack's max (medium): $(cut -d' ' -f1-5 "$STUB/sessions" | tr '\n' ,)"
+}
+
+# Bug it catches: a test fix that is the card's first fix ran one level up, because the reviews before it were counted as
+# fix rounds. Its one review is a GO, the changed tests fail once, and the build and the test fix both run at medium.
+t_cardfixupfirst() {
+  seatsetup "[$(issue 7 2026-01-01)]"
+  for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done
+  echo 'echo "$RANDOM" >> a.txt; ! grep -q "The changed tests fail" "$STUB/brief" || touch "$STUB/testfixed"' > "$STUB/build"
+  echo '[ -e "$STUB/testfixed" ] || { echo "FAIL a.test.sh"; exit 1; }' > "$STUB/test-cmd"
+  : > "$STUB/sessions"; loop run >/dev/null || fail "run exited non-zero" # loop: only a whole card has a test fix after its reviews
+  [ "$(cut -d' ' -f5 "$STUB/sessions" | tr '\n' ,)" = "medium,medium," ] || fail "the build and the first (test) fix did not both run at medium: $(cut -d' ' -f1-5 "$STUB/sessions" | tr '\n' ,)"
+}
+# Bug it catches: a second fix went above the pack's max when the effort of its seat already was above it (a control
+# record can set one the pack does not allow): `max` on a model the pack caps at xhigh stepped to `max`, not xhigh.
+# The step is the engine's own function (effortup()), run on that pack.
+t_effortupcap() {
+  seatsetup "[$(issue 7 2026-01-01)]"; tune '.pick.builder.m = {max: "xhigh"}'
+  local out
+  out=$( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
+    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/serve.sh")" && echo "$(effortup claude m max) $(effortup claude m high) $(effortup claude m xhigh) $(effortup claude m2 xhigh)" 2>&1)
+  [ "$out" = "xhigh xhigh xhigh max" ] || fail "effortup claude m max/high/xhigh and m2 xhigh (m capped at xhigh) gave: $out, not xhigh xhigh xhigh max"
 }
 
 # Bug: a card with no fix or testFix seat set repaired on another model than its own builder (here #7's own m2 at
