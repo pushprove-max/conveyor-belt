@@ -136,3 +136,79 @@ t_swecheckblocked() {
   grep -q "^conveyor: failed: it ran the trivial task headless but changed no file; its card ended at its blocked step (blocked): commit: git: 'hook' is not a git command" <<<"$o" \
     || fail "the reason does not give the card's last step and its reason: $o"
 }
+
+# Bug (R44): a request that joined a check read the answer at the record of the arm's key, which a check of other
+# settings (the key does not name them) can replace first: it found no answer, so it ran a check of its own and
+# printed a second ID. Here the joiner is held in the check of its first arm (stub-slowb, held while $SWE_FX/bhold is
+# there) while the joined check ends and a check of another taskTimeout runs and replaces the record.
+# It polls three real requests: the bug is in the order they take the arm's lock, which one call cannot show.
+t_swecheckjoinkept() {
+  swe; local id
+  jq '.preflight |= sub("phold"; "bhold") | .label = "Stub slowb"' "$SWE_FX/arms/stub-slow.json" > "$SWE_FX/arms/stub-slowb.json" \
+    && : > "$SWE_FX/phold" && : > "$SWE_FX/bhold" || fail "the held arms were not made"
+  loop bench swe arms check stub-slow > "$T/$CASE/one.out" 2>&1 & local p1=$!
+  wait_until "jq -e '.step == \"Checking its tools and logins\"' '$B/preflight/stub-slow/stub-slow.json'" "cat '$T/$CASE/one.out'" \
+    || fail "the held check's record does not say it is checking its tools"
+  id=$(sed -n 's/^stub-slow: checking //p' "$T/$CASE/one.out"); [ -n "$id" ] || fail "the held check printed no ID: $(cat "$T/$CASE/one.out")"
+  loop bench swe arms check stub-slowb stub-slow > "$T/$CASE/two.out" 2>&1 & local p2=$!
+  wait_until "jq -e '.step == \"Checking its tools and logins\"' '$B/preflight/stub-slowb/stub-slowb.json'" "cat '$T/$CASE/two.out'" \
+    || fail "the joiner's first arm is not held in its check"
+  grep -qx "stub-slow: checking $id" "$T/$CASE/two.out" || fail "the request did not join the check that runs: $(cat "$T/$CASE/two.out") (that check: $id)"
+  loop bench swe arms check --settings '{"taskTimeout": 7200}' stub-slow > "$T/$CASE/three.out" 2>&1 & local p3=$!
+  wait_until "grep -q '^stub-slow: ' '$T/$CASE/three.out'" || fail "the request of other settings said nothing on admission"
+  rm "$SWE_FX/phold"; wait "$p1"; wait "$p3"
+  jq -e --arg id "$id" '.id != $id and .limits.taskTimeout == 7200 and .state == "ready"' "$B/preflight/stub-slow/stub-slow.json" > /dev/null \
+    || fail "the check of other settings did not replace the joined check's record: $(cat "$B/preflight/stub-slow/stub-slow.json")"
+  rm "$SWE_FX/bhold"; wait "$p2"
+  [ "$(sed -n '3,$p' "$T/$CASE/two.out")" = "$(printf 'stub-slowb: ready\nstub-slow: ready')" ] \
+    || fail "the joiner did not print the joined check's answer: $(cat "$T/$CASE/two.out") (joined: $id)"
+  [ "$(grep -c '^create .*-check-stub-slow-preflight ' "$SWE_FX/docker.log")" = 2 ] || fail "the joiner ran a check of its own: $(grep '^create ' "$SWE_FX/docker.log")"
+}
+
+# Bug (R45): a request that waited for a check of other settings ran its setup (Docker, the harness, the image fetch)
+# before it wrote its record or printed its ID, so through that setup `bench swe arms` showed the other settings'
+# ended check and no ID of this one. Here the image fetch is held while $SWE_FX/ihold is there, once the first check
+# is past its own. It polls two real requests: the bug is what a second process reads while the waiter is mid-setup.
+t_swecheckwaitid() {
+  swe; local id o
+  : > "$SWE_FX/phold" || fail "the hold was not made"
+  loop bench swe arms check stub-slow > "$T/$CASE/one.out" 2>&1 & local p1=$!
+  wait_until "jq -e '.step == \"Checking its tools and logins\"' '$B/preflight/stub-slow/stub-slow.json'" "cat '$T/$CASE/one.out'" \
+    || fail "the held check's record does not say it is checking its tools"
+  loop bench swe arms check --settings '{"taskTimeout": 7200}' stub-slow > "$T/$CASE/two.out" 2>&1 & local p2=$!
+  wait_until "grep -qx 'stub-slow: waiting for the check of the arm that runs now' '$T/$CASE/two.out'" "cat '$T/$CASE/two.out'" \
+    || fail "the request of other settings did not wait for the check that runs"
+  : > "$SWE_FX/ihold" && rm "$SWE_FX/phold" || fail "the image fetch was not held"
+  wait "$p1"
+  WAIT_CEILING=30 wait_until "grep -q '^stub-slow: checking ' '$T/$CASE/two.out'" "cat '$T/$CASE/two.out'" \
+    || fail "the waited check printed no ID before its image fetch: $(cat "$T/$CASE/two.out")"
+  id=$(sed -n 's/^stub-slow: checking //p' "$T/$CASE/two.out")
+  wait_until "jq -e --arg id '$id' '.id == \$id and .step == \"Fetching the test image\"' '$B/preflight/stub-slow/stub-slow.json'" \
+    "cat '$B/preflight/stub-slow/stub-slow.json'" || fail "the waited check's record does not say it fetches the image"
+  o=$(loop bench swe arms 2>&1); grep -qx "stub-slow (Stub slow, agent): checking ($id): Fetching the test image" <<<"$o" \
+    || fail "the arms list does not show the waited check fetching its image, with its ID $id: $o"
+  rm "$SWE_FX/ihold"; wait "$p2"
+  [ "$(sed -n 3p "$T/$CASE/two.out")" = "stub-slow: ready" ] || fail "the waited check did not end ready: $(cat "$T/$CASE/two.out")"
+}
+
+# Bug (R46): a check recorded the logins of its admission but tested, and gave its container, the logins read when its
+# preflight ran: with the reviewer moved from Codex to Claude while the conveyor arm's check fetched its image, its
+# container had no Codex login though its record, of a Codex reviewer, passed; and its sandbox's control record,
+# read then too, gave the card the Claude reviewer its record did not name. Here the image fetch is held while
+# $SWE_FX/ihold is there. It polls a real request: the seat must move between its admission and its preflight.
+t_swecheckloginsadmit() {
+  swe; local id
+  : > "$SWE_FX/ihold" || fail "the image fetch was not held"
+  loop bench swe arms check conveyor > "$T/$CASE/one.out" 2>&1 & local p1=$!
+  wait_until "grep -q '^conveyor: checking ' '$T/$CASE/one.out'" "cat '$T/$CASE/one.out'" || fail "the check printed no ID"
+  id=$(sed -n 's/^conveyor: checking //p' "$T/$CASE/one.out")
+  wait_until "jq -e --arg id '$id' 'select(.id == \$id) | .step == \"Fetching the test image\" and .logins == \"claude codex\"' '$B/preflight/conveyor/'*.json" \
+    "cat '$B/preflight/conveyor/'*.json" || fail "the check's record does not say it fetches the image with the Codex reviewer's logins"
+  jq -c '.reviewer = {cli: "claude", model: "m"} | .judgeOn = false' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json" || fail "the reviewer was not moved"
+  rm "$SWE_FX/ihold"; wait "$p1"
+  grep -qx 'conveyor: ready' "$T/$CASE/one.out" || fail "the check did not pass: $(cat "$T/$CASE/one.out")"
+  [ "$(cat "$SWE_FX/codex.seen" 2>/dev/null)" = CODEX-LOGIN ] \
+    || fail "the container was not given the logins of the check's admission (claude codex) but those read after the reviewer moved"
+  jq -e '.reviewer.model == "x" and .reviewer.cli != "claude"' "$SWE_FX/control.seen" > /dev/null \
+    || fail "the preflight's card was not given the reviewer of the check's admission (Codex, x) but $(jq -c .reviewer "$SWE_FX/control.seen" 2>&1)"
+}

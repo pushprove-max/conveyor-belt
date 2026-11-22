@@ -46,7 +46,7 @@
 # is an estimate, swe_estimate), a card's records and, for a conveyor arm, fixRounds and findingsFixed (the findings of the
 # reviews a fix round followed), the inputs; and from the grade: class,
 # tests, ref and measures, as swe_harness.py's grade says, with only class kept for a patch that was not graded: none
-# when the result is older than them, which each reader shows as null, not kept) and .patch, preflight/<arm>/<key>.json (key: swe_armkey(); each check's record, from its start, swe_ckopen) and its lock,
+# when the result is older than them, which each reader shows as null, not kept) and .patch, preflight/<arm>/<key>.json (key: swe_armkey(); each check's record, from its start, swe_ckopen) and its lock, preflight/<arm>/id/<id>.json (each ended check's record by its ID, for a day, swe_ckend),
 # arms/<id>.json (each saved arm revision, swe_armsave), frozen/<arm> while a run goes (its copy of what a conveyor
 # arm reads of the project, swe_freeze),
 # a line a run in runs.jsonl (changed under runs.lock, swe_runlog), the run in progress in live.json, tails/<run>.jsonl (each run's event tail, swe_event),

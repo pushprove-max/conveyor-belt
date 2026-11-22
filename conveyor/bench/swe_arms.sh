@@ -133,13 +133,15 @@ swe_armkey() { # <arm json> <engine commit, conveyor kind> <model>
   printf '%s\n' "${k//[^A-Za-z0-9._-]/-}"
 }
 # Where a conveyor arm's sandbox reads the project's files from: the run's copy of them for the arm in use (SWE_FZ,
-# swe_freeze), else the project's checkout (a preflight `bench swe arms check` runs, the Board's history, Compare).
+# swe_freeze; a check of `bench swe arms check`, its copy taken at its admission), else the project's checkout (the
+# Board's history, Compare, a check's request read for the arms' list).
 # Sets the caller's o to that folder and PACK, the pack packget reads, to the pack there: the caller makes both local.
 swe_root() {
   if [ -n "${SWE_FZ:-}" ]; then o=$SWE_FZ/main; PACK=$o/.conveyor/project.json; else o=$MAIN; fi
 }
 # A run's copy of what a conveyor arm's sandbox reads of the project, taken once at the run's start, so every task of
-# the run builds on the same seats, policy and rules, even when the project's change while it runs: the sandbox's
+# the run builds on the same seats, policy and rules, even when the project's change while it runs (a check's too,
+# taken at its admission, so its preflight tests the seats and logins its record holds): the sandbox's
 # control record (swe_ctl) in <folder>/control.json, and under <folder>/main the pack and, for an arm on the project's
 # rules, the card rules and each area rule file the pack maps. A rule file missing or unreadable now is missing there
 # too: swe_taskrules and swe_pack refuse the arm when a task's card reads it.
@@ -370,7 +372,7 @@ SWE_ASK='Fix this issue in the repository in the current folder. Change the code
 # mount; fails (prints why) only when the container could not be made or the patch read, which says nothing of the
 # arm. An arm that does not fire (its install, preflight or command failed, or its output shows no use of its method)
 # has fired false and why: that is the arm's failure, never a task not run.
-swe_trial() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor kind>
+swe_trial() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor kind> [<logins>: a check's, fixed at its admission; else swe_logins now]
   local sb=$2 a=$3 h=$2.h base t0 c rc='' run why='' kind eng='' to b n p=0 ended='' wc=''
   base=$(jq -r .base <<<"$1"); t0=$(date +%s); kind=$(jq -r .kind <<<"$a"); to=$(swe_set .taskTimeout)
   n=conveyor-swe-${SWE_RUN:-check}-$(jq -r .name <<<"$a")-$(jq -r .id <<<"$1"); c=${n//[^A-Za-z0-9_.-]/-}
@@ -385,7 +387,7 @@ swe_trial() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor kind
   else run=$(jq -r .run <<<"$a"); fi
   printf '%s\n' "$c" > "$h/box"; docker rm -f "$c" > /dev/null 2>&1
   swe_ckstep 'Starting the test container'
-  swe_box "$c" "$(jq -r .image <<<"$1")" "$sb" "$(swe_logins "$a")" "$eng" > "$h/box.err" 2>&1 \
+  swe_box "$c" "$(jq -r .image <<<"$1")" "$sb" "${5-$(swe_logins "$a")}" "$eng" > "$h/box.err" 2>&1 \
     || { docker rm -f "$c" > /dev/null 2>&1; echo "its container could not be made: $(cliwords "$(cat "$h/box.err")" | tail -n 2 | paste -sd ' ' -)"; return 1; }
   swe_ckstep 'Installing the arm'
   if ! swe_in "$to" "$c" "$sb/$SWE_MAIN" "$(jq -r '.install // "true"' <<<"$a")" "SWE_SB=$sb" < /dev/null > "$h/install.log" 2>&1; then
@@ -477,14 +479,16 @@ swe_checktask() { # <image>
 # An arm's preflight: offered, each login it uses present on this machine, then the trivial task in a container: its
 # install, its preflight command and its run, which must fire and change hello.py (Docker and the harness are checked
 # before, by swe_setup, in both callers). Prints nothing when it passed, else what is missing. Run in a check
-# (swe_check, swe_arms), which keeps its answer in the check's record.
-swe_preflight() { # <arm json> <image> <engine's conveyor.sh, conveyor kind>
+# (swe_check, swe_arms), which keeps its answer in the check's record: the logins are its request's (swe_checkq),
+# read at its admission, and a conveyor arm's sandbox reads the copy of the project's files taken then (SWE_FZ,
+# swe_freeze), so a seat moved while it waits or sets up changes neither what it tests nor its record.
+swe_preflight() { # <arm json> <image> <engine's conveyor.sh, conveyor kind> <logins>
   local a=$1 n why='' l f t sb b
   n=$(jq -r .name <<<"$a")
   swe_ckstep 'Setting up the trivial task'
   if jq -e '.offered == false' <<<"$a" > /dev/null; then why="not offered: $(jq -r '.why // "no reason given"' <<<"$a")"
   else
-    for l in $(swe_logins "$a"); do
+    for l in $4; do
       f=$(swe_login "$l") && [ -s "$f" ] && continue
       why="no $l login on this machine: ${f:+${f/#$HOME/\~} is missing; }sign in with $l (on macOS a Claude login kept in the Keychain has no such file)"; break
     done
@@ -492,7 +496,7 @@ swe_preflight() { # <arm json> <image> <engine's conveyor.sh, conveyor kind>
   if [ -z "$why" ]; then
     sb=$SWE_DIR/check/$n
     if ! t=$(swe_checktask "$2") || ! swe_sandbox "$t" "$sb" 2> /dev/null; then why="the trivial task could not be set up"
-    elif ! b=$(swe_trial "$t" "$sb" "$a" "$3"); then why=$b
+    elif ! b=$(swe_trial "$t" "$sb" "$a" "$3" "$4"); then why=$b
     elif ! jq -e .fired <<<"$b" > /dev/null; then why="on the trivial task, $(jq -r .why <<<"$b")"
     elif [ ! -s "$sb.h/patch" ]; then why="it ran the trivial task headless but changed no file"
       # A conveyor arm's card says why it ended with no change (an engine version that cannot run in the container:
@@ -534,10 +538,12 @@ swe_cklock() { # <request json> [wait]
 }
 # With the lock taken after a wait: prints the why of the record of the request's key (nothing for a pass) when a
 # check of the same request ended since <since> (the one waited for, or one after it): the two requests shared it,
-# and the caller frees the lock. Else returns 1: the lock is for the caller's own check.
-swe_ckshared() { # <request json> <since: epoch seconds>
+# and the caller frees the lock. Else returns 1: the lock is for the caller's own check. The record is the one given
+# (as it was when the lock was taken, before the caller's own record replaced it), else the key's, read now.
+swe_ckshared() { # <request json> <since: epoch seconds> [<record json>]
   local f; f=$SWE_DIR/preflight/$(jq -r '"\(.spec.name)/\(.key)"' <<<"$1").json
-  jq -er --argjson q "$1" --argjson s "$2" "$SWE_CHECKOK"'select(.state != "checking" and .epoch >= $s and samecheck($q)) | .why // ""' "$f" 2>/dev/null
+  { if [ $# -ge 3 ]; then printf '%s\n' "$3"; else cat "$f"; fi; } 2>/dev/null \
+    | jq -er --argjson q "$1" --argjson s "$2" "$SWE_CHECKOK"'select(.state != "checking" and .epoch >= $s and samecheck($q)) | .why // ""' 2>/dev/null
 }
 # Writes the record of the check that holds the lock (SWE_CKF), in state checking at <step>; SWE_CKID is its ID.
 swe_ckopen() { # <request json> <step>
@@ -547,11 +553,16 @@ swe_ckopen() { # <request json> <step>
     '{id: $id, arm: .spec.name, key, state: "checking", step: $s, ok: false, why: null, started: $at, at: $at, epoch: $e, pid: $p, spec, logins, image, limits, set}' <<<"$1")"
 }
 swe_ckstep() { [ -z "${SWE_CKF:-}" ] || swe_put "$SWE_CKF" "$(jq -c --arg s "$1" '.step = $s' "$SWE_CKF")"; } # <step>: of the check running (SWE_CKF), else nothing
-# Ends the check (SWE_CKF): ready when <why> is empty, else failed with it, on <image> when given; frees its lock.
+# Ends the check (SWE_CKF): ready when <why> is empty, else failed with it, on <image> when given; frees its lock. The
+# ended record is kept by its ID too, preflight/<arm>/id/<id>.json, for a day: a request that joined the check reads
+# its answer there, as a check of other settings (its key does not name them) may replace the key's record before.
 swe_ckend() { # <why> [<image>]
-  swe_put "$SWE_CKF" "$(jq -c --arg w "$1" --arg i "${2:-}" --arg at "$(swe_now)" --argjson e "$(date +%s)" \
+  local r d=${SWE_CKF%/*}/id
+  r=$(jq -c --arg w "$1" --arg i "${2:-}" --arg at "$(swe_now)" --argjson e "$(date +%s)" \
     '.state = (if $w == "" then "ready" else "failed" end) | .ok = ($w == "") | .why = (if $w == "" then null else $w end) | .step = null | .at = $at | .epoch = $e
-     | del(.pid) | if $i == "" then . else .image = $i end' "$SWE_CKF")"
+     | del(.pid) | if $i == "" then . else .image = $i end' "$SWE_CKF")
+  swe_put "$SWE_CKF" "$r"
+  [ -z "$r" ] || { mkdir -p "$d" && find "$d" -name '*.json' -mmin +1440 -delete 2>/dev/null; swe_put "$d/$(jq -r .id <<<"$r").json" "$r"; }
   exec {SWE_CKFD}>&-
 }
 # One check of an arm whose setup is done (Docker, harness, image, engine): it runs the preflight, or takes the answer
@@ -563,7 +574,7 @@ swe_check() { # <arm json> <key> <image> <engine's conveyor.sh, conveyor kind>
     if w=$(swe_ckshared "$q" "$s"); then exec {SWE_CKFD}>&-; printf '%s' "$w"; return; fi
   fi
   swe_ckopen "$q" 'Setting up the trivial task' || { exec {SWE_CKFD}>&-; printf 'its check record could not be written'; return; }
-  w=$(swe_preflight "$1" "$3" "$4"); swe_ckend "$w"; printf '%s' "$w"
+  w=$(swe_preflight "$1" "$3" "$4" "$(jq -r .logins <<<"$q")"); swe_ckend "$w"; printf '%s' "$w"
 }
 # An arm can be picked once its preflight passed: a pass of the request (checkok) is taken, else the check runs now.
 # Prints nothing when the arm is ready, else why not.
@@ -620,7 +631,7 @@ swe_arms() { # [check [--settings <json>] <arm>... | save <name> <spec json> | s
   if [ "${1:-}" = check ]; then
     shift; [ "${1:-}" != --settings ] || { [ $# -ge 2 ] || { echo "$SWE_ARMSUSE" >&2; return 2; }; swe_settings "$2" || return; shift 2; }
     [ $# -gt 0 ] || { echo "$SWE_ARMSUSE" >&2; return 2; }
-    local names=() as=() qs=() fs=() fds=() js=() x=() since i SWE_CKF='' SWE_CKFD='' SWE_CKID='' SWE_CKPREP='' SWE_CKIMG='' SWE_CKWHY=''
+    local names=() as=() qs=() fs=() fds=() js=() zs=() x=() since i p z=$SWE_DIR/check/fz.$$ SWE_FZ='' SWE_CKF='' SWE_CKFD='' SWE_CKID='' SWE_CKPREP='' SWE_CKIMG='' SWE_CKWHY=''
     mapfile -t names < <(printf '%s\n' "$@" | awk '!s[$0]++')
     # A preflight starts a model session on the trivial task: the usage guard holds it back as it holds a run. An arm
     # or saved revision that is not there refuses the whole request, as a run's does, before any check is admitted.
@@ -628,13 +639,16 @@ swe_arms() { # [check [--settings <json>] <arm>... | save <name> <spec json> | s
     ! swe_held "$gc" "$ga" || { echo "conveyor: the usage guard is reached: no preflight starts while it stands" >&2; return 1; }
     # Each arm's check is admitted at once, its record written (checking) before any setup, and its ID printed: an arm
     # whose check runs now (another request's) waits for it. A conveyor arm checks on main's engine (its key names it;
-    # "main" when main cannot be read, which its check then fails on).
+    # "main" when main cannot be read, which its check then fails on), its sandbox on the copy of the project's files
+    # taken at its admission (zs, swe_freeze), whose seats give its request's logins.
     since=$(date +%s)
     for n in "${names[@]}"; do
       a=$(swe_arm "$n") || { echo "conveyor: no arm $n: \`conveyor.sh bench swe arms\` lists them" >&2; bad=1; continue; }
       [ "$(jq -r .kind <<<"$a")" != conveyor ] || swe_mainc
       mapfile -t x < <(swe_armnow "$a"); k=${x[0]:-}; [ -n "$k" ] || k=$(swe_armkey "$a" main '')
-      as+=("$a"); qs+=("$(swe_checkq "$a" "$k" '')")
+      SWE_FZ=''; [ "$(jq -r .kind <<<"$a")" != conveyor ] || { SWE_FZ=$z/${n//[^A-Za-z0-9._-]/-}; swe_freeze "$a" "$SWE_FZ"; } \
+        || { echo "$n: failed: the project's control record, pack or rules could not be copied for its check"; bad=1; continue; }
+      as+=("$a"); zs+=("$SWE_FZ"); qs+=("$(swe_checkq "$a" "$k" '')"); SWE_FZ=''
       if swe_cklock "${qs[-1]}"; then
         SWE_CKID=''; swe_ckopen "${qs[-1]}" 'Checking Docker and the harness' || SWE_CKF=''
         fs+=("$SWE_CKF"); fds+=("$SWE_CKFD"); js+=(''); [ -z "$SWE_CKF" ] || echo "$n: checking $SWE_CKID"
@@ -647,27 +661,33 @@ swe_arms() { # [check [--settings <json>] <arm>... | save <name> <spec json> | s
         if [ -n "$r" ]; then echo "$n: checking $r"; else echo "$n: waiting for the check of the arm that runs now"; fi
       fi
     done
-    # The admitted checks, then each that waited: one that joined a check takes that check's answer, whatever it
-    # failed on (its image too); another's answer is the check it waited for when that one was of the same request on
-    # the same image, the first task's of its own task list (swe_ckprep, swe_ckshared); else it is admitted then and
-    # runs its own (as is one whose joined check stopped before it ended).
+    # The admitted checks, then each that waited: one that joined a check takes that check's answer by its ID (kept by
+    # swe_ckend), whatever it failed on (its image too); else it is admitted once it holds the lock, its record written
+    # (checking) and its ID printed before the setup, and its answer is the check it waited for when that one was of
+    # the same request on the same image, the first task's of its own task list (swe_ckprep, swe_ckshared), else its
+    # own check's (as is one whose joined check stopped before it ended). Its logins and seats stay those of its
+    # admission.
     for i in "${!as[@]}"; do [ -z "${js[i]}" ] || continue; swe_armcheck "$i" || bad=1; done
     for i in "${!as[@]}"; do
       [ -n "${js[i]}" ] || continue
       n=$(jq -r .name <<<"${as[i]}")
       SWE_CKFD=''; swe_cklock "${qs[i]}" wait || { echo "$n: failed: its check could not be started"; bad=1; continue; }
       if [ "${js[i]}" != - ] && r=$(jq -er --arg id "${js[i]}" 'select(.id == $id and .state != "checking") | .why // ""' \
-        "$SWE_DIR/preflight/$n/$(jq -r .key <<<"${qs[i]}").json" 2>/dev/null); then exec {SWE_CKFD}>&-
+        "$SWE_DIR/preflight/$n/id/${js[i]}.json" 2>/dev/null); then exec {SWE_CKFD}>&-
         if [ -z "$r" ]; then echo "$n: ready"; else echo "$n: failed: $r"; bad=1; fi; continue
       fi
-      ! swe_ckprep || qs[i]=$(swe_checkq "${as[i]}" "$(jq -r .key <<<"${qs[i]}")" "$SWE_CKIMG")
-      if r=$(swe_ckshared "${qs[i]}" "$since"); then exec {SWE_CKFD}>&-
-        if [ -z "$r" ]; then echo "$n: ready"; else echo "$n: failed: $r"; bad=1; fi; continue
-      fi
+      p=$(cat "$SWE_DIR/preflight/$n/$(jq -r .key <<<"${qs[i]}").json" 2>/dev/null)
       SWE_CKF=''; swe_ckopen "${qs[i]}" 'Checking Docker and the harness' || SWE_CKF=''
       [ -z "$SWE_CKF" ] || echo "$n: checking $SWE_CKID"
-      fs[i]=$SWE_CKF; fds[i]=$SWE_CKFD; swe_armcheck "$i" || bad=1
+      fs[i]=$SWE_CKF; fds[i]=$SWE_CKFD
+      ! swe_ckprep "${fs[i]}" || qs[i]=$(jq -c --arg m "$SWE_CKIMG" '.image = $m' <<<"${qs[i]}")
+      if r=$(swe_ckshared "${qs[i]}" "$since" "$p"); then
+        if [ -n "${fs[i]}" ]; then swe_ckend "$r" "$SWE_CKIMG"; else exec {SWE_CKFD}>&-; fi; fs[i]=''; fds[i]=''; SWE_CKF=''
+        if [ -z "$r" ]; then echo "$n: ready"; else echo "$n: failed: $r"; bad=1; fi; continue
+      fi
+      swe_armcheck "$i" || bad=1
     done
+    rm -rf "$z"
     return "$bad"
   fi
   [ $# = 0 ] || { echo "$SWE_ARMSUSE" >&2; return 2; }
@@ -688,7 +708,7 @@ swe_arms() { # [check [--settings <json>] <arm>... | save <name> <spec json> | s
 # the setup every check of the command shares, done once (swe_ckprep), then main's engine for a conveyor arm, then
 # the preflight. Ends its record and prints "<arm>: ready" or "<arm>: failed: <why>"; returns 1 when it failed.
 swe_armcheck() { # <i>
-  local a=${as[$1]} n r='' eng='' m; n=$(jq -r .name <<<"$a")
+  local a=${as[$1]} n r='' eng='' m SWE_FZ=${zs[$1]}; n=$(jq -r .name <<<"$a")
   SWE_CKF=${fs[$1]} SWE_CKFD=${fds[$1]}
   if [ -z "$SWE_CKF" ]; then exec {SWE_CKFD}>&-; echo "$n: failed: its check record could not be written"; return 1; fi
   swe_ckprep "${fs[@]}" || r=$SWE_CKWHY
@@ -700,7 +720,7 @@ swe_armcheck() { # <i>
   fi
   if [ -z "$r" ]; then
     SWE_MODEL=''; [ "$(jq -r .kind <<<"$a")" = conveyor ] || { m=$(jq -r '.model // ""' <<<"$a"); [ "$m" != builder ] || m=$(swe_solomodel); SWE_MODEL=$m; }
-    r=$(swe_preflight "$a" "$SWE_CKIMG" "$eng")
+    r=$(swe_preflight "$a" "$SWE_CKIMG" "$eng" "$(jq -r .logins <<<"${qs[$1]}")")
   fi
   swe_ckend "$r" "$SWE_CKIMG"; fs[$1]=''; fds[$1]=''; SWE_CKF=''
   if [ -z "$r" ]; then echo "$n: ready"; else echo "$n: failed: $r"; return 1; fi
