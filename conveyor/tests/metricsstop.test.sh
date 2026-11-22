@@ -162,4 +162,10 @@ t_metricstests() {
     'test-changed: 1 web test file(s) selected' 'test-changed: web totals: Test Files  1 passed (1); Tests  4 passed (4)' > "$o"
   eval "$(sed -n '/^testcounts() {/,/^}/p' "$SRC/lib/records.sh")"
   [ "$(testcounts "$o")" = '{"files":3,"total":null,"passed":null,"failed":null,"skipped":null}' ] || fail "a run with no root totals: $(testcounts "$o")"
+  # Both halves with totals, the web line in colour: the files, tests and skips of root and web are summed (a colour
+  # code left in, or one half's count dropped, gives other numbers).
+  { printf '%s\n' 'test-changed: 2 root test file(s) selected from 1 changed file(s)' 'test-changed: 1 web test file(s) selected' \
+      'test-changed: root totals: tests 7, pass 6, fail 0, cancelled 0, skipped 1, todo 0'
+    printf '\033[32mtest-changed: web totals: Test Files  1 passed (1); Tests  4 passed | 1 skipped (5)\033[0m\n'; } > "$o"
+  [ "$(testcounts "$o")" = '{"files":3,"total":12,"passed":10,"failed":0,"skipped":2}' ] || fail "a run with both totals: $(testcounts "$o")"
 }

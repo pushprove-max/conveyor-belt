@@ -4,6 +4,7 @@
     ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/codex.test.sh",
+    "conveyor/tests/metrics.test.sh",
     "conveyor/tests/models.test.sh",
     "conveyor/tests/modelsproxy.test.sh",
     "conveyor/tests/opencode.test.sh",
@@ -28,18 +29,21 @@
   "conveyor/conveyor.sh": [
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
     ".claude/scripts/__tests__/dashboard-local.test.sh",
-    ".claude/scripts/__tests__/dashboard.test.sh"
+    ".claude/scripts/__tests__/dashboard.test.sh",
+    "conveyor/tests/metrics.test.sh"
   ],
   "conveyor/lib/card.sh": [
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
     ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh",
+    "conveyor/tests/metrics.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/lib/push.sh": [
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
     ".claude/scripts/__tests__/dashboard-local.test.sh",
-    ".claude/scripts/__tests__/dashboard.test.sh"
+    ".claude/scripts/__tests__/dashboard.test.sh",
+    "conveyor/tests/metrics.test.sh"
   ],
   "conveyor/lib/setup.sh": [
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
@@ -78,6 +82,7 @@
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
     ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh",
+    "conveyor/tests/metrics.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   "docs/configuration.md": [
@@ -219,6 +224,7 @@
   ],
   "conveyor/jq/check.jq": [
     ".claude/scripts/__tests__/dashboard-local.test.sh",
+    "conveyor/tests/metrics.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/jq/rows.jq": [
@@ -226,6 +232,7 @@
     ".claude/scripts/__tests__/dashboard-view.focus.test.mjs",
     ".claude/scripts/__tests__/dashboard-view.overview.test.mjs",
     ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
+    "conveyor/tests/metrics.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/jq/track.jq": [
@@ -242,6 +249,7 @@
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/lib/issues.sh": [
+    "conveyor/tests/metrics.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/lib/prompts.sh": [
@@ -260,6 +268,7 @@
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/lib/testaction.sh": [
+    "conveyor/tests/metrics.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/lib/testfiles.sh": [
@@ -343,6 +352,7 @@
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/lib/views.sh": [
+    "conveyor/tests/metrics.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/rules/card-core.md": [
@@ -420,6 +430,7 @@
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
     ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh",
+    "conveyor/tests/metrics.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   "docs/demo/capture-board.js": [
@@ -455,12 +466,14 @@
   ".claude/dashboard/panels/release.js": [
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
     ".claude/scripts/__tests__/dashboard-local.test.sh",
-    ".claude/scripts/__tests__/dashboard.test.sh"
+    ".claude/scripts/__tests__/dashboard.test.sh",
+    "conveyor/tests/metrics.test.sh"
   ],
   ".claude/scripts/__tests__/dashboard-view.release.test.mjs": [
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
     ".claude/scripts/__tests__/dashboard-local.test.sh",
-    ".claude/scripts/__tests__/dashboard.test.sh"
+    ".claude/scripts/__tests__/dashboard.test.sh",
+    "conveyor/tests/metrics.test.sh"
   ],
   "docs/belt-3d.gif": [
     "conveyor/e2e.test.sh"
@@ -503,7 +516,8 @@
   "conveyor/foreman/foreman.sh": [
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
     ".claude/scripts/__tests__/dashboard-local.test.sh",
-    ".claude/scripts/__tests__/dashboard.test.sh"
+    ".claude/scripts/__tests__/dashboard.test.sh",
+    "conveyor/tests/metrics.test.sh"
   ],
   "conveyor/foreman/lib.sh": [
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
@@ -523,7 +537,8 @@
   "docs/foreman.md": [
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
     ".claude/scripts/__tests__/dashboard-local.test.sh",
-    ".claude/scripts/__tests__/dashboard.test.sh"
+    ".claude/scripts/__tests__/dashboard.test.sh",
+    "conveyor/tests/metrics.test.sh"
   ],
   "conveyor/foreman/waiter.sh": [
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
@@ -705,5 +720,65 @@
   ],
   "conveyor/tests/swebenchstop.test.sh": [
     ".claude/scripts/__tests__/dashboard-local.test.sh"
+  ],
+  ".claude/dashboard/panels/rules.js": [
+    "conveyor/tests/metrics.test.sh"
+  ],
+  ".claude/dashboard/parts/rules-moves.js": [
+    "conveyor/tests/metrics.test.sh"
+  ],
+  ".claude/dashboard/parts/rules-rows.js": [
+    "conveyor/tests/metrics.test.sh"
+  ],
+  ".claude/scripts/__tests__/dashboard-view.rules.test.mjs": [
+    "conveyor/tests/metrics.test.sh"
+  ],
+  ".claude/scripts/__tests__/dashboard-view.tests-noissue.test.mjs": [
+    "conveyor/tests/metrics.test.sh"
+  ],
+  "conveyor/commands/snapshot.sh": [
+    "conveyor/tests/metrics.test.sh"
+  ],
+  "conveyor/commands/testaction.sh": [
+    "conveyor/tests/metrics.test.sh"
+  ],
+  "conveyor/foreman/filing-cause.test.sh": [
+    "conveyor/tests/metrics.test.sh"
+  ],
+  "conveyor/lib/control-defaults.json": [
+    "conveyor/tests/metrics.test.sh"
+  ],
+  "conveyor/lib/control.sh": [
+    "conveyor/tests/metrics.test.sh"
+  ],
+  "conveyor/lib/followups.sh": [
+    "conveyor/tests/metrics.test.sh"
+  ],
+  "conveyor/lib/fulltest.sh": [
+    "conveyor/tests/metrics.test.sh"
+  ],
+  "conveyor/lib/pick.sh": [
+    "conveyor/tests/metrics.test.sh"
+  ],
+  "conveyor/lib/run.sh": [
+    "conveyor/tests/metrics.test.sh"
+  ],
+  "conveyor/lib/slices.sh": [
+    "conveyor/tests/metrics.test.sh"
+  ],
+  "conveyor/tests/control.test.sh": [
+    "conveyor/tests/metrics.test.sh"
+  ],
+  "conveyor/tests/releasefixes.test.sh": [
+    "conveyor/tests/metrics.test.sh"
+  ],
+  "conveyor/tests/testcards.test.sh": [
+    "conveyor/tests/metrics.test.sh"
+  ],
+  "docs/cards.md": [
+    "conveyor/tests/metrics.test.sh"
+  ],
+  "docs/releases.md": [
+    "conveyor/tests/metrics.test.sh"
   ]
 }

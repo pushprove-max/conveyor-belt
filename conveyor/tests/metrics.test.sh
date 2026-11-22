@@ -30,10 +30,11 @@ echo '{"type":"item.completed","item":{"type":"command_execution"}}'; echo '{"ty
 echo '{"type":"item.completed","item":{"type":"agent_message"}}'
 echo '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":60,"output_tokens":7}}'
 EOF
+  # The card gives its one test file, so the run reports one: a run that reports more ran files it was not given, and
+  # blocks the card (tests(), lib/testrun.sh). Root and web counts summed are t_metricstests' (metricsstop.test.sh).
   cat > "$STUB/test-cmd" <<'EOF'
-echo 'test-changed: 2 root test file(s) selected from 1 changed file(s)'; echo 'test-changed: 1 web test file(s) selected'
-echo 'test-changed: root totals: tests 7, pass 6, fail 0, cancelled 0, skipped 1, todo 0'
-printf '\033[32mtest-changed: web totals: Test Files  1 passed (1); Tests  4 passed | 1 skipped (5)\033[0m\n'
+echo 'test-changed: 1 root test file(s) selected from 1 changed file(s)'
+printf '\033[32mtest-changed: root totals: tests 7, pass 6, fail 0, cancelled 0, skipped 1, todo 0\033[0m\n'
 jq -cn '{time: (now | todate), pct: 42.5}' >> "$ST/limit.jsonl"
 EOF
   # loop: the records only a card writes are checked here (its worktree, brief, landed and pushed lines, the review's and the test run's measurements on them, the loop's samples)
@@ -42,7 +43,7 @@ EOF
     || fail "the build's session stats: $(st 'select(.step == "build")')"
   [ "$(st 'select(.step == "review") | [.result, .counts, .model, (.sec | type), .stats] | tojson')" = '["GO",{"P0":0,"P1":0,"P2":0,"P3":0},"x","number",{"turns":1,"tools":{"command_execution":2}}]' ] \
     || fail "the review's measurements: $(st 'select(.step == "review")')"
-  [ "$(st 'select(.step == "test") | .tests | tojson')" = '{"files":3,"total":12,"passed":10,"failed":0,"skipped":2}' ] || fail "the test run's counts: $(st 'select(.step == "test")')"
+  [ "$(st 'select(.step == "test") | .tests | tojson')" = '{"files":1,"total":7,"passed":6,"failed":0,"skipped":1}' ] || fail "the test run's counts: $(st 'select(.step == "test")')"
   [ "$(st 'select(.step | IN("worktree", "brief", "landed")) | [.step, .limit, .depth, .diff] | tojson' | tr '\n' ' ')" \
     = '["worktree",40,null,null] ["brief",null,1,null] ["landed",42.5,null,{"files":1,"added":1,"removed":0}] ' ] || fail "limit, depth or diff: $(st 'select(.step | IN("worktree", "brief", "landed"))')"
   [ "$(st 'select(.step == "pushed") | .sec | type')" = number ] || fail "the push's seconds: $(st 'select(.step == "pushed")')"
