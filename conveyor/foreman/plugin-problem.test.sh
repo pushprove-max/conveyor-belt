@@ -99,6 +99,15 @@ t_zero() {
   out=$(start); ! grep -q 'running cards keep' <<<"$out" || fail "the start-up text lists the note filed as #449 as unfiled: $out"
 }
 
+# Bug (R28): a line ending ",filed as #449" (no space) passed the stop hook, but the start-up list did not know its
+# note as filed and listed it as unfiled again.
+t_nospace() {
+  fixture nospace "git@github.com:${OWN#https://github.com/}.git"
+  out=$(turn u1 "$LINE,filed as #449"); [ -z "$out" ] || fail "the line ending ',filed as #449' was refused: $out"
+  grep -q 'running cards keep .*,filed as #449 · evidence: ' "$FD/plugin-bugs.md" || fail "the note does not end ',filed as #449': $(cat "$FD/plugin-bugs.md")"
+  out=$(start); ! grep -q 'running cards keep' <<<"$out" || fail "the start-up text lists the note ending ',filed as #449' as unfiled: $out"
+}
+
 # Older notes (made in other words, before the form) filed from the start-up list. Bugs: a filed line that only
 # shared a note's card and evidence path replaced that note, so a different problem erased it; and a note with no
 # card or evidence, filed in the form with "card -, evidence -", stayed listed as unfiled. The start-up list gives

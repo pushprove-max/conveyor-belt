@@ -174,6 +174,15 @@ got_p, said_p = call('/plugin-preview', {'file': NOTES, 'line': C})
 got_f, said_f = call('/plugin-file', {'file': NOTES, 'line': C, 'title': 'running cards keep the old engine code', 'body': 'c\n'})
 check('filed_note_not_filed_again', got_p == 409 and got_f == 409 and 'filed as' in said_f
       and text(os.path.join(T, 'gh-calls')) == 'call\n' and text(NOTES) == HEAD + A + '\n' + C + '\n', (got_p, said_p, got_f, said_f))
+# Bug (R28): a reply line ending ",filed as #449" (no space after the comma, which stop.sh accepts) left a note that
+# the Board did not know as filed, so it could be previewed and filed again.
+C2 = '- 2026-11-20T09:30:00Z · card - · running cards keep the old engine code,filed as #449 · evidence: -'
+with open(NOTES, 'a') as f:
+    f.write(C2 + '\n')
+got_p2, said_p2 = call('/plugin-preview', {'file': NOTES, 'line': C2})
+check('filed_note_without_space_not_previewed', got_p2 == 409, (got_p2, said_p2))
+with open(NOTES, 'w') as f:
+    f.write(HEAD + A + '\n' + C + '\n')
 # Bug (E1): a host file that did not read was taken as no terms file, so a private name only its terms file lists
 # could reach gh. It refuses the filing, as gh_write does.
 os.makedirs(os.path.join(T, 'config', 'conveyor'))

@@ -82,6 +82,15 @@
     ol.setAttribute('aria-label', at >= 0 ? `Steps: ${stepName(six.steps[at])}, step ${at + 1} of 6` : 'Steps of this card');
     return true;
   }
+  // The line that sums up a failed test run: of the files run (an "of" of 0 is a run of no test files, as when the
+  // project's checks failed before any ran: it is no total to say), n failed, and the timeout when there is one.
+  function testSum(total, n, t) {
+    const of = num(total) && total > 0 ? total : 0;
+    const failed = `${n}${of ? ` of ${of}` : ''} test ${(of || n) === 1 ? 'file' : 'files'} failed`;
+    if (!t) return failed;
+    const after = num(t.sec) ? ` after ${t.sec < 60 ? took(t.sec) : `${Math.round(t.sec / 60)} min`}` : '';
+    return `Timed out${after}${typeof t.file === 'string' && t.file ? ` in ${t.file}` : ''}${n ? ` · ${failed}` : ''}`;
+  }
   // What a failed test run says went wrong (the record's failures: {of, files: [{file, cases: [{name, line}]}],
   // timeout: null | {sec, file}}): one line that sums it up ("2 of 41 test files failed", or that it timed out and in
   // which file), then a row a failing file with its failing cases, each on a line of its own with its first failure
@@ -91,11 +100,9 @@
     if (!f || typeof f !== 'object') return null;
     const files = (Array.isArray(f.files) ? f.files : []).filter((x) => x && typeof x.file === 'string' && Array.isArray(x.cases));
     const t = f.timeout && typeof f.timeout === 'object' ? f.timeout : null;
-    if (!files.length && !t) return null;
-    const failed = `${files.length}${num(f.of) ? ` of ${f.of}` : ''} test ${(num(f.of) ? f.of : files.length) === 1 ? 'file' : 'files'} failed`;
-    const timed = t ? `Timed out${num(t.sec) ? ` after ${t.sec < 60 ? took(t.sec) : `${Math.round(t.sec / 60)} min`}` : ''}${typeof t.file === 'string' && t.file ? ` in ${t.file}` : ''}` : '';
+    if ((!files.length && !t) || (f.of === 0 && !t)) return null;
     const box = h('div', 'test-fails'), rows = h('ul', 'test-files');
-    box.append(h('p', 'test-sum', t ? timed + (files.length ? ` · ${failed}` : '') : failed));
+    box.append(h('p', 'test-sum', testSum(f.of, files.length, t)));
     (brief ? files.slice(0, 1) : files).forEach((x) => {
       const row = h('li', 'test-file'), cases = h('ul', 'test-cases');
       x.cases.filter((c) => c && typeof c.name === 'string').slice(0, brief ? 1 : Infinity).forEach((c) => {
@@ -537,7 +544,14 @@
     else if (timeout) said = `The tests timed out${typeof timeout.file === 'string' && timeout.file ? ` in ${timeout.file}` : ''}`;
     else if (nogo && !reviewBroke && (at === 1 || /NO-GO/.test(full))) said = `Review asked for changes ${TIMES[nogo] || `${nogo} times`}`;
     else said = first(full);
-    return { said, full, fails };
+    const checks = ranNoTest(fails);
+    return { said, full, fails: checks ? null : fails, checks };
+  }
+  // A failed run of no test files ("of" 0, no timeout) is a command that failed before any test ran (the project's
+  // checks): it names no test, so its output is what the card leads with. A run of files whose failure names no case
+  // (a Python test file) is a test failure and keeps its files.
+  function ranNoTest(fails) {
+    return !!fails && !fails.timeout && fails.of === 0;
   }
   // The failed tests of a blocked card (failure), from its steps recs: the cases' names, the timeout and the last
   // failed run's failures. The failed tests are the cause only when the card stopped for them (its reason full: "the
@@ -546,7 +560,7 @@
   function failedTests(recs, full) {
     const names = [];
     let timeout = null, fails = null;
-    const byTests = /\btests failed\b/i.test(full) && !/^fix\b/i.test(full);
+    const byTests = /\b(?:tests|checks) failed\b/i.test(full) && !/^fix\b/i.test(full);
     if (byTests) recs.filter((s) => s.state === 'failed' && s.failures && typeof s.failures === 'object').slice(-1).forEach((s) => {
       (Array.isArray(s.failures.files) ? s.failures.files : []).forEach((f) => (f && Array.isArray(f.cases) ? f.cases : []).forEach((x) => { if (x && typeof x.name === 'string') names.push(x.name); }));
       if (s.failures.timeout && typeof s.failures.timeout === 'object') timeout = s.failures.timeout;
@@ -617,10 +631,15 @@
   // test file with its first failing case, in "Why it blocked"; rest is the whole explanation as failureLine draws it,
   // in "Why it blocked, in full", or null when the lead already says all of it. A plain reason leads with its sentence.
   function failureShort(c) {
-    const { said, full, fails } = failure(c);
+    const { said, full, fails, checks } = failure(c);
     const repoUrl = repoOf(c), known = new Set(pathsIn(full));
     const lead = doc.createDocumentFragment();
     lead.append(fill(h('p', 'reason why-said'), said, repoUrl, known, 'why-said'));
+    // A card the project's checks stopped leads with their output (the ShellCheck line); that is all of its reason.
+    if (checks && said !== full) {
+      lead.append(whyBlock('Why it blocked', clipped(full, repoUrl, known)));
+      return { lead, rest: null };
+    }
     const one = reviewWhy(full, repoUrl, known, true) || (fails && testFails(fails, true));
     if (one) lead.append(whyBlock('Why it blocked', one));
     const body = reviewWhy(full, repoUrl, known) || (fails && testFails(fails)) || (said !== full && clipped(full, repoUrl, known));

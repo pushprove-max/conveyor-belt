@@ -159,6 +159,19 @@ test('a failed Tests step names the failing files and cases, and keeps its outpu
   assert.match(css, /\.tl-item > \.test-fails,/);
 });
 
+// Bug (R1): the project's checks failing before any test file ran is recorded as {of: 0, files: [{file: <the command>,
+// cases: []}]}; the step history called that command "1 test file failed" in place of the recorded reason.
+test('a Tests step the project\'s checks failed shows its recorded reason, not a failed test file', () => {
+  const w = boot();
+  const data = full();
+  const records = [{ name: 'tests failed', state: 'failed', sec: 3, why: 'the project\'s checks failed; no test file ran', failures: { of: 0, timeout: null, files: [{ file: 'bash .conveyor/test-changed.sh', cases: [] }] } }];
+  Object.assign(data.panels.needs.data.cards.blocked[0], { track: { ...trackOf('++!...', ''), at: null, records } });
+  deliver(w, data);
+  const [step] = panel(w, 'needs').querySelectorAll('li[data-key="blocked:c2-13"] details.track-detail .timeline > li');
+  assert.equal(step.querySelector('.test-sum'), null, 'no "test file failed" line');
+  assert.equal(step.querySelector('.detail-why').textContent, 'the project\'s checks failed; no test file ran');
+});
+
 // Bug: a URL naming the card was taken for its worktree, so two different URLs both became "https:./log" and were
 // folded into one line ×2, losing which host each named; a protocol-relative //host URL likewise became "?path=./log",
 // and a quoted one became "'./log'".

@@ -305,7 +305,7 @@ NOTE_LINE = re.compile(r'- (?P<at>\S+) · card (?P<card>\S+) · (?P<text>.*)')  
 # A note that names the issue it was filed as (foreman/stop.sh's and foreman.sh's test): it is not filed again.
 # The note's guessed cause (foreman/stop.sh's "cause not checked: <text>" part): it ends at the card, evidence or filed part, each in its own shape, a card id or "-", a path or "-" (so a cause that says ", card lookups" goes on).
 NOTE_CAUSE = globals()['re'].compile(r'(?:, |^)cause not checked: (?P<cause>.*?)(?=, card (?:(?:c[0-9]{8}T[0-9]{6}-|<card>)\S*|-)(?:, |$)|, evidence (?:\S*/\S*|-)(?:, |$)|, filed as #|$)', globals()['re'].I)  # re is the base part's, as CARD is
-NOTE_FILED = re.compile(r' filed as #[1-9][0-9]*\s*\.? · evidence: ', re.I)
+NOTE_FILED = globals()['re'].compile(r'[\s,;]filed as #[1-9][0-9]*\s*\.? · evidence: ', globals()['re'].I)  # re is the base part's, as above
 
 
 def note_issue(line):

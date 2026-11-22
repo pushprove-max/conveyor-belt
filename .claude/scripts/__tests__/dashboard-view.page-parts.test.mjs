@@ -31,6 +31,18 @@ test('the page loads every part before the panels, and each panel of every tab d
   }
 });
 
+// Bug it catches (R2): a part of app.js that failed to load (parts/app-feed.js answering 404) still had the page start
+// on code it lacked, and start() threw an uncaught error, leaving the page on its skeleton with no word of why.
+test('a part of app.js that did not load leaves a Reload message and starts nothing', () => {
+  const w = boot({ loader: true, failing: ['parts/app-feed.js'] });
+  // The panel files that load after it may throw for the missing part (as in a browser); start() is not run, so it throws nothing.
+  assert.ok(w.scriptErrors.every((e) => /DASH_APP\.\w+ is not a function/.test(e)), `only missing-part errors: ${w.scriptErrors.join('; ')}`);
+  const grid = w.document.getElementById('grid');
+  assert.match(grid.textContent, /could not load all of its files/);
+  assert.equal(grid.querySelector('button').textContent, 'Reload');
+  assert.equal(grid.getAttribute('aria-busy'), 'false');
+});
+
 // Bug it catches: a panel file whose part did not load went on with half its code and threw at its first draw, or
 // stopped with no word of which file was missing; it stops at once, naming the part, and its panel says it is missing.
 test('a panel whose part did not load says it is missing, and the other panels still draw', () => {

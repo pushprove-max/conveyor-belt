@@ -554,7 +554,7 @@ function pluginPane(bugs, ctx) {
         });
     });
     // A note that names the issue it was filed as (the Foreman's own test) gets no File on GitHub: it is filed already.
-    if (/ filed as #[1-9][0-9]*\s*\.? · evidence: /i.test(n.line)) li.append(head, meta, off);
+    if (/[\s,;]filed as #[1-9][0-9]*\s*\.? · evidence: /i.test(n.line)) li.append(head, meta, off);
     else li.append(head, meta, file, off);
     if (PLUGIN_FAILED.has(k)) li.append(h('p', 'warn-note', PLUGIN_FAILED.get(k)));
     if (PLUGIN_PREVIEW.has(k)) li.append(pluginPreview(n, k, ctx));

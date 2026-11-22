@@ -199,6 +199,38 @@ test('Needs you and Control: a blocked card leads with why it stopped, not with 
   assert.equal(bcard(c, 13).querySelector('.why-said').textContent, '1 test failed: pays once');
 });
 
+// Bug (R1): a card the project's checks stopped has a failed run of {of: 0, files: [{file: <the check command>, cases: []}]}:
+// Needs you led with "1 of 0 test files failed" and the command as a test file, and the ShellCheck line that says what
+// broke was left out of the lead (it was in the reason's text only).
+test('Needs you: a card the project\'s checks stopped leads with their output, never "1 of 0"', () => {
+  const track = trackOf('+++!..', '', {
+    records: [{ name: 'tests failed', state: 'failed', sec: 3, failures: { of: 0, files: [{ file: 'bash .conveyor/test-changed.sh', cases: [] }], timeout: null } }],
+  });
+  const reason = 'tests: the changed tests failed again after their one fix round (exit 1); nothing landed.\nIn conveyor/lib/x.sh line 12:\nSC2086 (info): Double quote to prevent globbing and word splitting.';
+  const w = boot({ list: ['needs'] });
+  const d = full();
+  Object.assign(d.panels.needs.data.cards.blocked[0], { reason, track });
+  deliver(w, d);
+  const row = blockedRow(w);
+  const lead = Array.from(row.querySelectorAll('.why-block')).filter((b) => !b.closest('details.block-more')).map((b) => b.textContent).join('\n');
+  assert.match(lead, /SC2086 \(info\): Double quote/, 'the ShellCheck line is in the lead, not only under "The full reason and every step"');
+  assert.doesNotMatch(row.textContent, /1 of 0/);
+});
+
+// Bug (E1 of its review): a test file that failed with no case named (a Python test file) has "of" above 0; clearing
+// its failures as the checks' record left the lead without the failed file.
+test('Needs you: a failed test file that names no case keeps its file in the lead', () => {
+  const track = trackOf('+++!..', '', {
+    records: [{ name: 'tests failed', state: 'failed', sec: 3, failures: { of: 4, files: [{ file: 't.py', cases: [] }], timeout: null } }],
+  });
+  const reason = 'tests: the changed tests failed again after their one fix round (exit 1); nothing landed.';
+  const w = boot({ list: ['needs'] });
+  const d = full();
+  Object.assign(d.panels.needs.data.cards.blocked[0], { reason, track });
+  deliver(w, d);
+  assert.match(blockedRow(w).textContent, /1 of 4 test files failed[\s\S]*t\.py/);
+});
+
 // Bug: a card whose first review said NO-GO and whose second review session then failed ("review 2: review failed
 // (exit 3; …)", track at Review) led with "Review said NO-GO once", hiding that the review itself broke.
 test('Needs you and Control: a review session that failed after an earlier NO-GO leads with its own failure', () => {

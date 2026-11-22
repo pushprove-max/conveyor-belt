@@ -151,6 +151,9 @@ waits for you to confirm, or a request has no answer yet. Then the page shows **
 status mark, and keeps what you did. The page loads again by itself when you finish, for example when you clear the
 field, or when you go to another browser tab. Click **Reload** to load the new version at once.
 
+When one of the page's script files does not load, the page shows "The page could not load all of its files." and a
+**Reload** button in place of the panels. Click **Reload** to try again.
+
 A reload keeps these, in this browser tab only, until you close the tab or someone signs in again in any tab of
 this browser:
 
@@ -177,8 +180,9 @@ lists every project's rows, so it stays as it is.
   the cards that the card records hold blocked or waiting for your yes now, and On the belt counts the cards that the
   loop builds now (none when the loop does not run).
 - **A blocked card.** A blocked card shows, in this order: why it failed, in one sentence; the first finding of its
-  review, or the first failed test file with its first failure line; the next step; what **Fix** does, when it has
-  Fix; then its buttons. Under the buttons, open **The full reason and every step** to read the other findings and
+  review, the first failed test file with its first failure line, or, when the project's checks stopped the card
+  before any test ran, the output of those checks; the next step; what **Fix** does, when it has Fix; then its
+  buttons. Under the buttons, open **The full reason and every step** to read the other findings and
   their full proof, what Retry does, the card's output, the step where it failed, its track, every step and its
   reviews. It stays open or closed as you left it when the Board reads Conveyor again.
 - **Retry and Close.** Each blocked card has a **Retry** button (`conveyor.sh retry`) and a **Close** button. Close

@@ -134,7 +134,7 @@ while IFS= read -r l; do
   if [ "$what" != "$seen" ] && [ -s "$NOTES" ] && plugin_home \
     && W="$what" S="$seen" LC_ALL=C awk '
       BEGIN { D = " · "; C = " · card "; E = " · evidence: " }
-      !done && /^- / && tolower($0) !~ / filed as #[1-9][0-9]*[[:space:]]*\.? · evidence: / && (i = index($0, C)) {
+      !done && /^- / && tolower($0) !~ /[ ,;]filed as #[1-9][0-9]*[[:space:]]*\.? · evidence: / && (i = index($0, C)) {
         r = substr($0, i + length(C)); j = index(r, D); card = substr(r, 1, j - 1); t = substr(r, j + length(D))
         k = 0; while ((m = index(substr(t, k + 1), E))) k += m
         if (j && k) { ev = substr(t, k + length(E)); t = substr(t, 1, k - 1)

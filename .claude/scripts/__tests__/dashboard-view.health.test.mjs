@@ -219,6 +219,18 @@ test('Health: File on GitHub previews the issue, files only the confirmed note w
   assert.equal(pane().querySelector('.plugin-filed a').getAttribute('href'), 'https://github.com/owner/plugin/issues/9', 'the link stays for the session');
 });
 
+// Bug (R28): a reply line ending ",filed as #449" (no space) left a note that was offered for filing a second time.
+test('Health: a note ending ",filed as #449" with no space is not offered for filing', () => {
+  const w = page('health');
+  const data = full(), line = '- 2026-11-09T16:20:00Z · card - · running cards keep the old engine code,filed as #449 · evidence: -';
+  data.panels.health.data.pluginBugs = [{ repo: 'sample', projects: ['sample'], count: 1, file: '/srv/sample/conveyor/state/foreman/plugin-bugs.md', url: 'plugin-bugs/sample.txt',
+    notes: [{ at: '2026-11-09T16:20:00Z', card: '-', text: 'running cards keep the old engine code,filed as #449 · evidence: -', line }] }];
+  deliver(w, data);
+  const li = panel(w, 'health').querySelector('section.plugin-problems li.row');
+  assert.equal(li.querySelector('[data-act="plugin-file-open"]'), null, `no File on GitHub for: ${line}`);
+  assert.ok(li.querySelector('[data-act="plugin-dismiss"]'), 'it can still be dismissed');
+});
+
 // Bug: the live feed rewrites the stream every 10 s and the panel is drawn again on each write, so an opened "Show
 // output" or "checks fine" closed under the owner while they read it. What was open stays open; what was not, stays shut.
 // Bug (#557): the push's output was a new box at each draw, so a reader scrolled in it went back to its top.
