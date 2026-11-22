@@ -428,6 +428,39 @@ EOF
   [ "$(jq -c .timedOut "$B"/results/solo-*/*.json)" = true ] || fail "a command that reached the time limit is not timedOut true: $(cat "$B"/results/solo-*/*.json) $out"
 }
 
+# Bug: a grade that failed (the harness's exit not 0, no report) returned before the task's sandbox and its trial's
+# folder were removed, so the hidden tests the harness wrote in its grade folder (logs/.../eval.sh) stayed in the run's
+# folder while the run went on. A harness in front of the fixture's writes eval.sh there and fails the first task's
+# grade; the second task's grade notes each eval.sh left under the run's work folder.
+t_swegradefaillogs() {
+  swe; local out first; first=$(sweorder | head -n 1)
+  printf '%s\n' '#!/usr/bin/env bash' \
+    'if [ "$2" = grade ] && [ "$5" = "$SWE_FIRST" ]; then mkdir -p "$7/logs/run_evaluation/x" && echo HIDDENTEST > "$7/logs/run_evaluation/x/eval.sh"; exit 1; fi' \
+    '[ "$2" != grade ] || find "$B/work" -name eval.sh > "$SWE_FX/evals-left"' 'exec "$SWE_FX/py" "$@"' > "$T/$CASE/py" && chmod +x "$T/$CASE/py" || fail "the harness was not made"
+  out=$(SWE_FIRST=$first CONVEYOR_BENCH_PYTHON=$T/$CASE/py loop bench swe 2 --arm stub-a 2>&1) || fail "the run failed: $out"
+  grep -q "^1/2 $first: not run: the harness could not grade it (exit 1)$" <<<"$out" || fail "the first task's grade did not fail: $out"
+  [ -e "$SWE_FX/evals-left" ] && [ ! -s "$SWE_FX/evals-left" ] || fail "the failed grade of $first left its hidden tests in the run's folder: $(cat "$SWE_FX/evals-left" 2>&1)"
+}
+
+# Bug: a trial whose command failed on its login (an expired sign-in) was kept as the arm's unresolved result, so
+# once the owner signed in again, later runs reused it and never ran the task. It is not run, and runs again. A
+# command that spent tokens and then printed such words did try the task: that one stays the arm's failure.
+t_swesolologin() {
+  swe; local out first second; { read -r first; read -r second; } < <(sweorder)
+  echo 'echo "{\"type\":\"result\",\"is_error\":true,\"result\":\"OAuth token has expired · Please run /login\"}"; exit 1' > "$STUB/build"
+  out=$(loop bench swe 1 --solo 2>&1) || fail "the solo run failed: $out"
+  grep -q "^1/1 $first: not run: its login failed: its command failed (exit 1): " <<<"$out" && ! compgen -G "$B/results/solo-*/$first.json" > /dev/null \
+    || fail "the trial whose login failed was not reported as not run, or a result was kept: $out $(cat "$B"/results/solo-*/"$first.json" 2>&1)"
+  echo 'echo fixed > x.py' > "$STUB/build"
+  out=$(loop bench swe 1 --solo 2>&1) && grep -q "^1/1 $first: resolved$" <<<"$out" || fail "the task was not run again once the login worked: $out"
+  # The run of one task checks the arm on that task's image: the preflight's trivial task (hello.py) passes.
+  echo 'if [ -e hello.py ]; then echo "print(\"hello\")" > hello.py; else echo "{\"type\":\"result\",\"is_error\":false,\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}"
+echo "{\"type\":\"result\",\"is_error\":true,\"result\":\"Please run /login\"}"; exit 1; fi' > "$STUB/build"
+  out=$(loop bench swe 1 --solo --task "$second" 2>&1) || fail "the run of $second failed: $out"
+  grep -q "^1/1 $second: unresolved (its command failed (exit 1): " <<<"$out" && jq -e '.fired == false' "$B"/results/solo-*/"$second.json" > /dev/null \
+    || fail "a command that spent 15 tokens, then printed login words, was not kept as the arm's failure: $out"
+}
+
 # swetrialheld: project A's trial (the real swe_trial; its work, swe_trialrun, a stand-in that holds until $C/release
 # is made and then adds trial to $C/order) in the background, its pid in t, once it holds the dataset lock; and each
 # read of the stand-in dataset makes $C/read.

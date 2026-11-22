@@ -36,8 +36,8 @@ while [ -e "$SWE_FX/hold" ]; do sleep 0.1; done
 [ ! -e "$SWE_FX/efail" ] || { echo ENGINE-FAIL-SAID; exit 1; }
 # The real loop starts no card unless its queue takes the task's issue: the dry pick on the sandbox's pack, control
 # record and issue, by the engine under test (a fake that skipped it missed an arm's policy keeping the issue off).
-# The issue is opened by the owner, as openissues() reads it from GitHub.
-q=$(mktemp) && gh issue list --json number,title,body,labels,createdAt | jq -c 'map(.authorAssociation = "OWNER")' > "$q" \
+# The open issues are read as the real loop reads them (openissues(), with who opened each), from the sandbox's gh.
+q=$(mktemp) && (set -- run; HERE=$SWE_SRC; . "$SWE_SRC/lib/paths.sh" && . "$SWE_SRC/lib/prompts.sh" && . "$SWE_SRC/lib/issues.sh" && GITHUB='' openissues "$FIELDS") > "$q" \
   && p=$(bash "$SWE_SRC/conveyor.sh" pick --dry --issues "$q" --state "$CONVEYOR_MAIN/conveyor/state" 2>> "$SWE_FX/pick.err"); rm -f "$q"; [ -n "${p:-}" ] || exit 0
 mkdir -p "$CONVEYOR_MAIN/conveyor/state"
 rec() { jq -nc --arg s "$1" --arg r "$2" --arg w "${3:-}" --argjson j "${4:-null}" --arg t "${5:-}" --argjson k "${6:-null}" '{card: "c1", issue: 1, step: $s, result: $r, reason: $w, time: "2026-11-01T00:00:00Z", tokens: {claude: 100, codex: 10}}
@@ -157,13 +157,17 @@ swe() {
     && jq -cn --arg a "$T/$CASE/acct" '{accounts: [{name: "bench", configDir: $a}]}' > "$XDG_CONFIG_HOME/conveyor/host.json" \
     && jq -c '.account = "bench"' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json" || fail "the logins were not made"
   # The conveyor arm on both engines and Claude alone passed their preflight an hour ago (a case of the preflight runs it),
-  # with the logins their seats take (the conveyor arm's builder m is Claude's, its reviewer x Codex's), on the pinned first task's image, swe.json's limits and task set.
-  local k a img lim set now; img=img-$(sweorder | head -n 1); now=$(($(date +%s) - 3600))
+  # with the logins their seats take (the conveyor arm's builder m is Claude's, its reviewer x Codex's), on the pinned first task's image, swe.json's limits and task set,
+  # and the conveyor arm's on the control record its card builds on now (swe_ctlin).
+  local k a img lim set now ci; img=img-$(sweorder | head -n 1); now=$(($(date +%s) - 3600))
   lim=$(jq -c '{cpus: .limits.cpus, memory: .limits.memory, taskTimeout}' "$SRC/bench/swe.json"); set=$(jq -c '{dataset, revision, seed}' "$SRC/bench/swe.json")
+  ci=$(set -- bench; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; HERE=$SRC; . "$SRC/lib/paths.sh" && . "$SRC/lib/prompts.sh" && . "$SRC/lib/control.sh" \
+    && . "$SRC/bench/swe.sh" && swe_ctlin '{"kind":"conveyor"}') && [ -n "$ci" ] || fail "the conveyor arm's control record could not be read"
   for k in conveyor/$EA conveyor/$EB solo/solo-m; do a=${k%/*}; mkdir -p "$B/preflight/$a"
     jq -cn --arg k "${k#*/}" --argjson e "$now" --argjson s "$(jq -cS --arg n "$a" '.name = $n' "$SWE_FX/arms/$a.json")" --arg i "$img" --argjson lim "$lim" \
-      --argjson set "$set" \
-      '{arm: $s.name, key: $k, ok: true, why: null, at: "2026-11-17T00:00:00Z", epoch: $e, spec: $s, logins: (if $s.kind == "conveyor" then "claude codex" else "claude" end), image: $i, limits: $lim, set: $set}' \
+      --argjson set "$set" --argjson ci "$ci" \
+      '{arm: $s.name, key: $k, ok: true, why: null, at: "2026-11-17T00:00:00Z", epoch: $e, spec: $s, logins: (if $s.kind == "conveyor" then "claude codex" else "claude" end), image: $i, limits: $lim, set: $set,
+        control: (if $s.kind == "conveyor" then $ci else null end)}' \
       > "$B/preflight/$a/${k#*/}.json" || fail "the preflight passes were not kept"
   done
 }
@@ -376,16 +380,17 @@ t_swesolo() {
 
 # Bugs: an arm whose command failed in a trial was skipped as a task not run (the owner's rule: an arm that does not
 # fire fails that task), or its change was graded as if the arm had worked; and the failed session's stderr kept its
-# credential and address in the results and the Board's snapshot.
+# credential and address in the results and the Board's snapshot. (A command that failed on its login is not run:
+# swebenchgrade.test.sh's t_swesolologin.)
 t_swesolofail() {
   swe; local out first
   first=$(sweorder | head -n 1)
   # A credential and an address, made here so that this file holds neither. The session changes x.py as a fix would.
   printf 'sk-ant-oat01-%s\n' "$(printf 'Ab9x%.0s' {1..10})" > "$STUB/secret"; echo "contact: ops${AT}corp-mail.test" > "$STUB/mail"
   echo 'echo fixed > x.py; { echo "Authorization: Bearer $(cat "$STUB/secret")"; cat "$STUB/mail"; } >&2
-echo "{\"type\":\"result\",\"is_error\":true,\"result\":\"Invalid API key · Please run /login\"}"; exit 1' > "$STUB/build"
+echo "{\"type\":\"result\",\"is_error\":true,\"result\":\"API Error: 500 Internal server error\"}"; exit 1' > "$STUB/build"
   out=$(loop bench swe 1 --solo 2>&1) || fail "the solo run failed: $out"
-  grep -q "1/1 $first: unresolved (its command failed (exit 1): Authorization: Bearer \[left out\] \[a line left out: email\] Invalid API key · Please run /login)$" <<<"$out" \
+  grep -q "1/1 $first: unresolved (its command failed (exit 1): Authorization: Bearer \[left out\] \[a line left out: email\] API Error: 500 Internal server error)$" <<<"$out" \
     && grep -q "Resolved 0 of 1 with Claude alone; not run: 0\." <<<"$out" || fail "the failed session was not counted as the arm's failure, with its words and no credential: $out"
   jq -e '.fired == false and .resolved == false and (.why | startswith("its command failed"))' "$B"/results/solo-m-*/"$first.json" > /dev/null \
     && [ ! -e "$SWE_FX/graded" ] || fail "the failed trial was not kept as not fired, or its change was graded: $(cat "$B"/results/solo-m-*/"$first.json" 2>&1)"

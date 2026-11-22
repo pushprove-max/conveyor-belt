@@ -212,3 +212,49 @@ t_swecheckloginsadmit() {
   jq -e '.reviewer.model == "x" and .reviewer.cli != "claude"' "$SWE_FX/control.seen" > /dev/null \
     || fail "the preflight's card was not given the reviewer of the check's admission (Codex, x) but $(jq -c .reviewer "$SWE_FX/control.seen" 2>&1)"
 }
+
+# Bug: a check whose trial could not read the arm's change in its container (swe_trial failed and said nothing) was
+# recorded ready, as an empty why reads as a pass. A docker stand-in in front of the fixture's fails the patch read
+# (the one exec given SWE_BASE).
+t_swecheckpatchread() {
+  swe; local o d=$T/$CASE/bin w='its change could not be read in its container'
+  mkdir -p "$d" && printf '%s\n' '#!/usr/bin/env bash' 'case "$*" in exec*SWE_BASE=*) exit 1 ;; esac' 'exec "$SWE_FX/bin/docker" "$@"' > "$d/docker" \
+    && chmod +x "$d/docker" || fail "the docker stand-in was not made"
+  o=$(PATH=$d:$PATH loop bench swe arms check stub-a 2>&1) && fail "bench swe arms check stub-a passed with its change unread: $o"
+  grep -qxF "stub-a: failed: $w" <<<"$o" && jq -e --arg w "$w" '.state == "failed" and .ok == false and .why == $w' "$B/preflight/stub-a/stub-a.json" > /dev/null \
+    || fail "bench swe arms check stub-a with its change unread was not recorded failed with why: $o $(cat "$B/preflight/stub-a/stub-a.json")"
+}
+
+# Bug: the usage guard was read once, when a check request came, so a request that waited for another check of its
+# arm started its preflight's model session past the guard reached while it waited. stub-slow's first check is held
+# while $SWE_FX/phold is there; the second request, on other limits, waits for it; the guard's reading is use.json.
+# It polls two real requests: the guard must be reached between the second's admission and its turn.
+t_swecheckwaitguard() {
+  swe; local p1 p2
+  jq -c '.guard = 50' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json" && tune '.tunables += {limitTtl: 0}' \
+    && echo '{"seven_day":{"utilization":10}}' > "$SWE_FX/use.json" && : > "$SWE_FX/phold" || fail "the guard or the hold was not set"
+  export CONVEYOR_LIMIT_CMD='cat "$SWE_FX/use.json"'
+  loop bench swe arms check stub-slow > "$T/$CASE/one.out" 2>&1 & p1=$!
+  wait_until "jq -e '.state == \"checking\" and .step == \"Checking its tools and logins\"' '$B/preflight/stub-slow/stub-slow.json'" "cat '$T/$CASE/one.out'" \
+    || fail "the first check did not reach its held preflight"
+  loop bench swe arms check --settings '{"cpus": 0.5}' stub-slow > "$T/$CASE/two.out" 2>&1 & p2=$!
+  wait_until "grep -q '^stub-slow: waiting' '$T/$CASE/two.out'" "cat '$T/$CASE/two.out'" || fail "the second request did not wait for the first check"
+  echo '{"seven_day":{"utilization":90}}' > "$SWE_FX/use.json"; rm "$SWE_FX/phold"; wait "$p1"; wait "$p2"
+  [ "$(tail -n 1 "$T/$CASE/two.out")" = 'stub-slow: failed: the usage guard is reached: no preflight starts while it stands' ] \
+    || fail "bench swe arms check --settings '{\"cpus\": 0.5}' stub-slow, which waited while the guard was reached, did not fail on the guard: $(cat "$T/$CASE/two.out")"
+  [ "$(grep -c '^create .*-check-stub-slow-preflight ' "$SWE_FX/docker.log")" = 1 ] || fail "the request that waited ran a trial past the guard: $(grep '^create ' "$SWE_FX/docker.log")"
+}
+
+# Bug: a check's request held no seat the arm inherits from the project's control record, so after the project's
+# reviewer changed, the arm still read ready and Start ran it on the new reviewer, never checked. The fixture's conveyor
+# arm passed on main's engine and the control record of now (a first run takes that pass and makes the task list the
+# arms list reads its image from); then the reviewer's effort changes (its logins stay).
+t_swecheckseats() {
+  swe; local o
+  o=$(loop bench swe 1 2>&1) && ! grep -q '^create .*-conveyor-preflight ' "$SWE_FX/docker.log" || fail "the first run did not take the conveyor arm's pass: $o"
+  o=$(loop bench swe arms 2>&1); grep -q '^conveyor (.*): ready (checked ' <<<"$o" || fail "the conveyor arm's pass on the control record of now is not ready: $o"
+  jq -c '.reviewer.effort = "high"' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json" || fail "the reviewer was not changed"
+  o=$(loop bench swe arms 2>&1); grep -q '^conveyor (.*): not checked since its file, seats, ' <<<"$o" || fail "the conveyor arm reads ready after the reviewer it inherits changed: $o"
+  o=$(loop bench swe 1 2>&1) || fail "the run failed: $o"
+  grep -q '^create .*-conveyor-preflight ' "$SWE_FX/docker.log" || fail "Start took the pass of the former reviewer and ran no check: $(grep '^create ' "$SWE_FX/docker.log")"
+}

@@ -308,3 +308,48 @@ t_swearmareaorder() {
   [ -n "$k1" ] && [ "$k1" != null ] && [ "$k1" = "$k3" ] && [ "$k1" != "$k2" ] \
     || fail "swapping two areas of the pack did not change the arm's results key (or the key is not stable): $k1 $k3 $k2"
 }
+
+# Bug: the usage guard of a conveyor arm read the project's seats alone, so with the project's builder and reviewer on
+# Codex it read no Claude account, and a saved arm whose fix seat runs on Claude started past that account's guard.
+t_swearmguardfix() {
+  swe; local id out
+  export CONVEYOR_LIMIT_CMD='echo "{\"seven_day\":{\"utilization\":90}}"'
+  jq -c '.guard = 50 | .model = {cli: "codex", model: "x", effort: null} | .reviewer = {cli: "codex", model: "x", effort: "low"}' "$ST/control.json" > "$ST/c.new" \
+    && mv "$ST/c.new" "$ST/control.json" || fail "the control record was not changed"
+  id=$(loop bench swe arms save 'Claude fixes' '{"kind":"conveyor","seats":{"fix":{"cli":"claude","model":"m"}}}' 2>&1) || fail "the arm was not saved: $id"
+  out=$(loop bench swe 1 --arm "$id" 2>&1) && fail "bench swe 1 --arm $id (fix on Claude, the account at 90% of a 50% guard) started: $out"
+  grep -q 'the usage guard is reached' <<<"$out" && [ ! -s "$SWE_FX/log" ] || fail "bench swe 1 --arm $id: the refusal does not name the guard, or a task was built: $out"
+  out=$(loop bench swe arms check "$id" 2>&1) && fail "bench swe arms check $id (fix on Claude, past the guard) ran: $out"
+  grep -q 'the usage guard is reached' <<<"$out" && ! grep -q '^create ' "$SWE_FX/docker.log" 2>/dev/null \
+    || fail "bench swe arms check $id: the refusal does not name the guard, or a container started: $out"
+}
+
+# Bugs: a saved arm's choices were checked against the project's only at its save, so a check and a run took a fix
+# seat on a model the project had removed from models.allowed since; and `bench swe arms` listed the host arms only,
+# never a saved revision.
+t_swearmremoved() {
+  swe; local id out
+  tune '.models.allowed.claude += ["m2"]'
+  id=$(loop bench swe arms save 'Fix on m2' '{"kind":"conveyor","seats":{"fix":{"cli":"claude","model":"m2"}}}' 2>&1) || fail "the arm was not saved: $id"
+  out=$(loop bench swe arms 2>&1); grep -q "^$id (Fix on m2, conveyor): not checked" <<<"$out" || fail "bench swe arms does not list the saved arm $id: $out"
+  tune '.models.allowed.claude -= ["m2"]'
+  local why="the saved arm $id no longer fits the project's choices: the project does not allow \"m2\" on claude for the fix seat"
+  out=$(loop bench swe arms check "$id" 2>&1) && fail "bench swe arms check $id passed with m2 removed from the pack: $out"
+  grep -qxF "$id: failed: $why" <<<"$out" || fail "bench swe arms check $id does not fail naming the seat and model: $out"
+  out=$(loop bench swe 1 --arm "$id" 2>&1) && fail "bench swe 1 --arm $id ran with m2 removed from the pack: $out"
+  grep -qxF "conveyor: $why" <<<"$out" && [ ! -s "$SWE_FX/log" ] || fail "bench swe 1 --arm $id was not refused naming the seat and model, or a task was built: $out"
+}
+
+# Bug: diff named a side given as an arm on the builder's model by the arm alone, with no model, while a side given
+# by its results key named its model (resname): two models' runs of one arm could not be told apart.
+t_swearmdiffmodel() {
+  swe; local m out
+  jq '.model = "builder" | .label = "Stub mb"' "$SWE_FX/arms/stub-a.json" > "$SWE_FX/arms/stub-mb.json" || fail "the arm was not made"
+  for m in m m2; do
+    mkdir -p "$B/results/stub-mb-$m-0123456789ab" && jq -nc --arg m "$m" '{task: "proj__a-1", arm: "stub-mb", label: "Stub mb", key: "stub-mb-\($m)-0123456789ab", engine: null,
+      version: null, model: $m, inputs: {arm: {model: "builder"}}, resolved: true, fired: true, sessions: 1, tokens: 7, minutes: 1, steps: [], at: "2026-11-01T00:00:00Z"}' \
+      > "$B/results/stub-mb-$m-0123456789ab/proj__a-1.json" || fail "the results could not be written"
+  done
+  out=$(loop bench swe diff stub-mb stub-mb-m2-0123456789ab --json 2>&1) && [ "$(jq -c '[.a.version, .b.version]' <<<"$out")" = '["stub-mb (m)","Stub mb (m2)"]' ] \
+    || fail "bench swe diff stub-mb stub-mb-m2-0123456789ab does not name each side's model (the builder's is m): $out"
+}

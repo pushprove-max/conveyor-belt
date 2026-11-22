@@ -207,10 +207,13 @@ swe_resolve() {
 # Whether the project's usage guard is reached now (the loop's own test: state(), lib/control.sh), whatever the
 # project's mode: a paused or stopped project's guard still stands for a run of its own. The guard of an arm that is
 # not the engine's reads the one Claude account copied into its container (swe_login), the builder's, whatever agent
-# and route the seats have: guardread reads none for a Codex or OpenCode builder or one on an API route.
-swe_guarded() { # [an arm that is not the engine's: any non-empty word]
-  local pct; ctlread 2>/dev/null || return 1
-  pct=$(swe_pct "$CTL_V" "${1:-}")
+# and route the seats have: guardread reads none for a Codex or OpenCode builder or one on an API route. The guard of a
+# conveyor arm reads the accounts of the seats its card runs on: the arm's seats over the project's (as swe_ctl sets
+# them), so an arm whose fix or testFix runs on Claude is held back though the project's seats are all Codex.
+swe_guarded() { # [an arm that is not the engine's: any non-empty word] [a conveyor arm's seats, JSON]
+  local pct c s=${2:-}; [ -n "$s" ] || s='{}'; ctlread 2>/dev/null || return 1
+  c=$(jq -c --argjson s "$s" '. + $s' <<<"$CTL_V") || return 1
+  pct=$(swe_pct "$c" "${1:-}")
   [ "$(state "$(jq -c '.mode = "run"' <<<"$CTL_V")" "$pct")" = "paused by guard" ]
 }
 swe_pct() { # <control record> [an arm that is not the engine's: any non-empty word]: the week's use the guard reads, "" for none
@@ -363,7 +366,7 @@ swe_lines() {
 # when the control record does not read.
 swe_history() {
   local arms='[]' n a r p m k i x s gc=false ga=false ch c df wl
-  for n in $(swe_armnames) $(cd "$SWE_DIR/arms" 2>/dev/null && for x in arm-*.json; do [ -e "$x" ] && echo "${x%.json}"; done); do
+  for n in $(swe_armnames); do
     a=$(swe_arm "$n") || continue
     s=null; [[ ! $n =~ $SWE_ARMID ]] || s=$(jq -c '.spec' "$SWE_DIR/arms/$n.json") || continue
     [ "$(jq -r .kind <<<"$a")" != conveyor ] || swe_mainc
@@ -640,6 +643,10 @@ case $1:${2:-} in
       *) jq -c . "$S/issue.json" ;; esac ;;
   issue:close) [ "$3" != 1 ] || : > "$S/closed" ;;
   issue:create) echo "https://github.invalid/sandbox/issues/$((1000 + $(wc -l < "$S/gh.log")))" ;;
+  # Who opened the open issues (openissues(), lib/issues.sh): the owner opened #1, so the loop's queue takes it (with no
+  # answer it reads #1 as opened by someone outside the project, and holds it).
+  api:graphql) case "$*" in *authorAssociation*) if open; then n='[{"number":1,"authorAssociation":"OWNER","parent":null,"subIssues":{"nodes":[]}}]'; else n='[]'; fi
+    echo '{"data":{"repository":{"nameWithOwner":"sandbox/swe","issues":{"nodes":'"$n"',"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}' ;; esac ;;
   auth:status) ;;
   *) ;;
 esac
@@ -708,8 +715,11 @@ SWE_NAMES='def runname: if .arm == "solo" then "Claude alone" elif .arm == "conv
     else "\(.label // .arm)\(if .model and (if .inputs then .inputs.arm.model == "builder" else .key != .arm end) then " (\(.model))" else "" end)\(if .engine then " \(.version // "commit") \(.engine[0:12])" else "" end)" end;'
 # One task with the arm in use (swe_use): fetched image, sandbox, trial, grade. Writes results/<key>/<task>.json and
 # .patch and prints "resolved", "unresolved", "unresolved (<why it did not fire>)", or "not run: <why>". A trial that
-# did not fire is the arm's failed task: kept, never graded, never run again. The result keeps the run's inputs
-# (swe_inputs): a conveyor arm's sandbox reads the run's copy of the project's files (swe_freeze).
+# did not fire is the arm's failed task: kept, never graded, never run again; but one whose command failed on its
+# login (loginFailed, swe_trialrun) is not run, so it runs again once the owner signs in. The result keeps the run's
+# inputs (swe_inputs): a conveyor arm's sandbox reads the run's copy of the project's files (swe_freeze). Once its
+# trial has run, every end removes the task's sandbox and the trial's folder: the grade writes the hidden tests there.
+swe_rmsb() { { chmod -R u+w "$1" "$1.h"; rm -rf "$1" "$1.h"; } 2>/dev/null; } # <sb>: it and its trial's folder <sb>.h
 swe_task() { # <task json>
   local id sb b g rc sz out=$SWE_DIR/results/$SWE_KEY ag=''; id=$(jq -r .id <<<"$1"); sb=$SWE_DIR/work/$id
   # A run with --again on a task with a kept result keeps its own apart, under again/<run id>: the kept one stays the
@@ -722,19 +732,20 @@ swe_task() { # <task json>
   swe_phase 'Setting up'
   mkdir -p "$SWE_DIR/work" && swe_sandbox "$1" "$sb" 2> "$SWE_DIR/work/$id.err" \
     || { echo "not run: its repository could not be fetched at the base commit: $(head -c 300 "$SWE_DIR/work/$id.err")"; return; }
-  b=$(swe_trial "$1" "$sb" "$SWE_ARMJ" "$SWE_ENG") && [ -n "$b" ] && jq -e . <<<"$b" > /dev/null 2>&1 || { echo "not run: ${b:-the patch of the sandbox could not be read}"; return; }
+  b=$(swe_trial "$1" "$sb" "$SWE_ARMJ" "$SWE_ENG") && [ -n "$b" ] && jq -e . <<<"$b" > /dev/null 2>&1 || { swe_rmsb "$sb"; echo "not run: ${b:-the patch of the sandbox could not be read}"; return; }
   # The trial's cost from all its records replaces what was read of them while it ran: the run counts it even when
   # the task is then not run.
   swe_sofar "$(jq -c .cost <<<"$b")"
+  ! jq -e '.loginFailed == true' <<<"$b" > /dev/null || { swe_rmsb "$sb"; echo "not run: its login failed: $(jq -r .why <<<"$b")"; return; }
   if ! jq -e .fired <<<"$b" > /dev/null || [ ! -s "$sb.h/patch" ]; then g='{"resolved":false,"class":"nopatch"}'
   else swe_phase Grading; g=$(swe_h grade "$(swe_set .dataset)" "$(swe_set .revision)" "$id" "$sb.h/patch" "$sb.h/grade" "$SWE_RUN" 2>/dev/null); rc=$?
-    [ "$rc" = 0 ] && jq -e '.resolved | type == "boolean"' <<<"$g" > /dev/null 2>&1 || {
+    [ "$rc" = 0 ] && jq -e '.resolved | type == "boolean"' <<<"$g" > /dev/null 2>&1 || { swe_rmsb "$sb"
       if [ "$rc" = 3 ]; then echo "not run: the harness could not fetch or build its image"; else echo "not run: the harness could not grade it (exit $rc)"; fi; return; }
   fi
   mkdir -p "$out" && cp "$sb.h/patch" "$out/$id.patch" && { [ ! -e "$sb.h/loop.log" ] || cp "$sb.h/loop.log" "$out/$id.log"; } && swe_put "$out/$id.json" "$(jq -c --arg t "$id" --arg a "$SWE_ARM" --arg k "$SWE_KEY" --arg e "${SWE_COMMIT:-}" --arg v "${SWE_VERSION:-}" \
     --arg m "${SWE_MODEL:-}" --arg l "$SWE_LABEL" --argjson g "$g" --arg at "$(swe_now)" --argjson i "$SWE_INPUTS" --arg ag "$ag" --argjson z "${sz:-null}" '{task: $t, arm: $a, label: $l, key: $k, engine: (if $e == "" then null else $e end), version: (if $v == "" then null else $v end),
-    model: (if $m == "" then null else $m end), resolved: $g.resolved, at: $at, inputs: $i, imageBytes: $z} + ($g | del(.resolved)) + . + (if $ag == "" then {} else {again: $ag} end)' <<<"$b")" || { echo "not run: its result could not be kept"; return; }
-  chmod -R u+w "$sb" "$sb.h" 2>/dev/null; rm -rf "$sb" "$sb.h"
+    model: (if $m == "" then null else $m end), resolved: $g.resolved, at: $at, inputs: $i, imageBytes: $z} + ($g | del(.resolved)) + . + (if $ag == "" then {} else {again: $ag} end)' <<<"$b")" || { swe_rmsb "$sb"; echo "not run: its result could not be kept"; return; }
+  swe_rmsb "$sb"
   if jq -e .resolved <<<"$g" > /dev/null; then echo resolved; elif jq -e .fired <<<"$b" > /dev/null; then echo unresolved; else echo "unresolved ($(jq -r .why <<<"$b"))"; fi
 }
 # The run's end: its line in runs.jsonl, live.json's state, the containers of its trials and preflights, the
@@ -759,53 +770,80 @@ swe_end() { # <state> [gone: its process had ended with no end written]
   [ ! -d "$SWE_DIR/work" ] || { chmod -R u+w "$SWE_DIR/work"; rm -rf "$SWE_DIR/work"; }
   rm -rf "$SWE_DIR/frozen"; rm -f "$SWE_DIR/stop"; swe_board; SWE_RUN=; trap - TERM INT
 }
-# Whether the usage guard holds back a run of these kinds of arm: <conveyor> is non-empty when the run has a conveyor
-# arm, <agent> when it has another arm that uses the Claude login (swe_guards).
-swe_held() { { [ -n "$1" ] && swe_guarded; } || { [ -n "$2" ] && swe_guarded 1; }; } # <conveyor> <agent>
+# Whether the usage guard holds back a run of these kinds of arm: <conveyor> holds the seats of each conveyor arm of the
+# run (swe_armseats, a line each; empty for none), <agent> is non-empty when it has another arm that uses the Claude
+# login (swe_guards).
+swe_held() { # <conveyor> <agent>
+  local s
+  while IFS= read -r s; do [ -z "$s" ] || ! swe_guarded '' "$s" || return 0; done <<<"$1"
+  [ -n "$2" ] && swe_guarded 1
+}
+swe_armseats() { jq -c '.seats // {}' <<<"$1"; } # <arm json>: the seats it sets over the project's (swe_ctl)
+# Whether the usage guard holds back one arm now (swe_guards: an arm with no Claude login is never held).
+swe_armheld() { case $(swe_guards "$1") in conveyor) swe_held "$(swe_armseats "$1")" '' ;; agent) swe_held '' 1 ;; *) return 1 ;; esac; } # <arm json>
 # Which guard an arm is held back by: "conveyor" (the engine's), "agent" (the Claude account an arm that is not the
 # engine's uses) or nothing, for an arm with no Claude login (Codex alone): the Claude guard does not hold it.
 swe_guards() { jq -r 'if .kind == "conveyor" then "conveyor" elif (.login // [] | index("claude")) then "agent" else empty end' <<<"$1"; } # <arm json>
+# A run's record before its arms' contexts are taken (swe_context): its ID (SWE_RUN), arms, task count and settings,
+# its conveyor arms naming the engine asked for; running (with its process: Stop finds it while its setup goes) or
+# refused (ended, with why).
+swe_setuprec() { # <n> <engine> <running | refused> [<why>] < the arms' JSON, one a line
+  jq -sc --arg id "$SWE_RUN" --argjson pid "$$" --argjson n "$1" --arg at "$(swe_now)" --arg e "$2" --arg s "$3" --arg w "${4:-}" --argjson set "$SWE_SET" '($e | test("^[0-9a-f]{40}$")) as $c
+    | {id: $id, arm: .[0].name, arms: map(.name), label: (map(.label // .name) | join(", ")), n: ($n * length),
+       cols: map({arm: .name, key: null, label: (.label // .name), kind}
+         + (if .kind == "conveyor" then {engine: (if $c then $e else null end), version: (if $c then null else $e end)} else {} end)),
+       set: ($set | {dataset, revision, seed}), limits: ($set | {cpus, memory, taskTimeout}), done: 0, resolved: 0, current: null, started: $at, state: $s, tasks: []}
+    + if $s == "running" then {pid: $pid, active: null, seq: 1, updated: $at} else {ended: $at, why: $w} end'
+}
+# A run that ends before it is one: live.json as it was before its start (none: no live.json), no Stop trap, no run.
+swe_unstart() { # <live.json before the run's start>
+  trap - TERM INT
+  if [ -n "$1" ]; then swe_put "$SWE_DIR/live.json" "$1"; else rm -f "$SWE_DIR/live.json"; fi
+  SWE_RUN=
+}
 # A run: the first n tasks, each built by every arm in turn, so a run stopped early has compared the arms on the same
 # tasks. Each arm is picked only once its preflight passed (swe_ready) and, for a conveyor arm, the area rule files
 # its cards of these tasks read are there (swe_taskrules).
 swe_run() { # <n> <engine> <arm>...
-  local n=$1 eng0=$2 tf all i t id r x a l left rid gc='' ga='' why ctxs=() specs=() plan='[]' ra tag ag SWE_TASK=''
+  local n=$1 eng0=$2 tf all i t id r x a l left rid gc='' ga='' why prev ctxs=() specs=() plan='[]' ra tag ag SWE_TASK=''
   shift 2
   mkdir -p "$SWE_DIR" && swe_lock || { echo "conveyor: a SWE-bench run is already going; \`conveyor.sh bench swe stop\` ends it" >&2; return 1; }
   for x; do a=$(swe_arm "$x") || { echo "conveyor: no arm $x: \`conveyor.sh bench swe arms\` lists them" >&2; return 2; }
-    specs+=("$a"); case $(swe_guards "$a") in conveyor) gc=1 ;; agent) ga=1 ;; esac; done
-  ! swe_held "$gc" "$ga" || { echo "conveyor: the usage guard is reached: no SWE-bench run starts while it stands" >&2; return 1; }
+    # A saved revision is checked against the project's choices now, not only at its save: a pass of its check can be
+    # from before a model was removed (swe_savedwhy).
+    why=$(swe_savedwhy "$a"); [ -z "$why" ] || { echo "conveyor: $why" >&2; return 1; }
+    specs+=("$a"); case $(swe_guards "$a") in conveyor) gc+=$(swe_armseats "$a")$'\n' ;; agent) ga=1 ;; esac; done
+  # The run is live from here, before its setup (the task list, the engine's install, the copies of the project's
+  # files), which can take minutes: live.json says it is running, with its process, so a Stop then finds it and ends
+  # it (stopped). An early end that is no run (the guard, the task list, n or --task, an arm's context) puts live.json
+  # back as it was (swe_unstart): no run is recorded.
+  SWE_RUN=r$(date -u +%Y%m%dT%H%M%S)-$$; rm -f "$SWE_DIR/stop"; prev=$(cat "$SWE_DIR/live.json" 2>/dev/null)
+  swe_put "$SWE_DIR/live.json" "$(printf '%s\n' "${specs[@]}" | swe_setuprec "$n" "$eng0" running)" || { SWE_RUN=; return 1; }
+  trap 'swe_stopping; exit 143' TERM INT
+  ! swe_held "$gc" "$ga" || { swe_unstart "$prev"; echo "conveyor: the usage guard is reached: no SWE-bench run starts while it stands" >&2; return 1; }
   # A build machine that cannot run a task refuses the run, kept as its recorded end (state refused, with why) as a
   # failed preflight is, so the run history still says what to repair once the Board no longer waits for the answer.
   # Its conveyor arms name the engine asked for. Written here, not by swe_end: no container or sandbox is this run's,
   # and the ones swe_end removes can be an arms check's.
-  why=$(swe_setup 2>&1) || { echo "$why" >&2
-    l=$(printf '%s\n' "${specs[@]}" | jq -sc --arg id "r$(date -u +%Y%m%dT%H%M%S)-$$" --argjson n "$n" --arg at "$(swe_now)" --arg w "${why#conveyor: }" \
-      --arg e "$eng0" --argjson set "$SWE_SET" '($e | test("^[0-9a-f]{40}$")) as $c
-      | {id: $id, arm: .[0].name, arms: map(.name), label: (map(.label // .name) | join(", ")), n: ($n * length),
-         cols: map({arm: .name, key: null, label: (.label // .name), kind}
-           + (if .kind == "conveyor" then {engine: (if $c then $e else null end), version: (if $c then null else $e end)} else {} end)),
-         set: ($set | {dataset, revision, seed}), limits: ($set | {cpus, memory, taskTimeout}), done: 0, resolved: 0, current: null, started: $at, ended: $at, state: "refused", tasks: [], why: $w}') \
-      && swe_put "$SWE_DIR/live.json" "$l" && swe_runlog "$l"; swe_board; return 1; }
-  tf=$(swe_tasks) || return 1; all=$(wc -l < "$tf")
-  [ "$n" -le "$all" ] || { echo "conveyor: the task list holds $all tasks: n is 1 to $all" >&2; return 2; }
+  why=$(swe_setup 2>&1) || { echo "$why" >&2; trap - TERM INT
+    l=$(printf '%s\n' "${specs[@]}" | swe_setuprec "$n" "$eng0" refused "${why#conveyor: }") && swe_put "$SWE_DIR/live.json" "$l" && swe_runlog "$l"; SWE_RUN=; swe_board; return 1; }
+  tf=$(swe_tasks) || { swe_unstart "$prev"; return 1; }; all=$(wc -l < "$tf")
+  [ "$n" -le "$all" ] || { swe_unstart "$prev"; echo "conveyor: the task list holds $all tasks: n is 1 to $all" >&2; return 2; }
   # --task: the run's one task is that one, not the first of the order.
   [ -z "${SWE_ONLY:-}" ] || { jq -c --arg t "$SWE_ONLY" 'select(.id == $t)' "$tf" > "$SWE_DIR/only.jsonl" && [ -s "$SWE_DIR/only.jsonl" ] \
-    || { echo "conveyor: the task list has no task $SWE_ONLY" >&2; return 2; }; tf=$SWE_DIR/only.jsonl; }
-  rm -rf "$SWE_DIR/frozen"; for x; do swe_context "$x" "$eng0" || return 1; ctxs+=("$SWE_CTX"); done
-  # The run is live from its preflights on, which can take minutes: Stop ends it there too, and a failed preflight is
-  # the run's recorded end (state refused, with why), which the Board shows once it no longer waits for the answer.
+    || { swe_unstart "$prev"; echo "conveyor: the task list has no task $SWE_ONLY" >&2; return 2; }; tf=$SWE_DIR/only.jsonl; }
+  rm -rf "$SWE_DIR/frozen"; for x; do swe_context "$x" "$eng0" || { swe_unstart "$prev"; return 1; }; ctxs+=("$SWE_CTX"); done
+  # The run's whole record, once its arms' contexts are taken: a failed preflight is the run's recorded end (state
+  # refused, with why), which the Board shows once it no longer waits for the answer.
   # cols names each arm's results key (the Board's history and run page read each arm's results by it), set the
   # task set (dataset, revision and seed: runs of one set are read side by side) and limits each trial's (swe_settings).
   # again: true for a run with --again, which reuses no kept result (the Board's Live run then counts none as reused).
   # weekStart and weekLeft: the share of the week the guards of the run's arms (swe_weeks) had left when it started and after its last trial: the Board's Live run says it and what the run needs.
-  SWE_RUN=r$(date -u +%Y%m%dT%H%M%S)-$$; rm -f "$SWE_DIR/stop"
   swe_put "$SWE_DIR/live.json" "$(printf '%s\n' "${ctxs[@]}" | jq -sc --arg id "$SWE_RUN" --argjson pid "$$" --argjson n "$n" --arg at "$(swe_now)" --arg ag "${SWE_AGAIN:-}" --arg only "${SWE_ONLY:-}" \
     --argjson w "$(swe_weeks "$gc" "$ga")" --argjson set "$SWE_SET" "$SWE_NAMES"'. as $c | $c[0]
     | {id: $id, pid: $pid, arm, key, engine, version, model, arms: ($c | map(.arm)), label: ($c | map(runname) | join(", ")), n: ($n * ($c | length)),
        cols: ($c | map({arm, key, label, kind, engine, version, model})), set: ($set | {dataset, revision, seed}), limits: ($set | {cpus, memory, taskTimeout}),
        weekStart: $w, weekLeft: $w, done: 0, resolved: 0, current: null, active: null, seq: 1, updated: $at, started: $at, state: "running", tasks: []} + (if $ag == "" then {} else {again: true} end) + (if $only == "" then {} else {only: $only} end)')"
-  trap 'swe_stopping; exit 143' TERM INT
   swe_board; swe_event 'Run started'
   # The run's receipt, once its record is written: the Board's Start answers it. A run that reuses the saved result
   # of each of its tasks prints none, so Start waits for its end and answers its result, whose last line names it.
@@ -834,8 +872,7 @@ swe_run() { # <n> <engine> <arm>...
         swe_event "Reused: ${r^}" "$SWE_ARM" "$id"
         continue
       fi
-      case $(swe_guards "$SWE_ARMJ") in conveyor) ! swe_held 1 '' ;; agent) ! swe_held '' 1 ;; esac \
-        || { echo "conveyor: the usage guard is reached: the run stops before $id"; swe_end guard; return 0; }
+      ! swe_armheld "$SWE_ARMJ" || { echo "conveyor: the usage guard is reached: the run stops before $id"; swe_end guard; return 0; }
       swe_live --arg t "$id" '.current = $t'
       SWE_TASK=$id; r=$(swe_task "$t"); echo "$i/$n $id$tag: $r"
       # The task's cost is its trial's (swe_sofar); a task whose trial never started its command ran no session: $0.
@@ -1013,7 +1050,9 @@ swe_side() { # <A or B>
   if [ "$(jq -r .kind <<<"$a")" = conveyor ]; then swe_resolve "${ver:-main}" || return 1
     SIDE_COMMIT=$SWE_COMMIT; SIDE_NAME="${arm:+$arm }${SWE_VERSION:-${SWE_COMMIT:0:12}}"
   else [ -z "$ver" ] || { echo "conveyor: the arm $arm runs no engine version" >&2; return 1; }
-    SIDE_COMMIT=''; SIDE_NAME=$arm; m=$(jq -r '.model // ""' <<<"$a"); [ "$m" != builder ] || m=$(swe_solomodel)
+    SIDE_COMMIT=''; SIDE_NAME=$arm; m=$(jq -r '.model // ""' <<<"$a")
+    # An arm on the builder's model is named with it, as resname names its results.
+    [ "$m" != builder ] || { m=$(swe_solomodel); SIDE_NAME="$arm (${m:-default})"; }
   fi
   # A result kept before arms has no arm: it is the conveyor arm's. Its folder is its key.
   SIDE_KEY=$(jq -rn --arg a "$(jq -r .name <<<"$a")" --arg e "$SIDE_COMMIT" --arg m "$m" '[inputs | select((.arm // "conveyor") == $a and (.engine // "") == $e and ($m == "" or .model == $m))

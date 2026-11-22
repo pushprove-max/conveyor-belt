@@ -81,6 +81,28 @@ t_swestoppre() {
     || fail "the stopped run is not recorded with its stopping, or its preflight's container was left: $(cat "$B/runs.jsonl" 2>&1) $(ls "$SWE_FX/boxes")"
 }
 
+# Bug: Stop found no run during a run's setup (the task list's fetch, the engine's install), as the run wrote live.json
+# only after it: Stop said no run was going, and the run then started. A harness in front of the fixture's holds the
+# task list's fetch while $SWE_FX/thold is there. Then a run that ends before it is one (an engine not released) puts
+# live.json back as it was, and records no run.
+t_swestopsetup() {
+  swe; local out id
+  printf '%s\n' '#!/usr/bin/env bash' \
+    '[ "$2" != tasks ] || { : > "$SWE_FX/tasks-asked"; while [ -e "$SWE_FX/thold" ]; do sleep 0.1; done; } # sleep: held until the case removes thold' \
+    'exec "$SWE_FX/py" "$@"' > "$T/$CASE/py" && chmod +x "$T/$CASE/py" && : > "$SWE_FX/thold" || fail "the held harness was not made"
+  CONVEYOR_BENCH_PYTHON=$T/$CASE/py loop bench swe 1 > "$T/$CASE/run.out" 2>&1 &
+  wait_until "[ -e '$SWE_FX/tasks-asked' ]" "cat '$T/$CASE/run.out'" || fail "the run did not reach its task list's fetch"
+  id=$(jq -r 'select(.state == "running") | .id' "$B/live.json" 2>/dev/null)
+  out=$(loop bench swe stop 2>&1); rm -f "$SWE_FX/thold"
+  [ -n "$id" ] && [ "$out" = "conveyor: run $id is stopped. Its finished tasks are kept." ] || fail "bench swe stop during the run's setup did not stop it: $out (live.json: $(cat "$B/live.json" 2>&1))"
+  wait $! 2>/dev/null
+  tail -n 1 "$B/runs.jsonl" | jq -e --arg id "$id" '.id == $id and .state == "stopped"' > /dev/null && [ ! -s "$SWE_FX/log" ] && ! grep -q '^create ' "$SWE_FX/docker.log" 2>/dev/null \
+    || fail "the run stopped in its setup is not recorded stopped, or it went on to a check or a trial: $(cat "$B/runs.jsonl" 2>&1) $(cat "$T/$CASE/run.out")"
+  out=$(loop bench swe 1 --engine v9.9.9 2>&1) && fail "a run on an engine not released started: $out"
+  jq -e --arg id "$id" '.id == $id and .state == "stopped"' "$B/live.json" > /dev/null && [ "$(wc -l < "$B/runs.jsonl")" = 1 ] \
+    || fail "bench swe 1 --engine v9.9.9 did not put live.json back, or recorded a run: $(cat "$B/live.json") $(cat "$B/runs.jsonl")"
+}
+
 # Bugs (#645): a Stop sent for a run that had ended stopped the run started after it, as Stop took no run ID; a second
 # Stop of a stopped run wrote its end again. Run 1 builds the first task; run 2 reuses it and is on the second when a
 # late Stop of run 1 comes, then Stop of run 2 comes twice.
