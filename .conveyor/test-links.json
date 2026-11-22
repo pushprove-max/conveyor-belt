@@ -750,6 +750,7 @@
     "conveyor/tests/metrics.test.sh"
   ],
   "conveyor/lib/control.sh": [
+    "conveyor/tests/batch.test.sh",
     "conveyor/tests/metrics.test.sh"
   ],
   "conveyor/lib/followups.sh": [
@@ -781,5 +782,11 @@
   ],
   "docs/releases.md": [
     "conveyor/tests/metrics.test.sh"
+  ],
+  "conveyor/lib/modelpick.sh": [
+    "conveyor/tests/batch.test.sh"
+  ],
+  "conveyor/tests/modelpick.test.sh": [
+    "conveyor/tests/batch.test.sh"
   ]
 }

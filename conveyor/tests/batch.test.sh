@@ -146,7 +146,10 @@ t_batchmask() {
 if grep -q '^# The changed tests fail' "$STUB/brief"; then rm -f needs-b
 else echo x > "s${PWD##*-}.txt"; case $PWD in *-7) sed -i 1s/.*/seven/ a.txt; : > needs-b ;; *) echo eight >> a.txt; : > supplied-by-b ;; esac; fi
 EOF
-  echo '[ ! -e needs-b ] || [ -e supplied-by-b ] || { echo "FAIL needs.test: needs-b without supplied-by-b"; printf "%s\n" "== needs.test" "-- FAIL needs.test" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1; }' >> "$STUB/test-cmd"
+  # The failure is #7's own file's (t7.test.sh, which the runner logs, then runs with test.fileCommand): a
+  # `== needs.test` line of its own in the runner's log would be a second file reported by a run given one, a wide run
+  # (watch(), lib/session.sh).
+  echo '[ ! -e needs-b ] || [ -e supplied-by-b ] || { echo "FAIL needs.test: needs-b without supplied-by-b"; exit 1; }' >> "$STUB/test-cmd"
   # #7's tests after its fix end only once #8 has landed: #8, at its claim, looks again each `live` second, and #7's
   # stubbed fix is faster than that, so without this wait #8 could land before those tests start or after they end.
   echo 'case $PWD in *-7) [ -e needs-b ] || while [ -d "$STUB" ]; do jq -e "select(.issue == 8 and .step == \"landed\")" "$ST/cards.jsonl" >/dev/null 2>&1 && break; sleep 0.1; done ;; esac' >> "$STUB/test-cmd"
