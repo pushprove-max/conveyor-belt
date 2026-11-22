@@ -537,6 +537,15 @@ test('QUEUE counts what is held back from the snapshot\'s queue.skipped by rule 
   expect(paneModel(s, 80, 0).map(plain).join('\n')).toContain('held back: 1 backlog · 2 dormant · 2 held')
 })
 
+// Bug: at 40 columns `held back: 1 follow-ups · 1 P0 · 1 P1 · 1 P2` is 44 columns, and the pane and /units cut it, so
+// the last count fell off. The counts wrap at the width instead, each whole.
+test('held back wraps at its counts at 40 columns, never cut, in the pane and /units', () => {
+  const s = board({ queue: { next: queued(1), skipped: skipped({ P0: 1, P1: 1, P2: 1, 'follow-ups': 1 }) } })
+  const pane = paneModel(s, 40, 0).map(plain), at = pane.findIndex(l => l.startsWith('held back:'))
+  expect(pane.slice(at, at + 2)).toEqual(['held back: 1 follow-ups · 1 P0 · 1 P1 ·', '  1 P2'])
+  expect(section(tableText(s, 40), 'QUEUE').split('\n').slice(-2)).toEqual([' held back: 1 follow-ups · 1 P0 · 1 P1 ·', '   1 P2'])
+})
+
 // Bug (#1438, O371): the mod sorted queue.next by follow-up and priority, so a pinned P2 issue the engine picks first
 // showed below the P0 issue picked after it. Each record's order stands.
 test('QUEUE and PICK ORDER keep the engine\'s pick order within a record: a pinned P2 stays ahead of a P0', () => {

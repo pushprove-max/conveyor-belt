@@ -922,6 +922,11 @@ const unpushedLines = (snap: Snap, w: number, lead: string): Line[] => {
   return l.length ? wrapParts(['landed, not pushed:', ...l.map((x, i) => `${x.repo}#${x.issue}${i < l.length - 1 ? ' ·' : ''}`)], w, lead, ' ', { d: true }) : []
 }
 
+// What the pick held back, a count a rule, wrapped at its counts, never cut: at 40 columns four rules are wider than
+// the pane, and a cut line drops the last count. `held back: 1 follow-ups · 1 P0 · 1 P1 · 1 P2`.
+const heldLines = (snap: Snap, w: number, lead: string): Line[] =>
+  snap.held.length ? wrapParts(['held back:', ...snap.held.map(([label, n], i, l) => `${n} ${label}${i < l.length - 1 ? ' ·' : ''}`)], w, lead, ' ') : []
+
 // Each project's push, so a slow push is told from a stuck one. In progress: what runs (its stage, PUSH_STAGE, as
 // pushing() in conveyor/lib/push.sh writes it; none is the hook's), since when, on which commit, its process and the time it
 // has taken, then the newest line of its output; stale, with its log, when its process is gone and it did not end.
@@ -1000,7 +1005,7 @@ export const queueModel = (snap: Snap, w: number): Line[] => {
         : [titled({ ...x, parent: null }, [{ t: ' · ', d: true }], [], w, false), ...wrapParts(['Waits for', ...refs], w, '    ', ' ')]
     }),
     ...(snap.waits.length > NEXT ? [empty(`and ${snap.waits.length - NEXT} more waiting`)] : []),
-    ...(snap.held.length ? [fitWidth([{ t: ` held back: ${snap.held.map(([label, n]) => `${n} ${label}`).join(' · ')}`, d: true }], w)] : []),
+    ...heldLines(snap, w, ' '),
     ...unpushedLines(snap, w, ' '),
   ]
 }
@@ -1327,7 +1332,7 @@ const paneBoard = (s: State, snap: Snap, w: number, frame: number, open: boolean
     ...matrixModel(s, snap, w), [],
     ...activityModel(s, snap, w, frame), [],
     ...pickModel(snap, w),
-    ...(snap.held.length ? [fitWidth([{ t: `held back: ${snap.held.map(([label, n]) => `${n} ${label}`).join(' · ')}`, d: true }], w)] : []),
+    ...heldLines(snap, w, ''),
     ...unpushedLines(snap, w, ''),
     ...pushLines(s, snap, w, ''),
     ...(snap.deploy.length ? [[], ...deployModel(s, snap, w)] : []), [],
