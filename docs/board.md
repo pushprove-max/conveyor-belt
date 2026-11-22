@@ -410,7 +410,7 @@ its review and before its landing. Off, no lint command runs, and the tab says "
 land with no lint check". Under the switch, the tab lists the pack's lint commands, each with the files it reads. You
 cannot change them here: they are set in the `lint` field of `.conveyor/project.json` ([Lint](configuration.md#lint)).
 
-**Split large issues** has three settings per project: Off, Shadow and On. Shadow is the default. Shadow records what
+**Split large issues** has three settings per project: Off, Shadow and On. On is the default for a new project. A project that set the rule keeps its setting. Shadow records what
 the Judge would split a large issue into, and builds the issue whole. The tab says "shadow: the verdict is recorded,
 and the issue is built whole". On files the slices as follow-ups and as sub-issues of the issue, and holds the issue
 as their umbrella until all its slices are closed. Off checks no issue ([Split large issues](configuration.md#split-large-issues)).

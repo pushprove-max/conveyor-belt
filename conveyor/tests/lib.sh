@@ -130,7 +130,7 @@ tuned() { # <jq filter> <command...>
 # seat's model changed and its effort kept (seatset). The judge off, visible changes waiting for the owner's yes and
 # a push after each landing are set here, not left to control-defaults.json (judge on, visible off, push off): a case
 # turns them as it needs. The rule Split large
-# issues is off (its default is shadow): a card's lines are those of today's cards; its cases (slices.test.sh) turn it on.
+# issues is off (its default is on): a card's lines are those of today's cards; its cases (slices.test.sh) turn it on.
 seed() {
   mkdir -p "$ST"
   echo '{"mode":"run","cap":5,"guard":null,"held":[],"order":[],"rules":{"P0":true,"P1":true,"P2":true,"followups":true,"push":true,"visible":true,"split":"off","never":[]},"model":{"model":"m","effort":"medium"},"reviewer":{"model":"x","effort":"medium"},"judge":null,"judgeOn":false,"start":"queue","startHeld":[],"startSeen":[]}' \

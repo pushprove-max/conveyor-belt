@@ -12,7 +12,7 @@
     "followups": true,
     "push": false,
     "visible": false,
-    "split": "shadow",
+    "split": "on",
     "pick": "off",
     "lint": true,
     "never": []

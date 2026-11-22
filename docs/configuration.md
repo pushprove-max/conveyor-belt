@@ -276,8 +276,8 @@ test run keeps the factor of that run.
 ## Split large issues
 
 The rule **Split large issues** on the Rules tab sets what Conveyor does with a large issue before it builds it. It
-has three settings: Off, Shadow and On. Shadow is the default. `conveyor.sh control rules split=off`, `split=shadow`
-or `split=on` also sets it.
+has three settings: Off, Shadow and On. On is the default for a new project. A project that set the rule keeps its
+own setting. `conveyor.sh control rules split=shadow` sets Shadow, `split=off` sets Off and `split=on` sets On.
 
 Conveyor checks an issue one time, when it picks the issue and before it makes the card's worktree. It checks the
 issue again only after you edit its title or body. It does not check follow-ups, the slices of a split issue, or fix

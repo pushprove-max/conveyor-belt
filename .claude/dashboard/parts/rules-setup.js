@@ -58,8 +58,8 @@
       return ['none', steps, at({}, { never: [] })];
     }
     if (k === 'push' || k === 'visible') return ['Off', [['rules', [`${k}=off`]]], at({}, { [k]: false })];
-    // Split large issues: shadow, as control-defaults.json has it.
-    if (k === 'split') return ['Shadow', [['rules', ['split=shadow']]], at({}, { split: 'shadow' })];
+    // Split large issues: on, as control-defaults.json has it.
+    if (k === 'split') return ['On', [['rules', ['split=on']]], at({}, { split: 'on' })];
     return null;
   }
   // onbDefault of a setting that is not one of the record's rules. role(key): a seat's default model, in words.

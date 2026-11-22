@@ -34,7 +34,7 @@ t_control() {
   # with nobody asked: push is off). Each seat names a
   # model this pack does not list, so it runs on the seed: the first model the pack allows it, at medium.
   rm "$C"; [ "$(ctl | jq -c '[.mode, .cap, .guard, .held, .order, .model, .reviewer, .judge, .judgeOn, .judgeAlways, .rules, .depGuard, .start]')" \
-    = '["run",6,98,[],[],{"model":"claude-opus-5-5","effort":"medium"},{"model":"gpt-6.1-sol","effort":"medium"},{"model":"claude-opus-5-5","effort":"medium"},true,[],{"P0":true,"P1":true,"P2":true,"P3":true,"followups":true,"push":false,"visible":false,"split":"shadow","pick":"off","lint":true,"never":[]},true,"queue"]' ] \
+    = '["run",6,98,[],[],{"model":"claude-opus-5-5","effort":"medium"},{"model":"gpt-6.1-sol","effort":"medium"},{"model":"claude-opus-5-5","effort":"medium"},true,[],{"P0":true,"P1":true,"P2":true,"P3":true,"followups":true,"push":false,"visible":false,"split":"on","pick":"off","lint":true,"never":[]},true,"queue"]' ] \
     && [ ! -e "$C" ] || fail "no record does not read as the plugin project's settings: $(ctl)"
   h=$(loop health)
   [ "$(jq -c '[.models, .efforts, .builderCap]' <<<"$h")" = '[{"claude":"m","codex":"x"},{"claude":"medium","codex":"medium"},6]' ] || fail "no record does not have the seed's seats and the defaults' cap: $h"
@@ -59,7 +59,7 @@ t_control() {
   [ "$(ctl cap 9 | jq .cap)" = 9 ] && [ "$(ctl cap 100 | jq .cap)" = 100 ] && [ "$(ctl | jq .cap)" = 100 ] \
     && [ "$(ctl cap 1 | jq .cap)" = 1 ] && [ "$(ctl guard 50 | jq .guard)" = 50 ] && [ "$(ctl hold 8 6 | jq -c .held)" = '[6,8]' ] && [ "$(ctl release 6 | jq -c .held)" = '[8]' ] \
     && [ "$(ctl order 9 5 9 | jq -c .order)" = '[9,5]' ] && [ "$(ctl order 9 5 8 | jq -c .order)" = '[9,5,8]' ] && [ "$(ctl unpin 5 6 | jq -c .order)" = '[9,8]' ] \
-    && [ "$(ctl order 9 5 | jq -c .order)" = '[9,5]' ] &&[ "$(ctl rules P1=off area:billing=off followups=off | jq -c .rules)" = '{"P0":true,"P1":false,"P2":true,"P3":true,"followups":false,"push":false,"visible":false,"split":"shadow","pick":"off","lint":true,"never":["area:billing"]}' ] \
+    && [ "$(ctl order 9 5 | jq -c .order)" = '[9,5]' ] &&[ "$(ctl rules P1=off area:billing=off followups=off | jq -c .rules)" = '{"P0":true,"P1":false,"P2":true,"P3":true,"followups":false,"push":false,"visible":false,"split":"on","pick":"off","lint":true,"never":["area:billing"]}' ] \
     && [ "$(ctl rules area:billing=on followups=on | jq -c '[.rules.never, .rules.followups]')" = '[[],true]' ] \
     && [ "$(ctl rules push=on | jq -c '[.rules.push, .rules.never]')" = '[true,[]]' ] && [ "$(ctl | jq .rules.push)" = true ] && [ "$(ctl rules push=off | jq .rules.push)" = false ] \
     && [ "$(ctl rules lint=off | jq -c '[.rules.lint, .rules.never]')" = '[false,[]]' ] && [ "$(ctl rules lint=on | jq .rules.lint)" = true ] \
@@ -290,24 +290,27 @@ t_controlkept() {
   mkdir -p "$T/$CASE" && echo '{"cap":2,"judgeOn":false}' > "$CONTROL"
   ctlread || fail "a record that sets cap and judgeOn alone did not read"
   [ "$(jq -c '[.cap, .judgeOn, .guard, .model, .reviewer, .judge, .rules.visible, .rules.push, .rules.split, .depGuard, .start]' <<<"$CTL_V")" \
-    = '[2,false,98,{"model":"claude-opus-5-5","effort":"medium"},{"model":"gpt-6.1-sol","effort":"medium"},{"model":"claude-opus-5-5","effort":"medium"},false,false,"shadow",true,"queue"]' ] \
+    = '[2,false,98,{"model":"claude-opus-5-5","effort":"medium"},{"model":"gpt-6.1-sol","effort":"medium"},{"model":"claude-opus-5-5","effort":"medium"},false,false,"on",true,"queue"]' ] \
     || fail "the record's cap 2 and judge off were not kept, or a key it leaves out is not the new defaults': $CTL_V"
   # conveyor/README.md's rule defaults paragraph must say what this record (saved with no rules) reads (#446): its
   # rules are what the paragraph claims for an older record, built from its own words, not a copy of them.
-  local para off split want
+  local para off want
   para=$(awk '/^Every rule is on by default/ {p = 1} p && /^$/ {exit} p' "$SRC/README.md" | tr '\n' ' ')
   off=$(sed -n 's/.*except \(.*\), which are off.*/\1/p' <<<"$para" | grep -o '`[A-Za-z0-9]*`' | tr -d '`' | jq -Rsc 'split("\n") | map(select(. != ""))')
-  split=$(sed -n 's/.*`split`, which is `\([a-z]*\)`.*/\1/p' <<<"$para")
   case $para in
     *"saved before a rule existed reads that rule at its default"*)
-      want=$(jq -c --argjson off "$off" --arg s "$split" '{P0: true, P1: true, P2: true, P3: true, followups: true, push: true, visible: true}
-        | with_entries(.value = (.key | IN($off[]) | not)) + {split: $s}' <<<null) ;;
+      want=$(jq -c --argjson off "$off" '{P0: true, P1: true, P2: true, P3: true, followups: true, push: true, visible: true}
+        | with_entries(.value = (.key | IN($off[]) | not)) + {split: "on"}' <<<null) ;;
     *"saved before a rule existed reads that rule as on"*)
       want='{"P0":true,"P1":true,"P2":true,"P3":true,"followups":true,"push":true,"visible":true,"split":"on"}' ;;
     *) want='"no rule for an older record"' ;;
   esac
   [ "$(jq -c '.rules | {P0, P1, P2, P3, followups, push, visible, split}' <<<"$CTL_V")" = "$want" ] \
     || fail "conveyor/README.md's rule defaults paragraph claims $want for a record saved before its rules, but it reads $(jq -c .rules <<<"$CTL_V")"
+  # Split is on for a record that leaves it out (above); a project that set shadow keeps it. Bug caught: the new
+  # default overrides a project's own setting, so its large issues start to be split without its choice.
+  echo '{"rules":{"split":"shadow"}}' > "$CONTROL"
+  ctlread && [ "$(jq -r .rules.split <<<"$CTL_V")" = shadow ] || fail "a record that set split shadow did not keep it over the default on: $CTL_V"
   echo '{"rules":{"push":true}}' > "$CONTROL"
   ctlread && [ "$(jq .rules.push <<<"$CTL_V")" = true ] || fail "a record with push on did not keep it over the defaults: $CTL_V"
 }

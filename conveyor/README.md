@@ -43,7 +43,7 @@ its own, and the Board's Rules tab sets them in its Judge row.
   A visible change landed while it is off was never approved; the Board says so beside the switch.
 - `lint`: the rule Lint check, on by default. On, each card's change goes through the review gate (Lint, below)
   before each review and the landing gate before it lands. Off, no lint command runs in a card and the brief has no `# Lint` section.
-- `split`: the rule Split large issues, `off`, `shadow` or `on` (`conveyor.sh control rules split=<off|shadow|on>`).
+- `split`: the rule Split large issues, `off`, `shadow` or `on`. It is on by default (`conveyor.sh control rules split=<off|shadow|on>`).
   Before a card makes its worktree, code measures its issue against the pack's `split` limits; an issue that reaches
   one goes to the judge one time, which answers keep or 2 or 3 slices. Shadow records the verdict on the card's
   `split` line, and the card builds the issue whole. On files the slices as follow-ups (`Follow-up of #N`) and as
@@ -71,7 +71,7 @@ its own, and the Board's Rules tab sets them in its Judge row.
   promoted cards of a group cost more for each landed card than its default cards, the rule goes back to Shadow
   ([Pick settings](../docs/configuration.md#pick-settings)).
 
-Every rule is on by default, except `push` and `visible`, which are off, `split`, which is `shadow`, and `pick`, which is `off`. An issue a rule excludes is left out of the pick and listed as skipped, with the rule
+Every rule is on by default, except `push` and `visible`, which are off, and `pick`, which is `off`. An issue a rule excludes is left out of the pick and listed as skipped, with the rule
 that skips it. A record saved before a rule existed reads that rule at its default.
 
 `conveyor.sh control land-as main|pr` sets Land as (`landAs` in the record; null, the default, is the pack's

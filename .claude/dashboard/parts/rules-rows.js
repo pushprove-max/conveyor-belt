@@ -467,8 +467,8 @@
   }
   function rulesSplit(el, r) {
     const h = S.ctx.h;
-    // Split large issues: Shadow (the default) records what the Judge would split a large issue into, and builds it
-    // whole; On files the slices as follow-ups and holds the issue as their umbrella; Off checks nothing. An engine whose
+    // Split large issues: On (the default) files the slices as follow-ups and holds the issue as their umbrella; Shadow
+    // records what the Judge would split a large issue into, and builds it whole; Off checks nothing. An engine whose
     // record has no rules.split is sent none of them. Undo sends the setting it had.
     const splitAt = ['off', 'shadow', 'on'].includes(r.split) ? r.split : null;
     const splitTo = (v, label) => {

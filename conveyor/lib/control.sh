@@ -43,8 +43,8 @@ CTL_K=()
 # before a push runs (pushCheck null). A card that lands is not pushed (rules.push
 # off: land only, owed()): it waits for the Board's Push landed, or for the owner to turn the rule on. A visible change needs no yes from the owner (rules.visible off; on: a card waits for a
 # `Visible change approved:` line, yesrule()). The rule Lint check is on (rules.lint: the pack's lint commands run at
-# the review gate, lintgate(), lib/lint.sh). The rule Split large issues is in shadow (rules.split: the judge's
-# verdict on a large issue is recorded, and the issue is built whole, splitcheck()). The rule Pick settings is off
+# the review gate, lintgate(), lib/lint.sh). The rule Split large issues is on (rules.split: the judge's
+# verdict on a large issue that is too big is acted on: its slices are filed, splitcheck()). The rule Pick settings is off
 # (rules.pick: no card's group and builder choice is recorded, modelpick()). No Tests seat is set: no test action starts (testaction()). The project
 # is not onboarded (onboarded null; `control onboarded` sets {at, rules}: when the owner finished the Board's setup and
 # the rules confirmed there), so the Board opens its setup. A release suite in parallel mode runs at most suiteAtOnce

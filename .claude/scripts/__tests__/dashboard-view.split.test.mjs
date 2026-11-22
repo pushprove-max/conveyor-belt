@@ -42,17 +42,17 @@ test('Rules: Split large issues, unset, is not sent to an engine that does not k
 });
 
 // Bug this guards: the setup (#250) asks every project rule, and it left Split large issues unasked. Its default,
-// Shadow, is shown selected until the rule is set, whatever the record holds, and that choice sends it.
-test('Setup: a project not yet onboarded is asked Split large issues, with Shadow as its default', async () => {
+// On, is shown selected until the rule is set, whatever the record holds, and that choice sends it.
+test('Setup: a project not yet onboarded is asked Split large issues, with On as its default', async () => {
   const w = boot();
   const d = rules('off');
   d.panels.rules.data.control.onboarded = null;
   deliver(w, d);
   const box = w.document.getElementById('onboard');
   assert.deepEqual(Array.from(box.querySelectorAll('.onboard-body .rules-row'), (r) => r.dataset.rule), ['build', 'never', 'split']);
-  assert.equal(act(box, 'onboard-default-split').textContent, 'default: Shadow');
-  assert.equal(act(box, 'split-shadow').getAttribute('aria-pressed'), 'true');
-  assert.deepEqual(await sent(w, () => act(box, 'split-shadow').click()), [{ action: 'rules', args: ['split=shadow'], repo: 'sample' }]);
+  assert.equal(act(box, 'onboard-default-split').textContent, 'default: On');
+  assert.equal(act(box, 'split-on').getAttribute('aria-pressed'), 'true');
+  assert.deepEqual(await sent(w, () => act(box, 'split-on').click()), [{ action: 'rules', args: ['split=on'], repo: 'sample' }]);
   assert.equal(box.querySelector('[data-rule="split"]').dataset.set, 'true');
 });
 
