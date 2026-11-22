@@ -922,10 +922,32 @@ const unpushedLines = (snap: Snap, w: number, lead: string): Line[] => {
   return l.length ? wrapParts(['landed, not pushed:', ...l.map((x, i) => `${x.repo}#${x.issue}${i < l.length - 1 ? ' ·' : ''}`)], w, lead, ' ', { d: true }) : []
 }
 
+// A part of a wrapped line cut into pieces of at most `room` columns, at its spaces, so wrapParts never cuts it: a
+// word wider than the line (a log path) is broken between whole characters (graphemes), so an emoji and its
+// variation selector stay on one line.
+const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+const pieces = (t: string, room: number): string[] => {
+  if (room < 1 || cols(t) <= room) return [t]
+  const out: string[] = []
+  let cur = ''
+  for (const word of t.split(' ')) {
+    const next = cur ? `${cur} ${word}` : word
+    if (cols(next) <= room) { cur = next; continue }
+    if (cols(word) <= room) { out.push(cur); cur = word; continue }
+    // A word wider than the line goes on from where the line is.
+    if (cur && cols(cur) < room) cur += ' '
+    else if (cur) { out.push(cur); cur = '' }
+    for (const { segment: ch } of GRAPHEMES.segment(word)) { if (cur && cols(cur + ch) > room) { out.push(cur); cur = '' } cur += ch }
+  }
+  return cur ? [...out, cur] : out
+}
+
 // What the pick held back, a count a rule, wrapped at its counts, never cut: at 40 columns four rules are wider than
-// the pane, and a cut line drops the last count. `held back: 1 follow-ups · 1 P0 · 1 P1 · 1 P2`.
+// the pane, and a cut line drops the last count. `held back: 1 follow-ups · 1 P0 · 1 P1 · 1 P2`. A count whose rule
+// is wider than the line (a Depends on: line the pick cannot read) goes on over lines, at its spaces, and a word in it
+// wider than the line is broken between whole characters (pieces).
 const heldLines = (snap: Snap, w: number, lead: string): Line[] =>
-  snap.held.length ? wrapParts(['held back:', ...snap.held.map(([label, n], i, l) => `${n} ${label}${i < l.length - 1 ? ' ·' : ''}`)], w, lead, ' ') : []
+  snap.held.length ? wrapParts(['held back:', ...snap.held.flatMap(([label, n], i, l) => pieces(`${n} ${label}${i < l.length - 1 ? ' ·' : ''}`, w - cols(lead) - 2))], w, lead, ' ') : []
 
 // Each project's push, so a slow push is told from a stuck one. In progress: what runs (its stage, PUSH_STAGE, as
 // pushing() in conveyor/lib/push.sh writes it; none is the hook's), since when, on which commit, its process and the time it
@@ -940,22 +962,7 @@ const PUSH_STAGE: Record<string, string> = { tests: 'tests before the push runni
 const pushLines =(s: State, snap: Snap, w: number, lead: string): Line[] => (snap.pushes ?? []).flatMap((p): Line[] => {
   const of = snap.loops.length > 1 ? `${p.repo}: ` : '', r = p.running, l = p.last
   const room = w - cols(lead) - 2
-  const pieces = (t: string): string[] => {
-    if (room < 1 || cols(t) <= room) return [t]
-    const out: string[] = []
-    let cur = ''
-    for (const word of t.split(' ')) {
-      const next = cur ? `${cur} ${word}` : word
-      if (cols(next) <= room) { cur = next; continue }
-      if (cols(word) <= room) { out.push(cur); cur = word; continue }
-      // A word wider than the line goes on from where the line is.
-      if (cur && cols(cur) < room) cur += ' '
-      else if (cur) { out.push(cur); cur = '' }
-      for (const ch of word) { if (cur && cols(cur + ch) > room) { out.push(cur); cur = '' } cur += ch }
-    }
-    return cur ? [...out, cur] : out
-  }
-  const wrap = (parts: string[], c: string) => wrapParts(parts.flatMap(pieces), w, lead, ' · ', { c })
+  const wrap = (parts: string[], c: string) => wrapParts(parts.flatMap(t => pieces(t, room)), w, lead, ' · ', { c })
   const log = (f: string) => (f ? [`Log: ${f}`] : [])
   if (r) {
     const on = r.sha ? ` on ${r.sha.slice(0, 12)}` : '', pid = r.pid === null ? '' : `pid ${r.pid}`

@@ -113,9 +113,10 @@ right-aligned and the title is what gives way.
   log is in the state folder ([Push](cards.md#push)).
 - **QUEUE**: `next 5 of 9`: the next five, numbered, the title cut to fit, the priority right-aligned (with
   `follow-up` and `retried`); the issues that wait on another; then the held-back line (`held back: 1 P0 · 1 P1`),
-  which goes on to more lines when it does not fit, so no count is lost. With the rule "Push on
-  landing" Off, `landed, not pushed:` follows, with each open issue whose card landed and that waits for the push,
-  from today or an earlier day.
+  which goes on to more lines when it does not fit, so no count is lost. A reason too wide for one line goes on to
+  more lines at its spaces, so no part of it is lost. A word wider than the line breaks between whole characters.
+  With the rule "Push on landing" Off, `landed, not pushed:` follows, with each open issue whose card landed and
+  that waits for the push, from today or an earlier day.
 - **BUILT, WAITING FOR YOUR PROD DEPLOY**: the open issues labelled `awaiting-deploy`, which the loop never picks,
   with how long each has carried the label. Shown only when there is one.
 - **LANDED TODAY**: the count of every card landed today and the day's cost in the heading; under it, the most
@@ -181,7 +182,8 @@ this page says that it wraps.
   the order that the loop picks them. When the issues it waits for do not fit on one line, they go on to more lines
   under `Requires`, so none is lost. With nothing ready and nothing waiting it reads `the queue is empty`, and with a
   queue GitHub did not list, `not read: GitHub did not list the issues`. The held-back line follows. When its
-  counts do not fit on one line, they go on to more lines, so none is lost.
+  counts do not fit on one line, they go on to more lines, so none is lost. A reason too wide for one line goes on to
+  more lines at its spaces. A word wider than the line breaks between whole characters.
 - **LANDED TODAY · 20**: the count of every card landed today; on the right, `5 most recent of 20`. One row for each of the five most recent cards: the time
   it landed, the issue, the last verdict and its round (`✓ GO r2`), its overall time and its cost (or `pushing`,
   `issue open` or `not pushed`).

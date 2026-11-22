@@ -546,6 +546,29 @@ test('held back wraps at its counts at 40 columns, never cut, in the pane and /u
   expect(section(tableText(s, 40), 'QUEUE').split('\n').slice(-2)).toEqual([' held back: 1 follow-ups · 1 P0 · 1 P1 ·', '   1 P2'])
 })
 
+// Bug: the rule the pick gives `Depends on: # 2 3` (conveyor/jq/upnext.jq) is one count wider than 40 columns, and
+// the pane and /units cut it with '…', so the end of the explanation was lost. It goes on over lines at its spaces instead.
+test('held back wraps a rule wider than the line at its spaces at 40 columns, never cut, in the pane and /units', () => {
+  const rule = 'the line "Depends on: # 2 3", not a list of issues in the form #N'
+  const s = board({ queue: { next: queued(1), skipped: skipped({ [rule]: 1 }) } })
+  const pane = paneModel(s, 40, 0).map(plain), at = pane.findIndex(l => l.startsWith('held back:'))
+  expect(pane.slice(at, at + 3)).toEqual(['held back:', '  1 the line "Depends on: # 2 3", not a', '  list of issues in the form #N'])
+  expect(section(tableText(s, 40), 'QUEUE').split('\n').slice(-3)).toEqual([' held back:', '   1 the line "Depends on: # 2 3", not a', '   list of issues in the form #N'])
+})
+
+// Bug: a word in a held-back rule wider than the line was broken per code point, so `❤️` lost its variation selector
+// to the next line at 40 columns in the pane and 41 in /units. It is broken between whole characters.
+test('held back breaks a word wider than the line between whole characters, so an emoji stays whole', () => {
+  const rule = 'the line "Depends on: [Investigate-❤️-before-release](https://example.com/issues/2)", not a list of issues in the form #N'
+  const s = board({ queue: { next: queued(1), skipped: skipped({ [rule]: 1 }) } })
+  const pane = paneModel(s, 40, 0).map(plain), at = pane.findIndex(l => l.startsWith('held back:'))
+  const units = section(tableText(s, 41), 'QUEUE').split('\n'), from = units.findIndex(l => l.startsWith(' held back:'))
+  for (const lines of [pane.slice(at), units.slice(from)]) {
+    expect(lines.filter(l => l.startsWith('\u{FE0F}') || l.trim().startsWith('\u{FE0F}')), `rule ${rule}: ${JSON.stringify(lines)}`).toEqual([])
+    expect(lines.join(''), `rule ${rule}`).toContain('❤️')
+  }
+})
+
 // Bug (#1438, O371): the mod sorted queue.next by follow-up and priority, so a pinned P2 issue the engine picks first
 // showed below the P0 issue picked after it. Each record's order stands.
 test('QUEUE and PICK ORDER keep the engine\'s pick order within a record: a pinned P2 stays ahead of a P0', () => {
