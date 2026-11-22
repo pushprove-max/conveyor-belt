@@ -37,7 +37,7 @@
 # shadow, with a Needs you line (pickback(), lib/control.sh).
 # The trial claim (trial.card in the state folder, read and written under its flock) names the newest trial card; it
 # is in flight while its lines in the card records have none that ends a card (landed, closed, blocked; not filed,
-# which comes before the landing). The claim is written before the card's first line with its pick, so two cards picked at once never both take the trial.
+# which comes before the landing) and it has a worktree line or the process that claimed it runs. The claim is written before the card's first line with its pick, so two cards picked at once never both take the trial.
 # The pick goes on each line card() writes from then on, up to its end (PICK and PICKCARD, which line() reads,
 # lib/records.sh; a stopped or blocked line the loop writes outside card() takes it from the card's lines,
 # heldpick(); the push's lines, written after the card has ended, have none):
@@ -65,19 +65,20 @@ PICKLADDER='[{"model":"claude-sonnet-5-5","effort":"medium"},{"model":"claude-so
 PICKELIGIBLE='def eligible($c): IN("small docs", "small code") or (startswith("medium ") and ($c.picks[.] | objects) != null);'
 # shellcheck disable=SC2034 # PICK, PICKCARD, PICKSEAT and PICKSEATS are card()'s, read by line() in lib/records.sh and seat() in lib/control.sh
 modelpick() { # <card> <issue>: sets card()'s PICK, PICKCARD and PICKSEAT
-  local c=${CARDCTL:-} rule old b by=auto issue size t1 t2 t3 t4 pipe group back PICKHOLD=''
+  local c=${CARDCTL:-} rule old b by=auto issue size t1 t2 t3 t4 pipe group back bk PICKHOLD=''
   [ -n "$c" ] || c=$(ctl 2>/dev/null) || return 0
   rule=$(jq -r '.rules.pick // "off"' <<<"$c" 2>/dev/null)
   [ "$rule" = shadow ] || [ "$rule" = on ] || return 0
   # The rule's own return to shadow (pickback(), lib/control.sh): the kept snapshot (the one the Board reads,
   # commands/snapshot.sh) finds that a group's promoted cards cost more per landed card than its default cards
   # (cost.trials.groups' over), on the owner's promote that stands now: a snapshot built before a later decision
-  # does not count. This card is picked in shadow too.
-  if [ "$rule" = on ] && back=$(jq -r --argjson c "$c" 'first(.cost.trials.groups[]? | select(.over == true and .decidedAt == $c.picks[.group].at) | .back) // empty' \
+  # does not count. This card is picked in shadow too. pickback() checks that decision again on the record as it is
+  # now: a keep or drop since this card read its record leaves the rule and this card as they were.
+  if [ "$rule" = on ] && back=$(jq -c --argjson c "$c" 'first(.cost.trials.groups[]? | select(.over == true and .decidedAt == $c.picks[.group].at)) // empty' \
       "${STATE%/*}/snapshot.json" 2>/dev/null) && [ -n "$back" ]; then
-    echo "conveyor: card $1: $back" >&2
-    locked pickback "$back" || echo "conveyor: card $1: the rule Pick settings could not be set to shadow" >&2
-    rule=shadow
+    locked pickback "$(jq -r .group <<<"$back")" "$(jq -r .decision <<<"$back")" "$(jq -r .decidedAt <<<"$back")" "$(jq -r .back <<<"$back")"; bk=$?
+    if [ "$bk" = 0 ]; then echo "conveyor: card $1: $(jq -r .back <<<"$back")" >&2; rule=shadow
+    elif [ "$bk" != 2 ]; then echo "conveyor: card $1: the rule Pick settings could not be set to shadow" >&2; rule=shadow; fi
   fi
   b=$(seat builder "$c" | jq -c '{model, effort}') && [ -n "$b" ] || { echo "conveyor: card $1: no builder to record in its pick" >&2; return 0; }
   ! jq -e --arg n "$2" '.cards[$n].builder | objects' <<<"$c" >/dev/null 2>&1 || by=owner
@@ -278,25 +279,30 @@ challenger() {
   [ "$(state "$3" "$(SEATCARD=$2 guardread "$3" ask | jq -r '.pct // empty')")" != "paused by guard" ] \
     || { echo "conveyor: card $1: not on the challenger: its account is at the weekly limit guard" >&2; PICKSEAT=''; return 1; }
 }
+# The blocked trial cards, of every issue: this issue's, and the group's (a drop at two), counted from the owner's
+# last decision on the group (`control pick`): after keep, the blocks before it no longer drop the challenger. Prints
+# why the card gets no trial for them, else nothing; fails when the records cannot be read.
+trialblocked() { # <issue> <group> <control record>
+  local lines
+  lines=$({ stdb ask lines cards; stdb ask lines retried; } 2>/dev/null) || return 1
+  jq -rs --argjson n "$1" --arg g "$2" --argjson c "$3" '($c.picks[$g].at // "") as $at
+    | [.[] | objects | select(.step == "blocked" and .pick.trial == true)]
+    | if any(.[]; .issue == $n) then "a trial card of the issue was blocked: its retry builds on the default"
+      elif ([.[] | select(.pick.group == $g and (.time // "") > $at) | .card] | unique | length) >= 2 then "two trial cards of the group were blocked: its challenger is dropped"
+      else "" end' <<<"$lines"
+}
 # <card> <issue> <control record> <the project's builder>: makes PICK a trial on the challenger, with PICKSEAT set,
 # when the rules above allow it; else a pick on the project's builder, with no PICKSEAT. Fails on none of them.
 # shellcheck disable=SC2034 # PICKSEAT is card()'s, read by seat() in lib/control.sh
 picktrial() {
-  local lines why='' claim=${STATE%/*}/trial.card ch a r f
+  local why='' claim=${STATE%/*}/trial.card ch a r f g me st
   PICKSEAT=''
   PICK=$(jq -c --argjson b "$4" '.trial = false | .choice = $b | del(.promoted)' <<<"$PICK") || return 0
   # The group's challenger: the one its next decision put on trial, else PICKTRIAL.
   ch=$(jq -c --argjson c "$3" --argjson t "$PICKTRIAL" '$c.picks[.group].challenger // $t' <<<"$PICK") || return 0
   [ "$(jq -r .mode <<<"$PICK")" = on ] && [ "$(jq -r .by <<<"$PICK")" = auto ] && [ $(($2 % 5)) = 0 ] \
     && jq -e --argjson c "$3" "$PICKELIGIBLE"'.group | eligible($c)' <<<"$PICK" >/dev/null && [ "$4" != "$ch" ] || return 0
-  # The blocked trial cards, of every issue: this issue's, and the group's (a drop at two), counted from the owner's
-  # last decision on the group (`control pick`): after keep, the blocks before it no longer drop the challenger.
-  lines=$({ stdb ask lines cards; stdb ask lines retried; } 2>/dev/null) || return 0
-  why=$(jq -rs --argjson n "$2" --arg g "$(jq -r .group <<<"$PICK")" --argjson c "$3" '($c.picks[$g].at // "") as $at
-    | [.[] | objects | select(.step == "blocked" and .pick.trial == true)]
-    | if any(.[]; .issue == $n) then "a trial card of the issue was blocked: its retry builds on the default"
-      elif ([.[] | select(.pick.group == $g and (.time // "") > $at) | .card] | unique | length) >= 2 then "two trial cards of the group were blocked: its challenger is dropped"
-      else "" end' <<<"$lines") || return 0
+  g=$(jq -r .group <<<"$PICK") && why=$(trialblocked "$2" "$g" "$3") || return 0
   [ -n "$why" ] || ! jq -e --argjson c "$3" '$c.picks[.group].decision == "drop"' <<<"$PICK" >/dev/null || why="the owner dropped the group's challenger"
   [ -z "$why" ] || { echo "conveyor: card $1: no trial: $why" >&2; return 0; }
   # The challenger the pack allows for the builder, as seat() gives it (else seat() keeps the project's builder), on
@@ -312,14 +318,19 @@ picktrial() {
       | fit($r; $e; "builder"; $c.g; $c.model; $p.effort) as $f | select($f != null) | $p + {effort: $f}' <<<"$a" 2>/dev/null) && [ -n "$f" ]; }; then
     echo "conveyor: card $1: no trial: the challenger is not one of the models pick.builder lets the pick give the builder, at an effort its program takes" >&2; PICKSEAT=''; return 0
   fi
-  # One trial card in flight: the claim is checked and taken under its lock.
+  # One trial card in flight: the claim is checked and taken under its lock. It names this card's process (pid, then
+  # p_started's answer): a claimed card with no worktree line whose process is gone (the loop restarted before card()
+  # wrote that line) holds it no more, as nothing ever ends that card. The blocks are counted again after the claim is
+  # read: the card it names may have blocked since the count above, the group's second block.
+  me=$BASHPID; st=$(p_started "$me")
   # shellcheck disable=SC2094 # the claim is read and then written while its lock is held
   if ( flock 9 || exit 1
-       o=$(head -n 1 "$claim" 2>/dev/null)
-       [ -z "$o" ] || [ "$o" = "$1" ] || ! stdb ask card "$o" 2>/dev/null | jq -es --arg c "$o" \
-         'map(select(.card == $c)) | length > 0 and (any(.step | IN("landed", "closed", "blocked")) | not)' >/dev/null 2>&1 \
+       o=$(sed -n 1p "$claim" 2>/dev/null); op=$(sed -n 2p "$claim" 2>/dev/null); ot=$(sed -n 3p "$claim" 2>/dev/null)
+       [ -z "$o" ] || [ "$o" = "$1" ] || ! stdb ask card "$o" 2>/dev/null | jq -es --arg c "$o" --argjson up "$(p_alive "$op" "$ot" && echo true || echo false)" \
+         'map(select(.card == $c)) | length > 0 and (any(.step | IN("landed", "closed", "blocked")) | not) and ($up or any(.step == "worktree"))' >/dev/null 2>&1 \
          || { echo "conveyor: card $1: no trial: trial card $o is in flight" >&2; exit 1; }
-       printf '%s\n' "$1" > "$claim" ) 9>>"$claim"; then
+       why=$(trialblocked "$2" "$g" "$3") && [ -z "$why" ] || { echo "conveyor: card $1: no trial: ${why:-the blocked trial cards could not be read}" >&2; exit 1; }
+       printf '%s\n%s\n%s\n' "$1" "$me" "$st" > "$claim" ) 9>>"$claim"; then
     PICKSEAT=$f
     PICK=$(jq -c --argjson s "$ch" --argjson f "$f" '.trial = true | .choice = $s | if $f.effort == $s.effort then . else .trialEffort = $f.effort end' <<<"$PICK") || PICKSEAT=''
   else PICKSEAT=''; fi

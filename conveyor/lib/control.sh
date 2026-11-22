@@ -1372,9 +1372,12 @@ signinpause() { # <reason>
 }
 # Under the lock: the rule Pick settings, On, goes back to shadow by itself (modelpick(), lib/modelpick.sh), with why
 # and when in pickBack, the Needs you line; an owner's `control rules pick=...` clears it. A rule not On is left as it is.
-pickback() { # <reason>
+# It checks the record as it is now, not the card's (CARDCTL, read as the card starts): when the group's decision and
+# its at are no longer the ones the snapshot counted (`control pick` since), nothing is set and it returns 2.
+pickback() { # <group> <the decision the snapshot counted> <its at> <reason>
   local c new; c=$(ctl) || return 1
-  new=$(jq -c --arg r "$1" --arg t "$(clock)" 'if .rules.pick != "on" then . else .rules.pick = "shadow" | .pickBack = {at: $t, reason: $r} end' <<<"$c") && ctlput "$c" "$new"
+  jq -e --arg g "$1" --arg d "$2" --arg a "$3" '.picks[$g] | objects | .decision == $d and .at == $a' <<<"$c" >/dev/null || return 2
+  new=$(jq -c --arg r "$4" --arg t "$(clock)" 'if .rules.pick != "on" then . else .rules.pick = "shadow" | .pickBack = {at: $t, reason: $r} end' <<<"$c") && ctlput "$c" "$new"
 }
 # `control depends <issue> add|remove <issue>...` (the Board's "Depends on…"): the issue's `Depends on: #N` lines, the
 # ones pick reads (DEPS, prompts.sh), changed on GitHub through gh_write; the control record is not touched, and the

@@ -146,6 +146,43 @@ c1-55 small docs false m m' ] || fail "the trials of the cards picked: $(cat "$T
     || fail "the snapshot does not list the dropped challenger of small code: $(loop snapshot | jq -c .cost.trials)"
 }
 
+# A line of a card of group small code (tln, as card() writes it), with the trial pick for its trial lines.
+tln() { # <card> <issue> <step>
+  jq -cn --arg c "$1" --argjson n "$2" --arg s "$3" '{card: $c, issue: $n, step: $s, time: "2026-11-01T00:00:00Z",
+    tokens: {claude: 0, codex: 0}, result: (if $s == "blocked" then "blocked" else "ok" end), sha: "", reason: ""}
+    + (if $s == "picked" then {title: "T"} else {pick: {group: "small code", choice: {model: "claude-sonnet-5-5", effort: "medium"}, by: "auto", trial: true, mode: "on"}} end)' >> "$ST/cards.jsonl"
+}
+# Issues 15 and 20, small code, in the share (issue number a multiple of 5), with the rule On.
+trialsetup() {
+  setup "[$(for n in 15 20; do issue $n 2026-01-01 | jq -c '.body = "Change src/a.js."'; done | paste -sd, -)]"
+  tune '.models.allowed.claude += ["claude-sonnet-5-5"]'
+  loop control rules pick=on >/dev/null || fail "control rules pick=on was refused"
+}
+# Bug caught (R99): the claim of a trial card that never reached its worktree line (the loop restarted after
+# picktrial() wrote trial.card) held the trial for good, as nothing ends a card with only a picked line. c1-10 holds
+# the claim, its process gone; c1-15 takes the trial, and its own claim, with only its picked line, still holds the
+# trial from c1-20 while its process runs.
+t_picktrialstale() {
+  trialsetup
+  tln c1-10 10 picked
+  local d; sh -c : & d=$!; wait "$d"; printf 'c1-10\n%s\nx\n' "$d" > "$ST/trial.card"
+  fx_in 'for k in 15 20; do tln c1-$k $k picked; SEATCARD=$k PICK="" PICKSEAT=""; modelpick c1-$k $k 2>/dev/null; echo "c1-$k $(jq -c .trial <<<"$PICK")"; done'
+  [ "$(cat "$T/$CASE/run.out")" = $'c1-15 true\nc1-20 false' ] \
+    || fail "trial.card naming c1-10 (only a picked line, its process gone), then c1-15 claiming: the trials of c1-15 and c1-20: $(cat "$T/$CASE/run.out")"
+}
+# Bug caught (R100): the group's second trial block, written after picktrial() counted the blocks and before it took
+# the claim, let one more trial card run on a dropped challenger: the claim's card had ended, so the claim was free,
+# and the count was not read again. c1-5 is blocked; c1-10, the claim's card, blocks inside challenger(), which runs
+# between the two.
+t_picktrialrace() {
+  trialsetup
+  tln c1-5 5 blocked; tln c1-10 10 worktree; printf 'c1-10\n' > "$ST/trial.card"
+  fx_in 'eval "real$(declare -f challenger)"; challenger() { tln c1-10 10 blocked; realchallenger "$@"; }
+    tln c1-15 15 picked; SEATCARD=15 PICK="" PICKSEAT=""; modelpick c1-15 15 2>"$T/$CASE/pick.err"; grep "no trial" "$T/$CASE/pick.err"; echo "trial $(jq -c .trial <<<"$PICK")"'
+  [ "$(cat "$T/$CASE/run.out")" = $'conveyor: card c1-15: no trial: two trial cards of the group were blocked: its challenger is dropped\ntrial false' ] \
+    || fail "c1-10 (the claim's trial card) blocked between the count and the claim, c1-5 blocked before: c1-15's pick: $(cat "$T/$CASE/run.out")"
+}
+
 # Bug caught: a card that starts again for the same issue was picked again, so a restart could move it to another
 # group. The issue's earlier card (blocked) holds a pick of another group and builder than this issue now gets; the
 # new card keeps that pick, with the rule's setting as it is now. Bug: in Shadow it also kept the earlier builder (m0
@@ -355,6 +392,15 @@ t_pickback() {
   [ "$(loop snapshot --fresh | jq -c '.needsYou.pick | map([.title, .reason])')" = '[["Pick settings went back to Shadow","Promoted cards of small docs on claude-sonnet-5-5 at medium effort cost $4.00 for each landed card, more than the $2.00 of its default cards. Conveyor set Pick settings to Shadow. Before you set it to On again, choose keep or drop for the group: conveyor.sh control pick small docs keep or drop."]]' ] \
     || fail "Needs you has no line for the return to shadow: $(loop snapshot | jq -c .needsYou.pick)"
   loop control rules pick=on >/dev/null && [ "$(jq -c .pickBack "$ST/control.json")" = null ] || fail "control rules pick=on did not clear the line: $(jq -c .pickBack "$ST/control.json")"
+  # Bug caught (R79): the owner's keep, made after the card read its control record (CARDCTL) and before modelpick()
+  # ran, did not stop the return to shadow that the kept snapshot of the promote asked for: pickback() did not check
+  # the decision again on the record as it is now.
+  [ "$(loop snapshot --fresh | jq -c '.cost.trials.groups | map([.decision, .over])')" = '[["promote",true]]' ] || fail "the snapshot does not find the promote over: $(loop snapshot | jq -c .cost.trials.groups)"
+  local ctl0; ctl0=$(cat "$ST/control.json")
+  CONVEYOR_NOW=$(($(date +%s) + 50)) loop control pick small docs keep >/dev/null || fail "control pick small docs keep was refused"
+  CARDCTL=$ctl0 fx_in 'SEATCARD=21; PICK=""; PICKSEAT=""; modelpick c1-21 21 2>/dev/null; jq -r .mode <<<"$PICK"'
+  [ "$(jq -r '.rules.pick' "$ST/control.json") $(cat "$T/$CASE/run.out")" = 'on on' ] \
+    || fail "a keep made after the card read its control record (CARDCTL: promote) did not keep the rule on: rules.pick and the card's mode: $(jq -c '[.rules.pick, .pickBack]' "$ST/control.json") $(cat "$T/$CASE/run.out")"
   CONVEYOR_NOW=$(($(date +%s) + 100)) loop control pick small docs promote >/dev/null || fail "control pick small docs promote was refused"
   fx_in 'SEATCARD=21; PICK=""; PICKSEAT=""; modelpick c1-21 21 2>/dev/null; jq -c "[.mode, .choice.model]" <<<"$PICK"'
   [ "$(cat "$T/$CASE/run.out")" = '["on","claude-sonnet-5-5"]' ] || fail "a snapshot built before the owner's new promote set the rule back: $(cat "$T/$CASE/run.out"); $(jq -c .rules.pick "$ST/control.json")"
