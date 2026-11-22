@@ -211,6 +211,69 @@ t_followhookfail() {
   [ "warning: $(CONVEYOR_MAIN=$R bash "$V/$X2/conveyor/conveyor.sh" take stale)" = "$line" ] || fail "take stale does not print doctor's line"
 }
 
+# Bugs (issue 1401): a loop that follows the plugin's main stops picking and restarts on every commit it takes,
+# though one that changes only docs changes no code it runs; it goes on with no restart after a commit whose changed
+# files it cannot read (no install of it is there), or after one that changes conveyor/jq/; a loop stale as it has taken
+# no commit yet (from a pin to following main) stays stale after a first take of docs alone, so never picks again.
+t_followtakelight() {
+  setup '[]'; coderepo; trap 'chmod -R u+w "$T/$CASE"' EXIT; newloop
+  tune '.plugin = {follow: "main"}'; mainat "$B"
+  bash "$D/conveyor/conveyor.sh" install "$B" >/dev/null || fail "the loop's commit was not installed"
+  pushed 'mkdir -p docs && echo x > docs/x.md && echo x >> conveyor/README.md'; L=$NEW
+  pushed 'echo y >> docs/x.md'
+  # shellcheck disable=SC2034 # U is read by the commands serveeng() runs below
+  U=$NEW
+  pushed 'echo "# x" >> conveyor/jq/check.jq'; H=$NEW
+  # The loop on $B's install, between its looks, with no commit taken yet: its turn's count (turncount, with run()'s
+  # variables of a turn with no card) marks it stale (old); main at $L (docs) is taken, and the next count clears the
+  # mark. Then the project's engine is $U (docs), with no install to read its files from; then main at $H
+  # (conveyor/jq/) is taken.
+  # The loop's turn (run) restarts on $H: only run() joins the look that names the new script (turnopen), the stale
+  # mark (turncount) and the exec (turnrestart, to the newloop stub) into one restart.
+  out=$(serveeng "$V/$B/conveyor" 'declare -A mine=() took=(); running=0 cap=3 old="" why="" serve=1 mhold="" self=x now=running said=""
+    turncount; echo "old with no take: ${old:-none}"
+    mainat "$L"; takeby "$B" >/dev/null; stale && echo "stale on docs"; turncount; echo "old after docs: ${old:-none}"; echo "runs $RAN"
+    jq --arg c "$U" ".commit = \$c" "$R/.git/conveyor-engine.json" > "$STUB/engine.new" && mv "$STUB/engine.new" "$R/.git/conveyor-engine.json"
+    stale && echo "stale on unread"; echo "runs $RAN"
+    mainat "$H"; takeby "$B" >/dev/null; stale && echo "stale on jq"
+    nojobs; BASH=$STUB/newloop; run "" serve' 2>&1)
+  grep -qx 'old with no take: 1' <<<"$out" && grep -qx 'old after docs: none' <<<"$out" \
+    || fail "a loop stale with no commit taken stayed stale after a first take of docs alone, so it never picks: $out"
+  grep -qxF "conveyor: Conveyor commit $L changes no engine code; the loop goes on without a restart" <<<"$out" \
+    && ! grep -q '^stale on docs' <<<"$out" \
+    || fail "a take of a commit of docs alone made the loop stale, or the loop did not say why it went on: $out"
+  [ "$(grep -c "^runs $L\$" <<<"$out")" = 2 ] && grep -qx 'stale on unread' <<<"$out" \
+    || fail "a commit whose changed files could not be read did not make the loop stale: $out"
+  grep -qx 'stale on jq' <<<"$out" && grep -qF "the project's engine is now Conveyor commit $H, not this loop's $B" <<<"$out" \
+    && [ "$(engine .commit)" = "$H" ] && [ "$(cat "$STUB/newloop.args" 2>&1)" = "$V/$H/conveyor/conveyor.sh serve" ] \
+    || fail "a take of a commit of conveyor/jq/ did not restart the loop on it: $out $(cat "$STUB/newloop.args" 2>&1)"
+}
+# Bug (issue 1401): a commit of a card rules page (conveyor/rules/*.md), a guard hook (.claude/hooks/) or a script the
+# loop runs from .claude/scripts/ (decision.sh, dashboard_limit*.py) alone counted as no engine code: a loop on an
+# install took it with no restart, and the cards it started from then on kept the old install's rules, guards and
+# scripts. A commit of the Board's server and pages, a hook's test fixture, the test pack's card rules
+# (conveyor/lib/test-card-rules.md, which only tests copy) and conveyor/README.md alone is still no engine code. noengine(), which stale() asks for both a take and a commit of a checkout, is called on each commit
+# and the one before it: a take (t_followtakelight) adds an install and a pack check to each, and shows no more of
+# which files count.
+t_enginefiles() {
+  local g=$T/$CASE/g f
+  eval "$(sed -n '/^noengine() {/,/^}/p' "$SRC/lib/install.sh")"
+  mkdir -p "$g/conveyor/rules" "$g/conveyor/lib" "$g/conveyor/foreman" "$g/.claude/hooks/__tests__" "$g/.claude/scripts" "$g/.claude/dashboard" \
+    && git init -q "$g" && for f in conveyor/README.md conveyor/lib/test-card-rules.md conveyor/rules/card-core.md conveyor/foreman/owner-rules.md \
+      .claude/hooks/git-safety.sh .claude/hooks/__tests__/x.json \
+      .claude/scripts/decision.sh .claude/scripts/dashboard_limit.py .claude/scripts/dashboard_limit_usage.py \
+      .claude/scripts/dashboard_server.py .claude/dashboard/x.js; do echo x > "$g/$f"; done \
+    && git -C "$g" add -A && git -C "$g" commit -qm base || fail "the case's repository was not made"
+  for f in conveyor/rules/card-core.md conveyor/foreman/owner-rules.md .claude/hooks/git-safety.sh .claude/scripts/decision.sh \
+    .claude/scripts/dashboard_limit.py .claude/scripts/dashboard_limit_usage.py; do
+    echo y >> "$g/$f" && git -C "$g" commit -qam "$f" || fail "the commit of $f was not made"
+    ! noengine "$g" HEAD~1 HEAD || fail "a commit of $f alone counted as no engine code: a loop on an install goes on with no restart, and its new cards keep the old copy"
+  done
+  for f in .claude/scripts/dashboard_server.py .claude/dashboard/x.js .claude/hooks/__tests__/x.json conveyor/lib/test-card-rules.md \
+    conveyor/README.md; do echo y >> "$g/$f"; done
+  git -C "$g" commit -qam board || fail "the commit of the Board was not made"
+  noengine "$g" HEAD~1 HEAD || fail "a commit of the Board's server and pages, a hook's test fixture, conveyor/lib/test-card-rules.md and conveyor/README.md counted as engine code, so the loop restarts on it"
+}
 # Bug (#192): the old-engine line read the last take that worked only from the hooks' log, so a take that worked by
 # setup, the loop or `conveyor.sh take` (none of which writes that log) was shown as "none in the log" or an older time.
 t_followtakeok() {

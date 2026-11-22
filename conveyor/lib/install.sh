@@ -82,6 +82,44 @@ enginepin() { # <commit variable> [<follow variable>]
   [ -z "$ep_f" ] || ep_c=$(jq -r '.commit | strings | select(test("^[0-9a-f]{40}$"))' "$ENGINE" 2>/dev/null) || ep_c=''
   printf -v "$1" %s "$ep_c"; [ -z "${2:-}" ] || printf -v "$2" %s "$ep_f"
 }
+# True when this process runs from an install and the pack pins another commit (or, following the plugin's main, the
+# project's current engine is another commit, or none is taken yet: enginepin()), or is a `serve` run from a checkout
+# whose HEAD (the commit its conveyor/ came from) is no longer the one it started on. A loop run from a checkout has
+# no version folder, and never restarts on the pin; a `run` from one is not restarted, and its own landings move HEAD.
+# A new commit of the checkout, or one taken following the plugin's main or releases, that changes no engine code
+# since RAN (samecode()) is not stale. A pack that does not read is not said here: the loop asks at every turn, and
+# says why once (packturn(), lib/run.sh).
+stale() {
+  local p f
+  if [ -n "$OWN" ]; then enginepin p f 2>/dev/null || return 1
+    if [ -z "$p" ]; then [ -n "$f" ]
+    elif [ -z "$f" ]; then [ "$p" != "$OWN" ]
+    else [ "$p" != "$RAN" ] && ! samecode "$VERSIONS/$p" "$p"; fi
+  else [ -n "$FOLLOW" ] && p=$(git -C "$HERE" rev-parse -q --verify HEAD) && [ "$p" != "$RAN" ] && ! samecode "${HERE%/*}" "$p"; fi
+}
+# <the plugin's folder that holds commit> <commit>: true when the commit changes no engine file since RAN, the commit
+# the loop counts as running (noengine()): RAN moves to it, so the next commit is compared with it, and the loop says
+# so. False when it changes one, or the files it changes cannot be read (git fails, the commit is not there yet): the
+# loop restarts on it. Cards it starts after that run on RAN with the files of the folder the loop runs from, the same
+# as the new commit's in every engine file, so they make no switch to it (switchcode(), lib/card.sh).
+samecode() {
+  noengine "$1" "$RAN" "$2" || return 1
+  RAN=$2; echo "conveyor: Conveyor commit $2 changes no engine code; the loop goes on without a restart" >&2
+}
+# <the plugin's folder> <commit> <commit>: true when no engine file differs between the two commits; false when one
+# does, or git cannot tell (exit 128). The engine files are those the loop or a card process runs or reads from the
+# folder it runs from: every file under conveyor/ but its tests and state folders, its *.test.sh files, its README.md
+# and the test pack's card rules (lib/test-*.md, which only tests copy), with the card rules (conveyor/rules/*.md,
+# cardrules()) and the Foreman's owner-rules.md; shim.sh; the guard hooks a card's settings run (.claude/hooks/,
+# cardsettings()) but their tests; and the scripts the loop and cards run from .claude/scripts/ (decision.sh, which
+# lib/needsask.sh runs; dashboard_limit.py and the dashboard_limit_*.py parts it loads, noprice()). A loop on an
+# install that goes on past a commit runs its new cards from the install it started on, so a file left out here would
+# keep its old copy there. The rest of .claude/scripts/ is the Board's. A pathspec's * matches /.
+noengine() {
+  git -C "$1" diff --quiet "$2" "$3" -- conveyor shim.sh .claude/hooks .claude/scripts/decision.sh '.claude/scripts/dashboard_limit*.py' \
+    ':(exclude)conveyor/tests' ':(exclude)conveyor/state' ':(exclude)*.test.sh' ':(exclude)conveyor/README.md' \
+    ':(exclude)conveyor/lib/test-*.md' ':(exclude).claude/hooks/__tests__' 2>/dev/null
+}
 # The plugin's repository as its manifest names it, for a plugin folder that is no clone of its own (a marketplace
 # install runs from Claude Code's plugin cache, a copy with no .git; one inside a repository kept above it, such as a
 # config folder in git, is no clone either): plugin.json's repository, else the marketplace entry's source for that
@@ -151,7 +189,8 @@ hooksmissing() { # <folder>
 # once a minute at most. Once the plugin's pushed main (mainof), or its newest release (releaseof), is a commit this
 # project has not taken, that commit is installed (install()), its own pack check is run on the project's
 # pack, and every hook the project's .claude/settings.json runs through shim.sh must be in it. Then it is the
-# project's current engine (ENGINE): the loop restarts on it at its next pick (stale(), lib/run.sh) and shim.sh runs
+# project's current engine (ENGINE): the loop restarts on it at its next pick when it changes engine code or the files
+# it changes cannot be read, else goes on as it is (stale(), above), and shim.sh runs
 # hooks from it; cards in flight end on the engine they started on. A commit that fails its check or lacks a hook is
 # not taken and not tried again: the project stays on its engine, and ENGINE's refused (Needs you, in the snapshot)
 # names the commit and why until a later commit is taken. One that could not be read or installed is tried again at
@@ -193,7 +232,7 @@ taken() {
       | if $r == "" then {commit: $c, taken: ((.taken // []) - [$c] + [$c]), head} + (if $f == "releases" then {release: $v} else {} end)
       else . + {refused: ({commit: $c, reason: $r[0:1500], since: (now | todate)} + (if $f == "releases" then {release: $v} else {} end))} end' > "$t" \
       && mv "$t" "$ENGINE" || { rm -f "$t"; return 1; }
-    if [ -z "$why" ]; then echo "conveyor: took Conveyor commit $h of the plugin's $n: the loop restarts on it at its next pick"
+    if [ -z "$why" ]; then echo "conveyor: took Conveyor commit $h of the plugin's $n: the loop restarts on it at its next pick unless it changes no engine code"
       # The Board does not restart on it by itself: one on the commit before is started again on this one.
       boardrenew
     else echo "conveyor: did not take Conveyor commit $h of the plugin's $n, as $why; the project stays on $(jq -r '.commit // "no commit"' "$ENGINE")" >&2; fi

@@ -24,8 +24,8 @@ projects() {
 # (machineend).
 # A loop runs the machine's own Conveyor (this file's), which restarts it on its project's pin or taken commit; a
 # record run from its own checkout ("engine": "checkout") runs that checkout's conveyor.sh instead, which restarts on
-# the checkout's new code as its HEAD moves (stale(), lib/run.sh). A record whose engine changes is a record gone and
-# one added: its loop is stopped and started again on the other.
+# the checkout's new code as its HEAD moves to a commit that changes engine code (stale(), lib/install.sh). A record
+# whose engine changes is a record gone and one added: its loop is stopped and started again on the other.
 MACHINE_POLL=5 MACHINE_RESTART=10
 # <pid>...: ends each of them and every process under it. Each is stopped before the processes under it are listed
 # (freeze), so none starts another unseen; all are then told TERM and go on, and those still there 3 s later are

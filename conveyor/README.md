@@ -122,7 +122,14 @@ goes turn after turn. Each turn calls these functions in this order:
 - `turncount` counts the cards that build against the cap, the cards that wait, and the cards in their review or
   Test step, and writes `loop.json`.
 - `turnrestart` runs only when the loop's code is stale and a new script is known. It restarts the loop on the new
-  code, and the new loop adopts the cards in flight.
+  code, and the new loop adopts the cards in flight. A new commit of the loop's checkout, or a commit taken while the
+  project follows the plugin's releases or `main`, makes the code stale unless the loop can read which files the
+  commit changes and none of them is engine code. Engine code is each file that the loop or its cards run or read from
+  the engine: a file under `conveyor/` (the card rules in `conveyor/rules/` too), `shim.sh`, a guard hook in
+  `.claude/hooks/`, `.claude/scripts/decision.sh` or a `.claude/scripts/dashboard_limit*.py` file. The files in
+  `conveyor/tests/`, `conveyor/state/` and `.claude/hooks/__tests__/`, the `*.test.sh` files, the test pack's
+  `conveyor/lib/test-*.md` files and `conveyor/README.md` are not engine code. After a commit that changes no engine code, the loop goes on picking with no restart and says
+  so.
 - `turnask` gets what the pick reads: the open issues, the urgent and main-red cards, and the blocked cards whose
   issue is closed.
 - `turnpick` picks an issue and starts its card. The turn then ends, and the next turn starts.

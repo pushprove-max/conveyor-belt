@@ -2,7 +2,8 @@
 # The installs (plan section 7): `install <commit>` puts that commit in VERSIONS/<commit>, read-only. OWN is the
 # commit this process runs: its version folder's name when it runs from an install, empty when it runs from a checkout.
 # A loop that runs from an install restarts on the commit the pack pins; a `serve` run from a checkout restarts on the
-# checkout's code once its HEAD moves (stale(), below). RAN is the commit this process runs: OWN, or the checkout's
+# checkout's code once its HEAD moves to a commit that changes engine code (stale(), lib/install.sh); past one that
+# changes none, RAN moves to it with no restart (samecode()). RAN is the commit this process runs: OWN, or the checkout's
 # HEAD read here, before bash reads the rest of this file, so a commit that lands while the engine is read is newer
 # than RAN and restarts the loop. RAN is empty when the engine's folder is in no git checkout. FOLLOW is set for a
 # `serve` run from a checkout (run()).

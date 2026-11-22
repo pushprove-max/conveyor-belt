@@ -64,16 +64,8 @@ tree() { local k; echo "$1"; for k in $(pgrep -P "$1"); do tree "$k"; done; } # 
 # <pid>: it and every process under it, each stopped before the processes under it are looked for, so none can start
 # another unseen; KILL then ends them all, and none of them runs a handler that starts one more.
 freeze() { local k; kill -STOP "$1" 2>/dev/null; echo "$1"; for k in $(pgrep -P "$1"); do freeze "$k"; done; }
-# True when this process runs from an install and the pack pins another commit (or, following the plugin's main, the
-# project's current engine is another commit, or none is taken yet: enginepin()), or is a `serve` run from a checkout
-# whose HEAD (the commit its conveyor/ came from) is no longer the one it started on. A loop run from a checkout has
-# no version folder, and never restarts on the pin; a `run` from one is not restarted, and its own landings move HEAD.
-# A pack that does not read is not said here: the loop asks at every turn, and says why once (packturn()).
-stale() {
-  local p f
-  if [ -n "$OWN" ]; then enginepin p f 2>/dev/null && if [ -n "$p" ]; then [ "$p" != "$OWN" ]; else [ -n "$f" ]; fi
-  else [ -n "$FOLLOW" ] && p=$(git -C "$HERE" rev-parse -q --verify HEAD) && [ "$p" != "$RAN" ]; fi
-}
+# (stale(), samecode() and noengine(), the loop's look at whether its code is stale, are in lib/install.sh, beside
+# enginepin().)
 # <command...>, run under the card records' lock unless this process is stale: then "stale". A landing takes the same
 # lock, so no pick follows one that changed the pin.
 fresh() { if stale; then echo stale; else "$@"; fi; }
@@ -248,7 +240,7 @@ cardrun() { # <card> <issue>
   ( LOOPCARD=1; export CONVEYOR_CARDRUN=$1; card "$1" "$2" ); echo $? > "$CARDS/$1.exit"
 }
 # The Conveyor commit a card of the loop runs now: the one its last switch to new code named on its start line
-# (began(), lib/card.sh), else the one it started on.
+# (began(), lib/card.sh), else the one it started on (took, or ranon: run()).
 cardcode() { # <card> <the commit it started on>
   local t
   t=$(stdb ask card "$1" 2>/dev/null | jq -rs --arg c "$1" 'map(select(.card == $c and .step == "start" and .engine)) | last | .engine // empty' 2>/dev/null) \
@@ -432,8 +424,8 @@ turnopen() {
   mhold=''; [ -n "$nopack" ] || mhold=$(machineheld)
   [ "$mhold" = "$htold" ] || { htold=$mhold; [ -z "$mhold" ] || echo "conveyor: $mhold" >&2; }
   # A pack that follows the plugin's main or its releases: its pushed main, or newest release, is looked at once every IDLE seconds (take(),
-  # lib/install.sh), a job beside the cards, never counted as one and given no run lock; a commit it takes is
-  # restarted on at a later turn (stale()).
+  # lib/install.sh), a job beside the cards, never counted as one and given no run lock; a commit it takes is restarted
+  # on at a later turn unless it changes no engine code (stale()).
   if [ -n "$serve" ] && [ -z "$nopack" ] && [ $((SECONDS - ttook)) -ge "$IDLE" ] && { [ -z "$taker" ] || ! jobs -rp | grep -qx "$taker"; } \
     && packget plugin.follow f && [ -n "$f" ]; then
     ttook=$SECONDS; ( take ) 8>&- < /dev/null & taker=$!
@@ -483,7 +475,7 @@ turnended() {
     # One alive with no process of its step for STUCK and REVIEW_PAUSE seconds (stuckcard(), #466) is ended and blocked, naming that
     # step, so `retry` can take it.
     if kill -0 "$p" 2>/dev/null && [ ! -e "$CARDS/${mine[$p]% *}.live" ] && read -r _ gs gone < <(stuckcard "${mine[$p]% *}" turn) && [ "$gone" = stuck ]; then
-      read -r c n <<<"${mine[$p]}"; unset 'mine[$p]' 'took[$p]' 'kids[$p]'
+      read -r c n <<<"${mine[$p]}"; unset 'mine[$p]' 'took[$p]' 'ranon[$p]' 'kids[$p]'
       gone=$(stuckwhy "$gs" stuck)
       endcard "$c" "$n" "$p" "$gs" "$gone" && echo "conveyor: card $c: $gone; it is blocked, and \`retry $n\` takes issue #$n again"
       wait "$p" 2>/dev/null; rm -f "$CARDS/$c.exit"; stdbkeeps; continue
@@ -494,7 +486,7 @@ turnended() {
         for k in $(tree "$p"); do t=$(p_started "$k") && echo "$k $t"; done; } | sort -u)
       continue
     fi
-    read -r c n <<<"${mine[$p]}"; unset 'mine[$p]' 'took[$p]'
+    read -r c n <<<"${mine[$p]}"; unset 'mine[$p]' 'took[$p]' 'ranon[$p]'
     k=${kids[$p]:-}; unset 'kids[$p]'
     # Its closing line is looked for in the whole lines only: a last line still being written (check() says why)
     # made the whole read fail, and a card that had landed was blocked; its push is the loop's, as for any landing.
@@ -517,7 +509,7 @@ turnended() {
       [ -n "$p" ] || continue
       # An adopted card is no job of this shell's: wait cannot wait on it, so it is watched until it is gone.
       wait "$p" 2>/dev/null; while kill -0 "$p" 2>/dev/null; do sleep 0.1; done
-      read -r c n <<<"${mine[$p]}"; unset 'mine[$p]' 'took[$p]' 'kids[$p]'
+      read -r c n <<<"${mine[$p]}"; unset 'mine[$p]' 'took[$p]' 'ranon[$p]' 'kids[$p]'
       stopped "$c" "$n"; clean "$CARDS/$c"; rm -f "$CARDS/$c.exit"
       locked moveout '.card == $c' --arg c "$c" && echo "conveyor: stopped card $c; issue #$n is back in the queue" \
         || echo "conveyor: stopped card $c, but its lines could not be moved out of the card records: retry #$n by hand" >&2
@@ -574,7 +566,11 @@ turncount() {
   if [ -n "$mhold" ] && [ $((SECONDS - htried)) -ge "$POLL" ] && { [ -z "$prober" ] || ! jobs -rp | grep -qx "$prober"; }; then
     htried=$SECONDS; ( machineprobe ) 8>&- < /dev/null & prober=$!
   fi
-  if [ -z "$old" ] && stale; then
+  # Looked at again at each turn: a commit taken or landed later that brings the engine back to the code the loop runs
+  # (the first take after a pin, when the pin's own code was not stale until then, or one that takes a change back)
+  # makes it not stale, and the loop picks again (stale() moves RAN to it and says so).
+  if ! stale; then old=''
+  elif [ -z "$old" ]; then
     old=1; enginepin p f 2>/dev/null || f=''
     if [ -n "$FOLLOW" ]; then echo "conveyor: the checkout has moved on from this loop's $RAN; nothing new is picked, and the loop restarts on the checkout's new code once its push is done"
     elif [ -n "$f" ]; then echo "conveyor: $([ -n "$p" ] && echo "the project's engine is now Conveyor commit $p, not this loop's $OWN" || echo "the project follows the plugin's $f and has taken no commit of it on this machine yet"); nothing new is picked, and the loop $([ -n "$serve" ] && echo "restarts on the project's engine once its push is done" || echo "ends once its cards and push are done")"
@@ -614,7 +610,7 @@ turnrestart() {
     for p in $(tree "$k"); do t=$(p_started "$p") && echo "$k $p $t"; done
   done | sort -u)
   local -A on=() # the commit each card runs now (cardcode())
-  for k in "${!mine[@]}"; do read -r c _ <<<"${mine[$k]}"; on[$k]=$(cardcode "$c" "${took[$k]:-$RAN}"); done
+  for k in "${!mine[@]}"; do read -r c _ <<<"${mine[$k]}"; on[$k]=$(cardcode "$c" "${took[$k]:-${ranon[$k]:-$RAN}}"); done
   # The new commit, named before the exec (sayself()): no record names the old one under this pid from then on.
   local c=${new%/conveyor/conveyor.sh}
   if [ -n "$FOLLOW" ]; then sayself "$(git -C "$HERE" rev-parse -q --verify HEAD 2>/dev/null)" "$HERE"; else sayself "${c##*/}" ''; fi
@@ -702,7 +698,7 @@ turnpick() {
   [ "$picked" != wait ] || { waits=1; picked=''; }
   [ -n "$picked" ] || return 0
   read -r c n again <<<"$picked"
-  CARDCTL=$ctl cardrun "$c" "$n" & mine[$!]="$c $n"
+  CARDCTL=$ctl cardrun "$c" "$n" & mine[$!]="$c $n"; ranon[$!]=$RAN
   [ "$again" = true ] || left=$((left - 1)); started=$((started + 1))
   return 1
 }
@@ -712,10 +708,11 @@ run() { # [max-cards] [serve]
   local mhold htold='' prober='' htried=-1000000 gone gs merger='' gtried=-1000000 fixer='' rtried=-1000000 asker='' atried=-1000000
   local inuse # the machine's count of the turn (turncount())
   # The loop's own cards in progress: pid -> "card issue"; took: those it adopted at its start -> the commit they run;
-  # kids: a card's processes at the last turn, as "<pid> <started>" lines; at a restart, the list the loop
-  # before it took just before it restarted (CONVEYOR_KIDS), so a card that ends before this loop's first turn still
-  # has its review and tests ended before its worktree goes.
-  local -A mine=() took=() kids=() shuts=()
+  # ranon: those it started -> the commit it ran then (RAN), which stays theirs when a commit with no engine code
+  # moves RAN on (samecode()); kids: a card's processes at the last turn, as "<pid> <started>" lines; at a restart,
+  # the list the loop before it took just before it restarted (CONVEYOR_KIDS), so a card that ends before this loop's
+  # first turn still has its review and tests ended before its worktree goes.
+  local -A mine=() took=() ranon=() kids=() shuts=()
   # One loop per checkout: the cap counts this loop's own cards, so a second loop beside it would double it.
   # A loop restarted on new code with cards in flight (CONVEYOR_ADOPT, below) keeps the lock it was given on fd 8:
   # those cards hold it too, so a lock taken anew would be refused. Only an fd 8 open on this run file is kept, and

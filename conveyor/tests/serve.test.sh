@@ -156,6 +156,48 @@ t_followdoctor() {
   grep -qx "warning: the running loop started on Conveyor commit $A, and the pack pins $B: it runs old code until it restarts" <<<"$out" \
     || fail "doctor did not warn of a loop behind the pin: $out"
 }
+# A commit of the case's checkout ($D), made by <shell command> run in it: in serveeng(), between two looks of the loop.
+checkoutcommit() { (cd "$D" && eval "$1" && git add -A && git commit -qm "$1"); } # <shell command>
+# Bugs (issue 1401): a `serve` from a checkout stops picking and restarts after every commit that lands there, though
+# one that changes only the Board and tests changes no code it runs; a restart after a second commit with no engine
+# code names that commit, not the one the card in flight started on, and hands it to the new loop; it goes on after a
+# commit that changes engine code; it compares the next commit with the one it started on, not with the last one it
+# went on past.
+t_followlight() {
+  setup "[$(issue 9 2026-01-03)]"; coderepo; trap 'chmod -R u+w "$T/$CASE"' EXIT; newloop
+  # The fixture's .claude is a link to this repository's: the light commit makes it a folder of its own. Then the
+  # turn's pick (turnpick, with run()'s variables of a turn with room below the cap, as t_locklimit sets them) picks
+  # the ready #9, past fresh(), the guard of every pick that runs it only when the loop is not stale; cardrun, the
+  # card's start, only says the card. A second light commit follows, and the restart (turnrestart, in a subshell, its
+  # exec to true) says the commit the card started on. A commit of shim.sh makes the loop stale, and is taken back out
+  # of the checkout, so the later commit of conveyor/lib/ alone differs from the second light one.
+  # The loop's turn (run) then restarts: only run() joins the look that names the new script (turnopen), the stale
+  # mark (turncount) and the exec (turnrestart, to the newloop stub) into one restart.
+  out=$(serveeng "$D/conveyor" 'FOLLOW=serve
+    checkoutcommit "rm .claude && mkdir -p .claude/dashboard conveyor/tests && echo x > .claude/dashboard/x.js && echo x > conveyor/tests/x.test.sh && echo x > conveyor/lib/x.test.sh && echo x >> conveyor/README.md"
+    stale && echo "stale on light"
+    cardrun() { echo "picks #$2 on $RAN"; }
+    asking=1 urgent="" red="" building=0 cap=3 left=5 pct="" running=0 serve=1 pusher="" started=0 waits="" self=x ctl=$(ctl) issues=$(cat "$STUB/issues.json")
+    declare -A mine=() ranon=(); turnpick; wait
+    checkoutcommit "echo y >> .claude/dashboard/x.js"; stale && echo "stale on second light"
+    ( new=x BASH=true; turnrestart )
+    checkoutcommit "echo x >> shim.sh"; stale && echo "stale on shim.sh"; git -C "$D" reset -q --hard HEAD~1
+    checkoutcommit "echo \"# x\" >> conveyor/lib/run.sh"
+    stale && echo "stale on heavy"; fresh echo "picks after heavy"
+    nojobs; BASH=$STUB/newloop; run "" serve' 2>&1)
+  L=$(git -C "$D" rev-parse HEAD~2); L2=$(git -C "$D" rev-parse HEAD~1)
+  grep -qxF "conveyor: Conveyor commit $L changes no engine code; the loop goes on without a restart" <<<"$out" \
+    && grep -qx "picks #9 on $L" <<<"$out" && ! grep -q '^stale on light' <<<"$out" \
+    || fail "a commit of .claude/dashboard/ and conveyor/tests/ files (and a *.test.sh and conveyor/README.md) alone stopped the loop's pick of the ready #9, or the loop did not say why it went on: $out"
+  grep -qxF "conveyor: Conveyor commit $L2 changes no engine code; the loop goes on without a restart" <<<"$out" && ! grep -q '^stale on second light' <<<"$out" \
+    && grep -qF "conveyor: restarting on the new code; 1 cards in flight carry on on $L;" <<<"$out" \
+    || fail "after a second commit with no engine code ($L2), the restart did not name $L, the commit card #9 started on: $out"
+  grep -qx 'stale on shim.sh' <<<"$out" || fail "a commit of shim.sh, which every hook runs, did not make the loop stale: $out"
+  grep -qx 'stale on heavy' <<<"$out" && ! grep -q '^picks after heavy' <<<"$out" \
+    && grep -qxF "conveyor: the checkout has moved on from this loop's $L2; nothing new is picked, and the loop restarts on the checkout's new code once its push is done" <<<"$out" \
+    && [ "$(cat "$STUB/newloop.args" 2>&1)" = "$D/conveyor/conveyor.sh serve" ] \
+    || fail "a later commit of conveyor/lib/ did not stop the pick and restart the loop, compared with $L2: $out $(cat "$STUB/newloop.args" 2>&1)"
+}
 
 # The pushes of serve and run (t_serve, t_serverun, t_servebatch), each a case of its own on a main of its own: no
 # issue yet, a pushed b.txt that main's checkout then edits (a tracked file no card touches), the repo's pre-push rules.

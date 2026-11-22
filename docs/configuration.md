@@ -20,6 +20,17 @@ Some pack settings that this site names:
   approval of a visible change ([Board](board.md#needs-you)). Conveyor does not take screenshots.
 - `pipelineFiles`: the files that change how cards are built, reviewed, fixed, tested, landed or pushed. A follow-up
   that changes one is filed held.
+- `plugin`: the engine the project runs. When the project follows the plugin's releases or `main` and takes a new
+  commit, the loop restarts on that commit unless it can read which files the commit changes and none of them is
+  engine code. Engine code is each file that the loop or its cards run or read from the engine: the files under
+  `conveyor/` with the card rules in `conveyor/rules/`, `shim.sh`, the guard hooks in `.claude/hooks/`, and the
+  scripts in `.claude/scripts/` that the loop runs (`decision.sh` and the `dashboard_limit*.py` files). The engine's
+  tests, the files in `conveyor/state/` and `conveyor/README.md` are not engine code. After a commit that changes no
+  engine code, the loop goes on picking cards with no restart, and its log says "Conveyor commit <sha> changes no
+  engine code; the loop goes on without a restart". A loop that you start with `serve` from a checkout of the plugin
+  uses the same rule for each new commit of that checkout. When you change the pin (`plugin.commit`), a loop that
+  runs from an installed commit always restarts. A loop that you start from a checkout does not restart when the pin
+  changes.
 - `auto.reserved`: what `/conveyor-belt:auto` never decides ([Foreman](foreman.md)).
 - `auto.standing`: the kinds of routine step that the Foreman takes without asking you. The kinds are `asked-fix` (a
   fix you asked for is filed and queued at once), `review-followup` (a follow-up that only finishes or corrects the

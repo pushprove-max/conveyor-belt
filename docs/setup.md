@@ -325,12 +325,15 @@ The pack's `plugin` names the engine the project runs, in one of three ways:
   pushed `main` in the same way.
 - `plugin.commit`: the project runs exactly that commit. Nothing changes when `main` moves or a release is published.
 
-The loop moves to the new engine at its next pick. A card in flight goes on with the new engine from its next step.
-The step in progress ends on the old engine, and the card keeps its worktree, its files and the steps it passed. No
-passed step runs again, and the card is not stopped or retried. The card's log says when it changed: "Conveyor took
-commit <sha>; the card goes on with the new code from its <step> step, and no passed step runs again". From that step,
-the card's sessions use the new engine's hooks and rules. The card ends on the old engine, and its log says why, when
-the new engine cannot read the files that the old engine saved for the card's steps, or when the new engine changes
+The loop moves to the new engine at its next pick when the new commit changes engine code, when the loop cannot read
+which files the commit changes, or when you change `plugin.commit` and the loop runs from an installed commit
+([Configuration](configuration.md#the-pack)). After a commit that changes no engine code, the loop goes on with no
+restart. A card in flight goes on with the new engine
+from its next step. The step in progress ends on the old engine, and the card keeps its worktree, its files and the
+steps it passed. No passed step runs again, and the card is not stopped or retried. The card's log says when it
+changed: "Conveyor took commit <sha>; the card goes on with the new code from its <step> step, and no passed step runs
+again". From that step, the card's sessions use the new engine's hooks and rules. The card ends on the old engine,
+and its log says why, when the new engine cannot read the files that the old engine saved for the card's steps, or when the new engine changes
 the part of the engine that runs the card's steps. `conveyor doctor` says which release or commit the project is on, and whether a newer one is out.
 
 A machine that runs no loop moves too. The plugin's hooks and commands run from the engine the project took on that
