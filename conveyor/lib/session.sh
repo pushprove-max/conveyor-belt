@@ -788,7 +788,7 @@ startcheck() { # <{seat, cli, model, account}>
   # On the route its seat's role takes (proxyroute()).
   local PROXY_ROLE; PROXY_ROLE=$(jq -r '.seat // "builder"' <<<"$1"); [ "$PROXY_ROLE" = reviewer ] || PROXY_ROLE=builder
   case $cli in
-    claude) (cd "$d" && a=$(acctenv "$a") && proxyenv && acctrun "$a" \
+    claude) (cd "$d" && a=$(acctenv "$a") && proxyenv && cacheenv && acctrun "$a" \
       && exec timeout --kill-after=10 120 claude -p --model "$m" --setting-sources "" --strict-mcp-config --no-session-persistence <<<"Reply with the one word OK." >"$d.out" 2>&1 8>&-) ;;
     codex) (cd "$d" && codexargs && exec timeout --kill-after=10 120 codex exec --skip-git-repo-check -s read-only "${CODEX_PX[@]}" -m "$m" - <<<"Reply with the one word OK." >"$d.out" 2>&1 8>&-) ;;
     opencode) (cd "$d" && OPENCODE_DISABLE_PROJECT_CONFIG=1 exec timeout --kill-after=10 120 opencode run --model "${m#opencode:}" <<<"Reply with the one word OK." >/dev/null 2>&1 8>&-) ;;

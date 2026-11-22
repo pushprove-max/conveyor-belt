@@ -208,7 +208,7 @@ claudereview() { # <worktree> <brief> <instructions> <model> <effort>
   d=$(acctenv "${RACCT:-$ACCT}") || { echo "$d"; return 1; }
   p=$(noshell "$1" "$2" "$3") || { echo "$p"; return 1; }
   sec=$SECONDS
-  (cd "$1" && proxyenv && acctrun "$d" && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" claude -p --model "$4" --effort "$5" --permission-mode default --tools Read,Grep,Glob \
+  (cd "$1" && proxyenv && cacheenv && acctrun "$d" && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" claude -p --model "$4" --effort "$5" --permission-mode default --tools Read,Grep,Glob \
     --setting-sources "" --strict-mcp-config --add-dir "$1.rv" --no-session-persistence --output-format stream-json --verbose \
     <<<"$p"$'\n\n'"$2" > "$1.events" 2> "$1.err" 8>&-) &
   watch $! "$1.events" "$1.live" review "$4" "" "$5"; rc=$?; sec=$((SECONDS - sec)); rm -rf "$1.rv"
@@ -379,7 +379,7 @@ judgecall() { # <worktree> <instructions> <the brief and the findings>
     d=$(acctenv "${RACCT:-$ACCT}") || { jq -cn --arg r "$d" '{failed: $r}'; return 1; }
     rm -rf "$1.rv"; mkdir "$1.rv" && git -C "$1" diff --cached > "$1.rv/staged.diff" && cp "$STE80" "$1.rv/ste80.md" || { jq -cn '{failed: "the staged change or the writing method could not be written for the judge"}'; return 1; }
     p=$2$'\n\n'"You have no shell: the staged change (\`git diff --cached\`) is the file $1.rv/staged.diff. Read it there, in parts if it is large. The file $STE80 is the file $1.rv/ste80.md: read it there."
-    (cd "$1" && proxyenv && acctrun "$d" && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" claude -p --model "$model" --effort "$effort" --permission-mode default --tools Read,Grep,Glob \
+    (cd "$1" && proxyenv && cacheenv && acctrun "$d" && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" claude -p --model "$model" --effort "$effort" --permission-mode default --tools Read,Grep,Glob \
       --setting-sources "" --strict-mcp-config --add-dir "$1.rv" --no-session-persistence --output-format stream-json --verbose \
       <<<"$p"$'\n\n'"$3" > "$1.judge.events" 2> "$1.judge.err" 8>&-); rc=$?; sec=$((SECONDS - sec)); rm -rf "$1.rv"
     f=$(jq -cRn --arg m "$model" --arg e "$effort" --argjson s "$sec" "$SESSIONREAD" "$1.judge.events" 2>/dev/null | tail -n 1 | jq -c '{model, effort, sec, tokens, usage, ok} | del(.[] | nulls)' 2>/dev/null)

@@ -263,7 +263,7 @@ askmodel() { # <folder> <seconds> <effort> <the control record, or ""> <prompt>
   [ -n "${ASKSEAT:-}" ] || model=$(jq -r --arg g "$agent" --arg m "$model" "$OKMODELS"'okmodels("builder")[$g] // [] | last // $m' <<<"$a") || model=''
   case $agent in
     claude) acct=$(acctenv "$(ctlacct "$4")") || { echo "$acct"; return 1; }
-      (cd "$d" && proxyenv && acctrun "$acct" && exec timeout --kill-after=10 "$2" claude -p --model "$model" --effort "$3" --tools "" \
+      (cd "$d" && proxyenv && cacheenv && acctrun "$acct" && exec timeout --kill-after=10 "$2" claude -p --model "$model" --effort "$3" --tools "" \
         --setting-sources "" --strict-mcp-config --no-session-persistence --output-format json <<<"$p" > "$d/raw" 2> "$d/err" 8>&- 9>&-); rc=$? ;;
     codex) model=$(codexmodel "$model") || { echo "$model"; return 1; }
       # The model id a family name resolved to, for a caller that records the call by the model it ran on (pickcall()).

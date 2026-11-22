@@ -607,7 +607,7 @@ tarun() { # <the record> <worktree> <prompt>
     [ -z "$px" ] || export PROXY_NOW=1
     case $cli in
       claude) d=$(acctenv "$acct") || { echo "$d" >&2; exit 1; }
-        cd "$wt" && proxyenv && acctrun "$d" && exec timeout --kill-after=30 "$TESTACTION_TIMEOUT" claude -p --model "$model" --effort "$effort" --permission-mode default \
+        cd "$wt" && proxyenv && cacheenv && acctrun "$d" && exec timeout --kill-after=30 "$TESTACTION_TIMEOUT" claude -p --model "$model" --effort "$effort" --permission-mode default \
           --tools Read,Grep,Glob --setting-sources "" --strict-mcp-config --no-session-persistence --output-format stream-json --verbose ;;
       codex) cd "$wt" && codexargs && exec timeout --kill-after=30 "$TESTACTION_TIMEOUT" codex exec --json -s read-only "${CODEX_PX[@]}" -m "$model" -c "model_reasoning_effort=\"$effort\"" - ;;
       opencode) REVIEW_TIMEOUT=$TESTACTION_TIMEOUT ocrun "$wt" "$model" "$effort" ;;

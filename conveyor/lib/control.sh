@@ -546,6 +546,14 @@ clis() {
   for r in fix testFix; do seat "$r" "$c" >/dev/null && [ "${SEAT_V[$r]}" != "${SEAT_V[builder]}" ] || continue; seatready "$r" "${SEAT_V[$r]}" || rc=1; done
   return $rc
 }
+# The prompt cache lifetime of a Claude call that runs without the card settings (--setting-sources "" and no
+# --settings): the judges, a Claude review, the short checks. Without it such a call writes its cache at the 1-hour
+# price. The value is the one the card settings give a build or fix session (env.CLAUDE_CODE_PROMPT_CACHE_TTL); a
+# call with no such value in them keeps the environment it has.
+cacheenv() {
+  local t; t=$(jq -r '.env.CLAUDE_CODE_PROMPT_CACHE_TTL // empty' "$CARD_SETTINGS" 2>/dev/null)
+  [ -z "$t" ] || export CLAUDE_CODE_PROMPT_CACHE_TTL=$t
+}
 # Models through an API proxy. Claude's: card sessions run with --setting-sources "", so a base URL in the user's
 # settings.json never reaches them; the host file's claudeProxy, else the pack's models.claudeProxy, names it and the
 # NAME of the variable that holds its key (never the key). Prints that object as JSON; nothing when neither names one.
@@ -735,7 +743,7 @@ routecall() { # <claude|codex> <model, or "" for the CLI's own default> [<route 
   [ -z "${3:-}" ] || { k=$(jq -r '.keyEnv | strings' <<<"$3"); [[ $k =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || k=''; }
   if [ -n "${3:-}" ] && [ -z "$v" ] && [ "$(jq -r .kind <<<"$3")" != api ]; then v=$NOKEY; [ "$1" = claude ] || k=$NOKEYENV; fi
   o=$(cd "$d" && unset ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY OPENAI_API_KEY ENABLE_TOOL_SEARCH CLAUDE_CONFIG_DIR ${k:+"$k"}
-    if [ "$1" = claude ]; then acctrun "${CALL_ACCT:-}"
+    if [ "$1" = claude ]; then acctrun "${CALL_ACCT:-}"; cacheenv
       if [ -n "${3:-}" ]; then export ANTHROPIC_BASE_URL; ANTHROPIC_BASE_URL=$(jq -r '.baseUrl // "https://api.anthropic.com"' <<<"$3")
         if [ -z "$v" ]; then :; elif [ "$(jq -r .kind <<<"$3")" = api ]; then export ANTHROPIC_API_KEY="$v"; else export ANTHROPIC_AUTH_TOKEN="$v"; fi
       fi
