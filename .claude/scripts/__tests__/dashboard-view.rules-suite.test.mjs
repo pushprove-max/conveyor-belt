@@ -5,7 +5,7 @@
 // dashboard-view.helpers.mjs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { boot, deliver, next, settle, full, act, ruled, rulesP, css } from './dashboard-view.helpers.mjs';
+import { boot, deliver, next, settle, full, act, ruled, rulesP, css, heldP, pickProject } from './dashboard-view.helpers.mjs';
 
 const DEVBOX = { kind: 'devbox', size: '4x8', tag: 'conveyor-suite-sample', idleStop: '15m' };
 const SSH = { kind: 'ssh', target: 'me@box.example.com', dir: '~/conveyor-suite' };
@@ -158,6 +158,70 @@ test('Rules: Release suite runs on, with no Namespace login, shows devbox login,
   assert.equal(row(w).querySelector('code'), null, 'a logged-in devbox shows no login command');
   assert.ok(!act(row(w), 'suite-check').disabled);
   assert.deepEqual(await sent(w, () => { w.clock += 60000; next(w, data(DEVBOX)); }), [], 'a login that is there is not read again by itself');
+});
+
+// Bug this guards: a refresh that differs only in readAt draws nothing (the live feed sends one every few seconds), and
+// it returned before the login retry, so Check the box stayed off after the owner logged in to Namespace.
+test('Rules: a refresh that changes only readAt still reads the missing Namespace login again', async () => {
+  const w = boot({ tab: 'rules' });
+  await devboxShown(w, false);
+  assert.ok(act(row(w), 'suite-check').disabled, 'Check the box is off while the login is missing');
+  w.reply = reply(login(true));
+  w.clock += 16000;
+  const d = data(DEVBOX);
+  d.panels.rules.data.readAt = '2026-11-22T00:00:30Z';
+  assert.deepEqual(await sent(w, () => next(w, d)), [{ action: 'suite-machine-check', args: [], repo: 'sample' }],
+    'a refresh with only a new readAt reads the login again');
+  assert.ok(!act(row(w), 'suite-check').disabled, 'Check the box is on once the login is there');
+});
+
+// Bug this guards: the login retry of a readAt-only refresh drew the tab when it started and when it ended, replacing
+// the open Group by select (issue 294) for a login that was still missing. A changed answer is still drawn.
+test('Rules: the login retry of a readAt-only refresh keeps the open Group by select while the login stays missing', async () => {
+  const w = boot({ tab: 'rules' });
+  await devboxShown(w, false);
+  const by = act(heldP(w), 'held-by');
+  assert.ok(by, 'the Group by select is shown');
+  by.focus();
+  w.clock += 16000;
+  const d = data(DEVBOX);
+  d.panels.rules.data.readAt = '2026-11-22T00:00:30Z';
+  assert.deepEqual(await sent(w, () => next(w, d)), [{ action: 'suite-machine-check', args: [], repo: 'sample' }],
+    'the login is read again');
+  assert.equal(act(heldP(w), 'held-by'), by, 'the select the user has open is the same node');
+  assert.equal(w.document.activeElement, by);
+  w.reply = reply(login(true));
+  w.clock += 16000;
+  const e = data(DEVBOX);
+  e.panels.rules.data.readAt = '2026-11-22T00:01:00Z';
+  await sent(w, () => next(w, e));
+  assert.ok(!act(row(w), 'suite-check').disabled, 'a login now there is drawn: Check the box is on');
+});
+
+// Bug this guards: a login retry that is out draws Check the box off for any draw in it (here, picking another project
+// with a saved ssh box); when its answer was the one already shown, nothing drew again, so the ssh box's Check stayed off.
+test('Rules: Check the box is on for another project picked while a login retry is out, whose answer is unchanged', async () => {
+  const w = boot({ tab: 'rules' });
+  const two = (readAt) => {
+    const d = data(DEVBOX), r = d.panels.rules.data, names = ['sample', 'widgetshop'];
+    r.readAt = readAt;
+    d.panels.machine.data.repos = names;
+    Object.assign(r, { repos: names, others: { widgetshop: { ...r, repo: 'widgetshop', control: { ...r.control, suiteMachine: SSH } } } });
+    return d;
+  };
+  await devboxShown(w, false);
+  next(w, two('2026-11-22T00:00:00Z'));
+  await settle();
+  w.posts.length = 0;
+  let answer = null;
+  w.reply = { ok: true, status: 200, text: () => new Promise((r) => { answer = () => r(JSON.stringify(login(false))); }) };
+  w.clock += 16000;
+  assert.deepEqual(await sent(w, () => next(w, two('2026-11-22T00:00:30Z'))), [{ action: 'suite-machine-check', args: [], repo: 'sample' }], 'the retry is out');
+  pickProject(w, 'widgetshop');
+  assert.ok(act(row(w), 'suite-check').disabled, 'the ssh box\'s Check is off while the retry is out');
+  answer();
+  await settle();
+  assert.ok(!act(row(w), 'suite-check').disabled, 'the retry has ended: the ssh box\'s Check is on');
 });
 
 // Bug this guards: Check on a saved ssh box stayed on while its target was being edited, so it reported the saved box

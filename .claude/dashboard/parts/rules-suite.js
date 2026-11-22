@@ -20,7 +20,7 @@
   ];
   // The last check: {repo, key (the rule it was for), at, rec (the lines) or error}; OUT: one is under way. An ssh box
   // picked and not yet saved: draft {repo, target, dir}.
-  let LAST = null, OUT = false, DRAFT = null;
+  let LAST = null, OUT = false, DRAFT = null, BUSY = false;
 
   const rec = (c) => (c && c.suiteMachine && typeof c.suiteMachine === 'object' ? c.suiteMachine : { kind: 'local' });
   const kindOf = (c) => (['devbox', 'ssh'].includes(rec(c).kind) ? rec(c).kind : 'local');
@@ -52,15 +52,22 @@
     return { kind: k, n: got !== null ? got : k === 'devbox' ? cpusOf(text(rec(c).size)) : null };
   }
 
-  function check(c) {
+  // quiet: the retry of a refresh that drew nothing. It draws neither when it starts nor when its answer is what the
+  // last check said, so an open select (Group by) stays open; a changed answer (the login made) is drawn, and so is
+  // the end of a retry that a draw happened in (BUSY: that draw showed Check the box off while the retry was out).
+  function check(c, quiet) {
     if (OUT) return;
-    const repo = S.d.repo, key = JSON.stringify(rec(c));
-    OUT = true; draw();
+    const repo = S.d.repo, key = JSON.stringify(rec(c)), was = last(c), before = was ? JSON.stringify([was.rec, was.error]) : null;
+    OUT = true; BUSY = false;
+    if (!quiet) draw();
     post('suite-machine-check', [], repo).then((r) => {
       const out = (() => { try { return JSON.parse(r.said); } catch { return null; } })();
       const good = r.ok && out && Array.isArray(out.needs);
       LAST = { repo, key, at: Date.now(), rec: good ? out : null, error: good ? '' : r.said };
-    }, () => { LAST = { repo, key, at: Date.now(), rec: null, error: 'the host did not answer' }; }).then(() => { OUT = false; draw(); });
+    }, () => { LAST = { repo, key, at: Date.now(), rec: null, error: 'the host did not answer' }; }).then(() => {
+      OUT = false;
+      if (!quiet || BUSY || before !== JSON.stringify([LAST.rec, LAST.error])) draw();
+    });
   }
   // The check's lines, each with "ok" or "missing". A tool the box lacks (not the login, ssh, bash or the slots)
   // offers "Set up now", which cannot be sent yet: no action runs test-machine.sh there, so it stays off.
@@ -139,6 +146,7 @@
   }
   function rulesSuite(el, c) {
     const h = S.ctx.h, now = kindOf(c), shown = drafting() ? 'ssh' : now;
+    BUSY = OUT;
     const slots = S.cores && typeof S.cores.slots === 'number' ? S.cores.slots : null;
     const group = h('div', 'rules-suite-kinds');
     group.setAttribute('role', 'radiogroup'); group.setAttribute('aria-label', 'Release suite runs on');
@@ -151,9 +159,13 @@
     };
     KINDS.forEach(([k, name, what]) => group.append(kindRadio(k, name, what(slots), shown, pick)));
     el.append(row('suite', 'Release suite runs on', 'the machine a release\'s full suite runs on', group, fields(c, shown, now, slots)));
-    // A devbox saved is checked when it is shown (its login is what the row needs), and again while the login is missing.
+    again(c);
+  }
+  // A devbox saved is checked when it is shown (its login is what the row needs), and again while the login is missing.
+  // Also asked by the Rules panel for a refresh that draws nothing, so the login retry does not wait on a redraw.
+  function again(c, quiet) {
     const l = last(c);
-    if (shown === 'devbox' && now === 'devbox' && !OUT && (!l || (loggedIn(c) === false && Date.now() - l.at > AGAIN))) Promise.resolve().then(() => check(c));
+    if (kindOf(c) === 'devbox' && !drafting() && !OUT && (!l || (loggedIn(c) === false && Date.now() - l.at > AGAIN))) Promise.resolve().then(() => check(c, quiet));
   }
   // What the chosen machine shows under the choices: its texts or fields, the buttons and the last check's lines.
   function fields(c, shown, now, slots) {
@@ -173,6 +185,6 @@
   }
   window.DASH_APP.part('rules-suite', function (shared) {
     ({ S, num, send, button, post, row, draw } = shared);
-    return { rulesSuite, suiteSlots, undoArgs };
+    return { rulesSuite, suiteSlots, suiteAgain: (c) => again(c, true), undoArgs };
   });
 })();

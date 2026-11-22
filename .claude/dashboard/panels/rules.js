@@ -646,6 +646,7 @@
     if (drawn && S.d && S.bare === key && view.repo === S.d.repo && !(S.ctl || S.turned || S.moved.size || saved)) {
       S.raw = [d, read, view.repo]; S.d = view; S.read = read; S.ctx = ctx;
       S.idle = d;
+      suite.suiteAgain(ctl());
       return;
     }
     S.idle = null;
