@@ -301,6 +301,8 @@ def host_file():
 PLUGIN_ROOT = os.path.dirname(os.path.dirname(HERE))  # the checkout this Board runs from
 NOTE_LINE = re.compile(r'- (?P<at>\S+) · card (?P<card>\S+) · (?P<text>.*)')  # a plugin-bugs.md note (foreman/stop.sh)
 # A note that names the issue it was filed as (foreman/stop.sh's and foreman.sh's test): it is not filed again.
+# The note's guessed cause (foreman/stop.sh's "cause not checked: <text>" part): it ends at the card, evidence or filed part, each in its own shape, a card id or "-", a path or "-" (so a cause that says ", card lookups" goes on).
+NOTE_CAUSE = globals()['re'].compile(r'(?:, |^)cause not checked: (?P<cause>.*?)(?=, card (?:(?:c[0-9]{8}T[0-9]{6}-|<card>)\S*|-)(?:, |$)|, evidence (?:\S*/\S*|-)(?:, |$)|, filed as #|$)', globals()['re'].I)  # re is the base part's, as CARD is
 NOTE_FILED = re.compile(r' filed as #[1-9][0-9]*\s*\.? · evidence: ', re.I)
 
 
@@ -312,7 +314,8 @@ def note_issue(line):
     no card id (an issue number, in a note written before the field took card ids only) names no project and stays.
     The note's ' · evidence: <path>' part (the last one, as foreman/stop.sh reads it) is not in the body as it is: the
     body has the text alone when the text already names the path (or the part is '-' or not there), else the text and
-    a line 'Evidence: <path>'."""
+    a line 'Evidence: <path>'. The note's 'cause not checked: <text>' part is not in the text: the body has it as its
+    own last line 'Cause (not checked): <text>', and has no such line when the note has no such part."""
     m = NOTE_LINE.fullmatch(line)
     text = m.group('text') if m else line[2:]
     text, sep, evidence = text.rpartition(' · evidence: ')
@@ -321,9 +324,14 @@ def note_issue(line):
     evidence = evidence.strip()
     if m and globals()['CARD'].fullmatch(m.group('card')):  # CARD is the base part's, as REDCARD is above
         text, evidence = text.replace(m.group('card'), '<card>'), evidence.replace(m.group('card'), '<card>')
+    cause = NOTE_CAUSE.search(text)
+    if cause:
+        text = (text[:cause.start()] + text[cause.end():]).lstrip(', ')
     title = re.split(r'[,;:.](?=\s|$)', text.split(' · ')[0], maxsplit=1)[0].strip() or 'Plugin problem'
     if evidence not in ('', '-') and evidence not in text:  # after the title: the Evidence line is no part of it
         text += '\nEvidence: ' + evidence
+    if cause and cause.group('cause').strip():
+        text += '\nCause (not checked): ' + cause.group('cause').strip()
     try:
         with open(os.path.join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'), encoding='utf-8') as f:
             version = json.load(f).get('version')

@@ -21,8 +21,9 @@
 #   card, what was seen, evidence path) before any check, so the finding outlives a refused or short reply. In the
 #   plugin's own repository (lib.sh plugin_home) the Foreman files it there itself, so a line that does not end
 #   "filed as #<n>" is refused too, at every stop of the turn (not only once, as the checks above are).
-#   A plugin-problem line that holds [likely] gives a cause the Foreman did not check: it is noted nowhere and the
-#   stop is refused once per turn, as the checks above are.
+#   A plugin-problem line may carry a part "cause not checked: <text>" before its card and evidence: a guess at the cause.
+#   No line is refused for [likely]: a clause that holds it outside that part is noted moved into the part (plug_cause),
+#   so the marker is never lost and the report shows the text as a cause that was not checked.
 # Each refused stop is noted in $FD/refused-stops (lib.sh refused_put), which waiter.sh reads.
 set -uo pipefail
 INPUT=$(cat)
@@ -63,7 +64,7 @@ TURN=$(jq -cs --arg w "$W" 'def txt: .message.content | if type == "string" then
 U=$(jq -r '.uuid // empty' <<<"$TURN" 2>/dev/null); REPLY=$(jq -r '.reply // empty' <<<"$TURN" 2>/dev/null)
 [ -n "$U" ] && [ -n "$REPLY" ] || exit 0
 PLUG='^[[:space:]*_>-]*plugin problem \(for the conveyor-belt repo\):[[:space:]*_]*'
-FORM="'Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what you expected>, card <card>, evidence <path>'"
+FORM="'Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what you expected>[, cause not checked: <what you think the cause is>], card <card>, evidence <path>'"
 # Each plugin-problem line is noted once: a reply that says it again (after a refusal) adds no second note. A line
 # that ends "filed as #<n>" names the issue it was filed as; in the plugin's own repository, said after the same line
 # without it (or as the line context gives a listed note), it takes that note's place, so the note names the issue
@@ -73,24 +74,59 @@ NOTES=$FD/plugin-bugs.md
 FILED='[,;]?[[:space:]]*filed as #([1-9][0-9]*)[[:space:]]*\.?$'
 NOISSUE='[,;]?[[:space:]]*filed as #[0-9]+[[:space:]]*\.?$'
 UNFILED=()
-# A line that holds [likely] is a guessed cause sent as a finding: it is not noted, and the stop is refused below.
-GUESS=
+# plug_cause <text>: sets BODY, the text with each clause that holds [likely] moved into its "cause not checked: <text>"
+# part (put before the card, evidence and filed clauses), and BASE, the text without that part (where the card and the
+# evidence path are read). A text with neither [likely] nor that part is both, as it is. Clauses end at ", " or "; ".
+plug_cause() {
+  BODY=$1 BASE=$1
+  [[ ${1,,} == *'[likely]'* || ${1,,} == *'cause not checked:'* ]] || return 0
+  # A card, evidence or filed clause is only one that has the field's own shape (a card id or "-", one path with a "/"
+  # or "-"), so a cause that says ", card lookups use old data" stays in the cause, and an empty field ends it.
+  local TAILRE='^(card[[:space:]]+(c[0-9]{8}T[0-9]{6}-[^[:space:]]+|-)|evidence[[:space:]]+([^[:space:]]*/[^[:space:]]*|-)|filed as #.*)$'
+  local s=${1//; /, } c p before after cause='' moved=0 incause=0 intail=0 tailtag=0
+  local -a cl=() head=() tail=()
+  while [[ $s == *', '* ]]; do cl+=("${s%%, *}"); s=${s#*, }; done; cl+=("$s")
+  for c in "${cl[@]}"; do
+    p=${c,,}; p=${p%%\[likely\]*}; before=$(plug_join "${c:0:${#p}}")
+    if [[ ${c,,} == 'cause not checked:'* ]]; then incause=1; cause=$(plug_join "$cause" "${c#*:}"); continue; fi
+    if ((incause)) && ! [[ $before =~ $TAILRE ]]; then cause=$(plug_join "$cause" "$(plug_untag "$c")"); continue; fi
+    incause=0
+    if [[ ${c,,} == *'[likely]'* ]]; then
+      moved=1; after=$(plug_untag "${c:${#p}+8}")
+      if [[ $before =~ $TAILRE ]]; then   # a card, evidence or filed clause keeps its text before the tag
+        c=$before
+        # A tag that ends a field has no claim of its own to mark: it marks the line's text before the fields.
+        if [ -n "$after" ]; then cause=$(plug_join "$cause" "$after"); else tailtag=1; fi
+      else cause=$(plug_join "$cause" "$(plug_untag "$c")"); continue; fi
+    fi
+    [[ $c =~ $TAILRE ]] && intail=1
+    if ((intail)); then tail+=("$c"); else head+=("$c"); fi
+  done
+  BASE=$(plug_join "${head[@]}" "${tail[@]}")
+  ((moved)) || return 0
+  if ((tailtag)); then cause=$(plug_join "${head[@]}" "$cause"); head=(); fi
+  BODY=$(plug_join "${head[@]}" "cause not checked: ${cause:-not stated}" "${tail[@]}")
+}
+# plug_join <part>...: the non-empty parts, each trimmed, joined with ", ".
+plug_join() { local o='' x; for x; do x=${x#"${x%%[![:space:]]*}"}; x=${x%"${x##*[![:space:]]}"}; [ -z "$x" ] || o=${o:+$o, }$x; done; printf '%s' "$o"; }
+# plug_untag <text>: the text without any [likely] tag, trimmed.
+plug_untag() { local s=$1 p; while [[ ${s,,} == *'[likely]'* ]]; do p=${s,,}; p=${p%%\[likely\]*}; s=${s:0:${#p}}${s:${#p}+8}; done; plug_join "$s"; }
 shopt -s nocasematch
 while IFS= read -r l; do
   [[ $l =~ $PLUG ]] || continue
   seen=${l:${#BASH_REMATCH[0]}}; seen=${seen%"${seen##*[![:space:]]}"}; [ -n "$seen" ] || continue
-  [[ $seen == *'[likely]'* ]] && { GUESS=$l; continue; }
-  what=$seen
-  if [[ $seen =~ $FILED ]]; then what=${seen:0:${#seen}-${#BASH_REMATCH[0]}}
+  # The "filed as #<n>" end is set aside, so a cause part never swallows it. A number that names no issue is left out
+  # of the note, so the line with a valid number later takes its place.
+  sfx=; [[ $seen =~ $NOISSUE ]] && { sfx=${BASH_REMATCH[0]}; seen=${seen:0:${#seen}-${#sfx}}; }
+  plug_cause "$seen"; seen=$BODY
+  if [[ $sfx =~ $FILED ]]; then seen=$seen$sfx; what=$BODY
   else
-    # A number that names no issue is left out of the note, so the line with a valid number later takes its place.
-    [[ $seen =~ $NOISSUE ]] && { seen=${seen:0:${#seen}-${#BASH_REMATCH[0]}}; what=$seen; }
     [ -n "$seen" ] || continue
-    UNFILED+=("$what")
+    what=$seen; UNFILED+=("$what")
   fi
   ! grep -qF -- " · $seen · evidence: " "$NOTES" 2>/dev/null || continue
-  card=$(grep -oE '\bc[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]*[A-Za-z0-9]' <<<"$what" | head -n 1)
-  ev=$(grep -oE "(~|\.{1,2})?/[^[:space:],;()'\"\`]+|[A-Za-z0-9._-]+/[^[:space:],;()'\"\`]+" <<<"$what" | head -n 1); ev=${ev%.}
+  card=$(grep -oE '\bc[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]*[A-Za-z0-9]' <<<"$BASE" | head -n 1)
+  ev=$(grep -oE "(~|\.{1,2})?/[^[:space:],;()'\"\`]+|[A-Za-z0-9._-]+/[^[:space:],;()'\"\`]+" <<<"$BASE" | head -n 1); ev=${ev%.}
   # In the plugin's own repository (plugin_home) a filed line takes the place of the first note that names no issue
   # and says the same thing: its own text (the line the start-up list gives for it), or that text with its own card
   # and evidence fields after it. Never a note that only shares a card or path: that may be a different problem. In
@@ -123,17 +159,11 @@ REST=$(grep -viE "$PLUG" <<<"$REPLY" | grep -viE "$DONE")
 # unfiled; filing it, or leaving the line out (its note stays listed at start-up), lets the stop pass. In any other
 # project the owner files it, and the line passes as it is.
 if [ ${#UNFILED[@]} != 0 ] && plugin_home; then
-  block "This project is the plugin's own repository, so a plugin problem is a defect you file here yourself, as any issue you file (it starts held until the owner says yes). File it now, then name the issue at the end of the line: 'Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what you expected>, card <card>, evidence <path>, filed as #<n>'. Not filed: ${UNFILED[0]}"
+  block "This project is the plugin's own repository, so a plugin problem is a defect you file here yourself, as any issue you file (it starts held until the owner says yes). File it now, then name the issue at the end of the line: 'Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what you expected>[, cause not checked: <what you think the cause is>], card <card>, evidence <path>, filed as #<n>'. Not filed: ${UNFILED[0]}"
 fi
-GUESSMSG="A plugin problem says what you saw, not a cause you did not check: give the command, what it did and what you expected, and leave the cause out. Form: $FORM"
-# In the plugin's own repository a guessed cause is refused at every stop, as an unfiled line is: said again with
-# [likely] after a refusal, it must not pass as filed work. In any other project it is refused once per turn.
-[ -z "$GUESS" ] || ! plugin_home || block "$GUESSMSG"
 MARK=$FD/reply-mark
 [ "$(cat "$MARK" 2>/dev/null)" != "$U" ] || exit 0
 refuse() { { mkdir -p "$FD" && printf '%s\n' "$U" > "$MARK"; } 2>/dev/null || exit 0; block "$1"; }
-
-[ -z "$GUESS" ] || refuse "$GUESSMSG"
 
 if [ -n "$W" ] && jq -e --arg w "$W" '(.opening | contains($w)) and (.owner | not)' <<<"$TURN" >/dev/null 2>&1 && [ "$(wc -w <<<"$REST")" -gt 1 ]; then
   # What needs the owner is said to them: a reply that never says you, your or owner reports, and so does a sentence

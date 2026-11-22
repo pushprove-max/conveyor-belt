@@ -209,19 +209,22 @@ problem that the Foreman finds in Conveyor itself always needs you. Who files it
 
 - In any other project, you file it in the plugin's repository. The Foreman says it on a line of its own:
 
-  `Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what it expected>, card <card>, evidence <path>`
+  `Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what it expected>[, cause not checked: <what the Foreman thinks the cause is>], card <card>, evidence <path>`
 
 - In the plugin's own repository, the Foreman files it there at once, as it files any other issue. The issue is held
   until you say yes. The line ends with the issue number:
 
-  `Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what it expected>, card <card>, evidence <path>, filed as #<n>`
+  `Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what it expected>[, cause not checked: <what the Foreman thinks the cause is>], card <card>, evidence <path>, filed as #<n>`
 
   If the line has no issue number, the Foreman cannot end its reply. It gets the reason and files the issue. When the
   Foreman starts, it gets a list of each entry in `plugin-bugs.md` that has no issue number. For each entry, it first looks for an issue that already reports the problem, such as
   one that you filed, and uses that issue's number. It files only the entries that no issue reports.
 
-The line says what the Foreman saw: the command or step, what it did and what the Foreman expected. It gives no cause
-that the Foreman did not check. A line that holds `[likely]` is refused and is not noted.
+The line says what the Foreman saw: the command or step, what it did and what the Foreman expected. A cause that the
+Foreman checked in the code or the logs goes in what it did, with where it checked. A cause that it did not check goes
+in the last part of the line before the card, as `cause not checked: <text>`. The line is never refused for that part.
+A clause that holds `[likely]` outside the part is noted inside it. The report that you file from the Board shows the
+part on its own line, as `Cause (not checked): <text>`.
 
 Each such problem also goes into `plugin-bugs.md` in the Foreman's folder, one line each: the time, the card, what the
 Foreman saw and the evidence path. The Board's Health panel and `/units` then show "N plugin problems noted", with

@@ -123,6 +123,21 @@ check('evidence_named_once', named.count('~/logs/setup.log') == 1 and 'Evidence:
 unnamed_title, unnamed = ds.note_issue('- 2026-11-22T09:00:00Z · card - · setup fails · evidence: ~/logs/setup.log')
 check('evidence_title_clean', unnamed_title == 'setup fails', unnamed_title)
 check('evidence_line_once', unnamed.startswith('setup fails\nEvidence: ~/logs/setup.log\n\n') and unnamed.count('Evidence: ~/logs/setup.log') == 1, unnamed)
+# Bug (#1357): a guessed cause was part of the finding's text, so the report stated it as fact. The note's
+# 'cause not checked:' part is its own body line 'Cause (not checked): <text>', once; a note without one has no such line.
+cause_title, cause_body = ds.note_issue('- 2026-11-22T09:00:00Z · card - · setup fails, cause not checked: the cache, maybe, is stale, card c20261122T090000-sample-7, evidence ~/logs/setup.log · evidence: ~/logs/setup.log')
+check('cause_line_once', cause_body.count('Cause (not checked): the cache, maybe, is stale\n') == 1 and cause_body.count('Cause (not checked)') == 1
+      and cause_body.startswith('setup fails, card c20261122T090000-sample-7, evidence ~/logs/setup.log\n') and cause_title == 'setup fails', (cause_title, cause_body))
+# Bug (review of #1357): the cause ended at any ', card ' or ', evidence ', so words of the guess ('card lookups use old
+# data') were left in the report's text as fact. Only a card id or an evidence path ends it.
+_, words_body = ds.note_issue('- 2026-11-22T09:00:00Z · card - · setup fails, cause not checked: the cache is stale, card lookups use old data, evidence the log, card c20261122T090000-sample-7, evidence ~/logs/setup.log · evidence: ~/logs/setup.log')
+check('cause_keeps_card_words', words_body.startswith('setup fails, card c20261122T090000-sample-7, evidence ~/logs/setup.log\n')
+      and words_body.count('Cause (not checked): the cache is stale, card lookups use old data, evidence the log\n') == 1, words_body)
+# Bug (review of #1357): empty fields ('card -, evidence -') after the cause were part of it: the report's cause line read
+# 'the cache is stale, card -, evidence -'. A '-' is a field's empty value and ends the cause like an id or a path.
+_, empty_body = ds.note_issue('- 2026-11-22T09:00:00Z · card - · setup fails, cause not checked: the cache is stale, card -, evidence - · evidence: -')
+check('cause_ends_at_empty_fields', empty_body.startswith('setup fails, card -, evidence -\nCause (not checked): the cache is stale\n'), empty_body)
+check('no_cause_no_line', 'Cause' not in named and 'Cause' not in unnamed, (named, unnamed))
 check('preview_writes_nothing', text(NOTES) == WHOLE and not os.path.exists(os.path.join(T, 'gh-ran')), text(NOTES))
 # Built in parts, so this file holds no home path or private address itself.
 HOMEPATH, PRIVATE = '/ho' + 'me/someone/notes.txt', '10.' + '1.2.3'

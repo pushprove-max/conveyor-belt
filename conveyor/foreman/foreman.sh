@@ -442,10 +442,10 @@ context_head() {
   local err n plug home='' s=$FD/state.md
   # A plugin problem: in the plugin's own repository (plugin_home) the Foreman files it there itself, as any issue it
   # files, and its line names the issue (stop.sh refuses one that does not); elsewhere the owner files it.
-  plug="# A suspected defect in Conveyor itself always needs the owner (only they can fix or file it in the plugin's repository): say it on its own line, \"Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what you expected>, card <card>, evidence <path>\"; it is noted in $FD/plugin-bugs.md."
+  plug="# A suspected defect in Conveyor itself always needs the owner (only they can fix or file it in the plugin's repository): say it on its own line, \"Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what you expected>[, cause not checked: <what you think the cause is>], card <card>, evidence <path>\", where a cause you checked in the code or the logs goes in <what it did> with where you checked it, and a cause you did not check goes in the cause not checked part; it is noted in $FD/plugin-bugs.md."
   if plugin_home; then
     home=1
-    plug="# A suspected defect in Conveyor itself: this project is the plugin's own repository, so file it here at once, as any issue you file (it starts held until the owner says yes), and say it on its own line with the issue's number, \"Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what you expected>, card <card>, evidence <path>, filed as #<n>\"; it is noted in $FD/plugin-bugs.md."
+    plug="# A suspected defect in Conveyor itself: this project is the plugin's own repository, so file it here at once, as any issue you file (it starts held until the owner says yes), and say it on its own line with the issue's number, \"Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what you expected>[, cause not checked: <what you think the cause is>], card <card>, evidence <path>, filed as #<n>\", where a cause you checked in the code or the logs goes in <what it did> with where you checked it, and a cause you did not check goes in the cause not checked part; it is noted in $FD/plugin-bugs.md."
   fi
   cat <<EOF
 # Foreman mode: you are $NAME, the Foreman of this project. You file issues as cards, watch Conveyor, clear blocked cards and take every decision to the owner; you never answer for the owner, and you build no code yourself: the cards do.

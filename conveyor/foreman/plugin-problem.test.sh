@@ -173,29 +173,74 @@ t_issuecard() {
     || fail "for the reply '$reply' the note's card field is not - or its text lost an issue number: $(cat "$FD/plugin-bugs.md" 2>&1)"
 }
 
-# Bug (#1352): a plugin-problem line carried a guessed cause tagged [likely] and went to the plugin's repository as a
-# finding. The line with [likely] is refused and not noted; the same line without it is noted and passes.
-t_guess() {
-  fixture guess https://github.com/example/alpha
-  base='Plugin problem (for the conveyor-belt repo): control release 1345 leaves card 1345 held in foreman status, it should be started, card c20261118T045400-alpha-7, evidence ~/cards/x.log'
-  guess="$base; the open range seems to still cover it [likely]"
-  out=$(turn u1 "$guess")
-  jq -e '.decision == "block" and (.reason | contains("not a cause you did not check"))' <<<"$out" >/dev/null \
-    || fail "the plugin problem '$guess' was not refused for its guessed cause: $out"
-  [ ! -s "$FD/plugin-bugs.md" ] || fail "the plugin problem '$guess' was noted: $(cat "$FD/plugin-bugs.md")"
-  out=$(turn u2 "$base"); [ -z "$out" ] || fail "the plugin problem '$base' with no guess was refused: $out"
-  [ "$(grep -c '^- ' "$FD/plugin-bugs.md" 2>/dev/null)" = 1 ] || fail "the plugin problem '$base' was not noted once: $(cat "$FD/plugin-bugs.md" 2>&1)"
+# Bug (#1357): the refusal of a [likely] line was fooled by deleting the tag, which left an unmarked guess in the
+# report. A line may carry "cause not checked: <text>" before its card and evidence: it passes and is noted whole, with
+# its card and evidence fields read from the rest of the line (not from the cause).
+t_cause() {
+  fixture cause https://github.com/example/alpha
+  line='Plugin problem (for the conveyor-belt repo): control release 1345 leaves card 1345 held, it should start, cause not checked: the open range, see ~/other/x.log, still covers it, card c20261118T045400-alpha-7, evidence ~/cards/x.log'
+  out=$(turn u1 "$line"); [ -z "$out" ] || fail "the plugin problem '$line' with a cause not checked part was refused: $out"
+  grep -qE '^- [^ ]+ · card c20261118T045400-alpha-7 · control release 1345 leaves card 1345 held, it should start, cause not checked: the open range, see ~/other/x\.log, still covers it, card c20261118T045400-alpha-7, evidence ~/cards/x\.log · evidence: ~/cards/x\.log$' "$FD/plugin-bugs.md" \
+    || fail "the plugin problem '$line' was not noted with its cause part, card and evidence: $(cat "$FD/plugin-bugs.md" 2>&1)"
 }
 
-# Bug (#1352 E1): in the plugin's own repository the guess refusal set reply-mark, and the same [likely] line said
-# again at the turn's next stop passed with no issue named. It is refused at every stop until the guess is left out.
+# Bug (#1357): a line with [likely] and no cause part was refused. It passes, and its note has the tagged text in a
+# "cause not checked:" part before the card, with no [likely] left in the note.
+t_guess() {
+  fixture guess https://github.com/example/alpha
+  line='Plugin problem (for the conveyor-belt repo): control release 1345 leaves card 1345 held in foreman status, it should be started, card c20261118T045400-alpha-7, evidence ~/cards/x.log; the open range seems to still cover it [likely]'
+  out=$(turn u1 "$line"); [ -z "$out" ] || fail "the plugin problem '$line' with [likely] was refused: $out"
+  grep -qE '^- [^ ]+ · card c20261118T045400-alpha-7 · control release 1345 leaves card 1345 held in foreman status, it should be started, cause not checked: the open range seems to still cover it, card c20261118T045400-alpha-7, evidence ~/cards/x\.log · evidence: ~/cards/x\.log$' "$FD/plugin-bugs.md" \
+    || fail "the plugin problem '$line' was not noted with its tagged text in a cause not checked part: $(cat "$FD/plugin-bugs.md" 2>&1)"
+  out=$(turn u2 "$line"); [ -z "$out" ] || fail "the same plugin problem said again was refused: $out"
+  [ "$(grep -c '^- ' "$FD/plugin-bugs.md")" = 1 ] || fail "the same plugin problem said again was noted twice: $(cat "$FD/plugin-bugs.md")"
+}
+
+# Bug (review of #1357): a cause with the words ", card lookups use old data" was cut there, as if they began the card
+# field, and the rest of the guess went to the report as fact. Only a card id or an evidence path ends the cause.
+t_causewords() {
+  fixture causewords https://github.com/example/alpha
+  line='Plugin problem (for the conveyor-belt repo): setup fails, it should pass, cause not checked: the cache is stale, card lookups use old data, evidence the log, card c20261118T045400-alpha-7, evidence ~/cards/x.log'
+  out=$(turn u1 "$line"); [ -z "$out" ] || fail "the plugin problem '$line' was refused: $out"
+  grep -qE '^- [^ ]+ · card c20261118T045400-alpha-7 · setup fails, it should pass, cause not checked: the cache is stale, card lookups use old data, evidence the log, card c20261118T045400-alpha-7, evidence ~/cards/x\.log · evidence: ~/cards/x\.log$' "$FD/plugin-bugs.md" \
+    || fail "the plugin problem '$line' did not keep the words of its cause in the cause part: $(cat "$FD/plugin-bugs.md" 2>&1)"
+  line='Plugin problem (for the conveyor-belt repo): setup fails, it should pass, card lookups use old data [likely], card c20261118T045400-alpha-8, evidence ~/cards/y.log'
+  out=$(turn u2 "$line"); [ -z "$out" ] || fail "the plugin problem '$line' was refused: $out"
+  grep -qE ' · setup fails, it should pass, cause not checked: card lookups use old data, card c20261118T045400-alpha-8, evidence ~/cards/y\.log · evidence: ~/cards/y\.log$' "$FD/plugin-bugs.md" \
+    || fail "the plugin problem '$line': a tagged clause that starts with 'card' was not moved to the cause part: $(cat "$FD/plugin-bugs.md" 2>&1)"
+}
+
+# Bug (review of #1357): a [likely] tag at the end of the line, after the evidence, put the evidence path in the cause
+# part and left the claim outside it. The tag marks the text before the card and evidence fields, so that goes into it.
+t_guessend() {
+  fixture guessend https://github.com/example/alpha
+  out=$(turn u1 "$LINE [likely]"); [ -z "$out" ] || fail "the plugin problem '$LINE [likely]' was refused: $out"
+  grep -qE '^- [^ ]+ · card c20261118T045400-alpha-7 · cause not checked: running cards keep the old engine code, card c20261118T045400-alpha-7, evidence ~/cards/c20261118T045400-alpha-7\.err · evidence: ~/cards/c20261118T045400-alpha-7\.err$' "$FD/plugin-bugs.md" \
+    || fail "the plugin problem '$LINE [likely]' was not noted with its claim in the cause part: $(cat "$FD/plugin-bugs.md" 2>&1)"
+}
+
+# Bug (review of #1357): with empty fields ("card -, evidence -") a [likely] tag at the end took "evidence -" for the
+# claim: the note had "cause not checked: evidence -" and the claim stayed outside it. "-" is a field's empty value.
+t_guessempty() {
+  fixture guessempty https://github.com/example/alpha
+  line='Plugin problem (for the conveyor-belt repo): running cards keep the old engine code, card -, evidence - [likely]'
+  out=$(turn u1 "$line"); [ -z "$out" ] || fail "the plugin problem '$line' was refused: $out"
+  grep -qE '^- [^ ]+ · card - · cause not checked: running cards keep the old engine code, card -, evidence - · evidence: -$' "$FD/plugin-bugs.md" \
+    || fail "the plugin problem '$line' was not noted with its claim in the cause part: $(cat "$FD/plugin-bugs.md" 2>&1)"
+  line='Plugin problem (for the conveyor-belt repo): setup fails, it should pass, cause not checked: the cache is stale, card -, evidence -'
+  out=$(turn u2 "$line"); [ -z "$out" ] || fail "the plugin problem '$line' was refused: $out"
+  grep -qE ' · setup fails, it should pass, cause not checked: the cache is stale, card -, evidence - · evidence: -$' "$FD/plugin-bugs.md" \
+    || fail "the plugin problem '$line' did not keep its cause part before the empty fields: $(cat "$FD/plugin-bugs.md" 2>&1)"
+}
+
+# Bug (#1357): in the plugin's own repository a [likely] clause before "filed as #<n>" passes as a filed line and keeps
+# its issue number at the end of the note, after the cause part.
 t_guesshome() {
   fixture guesshome "git@github.com:${OWN#https://github.com/}.git"
-  out=$(turn u1 "$LINE [likely]")
-  jq -e '.decision == "block"' <<<"$out" >/dev/null || fail "the plugin problem '$LINE [likely]' passed at the first stop: $out"
-  out=$(again "$LINE [likely]")
-  jq -e '.decision == "block" and (.reason | contains("not a cause you did not check"))' <<<"$out" >/dev/null     || fail "the plugin problem '$LINE [likely]' passed at the turn's second stop: $out"
-  out=$(again "$LINE, filed as #449"); [ -z "$out" ] || fail "the plugin problem '$LINE, filed as #449' without the guess was refused: $out"
+  line="$LINE, filed as #449"; line=${line/, card /, the lock seems stale [likely], card }
+  out=$(turn u1 "$line"); [ -z "$out" ] || fail "the filed plugin problem '$line' with [likely] was refused: $out"
+  grep -qE ' · running cards keep the old engine code, cause not checked: the lock seems stale, card c20261118T045400-alpha-7, evidence ~/cards/c20261118T045400-alpha-7\.err, filed as #449 · evidence: ' "$FD/plugin-bugs.md" \
+    || fail "the filed plugin problem '$line' was not noted with its cause part before the card and its issue at the end: $(cat "$FD/plugin-bugs.md" 2>&1)"
 }
 
 # Bug (#1352): the start text asked for "what you saw", so a guess fitted the form. It asks for the command, what it
@@ -204,7 +249,7 @@ form_check() {
   local own=$1
   fixture "form$own" "$([ "$own" = home ] && echo "git@github.com:${OWN#https://github.com/}.git" || echo https://github.com/example/alpha)"
   out=$(start)
-  grep -qF 'Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what you expected>, card <card>, evidence <path>' <<<"$out" \
+  grep -qF 'Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what you expected>[, cause not checked: <what you think the cause is>], card <card>, evidence <path>' <<<"$out" \
     || fail "the start text in the $own project has no form with the command, what it did and what was expected: $out"
 }
 t_formhome() { form_check home; }

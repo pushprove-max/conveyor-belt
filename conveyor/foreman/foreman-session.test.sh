@@ -184,7 +184,7 @@ jq -e '.decision == "block" and (.reason | contains("Plugin problem (for the con
 [ "$(grep -c '^- ' "$FD/plugin-bugs.md")" = 1 ] || fail "a plugin problem said again was noted twice: $(cat "$FD/plugin-bugs.md")"
 # A finding in other words is refused, and told the form that keeps it.
 out=$(turn u12 'Stop hook feedback: Conveyor: alpha: blocked: #7' 'The tests likely failed because Conveyor does not install packages in card worktrees, another plugin problem.')
-jq -e '.decision == "block" and (.reason | contains("Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what you expected>, card <card>, evidence <path>"))' <<<"$out" >/dev/null \
+jq -e '.decision == "block" and (.reason | contains("Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what you expected>[, cause not checked: <what you think the cause is>], card <card>, evidence <path>"))' <<<"$out" >/dev/null \
   || fail "a refused plugin finding was not told the form to use: $out"
 # Only the owner can file a plugin problem, so "not filed yet" on its line is no unfinished work of the Foreman's; a
 # finding that is part of one noted before is noted on its own.
