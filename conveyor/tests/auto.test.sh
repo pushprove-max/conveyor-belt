@@ -133,10 +133,10 @@ autoprofile() { # <on|narrow>
 
 The owner is away and has handed you their open decisions. Pick what is best for the project's long-term health, not the fastest path.
 
-- Run \`$run\` from the main checkout now, and again each time a new open decision is on the Board. It answers each open decision that has a recommended option, that nothing reserves and that the owner's latest ruling on the same question does not answer otherwise, logs it, and lists the rest under \"## Waiting for the owner\" in $log.
+- Run \`$run\` from the main checkout now, and again each time a new open decision is on the Board. It answers each open decision that has a recommended option, that nothing reserves, that the owner's latest ruling on the same question does not answer otherwise and that is not a blocked card whose issue was already retried for the same block reason, logs it, and lists the rest under \"## Waiting for the owner\" in $log.
 - A question a session sends you that is not in the ledger: decide it the same way. Log it first in $log under \"## Decisions\" as \"### HH:MM <what>\", then the bullets **Question**, **Picked**, **Why** (the reasoning and the long-term trade-off) and **Reversible**.
 - How the owner decides: the owner took the recommended option in 1 of their last 2 picker answers. Their recorded picks are in the ruling log $CONVEYOR_RULING_LOG; read the ones on the same subject before you decide what the ledger does not hold.
-- Never decide; list under \"## Waiting for the owner\" instead: anything about $r; any irreversible step; anything against or reopening one of the owner's rulings; a question with no recommended option, or with two good ones.
+- Never decide; list under \"## Waiting for the owner\" instead: anything about $r; any irreversible step; anything against or reopening one of the owner's rulings; a blocked card whose issue was already retried for the same block reason; a question with no recommended option, or with two good ones.
 - Do not ask the owner: the picker is refused while this is on. Keep \"## Summary\" in the log current.
 - When the owner next types to you, give a short account of what you decided and point at the log. This stays on until /conveyor-belt:auto off."
   else
@@ -238,4 +238,45 @@ t_autohostway() {
   log=$(jq -r .log "$ST/auto/mode.json")
   [ "$(answer d-docs)" = 'yes, merge it' ] && grep -qF -- '- **Why:** it is the recommended option, and the owner took the recommended option in 1 of their last 1 picker answers.' "$log" \
     || fail "decide with only the rulings sent from the owner's machine did not log their picks for d-docs: $(answer d-docs) $(cat "$log")"
+}
+
+# A blocked-card decision as the engine puts it (lib/needsask.sh): <card> <issue> <reason>, the reason cut at 300 characters.
+autoblocked() {
+  jq -cn --arg c "$1" --arg n "$2" --arg r "${3:0:300}" '{id: "blocked-\($c)", askedAt: "2026-11-15T10:0\($c | length):00Z", source: "t", answer: null, answeredAt: null,
+    question: "Card \($c) (#\($n)) is blocked with its work kept: \($r). What should the engine do with it?",
+    proposedDefault: "Retry keeping the work", options: ["Retry keeping the work", "Fresh retry", "Leave it held"]}' >> "$LEDGER"
+}
+
+# Bug: auto answered "Retry keeping the work" for every new blocked-card decision of one issue (the card id is new each
+# time), so an issue whose build met the same check each time was retried 12 times. It retries the first block of an
+# issue and reason and lists the second (the card id and the timing in the reason differ) for the owner.
+t_autoblocked() {
+  local out log pad; setup '[]'; LEDGER=$R/.claude/metrics/decisions.jsonl; : > "$LEDGER"
+  # Long reasons with front numbers of different lengths: the engine cuts a reason at 300 characters, so once the digits are
+  # replaced the two texts end at different places (a key of the whole text would tell the repeat from a new reason).
+  pad=$(printf 'a%.0s' {1..270})
+  autoblocked c1 7 "build: the split does not fit: the files take 70.1 CPU s summed, $pad 70.1"
+  autoblocked c22 7 "build: the split does not fit: the files take 72.444 CPU s summed, $pad 72.444"
+  out=$(cd "$R" && loop auto on && loop auto decide) || fail "auto on or decide failed: $out"
+  log=$(jq -r .log "$ST/auto/mode.json")
+  [ "$(answer blocked-c1)" = 'Retry keeping the work' ] && [ "$(answer blocked-c22)" = open ] \
+    && awk '/^## Waiting for the owner$/ { on = 1; next } on' "$log" | grep -q '^- blocked-c22: .*already retried' \
+    || fail "the second block of one issue and reason: $(answer blocked-c1) $(answer blocked-c22) $(cat "$log")"
+}
+
+# Bug: the check on a repeated block took any later block of the issue (or of the same reason on another issue) as a
+# repeat. Two different reasons of one issue are each retried once, and so is the same reason on another issue; the
+# same reason again, in a later pass, waits for the owner.
+t_autoblockeddiff() {
+  local out log; setup '[]'; LEDGER=$R/.claude/metrics/decisions.jsonl; : > "$LEDGER"
+  autoblocked c1 7 'build: the split does not fit'
+  autoblocked c22 7 'review: the fix did not hold'
+  autoblocked c333 8 'build: the split does not fit'
+  out=$(cd "$R" && loop auto on && loop auto decide) || fail "auto on or decide failed: $out"
+  [ "$(answer blocked-c1)" = 'Retry keeping the work' ] && [ "$(answer blocked-c22)" = 'Retry keeping the work' ] && [ "$(answer blocked-c333)" = 'Retry keeping the work' ] \
+    || fail "blocks of different reasons or issues: $(answer blocked-c1) $(answer blocked-c22) $(answer blocked-c333)"
+  autoblocked c4444 7 'build: the split does not fit'
+  out=$(cd "$R" && loop auto decide) || fail "the second decide failed: $out"
+  log=$(jq -r .log "$ST/auto/mode.json")
+  [ "$(answer blocked-c4444)" = open ] && grep -q '^- blocked-c4444: ' "$log" || fail "the same reason again, in a later pass: $(answer blocked-c4444) $(cat "$log")"
 }

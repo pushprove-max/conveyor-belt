@@ -26,6 +26,8 @@
 #   one gets its log entry (question, pick, why, reversible), written before decision.sh answers it with its
 #   recommended option; each one it leaves gets a line under "## Waiting for the owner", once. The Foreman runs it, and
 #   the engine's loop runs it on a new open decision; one pass at a time (decide.lock), so each is decided once.
+#   A blocked-card decision whose issue was already retried (answered with its recommended option) for the same block
+#   reason is left for the owner, not retried again.
 #   The Foreman's pass first sends the owner's rulings to the hosts (hostrulings), so the engine there reads the new ones.
 # - rulings: the owner's picker answers from the ruling log of the Foreman's machine (hostrulings there), read on stdin
 #   and kept as <state folder>/auto/rulings.jsonl, in place of the last ones sent: decide reads them beside this
@@ -158,10 +160,10 @@ case $2 in
 
 The owner is away and has handed you their open decisions. Pick what is best for the project's long-term health, not the fastest path.
 
-- Run \`$run\` from the main checkout now, and again each time a new open decision is on the Board. It answers each open decision that has a recommended option, that nothing reserves and that the owner's latest ruling on the same question does not answer otherwise, logs it, and lists the rest under "## Waiting for the owner" in $log.
+- Run \`$run\` from the main checkout now, and again each time a new open decision is on the Board. It answers each open decision that has a recommended option, that nothing reserves, that the owner's latest ruling on the same question does not answer otherwise and that is not a blocked card whose issue was already retried for the same block reason, logs it, and lists the rest under "## Waiting for the owner" in $log.
 - A question a session sends you that is not in the ledger: decide it the same way. Log it first in $log under "## Decisions" as "### HH:MM <what>", then the bullets **Question**, **Picked**, **Why** (the reasoning and the long-term trade-off) and **Reversible**.
 - How the owner decides: $(way). Their recorded picks are in the ruling log ${RL:-(none named)}; read the ones on the same subject before you decide what the ledger does not hold.$p
-- Never decide; list under "## Waiting for the owner" instead: anything about $r; any irreversible step; anything against or reopening one of the owner's rulings; a question with no recommended option, or with two good ones.
+- Never decide; list under "## Waiting for the owner" instead: anything about $r; any irreversible step; anything against or reopening one of the owner's rulings; a blocked card whose issue was already retried for the same block reason; a question with no recommended option, or with two good ones.
 - Do not ask the owner: the picker is refused while this is on. Keep "## Summary" in the log current.
 - When the owner next types to you, give a short account of what you decided and point at the log. This stays on until /conveyor-belt:auto off.
 EOF
@@ -202,8 +204,18 @@ EOF
     [ -f "$log" ] || die "the log $log is gone"
     packget auto.reserved RES || exit 1
     L=${CONVEYOR_LEDGER:-$MAIN/.claude/metrics/decisions.jsonl}
-    open='[]'
-    if [ -e "$L" ]; then open=$(CONVEYOR_MAIN=$MAIN bash "$DECISION" list | jq -c '[.[] | select(.answeredAt == null)]') || die "the ledger $L could not be read"; fi
+    open='[]' seen=
+    # A blocked-card decision's key: its issue and the first 200 characters of its block reason, digits as N (the card id and the
+    # timings in a reason differ on each block of one issue, and the engine cut the reason at 300 characters before the digits
+    # changed its length, so its end differs). seen: the keys of the blocked-card decisions already answered with the recommended
+    # retry (the ledger's answered rows, then each one this pass answers).
+    bkey='def bkey: (.question // "") | (capture("\\(#(?<n>[0-9]+)\\) is blocked with its work kept: (?<r>.*)\\. What should the engine do with it\\?\\z")? // empty)
+      | "\(.n) \(.r | gsub("[0-9]+(\\.[0-9]+)?"; "N") | .[:200])";'
+    if [ -e "$L" ]; then
+      all=$(CONVEYOR_MAIN=$MAIN bash "$DECISION" list) || die "the ledger $L could not be read"
+      open=$(jq -c '[.[] | select(.answeredAt == null)]' <<<"$all") || die "the ledger $L could not be read"
+      seen=$(jq -r "$bkey"'.[] | select(.answeredAt != null and (.id | startswith("blocked-")) and .answer == .proposedDefault) | bkey' <<<"$all") || die "the ledger $L could not be read"
+    fi
     w=$(way) d=0 k=0
     # put <text>: the text added to the log just before its "## Waiting for the owner" heading (the end of "## Decisions").
     put() { P=$1 awk '/^## Waiting for the owner$/ && !done { printf "%s\n\n", ENVIRON["P"]; done = 1 } { print }' "$log" > "$log.new" && mv "$log.new" "$log" || die "the log $log could not be written"; }
@@ -217,6 +229,10 @@ EOF
       t=$(jq -r --argjson r "$RES" '([.question, .proposedDefault] + (.options // []) | join("\n") | ascii_downcase) as $t
         | first($r[] | select(. as $w | $t | contains($w | ascii_downcase))) // ""' <<<"$row")
       if [ -n "$t" ]; then hold "$id" "$q" "reserved: $t"; continue; fi
+      # A card blocked again for a reason its issue was already retried for goes to the owner (rules.md "Cards": a repeated
+      # block is the owner's), not to a third try that meets the same check.
+      bk=$(jq -r "$bkey"'bkey' <<<"$row")
+      if [ -n "$bk" ] && grep -qxF -- "$bk" <<<"$seen"; then hold "$id" "$q" "this issue was already retried for the same block reason"; continue; fi
       # A picker ask with no "(Recommended)" option is in the ledger with the default "none" (ask-records-decision.sh).
       [ -n "${def//[[:space:]]/}" ] && [ "$def" != none ] || { hold "$id" "$q" "no recommended option"; continue; }
       # The owner's latest ruling on the same question: its id and whether it gave the recommended option ("true" or
@@ -239,7 +255,7 @@ EOF
       fi
       put "$(printf '### %s %s: %s\n- **Question:** %s%s\n- **Picked:** %s\n- **Why:** %s.\n- **Reversible:** yes: the owner replaces the answer on the Board, or with `decision.sh answer %s <answer> --correct`.\n' \
         "$(date +%H:%M)" "$id" "${q:0:100}" "$q" "${opts:+ (options: $opts)}" "$def" "$why" "$id")"
-      if e=$(CONVEYOR_MAIN=$MAIN bash "$DECISION" answer "$id" "$def" --asked-at "$asked" 2>&1 >/dev/null); then d=$((d + 1))
+      if e=$(CONVEYOR_MAIN=$MAIN bash "$DECISION" answer "$id" "$def" --asked-at "$asked" 2>&1 >/dev/null); then d=$((d + 1)); [ -z "$bk" ] || seen+=$'\n'$bk
       else put "- **Recorded:** no, so it still waits for the owner: ${e//$'\n'/ }"; hold "$id" "$q" "the answer could not be recorded"; fi
     done < <(jq -c '.[]' <<<"$open")
     # The summary, made again from the log: its decisions and the lines waiting for the owner.
