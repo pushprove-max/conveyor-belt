@@ -168,7 +168,7 @@ line the reviewer itself starts with `MINOR:` is a finding. A declined finding c
 follow-up, and a review with no accepted finding is a GO. Each declined finding goes to the declined list, one line
 in `declined.jsonl` of the state folder: its time, card, issue, the finding, who declined it (`judge`) and why. A line
 the reviewer itself starts with `DECLINED:` is a finding, as any other line is. The review's record line holds each finding, the judge's
-reason and, for an accepted one, its "Cost to every card" (a finding accepted because the judge's answer held no line for it that could be read has a reason that says so and no cost). `conveyor.sh control judge always security data` names
+reason and, for an accepted one, its "Cost to every card" (a finding accepted because the judge's answer held no line for it that could be read, or two lines for it, has the reason "the judge gave no line for this finding that could be read" and no cost). `conveyor.sh control judge always security data` names
 the finding kinds that are always accepted, whatever the judge says: the reviewer tags a finding of one with its
 kind, in square brackets right after its level. Each kind is one word; the command names them all, and with no kind
 it clears them.
