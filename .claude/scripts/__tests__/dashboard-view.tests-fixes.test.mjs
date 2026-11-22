@@ -131,6 +131,32 @@ test('Tests fixes: Rewrite as a direct check writes a | inside a DIRECT field as
   assert.equal(line.split('|').length, 3);
 });
 
+// Bug it guards (#1384, R7): a judge report with more DIRECT lines than the body held was cut to '- and N more', and
+// the card's check, which reads only the DIRECT lines in the issue, never asked or checked the parts cut off. The
+// draft keeps every DIRECT line (the verdict line goes first); one that cannot hold them all is not made. Bug it
+// guards too: dropping the runs line made the card's check hold the file to its old median, not its recent runs
+// (recentcpu() and slowestrun(), lib/speedproof.sh read the "Last runs, newest first" line).
+const parts = (n) => Array.from({ length: n }, (_, i) => ({ protects: `the part ${i} of the install holds its files`, check: `compare list ${i} with the manifest`, cases: [`relpart${i}`] }));
+const indirect = (n) => show({ acts: [rec({ state: 'done', end: iso(Date.now()), verdict: 'indirect', direct: parts(n), text: 'VERDICT: indirect\n' })] });
+test('Tests fixes: Rewrite as a direct check past the body limit keeps every DIRECT line and the runs line, dropping the verdict line', () => {
+  // 18 DIRECT lines: past the limit with the runs and verdict lines, inside it with the runs line alone.
+  const body = preview(indirect(18), MERGE, 'rewrite-direct')[1];
+  assert.ok(body.length <= 2500, `the body fits the limit: ${body.length}`);
+  assert.equal(body.split('\n').filter((l) => l.startsWith('- DIRECT: ')).length, 18, `every DIRECT line is in the body:\n${body}`);
+  assert.ok(!/- and \d+ more/.test(body), `no DIRECT line is cut:\n${body}`);
+  assert.match(body, /\n- Last runs, newest first: \d/, `the runs line, which the card's CPU limit comes from, stays:\n${body}`);
+  assert.ok(!body.includes("The judge's verdict ("), `the verdict line went to make room:\n${body}`);
+});
+test('Tests fixes: Rewrite as a direct check whose DIRECT lines alone pass the body limit makes no draft and says why', async () => {
+  const w = indirect(40);
+  act(open(w, MERGE), 'rewrite-direct').click();
+  await settle();
+  const more = opened(w, MERGE);
+  assert.equal(act(more, 'issue-body'), null, 'no preview opens');
+  assert.match(more.textContent, /Not drafted: the judge's 40 proxy parts \(DIRECT lines\) do not fit in one issue of 2500 characters/);
+  assert.deepEqual(w.posts, [], 'nothing is sent');
+});
+
 // Bug it guards (#768): the owner could not ask for a test file to be split. More has Split it, whose preview is titled
 // "Split the test file <file>" and says how to split it; File posts one test-issue with that title and the body as the
 // owner edited it. Bug it guards too: a runner (wholeOnly, here X) is the sum of other test files, so splitting it

@@ -44,18 +44,23 @@
   const writeOf = (r) => (num(r.cacheWrite) !== null ? r.cacheWrite : num(r.input) !== null ? r.input * 1.25 : null);
   // Whether a value saved here ({repo, for, at, over}) still shows: for its project, until a snapshot begun at or after
   // the host's answer (at); with no answer time or no snapshot time, until the next snapshot (now is not for).
-  const savedShown = (s, now) => !!s && s.repo === S.d.repo && (s.at !== null && S.read !== null ? S.read < s.at : s.for === now);
+  // The project's is the one of view d read at read: the one on screen, or one a change was sent from (run()), whose
+  // answer can come after another project is picked.
+  const savedShown = (s, now, d = S.d, read = S.read) => !!s && s.repo === d.repo && (s.at !== null && read !== null ? read < s.at : s.for === now);
+  // The value saved here for the project of view d (S.priceSaved, S.standingSaved, S.pickSaved keep one a project, by
+  // repo), while it shows.
+  const savedFor = (m, d, read, now) => { const s = m.get(d.repo); return savedShown(s, now, d, read) ? s : null; };
   // The pack's standing kinds as shown: as a change saved here left them, until a snapshot read after it comes; null
-  // from a snapshot without them.
-  const standingShown = () => (savedShown(S.standingSaved, S.d.standing) ? S.standingSaved.over
-    : Array.isArray(S.d.standing) ? S.d.standing : null);
+  // from a snapshot without them. Each of these three is for the project on screen, or the one of view d read at read.
+  const standingShown = (d = S.d, read = S.read) => { const s = savedFor(S.standingSaved, d, read, d.standing); return s ? s.over
+    : Array.isArray(d.standing) ? d.standing : null; };
   // The pack's pick lists of Pick settings (pick: {<seat>: {<model>: {min, max}}}) as shown: as a change saved here
   // left them, until a snapshot read after it comes; null from a snapshot without them.
-  const pickShown = () => (savedShown(S.pickSaved, S.d.packPick) ? S.pickSaved.over
-    : S.d.packPick && typeof S.d.packPick === 'object' && S.d.packPick.lists && typeof S.d.packPick.lists === 'object' ? S.d.packPick.lists : null);
+  const pickShown = (d = S.d, read = S.read) => { const s = savedFor(S.pickSaved, d, read, d.packPick); return s ? s.over
+    : d.packPick && typeof d.packPick === 'object' && d.packPick.lists && typeof d.packPick.lists === 'object' ? d.packPick.lists : null; };
   // The pack's prices as shown: as the changes saved here left them, until a snapshot read after them comes.
-  const pricesShown = () => (savedShown(S.priceSaved, S.d.prices) ? S.priceSaved.over
-    : S.d.prices && S.d.prices.overrides && typeof S.d.prices.overrides === 'object' ? S.d.prices.overrides : {});
+  const pricesShown = (d = S.d, read = S.read) => { const s = savedFor(S.priceSaved, d, read, d.prices); return s ? s.over
+    : d.prices && d.prices.overrides && typeof d.prices.overrides === 'object' ? d.prices.overrides : {}; };
   // The pack's prices after `prices <a>`, as the engine writes them (conveyor/commands/prices.sh).
   function applied(o, a) {
     const r = JSON.parse(JSON.stringify(o)), m = a[1], e = r[m] || {};

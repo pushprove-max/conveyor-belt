@@ -4,7 +4,7 @@
 // previews an issue that asks a card to make the file succeed reliably. Shared setup: dashboard-view.helpers.mjs (TA.snap():
 // the three files of TESTS with the Tests model; fail(): one failed test step).
 import assert from 'node:assert/strict';
-import { boot, deliver, settle, act, cases, iso, P, TA, fail } from './dashboard-view.helpers.mjs';
+import { boot, deliver, next, settle, act, cases, iso, P, TA, fail, T0 } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const { MERGE, X, rec, snap, tp, rowOf, opened, open } = TA;
@@ -93,6 +93,23 @@ test('Tests failures: Fix failures previews the issue with cases, kinds, output,
   const posts = w.posts.splice(0);
   assert.deepEqual(posts.map((p) => [p.body.action, p.body.args[0], p.body.args[1], p.body.args[2] === body.trim()]), [['test-issue', MERGE, title, true]]);
   assert.match(opened(w, MERGE).textContent, /Fix failures: Filed: https:\/\/github\.com\/example\/sample\/issues\/700/);
+});
+
+// Bug it guards (#1384, R8): the Fix failures preview was made once, when opened, so after a later "Test history starts
+// at" was saved it still showed, and filed, the failures before the new start. A snapshot under another start makes the
+// draft again from the failures it counts (the engine leaves out the older ones); with none left to fix it closes.
+test('Tests failures: an open Fix failures preview is made again when the test history start changes', () => {
+  const w = show();
+  act(open(w, MERGE), 'fix-failures').click();
+  assert.match(act(opened(w, MERGE), 'issue-body').value, /card #435: flaky/);
+  const later = (start, failures) => { const d = snap(); Object.assign(d.panels.tests.data.tests.settings, { historyStart: start }); d.panels.tests.data.tests.files.find((x) => x.file === MERGE).failures = failures; return d; };
+  // A start 2 hours back: #435 (3 hours back) is before it, #509 (1 hour back) after.
+  next(w, later(iso(T0 - 2 * 3600000), [fail(509, 1, 'main', ['mergeclean'], TAIL)]));
+  const body = act(opened(w, MERGE), 'issue-body').value;
+  assert.doesNotMatch(body, /#435/, `the failure before the new start is not in the preview:\n${body}`);
+  assert.match(body, /card #509: failed on main too\. Failing cases: mergeclean\./);
+  next(w, later(iso(T0), []));
+  assert.equal(act(opened(w, MERGE), 'issue-body'), null, 'with no failure left to fix the preview closes');
 });
 
 // Bug it guards (#188): a file with many failures gave a Fix failures body over the 2500 characters the server takes,

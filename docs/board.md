@@ -889,7 +889,8 @@ names as dropped. With that verdict,
 **Rewrite as a direct check** is the step that the Board suggests. A Whole suite only file does not get it, because
 the check of the card runs the file alone: make it run alone first. The button opens the issue preview, with the title
 "Rewrite the test file <file> as direct checks" and the DIRECT lines in its text. A `|` inside a field shows as
-`/`. You can edit both before you file it. Conveyor checks the card as an Optimize card. The change must keep the
+`/`. You can edit both before you file it. The text keeps every DIRECT line. When they do not all fit in one issue,
+the button opens no preview, and the line under it says why. Conveyor checks the card as an Optimize card. The change must keep the
 file and each case that a DIRECT line names and the file had before the change, and add or remove no other test
 file. The check skips a name that is not a case of the file. When it drops one of those cases, the card is blocked, and the reason
 names the case. The file must also pass alone with the change, in fewer CPU seconds than its last runs.

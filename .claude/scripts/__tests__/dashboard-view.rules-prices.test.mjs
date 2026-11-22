@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { boot, deliver, next, settle, full, act, panel, pricesP, cases, T0 } from './dashboard-view.helpers.mjs';
+import { boot, deliver, next, settle, full, act, panel, pricesP, cases, T0, clone, pickProject } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const type = (el, v) => { el.value = v; el.dispatchEvent(new el.ownerDocument.defaultView.Event('input')); };
@@ -143,6 +143,33 @@ test('Rules: a price saved stays through frames read before the save, and a fram
   assert.equal(cells(rowOf(w, 'claude-opus-5-5'))[4], 'built in', 'a frame of the snapshot read before the save keeps the saved price');
   next(w, frame(T0 + 1000));
   assert.deepEqual(cells(rowOf(w, 'claude-opus-5-5')).slice(0, 3), ['$1', '$5', '$0.1'], 'a snapshot read after the save shows what it holds');
+});
+
+// Issue 1384 (R6): the saved price was kept in one slot, set only when its answer came while its project was on screen.
+// Bug: a price saved in sample, answered after widgetshop was picked, was dropped, and sample picked again with its
+// old snapshot showed the old price. The saved price is kept for its project whichever project is on screen.
+test('Rules: a price saved in one project, answered after another is picked, shows when the first is picked again', async () => {
+  const frame = (readAt) => {
+    const d = full(), r = d.panels.rules.data, at = new Date(readAt).toISOString();
+    d.panels.machine.data.repos = ['sample', 'widgetshop'];
+    Object.assign(r, { prices: clone(PRICES), readAt: at, repos: ['sample', 'widgetshop'] });
+    r.others = { widgetshop: { ...clone(r), repo: 'widgetshop', queue: [], readAt: at } };
+    return d;
+  };
+  const w = boot({ tab: 'rules' });
+  deliver(w, frame(T0 - 20000));
+  pickProject(w, 'sample');
+  let answer;
+  w.reply = new Promise((r) => { answer = r; });
+  act(rowOf(w, 'claude-opus-5-5'), 'price-reset').click();
+  await settle();
+  pickProject(w, 'widgetshop');
+  answer({ ok: true, status: 200, headers: { get: (k) => (k === 'X-Answered-At' ? String(T0 / 1000) : null) }, text: () => Promise.resolve('conveyor: prices: cleared') });
+  await settle(); await settle();
+  assert.equal(cells(rowOf(w, 'claude-opus-5-5'))[4], 'Saved, from the pack', 'widgetshop does not show sample\'s change');
+  next(w, frame(T0 - 10000));
+  pickProject(w, 'sample');
+  assert.equal(cells(rowOf(w, 'claude-opus-5-5'))[4], 'built in', 'sample, from a snapshot read before the answer, shows the saved price');
 });
 
 // Bug: a fast mode's price could not be changed or reset: Edit and Reset acted only on the model's own ID. Edit :fast

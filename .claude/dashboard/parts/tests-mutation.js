@@ -8,7 +8,7 @@
   // What this part uses of panels/tests.js, set when tests.js asks for the part (DASH_APP.part, at the end).
   let S, num, list, obj, one, pct, dk, say, button, ACTS, FILES_MAX, RUNNER_WHY, ENDED, ID, BODY_MAX, NO_SEAT,
     WAIT, SENDING, actions, mmss, limitOf, used, tmodel, hollowOf, hollowSaid, verdictOf, causeSaid, failsOf,
-    fixable, kindSaid, casesSaid, runBy, draw;
+    fixable, kindSaid, casesSaid, runBy, draw, inForce, tests;
 
   // ---- mutation checks (#79): the snapshot's mutation (a file's newest check) and mutationPlace (its place in the asked list) ----
   const MUT_WHY = 'A check starts only when no card needs a test slot.';
@@ -106,15 +106,31 @@
   // (Optimize, Fix failures, Split it and the other fix actions) starts that card at once, with no GitHub issue: its
   // draft d is sent as it is (test-issue: `conveyor.sh testissue`, which starts the card when the rule is off), in place
   // of the issue preview. With it Off, the preview opens (keep: the field to focus), to be edited and filed.
+  // The draft is make(f); the preview keeps make and the test history's start it was made under (history), so a
+  // snapshot with another start makes it again (redraft()).
   const noIssue = () => { const c = obj(S.d && S.d.control); return !!(c && obj(c.rules) && c.rules.testissues === false); };
-  function askIssue(d, keep) {
-    const k = dk(d.file), note = (state, text = '') => S.notes.set(k, { what: d.what || 'Optimize', state, text });
+  function askIssue(make, f, keep) {
+    const d = make(f), k = dk(d.file), note = (state, text = '') => S.notes.set(k, { what: d.what || 'Optimize', state, text });
     S.notes.delete(k);
-    if (!noIssue()) { S.ask = d; S.keep = keep || { act: 'issue-title', file: d.file }; draw(); return; }
+    // A draft that cannot be made (refused: why, as draftDirect() gives it) opens no preview and sends nothing.
+    if (d.refused) { S.ask = null; note('refused', d.refused); draw(); say(d.refused); return; }
+    if (!noIssue()) { S.ask = Object.assign(d, { make, history: inForce('historyStart') }); S.keep = keep || { act: 'issue-title', file: d.file }; draw(); return; }
     S.ask = null;
     if (S.busy) { note('refused', WAIT); draw(); say(WAIT); return; }
     note('sending');
     send('test-issue', [d.file, d.title, d.body], (t) => t, (t) => note('done', t), (no) => note('refused', no));
+  }
+  // An open issue preview made under another "Test history starts at" (#1384, R8) is made again from this snapshot,
+  // whose failures, runs and waits count only from the new start; one its file no longer has a draft for (gone,
+  // refused, or Fix failures with no failure left) closes. Either way the line says so: the edits typed are dropped.
+  function redraft() {
+    const a = S.ask;
+    if (!a || a.kind !== 'issue' || !a.make || a.history === inForce('historyStart')) return;
+    const f = list(tests() && tests().files).find((x) => obj(x) && x.file === a.file);
+    const d = f && !(a.what === 'Fix failures' && !fixable(f).length) ? a.make(f) : null;
+    S.ask = d && !d.refused ? Object.assign(d, { make: a.make, history: inForce('historyStart') }) : null;
+    say(S.ask ? `Test history starts at changed: the ${a.what || 'Optimize'} preview of ${a.file} is made again from the runs that count now.`
+      : `Test history starts at changed: the ${a.what || 'Optimize'} preview of ${a.file} is closed, as nothing it named counts now.`);
   }
   // The text of an action as seen here, with the snapshot's text added: a whole text replaces it; the end of a long
   // one (textCut) is joined to it where the two meet, so the text seen before stays.
@@ -273,7 +289,7 @@
       // The preview is on the Overview tab: it opens there, scrolled to, with the cursor in its body (#130).
       const fix = a.verdict === 'stabilise';
       const b = button('Optimize with this verdict', 'btn-quiet tests-act', 'optimize-verdict', `${fix ? 'Fix failures' : 'Optimize'} ${a.file}: preview an issue with this verdict`, () => {
-        S.tabs.set(dk(f.file), 'overview'); askIssue(fix ? draftFix(f, a) : draftIssue(f, a), { act: 'issue-body', file: f.file, scroll: true });
+        S.tabs.set(dk(f.file), 'overview'); askIssue((x) => (fix ? draftFix(x, a) : draftIssue(x, a)), f, { act: 'issue-body', file: f.file, scroll: true });
       });
       // A runner's time is its files' time, so no Optimize; its failures are its own, so Fix failures holds.
       if (f.wholeOnly === true && !fix) { b.disabled = true; b.title = RUNNER_WHY; }
@@ -359,17 +375,20 @@
   // ---- the other fix issues (#189): Fix hollow cases, Fix the waiting, Make it run and Delete it ----
   // Each draft's title is the one the engine knows its card by (HOLLOWFIX, WAITFIX, MAKERUN and DELFILE,
   // lib/speedproof.sh), and its Done-when is how the card's check proves it fixed. A list is cut, as in draftFix(), so the
-  // body with its Done-when fits BODY_MAX, with a line that counts the rest; each line is printable.
+  // body with its Done-when fits BODY_MAX, with a line that counts the rest; each line is printable. A list marked
+  // whole (its fourth field true) is never cut: with it the body over BODY_MAX, there is no draft (null).
   const printable = (l) => l.replace(/\p{C}/gu, ' ').trimEnd();
   function drafted(what, title, file, head, lists, done) {
     const lines = head.map(printable);
-    lists.forEach(([top, items, said]) => {
+    lists.forEach(([top, items, said, whole]) => {
       if (!items.length) { if (top) lines.push('', top); return; }
       lines.push('', top);
+      if (whole) { lines.push(...items.map((x) => printable(said(x)))); return; }
       const at = items.findIndex((x) => { const l = printable(said(x)); if (lines.concat(l, '', done).join('\n').length + 40 > BODY_MAX) return true; lines.push(l); return false; });
       if (at >= 0) lines.push(`- and ${items.length - at} more`);
     });
-    return { kind: 'issue', what, repo: S.d.repo, file, title, body: lines.concat('', 'Done when:', done).join('\n'), verdict: null };
+    const body = lines.concat('', 'Done when:', done).join('\n');
+    return body.length > BODY_MAX && lists.some((l) => l[3]) ? null : { kind: 'issue', what, repo: S.d.repo, file, title, body, verdict: null };
   }
   // Its waits (#189): the WAIT lines its newest judge named (the snapshot's waits), [{case, kind, at, reason}].
   const waitsOf = (f) => list(f.waits).filter((x) => obj(x) && typeof x.case === 'string' && typeof x.kind === 'string');
@@ -416,15 +435,22 @@
   // A | inside a field is written as / (#827): the card's check splits the line at |, so it keeps three fields.
   const directField = (s) => s.replace(/\|/g, '/');
   const directSaid = (x) => [x.protects, x.check, x.cases.filter((c) => typeof c === 'string').join(', ')].map(directField).join(' | ');
+  // Every DIRECT line is in the body (#1384): the card's check asks and checks only the parts the issue names. When
+  // they do not fit, the verdict line goes first; the runs line stays, as the card's check takes its CPU limit from it
+  // (recentcpu() and slowestrun(), lib/speedproof.sh). When they still do not fit, there is no draft, and the reason
+  // (refused) says so.
   function draftDirect(f) {
-    const v = verdictOf(f.file), runs = list(f.runs).filter(obj);
-    return drafted('Rewrite as a direct check', `Rewrite the test file ${f.file} as direct checks`, f.file,
+    const v = verdictOf(f.file), runs = list(f.runs).filter(obj), parts = directOf(f.file), what = 'Rewrite as a direct check';
+    const last = ['', `- Last runs, newest first: ${runs.map((r) => `${one(r.cpu)} CPU s (${runBy(r)})`).join(', ') || 'none'}`];
+    const facts = [...last, ...(v ? ['', `The judge's verdict (${v.end || v.start}, ${v.cli} · ${v.model} · ${v.effort}): ${v.verdict}.`] : [])];
+    const draft = (more) => drafted(what, `Rewrite the test file ${f.file} as direct checks`, f.file,
       ['This test file checks what it protects through a proxy: it runs other test files or the suite runner, runs the real loop, or waits on a real process with a poll. Rewrite each proxy part below as the direct check named for it, and keep each case named there passing.',
-        '', `- Last runs, newest first: ${runs.map((r) => `${one(r.cpu)} CPU s (${runBy(r)})`).join(', ') || 'none'}`,
-        ...(v ? ['', `The judge's verdict (${v.end || v.start}, ${v.cli} · ${v.model} · ${v.effort}): ${v.verdict}.`] : [])],
-      [['Its proxy parts (what it protects | the direct check | the cases that must keep passing):', directOf(f.file), (x) => `- DIRECT: ${directSaid(x)}`]],
+        ...more],
+      [['Its proxy parts (what it protects | the direct check | the cases that must keep passing):', parts, (x) => `- DIRECT: ${directSaid(x)}`, true]],
       ['- The file keeps each case that a DIRECT line above names, and adds or removes no other test file.',
         '- Run alone with the change on a test slot, the file succeeds and costs less CPU time than its recent runs.']);
+    return draft(facts) || draft(last) || { what, file: f.file,
+      refused: `Not drafted: the judge's ${parts.length} proxy parts (DIRECT lines) do not fit in one issue of ${BODY_MAX} characters. Ask the judge again, or file the rewrite by hand with every DIRECT line.` };
   }
   // Split it (#768): the cases of the file in two or more test files, and the judge's reason when its newest verdict
   // is split.
@@ -445,10 +471,10 @@
   window.DASH_APP.part('tests-mutation', function (shared) {
     ({ S, num, list, obj, one, pct, dk, say, button, ACTS, FILES_MAX, RUNNER_WHY, ENDED, ID, BODY_MAX, NO_SEAT,
       WAIT, SENDING, actions, mmss, limitOf, used, tmodel, hollowOf, hollowSaid, verdictOf, causeSaid, failsOf,
-      fixable, kindSaid, casesSaid, runBy, draw } = shared);
+      fixable, kindSaid, casesSaid, runBy, draw, inForce, tests } = shared);
     return { MUT_WHY, mutDone, survivors, trimmed, mutState, mutCell, mutAsk, progress, mutNow, actBtn, send, merge,
       copy, actArgs, start, stop, verdictChip, result, running, queued, live, queuedSaid, actNow, md, reasonOf, box,
       rowAction, draftIssue, draftFix, drafted, caseHit, shows, neverWhy, draftHollow, draftWaits, draftRun,
-      draftDirect, draftSplit, SPLIT_RUNNER_WHY, draftDelete, noIssue, askIssue };
+      draftDirect, draftSplit, SPLIT_RUNNER_WHY, draftDelete, noIssue, askIssue, redraft };
   });
 })();

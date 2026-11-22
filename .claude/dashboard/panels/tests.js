@@ -560,7 +560,7 @@
     else el.append(h('span', null, n.text));
     return el;
   }
-  const askSplit = (f) => askIssue(draftSplit(f));
+  const askSplit = (f) => askIssue(draftSplit, f);
   // What an action that makes a card does on a click (askIssue()): preview its issue, or, with the rule Tests page
   // issues off, start its card with no issue.
   const asks = () => (noIssue() ? 'start a card with no GitHub issue about' : 'preview an issue about');
@@ -590,18 +590,18 @@
     const again = optsOf(f).some((o) => o.state === 'landed');
     const opt = btn('optimize', again ? 'Optimize again' : 'Optimize', 'optimize', `Optimize: ${asks()} ${file}`, () => {
       if (f.wholeOnly === true) { S.notes.set(dk(file), { what: 'Optimize', state: 'refused', text: RUNNER_WHY }); draw(); return; }
-      askIssue(draftIssue(f));
+      askIssue(draftIssue, f);
     });
     if (f.wholeOnly === true) opt.title = RUNNER_WHY;
     // Fix failures (#188), on a file with failures no card's change caused: the same preview as Optimize, of a Fix
     // failures issue (draftFix()).
-    const fix = fixable(f).length ? btn('fix', 'Fix failures', 'fix-failures', `Fix failures: ${asks()} ${file}`, () => askIssue(draftFix(f))) : null;
+    const fix = fixable(f).length ? btn('fix', 'Fix failures', 'fix-failures', `Fix failures: ${asks()} ${file}`, () => askIssue(draftFix, f)) : null;
     // The other fix issues (#189), each on a file with its status: the same preview, of its own draft.
     const has = (k) => marks(f).some((m) => m[0] === k);
     const fixes = [[has('hollow'), 'Fix hollow cases', 'fix-hollow', draftHollow], [has('waits'), 'Fix the waiting', 'fix-waits', draftWaits],
       [has('never'), 'Make it run', 'make-run', draftRun], [has('never'), 'Delete it', 'delete-file', draftDelete], [f.wholeOnly === true, 'Make it run alone', 'make-alone', draftAlone],
       [next === 'rewrite-direct', 'Rewrite as a direct check', 'rewrite-direct', draftDirect], [next === 'split', 'Split it', 'split', draftSplit]]
-      .filter(([on]) => on).map(([, text, act, draft]) => btn(act, text, act, `${text}: ${asks()} ${file}`, () => askIssue(draft(f))));
+      .filter(([on]) => on).map(([, text, act, draft]) => btn(act, text, act, `${text}: ${asks()} ${file}`, () => askIssue(draft, f)));
     // Record CPU time (#190), on a Wall only file whose test command the engine can wrap: the change, shown first.
     const plan = wallOnly(f) ? cpuPlan(f) : null;
     if (plan) fixes.push(btn('record-cpu', 'Record CPU time', 'record-cpu', `Record CPU time: preview the change to the test command for ${file}`, () => {
@@ -691,6 +691,7 @@
     }
     Object.assign(S, { raw: d, ctx, d: view, read, repo: view.repo });
     if (view.repo !== null) {
+      redraft();
       const after = (p) => read !== null && (p.at !== null && p.at !== undefined ? read >= p.at : read !== p.read);
       S.pending.forEach((p, k) => {
         if (k !== dk(p.key)) return;  // another project's
@@ -735,7 +736,7 @@
   Object.assign(shared, window.DASH_APP.use('tests-rows', shared));
   const { mutDone, mutAsk, progress, mutNow, send, merge, start, verdictChip, live, box, rowAction, draftIssue,
     draftFix, drafted, draftHollow, draftWaits, draftRun, draftDirect, draftSplit, SPLIT_RUNNER_WHY, draftDelete,
-    noIssue, askIssue, optsOf, ISSUE_URL, drawSet, drawTests } = shared;
+    noIssue, askIssue, redraft, optsOf, ISSUE_URL, drawSet, drawTests } = shared;
 
   window.DASH_APP.panel({
     id: PART,
