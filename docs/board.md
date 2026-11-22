@@ -740,7 +740,7 @@ issue number, as a link, and the issue title.
   first program after a guard, such as `ruff`), a chip for its result (Pass, No files, "Findings: 2 of this change",
   Error, or "Skipped: missing <tool>" when its tool is missing) and its seconds. Hover over the name, or focus it, to see
   the whole command; "Show command" shows it on a touch screen. A command with findings of this change, or an error,
-  comes first, with its findings (file, line and text, the first 20) or its error under the row. When the change changed
+  comes first, with its findings (file, line and text, all of them) or its error under the row. When the change changed
   a trigger of a command that ran, the rows end with "Tools ran as installed". A lint check recorded without its
   commands shows its reason as one line: each command's result and seconds.
 - A card in its Test step shows how many tests have run, "142 of 205 tests", and " · 2 failed" when any failed. A test

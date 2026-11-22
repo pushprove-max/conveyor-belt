@@ -416,7 +416,7 @@ lintrun() { # <worktree> <base> <card> <output file>
   ! jq -se 'any(.[]; .reported != [])' "$o" > /dev/null || return 1
 }
 # A gate's lint line in the card's records, for <output file> of lintrun and its exit: result pass, findings or error;
-# lint.commands each command's {n, run, result, sec, findings: the count of the change's, reported: the first 20 of them as {file, line, text}, when it has any; why: an error's}, a skipped one's result
+# lint.commands each command's {n, run, result, sec, findings: the count of the change's, reported: all of them as {file, line, text}, when it has any; why: an error's}, a skipped one's result
 # `skipped: missing <tool>` (or <the trigger file, lintlate>); lint.asInstalled true when a command that ran (not
 # one with no files or a missing tool) has a trigger the change changed (the tools ran as installed, not as the change would install them); lint.gate the gate
 # that ran it, review, land (the landing gate) or wait (the gate for a waiting card), so the Board and /units can name
@@ -424,7 +424,7 @@ lintrun() { # <worktree> <base> <card> <output file>
 lintline() { # <card> <issue> <output file> <lintrun's exit> <review|land|wait>
   local r=pass x
   case $4 in 1) r=findings ;; 2) r=error ;; esac
-  x=$(jq -cs --arg w "$LINT_WHY" --arg g "$5" 'map({n, run, result: (if .result == "skipped" then "skipped: missing \(.why)" else .result end), sec, findings: (.reported | length)} + (if .reported == [] then {} else {reported: (.reported[:20] | map({file, line, text: .text[:300]}))} end) + (if .result == "error" then {why} else {} end)) as $c
+  x=$(jq -cs --arg w "$LINT_WHY" --arg g "$5" 'map({n, run, result: (if .result == "skipped" then "skipped: missing \(.why)" else .result end), sec, findings: (.reported | length)} + (if .reported == [] then {} else {reported: (.reported | map({file, line, text}))} end) + (if .result == "error" then {why} else {} end)) as $c
     | any(.[]; .triggered and (.result | IN("no files", "skipped") | not)) as $i
     | {lint: {commands: $c, asInstalled: $i, gate: $g}, reason: ([$c[] | "lint command \(.n) (\(.run)): \(.result)\(if .result == "findings" then ", \(.findings) of this change" else "" end), \(.sec) s"]
         + (if $i then ["tools ran as installed"] else [] end) + (if $w == "" then [] else [$w] end) | join("; "))}' "$3") \

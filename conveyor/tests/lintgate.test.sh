@@ -213,6 +213,19 @@ t_lintgateleft() {
     || fail "the first lint line does not carry its finding: $(st 'select(.step == "lint") | .lint.commands')"
 }
 
+# Bug (#1368): the lint line kept the first 20 findings of a command and cut each text at 300 characters, so the Board's
+# chip counted 21 findings and its row listed 20, with a long message cut. The line carries every finding whole.
+t_lintlineall() {
+  setup '[]'
+  FXWT=$T/$CASE/cards/c7
+  jq -cn '{n: 1, run: "x", result: "findings", sec: 0, triggered: false,
+    reported: ([range(21)] | map({file: "a.txt", line: ., text: ("E\(.) " + ("w" * 400))}))}' > "$T/$CASE/o"
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  fx_in 'LINT_WHY=""; lintline c7 7 "$T/$CASE/o" 1 review'
+  [ "$(st 'select(.step == "lint") | .lint.commands[0] | [.findings, (.reported | length), (.reported[20].text | length)] | tojson' | head -n 1)" = '[21,21,404]' ] \
+    || fail "the lint line dropped findings after the 20th or cut a text: $(cat "$T/$CASE/run.out") $(st 'select(.step == "lint") | .lint.commands[0] | [.findings, (.reported | length)]')"
+}
+
 # Bug: a lint command that fails to run (exit 2) at the gate is taken as findings and sent to a fix session, or as a
 # pass. It blocks the card, naming the command, with no fix session.
 t_lintgateerror() {
