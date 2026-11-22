@@ -154,6 +154,8 @@ t_bugcomments() {
   [ "$RC" = 0 ] && [ ! -e "$STUB/mainran" ] || fail "a comments-only change was run on main or failed the check (exit $RC): $BW $(cat "$STUB/mainran" 2>&1)"
   grep -q '^The change is comments only in its product files: ' "$FXWT.unfixed" \
     || fail "the result does not say the product change is comments only: $(cat "$FXWT.unfixed" 2>&1)"
+  # R142: the case checked only $STUB/mainran, so a check that made and left the mainrun worktree passed.
+  [ ! -e "$T/$CASE/cards/mainrun" ] || fail "the comments-only check left a run's folder: $(ls "$T/$CASE/cards/mainrun")"
 }
 
 # #872 D1. Bug it catches: a bug card whose change only fixes a comment in a product file, with no test file (no test
@@ -231,6 +233,8 @@ t_bugnotest() {
   [ "$RC" = 1 ] && [ "$BW" = "$why" ] || fail "a change with no test did not fail the check with the no-test reason (exit $RC): $BW"
   grep -qF "No test file found in the change (patterns: __tests__/, " "$FXWT.unfixed" || fail "the result does not say no test file was found: $(cat "$FXWT.unfixed" 2>&1)"
   [ ! -e "$STUB/mainran" ] || fail "a card with no test file ran a test on main: $(cat "$STUB/mainran")"
+  # R142: the case checked only $STUB/mainran, so a check that made and left the mainrun worktree passed.
+  [ ! -e "$T/$CASE/cards/mainrun" ] || fail "the no-test check left a run's folder: $(ls "$T/$CASE/cards/mainrun")"
   [ -z "$(st 'select(.step == "bugproof")' 2>/dev/null)" ] || fail "a code change with no test was let skip the check: $(st 'select(.step == "bugproof")')"
 }
 
@@ -324,6 +328,8 @@ t_buginlineshared() {
   [ "$RC" = 1 ] && [ "$BW" = "$why" ] && [ "$(head -n 1 "$FXWT.unfixed")" = "${why^}." ] \
     || fail "the check did not fail with the shared-lines reason (exit $RC): $BW $(cat "$FXWT.unfixed" 2>&1)"
   [ ! -e "$STUB/mainran" ] || fail "a fix it could not take out was run on main: $(cat "$STUB/mainran")"
+  # R142: the case checked only $STUB/mainran, so a check that made and left the mainrun worktree passed.
+  [ ! -e "$T/$CASE/cards/mainrun" ] || fail "the shared-lines check left a run's folder: $(ls "$T/$CASE/cards/mainrun")"
 }
 
 # bugwt() on a change that only rewords a comment of s.sh (`# an old word` becomes `# a new word`), on a main that holds

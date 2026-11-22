@@ -77,9 +77,11 @@ EOF
 # fail on `broken` (red8). Only then do #7's first tests end, failing. #7's fix session waits for #8's landing
 # (landed8): #8 is brought onto main alone, reviewed and tested there, and lands alone during it. The fix then removes
 # `broken` and puts the last line back, and #7 lands on #8's main. The mark (settle(): stackred) is what keeps #8 from
-# running its tests on #7's stack again: #7's tests wait up to 2 s on again8, which #8's tests say when a second run
-# of them starts there (again8.seen; the run again of the failed cases within one run, <worktree>.first, is not one),
-# so without the mark #8 runs them again before #7 gives way.
+# running its tests on #7's stack again: each session of #8 notes whether its <worktree>.ready holds the mark (a line
+# of mark8: true; without the mark, false, or none when the file is gone), and the last one, which brings #8 onto main
+# once #7 gave way, must note true. That session runs only after #8's wait on #7's stack ended, so the note does not
+# hang on how fast either card is. The build tells the sessions apart by their worktree (`broken` there, built8), not
+# by $STUB/brief, which the sessions of #7 and #8 both write at once.
 t_givewaystackred() {
   local out rc c7 c8
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; tune '.landBatch = 8'; for i in $(seq 10); do echo "$GO" > "$STUB/review.$i"; done
@@ -87,24 +89,25 @@ t_givewaystackred() {
   seq 20 > "$R/a.txt"; git -C "$R" commit -qam "a longer a.txt"
   # #7's first tests listen on red8 before they let #8 be built (tell); #8 can land before #7's fix session opens
   # landed8 (#7 gives way just before it), so the hook says it.
-  gwpipes say go8 red8 landed8 again8
+  gwpipes say go8 red8 landed8
   cat > "$STUB/build" <<'EOF'
 . "$STUB/pipes.sh"
-if grep -q '^# The changed tests fail' "$STUB/brief"; then
-  [ "${PWD##*-}" != 7 ] || { ! hear landed8 || : > "$STUB/heard8"; }; rm -f broken; sed -i 20s/.*/20/ a.txt
-else case $PWD in
-  *-7) sed -i '1s/.*/seven/;20s/.*/seven-20/' a.txt; : > broken ;;
-  *) grep -q '^# Stacked\|^# Main moved' "$STUB/brief" || hear go8; echo eight >> a.txt ;;
-esac; fi
+case $PWD in
+  *-7) if [ -e broken ]; then ! hear landed8 || : > "$STUB/heard8"; rm -f broken; sed -i 20s/.*/20/ a.txt
+       else sed -i '1s/.*/seven/;20s/.*/seven-20/' a.txt; : > broken; fi ;;
+  *) { jq '.stackred == true' "$PWD.ready" 2>/dev/null || echo none; } >> "$STUB/mark8"
+     [ -e "$STUB/built8" ] || { : > "$STUB/built8"; hear go8; }; echo eight >> a.txt ;;
+esac
 EOF
-  { echo 'case $PWD in *-7) [ -e "$STUB/said7" ] || { : > "$STUB/said7"; . "$STUB/pipes.sh"; exec {AG}<> "$STUB/again8"; listen red8; say go8; heard; read -r -t 2 l <&"$AG"; } ;;'
-    echo '  *-8) [ ! -e broken ] || [ -e "$PWD.first" ] || { . "$STUB/pipes.sh"; if [ -e "$STUB/said8" ]; then : > "$STUB/again8.seen"; tell again8; else : > "$STUB/said8"; tell red8; fi; } ;; esac'
+  { echo 'case $PWD in *-7) [ -e "$STUB/said7" ] || { : > "$STUB/said7"; . "$STUB/pipes.sh"; listen red8; say go8; heard; } ;;'
+    echo '  *-8) [ ! -e broken ] || [ -e "$STUB/said8" ] || { : > "$STUB/said8"; . "$STUB/pipes.sh"; tell red8; } ;; esac'
     cat "$STUB/test-cmd"; echo '[ ! -e broken ] || { echo "FAIL broken.test"; exit 1; }'; } > "$STUB/test-cmd.new" && mv "$STUB/test-cmd.new" "$STUB/test-cmd"
-  out=$(loop run 2>&1); rc=$?; gwfree go8 red8 landed8 again8; [ $rc = 0 ] || fail "run exited $rc: $out"
+  # loop: only card() and settle() in one run join #8's stack, its stackred wait and #7's give-way (see the top of the file)
+  out=$(loop run 2>&1); rc=$?; gwfree go8 red8 landed8; [ $rc = 0 ] || fail "run exited $rc: $out"
   c7=$(st 'select(.issue == 7 and .step == "picked") | .card'); c8=$(st 'select(.issue == 8 and .step == "picked") | .card')
   grep -q "card $c8 is stacked on card $c7" <<<"$out" && grep -q "card $c8: its checks or tests failed on main with the change of card $c7" <<<"$out" \
     || fail "#8 was not stacked on #7, or its tests there did not fail on #7's change: $out"
-  [ ! -e "$STUB/again8.seen" ] || fail "#8 was not marked stackred: it ran its tests again on #7's stack: $out"
+  [ "$(tail -n 1 "$STUB/mark8" 2>/dev/null)" = true ] || fail "#8 was not marked stackred on #7's stack (its ready file at each of its sessions: $(paste -sd, "$STUB/mark8" 2>/dev/null || echo 'no session')): $out"
   [ -e "$STUB/heard8" ] && [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "8 7 " ] \
     || fail "#8 did not land during #7's fix session, before #7: $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
   [ "$(st 'select(.issue == 8 and .step == "fix") | .reason' | cut -c1-14 | tr '\n' ,)" = "stacked on car,main moved sin," ] \

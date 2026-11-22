@@ -9,8 +9,9 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 T=$(mktemp -d); trap 'chmod -R u+w "$T"; rm -rf "$T"' EXIT # u+w: the installs are read-only
 # Git reaches only the scratch folder's repos (lib/gitfence.sh): under the GIT_DIR `git bisect run` exports, the
 # fixture's `git -C "$R" init`, `commit -qm init` and `git init --bare .../origin` (fixture(), below) worked on the
-# checkout the run was started in. Each case starts in its own folder, $T/$CASE (case_keep).
-. "$SRC/lib/gitfence.sh"; gitfence "$T"
+# checkout the run was started in. Each case starts in its own folder, $T/$CASE (case_keep). With no fence (gitfence()
+# failed), no case runs.
+. "$SRC/lib/gitfence.sh" && gitfence "$T" || exit 1
 # The machine's test slots (lib/slots.sh), which each case takes one of (the runner; run_case): the pool of the
 # runner's own host file (the machine's, or the testSlotsDir it names) and this run's home slot, read before the
 # cases' environment below names a host file of their own. A loop a case runs is told the case's slot

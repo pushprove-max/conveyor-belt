@@ -362,18 +362,31 @@ t_pushrecstart() {
   kill "$p"; wait "$p" 2>/dev/null || :
 }
 # t_slowpush end to end, in a real `run`: only it joins the card count, the pick and the end check (run(), lib/run.sh). Push 1 waits on the fifo held
-# till main's third landing (fifo landed, from a reference-transaction hook), push 2 on the run's next turn (fifo turn): a run that exits first leaves origin behind, or the push's pushed lines unwritten.
+# till main's third landing (fifo landed, from main's reference-transaction hook). Push 2 waits in that hook, once
+# main's checkout holds origin's main at main's head (the engine reads that ref as pushed: atorigin()), for two of the
+# run's turns that count no card running (fifo turn: the turn's timer says it only when run()'s running is 0); only
+# that first move is held (held2). A turn that counts a card (#9 may not have ended yet) is not counted, as it waits
+# whatever the push. A run that ends before its push does ends at the first turn's end check that counts no card, and
+# that check comes before such a turn's timer: a run that exits first always leaves push 2 held, its pushed lines
+# unwritten and the run lock taken when wait returns, on every run.
 t_heldpush() {
   servesetup; loop control cap 1 >/dev/null; tune '.tunables.poll = 1'; add 7; add 8; add 9; mkfifo "$STUB/held" "$STUB/landed" "$STUB/turn"; exec {l}<> "$STUB/landed"
-  printf '#!/usr/bin/env bash\nread -r _ s _; echo "$s" >> "$STUB/pushes"; f=turn; [ "$(wc -l < "$STUB/pushes")" != 1 ] || f=held; read -r -t 120 _ <> "$STUB/$f"\n' > "$R/.git/hooks/pre-push"
-  printf '#!/usr/bin/env bash\n[ "$1" = committed ] && grep " refs/heads/main$" >> "$STUB/mains" && [ "$(wc -l < "$STUB/mains")" = 3 ] && echo > "$STUB/landed"; :\n' > "$R/.git/hooks/reference-transaction"
+  printf '#!/usr/bin/env bash\nread -r _ s _; echo "$s" >> "$STUB/pushes"; [ "$(wc -l < "$STUB/pushes")" != 1 ] || read -r -t 120 _ <> "$STUB/held"\n' > "$R/.git/hooks/pre-push"
+  cat > "$R/.git/hooks/reference-transaction" <<'EOF'
+#!/usr/bin/env bash
+[ "$1" = committed ] || exit 0; u=$(cat)
+grep " refs/heads/main$" <<<"$u" >> "$STUB/mains" && [ "$(wc -l < "$STUB/mains")" = 3 ] && echo > "$STUB/landed"
+grep -q " refs/remotes/origin/main$" <<<"$u" && [ "$(wc -l < "$STUB/pushes" 2>/dev/null)" = 2 ] && [ ! -e "$STUB/held2" ] \
+  && { : > "$STUB/held2"; exec 3<> "$STUB/turn"; read -r -t 120 _ <&3; read -r -t 120 _ <&3; }; :
+EOF
   # `3<> turn >&3`, not `1<> turn`: bash before 5.3 prints `1<>` as `<>` (fd 0) in `export -f` and `declare -f`, so the
   # turn went to the run's output and push 2 waited its 120 s.
-  chmod +x "$R/.git/hooks/reference-transaction"; sleep() { [ "${FUNCNAME[1]:-}" != run ] || [ "$1" = 0.1 ] || echo 3<> "$STUB/turn" >&3; command sleep "$@"; }; export -f sleep # sleep: the engine's own, passed on as called
+  chmod +x "$R/.git/hooks/reference-transaction"; sleep() { [ "${FUNCNAME[1]:-}" != run ] || [ "$1" = 0.1 ] || [ "${running:-0}" != 0 ] || echo 3<> "$STUB/turn" >&3; command sleep "$@"; }; export -f sleep # sleep: the engine's own, passed on as called
   at=$(originat); loop run > "$STUB/run.out" 2>&1 & pid=$!; read -r -t 200 -u "$l" _ || fail "three cards did not land while the first push was held: $(st '"\(.issue) \(.step)"' | tr '\n' ,)"
   [ "$(cat "$STUB/pushes")" = "$(st 'select(.step == "landed") | .sha' | head -n 1)" ] && [ "$(originat)" = "$at" ] || fail "a push was not held for the first landing alone: $(cat "$STUB/pushes")"; echo > "$STUB/held"; wait "$pid"; rc=$?
   [ "$rc" = 0 ] && [ "$(sed -n 2p "$STUB/pushes")" = "$(mainat)" ] && [ "$(originat)" = "$(mainat)" ] && [ "$(wc -l < "$STUB/pushes")" = 2 ] || fail "the run ($rc) did not push the landings made during the held push as one push of main's head: $(cat "$STUB/pushes" "$STUB/run.out")"
   # Checked at once, with no wait: the push moves origin before it writes its pushed lines, so only those lines and a free run lock show the run waited for it.
+  # Push 2 is held after origin moved until two turns with no card running (above), so a run that did not wait for it leaves both missing here.
   [ "$(st "select(.step == \"pushed\" and .head == \"$(mainat)\") | .card" | sort -u | wc -l)" = 2 ] && flock -n "$ST/cards.jsonl.run" true \
     || fail "the run exited before its final push cleared: $(st 'select(.step == "pushed") | "\(.card) \(.head)"' | tr '\n' ,)"; loopend
 }
