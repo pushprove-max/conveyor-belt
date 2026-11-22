@@ -319,8 +319,10 @@
   // closed line, "Earlier attempt: <start> to <end>, <time>, ended: <reason>", opening to its own steps: the card's
   // overall time counts their seconds, so the steps it is made of are all here.
   // repoUrl: the card's repository (repoOf), in which its review findings' file paths link to their lines; repo: its
-  // record, whose findings' places open the lines the review read (output).
-  function trackDetail(t, card, was, earlier, repoUrl, repo) {
+  // record, whose findings' places open the lines the review read (output). filed: the follow-ups filed for the findings
+  // the judge found outside a card's change (filedOf); an earlier attempt's line is given its later cards' too, as a
+  // card that lands from a kept patch files the findings of the review it kept, with no review of its own.
+  function trackDetail(t, card, was, earlier, repoUrl, repo, filed) {
     const det = h('details', 'track-detail'), sum = h('summary', null, 'Every step');
     if (typeof card === 'string') det.dataset.card = card;
     const total = h('p', 'tl-total'), ol = h('ol', 'timeline');
@@ -328,26 +330,27 @@
     // "Every step" of an earlier card id (a retry, panels/belt.js): its own steps are one of this card's earlier
     // attempts now, which keeps their open output boxes, and this card's steps take nothing from it.
     const mine = was && was.dataset.card === card ? was.querySelector(':scope > ol.timeline') : null;
-    const before = earlierLines(was, earlier, repoUrl, repo);
+    const ups = filed || filedOf([t, ...(Array.isArray(earlier) ? earlier : []).map((e) => e && e.track)]);
+    const before = earlierLines(was, earlier, repoUrl, repo, ups);
     const all = stepsOf(t);
     const { bars, wait } = barsOf(t, all);
-    bars.forEach((b) => ol.append(barItem(b, { t, card, mine, all, repoUrl, repo })));
+    bars.forEach((b) => ol.append(barItem(b, { t, card, mine, all, repoUrl, repo, filed: ups })));
     placeBars(det, total, bars, t, wait);
     ol.setAttribute('aria-label', 'Every step, in order, on one time axis');
     det.append(sum, ...before, total, ol);
     det.hidden = !ol.children.length && !before.length;
     det.open = Boolean(was && was.open);
     det.dataset.form = form();
-    det.redraw = () => trackDetail(t, card, det, earlier, repoUrl, repo);
+    det.redraw = () => trackDetail(t, card, det, earlier, repoUrl, repo, filed);
     return det;
   }
   // The closed lines of the earlier attempts (trackDetail's earlier), each one's own "Every step" drawn over the one
-  // was had for it.
-  function earlierLines(was, earlier, repoUrl, repo) {
+  // was had for it, with filed, the follow-ups of every attempt.
+  function earlierLines(was, earlier, repoUrl, repo, filed) {
     return (Array.isArray(earlier) ? earlier : []).filter((e) => e && typeof e === 'object' && e.track && typeof e.track === 'object').map((e) => {
       const prior = Boolean(was && was.dataset.card === e.card);
       const old = prior ? was : was ? Array.from(was.querySelectorAll(':scope > details.tl-earlier')).find((x) => x.dataset.card === e.card) : null;
-      const d = trackDetail(e.track, e.card, old, null, repoUrl, repo);
+      const d = trackDetail(e.track, e.card, old, null, repoUrl, repo, filed);
       // The earlier card's "Every step" was the whole box, never this line: the line starts closed.
       if (prior) d.open = false;
       d.classList.add('tl-earlier');
@@ -356,6 +359,10 @@
       return d;
     });
   }
+  // The follow-ups filed for the findings the judge found outside a card's change (a filed line's outside) in the
+  // tracks given: a Map from the finding to its issue number or follow-up card id.
+  const filedOf = (tracks) => new Map(tracks.flatMap((t) => stepsOf(t)).flatMap((x) => (x.name === 'follow-ups filed' && Array.isArray(x.outside) ? x.outside : []))
+    .filter((o) => o && typeof o.finding === 'string' && (typeof o.issue === 'number' || typeof o.issue === 'string')).map((o) => [o.finding, o.issue]));
   // The bars of track t (all: its steps), one a step and one for the set-up steps together, and the queue's wait.
   function barsOf(t, all) {
     let wait = null;
@@ -430,7 +437,7 @@
     // A review's findings are one list of rows under the bar; its Show output keeps the review's text as written.
     const review = /^review \d/.test(s.name);
     const was = review && at.mine ? Array.from(at.mine.querySelectorAll('.review-findings')).find((x) => x.dataset.step === step) : null;
-    const rows = review ? reviewList(s.output, at.card, was, at.repoUrl, at.repo, s.at) : null;
+    const rows = review ? reviewList(s.output, at.card, was, at.repoUrl, at.repo, s.at, at.filed) : null;
     if (rows) { rows.dataset.step = step; els.push(rows); }
     const out = output(s.output, at.card, s.name === 'tests failed' ? 'Show full output' : null, old, at.repoUrl, at.repo, review ? s.at : null, Boolean(rows));
     if (out) { out.dataset.step = step; els.push(out); }

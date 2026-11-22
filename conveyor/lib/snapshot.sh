@@ -62,8 +62,8 @@
 #   track are as below.
 # reviews (of a belt card and of a landed one): its finished reviews in order: round, verdict (GO, NO-GO, or none),
 #   counts (the findings by level; null for a review recorded before they were counted), sec, fixed (a fix round
-#   followed it), and judge, what the judge (judged()) made of it: {ran: true, accepted, declined (how many findings of
-#   each), go (its GO came from the judge declining every finding)}, or {ran: false, why} for a review the judge did
+#   followed it), and judge, what the judge (judged()) made of it: {ran: true, accepted, declined, outside (how many findings of
+#   each; outside: found outside the card's change, filed as follow-ups, only when it found any), go (its GO came from the judge accepting no finding)}, or {ran: false, why} for a review the judge did
 #   not read (its call failed, the judge is off, or the review held no finding or no verdict). survived: the findings
 #   of a NO-GO that came back after a fix round told to fix them, each {id, rounds: how many fix rounds}, else [].
 #   loopEnd: on the review that ended the fix loop, {stop: why (card.sh loopstop()), own: the card's own reviews (the record's pass), rounds}, else null.
@@ -85,7 +85,7 @@
 #   before and after it was split for its size (growcheck(), lib/slices.sh; else null). No time is estimated from past cards. detail is every recorded step, the 17 of before (queued,
 #   picked, worktree ready, dependencies linked, brief written, building, review 1, fix 1, review 2, fix 2, review 3,
 #   tests, rebuild, landing, pushed, issue closed, follow-ups filed), each {name, state, sec} (follow-ups filed also
-#   n), and detailAt the place in it of the step in progress.
+#   n, and outside: the findings the judge found outside the card's change, each {finding, issue}, when it filed any), and detailAt the place in it of the step in progress.
 # A card of needsYou, belt and landed also has parent (the issue whose landed line filed it as a follow-up, else
 #   null) and its times: start (when its work was first picked up: a card resumed from a kept patch counts the
 #   cards whose work it resumes, and a restarted card its issue's earlier runs), pickedAt (its own pick-up), priorSec (the seconds of those earlier cards, pick-up to

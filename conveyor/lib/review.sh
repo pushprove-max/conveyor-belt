@@ -84,10 +84,10 @@ review() { # <worktree> <brief> [instructions, in place of REVIEW]
     model=$(codexmodel "$model") || { echo "$model"; return 1; } # a family name, as the proxy lists it now
     apitries "$1" review "$1.events" codexreview "$1" "$br" "$ins" "$model" "$effort"
   fi; rc=$?
-  # A `DECLINED:` or `MINOR:` line is the engine's alone to write (NOTFINDING): one the reviewer wrote is a finding, as
+  # A `DECLINED:`, `MINOR:` or `OUTSIDE:` line is the engine's alone to write (NOTFINDING): one the reviewer wrote is a finding, as
   # any line is.
-  [ $rc != 0 ] || ! grep -Eq '^(DECLINED|MINOR):' "$1.review" 2>/dev/null \
-    || { sed -E 's/^((DECLINED|MINOR):[[:space:]]*)+//' "$1.review" > "$1.review.new" && mv -f "$1.review.new" "$1.review"; } || { echo "the review could not be read"; return 1; }
+  [ $rc != 0 ] || ! grep -Eq '^(DECLINED|MINOR|OUTSIDE):' "$1.review" 2>/dev/null \
+    || { sed -E 's/^((DECLINED|MINOR|OUTSIDE):[[:space:]]*)+//' "$1.review" > "$1.review.new" && mv -f "$1.review.new" "$1.review"; } || { echo "the review could not be read"; return 1; }
   return $rc
 }
 codexreview() { # <worktree> <brief> <instructions> <model> <effort>: one Codex review, ending as review() says
@@ -245,36 +245,44 @@ claudereview() { # <worktree> <brief> <instructions> <model> <effort>
 
 # The judge. With the control record's judge on (`control judge on`; judgeon()), a judge reads each review of a card's change that holds findings, before
 # the card acts on it: the findings, the card's staged change, the issue (the brief) and the findings already
-# declined on this issue's cards (the declined list, DECLINED, holds them). It marks each finding accepted or declined, with a
-# one-line reason, and declines unless the finding earns its place (a P2 has a higher bar: rare-case and style P2s are declined; a P3 is judged as a P2, but not declined for being
+# declined on this issue's cards (the declined list, DECLINED, holds them). It marks each finding accepted, declined or
+# outside (real, but not caused by the card's change), with a one-line reason, and declines unless the finding earns its place (a P2 has a higher bar: rare-case and style P2s are declined; a P3 is judged as a P2, but not declined for being
 # minor). A declined finding becomes a line `DECLINED:
 # <finding> (judge: <reason>)` of the review, which is no finding (NOTFINDING): it causes no fix round and no
 # follow-up, and a review left with no finding is a GO; it goes to the declined list
-# (declined(), by: "judge", why: the reason). The review's record line holds judge: {model, effort, sec,
-# tokens, usage, accepted: [{n, finding, place, reason, cost}], declined: [{n, finding, place, reason}]}; n is the
+# (declined(), by: "judge", why: the reason). An outside finding becomes a line `OUTSIDE: <finding> (judge: <reason>)`
+# of the review, no finding either (no fix round for this card), and a JSON line {finding, reason} of
+# <worktree>.outside, kept over the card's rounds: when the card lands, followups() files each as a follow-up of the
+# card, as a NO-GO finding is filed. The review's record line holds judge: {model, effort, sec,
+# tokens, usage, accepted: [{n, finding, place, reason, cost}], declined: [{n, finding, place, reason}], outside: [the same]}; n is the
 # finding's number as the judge was given it (its F<n>), and cost is what the judge wrote after "Cost to every card:",
 # which every accepted finding has.
 # Each finding reaches the judge marked with its place: inside the card's diff (the first file:line it names, a path under the worktree read as one in it, is a
 # line the staged change adds or changes, or one of the two lines a removal sits between, or its file is one the
 # change deletes or changes as binary), outside it (an unchanged line beside a changed one too), or none (it
-# names no file:line). One outside it is not dropped: the judge accepts it only when the card's change causes it.
+# names no file:line). One outside it is accepted when the card's change causes it, and answered OUTSIDE when it is real
+# but the change did not cause it.
 # The control record's judgeAlways (`control judge always <kind>...`) lists the finding kinds that are always accepted: the reviewer tags a finding of one with
 # its kind right after its level (KINDS; the same word anywhere else in the finding is no tag), and a tagged finding is accepted whatever the judge says, wherever it is.
 # The judge runs on the seat judgeseat() names (the reviewer's CLI too, when the control record sets it; left at
 # default, another model family than the reviewer's), read-only, as a review does. A judge that
 # cannot run or fails, or whose answer is not read, changes nothing: every finding is accepted, as with the judge
 # off, and the line's judge says why (failed). No card is blocked by it. An answer is read only when it holds exactly
-# one decision line for each finding and none for any other, and each accepted finding's line (an ACCEPT, or either
+# one decision line for each finding and none for any other, and each accepted finding's line (an ACCEPT, or any
 # answer for an always-accepted kind) holds a reason and its cost.
 JUDGE='You are the judge of a code review. A reviewer read the staged change in this worktree (`git diff --cached`)
 against the issue below and wrote the findings at the end of this message, numbered F1, F2 and so on. Decide for
-each finding whether it counts: accept it or decline it. Read the change and the code it touches; do not run tests
-or builds and change nothing. Decline unless the finding earns its place; a tie is a decline. Accept a finding only
-when all of these hold:
-- It is about this card'"'"'s change. Each finding is marked with its place: `inside the diff` (its file and line
-  are in the staged change), `outside the diff` (they are not) or `no place` (it names no file and line). Accept one
-  outside the diff only when the card'"'"'s change causes it: a caller or dependant the change breaks. Decline one
-  about code the card neither changed nor broke, with the reason `not about this card'"'"'s change`.
+each finding whether it counts: accept it, decline it, or mark it outside. Read the change and the code it touches;
+do not run tests or builds and change nothing. Decline unless the finding earns its place; a tie is a decline.
+Each finding is marked with its place: `inside the diff` (its file and line are in the staged change), `outside the
+diff` (they are not) or `no place` (it names no file and line).
+Answer OUTSIDE for a real defect that this card'"'"'s change did not cause: code the card neither changed nor broke.
+The card lands without a fix for it, and the finding is filed as a follow-up of the card. A finding is real when
+its proof can happen with what the project really runs and its claim is right. "Not about this card'"'"'s change" is
+never a reason to decline a real finding: answer OUTSIDE for it.
+Accept a finding only when all of these hold:
+- The card'"'"'s change causes it. Accept one outside the diff only when the change causes it: a caller or dependant
+  the change breaks.
 - Its proof can happen with what the project really runs: its real config, commands and inputs. Decline a proof that
   needs a stub built to misbehave, or a setup the project does not have.
 - It is not a finding already declined (listed before the findings, when there are any) raised again with nothing new.
@@ -286,11 +294,16 @@ Judge a P3 finding as a P2: accept it only when it is inside the diff, its proof
 and the defect is real, and decline a P3 whose proof needs an unusual input, timing or setup with the reason `rare
 case`. A P3 is minor by its level: do not decline it because it causes no wrong result, or as `style` when it is a
 misleading name or message, a small inconsistency, or dead code the change left.
+The P2 and P3 bars above are for ACCEPT only, not for OUTSIDE.
+Answer OUTSIDE for a real finding of any level, also when its proof needs an uncommon input or timing.
+Decline a finding that the change did not cause only when it is not real, or when it is a finding already declined
+that is raised again with nothing new.
 A finding marked `always accepted` is of a kind the project always accepts: answer ACCEPT for it. It is accepted
 whatever you answer, so its line always ends with its `Cost to every card:`.
 Answer with exactly one line for each finding, in order, and no other line:
 `F<n> ACCEPT: <one-line reason>. Cost to every card: <any run, wait, retry or gate the fix would add to every card, or none>`
 `F<n> DECLINE: <one-line reason>`
+`F<n> OUTSIDE: <one-line reason: why it is real, and why this card'"'"'s change did not cause it>`
 A reason that names another finding by its number quotes that finding'"'"'s file and line beside it, as
 `F1 (src/a.js:12)`, so the reason reads on its own.
 '"$STE"
@@ -315,7 +328,7 @@ judgemarks() { # <worktree> <the always-accepted kinds, a JSON array>
 }
 # The lines each finding of a review cites, kept on the review's line (excerpts) so that the Board shows the lines the
 # review read after the card's worktree is gone (history excerpts); a finding the judge declined (a DECLINED: line)
-# keeps its lines too, as the Board lists it. A finding cites its first file:line or file:a-b,
+# or found outside the change (an OUTSIDE: line) keeps its lines too, as the Board lists it. A finding cites its first file:line or file:a-b,
 # read as judgemarks() reads it (a path under the worktree read as one in it). The lines are read from git's trees only,
 # never from the disk: the staged tree the review read (side "new") when it has the file and the first line; the tree
 # of the worktree's HEAD (side "old"); and, for a review that follows a fix round, the tree before that fix (side
@@ -355,7 +368,7 @@ excerpts() { # <worktree> [<the tree before the fix round the review follows>]
       [ "$got" = '[]' ] || [ "$(jq length <<<"$out")" -ge "$EXCERPTS" ] \
         || { kept=1; out=$(jq -c --arg at "$at" --arg s "$side" --argjson a "$a" --argjson l "$got" '. + [{at: $at, side: $s, from: $a, lines: $l}]' <<<"$out"); }
     done
-  done < <(sed -E 's/^DECLINED:[[:space:]]*//' "$1.review" 2>/dev/null | grep -Ev "$NOTFINDING" | jq -Rr --arg wt "$1/" --arg real "$(cd "$1" && pwd -P)/" \
+  done < <(sed -E 's/^(DECLINED|OUTSIDE):[[:space:]]*//' "$1.review" 2>/dev/null | grep -Ev "$NOTFINDING" | jq -Rr --arg wt "$1/" --arg real "$(cd "$1" && pwd -P)/" \
     'split($wt) | join("") | split($real) | join("") | [scan("([A-Za-z0-9_./-]+):([0-9]{1,9})(?:[-–]([0-9]{1,9}))?")] | first // empty
       | [(.[0] | ltrimstr("./")), .[1], (.[2] // "")] | @tsv' | awk '!seen[$0]++')
   printf '%s\n' "$out"
@@ -428,9 +441,9 @@ judged() { # <card> <issue> <worktree> <brief> <the review's fields>
     ! j=$(judgecall "$wt" "$JUDGE" "$4"$'\n\n'"$before# The findings"$'\n'"$(jq -r '.[]
       | "F\(.n) [\({inside: "inside the diff", outside: "outside the diff", none: "no place"}[.place])\(if .kind then "; always accepted: \(.kind)" else "" end)] \(.finding)"' "$wt.judge.marks")"); then :
   # What it said of each finding: exactly one decision line each and none for any other, an accepted one with its
-  # reason and cost, else its answer is not read. An always-accepted kind beats a decline.
+  # reason and cost, else its answer is not read. An always-accepted kind beats a decline and an OUTSIDE.
   elif ! jq -cn --slurpfile m "$wt.judge.marks" --rawfile a "$wt.judge" '($a | split("\n") | map(gsub("^[[:space:]`*-]+|[[:space:]`*]+$"; "") | select(test("^F[0-9]+")))) as $said
-      | ($said | map(capture("^F(?<n>[0-9]+) (?<d>ACCEPT|DECLINE):[[:space:]]*(?<r>.*[^[:space:]].*)$"))) as $all
+      | ($said | map(capture("^F(?<n>[0-9]+) (?<d>ACCEPT|DECLINE|OUTSIDE):[[:space:]]*(?<r>.*[^[:space:]].*)$"))) as $all
       | if ($all | length) != ($said | length) or ($all | length) != ($m[0] | length) then error("lines") else . end
       | $m[0] | map(. as $x | [$all[] | select((.n | tonumber) == $x.n)] as $d
         | if ($d | length) != 1 then error("F\($x.n)") else $d[0] as $d
@@ -438,23 +451,30 @@ judged() { # <card> <issue> <worktree> <brief> <the review's fields>
           | if ($d.d == "ACCEPT" or $x.kind != null) and ($rc.c == null or $rc.r == "") then error("F\($x.n) cost") else . end
           | {n: $x.n, finding: $x.finding, place: $x.place}
             + (if $d.d == "ACCEPT" then {accept: true, reason: $rc.r, cost: $rc.c}
-               elif $x.kind != null then {accept: true, reason: "always accepted: a \($x.kind) finding (the judge declined it: \($rc.r))", cost: $rc.c}
-               else {accept: false, reason: $d.r} end) end)' > "$wt.judge.said" 2>/dev/null; then
+               elif $x.kind != null then {accept: true, reason: "always accepted: a \($x.kind) finding (the judge \(if $d.d == "OUTSIDE" then "found it outside the change" else "declined it" end): \($rc.r))", cost: $rc.c}
+               else {accept: false, outside: ($d.d == "OUTSIDE"), reason: $d.r} end) end)' > "$wt.judge.said" 2>/dev/null; then
     j=$(jq -c '. + {failed: "the answer of the judge does not hold exactly one line for each finding and no other, each accepted one with its reason and cost"}' <<<"$j")
-  # The review with each declined finding as a DECLINED line; with no finding left, its verdict is GO.
+  # The review with each declined finding as a DECLINED line and each outside one as an OUTSIDE line; with no finding
+  # left, its verdict is GO.
   elif ! { jq -rRn --slurpfile d "$wt.judge.said" '($d[0] | map(select(.accept | not))) as $no | ($d[0] | all(.accept | not)) as $go
       | inputs | . as $l | gsub("^[[:space:]]+|[[:space:]]+$"; "") as $s | ([$no[] | select(.finding == $s)] | first) as $x
-      | if $x then "DECLINED: \($s) (judge: \($x.reason))" elif $go and startswith("VERDICT:") then "VERDICT: GO" else $l end' "$wt.review" > "$wt.review.new" \
+      | if $x then "\(if $x.outside then "OUTSIDE" else "DECLINED" end): \($s) (judge: \($x.reason))" elif $go and startswith("VERDICT:") then "VERDICT: GO" else $l end' "$wt.review" > "$wt.review.new" \
       && mv -f "$wt.review.new" "$wt.review"; } 2>/dev/null; then
     j=$(jq -c '. + {failed: "the review could not be written again with what the judge declined"}' <<<"$j")
   else
     # Each declined finding goes to the declined list (declined()).
     while IFS=$'\t' read -r why f; do
       declined "$1" "$2" judge "$why" "$f" || echo "conveyor: cannot write the declined findings of $1 to the declined list" >&2
-    done < <(jq -r '.[] | select(.accept | not) | [.reason, .finding] | map(gsub("[[:space:]]+"; " ")) | join("\t")' "$wt.judge.said")
-    j=$(jq -c --slurpfile d "$wt.judge.said" '. + {accepted: ($d[0] | map(select(.accept) | del(.accept))), declined: ($d[0] | map(select(.accept | not) | del(.accept)))}' <<<"$j")
+    done < <(jq -r '.[] | select((.accept or .outside) | not) | [.reason, .finding] | map(gsub("[[:space:]]+"; " ")) | join("\t")' "$wt.judge.said")
+    # Each outside finding goes to <worktree>.outside, {finding, reason} a line, once a finding: the card files them when it lands.
+    ! jq -e 'any(.[]; .outside)' "$wt.judge.said" >/dev/null 2>&1 \
+      || { { cat "$wt.outside" 2>/dev/null; jq -c '.[] | select(.outside) | {finding, reason}' "$wt.judge.said"; } \
+        | jq -cs 'reduce .[] as $x ([]; if any(.[]; .finding == $x.finding) then . else . + [$x] end) | .[]' > "$wt.outside.new" && mv -f "$wt.outside.new" "$wt.outside"; } \
+      || echo "conveyor: cannot write the findings of $1 that the judge found outside its change to $wt.outside" >&2
+    j=$(jq -c --slurpfile d "$wt.judge.said" '. + {accepted: ($d[0] | map(select(.accept) | del(.accept, .outside))), declined: ($d[0] | map(select((.accept or .outside) | not) | del(.accept, .outside))),
+      outside: ($d[0] | map(select(.outside) | del(.accept, .outside)))}' <<<"$j")
   fi
-  rm -f "$wt.judge" "$wt.judge.marks" "$wt.judge.said" "$wt.judge.events" "$wt.judge.err" "$wt.review.new"
+  rm -f "$wt.judge" "$wt.judge.marks" "$wt.judge.said" "$wt.judge.events" "$wt.judge.err" "$wt.review.new" "$wt.outside.new"
   jq -ce --slurpfile j <(printf '%s' "${j:-null}") '. + {judge: $j[0]}' <<<"$5" 2>/dev/null || printf '%s\n' "$5"
 }
 # The P3 findings the review still holds after the judge (judged()) are handled by the control record's rule P3 (the

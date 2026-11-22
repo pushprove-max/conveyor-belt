@@ -183,7 +183,8 @@
                  state: (if ($l.step == "test" and $l.result == "fail") or ($l.step == "issue" and $l.result != "ok") or ($l.step == "review" and ($l.result | IN("fail", "stopped")))
                    or ($l.step == "blocked" and $l.stop != "yes") then "failed" else "done" end),
                  sec: (if $l.step == "picked" then null else $l.took // null end), at: $l.time}
-                + (if $l.step == "filed" then {n: ($l.n // 0)} elif $l.step == "review" then {counts: ($l.counts // null), judge: ($l.judge // null)}
+                # A filed line's outside: the findings the judge found outside the card's change, each {finding, issue}.
+                + (if $l.step == "filed" then {n: ($l.n // 0)} + (if $l.outside then {outside: $l.outside} else {} end) elif $l.step == "review" then {counts: ($l.counts // null), judge: ($l.judge // null)}
                    elif $l.step == "test" and $l.result == "pass" and $l.rerun != null then {rerun: true} else {} end)
                 # A blocked line's sentence (why) and the end of its output, a failed test run's, review's or issue closing's reason (why),
                 # a worktree line's reason (why: how the card took up a kept patch), a lint line's reason (why: each
@@ -194,7 +195,9 @@
                       # A test run that left linked test files out (testcap(), testrun.sh), or ran only the changed
                       # cases of its own test files (owncases(), testlist.sh): its list's note (rows.jq) says so.
                       elif $l.step == "test" and $l.list != null then $l.list.why else null end),
-                    output: (if $l.step == "blocked" or ($l.step == "test" and $l.result != "pass") or ($l.step == "review" and $l.result == "NO-GO") then $l.tail else null end),
+                    # A GO review's findings too when the judge found one outside the card's change (an OUTSIDE line of its tail, rows.jq).
+                    output: (if $l.step == "blocked" or ($l.step == "test" and $l.result != "pass") or ($l.step == "review" and $l.result == "NO-GO") then $l.tail
+                      elif $l.step == "review" and ($l.tail // "" | test("(^|\n)OUTSIDE: ")) then $l.tail else null end),
                     failures: (if $l.step == "test" and $l.result != "pass" then $l.failures else null end),
                     # A test run's changed lines no test reached, from its coverage report (uncovered(), testlist.sh).
                     coverage: (if $l.step == "test" then $l.coverage else null end),

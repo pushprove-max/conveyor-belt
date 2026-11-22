@@ -276,6 +276,12 @@ Board, that review shows "Fix loop ended:" and the reason.
 The judge, when it is on (`conveyor.sh control judge on`), reads each review and declines a finding that does not earn
 its place. A declined finding causes no fix and no follow-up (`conveyor/README.md`, The judge).
 
+A real defect that the card's change did not cause is never declined for that. The judge marks it `OUTSIDE`. The card
+gets no fix round for it and lands as its other findings let it. When the card lands, the finding is filed as a
+follow-up of the card, with its level and the card's issue as its parent, as a finding of a last `NO-GO` is. The
+Board shows such a finding as "Filed as a follow-up" with its issue, and as "To be filed as a follow-up" until the card
+lands.
+
 A change can need a step when you deploy it: a migration before the deploy, a new environment value or a flag. The
 reviewer writes this step as a `ROLLOUT:` line: the action, what fails without it, and its file and line. The builder
 writes one as a `Rollout:` line of the card's commit trailers. A rollout action is not a finding. It does not stop the

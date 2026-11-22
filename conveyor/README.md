@@ -144,14 +144,21 @@ The judge is set in each project's control record, by `conveyor.sh control judge
 Board's Rules tab, never in the pack: a pack (`.conveyor/project.json`) that still holds a `judge` object fails its
 check, with a line naming these commands. `conveyor.sh control judge on` switches it on and
 `conveyor.sh control judge off` off, from the next review; it is on in a new project (docs/configuration.md, The control record). On, a judge reads each review
-that holds findings before the card acts on it, and marks each finding accepted or declined with a one-line reason.
-It declines unless the finding earns its place: one about code the card neither changed nor broke, or whose proof
-cannot happen with what the project really runs, is declined. A P2 finding has a higher bar: it is accepted only
+that holds findings before the card acts on it, and marks each finding accepted, declined or outside with a one-line
+reason. It declines unless the finding earns its place: one whose proof cannot happen with what the project really
+runs, or whose claim is wrong, is declined. A real defect in code that the card neither changed nor broke is never
+declined for that: the judge marks it outside. It becomes an `OUTSIDE:` line of the review, with no fix round for
+this card, and a review with no accepted finding is a GO. When the card lands, each outside finding is filed as a
+follow-up of the card, with its level and the card's issue as its parent, as a finding of a last NO-GO is; a card
+at the follow-up depth cap puts it on the declined list instead. The card's filed line names the follow-up of each
+(`outside`), and the Board shows it under the review as "Filed as a follow-up" with that issue. A line the reviewer
+itself starts with `OUTSIDE:` is a finding. A P2 finding has a higher bar: it is accepted only
 when it is inside the diff, its proof uses what the project really runs, and it would cause a wrong result that users
 or the next card meet. A P2 whose proof needs an unusual input, timing or setup is declined as `rare case`, and a P2
 about wording, naming or form with no wrong result as `style`. A P3 finding (a real but minor defect, such as a
 misleading name or message, a small inconsistency or dead code the change left) is judged as a P2 is, but is not
-declined because it causes no wrong result. An accepted P3 is handled by the control record's rule `P3` (the Rules
+declined because it causes no wrong result. These bars are for an accepted finding only: a real outside finding is
+filed at any level, also when its proof needs an uncommon input or timing. An accepted P3 is handled by the control record's rule `P3` (the Rules
 tab): on, it is a finding as a P2 is, so it makes a NO-GO, goes to the fix round and, still open after the last
 review, is filed as a follow-up of the pack's P3 priority (with no priority label when the pack has fewer than four:
 an issue with none counts as P3). Off, it becomes a

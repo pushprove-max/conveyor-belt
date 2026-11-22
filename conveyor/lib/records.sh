@@ -143,7 +143,7 @@ line() { # <card> <issue> <step> <result> [extra json]
      | if $p != null then .pick = $p else . end
      | if has("tail") then .tail |= '"($TAIL)"' else . end'
 }
-# A line's tail (a blocked line's output, a NO-GO review's findings): its last 60 lines, each whole, so no line loses what it says and identical lines stay
+# A line's tail (a blocked line's output, the findings of a NO-GO review or of a GO with an OUTSIDE line): its last 60 lines, each whole, so no line loses what it says and identical lines stay
 # identical (the Board folds them).
 TAIL='split("\n") | .[-60:] | join("\n")'
 # A build, fix or rebase line written with no price to read (no usage: its output held none, or the session's fields

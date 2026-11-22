@@ -81,6 +81,63 @@ t_judgeoutside() {
     || fail "an accepted finding outside the diff did not leave the review a NO-GO holding it, or is not recorded as outside the diff with its cost: $(jr 8) $(jf 8 .judge)"
 }
 
+# Bugs (#1424): the judge is told to decline a real finding for being outside the card's change, so the defect is
+# dropped: no fix and no follow-up. Marked OUTSIDE, it costs this card a fix round, keeps the review a NO-GO, goes to
+# the declined list, or is not filed as a follow-up with its level and the card's issue as parent when the card lands;
+# the filed line does not name its follow-up, or the snapshot's track does not show the GO review's OUTSIDE line
+# (read from the review line's reason, cut at 1500 characters: here a long UNPROVEN line comes before it). The judge
+# is told to decline a real outside finding as a `rare case`. The card waiting to land is not marked alone
+# (cardready()), so a batch could land it with the follow-up never filed.
+t_judgeoutsidefiled() {
+  local f='[P2] b.txt:1 holds a stale first line that every reader of b.txt gets. Proof: cat b.txt on main' why="real: b.txt:1 is stale on main; the card did not change b.txt" out
+  judging "[$(issue 7 2026-01-01)]"
+  printf '%s\n' "UNPROVEN: $(printf 'a.txt may read wrong %.0s' {1..80})" "$f" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
+  echo "F1 OUTSIDE: $why" > "$STUB/judge.1"
+  # The card's ready file (cardready()) as its test run finds it, before it lands.
+  echo '[ ! -e "$PWD.ready" ] || cp "$PWD.ready" "$STUB/ready"' >> "$STUB/test-cmd"
+  # loop: that the card lands with no fix round and files the follow-up at its landing is the whole card's run (card(), cardlanding()).
+  loop run >/dev/null || fail "run exited non-zero"
+  grep -qxF '`F<n> OUTSIDE: <one-line reason: why it is real, and why this card'"'"'s change did not cause it>`' "$STUB/judge-asked" \
+    && grep -qxF 'never a reason to decline a real finding: answer OUTSIDE for it.' "$STUB/judge-asked" \
+    && grep -qxF 'The P2 and P3 bars above are for ACCEPT only, not for OUTSIDE.' "$STUB/judge-asked" \
+    && ! grep -qF 'decline a `rare case` or `style` one as above' "$STUB/judge-asked" \
+    && ! grep -qF 'with the reason `not about this card'"'"'s change`' "$STUB/judge-asked" \
+    || fail "the judge's prompt has no OUTSIDE answer, or still declines a real finding for being outside the change: $(grep -n 'OUTSIDE\|not about' "$STUB/judge-asked")"
+  [ "$(wc -l < "$STUB/reviews")" = 1 ] && [ -z "$(st 'select(.issue == 7 and .step == "fix") | .step')" ] && [ "$(rev 7 .result)" = GO ] \
+    || fail "a finding the judge found outside the change cost the card a fix round, or left its review a NO-GO: $(rev 7 '[.result, .reason] | tojson')"
+  [ "$(rev 7 '.judge.outside | map([.finding, .reason]) | tojson')" = "$(jq -cn --arg f "$f" --arg w "$why" '[[$f, $w]]')" ] && [ ! -s "$ST/declined.jsonl" ] \
+    || fail "the outside finding is not on the review line's judge, or went to the declined list: $(rev 7 '.judge | tojson') $(cat "$ST/declined.jsonl" 2>&1)"
+  [ -n "$(st 'select(.issue == 7 and .step == "landed") | .step')" ] || fail "the card did not land: $(st 'select(.issue == 7) | .step' | tr '\n' ' ')"
+  jq -e '.alone == true' "$STUB/ready" >/dev/null 2>&1 || fail "the card with an outside finding to file waited to land not marked alone, so a batch could take it: $(cat "$STUB/ready" 2>&1)"
+  [ "$(jq -cs 'map([.title, (.labels | map(.name) | join(" "))])' "$STUB/filed")" = "$(jq -cn --arg f "$f" '[[$f, "conveyor-followup bug P2"]]')" ] \
+    && jq -rs '.[0].body' "$STUB/filed" | grep -q '^Follow-up to #7 (Conveyor card c[^)]*)\. The judge of that card'"'"'s review found the finding below real, but not caused by that card'"'"'s change: '"$why"'$' \
+    && jq -rs '.[0].body' "$STUB/filed" | grep -qxF "Finding: $f" \
+    || fail "not one follow-up filed with the finding, its level and the card's issue as parent: $(cat "$STUB/filed" 2>&1)"
+  [ "$(st 'select(.issue == 7 and .step == "filed") | [.followups, .outside] | tojson')" = "$(jq -cn --arg f "$f" '[[100101], [{finding: $f, issue: 100101}]]')" ] \
+    && [ "$(st 'select(.issue == 7 and .step == "landed") | [.leftover, .followups] | tojson')" = '[null,[100101]]' ] \
+    || fail "the filed line does not name the follow-up of the outside finding, or the landed line says it landed on a NO-GO: $(st 'select(.issue == 7 and (.step == "filed" or .step == "landed")) | tojson')"
+  out=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
+  [ "$(jq -c --arg f "$f" '.landed[] | select(.issue == 7) | .track.records | [(.[] | select(.name | startswith("review")) | .output | split("\n") | map(select(startswith("OUTSIDE: ")))), (.[] | select(.name == "follow-ups filed") | .outside[0].issue)]' <<<"$out")" \
+    = "$(jq -cn --arg f "$f" --arg w "$why" '[["OUTSIDE: \($f) (judge: \($w))"], 100101]')" ] \
+    || fail "the snapshot's track does not give the GO review's OUTSIDE line and the follow-up filed for it: $(jq -c '.landed[] | select(.issue == 7) | .track.records' <<<"$out")"
+}
+
+# Bugs (#1424): the fix round after a NO-GO is told the finding the judge found outside the change too, so it fixes
+# what the card did not cause; the finding is not kept for the landing; a line the reviewer itself starts with OUTSIDE:
+# is taken as the engine's, so it escapes the judge and the fix.
+t_judgeoutsidefix() {
+  local a='[P1] a.txt:2 wrong word. Proof: a.txt:2' o='[P2] b.txt:1 stale line. Proof: cat b.txt'
+  judging "[$(issue 7 2026-01-01)]"
+  printf '%s\n' "OUTSIDE: $a" "$o" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
+  printf '%s\n' 'F1 ACCEPT: the word is wrong. Cost to every card: none' 'F2 OUTSIDE: real, and b.txt is not the change'"'"'s' > "$STUB/judge.1"
+  judgeone 7 - fix
+  grep -qxF "F1 [inside the diff] $a" "$STUB/judge-asked" || fail "a line the reviewer started with OUTSIDE: did not reach the judge as a finding: $(grep '^F' "$STUB/judge-asked")"
+  [ "$(jf 7 .verdict)" = NO-GO ] && [ "$(grep -c '^E[0-9]' "$T/$CASE/cards/c7.fix")" = 1 ] && grep -qxF "E1 $a" "$T/$CASE/cards/c7.fix" && ! grep -qF 'b.txt' "$T/$CASE/cards/c7.fix" \
+    || fail "the fix round is not told the accepted finding alone: $(cat "$T/$CASE/cards/c7.fix")"
+  [ "$(jq -c . "$T/$CASE/cards/c7.outside")" = "$(jq -cn --arg o "$o" '{finding: $o, reason: "real, and b.txt is not the change'"'"'s"}')" ] \
+    || fail "the outside finding is not kept beside the worktree for the landing: $(cat "$T/$CASE/cards/c7.outside" 2>&1)"
+}
+
 # Bugs: a review whose only finding the judge declines still says NO-GO and costs a fix round; the declined finding or
 # the judge's reason is lost from the card's record, or never reaches the declined list; the judge runs on the reviewer's own model family.
 t_judgedecline() {

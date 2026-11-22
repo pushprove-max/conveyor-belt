@@ -81,3 +81,48 @@ test('an open Proof stays open when the card is drawn again', () => {
   const again = row().querySelectorAll('.review-findings details.finding-proof');
   assert.deepEqual(Array.from(again, (x) => x.open), [false, true]);
 });
+
+// Bug it guards (#1424): a real finding the judge found outside the card's change (an OUTSIDE: line) showed as no
+// finding at all, or as declined, though the card files it as a follow-up; its row did not name the follow-up's issue,
+// and a redraw after the filing kept the row drawn before it; before the card landed, the judge line and the row said
+// the finding was filed already, though no follow-up existed yet.
+test('a finding the judge found outside the change shows as filed as a follow-up, with its issue', () => {
+  const OUT = '[P1] .claude/dashboard/panels/belt.js:12 The count skips the last card. Proof: open the Belt with two cards.';
+  const why = 'real: the count is wrong on main; the card did not change belt.js.';
+  const { w, row, data } = shown({ name: 'review 1 (GO)', output: `OUTSIDE: ${OUT} (judge: ${why})`, judge: { ran: true, accepted: 0, declined: 0, outside: 1, go: true } });
+  const item = () => Array.from(row().querySelectorAll('.timeline > li.tl-item')).find((li) => li.querySelector('.tl-label').textContent.startsWith('Review'));
+  const finding = () => item().querySelector(':scope > .review-findings > .output-finding');
+  assert.equal(item().querySelector(':scope > .tl-review .judged').textContent, 'judge: 0 accepted, 0 declined, 1 outside the change', 'the judge line counts it apart from the declined, and not as filed before any filing');
+  assert.equal(finding().classList.contains('is-declined'), false, 'it is not drawn as declined');
+  assert.deepEqual(Array.from(finding().querySelectorAll('.finding-head > .chip'), (c) => c.textContent), ['P1', 'To be filed as a follow-up'], 'before the card lands');
+  assert.equal(finding().querySelector('.why-block .why-label').textContent, 'Why the judge found it outside the change', 'the reason does not say it was filed before any filing');
+  // The card lands: its filed line names the follow-up of the finding, and the redraw shows it.
+  data.panels.belt.data.cards[0].track.records.push({ name: 'follow-ups filed', state: 'done', sec: 2, n: 1, outside: [{ finding: OUT, issue: 100101 }] });
+  next(w, data);
+  assert.deepEqual(Array.from(finding().querySelectorAll('.finding-head > .chip'), (c) => c.textContent), ['P1', 'Filed as a follow-up']);
+  const link = finding().querySelector('.finding-head > .issue');
+  assert.equal(link && link.textContent, '#100101', 'the row names the follow-up issue');
+  assert.match(link.getAttribute('href') || '', /\/issues\/100101$/, 'and links it');
+});
+
+// Bug it guards (#1424): a retry that lands from a kept patch (after a yes) writes no review of its own and files the
+// outside findings of the review it kept, so the filed line is on the retry and the review on its earlier attempt;
+// that review's row still said "To be filed as a follow-up" after the filing.
+test('an earlier attempt\'s outside finding names the follow-up the retry filed', () => {
+  const OUT = '[P2] .claude/dashboard/panels/belt.js:12 The count skips the last card. Proof: open the Belt with two cards.';
+  const w = boot();
+  const data = full();
+  const card = data.panels.belt.data.cards[0];
+  const prior = { card: 'c3-60', start: iso(T0 - 3600000), end: iso(T0 - 2400000), sec: 1200, reason: 'waits for a yes', track: trackOf('++....', '', { at: null, since: null, records: [
+    { name: 'picked', state: 'done', sec: null, at: at(0) },
+    { name: 'review 1 (GO)', state: 'done', sec: 60, at: at(10), output: `OUTSIDE: ${OUT} (judge: real: the count is wrong on main.)`, judge: { ran: true, accepted: 0, declined: 0, outside: 1, go: true } }] }) };
+  card.track = trackOf('+++++>', 'push', { since: at(900), records: [
+    { name: 'picked', state: 'done', sec: null, at: at(100) }, { name: 'follow-ups filed', state: 'done', sec: 2, at: at(200), n: 1, outside: [{ finding: OUT, issue: 100102 }] }] });
+  card.earlier = [prior];
+  deliver(w, data);
+  const det = openEvery(w, panel(w, 'belt').querySelector(`li[data-key="sample:${card.card}"] details.track-detail`));
+  const finding = det.querySelector(':scope > details.tl-earlier .review-findings > .output-finding');
+  assert.deepEqual(Array.from(finding.querySelectorAll('.finding-head > .chip'), (c) => c.textContent), ['P2', 'Filed as a follow-up'], 'the earlier attempt\'s review row');
+  const link = finding.querySelector('.finding-head > .issue');
+  assert.equal(link && link.textContent, '#100102', 'it names the issue the retry filed');
+});

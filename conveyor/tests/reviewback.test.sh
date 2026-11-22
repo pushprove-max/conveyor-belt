@@ -162,6 +162,19 @@ t_retryrounds() {
     || fail "the last review of the retried card did not file its finding: $(cat "$STUB/filed" 2>&1)"
 }
 
+# Bug (#1424): a blocked card's findings that its judge found outside its change (<worktree>.outside, judged()) were
+# not kept with its patch, or its retry did not take them back: a retry that lands from the kept patch with no review
+# (as after the owner's yes) then files no follow-up for them.
+t_retryoutside() {
+  local o='{"finding":"[P2] b.txt:1 stale line. Proof: cat b.txt","reason":"real, and the change did not touch b.txt"}'
+  setup "[$(issue 7 2026-01-01)]"; fx_wt 'echo two >> a.txt' b.txt base
+  keptblock 7 1 'fix: the session failed' "echo '$o' > \"\$wt.outside\""
+  [ "$(cat "$K/c7.outside" 2>&1)" = "$o" ] || fail "block() did not keep the outside findings with the patch: $(ls "$K" 2>&1)"
+  resumed 7 'cat "$wt.outside" > "$T/$CASE/outside"'
+  [ "$(jq -c '[.mode, (.beside | index("outside") != null)]' <<<"$RESUMED")" = '["session",true]' ] && [ "$(cat "$T/$CASE/outside")" = "$o" ] \
+    || fail "the retried card did not take back the outside findings beside its worktree: $RESUMED $(cat "$T/$CASE/outside" 2>&1)"
+}
+
 # A repeat is known whatever else ends the loop. Bugs: a P1 finding back after its fix on the last round lands with
 # follow-ups instead of blocking; a card that blocks deletes its fix rounds, so its retry fixes a finding that came
 # back as if new; a card whose patch could not be kept deletes them too. Its cases (repeatkept*) each block card c7

@@ -78,8 +78,10 @@
   const verdictSaid = (v) => (v === 'GO' ? 'passed' : v === 'NO-GO' ? 'changes asked' : 'no verdict');
   // A finished review on a card: "Review 2: changes asked", its chip toned by the verdict.
   const reviewChip = (r) => chip(`Review ${r && num(r.round) ? r.round : '?'}: ${verdictSaid(r && r.verdict)}`, r && r.verdict === 'GO' ? 'ok' : 'warn');
-  // What the judge made of a review (its judge, as the snapshot gives it): "judge: N accepted, M declined"; "passed
-  // (the judge declined all M)" for a GO that came from the judge declining every finding. The declined count is a button:
+  // What the judge made of a review (its judge, as the snapshot gives it): "judge: N accepted, M declined", and ", K
+  // outside the change" when it found K outside the card's change (each filed as a follow-up when the card lands: its
+  // row says when it is); "passed (the judge declined all M)" for a GO that came from
+  // the judge declining every finding. The declined count is a button:
   // it opens that card's lines in the panel that lists the declined findings, the module with declinedOf (the address
   // parameter that cuts it to one card's lines). null, so no judge line, for a review the judge did not read (ran not
   // true) or with no judge recorded.
@@ -87,7 +89,7 @@
     const j = r && r.judge;
     if (!j || typeof j !== 'object' || j.ran !== true) return null;
     const el = h('span', 'judged');
-    const a = num(j.accepted) ? j.accepted : 0, m = num(j.declined) ? j.declined : 0;
+    const a = num(j.accepted) ? j.accepted : 0, m = num(j.declined) ? j.declined : 0, o = num(j.outside) ? j.outside : 0;
     const lines = Array.from(modules.values()).find((x) => typeof x.declinedOf === 'string' && x.declinedOf);
     const open = (text) => {
       if (!m || !lines || typeof card !== 'string' || !card) return text;
@@ -98,8 +100,8 @@
       b.addEventListener('click', () => { params({ [lines.declinedOf]: card }); redrawAll(); goTo(lines.id); });
       return b;
     };
-    if (j.go === true) el.append('passed (the judge ', open(`declined all ${m}`), ')');
-    else el.append(`judge: ${a} accepted, `, open(`${m} declined`));
+    if (j.go === true && !o) el.append('passed (the judge ', open(`declined all ${m}`), ')');
+    else el.append(`judge: ${a} accepted, `, open(`${m} declined`), o ? `, ${o} outside the change` : '');
     return el;
   }
   // The end of the output a blocked card failed on (its line's tail), shown under its sentence: closed under "Show
@@ -227,21 +229,28 @@
   const FINDING = /^\[(P[0-3])\]\s*(?:\[cleanup\]\s*)?(.*)$/;
   // A finding the judge declined, as the engine writes it into the review (review.sh): "DECLINED: <finding> (judge: <reason>)".
   const DECLINED = /^DECLINED:\s*(\[P[0-3]\].*?) \(judge: ([\s\S]*)\)\s*$/;
+  // A finding the judge found real but not caused by the card's change (review.sh judged()): "OUTSIDE: <finding> (judge:
+  // <reason>)". It is filed as a follow-up of the card when the card lands, never declined.
+  const OUTSIDE = /^OUTSIDE:\s*(\[P[0-3]\].*?) \(judge: ([\s\S]*)\)\s*$/;
   // A review's findings as rows, in their order: the priority chip (P0 and P1 warn, P2 and P3 quiet) and the sentence
   // in bold on one line, the place (path:line) under it as a link to that line, and the part after "Proof:" folded
   // under a closed "Proof:" toggle. Code spans and file paths in the sentence and proof are drawn as fill draws them,
   // linked in the repository repoUrl (none: no links). A line that is not a finding is a row of its whole text.
   // With the card, its repository (repo, the record's name) and the review the findings are from (review, the time of
   // its record), the place has a closed "Reviewed lines" toggle under it: opened, it shows the lines the place cites as
-  // that review read them (reviewedLines).
-  function findingRows(folded, repoUrl, card, repo, review) {
+  // that review read them (reviewedLines). filed: the follow-up of each finding the judge found outside the change, a
+  // Map from the finding (as the card's filed line has it) to its issue number or follow-up card id; a finding it does
+  // not hold is still to be filed.
+  function findingRows(folded, repoUrl, card, repo, review, filed) {
     const list = h('ol', 'output-findings');
     const known = new Set(folded.flatMap((x) => pathsIn(x.text)));
     const lines = [card, repo, review].every((s) => typeof s === 'string' && s) ? reviewedLines(repo, card, review) : null;
+    // The filed findings folded as the review's lines are, so a worktree path in one reads as in the row.
+    const ups = new Map(filed instanceof Map ? Array.from(filed, ([f, n]) => [foldLines(f, card)[0].text, n]) : []);
     folded.forEach((x) => {
       if (!x.text.trim()) return;
-      const no = DECLINED.exec(x.text);
-      const row = h('li', 'output-finding'), m = FINDING.exec(no ? no[1] : x.text), times = x.n > 1 ? ` ×${x.n}` : '';
+      const out = OUTSIDE.exec(x.text), no = out ? null : DECLINED.exec(x.text), judged = out || no;
+      const row = h('li', 'output-finding'), m = FINDING.exec(judged ? judged[1] : x.text), times = x.n > 1 ? ` ×${x.n}` : '';
       if (!m) { row.append(h('p', 'finding-text', x.text + times)); list.append(row); return; }
       let rest = m[2];
       const at = /^(\S+:\d+(?:[-–]\d+)?)[:,]?\s+(?=\S)/.exec(rest);
@@ -251,7 +260,7 @@
       const head = h('div', 'finding-head'), said = h('p', 'finding-text');
       said.append(fill(h('strong', 'finding-claim'), sentence, repoUrl, known, 'finding'));
       if (times) said.append(times);
-      head.append(chip(m[1], m[1] === 'P0' || m[1] === 'P1' ? 'warn' : 'quiet'), ...(no ? [chip('Declined', 'quiet')] : []), said);
+      head.append(chip(m[1], m[1] === 'P0' || m[1] === 'P1' ? 'warn' : 'quiet'), ...judgeChips(no, out, ups, repoUrl), said);
       row.append(head);
       if (at) { const p = h('p', 'finding-at'); p.append(codeEl(repoUrl, at[1], known, 'finding-at-link').el); row.append(p); }
       if (at && lines) row.append(lines(at[1]));
@@ -260,17 +269,29 @@
         fold.append(h('summary', 'finding-proof-label', 'Proof:'), fill(h('div', 'finding-proof-text'), proof, repoUrl, known, 'finding'));
         row.append(fold);
       }
-      if (no) {
-        // The judge's reason, in its own block as the Declined panel draws it (panels/declined.js).
-        row.classList.add('is-declined');
-        const box = h('div', 'reason why-block');
-        box.dataset.by = 'judge';
-        box.append(h('strong', 'why-label', 'Why the judge declined it'), fill(h('div', 'why-text'), no[2].trim(), repoUrl, known, 'why'));
-        row.append(box);
-      }
+      if (no) row.classList.add('is-declined');
+      if (judged) row.append(judgeWhy(out ? 'Why the judge found it outside the change' : 'Why the judge declined it', judged[2], repoUrl, known));
       list.append(row);
     });
     return list;
+  }
+  // The chips after a finding's priority (findingRows): "Declined" for a declined finding (no); for one the judge found
+  // outside the change (out, its OUTSIDE match), "Filed as a follow-up" and its follow-up (from ups: an issue number,
+  // linked, or a card id), or "To be filed as a follow-up" while ups holds none for it.
+  function judgeChips(no, out, ups, repoUrl) {
+    if (no) return [chip('Declined', 'quiet')];
+    if (!out) return [];
+    const up = ups.get(out[1]);
+    if (up === undefined) return [chip('To be filed as a follow-up', 'quiet')];
+    const upEl = typeof up === 'number' ? issueLink({ issue: up, url: repoUrl ? `${repoUrl}/issues/${up}` : null }) : h('span', 'issue', String(up));
+    return [chip('Filed as a follow-up', 'quiet'), upEl];
+  }
+  // The judge's reason under a finding (findingRows), in its own block as the Declined panel draws it (panels/declined.js).
+  function judgeWhy(label, reason, repoUrl, known) {
+    const box = h('div', 'reason why-block');
+    box.dataset.by = 'judge';
+    box.append(h('strong', 'why-label', label), fill(h('div', 'why-text'), reason.trim(), repoUrl, known, 'why'));
+    return box;
   }
   // The "Reviewed lines" toggles of one card's findings (findingRows): a function that makes the toggle of a place
   // (`path:line` or `path:a-b`, as the finding writes it). The lines are not in the snapshot: each review kept them from
@@ -407,15 +428,17 @@
   }
   // A review's findings as one list of rows, accepted and declined alike (findingRows), for the step that shows its
   // output as plain text (output with raw); null when the output holds no finding. was: the list this one replaces in a
-  // redraw: the same output keeps it, so its open toggles stay open.
-  function reviewList(tail, card, was, repoUrl, repo, reviewAt) {
+  // redraw: the same output, with the same follow-ups filed (filed, as findingRows takes it), keeps it, so its open toggles stay open.
+  function reviewList(tail, card, was, repoUrl, repo, reviewAt, filed) {
     if (typeof tail !== 'string' || !tail.trim()) return null;
-    if (was && was.dataset.text === tail && was.dataset.card === String(card)) return was;
+    const ups = JSON.stringify(filed instanceof Map ? Array.from(filed) : []);
+    if (was && was.dataset.text === tail && was.dataset.card === String(card) && was.dataset.filed === ups) return was;
     const folded = foldLines(tail, card);
-    if (!folded.some((x) => FINDING.test(x.text) || DECLINED.test(x.text))) return null;
-    const list = findingRows(folded, repoUrl, card, repo, reviewAt);
+    if (!folded.some((x) => FINDING.test(x.text) || DECLINED.test(x.text) || OUTSIDE.test(x.text))) return null;
+    const list = findingRows(folded, repoUrl, card, repo, reviewAt, filed);
     list.classList.add('review-findings');
     list.dataset.text = tail;
+    list.dataset.filed = ups;
     list.dataset.card = String(card);
     return list;
   }

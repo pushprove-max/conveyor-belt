@@ -91,9 +91,10 @@ cardready() {
   # its tests passed, it takes the landing turn and the ready cards that share them or wait on that turn, and one run
   # judges them all (batch()); while another card has the turn, it waits for the next batch (turnq()). Tests that
   # passed while it waited on what its worktree still holds are not run again (testedhere()). A card that files a
-  # last NO-GO's follow-ups keeps its pass there too, marked alone: no batch takes it or is taken by it.
+  # last NO-GO's follow-ups, or of findings the judge found outside its change (<worktree>.outside), keeps its pass
+  # there too, marked alone: no batch takes it or is taken by it, as a batch would land it with none of them filed.
   # Its extra's waitSec is what it has waited so far; settle() keeps it up to date while it waits (a batch lands it).
-  rm -f "$wt.ready"; jq -cn --argjson i "$n" --arg m "$cmsg" --argjson y "${yesfrom:-null}" --argjson a "$([ -n "$last" ] && echo true || echo false)" --argjson w "$((waitsec + mainsec))" --argjson ro "$ro" \
+  rm -f "$wt.ready"; jq -cn --argjson i "$n" --arg m "$cmsg" --argjson y "${yesfrom:-null}" --argjson a "$({ [ -n "$last" ] || [ -s "$wt.outside" ]; } && echo true || echo false)" --argjson w "$((waitsec + mainsec))" --argjson ro "$ro" \
     '{issue: $i, msg: $m, extra: ({waitSec: $w} + (if $y then {yesFrom: $y} else {} end) + if $ro != [] then {rollout: $ro} else {} end)} + (if $a then {alone: true} else {} end)' > "$wt.ready"
   go=''
 }
@@ -395,21 +396,27 @@ cardland() {
       [ $rc = 0 ] || { rm -f "$wt.ready"; locked giveway "$c" "$wt"; go=next; return; }
       [ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" = "$old" ] && [ "$t" = 0 ] || { go=again; return; }
     fi
-    if [ -n "$last" ]; then
+    # A last NO-GO's findings, and the findings the judge found outside the card's change (<worktree>.outside,
+    # judged()) after a GO too, are filed here as follow-ups (followups()).
+    if [ -n "$last" ] || [ -s "$wt.outside" ]; then
       # The earlier loop's last NO-GO is filed here, after the checks above read this card's own review: alone after a
       # GO, its findings before this review's after a NO-GO.
-      [ -n "$merged" ] || [ -z "$earlier" ] || { { if [ "$res" = GO ]; then printf '%s\n' "$earlier"; else grep -Ev "$NOTFINDING" <<<"$earlier"; cat "$wt.review"; fi; } > "$wt.review.new" \
+      [ -z "$last" ] || [ -n "$merged" ] || [ -z "$earlier" ] || { { if [ "$res" = GO ]; then printf '%s\n' "$earlier"; else grep -Ev "$NOTFINDING" <<<"$earlier"; cat "$wt.review"; fi; } > "$wt.review.new" \
         && mv -f "$wt.review.new" "$wt.review"; } || { block "$c" "$n" "$wt" "the engine could not put back the last review of the earlier loop, so it could not file the findings of that review"; return; }
-      merged=1
+      [ -z "$last" ] || merged=1
+      # After a GO, the depth cap is read here: a follow-up at the cap files none of them, as after a last NO-GO.
+      [ -n "$last" ] || { isfu=1; [ "$(fudepth "$issue")" -lt "$MAX_DEPTH" ] 2>/dev/null && isfu=''; }
       if [ -n "$isfu" ]; then
-        dec=$(leftovers "$wt.review"); left='{"leftover":true,"followups":[]}'
+        dec=$(tofile "$wt.review"); left='{"leftover":true,"followups":[]}'; [ -n "$last" ] || left='{"followups":[]}'
         [ -n "$dec" ] || { block "$c" "$n" "$wt" "the last review said NO-GO and named no finding to file"; return; }
       else
         began "$c" "$n" file
         ups=$(followups "$c" "$issue" "$wt.review") || { block "$c" "$n" "$wt" "$ups"; return; }
         # Its filed line says why the loop whose findings it files ended: after a GO on a port, the earlier loop's.
         fe=$ended; [ "$res" != GO ] || [ -z "$earlyend" ] || fe=$earlyend
-        left="{\"leftover\":true,\"followups\":$ups}"; record "$c" "$n" filed ok "$(jq -c --argjson u "$ups" '. + {followups: $u}' <<<"${fe:-"{}"}")"
+        # The landed line's leftover says it landed on a NO-GO; outside: the outside findings filed, {finding, issue}.
+        left="{\"leftover\":true,\"followups\":$ups}"; [ -n "$last" ] || left="{\"followups\":$ups}"
+        record "$c" "$n" filed ok "$(jq -c --argjson u "$ups" --slurpfile o <(cat "$wt.outfiled" 2>/dev/null) '. + {followups: $u} + (if $o == [] then {} else {outside: $o} end)' <<<"${fe:-"{}"}")"
       fi
     fi
     # A case that joined during its last test run stages its links before it lands (redbrief()).
@@ -440,8 +447,11 @@ cardland() {
 # A landing that did not land (its reason in t): the one rebuild of a GO card whose change no longer applies to main,
 # or else the one port of a finished loop; else the card blocks. go: next (review the rebuilt or ported change).
 landconflict() {
-  # The one rebuild: a card that got a GO, whose reviewed change does not apply to main as it is now.
-  if [ -z "$rebased" ] && [ -z "$ups" ] && [ -z "$dec" ] && [ -z "$ported" ] && [[ $t == "rebase onto main conflicts: "* ]]; then
+  # The one rebuild: a card that got a GO (no last NO-GO), whose reviewed change does not apply to main as it is now.
+  # The follow-ups it filed for the judge's outside findings are withdrawn: filed again when it comes back to land.
+  if [ -z "$rebased" ] && [ -z "${last:-}" ] && [ -z "$ported" ] && [[ $t == "rebase onto main conflicts: "* ]]; then
+    # shellcheck disable=SC2046 # the filed follow-ups' issue numbers, one word each
+    [ -z "$ups" ] || unfile "$n" "$wt.review" $(jq -r '.[]' <<<"$ups"); ups=''; left=''; dec=''
     # Its change outside documentation (*.md) as reviewed (docs), and as tested when its tests passed on it (docpass),
     # when the clash is in documentation alone (docsonly()).
     docs=$(cardpatch "$wt" ':(exclude)*.md'); docsonly "$wt.patch" "$docs" || docs=''; docpass=''; ! testedhere "$wt" || docpass=$docs

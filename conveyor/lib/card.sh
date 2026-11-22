@@ -587,10 +587,10 @@ cardreview() {
     # (excerpts(), lib/review.sh), which the Board reads on demand too (history excerpts); after a fix round, also
     # from the tree before that fix (fixtree), which holds the lines the fix deleted.
     ex=$(excerpts "$wt" "$fixtree"); fixtree=''
-    # The line is written once the loop's end is known (stop, below); a review with no verdict blocks with it here.
+    # The line is written once the loop's end is known (stop, below); a review with no verdict blocks with it here. Its tail, the review's recorded lines (no USER-VISIBLE or VERDICT line; their last 60, TAIL in records.sh), as the reason is cut at 1500 characters: on a NO-GO, and on a GO with an OUTSIDE line, which the Board lists.
     rline=$(grep -Ev "$UNRECORDED" "$wt.review" | jq -cRs --arg res "$res" --argjson t "$t" --arg v "$vis" --argjson k "$(counts "$wt.review")" --arg p "$cpid" --arg m "$chead" --arg s "$cseen" --argjson sv "${sv:-[]}" --argjson an "${an:-[]}" \
       --argjson ro "$(rollouts "$wt.review" ROLLOUT)" --argjson h "$(sed -n 's/^DONE-WHEN: D\([0-9][0-9]*\) holds[[:space:]]*$/\1/p' "$wt.review" | jq -sc 'unique')" --argjson ex "${ex:-[]}" \
-      'sub("\n+$"; "") as $r | $t + {reason:$r,visible:$v,counts:$k,patch:$p,main:$m,seen:$s} + (if $res == "NO-GO" then {tail: $r} else {} end) + (if $sv == [] then {} else {survived: $sv} end) + (if $an == [] then {} else {answers: $an} end) + (if $h == [] then {} else {doneWhenHolds: $h} end) + (if $ro != [] then {rollout: $ro} else {} end) + (if $ex == [] then {} else {excerpts: $ex} end)')
+      'sub("\n+$"; "") as $r | $t + {reason:$r,visible:$v,counts:$k,patch:$p,main:$m,seen:$s} + (if $res == "NO-GO" or ($r | test("(^|\n)OUTSIDE: ")) then {tail: $r} else {} end) + (if $sv == [] then {} else {survived: $sv} end) + (if $an == [] then {} else {answers: $an} end) + (if $h == [] then {} else {doneWhenHolds: $h} end) + (if $ro != [] then {rollout: $ro} else {} end) + (if $ex == [] then {} else {excerpts: $ex} end)')
     [ -n "$rline" ] || rline='{}' # the grep finds no line in a review of only unrecorded lines: that is no failure
     [ "$res" != none ] || { record "$c" "$n" review "$res" "$rline"; block "$c" "$n" "$wt" "review $pass ended without one clear verdict$unclear"; return; }
   fi
@@ -616,7 +616,7 @@ cardfix() {
     [ -z "$p1" ] || { p1fix=1; echo "conveyor: card $c: its last review holds a P1 finding, so it goes to one fix round and a review of that fix: ${p1:0:200}"; }
     locked giveway "$c" "$wt" fix; began "$c" "$n" fix
     old=$(git -C "$wt" write-tree); more=''; [ -z "$rep" ] || more=$'\n\n'"$(again "$rep")"
-    # The fix is told the accepted findings only: a finding the judge declined (a DECLINED line), a P3 listed only
+    # The fix is told the accepted findings only: a finding the judge declined (a DECLINED line) or found outside the change (an OUTSIDE line, filed when the card lands), a P3 listed only
     # (a MINOR line, minor()), or a rollout action (a ROLLOUT line, no defect), is not its to fix. Each finding it is told is led by its id (donewhen.sh numbered(), fixlines()).
     # It runs on the fix seat (seat(): the builder's unless the control record sets fix).
     ids=$(numbered "$wt") && fl=$(fixlines "$wt" "$ids") || { block "$c" "$n" "$wt" "fix: the engine could not give the review's findings their ids"; return; }
@@ -639,7 +639,7 @@ cardfix() {
 # parse is given up: that card is built from nothing.
 # It reads card()'s n, br, wt, issue, vrule, heldto and inh, and sets its from, fromk, was, mode (land, review,
 # session, port, stale, or none: built from nothing), note, fin, finend, pro and rounds, and the files
-# beside the worktree that come with the kept patch (review, rerun, trailers, covered, rounds). It fails, with the
+# beside the worktree that come with the kept patch (review, rerun, trailers, covered, outside, rounds). It fails, with the
 # reason in err, when the card must block: a staged change in the new worktree that is no kept patch, a kept patch it
 # could not take out again, or retried lines it could not read.
 resumeplan() {
@@ -673,8 +673,8 @@ resumeplan() {
         mode=stale; note="the kept patch of card $from cannot be read: built from nothing"
       fi
       # Its commit trailers and the COVERED-BY lines of its replies (speedproof.sh hollowproof()) come with its patch (a card that
-      # lands from it has no session to write them again, and its deleted hollow cases are checked again on them).
-      [ "$mode" = stale ] || for t in trailers covered; do cp "$fromk/$from.$t" "$wt.$t" 2>/dev/null || cp "$CARDS/$from.$t" "$wt.$t" 2>/dev/null; done
+      # lands from it has no session to write them again, and its deleted hollow cases are checked again on them); so do, whatever the patch, the findings its judge found outside its change (judged()), which this card files when it lands.
+      [ "$mode" = stale ] || for t in trailers covered; do cp "$fromk/$from.$t" "$wt.$t" 2>/dev/null || cp "$CARDS/$from.$t" "$wt.$t" 2>/dev/null; done; cp "$fromk/$from.outside" "$wt.outside" 2>/dev/null || cp "$CARDS/$from.outside" "$wt.outside" 2>/dev/null || :
     fi
   fi
   # A kept patch lands unreviewed only on the issue its review read (keptway(): the body its card kept when it

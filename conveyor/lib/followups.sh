@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # The last review said NO-GO: each of its finding lines becomes its own issue, filed before the card lands; a line
-# the review repeats word for word is filed once. Prints the new issue numbers as a JSON array.
+# the review repeats word for word is filed once. So does each finding the judge found real but not caused by the
+# card's change (an OUTSIDE answer, judged(): <worktree>.outside), after the review's, whatever the last verdict; its
+# body says so and gives the judge's reason, and each goes to <worktree>.outfiled as {finding, issue} (issue: the
+# number, or the card id of a follow-up card) for the filed line. Prints the new issue numbers as a JSON array.
 # With the control record's rules.followupissues false (the Rules tab's Cards with no GitHub issue: Review follow-ups On)
 # each finding becomes a card with no GitHub issue instead (tcadd(), lib/testaction.sh), its body the issue's, naming its
 # parent, and a `Depends on:` line with the parent card's id, so it is picked only once the parent has landed. A card on a finding that names a pipeline file is held as the issue is (`control release <card id>`). None is
@@ -157,6 +160,9 @@ fudepth() {
 # shellcheck disable=SC2034 # read by card() (lib/card.sh)
 FUCAP="its issue is a follow-up at the depth cap of $MAX_DEPTH, so no deeper follow-up is filed" # the reason of a finding declined at the cap
 leftovers() { grep -Ev "$NOTFINDING" "$1" 2>/dev/null | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' | awk '!seen[$0]++'; } # <review file>: its finding lines, each once
+# <review file>: the findings followups() files, in its order: the review's finding lines (leftovers()), then the
+# findings of <worktree>.outside that are not among them, each once.
+tofile() { { leftovers "$1"; jq -r '.finding' "${1%.review}.outside" 2>/dev/null; } | awk 'NF && !seen[$0]++'; }
 decline() { # <card> <issue> <why>, the findings on stdin, one a line: each to the declined list (declined()), by code
   local f
   while IFS= read -r f; do
@@ -205,7 +211,7 @@ privown() {
 }
 unfile() { # <parent issue> <review file> <follow-up issue>...
   local n=$1 r=$2 i j=0 found=(); shift 2
-  mapfile -t found < <(leftovers "$r")
+  mapfile -t found < <(tofile "$r")
   for i; do
     gh_write issue close "$i" --reason "not planned" --comment "Conveyor: the card this follows up did not land; withdrawn. The next build of #$n carries this finding in its brief." >/dev/null 2>&1
     printf '#%s %s\n' "$i" "${found[j]:-}" >> "${r%.review}.withdrawn"; j=$((j + 1))
@@ -219,6 +225,7 @@ unfile() { # <parent issue> <review file> <follow-up issue>...
 }
 followups() { # <card> <issue json> <review file>
   local f mark where out num n nums=() more=() found=() pipe cost own='' free res pm g masked depth kind clean body area nocard='' fc=${3%.review}.fucards
+  local why ofc=${3%.review}.outfiled
   depth=$(fudepth "$2") && [[ $depth =~ ^[0-9]+$ ]] || { echo "cannot read the parent issue's follow-up depth"; return 1; }
   packget pipelineFiles pipe || { echo "cannot read the pack's pipeline files"; return 1; }
   packget privacy.mode pm || { echo "cannot read the pack's privacy mode"; return 1; }
@@ -229,8 +236,8 @@ followups() { # <card> <issue json> <review file>
   # The parent of a card with no GitHub issue (issue 0) is the issue that card follows up, if it follows one up: its follow-ups
   # are the follow-ups of that issue (a run limited by --only to it takes them, and the follow-up's brief reaches its yes).
   [ "$n" != 0 ] || n=$(tcparent "$1")
-  mapfile -t found < <(leftovers "$3")
-  rm -f "$fc"; [ "$(ctl 2>/dev/null | jq -r '.rules.followupissues' 2>/dev/null)" != false ] || nocard=1
+  mapfile -t found < <(tofile "$3")
+  rm -f "$fc" "$ofc"; [ "$(ctl 2>/dev/null | jq -r '.rules.followupissues' 2>/dev/null)" != false ] || nocard=1
   [ ${#found[@]} != 0 ] || { echo "the last review said NO-GO and named no finding to file"; return 1; }
   for f in "${found[@]}"; do
     # The finding's level, P0 to P3 (P1 when it names none), is the pack's priority at that place, or its last one.
@@ -262,7 +269,17 @@ followups() { # <card> <issue json> <review file>
     if grep -qiE '^(\[[^]]*\][[:space:]]*)*\[cleanup\]' <<<"$f"; then
       kind='' clean=$'\nCleanup: the finding changes no behaviour, so no test has to fail on main for it. The change must keep what the code does: the review judges that it does.'
     fi
-    body="Follow-up to #$n (Conveyor card $1). The last review of that card said NO-GO. The card landed without a fix for the finding below. Fix it in this issue.
+    # An outside finding (<worktree>.outside) that the review does not hold as a finding: the judge's reason is its why.
+    why=''; leftovers "$3" | grep -Fxq -- "$f" || why=$(jq -r --arg f "$f" 'select(.finding == $f) | .reason' "${3%.review}.outside" 2>/dev/null | head -n 1)
+    [ -z "$why" ] || [ "$pm" != public ] || why=$(privmask "$why") \
+      || { unfile "$n" "$3" "${nums[@]}"; echo "follow-up not filed, so nothing landed: the privacy check could not be made (finding: ${f:0:200})"; return 1; }
+    if [ -n "$why" ]; then
+      body="Follow-up to #$n (Conveyor card $1). The judge of that card's review found the finding below real, but not caused by that card's change: $why
+The card landed without a fix for it. Fix it in this issue."
+    else
+      body="Follow-up to #$n (Conveyor card $1). The last review of that card said NO-GO. The card landed without a fix for the finding below. Fix it in this issue."
+    fi
+    body+="
 
 Finding: $g
 Where: ${where:-the finding names no file:line}$clean$cost$masked
@@ -273,12 +290,14 @@ Follow-up depth: $((depth + 1))"
       # Its parent's card is filed before it lands: the card waits on that id, as an issue waits on its parent's landed line (jq/upnext.jq).
       # It keeps its parent's area label, as the follow-up issue does (more), so an area set to Never build holds it too.
       num=$(tcadd "" "${g:0:200}" "$body"$'\n'"Depends on: $1" "$([ -z "$cost" ] || [ -n "$free" ] || echo held)" "Review follow-up of #$n" "$(jq -cn '$ARGS.positional' --args "$FOLLOWUP" ${kind:+"$kind"} ${mark:+"$mark"} ${area:+"$area"})" "$n") \
-        && printf '%s\t%s\n' "$num" "$f" >> "$fc" || { unfile "$n" "$3" "${nums[@]}"; echo "follow-up not filed, so nothing landed (finding: ${f:0:200}): its card could not be started"; return 1; }
+        && printf '%s\t%s\n' "$num" "$f" >> "$fc" && { [ -z "$why" ] || jq -cn --arg f "$f" --arg i "$num" '{finding: $f, issue: $i}' >> "$ofc"; } || { unfile "$n" "$3" "${nums[@]}"; echo "follow-up not filed, so nothing landed (finding: ${f:0:200}): its card could not be started"; return 1; }
       continue
     fi
     out=$(gh_write issue create --title "${g:0:200}" --label "$FOLLOWUP" ${kind:+--label "$kind"} ${mark:+--label "$mark"} "${more[@]}" --body "$body" 2>&1) && num=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1) && num=${num##*/} && [ -n "$num" ] \
       || { unfile "$n" "$3" "${nums[@]}"; echo "follow-up not filed, so nothing landed (finding: ${f:0:200}): ${out:0:400}"; return 1; }
     nums+=("$num")
+    [ -z "$why" ] || jq -cn --arg f "$f" --argjson i "$num" '{finding: $f, issue: $i}' >> "$ofc" \
+      || { unfile "$n" "$3" "${nums[@]}"; echo "follow-up #$num filed, but the engine could not note it as an outside finding's, so nothing landed (finding: ${f:0:200})"; return 1; }
     [ -z "$free" ] || standinglog review-followup "#$num, a follow-up of #$n (card $1), was not held: its finding names only files of that card's change: ${f:0:200}" >/dev/null 2>&1 || free=''
     [ -z "$cost" ] || [ -n "$free" ] || out=$(locked control hold "$num" 2>&1 >/dev/null) \
       || { unfile "$n" "$3" "${nums[@]}"; echo "a follow-up that changes a pipeline file could not be held, so nothing landed (finding: ${f:0:200}): ${out:0:400}"; return 1; }

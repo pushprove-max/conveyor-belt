@@ -516,7 +516,7 @@ the change itself, whatever it touches.'
 # verdict, causes no fix round, is never filed or counted, and goes to the judge as no finding. It is kept on its own
 # (rollouts()). Only a line of exactly that shape is one (ROLLOUT, after the prefix): any other line that starts so is a finding.
 ROLLOUT='[^|]*[^|[:space:]][^|]* \| [^|]*[^|[:space:]][^|]* \| [^|[:space:]]+:[0-9]+[[:space:]]*$'
-NOTFINDING='^(NEW CARD|UNPROVEN|DECLINED|MINOR|COVERED-BY|VERDICT|USER-VISIBLE|INHERITED):|^DONE-WHEN: D[0-9]+ holds[[:space:]]*$|^EARLIER: E[0-9]+ holds[[:space:]]*$|^ROLLOUT: '"$ROLLOUT"'|^[[:space:]]*$'
+NOTFINDING='^(NEW CARD|UNPROVEN|DECLINED|MINOR|OUTSIDE|COVERED-BY|VERDICT|USER-VISIBLE|INHERITED):|^DONE-WHEN: D[0-9]+ holds[[:space:]]*$|^EARLIER: E[0-9]+ holds[[:space:]]*$|^ROLLOUT: '"$ROLLOUT"'|^[[:space:]]*$'
 # The rollout actions a file names, as a JSON array of {action, fails, place} ([] when none): a review's ROLLOUT lines
 # (prefix ROLLOUT) or a card's `Rollout:` commit trailers (prefix Rollout, donewhen.sh trailerbrief()), each of the shape above.
 # They are steps in order: each is kept once, where it is first named, and never sorted (ROLLOUTONCE).
@@ -528,12 +528,14 @@ rollouts() { # <file> <prefix>
 # A `DECLINED:` line is a finding the judge declined (judged()), with the judge's reason: it holds no verdict, causes
 # no fix round and is never filed. A `MINOR:` line is an accepted P3 finding while the control record's rule P3 is
 # off (minor()): it is listed only, holds no verdict, causes no fix round and is never filed, but it is counted
-# (donewhen.sh counts()). Only the engine writes either: a line the reviewer starts so is a finding (review()).
+# (donewhen.sh counts()). An `OUTSIDE:` line is a finding the judge found real but not caused by the card's change
+# (judged()): it holds no verdict and causes no fix round, and it is filed as a follow-up when the card lands
+# (followups(), from <worktree>.outside). Only the engine writes these lines: a line the reviewer starts so is a finding (review()).
 # The lines a review's record line (reason) and a blocked card's comment leave out: the NEW CARD, UNPROVEN,
-# DECLINED, MINOR and COVERED-BY lines stay there, so the dashboard's review text shows them, and the Tests page the
+# DECLINED, MINOR, OUTSIDE and COVERED-BY lines stay there, so the dashboard's review text shows them, and the Tests page the
 # test files that cover the cases of a file an Optimize deleted (testspart()).
 # shellcheck disable=SC2034 # used in lib/card.sh, lib/followups.sh and lib/push.sh
-UNRECORDED=${NOTFINDING/NEW CARD|UNPROVEN|DECLINED|MINOR|COVERED-BY|/}
+UNRECORDED=${NOTFINDING/NEW CARD|UNPROVEN|DECLINED|MINOR|OUTSIDE|COVERED-BY|/}
 # What the fix session after a NO-GO is told, after the brief; the review follows it, each finding led by its id
 # (donewhen.sh fixlines()).
 FIX='# Reviewer findings: fix these findings, and every other place in this change that makes the same mistake; nothing else

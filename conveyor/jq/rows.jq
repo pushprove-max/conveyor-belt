@@ -71,7 +71,11 @@ map(select(.step != "push")) | group_by(.card) | map(. as $all
                gate: (if .step == "lint" then .lint.gate else null end),
                # A lint line's commands (lintline()): the Board shows a row for each.
                lintCommands: (if .step == "lint" then .lint.commands else null end),
-               tail: (if .step == "blocked" or (.step == "test" and .result != "pass") or (.step == "review" and .result == "NO-GO") then .tail else null end),
+               # A GO review has its tail too when it holds a finding the judge found outside the card's change (an OUTSIDE line, card.sh).
+               tail: (if .step == "blocked" or (.step == "test" and .result != "pass") or (.step == "review" and .result == "NO-GO") then .tail
+                 elif .step == "review" and (.tail // "" | test("(^|\n)OUTSIDE: ")) then .tail else null end),
+               # A filed line's outside findings, each {finding, issue}: the Board names the follow-up of each under its review.
+               outside: (if .step == "filed" then .outside else null end),
                failures: (if .step == "test" and .result != "pass" then .failures else null end),
                # A test line's failures' verdicts (card, main or flaky) and the seconds its run of them on main took (mainred.sh verdicts());
                # mainSec also on a start line of the test step after a wait for main, the seconds of the runs on main that wait took (card.sh mainwaited()).
@@ -90,12 +94,13 @@ map(select(.step != "push")) | group_by(.card) | map(. as $all
                # check's (donewhen.sh checked()), which the track draws on the step of the session it checks.
                checkFailed: (if (.step | IN("build", "fix", "rebase")) and ((.doneWhen.failed? // []) | length > 0) then true else null end),
                stop: (if .step != "blocked" then null else .reason | if startswith($nodeps) then "deps" elif startswith("worktree:") then "worktree" elif startswith("brief:") then "brief" elif startswith($yes) or startswith($lintyes) then "yes" else null end end),
-               # A review's judge: {ran: true, accepted, declined (how many findings it accepted and declined), go (the
-               # review's GO came from the judge declining every finding)}; {ran: false, why} for a review it did not
+               # A review's judge: {ran: true, accepted, declined, outside (how many findings it accepted, declined and found
+               # outside the card's change, filed as follow-ups; outside only when it found any), go (the review's GO came from the judge accepting no finding)}; {ran: false, why} for a review it did not
                # read: its call failed or its answer was not read (why says), the review ended with no verdict or held
                # no finding, or the judge is off.
                judge: (if .step != "review" then null
                  elif (.judge.accepted | type) == "array" then {ran: true, accepted: (.judge.accepted | length), declined: (.judge.declined | length), go: (.result == "GO" and (.judge.accepted | length) == 0)}
+                   + (.judge.outside // [] | length | if . > 0 then {outside: .} else {} end)
                  elif .judge.failed then {ran: false, why: .judge.failed}
                  elif .result | IN("GO", "NO-GO") | not then {ran: false, why: "the review did not end with a verdict"}
                  elif .reason // "" | split("\n") | any(test("^(NEW CARD|UNPROVEN|DECLINED):|^[[:space:]]*$") | not) then {ran: false, why: "the judge is off"}
