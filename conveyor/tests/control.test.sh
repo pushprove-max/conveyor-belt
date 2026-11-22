@@ -387,7 +387,7 @@ t_controlsuitemachine() {
   [ "$(ctl suite-machine devbox --size 8x16 | jq -r .suiteMachine.setupAt)" = 2026-11-20T15:04:00Z ] || fail "control suite-machine devbox --size 8x16 again dropped the box's setupAt: $(jq -c .suiteMachine "$C")"
   [ "$(ctl suite-machine devbox --size 4x8 | jq -c '.suiteMachine | has("setupAt")')" = false ] || fail "control suite-machine devbox --size 4x8 kept the setupAt of the 8x16 box: $(jq -c .suiteMachine "$C")"
   ctl suite-machine devbox --size 8x16 > /dev/null || fail "control suite-machine devbox --size 8x16 did not set the rule back"
-  for a in 'devbox --size' 'devbox --size -oX''devbox --size a/b' 'devbox 4x8' 'devbox --size 4x8 x' 'devbox --dir ~'; do
+  for a in 'devbox --size' 'devbox --size -oX' 'devbox --size a/b' 'devbox 4x8' 'devbox --size 4x8 x' 'devbox --dir ~'; do
     # shellcheck disable=SC2086 # each word an argument
     out=$(loop control suite-machine $a 2>&1); [ $? = 2 ] && [ "$(jq -c .suiteMachine "$C")" = '{"kind":"devbox","size":"8x16","tag":"conveyor-suite-main","idleStop":"15m"}' ] \
       || fail "control suite-machine $a was not refused with nothing changed: $out"
