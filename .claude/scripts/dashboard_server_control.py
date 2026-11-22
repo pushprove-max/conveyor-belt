@@ -325,9 +325,13 @@ def note_issue(line):
     if m and globals()['CARD'].fullmatch(m.group('card')):  # CARD is the base part's, as REDCARD is above
         text, evidence = text.replace(m.group('card'), '<card>'), evidence.replace(m.group('card'), '<card>')
     cause = NOTE_CAUSE.search(text)
+    claim = text
     if cause:
+        claim = text[:cause.start()].strip(', ')
         text = (text[:cause.start()] + text[cause.end():]).lstrip(', ')
-    title = re.split(r'[,;:.](?=\s|$)', text.split(' · ')[0], maxsplit=1)[0].strip() or 'Plugin problem'
+        if not claim:  # the hook put the whole claim in the cause (a [likely] tag): the title is from it, not 'card <card>'
+            claim = cause.group('cause')
+    title = globals()['re'].split(r'[,;:.](?=\s|$)', claim.split(' · ')[0], maxsplit=1)[0].strip() or 'Plugin problem'
     if evidence not in ('', '-') and evidence not in text:  # after the title: the Evidence line is no part of it
         text += '\nEvidence: ' + evidence
     if cause and cause.group('cause').strip():

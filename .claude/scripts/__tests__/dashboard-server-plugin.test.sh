@@ -137,6 +137,10 @@ check('cause_keeps_card_words', words_body.startswith('setup fails, card c202611
 # 'the cache is stale, card -, evidence -'. A '-' is a field's empty value and ends the cause like an id or a path.
 _, empty_body = ds.note_issue('- 2026-11-22T09:00:00Z · card - · setup fails, cause not checked: the cache is stale, card -, evidence - · evidence: -')
 check('cause_ends_at_empty_fields', empty_body.startswith('setup fails, card -, evidence -\nCause (not checked): the cache is stale\n'), empty_body)
+# Bug (review of #1357): when the hook put the whole claim in the cause part (a [likely] tag at the end), only the card
+# and evidence fields stayed outside it, and the title was 'card <card>'. The title is the cause's first clause.
+whole_title, whole_body = ds.note_issue('- 2026-11-22T09:00:00Z · card c20261122T090000-sample-7 · cause not checked: running cards keep the old engine code, card c20261122T090000-sample-7, evidence ~/cards/x.err · evidence: ~/cards/x.err')
+check('cause_only_title', whole_title == 'running cards keep the old engine code', (whole_title, whole_body))
 check('no_cause_no_line', 'Cause' not in named and 'Cause' not in unnamed, (named, unnamed))
 check('preview_writes_nothing', text(NOTES) == WHOLE and not os.path.exists(os.path.join(T, 'gh-ran')), text(NOTES))
 # Built in parts, so this file holds no home path or private address itself.
