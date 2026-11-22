@@ -2,13 +2,15 @@
 # SPDX-License-Identifier: Apache-2.0
 # watch-idle.sh [--once] -- keeps the Foreman session's 1-hour prompt cache warm while it is idle, run by waiter.sh.
 # Past an hour with no turn the next turn writes the whole cache again; a turn every 50 minutes reads it instead.
-# The last activity is the modification time of the Foreman's own transcript, <marked session id>.jsonl in its
+# The last activity is the newest line timestamp in the Foreman's own transcript (the file time when no line in its
+# last 500 carries one: Claude Code adds lines with no timestamp, such as cost-state or mode, long after a turn, and
+# those are not activity), <marked session id>.jsonl in its
 # project folder (Claude Code's, under CLAUDE_CONFIG_DIR, else ~/.claude: the checkout's path, every other character
 # a dash, cut past 200 characters to those and a dash and a hash, as foreman.sh launch reads it); another session's
 # transcript in that folder is not the Foreman's activity.
 # Once a minute, when that is 50 minutes old, it puts one wake in pending and exits. At most 10 pings in a row, then
 # none until real activity: keepalive.txt holds "<count> <epoch of the last ping>", and the count goes back to 0
-# once the last activity is more than 5 minutes after the last ping (the ping's own turn writes within seconds).
+# once the last activity is more than 5 minutes after the last ping (the ping's own turn ends within seconds).
 # Before the next ping it reads the usage of the last assistant line at or after the last ping in the transcript: the
 # ping's own turn, or the owner's turn when the owner used the Foreman within those 5 minutes. A turn that wrote the
 # cache and read none of it (the cache was gone, a 5-minute cache, another model) stops the pings until real activity,
@@ -30,12 +32,18 @@ turn_usage() { # <transcript> <epoch>
     | objects | select((.cache_creation_input_tokens | type) == "number" and (.cache_read_input_tokens | type) == "number")
     | "\(.cache_creation_input_tokens) \(.cache_read_input_tokens) \(.input_tokens // 0)"' 2>/dev/null
 }
+# The epoch of the newest line timestamp in the last 500 lines of <transcript>; nothing when none has one.
+last_turn() { # <transcript>
+  tail -n 500 "$1" 2>/dev/null | jq -Rnr '
+    [inputs | fromjson? | objects | .timestamp | strings | try (sub("\\.[0-9]+"; "") | fromdateiso8601) catch empty] | max // empty' 2>/dev/null
+}
 poll() { # 0 when a ping was put in pending
   local now last=0 t f file='' count=0 at=0 id u w r i
   now=${CONVEYOR_FOREMAN_NOW:-$(date +%s)}
   id=$(marked); [ -n "$id" ] || return 1
   for f in "$PROJECTS"/$ENC/"$id.jsonl"; do
-    t=$(p_stat "$f" | cut -d' ' -f2) && [ -n "$t" ] || continue
+    t=$(last_turn "$f")
+    [[ $t =~ ^[0-9]+$ ]] || { t=$(p_stat "$f" | cut -d' ' -f2) && [ -n "$t" ] || continue; }
     [ "$t" -gt "$last" ] && last=$t file=$f
   done
   [ "$last" -gt 0 ] && [ $((now - last)) -ge $IDLE_S ] || return 1

@@ -7,7 +7,9 @@
 # active every 30 minutes kept it from ever pinging and the Foreman's 1-hour cache expired; and the project folder was
 # looked for by the whole path, though Claude Code cuts a name past 200 characters to those, a dash and a hash, so a
 # checkout with a long path never pinged. And a keepalive turn that wrote the whole cache again and read none of it
-# (the cache was gone) was followed by more pings, each a full turn for nothing.
+# (the cache was gone) was followed by more pings, each a full turn for nothing. And Claude Code's later writes of
+# lines with no timestamp (mode, cost-state) moved the file time, which reset the ping count before every ping, so the
+# 10-ping limit never stopped them.
 set -uo pipefail
 SRC=$(cd "$(dirname "$0")" && pwd -P)
 . "$SRC/../lib/portable.sh"; p_tools
@@ -57,7 +59,7 @@ stopped() {
   local d=$T/miss/cfg/projects/${P//[^A-Za-z0-9]/-}
   pinged miss '{"input_tokens":3,"cache_creation_input_tokens":41000,"cache_read_input_tokens":0}'
   ! poll miss "$P" && ! poll miss "$P" 60 && grep -qF 'wrote 41000 tokens to the cache and read none (input 3)' "$T/miss/foreman/keepalive.log" \
-    && TZ=UTC touch -t "$(TZ=UTC p_date "@$((NOW + 600))" +%Y%m%d%H%M.%S)" "$d/$ID.jsonl" && poll miss "$P" 3600
+    && printf '{"type":"user","timestamp":"%s","message":{"content":"Status?"}}\n' "$(TZ=UTC p_date "@$((NOW + 600))" +%Y-%m-%dT%H:%M:%S.000Z)" >> "$d/$ID.jsonl" && poll miss "$P" 3600
 }
 check "a keepalive turn that wrote the cache and read none stops the pings until new activity" stopped
 
@@ -73,6 +75,24 @@ owner() {
   poll owner "$P" 60
 }
 check "an owner's turn after a cold keepalive reply, within 5 minutes of the ping: the pings go on" owner
+
+# Bug: the 10th ping was answered at NOW-69 minutes; a line with no timestamp written at NOW-55 minutes (after the
+# 5 minutes that reset the count) moved the file time, the count went back to 0 and the 11th ping came. A turn with a
+# timestamp at the same time is real activity and does start the pings again.
+tenth() { # <case> <line to append at NOW-55 minutes>
+  local d=$T/$1/cfg/projects/${P//[^A-Za-z0-9]/-}
+  mkdir -p "$T/$1/foreman" && printf '10 %s\n' $((NOW - 70 * 60)) > "$T/$1/foreman/keepalive.txt"
+  transcript "$d" "$ID" 55
+  printf '{"type":"assistant","timestamp":"%s","message":{"content":"Idle","usage":{"cache_creation_input_tokens":200,"cache_read_input_tokens":41000}}}\n' \
+    "$(TZ=UTC p_date "@$((NOW - 69 * 60))" +%Y-%m-%dT%H:%M:%S.123Z)" > "$d/$ID.jsonl"
+  printf '%s\n' "$2" >> "$d/$ID.jsonl"
+  TZ=UTC touch -t "$(TZ=UTC p_date "@$((NOW - 55 * 60))" +%Y%m%d%H%M.%S)" "$d/$ID.jsonl"
+}
+tenth quiet '{"type":"mode","mode":"normal"}'
+no_ping() { ! "$@"; }
+check "a write with no timestamp after the 10th ping does not reset the count: no 11th ping" no_ping poll quiet "$P"
+tenth real "$(printf '{"type":"user","timestamp":"%s","message":{"content":"Status?"}}' "$(TZ=UTC p_date "@$((NOW - 55 * 60))" +%Y-%m-%dT%H:%M:%S.000Z)")"
+check "a timestamped turn after the 10th ping is real activity: the pings start again" poll real "$P"
 
 pinged hit '{"input_tokens":3,"cache_creation_input_tokens":200,"cache_read_input_tokens":41000}'
 check "a keepalive turn that read the cache: the pings go on" poll hit "$P"
