@@ -37,6 +37,23 @@ t_lintpolicylisted() {
   [ "$(sed -n '2,$p' "$T/$CASE/run.out" | paste -sd' ')" = '.conveyor/project.json .lintrc .size-exempt' ] && [[ $(head -n 1 "$T/$CASE/run.out") =~ ^[0-9a-f]{40,64}$ ]] \
     || fail "the policy files or their hash were not listed: $(cat "$T/$CASE/run.out")"
 }
+# Bug (R268): a policy file whose name holds a newline was read as two paths, neither of them the file, so its diff was
+# hashed as empty: the hash stayed the same when the file changed, and an owner's yes to one content covered another.
+# The file is listed whole, and a change to its content gives another hash.
+t_lintpolicynewline() {
+  local p=$'pol/a\nb' l='{"commands": [{"files": ["*.txt"], "run": "true"}], "policy": ["pol/*"]}' h1
+  setup '[]'
+  fx_wt 'mkdir -p pol && printf "one\n" > "pol/a
+b"' keep.txt one
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  fx_in 'lintpolicy "$FXWT" "$(git -C "$FXWT" rev-parse HEAD)" '"'$l'"
+  [ "$RC" = 0 ] && [ "$(sed -n '2,$p' "$T/$CASE/run.out")" = "$p" ] || fail "lintpolicy did not list the policy file $p whole (exit $RC): $(cat "$T/$CASE/run.out")"
+  h1=$(head -n 1 "$T/$CASE/run.out")
+  printf 'two\n' > "$FXWT/$p" && git -C "$FXWT" add -A || fail "the card's second change"
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  fx_in 'lintpolicy "$FXWT" "$(git -C "$FXWT" rev-parse HEAD)" '"'$l'"
+  [ "$RC" = 0 ] && [ "$(head -n 1 "$T/$CASE/run.out")" != "$h1" ] || fail "a change to the content of the policy file $p kept its hash $h1: $(cat "$T/$CASE/run.out")"
+}
 
 # Card #7 on a main whose pack makes .lintrc lint policy, with a lint command that passes: its build runs <build>
 # and notes `build` in $STUB/did; review 1 is <review> (a GO by default).

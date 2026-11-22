@@ -145,9 +145,10 @@ lintresult() { # <exit> <output file> <finding lines> <over the limit: 1 or empt
 # `<path>:<limit + 1>: size <n> lines, limit <limit>`, and the exit is 1; else 0. A line exempts the file whose path
 # is the whole line, so a function's line (path, a tab, its name) exempts no file; an exempt file the index lacks (an
 # ignored one too) or holds as a link (its blob is the target's name) exempts nothing. A link or a submodule is not
-# counted. A last line with no newline is a line. When a file cannot be read, the exit is 2 after awk's why.
+# counted, nor a file under a folder that is a link (a tracked folder made a link, to a place outside the worktree
+# too). A last line with no newline is a line. When a file cannot be read, the exit is 2 after awk's why.
 lintsize() { # <worktree> <limit> <exempt file> <file>...
-  local w=$1 lim=$2 ex=$3 f n out i=0 rc=0
+  local w=$1 lim=$2 ex=$3 f d n out i=0 rc=0
   local -a fs=() ns
   local -A skip=()
   shift 3
@@ -155,7 +156,11 @@ lintsize() { # <worktree> <limit> <exempt file> <file>...
   if [[ $n == '100644 '* || $n == '100755 '* ]]; then
     while IFS= read -r n || [ -n "$n" ]; do n=${n%$'\r'}; [ -z "$n" ] || skip[$n]=1; done < <(git -C "$w" cat-file blob ":$ex" 2>/dev/null)
   fi
-  for f; do [ -f "$w/$f" ] && [ ! -L "$w/$f" ] && [ -z "${skip[$f]:-}" ] && fs+=("$f"); done
+  for f; do
+    [ -f "$w/$f" ] && [ ! -L "$w/$f" ] && [ -z "${skip[$f]:-}" ] || continue
+    d=$f; while [[ $d == */* ]]; do d=${d%/*}; [ ! -L "$w/$d" ] || continue 2; done
+    fs+=("$f")
+  done
   [ ${#fs[@]} != 0 ] || return 0
   # One awk for all the files, a count a line in their order (0 for an empty file, which has no first line); each
   # path after ./, so that awk reads no `name=value` path as a variable.
@@ -192,7 +197,8 @@ lintsizelist() { # <worktree>
     [ "$rc" -le 1 ] || { rm -rf "$t"; echo "conveyor size: ${out:-the lines could not be counted}" >&2; return 1; }
     [ -z "$out" ] || sed 's/:[0-9]*: size [0-9]* lines, limit [0-9]*$//' <<<"$out" >> "$t/list"
   done < <(jq -c '.commands // [] | .[] | select(.size)' <<<"${l:-null}")
-  LC_ALL=C sort -u "$t/list"; rm -rf "$t"
+  # The list's write fails the command (a full disk, a closed output): its status is sort's.
+  LC_ALL=C sort -u "$t/list"; rc=$?; rm -rf "$t"; return $rc
 }
 
 # The pack's lint commands run on <worktree>'s tree, the change being from <base> (a commit) to that tree: one JSON
@@ -302,18 +308,18 @@ lintbasegone() { # <worktree> <base worktree>
 # so a command's base run reads no other command's triggers; the record then holds this call's paths. A folder of a
 # path that is a link in the base worktree (a tracked link the tree made a folder) is first made a folder there, and
 # noted before the path, so that nothing is written or deleted in the link's target; the next call, putting the record
-# back last path first, deletes that folder and checks the link out again.
+# back, deletes each path last path first (that folder too), then checks base's copy of each out again (the link too).
+# A path the tree made a file where base has a folder (config, for base's config/old.toml) has that folder deleted.
 lintsync() { # <worktree> <index> <base> <base worktree> <scratch file> <record file> <pathspec>...
   local w=$1 ix=$2 b=$3 bw=$4 s=$5 rec=$6 st p d r i
   local -a ps
   shift 6
   if [ -s "$rec" ]; then
     mapfile -d '' -t ps < "$rec"
-    for ((i = ${#ps[@]} - 1; i >= 0; i--)); do
-      p=${ps[i]}
-      if [ -d "$bw/$p" ] && [ ! -L "$bw/$p" ]; then rm -rf "${bw:?}/$p"; else rm -f "$bw/$p"; fi || return 1
-      ! git -C "$bw" ls-files --error-unmatch -- ":(literal)$p" > /dev/null 2>&1 \
-        || git -C "$bw" checkout-index -f -- "$p" || return 1
+    for ((i = ${#ps[@]} - 1; i >= 0; i--)); do lintsyncrm "$bw" "${ps[i]}" || return 1; done
+    # Only a path base's index holds as an entry (a file or a link; never a folder, which a pathspec would match).
+    for p in "${ps[@]}"; do
+      ! git -C "$bw" cat-file -e ":0:$p" 2>/dev/null || git -C "$bw" checkout-index -f -- "$p" || return 1
     done
   fi
   : > "$rec" || return 1
@@ -325,9 +331,15 @@ lintsync() { # <worktree> <index> <base> <base worktree> <scratch file> <record 
       d=${d:+$d/}${r%%/*} r=${r#*/}
       [ ! -L "$bw/$d" ] || { rm -f "$bw/$d" && mkdir "$bw/$d" && printf '%s\0' "$d" >> "$rec"; } || return 1
     done
-    rm -f "$bw/$p" && printf '%s\0' "$p" >> "$rec" || return 1
+    lintsyncrm "$bw" "$p" && printf '%s\0' "$p" >> "$rec" || return 1
     [ "$st" = D ] || { mkdir -p "$(dirname "$bw/$p")" && cp -pP "$w/$p" "$bw/$p"; } || return 1
   done < "$s"
+}
+# <path> deleted in <base worktree>: a folder with what it holds, a file or a link alone; nothing when it is not there
+# (a path under a folder an earlier path made a file).
+lintsyncrm() { # <base worktree> <path>
+  if [ -d "$1/$2" ] && [ ! -L "$1/$2" ]; then rm -rf "${1:?}/$2"
+  elif [ -e "$1/$2" ] || [ -L "$1/$2" ]; then rm -f "$1/$2"; fi
 }
 
 # The ratchet: lintcheck's lines for <worktree>'s tree, the change being from <base>, each with `reported`, the
@@ -407,17 +419,24 @@ lintclean() { # <worktree>
 # (lintratchet) in <output file>. Before the commands, the index tree is kept and lintclean must hold; else no command
 # runs and nothing is put back, so no work is lost. After them (a run over the time limit too) the index tree must be
 # the kept one and lintclean must hold again; else the index is read back from the kept tree, the tracked files are
-# written from it (deleted ones and modes too) and each file git neither tracks nor ignores is deleted. Writes to
+# written from it (deleted ones and modes too) and each file git neither tracks nor ignores is deleted, with the folders
+# that held them; an empty folder git neither tracks nor ignores that was there before the commands is made again. Writes to
 # ignored paths are not checked. 0: the card goes on (each command passed, was skipped, had no files, or found nothing
 # of the change's); 1: findings of the change's (reported); 2: an execution error, LINT_WHY saying what it was.
 lintrun() { # <worktree> <base> <card> <output file>
   local w=$1 o=$4 tree rc=0
+  local -a ed=()
   LINT_WHY=''; : > "$o"
   tree=$(git -C "$w" write-tree 2>/dev/null) && lintclean "$w" \
     || { LINT_WHY="the worktree differs from its staged change, or holds a file git neither tracks nor ignores, so no lint command ran"; return 2; }
+  # The empty folders git neither tracks nor ignores (lintclean holds, so the folders git lists hold no file), each
+  # with the folders in it, which the put-back's clean would delete.
+  mapfile -d '' -t ed < <(git -C "$w" ls-files -z --others --exclude-standard --directory 2>/dev/null)
+  [ ${#ed[@]} = 0 ] || mapfile -d '' -t ed < <(cd "$w" && find "${ed[@]/#/./}" -type d -print0 2>/dev/null)
   lintratchet "$w" "$2" "$3" > "$o" 2> "$o.err" || rc=$?
   if [ "$(git -C "$w" write-tree 2>/dev/null)" != "$tree" ] || ! lintclean "$w"; then
-    if git -C "$w" read-tree "$tree" && { git -C "$w" update-index -q --refresh > /dev/null 2>&1; git -C "$w" checkout-index -a -f; } && git -C "$w" clean -fdq; then
+    if git -C "$w" read-tree "$tree" && { git -C "$w" update-index -q --refresh > /dev/null 2>&1; git -C "$w" checkout-index -a -f; } && git -C "$w" clean -fdq \
+      && { [ ${#ed[@]} = 0 ] || (cd "$w" && mkdir -p -- "${ed[@]}"); }; then
       LINT_WHY="a lint command changed the worktree or its index; the engine put both back as they were"
     else LINT_WHY="a lint command changed the worktree or its index, and the engine could not put them back"; fi
     rm -f "$o.err"; return 2
@@ -453,29 +472,37 @@ lintrule() { [ "$(jq -r '.rules.lint' <<<"${CARDCTL:-$(ctl 2>/dev/null)}" 2>/dev
 # lint.policy pathspecs of <lint field> (main's pack's) match, and .conveyor/project.json when its lint field changed
 # (lintfield). A change that only removes lines from an exempt file (one that the files of a `ratchet: false`
 # command match) only tightens, so it is left out. Nothing when no path is left. Fails when the change cannot be read.
+# Paths are read whole, NUL-separated, so a name with a newline is one path.
 lintpolicy() { # <worktree> <base> <lint field>
-  local a f ix t h ex='' i
-  local -a ps xs fs=()
+  local a f p ix t h i
+  local -a ps xs ns fs=()
+  local -A ex=()
   mapfile -d '' -t ps < <(jq -j '(.policy // [])[] + "\u0000"' <<<"${3:-null}")
   if [ ${#ps[@]} != 0 ]; then
-    t=$(git -C "$1" diff --cached --no-renames -z --numstat "$2" -- "${ps[@]}" | tr '\0' '\n'; exit "${PIPESTATUS[0]}") || return 1
+    t=$(mktemp) || return 1
+    # Each changed path: <added>\t<deleted>\t<path>.
+    git -C "$1" diff --cached --no-renames -z --numstat "$2" -- "${ps[@]}" > "$t" || { rm -f "$t"; return 1; }
+    mapfile -d '' -t ns < "$t"
     # The changed paths that each ratchet: false command's own pathspecs match (each command's set alone, so that its
-    # :(exclude) entries apply only to it), one a line.
+    # :(exclude) entries apply only to it).
     for i in $(jq -r '(.commands // []) | to_entries[] | select(.value.ratchet == false) | .key' <<<"${3:-null}"); do
       mapfile -d '' -t xs < <(jq -j --argjson i "$i" '.commands[$i].files[] + "\u0000"' <<<"$3")
-      ex+=$(git -C "$1" diff --cached --no-renames -z --name-only "$2" -- "${xs[@]}" | tr '\0' '\n'; exit "${PIPESTATUS[0]}")$'\n' || return 1
+      git -C "$1" diff --cached --no-renames -z --name-only "$2" -- "${xs[@]}" > "$t" || { rm -f "$t"; return 1; }
+      while IFS= read -r -d '' p; do ex["$p"]=1; done < "$t"
     done
-    while IFS=$'\t' read -r a _ f; do
-      [ -n "$f" ] || continue
-      if [ "$a" != 0 ] || ! grep -qxF -- "$f" <<<"$ex"; then fs+=("$f"); fi
-    done <<<"$t"
+    rm -f "$t"
+    for p in "${ns[@]}"; do
+      a=${p%%$'\t'*} p=${p#*$'\t'} p=${p#*$'\t'}
+      [ -n "$p" ] || continue
+      if [ "$a" != 0 ] || [ -z "${ex["$p"]:-}" ]; then fs+=("$p"); fi
+    done
   fi
   ix=$(git -C "$1" rev-parse --path-format=absolute --git-path index) || return 1
   lintfield "$1" "$ix" "$2" && f=.conveyor/project.json || f=''
   [ ${#fs[@]} != 0 ] || [ -n "$f" ] || return 0
-  h=$({ [ ${#fs[@]} = 0 ] || git -C "$1" diff --cached --no-renames --binary "$2" -- "${fs[@]}" | sed '/^index /d'
+  h=$({ [ ${#fs[@]} = 0 ] || git -C "$1" diff --cached --no-renames --binary "$2" -- "${fs[@]/#/:(literal)}" | sed '/^index /d'
     [ -z "$f" ] || git -C "$1" show ":$f" | jq -c .lint; } | git -C "$1" hash-object --stdin) && [ -n "$h" ] || return 1
-  printf '%s\n' "$h"; printf '%s\n' "${fs[@]}" ${f:+"$f"} | sort -u
+  printf '%s\n' "$h"; printf '%s\0' "${fs[@]}" ${f:+"$f"} | sort -zu | tr '\0' '\n'
 }
 # Whether the owner's yes covers the policy diff hashed <hash>: the card that stopped for it kept that hash in its
 # <kept body file> (policy), and the issue now holds more approval lines than that body did. A yes covers one diff:
@@ -499,21 +526,29 @@ lintbrief() {
 # cardpatch()), the commit it ran from and the hash of the pack's lint field it ran (lintpassed()). True (lintstands())
 # for the same change and lint field on a commit where main changed none of the change's files (both sides of a
 # rename), no command's triggers or size exempt file, and no file a command without {files} reads: lint gives the
-# same result there, so that pass is the card's. A later run that finds the change red (lintwait, lintleave) removes
+# same result there, so that pass is the card's. A command with {files} (a size entry too) whose trigger the change
+# changes, or any command when the change changes the pack's lint field, read every file its `files` match
+# (lintscope()): for it, main must have changed none of those files either. A later run that finds the change red (lintwait, lintleave) removes
 # <worktree>.linted: a linter can read a file no trigger names, so that finding, not the earlier pass, decides.
 lintpassed() { printf '%s\t%s\t%s\n' "$(cardpatch "$1")" "$2" "$(git hash-object --stdin <<<"$3")" > "$1.linted"; } # <worktree> <base> <lint field>
 lintstands() { # <worktree> <lint field>
-  local p b k h f i n
-  local -a ps=()
+  local p b k h f i n all=''
+  local -a ps=() fs
   { IFS=$'\t' read -r p b k < "$1.linted"; } 2>/dev/null && [ -n "$p" ] && [ "$p" = "$(cardpatch "$1")" ] && [ "$k" = "$(git hash-object --stdin <<<"$2")" ] \
     && h=$(git -C "$1" rev-parse -q --verify HEAD) || return 1
   while IFS= read -r -d '' f; do ps+=(":(literal)$f"); done < <(git -C "$1" diff --cached --name-only --no-renames -z HEAD)
   [ ${#ps[@]} != 0 ] && git -C "$1" diff --quiet "$b" "$h" -- "${ps[@]}" 2>/dev/null && n=$(jq '.commands // [] | length' <<<"$2") || return 1
-  # Each command's pathspecs apart, so that its :(exclude) entries apply only to it.
+  ! lintfield "$1" "$(git -C "$1" rev-parse --path-format=absolute --git-path index)" "$h" || all=1
+  # Each command's pathspecs apart, so that its :(exclude) entries apply only to it, and its files apart from its
+  # triggers, so that an :(exclude) of its files (a linter's own script) hides no trigger.
   for ((i = 0; i < n; i++)); do
-    mapfile -d '' -t ps < <(jq -j --argjson i "$i" '.commands[$i] | (.triggers // []) + [.size.exempt // empty | ":(literal)" + .]
-      + (if .size == null and (.run | contains("{files}") | not) then .files else [] end) | .[] + "\u0000"' <<<"$2")
+    mapfile -d '' -t ps < <(jq -j --argjson i "$i" '.commands[$i] | (.triggers // []) + [.size.exempt // empty | ":(literal)" + .] | .[] + "\u0000"' <<<"$2")
     [ ${#ps[@]} = 0 ] || git -C "$1" diff --quiet "$b" "$h" -- "${ps[@]}" 2>/dev/null || return 1
+    mapfile -d '' -t fs < <(jq -j --argjson i "$i" '.commands[$i] | (.files // [])[] + "\u0000"' <<<"$2")
+    if [ -n "$all" ] || [ "$(jq -r --argjson i "$i" '.commands[$i] | .size == null and (.run | contains("{files}") | not)' <<<"$2")" = true ] \
+      || { [ ${#ps[@]} != 0 ] && ! git -C "$1" diff --cached --quiet "$h" -- "${ps[@]}" 2>/dev/null; }; then
+      [ ${#fs[@]} = 0 ] || git -C "$1" diff --quiet "$b" "$h" -- "${fs[@]}" 2>/dev/null || return 1
+    fi
   done
 }
 LINTFIX=$'# Lint findings: fix them and nothing else\nThe pack\'s lint commands found <n> finding(s) in this card\'s change. The first 50 are below, each after the command that found it. Fix the code each one names. Do not change lint policy (the pack\'s `lint` field, a linter\'s config or a suppression) to make a finding go away, unless the issue asks for it.'

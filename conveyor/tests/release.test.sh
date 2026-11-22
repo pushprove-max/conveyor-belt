@@ -370,18 +370,35 @@ t_cutpass() {
 # it touches; one added and removed again since the last release, still found by the commit that added it (h).
 # Bug: a GitHub web edit's Signed-off-by trailer, which holds the commit's own author email, refused the release. A
 # sign-off (A) or co-author (D) trailer with the commit's own author or committer email is not a hit; a sign-off with
-# another email (B), or a body line with another email beside an own sign-off (C), still is. The hits are listed newest
-# first, so the list is C B h exactly: A, D and the commit that removes the text are no hits.
+# another email (B), or a body line with another email beside an own sign-off (C), still is. Bug (R173): a sign-off
+# line with the author's own email that is not in the trailer block, as a prose line follows it (E), was taken out too;
+# it is a hit. The hits are listed newest first, so the list is E C B h exactly: A, D and the commit that removes the
+# text are no hits.
 t_cutprivacy() {
-  local O h b c AT=@; local m=dev${AT}mail.io o=other${AT}mail.io; cutsetup true "someone${AT}gmail.com"
+  local O h b c e AT=@; local m=dev${AT}mail.io o=other${AT}mail.io; cutsetup true "someone${AT}gmail.com"
   echo "someone${AT}gmail.com" > "$R/new.txt" && git -C "$R" add new.txt && git -C "$R" commit -qm add && h=$(git -C "$R" rev-parse HEAD) \
     && git -C "$R" rm -q new.txt && git -C "$R" commit -qm remove || fail "the fixture could not be made"
   com() { GIT_COMMITTER_EMAIL=$1 git -C "$R" commit -q --allow-empty --author="dev <$m>" -m x -m "$2" && git -C "$R" rev-parse HEAD; } # <committer> <body>
   com "$m" "Signed-off-by: dev <DEV${AT}mail.io>" > /dev/null && b=$(com "$m" "Signed-off-by: other <$o>") \
     && c=$(com "$m" "$(printf 'Ask %s\n\nSigned-off-by: dev <%s>' "$o" "$m")") && com "$o" "Co-authored-by: other <$o>" > /dev/null \
+    && e=$(com "$m" "$(printf 'Signed-off-by: dev <%s>\nand a line of prose after it' "$m")") \
     && git -C "$R" push -q origin main && O=$(git -C "$R" rev-parse HEAD) || fail "the fixture could not be made"
   cutrefused 1.1.0 'privacy check finds something in the tracked files.*old.txt:1: email' \
-    "privacy check finds something in commits since v1.0.0: ${c:0:12} ${b:0:12} ${h:0:12} \(run"
+    "privacy check finds something in commits since v1.0.0: ${e:0:12} ${c:0:12} ${b:0:12} ${h:0:12} \(run"
+}
+# Bug (R180): release took the pass of main's head from release-prep's commit status, its record naming another
+# commit's run (here a serial run on another machine): it set the commit and cleared the counts, but kept that run's
+# mode, files at once and machine, so the record said main's suite ran as that run did. Those are not known of the
+# pass taken, so they are cleared.
+t_cutstatusother() {
+  local O out; cutsetup true
+  mkdir -p "$T/$CASE/cards/release" && jq -n '{kind: "release", step: "release-prep", version: "1.1.0", since: "2026-01-01T00:00:00Z", ended: "2026-01-01T00:10:00Z", state: "passed",
+    sha: "0123456789abcdef0123456789abcdef01234567", mode: "serial", atOnce: 1, machine: {kind: "ssh", name: "box.example.com"}, done: 9, failed: 0,
+    cases: [], alone: [{case: "flips", verdict: "flaky"}], moved: false, reused: null}' > "$T/$CASE/cards/release/run.json" \
+    && echo '[{"context":"conveyor/release-suite","state":"success"}]' > "$STUB/statuses" || fail "the fixture could not be made"
+  out=$(loop release 1.1.0 2>&1) || fail "the release with the pass of main's head from its status was refused: $out"
+  [ ! -e "$STUB/full-at" ] && jq -e --arg o "$O" '.sha == $o and .mode == null and .atOnce == null and .machine == null and .alone == [] and .done == 0' \
+    "$T/$CASE/cards/release/run.json" > /dev/null || fail "the record of the release keeps the other commit's run: $(cat "$T/$CASE/cards/release/run.json")"
 }
 # --allow-commit: hits in pushed commits (a, b) the owner keeps, as only a history rewrite could remove them.
 # Bugs: no way to release over them; a named commit passes over a hit in one not named (b), or one not on origin/main

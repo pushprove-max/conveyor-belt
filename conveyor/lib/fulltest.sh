@@ -520,13 +520,38 @@ relnoteswait() { # <version> <card> <then> <what the run found>
   echo "conveyor: release-prep: $4; release-prep $1 starts again by itself once the card lands, and runs the suite" >&2
   return 1
 }
+# `release-run stop` (commands/release-prep.sh). The run under way ended: its record's pid and every process of the run (relreap()). Only a pid that runs
+# conveyor.sh is taken, so a record left by a run that died names no other process. A process of the run relreap cannot
+# see still holds the release lock as it ends: the run's release-prep, whose bash carries no mark ps can read (export
+# changes no process's own environment) and which leaves the tree of the record's pid once that pid has ended, ends
+# on the TERM through its trap (relsig()). The stop waits for the lock, so a release-prep started next is not refused. It
+# writes the record only holding the lock (the run's own end and the next run write it holding it too), and only while
+# the record is still the stopped run's (its pid and start): a run started once the lock was free has its own record,
+# which is never marked stopped.
+# 1: the lock is still held 10 s on (relreap's time for a TERM; with the stop's own reap, within the Board's 30 s); the
+# record is left as it is, and the snapshot shows the run stopped once the lock is free.
+releasestop() {
+  local p s v lk='' rc=1 r
+  # The pid, start and version from one read of the record, so they are all of one run.
+  r=$(jq -er 'select(.ended == null and (.pid | numbers)) | "\(.pid)\t\(.since)\t\(.version)"' "$RELRUN" 2>/dev/null) && IFS=$'\t' read -r p s v <<<"$r" \
+    && kill -0 "$p" 2>/dev/null && ps -o args= -p "$p" 2>/dev/null | grep -q 'conveyor\.sh' || { relstopwaiting; return; }
+  relreap "$p" "$p"; hoststop
+  { exec {lk}>>"$CARDS/release/lock"; } 2>/dev/null && flock -w 10 "$lk" && rc=0
+  # .counts: the suite's counts while its failed cases run alone, which the run's own end takes into the record; the
+  # stop does the same, as the snapshot does for a run that ended with no record of it (lib/snapshot.sh suites()).
+  [ $rc != 0 ] || relrec --argjson p "$p" --arg s "$s" --arg t "$(clock)" 'if .pid == $p and .since == $s then . + (.counts // {}) | del(.counts) | .state = "stopped" | .ended = $t | .reasons = ["stopped by the owner"] else . end'
+  [ -z "$lk" ] || exec {lk}>&-
+  # Not the lock, but another run's record: that run took the lock once this one's processes had let it go.
+  [ $rc = 0 ] || jq -e --argjson p "$p" --arg s "$s" '.pid != $p or .since != $s' "$RELRUN" > /dev/null 2>&1 || { echo "conveyor: release-run stop: the run is stopped, but a process of it still holds $CARDS/release/lock; release-prep and release are refused until it ends" >&2; return 1; }
+  echo "conveyor: release-run: the release run of $v is stopped"
+}
 # A release-prep that waits on its notes card (state waiting: relnoteswait()) has no process to end: `release-run stop`
-# (releasestop(), commands/release-prep.sh) marks its record stopped, so relfixes() does not start the run again when the
+# (releasestop(), above) marks its record stopped, so relfixes() does not start the run again when the
 # card lands. The card is not closed (`conveyor.sh shut` closes it) and may still land. Only a record that waits, was not
 # started again and is still the one read, and only holding the release lock (as relfixes() does). 2: no run is under
 # way and none waits; 1: the lock is held 10 s on.
 relstopwaiting() {
-  local r s v c lk rc=1
+  local r s v c lk='' rc=1
   r=$(jq -ce 'select(.state == "waiting" and (.ended | type) == "string" and .restarted == null and (.notes.card | type) == "string")' "$RELRUN" 2>/dev/null) \
     || { echo "conveyor: release-run stop: no release run is under way; nothing stopped" >&2; return 2; }
   s=$(jq -r .since <<<"$r") && v=$(jq -r .version <<<"$r") && c=$(jq -r .notes.card <<<"$r") || { echo "conveyor: release-run stop: $RELRUN could not be read; nothing stopped" >&2; return 1; }

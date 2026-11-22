@@ -251,13 +251,27 @@ t_hostlate() {
 # Bug: a poll of the box that ssh reached but that never ended (here the box's tar, which sends the run's output back,
 # hangs) held the run for ever: no live record, no failed poll counted. Each poll ends at HOSTPOLL (2 s here), so six
 # such polls end the run as a box that stopped answering, with its live record kept up to date meanwhile.
+# Bug (R322): the run given up on was left running there. The box's suite sleeps 300 s; the stop, which reads no
+# archive, reaches the box and ends it. The wait for its end is 20 s, far short of the sleep.
 t_hoststall() {
   local rc w=$T/$CASE/wt t
   setup '[]'; boxsetup 3; t=$(command -v tar)
   printf '#!/usr/bin/env bash\n[ "$1" != -cf ] || exec sleep 60\nexec %q "$@"\n' "$t" > "$STUB/box/bin/tar" && chmod +x "$STUB/box/bin/tar" || fail "the fixture could not be made" # sleep: a tar that never sends its archive, as on a box that stalls
+  rc=$(boxrun "$w" 'sleep 300 & echo $! > "$STUB/box-sleep"; wait' HOSTPOLL=2) # sleep: the box's suite, which only a stop ends
+  [ "$rc" = 1 ] && grep -q 'box.example.com stopped answering over ssh while the suite ran there; it was stopped there' "$w.test" && jq -e '.step == "test" and .last != ""' "$w.live" > /dev/null \
+    || fail "hosttests with HOSTPOLL 2 and a box whose polls stall did not end as a box that stopped answering and stop the run there, with a live record: exit $rc, output $(cat "$w.test" 2>&1), live $(cat "$w.live" 2>&1)"
+  # wait_until: a process sent TERM ends a moment later; only a check of it shows when it has.
+  WAIT_CEILING=20 wait_until "! kill -0 $(cat "$STUB/box-sleep") 2>/dev/null" || { kill "$(cat "$STUB/box-sleep")"; fail "the suite still runs on the box after it stopped answering"; }
+}
+# Bug: a suite that had ended on the box before the stop was said to be stopped there, as the stop's exit was that of
+# its last command (rm), not of its kill. Its polls stall as in t_hoststall; the suite (:) ends at once.
+t_hoststallended() {
+  local rc w=$T/$CASE/wt t
+  setup '[]'; boxsetup 3; t=$(command -v tar)
+  printf '#!/usr/bin/env bash\n[ "$1" != -cf ] || exec sleep 60\nexec %q "$@"\n' "$t" > "$STUB/box/bin/tar" && chmod +x "$STUB/box/bin/tar" || fail "the fixture could not be made" # sleep: a tar that never sends its archive, as on a box that stalls
   rc=$(boxrun "$w" ':' HOSTPOLL=2)
-  [ "$rc" = 1 ] && grep -q 'box.example.com stopped answering over ssh while the suite ran there' "$w.test" && jq -e '.step == "test" and .last != ""' "$w.live" > /dev/null \
-    || fail "hosttests with HOSTPOLL 2 and a box whose polls stall did not end as a box that stopped answering, with a live record: exit $rc, output $(cat "$w.test" 2>&1), live $(cat "$w.live" 2>&1)"
+  [ "$rc" = 1 ] && grep -q 'box.example.com stopped answering over ssh while the suite ran there; it had already ended there' "$w.test" \
+    || fail "hosttests with a box whose polls stall and a suite that had ended there did not say it had ended: exit $rc, output $(cat "$w.test" 2>&1)"
 }
 # `suite-machine check` names each need of the rule's box, ok or missing. Bugs: a tool a `# needs: <tool> [<version>]`
 # line of .conveyor/test-machine.sh names was not checked (the old `# tools:` line is not one), a missing one passed the
@@ -279,6 +293,10 @@ t_hostcheck() {
   jq -c '.suiteAtOnce = 9' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json" || fail "the fixture could not be made"
   out=$(unset CONVEYOR_TEST_SLOT; CONVEYOR_TEST_POOL=1:$T/$CASE/pool loop release-run atonce 2>&1) && [ "$out" = 2 ] \
     || fail "release-run atonce with the ssh rule, suiteAtOnce 9, the box's 3 CPUs and 2 slots and one slot here did not print 2: $out"
+  # Bug (R193): the owner can run the suite here (--machine local), but the only number to quote was the box's. With
+  # --machine local it is this machine's one slot, the cap a run here takes.
+  out=$(unset CONVEYOR_TEST_SLOT; CONVEYOR_TEST_POOL=1:$T/$CASE/pool loop release-run atonce --machine local 2>&1) && [ "$out" = 1 ] \
+    || fail "release-run atonce --machine local with the ssh rule, suiteAtOnce 9 and one slot here did not print 1: $out"
 }
 # Bug: the box's test slots were read by opening its input again by path (`. /dev/stdin`), which a Namespace devbox's ssh
 # refuses ("Permission denied"): the check said "its test slots cannot be read" and hostneeds refused the box. Here the
@@ -304,7 +322,10 @@ t_hostnostdinpath() {
 # release of any other lease, or of one given back, fails. A file $STUB/devbox-nologin is a login that has expired.
 # A file $STUB/devbox-full is an account at its devbox limit: acquire refuses. $STUB/devbox-list is what `devbox list -o json`
 # prints (no file: no boxes). A box named hand-made is the account's own, with no tag: exec reaches it by name, with no lease.
-# A file $STUB/devbox-tagged is a box already tagged: acquire reuses it; with none, acquire makes a box (conveyor-made) in the list.
+# A file $STUB/devbox-tagged is a box already tagged (tagged-box): acquire reuses it; with none, acquire makes a box
+# (conveyor-made) in the list; either way it names the box on the line before the lease id, as the real acquire prints
+# the box's name. A file $STUB/devbox-other is another project's box made while acquire runs: a box named devbox, a
+# word of acquire's own lines, joins the list.
 DEVBOX='#!/usr/bin/env bash
 L=lease-1274
 note() { printf "%s\n" "$*" >> "$STUB/devbox-calls"; }
@@ -312,8 +333,11 @@ case $1 in
   auth) note "$@"; [ ! -e "$STUB/devbox-nologin" ] || { echo "not logged in" >&2; exit 1; } ;;
   list) note "$@"; cat "$STUB/devbox-list" 2> /dev/null || echo "[]" ;;
   acquire) note "$@"; [ ! -e "$STUB/devbox-full" ] || { echo "rpc error: code = ResourceExhausted desc = failed to create devbox: per-user devbox limit reached" >&2; exit 1; }
+    echo "Leasing a devbox"
     [ -e "$STUB/devbox-tagged" ] || echo "[{\"name\":\"conveyor-made\"}]" > "$STUB/devbox-list"
-    echo "Leasing a devbox"; echo "$L"; : > "$STUB/devbox-leased" ;;
+    [ ! -e "$STUB/devbox-other" ] || { jq -c ". + [{name: \"devbox\"}]" "$STUB/devbox-list" > "$STUB/devbox-list.new" && mv "$STUB/devbox-list.new" "$STUB/devbox-list"; }
+    if [ -e "$STUB/devbox-tagged" ]; then echo "Reused devbox \"tagged-box\"."; else echo "Created devbox \"conveyor-made\"."; fi
+    echo "$L"; : > "$STUB/devbox-leased" ;;
   release) note "$@"; [ "$2 $3" = "--lease_id $L" ] && [ -e "$STUB/devbox-leased" ] || { echo "no such lease" >&2; exit 1; }; rm -f "$STUB/devbox-leased"; echo "$L" >> "$STUB/devbox-released" ;;
   exec) shift; d=; [ "${1:-}" != -d ] || { d=-d; shift; }
     if [ "$1 $2" = "hand-made --" ]; then shift 2
@@ -506,6 +530,12 @@ t_devboxcheck() {
   out=$(loop suite-machine check 2>&1) && grep -q '^ok: Devbox: the run reuses the box tagged conveyor-suite-' <<<"$out" && ! grep -q 'created' <<<"$out" \
     || fail "check with a tagged box did not say the run reuses it: $out"
   [ "$(cat "$STUB/devbox-released" 2>&1)" = lease-1274 ] || fail "check did not give back the lease it took: $(devboxcalls)"
+  # Bug (R321): another project's box made while the check leased the tagged one was read as a box the check created;
+  # then so was one whose name is a word of acquire's other lines (devbox, in "Reused devbox").
+  echo '[{"name":"tagged-box"}]' > "$STUB/devbox-list"; : > "$STUB/devbox-other"
+  out=$(loop suite-machine check 2>&1) && grep -q '^ok: Devbox: the run reuses the box tagged conveyor-suite-' <<<"$out" && ! grep -q 'created' <<<"$out" \
+    || fail "check that reused tagged-box while another project made a box named devbox said a box was created: $out"
+  rm -f "$STUB/devbox-other"
   rm -f "$STUB/devbox-tagged"; echo '[]' > "$STUB/devbox-list"
   out=$(loop suite-machine check --json 2>&1) && jq -e '.ok and .boxes == ["conveyor-made"] and (.needs[1].detail | test("a new one was created"))' <<<"$out" > /dev/null \
     || fail "check with no tagged box did not say a new box was created, and list it: $out"

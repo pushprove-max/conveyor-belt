@@ -72,6 +72,8 @@ t_lintgatewrites() {
   local cmd before
   gatesetup '[]'
   fx_wt 'echo two >> a.txt && echo new > n.txt && git rm -q d.txt' d.txt gone
+  # Bug (R267): the put-back deleted the empty folders that were in the worktree before the lint ran (its git clean -d).
+  mkdir -p "$FXWT/empty/inner" || fail "the empty folders could not be made"
   before=$(git -C "$FXWT" write-tree)
   # The index commands unset GIT_INDEX_FILE (the gate's copy of the index) to reach the worktree's own.
   for cmd in 'echo spoiled >> a.txt' 'chmod +x a.txt' 'echo x > stray.txt; mkdir -p dir && echo y > dir/f.txt' 'rm n.txt' \
@@ -84,6 +86,7 @@ t_lintgatewrites() {
     [ "$(git -C "$FXWT" write-tree)" = "$before" ] && git -C "$FXWT" diff --quiet && [ -z "$(git -C "$FXWT" ls-files -o --exclude-standard)" ] \
       && [ "$(cat "$FXWT/a.txt")" = "$(printf 'one\ntwo')" ] && [ ! -x "$FXWT/a.txt" ] && [ -f "$FXWT/n.txt" ] && [ ! -e "$FXWT/d.txt" ] \
       || fail "after '$cmd' the worktree or index is not as before: $(git -C "$FXWT" status --porcelain)"
+    [ -d "$FXWT/empty/inner" ] && [ ! -e "$FXWT/dir" ] || fail "after '$cmd' the put-back deleted the empty folders empty/inner that were there before, or left the folder dir the command made"
   done
 }
 
@@ -190,6 +193,48 @@ t_lintgatestands() {
   [ "$(grep -c '^run ' "$STUB/lint-args")" = 1 ] && [ "$(st 'select(.step == "lint") | "\(.result) \(.lint.gate)"' | paste -sd,)" = 'pass land' ] \
     && grep -q 'main changed none of its files or lint settings since its lint passed, so that pass stands' "$T/$CASE/run.out" \
     || fail "lint ran again on a main that changed none of the card's files: $(cat "$STUB/lint-args"); $(st 'select(.step == "lint") | .reason')"
+}
+# Bug (R271): a card that changes a trigger (it tightens the linter's config) has its lint run on every file the command
+# reads, not on its own files alone; but its pass stood on a main that added such a file, as main changed none of the
+# card's files and no trigger. Fitted onto that main, the pass does not stand.
+t_lintgatetriggerfile() {
+  gatesetup '[]'
+  tune '.lint.commands[0].triggers = [".lintrc"]'
+  fx_wt 'echo tight > .lintrc' .lintrc old a.txt one
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  fx_in 'packget lint l && lintpassed "$FXWT" "$(git -C "$FXWT" rev-parse HEAD)" "$l" || exit 3
+    echo "BAD new" > "$R/new.txt" && git -C "$R" add new.txt && git -C "$R" commit -qm "main adds a file" && git -C "$FXWT" diff --cached --binary > "$FXWT.p" \
+      && git -C "$FXWT" reset -q --hard main && git -C "$FXWT" apply --index "$FXWT.p" || exit 4
+    lintstands "$FXWT" "$l"; echo "stands=$?"'
+  grep -qx 'stands=1' "$T/$CASE/run.out" \
+    || fail "the lint pass of a card that changed the trigger .lintrc stood on a main that added new.txt, a file the command reads (3: no pass kept, 4: no refit): rc $RC, $(cat "$T/$CASE/run.out")"
+}
+# Bug: with the command's files and triggers in one pathspec, an :(exclude) of its files (the linter's own script, as
+# this repository's pack has) hid that trigger, so the pass of a card that changed another trigger stood on a main that
+# changed the linter. Fitted onto that main, the pass does not stand.
+t_lintgatetriggerexclude() {
+  gatesetup '[]'
+  tune '.lint.commands[0].triggers = [".lintrc", "lint.txt"] | .lint.commands[0].files = ["*.txt", ":(exclude)lint.txt"]'
+  fx_wt 'echo tight > .lintrc' .lintrc old lint.txt old
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  fx_in 'packget lint l && lintpassed "$FXWT" "$(git -C "$FXWT" rev-parse HEAD)" "$l" || exit 3
+    echo new > "$R/lint.txt" && git -C "$R" commit -qam "main changes the linter" && git -C "$FXWT" diff --cached --binary > "$FXWT.p" \
+      && git -C "$FXWT" reset -q --hard main && git -C "$FXWT" apply --index "$FXWT.p" || exit 4
+    lintstands "$FXWT" "$l"; echo "stands=$?"'
+  grep -qx 'stands=1' "$T/$CASE/run.out" \
+    || fail "the lint pass of a card that changed the trigger .lintrc stood on a main that changed the trigger lint.txt, which the command's files exclude (3: no pass kept, 4: no refit): rc $RC, $(cat "$T/$CASE/run.out")"
+}
+# Bug (R420): the pages said lint runs before each review, but the review gate does not run on the change the landing
+# gate's lint fix left (lintgate's lfix) while no other session changes it. Each page that says when lint runs names that
+# exception and its condition. Text check: a doc page has no behaviour to run.
+t_lintgatedocs() {
+  local p d
+  for p in docs/cards.md docs/configuration.md conveyor/README.md; do
+    d=$(tr '\n' ' ' < "$SRC/../$p" | tr -s ' ')
+    grep -qE 'the change that (a fix of lint findings at the landing gate|the landing gate.s lint fix|fix) left' <<<"$d" \
+      && grep -qE '(no other session changes it|another session changes it again)' <<<"$d" && grep -qF 'because the landing gate checks' <<<"$d" \
+      || fail "$p does not say that the review of the change the landing gate's lint fix left, while no other session changes it, has no lint gate before it"
+  done
 }
 # Bug it catches: a lint pass standing on a main that changed one of the card's files. Lint runs again, as before.
 t_lintgatefileagain() {

@@ -46,8 +46,13 @@ printf "slots\t%s\n" "$(eval "$(cat)" > /dev/null 2>&1 && slot_pool > /dev/null 
 HOSTRUN='bash -c "$1" > ../wt.test 2>&1 < /dev/null; r=$?
 [ "$SECONDS" -lt "$2" ] || { r=124; echo "conveyor: the suite ran past its time limit, $2 s (testTimeout), on $3" >> ../wt.test; }
 echo "$r" > ../wt.rc'
-# The suite's run on the box stopped: its process group, which setsid made, else its process.
-HOSTKILL='p=$(cat "$D/wt.pid" 2> /dev/null) && { kill -TERM -- -"$p" 2> /dev/null || kill -TERM "$p" 2> /dev/null; }; rm -f "$D/wt.pid"'
+# The suite's run on the box stopped: its process group, which setsid made, else its process. Exit 0: it was stopped;
+# 3: there was none to stop (the run had ended, or none started); another exit is the box's, or ssh's, not reached.
+HOSTKILL='r=3; p=$(cat "$D/wt.pid" 2> /dev/null) && { kill -TERM -- -"$p" 2> /dev/null || kill -TERM "$p" 2> /dev/null; } && r=0; rm -f "$D/wt.pid"; exit $r'
+# HOSTKILL's <exit> (hostssh's) in words: stopped, ended, or not reached <via> (' over ssh' or nothing).
+hostkilled() { # <exit> <via>
+  case $1 in 0) echo 'was stopped there' ;; 3) echo 'had already ended there' ;; *) echo "could not be reached$2 to stop it; it may still run there" ;; esac
+}
 # The seconds one poll of the run on the box may take (hosttests()): its 10 s wait there, then the copy of its output.
 HOSTPOLL=60
 # <text> in single quotes, as any POSIX shell reads it: the box's login shell is not always bash.
@@ -143,12 +148,13 @@ hostboxes() {
   SH_BOXES=$(timeout --kill-after=5 60 devbox list -o json 2> /dev/null < /dev/null | jq -c '[.[] | .name | strings]' 2> /dev/null) && [ -n "$SH_BOXES" ] \
     || { SH_BOXES=null SH_WHY="the account's devboxes could not be listed with devbox list"; return 1; }
 }
-# A devbox leased: `devbox acquire <tag>` with the size and the idle stop, which prints the lease id last, in SH_LEASE.
-# Sets SH_WHY to why not, and fails.
+# A devbox leased: `devbox acquire <tag>` with the size and the idle stop, which prints the box's name and the lease id
+# last, in SH_LEASE; its whole output in SH_ACQ. Sets SH_WHY to why not, and fails.
 hostlease() { # <seconds>
   local out
   out=$(timeout --kill-after=5 "$1" devbox acquire "$SH_TAG" --size "$SH_SIZE" --auto_stop_idle_timeout "$SH_IDLE" 2>&1 < /dev/null) \
     || { SH_WHY="a devbox could not be acquired: $(grep . <<<"$out" | tail -n 1)"; return 1; }
+  SH_ACQ=$out
   out=$(grep . <<<"$out" | tail -n 1)
   [[ $out =~ ^[A-Za-z0-9][A-Za-z0-9._:-]*$ ]] || { SH_WHY="devbox acquire did not print a lease id: ${out:0:200}"; return 1; }
   SH_LEASE=$out
@@ -222,7 +228,7 @@ hostcheckout() { # <command name> <worktree> <commit>
 }
 # run: tests() here; on a box over ssh or a devbox, the pack's <field> command there, in its checkout, as tests() runs it: with
 # alone, the list <worktree>.rerun names (fullalone()). Its exit is the command's; 1 when the box stops answering for
-# six polls in a row (each poll ended at HOSTPOLL), and 124 when the run ends past the time limit of a run here
+# six polls in a row (each poll ended at HOSTPOLL), which stops the run there when the box answers that, and 124 when the run ends past the time limit of a run here
 # (testTimeout: HOSTRUN), or is still going a poll's time (HOSTPOLL) past it, which stops it there; its output says which.
 hosttests() { # <worktree> <field> [alone]
   [ "$SH_STEP" = run ] || hoststep run
@@ -257,9 +263,12 @@ hosttests() { # <worktree> <field> [alone]
     # The live record: its progress is when the output or the log folder last changed.
     now=$(date -u +%FT%TZ); [ "$was" = "$(cksum < "$1.test" 2>/dev/null)$(find "$1.testlog" 2>/dev/null | wc -l)" ] || { pr=$now; was=$(cksum < "$1.test" 2>/dev/null)$(find "$1.testlog" 2>/dev/null | wc -l); }
     jq -cn --arg at "$at" --arg l "$now" --arg p "$pr" '{step: "test", at: $at, last: $l, progress: $p}' > "$1.live.tmp" && mv -f "$1.live.tmp" "$1.live"
-    [ $i -lt 6 ] || { printf 'conveyor: %s stopped answering%s while the suite ran there\n' "$SH_NAME" "$via" >> "$1.test"; rm -rf "$1.send" "$1.got"; return 1; }
+    # Given up on, the run there is stopped too, when the box answers that: else it would run on, unseen.
+    [ $i -lt 6 ] || {
+      hostssh "$SH_D; $HOSTKILL" 30 < /dev/null > /dev/null 2>&1; out="it $(hostkilled $? "$via")"
+      printf 'conveyor: %s stopped answering%s while the suite ran there; %s\n' "$SH_NAME" "$via" "$out" >> "$1.test"; rm -rf "$1.send" "$1.got"; return 1; }
     [ -s "$1.rc" ] || [ $((SECONDS - t0)) -lt $((lim + HOSTPOLL)) ] || {
-      if hostssh "$SH_D; $HOSTKILL" 30 < /dev/null > /dev/null 2>&1; then out='was stopped there'; else out="could not be reached$via to stop it; it may still run there"; fi
+      hostssh "$SH_D; $HOSTKILL" 30 < /dev/null > /dev/null 2>&1; out=$(hostkilled $? "$via")
       printf 'conveyor: the suite ran past its time limit, %s s (testTimeout), on %s and %s\n' "$lim" "$SH_NAME" "$out" >> "$1.test"; rm -rf "$1.send" "$1.got"; return 124; }
   done
   rc=$(<"$1.rc"); rm -rf "$1.rc" "$1.send" "$1.got"
@@ -277,12 +286,12 @@ hostfinish() { # <command name>
 # `release-run stop`: the run on the box over ssh or the devbox that the record names, stopped there (HOSTKILL), when the
 # record's machine has not reached done; a devbox's lease is given back too.
 hoststop() {
-  local m via=''
+  local m via='' rc
   m=$(jq -ce '.machine | objects | select((.kind == "ssh" or (.kind == "devbox" and (((.lease // "") | length > 0) or ((.box // "") | length > 0)))) and .step != "done")' "$RELRUN" 2>/dev/null) || return 0
   SH_KIND=$(jq -r .kind <<<"$m") SH_TARGET=$(jq -r '.target // ""' <<<"$m") SH_DIR=$(jq -r '.dir // "~/conveyor-suite"' <<<"$m") SH_LEASE=$(jq -r '.lease // ""' <<<"$m") SH_BOX=$(jq -r '.box // ""' <<<"$m") && hostd
   [ "$SH_KIND" != ssh ] || via=' over ssh'
-  hostssh "$SH_D; $HOSTKILL" 30 < /dev/null > /dev/null 2>&1 \
-    || echo "conveyor: release-run stop: the suite's run on $(jq -r .name <<<"$m") could not be reached$via to stop it; it may still run there" >&2
+  hostssh "$SH_D; $HOSTKILL" 30 < /dev/null > /dev/null 2>&1; rc=$?
+  [ $rc = 0 ] || [ $rc = 3 ] || echo "conveyor: release-run stop: the suite's run on $(jq -r .name <<<"$m") $(hostkilled $rc "$via")" >&2
   hostrelease "release-run stop"
 }
 # The Devbox need of a check, added to hostcheck()'s needs (n), and the account's devbox names in SH_BOXES (a JSON array, null
@@ -291,7 +300,7 @@ hoststop() {
 # is made, which the list before and after tells) and given back at once; one refused for the account's limit says so, with the
 # fix (a box of the account, named in the rule, or one removed). With <no-create> (a member's check on the Board) none is asked for.
 hostboxneed() { # [no-create]
-  local ok=false msg='' was=''
+  local ok=false msg='' was='' a
   hostboxes && was=$SH_BOXES || msg=$SH_WHY
   if [ -n "$SH_BOX" ]; then
     if [ -z "$was" ]; then :
@@ -301,7 +310,12 @@ hostboxneed() { # [no-create]
     ok=true msg="the run reuses the box tagged $SH_TAG, or creates one; this check does not ask for one"
   elif hostlease 100; then
     ok=true msg="the run reuses the box tagged $SH_TAG"
-    if [ -n "$was" ] && hostboxes && ! jq -e --argjson w "$was" '. - $w | length == 0' <<<"$SH_BOXES" > /dev/null; then
+    # Created: the box leased is one the list did not have before. Its name is the one acquire resolves: the last word of
+    # the line before the lease id, the marks around it left out. A box another project made meanwhile is new to the list
+    # too, but is not that name, even when its name is a word of acquire's other lines.
+    a=$(grep . <<<"$SH_ACQ" | tail -n 2 | head -n 1); a=${a##*[[:space:]]}
+    [[ $a =~ ^[^A-Za-z0-9]*(.*[A-Za-z0-9])[^A-Za-z0-9]*$ ]] && a=${BASH_REMATCH[1]} || a=''
+    if [ -n "$was" ] && [ -n "$a" ] && hostboxes && jq -e --argjson w "$was" --arg a "$a" '. - $w | index($a) != null' <<<"$SH_BOXES" > /dev/null; then
       msg="no box tagged $SH_TAG was found, so a new one was created for the run to reuse"; fi
     hostrelease suite-machine || msg="$msg (the lease taken to try it could not be given back; it stops itself when idle)"
   else

@@ -84,7 +84,8 @@
 # carries the run's mark, in whatever process group), never a whole process group, and the suite's run on a box over ssh or a devbox, whose lease it gives back (hoststop(), lib/suitehost.sh), and its record says stopped; it
 # returns once the release lock is free (exit 1 when it is not). A run that ends in any other way (a KILL too) ends the
 # processes left of it too, so none holds the release lock. Exit 2: refused (a run is already under way; none to stop).
-# `conveyor.sh release-run atonce` prints relatonce(), which the Foreman's release question names.
+# `conveyor.sh release-run atonce` prints relatonce(), which the Foreman's release question names; with --machine
+# local, that of a run on this machine, as `release-run ... --machine local` runs it.
 # Sourced by conveyor.sh.
 . "$HERE/lib/slots.sh" || exit 1
 . "$HERE/lib/prompts.sh" || exit 1
@@ -303,7 +304,7 @@ relstart() { # <command name> <version>
   # version: that suite, and red, the failed run `release --anyway` may go over, kept through a refused release.
   [ "$1" != release ] || was=$(jq -ce --arg v "$2" 'select(.version == $v and .sha != null) | if .step == "release-prep" and .state == "passed" then {since, sha, mode, atOnce, machine, done, failed, cases, moved, reused, alone: (.alone // [])}
     elif .step == "release-prep" and .state == "failed" then {since, sha, mode, atOnce, machine, done, failed, cases, moved, reused, files, timedout, alone: (.alone // []), red: {sha, files: (.files.failed // []), cases}}
-    elif .step == "release" and .state == "refused" then {since, sha, mode, atOnce, machine, done, failed, cases, reused, red} else empty end' "$RELRUN" 2>/dev/null) || was=null
+    elif .step == "release" and .state == "refused" then {since, sha, mode, atOnce, machine, done, failed, cases, reused, red, alone: (.alone // [])} else empty end' "$RELRUN" 2>/dev/null) || was=null
   # by: what started the run when it was not the owner (CONVEYOR_RELEASE_BY: "fixes landed", relfixes(), lib/fulltest.sh).
   jq -cn --arg s "$1" --arg v "$2" --arg t "$(clock)" --argjson p "${CONVEYOR_RELEASE_PID:-$$}" --argjson w "$was" --arg by "${CONVEYOR_RELEASE_BY:-}" \
     '{kind: "release", step: $s, version: $v, since: $t, ended: null, state: "running", sha: null, mode: null, atOnce: null, machine: null, done: 0, failed: 0, cases: [], alone: [], rerun: null, moved: false, reused: null, reasons: [], pid: $p, red: null, anyway: null, allowed: null, minver: null, by: (if $by == "" then null else $by end)} + $w' > "$RELRUN.new" \
@@ -323,9 +324,11 @@ relstart() { # <command name> <version>
   unset CONVEYOR_RELEASE_PID CONVEYOR_RELEASE_BY CONVEYOR_RELEASE_THEN # the suite's own commands are no part of this run's record
 }
 # A stop's signal: the run's processes reaped, then the exit <code>. A child that took the signal before it reset its
-# traps (relstart()) only exits: the reap is this shell's alone, as the child's would end the run's processes.
+# traps (relstart()) only exits: the reap is this shell's alone, as the child's would end the run's processes. The
+# plugin relminver() unpacked for its validate is removed.
+RELPKG=''
 relsig() { # <exit code>
-  [ "$BASHPID" != $$ ] || relreap $$ "$CONVEYOR_RELEASE_RUN"
+  if [ "$BASHPID" = $$ ]; then relreap $$ "$CONVEYOR_RELEASE_RUN"; [ -z "$RELPKG" ] || rm -rf "$RELPKG"; fi
   exit "$1"
 }
 # The processes of a release run, one a line: <pid> and those under it, and each that carries the run's <mark>
@@ -337,13 +340,19 @@ relsig() { # <exit code>
 # its own that carries the mark (a pipe's other side, or a ps one subshell further down), and a reap from a process of
 # the run (the run's own end, its watcher) ran all its KILL rounds (relreap()). What it starts (ps, awk, sort) carries
 # no mark, so another reap at the same time (the stop's, the run's own end's) does not find it as a process of the run.
+# The mark is looked for in the environment ps prints after a process's arguments (a second ps, after the first, gives
+# the arguments to cut off), so a process given it as an argument is none; one that ran another program between the two is read whole.
 relprocs() { # <pid> <mark> [<pid left out>]
-  local t e me=$BASHPID x=${3:-$$}
+  local t e c me=$BASHPID x=${3:-$$}
   unset CONVEYOR_RELEASE_RUN # in this command substitution's subshell alone
   t=$(exec ps -A -o pid= -o ppid= -o stat= 2>/dev/null); e=$(exec ps axeww -o pid= -o ppid= -o command= 2>/dev/null)
+  c=$(exec ps axww -o pid= -o command= 2>/dev/null)
   { awk -v r="$1" -v me="$me" -v x="$x" '{ k[$2] = k[$2] " " $1; a[$1] = ($3 !~ /Z/) } END { q[1] = r; n = 1
     for (i = 1; i <= n; i++) { if (q[i] == me) continue; if (a[q[i]] && q[i] != x) print q[i]; m = split(k[q[i]], c, " "); for (j = 1; j <= m; j++) q[++n] = c[j] } }' <<<"$t"
-    awk -v k=" CONVEYOR_RELEASE_RUN=$2 " -v me="$me" -v x="$x" '$1 != me && $1 != x && $2 != me && index($0 " ", k) { print $1 }' <<<"$e"; } | sort -u
+    awk -v k=" CONVEYOR_RELEASE_RUN=$2 " -v me="$me" -v x="$x" 'FNR == NR { p = $1; sub(/^[[:space:]]*[0-9]+[[:space:]]+/, ""); g[p] = $0; next }
+      $1 != me && $1 != x && $2 != me { p = $1; l = $0; sub(/^[[:space:]]*[0-9]+[[:space:]]+[0-9]+[[:space:]]+/, "", l)
+        if ((p in g) && substr(l, 1, length(g[p])) == g[p]) l = substr(l, length(g[p]) + 1)
+        if (index(l " ", k)) print p }' <(printf '%s\n' "$c") - <<<"$e"; } | sort -u
 }
 # A release run ended (relprocs()'s arguments): each of its processes told to end, then killed 10 s later if they
 # have not, and killed again while one is left (one started meanwhile, or one still ending), for up to 2 s. Its sleeps
@@ -381,15 +390,20 @@ relrun() { # <function> <version>
 # relmessage <commit>: the commit's message for the privacy check, with the email taken out of each Signed-off-by: or
 # Co-authored-by: trailer whose last <email> is the commit's own author or committer email (case aside), which the
 # commit already shows in its author fields. The rest of each such line, and every other email, is still checked.
+# A trailer is a line of the message's trailer block: its last paragraph, when that is not the subject's and each of
+# its lines is a `<token>: <value>` line or, after the first, one that starts with a space or tab (a folded value). Such
+# a line anywhere else in the message is checked whole.
 relmessage() {
   local m; m=$(git log -1 --format='%ae%n%ce' "$1") || return 1
   git log -1 --format=%B "$1" | RELA=${m%%$'\n'*} RELC=${m#*$'\n'} awk '
     BEGIN { a = tolower(ENVIRON["RELA"]); c = tolower(ENVIRON["RELC"]) }
-    tolower($0) ~ /^(signed-off-by|co-authored-by):/ && match($0, /<[^<>]*>[[:space:]]*$/) {
-      e = substr($0, RSTART + 1, RLENGTH - 1); sub(/>[[:space:]]*$/, "", e); e = tolower(e)
-      if (e != "" && (e == a || e == c)) $0 = substr($0, 1, RSTART - 1)
-    }
-    { print }'
+    { l[NR] = $0 }
+    END { n = NR; while (n > 0 && l[n] ~ /^[[:space:]]*$/) n--; s = n; while (s > 0 && l[s] !~ /^[[:space:]]*$/) s--
+      t = s == 0 ? n + 1 : s + 1; for (i = s + 1; i <= n; i++) if (l[i] !~ /^[A-Za-z0-9][A-Za-z0-9-]*:/ && !(i > s + 1 && l[i] ~ /^[ \t]/)) t = n + 1
+      for (i = 1; i <= NR; i++) { $0 = l[i]
+        if (i >= t && tolower($0) ~ /^(signed-off-by|co-authored-by):/ && match($0, /<[^<>]*>[[:space:]]*$/)) {
+          e = substr($0, RSTART + 1, RLENGTH - 1); sub(/>[[:space:]]*$/, "", e); e = tolower(e); if (e != "" && (e == a || e == c)) $0 = substr($0, 1, RSTART - 1) }
+        print } }'
 }
 lasttag() { git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1; }
 # The mod on the oldest Claude Code its plugin says it supports (issue 772). When <commit> is a Claude Code plugin
@@ -424,9 +438,10 @@ relminver() { # <command name> <commit>
     rm -rf "$d" && mkdir -p "$d" && out=$(timeout 600 npm install --prefix "$d" --no-save --no-audit --no-fund --loglevel=error "@anthropic-ai/claude-code@$min" < /dev/null 2>&1) && [ -x "$c" ] || {
       echo "conveyor: $n: Claude Code $min could not be installed in $d to validate the mod on it: $(tail -n 5 <<<"$out" | paste -sd ';' -)" >&2; mrec "$min" failed "Claude Code $min could not be installed"; return 1; }
   fi
-  pkg=$(mktemp -d) && git archive "$sha" | tar -x -C "$pkg" || { rm -rf "$pkg"; echo "conveyor: $n: the plugin at ${sha:0:12} could not be packaged to validate it on Claude Code $min" >&2; return 1; }
+  # RELPKG: the unpacked plugin, which a stop (relsig()) removes too, as its exit comes before the rm below.
+  pkg=$(mktemp -d) && RELPKG=$pkg && git archive "$sha" | tar -x -C "$pkg" || { rm -rf "$pkg"; RELPKG=''; echo "conveyor: $n: the plugin at ${sha:0:12} could not be packaged to validate it on Claude Code $min" >&2; return 1; }
   out=$(DISABLE_AUTOUPDATER=1 timeout 300 "$c" plugin validate "$pkg" < /dev/null 2>&1); rc=$?
-  rm -rf "$pkg"
+  rm -rf "$pkg"; RELPKG=''
   if [ $rc != 0 ] || grep -q '✘ Validation failed' <<<"$out"; then
     echo "conveyor: $n: the mod fails claude plugin validate on Claude Code $min, the oldest .claude-plugin/plugin.json supports (exit $rc), so the suite is not run and no status is posted:" >&2
     tail -n 40 <<<"$out" | sed "s/^/conveyor: $n: validate $min: /" >&2
@@ -669,8 +684,9 @@ release() { # <version>
     state=$(timeout 60 gh api "repos/{owner}/{repo}/commits/$sha/statuses?per_page=100" < /dev/null 2>/dev/null \
       | jq -r '[.[] | select(.context == "conveyor/release-suite")][0].state // "none"' 2>/dev/null)
     if [ "$state" = success ]; then
-      # The record names the commit the pass is of; its cases are known only from a run of that commit kept above.
-      relrec --arg s "$sha" 'if .sha == $s then . else .sha = $s | .done = 0 | .failed = 0 | .cases = [] | .reused = null end'
+      # The record names the commit the pass is of; its cases, mode, files at once, machine and flaky verdicts are known
+      # only from a run of that commit kept above.
+      relrec --arg s "$sha" 'if .sha == $s then . else .sha = $s | .done = 0 | .failed = 0 | .cases = [] | .reused = null | .mode = null | .atOnce = null | .machine = null | .alone = [] end'
       echo "conveyor: release: the whole suite passed on ${sha:0:12} (release-prep's status); it is not run again"
     else relsuite release "$sha" || { echo "conveyor: release: refused, nothing tagged or released: the whole suite did not pass on ${sha:0:12}" >&2; return 1; }; fi
   fi
@@ -742,28 +758,7 @@ releasego() { # <version> [prep: release-prep alone | anyway <who>]
   elif [ -n "$ok" ]; then echo "conveyor: release-run: release $1 is running, with the suite that passed on ${ok:0:12}; its output is in $CARDS/release/run.log"
   else echo "conveyor: release-run: release-prep $1 is running, then release $1 once its suite passes; their output is in $CARDS/release/run.log"; fi
 }
-# The run under way ended: its record's pid and every process of the run (relreap()). Only a pid that runs
-# conveyor.sh is taken, so a record left by a run that died names no other process. A process of the run relreap cannot
-# see still holds the release lock as it ends: the run's release-prep, whose bash carries no mark ps can read (export
-# changes no process's own environment) and which leaves the tree of the record's pid once that pid has ended, ends
-# on the TERM through its trap (relsig()). The stop waits for the lock, so a release-prep started next is not refused. It
-# writes the record only holding the lock (the run's own end and the next run write it holding it too), and only while
-# the record is still the stopped run's (its pid and start): a run started once the lock was free has its own record,
-# which is never marked stopped.
-# 1: the lock is still held 10 s on (relreap's time for a TERM; with the stop's own reap, within the Board's 30 s); the
-# record is left as it is, and the snapshot shows the run stopped once the lock is free.
-releasestop() {
-  local p s v lk rc=1
-  p=$(jq -er 'select(.ended == null) | .pid | numbers' "$RELRUN" 2>/dev/null) && kill -0 "$p" 2>/dev/null && ps -o args= -p "$p" 2>/dev/null | grep -q 'conveyor\.sh' || { relstopwaiting; return; }
-  s=$(jq -r '.since' "$RELRUN") && v=$(jq -r '.version' "$RELRUN") || { echo "conveyor: release-run stop: $RELRUN could not be read; nothing stopped" >&2; return 1; }
-  relreap "$p" "$p"; hoststop
-  { exec {lk}>>"$CARDS/release/lock"; } 2>/dev/null && flock -w 10 "$lk" && rc=0
-  [ $rc != 0 ] || relrec --argjson p "$p" --arg s "$s" --arg t "$(clock)" 'if .pid == $p and .since == $s then .state = "stopped" | .ended = $t | .reasons = ["stopped by the owner"] else . end'
-  [ -z "$lk" ] || exec {lk}>&-
-  # Not the lock, but another run's record: that run took the lock once this one's processes had let it go.
-  [ $rc = 0 ] || jq -e --argjson p "$p" --arg s "$s" '.pid != $p or .since != $s' "$RELRUN" > /dev/null 2>&1 || { echo "conveyor: release-run stop: the run is stopped, but a process of it still holds $CARDS/release/lock; release-prep and release are refused until it ends" >&2; return 1; }
-  echo "conveyor: release-run: the release run of $v is stopped"
-}
+# `release-run stop`: releasestop() (lib/fulltest.sh).
 shift
 if [ "$CMD_ARG" = release ]; then
   RELUSE='usage: conveyor.sh release <version: X.Y.Z> [--anyway] [--allow-commit <sha>]... [--by <who>: with --anyway or --allow-commit]'
@@ -782,7 +777,10 @@ if [ "$CMD_ARG" = release ]; then
   relrun release "$ver"
 elif [ "$CMD_ARG" = release-run ]; then
   if [ "$*" = stop ]; then releasestop
-  elif [ "$*" = atonce ]; then hostrule release-run && hostslots release-run && relatonce release-run
+  elif [ "$*" = atonce ] || [ "$*" = 'atonce --machine local' ]; then
+    # With --machine local: the number of a run here, as `release-run ... --machine local` runs it, whatever the rule says.
+    if [ $# = 3 ]; then export CONVEYOR_RELEASE_MACHINE=local; else unset CONVEYOR_RELEASE_MACHINE; fi
+    hostrule release-run && hostslots release-run && relatonce release-run
   else
     how=; by=
     # For the forms that run release-prep's suite (not anyway, which runs none), last: the machine of this run alone (--machine local: here, whatever the rule says, lib/suitehost.sh), then the suite's mode.
@@ -790,7 +788,7 @@ elif [ "$CMD_ARG" = release-run ]; then
     if [ $# -ge 2 ] && [ "$1" != anyway ] && [[ ${!#} =~ ^--(parallel|serial)$ ]]; then RELMODE=${BASH_REMATCH[1]}; set -- "${@:1:$#-1}"; fi
     if [ $# = 2 ] && [ "$1" = prep ]; then how=prep; shift
     elif [ $# = 4 ] && [ "$1" = anyway ] && [ "$3" = --by ] && [[ $4 == *[![:space:]]* && $4 != *$'\n'* ]]; then how=anyway by=$4; set -- "$2"; fi
-    [ $# = 1 ] && [[ $1 =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "usage: conveyor.sh release-run [prep] <version: X.Y.Z> [--parallel | --serial] [--machine local] | release-run anyway <version: X.Y.Z> --by <who> | release-run stop | release-run atonce" >&2; exit 2; }
+    [ $# = 1 ] && [[ $1 =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "usage: conveyor.sh release-run [prep] <version: X.Y.Z> [--parallel | --serial] [--machine local] | release-run anyway <version: X.Y.Z> --by <who> | release-run stop | release-run atonce [--machine local]" >&2; exit 2; }
     mkdir -p "$CARDS/release" && releasego "$1" $how "$by"
   fi
 else

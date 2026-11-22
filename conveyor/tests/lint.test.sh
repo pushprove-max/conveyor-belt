@@ -376,6 +376,23 @@ t_lintsynclink() {
     || fail "lintsync config/ruff.toml over base's link config (exit $RC: 3 sync failed, 4 no folder copy, 5 written into the target, 6 put-back failed, 7 link not back) left the target: $(ls -A "$tg") $(cat "$T/$CASE/out")"
 }
 
+# Bug (R264): a trigger file `config` that the card makes in place of base's folder config (config/old.toml) failed the
+# sync, so the base run did not run: rm -f cannot delete a folder. The base worktree gets the file, and putting base
+# back gives the folder and its file again. Calls lintsync twice, as two commands' base runs do.
+t_lintsyncdir() {
+  lintsetup
+  lintwt config/old.toml old a.c one
+  git -C "$R" worktree add -q --detach "$T/$CASE/bw" || fail "the base worktree"
+  (cd "$W" && git rm -rq config && echo 'line-length = 1' > config) || fail "the card's change"
+  # shellcheck disable=SC2016 # expanded in lintin
+  lintin 'lintindex "$W" "$T/$CASE/ix" && b=$(git -C "$W" rev-parse HEAD) && bw=$T/$CASE/bw
+    lintsync "$W" "$T/$CASE/ix" "$b" "$bw" "$T/$CASE/s" "$T/$CASE/rec" config || exit 3
+    [ -f "$bw/config" ] && [ "$(cat "$bw/config")" = "line-length = 1" ] || exit 4
+    lintsync "$W" "$T/$CASE/ix" "$b" "$bw" "$T/$CASE/s" "$T/$CASE/rec" || exit 5
+    [ "$(cat "$bw/config/old.toml")" = old ] || exit 6'
+  [ "$RC" = 0 ] || fail "lintsync of the file config over base's folder config (exit $RC: 3 sync failed, 4 no file copy, 5 put-back failed, 6 folder not back): $(cat "$T/$CASE/out")"
+}
+
 # Bugs: `conveyor.sh size --list` leaves out a file over the limit (one the exempt file names: the list is what it
 # names; one not tracked yet; one only the worktree it was called in has, not main), lists a file at the limit (edge.c,
 # three lines) or one under an excluded folder, prints more than the path, or makes a state folder. It is called in a
@@ -392,6 +409,24 @@ t_lintsizelist() {
   [ "$RC" = 0 ] && [ "$out" = "$(printf 'at.c\nbig.c\nnew.c')" ] \
     || fail "size --list is not the worktree's three files over the limit, the excluded one left out (exit $RC): $out"
   [ ! -e "$ST" ] && [ ! -e "$T/$CASE/cards/mainrun" ] || fail "conveyor.sh size --list made a state folder: $(ls "$ST" "$T/$CASE/cards" 2>&1)"
+  # Bug (R263): a list that could not be written (a full disk) still exited 0, as rm was the last command. The sort
+  # here fails as a write to /dev/full does, which macOS has not.
+  # shellcheck disable=SC2016 # expanded in lintin
+  lintin 'sort() { echo "sort: write failed: standard output: No space left on device" >&2; return 2; }; lintsizelist "$W"'
+  [ "$RC" = 2 ] || fail "lintsizelist whose sort could not write the list exited $RC, not sort's 2: $(cat "$T/$CASE/out")"
+}
+
+# Bug (R262): a tracked folder made a link to a folder outside the worktree had the files there counted, under the
+# tracked paths: `conveyor.sh size --list` named a file the worktree does not hold. A file under a link is not counted.
+t_lintsizelinkdir() {
+  local out
+  lintsetup
+  tune '.lint = {commands: [{files: ["*.c"], size: {file: 3, exempt: ".size-exempt"}}]}'
+  lintwt sub/big.c "$(printf 'l1\nl2\nl3\nl4\nl5')" small.c l1
+  mkdir -p "$T/$CASE/outside" && printf 'l1\nl2\nl3\nl4\nl5\n' > "$T/$CASE/outside/big.c" \
+    && rm -rf "$W/sub" && ln -s "$T/$CASE/outside" "$W/sub" || fail "the card's change"
+  out=$(cd "$W" && CONVEYOR_CARDS=$T/$CASE/cards bash "$SRC/conveyor.sh" size --list 2>&1); RC=$?
+  [ "$RC" = 0 ] && [ -z "$out" ] || fail "size --list counted sub/big.c through the link sub to a folder outside the worktree (exit $RC): $out"
 }
 
 # Bug: doctor says nothing of a lint command that cannot run, or runs one with no file to read. Each of five stub

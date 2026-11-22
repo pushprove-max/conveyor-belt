@@ -45,7 +45,8 @@ its own, and the Board's Rules tab sets them in its Judge row.
   the reviewer still answers the USER-VISIBLE line (kept on the card's review line), and the card lands as any other.
   A visible change landed while it is off was never approved; the Board says so beside the switch.
 - `lint`: the rule Lint check, on by default. On, each card's change goes through the review gate (Lint, below)
-  before each review and the landing gate before it lands. Off, no lint command runs in a card and the brief has no `# Lint` section.
+  before each review and the landing gate before it lands. The exception is a review of the change that the landing
+  gate's lint fix left: while no other session changes it, it has no review gate, because the landing gate checks it. Off, no lint command runs in a card and the brief has no `# Lint` section.
 - `split`: the rule Split large issues, `off`, `shadow` or `on`. It is on by default (`conveyor.sh control rules split=<off|shadow|on>`).
   Before a card makes its worktree, code measures its issue against the pack's `split` limits; an issue that reaches
   one goes to the judge one time, which answers keep or 2 or 3 slices. Shadow records the verdict on the card's

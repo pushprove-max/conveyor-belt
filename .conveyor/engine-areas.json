@@ -1142,6 +1142,7 @@
 {"area": "cmd-release-prep", "test": "releaseminver.test.sh"}
 {"area": "cmd-release-prep", "test": "releasemode.test.sh"}
 {"area": "cmd-release-prep", "test": "releasehold.test.sh"}
+{"area": "cmd-release-prep", "test": "releaseparts.test.sh"}
 {"area": "cmd-release-prep", "file": "conveyor/lib/suitehost.sh"}
 {"area": "cmd-release-prep", "file": "conveyor/commands/suite-machine.sh"}
 {"area": "cmd-release-prep", "test": "suitehost.test.sh"}

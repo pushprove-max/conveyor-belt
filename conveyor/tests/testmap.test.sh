@@ -338,6 +338,24 @@ t_testmapsilent() {
     "$T/$CASE/eng.out" > /dev/null || fail "a run that failed with no message gave a save's reason: $(cat "$T/$CASE/eng.out")"
 }
 
+# Bug it catches (R324): a failed run whose files could not be moved into the state folder was said to have them kept
+# there, and its temporary folder, which still held them, was then removed; a build by hand (maprunbuild()) removed it
+# too, with the runner's own scratch folder, mapbuild's TMPDIR. The mv here refuses the kept folder (a real one would
+# need a full disk): the build's record says the files were not all kept and where they are left, and they are there.
+t_testmapkeptfail() {
+  local d
+  setup '[]'; echo '{"name": "fixture"}' > "$R/package.json" || fail "the fixture's package.json"
+  # slot_pool and SLOT_HOME: a test slot already held, as the runner's slot is no part of this; mapcollect: a run that
+  # fails at once, saying why; mv: one that cannot move a file into the kept folder
+  mapeng 'slot_pool() { :; }; SLOT_HOME=held; mapcollect() { echo "the run broke" >&2; return 1; }
+    mv() { [[ ${!#} != */test-map.failed/ ]] || return 1; command mv "$@"; }; maprunbuild "V8 coverage"; cat "$(mapbuildpath)"' \
+    || fail "the build's runner failed: $(cat "$T/$CASE/eng.out")"
+  d=$(jq -r 'select(.state == "failed") | .reason' "$T/$CASE/eng.out" | sed -n 's/.*; its files could not all be kept in .*; those not moved are left in //p')
+  [ -n "$d" ] && grep -qx 'the run broke' "$d/err" && ! grep -qs 'files are kept in' "${d%/*}"/err.* \
+    || fail "a failed move was said to keep the files, or the folder that holds them was removed: $(cat "$T/$CASE/eng.out"); $(ls -A "$d" 2>&1)"
+  rm -rf "${d%/*}"
+}
+
 # Bug it catches (#1348): the run kept each test file's V8 coverage folder to its end, so a suite of 1500 files can
 # fill a /tmp that has a quota, and a skipped cut short there cannot be saved (the likely cause of #1348's failed save:
 # its files were deleted, so it is not proven). Each folder goes once its pairs are read, and the pairs are still there.

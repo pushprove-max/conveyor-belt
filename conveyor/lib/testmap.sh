@@ -274,7 +274,7 @@ mapcost() {
 # (mapkeptpath()) until the next build starts, as its temporary folder is removed.
 mapkeptpath() { echo "${STATE%/*}/test-map.failed"; }
 mapbuild() { # <dir>
-  local lang tool tmp at=$SECONDS rc=0 sec why e k f MAPRUN=1
+  local lang tool tmp at=$SECONDS rc=0 sec why e k f MAPRUN=1 kept=1
   lang=$(maplang "$1"); tool=$(maptool "$lang" "$1") || { echo "conveyor: no test map: $tool; a card's tests are found by name" >&2; return 1; }
   tmp=$(mktemp -d) || return 1
   k=$(mapkeptpath); rm -rf "$k"
@@ -294,15 +294,17 @@ mapbuild() { # <dir>
       why=$(mapwhy "$tmp/err" || echo 'it stopped with no error message')
       e=$(cat "$tmp/err" 2>/dev/null); e=${e:-$why}
     fi
+    # A file that could not be moved stays in $tmp, which is then kept, not removed, and the reason names it.
+    mkdir -p "$k" || kept=''
+    for f in pairs skipped err save.err log; do [ -z "$kept" ] || [ ! -e "$tmp/$f" ] || mv -f "$tmp/$f" "$k/" || kept=''; done
+    [ -n "$kept" ] || why="$why; its files could not all be kept in $k; those not moved are left in $tmp"
     mapend "the run with $tool failed after ${sec}s: $why"
     echo "conveyor: no test map: the run with $tool failed after ${sec}s; a card's tests are found by name: $e" >&2
-    if mkdir -p "$k"; then
-      for f in pairs skipped err save.err log; do [ ! -e "$tmp/$f" ] || mv -f "$tmp/$f" "$k/"; done
-      echo "conveyor: the failed run's files are kept in $k" >&2
-    fi
+    if [ -n "$kept" ]; then echo "conveyor: the failed run's files are kept in $k" >&2
+    else echo "conveyor: the failed run's files could not all be kept in $k; those not moved are left in $tmp" >&2; fi
     rc=1
   fi
-  rm -rf "$tmp"; return $rc
+  [ -z "$kept" ] || rm -rf "$tmp"; return $rc
 }
 # A build by hand (`conveyor.sh testmap build`, the Board's Build the test map): mapbuild() on the main checkout, in
 # the background, on one of the machine's test slots as a test run takes one (tests(), lib/testrun.sh). Its record is
@@ -352,7 +354,9 @@ maprunbuild() { # <tool>
     else st=failed; why=$(jq -c '.failed | strings' "$(mapprogpath)" 2>/dev/null | grep . || jq -Rc . < <(mapwhy "${tmp:-/tmp}/err.$me" || echo 'the build failed'))
     fi
     [ -n "$SLOT_HOME" ] || slot_free
-    rm -rf "${tmp:-/tmp}/err.$me" ${tmp:+"$tmp"}
+    # mapbuild's folder is in $tmp (its TMPDIR): one it kept, as its files could not be moved, is kept with it.
+    [ "$st" = failed ] && grep -q '^conveyor: the failed run.s files could not all be kept' "${tmp:-/tmp}/err.$me" 2>/dev/null \
+      || rm -rf "${tmp:-/tmp}/err.$me" ${tmp:+"$tmp"}
   elif [ -n "$stopped" ]; then st=stopped why='"stopped by hand, before it had a test slot"'
   else st=failed why='"the machine'\''s test slots could not be read"'; fi
   maprec --arg s "$st" --argjson w "$why" '. + {end: (now | floor), state: $s, reason: $w} | del(.pid)' "$(mapbuildpath)"

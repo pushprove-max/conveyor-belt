@@ -153,7 +153,10 @@ stops again in the same way stays on Needs you until you retry it.
 ## Lint
 
 When the pack has a `lint` field ([Lint](configuration.md#lint)) and the rule Lint check is on, the card's change goes
-through a lint gate before each review, and through the landing gate (below) before it lands. The gate runs the pack's lint commands on the staged change. The brief of the build and fix sessions has a
+through a lint gate before each review, and through the landing gate (below) before it lands. There is one exception:
+after a fix of lint findings at the landing gate, the review of the change that fix left has no lint gate before it,
+because the landing gate checks that change. When another session changes it again, the next review has its lint gate.
+The gate runs the pack's lint commands on the staged change. The brief of the build and fix sessions has a
 `# Lint` section. It names the commands and tells the session to run `conveyor.sh lint` before it finishes.
 
 - A pass lets the card go on. So does a command whose tool is missing: the card's lint line says
