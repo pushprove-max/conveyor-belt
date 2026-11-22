@@ -444,9 +444,9 @@ judged() { # <card> <issue> <worktree> <brief> <the review's fields>
       | "F\(.n) [\({inside: "inside the diff", outside: "outside the diff", none: "no place"}[.place])\(if .kind then "; always accepted: \(.kind)" else "" end)] \(.finding)"' "$wt.judge.marks")"); then :
   # What it said of each finding: its one decision line that parses whole, an accepted one with its reason and cost,
   # else the finding is accepted (a duplicate id, a line that cannot be read, no line). A line for no finding of the
-  # review is dropped. None read at all fails the answer. An always-accepted kind beats a decline and an OUTSIDE.
+  # review is dropped. A line's bullet or list number (`- `, `1. `, `1) `) is not read. None read at all fails the answer. An always-accepted kind beats a decline and an OUTSIDE.
   elif ! jq -cn --slurpfile m "$wt.judge.marks" --rawfile a "$wt.judge" 'def rx: "^F(?<n>[0-9]+) (?<d>ACCEPT|DECLINE|OUTSIDE):[[:space:]]*(?<r>.*[^[:space:]].*)$";
-      ($a | split("\n") | map(gsub("^[[:space:]`*-]+|[[:space:]`*]+$"; "") | select(test("^F[0-9]+")))) as $said
+      ($a | split("\n") | map(gsub("^([[:space:]`*-]|[0-9]+[.)])+|[[:space:]`*]+$"; "") | select(test("^F[0-9]+")))) as $said
       | ($said | map(capture(rx))) as $all
       | ($said | map(select([capture(rx)] | length == 0) | capture("^F(?<n>[0-9]+)").n | tonumber)) as $bad
       | ($m[0] | map(. as $x | [$all[] | select((.n | tonumber) == $x.n)] as $d

@@ -398,6 +398,19 @@ t_judgedup() {
     || fail "a finding named by two lines of the answer was not accepted: $(jr 7) $(jf 7 '.judge | tojson')"
 }
 
+# Bug: a line with a list number ("1. F1 ...") is not read, so a second line for a finding in a numbered list is
+# dropped: the decline before it stands, the verdict turns GO and the raw answer is not kept. Here F1's two lines
+# leave it undecided: the review stands as written, nothing is declined and the raw answer is kept.
+t_judgenumbered() {
+  judging "[$(issue 7 2026-01-01)]"
+  printf '%s\n' '[P1] a.txt:2 wrong word' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
+  printf '%s\n' 'F1 DECLINE: no' '1. F1 ACCEPT: yes. Cost to every card: none' > "$STUB/judge.1"
+  judgeone 7 "$STUB/review"
+  cmp -s "$STUB/review" "$T/$CASE/cards/c7.review" && [ "$(jf 7 .verdict)" = NO-GO ] && [ "$(jf 7 '.judge.decided')" = 0 ] \
+    && [ "$(jf 7 '.judge.raw')" = "$(cat "$STUB/judge.1")" ] && [ ! -s "$ST/declined.jsonl" ] \
+    || fail "a finding named again on a numbered line was not accepted: $(jr 7) $(jf 7 '.judge | tojson')"
+}
+
 # Bug: a finding with one line that parses and another that does not is decided by the line that parses, so a decline
 # stands that the judge's other line for the same finding left unclear. Here F1 has a decline and a line that is no
 # decision: it is accepted; F2's one line is read.
