@@ -386,8 +386,13 @@ t_controlsuitemachine() {
   jq -c '.suiteMachine.setupAt = "2026-11-20T15:04:00Z"' "$C" > "$C.new" && mv "$C.new" "$C" || fail "the fixture could not be made"
   [ "$(ctl suite-machine devbox --size 8x16 | jq -r .suiteMachine.setupAt)" = 2026-11-20T15:04:00Z ] || fail "control suite-machine devbox --size 8x16 again dropped the box's setupAt: $(jq -c .suiteMachine "$C")"
   [ "$(ctl suite-machine devbox --size 4x8 | jq -c '.suiteMachine | has("setupAt")')" = false ] || fail "control suite-machine devbox --size 4x8 kept the setupAt of the 8x16 box: $(jq -c .suiteMachine "$C")"
+  # Bug: the Board's Undo of "Use this machine" put the devbox back with no setupAt (a local rule keeps none), so the Box row said "set-up time not kept"; --setup-at gives it back, and a bad time is refused.
+  ctl suite-machine local > /dev/null
+  [ "$(ctl suite-machine devbox --size 8x16 --setup-at 2026-11-20T15:04:00Z | jq -c '.suiteMachine | [.size, .setupAt]')" = '["8x16","2026-11-20T15:04:00Z"]' ] || fail "control suite-machine devbox --size 8x16 --setup-at <time> from a local rule did not keep the time: $(jq -c .suiteMachine "$C")"
+  out=$(loop control suite-machine devbox --size 8x16 --setup-at yesterday 2>&1); [ $? = 2 ] && [ "$(jq -r .suiteMachine.setupAt "$C")" = 2026-11-20T15:04:00Z ] || fail "control suite-machine devbox --setup-at yesterday was not refused with the record left as it was: $out"
+  ctl suite-machine local > /dev/null  # a local rule keeps no setupAt: the next rule has none
   ctl suite-machine devbox --size 8x16 > /dev/null || fail "control suite-machine devbox --size 8x16 did not set the rule back"
-  for a in 'devbox --size' 'devbox --size -oX' 'devbox --size a/b' 'devbox 4x8' 'devbox --size 4x8 x' 'devbox --dir ~'; do
+  for a in 'devbox --size' 'devbox --size -oX' 'devbox --size a/b' 'devbox 4x8' 'devbox --size 4x8 x' 'devbox --setup-at 2026-11-20T15:04:00Z' 'devbox --dir ~'; do
     # shellcheck disable=SC2086 # each word an argument
     out=$(loop control suite-machine $a 2>&1); [ $? = 2 ] && [ "$(jq -c .suiteMachine "$C")" = '{"kind":"devbox","size":"8x16","tag":"conveyor-suite-main","idleStop":"15m"}' ] \
       || fail "control suite-machine $a was not refused with nothing changed: $out"

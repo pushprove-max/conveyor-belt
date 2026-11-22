@@ -29,7 +29,10 @@
   const cpusOf = (size) => { const m = /^([0-9]+)x[0-9]+$/.exec(size); return m ? Number(m[1]) : null; };
   // The arguments of control suite-machine that make a record's rule.
   function argsOf(m) {
-    if (m.kind === 'devbox') return ['devbox'].concat(text(m.size) ? ['--size', m.size] : []);
+    if (m.kind === 'devbox') {
+      // The set-up time goes back with the box (an Undo of a change to this machine), or the Box row loses it.
+      return ['devbox'].concat(text(m.size) ? ['--size', m.size] : [], Number.isNaN(Date.parse(text(m.setupAt))) ? [] : ['--setup-at', m.setupAt]);
+    }
     if (m.kind === 'ssh' && TARGET.test(text(m.target))) return ['ssh', m.target].concat(text(m.dir) ? ['--dir', m.dir] : []);
     return ['local'];
   }

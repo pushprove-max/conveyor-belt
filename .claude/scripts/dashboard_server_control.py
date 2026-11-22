@@ -18,6 +18,13 @@ def suite_dir_ok(x):
     return x == '~' or (len(x) <= 256 and rest.startswith('/') and all((c.isascii() and c.isalnum()) or c in '._/@+-' for c in rest))
 
 
+def setup_at_ok(x):
+    """Whether x is a devbox's set-up time, as control suite-machine reads it: 2026-11-20T15:04:00Z (digits and colons)."""
+    digits = '0123456789'
+    return (len(x) == 20 and x[4] == x[7] == '-' and x[10] == 'T' and x[19] == 'Z'
+            and all(c in digits for c in x[:4] + x[5:7] + x[8:10]) and all(c in digits + ':' for c in x[11:19]))
+
+
 def control_ok(body):
     """Whether the page's body is one action this route takes, with arguments of the shape conveyor.sh takes. The host
     checks again (a CLI it has not installed is refused there, with its reason)."""
@@ -39,8 +46,9 @@ def control_ok(body):
     if a == 'suite-machine':  # where a release's suite runs, as `control suite-machine` takes it (the host checks again)
         if v == ['local'] or v == ['devbox']:
             return True
-        if v[:2] == ['devbox', '--size'] and n == 3:
-            return suite_word(v[2], '', '._-', 20)  # a devbox size, such as 4x8
+        if v[:2] == ['devbox', '--size'] and n in (3, 5):
+            # a devbox size, such as 4x8; with --setup-at <time>, the Board's Undo putting the box's set-up time back
+            return suite_word(v[2], '', '._-', 20) and (n == 3 or (v[3] == '--setup-at' and setup_at_ok(v[4])))
         # An ssh target is user@host or a host, never one ssh reads as an option: it does not start with a dash.
         return v[:1] == ['ssh'] and n in (2, 4) and suite_word(v[1], '._', '._@-', 128) and (n == 2 or (v[2] == '--dir' and suite_dir_ok(v[3])))
     if a == 'suite-machine-check':  # Check the box: what the suite machine has

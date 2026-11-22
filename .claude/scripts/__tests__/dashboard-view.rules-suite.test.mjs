@@ -115,6 +115,20 @@ test('Rules: Release suite runs on, on a Namespace Devbox, the Box line shows wh
   assert.doesNotMatch(t, /set-up time not kept/);
 });
 
+// Bug this guards: Undo of "Use this machine" on a devbox that had been set up sent only its size, so the saved rule lost
+// its setupAt and the Box row said "set-up time not kept".
+test('Rules: Undo of a change from a set-up devbox sends its set-up time back with it', async () => {
+  const w = boot({ tab: 'rules' });
+  deliver(w, data(undefined));
+  const at = '2026-11-20T15:04:00Z';
+  await devboxShown(w, true, { ...DEVBOX, setupAt: at });
+  await sent(w, () => act(row(w), 'suite-use-local').click());
+  next(w, data(undefined));  // the record now holds this machine
+  assert.deepEqual(await sent(w, () => rulesP(w).querySelector('[data-act="undo"]').click()),
+    [{ action: 'suite-machine', args: ['devbox', '--size', '4x8', '--setup-at', at], repo: 'sample' }, { action: 'suite-machine-check', args: [], repo: 'sample' }],
+    'Undo puts the devbox back with its set-up time');
+});
+
 // Bug this guards: a Linux box over ssh could not be set from the Board, or was sent with a target the engine refuses.
 test('Rules: Release suite runs on, on a Linux box over ssh, takes a target and a folder and sends them', async () => {
   const w = boot({ tab: 'rules' });
