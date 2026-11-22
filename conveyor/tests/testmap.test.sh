@@ -485,6 +485,20 @@ t_startbriefvar() {
     || fail "the list does not give cmd/up.sh and cmd/deep.sh, which source lib/u.sh through a variable and ../, or cmd/trim.sh, through a trimmed variable: $(cat "$T/$CASE/run.out")"
 }
 
+# Bug it catches (#1321): the list of callers of an engine function was filled, in its first 12 files, by what only looks
+# like a call, so real callers fell outside it. fa() is defined in a shell file: a JavaScript helper of its own name
+# (js/x.mjs, fa(1)) is no caller of it, but is one of a function a JavaScript file defines. A file with the name alone on
+# a line (lib/0list.sh, a list of commands; lib/b.sh) is listed after the file that calls it with more on the line (lib/f.sh),
+# though it sorts first.
+t_startbriefcalls() {
+  startmain
+  mkdir -p "$R/js" && printf 'const fa = () => 1;\nfa(1);\n' > "$R/js/x.mjs" && printf 'run\nfa\nx\n' > "$R/lib/0list.sh" && printf 'fa 1\n' > "$R/lib/f.sh" \
+    && git -C "$R" add -A && git -C "$R" commit -qm calls || fail "the callers fixture could not be committed"
+  fx_in 'briefcalls "$R" fa lib/a.sh; echo --; briefcalls "$R" fa $'"'"'js/y.js\nlib/a.sh'"'"'; echo --; briefcalls "$R" fa ""'
+  [ "$(tr '\n' ' ' < "$T/$CASE/run.out")" = 'lib/f.sh lib/0list.sh lib/b.sh -- js/x.mjs lib/f.sh lib/0list.sh lib/b.sh -- js/x.mjs lib/f.sh lib/0list.sh lib/b.sh ' ] \
+    || fail "the callers of fa() are not lib/f.sh, then the files with the name alone on a line (a function of shell files: no JavaScript file; else js/x.mjs too): $(cat "$T/$CASE/run.out")"
+}
+
 # Bug it catches (#1312): an issue that names no tracked file or function (a word in backticks, a file that is not
 # there, a function nothing defines or calls) must get no list: an empty heading would anchor the builder on nothing.
 t_startbriefnone() {

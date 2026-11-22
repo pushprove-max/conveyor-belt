@@ -575,13 +575,21 @@ briefref() { # <worktree> <path>
 }
 # The files that call the function <name>, one a line: a shell command (a *.sh or *.bash file, the name at the start
 # of a line, or after ; & | ( { ! then do else if while until, and followed by a space, a ; & or the end) and, in any
-# other file but a Markdown page, a call written name( that is not a definition. Not a line in a comment.
-briefcalls() { # <worktree> <name>
-  local wt=$1 n=$2 dp dq
+# other file but a Markdown page, a call written name( that is not a definition. Not a line in a comment. A function that
+# only shell files (<defs>, one a line) define has no caller in a file of another language, whose own name( is another
+# function, so that search runs only when <defs> is empty or names a file that is not shell. A file whose only match is
+# the name alone on a line (a word in a list of commands) comes after the files with a call that has more on its line.
+briefcalls() { # <worktree> <name> <defs>
+  local wt=$1 n=$2 defs=$3 dp dq lines
   dp="^[[:space:]]*(function[[:space:]]+)?${n}[[:space:]]*\\(\\)"; dq="(function|def|func|fn)[[:space:]]+${n}([^A-Za-z0-9_]|$)"
-  { git -C "$wt" -c core.quotePath=false grep -nIE -e "(^|[;&|({]|(^|[[:space:]])(then|do|else|if|while|until|!))[[:space:]]*${n}([[:space:]]|;|&|$)" -- '*.sh' '*.bash' 2>/dev/null
-    git -C "$wt" -c core.quotePath=false grep -nIE -e "(^|[^A-Za-z0-9_.\$])${n}[[:space:]]*\\(" -- . ':(exclude)*.md' ':(exclude)*.sh' ':(exclude)*.bash' 2>/dev/null
-  } | grep -vE -e "^[^:]*:[0-9]+:${dp#^}" -e "^[^:]*:[0-9]+:.*$dq" | briefcode
+  lines=$(git -C "$wt" -c core.quotePath=false grep -nIE -e "(^|[;&|({]|(^|[[:space:]])(then|do|else|if|while|until|!))[[:space:]]*${n}([[:space:]]|;|&|$)" -- '*.sh' '*.bash' 2>/dev/null)
+  if [ -z "$defs" ] || grep -qvE '\.(sh|bash)$' <<<"$defs"; then
+    lines+=$'\n'$(git -C "$wt" -c core.quotePath=false grep -nIE -e "(^|[^A-Za-z0-9_.\$])${n}[[:space:]]*\\(" -- . ':(exclude)*.md' ':(exclude)*.sh' ':(exclude)*.bash' 2>/dev/null)
+  fi
+  lines=$(grep -vE -e "^[^:]*:[0-9]+:${dp#^}" -e "^[^:]*:[0-9]+:.*$dq" <<<"$lines")
+  # The files with a match that is more than the name alone, then the others.
+  awk 'FILENAME == ARGV[1] { print; seen[$0]; next } !($0 in seen)' \
+    <(grep -vE -e "^[^:]*:[0-9]+:[[:space:]]*${n}[[:space:]]*$" <<<"$lines" | briefcode) <(briefcode <<<"$lines")
 }
 # The build brief's starting point (card(), cardbuild()): for each tracked file (with or without a :line) and each
 # function (name() or name(args)) the issue names, in backticks or bare, the files that define it, the files that call
@@ -614,7 +622,7 @@ startbrief() { # <worktree> <issue json>
     [ -n "$n" ] || continue
     # A definition: a shell `name()` at the start of a line, or `function`, `def`, `func` or `fn` before the name.
     defs=$(git -C "$wt" -c core.quotePath=false grep -lIE -e "^[[:space:]]*(function[[:space:]]+)?${n}[[:space:]]*\\(\\)" -e "(function|def|func|fn)[[:space:]]+${n}([^A-Za-z0-9_]|$)" 2>/dev/null)
-    hits=$(briefcalls "$wt" "$n")
+    hits=$(briefcalls "$wt" "$n" "$defs")
     out=''
     [ -z "$defs" ] || out="defined in $(briefcap "$defs")"
     [ -z "$hits" ] || out+="${out:+; }called in $(briefcap "$hits")"
