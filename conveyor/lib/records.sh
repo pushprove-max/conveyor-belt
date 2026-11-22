@@ -27,6 +27,24 @@ keepcards() {
 # LOCKHELD tells what runs under it that the lock is held (check(), views.sh): a second flock on the file would wait for ever.
 # shellcheck disable=SC2034 # read by check() in lib/views.sh
 locked() { ( flock 9 && LOCKHELD=1 && "$@" ) 9>>"$STATE"; }
+# The longest a pick, or a snapshot's hold of new issues (adopt), may hold that lock, in seconds: every card's record
+# writes wait on it, and one jq that did not end there stopped the whole belt, with no word, until it was stopped by hand.
+LOCKLIMIT=120
+# locked, for <step>'s work, to LOCKLIMIT seconds. Past it, the work and every process under it are stopped (each
+# one holds the lock's file open, and the lock is free only when all of them have ended), the log says which step ran
+# out of time, and the status is 124: the step failed, as when it fails on its own. The watch has no stdout (a caller
+# that reads the work's output reads to its end) and no lock.
+# shellcheck disable=SC2034 # LOCKHELD: read by check() in lib/views.sh
+lockedfor() { # <step> <command> [args]
+  local step=$1; shift
+  ( flock 9 || exit 1
+    LOCKHELD=1; "$@" & p=$!
+    ( exec > /dev/null 9>&-; s=''; trap 'kill "$s" 2>/dev/null; exit 0' TERM; sleep "$LOCKLIMIT" 2> /dev/null & s=$!; wait "$s" || exit 0; trap '' TERM
+      echo "conveyor: $step ran out of time: it held the card records' lock for over $LOCKLIMIT s; it is stopped and the lock is free" >&2
+      # shellcheck disable=SC2046 # the pids freeze() (lib/run.sh, loaded by the pick and the snapshot) prints, one word each
+      kill -KILL $(freeze "$p") 2>/dev/null; exit 3 ) & k=$!
+    wait "$p"; rc=$?; kill "$k" 2>/dev/null; wait "$k"; [ $? != 3 ] || exit 124; exit "$rc" ) 9>>"$STATE"
+}
 # The state database (state.py): the only reader and writer of the history files (the card records, the retried
 # lines, the declined list, the samples and the limit readings). Every line is appended, and every rewrite written,
 # through it, to its table and its file both; every reader asks it, but check() (views.sh), which checks the card

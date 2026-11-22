@@ -461,7 +461,8 @@ checkrun() { # <scratch folder>; prints {} when the pack names no progress comma
 # the whole lines of the records are read (check() says why). 3 when the copy was taken and the hold could not be saved.
 snapcopy() { # [<open issues json>]
   local rc=0 c CTL_V
-  [ -z "${1:-}" ] || { ctlread 2>/dev/null && c=$CTL_V && [ "$(adopted "$c" "$1" 2>/dev/null)" = "$c" ]; } || locked adopt "$1" || rc=3
+  [ -z "${1:-}" ] || { ctlread 2>/dev/null && c=$CTL_V && [ "$(adopted "$c" "$1" 2>/dev/null)" = "$c" ]; } \
+    || lockedfor "the snapshot's adopt" adopt "$1" || rc=3
   # The copy, and what the snapshot reads of the records past their rows, are the state database's answers to one
   # call (state.py), read at one time: the pushes, the cards waiting for the owner's yes (yes), the samples and the
   # declined list.

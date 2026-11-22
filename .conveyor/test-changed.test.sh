@@ -23,7 +23,7 @@ no() { echo "not ok - $1"; }
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/tests"
 # The test lint and the browser check, which every run starts, are empty here: no part checks them, and each run of
 # the real ones is time paid ~100 times a file run (test-lint.test.sh checks that a run runs the lint).
-cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$R/.conveyor/"; : > "$R/.conveyor/test-lint.sh"; : > "$R/.conveyor/no-browser-tests.sh"
+cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$R/.conveyor/"; : > "$R/.conveyor/test-lint.sh"; : > "$R/.conveyor/no-browser-tests.sh"; : > "$R/.conveyor/no-records-split.sh"
 cat > "$R/.conveyor/engine-areas.json" <<'EOF'
 {"outside": "conveyor/README.md"}
 {"area": "core", "file": "conveyor/core.sh"}
@@ -718,7 +718,7 @@ p_slotsparse() {
 # copy of it (M). A run here loops over every case file of the map, so each of these parts makes one run (two only
 # where both are cheap whole runs), and the parts that start from the same commit build it with one <name>fix function.
 M=$T/m; mkdir -p "$M/.conveyor" "$M/conveyor/tests"
-cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/engine-areas.json" "$M/.conveyor/"; : > "$M/.conveyor/test-lint.sh"; : > "$M/.conveyor/no-browser-tests.sh"
+cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/engine-areas.json" "$M/.conveyor/"; : > "$M/.conveyor/test-lint.sh"; : > "$M/.conveyor/no-browser-tests.sh"; : > "$M/.conveyor/no-records-split.sh"
 HMAP=$T/here.json; (cd "$ROOT" && bash .conveyor/test-changed.sh --map) > "$HMAP" || echo "not ok - this checkout's map could not be read"
 jq -r '.areas[].files[] | split("/")[:-1] | join("/")' "$HMAP" | sort -u | (cd "$M" && xargs mkdir -p)
 jq -r '.areas[].files[]' "$HMAP" | while read -r f; do echo one > "$M/$f"; done

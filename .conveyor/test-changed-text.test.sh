@@ -21,7 +21,7 @@ no() { echo "not ok - $1"; }
 # Area c (c.test.sh, cone) no change here selects: aone and bone are then not a case of every case file, which runs the
 # whole engine test (a meta-runner's run, issue 584, that the pack here does not mark).
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/lib" "$R/conveyor/tests" "$R/.claude/dashboard/__tests__"
-cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$R/.conveyor/"
+cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$HERE/no-records-split.sh" "$R/.conveyor/"
 printf '%s\n' '{"area": "a", "file": "conveyor/lib/m.sh"}' '{"area": "a", "test": "a.test.sh"}' \
   '{"area": "b", "file": "conveyor/y.sh"}' '{"area": "b", "test": "b.test.sh"}' \
   '{"area": "c", "test": "c.test.sh"}' > "$R/.conveyor/engine-areas.json"

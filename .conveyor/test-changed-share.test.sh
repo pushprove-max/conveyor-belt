@@ -21,7 +21,7 @@ no() { echo "not ok - $1"; fails=1; }
 # (1,200 KB, past the 1 MB share, each under the size limit); and two other test files, lib/big.test.sh, which writes
 # the same 1,200 KB, and lib/fine.test.sh, which notes its TMPDIR and writes 100 KB. The share is 1 MB.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/tests" "$R/lib" "$R/dirs"
-cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$R/.conveyor/"; : > "$R/.conveyor/test-lint.sh"; : > "$R/.conveyor/no-browser-tests.sh"
+cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$R/.conveyor/"; : > "$R/.conveyor/test-lint.sh"; : > "$R/.conveyor/no-browser-tests.sh"; : > "$R/.conveyor/no-records-split.sh"
 printf '%s\n' '{"area": "a", "file": "conveyor/x.sh"}' '{"area": "a", "test": "a.test.sh"}' \
   '{"area": "b", "file": "conveyor/y.sh"}' '{"area": "b", "test": "b.test.sh"}' \
   '{"area": "c", "file": "conveyor/z.sh"}' '{"area": "c", "test": "c.test.sh"}' > "$R/.conveyor/engine-areas.json"

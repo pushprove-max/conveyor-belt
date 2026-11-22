@@ -16,7 +16,7 @@ no() { echo "not ok - $1" | tee -a "$T/notok" >&2; }
 
 D=.claude/scripts/__tests__
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/tests"
-cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$R/.conveyor/"
+cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$HERE/no-records-split.sh" "$R/.conveyor/"
 printf '%s\n' '{"area": "a", "file": "conveyor/x.sh"}' '{"area": "a", "test": "a.test.sh"}' > "$R/.conveyor/engine-areas.json"
 printf 't_aone() {\n  :\n}\n' > "$R/conveyor/tests/a.test.sh"; echo 'echo one' > "$R/conveyor/x.sh"
 (cd "$ROOT" && git ls-files -z "$D" .claude/dashboard/panels | tar -cf - --null -T -) | tar -xf - -C "$R" || { echo "not ok - the Board files could not be copied"; exit 1; }

@@ -127,6 +127,12 @@ goes turn after turn. Each turn calls these functions in this order:
   issue is closed.
 - `turnpick` picks an issue and starts its card. The turn then ends, and the next turn starts.
 
+A pick holds the card records' lock, and while it holds the lock, no card can write its records. A pick can hold the
+lock for 120 seconds at most. A pick that runs longer is stopped with all the programs it started, and the lock is
+free again. The turn counts the pick as failed, and the next turn picks again. The loop's log shows
+`conveyor: pick ran out of time`. A snapshot that holds new issues has the same limit, and the log shows
+`conveyor: the snapshot's adopt ran out of time`.
+
 When the turn picks nothing, it waits (`turnwait`) until a card, the push or the machine hold's check ends, or until
 the turn's timer ends. `conveyor.sh control hold`, `conveyor.sh control release` and the Foreman's filing hooks also
 end the wait, so the next turn starts at once. A `run` ends at the first turn where none of its cards, pushes, machine hold checks or picks

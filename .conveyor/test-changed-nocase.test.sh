@@ -17,7 +17,7 @@ no() { echo "not ok - $1"; fails=1; }
 # A scratch repo: the real script, and a runner whose start-up takes 0.6 CPU s and each case 1 CPU s more; its one
 # case file starts it as the engine's do (run alone, it gives the runner its own cases when none is chosen).
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/tests"
-cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$R/.conveyor/"
+cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$HERE/no-records-split.sh" "$R/.conveyor/"
 printf '%s\n' '{"area": "a", "file": "conveyor/x.sh"}' '{"area": "a", "test": "a.test.sh"}' > "$R/.conveyor/engine-areas.json"
 echo 'echo one' > "$R/conveyor/x.sh"
 cat > "$R/conveyor/tests/a.test.sh" <<'EOF'

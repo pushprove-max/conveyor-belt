@@ -1487,13 +1487,30 @@ adopt() { # <open issues json>
 }
 # The record with adopt's holds added, saved nowhere: adopt saves it, and `pick --dry` reads it as the record. A
 # forced issue (`control force`) leaves forced, and a pinned one (`control order`) leaves order, once a card of it has
-# landed or it is no longer open; the card records are read only while forced or order lists one, and a line not whole
-# yet (a card writing it) is skipped.
+# landed or it is no longer open. The landed issues are read only while forced or order lists one (landedissues). When
+# they cannot be read, forced and order keep every issue they list, and stderr says so.
 adopted() { # <control record> <open issues json>
-  jq -c --argjson c "$1" --arg fu "$FOLLOWUP" --rawfile r <([[ $1 == *'"forced":[]'* && $1 == *'"order":[]'* ]] || recs 2>/dev/null) "$INSIDE"'[.[] | select((.number | IN($c.startSeen[]) | not)
+  local l='' ok=true
+  [[ $1 == *'"forced":[]'* && $1 == *'"order":[]'* ]] || l=$(landedissues 2>/dev/null) \
+    || { ok=false; echo "conveyor: the landed issues cannot be read from the card records; forced and order keep every issue they list until they can" >&2; }
+  jq -c --argjson c "$1" --arg fu "$FOLLOWUP" --argjson ok "$ok" --slurpfile landed <(printf '%s' "$l") "$INSIDE"'[.[] | select((.number | IN($c.startSeen[]) | not)
       and (((.labels // [] | any(.name == $fu) | not) and (.number as $i | $c.startHeld | any($i > .from and (.to == null or $i <= .to))))
         or (.authorAssociation | type == "string") and (inside | not))) | .number] as $n
-    | map(.number) as $open | [$r | splits("\n") | fromjson? | objects | select(.step == "landed") | .issue] as $landed
+    | map(.number) as $open
     | if $n == [] then $c else $c | .held = (.held + $n | unique) | .startSeen = (.startSeen + $n | unique) end
-    | (.forced, .order) |= map(select(IN($open[]) and (IN($landed[]) | not)))' <<<"$2"
+    | if $ok then (.forced, .order) |= map(select(IN($open[]) and (IN($landed[]) | not))) else . end' <<<"$2"
+}
+# What landedissues reads of each line of the card records (linesum(), lib/records.sh): the issue of a landed line.
+LANDEDLINE='fromjson? | objects | select(.step == "landed") | .issue'
+# The issues of the card records' landed lines, one a line, from their running summary beside the records
+# ($STATE.landed, linesum()): only the lines written since the last read are parsed, so the cost does not grow with the
+# history. Parsing the whole records as one jq string, under the records' lock, ran for minutes on a long history and
+# held every card's record writes. A dry pick writes nothing, so it parses each line of its file in place (a line
+# not whole yet is skipped).
+landedissues() {
+  local d rc=0
+  if [ -n "${DRYPICK:-}" ]; then jq -cR "$LANDEDLINE" "$READ"; return; fi
+  d=$(mktemp -d) || return 1
+  { recs > "$d/rec" && linesum "$d/rec" "$STATE.landed" "$d/l" "$LANDEDLINE" && cat "$d/l"; } || rc=1
+  rm -rf "$d"; return "$rc"
 }

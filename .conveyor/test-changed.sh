@@ -57,6 +57,7 @@
 # sources its case files, which the hook does not see: its run of every case file is a meta-runner's run, logged so,
 # and with neither mark it is not run, and fails; its run of chosen cases is not, and runs whatever its mark.
 # Every run also runs the test lint (.conveyor/test-lint.sh): a sleep-then-check in any test file fails the run.
+# And the records split check (.conveyor/no-records-split.sh): engine code that splits a whole records file in jq fails it.
 # And shellcheck on the changed .sh files: a warning on a line the change added or changed fails the run (below).
 # And `claude plugin validate` when the change touches hooks/, types/ or .claude-plugin/: an error fails the run, and so
 # does a type error HEAD's copy of the plugin does not have (below).
@@ -316,7 +317,7 @@ metarunners() {
 }
 if [ "${1:-}" = --check ]; then mapcheck; r=$?; covage; metarunners; exit $r; fi
 mapfile -t changed < <({ git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u)
-# checks: the checks every run makes (the map check, the test lint, no browser tests, shellcheck, the plugin's
+# checks: the checks every run makes (the map check, the test lint, no browser tests, no records split, shellcheck, the plugin's
 # validate when the change touches it), printing what they
 # find; exit 1 when one fails. In one-file mode in a test step they run once a tree (below), not on every run.
 checks() {
@@ -327,6 +328,9 @@ covage
 bash .conveyor/test-lint.sh || rc=1
 # No browser tests (no-browser-tests.sh, the owner's order of 2026-11-14), with the map check too.
 bash .conveyor/no-browser-tests.sh || rc=1
+# No engine code splits a whole card records file in jq (no-records-split.sh, issue 1427: one such jq held the records'
+# lock for minutes and stopped the belt), with the map check too.
+bash .conveyor/no-records-split.sh || rc=1
 # The shellcheck of each changed .sh file, with the map check too (issue 525): a warning or error (-S warning) on a
 # line the change added or changed (every line of a new file) fails the run, printed with its file and line; one on a line it
 # did not touch does not (the engine's files hold old ones). shellcheck runs through .conveyor/lint-shell.sh, the
