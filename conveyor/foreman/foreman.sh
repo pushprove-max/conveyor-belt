@@ -84,11 +84,13 @@ case ${1:-} in
 esac
 # A hook's input, and the session it names.
 case $1 in start | rules | words | filing | filed) IN=$(cat); SID=$(jq -r '.session_id // empty | strings' <<<"$IN" 2>/dev/null) ;; esac
-# words: every prompt of every session comes here, so a session that is not in a project's main checkout, or has no
-# valid id, ends before anything more is read; the rest runs in the session's own folder (the hook input's cwd),
-# whose main checkout is the one claimed.
+# words: every prompt of every session comes here, so a session with no valid id ends before anything more is read, and
+# so does an ordinary prompt from a folder with no .conveyor/project.json in its checkout (a worktree of a Conveyor
+# project passes this, and words() stops it, as it stops any session outside the main checkout); the rest runs in the
+# session's own folder (the hook input's cwd), whose main checkout is the one claimed.
 if [ "$1" = words ]; then
-  # Any other prompt only goes on, in a Conveyor project's checkout, to name a session that took the role by claim.
+  # Any other prompt only goes on, in a Conveyor project's checkout, to words(), which names a session that took the
+  # role by claim, once, and only in the main checkout, and stops there for any session that is not the Foreman.
   WORDS=1
   case $(jq -r '.prompt // "" | strings | ascii_downcase | gsub("^\\s+|[\\s.!]+$"; "") | gsub("\\s+"; " ")' <<<"$IN" 2>/dev/null) in
     'start your role' | 'you are the foreman') WORDS= ;;
