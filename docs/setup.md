@@ -120,6 +120,15 @@ files, for example `node --test checks/*.js`, setup does not ask. Go test and ca
 targets, not test files, so setup does not ask for them. The answer is `--file-command yes|no`. If your pack already
 sets `test.fileCommand`, setup does not ask.
 
+Setup also tells you when the project has no `.conveyor/test-machine.sh`. That bash script installs what your suite
+needs on a bare Linux box. Conveyor runs it on the machine that runs a release's suite, when you set that machine to an
+ssh box or a Namespace devbox ([Where the suite runs](releases.md#where-the-suite-runs)). It runs as the box's user, which
+can use `sudo`. Setup does not run it. Conveyor runs it on the box again only when the script changes. Answer
+`--test-machine yes` to have setup write one from your pack's test commands. It holds a `# needs: <tool> [<version>]`
+line for each tool that your test commands start with (not `bash`, `sh`, `jq` or `git`, which a box has), which
+`conveyor.sh suite-machine check` reads, and no install commands:
+your project must add those, and commit the script. `--test-machine no` writes nothing and says nothing. Setup never changes a script that is there.
+
 Setup then offers to make the test map ([The test map](configuration.md#the-test-map)). The map tells which test
 files cover which source files, so a card runs only the tests that cover its change. To make it, setup runs your
 whole suite once with the coverage tool of your language: V8 coverage for Node, coverage.py for Python,
@@ -296,7 +305,7 @@ changes a `CLAUDE.md` or an `AGENTS.md` that is already there.
 - `--pin` pins a new project to the commit of the plugin copy, in place of following releases (below).
 
 From a shell, in your project's checkout, the same steps are
-`conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--file-command yes|no] [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--lint <command> --lint-files <pathspec>...] [--lint-ready yes|no] [--lint-shared yes|no] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]`,
+`conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--file-command yes|no] [--test-machine yes|no] [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--lint <command> --lint-files <pathspec>...] [--lint-ready yes|no] [--lint-shared yes|no] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]`,
 then `conveyor.sh doctor`.
 
 ## Following releases or main, or pinning a commit

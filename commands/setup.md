@@ -82,6 +82,10 @@ First install the requirements, then sign in, before step 1:
      file's path, every value quoted for the shell.
    - When it exits 1 naming a key file (a mode that lets others read it, or no file there), or a key that is not in
      the settings file, show its message and ask the same question again.
+   - When it ends 0 and says the project has no `.conveyor/test-machine.sh`, ask the user "Write a
+     `.conveyor/test-machine.sh` from the pack's test commands, for a release suite that runs on an ssh box or a
+     Namespace devbox?" (yes / no), then run setup again with `--test-machine yes` or `--test-machine no` and the same
+     answers, but not `--survey`: the run that ended 0 saved that answer, and `--survey yes` again files a second survey issue. Tell the user that the script installs nothing yet: the project must finish it and commit it.
    - Any other failure: show its message, then go on to step 2, where doctor names what is missing and its fix.
 2. Run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" doctor` and show its output.
 3. When `bash "${CLAUDE_PLUGIN_ROOT}/conveyor/lib/requires.sh" run git status --porcelain -- .conveyor/project.json .conveyor/size-exempt.txt`

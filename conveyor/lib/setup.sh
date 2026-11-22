@@ -79,9 +79,9 @@ mpsinstalled() { jq -e --arg p "$MPS" '.plugins[$p] | type == "array" and length
 # project whose cards may change a lockfile needs in place of links to main's folders. Once the pack has either, the
 # question is not asked and a rerun changes neither.
 LOCKFILES=(package-lock.json npm-shrinkwrap.json yarn.lock pnpm-lock.yaml bun.lockb poetry.lock uv.lock Pipfile.lock Gemfile.lock Cargo.lock composer.lock Podfile.lock)
-SETUP_USAGE='setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--file-command yes|no] [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--lint <command> --lint-files <pathspec>...] [--lint-ready yes|no] [--lint-shared yes|no] [--size <lines>|no] [--size-files <pathspec>]... [--size-skip <folder>]... [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]'
+SETUP_USAGE='setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--file-command yes|no] [--test-machine yes|no] [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--lint <command> --lint-files <pathspec>...] [--lint-ready yes|no] [--lint-shared yes|no] [--size <lines>|no] [--size-files <pathspec>]... [--size-skip <folder>]... [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]'
 setup() { # as SETUP_USAGE
-  local owner='' test='' prods=() need=() b p f have l n x fm='' pin='' sv='' fl='' rl='' br='' rr='' fr='' w first full c lk='' ws='' lf='' wsx='' dds=() lks tp='' tpa='' tn tl='' tla='' tma='' tmt='' tmw='' lc='' lfs=() lra='' lsa='' lro='' sz='' szf=() szs=()
+  local owner='' test='' prods=() need=() b p f have l n x fm='' pin='' sv='' fl='' rl='' br='' rr='' fr='' w first full c lk='' ws='' lf='' wsx='' dds=() lks tp='' tpa='' tn tl='' tla='' tmc='' tma='' tmt='' tmw='' lc='' lfs=() lra='' lsa='' lro='' sz='' szf=() szs=()
   local -A keyarg=() pxarg=() pkarg=() rcli=() lg=() pxu=() ak=() akf=() pk=() pkf=() as=() kd=(); local clis=()
   local ask='--survey <yes or no: run a first test-speed survey now?>'
   while [ $# -gt 0 ]; do
@@ -91,6 +91,7 @@ setup() { # as SETUP_USAGE
       --survey) sv=${2-}; [[ $sv == yes || $sv == no ]] || { set -- x; break; } ;;
       --test-patterns) tpa=${2-}; [[ $tpa == yes || $tpa == no ]] || { set -- x; break; } ;;
       --file-command) tla=${2-}; [[ $tla == yes || $tla == no ]] || { set -- x; break; } ;;
+      --test-machine) tmc=${2-}; [[ $tmc == yes || $tmc == no ]] || { set -- x; break; } ;;
       --test-map) tma=${2-}; [[ $tma == yes || $tma == no ]] || { set -- x; break; } ;;
       --fast-lane) fl=${2-}; [[ $fl == yes || $fl == no ]] || { set -- x; break; } ;;
       --research-lane) rl=${2-}; [[ $rl == yes || $rl == no ]] || { set -- x; break; } ;;
@@ -254,6 +255,7 @@ setup() { # as SETUP_USAGE
   # that fails says so, and the cards' tests are found by name. No writes test.map off, so it is not asked again.
   [ -z "$tmw" ] || echo "conveyor: no test map: $tmw; a card's tests are found by name"
   filehint
+  machineoffer "$tmc" || return 1
   if [ "$tma" = yes ] && [ -n "$tmt" ]; then mapbuild "$MAIN" || :
   elif [ "$tma" = no ] && ! jq -e '.test.map' "$PACK" >/dev/null 2>&1; then
     jq '.test.map = "off"' "$PACK" > "$PACK.new" && pinreads "$p" "$PACK.new" && mv "$PACK.new" "$PACK" \
@@ -1029,6 +1031,32 @@ filehint() {
   local fc g
   packget test.fileCommand fc 2>/dev/null && [ -z "$fc" ] && g=$(fileguess "$MAIN") && [ -n "$g" ] || return 0
   echo "conveyor: the test files run alone as plain scripts (\`$g <file>\`); set test.fileCommand to \"$g\" in .conveyor/project.json, so a card runs each of its test files alone"
+}
+# The offer of .conveyor/test-machine.sh (docs/setup.md), the script that installs what the project's suite needs on a
+# bare Linux box, run on the machine a release's suite runs on when that is not this one (lib/suitehost.sh). While the
+# main checkout has none, setup says so on each run; --test-machine yes writes one from the pack's test commands
+# (test.command, test.full, test.fileCommand): a `# needs: <tool>` line for the first word of each, and no install
+# commands, which only the project knows, so it says the project must finish the script and commit it. no writes
+# nothing and says nothing. A script already there is never changed.
+machineoffer() { # <yes|no|empty>
+  local f=$MAIN/.conveyor/test-machine.sh t=() n
+  [ ! -e "$f" ] && [ "${1:-}" != no ] && [ -e "$PACK" ] || return 0
+  if [ "${1:-}" != yes ]; then
+    echo "conveyor: the project has no .conveyor/test-machine.sh, which installs what its suite needs on a bare Linux box, for a release suite that runs on an ssh box or a Namespace devbox; pass --test-machine yes to write one from the pack's test commands, which the project must then finish"
+    return 0
+  fi
+  # Each command's first word; a shell, jq and git are on any box that runs a suite (suite-machine check asks for jq and git).
+  mapfile -t t < <(jq -r '.test | [.command, .full, .fileCommand] | map(strings | split(" ")[0] | select(test("^[A-Za-z0-9._+-]+$") and (IN("bash", "sh", "jq", "git") | not))) | unique[]' "$PACK")
+  mkdir -p "${f%/*}" && {
+    printf '#!/usr/bin/env bash\n# What this project'"'"'s test suite needs on a bare Linux box: the machine a release'"'"'s suite runs on when it is not this one.\n'
+    printf '# Conveyor runs this script there as the box'"'"'s user, which can use sudo, and again only after the script changes.\n'
+    printf '# `conveyor.sh suite-machine check` reads each `# needs: <tool> [<version>]` line and names the tools the box lacks.\n'
+    printf '# Setup wrote the lines below from the pack'"'"'s test commands: add each tool the suite needs and the commands that install it.\n'
+    [ ${#t[@]} = 0 ] || printf '# needs: %s\n' "${t[@]}"
+    printf 'set -euo pipefail\n'
+  } > "$f.new" 2>/dev/null && mv "$f.new" "$f" || { rm -f "$f.new"; echo "conveyor: .conveyor/test-machine.sh could not be written" >&2; return 1; }
+  n=${#t[@]}
+  echo "conveyor: wrote .conveyor/test-machine.sh with $n # needs: line(s) from the pack's test commands; it installs nothing yet: the project must finish it with the commands that install what the suite needs, and commit it"
 }
 # Doctor's warning of a pack whose cards cannot run their test files (listcmd(), lib/testrun.sh): a card runs each
 # alone through test.fileCommand, else, when the pack does not set it, through Conveyor's own runner (lib/filerun.sh),

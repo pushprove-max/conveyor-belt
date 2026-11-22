@@ -259,19 +259,20 @@ t_hoststall() {
   [ "$rc" = 1 ] && grep -q 'box.example.com stopped answering over ssh while the suite ran there' "$w.test" && jq -e '.step == "test" and .last != ""' "$w.live" > /dev/null \
     || fail "hosttests with HOSTPOLL 2 and a box whose polls stall did not end as a box that stopped answering, with a live record: exit $rc, output $(cat "$w.test" 2>&1), live $(cat "$w.live" 2>&1)"
 }
-# `suite-machine check` names each need of the rule's box, ok or missing. Bugs: a tool .conveyor/test-machine.sh names
-# was not checked, a missing one passed the check, or the box's slots were its CPUs, not its pool's. The box has 3 CPUs
-# and 2 test slots, and the script names a tool no box has.
+# `suite-machine check` names each need of the rule's box, ok or missing. Bugs: a tool a `# needs: <tool> [<version>]`
+# line of .conveyor/test-machine.sh names was not checked (the old `# tools:` line is not one), a missing one passed the
+# check, or the box's slots were its CPUs, not its pool's. The box has 3 CPUs and 2 test slots, and the script names a
+# tool no box has, with a version, and one the box has.
 t_hostcheck() {
   local out
   setup '[]'; boxsetup 3; boxrule
-  mkdir -p "$R/.conveyor" && printf '# tools: git notatool-1273\n' > "$R/.conveyor/test-machine.sh" || fail "the fixture could not be made"
+  mkdir -p "$R/.conveyor" && printf '# needs: notatool-1273 2.1\n# needs: ls\n# tools: nottool-1268\n' > "$R/.conveyor/test-machine.sh" || fail "the fixture could not be made"
   out=$(loop suite-machine check 2>&1); [ $? = 1 ] && grep -qx 'ok: ssh: tester@box.example.com answers' <<<"$out" && grep -qx 'ok: bash 5.1+: bash [0-9.]*' <<<"$out" \
     && grep -qx 'missing: notatool-1273: not installed (.conveyor/test-machine.sh)' <<<"$out" && grep -qx 'ok: test slots: 3 CPUs, 2 test slots' <<<"$out" \
     || fail "suite-machine check did not name each need of the box, with the missing tool: $out"
   out=$(loop suite-machine check --json 2>&1)
   jq -e '.kind == "ssh" and .ok == false and .cpus == 3 and .slots == 2 and ([.needs[] | select(.ok | not) | .need] == ["notatool-1273"])
-    and ([.needs[].need] == ["ssh", "bash 5.1+", "jq", "git", "notatool-1273", "test slots"])' <<<"$out" > /dev/null \
+    and ([.needs[].need] == ["ssh", "bash 5.1+", "jq", "git", "ls", "notatool-1273", "test slots"])' <<<"$out" > /dev/null \
     || fail "suite-machine check --json does not hold the box's needs, with only the tool missing: $out"
   # Bug: `release-run atonce`, which the Foreman's release question names, printed this machine's cap with the ssh
   # rule. suiteAtOnce is 9 and this machine has one slot: the box's 2 is the answer.

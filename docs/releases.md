@@ -154,7 +154,8 @@ The box needs bash 5.1 or later, jq and git. Conveyor connects with ssh and does
 key for the box first. The box needs no access to the repository and gets no GitHub token. Conveyor sends it the
 commit under test as a git bundle, and runs the pack's `worktree.setup` there after the checkout. When the commit
 has `.conveyor/test-machine.sh`, Conveyor runs that script on the box first, and runs it again only after the script
-changes. Use it to install what the tests need. A `# tools: <tool>...` line in it names the tools for the check below.
+changes. Use it to install what the tests need. A `# needs: <tool> [<version>]` line in it names each tool the suite needs, for the check below. The tool is the
+command the suite runs; the check does not read the version.
 
 A devbox needs the same bash, jq and git, and gets the commit and `.conveyor/test-machine.sh` as a box over ssh does.
 Conveyor starts the run on it with `devbox exec -d`, copies the output back as it does from a box, and gives the lease

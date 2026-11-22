@@ -53,6 +53,9 @@
   "linkFromMain": [
     "node_modules"
   ],
+  "worktree": {
+    "setup": "[ -e node_modules ] || npm ci --no-audit --no-fund"
+  },
   "push": {
     "env": {},
     "check": false

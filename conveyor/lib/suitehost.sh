@@ -252,7 +252,7 @@ hoststop() {
 }
 # `conveyor.sh suite-machine check [--json]`: one line a need of the rule's machine, ok or missing: ssh reach (a box
 # over ssh), bash 5.1 or later, jq, git and each tool the main checkout's .conveyor/test-machine.sh names on a
-# `# tools: <tool>...` line, then its CPU count and test slots (slot_pool's, here or on the box: HOSTFACTS). With
+# `# needs: <tool> [<version>]` line (the tool is the command; the version is for people, not checked), then its CPU count and test slots (slot_pool's, here or on the box: HOSTFACTS). With
 # json: {kind, name, ok, needs: [{need, ok, detail}], cpus, slots}. Exit 0: every need ok; 1: one is missing. For a
 # devbox, the one need is the Namespace login (hostlogin()), and cpus and slots are null: it is leased only for a run.
 hostcheck() { # [json]
@@ -263,7 +263,7 @@ hostcheck() { # [json]
     hostlogin && ok=true || ok=false
     n+=("$(jq -cn --argjson ok $ok --arg w "$SH_WHY" '{need: "Namespace login", ok: $ok, detail: (if $ok then "logged in" else $w end)}')")
   else
-    mapfile -t tools < <(sed -n 's/^# tools:[[:space:]]*//p' "$MAIN/.conveyor/test-machine.sh" 2>/dev/null | tr -s ' \t' '\n' | grep -E '^[A-Za-z0-9._+-]+$' | grep -vxE 'jq|git' | sort -u)
+    mapfile -t tools < <(sed -n 's/^# needs:[[:space:]]*//p' "$MAIN/.conveyor/test-machine.sh" 2>/dev/null | awk '{print $1}' | grep -E '^[A-Za-z0-9._+-]+$' | grep -vxE 'jq|git' | sort -u)
     f=$(hostfacts jq git "${tools[@]}" 2>&1); rc=$?
     [ "$SH_KIND" = local ] || n+=("$(jq -cn --arg t "$SH_TARGET" --argjson ok "$([ $rc = 255 ] && echo false || echo true)" --arg w "$([ $rc != 255 ] || grep . <<<"$f" | tail -n 1)" \
       '{need: "ssh", ok: $ok, detail: (if $ok then "\($t) answers" else "\($t) does not answer: \($w)" end)}')")
