@@ -441,10 +441,15 @@ as their umbrella until all its slices are closed. Off checks no issue ([Split l
 group of each card, the builder that the rule chooses for it, and the Judge's choice of seats. With Shadow, the card
 builds on its builder as before, and the tab says "shadow: the pick is recorded, and the card builds on its builder
 as before". With On, the card builds and is reviewed on the Judge's seats, and a card of an eligible group can build
-on the group's challenger as a trial. A trial card is reviewed on the project's reviewer and judge. A seat that you set for a card always wins. Under the setting, the row shows
-each seat on its own lines: each model that the seat allows has a checkbox. Select the models that the Judge can
-give the seat, choose the lowest and the highest effort of each one (**Any** for no limit), and click **Save** for the
-seat. With no model selected, **Save** removes the list, and the seat shows **All models, any effort**
+on the group's challenger as a trial. A trial card is reviewed on the project's reviewer and judge. A seat that you set for a card always wins. With Shadow or On, the row shows
+the three seats side by side under the setting (one under another on a narrow screen): **Builder**, **Reviewer** and
+**Judge**. Each seat has a box with the models that it is set to now, and a table of the models that the Judge can give
+the seat. In the table, choose the lowest and the highest effort of each model (**Any** for no limit), or click
+**Remove** to take a model off the list. The **Add a model** menu under the table lists the other models that the seat
+allows. One **Save** and one **Cancel** serve the three seats, and both are off until a seat changes, with "Unsaved
+changes" beside them. **Save** sends each seat that changed, and no other. **Cancel** puts back the saved lists. If you
+leave the tab, the changes stay until you save or cancel them. A seat with no model in its table shows **All models, any
+effort**, and **Save** removes its list
 ([The judge's choice of seats](configuration.md#the-judges-choice-of-seats)). A
 card shows its seats in one list ([Settings for one card](#settings-for-one-card)). The **Cost** panel then shows **Pick settings, by group and builder**: one row for each group and
 builder, with its cards, the spend per landed card, the share of cards that landed with no retry, the review rounds

@@ -54,9 +54,9 @@ const picked = (lists) => { const d = rules('on'); d.panels.rules.data.packPick 
 // choose which models the pick may give it with a range for each; the seat's label and text ran together
 // ("BUILDERmodels: ..."); a model's menus offered efforts its program does not take; Save sent a list in a shape
 // `conveyor.sh pick models` does not take, or the row went on showing the old list after the save or did not show
-// the saved one after a reload; a refresh dropped a model checked and not yet saved; unchecking every model did not
-// take the list off; saving the reviewer's list gave the focus to another seat's Save.
-test('Rules: Pick settings saves the models checked for a seat, each with its own effort range, and shows them after a reload', async () => {
+// the saved one after a reload; a refresh dropped a model added and not yet saved; removing every model did not
+// take the list off.
+test('Rules: Pick settings saves the models listed for a seat, each with its own effort range, and shows them after a reload', async () => {
   const w = boot({ tab: 'rules' });
   const d = picked({ reviewer: { 'gpt-6.1-sol': { min: 'low', max: 'medium' } } });
   const again = structuredClone(d);
@@ -66,40 +66,163 @@ test('Rules: Pick settings saves the models checked for a seat, each with its ow
   const menu = (k, id, which, win = w) => act(seat(k, win), `pick-${which}-${k}-${id}`);
   const words = (sel) => Array.from(sel.options, (o) => o.value);
   const choose = (k, id, which, v) => { const s = menu(k, id, which); s.value = v; s.dispatchEvent(new w.Event('change')); };
+  const add = (k, id) => { const s = act(seat(k), `pick-add-${k}`); s.value = id; s.dispatchEvent(new w.Event('change')); };
   assert.equal(head('builder'), 'Builder All models, any effort', 'a seat with no list says so, with a space after its label');
   assert.equal(head('reviewer'), 'Reviewer gpt-6.1-sol: low to medium');
-  assert.deepEqual(Array.from(seat('builder').querySelectorAll('.rules-pick-model'), (r) => r.dataset.model), CLAUDE4, "each of the builder's allowed models is a row");
-  assert.equal(menu('builder', 'claude-opus-5-5', 'min'), null, 'a model not checked has no menus');
+  assert.equal(seat('builder').querySelector('table'), null, 'a seat with no list has no table');
+  assert.deepEqual(words(act(seat('builder'), 'pick-add-builder')), [''].concat(CLAUDE4), "the Add a model menu holds each of the builder's allowed models");
+  assert.equal(menu('builder', 'claude-opus-5-5', 'min'), null, 'a model not listed has no menus');
   assert.deepEqual(words(menu('reviewer', 'gpt-6.1-sol', 'min')), [''].concat(EFFORTS.codex), "a Codex model's menus hold Codex's efforts alone");
-  act(seat('builder'), 'pick-model-builder-claude-opus-5-5').click();
-  act(seat('builder'), 'pick-model-builder-claude-sonnet-5-5').click();
+  add('builder', 'claude-opus-5-5');
+  add('builder', 'claude-sonnet-5-5');
   assert.deepEqual(words(menu('builder', 'claude-opus-5-5', 'max')), [''].concat(EFFORTS.claude), "a Claude model's menus hold Claude's efforts alone");
   choose('builder', 'claude-opus-5-5', 'min', 'medium'); choose('builder', 'claude-opus-5-5', 'max', 'high'); choose('builder', 'claude-sonnet-5-5', 'max', 'low');
   again.panels.rules.data.modelSettings.builder.effort = 'max';  // a snapshot that differs, so the panel draws again
   next(w, again);
-  assert.equal(act(seat('builder'), 'pick-model-builder-claude-opus-5-5').checked, true, 'a refresh keeps a model checked and not yet saved');
+  assert.ok(menu('builder', 'claude-opus-5-5', 'min'), 'a refresh keeps a model added and not yet saved');
   assert.equal(menu('builder', 'claude-opus-5-5', 'min').value, 'medium', 'a refresh keeps a range picked and not yet saved');
-  assert.deepEqual(await sent(w, () => act(seat('builder'), 'pick-save-builder').click()),
+  assert.deepEqual(await sent(w, () => act(ruled(w), 'pick-save').click()),
     [{ action: 'pick-models', args: ['builder', 'claude-opus-5-5=medium-high', 'claude-sonnet-5-5=-low'], repo: 'sample' }]);
   await settle();
   assert.equal(head('builder'), 'Builder claude-opus-5-5: medium to high; claude-sonnet-5-5: low or lower', 'the saved list shows before the next snapshot');
   // The panel shows one group at a time and a control in a hidden group cannot take the focus: open the pick row's group.
   act(rulesP(w), 'rules-set-picking').click();
-  act(seat('reviewer'), 'pick-model-reviewer-gpt-6.1-sol').click();
-  const save = act(seat('reviewer'), 'pick-save-reviewer');
-  save.focus();
-  assert.deepEqual(await sent(w, () => save.click()), [{ action: 'pick-models', args: ['reviewer', 'clear'], repo: 'sample' }], 'no model checked takes the list off');
+  act(seat('reviewer'), 'pick-remove-reviewer-gpt-6.1-sol').click();
+  assert.deepEqual(await sent(w, () => act(ruled(w), 'pick-save').click()), [{ action: 'pick-models', args: ['reviewer', 'clear'], repo: 'sample' }], 'no model listed takes the list off');
   await settle();
   assert.equal(head('reviewer'), 'Reviewer All models, any effort');
-  assert.equal(w.document.activeElement, act(seat('reviewer'), 'pick-save-reviewer'), "the focus comes back to the reviewer's Save");
   // A reload: a new page given the pack as the save left it.
   const w2 = boot({ tab: 'rules' });
   deliver(w2, picked({ builder: { 'claude-opus-5-5': { min: 'medium', max: 'high' }, 'claude-sonnet-5-5': { max: 'low' } } }));
-  assert.deepEqual(Array.from(seat('builder', w2).querySelectorAll('.rules-pick-model input:checked'), (b) => b.closest('.rules-pick-model').dataset.model), ['claude-opus-5-5', 'claude-sonnet-5-5']);
+  assert.deepEqual(Array.from(seat('builder', w2).querySelectorAll('.rules-pick-model'), (r) => r.dataset.model), ['claude-opus-5-5', 'claude-sonnet-5-5']);
   assert.deepEqual(['claude-opus-5-5', 'claude-sonnet-5-5'].flatMap((id) => ['min', 'max'].map((x) => menu('builder', id, x, w2).value)), ['medium', 'high', '', 'low']);
   const old = rules('on');
   next(w2, old);
   assert.equal(seat('builder', w2), null, 'a snapshot with no packPick (an older engine) shows no list to set');
+});
+
+const seatOf = (w, k) => ruled(w).querySelector(`[data-rule="pick"] [data-seat="${k}"]`);
+const addTo = (w, k, id) => { const s = act(seatOf(w, k), `pick-add-${k}`); s.value = id; s.dispatchEvent(new w.Event('change')); };
+const LISTS = { builder: { 'claude-opus-5-5': { min: 'low', max: 'high' } }, reviewer: { 'gpt-6.1-sol': {}, 'gpt-6-astra': { max: 'medium' } } };
+
+// Bugs this guards (#1358): the seats sat in a narrow column at the far edge of the row, under no switch; each seat listed
+// every model it allows as a checkbox, so the one picked model was hard to find; the effort menus did not line up. The
+// layout itself (side by side, columns) is a stylesheet rule that jsdom does not lay out: this test checks the structure
+// the stylesheet works on (the three seats in one grid after the switch, a table a seat).
+test('Rules: Pick settings shows the three seats under the switch, each with a table of its picked models and an Add a model menu of the others', () => {
+  const w = boot({ tab: 'rules' });
+  deliver(w, picked(LISTS));
+  const row = ruled(w).querySelector('[data-rule="pick"]'), grid = row.querySelector('.rules-pick-seats');
+  assert.deepEqual(Array.from(grid.children, (s) => s.dataset.seat), ['builder', 'reviewer', 'judge'], 'the three seats in one grid, in order');
+  assert.ok(row.querySelector('.rules-seg').compareDocumentPosition(grid) & w.Node.DOCUMENT_POSITION_FOLLOWING, 'the seats come after the switch');
+  const rows = (k) => Array.from(seatOf(w, k).querySelectorAll('tbody tr'), (r) => r.dataset.model);
+  const opts = (k) => Array.from(act(seatOf(w, k), `pick-add-${k}`).options, (o) => o.value);
+  assert.deepEqual(Array.from(seatOf(w, 'builder').querySelectorAll('thead th'), (c) => c.textContent), ['Model', 'Lowest', 'Highest', 'Remove']);
+  assert.deepEqual(rows('builder'), ['claude-opus-5-5'], 'a table row for each picked model alone');
+  assert.deepEqual(opts('builder'), ['', 'claude-fable-5-2', 'claude-sonnet-5-5', 'claude-haiku-5-5'], 'the menu holds the models not picked');
+  const cells = seatOf(w, 'builder').querySelectorAll('tbody tr td');
+  assert.equal(cells[0].textContent, 'claude-opus-5-5');
+  assert.deepEqual([cells[1].firstChild.value, cells[2].firstChild.value], ['low', 'high']);
+  assert.equal(cells[3].firstChild.dataset.act, 'pick-remove-builder-claude-opus-5-5');
+  assert.deepEqual(rows('reviewer'), ['gpt-6.1-sol', 'gpt-6-astra']);
+  assert.equal(act(seatOf(w, 'reviewer'), 'pick-add-reviewer'), null, 'every model of the seat is picked: no menu to add one');
+  assert.equal(seatOf(w, 'judge').querySelector('table'), null, 'a seat with no list has no table');
+  assert.match(seatOf(w, 'judge').textContent, /All models, any effort/);
+  assert.deepEqual(opts('judge'), ['', 'gpt-6.1-sol', 'gpt-6-astra', 'claude-opus-5-5', 'claude-sonnet-5-5']);
+});
+
+// Bug this guards (#1358): one Save for each seat lost a change to one seat when another's Save was clicked; the one
+// Save must send each seat that changed, and no seat that did not.
+test('Rules: Pick settings sends one pick-models for each seat that changed when Save is clicked once', async () => {
+  const w = boot({ tab: 'rules' });
+  deliver(w, picked(LISTS));
+  addTo(w, 'builder', 'claude-sonnet-5-5');
+  act(seatOf(w, 'reviewer'), 'pick-remove-reviewer-gpt-6-astra').click();
+  assert.deepEqual(await sent(w, () => act(ruled(w), 'pick-save').click()), [
+    { action: 'pick-models', args: ['builder', 'claude-opus-5-5=low-high', 'claude-sonnet-5-5'], repo: 'sample' },
+    { action: 'pick-models', args: ['reviewer', 'gpt-6.1-sol'], repo: 'sample' }], 'the builder and the reviewer, and not the judge');
+  await settle();
+  assert.equal(act(ruled(w), 'pick-save').disabled, true, 'saved: nothing left to save');
+});
+
+// Bugs this guards (#1358): Save and Cancel were active with no change; Cancel did not put back the saved lists; a
+// seat put back to its saved list (a model added and removed) still counted as a change.
+test('Rules: Pick settings keeps Save and Cancel inactive with no change, and Cancel puts back the saved lists', async () => {
+  const w = boot({ tab: 'rules' });
+  deliver(w, picked(LISTS));
+  const words = () => Array.from(ruled(w).querySelectorAll('[data-rule="pick"] .rules-pick-foot *')).find((e) => e.textContent === 'Unsaved changes');
+  const state = () => [act(ruled(w), 'pick-save').disabled, act(ruled(w), 'pick-cancel').disabled, !words().hidden];
+  assert.deepEqual(state().slice(0, 2), [true, true], 'no change: Save and Cancel inactive');
+  addTo(w, 'builder', 'claude-haiku-5-5');
+  assert.deepEqual(state(), [false, false, true], 'a change: both active, with the words Unsaved changes');
+  act(seatOf(w, 'builder'), 'pick-remove-builder-claude-haiku-5-5').click();
+  assert.deepEqual(state().slice(0, 2), [true, true], 'the saved list put back by hand is no change');
+  addTo(w, 'judge', 'claude-opus-5-5');
+  act(seatOf(w, 'reviewer'), 'pick-remove-reviewer-gpt-6.1-sol').click();
+  assert.equal(act(ruled(w), 'pick-save').disabled, false);
+  assert.deepEqual(await sent(w, () => act(ruled(w), 'pick-cancel').click()), [], 'Cancel sends nothing');
+  assert.deepEqual(['builder', 'reviewer', 'judge'].map((k) => Array.from(seatOf(w, k).querySelectorAll('tbody tr'), (r) => r.dataset.model)),
+    [['claude-opus-5-5'], ['gpt-6.1-sol', 'gpt-6-astra'], []], 'the saved lists are back');
+  assert.deepEqual(state().slice(0, 2), [true, true], 'after Cancel: inactive again');
+});
+
+// Bug this guards (#1358): Save dropped the drafts of every changed seat before the host answered, so a seat the host
+// refused (the builder's range), and the seat after it that was never sent (the reviewer), lost their changes.
+test('Rules: Pick settings keeps the drafts of the seats the host refused or never got', async () => {
+  const w = boot({ tab: 'rules' });
+  deliver(w, picked(LISTS));
+  addTo(w, 'builder', 'claude-sonnet-5-5');
+  act(seatOf(w, 'reviewer'), 'pick-remove-reviewer-gpt-6.1-sol').click();
+  w.reply = { ok: false, status: 409, text: () => Promise.resolve('conveyor: the range is refused') };
+  const out = await sent(w, () => act(ruled(w), 'pick-save').click());
+  assert.deepEqual(out.map((b) => b.args[0]), ['builder'], 'the host refused the first seat: the second was not sent');
+  await settle();
+  const rows = (k) => Array.from(seatOf(w, k).querySelectorAll('tbody tr'), (r) => r.dataset.model);
+  assert.deepEqual([rows('builder'), rows('reviewer'), act(ruled(w), 'pick-save').disabled],
+    [['claude-opus-5-5', 'claude-sonnet-5-5'], ['gpt-6-astra'], false], 'both changes are still there to save again');
+});
+
+// Bug this guards (#1358): Remove, the last Add a model, and Save and Cancel going off took the keyboard focus out of
+// the row (its control was gone or off after the redraw), so the next key press went to the page.
+test('Rules: Pick settings keeps the focus in the row after Remove, the last Add a model, Cancel and Save', async () => {
+  const w = boot({ tab: 'rules' });
+  deliver(w, picked(LISTS));
+  const at = () => w.document.activeElement.dataset.act;
+  act(rulesP(w), 'rules-set-picking').click();  // a control in a hidden group cannot take the focus
+  act(seatOf(w, 'reviewer'), 'pick-remove-reviewer-gpt-6.1-sol').focus();
+  act(seatOf(w, 'reviewer'), 'pick-remove-reviewer-gpt-6.1-sol').click();
+  assert.equal(at(), 'pick-remove-reviewer-gpt-6-astra','Remove: the focus goes to the row that took its place');
+  act(seatOf(w, 'reviewer'), 'pick-remove-reviewer-gpt-6-astra').click();
+  assert.match(at(), /^pick-add-reviewer$/, 'the last model removed: the focus goes to the Add a model menu');
+  const menu = act(seatOf(w, 'reviewer'), 'pick-add-reviewer');
+  const left = Array.from(menu.options, (o) => o.value).filter(Boolean);
+  left.forEach((id) => addTo(w, 'reviewer', id));
+  assert.equal(act(seatOf(w, 'reviewer'), 'pick-add-reviewer'), null, 'every model is picked: no menu');
+  assert.equal(w.document.activeElement.dataset.act.startsWith('pick-'), true, 'the last Add a model: the focus stays in the row');
+  act(ruled(w), 'pick-cancel').focus();
+  act(ruled(w), 'pick-cancel').click();
+  assert.equal(act(ruled(w), 'pick-cancel').disabled, true);
+  assert.equal(w.document.activeElement.getAttribute('aria-pressed'), 'true', 'Cancel gone off: the focus goes to the setting\'s switch');
+  act(seatOf(w, 'builder'), 'pick-remove-builder-claude-opus-5-5').click();
+  act(ruled(w), 'pick-save').focus();
+  await sent(w, () => act(ruled(w), 'pick-save').click());
+  await settle();
+  assert.equal(act(ruled(w), 'pick-save').disabled, true, 'saved: nothing left to save');
+  assert.equal(w.document.activeElement.getAttribute('aria-pressed'), 'true', 'Save gone off: the focus goes to the setting\'s switch');
+});
+
+// Bugs this guards (#1358): the seats showed with the setting Off; the description lost its first word ("code puts").
+test('Rules: Pick settings hides the seats with the setting Off and its text starts with Conveyor', () => {
+  const w = boot({ tab: 'rules' });
+  deliver(w, picked(LISTS));
+  assert.ok(seatOf(w, 'builder'), 'On shows the seats');
+  const d = picked(LISTS);
+  d.panels.rules.data.control.rules.pick = 'off';
+  next(w, d);
+  assert.equal(seatOf(w, 'builder'), null, 'Off shows no seat');
+  assert.match(ruled(w).querySelector('[data-rule="pick"] .rules-what').textContent, /^Conveyor puts each card in a group/);
+  next(w, picked(LISTS));
+  assert.ok(seatOf(w, 'builder'), 'On shows them again');
 });
 
 // Bugs this guards (#1047, #1086): a card did not show the seats the Judge gave it, the Judge's reason for each, or

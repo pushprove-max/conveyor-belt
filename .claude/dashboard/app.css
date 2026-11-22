@@ -774,6 +774,23 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .rules-menu > summary::-webkit-details-marker { display: none; }
 .rules-menu-acts { position: absolute; right: 0; z-index: 2; display: grid; gap: var(--sp-1); padding: var(--sp-1); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
 .rules-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); min-width: 0; }
+/* Pick settings: the row's parts one under another (title, switch, the setting's text, the seats), the three seats side by
+   side in a box each, one under another in a narrow panel. */
+.rules-row[data-rule="pick"] { grid-template-columns: minmax(0, 1fr); align-items: start; }
+.rules-row[data-rule="pick"] .rules-ctl { display: grid; justify-items: start; }
+.rules-row[data-rule="pick"] .rules-ctl > .rules-off { max-width: 80ch; }
+.rules-pick-box { justify-self: stretch; display: grid; gap: var(--sp-2); }
+.rules-pick-seats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); align-items: start; }
+@container rules-panel (max-width: 760px) { .rules-pick-seats { grid-template-columns: minmax(0, 1fr); } }
+.rules-pick-seat { display: grid; gap: var(--sp-2); padding: var(--sp-2); border: 1px solid var(--surface-2); border-radius: var(--radius-sm); }
+.rules-pick-head { display: grid; }
+.rules-pick-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.rules-pick-table th { text-align: left; font-weight: 600; color: var(--muted); font-size: var(--fs-xs); }
+.rules-pick-table th, .rules-pick-table td { padding: var(--sp-1) var(--sp-1) var(--sp-1) 0; vertical-align: middle; }
+.rules-pick-table td:first-child { overflow-wrap: anywhere; }
+.rules-pick-table .field { width: 100%; min-width: 0; }
+.rules-pick-gone { text-align: right; }
+.rules-pick-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); }
 .rules-would { flex-basis: 100%; font-size: var(--fs-sm); color: var(--warn); }
 .rules-would:empty { display: none; }
 .rules-refused { flex-basis: 100%; font-size: var(--fs-sm); color: var(--bad); }

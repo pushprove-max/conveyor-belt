@@ -587,7 +587,9 @@
     if (to) {
       const el = to[1].el;
       const scope = keep.group !== null && keep.group !== undefined ? Array.from(el.querySelectorAll('[data-group]')).find((g) => g.dataset.group === keep.group) : el;
-      const again = scope && scope.querySelector(keep.issue ? `[data-issue="${keep.issue}"] [data-act="${keep.act}"]` : `[data-act="${keep.act}"]`);
+      let again = scope && scope.querySelector(keep.issue ? `[data-issue="${keep.issue}"] [data-act="${keep.act}"]` : `[data-act="${keep.act}"]`);
+      // Save and Cancel of Pick settings are off once nothing is left to save: the focus goes to the setting's switch.
+      if (scope && (!again || again.disabled) && /^pick-(save|cancel)$/.test(keep.act)) again = scope.querySelector('[data-rule="pick"] [aria-pressed="true"]');
       if (again && !again.disabled) again.focus({ preventScroll: true });
       else if (S.busy && again) S.keep = keep;
     } else if (keep && !from) S.keep = keep;  // kept for a panel not drawn now

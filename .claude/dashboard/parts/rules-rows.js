@@ -8,7 +8,7 @@
   let KIND, MODEL, KINDS_MAX, STANDING, SETS, PINS_SHOWN, KNOWN_KINDS, GUARDS, BUILDS, ROLES, OTHER, S, ONB, OB,
     num, list, ctl, same, plural, pre, isArea, depKnown, landNow, landKnown, PRMERGE, prNow, prKnown, pushCheckOn,
     draftOf, draftPut, draftDrop, say, send, button, choice, seg, pickList, stepper, row, wouldSkip, skipWords,
-    fieldLabel, areaWould, unlisted, heldUnknown, arm, limitsLine, standingShown, pickShown, CAP0, draw, relength, rulesSuite, suiteSlots;
+    fieldLabel, areaWould, unlisted, heldUnknown, arm, limitsLine, standingShown, pickShown, CAP0, draw, relength, rulesSuite, suiteSlots, run;
 
   // ---- left: one row a rule ----
   // A role: its CLI (one of those installed on the loop's host, s.clis; the judge's the reviewer's too), then a model
@@ -516,21 +516,17 @@
       b.disabled = pickAt === null;
       return b;
     };
-    // Each seat's pick list (the pack's pick.<seat>, pickShown()): each model the pack allows the seat (modelSettings'
-    // allowed, by program) is a row with a checkbox, may the pick give it, and when it is checked its lowest and
-    // highest effort menus in its own program's efforts (packPick.efforts; an OpenCode builder takes none), Any for
-    // no bound on that side. Save sends the checked models with their ranges (`pick models`), or clear when none is
-    // checked, so the pick may give the seat any allowed model at any effort. A snapshot with no packPick shows none.
+    // Each seat's pick list (the pack's pick.<seat>, pickShown()), under the switch while the setting is Shadow or On:
+    // see pickSeats. Efforts are in each model's own program (packPick.efforts; an OpenCode builder takes none); Any is
+    // no bound on that side. A snapshot with no packPick shows none.
     const lists = pickShown(), ms = d.modelSettings && typeof d.modelSettings === 'object' ? d.modelSettings : {};
     const effs = d.packPick && typeof d.packPick === 'object' && d.packPick.efforts && typeof d.packPick.efforts === 'object' ? d.packPick.efforts : {};
-    const seats = h('div', 'rules-pick-seats');
-    ROLES.forEach((k) => seats.append(pickSeat(k, lists, ms, effs)));
-    el.append(row('pick', 'Pick settings', 'code puts each card in a group before its build, and the Judge chooses its builder, reviewer and judge from the models you let it give each seat, each in its effort range; a seat you set for a card always wins',
+    el.append(row('pick', 'Pick settings', 'Conveyor puts each card in a group before its build, and the Judge chooses its builder, reviewer and judge from the models you let it give each seat, each in its effort range; a seat you set for a card always wins',
       seg('Pick settings', pickTo('off', 'Off'), pickTo('shadow', 'Shadow'), pickTo('on', 'On')),
       pickAt === null ? newer(false) : pickAt === 'off' ? offLine(false, 'no pick is recorded')
         : h('span', 'board-from rules-off', pickAt === 'shadow' ? 'shadow: the pick is recorded, and the card builds on its builder as before'
           : 'on: the card builds and is reviewed on the Judge\'s seats. A card of an eligible group can build on the group\'s challenger as a trial, one trial card at a time, and is reviewed on the project\'s reviewer and judge. A seat you set for a card always wins'),
-      lists === null ? null : seats));
+      lists === null || pickAt === 'off' || pickAt === null ? null : pickSeats(lists, ms, effs)));
   }
   const rangeText = (g) => (g.min && g.max ? `${g.min} to ${g.max}` : g.min ? `${g.min} or higher` : g.max ? `${g.max} or lower` : 'any effort');
   // The models the pack allows seat k (ms: the snapshot's modelSettings), each once, {id, efforts}: the efforts of its
@@ -545,52 +541,96 @@
     }));
     return models;
   }
-  // Seat k's pick list in Pick settings (rulesPick): its head, a row a model it may be given, and Save. lists: the
-  // pack's pick lists as shown.
-  function pickSeat(k, lists, ms, effs) {
-    const h = S.ctx.h, name = k[0].toUpperCase() + k.slice(1), one = h('div', 'rules-pick-seat');
-    one.dataset.seat = k;
-    const saved = lists && lists[k] && typeof lists[k] === 'object' ? lists[k] : null;
+  // The three seats of Pick settings side by side, with the one Save and Cancel under them. lists: the pack's pick
+  // lists as shown. Unsaved changes stay in S.pickDraft over a redraw. Save sends only the seats that changed (`pick
+  // models`; clear when none is listed, so the pick may give the seat any allowed model at any effort).
+  function pickSeats(lists, ms, effs) {
+    const h = S.ctx.h, box = h('div', 'rules-pick-box'), seats = h('div', 'rules-pick-seats'), foot = h('div', 'rules-pick-foot');
+    const picks = ROLES.map((k) => pickSeat(k, lists, ms, effs, () => sync()));
+    const flag = S.ctx.chip('Unsaved changes', 'warn');
+    const save = button('Save', 'btn-primary', 'pick-save', 'Save the models the pick may give each seat', () => {
+      // One batch for the seats that changed, each undone by its saved list; a refused seat keeps its draft.
+      const mine = picks.filter((P) => P.changed());
+      run(mine.map((P) => ['pick-models', P.words(P.cur, true)]), `Pick settings: ${mine.map((P) => P.k).join(', ')}`,
+        () => mine.forEach((P) => S.pickDraft.delete(P.dk)), mine.map((P) => ['pick-models', P.words(P.saved, false)]));
+    });
+    const cancel = button('Cancel', 'btn-quiet', 'pick-cancel', 'Put the models the pick may give each seat back as saved',
+      () => { picks.forEach((P) => S.pickDraft.delete(P.dk)); draw(); });
+    function sync() { const on = picks.some((P) => P.changed()); save.disabled = cancel.disabled = !on; flag.hidden = !on; }
+    sync();
+    seats.append(...picks.map((P) => P.el));
+    foot.append(save, cancel, flag);
+    return box.append(seats, foot) || box;
+  }
+  // A list as one string, to tell whether a seat's list changed (the order of the models does not count).
+  const pickKey = (o) => JSON.stringify(Object.keys(o).sort().map((id) => [id, (o[id] && o[id].min) || '', (o[id] && o[id].max) || '']));
+  // Seat k's box in Pick settings: its head, a table of the models the pick may give it, and an Add a model menu.
+  // sync() tells the row a list changed. Returns the box (el), the list as picked (cur) and saved, its words, changed().
+  function pickSeat(k, lists, ms, effs, sync) {
+    const h = S.ctx.h, name = k[0].toUpperCase() + k.slice(1), one = h('div', 'rules-pick-seat'), saved = lists && lists[k] && typeof lists[k] === 'object' ? lists[k] : {};
     const models = pickModels(k, ms, effs);
-    // The models checked and the ranges picked, not yet saved, stay when a snapshot redraws the row; Save drops
-    // them. Each control's action names its seat and model, so a redraw gives the focus back to the same control.
-    const dk = `${S.d.repo} ${k}`, cur = JSON.parse(JSON.stringify(S.pickDraft.get(dk) || saved || {}));
-    const keep = () => S.pickDraft.set(dk, cur);
-    const head = h('div', 'rules-pick-head');
+    const dk = `${S.d.repo} ${k}`;
+    one.dataset.seat = k;
+    if (S.pickDraft.has(dk) && pickKey(S.pickDraft.get(dk)) === pickKey(saved)) S.pickDraft.delete(dk);  // saved as drafted
+    const cur = JSON.parse(JSON.stringify(S.pickDraft.get(dk) || saved));
+    const keep = () => { if (pickKey(cur) === pickKey(saved)) S.pickDraft.delete(dk); else S.pickDraft.set(dk, cur); sync(); };
+    const head = h('div', 'rules-pick-head'), ids = Object.keys(saved);
     head.append(h('span', 'board-label', name), ' ', h('span', 'board-from rules-pick-now',
-      saved && Object.keys(saved).length ? Object.keys(saved).map((id) => `${id}: ${rangeText(saved[id] || {})}`).join('; ') : 'All models, any effort'));
+      ids.length ? ids.map((id) => `${id}: ${rangeText(saved[id] || {})}`).join('; ') : 'All models, any effort'));
     one.append(head);
-    models.forEach((x) => one.append(pickModelRow(k, name, x, cur, keep)));
+    const listed = models.filter((x) => Object.prototype.hasOwnProperty.call(cur, x.id)), others = models.filter((x) => !listed.includes(x));
+    if (listed.length) {
+      const table = h('table', 'rules-pick-table'), top = h('tr'), body = h('tbody');
+      ['Model', 'Lowest', 'Highest', 'Remove'].forEach((t) => { const c = h('th', t === 'Remove' ? 'rules-pick-gone' : null, t); c.scope = 'col'; top.append(c); });
+      const thead = h('thead'); thead.append(top);
+      listed.forEach((x) => body.append(pickModelRow(k, name, x, cur, keep)));
+      table.append(thead, body); one.append(table);
+    }
+    if (others.length) {
+      const add = h('select', 'field board-select');
+      add.dataset.act = `pick-add-${k}`; add.setAttribute('aria-label', `${name}: add a model the pick may give`);
+      [''].concat(others.map((x) => x.id)).forEach((id) => { const o = h('option', null, id || 'Add a model'); o.value = id; add.append(o); });
+      add.addEventListener('change', () => {
+        if (!add.value) return;
+        const id = add.value, root = one.closest('.rules');
+        cur[id] = {}; keep(); draw();
+        // The menu is gone when that was the last model to add: the focus goes to the new row's first control.
+        pickFocus(root, `pick-add-${k}`, `pick-min-${k}-${id}`, `pick-remove-${k}-${id}`);
+      });
+      one.append(add);
+    }
     // The command's words for a list: each model, with =<min>-<max> when it has a bound; clear for none.
     const words = (o, only) => {
       const ids = Object.keys(o).filter((id) => !only || models.some((x) => x.id === id));
       return ids.length ? [k].concat(ids.map((id) => { const g = o[id] || {}; return g.min || g.max ? `${id}=${g.min || ''}-${g.max || ''}` : id; })) : [k, 'clear'];
     };
-    const undo = ['pick-models', words(saved || {}, false)];
-    one.append(button('Save', 'btn-quiet', `pick-save-${k}`, `${name}: save the models the pick may give`, () => { S.pickDraft.delete(dk); send('pick-models', words(cur, true), null, undo); }));
-    return one;
+    return { el: one, k, dk, cur, saved, words, changed: () => pickKey(cur) !== pickKey(saved) };
   }
-  // The row of model id of seat k (name: its words) in its pick list: may the pick give it, and when it may, its
-  // lowest and highest effort. cur: the list as picked here; keep() keeps it.
+  // After a redraw, the focus goes to the first of these controls (their actions) in the rules panel root that is on.
+  function pickFocus(root, ...acts) {
+    const to = root && acts.map((a) => root.querySelector(`[data-act="${a}"]`)).find((x) => x && !x.disabled);
+    if (to) to.focus({ preventScroll: true });
+  }
+  // The table row of model id of seat k (name: its words): its efforts and a Remove button. cur: the list; keep() keeps it.
   function pickModelRow(k, name, { id, efforts }, cur, keep) {
-    const h = S.ctx.h, r = h('div', 'rules-pick-model'), box = h('input'), lab = h('label', 'board-from');
+    const h = S.ctx.h, r = h('tr', 'rules-pick-model'), cell = (...kids) => { const c = h('td'); c.append(...kids); r.append(c); };
     r.dataset.model = id;
-    box.type = 'checkbox'; box.checked = Object.prototype.hasOwnProperty.call(cur, id); box.dataset.act = `pick-model-${k}-${id}`;
-    box.setAttribute('aria-label', `${name}: the pick may give ${id}`);
-    box.addEventListener('change', () => { if (box.checked) cur[id] = {}; else delete cur[id]; keep(); draw(); });
-    lab.append(box, ' ', id);
-    r.append(lab);
-    if (box.checked && efforts.length) {
-      const g = cur[id] && typeof cur[id] === 'object' ? cur[id] : (cur[id] = {});
-      const menu = (which) => {
-        const sel = h('select', 'field board-select');
-        sel.dataset.act = `pick-${which}-${k}-${id}`; sel.setAttribute('aria-label', `${name}, ${id}: ${which === 'min' ? 'lowest' : 'highest'} effort`);
-        [''].concat(efforts).forEach((e) => { const o = h('option', null, e || 'Any'); o.value = e; o.selected = e === (g[which] || ''); sel.append(o); });
-        sel.addEventListener('change', () => { if (sel.value) g[which] = sel.value; else delete g[which]; keep(); });
-        return sel;
-      };
-      r.append(' ', h('span', 'board-from', 'lowest'), ' ', menu('min'), ' ', h('span', 'board-from', 'highest'), ' ', menu('max'));
-    }
+    cell(id);
+    const g = cur[id] && typeof cur[id] === 'object' ? cur[id] : (cur[id] = {});
+    ['min', 'max'].forEach((which) => {
+      if (!efforts.length) { cell(); return; }
+      const sel = h('select', 'field board-select');
+      sel.dataset.act = `pick-${which}-${k}-${id}`; sel.setAttribute('aria-label', `${name}, ${id}: ${which === 'min' ? 'lowest' : 'highest'} effort`);
+      [''].concat(efforts).forEach((e) => { const o = h('option', null, e || 'Any'); o.value = e; o.selected = e === (g[which] || ''); sel.append(o); });
+      sel.addEventListener('change', () => { if (sel.value) g[which] = sel.value; else delete g[which]; keep(); });
+      cell(sel);
+    });
+    cell(button('Remove', 'btn-quiet', `pick-remove-${k}-${id}`, `${name}: the pick may give ${id} no more`, (e) => {
+      // The row is gone after the redraw: the focus goes to the Remove of the next row, else the one before, else Add.
+      const root = e.currentTarget.closest('.rules'), rows = Array.from(r.parentNode.children, (x) => x.dataset.model), at = rows.indexOf(id);
+      delete cur[id]; keep(); draw();
+      pickFocus(root, ...[rows[at + 1], rows[at - 1]].filter(Boolean).map((m) => `pick-remove-${k}-${m}`), `pick-add-${k}`);
+    }));
     return r;
   }
   function rulesCores(el) {
@@ -754,7 +794,7 @@
       num, list, ctl, same, plural, pre, isArea, depKnown, landNow, landKnown, PRMERGE, prNow, prKnown, pushCheckOn,
       draftOf, draftPut, draftDrop, say, send, button, choice, seg, pickList, stepper, row, wouldSkip, skipWords,
       fieldLabel, areaWould, unlisted, heldUnknown, arm, limitsLine, standingShown, pickShown, CAP0, draw,
-      relength, rulesSuite, suiteSlots } = shared);
+      relength, rulesSuite, suiteSlots, run } = shared);
     return { rules, index };
   });
 })();
