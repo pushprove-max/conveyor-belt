@@ -10,11 +10,12 @@
 # transcript in that folder is not the Foreman's activity.
 # Once a minute, when that is 50 minutes old, it puts one wake in pending and exits. At most 10 pings in a row, then
 # none until real activity: keepalive.txt holds "<count> <epoch of the last ping>", and the count goes back to 0
-# once the last activity is more than 5 minutes after the last ping (the ping's own turn ends within seconds).
+# once the last activity is more than 5 minutes after the last ping (the ping's own turn ends within seconds), or a
+# user line at or after the last ping is not the ping's (the owner used the Foreman within those 5 minutes).
 # Before the next ping it reads the usage of the last assistant line at or after the last ping in the transcript: the
-# ping's own turn, or the owner's turn when the owner used the Foreman within those 5 minutes. A turn that wrote the
-# cache and read none of it (the cache was gone, a 5-minute cache, another model) stops the pings until real activity,
-# as the 10th ping does, with a line in keepalive.log. A turn whose usage cannot be read changes nothing.
+# ping's own turn. A turn that wrote the cache and read none of it (the cache was gone, a 5-minute cache, another
+# model) stops the pings until real activity, as the 10th ping does, with a line in keepalive.log. A turn whose usage
+# cannot be read changes nothing.
 # For tests: CONVEYOR_FOREMAN_NOW (the clock), --once.
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || exit 1
@@ -31,6 +32,18 @@ turn_usage() { # <transcript> <epoch>
       | select((try (.timestamp | sub("\\.[0-9]+"; "") | fromdateiso8601) catch -1) >= $at) | .message.usage][-1]
     | objects | select((.cache_creation_input_tokens | type) == "number" and (.cache_read_input_tokens | type) == "number")
     | "\(.cache_creation_input_tokens) \(.cache_read_input_tokens) \(.input_tokens // 0)"' 2>/dev/null
+}
+# 0 when a user line at or after <epoch> in the last 500 lines of <transcript> starts a turn the ping did not (the
+# owner's): not meta, not a tool result, and not the ping (its text holds no "Keepalive: idle "). Bug: an owner turn
+# soon after a ping, with a reply
+# that wrote the cache and read none (a model switch), was read as the ping's reply and stopped the pings.
+owner_since() { # <transcript> <epoch>
+  tail -n 500 "$1" 2>/dev/null | jq -Rne --argjson at "$2" '
+    any(inputs | fromjson? | objects | select(.type == "user" and ((.isMeta // false) | not))
+      | select((try (.timestamp | sub("\\.[0-9]+"; "") | fromdateiso8601) catch -1) >= $at)
+      | .message.content | if type == "string" then . elif type == "array" then
+          (if any(.[]?; .type? == "tool_result") then null else ([.[]? | .text? | strings] | join("\n")) end) else null end
+      | strings | contains("Keepalive: idle ") | not; .)' > /dev/null 2>&1
 }
 # The epoch of the newest line timestamp in the last 500 lines of <transcript>; nothing when none has one.
 last_turn() { # <transcript>
@@ -49,7 +62,7 @@ poll() { # 0 when a ping was put in pending
   [ "$last" -gt 0 ] && [ $((now - last)) -ge $IDLE_S ] || return 1
   { read -r count at < "$STATE"; } 2>/dev/null
   [[ $count =~ ^[0-9]+$ && $at =~ ^[0-9]+$ ]] || count=0 at=0
-  [ $((last - at)) -gt $REAL_S ] && count=0
+  [ "$count" -gt 0 ] && { [ $((last - at)) -gt $REAL_S ] || owner_since "$file" "$at"; } && count=0
   [ "$count" -lt $MAX_PINGS ] || return 1
   if [ "$count" -gt 0 ]; then
     u=$(turn_usage "$file" "$at")

@@ -35,7 +35,7 @@ pinged() { # <case> <usage>
   local d=$T/$1/cfg/projects/${P//[^A-Za-z0-9]/-}
   mkdir -p "$T/$1/foreman" && printf '1 %s\n' $((NOW - 51 * 60)) > "$T/$1/foreman/keepalive.txt"
   transcript "$d" "$ID" 50
-  printf '{"type":"user","timestamp":"%s","message":{"content":"Keepalive"}}\n' "$(TZ=UTC p_date "@$((NOW - 51 * 60))" +%Y-%m-%dT%H:%M:%S.000Z)" > "$d/$ID.jsonl"
+  printf '{"type":"user","timestamp":"%s","message":{"content":"Keepalive: idle 50 min, refreshing the 1-hour cache (ping 1 of 10). Nothing to do: reply Idle."}}\n' "$(TZ=UTC p_date "@$((NOW - 51 * 60))" +%Y-%m-%dT%H:%M:%S.000Z)" > "$d/$ID.jsonl"
   printf '{"type":"assistant","timestamp":"%s","message":{"content":"Idle","usage":%s}}\n' "$(TZ=UTC p_date "@$((NOW - 50 * 60 - 5))" +%Y-%m-%dT%H:%M:%S.123Z)" "$2" >> "$d/$ID.jsonl"
   TZ=UTC touch -t "$(TZ=UTC p_date "@$((NOW - 50 * 60))" +%Y%m%d%H%M.%S)" "$d/$ID.jsonl"
 }
@@ -75,6 +75,19 @@ owner() {
   poll owner "$P" 60
 }
 check "an owner's turn after a cold keepalive reply, within 5 minutes of the ping: the pings go on" owner
+
+# R20. Bug: an owner turn 90 s after the ping did not reset the count (within 5 minutes of it), so 50 minutes later its
+# reply, which wrote the cache and read none (a model switch), was read as the ping's own and stopped the pings.
+coldowner() {
+  local d=$T/coldowner/cfg/projects/${P//[^A-Za-z0-9]/-}
+  pinged coldowner '{"input_tokens":3,"cache_creation_input_tokens":200,"cache_read_input_tokens":41000}'
+  printf '{"type":"user","timestamp":"%s","message":{"content":"Status?"}}\n{"type":"assistant","timestamp":"%s","message":{"content":"All quiet","usage":%s}}\n' \
+    "$(TZ=UTC p_date "@$((NOW - 50 * 60 + 30))" +%Y-%m-%dT%H:%M:%S.000Z)" "$(TZ=UTC p_date "@$((NOW - 50 * 60 + 40))" +%Y-%m-%dT%H:%M:%S.000Z)" \
+    '{"input_tokens":5,"cache_creation_input_tokens":41000,"cache_read_input_tokens":0}' >> "$d/$ID.jsonl"
+  TZ=UTC touch -t "$(TZ=UTC p_date "@$((NOW - 50 * 60 + 40))" +%Y%m%d%H%M.%S)" "$d/$ID.jsonl"
+  poll coldowner "$P" 40 # 3000 s after the owner's reply
+}
+check "an owner's turn within 2 minutes of the ping, its reply cache-write-only, then 3000 s idle: a ping" coldowner
 
 # Bug: the 10th ping was answered at NOW-69 minutes; a line with no timestamp written at NOW-55 minutes (after the
 # 5 minutes that reset the count) moved the file time, the count went back to 0 and the 11th ping came. A turn with a

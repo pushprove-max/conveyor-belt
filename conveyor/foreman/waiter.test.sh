@@ -303,6 +303,39 @@ after false s2; rc=$?
 [ "$rc" = 2 ] && [ "$(cat "$T/wake")" = 'Alert: blocked #8' ] || fail "the new Foreman's first stop did not deliver the wake (exit $rc): $(cat "$T/wake")"
 }
 
+# R59. Bug: deliver keeps the wake as sent, then the stop stops its watchers and hands off before its exit 2; a session
+# whose process ended in that gap never read the wake, and resumed with the same session id (a new process) its next
+# stop deleted it as received. A watcher that ignores TERM holds the gap open for stop_all's 5 s.
+t_resumed() {
+fixture resumed
+put 'Alert: blocked #9'
+jq -cn '{stop_hook_active: false, session_id: "s1"}' \
+  | CONVEYOR_FOREMAN_WATCHERS="$W"$'\n'"trap '' TERM; while :; do sleep 1; done" timeout 30 bash "$SRC/waiter.sh" 2> "$T/wake" > /dev/null & s=$! # sleep: the stubborn watcher's idle loop
+wait_until 'compgen -G "$FD/pending/*.sent-*" > /dev/null' || fail "the stop delivered no wake"
+kill -0 "$s" 2>/dev/null || fail "the stop exited before the session's process was ended, so the case proves nothing"
+kill "$SP"; wait "$s"; rc=$?
+[ "$rc" = 2 ] && [ "$(cat "$T/wake")" = 'Alert: blocked #9' ] || fail "the first stop did not relay the wake (exit $rc): $(cat "$T/wake")"
+sleep 600 & SP=$! # sleep: the resumed session's process, ended with the case
+export CONVEYOR_FOREMAN_SESSION_PID=$SP
+after false s1; rc=$?
+[ "$rc" = 2 ] && [ "$(cat "$T/wake")" = 'Alert: blocked #9' ] || fail "the resumed session's stop did not put the unread wake back in pending and deliver it (exit $rc, pending: $(ls "$FD/pending")): $(cat "$T/wake")"
+}
+
+# R61. Bug: start() names a watcher by its pid before its setsid makes that pid a group; a TERM in that gap found no
+# group to stop, the watcher then made its group and ran on, and the waiter's wait on it never ended, holding
+# waiter.lock. The setsid on PATH (perl on macOS, as p_execsid runs it) holds that gap open for 3 s.
+t_slowsid() {
+fixture slowsid
+local n=setsid real; [ "$(uname)" != Darwin ] || n=perl
+real=$(command -v "$n") && mkdir -p "$T/bin" || fail "no $n to wrap"
+printf '#!/bin/sh\ncase " $* " in *" bash -c "*) : > "%s"; sleep 3 ;; esac\nexec "%s" "$@"\n' "$T/forked" "$real" > "$T/bin/$n" && chmod +x "$T/bin/$n" || fail "the slow $n was not made" # sleep: the slow setsid's gap, which the TERM falls in
+echo '{}' | PATH=$T/bin:$PATH CONVEYOR_FOREMAN_WATCHERS=$W bash "$SRC/waiter.sh" > /dev/null 2>&1 & s=$!
+wait_until '[ -e "$T/forked" ]' || fail "the waiter started no watcher"
+kill -TERM "$s"
+WAIT_CEILING=6 wait_until "! kill -0 $s 2>/dev/null" || { kill -KILL "$s" "$(cut -d' ' -f1 "$FD/watchers.pid")"; fail "the waiter did not exit within 6 s of a TERM while its watcher's setsid was slow"; }
+flock -n "$FD/waiter.lock" true || fail "waiter.lock is still held after the waiter exited"
+}
+
 # Issue 594: Claude Code's /restart runs the new program in the same process, which no longer reads the Stop hook it
 # ran before. reader: a stop's waiter (SW) whose stderr is a pipe read by RP, which unread ends as the restart does;
 # SIGPIPE is ignored, as Claude Code's hooks have it (with it not ignored, the write would kill the waiter).
@@ -480,7 +513,7 @@ echo new > "$FD/started"
 up "$bp" || fail "CONVEYOR_WAITER_START=1 waiter.sh (input $in, no CONVEYOR_FOREMAN) started no waiter once foreman.sh start ended: $(cat "$FD/waiter.log" 2>/dev/null)"
 }
 
-cases=(handoff restart why downheld downstop goneblock takeover undelivered takecheck oldpid refused delivered refusedwait claimed noreader stopover reclaim checkquiet startwake startother startlive startover startheld startclaim startadopt)
+cases=(handoff restart why downheld downstop goneblock takeover undelivered takecheck oldpid refused delivered refusedwait claimed resumed slowsid noreader stopover reclaim checkquiet startwake startother startlive startover startheld startclaim startadopt)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

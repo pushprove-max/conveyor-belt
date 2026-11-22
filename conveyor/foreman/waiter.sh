@@ -38,9 +38,10 @@
 # (issue 592): a stop that another hook refused (stop.sh) ends no turn, so the wake relayed at it, or by its waiter
 # during the turn it goes on with, is dropped with it. The next stop follows a refused stop (stop_hook_active): it
 # takes over the waiter that runs, held or not, and relays the sent wakes again when stop.sh refused the stop they were
-# relayed at (refused-stops, lib.sh stop_key). Any other stop of the same session drops them: the stop the waiter
-# itself refused to relay them reached the session with them (issue 605). A stop of another session (after a claim)
-# relays them again, as the old session had them.
+# relayed at (refused-stops, lib.sh stop_key). Any other stop of the same session in the same process drops them: the
+# stop the waiter itself refused to relay them reached the session with them (issue 605). A stop of another session
+# (after a claim), or of the same session in another process (it quit before the hook's exit 2 and was resumed),
+# relays them again.
 # The waiter and its watchers run from the install the shim started it from (versions/<commit>). Once a minute it
 # reads the commit the project runs now (its pack's plugin.commit, else for a pack that follows the plugin its
 # conveyor-engine.json commit, as shim.sh reads them); when that is another installed commit, it stops its watchers
@@ -145,17 +146,19 @@ else
     flock -w 10 7 || { log "the waiter $old did not stop in 10 s; this stop passes"; exit 0; }
   fi
 fi
-# stop_groups <process group>...: each group is gone before it returns (TERM, then KILL after 5 s).
+# stop_groups <process group>...: each group is gone before it returns (TERM, then KILL after 5 s). The process that
+# leads it is signalled too: a watcher start just forked has not run its setsid yet (perl on macOS widens that gap), so
+# its group does not exist, and it would make it once the stop was over and run on, the waiter's wait on it never done.
 stop_groups() {
   local p alive
   [ $# -gt 0 ] || return 0
-  for p in "$@"; do kill -TERM -- "-$p" 2>/dev/null; done
+  for p in "$@"; do kill -TERM -- "-$p" "$p" 2>/dev/null; done
   for _ in $(seq 50); do
-    alive=; for p in "$@"; do kill -0 -- "-$p" 2>/dev/null && alive=1; done
+    alive=; for p in "$@"; do { kill -0 -- "-$p" || kill -0 "$p"; } 2>/dev/null && alive=1; done
     [ -n "$alive" ] || break
     sleep 0.1
   done
-  for p in "$@"; do kill -KILL -- "-$p" 2>/dev/null; done
+  for p in "$@"; do kill -KILL -- "-$p" "$p" 2>/dev/null; done
 }
 # watchers.pid (in the Foreman's folder): "<process group> <its start time>" of each watcher the waiter runs. A watcher
 # closes fd 7, so a waiter killed with no time to stop its watchers frees the lock while they run on: the waiter that
@@ -200,7 +203,7 @@ trap 'log "ended: ${why:-it stopped for no known reason}"' EXIT
 ACK=$(mktemp) || { why='no temporary file could be made'; exit 0; }
 # deliver: 0 when anything pending went to stderr while the session's process was alive. What it relays leaves
 # pending only then: a wake relayed to an ended process, or one stderr would not take, waits for the next stop. It is
-# kept as <wake>.sent-<session> until a later stop shows the session got it (below).
+# kept as <wake>.sent-<session>.<session's process> until a later stop shows the session got it (below).
 # A stderr that takes no wake has no reader: the session no longer reads this hook's output, though its process runs
 # (Claude Code's /restart runs the new program in the same process; issue 594). Such a waiter can never wake the
 # session, so it ends, its wake left pending: the next hook of the session starts a waiter, and the next stop delivers.
@@ -215,7 +218,7 @@ deliver() {
   live
   printf '%s\n' "$text" > "$FD/last-wake.txt"
   printf '%s\n' "$KEY" > "$FD/sent-stop"
-  while IFS= read -r f; do mv -f "$f" "$f.sent-$SID"; done < "$ACK"
+  while IFS= read -r f; do mv -f "$f" "$f.sent-$SID.$CONVEYOR_FOREMAN_SESSION_PID"; done < "$ACK"
   why='it delivered a wake'
 }
 declare -A CMD=() PID=() TRIES=()
@@ -235,9 +238,11 @@ onterm() {
   kill "${sp:-}" 2>/dev/null; why="it was stopped (a claim, a stop that took over, or the end of its hook)"; stop_all; exit 0
 }
 trap onterm TERM HUP INT
-# The wakes relayed before (<wake>.sent-<session>, deliver, at the stop sent-stop names): a stop of another session,
-# or one that follows a refused stop when stop.sh refused the stop they were relayed at, puts them back in pending, so
-# it relays them again; any other stop of their session drops them, as they reached it.
+# The wakes relayed before (<wake>.sent-<session>.<session's process>, deliver, at the stop sent-stop names): a stop of
+# another session, or of the same session in another process (the process they were relayed to ended before it read
+# them, between deliver and exit 2, and the session was resumed), or one that follows a refused stop when stop.sh
+# refused the stop they were relayed at, puts them back in pending, so it relays them again; any other stop of their
+# session's process drops them, as they reached it.
 if [ -z "$MODE" ] && [ -n "$AFTER" ]; then
   lost=false
   if [ "$AFTER" = true ]; then
@@ -246,7 +251,7 @@ if [ -z "$MODE" ] && [ -n "$AFTER" ]; then
   fi
   for f in "$PENDING"/*.wake.sent-*; do
     [ -f "$f" ] || continue
-    if [ "$lost" = false ] && [ "${f##*.sent-}" = "$SID" ]; then rm -f "$f"; else mv -f "$f" "${f%.sent-*}"; fi
+    if [ "$lost" = false ] && [ "${f##*.sent-}" = "$SID.$CONVEYOR_FOREMAN_SESSION_PID" ]; then rm -f "$f"; else mv -f "$f" "${f%.sent-*}"; fi
   done
 fi
 [ "$MODE" = --held ] || ! deliver || { rm -f "$ACK"; handoff; exit 2; }

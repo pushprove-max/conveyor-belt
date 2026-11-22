@@ -104,11 +104,12 @@ record_of() {
   awk -F'\t' -v r="$n" 'tolower($1) == r { print; exit }' <<<"$2"
 }
 # ledger <repo> <main>: the checkout whose decision ledger (.claude/metrics/decisions.jsonl) a record's open decisions
-# are read from: its main when that is on this machine; else, for the record mine matched by this checkout's
-# repository (repo_name), the checkout this runs for, where the Foreman writes and answers them. Nonzero for any
-# other record whose main is not on this machine: its ledger is not here.
+# are read from: its main when that is a checkout on this machine (it has .git: an empty folder at a path of the
+# belt's host is none); else, for the record mine matched by this checkout's repository (repo_name), the checkout
+# this runs for, where the Foreman writes and answers them. Nonzero for any other record whose main is not on this
+# machine: its ledger is not here.
 ledger() {
-  if [ -d "$2" ]; then printf '%s' "$2"
+  if [ -e "$2/.git" ]; then printf '%s' "$2"
   elif [ -n "$1" ] && [ "$1" = "$(repo_name)" ] && [ -d "$CONVEYOR_MAIN" ]; then printf '%s' "$CONVEYOR_MAIN"
   else return 1; fi
 }

@@ -155,6 +155,14 @@ t_split() {
   out=$(turn u2 "${say%<n>}449"); [ -z "$out" ] || fail "the line the start-up text gives to file was refused: $out"
 }
 
+# R57. Bug: an empty folder on this machine at the path of the record's main (on the belt's host) was taken as the
+# record's checkout (ledger): its remote did not read, so plugin_home never tried this checkout, the plugin's own.
+t_splitempty() {
+  fixture splitempty "git@github.com:${OWN#https://github.com/}.git" "${OWN##*/}"
+  mkdir -p "$T/far/${OWN##*/}" || fail "the empty folder was not made"
+  (. "$SRC/lib.sh" && plugin_home) || fail "plugin_home was not 0 for a record whose main is an empty local folder and whose repo is this checkout's, the plugin's own: $(jq -c . "$XDG_CONFIG_HOME/conveyor/host.json")"
+}
+
 # D2: in another project the same line with no number passes, as before, and the owner files it: the start-up text
 # lists no entry and does not tell the Foreman to file it.
 t_other() {

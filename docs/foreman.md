@@ -65,8 +65,9 @@ role runs with another cache time, such as `5m`, the claim says so in one line. 
 1-hour cache.
 
 While the Foreman is idle, the waiter sends it a short keepalive turn every 50 minutes, so the cache stays warm. Before
-the next one, it reads the usage of the Foreman's last turn since the last keepalive turn: that turn, or your own turn
-when you used the Foreman soon after it. When the turn wrote the cache again and read none of it, the cache did not stay warm, so the waiter sends no more keepalive turns until the Foreman is active again. Each
+the next one, it reads the usage of the last keepalive turn. When the turn wrote the cache again and read none of it,
+the cache did not stay warm, so the waiter sends no more keepalive turns until the Foreman is active again. When you
+used the Foreman after the last keepalive turn, the waiter does not read that usage, and the keepalive turns go on. Each
 stop adds a line with the turn's usage to `keepalive.log` in the Foreman's folder. When the usage cannot be read, the
 keepalive turns go on.
 
