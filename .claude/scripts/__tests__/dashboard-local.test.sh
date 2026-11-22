@@ -507,8 +507,9 @@ found=$(grep -n -i -E "$RETIRED" "${DASH%.sh}"*.sh "$VIEW"/*.* "$VIEW"/panels/*.
 # Exempt: the Benchmarks tab's tests (dashboard-view.bench*.mjs). They check the tab's texts, which use SWE-bench's
 # own names for a test's result ("fail-to-[p]ass"), not the retired workflow; the tab's parts/ are not scanned either.
 # Exempt: the lint step's tests (dashboard-view.lint-rows.test.mjs). A lint command's result in the card's record is
-# "[p]ass", "findings", "error", "no files" or "skipped: missing <tool>" (conveyor/lib/lint.sh), shown as a chip,
-# not the retired workflow; parts/ is not scanned.
+# "[p]ass", "findings", "error", "no files", "skipped: missing <tool>" or "skipped: missing <trigger file>, which main
+# added after the commit of this tree: ..." (conveyor/lib/lint.sh), shown as a chip, not the retired workflow; parts/
+# is not scanned.
 # Exempt: the service file's section header, a line that is only that header. Any other line still fails: the
 # header's text anywhere in a line used to exempt it, so this check's own line could hide a retired word beside it.
 [ -z "$found" ] || fail "the retired workflow is still named (the service file's own section header aside): $found"
