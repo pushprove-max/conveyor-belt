@@ -154,7 +154,7 @@ Tests:
   its build or test step and no test of another project runs on the machine (`conveyor/README.md`, Mutation checks).
   `mutate ask <test file>...` puts files at the front of that queue and starts no check (the Board's Mutation check).
 - `test-settings` saves a test setting in the pack: a "slow on purpose" mark,
-  whether slow files file issues, and the test command that records a Wall only file's CPU time (`conveyor/README.md`, The test files in the snapshot).
+  whether slow files file issues, the time the test history starts at (saved in the control record), and the test command that records a Wall only file's CPU time (`conveyor/README.md`, The test files in the snapshot).
 - `prices` changes the model prices in the pack ([Configuration](configuration.md#the-pack)):
   - `prices set <model> <input> <output> <cache read> [<cache write>]` saves your price of one model, and
     `prices clear <model>` removes it.

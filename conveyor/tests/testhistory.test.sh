@@ -78,6 +78,8 @@ t_thstart() {
     || fail "h.test's figures with the start $TH_START are not those of its runs on or after it: $(th_figs "$got")"
   [ "$(jq -c '[.files[] | select(.file == "g.test")] | length' <<<"$got")" = 0 ] || fail "g.test, run only before the start $TH_START, has a row: $(jq -c '.files[] | select(.file == "g.test")' <<<"$got")"
   [ "$(jq -c '.totals.slower' <<<"$got")" = 1 ] || fail "the totals with the start $TH_START do not count h.test slower: $(jq -c .totals <<<"$got")"
+  # Bug it catches: the snapshot did not carry the start, so the Board's Test settings could not show it.
+  [ "$(jq -r '.settings.historyStart' <<<"$got")" = "$TH_START" ] || fail "the snapshot's settings.historyStart is not the start $TH_START: $(jq -c .settings <<<"$got")"
 }
 # Bug it catches: with no start set the filter dropped runs (a missing setting read as a date): every run counts, as
 # before the setting existed: the 900 s runs, the survey time and the carried time are in the median (30), usual
@@ -87,6 +89,26 @@ t_thnostart() {
   got=$(th_as snapshot testspart 2026-11-09) || fail "testspart failed with no start: $got"
   [ "$(th_figs "$got" | jq -c '.[:9]')" = '[30,30,0,700,false,13,2,2,2]' ] \
     || fail "with no start set, h.test's figures are not those of all its runs: $(th_figs "$got")"
+  [ "$(jq -c '.settings.historyStart' <<<"$got")" = null ] || fail "with no start set, settings.historyStart is not null: $(jq -c .settings <<<"$got")"
+}
+# Bug it catches: the figures' slot wait and run time of the card Test steps, and the whole-suite run, still counted
+# what ran before the start (the Tests page said it did not). With the start set, the steps' wait and run are those of
+# the steps on or after it, and the suite is the newest suite run on or after it, none when every one is before it.
+t_thsteps() {
+  local got; th_fixture
+  jq -cn '{card: "c-wr", issue: 7, step: "test", time: "2026-11-10T15:00:00Z", result: "pass", wait: 100, run: 200}' >> "$ST/cards.jsonl"
+  jq -cn '{card: "c-wr", issue: 7, step: "test", time: "2026-11-21T15:00:00Z", result: "pass", wait: 1, run: 2}' >> "$ST/cards.jsonl"
+  loop test-settings history-start "$TH_START" || fail "the start $TH_START was not saved"
+  got=$(th_as snapshot testspart 2026-11-09) || fail "testspart failed with the start $TH_START: $got"
+  [ "$(jq -c '[.totals.steps.waitSec, .totals.steps.runSec]' <<<"$got")" = '[1,2]' ] \
+    || fail "the card steps' wait and run with the start $TH_START do not leave out the step before it: $(jq -c .totals.steps <<<"$got")"
+  loop test-settings history-start 2026-11-23T00:00:00Z || fail "the start 2026-11-23T00:00:00Z was not saved"
+  got=$(th_as snapshot testspart 2026-11-09) || fail "testspart failed with the start after every suite run: $got"
+  [ "$(jq -c .suite <<<"$got")" = null ] || fail "the suite with every suite run before the start is not none: $(jq -c .suite <<<"$got")"
+  loop test-settings history-start clear || fail "the start was not cleared"
+  got=$(th_as snapshot testspart 2026-11-09) || fail "testspart failed with no start: $got"
+  [ "$(jq -c '[.totals.steps.waitSec, .totals.steps.runSec, .suite.time]' <<<"$got")" = '[101,202,"2026-11-22T00:00:00Z"]' ] \
+    || fail "with no start, the card steps' wait and run and the newest suite run are not all counted: $(jq -c '[.totals.steps, .suite]' <<<"$got")"
 }
 # Bug it catches: the judge was given the runs and failures from before the start, so it judged a file by history the
 # Tests page no longer showed. With the start set, its runs, newest run, failures and flaky entries are all on or after it.

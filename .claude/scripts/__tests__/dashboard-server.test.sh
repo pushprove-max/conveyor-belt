@@ -921,10 +921,13 @@ pass=$((pass + 4))
 # path that reads as an option, a reason of two lines, a budget, which no test file has now: #349) is sent on.
 fresh_control
 [ "$(ctl "$(act test-settings slow-issues true)")" = 200 ] && [ "$(ctl "$(act test-settings slow-mark conveyor/tests/e2e.test.sh 'runs the whole loop')")" = 200 ] \
+  && [ "$(ctl "$(act test-settings history-start 2026-11-21T00:00:00Z)")" = 200 ] && [ "$(ctl "$(act test-settings history-start clear)")" = 200 ] \
   && [ "$(calls)" = "CONVEYOR_MAIN=$HM test-settings slow-issues true
-CONVEYOR_MAIN=$HM test-settings slow-mark conveyor/tests/e2e.test.sh runs the whole loop" ] || fail "test_settings_reach_conveyor: $(cat "$M/ctl.out") ran '$(calls)'"
+CONVEYOR_MAIN=$HM test-settings slow-mark conveyor/tests/e2e.test.sh runs the whole loop
+CONVEYOR_MAIN=$HM test-settings history-start 2026-11-21T00:00:00Z
+CONVEYOR_MAIN=$HM test-settings history-start clear" ] || fail "test_settings_reach_conveyor: $(cat "$M/ctl.out") ran '$(calls)'"
 fresh_control
-for a in 'file-budget a.test.sh 30' 'budget 8' 'file-budget-clear a.test.sh' 'slow-mark a.test.sh' 'slow-mark-clear -x.test.sh' 'slow-issues yes' 'slow-mark-clear /etc/x'; do
+for a in 'history-start yesterday' 'history-start 2026-11-21' 'history-start' 'file-budget a.test.sh 30' 'budget 8' 'file-budget-clear a.test.sh' 'slow-mark a.test.sh' 'slow-mark-clear -x.test.sh' 'slow-issues yes' 'slow-mark-clear /etc/x'; do
   # shellcheck disable=SC2086 # each word an argument
   [ "$(ctl "$(act test-settings $a)")" = 400 ] || fail "test_settings_take_only_their_shapes: '$a' answered '$(cat "$M/ctl.out")'"
 done

@@ -70,10 +70,10 @@ test('Test settings: its own panel holds Test actions, Test limits and Auto-file
   assert.ok(tp(w).compareDocumentPosition(sp(w)) & w.Node.DOCUMENT_POSITION_FOLLOWING, 'after the Tests panel');
   assert.ok(!tp(w).contains(sp(w)) && !sp(w).contains(tp(w)), 'apart from it');
   const parts = Array.from(sp(w).querySelectorAll('.tests-set-part'));
-  assert.deepEqual(parts.map((p) => p.querySelector('.tests-set-head').textContent), ['Test actions', 'Test limits', 'Auto-file']);
+  assert.deepEqual(parts.map((p) => p.querySelector('.tests-set-head').textContent), ['Test actions', 'Test limits', 'Test history', 'Auto-file']);
   // Each section says once where its rows save; no row says it again.
   assert.deepEqual(parts.map((p) => Array.from(p.querySelectorAll('.tests-where'), (x) => x.textContent)),
-    [['Saves to: Control record: this project'], ['Saves to: Pack file: this project'], ['Saves to: Pack file: this project']]);
+    [['Saves to: Control record: this project'], ['Saves to: Pack file: this project'], ['Saves to: Control record: this project'], ['Saves to: Pack file: this project']]);
   assert.equal(sp(w).querySelectorAll('.rules-row .tests-where').length, 0, 'no row says where it saves');
   assert.match(sp(w).querySelector('[data-limit="purpose"]').textContent, /conveyor\/tests\/e2e\.test\.sh: runs the whole loop/);
   // The Tests panel keeps none of them, nor their controls.
@@ -136,4 +136,32 @@ test('Tests: the #457 rows show when the snapshot names them and not when it doe
   act(sec(w), 'slow-issues-save').click();
   await settle();
   assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['slow-issues', 'true']]);
+});
+
+// Issue 1338. Bug it catches: the Test settings did not show the test history's start, or a change to it was not sent
+// to `conveyor.sh test-settings history-start` (the control record), a text that is no UTC time was sent on, or the
+// setting sat under the Test limits heading, which says the pack file, when it saves to the control record.
+test('Tests: "Test history starts at" shows the start in force, and a change posts it to test-settings history-start', async () => {
+  const w = boot({ tab: 'tests' });
+  const d = issues();
+  d.panels.tests.data.tests.settings.historyStart = '2026-11-21T00:00:00Z';
+  deliver(w, d);
+  const hs = () => sp(w).querySelector('.tests-history');
+  assert.equal(act(hs(), 'history-start-field').value, '2026-11-21T00:00:00Z', 'the start in force shows');
+  assert.equal(hs().querySelector('.tests-where').textContent, 'Saves to: Control record: this project');
+  assert.match(hs().querySelector('[data-limit="history-start"]').textContent, /^Test history starts at/);
+  assert.equal(sec(w).querySelector('[data-limit="history-start"]'), null, 'not under the Test limits, which save to the pack file');
+  const put = (v) => { const f = act(hs(), 'history-start-field'); f.value = v; f.dispatchEvent(new w.Event('input')); };
+  put('yesterday');
+  act(hs(), 'history-start-save').click();
+  await settle();
+  assert.deepEqual(w.posts, [], 'a text that is no UTC time is not sent');
+  put('2026-11-22T06:30:00Z');
+  act(hs(), 'history-start-save').click();
+  await settle();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body), [{ action: 'test-settings', args: ['history-start', '2026-11-22T06:30:00Z'], repo: 'sample' }]);
+  put('');
+  act(hs(), 'history-start-save').click();
+  await settle();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body), [{ action: 'test-settings', args: ['history-start', 'clear'], repo: 'sample' }], 'empty counts every run again');
 });

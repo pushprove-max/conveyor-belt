@@ -929,8 +929,8 @@ The pack's `test.fileBudget`, a `budget` in `test.files` and a test rule with th
 
 The Board saves these settings with `conveyor.sh test-settings`, which changes main's pack (`.conveyor/project.json`)
 and nothing else. Each command checks its value and the changed pack (lib/pack.sh) before it saves; a bad value is
-refused with the reason, and the pack does not change. `history-start` is the one setting the Board does not save: it
-is set with the command only, and it changes the control record, not the pack.
+refused with the reason, and the pack does not change. `history-start` is the one setting that changes the control
+record, not the pack. The Board saves it too, in "Test history starts at" of the Test settings.
 
 - `test-settings slow-issues <true | false>`: `test.slowIssues`, which files nothing now (Test rules, below);
 - `test-settings slow-mark <file> <reason>`: the "slow on purpose" mark of one file that main's checkout tracks, with

@@ -5,7 +5,7 @@
 (() => {
   'use strict';
   // What this part uses of panels/tests.js, set when tests.js asks for the part (DASH_APP.part, at the end).
-  let NEVER, PACK, MARKS, S, num, list, obj, one, pct, tests, settings, dk, shown, marks, look, timed, wallOnly,
+  let NEVER, PACK, CONTROL, MARKS, S, num, list, obj, one, pct, tests, settings, dk, shown, marks, look, timed, wallOnly,
     clockTook, COLS, say, button, row, section, setting, control, ENDED, SENDING, actions, mmss, hollowOf, proxyOf,
     proxySaid, hollowSaid, verdictOf, causesOf, causeSaid, failsOf, caughtOf, notCard, kindSaid, casesSaid, plural,
     failKinds, mutDone, survivors, trimmed, mutState, mutCell, progress, send, verdictChip, reasonOf, box, rowAction,
@@ -522,6 +522,7 @@
   }
 
   // ---- Test limits ----
+  const UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;  // a time as `test-settings history-start` takes it
   function limits() {
     const h = S.ctx.h, el = section('tests-limits', 'Test limits', PACK), t = tests(), s = settings();
     if (!t) return el;
@@ -541,6 +542,18 @@
         ...setting('slowIssues', { act: 'slow-issues', label: 'Take a file off card runs', choices: [['true', 'On'], ['false', 'Off']],
           check: () => null, send: (v) => control(['slow-issues', v]), said: (v) => `Take a file off card runs is now ${v === 'true' ? 'On' : 'Off'}` })));
     }
+    return el;
+  }
+  // Test history: "Test history starts at", the control record's testsFrom, which the snapshot gives as
+  // settings.historyStart. The figures, failures, card steps, whole-suite run and drafts count only the runs on or after
+  // it; nothing is deleted. A section of its own: it saves to the control record, the Test limits to the pack file.
+  function history() {
+    const el = section('tests-history', 'Test history', CONTROL);
+    el.append(row('history-start', 'Test history starts at', 'Only the runs, failed steps and flaky entries on or after this time count on this page, in its drafts and for the Tests judge. Older ones are kept, not counted. Empty: every run counts.', null,
+      ...setting('historyStart', { act: 'history-start', label: 'Test history starts at', placeholder: '2026-11-21T00:00:00Z', clear: 'Count every run',
+        check: (v) => (v === '' || UTC.test(v) ? null : 'Type a UTC time like 2026-11-21T00:00:00Z, or leave it empty.'),
+        send: (v) => control(['history-start', v === '' ? 'clear' : v]),
+        said: (v) => (v === '' ? 'Every run counts again' : `Test history starts at ${v}`) })));
     return el;
   }
 
@@ -662,7 +675,7 @@
       if (!['filter', 'edits-filter', 'open', 'goto', 'copy', 'search', 'select', 'select-all', 'more', 'timeline-all', 'judge-report'].includes(b.dataset.act) && !/^(sort|figure|tab|tl)-/.test(b.dataset.act || '')) b.disabled = true;
     });
   }
-  // The Test settings panel (#1088): Test actions, Test limits and Auto-file. With no test figures (the pack does not
+  // The Test settings panel (#1088): Test actions, Test limits, Test history and Auto-file. With no test figures (the pack does not
   // read: tests is null) it says so and holds none of them: Test limits and Auto-file read the figures, and the Tests
   // model is only for Judge and Explain the slowdown, which act on the table's files, and there is no table then.
   function drawSet() {
@@ -674,7 +687,7 @@
     }
     const root = h('div', 'tests tests-set');
     if (!tests()) root.append(h('p', 'warn-note', 'Conveyor could not read the test settings of this project. Its pack does not read, or the build machine runs an older Conveyor.'));
-    else root.append(actionsHead(), limits(), autofile());
+    else root.append(actionsHead(), limits(), history(), autofile());
     el.replaceChildren(root, noteOf(el));
     still(root);
   }
@@ -724,7 +737,7 @@
     still(root);
   }
   window.DASH_APP.part('tests-rows', function (shared) {
-    ({ NEVER, PACK, MARKS, S, num, list, obj, one, pct, tests, settings, dk, shown, marks, look, timed, wallOnly,
+    ({ NEVER, PACK, CONTROL, MARKS, S, num, list, obj, one, pct, tests, settings, dk, shown, marks, look, timed, wallOnly,
       clockTook, COLS, say, button, row, section, setting, control, ENDED, SENDING, actions, mmss, hollowOf, proxyOf,
       proxySaid, hollowSaid, verdictOf, causesOf, causeSaid, failsOf, caughtOf, notCard, kindSaid, casesSaid, plural,
       failKinds, mutDone, survivors, trimmed, mutState, mutCell, progress, send, verdictChip, reasonOf, box,

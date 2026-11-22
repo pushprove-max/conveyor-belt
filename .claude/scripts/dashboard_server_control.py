@@ -241,8 +241,8 @@ PROVIDERS = frozenset({'claude', 'openai', 'opencode', 'other'})
 
 def test_settings_ok(v):
     """Whether args are one `conveyor.sh test-settings` command: slow-issues true|false, slow-mark <file> <reason: one
-    line>, slow-mark-clear <file> or cpu-time <file> (Record CPU time: the pack's test command changed, an admin's
-    alone)."""
+    line>, slow-mark-clear <file>, cpu-time <file> (Record CPU time: the pack's test command changed, an admin's
+    alone) or history-start <UTC time like 2026-11-21T00:00:00Z | clear> (the control record's test history start)."""
     n, w = len(v), v[0] if v else None
     if n == 2 and w == 'slow-issues':
         return v[1] in ('true', 'false')
@@ -250,6 +250,8 @@ def test_settings_ok(v):
         return TEST_FILE.fullmatch(v[1]) is not None and said_ok(v[2])
     if n == 2 and w in ('slow-mark-clear', 'cpu-time'):
         return TEST_FILE.fullmatch(v[1]) is not None
+    if n == 2 and w == 'history-start':
+        return v[1] == 'clear' or setup_at_ok(v[1])  # the command checks the date itself
     return False
 
 

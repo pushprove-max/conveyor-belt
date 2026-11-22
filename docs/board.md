@@ -713,6 +713,14 @@ build runs your whole suite once on the build machine, on a test slot. While it 
 have run, and **Stop** ends the build. When the build ends, the part shows its result. The Board refuses the button to
 a member. When the map is off, when `test.map` names a map that your project keeps itself, or when your language has no coverage tool, the part tells you and shows no button.
 
+"Test history starts at" in the Test settings sets a UTC time, such as `2026-11-21T00:00:00Z`. The page counts only the
+runs, failed steps and flaky entries on or after it: the table, the figures (with the slot wait and run time of the
+card Test steps), the whole-suite run, the Fix failures and Fix the waiting drafts, the test rules, and the facts that
+Judge gives the Tests model. It deletes nothing. Older runs stay on record,
+and an empty value counts every run again. A change is saved in the control record
+(`conveyor.sh test-settings history-start`). Use it after a change of machine or of test command, when the old runs no
+longer say how fast the tests are.
+
 The figures count the timed files, the files slower than usual and the files that wait more than they work, and give
 the slot wait and run time of the card Test steps of 7 days. No test file has a CPU budget. Click the figure of files
 slower than usual or that wait, and the table shows those files only, as their filter chip does.
@@ -971,13 +979,14 @@ test that still covers each case of the file. Each file of an action on many fil
 its own answer. At most 3 test actions run at once. The others wait as queued and start in the order asked. Stop
 takes a queued one off before it starts.
 
-The Test settings panel, on the Tests tab after the Tests panel, has three sections. Each section says once where its
+The Test settings panel, on the Tests tab after the Tests panel, has four sections. Each section says once where its
 settings are saved:
 
 - **Test actions**: "Model for Tests actions", the CLI, model and effort that Judge and Explain the slowdown use. It
   is saved in the control record. "In force" shows the saved model only while you have a change that is not saved.
 - **Test limits**: the files slow on purpose, and "Take a file off card runs" when the pack has it. They are saved in
   the pack file.
+- **Test history**: "Test history starts at", saved in the control record (see [Tests page](#tests-page)).
 - **Auto-file**: the switch for the test rules (`conveyor.sh testrules`), their guards and their fields, saved in the
   pack file. The preview of what the rules matched is under the switch, and the log of what they filed is at the end.
   Each is in a box of its own (`conveyor/README.md`, Test actions).

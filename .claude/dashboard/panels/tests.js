@@ -86,7 +86,8 @@
 // Close its issue as done and Mark as slow on purpose (it asks for the reason).
 // Test settings, Test limits. Its rows save to the pack file (this project): the files slow on purpose (a
 // list), and, only when the snapshot names them, the hard box of each test file (settings.box: {on}) and "Take a
-// file off card runs" (settings.slowIssues, #457).
+// file off card runs" (settings.slowIssues, #457). "Test history starts at" (settings.historyStart) saves to the control
+// record; the table, the failures and the Fix failures and Fix the waiting drafts count only what is on or after it.
 // Every value is typed or picked first: the row says Unsaved, with Save and Cancel, as on the Rules tab, and only Save
 // sends it: POST control {action: test-settings, args, repo}
 // (`conveyor.sh test-settings`) for a pack setting. A value saved shows until a snapshot names it, or one begun after
@@ -203,6 +204,7 @@
   function inForce(key) {
     const s = settings();
     if (key === 'slowIssues') return s.slowIssues === true ? 'true' : 'false';
+    if (key === 'historyStart') return typeof s.historyStart === 'string' ? s.historyStart : '';
     // Auto-file: rules-on (the switch), guard:<guard>, rule:<setting>:<rule name>.
     const said = (v) => (v === undefined || v === null ? '' : String(v));
     if (key === 'rules-on') return rules().on === true ? 'true' : 'false';
