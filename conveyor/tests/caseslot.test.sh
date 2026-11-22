@@ -43,3 +43,21 @@ t_caseslot() {
   ( CASE=slotnext; run_case ) > "$d/out" 2>&1; slot_free
   grep -qx 'ok slotnext' "$d/out" || fail "$(cat "$d/out")"
 }
+
+# Issue 1310. Bug it catches: the engine's workers wrote no record of their cases, so the loop read each case's result
+# and file from the output, which workers running at once interleave, and could not tell a runner whose filter ran no
+# case from one that writes no records. The lines lib.sh runs as the runner starts, in a loop's test step (a log
+# folder, CONVEYOR_TEST_FILE), say that it writes them, and two workers at once (run_case) each write their case's
+# record: its file, name, result and seconds.
+t_caserecords() {
+  local d=$T/$CASE got
+  mkdir -p "$d/in" "$d/log"
+  t_rec_pass() { :; }; t_rec_fail() { return 1; } # no case of the runner's (no t_ name has a _)
+  # shellcheck disable=SC2034 # read by the lines of lib.sh the eval runs and by run_case
+  ( CONVEYOR_TEST_LOG=$d/log CONVEYOR_TEST_FILE=conveyor/tests/x.test.sh T=$d/in
+    eval "$(sed -n '/^CASE_RUNFILE=/,/runner\.\$\$"; }$/p' "$SRC/tests/lib.sh")"
+    ( CASE=rec_pass; run_case ) & ( CASE=rec_fail; run_case ) & wait ) > "$d/out" 2>&1
+  got=$(cat "$d/log/results/"* | jq -sc 'map(if has("sec") then .sec |= (type == "number" and . >= 0) else . end) | sort_by(.case // "")')
+  [ "$got" = '[{"file":"conveyor/tests/x.test.sh"},{"file":"conveyor/tests/x.test.sh","case":"rec_fail","result":"fail","sec":true},{"file":"conveyor/tests/x.test.sh","case":"rec_pass","result":"ok","sec":true}]' ] \
+    || fail "the runner of conveyor/tests/x.test.sh, its cases rec_pass and rec_fail run at once, wrote these records: $got ($(cat "$d/out"))"
+}

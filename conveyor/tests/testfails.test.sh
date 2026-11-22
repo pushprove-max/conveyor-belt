@@ -25,7 +25,7 @@ frameread() { sed -n '/^FRAMERX=/p; /^PYFRAMERX=/p; /^FRAMEJQ=/p; /^atsource() {
 allfails() { # <exit> [<testTimeout>]
   local w=$T/$CASE/wt; mkdir -p "$w.testlog"
   (cd "$T/$CASE" && CONVEYOR_TEST_LOG=$w.testlog bash cmd > "$w.test" 2>&1 < /dev/null)
-  ( eval "$(frameread; sed -n '/^testfails() {/,/^}/p' "$SRC/lib/testrun.sh"; sed -n '/^testlogs() {/,/^}/p' "$SRC/lib/session.sh")"
+  ( eval "$(frameread; sed -n '/^testfails() {/,/^}/p; /^RECJQ=/p' "$SRC/lib/testrun.sh"; sed -n '/^testlogs() {/,/^}/p' "$SRC/lib/session.sh")"
     packget() { [ -n "${PACKCMD:-}" ] && printf -v "$2" '%s' "$PACKCMD"; } # the pack's test.command: $PACKCMD, else none
     TEST_TIMEOUT=${2:-600} testfails "$w.test" "$1" )
 }
@@ -48,6 +48,24 @@ echo "-- ok f.test.mjs" >> "$CONVEYOR_TEST_LOG/a.log"
 EOF
   f=$(allfails 0 | jq -c .passcases) || fail "the passed cases could not be read"
   [ "$f" = '[{"file":"f.test.mjs","cases":["a b, c","d e"]}]' ] || fail "node's ✔ and TAP's ok lines are not the file's passed cases: $f"
+}
+# Done when 1 (#1310). Bug it catches: which file a case is of was read from the output alone, so two workers whose
+# output interleaves gave a case of one file to the other (a wrong red of a file that did not fail it) and a passed
+# case to the wrong file. Two runners at once, a.test.sh and b.test.sh each failing one case and passing one, print
+# both `== ` lines before any case; each case's record (results/: tests/lib.sh run_case) names its file, and the
+# failures and passes are the records', each failure line still the output's.
+t_testfailsrecords() {
+  mkdir -p "$T/$CASE"; cat > "$T/$CASE/cmd" <<'EOF'
+l=$CONVEYOR_TEST_LOG; mkdir -p "$l/results"
+printf '%s\n' '== a.test.sh' '-- FAIL a.test.sh' > "$l/a.log"; printf '%s\n' '== b.test.sh' '-- FAIL b.test.sh' > "$l/b.log"
+for r in 'a.test.sh one fail' 'a.test.sh two ok' 'b.test.sh three fail' 'b.test.sh four ok'; do
+  set -- $r; jq -cn --arg f "$1" --arg c "$2" --arg r "$3" '{file: $f, case: $c, result: $r, sec: 0.1}' > "$l/results/$2"
+done
+printf '%s\n' '== a.test.sh' '== b.test.sh' 'FAIL [one]: boom' 'ok two' 'FAIL [three]: bang' 'ok four'; exit 1
+EOF
+  f=$(allfails 1 | jq -c '[[.files[] | {file, cases: [.cases[] | [.name, .line]]}], (.okcases | sort_by(.file)), .passed]') || fail "the failures could not be read"
+  [ "$f" = '[[{"file":"a.test.sh","cases":[["one","FAIL [one]: boom"]]},{"file":"b.test.sh","cases":[["three","FAIL [three]: bang"]]}],[{"file":"a.test.sh","cases":["two"]},{"file":"b.test.sh","cases":["four"]}],[]]' ] \
+    || fail "two workers' interleaved output (cmd: $(cat "$T/$CASE/cmd")) gave cases not as their records say: $f"
 }
 # Done when 4 (#1084). Bug it catches: a test that fails with no message of its own (node's assert.ok(false): its
 # report printed only `ERR_ASSERTION actual: false expected: true`) gave a failure report with no command or line, so

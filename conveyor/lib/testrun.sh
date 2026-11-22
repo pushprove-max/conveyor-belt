@@ -71,8 +71,8 @@ testfails() { # <test output file> <exit> [the pack's field of the run's command
         elif $b then .files |= (. + [$b] | unique) | (if .order[-1] | index($b) then . else .order[-1] += [$b] end) | .open[-1] += [$b]
         elif $e then .files |= (. + [$e.f] | unique) | .open[-1] -= [$e.f] | if $e.r == "FAIL" and (.failed | index($e.f) | not) then .failed += [$e.f] else . end
         elif $n then .n += ($n | tonumber) else . end)') || return 1
-  out=$(sed 's/\x1b\[[0-9;]*m//g' "$1" 2>/dev/null | tr -d '\000\r' | jq -cRn --arg rc "$2" --arg sec "$TEST_TIMEOUT" --arg cmd "$cmd" --slurpfile log <(printf '%s' "$log") \
-    --arg rx "${FRAMERX:-}" --arg pyrx "${PYFRAMERX:-}" --arg wd "$wd" --arg wdr "$wdr" '$log[0] as $log | '"$named ${FRAMEJQ:-def frame: null; def pyend(\$l): false;}"'
+  out=$(sed 's/\x1b\[[0-9;]*m//g' "$1" 2>/dev/null | tr -d '\000\r' | jq -cRn --arg rc "$2" --arg sec "$TEST_TIMEOUT" --arg cmd "$cmd" --slurpfile log <(printf '%s' "$log") --slurpfile rec <(cat "${1%.test}.testlog"/results/* 2>/dev/null | jq -cR 'fromjson? // empty') \
+    --arg rx "${FRAMERX:-}" --arg pyrx "${PYFRAMERX:-}" --arg wd "$wd" --arg wdr "$wdr" '$log[0] as $log | '"$named ${FRAMEJQ:-def frame: null; def pyend(\$l): false;} ${RECJQ:-def recs(\$r; \$l): .;}"'
     def cut: if length <= 200 then . else (.[0:201] | sub("\\s+\\S*$"; "")) as $w | if ($w | length) > 200 then .[0:200] else $w end end;
     def failcase: [capture("^FAIL \\[(?<c>[^\\]]+)\\]: "), capture("^\\s*not ok [0-9]+ (- )?(?<c>.*\\S)") , capture("^\\s*✖ (?<c>.+) \\([0-9.]+ms\\)$")][0].c;
     (if $log.files == [] and $cmd != "" then $cmd else null end) as $only
@@ -138,7 +138,7 @@ testfails() { # <test output file> <exit> [the pack's field of the run's command
             | .files |= map(if .file == $file and (any(.cases[]; .name == $c) | not) then .cases += [{name: $c, line: ($l | sub("^\\s+"; "") | cut)}] else . end))
         else . end)
       | reduce $hs[$k][] as [$r, $i] (.; .seen["\($r) \($i)"] = $k | if $i > .at[$r] then .cur = $log.order[$r][$i] | .at[$r] = $i else . end))
-    | ($log.files - $log.failed - ($log.open | flatten)) as $passed | .files as $fs
+    | recs($rec; $log) | ($log.files - $log.failed - ($log.open | flatten)) as $passed | .files as $fs
     | {of: ($log.n // ($log.files | length | if . == 0 then null else . end)),
        files: (.files | map((.cases |= map(. + if $at[.name] then {at: $at[.name]} else {} end)) + if .cases == [] and $fat[.file] then {at: $fat[.file]} else {} end)),
        timeout: (if $rc == "124" then {sec: ($sec | tonumber? // $sec), file: ($only // ($log.open | flatten | last))} else null end),
@@ -149,9 +149,14 @@ testfails() { # <test output file> <exit> [the pack's field of the run's command
   [[ $out == *'"at":['* ]] || { printf '%s\n' "$out"; return 0; }
   atsource "$wd" <<<"$out"
 }
+# What testfails() reads of the records of the cases ($rec: {file, case, result, sec} lines in results/ of the log
+# folder, tests/lib.sh run_case): a file the logs name that has any has the cases they say failed and passed, not those
+# the output's lines gave it, each failure with its line of the output when it has one. With no RECJQ (no globals of
+# this file) the records are not read.
+RECJQ='def recs($rec; $log): [$rec[] | objects | select((.case | type) == "string" and IN(.file; $log.files[]) and IN(.result; "ok", "fail"))] as $rd | reduce ([$rd[].file] | unique)[] as $f (.; .oks[$f] = [$rd[] | select(.file == $f and .result == "ok") | .case] | [.files[].cases[]] as $tc | .files |= map(if .file == $f then .cases = ([$rd[] | select(.file == $f and .result == "fail") | .case] | unique | map(. as $c | {name: $c, line: ([$tc[] | select(.name == $c) | .line][0] // "FAIL [\($c)]: its record says it failed")})) else . end));'
 
 # A test output that is no run's (the loop's own words for why nothing ran): the logs and times of the run before are not its.
-norun() { rm -rf "$1.testlog" "$1.first" "$1.testlist"; TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; printf '%s\n' "$2" > "$1.test"; } # <worktree> <text>
+norun() { rm -rf "$1.testlog" "$1.first" "$1.testlist" "$1.noresult"; TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; printf '%s\n' "$2" > "$1.test"; } # <worktree> <text>
 # A run's output and the logs it wrote, copied as one: what failed is read from both (testfails()); and its first
 # run's record when it went again (tests()).
 keeprun() { # <worktree> <output file to> <log folder to> <first run's record to>
@@ -295,7 +300,7 @@ slowoff() { # <worktree>
 # run left <worktree>.stop.
 tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alone]
   local cmd at rc r p='' b='' t='' f o l=() w=$SECONDS t0 ob mw off kp ko ka cw='' x RUNOFF='' TEST_BEFORE='' LISTNONE='' CAPNOTE='' TEST_CASES='' TEST_GIVEN=${TEST_GIVEN:-}
-  TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; TEST_REFUSED=''; TEST_FILES=''; rm -f "$1.testlist" "$1.stop" "$1.wide"
+  TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; TEST_REFUSED=''; TEST_FILES=''; rm -f "$1.testlist" "$1.stop" "$1.wide" "$1.noresult"
   # The files the run before timed (testlist.sh timed()): kept below when this run keeps its passes and so may not run them.
   mapfile -t l < <(testlogs "$1"); o=$({ cat "$1.oldtimes" "$1.times" "$1.reported"; [ ${#l[@]} = 0 ] || grep -h '^TESTRUN sec' "${l[@]}"; } 2>/dev/null)
   # The commit the last run's list was tested on, and a merge in doubt (<worktree>.whole: card(), settle()), before
@@ -368,7 +373,7 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
   # The files its list keeps whole as passed (`pass` lines): not run. A file it runs only some cases of is run.
   kp=$(awk -F'\t' '$1 == "pass" {print $2}' "$1.rerun" 2>/dev/null)
   testonce "$1" "$cmd"; rc=$?; cachekeep "$1"; runnernote "$RUNOFF" >> "$1.test"
-  if [ ! -s "$1.wide" ] && [ $rc != 0 ] && [ -n "$p" ] && f=$(testfails "$1.test" "$rc") && rerunlist "$1" "$p" "$f" "$b" "$t" \
+  if [ ! -s "$1.wide" ] && [ $rc != 0 ] && [ -n "$p" ] && f=$(testfails "$1.test" "$rc") && f=$(nopass "$1" "$f") && rerunlist "$1" "$p" "$f" "$b" "$t" \
     && { [ -z "$off" ] || printf '%s\n' "$off" >> "$1.rerun"; }; then
     # Its output's end (the last 60 lines, as a failed test line's tail, card()) goes with them: the run again
     # overwrites <worktree>.test, and a pass on re-run is the only record of the flaky failure (FAILURE, testfiles.sh).
@@ -384,9 +389,13 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
       # shellcheck disable=SC2034 # TEST_BEFORE is read by watch() in lib/session.sh
       TEST_BEFORE=$((SECONDS - w)); testonce "$1" "$cmd"; rc=$?; cachekeep "$1"; runnernote "$RUNOFF" >> "$1.test"
     else rc=1; fi
-    [ $rc = 0 ] || { f=$(testfails "$1.test" "$rc") && rerunlist "$1" "$p" "$f" "$b" "$t"; } || rm -f "$1.rerun"
+    [ $rc = 0 ] || { f=$(testfails "$1.test" "$rc") && f=$(nopass "$1" "$f") && rerunlist "$1" "$p" "$f" "$b" "$t"; } || rm -f "$1.rerun"
   fi
   TEST_RUN=$((SECONDS - w))
+  # A card's run that passed with a file whose filter ran no case (nocases()) gave no result: its exit is 1 and
+  # <worktree>.noresult says why (voidrun()). Its list stays, and nothing of it is a pass on re-run (flakyrun(): f).
+  # In a run that failed, such a file is no pass either: nopass() above.
+  [ $rc != 0 ] || [ -n "${2:-}" ] || ! x=$(nocases "$1" | awk -F'\t' 'NR == 1 { c = $2; for (i = 3; i <= NF; i++) c = c ", " $i; print $1 ": its filter (" c ") ran no case, and the run passed" }' | grep .) || { printf '%s\n' "$x" > "$1.noresult"; printf 'conveyor: no result: %s\n' "$x" >> "$1.test"; rc=1; f=''; }
   # A card's run: the changed lines its coverage report says no test reached (testlist.sh uncovered()), the first run's report
   # (testlist.sh covkeep()) and a run again's together.
   [ -n "${2:-}" ] || uncovered "$1" "$t0"; rm -rf "$1.covfirst"
@@ -703,11 +712,13 @@ noresult() { # <worktree> <exit> <file>...
 # itself, not a test, ran out of time), or its runner wrote logs that name nothing it ran (no `TESTRUN`, `== ` or `-- `
 # line), or its only failure is the test command itself (testfails()'s name for a run that logged no file, when its
 # output names no failing case either): the command names no test. The loop's own file in the log folder (cache:
-# testlist.sh cacheoff()) is none of the runner's. Prints why; fails when the run passed or gave a result.
+# testlist.sh cacheoff()) is none of the runner's. Or it passed with a file whose filter ran no case (nocases():
+# tests() wrote <worktree>.noresult and made its exit 1). Prints why; fails when the run passed or gave a result.
 voidrun() { # <worktree> <exit>
   local l=() f cmd
   [ "$2" != 0 ] || return 1
   [ "$2" -le 128 ] || { echo "exit $2: the run was killed by a signal"; return 0; }
+  [ ! -s "$1.noresult" ] || { cat "$1.noresult"; return 0; }
   mapfile -t l < <(testlogs "$1" | grep -v '/cache$')
   if [ "$2" = 124 ]; then
     f=$(testfails "$1.test" 124 | jq -r '.timeout.file // empty' 2>/dev/null)
@@ -722,6 +733,29 @@ voidrun() { # <worktree> <exit>
   packget test.command cmd 2>/dev/null && [ -n "$cmd" ] && testfails "$1.test" "$2" \
     | jq -e --arg c "$cmd" '.files != [] and all(.files[]; .file == $c and .cases == [])' > /dev/null 2>&1 || return 1
   echo "exit $2: the run named no test that failed, only the test command"
+}
+# Each file of a run whose filter ran no case: its list (<worktree>.rerun) names cases of it (`fail<TAB><file>
+# <TAB><case>` lines, and no such line of it with no case), the logs say it ended ok, its runner said it writes a
+# record of each case it runs (a record {file} with no case in results/ of the log folder: tests/lib.sh; or that its
+# filter ran none: lib/filerun.sh), and no record of a case is of it (testfails()). A runner may exit 0 on a filter
+# that matches no case, and that is no pass. A file whose runner writes no records is read as before. Prints
+# `<file><TAB><case><TAB><case>...` for each; fails when there is none.
+nocases() { # <worktree>
+  local rs l=()
+  rs=$(cat "$1.testlog"/results/* 2>/dev/null | jq -rR 'fromjson? | objects | select(.file | type == "string") | [if .case == null then "runner" else "case" end, .file] | @tsv')
+  [ -n "$rs" ] && [ -s "$1.rerun" ] || return 1
+  mapfile -t l < <(testlogs "$1"); [ ${#l[@]} -gt 0 ] || return 1
+  awk -F'\t' 'FILENAME == ARGV[1] { if ($1 == "fail" && $2 != "") { if ($3 == "") w[$2] = 1; else c[$2] = c[$2] "\t" $3 }; next }
+    FILENAME == ARGV[2] { if ($1 == "runner") rn[$2] = 1; else r[$2] = 1; next }
+    /^-- ok / { f = substr($0, 7); if ((f in c) && (f in rn) && !(f in w) && !(f in r) && !s[f]++) print f c[f] }' \
+    "$1.rerun" <(printf '%s\n' "$rs") "${l[@]}" | grep .
+}
+# A failed run's record (testfails()) with each file nocases() names out of its passes and among its failures, with
+# the cases its filter named: such a file passed nothing, so the list (rerunlist()) keeps its `fail` lines for the run
+# again, not a `pass` line.
+nopass() { # <worktree> <the run's record>
+  jq -c --rawfile z <(nocases "$1") '[$z | split("\n")[] | select(. != "") | split("\t")] as $z | .passed -= [$z[][0]]
+    | .files += [$z[] | {file: .[0], cases: [.[1:][] | {name: ., line: "its filter ran no case"}]}]' <<<"$2"
 }
 # One run of the command <cmd> in the worktree, on the slot tests() holds. The report file an earlier run wrote
 # (<worktree>.report, reportask()) goes first: a runner that adds to it (tools/mochatimes.cjs) would otherwise give the
@@ -763,38 +797,4 @@ reportask() { # <worktree> [files]
   [ -z "$e" ] || mapfile -t REPORT_ENV < <(jq -r --arg f "\"$1.report\"" --arg m "\"$HERE/tools/mochatimes.cjs\"" 'objects | to_entries[]
     | select((.key | test("^[A-Za-z_][A-Za-z0-9_]*$")) and (.value | type == "string"))
     | "\(.key)=\(env[.key] // "" | if . == "" then "" else . + " " end)\(.value | gsub("<file>"; $f) | gsub("<mochatimes>"; $m) | gsub("\n"; " "))"' <<<"$e")
-}
-# The list of the card's last run (testlist.sh rerunlist()) for its run now: kept as it is for the same staged change on the same
-# HEAD; for a change made on the same HEAD (a fix session's), with a line `changed\t<file>` for each file whose content
-# differs between the tree last tested and the tree now (the two trees compared, not the two patches), so the command
-# runs their tests beside what had not passed. On another HEAD (the change moved onto a newer main, or a retried card's
-# kept list on a main that moved since: the owner, 2026-11-14), `changed` lines for the files of the card's change, as
-# it was or is now, whose content differs between the two trees, and a line `main\t<file>` for each file main changed
-# between the HEAD last tested and HEAD now, whose tests the command runs when its selection for the card's change
-# holds them too, and a line `from\t<the HEAD last tested>`, so the command can read what main changed in each (a
-# change of text alone runs only the tests that hold the text: test-changed.sh, issue 512). Fails (1), and the whole selection would run, when there is no list, the change has no id, or the
-# trees or HEADs cannot be compared, RERUN_WHY saying which (tests() refuses such a full run unless it is allowed).
-# Fails (2), the whole selection to run, when HEAD moved and a file of the card's change that main did not change
-# differs: the session that brought the change onto main (the rebuild, the port) edited it outside what main changed,
-# a merge in doubt.
-rerunsince() { # <worktree> <the staged change's id> <HEAD> <tree>
-  local ot ob ch m='' c
-  RERUN_WHY='no list of what the last run passed'
-  [ -n "$2" ] && [ -s "$1.rerun" ] || return 1
-  ob=$(sed -n 's/^base\t//p' "$1.rerun"); ot=$(sed -n 's/^tree\t//p' "$1.rerun")
-  [ "$(sed -n '1s/^change\t//p' "$1.rerun")" != "$2" ] || [ "$ob" != "$3" ] || return 0
-  RERUN_WHY="the last run's list names no tree or commit to compare with"
-  [ -n "$3" ] && [ -n "$4" ] && [ -n "$ot" ] && [ -n "$ob" ] || return 1
-  RERUN_WHY="the tree last tested ($ot) cannot be compared with the tree now"
-  ch=$(treediff "$1" "$ot" "$4") || return 1
-  if [ "$ob" != "$3" ]; then
-    RERUN_WHY="the commit last tested on ($ob) cannot be compared with HEAD"
-    m=$(treediff "$1" "$ob" "$3") && c=$(treediff "$1" "$ob" "$ot" && treediff "$1" "$3" "$4") || return 1
-    ch=$(grep -xF -f <(grep . <<<"$c") <<<"$ch")
-    ! grep -vxF -f <(grep . <<<"$m") <<<"$ch" | grep -q . || return 2
-  fi
-  RERUN_WHY="the list for this run could not be written"
-  { printf 'change\t%s\nbase\t%s\ntree\t%s\n' "$2" "$3" "$4"; [ "$ob" = "$3" ] || printf 'from\t%s\n' "$ob"
-    grep -E $'^(pass|ok|fail|shared)\t' "$1.rerun"; awk 'length { print "changed\t" $0 }' <<<"$ch"; awk 'length { print "main\t" $0 }' <<<"$m"; } > "$1.rerun.new" \
-    && mv -f "$1.rerun.new" "$1.rerun"
 }

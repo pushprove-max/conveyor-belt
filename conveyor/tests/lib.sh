@@ -40,6 +40,12 @@ unset CONVEYOR_RELEASE_MACHINE
 # time limit a case checks is the same on a busy machine as on an idle one.
 CASE_LOAD=$(awk -v f="${CONVEYOR_LOAD_FACTOR:-1}" 'BEGIN { f += 0; if (f < 1) f = 1; if (f > 3) f = 3; print f }')
 export CONVEYOR_LOAD_FACTOR=1
+# The file this runner runs (CONVEYOR_TEST_FILE, which the run names; else the runner), for its cases' records
+# (run_case). In a loop's test step it says, as it starts, that it writes them: a record {file} with no case in
+# results/ of the run's log folder, so the loop reads a file of it whose filter ran no case as no result (testrun.sh
+# nocases()); a file whose runner wrote no such record is never read so.
+CASE_RUNFILE=${CONVEYOR_TEST_FILE:-${0#./}}
+[ ! -d "${CONVEYOR_TEST_LOG:-}" ] || { mkdir -p "$CONVEYOR_TEST_LOG/results" && jq -cn --arg f "$CASE_RUNFILE" '{file: $f}' > "$CONVEYOR_TEST_LOG/results/runner.$$"; }
 # A time limit a case checks (seconds, or ms): <limit> times CASE_LOAD, rounded up, and under <below> when it is given,
 # the wait the check tells a run apart from (a hang, a sleep), so on a busy machine the check still fails a run that
 # waited it out; never under <limit>. A failure names the factor: "(limit <it>: <limit> times the load factor <f>)".
@@ -345,6 +351,11 @@ os.execvp(sys.argv[2], sys.argv[2:])' "$BASHPID")
   # says "timed out" for it (fulltest.sh suiteprog()).
   [ -z "$mark" ] || [ ! -e "$T/$CASE.late" ] || { mkdir -p "${mark%/*}/timedout" && : > "${mark%/*}/timedout/$CASE"; }
   [ -z "$mark" ] || { end=failed; [ "$(cat "$T/$CASE.rc" 2>/dev/null)" != 0 ] || end=ok; mkdir -p "${mark%/*}/$end" && : > "${mark%/*}/$end/$CASE"; rm -f "$mark"; }
+  # Its record, which the loop reads before the output's lines (testrun.sh testfails()): {file, case, result, sec},
+  # its file CASE_RUNFILE, in a file of its own under results/, so no other worker's output can mix with it or take
+  # its case.
+  [ -z "$mark" ] || { mkdir -p "$CONVEYOR_TEST_LOG/results" && jq -cn --arg f "$CASE_RUNFILE" --arg c "$CASE" --arg r "$end" \
+    --arg s "$(cat "$T/$CASE.sec" 2>/dev/null)" '{file: $f, case: $c, result: (if $r == "ok" then "ok" else "fail" end), sec: (($s | tonumber? // 0) / 1e6)}' > "$CONVEYOR_TEST_LOG/results/$CASE"; }
   [ -e "$T/$CASE.rc" ] || echo "FAIL [$CASE]: the case's keeper did not start, or was ended before the case was: $(cat "$T/$CASE.keeper" 2>/dev/null)" >> "$T/$CASE.out"
   [ "$(cat "$T/$CASE.rc" 2>/dev/null)" != 0 ] || echo "ok $CASE" >> "$T/$CASE.out"
   flock "$T/print.lock" cat "$T/$CASE.out"

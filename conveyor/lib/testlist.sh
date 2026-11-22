@@ -417,3 +417,38 @@ testclock() { # <timeout's pid> <turn wait file>
     kill -ALRM "$1"; return
   done
 }
+# The list of the card's last run (testlist.sh rerunlist()) for its run now: kept as it is for the same staged change on the same
+# HEAD; for a change made on the same HEAD (a fix session's), with a line `changed\t<file>` for each file whose content
+# differs between the tree last tested and the tree now (the two trees compared, not the two patches), so the command
+# runs their tests beside what had not passed. On another HEAD (the change moved onto a newer main, or a retried card's
+# kept list on a main that moved since: the owner, 2026-11-14), `changed` lines for the files of the card's change, as
+# it was or is now, whose content differs between the two trees, and a line `main\t<file>` for each file main changed
+# between the HEAD last tested and HEAD now, whose tests the command runs when its selection for the card's change
+# holds them too, and a line `from\t<the HEAD last tested>`, so the command can read what main changed in each (a
+# change of text alone runs only the tests that hold the text: test-changed.sh, issue 512). Fails (1), and the whole selection would run, when there is no list, the change has no id, or the
+# trees or HEADs cannot be compared, RERUN_WHY saying which (tests() refuses such a full run unless it is allowed).
+# Fails (2), the whole selection to run, when HEAD moved and a file of the card's change that main did not change
+# differs: the session that brought the change onto main (the rebuild, the port) edited it outside what main changed,
+# a merge in doubt.
+# shellcheck disable=SC2034 # RERUN_WHY is read by tests() in lib/testrun.sh
+rerunsince() { # <worktree> <the staged change's id> <HEAD> <tree>
+  local ot ob ch m='' c
+  RERUN_WHY='no list of what the last run passed'
+  [ -n "$2" ] && [ -s "$1.rerun" ] || return 1
+  ob=$(sed -n 's/^base\t//p' "$1.rerun"); ot=$(sed -n 's/^tree\t//p' "$1.rerun")
+  [ "$(sed -n '1s/^change\t//p' "$1.rerun")" != "$2" ] || [ "$ob" != "$3" ] || return 0
+  RERUN_WHY="the last run's list names no tree or commit to compare with"
+  [ -n "$3" ] && [ -n "$4" ] && [ -n "$ot" ] && [ -n "$ob" ] || return 1
+  RERUN_WHY="the tree last tested ($ot) cannot be compared with the tree now"
+  ch=$(treediff "$1" "$ot" "$4") || return 1
+  if [ "$ob" != "$3" ]; then
+    RERUN_WHY="the commit last tested on ($ob) cannot be compared with HEAD"
+    m=$(treediff "$1" "$ob" "$3") && c=$(treediff "$1" "$ob" "$ot" && treediff "$1" "$3" "$4") || return 1
+    ch=$(grep -xF -f <(grep . <<<"$c") <<<"$ch")
+    ! grep -vxF -f <(grep . <<<"$m") <<<"$ch" | grep -q . || return 2
+  fi
+  RERUN_WHY="the list for this run could not be written"
+  { printf 'change\t%s\nbase\t%s\ntree\t%s\n' "$2" "$3" "$4"; [ "$ob" = "$3" ] || printf 'from\t%s\n' "$ob"
+    grep -E $'^(pass|ok|fail|shared)\t' "$1.rerun"; awk 'length { print "changed\t" $0 }' <<<"$ch"; awk 'length { print "main\t" $0 }' <<<"$m"; } > "$1.rerun.new" \
+    && mv -f "$1.rerun.new" "$1.rerun"
+}

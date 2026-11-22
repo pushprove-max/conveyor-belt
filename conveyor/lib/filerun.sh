@@ -172,4 +172,15 @@ esac
 # The pack's report args go right after the runner's own words, before the file and the filter.
 a=("${b[@]}" "${extra[@]}" "${t[@]}")
 if [ -n "$which" ]; then printf '%s' "$d"; printf '\t%s' "${a[@]}"; printf '\n'; exit 0; fi
+# node --test exits 0 when its filter matches no case of the file: its summary counts no test, or it names the file
+# itself as the one test that ran. In a loop's run (CONVEYOR_TEST_LOG), that writes the record {file} with no record
+# of a case in results/ of the log folder, so the loop reads the file as one whose filter ran no case (testrun.sh
+# nocases()), not as a pass.
+if [ "${b[0]}" = node ] && [ ${#cs[@]} != 0 ] && [ -d "${CONVEYOR_TEST_LOG:-}" ]; then
+  o=$(mktemp) || exit 2
+  (cd "$d" && exec "${a[@]}") 2>&1 | tee "$o"; x=${PIPESTATUS[0]}
+  [ "$x" != 0 ] || ! awk -v r="$r" '$0 == "# tests 0" || $0 == "ℹ tests 0" || $0 == "ok 1 - " r || index($0, "✔ " r " (") == 1 { z = 1 } END { exit !z }' "$o" \
+    || { mkdir -p "$CONVEYOR_TEST_LOG/results" && jq -cn --arg f "${CONVEYOR_TEST_FILE:-$f}" '{file: $f}' > "$CONVEYOR_TEST_LOG/results/filerun.$$"; }
+  rm -f "$o"; exit "$x"
+fi
 cd "$d" && exec "${a[@]}"

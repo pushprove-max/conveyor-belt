@@ -448,11 +448,15 @@ run's as well as a run again's, says why each file ran in `why`, `{"<file>": [re
 A test step whose run gives no result proves nothing. This is a run that a signal stopped (for example, the service
 stopped or restarted), a run whose time ran out with no test file running, or a run that wrote logs in
 `CONVEYOR_TEST_LOG` that name no test (no `TESTRUN`, `== ` or `-- ` line). It is also a failed run that logged no
-test file and whose output names no failing case, so its only failure is the test command itself. Nothing of that run goes to main, to
+test file and whose output names no failing case, so its only failure is the test command itself. A card's run that
+passes is also a run with no result when its list names cases of a file, the file's runner writes case records (see
+below), and no record is of that file: the filter ran no case. Nothing of a run with no result goes to main, to
 `mainred.json`, to a wait for main or to a fix session. The step's `test` line has the reason `no result: <why>`, and
 the test step runs again. This is also true for a card that a restarted loop adopted. After the third such run in a
 row, the card is blocked with the reason "the changed tests gave no result 3 times in a row". A run that gives a
-result starts the count again.
+result starts the count again. A run that fails is a run with a result, also when a file's filter ran no case: that
+file is not kept as passed, and its cases run again, but the run's other failures go on to main and the fix session as
+usual.
 
 Before a failure goes to the fix session, what still did not pass after the run again runs on main (a fix session cannot repair main or the
 machine): in a worktree of main's commit as it is now, on a test
@@ -577,7 +581,12 @@ a newer main, the file has a line `main<TAB><file>` for each file main changed s
 command runs the tests it selects for those files that its selection for the card's change holds too. A command that
 ignores the file runs its whole selection again; one that reads `pass` lines but not `main` lines keeps passes main
 may have broken. Files and cases are read from the logs the command writes to the folder `CONVEYOR_TEST_LOG` names:
-`== <file>` as a file begins, `-- ok|FAIL <file>` as it ends.
+`== <file>` as a file begins, `-- ok|FAIL <file>` as it ends. A runner can also write a record of each case it runs:
+one JSON line `{"file": "<file>", "case": "<case>", "result": "ok"|"fail", "sec": <seconds>}`, in a file of its own
+in the folder `results` of that folder, and a line `{"file": "<file>"}` there as it starts. For a file with records,
+Conveyor reads which cases failed and passed from the records, not from the output. For a file with none, it reads
+the output. The engine's own runner writes these records. When a pack sets no `test.fileCommand` and a Node file's
+filter runs no case, Conveyor's own runner writes the line `{"file": "<file>"}` and no case record for that file.
 
 ### The list of tests a card's run is given
 

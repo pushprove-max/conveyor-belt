@@ -64,6 +64,24 @@ t_filerunnode() {
   [ "$FRRC" = 2 ] && [ -z "$FRGOT" ] && grep -qxF 'filerun: packages/web/gone.test.js: no such test file' "$T/$CASE/out" \
     || fail "a path that is no file ran, or did not fail naming it (exit $FRRC): [$FRGOT] $(cat "$T/$CASE/out")"
 }
+# Issue 1310. Bug it catches: node --test exits 0 when its filter matches no case of the file, and the built-in runner
+# wrote no record, so a card's run again of a renamed failed case ran none and passed. In a loop's run (a log folder),
+# a filtered run whose output counts no test (`ℹ tests 0`, as older Node prints it) or names the file itself as its one
+# test (`✔ a.test.js (...)`, as newer Node does) writes the record {file} with no case (testrun.sh nocases() reads it
+# as no result); one that ran a case writes none, so its pass stands.
+t_filerunnodenone() {
+  local l=$T/$CASE/log o got
+  frsetup 'packages/web/package.json={"name": "web"}' 'packages/web/a.test.js=x'
+  for o in 'ℹ tests 0' '✔ a.test.js (1.5ms)|ℹ tests 1' '✔ adds (0.4ms)|ℹ tests 1'; do
+    rm -rf "$l"; mkdir -p "$l"; printf '#!/usr/bin/env bash\nprintf "%%s\\n" %q | tr "|" "\\n"\n' "$o" > "$T/$CASE/bin/node"
+    CONVEYOR_TEST_LOG=$l CONVEYOR_TEST_FILE=packages/web/a.test.js fr packages/web/a.test.js "$(printf 'fail\tpackages/web/a.test.js\tadds')"
+    got=$(cat "$l"/results/* 2>/dev/null)
+    case $o in
+      *adds*) [ "$FRRC" = 0 ] && [ -z "$got" ] || fail "node's output [$o], a filter that ran its case, gave exit $FRRC and the records [$got]" ;;
+      *) [ "$FRRC" = 0 ] && [ "$got" = '{"file":"packages/web/a.test.js"}' ] || fail "node's output [$o], a filter that ran no case, gave exit $FRRC and the records [$got]: $(cat "$T/$CASE/out")" ;;
+    esac
+  done
+}
 
 # Bug it catches: a vitest package ran its file under node --test, or by a name vitest reads as part of a path (which
 # runs every file whose path holds it). vitest is given the file's whole path.

@@ -80,3 +80,32 @@ t_voidcommand() {
   esac
   [ ! -e "$ST/mainred.json" ] || fail "a red record whose only case is the test command was written: $(cat "$ST/mainred.json")"
 }
+
+# Done when 2 (#1310). Bug it catches: a run whose filter matched no case (a runner may exit 0 on a name filter that
+# matches none of its cases) passed, so the card's test step said its failed case passed on re-run. Each file's runner
+# says it writes a record of each case it runs (results/ of the log folder, as tests/lib.sh does), and here writes
+# none, as the stub runs no case: c.test's case three fails in the first run, and the run again, given that case
+# alone, runs no case and exits 0. tests() gives no result, not a pass: exit 1, and voidrun()'s reason names the file
+# and its filter. rerunwt and rerunstep (rerun.test.sh) run tests() on the card's worktree, as card() runs it.
+t_voidnocase() {
+  rerunwt 'echo two > a.txt' '1 fail three'
+  # shellcheck disable=SC2016 # expanded where the test command sources it
+  echo 'mkdir -p "$CONVEYOR_TEST_LOG/results" && jq -cn --arg f "$CONVEYOR_TEST_FILE" "{file: \$f}" > "$CONVEYOR_TEST_LOG/results/runner.$$"; [ "$n" != 2 ] || exit 0' > "$STUB/pre"
+  local w=$T/$CASE/cards/c7 got
+  ! rerunstep || fail "a run again whose filter of c.test (three) ran no case passed: $(cat "$w.test")"
+  got=$(eval "$(sed -n '/^voidrun() {/,/^}/p' "$SRC/lib/testrun.sh")"; voidrun "$w" 1) \
+    && [ "$got" = "c.test: its filter (three) ran no case, and the run passed" ] && [ "$(sed -n 's/^fail\t//p' "$STUB/rerun.2" | tr '\t' :)" = c.test:three ] \
+    || fail "the run again given c.test's case three alone (list: $(tr '\t\n' ':|' < "$STUB/rerun.2" 2>&1)) gave no reason of no result: '$got' ($(cat "$w.test"))"
+}
+# Issue 1310. Bug it catches: in a run again that failed (a.test's case one fails again), a file whose filter ran no
+# case (c.test, given its failed case three, runs none and exits 0) went into the list as passed (`pass c.test`), so
+# the next run left it out and the card could land with case three never run. The list keeps c.test's `fail` line.
+t_voidnocasefail() {
+  rerunwt 'echo two > a.txt' '1 fail one' '1 fail three' '2 fail one'
+  # shellcheck disable=SC2016 # expanded where the test command sources it
+  echo '[ "$n" != 2 ] || [ "$CONVEYOR_TEST_FILE" != c.test ] || { mkdir -p "$CONVEYOR_TEST_LOG/results" && jq -cn --arg f c.test "{file: \$f}" > "$CONVEYOR_TEST_LOG/results/runner.$$"; exit 0; }' > "$STUB/pre"
+  local w=$T/$CASE/cards/c7
+  ! rerunstep || fail "a run again whose a.test case one failed passed: $(cat "$w.test")"
+  [ "$(ran 2)" = one ] && ! grep -qxF $'pass\tc.test' "$w.rerun" && grep -qxF $'fail\tc.test\tthree' "$w.rerun" \
+    || fail "after a run again that failed and ran no case of c.test (ran: $(ran 2)), the list does not keep c.test's case three to run: $(tr '\t\n' ':|' < "$w.rerun" 2>&1)"
+}
