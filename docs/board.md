@@ -314,7 +314,7 @@ one control, and the value in force is the selected part.
    default), **Namespace Devbox** or **Linux box over ssh**. Card test steps stay on the build machine. A click on
    a choice saves it, and Undo puts the last one back. Only an admin changes it, because the release commit goes to
    that machine. On a devbox the row shows the Namespace login, the size with its CPUs, what happens after a run, the
-   box (its tag and, when the record keeps it, when it was set up) and its tools. The Board reads the login with a check when it shows the devbox. When you are not logged in, the
+   box (its tag and when a run last set it up, or "set-up time not kept" until a run has) and its tools. The Board reads the login with a check when it shows the devbox. When you are not logged in, the
    row shows the command `devbox login` to run in a terminal on the build machine, and **Check the box** stays off.
    The Board reads the login again with each refresh, so the button comes on after you log in. For a Linux box, type
    the **ssh target** and the **Folder there**, then press **Use this box**. **Check the box** stays off while you

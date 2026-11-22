@@ -161,13 +161,25 @@ hoststart() { # <command name>
   [ "$SH_KIND" != devbox ] || hostacquire || { hostfail "$1" "$SH_WHY"; return 1; }
   [ "$SH_KIND" = local ] || hostneeds || { hostfail "$1" "$SH_WHY"; return 1; }
 }
-# setup: the commit's .conveyor/test-machine.sh, sent on ssh's input, run on the box when it last ran another blob.
+# setup: the commit's .conveyor/test-machine.sh, sent on ssh's input, run on the box when it last ran another blob. The box
+# keeps the time of that run in setup.at beside setup.blob (a box set up before that file, the mtime of setup.blob, or now
+# where date cannot read it), and says it on its last line; a devbox's rule keeps it (setupAt, hostsetupat()), whether the
+# script ran in this call or an earlier one.
 hostsetup() { # <command name> <commit>
-  local h out
+  local h out t
   hoststep setup
   [ "$SH_KIND" != local ] && h=$(git rev-parse -q --verify "$2:.conveyor/test-machine.sh" 2>/dev/null) || return 0
-  out=$(git cat-file blob "$h" | hostssh "$SH_D"'; mkdir -p "$D" && cd "$D" && { [ "$(cat setup.blob 2> /dev/null)" = '"$h"' ] || { bash -s && echo '"$h"' > setup.blob; }; }' 2>&1) \
+  out=$(git cat-file blob "$h" | hostssh "$SH_D"'; mkdir -p "$D" && cd "$D" && { [ "$(cat setup.blob 2> /dev/null)" = '"$h"' ] || { bash -s && echo '"$h"' > setup.blob && date -u +%Y-%m-%dT%H:%M:%SZ > setup.at; }; } \
+    && { [ -s setup.at ] || { date -u -r setup.blob +%Y-%m-%dT%H:%M:%SZ 2> /dev/null || date -u +%Y-%m-%dT%H:%M:%SZ; } > setup.at; } && echo "conveyor-setup-at $(cat setup.at)"' 2>&1) \
     || { hostfail "$1" "its .conveyor/test-machine.sh failed: $(grep . <<<"$out" | tail -n 5 | paste -sd ';' -)"; return 1; }
+  [ "$SH_KIND" = devbox ] || return 0
+  t=$(grep '^conveyor-setup-at ' <<<"$out" | tail -n 1); t=${t#conveyor-setup-at }
+  [[ $t =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$ ]] && locked hostsetupat "$t" || echo "conveyor: $1: the devbox's set-up time could not be kept in the control record" >&2
+}
+# Under the lock: the devbox rule keeps <time> as when the box's script last ran (setupAt, the Board's Box line), when the rule is still a devbox.
+hostsetupat() { # <time>
+  local c new; c=$(ctl) || return 1
+  new=$(jq -c --arg t "$1" 'if .suiteMachine.kind == "devbox" then .suiteMachine.setupAt = $t else . end' <<<"$c") && ctlput "$c" "$new"
 }
 # checkout: the worktree <worktree> of <commit> here; on a box over ssh, the commit's bundle checked out there (a run
 # of it still going there stopped first) and the pack's worktree.setup run in it.

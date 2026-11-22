@@ -382,7 +382,12 @@ t_controlsuitemachine() {
     || fail "control suite-machine devbox did not write the rule with the size 4x8, the project's tag and 15m: $(jq -c .suiteMachine "$C")"
   [ "$(ctl suite-machine devbox --size 8x16 | jq -c .suiteMachine)" = '{"kind":"devbox","size":"8x16","tag":"conveyor-suite-main","idleStop":"15m"}' ] \
     || fail "control suite-machine devbox --size 8x16 did not write that size: $(jq -c .suiteMachine "$C")"
-  for a in 'devbox --size' 'devbox --size -oX' 'devbox --size a/b' 'devbox 4x8' 'devbox --size 4x8 x' 'devbox --dir ~'; do
+  # Bug: saving the same devbox rule again (`suite-machine devbox --size 8x16`) dropped the setupAt the runs kept, so the Board said "set-up time not kept" for a box a run had set up; a new size is a new box, and has none.
+  jq -c '.suiteMachine.setupAt = "2026-11-20T15:04:00Z"' "$C" > "$C.new" && mv "$C.new" "$C" || fail "the fixture could not be made"
+  [ "$(ctl suite-machine devbox --size 8x16 | jq -r .suiteMachine.setupAt)" = 2026-11-20T15:04:00Z ] || fail "control suite-machine devbox --size 8x16 again dropped the box's setupAt: $(jq -c .suiteMachine "$C")"
+  [ "$(ctl suite-machine devbox --size 4x8 | jq -c '.suiteMachine | has("setupAt")')" = false ] || fail "control suite-machine devbox --size 4x8 kept the setupAt of the 8x16 box: $(jq -c .suiteMachine "$C")"
+  ctl suite-machine devbox --size 8x16 > /dev/null || fail "control suite-machine devbox --size 8x16 did not set the rule back"
+  for a in 'devbox --size' 'devbox --size -oX''devbox --size a/b' 'devbox 4x8' 'devbox --size 4x8 x' 'devbox --dir ~'; do
     # shellcheck disable=SC2086 # each word an argument
     out=$(loop control suite-machine $a 2>&1); [ $? = 2 ] && [ "$(jq -c .suiteMachine "$C")" = '{"kind":"devbox","size":"8x16","tag":"conveyor-suite-main","idleStop":"15m"}' ] \
       || fail "control suite-machine $a was not refused with nothing changed: $out"
@@ -392,5 +397,10 @@ t_controlsuitemachine() {
     ! ctlcheck <<<"{\"suiteMachine\":$a}" >/dev/null || fail "the record {\"suiteMachine\":$a} was read"
   done
   ctlcheck <<<'{"suiteMachine":{"kind":"devbox","size":"4x8","tag":"conveyor-suite-x","idleStop":"15m"}}' > /dev/null || fail "a record with a whole devbox rule was not read"
+  # Bug: a devbox record with the time its script last ran (setupAt, hostsetup()) was refused as not whole, so a run that kept it stopped every pick; a bad time, or one on another kind, is still refused.
+  ctlcheck <<<'{"suiteMachine":{"kind":"devbox","size":"4x8","tag":"conveyor-suite-x","idleStop":"15m","setupAt":"2026-11-20T15:04:00Z"}}' > /dev/null || fail "a devbox rule with setupAt was not read"
+  for a in '{"kind":"devbox","size":"4x8","tag":"conveyor-suite-x","idleStop":"15m","setupAt":"yesterday"}' '{"kind":"ssh","target":"h","dir":"~","setupAt":"2026-11-20T15:04:00Z"}'; do
+    ! ctlcheck <<<"{\"suiteMachine\":$a}" >/dev/null || fail "the record {\"suiteMachine\":$a} was read"
+  done
   [ "$(ctl suite-machine local | jq -c .suiteMachine)" = '{"kind":"local"}' ] || fail "control suite-machine local did not write this machine: $(jq -c .suiteMachine "$C")"
 }

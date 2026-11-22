@@ -158,6 +158,7 @@ changes. Use it to install what the tests need. A `# needs: <tool> [<version>]` 
 command the suite runs; the check does not read the version.
 
 A devbox needs the same bash, jq and git, and gets the commit and `.conveyor/test-machine.sh` as a box over ssh does.
+The devbox keeps the time that script last ran. Each run copies that time into the devbox rule, also when the script did not run again, and the Board shows it on the Box line. Saving the rule again with the same size keeps the time; a new size has none until a run.
 Conveyor starts the run on it with `devbox exec -d`, copies the output back as it does from a box, and gives the lease
 back with `devbox release` when the run ends. It also gives the lease back when a step fails and when you run
 `release-run stop`.

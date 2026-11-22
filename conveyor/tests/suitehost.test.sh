@@ -315,6 +315,35 @@ devboxsetup() {
 }
 # devboxcalls: the calls the stand-in devbox had, each run of equal calls once, joined by ";".
 devboxcalls() { uniq "$STUB/devbox-calls" | paste -sd';' -; }
+# The devbox rule keeps when the box's script last ran (setupAt), from the time the box keeps in setup.at. Bugs: a run that
+# found the box already set up (the script's blob matched) kept no time; a box set up before setup.at existed kept none, or
+# the time of the later run; a time was written to a rule that is no longer a devbox. A function call, not a release run:
+# only hostsetup() is under test.
+t_devboxsetupat() {
+  local s t1 t2 out C=$T/$CASE/control.json
+  setup '[]'; devboxsetup 3
+  : > "$STUB/devbox-leased"
+  mkdir -p "$R/.conveyor" && printf 'pwd >> "$STUB/setups"\n' > "$R/.conveyor/test-machine.sh" && git -C "$R" add -f .conveyor/test-machine.sh && git -C "$R" commit -qm setup \
+    && s=$(git -C "$R" rev-parse HEAD) && cp "$ST/control.json" "$C" || fail "the fixture could not be made"
+  # shellcheck disable=SC2034,SC2088,SC2317 # the box's ~ is text; the variables and functions are suitehost.sh's and control.sh's, read by hostsetup()
+  at() { (cd "$R" && REPO=main CONTROL=$C; relrec() { :; }; locked() { "$@"; }; ctl() { cat "$CONTROL"; }
+    eval "$(sed -n '/^ctlput() {/,/^}/p' "$SRC/lib/control.sh")"; clock() { :; }
+    . "$SRC/lib/suitehost.sh" && SH_KIND=devbox SH_LEASE=lease-1274 SH_DIR='~/conveyor-suite' && hostd && hostsetup t "$s") 2>&1; }
+  out=$(at) || fail "the setup on the devbox failed: $out"
+  t1=$(jq -r '.suiteMachine.setupAt // ""' "$C")
+  [ "$t1" = "$(cat "$BOX/setup.at")" ] && [[ $t1 =~ ^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$ ]] || fail "the run that ran the script did not keep the box's setup.at ($(cat "$BOX/setup.at" 2>&1)) as setupAt: $(jq -c .suiteMachine "$C") $out"
+  # A rule saved again (no setupAt), the script not run again: the box's time is kept again.
+  jq -c 'del(.suiteMachine.setupAt)' "$C" > "$C.new" && mv "$C.new" "$C" && out=$(at) || fail "the second setup failed: $out"
+  [ "$(wc -l < "$STUB/setups")" = 1 ] && [ "$(jq -r '.suiteMachine.setupAt // ""' "$C")" = "$t1" ] || fail "a run that found the box set up kept no time, or ran the script again: $(jq -c .suiteMachine "$C") $(cat "$STUB/setups")"
+  # A box set up before setup.at was kept: its time is the mtime of setup.blob where date reads it (a date that cannot gives now).
+  rm -f "$BOX/setup.at" && touch -t 202601020304.05 "$BOX/setup.blob" && jq -c 'del(.suiteMachine.setupAt)' "$C" > "$C.new" && mv "$C.new" "$C" && out=$(at) || fail "the third setup failed: $out"
+  t2=$(jq -r '.suiteMachine.setupAt // ""' "$C")
+  [[ $t2 =~ ^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$ ]] && [ "$t2" = "$(cat "$BOX/setup.at")" ] || fail "a box with no setup.at kept no time: $(jq -c .suiteMachine "$C") $out"
+  ! date -u -r "$BOX/setup.blob" +%F > /dev/null 2>&1 || [[ $t2 == 2026-01-0* ]] || fail "a box with no setup.at did not give the mtime of setup.blob (2026-01-02): $t2"
+  # A rule that is not a devbox now takes no time.
+  jq -c '.suiteMachine = {kind: "local"}' "$C" > "$C.new" && mv "$C.new" "$C" && out=$(at) || fail "the fourth setup failed: $out"
+  [ "$(jq -c .suiteMachine "$C")" = '{"kind":"local"}' ] || fail "a rule that is not a devbox was given a setupAt: $(jq -c .suiteMachine "$C")"
+}
 # Bugs (D1, D7): a release-run prep with the devbox rule did not lease the devbox with the size and the idle stop, ran a
 # step out of its order (start, setup, checkout, run, results), ran the suite elsewhere than the devbox's checkout of
 # the commit, started the run attached (not `exec -d`), reached for ssh, named another machine in the record or the
@@ -336,6 +365,9 @@ t_devboxrun() {
     || fail "the devbox's calls are not login, acquire, facts, setup, checkout, upload, run detached, polls, release: $(devboxcalls)"
   [ "$(cat "$STUB/devbox-released")" = lease-1274 ] && [ ! -e "$STUB/devbox-leased" ] && [ ! -e "$STUB/ssh-calls" ] || fail "the lease was not given back once, or ssh was called: $(cat "$STUB/devbox-released" 2>&1) $(cat "$STUB/ssh-calls" 2>&1)"
   [ "$(cat "$STUB/setups" 2>&1)" = "$BOX" ] || fail "the commit's .conveyor/test-machine.sh did not run once in the devbox's run folder $BOX: $(cat "$STUB/setups" 2>&1)"
+  # Bug: the Board's Box line showed no set-up time, as nothing kept when the devbox's script last ran. The run that ran it keeps the time in the rule, which stays a whole record.
+  jq -e '.suiteMachine | .kind == "devbox" and .size == "4x8" and (.setupAt | type == "string" and test("^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$"))' "$ST/control.json" > /dev/null \
+    && loop control > /dev/null 2>&1 || fail "the run that ran the devbox's setup did not keep setupAt in the control record, or the record is no longer whole: $(jq -c .suiteMachine "$ST/control.json")"
   [ "$(cat "$STUB/full-pwd")" = "$BOX/wt" ] && [ "$(git -C "$BOX/wt" rev-parse HEAD)" = "$O" ] || fail "the suite did not run on the devbox's checkout of $O: $(cat "$STUB/full-pwd" 2>&1)"
   grep -q 'description=The whole suite (test.full) passed on Namespace Devbox 4x8$' "$STUB/gh-calls" || fail "the status does not name the machine as Namespace Devbox 4x8: $(cat "$STUB/gh-calls")"
   out=$(loop snapshot --fresh | jq -c '.suites[] | select(.kind == "release") | .machine.name') && [ "$out" = '"Namespace Devbox 4x8"' ] || fail "the snapshot does not name the run's machine as Namespace Devbox 4x8: $out"

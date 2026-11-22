@@ -49,7 +49,8 @@ CTL_K=()
 # is not onboarded (onboarded null; `control onboarded` sets {at, rules}: when the owner finished the Board's setup and
 # the rules confirmed there), so the Board opens its setup. A release suite in parallel mode runs at most suiteAtOnce
 # test files at once, 2 (`control atonce <n>`, or Test files at once on the Rules tab; a whole number from 1; at most the test slots of the machine it runs on: relsuite(), commands/release-prep.sh). That
-# suite runs on this machine (suiteMachine {kind: "local"}; `control suite-machine`, lib/suitehost.sh). Empty when
+# suite runs on this machine (suiteMachine {kind: "local"}; `control suite-machine`, lib/suitehost.sh; a devbox's record also keeps
+# setupAt, when the box's .conveyor/test-machine.sh last ran there, as each run reads it from the box: hostsetup()). Empty when
 # the file cannot be read, or there is no jq (doctor says so): then no record is read.
 CTL0=$(jq -c . "$HERE/lib/control-defaults.json" 2>/dev/null) || CTL0=
 ctl() { local CTL_V; ctlread || return 1; printf '%s\n' "$CTL_V"; }
@@ -90,7 +91,7 @@ ctlcheck() { # [<file>]: the record on the input, or in the file, whole, or exit
       and (.pickBack == null or (.pickBack | type == "object" and keys == ["at", "reason"] and all(.[]; type == "string")))
       and (.suiteAtOnce | type == "number" and . >= 1 and . == floor)
       and (.suiteMachine | type == "object" and if .kind == "local" then keys == ["kind"]
-        elif .kind == "devbox" then keys == ["idleStop", "kind", "size", "tag"] and (.size | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]*$"))
+        elif .kind == "devbox" then (keys - ["setupAt"]) == ["idleStop", "kind", "size", "tag"] and (.setupAt == null or (.setupAt | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$"))) and (.size | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]*$"))
           and (.tag | type == "string" and test("^conveyor-suite-[A-Za-z0-9._-]+$")) and (.idleStop | type == "string" and test("^[1-9][0-9]*[smh]$"))
         else .kind == "ssh" and keys == ["dir", "kind", "target"]
         and (.target | type == "string" and test("^[A-Za-z0-9._][A-Za-z0-9._@-]*$")) and (.dir | type == "string" and test("^(~$|~/|/)") and (contains("\n") | not)) end)
@@ -1124,13 +1125,15 @@ control() { # [action [arguments]]
     # suite-machine: where a release's whole suite runs (suiteMachine, lib/suitehost.sh): here, or a Linux box over ssh,
     # its folder there ~/conveyor-suite unless --dir names one (~, a path under ~/, or a full path). A target is
     # user@host or a host (an ssh config name too), never one that ssh would read as an option. devbox: a Namespace
-    # Devbox of --size (4x8 unless given), leased under the tag conveyor-suite-<project>, and stopped when idle for 15m.
+    # Devbox of --size (4x8 unless given), leased under the tag conveyor-suite-<project>, and stopped when idle for 15m. Saved again
+    # with the same size, it keeps the setupAt of the box (a new size is a new box).
     suite-machine) if [ "$*" = local ]; then f='.suiteMachine = {kind: "local"}'
       elif [ "${1:-}" = devbox ] && { [ $# = 1 ] || { [ $# = 3 ] && [ "$2" = --size ]; }; }; then
         x=${3:-4x8}
         [[ $x =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "conveyor: control suite-machine: \"$x\" is not a devbox size (such as 4x8); nothing changed" >&2; return 2; }
         # jq reads a --size among its arguments as its own option: the size alone is given.
-        set -- devbox "$x" "conveyor-suite-${REPO//[^A-Za-z0-9._-]/-}"; f='.suiteMachine = {kind: "devbox", size: $v[1], tag: $v[2], idleStop: "15m"}'
+        set -- devbox "$x" "conveyor-suite-${REPO//[^A-Za-z0-9._-]/-}"; f='.suiteMachine as $o | .suiteMachine = {kind: "devbox", size: $v[1], tag: $v[2], idleStop: "15m"}
+          | if $o.kind == "devbox" and $o.size == $v[1] and $o.tag == $v[2] and $o.setupAt then .suiteMachine.setupAt = $o.setupAt else . end'
       elif [ "${1:-}" = ssh ] && { [ $# = 2 ] || { [ $# = 4 ] && [ "$3" = --dir ]; }; }; then
         [[ $2 =~ ^[A-Za-z0-9._][A-Za-z0-9._@-]*$ ]] || { echo "conveyor: control suite-machine: \"$2\" is not an ssh target (user@host or a host); nothing changed" >&2; return 2; }
         [ $# = 2 ] || { [[ $4 =~ ^(~$|~/|/) ]] && [[ $4 != *$'\n'* ]]; } || { echo "conveyor: control suite-machine: \"$4\" is not ~, a folder under ~/ or a full path; nothing changed" >&2; return 2; }
