@@ -60,23 +60,51 @@ t_redproofstill() {
   [ "$(head -n 1 <<<"$got")" = "exit 2" ] && [ "$(tail -n 1 <<<"$got")" = '`c.test` still fails with the change.' ] \
     || fail "a change that leaves c.test failing was not blocked naming it: $got"
 }
-# Bug it catches: a fix card whose cases pass on main without its change (main is no longer red for them) landed a
-# change that proves nothing, or was blocked. card.sh cardbuild() on fix card cfix's fixture state, as card() takes it
-# (its locals; waitsec, the card's wait): its build session, then the check (bugstep() close) closes it as already
-# done, its closed line naming the cases and carrying its wait (waitSec, which the drift watch's mean wait reads), its
-# worktree gone, and nothing lands.
-t_redproofgreen() {
-  redsetup $'one\nc.test'
-  local s w=$T/$CASE/cards/cfix out; s=$(git -C "$R" rev-parse HEAD)
+# card.sh cardbuild() on fix card cfix's fixture state, as card() takes it (its locals; waitsec, the card's wait), with
+# a stand-in build session (session(): it notes each call in $STUB/sessions and fails, so the card ends there). Prints
+# cardbuild()'s output.
+redbuild() {
+  local w=$T/$CASE/cards/cfix
   jq -c '.reds[0].card = "cfix"' "$ST/mainred.json" > "$STUB/red.new" && mv "$STUB/red.new" "$ST/mainred.json"
   git -C "$R" worktree add -q --detach "$w" HEAD || fail "the fix card's worktree could not be made"
-  out=$(eng 'c=cfix n=0 br="" mode="" wt=$CONVEYOR_CARDS/cfix sprompt=brief sf="" waitsec=4 mainsec=0 go=end; issue=$(redissue cfix) && cardbuild; echo "go $go"' 2>&1)
-  [ "$(tail -n 1 <<<"$out")" = "go end" ] && [ "$(st 'select(.step == "closed") | .reason')" = 'Main is no longer red for `a.test: one`, `c.test`: they pass on main'"'"'s code at '"$s"' without the change, so the card closes as already done.' ] \
+  eng 'session() { echo x >> "$STUB/sessions"; return 1; }
+    c=cfix n=0 br="" mode="" wt=$CONVEYOR_CARDS/cfix sprompt=brief sf="" waitsec=4 mainsec=0 go=end; issue=$(redissue cfix) && cardbuild; echo "go $go"' 2>&1
+}
+# Bug it catches: a fix card whose cases pass on main (main is no longer red for them) ran a build session first, and only
+# then closed as already done: 16 cards in 300 spent 3,799 build seconds and $14.67 on it. cardbuild() closes it before
+# any session starts (bugproof.sh redgreen()), its closed line naming the cases and the runs, and carrying its wait (waitSec,
+# which the drift watch's mean wait reads), its worktree gone, and nothing lands.
+t_redproofgreen() {
+  redsetup $'one\nc.test'
+  local s w=$T/$CASE/cards/cfix out; s=$(git -C "$R" rev-parse HEAD); out=$(redbuild)
+  [ "$(tail -n 1 <<<"$out")" = "go end" ] && [ "$(st 'select(.step == "closed") | .reason')" = 'Main is no longer red for `a.test: one`, `c.test`: they pass on main'"'"'s code at '"$s"' without the change in each of 3 runs, so the card closes as already done.' ] \
     || fail "the fix card did not close as already done, naming the cases: $out: $(st '"\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+  [ ! -e "$STUB/sessions" ] && [ -z "$(st 'select(.step == "start" and .of == "build")')" ] || fail "a build session started for a card whose cases pass on main: $(cat "$STUB/sessions")"
   [ "$(st 'select(.step == "closed") | .waitSec == 4')" = true ] || fail "the closed line does not carry the card's wait as the number 4: $(st 'select(.step == "closed")')"
   [ -z "$(st 'select(.step == "landed" or .step == "blocked")')" ] && [ "$(git -C "$R" rev-parse HEAD)" = "$s" ] && [ ! -e "$w" ] \
     || fail "the fix card landed, was blocked or left its worktree: $out: $(st '"\(.step) \(.result)"' | tr '\n' ,)"
   recok "$ST/cards.jsonl" "the fix card's close"
+}
+# Bug it catches: the check before the build session closed a card whose cases still fail on main, so a red main got no
+# fix. With a case failing on main (ok.txt lacks `c.test`) the card is not closed and the build session starts, once.
+t_redgreenfails() {
+  redsetup 'one'
+  local out; out=$(redbuild)
+  [ "$(wc -l < "$STUB/sessions" 2>/dev/null)" = 1 ] && [ -z "$(st 'select(.step == "closed")')" ] \
+    || fail "the build session did not start once, or the card closed, with c.test failing on main: $out: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
+}
+# Bug it catches: a case that fails one run in three (flaky) was closed as passing because the check ran it once. Main's
+# runner here fails `one` in its second run only (the file n counts the runs): the check runs all of the flaky rule's runs
+# up to that failure, does not close the card, and the build session starts.
+t_redgreenflaky() {
+  redsetup $'one\nc.test'
+  local out
+  # A run is one call of the runner for each file (a.test, c.test): the count is of a.test's calls.
+  printf '%s\n' '[ "${CONVEYOR_TEST_FILE:-}" = a.test ] && { n=$(($(cat "$STUB/n" 2>/dev/null || echo 0) + 1)); echo $n > "$STUB/n"; [ $n != 2 ] || { grep -vx one ok.txt > ok.new; mv ok.new ok.txt; }; }' \
+    | cat - "$STUB/mainrun-cmd" > "$STUB/mainrun-cmd.new" && mv "$STUB/mainrun-cmd.new" "$STUB/mainrun-cmd" || fail "the flaky runner could not be made"
+  out=$(redbuild)
+  [ "$(cat "$STUB/n")" = 2 ] && [ "$(wc -l < "$STUB/sessions" 2>/dev/null)" = 1 ] && [ -z "$(st 'select(.step == "closed")')" ] \
+    || fail "the card whose case failed in its second run was closed, or the check stopped early or ran past it (runs: $(cat "$STUB/n")): $out: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
 }
 
 # Issue 323: mainred.sh verdicts() alone on card c7, its worktree on main with a new test file n.test staged and a comment added

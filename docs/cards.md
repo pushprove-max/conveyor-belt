@@ -49,6 +49,9 @@ reply needs a `D<n> met:` or `D<n> not met:` line for each item. It must also na
 the change adds, on a line with its file. On the Board, open a card's `Done when` line to see each item: its text,
 the builder's line for it, and the reviewer's answer when the review gave one.
 
+A main-red fix card runs its cases on main before its build session. A case that fails in any of three runs keeps the
+card going. When every case passes in all three runs, the card ends as `closed` with no session.
+
 A main-red fix card whose session changes no file runs its cases again on main. When they pass, the card ends as
 `closed`, and when they fail, the card is blocked. Any other build session that changes no file blocks the card with "the session made no change", unless
 its reply ends with one of two lines:

@@ -416,6 +416,14 @@ keptrep() {
   rep=''; [ "$(verdict "$wt.review" 2>/dev/null)" != NO-GO ] || ! jq -se --argjson r "$rounds" 'map(.round) | max < $r' "$wt.rounds/findings.jsonl" >/dev/null 2>&1 \
     || rep=$(repeats "$wt")
 }
+# Ends a main-red fix card as closed, its reason the first line of <worktree>.unfixed (bugproof.sh redgreen(), redproof()): main is no
+# longer red for its cases. Its change is dropped: the worktree goes. A closed line that cannot be written blocks the card.
+greenclose() { # <card> <issue number> <worktree>
+  local t out
+  t=$(head -n 1 "$3.unfixed") && out=$(line "$1" "$2" closed ok "$(jq -cn --arg r "$t" --argjson e "$(ending)" --argjson w "$(waited)" '{reason: $r} + $e + $w')") && locked append "$out" \
+    || { block "$1" "$2" "$3" "build: $(head -n 1 "$3.unfixed" 2>/dev/null) The engine could not write the closed line"; return; }
+  clean "$3"
+}
 # The build, then the checks a bug card's change must pass before its review (or, on a retry with no build, those of
 # one of the Board's fix issues). go: '', or the card ends: blocked, or closed as already fixed on main.
 # shellcheck disable=SC2034 # it declares no variable of its own: mk, as the rest, is card()'s, read in lib/cardland.sh
@@ -434,6 +442,9 @@ cardbuild() {
     keptrep; [ -z "$rep" ] || more+=$'\n\n'"$(again "$rep")"
     [ -z "$sf" ] || { t=$(speedbrief "$c" "$wt" "$sf" "$issue") && more+=$'\n\n'"$t"; } \
       || { block "$c" "$n" "$wt" "brief: the engine could not read the project pack for the split allowance of $sf"; return; }
+    # A main-red fix card (its entry in the main-red record names it) whose cases all pass on main, in each of the flaky rule's
+    # runs (bugproof.sh redgreen()), closes as already done before its build session starts, as redproof() closes one after it.
+    if jq -e --arg c "$c" 'any(.reds[]?; .card == $c)' "$MAINRED" >/dev/null 2>&1 && redgreen "$c" "$wt"; then greenclose "$c" "$n" "$wt"; return; fi
     began "$c" "$n" build
     redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt$more") || { block "$c" "$n" "$wt" "build: $t"; return; }
     checked "$c" "$n" "$wt" "$issue" "$sprompt" build "$t" || return
@@ -473,9 +484,7 @@ cardbuild() {
       # bugstep() gives what each exit of the check leads to.
       bugproof "$c" "$wt" "$issue"; trc=$(bugstep $?)
       if [ "$trc" = close ]; then
-        t=$(head -n 1 "$wt.unfixed") && out=$(line "$c" "$n" closed ok "$(jq -cn --arg r "$t" --argjson e "$(ending)" --argjson w "$(waited)" '{reason: $r} + $e + $w')") && locked append "$out" \
-          || { block "$c" "$n" "$wt" "build: $(head -n 1 "$wt.unfixed" 2>/dev/null) The engine could not write the closed line"; return; }
-        clean "$wt"; return
+        greenclose "$c" "$n" "$wt"; return
       fi
       [ "$trc" != block ] || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
       if [ "$trc" = build ]; then

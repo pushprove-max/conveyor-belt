@@ -24,8 +24,9 @@ t_redcap() {
   # a.txt, and main's red case (the run on main, mainrun-cmd) holds that a.txt has that line, so it fails on main's code
   # without the change and passes with it (bugproof.sh redproof()); the second fails its build at once. Any other build holds until
   # let go (go<n>), then fails. The case reads a.txt, not a.test.sh: main has its own stub a.test.sh (filemode), which
-  # passes without the change, so the card would close as main no longer red.
-  echo "[ \$(wc -l < a.txt) -ge $(($(wc -l < "$R/a.txt") + 1)) ]" > "$STUB/mainrun-cmd"
+  # passes without the change, so the card would close as main no longer red. The second card's case (b.test) fails on
+  # main always: with the first card landed, a.txt has its line, and a case passing on main closes its card before any build.
+  echo "[ \"\${CONVEYOR_TEST_FILE:-}\" != b.test ] && [ \$(wc -l < a.txt) -ge $(($(wc -l < "$R/a.txt") + 1)) ]" > "$STUB/mainrun-cmd"
   echo 'n=${PWD##*-}; if [ "$n" = 0 ] && [ -e "$STUB/building.0" ] && [ "$(cat "$STUB/building.0")" != "${PWD##*/}" ]; then : > "$STUB/building.0b"; exit 1; fi
 [ "$n" != 0 ] || [ -e "$STUB/building.0" ] || echo "${PWD##*/}" > "$STUB/building.0"; : >> "$STUB/building.$n"
 while [ -d "$STUB" ] && [ ! -e "$STUB/go$n" ]; do sleep 0.1; done; [ "$n" = 0 ] || exit 1

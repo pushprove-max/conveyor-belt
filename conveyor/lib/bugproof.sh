@@ -365,8 +365,7 @@ bugnamed() { # <card> <worktree> <issue json>
 # closes as already done, keeps none.
 redproof() { # <card> <worktree>
   local mwt=$CARDS/mainrun/$1.unfixed cs sha='' out wo='' wi='' rc=2 kw='' ki='' kf='' fc nw
-  cs=$(jq -ce --arg c "$1" '[.reds[]? | select(.card == $c) | .cases[] | {name: .case, file, files: [.files[]? | strings], case: (.file as $f
-    | if .case == $f then "" elif .case | startswith($f + ": ") then .case[($f | length) + 2:] else .case end)}] | select(. != [])' "$MAINRED" 2>/dev/null) \
+  cs=$(redcases "$1") \
     || { echo "the main-red record names no case of this card, so the cases main fails could not be run" > "$2.unfixed"; return 2; }
   if sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
     && out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
@@ -408,6 +407,31 @@ redproof() { # <card> <worktree>
   [ $rc = 2 ] || { rm -f "$kw" "$ki" 2>/dev/null; rmdir "$ST/kept/$1" 2>/dev/null; }
   git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; rmdir "${mwt%/*}" 2>/dev/null # the folder, once no card's run is in it
   return $rc
+}
+# The cases the main-red record holds for fix card <card>, as redrun() takes them ([{name, file, files, case}]); fails with none.
+redcases() { # <card>
+  jq -ce --arg c "$1" '[.reds[]? | select(.card == $c) | .cases[] | {name: .case, file, files: [.files[]? | strings], case: (.file as $f
+    | if .case == $f then "" elif .case | startswith($f + ": ") then .case[($f | length) + 2:] else .case end)}] | select(. != [])' "$MAINRED" 2>/dev/null
+}
+# The check that comes before a main-red fix card's build session (card.sh cardbuild()): the cases its entry holds run alone
+# on main's code at the card's commit, as redproof() runs them without the change, FULL_ALONE times (the runs the flaky rule
+# asks of a case that failed in a full run: lib/fulltest.sh). Exit 0 when every case passes in every run: main is no longer
+# red for them, and the result (<worktree>.unfixed, whose first line card() gives as the close reason) says the card closes as
+# already done, with no session. Exit 1 when a case fails or gives no result in any run (one that fails in one run in three
+# is not closed), or a run could not be made: the build session goes on as it would, and the check after it decides.
+redgreen() { # <card> <worktree>
+  local mwt=$CARDS/mainrun/$1.unfixed cs sha wo='' i=0
+  rm -f "$2.unfixed"
+  if cs=$(redcases "$1") && sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
+    && { git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
+      && git worktree add -q --detach "$mwt" "$sha" && deps "$mwt"; } > /dev/null 2>&1 < /dev/null; then
+    for ((i = 0; i < FULL_ALONE; i++)); do
+      wo=$(redrun "$mwt" "$cs") && [ -n "$wo" ] && [ -z "$(rednames fail "$wo")$(rednames none "$wo")" ] || break
+    done
+  fi
+  [ "$i" -ne "$FULL_ALONE" ] || printf '%s\n' "Main is no longer red for $(rednames pass "$wo"): they pass on main's code at $sha without the change in each of $FULL_ALONE runs, so the card closes as already done." > "$2.unfixed"
+  git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; rmdir "${mwt%/*}" 2>/dev/null # the folder, once no card's run is in it
+  [ "$i" -eq "$FULL_ALONE" ]
 }
 # A run's output (<output file>: a run's <worktree>.test) of redproof(), kept beside the card's kept work ($ST/kept/<card>,
 # block()) as <card>.redrun-<name>.out, its NUL bytes dropped; an output that cannot be read keeps an empty file. Prints
