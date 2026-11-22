@@ -239,9 +239,9 @@ t_refused() {
 fixture refused
 check; isheld "$(wpid)" || fail "no waiter listens during the turn"
 put 'Alert: blocked #7'; wait_until '[ "$(wakes)" = 1 ]' || fail "the wake found during the turn was not kept in pending"
-jq -cn '{type: "user", uuid: "u1", message: {content: "go"}}' > "$T/transcript.jsonl"; said a1 'Which card first?'
+jq -cn '{type: "user", uuid: "u1", message: {content: "go"}}' > "$T/transcript.jsonl"; said a1 'I still need to file #7.'
 jq -cn --arg t "$T/transcript.jsonl" '{stop_hook_active: false, transcript_path: $t}' | bash "$SRC/stop.sh" reply | grep -q '"block"' \
-  || fail "the reply check did not refuse a question in text"
+  || fail "the reply check did not refuse unfinished work (reply: I still need to file #7.)"
 after false; rc=$? # the stop the reply check refuses: the wake relayed here reaches no turn
 [ "$rc" = 2 ] && [ "$(cat "$T/wake")" = 'Alert: blocked #7' ] || fail "the refused stop's waiter did not relay the wake (exit $rc): $(cat "$T/wake")"
 said a2 'Idle'; after true; rc=$?

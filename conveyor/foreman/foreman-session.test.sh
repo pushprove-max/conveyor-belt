@@ -125,11 +125,16 @@ turn() { # <uuid> <opening text> <reply>
   jq -cn --arg u "$1" --arg o "$2" --arg r "$3" '{type: "user", uuid: $u, message: {content: $o}}, {type: "assistant", message: {content: [{type: "text", text: $r}]}}' > "$T/t.jsonl"
   jq -cn --arg t "$T/t.jsonl" '{transcript_path: $t, stop_hook_active: true}' | bash "$SRC/stop.sh" reply
 }
-out=$(turn u1 'what now' 'Should I retry #7?'); jq -e '.decision == "block" and (.reason | test("picker"))' <<<"$out" >/dev/null || fail "a question in text passed: $out"
-out=$(turn u1 'what now' 'Should I retry #7?'); [ -z "$out" ] || fail "the same turn was refused twice: $out"
+# Bug (#1292): any reply with a question mark was refused as a question to the owner, though a question mark also
+# stands in a quote, a checklist or a code span. A question mark at a line's end, or in a line's middle with a space
+# after it (what the old check refused), passes.
+for r in 'Why is #7 red?' $'- Is #7 red?\n- Is #8 green?' 'The owner asked how do we get you to think better? Here is the answer: #7 is filed.' 'Run `grep a? file` to find #7.'; do
+  out=$(turn "u1 $r" 'what now' "$r"); [ -z "$out" ] || fail "a reply with a question mark was refused (reply: $r): $out"
+done
 out=$(turn u2 'what now' 'Filed #9 and held it.'); [ -z "$out" ] || fail "a plain report was refused: $out"
 out=$(turn u3 'what now' 'Want me to file it.'); jq -e '.decision == "block"' <<<"$out" >/dev/null || fail "undone work passed: $out"
 out=$(turn u3b 'what now' 'I still need to file #9.'); jq -e '.decision == "block"' <<<"$out" >/dev/null || fail "work left undone passed: $out"
+out=$(turn u3b 'what now' 'I still need to file #9.'); [ -z "$out" ] || fail "the same turn was refused twice (reply: I still need to file #9.): $out"
 out=$(turn u3d 'what now' 'You still need to approve #7 because it changes the sign-in page.'); [ -z "$out" ] || fail "the owner's own decision was refused as unfinished work: $out"
 # Bug (#362): an "I'll <verb>" tied to a later event or a standing rule was refused as undone work, costing a turn;
 # a bare deferral is still refused.
@@ -143,16 +148,15 @@ done
 # A later event in one list item does not hide a bare deferral in the next item.
 out=$(turn u3m 'what now' $'- When the queue empties, I\'ll release 1.6.0\n- I\'ll file it'); jq -e '.decision == "block"' <<<"$out" >/dev/null || fail "a deferral in the next list item passed: $out"
 # The whole final reply is checked, not only its last text block.
-jq -cn '{type: "user", uuid: "u3e", message: {content: "what now"}}, {type: "assistant", message: {content: [{type: "text", text: "Should I file #9?"}, {type: "text", text: "Idle"}]}}' > "$T/t.jsonl"
+jq -cn '{type: "user", uuid: "u3e", message: {content: "what now"}}, {type: "assistant", message: {content: [{type: "text", text: "I still need to file #9."}, {type: "text", text: "Idle"}]}}' > "$T/t.jsonl"
 out=$(jq -cn --arg t "$T/t.jsonl" '{transcript_path: $t}' | bash "$SRC/stop.sh" reply)
-jq -e '.decision == "block" and (.reason | test("picker"))' <<<"$out" >/dev/null || fail "a question in an earlier text block passed: $out"
+jq -e '.decision == "block"' <<<"$out" >/dev/null || fail "undone work in an earlier text block passed (replies: I still need to file #9. / Idle): $out"
 # A long turn is still checked when its opening entry is over a thousand entries back.
 { jq -cn '{type: "user", uuid: "u3f", message: {content: "what now"}}'
   for _ in $(seq 1000); do echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"}]}}'; done
   jq -cn '{type: "assistant", message: {content: [{type: "text", text: "I still need to file #9."}]}}'; } > "$T/t.jsonl"
 out=$(jq -cn --arg t "$T/t.jsonl" '{transcript_path: $t}' | bash "$SRC/stop.sh" reply)
 jq -e '.decision == "block"' <<<"$out" >/dev/null && [ "$(cat "$FD/reply-mark")" = u3f ] || fail "a long turn whose opening left the last thousand entries passed: $out"
-out=$(turn u3c 'what now' $'May I retry #7?\nWaiting for your answer.'); jq -e '.decision == "block" and (.reason | test("picker"))' <<<"$out" >/dev/null || fail "a question before a closing line passed: $out"
 printf 'Conveyor: alpha: blocked: #7\nalpha: #7 is blocked\n' > "$FD/last-wake.txt"
 out=$(turn u4 'Stop hook feedback: Conveyor: alpha: blocked: #7' '#5 is still running, nothing needs you.'); jq -e '.decision == "block"' <<<"$out" >/dev/null || fail "play-by-play in a wake reply passed: $out"
 out=$(turn u5 'Stop hook feedback: Conveyor: alpha: blocked: #7' 'Idle'); [ -z "$out" ] || fail "a one-word wake reply was refused: $out"

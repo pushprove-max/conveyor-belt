@@ -43,14 +43,14 @@ start() { echo '{}' | bash "$SRC/foreman.sh" start 2>&1; }
 # the same line with "filed as #<n>" passes, and the note made at the refusal then names the issue (one note).
 t_home() {
   fixture home "git@github.com:${OWN#https://github.com/}.git"
-  out=$(turn u1 "$LINE"$'\nShould I retry #7?')
+  out=$(turn u1 "$LINE"$'\nI still need to file #7.')
   jq -e '.decision == "block" and (.reason | contains("plugin'"'"'s own repository") and contains("filed as #<n>") and contains("running cards keep the old engine code"))' <<<"$out" >/dev/null \
     || fail "a plugin problem with no issue number passed in the plugin's repository: $out"
   # Bug (#478): the refusal marked turn u1 in reply-mark, so the same unfiled line passed at the turn's next stop.
   out=$(again "$LINE"); jq -e '.decision == "block"' <<<"$out" >/dev/null \
     || fail "a plugin problem with no issue number passed at the turn's second stop: $out"
   # Bug (#478 E1, E2): with no tool call between, the refused replies were read as part of the turn's reply, so the
-  # corrected one was refused for their unfiled line and their question.
+  # corrected one was refused for their unfiled line and their unfinished-work line.
   out=$(again "$LINE, filed as #449"); [ -z "$out" ] || fail "a plugin problem filed as an issue was refused: $out"
   # Bug (#478 E2): a later stop noted a refused reply's unfiled line again, so the filed problem was listed at start-up.
   out=$(again 'Filed #449.'); [ -z "$out" ] || fail "a reply after the filed one was refused for a refused reply's line: $out"
@@ -73,15 +73,15 @@ t_home() {
 }
 
 # Bug (#564): stop.sh exits at once when reply-mark already names the turn, so the plugin check must come before
-# that exit; below it, an unfiled line said after a question refusal marked the turn passed unfiled.
+# that exit; below it, an unfiled line said after an unfinished-work refusal marked the turn passed unfiled.
 t_mark() {
   fixture mark "git@github.com:${OWN#https://github.com/}.git"
-  out=$(turn u1 'Should I retry #7?')
-  jq -e '.decision == "block" and (.reason | contains("asks the owner a question"))' <<<"$out" >/dev/null && [ "$(cat "$FD/reply-mark")" = u1 ] \
-    || fail "the question refusal did not mark turn u1 in reply-mark: $out"
+  out=$(turn u1 'I still need to file #7.')
+  jq -e '.decision == "block" and (.reason | contains("Unfinished work"))' <<<"$out" >/dev/null && [ "$(cat "$FD/reply-mark")" = u1 ] \
+    || fail "the unfinished-work refusal did not mark turn u1 in reply-mark (reply: I still need to file #7.): $out"
   out=$(again "$LINE")
   jq -e '.decision == "block" and (.reason | contains("filed as #<n>"))' <<<"$out" >/dev/null \
-    || fail "a plugin problem with no issue number passed after a question refusal marked the turn: $out"
+    || fail "a plugin problem with no issue number passed after an unfinished-work refusal marked the turn (reply: $LINE): $out"
 }
 
 # Bug (#479): "filed as #0" names no issue, yet the stop hook passed it as filed and the start-up list hid its note,

@@ -7,7 +7,6 @@
 # reply: the turn's last reply (every text block after its last tool call or user entry, such as a refused stop's
 #   feedback) is refused once per turn (the turn is its opening entry: the newest user entry that is
 #   not a tool result, nor meta unless it holds the wake; a refused turn is marked in reply-mark, so its next stop passes) when it
-#   - asks the owner a question in text: questions to the owner go only by the picker (AskUserQuestion);
 #   - answers a wake (the turn's opening entry holds the first line of last-wake.txt, waiter.sh) with more than what
 #     needs the owner: a still-running line, a progress count, a "nothing needs you", a reply that never says you,
 #     your or owner, or a sentence reporting a card (landed, merged, done ...) without them; a reply to a wake says only
@@ -125,9 +124,6 @@ MARK=$FD/reply-mark
 [ "$(cat "$MARK" 2>/dev/null)" != "$U" ] || exit 0
 refuse() { { mkdir -p "$FD" && printf '%s\n' "$U" > "$MARK"; } 2>/dev/null || exit 0; block "$1"; }
 
-if grep -qE '\?[[:space:]*_)]*($|[[:space:]])' <<<"$REPLY"; then
-  refuse "Your reply asks the owner a question in text. Ask the owner only with the picker (AskUserQuestion), with the options you propose; keep the rest of the reply."
-fi
 if [ -n "$W" ] && jq -e --arg w "$W" '(.opening | contains($w)) and (.owner | not)' <<<"$TURN" >/dev/null 2>&1 && [ "$(wc -w <<<"$REST")" -gt 1 ]; then
   # What needs the owner is said to them: a reply that never says you, your or owner reports, and so does a sentence
   # that gives a card's progress without them.
