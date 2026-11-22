@@ -108,6 +108,7 @@ remote=0; [ "$ok" != 0 ] || [ -z "$target" ] || [ "$rec" = 1 ] || [ "$here" -ef 
 # there are (each card's <card>.live and each bug card's proof run, mainrun/<card>.unfixed.live, views.sh proofs()),
 # and the step and the card waited on that each card's names, as a step that only a live record writes shows (a fix
 # after a GO, a wait, a proof run). A live record's other fields, rewritten as the step runs, are not read.
+# hooks/units.tsx (knowsStamp) reads the next line's text to know that this script has the check: keep it as it is.
 if [ "$mode" = stamp ]; then
   [ -e "$cfg" ] && [ "$ok" = 0 ] || { printf 'stamps\tnone\n'; exit 0; }
   scmd=$(jq -j --arg e "$engine/conveyor/conveyor.sh" '.records[]

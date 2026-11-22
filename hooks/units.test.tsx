@@ -31,14 +31,19 @@ const WAITING = { card: 'c1-3861', issue: 3861, title: 'Fast lane', sentence: 'S
 const LANDED = { card: 'c5-3862', issue: 3862, title: 'One snapshot record', step: 'landed', time: ago(13), usd: 4.2, reviews: 2, followups: [], sha: 'f1d6', pushed: true }
 const FULL = snapshot({ needsYou: { waiting: [WAITING], blocked: [] }, belt: [BELT], queue: { next: [{ issue: 3900, title: 'Next up', priority: 'P1', followup: false, retried: false }], held: {} }, landed: [LANDED], cost: { today: 7 } })
 
+// The fetch script's text, as the mod reads it to know whether the fetch has the short check (`stamp`): the line of
+// units-fetch.sh that runs it, or none (an install older than the check, which takes `stamp` for a whole fetch).
+const KNOWS_STAMP = 'if [ "$mode" = stamp ]; then'
+const NO_STAMP = '#!/usr/bin/env bash'
+
 // writes: the key of each of the mod's atoms written, in order.
-type World = { files: Map<string, { text: string; at: number }>; reads: string[]; writes: string[]; fetch: string; fetchRc: number; fetchCut?: boolean; boardDir: string | null; runs: { argv: string[]; cwd?: string }[]; status: (string | undefined)[]; toasts: string[]; registered: string[]; opened: string[]; clock: ReturnType<typeof mock.clock>; placed?: boolean; hold?: Promise<void>; run: (argv: readonly string[], cwd?: string) => any }
+type World = { files: Map<string, { text: string; at: number }>; reads: string[]; writes: string[]; fetch: string; fetchRc: number; script: string; fetchCut?: boolean; boardDir: string | null; runs: { argv: string[]; cwd?: string }[]; status: (string | undefined)[]; toasts: string[]; registered: string[]; opened: string[]; clock: ReturnType<typeof mock.clock>; placed?: boolean; hold?: Promise<void>; run: (argv: readonly string[], cwd?: string) => any }
 
 // env: the session's environment variables the mod reads (none set unless given).
 const world = (on: On, seat: keyof typeof SEATS, fetch: string, files: Record<string, string> = {}, installed = true, env: Record<string, string> = {}): World => {
   const clock = mock.clock(on, { now: NOW })
   mock.env(on, env)
-  const w: World = { files: new Map(), reads: [], writes: [], fetch, fetchRc: 0, boardDir: BOARD, runs: [], status: [], toasts: [], registered: [], opened: [], clock, run: () => undefined }
+  const w: World = { files: new Map(), reads: [], writes: [], fetch, fetchRc: 0, script: KNOWS_STAMP, boardDir: BOARD, runs: [], status: [], toasts: [], registered: [], opened: [], clock, run: () => undefined }
   for (const [p, text] of Object.entries(files)) w.files.set(p, { text, at: NOW - 1000 })
   if (installed) w.files.set(`${MAIN}/.conveyor/project.json`, { text: '', at: 0 })
   const [gitDir, top] = SEATS[seat]
@@ -66,7 +71,8 @@ const world = (on: On, seat: keyof typeof SEATS, fetch: string, files: Record<st
   })
   on('fs.read', (_, e) => {
     w.reads.push(e.path)
-    const f = w.files.get(e.path)
+    // The plugin's own fetch script, unless the test wrote one: w.script, its text.
+    const f = w.files.get(e.path) ?? (e.path.endsWith('/hooks/units-fetch.sh') ? { text: w.script, at: 0 } : undefined)
     if (!f) throw new Error(`ENOENT ${e.path}`)
     return { value: f.text }
   })
@@ -358,7 +364,8 @@ test('a kept snapshot 59 s old at the fetch says its age once the clock passes a
 // Issue 1461 (B-R442). Bug it catches: the 5 s check skipped only while a poll was queued, not while it ran, so it ran
 // beside a slow opening fetch; on an engine pinned before the check, whose fetch script runs the whole snapshot for
 // `stamp` too, the two built every record's snapshot at once. The fetch here holds (a slow host): the opening fetch
-// and the checksums it takes as it starts run, and no check beside them.
+// and the checksums it takes as it starts run, and no check beside them. It also catches the checksums taken before
+// the fetch, not beside it: a host that does not answer was then waited for twice before /units said so.
 test('with no feed, the 5 s check does not run while a fetch is still out', async ($, on) => {
   const w = world(on, 'main', answer(snapshot()))
   let release = () => {}
@@ -381,6 +388,26 @@ test('a fetch that prints no stamps (an older install) is checked once, then onl
   await w.clock.advance(20_000)
   await w.clock.settle()
   expect(checks(w).length).toBe(1)
+})
+
+// Bug it catches: with no feed, the opening fetch took the checksums (`stamp`) beside it from any fetch script; one
+// older than the check (an engine pinned before it) runs the whole snapshot for `stamp`, so two built every record's
+// snapshot at once. Its script has no `stamp`: the fetch runs alone, held here (a slow host), and no check ever runs.
+test('with no feed, a fetch script with no stamp mode (an older install) is never asked for stamps', async ($, on) => {
+  const w = world(on, 'main', answer(FULL))
+  w.script = NO_STAMP
+  let release = () => {}
+  w.hold = new Promise<void>(r => { release = r })
+  await start($, 'main')
+  await w.clock.advance(1000)
+  expect(fetches(w).length).toBe(1)
+  expect(checks(w).length).toBe(0)
+  w.hold = undefined
+  release()
+  await w.clock.advance(20_000)
+  await w.clock.settle()
+  expect(checks(w).length).toBe(0)
+  expect(await draw($, 'Pane')).toContain('1 ON BELT')
 })
 
 // A reload in a running session: the kit loads the module once and has no reload, so the first load is the kit's

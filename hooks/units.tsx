@@ -258,8 +258,14 @@ const collect = async ($: EngineInterface, cwd: string): Promise<{ st: State; fe
   const dir0 = foremanDir
   const key0 = dir0 ? await foremanKey($, dir0) : null
   // With no feed, the checksums are taken as the opening fetch starts: a record that changes after it and before the
-  // first check is then seen to have moved (the first check had nothing to compare with).
-  const taking = !fed && !stamps && !noStamp ? readStamps($, cwd) : null
+  // first check is then seen to have moved (the first check had nothing to compare with). Only from a fetch that knows
+  // `stamp`: an older one runs the whole snapshot for it, and the two would build every record's snapshot at once.
+  let taking: Promise<Map<string, string> | undefined> | null = null
+  if (!fed && !stamps && !noStamp) {
+    const knows = await knowsStamp($, cwd)
+    if (knows === false) noStamp = true
+    else if (knows) taking = readStamps($, cwd)
+  }
   // The script gives the host 50 s; the engine's own 30 s default would cut a slow answer short.
   const [r, taken] = await Promise.all([
     $.process.run(['bash', await fetchPath($, cwd), ...mode], { cwd, timeoutMs: 75_000 }).catch(() => undefined),
@@ -416,13 +422,20 @@ const drawFeed = async ($: EngineInterface, got: { board: Board; at: number; key
 // Every CHECK_MS while no live feed runs (the feed is drawn within the second already): the fetch's `stamp`, one
 // checksum a record (one command, over one ssh call at most). A record whose checksum moved since the last check is
 // fetched at once, fresh; a check that finds none moved fetches nothing. A fetch that prints no stamps (an install
-// older than the check, which takes it for a whole fetch) stops the checks for this load: the minute's fetch stays.
+// older than the check, which takes it for a whole fetch) stops the checks for this load: the minute's fetch stays. So
+// does a fetch script with no `stamp` mode, seen as the opening fetch starts: it is never asked.
 // No check runs while a poll is queued or running: there it would run beside that poll's fetch, and on such an older
 // install both would build every record's snapshot at once.
 let checkBusy = false
 let noStamp = false
 let stamps: Map<string, string> | null = null
 const freshFor = new Set<string>()
+// Whether the fetch has the short check, from its script's text (units-fetch.sh's `if [ "$mode" = stamp ]`): a fetch
+// older than the check takes `stamp` for a whole fetch. Undefined when the script cannot be read.
+const knowsStamp = async ($: EngineInterface, cwd: string): Promise<boolean | undefined> => {
+  const text = await $.fs.read(await fetchPath($, cwd)).catch(() => undefined)
+  return typeof text === 'string' ? text.includes('"$mode" = stamp') : undefined
+}
 // The short check's checksums, a record each; undefined when it failed or printed no stamps (that stops the checks).
 const readStamps = async ($: EngineInterface, cwd: string): Promise<Map<string, string> | undefined> => {
   const r = await $.process.run(['bash', await fetchPath($, cwd), 'stamp'], { cwd, timeoutMs: 15_000 }).catch(() => undefined)
