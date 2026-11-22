@@ -31,7 +31,7 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    of the style, the command says so, and a note at the top of the draft lists the lines the check refuses, with
    their line numbers in the draft as saved. Delete that note when you fix the lines. The head of `main` on GitHub has no notes yet, so no suite runs.
    A draft in the style goes to `main` as a card with no GitHub issue, which adds it as it is. When the card has
-   landed and its commit is in the commit that step 4 tests, `release-prep` starts again by itself, as
+   landed, its commit is in the commit that step 4 tests and no other card is open, `release-prep` starts again by itself, as
    `conveyor.sh serve` sees it, and goes on to step 4. A push still owed holds it. With Land as `pr` and the rule
    Merge PR set to `button` or `idle`, it waits until the pull request is merged. A draft that still breaks the style
    stops there.
@@ -283,7 +283,7 @@ runs `conveyor.sh release-run <version>`: `release` alone when the suite of that
 and `main` did not move after it, else `release-prep`, then `release` when the suite passes. The output of the two
 is in `release/run.log` in the cards folder. When `main` has no notes, the run waits for the card that adds the
 notes draft, then goes on by itself after the push or the merge that puts the card's commit in the commit the suite
-tests ([Making a release](#making-a-release), step 2). When a step stops, the panel shows each reason, and nothing more runs. `/units` shows the run while it is in
+tests, once no other card is open ([Making a release](#making-a-release), step 2). When a step stops, the panel shows each reason, and nothing more runs. `/units` shows the run while it is in
 progress ([/units](units.md)). `conveyor.sh release-run stop` is the panel's **Stop**.
 
 ## Release notes

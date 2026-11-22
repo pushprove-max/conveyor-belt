@@ -108,9 +108,16 @@ test('#1365: a run waiting on its notes card shows the notes step under way with
   const s1 = stepOf(w, 'release-notes');
   assert.equal(s1.dataset.state, 'now', 'the notes step is under way, not failed');
   assert.equal(s1.querySelector('.release-line').textContent, 'docs/releases/1.0.0.md on main: card c20261114T081500-plugin-0 adds the notes draft');
-  assert.equal(s1.querySelector('[data-figure="notes-card"]').textContent, 'The suite runs by itself once the card\'s commit is on the branch the suite tests, then the release.');
+  assert.equal(s1.querySelector('[data-figure="notes-card"]').textContent, 'The suite runs by itself once the card\'s commit is on the branch the suite tests and no other card is open, then the release.');
   assert.equal(s1.querySelector('[data-list="reasons"]'), null, 'the start line is not listed as a reason the run stopped');
   assert.equal(chip(w), 'Notes card under way');
+});
+// Bug this guards (#1375): the Draft notes tooltip said the suite runs once the notes commit is on the branch, but the
+// run also waits while another card is open (relfixes() busy), so the owner saw no reason for the wait.
+test('#1375: the Draft notes tooltip says the suite also waits for open cards', () => {
+  const w = boot();
+  deliver(w, data(null, { notes: false, written: [] }));
+  assert.match(act(card(w), 'release-prep').title, /branch the suite tests and no other card is open\./);
 });
 // Bug this guards (#1365): a notes card closed before it landed (relfixes() records its fixes entry closed) starts no
 // run, but the panel still said the suite runs by itself once the card lands.

@@ -396,7 +396,7 @@
     let s1;
     if (s.waiting) {
       // A step under way: the card that adds the draft to main, and what happens when it lands.
-      const p = h('p', 'row-meta', `The suite runs by itself once the card's commit is on the branch the suite tests${s.cur.notes.then === 'release' ? ', then the release' : ''}.`);
+      const p = h('p', 'row-meta', `The suite runs by itself once the card's commit is on the branch the suite tests and no other card is open${s.cur.notes.then === 'release' ? ', then the release' : ''}.`);
       p.dataset.figure = 'notes-card';
       s1 = step(h, 'Release notes', 'now', `docs/releases/${v}.md on main: card ${s.waiting} adds the notes draft`, p);
     } else if (s.notesClosed) {
@@ -504,7 +504,7 @@
     input.value = typed.has(rec.repo) ? typed.get(rec.repo) : String(m.next || '');
     const [label, ask, title, what] = s.moved ? ['Run again on the new main', 'Click again to run the suite on the new main',
       'Run the whole suite on main\'s head. It releases nothing.', 'The suite runs again on the new main.']
-      : !notes ? ['Draft notes', 'Click again to draft the notes', `release-prep writes a draft of docs/releases/${v}.md and starts a card that adds it to main. The suite runs when the card's commit is on the branch the suite tests. A draft that breaks the notes style stops for you to edit.`, 'The notes draft is being written.']
+      : !notes ? ['Draft notes', 'Click again to draft the notes', `release-prep writes a draft of docs/releases/${v}.md and starts a card that adds it to main. The suite runs when the card's commit is on the branch the suite tests and no other card is open. A draft that breaks the notes style stops for you to edit.`, 'The notes draft is being written.']
       : [s.passed || s.notStarted ? 'Run suite again' : 'Run suite', 'Click again to run the suite', 'Run the whole suite on main\'s head. It releases nothing.', 'The suite is running.'];
     const btn = h('button', 'btn', label);
     btn.type = 'button'; btn.dataset.act = 'release-prep'; btn.title = title;
