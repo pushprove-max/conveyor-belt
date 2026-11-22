@@ -30,15 +30,16 @@ right-aligned and the title is what gives way.
   A project where no session has the
   Foreman role and no Foreman is set up shows no Foreman line. [Foreman](foreman.md) tells what each reason means.
 - **The whole suite**, in `/units` and the pane, under the head: while a release suite or a full test run is in
-  progress, one line for it: the kind (`release 1.2.0` or `full test`), the short commit, the time it has run, the cases
-  done and the failures until now (`release 1.2.0 · a1b2c3d · running 12m · 140 cases done · 2 failures`). While a
+  progress, a line for it with the kind (`release 1.2.0` or `full test`), the short commit and the time it has run, and
+  under it the cases done and the failures until now (`release 1.2.0 · a1b2c3d · running 12m`, then `140 cases done · 2
+  failures`). While a
   release runs its failed cases again, the line shows that pass in their place: the pass of all the passes, its test
   files done and failed, and when it last moved (`release 1.2.0 · a1b2c3d · failed cases again: pass 2 of 6 · 1 file
   done · 1 failed · moved 3m ago`). When the run
   ends, the line shows the result (`passed 3m ago`) for 10 minutes, then it goes away.
   A release suite that runs on another machine (a Namespace Devbox or a Linux box over ssh, chosen in the control
-  record) names it after the commit: `release 1.10.0 · 3342e0e · on Devbox XL · running 5m 20s · 1204 cases done · 0
-  failures`. Before the tests start, the line gives the step of the box instead of `running`: `starting the box`,
+  record) names it after the commit: `release 1.10.0 · 3342e0e · on Devbox XL · running 5m 20s`, then `1204 cases done ·
+  0 failures` under it. Before the tests start, the line gives the step of the box instead of `running`: `starting the box`,
   `setting up`, `checking out` or, at the end, `bringing back results`. When the run ends, it shows how long the run
   took, then how long ago it ended, and for a Devbox `box given back` once its lease is back (`passed 8m 50s · 2 min
   ago · box given back`). A suite on this machine has no machine part.
@@ -158,7 +159,7 @@ this page says that it wraps.
 - **`[ Machine details ]`**: closed at first. Click it, or press `m` while the pane has the focus, to open or close it.
   It shows the session that has the Foreman role, the waiter and the watchers, the link to the plugin problems file,
   the test map line and the weekly limit.
-- The old-engine line and the whole-suite line, when there is one, and the cards that need you, one line each.
+- The old-engine line and the whole-suite line, when there is one (two lines while it runs), and the cards that need you, one line each.
 - **BUILD MATRIX**: on the right, the project and its slots in use against the builder cap (`bookstore · 3/4
   slots`). One row for each card on the belt: the issue (`#486`), one column for each step (`B R F T L P`: Build,
   Review, Fix, Test, Land, Push), its overall time (`Age`), its cost and, last, its short title (`Title`). The title

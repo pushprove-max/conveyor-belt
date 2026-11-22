@@ -11,7 +11,7 @@ import { clockOf, cols, plain } from './elements'
 const NOW = Date.UTC(2026, 10, 10, 4, 40, 0)
 const ago = (min: number) => new Date(NOW - min * 60_000).toISOString()
 const snapshot = (over: object = {}) => JSON.stringify({
-  time: ago(0), day: '2026-11-09', needsYou: { waiting: [], blocked: [] }, belt: [], queue: { next: [], held: {} }, landed: [], health: {},
+  time: ago(0), day: '2026-11-09', needsYou: { waiting: [], blocked: [] }, belt: [], queue: { next: [] }, landed: [], health: {},
   cost: { today: 0, week: 0, perLanded: null, landedAfter: {}, unpricedSteps: 0 }, ...over,
 })
 const fetched = (records: [string, string][], host = 'host\tbuildbox\tssh\t0', fast = 'fast\tnone') =>
@@ -19,6 +19,8 @@ const fetched = (records: [string, string][], host = 'host\tbuildbox\tssh\t0', f
 const state = (text: string, over: Partial<State> = {}): State =>
   ({ now: NOW, ...boardOf(parseFetch(text)), limit: null, fast: (parseFetch(text)?.fast ?? { state: 'unread' }) as Fast, research: { state: 'none' }, ...over })
 const board = (over: object = {}, more: Partial<State> = {}) => state(fetched([['bookstore', snapshot(over)]]), more)
+// The snapshot's queue.skipped: one entry a skipped issue, by the rule that skips it (what the engine emits; it has no queue.held).
+const skipped = (counts: Record<string, number>) => Object.entries(counts).flatMap(([rule, n]) => Array.from({ length: n }, (_, i) => ({ issue: 5000 + i, title: `Skipped ${i}`, rule })))
 const section = (text: string, name: string) => text.split('\n\n').find(p => p.startsWith(name)) ?? ''
 
 const WAITING = { card: 'c1-3861', issue: 3861, title: 'Fast lane lands through Conveyor', sentence: 'Staff land Fast lane changes as a card.', since: ago(12) }
@@ -37,7 +39,7 @@ const queued = (n: number) => Array.from({ length: n }, (_, i) => ({ issue: 3900
 // the head is two lines, CONVEYOR with today's cost and the host, then the weekly limit with its reset
 // and the counts on the belt and queued.
 test('the head gives dollars today and the host, then the weekly limit with its reset and the counts on the belt and queued', () => {
-  const text = tableText(board({ cost: { today: 12.345 }, belt: BELT, queue: { next: queued(9), held: {} } }, { limit: { pct: 94, resetsAt: NOW + (24 + 18) * 3600_000 } }), 62)
+  const text = tableText(board({ cost: { today: 12.345 }, belt: BELT, queue: { next: queued(9) } }, { limit: { pct: 94, resetsAt: NOW + (24 + 18) * 3600_000 } }), 62)
   const [first, second] = text.split('\n')
   expect(first).toMatch(/^CONVEYOR +today \$12\.35  ● buildbox$/)
   expect(second).toMatch(/^weekly limit 94% · resets 1d 18h +2 on belt · 9 queued$/)
@@ -72,7 +74,7 @@ test('/units gives the cards building against the cap and leaves out those waiti
 // a snapshot that still names the machine's pressure draws no machine line in ON THE BELT.
 test('/units says why the machine holds a queued card back, and draws no machine room line', () => {
   const room = 'waiting for a machine slot: 2 of the machine cap 2 in use'
-  const s = board({ queue: { next: [{ ...queued(1)[0], room }], held: {} },
+  const s = board({ queue: { next: [{ ...queued(1)[0], room }] },
     health: { pressure: { state: 'Strained', cpu: 12.5, memory: 25.5, wakeMs: 0.2, freeMB: null, why: 'memory pressure 25.5% is at or above 20%', gates: true } } })
   const text = tableText(s, 200)
   expect(section(text, 'ON THE BELT').split('\n')[1].trimEnd()).toBe('  the belt is empty')
@@ -86,7 +88,7 @@ test('/units says why the machine holds a queued card back, and draws no machine
     expect(queue.join(' ').replace(/\s+/g, ' ')).toContain(room)
   }
   // A queued card the machine does not hold has no line under it.
-  const none = tableText(board({ queue: { next: queued(1), held: {} } }), 200)
+  const none = tableText(board({ queue: { next: queued(1) } }), 200)
   expect(section(none, 'QUEUE').split('\n').length).toBe(2)
 })
 
@@ -107,9 +109,9 @@ test('with more than one project, the head gives each project\'s count after its
 // Bug: a release's whole suite (about 15 minutes) runs and /units shows nothing of it, so the owner asks the Foreman
 // whether it runs, how far it is and whether anything failed; or a run long over stays on the board.
 const SUITE = { kind: 'release', version: '1.2.0', step: 'release-prep', sha: 'a1b2c3d4e5f6a7b8', since: ago(12), ended: null, state: 'running', done: 140, failed: 2, cases: ['x: a', 'y: b'], moved: false, reasons: [] }
-test('a release suite under way is one line under the head: its version, short commit, time running, cases done and failures so far', () => {
+test('a release suite under way is a line under the head with its version, short commit and time running, and a line of cases done and failures so far', () => {
   const lines = tableText(board({ suites: [SUITE] }), 80).split('\n')
-  expect(lines[3]).toBe('release 1.2.0 · a1b2c3d · running 12m · 140 cases done · 2 failures')
+  expect(lines.slice(3, 5)).toEqual(['release 1.2.0 · a1b2c3d · running 12m', '  140 cases done · 2 failures'])
   expect(tableText(board({ suites: [] }), 80)).not.toMatch(/release|running|cases done/)
 })
 // Bug (#1240): while a release's failed cases ran again, /units kept the first pass's "140 cases done · 2 failures".
@@ -134,6 +136,7 @@ const agoSec = (sec: number) => new Date(NOW - sec * 1000).toISOString()
 const BOX = { kind: 'devbox', name: 'Devbox XL', lease: 'ns-1', step: 'start', secs: {}, reason: null }
 const BOXED = { ...SUITE, version: '1.10.0', sha: '3342e0eaaaaaaaaa', since: agoSec(40), done: null, failed: 0, machine: BOX }
 const suiteLine = (suite: object) => tableText(board({ suites: [{ ...BOXED, ...suite }] }), 100).split('\n')[3]?.trimEnd()
+const suiteCounts = (suite: object) => tableText(board({ suites: [{ ...BOXED, ...suite }] }), 100).split('\n')[4]?.trimEnd()
 // The record holds done 0 and failed 0 before the tests run, and the final counts when the results come back: the
 // steps around the tests say no counts (a line "0 cases done · 0 failures" for a box still starting was the bug).
 test('a release suite on a Devbox names the machine after the commit, its step before the tests, then its cases and failures, then, once ended, that the box was given back', () => {
@@ -141,15 +144,24 @@ test('a release suite on a Devbox names the machine after the commit, its step b
   expect(suiteLine({ done: 0, machine: { ...BOX, step: 'setup' } })).toBe('release 1.10.0 · 3342e0e · on Devbox XL · setting up 0m 40s')
   expect(suiteLine({ done: 0, machine: { ...BOX, step: 'checkout' } })).toBe('release 1.10.0 · 3342e0e · on Devbox XL · checking out 0m 40s')
   expect(suiteLine({ done: 1204, failed: 3, machine: { ...BOX, step: 'results' } })).toBe('release 1.10.0 · 3342e0e · on Devbox XL · bringing back results 0m 40s')
-  expect(suiteLine({ machine: { ...BOX, step: 'run' }, since: agoSec(320), done: 1204 })).toBe('release 1.10.0 · 3342e0e · on Devbox XL · running 5m 20s · 1204 cases done · 0 failures')
+  expect(suiteLine({ machine: { ...BOX, step: 'run' }, since: agoSec(320), done: 1204 })).toBe('release 1.10.0 · 3342e0e · on Devbox XL · running 5m 20s')
+  expect(suiteCounts({ machine: { ...BOX, step: 'run' }, since: agoSec(320), done: 1204 })).toBe('  1204 cases done · 0 failures')
   expect(suiteLine({ machine: { ...BOX, step: 'done' }, since: agoSec(530 + 120), ended: agoSec(120), state: 'passed' }))
     .toBe('release 1.10.0 · 3342e0e · on Devbox XL · passed 8m 50s · 2 min ago · box given back')
   // A box that was not given back (no lease kept) does not claim it was.
   expect(suiteLine({ machine: { ...BOX, lease: null, step: 'run' }, since: agoSec(530 + 120), ended: agoSec(120), state: 'not started' })).not.toMatch(/given back/)
 })
+// Bug (#1438, O376): at 80 columns the pane cut the case and failure counts off a running suite on a machine named
+// 'Namespace Devbox 4x8', as the one line was about 98 columns wide.
+test('a running suite on a long-named machine keeps its case and failure counts at 80 columns', () => {
+  const box = { ...BOX, name: 'Namespace Devbox 4x8', step: 'run' }
+  const out = paneModel(board({ suites: [{ ...BOXED, machine: box, since: agoSec(320), done: 1204 }] }), 80, 0).map(plain).join('\n')
+  expect(out).toContain('1204 cases done · 0 failures')
+})
 test('a release suite on this machine, or from a snapshot with no machine, has no machine part', () => {
   const local = { kind: 'local', name: 'this machine', lease: null, step: 'run', secs: {}, reason: null }
-  expect(suiteLine({ machine: local, since: ago(12), done: 140, failed: 2 })).toBe('release 1.10.0 · 3342e0e · running 12m · 140 cases done · 2 failures')
+  expect(suiteLine({ machine: local, since: ago(12), done: 140, failed: 2 })).toBe('release 1.10.0 · 3342e0e · running 12m')
+  expect(suiteCounts({ machine: local, since: ago(12), done: 140, failed: 2 })).toBe('  140 cases done · 2 failures')
   expect(suiteLine({ machine: undefined, since: ago(12), done: 140, failed: 2 })).not.toMatch(/ on /)
 })
 
@@ -502,8 +514,8 @@ test('ON THE BELT with no open card says so', () => {
 })
 
 test('QUEUE lists the next five, numbered, the title cut to fit and the priority right-aligned, then what each skipped label holds back', () => {
-  const next = [...queued(6), { issue: 3999, title: 'A follow-up with a title much too long for the line it is on', priority: 'P1', followup: true, retried: true }]
-  const part = section(tableText(board({ queue: { next, held: { dormant: 37, backlog: 2, 'ux-change': 0 } } }), 62), 'QUEUE')
+  const next = [{ issue: 3999, title: 'A follow-up with a title much too long for the line it is on', priority: 'P1', followup: true, retried: true }, ...queued(6)]
+  const part = section(tableText(board({ queue: { next, skipped: skipped({ dormant: 37, backlog: 2 }) } }), 62), 'QUEUE')
   for (const l of part.split('\n')) expect(cols(l)).toBeLessThanOrEqual(62)
   expect(part.split('\n')).toEqual([
     'QUEUE  next 5 of 7',
@@ -516,20 +528,40 @@ test('QUEUE lists the next five, numbered, the title cut to fit and the priority
   ])
 })
 
+// Bug (#1438, O372): the pane read queue.held, which the snapshot no longer emits, so 'held back:' never showed. The
+// snapshot gives queue.skipped (one entry an issue, with its rule) and queue.holding (the issues the record holds).
+test('QUEUE counts what is held back from the snapshot\'s queue.skipped by rule and queue.holding', () => {
+  const holding = [{ issue: 6001, title: 'Held one', priority: 'P2', waitsFor: [] }, { issue: 6002, title: 'Held two', priority: 'P2', waitsFor: [] }]
+  const s = board({ queue: { next: queued(1), skipped: skipped({ dormant: 2, backlog: 1 }), holding } })
+  expect(section(tableText(s, 80), 'QUEUE').split('\n').slice(-1)).toEqual([' held back: 1 backlog · 2 dormant · 2 held'])
+  expect(paneModel(s, 80, 0).map(plain).join('\n')).toContain('held back: 1 backlog · 2 dormant · 2 held')
+})
+
+// Bug (#1438, O371): the mod sorted queue.next by follow-up and priority, so a pinned P2 issue the engine picks first
+// showed below the P0 issue picked after it. Each record's order stands.
+test('QUEUE and PICK ORDER keep the engine\'s pick order within a record: a pinned P2 stays ahead of a P0', () => {
+  const next = [{ issue: 5, title: 'Pinned', priority: 'P2', followup: false, retried: false }, { issue: 9, title: 'Urgent', priority: 'P0', followup: false, retried: false }]
+  const s = board({ queue: { next } })
+  expect(section(tableText(s, 80), 'QUEUE').split('\n').slice(1, 3)).toEqual([expect.stringMatching(/^ 1 #5 /), expect.stringMatching(/^ 2 #9 /)])
+  const pick = section(paneModel(s, 80, 0).map(plain).join('\n'), 'PICK ORDER')
+  expect(pick.indexOf('#5')).toBeGreaterThan(-1)
+  expect(pick.indexOf('#5')).toBeLessThan(pick.indexOf('#9'))
+})
+
 // Issue 875. Bug: with push off, an open issue whose card landed on an earlier day and is not pushed was in no part of
 // /units: LANDED TODAY lists only today's landings, so it looked like open work. Its snapshot entry is open.held, a
 // card reason notPushed; one held by you is not listed.
 test('QUEUE names each open issue landed and not pushed, on any day, after the held-back line', () => {
   const open = { held: [{ issue: 3700, reasons: [{ kind: 'card', step: 'landed', card: 'c-3700', notPushed: true }] }, { issue: 3701, reasons: [{ kind: 'you' }] },
     { issue: 3702, reasons: [{ kind: 'card', step: 'landed', card: 'c-3702', notPushed: true }] }] }
-  const s = board({ queue: { next: [], held: { dormant: 3 } }, open })
+  const s = board({ queue: { next: [], skipped: skipped({ dormant: 3 }) }, open })
   expect(section(tableText(s, 80), 'QUEUE').split('\n').slice(-2)).toEqual([' held back: 3 dormant', ' landed, not pushed: #3700 · #3702'])
   expect(paneModel(s, 80, 0).map(plain).join('\n')).toMatch(/\nheld back: 3 dormant\nlanded, not pushed: #3700 · #3702\n/)
 })
 
 test('QUEUE shows an issue that waits on another after the next ones, as "Waits for #N", never numbered', () => {
   const waiting = [{ issue: 3950, title: 'Second half', waitsFor: [3900] }, { issue: 3951, title: 'Both', waitsFor: [3900, 3950] }, { issue: 3952, title: 'Bad', waitsFor: [] }]
-  const part = section(tableText(board({ queue: { next: queued(1), held: {}, waiting } }), 80), 'QUEUE')
+  const part = section(tableText(board({ queue: { next: queued(1), waiting } }), 80), 'QUEUE')
   expect(part.split('\n')).toEqual([
     'QUEUE  1',
     expect.stringMatching(/^ 1 #3900 Issue 0 +P2$/),
@@ -537,7 +569,7 @@ test('QUEUE shows an issue that waits on another after the next ones, as "Waits 
     expect.stringMatching(/^ · #3951 Both +Waits for #3900, #3950$/),
   ])
   // A snapshot from before the list, or one whose issues were not listed, shows none.
-  expect(section(tableText(board({ queue: { next: queued(1), held: {} } }), 80), 'QUEUE')).not.toContain('Waits for')
+  expect(section(tableText(board({ queue: { next: queued(1) } }), 80), 'QUEUE')).not.toContain('Waits for')
 })
 
 // Bug (issue 439): "Waits for #N" did not say why #N does not move, so the owner could not tell a stuck queue from one
@@ -545,7 +577,7 @@ test('QUEUE shows an issue that waits on another after the next ones, as "Waits 
 test('QUEUE says the state of each issue a waiting one waits for', () => {
   const waiting = [{ issue: 3950, title: 'Second half', waitsFor: [3900, 3901, 3902],
     waitsOn: [{ issue: 3900, state: 'held' }, { issue: 3901, state: 'blocked' }, { issue: 3902, state: 'queued' }] }]
-  expect(section(tableText(board({ queue: { next: queued(1), held: {}, waiting } }), 100), 'QUEUE').split('\n')[2])
+  expect(section(tableText(board({ queue: { next: queued(1), waiting } }), 100), 'QUEUE').split('\n')[2])
     .toMatch(/^ · #3950 Second half +Waits for #3900 \(held\), #3901 \(blocked\), #3902 \(queued\)$/)
 })
 
@@ -554,7 +586,7 @@ test('QUEUE says the state of each issue a waiting one waits for', () => {
 test('QUEUE puts a "Waits for" label too long for the line under the title, not drops it', () => {
   const waiting = [{ issue: 3950, title: 'Second half', waitsFor: [3900, 3901, 3902],
     waitsOn: [{ issue: 3900, state: 'held' }, { issue: 3901, state: 'blocked' }, { issue: 3902, state: 'queued' }] }]
-  expect(section(tableText(board({ queue: { next: queued(1), held: {}, waiting } }), 56), 'QUEUE').split('\n').slice(2)).toEqual([
+  expect(section(tableText(board({ queue: { next: queued(1), waiting } }), 56), 'QUEUE').split('\n').slice(2)).toEqual([
     ' · #3950 Second half',
     '    Waits for #3900 (held), #3901 (blocked),',
     '      #3902 (queued)',
@@ -566,7 +598,7 @@ test('QUEUE puts a "Waits for" label too long for the line under the title, not 
 test('QUEUE whose issues all wait says nothing can be picked and names what they wait for, not that it is empty', () => {
   const waiting = [{ issue: 3950, title: 'Second half', waitsFor: [3967, 3959], waitsOn: [{ issue: 3967, state: 'held' }, { issue: 3959, state: 'blocked' }] },
     { issue: 3951, title: 'Third', waitsFor: [3967], waitsOn: [{ issue: 3967, state: 'held' }] }]
-  const part = section(tableText(board({ queue: { next: [], held: {}, waiting } }), 100), 'QUEUE')
+  const part = section(tableText(board({ queue: { next: [], waiting } }), 100), 'QUEUE')
   expect(part).not.toContain('the queue is empty')
   // Not "each waits for": #3951 waits for #3967 only.
   expect(part.split('\n').slice(0, 2)).toEqual(['QUEUE', '  nothing can be picked: waiting for #3959 (blocked), #3967 (held)'])
@@ -574,7 +606,7 @@ test('QUEUE whose issues all wait says nothing can be picked and names what they
 
 test('the issues built and waiting for a PROD deploy are a section of their own under QUEUE, with how long each has waited; with none there is no section', () => {
   const awaitingDeploy = [{ issue: 3476, title: 'Stack split', since: ago(2 * 24 * 60) }, { issue: 3500, title: 'Label time not read', since: null }]
-  const text = tableText(board({ queue: { next: queued(1), held: {} }, awaitingDeploy }), 80)
+  const text = tableText(board({ queue: { next: queued(1) }, awaitingDeploy }), 80)
   expect(section(text, 'BUILT').split('\n')).toEqual([
     'BUILT, WAITING FOR YOUR PROD DEPLOY (2)',
     expect.stringMatching(/^· #3476 Stack split +waiting 2d\b.*$/),
@@ -593,7 +625,7 @@ test('the issues built and waiting for a PROD deploy are a section of their own 
 
 test('QUEUE with nothing to pick says so, and one GitHub did not list says it was not read', () => {
   expect(section(tableText(board(), 80), 'QUEUE')).toBe('QUEUE\n  the queue is empty')
-  const unread = board({ queue: { next: null, held: null } })
+  const unread = board({ queue: { next: null } })
   expect(section(tableText(unread, 80), 'QUEUE')).toBe('QUEUE\n  not read: GitHub did not list the issues')
 })
 
@@ -813,14 +845,14 @@ test('a live feed\'s snapshot 90 s old adds no age note; with the stream down, o
 test('the pane\'s count band shows NEEDS YOU in full at 40 columns, also with ten issues ready', () => {
   const lines = (over: object) => paneModel(board(over), 40, 0).map(plain)
   expect(lines({}).find(l => l.includes('ON BELT'))).toContain('NEEDS YOU')
-  const busy = lines({ belt: BELT, needsYou: { waiting: [WAITING], blocked: [BLOCKED] }, queue: { next: queued(10), held: {} } })
+  const busy = lines({ belt: BELT, needsYou: { waiting: [WAITING], blocked: [BLOCKED] }, queue: { next: queued(10) } })
   expect(busy.find(l => l.includes('NEEDS YOU') && !l.includes('NEEDS YOU ('))).toBe('0 WAITING · 2 NEEDS YOU')
   expect(busy.find(l => l.includes('ON BELT'))).toMatch(/^2 ON BELT · 10\+? READY$/)
 })
 
 test('a second record\'s cards carry its name, and one record that cannot be read costs only its own note', () => {
-  const other = snapshot({ belt: [{ ...BELT[0], card: 'c1-12', issue: 12, title: 'Other work' }], cost: { today: 1 }, queue: { next: null, held: null } })
-  const both = state(fetched([['bookstore', snapshot({ belt: [BELT[1]], cost: { today: 2.5 }, queue: { next: queued(1), held: {} } })], ['widgetshop', other]]))
+  const other = snapshot({ belt: [{ ...BELT[0], card: 'c1-12', issue: 12, title: 'Other work' }], cost: { today: 1 }, queue: { next: null } })
+  const both = state(fetched([['bookstore', snapshot({ belt: [BELT[1]], cost: { today: 2.5 }, queue: { next: queued(1) } })], ['widgetshop', other]]))
   const text = tableText(both, 100)
   expect(text).toMatch(/^CONVEYOR +today \$3\.50  ● buildbox\n/)
   expect(text).toMatch(/\n #3864 Rebuild \/units for Conveyor /)
@@ -838,7 +870,7 @@ test('a second record\'s cards carry its name, and one record that cannot be rea
 // line wrapped (a title, a lane), or the matrix dropped the card's title and left the rest of each row empty.
 test('the pane at 60 columns: no line wider than the pane, and each matrix row ends in its title, cut to fit', () => {
   const landed = Array.from({ length: 7 }, (_, i) => ({ ...LANDED[0], card: `c-${i}`, issue: 3800 + i, time: ago(i) }))
-  const s = board({ needsYou: { waiting: [WAITING], blocked: [BLOCKED] }, belt: BELT, queue: { next: queued(10), held: { dormant: 3 } }, landed, cost: { today: 29.48 } },
+  const s = board({ needsYou: { waiting: [WAITING], blocked: [BLOCKED] }, belt: BELT, queue: { next: queued(10), skipped: skipped({ dormant: 3 }) }, landed, cost: { today: 29.48 } },
     { limit: { pct: 50, resetsAt: NOW + 3600_000 }, research: { state: 'ok', lastAt: NOW - 60_000 }, fast: { state: 'ok', branch: 'fast-lane', ahead: 1, dirty: 0, subject: 'A long subject '.repeat(8) } })
   const lines = paneModel(s, 60, 0).map(plain)
   for (const l of lines) expect(cols(l)).toBeLessThanOrEqual(60)
@@ -927,7 +959,7 @@ test('the pane from two projects with 4 cards building, 5 waiting and 20 landed:
   const landed = Array.from({ length: 20 }, (_, i) => ({ ...LANDED[0], card: `c-l${i}`, issue: 400 + i, time: ago(i), rounds: [{ round: 2, verdict: 'GO', counts: null, sec: 60, fixed: false }] }))
   const health = (building: number) => ({ loop: true, state: 'running', building, waitingCount: 0, builderCap: 4 })
   const s = state(fetched([
-    ['bookstore', snapshot({ belt: [485, 486, 487].map(n => card('bookstore', n)), queue: { next: [], held: {}, waiting: waits }, landed, health: health(3) })],
+    ['bookstore', snapshot({ belt: [485, 486, 487].map(n => card('bookstore', n)), queue: { next: [], waiting: waits }, landed, health: health(3) })],
     ['gadgetlab', snapshot({ belt: [card('gadgetlab', 7)], health: health(1) })],
   ]))
   const lines = paneModel(s, 72, 0).map(plain)
@@ -969,7 +1001,7 @@ test('LANDED TODAY counts every card landed today (landedCount, summed across pr
 // width and lost #488, the last issue it waits for.
 test('a Pick order row too long for the pane wraps at each issue it waits for, and loses none', () => {
   const waiting = [{ issue: 489, title: 'Waits', waitsFor: [485, 486, 487, 488], waitsOn: [485, 486, 487, 488].map(n => ({ issue: n, state: 'building' })) }]
-  const lines = paneModel(board({ queue: { next: [], held: {}, waiting } }), 60, 0).map(plain)
+  const lines = paneModel(board({ queue: { next: [], waiting } }), 60, 0).map(plain)
   const at = lines.indexOf(lines.find(l => l.startsWith('#489 '))!)
   expect(lines.slice(at, at + 3)).toEqual(['#489     #485 (building)  #486 (building)  #487 (building)', '         #488 (building)', ''])
   for (const l of lines) expect(cols(l)).toBeLessThanOrEqual(60)
@@ -979,7 +1011,7 @@ test('a Pick order row too long for the pane wraps at each issue it waits for, a
 // the waiting, was counted READY and WAITING at once, and listed in Pick order as waiting.
 test('a forced issue counts as ready only, and is not in Pick order', () => {
   const waiting = [{ issue: 3, title: 'Forced', waitsFor: [2], forced: true }, { issue: 4, title: 'Waits', waitsFor: [2], forced: false }]
-  const text = paneModel(board({ queue: { next: [{ issue: 3, title: 'Forced', waitsFor: [2], forced: true }], held: {}, waiting } }), 72, 0).map(plain).join('\n')
+  const text = paneModel(board({ queue: { next: [{ issue: 3, title: 'Forced', waitsFor: [2], forced: true }], waiting } }), 72, 0).map(plain).join('\n')
   expect(text).toContain('\n0 ON BELT · 1 READY · 1 WAITING · 0 NEEDS YOU\n')
   expect(text).toMatch(/\nPICK ORDER +1 ready\n 1 #3 Forced +P3\nWaiting +Requires\n#4 +#2\n\n/)
 })
@@ -991,7 +1023,7 @@ test('a parent with three parts, one done, one in flight and one waiting, is one
   // #701 is a part of a parent the snapshot does not list: it keeps its own row, so it is not lost.
   const waiting = [{ issue: 637, title: 'Third part', waitsFor: [636], umbrella: 647 }, { issue: 700, title: 'No part', waitsFor: [699] },
     { issue: 701, title: 'Part of an unlisted parent', waitsFor: [700], umbrella: 900 }]
-  const s = board({ belt: [{ ...BELT[0], issue: 636, card: 'c3-636', title: 'Second part', umbrella: 647 }], queue: { next: [], held: {}, waiting }, open: { umbrellas } })
+  const s = board({ belt: [{ ...BELT[0], issue: 636, card: 'c3-636', title: 'Second part', umbrella: 647 }], queue: { next: [], waiting }, open: { umbrellas } })
   const text = paneModel(s, 72, 0).map(plain).join('\n')
   expect(text).toMatch(/\nPICK ORDER +0 ready\nParent +Parts\n#647 +1 of 3 done · #636 in flight  Parts of a large piece of work\nWaiting +Requires\n#700 +#699\n#701 +#700\n\n/)
   expect(text).not.toMatch(/\n#637 /)
@@ -1003,7 +1035,7 @@ test('a parent with three parts, one done, one in flight and one waiting, is one
 test('the parts of one parent count as one in READY, and not in WAITING while a part is ready', () => {
   const umbrellas = [{ issue: 650, title: 'Parent', parts: ['#651', '#652', '#653'], done: 0, all: 3, inFlight: [] }]
   const next = [651, 652].map(n => ({ issue: n, title: `Part ${n}`, priority: 'P2', followup: false, retried: false, umbrella: 650 }))
-  const s = board({ queue: { next, held: {}, waiting: [{ issue: 653, title: 'Part 653', waitsFor: [651], umbrella: 650 }] }, open: { umbrellas } })
+  const s = board({ queue: { next, waiting: [{ issue: 653, title: 'Part 653', waitsFor: [651], umbrella: 650 }] }, open: { umbrellas } })
   const text = paneModel(s, 72, 0).map(plain).join('\n')
   expect(text).toContain('\n0 ON BELT · 1 READY · 0 WAITING · 0 NEEDS YOU\n')
   expect(text).toMatch(/\nPICK ORDER +2 ready\n 1 #651 Part 651 +P2\n 2 #652 Part 652 +P2\nParent +Parts\n#650 +0 of 3 done  Parent\n\n/)
@@ -1146,7 +1178,7 @@ test('WORKER ACTIVITY: a card in its Test step shows a bar of its tests done of 
 test('PICK ORDER lists the next five ready issues of two projects, numbered, with their priorities, above the Waiting table', () => {
   const next = (n: number, p: string) => Array.from({ length: n }, (_, i) => ({ issue: 10 + i, title: `${p} issue ${i}`, priority: i === 0 ? 'P0' : 'P2', followup: false, retried: false }))
   const waiting = [{ issue: 90, title: 'Waits', waitsFor: [10] }, { issue: 91, title: 'Waits too', waitsFor: [90] }]
-  const s = state(fetched([['bookstore', snapshot({ queue: { next: next(4, 'Book'), held: {}, waiting } })], ['gadgetlab', snapshot({ queue: { next: next(3, 'Gadget'), held: {} } })]]))
+  const s = state(fetched([['bookstore', snapshot({ queue: { next: next(4, 'Book'), waiting } })], ['gadgetlab', snapshot({ queue: { next: next(3, 'Gadget') } })]]))
   const text = paneModel(s, 72, 0).map(plain).join('\n')
   expect(text).toContain(' 7 READY ')
   const part = section(text, 'PICK ORDER').split('\n')
@@ -1168,8 +1200,8 @@ test('PICK ORDER lists the next five ready issues of two projects, numbered, wit
 // the pane lost with the list.
 test('PICK ORDER says why the machine holds an issue back, marks a follow-up and a retried issue, and keeps the held-back line', () => {
   const room = 'waiting for a machine slot: 2 of the machine cap 2 in use'
-  const next = [{ ...queued(1)[0], room }, { issue: 3950, title: 'Fix the follow-up', priority: 'P1', followup: true, retried: false }, { issue: 3951, title: 'Try again', priority: 'P2', followup: false, retried: true }]
-  const part = section(paneModel(board({ queue: { next, held: { dormant: 3 } } }), 72, 0).map(plain).join('\n'), 'PICK ORDER').split('\n')
+  const next = [{ issue: 3950, title: 'Fix the follow-up', priority: 'P1', followup: true, retried: false }, { ...queued(1)[0], room }, { issue: 3951, title: 'Try again', priority: 'P2', followup: false, retried: true }]
+  const part = section(paneModel(board({ queue: { next, skipped: skipped({ dormant: 3 }) } }), 72, 0).map(plain).join('\n'), 'PICK ORDER').split('\n')
   expect(part.slice(0, 5)).toEqual([
     expect.stringMatching(/^PICK ORDER +3 ready$/),
     expect.stringMatching(/^ 1 #3950 Fix the follow-up +P1 · follow-up$/),
@@ -1185,8 +1217,8 @@ test('PICK ORDER says why the machine holds an issue back, marks a follow-up and
 test('PICK ORDER with nothing ready and nothing waiting says the queue is empty; with only waiting issues it shows the Waiting table alone', () => {
   const empty = paneModel(board(), 72, 0).map(plain).join('\n')
   expect(section(empty, 'PICK ORDER').split('\n').slice(1)).toEqual(['  the queue is empty'])
-  const waiting = paneModel(board({ queue: { next: [], held: {}, waiting: [{ issue: 5, title: 'Waits', waitsFor: [4] }] } }), 72, 0).map(plain).join('\n')
+  const waiting = paneModel(board({ queue: { next: [], waiting: [{ issue: 5, title: 'Waits', waitsFor: [4] }] } }), 72, 0).map(plain).join('\n')
   expect(section(waiting, 'PICK ORDER').split('\n').slice(1)).toEqual([expect.stringMatching(/^Waiting +Requires$/), expect.stringMatching(/^#5 +#4$/)])
-  const unread = paneModel(board({ queue: { next: null, held: null } }), 72, 0).map(plain).join('\n')
+  const unread = paneModel(board({ queue: { next: null } }), 72, 0).map(plain).join('\n')
   expect(section(unread, 'PICK ORDER').split('\n').slice(1)).toEqual(['  not read: GitHub did not list the issues'])
 })

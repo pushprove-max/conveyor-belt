@@ -232,6 +232,31 @@ const umbrellaOf = (x: any) => { const n = num(x.umbrella); return n !== null &&
 
 const liveOf = (v: any): Live | null => (v && typeof v === 'object' ? { action: one(v.action), turns: num(v.turns), lastOutputAt: time(v.lastOutputAt) } : null)
 
+// The records' queues as one list. Each queue is already in the engine's pick order (a pinned issue can stand ahead of a
+// higher priority one), so one record's issues keep their order; only the heads of the queues are compared: follow-ups
+// first, then priority, then the place in its own queue (the stand-in for age), the first record winning a tie.
+const mergeQueues = (queues: Queued[][]): Queued[] => {
+  // Each queue reversed, so the next issue of a queue is popped from its end, with its place in the queue as its age.
+  const rest = queues.map(q => q.map((x, at) => ({ x, at })).reverse())
+  const out: Queued[] = []
+  for (;;) {
+    let best: { x: Queued; at: number } | undefined
+    for (const q of rest) {
+      const a = q[q.length - 1]
+      if (a && (!best || Number(a.x.followup) - Number(best.x.followup) > 0 || (a.x.followup === best.x.followup && (a.x.priority.localeCompare(best.x.priority) < 0 || (a.x.priority === best.x.priority && a.at < best.at))))) best = a
+    }
+    if (!best) return out
+    out.push(best.x)
+    rest.find(q => q[q.length - 1] === best)?.pop()
+  }
+}
+const heldCounts =(skipped: unknown, holding: unknown): Record<string, number> => {
+  const out: Record<string, number> = {}
+  for (const x of Array.isArray(skipped) ? skipped : []) if (x && typeof x === 'object' && one((x as any).rule)) out[one((x as any).rule)] = (out[one((x as any).rule)] ?? 0) + 1
+  const n = (Array.isArray(holding) ? holding : []).filter(x => x && typeof x === 'object').length
+  if (n > 0) out.held = n
+  return out
+}
 type Rec = { loop: Loop; needs: Need[]; belt: Belt[]; queue: Queued[] | null; waits: Waiting[]; held: Record<string, number>; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut: number; judgeDeclined: { id: string; at: number }[]; suites: Suite[]; umbrellas: Umbrella[]; unpushed: number[]; push: Push; snapshotAt: number | null }
 const pushOf = (repo: string, h: any): Push => {
   const r = h?.pushing, l = h?.pushLast
@@ -264,7 +289,8 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
       .map((x: any): Waiting => ({ repo, issue: num(x.issue) ?? 0, title: one(x.title), umbrella: umbrellaOf(x), waitsFor: Array.isArray(x.waitsFor) ? x.waitsFor.filter((n: unknown): n is number => num(n) !== null) : [],
         states: Object.fromEntries((Array.isArray(x.waitsOn) ? x.waitsOn : []).filter((w: any) => w && num(w.issue) !== null && one(w.state)).map((w: any) => [w.issue, one(w.state)])) }))
       .filter((x: Waiting) => x.waitsFor.length > 0),
-    held: Object.fromEntries(Object.entries(j.queue.held && typeof j.queue.held === 'object' ? j.queue.held : {}).filter((e): e is [string, number] => (num(e[1]) ?? 0) > 0)),
+    // What the record holds back, counted: the issues its rules skip, by rule (queue.skipped), and the issues it holds (queue.holding).
+    held: heldCounts(j.queue.skipped, j.queue.holding),
     // A record whose loop does not give the list (or whose issues GitHub did not list) has none to show.
     deploy: (Array.isArray(j.awaitingDeploy) ? j.awaitingDeploy : []).filter((x: unknown) => x && typeof x === 'object').map((x: any): Deploy => ({ repo, issue: num(x.issue) ?? 0, title: one(x.title), since: time(x.since) })),
     landed: j.landed.map((x: any): Landed => {
@@ -371,8 +397,8 @@ const boardFrom = (name: string, records: { repo: string; json: unknown }[], own
       // Your yes first, then the blocked cards; in each, the one waiting longest first.
       needs: recs.flatMap(r => r.needs).sort((a, b) => Number(b.yes) - Number(a.yes) || at(a.since) - at(b.since)),
       belt: recs.flatMap(r => r.belt),
-      // pick's order (follow-ups, then priority, then age), with a record's own order standing for age.
-      queue: queues.length ? queues.flatMap(q => q.map((x, i) => ({ x, i }))).sort((a, b) => Number(b.x.followup) - Number(a.x.followup) || a.x.priority.localeCompare(b.x.priority) || a.i - b.i).map(e => e.x) : null,
+      // The records' pick orders as one list: each record's own order stands (see mergeQueues).
+      queue: queues.length ? mergeQueues(queues) : null,
       queueMore: queues.some(q => q.length >= 10),
       waits: recs.flatMap(r => r.waits),
       held: [...held].sort((a, b) => a[0].localeCompare(b[0])),
@@ -1032,8 +1058,8 @@ const declinedTodayText =(s: State, snap: Snap): string => {
   return `judge declined ${n ? count(n, 'finding') : 'no findings'} today`
 }
 
-// A whole-suite run (a release's suite, the full test): one line while it runs (two while a release reruns failed cases), its kind, short commit, time running,
-// cases done and failures so far; once it ended, its result for SUITE_SHOWN_MS, then nothing.
+// A whole-suite run (a release's suite, the full test): while it runs, a line with its kind, short commit and time running, and a second line with the
+// cases done and failures so far (the second line holds a rerun's progress while a release reruns failed cases); once it ended, one line with its result for SUITE_SHOWN_MS, then nothing.
 export const SUITE_SHOWN_MS = 10 * 60 * 1000
 // A suite on another machine gives minutes and seconds, as the box's steps are short, and names the machine after the commit.
 const BOX_STEP: Record<string, string> = { start: 'starting the box', setup: 'setting up', checkout: 'checking out', results: 'bringing back results' }
@@ -1059,7 +1085,10 @@ export const suitesModel = (s: State, snap: Snap): Line[] => (snap.suites ?? [])
     if (x.ended === null) {
       // A box that is not yet running the tests says its step, not "running".
       const step = m && BOX_STEP[m.step] ? `${BOX_STEP[m.step]}${run}` : `running${run}`
-      return [[{ t: what, c: C.work, b: true }, { t: ` · ${step}${x.done === null || !counting ? '' : ` · ${count(x.done, 'case')} done`}`, d: true }, ...failed]]
+      // The counts go on a second line, as for the rerun: with a machine's name the one line is over 80 columns and the pane would cut them off.
+      const counts: Seg[] = [...(x.done === null || !counting ? [] : [{ t: `${count(x.done, 'case')} done`, d: true }]), ...failed.map(f => ({ ...f, t: f.t.slice(3) }))]
+      return [[{ t: what, c: C.work, b: true }, { t: ` · ${step}`, d: true }],
+        ...(counts.length ? [[{ t: '  ', d: true }, ...counts.flatMap((c, i) => (i ? [{ t: ' · ', d: true }, c] : [c]))] as Line] : [])]
     }
     const good = x.state === 'passed' || x.state === 'released'
     const took = m && x.since !== null ? ` ${mSec((x.ended - x.since) / 1000)}` : ''

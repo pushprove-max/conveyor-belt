@@ -41,7 +41,8 @@ mode=${1:-}; [ $# = 0 ] || shift
 #   or down: <why>, as lib.sh waiter_state reads it from waiter.pid and waiter.log>
 # The waiter writes waiter.pid only once it holds waiter.lock, and holds it while it runs, so a live waiter.sh by that
 # pid holds the lock: the lock is not tried here, as a try that held it while a waiter started would make that waiter
-# stand down. A watcher is up while a child of the waiter runs its watch-<name>.sh. Nothing is started or written.
+# stand down. A watcher is up while a child of the waiter runs its watch-<name>.sh. Nothing is started; a read writes only
+#   the waiter's end line, once, when waiter_state finds the waiter gone with no end line in waiter.log.
 # foremandir <FD> goes before it: the folder whose role mark (session) and waiter.pid the mod looks at each second
 # (hooks/units.tsx foremanTick). Mode `foreman` prints these two lines alone.
 foreman_line() {

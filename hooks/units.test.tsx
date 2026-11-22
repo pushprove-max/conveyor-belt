@@ -645,6 +645,12 @@ test('with motion on, the mark of a card on the belt turns once a second, and st
   await w.clock.settle()
   await w.clock.advance(1000)
   expect(await draw($, 'Pane')).toContain('nothing on the belt')
+  // Bug (#1438, O380): the empty text has no mark, so a frame timer left running passed; and its frame came back to 0 after
+  // four ticks, so a later mark check could pass too. The count of frame writes shows a tick: none may come with the belt empty.
+  const frames = () => w.writes.filter(k => k === 'frame').length
+  const before = frames()
+  await w.clock.advance(3000)
+  expect(frames(), 'frame writes after the belt emptied: a timer kept turning the frame').toBe(before)
 })
 
 // Issue 497. Bug it catches: Worker activity and Landed today always wrote AM or PM, with the Time set to 24-hour.
