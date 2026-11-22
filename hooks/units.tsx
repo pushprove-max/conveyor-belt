@@ -28,8 +28,9 @@ const drawnAt = async ($: EngineInterface, s: State): Promise<State> => {
 type Views = 'pane'
 
 const POLL_MS = 60_000
-// The Board's live feed: its stream.json is looked at once a second and read when it changed. It is rewritten
-// at least every 10 s while the Board runs; one older than STREAM_FRESH is no feed.
+// The Board's live feed: its units-feed.json (its stream.json with each snapshot cut to what this pane draws) is
+// looked at once a second and read when it changed. It is rewritten at least every 10 s while the Board runs; one
+// older than STREAM_FRESH is no feed.
 const STREAM_MS = 1000
 const STREAM_FRESH = 30_000
 // With no live feed running, the fetch's short check (`stamp`) runs this often, and a record it sees change is fetched
@@ -184,7 +185,7 @@ let feedAt = -1
 // The feed text that board came from, its heartbeat left out (feedText): set with feedAt, so a rewrite that only beat
 // is not drawn again.
 let feedKey: string | null = null
-// The Board rewrites stream.json at least every 10 s with only stream.heardAt moved: the text with that left
+// The Board rewrites units-feed.json at least every 10 s with only stream.heardAt moved: the text with that left
 // out says whether the board changed. A stream that is down keeps it, as its note gives that time.
 const feedText = (text: string) => {
   try {
@@ -211,10 +212,10 @@ const feedBoardOf = (key: string): Board | null => {
 }
 const readFeed = async ($: EngineInterface) => {
   if (!feedDir) return null
-  const file = `${feedDir}/stream.json`
+  const file = `${feedDir}/units-feed.json`
   const st = await $.fs.stat(file).catch(() => undefined)
   if (!st || (await $.clock.now()) - st.mtimeMs > STREAM_FRESH) return null
-  if (st.size > MAX_DATA) return { over: overCap("the Board's live feed (stream.json)", st.size, 'it is not read, reading the host') }
+  if (st.size > MAX_DATA) return { over: overCap("the Board's live feed (units-feed.json)", st.size, 'it is not read, reading the host') }
   const key = feedText((await $.fs.read(file)) as string)
   const board = feedBoardOf(key)
   return board ? { board, at: st.mtimeMs, key } : null
@@ -314,7 +315,7 @@ const feedTick = ($: EngineInterface) => {
   if (feedBusy || !feedDir || !main || !anyWanted()) return
   feedBusy = true
   void (async () => {
-    const st = await $.fs.stat(`${feedDir}/stream.json`).catch(() => undefined)
+    const st = await $.fs.stat(`${feedDir}/units-feed.json`).catch(() => undefined)
     // feedAt is the feed last published: one a poll read and has not drawn yet (its fetch still out) is drawn now.
     const drawn = (await read($, state)) as State | null
     const now0 = await $.clock.now()
@@ -406,7 +407,7 @@ const checkTick = ($: EngineInterface) => {
   const cwd = main
   checkBusy = true
   void (async () => {
-    const st = feedDir ? await $.fs.stat(`${feedDir}/stream.json`).catch(() => undefined) : undefined
+    const st = feedDir ? await $.fs.stat(`${feedDir}/units-feed.json`).catch(() => undefined) : undefined
     if (st && st.size <= MAX_DATA && (await $.clock.now()) - st.mtimeMs <= STREAM_FRESH) return
     const r = await $.process.run(['bash', await fetchPath($, cwd), 'stamp'], { cwd, timeoutMs: 15_000 }).catch(() => undefined)
     if (!r || r.exitCode !== 0) return

@@ -326,8 +326,9 @@ export const boardOf = (f: Fetched | null, cut: string | null = null): Pick<Stat
   return boardFrom(name, f.records, f.own)
 }
 
-// The dashboard collector's live feed: its stream.json, which it rewrites with each change Conveyor's host
-// streams and at least every 10 s. `{host, records: [{repo, snap}], stream: {live, heardAt, error}}`; null when the
+// The dashboard collector's live feed: its units-feed.json (stream.json with each snapshot cut to what /units draws),
+// which it rewrites with each change Conveyor's host streams and at least every 10 s.
+// `{host, records: [{repo, snap}], stream: {live, heardAt, error}}`; null when the
 // file is not that, or holds no snapshot of every record yet.
 export type Feed = { host: string; records: { repo: string; json: unknown }[]; live: boolean; heardAt: number | null; error: string }
 export const parseStream = (text: string): Feed | null => {

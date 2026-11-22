@@ -29,7 +29,8 @@ printf '%s\n' "$WANT" > "$T/two.txt"
 # a checkout per project. Each case is a machine of its own.
 machine() { # <case>
   M=$T/$1; H=$M/home
-  mkdir -p "$H/.config/conveyor" "$M/clone/conveyor" "$M/bakery" "$M/gadgetlab" "$M/bin"
+  mkdir -p "$H/.config/conveyor" "$M/clone/conveyor/lib" "$M/bakery" "$M/gadgetlab" "$M/bin"
+  cp "$DIR/../conveyor/lib/portable.sh" "$M/clone/conveyor/lib/portable.sh" # the fetch's cut takes its PATH from it
   printf '%s\n' '#!/usr/bin/env bash' '[ "$1" = snapshot ] || exit 2' \
     "awk -F'\\t' -v r=\"\${CONVEYOR_MAIN##*/}\" '\$1 == r { sub(/^[^\\t]*\\t/, \"\"); print }' '$T/two.txt'" > "$M/clone/conveyor/conveyor.sh"
 }
@@ -99,7 +100,7 @@ machine foreman
 FD=$M/bakery/conveyor/state/foreman
 mkdir -p "$FD" "$M/bakery/.conveyor" "$M/v/$A/conveyor/foreman"
 echo "{\"plugin\": {\"commit\": \"$A\"}}" > "$M/bakery/.conveyor/project.json"
-hostfile --arg c "$M/clone" --arg b "$M/bakery" '{host: "lab", main: $c, records: [{repo: "bakery", main: $b}]}'
+hostfile --arg c "$M/clone" --arg b "$M/bakery" '{host: "lab", ssh: "lab", main: $c, records: [{repo: "bakery", main: $b}]}'
 printf '%s\n' '#!/usr/bin/env bash' 'exec 7>>"$1/waiter.lock"; flock -n 7 || exit 1' \
   'for w in conveyor limit alerts idle; do [ "$w" = "${3:-}" ] && continue; bash "${0%/*}/watch-$w.sh" & done' \
   'printf "%s %s %s %s\n" "$$" "$2" "$PPID" s1 > "$1/waiter.pid"' 'wait' > "$M/v/$A/conveyor/foreman/waiter.sh"
@@ -183,12 +184,12 @@ same 'a build machine with the feed: its map still, and no snapshots' \
 
 # The short check (issue 1033): `stamp` prints one checksum a record, of its state folder's cards.jsonl, control.json
 # and queue, in one command (one ssh call for every record); `fresh <repo>` asks that record for a snapshot built now.
-# The stub engine names each checkout's state folder, and its snapshot is the kept one ("kept") unless --fresh, then
-# the last line of cards.jsonl. Bugs it catches: a card started showed only at the next minute's fetch, and then from a
+# The stub engine names each checkout's state folder, and its snapshot is the kept one (health state "kept") unless
+# --fresh, then the last line of cards.jsonl as its health. Bugs it catches: a card started showed only at the next minute's fetch, and then from a
 # kept snapshot older than it; a check asked the host once a record, or moved for a record nothing changed in.
 machine stamp
 printf '%s\n' '#!/usr/bin/env bash' 'case $1 in' 'state-dir) echo "$CONVEYOR_MAIN/state" ;;' \
-  'snapshot) if [ "${2-}" = --fresh ]; then tail -n 1 "$CONVEYOR_MAIN/state/cards.jsonl"; else echo kept; fi ;;' '*) exit 2 ;;' 'esac' > "$M/clone/conveyor/conveyor.sh"
+  'snapshot) if [ "${2-}" = --fresh ]; then tail -n 1 "$CONVEYOR_MAIN/state/cards.jsonl" | jq -c "{health: .}"; else echo "{\"health\":{\"state\":\"kept\"}}"; fi ;;' '*) exit 2 ;;' 'esac' > "$M/clone/conveyor/conveyor.sh"
 printf '%s\n' '#!/usr/bin/env bash' 'echo x >> "$(dirname "$0")/calls"' 'while [ "$1" = -o ]; do shift 2; done' 'bash -c "$2"' > "$M/bin/ssh" && chmod +x "$M/bin/ssh"
 mkdir -p "$M/bakery/state" "$M/gadgetlab/state" "$M/elsewhere"
 echo '{"step":"landed"}' > "$M/bakery/state/cards.jsonl"
@@ -218,6 +219,33 @@ s2=$s4
 same 'stamp: over ssh, the same checksums in one call' "$(sed 's/^stamps\tlocal$/stamps\tssh/' <<<"$s2")|x" "$(fetch "$M/elsewhere" stamp)|$(cat "$M/bin/calls")"
 got=$(fetch "$M/bakery" fresh bakery)
 same 'fresh: the changed record'"'"'s snapshot holds the change, the other'"'"'s is the kept one' \
-  "$(printf 'bakery\t{"step":"start","card":"c9"}\ngadgetlab\tkept')" "$(sed -n '/^host/,$p' <<<"$got" | sed 1d)"
+  "$(printf 'bakery\t{"health":{"step":"start","card":"c9"}}\ngadgetlab\t{"health":{"state":"kept"}}')" "$(sed -n '/^host/,$p' <<<"$got" | sed 1d)"
+
+# Bug (issue 1287): a snapshot printed whole, with the Tests page's history (tests, testActions) and every declined line,
+# grew past what the fetch could read in time, and past the cap, though the pane draws none of it. The stub engine prints
+# a snapshot with a large tests part; the fetch prints only the parts the pane draws, the judge's declined lines cut to
+# id, who and time, and open cut to its two lists.
+machine cut
+printf '%s\n' '#!/usr/bin/env bash' '[ "$1" = snapshot ] || exit 2' \
+  "jq -nc '{health: {state: \"ok\"}, belt: [], queue: {next: []}, cost: {today: 1}, snapshotAt: \"t\", tests: [range(0; 3000) | {file: \"f\\(.)\", log: (\"x\" * 1000)}], testActions: [range(0; 5)], declined: [{id: \"a\", by: \"judge\", time: \"t1\", why: \"long\"}, {id: \"b\", by: \"owner\", time: \"t2\"}], declinedRest: [], open: {umbrellas: [{issue: 1}], held: [], issues: [range(0; 50)]}}'" > "$M/clone/conveyor/conveyor.sh"
+hostfile --arg c "$M/clone" --arg b "$M/bakery" '{host: "lab", ssh: "lab", main: $c, records: [{repo: "bakery", main: $b}]}'
+got=$(fetch "$M/bakery" | sed -n '/^host/,$p' | sed 1d)
+same 'the snapshot the host fallback prints holds only what the pane draws, whatever the Tests page holds' \
+  'bakery	{"health":{"state":"ok"},"belt":[],"queue":{"next":[]},"cost":{"today":1},"snapshotAt":"t","declined":[{"id":"a","by":"judge","time":"t1"}],"declinedRest":[],"open":{"umbrellas":[{"issue":1}],"held":[]}}' "$got"
+[ "${#got}" -lt 1000 ] && ok 'the cut snapshot is small' || bad "the cut snapshot is ${#got} characters"
+
+# Bug (issue 1287, review): on a macOS build machine jq is Homebrew's, which an ssh command's PATH does not hold; the
+# engine adds it to PATH itself (lib/portable.sh p_path), so the snapshot was made and the cut then failed, and the
+# pane read null. The ssh stub runs the command on a PATH with no jq, on a host that says Darwin, whose Homebrew folder
+# ($M/bin, by the brew stub's place) holds jq: the cut must take that folder from p_path.
+machine darwin
+mkdir -p "$M/rbin" "$M/elsewhere"
+ln -s "$(command -v jq)" "$M/bin/jq"; ln -s "$(command -v dirname)" "$M/rbin/dirname"; ln -s "$(command -v env)" "$M/rbin/env"; ln -s "$(command -v bash)" "$M/rbin/bash"
+printf '%s\n' '#!/bin/sh' 'echo Darwin' > "$M/rbin/uname"; printf '%s\n' '#!/bin/sh' 'exit 0' > "$M/rbin/brew"; chmod +x "$M/rbin/uname" "$M/rbin/brew"
+printf '%s\n' '#!/usr/bin/env bash' "printf '%s\\n' '{\"health\":{\"state\":\"ok\"},\"tests\":[1,2]}'" > "$M/clone/conveyor/conveyor.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'while [ "$1" = -o ]; do shift 2; done' "PATH=$M/rbin $(command -v bash) -c \"\$2\"" > "$M/bin/ssh" && chmod +x "$M/bin/ssh"
+hostfile --arg c "$M/clone" --arg b "$M/bakery" '{host: "lab", ssh: "lab", main: $c, records: [{repo: "bakery", main: $b}]}'
+same 'over ssh with no jq on its PATH, the cut still takes the engine'"'"'s PATH and the snapshot is kept' \
+  'bakery	{"health":{"state":"ok"}}' "$(fetch "$M/elsewhere" | sed -n '/^host/,$p' | sed 1d)"
 
 [ "$fails" = 0 ] || exit 1

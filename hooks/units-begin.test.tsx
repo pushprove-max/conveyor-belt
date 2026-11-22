@@ -10,7 +10,7 @@ import { register } from './units'
 const MAIN = '/r/main'
 const NOW = Date.UTC(2026, 10, 15, 10, 0, 0)
 const BOARD = '/r/state/bookstore/dashboard'
-const FEED = `${BOARD}/stream.json`
+const FEED = `${BOARD}/units-feed.json`
 const feed = (issue: number) => JSON.stringify({
   host: 'buildbox',
   records: [{

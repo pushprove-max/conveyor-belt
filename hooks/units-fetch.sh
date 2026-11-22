@@ -162,8 +162,17 @@ fi
 # Every name and path is quoted for the shell (@sh), here or on the host. A record `fresh` names is asked for
 # `snapshot --fresh`: its state changed since the kept snapshot may have been built, which a plain read would print.
 [ "$mode" = fresh ] || set --
-cmd=$(jq -j --arg e "$engine/conveyor/conveyor.sh" '$ARGS.positional as $f | .records[]
-  | "printf \"%s\\t\" \(.repo | @sh); { CONVEYOR_MAIN=\(.main | @sh) bash \($e | @sh) snapshot\(.repo as $r | if any($f[]; . == $r) then " --fresh" else "" end) 2>/dev/null || echo null; }; "' --args "$@" <<<"$got")
+# Each snapshot is cut, on the machine that makes it, to the parts the pane draws (hooks/sources.ts parseRecord; the same
+# cut as units_snap in .claude/scripts/dashboard_stream.py): the rest, the Tests page's history above all, grows without
+# end and made the fetch too slow and too big to read. A snapshot that jq cannot cut prints null, as a failed one does.
+view='with_entries(select(.key | IN("health", "needsYou", "belt", "landed", "landedCount", "queue", "cost", "awaitingDeploy", "suites", "snapshotAt", "open", "declined", "declinedRest")))
+  | if (.open | type) == "object" then .open |= with_entries(select(.key | IN("umbrellas", "held"))) else . end
+  | reduce ("declined", "declinedRest") as $k (.; if (.[$k] | type) == "array" then .[$k] |= map(select(type == "object" and .by == "judge") | {id, by, time}) else . end)'
+# The cut runs in a bash that has taken the engine's PATH (p_path in conveyor/lib/portable.sh): on macOS the jq the engine
+# needs is Homebrew's, and an ssh command's PATH has no Homebrew folder.
+cutc='. "$1" && p_path && jq -c "$2"'
+cmd=$(jq -j --arg e "$engine/conveyor/conveyor.sh" --arg l "$engine/conveyor/lib/portable.sh" --arg v "$view" --arg c "$cutc" '$ARGS.positional as $f | .records[]
+  | "printf \"%s\\t\" \(.repo | @sh); { s=$(CONVEYOR_MAIN=\(.main | @sh) bash \($e | @sh) snapshot\(.repo as $r | if any($f[]; . == $r) then " --fresh" else "" end) 2>/dev/null) && printf \"%s\" \"$s\" | bash -c \($c | @sh) _ \($l | @sh) \($v | @sh) || echo null; }; "' --args "$@" <<<"$got")
 if [ "$remote" = 0 ]; then out=$(timeout -k 2 50 bash -c "$cmd"); rc=$?; how=local
 else out=$(timeout -k 2 50 ssh -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$target" "$tmcmd$cmd" 2>/dev/null); rc=$?; how=ssh
   # The build machine's testmap line comes first, and goes before the host line, as parseFetch reads it.

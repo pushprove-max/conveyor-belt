@@ -12,7 +12,7 @@ const MAIN = '/r/main'
 const WS = '/r/ws'
 const HOME = '/r/home'
 const NOW = Date.UTC(2026, 10, 10, 4, 40, 0)
-// The Board's folder, as FEED_DIR names it: the folder the Board writes data.js, limit.json and stream.json to.
+// The Board's folder, as FEED_DIR names it: the folder the Board writes data.js, limit.json, stream.json and units-feed.json to.
 const BOARD = '/r/state/bookstore/dashboard'
 const DATA = `${BOARD}/data.js`
 const LIMIT = `${BOARD}/limit.json`
@@ -646,10 +646,10 @@ test('outside a checkout with a Conveyor pack the mod registers nothing and fetc
   expect(fetches(w)).toEqual([])
 })
 
-// The Board's live feed: the stream.json it rewrites with each change Conveyor's host streams.
-const FEED = `${BOARD}/stream.json`
+// The Board's live feed: the units-feed.json (stream.json with each snapshot cut to what /units draws) it rewrites with each change Conveyor's host streams.
+const FEED = `${BOARD}/units-feed.json`
 // A feed outside the folder the Board's job names: the mod never reads it.
-const OLD_FEED = `${HOME}/.conveyor/dashboard/stream.json`
+const OLD_FEED = `${HOME}/.conveyor/dashboard/units-feed.json`
 // heardAt: the heartbeat, the field the Board moves on each rewrite.
 const feed = (snap: string, live = true, heardAt = ago(0)) => JSON.stringify({
   host: 'buildbox', records: [{ repo: 'bookstore', snap: JSON.parse(snap) }],
@@ -720,14 +720,30 @@ test('a feed and a limit file over the cap are not read: a line names each one\'
   await w.clock.settle()
   const text = await units($)
   expect(text).toContain('#3863')
-  expect(text).toContain("units: the Board's live feed (stream.json) is 4.5 MB, over the 4.2 MB cap; it is not read, reading the host")
+  expect(text).toContain("units: the Board's live feed (units-feed.json) is 4.5 MB, over the 4.2 MB cap; it is not read, reading the host")
   expect(text).toContain("units: the Board's limit file (limit.json) is 20000 bytes, over the 16384 byte cap; the usage limit is not read")
   expect(feeds(w)).toEqual([])
   expect(w.reads).not.toContain(LIMIT)
   w.fetchRc = 3
   await units($)
   await w.clock.settle()
-  expect(await draw($, 'Pane')).toBe("units: the Board's live feed (stream.json) is 4.5 MB, over the 4.2 MB cap; it is not read, reading the host; units: the Board's limit file (limit.json) is 20000 bytes, over the 16384 byte cap; the usage limit is not read; units: the Conveyor snapshot cannot be read (the fetch did not run)")
+  expect(await draw($, 'Pane')).toBe("units: the Board's live feed (units-feed.json) is 4.5 MB, over the 4.2 MB cap; it is not read, reading the host; units: the Board's limit file (limit.json) is 20000 bytes, over the 16384 byte cap; the usage limit is not read; units: the Conveyor snapshot cannot be read (the fetch did not run)")
+})
+
+// #1287: /units read stream.json, whose snapshots hold the Tests page's history (tests, testActions), and refused it
+// over the cap: the pane showed no board and the host fallback timed out. It reads units-feed.json, the same cut to what
+// it draws. The Board's own whole feed, here 4.5 MB, is never read or stat-checked against the cap.
+test('with the Board\'s whole feed over the cap, the board is drawn from the units feed beside it: no over-cap line, no host read, the whole feed never read', async ($, on) => {
+  const whole = `${BOARD}/stream.json`
+  const w = world(on, 'main', answer(FULL), { [FEED]: feed(snapshot({ belt: [BELT] })), [whole]: ' '.repeat(4_500_000) })
+  await start($, 'main')
+  await units($)
+  await w.clock.settle()
+  const text = await units($)
+  expect(text).toContain('#3863')
+  expect(text).not.toContain('over the 4.2 MB cap')
+  expect(w.reads, 'the whole feed was read').not.toContain(whole)
+  expect(feeds(w).length, 'the board was not the feed\'s').toBeGreaterThan(0)
 })
 
 // #858: /units read the whole data.js for the limit and refused it past 4 MiB, which data.js outgrew (the Tests
@@ -773,7 +789,7 @@ test('a drawn feed that grows to 4.5 MB is not read again: the host is read at o
   await w.clock.settle()
   expect(w.reads.filter(p => p === FEED).length).toBe(reads)
   expect(fetches(w).length).toBe(polls + 1)
-  expect(await units($)).toContain("units: the Board's live feed (stream.json) is 4.5 MB, over the 4.2 MB cap; it is not read, reading the host")
+  expect(await units($)).toContain("units: the Board's live feed (units-feed.json) is 4.5 MB, over the 4.2 MB cap; it is not read, reading the host")
 })
 
 // the engine keeps a command's first 4 MiB of output; a cut snapshot was parsed as if whole.
@@ -1138,8 +1154,8 @@ test('the session start returns before the feed-folder script answers; the feed 
   expect(w.runs.filter(x => x.argv[3] === 'units-feed').length).toBe(1)
 })
 
-// stream.json is rewritten at least every 10 s, changed or not, and each rewrite was parsed into a new board.
-test('a stream.json rewrite with only the heartbeat changed builds no new board; a change in the board is drawn', async ($, on) => {
+// units-feed.json is rewritten at least every 10 s, changed or not, and each rewrite was parsed into a new board.
+test('a units-feed.json rewrite with only the heartbeat changed builds no new board; a change in the board is drawn', async ($, on) => {
   const w = world(on, 'main', answer(FULL), { [FEED]: feed(snapshot()) })
   await start($, 'main')
   await w.clock.advance(1000)

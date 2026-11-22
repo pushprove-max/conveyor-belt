@@ -225,7 +225,7 @@ The fetch is
 `hooks/units-fetch.sh`, run in the main checkout. It reads the machine's host file, `~/.config/conveyor/host.json`
 (under `$XDG_CONFIG_HOME` when that is set; else the checkout's `conveyor/host.json`), as the Board reads it:
 
-- `conveyor.sh snapshot` of every record the host file names, from the clone its `main` names, in one command. The
+- `conveyor.sh snapshot` of every record the host file names, from the clone its `main` names, in one command, each snapshot cut on that machine to the parts the pane draws. The
   command runs on this machine when the session's checkout is a record of the host file, or that clone; else over ssh
   to the host file's `ssh` target. Each record's snapshot is the last one Conveyor made, or a new one after a check
   found that record changed; when it is more than a minute
@@ -238,7 +238,8 @@ The fetch is
   `not read: the host file has no record of this checkout`.
 
 The live feed. Where the Board runs, it keeps `stream.json` in its own folder from one long-lived `conveyor.sh watch`
-per record, the same stream the Board shows. The mod names that folder at the session's start the way
+per record, the same stream the Board shows, and beside it `units-feed.json`: the same, with each snapshot cut to the
+parts the pane draws, so the Tests page's history does not grow it. The mod reads `units-feed.json`. It names that folder at the session's start the way
 `.claude/scripts/dashboard.sh` does, from the Board job installed on this machine (the Mac's
 `~/Library/LaunchAgents/com.conveyor.dashboard.plist`, else `~/.config/systemd/user/dashboard.service`), with the job's
 own settings, not the session's: the Board's folder in its project's state folder. When it cannot be named (no Board
@@ -281,6 +282,6 @@ The Foreman line still shows under it.
 
 Smaller gaps are named where they are: `weekly limit not read`, `today partial` and `cost partial` (a step could not be
 priced: never a part sum), `QUEUE` `not read: GitHub did not list the issues`, and under the board `units: the <record> snapshot cannot be read` when one record of several fails. A Board feed
-(`stream.json`) over the 4 MiB cap (shown as 4.2 MB; the engine refuses a larger read), or a limit file
+(`units-feed.json`) over the 4 MiB cap (shown as 4.2 MB; the engine refuses a larger read), or a limit file
 (`limit.json`) over 16384 bytes, is not read, nor tried again each second, and a line under the board names its size
 and the cap; with no board, that line comes first in the one line every view draws.

@@ -23,7 +23,7 @@ A stream that ends, or says nothing for DEAD seconds (the host beats every 10 s)
 1 s, then 2, 4 ... up to 30 s between tries; each new stream begins with a whole snapshot. While a record's stream is
 down its last snapshot stays, marked stale (live false, with heardAt), and records is null only until every record
 has sent one. stream.json is written at least every TICK seconds while this runs, so its age says whether it does.
-/units reads stream.json too.
+/units reads units-feed.json, written with it: the same, each snapshot cut to what /units draws.
 Test seams: CONVEYOR_STREAM_DEAD, CONVEYOR_STREAM_TICK and CONVEYOR_STREAM_BACKOFF (the first wait, s).
 """
 import copy
@@ -98,16 +98,43 @@ def figures_only(old, new):
     return isinstance(old, dict) and old.keys() == new.keys() and all(rest(old[k]) == rest(new[k]) for k in new)
 
 
+# The parts of a record's snapshot that /units draws (hooks/sources.ts parseRecord). The rest (tests, testActions ...)
+# is the Board's alone and grows with the Tests page's history. `declined` and `declinedRest` are cut to the judge's
+# lines, by id, who and time; `open` to the two lists /units reads.
+UNITS_PARTS = ('health', 'needsYou', 'belt', 'landed', 'landedCount', 'queue', 'cost', 'awaitingDeploy', 'suites', 'snapshotAt')
+
+
+def units_snap(snap):
+    if not isinstance(snap, dict):
+        return snap
+    out = {k: snap[k] for k in UNITS_PARTS if k in snap}
+    if isinstance(snap.get('open'), dict):
+        out['open'] = {k: snap['open'][k] for k in ('umbrellas', 'held') if k in snap['open']}
+    for k in ('declined', 'declinedRest'):
+        if isinstance(snap.get(k), list):
+            out[k] = [{f: x.get(f) for f in ('id', 'by', 'time')} for x in snap[k] if isinstance(x, dict) and x.get('by') == 'judge']
+    return out
+
+
+def units_doc(d):
+    """d with each record's snapshot cut to the parts /units draws."""
+    if not isinstance(d.get('records'), list):
+        return d
+    return dict(d, records=[dict(r, snap=units_snap(r.get('snap'))) if isinstance(r, dict) else r for r in d['records']])
+
+
 def put(out, d):
-    """<out>/stream.json replaced by d, whole: a reader never sees half of it."""
+    """<out>/stream.json replaced by d, whole: a reader never sees half of it. Then <out>/units-feed.json: the same, each
+    snapshot cut to what /units draws (units_doc), so it stays under the cap /units reads under as the history grows."""
     tmp = os.path.join(out, '.stream.json.%d' % threading.get_ident())
     try:
-        with open(tmp, 'w') as f:
-            json.dump(d, f, separators=(',', ':'))
-        os.chmod(tmp, 0o644)
-        os.replace(tmp, os.path.join(out, 'stream.json'))
+        for name, doc in (('stream.json', d), ('units-feed.json', units_doc(d))):
+            with open(tmp, 'w') as f:
+                json.dump(doc, f, separators=(',', ':'))
+            os.chmod(tmp, 0o644)
+            os.replace(tmp, os.path.join(out, name))
     except OSError as e:
-        sys.stderr.write('dashboard_stream: could not write stream.json: %s\n' % e)
+        sys.stderr.write(f'dashboard_stream: could not write the feed: {e}\n')
         try:
             os.remove(tmp)  # not left: each process names its own, so leftovers add up
         except OSError:
