@@ -207,6 +207,7 @@
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/README.md": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard-view.focus.test.mjs",
     ".claude/scripts/__tests__/dashboard-view.overview.test.mjs",
     ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
