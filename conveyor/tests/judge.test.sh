@@ -194,6 +194,44 @@ t_judgerare() {
     || fail "the declined P2 is not on the declined list, once, with the judge's reason: $(cat "$ST/declined.jsonl" 2>&1)"
 }
 
+# Bugs: `control judge rare` writes levels out of order or twice, takes a word that is not a level (or none beside a
+# level) and changes the record, or none leaves the levels in force; a record written before the setting fails its
+# check or reads as some level; the judge's prompt ignores the setting: with P2 and P3 it drops one of them, with P3 it still forbids a rare-case decline
+# at every level, or allows one at another level, and with none it still allows one.
+t_judgerarelevels() {
+  local p r=$'[P3] a.txt:2 the message names the wrong file. Proof: run it with two cards at once\nUSER-VISIBLE: no\nVERDICT: NO-GO'
+  local none='project really runs. The reason says which of the two, and why. "Rare case" is no reason to decline at any level: an'
+  judging "[$(issue 7 2026-01-01)]"
+  [ "$(loop control | jq -c .judgeRare)" = '[]' ] || fail "a new record does not read as no rare-case level: $(loop control | jq -c .judgeRare)"
+  [ "$(loop control judge rare P3 P2 P3 | jq -c .judgeRare)" = '["P2","P3"]' ] || fail "control judge rare P3 P2 P3 did not write P2 and P3, each once, in order"
+  local was; was=$(cat "$ST/control.json")
+  for p in 'P4' 'p3' 'P3 none' 'none P3' ''; do
+    # shellcheck disable=SC2086 # each word of $p is one argument, and '' gives none
+    loop control judge rare $p >/dev/null 2>&1; [ $? = 2 ] && [ "$(cat "$ST/control.json")" = "$was" ] \
+      || fail "control judge rare $p was not refused with the whole record unchanged: $(diff <(echo "$was") "$ST/control.json")"
+  done
+  # The prompt the judge is given with two levels names both of them.
+  printf '%s\n' "$r" > "$STUB/review"; echo 'F1 ACCEPT: real. Cost to every card: none' > "$STUB/judge.1"
+  judgeone 7 "$STUB/review"
+  grep -qF 'really runs, or, at P2 and P3 only, it is a rare case' "$STUB/judge-asked" \
+    || fail "with judgeRare [P2, P3], the judge's prompt does not allow a rare-case decline at P2 and P3: $(grep -n -i 'rare case' "$STUB/judge-asked")"
+  [ "$(loop control judge rare none | jq -c .judgeRare)" = '[]' ] || fail "control judge rare none did not clear the levels"
+  jq -c 'del(.judgeRare)' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json" \
+    && [ "$(loop control | jq -c .judgeRare)" = '[]' ] || fail "a record with no judgeRare does not pass its check as no level: $(loop control 2>&1)"
+  # The prompt the judge is given, with P3 and then with none.
+  loop control judge rare P3 >/dev/null || fail "control judge rare P3 failed"
+  printf '%s\n' "$r" > "$STUB/review"; echo 'F1 DECLINE: rare case: two cards at once seldom touch this line' > "$STUB/judge.2"
+  judgeone 7 "$STUB/review"
+  grep -qF 'really runs, or, at P3 only, it is a rare case: its proof needs an input, timing or setup that the project runs' "$STUB/judge-asked" \
+    && grep -qF 'At any other level,' "$STUB/judge-asked" && ! grep -qF "$none" "$STUB/judge-asked" && ! grep -qE 'at P[0-2]' "$STUB/judge-asked" \
+    || fail "with judgeRare [P3], the judge's prompt does not allow a rare-case decline at P3 alone: $(grep -n -i 'rare case' "$STUB/judge-asked")"
+  loop control judge rare none >/dev/null || fail "control judge rare none failed"
+  printf '%s\n' "$r" > "$STUB/review"; echo 'F1 ACCEPT: real. Cost to every card: none' > "$STUB/judge.3"
+  judgeone 7 "$STUB/review"
+  grep -qxF -- "$none" "$STUB/judge-asked" && ! grep -qF 'it is a rare case' "$STUB/judge-asked" \
+    || fail "with judgeRare none, the judge's prompt still allows a rare-case decline: $(grep -n -i 'rare case' "$STUB/judge-asked")"
+}
+
 # Bugs (#534): the writing method the reviewer and the judge read is missing, changed from the pinned upstream text,
 # or kept without its licence; either file does not name the commit it was copied from. The hashes are the Git blob
 # ids of SKILL.md and LICENSE at that commit upstream, so an edit to the copied text fails here.

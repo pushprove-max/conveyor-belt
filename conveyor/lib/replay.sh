@@ -116,6 +116,8 @@ replay() { # judge <model> [<effort>] [--last <n>] [--estimate]
   mapfile -t x < <(SEATCARD='' cardaccts "$c")
   # shellcheck disable=SC2034 # ACCT and RACCT are read by judgecall() in lib/review.sh
   local ACCT=${x[0]-} RACCT=${x[1]-}
+  # The judge's prompt as a review's judge is given it now (judgeprompt(), with the control record's rare-case levels).
+  local jp; jp=$(judgeprompt)
   for k in "${cs[@]}"; do
     d=$(mktemp -d) || break # the calls made so far are still written, with their usage
     if ! replaywt "$k" "$d"; then skipped=$((skipped + 1)); git -C "$MAIN" worktree remove --force "$d/wt" >/dev/null 2>&1; rm -rf "$d"; continue; fi
@@ -124,7 +126,7 @@ replay() { # judge <model> [<effort>] [--last <n>] [--estimate]
     printf '%s\n' "$k" > "$d/case"
     # The findings declined on the issue's cards before the recorded judge ran, given as judged() gives them.
     before=$(jq -r '.before | arrays | if length > 0 then "# Findings already declined on the cards of this issue\n\(join("\n"))" else empty end' <<<"$k")
-    out=$(CALLSEAT=$s CALLSTEP=replay CALLACT="the replay judge reads the findings of $(jq -r .card <<<"$k")" judgecall "$d/wt" "$JUDGE" "$brief"$'\n\n'"${before:+$before$'\n\n'}# The findings"$'\n'"$(jq -r '.findings
+    out=$(CALLSEAT=$s CALLSTEP=replay CALLACT="the replay judge reads the findings of $(jq -r .card <<<"$k")" judgecall "$d/wt" "$jp" "$brief"$'\n\n'"${before:+$before$'\n\n'}# The findings"$'\n'"$(jq -r '.findings
       | to_entries[] | "F\(.key + 1) [\({inside: "inside the diff", outside: "outside the diff"}[.value.place] // "no place")] \(.value.finding)"' <<<"$k")") && f=ok || f=''
     jq -e objects <<<"$out" >/dev/null 2>&1 || out='{"failed": "the judge call printed no fields"}'
     ans='[]'; [ -z "$f" ] || ans=$(jq -cRn '[inputs | gsub("^[[:space:]`*-]+|[[:space:]`*]+$"; "") | capture("^F(?<n>[0-9]+) (?<d>ACCEPT|DECLINE):[[:space:]]*(?<r>.*)$")]' "$d/wt.judge" 2>/dev/null) || ans='[]'

@@ -10,7 +10,8 @@
 # sessions: testaction(), lib/testaction.sh) is null or {cli, model, effort}, always with its CLI; cards holds the
 # per-card seats by issue number ({"<issue>": {builder, reviewer, judge}}, each left out or {model, effort (null: the
 # project's)}, `control card`), which that issue's card runs on in place of the project's (seat(), SEATCARD);
-# judgeOn is whether the judge reads the reviews (judged()) and judgeAlways the finding kinds it always accepts; account and
+# judgeOn is whether the judge reads the reviews (judged()), judgeAlways the finding kinds it always accepts and judgeRare
+# the levels (P0 to P3, none by default) at which it may decline a finding as a rare case (judgeprompt()); account and
 # reviewAccount are null or the name of one of the host file's accounts (ACCT, above); start is where
 # new issues start, queue or held, startHeld the spans it was held ({from, to}: the newest issue number at each switch;
 # to is null for the one in force, the last), startSeen the issues this setting has had its say on: held by adopt(), or released.
@@ -82,6 +83,7 @@ ctlcheck() { # [<file>]: the record on the input, or in the file, whole, or exit
         and (keys - ["builder", "reviewer", "judge"]) == [] and all(.[]; type == "object" and (keys - ["effort"]) == ["model"] and (.model | type == "string")
           and (.effort == null or (.effort | type == "string"))))))
       and (.judgeOn | type == "boolean") and (.judgeAlways | type == "array" and all(type == "string"))
+      and (.judgeRare | type == "array" and all(IN("P0", "P1", "P2", "P3")))
       and (.depGuard | type == "boolean") and (.forced | type == "array" and all(type == "number"))
       and (.signin == null or (.signin | type == "string")) and (.landAs == null or (.landAs | IN("main", "pr")))
       and (.prMerge == null or (.prMerge | IN("button", "release", "idle")))
@@ -1141,7 +1143,7 @@ control() { # [action [arguments]]
   local c a=${1:-} f=. new x ag es bx sz top=0 p='' open=''
   c=$(ctl) || return 1
   [ $# = 0 ] || shift
-  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | atonce <number> | suite-mode <serial|parallel> | tests-from <UTC time | clear> | suite-machine <local | ssh <target> [--dir <d>] | devbox [--size <s>] [--box <name>] [--setup-at <time>]> | hold <issue>... | release <issue>... | adopt <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|lint|testissues|foremanissues|followupissues|releaseissues|splitissues|<areaPrefix><name>>=<on|off>... | rules <split|pick>=<off|shadow|on> | pick <small|medium> <docs|code> <promote|keep|drop|add|next> | pick <reviewer|judge> <promote <model> [effort]|drop> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | start queue filed | dep-guard <on|off> | land-as <main|pr> | pr-merge <button|release|idle> | push-check <on|off> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>... | card <issue> <builder|reviewer|judge> <model> [effort] | card <issue> [builder|reviewer|judge] clear | card <issue> pick]" >&2; return 2; }
+  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | atonce <number> | suite-mode <serial|parallel> | tests-from <UTC time | clear> | suite-machine <local | ssh <target> [--dir <d>] | devbox [--size <s>] [--box <name>] [--setup-at <time>]> | hold <issue>... | release <issue>... | adopt <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|lint|testissues|foremanissues|followupissues|releaseissues|splitissues|<areaPrefix><name>>=<on|off>... | rules <split|pick>=<off|shadow|on> | pick <small|medium> <docs|code> <promote|keep|drop|add|next> | pick <reviewer|judge> <promote <model> [effort]|drop> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | judge rare <P0|P1|P2|P3>... | judge rare none | account [<name>] | review-account [<name>] | start <queue|held> | start queue filed | dep-guard <on|off> | land-as <main|pr> | pr-merge <button|release|idle> | push-check <on|off> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>... | card <issue> <builder|reviewer|judge> <model> [effort] | card <issue> [builder|reviewer|judge] clear | card <issue> pick]" >&2; return 2; }
   nums() { local x; for x; do [[ $x =~ ^[1-9][0-9]{0,8}$ ]] || return 1; done; }
   # A main-red fix card is of no issue (issue 0), named by its card id: there is nothing of it to hold or release.
   case $a in hold | release) for x; do [[ ! $x =~ ^(0+|c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0)$ ]] || {
@@ -1273,13 +1275,20 @@ control() { # [action [arguments]]
             elif $v[2] == "drop" and $r.promoted != null then {decision: "promote", at: $t, challenger: $r.promoted}
             else {decision: $v[2], at: $t} + ($r // {} | if .challenger != null then {challenger} else {} end) end)'
       fi ;;
-    # The judge's on or off and the finding kinds it always accepts (no kind clears them) are the record's too. The
+    # The judge's on or off, the finding kinds it always accepts (no kind clears them) and the levels at which it may
+    # decline a finding as a rare case (none clears them) are the record's too. The
     # Tests seat is set as the others are; default is none, and no test action starts.
     model | reviewer | judge | tests)
       if [ "$a" = judge ] && [[ ${1:-} =~ ^(on|off)$ ]]; then [ $# = 1 ] || { bad; return; }; f='.judgeOn = ($v[0] == "on")'
       elif [ "$a" = judge ] && [ "${1:-}" = always ]; then
         for x in "${@:2}"; do [[ $x =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$ ]] || { bad; return; }; done
         f='.judgeAlways = reduce $v[1:][] as $k ([]; if index($k) then . else . + [$k] end)'
+      elif [ "$a" = judge ] && [ "${1:-}" = rare ]; then
+        if [ $# = 2 ] && [ "$2" = none ]; then f='.judgeRare = []'
+        else [ $# -ge 2 ] || { bad; return; }
+          for x in "${@:2}"; do [[ $x =~ ^P[0-3]$ ]] || { bad; return; }; done
+          f='.judgeRare = ($v[1:] | unique)'
+        fi
       else [ $# -ge 1 ] && [ $# -le 3 ] || { bad; return; }
       if [ "$1" = default ]; then [ $# = 1 ] || { bad; return; }; f='.[$a] = null'; else
       # A CLI installed on this host (hostclis(), which conveyor.sh read afresh for that CLI before the lock) and any

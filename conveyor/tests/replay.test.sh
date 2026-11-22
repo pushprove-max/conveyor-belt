@@ -60,7 +60,7 @@ replaysetup() {
 # F1 ACCEPT and F2 ACCEPT (so F2 differs from the recorded decline), the one of c1-8 with a DECLINE (as its judge
 # did), and fails on c1-11 (a timeout) with the usage the call had used, as judgecall() prints it.
 STUBJUDGE='judgecall() {
-  { echo "== $CALLACT"; git -C "$1" diff --cached | grep "^+[a-z]\|^@@"; printf "%s\n" "$3"; } >> "$STUB/judged"
+  { echo "== $CALLACT"; git -C "$1" diff --cached | grep "^+[a-z]\|^@@"; printf "%s\n" "$3"; } >> "$STUB/judged"; printf "%s\n" "$2" >> "$STUB/judge-prompt"
   case $CALLACT in
     *c1-7) printf "%s\n" "F1 ACCEPT: real. Cost to every card: none" "F2 ACCEPT: the change causes it. Cost to every card: none" > "$1.judge"
       echo "{\"model\":\"claude-haiku-5-5\",\"effort\":\"low\",\"sec\":3,\"usage\":$U}" ;;
@@ -75,6 +75,9 @@ STUBJUDGE='judgecall() {
 # a failed judge call left no usage; the replay wrote a card line, changed a setting or left a worktree behind.
 t_replayjudge() {
   replaysetup
+  # Bug caught: the replay judge was given another decline rule than a review's judge is now (the control record's
+  # rare-case levels, judgeprompt()).
+  loop control judge rare P2 >/dev/null || fail "control judge rare P2 failed"; eval "$SUMS" > "$STUB/before"
   fx_in '. "$HERE/lib/replay.sh"; '"$STUBJUDGE"'; replay judge claude-haiku-5-5 low'
   [ "$RC" = 0 ] || fail "the replay failed: $(cat "$T/$CASE/run.out")"
   out=$(tail -n 1 "$T/$CASE/run.out")
@@ -88,6 +91,8 @@ t_replayjudge() {
   grep -q '^+three$' "$STUB/judged" && grep -q '^+four$' "$STUB/judged" && grep -q '^F1 \[inside the diff\] \[P1\] a.txt:2 F-one$' "$STUB/judged" \
     && grep -q '^F2 \[outside the diff\] \[P2\] a.txt:1 F-two$' "$STUB/judged" && grep -q '^#7 title 7$' "$STUB/judged" \
     || fail "the judge was not given each case's diff, issue and findings: $(cat "$STUB/judged")"
+  [ "$(grep -cF 'really runs, or, at P2 only, it is a rare case' "$STUB/judge-prompt")" = 3 ] \
+    || fail "a replay judge's prompt does not hold the record's rare-case level P2: $(grep -n -i 'rare case' "$STUB/judge-prompt")"
   # Bug caught: c1-7's landed commit was staged on its parent, a later main than its review read, so the judge saw
   # other hunk line numbers (line 5, below "zero") than its review did (line 4, on B0).
   grep -q '^@@ -4,3 +4,4 @@' "$STUB/judged" && ! grep -q '^@@ -5,3 +5,4 @@' "$STUB/judged" \

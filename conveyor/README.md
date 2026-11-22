@@ -20,9 +20,10 @@ while old cards wait. The machine's cap counts every card of each project that b
 and leaves out the waiting cards in the same way. `conveyor.sh foreman status`, `/units` and the Board show a waiting card as waiting, and
 give the count of cards that build against the cap without the waiting cards.
 
-`conveyor.sh control judge on|off`, `conveyor.sh control judge always [<kind>...]` and
+`conveyor.sh control judge on|off`, `conveyor.sh control judge always [<kind>...]`,
+`conveyor.sh control judge rare <level>...|none` and
 `conveyor.sh control judge <cli> <model> [effort]` set the review's judge (below, The judge): each project's record holds
-its own, and the Board's Rules tab sets them in its Judge row.
+its own, and the Board's Rules tab sets them in its Judge row, except the rare-case levels, which only the command sets.
 
 `conveyor.sh control tests <cli> <model> [effort]` sets the Tests seat (below, Test actions), and
 `conveyor.sh control tests default` clears it.
@@ -153,7 +154,7 @@ check, with a line naming these commands. `conveyor.sh control judge on` switche
 `conveyor.sh control judge off` off, from the next review; it is on in a new project (docs/configuration.md, The control record). On, a judge reads each review
 that holds findings before the card acts on it, and marks each finding accepted, declined or outside with a one-line
 reason. It declines a finding only when its proof cannot happen with what the project really
-runs, or its claim is wrong. A real defect in code that the card neither changed nor broke is never
+runs, or its claim is wrong, or, at a level that `control judge rare` names (below), it is a rare case. A real defect in code that the card neither changed nor broke is never
 declined for that: the judge marks it outside. It becomes an `OUTSIDE:` line of the review, with no fix round for
 this card, and a review with no accepted finding is a GO. When the card lands, each outside finding is filed as a
 follow-up of the card, with its level and the card's issue as its parent, as a finding of a last NO-GO is; a card
@@ -163,7 +164,7 @@ itself starts with `OUTSIDE:` is a finding. One scope rule holds at every level,
 when it is inside the diff (any file and line it names is a changed line, or one of the two lines a removal sits between), or outside it because the card's change
 causes it, such as a caller the change breaks; the judge's reason names the changed line. A finding is declined only when
 its claim is wrong about the code, or its proof cannot happen with what the project really runs, and the reason says
-which, and why. "Rare case" is no reason to decline at any level. A P3 finding (a real but minor defect, such as a
+which, and why. "Rare case" is no reason to decline, except at a level that `control judge rare` names (below). A P3 finding (a real but minor defect, such as a
 misleading name or message, a small inconsistency or dead code the change left) is not declined because it causes no
 wrong result. A real outside finding is filed at any level, also when its proof needs an uncommon input or timing. An accepted P3 is handled by the control record's rule `P3` (the Rules
 tab): on, it is a finding as a P2 is, so it makes a NO-GO, goes to the fix round and, still open after the last
@@ -179,6 +180,12 @@ reason and, for an accepted one, its "Cost to every card" (a finding accepted be
 the finding kinds that are always accepted, whatever the judge says: the reviewer tags a finding of one with its
 kind, in square brackets right after its level. Each kind is one word; the command names them all, and with no kind
 it clears them.
+
+`conveyor.sh control judge rare <level>...` names the levels (P0 to P3) at which the judge can also decline a finding
+as a rare case: a finding whose proof needs an input, timing or setup that the project runs only rarely. The reason of
+such a decline starts with "rare case". At each other level, "rare case" is no reason to decline.
+`conveyor.sh control judge rare none` clears the levels. The default is none: the judge declines no finding as a rare
+case. A word that is not a level is refused, and the setting does not change.
 
 `conveyor.sh control judge <cli> <model> [effort]` names the judge (a CLI installed on the host, the reviewer's too,
 and any model, listed by that CLI or not: docs/configuration.md, Models); a judge set to the reviewer's CLI is used, of the same

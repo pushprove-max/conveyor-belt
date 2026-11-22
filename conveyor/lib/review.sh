@@ -247,7 +247,7 @@ claudereview() { # <worktree> <brief> <instructions> <model> <effort>
 # the card acts on it: the findings, the card's staged change, the issue (the brief) and the findings already
 # declined on this issue's cards (the declined list, DECLINED, holds them). It marks each finding accepted, declined or
 # outside (real, but not caused by the card's change), with a one-line reason, and declines a finding at any level (P0 to P3) only when its claim is wrong about the code or its proof cannot happen with what the project really runs ("rare case" is
-# no reason at any level; a P3 is not declined for being minor). A declined finding becomes a line `DECLINED:
+# no reason, except at a level the control record's judgeRare names: judgeprompt(); a P3 is not declined for being minor). A declined finding becomes a line `DECLINED:
 # <finding> (judge: <reason>)` of the review, which is no finding (NOTFINDING): it causes no fix round and no
 # follow-up, and a review left with no finding is a GO; it goes to the declined list
 # (declined(), by: "judge", why: the reason). An outside finding becomes a line `OUTSIDE: <finding> (judge: <reason>)`
@@ -288,10 +288,7 @@ Accept a finding only when all of these hold. One rule holds at every level, P0 
   diff, the reason names the changed line that causes it.
 - Its proof can happen with what the project really runs: its real config, commands and inputs. Decline a proof that
   needs a stub built to misbehave, or a setup the project does not have.
-Decline a finding at any level only when its claim is wrong about the code, or its proof cannot happen with what the
-project really runs. The reason says which of the two, and why. "Rare case" is no reason to decline at any level: an
-unusual input, timing or setup that the project really runs is not one. A P3 is minor by its level: do not decline it
-because it causes no wrong result.
+<rare>
 A finding already declined (listed before the findings, when there are any) and raised again with nothing new is
 declined for the reason it was declined, when that reason is one of the two above. Judge it again from the code when
 that reason was "rare case" or any other.
@@ -306,6 +303,26 @@ Answer with exactly one line for each finding, in order, and no other line:
 A reason that names another finding by its number quotes that finding'"'"'s file and line beside it, as
 `F1 (src/a.js:12)`, so the reason reads on its own.
 '"$STE"
+# JUDGE as the judge is given it: <rare> is its decline rule, by the control record's judgeRare (`control judge rare
+# <level>...`, `control judge rare none`): with no level (the default, or a record that cannot be read), "rare case" is
+# no reason to decline at any level; else it is one at the levels named, and at those only.
+judgeprompt() {
+  local l r
+  l=$(ctl 2>/dev/null | jq -r '.judgeRare // [] | if length < 2 then join("") else "\(.[:-1] | join(", ")) and \(last)" end' 2>/dev/null) || l=''
+  if [ -z "$l" ]; then
+    r='Decline a finding at any level only when its claim is wrong about the code, or its proof cannot happen with what the
+project really runs. The reason says which of the two, and why. "Rare case" is no reason to decline at any level: an
+unusual input, timing or setup that the project really runs is not one. A P3 is minor by its level: do not decline it
+because it causes no wrong result.'
+  else
+    r="Decline a finding only when its claim is wrong about the code, or its proof cannot happen with what the project
+really runs, or, at $l only, it is a rare case: its proof needs an input, timing or setup that the project runs
+only rarely. The reason says which of these, and why; a rare-case reason starts with \"rare case\". At any other level,
+\"rare case\" is no reason to decline: an unusual input, timing or setup that the project really runs is not one. A P3
+is minor by its level: do not decline it because it causes no wrong result."
+  fi
+  printf '%s' "${JUDGE/<rare>/"$r"}"
+}
 # What the reviewer is told, after REVIEW, when the judge is on and always accepts some kinds.
 KINDS='The project always accepts a finding of one of these kinds: <kinds>. A finding of one of them names its kind in
 square brackets right after its level, as `[P1][<kind>] file:line what. Proof: <proof>`. Tag no other finding.'
@@ -438,7 +455,7 @@ judged() { # <card> <issue> <worktree> <brief> <the review's fields>
   if ! { judgemarks "$wt" "$ja" > "$wt.judge.marks" && jq -e 'length > 0' "$wt.judge.marks" > /dev/null; } 2>/dev/null; then
     j=$(jq -cn '{failed: "the findings could not be read for the judge"}')
   elif [ -z "$before" ] || before="# Findings already declined on the cards of this issue"$'\n'"$before"$'\n\n'
-    ! j=$(judgecall "$wt" "$JUDGE" "$4"$'\n\n'"$before# The findings"$'\n'"$(jq -r '.[]
+    ! j=$(judgecall "$wt" "$(judgeprompt)" "$4"$'\n\n'"$before# The findings"$'\n'"$(jq -r '.[]
       | "F\(.n) [\({inside: "inside the diff", outside: "outside the diff", none: "no place"}[.place])\(if .kind then "; always accepted: \(.kind)" else "" end)] \(.finding)"' "$wt.judge.marks")"); then :
   # What it said of each finding: its one decision line that parses whole, an accepted one with its reason and cost,
   # else the finding is accepted (a duplicate id, a line that cannot be read, no line). A line for no finding of the
