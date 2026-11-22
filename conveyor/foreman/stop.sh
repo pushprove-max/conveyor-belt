@@ -23,6 +23,8 @@
 #   "filed as #<n>" is refused too, at every stop of the turn (not only once, as the checks above are).
 #   A plugin-problem line may carry a part "cause not checked: <text>" before its card and evidence: a guess at the cause.
 #   No line is refused for [likely]: a clause that holds it outside that part is noted moved into the part (plug_cause),
+#   with the clauses before it that it goes on (one with no subject, "is stale", or a hedge word, "maybe", takes the
+#   clause before it),
 #   so the marker is never lost and the report shows the text as a cause that was not checked.
 # Each refused stop is noted in $FD/refused-stops (lib.sh refused_put), which waiter.sh reads.
 set -uo pipefail
@@ -83,7 +85,7 @@ plug_cause() {
   # A card, evidence or filed clause is only one that has the field's own shape (a card id or "-", one path with a "/"
   # or "-"), so a cause that says ", card lookups use old data" stays in the cause, and an empty field ends it.
   local TAILRE='^(card[[:space:]]+(c[0-9]{8}T[0-9]{6}-[^[:space:]]+|-)|evidence[[:space:]]+([^[:space:]]*/[^[:space:]]*|-)|filed as #.*)$'
-  local s=${1//; /, } c p before after cause='' moved=0 incause=0 intail=0 tailtag=0
+  local s=${1//; /, } c p before after first cause='' moved=0 incause=0 intail=0 tailtag=0
   local -a cl=() head=() tail=()
   while [[ $s == *', '* ]]; do cl+=("${s%%, *}"); s=${s#*, }; done; cl+=("$s")
   for c in "${cl[@]}"; do
@@ -97,7 +99,16 @@ plug_cause() {
         c=$before
         # A tag that ends a field has no claim of its own to mark: it marks the line's text before the fields.
         if [ -n "$after" ]; then cause=$(plug_join "$cause" "$after"); else tailtag=1; fi
-      else cause=$(plug_join "$cause" "$(plug_untag "$c")"); continue; fi
+      else
+        # A tagged clause with no subject of its own ("is stale") or a hedge word ("maybe") goes on the clause before
+        # it, so that clause is part of the same guess and goes into the cause too ("the cache, maybe, is stale"). A
+        # one-word guess that is no hedge ("timeout") has its own subject: the clause before it stays outside the cause.
+        c=$(plug_untag "$c"); first=$c
+        while ((${#head[@]} && !intail)) && [[ ${first,,} =~ ^((is|are|was|were|has|have|had|seems?|may|might|can|could|will|would|does|do|did)([[:space:]]|$)|(maybe|perhaps|probably|possibly|likely|apparently)$) ]]; do
+          first=${head[-1]}; c=$(plug_join "$first" "$c"); unset 'head[-1]'
+        done
+        cause=$(plug_join "$cause" "$c"); continue
+      fi
     fi
     [[ $c =~ $TAILRE ]] && intail=1
     if ((intail)); then tail+=("$c"); else head+=("$c"); fi

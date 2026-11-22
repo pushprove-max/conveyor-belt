@@ -56,6 +56,28 @@ t_filedmixed() {
   out=$(hook filed "$cmd" "$o"$'\n'"7"$'\n')
   jq -e '.hookSpecificOutput.additionalContext | test("no link for each issue.*control hold")' <<<"$out" >/dev/null \
     || fail "filed did not warn that one of two creates shows no link (command: $cmd, output: $o and 7): $out"
+  # Bug (#1405): the creates were counted on the command as written, so a quoted `gh issue 'create'` was no create and
+  # got no warning, while a title that says "issue create" was one. They are counted as the filing hook reads them.
+  cmd="gh issue create --title a --body a && gh issue 'create' --title b --body b | grep -oE '[0-9]+\$'"
+  hook filing "$cmd" >/dev/null
+  o=$(gh issue create --title a --body a) || fail "the stub filed no issue"
+  out=$(hook filed "$cmd" "$o"$'\n'"8"$'\n')
+  jq -e '.hookSpecificOutput.additionalContext | test("no link for each issue.*control hold")' <<<"$out" >/dev/null \
+    || fail "filed did not warn that a quoted create shows no link (command: $cmd, output: $o and 8): $out"
+  # Bug (#1405 review): a line continuation between gh and issue create split the create over two lines, so it was
+  # not counted and one link was taken to cover both creates.
+  cmd=$'gh issue create --title a --body a && gh \\\n issue create --title b --body b | grep -oE \'[0-9]+$\''
+  hook filing "$cmd" >/dev/null
+  o=$(gh issue create --title a --body a) || fail "the stub filed no issue"
+  out=$(hook filed "$cmd" "$o"$'\n')
+  jq -e '.hookSpecificOutput.additionalContext | test("no link for each issue.*control hold")' <<<"$out" >/dev/null \
+    || fail "filed did not warn that a create split by a line continuation shows no link (command: $cmd, output: $o): $out"
+  cmd='gh issue create --title "Count each issue create" --body a'
+  hook filing "$cmd" >/dev/null
+  o=$(gh issue create --title a --body a) || fail "the stub filed no issue"
+  out=$(hook filed "$cmd" "$o"$'\n')
+  ! jq -e '.hookSpecificOutput.additionalContext | test("no link for each issue")' <<<"$out" >/dev/null \
+    || fail "filed warned of an unlinked issue for a title that says issue create (command: $cmd, output: $o): $out"
 }
 # Bug (#1234): when filed blocks (a linked issue it cannot hold) the block reason must still carry the unlinked-issue
 # warning; without it the Foreman is told of the one failure and never that the other create shows no link.

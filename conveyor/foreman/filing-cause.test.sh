@@ -45,6 +45,26 @@ printf '## What happens now\nIt breaks.\n' > "$T/body.md"
 refused "gh issue create --title 'Fix it' --body-file $T/body.md"
 printf '## What happens now\nIt breaks.\n## Cause\nThe cache is stale.\n' > "$T/body.md"
 passes "gh issue create --title 'Fix it' --body-file $T/body.md"
+# Bug (#1405): a body read from stdin (`--body-file -`) was never read, so a fix with no Cause passed. The `< file`
+# redirect names its file, which is read as a named body file is.
+printf '## What happens now\nIt breaks.\n' > "$T/fix.md"
+refused "gh issue create --title x --body-file - < $T/fix.md"
+refused "gh issue create --title x -F - <$T/fix.md"
+passes "gh issue create --title x --body-file - < $T/body.md"
+}
+
+# Bug (#1405): the headings were found anywhere in the text, so '### Cause' counted as a Cause section and a sentence
+# that quotes '## What happens now' made a new-work issue a fix issue. A heading is a line of its own with two hashes.
+t_heading() {
+case_ heading
+refused "$(body $'## What happens now\nIt breaks.\n### Cause\nThe file is never trimmed.')"
+refused "gh issue create --title 'Fix it' --body '## What happens now\nIt breaks.\n### Cause\nnone'"
+passes "$(body $'A fix issue has a \'## What happens now\' section, and the form should say so.')"
+passes "gh issue create --title 'Form' --body 'Each fix has a \`## What happens now\` section.'"
+# Bug (#1405 review): a heading with up to three spaces before it is still a Markdown heading; it was not seen, so a
+# fix with an indented Cause was refused and one with an indented What happens now passed with no Cause.
+refused "$(body $'  ## What happens now\nIt breaks.')"
+passes "$(body $'## What happens now\nIt breaks.\n  ## Cause\nThe file grows.')"
 }
 
 # D2: a `bug` label makes it a fix issue, whatever its body. `testissue` files with the pack's type label (`bug` here),
@@ -77,7 +97,7 @@ out=$(cd "$M" && jq -cn --arg c "$(body $'## What happens now\nIt breaks.')" '{s
 [ -z "$out" ] || fail "a fix issue filed in a session that is not the Foreman's was checked; command: $(body $'## What happens now\nIt breaks.'); output: $out"
 }
 
-cases=(what bug new)
+cases=(what heading bug new)
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
 read -ra cases <<<"$SEL"

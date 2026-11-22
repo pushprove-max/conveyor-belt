@@ -219,6 +219,23 @@ t_causewords() {
     || fail "the plugin problem '$line': a tagged clause that starts with 'card' was not moved to the cause part: $(cat "$FD/plugin-bugs.md" 2>&1)"
 }
 
+# Bug (#1405): a guess with a comma before its [likely] tag kept its first part as fact: only the clause holding the
+# tag moved, so 'the cache, maybe, is stale [likely]' gave 'the cache, maybe, cause not checked: is stale'. A tagged
+# clause with no subject, or a one-word aside, goes on the clause before it, so the whole guess moves.
+t_guesscomma() {
+  CASE=guesscomma
+  eval "$(sed -n '/^plug_cause() {/,/^}/p; /^plug_join() /p; /^plug_untag() /p' "$SRC/stop.sh")"
+  local in='the cache, maybe, is stale [likely], card c20260101T000000-x'
+  plug_cause "$in"
+  [ "$BODY" = 'cause not checked: the cache, maybe, is stale, card c20260101T000000-x' ] \
+    || fail "plug_cause '$in' did not move the whole guess into the cause part: BODY '$BODY'"
+  # Bug (#1405 review): a one-word guess that is no hedge word took the clause before it, the expected result, too.
+  in='setup fails, it should pass, timeout [likely], card -, evidence -'
+  plug_cause "$in"
+  [ "$BODY" = 'setup fails, it should pass, cause not checked: timeout, card -, evidence -' ] \
+    || fail "plug_cause '$in' moved a clause that is not part of the one-word guess into the cause part: BODY '$BODY'"
+}
+
 # Bug (review of #1357): a [likely] tag at the end of the line, after the evidence, put the evidence path in the cause
 # part and left the claim outside it. The tag marks the text before the card and evidence fields, so that goes into it.
 t_guessend() {
