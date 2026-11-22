@@ -23,3 +23,9 @@ bad=$(jq -rn --argjson g "$got" --argjson w "$want" '
     ([$w.areas[] | select(.files != []) | .tests | arrays[] | "conveyor/tests/" + .] | unique - [$g.sources[][]] | .[] | "\(.): a case file of the area map no source runs"),
     ([$w.areas[] | select(.tests == "all") | .files[]] - $g.shared | .[] | "\(.): in an \"all\" area, but not shared")')
 [ -z "$bad" ] && echo "ok - the map reader reads every area, case file and shared file as test-changed.sh does" || { echo "not ok - the map reader and test-changed.sh differ:"; echo "$bad"; exit 1; }
+# Bug it catches (#1339): testhistory.test.sh runs the cases of the test rules library and of the test-settings command,
+# but the map listed it under neither area, so a card changing only one of those files did not run it.
+for f in conveyor/lib/testrules.sh conveyor/commands/test-settings.sh; do
+  jq -e --arg f "$f" --arg t conveyor/tests/testhistory.test.sh '.sources[$f] // [] | index($t)' <<< "$got" > /dev/null \
+    && echo "ok - a change to $f runs testhistory.test.sh" || { echo "not ok - a change to $f does not run testhistory.test.sh"; exit 1; }
+done
