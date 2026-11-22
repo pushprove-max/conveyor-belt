@@ -271,7 +271,7 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
 # usages, turns and refusals add up over the results; answers after the last result (a turn a timeout cut off) are
 # added from the answers themselves, each answer once (the usage of its last event). modelUsage and duration_api_ms
 # are the session's totals so far: the last result's and the largest are taken.
-SESSIONREAD=$(<"$HERE/jq/sessionread.jq")
+SESSIONREAD=$(<"$HERE/jq/sessionread.jq") SESSID='first(inputs | fromjson? | objects | .session_id | strings | select(test("^[0-9A-Za-z-]+$")))' # SESSID: the session id a Claude output's events name
 # A Claude session's fields when its output holds no token usage: Claude Code's own transcript of that session is
 # read with SESSIONREAD (each answer once: the usage of its last event), and its tokens, usage and the models that ran
 # take the place of unread, so the step is priced. The transcript is <account folder, ~/.claude for the default
@@ -281,7 +281,7 @@ SESSIONREAD=$(<"$HERE/jq/sessionread.jq")
 transcribed() { # <the step's fields> <output file> <worktree> <account folder, "" for the default login>
   local id p t u
   if jq -e '(.usage | type) != "object"' <<<"$1" >/dev/null 2>&1 \
-    && id=$(jq -rRn 'first(inputs | fromjson? | objects | .session_id | strings | select(test("^[0-9A-Za-z-]+$")))' "$2" 2>/dev/null) && [ -n "$id" ] \
+    && id=$(jq -rRn "$SESSID" "$2" 2>/dev/null) && [ -n "$id" ] \
     && p=$(cd "$3" 2>/dev/null && pwd -P) && t=${4:-$HOME/.claude}/projects/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$p")/$id.jsonl && [ -s "$t" ] \
     && u=$(jq -cRn --arg m "$(jq -r '.model // ""' <<<"$1")" --arg e "" --argjson s 0 "$SESSIONREAD" "$t" 2>/dev/null | tail -n 1 \
       | jq -ce 'select((.usage | type) == "object" and .unread == null) | {tokens, usage, stats: (.stats // {} | {models, byModel, cacheHit})}' 2>/dev/null); then
@@ -409,9 +409,9 @@ APIERR=${STATE%/*}/apierror
 apifresh() { [ -e "$APIERR" ] && jq -en --slurpfile u "$APIERR" '($u[0] | numbers) > now' >/dev/null 2>&1; }
 # A step's fields with those of the tries the API refused before it ($p) folded in. As with a review's two attempts
 # (BOTHTRIES): when a refused try's usage is unknown or only part of it, or it ran on another model, unread says so,
-# so the step is unpriced, never underpriced. An OpenCode cost (usage.cost) is the sum when both report one, else left out.
+# so the step is unpriced, never underpriced. An OpenCode cost (usage.cost) is the sum when both report one, else left out. A resumed try (session1()) leaves it resumed.
 APIFOLD='def add2(a; b): [a, b] | map(. // {} | to_entries[]) | reduce .[] as $e ({}; .[$e.key] += $e.value);
-  .sec += $p.sec | (if .tokens != null or $p.tokens != null then .tokens = add2(.tokens; $p.tokens) else . end)
+  .sec += $p.sec | (if .tokens != null or $p.tokens != null then .tokens = add2(.tokens; $p.tokens) else . end) | (if $p.resumed then .resumed = $p.resumed else . end)
   | if $p.model != null and $p.model != .model then .unread //= "a try the model API refused ran on another model (\($p.model)): one model cannot price both"
     elif (.usage | type) == "object" and ($p.usage | type) == "object" then
       .usage.cost as $c | .usage = (add2(.usage; $p.usage) | if [$c, $p.usage.cost] | all(type == "number") then . else del(.cost) end)
@@ -431,7 +431,7 @@ apihold() { # <worktree> <step> <output file>
   done
 }
 apitries() { # <worktree> <step> <output file> <command ...>
-  local wt=$1 st=$2 o=$3 t rc api try=0 w at used=null s codex=false said; shift 3
+  local wt=$1 st=$2 o=$3 t rc api try=0 w at used=null s codex=false said APIRESUME='' APIRESUMED=''; shift 3
   # Codex's words are read as Codex's (APISAID) for a Codex review and for a session on a Codex builder model alike.
   case $1 in
     codexreview) codex=true ;;
@@ -461,7 +461,7 @@ apitries() { # <worktree> <step> <output file> <command ...>
     [ "$st" != review ] || [ $rc = 2 ] || { printf '%s\n' "$t"; return $rc; }
     [ $try -lt 4 ] || { printf 'the model API refused (%s) at each of 5 tries, made %ss, then 2, 4 and 8 times that, apart\n%s\n' "$api" "$API_PAUSE" "$(jq -rRn --argjson codex "$codex" --rawfile e "$wt.err" "$APISAID" "$said" 2>/dev/null | tail -n 60)"; return 1; }
     read -r w at <<<"$(jq -rn --argjson p "$API_PAUSE" --argjson t "$try" '($p * pow(2; $t)) as $w | "\($w) \(now + $w | floor)"')"
-    try=$((try + 1)); used=$(jq -c 'del(.step)' "$wt.spent")
+    try=$((try + 1)); used=$(jq -c 'del(.step)' "$wt.spent"); APIRESUME=''; APIRESUMED=''; jq -e '.resumed' <<<"$used" >/dev/null 2>&1 && APIRESUMED=1; [ $try != 1 ] || APIRESUME=1 # the first retry resumes the refused session (session1()); a resumed try is the step's one resume, so no later try resumes (APIRESUMED)
     jq -cn --arg s "$st" --arg a "waiting: the model API refused ($api); trying again at $(p_date "@$at" +%H:%M)" --slurpfile u "$wt.spent" \
       '{step: $s, at: (now | todate), last: null, turns: 0, model: $u[0].model, action: $a} + (if ($u[0].effort | type) == "string" and $u[0].effort != "" then {effort: $u[0].effort} else {} end)' > "$wt.live.tmp" && mv -f "$wt.live.tmp" "$wt.live"
     sleep "$w"
@@ -504,9 +504,10 @@ newtexts() { # <the name of a variable that holds a prompt>
 # a tool no hook is given, is off. Its commands get no terminal (unified_exec_tty off), so their input is closed:
 # write_stdin, which types into a command already running and is given no hook, can only wait for output, and Codex
 # refuses keys sent with it (a Codex without the feature fails to start). It runs on no Claude account.
+RESUMEBRIEF='Your session was cut off (it made no progress for a while, or the model API refused it) and is now resumed. The worktree holds what you did so far: go on with the task from where you stopped, and end as the brief asks.' # what a resumed build session is told (session1())
 BUILDNOTOOLS=Agent,ScheduleWakeup,CronCreate,CronDelete,CronList,Monitor,RemoteTrigger,PushNotification,SendMessage,ListAgents,Workflow
 sq() { local q="'"; printf "'%s'" "${1//$q/$q\\$q$q}"; } # <word>: it single-quoted for a shell
-builder() { # <worktree> <prompt> <model> <effort> <account folder> <agent: claude, opencode or codex>
+builder() { # <worktree> <prompt> <model> <effort> <account folder> <agent: claude, opencode or codex> [Claude session id to resume]
   local h a=()
   cd "$1" && mkdir -p "$1.briefs" || exit 1
   export CONVEYOR_CARD=${1##*/} CONVEYOR_BRIEFS=$1.briefs # kept long outputs (tools/outbrief.sh), gone with the card
@@ -524,8 +525,8 @@ builder() { # <worktree> <prompt> <model> <effort> <account folder> <agent: clau
         --enable hooks --dangerously-bypass-hook-trust --disable unified_exec_tty -c "hooks.PreToolUse=$h" - <<<"$2" > "$1.out" 2> "$1.err" 8>&- ;;
     opencode) export CLAUDE_PROJECT_DIR=$1 CONVEYOR_GUARD_SETTINGS=$1.settings OPENCODE_CONFIG=$1.opencode.json OPENCODE_DISABLE_PROJECT_CONFIG=1
       exec "${KEEP[@]}" timeout --kill-after=30 "$BUILD_TIMEOUT" opencode run --model "${3#opencode:}" --format json --auto <<<"$2" > "$1.out" 2> "$1.err" 8>&- ;;
-    *) proxyenv && acctrun "$5" || exit 1
-      exec "${KEEP[@]}" timeout --kill-after=30 "$BUILD_TIMEOUT" claude -p --model "$3" --effort "$4" --permission-mode bypassPermissions --disallowedTools "$BUILDNOTOOLS" \
+    *) proxyenv && acctrun "$5" || exit 1; [ -z "${7:-}" ] || a=(--resume "$7") # the session it resumes (session1())
+      exec "${KEEP[@]}" timeout --kill-after=30 "$BUILD_TIMEOUT" claude -p "${a[@]}" --model "$3" --effort "$4" --permission-mode bypassPermissions --disallowedTools "$BUILDNOTOOLS" \
         --setting-sources "" --strict-mcp-config --settings "$1.settings" --output-format stream-json --verbose <<<"$2" > "$1.out" 2> "$1.err" 8>&- ;;
   esac
 }
@@ -576,14 +577,13 @@ session1() {
   esac
   rm -f "$1.spent" "$1.stalled" "$1.guardfail"
   # The session runs on the cores left for card work (lib/slots.sh slot_keepwords).
-  local KEEP bp
-  slot_keepwords
+  local KEEP bp p rid rd=''; slot_keepwords
   # A session that stalls (watch()) is ended and runs once more after REVIEW_PAUSE, as a review with no verdict does
-  # (reviewed()), on what it left in the worktree; the stalled try
-  # is firstTry on the step's line (BOTHTRIES), and stalls counts the stalls. A second stall fails the step.
+  # (reviewed()), on what it left in the worktree; the stalled try is firstTry on the step's line (BOTHTRIES), and stalls counts the stalls. A second stall fails the step.
+  # A Claude build session cut off by a stall, or by the model API (APIRESUME: apitries()'s first retry), is resumed once by the session id its output names (claude --resume, told RESUMEBRIEF), not run again from nothing: its line has resumed 1.
   while :; do
-    sec=$SECONDS
-    builder "$1" "$2" "$model" "$effort" "$dir" "$agent" & bp=$!
+    sec=$SECONDS; p=$2 rid=''; [ -z "$rd" ] && [ -z "${APIRESUMED:-}" ] && [ "$agent" = claude ] && [ "${3:-build}" = build ] && [ -n "${APIRESUME:-}$x" ] && rid=$(jq -rRn "$SESSID" "$1.out" 2>/dev/null) && [ -n "$rid" ] && p=$RESUMEBRIEF rd=1
+    builder "$1" "$p" "$model" "$effort" "$dir" "$agent" "$rid" & bp=$!
     watch $bp "$1.out" "$1.live" "${3:-build}" "$model" "$agent" "$effort"; rc=$?; sec=$((SECONDS - sec))
     # A Codex session cut off before its turn completed: its running total, from the session file Codex keeps (read
     # and removed, as a review's is).
@@ -599,7 +599,7 @@ session1() {
     echo "conveyor: card ${1##*/}: its ${3:-build} made no progress for ${STUCK}s: ended, and run once more after ${REVIEW_PAUSE}s" >&2
     sleep "$REVIEW_PAUSE"
   done
-  [ -z "$x" ] || f=$(jq -c --argjson f "$x" --argjson n "$([ -e "$1.stalled" ] && echo 2 || echo 1)" "$BOTHTRIES"' | .stalls = $n' <<<"$f")
+  [ -z "$x" ] || f=$(jq -c --argjson f "$x" --argjson n "$([ -e "$1.stalled" ] && echo 2 || echo 1)" "$BOTHTRIES"' | .stalls = $n' <<<"$f"); [ -z "$rd" ] || f=$(jq -c '.resumed = 1' <<<"$f")
   [ "$agent" != claude ] || proxypack
   [ "$agent" = opencode ] || f=$(routed "$f" "$agent")
   s=$(awk -F'\t' '++n[$1] == 2 { print "guard " $1 " is failing: " $2; exit }' "$1.guardfail" 2>/dev/null); rm -f "$1.guardfail" # guardrun.sh: blocks the card

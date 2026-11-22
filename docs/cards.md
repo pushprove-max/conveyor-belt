@@ -27,6 +27,12 @@ A Claude build or fix session cannot use the tools that schedule work, send mess
 `WebSearch`. There is no limit on turns or on cost. The session ends at its time limit, or sooner when it makes no
 progress for the pack's `tunables.stuck`.
 
+A Claude build session that makes no progress, or that the model API refuses, continues once in the same session
+(`claude --resume`). It does not start again with the whole brief. The card's line then shows `resumed: 1`. This needs
+the session id in the session's output: a session that stops before it names its id starts again with the whole
+brief. A build step resumes once at most. When the
+build still fails, the blocked line names the cause in its `class`: `stall`, `api error` or `timeout`.
+
 The card's guard hooks check each Bash, Edit, Write and AskUserQuestion call of a build or fix session. Each guard
 hook that `onFailure: block` marks (all the guards of Conveyor, and each guard of `.conveyor/hooks.json` with that
 field) runs behind Conveyor's guard runner. When such a guard fails to run, the runner refuses the call. The text that

@@ -231,3 +231,40 @@ EOF
     || fail "the session the API kept refusing on stderr did not fail naming the error: $(cat "$T/$CASE/run.out")"
   grep -qF 'API Error: 503 Service Unavailable' "$T/$CASE/run.out" || fail "the failure lost the API's own words: $(cat "$T/$CASE/run.out")"
 }
+
+# Issue 1309. Bug it catches: a build session the API refused ran again from nothing, its whole brief once more, and
+# its block, refused at each try, was in the class "session failed", as any failed session's. Refused twice here: the
+# first try after the refusal resumes the refused session by its id (claude --resume), told the resume brief, and the
+# try after that starts from nothing; the build's record has resumed 1. failclass() names each failed build's class.
+t_apiresume() {
+  setup '[]'; refusing 2; tune '.tunables.apiPause = 0.02'; fx_wt : b.txt one
+  sed -i '1i echo "{\\"type\\":\\"system\\",\\"session_id\\":\\"0aa1-b2\\"}"' "$STUB/build"
+  apicall 'session "$FXWT" "Build the issue."; echo "rc=$?"
+    for r in "the model API refused (403) at each of 5 tries" "stalled twice at build: no progress" "session failed (exit 124, the 60s timeout)" "session failed (exit 1)"; do echo "class=$(failclass "$r")"; done'
+  [ "$(sed -n 's/^class=//p' "$T/$CASE/run.out" | tr '\n' ,)" = 'api error,stall,timeout,,' ] \
+    || fail "failclass() did not name the API error, the stall and the time limit, or named another failure: $(cat "$T/$CASE/run.out")"
+  grep -qx rc=0 "$T/$CASE/run.out" && [ "$(wc -l < "$STUB/sessions")" = 3 ] || fail "a build the API refused twice did not run 3 times and end well: $(cat "$STUB/sessions") $(cat "$T/$CASE/run.out")"
+  [ "$(grep -c -- '--resume 0aa1-b2 ' "$STUB/sessions")" = 1 ] && sed -n 2p "$STUB/sessions" | grep -q -- --resume \
+    || fail "the first try after the refusal did not resume the refused session, or a later try did too: $(cat "$STUB/sessions")"
+  [ "$(head -n 1 "$T/$CASE/run.out" | jq -r .resumed)" = 1 ] || fail "the build's record does not say it was resumed: $(head -n 1 "$T/$CASE/run.out")"
+}
+
+# Issue 1309. Bug it catches: a build that stalled was resumed, and when the API refused that resumed try, the try
+# after the refusal, which stalled again after it named its session, resumed that session too, while its record said
+# resumed 1. One resume a step: the stall's resume is the step's one, so no later try of the step resumes.
+t_apiresumestall() {
+  setup '[]'; tune '.tunables.apiPause = 0.02 | .tunables.stuck = 2 | .tunables.reviewPause = 1'; fx_wt : b.txt one
+  echo "Failed to authenticate. API Error: 403 Attention Required! | Cloudflare" > "$STUB/refusal"
+  # The first try stalls, its resume is refused by the API, the try after that stalls too, the one after that builds the change.
+  cat > "$STUB/build" <<'EOT'
+echo x >> "$STUB/calls"; n=$(wc -l < "$STUB/calls")
+[ "$n" != 1 ] && [ "$n" != 3 ] || { echo "{\"type\":\"system\",\"session_id\":\"0aa1-b$n\"}"; exec sleep 60; } # sleep: a stalled try, ended by the engine
+[ "$n" != 2 ] || { jq -cn --rawfile r "$STUB/refusal" '{type: "result", session_id: "0aa1-b2", is_error: true, result: ($r | rtrimstr("\n")), usage: {input_tokens: 3, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 1}}'; exit 1; }
+echo two >> a.txt
+EOT
+  apicall 'session "$FXWT" "Build the issue."; echo "rc=$?"'
+  grep -qx rc=0 "$T/$CASE/run.out" && [ "$(wc -l < "$STUB/sessions")" = 4 ] || fail "a build that stalled, was refused, then stalled again, did not run 4 times and end well: $(cat "$STUB/sessions") $(cat "$T/$CASE/run.out")"
+  [ "$(grep -c -- '--resume' "$STUB/sessions")" = 1 ] && sed -n 2p "$STUB/sessions" | grep -q -- '--resume 0aa1-b1 ' \
+    || fail "the stalled build was not resumed exactly once, the try after the refusal resumed it again: $(cat "$STUB/sessions")"
+  [ "$(grep -m 1 '^{' "$T/$CASE/run.out" | jq -r .resumed)" = 1 ] || fail "the build's record does not say it was resumed once: $(cat "$T/$CASE/run.out")"
+}

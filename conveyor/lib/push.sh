@@ -709,6 +709,17 @@ trialflag() {
   PICK=$(jq -c 'if $ARGS.positional == [] then del(.pipeline) else .pipeline = $ARGS.positional end' --args "${files[@]}" <<<"$PICK") || :
 }
 clean() { tidy "$1"; rm -f "$1".out "$1".err "$1".review "$1".test "$1".withdrawn "$1".approvals "$1".spent "$1".trailers; rm -rf "$1".testlog "$1".rounds; }
+# The class of a failed build session (session()'s reason), for its blocked line (block()'s BLOCKCLASS) and the
+# metrics: api error (refused at each try, apitries()), stall (stalled twice, session1()), timeout (the time limit's
+# exit 124, exitsaid()), else nothing: the metrics then read the class from the reason (blockclass, jq/metrics.jq:
+# prompt too long, engine error, else session failed), as they read no change. A proof check is named where it blocks (cardbuild()).
+failclass() { # <reason>
+  case $1 in
+    'the model API refused'*) echo 'api error' ;;
+    'stalled twice at '*) echo stall ;;
+    'session failed (exit 124'*) echo timeout ;;
+  esac
+}
 # The closing line for a card that does not land. Its worktree goes, once its change is kept as a patch (a
 # patch that cannot be written leaves the worktree where it is, and the reason says so); its session output, error
 # output, last review, last test output, the findings of its withdrawn follow-ups, the issue body its last review read, its commit trailers, its fix rounds (donewhen.sh repeats()) and the list of what its tests passed (tests(): a retried card keeps those passes) are moved to a folder beside the cards folder, and the line names that folder. Evidence is never deleted
@@ -726,7 +737,8 @@ clean() { tidy "$1"; rm -f "$1".out "$1".err "$1".review "$1".test "$1".withdraw
 # last 60 lines of it), so the Board shows the sentence and the output apart. SPEEDCHECKED, when set, is the version
 # of the speed check that blocks the card (SPEEDCHECK, lib/testrun.sh): the line's speedcheck. BLOCKCLASS, when set,
 # is the line's class, the block class the metrics give it ("proof check": a check that proves the change refused it,
-# card.sh and cardland.sh; its reason starts as a failed session's does). Called in card(), the
+# card.sh and cardland.sh, its reason starting as a failed session's does; api error, stall or timeout: a failed build
+# session, failclass() above). A failed session that was resumed (session1()) gives the line resumed. Called in card(), the
 # line's waitSec is the seconds the card waited on other cards and for main to change (card()'s waitsec and mainsec),
 # as on its landed line, for the drift watch (bench/drift.sh); outside card() it has none.
 # A card that stops for the owner's yes to a visible change keeps the project's own screenshots of it (keepshots()),
@@ -800,5 +812,5 @@ block() { # <card> <issue> <worktree> <reason> [post the reason on the issue wha
   record "$1" "$2" blocked blocked "$(printf '%s' "$tail" | jq -cRs --arg r "$reason" --arg k "${kept:+kept/$1}" --argjson d "$size" --argjson e "$(ending)" --argjson sp "$sp" --argjson p "${named:-null}" --arg sc "${SPEEDCHECKED:-}" --argjson ws "$ws" --arg bc "${BLOCKCLASS:-}" '. as $t | {reason:$r,kept:$k} + (if $t == "" then {} else {tail: $t} end)
     + (if $sc == "" then {} else {speedcheck: ($sc | tonumber)} end) + (if $bc == "" then {} else {class: $bc} end) + (if $ws == null then {} else {waitSec: $ws} end) + (if $d == null then {} else {diff: $d} end) + (if $p == null then {} else {paths: $p} end) + $e
     + (if $sp == null then {} else {spent: $sp, tokens: {claude: ($sp.tokens.claude // 0), codex: ($sp.tokens.codex // 0)}} end)
-    + (if ($sp.stalls // 0) > 0 then {stalls: $sp.stalls} else {} end)')"
+    + (if ($sp.stalls // 0) > 0 then {stalls: $sp.stalls} else {} end) + (if ($sp.resumed // 0) > 0 then {resumed: $sp.resumed} else {} end)')"
 }

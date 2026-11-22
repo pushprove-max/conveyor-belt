@@ -282,6 +282,8 @@ t_optdirectcard() {
   printf '%s\n' 't_relstop() { :; }' 't_relpin() { :; }' > "$R/f.test.sh"
   git -C "$R" add f.test.sh && git -C "$R" commit -qm 'a test' && git -C "$R" push -q origin main || fail "main's files"
   echo "printf '%s\n' 't_relstop() { :; }' > f.test.sh" > "$STUB/build"
+  # The session names its id, so a resume of a proof-check block (issue 1309: only a failed session is resumed) would be seen.
+  printf '%s\n' '{"type":"system","session_id":"0aa1-b2"}' '{"type":"result","is_error":false,"usage":{"input_tokens":10,"output_tokens":5}}' > "$STUB/claude-usage"
   loop run >/dev/null || fail "run exited non-zero"
   [ "$(st 'select(.step == "blocked") | .reason')" = "build: the verdict is indirect, and the change drops cases of f.test.sh that the issue's DIRECT lines say must keep passing: relpin" ] \
     || fail "card() did not send a Rewrite card to the Optimize check: $(st 'select(.step | IN("review", "blocked", "landed"))')"
@@ -290,4 +292,6 @@ t_optdirectcard() {
   [ "$(st 'select(.step == "blocked") | .class')" = "proof check" ] \
     && [ "$(loop snapshot --fresh 2>/dev/null | jq -r '.metrics.cards[] | select(.issue == 7) | .metrics.blockClass')" = "proof check" ] \
     || fail "the Optimize check's block of #7 is not in the class proof check: $(st 'select(.step == "blocked")'): $(loop snapshot --fresh 2>/dev/null | jq -c '.metrics.cards')"
+  [ "$(wc -l < "$STUB/sessions")" = 1 ] && ! grep -q -- --resume "$STUB/sessions" && [ "$(st 'select(.step == "blocked") | .resumed')" = null ] \
+    || fail "the proof-check block of #7 resumed its build session: $(cat "$STUB/sessions"): $(st 'select(.step == "blocked")')"
 }

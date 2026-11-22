@@ -253,7 +253,7 @@ SNAPKEEP=20 PUSHKEEP=100
 # its retry, or to this card's pick when its retry time is not recorded, and for a card that is blocked now, its end to now), leadSec (issue opened to landed) and
 # cycleSec (picked to landed), reviews, firstReview (its verdict), findings (by level, all reviews; null when a review
 # has none counted), rebuilds, retries (the issue's blocked cards before it), blockClass (why it is blocked: the class
-# its blocked line names, proof check, else visible change, no change, conflict, session failed, tests failed, timeout,
+# its blocked line names, proof check, api error, stall or timeout, else visible change, no change, conflict, session failed, tests failed, timeout,
 # prompt too long, lint, setup, product check, engine error or other), brokeMain (the card whose landing turned main red,
 # as its test line names it; null for none), depth, followups (how
 # many it filed), diff ({files, added, removed}), limit ({before, after, used}: weekly limit percent; used is null

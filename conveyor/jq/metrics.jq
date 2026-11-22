@@ -6,7 +6,8 @@
     def share(f): if length == 0 then null else (map(select(f)) | length) / length | r3 end;
     def pos($a; $x): $a | bsearch($x) | if . < 0 then -1 - . else . end;
     # The class a blocked line names (block()'s BLOCKCLASS: "proof check" for a check that proves the change, whose
-    # reason starts as a failed session's does) comes first; else the class is read from the reason.
+    # reason starts as a failed session's does; api error, stall or timeout for a failed build session, session.sh
+    # failclass()) comes first; else the class is read from the reason.
     def blockclass($yes; $tail; $class): if ($class | type) == "string" then $class elif startswith($yes) then "visible change"
       elif test("prompt is too long"; "i") or ($tail | test("prompt is too long"; "i")) then "prompt too long"
       elif test("exit 124[^0-9]") then "timeout" elif test("changed tests") then "tests failed" elif test("conflict") then "conflict"

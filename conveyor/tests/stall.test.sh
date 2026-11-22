@@ -56,7 +56,7 @@ EOF
 # reset the clock, and it was never ended.
 t_stalltwice() {
   setup "[$(issue 7 2026-01-01)]"; tune '.tunables.stuck = 3'
-  printf '%s\n' 'echo "{\"type\":\"system\"}"; echo kept >> a.txt; for i in $(seq 120); do printf x; sleep 0.5; done' > "$STUB/build" # sleep: the pause between two bytes of a spinner, ended by the engine
+  printf '%s\n' 'echo "{\"type\":\"system\",\"session_id\":\"0aa1-b2\"}"; echo kept >> a.txt; for i in $(seq 120); do printf x; sleep 0.5; done' > "$STUB/build" # sleep: the pause between two bytes of a spinner, ended by the engine
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   c=$(st 'select(.step == "picked") | .card')
   [ "$(wc -l < "$STUB/sessions")" = 2 ] && [ ! -e "$STUB/reviews" ] || fail "the build did not run twice, then stop: $(wc -l < "$STUB/sessions") sessions"
@@ -68,6 +68,15 @@ t_stalltwice() {
   [ "$(st 'select(.step == "blocked") | [.stalls, .kept, .spent.step] | tostring')" = "[2,\"kept/$c\",\"build\"]" ] \
     || fail "the blocked line does not count both stalls or name the kept work: $(st 'select(.step == "blocked")')"
   grep -qx '+kept' "$ST/kept/$c/$c.patch" || fail "the stalled build's work was not kept: $(cat "$ST/kept/$c/$c.patch" 2>/dev/null)"
+  # Issue 1309. Bug it catches: the stalled build ran again from nothing, its whole brief once more, and its block was in
+  # the class "session failed", as any failed session's. The stalled Claude session is resumed once by its session id
+  # (claude --resume, told the resume brief), and the block of the second stall is in the class stall, with resumed 1.
+  ! sed -n 1p "$STUB/sessions" | grep -q -- --resume && sed -n 2p "$STUB/sessions" | grep -q -- '--resume 0aa1-b2 ' \
+    || fail "the stalled build was not resumed once by its session id: $(cat "$STUB/sessions")"
+  grep -q '^Your session was cut off' "$STUB/brief" || fail "the resumed session was given the whole brief again, not the resume brief: $(head -c 300 "$STUB/brief")"
+  [ "$(st 'select(.step == "blocked") | [.class, .resumed] | tostring')" = '["stall",1]' ] \
+    && [ "$(loop snapshot --fresh 2>/dev/null | jq -r '.metrics.cards[] | select(.issue == 7) | .metrics.blockClass')" = stall ] \
+    || fail "the twice-stalled build's block is not in the class stall with one resume: $(st '"\(.step) \(.class) \(.resumed) \(.reason)"' | tr '\n' ,)"
 }
 
 # Output, a changed file and a new commit each reset the clock: a session that keeps doing one of them is never ended,

@@ -428,7 +428,7 @@ cardbuild() {
     # runs (bugproof.sh redgreen()), closes as already done before its build session starts, as redproof() closes one after it.
     if jq -e --arg c "$c" 'any(.reds[]?; .card == $c)' "$MAINRED" >/dev/null 2>&1 && redgreen "$c" "$wt"; then greenclose "$c" "$n" "$wt"; return; fi
     more+=$(startbrief "$wt" "$issue" 2>/dev/null) || :; began "$c" "$n" build # startbrief() gives its own blank line, or nothing
-    redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt$more") || { block "$c" "$n" "$wt" "build: $t"; return; }
+    redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt$more") || { BLOCKCLASS=$(failclass "$t") block "$c" "$n" "$wt" "build: $t"; return; }
     checked "$c" "$n" "$wt" "$issue" "$sprompt" build "$t" || return
     # A bug card (the pack's type label): the tests it adds or changes must fail on main's code without the fix
     # (bugproof.sh bugproof(); a change that selects no test of its own is proved by the test files its issue's Done-when names,
