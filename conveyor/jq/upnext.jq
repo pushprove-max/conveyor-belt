@@ -45,5 +45,8 @@
         # A Depends on: line it cannot read (baddeps, DEPS) would otherwise count as only the #N it holds (none for
         # `# 2 3`, #2 alone for `#2 3`), and the issue would start before the other issues it names.
         // (baddeps | first // null | if . == null then null else "the line \"\(.[0:200])\", not a list of issues in the form #N" end))})
+    # named: the issues another open issue waits on (a Depends on line), read before the filter below drops the waiting
+    # issues. Of equal owner order, follow-up position and priority, one of them is picked first: it unblocks others.
+    | (reduce (.[] | .number as $m | .waits[] | numbers | select(. != $m)) as $d ({}; .[$d | tostring] = true)) as $named
     | map(select($all != "" or ((.hold | not) and .rule == null and (.waits == [] or .forced) and (.before | not))))
-    | sort_by(.number as $n | ($ctl.order | index($n)) // ($ctl.order | length), .later, .rank, .createdAt)
+    | sort_by(.number as $n | ($ctl.order | index($n)) // ($ctl.order | length), .later, .rank, ($named[.number | tostring] | not), .createdAt)

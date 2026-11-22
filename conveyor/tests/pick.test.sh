@@ -164,6 +164,17 @@ t_p3on() {
     || fail "P3 on: the P3 and unprioritised issues are skipped, or not next: $out $(cat "$T/$CASE/err")"
 }
 
+# Bugs: of two issues of one priority, the older is picked first though a waiting issue's Depends on line names the
+# newer, so the waiting issue stays blocked longer; or the owner's order (`control order`), or a higher priority, loses to it.
+t_pickneeded() {
+  setup "$(jq -cs . <(issue 5 2026-01-01 P1) <(issue 6 2026-02-01 P1) <(issue 7 2026-03-01 P1 | jq -c '.body = "Depends on: #6"') <(issue 8 2026-04-01 P0))"
+  out=$(upqueue | jq -c '.[0]'); [ "$out" = '[8,6,5]' ] \
+    || fail "the pick was not the P0 first, then the P1 a waiting issue names, then the older P1: $out"
+  loop control order 5 >/dev/null
+  out=$(upqueue | jq -c '.[0]'); [ "$out" = '[5,8,6]' ] \
+    || fail "the owner's order did not keep #5 before the issue a waiting issue names: $out"
+}
+
 # Bugs: lowest priority or newest picked first; an issue with a card (open after a restart) picked again; a second
 # loop started beside a running one, so the two together pass the builder cap.
 t_pick() {
