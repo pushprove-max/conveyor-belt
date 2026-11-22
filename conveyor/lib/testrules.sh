@@ -44,18 +44,19 @@ testrulesettings() {
 }
 
 # What the rules that are on match now (<now>, epoch seconds), in the order of the rules and then of the files:
-# [{rule, measure, limit, file, values, cards}]. A file counts its runs from the card test lines that timed it.
+# [{rule, measure, limit, file, values, cards}]. A file counts its runs from the card test lines that timed it, and its
+# failed steps and flaky entries, from the test history's start on (histstart(), startlines(): lib/testfiles.sh).
 testrulesmatches() { # <now> <settings: testrulesettings()>
   local fl defs refs
   jq -e 'any(.list[]; .on == true)' <<<"$2" > /dev/null || { echo '[]'; return 0; }
   fl=$(jq -ce 'objects' "$FLAKY" 2>/dev/null) || fl='{}'
   testowners
-  { olds; recs; } 2>/dev/null | { grep -F '"step":"test"' || :; } | jq -cRn --argjson now "$1" --argjson s "$2" \
-    --slurpfile fl <(printf '%s' "$fl") --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") '$fl[0] as $fl | '"$OWNERS"'
+  { olds; recs; } 2>/dev/null | { grep -F '"step":"test"' || :; } | jq -cRn --argjson now "$1" --argjson s "$2" --arg st "$(histstart)" \
+    --slurpfile fl <(printf '%s' "$fl") --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") "$HISTFROM"'$fl[0] as $fl | '"$OWNERS"'
     def median: sort | if length == 0 then null else (.[(length - 1) / 2 | floor] + .[length / 2 | floor]) / 2 end;
-    [inputs | fromjson? | objects | select(.step == "test")] | sort_by(.time) as $ls
+    ([inputs | fromjson? | objects | select(.step == "test")] | sort_by(.time) | startlines($st)) as $ls
     | [$ls[] | select(.result == "fail") | {at: ((.time | fromdate?) // 0), card, files: failedfiles}] as $fails
-    | [$fl.entries | arrays | .[] | objects | select(.case | type == "string") | {at: ((.time | fromdate?) // 0), card: (.card // .source), files: (.case | caseowners)}] as $flk
+    | [$fl.entries | arrays | .[] | objects | select(.case | type == "string") | fromstart($st) | {at: ((.time | fromdate?) // 0), card: (.card // .source), files: (.case | caseowners)}] as $flk
     | (reduce ($ls[] | . as $l | .times | objects | to_entries[] | select(.value | type == "number") | .key as $f
         | {f: $f, r: {cpu: .value, sec: (($l.clocks | objects | .[$f] | numbers) // null), card: $l.card}}) as $x ({}; .[$x.f] += [$x.r])) as $runs
     | ([$runs | keys[]] + [$fails[].files[], $flk[].files[]] | unique) as $all

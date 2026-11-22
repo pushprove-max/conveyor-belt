@@ -237,6 +237,8 @@ tafail() { # <id> <why>: a queued action that could not start, failed
   local r
   r=$(jq -ce 'objects' "$TESTACTS/$1.json" 2>/dev/null) && taput "$TESTACTS/$1.json" "$(jq -c --arg t "$(clock)" --arg w "${2:0:600}" '. + {end: $t, state: "failed", reason: $w}' <<<"$r")"
 }
+# Only what is on or after the test history's start (histstart(), HISTFROM: lib/testfiles.sh) is given: no run, flaky
+# entry, failure or newest run before it.
 # What the session is given of <file>: {runs: each run that timed it, oldest first, the runs the Tests page shows: each
 # test line of a card, {card, issue, time} and its times, clocks (its seconds on the clock), and timed parts for
 # the file, and carried: true on a line that kept it as passed and did not run it, its times an earlier step's of the
@@ -255,17 +257,18 @@ tafail() { # <id> <why>: a queued action that could not start, failed
 # ran last is not known.}
 TAFAILS=5
 testfacts() { # <file>
-  local fl defs refs
-  fl=$(jq -c --arg f "$1" '[.entries | arrays | .[] | objects | select(.case == $f or ((.case | strings) | startswith($f + ": ")))]' "$FLAKY" 2>/dev/null) || fl='[]'
+  local fl defs refs st
+  st=$(histstart)
+  fl=$(jq -c --arg f "$1" --arg st "$st" "$HISTFROM"'[.entries | arrays | .[] | objects | select(.case == $f or ((.case | strings) | startswith($f + ": "))) | fromstart($st)]' "$FLAKY" 2>/dev/null) || fl='[]'
   testowners
-  { olds; recs; } 2>/dev/null | jq -cRn --arg f "$1" --slurpfile fl <(printf '%s' "$fl") --argjson n "$TAFAILS" --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") \
+  { olds; recs; } 2>/dev/null | jq -cRn --arg f "$1" --arg st "$st" --slurpfile fl <(printf '%s' "$fl") --argjson n "$TAFAILS" --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") \
     --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) --slurpfile sv <(testsurvey) \
-    --slurpfile ta <(cat "$TESTACTS"/*.json 2>/dev/null | jq -cR --arg f "$1" 'fromjson? | objects | select(.action == "run" and .file == $f and (.result | strings) and (.end | strings))' 2>/dev/null) '$fl[0] as $fl | '"$OWNERS$FAILURE"'[inputs | fromjson? | objects | select(.step == "test")] as $ls
+    --slurpfile ta <(cat "$TESTACTS"/*.json 2>/dev/null | jq -cR --arg f "$1" 'fromjson? | objects | select(.action == "run" and .file == $f and (.result | strings) and (.end | strings))' 2>/dev/null) "$HISTFROM"'$fl[0] as $fl | ($su | map(fromstart($st))) as $su | ($ta | map(select($st == "" or (.end | strings) >= $st))) as $ta | ($sv[0] | map(fromstart($st))) as $sv | '"$OWNERS$FAILURE"'([inputs | fromjson? | objects | select(.step == "test")] | startlines($st)) as $ls
     | ([$ls[] | failedrun | select(any(failedfiles[]; . == $f)) | failure($f)] | sort_by(.time) | reverse | .[:$n]) as $fails
     | [$ls[] | {card, issue, time, times: ((.times | objects | .[$f]) // null), clocks: ((.clocks | objects | .[$f]) // null), timed: ([.timed | arrays | .[] | objects | select(.file == $f)] | first), carried: (if any(.carried | arrays | .[]; . == $f) then true else null end)}
          | select(.times != null or .clocks != null or .timed != null) | del(.[] | nulls)] as $c
     | [$su[] | . as $w | .files | objects | .[$f] | objects | {time: $w.time, whole: true, how: $w.how, cpu, sec, result} | del(.[] | nulls)] as $w
-    | [$sv[0][] | select(.file == $f) | {time, survey: true, cpu, sec} | del(.[] | nulls)] as $v
+    | [$sv[] | select(.file == $f) | {time, survey: true, cpu, sec} | del(.[] | nulls)] as $v
     | [[$ls | to_entries[] | select(.value.reused != true)] | group_by(.value.card)[] | . as $g
         | range(0; length - 1) | select(any($g[. + 1].value.carried | arrays | .[]; . == $f)) | $g[.].key] as $ranat
     | ([$ls | to_entries[] | .key as $i | .value | .result as $r | [if $r == "held" then .result = "fail" else . end | failedrun | select(any(failedfiles[]; . == $f))] as $x

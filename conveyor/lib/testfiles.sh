@@ -2,6 +2,8 @@
 # The test files in the snapshot (README.md, The test files in the snapshot): the snapshot's tests part, and the
 # command that sets the pack's test settings the Board saves (conveyor.sh test-settings).
 
+# The part counts only what is on or after the test history's start (histstart(), below): each file's runs, failed
+# steps, failures, flaky entries and what they give (cpu, median, change, usual, slower); the records keep every line.
 # The snapshot's tests part, read from the card records (recs, olds: a retried card's runs count too), the pack, the
 # flaky-test record ($FLAKY), the slow-test record ($SLOWFILED), the test rules' log ($TESTRULESLOG) and the Board's
 # test issues ($TAFILED):
@@ -394,11 +396,32 @@ testproxy() { # <each test file of main's checkout>...
 # only its COVERED-BY lines (optimize).
 TESTLINE='select(test("\"step\":\"(test|picked|bugproof|blocked|closed|landed|review)\"")) | fromjson? | objects
   | def cut: if type == "string" then .[-1500:] else . end;
-  {card, issue, step, time, result} + if .step == "test" then {times, clocks, reused, wait, run}
+  {card, issue, step, time, result} + if .step == "test" then {times, clocks, carried, reused, wait, run}
       + (if .result == "fail" or .rerun != null then {verdicts, failures, rerun: (.rerun | if type == "object" and has("tail") then .tail |= cut else . end), tail: (.tail | cut)} else {} end)
     elif .step == "landed" then {sha, testedits} elif .step == "bugproof" then {speed} elif .step == "blocked" then {reason}
     elif .step == "review" then {reason: (.reason | if type == "string" then [split("\n")[] | select(test("^COVERED-BY: [^\\s:]+: "))] | join("\n") else . end)}
     else {} end'
+# The test history's start: the control record's testsFrom (`conveyor.sh test-settings history-start`), a UTC time, or
+# nothing when none is set (or the record cannot be read: every run then counts). Nothing is deleted: the readers of the
+# history (testspart() here, testfacts() in lib/testaction.sh) count only the runs, failures and flaky entries that are
+# on or after it. HISTFROM is the one jq filter for that: `fromstart($s)` keeps a record whose .time is on or after
+# the start $s ("" for none: all of them); with a start set, a record with no time is left out. Both read the time
+# as the same UTC text the records write (2026-11-21T00:00:00Z), so the text compares as the time does.
+# `startlines($s)` does it for the card test lines, oldest first: a line on or after the start, and of its times,
+# clocks and timed entries only those of a run on or after it. A file the line carried (`carried`: kept as passed, not
+# run) has the time of the latest earlier line of that card that did not carry it and is not a reused pass: that step ran
+# it (a failed step saves no times, so the later line that carries the file is the only record of its time); a time with
+# no such line is left out.
+HISTFROM='def fromstart($s): select($s == "" or ((.time | strings) >= $s));
+  def startlines($s): if $s == "" then . else
+    (reduce .[] as $l ({h: {}, out: []};
+      ($l.card | tostring) as $c | ($l.carried | if type == "array" then . else [] end) as $cf | .h[$c] as $h
+      | (reduce ((($l.times, $l.clocks) | objects | keys[]), ($l.timed | arrays | .[] | objects | .file | strings), $cf[]) as $f ({};
+          .[$f] = (if any($cf[]; . == $f) then ([$h[]? | select(.r != true and (.c | any(. == $f) | not))] | last | .t) else $l.time end))) as $o
+      | .out += [$l | select((.time | strings) >= $s) | (.times, .clocks) |= (if type == "object" then with_entries(select(.key as $k | ($o[$k] | strings) >= $s)) else . end)
+          | .timed |= (if type == "array" then map(select(.file as $k | ($o[$k] | strings) >= $s)) else . end)]
+      | .h[$c] += [{t: $l.time, c: $cf, r: ($l.reused == true)}])).out end;'
+histstart() { ctl 2>/dev/null | jq -r '.testsFrom // ""' 2>/dev/null || :; }
 # The retried lines, then the card records, as the Tests part reads them (TESTLINE), each from its summary (linesum());
 # nothing when they cannot be read.
 testlines() {
@@ -535,12 +558,12 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   ch=$(printf '%s\n' "$ch" | git -C "$MAIN" diff-tree --stdin -r --root --name-only --no-renames -z 2>/dev/null \
     | jq -Rsc --arg want "$ch" '($want | split("\n") | map(select(. != "") | {key: ., value: true}) | from_entries) as $w
       | reduce (split("\u0000")[] | select(. != "")) as $x ({k: null, m: {}}; if $w[$x] then .k = $x | .m[$x] = [] elif .k == null then . else .m[.k] += [$x] end) | .m') || ch='{}'
-  out=$(printf '%s\n' "$ln" | jq -cRn --arg since "$1" --arg si "$si" --argjson sh "$sh" --argjson rn "$rn" --slurpfile ch <(printf '%s\n' "$ch") \
+  out=$(printf '%s\n' "$ln" | jq -cRn --arg since "$1" --arg st "$(histstart)" --arg si "$si" --argjson sh "$sh" --argjson rn "$rn" --slurpfile ch <(printf '%s\n' "$ch") \
     --argjson mn "$mn" --slurpfile fs <(printf '%s' "$fs") --slurpfile fl <(printf '%s' "$fl") --slurpfile sf <(printf '%s' "$sf") --argjson keep "$TESTKEEP" --argjson days "$FLAKY_DAYS" \
     --slurpfile cs <(printf '%s' "$cs") --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") --argjson ru "$ru" --rawfile all <(printf '%s\0' "${tf[@]}") \
     --slurpfile hv <(printf '%s' "$hv") --slurpfile px <(printf '%s' "$px") --slurpfile mu <(cat "$MUTS"/*.json 2>/dev/null | jq -c 'objects' 2>/dev/null) --rawfile mq "$(rawok "$MUTS/asked")" --rawfile su "$su" --slurpfile sv <(printf '%s' "$sv") --slurpfile last <(jq -ce 'objects' "$TESTRULES" 2>/dev/null || echo null) \
     --rawfile rl "$(rawok "$TESTRULESLOG")" --argjson shown "$TESTRULES_SHOWN" --rawfile tf "$(rawok "$TAFILED")" \
-    --slurpfile tj <(cat "$TESTACTS"/*.json 2>/dev/null | jq -c 'objects | select(.action == "judge" and .state == "done" and (.file | type) == "string" and (.waits | type) == "array") | {file, end, waits}' 2>/dev/null) '$fs[0] as $fs | $fl[0] as $fl | $sf[0] as $sf | ($all | split("\u0000") | map(select(. != ""))) as $all | $hv[0] as $hv | $px[0] as $px | '"$JSONL$OWNERS$FAILURE$RUNDEFS$FLAKYAGAIN"'
+    --slurpfile tj <(cat "$TESTACTS"/*.json 2>/dev/null | jq -c 'objects | select(.action == "judge" and .state == "done" and (.file | type) == "string" and (.waits | type) == "array") | {file, end, waits}' 2>/dev/null) "$HISTFROM"'$fs[0] as $fs | ($fl[0] | if (.entries | type) == "array" then .entries |= map(fromstart($st)) else . end) as $fl | $sf[0] as $sf | ($all | split("\u0000") | map(select(. != ""))) as $all | $hv[0] as $hv | $px[0] as $px | '"$JSONL$OWNERS$FAILURE$RUNDEFS$FLAKYAGAIN"'
     # The rules log and the Board test issues, each read once: the log'"'"'s last $shown lines, newest first (lg), and
     # their filed lines (fd); the test issues with a file and an issue number (ta).
     ($su | jsonl) as $su | ($rl | split("\n") | if .[-1] == "" then .[:-1] else . end | .[-$shown:] | map(fromjson? | objects) | reverse) as $lg
@@ -572,18 +595,19 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
     # The asked list of the mutation checks (lib/mutate.sh mutask()): each file to its place, 1 first.
     ($mq | split("\n") | map(select(. != "")) | to_entries | map({key: .value, value: (.key + 1)}) | from_entries) as $place
     # The failed test steps of each file (FAILURE: failedrun), newest first.
-    | (reduce ($ls | reverse[] | failedrun) as $l ({}; reduce ($l | failedfiles[]) as $f (.; .[$f] += [$l | failure($f)]))) as $failed
+    | ($ls | startlines($st)) as $lf
+    | (reduce ($lf | reverse[] | failedrun) as $l ({}; reduce ($l | failedfiles[]) as $f (.; .[$f] += [$l | failure($f)]))) as $failed
     # Each failed test step of a card that landed, for each file it failed in: caught when the landed commit left the
     # file as it was (the fix went into the code), changed to pass when it changed the file.
     | (reduce ($cr[] | select(.step == "landed" and (.card | type == "string"))) as $l ({}; .[$l.card] = $l.sha)) as $land
-    | (reduce ($ls[] | select(.result == "fail" and (.card | type == "string")) | ($ch[0][$land[.card] | strings] // null) as $d | select($d != null)
+    | (reduce ($lf[] | select(.result == "fail" and (.card | type == "string")) | ($ch[0][$land[.card] | strings] // null) as $d | select($d != null)
         | failedfiles[] | [., IN($d[])]) as [$f, $ed] ({}; if $ed then .[$f].changed += 1 else .[$f].caught += 1 end)) as $catch
     | (reduce ($fl.entries | arrays | .[] | objects | .case | strings | caseowners[]) as $f ({}; .[$f] += 1)) as $flaky
     | alledits($cr) as $alledits
     # A survey time counts for each file the part has a row for (listed, run or filed), as testolder() counts it, so
     # a file the patterns do not list keeps it beside its card runs (#1044); it adds no row of its own (#1036).
-    | [testruns($ls; $su)] as $tr | ([$all[], $tr[].file, $ta[].file] | map({key: ., value: true}) | from_entries) as $rows
-    | [$tr[], ($sv[0][] | select($rows[.file] == true)), ($all[], $ta[].file | {file: ., none: true})]
+    | [testruns($lf; $su) | fromstart($st)] as $tr | ([$all[], $tr[].file, $ta[].file] | map({key: ., value: true}) | from_entries) as $rows
+    | [$tr[], ($sv[0][] | select($rows[.file] == true) | fromstart($st)), ($all[], $ta[].file | {file: ., none: true})]
     | group_by(.file)
     | map(.[0].file as $f | map(select(.none != true)) | sort_by(.time) as $r | [$r[].cpu | numbers] as $c | ($c | median) as $m | $c[-1] as $now
         | ($fs[$f] // {}) as $own | ($own.wholeOnly == true) as $wo
@@ -684,12 +708,15 @@ except SyntaxError as x: print(f"{sys.argv[1]}: line {x.lineno}: {x.msg}"); sys.
 #   slow-mark-clear <file>       that mark taken off
 #   cpu-time <file>              test.command made the one cpuplan() gives for that file (Record CPU time, #190), and
 #                                test.fileCommand its wrapped one, when it gives one
+#   history-start <time | clear> the control record's testsFrom (histstart()): a UTC time like 2026-11-21T00:00:00Z;
+#                                only the runs and failures on or after it count; clear: all of them count
 # A file with no setting left is taken out of test.files (packset()).
-TESTSET_USAGE='usage: conveyor.sh test-settings slow-issues <true | false> | slow-mark <file> <reason> | slow-mark-clear <file> | cpu-time <file>'
+TESTSET_USAGE='usage: conveyor.sh test-settings slow-issues <true | false> | slow-mark <file> <reason> | slow-mark-clear <file> | cpu-time <file> | history-start <UTC time | clear>'
 testsettings() { # <what> [<file>] [<value>]
   local why='' r=${3:-} p
   case ${1:-}:$# in
     slow-issues:2 | slow-mark:3 | slow-mark-clear:2 | cpu-time:2) ;;
+    history-start:2) locked control tests-from "$2" > /dev/null; return ;;
     *) echo "$TESTSET_USAGE" >&2; return 2 ;;
   esac
   case $1 in

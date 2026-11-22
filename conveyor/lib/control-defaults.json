@@ -49,6 +49,7 @@
   "onboarded": null,
   "picks": {},
   "pickBack": null,
+  "testsFrom": null,
   "suiteAtOnce": 2,
   "suiteMachine": {"kind": "local"}
 }

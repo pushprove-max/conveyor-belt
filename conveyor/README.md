@@ -929,7 +929,8 @@ The pack's `test.fileBudget`, a `budget` in `test.files` and a test rule with th
 
 The Board saves these settings with `conveyor.sh test-settings`, which changes main's pack (`.conveyor/project.json`)
 and nothing else. Each command checks its value and the changed pack (lib/pack.sh) before it saves; a bad value is
-refused with the reason, and the pack does not change:
+refused with the reason, and the pack does not change. `history-start` is the one setting the Board does not save: it
+is set with the command only, and it changes the control record, not the pack.
 
 - `test-settings slow-issues <true | false>`: `test.slowIssues`, which files nothing now (Test rules, below);
 - `test-settings slow-mark <file> <reason>`: the "slow on purpose" mark of one file that main's checkout tracks, with
@@ -939,6 +940,9 @@ refused with the reason, and the pack does not change:
   snapshot's `cpuTime` gives it, refused with its `why` when no wrapper applies. The test command finds the helper in
   `CONVEYOR_TEST_TIME`, and puts the helper's `TESTRUN sec` line in the run's log. Only an admin can save it from the
   Board.
+- `test-settings history-start <UTC time | clear>`: the time, such as `2026-11-21T00:00:00Z`, from which the Tests
+  snapshot, the test rules and the facts the Tests judge is given count runs, failed steps and flaky entries. Older
+  ones are kept and not counted. `clear` counts every run again.
 
 A file with no setting left is removed from `test.files`. The next snapshot shows each change.
 
