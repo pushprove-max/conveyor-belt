@@ -299,7 +299,7 @@ slowoff() { # <worktree>
 # ends it, <worktree>.wide) does not run again and fails with <worktree>.stop saying why. card() blocks a card whose
 # run left <worktree>.stop.
 tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alone]
-  local cmd at rc r p='' b='' t='' f o l=() w=$SECONDS t0 ob mw off kp ko ka cw='' x RUNOFF='' TEST_BEFORE='' LISTNONE='' CAPNOTE='' TEST_CASES='' TEST_GIVEN=${TEST_GIVEN:-}
+  local cmd at rc r p='' b='' t='' f o l=() wn w=$SECONDS t0 ob mw off kp ko ka cw='' x RUNOFF='' TEST_BEFORE='' LISTNONE='' CAPNOTE='' TEST_CASES='' TEST_GIVEN=${TEST_GIVEN:-}
   TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; TEST_REFUSED=''; TEST_FILES=''; rm -f "$1.testlist" "$1.stop" "$1.wide" "$1.noresult"
   # The files the run before timed (testlist.sh timed()): kept below when this run keeps its passes and so may not run them.
   mapfile -t l < <(testlogs "$1"); o=$({ cat "$1.oldtimes" "$1.times" "$1.reported"; [ ${#l[@]} = 0 ] || grep -h '^TESTRUN sec' "${l[@]}"; } 2>/dev/null)
@@ -404,12 +404,12 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
     && jq -cn --argjson o "$ko" --argjson a "$ka" --arg k "$kp" '[$k | split("\n")[] | select($a[.] != null and $o[.] == null)] | unique' > "$1.oldfiles"; } \
     || rm -f "$1.oldfiles"
   # Given TEST_GIVEN files, a run reported more (watch() ended it, <worktree>.wide): it does not run again, and
-  # <worktree>.stop says why. It names the file test.fileCommand was running then (its last `== <file>` log line):
-  # that file ran the rest.
+  # <worktree>.stop says why. It names the file test.fileCommand was running then (the file on the second line of <worktree>.wide, wideeach() in lib/testlist.sh, else its last `== <file>` log line): that file ran the rest. A count not over TEST_GIVEN is of one invocation that reported more files than had begun.
   if [ -s "$1.wide" ]; then
-    f=$(sed -n 's/^== //p' "$1.testlog/files" 2>/dev/null | tail -n 1)
-    if [ -n "$f" ]; then narrowstop "the test command, given $TEST_GIVEN test file(s), reported $(<"$1.wide") test files: $f, run alone by test.fileCommand, ran test files it is not given, so its run was stopped" > "$1.stop"
-    else narrowstop "the test command, given $TEST_GIVEN test file(s), reported $(<"$1.wide") test files: it runs test files it is not given, so its run was stopped" > "$1.stop"; fi
+    { read -r wn; read -r f; } < "$1.wide"; [ -n "$f" ] || f=$(sed -n 's/^== //p' "$1.testlog/files" 2>/dev/null | tail -n 1)
+    if [ -n "$f" ] && [ "$wn" -le "$TEST_GIVEN" ] 2>/dev/null; then narrowstop "the test command, given $TEST_GIVEN test file(s) one at a time, reported $wn test files before it had begun them all: $f, run alone by test.fileCommand, ran test files it is not given, so its run was stopped" > "$1.stop"
+    elif [ -n "$f" ]; then narrowstop "the test command, given $TEST_GIVEN test file(s), reported $wn test files: $f, run alone by test.fileCommand, ran test files it is not given, so its run was stopped" > "$1.stop"
+    else narrowstop "the test command, given $TEST_GIVEN test file(s), reported $wn test files: it runs test files it is not given, so its run was stopped" > "$1.stop"; fi
     cat "$1.stop" >> "$1.test"; [ -n "$SLOT_HOME" ] || slot_free; slot_unask; return 1
   fi
   if [ $rc = 0 ] && [ -n "$p" ]; then
@@ -641,7 +641,7 @@ NOTPASSED='def notpassed: [.failures.files[] | .file as $f | if .cases == [] the
 # again after a failure runs only the files that did not pass. A list with a `changed` or `main` line (rerunsince(): a fix or main
 # changed code since those passes) keeps none: every file runs, as any of them may test that code.
 # The files to run are listed first, and `TESTRUN files=<n>` is logged before the first runs (#433): a file's own run
-# prints its own count, so without it the live record had no count of the files while they ran.
+# prints its own count, so without it the live record had no count of the files while they ran. Before each file after the first begins, the size of each other log in its folder then is logged, a `=@ <bytes> <log>` line each: watch() (wideeach(), lib/testlist.sh) reads what the files before it reported from those.
 # Each file runs in a process group of its own (timeout's), with the file's own time limit, its `# timeout: <seconds>`
 # line (FILELIMIT), times the run's load factor (CONVEYOR_LOAD_FACTOR: loadfactor(), LOADSCALE, rounded up): past it,
 # timeout ends the file and everything it started, and the output says it timed out, and with a factor over 1, the
@@ -671,7 +671,7 @@ filecmd() { # <the pack's test.fileCommand> [files]
   printf '%s\n' 'echo "TESTRUN files=${#fs[@]}" >> "$l"; i=0 to=' \
     "trap '[ -z \"\${p:-}\" ] || kill -TERM \"\$p\" 2>/dev/null; exit 143' TERM INT" \
     'for f in "${fs[@]}"; do' \
-    '  i=$((i + 1)); echo "== $f" | tee -a "$l"' \
+    '  i=$((i + 1)); [ $i = 1 ] || for g in "${l%/*}"/*; do [ ! -f "$g" ] || [ "$g" = "$l" ] || echo "=@ $(($(wc -c < "$g"))) ${g##*/}"; done >> "$l"; echo "== $f" | tee -a "$l"' \
     "  n=\$(awk $(printf %q "$FILELIMIT") \"\$f\" 2>/dev/null); [ \"\${n:-0}\" -gt 0 ] 2>/dev/null || n=0" \
     "  s=\$n; [ \"\$n\" = 0 ] || s=\$(awk -v n=\"\$n\" -v f=\"\${CONVEYOR_LOAD_FACTOR:-1}\" $(printf %q "$LOADSCALE"))" \
     "  CONVEYOR_TEST_FILE=\$f CONVEYOR_TEST_N=\$i timeout --kill-after=10 \"\$s\" bash -c $q'"' "$CONVEYOR_TEST_FILE"'"' < /dev/null & p=\$!" \

@@ -15,14 +15,14 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # The bug-card check of card c7, called as card() calls it, on a change that fixes a.txt and changes a.test.sh (a bash
 # script, which fails on main's a.txt). The pack's test.fileCommand is <file command> (none: not set). On main, the
 # fixture's stub commands (its test.command too) note in $STUB/ran that they ran. Writes $T/$CASE/unfixed (the
-# check's result) and $T/$CASE/rc (its exit).
-wideproof() { # <file command> | none
+# check's result) and $T/$CASE/rc (its exit). With `two`, the change adds b.test.sh too, a copy of a.test.sh.
+wideproof() { # <file command> | none [two]
   local wt=$T/$CASE/cards/c7
   setup '[]'
   if [ "${1:-}" = none ]; then tune 'del(.test.fileCommand)'; elif [ -n "${1:-}" ]; then tune --arg f "$1" '.test.fileCommand = $f'; fi
   printf '%s\n' 'echo ran >> "$STUB/ran"; bash "$CONVEYOR_TEST_FILE"' > "$STUB/mainrun-cmd"
   git -C "$R" worktree add -q --detach "$wt" && echo two >> "$wt/a.txt" && printf '%s\n' '#!/usr/bin/env bash' 'grep -qx two a.txt' > "$wt/a.test.sh" \
-    && git -C "$wt" add -A || fail "the card's change could not be staged"
+    && { [ "${2:-}" != two ] || cp "$wt/a.test.sh" "$wt/b.test.sh"; } && git -C "$wt" add -A || fail "the card's change could not be staged"
   ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
     . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" || exit 1
     names || exit 1
@@ -42,6 +42,41 @@ t_wideofffile() {
   [ $((SECONDS - s)) -lt "$lim" ] && [ "$(cat "$T/$CASE/rc")" = 2 ] || fail "the proof run was not stopped, or the check did not fail with exit 2 (exit $(cat "$T/$CASE/rc"), $((SECONDS - s))s; limit $lim s: 25 s times the load factor $CASE_LOAD)"
   head -n 1 "$T/$CASE/unfixed" | grep -qE '^a card runs each of its test files alone, and the test command, given 1 test file\(s\), reported [23] test files: a\.test\.sh, run alone by test\.fileCommand, ran test files it is not given, so its run was stopped; ' \
     || fail "the check's result does not begin with the reason naming the file: $(cat "$T/$CASE/unfixed")"
+}
+
+# R115. Bug it catches: a run that reported too many files and exited between two looks of watch() was never
+# counted, as the count ran only while the run did: the run given a.test.sh alone, whose file command reports 5 file
+# results and exits at once, passed. It is counted once more as it ends: the check fails with exit 2, its result's
+# first line naming the wide run.
+t_widefast() {
+  wideproof 'for f in a t1 t2 t3 t4; do echo "-- ok $f.test.sh" >> "$CONVEYOR_TEST_LOG/inner"; done; :'
+  [ "$(cat "$T/$CASE/rc")" = 2 ] || fail "the check of a run that reported 5 files and exited at once did not fail with exit 2 (exit $(cat "$T/$CASE/rc")): $(head -n 3 "$T/$CASE/unfixed")"
+  head -n 1 "$T/$CASE/unfixed" | grep -qE '^a card runs each of its test files alone, and the test command, given 1 test file\(s\), reported 5 test files: a\.test\.sh, run alone by test\.fileCommand, ran test files it is not given, so its run was stopped; ' \
+    || fail "the check's result does not begin with the reason naming the wide run: $(cat "$T/$CASE/unfixed")"
+}
+
+# R135. Bug it catches: a run file by file was stopped only when the whole run's count went over the files it was
+# given, so with two files an invocation given the first that ran both was not stopped (2 of 2), and the run went on to
+# the second file. The file command, given a.test.sh, reports a.test.sh and b.test.sh and then runs on: the run is
+# stopped in that first invocation (well under its 30 s), and the result's first line names a.test.sh.
+t_wideeach() {
+  local s=$SECONDS
+  wideproof 'for f in a b; do echo "-- ok $f.test.sh" >> "$CONVEYOR_TEST_LOG/inner"; done; sleep 30; :' two # sleep: a long invocation, which the stop cuts
+  lim=$(loadlimit 25 30) # under the first invocation's 30 s
+  [ $((SECONDS - s)) -lt "$lim" ] && [ "$(cat "$T/$CASE/rc")" = 2 ] || fail "the invocation given a.test.sh that ran both files was not stopped, or the check did not fail with exit 2 (exit $(cat "$T/$CASE/rc"), $((SECONDS - s))s; limit $lim s: 25 s times the load factor $CASE_LOAD)"
+  head -n 1 "$T/$CASE/unfixed" | grep -qE '^a card runs each of its test files alone, and the test command, given 2 test file\(s\) one at a time, reported 2 test files before it had begun them all: a\.test\.sh, run alone by test\.fileCommand, ran test files it is not given, so its run was stopped; ' \
+    || fail "the check's result does not begin with the reason naming a.test.sh: $(cat "$T/$CASE/unfixed")"
+}
+
+# R135. Bug it catches: the run was stopped only when its totals were over, so an invocation given a.test.sh that
+# reported both files and ended before watch() looked, the one given b.test.sh then begun, showed 2 files of 2 begun,
+# and the run passed. What was reported before b.test.sh began is counted: the check fails with exit 2, and the
+# result's first line names a.test.sh.
+t_wideeachfast() {
+  wideproof 'for f in a b; do echo "-- ok $f.test.sh" >> "$CONVEYOR_TEST_LOG/inner"; done; :' two
+  [ "$(cat "$T/$CASE/rc")" = 2 ] || fail "the check of a run whose first invocation reported both files and ended did not fail with exit 2 (exit $(cat "$T/$CASE/rc")): $(head -n 3 "$T/$CASE/unfixed")"
+  head -n 1 "$T/$CASE/unfixed" | grep -qE '^a card runs each of its test files alone, and the test command, given 2 test file\(s\) one at a time, reported 2 test files before it had begun them all: a\.test\.sh, run alone by test\.fileCommand, ran test files it is not given, so its run was stopped; ' \
+    || fail "the check's result does not begin with the reason naming a.test.sh: $(cat "$T/$CASE/unfixed")"
 }
 
 # #293, #351 scenario 1. Bug it catches: with a pack that sets no test.fileCommand, the proof run started

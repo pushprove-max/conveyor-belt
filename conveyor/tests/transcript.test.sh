@@ -62,3 +62,48 @@ t_transcriptnone() {
   [ "$(tsbuild | jq -c '[.usd, .unpriced]')" = '[null,"its token usage could not be read: the session output holds no token usage"]' ] \
     || fail "the Board does not list the build as unpriced with its reason: $(tsbuild)"
 }
+
+# Card c1-7's build stopped by `control stop` (stopped(), called as the loop calls it) when its output holds only the
+# init event, naming its session. With <transcript>, Claude Code's transcript of that session is in the default
+# login's projects folder ($HOME/.claude, here $T/$CASE/home) for the card's worktree. With <account>, the card's
+# worktree line names that account, the host file gives it the folder $T/$CASE/acct, and the transcript is there.
+stoprun() { # [transcript] [account]
+  local w=$T/$CASE/cards/c1-7 d=$T/$CASE/home/.claude
+  setup '[]'; mkdir -p "$w" "$T/$CASE/home" || fail "the card's worktree"
+  if [ -n "${2:-}" ]; then
+    d=$T/$CASE/acct; mkdir -p "$XDG_CONFIG_HOME/conveyor" && jq -n --arg n "$2" --arg d "$d" '{accounts: [{name: $n, configDir: $d}]}' > "$XDG_CONFIG_HOME/conveyor/host.json" || fail "the host file"
+    jq -cn --arg a "$2" '{card: "c1-7", issue: 7, time: "2026-11-01T00:00:00Z", tokens: {claude: 0, codex: 0}, sha: "", reason: "", step: "worktree", result: "ok", account: $a}' >> "$ST/cards.jsonl"
+  fi
+  jq -cn '{card: "c1-7", issue: 7, time: "2026-11-01T00:00:00Z", tokens: {claude: 0, codex: 0}, sha: "", reason: "", step: "start", result: "", of: "build"}' >> "$ST/cards.jsonl"
+  echo "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"$TSID\",\"model\":\"m\"}" > "$w.out"
+  if [ -n "${1:-}" ]; then d=$d/projects/$(cd "$w" && pwd -P | sed 's/[^A-Za-z0-9]/-/g'); mkdir -p "$d" && printf '%s\n' "$1" > "$d/$TSID.jsonl" || fail "the transcript"; fi
+  HOME=$T/$CASE/home fx_in 'stopped c1-7 7'; [ "$RC" = 0 ] || fail "stopped() exited $RC: $(cat "$T/$CASE/run.out")"
+}
+
+# R117. Bug it catches: a Claude build that `control stop` ended after its init event and before its first usage
+# event had a stopped line with no usage, as stopped() read only its output, not the session's transcript, as a
+# session's own line does (transcribed()). The stopped line holds the transcript's usage.
+t_transcriptstop() {
+  stoprun "$(jq -cn --arg s "$TSID" '{type: "assistant", sessionId: $s, message: {id: "msg_1", model: "claude-sonnet-5-5", usage: {input_tokens: 3, cache_creation_input_tokens: 100, cache_read_input_tokens: 0, output_tokens: 40}}}')"
+  [ "$(st 'select(.step == "build") | [.result, .usage, has("unread")]' | jq -c .)" = '["stopped",{"input":3,"write":100,"write1h":0,"read":0,"output":40},false]' ] \
+    || fail "the stopped build's line does not hold the transcript's usage: $(st 'select(.step == "build")')"
+  [ ! -e "$ST/kept/c1-7/c1-7.build.out" ] || fail "the output of a stopped build priced from its transcript was kept"
+}
+
+# Bug it catches: stopped() looked for the transcript of a card started on a named account (`control account`) under
+# the loop's own account, the default login, as the loop that calls it never takes the card's: the stopped line had
+# no usage. The transcript is read from the folder of the account the card's worktree line names.
+t_transcriptstopacct() {
+  stoprun "$(jq -cn --arg s "$TSID" '{type: "assistant", sessionId: $s, message: {id: "msg_1", model: "claude-sonnet-5-5", usage: {input_tokens: 3, cache_creation_input_tokens: 100, cache_read_input_tokens: 0, output_tokens: 40}}}')" second
+  [ "$(st 'select(.step == "build") | [.result, .usage.output]' | jq -c .)" = '["stopped",40]' ] \
+    || fail "the stopped build of a card on the account 'second' does not hold its transcript's usage: $(st 'select(.step == "build")')"
+}
+
+# R117. Bug it catches: a stopped build with no usage in its output or a transcript lost its output as the card was
+# cleaned up, as stopped() wrote its line with no outkeep(), as a session's line has: the output is kept beside the
+# card's kept work, so the cause can be read.
+t_transcriptstopnone() {
+  stoprun
+  [ "$(st 'select(.step == "build") | [.result, has("usage")]' | jq -c .)" = '["stopped",false]' ] || fail "the stopped build's line: $(st 'select(.step == "build")')"
+  grep -q "\"session_id\":\"$TSID\"" "$ST/kept/c1-7/c1-7.build.out" || fail "the stopped build's output was not kept beside the card's kept work: $(ls -R "$ST/kept" 2>&1)"
+}

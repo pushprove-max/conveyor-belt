@@ -239,6 +239,32 @@ nofilecmd() { # <worktree> <file>...
     *) printf 'the pack sets no test.fileCommand, and its test.list, %s, is no form a test file can be given in\n' "$lm"; return 1 ;;
   esac
 }
+# A run file by file (filecmd(), lib/testrun.sh) whose invocations before the k-th reported more than k - 1 test
+# files: one ran files it was not given, even when it ended, and the next began, between two looks of watch()
+# (lib/session.sh, for a run given TEST_GIVEN files: tests() and bugrun() below). What they reported is counted
+# (testprogress()) from the logs as they were when the k-th began: its `files` log up to that `== <file>` line, each
+# other log up to the size its `=@ <bytes> <log>` line gives. Each k after the first and after <read> (how many a
+# call before read) is read once. The first that is over writes <worktree>.wide, the count, then the file that ran
+# just before it on a second line; fails when none is, and prints how many it has read.
+wideeach() { # <worktree> [read]
+  local lg=$1.testlog/files k=0 line pre='' fs=() i n d prev='' rc=1
+  [ -s "$lg" ] || { echo "${2:-0}"; return 1; }
+  while IFS= read -r line; do
+    case $line in
+      '=@ '*) line=${line#=@ }; fs+=("${line%% *}" "${line#* }"); continue ;;
+      '== '*) k=$((k + 1))
+        if [ "$k" -gt 1 ] && [ "$k" -gt "${2:-0}" ] && d=$(mktemp -d 2>/dev/null); then
+          printf '%s' "$pre" > "$d/files"
+          for ((i = 0; i < ${#fs[@]}; i += 2)); do [[ ${fs[i]} =~ ^[0-9]+$ ]] && [ "${fs[i + 1]}" != files ] && head -c "${fs[i]}" "$1.testlog/${fs[i + 1]}" > "$d/${fs[i + 1]}" 2>/dev/null; done
+          n=$(testprogress /dev/null "$d"/* | jq -r '.run + (.over // 0)' 2>/dev/null); rm -rf "$d"
+          [[ $n =~ ^[0-9]+$ ]] && [ "$n" -gt $((k - 1)) ] && printf '%s\n%s\n' "$n" "$prev" > "$1.wide" && rc=0 && break
+        fi
+        fs=(); prev=${line#== } ;;
+    esac
+    pre+=$line$'\n'
+  done < "$lg"
+  [ $rc = 0 ] || echo "$k"; return $rc
+}
 # One run of the bug-card check in <worktree>: the files <file>... each alone through test.fileCommand, each a `fail`
 # line of the run's list (CONVEYOR_TEST_RERUN). A file that runs past its own time limit (its `# timeout:` line:
 # filecmd()) is stopped and fails, and the output says so; one still running when the run's own limit (the

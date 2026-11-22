@@ -85,3 +85,30 @@ EOF
   jq -e '[.needsYou.blocked[] | select(.issue == 7) | .reason | test("guard crash.sh is failing")] == [true]' <<<"$out" >/dev/null \
     || fail "Needs you does not show the failing guard: $(jq -c '.needsYou.blocked' <<<"$out")"
 }
+
+# R118. Bug it catches: the guard failures of a stalled try counted against the try that replaces it, as session1()
+# cleared them once, before its stall-retry loop: one crash in the stalled try and one in the next made two, and the
+# next try was ended and the card blocked for 'guard crash.sh is failing'. The build stub runs the crashing guard on
+# one Bash call, as Claude Code runs a PreToolUse hook; its first try then stalls (no output, no change), and its
+# second, after the one crash, changes a file and ends: the session succeeds.
+t_guardstall() {
+  local d=$T/$CASE c=c7-7
+  setup '[]'; tune '.tunables.stuck = 2'; CARDS=$d/cards; mkdir -p "$CARDS"
+  printf '%s\n' 'echo "crash.sh: cannot read its rules file" >&2; exit 1' > "$d/crash.sh"; chmod +x "$d/crash.sh"
+  jq -n --arg c "$(printf "'%s'/crash.sh" "$d")" '{hooks: {PreToolUse: [{matcher: "Bash", hooks: [{type: "command", command: $c, onFailure: "block"}]}]}}' > "$R/.conveyor/hooks.json"
+  git -C "$R" worktree add -q --detach "$CARDS/$c" refs/heads/main || fail "the card's worktree could not be made"
+  landed 7 | jq -c --arg c "$c" '.card = $c | .step = "picked"' >> "$ST/cards.jsonl"
+  cat > "$STUB/build" <<'EOF'
+h=$(jq -r '.hooks.PreToolUse[] | select(.matcher == "Bash") | .hooks[].command | select(test("crash"))' "$PWD.settings")
+n=$(wc -l < "$STUB/sessions")
+echo '{"tool_name":"Bash","tool_input":{"command":"ls"}}' | CLAUDE_PROJECT_DIR=$PWD sh -c "$h" > "$STUB/hook.$n" 2>&1; echo "rc=$?" >> "$STUB/hook.$n"
+[ "$n" != 1 ] || sleep 60 # sleep: the first try stalls, and the engine ends it after stuck seconds
+echo two >> a.txt
+EOF
+  fx_in 'w=$CARDS/c7-7; cd "$R" && cardsettings "$w.settings" && began c7-7 7 build || { echo "began failed"; exit 1; }
+    t=$(session "$w" "Build the issue."); rc=$?; echo "$t"; echo "step: $rc"'
+  [ "$(wc -l < "$STUB/sessions")" = 2 ] && grep -qx 'rc=2' "$STUB/hook.1" && grep -qx 'rc=2' "$STUB/hook.2" \
+    || fail "the build did not run twice, each try refused once by the crashing guard on the Bash command 'ls' (payload {\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"}}): $(cat "$STUB/sessions" "$STUB"/hook.* 2>&1)"
+  [ "$(tail -n 1 "$d/run.out")" = "step: 0" ] && ! grep -q 'is failing' "$d/run.out" \
+    || fail "the try after a stall, with one guard crash of its own on the Bash command 'ls', did not succeed: $(cat "$d/run.out")"
+}

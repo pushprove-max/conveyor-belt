@@ -128,7 +128,7 @@ holds() { # <worktree>: when it last changed, epoch seconds: the newest of its f
     | awk -v n="$EPOCHSECONDS" '{t = int($1)} t <= n && t > m {m = t} END {print m + 0}' # a time after now is a wrong clock, not progress
 }
 watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the program that runs it: codex for a Codex build, fix or rebase] [the effort it runs at]
-  local pid=$1 f=$2 out=$3 st new who rc=0 timer n have=0 size=0 now logs roll='' rsize=0 wt=${3%.live} was='' seen=$EPOCHSECONDS at lines=0 rhave=0 rn cs dn cx=false wn
+  local pid=$1 f=$2 out=$3 st new who rc=0 timer n have=0 size=0 now logs roll='' rsize=0 wt=${3%.live} was='' seen=$EPOCHSECONDS at lines=0 rhave=0 rn cs dn cx=false wn wb wk=0
   [ "${6:-}" != codex ] || cx=true
   # rm only when there is a file to remove (#532: most steps have none).
   [ "$4" = test ] || { [ ! -e "$wt.stalled" ] && [ ! -L "$wt.stalled" ]; } || { [ ! -s "$wt.stalled" ] || was=$(<"$wt.stalled"); rm -f "$wt.stalled"; }
@@ -166,11 +166,9 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
         && [ -n "$new" ] && st=$new && printf '%s\n' "$st" > "$out.tmp" && mv -f "$out.tmp" "$out"
       # A run given TEST_GIVEN test files (a card's run and the bug-card check, tests(), testlist.sh bugrun(); never the full test
       # suite) that reports more (the files it says it selected, or those it ran) than those is ended at once, every
-      # process under it (#350: a card never runs the whole suite): <worktree>.wide holds that count.
-      if [ -n "${TEST_GIVEN:-}" ] && [ ! -e "$wt.wide" ] && wn=$(jq -r '[.files.run + (.files.over // 0), .files.of // 0] | max' <<<"$st" 2>/dev/null) \
-        && [[ $wn =~ ^[0-9]+$ ]] && [ "$wn" -gt "$TEST_GIVEN" ]; then
-        echo "$wn" > "$wt.wide"; endall "$pid"
-      fi
+      # process under it (#350: a card never runs the whole suite): <worktree>.wide holds that count. Run file by file (filecmd(), lib/testrun.sh: a `== <file>` line in its log `files` as each begins), a run that reports more files than it began is ended too (an invocation given the first of two that runs both); the begun ones are read last, so one begun meanwhile is no false stop. So is one whose files before the k-th reported more than k - 1 (wideeach(): one that ran both and ended, and the next began, between two looks).
+      if [ -n "${TEST_GIVEN:-}" ] && [ ! -e "$wt.wide" ] && wn=$(jq -r '[.files.run + (.files.over // 0), .files.of // 0] | "\(.[0]) \(max)"' <<<"$st" 2>/dev/null) && [[ $wn =~ ^[0-9]+\ [0-9]+$ ]]; then
+        wb=$(sed -n 's/^== //p' "$wt.testlog/files" 2>/dev/null | sort -u | wc -l); if [ "${wn#* }" -gt "$TEST_GIVEN" ] || { [ "$wb" -gt 0 ] && [ "${wn% *}" -gt "$wb" ]; }; then echo "${wn#* }" > "$wt.wide"; endall "$pid"; elif wn=$(wideeach "$wt" "$wk"); then endall "$pid"; else wk=$wn; fi; fi
       continue
     fi
     # A Codex review's, or a Codex session's: its running total, from the session file Codex keeps.
@@ -259,6 +257,8 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
     [ $((EPOCHSECONDS - seen)) -ge "$STUCK" ] || continue
     jq -rn --argjson s "$seen" '$s | todate' > "$wt.stalled"; kill "$pid" 2>/dev/null; wait "$pid"; rc=$?; break
   done
+  # A run given TEST_GIVEN files that ended between two looks (a fast runner that ran more and exited) is counted once more, whole, and file by file (wideeach()): over the count, it is a wide run all the same.
+  [ "$4" != test ] || [ -z "${TEST_GIVEN:-}" ] || [ -e "$wt.wide" ] || wideeach "$wt" "$wk" > /dev/null || { mapfile -t logs < <(testlogs "$wt"); wn=$(testprogress "$f" "${logs[@]}" | jq -r --argjson st "$st" '[.run + (.over // 0), .of // $st.list.files // 0] | max' 2>/dev/null); ! [[ $wn =~ ^[0-9]+$ ]] || [ "$wn" -le "$TEST_GIVEN" ] || echo "$wn" > "$wt.wide"; }
   rm -f "$out" "$out.tmp"; return $rc
 }
 
@@ -330,7 +330,7 @@ OPENCODEANSWER='[inputs | fromjson? // empty | objects | select(.type == "step_s
 # A card that `control stop` ended with a session or review running: what that one used so far is written as
 # a line of its step, result stopped (its model the one the live file names, its seconds from its start line), so
 # it is priced and counted when the card's lines move to the retried file. Called by the loop before the worktree
-# goes; a line that cannot be written is said, and the stop goes on.
+# goes; a line that cannot be written is said, and the stop goes on. A build, fix or rebase whose output holds no usage yet is read from its transcript (transcribed()), on the account its worktree line names (the loop's own ACCT is the default), and one still with no price keeps its output (outkeep()), as a session's line does.
 stopped() { # <card> <issue>
   local wt=$CARDS/$1 last of o f m e s x roll run='' ft=$CARDS/$1.firsttry
   last=$(stdb ask last "$1" 2>/dev/null)
@@ -355,7 +355,7 @@ stopped() { # <card> <issue>
       f=$(jq -cRn --arg m "$m" --argjson s "${s:-0}" "$OPENCODEREAD" "$wt.out" 2>/dev/null | tail -n 1 | jq -c 'del(.ok)' 2>/dev/null) ;;
     # A Claude review is read as a session is, from its events.
     build:* | fix:* | rebase:* | review:claude-*) o=$wt.out; [ "$of" != review ] || o=$wt.events; [ -s "$o" ] || return 0
-      f=$(jq -cRn --arg m "$m" --arg e "$e" --argjson s "${s:-0}" "$SESSIONREAD" "$o" 2>/dev/null | tail -n 1 | jq -c 'del(.ok) | del(.effort)' 2>/dev/null) ;;
+      f=$(jq -cRn --arg m "$m" --arg e "$e" --argjson s "${s:-0}" "$SESSIONREAD" "$o" 2>/dev/null | tail -n 1 | jq -c 'del(.ok) | del(.effort)' 2>/dev/null); [ "$of" = review ] || { x=$(stdb ask card "$1" 2>/dev/null | jq -rs 'map(select(.step == "worktree")) | last | .account // ""' 2>/dev/null) && x=$(acctenv "$x" 2>/dev/null) || x=''; f=$(transcribed "$f" "$o" "$wt" "$x"); } ;;
     review:opencode:*) [ -s "$wt.events" ] || return 0
       f=$(jq -cRn --arg m "$m" --arg e "$e" --argjson s "${s:-0}" "$OCREVIEWREAD" "$wt.events" 2>/dev/null | tail -n 1 | jq -c 'del(.effort)' 2>/dev/null) ;;
     review:*) [ -s "$wt.events" ] || return 0
@@ -371,7 +371,7 @@ stopped() { # <card> <issue>
   [ -n "$m" ] || f=$(jq -c 'del(.model)' <<<"$f")
   # Stopped while a review ran again: the failed first attempt (reviewed()) is on the line, its tokens counted.
   [ "$of" != review ] || ! x=$(jq -ce objects "$ft" 2>/dev/null) || f=$(jq -c --argjson f "$x" "$BOTHTRIES" <<<"$f")
-  f=$(line "$1" "$2" "$of" stopped "$(jq -c '. + {reason: "stopped by control stop while it ran"}' <<<"$f")") && locked append "$f" \
+  f=$(line "$1" "$2" "$of" stopped "$(jq -c '. + {reason: "stopped by control stop while it ran"}' <<<"$f")") && locked append "$f" && { outkeep "$1" "$of" "$f" || :; } \
     || echo "conveyor: card $1 was stopped, but what its $of used could not be written to the card records" >&2
 }
 # One headless session with the safety hooks only and no subagents; model and effort are read at each launch
@@ -575,14 +575,14 @@ session1() {
     codex) read=$CODEXREAD; model=$(codexmodel "$model") || { echo "$model"; return 1; }; f=$(cxready "$1") || { echo "$f"; return 1; } ;;
     *) dir=$(acctenv "$ACCT") || { echo "$dir"; return 1; } ;;
   esac
-  rm -f "$1.spent" "$1.stalled" "$1.guardfail"
+  rm -f "$1.spent" "$1.stalled"
   # The session runs on the cores left for card work (lib/slots.sh slot_keepwords).
   local KEEP bp p rid rd=''; slot_keepwords
   # A session that stalls (watch()) is ended and runs once more after REVIEW_PAUSE, as a review with no verdict does
-  # (reviewed()), on what it left in the worktree; the stalled try is firstTry on the step's line (BOTHTRIES), and stalls counts the stalls. A second stall fails the step.
+  # (reviewed()), on what it left in the worktree; the stalled try is firstTry on the step's line (BOTHTRIES), and stalls counts the stalls. A second stall fails the step. Each try starts with no guard failure (<worktree>.guardfail): one of the stalled try does not count against the next.
   # A Claude build session cut off by a stall, or by the model API (APIRESUME: apitries()'s retries), is resumed once by the session id its output names (claude --resume, told RESUMEBRIEF), not run again from nothing: its line has resumed 1.
   while :; do
-    sec=$SECONDS; p=$2 rid=''; [ -z "$rd" ] && [ -z "${APIRESUMED:-}" ] && [ "$agent" = claude ] && [ "${3:-build}" = build ] && [ -n "${APIRESUME:-}$x" ] && rid=$(jq -rRn "$SESSID" "$1.out" 2>/dev/null) && [ -n "$rid" ] && p=$RESUMEBRIEF rd=1
+    sec=$SECONDS; p=$2 rid=''; rm -f "$1.guardfail"; [ -z "$rd" ] && [ -z "${APIRESUMED:-}" ] && [ "$agent" = claude ] && [ "${3:-build}" = build ] && [ -n "${APIRESUME:-}$x" ] && rid=$(jq -rRn "$SESSID" "$1.out" 2>/dev/null) && [ -n "$rid" ] && p=$RESUMEBRIEF rd=1
     builder "$1" "$p" "$model" "$effort" "$dir" "$agent" "$rid" & bp=$!
     watch $bp "$1.out" "$1.live" "${3:-build}" "$model" "$agent" "$effort"; rc=$?; sec=$((SECONDS - sec))
     # A Codex session cut off before its turn completed: its running total, from the session file Codex keeps (read
