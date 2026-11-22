@@ -263,3 +263,104 @@ t_machinecheckout() {
   jq '.records[0].engine = "chekout"' "$H" > "$SH/h" && mv "$SH/h" "$H"
   wait_until 'grep -q "conveyor: the records of .*host.json are not understood" "$SH/machine.out"' || fail "a mistyped engine was taken: $(cat "$SH/machine.out")"
 }
+
+# Bug (#1332): a card's build session started a test in the background, and its shell ended before the test did, so
+# the test's parent was the machine's Conveyor (on Linux the reaper of all it starts). The session then sent TERM to
+# that test and to its parent, which it took for a process of its own. The machine's Conveyor took that TERM for a
+# stop of its service and ended, and its loop and every card in flight ended with it, with no line of its own. Under
+# its service (a systemctl here that names it the service's main process, the service active), such a TERM is no
+# stop: it says so, and the machine, its loop and the card's session go on. A TERM once the service is stopping ends it.
+# Linux only: elsewhere no process is the reaper of what it starts, and the machine's service is not a systemd one.
+t_machineparent() {
+  [ "$(uname -s)" = Linux ] || return 0
+  local n pre all
+  # The card's session: it waits until the case knows the machine's pid, starts the background test, then TERMs it
+  # and its parent.
+  # shellcheck disable=SC2016 # run by the card's session
+  pre='d=${STUB%/solo/stub}/shared; until [ -s "$d/mp" ]; do command sleep 0.1; done'
+  # shellcheck disable=SC2016 # run by the card's session
+  pre+=$'\n''( command sleep 600 & echo $! > "$d/stray" )' # sleep: the background test, which outlives the shell that started it
+  # shellcheck disable=SC2016 # run by the card's session
+  pre+=$'\n''q=$(ps -o ppid= -p "$(cat "$d/stray")" | tr -d " "); echo "$q" > "$d/strayparent"; kill -TERM "$q" "$(cat "$d/stray")"; : > "$d/killed"'
+  machine1 '' "$pre"
+  printf '#!/usr/bin/env bash\nprintf "ActiveState=%%s\\nMainPID=%%s\\n" "$(cat %q)" "$(cat %q)"\n' "$SH/state" "$SH/mp" > "$SH/bin/systemctl" \
+    && chmod +x "$SH/bin/systemctl" && echo active > "$SH/state" && echo "$mp" > "$SH/mp" || fail "the systemctl of the case could not be made"
+  # The polls: the bug is one of a running machine with a card's session under it. Only there is the machine the
+  # parent of the process the session left (the reaper of all it starts), so the session's TERM reaches it, and only
+  # there can its loop and that session be seen to go on after it; a call of machinenostop shows neither. Each poll
+  # fails after its ceiling.
+  wait_until '[ -e "$SH/killed" ]' || fail "the card's session did not send its TERM: $(cat "$SH/machine.out")"
+  [ "$(cat "$SH/strayparent")" = "$mp" ] || fail "the process the session started did not have the machine's Conveyor ($mp) as its parent once its shell ended: $(cat "$SH/strayparent")"
+  n=$(grep -cx machine "$TURNS")
+  # The poll: two more turns of the machine show that it went on after the TERM; a machine that ends stops it at once.
+  wait_until "[ \"\$(grep -cx machine '$TURNS')\" -ge $((n + 2)) ] || [ -z \"\$(running $mp)\" ]"
+  [ -n "$(running "$mp")" ] || fail "the machine's Conveyor ended on the TERM a card's session sent to the parent of a process it had started: $(cat "$SH/machine.out")"
+  mapfile -t all < <(below "$mp")
+  [ -e "$SH/run/solo-1" ] && running "${all[@]}" | grep -q 'stub/claude' || fail "the card's session did not go on after that TERM: $(running "${all[@]}")"
+  grep -q "^conveyor: the machine's Conveyor was sent TERM while its service conveyor-machine runs, so by no stop of the service: it goes on" "$SH/machine.out" \
+    || fail "the machine's Conveyor did not say that it goes on after a TERM that was no stop: $(cat "$SH/machine.out")"
+  echo deactivating > "$SH/state"; kill -TERM "$mp"
+  # The poll: a TERM once the service stops ends the running machine, with its loop and the card's session.
+  WAIT_CEILING=10 wait_until '[ -z "$(running "$mp")" ]' || fail "the machine's Conveyor did not end on a TERM while its service stops: $(cat "$SH/machine.out")"
+  ! grep -q "Conveyor ends:" "$SH/machine.out" || fail "the machine's Conveyor said it ends on its stop: $(cat "$SH/machine.out")"
+}
+
+# The machine's Conveyor as `conveyor.sh machine` runs it (machineloop, in a shell of the engine), in the background,
+# over one record whose main checkout is not there: its loop ends at once, and the machine says so at its next turn,
+# a second later. Sets mp; its output is in $T/$CASE/out. The shell runs <commands> once the engine is loaded. It
+# starts with INT as the service and a terminal give it (not ignored, as a job in the background of a script has it,
+# which bash cannot trap). On Linux it is first made the reaper of all it starts, as machineloop makes itself, so
+# machineloop does not start conveyor.sh again, which the commands would not reach.
+bare() { # [commands]
+  local d=$T/$CASE w
+  export XDG_CONFIG_HOME=$d/config; mkdir -p "$XDG_CONFIG_HOME/conveyor" && git init -q "$d/m" || fail "the case's checkout could not be made"
+  jq -n --arg m "$d/gone" '{records: [{repo: "gone", main: $m}]}' > "$XDG_CONFIG_HOME/conveyor/host.json"
+  w=(python3 -I -c 'import ctypes, os, signal, sys
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+sys.platform != "linux" or ctypes.CDLL(None).prctl(36, 1) == 0 or sys.exit("prctl"); os.execvp(sys.argv[1], sys.argv[1:])')
+  cat > "$d/machine.sh" <<'EOF'
+. "$1/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$1/commands/machine.sh")" || exit 9
+MACHINE_POLL=1; eval "$2"; machineloop
+EOF
+  ( cd "$d/m" && CONVEYOR_MAIN=$d/m exec "${w[@]}" bash "$d/machine.sh" "$SRC" "${1:-}" ) > "$d/out" 2>&1 & mp=$!
+}
+
+# Bug (#1332): the machine's Conveyor that ended by itself said nothing of it: the journal showed its loop's last
+# line, then the service's restart. Ended by an error (a variable it reads is not set, so under set -u the shell
+# ends: the line that says its loop ended reads it), its last line names that error, its exit status and the command.
+# The shell's own line for the error is the line before; a last line without the error left the cause off it.
+t_machineerror() {
+  local rc last
+  bare 'unset MACHINE_RESTART'
+  # The poll: a wait on a machine that does not end (the bug) would never return; this one fails after its ceiling.
+  WAIT_CEILING=20 wait_until '[ -z "$(running "$mp")" ]' || fail "the machine's Conveyor did not end on its error: $(cat "$T/$CASE/out")"
+  wait "$mp"; rc=$?; last=$(tail -n 1 "$T/$CASE/out")
+  [ "$rc" = 1 ] || fail "the machine's Conveyor ended on its error with exit status $rc: $(cat "$T/$CASE/out")"
+  # shellcheck disable=SC2016 # the command as the shell names it
+  [[ $last == "conveyor: the machine's Conveyor ends: the shell's error \"MACHINE_RESTART: unbound variable\", exit status 1 at the command: echo \"conveyor: the loop of \$r ended;"*'${MACHINE_RESTART}'* ]] \
+    || fail "the last line of the machine's Conveyor does not name the error it ended on, its exit status and the command: $(cat "$T/$CASE/out")"
+}
+
+# The machine's Conveyor (bare) sent <signal> once its first turn is over: it ends with <status>, and its last line
+# names the signal.
+sigend() { # <signal> <status>
+  local rc
+  bare
+  # The poll: the signal goes to the running machine once its first turn is over (its traps are set before it), as
+  # only a running process can show how it ends on it: it says its loop ended.
+  wait_until 'grep -q "the loop of gone ended" "$T/$CASE/out"' || fail "the machine's Conveyor did not take its first turn: $(cat "$T/$CASE/out")"
+  kill "-$1" "$mp"
+  # The poll: a wait on a machine that does not end on the signal would never return; this one fails after its ceiling.
+  WAIT_CEILING=20 wait_until '[ -z "$(running "$mp")" ]' || fail "the machine's Conveyor did not end on $1: $(cat "$T/$CASE/out")"
+  wait "$mp"; rc=$?
+  [ "$rc" = "$2" ] && [ "$(tail -n 1 "$T/$CASE/out")" = "conveyor: the machine's Conveyor ends: it was sent SIG$1" ] \
+    || fail "the machine's Conveyor ended on $1 with exit status $rc, its last line not naming the signal: $(cat "$T/$CASE/out")"
+}
+
+# Bug (#1332): ended by a signal that is not its stop (HUP, QUIT, USR1, USR2 or ALRM: here HUP), the machine's
+# Conveyor ended at once and said nothing. It ends its loops as on TERM, and its last line names the signal.
+t_machinehup() { sigend HUP 129; }
+
+# Bug (#1332): on INT (Ctrl+C on `conveyor.sh machine`) the machine's Conveyor ended as on its stop, with no line.
+# It ends its loops as on TERM, and its last line names the signal.
+t_machineint() { sigend INT 130; }

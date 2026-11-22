@@ -72,7 +72,10 @@ t_adopt() {
   # The wait that ends a turn is a job of the loop's (sleep "$t" &), so the turns are counted in a file.
   turns='sleep() { [ "${FUNCNAME[1]:-}" = run ] && [ "$1" != 0.1 ] || { command sleep "$@"; return; }; echo >> "$STUB/turns"; case $(wc -l < "$STUB/turns") in 1) tune --arg c "$B" ".plugin.commit = \$c" ;; 2) echo "pusher ${pusher:-none}" > "$STUB/turn2"; echo 5 > "$R/f5.txt"; git -C "$R" add f5.txt && git -C "$R" commit -qm 5 && adoptrec c-5 5 picked && adoptrec c-5 5 landed "{\"sha\": \"$(git -C "$R" rev-parse HEAD)\", \"product\": false}"; kill -KILL "$pusher" ;; *) kill -KILL "$me" ;; esac; }' # sleep: the engine's own, passed on as called
   out=$(CONVEYOR_ADOPT="$p7 c-7 7 $A"$'\n'"$p8 c-8 8 $A" adoptrun "$V/$A/conveyor" 'me=$BASHPID; echo $me > "$STUB/me"; push() { echo "$*" >> "$STUB/pushcalls"; standin; }; '"$turns"'; run "" serve' 8>>"$ST/cards.jsonl.run" 2>&1)
-  grep -qxF "conveyor: restarting on the new code; 2 cards in flight carry on on $A" <<<"$out" || fail "the loop did not restart with its 2 cards once the push ended, or did not say so: $out"
+  # Its line also says what ends the cards all the same (#1332: a restart of the machine's service ended them, under
+  # a line that said they carry on).
+  grep -qxF "conveyor: restarting on the new code; 2 cards in flight carry on on $A; a stop of this loop or of the machine's Conveyor, or a restart of its service, ends them" <<<"$out" \
+    || fail "the loop did not restart with its 2 cards once the push ended, or did not say so and what ends them: $out"
   [[ "$(cat "$STUB/turn2" 2>&1)" =~ ^pusher\ [0-9]+$ ]] || fail "the loop restarted while #6's push ran, or started no push: $(cat "$STUB/turn2" 2>&1) $out"
   read -r me args < "$STUB/new.args"; [ "$me" = "$(cat "$STUB/me")" ] && [ "$args" = "$V/$B/conveyor/conveyor.sh serve" ] && [ "$(cat "$STUB/new.lock" 2>&1)" = held ] \
     || fail "the loop did not restart on $B in its own process, holding the run lock: $(cat "$STUB/new.args" "$STUB/new.lock" 2>&1)"
@@ -138,7 +141,7 @@ EOF2
   [ -n "$deaf" ] || fail "#8 runs no review to outlive it"
   adoptcard c-8 8 "$p8" review; adoptcard c-9 9 "$p9" build; tune --arg c "$A" '.plugin.commit = $c'
   out=$(CONVEYOR_ADOPT="$p8 c-8 8 $A"$'\n'"$p9 c-9 9 $B" adoptrun "$V/$B/conveyor" 'run "" serve' 8>>"$ST/cards.jsonl.run" 2>&1)
-  grep -qxF "conveyor: restarting on the new code; 2 cards in flight carry on on $(printf '%s\n' "$A" "$B" | sort | paste -sd' ' - | sed 's/ /, /g')" <<<"$out" \
+  grep -qxF "conveyor: restarting on the new code; 2 cards in flight carry on on $(printf '%s\n' "$A" "$B" | sort | paste -sd' ' - | sed 's/ /, /g'); a stop of this loop or of the machine's Conveyor, or a restart of its service, ends them" <<<"$out" \
     || fail "the second restart did not say #8 runs $A and #9 runs $B: $out"
   [ "$(sort "$STUB/new.adopt")" = "$(printf '%s\n' "$p8 c-8 8 $A" "$p9 c-9 9 $B" | sort)" ] && grep -q "^$p8 $deaf " "$STUB/new.kids" \
     || fail "the new loop was not handed each card's own commit, or #8's review: $(cat "$STUB/new.adopt" "$STUB/new.kids")"

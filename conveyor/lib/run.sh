@@ -560,6 +560,8 @@ turncount() {
 # (CONVEYOR_ADOPT, with the run lock on fd 8): it counts them against the cap, keeps their claims (their process
 # lives), sees to their ends and the push as for its own, and records one whose process ends without a result as
 # blocked. A pin that is not installed ends the loop only once nothing of its own runs. A `run` ends then too.
+# They carry on only while this process does: a stop of the loop, or of the machine's Conveyor over it (its service's
+# restart too), ends them with all under it (machinestop, lib/machine.sh), and the restart's line says so (#1332).
 turnrestart() {
   # The list of the last turn is kept with what runs under each card now: a card killed since then has none under it.
   held=$(for k in "${!mine[@]}"; do
@@ -568,7 +570,7 @@ turnrestart() {
   done | sort -u)
   local -A on=() # the commit each card runs now (cardcode())
   for k in "${!mine[@]}"; do read -r c _ <<<"${mine[$k]}"; on[$k]=$(cardcode "$c" "${took[$k]:-$RAN}"); done
-  echo "conveyor: restarting on the new code; ${#mine[@]} cards in flight carry on on $( (for k in "${!mine[@]}"; do echo "${on[$k]}"; done; [ ${#mine[@]} != 0 ] || echo "$RAN") | sort -u | paste -sd' ' - | sed 's/ /, /g')"
+  echo "conveyor: restarting on the new code; ${#mine[@]} cards in flight carry on on $( (for k in "${!mine[@]}"; do echo "${on[$k]}"; done; [ ${#mine[@]} != 0 ] || echo "$RAN") | sort -u | paste -sd' ' - | sed 's/ /, /g')$([ ${#mine[@]} = 0 ] || echo "; a stop of this loop or of the machine's Conveyor, or a restart of its service, ends them")"
   # Without its copy of stderr (LOGFD): the new code makes its own, so each restart kept one more, and after some
   # hundreds every card's test runner got fd 255, bash's own.
   CONVEYOR_KIDS=$held CONVEYOR_ADOPT=$(for k in "${!mine[@]}"; do echo "$k ${mine[$k]} ${on[$k]}"; done) exec "$BASH" "$new" serve {LOGFD}>&-

@@ -26,8 +26,8 @@ t_machinefds() {
   wait_until 'lp=$(jq -r .pid "$ST/loop.json" 2>/dev/null) && [ "$lp" != "$mp" ] && kill -0 "$lp" 2>/dev/null' \
     || fail "the machine did not start the project's loop: $(cat "$out")"
   lp=$(jq -r .pid "$ST/loop.json")
-  # The machine: its stdout, its stderr and its own LOGFD.
-  [ "$(copies "$mp")" = 3 ] || fail "the machine holds $(copies "$mp") fds on its output, not 3: it kept a copy of stderr when it ran itself again"
+  # The machine: its stdout and its own LOGFD (its stderr is the pipe to its reader, machineerr); a copy kept is a third.
+  [ "$(copies "$mp")" = 2 ] || fail "the machine holds $(copies "$mp") fds on its output, not 2: it kept a copy of stderr when it ran itself again"
   # The loop writes to its reader, never to the machine's output.
   [ "$(copies "$lp")" = 0 ] || fail "the project's loop holds $(copies "$lp") fds on the machine's output, not 0: the machine gave it its copy of stderr"
   # Bug (#213, asked for by #216): each restart of serve kept fds (a copy of stderr, LOGFD), so after hundreds the lock and slot fds of

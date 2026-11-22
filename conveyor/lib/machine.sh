@@ -19,7 +19,9 @@ projects() {
 # read or written by another's card; the machine's cap and room (room()) are over them all. A record added is
 # served from the next turn; a loop whose record is gone is stopped; a loop that ends is started again after
 # MACHINE_RESTART seconds. Each loop's output is its lines with its repo in front. TERM ends every loop and all under
-# it (its cards, their sessions, reviews and tests), then this, within seconds (machinestop).
+# it (its cards, their sessions, reviews and tests), then this, within seconds (machinestop); a TERM sent while its
+# service runs, by no stop of it, ends nothing (machinenostop). Any other end (INT too) says why, on its last line
+# (machineend).
 # A loop runs the machine's own Conveyor (this file's), which restarts it on its project's pin or taken commit; a
 # record run from its own checkout ("engine": "checkout") runs that checkout's conveyor.sh instead, which restarts on
 # the checkout's new code as its HEAD moves (stale(), lib/run.sh). A record whose engine changes is a record gone and
@@ -55,12 +57,14 @@ machinestop() {
 # (it is their subreaper: machineloop), but the readers of its loops' output; and every process that carries its mark
 # in its environment (MACHINE_MARK: all it started and all those started, where they kept it; the only way to find
 # one where no process can be made a subreaper, macOS). Asked in a $( ): the mark is taken out there, or the programs
-# that look for it would carry it themselves. One that has ended and is not waited for yet (Z) is gone.
+# that look for it would carry it themselves. One that has ended and is not waited for yet (Z) is gone. The reader of
+# its own stderr (machineerr, MACHINE_ERRPID) is never one: it ends with this process, once it has written this
+# process's last line (machineend, which waits for it) or, on the stop, which says nothing, once that stderr closes.
 machineleft() {
   local me=$BASHPID m=$MACHINE_MARK
   unset "${m%%=*}"
   { ps -axo pid=,ppid=,stat= | awk -v p=$$ -v me="$me" -v rd="$MACHINE_READERS " '$2 == p && $1 != me && $3 !~ /^Z/ && !index(rd, " " $1 " ") { print $1 }'
-    ps axeww -o pid=,args= | awk -v m="$m" 'index($0 " ", " " m " ") { print $1 }'; } | sort -u
+    ps axeww -o pid=,args= | awk -v m="$m" 'index($0 " ", " " m " ") { print $1 }'; } | sort -u | grep -vxF "${MACHINE_ERRPID:-}"
 }
 # Whether this process is the child subreaper of what it starts (Linux). No process can read that of itself but by
 # prctl, which bash cannot call, so it is tried: a process whose parent has ended has this process as its parent
@@ -71,6 +75,53 @@ p = os.getpid()
 if os.fork(): os._exit(0)
 while os.getppid() == p: time.sleep(0.001)
 print(int(os.getppid() == int(sys.argv[1])))' $$)" = 1 ]
+}
+# Whether a TERM is no stop: this process is the main process of its service (conveyor-machine, as install-service
+# names it: its MainPID) and the service is active, so no stop or restart of it sent the TERM (either has the service
+# deactivating before the TERM is handled). Such a TERM came from a process on this machine: a card's build session
+# killed the parent of a process it had started in the background, and that process had outlived its shell, so its
+# parent was this one (the reaper of all it starts, machineloop); the machine then ended with every loop and card
+# (#1332). It says so, and the machine goes on. Anywhere else (no systemd, a process that is not the service's own, a
+# service that is stopping or that systemctl does not answer for) a TERM is a stop.
+machinenostop() {
+  local o
+  command -v systemctl >/dev/null && o=$(timeout 10 systemctl --user show -p MainPID -p ActiveState conveyor-machine.service 2>/dev/null) \
+    && grep -qx "MainPID=$$" <<<"$o" && grep -qx 'ActiveState=active' <<<"$o" || return 1
+  echo "conveyor: the machine's Conveyor was sent TERM while its service conveyor-machine runs, so by no stop of the service: it goes on (systemctl --user stop conveyor-machine stops it)" >&2
+}
+# The machine's stop, on TERM (but one machinenostop takes for none): its loops and all under them are ended
+# (machinestop), then it, with no line. Called in machineloop's traps, as machinesig, in its variables (kid, nap).
+machinedown() { trap '' TERM INT; trap - EXIT; machinestop "${!kid[@]}" $nap; exit 0; }
+# Its end on a signal other than TERM (INT, as Ctrl+C sends, too): its loops and all under them are ended as on its
+# stop, and its last line names the signal (machineend).
+machinesig() { # <signal>
+  trap '' TERM INT; MACHINE_WHY="it was sent SIG$1"; machinestop "${!kid[@]}" $nap; exit $((128 + $(kill -l "$1")))
+}
+# The machine's last line when it ends, but on its stop: why it ends. A signal (machinesig), else its exit status and
+# the command it ended at, with the error the shell ended on (a variable not set, under set -u), which the shell
+# writes on the line before: its reader (machineerr) puts that error on this line. It waits (2 s at most) until the
+# reader has written it, so this line is out before the process ends.
+machineend() { # <exit status> <the command>
+  local i=0
+  echo "conveyor: the machine's Conveyor ends: ${MACHINE_WHY:-"exit status $1 at the command: $2"}" >&2
+  while ps -o stat= -p "${MACHINE_ERRPID:-0}" 2>/dev/null | grep -qv Z && [ $((i++)) -lt 20 ]; do sleep 0.1; done
+}
+# The reader of the machine's own stderr (machineloop): each line goes on as it is, at once. Its last line
+# (machineend) ends it; when that line gives an exit status and the line before it is the shell's own error
+# ("<file>: line <n>: <error>"), the error that ended the shell, the line names that error first. It ignores the
+# signals that end the machine (Ctrl+C sends INT to the whole group), so it is still there to write that line, which
+# the machine waits for before it ends (machineend). It holds no lock (fd 8), so a reader that outlives that wait
+# keeps no next machine from starting.
+machineerr() {
+  local l='' p
+  trap '' TERM INT HUP; exec 8>&-
+  while IFS= read -r p; do
+    [[ $p != "conveyor: the machine's Conveyor ends: exit status "* || ! $l =~ :\ line\ [0-9]+:\ (.+)$ ]] \
+      || p="conveyor: the machine's Conveyor ends: the shell's error \"${BASH_REMATCH[1]}\", ${p#"conveyor: the machine's Conveyor ends: "}"
+    printf '%s\n' "$p" >&2
+    [[ $p != "conveyor: the machine's Conveyor ends: "* ]] || exit 0
+    l=$p
+  done
 }
 machineloop() {
   local -A kid=() at=() rec=(); local recs known r m e p o nap='' why told=''
@@ -96,7 +147,11 @@ os.execvp(sys.argv[2], sys.argv[2:])' "$(sed -n 's/^SigIgn:[[:space:]]*//p' "/pr
   flock -n 8 || { echo "conveyor: the machine's Conveyor already runs ($(jq -r '"pid \(.pid)"' "$MACH/loop.json" 2>/dev/null)); a second one would pass the machine cap" >&2; exit 1; }
   # Its commit (none from a checkout), so no project's prune() removes the install the service runs.
   jq -cn --argjson p "$$" --arg t "$(p_started $$)" --arg c "$OWN" '{pid: $p, started: $t} + (if $c == "" then {} else {commit: $c} end)' > "$MACH/loop.json"
-  trap 'trap "" TERM INT; machinestop "${!kid[@]}" $nap; exit 0' TERM INT
+  # The stop (TERM) says nothing of itself; every other end says why (machineend, machinesig), its stderr read by
+  # machineerr, which machineleft does not count as left.
+  exec 2> >(machineerr); MACHINE_ERRPID=$!
+  MACHINE_WHY=''; trap 'machinenostop || machinedown' TERM; trap 'machineend "$?" "$BASH_COMMAND"' EXIT
+  trap 'machinesig INT' INT; trap 'machinesig HUP' HUP; trap 'machinesig QUIT' QUIT; trap 'machinesig USR1' USR1; trap 'machinesig USR2' USR2; trap 'machinesig ALRM' ALRM
   while :; do
     # Records that do not read stop no loop (the file may be half written); records read as none stop every loop.
     # Why they do not is said when it changes, never at every turn (as the loop's own reason is: run, told).
