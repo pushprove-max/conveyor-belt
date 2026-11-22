@@ -593,7 +593,7 @@ session1() {
     jq -e 'objects | has("ok")' <<<"$f" >/dev/null 2>&1 \
       || f=$(jq -cn --arg m "$model" --arg e "$effort" --argjson s "$sec" '{model: $m, effort: $e, sec: $s, unread: "the session output could not be read", ok: false}
           | if $e == "" then del(.effort) else . end')
-    [ "$agent" != claude ] || f=$(transcribed "$f" "$1.out" "$1" "$dir")
+    [ "$agent" != claude ] || [ -n "$rd" ] || f=$(transcribed "$f" "$1.out" "$1" "$dir") # not for a resumed try: its transcript holds the earlier try, which BOTHTRIES or APIFOLD adds
     [ -z "$x" ] && [ -e "$1.stalled" ] || break
     x=$(jq -c --arg r "stalled at ${3:-build}: no progress since $(<"$1.stalled")" '{reason: $r, spent: del(.ok)}' <<<"$f")
     echo "conveyor: card ${1##*/}: its ${3:-build} made no progress for ${STUCK}s: ended, and run once more after ${REVIEW_PAUSE}s" >&2

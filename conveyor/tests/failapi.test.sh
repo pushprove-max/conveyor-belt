@@ -286,3 +286,25 @@ EOT
     || fail "the stalled build was not resumed exactly once, the try after the refusal resumed it again: $(cat "$STUB/sessions")"
   [ "$(grep -m 1 '^{' "$T/$CASE/run.out" | jq -r .resumed)" = 1 ] || fail "the build's record does not say it was resumed once: $(cat "$T/$CASE/run.out")"
 }
+
+# Issue 1324. Bug it catches: the resumed try emitted its session id but reported no usage, so the transcript of that
+# session, which holds the refused try too, was read as the resumed try's usage, and the refused try's usage was
+# added to it again: the build's tokens counted twice. A resumed try's usage is not read from the transcript; the
+# step says unread instead of showing a count with the refused try in it twice.
+t_apiresumetokens() {
+  setup '[]'; tune '.tunables.apiPause = 0.02'; fx_wt : b.txt one
+  cat > "$STUB/build" <<'EOT'
+echo x >> "$STUB/calls"; n=$(wc -l < "$STUB/calls")
+echo '{"type":"system","session_id":"0aa1-b2"}'
+[ "$n" != 1 ] || { echo '{"type":"result","session_id":"0aa1-b2","is_error":true,"result":"API Error: 503 Service Unavailable","usage":{"input_tokens":3,"cache_creation_input_tokens":100,"cache_read_input_tokens":0,"output_tokens":40}}'; exit 1; }
+echo two >> a.txt; echo '{"type":"result","session_id":"0aa1-b2","is_error":false,"num_turns":1,"usage":"n/a"}'; exit 0 # the claude stub would print its own usage after this
+EOT
+  # The default login's transcript of the session: the refused try's answer, which the resumed session carries on.
+  local h=$T/$CASE/home p; p=$h/.claude/projects/$(cd "$FXWT" && pwd -P | sed 's/[^A-Za-z0-9]/-/g'); mkdir -p "$p"
+  jq -cn '{type: "assistant", sessionId: "0aa1-b2", message: {id: "msg_1", model: "claude-sonnet-5-5", usage: {input_tokens: 3, cache_creation_input_tokens: 100, cache_read_input_tokens: 0, output_tokens: 40}}}' > "$p/0aa1-b2.jsonl"
+  apicall 'HOME='"$h"'; session "$FXWT" "Build the issue."; echo "rc=$?"'
+  grep -qx rc=0 "$T/$CASE/run.out" && [ "$(grep -c -- '--resume 0aa1-b2 ' "$STUB/sessions")" = 1 ] \
+    || fail "a build refused once did not resume and end well: $(cat "$STUB/sessions") $(cat "$T/$CASE/run.out")"
+  [ "$(head -n 1 "$T/$CASE/run.out" | jq -c '[.usage, (.unread | type)]')" = '[null,"string"]' ] \
+    || fail "the resumed try's usage was read from a transcript that holds the refused try too: $(head -n 1 "$T/$CASE/run.out")"
+}
