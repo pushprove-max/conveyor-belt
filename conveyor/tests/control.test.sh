@@ -454,3 +454,17 @@ t_controlwakeloop() {
     || fail "control release 4 did not wake the loop asleep on its 100 s idle timer: #4 was not picked"
   kill "$lp" 2>/dev/null; wait "$lp" 2>/dev/null; return 0
 }
+# Bug (issue 1349): `control release` of an issue the record's held does not list (held by a card, a rule or a split)
+# changed nothing and said nothing, so the Foreman took it for released. It now says so on stderr; exit stays 0.
+t_controlreleasenothing() {
+  controlsetup "$(jq -cs . <(issue 5 2026-01-01) <(issue 6 2026-02-01))"
+  loop control hold 6 >/dev/null || fail "hold 6 was refused"
+  before=$(loop control); rc=0; err=$(loop control release 5 2>&1 >/dev/null) || rc=$?
+  [ "$rc" = 0 ] || fail "control release 5, not held, exited $rc: $err"
+  [ "$err" = 'conveyor: #5 is not held in this record, so nothing changed; foreman status says what holds it' ] \
+    || fail "control release 5, not held, printed on stderr: $err"
+  [ "$(loop control | jq -c .held)" = "$(jq -c .held <<<"$before")" ] || fail "control release 5, not held, changed held: $(loop control)"
+  err=$(loop control release 6 2>&1 >/dev/null) || fail "control release 6, held, failed: $err"
+  [ -z "$err" ] || fail "control release 6, held, printed on stderr: $err"
+  [ "$(loop control | jq -c .held)" = '[]' ] || fail "control release 6 did not release #6: $(loop control)"
+}

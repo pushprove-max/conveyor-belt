@@ -65,6 +65,25 @@ out=$(cd "$M" && bash "$SRC/../conveyor.sh" foreman status beta 2>&1) && fail "a
 grep -qF 'beta is none of' <<<"$out" || fail "the refusal does not name the project: $out"
 }
 
+# Issue 1349: the held line named every held issue alone, so each read as the owner's hold and a `control release` that
+# changed nothing looked like a fault. Each issue shows what holds it: #12 the record's held, #13 a split (its last card
+# closed, with its parts, and the hold Conveyor puts on it, which is no `control release` to give), #16 a blocked card,
+# #17 a waiting list, #19 a shut card with no parts (null umbrella: it must still show its card), #20 a parent with
+# parts and no card, held by the owner (its hold is the only reason, so it must still show it); an issue with no reasons
+# shows its number alone.
+t_statusheld() {
+CASE=statusheld; fixture statusheld
+snap '.open.held = [{issue: 12, reasons: [{kind: "you"}]},
+  {issue: 13, reasons: [{kind: "you"}, {kind: "card", step: "closed", card: "c13"}], umbrella: [14, 15]},
+  {issue: 16, reasons: [{kind: "card", step: "blocked", card: "c16"}]},
+  {issue: 17, reasons: [{kind: "waits", waitsFor: [14, 15]}]}, {issue: 18},
+  {issue: 19, reasons: [{kind: "card", step: "closed", card: "c19"}], umbrella: null},
+  {issue: 20, reasons: [{kind: "you"}], umbrella: [21, 22]}]'
+out=$(cd "$M" && bash "$SRC/../conveyor.sh" foreman status 2>&1) || fail "foreman status failed: $out"
+l='held: #12 (your hold: control release) #13 (split: waits for its parts #14 #15) #16 (card blocked: retry) #17 (waits for #14 #15) #18 #19 (card closed) #20 (your hold: control release)'
+grep -qxF -- "$l" <<<"$out" || fail "the held line does not give each issue its reason; wanted '$l' in: $out"
+}
+
 # D2: a card moving from build to review wakes no one; an awaited card that landed and another that blocked give one
 # wake that names the landed commit and the block reason, so the Foreman need not look them up.
 t_wake() {
@@ -424,7 +443,7 @@ watcher: last poll ended 2026-11-15T11:59:47Z, took 47 s (alpha: slow, read heal
 waiter: listening" ] || fail "ask alpha foreman status (host devhost, live waiter $wp) did not give this Foreman's watcher and waiter: $out"
 }
 
-cases=(status wake suite suitedead mainred prmerge building slowlive slowdown nosnapanew nosnapquiet nosnaplast healthwake polllog unreported stopped resumed resumedhost askhost)
+cases=(status statusheld wake suite suitedead mainred prmerge building slowlive slowdown nosnapanew nosnapquiet nosnaplast healthwake polllog unreported stopped resumed resumedhost askhost)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

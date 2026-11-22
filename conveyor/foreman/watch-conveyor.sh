@@ -289,6 +289,20 @@ unreported() {
 # the poll log: "watcher: last poll ended <time>, took <n> s (<outcomes>)", or "watcher: no poll logged yet". Last, the Foreman's
 # waiter: "waiter: listening", "waiter: starting again" or "waiter: down: <why>" (lib.sh status_tail).
 STATUS=$SUITE$REF'def num: if type == "number" then "#\(.)" else tostring end;
+  # A split issue (its parts, and its last card closed) is held by Conveyor until its parts finish; a release of it would
+  # build nothing (the Board gives it no Queue), so its own hold adds no text and the split reason says what it waits for.
+  # A parent with parts and no closed card is not split: its hold is the owner'"'"'s, and shows as such.
+  def heldwhy($h): ((($h.umbrella // []) | length > 0) and ($h.reasons | arrays | any(.[]; objects | .kind == "card" and .step == "closed"))) as $split
+    | if .kind == "you" then (if $split then empty else "your hold: control release" end)
+    elif .kind == "label" then "label \(.label): remove the label"
+    elif .kind == "rule" then "rule \(.rule): change the rule"
+    elif .kind == "waits" then "waits for \(.waitsFor | arrays | map(num) | join(" "))"
+    elif .kind == "approve" then "waits for your yes"
+    elif .kind == "card" and .step == "closed" and $split then "split: waits for its parts \($h.umbrella | map(num) | join(" "))"
+    elif .kind == "card" and .step == "blocked" then "card blocked: retry"
+    elif .kind == "card" then "card \(.step)\(if .notPushed == true then ", not pushed" else "" end)"
+    elif .kind == "parent" then "follow-up of a held issue"
+    else .kind end;
   (.belt | if type == "array" then length else 0 end) as $n
   # While the snapshot is behind the card records and the loop runs, the count on the belt is the one of now: loop.json'"'"'s
   # cards in progress (running: building, waiting, in review or in their Test step), and the landed cards still on the
@@ -306,7 +320,9 @@ STATUS=$SUITE$REF'def num: if type == "number" then "#\(.)" else tostring end;
   (.belt | arrays | .[] | objects | "  \(ref) \(.step)\((.waitsOn | objects | select(.issue | numbers) | " on \(ref)") // "")"
     + " \((.stepAt | fromdate? | $now - .) // null | if . == null then "?" else took end) \(.title // "" | tostring | gsub("\\s+"; " ") | .[0:60] | sub(" $"; ""))"),
   (.queue.waiting | arrays | select(length > 0) | "waiting: " + (map(objects | "\(.issue | num) on \(.waitsFor | arrays | map(num) | join(" "))") | join(", "))),
-  (.open.held | arrays | select(length > 0) | "held: " + (map(objects | .issue | num) | join(" "))),
+  # Each held issue with what holds it and the step that clears it, from its reasons (snapshot.sh, open.held); none: the number alone.
+  (.open.held | arrays | select(length > 0) | "held: " + (map(objects | . as $h | (($h.reasons | arrays | map(objects | heldwhy($h)) | join("; ")) // "") as $w
+    | ($h.issue | num) + (if $w == "" then "" else " (\($w))" end)) | join(" "))),
   ([.suites | arrays | .[] | objects] as $s | ($s | map(select(.ended == null))) as $run
     | if $run != [] then $run[] | suiteline($now)
       else $s | map(select(.ended != null)) | max_by(.ended) | objects | "last " + suiteline($now) end)'

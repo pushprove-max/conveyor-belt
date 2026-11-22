@@ -1302,6 +1302,13 @@ control() { # [action [arguments]]
   [ -z "$open" ] || { new=$(jq -c --argjson o "$open" '.startHeld[-1] as $s | ([$o[].number | select(. > $s.from and . <= $s.to)] - .startSeen) as $h
     | .held = (.held + $h | unique) | .startSeen = (.startSeen + $h | unique)' <<<"$new") && [ -n "$new" ]; } || return 1
   ctlput "$c" "$new" || return 1
+  # A release of an issue the record's held does not list changes nothing there: it is held for another reason, or not
+  # held. Say so on stderr (exit 0 stays), so the one who ran it does not take the issue for released.
+  if [ "$a" = release ]; then
+    for x in $(jq -r '.held as $h | $ARGS.positional[] | select(tonumber | IN($h[]) | not)' --args "$@" <<<"$c"); do
+      echo "conveyor: #$x is not held in this record, so nothing changed; foreman status says what holds it" >&2
+    done
+  fi
   # A release dates only the issues the record held; an adopt, or the filing hooks' Queue, only those it held now.
   case $a in hold) movedlocked movedhold hold "$new" "$@" ;; adopt | start) x=$(jq -r --argjson c "$c" '.held - $c.held | .[]' <<<"$new")
     [ -z "$x" ] || movedlocked movedhold hold "$new" $x ;; release) x=$(jq -r '.held as $h | $ARGS.positional[] | select(tonumber | IN($h[]))' --args "$@" <<<"$c")
