@@ -17,7 +17,7 @@
 # files ran and which failed is read from the logs the runner wrote (testlogs), never from the output, where a test's
 # own lines could pass for the runner's: `== <file>` as a file begins (the whole line: a name may have spaces),
 # `-- ok|FAIL <file>` as it ends, `TESTRUN files=N` for how many it selected. A failed file is listed even when no line names a case of it. A failing case is a
-# line of the output: `FAIL [<case>]: ...`, TAP's `not ok N - <case>` (never a TODO or SKIP one) or node's
+# line of the output: `FAIL [<case>]: ...`, TAP's `not ok N - <case>` (never a TODO or SKIP one; tapjq(), lib/failat.sh: its name is read back as the case has it, and a line in a result's YAML block is no result) or node's
 # `✖ <case> (Nms)`; it is its file's when the output has `== <file>` before it for a file the logs say began, and
 # began after the file the output was in (a log is one runner's and its files run in its order, so a `== ` line that
 # goes back in its log, or names no file of the run, is a test's own), else under the file "". A case line under a
@@ -72,11 +72,11 @@ testfails() { # <test output file> <exit> [the pack's field of the run's command
         elif $e then .files |= (. + [$e.f] | unique) | .open[-1] -= [$e.f] | if $e.r == "FAIL" and (.failed | index($e.f) | not) then .failed += [$e.f] else . end
         elif $n then .n += ($n | tonumber) else . end)') || return 1
   out=$(sed 's/\x1b\[[0-9;]*m//g' "$1" 2>/dev/null | tr -d '\000\r' | jq -cRn --arg rc "$2" --arg sec "$TEST_TIMEOUT" --arg cmd "$cmd" --slurpfile log <(printf '%s' "$log") --slurpfile rec <(cat "${1%.test}.testlog"/results/* 2>/dev/null | jq -cR 'fromjson? // empty') \
-    --arg rx "${FRAMERX:-}" --arg pyrx "${PYFRAMERX:-}" --arg wd "$wd" --arg wdr "$wdr" '$log[0] as $log | '"$named ${FRAMEJQ:-def frame: null; def pyend(\$l): false;} ${RECJQ:-def recs(\$r; \$l): .;}"'
+    --arg rx "${FRAMERX:-}" --arg pyrx "${PYFRAMERX:-}" --arg wd "$wd" --arg wdr "$wdr" '$log[0] as $log | '"$named ${FRAMEJQ:-def frame: null; def pyend(\$l): false;} ${RECJQ:-def recs(\$r; \$l): .;} $(tapjq 2>/dev/null || printf %s 'def tapname: .; def tapyaml: .;')"'
     def cut: if length <= 200 then . else (.[0:201] | sub("\\s+\\S*$"; "")) as $w | if ($w | length) > 200 then .[0:200] else $w end end;
-    def failcase: [capture("^FAIL \\[(?<c>[^\\]]+)\\]: "), capture("^\\s*not ok [0-9]+ (- )?(?<c>.*\\S)") , capture("^\\s*✖ (?<c>.+) \\([0-9.]+ms\\)$")][0].c;
+    def failcase: [capture("^FAIL \\[(?<c>[^\\]]+)\\]: "), (capture("^\\s*not ok [0-9]+ (- )?(?<c>.*\\S)") | tapname), capture("^\\s*✖ (?<c>.+) \\([0-9.]+ms\\)$")][0].c;
     (if $log.files == [] and $cmd != "" then $cmd else null end) as $only
-    | [inputs] as $ls | ($log.order | map(length)) as $ns
+    | ([inputs] | tapyaml) as $ls | ($log.order | map(length)) as $ns
     # $at: of each failing case, [file, line] of the first place a stack after its failure line names in the worktree
     # (FRAMEJQ); a passed case line or a `== ` line of a file of the run (not the `=== ` of an assertion node prints before
     # the stack) ends the search. $fat: of each file of the run, the first such place after its `== ` line that no
@@ -124,7 +124,7 @@ testfails() { # <test output file> <exit> [the pack's field of the run's command
       # name filter ran no case): a name that is the file itself, or a path of it, is no case.
       | (if .cur == "" then $only else .cur end) as $of
       | ([$l | capture("^ok (?<c>\\S+)$"), capture("^\\s*✔ (?<c>.+) \\([0-9.]+ms\\)$"),
-          (select(test("^\\s*ok .*# *(TODO|SKIP)"; "i") | not) | capture("^\\s*ok [0-9]+ (- )?(?<c>.*\\S)"))][0].c
+          (select(test("^\\s*ok .*# *(TODO|SKIP)"; "i") | not) | capture("^\\s*ok [0-9]+ (- )?(?<c>.*\\S)") | tapname)][0].c
          | . as $n | if $n and $of and ($n == $of or ($n | endswith("/" + $of)) or ($of | endswith("/" + $n))) then null else $n end) as $o
       | (if $o and $of then .oks[$of] += [$o] else . end)
       | ($l | failcase) as $c

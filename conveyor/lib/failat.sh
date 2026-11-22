@@ -29,6 +29,12 @@ PYFRAMERX='^\s*File "(?<p>/[^"]+)", line (?<n>[0-9]+)(?:, in .*)?$'
 # its last one (it ends with that frame), read at the end of the traceback: pyend(<line>), its exception line, the first
 # that starts with no space and is no `Traceback` header.
 FRAMEJQ='def frame: [(capture($rx) | . + {py: false}), (select($pyrx != "") | capture($pyrx) | . + {py: true})][0] | if . == null then null else . as $m | (first([$wdr, $wd][] | . as $x | select($x != "" and ($m.p | startswith($x + "/")))) // null) as $d | (if $d then $m.p[($d | length) + 1:] else null end) as $f | {f: (if $f and ($f | test("(^|/)(node_modules|\\.\\.)(/|$)") | not) then $f else null end), n: $m.n, py: $m.py} end; def pyend($l): ($l | test("^\\S")) and ($l | test("^Traceback ") | not);'
+# tapjq prints the jq of TAP's result lines, for the lines of a test's output (testfails()). tapname: of {c: the name a result line
+# gives}, the name with TAP's escapes read back (it writes `\` as `\\` and `#` as `\#`), so it is the name the case has.
+# tapyaml: of the output's lines, the same lines, except that a line in the YAML block of a result (`---` to `...`, two
+# more spaces in than the result line; it holds the actual and expected values of an assertion, which may have lines in
+# the shape of a result: `ok 1 - x`, `not ok 1 - x`, node's `✔ x (1ms)` or `✖ x (1ms)`) that begins as one gets `# ` before it, as TAP marks a line a test printed: no case's.
+tapjq() { printf '%s' 'def tapname: .c |= gsub("\\\\(?<c>[\\\\#])"; .c); def tapyaml: reduce .[] as $l ({e: null, p: "", o: []}; (if .e != null then (if $l == .e then .e = null | .o += [$l] else .o += [$l | if test("^\\s*((not )?ok |[✔✖] )") then "# " + . else . end] end) else (if ($l | test("^ *---$")) and (.p | test("^ *(not )?ok ")) and (($l | length) == (.p | match("^ *").length) + 5) then .e = ($l | sub("---$"; "...")) else . end) | .o += [$l] end) | .p = $l) | .o;'; }
 # Line <n> of <file>, a path in <dir>: only of a regular file whose path below <dir> has no symbolic link in it, as one
 # there (a commit's, or one a test made) could name a file outside <dir>, which a failure report would then show
 # (testfails(), failat()). Prints nothing else.

@@ -87,8 +87,20 @@ t_filerunnodenone() {
 # runs every file whose path holds it). vitest is given the file's whole path.
 t_filerunvitest() {
   frsetup 'packages/ui/package.json={"devDependencies": {"vitest": "1"}}' 'packages/ui/src/b.test.ts=x'
-  frcheck packages/ui/src/b.test.ts "npx /packages/ui|--no vitest run $FRP/packages/ui/src/b.test.ts" \
-    "npx /packages/ui|--no vitest run $FRP/packages/ui/src/b.test.ts -t (^| )(conveyor-no-case)\$"
+  frcheck packages/ui/src/b.test.ts "npx /packages/ui|--no vitest run $FRP/packages/ui/src/b.test.ts --exclude **/b.test.ts?*" \
+    "npx /packages/ui|--no vitest run $FRP/packages/ui/src/b.test.ts --exclude **/b.test.ts?* -t (^| )(conveyor-no-case)\$"
+}
+# R84 of #1393. Bug it catches: vitest keeps each file whose path starts with the path it is given, so a run of
+# b.test.ts also ran the failing b.test.tsx beside it and counted its failures as b.test.ts's. The run leaves out each
+# file whose name goes on past the file's (--exclude **/<name>?*); a name's glob characters are escaped, so it is no
+# pattern that could leave out the file itself. The stub runner shows the arguments only: no real vitest is run.
+t_filerunvitestsibling() {
+  frsetup 'packages/ui/package.json={"devDependencies": {"vitest": "1"}}' 'packages/ui/src/b.test.ts=x' 'packages/ui/src/b.test.tsx=x' 'packages/ui/src/[id](a).test.ts=x'
+  fr packages/ui/src/b.test.ts
+  [ "$FRRC" = 0 ] && [ "$FRGOT" = "npx /packages/ui|--no vitest run $FRP/packages/ui/src/b.test.ts --exclude **/b.test.ts?*" ] \
+    || fail "b.test.ts beside b.test.tsx was not run with the files whose name goes on past it left out (exit $FRRC): [$FRGOT]"
+  fr 'packages/ui/src/[id](a).test.ts'
+  [[ $FRGOT == *'--exclude **/\[id\]\(a\).test.ts?*' ]] || fail "a name's glob characters were not escaped in the exclusion: [$FRGOT]"
 }
 
 # Bug it catches: a jest file of a workspace whose jest is listed at the checkout's root ran under node --test, or by a

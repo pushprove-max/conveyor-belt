@@ -18,9 +18,9 @@
 logfails() { # <exit> [<testTimeout>]
   allfails "$@" | jq -c 'del(.passed, .okcases, .passcases)'
 }
-# The readers of a failure's place in a test's output (lib/failat.sh): the frame patterns, their jq, atsource() and
-# wtline(), for eval.
-frameread() { sed -n '/^FRAMERX=/p; /^PYFRAMERX=/p; /^FRAMEJQ=/p; /^atsource() {/,/^}/p; /^wtline() {/,/^}/p' "$SRC/lib/failat.sh"; }
+# The readers of a test's output (lib/failat.sh): the frame patterns, their jq, tapjq() (the jq of TAP's result lines), atsource()
+# and wtline(), for eval.
+frameread() { sed -n '/^FRAMERX=/p; /^PYFRAMERX=/p; /^FRAMEJQ=/p; /^tapjq() {/p; /^atsource() {/,/^}/p; /^wtline() {/,/^}/p' "$SRC/lib/failat.sh"; }
 # logfails() with the files and cases the run passed.
 allfails() { # <exit> [<testTimeout>]
   local w=$T/$CASE/wt; mkdir -p "$w.testlog"
@@ -48,6 +48,70 @@ echo "-- ok f.test.mjs" >> "$CONVEYOR_TEST_LOG/a.log"
 EOF
   f=$(allfails 0 | jq -c .passcases) || fail "the passed cases could not be read"
   [ "$f" = '[{"file":"f.test.mjs","cases":["a b, c","d e"]}]' ] || fail "node's ✔ and TAP's ok lines are not the file's passed cases: $f"
+}
+# R140 of #1393 (the loop runs a node file with TAP). Bug it catches: node's TAP writes `\#` for a `#` and `\\` for a
+# `\` in a case's name, so a passed or failed case `id #413` was read as `id \#413` and matched no case of that name
+# (its main-red check said none); and it writes the actual and expected values of a failed assertion as a YAML block, so a
+# line in one that began as a result (`ok 4 ghost`, `not ok 5 phantom`, `✔ ghost (1ms)`) was read as a pass or a failure of a case that
+# never ran. The output is what node's TAP reporter prints (a top-level failing case and a nested one, each with such
+# values), with the file's own printed lines marked `# ` as node marks them: it is run through testfails() directly.
+t_testfailstap() {
+  mkdir -p "$T/$CASE"; cat > "$T/$CASE/cmd" <<'EOF'
+echo "== f.test.mjs" | tee -a "$CONVEYOR_TEST_LOG/a.log"
+cat <<'TAP'
+TAP version 13
+# ok 6 - printed
+# Subtest: id \#413
+ok 1 - id \#413
+  ---
+  duration_ms: 1.1
+  type: 'test'
+  ...
+# Subtest: a\\b
+ok 2 - a\\b
+  ---
+  type: 'test'
+  ...
+# Subtest: merges
+not ok 3 - merges
+  ---
+  duration_ms: 1.2
+  type: 'test'
+  expected: |-
+    ok 4 ghost
+    not ok 5 phantom
+    ✔ ghost (1ms)
+    ✖ phantom (1ms)
+  actual: 'x'
+  ...
+# Subtest: outer
+    # Subtest: inner
+    not ok 1 - inner
+      ---
+      expected: |-
+        ok 7 nested ghost
+        not ok 8 nested phantom
+        ✔ nested ghost (1ms)
+      ...
+    1..1
+not ok 4 - outer
+  ---
+  type: 'suite'
+  ...
+# Subtest: lost \#2
+not ok 5 - lost \#2
+  ---
+  type: 'test'
+  ...
+1..5
+TAP
+echo "-- FAIL f.test.mjs" >> "$CONVEYOR_TEST_LOG/a.log"
+EOF
+  f=$(allfails 1) || fail "the run could not be read"
+  [ "$(jq -c '[.files[].cases[].name]' <<<"$f")" = '["merges","inner","outer","lost #2"]' ] \
+    || fail "a line in a result's YAML block was read as a failing case, a failing case was missed, or its TAP name was not read back as the case has it: $f"
+  [ "$(jq -c .okcases <<<"$f")" = '[{"file":"f.test.mjs","cases":["a\\b","id #413"]}]' ] \
+    || fail "a case's TAP name was not read back as the case has it, or a line in a result's YAML block was read as a pass: $f"
 }
 # Done when 1 (#1310). Bug it catches: which file a case is of was read from the output alone, so two workers whose
 # output interleaves gave a case of one file to the other (a wrong red of a file that did not fail it) and a passed

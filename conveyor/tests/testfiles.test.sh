@@ -582,3 +582,19 @@ t_tfproxy() {
 '{"line":9,"kind":"runs","text":"&& node --test t/a.test.js)","why":null},'\
 '{"line":10,"kind":"runs","text":"bash .conveyor/test-changed.sh --file tests/plain.test.sh","why":null}]}]' ] || fail "the proxy checks: $got"
 }
+
+# R131 of #1393. Bug it catches: a test file committed as a link to a file outside the checkout was read by the proxy check
+# (the file test follows links), so that file's poll lines and notes went into the Tests snapshot. The snapshot has no
+# line and no text of linked.test.sh, while a test file of the checkout with the same poll still has its line.
+t_tfproxylink() {
+  setup '[]'; tune '.test.command = "bash run-all.sh" | .test.pollHelpers = ["wait_until"]'
+  mkdir -p "$R/tests" "$T/$CASE/outside"
+  printf '%s\n' "wait_until ready # private note" > "$T/$CASE/outside/secret.sh"; printf '%s\n' "wait_until ready # own note" > "$R/tests/own.test.sh"
+  ln -s "$T/$CASE/outside/secret.sh" "$R/tests/linked.test.sh"
+  git -C "$R" add -A && git -C "$R" commit -qm 'tests' || fail "main's files"
+  got=$(tf_in testspart 2026-11-09 | jq -c '[.files[] | select(.file | startswith("tests/")) | {file, proxy}]') || fail "testspart failed: $got"
+  [[ $got == *'"file":"tests/linked.test.sh"'* ]] || fail "the fixture's linked test file is not in the snapshot: $got"
+  [[ $got != *'private note'* ]] && [ "$(jq -r '.[] | select(.file == "tests/linked.test.sh") | .proxy | tostring' <<<"$got")" = null ] \
+    || fail "the snapshot holds a line or note of the file the link names outside main: $got"
+  [[ $got == *'"why":"own note"'* ]] || fail "the checkout's own test file lost its proxy line: $got"
+}

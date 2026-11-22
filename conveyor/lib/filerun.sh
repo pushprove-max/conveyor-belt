@@ -6,7 +6,8 @@
 # the file's own up to the checkout, with the manifest the runner reads. In a workspace or monorepo, so, each file runs
 # from its own package. [args] (the pack's test.report.args) go to the runner right after its own words (to a
 # JavaScript runner, with npm's `--` before them left out).
-#   .js .mjs .cjs .jsx .ts .mts .cts .tsx  under a package.json: `npx --no vitest run <absolute path>` when that
+#   .js .mjs .cjs .jsx .ts .mts .cts .tsx  under a package.json: `npx --no vitest run <absolute path> --exclude
+#                     **/<file name>?*` (not a file whose name goes on past it) when that
 #                     package or the checkout's lists vitest, else `npx --no jest --runTestsByPath <path>` for jest,
 #                     else `bun test ./<path>` with a bun.lock or bun.lockb there, else `node --test <path>`
 #   .py               under pyproject.toml, setup.py, setup.cfg, pytest.ini or tox.ini: `pytest --tb=native <path>`
@@ -91,7 +92,11 @@ case $f in
     # (reportguess(), lib/setup.sh). The runner here runs with no npm, so that `--` is left out: jest would take the
     # words after it as no options, and vitest would get no file to run.
     [ "${extra[0]:-}" != -- ] || extra=("${extra[@]:1}")
-    if dep "$d" vitest || dep . vitest; then b=(npx --no vitest run); t=("$PWD/$f")
+    if dep "$d" vitest || dep . vitest; then
+      # vitest reads the path as a filter on the paths of its files: b.test.ts would also run b.test.tsx. So the files
+      # whose name goes on past this one's are left out (--exclude, the name's glob characters escaped).
+      x=$(printf '%s' "${f##*/}" | sed 's/[][\\*?(){}!+@|]/\\&/g')
+      b=(npx --no vitest run); t=("$PWD/$f" --exclude "**/$x?*")
     elif dep "$d" jest || dep . jest; then b=(npx --no jest); t=(--runTestsByPath "$r")
     elif [ -e "$d/bun.lock" ] || [ -e "$d/bun.lockb" ] || [ -e bun.lock ] || [ -e bun.lockb ]; then b=(bun test); t=("./$r")
     else b=(node --test); t=("$r"); fi

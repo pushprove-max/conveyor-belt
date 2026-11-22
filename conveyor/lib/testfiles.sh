@@ -376,10 +376,10 @@ PROXY_AWK='function norm(s,  t) {
     }
     for (p = 1; p <= pn; p++) { if ((p, "runs") in mk) mark("runs", p); if ((p, "polls") in mk) mark("polls", p) }
     prev = 0; above = ""; pn = 0; buf = "" }'
-# testproxy prints {file: [{line, kind, text, why}]} for each test file of main's checkout, a file with none [].
+# testproxy prints {file: [{line, kind, text, why}]} for each test file of main's checkout, a file with none []; a link, or a file below one, is read as no file (it could name one outside the checkout).
 testproxy() { # <each test file of main's checkout>...
-  local f fs=() run pol c a
-  for f; do [ ! -f "$MAIN/$f" ] || fs+=("./$f"); done
+  local f fs=() run pol c a p x
+  for f; do p=$MAIN; while IFS= read -r -d / x || [ -n "$x" ]; do p+=/$x; [ ! -L "$p" ] || continue 2; done < <(printf '%s' "$f"); [ ! -f "$p" ] || fs+=("./$f"); done
   [ ${#fs[@]} -gt 0 ] || { echo '{}'; return; }
   packget test.command c test.full a test.pollHelpers pol || return 1
   run=$(printf '%s\n' "$c" "$a" conveyor/conveyor.test.sh .conveyor/test-full.sh)

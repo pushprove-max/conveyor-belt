@@ -1486,8 +1486,12 @@ ended() { # <test file> <ok|FAIL> <its output>
     if [ "$i" -le "$f" ]; then : > "$d/failed/${1//\//:}#$i"; else : > "$d/ok/${1//\//:}#$i"; fi
   done
 }
+# A node test file runs with node's TAP reporter (NODETEST): it puts `# ` before each line the file prints, so a line a
+# test file prints itself (`✔ X (1ms)`, `ok 1 - X`) is never read as the pass of a case X that the file did not run
+# (testfails() reads `ok <n> - <name>` and `not ok <n> - <name>`); the default reporter prints it as it prints a pass.
+NODETEST=(node --max-old-space-size=4096 --test --test-reporter=tap)
 # Of a node test file, the cases the list says to leave out or to run alone, as node's options (nargs): each case named
-# whole (its own name, as testfails() reads it from node's `✖ <name>` line, matched exactly). Not run: each case of an
+# whole (its own name, as testfails() reads it from node's `not ok <n> - <name>` line, matched exactly). Not run: each case of an
 # `ok` line (one the loop keeps off as flaky, conveyor.sh flakyoff(), or that passed in a run killed part-way) or of an
 # `off` line (one kept off as flaky). Run
 # alone: each case of a `fail` line, when only such lines select the file (the run of a card's failing cases on main).
@@ -1685,7 +1689,7 @@ for t in "${order[@]}"; do
     # A meta-runner runs in its card mode (the pack's test.files cardMode, mk above): its own checks, with a stub in
     # place of the files it starts.
     case $t in
-      *.mjs) nodecases "$t"; fshare "$t" env "${mk[@]}" node --max-old-space-size=4096 --test "${nargs[@]}" "$t" ;;
+      *.mjs) nodecases "$t"; fshare "$t" env "${mk[@]}" "${NODETEST[@]}" "${nargs[@]}" "$t" ;;
       *.py) fshare "$t" env "${mk[@]}" python3 "$t" ;;
       *.ts|*.tsx) plugintest "$t" ;;
       # An engine case file's run with no case (nocase, above): a selection of a blank, which the file keeps (it gives

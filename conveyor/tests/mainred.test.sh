@@ -553,3 +553,26 @@ t_mainredland() {
   [ ! -e "$STUB/filed" ] && [ ! -e "$STUB/closed" ] && [ ! -e "$STUB/comments" ] || fail "main-red filed, closed or commented on an issue: $(cat "$STUB/filed" "$STUB/closed" "$STUB/comments" 2>&1)"
   loop check || fail "the record check refuses the fix card's picked line"
 }
+
+# R140 of #1393. Bug it catches: a line a test file printed itself (`✔ X (1ms)`, in the shape of node's passed-case line)
+# was read as a pass of case X, which the file never ran, so the check of a main-red fix took the case as passing. Real
+# node runs the file with the options the pack's runner gives it (NODETEST, .conveyor/test-changed.sh), which writes no
+# case record: redrun() (mainred.sh), reading the run as the loop does, gives X none, Y, which ran, pass, and Z, whose
+# failed assertion holds `✔ X (1ms)` in its expected value (TAP's YAML block of it), fail. The stand-in tests() is the
+# run's command: its output and log are what testfails() reads.
+t_redrunprinted() {
+  local w=$T/$CASE/wt got
+  mkdir -p "$T/$CASE"
+  printf '%s\n' "import test from 'node:test';" "console.log('✔ X (1ms)'); console.log('ok 7 - X');" "import assert from 'node:assert';" "test('Y', () => {});" "test('Z', () => { assert.equal('other', '✔ X (1ms)\\nok 7 - X\\n'); });" > "$T/$CASE/f.test.mjs"
+  got=$( cd "$T/$CASE" && eval "$(sed -n '/^redrun() {/,/^}/p' "$SRC/lib/mainred.sh"; sed -n '/^testfails() {/,/^}/p; /^RECJQ=/p' "$SRC/lib/testrun.sh"; sed -n '/^testlogs() {/,/^}/p' "$SRC/lib/session.sh"; sed -n '/^tapjq() {/p' "$SRC/lib/failat.sh")
+      $(grep '^NODETEST=' "$SRC/../.conveyor/test-changed.sh")"
+    packget() { return 1; }; export TEST_TIMEOUT=600
+    tests() { # <worktree>
+      mkdir -p "$1.testlog"
+      { echo '== f.test.mjs'; "${NODETEST[@]}" f.test.mjs; } > "$1.test" 2>&1
+      printf '%s\n' '== f.test.mjs' '-- FAIL f.test.mjs' > "$1.testlog/a.log"
+    }
+    redrun "$w" '[{"name": "X", "file": "f.test.mjs", "files": [], "case": "X"}, {"name": "Y", "file": "f.test.mjs", "files": [], "case": "Y"}, {"name": "Z", "file": "f.test.mjs", "files": [], "case": "Z"}]' | jq -c 'map(.verdict)' ) \
+    || fail "redrun() did not run: $got"
+  [ "$got" = '["none","pass","fail"]' ] || fail "a case the file printed as passed (or one a failed assertion's expected value holds a line of) was not none, or the case that ran was not its result: $got"
+}
