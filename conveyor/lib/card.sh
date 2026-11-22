@@ -202,12 +202,11 @@ failline() { # <worktree> <exit> <seconds> <failures json, or null> <verdicts js
        reason:("exit " + $rc + (if $f.timeout then ": timed out after \($f.timeout.sec)s" + (if $f.timeout.file then " in \($f.timeout.file)" else "" end) else "" end))}
      + (if $f then {failures:($f | del(.passed, .okcases, .passcases))} else {} end) + (if $t == "" then {} else {tail:$t} end) + $r + $v'
 }
-# What card() does after a review, decided from its verdict (res) and the loop's state, with nothing done: after is
-# hard (a repeated P0 or P1 did not hold after its fix: block), p0 (a last NO-GO holds a P0: block), p1 (a last NO-GO
-# holds a P1 after its one fix round: block), go (land), last (a last review: land with follow-ups), nofinding (a NO-GO
-# with no finding to fix: block) or fix (a fix round). It reads card()'s wt, issue, res, fin, finrev, finend, pass, rounds
-# (the rounds a retried card carries), rebased, tfix, lfix, mode, privfix and p1fix, and sets card()'s after, last,
-# earlier, earlyend, fin, rep, hard, priv, p1, stop, last0, ended, isfu and why (bash's dynamic scope).
+# What card() does after a review, decided from its verdict (res) and the loop's state, with nothing done: after is hard (a repeated
+# P0 or P1 did not hold after its fix: block), p0 (a last NO-GO holds a P0: block), priv and p1 (a last NO-GO holds a privacy hit of
+# its own, or a P1, after its one fix round: block), go (land), last (a last review: land with follow-ups), nofinding (a NO-GO with no
+# finding to fix: block) or fix (a fix round). It reads card()'s wt, issue, res, fin, finrev, finend, pass, rounds (the rounds a retried
+# card carries), rebased, tfix, lfix, mode, privfix and p1fix, and sets card()'s after, last, earlier, earlyend, fin, rep, hard, priv, p1, stop, last0, ended, isfu and why (bash's dynamic scope).
 afterreview() {
   local d
   # A GO on the review of a port lands with the earlier loop's outcome: after its last NO-GO, that review's
@@ -219,8 +218,8 @@ afterreview() {
   rep=''; [ "$res" != NO-GO ] || rep=$(repeats "$wt")
   hard=$(jq -rs 'map(select(.level == "P0" or .level == "P1")) | first // empty | "\(.line[:300]) did not hold after \(.rounds) round\(if .rounds == 1 then "" else "s" end)"' <<<"$rep")
   # A last NO-GO with a finding that is a privacy hit in the card's own change (privown(), lib/followups.sh) gets
-  # one more fix round, once a card: a follow-up would land the hit on main. Bug: such a finding was filed as a
-  # follow-up that the privacy check refused, and the card was blocked.
+  # one more fix round, once a card (privfix); a hit found again after that round blocks the card (after priv): a
+  # follow-up would land the hit on main. Bugs: it was filed as a follow-up the privacy check refused; after its round, a new hit landed.
   # stop: why this review ends the loop (loopstop()), empty when a fix round follows (or the card blocks).
   # last0: the first P0 finding of a last NO-GO (one that ends the loop): the card blocks with it and files none of
   # its findings, its work and reviews kept for a retry. Bug: a P0 first found on the last review was filed as a
@@ -230,7 +229,7 @@ afterreview() {
   priv=''; stop=''; last0=''; p1=''
   if [ -z "$hard" ]; then
     stop=$(loopstop "$res" "$((pass + rounds))" "$rebased" "$tfix" "$lfix" "$mode" "$rep" "$wt.review")
-    [ -z "$stop" ] || [ "$res" = GO ] || [ -n "$privfix" ] || ! priv=$(privown "$wt") || [ -z "$priv" ] || stop=''
+    [ -z "$stop" ] || [ "$res" = GO ] || ! priv=$(privown "$wt") || [ -z "$priv" ] || [ -n "$privfix" ] || stop=''
     [ -z "$stop" ] || [ "$res" = GO ] || last0=$(findings "$wt.review" | jq -rs 'map(select(.level == "P0")) | first // empty | .line[:300]')
     [ -z "$stop" ] || [ "$res" = GO ] || [ -n "$last0" ] || p1=$(findings "$wt.review" | jq -rs 'map(select(.level == "P1")) | first // empty | .line[:300]'); [ -z "$p1" ] || [ -n "$p1fix" ] || stop=''
   fi
@@ -238,6 +237,7 @@ afterreview() {
   ended=$(jq -cn --arg s "$stop" --argjson p "$pass" --argjson r "$rounds" 'if $s == "" then {} else {stop: $s, pass: $p, rounds: $r} end')
   if [ -n "$hard" ]; then after=hard
   elif [ -n "$last0" ]; then after=p0
+  elif [ -n "$priv" ] && [ -n "$privfix" ]; then after=priv
   elif [ -n "$p1" ] && [ -n "$p1fix" ]; then after=p1
   elif [ "$res" = GO ] && [ -z "$earlier" ]; then after=go
   elif [ -n "$stop" ]; then
@@ -605,13 +605,14 @@ cardfix() {
   [ -z "$rline" ] || record "$c" "$n" review "$res" "$(jq -c --argjson e "$ended" '. + $e' <<<"$rline")"; rline=''
   [ "$after" != hard ] || { block "$c" "$n" "$wt" "the fix for $hard"; return; }
   [ "$after" != p0 ] || { block "$c" "$n" "$wt" "review $pass is the last review and still holds a P0 finding, so it files no follow-up: $last0"; return; }
+  [ "$after" != priv ] || { block "$c" "$n" "$wt" "review $pass is the last review and still holds a privacy hit in the card's own change after its one fix round, so it files no follow-up: ${priv:0:300}"; return; }
   [ "$after" != p1 ] || { block "$c" "$n" "$wt" "review $pass is the last review and still holds a P1 finding after its one fix round, so it files no follow-up: $p1"; return; }
   [ "$after" != nofinding ] || { block "$c" "$n" "$wt" "review $pass is NO-GO with no finding to fix: ${why:0:200}"; return; }
   if [ "$after" != fix ]; then mode=''
   else
     # A card stacked on this one (stackto()) that passed its tests goes on during this round, fitted onto main alone
-    # (giveway(), claim()).
-    [ -z "$priv" ] || { privfix=1; echo "conveyor: card $c: a finding of its last review is a privacy hit in its own change, so it goes to one more fix round: ${priv:0:200}"; }
+    # (giveway(), claim()). A kept patch landed with no review (land) is reviewed after this fix, as after lintgate's fix.
+    [ "$mode" != land ] || mode=''; [ -z "$priv" ] || { privfix=1; echo "conveyor: card $c: a finding of its last review is a privacy hit in its own change, so it goes to one more fix round: ${priv:0:200}"; }
     [ -z "$p1" ] || { p1fix=1; echo "conveyor: card $c: its last review holds a P1 finding, so it goes to one fix round and a review of that fix: ${p1:0:200}"; }
     locked giveway "$c" "$wt" fix; began "$c" "$n" fix
     old=$(git -C "$wt" write-tree); more=''; [ -z "$rep" ] || more=$'\n\n'"$(again "$rep")"
@@ -643,6 +644,9 @@ cardfix() {
 # could not take out again, or retried lines it could not read.
 resumeplan() {
   local prev d t rev='' kw='' crev='[]' # rev: the kept review prior() found; kw: keptway()'s answer for a kept patch; crev: the review lines of the kept-patch chain this card carries (pro and rounds are read from them)
+  # A staged change in the new worktree of main (a checkout hook's), before a kept patch is applied, is no work of this card: it stops. Bug: checked after the apply.
+  [ -n "$br" ] || t=$(git -C "$wt" diff --cached --name-only 2>&1) || { err="worktree: the engine could not read the staged change of the new worktree: ${t:0:400}"; return 1; }
+  [ -n "$br" ] || [ -z "$t" ] || { err="worktree: the new worktree already holds a staged change that is no kept work of this issue: $(paste -sd ' ' - <<<"$t" | cut -c 1-400)"; return 1; }
   if [ -z "$br" ] && prev=$(prior "$n" "$([ "$n" != 0 ] || testcardwas "$c")") && [ -n "$prev" ]; then
     from=$(jq -r .card <<<"$prev"); fromk=$(jq -r .kept <<<"$prev"); was=$(jq -r .reason <<<"$prev"); rev=$(jq -r .review <<<"$prev")
     [ -z "$rev" ] || cp "$rev" "$wt.review"
@@ -672,12 +676,6 @@ resumeplan() {
       # lands from it has no session to write them again, and its deleted hollow cases are checked again on them).
       [ "$mode" = stale ] || for t in trailers covered; do cp "$fromk/$from.$t" "$wt.$t" 2>/dev/null || cp "$CARDS/$from.$t" "$wt.$t" 2>/dev/null; done
     fi
-  fi
-  # A card that applied no kept patch (session, land) and merged no branch starts on a clean worktree of main. A staged
-  # change found there is no work of this card: its build would take it for its own, so the card stops here.
-  if [ -z "$br" ] && [ "$mode" != session ] && [ "$mode" != land ]; then
-    t=$(git -C "$wt" diff --cached --name-only 2>&1) || { err="worktree: the engine could not read the staged change of the new worktree: ${t:0:400}"; return 1; }
-    [ -z "$t" ] || { err="worktree: the new worktree already holds a staged change that is no kept work of this issue: $(paste -sd ' ' - <<<"$t" | cut -c 1-400)"; return 1; }
   fi
   # A kept patch lands unreviewed only on the issue its review read (keptway(): the body its card kept when it
   # stopped for the yes). A body changed since: the patch is built on and reviewed against the issue as it is now. A
@@ -711,14 +709,14 @@ resumeplan() {
   # to one built from nothing. `retry` moved those review lines out of its card records, and a new review replaces the
   # kept one, so its landing reads them (ro, card()). Bug: every retried card of the issue was read, so a patch
   # `retry --fresh` discarded brought its rollout action back into the commit.
-  # One read gives the chain's review lines (crev): pro is their rollout actions, and rounds (below) counts them.
+  # One read gives the chain's review lines and port lines (crev): pro is the reviews' rollout actions, and rounds (below) counts the reviews.
   if [ -n "$from" ] && [ -n "$mode" ] && [ "$mode" != stale ]; then
     # shellcheck disable=SC2034 # pro: card()'s, read by cardready() (lib/cardland.sh)
     crev=$(stdb ask issue retried "$n" | jq -cs --argjson n "$n" --arg f "$from" 'map(select(.issue == $n)) as $l
       | def up: . as $c | ($l | map(select(.card == $c and .step == "worktree")) | first | .reason // ""
           | select(test("built from nothing") | not) | capture("kept patch of card (?<c>c[A-Za-z0-9-]+)").c) // null;
       [limit(100; $f | recurse(up; . != null))] as $chain
-      | [$l[] | select(.step == "review" and (.card | IN($chain[])))]') \
+      | [$l[] | select((.step == "review" or (.step == "rebase" and .port == true)) and (.card | IN($chain[])))]') \
       && pro=$(jq -c '[.[] | .rollout // [] | .[]]' <<<"$crev") \
       || { err="worktree: the engine could not read the rollout actions of the retried cards of the issue"; return 1; }
   fi
@@ -731,8 +729,10 @@ resumeplan() {
   # is read from). A card's id is its own, so another project's cards are not in the chain; the lines' repo is not
   # read, as a project renamed in host.json keeps its chain. Bug (issue 1071): every review line of the issue in the
   # retried file was counted, another chain's and another project's too, so a card's first NO-GO could be its last review.
+  # After an automatic port (landconflict() marks its rebase line port), only the reviews after the port's own review count: those before
+  # it ended a loop, and the port's review checked the port alone. Bug (issue 1385): 3 reviews, a port and 2 reviews carried 5 rounds (then 2): a last review.
   if [ "$mode" = session ] || [ "$mode" = review ] || { [ "$mode" = port ] && [ -z "$fin" ]; }; then
-    rounds=$(jq 'length' <<<"$crev" 2>/dev/null) || rounds=0
+    rounds=$(jq '(to_entries | map(select(.value.step == "rebase")) | last | .key) as $p | if $p == null then length else .[$p + 2:] | length end' <<<"$crev" 2>/dev/null) || rounds=0
     [[ $rounds =~ ^[0-9]+$ ]] || rounds=0
     # Rounds still beside the old worktree are the ones its block could not move (a folder of that name in the kept
     # folder stopped it, so that one is not the history): those are copied.

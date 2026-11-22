@@ -267,7 +267,8 @@ cardgone() { # <card> <its last step>
   elif [ "$rc" -gt 128 ] && a=$(kill -l $((rc - 128)) 2>/dev/null); then echo "$why; signal $a killed it (exit status $rc)"
   else echo "$why; it exited with status $rc"; fi
 }
-# A card stuck in flight (#466): open, its worktree line naming its process (pid and start), and either that process
+# A card stuck in flight (#466): open, its worktree line (or, before it, its split check's start line, lib/slices.sh)
+# naming its process (pid and start), and either that process
 # gone, or alive with no process of its step for a stall's time (below). Its step is the one the Board shows it in: the step
 # its last start line begins, else the one after its last line. A step's process (a session, a review, a test run, a
 # wait at the claim or for the machine or the model API, a bug card's run on main's code) keeps a live record while it
@@ -283,7 +284,7 @@ cardgone() { # <card> <its last step>
 stuckcard() { # <card> [turn | any]
   local c=$1 p t s at m f
   IFS=$'\t' read -r p t s at < <(if [ "${2:-}" = turn ]; then turncards; else stdb ask card "$c"; fi 2>/dev/null | jq -rs --arg c "$c" 'map(select(.card == $c and .step != "push")) as $l
-    | ($l | map(select(.step == "worktree" and (.pid | type) == "number" and (.started | type) == "string")) | last) as $w | ($l | last) as $z
+    | ($l | map(select((.step == "worktree" or (.step == "start" and .of == "split")) and (.pid | type) == "number" and (.started | type) == "string")) | last) as $w | ($l | last) as $z
     | select($w != null and all($l[]; .step | IN("landed", "closed", "blocked", "pushed") | not))
     | [$w.pid, $w.started, (if $z.step == "start" then $z.of elif $z.step | IN("build", "fix", "rebase") then "review" elif $z.step == "brief" then "build"
         elif $z.step == "review" then (if $z.result == "GO" then "test" else "fix" end) elif $z.step == "test" then (if $z.result == "fail" then "fix" else "land" end)
@@ -330,16 +331,32 @@ unstick() { # <issue>
 # `shut <issue | card id>` (#1030): each open card named, every one of the issue's or the one card, is ended as
 # endcard() ends a card stuck in flight, whatever its step and whether its process runs, outside the records' lock,
 # and blocked with OWNSHUT, its work kept; shut() then closes it. A card in its land step is left as it is: its change
-# may be going onto main. Prints a line for each card it ended; a card left is said on stderr.
+# may be going onto main. So is one that has begun filing issues (its last start line is of file: its follow-ups, or the
+# slices of a split, lib/slices.sh), as halt() leaves it: ended there, it would leave some of them open on GitHub, or a
+# split's umbrella not held. A card that has filed them and begun its next step (a grown split's fix, growcheck()) is
+# ended as any other. Bug: shut ended a card while it filed the
+# slices of a split, before splitwithdraw() could close the slices it had filed. The card's processes are stopped
+# (freeze()) before its step is read, so a card that runs writes no line between that read and its end; one left is
+# started again (unless a signal had stopped it before). A database call of the card's (state.py) is let finish: it
+# starts no other, and stopped, it would hold the database's write transaction, so the reads here would wait for it
+# until they time out. Bug (issue 1385): shut read the step, the card then began filing, and shut ended it with a slice
+# filed. Prints a line for each card it ended; a card left is said on stderr, as is one whose records cannot be read.
 shutopen() { # <issue | card id>
-  local c n p s how
+  local c n p q s t how k
   [ -n "${NAMED:-}" ] || names || return 1
   if [[ $1 =~ ^[0-9]+$ ]]; then c=$(stdb ask issue cards "$1" 2>/dev/null | jq -r '.card' 2>/dev/null | sort -u)
   else c=$1; fi
   for c in $c; do
     read -r p s how < <(stuckcard "$c" any) || continue
-    [ "$s" != land ] || { echo "conveyor: card $c is in its land step; it is left to land" >&2; continue; }
-    n=$(stdb ask card "$c" 2>/dev/null | jq -rs 'first | .issue') || continue
+    k=''; [ "$how" = gone ] || k=$(freeze "$p")
+    for q in $k; do [[ $(ps -o args= -p "$q" 2>/dev/null) != *state.py* ]] || kill -CONT "$q" 2>/dev/null; done
+    # A card the loop blocked meanwhile has no step now: it is ended as before (endcard() reads it closed), shut's own.
+    ! read -r _ t _ < <(stuckcard "$c" any) || s=$t
+    n=''; read -r n q < <(stdb ask card "$c" 2>/dev/null | jq -rs --arg c "$c" 'map(select(.card == $c)) | "\(first | .issue) \(map(select(.step == "start")) | last | .of // "none")"' 2>/dev/null)
+    if [[ ! $n =~ ^[0-9]+$ ]]; then echo "conveyor: card $c: its records could not be read; it is left as it is" >&2; s=''
+    elif [ "$s" = land ]; then echo "conveyor: card $c is in its land step; it is left to land" >&2; s=''
+    elif [ "$q" = file ]; then echo "conveyor: card $c has begun filing its follow-ups or the slices of its issue; it is left to finish" >&2; s=''; fi
+    [ -n "$s" ] || { [ "$how" != running ] || [ -z "$k" ] || kill -CONT $k 2>/dev/null; continue; }
     [ "$how" != gone ] || p=''
     endcard "$c" "$n" "$p" "$s" "$OWNSHUT" && echo "conveyor: card $c was open in its $s step ($([ "$how" = gone ] && echo "its process gone" || echo "its process $how, now ended")); it is blocked, its work kept"
   done

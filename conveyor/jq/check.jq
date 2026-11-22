@@ -7,7 +7,7 @@ def fails: type == "object" and keys == ["files", "of", "timeout"] and (.of | . 
 def need: ["card", "issue", "reason", "result", "sha", "step", "time", "tokens"];
 def known: ["product", "title", "usage", "kept", "leftover", "followups", "sec", "visible", "branch", "created", "counts", "of", "model", "effort",
   "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "doneWhenItems", "doneWhenHolds", "excerpts", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost", "survived", "answers",
-  "wait", "run", "slotsFree", "selected", "ended", "list", "coverage", "slow", "timed", "times", "clocks", "carried", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "testFile", "noIssue", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "waitSec", "wide", "pr", "doneLines", "ran", "checks", "split", "grown", "rollout", "pick", "lint", "stop", "pass", "rounds", "flaky", "waitFor", "log", "brokeMain", "class", "resumed"];
+  "wait", "run", "slotsFree", "selected", "ended", "list", "coverage", "slow", "timed", "times", "clocks", "carried", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "testFile", "noIssue", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "waitSec", "wide", "pr", "doneLines", "ran", "checks", "split", "grown", "rollout", "pick", "lint", "stop", "pass", "rounds", "flaky", "waitFor", "log", "brokeMain", "class", "resumed", "port"];
 def steps: ["picked", "split", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof", "grown", "lint", "seats"];
 # Each required field's own test.
 def needok($k): if $k == "issue" then .issue | type == "number" elif $k == "time" then (try (.time | fromdate | type == "number") catch false)
@@ -26,7 +26,9 @@ def ok: . as $r | (keys - known) == need
             and (keys == ["after", "before", "file"] or (keys == ["after", "before", "file", "fix", "into"]
               and (.fix | IN("sped up", "split", "merged", "deleted")) and (.into | type == "array" and all(.[]; type == "string")))))))
         and (.speed == null or .step == "bugproof")
-        and (.step != "start" or (.of | IN("build", "review", "fix", "test", "file", "land", "rebase")))
+        and (.step != "start" or (.of | IN("build", "review", "fix", "test", "file", "land", "rebase", "split")))
+        # port: the rebase line of a card's automatic port (landconflict(), lib/cardland.sh).
+        and (.port == null or (.step == "rebase" and .port == true))
         # A land step's start line that opens a card's wait for a release run (releasewait(), lib/push.sh) or for
         # another card's landing turn (landwait(), lib/claim.sh).
         and (.waitFor == null or (.step == "start" and .of == "land" and (.waitFor | IN("release", "turn"))))

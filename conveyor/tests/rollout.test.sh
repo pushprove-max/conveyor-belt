@@ -101,3 +101,17 @@ t_rolloutfresh() {
     && ! git -C "$T/$CASE/origin" log -1 --format=%B main | grep -q '^Rollout: ' \
     || fail "the card landed with the rollout action of the patch retry --fresh discarded: $(st 'select(.issue == 12 and .step == "landed")'); $(git -C "$T/$CASE/origin" log -1 --format=%B main)"
 }
+
+# Bug (#1385): with the pack's privacy.mode public, a review's ROLLOUT line went into the landed commit message as
+# written, so an address it named was pushed: the push checks no commit message. Its Rollout line is masked as
+# cardsubject() masks a body; the landed line keeps the action as the review gave it.
+t_rolloutpriv() {
+  setup "[$(issue 7 2026-01-01)]"; tune '.privacy.mode = "public"'
+  local ip=10.0."0.1" # a private address, put together so this file holds none itself (the privacy check runs over it)
+  printf '%s\n' "ROLLOUT: Open port 22 to $ip | the deploy cannot reach the host | a.txt:2" 'USER-VISIBLE: no' 'VERDICT: GO' > "$STUB/review.1"
+  # loop: the commit message is put together from the card's review lines at its landing, which only a card reaches.
+  loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
+  local m; m=$(git -C "$R" log -1 --format=%B main)
+  grep -qxF 'Rollout: Open port 22 to <private address> | the deploy cannot reach the host | a.txt:2' <<<"$m" && ! grep -qF "$ip" <<<"$m" \
+    || fail "the landed commit message of a review whose ROLLOUT line names $ip, with privacy.mode public, does not mask it: $m"
+}

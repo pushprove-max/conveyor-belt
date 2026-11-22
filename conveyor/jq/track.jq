@@ -25,6 +25,8 @@
           # The landing that met the conflict ran until the rebuild began: those seconds stay with the landing. The
           # seconds of the rebuild session, from its start line to its rebase line, are those of the rebuild step.
           elif $l.step == "start" and $l.of == "rebase" then put(13; null) | .phase = "rebuild" | .cur = 12
+          # The split check's start line (splitcheck(), lib/slices.sh) comes before the worktree: no step of the track.
+          elif $l.step == "start" and $l.of == "split" then .
           elif $l.step == "start" then .cur = place($l.of)
           elif $l.step == "rebase" then .phase = "rebuild" | put(12; "done")
           elif $l.step == "filed" then .s[16] = {state: "done", sec: ($l.took // null), n: ($l.n // 0)}
@@ -45,12 +47,12 @@
           else . end)) as $t
       | ($log | last) as $last
       # A bug card's proof run (snapshot.sh: .proof) is drawn on Build, the step whose change it checks, never as the review after it.
-      | (if $c.result != "" then null elif $last.step == "start" then $last.of elif $c.proof then "proof"
+      | (if $c.result != "" then null elif $last.step == "start" and $last.of != "split" then $last.of elif $c.proof then "proof"
          else {build: "build", review: "review", fix: "fix", tests: "test", landing: "land"}[$c.x.at] // null end) as $kind
       | ($c.x.after // null) as $after
       # wait: landed, not pushed, with push off: no step runs until the owner presses Push landed.
       | (if $after == "wait" then null elif $after then (if $after | IN("issue", "issuefail") then 15 else 14 end) elif $c.result != "" then null elif $kind then ($t | place($kind))
-         elif $last.step == "picked" then 2 elif $last.step == "worktree" then 3 else 4 end) as $at
+         elif $last.step == "picked" or ($last.step == "start" and $last.of == "split") then 2 elif $last.step == "worktree" then 3 else 4 end) as $at
       | ($t.nrev + 1) as $r
       # The fix in progress is the next one of the card, counted like the reviews: over every fix, a fix after failed tests too.
       | ([$log[] | select(.step == "fix")] | length + 1) as $f
@@ -102,6 +104,7 @@
             | .s[3].rerun = (if $l.result == "pass" and $l.reused == true then .s[3].rerun == true else $l.result == "pass" and $l.rerun != null end)
             | if ($l.wait | type) == "number" and ($l.run | type) == "number" then .s[3].wait = (.s[3].wait // 0) + $l.wait | .s[3].run = (.s[3].run // 0) + $l.run else . end
           # The landing that met a conflict ran until the rebuild began: those seconds are the landing's.
+          elif $l.step == "start" and $l.of == "split" then .
           elif $l.step == "start" then (if $l.of == "rebase" then add(4) else . end) | .cur = (if .rc or .lg == "review" then .last else {build: 0, review: 1, fix: 2, test: 3}[$l.of] // 4 end)
           elif $l.step == "rebase" then add(4) | .last = 4
           elif $l.step == "filed" then add(4) | .filed = ($l.n // 0)

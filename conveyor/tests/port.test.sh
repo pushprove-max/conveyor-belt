@@ -262,6 +262,9 @@ t_autoport() {
   [ "$(cat "$R/b.txt")" = b ] && [ "$(git -C "$R" log -1 --format=%P | wc -w)" = 1 ] && [ "$(git -C "$R" log -2 --format=%s | tail -n 1)" = "main adds b.txt" ] \
     || fail "#8 did not land alone on the main that moved: $(git -C "$R" log --oneline | head -3)"
   st 'select(.issue == 8 and .step == "rebase") | .reason' | grep -q '^rebase onto main conflicts: ' || fail "the port's step does not name the conflict"
+  # Bug (#1385): nothing marked the port, so a retry counted the reviews before it as its rounds (t_resumeport3).
+  [ "$(st 'select(.issue == 8 and .step == "rebase") | .port')" = true ] && recok "$ST/cards.jsonl" "an automatic port" \
+    || fail "the port's rebase line does not mark it as the port: $(st 'select(.issue == 8 and .step == "rebase")')"
   # The .port file and the instructions of the port's review are made inside card() (no function makes them), so only
   # this run shows that review is told it reviews a port alone and handed the kept patch against the ported change.
   # Bug: the port's review was given the instructions of any other review (no PORTREVIEW, no .port file named).
@@ -385,6 +388,38 @@ t_resume() {
   [ "$(jq -c '[.mode, .note, .staged]' <<<"$RESUMED")" = '["land","landing from the kept patch of card c1-7: no build and no review",["a.txt","web/pay.ts"]]' ] \
     || fail "an approved kept patch was not taken up to land with no build and no review: $RESUMED"
   [ "$(cat "$T/$CASE/after")" = "last land" ] || fail "the kept NO-GO of a patch landed by retry is not a last review that files its finding: $(cat "$T/$CASE/after")"
+}
+# Bug (#1385): an approved kept patch whose kept review holds a P1 got its one fix round, but the card stayed in mode
+# land, so the pass after the fix read the kept review again and blocked on its P1, with no review of the fix. After
+# the fix a review session runs (the stub's review 1, a GO), and the card lands on it.
+t_resumep1() {
+  resumesetup 7
+  portkept 7 c1-7 "visible to customers or staff: needs Dana's yes: guests see a new Pay button" 'echo two >> a.txt; mkdir -p web; echo pay >> web/pay.ts' \
+    "$(printf '%s\n' '[P1] a.txt:31 wrong word' "$YES" 'VERDICT: NO-GO')"
+  issue 7 2026-01-01 | jq -c '{body}' > "$K/c1-7.body"
+  issue 7 2026-01-01 | jq -c '[.body += "\nVisible change approved: r-11"]' > "$STUB/issues.json"
+  loop retry 7 | grep -q 'lands from the kept patch' || fail "retry does not say the approved next card lands from the kept patch"
+  echo "$GO" > "$STUB/review.1"
+  # loop: only a card's loop shows what the pass after the fix does: a review session, or the kept review read again.
+  loop run >/dev/null
+  [ "$(st 'select(.issue == 7 and (.step | IN("fix", "review", "landed", "blocked"))) | "\(.step) \(.result)"' | paste -sd , -)" = 'fix ok,review GO,landed ok' ] \
+    && [ "$(wc -l < "$STUB/reviews" | tr -d ' ')" = 1 ] \
+    || fail "the kept P1 ('[P1] a.txt:31 wrong word') was not fixed, reviewed in a session and landed on its GO: $(steps 7)"
+}
+# Bug (#1385): a retried card counted the reviews of its chain from before an automatic port (landconflict(),
+# lib/cardland.sh, which starts pass and rounds again) as its rounds. Card c1-7: 3 reviews, its port (its rebase line
+# marks it), 2 reviews (the port's own, then one of its fix), then a failed step. The retried card carries the 1
+# review after the port's own alone, so its first NO-GO (a P2, review 2 of 3) gets a fix round; with the 5 counted,
+# or the 2 after the port, it was its last review and landed the finding as a follow-up.
+t_resumeport3() {
+  local r l=''
+  resumesetup 7
+  r=$(kline c1-7 7 review NO-GO); l=$(printf '%s\n' "$r" "$r" "$r" "$(kline c1-7 7 rebase ok '{"port": true}')" "$r" "$r")
+  portkept 7 c1-7 'test: exit 1' 'echo two >> a.txt' "$(printf '%s\n' '[P2] a.txt:1 wrong word' 'USER-VISIBLE: no' 'VERDICT: NO-GO')" "$l"
+  loop retry 7 >/dev/null || fail "retry of #7 exited non-zero"
+  resumed 7 'res=NO-GO rep="" finrev="" earlier="" pass=1 rebased="" tfix="" lfix="" privfix="" p1fix=""; afterreview; echo "$after $stop" > "$T/$CASE/after"'
+  [ "$(jq -c '[.mode, .rounds]' <<<"$RESUMED")" = '["session",1]' ] || fail "the reviews before the port of c1-7, or the port's own review, were counted as the retried card's rounds: $RESUMED"
+  [ "$(cat "$T/$CASE/after")" = "fix " ] || fail "the retried card's first NO-GO (review 1, 1 round carried) did not get a fix round: $(cat "$T/$CASE/after")"
 }
 
 # A failed step (here the review) with a patch that still applies: the next card starts from the patch, one session

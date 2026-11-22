@@ -639,14 +639,18 @@ privwords() {
   rm -f "$t"; printf '%s\n' "$w" | grep -v '^$'; return 0
 }
 # <text>: the text as gh_write posts it, with each word the privacy check flags (privwords()) written as a neutral
-# mark of what it is (<home path>, <email>, <private term>). Fails when the check could not be made.
+# mark of what it is (<home path>, <email>, <private term>), and a whole private key as one <token>. Fails when the
+# check could not be made.
 privmask() {
   local w a
   w=$(privwords "$1") || return 1
   a=${1//"$CARDS"/<cards>}; a=${a//"${STATE%/*}"/<state>}
-  # A run of several words (privwords()) is masked first, then each word.
+  # A private key is masked whole first, from its BEGIN line to its END line, as one mark: the check flags its BEGIN
+  # line alone, and its body and END line are the key. Bug: only the BEGIN line was masked. Then a run of several
+  # words (privwords()) is masked, then each word.
   jq -rn --arg a "$a" --arg w "$w" '($w | split("\n") | map(select(. != "") | split("\t") | {key: .[1], value: .[0]})) as $e
     | ($e | map(select(.key | test("\\s") | not)) | from_entries) as $m
+    | ($a | gsub("-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----"; "<token>")) as $a
     | reduce ($e[] | select(.key | test("\\s"))) as $r ($a; split($r.key) | join("<\($r.value)>"))
     | [scan("\\s+|\\S+") | if $m[.] then "<\($m[.])>" else . end] | join("")'
 }

@@ -89,8 +89,9 @@ t_sliceson() {
   [ "$(cat "$STUB/subs" 2>/dev/null)" = $'7 100101\n7 100102' ] && grep -q 'are its sub-issues' "$STUB/comments" \
     || fail "the slices were not attached as sub-issues of #7, or its comment does not say so: $(cat "$STUB/subs" 2>/dev/null) $(cat "$STUB/comments")"
   grep -q 'D1 (first): #100101' "$STUB/comments" && grep -q 'D3 (third): #100102' "$STUB/comments" || fail "the umbrella's comment does not name the slice of each Done-when item: $(cat "$STUB/comments")"
-  # The start line of file comes before the slices are filed: stop (halt()) leaves the card to finish from there.
-  [ "$(st '[.step, .result, .of // empty] | @json' | tr '\n' ' ')" = '["start","ok","file"] ["split","split"] ["closed","ok"] ' ] && [ "$(st 'select(.step == "split") | .split.filed | @json')" = '[100101,100102]' ] \
+  # The start line of file comes before the slices are filed: stop (halt()) leaves the card to finish from there. The
+  # start line of split before it names the card's process while the judge answers (t_slicesshut).
+  [ "$(st '[.step, .result, .of // empty] | @json' | tr '\n' ' ')" = '["start","ok","split"] ["start","ok","file"] ["split","split"] ["closed","ok"] ' ] && [ "$(st 'select(.step == "split") | .split.filed | @json')" = '[100101,100102]' ] \
     || fail "the parent's card is not a start of filing, a split line with the slices filed, then closed: $(cat "$ST/cards.jsonl")"
   recok "$ST/cards.jsonl" "a split card"
   # While it is open, the snapshot's Held names the umbrella's slices (the Board: "Umbrella of #100101, #100102").
@@ -188,6 +189,109 @@ t_slicesbad() {
   [ "$(st 'select(.step == "split") | [.result, .split.verdict, .split.why, (.split.answer | contains("covers"))] | @json')" = '["kept","invalid","no slice covers D2",true]' ] \
     || fail "the broken answer was not recorded with the issue kept: $(st 'select(.step == "split")')"
   recok "$ST/cards.jsonl" "a kept split check"
+}
+
+# Bug (#1385): a card waiting in its split check's judge call (up to SPLIT_TIMEOUT) had no line naming its process,
+# which comes on its worktree line after the check, so `shut` (and `retry`, were it to die there) passed over it. The
+# check's start line names it: `shut 7` ends the card waiting in a stub judge that sleeps, blocks and closes it.
+t_slicesshut() {
+  local bg
+  slices on "$SPLIT2" "[$(big 7)]"; export CONVEYOR_SPLIT_CMD='sleep 120' # sleep: the judge that has not answered yet, until shut ends it
+  fx_in 'splitcheck c1-7 7' & bg=$!
+  # Waits on the records: the card runs in a process of its own here, as the loop runs it, and shut must find that
+  # process from its line; the line is written just before the judge call, which no direct call can be stopped in.
+  wait_until '[ -n "$(st '"'"'select(.step == "start" and .of == "split") | .pid'"'"')" ]' || fail "the split check wrote no start line naming its process: $(cat "$ST/cards.jsonl")"
+  recok "$ST/cards.jsonl" "the split check's start line"
+  local out; out=$(loop shut 7 2>&1) || fail "shut 7, its card waiting in the split judge, exited non-zero: $out"
+  grep -qF 'card c1-7 was open in its split step (its process running, now ended); it is blocked, its work kept' <<<"$out" \
+    && [ "$(st 'select(.card == "c1-7") | [.step, .reason] | @tsv' | tail -n 2)" = $'blocked\tshut by the owner\nclosed\tshut by the owner' ] \
+    || fail "shut 7 did not end, block and close the card waiting in its split judge: $out $(st 'select(.card == "c1-7")')"
+  wait "$bg" 2>/dev/null; [ -z "$(st 'select(.step == "split")')" ] || fail "the split check went on after shut ended its card: $(st 'select(.step == "split")')"
+}
+# Bug (#1385 review): once the split check's start line named the card's process, `shut` ended a card that was filing
+# the slices (its start line of file), or had filed them (its split line), before splitwithdraw() could close the ones
+# filed: they stayed open on GitHub. As `stop` (halt()), shut leaves such a card to finish, its process running.
+t_slicesshutfile() {
+  local p out l
+  setup "[$(big 7)]"
+  sleep 600 & p=$! # sleep: a stand-in for the card's process, filing the slices
+  l='{card:"c1-7",issue:7,time:"2026-11-01T00:00:00Z",tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""}'
+  jq -cn --argjson p "$p" --arg s "$(p_started "$p")" "$l"' | (. + {step:"start",of:"split",pid:$p,started:$s}), (. + {step:"start",of:"file"})' >> "$ST/cards.jsonl"
+  out=$(loop shut 7 2>&1)
+  kill -0 "$p" 2>/dev/null && [ -z "$(st 'select(.step == "blocked" or .step == "closed")')" ] && grep -qF 'card c1-7 has begun filing' <<<"$out" \
+    || fail "shut 7 ended the card in its start line of file (its slices being filed): $out $(st 'select(.card == "c1-7")')"
+  jq -cn "$l"' + {step:"split",result:"split",split:{verdict:"split",filed:[100101]}}' >> "$ST/cards.jsonl"
+  out=$(loop shut 7 2>&1)
+  kill -0 "$p" 2>/dev/null && [ -z "$(st 'select(.step == "blocked" or .step == "closed")')" ] && grep -qF 'card c1-7 has begun filing' <<<"$out" \
+    || fail "shut 7 ended the card after its split line named slice #100101 filed: $out $(st 'select(.card == "c1-7")')"
+  kill "$p" 2>/dev/null; wait "$p" 2>/dev/null; return 0
+}
+# Bug (#1385 review): shut read the card's step (split), the card then wrote its start line of file and filed a slice,
+# and shut ended it all the same, so splitwithdraw() never closed that slice. Here the card's line of file is written
+# just after shut's first read of the card (stuckcard() wrapped): shut must still see it, leave the card and let its
+# process run on (not left stopped).
+t_slicesshutrace() {
+  local p l
+  setup "[$(big 7)]"
+  sleep 600 & p=$! # sleep: a stand-in for the card's process, about to file the slices
+  l='{card:"c1-7",issue:7,time:"2026-11-01T00:00:00Z",tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""}'
+  jq -cn --argjson p "$p" --arg s "$(p_started "$p")" "$l"' + {step:"start",of:"split",pid:$p,started:$s}' >> "$ST/cards.jsonl"
+  fx_in 'eval "$(declare -f stuckcard | sed "1s/stuckcard/stuckcard0/")"
+    stuckcard() { local o r; o=$(stuckcard0 "$@"); r=$?; [ -e "$T/$CASE/began" ] || { : > "$T/$CASE/began"; record c1-7 7 start ok "{\"of\":\"file\"}"; }; echo "$o"; return $r; }
+    shutopen 7'
+  kill -0 "$p" 2>/dev/null && [[ $(ps -o stat= -p "$p") != *T* ]] && [ -z "$(st 'select(.step == "blocked" or .step == "closed")')" ] && grep -qF 'card c1-7 has begun filing' "$T/$CASE/run.out" \
+    || fail "shutopen 7 ended (or left stopped) the card that began filing after shut first read its step: $(cat "$T/$CASE/run.out") $(ps -o stat= -p "$p") $(st 'select(.card == "c1-7")')"
+  kill "$p" 2>/dev/null; wait "$p" 2>/dev/null; return 0
+}
+# Bug (#1385 review): shut left every card whose records named slices filed, so a card whose grown change was split
+# (growcheck()) and that had begun its fix after the filing could not be shut. Its last start line is of fix: shut
+# ends and blocks it.
+t_slicesshutgrown() {
+  local p l out
+  setup "[$(big 7)]"
+  sleep 600 & p=$! # sleep: a stand-in for the card's process, in its fix after its slices were filed
+  l='{card:"c1-7",issue:7,time:"2026-11-01T00:00:00Z",tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""}'
+  jq -cn --argjson p "$p" --arg s "$(p_started "$p")" "$l"' | (. + {step:"worktree",pid:$p,started:$s}), (. + {step:"start",of:"file"}),
+    (. + {step:"grown",result:"split",grown:{verdict:"split",filed:[100101]}}), (. + {step:"start",of:"fix"})' >> "$ST/cards.jsonl"
+  out=$(loop shut 7 2>&1)
+  grep -qF 'card c1-7 was open in its fix step (its process running, now ended)' <<<"$out" \
+    && [ "$(st 'select(.card == "c1-7") | .step' | tail -n 2 | tr '\n' ' ')" = 'blocked closed ' ] \
+    || fail "shut 7 did not end the card in its fix after its grown split filed #100101: $out $(st 'select(.card == "c1-7")')"
+  kill "$p" 2>/dev/null; wait "$p" 2>/dev/null; return 0
+}
+# Bug (#1385 review): shut stopped every process of the card, a database call (state.py) in its write transaction
+# too, so its reads of the records after that waited on the call until they timed out; it then read no issue number
+# and blocked the card under the word "false". Here the card's database call takes the write transaction just after
+# shut's first read (stuckcard() wrapped): shut must let the call end, then end and block the card under issue 7.
+t_slicesshutdb() {
+  local p l
+  setup "[$(big 7)]"
+  mkdir -p "$T/$CASE/db"
+  # A stand-in for the engine's state.py (the name shut knows it by): once told (go), it holds the write transaction
+  # (held) for 2 s.
+  printf '%s\n' 'import os, sqlite3, sys, time' 'while not os.path.exists(sys.argv[2]): time.sleep(0.05)' \
+    'db = sqlite3.connect(sys.argv[1], timeout=60, isolation_level=None); db.execute("BEGIN IMMEDIATE")' \
+    'open(sys.argv[3], "w").close(); time.sleep(2); db.execute("COMMIT")' > "$T/$CASE/db/state.py"
+  bash -c 'python3 "$1" "$2" "$3" "$4"; sleep 600' _ "$T/$CASE/db/state.py" "$ST/state.db" "$T/$CASE/go" "$T/$CASE/held" & p=$! # sleep: the card's process, after its database call, until shut ends it
+  l='{card:"c1-7",issue:7,time:"2026-11-01T00:00:00Z",tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""}'
+  jq -cn --argjson p "$p" --arg s "$(p_started "$p")" "$l"' + {step:"start",of:"split",pid:$p,started:$s}' >> "$ST/cards.jsonl"
+  fx_in 'eval "$(declare -f stuckcard | sed "1s/stuckcard/stuckcard0/")"
+    stuckcard() { local o r i=0; o=$(stuckcard0 "$@"); r=$?; [ -e "$T/$CASE/go" ] || { : > "$T/$CASE/go"; until [ -e "$T/$CASE/held" ] || [ $((i++)) -ge 200 ]; do sleep 0.05; done; }; echo "$o"; return $r; }
+    shutopen 7'
+  [ -e "$T/$CASE/held" ] || fail "the stand-in database call never took the write transaction"
+  grep -qF 'card c1-7 was open in its split step' "$T/$CASE/run.out" && [ "$(st 'select(.card == "c1-7" and .step == "blocked") | .issue')" = 7 ] \
+    || fail "shutopen 7, the card's database call in its write transaction, did not block the card under issue 7: $(cat "$T/$CASE/run.out") $(st 'select(.card == "c1-7")')"
+  kill "$p" 2>/dev/null; wait "$p" 2>/dev/null; return 0
+}
+# Bug (#1385 review): the Board drew a card waiting in its split check (its start line of split, before the worktree)
+# on Land, labelled "tests", and a card shut there as failed on Land. Both are on Build, as before the worktree.
+t_slicestrack() {
+  local out
+  out=$(jq -nc "$(<"$SRC/jq/track.jq")"' [{step: "picked", time: "2026-11-01T00:00:00Z", created: "2026-11-01T00:00:00Z"}, {step: "start", of: "split", result: "ok", time: "2026-11-01T00:00:05Z"}] as $l
+    | ({result: "", issue: 7, x: {at: "brief", log: $l}} | track(null; null) | [.at, .label, (.steps[] | select(.state == "now") | .name)]),
+      ({result: "blocked", issue: 7, x: {at: "brief", log: ($l + [{step: "blocked", result: "blocked", time: "2026-11-01T00:00:09Z"}])}} | track(null; null) | [.steps[] | select(.state == "failed") | .name])') \
+    || fail "the track of a card in its split check could not be drawn: $out"
+  [ "$out" = $'[0,"making the worktree","Build"]\n["Build"]' ] || fail "a card waiting in its split check is not drawn on Build, or one shut there not failed on Build: $out"
 }
 
 # A slice with no Done-when items of its own breaks the rules: SPLIT2 with slice 1's doneWhen empty, missing, a blank

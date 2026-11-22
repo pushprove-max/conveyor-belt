@@ -111,7 +111,7 @@ splitprompt() { # <issue json> <size json>
   printf '%s' "$p"
 }
 splitcheck() { # <card> <issue>: 0 when the card goes on to build; 1 when the issue was split and the card has ended
-  local c=${CARDCTL:-} rule issue h size t1 t2 t3 t4 p ans v model='' nums x split sf
+  local c=${CARDCTL:-} rule issue h size t1 t2 t3 t4 p ans v model='' nums x split sf me
   [ -n "$c" ] || c=$(ctl 2>/dev/null) || return 0
   rule=$(jq -r '.rules.split // "off"' <<<"$c" 2>/dev/null)
   [ "$rule" = shadow ] || [ "$rule" = on ] || return 0
@@ -126,6 +126,11 @@ splitcheck() { # <card> <issue>: 0 when the card goes on to build; 1 when the is
     v=$(jq -c '{verdict: "under", why: "under the pack'"'"'s split thresholds: \(.doneWhen | length) Done-when items, \(.files | length) files, \(.areas) areas, \(.chars) characters"}' <<<"$size")
   else
     p=$(splitprompt "$issue" "$size")
+    # The judge call can take SPLIT_TIMEOUT, before the card's worktree line names its process: its start line names
+    # it (pid, started, as the worktree line does), so `shut` and `retry` find the card (stuckcard(), lib/run.sh).
+    # Bug: a card that waited here, or died here, could not be ended outside a running loop.
+    me=$BASHPID
+    record "$1" "$2" start ok "$(jq -cn --argjson p "$me" --arg t "$(p_started "$me")" '{of: "split"} + (if $t == "" then {} else {pid: $p, started: $t} end)')"
     if ! splitcall "$c" "$p"; then v=$(jq -cn --arg r "$ans" '{verdict: "failed", why: $r}')
     else v=$(jq -Rsc --argjson n "$(jq '.doneWhen | length' <<<"$size")" "$SPLITREAD" <<<"$ans" 2>/dev/null)
       [ -n "$v" ] || v=$(jq -cn --arg a "${ans:0:2000}" '{verdict: "invalid", why: "the answer held no JSON object", answer: $a}'); fi

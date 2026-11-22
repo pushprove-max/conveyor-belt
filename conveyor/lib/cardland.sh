@@ -52,11 +52,15 @@ cardready() {
   # that lands from a kept patch has no review line of its own), then its Rollout trailers, each once and in the order
   # named (ROLLOUTONCE). All go on its landed line (rollout) and, in that order, at the end of the commit message as
   # Rollout lines in place of its Rollout trailers, so the push carries each one. They are no findings: nothing here
-  # holds the card.
+  # holds the card. With the pack's privacy.mode public, the Rollout lines have each word the privacy check flags
+  # masked (privmask(), lib/issues.sh), as cardsubject() masks a body: they are reviewer text, and the push checks no
+  # commit message. Bug: an address a review named in its ROLLOUT line was pushed in the commit message.
   rtr=$(rollouts <(printf '%s\n' "$cmsg") Rollout) && rrev=$(rollouts "$wt.review" ROLLOUT) \
     && ro=$(stdb ask card "$c" | jq -cs --argjson p "$pro" --argjson k "$rrev" --argjson t "$rtr" '[$p[], (.[] | select(.step == "review") | .rollout // [] | .[]), $k[], $t[]] | '"$ROLLOUTONCE") \
     && rmsg=$(jq -r '.[] | "Rollout: \(.action) | \(.fails) | \(.place)"' <<<"$ro") \
     || { block "$c" "$n" "$wt" "the engine could not read the rollout actions of the card, so nothing landed"; return; }
+  { [ -z "$rmsg" ] || { packget privacy.mode t && { [ "$t" != public ] || rmsg=$(privmask "$rmsg"); }; }; } \
+    || { block "$c" "$n" "$wt" "the engine could not read the pack's privacy mode, or make the privacy check of the card's rollout actions, so nothing landed"; return; }
   cmsg=$(grep -Ev "^Rollout: $ROLLOUT" <<<"$cmsg" || :); cmsg=$cmsg${cmsg:+${rmsg:+$'\n'}}$rmsg
   # A main-red fix card names its cases and main's commit, as its entry holds them now (a case added during its
   # build or a review too). A Tests page card of issue 0 (testcardissue(), lib/testaction.sh) keeps its subject
@@ -475,7 +479,8 @@ landconflict() {
       git -C "$wt" reset -q --hard "$old" 2>/dev/null && git -C "$wt" clean -fdq 2>/dev/null && git -C "$wt" apply --index "$wt.patch" 2>/dev/null \
         || t="${t%%$'\n'*} [the engine could not put the reviewed change back in the worktree. The kept patch is what the failed port left]$([[ $t != *$'\n'* ]] || printf '\n%s' "${t#*$'\n'}")"
       block "$c" "$n" "$wt" "rebase: $t"; return; }
-    checked "$c" "$n" "$wt" "$issue" "$sprompt" rebase "$(jq -c --arg r "$why" '. + {reason:$r}' <<<"$t")" || return
+    # Its rebase line has port: a retry counts only the reviews after it (resumeplan(), lib/card.sh), as pass and rounds start again here.
+    checked "$c" "$n" "$wt" "$issue" "$sprompt" rebase "$(jq -c --arg r "$why" '. + {reason:$r, port:true}' <<<"$t")" || return
     parsecheck=1; go=next; return
   fi
   # A landing that fails after the follow-ups were filed withdraws them, unless main did get the commit.

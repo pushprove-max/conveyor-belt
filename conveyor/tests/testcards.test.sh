@@ -244,6 +244,20 @@ t_tcprivmsg() {
     || fail "cardsubject c0-0 '$issue' with privacy.mode private changed the body (exit $RC): $(cat "$T/$CASE/run.out")"
 }
 
+# Bug it catches (#1385): with privacy.mode public, the commit message of a card with no issue whose body holds a whole
+# private key masked its BEGIN line alone (the words the privacy check flags), so the key's body and END line landed.
+# The whole key, BEGIN to END, is one <token>; the lines around it stay.
+t_tcprivkey() {
+  setup '[]'
+  local k="PRIVATE"" KEY" # put together so this file holds no key header itself (the privacy check runs over it)
+  local issue; issue=$(jq -cn --arg b "$(printf '%s\n' 'The end of the output:' "-----BEGIN RSA $k-----" 'MIIBOgIBAAJBAKj34GkxFhD90vcNLYLInFEX6Ppy1tPf9Cnzj4p4WGeKLs1Pt8Qu' 'KUpRKfFLfRYC9AIKjbJTWit+CqvjWYzvQwECAwEAAQ==' "-----END RSA $k-----" 'and then it stopped')" \
+    '{number: 0, title: "Fix the failures of the test file f.test.sh", body: $b, labels: []}')
+  tune '.privacy.mode = "public"'
+  fx_in "cardsubject c0-0 '$issue'"
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = $'feat(product): Fix the failures of the test file f.test.sh\n\nThe end of the output:\n<token>\nand then it stopped\n\nConveyor card c0-0' ] \
+    || fail "cardsubject c0-0 '$issue' with privacy.mode public left a line of the key body or its END line (exit $RC): $(cat "$T/$CASE/run.out")"
+}
+
 # #1347: the other four kinds of card with no GitHub issue, each with its switch of the Rules tab's Cards with no GitHub
 # issue group (rules.foremanissues, followupissues, releaseissues, splitissues, each false = On). The helpers are named ni*.
 # nisetup <rule>: a case with the open issue #7 and the rule <rule> off. nipick: the pick, as the loop takes it, with

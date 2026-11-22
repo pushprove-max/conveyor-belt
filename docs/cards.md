@@ -60,7 +60,8 @@ Each card builds, reviews, tests and lands as any card does. No size check split
 - **On landing**: its commit message has its title, the text it came from and its card id. It has no `Closes` line,
   and a "Fixes #12" in the text goes in as "Fixes issue 12", so the push closes no issue. When the pack's
   `privacy.mode` is public, each part of the message that the privacy check flags (a home path in test output, for
-  example) goes in as a mark of what it is, such as `<home path>`. **Landed today** keeps the
+  example) goes in as a mark of what it is, such as `<home path>`. A whole private key, from its BEGIN line to its END
+  line, goes in as one `<token>` mark. **Landed today** keeps the
   record of the card, and its **File on GitHub** files an issue from it
   ([Board: Done without asking](board.md#rules)).
 
@@ -253,7 +254,8 @@ has no step. The loop ends at the first of these:
 - `go`: a review says `GO`.
 - `max-reviews`: the card has had three reviews. A card that starts from the kept patch of a blocked card also counts
   the reviews of that card and of the cards whose kept patch it took. It does not count the reviews of other cards of
-  the same issue.
+  the same issue. After an automatic port of one of those cards, it counts only the reviews after the review of the
+  port.
 - `rebased`: the one review after a conflict with main at landing.
 - `test-fix`: the one review after the fix of failed tests.
 - `lint-fix`: the one review after the fix of lint findings at the landing gate.
@@ -261,7 +263,8 @@ has no step. The loop ends at the first of these:
 - `repeat`: a finding comes back after its fix, and each finding of the review is P2 or P3. A P0 or P1 that comes
   back blocks the card.
 
-If a finding of the last review is a privacy hit in the card's own change, the card gets one more fix session. If the
+If a finding of the last review is a privacy hit in the card's own change, the card gets one more fix session. If a
+last review after that session still holds such a hit, the card blocks and files no follow-up. If the
 last review is a `NO-GO` that holds a P1 finding, the card also gets one fix session, once, and one more review of that
 fix alone. If that review still holds a P1, the card blocks and files no follow-up, as it does for a P1 that comes back
 after its fix. The findings that are still open when the loop ends become follow-ups. If the last review is a `NO-GO`
@@ -278,7 +281,8 @@ reviewer writes this step as a `ROLLOUT:` line: the action, what fails without i
 writes one as a `Rollout:` line of the card's commit trailers. A rollout action is not a finding. It does not stop the
 card, and the judge does not read it. The card's commit message has each one as a `Rollout:` line, so the push carries
 it, and the Landed today panel shows it under the card. The reviewer's steps come first, then the builder's, each in
-the order it was written.
+the order it was written. When the pack's `privacy.mode` is public, each part of these lines that the privacy check
+flags goes in as a mark of what it is, such as `<home path>`.
 
 A test that a card adds or changes must check its behaviour directly. Some tests run other test files or the suite
 runner, run the real loop, or poll a real process until a condition holds. Such a test needs a comment beside it that

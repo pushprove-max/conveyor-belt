@@ -41,3 +41,25 @@ t_straystaged() {
   [ ! -s "$STUB/sessions" ] && [ -z "$(st 'select(.issue == 5 and (.step | IN("build", "brief"))) | .step')" ] \
     || fail "the card went on to its brief or build on the stray staged change: $(st '.step' | tr '\n' ' ')"
 }
+
+# Bug (#1385): the check above skipped a card that took up a kept patch: the patch was applied on top of what the
+# post-checkout hook staged, and the card took stray.txt as its own work (a kept patch that lands with no review
+# committed it unreviewed). t_keptbrief's retry with t_straystaged's hook: the retried card blocks naming stray.txt,
+# before its brief. Two whole card runs, as t_keptbrief: a real block keeps the patch, a real retry takes it up in a
+# new worktree, where git runs the hook.
+t_keptstray() {
+  local old
+  setup "[$(issue 9 2026-01-01)]"; echo 'exit 3' > "$STUB/review-cmd"; echo 'echo nine > n.txt' > "$STUB/build"
+  # loop: a real block keeps the patch that the retry takes up.
+  loop run >/dev/null; old=$(st 'select(.issue == 9 and .step == "blocked") | .card')
+  [ -n "$old" ] && [ -s "$ST/kept/$old/$old.patch" ] || fail "#9 was not blocked with its patch kept: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
+  printf '%s\n' '#!/bin/sh' '[ "$1" = 0000000000000000000000000000000000000000 ] || exit 0' 'echo stray > stray.txt && git add stray.txt' > "$R/.git/hooks/post-checkout"
+  chmod +x "$R/.git/hooks/post-checkout"; rm "$STUB/review-cmd"
+  loop retry 9 | grep -q 'starts from the kept patch' || fail "retry of #9 does not say its next card starts from the kept patch"
+  # loop: only a card started by the loop gets a new worktree, where git runs the hook, before it applies the patch.
+  loop run >/dev/null
+  [ "$(st "select(.issue == 9 and .step == \"blocked\" and .card != \"$old\") | .reason")" = "worktree: the new worktree already holds a staged change that is no kept work of this issue: stray.txt" ] \
+    || fail "the retried card, its new worktree holding the hook's staged stray.txt, did not stop naming it: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
+  [ -z "$(st "select(.issue == 9 and .card != \"$old\" and (.step | IN(\"build\", \"brief\", \"review\", \"landed\"))) | .step")" ] \
+    || fail "the retried card went on with the stray staged change: $(st '.step' | tr '\n' ' ')"
+}

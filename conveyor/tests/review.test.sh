@@ -260,6 +260,22 @@ t_privfixrun() {
     || fail "the privacy finding on the card's own line on its last review did not go to a fix round: $AFTER"
   grep -qxF "E1 [P0] a.txt:3 flags $HX/bench" "$T/$CASE/fix" || fail "the fix round is not told the privacy finding: $(cat "$T/$CASE/fix")"
 }
+# Bug (#1385): once its privacy fix round was given (privfix), privown() was not asked again, so a new privacy hit on
+# the last review, on another line than the one fixed, landed on main with a follow-up. Here that round swapped the
+# home path for another ($HY, the line the change now adds) and the last NO-GO names the new line: cardfix() blocks
+# the card (after priv) and lands nothing (go is not ''). block is replaced so the case reads its reason.
+t_privfixagain() {
+  local HY=/hom"e"/y # a home path, put together as HX is
+  setup "[$(issue 7 2026-01-01)]"; fx_wt "printf 'two\ncd %s/bench\n' '$HY' >> a.txt" b.txt base
+  printf '%s\n' "[P2] a.txt:3 flags $HY/bench" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
+  ISSUE=$(issue 7 2026-01-01) fx_in 'wt=$FXWT issue=$ISSUE mode="" rounds=0 fin="" finend="{}" c=c7 n=7 rline="" go=end; '"$FIRSTPASS"'; pass=4 privfix=1
+    block() { printf "%s\n" "$4" > "$T/$CASE/blocked"; }
+    res=$(verdict "$wt.review"); cardfix; echo "$after $go" > "$T/$CASE/after"'
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/after" 2>/dev/null)" = "priv end" ] \
+    || fail "a privacy hit found again after its fix round (review: [P2] a.txt:3 flags \$HY/bench, privfix=1) did not block the card: $(cat "$T/$CASE/after" "$T/$CASE/run.out" 2>&1)"
+  [ "$(cat "$T/$CASE/blocked")" = "review 4 is the last review and still holds a privacy hit in the card's own change after its one fix round, so it files no follow-up: [P2] a.txt:3 flags $HY/bench" ] \
+    || fail "the block does not name the privacy hit of review 4: $(cat "$T/$CASE/blocked" 2>&1)"
+}
 
 # Bug: a P1 that is new in a last review (the fix-only review after its one fix round finds another, not the one fixed,
 # so repeats() does not see it) landed as a follow-up. The first last review with a P1 goes to a fix round (after fix, no
