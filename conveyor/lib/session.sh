@@ -38,8 +38,7 @@ testcases() { # <worktree>; prints a JSON array
   ts=$(p_mtimes "${fs[@]}") || :
   jq -cRn '[inputs | capture("^(?<t>[0-9]+) .*/(?<name>[^/]+)$") | {name, since: (.t | tonumber | todate)}]' <<<"$ts" 2>/dev/null || echo '[]'
 }
-# The cases of a test run that have ended: a runner may name each, as it ends, by an empty file in cases/ok (it
-# passed) or cases/failed of that folder.
+# The cases of a test run that have ended: a runner may name each, as it ends, by an empty file in cases/ok (it passed) or cases/failed of that folder.
 testdone() { # <worktree>; prints {done, failed}
   local ok bad
   ok=$(find "$1.testlog/cases/ok" -maxdepth 1 -type f 2>/dev/null | wc -l); bad=$(find "$1.testlog/cases/failed" -maxdepth 1 -type f 2>/dev/null | wc -l)
@@ -97,14 +96,12 @@ testprogress() { # <output file> [log...]
 # Its cases (tests: {done, of, failed}) are counted only when `TESTRUN cases=N` lines say how many were selected
 # (several add up) and that is above 0, else tests is null (#385: a run of whole files prints cases=0): done and
 # failed are the cases its runner named as ended (testdone()).
-# files.now ({file, at}) names the file that runs now (testprogress() now) and when this watch first saw it begin, so
-# a slow file and a hung run can be told apart (#433); left out while no file runs.
+# files.now ({file, at}) names the file that runs now (testprogress() now) and when this watch first saw it begin, so a slow file and a hung run can be told apart (#433); left out while no file runs.
 # A test run's `progress` (which health reads beside `last`, so the Foreman calls no running test step stuck while it
 # moves) is when the run began, then when a case of its runner last began or ended (testcases(), testdone()); its
 # `list` is the list of tests the command was given (<worktree>.testlist, tests()); its `before` is the seconds of the
 # run before it in the same Test step (TEST_BEFORE: tests() runs the failed cases again at once), left out on a first.
-# A review's tokens are not in its stream before its turn ends: Codex writes the running total (`token_count`) to the
-# session file it keeps under its home, named after the thread the stream opens with. rollout() finds that file.
+# A review's tokens are not in its stream before its turn ends: Codex writes the running total (`token_count`) to the session file it keeps under its home, named after the thread the stream opens with. rollout() finds that file.
 rollout() { # <a review's events file>; prints the session file of that review, nothing when there is none yet
   local id
   id=$(grep -m 1 '"thread.started"' "$1" 2>/dev/null | jq -r '.thread_id // empty' 2>/dev/null) && [[ $id =~ ^[0-9A-Za-z-]+$ ]] || return 0
@@ -114,8 +111,7 @@ rollout() { # <a review's events file>; prints the session file of that review, 
 # record's `last`), no file of its worktree changed and no new commit there (holds(), asked only once the output has
 # been quiet that long, so a session's files cost nothing while it talks). Output is a whole new line, and of a Codex
 # review's session file a new token count read from it: bytes with no newline (a spinner, a line cut short) move the
-# file's size and are no progress. The output is read first each time, so a line
-# that came since the last look counts; and the clock runs from when the files last changed, not from when that was
+# file's size and are no progress. The output is read first each time, so a line that came since the last look counts; and the clock runs from when the files last changed, not from when that was
 # seen, so a change made while the session still talked gives it no second wait. Its exit is then the ended
 # process's, and <worktree>.stalled holds when its progress stopped; a step that begins with that file there is the
 # one run after such a stall, and its live record says so (stalled: that time).
@@ -128,7 +124,7 @@ holds() { # <worktree>: when it last changed, epoch seconds: the newest of its f
     | awk -v n="$EPOCHSECONDS" '{t = int($1)} t <= n && t > m {m = t} END {print m + 0}' # a time after now is a wrong clock, not progress
 }
 watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the program that runs it: codex for a Codex build, fix or rebase] [the effort it runs at]
-  local pid=$1 f=$2 out=$3 st new who rc=0 timer n have=0 size=0 now logs roll='' rsize=0 wt=${3%.live} was='' seen=$EPOCHSECONDS at lines=0 rhave=0 rn cs dn cx=false wn wb wk=0
+  local pid=$1 f=$2 out=$3 st new who rc=0 timer n have=0 size=0 now logs roll='' rsize=0 wt=${3%.live} was='' seen=$EPOCHSECONDS at lines=0 rhave=0 rn cs dn cx=false wn wb wk=0 gk=''
   [ "${6:-}" != codex ] || cx=true
   # rm only when there is a file to remove (#532: most steps have none).
   [ "$4" = test ] || { [ ! -e "$wt.stalled" ] && [ ! -L "$wt.stalled" ]; } || { [ ! -s "$wt.stalled" ] || was=$(<"$wt.stalled"); rm -f "$wt.stalled"; }
@@ -149,8 +145,8 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
     # A card that gave way (giveway()): once a card took its turn, the live record names it (gaveWay: its issue).
     new=$(jq -c --argjson st "$st" 'select(.away == true and (.to | type) == "number" and .to != $st.gaveWay) | $st + {gaveWay: .to}' "${out%.live}.claim" 2>/dev/null) \
       && [ -n "$new" ] && st=$new && printf '%s\n' "$st" > "$out.tmp" && mv -f "$out.tmp" "$out"
-    # A guard that failed twice (guardrun.sh) ends the session at once, as OpenCode and Codex ignore "continue": false.
-    [ "$4" = test ] || [ ! -s "$wt.guardfail" ] || ! awk -F'\t' '++n[$1] == 2 { f = 1 } END { exit !f }' "$wt.guardfail" || { kill "$pid" 2>/dev/null; wait "$pid"; rc=$?; break; }
+    # A guard that failed twice (guardrun.sh) ends the session, as OpenCode and Codex ignore "continue": false: at the look after the one that saw it (gk), as guardrun.sh records the failure before it gives the session the refusal, which the session reads in between.
+    [ "$4" = test ] || [ ! -s "$wt.guardfail" ] || ! awk -F'\t' '++n[$1] == 2 { f = 1 } END { exit !f }' "$wt.guardfail" || { [ -z "$gk" ] && gk=1 || { kill "$pid" 2>/dev/null; wait "$pid"; rc=$?; break; }; }
     if [ "$4" = test ]; then
       mapfile -t logs < <(testlogs "${f%.test}")
       now=$(p_stat "$f" "${logs[@]}" | awk '{s = s "," $1; if ($2 > t) t = $2} END {if (NR) print s " " t}')
@@ -189,7 +185,8 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
       new=$(tail -n +$((have + 1)) "$f" | head -n $((n - have)) | jq -cRn --argjson st "$st" --argjson t "${now#* }" --argjson cx "$cx" --arg wt "$wt" '
         def use: (.cache_creation.ephemeral_1h_input_tokens // 0) as $h | {input: (.input_tokens // 0), write: ((.cache_creation_input_tokens // 0) - $h),
           write1h: $h, read: (.cache_read_input_tokens // 0), output: (.output_tokens // 0)};
-        def plus($b): with_entries(.value += ($b[.key] // 0));
+        def plus($b): with_entries(.value += ($b[.key] // 0)); def minus($b): with_entries(.value = ([.value - ($b[.key] // 0), 0] | max)); def u0: {input: 0, write: 0, write1h: 0, read: 0, output: 0};
+        def sofar: (.cur // {}) as $c | (.done // u0) | plus($c); def bym: (.cur // {}) as $c | (.bmd // {}) as $d | $d + (if .cm == null then {} else {(.cm): (($d[.cm] // u0) | plus($c))} end); # the answers so far; each model'"'"'s
         # The card'"'"'s worktree path reads worktree before the cut, so a long path does not push the end of a command
         # out of its 80 characters (a path that only starts with it, the card'"'"'s <worktree>.wide, is kept).
         def tree: if $wt == "" or . == "" then . else split($wt) as $p | reduce $p[1:][] as $x ($p[0];
@@ -220,9 +217,9 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
                   | if .ocost == false then . else .usage.cost = .ocost end
                 elif $e.type == "tool_use" and ($e.part | type) == "object" then .action = ($e.part | ocact)
                 elif $e.type == "text" then .action = "writing" elif $e.type == "reasoning" then .action = "thinking" else . end
-            # A Claude turn'"'"'s result: its whole usage (rdone, the sum of the results so far). It is the reading when its
-            # answers report less (a route whose stream gives every answer usage 0, #391).
-              elif $e.type == "result" and ($e.usage | type) == "object" then .rdone = ((.rdone // {input: 0, write: 0, write1h: 0, read: 0, output: 0}) | plus($e.usage | use))
+            # A Claude turn'"'"'s result: its whole usage (rdone, the sum of the results so far), with the answers after the last result added (rbase: the answers'"'"' sum at it), is the reading when its
+            # answers report less (a route whose stream gives every answer usage 0, #391). The last result'"'"'s modelUsage (mu), its usage readable or not, with each model'"'"'s answers after it (rbm), is the split by model the Board prices (stats.byModel, as sessionread.jq gives it).
+              elif $e.type == "result" then (if ($e.usage | type) == "object" then .rdone = ((.rdone // u0) | plus($e.usage | use)) | .rbase = sofar else . end) | .rbm = bym | .mu =($e.modelUsage | if type == "object" then with_entries(.value |= {input: ((.inputTokens? | numbers) // 0), write: ((.cacheCreationInputTokens? | numbers) // 0), read: ((.cacheReadInputTokens? | numbers) // 0), output: ((.outputTokens? | numbers) // 0)}) else null end)
             # A Claude review streams as a session does: its answers are read as a session'"'"'s.
               elif .step == "review" and $e.type != "assistant" then
                 (if $e.type == "item.completed" then .turns += 1 else . end)
@@ -238,13 +235,13 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
                 else . end
               elif $e.type == "assistant" and ($e.message | type) == "object" and ($e.message | act) != null and ($e.message.usage | type) != "object" then .action = ($e.message | act)
               elif $e.type == "assistant" and ($e.message.usage | type) == "object" and ($e.message.id | type) == "string" then
-                (if .id == $e.message.id then . else (.cur // {}) as $c | .done = ((.done // {input: 0, write: 0, write1h: 0, read: 0, output: 0}) | plus($c)) | .turns += 1 end)
-                | .id = $e.message.id | .cur = ($e.message.usage | use) | .cur as $c | .usage = (.done | plus($c))
+                (if .id == $e.message.id then . else (.cur // {}) as $c | .done = ((.done // u0) | plus($c)) | .bmd = bym | .turns += 1 end)
+                | .id = $e.message.id | .cm = ($e.message.model | if type == "string" and . != "" then . else $st.model // "" end) | .cur = ($e.message.usage | use) | .cur as $c | .usage = (.done | plus($c))
                 | (($e.message | act) // .action) as $a | if $a == null then . else .action = $a end
               else . end)
-          | if (.rdone | type) == "object" and ((.usage // {} | del(.cost) | [.[]] | add // 0) < (.rdone | [.[]] | add)) then .usage = .rdone else . end
-          # zero: a Claude session whose answers so far all report usage 0, and no result yet: its cost is read when
-          # its step ends (sofar in snapshot.sh), not "no reading yet".
+          | if (.rdone | type) == "object" then (.rbase // u0) as $b | (sofar | minus($b)) as $a | (.rdone | plus($a)) as $r | (if (.usage // {} | del(.cost) | [.[]] | add // 0) < ($r | [.[]] | add) then .usage = $r else . end) else . end
+          | bym as $now | (.rbm // {}) as $was | if (.mu | type) != "object" then . else .stats.byModel = (reduce ($now | keys[]) as $k (.mu; ($now[$k] | minus($was[$k] // u0)) as $d | if $was[$k] != null and ($d | add) == 0 then . else .[$k] = ((.[$k] // {input: 0, write: 0, read: 0, output: 0}) | .input += $d.input | .write += $d.write + $d.write1h | .read += $d.read | .output += $d.output) end) | with_entries(.key as $k | .value += (if $now[$k] == null then {} else {write1h: $now[$k].write1h} end)) | del(.["<synthetic>"])) end
+          # zero: a Claude session whose answers so far all report usage 0, and no result yet: its cost is read when its step ends (sofar in snapshot.sh), not "no reading yet".
           | .zero = (.id != null and (.usage // {} | [.[] | numbers] | add // 0) == 0)
           | if any($ls[]; test("\\S")) then .last = ([($t | todate), (.last // "")] | max) else . end' 2>/dev/null) && [ -n "$new" ] && st=$new && have=$n && printf '%s\n' "$st" > "$out.tmp" && mv -f "$out.tmp" "$out"
     fi
@@ -453,13 +450,14 @@ apitries() { # <worktree> <step> <output file> <command ...>
       [ -n "$api" ] || [ $codex = false ] || { said=$wt.err; api=$(jq -rRn --argjson codex true --rawfile e "$wt.err" "$APIERROR" "$said" 2>/dev/null); }
     fi
     [ -n "$api" ] || { printf '%s\n' "$t"; return $rc; }
-    # The API refused it: not a CLI that stopped before any work (nostart()), so no check session puts the card back.
+    # The API refused it: not a CLI that stopped before any work (nostart()), so no check session puts the card back. A try that failed on the subscription login and then through the proxy (bothsaid()) keeps the login's cause on the reason of the fifth.
     jq -c 'del(.start)' "$wt.spent" > "$wt.spent.new" 2>/dev/null && mv -f "$wt.spent.new" "$wt.spent" || rm -f "$wt.spent.new"
     s=$APIERR.$BASHPID; jq -n --argjson p "$API_PAUSE" 'now + 5 * $p' > "$s" 2>/dev/null && mv -f "$s" "$APIERR" || rm -f "$s"
     # A review that wrote its verdict and then failed (1, not 2) answered: its API error is marked as any is, so the
     # queue pauses, but it is never run again.
     [ "$st" != review ] || [ $rc = 2 ] || { printf '%s\n' "$t"; return $rc; }
-    [ $try -lt 4 ] || { printf 'the model API refused (%s) at each of 5 tries, made %ss, then 2, 4 and 8 times that, apart\n%s\n' "$api" "$API_PAUSE" "$(jq -rRn --argjson codex "$codex" --rawfile e "$wt.err" "$APISAID" "$said" 2>/dev/null | tail -n 60)"; return 1; }
+    [ $try -lt 4 ] || { s=''; [[ $t != 'on the subscription login, '* ]] || { s=${t%%$'\n'*}; s=", through the proxy; ${s%%; through the proxy, *}"; [[ $t != *$'\n'* ]] || s+=$'\n'${t#*$'\n'}; }
+      printf 'the model API refused (%s) at each of 5 tries, made %ss, then 2, 4 and 8 times that, apart%s\n%s\n' "$api" "$API_PAUSE" "$s" "$(jq -rRn --argjson codex "$codex" --rawfile e "$wt.err" "$APISAID" "$said" 2>/dev/null | tail -n 60)"; return 1; }
     read -r w at <<<"$(jq -rn --argjson p "$API_PAUSE" --argjson t "$try" '($p * pow(2; $t)) as $w | "\($w) \(now + $w | floor)"')"
     try=$((try + 1)); used=$(jq -c 'del(.step)' "$wt.spent"); APIRESUME=1; APIRESUMED=''; jq -e '.resumed' <<<"$used" >/dev/null 2>&1 && APIRESUMED=1 # each retry of a Claude build resumes the refused session by the id its output names (session1(); other agents and steps run again from nothing), so a try refused before it named one leaves the resume to the next; a resumed try is the step's one resume, so no later try resumes (APIRESUMED)
     jq -cn --arg s "$st" --arg a "waiting: the model API refused ($api); trying again at $(p_date "@$at" +%H:%M)" --slurpfile u "$wt.spent" \
@@ -577,14 +575,16 @@ session1() {
   esac
   rm -f "$1.spent" "$1.stalled"
   # The session runs on the cores left for card work (lib/slots.sh slot_keepwords).
-  local KEEP bp p rid rd=''; slot_keepwords
+  local KEEP bp p rid rd='' k; slot_keepwords
   # A session that stalls (watch()) is ended and runs once more after REVIEW_PAUSE, as a review with no verdict does
   # (reviewed()), on what it left in the worktree; the stalled try is firstTry on the step's line (BOTHTRIES), and stalls counts the stalls. A second stall fails the step. Each try starts with no guard failure (<worktree>.guardfail): one of the stalled try does not count against the next.
   # A Claude build session cut off by a stall, or by the model API (APIRESUME: apitries()'s retries), is resumed once by the session id its output names (claude --resume, told RESUMEBRIEF), not run again from nothing: its line has resumed 1.
+  # What a try left running in the card's folders as it ends (a test it started under timeout, in a process group of its own) is ended then (leftin(), lib/run.sh), before the next try reads the worktree or block() takes it away.
   while :; do
     sec=$SECONDS; p=$2 rid=''; rm -f "$1.guardfail"; [ -z "$rd" ] && [ -z "${APIRESUMED:-}" ] && [ "$agent" = claude ] && [ "${3:-build}" = build ] && [ -n "${APIRESUME:-}$x" ] && rid=$(jq -rRn "$SESSID" "$1.out" 2>/dev/null) && [ -n "$rid" ] && p=$RESUMEBRIEF rd=1
     builder "$1" "$p" "$model" "$effort" "$dir" "$agent" "$rid" & bp=$!
     watch $bp "$1.out" "$1.live" "${3:-build}" "$model" "$agent" "$effort"; rc=$?; sec=$((SECONDS - sec))
+    ! declare -F leftin >/dev/null || { k=$(for p in $(leftin "${1##*/}"); do freeze "$p"; done); [ -z "$k" ] || kill -KILL $k 2>/dev/null; }
     # A Codex session cut off before its turn completed: its running total, from the session file Codex keeps (read
     # and removed, as a review's is).
     run=''; [ "$agent" != codex ] || { roll=$(rollout "$1.out"); [ -z "$roll" ] || { run=$(grep '"token_count"' "$roll" | tail -n 1 | jq -c '.payload.info.total_token_usage | objects' 2>/dev/null); rm -f "$roll"; }; }
@@ -593,7 +593,7 @@ session1() {
     jq -e 'objects | has("ok")' <<<"$f" >/dev/null 2>&1 \
       || f=$(jq -cn --arg m "$model" --arg e "$effort" --argjson s "$sec" '{model: $m, effort: $e, sec: $s, unread: "the session output could not be read", ok: false}
           | if $e == "" then del(.effort) else . end')
-    [ "$agent" != claude ] || [ -n "$rd" ] || f=$(transcribed "$f" "$1.out" "$1" "$dir") # not for a resumed try: its transcript holds the earlier try, which BOTHTRIES or APIFOLD adds
+    [ "$agent" != claude ] || [ -n "$rid" ] || f=$(transcribed "$f" "$1.out" "$1" "$dir") # not for a resumed try (rid): its transcript holds the earlier try, which BOTHTRIES or APIFOLD adds; a fresh try after it has its own
     [ -z "$x" ] && [ -e "$1.stalled" ] || break
     x=$(jq -c --arg r "stalled at ${3:-build}: no progress since $(<"$1.stalled")" '{reason: $r, spent: del(.ok)}' <<<"$f")
     echo "conveyor: card ${1##*/}: its ${3:-build} made no progress for ${STUCK}s: ended, and run once more after ${REVIEW_PAUSE}s" >&2

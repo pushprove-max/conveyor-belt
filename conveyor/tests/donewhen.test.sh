@@ -64,7 +64,11 @@ t_dwland() {
 
 # #305. Bugs: history donewhen takes the reviewer's answer from a review before the last check (an earlier round's), or
 # drops a finding that names the item, or one past the reason's cut that only the tail keeps (c1's D10); a finding
-# about D10 is given to D1 too. The reader is called on record lines alone.
+# about D10 is given to D1 too; a finding the judge declined (a DECLINED line, c4) is shown as the reviewer's answer
+# (#1444), or an OUTSIDE line is given to D2 as the judge's reason on it names D2 (#1444 review E4): an OUTSIDE line
+# is the reviewer's, shown without the judge's reason; or one whose finding quotes ` (judge: ` before it names D1 loses
+# D1, cut at that quote and not at the judge's own (review E8). c4's last review is a reused one: the judge's record of
+# its OUTSIDE lines is on the line of the review it reuses, before the fix. The reader is called on record lines alone.
 t_dwdetail() {
   setup '[]'
   jq -c . >> "$ST/cards.jsonl" <<'EOF'
@@ -76,12 +80,18 @@ t_dwdetail() {
 {"card":"c3","issue":7,"step":"build","doneWhenItems":[{"n":1,"text":"one","said":"D1 met: old"}]}
 {"card":"c3","issue":7,"step":"review","reason":"[P1] D1 is not met","doneWhenHolds":[]}
 {"card":"c3","issue":7,"step":"fix","doneWhenItems":[{"n":1,"text":"one","said":"D1 met: new"}]}
+{"card":"c4","issue":8,"step":"build","doneWhenItems":[{"n":1,"text":"one","said":"D1 met: c.test.sh case c"},{"n":2,"text":"two","said":"D2 met: d.sh:1"}]}
+{"card":"c4","issue":8,"step":"review","time":"2026-01-01T00:00:00Z","result":"NO-GO","reason":"DECLINED: [P2] D1's case c misses a rare input (judge: a rare case)\nOUTSIDE: [P2] lib/x.sh:3 an old typo (judge: outside the change, and D2 does not need it)\nOUTSIDE: [P3] lib/review.sh:483 the suffix (judge: ...) hides D1's words (judge: main has it)\n[P1] D1's evidence: c.test.sh has no case c","judge":{"outside":[{"n":2,"finding":"[P2] lib/x.sh:3 an old typo","place":"outside","reason":"outside the change, and D2 does not need it"},{"n":3,"finding":"[P3] lib/review.sh:483 the suffix (judge: ...) hides D1's words","place":"outside","reason":"main has it"}]},"doneWhenHolds":[]}
+{"card":"c4","issue":8,"step":"fix","doneWhenItems":[{"n":1,"text":"one","said":"D1 met: c.test.sh case c"},{"n":2,"text":"two","said":"D2 met: d.sh:1"}]}
+{"card":"c4","issue":8,"step":"review","result":"NO-GO","reused":"2026-01-01T00:00:00Z","reason":"DECLINED: [P2] D1's case c misses a rare input (judge: a rare case)\nOUTSIDE: [P2] lib/x.sh:3 an old typo (judge: outside the change, and D2 does not need it)\nOUTSIDE: [P3] lib/review.sh:483 the suffix (judge: ...) hides D1's words (judge: main has it)\n[P1] D1's evidence: c.test.sh has no case c","doneWhenHolds":[]}
 EOF
   # c3's last check has no review after it: the review of the build before it is not its answer.
   [ "$(loop history donewhen c3 | jq -c .items)" = '[{"n":1,"text":"one","builder":"D1 met: new","reviewer":null}]' ] \
     || fail "history donewhen gave the last check a review from before it: $(loop history donewhen c3)"
   [ "$(loop history donewhen c1 | jq -c .items)" = '[{"n":1,"text":"one","builder":"D1 met: a.test.sh case a","reviewer":"[P1] D1'"'"'s evidence: a.test.sh has no case a"},{"n":2,"text":"two","builder":null,"reviewer":"holds"},{"n":10,"text":"ten","builder":"D10 met: b.c:3","reviewer":"[P2] D10'"'"'s evidence: b.c:3 does not hold it"}]' ] \
     || fail "history donewhen did not pair the last check with the review after it: $(loop history donewhen c1)"
+  [ "$(loop history donewhen c4 | jq -c '.items | map(.reviewer)')" = "[\"OUTSIDE: [P3] lib/review.sh:483 the suffix (judge: ...) hides D1's words\\n[P1] D1's evidence: c.test.sh has no case c\",null]" ] \
+    || fail "history donewhen gave the judge's words (a DECLINED line, or the reason on an OUTSIDE line, which alone names D2) as the reviewer's answer, or cut an OUTSIDE finding at the '(judge: ' it quotes: $(loop history donewhen c4)"
   [ "$(loop history donewhen c9)" = '{"card":"c9","items":[]}' ] || fail "a card with no check is not an empty list: $(loop history donewhen c9)"
 }
 

@@ -8,7 +8,8 @@
 # past its time-out, or its file is missing. Each failure is one line, <hook>\t<why>, in <worktree>.guardfail (the
 # worktree is CLAUDE_PROJECT_DIR). The second failure of one hook in a session also stops the session (a JSON answer
 # with "continue": false, which Claude Code obeys; OpenCode and Codex read only its deny, so watch() in lib/session.sh
-# ends them on the second line), and session1() then blocks the card with the reason "guard <hook> is failing: <why>".
+# ends them at its look after the one that saw the second line, once the session has had the deny), and session1()
+# then blocks the card with the reason "guard <hook> is failing: <why>".
 # Usage: guardrun.sh <timeout in seconds> <the hook's command> < <the call>
 set -uo pipefail
 t=${1:-60} cmd=${2:-}

@@ -160,6 +160,20 @@ t_stallreaped() {
   [[ $out =~ ^rc\ 7\ took\ ([0-9]+)$ ]] && [ "${BASH_REMATCH[1]}" -lt 4 ] \
     || fail "watch() of a step that ended with 7 before its timer began, under bash 5.2's wait -n, did not return 7 at once with nothing on stderr: $out"
 }
+# #1444 (R295). Bug it catches: a build that started a test in the background under timeout (in a process group of
+# its own, as the brief tells builders to) and then ended left that test running in the worktree: watch() ends only
+# the session's process, and block() then took the worktree away under the test. The build session alone, as card()
+# calls it, with the mark (CONVEYOR_CARDRUN) a card's process gives what it starts.
+t_stallleft() {
+  local bg
+  setup '[]'; fx_wt : b.txt one
+  echo 'timeout 60 sleep 31 > /dev/null 2>&1 & echo $! > "$STUB/bg"; echo two >> a.txt' > "$STUB/build" # sleep: a test the build leaves running
+  CONVEYOR_CARDRUN=c7 fx_in 'cd "$R" && session "$FXWT" "Build the issue."; echo "rc=$?"'
+  bg=$(cat "$STUB/bg" 2>/dev/null)
+  [ -n "$bg" ] && grep -qx 'rc=0' "$T/$CASE/run.out" || fail "the build that starts a background test did not run and end well: $(cat "$T/$CASE/run.out")"
+  wait_until "! ps -o stat= -p $bg | grep -qv Z" "ps -o pid=,stat=,args= -p $bg" \
+    || { kill "$bg" 2>/dev/null; fail "the test the build left running in its worktree under timeout outlived the session"; }
+}
 # The runner (conveyor.test.sh) sources every area file before any case runs, so a function two files define is, in
 # every run, the later file's for the cases of both. Bug it catches (#871): views.test.sh and stall.test.sh each
 # defined a watched() of other arguments, and serve.test.sh an eng() of other arguments than mainred.test.sh's, which

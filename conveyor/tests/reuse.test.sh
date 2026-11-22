@@ -36,6 +36,24 @@ t_reusesame() {
   loop check >/dev/null || fail "the review lines do not pass the record check: $(loop check 2>&1)"
 }
 
+# #1444 (R231). Bug it catches: the review after a fix round keeps the lines that fix deleted (excerpts(), from the
+# tree before the fix); a second fix round that changed nothing then made the tree before it, which no longer has
+# those lines, the one its reused review read them from, so that review lost them. The build adds `two` and `three`,
+# the first fix deletes `two`, the review after it cites a.txt:2 (two, as that fix deleted it), the second fix changes
+# nothing; the review it reuses kept `two`, and so must it.
+t_reuseexcerpts() {
+  local r
+  setup "[$(issue 7 2026-01-01)]"
+  echo 'case $(wc -l < "$STUB/sessions") in 1) printf "%s\n" two three >> a.txt ;; 2) sed -i "/^two$/d" a.txt ;; esac' > "$STUB/build"
+  printf '%s\n' '[P2] a.txt:1 a nit. Proof: line 1 reads one' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
+  printf '%s\n' '[P2] a.txt:2 the deleted two was needed. Proof: line 2 read two before the fix' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
+  # loop: only card()'s review loop shows a fix round, the review after it and a reused review after a second fix
+  loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
+  r=$(st 'select(.issue == 7 and .step == "review") | [(.reused // "none" | . != "none"), [.excerpts[]? | select(.at == "a.txt:2") | [.side, .lines]]] | tojson' | tail -n 2)
+  [ "$r" = '[false,[["new",["three"]],["fix",["two"]]]]'$'\n''[true,[["new",["three"]],["fix",["two"]]]]' ] \
+    || fail "the review reused after a fix that changed nothing lost the line the fix before it deleted: $r ($(st 'select(.issue == 7) | "\(.step) \(.result)"' | tr '\n' ,))"
+}
+
 # #8: a NO-GO with a P1: the reused review repeats it after its fix round, and the card blocks as it does today. A
 # case of its own on a main of its own, beside t_reusesame.
 t_reuseblock() {

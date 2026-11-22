@@ -15,7 +15,8 @@ PXURL=http://192.0.2.1:4141
 # One issue, 7, on a main whose builder runs on Claude (the stub). Its sessions log their route ("subscription", or
 # the base URL and token they were given) in $STUB/routes. On the subscription the login has expired (as on the
 # machine the bug was found on: "OAuth session expired and could not be refreshed", no turn, no token); through the
-# proxy the session works, unless $STUB/proxybad is there, when the proxy refuses its key.
+# proxy the session works, unless $STUB/proxybad is there, when the proxy refuses its key, or $STUB/proxy503, when the
+# model API behind it refuses the call (503).
 pxsetup() {
   setup "[$(issue 7 2026-01-01)]"; printf '%s\n' "$GO" > "$STUB/review.1"; tune '.tunables.apiPause = 0'
   unset ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY ENABLE_TOOL_SEARCH
@@ -27,6 +28,7 @@ if [ -z "${ANTHROPIC_BASE_URL:-}" ]; then
 fi
 echo "$ANTHROPIC_BASE_URL ${ANTHROPIC_AUTH_TOKEN:-}" >> "$STUB/routes"
 [ ! -e "$STUB/proxybad" ] || { echo '{"type":"result","is_error":true,"result":"Invalid API key · Please run /login","num_turns":1}'; exit 1; }
+[ ! -e "$STUB/proxy503" ] || { echo '{"type":"result","is_error":true,"result":"API Error: 503 Service Unavailable","num_turns":1,"usage":{"input_tokens":3,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}'; exit 1; }
 echo two >> a.txt
 EOT
 }
@@ -114,6 +116,17 @@ t_proxyboth() {
     || fail "the blocked line lost the words of one route: $(jq -r .tail <<<"$b")"
   [ "$(jq -r .spent.route <<<"$b")" = proxy ] || fail "the blocked line's spent does not say the last try ran through the proxy: $(jq -c .spent <<<"$b")"
   [ "$(loop health | jq -c '.routes | [.subscription.state, .proxy.state]')" = '["expired","fails"]' ] || fail "health does not show both routes failing: $(loop health | jq -c .routes)"
+}
+# #1444 (R299). Bug it catches: with the subscription login expired and the model API behind the proxy refusing each
+# call (503), the build was tried again as the API's refusal, and after the fifth try its reason named the API alone:
+# the expired login, which sent each try to the proxy, was lost.
+t_proxyapi() {
+  pxsetup; tune --arg b "$PXURL" '.models.claudeProxy = {baseUrl: $b, roles: {builder: "fallback"}}'; touch "$STUB/proxy503"
+  pxeng "$PXBUILD"; pxbuilt 1
+  [ "$(grep -c '^subscription$' "$STUB/routes")" = 5 ] && [ "$(grep -c "^$PXURL " "$STUB/routes")" = 5 ] \
+    || fail "the build was not tried 5 times, each on the subscription and then through the proxy: $(cat "$STUB/routes")"
+  pxblocked | jq -r .reason | head -n 1 | grep -q "^build: the model API refused (503[^)]*) at each of 5 tries, .*, through the proxy; on the subscription login, Claude Code's own sign-in expired (exit 1)" \
+    || fail "the blocked line does not name the API's refusal through the proxy and the expired login: $(pxblocked | jq -r .reason)"
 }
 # Each role takes its own route: the builder set to the proxy runs through it at once; the Claude reviewer, set to the
 # proxy as its fallback, runs on the subscription first, and when that login fails runs again through the proxy.

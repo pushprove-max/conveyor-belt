@@ -66,7 +66,8 @@ t_slicesshadow() {
 # On, a released parent: the judge is given the issue and the file it names as main has it; the slices are filed as
 # follow-ups of the parent (the follow-up label and its priority, "Follow-up of #7", each slice's Done-when items and
 # the parent's it covers, the second depending on the first), queued; the parent is held, told which slice covers each
-# Done-when item, and its card ends closed before any worktree (1). Bug caught: a split issue was also built whole.
+# Done-when item, and the check ends its card closed (1), before any build (card() then removes its worktree). Bug
+# caught: a split issue was also built whole.
 t_sliceson() {
   YES='Visible change approved: yes, 2026-11-02; condition: only for admins'
   SEEN='The Save button reads Keep.'
@@ -75,7 +76,7 @@ t_sliceson() {
   fx_in 'splitcheck c1-7 7'
   # Bug caught: a path in a hidden directory was not read as a file, so the judge never saw it.
   grep -q 'hidden split' "$STUB/prompt" || fail "the judge was not given .claude/x.js, a file in a hidden directory: $(cat "$STUB/prompt")"
-  [ "$RC" = 1 ] && [ ! -e "$T/$CASE/cards/c1-7" ] || fail "a split issue's card did not end before its worktree (exit $RC): $(cat "$T/$CASE/run.out")"
+  [ "$RC" = 1 ] && [ ! -e "$T/$CASE/cards/c1-7" ] || fail "the split check of a split issue did not end its card (exit $RC), or made a worktree of its own: $(cat "$T/$CASE/run.out")"
   grep -q '^D3: third$' "$STUB/prompt" && grep -q 'hello split' "$STUB/prompt" || fail "the judge was not given the Done-when items and src/app.sh: $(cat "$STUB/prompt")"
   [ "$(jq -sc 'map([.number, .title, (.labels | map(.name) | sort)])' "$STUB/filed")" = '[[100101,"part one",["P1","conveyor-followup"]],[100102,"part two",["P1","conveyor-followup"]]]' ] \
     || fail "the slices were not filed as follow-ups of the parent's priority: $(cat "$STUB/filed")"
@@ -436,6 +437,29 @@ t_slicesgrownlint() {
   [ "$(st 'select(.step | IN("lint", "grown", "fix", "review")) | "\(.step):\(.result)"' | tr '\n' ' ')" = 'lint:pass grown:split fix:ok lint:findings fix:ok lint:pass review:GO lint:pass ' ] \
     && ! git -C "$R" show HEAD:src/c1.sh | grep -q BAD \
     || fail "the change the split's fix left was not linted before its review: $(st 'select(.step | IN("lint", "grown", "fix", "review")) | "\(.step):\(.result)"' | tr '\n' ' ')"
+}
+
+# #1444 (R232). Bug caught: a trial card's pick names the pipeline files its change touches (trialflag()), set once a
+# pass before the size check; a split for size that moved a pipeline file into a slice left it named on the card's
+# review and landing lines, though the change that landed does not touch it. grownrun()'s card on issue 10 (a trial:
+# the rule pick On, its number a multiple of 5), with src/s2.sh, which the split moves out, a pipeline file. A whole
+# card: only card() shows the flag set again after growcheck(). Review E3: the flag was set after each lint gate, so the
+# gate's lines (and the Board, which reads the last pick) lost it before the split and kept it after; a lint command
+# that passes writes those lines.
+t_slicesgrowntrial() {
+  slices on "$GROWN" "[$(big 10 | jq -c --arg l "$GYES" '.body = "Change src/app.sh.\n\nDone when:\n- first\n- second\n\n" + $l')]"
+  tune '.split.growFiles = 3 | .models.allowed.claude += ["claude-sonnet-5-5"] | .pipelineFiles = ["src/s2.sh"] | .lint = {commands: [{files: ["src/*.sh"], run: "true {files}"}]}'
+  loop control rules pick=on >/dev/null || fail "control rules pick=on was refused"
+  echo 'main s1' > "$R/src/s1.sh"; git -C "$R" add src && git -C "$R" commit -qm s1 || fail "main's src/s1.sh"
+  echo "[ -e src/c1.sh ] || { $FIVE; }" > "$STUB/build"; echo "$GO" > "$STUB/review.1"
+  # loop: only card()'s pass shows the flag set before the size check and the lines written after it
+  loop run 1 >/dev/null
+  [ "$(st 'select(.step == "landed") | .issue')" = 10 ] && [ "$(st 'select(.step == "build") | .pick.trial')" = true ] \
+    && [ "$(landedfiles)" = 'src/c1.sh src/c2.sh src/c3.sh ' ] || fail "issue 10 did not build as a trial card and land the core files: $(st '"\(.step) \(.pick.trial)"' | tr '\n' ' ') $(landedfiles)"
+  [ "$(st 'select(.step | IN("review", "landed")) | .pick.pipeline // [] | tojson' | sort -u)" = '[]' ] \
+    || fail "the trial card's review or landing line names a pipeline file the split moved out of its change: $(st 'select(.step | IN("review", "landed")) | "\(.step) \(.pick.pipeline)"' | tr '\n' ' ')"
+  [ "$(st 'select(.step | IN("lint", "grown")) | "\(.step):\(.pick.pipeline // [] | join(","))"' | tr '\n' ' ')" = 'lint:src/s2.sh grown:src/s2.sh lint: lint: ' ] \
+    || fail "the trial card's lint lines do not name the pipeline files of the change each gate read (src/s2.sh before the split, none after): $(st 'select(.step | IN("lint", "grown")) | "\(.step):\(.pick.pipeline)"' | tr '\n' ' ')"
 }
 
 # Shadow: the judge's answer is recorded on the grown line, and the card lands its change as it was: nothing filed,

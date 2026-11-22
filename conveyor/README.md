@@ -48,7 +48,7 @@ its own, and the Board's Rules tab sets them in its Judge row.
   before each review and the landing gate before it lands. The exception is a review of the change that the landing
   gate's lint fix left: while no other session changes it, it has no review gate, because the landing gate checks it. Off, no lint command runs in a card and the brief has no `# Lint` section.
 - `split`: the rule Split large issues, `off`, `shadow` or `on`. It is on by default (`conveyor.sh control rules split=<off|shadow|on>`).
-  Before a card makes its worktree, code measures its issue against the pack's `split` limits; an issue that reaches
+  Before a card builds, code measures its issue against the pack's `split` limits; an issue that reaches
   one goes to the judge one time, which answers keep or 2 or 3 slices. Shadow records the verdict on the card's
   `split` line, and the card builds the issue whole. On files the slices as follow-ups (`Follow-up of #N`) and as
   sub-issues of the issue, and holds the issue as their umbrella; Conveyor closes it when all its slices are closed. Off checks no issue.

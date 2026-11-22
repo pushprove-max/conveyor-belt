@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # The rule Split large issues (the control record's rules.split: off, shadow or on; on by default). card() asks
-# splitcheck() once, as the card starts and before its worktree is made, for an issue of its own (not a main-red fix
+# splitcheck() once, as the card starts, once its worktree is made and holds no stray staged change (cardtree(), lib/card.sh), and before the build, for an issue of its own (not a main-red fix
 # card, issue 0, nor a branch). Its issue is left out when it is a follow-up (the pack's follow-up label: the slices of
 # a split issue have it too), or when a split line of the card records or the retried lines already holds the same
 # text of it (hash: the git hash of its title, a newline and its body): an issue is checked again only once it has

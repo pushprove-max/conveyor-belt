@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # The rule Pick settings (the control record's rules.pick: off, shadow or on; off by default). card() asks
-# modelpick() once, after the split check and before the worktree, for an issue of its own (not a main-red fix card,
+# modelpick() once, after the worktree is made (cardtree(), lib/card.sh) and the split check, and before the build, for an issue of its own (not a main-red fix card,
 # issue 0, nor a branch); the slices of a split issue are issues of their own, so each gets its own pick. Code
 # decides the card's group, from its issue, and the builder the rule chooses for that group: the project's builder,
 # or the challenger on a trial (below); when the owner set the issue's builder (`control card <issue> builder`), the

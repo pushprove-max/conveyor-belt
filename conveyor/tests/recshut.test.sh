@@ -264,6 +264,19 @@ t_doneoutside() {
   [ -z "$(ls "$T/$CASE/cards")" ] && [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] || fail "something was committed, or the worktree is left: $(ls "$T/$CASE/cards")"
 }
 
+# #1444 (R251). Bug it catches: an OpenCode build that wrote its report and its DONE-OUTSIDE line as two text parts of
+# its last step had only the last part read as its reply (lastreply()), so the issue was closed with the DONE-OUTSIDE
+# line alone as its comment, and the report was lost.
+t_doneoutsideparts() {
+  donewt 16 ''; echo "$GO" > "$STUB/review.1"
+  { echo '{"type":"step_start","part":{}}'; jq -cn '{type: "text", part: {text: "I judged 3 files and filed 3 issues."}}'
+    jq -cn --arg o "$OUT" '{type: "text", part: {text: $o}}'; echo '{"type":"step_finish","part":{}}'; } > "$T/$CASE/cards/c0-16.out"
+  fx_in 'cd "$R" && nochange c0-16 16 "$CONVEYOR_CARDS/c0-16" "the brief of # Issue #16:"'
+  [ "$RC" = 0 ] && [ "$(cat "$STUB/closed" 2>&1)" = 16 ] || fail "nochange did not close #16 ($RC): $(cat "$T/$CASE/run.out") $(st '"\(.step) \(.reason)"')"
+  grep -qF 'I judged 3 files and filed 3 issues.' "$STUB/close-comments" && grep -qF "$OUT" "$STUB/close-comments" \
+    || fail "the closing comment of a two-part OpenCode reply does not hold both parts: $(cat "$STUB/close-comments" 2>&1)"
+}
+
 # The reviewer finds the evidence short: blocked, the reason giving the reviewer's finding, the issue left open.
 t_doneoutsidenogo() {
   donewt 15 "$OUT"; echo "$NOGO" > "$STUB/review.1"

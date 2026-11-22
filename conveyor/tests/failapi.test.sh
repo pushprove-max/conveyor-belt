@@ -308,3 +308,26 @@ EOT
   [ "$(head -n 1 "$T/$CASE/run.out" | jq -c '[.usage, (.unread | type)]')" = '[null,"string"]' ] \
     || fail "the resumed try's usage was read from a transcript that holds the refused try too: $(head -n 1 "$T/$CASE/run.out")"
 }
+
+# #1444 (R300). Bug it catches: the try after a resumed try that stalled runs fresh, in a session of its own, but the
+# step still took it for the resumed try, so its transcript was not read: a fresh try whose output holds no usage
+# (only Claude Code's transcript of its session does) left the step's usage unread, and the step unpriced.
+t_apiresumefresh() {
+  setup '[]'; tune '.tunables.apiPause = 0.02 | .tunables.stuck = 2 | .tunables.reviewPause = 1'; fx_wt : b.txt one
+  # Refused by the API, its resume stalls, the fresh try after that builds the change and gives no usage in its output.
+  cat > "$STUB/build" <<'EOT'
+echo x >> "$STUB/calls"; n=$(wc -l < "$STUB/calls")
+[ "$n" != 1 ] || { echo '{"type":"result","session_id":"0aa1-b1","is_error":true,"result":"API Error: 503 Service Unavailable","usage":{"input_tokens":3,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}'; exit 1; }
+[ "$n" != 2 ] || { echo '{"type":"system","session_id":"0aa1-b1"}'; exec sleep 60; } # sleep: the resumed try stalls, ended by the engine
+echo '{"type":"system","session_id":"0aa1-b3"}'; echo two >> a.txt; echo '{"type":"result","session_id":"0aa1-b3","is_error":false,"num_turns":1,"usage":"n/a"}'; exit 0 # the claude stub would print its own usage after this
+EOT
+  # The default login's transcript of the fresh try's session.
+  local h=$T/$CASE/home p; p=$h/.claude/projects/$(cd "$FXWT" && pwd -P | sed 's/[^A-Za-z0-9]/-/g'); mkdir -p "$p"
+  jq -cn '{type: "assistant", sessionId: "0aa1-b3", message: {id: "msg_3", model: "claude-sonnet-5-5", usage: {input_tokens: 5, cache_creation_input_tokens: 100, cache_read_input_tokens: 0, output_tokens: 40}}}' > "$p/0aa1-b3.jsonl"
+  apicall 'HOME='"$h"'; session "$FXWT" "Build the issue."; echo "rc=$?"'
+  grep -qx rc=0 "$T/$CASE/run.out" && [ "$(wc -l < "$STUB/sessions")" = 3 ] && [ "$(grep -c -- '--resume' "$STUB/sessions")" = 1 ] && sed -n 2p "$STUB/sessions" | grep -q -- '--resume 0aa1-b1 ' \
+    || fail "a build refused once, whose resume stalled, did not run fresh once more and end well: $(cat "$STUB/sessions") $(cat "$T/$CASE/run.out")"
+  # Its 40 output tokens are counted (with the refused try's 1); the stalled try's output holds none, which unread still says.
+  [ "$(grep -m 1 '^{' "$T/$CASE/run.out" | jq -c '.usage.output')" = 41 ] \
+    || fail "the fresh try's usage, in its own transcript only, was not read: $(grep -m 1 '^{' "$T/$CASE/run.out")"
+}

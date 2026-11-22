@@ -3,10 +3,8 @@
 # ends; nothing waits between a line and the next step, which is how cards() names the step in progress.
 # With a branch and its tip (land-branch) the card skips the build: that commit is merged into the worktree, staged
 # and uncommitted, in place of a session's work. Issue 0 is a branch that names no issue: branchissue() stands in.
-# Before the worktree, the rule Split large issues checks the card's issue (splitcheck(), lib/slices.sh): an issue it
-# splits ends its card there, closed, its slices filed. Then the rule Pick settings records the card's group and
-# builder choice on each of its lines from there on, and with the rule On sets a trial card's builder (modelpick(),
-# lib/modelpick.sh).
+# Once the worktree is made and holds no stray staged change (cardtree()), the rule Split large issues checks the card's issue (splitcheck(), lib/slices.sh): an issue it splits ends its card there, closed, its slices filed, its worktree removed.
+# Then the rule Pick settings records the card's group and builder choice on each of its lines from there on, and with the rule On sets a trial card's builder (modelpick(), lib/modelpick.sh).
 . "$HERE/lib/slices.sh" || exit 1
 . "$HERE/lib/modelpick.sh" || exit 1
 . "$HERE/lib/lint.sh" || exit 1
@@ -63,6 +61,7 @@ switchcode() { # <card> <the step it begins>
     [ -n "$why" ] || ( . "$tmp/load" && NAMED='' && names && cardrules "$issue" > "$tmp/rules" && header "$vrule" > "$tmp/hdr" && cardsettings "$tmp/settings" ) >/dev/null 2>&1 \
       || why=${why:-"the new code could not make the card's rules, header and settings"}
   fi
+  [ -n "$why" ] || mv -f "$tmp/settings" "$CARDS/$1.settings" 2>/dev/null || why="the new code's settings for the card could not be saved as $CARDS/$1.settings"
   if [ -z "$why" ]; then
     # The texts card() made its prompts of, before the switch and after it: its header and rules, and the review
     # texts its rv is made of (KINDS with the kinds judgeon names now). After the next switch, its new ones are old.
@@ -71,7 +70,6 @@ switchcode() { # <card> <the step it begins>
     . "$tmp/load"; NAMED=''; names >/dev/null 2>&1
     nv=("$(<"$tmp/hdr")" "$(<"$tmp/rules")" "$REVIEWOFF" "$REVIEW" "$INHERIT" "$HELD" "${k:+${KINDS//'<kinds>'/"$k"}}")
     for i in "${!o[@]}"; do [ -z "${o[i]}" ] || [ "${o[i]}" = "${nv[i]}" ] || { SWAPOLD+=("${o[i]}"); SWAPNEW+=("${nv[i]}"); }; done
-    mv -f "$tmp/settings" "$CARDS/$1.settings"
     hdr=${nv[0]}; rules=${nv[1]}
   fi
   rm -rf "$tmp"
@@ -271,8 +269,7 @@ emptychange() { # <card> <issue number> <worktree> <branch, or ''>
   [ "$2" = 0 ] && [ -z "$4" ] && linksonly "$1" "$3" || return 1
   git -C "$3" reset -q --hard HEAD || :
 }
-# card()'s steps, in turn: cardopen(), cardbuild(), then on each pass of the review loop cardreview() and cardfix()
-# here, cardready(), cardlanding() and landconflict() in lib/cardland.sh. Each reads and sets card()'s locals (bash's
+# card()'s steps, in turn: cardtree(), cardopen(), cardbuild(), then on each pass of the review loop cardreview() and cardfix() here, cardready(), cardlanding() and landconflict() in lib/cardland.sh. Each reads and sets card()'s locals (bash's
 # dynamic scope) and says in go what follows. card() sets go=end before each: a step that returns leaving it so ends
 # the card, with the step's exit as card()'s; else '' (the next step), next (the next pass of the review loop),
 # landed (a batch or its own landing landed it) or out (its landing did not land: landconflict()).
@@ -287,7 +284,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local grown='' # grown: the judge was asked about the size of its change (growcheck(), lib/slices.sh)
   local rline='' ended='{}' stop='' finend='{}' earlyend='' fe # rline, ended, stop: a review's line before it is written, and why the loop ended (loopstop()); finend, earlyend, fe: why the loop of a port's kept review ended, and the stop the filed line carries
   local lfix='' # lfix: the change the landing gate's lint fix left, its cardpatch() (lintgate(), lib/lint.sh)
-  local fixtree='' # fixtree: the tree before the last fix round, which holds the lines that fix deleted (excerpts())
+  local fixtree='' rtree='' # fixtree: the tree before the last fix round, which holds the lines that fix deleted (excerpts()); rtree: the one the last review read, which a reused review reads again
   local after # what follows a review (afterreview())
   local priv privfix='' p1 p1fix='' # priv: a last-review finding that is a privacy hit in the card's own change (privown()); privfix: its fix round was given; p1: the P1 finding that gets one fix round, p1fix: that round was given
   local fixed=0 # fixed: the fix sessions this card has run, review fixes and test fixes; the second and every later one runs one effort level up (session1())
@@ -304,7 +301,8 @@ card() { # <card> <issue> [<branch> <tip>]
   local go sx # go, sx: what the step that returned says follows (above), and its exit
   # shellcheck disable=SC2034 # SEATCARD is read by seat() in lib/control.sh
   local SEATCARD=$n # every step of this card, its split check too, runs on the seats the control record keeps for its issue (seat(), lib/control.sh)
-  [ -n "$br" ] || [ "$n" = 0 ] || splitcheck "$c" "$n" || return 0
+  go=end; cardtree; sx=$?; [ "$go" != end ] || return $sx
+  [ -n "$br" ] || [ "$n" = 0 ] || splitcheck "$c" "$n" || { clean "$wt"; return 0; }
   # shellcheck disable=SC2034 # PICK and PICKCARD are read by line() in lib/records.sh, PICKSEAT and PICKSEATS by seat() in lib/control.sh
   local PICK='' PICKCARD='' PICKSEAT='' PICKSEATS='' # the card's pick (modelpick(), lib/modelpick.sh), which line() puts on each of its lines, a trial's builder and the promoted reviewer and judge
   [ -n "$br" ] || [ "$n" = 0 ] || modelpick "$c" "$n"
@@ -328,11 +326,18 @@ card() { # <card> <issue> [<branch> <tip>]
   done
   clean "$wt"
 }
-# The worktree, its dependencies and the brief (sprompt), with the resume of a retried card (resumeplan()). go: ''.
-cardopen() {
+# The worktree, with a branch's tip merged in, before anything asks GitHub for the issue (splitcheck(), modelpick(), cardopen()): a stray staged change blocks the card at once, not when GitHub answers. go: ''.
+cardtree() {
   err=$(git worktree add -q --detach "$wt" "refs/heads/$BRANCH" 2>&1) || { block "$c" "$n" "$wt" "worktree: $err"; return; }
   [ -z "$br" ] || err=$(git -C "$wt" merge -q --squash "$tip" 2>&1) \
     || { block "$c" "$n" "$wt" "worktree: branch $br does not merge into main as it stands; rebase it on main and land it again: ${err:0:400}"; return; }
+  # A staged change in the new worktree of main (a checkout hook's), before a kept patch is applied (resumeplan()), is no work of this card: it stops.
+  [ -n "$br" ] || err=$(git -C "$wt" diff --cached --name-only 2>&1) || { block "$c" "$n" "$wt" "worktree: the engine could not read the staged change of the new worktree: ${err:0:400}"; return; }
+  [ -n "$br" ] || [ -z "$err" ] || { block "$c" "$n" "$wt" "worktree: the new worktree already holds a staged change that is no kept work of this issue: $(paste -sd ' ' - <<<"$err" | cut -c 1-400)"; return; }
+  go=''
+}
+# The worktree's dependencies and the brief (sprompt), with the resume of a retried card (resumeplan()). go: ''.
+cardopen() {
   # Its issue's retried lines, read by prior() and carried(), kept in this shell (stdb, lib/records.sh).
   [ "$n" = 0 ] || stdb ask issue retried "$n" >/dev/null 2>&1 || :
   # A card of issue 0 (no GitHub issue): its local record stands in, a branch's (branchissue()), a main-red fix card's (redissue()) or a Tests page card's
@@ -352,7 +357,7 @@ cardopen() {
   # The resume of a retried card: how it takes up the kept patch of its issue's blocked cards.
   resumeplan || { block "$c" "$n" "$wt" "$err"; return; }
   # A main-red fix card commits, with its fix, the links from the files of the landing that broke a case to its test
-  # file (issue 598: mainred.sh testlinks()). After resumeplan's check that the new worktree holds no staged change.
+  # file (issue 598: mainred.sh testlinks()). After the check above that the new worktree holds no staged change.
   testlinks "$c" "$wt" || { block "$c" "$n" "$wt" "the test links of the main-red record could not be staged in .conveyor/test-links.json"; return; }
   # ybase is kept beside the worktree (yesbase() reads it for the next card) once the checks of the new worktree have
   # passed: a card that stops on one of them keeps no count.
@@ -513,10 +518,9 @@ cardreview() {
   redbrief "$c" "$n" "$br"
   # A staged change that is no change (emptychange(): a main-red fix card's links alone too) goes to nochange().
   ! emptychange "$c" "$n" "$wt" "$br" || { nochange "$c" "$n" "$wt" "$sprompt"; return; }
-  trialflag "$wt" # a trial card's pick names the pipeline files its change touches (lib/push.sh)
-  # The review gate (lintgate(), lib/lint.sh): a fix of lint findings changed the change, so a kept review, a kept
-  # patch's review (land) and a test pass no longer stand for it, and the review of this pass reads all of it.
-  lintgate "$c" "$n" "$wt" "$issue" "$sprompt" "$br"; case $? in 1) return ;; 2) kept=''; docpass=''; refix=''; [ "$mode" != land ] || mode='' ;; esac
+  # The review gate (lintgate(), lib/lint.sh): a fix of lint findings changed the change, so a kept review, a kept patch's review (land) and a test pass no longer stand for it, and the review of this pass reads all of it; a fix that left no change goes to nochange() as above.
+  trialflag "$wt" # a trial card's pick names the pipeline files its change touches (lib/push.sh): on the gate's lines and its fix's, then on what that fix left
+  lintgate "$c" "$n" "$wt" "$issue" "$sprompt" "$br"; case $? in 1) return ;; 2) ! emptychange "$c" "$n" "$wt" "$br" || { nochange "$c" "$n" "$wt" "$sprompt"; return; }; trialflag "$wt"; kept=''; docpass=''; refix=''; [ "$mode" != land ] || mode='' ;; esac
   if [ "$mode" = land ]; then
     # Landing from the kept patch: the kept review is this change's review, and it let the card land (a GO, or a
     # last review's NO-GO), so there is no review here and no review line. A review after this is this card's first.
@@ -531,9 +535,9 @@ cardreview() {
     # or when an ordered card went past it and main moved meanwhile (then even when its patch still applies).
     # A change grown past the pack's split.growFiles (growcheck(), lib/slices.sh): asked once a card; split, its one
     # fix session dropped the slices' parts, so this review reads the whole change, not that fix alone, and the
-    # review gate runs again on what that fix left.
-    if [ -z "$grown" ] && [ -z "$br" ]; then growcheck "$c" "$n" "$wt" "$issue" "$sprompt"; case $? in 1) return ;; 2) refix=''; git -C "$wt" add -A 2>/dev/null
-      lintgate "$c" "$n" "$wt" "$issue" "$sprompt" "$br"; [ $? != 1 ] || return; docpass='' ;; esac; fi
+    # review gate runs again on what that fix left; a change it left empty goes to nochange(), and a trial card's pipeline files are those it left, on the gate's lines too.
+    if [ -z "$grown" ] && [ -z "$br" ]; then growcheck "$c" "$n" "$wt" "$issue" "$sprompt"; case $? in 1) return ;; 2) refix=''; git -C "$wt" add -A 2>/dev/null; trialflag "$wt"
+      lintgate "$c" "$n" "$wt" "$issue" "$sprompt" "$br"; [ $? != 1 ] || return; docpass=''; ! emptychange "$c" "$n" "$wt" "$br" || { nochange "$c" "$n" "$wt" "$sprompt"; return; }; trialflag "$wt" ;; esac; fi
     # A fix or rebase session changed a Fix the waiting, Fix hollow cases, Delete it or Make it run alone card: its check runs again on
     # what this review reads, and the card is blocked when it no longer holds.
     if [ -n "$pk" ] && [ "$(git -C "$wt" write-tree)" != "$pt" ]; then
@@ -550,7 +554,7 @@ cardreview() {
     # difference, not the change alone.
     cpid=$(cardpatch "$wt"); chead=$(git -C "$wt" rev-parse HEAD 2>/dev/null); cseen=$(git -C "$wt" hash-object --stdin <<<"$more")
     if [ -z "$fin" ] && t=$(reusable "$c" "$cpid" "$chead" "$cseen"); then
-      echo "conveyor: card $c: its staged change, main, trailers and D<n> lines are those of its last review: that review stands, with no review session"
+      echo "conveyor: card $c: its staged change, main, trailers and D<n> lines are those of its last review: that review stands, with no review session"; fixtree=$rtree
     else
       # The one review of a port reads what the port changed: the kept patch against the staged change.
       if [ -n "$fin" ]; then
@@ -584,8 +588,8 @@ cardreview() {
     # doneWhenHolds: the D<n> its `DONE-WHEN: D<n> holds` lines name, which the reason leaves out (UNRECORDED); the
     # Board reads them on demand (history donewhen). excerpts: the lines its findings cite, from the tree it read
     # (excerpts(), lib/review.sh), which the Board reads on demand too (history excerpts); after a fix round, also
-    # from the tree before that fix (fixtree), which holds the lines the fix deleted.
-    ex=$(excerpts "$wt" "$fixtree"); fixtree=''
+    # from the tree before that fix (fixtree), which holds the lines the fix deleted; a reused review, from the tree the review it reuses read (rtree).
+    ex=$(excerpts "$wt" "$fixtree"); rtree=$fixtree; fixtree=''
     # The line is written once the loop's end is known (stop, below); a review with no verdict blocks with it here. Its tail, the review's recorded lines (no USER-VISIBLE or VERDICT line; their last 60, TAIL in records.sh), as the reason is cut at 1500 characters: on a NO-GO, and on a GO with an OUTSIDE line, which the Board lists.
     rline=$(grep -Ev "$UNRECORDED" "$wt.review" | jq -cRs --arg res "$res" --argjson t "$t" --arg v "$vis" --argjson k "$(counts "$wt.review")" --arg p "$cpid" --arg m "$chead" --arg s "$cseen" --argjson sv "${sv:-[]}" --argjson an "${an:-[]}" \
       --argjson ro "$(rollouts "$wt.review" ROLLOUT)" --argjson h "$(sed -n 's/^DONE-WHEN: D\([0-9][0-9]*\) holds[[:space:]]*$/\1/p' "$wt.review" | jq -sc 'unique')" --argjson ex "${ex:-[]}" \
@@ -639,13 +643,9 @@ cardfix() {
 # It reads card()'s n, br, wt, issue, vrule, heldto and inh, and sets its from, fromk, was, mode (land, review,
 # session, port, stale, or none: built from nothing), note, fin, finend, pro and rounds, and the files
 # beside the worktree that come with the kept patch (review, rerun, trailers, covered, outside, rounds). It fails, with the
-# reason in err, when the card must block: a staged change in the new worktree that is no kept patch, a kept patch it
-# could not take out again, or retried lines it could not read.
+# reason in err, when the card must block: a kept patch it could not take out again, or retried lines it could not read (cardtree() has checked the new worktree holds no staged change).
 resumeplan() {
   local prev d t rev='' kw='' crev='[]' # rev: the kept review prior() found; kw: keptway()'s answer for a kept patch; crev: the review lines of the kept-patch chain this card carries (pro and rounds are read from them)
-  # A staged change in the new worktree of main (a checkout hook's), before a kept patch is applied, is no work of this card: it stops. Bug: checked after the apply.
-  [ -n "$br" ] || t=$(git -C "$wt" diff --cached --name-only 2>&1) || { err="worktree: the engine could not read the staged change of the new worktree: ${t:0:400}"; return 1; }
-  [ -n "$br" ] || [ -z "$t" ] || { err="worktree: the new worktree already holds a staged change that is no kept work of this issue: $(paste -sd ' ' - <<<"$t" | cut -c 1-400)"; return 1; }
   if [ -z "$br" ] && prev=$(prior "$n" "$([ "$n" != 0 ] || testcardwas "$c")") && [ -n "$prev" ]; then
     from=$(jq -r .card <<<"$prev"); fromk=$(jq -r .kept <<<"$prev"); was=$(jq -r .reason <<<"$prev"); rev=$(jq -r .review <<<"$prev")
     [ -z "$rev" ] || cp "$rev" "$wt.review"

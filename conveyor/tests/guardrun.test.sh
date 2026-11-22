@@ -86,6 +86,22 @@ EOF
     || fail "Needs you does not show the failing guard: $(jq -c '.needsYou.blocked' <<<"$out")"
 }
 
+# #1444 (R296). Bug it catches: guardrun.sh records a guard's second failure before it gives the session the refusal,
+# and watch() ended the session at its first look that saw the record, so the session could be killed before it read
+# that refusal. watch() (lib/session.sh) alone, on a stand-in session, as only its looks are under test: the record
+# is there from the start, and the session reads the refusal (writes denied) between the first look (at LIVE, 1 s)
+# and the second; it must still be ended, at that second look.
+t_guardseen() {
+  local d=$T/$CASE w=$T/$CASE/cards/c7-7; mkdir -p "$d/cards"
+  printf 'crash.sh\tit crashed with exit 1\ncrash.sh\tit crashed with exit 1\n' > "$w.guardfail"
+  ( . "$SRC/lib/portable.sh"; eval "$(sed -n '/^watch() {/,/^}/p' "$SRC/lib/session.sh")"
+    # shellcheck disable=SC2034 # LIVE and STUCK are read by watch(), defined by the eval
+    LIVE=1 STUCK=1200; { sleep 1.4; : > "$d/denied"; exec sleep 30; } > "$w.out" 2>&1 < /dev/null & # sleep: the session reads the refusal 1.4 s in, then goes on until it is ended
+    watch $! "$w.out" "$w.live" build claude-sonnet-5-5; echo "rc=$?" ) > "$d/run.out" 2>&1
+  [ -e "$d/denied" ] || fail "the session was ended before it read the refusal of the guard that failed twice (guardfail: crash.sh twice): $(cat "$d/run.out")"
+  grep -qx 'rc=143' "$d/run.out" || fail "the session that read the refusal was not ended by watch() (guardfail: crash.sh twice): $(cat "$d/run.out")"
+}
+
 # R118. Bug it catches: the guard failures of a stalled try counted against the try that replaces it, as session1()
 # cleared them once, before its stall-retry loop: one crash in the stalled try and one in the next made two, and the
 # next try was ended and the card blocked for 'guard crash.sh is failing'. The build stub runs the crashing guard on

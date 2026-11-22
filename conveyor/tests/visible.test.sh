@@ -235,6 +235,11 @@ t_unclearspaces() {
     || fail "a yes line or verdict lines with trailing spaces were not read as written: $(visibleof $'USER-VISIBLE: yes: a button \t' 'VERDICT: GO  ' '' $'VERDICT: GO\t ')"
   [ "$(visibleof 'USER-VISIBLE: no, I think' 'VERDICT: GO')" = 'GO|' ] || fail "USER-VISIBLE: no, I think was taken as a clear answer"
   [ "$(visibleof 'USER-VISIBLE: no' 'VERDICT: GO, I think')" = 'none|no' ] || fail "VERDICT: GO, I think was taken as a clear verdict"
+  # #1444 (R250): an em space (U+2003) at the end is other added text, not a space or tab, though [[:blank:]] takes it
+  # in under a UTF-8 locale: the verdict line and the USER-VISIBLE line that end in one are no answer.
+  local em=$'\xe2\x80\x83'
+  [ "$(LC_ALL=C.UTF-8 visibleof "USER-VISIBLE: no$em" "VERDICT: GO$em")" = 'none|' ] \
+    || fail "a review whose USER-VISIBLE: no and VERDICT: GO lines end in an em space gave an answer: $(LC_ALL=C.UTF-8 visibleof "USER-VISIBLE: no$em" "VERDICT: GO$em")"
 }
 # A NO-GO at the cap with `yes` and no approval: blocked, no follow-ups filed, findings and sentence posted.
 t_visiblecap() {

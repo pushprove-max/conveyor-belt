@@ -572,9 +572,10 @@ snapshot() (
   # it runs (its live record there, the card open, its last line no start), it is the card's proof, the step in progress.
   # A step that waits for its seat's CLI (seatwait(), its live record's cli) is shown with no start line before it too:
   # the judge's check of a test file for hollow cases waits after the build line.
+  # A running step whose result named the models that ran it keeps their split (stats.byModel, watch()): its live part is priced at each one's rate.
   jq -c --argjson m "$models" --argjson live "$LIVEJSON" --argjson proof "$(proofs)" --argjson away "$(aways)" --argjson red "$(redtitles)" --slurpfile old "$d/old" '(map($live[.card] as $v | $proof[.card] as $p
       | .title = ($red[.card] // .title) | .gaveWay = ($away[.card].to // null) | .gaveWayFixing = ($away[.card].fixing == true)
-      | if $v != null and .result == "" and ((.x.log | last | .step == "start" and .of == $v.step) or ($v.cli | type) == "string") then .live = ($v | {step, at, turns, last, usage, files, tests, list, action, waits, before} + (if $v.zero == true then {zero: true} else {} end) +(if $v.model then {model: $v.model} else {} end) + (if ($v.effort | type) == "string" and $v.effort != "" then {effort: $v.effort} else {} end) + (if ($v.stalled | type) == "string" then {stalled: $v.stalled} else {} end)) else . end
+      | if $v != null and .result == "" and ((.x.log | last | .step == "start" and .of == $v.step) or ($v.cli | type) == "string") then .live = ($v | {step, at, turns, last, usage, files, tests, list, action, waits, before} + (if $v.zero == true then {zero: true} else {} end) +(if $v.model then {model: $v.model} else {} end) + (if ($v.effort | type) == "string" and $v.effort != "" then {effort: $v.effort} else {} end) + (if ($v.stalled | type) == "string" then {stalled: $v.stalled} else {} end) + (if ($v.stats.byModel | type) == "object" then {stats: {byModel: $v.stats.byModel}} else {} end)) else . end
       | if ($p | type) == "object" and .result == "" and (.x.log | last | .step != "start") then .proof = ($p | {at, files, tests, list, action}) else . end)
     + ($old[0] | map(.x.retried = true)) | map(.models = $m))[]' "$d/rows" > "$d/all" || exit 1
   # The pack's model prices, added models and aliases (prices) win over the built-in table; a pack that does not read

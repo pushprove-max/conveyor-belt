@@ -337,6 +337,20 @@ t_lintgatefix() {
   recok "$ST/cards.jsonl" "the card with lint lines"
 }
 
+# #1444 (R233). Bug it catches: a lint fix that took out the build's only change (its BAD line) left the change empty,
+# and the card went on to review it: the check for an empty change ran before the review gate only. The card ends as
+# one whose session made no change (nochange()), with no review session.
+t_lintgateempty() {
+  gatesetup "[$(issue 7 2026-01-01)]"
+  gatesessions 'echo BAD >> a.txt' "sed -i '/BAD/d' a.txt"
+  # loop: only card()'s review loop shows the empty-change check after the gate's fix and before the review
+  loop run > /dev/null || fail "run exited non-zero"
+  [ "$(did)" = 'build lintfix' ] && [ ! -s "$STUB/reviews" ] && [ -z "$(st 'select(.issue == 7 and .step == "review")')" ] \
+    || fail "a lint fix that left no change was reviewed: $(did), $(wc -l < "$STUB/reviews" 2>/dev/null) reviews"
+  [[ $(st 'select(.issue == 7 and .step == "blocked") | .reason') == 'the session made no change, so there is nothing to review.'* ]] \
+    || fail "the card whose lint fix left no change did not end as one with no change: $(st 'select(.issue == 7) | "\(.step) \(.reason)"' | tr '\n' ,)"
+}
+
 # Bug: a retry that lands an approved kept patch (no build, no review) lands a finding the gate finds in it. The
 # finding gets one fix session, then a fresh review session reads the fixed change, and that review lets it land.
 t_lintgateland() {

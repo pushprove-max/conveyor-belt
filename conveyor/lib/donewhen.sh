@@ -192,17 +192,24 @@ donewhen() { # <worktree> <issue json>
 # (the Board asks for it when a card's Done-when line is opened): {card, items: [{n, text, builder, reviewer}]}, from
 # the card's last line with doneWhenItems and the last review after it. builder is the session's D<n> line; reviewer
 # is "holds" for a D<n> the review said holds (doneWhenHolds), else its findings that name D<n> (from its reason, cut to
-# 1500 characters, and a NO-GO's tail, which keeps its last lines whole), else null. items is []
-# when no line of the card has the check.
+# 1500 characters, and a NO-GO's tail, which keeps its last lines whole), else null. A finding the judge declined (a
+# DECLINED line, with the judge's reason) is no reviewer's answer; one it found outside the change (an OUTSIDE line,
+# `OUTSIDE: <finding> (judge: <reason>)`: judged(), lib/review.sh) is, without the judge's reason, which names no D<n>
+# for it. That reason is cut off by the finding the judge's record keeps (judge.outside of the card's review lines: a
+# reused review's line has none, the line of the review it reuses has), not at a ` (judge: ` the finding itself can
+# quote; a line cut inside the finding keeps what it has. items is [] when no line of the card has the check.
 dwdetail() { # <card>
   { olds; recs; } 2>/dev/null | jq -cRn --arg c "$1" '[inputs | fromjson? | objects | select(.card == $c)] as $l
     | ([$l | to_entries[] | select(.value.doneWhenItems | type == "array")] | last) as $b
     | ([$l[(($b.key // -1) + 1):][] | select(.step == "review")] | last) as $r
     | [$r.tail | strings | splits("\n")] as $t
     | ([$r.reason | strings | splits("\n") | . as $x | select(any($t[]; startswith($x)) | not)] + $t) as $f
+    | [$l[] | select(.step == "review") | .judge.outside[]? | objects | "OUTSIDE: \(.finding)" as $o | {o: $o, w: "\($o) (judge: \(.reason))"}] as $o
     | {card: $c, items: [($b.value.doneWhenItems // [])[] | objects | .n as $n | {n, text, builder: .said,
         reviewer: (if $r == null then null elif any($r.doneWhenHolds[]?; . == $n) then "holds"
-          else [$f[] | select(test("\\bD\($n)\\b"))] | if . == [] then null else join("\n") end end)}]}'
+          else [$f[] | select(startswith("DECLINED:") | not) | . as $x
+            | if startswith("OUTSIDE: ") then (first($o[] | select(.w | startswith($x))) // null) as $m | if $m then $x[:($m.o | length)] else $x end else $x end
+            | select(test("\\bD\($n)\\b"))] | if . == [] then null else join("\n") end end)}]}'
 }
 # A card's excerpts, which the snapshot leaves out: the lines each of its reviews' findings cites, as its review lines
 # keep them (excerpts(), lib/review.sh), oldest review first, each with the time of the review line that kept it (the

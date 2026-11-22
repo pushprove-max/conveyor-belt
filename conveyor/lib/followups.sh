@@ -392,10 +392,11 @@ pushable() {
 
 # One clear answer or none: every verdict line says the same (a review may repeat its verdict), and the last line is
 # that verdict; a GO beside an open finding is a NO-GO. Spaces and tabs at a verdict line's end are left out (a
-# Markdown line break). Prints "GO", "NO-GO" or "none".
+# Markdown line break): those two alone, as [[:blank:]] takes in other blanks too in a UTF-8 locale (an em space).
+# Prints "GO", "NO-GO" or "none".
 verdict() { # <review file>
-  [ "$(grep '^VERDICT:' "$1" | sed 's/[[:blank:]]*$//' | sort -u | wc -l)" -eq 1 ] || { echo none; return; }
-  case $(tail -n 1 "$1" | sed 's/[[:blank:]]*$//') in
+  [ "$(grep '^VERDICT:' "$1" | sed $'s/[ \t]*$//' | sort -u | wc -l)" -eq 1 ] || { echo none; return; }
+  case $(tail -n 1 "$1" | sed $'s/[ \t]*$//') in
     'VERDICT: GO') if grep -Evq "$NOTFINDING" "$1"; then echo NO-GO; else echo GO; fi ;;
     'VERDICT: NO-GO') echo NO-GO ;;
     *) echo none ;;
@@ -412,15 +413,19 @@ visible() { # <review file> [held | any]
   [ "${2:-}" != held ] || f='matches|differs: .*[^[:space:]].*'
   [ "${2:-}" != any ] || f="$f|matches|differs: .*[^[:space:]].*"
   [ "$(grep -c '^USER-VISIBLE:' "$1")" = 1 ] || return 0
-  grep -E "^USER-VISIBLE: ($f)[[:blank:]]*\$" "$1" | sed 's/^USER-VISIBLE: //; s/[[:blank:]]*$//'
+  grep -E "^USER-VISIBLE: ($f)[ "$'\t'"]*\$" "$1" | sed $'s/^USER-VISIBLE: //; s/[ \t]*$//'
 }
 
-# The last reply of a session's stream (a Claude result, a Codex agent_message or an OpenCode text part) that holds
-# more than white space, on one line, cut to 1000 characters; nothing when it has none. With whole, the reply as it is.
+# The last reply of a session's stream (a Claude result, a Codex agent_message or the text an OpenCode step wrote: its
+# text parts, in order, one a line, as OPENCODEANSWER joins them) that holds more than white space, on one line, cut
+# to 1000 characters; nothing when it has none. With whole, the reply as it is.
 lastreply() { # <session output> [whole]
-  jq -Rrjn --arg w "${2:-}" '[inputs | fromjson? // empty | objects | if .type == "result" then .result
-      elif .type == "item.completed" and .item.type? == "agent_message" then .item.text elif .type == "text" then .part.text? else empty end
-      | strings | select(test("\\S"))] | last // "" | if $w != "" then . else [splits("\\s+")] | map(select(. != "")) | join(" ") | .[0:1000] end' "$1" 2>/dev/null
+  jq -Rrjn --arg w "${2:-}" 'reduce (inputs | fromjson? // empty | objects) as $e ({r: [], step: false};
+      if $e.type == "step_start" then .step = false
+      elif $e.type == "text" and ($e.part.text? | type) == "string" then (if .step then .r[-1] += "\n" + $e.part.text else .r += [$e.part.text] | .step = true end)
+      elif $e.type == "result" then .r += [$e.result] | .step = false
+      elif $e.type == "item.completed" and $e.item.type? == "agent_message" then .r += [$e.item.text] | .step = false else . end)
+    | [.r[] | strings | select(test("\\S"))] | last // "" | if $w != "" then . else [splits("\\s+")] | map(select(. != "")) | join(" ") | .[0:1000] end' "$1" 2>/dev/null
 }
 
 # block(), with the given words added at the end of the reason's first line, before the output a reason may carry.

@@ -30,12 +30,20 @@ t_keptbrief() {
 # Bug (#874): a card with no kept work that found a staged change in its new worktree built on it, as its own. It
 # stops before the build with a reason naming the files. The change is staged by a post-checkout hook of main (git
 # runs it in each new worktree), so it is there at the card's start as it would be in a project; a whole card run, as
-# the check is in card() between the worktree and the build.
+# the check is in card() between the worktree and the build. #1444 (R230): the check came after the card asked GitHub
+# for its issue, so a GitHub that did not answer held the block; gh here hangs on that ask, and the card must block
+# without making it. The rules Split large issues and Pick settings are On, as each asks GitHub for the issue first.
+# Only the card's asks for the issue (--json number,...) count: the turn after the block asks whether the blocked
+# issue is closed (`--json closed`, turnask()), which is no part of the card (review E6).
 t_straystaged() {
   setup "[$(issue 5 2026-01-01)]"; echo "$GO" > "$STUB/review.1"
   printf '%s\n' '#!/bin/sh' '[ "$1" = 0000000000000000000000000000000000000000 ] || exit 0' 'echo stray > stray.txt && git add stray.txt' > "$R/.git/hooks/post-checkout"
   chmod +x "$R/.git/hooks/post-checkout"
+  loop control rules split=on pick=on >/dev/null || fail "control rules split=on pick=on was refused"
+  # stub: each ask of the card for its issue is noted in $STUB/viewed, and hangs as a GitHub that does not answer
+  sed -i '2a case "$*" in "issue view 5 --json number,"*) echo "$*" >> "$STUB/viewed"; exec sleep 10 ;; esac' "$STUB/gh" # sleep: a GitHub that does not answer
   loop run >/dev/null
+  [ ! -e "$STUB/viewed" ] || fail "the card asked GitHub for its issue before it checked its new worktree for a staged change: $(cat "$STUB/viewed")"
   [ "$(st 'select(.issue == 5 and .step == "blocked") | .reason')" = "worktree: the new worktree already holds a staged change that is no kept work of this issue: stray.txt" ] \
     || fail "a card whose new worktree held a staged change did not stop naming the file: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
   [ ! -s "$STUB/sessions" ] && [ -z "$(st 'select(.issue == 5 and (.step | IN("build", "brief"))) | .step')" ] \

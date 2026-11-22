@@ -195,11 +195,12 @@ t_adoptidle() {
 # saves what the card has then: the card records ($STUB/cards.land), its settings file ($STUB/settings) and its
 # prompt as a session would be given it (card()'s sprompt, through newtexts(), lib/session.sh: $STUB/prompt). Then
 # whether newmark() was loaded and the commit the shell runs (ran). Sets the caller's out to what that shell printed.
-switchtry() {
+# [<shell>] runs in the test step too, after loop.json is written, in the card's worktree.
+switchtry() { # <sed script> [<shell>]
   local new
   setup "[$(issue 5 2026-01-01)]"; export XDG_DATA_HOME=$T/$CASE/data; V=$XDG_DATA_HOME/conveyor/versions; new=$V/new2/conveyor
   echo "$GO" > "$STUB/review.1"
-  printf '%s\n' 'echo x >> "$STUB/tests"; cp "$STUB/says" "$(cat "$STUB/sayspath")"' > "$STUB/test-cmd"
+  printf '%s\n' 'echo x >> "$STUB/tests"; cp "$STUB/says" "$(cat "$STUB/sayspath")"' "${2:-}" > "$STUB/test-cmd"
   printf '%s\n' 'cp "$STATE" "$STUB/cards.land"; cp "$CARDS/$1.settings" "$STUB/settings"; newtexts sprompt; printf "%s\n" "$sprompt" > "$STUB/prompt"' > "$STUB/landsave"
   mkdir -p "$new" && cp -a "$SRC/." "$new/" && sed -i -e "$1" -e "/^redbrief() {/r $STUB/landsave" "$new/lib/card.sh" && echo 'newmark() { :; }' >> "$new/lib/card.sh" \
     && echo 'A rule of commit new2.' >> "$new/rules/card-core.md" || fail "no copy of the engine to switch to"
@@ -278,6 +279,22 @@ t_switchbusy() {
   grep -qxF "conveyor: card c-5: Conveyor took commit new2; the card goes on with its old code, commit old1: the new code changes card(), which the card is running in" <<<"$out" \
     || fail "c-5 did not say why it kept its old code: $out"
   grep -qx 'none of the new code loaded' <<<"$out" || fail "c-5 loaded new2's code: $out"
+  # #1444 (R412, review E5): the 1.6.0 notes said a card always moves to the new code at its next step, then named only
+  # this case of it keeping its old code, not t_switchkeep's (another form of step files) or t_switchsave's (the card
+  # not set up). A release note has no behaviour to run, so its text is checked here, beside the behaviour it describes.
+  tr '\n' ' ' < "$SRC/../docs/releases/1.6.0.md" | grep -qF 'It moves to the new code at its next step, unless the new version changes a function the card is running in, saves step files in a different form, or cannot load or set up the card.' \
+    || fail "the 1.6.0 release notes do not name each case where a card keeps its old code: a function it runs in changed, another form of step files, or new code that cannot load or set up the card"
+}
+
+# #1444 (R236). Bug it catches: switchcode() did not check the move of the new code's settings file into the card's,
+# and said the card went on with the new code, which it loaded, though the card's settings were still the old code's.
+# The settings file's place is taken, as the test step ends, by a folder holding a folder of the moved file's name:
+# the move fails, and the card keeps its old code and says why.
+t_switchsave() {
+  local out; switchtry 's/^$//' 'rm -f "$PWD.settings" && mkdir -p "$PWD.settings/settings/x"'
+  grep -qxF "conveyor: card c-5: Conveyor took commit new2; the card goes on with its old code, commit old1: the new code's settings for the card could not be saved as $T/$CASE/cards/c-5.settings" <<<"$out" \
+    || fail "c-5 did not say it kept its old code as its new settings could not be saved: $out"
+  grep -qx 'none of the new code loaded' <<<"$out" || fail "c-5 loaded new2's code though its settings were not saved: $out"
 }
 
 # Bug: the loop that a restart starts adopts a card that has landed and not pushed yet; the card's process ends while
