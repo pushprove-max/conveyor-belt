@@ -106,7 +106,7 @@ REPO = PLUGIN['repository'].split('github.com/', 1)[1]
 got, said = call('/plugin-preview', {'file': NOTES, 'line': A})
 prev = json.loads(said) if got == 200 else {}
 check('preview_title', prev.get('title') == 'setup never sets linkFromMain' and prev.get('repo') == REPO, (got, said))
-check('preview_body', prev['body'].startswith('setup never sets linkFromMain, so card <card> has no packages · evidence: ~/cards/<card>/test.log\n')
+check('preview_body', prev['body'].startswith('setup never sets linkFromMain, so card <card> has no packages\nEvidence: ~/cards/<card>/test.log\n\n')
       and 'Plugin version: %s\n' % PLUGIN['version'] in prev['body'] and re.search(r'Engine commit: [0-9a-f]{40}\n', prev['body'])
       and re.search(r'System: \S', prev['body']) and 'sample' not in prev['body'], prev['body'])
 # Bug (#1350): a note written with an issue number as its card field had that number hidden as <card> in the body; an
@@ -114,7 +114,15 @@ check('preview_body', prev['body'].startswith('setup never sets linkFromMain, so
 _, issue_body = ds.note_issue('- 2026-11-22T09:00:00Z · card #12 · the fix covers #12 and #13 · evidence: -')
 check('issue_card_kept', 'the fix covers #12 and #13' in issue_body and '<card>' not in issue_body, issue_body)
 _, id_body = ds.note_issue('- 2026-11-22T09:00:00Z · card c20261122T090000-sample-7 · see c20261122T090000-sample-7 · evidence: -')
-check('card_id_hidden', id_body.startswith('see <card> · evidence: -\n') and 'sample' not in id_body, id_body)
+check('card_id_hidden', id_body.startswith('see <card>\n\n') and 'sample' not in id_body, id_body)
+# Bug (#1351): the body gave the evidence path twice, once in the note's text and again as ' · evidence: <path>'. The body
+# has the path once: in the text when the text names it, else as its own line 'Evidence: <path>'.
+_, named = ds.note_issue('- 2026-11-22T09:00:00Z · card - · setup fails, evidence ~/logs/setup.log (line 4) · evidence: ~/logs/setup.log')
+check('evidence_named_once', named.count('~/logs/setup.log') == 1 and 'Evidence:' not in named, named)
+# Bug (review of #1351): the title was cut from the text after the Evidence line was added, so it read 'setup fails\nEvidence'.
+unnamed_title, unnamed = ds.note_issue('- 2026-11-22T09:00:00Z · card - · setup fails · evidence: ~/logs/setup.log')
+check('evidence_title_clean', unnamed_title == 'setup fails', unnamed_title)
+check('evidence_line_once', unnamed.startswith('setup fails\nEvidence: ~/logs/setup.log\n\n') and unnamed.count('Evidence: ~/logs/setup.log') == 1, unnamed)
 check('preview_writes_nothing', text(NOTES) == WHOLE and not os.path.exists(os.path.join(T, 'gh-ran')), text(NOTES))
 # Built in parts, so this file holds no home path or private address itself.
 HOMEPATH, PRIVATE = '/ho' + 'me/someone/notes.txt', '10.' + '1.2.3'

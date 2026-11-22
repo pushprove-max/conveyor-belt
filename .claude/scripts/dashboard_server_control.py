@@ -306,12 +306,21 @@ def note_issue(line):
     the first ' · ', cut at the first , ; : or . that ends a clause); the body is the note, then the plugin's version,
     the engine commit and the system of the checkout this Board runs from. The card id stays out: it names a project,
     so each time the note's text says it (its finding, its evidence path) it is <card> in the body. A card field that is
-    no card id (an issue number, in a note written before the field took card ids only) names no project and stays."""
+    no card id (an issue number, in a note written before the field took card ids only) names no project and stays.
+    The note's ' · evidence: <path>' part (the last one, as foreman/stop.sh reads it) is not in the body as it is: the
+    body has the text alone when the text already names the path (or the part is '-' or not there), else the text and
+    a line 'Evidence: <path>'."""
     m = NOTE_LINE.fullmatch(line)
     text = m.group('text') if m else line[2:]
+    text, sep, evidence = text.rpartition(' · evidence: ')
+    if not sep:
+        text, evidence = evidence, ''
+    evidence = evidence.strip()
     if m and globals()['CARD'].fullmatch(m.group('card')):  # CARD is the base part's, as REDCARD is above
-        text = text.replace(m.group('card'), '<card>')
+        text, evidence = text.replace(m.group('card'), '<card>'), evidence.replace(m.group('card'), '<card>')
     title = re.split(r'[,;:.](?=\s|$)', text.split(' · ')[0], maxsplit=1)[0].strip() or 'Plugin problem'
+    if evidence not in ('', '-') and evidence not in text:  # after the title: the Evidence line is no part of it
+        text += '\nEvidence: ' + evidence
     try:
         with open(os.path.join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'), encoding='utf-8') as f:
             version = json.load(f).get('version')
