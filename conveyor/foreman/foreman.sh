@@ -391,7 +391,8 @@ off() {
 # an output of its own. A call without it (a claim in a running session, which no SessionStart follows, or a plugin from
 # before the rules hook) gets rules.md after the rest, cut to what the limit leaves. When the whole is over the limit,
 # state.md is swapped for one line that tells the Foreman to Read the file; when the fixed text and the rest alone leave
-# no room for the owner rules, a line that tells the Foreman to Read owner-rules.md stands for them.
+# no room for the owner rules, a line that tells the Foreman to Read owner-rules.md stands for them, and names rules.md
+# in the same line when the project has one.
 context() {
   local head mid st left own=0
   launcher
@@ -405,8 +406,13 @@ context() {
   [ -z "$st" ] || printf '%s\n' "$st"
   [ -z "$RULES_APART" ] || return 0
   left=$((CTX_LIMIT - $(printf '%s\n%s\n%s\n' "$head" "$mid" "$st" | wc -c)))
-  # The fixed text and the rest alone may leave no room for the owner rules: a Read line stands for them, never a start over the limit.
-  if [ "$own" -gt 0 ] && [ "$left" -lt "$own" ]; then printf '\n# %s did not fit in this start (Claude Code cuts a start over 10,000 characters): Read it now, before you act.\n' "$FHERE/owner-rules.md"; return 0; fi
+  # The fixed text and the rest alone may leave no room for the owner rules: a Read line stands for them, and for this
+  # project's rules.md too when it has text (rules_text, which would name it, is not reached), never a start over the limit.
+  if [ "$own" -gt 0 ] && [ "$left" -lt "$own" ]; then
+    if [ -s "$FD/rules.md" ]; then printf '\n# %s and %s did not fit in this start (Claude Code cuts a start over 10,000 characters): Read both now, before you act.\n' "$FHERE/owner-rules.md" "$FD/rules.md"
+    else printf '\n# %s did not fit in this start (Claude Code cuts a start over 10,000 characters): Read it now, before you act.\n' "$FHERE/owner-rules.md"; fi
+    return 0
+  fi
   rules_text "$left"
 }
 

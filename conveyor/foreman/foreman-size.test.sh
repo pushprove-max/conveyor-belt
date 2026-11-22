@@ -149,7 +149,24 @@ t_owner_mid() {
   grep -qF "$SRC/owner-rules.md did not fit" <<<"$st" || fail "no Read line names owner-rules.md in a start of ${#st} characters: ${st: -300}"
 }
 
-cases=(fit big other race old owner owner_whole owner_mid)
+# Bug it catches (#1296): in the same start as owner_mid, with a rules.md in the project, the Read line named only
+# owner-rules.md and returned before the project's rules.md was sent or named, so the Foreman never learned it existed.
+t_owner_mid_rules() {
+  local st a b len
+  fixture owner_mid_rules
+  marked
+  grow() { jq -n --arg h "$M" --arg n "$(printf 'r%.0s' $(seq 1 "$1"))" '{records: [{repo: "alpha", main: $h}, {repo: $n, main: ($h + "/gone")}], foreman: {groups: [["alpha", $n]]}}' > "$XDG_CONFIG_HOME/conveyor/host.json"; }
+  grow 100; a=$(hook start sA --rules-apart); a=${#a}
+  grow 200; b=$(hook start sA --rules-apart); b=${#b}
+  [ "$b" -gt "$a" ] || fail "a longer repo name did not lengthen the start ($a, $b)"
+  len=$((100 + (8300 - a) * 100 / (b - a))); grow "$len"
+  text STATEBODY 16 > "$FD/state.md"; text RULESBODY 3 > "$FD/rules.md"
+  st=$(hook start sA)
+  [ "${#st}" -lt 10000 ] || fail "a start without --rules-apart with $len-character repo name is ${#st} characters, not under 10000"
+  grep -qF "$SRC/owner-rules.md and $FD/rules.md did not fit" <<<"$st" || fail "no Read line names both owner-rules.md and rules.md in a start of ${#st} characters: ${st: -300}"
+}
+
+cases=(fit big other race old owner owner_whole owner_mid owner_mid_rules)
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
 read -ra cases <<<"$SEL"
