@@ -119,20 +119,22 @@ t_relalonelogs() {
 }
 # Bug (R91): the snapshot read the record's rerun, then the worktree's logs, in two reads: a pass that ended between
 # them (fulljudge() clears or moves on the rerun and starts the next pass's logs) was shown with the next pass's
-# counts. Here the record says pass 1, and a find on PATH moves it to pass 2 as the snapshot reads the logs (find is
-# what suiteprog() and logmoved() first run on them): pass 1 is shown with no done, failed, files or at.
+# counts. Here the record says pass 1, and an exported find function moves it to pass 2 as the snapshot reads the logs
+# (find is what suiteprog() and logmoved() first run on them): pass 1 is shown with no done, failed, files or at. A
+# function, not a find on PATH: on macOS p_path puts Homebrew's find ahead of any folder the test puts first on PATH.
 t_relalonerace() {
   local k=$T/$CASE/cards/release h rr
   setup '[]'
-  mkdir -p "$k/wt.testlog/cases/ok" "$T/$CASE/bin" && : > "$k/wt.testlog/cases/ok/a" && printf '%s\n' 'TESTRUN files=1' '-- ok a.test' > "$k/wt.test" \
+  mkdir -p "$k/wt.testlog/cases/ok" && : > "$k/wt.testlog/cases/ok/a" && printf '%s\n' 'TESTRUN files=1' '-- ok a.test' > "$k/wt.test" \
     && jq -cn --arg s "$(git -C "$R" rev-parse HEAD)" '{kind: "release", step: "release-prep", version: "1.1.0", since: "2020-01-01T00:00:00Z", ended: null,
       state: "running", sha: $s, counts: {state: "running", failed: 0, cases: ["x"]}, rerun: {round: 1, of: 3, case: "x", since: "2020-01-01T00:00:00Z"}}' > "$k/run.json" \
-    && printf '#!/usr/bin/env bash\n[[ $* != *release/wt.testlog* ]] || [ -e %q ] || { : > %q; jq -c ".rerun.round = 2" %q > %q && mv %q %q; }\nexec %q "$@"\n' \
-      "$k/moved" "$k/moved" "$k/run.json" "$k/run.new" "$k/run.new" "$k/run.json" "$(command -v find)" > "$T/$CASE/bin/find" && chmod +x "$T/$CASE/bin/find" \
     && exec {h}>>"$k/lock" && flock -n "$h" || fail "the fixture could not be made"
-  rr=$(PATH=$T/$CASE/bin:$PATH loop snapshot --fresh | jq -c '.suites[] | select(.kind == "release") | .rerun')
+  rr=$( RACEK=$k; export RACEK
+    find() { [[ $* != *release/wt.testlog* ]] || [ -e "$RACEK/moved" ] || { : > "$RACEK/moved"; jq -c '.rerun.round = 2' "$RACEK/run.json" > "$RACEK/run.new" && mv "$RACEK/run.new" "$RACEK/run.json"; }
+      command find "$@"; }
+    export -f find; loop snapshot --fresh | jq -c '.suites[] | select(.kind == "release") | .rerun' )
   exec {h}>&-
-  [ -e "$k/moved" ] || fail "the find on PATH did not run on the logs, so the case proves nothing"
+  [ -e "$k/moved" ] || fail "the exported find did not run on the logs, so the case proves nothing"
   [ "$rr" = '{"round":1,"of":3,"case":"x","since":"2020-01-01T00:00:00Z"}' ] \
     || fail "the snapshot showed pass 1 with progress read after the record moved to pass 2: rerun is $rr"
 }
