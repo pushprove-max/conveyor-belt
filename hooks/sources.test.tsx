@@ -865,6 +865,49 @@ test('the matrix title fills the free width after Cost at 100 columns, and is le
   expect(section(paneModel(s, w + 1, 0).map(plain).join('\n'), 'BUILD MATRIX').split('\n')[1]).toMatch(/Cost  Title$/)
 })
 
+// Issue 1372. Bugs it catches: a card with no issue showed its whole name (with the project's name before it) as its
+// ID, so the ID column grew past 12 columns and pushed the step columns, Age and Cost off the pane; the project's name
+// was said again in a row of its own matrix; WORKER ACTIVITY and LANDED TODAY still showed the long name.
+test('a card with no issue has a short ID in every table, its whole name moves to the matrix Title, and no row repeats the project name', () => {
+  const red = { issue: 0, name: 'Main is red (fedcba9876543210)', title: '', card: 'c20261122T164516-bookstore-0' }
+  const other = { ...BELT[0], issue: 0, name: '', title: 'Tidy the logo copy', card: 'c20261122T165000-bookstore-77' }
+  const landedRed = { ...LANDED[0], issue: 0, name: 'Main is red (0123456789abcdef)', card: 'c20261122T160000-bookstore-0' }
+  const s = board({ belt: [{ ...BELT[1], ...red }, other, BELT[0]], landed: [landedRed] })
+  for (const w of [60, 100]) {
+    const rows = section(paneModel(s, w, 0).map(plain).join('\n'), 'BUILD MATRIX').split('\n')
+    const head = rows[1] ?? ''
+    expect(head, `matrix head at ${w} columns`).toMatch(/^ID +B R F T L P +Age +Cost  Title$/)
+    // The ID column ends where the first step column starts.
+    const idW = head.indexOf('B') - 2
+    expect(idW, `ID column width at ${w} columns`).toBeLessThanOrEqual(12)
+    const [redRow = '', otherRow = '', issueRow = ''] = rows.slice(2, 5)
+    expect(redRow.slice(0, idW).trim(), `main-red ID at ${w} columns`).toBe('red fedcba9')
+    expect(redRow, `main-red row at ${w} columns`).toMatch(/^red fedcba9 +✓ ▶ · · · · +\S+ +\$1\.25  Main is red \(fedcba98/)
+    // The title is cut to fit as any title is: whole at 100 columns.
+    if (w === 100) expect(redRow, 'main-red name whole at 100 columns').toContain('Main is red (fedcba9876543210)')
+    expect(otherRow, `other row at ${w} columns`).toMatch(/^card 77 +▶ · · · · · +\S+ +–  Tidy the logo copy/)
+    expect(issueRow.startsWith('#3863'), `issue row at ${w} columns`).toBe(true)
+    // Every step column of every row sits at the head's column, whole and in its own place.
+    for (const r of [redRow, otherRow, issueRow]) expect(r.slice(idW + 2, idW + 13), `steps of "${r}"`).toMatch(/^[✓▶✗·] [✓▶✗·] [✓▶✗·] [✓▶✗·] [✓▶✗·] [✓▶✗·]$/)
+    for (const l of rows) expect(l.startsWith('bookstore'), `matrix line "${l}" repeats the project name`).toBe(false)
+  }
+  const wide = section(paneModel(s, 100, 0).map(plain).join('\n'), 'BUILD MATRIX')
+  expect(wide, 'the project name is in the matrix heading only').not.toMatch(/\nbookstore /)
+  const activity = activityModel(s, s.snap!, 62, 0).map(plain)
+  expect(activity[1], 'WORKER ACTIVITY main-red row').toMatch(/^◐ red fedcba9  /)
+  expect(activity[2], 'WORKER ACTIVITY other row').toMatch(/^◐ card 77  /)
+  expect(section(paneModel(s, 100, 0).map(plain).join('\n'), 'LANDED TODAY'), 'LANDED TODAY').toMatch(/\n\S+ [AP]M +red 0123456 +/)
+})
+
+// Issue 1372. Bug it catches: a card id of a card with no issue ends in `-0` (a Foreman order, a Tests page card); the
+// suffix was read as a card number, so every such card showed `card 0` and no table told two of them apart by a number.
+test('a card with no issue whose card id ends in -0 has the ID `card`, not `card 0`', () => {
+  const zero = { ...BELT[0], issue: 0, name: '', title: 'Order from the Foreman', card: 'c20261122T165000-bookstore-0' }
+  const s = board({ belt: [zero], landed: [] })
+  expect(activityModel(s, s.snap!, 62, 0).map(plain)[1], 'WORKER ACTIVITY row of a card id ending in -0').toMatch(/^◐ card  /)
+  expect(section(paneModel(s, 100, 0).map(plain).join('\n'), 'BUILD MATRIX').split('\n')[2], 'matrix row of a card id ending in -0').toMatch(/^card  /)
+})
+
 // Issue 497. Bugs it catches: the pane said "0 queued" and "the queue is empty" while issues waited on other cards,
 // and each card took four lines.
 test('the pane from two projects with 4 cards building, 5 waiting and 20 landed: the count band, a matrix row a card, the pick order', () => {

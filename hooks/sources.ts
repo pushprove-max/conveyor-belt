@@ -1099,7 +1099,15 @@ const padR = (t: string, n: number) => `${t}${' '.repeat(Math.max(0, n - cols(t)
 const padL = (t: string, n: number) => `${' '.repeat(Math.max(0, n - cols(t)))}${t}`
 const rule = (w: number): Line => [{ t: '─'.repeat(w), d: true }]
 const section = (title: string, right: string, w: number): Line => spread([{ t: title, c: C.head, b: true }], right ? { t: right, d: true } : null, w)
-const idOf = (c: Ref) => (c.issue ? `#${c.issue}` : named(c) || 'branch')
+// A card's ID in a table: `#<issue>`; with no issue, short so no name pushes a column: a main-red fix card `red <commit's
+// first 7>`, any other `card` and the number its card id ends in (a card id ending in `-0` has no number: `card`). The matrix shows its whole name in the Title column.
+const idOf = (c: Card) => {
+  if (c.issue) return `#${c.issue}`
+  const red = /^Main is red \(([0-9a-f]+)\)/.exec(c.name ?? '')
+  if (red?.[1]) return `red ${red[1].slice(0, 7)}`
+  const n = /-([1-9]\d{0,6})$/.exec(c.card)?.[1]
+  return n ? `card ${n}` : 'card'
+}
 // A card that is a part of a parent issue names it: `#636 of #647`.
 const beltId = (b: Belt) => `${idOf(b)}${b.umbrella ? ` of #${b.umbrella}` : ''}`
 // The pick order's counts, the parts of one parent issue counted as one entry: ready when any part is ready, else
@@ -1134,7 +1142,9 @@ const matrixTable = (s: State, cards: Belt[], w: number): Line[] => {
   const fixed = noAge + (age ? 2 + ageW : 0)
   const titleW = w - fixed - 2 >= 6 ? w - fixed - 2 : 0
   const head = `${padR('ID', idW)}  ${STEP_NAMES.map(n => n[0]).join(' ')}  ${age ? `${padL('Age', ageW)}  ` : ''}${padL('Cost', costW)}${titleW ? '  Title' : ''}`
-  const title = (b: Belt): Line => [{ t: '  ' }, ...fitWidth([{ t: shortTitle(b.title) || (b.issue ? '' : 'a branch with no issue'), c: C.name }], titleW)]
+  // The card's own name (no project name: the heading has it) goes before its title.
+  const text = (b: Belt) => [b.issue ? '' : b.name, shortTitle(b.title)].filter(Boolean).join(' ') || (b.issue ? '' : 'a branch with no issue')
+  const title = (b: Belt): Line => [{ t: '  ' }, ...fitWidth([{ t: text(b), c: C.name }], titleW)]
   return [
     fitWidth([{ t: head, d: true }], w),
     ...rows.map((r): Line => fitWidth([
@@ -1235,7 +1245,7 @@ export const landedTable = (s: State, snap: Snap, w: number): Line[] => {
     const state: Seg = l.push === 'now' ? { t: 'pushing', c: C.you } : l.issueOpen ? { t: 'issue open', c: C.you } : l.waits ? { t: l.waits, c: C.you }
       : l.push === 'failed' || l.pushed === false ? { t: 'not pushed', c: C.you } : cost(l.usd)
     const all = overallOf(l, s.now)
-    return { at: l.at ? clockOf(l.at) : 'time?', id: ref(l), verdict, total: all === null ? '–' : fmtSec(all), state }
+    return { at: l.at ? clockOf(l.at) : 'time?', id: l.issue ? ref(l) : idOf(l), verdict, total: all === null ? '–' : fmtSec(all), state }
   })
   const W = (h: string, f: (r: (typeof rows)[number]) => string) => Math.max(cols(h), ...rows.map(r => cols(f(r))))
   const aW = W('Landed', r => r.at), iW = W('Issue', r => r.id), vW = W('Verdict', r => r.verdict.t), tW = W('Total', r => r.total), cW = W('Cost', r => r.state.t)
