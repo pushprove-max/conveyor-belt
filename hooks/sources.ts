@@ -103,7 +103,10 @@ export type Landed = Card & Times & { closed: boolean; at: number | null; usd: n
 // count as they only wait on another card; null when no loop runs or the snapshot does not say. onBelt: the record's
 // cards on the belt; landing: those of them landed, in Push (the loop's building leaves them out).
 export type Loop = { repo: string; state: string; reason: string; loop: boolean | null; building: number | null; waiting: number | null; cap: number | null; onBelt: number; landing: number }
+// machine: where a release's suite runs when that is not this machine ({kind: ssh or devbox, name, step: the step the run
+// is at (start, setup, checkout, run, results, done), given: a devbox's lease went back}), else null.
 export type Suite = { repo: string; kind: string; version: string; sha: string; since: number | null; ended: number | null; state: string; done: number | null; failed: number | null
+  machine: { kind: string; name: string; step: string; given: boolean } | null
   rerun: { pass: number; of: number | null; done: number | null; failed: number; at: number | null } | null }
 // A project's push (the snapshot's health): running, the push in progress (pushing: stale when its process is gone and
 // it did not end; stage, a key of PUSH_STAGE; line, the newest line of its log), last, the last push that ended
@@ -287,6 +290,8 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
     // A snapshot from an older engine has no suites.
     suites: (Array.isArray(j.suites) ? j.suites : []).filter((x: unknown) => x && typeof x === 'object')
       .map((x: any): Suite => ({ repo, kind: one(x.kind), version: one(x.version), sha: one(x.sha), since: time(x.since), ended: time(x.ended), state: one(x.state), done: num(x.done), failed: num(x.failed),
+        machine: x.machine && typeof x.machine === 'object' && (x.machine.kind === 'ssh' || x.machine.kind === 'devbox') && one(x.machine.name)
+          ? { kind: x.machine.kind, name: one(x.machine.name), step: one(x.machine.step), given: x.machine.kind === 'devbox' && one(x.machine.step) === 'done' && one(x.machine.lease) !== '' } : null,
         rerun: x.rerun && typeof x.rerun === 'object' && num(x.rerun.round) !== null ? { pass: x.rerun.round, of: num(x.rerun.of), done: num(x.rerun.files?.done),
           failed: Array.isArray(x.rerun.files?.failed) ? x.rerun.files.failed.length : 0, at: time(x.rerun.at) } : null })),
     // Each open parent issue (open.umbrellas); none when GitHub did not list the issues, or from an older engine.
@@ -1032,11 +1037,18 @@ const declinedTodayText =(s: State, snap: Snap): string => {
 // A whole-suite run (a release's suite, the full test): one line while it runs (two while a release reruns failed cases), its kind, short commit, time running,
 // cases done and failures so far; once it ended, its result for SUITE_SHOWN_MS, then nothing.
 export const SUITE_SHOWN_MS = 10 * 60 * 1000
+// A suite on another machine gives minutes and seconds, as the box's steps are short, and names the machine after the commit.
+const BOX_STEP: Record<string, string> = { start: 'starting the box', setup: 'setting up', checkout: 'checking out', results: 'bringing back results' }
+const mSec = (s: number) => { const n = Math.max(0, Math.floor(s)); return `${Math.floor(n / 60)}m ${n % 60}s` }
 export const suitesModel = (s: State, snap: Snap): Line[] => (snap.suites ?? [])
   .filter(x => x.ended === null || s.now - x.ended < SUITE_SHOWN_MS)
   .flatMap((x): Line[] => {
-    const what = `${x.repo ? `${x.repo} ` : ''}${x.kind === 'release' ? `release ${x.version}` : x.kind}${x.sha ? ` · ${x.sha.slice(0, 7)}` : ''}`
-    const failed = x.failed ? [{ t: ` · ${count(x.failed, 'failure')}`, c: C.bad }] : []
+    const m = x.machine
+    const what = `${x.repo ? `${x.repo} ` : ''}${x.kind === 'release' ? `release ${x.version}` : x.kind}${x.sha ? ` · ${x.sha.slice(0, 7)}` : ''}${m ? ` · on ${m.name}` : ''}`
+    // A box's steps before and after its tests have no counts to show: the record holds 0 until the tests run.
+    const counting = !m || x.ended !== null || m.step === 'run'
+    const failed = counting && (x.failed || (m && x.ended === null && x.done !== null)) ? [{ t: ` · ${count(x.failed ?? 0, 'failure')}`, c: C.bad }] : []
+    const run = x.since === null ? '' : ` ${(m ? mSec : fmtSec)((s.now - x.since) / 1000)}`
     // While a release's failed cases run again, the pass under way and its own progress, not the first pass's counts.
     // The progress goes on a second line: one line is over 80 columns and the pane would cut off its failures and time.
     const r = x.rerun
@@ -1047,10 +1059,15 @@ export const suitesModel = (s: State, snap: Snap): Line[] => (snap.suites ?? [])
         ...(progress.length ? [[{ t: '  ', d: true }, ...progress.flatMap((p, i) => (i ? [{ t: ' · ', d: true }, p] : [p]))] as Line] : [])]
     }
     if (x.ended === null) {
-      return [[{ t: what, c: C.work, b: true }, { t: ` · running${x.since === null ? '' : ` ${fmtSec((s.now - x.since) / 1000)}`}${x.done === null ? '' : ` · ${count(x.done, 'case')} done`}`, d: true }, ...failed]]
+      // A box that is not yet running the tests says its step, not "running".
+      const step = m && BOX_STEP[m.step] ? `${BOX_STEP[m.step]}${run}` : `running${run}`
+      return [[{ t: what, c: C.work, b: true }, { t: ` · ${step}${x.done === null || !counting ? '' : ` · ${count(x.done, 'case')} done`}`, d: true }, ...failed]]
     }
     const good = x.state === 'passed' || x.state === 'released'
-    return [[{ t: what, c: good ? C.ok : C.bad, b: true }, { t: ` · ${x.state || 'ended'} ${fmtSec((s.now - x.ended) / 1000)} ago`, d: true }, ...failed]]
+    const took = m && x.since !== null ? ` ${mSec((x.ended - x.since) / 1000)}` : ''
+    const ago = m ? `${Math.max(1, Math.floor((s.now - x.ended) / 60000))} min` : fmtSec((s.now - x.ended) / 1000)
+    return [[{ t: what, c: good ? C.ok : C.bad, b: true }, { t: ` · ${x.state || 'ended'}${took}${m ? ' · ' : ' '}${ago} ago`, d: true }, ...failed,
+      ...(m?.given ? [{ t: ' · box given back', d: true }] : [])]]
   })
 
 const noteLine = (s: State): Line => [{ t: s.note, c: C.you }]

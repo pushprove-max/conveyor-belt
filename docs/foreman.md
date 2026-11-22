@@ -84,6 +84,11 @@ puts the least load on the build machine. **In parallel** (for example **In para
 of files that run at once for that project) is faster, but puts more load on the build machine, and the
 belt is slower while the suite runs. The Foreman adds your answer to the command: `--serial` or `--parallel`.
 
+When the control record sets a suite machine other than this one, the Foreman also asks "Run the suite on which
+machine?". The first option is the machine of the rule, marked Recommended. The second is **This machine** (the belt
+is slower meanwhile), which adds `--machine local` to the command, so that this one suite runs here and the rule stays
+as it is. With the rule on this machine, the Foreman does not ask this question.
+
 A watcher wakes the Foreman when something needs it. The wake holds the outcome, so the Foreman does not have to look
 it up:
 

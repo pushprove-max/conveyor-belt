@@ -36,6 +36,12 @@ right-aligned and the title is what gives way.
   files done and failed, and when it last moved (`release 1.2.0 · a1b2c3d · failed cases again: pass 2 of 6 · 1 file
   done · 1 failed · moved 3m ago`). When the run
   ends, the line shows the result (`passed 3m ago`) for 10 minutes, then it goes away.
+  A release suite that runs on another machine (a Namespace Devbox or a Linux box over ssh, chosen in the control
+  record) names it after the commit: `release 1.10.0 · 3342e0e · on Devbox XL · running 5m 20s · 1204 cases done · 0
+  failures`. Before the tests start, the line gives the step of the box instead of `running`: `starting the box`,
+  `setting up`, `checking out` or, at the end, `bringing back results`. When the run ends, it shows how long the run
+  took, then how long ago it ended, and for a Devbox `box given back` once its lease is back (`passed 8m 50s · 2 min
+  ago · box given back`). A suite on this machine has no machine part.
 - **The test map**, in `/units` under the head and in the pane under Machine details: one line. While setup or a whole run on main makes the
   map, the line shows the test files run so far, the time so far and a bar
   (`Test map: 12 of 40 test files · 3m ▰▰▰▱▱▱▱▱▱▱`). A narrow view cuts the text and keeps the bar. After the run, the

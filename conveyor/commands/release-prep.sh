@@ -464,7 +464,7 @@ relsuite() { # <command name> <commit>
   # main as the suite starts: a card that lands while it runs moves it (the record's moved).
   m0=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)
   # The machine the suite runs on started (lib/suitehost.sh), then the most files at once (the record's atOnce): 1 in serial mode; in parallel relatonce().
-  hoststart "$n" || return 1
+  relrec --arg s "$sha" '.sha = $s'; hoststart "$n" || return 1 # the record names the commit from the start, for the Board's line of the box's steps
   at=1
   [ "$RELMODE" != parallel ] || at=$(relatonce "$n") || { hostrelease "$n"; return 1; }
   relrec --arg s "$sha" --arg m "$m0" --arg md "$RELMODE" --argjson at "$at" '.sha = $s | .mode = $md | .atOnce = $at | .done = 0 | .failed = 0 | .cases = [] | .alone = [] | .moved = false | .reused = null | .main = (if $m == "" then null else $m end)'

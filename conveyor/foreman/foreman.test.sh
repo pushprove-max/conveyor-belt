@@ -139,6 +139,13 @@ grep -qF '# A release'"'"'s suite: before you run conveyor.sh release-run prep <
 grep -qF '"In parallel (<n> at once)" (faster' <<<"$out" \
   && grep -qF "<n> is the number $XDG_DATA_HOME/conveyor/foreman.sh ask <project> release-run atonce prints for the release's project" <<<"$out" \
   || fail "the Foreman's release question does not name, in its parallel option, the number release-run atonce prints for the release's project: $out"
+# Bug (#1271): the release question did not offer the rule's machine, so a suite set for a Devbox could not be run here
+# for one release, or the owner did not know where it ran. The rules are text the Foreman's model reads, so their text is
+# the behaviour here.
+grep -qF 'Ask a second question in the same picker call, "Run the suite on which machine?"' <<<"$out" \
+  && grep -qF 'first the rule'"'"'s machine by that name (marked Recommended, as the rule'"'"'s choice), then "This machine (the belt is slower meanwhile)"' <<<"$out" \
+  && grep -qF 'When the owner answers This machine, add --machine local as the very last words of the command' <<<"$out" \
+  || fail "the Foreman's release question does not ask which machine the suite runs on, with the rule's machine first and --machine local for This machine: $out"
 # Bug (#220): on a wake for a waiting card the Foreman only reported it, and cards waited for hours. Its rules tell it
 # to find the cause and fix it.
 grep -qF '# A wake that a card has waited (or is still waiting) for main to change, or on another card: do not only report it. Find why it waits' <<<"$out" \

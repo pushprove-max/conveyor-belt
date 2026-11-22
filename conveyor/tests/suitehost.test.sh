@@ -91,6 +91,8 @@ t_hostnostart() {
   jq -e '.state == "not started" and (.machine.reason | test("does not answer over ssh: .*Connection refused")) and .machine.step == "start"
     and any(.reasons[]; test("the suite was not started on box.example.com"))' "$RUN" > /dev/null \
     || fail "a box that ssh cannot reach did not end the run not started with ssh's reason: $(cat "$RUN")"
+  # Bug (#1271): the record named no commit until the box was ready, so the Board's line for the box's first steps had none.
+  jq -e '.sha | strings | test("^[0-9a-f]{40}$")' "$RUN" > /dev/null || fail "a run not started on its box has no commit in its record: $(cat "$RUN")"
   [ ! -e "$STUB/runs" ] && [ ! -e "$T/$CASE/cards/release/wt" ] || fail "the suite ran, or its worktree was made, though the box could not start: $(cat "$STUB/runs" 2>&1)"
   ! grep -q -- '-X POST' "$STUB/gh-calls" 2>/dev/null || fail "a run not started posted a status: $(cat "$STUB/gh-calls")"
 }

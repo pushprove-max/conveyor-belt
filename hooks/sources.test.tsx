@@ -128,6 +128,31 @@ test('an ended run shows its result for a short time, then goes away', () => {
   expect(tableText(board({ suites: [{ ...ended, ended: ago(11) }] }), 80)).not.toMatch(/full test/)
 })
 
+// Bug (#1271): a release's suite on a Devbox showed as a run on this machine, so the owner could not tell that the belt
+// was not slowed, or that a box was still leased. The line names the machine after the commit, with the box's step.
+const agoSec = (sec: number) => new Date(NOW - sec * 1000).toISOString()
+const BOX = { kind: 'devbox', name: 'Devbox XL', lease: 'ns-1', step: 'start', secs: {}, reason: null }
+const BOXED = { ...SUITE, version: '1.10.0', sha: '3342e0eaaaaaaaaa', since: agoSec(40), done: null, failed: 0, machine: BOX }
+const suiteLine = (suite: object) => tableText(board({ suites: [{ ...BOXED, ...suite }] }), 100).split('\n')[3]?.trimEnd()
+// The record holds done 0 and failed 0 before the tests run, and the final counts when the results come back: the
+// steps around the tests say no counts (a line "0 cases done · 0 failures" for a box still starting was the bug).
+test('a release suite on a Devbox names the machine after the commit, its step before the tests, then its cases and failures, then, once ended, that the box was given back', () => {
+  expect(suiteLine({ done: 0 })).toBe('release 1.10.0 · 3342e0e · on Devbox XL · starting the box 0m 40s')
+  expect(suiteLine({ done: 0, machine: { ...BOX, step: 'setup' } })).toBe('release 1.10.0 · 3342e0e · on Devbox XL · setting up 0m 40s')
+  expect(suiteLine({ done: 0, machine: { ...BOX, step: 'checkout' } })).toBe('release 1.10.0 · 3342e0e · on Devbox XL · checking out 0m 40s')
+  expect(suiteLine({ done: 1204, failed: 3, machine: { ...BOX, step: 'results' } })).toBe('release 1.10.0 · 3342e0e · on Devbox XL · bringing back results 0m 40s')
+  expect(suiteLine({ machine: { ...BOX, step: 'run' }, since: agoSec(320), done: 1204 })).toBe('release 1.10.0 · 3342e0e · on Devbox XL · running 5m 20s · 1204 cases done · 0 failures')
+  expect(suiteLine({ machine: { ...BOX, step: 'done' }, since: agoSec(530 + 120), ended: agoSec(120), state: 'passed' }))
+    .toBe('release 1.10.0 · 3342e0e · on Devbox XL · passed 8m 50s · 2 min ago · box given back')
+  // A box that was not given back (no lease kept) does not claim it was.
+  expect(suiteLine({ machine: { ...BOX, lease: null, step: 'run' }, since: agoSec(530 + 120), ended: agoSec(120), state: 'not started' })).not.toMatch(/given back/)
+})
+test('a release suite on this machine, or from a snapshot with no machine, has no machine part', () => {
+  const local = { kind: 'local', name: 'this machine', lease: null, step: 'run', secs: {}, reason: null }
+  expect(suiteLine({ machine: local, since: ago(12), done: 140, failed: 2 })).toBe('release 1.10.0 · 3342e0e · running 12m · 140 cases done · 2 failures')
+  expect(suiteLine({ machine: undefined, since: ago(12), done: 140, failed: 2 })).not.toMatch(/ on /)
+})
+
 // a snapshot that prices what it can gives today's priced dollars and the steps it leaves out, never hiding both.
 test('the head gives today\'s priced dollars and how many steps they leave out', () => {
   const text = tableText(board({ cost: { today: 4.5, todayLeftOut: 2 } }), 80)
