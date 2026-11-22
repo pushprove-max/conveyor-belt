@@ -541,3 +541,85 @@ mapread() { # <worktree> [<file>]
     || { out=${out#jq: error (at *): }; echo "${out:-$f: the test map cannot be read}"; return 1; }
   printf '%s\n' "$out"
 }
+
+# The files of <lines> (one a line), the first 12 joined by ", ", and how many more there are.
+briefcap() { # <lines>
+  awk 'NR <= 12 { printf "%s%s", (NR > 1 ? ", " : ""), $0 } NR > 12 { n++ } END { if (n) printf " and %d more", n }' <<<"$1"
+}
+# The files with a line of <git grep -n output> that is code: no line of a Markdown file, and none that starts with a
+# comment mark (# // * /*), as a word in a comment is no caller. Reads the grep's lines on stdin.
+briefcode() {
+  grep -vE -e '^[^:]*\.md:' -e '^[^:]*:[0-9]+:[[:space:]]*(#|//|\*|/\*)' | cut -d: -f1 | sort -u
+}
+# <text> with each character that is special in an extended regular expression escaped.
+briefesc() { # <text>
+  sed 's/[].[\*^$+?(){}|]/\\&/g' <<<"$1"
+}
+# An extended regular expression for a reference to the tracked file <path> in code: its name alone (control.sh), after
+# a directory path that ends its own (lib/control.sh, conveyor/lib/control.sh), after a shell variable ($DIR/control.sh)
+# or after a closing paren or quote. A same-named file of another directory (commands/control.sh) is none of these.
+# When another tracked file of <worktree> has the same name, the name alone (control.sh) or after a variable says
+# nothing of which one it is, so only a path that ends its own counts.
+briefref() { # <worktree> <path>
+  local wt=$1 f=$2 b d sfx='' q="'" end='([^A-Za-z0-9_.-]|\.([^A-Za-z0-9_]|$)|$)' same
+  same=$(git -C "$wt" ls-files -- 2>/dev/null | awk -F/ -v b="${f##*/}" '$NF == b { n++ } END { print n + 0 }')
+  b=$(briefesc "${f##*/}"); d=${f%/*}; [ "$d" != "$f" ] || d=''
+  while [ -n "$d" ]; do
+    sfx+="${sfx:+|}$(briefesc "$d")/"
+    [[ $d == */* ]] && d=${d#*/} || d=''
+  done
+  if [ "$same" -gt 1 ] && [ -n "$sfx" ]; then printf '%s' "(^|[^A-Za-z0-9_./-])($sfx)$b$end"
+  else printf '%s' "(^|[^A-Za-z0-9_./-])(${sfx:-^})?$b$end|(\\\$\\{?[A-Za-z_][A-Za-z0-9_]*\\}?|[)\"$q])/$b$end"; fi
+}
+# The files that call the function <name>, one a line: a shell command (a *.sh or *.bash file, the name at the start
+# of a line, or after ; & | ( { ! then do else if while until, and followed by a space, a ; & or the end) and, in any
+# other file but a Markdown page, a call written name( that is not a definition. Not a line in a comment.
+briefcalls() { # <worktree> <name>
+  local wt=$1 n=$2 dp dq
+  dp="^[[:space:]]*(function[[:space:]]+)?${n}[[:space:]]*\\(\\)"; dq="(function|def|func|fn)[[:space:]]+${n}([^A-Za-z0-9_]|$)"
+  { git -C "$wt" -c core.quotePath=false grep -nIE -e "(^|[;&|({]|(^|[[:space:]])(then|do|else|if|while|until|!))[[:space:]]*${n}([[:space:]]|;|&|$)" -- '*.sh' '*.bash' 2>/dev/null
+    git -C "$wt" -c core.quotePath=false grep -nIE -e "(^|[^A-Za-z0-9_.\$])${n}[[:space:]]*\\(" -- . ':(exclude)*.md' ':(exclude)*.sh' ':(exclude)*.bash' 2>/dev/null
+  } | grep -vE -e "^[^:]*:[0-9]+:${dp#^}" -e "^[^:]*:[0-9]+:.*$dq" | briefcode
+}
+# The build brief's starting point (card(), cardbuild()): for each tracked file (with or without a :line) and each
+# function (name() or name(args)) the issue names, in backticks or bare, the files that define it, the files that call
+# it (a call of a function; a file that names another by its path or name) and the test files the test map (mapread())
+# ties to its file, one line each. The text says it is a starting point, never the scope: a call made by a name built at
+# run time, or in another language, is not found. Nothing when the issue names no tracked file or function, or the
+# search finds nothing for a name. The text starts with a blank line, as a part of the brief does.
+startbrief() { # <worktree> <issue json>
+  local wt=$1 toks t n defs hits tests m out='' lines='' fns=() files=() d
+  mapfile -t toks < <(jq -r '[.title, .body] | map(strings) | join("\n") as $x
+    | [($x | scan("`([^`\n]+)`") | .[0]), ($x | scan("(?<![A-Za-z0-9_.])[A-Za-z_][A-Za-z0-9_]*\\(\\)"))
+       , ($x | scan("\\.?[A-Za-z0-9_][A-Za-z0-9_./-]*[A-Za-z0-9_](?::[0-9]+(?:-[0-9]+)?)?") | select(test("[./]")))] | unique | .[:80][]' <<<"$2")
+  for t in "${toks[@]}"; do
+    [[ $t =~ ^(.+):[0-9]+(-[0-9]+)?$ ]] && t=${BASH_REMATCH[1]}
+    if [[ $t =~ ^([A-Za-z_][A-Za-z0-9_]*)\(.*\)$ ]]; then fns+=("${BASH_REMATCH[1]}"); else files+=("$t"); fi
+  done
+  m=$(mapread "$wt" 2>/dev/null) || m=''
+  if [ ${#files[@]} -gt 0 ]; then
+    mapfile -t files < <(git -C "$wt" ls-files -- 2>/dev/null | grep -xF -f <(printf '%s\n' "${files[@]}") | head -n 20)
+    for t in "${files[@]}"; do
+      hits=$(git -C "$wt" -c core.quotePath=false grep -nIE -e "$(briefref "$wt" "$t")" -- . ':(exclude)*.md' 2>/dev/null | briefcode | grep -vxF -- "$t")
+      out=''; [ -z "$hits" ] || out="named in $(briefcap "$hits")"
+      tests=''
+      [ -z "$m" ] || tests=$(jq -r --arg f "$t" '.sources | objects | .[$f] // [] | .[]' <<<"$m")
+      [ -z "$tests" ] || out+="${out:+; }mapped test files $(briefcap "$tests")"
+      [ -z "$out" ] || lines+=$'\n'"- \`$t\`: $out"
+    done
+  fi
+  while read -r n; do
+    [ -n "$n" ] || continue
+    # A definition: a shell `name()` at the start of a line, or `function`, `def`, `func` or `fn` before the name.
+    defs=$(git -C "$wt" -c core.quotePath=false grep -lIE -e "^[[:space:]]*(function[[:space:]]+)?${n}[[:space:]]*\\(\\)" -e "(function|def|func|fn)[[:space:]]+${n}([^A-Za-z0-9_]|$)" 2>/dev/null)
+    hits=$(briefcalls "$wt" "$n")
+    out=''
+    [ -z "$defs" ] || out="defined in $(briefcap "$defs")"
+    [ -z "$hits" ] || out+="${out:+; }called in $(briefcap "$hits")"
+    tests=''
+    [ -z "$m" ] || [ -z "$defs" ] || tests=$(mapfile -t d <<<"$defs"; jq -r '.sources as $s | [$ARGS.positional[] as $f | ($s | objects | .[$f] // [])[]] | unique[]' --args "${d[@]}" <<<"$m")
+    [ -z "$tests" ] || out+="${out:+; }mapped test files $(briefcap "$tests")"
+    [ -z "$out" ] || lines+=$'\n'"- \`$n()\`: $out"
+  done < <(printf '%s\n' "${fns[@]}" | sort -u | head -n 20)
+  [ -z "$lines" ] || printf '\n\n# Where to start: callers and mapped tests\nThe issue names these files and functions. The list is a starting point, not the scope: it can miss a caller (a name built at run time, a call in another language) and a test. Check it against the code, and change only what the issue asks for.%s\n' "$lines"
+}

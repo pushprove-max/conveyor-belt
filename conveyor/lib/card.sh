@@ -445,7 +445,7 @@ cardbuild() {
     # A main-red fix card (its entry in the main-red record names it) whose cases all pass on main, in each of the flaky rule's
     # runs (bugproof.sh redgreen()), closes as already done before its build session starts, as redproof() closes one after it.
     if jq -e --arg c "$c" 'any(.reds[]?; .card == $c)' "$MAINRED" >/dev/null 2>&1 && redgreen "$c" "$wt"; then greenclose "$c" "$n" "$wt"; return; fi
-    began "$c" "$n" build
+    more+=$(startbrief "$wt" "$issue" 2>/dev/null) || :; began "$c" "$n" build # startbrief() gives its own blank line, or nothing
     redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt$more") || { block "$c" "$n" "$wt" "build: $t"; return; }
     checked "$c" "$n" "$wt" "$issue" "$sprompt" build "$t" || return
     # A bug card (the pack's type label): the tests it adds or changes must fail on main's code without the fix

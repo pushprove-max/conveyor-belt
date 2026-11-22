@@ -417,3 +417,56 @@ h=${RUBYOPT%% *}; [ "$1" = spec/a_spec.rb ] && grep -q "SimpleCov.start" "${h#-r
 p=$(pwd -P); echo "{\"RSpec\": {\"coverage\": {\"$p/lib/a.rb\": {\"lines\": [null, 1, 0]}, \"$p/lib/b.rb\": {\"lines\": [null, 0]}}}}" > "$CONVEYOR_MAP_COV/.resultset.json"' \
     '{"lib/a.rb": ["spec/a_spec.rb"]}' .rspec lib/a.rb lib/b.rb spec/a_spec.rb
 }
+
+# Main with a map of its own (test.map): lib/a.sh defines fa(), lib/b.sh calls it and sources lib/a.sh and .hid/x.sh,
+# tests/a.test.sh covers lib/a.sh. What only talks about them, no caller: a comment (lib/c.sh), a Markdown page, a data
+# row (data.txt), a regex of words (lib/d.sh), and a command that names other/a.sh by its bare name (lib/e.sh).
+startmain() {
+  setup '[]'; git -C "$R" rm -q a.test.sh || fail "the fixture's a.test.sh"
+  mkdir -p "$R/lib" "$R/tests" "$R/other" "$R/.hid" && printf 'fa() { echo a; }\n' > "$R/lib/a.sh" && printf '. lib/a.sh\n. .hid/x.sh\nfa\n' > "$R/lib/b.sh" \
+    && echo x > "$R/tests/a.test.sh" && echo : > "$R/other/a.sh" && echo : > "$R/.hid/x.sh" \
+    && printf '# fa is called by b.sh, see lib/a.sh\n' > "$R/lib/c.sh" && printf 'Call fa() from lib/a.sh.\n' > "$R/docs.md" && echo 'fa 26' > "$R/data.txt" \
+    && printf '[[ $w =~ ^(run|fa|x)$ ]]\n' > "$R/lib/d.sh" && printf 'cmd a a.sh\n' > "$R/lib/e.sh" \
+    && printf '%s\n' '{"area": "a", "test": "a.test.sh"}' '{"area": "a", "file": "lib/a.sh"}' > "$R/areas.json" || fail "the fixture"
+  git -C "$R" add -A && git -C "$R" commit -qm start || fail "main's files could not be committed"
+  tune '.test.map = "areas.json"'
+}
+# cardbuild() (card.sh) on card c7 of an issue of <title> and <body>, its worktree on main, as bugcard() (bugproof.test.sh)
+# does it: the build session's whole prompt is in $STUB/brief (the stub claude keeps it).
+startcard() { # <title> <body>
+  local ISSUE
+  # shellcheck disable=SC2034 # read by the command fx_in() runs
+  ISSUE=$(issue 7 2026-01-01 | jq -c --arg t "$1" --arg b "$2" '.title = $t | .body = $b')
+  echo : > "$STUB/build"
+  FXWT=$T/$CASE/cards/c7
+  git -C "$R" worktree add -q --detach "$FXWT" || fail "the card's worktree could not be made"
+  fx_in 'c=c7 n=7 br="" mode="" wt=$FXWT issue=$ISSUE sprompt=brief sf="" go=end; cardbuild; echo "go $go"'
+  [ -s "$STUB/brief" ] || fail "the build session was not run: $(tail -n 5 "$T/$CASE/run.out")"
+}
+
+# Bug it catches (#1312): every builder searched for the callers and tests of what its issue changes. An issue that
+# names a function (fa(), bare in the title) and files (bare, one with a leading dot) gets, in the build session's
+# prompt, a list marked a starting point, not the scope: the file that defines the function, the file that calls it, the
+# files that name a named file, and the test file the map ties to it. It must not list a comment, a Markdown page, a
+# data row or a regex of words as a caller, which would fill the list before a real caller, nor the file that names a
+# same-named file (other/a.sh) by its bare name as one that names lib/a.sh.
+t_startbrief() {
+  startmain
+  startcard 'Change fa()' 'It must print b. See lib/a.sh:1 and .hid/x.sh:2.'
+  grep -qF '# Where to start: callers and mapped tests' "$STUB/brief" && grep -qF 'a starting point, not the scope' "$STUB/brief" \
+    || fail "the prompt has no list marked a starting point: $(tail -n 8 "$STUB/brief")"
+  grep -qxF -e '- `fa()`: defined in lib/a.sh; called in lib/b.sh; mapped test files tests/a.test.sh' "$STUB/brief" \
+    || fail "the list does not give the definer, the caller and the mapped test of fa(), or lists a comment, a page, a data row or a regex as a caller: $(tail -n 5 "$STUB/brief")"
+  grep -qxF -e '- `lib/a.sh`: named in areas.json, lib/b.sh; mapped test files tests/a.test.sh' "$STUB/brief" \
+    || fail "the list does not give the files that name lib/a.sh and its mapped test, or lists a comment, a page or a bare name of another file: $(tail -n 5 "$STUB/brief")"
+  grep -qxF -e '- `.hid/x.sh`: named in lib/b.sh' "$STUB/brief" \
+    || fail "the list does not give the file that names .hid/x.sh, a path that starts with a dot: $(tail -n 5 "$STUB/brief")"
+}
+
+# Bug it catches (#1312): an issue that names no tracked file or function (a word in backticks, a file that is not
+# there, a function nothing defines or calls) must get no list: an empty heading would anchor the builder on nothing.
+t_startbriefnone() {
+  startmain
+  startcard 'Change the wording' 'Say `hello` in `docs/gone.md` and call `nothing_here()`; no file or function is named.'
+  ! grep -qF 'Where to start' "$STUB/brief" || fail "an issue that names nothing got a list: $(tail -n 8 "$STUB/brief")"
+}
