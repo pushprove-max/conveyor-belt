@@ -706,7 +706,7 @@ issue number, as a link, and the issue title.
 
 ## Tests page
 
-The Tests tab shows, from top to bottom: the Test map, a line with a link to the [Benchmarks tab](#benchmarks-tab), the
+The Tests tab shows, from top to bottom: the Test map, the
 figures, the table of test files, Test edits by cards, Removed by Optimize, and Recent actions. The settings of the
 tests are in the Test settings panel, after the Tests panel on the same tab.
 

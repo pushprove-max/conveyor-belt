@@ -900,7 +900,7 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .bench .r { text-align: right; }
 .bench .mono { font-family: var(--mono); font-size: var(--fs-xs); white-space: nowrap; }
 .bench .btn-sm { min-height: 28px; padding: 2px var(--sp-2); font-size: var(--fs-sm); }
-.bench .btn-link, .tests-bench-moved .btn-link { padding: 0; min-height: 0; border: 0; background: none; color: var(--accent); text-decoration: underline; cursor: pointer; }
+.bench .btn-link { padding: 0; min-height: 0; border: 0; background: none; color: var(--accent); text-decoration: underline; cursor: pointer; }
 .bench-muted { color: var(--muted); }
 .bench-small { font-size: var(--fs-xs); }
 .bench-log pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }

@@ -647,13 +647,6 @@
     return ctl;
   }
 
-  // Benchmarks moved to a tab of their own (#326): the page keeps one line with a link there.
-  function benchLink() {
-    const h = S.ctx.h, p = h('p', 'board-from tests-bench-moved');
-    p.append('Benchmarks moved to their own tab. ', button('Open Benchmarks', 'btn-quiet btn-sm', 'to-bench', 'Open the Benchmarks tab', () => S.ctx.setTab('bench', true)));
-    return p;
-  }
-
   // A control that is used tells which panel's note says what it did (say()).
   const hooked = new WeakSet();
   function hook(el, from) {
@@ -706,7 +699,6 @@
     if (!S.sel.size) { S.answers = null; if (asking('many')) S.ask = null; }
     const parts = [];
     if (obj(S.d.testMap)) parts.push(mapPart(S.d.testMap));
-    parts.push(benchLink());
     const wasRecent = el.querySelector('.tests-results');
     if (wasRecent) S.recentOpen = wasRecent.open;
     if (!t) {

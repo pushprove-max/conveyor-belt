@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // The Tests page's Test map part (#178): the map's state at the top of the page, Build the test map with its tool and
-// the last whole-suite run's time, a bar while the build runs, Stop, and the result in place; and the one line that
-// says the Benchmarks moved to their own tab (#326). Shared setup:
-// dashboard-view.helpers.mjs (TA.snap()).
+// the last whole-suite run's time, a bar while the build runs, Stop, and the result in place; and that the page has no
+// Benchmarks line or control (#1344). Shared setup: dashboard-view.helpers.mjs (TA.snap()).
 import assert from 'node:assert/strict';
-import { boot, deliver, next, settle, act, cases, order, T0, TA } from './dashboard-view.helpers.mjs';
+import { boot, deliver, next, settle, act, cases, T0, TA } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const { snap, tp, reply } = TA;
@@ -92,15 +91,14 @@ test('Test map: a refused Build says why in the part', async () => {
   assert.ok(act(part(w), 'map-build'), 'Build is still offered');
 });
 
-// Bug it guards (#326): the Benchmarks were a small part of the Tests page; they moved to a tab of their own, and the
-// Tests page keeps one line that opens it.
-test('Benchmarks moved: the Tests page says so in one line, and its link opens the Benchmarks tab', () => {
+// Bug it guards (#1344): the Benchmarks live in a tab of their own, so the Tests page must not keep the old
+// "Benchmarks moved to their own tab" line or its Open Benchmarks button.
+test('Benchmarks: the Tests page has no "moved" line, no to-bench button and no Benchmarks control', () => {
   const w = boot({ tab: 'tests' });
   deliver(w, snap());
-  const line = tp(w).querySelector('.tests-bench-moved');
-  assert.equal(line.textContent, 'Benchmarks moved to their own tab. Open Benchmarks');
-  assert.equal(tp(w).querySelector('[data-act^="bench-"]'), null, 'no Benchmarks control is left on the Tests page');
-  act(line, 'to-bench').click();
-  assert.deepEqual(order(w), ['bench']);
-  assert.equal(new w.URL(w.location.href).searchParams.get('tab'), 'bench');
+  const page = tp(w);
+  assert.equal(page.querySelector('.tests-bench-moved'), null, 'no "moved" line');
+  assert.equal(page.querySelector('[data-act="to-bench"]'), null, 'no Open Benchmarks button');
+  assert.equal(page.querySelector('[data-act^="bench-"]'), null, 'no Benchmarks control is left on the Tests page');
+  assert.ok(!page.textContent.includes('Benchmarks moved'), 'no "Benchmarks moved" text');
 });
