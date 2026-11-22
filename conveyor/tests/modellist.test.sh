@@ -270,6 +270,19 @@ t_nopriceran() {
   out=$(missing); [ "$out" = '["claude-ran-9","claude-reviewer-9","claude-spent-9","m","x"]' ] \
     || fail "a model a session (or a failed one) ran, or a review's own, is not listed, or a review's stats, a test's or an older one is: $out"
 }
+# Bug (#1356): <synthetic>, the name Claude Code gives a message no model answered (the note a cut-off session ends
+# with), was read as a model a build ran, so the look listed it as one with no price. A build (and a failed one's
+# spent) whose byModel and models hold <synthetic> beside a real model, and one whose byModel holds it alone beside
+# a models list of one, add no <synthetic> to the models with no price.
+t_nopricesynthetic() {
+  setup '[]'; unset CONVEYOR_NOPRICE_CMD
+  local now; now=$(TZ=UTC p_date now +%Y-%m-%dT%H:%M:%SZ)
+  { printf '{"card":"c1","step":"build","time":"%s","model":"claude-opus-5-5","stats":{"byModel":{"<synthetic>":{},"claude-opus-5-5":{}},"models":["<synthetic>","claude-opus-5-5"]}}\n' "$now"
+    printf '{"card":"c1","step":"fix","time":"%s","model":"claude-opus-5-5","stats":{"byModel":{"<synthetic>":{}},"models":["<synthetic>","claude-opus-5-5"]}}\n' "$now"; } >> "$ST/cards.jsonl"
+  printf '{"card":"c3","step":"blocked","time":"%s","spent":{"step":"build","model":"claude-opus-5-5","stats":{"byModel":{"<synthetic>":{}}}}}\n' "$now" >> "$ST/retried.jsonl"
+  looks 'noprice'
+  out=$(missing); [ "$out" = '["m","x"]' ] || fail "<synthetic> is listed as a model with no price: $out"
+}
 # Bug (#1074): the models only the research lane's sessions ran were listed (an embedding model, older chat models),
 # though the belt never runs them. With a lane session that ran research-9, the look lists only the pack's m and x.
 t_nopricelane() {

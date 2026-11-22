@@ -321,6 +321,23 @@ EOF
     || fail "the partly read build is shown as whole: $(jq -c '.landed[0].metrics' <<<"$out")"
 }
 
+# A session cut off by the time limit ends with an answer Claude Code names <synthetic> (no model answered it). Bug
+# caught (#1356): the step recorded <synthetic> as a model in stats.byModel and stats.models, so the Board asked for
+# its price. Neither holds it now, and the other model's tokens are as they were (the answer after the result is added to it).
+t_metricssynthetic() {
+  local o f
+  o=$T/$CASE/session.out; mkdir -p "$T/$CASE"
+  cat > "$o" <<'EOF'
+{"type":"assistant","message":{"id":"m1","model":"claude-opus-5-5","usage":{"input_tokens":5,"output_tokens":1}}}
+{"type":"result","is_error":false,"num_turns":1,"usage":{"input_tokens":5,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1},"modelUsage":{"claude-opus-5-5":{"inputTokens":5,"outputTokens":1}}}
+{"type":"assistant","message":{"id":"m2","model":"claude-opus-5-5","usage":{"input_tokens":3,"output_tokens":2}}}
+{"type":"assistant","message":{"id":"m3","model":"<synthetic>","usage":{"input_tokens":0,"output_tokens":0}}}
+EOF
+  f=$(jq -cRn --arg m m --arg e medium --argjson s 60 -f "$SRC/jq/sessionread.jq" "$o" | tail -n 1) || fail "the session's output was not read"
+  [ "$(jq -c '[.stats.models, .stats.byModel]' <<<"$f")" = '[["claude-opus-5-5"],{"claude-opus-5-5":{"input":8,"write":0,"read":0,"output":3,"write1h":0}}]' ] \
+    || fail "<synthetic> is recorded as a model, or the other model's tokens changed: $f"
+}
+
 # A session that ran on two models: each model's 1-hour cache writes at its own rate, and the step split between
 # them (pricedBy). Opus: 1M in at $4 + 1M 1-hour writes at $8 = $12; Sonnet: 1M in at $2 + 1M 5-minute writes at
 # $2.50 = $4.50. With no 1-hour count for either and both writing cache, whose they were is not known: unpriced.

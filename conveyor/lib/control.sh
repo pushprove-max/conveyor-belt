@@ -323,7 +323,7 @@ noprice_() {
   packget prices p lanes.research r 2>/dev/null || return 1
   # The model IDs the card sessions of the last 30 days ran, as the Board counts them under Seen (dashboard_limit.py
   # card_costs, the steps rows.jq takes): a build's, fix's or rebase's are the models its result names (stats.byModel,
-  # else stats.models when it names one), else the model it was run on; a review's is its own model; a test runs none.
+  # else stats.models when it names one; <synthetic>, the name of a message no model answered, is none), else the model it was run on; a review's is its own model; a test runs none.
   # A failed session or review is the blocked line's spent, at that line's time. A seat asked for one model can run
   # another. Only the lines that name a model are parsed, and a line that does not read is skipped. No such line (grep
   # fails, a missing file too) is no model.
@@ -331,7 +331,7 @@ noprice_() {
   ran=$({ grep -hF '"model' "$STATE" "$RETRIED" 2>/dev/null || :; } | jq -nRc --arg s "$since" '[inputs | try fromjson catch null | objects
       | if .step == "blocked" then (.spent | objects) + {time} else . end
       | select((.step | IN("build", "review", "fix", "rebase")) and (.time | strings) >= $s)
-      | ((if .step != "review" then .stats | objects | ((.byModel | objects | select(length > 0) | keys) // (.models | arrays | select(length == 1))) else empty end) // [.model])
+      | ((if .step != "review" then .stats | objects | ((.byModel | objects | keys | map(select(. != "<synthetic>")) | select(length > 0)) // (.models | arrays | map(select(. != "<synthetic>")) | select(length == 1))) else empty end) // [.model])
       | .[] | strings | select(. != "")] | unique') || return 1
   # Each model with its CLI. A seat the record and pack leave unset (no judge, say) adds none, and fails no look.
   x=$({ for m in builder reviewer judge; do seat "$m" "$c" 2>/dev/null || :; done; } | jq -rs --argjson a "$a" --argjson c "$c" \

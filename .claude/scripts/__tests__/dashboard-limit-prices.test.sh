@@ -55,6 +55,20 @@ print(json.dumps([[s['usd'], s['pricedAs']] for s in c['cards'][0]['steps']] + [
 [ "$got" = '[[12.2, "gpt-6-sol"], [24.4, "gpt-5.6-sol"], [24.4, "gpt-5.6-sol"], 16.2, 10.544]' ] \
   || fail "the gpt-6-sol and daybreak prices: $got"
 
+# A step whose byModel holds <synthetic> (what Claude Code names on a message no model answered, as the note a cut-off
+# session ends with) beside a priced model, and one whose byModel is <synthetic> alone with a models list of one: no
+# <synthetic> in seen, no model with no price, and each step priced at its real model (1M input at Opus 5.5's $4).
+# Bug caught (#1356): <synthetic> counted as a model that ran, so the Board asked for its price and left the step unpriced.
+got=$(python3 -c "import sys, json; sys.path.insert(0, '${LIM%/*}'); import dashboard_limit as d
+u = {'input': 1000000, 'write': 0, 'write1h': 0, 'read': 0, 'output': 0}
+z = {'input': 0, 'write': 0, 'read': 0, 'output': 0}
+t = {'input': 1000000, 'write': 0, 'read': 0, 'output': 0}
+c = d.card_costs({'since': '2026-11-01T00:00:00Z', 'cards': [{'steps': [
+  {'step': 'build', 'time': '2026-11-19T00:00:00Z', 'model': 'claude-opus-5-5', 'usage': u, 'stats': {'models': ['<synthetic>', 'claude-opus-5-5'], 'byModel': {'<synthetic>': z, 'claude-opus-5-5': t}}},
+  {'step': 'fix', 'time': '2026-11-19T00:01:00Z', 'model': 'claude-opus-5-5', 'usage': u, 'stats': {'models': ['<synthetic>', 'claude-opus-5-5'], 'byModel': {'<synthetic>': t}}}]}]})
+print(json.dumps([[s['usd'], s['pricedAs'], s.get('unpriced')] for s in c['cards'][0]['steps']] + [[x['model'] for x in c['seen']]]))")
+[ "$got" = '[[4.0, "claude-opus-5-5", null], [4.0, "claude-opus-5-5", null], ["claude-opus-5-5"]]' ] || fail "a step with <synthetic> among its models: $got"
+
 # Through the Board's collect: the pack's override reaches the cost today. One request today, 1M input tokens of
 # Sonnet 5.5 in fast mode: $4 at the built-in price, $2 at the pack's $1 override.
 MAIN=$T/main BIN=$T/bin OUT=$T/out H=$T/home

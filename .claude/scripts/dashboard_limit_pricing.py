@@ -205,11 +205,16 @@ def card_costs(part, lines=None, kept=None, dest=None):
 
     def ran(step):
         st = step.get("stats") if isinstance(step.get("stats"), dict) else {}
+        # <synthetic> is the model Claude Code names on a message no model answered: no model ran, and it has no price.
+        # Lines written before sessionread.jq left it out still hold it.
         by = st.get("byModel")
-        if isinstance(by, dict) and by:
-            return by
+        if isinstance(by, dict):
+            by = {m: v for m, v in by.items() if m != "<synthetic>"}
+            if by:
+                return by
         ms = st.get("models")
-        if isinstance(ms, list) and len(ms) == 1 and isinstance(ms[0], str):
+        ms = [m for m in ms if m != "<synthetic>"] if isinstance(ms, list) else None
+        if ms and len(ms) == 1 and isinstance(ms[0], str):
             return {ms[0]: None}
         return None
 

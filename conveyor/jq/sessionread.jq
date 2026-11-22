@@ -30,6 +30,8 @@
       | reduce $tailmsg[] as $a (.; (if ($a.model | type) == "string" and $a.model != "" then $a.model else $m end) as $k
           | .[$k] = ((.[$k] // {input: 0, write: 0, read: 0, output: 0}) | .input += ($a.usage.input_tokens | n) | .output += ($a.usage.output_tokens | n)
             | .write += ($a.usage.cache_creation_input_tokens | n) | .read += ($a.usage.cache_read_input_tokens | n)))
+      # <synthetic> is what Claude Code names on a message no model answered (the note a cut-off session ends with): no model ran, and it has no price.
+      | del(.["<synthetic>"])
       | if length == 0 then null
         else with_entries(.key as $k | .value += (if $h1 != null and ($h1[$k] | type) == "number" then {write1h: $h1[$k]} else {} end)) end) catch null) as $bm
   | {model: $m, effort: $e, sec: $s}
