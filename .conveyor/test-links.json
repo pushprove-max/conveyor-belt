@@ -218,15 +218,18 @@
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/jq/check.jq": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/jq/rows.jq": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard-view.focus.test.mjs",
     ".claude/scripts/__tests__/dashboard-view.overview.test.mjs",
     ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/jq/track.jq": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard-view.focus.test.mjs",
     ".claude/scripts/__tests__/dashboard-view.overview.test.mjs",
     ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
@@ -672,5 +675,23 @@
   ],
   "conveyor/tests/voidrun.test.sh": [
     "conveyor/tests/metrics.test.sh"
+  ],
+  ".claude/dashboard/parts/app-tabs.js": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh"
+  ],
+  ".claude/dashboard/parts/app-track.js": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh"
+  ],
+  ".claude/scripts/__tests__/dashboard-view.lint-rows.test.mjs": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh"
+  ],
+  "conveyor/lib/lint.sh": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh"
+  ],
+  "conveyor/tests/lintgate.test.sh": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh"
+  ],
+  "conveyor/tests/viewstrack.test.sh": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh"
   ]
 }

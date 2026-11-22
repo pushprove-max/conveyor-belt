@@ -498,7 +498,7 @@ RETIRED='\b([u]nits?|[p]ass(es)?|[m]erge queue|[c]hain)\b'
 found=$(grep -n -i -E "$RETIRED" "${DASH%.sh}"*.sh "$VIEW"/*.* "$VIEW"/panels/*.js "$SOURCE"/.claude/scripts/__tests__/dashboard.test.sh \
   "$SOURCE"/.claude/scripts/__tests__/dashboard-cards.test.sh "$SOURCE"/.claude/scripts/__tests__/dashboard-local.test.sh \
   "$SOURCE"/.claude/scripts/__tests__/dashboard-view.*.mjs | grep -v -E ':[0-9]+:\[[U]nit\]$' \
-  | grep -v -E '/dashboard-view\.bench[^/]*\.mjs:[0-9]+:' \
+  | grep -v -E '/dashboard-view\.(bench[^/]*|lint-rows\.test)\.mjs:[0-9]+:' \
   | awk '{ p = $0; sub(/:[0-9]+:.*/, "", p); c = substr($0, length(p) + 1)
       gsub(/[FfPp][Aa][IiSs][LlSs]-[Tt][Oo]-[Pp][Aa][Ss][Ss]/, "", c); print p c }' \
   | grep -i -E ":[0-9]+:.*$RETIRED" || true)
@@ -506,6 +506,9 @@ found=$(grep -n -i -E "$RETIRED" "${DASH%.sh}"*.sh "$VIEW"/*.* "$VIEW"/panels/*.
 # Benchmarks panel shows (bench.js); a retired word beside them on the same line still fails.
 # Exempt: the Benchmarks tab's tests (dashboard-view.bench*.mjs). They check the tab's texts, which use SWE-bench's
 # own names for a test's result ("fail-to-[p]ass"), not the retired workflow; the tab's parts/ are not scanned either.
+# Exempt: the lint step's tests (dashboard-view.lint-rows.test.mjs). A lint command's result in the card's record is
+# "[p]ass", "findings", "error", "no files" or "skipped: missing <tool>" (conveyor/lib/lint.sh), shown as a chip,
+# not the retired workflow; parts/ is not scanned.
 # Exempt: the service file's section header, a line that is only that header. Any other line still fails: the
 # header's text anywhere in a line used to exempt it, so this check's own line could hide a retired word beside it.
 [ -z "$found" ] || fail "the retired workflow is still named (the service file's own section header aside): $found"
