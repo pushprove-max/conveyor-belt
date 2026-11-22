@@ -158,7 +158,7 @@ swe_freeze() { # <arm json> <folder>
 # revision, the harness's swebench version), the limits, the arm (its JSON without the words that only name it), the
 # model and, for a conveyor arm, the control record and the parts of the pack its sandbox takes (swe_ctl, swe_pack)
 # and its rules: the mode and, for the project's, the sha256 of the card rules and of every area rule file the pack
-# maps (a task's card reads some of them). A conveyor arm's engine commit is not in it: its key holds it (swe_reskey).
+# maps, in the pack's order (a task's card reads some of them, each in that order). A conveyor arm's engine commit is not in it: its key holds it (swe_reskey).
 # The control record leaves out what the card's build does not read: the queue, the cap, the guard and the Tests
 # seat (the benchmark's `run 1` starts no `testaction`). Read from the run's copy of the arm in use (swe_root).
 swe_inputs() { # <arm json> <model>
@@ -169,10 +169,10 @@ swe_inputs() { # <arm json> <model>
     r=$(jq -c '{mode: (.rules // "engine")}' <<<"$1")
     if [ "$(jq -r .mode <<<"$r")" = project ]; then
       packget areas a || return 1
-      r=$(jq -c --arg h "$(sha256sum < "$o/.conveyor/card-rules.md" 2>/dev/null | cut -c1-64)" '. + {card: $h, areas: {}}' <<<"$r")
+      r=$(jq -c --arg h "$(sha256sum < "$o/.conveyor/card-rules.md" 2>/dev/null | cut -c1-64)" '. + {card: $h, areas: []}' <<<"$r")
       while IFS=$'\t' read -r g f; do
         h=$(sha256sum < "$o/$f" 2>/dev/null | cut -c1-64)
-        r=$(jq -c --arg g "$g" --arg f "$f" --arg h "$h" '.areas[$g] = {file: $f, sha: $h}' <<<"$r")
+        r=$(jq -c --arg g "$g" --arg f "$f" --arg h "$h" '.areas += [{glob: $g, file: $f, sha: $h}]' <<<"$r")
       done < <([ -z "$a" ] || jq -r 'to_entries[] | "\(.key)\t\(.value)"' <<<"$a")
     fi
   fi
@@ -251,9 +251,11 @@ swe_in() { # <seconds> <container> <folder> <script> [<NAME=value> ...]
 }
 # The areas of the project's pack whose rule a task's card reads: each "<glob>\t<rule file>" the pack's areas map, by
 # path glob, to a path the task's issue names (the sandbox's issue #1, swe_sandbox: its title and body), scanned as
-# cardrules() scans an issue, in the pack's order. Fails when the pack cannot be read.
+# cardrules() scans an issue, in the pack's order; none for the preflight's task. Fails when the pack cannot be read.
 swe_arearules() { # <task json>
   local a g f x ps
+  # The preflight's trivial task (swe_checktask) is no task of the project: no card there reads an area rule.
+  [ "$(jq -r .id <<<"$1")" != preflight ] || return 0
   packget areas a || return 1
   mapfile -t ps < <(jq -r '["SWE-bench \(.id)", .issue] | map(strings) | join("\n") | scan("[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*/?")' <<<"$1")
   while IFS=$'\t' read -r g f; do

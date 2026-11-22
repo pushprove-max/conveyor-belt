@@ -282,3 +282,29 @@ t_swedjango() {
     && [ "$(cat "$d/repo/runtests.args" 2>&1)" = '--settings=test_sqlite --parallel 1 invalid_models_tests.test_models' ] && [ ! -e "$d/repo/pytest.args" ] \
     || fail "the pack's test.fileCommand did not run a Django test file through tests/runtests.py by its label: $fc $(cat "$d/repo/runtests.args" "$d/repo/pytest.args" 2>&1)"
 }
+
+# Bug: an arm on the project's rules ran its preflight on a trivial task that names hello.py, so an area mapped to
+# hello.py whose rule file was missing refused the arm, though no real task's card reads that area.
+# loop: only a run shows the arm's preflight and its tasks start with the area's rule file missing.
+t_swearmarearules() {
+  swe; local o
+  jq '.rules = "project" | .label = "Conveyor, project rules"' "$SWE_FX/arms/conveyor.json" > "$SWE_FX/arms/conveyor-rules.json" && echo 'Rule A.' > "$R/.conveyor/card-rules.md" \
+    && jq '.areas = {"hello.py": "rules/other.md"}' "$R/.conveyor/project.json" > "$R/.conveyor/p.new" && mv "$R/.conveyor/p.new" "$R/.conveyor/project.json" \
+    || fail "the arm or the pack were not made"
+  o=$(loop bench swe 1 --arm conveyor-rules 2>&1) && grep -q ": resolved$" <<<"$o" \
+    || fail "the run did not start with the rule file of the area hello.py missing, though the tasks name x.py: $o"
+}
+
+# Bug: the arm's inputs kept the areas as an object, which jq -S sorts, so swapping two areas of the pack (a card adds
+# the rules of every area that matches a path, in the pack's order) left the results key as it was and kept a result built on the other order.
+t_swearmareaorder() {
+  swe; local k1 k2 k3
+  jq '.rules = "project" | .label = "Conveyor, project rules"' "$SWE_FX/arms/conveyor.json" > "$SWE_FX/arms/conveyor-rules.json" && echo 'Rule A.' > "$R/.conveyor/card-rules.md" \
+    && mkdir -p "$R/rules" && echo A > "$R/rules/a.md" && echo B > "$R/rules/b.md" || fail "the arm or the rule files were not made"
+  setareas() { jq --argjson a "$1" '.areas = $a' "$R/.conveyor/project.json" > "$R/.conveyor/p.new" && mv "$R/.conveyor/p.new" "$R/.conveyor/project.json" || fail "the pack was not written"; }
+  key() { loop bench swe history | jq -r '.arms[] | select(.name == "conveyor-rules") | .keyPrefix'; }
+  setareas '{"x.py": "rules/a.md", "*.py": "rules/b.md"}'; k1=$(key); k3=$(key)
+  setareas '{"*.py": "rules/b.md", "x.py": "rules/a.md"}'; k2=$(key)
+  [ -n "$k1" ] && [ "$k1" != null ] && [ "$k1" = "$k3" ] && [ "$k1" != "$k2" ] \
+    || fail "swapping two areas of the pack did not change the arm's results key (or the key is not stable): $k1 $k3 $k2"
+}

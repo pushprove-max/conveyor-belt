@@ -128,6 +128,17 @@ t_swestopnext() {
   [ -z "$(ls "$SWE_FX/boxes")" ] || fail "the gone run's container was left: $(ls "$SWE_FX/boxes")"
 }
 
+# Bug: a run that died in its preflight left its container, found only through the box file in check/<arm>.h, which the
+# next standalone check of that arm (it starts that folder over) replaced. Stop finds the container by the run's ID in
+# its name, so it goes with no box file.
+t_swestoppredead() {
+  swe; local id=r20261119T000000-1 c
+  c=conveyor-swe-$id-stub-a-preflight
+  swegone "$id"; swecheckbox; rm -f "$B"/work/*.h/box; mkdir -p "$SWE_FX/boxes/$c" "$B/check/stub-a.h" && echo conveyor-swe-check-stub-a-preflight > "$B/check/stub-a.h/box"     || fail "the dead run's preflight container was not made"
+  loop bench swe stop "$id" > "$T/$CASE/stop.out" 2>&1 || fail "stop failed: $(cat "$T/$CASE/stop.out")"
+  [ "$(ls "$SWE_FX/boxes")" = conveyor-swe-check-other-x ] || fail "Stop of run $id left its preflight container $c, or removed an arms check's: $(ls "$SWE_FX/boxes")"
+}
+
 # Bug (#1051): a Conveyor arm's card whose every failing case fails on main too waits for main to change, which never
 # changes in a trial, so the trial sat until its time limit (taskTimeout, 4 hours) with nothing running, its task
 # shown at Testing. Here the fake engine's card stages its fix, commits nothing, and then only waits, for 30 s at

@@ -733,8 +733,9 @@ swe_end() { # <state> [gone: its process had ended with no end written]
   for f in "$SWE_DIR"/work/*/box "$SWE_DIR"/check/*/box; do
     case $(cat "$f" 2>/dev/null) in "conveyor-swe-$SWE_RUN-"?*) docker rm -f "$(cat "$f")" > /dev/null 2>&1 ;; esac
   done
-  docker ps -a --filter "name=conveyor-$SWE_RUN-" --format '{{.Names}}' 2>/dev/null | while IFS= read -r f; do
-    case $f in "sweb.eval."*".conveyor-$SWE_RUN-"?*) docker rm -f "$f" > /dev/null 2>&1 ;; esac
+  # By name, not by a box file: a later check of the arm replaces the box file of a dead run's preflight container.
+  docker ps -a --filter "name=$SWE_RUN-" --format '{{.Names}}' 2>/dev/null | while IFS= read -r f; do
+    case $f in "sweb.eval."*".conveyor-$SWE_RUN-"?*|"conveyor-swe-$SWE_RUN-"?*) docker rm -f "$f" > /dev/null 2>&1 ;; esac
   done
   [ ! -d "$SWE_DIR/work" ] || { chmod -R u+w "$SWE_DIR/work"; rm -rf "$SWE_DIR/work"; }
   rm -rf "$SWE_DIR/frozen"; rm -f "$SWE_DIR/stop"; swe_board; SWE_RUN=; trap - TERM INT
