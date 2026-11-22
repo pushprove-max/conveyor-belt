@@ -187,6 +187,45 @@ test('#791: Release that runs the suite first asks the mode and sends it after t
   assert.deepEqual(await sent(w, () => { act(card(w), 'release').click(); act(card(w), 'release').click(); }), []);
   assert.deepEqual(await sent(w, () => act(card(w), 'mode-parallel').click()), [{ action: 'release-run', args: ['1.0.0', '--parallel'], repo: 'plugin' }]);
 });
+// Bug this guards (#1364): the mode question gave no sign of the project's rule, so the owner chose against it, and
+// Draft notes (which sends no mode) was recorded and shown as one by one whatever the rule said.
+const withRule = (run, mode, plugin) => { const d = data(run, plugin); d.panels.release.data.records[0].suiteMode = mode; return d; };
+test('#1364 D3: the mode question presets the record\'s suiteMode and marks it the rule\'s choice; a choice still sends its own mode', async () => {
+  const w = boot();
+  deliver(w, withRule(null, 'parallel'));
+  act(card(w), 'release-prep').click(); act(card(w), 'release-prep').click();
+  const ask = card(w).querySelector('[data-figure="mode-ask"]');
+  assert.equal(act(ask, 'mode-parallel').getAttribute('aria-pressed'), 'true');
+  assert.equal(act(ask, 'mode-serial').getAttribute('aria-pressed'), 'false');
+  assert.match(act(ask, 'mode-parallel').textContent, /The rule's choice\.$/);
+  assert.doesNotMatch(act(ask, 'mode-serial').textContent, /rule's choice/);
+  assert.deepEqual(await sent(w, () => act(card(w), 'mode-serial').click()), [{ action: 'release-run', args: ['prep', '1.0.0', '--serial'], repo: 'plugin' }], 'the flag given wins for the run');
+  next(w, withRule(null, 'serial'));
+  act(card(w), 'release-prep').click(); act(card(w), 'release-prep').click();
+  assert.equal(act(card(w), 'mode-serial').getAttribute('aria-pressed'), 'true', 'the preset follows the rule');
+  assert.equal(act(card(w), 'mode-parallel').getAttribute('aria-pressed'), 'false');
+  // A record with no suiteMode (an older engine) presets nothing.
+  next(w, data(null));
+  act(card(w), 'release-prep').click(); act(card(w), 'release-prep').click();
+  assert.deepEqual(['mode-serial', 'mode-parallel'].map((a) => act(card(w), a).getAttribute('aria-pressed')), ['false', 'false']);
+  assert.doesNotMatch(card(w).querySelector('[data-figure="mode-ask"]').textContent, /rule's choice/);
+});
+// Also guards: the Draft notes run (main has no notes, so no suite runs and its record has no mode) was shown as the
+// rule's mode, a false line. The mode of a run that starts its suite is covered by the #791 case below.
+test('#1364 D3: Draft notes sends no mode, and step 2 shows no mode for that run, not the rule\'s guess', async () => {
+  const w = boot();
+  const mode = () => { const p = stepOf(w, 'full-suite').querySelector('[data-figure="suite-mode"]'); return p && p.textContent; };
+  deliver(w, withRule(null, 'parallel', { notes: false, written: [] }));
+  assert.equal(act(card(w), 'release-prep').textContent, 'Draft notes');
+  act(card(w), 'release-prep').click();
+  assert.deepEqual(await sent(w, () => act(card(w), 'release-prep').click()), [{ action: 'release-run', args: ['prep', '1.0.0'], repo: 'plugin' }], 'Draft notes sends no mode');
+  assert.equal(card(w).querySelector('[data-figure="mode-ask"]'), null);
+  const draft = { notes: false, written: [] };
+  next(w, withRule({ ...RUN, ended: null, state: 'running', mode: null }, 'parallel', draft));
+  assert.equal(mode(), null, 'the draft run has no mode: the rule does not say how a suite would run');
+  next(w, withRule({ ...RUN, ended: '2026-11-14T08:15:00Z', state: 'passed', mode: null, failed: 0, cases: [] }, 'parallel', draft));
+  assert.equal(mode(), null, 'a run that ended with no mode says none');
+});
 // Bug this guards (#791): step 2 did not say whether the suite runs, or ran, its files one by one or in parallel.
 test('#791: step 2 shows the mode of the run under way and of the last run, from its record', () => {
   const w = boot();

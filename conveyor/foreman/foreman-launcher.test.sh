@@ -42,17 +42,17 @@ t_text() {
   st=$(start)
   grep -qF -- '# STANDING YES' <<<"$st" || fail "the start has no standing kinds: $st"
   [ -x "$L" ] || fail "the start did not make $L"
-  # Seven places: three in the fixed text (the filing line's `testissue`, the release suite line's `release-run` and
-  # `suite-machine`), one in the standing text all kinds share (the `auto act` line), and one in each of asked-fix,
+  # Eight places: four in the fixed text (the filing line's `testissue`, the release suite line's `release-run`,
+  # `control` and `suite-machine`), one in the standing text all kinds share (the `auto act` line), and one in each of asked-fix,
   # release-check and fixed-block (review-followup and review-retry name no command). The command is counted with its
   # path alone too, so a start that grows or drops a command does not pass on its own copy.
   n=$(grep -oF "$L ask" <<<"$st" | wc -l)
   # The line that sends the Foreman to the plugin's owner-rules.md (a start over its limit, as this one is with the long
   # fixture paths) names the plugin's folder, not a command, so it is left out of the folder check below.
-  [ "$n" -eq 7 ] && [ "$(grep -oF "$L" <<<"$st" | wc -l)" -eq 7 ] || fail "the start names $L ask $n times, not the 7 places the versioned path was in: $st"
+  [ "$n" -eq 8 ] && [ "$(grep -oF "$L" <<<"$st" | wc -l)" -eq 8 ] || fail "the start names $L ask $n times, not the 8 places the versioned path was in: $st"
   ! grep -qE 'versions/|foreman/foreman\.sh|bash [^ ]*foreman\.sh' <<<"$st" && ! grep -vF 'owner-rules.md did not fit' <<<"$st" | grep -qF "$SRC" || fail "the start names a version-folder path: $(grep -E 'versions/|foreman/foreman\.sh|bash [^ ]*foreman\.sh' <<<"$st" | head -3)"
   # Today's text names `bash <data>/conveyor/versions/<commit>/conveyor/foreman/foreman.sh` where it now names $L: the
-  # start, with the 7 commands put back, is longer by the paths removed (each over 60 characters).
+  # start, with the 8 commands put back, is longer by the paths removed (each over 60 characters).
   old=${st//"$L ask"/"bash $XDG_DATA_HOME/conveyor/versions/$v/conveyor/foreman/foreman.sh ask"}
   [ $((${#old} - ${#st})) -ge $((n * 60)) ] || fail "the start is ${#st} characters, only $((${#old} - ${#st})) shorter than with the versioned path in its $n places"
 }

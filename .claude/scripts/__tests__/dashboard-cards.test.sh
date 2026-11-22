@@ -209,8 +209,8 @@ run
 # Bug: the Release panel gets nothing of a record's main or its release run, or a record from an older engine breaks it;
 # its changes link no issue, for want of the repository's address.
 q '.panels.release == {error: null, data: {records: [{repo: "sample", url: "https://github.com/example/sample-project", release: null, suites: null,
-    suiteMachine: {kind: "ssh", target: "dev@192.0.2.7", dir: "~/suite"}},
-  {repo: "widgetshop", url: "https://github.com/example/WidgetShop", suiteMachine: null,
+    suiteMachine: {kind: "ssh", target: "dev@192.0.2.7", dir: "~/suite"}, suiteMode: null},
+  {repo: "widgetshop", url: "https://github.com/example/WidgetShop", suiteMachine: null, suiteMode: null,
   release: {tag: "v1.0.0", count: 2, commits: [], next: "1.1.0", notes: true, head: "abc"},
   suites: [{kind: "release", version: "1.1.0", sha: "abc", ended: null, state: "running", done: 3, failed: 1, cases: ["x: y"]}]}]}}' \
   "the Release part is each record's release, suites and the rule's suite machine as its snapshot gives them, null from a snapshot from before them"

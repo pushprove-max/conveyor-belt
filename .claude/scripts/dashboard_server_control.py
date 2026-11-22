@@ -43,6 +43,8 @@ def control_ok(body):
         return n == 1 and re.fullmatch(r'100|[1-9][0-9]?|off', v[0]) is not None
     if a == 'atonce':  # the test files a parallel release suite runs at once
         return n == 1 and v[0].isascii() and v[0].isdigit() and v[0][0] != '0' and len(v[0]) <= 3
+    if a == 'suite-mode':  # how a release's suite runs its test files when the press names no mode
+        return v in (['serial'], ['parallel'])
     if a == 'suite-machine':  # where a release's suite runs, as `control suite-machine` takes it (the host checks again)
         if v == ['local'] or v == ['devbox']:
             return True

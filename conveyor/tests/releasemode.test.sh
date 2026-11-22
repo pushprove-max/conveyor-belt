@@ -81,6 +81,36 @@ t_relserial() {
     || fail "the watcher's line for the passed run is not its result, commit and time alone: $line"
   [ "$(atonce)" = 1 ] || fail "two files ran at once in serial mode: $(cat "$STUB/times")"
 }
+# release-run <flags> with the control record's suiteMode <rule> (none: the record has no suiteMode), then waits for the
+# run's end. The whole run is started, as the mode is what the release-prep it starts is given and records.
+moderun() { # <rule: serial | parallel | none> [<flag>]
+  local out
+  modesetup
+  [ "$1" = none ] || { jq -c --arg m "$1" '.suiteMode = $m' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json" || fail "the fixture could not be made"; }
+  out=$(unset CONVEYOR_TEST_SLOT; CONVEYOR_TEST_POOL=$POOL loop release-run prep 1.1.0 ${2:+"$2"} 2>&1) || fail "release-run prep ${2:-} with suiteMode $1 did not start the run: $out"
+  relwait "the run did not end" '.ended != null'
+}
+# Bug (#1364): a release-run given no mode ran its suite one by one, though the project's rule is parallel: release-run
+# passed --serial for the mode it was not given. With suiteMode parallel and no flag, it runs in parallel.
+t_relmoderule() {
+  local RUN
+  moderun parallel
+  jq -e '.state == "passed" and .mode == "parallel" and .atOnce == 2' "$RUN" > /dev/null || fail "release-run prep with suiteMode parallel and no flag did not run in parallel: $(cat "$RUN") $(cat "$T/$CASE/cards/release/run.log")"
+  [ "$(atonce)" = 2 ] || fail "release-run prep with suiteMode parallel and no flag did not run two files at once: $(cat "$STUB/times")"
+}
+# A flag given wins for that run: --serial over suiteMode parallel runs one by one.
+t_relmodeflag() {
+  local RUN
+  moderun parallel --serial
+  jq -e '.state == "passed" and .mode == "serial" and .atOnce == 1' "$RUN" > /dev/null || fail "release-run prep --serial with suiteMode parallel did not run one by one: $(cat "$RUN") $(cat "$T/$CASE/cards/release/run.log")"
+  [ "$(atonce)" = 1 ] || fail "release-run prep --serial with suiteMode parallel ran two files at once: $(cat "$STUB/times")"
+}
+# A record with no suiteMode keeps today's behaviour: release-run with no flag runs one by one.
+t_relmodenone() {
+  local RUN
+  moderun none
+  jq -e '.state == "passed" and .mode == "serial" and .atOnce == 1' "$RUN" > /dev/null || fail "release-run prep with no suiteMode and no flag did not run one by one: $(cat "$RUN") $(cat "$T/$CASE/cards/release/run.log")"
+}
 # The stored setting of files at once (#1174) reaches a parallel suite, and `release-run atonce` prints it, at most
 # the slots. Bugs: release-prep did not tell the suite the setting, so it ran at the suite's own default of 2; a whole
 # number written 1.0 (or 4.0), which the control record keeps, stopped the run, as bash arithmetic reads no 1.0. A

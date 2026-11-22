@@ -140,6 +140,11 @@ grep -qF '# A release'"'"'s suite: before you run conveyor.sh release-run prep <
 grep -qF '"In parallel (<n> at once)" (faster' <<<"$out" \
   && grep -qF "<n> is the number $XDG_DATA_HOME/conveyor/foreman.sh ask <project> release-run atonce prints for the release's project" <<<"$out" \
   || fail "the Foreman's release question does not name, in its parallel option, the number release-run atonce prints for the release's project: $out"
+# Bug (#1364): the release question put no mode first, so the owner chose against the project's rule each time. It marks
+# the rule's mode (suiteMode, in the record `ask <project> control` prints) Recommended. The rules are text the
+# Foreman's model reads, so their text is the behaviour here.
+grep -qF "Mark the option of the rule's mode Recommended, as the rule's choice: the suiteMode in the JSON $XDG_DATA_HOME/conveyor/foreman.sh ask <project> control prints" <<<"$out" \
+  || fail "the Foreman's release question does not mark the rule's suiteMode Recommended: $out"
 # Bug (#1271): the release question did not offer the rule's machine, so a suite set for a Devbox could not be run here
 # for one release, or the owner did not know where it ran. The rules are text the Foreman's model reads, so their text is
 # the behaviour here.

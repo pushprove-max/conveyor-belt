@@ -9,7 +9,7 @@
 // Part of panels/rules.js, which asks for it by name (DASH_APP.use); boot.js loads it before the panels.
 (() => {
   'use strict';
-  let S, num, send, button, post, row, draw;
+  let S, num, send, button, post, row, draw, choice, seg;
   const SIZES = ['2x4', '4x8', '8x16', '16x32'];  // the sizes offered; the record's own size is added when it is another
   const TARGET = /^[A-Za-z0-9._][A-Za-z0-9._@-]*$/;  // control suite-machine's ssh target
   const FOLDER = /^(~|~?\/[A-Za-z0-9._/@+-]*)$/;     // its --dir: ~, a folder under ~/ or a full path
@@ -150,6 +150,17 @@
     save.disabled = !good(v) || (!d && kindOf(c) === 'ssh');
     box.append(field('ssh target', 'suite-ssh-target', v.target, edit('target')), field('Folder there', 'suite-ssh-dir', v.dir, edit('dir')), save);
   }
+  // Release suite mode: the record's suiteMode, how a release's suite runs its test files when the press names no mode
+  // (`control suite-mode <serial | parallel>`). A record without it is drawn disabled, as the other newer rules are.
+  function rulesMode(el, c) {
+    const known = !!c && (c.suiteMode === 'serial' || c.suiteMode === 'parallel'), par = known && c.suiteMode === 'parallel';
+    const to = (m) => () => { if (par !== (m === 'parallel')) send('suite-mode', [m]); };
+    const one = choice('One by one', 'suite-mode-serial', 'Release suite: test files one by one', known && !par, to('serial'));
+    const all = choice('In parallel', 'suite-mode-parallel', 'Release suite: test files in parallel', par, to('parallel'));
+    one.disabled = all.disabled = !known;
+    el.append(row('suite-mode', 'Release suite mode', 'how a release runs its test files, when its press asks no other',
+      seg('Release suite mode', one, all), known ? null : S.ctx.h('span', 'board-from', 'needs a newer Conveyor')));
+  }
   // A radio of the choice, labelled with its name and what it means.
   function kindRadio(k, name, what, shown, pick) {
     const h = S.ctx.h, lab = h('label', 'rules-suite-kind'), i = h('input');
@@ -198,7 +209,7 @@
     return box;
   }
   window.DASH_APP.part('rules-suite', function (shared) {
-    ({ S, num, send, button, post, row, draw } = shared);
-    return { rulesSuite, suiteSlots, suiteAgain: (c) => again(c, true), undoArgs };
+    ({ S, num, send, button, post, row, draw, choice, seg } = shared);
+    return { rulesSuite, rulesMode, suiteSlots, suiteAgain: (c) => again(c, true), undoArgs };
   });
 })();

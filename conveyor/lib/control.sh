@@ -48,7 +48,7 @@ CTL_K=()
 # verdict on a large issue that is too big is acted on: its slices are filed, splitcheck()). The rule Pick settings is off
 # (rules.pick: no card's group and builder choice is recorded, modelpick()). No Tests seat is set: no test action starts (testaction()). The project
 # is not onboarded (onboarded null; `control onboarded` sets {at, rules}: when the owner finished the Board's setup and
-# the rules confirmed there), so the Board opens its setup. A release suite in parallel mode runs at most suiteAtOnce
+# the rules confirmed there), so the Board opens its setup. A release suite runs its files one by one or in parallel as suiteMode says (serial; `control suite-mode`, the mode a release-prep or release-run given no flag takes), and in parallel runs at most suiteAtOnce
 # test files at once, 2 (`control atonce <n>`, or Test files at once on the Rules tab; a whole number from 1; at most the test slots of the machine it runs on: relsuite(), commands/release-prep.sh). That
 # suite runs on this machine (suiteMachine {kind: "local"}; `control suite-machine`, lib/suitehost.sh; a devbox's record also keeps
 # setupAt, when the box's .conveyor/test-machine.sh last ran there, as each run reads it from the box: hostsetup()). Empty when
@@ -91,7 +91,7 @@ ctlcheck() { # [<file>]: the record on the input, or in the file, whole, or exit
         else (.key | test("^(small|medium) (docs|code)$")) and (.value | type == "object" and (keys - ["challenger", "promoted"]) == ["at", "decision"]
           and (.at | type == "string") and (.decision | IN("promote", "keep", "drop", "add", "next")) and all(.challenger, .promoted | select(. != null); choice)) end))
       and (.pickBack == null or (.pickBack | type == "object" and keys == ["at", "reason"] and all(.[]; type == "string")))
-      and (.suiteAtOnce | type == "number" and . >= 1 and . == floor)
+      and (.suiteAtOnce | type == "number" and . >= 1 and . == floor) and (.suiteMode | IN("serial", "parallel"))
       and (.testsFrom == null or (.testsFrom | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$") and (try fromdate catch null) != null))
       and (.suiteMachine | type == "object" and if .kind == "local" then keys == ["kind"]
         elif .kind == "devbox" then (keys - ["setupAt", "box"]) == ["idleStop", "kind", "size", "tag"] and (.box == null or (.box | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]*$"))) and (.setupAt == null or (.setupAt | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$"))) and (.size | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]*$"))
@@ -1111,7 +1111,7 @@ control() { # [action [arguments]]
   local c a=${1:-} f=. new x ag es bx sz top=0 p='' open=''
   c=$(ctl) || return 1
   [ $# = 0 ] || shift
-  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | atonce <number> | tests-from <UTC time | clear> | suite-machine <local | ssh <target> [--dir <d>] | devbox [--size <s>] [--box <name>] [--setup-at <time>]> | hold <issue>... | release <issue>... | adopt <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|lint|testissues|foremanissues|followupissues|releaseissues|splitissues|<areaPrefix><name>>=<on|off>... | rules <split|pick>=<off|shadow|on> | pick <small|medium> <docs|code> <promote|keep|drop|add|next> | pick <reviewer|judge> <promote <model> [effort]|drop> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | start queue filed | dep-guard <on|off> | land-as <main|pr> | pr-merge <button|release|idle> | push-check <on|off> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>... | card <issue> <builder|reviewer|judge> <model> [effort] | card <issue> [builder|reviewer|judge] clear | card <issue> pick]" >&2; return 2; }
+  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | atonce <number> | suite-mode <serial|parallel> | tests-from <UTC time | clear> | suite-machine <local | ssh <target> [--dir <d>] | devbox [--size <s>] [--box <name>] [--setup-at <time>]> | hold <issue>... | release <issue>... | adopt <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|lint|testissues|foremanissues|followupissues|releaseissues|splitissues|<areaPrefix><name>>=<on|off>... | rules <split|pick>=<off|shadow|on> | pick <small|medium> <docs|code> <promote|keep|drop|add|next> | pick <reviewer|judge> <promote <model> [effort]|drop> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | start queue filed | dep-guard <on|off> | land-as <main|pr> | pr-merge <button|release|idle> | push-check <on|off> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>... | card <issue> <builder|reviewer|judge> <model> [effort] | card <issue> [builder|reviewer|judge] clear | card <issue> pick]" >&2; return 2; }
   nums() { local x; for x; do [[ $x =~ ^[1-9][0-9]{0,8}$ ]] || return 1; done; }
   # A main-red fix card is of no issue (issue 0), named by its card id: there is nothing of it to hold or release.
   case $a in hold | release) for x; do [[ ! $x =~ ^(0+|c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0)$ ]] || {
@@ -1125,6 +1125,10 @@ control() { # [action [arguments]]
     atonce) [ $# = 1 ] || { bad; return; }
       [[ $1 =~ ^[1-9][0-9]{0,2}$ ]] || { echo "conveyor: control atonce: \"$1\" is not a whole number from 1 to 999 (the most test files a parallel release suite runs at once); nothing changed" >&2; return 2; }
       f='.suiteAtOnce = ($v[0] | tonumber)' ;;
+    # suite-mode: how a release's suite runs its test files when the command names no mode (suiteMode, release-prep.sh).
+    suite-mode) [ $# = 1 ] || { bad; return; }
+      [[ $1 =~ ^(serial|parallel)$ ]] || { echo "conveyor: control suite-mode: \"$1\" is not serial or parallel; nothing changed" >&2; return 2; }
+      f='.suiteMode = $v[0]' ;;
     # tests-from: the test history's start (testsFrom, histstart() in lib/testfiles.sh): a UTC time, 2026-11-21T00:00:00Z,
     # or clear. Nothing is deleted; the readers of the test history count only what is on or after it.
     tests-from) [ $# = 1 ] || { bad; return; }

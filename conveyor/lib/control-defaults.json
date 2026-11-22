@@ -56,5 +56,6 @@
   "pickBack": null,
   "testsFrom": null,
   "suiteAtOnce": 2,
+  "suiteMode": "serial",
   "suiteMachine": {"kind": "local"}
 }

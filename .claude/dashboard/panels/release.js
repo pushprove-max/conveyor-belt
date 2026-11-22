@@ -18,7 +18,9 @@
 // its second click and before it sends, whether the suite runs its test files one by one or in parallel, and sends the
 // choice, `--serial` or `--parallel`, then, last, `--machine local` when the control record's suiteMachine (the record's
 // part of that name) names a devbox or an ssh box and the owner chose This machine in the question "On which machine?"
-// (the rule's machine is preset). While a run goes on such a box, step 2 says the machine, the box, the commit and the
+// (the rule's machine is preset); the question of the mode presets the control record's suiteMode the same way, and a
+// press that sends no mode (Draft notes, which runs no suite) lets that rule decide for any suite the run starts; step 2 shows only the
+// mode the run's record holds, so none until a suite starts. While a run goes on such a box, step 2 says the machine, the box, the commit and the
 // lease, shows the machine's steps as chips and says what Stop does there; a run that did not start (state "not
 // started") on a box shows its failed step with the reason, one fix line, Run on this machine instead and Run suite again
 // (one that did not start on this machine lists the reason, with the fix line and Run suite again); a run
@@ -49,6 +51,8 @@
   // in that mode: a run that reused a green run and ran no file (its reused.ran empty). A release that runs no suite
   // itself keeps the mode of the suite whose result it keeps (release-prep.sh relstart()); one that runs the suite has
   // its own.
+  // The control record's suiteMode, the rule's mode; null when it names none.
+  const ruleMode = (rec) => (rec && (rec.suiteMode === 'serial' || rec.suiteMode === 'parallel') ? rec.suiteMode : null);
   function modeLine(h, x, going) {
     const m = MODES.find((o) => o.mode === x.mode);
     if (!m) return null;
@@ -93,7 +97,8 @@
   // The question a press that starts the suite waits on: the machine (when the rule names another than this one), then
   // one by one or in parallel, each with what it means, and Cancel. A choice sends the press's args with the mode, then
   // `--machine local` when This machine was chosen over the rule's.
-  function modeAsk(h, ctx, repo, a, rule, last) {
+  // The control record's suiteMode is preset, as the machine's rule is: its choice is pressed and says "the rule's choice".
+  function modeAsk(h, ctx, repo, a, rule, last, preset) {
     const box = h('div', 'release-mode');
     box.dataset.figure = 'mode-ask';
     box.setAttribute('role', 'group');
@@ -104,7 +109,8 @@
     MODES.forEach((o) => {
       const b = h('button', 'btn release-mode-pick');
       b.type = 'button'; b.dataset.act = `mode-${o.mode}`;
-      b.append(h('span', 'release-mode-name', o.label), h('span', 'board-from', o.line));
+      b.setAttribute('aria-pressed', String(o.mode === preset));
+      b.append(h('span', 'release-mode-name', o.label), h('span', 'board-from', o.mode === preset ? `${o.line} The rule's choice.` : o.line));
       b.addEventListener('click', () => {
         const local = rule && choice.get(repo) === 'local';
         asking.delete(repo); choice.delete(repo);
@@ -525,7 +531,7 @@
       // The rule's machine, and when its last run ended: the record keeps only the newest run, so that is the run of this
       // very machine (same kind and name; a run on another box or here says nothing of it).
       const rule = ruleOf(rec.suiteMachine), lm = run && run.machine && typeof run.machine === 'object' ? run.machine : null;
-      card.append(modeAsk(h, ctx, rec.repo, a, rule, rule && lm && lm.kind === rule.kind && String(lm.name).trim() === rule.name && typeof run.ended === 'string' ? run.ended : null));
+      card.append(modeAsk(h, ctx, rec.repo, a, rule, rule && lm && lm.kind === rule.kind && String(lm.name).trim() === rule.name && typeof run.ended === 'string' ? run.ended : null, ruleMode(rec)));
     }
     // A version with no notes on main says so under the box.
     if (VERSION.test(v) && !notes) {

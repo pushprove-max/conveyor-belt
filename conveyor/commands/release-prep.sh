@@ -72,7 +72,7 @@
 # version keeps that run's suite (sha, done, failed, cases, alone, moved, reused, since); one after a failed release-prep of
 # it keeps that suite too, its files and timedout, and makes red of it; one after a refused release of it keeps that
 # one's (all but moved), and its red.
-# `conveyor.sh release-run [prep] <version> [--parallel | --serial] [--machine local]` (the mode passed to the release-prep it starts; --machine local: its suite runs here, whatever suiteMachine says) is the Board's Release (docs/board.md): the owner's yes, given there. It
+# `conveyor.sh release-run [prep] <version> [--parallel | --serial] [--machine local]` (the mode passed to the release-prep it starts, else the control record's suiteMode; --machine local: its suite runs here, whatever suiteMachine says) is the Board's Release (docs/board.md): the owner's yes, given there. It
 # starts release-prep, then, when it passes and prep is not given, release, in the background, and returns (with prep,
 # release-prep alone: the Board's Draft notes and Run suite, which release nothing; `release-run anyway <version> --by
 # <who>`, the Board's Release anyway: release --anyway alone); their output is in
@@ -290,8 +290,8 @@ rellock() { # <command name>
   flock -n "$RELLK" || { echo "conveyor: $1: release-prep or release is already running; this one is not started" >&2; return 2; }
   relhold "$1"
 }
-# The suite's mode, serial unless the command is given --parallel (release-prep, release-run): the record's mode.
-RELMODE=serial
+# The suite's mode: the flag the command is given (release-prep, release-run), else empty: relsuite() takes the record's suiteMode.
+RELMODE=
 # The run's record (above), begun once the lock is held. RELSTARTED says it was, so a run refused before it (or at the
 # lock) leaves the record of the one under way as it is.
 RELRUN=$CARDS/release/run.json
@@ -465,8 +465,8 @@ relsuite() { # <command name> <commit>
   m0=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)
   # The machine the suite runs on started (lib/suitehost.sh), then the most files at once (the record's atOnce): 1 in serial mode; in parallel relatonce().
   relrec --arg s "$sha" '.sha = $s'; hoststart "$n" || return 1 # the record names the commit from the start, for the Board's line of the box's steps
-  at=1
-  [ "$RELMODE" != parallel ] || at=$(relatonce "$n") || { hostrelease "$n"; return 1; }
+  [ -n "$RELMODE" ] || RELMODE=$(ctl | jq -er '.suiteMode') || { echo "conveyor: $n: the control record's suiteMode cannot be read; nothing run" >&2; hostrelease "$n"; return 1; }
+  at=1; [ "$RELMODE" != parallel ] || at=$(relatonce "$n") || { hostrelease "$n"; return 1; }
   relrec --arg s "$sha" --arg m "$m0" --arg md "$RELMODE" --argjson at "$at" '.sha = $s | .mode = $md | .atOnce = $at | .done = 0 | .failed = 0 | .cases = [] | .alone = [] | .moved = false | .reused = null | .main = (if $m == "" then null else $m end)'
   # The suite's command is told the run's mode (RELMODE), the whole run's and a rerun of some files alike, and the
   # suite record (SUITERUNS), whose times order its files in parallel mode, and the most files it runs at once.
@@ -735,7 +735,7 @@ releasego() { # <version> [prep: release-prep alone | anyway <who>]
     # and released again without the owner's second press.
     if [ "${2:-}" = anyway ]; then bash "$HERE/conveyor.sh" release "$1" --anyway --by "$3"
     elif [ -n "$ok" ]; then CONVEYOR_RELEASE_SHA=$ok bash "$HERE/conveyor.sh" release "$1"
-    else bash "$HERE/conveyor.sh" release-prep "$1" "--$RELMODE" && [ "${2:-}" != prep ] && CONVEYOR_RELEASE_SHA=$(jq -r '.sha // ""' "$RELRUN") bash "$HERE/conveyor.sh" release "$1"; fi ) >"$CARDS/release/run.log" 2>&1 < /dev/null 8>&- &
+    else bash "$HERE/conveyor.sh" release-prep "$1" ${RELMODE:+"--$RELMODE"} && [ "${2:-}" != prep ] && CONVEYOR_RELEASE_SHA=$(jq -r '.sha // ""' "$RELRUN") bash "$HERE/conveyor.sh" release "$1"; fi ) >"$CARDS/release/run.log" 2>&1 < /dev/null 8>&- &
   exec {lk}>&- # the run's process holds the lock now
   if [ "${2:-}" = prep ]; then echo "conveyor: release-run: release-prep $1 is running, and nothing is released; its output is in $CARDS/release/run.log"
   elif [ "${2:-}" = anyway ]; then echo "conveyor: release-run: release $1 is running over release-prep's failed suite, by $3; its output is in $CARDS/release/run.log"

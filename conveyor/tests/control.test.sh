@@ -359,6 +359,27 @@ t_controlatoncerule() {
       || fail "control atonce '$v' was not refused with its reason and nothing changed: $out"
   done
 }
+# `control suite-mode <serial|parallel>` writes suiteMode, the mode a release-prep or release-run given no flag takes
+# (#1364). Bugs: the write goes to another key, so a release still runs one by one; a word other than the two is written
+# (the next run reads a mode it has no word for) or is refused with exit 1, or with the record changed; a record with
+# no suiteMode reads anything but serial, so other projects' releases change; a stored word that is no mode is read.
+t_controlsuitemode() {
+  local v out CTL0; CTL0=$(jq -c . "$SRC/lib/control-defaults.json")
+  eval "$(sed -n '/^ctlcheck() {/,/^}/p' "$SRC/lib/control.sh")"
+  [ "$(ctlcheck <<<'{}' | jq -r .suiteMode)" = serial ] || fail "a record with no suiteMode does not read serial: $(ctlcheck <<<'{}' | jq -c .suiteMode)"
+  for v in '"mixed"' null 1 '"Parallel"'; do
+    ! ctlcheck <<<"{\"suiteMode\":$v}" >/dev/null || fail "the record {\"suiteMode\":$v} was read, though $v is no mode"
+  done
+  controlsetup '[]'
+  [ "$(ctl suite-mode parallel | jq -r .suiteMode)" = parallel ] && [ "$(jq -r .suiteMode "$C")" = parallel ] && [ "$(loop control | jq -r .suiteMode)" = parallel ] \
+    || fail "control suite-mode parallel did not write suiteMode parallel: $(jq -c . "$C")"
+  for v in mixed Parallel '' 'serial parallel'; do
+    out=$(loop control suite-mode "$v" 2>&1); [ $? = 2 ] && [ "$(jq -r .suiteMode "$C")" = parallel ] \
+      || fail "control suite-mode '$v' was not refused with exit 2 and nothing changed: $out"
+  done
+  out=$(loop control suite-mode 2>&1); [ $? = 2 ] || fail "control suite-mode with no mode was not refused with exit 2: $out"
+  [ "$(ctl suite-mode serial | jq -r .suiteMode)" = serial ] || fail "control suite-mode serial did not set the rule back: $(jq -c . "$C")"
+}
 # Where a release's whole suite runs, the stored rule suiteMachine (lib/suitehost.sh), which `control suite-machine`
 # writes. Bugs: a record that leaves it out reads no rule, or one other than this machine, so a suite reaches for a box;
 # the ssh form wrote no folder, or wrote a target ssh would read as an option (-oProxyCommand=... runs a command

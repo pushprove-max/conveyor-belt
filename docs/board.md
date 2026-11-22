@@ -331,7 +331,8 @@ one control, and the value in force is the selected part.
    is the most test files a parallel release suite runs together. The default is 2, and the next parallel run reads
    it. If the number is above the machine's test slots, the row says the suite runs at the slots
    ([Releases](releases.md#a-release-from-the-board)). On a devbox or a Linux box, the row says the suite machine's
-   slots cap it. **Release suite runs on** is the machine a release's full suite runs on: **This machine** (the
+   slots cap it. **Release suite mode** is how a release runs its test files when its press asks no other: **One by
+   one** (the default) or **In parallel**. **Release suite runs on** is the machine a release's full suite runs on: **This machine** (the
    default), **Namespace Devbox** or **Linux box over ssh**. Card test steps stay on the build machine. A click on
    a choice saves it, and Undo puts the last one back. Only an admin changes it, because the release commit goes to
    that machine. On a devbox the row shows the Namespace login, the box to use, the size with its CPUs, what happens after a run, the
@@ -646,6 +647,10 @@ one of the two choices, or **Cancel**:
 - **One by one**: slower, with the least load on the build machine. Conveyor adds `--serial` to the command.
 - **In parallel**: faster, with more load on the build machine. The belt is slower while the suite runs. Conveyor adds
   `--parallel` to the command.
+
+The choice that matches the rule **Release suite mode** (Rules tab, Capacity) is pressed already and says "The rule's
+choice". **Draft notes** asks nothing and sends no mode: it runs no suite, so step 2 shows no mode for it. A suite
+that starts with no mode given uses the rule's mode.
 
 When the project's rule sends the suite to another machine (a Namespace Devbox or a Linux box over ssh; see
 [Where the suite runs](releases.md#where-the-suite-runs)), the question also asks "On which machine?". The two choices

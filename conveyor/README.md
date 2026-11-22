@@ -1311,6 +1311,11 @@ landing while it runs. One run at a time per project: a second press while one r
   push over a red suite, with the Board user who confirmed it. The Board sends the id of the red run the confirm named;
   when a later run has ended since, nothing is pushed.
 
+A release's suite runs its test files one by one or in parallel. `release-prep` and `release-run` take `--serial` or
+`--parallel` for the run. With neither, they use the control record's `suiteMode` (`conveyor.sh control suite-mode
+<serial|parallel>`, or **Release suite mode** on the Rules tab), which is `serial` in a record that sets none. The
+record's `mode` keeps the mode the run used.
+
 Run full test suite, Push landed and `release-prep` keep one record of results for each commit (`suites.jsonl` in the
 state folder): each test file's ok or fail, with the commit, the time and the run that made it. Each of them reads
 that record before it runs:

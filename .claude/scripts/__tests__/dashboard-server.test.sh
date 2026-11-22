@@ -730,6 +730,7 @@ control_actions 'pause' 'resume' 'stop' 'cap 3' 'cap 9' 'cap 100' 'cap off' 'gua
 # check's JSON line, with 200, though the check exits 1 for a missing tool; a check with no output answers its error.
 # Bug: a form the Rules row sends was refused with a Bad Request; a missing tool's check answered as a failed action,
 # so the row had no lines to show.
+control_actions 'suite-mode serial' 'suite-mode parallel'
 control_actions 'suite-machine local' 'suite-machine devbox' 'suite-machine devbox --size 8x16' 'suite-machine devbox --box hand-made' 'suite-machine devbox --size 4x8 --box hand-made --setup-at 2026-11-20T15:04:00Z' 'suite-machine devbox --size 4x8 --setup-at 2026-11-20T15:04:00Z' 'suite-machine ssh me@box.example.com' 'suite-machine ssh box.example.com --dir ~/suite' 'suite-machine ssh box --dir /srv/suite'
 fresh_control
 got=$(ctl "$(act suite-machine-check)")
@@ -1173,7 +1174,7 @@ for b in "$(act frob)" "$(act 'pause;rm')" "$(act pause now)" "$(act cap 101)" "
   "$(act suite-machine devbox --box)" "$(act suite-machine devbox --box 'a;id')" "$(act suite-machine devbox --box -x)" "$(act suite-machine devbox --box a --box b)" "$(act suite-machine devbox --box a --setup-at 2026-11-20T15:04:00Z)" \
   "$(act suite-machine devbox --size 4x8 x)" "$(act suite-machine devbox --size 4x8 --setup-at)" "$(act suite-machine devbox --size 4x8 --setup-at yesterday)" "$(act suite-machine devbox --size 4x8 --setup-at '2026-11-20T15:04:00Z;id')" "$(act suite-machine devbox --size 4x8 --since 2026-11-20T15:04:00Z)" "$(act suite-machine ssh)" "$(act suite-machine ssh -oProxyCommand=id)" "$(act suite-machine ssh 'a b')" "$(act suite-machine ssh box --dir)" \
   "$(act suite-machine ssh box dir /x)" "$(act suite-machine ssh box --dir rel/x)" "$(act suite-machine ssh box --dir '~other')" "$(act suite-machine ssh box --dir '/x;id')" "$(act suite-machine ssh box --dir "$(printf '/a\nb')")" \
-  "$(act suite-machine-check now)" \
+  "$(act suite-machine-check now)" "$(act suite-mode)" "$(act suite-mode frob)" "$(act suite-mode Parallel)" "$(act suite-mode serial parallel)" \
   '{"action":"hold","args":[12]}' '{"action":"pause"}' '{"action":"pause","args":[],"extra":1}' '{"action":["pause"],"args":[]}' '[]' 'not json'; do
   got=$(ctl "$b")
   [ "$got" = 400 ] || fail "control_bad_value_refused: '$b' answered $got '$(cat "$M/ctl.out")'"

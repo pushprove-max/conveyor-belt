@@ -54,7 +54,7 @@
 #   release records: each record's repo, url (its repository's https address, else null), release (main's newest tag,
 #           the commits since it, the next version, whether main holds its notes, main's head, whether it releases
 #           with Conveyor), suites (its whole-suite runs) and suiteMachine (its control record's rule for where a release's suite
-#           runs, null for none), as the snapshot gives them.
+#           runs, null for none) and suiteMode (its rule for how that suite runs its files, serial or parallel, null for none), as the snapshot gives them.
 #   declined lines: the review findings the Declined panel shows (not dismissed, not built, at most 7 days old), of every
 #           record, newest first: each with repo, repoUrl (its repository's https address, else null), id, time, card, issue, url, finding, by (who declined it: code, judge
 #           or owner), why, built (the issue "File as issue" filed for it, else null), dismissed ({time, by}, else null),
@@ -388,7 +388,7 @@ PANELS_JQ='
    landed: (if $R == null then {error: $cerr, data: null} else {error: null, data: {day: $R[0].snap.day, cards: $landed}} end),
    # Release: the main of each record as its Release panel shows it, and its whole-suite runs (release and suites of
    # the snapshot; null from a snapshot from before them), with the address of its repository for the issue links.
-   release: (if $R == null then {error: $cerr, data: null} else {error: null, data: {records: ($R | map({repo, url: .repoUrl, release: (.snap.release // null), suites: (.snap.suites // null), suiteMachine: (.snap.control.suiteMachine // null)}))}} end),
+   release: (if $R == null then {error: $cerr, data: null} else {error: null, data: {records: ($R | map({repo, url: .repoUrl, release: (.snap.release // null), suites: (.snap.suites // null), suiteMachine: (.snap.control.suiteMachine // null), suiteMode: (.snap.control.suiteMode // null)}))}} end),
    # Declined: the declined list of every record (lines: the declined of its snapshot; rest: its declinedRest; none from
    # a snapshot from before it carried them), newest first.
    declined: (if $R == null then {error: $cerr, data: null} else {error: null, data: ({lines: "declined", rest: "declinedRest"} | map_values(. as $k

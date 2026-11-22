@@ -233,8 +233,8 @@ GitHub and releases:
 
 - `gh-write <gh arguments>` runs a `gh` write through the privacy check.
 - `release-prep <version> [--parallel | --serial]` prepares a release ([Releases](releases.md)). `--parallel` runs
-  the suite's test files several at once; the default is `--serial`. `release-run [prep] <version>` takes the same
-  choice at the end.
+  the suite's test files several at once. With neither flag the run uses `control suite-mode`, which is `serial` unless
+  set. `release-run [prep] <version>` takes the same choice at the end.
 - `release <version>` makes the release: the tag, the pinned marketplace entry and the GitHub release
   ([Releases](releases.md)). Only the owner decides a release: the Foreman runs it only after the owner says yes in
   chat. `release <version> --anyway --by <who>` releases over the failed suite of `release-prep` on the same commit
@@ -249,6 +249,8 @@ GitHub and releases:
   `release-run stop` stops that run ([Releases](releases.md#a-release-from-the-board)).
   `release-run atonce` prints the most test files a parallel suite runs at once on the machine it runs on.
   Add `--machine local` at the end to run that one suite on this machine, whatever `control suite-machine` chose.
+- `control suite-mode serial` or `control suite-mode parallel` sets how the release suite runs its test files when a
+  run names no mode. The default is `serial`. A `--serial` or `--parallel` flag on one run wins for that run.
 - `control suite-machine local` runs the release suite on this machine, the default.
   `control suite-machine ssh <user@host> [--dir <folder>]` runs it on a Linux box over ssh.
   `control suite-machine devbox [--size <size>]` runs it on a Namespace Devbox that each run leases and gives back

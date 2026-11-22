@@ -76,6 +76,7 @@
     cap: (a) => (a[0] === 'off' ? 'at once: the default' : `at once ${a[0]}`),
     guard: (a) => (a[0] === 'off' ? 'pause at: off' : `pause at ${a[0]}%`),
     atonce: (a) => `parallel suite: ${a[0]} test file${a[0] === '1' ? '' : 's'} at once`,
+    'suite-mode': (a) => `release suite ${a[0] === 'parallel' ? 'in parallel' : 'one by one'}`,
     'suite-machine': (a) => `release suite on ${a[0] === 'ssh' ? `${a[1]} over ssh` : a[0] === 'devbox' ? 'a Namespace Devbox' : 'this machine'}`,
     model: seatWords,
     reviewer: seatWords,
@@ -119,6 +120,7 @@
     cap: limitGuess,
     guard: limitGuess,
     atonce: (r, action, a) => { r.suiteAtOnce = Number(a[0]); return [r, action]; },
+    'suite-mode': (r, action, a) => { r.suiteMode = a[0]; return [r, action]; },
     'suite-machine': (r, action, a) => {
       const was = r.suiteMachine && typeof r.suiteMachine === 'object' ? r.suiteMachine : {};
       r.suiteMachine = a[0] === 'ssh' ? { kind: 'ssh', target: a[1], dir: a[3] || '~/conveyor-suite' }
