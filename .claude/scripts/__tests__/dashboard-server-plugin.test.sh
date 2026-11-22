@@ -109,6 +109,12 @@ check('preview_title', prev.get('title') == 'setup never sets linkFromMain' and 
 check('preview_body', prev['body'].startswith('setup never sets linkFromMain, so card <card> has no packages · evidence: ~/cards/<card>/test.log\n')
       and 'Plugin version: %s\n' % PLUGIN['version'] in prev['body'] and re.search(r'Engine commit: [0-9a-f]{40}\n', prev['body'])
       and re.search(r'System: \S', prev['body']) and 'sample' not in prev['body'], prev['body'])
+# Bug (#1350): a note written with an issue number as its card field had that number hidden as <card> in the body; an
+# issue number names no project, so it stays, and a card id in the field is still <card>.
+_, issue_body = ds.note_issue('- 2026-11-22T09:00:00Z · card #12 · the fix covers #12 and #13 · evidence: -')
+check('issue_card_kept', 'the fix covers #12 and #13' in issue_body and '<card>' not in issue_body, issue_body)
+_, id_body = ds.note_issue('- 2026-11-22T09:00:00Z · card c20261122T090000-sample-7 · see c20261122T090000-sample-7 · evidence: -')
+check('card_id_hidden', id_body.startswith('see <card> · evidence: -\n') and 'sample' not in id_body, id_body)
 check('preview_writes_nothing', text(NOTES) == WHOLE and not os.path.exists(os.path.join(T, 'gh-ran')), text(NOTES))
 # Built in parts, so this file holds no home path or private address itself.
 HOMEPATH, PRIVATE = '/ho' + 'me/someone/notes.txt', '10.' + '1.2.3'

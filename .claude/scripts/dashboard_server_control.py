@@ -305,10 +305,11 @@ def note_issue(line):
     """The issue a Plugin problems note proposes, as (title, body): the title is the note's first clause (its text before
     the first ' · ', cut at the first , ; : or . that ends a clause); the body is the note, then the plugin's version,
     the engine commit and the system of the checkout this Board runs from. The card id stays out: it names a project,
-    so each time the note's text says it (its finding, its evidence path) it is <card> in the body."""
+    so each time the note's text says it (its finding, its evidence path) it is <card> in the body. A card field that is
+    no card id (an issue number, in a note written before the field took card ids only) names no project and stays."""
     m = NOTE_LINE.fullmatch(line)
     text = m.group('text') if m else line[2:]
-    if m and m.group('card') != '-':
+    if m and globals()['CARD'].fullmatch(m.group('card')):  # CARD is the base part's, as REDCARD is above
         text = text.replace(m.group('card'), '<card>')
     title = re.split(r'[,;:.](?=\s|$)', text.split(' · ')[0], maxsplit=1)[0].strip() or 'Plugin problem'
     try:

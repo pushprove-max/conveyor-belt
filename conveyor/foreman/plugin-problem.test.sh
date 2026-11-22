@@ -162,6 +162,17 @@ t_other() {
     || fail "in another project a filed line replaced the older note: $(cat "$FD/plugin-bugs.md")"
 }
 
+# Bug (#1350): a line with no card id got its first issue number as its note's card, so the Board's report hid that
+# number as <card> and showed the other. Only a card id goes in the card field; the text keeps both numbers.
+t_issuecard() {
+  fixture issuecard https://github.com/example/alpha
+  reply='Plugin problem (for the conveyor-belt repo): the fix seems to still cover them, see #12 and #13, evidence ~/cards/x.log'
+  out=$(turn u1 "$reply")
+  [ -z "$out" ] || fail "the reply '$reply' was refused: $out"
+  grep -qE '^- [^ ]+ · card - · the fix seems to still cover them, see #12 and #13, evidence ~/cards/x\.log · evidence: ' "$FD/plugin-bugs.md" \
+    || fail "for the reply '$reply' the note's card field is not - or its text lost an issue number: $(cat "$FD/plugin-bugs.md" 2>&1)"
+}
+
 # The default list is every t_ function in this file: a hand-kept list left t_split out (bug #558).
 cases=$(declare -F | sed -n 's/^declare -f t_//p')
 SEL=${CONVEYOR_SHELL_TEST_CASE:-$cases}; SEL=${SEL//,/ }

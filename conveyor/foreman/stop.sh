@@ -84,7 +84,7 @@ while IFS= read -r l; do
     UNFILED+=("$what")
   fi
   ! grep -qF -- " · $seen · evidence: " "$NOTES" 2>/dev/null || continue
-  card=$(grep -oE '\bc[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]*[A-Za-z0-9]|#[0-9]+' <<<"$what" | head -n 1)
+  card=$(grep -oE '\bc[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]*[A-Za-z0-9]' <<<"$what" | head -n 1)
   ev=$(grep -oE "(~|\.{1,2})?/[^[:space:],;()'\"\`]+|[A-Za-z0-9._-]+/[^[:space:],;()'\"\`]+" <<<"$what" | head -n 1); ev=${ev%.}
   # In the plugin's own repository (plugin_home) a filed line takes the place of the first note that names no issue
   # and says the same thing: its own text (the line the start-up list gives for it), or that text with its own card
