@@ -231,7 +231,8 @@ t_pridle() {
   printf '%s\n' 'echo "$(git rev-parse HEAD) $1" >> "$STUB/ran"; [ ! -e "$STUB/during" ] || { bash "$STUB/during"; rm -f "$STUB/during"; }' \
     '[ ! -e "$STUB/red" ] && bash "$1"' > "$STUB/one"
   tune '.push.check = true | .push.landAs = "pr" | .test.fileCommand = "bash \"$STUB/one\""'
-  loop control pr-merge idle > /dev/null || fail "control pr-merge idle was refused"
+  # #2 is held until its card lands: an open issue that waits to be picked holds the merge (t_pridlerelease).
+  loop control pr-merge idle > /dev/null && loop control hold 2 > /dev/null || fail "control pr-merge idle or control hold 2 was refused"
   mkdir -p "$R/lib" && echo good > "$R/lib/m.js" && echo 'grep -qx good lib/m.js' > "$R/lib/m.test.js" || fail "the fixture could not be made"
   la_land 1; la_eng push c1 1 || fail "the push failed"
   sha=$(git -C "$R" rev-parse main); rm -f "$STUB/ran"
@@ -258,6 +259,21 @@ t_pridle() {
   [ "$(la_prst 7)" = OPEN ] || fail "the pull request merged while a release run was under way"
   la_eng idlemerge
   [ "$(la_prst 7)" = MERGED ] && git -C "$T/$CASE/origin" merge-base --is-ancestor "$sha" main || fail "the pull request did not merge once the belt was empty and its run passed"
+}
+# R106 of #1389. Bug it catches: with Merge PR idle, `control release` of a held issue while the push run ran (it takes
+# minutes) left that issue waiting to be picked with no card yet, and the pull request merged, as only the rule and
+# the card records were read again. #3 is held; the stubbed push run releases it: the run runs, and nothing merges.
+t_pridlerelease() {
+  setup "[$(issue 1 2026-01-01),$(issue 3 2026-01-01)]"; la_prstub
+  printf '%s\n' 'echo "$1" >> "$STUB/ran"; [ ! -e "$STUB/during" ] || { bash "$STUB/during"; rm -f "$STUB/during"; }; bash "$1"' > "$STUB/one"
+  tune '.push.check = true | .push.landAs = "pr" | .test.fileCommand = "bash \"$STUB/one\""'
+  loop control pr-merge idle > /dev/null && loop control hold 3 > /dev/null || fail "control pr-merge idle or control hold 3 was refused"
+  mkdir -p "$R/lib" && echo good > "$R/lib/m.js" && echo 'grep -qx good lib/m.js' > "$R/lib/m.test.js" || fail "the fixture could not be made"
+  la_land 1; la_eng push c1 1 || fail "the push failed"
+  rm -f "$STUB/ran"; printf '%s\n' "CONVEYOR_MAIN='$R' CONVEYOR_CARDS='$T/$CASE/cards' bash '$SRC/conveyor.sh' control release 3 > /dev/null" > "$STUB/during"
+  la_eng idlemerge
+  [ "$(cat "$STUB/ran" 2>&1)" = lib/m.test.js ] && [ ! -e "$STUB/during" ] || fail "the push run did not run, or #3 was not released during it: $(cat "$STUB/ran" 2>&1)"
+  [ "$(la_prst 7)" = OPEN ] || fail "the pull request merged though #3 was released, and waits to be picked, while its push run ran"
 }
 # Bug it catches (#463): the pages said Merge PR idle always runs the linked test files before it merges, but
 # pushtests() runs none with the push check off (push.check), so a reader took an untested merge for a tested one.

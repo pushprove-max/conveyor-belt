@@ -682,7 +682,9 @@ run() { # [max-cards] [serve]
   # process's children, running the code they started on. They are this loop's own cards from here on.
   while read -r p c n k; do [ -z "$p" ] || { mine[$p]="$c $n"; took[$p]=$k; }; done <<<"$adopt"
   while read -r p k t; do [ -z "$p" ] || [ -z "${took[$p]:-}" ] || kids[$p]+="$k $t"$'\n'; done <<<"$held"
-  rm -f "$PUSHING" "$SAYS" # a loop killed during its push left them; no push runs here now, and this loop has said nothing yet
+  # A loop killed during its push left them; this loop has said nothing yet. A push record whose process lives is a push
+  # that runs (the Board's Push now, under the push lock): it stays.
+  rm -f "$SAYS"; p=$(jq -r '.pid | numbers' "$PUSHING" 2>/dev/null) && [ -n "$p" ] && kill -0 "$p" 2>/dev/null || rm -f "$PUSHING"
   self=$(p_started $$)
   # A wake (wakeloop(), lib/control.sh, on a hold, a release or a filing) is URG: it kills the turn's timer, as the
   # turn's own end does, and sets nudged, which turnwait() reads. A trapped signal also cuts short a `wait` this shell

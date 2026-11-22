@@ -172,3 +172,21 @@ t_shotssame() {
   [ "$RC" = 0 ] && [ "$(jq -r .patch "$b/shots/shots.json" 2>&1)" = "$(git hash-object "$b/b.patch")" ] && [ "$(cat "$b/shots/pay.png")" = new ] \
     || fail "the same change, on a main that changed the first block, did not keep its screenshots: $(cat "$T/$CASE/run.out"; ls "$b")"
 }
+# R107 of #1389. Bugs it catches: samechange() compared the final modes alone, so the same edit lost its screenshots
+# when main ran chmod +x on the file between the two bases (the retry's file is 100755, the earlier one 100644), and
+# a retry that also ran chmod -x passed as the same change (its final mode is the earlier one's). a.patch edits
+# web/nums.ts; main then makes it executable; b.patch is the same edit, c.patch the same edit and chmod -x.
+t_shotsmode() {
+  setup "[$(issue 7 2026-01-01)]"; mkdir -p "$R/web" && cd "$R" || fail "main"
+  local a b
+  printf '0\n1\n2\n' > web/nums.ts && git add web/nums.ts && git commit -qm base && a=$(git rev-parse HEAD) \
+    && printf '0\n1\nx\n2\n' > web/nums.ts && git diff --binary --no-renames > "$T/$CASE/a.patch" && git checkout -q -- web/nums.ts \
+    && chmod +x web/nums.ts && git commit -qam 'main makes it executable' && b=$(git rev-parse HEAD) \
+    && git apply --index "$T/$CASE/a.patch" && git diff --cached --binary --no-renames > "$T/$CASE/b.patch" \
+    && chmod -x web/nums.ts && git add web/nums.ts && git diff --cached --binary --no-renames > "$T/$CASE/c.patch" \
+    && [ "$(git ls-files -s web/nums.ts | cut -d' ' -f1)" = 100644 ] && git reset -q --hard || fail "the patches"
+  fx_in "samechange '$T/$CASE/a.patch' $a '$T/$CASE/b.patch' $b && echo b same || echo b differs
+    samechange '$T/$CASE/a.patch' $a '$T/$CASE/c.patch' $b && echo c same || echo c differs"
+  [ "$(cat "$T/$CASE/run.out")" = $'b same\nc differs' ] \
+    || fail "the same edit over main's chmod +x is not the same change, or one with chmod -x too is: $(cat "$T/$CASE/run.out")"
+}

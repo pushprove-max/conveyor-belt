@@ -8,9 +8,10 @@
 # suite: testsel() narrow selects neither, and each file runs through a command that runs one file (mapone(),
 # lib/testmap.sh: test.fileCommand, else test.command given it as test.list says); a pack with neither runs none and
 # says so (PUSHNOFILE). The files run in a worktree of the commit ($CARDS/pushtest) on one test slot. The landing
-# that broke a file that fails is found by running the file on the landings in turn, oldest first (one that lacks the
-# file passes it): the first that fails it, else the pushed commit when it is a landing, else none (mainred() looks
-# for it then: brokeby()). Each such file goes to the main-fix card of the commit (mainred(), naming that landing),
+# that broke a file that fails is found by running the file on the landings in turn, newest first (the pushed commit,
+# when it is a landing, fails it; one that lacks the file passes it), up to the first that passes it: the oldest of
+# the landings after that one, as a file that failed, passed, then failed again was broken by the last change, else
+# none (mainred() looks for it then: brokeby()). Each such file goes to the main-fix card of the commit (mainred(), naming that landing),
 # and the push is held: a push line, result fail, kind check, its check the first file, its reason naming each file
 # with the landing that broke it and the first place its stack traces say it failed, or the scaled time limit it ran
 # past (pushfile()), so the loop pushes again only
@@ -20,7 +21,7 @@
 PUSHRAN='the run before the push failed'
 PUSHNOFILE='the test files linked to the landings did not run before the push: the test command cannot be given one test file; set test.fileCommand in .conveyor/project.json'
 pushtests() { # <card> <issue> <the commit to push> [<a commit origin holds>...]
-  local c=$1 n=$2 sha=$3 wt=$CARDS/pushtest lands=() fs=() bad=() l f s tc fc lm by why='' took=$SECONDS tested=${PUSHTESTED:-$PUSHED.tested}
+  local c=$1 n=$2 sha=$3 wt=$CARDS/pushtest lands=() fs=() bad=() l f s i tc fc lm by why='' took=$SECONDS tested=${PUSHTESTED:-$PUSHED.tested}
   local -A fat=() # fat: why each failed file failed (pushfile()), which the reason gives after the landing that broke it
   shift 3
   # Until #395 (the push.check rule): a state folder holding push.check.off runs no test before a push (owner's order).
@@ -47,11 +48,10 @@ pushtests() { # <card> <issue> <the commit to push> [<a commit origin holds>...]
     for f in "${fs[@]}"; do pushfile "$wt" "$f" || { bad+=("$f"); fat[$f]=$(head -n 1 "$wt.failat" 2>/dev/null); }; done
     for f in "${bad[@]}"; do
       by=''
-      for l in "${lands[@]}"; do
-        s=${l%% *}
-        [ "$s" != "$sha" ] || { by=$l; break; }
-        git cat-file -e "$s:$f" 2>/dev/null || continue
-        if pushwt "$wt.at" "$s" && ! pushfile "$wt.at" "$f"; then by=$l; break; fi
+      for ((i = ${#lands[@]} - 1; i >= 0; i--)); do
+        l=${lands[i]}; s=${l%% *}
+        if [ "$s" != "$sha" ]; then git cat-file -e "$s:$f" 2>/dev/null && pushwt "$wt.at" "$s" && ! pushfile "$wt.at" "$f" || break; fi
+        by=$l
       done
       mainred "$c" "$f" "$f" "$sha" "$by" || :
       read -r s l _ <<<"$by"
@@ -107,8 +107,8 @@ pushfile() { # <worktree> <test file>
 # (testtracked(), lib/issues.sh) that a line of the hook's output names, whole or after a /, on a line that says it
 # failed (FAIL, failed, ✖ or "not ok"). None when the hook says a check FAILED (its words "FAILED <name>", the check a
 # push line names) that is not one of those files (a pytest node id, file::case, is its file): the hook failed for
-# more than these files, so running them alone cannot clear it. A count after FAILED, as Python's unittest ends a
-# failed run ("FAILED (failures=1)"), is no check.
+# more than these files, so running them alone cannot clear it. A name in brackets is a check too ("FAILED
+# (fast-checks)"), but not a count, which holds "=", as Python's unittest ends a failed run ("FAILED (failures=1)").
 hookfiles() { # <commit> <the hook's output>
   local fs
   fs=$(testtracked "$MAIN" "$1") && [ -n "$fs" ] || return 0
@@ -121,7 +121,7 @@ hookfiles() { # <commit> <the hook's output>
         | reduce ($fs | sort_by(-length) | .[]) as $f ({l: $l, hit: []};
             ("(?<a>^|[^A-Za-z0-9_.-])" + ($f | esc) + "(?<b>$|[^A-Za-z0-9_/-])") as $re
             | if .l | test($re) then .hit += [$f] | .l |= gsub($re; "\(.a)\u0000\(.b)") else . end) | .hit[]] | unique as $hit
-    | [$o | join("\n") | scan("(?:^|[^A-Za-z0-9_])FAILED:?[ \t]+([^\\s(]\\S*)") | .[0] | sub("::.*$"; "") | sub("[:,.]$"; "")] as $checks
+    | [$o | join("\n") | scan("(?:^|[^A-Za-z0-9_])FAILED:?[ \t]+(\\([^()=\\n]+\\)|[^\\s(]\\S*)") | .[0] | sub("^\\((?<n>.*)\\)$"; "\(.n)") | sub("::.*$"; "") | sub("[:,.]$"; "")] as $checks
     | if $hit != [] and all($checks[]; . as $c | any($hit[]; . == $c or ($c | endswith("/" + .)))) then $hit[] else empty end'
 }
 # Each test file a failed pre-push hook names (hookfiles()) run again alone, once, on <commit>, as the run before the

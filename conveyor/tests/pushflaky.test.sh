@@ -81,6 +81,17 @@ t_pushflakyother() {
   [ "$(st 'select(.step == "push") | [.kind, .check] | join(" ")')" = 'check fast-checks' ] || fail "the push line: $(st 'select(.step == "push")')"
 }
 
+# R108 of #1389. Bug it catches: a check named in brackets (FAILED (fast-checks)) was read as a count, as unittest's
+# FAILED (failures=1) is, so the test file alone passed and the push went out with no hook, past the failed check.
+# The hook's output is pfix's (its FAILED (failures=1) still names no check: t_pushflaky) and that line.
+t_pushflakyparen() {
+  local base l1
+  pfix; echo 'push-checks: FAILED (fast-checks)' >> "$STUB/hook-says"; pnow
+  [ "$(origin)" = "$base" ] && [ ! -e "$STUB/ran" ] \
+    || fail "a hook whose output ends '$(tail -n 1 "$STUB/hook-says")' was pushed past, or its file ran alone: $(cat "$T/$CASE/push.out")"
+  [ "$(st 'select(.step == "push") | .kind')" = check ] || fail "the push line is not a check failure: $(st 'select(.step == "push")')"
+}
+
 # #1084. Bug it catches: a pre-push hook whose test failed with no message of its own (a stack, actual: false, expected:
 # true) held the push with a reason that named no line, so it could not be read without a run again; and the hook's
 # run got no load factor to scale a time budget by. The hook prints a stack frame of its worktree's lib/a.test.sh,

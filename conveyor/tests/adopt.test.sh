@@ -107,8 +107,11 @@ t_adopt() {
   [ "$rc" = 1 ] && grep -q 'already running' <<<"$out" || fail "an adoption with fd 8 opened anew on the run file was not refused ($rc): $out"
   # One push at a time: none starts while a push runs (pusher, its record in $PUSHING) or once the restart is due
   # (new); the new loop's first push decision makes the owed one, #5's (#6's commit is under it).
+  # R109 of #1389: the push job killed, its record stays for health to show it stale (it was deleted, so a killed push
+  # was not shown at all).
   out=$(serveeng "$SRC" 'pushstub; standin & pusher=$!; pproc=$pusher pushing "$(git rev-parse HEAD)" push; pushturn; echo T >> "$STUB/pushcalls"
-    kill "$pusher"; wait "$pusher"; pushended; [ -z "$pusher" ] && [ ! -e "$PUSHING" ] || echo "the ended push is still named"
+    k=$pusher; kill "$pusher"; wait "$pusher"; pushended; [ -z "$pusher" ] || echo "the ended push is still named"
+    [ "$(loop health | jq -c "[.pushing.pid, .pushing.stale]")" = "[$k,true]" ] || echo "health does not show the killed push stale: $(loop health | jq -c .pushing)"
     new=$STUB/adoptloop; pushturn; echo T >> "$STUB/pushcalls"; new=""; turn' 2>&1)
   [ -z "$out" ] && [ "$(cut -d' ' -f1,2 "$STUB/pushcalls" | paste -sd,)" = 'T,T,c-5 5' ] \
     || fail "a push started beside another or with the restart due, or the new loop did not push #5: $out $(cat "$STUB/pushcalls")"

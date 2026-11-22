@@ -110,3 +110,55 @@ t_pushcheckctl() {
   [ "$(loop control push-check off 2>&1 | jq .pushCheck)" = false ] || fail "control push-check off did not set the record's pushCheck: $(cat "$ST/control.json")"
   pushnow; pushedunchecked
 }
+
+# R104 of #1389. Bug it catches: a file that failed, passed, then failed again across three landings was blamed on the
+# first, as the landings ran oldest first up to the first that failed it, so the main-fix card went to a change a later
+# landing had fixed. c1 adds lib/cart.js broken with its test, c2 fixes it, c3 breaks it again: the push and the
+# main-fix entry name c3, and the file runs alone on main (c3), then on c2, where it passes.
+t_pushtestsblame() {
+  local base i s ls=()
+  setup '[]'; base=$(git -C "$R" rev-parse HEAD)
+  printf '%s\n' 'echo "$(git rev-parse HEAD) $1" >> "$STUB/ran"; bash "$1"' > "$STUB/one"
+  tune '.push.check = true | .test.fileCommand = "bash \"$STUB/one\""'
+  mkdir -p "$R/lib" && echo 'grep -qx good lib/cart.js' > "$R/lib/cart.test.js" || fail "the test file could not be written"
+  for i in 1 2 3; do
+    { [ $i = 2 ] && echo good || echo bad; } > "$R/lib/cart.js" && git -C "$R" add -A && git -C "$R" commit -qm "c$i" && s=$(git -C "$R" rev-parse HEAD) \
+      && jq -cn --arg s "$s" --argjson i $i '{card: "c\($i)", issue: $i, step: "landed", time: "2026-11-18T1\($i):00:00Z", result: "ok", sha: $s}' >> "$ST/cards.jsonl" \
+      || fail "landing $i could not be made"
+    ls+=("$s")
+  done
+  pushnow 'push c3 3; checkheld && echo held > "$T/$CASE/held"'
+  [ "$(git -C "$T/$CASE/origin" rev-parse main)" = "$base" ] && [ -e "$T/$CASE/held" ] || fail "the push was not held: $(cat "$T/$CASE/push.out")"
+  [ "$(cat "$STUB/ran" 2>&1)" = "${ls[2]} lib/cart.test.js
+${ls[1]} lib/cart.test.js" ] || fail "the file did not run on main (c3), then on c2 alone: $(cat "$STUB/ran" "$T/$CASE/push.out" 2>&1)"
+  [ "$(jq -c '[.reds[].cases[] | [.file, .landing.sha, .landing.card]]' "$ST/mainred.json" 2>&1)" = "[[\"lib/cart.test.js\",\"${ls[2]}\",\"c3\"]]" ] \
+    || fail "the main-fix entry does not name c3's landing: $(cat "$ST/mainred.json" 2>&1)"
+  st 'select(.step == "push") | .reason' | grep -qF "lib/cart.test.js (broken by the landing ${ls[2]:0:12} of c3)" \
+    || fail "the push line does not name c3: $(st 'select(.step == "push") | .reason')"
+}
+
+# R103 of #1389. Bug it catches: a push the remote refused, as it held a commit made by hand, merged that commit into
+# main and pushed the merge with no run of the linked test files on it, so a file that fails only on the merged tree
+# went out. c1 adds lib/cart.test.js, which fails once hand.txt is there; hand.txt is the commit by hand on origin. The
+# file passes on c1, the push is refused, main becomes the merge, and the file fails there: the push is held as a
+# check failure on the merge, and origin keeps the commit by hand.
+t_pushtestsmerge() {
+  local l1 hand m H=$T/$CASE/hand
+  setup '[]'
+  printf '%s\n' 'echo "$(git rev-parse HEAD) $1" >> "$STUB/ran"; bash "$1"' > "$STUB/one"
+  tune '.push.check = true | .test.fileCommand = "bash \"$STUB/one\""'
+  mkdir -p "$R/lib" && echo good > "$R/lib/cart.js" && printf '%s\n' 'grep -qx good lib/cart.js' '[ ! -e hand.txt ]' > "$R/lib/cart.test.js" \
+    && git -C "$R" add -A && git -C "$R" commit -qm c1 && l1=$(git -C "$R" rev-parse HEAD) || fail "the landing could not be made"
+  jq -cn --arg s "$l1" '{card: "c1", issue: 1, step: "landed", time: "2026-11-18T10:00:00Z", result: "ok", sha: $s}' >> "$ST/cards.jsonl"
+  git clone -q "$T/$CASE/origin" "$H" && echo hand > "$H/hand.txt" && git -C "$H" add hand.txt && git -C "$H" commit -qm 'by hand' \
+    && git -C "$H" push -q origin main && hand=$(git -C "$H" rev-parse HEAD) || fail "the commit by hand could not be made"
+  pushnow 'push c1 1; checkheld && echo held > "$T/$CASE/held"'
+  m=$(git -C "$R" rev-parse main)
+  [ "$(git -C "$R" rev-parse main^2 2>&1)" = "$hand" ] || fail "main is not the merge with the commit by hand: $(git -C "$R" log --oneline -3 main) $(cat "$T/$CASE/push.out")"
+  [ "$(git -C "$T/$CASE/origin" rev-parse main)" = "$hand" ] && [ -e "$T/$CASE/held" ] || fail "the merge was pushed, or the push is not held: $(cat "$T/$CASE/push.out")"
+  [ "$(cat "$STUB/ran" 2>&1)" = "$l1 lib/cart.test.js
+$m lib/cart.test.js
+$l1 lib/cart.test.js" ] || fail "the file did not run on c1, then on the merge (and on c1 for the landing that broke it): $(cat "$STUB/ran" "$T/$CASE/push.out" 2>&1)"
+  [ "$(st 'select(.step == "push") | [.result, .kind, .check, .sha] | join(" ")')" = "fail check lib/cart.test.js $m" ] \
+    || fail "the push line is not a check failure of the merge naming the file: $(st 'select(.step == "push")')"
+}

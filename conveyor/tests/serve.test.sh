@@ -317,8 +317,7 @@ t_servebatch() {
 
 # Bugs: a push holds up the next pick; two landings during one push bring two more pushes, or a push is started
 # beside one already running; a push takes a builder slot; health does not say a push is in progress and since when;
-# a `run` with nothing left to build ends before its last push has ended; the push marker is left after the last
-# push has ended. The loop's push scheduler, pushturn(), its check that a push job ended, pushended() (lib/push.sh),
+# a `run` with nothing left to build ends before its last push has ended. The loop's push scheduler, pushturn(), its check that a push job ended, pushended() (lib/push.sh),
 # its count of the cards running, cardsrun(), and its end check, runends() (lib/run.sh), called in
 # serveeng() in run()'s own variables, with the run lock held as a loop holds it, and pick() (lib/pick.sh) for #7 to #9.
 # push() is a stub held on the fifo $STUB/held: the case opens that fifo to write only once the push has written its
@@ -329,25 +328,38 @@ t_slowpush() {
   serveeng "$SRC" 'exec 7>>"$STATE.run" && flock -n 7 || exit 1; nopack="" pusher="" new="" tried="" triedat=0 owed=""
     serve="" waits="" prober="" running=0; declare -A took=()
     push() { echo "start $2 ${owed##* }" >> "$STUB/order"; pushing "${owed##* }" hook; read -r -t 20 _ <> "$STUB/held"
-      git -C "$R" push -q --no-verify origin "${owed##* }:refs/heads/main"; echo "end $2" >> "$STUB/order"; }
+      git -C "$R" push -q --no-verify origin "${owed##* }:refs/heads/main"; echo "end $2" >> "$STUB/order"; rm -f "$PUSHING"; }
     next() { local c n; read -r c n _ < <(locked pick "" "" "$(asked)"); echo "pick $n" >> "$STUB/order"; echo "$n" > "$R/f$n"
       git -C "$R" add -A; git -C "$R" commit -qm "$n"; record "$c" "$n" landed ok "$(jq -cn --arg s "$(git -C "$R" rev-parse HEAD)" "{sha: \$s, product: false}")"; }
-    # hold: once pushturn started a push, until it has written its pushing state and waits; release: it ends, and
-    # pushended, as the next turn calls it, finds its job gone (pusher empty, the pushing state removed).
+    # hold: once pushturn started a push, until it has written its pushing state and waits; release: it ends, clearing
+    # that state as push() does, and pushended, as the next turn calls it, finds its job gone (pusher empty).
     hold() { [ -n "$pusher" ] || { echo "no push" >> "$STUB/order"; exit 1; }; exec {w}> "$STUB/held"; }
     release() { echo >&"$w"; exec {w}>&-; wait "$pusher"; pushended; }
     next; pushturn; hold; next; next; pushturn; cardsrun; echo "jobs $(jobs -rp | wc -l) cards $running" >> "$STUB/order"
     runends || echo "run waits" >> "$STUB/order"
     loop health > "$STUB/health"; loop snapshot --fresh > "$STUB/snapshot" 2>/dev/null
-    release; pushturn; hold; release; [ ! -e "$PUSHING" ] || echo "marker left" >> "$STUB/order"; pushturn; [ -z "$pusher" ] || echo "push again" >> "$STUB/order"
+    release; pushturn; hold; release; pushturn; [ -z "$pusher" ] || echo "push again" >> "$STUB/order"
     cardsrun; ! runends || echo "run ends" >> "$STUB/order"'
   first=$(st 'select(.issue == 7 and .step == "landed") | .sha'); head=$(git -C "$R" rev-parse refs/heads/main)
   [ "$(paste -sd, "$STUB/order")" = "pick 7,start 7 $first,pick 8,pick 9,jobs 1 cards 0,run waits,end 7,start 9 $head,end 9,run ends" ] \
-    || fail "the loop did not pick during a push, counted it as a card, did not join the landings made during it into one push of main's head, did not wait for it to end, or left its push marker after the last push: $(paste -sd, "$STUB/order")"
+    || fail "the loop did not pick during a push, counted it as a card, did not join the landings made during it into one push of main's head, or did not wait for it to end: $(paste -sd, "$STUB/order")"
   [ "$(jq -c '[.pushing.sha, (.pushing.since | fromdate <= now), (.unpushed | length)]' "$STUB/health")" = "[\"$first\",true,3]" ] \
     || fail "health does not report the push in progress: $(jq -c '[.pushing, .unpushed]' "$STUB/health")"
   [ "$(jq -c '[.health.pushing.sha, (.belt | map(.track.label) | unique)]' "$STUB/snapshot")" = "[\"$first\",[\"pushing\"]]" ] \
     || fail "the snapshot does not report the push in progress: $(jq -c '[.health.pushing, (.belt | map(.track.label))]' "$STUB/snapshot")"
+}
+# R109 of #1389. Bug it catches: the loop's start deleted the push record whatever its process, so a Push now that
+# runs (its own process, under the push lock) was no longer shown by health. A stand-in Push now's record names a
+# live process; a `run` with nothing to build starts and ends: health still shows that push, not stale.
+t_pushrecstart() {
+  local p
+  setup '[]'
+  standin & p=$!
+  jq -cn --argjson p "$p" --arg s "$(git -C "$R" rev-parse HEAD)" '{pid: $p, since: (now | todate), started: (now | todate), sha: $s, stage: "hook", base: []}' > "$ST/pushing"
+  # loop: the record is cleared inline at run()'s start, in no function of its own a direct call could reach
+  loop run > "$T/$CASE/run.out" 2>&1 || fail "the run failed: $(cat "$T/$CASE/run.out")"
+  [ "$(loop health | jq -c '[.pushing.pid, .pushing.stale]')" = "[$p,false]" ] || fail "health does not show the running Push now after the loop's start: $(loop health | jq -c .pushing)"
+  kill "$p"; wait "$p" 2>/dev/null || :
 }
 # t_slowpush end to end, in a real `run`: only it joins the card count, the pick and the end check (run(), lib/run.sh). Push 1 waits on the fifo held
 # till main's third landing (fifo landed, from a reference-transaction hook), push 2 on the run's next turn (fifo turn): a run that exits first leaves origin behind, or the push's pushed lines unwritten.

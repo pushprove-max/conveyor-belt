@@ -57,7 +57,8 @@ depsreason() { # <the folders, from depsmissing>
 # names them (flaky: {files, issues}). The worktree goes either way; nothing but this
 # function writes in it, so a stale one (a push killed half way) is cleared before the next.
 # A push the remote refuses because its main holds a commit this one lacks (landed there by hand) is made again in the
-# same turn, of main merged with the remote's (remerge()); when they do not merge, the push line says so.
+# same turn, of main merged with the remote's (remerge()), after the run before the push passes on the merge too; when
+# they do not merge, the push line says so.
 # A push that worked leaves its marks: under each landed card whose commit it carried (the commits it took
 # to origin, past what origin held before), a `pushed` line; then, for each of those that has an issue, an `issue`
 # line: ok once GitHub shows the issue closed (the commit's "Closes #N" closes it when main reaches origin, a moment
@@ -158,8 +159,8 @@ pushone() { # <card> <issue> [<commit>]
           a=$?; pushing "$sha" "$([ $a = 0 ] && echo pushed || echo ended)"; exit $a; }
     } 2>&1 < /dev/null | tee -a "${plog:-/dev/null}"; exit "${PIPESTATUS[0]}") && { [ "$la" = pr ] || echo "$sha $REMOTE $BRANCH" > "$PUSHED"; } || rc=$?
     # The remote refused the push (git's "[rejected]": its main holds a commit this one lacks): main takes the
-    # remote's commits in a merge commit and is pushed again, once, in this same turn. The worktree stays until they
-    # are fetched: the fetch is made from it, as the push was.
+    # remote's commits in a merge commit and, once the run before the push passes on it, is pushed again, once, in this
+    # same turn. The worktree stays until they are fetched: the fetch is made from it, as the push was.
     # With Land as pr, origin's default branch is not pushed to, so there is nothing of it to merge. A push with no
     # hook merges nothing either: the merge is a commit no hook judged, so the next push makes it, through the hook.
     [ $rc != 0 ] && [ $try = 1 ] && [ "$la" != pr ] && [ -z "$nv" ] && grep -qF '[rejected]' <<<"$out"; a=$?
@@ -167,8 +168,10 @@ pushone() { # <card> <issue> [<commit>]
     [ $a != 0 ] || m=$(theirs "$sha" "$wt") || { out+=$'\n'"the remote's commits were not merged into main: ${m:0:600}"; a=1; }
     git worktree remove --force "$wt" 2>/dev/null
     [ $a = 0 ] || break
-    # Main is the merge with the remote's commits now (remerge()).
+    # Main is the merge with the remote's commits now (remerge()): a tree the run before the push has not run on, so it
+    # runs there (pushtests()) before the merge is pushed, and a file that fails on it holds the push as on main's commit.
     at=refs/heads/$BRANCH
+    if m=$(git rev-parse -q --verify "$at^{commit}"); then pushing "$m" tests; pushtests "$1" "$2" "$m" "${before[@]}" || return 1; at=$m; fi
   done
   [ $rc != 0 ] && [ -z "$nv" ] && [ $rc != 124 ] && [ $rc != 137 ] && hookfailed "$wt.trace" || break
   pushing "$sha" tests; m=$(hookalone "$sha" "$out") || { [ -z "$m" ] || out+=$'\n'"conveyor: $m"; break; }
@@ -285,8 +288,8 @@ remerge() { # <the commit that was pushed>
   git update-ref -m "conveyor merge of $REMOTE/$BRANCH" "refs/heads/$BRANCH" "$m" "$1" || { echo "main moved during the merge; its change is left in main's checkout for $OWNER to sort out"; return 1; }
   echo "$m"
 }
-# The push in progress, for health to read: this push job's pid, when it began and the commit it pushes. The
-# loop clears it when the job ends; one left by a loop that was killed names a pid that is gone, and health ignores it.
+# The push in progress, for health to read: this push job's pid, when it began and the commit it pushes. push()
+# clears it when it ends; one left by a push that was killed names a pid that is gone, and health shows it stale.
 # The commit of the last push that worked, when it went to the pack's remote and to the branch Land as pushes to
 # (pushto(): the pack's branch, or LANDING): a push to another one says nothing of what this one holds.
 pushed() { local s r b; read -r s r b 2>/dev/null < "$PUSHED" && [ "$r" = "$REMOTE" ] && [ "$b" = "$(pushto)" ] && echo "$s"; }
@@ -460,12 +463,15 @@ idlemerge() {
   hk=$RELHOLDFD
   idleone {lk}>&- {hk}>&-; rc=$?; exec {lk}>&- {hk}>&-; return $rc
 }
-# Merge PR idle holds now: the rule is idle, Land as pr, and every card in the card records is closed (filed, landed,
-# closed or blocked).
+# Merge PR idle holds now: the rule is idle, Land as pr, every card in the card records is closed (filed, landed,
+# closed or blocked), and no open issue waits to be picked (upnext(), lib/pick.sh: one released while the run before
+# the merge ran has no card yet). Open issues that cannot be read hold the merge too.
 idlenow() {
+  local issues
   [ "$(prmergerule 2>/dev/null)" = idle ] && [ "$(landas 2>/dev/null)" = pr ] || return 1
   stdb ask lines cards 2>/dev/null | jq -se 'map(select(.step | IN("push", "pushed", "issue", "bugproof") | not)) | group_by(.card)
-    | all(.[]; any(.[]; .step | IN("filed", "landed", "closed", "blocked")))' > /dev/null
+    | all(.[]; any(.[]; .step | IN("filed", "landed", "closed", "blocked")))' > /dev/null || return 1
+  issues=$(openissues "$FIELDS" 2>/dev/null) && upnext "$issues" 2>/dev/null | jq -e 'length == 0' > /dev/null
 }
 idleone() {
   local sha c n x
@@ -605,9 +611,9 @@ pushturn() {
   tried=$owed; triedat=$SECONDS; read -r c n _ <<<"$owed"
   checkheld || { push "$c" "$n" & pusher=$!; }
 }
-# A turn's check that the push job (pusher) has ended: then no push runs, and its pushing state goes.
-# push() clears the record itself; this clears one its job left (a stub's), never another push's.
-pushended() { [ -z "$pusher" ] || jobs -rp | grep -qx "$pusher" || { [ "$(jq -r '.pid' "$PUSHING" 2>/dev/null)" != "$pusher" ] || rm -f "$PUSHING"; pusher=''; }; }
+# A turn's check that the push job (pusher) has ended: then no push runs. push() clears its record ($PUSHING) as it
+# ends; one its job left (the job was killed) stays, for health to show it stale, until the next push writes its own.
+pushended() { [ -z "$pusher" ] || jobs -rp | grep -qx "$pusher" || pusher=''; }
 
 tidy() { git worktree remove --force "$1" 2>/dev/null; rm -f "$1".events "$1".firsttry "$1".firsttry.new "$1".patch "$1".index "$1".msg "$1".review.new "$1".carried "$1".base "$1".live "$1".live.tmp "$1".idle "$1".nocap "$1".claim "$1".claim.new "$1".cpatch "$1".cpatch.new "$1".stack "$1".settings "$1".opencode.json "$1".donewhen "$1".unfixed "$1".covered "$1".stalled "$1".ready "$1".ready.new "$1".batch "$1".batch.new "$1".bpatch "$1".lent "$1".batchtest "$1".batchfirst "$1".first "$1".rerun "$1".rerun.new "$1".sharedran "$1".linted "$1".whole "$1".passed "$1".bpass "$1".oldtimes "$1".times "$1".reported "$1".report "$1".report.[0-9]* "$1".testlist "$1".uncovered "$1".slow "$1".timed "$1".cpus "$1".clocks "$1".oldfiles "$1".before; rm -rf "$1".rv "$1".batchtestlog "$1".covfirst "$1".checks "$1".briefs; }
 # The project's own screenshots of a change that waits for the owner's yes, kept local for the Board: the images
@@ -654,10 +660,11 @@ keepshots() { # <worktree> <kept folder> <card>
 }
 # Whether two patch files (git diff --binary --no-renames), each made on a commit of main's, are the same change: they
 # change the same files, and each file the later patch gives is the earlier patch's, brought onto the later commit by a
-# three-way merge (git merge-file) with main's own change to that file between the two commits. The merge moves an edit
-# only as main's change moves its lines, never to another place with the same lines around it (as git apply, which
-# finds a hunk by its context, can), so an edit at another place is another change. Not the same when a patch or commit
-# cannot be read, a patch does not apply to its commit, or a merge has a conflict (a binary file main changed has one).
+# three-way merge (git merge-file) with main's own change to that file between the two commits, its mode too (main's
+# chmod under a patch that changes no mode is the later patch's mode; a chmod of the patch must be in both). The merge
+# moves an edit only as main's change moves its lines, never to another place with the same lines around it (as git
+# apply, which finds a hunk by its context, can), so an edit at another place is another change. Not the same when a
+# patch or commit cannot be read, a patch does not apply to its commit, or a merge has a conflict (a binary file main changed has one).
 samechange() { # <earlier patch> <the commit it was made on> <later patch> <the commit it was made on>
   local d r
   [ -s "$1" ] && [ -s "$3" ] && [ -n "$2" ] && [ -n "$4" ] && git -C "$MAIN" cat-file -e "$2^{commit}" 2>/dev/null \
@@ -672,10 +679,18 @@ samechange() { # <earlier patch> <the commit it was made on> <later patch> <the 
       && cmp -s "$d/pa" "$d/pb" || exit 1
     while IFS= read -r -d '' p; do
       # Each entry is "<mode> <type> <id>", or nothing for a file the patch deletes.
-      ea=$(g ls-tree "$ta" -- "$p") && eb=$(g ls-tree "$tb" -- "$p") || exit 1
-      ea=${ea%%$'\t'*} eb=${eb%%$'\t'*}
-      [ "$ea" != "$eb" ] || continue
-      [ -n "$ea" ] && [ -n "$eb" ] && [ "${ea%% *}" = "${eb%% *}" ] || exit 1
+      ea=$(g ls-tree "$ta" -- "$p") && eb=$(g ls-tree "$tb" -- "$p") && mo=$(g ls-tree "$2" -- "$p") && mt=$(g ls-tree "$4" -- "$p") || exit 1
+      ea=${ea%%$'\t'*} eb=${eb%%$'\t'*} mo=${mo%% *} mt=${mt%% *}
+      [ -n "$ea$eb" ] || continue
+      [ -n "$ea" ] && [ -n "$eb" ] || exit 1
+      # The mode is merged as the content is: main's mode change to a file at both commits is the mode the later
+      # patch gives when the earlier patch left the mode as it was; a mode change of the patch is the same one.
+      ma=${ea%% *}
+      if [ -n "$mo" ] && [ -n "$mt" ] && [ "$mo" != "$mt" ]; then
+        if [ "$ma" = "$mo" ]; then ma=$mt; elif [ "$ma" != "$mt" ]; then exit 1; fi
+      fi
+      [ "${eb%% *}" = "$ma" ] || exit 1
+      [ "${ea##* }" != "${eb##* }" ] || continue
       # Main did not change the file between the two commits: the change to it differs.
       o=$(g rev-parse -q --verify "$2:$p") t=$(g rev-parse -q --verify "$4:$p")
       [ "$o" != "$t" ] || exit 1
