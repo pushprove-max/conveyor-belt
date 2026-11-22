@@ -100,8 +100,8 @@ test('Rules: Release suite runs on, on a Namespace Devbox, shows its login, size
   assert.deepEqual(Array.from(size.options, (o) => o.value), ['2x4', '4x8', '8x16', '16x32']);
   size.value = '8x16';
   const posts = await sent(w, () => size.dispatchEvent(new w.Event('change')));
-  assert.deepEqual(posts[0], { action: 'suite-machine', args: ['devbox', '--size', '8x16'], repo: 'sample' });
-  assert.ok(posts.slice(1).every((p) => p.action === 'suite-machine-check'), 'a new size is a new rule: the box is read again');
+  assert.deepEqual(posts, [{ action: 'suite-machine', args: ['devbox', '--size', '8x16'], repo: 'sample' }, { action: 'suite-machine-check', args: [], repo: 'sample' }],
+    'a new size is saved, then is a new rule: the box is read again (a size that is never checked fails here)');
 });
 
 // Bug this guards: the Box line left out when the devbox was set up, which the owner asked it to show.
