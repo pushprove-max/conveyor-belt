@@ -316,6 +316,28 @@ test('Setup: with every project shown, the setup of the project left in ?repo= d
   assert.ok(shown(w), 'picked, widgetshop\'s setup opens');
 });
 
+// Bug guarded: with every project shown, a save from the setup on Overview whose reply came after a switch to the
+// Rules tab (key 4) drew the tab again, and that draw opened the setup over the project choice.
+test('Setup: a reply to a setup save after a switch to the project choice does not open the box over it', async () => {
+  const w = boot({ query: '?tab=overview&repo=widgetshop' });
+  const d = snap({ at: '2026-11-01T00:00:00Z', rules: ALL });
+  const other = { ...clone(d.panels.rules.data), repo: 'widgetshop', repoUrl: 'https://github.com/example/WidgetShop' };
+  other.control = { ...other.control, onboarded: null };
+  Object.assign(d.panels.rules.data, { repos: ['sample', 'widgetshop'], others: { widgetshop: other } });
+  d.panels.machine.data.repos = ['sample', 'widgetshop'];
+  deliver(w, d);
+  assert.ok(shown(w), 'on Overview, widgetshop\'s setup opens');
+  let answer;
+  w.reply = new Promise((r) => { answer = r; });
+  act(box(w), 'rule-P0').click();
+  key(w, w.document.activeElement, '4');
+  assert.ok(!shown(w), 'the switch to the project choice shuts the box');
+  answer(record({ onboarded: null }));
+  await settle();
+  assert.deepEqual(w.posts.map((p) => p.body.repo), ['widgetshop'], 'the save was sent for widgetshop');
+  assert.ok(!shown(w), 'the reply to the save does not open the box over the project choice');
+});
+
 // Bug guarded: a switch to an onboarded project left the box of the one before open, its controls sending to the
 // project now shown.
 test('Setup: a switch to an onboarded project shuts the box of the one before', async () => {

@@ -123,7 +123,9 @@
     open: new Set(), armed: null, unarm: null, asking: null, withLabels: false, moved: new Map(), picked: new Set(), waitsOpen: false, dep: null, depText: '',
     drafts: null, priceEdit: null, priceAdd: null, priceFind: '', priceSaved: new Map(), priceThis: new Map(), priceOpen: new Set(),
     standingSaved: new Map(), pickSaved: new Map(), pickDraft: new Map(), cores: null, bare: null, bareFor: null, idle: null, shown: new Map(),
-    ruleSet: 'models', ruleFind: '', pinsAll: false, pinMenu: null, dragPin: null };
+    ruleSet: 'models', ruleFind: '', pinsAll: false, pinMenu: null, dragPin: null, choosing: null };
+  // choosing: the overlay's ctx.picking, kept from its last draw: true while the tab in view shows the project choice.
+  // S.ctx.picking() cannot say it: a panel's own ctx says so for that panel, whichever tab is in view.
   // The setup of a repository not yet onboarded (drawOnboard()): its box and the line above the panels, once made; open;
   // later (Later pressed: shut for this visit); repo, the project it is for; keys, the rules it asks for, worked out
   // when it opens; set, the rules whose choice the host saved; rule, the rule of the row a box event is on (run());
@@ -563,7 +565,9 @@
       return;
     }
     // The setup over every tab is drawn from the same record (a change sent from it or from the tab shows in both).
-    if (!only) drawOnboard();
+    // Not while the tab in view shows the project choice: a reply that came back after a switch to it (key 4) opened
+    // the setup over the choice.
+    if (!only && !(S.choosing && S.choosing())) drawOnboard();
     // The focus a control had comes back to the control with the same action (on the same issue, in the same group,
     // in the same panel), if it is still there. While a change is out its control is off and cannot take the focus: it
     // is kept, and given back when the controls are on again.
@@ -734,6 +738,7 @@
     draw(d, ctx) {
       // With the project choice shown (no ?project= and more than one project), the project left in ?repo= is not
       // the one in view: no setup opens over the choice.
+      S.choosing = ctx.picking;
       if (!d || ctx.picking()) { if (OB.box) { OB.open = false; OB.box.hidden = true; OB.line.hidden = true; } return; }
       // A project picked under Show since (the same part, another project of it) is taken: the setup is for it.
       if (S.raw && S.raw[0] === d && S.raw[2] === ctx.project(d).repo) { drawOnboard(); return; }
