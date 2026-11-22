@@ -37,7 +37,7 @@ fixture() {
 set_file() { jq -cn --argjson p "$$" --arg s "$1" '{pid: $p, sessionId: $s, startedAt: 1794650400000, kind: "interactive"}' > "$HOME/.claude/sessions/$$.json"; }
 fail() { echo "FAIL [clear-$CASE]: $*" >&2; exit 1; }
 mark() { cut -d' ' -f1 "$FD/session" 2>/dev/null; }
-clear_b() { jq -cn '{session_id: "sB", source: "clear", transcript_path: "", stop_hook_active: false}' | bash "$SRC/foreman.sh" start; }
+clear_b() { jq -cn '{session_id: "sB", source: "clear", transcript_path: "", stop_hook_active: false}' | bash "$SRC/foreman.sh" start | jq -r '.hookSpecificOutput.additionalContext // empty'; }
 
 # D1: the Foreman's /clear, with the file naming the new session B as Claude Code writes it before the hook runs: B
 # takes the mark, gets the Foreman's rules and saved state, and A is no longer marked (it is listed in former, so its

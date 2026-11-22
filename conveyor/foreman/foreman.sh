@@ -29,7 +29,8 @@
 #   the Foreman" (any case, a closing . or !): in a session in a project's main checkout (one with a pack,
 #   .conveyor/project.json; never a worktree, as a card's), it claims the role as claim does, and tells the session to
 #   reply with the claim's first line (and its line on a prompt cache time other than 1h). Any other prompt, or the
-#   words anywhere else, does nothing.
+#   words anywhere else, claims nothing; but the first other prompt of a Foreman session that start did not name (one
+#   that took the role by claim, a Bash command) names it "<project> - foreman" (sessionTitle, see title), once.
 # start (SessionStart): in the launcher's session (CONVEYOR_FOREMAN=1), at its first start, fresh or resumed, first
 #   marks it the Foreman. A resumed session given a new id whose transcript is the Foreman session's takes the mark
 #   over, unless it is a session that lost the role; so does the new session a /clear starts in the Foreman's own
@@ -37,7 +38,8 @@
 #   Foreman session only, the Foreman's rules (with auto's rules and the standing kinds of routine
 #   yes each record's pack turns on, asked of the record: `conveyor.sh auto standing`), then its saved state: the DONE items of state.md archived
 #   (archive.py), a warning line when the project runs an old engine here (`conveyor.sh take stale`), a live summary
-#   built fresh (never saved), then state.md, cut to its cap.
+#   built fresh (never saved), then state.md, cut to its cap. The output is JSON: that text as additionalContext, and
+#   sessionTitle "<project> - foreman", the Foreman session's name (the first project mine names).
 # start --rules-apart: the start without rules.md (see rules); the plugin's hook passes it. An engine from before the
 #   rules hook ignores it and puts rules.md before the rest when the whole fits, or a Read line in its place when it does
 #   not; a start without it here puts rules.md after the rest, cut to what the limit leaves.
@@ -82,16 +84,19 @@ case ${1:-} in
 esac
 # A hook's input, and the session it names.
 case $1 in start | rules | words | filing | filed) IN=$(cat); SID=$(jq -r '.session_id // empty | strings' <<<"$IN" 2>/dev/null) ;; esac
-# words: every prompt of every session comes here, so any other prompt ends before anything is read; the rest runs in
-# the session's own folder (the hook input's cwd), whose main checkout is the one claimed.
+# words: every prompt of every session comes here, so a session that is not in a project's main checkout, or has no
+# valid id, ends before anything more is read; the rest runs in the session's own folder (the hook input's cwd),
+# whose main checkout is the one claimed.
 if [ "$1" = words ]; then
+  # Any other prompt only goes on, in a Conveyor project's checkout, to name a session that took the role by claim.
+  WORDS=1
   case $(jq -r '.prompt // "" | strings | ascii_downcase | gsub("^\\s+|[\\s.!]+$"; "") | gsub("\\s+"; " ")' <<<"$IN" 2>/dev/null) in
-    'start your role' | 'you are the foreman') ;;
-    *) exit 0 ;;
+    'start your role' | 'you are the foreman') WORDS= ;;
   esac
   [[ $SID =~ ^[A-Za-z0-9-]+$ ]] || exit 0
   WD=$(jq -r '.cwd // empty | strings' <<<"$IN" 2>/dev/null)
   [ -z "$WD" ] || cd "$WD" || exit 0
+  [ -z "$WORDS" ] || [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/.conveyor/project.json" ] || exit 0
 fi
 # The Bash call a filing or filed hook is for: a filing in flight is that call's, and only that call's filed ends it.
 case $1 in filing | filed) TID=$(jq -r '.tool_use_id // empty | strings' <<<"$IN" 2>/dev/null) ;; esac
@@ -243,7 +248,10 @@ start_() {
     locked adopt_ "$SID" "$t" || return 1
   elif [ "$src" = clear ] && [ -n "$SID" ]; then locked cleared_ "$SID" || return 1
   fi
-  if foreman "$SID"; then context; return 0; fi
+  if foreman "$SID"; then
+    jq -cn --arg c "$(context)" --arg t "$(title)" '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $c, sessionTitle: $t}}' || return 1
+    titled "$SID"; return 0
+  fi
   if [ -n "$SID" ] && grep -qxF -- "$SID" "$FD/former" 2>/dev/null; then
     # Plain stdout at SessionStart reaches only Claude: systemMessage shows the owner the line too.
     jq -cn --arg m "This session is no longer the Foreman: the role moved to another session or was turned off. /conveyor-belt:foreman makes it the Foreman again." \
@@ -293,6 +301,11 @@ auto_() {
   if [ -n "$m" ] && [ "$m" != "$1" ] && running "$m"; then printf '%s\n' "$m"; return 0; fi
   claim_ "$1"
 }
+# title: the Foreman session's name, "<first project mine names> - foreman" (a group's Foreman takes its first project's).
+# titled <session id>: notes in $FD/titled that Conveyor has named that session, so the words hook names a session that
+# took the role by claim (a Bash command, which no hook output can name) once, at its next prompt, and no later one.
+title() { local p; p=$(mine 2>/dev/null | awk -F'\t' 'NR == 1 { print $1 }'); printf '%s - foreman' "${p:-${MAIN##*/}}"; }
+titled() { [ -z "$1" ] || { mkdir -p "$FD" && printf '%s\n' "$1" > "$FD/titled.$$" && mv -f "$FD/titled.$$" "$FD/titled"; } 2>/dev/null; }
 # named: the Foreman's name in brackets, only when the host file gives it one other than "Foreman" (lib.sh's default),
 # so a start line never reads "the Foreman (Foreman)".
 named() { [ "$NAME" = Foreman ] || printf ' (%s)' "$NAME"; }
@@ -307,8 +320,9 @@ auto() {
   if [ -z "$m" ]; then
     out="This session is now the Foreman$(named): no live session held the role, so it took it at its start; its watchers start at once, with no turn needed."
     out+=$'\n\n'$(context)
-    jq -cn --arg m "${out%%$'\n'*}" --arg c "$out" '{systemMessage: $m, hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $c}}'
-    return
+    jq -cn --arg m "${out%%$'\n'*}" --arg c "$out" --arg t "$(title)" \
+      '{systemMessage: $m, hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $c, sessionTitle: $t}}' || return 1
+    titled "$SID"; return
   fi
   st=$(holders "$m" | awk '$2 != "" { print $2; exit }')
   if [ -n "$st" ]; then st=$(p_date "@$st" '+%Y-%m-%d %H:%M %Z')
@@ -698,16 +712,27 @@ filed() {
 }
 
 # words: in a project's main checkout, the claim, its reply the claim's first line and its cache-time line if any (a
-# prompt hook's additionalContext).
+# prompt hook's additionalContext), and the session's name with it; any other prompt names, once, a Foreman session
+# that start did not name (title), and says nothing else.
 words() {
   local out ttl n
   inmain || return 0
+  if [ -n "$WORDS" ]; then
+    foreman "$SID" && [ "$(cat "$FD/titled" 2>/dev/null)" != "$SID" ] || return 0
+    titled "$SID"
+    jq -cn --arg t "$(title)" '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", sessionTitle: $t}}'
+    return
+  fi
   if out=$(claim_cmd claim "$SID" 2>&1); then
     # The claim's line on a cache time other than 1h is part of the reply, so the owner sees it.
     ttl=$(grep -m1 '^The Foreman runs with the prompt cache time ' <<<"$out") && n='these two lines' || n='this one line'
     out="The owner asked, in words, for this session to be the Foreman, and it now is. Reply with only $n: ${out%%$'\n'*}${ttl:+$'\n'$ttl}"$'\n'"From this turn on, work by the rest of this as the Foreman."$'\n\n'"${out#*$'\n'}"
-  else out="The owner asked, in words, for this session to be the Foreman, and the claim failed. Show the owner this and stop: $out"; fi
-  jq -cn --arg c "$out" '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $c}}'
+    jq -cn --arg c "$out" --arg t "$(title)" '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $c, sessionTitle: $t}}' && titled "$SID"
+  else
+    # A failed claim makes no Foreman, so it names no session.
+    out="The owner asked, in words, for this session to be the Foreman, and the claim failed. Show the owner this and stop: $out"
+    jq -cn --arg c "$out" '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $c}}'
+  fi
 }
 
 # ask <repo> <command> [<argument>...]: one engine command of that record of this Foreman's (mine), run where the

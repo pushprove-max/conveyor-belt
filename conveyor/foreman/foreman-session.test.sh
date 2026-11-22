@@ -64,6 +64,7 @@ health() { # <waiting issues> <blocked issues> [<reason>]
 }
 snap() { jq -cn --argjson h "$(health "$@")" '{health: $h, belt: [{card: "x"}], queue: {next: []}}'; }
 # A hook's input for the session given: its id, how it started (startup) and its transcript.
+ctx() { jq -r '.hookSpecificOutput.additionalContext // empty'; } # the text a start's JSON output gives the session
 sess() { jq -cn --arg s "$1" --arg src "${2:-startup}" --arg t "${3:-}" '{session_id: $s, source: $src, transcript_path: $t, stop_hook_active: false}'; }
 
 t_state_stop() {
@@ -395,7 +396,7 @@ out=$(sess s1 | bash "$SRC/stop.sh" state); jq -e '.decision == "block"' <<<"$ou
 out=$(sess s2 | bash "$SRC/stop.sh" state); [ -z "$out" ] || fail "a session that is not marked ran the Foreman's stop hook: $out"
 echo small > "$FD/state.md"
 # Continued or resumed with the same id, it is still the Foreman: its start gives it its rules.
-out=$(sess s1 resume | bash "$SRC/foreman.sh" start); grep -qF 'Foreman mode: you are Ada' <<<"$out" || fail "the resumed Foreman got no Foreman start: $out"
+out=$(sess s1 resume | bash "$SRC/foreman.sh" start | ctx); grep -qF 'Foreman mode: you are Ada' <<<"$out" || fail "the resumed Foreman got no Foreman start: $out"
 out=$(sess s2 startup | bash "$SRC/foreman.sh" start); [ -z "$out" ] || fail "another session got the Foreman's start: $out"
 # A claim from a second session moves the mark, and the first session's waiter and its watchers exit at once.
 # The waiter's output goes through cat, which ends only once nothing the waiter started holds it open.
@@ -431,7 +432,7 @@ ada
 bash "$SRC/foreman.sh" claim s2 > /dev/null || fail "the claim for s2 failed"
 # A fork (--fork-session: source fork, a new id) keeps the role when its transcript is the Foreman's.
 jq -cn '{type: "user", sessionId: "s3", forkedFrom: {sessionId: "s2", messageUuid: "u1"}, message: {content: "watch"}}' > "$T/fork.jsonl"
-out=$(sess s3 fork "$T/fork.jsonl" | bash "$SRC/foreman.sh" start)
+out=$(sess s3 fork "$T/fork.jsonl" | bash "$SRC/foreman.sh" start | ctx)
 [ "$(cut -d' ' -f1 "$FD/session")" = s3 ] && grep -qF 'Foreman mode: you are Ada' <<<"$out" || fail "a fork of the Foreman lost the role: $(cat "$FD/session") $out"
 jq -cn '{type: "user", sessionId: "s4", message: {content: "watch"}}' > "$T/other.jsonl"
 jq -cn '{type: "user", sessionId: "s5", forkedFrom: {sessionId: "s3", messageUuid: "u2"}, message: {content: "watch"}}' > "$T/fork2.jsonl"
@@ -466,7 +467,7 @@ for src in clear compact resume; do
 done
 # The launcher marks its own session at its start.
 echo small > "$FD/state.md"
-out=$(sess s5 startup | CONVEYOR_FOREMAN=1 bash "$SRC/foreman.sh" start)
+out=$(sess s5 startup | CONVEYOR_FOREMAN=1 bash "$SRC/foreman.sh" start | ctx)
 [ "$(cut -d' ' -f1 "$FD/session")" = s5 ] && grep -qF 'Foreman mode: you are Ada' <<<"$out" || fail "the launcher did not mark its session: $(cat "$FD/session")"
 # One Foreman per group: a claim in the checkout of another project of the group (its own state folder) moves the
 # group's mark, kept in the first-named project's folder.
@@ -508,12 +509,12 @@ jq '.plugin = {follow: "main"}' "$SRC/../lib/test-pack.json" > "$M/.conveyor/pro
 jq -n --arg c "$PIN2" --arg h "$PIN" '{commit: $c, taken: [$c], head: {commit: $h, name: "main"}}' > "$M/.git/conveyor-engine.json"
 printf '%s\n' '{"time":"2026-11-16T05:10:00Z","by":"x","exit":0,"output":""}' '{"time":"2026-11-16T06:10:00Z","by":"x","exit":1,"output":"conveyor: the plugin'"'"'s main could not be read from its remote\n"}' > "$M/.git/conveyor-engine.log"
 bash "$SRC/foreman.sh" claim s1 > /dev/null || fail "the claim failed"
-out=$(sess s1 resume | bash "$SRC/foreman.sh" start)
+out=$(sess s1 resume | bash "$SRC/foreman.sh" start | ctx)
 [ "$(grep -c 'old engine' <<<"$out")" = 1 ] && grep -qxF "# WARNING: Conveyor runs an old engine here: commit ${PIN2:0:7}, and the plugin's main is at ${PIN:0:7} · last take that worked: 2026-11-16T05:10:00Z · last failure: conveyor: the plugin's main could not be read from its remote · to take it, run: cd $M && bash $(cd "$SRC/.." && pwd -P)/conveyor.sh take" <<<"$out" \
   || fail "the Foreman's start does not give one line naming the old engine and why: $out"
 # Once the newest commit read is the one it runs, the line goes.
 jq -n --arg c "$PIN2" '{commit: $c, taken: [$c], head: {commit: $c, name: "main"}}' > "$M/.git/conveyor-engine.json"
-out=$(sess s1 resume | bash "$SRC/foreman.sh" start); [[ $out != *'old engine'* ]] || fail "the Foreman's start names an old engine on the newest commit: $out"
+out=$(sess s1 resume | bash "$SRC/foreman.sh" start | ctx); [[ $out != *'old engine'* ]] || fail "the Foreman's start names an old engine on the newest commit: $out"
 }
 
 # Every case at once, each in a subshell on its own fixture; each one's output is shown once all have ended, and the

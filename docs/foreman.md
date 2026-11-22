@@ -17,6 +17,11 @@ the Foreman a name in `foreman.name`, the line shows it in brackets: `This sessi
 The session stays the Foreman when you continue or resume it, and after `/clear` in it. `/clear` in another session
 does not give it the role. `/conveyor-belt:foreman off` ends the role, and it stays off after `/clear`.
 
+The Foreman's session is named `<project> - foreman` at its start, for example `conveyor-belt - foreman`. A Foreman of
+several projects uses the name of the first one. A session that takes the role with `/conveyor-belt:foreman` gets the
+name when you send your next message. A session that is not the Foreman gets no name from Conveyor. `/conveyor-belt:foreman off`
+ends the role but leaves the name.
+
 Claude Code keeps the output of a hook over 10,000 characters out of the session. So the Foreman's start sends its text
 in two outputs, each kept short. The first holds the fixed text, the rules of auto mode, the standing kinds of routine,
 the live summary and the saved state. When the saved state does not fit with the rest, the start leaves it out and

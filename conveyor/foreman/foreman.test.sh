@@ -55,6 +55,7 @@ ready() {
 # standin: a stand-in for claude on PATH ($T/bin) that runs the plugin's SessionStart hook, as a session would.
 standin() {
 mkdir -p "$T/bin"
+# stub: a claude that runs only the plugin's SessionStart hook and prints its text, which no real claude run can show cheaply
 cat > "$T/bin/claude" <<'EOF'
 #!/usr/bin/env bash
 # A stand-in for claude: runs the plugin's SessionStart hook, as a session would.
@@ -62,7 +63,7 @@ echo "cwd=$PWD foreman=${CONVEYOR_FOREMAN:-} ttl=${CLAUDE_CODE_PROMPT_CACHE_TTL:
 echo "args=$*"
 echo "launch=${CONVEYOR_FOREMAN_LAUNCH:-}"
 src=startup; case " $* " in *' --resume '* | *' --continue '*) src=resume ;; esac
-jq -cn --arg s "${STANDIN_SID:-}" --arg src "$src" 'if $s == "" then {} else {session_id: $s, source: $src} end' | CLAUDE_PROJECT_DIR=$PWD bash -c "$(jq -r '.hooks.SessionStart[0].hooks[0].command' "$PLUGIN/hooks/hooks.json")"
+jq -cn --arg s "${STANDIN_SID:-}" --arg src "$src" 'if $s == "" then {} else {session_id: $s, source: $src} end' | CLAUDE_PROJECT_DIR=$PWD bash -c "$(jq -r '.hooks.SessionStart[0].hooks[0].command' "$PLUGIN/hooks/hooks.json")" | jq -r '.hookSpecificOutput.additionalContext // empty'
 EOF
 chmod +x "$T/bin/claude"
 }

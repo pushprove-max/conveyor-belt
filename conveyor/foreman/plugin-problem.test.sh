@@ -37,7 +37,7 @@ again() { # <reply>: the same turn's next stop after a refusal: Claude Code's st
   jq -cn --arg t "$T/t.jsonl" '{session_id: "s1", transcript_path: $t, stop_hook_active: true}' | bash "$SRC/stop.sh" reply
 }
 # start: the Foreman's start-up text (SessionStart; no session is marked yet, so CONVEYOR_FOREMAN makes this one it).
-start() { echo '{}' | bash "$SRC/foreman.sh" start 2>&1; }
+start() { echo '{}' | bash "$SRC/foreman.sh" start 2>&1 | jq -r '.hookSpecificOutput.additionalContext // empty'; }
 
 # D1: in the plugin's own repository a plugin problem with no issue number is refused, with the reason and the form;
 # the same line with "filed as #<n>" passes, and the note made at the refusal then names the issue (one note).

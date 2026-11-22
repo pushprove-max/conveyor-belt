@@ -31,6 +31,9 @@ fixture() {
 text() { local i; for ((i = 1; i <= $2; i++)); do printf '%s line %04d %s\n' "$1" "$i" "$(printf 'x%.0s' {1..40})"; done; }
 # marked: makes session sA the Foreman (the claim's own output is not under test here).
 marked() { (cd "$M" && bash "$SRC/foreman.sh" claim sA) > /dev/null || fail "the claim failed"; }
+# ctx: the text a start's JSON output gives the session (its additionalContext); the length checks below take the whole JSON
+# output, which is what Claude Code measures against its 10,000 characters.
+ctx() { jq -r '.hookSpecificOutput.additionalContext // empty'; }
 # hook <start|rules> <session> [<argument>...]: the SessionStart hook's output for that session; the plugin's start
 # command passes --rules-apart.
 hook() { jq -cn --arg s "$2" '{session_id: $s, source: "startup", transcript_path: ""}' | (cd "$M" && bash "$SRC/foreman.sh" "$1" "${@:3}") || fail "the $1 hook failed"; }
@@ -41,7 +44,7 @@ t_fit() {
   local st ru
   fixture fit
   text RULESBODY 98 > "$FD/rules.md"; text STATEBODY 16 > "$FD/state.md"
-  marked; st=$(hook start sA --rules-apart); ru=$(hook rules sA)
+  marked; st=$(hook start sA --rules-apart | ctx); ru=$(hook rules sA)
   [ "$(grep -c RULESBODY <<<"$ru")" = 98 ] && ! grep -q RULESBODY <<<"$st" || fail "the rules are not whole in the rules output only"
   [ "$(grep -c STATEBODY <<<"$st")" = 16 ] && ! grep -q STATEBODY <<<"$ru" || fail "the state is not whole in the start output only"
   ! grep -qE 'did not fit|Read .* now' <<<"$st$ru" || fail "an output that fits has a Read line: $(grep -E 'did not fit' <<<"$st$ru")"
@@ -92,10 +95,10 @@ t_old() {
   local st
   fixture old
   text RULESBODY 10 > "$FD/rules.md"; text STATEBODY 16 > "$FD/state.md"
-  marked; st=$(hook start sA)
+  marked; st=$(hook start sA | ctx)
   [ "$(grep -c RULESBODY <<<"$st")" = 10 ] && [ "$(grep -c STATEBODY <<<"$st")" = 16 ] || fail "a start without --rules-apart lacks the rules or the state: ${st:0:300}"
   text RULESBODY 200 > "$FD/rules.md"; st=$(hook start sA)
-  [ "${#st}" -lt 10000 ] && grep -qF "Read the rest from $FD/rules.md" <<<"$st" || fail "a start without --rules-apart is ${#st} characters or has no Read line"
+  [ "${#st}" -lt 10000 ] && grep -qF "Read the rest from $FD/rules.md" <<<"$(ctx <<<"$st")" || fail "a start without --rules-apart is ${#st} characters or has no Read line"
 }
 
 # A project with no rules.md still gets the plugin's 11 rules on working with the owner, in the rules output, and the
@@ -115,7 +118,7 @@ t_owner() {
     grep -qF -- "$((i + 1)). " <<<"$ru" && grep -qF -- "${phrase[i]}" <<<"$ru" || fail "rule $((i + 1)) (${phrase[i]}) is not in the rules output: ${ru:0:300}"
   done
   [ "${#st}" -lt 10000 ] || fail "the start is ${#st} characters, not under 10000"
-  grep -F 'await-' <<<"$st" | grep -qF 'idle wake ("Conveyor is idle")' || fail "the await-file line does not name the idle wake for a batch: $(grep -F 'await-' <<<"$st" | cut -c1-300)"
+  grep -F 'await-' <<<"$(ctx <<<"$st")" | grep -qF 'idle wake ("Conveyor is idle")' || fail "the await-file line does not name the idle wake for a batch: $(grep -F 'await-' <<<"$(ctx <<<"$st")" | cut -c1-300)"
 }
 
 # Bug it catches (#1295): without --rules-apart (a plugin from before the rules hook) the start keeps a state that
@@ -128,7 +131,7 @@ t_owner_whole() {
   text STATEBODY "$n" > "$FD/state.md"
   st=$(hook start sA)
   [ "${#st}" -lt 10000 ] || fail "a start without --rules-apart is ${#st} characters, not under 10000 ($base without a state)"
-  grep -qF 'gives the subject only' <<<"$st" || fail "a start without --rules-apart lacks the owner rules: ${st:0:300}"
+  grep -qF 'gives the subject only' <<<"$(ctx <<<"$st")" || fail "a start without --rules-apart lacks the owner rules: ${st:0:300}"
 }
 
 # Bug it catches (#1295): the fixed text and the rest (auto's rules, standing kinds, live summary) alone took 8,300
@@ -146,7 +149,7 @@ t_owner_mid() {
   text STATEBODY 16 > "$FD/state.md"
   st=$(hook start sA)
   [ "${#st}" -lt 10000 ] || fail "a start without --rules-apart with $len-character repo name is ${#st} characters, not under 10000"
-  grep -qF "$SRC/owner-rules.md did not fit" <<<"$st" || fail "no Read line names owner-rules.md in a start of ${#st} characters: ${st: -300}"
+  grep -qF "$SRC/owner-rules.md did not fit" <<<"$(ctx <<<"$st")" || fail "no Read line names owner-rules.md in a start of ${#st} characters: ${st: -300}"
 }
 
 # Bug it catches (#1296): in the same start as owner_mid, with a rules.md in the project, the Read line named only
@@ -163,7 +166,7 @@ t_owner_mid_rules() {
   text STATEBODY 16 > "$FD/state.md"; text RULESBODY 3 > "$FD/rules.md"
   st=$(hook start sA)
   [ "${#st}" -lt 10000 ] || fail "a start without --rules-apart with $len-character repo name is ${#st} characters, not under 10000"
-  grep -qF "$SRC/owner-rules.md and $FD/rules.md did not fit" <<<"$st" || fail "no Read line names both owner-rules.md and rules.md in a start of ${#st} characters: ${st: -300}"
+  grep -qF "$SRC/owner-rules.md and $FD/rules.md did not fit" <<<"$(ctx <<<"$st")" || fail "no Read line names both owner-rules.md and rules.md in a start of ${#st} characters: ${st: -300}"
 }
 
 cases=(fit big other race old owner owner_whole owner_mid owner_mid_rules)
