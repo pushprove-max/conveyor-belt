@@ -96,7 +96,8 @@ t_words_claim() {
   out=$(prompt sA 'hello'); [ -z "$out" ] || fail "a prompt after the words named the session again: $out"
 }
 # Bug it catches: the words hook named a session whose claim failed (a project in two groups has two Foremen, so the claim
-# is refused), and a later prompt then took the session for a Foreman that was never made.
+# is refused), and noted it as named. If the session became the Foreman later by another route, a prompt would then find
+# it noted as named and never give it its title.
 t_words_claim_fails() {
   local out
   fixture words_claim_fails
