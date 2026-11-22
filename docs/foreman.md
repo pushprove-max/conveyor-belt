@@ -139,6 +139,13 @@ is for the repository, the Foreman tells you the repository, the records it look
 the project's record in the host file to its main checkout on this machine, or run `conveyor.sh setup` in that
 checkout.
 
+The Foreman files a fix issue only with a `## Cause` section. A fix issue is one with a `## What happens now` section
+or the `bug` label. If the section is missing, the filing command does not run, and the Foreman is told what the
+section must hold: where the bad data or behaviour comes from and why it is there at all, a place in the code that
+already solves the same problem (or that none was found), and what the reader sees when the data is stale or missing.
+The check also covers `foreman.sh ask <project> testissue`. An issue for new work that you ordered, with neither the
+section nor the label, is not checked, and nor is an issue that the engine files itself, such as a follow-up.
+
 The Foreman can also file an issue about a test file with `conveyor.sh testissue`, the Tests page's command. This
 command holds the issue in the project's record and says so. It does this for a Foreman session, and also when the
 project's New issues start in is Held. The Foreman runs it with `foreman.sh ask <project> testissue`, so the issue is

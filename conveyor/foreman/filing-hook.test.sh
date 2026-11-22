@@ -60,7 +60,19 @@ out=$(run "$(line PreToolUse)" "$(input "$c" '{hook_event_name: "PreToolUse", to
 jq -e '.hookSpecificOutput.permissionDecision == "deny"' <<<"$out" >/dev/null || fail "a filing command run in the background was not refused: $out"
 }
 
-cases=(quiet files)
+# A testissue command files through the engine, not gh: its filing hook still starts foreman.sh filing (which refuses a
+# fix issue with no Cause section, filing-cause.test.sh), and its filed hook has nothing to do.
+t_testissue() {
+CASE=testissue; case_ testissue
+local c='foreman.sh ask alpha testissue conveyor/x.test.sh Slow body'
+out=$(run "$(line PreToolUse)" "$(input "$c" '{hook_event_name: "PreToolUse"}')")
+grep -qx 'conveyor/foreman/foreman.sh filing' "$T/marks" 2>/dev/null || fail "the filing line did not start foreman.sh filing; command: $c; marks: $(cat "$T/marks" 2>/dev/null)"
+: > "$T/marks"
+out=$(run "$(line PostToolUse)" "$(input "$c" '{hook_event_name: "PostToolUse"}')")
+[ ! -s "$T/marks" ] || fail "the filed line started the engine; command: $c; marks: $(cat "$T/marks")"
+}
+
+cases=(quiet files testissue)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

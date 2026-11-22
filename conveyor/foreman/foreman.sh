@@ -58,7 +58,8 @@
 #   guessed value.
 # filing (PreToolUse, Bash) and filed (PostToolUse and PostToolUseFailure, Bash): an issue the Foreman files (a
 #   command holding `issue create` or `issue new`: gh's, or the engine's gh-write) starts held, so nothing it files is
-#   built before the owner's yes; the Foreman releases it (conveyor.sh control release) once the owner says yes.
+#   built before the owner's yes; the Foreman releases it (conveyor.sh control release) once the owner says yes. A fix
+#   issue (a `## What happens now` section or a `bug` label) with no `## Cause` section is refused first (no_cause).
 #   filing, before the command runs, sets every record whose new issues start in the queue to start them held
 #   (another project's too, as the command may file there) (conveyor.sh control start held), so an issue is held from its first sight, however long the command runs on;
 #   when a record cannot be set, or the command is to run in the background, the command is refused. filed holds every
@@ -541,6 +542,23 @@ context_state() {
 # The program is files.jq, which the plugin's hook lines (filing-hook.sh) read too, so a command that files no issue
 # ends there, before the shim looks for the engine.
 files() { jq -e -f "$FHERE/files.jq" <<<"$1" >/dev/null 2>&1; }
+# no_cause <hook input>: 0 when its command files a fix issue with no `## Cause` section: the command files an issue
+# (files above, or `ask <project> testissue`), and the text it carries (a body file it names, when readable, too) has a
+# `## What happens now` section or a `bug` label (`--label bug`, `-l foo,bug`, `--label=bug`); `testissue` always
+# files with the pack's type label (`bug` in this pack), so it counts as a fix issue too. The section is read as
+# written in the command, as files is: its text is not judged, and a body made by an expansion is not seen.
+NO_CAUSE='Not run: a fix issue needs a "## Cause" section, and this one has none. Name the source of the problem, not only what the reader sees. The section holds three things. First, where the bad data or behaviour comes from and why it is there at all. Second, a place in the code that already solves the same problem, or that none was found. Third, what the reader sees when the data is stale or missing. Add the section and file it again.'
+no_cause() {
+  local cmd f t ti=0
+  cmd=$(jq -r '.tool_input.command // ""' <<<"$1" 2>/dev/null) || return 1
+  t=${cmd//[\"\']/}
+  [[ $t =~ (^|[[:space:];\&|])ask[[:space:]]+[^[:space:]]+[[:space:]]+testissue([[:space:]]|$) ]] && ti=1
+  files "$1" || [ "$ti" = 1 ] || return 1
+  if [[ $cmd =~ (--body-file|-F)[[:space:]=]+[\"\']?([^[:space:]\"\']+) ]] && f=${BASH_REMATCH[2]} && [ -f "$f" ]; then cmd+=$'\n'$(cat "$f" 2>/dev/null); fi
+  [[ $cmd =~ (^|[^[:alnum:]])\#\#[[:space:]]+Cause[[:space:]]*($|[^[:alnum:]]) ]] && return 1
+  [[ $cmd == *'## What happens now'* || $ti = 1 ]] && return 0
+  grep -qiE "(^|[[:space:]])(--label|-l)(=|[[:space:]]+)?[\"']?([^[:space:]\"']*,)?bug([,\"'[:space:]]|\$)" <<<"$cmd"
+}
 # Every Foreman of the host file, and every lane's filer, files against the same records, so what filing set held is
 # kept in one list for all ($SF/held, beside the host file), and each filing in flight adds a line to $SF/in (the
 # session filing, a tab, the folder of the Foreman or filer filing, whole, a tab, and the Bash call's id; one line per
@@ -550,6 +568,7 @@ files() { jq -e -f "$FHERE/files.jq" <<<"$1" >/dev/null 2>&1; }
 filing() {
   local in recs repo main c bad=() sl
   in=$IN
+  if foreman "$SID" && no_cause "$in"; then deny "$NO_CAUSE"; return 0; fi
   files "$in" || return 0
   # A command run in the background has its filed hook as soon as it starts: the records would start new issues in
   # the queue again before it files any, and its output links none, so nothing it files would be held.
