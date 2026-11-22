@@ -28,7 +28,7 @@ printf '#!/usr/bin/env bash\nT=%q\ntouch "$T/gh-ran"\n[ ! -e "$T/gh-fail" ] || {
 mkdir -p "$T/.conveyor" && cp "$HERE/../../../.conveyor/project.json" "$T/.conveyor/"
 PATH=$T/bin:$PATH CONVEYOR_DASHBOARD_AUTH=$T/auth/dashboard-auth.json CONVEYOR_RULING_LOG=$T/rulings.jsonl XDG_CONFIG_HOME=$T/config \
   HOME=$T CONVEYOR_MAIN=$T "$PY" -I - "$HERE/.." "$T" <<'EOF'
-import functools, http.client, io, json, os, re, sys, threading
+import fcntl, functools, http.client, io, json, os, re, sys, threading
 sys.path.insert(0, sys.argv[1])
 import dashboard_server as ds
 
@@ -94,8 +94,42 @@ log, sys.stderr = sys.stderr.getvalue(), err
 check('dismisses_that_note_alone', got == 200 and text(NOTES) == HEAD + A + '\n', (got, text(NOTES)))
 check('names_its_user', 'dashboard: plugin problem dismissed by %s from 127.0.0.1' % ds.LOCAL in log, log)
 check('keeps_the_mode', os.stat(NOTES).st_mode & 0o777 == 0o600, oct(os.stat(NOTES).st_mode))
-check('no_temp_left', sorted(os.listdir(os.path.dirname(NOTES))) == ['other.md', 'plugin-bugs.md'], os.listdir(os.path.dirname(NOTES)))
+check('no_temp_left', sorted(os.listdir(os.path.dirname(NOTES))) == ['noprice.lock', 'other.md', 'plugin-bugs.md'], os.listdir(os.path.dirname(NOTES)))
 check('runs_no_gh', not os.path.exists(os.path.join(T, 'gh-ran')), 'gh was run')
+# Bug (R83): the Dismiss rewrote the file from the copy it had read with no lock, so a price note serve appended
+# between that read and the replace was lost for good (noprice-noted then stops any later note). Here serve's append,
+# made as noprice() makes it (under noprice.lock beside the file), starts just before the Dismiss replaces the file;
+# it is given half a second to finish first, as it does when the Dismiss takes no lock.
+P = '- 2026-11-20T09:30:00Z · card - · No built-in price for gpt-new-9: the belt runs or offers this Codex model · evidence: -'
+
+
+def noprice_append():
+    with open(os.path.join(os.path.dirname(NOTES), 'noprice.lock'), 'a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        with open(NOTES, 'a') as f:
+            f.write(P + '\n')
+
+
+real_replace, appender = os.replace, threading.Thread(target=noprice_append)
+
+
+def replace_late(src, dst):
+    if dst == NOTES and appender.ident is None:  # the first replace only
+        appender.start()
+        appender.join(0.5)
+    return real_replace(src, dst)
+
+
+with open(NOTES, 'w') as f:
+    f.write(WHOLE)
+os.replace = replace_late
+err, sys.stderr = sys.stderr, io.StringIO()
+got = post({'file': NOTES, 'line': B})
+sys.stderr = err
+os.replace = real_replace
+appender.join(10)
+check('keeps_a_note_appended_meanwhile', got == 200 and text(NOTES) == HEAD + A + '\n' + P + '\n',
+      'dismiss of %r with a noprice append before its replace: %s %r' % (B, got, text(NOTES)))
 
 # File on GitHub, with both notes in the file again.
 with open(NOTES, 'w') as f:

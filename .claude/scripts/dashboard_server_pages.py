@@ -3,6 +3,13 @@
 # page server's request handler, which Handler (dashboard_server_handler.py) takes from Pages.
 
 
+def notes_lock(path):
+    """The lock file serve appends its price notes to the plugin-bugs.md path under (noprice.lock beside it, noprice(),
+    lib/control.sh), opened: the caller takes the lock on it, and closing it frees the lock."""
+    # os is the base part's, run in this namespace: globals() names it where a linter reads this file alone.
+    return open(globals()['os'].path.join(globals()['os'].path.dirname(path), 'noprice.lock'), 'a')
+
+
 class Pages:
     """Handler's methods that serve the page's files and the login, and take POST /time, the plugin notes and POST
     /restart; Handler holds the rest and its class settings. Handler puts Pages before SimpleHTTPRequestHandler, so
@@ -381,9 +388,15 @@ class Pages:
                 said = (r.stderr.strip() or r.stdout.strip() or 'exit %d' % r.returncode).splitlines()[-1]
                 return self.reply(502, 'nothing was filed: the issue could not be created: %s' % said)
             print('dashboard: plugin problem filed as %s by %s from %s' % (url, user, self.client_address[0]), file=sys.stderr, flush=True)
-        # Read again: gh may have taken a while, and the Foreman may have noted another problem since.
+        # Read again: gh may have taken a while, and the Foreman may have noted another problem since. The read, the
+        # edit and the replace hold the lock serve's price notes are appended under (noprice(), lib/control.sh:
+        # noprice.lock beside the file), so a note appended meanwhile is not lost under the Board's older copy.
         tmp = '%s.dismiss.%d' % (path, threading.get_ident())
+        lock = None
         try:
+            lock = notes_lock(path)
+            # fcntl is the base part's, run in this namespace: globals() names it where a linter reads this file alone.
+            globals()['fcntl'].flock(lock, globals()['fcntl'].LOCK_EX)
             with open(path, encoding='utf-8') as f:
                 lines = f.read().splitlines(keepends=True)
             at = next((i for i, x in enumerate(lines) if x.rstrip('\n') == body['line']), None)
@@ -401,6 +414,9 @@ class Pages:
                 pass
             return self.reply(500, '%sthe note could not be removed: %s' % (
                 'filed as %s, but ' % url if url else '', getattr(e, 'strerror', None) or e))
+        finally:
+            if lock:
+                lock.close()  # and with it the lock
         if url:
             return self.reply(200, url)
         print('dashboard: plugin problem dismissed by %s from %s in %s' % (user, self.client_address[0], path), file=sys.stderr, flush=True)

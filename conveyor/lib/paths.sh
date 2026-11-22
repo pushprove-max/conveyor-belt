@@ -272,8 +272,9 @@ MODELS0='{"claude":["claude-opus-5-5","claude-fable-5-2","claude-sonnet-5-5","cl
 # The CLIs a seat can run, and how each lists the models it has registered on this host (climodels()); a CLI that
 # offers no list (Claude Code's --model takes an alias or a full name, and nothing lists them) has null for its models.
 CLINAMES='claude codex opencode'
-# The host's report (hostclis()): {at: when it was read, clis: {<cli>: its models, or null}, seen: [<cli>...]}, one
-# key of clis for each CLI that was installed then; seen, each CLI a report of this host has listed (seatwait()). Read again once it is CLI_TTL seconds old by `watch`'s slower timer (github()), by a
+# The host's report (hostclis()): {at: when it was read, clis: {<cli>: its models, or null}, seen: [<cli>...], px},
+# one key of clis for each CLI that was installed then; seen, each CLI a report of this host has listed (seatwait());
+# px, true when Codex's list was read with the Codex proxy on (pxon()), so it is read again once a role leaves the proxy. Read again once it is CLI_TTL seconds old by `watch`'s slower timer (github()), by a
 # snapshot with no `watch` feed (snapshot()) and before a seat starts (seatready()), by `conveyor.sh clis`, and for one CLI by `control` when a seat is set to it.
 CLIS=${STATE%/*}/clis.json
 CLI_TTL=600

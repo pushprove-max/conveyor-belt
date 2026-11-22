@@ -363,7 +363,8 @@ noprice_() {
   # gets no second note (it is put on noted all the same). Filing or dismissing a note on the Board takes it out of
   # that file, so each model noted is also kept in noprice-noted in the same folder, one ID a line: a model on it gets
   # no second note either, though the group's other projects have it on no noted of their own. The look and the note
-  # are made under a lock of the folder, so two loops of a group never both note one model.
+  # are made under a lock of the folder, so two loops of a group never both note one model; the Board's Dismiss and
+  # File rewrite that file under the same lock (plugin_note(), dashboard_server_pages.py), so no note made meanwhile is lost.
   notes=$(foremandir)/plugin-bugs.md || return 1
   y=$(jq -r --argjson st "$st" '.[] | select(test("^(claude|gpt)-[A-Za-z0-9._\\[\\]-]+$")) | select(. as $m | $st.noted | arrays // [] | index([$m]) | not)' <<<"$gaps") || return 1
   if [ -n "$y" ]; then
@@ -436,10 +437,8 @@ climodels() { # <cli>
 # on to a redirect. An id that is no model name (one with a space, say) is left out. Fails, so Codex's own list is used
 # alone, when no such route is set, or the list does not come within 10 s or has no model.
 codexpxmodels() {
-  local p b PROXY_ROLE KEY_V KEY_FROM
-  p=$(codexproxyset) || return 1
-  [ "$(jq -r .kind <<<"$p")" != api ] || return 1
-  for PROXY_ROLE in builder reviewer; do [ "$(proxyrole codex)" = proxy ] || return 1; done
+  local p b KEY_V KEY_FROM
+  pxon && p=$(codexproxyset) || return 1
   b=$(jq -r '.baseUrl | strings' <<<"$p"); [ -n "$b" ] || return 1
   routekey "$p"
   CONVEYOR_APIKEY=${KEY_V:-$NOKEY} timeout 10 python3 -I -c 'import json, os, re, sys, urllib.request
@@ -451,6 +450,21 @@ ids = [x.get("id") for x in (d.get("data") if isinstance(d, dict) else None) or 
 print(json.dumps([m for m in ids if isinstance(m, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/@-]{0,199}", m)]))' "${b%/}/models" 2>/dev/null \
     | jq -ce 'select(length > 0)' 2>/dev/null
 }
+# Whether Codex's proxy route (codexProxy, kind proxy) is the one every role's Codex sessions always take (proxyrole
+# codex is proxy for the builder and the reviewer): codexpxmodels() asks the proxy only then. Kept, keyed on the host
+# file's text (PXON_K), so hostclis() can ask on each read with no program.
+PXON_K=()
+pxon() {
+  local h='' a=1 p r=1 PROXY_ROLE
+  [ ! -e "$HOST" ] || { IFS= read -r -d '' h; a=$?; } 2>/dev/null <"$HOST"
+  # A host file with a NUL byte is read as before and never kept: a bash variable cannot hold it.
+  [ "$a" = 1 ] && [ "${#PXON_K[@]}" = 2 ] && [ "${PXON_K[0]}" = "$h" ] && return "${PXON_K[1]}"
+  if p=$(codexproxyset) && [ "$(jq -r .kind <<<"$p")" != api ]; then
+    r=0; for PROXY_ROLE in builder reviewer; do [ "$(proxyrole codex)" = proxy ] || r=1; done
+  fi
+  [ "$a" != 1 ] || PXON_K=("$h" "$r")
+  return "$r"
+}
 # The host's report: each CLI of CLINAMES installed here (on PATH) and the models it has registered, as {<cli>: its
 # models (climodels), or null when it offers no list or it has not been read}. Read from CLIS; with fresh every CLI is
 # read again, with due only when CLIS is CLI_TTL old, and with a CLI's name that one alone; what was read is written
@@ -458,34 +472,42 @@ print(json.dumps([m for m in ids if isinstance(m, str) and re.fullmatch(r"[A-Za-
 # The report as CLIS holds it, for the CLIs installed now, is worked out in one jq run and kept, keyed on CLIS's exact
 # text and those CLIs (HOST_K), so a step that asks again before it is due starts no program for it, nor does a
 # subshell or card started after.
+# CLIS's px is true when its Codex list was read while the proxy route was on (pxon()), whether or not the proxy listed
+# any model (codexpxmodels()): once a role's Codex sessions no longer take the proxy, Codex is read again at the next
+# read, due or not, so a model only the proxy serves is not kept for a role on the subscription until CLI_TTL.
 # What it printed is in HOST_R too ("" when it failed), for a caller that keeps it in its own shell (seatready).
-HOST_K=() # the key, then CLIS read as an object, when it was read (.at, whole seconds) and the report
+HOST_K=() # the key, then CLIS read as an object, when it was read (.at, whole seconds), the report and its px
 hostclis() { # [fresh | due | <cli>]
-  local c old r found=() one=${1:-} t='' a=1 k='' x
+  local c old r found=() one=${1:-} t='' a=1 k='' x px=''
   HOST_R=''
   for c in $CLINAMES; do command -v "$c" >/dev/null && k+=" $c"; done
   [ ! -e "$CLIS" ] || { a=''; { IFS= read -r -d '' t; a=$?; } 2>/dev/null <"$CLIS"; }
   # A file with a NUL byte is read as before and never kept (a bash variable cannot hold it).
-  [ "$a" = 1 ] && [ "${#HOST_K[@]}" = 4 ] && [ "${HOST_K[0]}" = "$k"$'\037'"$t" ] || {
+  [ "$a" = 1 ] && [ "${#HOST_K[@]}" = 5 ] && [ "${HOST_K[0]}" = "$k"$'\037'"$t" ] || {
     mapfile -d '' -t x < <(jq -Rsj '(try fromjson catch null | objects) // {} | . as $o
-        | tojson, ((.at | numbers | floor) // 0 | tostring), ([$ARGS.positional[] | {key: ., value: ($o.clis[.] // null)}] | from_entries | tojson)
-        | . + "\u0000"' --args $k < <(if [ "$a" = 1 ]; then printf '%s' "$t"; else cat "$CLIS"; fi) 2>/dev/null) && [ "${#x[@]}" = 3 ] || return 1
+        | tojson, ((.at | numbers | floor) // 0 | tostring), ([$ARGS.positional[] | {key: ., value: ($o.clis[.] // null)}] | from_entries | tojson), (.px == true | tostring)
+        | . + "\u0000"' --args $k < <(if [ "$a" = 1 ]; then printf '%s' "$t"; else cat "$CLIS"; fi) 2>/dev/null) && [ "${#x[@]}" = 4 ] || return 1
     HOST_K=('' "${x[@]}"); [ "$a" != 1 ] || HOST_K[0]=$k$'\037'$t
   }
   old=${HOST_K[1]}
   [ "$one" != due ] || { one=''; [ $((HOST_K[2] + CLI_TTL)) -gt "$EPOCHSECONDS" ] || one=fresh; }
+  [ -n "$one" ] || [ "${HOST_K[4]}" != true ] || [[ "$k " != *" codex "* ]] || pxon || one=codex
   [ -n "$one" ] || { HOST_R=${HOST_K[3]}; printf '%s\n' "$HOST_R"; return 0; }
+  # px: whether Codex's list is read now with the proxy on (pxon(); false when Codex is not installed); kept when not read.
+  [ "$one" != fresh ] && [ "$one" != codex ] || px=false
   # Each installed CLI and its models: read now, or "*" for those CLIS has (null when it has none).
   for c in $CLINAMES; do
     command -v "$c" >/dev/null || continue
-    if [ "$one" = fresh ] || [ "$one" = "$c" ]; then found+=("$c" "$(climodels "$c" || echo null)"); else found+=("$c" '"*"'); fi
+    if [ "$one" = fresh ] || [ "$one" = "$c" ]; then found+=("$c" "$(climodels "$c" || echo null)"); [ "$c" != codex ] || ! pxon || px=true; else found+=("$c" '"*"'); fi
   done
   r=$(jq -cn --argjson o "$old" '$ARGS.positional as $p | [range(0; $p | length; 2) | {key: $p[.], value: ($p[. + 1] | fromjson)}
       | if .value == "*" then .value = ($o.clis[.key] // null) else . end] | from_entries' --args "${found[@]}") || return 1
-  # seen: every CLI a report of this host has listed, kept when one goes (seatwait()). One CLI read that is not
+  # seen: every CLI a report of this host has listed, kept when one goes (seatwait()), with the CLIs the old report's
+  # clis has, before one is taken out of it (a report written before seen was has only them). A CLI that clis has as
+  # null there is not counted: engines up to v1.9 wrote null for a CLI not installed. One CLI read that is not
   # installed is taken out of clis, not written there as installed with no list.
-  if [ "$one" = fresh ]; then jq -cn --argjson r "$r" --argjson o "$old" '{at: (now | floor), clis: $r, seen: ([($o.seen | arrays | .[] | strings), ($o.clis | objects | keys[]), ($r | keys[])] | unique)}' > "$CLIS.$$"
-  elif [ -n "$one" ]; then jq -c --arg c "$one" --argjson r "$r" 'if $r | has($c) then .clis[$c] = $r[$c] else del(.clis[$c]) end | .seen = ([(.seen | arrays | .[] | strings), ($r | keys[])] | unique)' <<<"$old" > "$CLIS.$$"; fi
+  if [ "$one" = fresh ]; then jq -cn --argjson r "$r" --argjson o "$old" --arg px "$px" '{at: (now | floor), clis: $r, px: ($px == "true"), seen: ([($o.seen | arrays | .[] | strings), ($o.clis | objects | with_entries(select(.value != null)) | keys[]), ($r | keys[])] | unique)}' > "$CLIS.$$"
+  elif [ -n "$one" ]; then jq -c --arg c "$one" --argjson r "$r" --arg px "$px" '.seen = ([(.seen | arrays | .[] | strings), (.clis | objects | with_entries(select(.value != null)) | keys[]), ($r | keys[])] | unique) | if $r | has($c) then .clis[$c] = $r[$c] else del(.clis[$c]) end | if $px == "" then . else .px = ($px == "true") end' <<<"$old" > "$CLIS.$$"; fi
   [ ! -e "$CLIS.$$" ] || mv -f "$CLIS.$$" "$CLIS" || rm -f "$CLIS.$$"
   HOST_R=$r; printf '%s\n' "$r"
 }
@@ -504,8 +526,8 @@ seatready() { # <builder|reviewer|judge> <its seat>
 }
 # A step's check of its seat before its session starts (session1(), review(), judgecall()). A CLI that an update or a
 # reinstall takes away for a moment must not block the card for good (issue 839): when seatready fails on a CLI that a
-# report of this host has listed (its seen, or the clis of a report written before seen was), the host's CLIs are read
-# again (a fresh report) SEAT_TRIES times, SEAT_PAUSE seconds apart, the card keeping its build slot. When the CLI is
+# report of this host has listed (its seen, or the clis of a report written before seen was, with a list for it: a
+# null there is a CLI an engine up to v1.9 found not installed), the host's CLIs are read again (a fresh report) SEAT_TRIES times, SEAT_PAUSE seconds apart, the card keeping its build slot. When the CLI is
 # still missing, a card of the loop (LOOPCARD, cardrun()) waits in its step: its live record names the CLI (its cli
 # and action) and <worktree>.idle stands, so it holds no build slot, until the loop takes that mark away in a turn with
 # a free slot once the host's report lists the CLI again (cliwake(), lib/run.sh); the step then starts, or waits again
@@ -516,7 +538,7 @@ seatwait() { # <role> <its seat> <worktree> <step>
   local why a i=0 at
   why=$(seatready "$1" "$2") && return 0
   a=$(jq -r '.agent | strings' <<<"$2" 2>/dev/null)
-  [ -n "$a" ] && jq -e --arg a "$a" '[(.seen | arrays | .[]), (.clis | objects | keys[])] | index($a)' "$CLIS" >/dev/null 2>&1 || { printf '%s\n' "$why"; return 1; }
+  [ -n "$a" ] && jq -e --arg a "$a" '[(.seen | arrays | .[]), (.clis | objects | with_entries(select(.value != null)) | keys[])] | index($a)' "$CLIS" >/dev/null 2>&1 || { printf '%s\n' "$why"; return 1; }
   at=$(date -u +%FT%TZ)
   while [ "$i" -lt "$SEAT_TRIES" ]; do
     seatlive "$1" "$3" "$4" "$a" "$at"; i=$((i + 1)); sleep "$SEAT_PAUSE"; hostclis fresh >/dev/null

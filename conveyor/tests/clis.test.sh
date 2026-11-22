@@ -202,3 +202,32 @@ t_clinever() {
     && grep -q '^the reviewer is set to opencode prov/m-1, and opencode is not installed on this host (not on PATH): the reviewer does not start' "$STUB/rv.out" \
     || fail "a reviewer set to a CLI this host never had was not refused at once with its reason: $(cat "$STUB/rv.out"); pauses: $(cat "$STUB/slept")"
 }
+
+# <commands> in the engine shell of `run`, with Claude Code alone on PATH and $ST/clis.json the report <report json>;
+# what they print in $STUB/eng.out. sleep there keeps each pause in $STUB/slept and waits none out.
+cliengine() { # <report json> <commands>
+  clisetup '[]'
+  export PATH; PATH=$(on claude)
+  printf '%s\n' "$1" > "$ST/clis.json"; mkdir -p "$T/$CASE/cards"
+  ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
+    && eval "$(grep -e '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names \
+    && sleep() { echo "$1" >> "$STUB/slept"; } && eval "$2" ) > "$STUB/eng.out" 2>&1
+}
+# Bug (R80): `control reviewer codex ...` reads codex alone (hostclis codex). With codex gone for a moment and a report
+# an engine before seen wrote, that read took codex out of clis and put it on no seen, so the reviewer's step failed at
+# once in place of waiting for codex (seatwait()). Here codex, which that report listed, is on seen after the read.
+t_cliseenone() {
+  cliengine "$(jq -cn '{at: (now | floor), clis: {codex: ["gpt-a"]}}')" 'hostclis codex'
+  out=$(jq -c '[.seen, (.clis | has("codex"))]' "$ST/clis.json")
+  [ "$out" = '[["claude","codex"],false]' ] || fail "hostclis codex with codex not on PATH, on a report with codex and no seen, left codex off seen: $out $(cat "$STUB/eng.out")"
+}
+# Bug (R82): engines up to v1.9 wrote clis.<cli>: null for a CLI not installed, and seatwait() took that key as a CLI
+# this host had listed, so a card set to it waited for a CLI the host never had. Here, on such a report with no codex
+# installed, a step whose seat is on codex fails at once, with no pause.
+t_clinull() {
+  # shellcheck disable=SC2016 # expanded in the engine shell (cliengine)
+  cliengine "$(jq -cn '{at: (now | floor), clis: {codex: null}}')" \
+    'seatwait reviewer "{\"model\":\"gpt-a\",\"effort\":\"low\",\"agent\":\"codex\"}" "$CARDS/c7" review; echo "rc=$?"'
+  [ "$(tail -n 1 "$STUB/eng.out")" = rc=1 ] && [ ! -s "$STUB/slept" ] && grep -q 'codex is not installed on this host' "$STUB/eng.out" \
+    || fail "seatwait for a codex seat, on a report with clis.codex null and no codex installed, did not fail at once: $(cat "$STUB/eng.out"); pauses: $(cat "$STUB/slept" 2>&1)"
+}

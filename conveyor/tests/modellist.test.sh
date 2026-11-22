@@ -109,6 +109,22 @@ t_pxmodelsadd() {
   [ "$(jq -c .codex "$T/$CASE/out")" = '["gpt-b"]' ] && [ "$(wc -l < "$d/asked")" = 1 ] \
     || fail "the OpenAI API route (kind api) was asked for its models, or they were added: $(cat "$T/$CASE/out" "$d/asked")"
 }
+# Bug (R21): once the reviewer was moved to the subscription, a model only the proxy serves (gpt-d) was still taken
+# for it (cardok()) until the saved report was read again, CLI_TTL later. Here the report is read with the proxy's
+# models, the host file then sets the reviewer to subscription, and with no fresh read the same shell's cardok refuses
+# gpt-d.
+t_pxmodelsleft() {
+  local d=$T/$CASE/px out; mkdir -p "$d"
+  pxstub
+  pxmodels "http://127.0.0.1:$(cat "$d/port")"
+  # shellcheck disable=SC2016 # expanded in the engine shell (looks)
+  looks 'hostclis fresh >/dev/null && cardok reviewer gpt-d medium && echo "--- taken" \
+    && jq ".codexProxy.roles.reviewer = \"subscription\"" "$XDG_CONFIG_HOME/conveyor/host.json" > "$T/$CASE/host.new" && mv "$T/$CASE/host.new" "$XDG_CONFIG_HOME/conveyor/host.json" \
+    && cardok reviewer gpt-d medium'
+  out=$(cat "$T/$CASE/out")
+  [[ $out == $'--- taken\ngpt-d is not one of the models'* ]] \
+    || fail "after the reviewer was set to the subscription, cardok reviewer gpt-d (a proxy-only model) was not refused: $out"
+}
 # Bug it catches: a model only the proxy serves was offered to, and taken for, a reviewer whose Codex sessions stay on
 # the subscription (the host's report has one Codex list for every role). With the reviewer on subscription, the
 # proxy is not asked and the menu is the pack's and Codex's models.
