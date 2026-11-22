@@ -46,7 +46,7 @@ test('D1: one card, for the project that releases with Conveyor: No release yet,
   assert.equal(chip(w), 'Suite not run');
   assert.equal(card(w).querySelector('[data-field="version"]').value, '1.0.0');
   assert.equal(act(card(w), 'release-prep').textContent, 'Run suite');
-  assert.equal(act(card(w), 'release-stop'), null, 'Stop shows only while a run is under way');
+  assert.equal(act(card(w), 'release-stop'), null, 'Stop is hidden when no run is under way or waiting');
   // Bug (#413): with no suite run the panel showed Run suite alone, and Release was hidden, so the owner could not see
   // how to release or what it waits for.
   assert.deepEqual(Array.from(card(w).querySelectorAll('.release-go button'), (b) => b.dataset.act), ['release-prep', 'release']);
@@ -122,6 +122,33 @@ test('#1371: a version typed that the last run was not of shows none of that run
   field.value = '1.1.0'; field.dispatchEvent(new w.Event('input'));
   assert.equal(card(w).querySelector('[data-list="reasons"]'), null, 'typed 1.1.0 after a run of 1.0.0: no reasons of that run are listed');
 });
+// Bug this guards (#1369): a run waiting on its notes card had no Stop, so the owner could not end the wait and the
+// card, once landed, started the suite and the release.
+test('#1369: a run waiting on its notes card shows Stop in the notes step, and a second click sends the stop', async () => {
+  const w = boot();
+  const id = 'c20261114T081500-plugin-0';
+  deliver(w, data({ ...RUN, sha: null, ended: '2026-11-14T08:15:00Z', state: 'waiting', reasons: [`notes card ${id} started`],
+    notes: { card: id, then: 'prep', mode: null, machine: null } }, { notes: false, written: [] }));
+  assert.ok(stepOf(w, 'release-notes').querySelector('[data-act="release-stop"]'), 'Stop shows in the notes step');
+  assert.deepEqual(await sent(w, () => act(card(w), 'release-stop').click()), []);
+  assert.deepEqual(await sent(w, () => act(card(w), 'release-stop').click()), [{ action: 'release-run', args: ['stop'], repo: 'plugin' }]);
+});
+// Bug this guards (#1369): the notes reached main while another card was open, the run still waited for that card, and
+// the panel (which read the wait from the missing notes) hid Stop, so the owner could not end it.
+const WAITING = { ...RUN, sha: null, ended: '2026-11-14T08:15:00Z', state: 'waiting', notes: { card: 'c20261114T081500-plugin-0', then: 'prep', mode: null, machine: null } };
+const stopShows = (w) => !!stepOf(w, 'release-notes').querySelector('[data-act="release-stop"]');
+for (const [name, patch, shows] of [
+  ['shows Stop while the notes are on main and the run still waits for open cards', {}, true],
+  ['shows no Stop once the run is stopped', { state: 'stopped', reasons: ['stopped by the owner'] }, false],
+  ['shows no Stop once the run is started again', { restarted: '2026-11-14T08:16:00Z' }, false],
+]) {
+  test(`#1369: ${name}`, () => {
+    const w = boot();
+    deliver(w, data({ ...WAITING, ...patch }, { notes: true, written: ['1.0.0'] }));
+    assert.match(stepOf(w, 'release-notes').textContent, /docs\/releases\/1\.0\.0\.md on main: written/, 'the fixture has the notes on main');
+    assert.equal(stopShows(w), shows, `Stop ${shows ? 'shows' : 'is hidden'} for a run record with ${JSON.stringify(patch)}`);
+  });
+}
 // Bug this guards (#1375): the Draft notes tooltip said the suite runs once the notes commit is on the branch, but the
 // run also waits while another card is open (relfixes() busy), so the owner saw no reason for the wait.
 test('#1375: the Draft notes tooltip says the suite also waits for open cards', () => {

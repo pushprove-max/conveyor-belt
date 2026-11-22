@@ -26,8 +26,8 @@
 // lease, shows the machine's steps as chips and says what Stop does there; a run that did not start (state "not
 // started") on a box shows its failed step with the reason, one fix line, Run on this machine instead and Run suite again
 // (one that did not start on this machine lists the reason, with the fix line and Run suite again); a run
-// here shows no machine line or steps; step 2 shows the mode of the run under way and of the last run. Stop (`release-run stop`, a second click too) shows only while a run is
-// under way. Each reason a refused or failed run printed shows under the step it belongs to, and each failed case
+// here shows no machine line or steps; step 2 shows the mode of the run under way and of the last run. Stop (`release-run stop`, a second click too) shows while a run is
+// under way and while a run waits on its notes card or on open cards (it ends the wait), else not. Each reason a refused or failed run printed shows under the step it belongs to, and each failed case
 // release-prep judged flaky (it passed every run alone) under the suite's step, and beside a red result the fix cards of
 // that run (its record's fixes), each with its state, and what happens next. The panel is wide or full,
 // never small: in the narrow column every line wraps.
@@ -207,9 +207,14 @@
     // lib/fulltest.sh relnotescard()); the run starts again by itself once the card's commit is on the branch the suite
     // tests (relfixes()). Its card id, else ''. A
     // card closed before it landed (its fixes entry closed: relfixes()) starts nothing: notesClosed, its id, else ''.
-    const card = !notes && cur && cur.ended !== null && cur.state === 'waiting' && cur.notes && typeof cur.notes.card === 'string' ? cur.notes.card : '';
-    const notesClosed = card && list(cur.fixes).some((x) => x && x.card === card && x.state === 'closed') ? card : '';
+    const held = cur && cur.ended !== null && cur.state === 'waiting' && cur.notes && typeof cur.notes.card === 'string' ? cur.notes.card : '';
+    const closed = !!held && list(cur.fixes).some((x) => x && x.card === held && x.state === 'closed');
+    const card = notes ? '' : held;
+    const notesClosed = closed ? card : '';
     const waiting = notesClosed ? '' : card;
+    // The run still waits (Stop ends the wait): its card is not closed and relfixes() has not started it again. That holds
+    // after the notes reach main too, while another card is open (relfixes() waits for none to be open).
+    const stoppable = !!held && !closed && cur.restarted == null;
     let chip;
     if (going) chip = ['Suite running', 'info'];
     else if (failed) chip = ['Suite failed', 'bad'];
@@ -226,7 +231,7 @@
     // Release reuses a passed release-prep of v on main's head, main not moved since (release-run); else it runs the
     // suite first.
     const reuse = passed && !moved && cur.step === 'release-prep' && cur.state === 'passed';
-    return { cur, going, passed: passed && !moved, failed, notStarted, moved, released, reuse, waiting, notesClosed, chip };
+    return { cur, going, passed: passed && !moved, failed, notStarted, moved, released, reuse, waiting, stoppable, notesClosed, chip };
   }
 
   // One numbered step: its mark (done, failed, in progress or to do), its name and its one line, then what else.
@@ -393,17 +398,27 @@
     if (run && run.ended !== null && run.version === v) list(run.reasons).forEach((r) => why[stepOf(String(r), run)].push(r));
     // 1. The notes.
     const notesFailed = why[0].length > 0 && run && run.version === v && run.state === 'refused';
+    // Stop: the run waits on the card and has no process; the stop ends the wait, so nothing starts when the card lands.
+    const waitStop = () => {
+      if (!s.stoppable) return null;
+      const stop = h('button', 'btn', 'Stop');
+      stop.type = 'button'; stop.dataset.act = 'release-stop';
+      stop.title = 'End the wait: nothing starts when the card lands, or when the other open cards end. The card itself is not closed.';
+      const box = h('div', 'release-stop');
+      box.append(ctx.twice(stop, 'final', 'Click again to stop the wait', () => send(ctx, rec.repo, ['stop'], 'The run no longer waits for the card.')));
+      return box;
+    };
     let s1;
     if (s.waiting) {
       // A step under way: the card that adds the draft to main, and what happens when it lands.
       const p = h('p', 'row-meta', `The suite runs by itself once the card's commit is on the branch the suite tests and no other card is open${s.cur.notes.then === 'release' ? ', then the release' : ''}.`);
       p.dataset.figure = 'notes-card';
-      s1 = step(h, 'Release notes', 'now', `docs/releases/${v}.md on main: card ${s.waiting} adds the notes draft`, p);
+      s1 = step(h, 'Release notes', 'now', `docs/releases/${v}.md on main: card ${s.waiting} adds the notes draft`, p, waitStop());
     } else if (s.notesClosed) {
       s1 = step(h, 'Release notes', 'failed', `docs/releases/${v}.md on main: missing: card ${s.notesClosed} was closed before it landed. Draft notes writes them again`);
     } else {
       s1 = step(h, 'Release notes', notes ? 'done' : notesFailed ? 'failed' : 'todo',
-        `docs/releases/${v}.md on main: ${notes ? 'written' : 'missing: Draft notes writes them'}`, reasonsList(h, why[0]));
+        `docs/releases/${v}.md on main: ${notes ? 'written' : 'missing: Draft notes writes them'}`, reasonsList(h, why[0]), waitStop());
     }
     // 2. The whole suite on main's head.
     let s2;

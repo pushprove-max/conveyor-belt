@@ -193,3 +193,33 @@ t_relfixesserve() {
     || fail "the serve loop did not record the red run's fixes: $(cat "$RUN")"
   kill $fxpid; wait $fxpid 2>/dev/null; return 0
 }
+# #1369. Bug it catches: a release-prep that waits on its notes card (state waiting) has ended, so `release-run stop` said
+# "no release run is under way" and the card, once landed, started the suite and the release the owner meant to stop. Stop
+# marks the waiting record stopped: relfixes() then starts nothing when the card lands, and a second stop is refused.
+t_relnotesstop() {
+  relsetup '' nonotes
+  local id n=$T/$CASE/notes N out
+  RUN=$T/$CASE/cards/release/run.json
+  relmodel $'# 1.1.0\n\nCards can wait. [#5]\n\n## Cards\n\n- You can hold a card. [#5]'
+  loop release-run 1.1.0 > /dev/null 2>&1 || fail "release-run 1.1.0 did not start"
+  # wait_until: release-run runs release-prep as a process of its own; its record shows the end, and the process holds the release lock until it exits.
+  wait_until "jq -e '.ended != null' '$RUN' > /dev/null && ! kill -0 \$(jq -r .pid '$RUN') 2>/dev/null" || fail "the run did not end: $(cat "$RUN")"
+  id=$(jq -r '.notes.card // ""' "$RUN"); [ -n "$id" ] || fail "the run did not wait on a notes card: $(cat "$RUN")"
+  out=$(loop release-run stop 2>&1) || fail "release-run stop of a run that waits on notes card $id failed: $out"
+  fixrec "the stop did not mark the waiting run stopped" '.state == "stopped" and .ended != null and .reasons == ["stopped by the owner"]'
+  # Bug it catches too: starting the stopped release again queued a second notes card for the same file; it waits on the first.
+  loop release-run 1.1.0 > /dev/null 2>&1 || fail "release-run 1.1.0 did not start again after its stop"
+  # wait_until: the stopped record also has an end, so the new run is told by its state waiting.
+  wait_until "jq -e '.state == \"waiting\" and .ended != null' '$RUN' > /dev/null && ! kill -0 \$(jq -r .pid '$RUN') 2>/dev/null" || fail "the run did not end the second time: $(cat "$RUN")"
+  [ "$(jq -r '.notes.card' "$RUN")" = "$id" ] && jq -e '.cards | length == 1' "$ST/testactions/cards.json" > /dev/null \
+    || fail "the run after the stop did not wait on the first notes card $id: $(cat "$RUN") $(cat "$ST/testactions/cards.json")"
+  loop release-run stop > /dev/null 2>&1 || fail "the second release-run stop failed"
+  git clone -q "$T/$CASE/origin" "$n" && mkdir -p "$n/docs/releases" && cp "$ST/release/1.1.0.md" "$n/docs/releases/" && git -C "$n" add docs \
+    && git -C "$n" commit -q -m "docs: Release notes 1.1.0" && git -C "$n" push -q origin main && N=$(git -C "$n" rev-parse HEAD) \
+    || fail "the fixture could not be made"
+  jq -cn --arg c "$id" --arg s "$N" '{card: $c, issue: 0, step: "landed", time: "2026-11-19T12:00:00Z", tokens: {claude: 0, codex: 0}, result: "ok", sha: $s, reason: ""}' >> "$ST/cards.jsonl"
+  fixcall
+  fixrec "the run started again after its stop, when notes card $id landed" '.state == "stopped" and .restarted == null'
+  [ ! -e "$STUB/full-at" ] || fail "the suite ran after the stop, when notes card $id landed"
+  out=$(loop release-run stop 2>&1); [ $? = 2 ] && grep -q 'no release run is under way' <<<"$out" || fail "a second stop was not refused: $out"
+}

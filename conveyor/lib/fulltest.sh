@@ -491,6 +491,22 @@ relnoteswait() { # <version> <card> <then> <what the run found>
   echo "conveyor: release-prep: $4; release-prep $1 starts again by itself once the card lands, and runs the suite" >&2
   return 1
 }
+# A release-prep that waits on its notes card (state waiting: relnoteswait()) has no process to end: `release-run stop`
+# (releasestop(), commands/release-prep.sh) marks its record stopped, so relfixes() does not start the run again when the
+# card lands. The card is not closed (`conveyor.sh shut` closes it) and may still land. Only a record that waits, was not
+# started again and is still the one read, and only holding the release lock (as relfixes() does). 2: no run is under
+# way and none waits; 1: the lock is held 10 s on.
+relstopwaiting() {
+  local r s v c lk rc=1
+  r=$(jq -ce 'select(.state == "waiting" and (.ended | type) == "string" and .restarted == null and (.notes.card | type) == "string")' "$RELRUN" 2>/dev/null) \
+    || { echo "conveyor: release-run stop: no release run is under way; nothing stopped" >&2; return 2; }
+  s=$(jq -r .since <<<"$r") && v=$(jq -r .version <<<"$r") && c=$(jq -r .notes.card <<<"$r") || { echo "conveyor: release-run stop: $RELRUN could not be read; nothing stopped" >&2; return 1; }
+  { exec {lk}>>"$CARDS/release/lock"; } 2>/dev/null && flock -w 10 "$lk" && rc=0
+  [ $rc != 0 ] || relrec --arg s "$s" --arg t "$(clock)" 'if .since == $s and .state == "waiting" and .restarted == null then .state = "stopped" | .ended = $t | .reasons = ["stopped by the owner"] else . end' || rc=1
+  [ -z "$lk" ] || exec {lk}>&-
+  [ $rc = 0 ] || { echo "conveyor: release-run stop: the record of release $v could not be written; the run still starts again when notes card $c lands" >&2; return 1; }
+  echo "conveyor: release-run: the release run of $v no longer waits on notes card $c, and starts nothing when it lands; \`conveyor.sh shut\` closes the card"
+}
 # The fix cards of a red release run: the issues, and the cards with no GitHub issue (rules.releaseissues false: `conveyor.sh card
 # --release`, cardnew(), lib/testaction.sh; their fixes entry has card and ids in place of issue), whose body has the line `Release fix: <version>` for the version of
 # the failed release-prep in $CARDS/release/run.json (commands/release-prep.sh), filed after that run ended. An issue

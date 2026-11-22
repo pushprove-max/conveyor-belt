@@ -713,9 +713,12 @@ To release from the panel:
   and the release names you and the failures. The status of the suite stays failed
   ([A release over a failed suite](releases.md#a-release-over-a-failed-suite)).
 
-**Stop** shows only while a run is in progress. After a second click, it stops the processes of that run. Conveyor
-itself continues. During a run on a devbox, the line beside it says that Stop stops the run on the devbox and gives the
-box back.
+**Stop** shows while a run is in progress, and while a run waits for its notes card or for other open cards. During a
+run, a second click stops the processes of that run. Conveyor itself continues. During a run on a devbox, the line
+beside it says that Stop stops the run on the devbox and gives the box back.
+
+While a run waits, **Stop** shows in the notes step. After a second click, the run does not start again when the card
+lands. The card is not closed and can still land: `conveyor.sh shut` closes it.
 
 When a card lands while the suite runs, the status stays Suite running, and the suite step says that `main` moved. The
 two buttons stay disabled until the suite ends. Then the status is Main moved since the suite, and the button is **Run again

@@ -551,7 +551,7 @@ releaseprep() { # <version>
   packget test.full cmd || return 1
   [ -n "$cmd" ] || { echo "conveyor: release-prep: the pack names no full test suite (test.full); nothing run" >&2; return 2; }
   rellock release-prep || return $?
-  was=$(jq -r --arg v "$v" 'select(.step == "release-prep" and .state == "waiting" and .version == $v) | .notes.card // empty' "$RELRUN" 2>/dev/null) # the last run's notes card, before relstart()
+  was=$(jq -r --arg v "$v" 'select(.step == "release-prep" and (.state | IN("waiting", "stopped")) and .version == $v) | .notes.card // empty' "$RELRUN" 2>/dev/null) # the last run's notes card (waiting, or stopped while it waited: relstopwaiting()), before relstart()
   relstart release-prep "$v"
   # The commit `release` releases is the remote's head of the branch, and the tags are the remote's; with Merge PR
   # release, the head of LANDING (relhead(), lib/push.sh), which relfixes() (lib/fulltest.sh) reads too.
@@ -754,7 +754,7 @@ releasego() { # <version> [prep: release-prep alone | anyway <who>]
 # record is left as it is, and the snapshot shows the run stopped once the lock is free.
 releasestop() {
   local p s v lk rc=1
-  p=$(jq -er 'select(.ended == null) | .pid | numbers' "$RELRUN" 2>/dev/null) && kill -0 "$p" 2>/dev/null && ps -o args= -p "$p" 2>/dev/null | grep -q 'conveyor\.sh' || { echo "conveyor: release-run stop: no release run is under way; nothing stopped" >&2; return 2; }
+  p=$(jq -er 'select(.ended == null) | .pid | numbers' "$RELRUN" 2>/dev/null) && kill -0 "$p" 2>/dev/null && ps -o args= -p "$p" 2>/dev/null | grep -q 'conveyor\.sh' || { relstopwaiting; return; }
   s=$(jq -r '.since' "$RELRUN") && v=$(jq -r '.version' "$RELRUN") || { echo "conveyor: release-run stop: $RELRUN could not be read; nothing stopped" >&2; return 1; }
   relreap "$p" "$p"; hoststop
   { exec {lk}>>"$CARDS/release/lock"; } 2>/dev/null && flock -w 10 "$lk" && rc=0
