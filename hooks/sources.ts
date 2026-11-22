@@ -118,7 +118,7 @@ export type Push = {
   last: { at: number | null; by: string; started: boolean; why: string; sha: string; ok: boolean; ahead: number | null; check: string; log: string } | null
 }
 // own: the session's own project, whose cards carry no project name ('' or absent: none is).
-export type Snap = { own?: string; pushes?: Push[]; loops: Loop[]; needs: Need[]; belt: Belt[]; queue: Queued[] | null; queueMore: boolean; waits: Waiting[]; held: [string, number][]; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut?: number; judgeDeclined: number[]; suites?: Suite[]; umbrellas: Umbrella[]; unpushed?: { repo: string; issue: number }[] }
+export type Snap = { own?: string; pushes?: Push[]; loops: Loop[]; needs: Need[]; belt: Belt[]; queue: Queued[] | null; queueMore: boolean; waits: Waiting[]; held: [string, number][]; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut?: number; judgeDeclined: number[]; suites?: Suite[]; umbrellas: Umbrella[]; unpushed?: { repo: string; issue: number }[]; kept?: { repo: string; at: number }[] }
 export type Fast = { state: 'none' | 'unread' | 'norecord' } | { state: 'ok'; branch: string; ahead: number; dirty: number; subject: string }
 export type Research = { state: 'none' } | { state: 'ok'; lastAt: number | null }
 export type Limit = { pct: number; resetsAt: number }
@@ -356,12 +356,6 @@ const boardFrom = (name: string, records: { repo: string; json: unknown }[], own
   if (!recs.length) return none(`${name} gave no snapshot`)
   const notes = read.filter(r => !r.rec).map(r => `units: the ${r.repo} snapshot cannot be read`)
   for (const r of read) if (r.rec && !r.rec.queue) notes.push(`units: the ${r.repo} queue was not read (GitHub did not list the issues)`)
-  // A record's kept snapshot (snapshotAt: when it was made) over a minute old says its age. A live stream sends a
-  // snapshot only when something in it changes, so on a quiet belt an old one is still the current one: no note.
-  if (!live) for (const r of read) {
-    const at = r.rec?.snapshotAt ?? null
-    if (at !== null && Date.now() - at > 60_000) notes.push(`units: the ${r.repo} snapshot is ${since(at, Date.now())} old (made at ${clockOf(at)})`)
-  }
   const queues = recs.map(r => r.queue).filter((q): q is Queued[] => !!q)
   const held = new Map<string, number>()
   for (const r of recs) for (const [k, n] of Object.entries(r.held)) held.set(k, (held.get(k) ?? 0) + n)
@@ -370,6 +364,9 @@ const boardFrom = (name: string, records: { repo: string; json: unknown }[], own
     note: '', notes, host: name,
     snap: {
       own: own && read.some(r => r.rec && r.repo === own) ? own : '',
+      // When each record's kept snapshot was made: ageNotes says its age when drawn. A live stream sends a snapshot only
+      // when something in it changes, so on a quiet belt an old one is still the current one: none kept then.
+      kept: live ? [] : read.flatMap(r => (r.rec?.snapshotAt != null ? [{ repo: r.repo, at: r.rec.snapshotAt }] : [])),
       loops: read.flatMap(r => (r.rec ? [{ ...r.rec.loop, repo: r.repo }] : [])),
       // Your yes first, then the blocked cards; in each, the one waiting longest first.
       needs: recs.flatMap(r => r.needs).sort((a, b) => Number(b.yes) - Number(a.yes) || at(a.since) - at(b.since)),
@@ -1085,11 +1082,15 @@ const board = (s: State, snap: Snap, w: number, short: boolean, frame: number): 
   ...(snap.deploy.length ? [...deployModel(s, snap, w), []] : []),
   ...landedModel(s, snap, w, short),
   ...(lanesModel(s).length ? [[], ...lanesModel(s).map(l => (short ? fitWidth(l, w) : l))] : []),
-  ...(s.notes.length ? [[], ...s.notes.map((n): Line => [{ t: n, c: C.you }])] : []),
+  ...(notesOf(s).length ? [[], ...notesOf(s).map((n): Line => [{ t: n, c: C.you }])] : []),
 ]
 
 // `/units`: every section in full. A snapshot that cannot be read is one plain line, and the Foreman indicator: the
 // Foreman's state is read from its folder, not from the snapshot.
+// A record's kept snapshot over a minute old says its age, counted at the time the view is drawn.
+export const ageNotes = (s: State): string[] =>
+  (s.snap?.kept ?? []).filter(k => s.now - k.at > 60_000).map(k => `units: the ${k.repo} snapshot is ${since(k.at, s.now)} old (made at ${clockOf(k.at)})`)
+const notesOf = (s: State): string[] => [...s.notes, ...ageNotes(s)]
 export const tableText = (s: State, w: number): string => (s.snap ? board(s, s.snap, w, false, 0) : [noteLine(s), ...foremanModel(s, w), ...engineModel(s, w), ...testMapModel(s, w)]).map(plain).join('\n')
 
 // The side pane, the Build matrix layout (#497): the head, the count band, the Foreman's state, Machine details (one
@@ -1257,8 +1258,18 @@ export const landedTable = (s: State, snap: Snap, w: number): Line[] => {
   ]
 }
 
+// The four counts on one line, joined by ' · '; where that is wider than the pane the dots lose their spaces, and where
+// that is still too wide the counts take two lines, so the last count (NEEDS YOU) is never the part cut off.
+const countBand = (parts: Seg[], w: number): Line[] => {
+  const join = (ps: Seg[], gap: string): Seg[] => ps.flatMap((p, k) => (k ? [{ t: gap, d: true }, p] : [p]))
+  const fits = (l: Seg[]) => cols(plain(l)) <= w
+  const wide = join(parts, ' · '), tight = join(parts, '·')
+  if (fits(wide)) return [fitWidth(wide, w)]
+  if (fits(tight)) return [fitWidth(tight, w)]
+  return [fitWidth(join(parts.slice(0, 2), ' · '), w), fitWidth(join(parts.slice(2), ' · '), w)]
+}
+
 const paneBoard = (s: State, snap: Snap, w: number, frame: number, open: boolean): Line[] => {
-  const sep: Seg = { t: ' · ', d: true }
   const counts = pickCounts(snap)
   const ready = snap.queue === null ? '?' : `${counts.ready}${snap.queueMore ? '+' : ''}`
   const status: Seg[] = [...(s.foreman ? [{ t: foremanText(s.foreman), c: s.foreman.ok ? C.ok : C.you, b: !s.foreman.ok }] : []), ...loopSegs(snap)]
@@ -1270,7 +1281,7 @@ const paneBoard = (s: State, snap: Snap, w: number, frame: number, open: boolean
   return [
     spread([{ t: ' /units ', c: C.head, b: true, i: true }, { t: ' ' }, { t: s.host, b: true }], [{ t: 'DAY SPEND ', d: true }, spend], w),
     rule(w),
-    fitWidth([{ t: `${snap.belt.length} ON BELT`, b: true }, sep, { t: `${ready} READY`, b: true }, sep, { t: `${counts.waiting} WAITING`, b: true }, sep,
+    ...countBand([{ t: `${snap.belt.length} ON BELT`, b: true }, { t: `${ready} READY`, b: true }, { t: `${counts.waiting} WAITING`, b: true },
       { t: `${snap.needs.length} NEEDS YOU`, b: true, ...(snap.needs.length ? { c: C.you } : {}) }], w),
     rule(w),
     ...(status.length || bugs ? [spread(status, bugs, w)] : []),
@@ -1293,7 +1304,7 @@ const paneBoard = (s: State, snap: Snap, w: number, frame: number, open: boolean
     ...(snap.deploy.length ? [[], ...deployModel(s, snap, w)] : []), [],
     ...landedTable(s, snap, w),
     ...(lanes.length ? [[], ...lanes.map(l => fitWidth(l, w))] : []),
-    ...(s.notes.length ? [[], ...s.notes.map((n): Line => [{ t: n, c: C.you }])] : []),
+    ...(notesOf(s).length ? [[], ...notesOf(s).map((n): Line => [{ t: n, c: C.you }])] : []),
   ]
 }
 // open: Machine details is opened.

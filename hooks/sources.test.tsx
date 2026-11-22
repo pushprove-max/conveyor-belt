@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { expect, test } from 'claude-code/testing'
 import { TWO_PROJECTS } from './fixtures/units-two-projects'
-import { activityModel, boardOf, boardOfFeed, fastText, paneModel, parseFetch, parseLimit, researchText, seatFromGit, seenOf, shortTitle, tableText, toasts } from './sources'
+import { activityModel, ageNotes, boardOf, boardOfFeed, fastText, paneModel, parseFetch, parseLimit, researchText, seatFromGit, seenOf, shortTitle, tableText, toasts } from './sources'
 import type { Fast, Research, State } from './sources'
 import { clockOf, cols, plain } from './elements'
 
@@ -788,23 +788,34 @@ test('a session in the second project: its cards carry no name, the first\'s car
 // Issue 398. Bug it catches: the fetch prints each record's kept snapshot, which can be minutes old, and the view
 // showed it as if it were new. One over a minute old says its age under the board; a newer one says nothing.
 test('a record\'s kept snapshot over a minute old says its age; a newer one adds no note', () => {
-  const made = Date.now() - 5 * 60_000
+  const made = NOW - 5 * 60_000
   const old = tableText(board({ snapshotAt: new Date(made).toISOString(), belt: [BELT[1]] }), 100)
   expect(old).toMatch(new RegExp(`\\nunits: the bookstore snapshot is [45]m old \\(made at ${clockOf(made)}\\)$`))
-  expect(tableText(board({ snapshotAt: new Date(Date.now() - 30_000).toISOString(), belt: [BELT[1]] }), 100)).not.toMatch(/snapshot is/)
+  expect(tableText(board({ snapshotAt: new Date(NOW - 30_000).toISOString(), belt: [BELT[1]] }), 100)).not.toMatch(/snapshot is/)
 })
 
 // Issue 631. Bug it catches: a live stream sends a snapshot only when something in it changes, so on a quiet belt
 // snapshotAt passed a minute while nothing was stale and the note showed about once a minute. With the stream down
 // the note shows as from the host, and as read from the host with no feed.
 test('a live feed\'s snapshot 90 s old adds no age note; with the stream down, or read from the host, it does', () => {
-  const made = Date.now() - 90_000
+  const made = NOW - 90_000
   const snap = snapshot({ snapshotAt: new Date(made).toISOString() })
   const note = `units: the bookstore snapshot is 1m old (made at ${clockOf(made)})`
   const feed = (live: boolean) => boardOfFeed({ host: 'buildbox', records: [{ repo: 'bookstore', json: snap }], live, heardAt: made, error: '' }, '')
-  expect(feed(true).notes.filter(n => /snapshot is/.test(n))).toEqual([])
-  expect(feed(false).notes).toContain(note)
-  expect(boardOf(parseFetch(fetched([['bookstore', snap]]))).notes).toContain(note)
+  const feedState = (b: ReturnType<typeof boardOfFeed>): State => ({ now: NOW, ...b, limit: null, fast: { state: 'none' }, research: { state: 'none' } })
+  expect(ageNotes(state(fetched([['bookstore', snap]])))).toEqual([note])
+  expect(ageNotes(feedState(feed(true)))).toEqual([])
+  expect(ageNotes(feedState(feed(false)))).toEqual([note])
+})
+
+// Bug it catches: at 40 columns the four counts ran past the line and the last, NEEDS YOU, was cut off; the dots
+// losing their spaces was not enough once the queue is long ("10+ READY"), so the counts take a second line.
+test('the pane\'s count band shows NEEDS YOU in full at 40 columns, also with ten issues ready', () => {
+  const lines = (over: object) => paneModel(board(over), 40, 0).map(plain)
+  expect(lines({}).find(l => l.includes('ON BELT'))).toContain('NEEDS YOU')
+  const busy = lines({ belt: BELT, needsYou: { waiting: [WAITING], blocked: [BLOCKED] }, queue: { next: queued(10), held: {} } })
+  expect(busy.find(l => l.includes('NEEDS YOU') && !l.includes('NEEDS YOU ('))).toBe('0 WAITING · 2 NEEDS YOU')
+  expect(busy.find(l => l.includes('ON BELT'))).toMatch(/^2 ON BELT · 10\+? READY$/)
 })
 
 test('a second record\'s cards carry its name, and one record that cannot be read costs only its own note', () => {

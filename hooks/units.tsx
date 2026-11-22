@@ -21,7 +21,8 @@ const details = atom({ plugin: 'conveyor-belt', key: 'details' } as const, false
 // step's seconds count on with no new state or toast check. A newer state's own `now` wins.
 const clockNow = atom({ plugin: 'conveyor-belt', key: 'now' } as const, 0)
 const drawnAt = async ($: EngineInterface, s: State): Promise<State> => {
-  const n = await read($, clockNow)
+  // The engine's clock at the draw: a snapshot's age note counts to it, not to the time of the last fetch.
+  const n = Math.max(await read($, clockNow), await $.clock.now().catch(() => 0))
   return n > s.now ? { ...s, now: n } : s
 }
 
@@ -251,8 +252,15 @@ const collect = async ($: EngineInterface, cwd: string): Promise<{ st: State; fe
   // The Foreman's files as they were before the fetch reads them: a change while it runs is read again next second.
   const dir0 = foremanDir
   const key0 = dir0 ? await foremanKey($, dir0) : null
+  // With no feed, the checksums are taken as the opening fetch starts: a record that changes after it and before the
+  // first check is then seen to have moved (the first check had nothing to compare with).
+  const taking = !fed && !stamps && !noStamp ? readStamps($, cwd) : null
   // The script gives the host 50 s; the engine's own 30 s default would cut a slow answer short.
-  const r = await $.process.run(['bash', await fetchPath($, cwd), ...mode], { cwd, timeoutMs: 75_000 }).catch(() => undefined)
+  const [r, taken] = await Promise.all([
+    $.process.run(['bash', await fetchPath($, cwd), ...mode], { cwd, timeoutMs: 75_000 }).catch(() => undefined),
+    taking,
+  ])
+  if (taken) stamps ??= taken
   const f = r && r.exitCode === 0 ? parseFetch(r.stdout) : null
   const now = await $.clock.now()
   if (f) {
@@ -402,6 +410,14 @@ let checkBusy = false
 let noStamp = false
 let stamps: Map<string, string> | null = null
 const freshFor = new Set<string>()
+// The short check's checksums, a record each; undefined when it failed or printed no stamps (that stops the checks).
+const readStamps = async ($: EngineInterface, cwd: string): Promise<Map<string, string> | undefined> => {
+  const r = await $.process.run(['bash', await fetchPath($, cwd), 'stamp'], { cwd, timeoutMs: 15_000 }).catch(() => undefined)
+  if (!r || r.exitCode !== 0) return undefined
+  const lines = r.stdout.split('\n').filter(Boolean)
+  if (!lines[0]?.startsWith('stamps\t')) { noStamp = true; return undefined }
+  return new Map(lines.slice(1).map(l => [l.slice(0, l.indexOf('\t')), l.slice(l.indexOf('\t') + 1)] as const))
+}
 const checkTick = ($: EngineInterface) => {
   if (checkBusy || noStamp || waiting || !main || !anyWanted()) return
   const cwd = main
@@ -409,11 +425,8 @@ const checkTick = ($: EngineInterface) => {
   void (async () => {
     const st = feedDir ? await $.fs.stat(`${feedDir}/units-feed.json`).catch(() => undefined) : undefined
     if (st && st.size <= MAX_DATA && (await $.clock.now()) - st.mtimeMs <= STREAM_FRESH) return
-    const r = await $.process.run(['bash', await fetchPath($, cwd), 'stamp'], { cwd, timeoutMs: 15_000 }).catch(() => undefined)
-    if (!r || r.exitCode !== 0) return
-    const lines = r.stdout.split('\n').filter(Boolean)
-    if (!lines[0]?.startsWith('stamps\t')) { noStamp = true; return }
-    const now = new Map(lines.slice(1).map(l => [l.slice(0, l.indexOf('\t')), l.slice(l.indexOf('\t') + 1)] as const))
+    const now = await readStamps($, cwd)
+    if (!now) return
     const was = stamps
     stamps = now
     const moved = was ? [...now].filter(([k, v]) => was.get(k) !== v).map(([k]) => k) : []

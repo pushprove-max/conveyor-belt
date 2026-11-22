@@ -280,7 +280,8 @@ test('with no feed, a record whose check moved is fetched at once with its snaps
   await w.clock.settle()
   await w.clock.advance(10_000)
   await w.clock.settle()
-  expect(checks(w).length).toBe(2)
+  // The opening fetch's own check, then one every 5 s.
+  expect(checks(w).length).toBe(3)
   expect(fetches(w).map(r => r.argv.slice(2))).toEqual([[]])
   // A start line in bookstore's cards.jsonl moves its checksum: the next check fetches it, asking for a fresh snapshot.
   stamp = 'stamps\tlocal\nbookstore\t3962379231 20\n'
@@ -289,6 +290,38 @@ test('with no feed, a record whose check moved is fetched at once with its snaps
   await w.clock.settle()
   expect(fetches(w).map(r => r.argv.slice(2))).toEqual([[], ['fresh', 'bookstore']])
   expect(await draw($, 'Pane')).toContain('#3863')
+})
+
+// Bug it catches: the first check only took the checksums to compare with later, so a record that changed between the
+// opening fetch and that check was not fetched until the minute's fetch.
+test('with no feed, a record that changed after the opening fetch and before the first check is fetched fresh', async ($, on) => {
+  const w = world(on, 'main', answer(snapshot()))
+  let stamp = 'stamps\tlocal\nbookstore\t4294967295 0\n'
+  const base = w.run
+  w.run = (argv, cwd) => {
+    if (argv[2] !== 'stamp') return base(argv, cwd)
+    w.runs.push({ argv: [...argv], cwd })
+    return { value: { exitCode: 0, stdout: stamp, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  }
+  await start($, 'main')
+  await w.clock.settle()
+  expect(fetches(w).map(r => r.argv.slice(2))).toEqual([[]])
+  stamp = 'stamps\tlocal\nbookstore\t3962379231 20\n'
+  w.fetch = answer(snapshot({ belt: [BELT] }))
+  await w.clock.advance(5000)
+  await w.clock.settle()
+  expect(fetches(w).map(r => r.argv.slice(2))).toEqual([[], ['fresh', 'bookstore']])
+})
+
+// Bug it catches: the age note was counted when the fetch ran, so a snapshot 59 s old then never said it was over a
+// minute old until the next fetch.
+test('a kept snapshot 59 s old at the fetch says its age once the clock passes a minute, with no new fetch', async ($, on) => {
+  const w = world(on, 'main', answer(snapshot({ snapshotAt: new Date(NOW - 59_000).toISOString() })))
+  await start($, 'main')
+  await w.clock.settle()
+  expect(await units($)).not.toContain('snapshot is')
+  await w.clock.advance(2000)
+  expect(await units($)).toContain('units: the bookstore snapshot is 1m old')
 })
 
 // Bug it catches: an install older than the check takes `stamp` for a whole fetch, so every 5 s ran one.

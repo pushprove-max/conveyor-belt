@@ -151,6 +151,8 @@ this page says that it wraps.
   today.
 - **The count band**, between two rules: `4 ON BELT · 0 READY · 5 WAITING · 0 NEEDS YOU`. `READY` counts the issues
   that the loop can pick now. `WAITING` counts the issues that wait on another card.
+  When the line is wider than the pane, the dots lose their spaces. When it is still too wide, the band wraps to two
+  lines: `ON BELT` and `READY` on the first, `WAITING` and `NEEDS YOU` on the second. `NEEDS YOU` is not cut off.
 - **The status line**: the Foreman's state (`Foreman listening`, or `Foreman not listening` with the reason), a loop
   that is not picking (`shop paused`), and on the right `! 2 plugin problems` when the Foreman noted some.
 - **`[ Machine details ]`**: closed at first. Click it, or press `m` while the pane has the focus, to open or close it.
