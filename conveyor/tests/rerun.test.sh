@@ -219,22 +219,30 @@ t_rerunspace() {
     || fail "the run after a fix that changed only whitespace did not run the changed file's tests: $(ran 3): $(cat "$STUB/rerun.3" 2>&1)"
 }
 
-# The next `git write-tree` fails, as it did under a release suite's load (the index locked, or no room), through a
-# git on PATH that fails it once and runs the real git for everything else.
-rerunnotree() {
-  local g; g=$(command -v git) && mkdir -p "$STUB/bin" || fail "the failing git could not be made"
-  printf '#!/usr/bin/env bash\nfor a; do [ "$a" != write-tree ] || [ ! -e %q ] || { rm -f %q; exit 128; }; done\nexec %q "$@"\n' \
-    "$STUB/notree" "$STUB/notree" "$g" > "$STUB/bin/git" && chmod +x "$STUB/bin/git" && : > "$STUB/notree" || fail "the failing git could not be made"
-  PATH=$STUB/bin:$PATH
+# The next <n> `git write-tree` calls fail, as one did under a release suite's load (the index locked, or no room),
+# through a git on PATH that fails them and runs the real git for everything else; $STUB/notree.hit holds a line for
+# each call it failed, $STUB/notree.n holds <n>. With <n> 0 it fails none. The failing git is made once: made again,
+# `command -v git` would find it in place of the real git, and it would run itself for ever.
+rerunnotree() { # <n>
+  local g
+  if [ ! -e "$STUB/bin/git" ]; then
+    g=$(command -v git) && mkdir -p "$STUB/bin" || fail "the failing git could not be made"
+    printf '#!/usr/bin/env bash\nfor a; do [ "$a" != write-tree ] || [ "$(wc -l < %q)" -ge "$(cat %q)" ] || { echo >> %q; exit 128; }; done\nexec %q "$@"\n' \
+      "$STUB/notree.hit" "$STUB/notree.n" "$STUB/notree.hit" "$g" > "$STUB/bin/git" && chmod +x "$STUB/bin/git" || fail "the failing git could not be made"
+    PATH=$STUB/bin:$PATH
+  fi
+  echo "$1" > "$STUB/notree.n" && : > "$STUB/notree.hit" || fail "the failing git could not be set to fail $1 write-tree(s)"
 }
+rerunfailed() { wc -l < "$STUB/notree.hit" | tr -d ' '; } # how many write-trees the failing git failed
 # Bug (issue 788, t_rerunspace's failure in a release run): a test step whose tree could not be read kept a list
 # naming no tree; the step after a fix could not compare trees, its refused full run kept every pass, and the fix's
 # changed file (a.txt) ran none of its tests. A list with no tree is not kept, so that step runs the whole selection
-# (but flaky, which passed on re-run and is kept off as flaky).
+# (but flaky, which passed on re-run and is kept off as flaky). The tree is read again twice before it is given up,
+# so these cases fail it every time.
 t_rerunnotree() {
   rerunwt 'echo two >> a.txt' '1 fail flaky'
-  rerunnotree; rerunstep; [ ! -e "$STUB/notree" ] || fail "the first test step did not read the tree"
-  rerunedit 'echo three >> a.txt'; rerunstep || fail "the step after the fix did not pass: $(ran 3)"
+  rerunnotree 9; rerunstep; [ "$(rerunfailed)" = 3 ] || fail "the first test step did not read the tree three times: failed $(rerunfailed)"
+  rerunnotree 0; rerunedit 'echo three >> a.txt'; rerunstep || fail "the step after the fix did not pass: $(ran 3)"
   [ "$(ran 3)" = "one two three" ] || fail "the step after a step with no tree did not run the whole selection: $(ran 3): $(cat "$STUB/rerun.3" 2>&1)"
 }
 # Bug (issue 788): the step after a fix, whose own tree could not be read, rewrote the list as a refused full run with
@@ -242,10 +250,20 @@ t_rerunnotree() {
 t_rerunnotreefix() {
   rerunwt 'echo two >> a.txt' '1 fail flaky' '2 fail flaky'
   ! rerunstep || fail "the first test step passed"
-  rerunedit 'echo three >> a.txt'; rerunnotree; rerunstep || fail "the step after the fix did not pass: $(ran 3)"
-  [ ! -e "$STUB/notree" ] || fail "the step after the fix did not read the tree"
+  rerunedit 'echo three >> a.txt'; rerunnotree 9; rerunstep || fail "the step after the fix did not pass: $(ran 3)"
+  [ "$(rerunfailed)" = 3 ] || fail "the step after the fix did not read the tree three times: failed $(rerunfailed)"
   [ "$(ran 3)" = "one two flaky three" ] && [ ! -e "$T/$CASE/cards/c7.rerun" ] \
     || fail "the step after a fix with no tree kept a list or did not run the whole selection: $(ran 3): $(cat "$T/$CASE/cards/c7.rerun" 2>&1)"
+}
+# Bug it catches (issue 1328): one failed read of the tree, as under a suite's load, dropped the list, so the step
+# after the first one ran the whole selection (one two flaky three) in place of the cases it had to run: a flaky
+# failure of rerunfixkept. A tree that fails once is read again, and the list is kept.
+t_rerunnotreeonce() {
+  rerunwt 'echo two >> a.txt' '1 fail flaky' '2 fail flaky'
+  rerunnotree 1; ! rerunstep || fail "the first test step passed"
+  [ "$(rerunfailed)" = 1 ] || fail "the first test step did not read the tree: failed $(rerunfailed)"
+  rerunedit 'echo three >> a.txt'; rerunstep || fail "the step after the fix did not pass: $(ran 3)"
+  [ "$(ran 3)" = "one two flaky" ] || fail "the step after a step whose tree was read at the second try did not keep its list: $(ran 3): $(cat "$STUB/rerun.3" 2>&1)"
 }
 
 # A file that had passed and runs again after the fix for the file it changed, and now fails, is not kept as passed

@@ -326,7 +326,7 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
   fi
   if [ -z "${2:-}" ]; then
     p=$(git -C "$1" diff --cached --binary --no-renames HEAD 2>/dev/null | git hash-object --stdin)
-    b=$(git -C "$1" rev-parse -q --verify HEAD 2>/dev/null); t=$(git -C "$1" write-tree 2>/dev/null)
+    b=$(git -C "$1" rev-parse -q --verify HEAD 2>/dev/null); for x in 1 2 3; do t=$(git -C "$1" write-tree 2>/dev/null) && break; [ $x = 3 ] || sleep 0.5; done # sleep: a tree that could not be read (write-tree failed under load, #788) is read again, twice at most; with none no list is kept (rerunlist())
   fi
   if [ "${3:-}" != alone ]; then
     rerunsince "$1" "$p" "$b" "$t"; r=$?
