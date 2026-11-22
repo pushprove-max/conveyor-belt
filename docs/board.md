@@ -393,7 +393,9 @@ costs 1.25 times the input price. A 1-hour cache write costs twice the input pri
   models ([Models](configuration.md#models)).
 - **Offered with no price** lists each model that a seat runs, or that the project's model list has
   ([Models](configuration.md#models)), and that no model
-  or alias prices, with the seats that use it. It has the same two buttons. Needs you counts these models too.
+  or alias prices, with the seats that use it. It also lists each model that Needs you counts and that no other row
+  shows, such as the Codex model that a family name (`sol`) runs. It has the same two buttons. Needs you counts these
+  models too.
 - **In use by this project** comes first. Each row has a mark: builder, reviewer, judge, Tests or research lane, or the
   number of sessions that used it in the last 30 days.
 - Then **Claude**, **OpenAI** and **Other**, by family, newest first. Older versions fold under "Older Claude models".
@@ -911,8 +913,9 @@ names as dropped. With that verdict,
 **Rewrite as a direct check** is the step that the Board suggests. A Whole suite only file does not get it, because
 the check of the card runs the file alone: make it run alone first. The button opens the issue preview, with the title
 "Rewrite the test file <file> as direct checks" and the DIRECT lines in its text. A `|` inside a field shows as
-`/`. You can edit both before you file it. The text keeps every DIRECT line. When they do not all fit in one issue,
-the button opens no preview, and the line under it says why. Conveyor checks the card as an Optimize card. The change must keep the
+`/`. You can edit both before you file it. The text keeps every DIRECT line and the line of the last runs. When they
+do not all fit in one issue, the button opens no preview, and the line under it says why. When a new "Test history
+starts at" counts more runs and the text then does not fit, the open preview closes, and the line says why. Conveyor checks the card as an Optimize card. The change must keep the
 file and each case that a DIRECT line names and the file had before the change, and add or remove no other test
 file. The check skips a name that is not a case of the file. When it drops one of those cases, the card is blocked, and the reason
 names the case. The file must also pass alone with the change, in fewer CPU seconds than its last runs.

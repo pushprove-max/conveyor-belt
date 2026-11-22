@@ -4,7 +4,7 @@
 // with its evidence and the Done-when its card's check proves. Shared setup: dashboard-view.helpers.mjs (TA.snap():
 // the three files of TESTS, with the Tests model; merge.test.sh waits, 2.5 times its CPU seconds on the clock).
 import assert from 'node:assert/strict';
-import { boot, deliver, settle, act, cases, iso, TA } from './dashboard-view.helpers.mjs';
+import { boot, deliver, next, settle, act, cases, iso, TA } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const { MERGE, X, rec, snap, rowOf, opened, open } = TA;
@@ -166,8 +166,34 @@ test('Tests fixes: Rewrite as a direct check whose DIRECT lines alone go over th
   await settle();
   const more = opened(w, MERGE);
   assert.equal(act(more, 'issue-body'), null, 'no preview opens');
-  assert.match(more.textContent, /Not drafted: the judge's 40 proxy parts \(DIRECT lines\) do not fit in one issue of 2500 characters/);
+  assert.match(more.textContent, /Not drafted: the judge's 40 proxy parts \(DIRECT lines\), with the line of the last runs, do not fit in one issue of 2500 characters/);
   assert.deepEqual(w.posts, [], 'nothing is sent');
+});
+// Bug it guards (#1461 B-R132): the runs line is in every draft, so DIRECT lines that fit with a few runs no longer fit
+// once a new "Test history starts at" counts more runs; the open preview then closed saying nothing it named counts
+// now, which is false (every DIRECT line still counts), and the refusal blamed the DIRECT lines alone. The snapshots
+// are the engine's (testspart(), lib/testfiles.sh): with the start set, only the run on or after it; with the start
+// cleared (null), every run, at most the newest five. 18 DIRECT lines fit beside one run and not beside five.
+test('Tests fixes: a Rewrite preview that no longer fits once more runs count says the draft does not fit, with the runs line', () => {
+  const acts = [rec({ state: 'done', end: iso(Date.now()), verdict: 'indirect', direct: parts(18), text: 'VERDICT: indirect\n' })];
+  const older = [[4, 420, 13], [5, 410, 12]].map(([c, i, h]) => ({ cpu: 10, sec: 20, card: `c${c}-${i}`, time: `2026-11-09T${h}:00:00Z`, issue: i, repo: 'sample',
+    url: `https://github.com/example/sample-project/issues/${i}` }));
+  const at = (start) => {
+    const d = snap({ acts }), t = d.panels.tests.data.tests, f = t.files.find((x) => x.file === MERGE);
+    t.settings.historyStart = start;
+    f.runs = [...f.runs, ...older].filter((r) => !start || r.time >= start);
+    return d;
+  };
+  const w = boot({ tab: 'tests' });
+  deliver(w, at('2026-11-09T15:30:00Z'));
+  assert.ok(preview(w, MERGE, 'rewrite-direct')[1], 'the preview opens with the one run on or after the start');
+  const d = at(null);
+  assert.equal(d.panels.tests.data.tests.files.find((x) => x.file === MERGE).runs.length, 5, 'the cleared start counts five runs');
+  next(w, d);
+  assert.equal(act(opened(w, MERGE), 'issue-body'), null, 'the preview closes');
+  const said = w.document.querySelector('.tests-note').textContent;
+  assert.doesNotMatch(said, /nothing it named counts now/);
+  assert.match(said, /Not drafted: the judge's 18 proxy parts \(DIRECT lines\), with the line of the last runs, do not fit in one issue of 2500 characters/);
 });
 
 // Bug it guards (#768): the owner could not ask for a test file to be split. More has Split it, whose preview is titled

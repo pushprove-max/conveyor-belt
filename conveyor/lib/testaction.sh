@@ -482,7 +482,8 @@ tafail() { # <id> <why>: a queued action that could not start, failed
 # that ran it (a file that passed on its run again while another file failed again: failed, then passed, unless the run again timed
 # out, which may have ended before the file ran; a `held` step, its failures the machine's, read as a failed one and
 # named held; a step that ran it, its line with no time of it as a failed step saves none, passed it when the card's
-# next step carried it), a whole-suite run (the
+# next step carried it; a step that ran some cases of it, its line naming it partial with no time of it, testlist.sh
+# partran()), a whole-suite run (the
 # release suite's too) or a run of it alone (tafile(), its record in $TESTACTS), {time, run (which run it was),
 # result}, null with none. Times are to the second: runs that share the newest time are all named in one, as which
 # ran last is not known.}
@@ -504,7 +505,8 @@ testfacts() { # <file>
         | range(0; length - 1) | select(any($g[. + 1].value.carried | arrays | .[]; . == $f)) | $g[.].key] as $ranat
     | ([$ls | to_entries[] | .key as $i | .value | .result as $r | [if $r == "held" then .result = "fail" else . end | failedrun | select(any(failedfiles[]; . == $f))] as $x
         | select($x != [] or ((any(.carried | arrays | .[]; . == $f) | not)
-            and (((.times | objects | .[$f]) // (.clocks | objects | .[$f]) // ([.timed | arrays | .[] | objects | select(.file == $f)] | first)) != null or any($ranat[]; . == $i))))
+            and (((.times | objects | .[$f]) // (.clocks | objects | .[$f]) // ([.timed | arrays | .[] | objects | select(.file == $f)] | first)) != null or any($ranat[]; . == $i)
+              or any(.partial | arrays | .[]; . == $f))))
         | {time, run: "the test step of card \(.card) (#\(.issue))", result: ((if $x == [] then "passed"
             elif $x[0].result == "pass" then "failed, then passed when run again"
             elif ($x[0].again | type) == "array" and (any($x[0].again[]; . == $f) | not) then

@@ -62,6 +62,15 @@ check('bad_value', post({'time': '25-hour'}) == 400 and kept() == {'time': '12-h
 check('other_key', post({'time': '24-hour', 'date': 'dd/mm/yyyy'}) == 400 and kept() == {'time': '12-hour'}, kept())
 check('not_logged_in', post({'time': '24-hour'}, host='192.0.2.1:%d' % PORT) == 401 and kept() == {'time': '12-hour'}, kept())
 check('other_site', post({'time': '24-hour'}, origin='https://example.com') == 403 and kept() == {'time': '12-hour'}, kept())
+# Bug it catches (#1461 B-R138): a browser's first send of the Time it kept from before (first: true) overwrote the
+# Time set since in another browser. It is kept only when no Time is here; the server checks as it writes, so a Time
+# sent between a page's read and its send is not overwritten either.
+check('first_refused_when_kept', post({'time': '24-hour', 'first': True}) == 409 and kept() == {'time': '12-hour'}
+      and sorted(os.listdir(OUT)) == ['time.json'], 'POST /time {time: 24-hour, first: true} over a kept 12-hour: %s, %s' % (kept(), os.listdir(OUT)))
+check('first_not_true', post({'time': '24-hour', 'first': False}) == 400 and kept() == {'time': '12-hour'}, 'POST /time {time: 24-hour, first: false}: %s' % kept())
+os.remove(KEPT)
+check('first_kept_when_none', post({'time': '24-hour', 'first': True}) == 200 and kept() == {'time': '24-hour'}
+      and sorted(os.listdir(OUT)) == ['time.json'], 'POST /time {time: 24-hour, first: true} with no time.json: %s' % os.listdir(OUT))
 srv.shutdown()
 print('PASS: dashboard-server-time (%d checks)' % passed[0])
 EOF

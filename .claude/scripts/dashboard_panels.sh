@@ -127,7 +127,8 @@
 #           says where each issue a card waits on is), blocked (the blocked cards), forecast
 #           (the snapshot's: cards, usd, perCard {usd, pct}, guard, reading, pausesAt; null from a snapshot without one;
 #           no time), prices (the snapshot's: the built-in model prices, the pack's prices, added models and aliases,
-#           each model's display name and the model IDs seen in 30 days, for Model prices and the Board's model names; null
+#           each model's display name and the model IDs seen in 30 days, for Model prices and the Board's model names,
+#           with missing: the models Needs you counts as having no price, needsYou.prices; null
 #           from a snapshot without them), standing (the snapshot's: the pack's auto.standing, the standing kinds
 #           of routine yes that are on; null from a snapshot without it), pushCheck (the snapshot's: the pack's
 #           push.check, true or false; null from a snapshot without it), lintCommands (the snapshot's: the pack's
@@ -286,7 +287,7 @@ PANELS_JQ='
        building: [$s.belt[] | select(.landed != true)] | length, onBelt: [$s.belt[] | select(.landed != true) | .issue],
        beltSteps: [$s.belt[] | {issue, step, landed: (.landed == true)}],
        blocked: [$s.needsYou.blocked[] | {card, issue, name: (.name // null), title, since}] | few($r), forecast: ($s.forecast // null),
-       prices: ($s.prices // null), standing: ($s.standing // null), pushCheck: ($s.pushCheck | if type == "boolean" then . else null end), lintCommands: ($s.lintCommands | if type == "array" then . else null end), open: openOf($r), readAt: ($r.readAt // null)};
+       prices: ($s.prices | if type == "object" then . + {missing: [$s.needsYou.prices.models | arrays | .[] | strings]} else null end), standing: ($s.standing // null), pushCheck: ($s.pushCheck | if type == "boolean" then . else null end), lintCommands: ($s.lintCommands | if type == "array" then . else null end), open: openOf($r), readAt: ($r.readAt // null)};
   # From the first pick-up of the work of the card to its landing: totalSec of the snapshot, else the time in its card id.
   def took: (.totalSec | numbers) // (try ((.card | capture("^c(?<d>[0-9]{8}T[0-9]{6})-").d | strptime("%Y%m%dT%H%M%S") | mktime) as $s
     | ((.time | fromdate) - $s) | select(. >= 0)) catch null) // null;

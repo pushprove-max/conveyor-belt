@@ -171,7 +171,30 @@ t_owner_mid_rules() {
   grep -qF "$SRC/owner-rules.md and $FD/rules.md did not fit" <<<"$(ctx <<<"$st")" || fail "no Read line names both owner-rules.md and rules.md in a start of ${#st} characters: ${st: -300}"
 }
 
-cases=(fit big other race old owner owner_whole owner_mid owner_mid_rules)
+# Bug it catches (#1461 O148): the owner's words that claim the role (the words hook) wrap the claim's start in text
+# and JSON the start's limit did not count, and the Read line for owner-rules.md and rules.md came last: once the
+# fixed text and the rest (which have no cap) grew, the output went over 10,000 characters, Claude Code showed a
+# preview of its start, and the Read line was lost. In the start of owner_mid_rules, the words hook's output is under
+# 10,000 characters, and the Read line naming both files is in its first 2,000.
+t_words_rules() {
+  local out c a b len
+  fixture words_rules
+  marked
+  grow() { jq -n --arg h "$M" --arg n "$(printf 'r%.0s' $(seq 1 "$1"))" '{records: [{repo: "alpha", main: $h}, {repo: $n, main: ($h + "/gone")}], foreman: {groups: [["alpha", $n]]}}' > "$XDG_CONFIG_HOME/conveyor/host.json"; }
+  grow 100; a=$(hook start sA --rules-apart); a=${#a}
+  grow 200; b=$(hook start sA --rules-apart); b=${#b}
+  [ "$b" -gt "$a" ] || fail "a longer repo name did not lengthen the start ($a, $b)"
+  len=$((100 + (8300 - a) * 100 / (b - a))); grow "$len"
+  text STATEBODY 16 > "$FD/state.md"; text RULESBODY 3 > "$FD/rules.md"
+  out=$(jq -cn --arg c "$M" '{session_id: "sB", prompt: "you are the foreman", cwd: $c}' | (cd "$M" && bash "$SRC/foreman.sh" words)) || fail "the words hook failed"
+  c=$(ctx <<<"$out")
+  [ -n "$c" ] || fail "the words hook gave no claim: $out"
+  [ "${#out}" -lt 10000 ] || fail "the words hook's output, with a $len-character repo name, is ${#out} characters, not under 10000"
+  grep -qF "$SRC/owner-rules.md and $FD/rules.md did not fit" <<<"${c:0:2000}" \
+    || fail "no Read line naming owner-rules.md and rules.md in the first 2000 characters of the claim's ${#c}: ${c:0:400}"
+}
+
+cases=(fit big other race old owner owner_whole owner_mid owner_mid_rules words_rules)
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
 read -ra cases <<<"$SEL"

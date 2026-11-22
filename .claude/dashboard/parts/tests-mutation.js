@@ -122,15 +122,17 @@
   }
   // An open issue preview made under another "Test history starts at" (#1384, R8) is made again from this snapshot,
   // whose failures, runs and waits count only from the new start; one its file no longer has a draft for (gone,
-  // refused, or Fix failures with no failure left) closes. Either way the line says so: the edits typed are dropped.
+  // refused, or Fix failures with no failure left) closes. Either way the line says so (a refused one, why): the edits
+  // typed are dropped.
   function redraft() {
     const a = S.ask;
     if (!a || a.kind !== 'issue' || !a.make || a.history === inForce('historyStart')) return;
     const f = list(tests() && tests().files).find((x) => obj(x) && x.file === a.file);
     const d = f && !(a.what === 'Fix failures' && !fixable(f).length) ? a.make(f) : null;
     S.ask = d && !d.refused ? Object.assign(d, { make: a.make, history: inForce('historyStart') }) : null;
-    say(S.ask ? `Test history starts at changed: the ${a.what || 'Optimize'} preview of ${a.file} is made again from the runs that count now.`
-      : `Test history starts at changed: the ${a.what || 'Optimize'} preview of ${a.file} is closed, as nothing it named counts now.`);
+    const was = `Test history starts at changed: the ${a.what || 'Optimize'} preview of ${a.file}`;
+    say(S.ask ? `${was} is made again from the runs that count now.` : d && d.refused ? `${was} is closed. ${d.refused}`
+      : `${was} is closed, as nothing it named counts now.`);
   }
   // The text of an action as seen here, with the snapshot's text added: a whole text replaces it; the end of a long
   // one (textCut) is joined to it where the two meet, so the text seen before stays.
@@ -453,7 +455,7 @@
       ['- The file keeps each case that a DIRECT line above names, and adds or removes no other test file.',
         '- Run alone with the change on a test slot, the file succeeds and costs less CPU time than its recent runs.']);
     return draft(facts) || draft(last) || { what, file: f.file,
-      refused: `Not drafted: the judge's ${parts.length} proxy parts (DIRECT lines) do not fit in one issue of ${BODY_MAX} characters. Ask the judge again, or file the rewrite by hand with every DIRECT line.` };
+      refused: `Not drafted: the judge's ${parts.length} proxy parts (DIRECT lines), with the line of the last runs, do not fit in one issue of ${BODY_MAX} characters. Ask the judge again, or file the rewrite by hand with every DIRECT line.` };
   }
   // Split it (#768): the cases of the file in two or more test files, and the judge's reason when its newest verdict
   // is split.

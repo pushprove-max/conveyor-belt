@@ -62,9 +62,12 @@ t_livebuild() { livestart; lines picked worktree deps brief start:build
     echo '{"type":"assistant","message":{"id":"m2","content":[{"type":"tool_use","name":"Bash","input":{"command":"npm test"}}]}}'; } > "$W.out"
   viewswatched "$W.out" build claude-sonnet-5-5 '.action == "Bash: npm test"'
   [ "$(jq -c '[.turns, .usage.input, .action, (.last != null)]' "$W.seen")" = '[2,2000000,"Bash: npm test",true]' ] || fail "the live record of a running session: $(cat "$W.seen")"
-  cp "$W.seen" "$W.live"; out=$(loop snapshot --fresh 2>/dev/null) || fail "snapshot of a running session exited non-zero"
-  [ "$(jq -c '[(.belt[0] | .usd, .reading, .tokens.claude, .live.turns, .live.action, (.live.lastOutputAt | fromdate > 0), .step), .cost.today]' <<<"$out")" \
-    = '[4,true,2000000,2,"Bash: npm test",true,"build",0]' ] || fail "the reading of a running session, or it is in the dollars of the steps that ended: $out"
+  # Its last output is set to today 00:30, well after the step began (00:04): watch() stamped it with the real clock,
+  # which before 00:04 UTC is before that start, so health asked then would find nothing stuck even if it ignored the
+  # output (#1461 B-R393).
+  jq -c --arg t "${d}T00:30:00Z" '.last = $t' "$W.seen" > "$W.live"; out=$(loop snapshot --fresh 2>/dev/null) || fail "snapshot of a running session exited non-zero"
+  [ "$(jq -c '[(.belt[0] | .usd, .reading, .tokens.claude, .live.turns, .live.action, .live.lastOutputAt, .step), .cost.today]' <<<"$out")" \
+    = '[4,true,2000000,2,"Bash: npm test","'"${d}"'T00:30:00Z","build",0]' ] || fail "the reading of a running session, or it is in the dollars of the steps that ended: $out"
   # Health asks a second past the last output: the start is then far past the limit, so a health that ignored the
   # output would say stuck.
   at=$(( $(jq -r '.belt[0].live.lastOutputAt | fromdate' <<<"$out") + 1 ))

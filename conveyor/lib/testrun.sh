@@ -299,7 +299,7 @@ slowoff() { # <worktree>
 # ends it, <worktree>.wide) does not run again and fails with <worktree>.stop saying why. card() blocks a card whose
 # run left <worktree>.stop.
 tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alone]
-  local cmd at rc r p='' b='' t='' f o l=() wn w=$SECONDS t0 ob mw off kp ko ka cw='' x RUNOFF='' TEST_BEFORE='' LISTNONE='' CAPNOTE='' TEST_CASES='' TEST_GIVEN=${TEST_GIVEN:-}
+  local cmd at rc r p='' b='' t='' f o l=() wn w=$SECONDS t0 ob mw off kp ko ka kc cw='' x RUNOFF='' TEST_BEFORE='' LISTNONE='' CAPNOTE='' TEST_CASES='' TEST_GIVEN=${TEST_GIVEN:-}
   TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; TEST_REFUSED=''; TEST_FILES=''; rm -f "$1.testlist" "$1.stop" "$1.wide" "$1.noresult"
   # The files the run before timed (testlist.sh timed()): kept below when this run keeps its passes and so may not run them.
   mapfile -t l < <(testlogs "$1"); o=$({ cat "$1.oldtimes" "$1.times" "$1.reported"; [ ${#l[@]} = 0 ] || grep -h '^TESTRUN sec' "${l[@]}"; } 2>/dev/null)
@@ -379,8 +379,8 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
     # overwrites <worktree>.test, and a pass on re-run is the only record of the flaky failure (FAILURE, testfiles.sh).
     jq -c --argjson rc "$rc" --rawfile t <(tail -n 60 "$1.test" 2>/dev/null | tr -d '\000') \
       '{exit: $rc, failures: del(.passed, .okcases, .passcases)} + ($t | sub("\n+$"; "") | if . == "" then {} else {tail: .} end)' <<<"$f" > "$1.first"
-    # The files the first run timed, which the run again does not run, after those of the runs before it (testlist.sh slowtests()).
-    mapfile -t l < <(testlogs "$1"); { cat "$1.reported"; [ ${#l[@]} = 0 ] || grep -h '^TESTRUN sec' "${l[@]}"; } >> "$1.times" 2>/dev/null
+    # The files the first run timed, which the run again does not run, after those of the runs before it (testlist.sh slowtests()), and its `TESTRUN case` lines (.oldfiles, below).
+    mapfile -t l < <(testlogs "$1"); { cat "$1.reported"; [ ${#l[@]} = 0 ] || grep -h -e '^TESTRUN sec' -e $'^TESTRUN case\t' "${l[@]}"; } >> "$1.times" 2>/dev/null
     # The first run's coverage report, which the run again may write over: kept (testlist.sh covkeep()) for uncovered(), in the same file.
     covkeep "$1"
     rm -rf "$1.testlog"; if mkdir "$1.testlog" 2>"$1.test"; then
@@ -399,9 +399,9 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
   # A card's run: the changed lines its coverage report says no test reached (testlist.sh uncovered()), the first run's report
   # (testlist.sh covkeep()) and a run again's together.
   [ -n "${2:-}" ] || uncovered "$1" "$t0"; rm -rf "$1.covfirst"
-  # Of those, the files the runs before timed (<worktree>.oldtimes) and this run did not: carried (testlist.sh carriedrec()).
-  [ -z "$kp" ] || [ ! -s "$1.oldtimes" ] || { ko=$(timed "$1" own) && ka=$(timed "$1") \
-    && jq -cn --argjson o "$ko" --argjson a "$ka" --arg k "$kp" '[$k | split("\n")[] | select($a[.] != null and $o[.] == null)] | unique' > "$1.oldfiles"; } \
+  # Of those, the files the runs before timed (<worktree>.oldtimes) and this run did not, nor ran some cases of (testlist.sh partran(): its test line names them partial): carried (testlist.sh carriedrec()).
+  [ -z "$kp" ] || [ ! -s "$1.oldtimes" ] || { ko=$(timed "$1" own) && ka=$(timed "$1") && kc=$(partran "$1") \
+    && jq -cn --argjson o "$ko" --argjson a "$ka" --argjson c "$kc" --arg k "$kp" '[$k | split("\n")[] | select($a[.] != null and $o[.] == null and (IN($c[]) | not))] | unique' > "$1.oldfiles"; } \
     || rm -f "$1.oldfiles"
   # Given TEST_GIVEN files, a run reported more (watch() ended it, <worktree>.wide): it does not run again, and
   # <worktree>.stop says why. It names the file test.fileCommand was running then (the file on the second line of <worktree>.wide, wideeach() in lib/testlist.sh, else its last `== <file>` log line): that file ran the rest. A count not over TEST_GIVEN is of one invocation that reported more files than had begun.

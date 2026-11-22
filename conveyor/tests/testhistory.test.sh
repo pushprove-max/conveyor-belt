@@ -232,3 +232,20 @@ t_thretrynew() {
   [ "$(jq -c '[.runs[] | select(.times != null or .timed != null) | .time]' <<<"$got")" = '["2026-11-20T12:15:00Z"]' ] \
     || fail "the facts for r.test with the start $TH_START drop the new time a retry carried, or keep the one before it: $got"
 }
+
+# Bug it guards (#1461 B-R390): a survey time counts for each file the Tests page has a row for (testspart() $rows:
+# listed, a card or whole-suite run, a Board filing, a Tests page card), and no case had a file whose only record was
+# a whole-suite run or a filing, so dropping either source from $rows failed nothing. src/s.mjs and src/f.mjs match no
+# pattern (none is set: *.test.* files alone); the survey saved a time of each; a release suite ran src/s.mjs, and the
+# Board filed an issue for src/f.mjs. Each row holds the survey run, beside the suite run for src/s.mjs.
+t_thsurveyrows() {
+  setup '[]'; mkdir -p "$R/src" "$ST/testactions" && echo x > "$R/src/s.mjs" && echo x > "$R/src/f.mjs" \
+    && echo '{"files": {"src/s.mjs": {"sec": 7.5, "cpu": 6.25}, "src/f.mjs": {"sec": 3, "cpu": 2}}}' > "$R/.conveyor/test-times.json" \
+    && git -C "$R" add src && git -C "$R" add -f .conveyor/test-times.json && GIT_COMMITTER_DATE=2026-11-12T00:00:00Z git -C "$R" commit -qm tests \
+    && jq -cn '{time: "2026-11-11T00:00:00Z", how: "release", sha: "", files: {"src/s.mjs": {result: "ok", sec: 9, cpu: 8}}}' > "$ST/suiteruns.jsonl" \
+    && jq -cn '{event: "filed", file: "src/f.mjs", issue: 12, time: "2026-11-11T00:00:00Z"}' > "$ST/testactions/filed.jsonl" || fail "the fixture"
+  got=$(th_as snapshot testspart 2026-11-09) || fail "testspart failed: $got"
+  [ "$(jq -c '[.files[] | select(.file | startswith("src/")) | {file, runs: [.runs[] | [.cpu, (.survey // false), .whole]]}] | sort_by(.file)' <<<"$got")" \
+    = '[{"file":"src/f.mjs","runs":[[2,true,false]]},{"file":"src/s.mjs","runs":[[6.25,true,false],[8,false,true]]}]' ] \
+    || fail "the survey time of a file only a suite run or a filing puts on the page is not on its row: $(jq -c '[.files[] | select(.file | startswith("src/"))]' <<<"$got")"
+}

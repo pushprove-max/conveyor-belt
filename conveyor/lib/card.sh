@@ -13,7 +13,7 @@
 . "$HERE/lib/cardland.sh" || exit 1
 began() { # <card> <issue> <what begins>
   local e=''
-  switchcode "$1" "$3"; rm -f "$CARDS/$1.firsttry" "$CARDS/$1.firsttry.new"; capmark "$1" "$3" # capmark(): lib/run.sh
+  switchcode "$1" "$3"; rm -f "$CARDS/$1.firsttry" "$CARDS/$1.firsttry.new" "$CARDS/$1.reviewed"; capmark "$1" "$3" # capmark(): lib/run.sh
   # A card on the code of a commit it switched to: its start line names that commit, so prune() (inflight(),
   # lib/install.sh) keeps its install while the card runs; its worktree line names the commit it started on.
   [ -z "$RAN" ] || [ "$RAN" != "${CODESEEN:-}" ] || e=",\"engine\":\"$RAN\""
@@ -120,10 +120,9 @@ redmsg() { # <card> <issue json>
   local t; t=$(redissue "$1") || t=$2
   jq -r --arg c "$1" --arg s "$(stdb ask card "$1" | jq -rs 'map(.mainRed // empty)[0] // ""')" '"fix(product): \(.title) (main \($s[0:12]))\n\nConveyor card \($c)"' <<<"$t"
 }
-# card()'s wait for main to change (mainred.sh mainwait()), its seconds added to card()'s mainsec, less those of the runs on main it took (mainwait()'s mainrun): a start line of card()'s test step records them as its mainRun, which the Board's mainSec counts.
+# card()'s wait for main to change (mainred.sh mainwait()), its seconds added to card()'s mainsec, less those of the runs on main it took (mainwait()'s mainrun): mainwait() records each on a start line of card()'s test step as its mainRun, which the Board's mainSec counts.
 mainwaited() { # <worktree> <main's commit> <case>...
-  local mw=$SECONDS mainrun=null; mainwait "$@"; mainsec=$((mainsec + SECONDS - mw - $(jq '.sec // 0' <<<"$mainrun" 2>/dev/null || echo 0)))
-  [ "$mainrun" = null ] || record "$c" "$n" start ok "$(jq -c '{of: "test", mainRun: .}' <<<"$mainrun")"; }
+  local mw=$SECONDS mainrun=null; mainwait "$@"; mainsec=$((mainsec + SECONDS - mw - $(jq '.sec // 0' <<<"$mainrun" 2>/dev/null || echo 0))); }
 # A card's landed line's extra (card(), as it lands): <left> (its filed follow-ups) with waitSec, the seconds it waited
 # on other cards (settle()) and for main to change (mainwaited()), for the drift watch (bench/drift.sh); yesFrom; and
 # rollout, its rollout actions, as its ready file holds them too.
@@ -569,8 +568,8 @@ cardreview() {
       redbrief "$c" "$n" "$br"; t="the engine could not write the re-review section"; { [ -z "$refix" ] || more+=$'\n\n'"$(rereview "$c" "$wt" "$refix" "$rr")"; } \
         && t=$(reviewed "$wt" "$sprompt$more" "$ins"); rc=$?; rm -f "$wt.port"
       [ $rc = 0 ] || { block "$c" "$n" "$wt" "review $pass: $t"; return; }
-      # The judge (judged()): a finding it declines is no finding from here on, and a review left with none is a GO.
-      redbrief "$c" "$n" "$br"; t=$(judged "$c" "$n" "$wt" "$sprompt" "$t")
+      # The judge (judged()): a finding it declines is no finding from here on, and a review left with none is a GO. While it runs, <worktree>.reviewed holds the review's fields (its usage; began() drops it), as a bench reads its cost (SWE_LIVES).
+      redbrief "$c" "$n" "$br"; printf '%s\n' "$t" > "$wt.reviewed"; t=$(judged "$c" "$n" "$wt" "$sprompt" "$t")
       # The P3 findings it leaves, with the rule P3 off, are listed only (minor()).
       minor "$wt"
     fi

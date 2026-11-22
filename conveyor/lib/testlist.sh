@@ -12,13 +12,15 @@
 # timed, {file: cpu}, to <worktree>.cpus, for its test line (times); and the clock seconds of every file the run
 # timed, {file: sec}, to <worktree>.clocks, for its test line
 # (clocks: the snapshot's tests part, testspart()), a file timed by the clock only (a runner's report, reported())
-# among them.
+# among them. A file the step ran only some cases of (partran()) has none of them: its time is an earlier step's, not
+# this one's; it goes in <worktree>.partial, for its test line (partial).
 slowtests() { # <worktree>
-  local c t x y
-  rm -f "$1.timed" "$1.cpus" "$1.clocks"
+  local c t x y p
+  rm -f "$1.timed" "$1.cpus" "$1.clocks" "$1.partial"
   c=$(git -C "$1" diff --cached --no-renames --name-status -z --diff-filter=AM HEAD 2>/dev/null \
     | jq -cRs 'split("\u0000") | . as $a | [range(0; length - 1; 2) | {key: $a[. + 1], value: $a[.]}] | from_entries') || return 1
-  t=$(timed "$1") || return 1
+  p=$(partran "$1") || return 1; printf '%s\n' "$p" > "$1.partial"
+  t=$(timed "$1" | jq -c --argjson p "$p" 'with_entries(select(.key | IN($p[]) | not))') || return 1
   jq -c --slurpfile c <(printf '%s' "$c") '$c[0] as $c | [to_entries[] | select($c[.key] != null) | {file: .key} + .value]' <<<"$t" > "$1.timed" || return 1
   { IFS= read -r x && IFS= read -r y; } < <(jq -c '(with_entries(select(.value.cpu != null)) | map_values(.cpu)), map_values(.sec)' <<<"$t") \
     && printf '%s\n' "$x" > "$1.cpus" && printf '%s\n' "$y" > "$1.clocks"
@@ -34,6 +36,16 @@ timed() { # <worktree> [own]
   { [ "${2:-}" = own ] || cat "$1.oldtimes" 2>/dev/null; cat "$1.times" "$1.reported" 2>/dev/null; for l in "${logs[@]}"; do printf '\n'; cat "$l" 2>/dev/null; done; } \
     | jq -cRn '[inputs | capture("^TESTRUN sec\t(?<f>[^\t]+)\t(?<s>[0-9]+(\\.[0-9]+)?)(\t(?<c>[0-9]+(\\.[0-9]+)?))?$")
       | {key: .f, value: {sec: (.s | tonumber), cpu: (.c | tonumber? // null)}}] | from_entries'
+}
+# The files the step in <worktree> ran some cases of and timed none of, as a JSON list: a `TESTRUN case` line of its
+# logs or of the run before a run again (<worktree>.times, tests()) names them, and no `TESTRUN sec` line of this step
+# does (timed own): a runner times no file it ran in part. A time of one on record is an earlier step's.
+partran() { # <worktree>
+  local o l=()
+  o=$(timed "$1" own) || return 1
+  mapfile -t l < <(testlogs "$1")
+  { cat "$1.times" 2>/dev/null; [ ${#l[@]} = 0 ] || cat "${l[@]}" 2>/dev/null; } \
+    | jq -cRn --argjson o "$o" '[inputs | capture("^TESTRUN case\t(?<f>[^\t]+)\t") | .f | select($o[.] == null)] | unique'
 }
 # A whole-suite run's files, for the Tests page (the snapshot's tests part, testspart() of lib/testfiles.sh): a line
 # for the run appended to $SUITERUNS, {time, how (full: the Board's full test suite, lib/fulltest.sh; release:
@@ -53,10 +65,12 @@ suiterec() { # <worktree> <full | release> <commit>
 }
 # Its test line's part: {timed: <worktree>.timed} when the run timed a test file the change adds or modifies,
 # {times: <worktree>.cpus, clocks: <worktree>.clocks} when it timed any file (times is {} when each was timed by the
-# clock only), and carriedrec()'s part, else {}.
+# clock only), {partial: <worktree>.partial} when it ran some cases of a file and timed none of it (partran()), and
+# carriedrec()'s part, else {}.
 slowrec() { # <worktree>
-  jq -cn --slurpfile t "$1.timed" --slurpfile c "$1.cpus" --slurpfile k "$1.clocks" --argjson o "$(carriedrec "$1")" '(if $t[0] | length > 0 then {timed: $t[0]} else {} end)
+  jq -cn --slurpfile t "$1.timed" --slurpfile c "$1.cpus" --slurpfile k "$1.clocks" --slurpfile p "$1.partial" --argjson o "$(carriedrec "$1")" '(if $t[0] | length > 0 then {timed: $t[0]} else {} end)
     + (if ($c[0] | length > 0) or ($k[0] | length > 0) then {times: $c[0], clocks: $k[0]} else {} end)
+    + (if $p[0] | length > 0 then {partial: $p[0]} else {} end)
     + $o' 2>/dev/null || echo '{}'
 }
 # A card's test line's part for the files its run kept as passed and did not run, though a run before timed them

@@ -280,6 +280,20 @@ test('Rules: a model offered or in force with no price is named as having no pri
   assert.equal(act(prices(w).querySelector('.rules-price-addform'), 'price-add-model').value, 'gpt-6.3-sol');
 });
 
+// Bug (#1461 A-R5): with the reviewer on the Codex family name sol, the engine resolves it to a model with no price
+// (gpt-6.10-sol, noprice()), and Needs you counts it and links here, but Offered with no price dropped sol as a
+// one-word name and listed nothing else, as no models.allowed list names gpt-6.10-sol and no step ran it yet.
+test('Rules: a model Needs you counts as having no price, which no list offers, is listed under Offered with no price', () => {
+  const w = boot({ tab: 'rules' });
+  const d = full();
+  d.panels.rules.data.prices = { ...JSON.parse(JSON.stringify(PRICES)), seen: [], missing: ['gpt-6.10-sol'] };
+  d.panels.rules.data.modelSettings.reviewer.model = 'sol';
+  d.panels.rules.data.modelSettings.reviewer.allowed.codex = ['sol'];
+  deliver(w, d);
+  const offered = Array.from(prices(w).querySelectorAll('.rules-noprice'), (x) => x.dataset.model);
+  assert.ok(offered.includes('gpt-6.10-sol') && !offered.includes('sol'), offered.join(', '));
+});
+
 // Bug: seven of the Codex models Codex reports (gpt-6-sol, gpt-6-luna, gpt-6.1-terra, the gpt-5.6 ones and the
 // gpt-daybreak-blue-latest alias) were offered with no price, and a step on one had no cost. With the real built-in
 // table and aliases (dashboard_limit.py card_costs, mapped as snapshot.sh maps them) and no pack prices, none is named.

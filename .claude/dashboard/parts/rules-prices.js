@@ -180,7 +180,12 @@
       });
     });
     const ran = new Set(seen.filter((x) => x.lane !== true).map((x) => x.model));
-    const noPrice = [...offered].filter((m) => !m.startsWith('opencode:') && !/^[a-z]{2,}$/.test(m) && !isModel(canon(m)) && !aliasTo.has(m) && !ran.has(m)).sort();
+    const none = (m) => !m.startsWith('opencode:') && !isModel(canon(m)) && !aliasTo.has(m) && !ran.has(m);
+    const noPrice = [...offered].filter((m) => !/^[a-z]{2,}$/.test(m) && none(m));
+    // The models Needs you counts (the part's prices.missing, noprice()): the model a family name resolves to (sol:
+    // the Codex model it runs) is in no list above until a step runs it, so each one no row shows is added.
+    list(P.p.missing).forEach((m) => { if (typeof m === 'string' && m && !noPrice.includes(m) && none(m)) noPrice.push(m); });
+    noPrice.sort();
     const known = models.filter((m) => providerOf(m, over[m]) !== 'opencode').sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
     const norm = (s) => s.toLowerCase().replace(/\./g, '-');
     const likely = (id) => {

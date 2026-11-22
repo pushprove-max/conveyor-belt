@@ -497,8 +497,9 @@ swe_phase() { # <phase>
 # and token usage; the live record of the session running is priced only while the card's last line is the start of
 # its step, so the step's own line, once written, replaces what the live record said, and a session started with no
 # live record is unpriced. While the judge runs, the review's live record is the judge's (judgecall()) and the
-# review's line is not yet written: the reviewer is priced from the record swe_watch kept of it since that start
-# line. A review that ran again has its first attempt's usage on its .firsttry (SWE_LIVES) until its line, which
+# review's line is not yet written: the reviewer is priced from the review's own fields (its .reviewed, SWE_LIVES,
+# which hold both attempts of one that ran again), and only when there are none yet from the record swe_watch kept of
+# it since that start line. A review that ran again has its first attempt's usage on its .firsttry (SWE_LIVES) until its line, which
 # holds both (BOTHTRIES), is written: it is priced beside the second attempt's live record, or kept record while the
 # judge runs (one kept in the pause is the first attempt's: the second's is then unpriced), and in the pause it is
 # all the review used. A build, fix or rebase run again after it stalled (its live record names the stall) has its
@@ -509,12 +510,14 @@ swe_cost() {
   jq -Rsc --argjson p "$pp" '[splits("\n") | fromjson? | objects] as $r | [$r[] | select(has("card") and .issue == 1)] as $c | ($c | last) as $s
     | (if $s.step == "start" and ($s.of | IN("build", "review", "fix", "rebase")) then ([$r[] | select((has("card") | not) and .step == $s.of)] | last) // {step: $s.of} else null end) as $live
     | ($s.of == "review" and ([($live.action | strings | startswith("the judge ")) and (($live.at | strings) >= ($s.time | strings))] | any)) as $judging
-    | (if $s.of == "review" then [$r[] | select(has("firsttry") and (.firsttry | type) == "object")] | last else null end) as $ft
-    | {prices: $p, live: (if $ft != null and $ft.second != true and ($judging | not) then null else $live end),
+    | (if $s.of == "review" then [$r[] | .reviewed | objects] | last else null end) as $rv
+    | (if $s.of == "review" and $rv == null then [$r[] | select(has("firsttry") and (.firsttry | type) == "object")] | last else null end) as $ft
+    | {prices: $p, live: (if ($rv != null or ($ft != null and $ft.second != true)) and ($judging | not) then null else $live end),
        steps: [($c[] | if .step == "blocked" then .spent | objects else . end | select(.step | IN("build", "review", "fix", "rebase"))
            | ({step, model, usage, unread, stats: (.stats | if type == "object" then {models, byModel} else null end)}, (.judge | objects | {step: "judge", model, usage}))),
          ($ft | objects | .firsttry.spent | if type == "object" then {step: "review", model, usage, unread} else {step: "review"} end),
-         (if $judging then ([$r[] | .reviewer | objects | select(.of == $s and ($ft == null or .second == true)) | .live | objects] | last
+         (if $rv != null then $rv | {step: "review", model, usage, unread}
+          elif $judging then ([$r[] | .reviewer | objects | select(.of == $s and ($ft == null or .second == true)) | .live | objects] | last
              | {step: "review", model, usage: (if .zero == true then null else .usage end)}) // {step: "review"} else empty end),
          (if $live.stalled | type == "string" and $s.of != "review" then {step: $s.of} else empty end)]}' \
     | python3 "$HERE/../.claude/scripts/dashboard_limit.py" work 2>/dev/null \
@@ -556,12 +559,15 @@ swe_stepof() { # [<seen>]
 # <card>.firsttry, .firsttry.new while that attempt's events are still there, until the review's line is written), as
 # {second, firsttry}: second is true once the second attempt has written its events, so the review's live record is
 # that attempt's (as stopped() tells them apart), and false in the pause, when the live record is still the first's.
+# Then the review's fields once it ended, while its judge runs and until its line is written (<card>.reviewed, the
+# review step's), as {reviewed}.
 SWE_LIVES='for f in "$SWE_CARDS"/*.live; do [ ! -f "$f" ] || { echo; head -c 4000 "$f"; echo; }; done
   for f in "$SWE_CARDS"/*.firsttry.new "$SWE_CARDS"/*.firsttry; do
     [ -f "$f" ] || continue; w=${f%.new}; w=${w%.firsttry}; s=false
     if [ "$f" = "$w.firsttry" ]; then [ ! -f "$f.new" ] || continue; [ ! -s "$w.events" ] || s=true; fi
     printf "\n{\"second\":%s,\"firsttry\":" "$s"; tr -d "\n" < "$f"; printf "}\n"
-  done; :'
+  done
+  for f in "$SWE_CARDS"/*.reviewed; do [ ! -s "$f" ] || { printf "\n{\"reviewed\":"; tr -d "\n" < "$f"; printf "}\n"; }; done; :'
 # Each card of the cards folder that only waits: its <worktree>.idle mark stands (the engine stands it while the
 # card sleeps out a wait for main to change, on another card, for the machine or for its seat's CLI, and never while
 # a session, check or test of it runs), as {idle: <card>, action: <its live record's action>, model: <its live

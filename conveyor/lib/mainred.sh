@@ -582,8 +582,9 @@ redlisted() { # <case>...
 # entry, or its fix card closed as already done), when it held one as the wait began; a wait on cases the record did
 # not hold (mainred() could not write them) ends only as main's state changes. Sets the caller's mainrun: the runs on
 # main it took, {sha, exit (the last run's), sec (their seconds added up: card.sh mainwaited())}, or null for none.
+# Called by card() (its c and n set), it records each of those runs as it takes it.
 mainwait() { # <worktree> <main's commit> <case>...
-  local at c listed='' on=$2 u sha hits ctl cf mf m r; at=$(date -u +%FT%TZ); c=$(jq -rn '$ARGS.positional | join(", ")' --args "${@:3}")
+  local at cs listed='' on=$2 u sha hits ctl cf mf m r; at=$(date -u +%FT%TZ); cs=$(jq -rn '$ARGS.positional | join(", ")' --args "${@:3}")
   mainrun=null
   u=$(jq -cn '[$ARGS.positional[] | index(": ") as $i | if $i then {file: .[:$i], case: .[$i + 2:]} else {file: ., case: null} end]' --args "${@:3}")
   ! redlisted "${@:3}" || listed=1
@@ -592,6 +593,9 @@ mainwait() { # <worktree> <main's commit> <case>...
       packget test.control ctl 2>/dev/null || ctl='[]'
       mainprobe "${1##*/}" "$u" "$u" '[]' "$on"; r=$?
       [ "$m" = null ] || mainrun=$(jq -cn --argjson a "$mainrun" --argjson m "$m" '$m + {sec: (($a.sec // 0) + $m.sec)}') || mainrun=$m
+      # Each run on main is on a start line of card()'s test step at once (its card c and issue n), not once the wait
+      # ends: a card shut while it waits (endcard(), a SIGKILL) would lose it.
+      [ "$m" = null ] || [ -z "${c:-}" ] || [ -z "${n:-}" ] || record "$c" "$n" start ok "$(jq -c '{of: "test", mainRun: .}' <<<"$m")"
       [ $r = 0 ] && [ -n "$sha" ] && [ "$sha" != "$on" ] \
         && jq -en --slurpfile u <(printf '%s' "$u") --slurpfile m <(printf '%s' "$mf") --slurpfile h <(printf '%s' "$hits") --slurpfile c <(printf '%s' "$ctl") --slurpfile f <(printf '%s' "$cf") \
           '$u[0] as $u | $m[0] as $m | $h[0] as $h | $c[0] as $c | $f[0] as $f | ($c == [] or $c - $f != [])
@@ -599,7 +603,7 @@ mainwait() { # <worktree> <main's commit> <case>...
         || break
       on=$sha
     fi
-    jq -cn --arg at "$at" --arg c "$c" --arg s "${on:0:12}" '{step: "test", at: $at, last: (now | todate), turns: 0, files: {run: 0, of: null}, tests: null,
+    jq -cn --arg at "$at" --arg c "$cs" --arg s "${on:0:12}" '{step: "test", at: $at, last: (now | todate), turns: 0, files: {run: 0, of: null}, tests: null,
       action: "waiting for main to change: \($c) fail on main at \($s) too"}' > "$1.live.tmp" 2>/dev/null && mv -f "$1.live.tmp" "$1.live"
     : > "$1.idle"; sleep "$LIVE"
   done

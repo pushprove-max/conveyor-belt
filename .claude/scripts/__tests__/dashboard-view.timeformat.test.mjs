@@ -2,7 +2,7 @@
 // The Board's Time (12-hour or 24-hour) and Date (mm/dd/yyyy or dd/mm/yyyy), set in Customize (issue 458): the times
 // and dates the panels write follow them, and a change shows at once. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { STORE, T0, $, boot, panel, deliver, next, full, saved, clone, issuesP, cases, iso, trackOf } from './dashboard-view.helpers.mjs';
+import { STORE, T0, $, boot, panel, deliver, next, full, saved, clone, issuesP, cases, iso, trackOf, settle } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const SENT = 'conveyor-board-time-sent';  // app.js TIME_SENT_KEY: set once this browser has sent a Time
@@ -42,9 +42,11 @@ test('a card\'s start and the head\'s clock follow Customize\'s Time and Date, a
 
 // Issue 506. Bugs it catches: a 24-hour Time this browser kept before the page sent it never reaching the server
 // (only a click sent it), and Restore putting the Board back to 12-hour while the plugin's Build pane kept 24-hour.
-test('a kept Time is sent when the Board opens, and the Time Restore puts back is sent too', () => {
+test('a kept Time is sent when the Board opens, and the Time Restore puts back is sent too', async () => {
   const w = boot({ store: { [STORE]: JSON.stringify({ time: '24-hour' }) } });
-  assert.deepEqual(w.posts, [{ url: 'time', body: { time: '24-hour' } }], 'sent on opening, with no click');
+  await settle();
+  assert.deepEqual(w.posts, [{ url: 'time', body: { time: '24-hour', first: true } }], 'sent on opening, with no click, as one kept only if the server has none');
+  assert.deepEqual(w.timeJson, { time: '24-hour' }, 'the server, which kept no Time, keeps it');
   // Issue 559. Bug it catches: the send not recorded, so every later visit sends the kept Time again (review E4).
   assert.equal(w.localStorage.getItem(SENT), '1', 'the send is recorded in this browser');
   w.document.getElementById('customize-open').click();
@@ -54,15 +56,29 @@ test('a kept Time is sent when the Board opens, and the Time Restore puts back i
 
 // Bug it catches (review E4): each visit sent the kept Time again, so a browser that set a Time earlier undid the Time
 // set later in another browser. The marker is the one the case above sees written.
-test('a browser that has sent a Time sends nothing when the Board opens again', () => {
+test('a browser that has sent a Time sends nothing when the Board opens again', async () => {
   const w = boot({ store: { [STORE]: JSON.stringify({ time: '24-hour' }), [SENT]: '1' } });
+  await settle();
   assert.deepEqual(w.posts, [], 'a Time sent on an earlier visit is not sent again');
+});
+
+// Bug it catches (#1461 B-R138): a browser that kept 24-hour before the Board sent any Time sent it on its first open
+// after the upgrade as a plain Time, so it undid the 12-hour set since in another browser (the last Time you set is
+// the one kept). It is sent as first, which the server keeps only with no Time kept (the server's own check, so a Time
+// set between a read and this send is safe too: dashboard-server-time.test.sh), and the browser marks its Time sent.
+test('a kept Time does not overwrite a Time the server already keeps when the Board opens', async () => {
+  const w = boot({ store: { [STORE]: JSON.stringify({ time: '24-hour' }) }, serverTime: { time: '12-hour' } });
+  await settle();
+  assert.deepEqual(w.posts, [{ url: 'time', body: { time: '24-hour', first: true } }], 'the opening send is the first-only kind');
+  assert.deepEqual(w.timeJson, { time: '12-hour' }, 'the kept 24-hour does not overwrite the server\'s 12-hour');
+  assert.equal(w.localStorage.getItem(SENT), '1', 'the browser does not send it again on its next visit');
 });
 
 // Bug it catches (review E4): a browser whose only change was Density (which saves the default 12-hour) sent that
 // default and undid the Time set later in another browser.
-test('a browser that kept only the default Time sends nothing when the Board opens', () => {
+test('a browser that kept only the default Time sends nothing when the Board opens', async () => {
   const w = boot({ store: { [STORE]: JSON.stringify({ density: 'compact', time: '12-hour' }) } });
+  await settle();
   assert.deepEqual(w.posts, [], 'the default Time that a Density change saved is not sent');
 });
 

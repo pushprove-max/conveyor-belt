@@ -1278,25 +1278,29 @@ export const pickModel = (snap: Snap, w: number): Line[] => {
 }
 
 // LANDED TODAY: the five most recent, a row each: the clock time it landed, the issue, the last verdict and its round,
-// its overall time and its cost (or what it still waits for), right-aligned.
+// its overall time and its cost (or that it still waits), right-aligned. What it waits for (a track label such as
+// "Landed, waiting for Push landed") goes on a line of its own under its row: in the shared Cost column it widened
+// every row, and a narrow pane cut the other cards' costs off.
 export const landedTable = (s: State, snap: Snap, w: number): Line[] => {
   const shown = snap.landed.slice(0, NEXT)
   const rows = shown.map(l => {
     const last = l.rounds.at(-1)
     const verdict: Seg = l.closed ? { t: 'already fixed', d: true } : last ? { t: `✓ ${last.verdict || 'no verdict'} r${last.round}`, c: last.verdict === 'GO' ? C.ok : C.you }
       : { t: count(l.reviews, 'review'), d: true }
-    const state: Seg = l.push === 'now' ? { t: 'pushing', c: C.you } : l.issueOpen ? { t: 'issue open', c: C.you } : l.waits ? { t: l.waits, c: C.you }
+    const waits = l.push !== 'now' && !l.issueOpen && l.waits ? l.waits : null
+    const state: Seg = l.push === 'now' ? { t: 'pushing', c: C.you } : l.issueOpen ? { t: 'issue open', c: C.you } : waits ? { t: 'waiting', c: C.you }
       : l.push === 'failed' || l.pushed === false ? { t: 'not pushed', c: C.you } : cost(l.usd)
     const all = overallOf(l, s.now)
-    return { at: l.at ? clockOf(l.at) : 'time?', id: l.issue ? ref(l) : idOf(l), verdict, total: all === null ? '–' : fmtSec(all), state }
+    return { at: l.at ? clockOf(l.at) : 'time?', id: l.issue ? ref(l) : idOf(l), verdict, total: all === null ? '–' : fmtSec(all), state, waits }
   })
   const W = (h: string, f: (r: (typeof rows)[number]) => string) => Math.max(cols(h), ...rows.map(r => cols(f(r))))
   const aW = W('Landed', r => r.at), iW = W('Issue', r => r.id), vW = W('Verdict', r => r.verdict.t), tW = W('Total', r => r.total), cW = W('Cost', r => r.state.t)
   return [
     section(`LANDED TODAY · ${snap.landedCount}`, snap.landed.length ? `${shown.length} most recent of ${snap.landedCount}` : '', w),
     ...(rows.length ? [fitWidth([{ t: `${padR('Landed', aW)}  ${padR('Issue', iW)}  ${padR('Verdict', vW)}  ${padL('Total', tW)}  ${padL('Cost', cW)}`, d: true }], w)] : [empty('nothing landed today')]),
-    ...rows.map((r): Line => fitWidth([{ t: `${padR(r.at, aW)}  `, d: true }, { t: `${padR(r.id, iW)}  `, c: C.name, b: true }, { ...r.verdict, t: `${padR(r.verdict.t, vW)}  ` },
-      { t: `${padL(r.total, tW)}  `, d: true }, { ...r.state, t: padL(r.state.t, cW) }], w)),
+    ...rows.flatMap((r): Line[] => [fitWidth([{ t: `${padR(r.at, aW)}  `, d: true }, { t: `${padR(r.id, iW)}  `, c: C.name, b: true }, { ...r.verdict, t: `${padR(r.verdict.t, vW)}  ` },
+      { t: `${padL(r.total, tW)}  `, d: true }, { ...r.state, t: padL(r.state.t, cW) }], w),
+      ...(r.waits ? [fitWidth([{ t: `${' '.repeat(aW + 2)}` }, { t: r.waits, c: C.you }], w)] : [])]),
   ]
 }
 

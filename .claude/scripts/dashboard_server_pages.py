@@ -284,6 +284,9 @@ class Pages:
     def set_time(self):
         """POST /time {time}: the Board's Time setting (12-hour or 24-hour), as a browser last sent it: on each change, and
         on opening the Board only once per browser (app.js TIME_SENT_KEY), and only when its Time is not the default.
+        The send on opening is {time, first: true}: it is kept only when no time.json is here yet, else refused with
+        409, so a Time set since, maybe in another browser, stands. The file is linked into place, which fails when
+        one is there, so no Time sent between the check and the write is overwritten.
         Same checks and order as /answer. It is written whole to time.json in the served folder, where the /units
         pane on this machine reads it (hooks/units.tsx readTime): the one file this server writes there."""
         if not self.own_page():
@@ -294,14 +297,26 @@ class Pages:
         body = self.json_body(MAX_TIME_BODY)
         if body is None:
             return None
-        if set(body) != {'time'} or body['time'] not in ('12-hour', '24-hour'):
+        if set(body) - {'first'} != {'time'} or body['time'] not in ('12-hour', '24-hour') or body.get('first', True) is not True:
             return self.send_error(400)
+        first = 'first' in body
         tmp = os.path.join(self.directory, '.time.json.%d' % threading.get_ident())
         try:
             with open(tmp, 'w') as f:
                 json.dump({'time': body['time']}, f)
             os.chmod(tmp, 0o644)
-            os.replace(tmp, os.path.join(self.directory, 'time.json'))
+            # os is the base part's, run in this namespace: globals() names it where a linter reads this file alone.
+            fs = globals()['os']
+            kept = fs.path.join(self.directory, 'time.json')
+            if first:
+                try:
+                    fs.link(tmp, kept)
+                except FileExistsError:
+                    fs.remove(tmp)
+                    return self.reply(409, 'a Time is kept already')
+                fs.remove(tmp)
+            else:
+                fs.replace(tmp, kept)
         except OSError as e:
             try:
                 os.remove(tmp)  # each thread names its own: one left behind would never be replaced

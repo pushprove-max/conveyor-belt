@@ -493,13 +493,19 @@ relheadsrefuse() { # <commit> <file> <version>
 # relnoteskept <version> <card or empty> <then> <commit>: exit 0 when the notes card <card> the last run of <version>
 # waited on is still under way (lib/testaction.sh's cards: none of it has landed, and it is not closed or blocked): the
 # run waits on it again (relnoteswait()) and writes no new draft, as the card holds the draft it adds: a second card
-# would add the same file, and a new draft would not be the text the card adds. Else exit 1, nothing done.
-relnoteskept() { # <version> <card or empty> <then> <commit>
+# would add the same file, and a new draft would not be the text the card adds. Else exit 1, nothing done. With the
+# notes of the last run of <version>, when it waited on the card (relnoteswait()), the run goes on as it was to: a
+# release-prep alone pressed meanwhile (the Board's Draft notes) keeps a release after it, and the mode and machine
+# the run was given, unless this run is given its own.
+relnoteskept() { # <version> <card or empty> <then> <commit> [<the waiting run's notes>]
+  local t=$3 n=${5:-null}
   [ -n "$2" ] && ( . "$HERE/lib/testaction.sh" || exit 1
     e=$(jq -ce --arg c "$2" 'first(.cards[]? | select(.id == $c)) | {ids: ([.id, .card, (.was // [])[]] | map(select(. != null))), now: (.card // .id)}' "$TACARDS" 2>/dev/null) \
       && cs=$(stdb ask lines cards 2>/dev/null) \
       && jq -se --argjson e "$e" 'any(.[]; (.step == "landed" and (.card | IN($e.ids[]))) or (.card == $e.now and (.step | IN("closed", "blocked")))) | not' <<<"$cs" > /dev/null ) || return 1
-  relnoteswait "$1" "$2" "$3" "notes card $2 is still under way: ${4:0:12} ($REMOTE/$BRANCH) has no docs/releases/$1.md yet, and no new draft is written, as the card adds the draft it holds"
+  [ "$(jq -r '.then? // empty' <<<"$n" 2>/dev/null)" != release ] || t=release
+  RELMODE=${RELMODE:-$(jq -r '.mode? // empty' <<<"$n" 2>/dev/null)} CONVEYOR_RELEASE_MACHINE=${CONVEYOR_RELEASE_MACHINE:-$(jq -r '.machine? // empty' <<<"$n" 2>/dev/null)} \
+    relnoteswait "$1" "$2" "$t" "notes card $2 is still under way: ${4:0:12} ($REMOTE/$BRANCH) has no docs/releases/$1.md yet, and no new draft is written, as the card adds the draft it holds"
   return 0
 }
 # relnoteswait <version> <card> <then> <what the run found>: the run's record waits on the notes card <card>: state

@@ -546,11 +546,11 @@ relsuite() { # <command name> <commit>
   else echo "conveyor: $n: the whole suite failed on ${sha:0:12} (exit $rc; its output is in $wt.test); a failing status is posted" >&2; return 1; fi
 }
 releaseprep() { # <version>
-  local v=$1 cmd sha last d out was nx=${CONVEYOR_RELEASE_THEN:-prep} # nx: what follows a pass (relnoteswait()), as relstart() unsets it
+  local v=$1 cmd sha last d out was wn nx=${CONVEYOR_RELEASE_THEN:-prep} # nx: what follows a pass (relnoteswait()), as relstart() unsets it
   packget test.full cmd || return 1
   [ -n "$cmd" ] || { echo "conveyor: release-prep: the pack names no full test suite (test.full); nothing run" >&2; return 2; }
   rellock release-prep || return $?
-  was=$(jq -r --arg v "$v" 'select(.step == "release-prep" and (.state | IN("waiting", "stopped")) and .version == $v) | .notes.card // empty' "$RELRUN" 2>/dev/null) # the last run's notes card (waiting, or stopped while it waited: relstopwaiting()), before relstart()
+  was=$(jq -r --arg v "$v" 'select(.step == "release-prep" and (.state | IN("waiting", "stopped")) and .version == $v) | .notes.card // empty' "$RELRUN" 2>/dev/null) wn=$(jq -c --arg v "$v" 'select(.step == "release-prep" and .state == "waiting" and .version == $v) | .notes | objects' "$RELRUN" 2>/dev/null) # the last run's notes card (waiting, or stopped while it waited: relstopwaiting()), and the notes of a run that waits on it (relnoteskept()), before relstart()
   [ -n "$was" ] || was=$( . "$HERE/lib/testaction.sh" && jq -r --arg v "$v" '[.cards[]? | select(.label == "Release notes" and (.title | startswith("Release notes \($v): ")))] | last | .id // empty' "$TACARDS" 2>/dev/null) # another version's run in between leaves the record naming that run's card: the newest notes card of $v is then its one
   relstart release-prep "$v"
   # The commit `release` releases is the remote's head of the branch, and the tags are the remote's; with Merge PR
@@ -567,7 +567,7 @@ releaseprep() { # <version>
     echo "conveyor: release-prep: ${sha:0:12} holds docs/releases/$v.md"
     relsuite release-prep "$sha"; return
   fi
-  ! relnoteskept "$v" "$was" "$nx" "$sha" || return 1 # the last run's notes card is under way: it adds the draft it holds
+  ! relnoteskept "$v" "$was" "$nx" "$sha" "$wn" || return 1 # the last run's notes card is under way: it adds the draft it holds
   d=${STATE%/*}/release/$v.md && mkdir -p "${d%/*}" && rm -f "$d" "${d%.md}.sources.json" && out=$(relnotes "$v" "$last" "$sha" "$d") \
     || { rm -f "$d" "${d%.md}.sources.json"; echo "conveyor: release-prep: the notes draft could not be written: $out; nothing run" >&2; return 1; }
   [ -z "$last" ] || out+=" The issues and commits each line comes from are in ${d%.md}.sources.json."

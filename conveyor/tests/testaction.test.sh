@@ -175,6 +175,18 @@ t_tacarried() {
   [ "$out" = '[{"time":"2026-11-09T00:00:00Z","run":"the test step of card c7-12 (#12)","result":"passed"},[["suite",false,1],["c7-12",true,1]],[{"card":"c7-12","issue":12}]]' ] \
     || fail "the newest run is not the failed step that passed the file, or the carried times are lost or not marked as carried: $out"
 }
+# Bug it catches (#1461 B-R336): a step that ran some cases of the file has no time of it (a runner times no file it
+# ran in part; testlist.sh partran()), so its line names the file partial; without it that passing step was not told,
+# and an older release-suite failure stood as the newest run.
+t_tapartial() {
+  tasetup; local out
+  jq -cn '{time: "2026-11-08T00:00:00Z", how: "release", sha: "0123456789abcdef", files: {"tests/x.test.sh": {result: "fail", sec: 1, cpu: 1}}}' >> "$ST/suiteruns.jsonl"
+  jq -cn '{card: "c7-12", issue: 12, step: "test", time: "2026-11-10T00:00:00Z", result: "pass", times: {"tests/y.test.sh": 2}, clocks: {"tests/y.test.sh": 2}, partial: ["tests/x.test.sh"]}' >> "$ST/cards.jsonl"
+  out=$( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/testaction.sh")" \
+    && testfacts tests/x.test.sh | jq -c '[.newest, (.runs | map(.card // "suite"))]')
+  [ "$out" = '[{"time":"2026-11-10T00:00:00Z","run":"the test step of card c7-12 (#12)","result":"passed"},["suite"]]' ] \
+    || fail "testfacts tests/x.test.sh, its only card step naming it partial: the newest run is not that step, or the step is given a time of it: $out"
+}
 # Bug it catches (#1036): the Tests page showed the time the test-speed survey saved in .conveyor/test-times.json as
 # the file's newest run, but Judge and Explain were given only the card runs, so they judged a time the page did not
 # show. The survey's time is one of the runs, marked survey, dated by the commit that wrote it.

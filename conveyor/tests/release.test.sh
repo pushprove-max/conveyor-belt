@@ -211,6 +211,22 @@ t_relnotescard() {
     || fail "release-prep 1.1.0 with notes card $id closed did not draft again and start a new card with that draft: $out; $(cat "$cards" "$run")"
 }
 
+# Bug (#1461 A-R50): a run waiting on its notes card to go on to the release, in parallel on this machine
+# (`release-run 1.1.0 --parallel --machine local`), lost all three to a press of release-prep alone (the Board's Draft
+# notes) while the card was under way: the record then said prep, no mode and no machine, so when the card landed
+# relfixes() started release-prep alone, on the default mode and machine, and no release followed.
+t_relnoteskeepthen() {
+  local out run
+  relsetup true nonotes; run=$T/$CASE/cards/release/run.json
+  relmodel $'# 1.1.0\n\nCards can wait. [#5]\n\n## Cards\n\n- You can hold a card. [#5]'
+  out=$(CONVEYOR_RELEASE_THEN=release CONVEYOR_RELEASE_MACHINE=local loop release-prep 1.1.0 --parallel 2>&1); [ $? = 1 ] || fail "release-prep did not stop on a head with no notes: $out"
+  jq -e '.state == "waiting" and (.notes | [.then, .mode, .machine]) == ["release", "parallel", "local"]' "$run" > /dev/null \
+    || fail "the first press's record does not wait to release in parallel on this machine: $(cat "$run")"
+  out=$(loop release-prep 1.1.0 2>&1); [ $? = 1 ] || fail "release-prep pressed again did not stop on a head with no notes: $out"
+  grep -q 'is still under way' <<<"$out" && jq -e '.state == "waiting" and (.notes | [.then, .mode, .machine]) == ["release", "parallel", "local"]' "$run" > /dev/null \
+    || fail "release-prep 1.1.0 pressed alone while the notes card is under way dropped the release, the mode or the machine the run waits to go on to: $out; $(cat "$run")"
+}
+
 # R51. Bug: release-prep found a version's notes card only from the last run's record, so release-prep 1.12.0 (card
 # waiting), then 1.13.0, then 1.12.0 again read no card for 1.12.0 and started a second one adding the same file. The
 # third press finds the card in the Tests page's cards and waits on it again: one card titled for 1.12.0.

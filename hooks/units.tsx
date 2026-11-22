@@ -3,7 +3,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 import { refresh as refreshAutoBand } from './auto'
 import { boardOf, boardOfFeed, foremanOf, paneModel, parseFetch, parseLimit, parseStream, seatFromGit, seenOf, tableText, toasts } from './sources'
-import { setClock } from './elements'
+import { clockOf, setClock } from './elements'
 import type { Line } from './elements'
 import type { Research, Seen, State } from './sources'
 
@@ -149,8 +149,8 @@ const readLimit = async ($: EngineInterface): Promise<{ limit: State['limit']; o
   if (limitRead?.file !== file || limitRead.at !== st.mtimeMs) limitRead = { file, at: st.mtimeMs, limit: parseLimit((await $.fs.read(file)) as string) }
   return { limit: limitRead.limit, over: null }
 }
-// The Board's Time setting, as its page last sent it: on a change, or on opening only once per browser and only when not
-// the default (app.js TIME_SENT_KEY) (dashboard_server.py's POST /time writes
+// The Board's Time setting, as its page last sent it: on a change, or on opening only once per browser, only when not
+// the default and only when the Board keeps none yet (app.js TIME_SENT_KEY) (dashboard_server.py's POST /time writes
 // time.json in the Board's folder). It wins over the plugin's `time` option, which stands where the Board here has
 // sent none: else 24-hour on the Board left the pane writing AM and PM.
 let optionTime: unknown
@@ -200,14 +200,16 @@ const feedText = (text: string) => {
 // The session's own project, as the last fetch named it (the host file's record whose main is this checkout): its cards
 // carry no project name, in the feed's board as in the host's. Empty until a fetch names one.
 let own = ''
-// The last board built from the feed, with its text and the own it was built for: the same text is not parsed into
-// cards again. null: the text is not a feed.
-let feedBuilt: { key: string; own: string; board: Board } | null = null
+// The last board built from the feed, with its text, the own it was built for and the Time it wrote its notes' times
+// in (clockOf(0), "12:00 AM" or "00:00"): the same text is not parsed into cards again under the same Time. null: the
+// text is not a feed.
+let feedBuilt: { key: string; own: string; clock: string; board: Board } | null = null
 const feedBoardOf = (key: string): Board | null => {
-  if (feedBuilt?.key !== key || feedBuilt.own !== own) {
+  const clock = clockOf(0)
+  if (feedBuilt?.key !== key || feedBuilt.own !== own || feedBuilt.clock !== clock) {
     const f = parseStream(key)
     if (!f) return null
-    feedBuilt = { key, own, board: boardOfFeed(f, own) }
+    feedBuilt = { key, own, clock, board: boardOfFeed(f, own) }
   }
   return feedBuilt.board
 }
@@ -243,6 +245,9 @@ const foremanKey = async ($: EngineInterface, dir: string) =>
   (await Promise.all(['session', 'waiter.pid'].map(n => $.fs.stat(`${dir}/${n}`).then(st => String(st.mtimeMs), () => '')))).join(' ')
 const collect = async ($: EngineInterface, cwd: string): Promise<{ st: State; fedAt: number | null; fedKey: string | null }> => {
   if (!feedDir) await nameFeedDir($, cwd)
+  // Before the feed's board is built and the state is published: the notes and views write their times in the Board's
+  // Time (the feed's down note and its snapshot's age too).
+  await readTime($).catch(() => undefined)
   const got = await readFeed($).catch(() => null)
   const fed = got && 'board' in got ? got : null
   // The records the short check saw change since the last fetch began: their snapshots are built fresh.
@@ -275,8 +280,6 @@ const collect = async ($: EngineInterface, cwd: string): Promise<{ st: State; fe
   // Read whether or not the host answered: a failed fetch must not drop the limit file's not-read line.
   const lim = await readLimit($).catch(() => NO_LIMIT)
   dataOver = lim.over
-  // Before the state is published: the views it draws write their times in the Board's Time.
-  await readTime($).catch(() => undefined)
   // Under the board; with no board, the one line every view draws says them first.
   const over = [got && 'over' in got ? got.over : null, lim.over].filter((x): x is string => !!x)
   const st: State = {
@@ -298,11 +301,18 @@ const collect = async ($: EngineInterface, cwd: string): Promise<{ st: State; fe
 // started yet stands for every call made meanwhile: it reads the board as it is when it starts.
 let queue: Promise<unknown> = Promise.resolve()
 let waiting: Promise<void> | undefined
+// A poll is running (its fetch out): the short check waits for it (checkTick).
+let polling = false
 const tick = ($: EngineInterface): Promise<void> => {
   if (waiting) return waiting
-  const run = queue.catch(() => undefined).then(() => {
+  const run = queue.catch(() => undefined).then(async () => {
     waiting = undefined
-    return poll($)
+    polling = true
+    try {
+      return await poll($)
+    } finally {
+      polling = false
+    }
   })
   waiting = run
   queue = run
@@ -344,6 +354,8 @@ const feedTick = ($: EngineInterface) => {
       return
     }
     if (st.mtimeMs !== feedAt || !drawn) {
+      // The Board's Time first: the feed's board writes its notes' times as it is built.
+      await readTime($).catch(() => undefined)
       const got = await readFeed($)
       // A feed too big to read is never read: a poll reads the host and says why, at once when the views hold a
       // board this feed gave (feedAt then -1, so the next second starts no second poll).
@@ -391,7 +403,6 @@ const drawFeed = async ($: EngineInterface, got: { board: Board; at: number; key
   // (the poll's fetch can take 75 s), and the limit is this machine's file.
   const lim = drawn ? null : await readLimit($).catch(() => NO_LIMIT)
   if (lim) dataOver = lim.over
-  await readTime($).catch(() => undefined)
   const rest = lim && { limit: lim.limit, fast: { state: 'unread' }, research: { state: 'none' } }
   feedSeq++
   feedBoard = { board: boardPart(fed), at: got.at }
@@ -406,6 +417,8 @@ const drawFeed = async ($: EngineInterface, got: { board: Board; at: number; key
 // checksum a record (one command, over one ssh call at most). A record whose checksum moved since the last check is
 // fetched at once, fresh; a check that finds none moved fetches nothing. A fetch that prints no stamps (an install
 // older than the check, which takes it for a whole fetch) stops the checks for this load: the minute's fetch stays.
+// No check runs while a poll is queued or running: there it would run beside that poll's fetch, and on such an older
+// install both would build every record's snapshot at once.
 let checkBusy = false
 let noStamp = false
 let stamps: Map<string, string> | null = null
@@ -419,7 +432,7 @@ const readStamps = async ($: EngineInterface, cwd: string): Promise<Map<string, 
   return new Map(lines.slice(1).map(l => [l.slice(0, l.indexOf('\t')), l.slice(l.indexOf('\t') + 1)] as const))
 }
 const checkTick = ($: EngineInterface) => {
-  if (checkBusy || noStamp || waiting || !main || !anyWanted()) return
+  if (checkBusy || noStamp || waiting || polling || !main || !anyWanted()) return
   const cwd = main
   checkBusy = true
   void (async () => {
@@ -602,9 +615,10 @@ export const register: Register = (on, options) => {
     const s = (await read($, state)) as State | null
     const { Box, Text, Button } = $.ui.resolve(e)
     if (!s) return <Text dimColor>{WAITING}</Text>
-    // The pane's own width, with no upper limit: the terminal gives it as `bodyColumns`; a surface that leaves that
-    // out gives the pane's size as `viewport`. 56 only when neither is given.
-    const w = Math.max(40, Number(e.props.bodyColumns) || Number(e.viewport?.columns) || 56)
+    // The pane's own width, with no upper or lower limit: the terminal gives it as `bodyColumns` (a dock can be as
+    // narrow as 24 columns); a surface that leaves that out gives the pane's size as `viewport`. 56 only when neither
+    // is given: a width wider than the dock's wraps every row.
+    const w = Math.floor(Number(e.props.bodyColumns) || Number(e.viewport?.columns)) || 56
     const f = await read($, frame)
     const open = (await read($, details)) === true
     const flip = () => { void update($, details, v => !v).catch(() => undefined) }

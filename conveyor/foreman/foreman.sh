@@ -113,6 +113,9 @@ case $1 in
 esac
 MAIN=${CONVEYOR_MAIN:-$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null | sed 's|/\.git$||')}
 CAP=5000 LIVE_CAP=1500 CTX_LIMIT=9000 RULES_LIMIT=9000
+# What the words hook adds around the claim's start (words()), in bytes: its own two lines, the claim's line and its
+# cache-time line said again, the JSON around them with the session's title, and the \ JSON writes before each newline.
+WORDS_ADD=1500
 # --rules-apart: the start's caller sends rules.md by the rules hook, so the start leaves it out (context).
 RULES_APART=; [ "$1" = start ] && [ "${2:-}" = --rules-apart ] && RULES_APART=1
 
@@ -408,27 +411,28 @@ off() {
 # before the rules hook) gets rules.md after the rest, cut to what the limit leaves. When the whole is over the limit,
 # state.md is swapped for one line that tells the Foreman to Read the file; when the fixed text and the rest alone leave
 # no room for the owner rules, a line that tells the Foreman to Read owner-rules.md stands for them, and names rules.md
-# in the same line when the project has one.
+# in the same line when the project has one. That line comes first: the fixed text and the rest have no cap, and an
+# output over the limit is shown as a short preview of its start, which keeps it.
 context() {
-  local head mid st left own=0
+  local head mid st left own=0 rd=''
   launcher
   FQ=$(printf %q "$LAUNCHER")
   # Without --rules-apart the owner rules come in this output too, so the saved state yields room for them.
   [ -n "$RULES_APART" ] || [ ! -s "$FHERE/owner-rules.md" ] || own=$(($(p_stat "$FHERE/owner-rules.md" | cut -d' ' -f1) + 1))
   head=$(context_head) mid=$(context_mid) st=$(context_state)
   if [ "$(printf '%s\n%s\n%s\n' "$head" "$mid" "$st" | wc -c)" -gt "$((CTX_LIMIT - own))" ]; then st=$(context_state_warn; context_read "$FD/state.md"); fi
-  printf '%s\n' "$head"
-  printf '%s\n' "$mid"
-  [ -z "$st" ] || printf '%s\n' "$st"
-  [ -z "$RULES_APART" ] || return 0
   left=$((CTX_LIMIT - $(printf '%s\n%s\n%s\n' "$head" "$mid" "$st" | wc -c)))
   # The fixed text and the rest alone may leave no room for the owner rules: a Read line stands for them, and for this
   # project's rules.md too when it has text (rules_text, which would name it, is not reached), never a start over the limit.
-  if [ "$own" -gt 0 ] && [ "$left" -lt "$own" ]; then
-    if [ -s "$FD/rules.md" ]; then printf '\n# %s and %s did not fit in this start (Claude Code cuts a start over 10,000 characters): Read both now, before you act.\n' "$FHERE/owner-rules.md" "$FD/rules.md"
-    else printf '\n# %s did not fit in this start (Claude Code cuts a start over 10,000 characters): Read it now, before you act.\n' "$FHERE/owner-rules.md"; fi
-    return 0
+  if [ -z "$RULES_APART" ] && [ "$own" -gt 0 ] && [ "$left" -lt "$own" ]; then
+    if [ -s "$FD/rules.md" ]; then rd=$(printf '# %s and %s did not fit in this start (Claude Code cuts a start over 10,000 characters): Read both now, before you act.' "$FHERE/owner-rules.md" "$FD/rules.md")
+    else rd=$(printf '# %s did not fit in this start (Claude Code cuts a start over 10,000 characters): Read it now, before you act.' "$FHERE/owner-rules.md"); fi
+    printf '%s\n\n' "$rd"
   fi
+  printf '%s\n' "$head"
+  printf '%s\n' "$mid"
+  [ -z "$st" ] || printf '%s\n' "$st"
+  [ -z "$RULES_APART" ] && [ -z "$rd" ] || return 0
   rules_text "$left"
 }
 
@@ -737,7 +741,8 @@ words() {
     jq -cn --arg t "$(title)" '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", sessionTitle: $t}}'
     return
   fi
-  if out=$(claim_cmd claim "$SID" 2>&1); then
+  # The start's text (context()) leaves room for what this hook adds around it, which CTX_LIMIT does not count.
+  if out=$(CTX_LIMIT=$((CTX_LIMIT - WORDS_ADD)) claim_cmd claim "$SID" 2>&1); then
     # The claim's line on a cache time other than 1h is part of the reply, so the owner sees it.
     ttl=$(grep -m1 '^The Foreman runs with the prompt cache time ' <<<"$out") && n='these two lines' || n='this one line'
     out="The owner asked, in words, for this session to be the Foreman, and it now is. Reply with only $n: ${out%%$'\n'*}${ttl:+$'\n'$ttl}"$'\n'"From this turn on, work by the rest of this as the Foreman."$'\n\n'"${out#*$'\n'}"

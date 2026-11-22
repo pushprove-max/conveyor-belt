@@ -101,11 +101,12 @@ ran() { sed -n "s/^$1 //p" "$STUB/ran" | tr '\n' ' ' | sed 's/ $//'; } # <run>: 
 # run and the fix session, t_rerunfail; the retry, t_rerunretry, in rerunkept.test.sh. A session that moved HEAD,
 # t_rerunmoved, and the rebuild onto main, t_rerunrebuilt and t_rerunmergedoubt, are tests() on a worktree too.)
 rerunedit() { (cd "$T/$CASE/cards/c7" && eval "$1") && git -C "$T/$CASE/cards/c7" add -A; } # <shell edit in the worktree>: the build's or a fix's edit, staged
-rerunstep() { # exits as tests() returns; its test line's part of the run (testrec()) is in c7.testrec, and a pass leaves its part of the first run, as card() puts it (firstrun()), in c7.firstrun
+rerunstep() { # exits as tests() returns; its test line's part of the run (testrec()) is in c7.testrec, and a pass leaves its part of the first run, as card() puts it (firstrun()), in c7.firstrun, and its times part (slowtests(), slowrec()) in c7.slowrec
   ( set -- run; HERE=$SRC; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; local rc
     eval "$(sed -n '/^\. "\$HERE\/lib\/portable.sh"/,/^\. "\$HERE\/lib\/records.sh"/p' "$SRC/conveyor.sh"; grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")"
     names || exit 1; tests "$T/$CASE/cards/c7"; rc=$?; testrec "$T/$CASE/cards/c7" "$rc" 0 > "$T/$CASE/cards/c7.testrec"
-    [ $rc = 0 ] || exit $rc; firstrun "$T/$CASE/cards/c7" pass > "$T/$CASE/cards/c7.firstrun" ) > /dev/null 2>&1
+    [ $rc = 0 ] || exit $rc; firstrun "$T/$CASE/cards/c7" pass > "$T/$CASE/cards/c7.firstrun"
+    slowtests "$T/$CASE/cards/c7"; slowrec "$T/$CASE/cards/c7" > "$T/$CASE/cards/c7.slowrec" ) > /dev/null 2>&1
 }
 rerunwt() { # <the build's edit> <plan line>...: rerunsetup's main and stubs, and the card's worktree with its change staged
   local b=$1; shift; rerunsetup "$@"; rerunfiles
@@ -312,4 +313,24 @@ t_rerunfixtest() {
   rerunedit 'echo x >> c.test'; rerunstep || fail "the step after the fix did not pass: $(ran 3)"
   [ "$(grep $'^changed\t' "$STUB/rerun.3")" = $'changed\tc.test' ] || fail "the run after the fix was not told the one file the fix changed: $(cat "$STUB/rerun.3" 2>&1)"
   [ "$(ran 3)" = "three flaky" ] || fail "the run after a fix of a test file alone was not of the failed case and that file's cases: $(ran 3)"
+}
+
+# Bug it catches (#1461 B-R336): a.test passed whole in the first step and its pass was kept; the fix edits x.txt,
+# which selects a.test's case one, so the run after the fix ran that case, which a runner gives no time (not every
+# case ran). a.test went on the test line as carried, so the test judge took that step as one that did not run it.
+# c.test, kept and not run, is carried. Each file run whole is timed, as the engine's runner times it ($STUB/pre).
+# The line gives a.test no time (the first step's time of it, from .oldtimes, would read as this step's) and names it
+# partial, so the test judge still takes that step as one that ran it (testaction.sh testfacts()).
+t_rerunfixpart() {
+  rerunwt 'echo two >> a.txt' '1 fail flaky' '2 fail flaky'
+  # shellcheck disable=SC2016 # expanded where the test command sources it
+  echo 'grep -qxF "pass	$CONVEYOR_TEST_FILE" "$RR" || printf "TESTRUN sec\t%s\t1\t1\n" "$CONVEYOR_TEST_FILE" >> "$L"' > "$STUB/pre"
+  ! rerunstep || fail "the first test step passed"
+  rerunedit 'echo x >> x.txt'; rerunstep || fail "the step after the fix did not pass: $(ran 3)"
+  [ "$(ran 3)" = "one flaky" ] || fail "the run after the fix did not run a.test's case one and the failed case: $(ran 3)"
+  # The files the test line names carried (testlist.sh carriedrec(), which card() adds to it).
+  [ "$(jq -c . "$T/$CASE/cards/c7.oldfiles" 2>&1)" = '["c.test"]' ] \
+    || fail "the run after the fix, which ran a case of a.test, names it carried (or does not name c.test, which it did not run): $(cat "$T/$CASE/cards/c7.oldfiles" 2>&1)"
+  [ "$(jq -c '[(.clocks, .times | objects | has("a.test")), .partial]' "$T/$CASE/cards/c7.slowrec" 2>&1)" = '[false,false,["a.test"]]' ] \
+    || fail "the run after the fix, which ran only a case of a.test, gives it the first step's time as its own, or does not name it partial: $(cat "$T/$CASE/cards/c7.slowrec" 2>&1)"
 }

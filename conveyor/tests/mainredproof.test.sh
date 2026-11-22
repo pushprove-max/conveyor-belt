@@ -508,6 +508,22 @@ t_mainwaitgone() {
   wait_until "grep -qx 'ended 0' '$STUB/mw.out'" 'cat "$STUB/mw.out"' || fail "the wait on a.test did not end once main deleted it"
   wait "$mw"; [ ! -s "$STUB/mainruns" ] || fail "a.test, gone from main, ran there: $(cat "$STUB/mainruns")"
 }
+# Bug it catches (#1461 B-R140): the runs on main a card's wait took were recorded only once the wait ended, so a card
+# shut while it waited (`conveyor.sh shut`: endcard() kills its process group with SIGKILL, so no trap runs) lost them,
+# and the Board's mainSec left them out. card()'s wait (mainwaited(), polled as it runs: only a wait under way can be
+# killed in it) runs a.test on main once main moves still red, then is killed: its start line holds that run.
+t_mainwaitkilled() {
+  local s s2 mw
+  mrshared
+  ( eng 'c=c9 n=9; append "$(line c9 9 picked ok "{\"title\":\"title 9\"}")"; echo "$BASHPID" > "$STUB/mw.pid"
+    LIVE=0.2; mainwaited "$CONVEYOR_CARDS/c9" '"$s"' "a.test: one"' > "$STUB/mw.out" 2>&1 ) & mw=$!
+  wait_until "grep -qs 'fail on main at ${s:0:12} too' '$T/$CASE/cards/c9.live'" 'cat "$STUB/mw.out"' || fail "card c9 did not wait for main, on a.test: one at $s"
+  git -C "$R" commit -q --allow-empty -m "main moves, still red"; s2=$(git -C "$R" rev-parse HEAD)
+  wait_until "grep -qs 'fail on main at ${s2:0:12} too' '$T/$CASE/cards/c9.live'" 'cat "$STUB/mw.out"' || fail "card c9 did not wait on at main's new commit $s2"
+  kill -KILL "$(cat "$STUB/mw.pid")"; wait "$mw" 2>/dev/null
+  [ "$(st 'select(.card == "c9" and .step == "start") | [.of, .mainRun.sha, (.mainRun.sec | type)] | @tsv')" = "test	$s2	number" ] \
+    || fail "the run of a.test on main at $s2, taken by a wait killed after it, is on no start line of card c9: $(st 'select(.card == "c9")') $(cat "$STUB/mw.out")"
+}
 # Bug it catches (E6): a card's wait for main ran its case on main once main moved, and that run's seconds went into
 # the wait's (waitSec) and into no run on main, so the Board's Test failures (mainSec) left them out. Main is green
 # at a later commit than s, its run of a.test taking 2 seconds: card()'s wait (mainwaited()) runs a.test there and

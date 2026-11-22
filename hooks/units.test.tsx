@@ -253,6 +253,17 @@ test('the pane draws at the width it is given, over 72 too, from bodyColumns or 
   expect(narrow.match(/^.*?DAY SPEND \$\d+\.\d\d/)?.[0]).toHaveLength(56)
 })
 
+// Issue 1461 (O381). Bug it catches: Claude Code keeps a dock 33 columns wide (body 32), but the pane drew at 40
+// columns at least, so every row ran past the dock and wrapped. It draws at the 32 columns it is given.
+test('the pane draws at a dock body narrower than 40 columns, at the width it is given', async ($, on) => {
+  world(on, 'main', answer(FULL))
+  await start($, 'main')
+  await units($)
+  const pane = await draw($, 'Pane', { title: 'Conveyor', isFocused: false, placement: 'dock', bodyColumns: 32 })
+  // The head row is padded to the pane width and ends at the day's spend: its length is the width the pane drew at.
+  expect(pane.match(/^.*?DAY SPEND \$\d+\.\d\d/)?.[0]).toHaveLength(32)
+})
+
 test('main fetches at the start and once a minute', async ($, on) => {
   const w = world(on, 'main', answer(snapshot()))
   await start($, 'main')
@@ -322,6 +333,24 @@ test('a kept snapshot 59 s old at the fetch says its age once the clock passes a
   expect(await units($)).not.toContain('snapshot is')
   await w.clock.advance(2000)
   expect(await units($)).toContain('units: the bookstore snapshot is 1m old')
+})
+
+// Issue 1461 (B-R442). Bug it catches: the 5 s check skipped only while a poll was queued, not while it ran, so it ran
+// beside a slow opening fetch; on an engine pinned before the check, whose fetch script runs the whole snapshot for
+// `stamp` too, the two built every record's snapshot at once. The fetch here holds (a slow host): the opening fetch
+// and the checksums it takes as it starts run, and no check beside them.
+test('with no feed, the 5 s check does not run while a fetch is still out', async ($, on) => {
+  const w = world(on, 'main', answer(snapshot()))
+  let release = () => {}
+  w.hold = new Promise<void>(r => { release = r })
+  await start($, 'main')
+  await w.clock.advance(5000)
+  await w.clock.advance(5000)
+  expect(fetches(w).length).toBe(1)
+  expect(checks(w).length).toBe(1)
+  w.hold = undefined
+  release()
+  await w.clock.settle()
 })
 
 // Bug it catches: an install older than the check takes `stamp` for a whole fetch, so every 5 s ran one.
@@ -727,6 +756,20 @@ test('a live feed that is down still shows its last board, and says the stream i
   expect(text).toContain('#3863')
   expect(text).toMatch(/units: the live stream is down \(buildbox: no line in 30 s\); the board is as buildbox was at \d+:\d\d [AP]M/)
   expect(fetches(w).at(-1)?.argv).toContain('feed')
+})
+
+// Issue 1461 (B-R440). Bug it catches: the feed's board was built, with its down note's time, before the poll read the
+// Board's Time, and while the stream stayed down its text (and so its built board) did not change: the note kept
+// "3:04 PM" with the Board's Time 24-hour, while Worker activity wrote 24-hour.
+test('a live feed that is down says when it was last heard in the Board\'s 24-hour Time', async ($, on) => {
+  const heard = new Date(NOW - 86_400_000)
+  heard.setHours(15, 4, 0, 0)
+  const w = world(on, 'main', answer(snapshot()), { [FEED]: feed(snapshot({ belt: [BELT] }), false, heard.toISOString()), [`${BOARD}/time.json`]: '{"time":"24-hour"}' })
+  await start($, 'main')
+  await w.clock.settle()
+  const text = await units($)
+  expect(text).toContain('the board is as buildbox was at 15:04')
+  expect(text).not.toContain('3:04 PM')
 })
 
 // Bug: the feed's board took its first record for the session's own, whatever record the fetch named: a session in

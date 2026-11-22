@@ -921,6 +921,28 @@ test('the pane at 60 columns: no line wider than the pane, and each matrix row e
   expect(text).toMatch(/\nFAST LANE      1 commit on fast-lane: A long subject .*…\nRESEARCH LANE  working · last activity 1m ago$/)
 })
 
+// Issue 1461 (O381). Claude Code keeps a dock as narrow as 24 columns, so a pane body can be 32 columns, and the
+// pane now draws at that width (units.test.tsx): a row laid out for 40 columns at least would run past it and wrap.
+// Bug it catches: a part of the pane that pads or lays out a row wider than the pane it is given.
+test('the pane at 32 columns: no line wider than the pane', () => {
+  const s = board({ needsYou: { waiting: [WAITING], blocked: [BLOCKED] }, belt: BELT, queue: { next: queued(10), held: { dormant: 3 } }, landed: LANDED, cost: { today: 29.48 } },
+    { limit: { pct: 50, resetsAt: NOW + 3600_000 }, research: { state: 'ok', lastAt: NOW - 60_000 }, fast: { state: 'ok', branch: 'fast-lane', ahead: 1, dirty: 0, subject: 'A long subject '.repeat(8) } })
+  const wide = paneModel(s, 32, 0).map(plain).filter(l => cols(l) > 32)
+  expect(wide).toEqual([])
+})
+
+// Issue 1461 (B-R429). Bug it catches: with push off, a landed card's "Landed, waiting for Push landed" (31 columns)
+// set the shared Cost column's width, so at 60 columns the pushed card's row ran past the pane and lost its $4.21.
+// The wait says "waiting" in that column and its label goes on a line of its own.
+test('the pane at 60 columns: a landed card waiting for Push landed leaves the other cards\' costs whole', () => {
+  const landed = [LANDED[0], { ...LANDED[1], track: track('++-++.', 'Landed, waiting for Push landed', { at: null }) }]
+  const lines = section(paneModel(board({ landed }), 60, 0).map(plain).join('\n'), 'LANDED TODAY').split('\n')
+  for (const l of lines) expect(cols(l)).toBeLessThanOrEqual(60)
+  expect(lines.find(l => l.includes('#3862'))).toMatch(/ \$4\.21$/)
+  expect(lines.find(l => l.includes('#3860'))).toMatch(/ waiting$/)
+  expect(lines).toContainEqual(expect.stringMatching(/^ +Landed, waiting for Push landed$/))
+})
+
 // Issue 603. Bug it catches: on a wide pane the title column kept a width of its own (or sat before the steps) and
 // did not take the row's free width after Cost; on a pane that leaves under 6 columns after Cost, a cut stub of a
 // title (or of its header) was drawn.

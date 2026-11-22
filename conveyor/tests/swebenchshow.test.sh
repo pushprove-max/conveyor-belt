@@ -451,6 +451,20 @@ t_swecostretry() {
     || fail "the failed build or the review's first attempt was not priced (or priced twice in the pause), or the reviewer's charge was dropped while the judge runs: $o"
 }
 
+# Bug (#1461 A-R34): while the judge ran, the reviewer was priced from the last live record swe_watch kept of it, at
+# most every ~2 s, so a usage update the review wrote after that sample was lost until the review's line was written.
+# Its fields (the review step's .reviewed, as SWE_LIVES reads it) now price it: the kept sample says 1M cache reads
+# ($0.50), the review ended at 2M ($1), and the judge's live record has no usage yet (unpriced).
+t_swecostreviewed() {
+  local o s='{"card":"c1","issue":1,"step":"start","result":"ok","of":"review","time":"2026-11-01T00:00:00Z"}'
+  local k='{"step":"review","at":"2026-11-01T00:00:01Z","model":"bench-m","action":"reads x.py","usage":{"read":1000000}}'
+  local j='{"step":"review","at":"2026-11-01T00:00:04Z","model":"bench-m","action":"the judge reads the findings","turns":0}'
+  mkdir -p "$T/$CASE/cards" && printf '%s\n' '{"model":"bench-m","effort":"high","usage":{"read":2000000}}' > "$T/$CASE/cards/c1.reviewed" || fail "the review's fields could not be written"
+  o=$(swefn 'printf "%s\n" "$1" "$2" "$(SWE_CARDS=$3 bash -c "$SWE_LIVES")" "{\"reviewer\":{\"of\":$1,\"live\":$4,\"second\":false}}" | swe_cost' "$s" "$j" "$T/$CASE/cards" "$k" 2>&1)
+  jq -e '{usd, state, unpriced} == {usd: 1, state: "partial", unpriced: 1}' <<<"$o" > /dev/null \
+    || fail "while the judge runs, the reviewer is not priced from the review's own fields (2M cache reads, \$1) but from the older kept sample: $o"
+}
+
 # Bug (#644 (6)): a run and a result kept before costs were read as $0, as did an old run stopped on its first task:
 # they are unknown.
 t_swecostold() {

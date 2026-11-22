@@ -148,8 +148,9 @@ export function bootFiles(w, failing = []) {
 // panels/index.js and for panel files of the test's own; `tab` is the tab the address opens (none: the page's own).
 // `session`, when given, is the page's sessionStorage (one a test shares between two pages, or one that throws).
 // `loader`: the page loads its files as a browser does, panels/index.js and boot.js (bootFiles; list and extra are
-// not used); one in `failing` fails to load.
-export function boot({ store = {}, reducedMotion = false, list = LIST, extra = '', rects = false, feed = false, tab = null, query = '', width = 1440, session = null, loader = false, failing = [] } = {}) {
+// not used); one in `failing` fails to load. `serverTime` is the Time the server keeps ({time}: its time.json, which
+// a POST to time writes), null before any browser sent one.
+export function boot({ store = {}, reducedMotion = false, list = LIST, extra = '', rects = false, feed = false, tab = null, query = '', width = 1440, session = null, loader = false, failing = [], serverTime = null } = {}) {
   const { JSDOM, VirtualConsole } = dom();
   const virtualConsole = new VirtualConsole();
   const w = new JSDOM(html, { url: `https://dash.test/index.html${tab ? `?tab=${tab}` : query}`, runScripts: 'outside-only', virtualConsole }).window;
@@ -181,6 +182,7 @@ export function boot({ store = {}, reducedMotion = false, list = LIST, extra = '
   // names it is a 304, as the server's; w.historyIfNoneMatch lists each ask's If-None-Match (null with none).
   w.historyAsks = 0;
   w.historyIfNoneMatch = [];
+  w.timeJson = serverTime;
   w.fetch = (url, opt) => {
     if (/^alive\.js\?\d+$/.test(url)) return Promise.resolve(w.aliveReply || { ok: true, status: 200, redirected: false, url: 'https://dash.test/alive.js' });
     if (url === 'history') {
@@ -232,6 +234,13 @@ export function boot({ store = {}, reducedMotion = false, list = LIST, extra = '
     assert.equal(opt.method, 'POST');
     assert.equal(opt.headers['Content-Type'], 'application/json');
     w.posts.push({ url, body: JSON.parse(opt.body) });
+    // The Time the server keeps (w.timeJson, its time.json), as set_time() keeps it: a send with first is refused
+    // (409) when one is kept, and any other send replaces it.
+    if (url === 'time' && !(w.replies && w.replies.time)) {
+      const b = JSON.parse(opt.body);
+      if (b.first && w.timeJson) return Promise.resolve({ ok: false, status: 409, text: () => Promise.resolve('a Time is kept already') });
+      w.timeJson = { time: b.time };
+    }
     // w.replies: the server's answer by address, where a test needs one other than w.reply.
     return Promise.resolve((w.replies && w.replies[url]) || w.reply || { ok: true, status: 200, text: () => Promise.resolve('sent to main') });
   };

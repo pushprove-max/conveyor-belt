@@ -95,6 +95,9 @@ t_judgeoutsidefiled() {
   echo "F1 OUTSIDE: $why" > "$STUB/judge.1"
   # The card's ready file (cardready()) as its test run finds it, before it lands.
   echo '[ ! -e "$PWD.ready" ] || cp "$PWD.ready" "$STUB/ready"' >> "$STUB/test-cmd"
+  # Bug (#1461 A-R34): the review's fields as the judge finds them beside the worktree (<card>.reviewed, which a bench
+  # prices the reviewer from while the judge runs, SWE_LIVES): the review step kept them only in memory.
+  echo 'cat "$CONVEYOR_CARDS"/c*.reviewed > "$STUB/reviewed" 2>/dev/null' > "$STUB/judge-cmd"
   # loop: that the card lands with no fix round and files the follow-up at its landing is the whole card's run (card(), cardlanding()).
   loop run >/dev/null || fail "run exited non-zero"
   grep -qxF '`F<n> OUTSIDE: <one-line reason: why it is real, and why this card'"'"'s change did not cause it>`' "$STUB/judge-asked" \
@@ -107,6 +110,8 @@ t_judgeoutsidefiled() {
   [ "$(rev 7 '.judge.outside | map([.finding, .reason]) | tojson')" = "$(jq -cn --arg f "$f" --arg w "$why" '[[$f, $w]]')" ] && [ ! -s "$ST/declined.jsonl" ] \
     || fail "the outside finding is not on the review line's judge, or went to the declined list: $(rev 7 '.judge | tojson') $(cat "$ST/declined.jsonl" 2>&1)"
   [ -n "$(st 'select(.issue == 7 and .step == "landed") | .step')" ] || fail "the card did not land: $(st 'select(.issue == 7) | .step' | tr '\n' ' ')"
+  [ "$(jq -c '.usage | objects' "$STUB/reviewed" 2>&1)" = "$(rev 7 '.usage | objects | tojson')" ] && ! compgen -G "$T/$CASE/cards/*.reviewed" > /dev/null \
+    || fail "while the judge ran, the review's fields with its usage were not beside the worktree, or were left there once the card landed: $(cat "$STUB/reviewed" 2>&1) $(rev 7 '.usage | tojson')"
   jq -e '.alone == true' "$STUB/ready" >/dev/null 2>&1 || fail "the card with an outside finding to file waited to land not marked alone, so a batch could take it: $(cat "$STUB/ready" 2>&1)"
   [ "$(jq -cs 'map([.title, (.labels | map(.name) | join(" "))])' "$STUB/filed")" = "$(jq -cn --arg f "$f" '[[$f, "conveyor-followup bug P2"]]')" ] \
     && jq -rs '.[0].body' "$STUB/filed" | grep -q '^Follow-up to #7 (Conveyor card c[^)]*)\. The judge of that card'"'"'s review found the finding below real, but not caused by that card'"'"'s change: '"$why"'$' \

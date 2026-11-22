@@ -68,7 +68,7 @@
     fixNow, flip, follow, fresh, goTo, idsOf, inRow, issueLink, joined, judged, keep, keptGet, keptScope,
     lay, lengthDrag, lengthOk, list, loopEnd, machineWord, modelName, move, output, overlay, pack, pageOf,
     panelFaults, panelHref, param, params, partOf, pickRepo, project, projectSort, readLayout, refresh, refusal,
-    restart, restartHere, retryText, reviewChip, rowsAbove, save, say, sendTime, setLength, setTab, shownAgain, since,
+    restart, restartHere, retryText, reviewChip, rowsAbove, save, say, setLength, setTab, shownAgain, since,
     skeleton, stateBlock, survived, tabFromAddress, tabOf, tag, testProgress, tick, tip, toggle, took, tool, track,
     trackDetail, trackShell, unread, verdictSaid, wantOf, watchMotion, watchView, when, widthsOf, wireTips;
 
@@ -625,6 +625,19 @@
     refresh(follow());
     window.setInterval(() => refresh(), REFRESH_MS);
   }
+  // A 24-hour Time this browser kept before the Board sent any is sent once. It is not sent on each visit: the kept
+  // Time is also the default that any other change saves, and would undo a Time set later in another browser. It is
+  // kept only when the server keeps no Time yet (first: the server checks as it writes, set_time() in
+  // dashboard_server_pages.py): one it keeps was set since, maybe in another browser, and stands (409). Either answer
+  // marks this browser's Time sent; a send that fails is tried again on the next visit.
+  function sendKeptTime() {
+    let sent;
+    try { sent = window.localStorage.getItem(TIME_SENT_KEY); } catch { sent = null; }
+    if (sent || prefs.time === PREFS0.time) return;
+    post('time', { time: prefs.time, first: true }).then((r) => {
+      if (r && (r.ok || r.status === 409)) try { window.localStorage.setItem(TIME_SENT_KEY, '1'); } catch { /* then it is sent again next visit */ }
+    }).catch(() => {});
+  }
   function start() {
     if (!byId('grid')) { startHead(); return; }
     watchMotion();
@@ -636,11 +649,7 @@
     modules.clear();
     ordered.forEach(([id, mod]) => modules.set(id, mod));
     readLayout();
-    // A 24-hour Time this browser kept before the Board sent any is sent once. It is not sent on each visit: the kept
-    // Time is also the default that any other change saves, and would undo a Time set later in another browser.
-    let sent = null;
-    try { sent = window.localStorage.getItem(TIME_SENT_KEY); } catch (e) { sent = null; }
-    if (!sent && prefs.time !== PREFS0.time) sendTime();
+    sendKeptTime();
     let kept = null;
     try { kept = window.localStorage.getItem(TAB_KEY); } catch (e) { kept = null; }
     tab = tabFromAddress() || (TABS.some((x) => x[0] === kept) ? kept : 'overview');
@@ -713,7 +722,7 @@
       findings, fixNow, flip, follow, fresh, goTo, idsOf, inRow, issueLink, joined, judged, keep, keptGet,
       keptScope, lay, lengthDrag, lengthOk, list, loopEnd, machineWord, modelName, move, output, overlay, pack,
       pageOf, panelFaults, panelHref, param, params, partOf, pickRepo, project, projectSort, readLayout, refresh,
-      refusal, restart, restartHere, retryText, reviewChip, rowsAbove, save, say, sendTime, setLength, setTab,
+      refusal, restart, restartHere, retryText, reviewChip, rowsAbove, save, say, setLength, setTab,
       shownAgain, since, skeleton, stateBlock, survived, tabFromAddress, tabOf, tag, testProgress, tick, tip, toggle,
       took, tool, track, trackDetail, trackShell, unread, verdictSaid, wantOf, watchMotion, watchView, when, widthsOf,
       wireTips } = app);
