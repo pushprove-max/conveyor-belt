@@ -33,3 +33,16 @@ t_doctorbuildhost() {
   p=${p#\`}; p=${p%%\`*}; p=${p//<name>/sample}; p=${p//<host>/buildbox}
   [[ $l == "$p"* ]] || fail "setup's step 5 names a line doctor does not print: $p"
 }
+
+# Bug caught (#1404): a record whose main was this checkout's own path (the build machine mounts it at the same path)
+# set the lookup aside, so doctor printed no build-machine line, and setup offered a service on this machine, a second
+# engine on the repository. Doctor names the project as served on the build machine whatever the record's path.
+t_doctorbuildhostsame() {
+  local X out; doctordone
+  jq --arg m "$T/$CASE/build/sample" '. + {host: "buildbox", ssh: "buildbox", main: $m, records: [{repo: "sample", main: "'"$S"'"}]}' \
+    "$XDG_CONFIG_HOME/conveyor/host.json" > "$T/$CASE/h" && mv "$T/$CASE/h" "$XDG_CONFIG_HOME/conveyor/host.json" || fail "the host file was not rewritten"
+  mkdir -p "$T/$CASE/bin" && printf '#!/bin/sh\nexit 255\n' > "$T/$CASE/bin/ssh" && chmod +x "$T/$CASE/bin/ssh" || fail "the ssh stub was not made"
+  out=$(cd "$S" && PATH=$T/$CASE/bin:$PATH bash "$X" doctor 2>&1)
+  grep -qxF "ok: the project sample is served on the build machine buildbox (its record of the host file $XDG_CONFIG_HOME/conveyor/host.json): Conveyor for it runs there, not on this machine" <<<"$out" \
+    || fail "doctor did not name the project as served on the build machine, the record's main being this checkout: $out"
+}

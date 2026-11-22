@@ -183,6 +183,12 @@ PY
   # Claude's key in a key file, and no longer in this shell: the proxy is checked with the file's key, and the file
   # is written as the route's keyFile. Codex's key in the settings file: not asked, and no keyFile.
   local f=$T/$CASE/proxy.key; printf '%s\n' "$CLAUDE_PROXY_KEY" > "$f"; chmod 600 "$f"
+  # Bug (#1404): a session reads CLAUDE_PROXY_KEY from the settings before the key file, so an expired key there beat the
+  # good key file setup tested, and the proxy refused the cards. Setup refuses it, and changes nothing.
+  jq -n --arg k "$CODEX_PROXY_KEY" '{env: {CODEX_PROXY_KEY: $k, CLAUDE_PROXY_KEY: "expired-key"}}' > "$CONVEYOR_CLAUDE_SETTINGS"
+  out=$(cd "$S" && env -u CLAUDE_PROXY_KEY -u CODEX_PROXY_KEY bash "$X" setup "${a[@]}" --builder-route proxy --reviewer-route fallback --claude-proxy "$b2" --claude-proxy-key "$f" 2>&1); \
+    [ $? = 1 ] && grep -qF -- "conveyor: --claude-proxy-key: CLAUDE_PROXY_KEY in the env of $CONVEYOR_CLAUDE_SETTINGS holds another key than the key file's" <<<"$out" \
+    && [ "$(cat "$h")" = "$was" ] || fail "setup took a key file while the settings hold another CLAUDE_PROXY_KEY: $out"
   jq -n --arg k "$CODEX_PROXY_KEY" '{env: {CODEX_PROXY_KEY: $k}}' > "$CONVEYOR_CLAUDE_SETTINGS"
   out=$(cd "$S" && env -u CLAUDE_PROXY_KEY -u CODEX_PROXY_KEY bash "$X" setup "${a[@]}" --builder-route proxy --reviewer-route fallback --claude-proxy "$b2" --claude-proxy-key "$f" 2>&1) \
     || fail "setup with the routes and the proxy's key file failed: $out"

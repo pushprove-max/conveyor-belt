@@ -884,6 +884,17 @@ for port in sys.argv[2:]:
 ANTHROPIC_API=${CONVEYOR_ANTHROPIC_API:-https://api.anthropic.com}
 OPENAI_API=${CONVEYOR_OPENAI_API:-https://api.openai.com/v1}
 declare -A APIKEY=([claude]=ANTHROPIC_API_KEY [codex]=OPENAI_API_KEY) APINAME=([claude]=Anthropic [codex]=OpenAI) PROXYKEY=([claude]=CLAUDE_PROXY_KEY [codex]=CODEX_PROXY_KEY)
+# A key file's key, in KEY_V, for the route of <variable> (<option> names the answer): fails, saying why, when the file is
+# no good (keyfile()), or when the env of the settings file holds another key under <variable>, as a session reads
+# that before the key file (routekey()) and would use it in the file's place.
+keyfileask() { # <variable> <key file> <option>
+  local v f
+  keyfile "$2" || { echo "conveyor: $3: $KEY_FROM" >&2; return 1; }
+  v=$KEY_V f=$KEY_FROM
+  routekey "{\"keyEnv\": \"$1\"}" service
+  [ -z "$KEY_V" ] || [ "$KEY_V" = "$v" ] || { echo "conveyor: $3: $1 in the env of $CLAUDE_SETTINGS holds another key than the key file's, and sessions read the settings first: remove it there, or answer settings" >&2; return 1; }
+  KEY_V=$v KEY_FROM=$f
+}
 # setup()'s route questions, in its own variables (its locals, read and set here). Each role's CLI now, in rcli: the
 # pack's seat, or with no pack yet the seat the built-in models (MODELS0) give. Each of those CLIs, Claude or Codex, with no route set
 # (Claude: no claudeProxy in the host file or the pack; Codex: installed, no codexProxy in the host file) is checked:
@@ -923,7 +934,7 @@ routeask() {
       [ -n "$KEY_V" ] || { echo "conveyor: --$c-key settings: $KEY_FROM; add it there, or answer the path of a key file" >&2; return 1; }
       akf[$c]=settings
     else a=$(cd "$(dirname -- "$a")" 2>/dev/null && printf '%s/%s' "$(pwd -P)" "$(basename -- "$a")") || a=${keyarg[$c]}
-      keyfile "$a" || { echo "conveyor: --$c-key: $KEY_FROM" >&2; return 1; }
+      keyfileask "$k" "$a" "--$c-key" || return 1
       akf[$c]=$a
     fi
     ak[$c]=$KEY_V; cs+=("$c")
@@ -941,7 +952,7 @@ routeask() {
       [ -n "$KEY_V" ] || { echo "conveyor: --$c-proxy-key settings: $KEY_FROM; add it there, or answer the path of a key file" >&2; return 1; }
       pkf[$c]=settings
     else a=$(cd "$(dirname -- "$a")" 2>/dev/null && printf '%s/%s' "$(pwd -P)" "$(basename -- "$a")") || a=${pkarg[$c]}
-      keyfile "$a" || { echo "conveyor: --$c-proxy-key: $KEY_FROM" >&2; return 1; }
+      keyfileask "$k" "$a" "--$c-proxy-key" || return 1
       pkf[$c]=$a
     fi
     pk[$c]=$KEY_V
@@ -1210,7 +1221,7 @@ doctor() {
     # that record serves this checkout, and a record of this checkout would start a second engine on the repository.
     # setup (commands/setup.md) offers no service on this machine when doctor prints this ok line.
     t=${MAIN##*/}; t=${t//[^A-Za-z0-9._-]/-}; c=${HERE%/*}/.claude/scripts/hostfile.sh; h=''
-    [ -n "$e" ] || [ ! -f "$c" ] || ! jq -e --arg n "$t" 'any(.records | arrays | .[] | objects; .repo == $n)' "$HOST" >/dev/null \
+    [ ! -f "$c" ] || ! jq -e --arg n "$t" 'any(.records | arrays | .[] | objects; .repo == $n)' "$HOST" >/dev/null \
       || h=$(bash "$c" "$MAIN" 2>/dev/null | jq -r 'select(.local == false) | .host | strings')
     if [ -n "$h" ]; then ok "the project $t is served on the build machine $h (its record of the host file $HOST): Conveyor for it runs there, not on this machine"
     elif [ -z "$e" ]; then no "a record of the host file $HOST for this checkout $MAIN (the machine's Conveyor serves only the checkouts its records name)" \
