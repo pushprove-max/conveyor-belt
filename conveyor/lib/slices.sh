@@ -111,7 +111,7 @@ splitprompt() { # <issue json> <size json>
   printf '%s' "$p"
 }
 splitcheck() { # <card> <issue>: 0 when the card goes on to build; 1 when the issue was split and the card has ended
-  local c=${CARDCTL:-} rule issue h size t1 t2 t3 t4 p ans v model='' nums x split
+  local c=${CARDCTL:-} rule issue h size t1 t2 t3 t4 p ans v model='' nums x split sf
   [ -n "$c" ] || c=$(ctl 2>/dev/null) || return 0
   rule=$(jq -r '.rules.split // "off"' <<<"$c" 2>/dev/null)
   [ "$rule" = shadow ] || [ "$rule" = on ] || return 0
@@ -134,7 +134,8 @@ splitcheck() { # <card> <issue>: 0 when the card goes on to build; 1 when the is
   # On, a split is filed; one that cannot be filed is recorded as a split not filed, and the issue is built whole.
   if [ "$rule" = on ] && [ "$(jq -r .verdict <<<"$split")" = split ]; then
     began "$1" "$2" file # stop (halt(), lib/run.sh) leaves the card to finish from here: its slices are being filed
-    if nums=$(splitfile "$1" "$issue" "$(jq -c .slices <<<"$split")" 1); then split=$(jq -c --argjson f "$nums" '. + $f' <<<"$split")
+    sf=splitfile; [ "$(jq -r '.rules.splitissues' <<<"$c" 2>/dev/null)" != false ] || sf=splitcards # Cards with no GitHub issue: Split parts On
+    if nums=$($sf "$1" "$issue" "$(jq -c .slices <<<"$split")" 1); then split=$(jq -c --argjson f "$nums" '. + $f' <<<"$split")
     else split=$(jq -c --arg r "$nums" '.why += "; the slices could not be filed, so the issue is built whole: \($r)"' <<<"$split"); fi
   fi
   record "$1" "$2" split "$(jq -r 'if .verdict == "split" then "split" else "kept" end' <<<"$split")" \
@@ -144,14 +145,15 @@ splitcheck() { # <card> <issue>: 0 when the card goes on to build; 1 when the is
   x=$(locked control hold "$2" 2>&1 >/dev/null) || echo "conveyor: card $1: #$2 was split, and could not be held: ${x:0:300}" >&2
   # Its slices become its parts (GitHub sub-issues): umbrellas() closes it once each is closed or landed.
   # shellcheck disable=SC2046 # one issue number a word
-  if x=$(attachparts "$2" $(jq -r '.filed[]' <<<"$split")); then x='are its sub-issues and build it, and this issue is not built itself. It stays open and held until each of them is closed or lands'
+  if jq -e '.cards' <<<"$split" >/dev/null; then x='are cards with no GitHub issue and build it, and this issue is not built itself. It stays open and held until each of them lands or is already done on main'
+  elif x=$(attachparts "$2" $(jq -r '.filed[]' <<<"$split")); then x='are its sub-issues and build it, and this issue is not built itself. It stays open and held until each of them is closed or lands'
   else echo "conveyor: card $1: #$2 was split; its slices could not all be made its sub-issues: $x" >&2
     x='build it, and this issue is not built itself. It stays open and held until each of them lands or is already done on main'; fi
   x=$(jq -r --argjson s "$size" --arg w "$x" '"Conveyor split this issue under the rule Split large issues. Its follow-ups below \($w); then Conveyor closes it.\n\nEach Done-when item and the follow-up that covers it:\n"
-    + ([.filed as $f | .slices | to_entries[] | .key as $k | .value.covers[] | {d: ., n: $f[$k]}] | sort_by(.d)
-       | map("- D\(.d) (\($s.doneWhen[.d - 1] | .[0:160])): #\(.n)") | join("\n"))' <<<"$split")
+    + ([(.cards // (.filed | map("#\(.)"))) as $f | .slices | to_entries[] | .key as $k | .value.covers[] | {d: ., n: $f[$k]}] | sort_by(.d)
+       | map("- D\(.d) (\($s.doneWhen[.d - 1] | .[0:160])): \(.n)") | join("\n"))' <<<"$split")
   gh_write issue comment "$2" --body "$x" >/dev/null 2>&1 || echo "conveyor: card $1: #$2 was split; no comment could be added to it" >&2
-  record "$1" "$2" closed ok "$(jq -c '{followups: .filed, reason: "split into \(.filed | map("#\(.)") | join(", ")) under the rule Split large issues: this issue is their umbrella, held, and Conveyor closes it when each of them lands or is already done on main"}' <<<"$split")"
+  record "$1" "$2" closed ok "$(jq -c '{followups: .filed, reason: "split into \((.cards // (.filed | map("#\(.)"))) | join(", ")) under the rule Split large issues: this issue is their umbrella, held, and Conveyor closes it when each of them lands or is already done on main"}' <<<"$split")"
   return 1
 }
 # The slices of a split, filed as follow-ups of <issue>: its priority, area and type labels and its milestone, the
@@ -187,6 +189,30 @@ splitfile() { # <card> <issue json> <slices json> <1: the slices take the parent
   held=$(locked splitplace "$n" "$4" "${nums[@]}") && [[ $held =~ ^(true|false)$ ]] \
     || { splitwithdraw "$n" "${nums[@]}"; echo "the control record could not be read or written, so the slices could not be held or queued as their issue is"; return 1; }
   jq -cn --argjson h "$held" '{filed: ($ARGS.positional | map(tonumber)), held: $h}' --args "${nums[@]}"
+}
+# The slices of a split as cards with no GitHub issue (rules.splitissues false: tcadd(), lib/testaction.sh), in the
+# place of splitfile()'s issues: the same bodies, each `Depends on:` line naming the card id of an earlier slice, the
+# parent's priority, area and type labels and the follow-up label as the stand-in issue's, held when the control record
+# holds <issue>. Prints {filed: [], cards: their ids, held: whether they start held}; when one cannot be made, prints
+# why and fails, the ones made before it taken out again.
+splitcards() { # <card> <issue json> <slices json> <unused: 1 or 0, as splitfile()>
+  local n k i body held ids=() id x labels
+  n=$(jq -r .number <<<"$2") && k=$(jq length <<<"$3") || { echo "the slices could not be read"; return 1; }
+  held=$(jq -r --argjson n "$n" 'if .held | index($n) != null then "held" else "" end' <<<"$(ctl 2>/dev/null)") || held=''
+  labels=$(jq -c --arg a "$AREA" --arg t "$TYPE" --arg f "$FOLLOWUP" --argjson p "$PRIOS" '(.labels // [] | map(.name) | map(select(($a != "" and startswith($a)) or . == $t or IN($p[]))) | unique) + [$f]' <<<"$2") \
+    || { echo "the labels of #$n could not be read"; return 1; }
+  for ((i = 0; i < k; i++)); do
+    body=$(jq -r --argjson i "$i" --argjson k "$k" --arg c "$1" --arg area "$AREA" --argjson sl "$3" --argjson ids "$(jq -cn '$ARGS.positional' --args "${ids[@]}")" \
+      '. as $iss | ('"$SPLITSIZE"' | .doneWhen) as $dw | .number as $n | $sl[$i] as $s
+      | "Follow-up of #\($n): slice \($i + 1) of \($k). Conveyor card \($c) split #\($n) under the rule Split large issues. #\($n) stays open and held until each of its slices lands or is already done on main.\n\n"
+        + "## The Done-when items of #\($n) this slice covers\n" + ($s.covers | map("- D\(.): \($dw[. - 1])") | join("\n"))
+        + (if $s.dependsOn == [] then "" else "\n\n" + ($s.dependsOn | map("Depends on: \($ids[. - 1])") | join("\n")) end)
+        + "\n\n## Done when\n" + ($s.doneWhen | map("- " + .) | join("\n"))' <<<"$2") \
+      && id=$(tcadd "" "$(jq -r --argjson i "$i" '.[$i].title' <<<"$3")" "$body" "$held" "Split part of #$n" "$labels" "$n") \
+      || { for x in "${ids[@]}"; do tcdrop "$x"; done; echo "slice $((i + 1)) was not made a card"; return 1; }
+    ids+=("$id")
+  done
+  jq -cn --argjson h "$([ -n "$held" ] && echo true || echo false)" '{filed: [], cards: $ARGS.positional, held: $h}' --args "${ids[@]}"
 }
 # Under the lock: the slices of <issue> start where it is now. The control record is read here, not taken from the
 # card: the card's copy is the one the loop read at the start of its turn, and an owner's release of the issue just
@@ -319,6 +345,7 @@ growcheck() { # <card> <issue> <worktree> <issue json> <the sessions' prompt>: 0
 # So is each open issue of the list with no parts (its slices were never attached as its sub-issues) that is the
 # umbrella of a split (a split line with filed slices) whose slices each have a landed line, or a closed line (main
 # already does it: ALREADY-DONE) that is not a shut one (SHUT: the owner closed it by hand; OWNSHUT: the owner shut the card).
+# The slices that are cards with no GitHub issue (the split line's cards) count the same, by their card's records (TADONE).
 umbrellas() { # <open issues, a json list>
   local k n s x m
   while IFS=$'\t' read -r k n s; do
@@ -333,7 +360,11 @@ umbrellas() { # <open issues, a json list>
       | [.parts[] | select(.open and (.number | IN($done[]))) | .ref] as $l
       | "parts\t\(.number)\t\(.parts | map(.ref) | join(", "))\(if $l == [] then "" else "; landed, not closed yet: \($l | join(", "))" end)"),
       ([.[] | select(.step == "split" and (.split.filed | type) == "array" and .split.filed != [] and (.issue | IN($open[] | select((.parts // []) == []) | .number)))]
-      | group_by(.issue)[] | last | select(all(.split.filed[]; IN($landed[]))) | "split\t\(.issue)\t\(.split.filed | map("#\(.)") | join(", "))")' < <(turncards) 2>/dev/null)
+      | group_by(.issue)[] | last | select(all(.split.filed[]; IN($landed[]))) | "split\t\(.issue)\t\(.split.filed | map("#\(.)") | join(", "))"),
+      ([.[] | select('"$TADONE"') | .card] | unique) as $lc
+      | ([.[] | select(.step == "split" and (.split.cards | type) == "array" and .split.cards != [] and (.issue | IN($open[] | select((.parts // []) == []) | .number)))]
+      | group_by(.issue)[] | last | select(all(.split.cards[]; . as $d | any($tac[0][]? | select(.id == $d) | .id, .card, (.was // [])[]; IN($lc[])))) | "split\t\(.issue)\t\(.split.cards | join(", "))")' \
+    --slurpfile tac <(jq -c '.cards | arrays' "${TACARDS:-/dev/null}" 2>/dev/null) < <(turncards) 2>/dev/null)
 }
 # The issues given attached to <parent> as its GitHub sub-issues (its parts): GitHub takes each one's id, not its
 # number. The id is read through graphql (privacy.test.sh's ghwrite refuses a REST call outside gh_write in lib/)

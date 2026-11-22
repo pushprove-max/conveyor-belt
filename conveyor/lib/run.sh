@@ -39,7 +39,7 @@ halt() { # <pid> <card> lines
     [ -n "$p" ] && kill -0 "$p" 2>/dev/null || continue
     stdb ask card "$c" 2>/dev/null | jq -es --arg c "$c" 'map(select(.card == $c)) | (last | .step == "start" and (.waitFor | IN("release", "turn"))) as $w
       | ($w | not) and (any(.step | IN("filed", "landed", "closed", "blocked")) or (last | .step == "start" and (.of | IN("file", "land"))))
-      or any(.[]; (.split, .grown) | objects | .filed | type == "array" and length > 0)' >/dev/null 2>&1 && continue
+      or any(.[]; (.split, .grown) | objects | (.filed, .cards) | type == "array" and length > 0)' >/dev/null 2>&1 && continue
     kill -TERM $(tree "$p") 2>/dev/null; echo "$p $c"
   done
 }

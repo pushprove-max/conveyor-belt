@@ -482,17 +482,27 @@
         : splitAt === 'off' ? offLine(false, 'no issue is checked') : null));
   }
   function rulesTestIssues(el, r) {
-    // Tests page actions, in Done without asking's group Cards with no GitHub issue (#1330, #1346): On starts the
-    // card a Tests page action makes at once with no GitHub issue (`conveyor.sh testissue`), the record's
-    // rules.testissues false; Off (the default, rules.testissues true) files a GitHub issue for it. The record keeps
-    // the same setting as before the move, so a project that set it keeps its choice. An engine whose record has no
-    // rules.testissues is sent neither choice.
-    const on = r.testissues === false, known = typeof r.testissues === 'boolean';
-    const tOn = choice('On', 'noissue-tests-on', 'Tests page actions with no GitHub issue: on', on, () => { if (!on) send('rules', ['testissues=off'], null, ['rules', ['testissues=on']]); });
-    const tOff = choice('Off', 'noissue-tests-off', 'Tests page actions with no GitHub issue: off', !on, () => { if (on) send('rules', ['testissues=on'], null, ['rules', ['testissues=off']]); });
-    tOn.disabled = tOff.disabled = !known;
-    el.append(row('testissues', 'Tests page actions', 'an action on the Tests page starts its card at once, with no GitHub issue',
-      seg('Tests page actions', tOn, tOff), known ? offLine(on, 'an action on the Tests page files a GitHub issue, and the belt builds that issue as a card') : newer(known)));
+    // The five switches of Done without asking's group Cards with no GitHub issue (#1330, #1346, #1347): On starts the
+    // card of that kind at once with no GitHub issue, the record's rule for it false; Off (the default, the rule true)
+    // files a GitHub issue for it. Tests page actions (`conveyor.sh testissue`, rules.testissues) keep the setting of
+    // before the move, so a project that set it keeps its choice. An engine whose record has no such rule is sent
+    // neither choice for it.
+    [['testissues', 'tests', 'Tests page actions', 'an action on the Tests page starts its card at once, with no GitHub issue',
+      'an action on the Tests page files a GitHub issue, and the belt builds that issue as a card'],
+    ['foremanissues', 'foreman', 'Foreman orders', 'a change you order the Foreman to make starts its card with no GitHub issue, held until you say yes',
+      'the Foreman files a GitHub issue for an order, held until you say yes'],
+    ['followupissues', 'followup', 'Review follow-ups', 'a finding a card\'s review files as a follow-up starts its card at once, with no GitHub issue',
+      'a review files each follow-up as a GitHub issue'],
+    ['releaseissues', 'release', 'Release fix cards', 'the fix card for a red test file of a release suite starts with no GitHub issue; the suite starts again once each fix card has landed',
+      'a release fix card is filed as a GitHub issue'],
+    ['splitissues', 'split', 'Split parts', 'the parts of a split issue start as cards with no GitHub issue, under their umbrella issue',
+      'a split files its parts as GitHub issues']].forEach(([rule, short, name, what, offWhat]) => {
+      const on = r[rule] === false, known = typeof r[rule] === 'boolean';
+      const tOn = choice('On', `noissue-${short}-on`, `${name} with no GitHub issue: on`, on, () => { if (!on) send('rules', [`${rule}=off`], null, ['rules', [`${rule}=on`]]); });
+      const tOff = choice('Off', `noissue-${short}-off`, `${name} with no GitHub issue: off`, !on, () => { if (on) send('rules', [`${rule}=on`], null, ['rules', [`${rule}=off`]]); });
+      tOn.disabled = tOff.disabled = !known;
+      el.append(row(rule, name, what, seg(name, tOn, tOff), known ? offLine(on, offWhat) : newer(known)));
+    });
   }
   function rulesPick(el, d, r) {
     const h = S.ctx.h;

@@ -184,6 +184,19 @@ issue and says so: `conveyor.sh control release <card id>` releases the card aft
 command with `foreman.sh ask <project> testissue`, so the issue or the card is held also when the project is on a
 host, or is another project of the Foreman's group.
 
+When the Rules tab's **Foreman orders** (under **Cards with no GitHub issue**) is On, the Foreman starts a change that
+you order with `foreman.sh ask <project> card <title> <body>`. The command files no issue: it starts a held card with
+no GitHub issue and says so, and `conveyor.sh control release <card id>` releases it after your yes. Off, the command
+files a fix issue and holds it, and it refuses a body with no `## Cause` section, as the filing check does for any fix
+issue. The filing check does not read the command. For the fix
+card of a red release suite, the Foreman runs `foreman.sh ask <project> card --release <version> <title> <body>`.
+**Release fix cards** decides the same way for it: On, the card has no GitHub issue, and Conveyor reads its
+`Release fix: <version>` line and starts the suite again once each fix card has landed and its change is in the commit
+the suite tests. Off, the command files a fix issue, and it refuses a body with no `## Cause` section in the same way.
+**Review follow-ups** and **Split parts** are
+for the cards that Conveyor files itself, so the Foreman does nothing for them; see
+[Cards with no GitHub issue](cards.md#cards-with-no-github-issue).
+
 The Foreman's start names `foreman.sh` by one command, `conveyor/foreman.sh` in the data folder (`~/.local/share`
 unless `XDG_DATA_HOME` says otherwise). Its path does not change when the engine moves to a new version, and it runs
 `foreman.sh` of the engine the project runs, the one its hooks run. The start makes it when it is not there.

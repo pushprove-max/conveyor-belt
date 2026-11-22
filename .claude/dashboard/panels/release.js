@@ -297,7 +297,8 @@
   // until then a push owed, a pull request not merged or another open card holds it. A run with no fixes: null.
   const FIXSTATE = { open: 'open', landed: 'landed', closed: 'closed with no landed card' };
   function fixesList(h, ctx, x, url) {
-    const fx = list(x.fixes).filter((f) => f && num(f.issue) && f.issue > 0 && Object.hasOwn(FIXSTATE, f.state));
+    // A fix card with no GitHub issue (rules.releaseissues off) has issue null and its card id.
+    const fx = list(x.fixes).filter((f) => f && Object.hasOwn(FIXSTATE, f.state) && ((num(f.issue) && f.issue > 0) || (f.issue === null && typeof f.card === 'string' && f.card !== '')));
     if (!fx.length) return null;
     const box = h('div', 'release-fixes');
     box.dataset.list = 'fixes';
@@ -305,10 +306,10 @@
     fx.forEach((f) => {
       const li = h('li', null);
       li.dataset.state = f.state;
-      li.append(ctx.issueLink({ issue: f.issue, url: url ? `${url}/issues/${f.issue}` : null }), `: ${FIXSTATE[f.state]}`);
+      li.append(f.issue === null ? f.card : ctx.issueLink({ issue: f.issue, url: url ? `${url}/issues/${f.issue}` : null }), `: ${FIXSTATE[f.state]}`);
       ul.append(li);
     });
-    const closed = fx.filter((f) => f.state === 'closed').map((f) => `#${f.issue}`);
+    const closed = fx.filter((f) => f.state === 'closed').map((f) => (f.issue === null ? f.card : `#${f.issue}`));
     const next = closed.length
       ? `${closed.join(', ')} ${closed.length === 1 ? 'was' : 'were'} closed with no landed card: the release waits for the Foreman.`
       : !fx.every((f) => f.state === 'landed') ? 'The suite runs again when every fix has landed.'

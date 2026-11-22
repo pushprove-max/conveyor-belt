@@ -69,6 +69,10 @@ t_new() {
 case_ new
 passes "$(body $'## Done when\nThe page shows the new row.' '--label enhancement')"
 passes "gh issue view 7 --label bug"
+# Bug caught (#1347): `ask <project> card` (a Foreman's order, or with --release a release fix card) was checked for a Cause section
+# as a fix issue is, so the Foreman could not order a card with no GitHub issue, whatever its Rules switch; the engine itself asks an order that files an issue for its Cause section (cardnew(), testcards.test.sh nioff).
+passes "foreman.sh ask alpha card 'Add a row' 'Make it so.'"
+passes "foreman.sh ask alpha card --release 1.1.0 'Fix a.test.sh' 'It fails.'"
 out=$(cd "$M" && jq -cn --arg c "$(body $'## What happens now\nIt breaks.')" '{session_id: "s2", tool_use_id: "x", tool_input: {command: $c}}' | bash "$SRC/foreman.sh" filing 2>&1)
 [ -z "$out" ] || fail "a fix issue filed in a session that is not the Foreman's was checked; command: $(body $'## What happens now\nIt breaks.'); output: $out"
 }

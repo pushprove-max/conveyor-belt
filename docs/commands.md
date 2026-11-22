@@ -149,6 +149,9 @@ Tests:
   At most 3 run at once; the others wait as queued. `testaction stop <id>` stops one, or takes a queued one off
   (`conveyor/README.md`, Test actions).
 - `testissue <test file> <title> <body>` files the Board's issue about one test file.
+- `card [--release <version>] <title> <body>` is the Foreman's order (`foreman.sh ask <project> card ...`). With the
+  rule **Foreman orders** On (**Release fix cards**, with `--release`), it starts a held card with no GitHub issue.
+  Otherwise it files an issue and holds it.
 - `cardissue <card id>` is the Board's File on GitHub on a landed card with no GitHub issue. It files an issue with
   the card's title and text, closes it with a comment that names the commit, and prints its address.
 - `testmap` prints the state of the test map. `testmap build` makes the map now, on a test slot, and `testmap stop`

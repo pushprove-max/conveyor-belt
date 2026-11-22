@@ -16,8 +16,8 @@ map(select(.step != "push")) | group_by(.card) | map(. as $all
          elif $l.result != "NO-GO" then "review" elif $r < $max and (any(.step == "rebase" or (.step == "test" and .result == "fail")) | not) then "fix" else "landing" end) as $at
       # name: what a main-red fix card (issue 0, its picked line naming main's commit: mainred.sh redpick()) is shown as, in place
       # of an issue number, "Main is red (<commit>)"; a Tests page card of no issue (its picked line naming its test file:
-      # testpick(), lib/testaction.sh), "Tests page: <file>"; null for any other card, which is shown by its issue.
-      | {card: .[0].card, issue: .[0].issue, name: ((.[0].mainRed | strings | "Main is red (\(.[0:12]))") // (.[0].testFile | strings | "Tests page: \(.)") // null), title: (.[0].title // ""), step: ($end.step // $at),
+      # testpick(), lib/testaction.sh), "Tests page: <file>"; a card of another kind with no issue (noIssue), that name; null for any other card, which is shown by its issue.
+      | {card: .[0].card, issue: .[0].issue, name: ((.[0].mainRed | strings | "Main is red (\(.[0:12]))") // (.[0].testFile | strings | "Tests page: \(.)") // .[0].noIssue // null), title: (.[0].title // ""), step: ($end.step // $at),
          stage: ({picked: 0, build: 1, fix: 3, landing: 5}[$at] // (if $r + (if $l.step == "review" then 0 else 1 end) > 1 then 4 else 2 end)),
          reviews: $r, startedAt: .[0].time, stepAt: last.time,
          # seats: the judge's call of the rule Pick settings before the card (pickjudge(), lib/modelpick.sh), priced as a step of its own.

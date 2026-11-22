@@ -441,7 +441,7 @@ health() {
     (($ENV.CONVEYOR_NOW // "" | tonumber?) // now) as $now
     | ($ahead | split("\n") | map(select(. != "")) | INDEX(.)) as $ahead
     | ([.[], $old[] | select(.step == "picked") | if (.mainRed | type) == "string" then {key: .card, value: "Main is red (\(.mainRed[0:12]))"}
-        elif (.testFile | type) == "string" then {key: .card, value: "Tests page: \(.testFile)"} else empty end] | from_entries) as $names
+        elif (.testFile | type) == "string" then {key: .card, value: "Tests page: \(.testFile)"} elif (.noIssue | type) == "string" then {key: .card, value: .noIssue} else empty end] | from_entries) as $names
     | [.[] | select(.step == "landed" and $ahead[.sha]) | {card, issue, sha, since: .time}] as $un
     # The cards the push in progress carries: each whose landed commit is one it carries.
     | ($carry | split("\n") | map(select(. != "")) | INDEX(.)) as $carry

@@ -348,8 +348,8 @@ cardopen() {
   [ -z "$issue" ] || ! jq -e --arg t "$TYPE" 'any(.labels[]?; .name == $t)' <<<"$issue" >/dev/null || sf=$(speedfile "$issue") || sf=$(speedfile "$issue" "$OPTIMIZE") || sf=$(speedfile "$issue" "$REWRITE") || sf=$(speedfile "$issue" "$SPLIT") || sf=''
   # The visible-change gate before the build: seen, nyes, sect, ybase, heldto, vmode and yfile (visplan()).
   visplan
-  # A follow-up whose parent (or an issue up its chain) has the owner's yes (inherit()).
-  [ "$n" = 0 ] || [ -z "$issue" ] || [ "$vrule" = off ] || inh=$(inherit "$issue")
+  # A follow-up whose parent (or one up its chain) has the owner's yes (inherit()); one with no GitHub issue too (its stand-in's body opens as an issue's).
+  [ -z "$issue" ] || [ "$vrule" = off ] || inh=$(inherit "$issue")
   # The resume of a retried card: how it takes up the kept patch of its issue's blocked cards.
   resumeplan || { block "$c" "$n" "$wt" "$err"; return; }
   # A main-red fix card commits, with its fix, the links from the files of the landing that broke a case to its test

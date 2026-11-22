@@ -44,6 +44,31 @@ test('Rules: Tests page actions, under Done without asking in Cards with no GitH
   assert.match(row(w).textContent, /needs a newer Conveyor/);
 });
 
+// Bugs this guards (#1347): a kind had no switch in the group, so its cards always filed an issue; or its On sent the rule
+// as it is (on) in place of off; or an engine before its rule was sent it. Each of the four kinds is a row of the group
+// Cards with no GitHub issue: its default (rule true) shows Off, a rule false shows On, and each press sends its rule turned.
+test('Rules: Foreman orders, Review follow-ups, Release fix cards and Split parts are switches of Cards with no GitHub issue, On for their rule off', async () => {
+  const kinds = [['foremanissues', 'foreman', /Foreman orders/], ['followupissues', 'followup', /Review follow-ups/], ['releaseissues', 'release', /Release fix cards/], ['splitissues', 'split', /Split parts/]];
+  const data = (v) => { const d = full(), r = d.panels.rules.data; r.control = { ...r.control, rules: { ...r.control.rules, ...Object.fromEntries(kinds.map(([k]) => [k, v])) } }; if (v === 'none') for (const [k] of kinds) delete r.control.rules[k]; return d; };
+  const w = boot({ tab: 'rules' });
+  deliver(w, data(true));
+  const press = (short) => ['on', 'off'].map((o) => act(rulesP(w), `noissue-${short}-${o}`).getAttribute('aria-pressed'));
+  for (const [rule, short, name] of kinds) {
+    const r = rulesP(w).querySelector(`.rules-group[data-group="noissue"] [data-rule="${rule}"]`);
+    assert.ok(r, `${rule} is a row of the group Cards with no GitHub issue, under Done without asking`);
+    assert.match(r.textContent, name);
+    assert.deepEqual(press(short), ['false', 'true'], `${rule} true (the default: issues filed) shows Off`);
+    assert.deepEqual(await sent(w, () => act(rulesP(w), `noissue-${short}-on`).click()), [{ action: 'rules', args: [`${rule}=off`], repo: 'sample' }]);
+  }
+  next(w, data(false));
+  for (const [rule, short] of kinds) {
+    assert.deepEqual(press(short), ['true', 'false'], `${rule} false shows On`);
+    assert.deepEqual(await sent(w, () => act(rulesP(w), `noissue-${short}-off`).click()), [{ action: 'rules', args: [`${rule}=on`], repo: 'sample' }]);
+  }
+  next(w, data('none'));
+  for (const [, short] of kinds) assert.ok(act(rulesP(w), `noissue-${short}-on`).disabled && act(rulesP(w), `noissue-${short}-off`).disabled, `an older engine is sent neither for ${short}`);
+});
+
 // Bugs this guards: with the rule off, an action still opened the issue preview, so a card started only once the owner
 // filed an issue they had turned off; or it sent another title or file than the action's, so the engine held the card
 // to another check. Optimize (its own button) and Fix hollow cases (one of the other fix actions) each send their

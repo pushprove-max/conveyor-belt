@@ -18,15 +18,41 @@ loop closes the decision.
 
 ## Cards with no GitHub issue
 
-With the Rules tab's **Tests page actions** On (in **Done without asking**, group **Cards with no GitHub issue**), an
-action on the Tests page starts a card with no GitHub issue. Its record is only in Conveyor: the Board shows the card
-as "Tests page: <file>", with the title of the action. It builds, reviews, tests and lands as any card does, and is
-held to the same check as the issue of that action. No size check splits it. Follow-ups from its review are filed as
-issues.
+The Rules tab has five switches in **Done without asking**, group **Cards with no GitHub issue**. Each is Off by
+default. Off, that kind of card files a GitHub issue, and the belt builds the issue. On, the kind starts its card at
+once with no GitHub issue. Its record is only in Conveyor. The five kinds:
 
-- **Held**: a card that a Foreman session starts is held until you say yes. `conveyor.sh control release <card id>`
+- **Tests page actions**: an action on the Tests page. The Board shows the card as "Tests page: <file>", with the
+  title of the action. It is held to the same check as the issue of that action.
+- **Foreman orders**: a change that you order the Foreman to make. The Foreman runs
+  `foreman.sh ask <project> card <title> <body>`. The Board shows the card as "Foreman order".
+- **Review follow-ups**: a finding that the review of a card files as a follow-up. The text of the card names its
+  parent. The Board shows it as "Review follow-up of #<parent>". The card waits until its parent card has landed. A
+  finding that names a file of the pipeline is held as its issue would be. If its parent card does not land, the
+  follow-up is taken back, and the finding goes in the brief of the next card of the parent. A follow-up inherits the
+  yes that the owner gave to its parent for a visible change.
+- **Release fix cards**: the fix card for a red test file of a release suite. Its text has the line
+  `Release fix: <version>`, which Conveyor reads as it reads the line of an issue. Once each fix card has landed
+  and its change is in the commit the suite tests, the release suite starts again ([Fix cards of a failed suite](releases.md#fix-cards-of-a-failed-suite)). The Board
+  shows the card as "Release fix".
+- **Split parts**: the parts of an issue that Split large issues cuts into 2 or 3. Each part is a card with no GitHub
+  issue, under the umbrella issue, which stays open and held. A part that depends on an earlier part has the line
+  `Depends on: <card id>`. The Board shows each as "Split part of #<umbrella>". Conveyor closes the umbrella when each
+  part card has landed or is already done on main. A part inherits the yes that the owner gave to the umbrella for a
+  visible change. The parts of a change that grew past `split.growFiles` are still issues.
+
+A review follow-up and a split part are follow-ups, so the Follow-ups rule in the Rules tab holds them back when it is
+Off. `conveyor.sh run --only <issue>` also runs the review follow-ups and the split parts of that issue, and the review follow-ups of those parts. A follow-up of a split part names the umbrella as its parent, so it inherits the same yes.
+
+Each card builds, reviews, tests and lands as any card does. No size check splits it.
+
+- **Held**: a card that a Foreman session starts (a Foreman order, a release fix card) is held until you say yes. So are the parts of a held umbrella. `conveyor.sh control release <card id>`
   releases it, and the loop picks it in its turn.
-- **Depends on**: a line `Depends on: <card id>` in the text of the card holds it until the card of that id lands.
+- **Depends on**: a line `Depends on: <card id>` in the text of the card holds it until the card of that id lands or is
+  already done on main. A line `Depends on: #<issue>` holds it as it holds an issue: until that issue is closed or its
+  card has landed.
+- **Never build**: a card with a label that the Rules tab sets to Never build (an area) is not started, as an issue with that
+  label is not.
 - **On a block**: Conveyor tries the card again one time, with its work kept. If it blocks again, it stays in Needs
   you with its reason. Retry and Close in Needs you use its card id, as `conveyor.sh retry <card id>` and
   `conveyor.sh shut <card id>` do. Retry starts the card again from its kept work. Close ends the card, and the action

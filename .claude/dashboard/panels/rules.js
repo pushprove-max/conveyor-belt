@@ -92,7 +92,7 @@
     ['review-retry', 'Review retry', 'a card blocked by its review is tried again, with no turn of the Foreman'],
   ];
   // A group of rows inside a group of the index (rulesIndexed()): its key, its name, then its rows (by their rule).
-  const NOISSUE = ['noissue', 'Cards with no GitHub issue', 'testissues'];
+  const NOISSUE = ['noissue', 'Cards with no GitHub issue', 'testissues', 'foremanissues', 'followupissues', 'releaseissues', 'splitissues'];
   // The Rules panel's six groups, in the index's order: key, name, what it holds, and what it shows: a row (by its
   // rule) or a group of rows (NOISSUE) each.
   const SETS = [

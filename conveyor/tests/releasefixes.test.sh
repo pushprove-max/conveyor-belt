@@ -59,6 +59,58 @@ t_relfixesland() {
   fixrec "the run is not release-prep 1.1.0 started for the fixes, or did not pass: $(cat "${RUN%/*}/run.log")" '.step == "release-prep" and .version == "1.1.0" and .state == "passed" and .by == "fixes landed"'
   [ -e "$STUB/full-at" ] || fail "the run did not run the suite"
 }
+# #1347 D6. Bug it catches: a fix card with no GitHub issue (rules.releaseissues off: `card --release`, a card of the
+# record that the Tests page's cards use) was not read as a fix of the red run, so the suite never started again when it
+# landed. Open, it is recorded as the fix, by its card id, and no run starts; landed and pushed, release-prep 1.1.0 runs.
+t_relfixescard() {
+  relsetup ''
+  fixred
+  # stub: relfixes() reads the issues through `gh issue list`, which the release fixture's gh does not answer; none is filed.
+  printf '%s\n' '[ "$1 $2" != "issue list" ] || echo "[]"' >> "$STUB/gh"
+  loop control rules releaseissues=off > /dev/null && loop card --release 1.1.0 'Fix a.test.sh' 'Make it pass.' > /dev/null 2>&1 || fail "the fix card with no issue was not started"
+  local id; id=$(jq -r '.cards[0].id' "$ST/testactions/cards.json")
+  fixcall
+  fixrec "the open fix card $id with no issue is not recorded as the fix, or a run started" '.state == "failed" and .restarted == null and .fixes == [{issue: null, card: "'"$id"'", ids: ["'"$id"'"], state: "open"}]'
+  [ ! -e "${RUN%/*}/run.log" ] || fail "a run started with the fix card $id still open: $(cat "${RUN%/*}/run.log")"
+  git -C "$R" push -q origin main || fail "the fixture could not be pushed"
+  jq -cn --arg c "$id" --arg s "$(git -C "$R" rev-parse HEAD)" '{card: $c, issue: 0, step: "landed", time: "2026-11-19T12:00:00Z", tokens: {claude: 0, codex: 0}, result: "ok", sha: $s, reason: ""}' >> "$ST/cards.jsonl"
+  fixcall
+  grep -q 'release-prep 1.1.0 is running' "$T/$CASE.fix" || fail "release-run prep 1.1.0 did not start when the fix card $id with no issue landed: $(cat "$T/$CASE.fix") $(cat "$RUN")"
+  # wait_until: release-run prep runs as a process of its own after relfixes() returns; only its record shows that it ended and passed.
+  wait_until "jq -e '.since != \"2026-11-19T09:00:00Z\" and .ended != null' '$RUN' > /dev/null" || fail "the run did not end: $(cat "$RUN")"
+  fixrec "the run is not release-prep 1.1.0 started for the fix card, or did not pass" '.step == "release-prep" and .version == "1.1.0" and .state == "passed" and .by == "fixes landed"'
+}
+# #1347. Bug it catches: the Board's File on GitHub on a landed release fix card (cardissue()) copies its `Release fix:`
+# line into a new issue that it closes at once; relfixes() read that issue as a second fix, closed with no landed card of
+# its own, so the suite never started again after the fix landed.
+t_relfixesfiled() {
+  relsetup ''
+  fixred
+  fixissue 21 12 CLOSED $'Make it pass.\n\nRelease fix: 1.1.0' | jq -s . > "$STUB/fixes.json"
+  printf '%s\n' '[ "$1 $2" != "issue list" ] || cat "$STUB/fixes.json"' >> "$STUB/gh" # stub: relfixes() reads the issues through `gh issue list`, which the release fixture's gh does not answer; none is filed.
+  local id=c20261119T110000-main-0
+  mkdir -p "$ST/testactions" && jq -cn --arg c "$id" '{cards: [{file: null, title: "Fix a.test.sh", body: "Make it pass.\n\nRelease fix: 1.1.0", time: "2026-11-19T11:00:00Z", id: $c, card: $c,
+    filed: 21, filedUrl: "https://example.com/o/r/issues/21"}]}' > "$ST/testactions/cards.json" || fail "the card record could not be made"
+  git -C "$R" push -q origin main || fail "the fixture could not be pushed"
+  jq -cn --arg c "$id" --arg s "$(git -C "$R" rev-parse HEAD)" '{card: $c, issue: 0, step: "landed", time: "2026-11-19T12:00:00Z", tokens: {claude: 0, codex: 0}, result: "ok", sha: $s, reason: ""}' >> "$ST/cards.jsonl"
+  fixcall
+  grep -q 'release-prep 1.1.0 is running' "$T/$CASE.fix" || fail "release-run prep 1.1.0 did not start though the fix card $id landed and its issue #21 was filed from it: $(cat "$T/$CASE.fix") $(cat "$RUN")"
+  # wait_until: release-run prep runs as a process of its own after relfixes() returns; only its record shows that it ended.
+  wait_until "jq -e '.since != \"2026-11-19T09:00:00Z\" and .ended != null' '$RUN' > /dev/null" || fail "the run did not end: $(cat "$RUN")"
+}
+# #1347. Bug it catches: a release fix card with no GitHub issue that was given back (retried: its entry's was holds the first card,
+# card the new one) and then shut by the owner showed as open, as relfixes() looked for the closed line of the oldest card, not of
+# the current one; the Release panel never showed the closed fix that holds the run.
+t_relfixesretried() {
+  setup '[]'
+  fixred
+  mkdir -p "$ST/testactions" && jq -cn '{cards: [{file: null, title: "Fix a.test.sh", body: "Make it pass.\n\nRelease fix: 1.1.0", time: "2026-11-19T11:00:00Z",
+    id: "c20261119T110000-main-0", card: "c20261119T113000-main-0", was: ["c20261119T110000-main-0"]}]}' > "$ST/testactions/cards.json" || fail "the card record could not be made"
+  cardline 0 c20261119T110000-main-0 blocked
+  cardline 0 c20261119T113000-main-0 closed
+  fixcall
+  fixrec "the retried fix card, shut after its retry, is not recorded as closed, or a run started" '.state == "failed" and .restarted == null and (.fixes | map(.state) == ["closed"])'
+}
 # Bug (#758): a fix closed with no landed card fixed nothing, so the suite must not start; the record names that fix.
 # Landed fix #20's commit is main's head, at origin, so the closed fix is the only hold.
 t_relfixesclosed() {

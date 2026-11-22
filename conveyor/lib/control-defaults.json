@@ -16,6 +16,10 @@
     "pick": "off",
     "lint": true,
     "testissues": true,
+    "foremanissues": true,
+    "followupissues": true,
+    "releaseissues": true,
+    "splitissues": true,
     "never": []
   },
   "model": {

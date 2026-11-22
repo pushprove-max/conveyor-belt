@@ -134,8 +134,11 @@ testissue() { # <test file> <title> <body>
   fi
   grep -oE '[^[:space:]]*/issues/[0-9]+' <<<"$out" | tail -n 1
 }
-# A card with no GitHub issue (testissue() with rules.testissues false, #1330), a card of issue 0 as a main-red fix
-# card is. $TACARDS keeps {cards: [{file, title, body, time, id, card, held, was, filed, filedUrl}]}: the test file,
+# A card with no GitHub issue (testissue() with rules.testissues false, #1330; a Foreman order, a review follow-up, a release
+# fix card or a split part with its rule false: cardnew(), followups(), splitcards()), a card of issue 0 as a main-red fix
+# card is. $TACARDS keeps {cards: [{file, label, labels, parent, title, body, time, id, card, held, was, filed, filedUrl}]}: the test file
+# (null for a card of another kind, which has its label, the name the Board shows it by, its stand-in issue's labels and, for a
+# review follow-up or a split part, its parent issue instead),
 # the title and body the action would have filed, when it was asked, its card id (id, made here, so another card can
 # wait on it before it is picked: testpick()), card, null until the loop picks it (testpick()), held (true until
 # `control release <id>`: testrelease()), was (the cards of it given back, oldest first) and filed and filedUrl (the
@@ -144,18 +147,68 @@ testissue() { # <test file> <title> <body>
 # Landed today shows a landed one's). Prints that the card is queued; one held also says on stderr how to release it.
 TACARDS=$TESTACTS/cards.json
 testcard() { # <test file> <title> <body> [held [<why it is held>]]
+  local id
+  id=$(tcadd "$1" "$2" "$3" "${4:-}") || return 1
+  [ "${4:-}" != held ] || echo "conveyor: card $id is held, ${5:-as it was asked for a Foreman session}: release it (conveyor.sh control release $id) once the owner says yes" >&2
+  echo "Card queued with no GitHub issue: ${2:0:200}"
+}
+# The record's one writer, for every kind of card with no GitHub issue: <test file> "" for a card of another kind, which
+# the Board shows by <label> (a Foreman order, a review follow-up, a release fix card or a split part: cardnew(),
+# followups(), splitcards()) in place of "Tests page: <file>"; <labels json> the labels its stand-in issue has
+# (testcardissue()), the pack's type and last priority when none; <parent> the issue a review follow-up or a split part
+# follows up (parent in the entry: a run limited by --only to that issue takes the card, testpick()). Prints the card's id.
+tcadd() { # <test file> <title> <body> <"held" or ""> [<label> [<labels json> [<parent issue>]]]
   local lock rec id
+  mkdir -p "$TESTACTS" 2>/dev/null
   { exec {lock}>>"$TACARDS.lock"; } 2>/dev/null && flock "$lock" || { echo "conveyor: the record of the Tests page's cards could not be locked; no card started" >&2; return 1; }
   rec=$(jq -ce '.cards | arrays' "$TACARDS" 2>/dev/null) || rec='[]'
   id=$(tcfree "$rec")
   # The record goes to jq on its input: Linux refuses an argument over 128 KiB.
-  jq -c --arg f "$1" --arg t "${2:0:200}" --arg b "$3" --arg at "$(clock)" --arg id "$id" --arg held "${4:-}" '. + [{file: $f, title: $t, body: $b, time: $at, id: $id, card: null}
-      + (if $held == "held" then {held: true} else {} end)]
+  jq -c --arg f "$1" --arg t "${2:0:200}" --arg b "$3" --arg at "$(clock)" --arg id "$id" --arg held "${4:-}" --arg label "${5:-}" --arg labels "${6:-}" --arg parent "${7:-}" \
+    '. + [{file: (if $f == "" then null else $f end), title: $t, body: $b, time: $at, id: $id, card: null}
+      + (if $held == "held" then {held: true} else {} end) + (if $label == "" then {} else {label: $label} end) + (if $labels == "" then {} else {labels: ($labels | fromjson)} end)
+      + (if $parent == "" then {} else {parent: ($parent | tonumber)} end)]
     | ([to_entries[] | select(.value.card != null) | .key] | .[:-200]) as $old | {cards: [to_entries[] | select(.key | IN($old[]) | not) | .value]}' <<<"$rec" > "$TACARDS.new" \
     && mv -f "$TACARDS.new" "$TACARDS" || { rm -f "$TACARDS.new"; exec {lock}>&-; echo "conveyor: the record of the Tests page's cards could not be written; no card started" >&2; return 1; }
   exec {lock}>&-
-  [ "${4:-}" != held ] || echo "conveyor: card $id is held, ${5:-as it was asked for a Foreman session}: release it (conveyor.sh control release $id) once the owner says yes" >&2
-  echo "Card queued with no GitHub issue: ${2:0:200}"
+  echo "$id"
+}
+# `conveyor.sh card [--release <version>] <title> <body>`: a card the Foreman's owner ordered (the Foreman runs it as
+# `foreman.sh ask <project> card ...`), or with --release the fix card of a red test file of a release's suite, whose body
+# then has the line `Release fix: <version>` (relfixes(), lib/fulltest.sh). An order that files an issue (it has the pack's
+# type label, as a fix issue has) is refused with no `## Cause` section, as the Foreman's filing hook refuses a fix issue.
+# With the control record's rules.foremanissues (rules.releaseissues for --release) false (the Rules tab's Cards with no
+# GitHub issue) it starts a card with no GitHub issue (tcadd()), held until the owner's yes, as an issue the Foreman files
+# is. Otherwise it files the issue, with the pack's type and last priority, and holds it. Prints what it started or filed.
+cardnew() { # [--release <version>] <title> <body>
+  local rule=foremanissues label='Foreman order' body='' out n u nocard
+  [ "${1:-}" != --release ] || { [[ ${2:-} =~ ^[0-9A-Za-z][0-9A-Za-z._+-]*$ ]] || { echo "usage: conveyor.sh card [--release <version>] <title> <body>" >&2; return 2; }
+    rule=releaseissues label='Release fix'; body=$'\n\nRelease fix: '$2; shift 2; }
+  [ $# = 2 ] && [[ -n ${1//[[:space:]]/} && $1 != *$'\n'* && -n ${2//[[:space:]]/} ]] || { echo "usage: conveyor.sh card [--release <version>] <title> <body>" >&2; return 2; }
+  body=$2$body
+  nocard=$(ctl 2>/dev/null | jq -r --arg r "$rule" '.rules[$r] == false' 2>/dev/null)
+  if [ "$nocard" != true ] && ! grep -qE '^[[:space:]]*##[[:space:]]+Cause[[:space:]]*$' <<<"$body"; then
+    echo 'conveyor: an order that files an issue files a fix issue (it has the pack'"'"'s type label), and a fix issue needs a "## Cause" section: the source of the problem, a place in the code that already solves the same problem (or that none was found), and what the reader sees when the data is stale or missing. Add it and run the command again.' >&2; return 2
+  fi
+  if [ "$nocard" = true ]; then
+    n=$(tcadd "" "$1" "$body" held "$label") || return 1
+    echo "conveyor: card $n is held, as it was asked for a Foreman session: release it (conveyor.sh control release $n) once the owner says yes" >&2
+    echo "Card queued with no GitHub issue: ${1:0:200}"; return 0
+  fi
+  out=$(gh_write issue create --title "${1:0:200}" --label "$TYPE" --label "$(jq -r '.[-1]' <<<"$PRIOS")" --body "$body" 2>&1); u=$(grep -oE '[^[:space:]]*/issues/[0-9]+' <<<"$out" | tail -n 1); n=${u##*/}
+  [ -n "$n" ] || { echo "conveyor: the issue could not be filed: $out" >&2; return 1; }
+  locked control hold "$n" > /dev/null 2>&1 && echo "conveyor: #$n is held, as it was filed for a Foreman session: release it (conveyor.sh control release $n) once the owner says yes" >&2 \
+    || echo "conveyor: #$n is filed, but could not be held: hold it (conveyor.sh control hold $n) unless the owner has said yes to it" >&2
+  echo "$u"
+}
+# Takes the entry of <card id> out of the record while no card has picked it (a follow-up withdrawn: unfile()). A picked
+# one stays: its card is on the belt. One writer at a time, as tcadd() is.
+tcdrop() { # <card id>
+  local lock rec
+  { exec {lock}>>"$TACARDS.lock"; } 2>/dev/null && flock "$lock" || return 1
+  rec=$(jq -ce '.cards | arrays' "$TACARDS" 2>/dev/null) || { exec {lock}>&-; return 1; }
+  jq -c --arg c "$1" '{cards: map(select(.id != $c or .card != null))}' <<<"$rec" > "$TACARDS.new" && mv -f "$TACARDS.new" "$TACARDS" || rm -f "$TACARDS.new"
+  exec {lock}>&-
 }
 # A card id no card has yet: its second, its project and its issue 0, as every card of issue 0 is named. One that a
 # card of the records, a retried line or an entry of the record given (its id, its card or one of its was) has waits
@@ -167,8 +220,10 @@ tcfree() { # <the record's cards json>
   printf '%s' "$card"
 }
 # Under the lock (pick()), after the main-red fix cards and ahead of the queue: the oldest card with no GitHub issue
-# that is not picked yet, not held (testrelease()), and whose `Depends on:` lines name no card id (c<date>T<time>-<project>-0)
-# that has not landed: the card of that id, or the card now of the entry that id is or was. Any size: no split
+# that is not picked yet, not held (testrelease()), and whose `Depends on:` lines name no card id (c<date>T<time>-<project>-<issue>,
+# 0 for a card of no issue) that has not landed or ended as already done (TADONE): the card of that id, or the card now of the entry
+# that id is or was, and no issue (#N) that is open and has not landed (waitsof(), as upnext() reads it), and that has none of
+# its labels set to never build (rules.never). A review follow-up's body names its parent card so, so it waits for its parent to land. Any size: no split
 # check reads it (card()). It is picked as its own id the first time, under a new id after that. Its picked line has
 # the action's title and its test file (testFile), which the Board shows it by. Prints "<card> 0 false", `wait` when
 # the machine holds it back, nothing when no card waits. A card whose lines left the card records (`retry <card id>`,
@@ -178,13 +233,32 @@ tcfree() { # <the record's cards json>
 # Needs you. Not one stopped for the owner's yes: that waits on the owner, not on a second try. With the records of
 # issue 0 unread, nothing is retried, and only a card not picked yet is picked.
 TCRETRY='retried once with its kept work: a card with no GitHub issue is tried again once before it goes to the owner'
-testpick() {
-  local lock rec i l card have h=1 old
+# A card record line (a jq filter, with $shut and $own the SHUT and OWNSHUT reasons) that ends a card whose work is on main: it
+# landed, or it ended closed because main already did what it asks (closed(), lib/followups.sh: ALREADY-DONE), as umbrellas() reads
+# an issue's slice. A card shut by hand is not one. A card that depends on it by its id, or an umbrella it is a part of, goes
+# on from there (testpick(), umbrellas()).
+TADONE='(.step == "landed" or (.step == "closed" and ((.reason // "") | IN($shut, $own) | not)))'
+# A run limited by --only (ONLY, a json list of issues) takes only the cards that follow up one of them (parent: a review follow-up
+# or a split part), as it takes their issues': an issue it names grows to its GitHub parts and the follow-ups of its cards, as
+# upnext() grows it (jq/upnext.jq), so a follow-up of a part of a named umbrella is taken; with the Follow-ups rule off (rules.followups false) no follow-up card or split part
+# is taken, as no follow-up issue is (jq/upnext.jq): a card is one by its follow-up label.
+testpick() { # <the open issues json>
+  local lock rec i l card have h=1 old fuoff never open cards c far parts
   [ -s "$TACARDS" ] || return 0
   { exec {lock}>>"$TACARDS.lock"; } 2>/dev/null && flock "$lock" || { echo "conveyor: the record of the Tests page's cards could not be locked; its cards wait" >&2; return 1; }
   rec=$(jq -ce '.cards | arrays' "$TACARDS" 2>/dev/null) || rec='[]'
+  c=$(ctl 2>/dev/null) || c=null
+  fuoff=$(jq -r 'if .rules.followups == false then true else false end' <<<"$c" 2>/dev/null) || fuoff=false
+  never=$(jq -c '.rules.never // []' <<<"$c" 2>/dev/null) || never='[]'
+  open=$(jq -c 'map(.number)' <<<"${1:-[]}" 2>/dev/null) || open='[]'
+  parts=$(jq -c 'map(select((.parts // []) != []) | {key: (.number | tostring), value: [.parts[] | .number | numbers]}) | from_entries' <<<"${1:-[]}" 2>/dev/null) || parts='{}'
+  # The unheld cards not picked yet are read as an issue is: the state of each issue of another repository their `Depends on:` lines name is asked now (farstates()).
+  far=$(farstates "$(jq -c 'map(if .card == null and (.held | not) then {body} else {} end)' <<<"$rec")") \
+    && rec=$(jq -c --argjson f "$far" '[., $f] | transpose | map(.[0] + (.[1] | if .far then {far} else {} end))' <<<"$rec") \
+    || { exec {lock}>&-; echo "conveyor: the issues of other repositories the Tests page's cards depend on could not be read; its cards wait" >&2; return 1; }
+  cards=$(recs) || { exec {lock}>&-; return 1; }
   have=$(stdb ask issue cards 0) || h=0
-  if [ "$h" = 1 ]; then
+  if [ "$h" = 1 ] && [ -z "${ONLY:-}" ]; then
     while read -r old; do
       RETRYWHY=$TCRETRY retry "$old" > /dev/null 2>&1 && echo "conveyor: card $old: $TCRETRY" >&2
     done < <(printf '%s\n%s\n' "$rec" "$have" | jq -Rrn --arg yes "$YES" --arg lintyes "$LINTYES" 'input | fromjson as $r
@@ -192,20 +266,34 @@ testpick() {
       | $r[] | select(.card != null and (.was // []) == []) | $end[.card] | select(. != null and .step == "blocked" and ((.reason // "") | startswith($yes) or startswith($lintyes) | not)) | .card')
     have=$(stdb ask issue cards 0) || h=0
   fi
+  # The cards of an issue that a `Depends on:` line names (a review follow-up's parent card): their lines are read too.
+  while read -r old; do
+    [ -z "$old" ] || have+=$'\n'$(stdb ask card "$old" 2>/dev/null)
+  done < <(jq -r '.[] | (.body // "") | splits("\r?\n") | select(test("^\\s*Depends on:")) | scan("c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]*-[1-9][0-9]*(?![A-Za-z0-9_])")' <<<"$rec" | sort -u)
   while read -r i; do
     room 0 >/dev/null || { exec {lock}>&-; echo wait; return 0; }
     card=$(jq -r --argjson i "$i" '.[$i] | select(.card == null) | .id // empty' <<<"$rec")
     if [ -z "$card" ] || [ -n "$(stdb ask card "$card")" ] || stdb ask lines retried | grep -F "\"card\":\"$card\"" >/dev/null; then card=$(tcfree "$rec"); fi
     jq -c --argjson i "$i" --arg c "$card" '{cards: (.[$i] |= ((if .card == null then . else .was = (.was // []) + [.card] end) | .card = $c))}' <<<"$rec" > "$TACARDS.new" && mv -f "$TACARDS.new" "$TACARDS" \
-      && l=$(line "$card" 0 picked ok "$(jq -c --argjson i "$i" '.[$i] | {title, testFile: .file}' <<<"$rec")") && append "$l" \
-      || { rm -f "$TACARDS.new"; exec {lock}>&-; echo "conveyor: the Tests page's card about $(jq -r --argjson i "$i" '.[$i].file' <<<"$rec") could not be picked" >&2; return 1; }
+      && l=$(line "$card" 0 picked ok "$(jq -c --argjson i "$i" '.[$i] | {title} + (if .file != null then {testFile: .file} else {noIssue: (.label // "Card")} end)' <<<"$rec")") && append "$l" \
+      || { rm -f "$TACARDS.new"; exec {lock}>&-; echo "conveyor: the Tests page's card about $(jq -r --argjson i "$i" '.[$i] | .file // .title' <<<"$rec") could not be picked" >&2; return 1; }
     exec {lock}>&-; echo "$card 0 false"; return 0
   # The record and the lines go to jq on its input: Linux refuses an argument over 128 KiB.
-  done < <(printf '%s\n%s\n' "$rec" "$have" | jq -Rrn --argjson h "$h" 'input | fromjson as $r | [inputs | fromjson? | objects] as $l
-    | ($l | map(.card | strings) | INDEX(.)) as $have | ($l | map(select(.step == "landed") | .card) | INDEX(.)) as $landed
-    | def landed($d): ((first($r[] | . as $e | select($d | IN($e.id, $e.card, ($e.was // [])[]))) | .card) // $d) as $k | $landed[$k] != null;
+  done < <(printf '%s\n%s\n' "$rec" "$have" | jq -Rrn --argjson h "$h" --argjson only "${ONLY:-null}" --argjson fuoff "${fuoff:-false}" --argjson never "${never:-[]}" --argjson open "${open:-[]}" --argjson parts "$parts" \
+    --slurpfile cards <(printf '%s' "$cards") --arg fu "$FOLLOWUP" --arg shut "$SHUT" --arg own "$OWNSHUT" \
+    "$DEPS"'input | fromjson as $r | [inputs | fromjson? | objects] as $l
+    | ($l | map(.card | strings) | INDEX(.)) as $have | ($l | map(select('"$TADONE"') | .card) | INDEX(.)) as $landed
+    | landed($cards) as $idone | ($cards | map(select(.followups))) as $fc
+    | def withparts: . as $o | . + [$o[] | $parts[tostring] // [] | .[]] | unique;
+      def grow: . as $o | (ups($fc; $o) | withparts) as $n | if $n == ($o | unique) then $n else $n | grow end;
+      (if $only == null then null else $only | grow end) as $only
+    | def cardlanded($d): ((first($r[] | . as $e | select($d | IN($e.id, $e.card, ($e.was // [])[]))) | .card) // $d) as $k | $landed[$k] != null;
     $r | to_entries[] | select((.value.held | not) and (.value.card == null or ($h == 1 and $have[.value.card] == null))
-      and all(.value.body // "" | splits("\r?\n") | select(test("^\\s*Depends on:")) | scan("c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]*-0(?![A-Za-z0-9_])"); landed(.))) | .key')
+      and ($only == null or (.value.parent | IN($only[]))) and (($fuoff | not) or ((.value.labels // []) | index($fu) == null))
+      and ((.value.labels // []) | any(IN($never[])) | not)
+      and (.value | [ups($fc; needs)[] | select(IN($open[]) and (IN($idone[]) | not))] == [])
+      and (.value.card != null or (.value | [farneeds[] as $x | select(.far[$x].open != false) | $x] == []))
+      and all(.value.body // "" | splits("\r?\n") | select(test("^\\s*Depends on:")) | scan("c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]*-[0-9]+(?![A-Za-z0-9_])"); cardlanded(.))) | .key')
   exec {lock}>&-
 }
 # `control release <card id>` of a held card with no GitHub issue (testcard() held): it is picked in its turn from then
@@ -225,6 +313,11 @@ testrelease() { # <card id>
 # kept work it starts from (resumeplan(), lib/card.sh); nothing for another card.
 testcardwas() { # <card>
   [ -n "$1" ] && jq -r --arg c "$1" 'first(.cards[]? | select(.card == $c)) | (.was // [])[]' "$TACARDS" 2>/dev/null
+}
+# The issue a card with no GitHub issue follows up (its entry's parent: a review follow-up or a split part), 0 for any other card.
+# A follow-up of such a card follows up that issue too, so its body names it, and its brief reads that issue's yes (inherit()).
+tcparent() { # <card>
+  [ -n "$1" ] && jq -r --arg c "$1" 'first(.cards[]? | select(.card == $c)) | .parent // 0' "$TACARDS" 2>/dev/null || echo 0
 }
 # `conveyor.sh cardissue <card id>`: the Board's File on GitHub on a landed card with no GitHub issue (testcard()).
 # It files an issue with the card's title and body through the GitHub write path, and closes it at once with a
@@ -257,7 +350,7 @@ cardissue() { # <card id>
 # (lib/speedproof.sh) as that issue's card is. Fails for any other card.
 testcardissue() { # <card>
   [ -n "$1" ] && jq -ce --arg c "$1" --arg t "$TYPE" --argjson p "$PRIOS" 'first(.cards[]? | select(.card == $c))
-    | {number: 0, title, body, milestone: null, labels: [{name: $t}, {name: $p[-1]}]}' "$TACARDS" 2>/dev/null
+    | {number: 0, title, body, milestone: null, labels: ((.labels // [$t, $p[-1]]) | map({name: .}))}' "$TACARDS" 2>/dev/null
 }
 taput() { printf '%s\n' "$2" > "$1.new" && mv -f "$1.new" "$1" || { rm -f "$1.new"; return 1; }; } # <file> <record>
 testaction() { # <judge | explain | run> <test file> | stop <id>

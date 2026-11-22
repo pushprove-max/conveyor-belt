@@ -218,6 +218,7 @@ When `release-prep` asks for the release notes, the run ends. Thus the commit of
 
 When the suite of step 4 fails, file one fix card for each failure. Put the line `Release fix: <version>` in the body
 of each fix card. The Foreman does this for you when the `release-check` kind of standing yes is on.
+With the Rules tab's **Release fix cards** On, a fix card has no GitHub issue (`conveyor.sh card --release <version> <title> <body>`). Conveyor reads its `Release fix: <version>` line, and the record of the run lists it by its card id.
 
 `conveyor.sh serve` reads these cards again after each wait of the `tunables.idle` setting in the pack. It reads only
 the issues filed after the failed suite ended. The record of the run (`release/run.json` in the cards folder) lists

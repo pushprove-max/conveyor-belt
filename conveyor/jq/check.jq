@@ -7,7 +7,7 @@ def fails: type == "object" and keys == ["files", "of", "timeout"] and (.of | . 
 def need: ["card", "issue", "reason", "result", "sha", "step", "time", "tokens"];
 def known: ["product", "title", "usage", "kept", "leftover", "followups", "sec", "visible", "branch", "created", "counts", "of", "model", "effort",
   "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "doneWhenItems", "doneWhenHolds", "excerpts", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost", "survived", "answers",
-  "wait", "run", "slotsFree", "selected", "ended", "list", "coverage", "slow", "timed", "times", "clocks", "carried", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "testFile", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "waitSec", "wide", "pr", "doneLines", "ran", "checks", "split", "grown", "rollout", "pick", "lint", "stop", "pass", "rounds", "flaky", "waitFor", "log", "brokeMain", "class", "resumed"];
+  "wait", "run", "slotsFree", "selected", "ended", "list", "coverage", "slow", "timed", "times", "clocks", "carried", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "testFile", "noIssue", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "waitSec", "wide", "pr", "doneLines", "ran", "checks", "split", "grown", "rollout", "pick", "lint", "stop", "pass", "rounds", "flaky", "waitFor", "log", "brokeMain", "class", "resumed"];
 def steps: ["picked", "split", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof", "grown", "lint", "seats"];
 # Each required field's own test.
 def needok($k): if $k == "issue" then .issue | type == "number" elif $k == "time" then (try (.time | fromdate | type == "number") catch false)
@@ -40,6 +40,8 @@ def ok: . as $r | (keys - known) == need
         and (.visible // "" | type == "string") and (.branch // "" | type == "string") and (.mainRed // "" | type == "string")
         # testFile: a Tests page card's picked line names its test file (testpick(), lib/testaction.sh).
         and (.testFile == null or (.step == "picked" and (.testFile | type == "string")))
+        # noIssue: the picked line of another card with no GitHub issue (a Foreman order, a review follow-up, a release fix card or a split part) names what the Board shows it as.
+        and (.noIssue == null or (.step == "picked" and (.noIssue | type == "string")))
         and (.model // "" | type == "string") and (.effort // "" | type == "string") and (.head // "" | type == "string") and (.unread // "" | type == "string")
         and (.patch // "" | type == "string") and (.main // "" | type == "string") and (.seen // "" | type == "string")
         # route: the route a Claude or Codex session took when a proxy is set (session1(), claudereview(), codexreview()).
@@ -173,14 +175,14 @@ def ok: . as $r | (keys - known) == need
           and (.by | IN("owner", "auto")) and (.trial | type == "boolean") and (.mode | IN("shadow", "on"))))
         and ((.step == "split") == (.split != null))
         and (.split == null or ((.result | IN("kept", "split")) and (.split | type == "object"
-          and (keys - ["slices", "filed", "held", "answer"]) == ["hash", "mode", "size", "verdict", "why"]
+          and (keys - ["slices", "filed", "cards", "held", "answer"]) == ["hash", "mode", "size", "verdict", "why"]
           and (.held // false | type == "boolean")
           and (.mode | IN("shadow", "on")) and ([.hash, .why, .answer // ""] | all(type == "string"))
           and (.verdict | IN("under", "keep", "split", "invalid", "failed")) and ((.verdict == "split") == ($r.result == "split"))
           and (.size | type == "object" and keys == ["areas", "chars", "doneWhen", "files"] and all(type == "number"))
           and (.slices // [] | type == "array" and all(type == "object" and keys == ["covers", "dependsOn", "doneWhen", "title"] and (.title | type == "string")
             and ([.covers, .dependsOn] | all(type == "array" and all(type == "number"))) and (.doneWhen | type == "array" and all(type == "string"))))
-          and (.filed // [] | type == "array" and all(type == "number")))))
+          and (.filed // [] | type == "array" and all(type == "number")) and (.cards // [] | type == "array" and all(type == "string")))))
         # A lint line (lintline(), lib/lint.sh): the gate's result, each command's result, seconds and findings of the
         # change, whether the tools ran as installed and the gate that ran it (a line written before the gate was
         # recorded has none).

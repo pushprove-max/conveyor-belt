@@ -446,8 +446,10 @@ $2" >/dev/null 2>&1; then jq -cn --argjson n "$n" '{issue: $n, reused: true}'
     || { jq -cn --arg r "${out:0:300}" '{issue: null, reused: false, why: ("its issue could not be filed: " + $r)}'; return; }
   jq -cn --argjson n "$n" '{issue: $n, reused: false}'
 }
-# The fix cards of a red release run: the issues whose body has the line `Release fix: <version>` for the version of
-# the failed release-prep in $CARDS/release/run.json (commands/release-prep.sh), filed after that run ended. The
+# The fix cards of a red release run: the issues, and the cards with no GitHub issue (rules.releaseissues false: `conveyor.sh card
+# --release`, cardnew(), lib/testaction.sh; their fixes entry has card and ids in place of issue), whose body has the line `Release fix: <version>` for the version of
+# the failed release-prep in $CARDS/release/run.json (commands/release-prep.sh), filed after that run ended. An issue
+# the Board's File on GitHub filed from a landed one of those cards (cardissue(): filed in its entry) is not a fix of its own. The
 # record's fixes lists them by number, each with its state: landed (a card of it landed), open, or closed (closed with
 # no landed card). When there is at least one, each one has landed and no card in the card records is open, it starts
 # `release-run prep <version>` (its record's by: "fixes landed") once: the red record's restarted says when. A fix
@@ -463,9 +465,14 @@ relfixes() {
   v=$(jq -r .version <<<"$r") && e=$(jq -r .ended <<<"$r") && s=$(jq -r .since <<<"$r") || return 1
   is=$(timeout 60 gh issue list --state all --limit 1000 --json number,body,createdAt,state --search "\"Release fix: $v\" in:body" < /dev/null 2>/dev/null) \
     && cs=$(stdb ask lines cards 2>/dev/null) \
-    && fx=$(jq -c --arg v "$v" --arg e "$e" --slurpfile c <(printf '%s' "$cs") '($c | map(select(.step == "landed") | .issue)) as $landed
-      | [.[] | select(.createdAt > $e and ((.body // "") | test("(^|\\n)[ \\t]*Release fix:[ \\t]*" + ($v | gsub("\\."; "\\.")) + "[ \\t]*\\r?(\\n|$)")))
-        | {issue: .number, state: (if .number | IN($landed[]) then "landed" elif .state == "OPEN" then "open" else "closed" end)}] | sort_by(.issue)' <<<"$is") \
+    && fx=$(jq -c --arg v "$v" --arg e "$e" --slurpfile c <(printf '%s' "$cs") --slurpfile t <(jq -c '.cards | arrays' "${TACARDS:-/dev/null}" 2>/dev/null) \
+      '($c | map(select(.step == "landed") | .issue)) as $landed | ("(^|\\n)[ \\t]*Release fix:[ \\t]*" + ($v | gsub("\\."; "\\.")) + "[ \\t]*\\r?(\\n|$)") as $re
+      | (($t[0] // []) | map(.filed | numbers)) as $filed
+      | ([.[] | select(.createdAt > $e and ((.body // "") | test($re)) and (.number | IN($filed[]) | not))
+        | {issue: .number, state: (if .number | IN($landed[]) then "landed" elif .state == "OPEN" then "open" else "closed" end)}] | sort_by(.issue))
+      + ([$t[0][]? | select(.time > $e and ((.body // "") | test($re))) | ([.id, .card, (.was // [])[]] | map(select(. != null))) as $ids | (.card // .id) as $now
+        | {issue: null, card: .id, ids: $ids, state: (if any($c[]; .step == "landed" and (.card | IN($ids[]))) then "landed"
+            elif any($c[]; .step == "closed" and .card == $now) then "closed" else "open" end)}] | sort_by(.card))' <<<"$is") \
     && busy=$(printf '%s' "$cs" | jq -s 'map(select(.step | IN("push", "pushed", "issue", "bugproof") | not)) | group_by(.card)
       | any(.[]; any(.[]; .step | IN("filed", "landed", "closed", "blocked")) | not)') \
     || { echo "conveyor: the fix cards of release $v's failed suite could not be read (gh issue list, or the card records)" >&2; return 1; }
@@ -474,7 +481,7 @@ relfixes() {
   if [ "$busy" = false ] && jq -e 'length > 0 and all(.[]; .state == "landed")' <<<"$fx" > /dev/null; then
     hd=$(relhead 2>/dev/null) || busy=true
     while IFS= read -r sha; do [ -n "$hd" ] && [ -n "$sha" ] && git merge-base --is-ancestor "$sha" "$hd" 2>/dev/null || busy=true
-    done < <(printf '%s' "$cs" | jq -r --argjson x "$fx" '($x | map(.issue)) as $l | select(.step == "landed" and (.issue | IN($l[]))) | .sha // ""')
+    done < <(printf '%s' "$cs" | jq -r --argjson x "$fx" '($x | map(.issue | numbers)) as $l | ($x | map(.ids // [] | .[])) as $k | select(.step == "landed" and ((.issue | IN($l[])) or (.card | IN($k[])))) | .sha // ""')
   fi
   { exec {lk}>>"$CARDS/release/lock"; } 2>/dev/null || return 1
   flock -n "$lk" || { exec {lk}>&-; return 0; }
@@ -483,6 +490,6 @@ relfixes() {
     && [ -n "$go" ] && printf '%s\n' "$go" > "$f.new" && mv -f "$f.new" "$f" || go=''
   exec {lk}>&-
   [ -n "$(jq -r '.restarted // empty' <<<"${go:-null}")" ] || return 0
-  echo "conveyor: each fix card of release $v's failed suite has landed ($(jq -r 'map("#\(.issue)") | join(", ")' <<<"$fx")): release-prep $v starts again" >&2
+  echo "conveyor: each fix card of release $v's failed suite has landed ($(jq -r 'map(if .issue == null then .card else "#\(.issue)" end) | join(", ")' <<<"$fx")): release-prep $v starts again" >&2
   CONVEYOR_RELEASE_BY='fixes landed' bash "$HERE/conveyor.sh" release-run prep "$v" < /dev/null
 }

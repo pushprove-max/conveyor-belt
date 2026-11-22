@@ -1,6 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # The last review said NO-GO: each of its finding lines becomes its own issue, filed before the card lands; a line
-# the review repeats word for word is filed once. Prints the new issue numbers as a JSON array. When a filing fails
+# the review repeats word for word is filed once. Prints the new issue numbers as a JSON array.
+# With the control record's rules.followupissues false (the Rules tab's Cards with no GitHub issue: Review follow-ups On)
+# each finding becomes a card with no GitHub issue instead (tcadd(), lib/testaction.sh), its body the issue's, naming its
+# parent, and a `Depends on:` line with the parent card's id, so it is picked only once the parent has landed. A card on a finding that names a pipeline file is held as the issue is (`control release <card id>`). None is
+# an issue, so the array is empty; each card's id and finding go to <worktree>.fucards, one a line, so unfile() can
+# take them back out of the record. When a filing fails
 # it prints the reason instead, and withdraws (closes) the ones it had already filed: the card will not land, and an
 # open follow-up would be built against a main that never got its parent's change.
 # A withdrawn follow-up is closed as "not planned", never "completed": nothing fixed its finding. The finding
@@ -205,16 +210,27 @@ unfile() { # <parent issue> <review file> <follow-up issue>...
     gh_write issue close "$i" --reason "not planned" --comment "Conveyor: the card this follows up did not land; withdrawn. The next build of #$n carries this finding in its brief." >/dev/null 2>&1
     printf '#%s %s\n' "$i" "${found[j]:-}" >> "${r%.review}.withdrawn"; j=$((j + 1))
   done
+  # The follow-ups that are cards with no GitHub issue (followups() noted each, with its finding, in <review>.fucards) are
+  # taken out of the record while no card has picked them, and their findings go to the brief as an issue's do.
+  [ ! -s "${r%.review}.fucards" ] || while IFS=$'\t' read -r i j; do
+    tcdrop "$i"; printf '%s %s\n' "$i" "$j" >> "${r%.review}.withdrawn"
+  done < "${r%.review}.fucards"
+  rm -f "${r%.review}.fucards"
 }
 followups() { # <card> <issue json> <review file>
-  local f mark where out num n nums=() more=() found=() pipe cost own='' free res pm g masked depth kind clean
+  local f mark where out num n nums=() more=() found=() pipe cost own='' free res pm g masked depth kind clean body area nocard='' fc=${3%.review}.fucards
   depth=$(fudepth "$2") && [[ $depth =~ ^[0-9]+$ ]] || { echo "cannot read the parent issue's follow-up depth"; return 1; }
   packget pipelineFiles pipe || { echo "cannot read the pack's pipeline files"; return 1; }
   packget privacy.mode pm || { echo "cannot read the pack's privacy mode"; return 1; }
   ! standingon review-followup || { packget auto.reserved res || { echo "cannot read the pack's auto.reserved"; return 1; }; own=1; }
+  area=$(jq -r --arg p "$AREA" '.labels | map(.name | select(startswith($p))) | .[0] // empty' <<<"$2") || { echo "cannot read the parent issue's labels"; return 1; }
   n=$(jq -r .number <<<"$2") && mapfile -t more < <(jq -r --arg p "$AREA" '(.labels | map(.name | select(startswith($p))) | .[0] // empty | "--label", .),
     (.milestone.title // empty | "--milestone", .)' <<<"$2") || { echo "cannot read the parent issue's labels and milestone"; return 1; }
+  # The parent of a card with no GitHub issue (issue 0) is the issue that card follows up, if it follows one up: its follow-ups
+  # are the follow-ups of that issue (a run limited by --only to it takes them, and the follow-up's brief reaches its yes).
+  [ "$n" != 0 ] || n=$(tcparent "$1")
   mapfile -t found < <(leftovers "$3")
+  rm -f "$fc"; [ "$(ctl 2>/dev/null | jq -r '.rules.followupissues' 2>/dev/null)" != false ] || nocard=1
   [ ${#found[@]} != 0 ] || { echo "the last review said NO-GO and named no finding to file"; return 1; }
   for f in "${found[@]}"; do
     # The finding's level, P0 to P3 (P1 when it names none), is the pack's priority at that place, or its last one.
@@ -246,12 +262,21 @@ followups() { # <card> <issue json> <review file>
     if grep -qiE '^(\[[^]]*\][[:space:]]*)*\[cleanup\]' <<<"$f"; then
       kind='' clean=$'\nCleanup: the finding changes no behaviour, so no test has to fail on main for it. The change must keep what the code does: the review judges that it does.'
     fi
-    out=$(gh_write issue create --title "${g:0:200}" --label "$FOLLOWUP" ${kind:+--label "$kind"} ${mark:+--label "$mark"} "${more[@]}" \
-      --body "Follow-up to #$n (Conveyor card $1). The last review of that card said NO-GO. The card landed without a fix for the finding below. Fix it in this issue.
+    body="Follow-up to #$n (Conveyor card $1). The last review of that card said NO-GO. The card landed without a fix for the finding below. Fix it in this issue.
 
 Finding: $g
 Where: ${where:-the finding names no file:line}$clean$cost$masked
-Follow-up depth: $((depth + 1))" 2>&1) && num=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1) && num=${num##*/} && [ -n "$num" ] \
+Follow-up depth: $((depth + 1))"
+    if [ -n "$nocard" ]; then
+      # The standing yes is logged before the card exists (it has no id yet); one that cannot be logged is held, as an issue is.
+      [ -z "$free" ] || standinglog review-followup "a follow-up card of #$n (card $1) was not held: its finding names only files of that card's change: ${f:0:200}" >/dev/null 2>&1 || free=''
+      # Its parent's card is filed before it lands: the card waits on that id, as an issue waits on its parent's landed line (jq/upnext.jq).
+      # It keeps its parent's area label, as the follow-up issue does (more), so an area set to Never build holds it too.
+      num=$(tcadd "" "${g:0:200}" "$body"$'\n'"Depends on: $1" "$([ -z "$cost" ] || [ -n "$free" ] || echo held)" "Review follow-up of #$n" "$(jq -cn '$ARGS.positional' --args "$FOLLOWUP" ${kind:+"$kind"} ${mark:+"$mark"} ${area:+"$area"})" "$n") \
+        && printf '%s\t%s\n' "$num" "$f" >> "$fc" || { unfile "$n" "$3" "${nums[@]}"; echo "follow-up not filed, so nothing landed (finding: ${f:0:200}): its card could not be started"; return 1; }
+      continue
+    fi
+    out=$(gh_write issue create --title "${g:0:200}" --label "$FOLLOWUP" ${kind:+--label "$kind"} ${mark:+--label "$mark"} "${more[@]}" --body "$body" 2>&1) && num=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1) && num=${num##*/} && [ -n "$num" ] \
       || { unfile "$n" "$3" "${nums[@]}"; echo "follow-up not filed, so nothing landed (finding: ${f:0:200}): ${out:0:400}"; return 1; }
     nums+=("$num")
     [ -z "$free" ] || standinglog review-followup "#$num, a follow-up of #$n (card $1), was not held: its finding names only files of that card's change: ${f:0:200}" >/dev/null 2>&1 || free=''

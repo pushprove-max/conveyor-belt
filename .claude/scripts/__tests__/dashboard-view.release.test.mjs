@@ -264,6 +264,15 @@ test('#760 D1: a red run with two fixes, one landed: both with their states and 
   assert.equal(fixNext(w), 'The suite runs again now.');
 });
 
+// Bug it catches (#1347): a fix card with no GitHub issue (issue null, its card id) was left out of the list, so a red run
+// showed fewer fixes than the suite waits for.
+test('#1347: a fix card with no GitHub issue is listed by its card id, with its state', () => {
+  const w = boot();
+  deliver(w, data({ ...RED, fixes: [{ issue: 753, state: 'landed' }, { issue: null, card: 'c20261122T120000-sample-0', ids: ['c20261122T120000-sample-0'], state: 'open' }] }));
+  assert.deepEqual(fixLines(w), ['#753: landed', 'c20261122T120000-sample-0: open']);
+  assert.match(stepOf(w, 'full-suite').querySelector('[data-list="fixes"]').textContent, /1 of 2 landed/);
+});
+
 test('#760 D2: a fix closed with no landed card is named, and the release waits for the Foreman', () => {
   const w = boot();
   deliver(w, data({ ...RED, fixes: [{ issue: 753, state: 'landed' }, { issue: 755, state: 'closed' }] }));

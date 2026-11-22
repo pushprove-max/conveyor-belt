@@ -454,13 +454,24 @@ All are Off until you turn them on. **Review retry** On: the Foreman's watcher t
 that its review blocked, and the Foreman gets no wake for it. A retry that fails still wakes the Foreman, with the
 reason.
 
-The group **Cards with no GitHub issue**, under **Done without asking**, has the switch **Tests page actions**, one per
-project. It is Off by default. Off, an action on the Tests page that makes a card files a GitHub issue, and the belt
+The group **Cards with no GitHub issue**, under **Done without asking**, has five switches, one per kind of card and
+per project: **Tests page actions**, **Foreman orders**, **Review follow-ups**, **Release fix cards** and **Split
+parts**. Each is Off by default. Off, that kind of card files a GitHub issue. On, it starts its card at once, with no
+GitHub issue ([Cards with no GitHub issue](cards.md#cards-with-no-github-issue)). The first switch is described here: Off, an action on the Tests page that makes a card files a GitHub issue, and the belt
 builds that issue as a card. The tab then says "off: an action on the Tests page files a GitHub issue, and the belt
 builds that issue as a card". On, the action files no issue: it starts its card at once. The switch covers each such
 action: Optimize, Rewrite as a direct check, Split it, Fix failures, Fix the waiting, Fix hollow cases, Make it run,
 Make it run alone and Delete it. From a shell, `conveyor.sh control rules testissues=off` turns the switch On, and
 `testissues=on` turns it Off. A project that set this switch when it was under **Picking** keeps its choice.
+
+**Foreman orders** On: a change that you order the Foreman to make (`foreman.sh ask <project> card <title> <body>`)
+starts a held card with no GitHub issue. Off, the command files an issue and holds it. **Review follow-ups** On: each
+finding that a review files as a follow-up becomes a card with no GitHub issue, and the card names its parent. Off,
+each finding is filed as an issue. **Release fix cards** On: the fix card of a red release suite starts with no GitHub
+issue, and the suite starts again once each fix card has landed and its change is in the commit the suite tests. Off, it is an issue. **Split parts** On: the parts of a split issue
+are cards with no GitHub issue under the umbrella issue. Off, they are issues. From a shell, the switches are
+`conveyor.sh control rules foremanissues=off`, `followupissues=off`, `releaseissues=off` and `splitissues=off`. As
+for **Tests page actions**, `off` turns the kind On, and `on` turns it Off.
 
 A card with no GitHub issue builds, is reviewed, is tested and lands as other cards do
 ([Cards with no GitHub issue](cards.md#cards-with-no-github-issue)). In **Landed today**, its row keeps its title, its
