@@ -132,6 +132,7 @@
     judge: (r, action, a) => {
       if (a[0] === 'on' || a[0] === 'off') { r.judgeOn = a[0] === 'on'; return [r, 'judge']; }
       if (a[0] === 'always') { r.judgeAlways = a.slice(1); return [r, 'judge']; }
+      if (a[0] === 'rare') { r.judgeRare = a[1] === 'none' ? [] : a.slice(1); return [r, 'judge']; }
       return seatGuess(r, action, a);
     },
     model: seatGuess,
@@ -241,6 +242,16 @@
     const box = S.ctx.h('span', 'rules-seg');
     box.setAttribute('role', 'group'); box.setAttribute('aria-label', label);
     box.append(...choices);
+    return box;
+  }
+  // The Judge row's "May decline as a rare case": one switch a level, pressed for each level of the record c's judgeRare,
+  // and "no level" said when it has none. A click sends the levels whole (control judge rare), or none when it leaves no level.
+  function judgeRare(c) {
+    const h = S.ctx.h, LV = ['P0', 'P1', 'P2', 'P3'], rare = LV.filter((p) => list(c.judgeRare).includes(p));
+    const to = (levels) => ['rare'].concat(levels.length ? levels : ['none']), box = h('span', 'rules-list');
+    box.append(h('span', 'board-from', rare.length ? 'may decline as a rare case at' : 'may decline as a rare case at no level'),
+      seg('May decline as a rare case', ...LV.map((p) => choice(p, `judge-rare-${p}`, `May decline a ${p} finding as a rare case: ${rare.includes(p) ? 'on' : 'off'}`,
+        rare.includes(p), () => send('judge', to(LV.filter((x) => (x === p) !== rare.includes(x))), null, ['judge', to(rare)])))));
     return box;
   }
   // The values a field offers to pick from (its list), or null when there is none to offer.
@@ -386,7 +397,7 @@
     ({ AREA, RELEASE_MAX, STANDING, ARM_MS, BUILDS, S, ONB, OB, num, list, ctl, plural, prio, pre, isArea,
       areaName, PRMERGE, undoOf, say, run, button, priceWords, draw } = shared);
     return { MOVES, moveOf, moveMark, readOf, moveJudge, moveNote, words, guessed, tabLine, post, send, undoSkips,
-      undoLabel, undoAsk, guarded, choice, seg, pickList, stepper, row, wouldSkip, skipWords, fieldLabel, areaWould,
+      undoLabel, undoAsk, guarded, choice, seg, judgeRare, pickList, stepper, row, wouldSkip, skipWords, fieldLabel, areaWould,
       held, unlisted, heldUnknown, groups, labelMark, matches, arm, queueOne, queueAll };
   });
 })();

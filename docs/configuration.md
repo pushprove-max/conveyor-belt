@@ -789,7 +789,7 @@ accounts. `conveyor.sh control` or the Board's Control and Rules tabs set it. Ev
   for one card](#settings-for-one-card)),
 - the rules: P0 to P3, follow-ups, push, visible changes, split large issues and the dependency guard,
 - the levels at which the judge can decline a finding as a rare case (`conveyor.sh control judge rare <level>...`,
-  any of P0 to P3). A rare case is a finding whose proof needs an input, timing or setup that the project runs only
+  any of P0 to P3, or May decline as a rare case on the Rules tab). A rare case is a finding whose proof needs an input, timing or setup that the project runs only
   rarely. At each other level, "rare case" is no reason to decline. `conveyor.sh control judge rare none` clears the
   levels. The default is none: the judge declines no finding as a rare case,
 - where new issues start,

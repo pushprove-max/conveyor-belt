@@ -240,6 +240,16 @@ test('Setup: the Judge step shows Always accept; Add sends the kinds and sets th
     'Finish sends no Judge default over the kinds');
 });
 
+// Bug guarded: a click on a pressed rare-case level of the Judge not yet set was taken as "the default": it sent
+// the Judge's defaults (on, its default model, no always-accept kinds) and left the level set. It takes the level out.
+test('Setup: a click on a pressed rare-case level of an unset Judge takes it out and sends no Judge default', async () => {
+  const w = boot();
+  deliver(w, snap({ at: '2026-11-01T00:00:00Z', rules: ALL.filter((k) => k !== 'judge') }, { judgeRare: ['P3'], judgeAlways: ['security'] }));
+  assert.equal(pressed(w, 'judge-rare-P3'), 'true');
+  assert.deepEqual(await sent(w, () => act(box(w), 'judge-rare-P3').click()), [{ action: 'judge', args: ['rare', 'none'], repo: 'sample' }],
+    'clicking the pressed P3 of an unset Judge sends judge rare none, not the Judge defaults');
+});
+
 // Bug guarded: the setup reopened on every load after Finish.
 test('Setup: an onboarded project does not open the modal on a Board load', () => {
   const w = boot();

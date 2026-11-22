@@ -301,6 +301,8 @@ The first time the Board opens for a repository, a box asks you to set each proj
 
 Each rule shows its name, what it does and the controls of the Rules tab. The default is already selected, also when
 the rule has another value now. To keep the default, click the selected choice or the **default: <value>** button.
+The Judge's **May decline as a rare case** switches are not part of its default: a click on a selected switch turns
+that level off.
 A rule is set only when the build machine saves your choice. **Next** sets each rule of the step that is not set yet
 to its default, then shows the next step. On the last step it is **Finish**. The footer says how many rules are set.
 
@@ -329,7 +331,9 @@ Each row shows the rule name, one short line on what it does, and its control. A
 one control, and the value in force is the selected part.
 
 1. **Models**: **Builder**, **Reviewer** and **Judge**, each a CLI installed on the loop's machine, then a model,
-   then an effort ([Models](configuration.md#models)). The Judge is also On or Off. **Always accept** lists the
+   then an effort ([Models](configuration.md#models)). The Judge is also On or Off. **May decline as a rare case**
+   has one switch for each level, P0 to P3. Turn a level on to let the Judge decline a finding at that level as a rare
+   case. **Always accept** lists the
    finding kinds the Judge accepts every time. **Account** and **Review account** pick the accounts
    ([Accounts](#accounts)). A seat is saved only when you press its **Save**. While a seat has a change that is not
    saved, the row shows the model in force.

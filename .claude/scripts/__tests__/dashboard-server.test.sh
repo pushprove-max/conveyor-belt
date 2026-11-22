@@ -717,7 +717,7 @@ control_actions() {
 ( control_part actions "${PORTS[9]}"
 control_actions 'rules P1=off followups=on area:infra=on' 'rules P3=off' 'rules P3=on' 'rules team/billing=off' 'rules visible=off' 'rules visible=on' 'rules lint=off' 'rules lint=on' 'rules split=shadow' 'rules split=on' 'rules pick=shadow' 'model claude claude-opus-5-5 high' 'model claude claude-opus-5-5' 'model default' 'reviewer codex gpt-6.1-sol low' 'reviewer default' 'start held' 'start queue' \
   'reviewer opencode openrouter/vendor/model-1:free high' 'judge opencode openrouter/vendor/model-1' 'model claude opus[1m]' 'model codex gpt-6.1-sol' \
-  'judge on' 'judge off' 'judge claude claude-opus-5-5 high' 'judge default' 'judge always security data' 'judge always' \
+  'judge on' 'judge off' 'judge claude claude-opus-5-5 high' 'judge default' 'judge always security data' 'judge always' 'judge rare P2 P3' 'judge rare none' \
   'account second' 'account default' 'account' 'review-account first' 'review-account' 'dep-guard off' 'dep-guard on' 'push-check off' 'push-check on' 'force 12' 'land-as pr' 'land-as main' 'pr-merge idle' 'pr-merge release' 'pr-merge button' 'onboarded build review-account dep-guard'
 grep -q "dashboard: control model default by max from 127.0.0.1" "$M/server.err" || fail "control_is_logged: no line for the control in the log"
 done_part
@@ -1161,7 +1161,7 @@ for b in "$(act frob)" "$(act 'pause;rm')" "$(act pause now)" "$(act cap 101)" "
   "$(act model)" "$(act model --help)" "$(act model claude m bogus)" "$(act model default high)" "$(act model claude m high x)" "$(act reviewer codex 'm;id')" \
   "$(act model claude-opus-5-5)" "$(act model claude-opus-5-5 high)" "$(act model nosuch m)" "$(act model claude --help)" "$(act model claude '')" \
   "$(act reviewer opencode 'openrouter/m;id')" "$(act reviewer opencode '/m')" "$(act judge opencode 'p/m $(id)')" "$(act judge opencode 'p/m x')" \
-  "$(act judge)" "$(act judge on off)" "$(act judge always 'a b')" "$(act judge always 'x;id')" "$(act judge always -x)" "$(act judge always $(seq 21))" "$(act judge claude m bogus)" \
+  "$(act judge)" "$(act judge on off)" "$(act judge always 'a b')" "$(act judge always 'x;id')" "$(act judge always -x)" "$(act judge always $(seq 21))" "$(act judge rare)" "$(act judge rare P4)" "$(act judge rare p3)" "$(act judge rare none P3)" "$(act judge rare 'P3;id')" "$(act judge claude m bogus)" \
   "$(act account a b)" "$(act account 'a;id')" "$(act account -x)" "$(act review-account '')" \
   "$(act dep-guard)" "$(act dep-guard maybe)" "$(act dep-guard on off)" "$(act push-check)" "$(act push-check maybe)" "$(act push-check on off)" "$(act force)" "$(act force x)" "$(act force 12 13)" "$(act force '12;id')" \
   "$(act land-as)" "$(act land-as branch)" "$(act land-as main pr)" "$(act pr-merge)" "$(act pr-merge never)" "$(act pr-merge idle button)" \

@@ -505,9 +505,10 @@
     // A click on the choice shown selected of a rule not yet set, its default, sends the default: the Rules tab's
     // control sends nothing for the value in force. A selected Build choice (each is, at the default) keeps the
     // default too, rather than turning that choice off: once the rule is set, a click toggles it as on the Rules tab.
+    // The Judge's rare-case levels are not part of its default: a pressed level is the record's, and a click takes it out.
     const body = dlg.querySelector('.onboard-body');
     body.addEventListener('click', (e) => {
-      const b = e.target.closest && e.target.closest('.rules-tog[aria-pressed="true"]'), row = b && b.closest('.rules-row');
+      const b = e.target.closest && e.target.closest('.rules-tog[aria-pressed="true"]:not([data-act^="judge-rare-"])'), row = b && b.closest('.rules-row');
       if (!row || b.disabled || OB.set.has(row.dataset.rule)) return;
       e.stopPropagation();
       onbConfirm(row.dataset.rule, row.querySelector('.board-label').textContent);

@@ -8,7 +8,7 @@
   let KIND, MODEL, KINDS_MAX, STANDING, SETS, PINS_SHOWN, KNOWN_KINDS, GUARDS, BUILDS, ROLES, OTHER, S, ONB, OB,
     num, list, ctl, same, plural, pre, isArea, depKnown, landNow, landKnown, PRMERGE, prNow, prKnown, pushCheckOn,
     draftOf, draftPut, draftDrop, say, send, button, choice, seg, pickList, stepper, row, wouldSkip, skipWords,
-    fieldLabel, areaWould, unlisted, heldUnknown, arm, limitsLine, standingShown, pickShown, CAP0, draw, relength, rulesSuite, rulesMode, suiteSlots, run;
+    fieldLabel, areaWould, unlisted, heldUnknown, arm, limitsLine, standingShown, pickShown, CAP0, draw, relength, rulesSuite, rulesMode, suiteSlots, run, judgeRare;
 
   // ---- left: one row a rule ----
   // A role: its CLI (one of those installed on the loop's host, s.clis; the judge's the reviewer's too), then a model
@@ -332,8 +332,8 @@
   function rulesJudge(el, c, d) {
     const h = S.ctx.h, m = d.modelSettings;
     // Judge: on or off, its CLI, model and effort (every installed CLI, the reviewer's too; the default names the one
-    // of another family it runs on when none is set), and the finding kinds it always accepts, each removable,
-    // with a field to add one. The kinds are sent whole: none clears them.
+    // of another family it runs on when none is set), the levels it may decline a finding at as a rare case (judgeRare),
+    // and the finding kinds it always accepts, each removable, with a field to add one. The kinds are sent whole.
     const judgeOn = c.judgeOn === true, kinds = list(c.judgeAlways).filter((k) => typeof k === 'string');
     const always = h('span', 'rules-list');
     always.dataset.list = 'judge-kinds';
@@ -363,7 +363,7 @@
     el.append(row('judge', 'Judge', 'Decides which review findings count.',
       seg('Judge', choice('On', 'judge-on', 'Judge: on', judgeOn, () => { if (!judgeOn) send('judge', ['on'], null, ['judge', ['off']]); }),
         choice('Off', 'judge-off', 'Judge: off', !judgeOn, () => { if (judgeOn) send('judge', ['off'], null, ['judge', ['on']]); })),
-      m && m.judge ? modelCtl('Judge', 'judge', m.judge) : h('span', 'board-from', 'The build machine names no model for the reviewer, so none for the judge.')));
+      m && m.judge ? modelCtl('Judge', 'judge', m.judge) : h('span', 'board-from', 'The build machine names no model for the reviewer, so none for the judge.'), judgeRare(c)));
     el.append(row('judge-always', 'Always accept', 'Finding kinds the Judge accepts every time.', always, kindForm));
   }
   function rulesAccounts(el, c) {
@@ -794,7 +794,7 @@
       num, list, ctl, same, plural, pre, isArea, depKnown, landNow, landKnown, PRMERGE, prNow, prKnown, pushCheckOn,
       draftOf, draftPut, draftDrop, say, send, button, choice, seg, pickList, stepper, row, wouldSkip, skipWords,
       fieldLabel, areaWould, unlisted, heldUnknown, arm, limitsLine, standingShown, pickShown, CAP0, draw,
-      relength, rulesSuite, rulesMode, suiteSlots, run } = shared);
+      relength, rulesSuite, rulesMode, suiteSlots, run, judgeRare } = shared);
     return { rules, index };
   });
 })();

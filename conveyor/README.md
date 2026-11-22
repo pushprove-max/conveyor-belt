@@ -23,7 +23,7 @@ give the count of cards that build against the cap without the waiting cards.
 `conveyor.sh control judge on|off`, `conveyor.sh control judge always [<kind>...]`,
 `conveyor.sh control judge rare <level>...|none` and
 `conveyor.sh control judge <cli> <model> [effort]` set the review's judge (below, The judge): each project's record holds
-its own, and the Board's Rules tab sets them in its Judge row, except the rare-case levels, which only the command sets.
+its own, and the Board's Rules tab sets them in its Judge row.
 
 `conveyor.sh control tests <cli> <model> [effort]` sets the Tests seat (below, Test actions), and
 `conveyor.sh control tests default` clears it.
