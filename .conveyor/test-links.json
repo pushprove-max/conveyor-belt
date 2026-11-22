@@ -61,6 +61,7 @@
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/tests/judge.test.sh": [
+    ".claude/scripts/__tests__/dashboard-view.focus.test.mjs",
     "conveyor/tests/judgeminor.test.sh",
     "conveyor/tests/judgesnap.test.sh"
   ],
@@ -791,5 +792,8 @@
   ],
   "conveyor/foreman/foreman-title.test.sh": [
     "conveyor/foreman/foreman-size.test.sh"
+  ],
+  "conveyor/lib/review.sh": [
+    ".claude/scripts/__tests__/dashboard-view.focus.test.mjs"
   ]
 }
