@@ -32,6 +32,7 @@
     by: 'all',          // what the Task map is coloured by
     folds: new Set(),   // the folds opened (fold), by their key, so a redraw keeps them open
     busy: false, held: false, late: false, keep: null,
+    checks: false,      // a check was sent and no read of the arms has answered since: the arms are read again until one does
     landed: false,      // the page the tab opens on was chosen for this showing of the tab
     said: new Map(),    // each action's answer, by its key: {text, tone}, shown beside that action (saidAt)
   };
@@ -263,7 +264,7 @@
     if (typeof repo !== 'string' || (!again && was && was.repo === repo && (was.busy || was.stamp === stamp))) return;
     const o = { repo, stamp, busy: true, data: was && was.repo === repo ? was.data : null, error: null };
     B.hist = o;
-    getJSON(`bench?repo=${encodeURIComponent(repo)}`).then((x) => { if (obj(x)) o.data = x; else o.error = 'the answer did not read'; },
+    getJSON(`bench?repo=${encodeURIComponent(repo)}`).then((x) => { if (obj(x)) { o.data = x; B.checks = false; } else o.error = 'the answer did not read'; },
       (e) => { o.error = e && e.message ? e.message : 'no answer'; }).then(() => { o.busy = false; o.read = B.ctx.now(); if (B.hist === o) draw(); });
   }
   // A run's tasks: read once, and again while it is the run in progress and the snapshot says it moved on.
@@ -513,12 +514,12 @@
     new window.MutationObserver(() => { if (B.el && !B.el.isConnected) B.landed = false; }).observe(parent, { childList: true });
   }
   function same(el, d, ctx) { if (!B.landed) render(el, d, ctx); }
-  // While an arm's check runs, the arms are read again on the Board's clock, one read at a time and at most one each
+  // While an arm's check runs, or a read after a check sent was lost, the arms are read again on the Board's clock, one read at a time and at most one each
   // CHECK_MS after the last one ended: a check alone moves no run, so the Board sends the panel no update for it.
   const CHECK_MS = 5000;
   function tick() {
     const was = B.hist;
-    if (!was || was.repo !== B.repo || was.busy || !armsOf().some((x) => x.state === 'checking')) return;
+    if (!was || was.repo !== B.repo || was.busy || !(B.checks || armsOf().some((x) => x.state === 'checking'))) return;
     if (B.ctx.now() - (was.read || 0) >= CHECK_MS) readHist(true);
   }
   // The panel is drawn whole. A control drawn anew between its press and its release lost the click, so a part that

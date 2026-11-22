@@ -5,7 +5,7 @@
 // also in the few page's history fold. One case for each fixture (BH.study(), 7 arms on 50 tasks; BH.few(), 2 runs of 1
 // task; BH.live(), a run going), changed to reach the state. The tests use jsdom only. Shared setup: dashboard-view.helpers.mjs (BH).
 import assert from 'node:assert/strict';
-import { boot, settle, act, cases, BH, iso, T0 } from './dashboard-view.helpers.mjs';
+import { boot, settle, act, cases, BH, iso, T0, tick as clockTick } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const { bp, page, TASKS, STUDY } = BH;
@@ -348,4 +348,35 @@ test('Plan a run, a run going: Start is off and says a run goes now, Check the a
   const w = await opened(BH.live(), 'plan');
   assert.deepEqual(['start', 'check-arms'].map((a) => act(bp(w), a).disabled), [true, false]);
   assert.equal(text(q(w, '.bench-why')), 'Start is off: a run goes now.');
+});
+
+// Bug it guards: the Check button's read of the arms was lost (the page server did not answer). The arms read stayed as it
+// was, with no arm checking, so the page never asked again and showed the old states for good, though the checks ran.
+test('Plan a run, Check the arms first, the first read of the arms lost: the page asks again after CHECK_MS and shows the arms being checked', async () => {
+  const set = BH.few();
+  const w = await opened(set, 'plan');
+  const answer = w.benchBody;
+  w.benchBody = () => null;
+  w.reply = BH.reply('conveyor: checking c1');
+  act(bp(w), 'check-arms').click();
+  await settle(); await settle();
+  const asked = w.benchAsks.length;
+  w.benchBody = (url) => { const b = answer(url); if (b && b.arms) b.arms.forEach((a) => { if (a.name === 'conveyor' || a.name === 'solo') a.state = 'checking'; }); return b; };
+  clockTick(w, 4000);
+  assert.equal(w.benchAsks.length, asked, 'no ask before CHECK_MS has passed');
+  clockTick(w, 1000);
+  await settle(); await settle();
+  assert.equal(w.benchAsks.length, asked + 1, 'the page asked for the arms again');
+  assert.match(text(q(w, '.bench-why')), /Check the arms first is off: the ticked arms are being checked\.$/);
+  assert.equal(act(bp(w), 'check-arms').disabled, true, 'the arms read shows the ticked arms being checked');
+});
+
+// Bug it guards: while the answer to Check the arms first was out, both buttons were off with no word of why.
+test('Plan a run, Check the arms first sent and not answered: both buttons are off and the page says why', async () => {
+  const w = await opened(BH.few(), 'plan');
+  w.reply = { ok: true, status: 200, text: () => new Promise(() => {}) };
+  act(bp(w), 'check-arms').click();
+  await settle(); await settle();
+  assert.deepEqual(['start', 'check-arms'].map((a) => act(bp(w), a).disabled), [true, true]);
+  assert.equal(text(q(w, '.bench-why')), 'Both buttons are off: the last action has no answer yet.');
 });

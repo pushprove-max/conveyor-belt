@@ -138,12 +138,13 @@
   function checkButton(arms) {
     const need = toCheck(arms);
     const b = K.button('Check the arms first', '', 'check-arms', `Check ${named(need) || 'the arms'}`, () => K.send('check', ['arms', 'check', ...need.map((a) => a.name)],
-      (t) => `${t.replace(/^conveyor: /, '')}. The arms are read again while their checks run.`, () => K.readHist(true)));
+      (t) => `${t.replace(/^conveyor: /, '')}. The arms are read again while their checks run.`, () => { K.B.checks = true; K.readHist(true); }));
     b.disabled = Boolean(checkWhy(arms)) || K.B.busy;
     return b;
   }
   // The page says why a button is off, under the buttons, as one line; with both on, the mockup's page has none.
-  const offWhy = (arms) => { const t = [startWhy(arms), checkWhy(arms)].filter(Boolean).join(' '); return t ? h('p', 'bench-note bench-why', t) : ''; };
+  // While the answer to the last action is out, both buttons are off (K.B.busy) and the line says so.
+  const offWhy = (arms) => { const t = [startWhy(arms), checkWhy(arms), K.B.busy ? 'Both buttons are off: the last action has no answer yet.' : ''].filter(Boolean).join(' '); return t ? h('p', 'bench-note bench-why', t) : ''; };
   // The share of the week one trial has used on a guard ("conveyor" or "agent"): the runs that kept the guard's share of the
   // week left at their start and after their last trial, the share they used over the trials they ran on arms of that
   // guard (a col's ran). Where both guards read one login (K.weekPool), the share is the use of the trials of both. Null with
