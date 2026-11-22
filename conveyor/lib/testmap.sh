@@ -556,20 +556,22 @@ briefesc() { # <text>
   sed 's/[].[\*^$+?(){}|]/\\&/g' <<<"$1"
 }
 # An extended regular expression for a reference to the tracked file <path> in code: its name alone (control.sh), after
-# a directory path that ends its own (lib/control.sh, conveyor/lib/control.sh), after a shell variable ($DIR/control.sh)
-# or after a closing paren or quote. A same-named file of another directory (commands/control.sh) is none of these.
-# When another tracked file of <worktree> has the same name, the name alone (control.sh) or after a variable says
-# nothing of which one it is, so only a path that ends its own counts.
+# a directory path that ends its own (lib/control.sh, conveyor/lib/control.sh), after a shell variable ($DIR/control.sh,
+# "$HERE/lib/control.sh", "$HERE/../lib/control.sh", "${BASH_SOURCE[0]%/*}/control.sh") or after a closing paren or
+# quote. A same-named file of another directory (commands/control.sh) is none of these. When another tracked file of <worktree> has the same name, the name
+# alone (control.sh) or after a variable says nothing of which one it is, so only a path that ends its own counts, with
+# or without a variable before it.
 briefref() { # <worktree> <path>
-  local wt=$1 f=$2 b d sfx='' q="'" end='([^A-Za-z0-9_.-]|\.([^A-Za-z0-9_]|$)|$)' same
+  local wt=$1 f=$2 b d sfx='' q="'" end='([^A-Za-z0-9_.-]|\.([^A-Za-z0-9_]|$)|$)' same v
+  v="(\\\$[A-Za-z_][A-Za-z0-9_]*|\\\$\\{[^}]*\\}|[)\"$q])/(\\.\\./)*"
   same=$(git -C "$wt" ls-files -- 2>/dev/null | awk -F/ -v b="${f##*/}" '$NF == b { n++ } END { print n + 0 }')
   b=$(briefesc "${f##*/}"); d=${f%/*}; [ "$d" != "$f" ] || d=''
   while [ -n "$d" ]; do
     sfx+="${sfx:+|}$(briefesc "$d")/"
     [[ $d == */* ]] && d=${d#*/} || d=''
   done
-  if [ "$same" -gt 1 ] && [ -n "$sfx" ]; then printf '%s' "(^|[^A-Za-z0-9_./-])($sfx)$b$end"
-  else printf '%s' "(^|[^A-Za-z0-9_./-])(${sfx:-^})?$b$end|(\\\$\\{?[A-Za-z_][A-Za-z0-9_]*\\}?|[)\"$q])/$b$end"; fi
+  if [ "$same" -gt 1 ] && [ -n "$sfx" ]; then printf '%s' "(^|[^A-Za-z0-9_./-])($sfx)$b$end|$v($sfx)$b$end"
+  else printf '%s' "(^|[^A-Za-z0-9_./-])(${sfx:-^})?$b$end|$v${sfx:+($sfx)?}$b$end"; fi
 }
 # The files that call the function <name>, one a line: a shell command (a *.sh or *.bash file, the name at the start
 # of a line, or after ; & | ( { ! then do else if while until, and followed by a space, a ; & or the end) and, in any

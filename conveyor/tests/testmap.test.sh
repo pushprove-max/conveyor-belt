@@ -463,6 +463,28 @@ t_startbrief() {
     || fail "the list does not give the file that names .hid/x.sh, a path that starts with a dot: $(tail -n 5 "$STUB/brief")"
 }
 
+# Bug it catches (#1320): a shell command that sources a file through a directory variable named the file in code, but
+# the list skipped it: the slash after the variable was refused before the directory path. It holds for a file of a
+# unique name (. "$HERE/../lib/u.sh", up one or three directories), and for one whose name another file has
+# (. "$HERE/lib/a.sh"), where a variable before another directory (. "${HERE}/other/a.sh") is still no mention of it.
+# A Bash trim in the braces (. "${BASH_SOURCE[0]%/*}/../lib/u.sh") is a variable too: its own slash ended the match.
+t_startbriefvar() {
+  startmain
+  mkdir -p "$R/cmd" && echo : > "$R/lib/u.sh" && printf '. "$HERE/lib/a.sh" || exit 1\n' > "$R/cmd/run.sh" \
+    && printf '. "${HERE}/other/a.sh"\n' > "$R/cmd/other.sh" && printf '. "$FHERE/../lib/u.sh"\n' > "$R/cmd/up.sh" \
+    && printf '. "$HERE/../../../lib/u.sh"\n' > "$R/cmd/deep.sh" \
+    && printf '. "${BASH_SOURCE[0]%%/*}/../lib/u.sh" || return 1\n' > "$R/cmd/trim.sh" \
+    && git -C "$R" add -A && git -C "$R" commit -qm var || fail "the variable fixture could not be committed"
+  local ISSUE
+  # shellcheck disable=SC2034 # read by the command fx_in() runs
+  ISSUE=$(issue 7 2026-01-01 | jq -c '.title = "Change lib/a.sh and lib/u.sh" | .body = ""')
+  fx_in 'startbrief "$R" "$ISSUE"'
+  grep -qxF -e '- `lib/a.sh`: named in areas.json, cmd/run.sh, lib/b.sh; mapped test files tests/a.test.sh' "$T/$CASE/run.out" \
+    || fail "the list does not give cmd/run.sh, which sources lib/a.sh through \$HERE, or lists cmd/other.sh, which sources other/a.sh: $(cat "$T/$CASE/run.out")"
+  grep -qxF -e '- `lib/u.sh`: named in cmd/deep.sh, cmd/trim.sh, cmd/up.sh' "$T/$CASE/run.out" \
+    || fail "the list does not give cmd/up.sh and cmd/deep.sh, which source lib/u.sh through a variable and ../, or cmd/trim.sh, through a trimmed variable: $(cat "$T/$CASE/run.out")"
+}
+
 # Bug it catches (#1312): an issue that names no tracked file or function (a word in backticks, a file that is not
 # there, a function nothing defines or calls) must get no list: an empty heading would anchor the builder on nothing.
 t_startbriefnone() {
