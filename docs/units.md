@@ -148,7 +148,9 @@ sign-in failed, shows the reason after the state (`shop paused: build: Claude Co
 ## The pane
 
 The pane shows the board as tables, from top to bottom. A line that is wider than the pane is cut, unless
-this page says that it wraps.
+this page says that it wraps. Before the first fetch answers, the pane shows `units: reading the Conveyor snapshot`.
+That message, a line about what could not be read and a fetch error go on to more lines at their spaces when they are
+wider than the pane.
 
 - **The head**: `/units` as a filled label, the Conveyor host in bold and, on the right, `DAY SPEND` and the dollars
   today.
@@ -188,7 +190,8 @@ this page says that it wraps.
   it landed, the issue, the last verdict and its round (`✓ GO r2`), its overall time and its cost (or `pushing`,
   `issue open` or `not pushed`). A card that still waits shows `waiting` there, and what it waits for (such as
   `Landed, waiting for Push landed`) on the line under its row.
-- The Fast and Research lanes, and the lines about what could not be read.
+- The Fast and Research lanes, and the lines about what could not be read. A line about what could not be read wraps
+  at its spaces.
 
 A section with nothing to show has one dim line: `nothing on the belt`, `nothing waiting`, `nothing landed today`.
 The pane and `/units` write times of day in the form that the Board's **Time** setting gives, or the `time` setting
@@ -258,7 +261,7 @@ job here, or no state folder), each poll asks again, the board is read from the 
 While that file is fresh (written in the last 30 s), the board is read from it: once a second the mod looks at it, and
 a file that changed is drawn at once (a rewrite that only moved its heartbeat, `stream.heardAt`, is not built into a
 board again), so a card's step or a control change is in the views within about 2 seconds; the minute's fetch then
-asks no host for the snapshots (it still reads the lanes and the test map). A stream that is down keeps its last board, with one line under it:
+asks no host for the snapshots (it still reads the lanes and the test map). A stream that is down keeps its last board, with a note under it:
 `units: the live stream is down (<why>); the board is as <host> was at <time>`. With no fresh file the fetch reads the
 snapshot as above.
 
@@ -282,16 +285,17 @@ Then three reads on this machine:
 
 ## When something cannot be read
 
-A snapshot that cannot be read is one plain line in every view, and nothing from an earlier fetch:
+A snapshot that cannot be read is one plain note in every view, and nothing from an earlier fetch:
 `units: the Conveyor snapshot cannot be read (<why>)`, where the reason is one of `<host> is unreachable`,
 `<host> did not answer in time`, `<host> gave no snapshot`,
 `this machine has no host file at <paths looked at>`, `the host file is not understood`,
 `the fetch did not run` or `the fetch did not finish`, or
 `the fetch printed over the 4.2 MB cap and was cut short` (the engine keeps a command's first 4 MiB of output).
-The Foreman line still shows under it.
+In the pane, a note that is wider than the pane goes on to more lines at its spaces. The Foreman line still shows
+under it.
 
 Smaller gaps are named where they are: `weekly limit not read`, `today partial` and `cost partial` (a step could not be
 priced: never a part sum), `QUEUE` `not read: GitHub did not list the issues`, and under the board `units: the <record> snapshot cannot be read` when one record of several fails. A Board feed
 (`units-feed.json`) over the 4 MiB cap (shown as 4.2 MB; the engine refuses a larger read), or a limit file
 (`limit.json`) over 16384 bytes, is not read, nor tried again each second, and a line under the board names its size
-and the cap; with no board, that line comes first in the one line every view draws.
+and the cap; with no board, that line comes first in the note every view draws.

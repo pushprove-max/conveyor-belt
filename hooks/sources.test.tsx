@@ -820,7 +820,7 @@ test('the Research lane line says no worktree, no run, working or idle with its 
   expect(tableText(idle, 80)).toMatch(/\nRESEARCH LANE  idle · last activity 3h 20m ago$/)
 })
 
-test('a snapshot that cannot be read is one plain line saying why, in /units and the pane', () => {
+test('a snapshot that cannot be read is one plain note saying why, in /units and the pane', () => {
   const cases: [string, string][] = [
     ['', 'the fetch did not run'],
     ['paths\t/r/ws\t/r/home\nfast\tnone\n', 'the fetch did not finish'],
@@ -838,7 +838,8 @@ test('a snapshot that cannot be read is one plain line saying why, in /units and
     const s = state(text, { limit: { pct: 10, resetsAt: NOW + 1000 } })
     const line = `units: the Conveyor snapshot cannot be read (${why})`
     expect(tableText(s, 80)).toBe(line)
-    expect(paneModel(s, 72, 0).map(plain)).toEqual([line])
+    // Wide enough for the longest reason on one row: the pane wraps a note at its width (the 32-column case below).
+    expect(paneModel(s, 160, 0).map(plain)).toEqual([line])
   }
 })
 
@@ -872,6 +873,21 @@ test('a live feed\'s snapshot 90 s old adds no age note; with the stream down, o
   expect(ageNotes(state(fetched([['bookstore', snap]])))).toEqual([note])
   expect(ageNotes(feedState(feed(true)))).toEqual([])
   expect(ageNotes(feedState(feed(false)))).toEqual([note])
+})
+
+// Bug it catches: the pane drew a fetch's failure note and a record's not-read note at their full width, so in a
+// 32-column dock body the terminal wrapped them. Each is wrapped at its spaces to the pane's width, no word lost.
+test('the pane wraps the fetch-failure note and the feed notes to a 32-column dock body', () => {
+  const cannot = 'units: the Conveyor snapshot cannot be read (buildbox is unreachable)'
+  const notRead = 'units: the bookstore queue was not read (GitHub did not list the issues)'
+  const failed = paneModel({ ...board(), snap: null, note: cannot }, 32, 0).map(plain)
+  const noted = paneModel(board({}, { notes: [notRead] }), 32, 0).map(plain)
+  for (const [lines, note] of [[failed, cannot], [noted, notRead]] as const) {
+    const at = lines.findIndex(l => l.startsWith('units: the'))
+    const rows = lines.slice(at, at + 3)
+    expect(rows.every(l => cols(l) <= 32), `${note}: ${JSON.stringify(rows)}`).toBe(true)
+    expect(rows.join(' ')).toBe(note)
+  }
 })
 
 // Bug it catches: at 40 columns the four counts ran past the line and the last, NEEDS YOU, was cut off; the dots

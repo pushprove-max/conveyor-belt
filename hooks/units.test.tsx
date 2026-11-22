@@ -99,6 +99,9 @@ const draw = async ($: any, component: 'AbovePrompt' | 'Pane', props?: Record<st
   await ui.unmount()
   return texts.join('')
 }
+// A pane wide enough that a long note is one row: the pane wraps a note at its width, and draw joins the rows with
+// no space, so a case about what a note says draws it here (the wrap is the 32-column cases').
+const drawWide = ($: any) => draw($, 'Pane', { title: 'Conveyor', isFocused: false, placement: 'dock', bodyColumns: 400 })
 // Presses the pane's Machine details Button, which opens the details, or closes them when open.
 const pressDetails = async ($: any) => {
   const ui = await $.ui.mount({ plugin: 'conveyor-belt', surface: 'terminal', component: 'Pane', requestId: 'units', props: { title: 'Conveyor', isFocused: false, bodyColumns: 72, placement: 'dock' } })
@@ -262,6 +265,23 @@ test('the pane draws at a dock body narrower than 40 columns, at the width it is
   const pane = await draw($, 'Pane', { title: 'Conveyor', isFocused: false, placement: 'dock', bodyColumns: 32 })
   // The head row is padded to the pane width and ends at the day's spend: its length is the width the pane drew at.
   expect(pane.match(/^.*?DAY SPEND \$\d+\.\d\d/)?.[0]).toHaveLength(32)
+})
+
+// Bug it catches: before the first fetch answers, the pane drew its 36-column waiting line whole in a 32-column dock
+// body, so the terminal wrapped it. It is wrapped at its spaces to the body, one row a Text, no word cut.
+test('the waiting line before the first fetch is wrapped to a 32-column dock body', async ($, on) => {
+  const w = world(on, 'main', answer(FULL))
+  let release = () => {}
+  w.hold = new Promise<void>(r => { release = r })
+  const ui = await ($ as any).ui.mount({ plugin: 'conveyor-belt', surface: 'terminal', component: 'Pane', requestId: 'units', props: { title: 'Conveyor', isFocused: false, placement: 'dock', bodyColumns: 32 } })
+  const rows = ((await ui.findAll({ type: 'Text' })) as { text: string }[]).map(t => t.text)
+  // Each Text in a row Box of its own, under one column Box: two Texts in one row Box draw as one 36-column row.
+  const boxes = ((await ui.findAll({ type: 'Box' })) as { props: { flexDirection?: string }; text: string }[]).map(b => [b.props.flexDirection, b.text])
+  await ui.unmount()
+  expect(rows).toEqual(['units: reading the Conveyor', 'snapshot'])
+  expect(boxes).toEqual([['column', 'units: reading the Conveyorsnapshot'], ['row', 'units: reading the Conveyor'], ['row', 'snapshot']])
+  release()
+  await w.clock.settle()
 })
 
 test('main fetches at the start and once a minute', async ($, on) => {
@@ -809,7 +829,7 @@ test('a feed and a limit file over the cap are not read: a line names each one\'
   w.fetchRc = 3
   await units($)
   await w.clock.settle()
-  expect(await draw($, 'Pane')).toBe("units: the Board's live feed (units-feed.json) is 4.5 MB, over the 4.2 MB cap; it is not read, reading the host; units: the Board's limit file (limit.json) is 20000 bytes, over the 16384 byte cap; the usage limit is not read; units: the Conveyor snapshot cannot be read (the fetch did not run)")
+  expect(await drawWide($)).toBe("units: the Board's live feed (units-feed.json) is 4.5 MB, over the 4.2 MB cap; it is not read, reading the host; units: the Board's limit file (limit.json) is 20000 bytes, over the 16384 byte cap; the usage limit is not read; units: the Conveyor snapshot cannot be read (the fetch did not run)")
 })
 
 // #1287: /units read stream.json, whose snapshots hold the Tests page's history (tests, testActions), and refused it
@@ -913,7 +933,7 @@ test('the limit file\'s over-cap line stays under a board the feed changes, each
   expect(await units($)).toContain(line)
   w.files.set(FEED, { text: feed(snapshot({ belt: [BELT] })), at: NOW + 500 })
   await w.clock.advance(1000)
-  const pane = await draw($, 'Pane')
+  const pane = await drawWide($)
   expect(pane).toContain('#3863')
   expect(pane).toContain(line)
   let release = () => {}
@@ -926,7 +946,7 @@ test('the limit file\'s over-cap line stays under a board the feed changes, each
   w.hold = undefined
   release()
   await w.clock.settle()
-  const after = await draw($, 'Pane')
+  const after = await drawWide($)
   expect(after).toContain('#6173')
   expect(after).toContain(line)
   // A poll whose host read fails cleared the line, and the next feed board was drawn without it.
@@ -935,7 +955,7 @@ test('the limit file\'s over-cap line stays under a board the feed changes, each
   await w.clock.settle()
   w.files.set(FEED, { text: feed(snapshot({ belt: [{ ...BELT, issue: 6174 }] })), at: NOW + 2500 })
   await w.clock.advance(1000)
-  const failed = await draw($, 'Pane')
+  const failed = await drawWide($)
   expect(failed).toContain('#6174')
   expect(failed).toContain(line)
 })
@@ -951,7 +971,7 @@ test('the limit file\'s over-cap line leads the one line drawn when the feed giv
   await w.clock.settle()
   w.files.set(FEED, { text: feed('null'), at: NOW + 500 })
   await w.clock.advance(1000)
-  expect(await draw($, 'Pane')).toBe(none)
+  expect(await drawWide($)).toBe(none)
   let release = () => {}
   w.hold = new Promise<void>(r => { release = r })
   // The poll reads the snapshot feed, then waits on its fetch; the feed loses its snapshot meanwhile.
@@ -964,7 +984,7 @@ test('the limit file\'s over-cap line leads the one line drawn when the feed giv
   w.hold = undefined
   release()
   await w.clock.settle()
-  expect(await draw($, 'Pane')).toBe(none)
+  expect(await drawWide($)).toBe(none)
 })
 
 // the Board writes its feed in its own folder; a mod reading a fixed folder finds no fresh file there and asks the

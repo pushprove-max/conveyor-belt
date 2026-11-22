@@ -122,7 +122,7 @@ export type Snap = { own?: string; pushes?: Push[]; loops: Loop[]; needs: Need[]
 export type Fast = { state: 'none' | 'unread' | 'norecord' } | { state: 'ok'; branch: string; ahead: number; dirty: number; subject: string }
 export type Research = { state: 'none' } | { state: 'ok'; lastAt: number | null }
 export type Limit = { pct: number; resetsAt: number }
-// snap is null when no record's snapshot could be read; note then holds the one line every view shows instead, with
+// snap is null when no record's snapshot could be read; note then holds the note every view shows instead, with
 // the Foreman indicator still under it.
 // The Foreman indicator (foremanOf): null where no Foreman is expected; else listening or not, why not, and the line
 // of details under it.
@@ -942,6 +942,9 @@ const pieces = (t: string, room: number): string[] => {
   }
   return cur ? [...out, cur] : out
 }
+// A note (a fetch that failed, a record not read, the pane's first wait) wrapped at its spaces to the pane's width,
+// never cut: the terminal wraps a line wider than a dock, and a cut note loses its reason.
+export const noteLines = (t: string, w: number, style: Omit<Seg, 't'> = { c: C.you }): Line[] => pieces(t, w).map(p => fitWidth([{ ...style, t: p }], w))
 
 // What the pick held back, a count a rule, wrapped at its counts, never cut: at 40 columns four rules are wider than
 // the pane, and a cut line drops the last count. `held back: 1 follow-ups · 1 P0 · 1 P1 · 1 P2`. A count whose rule
@@ -1137,7 +1140,7 @@ export const tableText = (s: State, w: number): string => (s.snap ? board(s, s.s
 
 // The side pane, the Build matrix layout (#497): the head, the count band, the Foreman's state, Machine details (one
 // toggle line until it is opened), then BUILD MATRIX, WORKER ACTIVITY, PICK ORDER and LANDED TODAY, each a table that
-// scans. A line that would wrap is cut at the width.
+// scans. A line that would wrap is cut at the width; a note (a fetch error, a record not read) wraps at its spaces.
 const padR = (t: string, n: number) => `${t}${' '.repeat(Math.max(0, n - cols(t)))}`
 const padL = (t: string, n: number) => `${' '.repeat(Math.max(0, n - cols(t)))}${t}`
 const rule = (w: number): Line => [{ t: '─'.repeat(w), d: true }]
@@ -1350,11 +1353,11 @@ const paneBoard = (s: State, snap: Snap, w: number, frame: number, open: boolean
     ...(snap.deploy.length ? [[], ...deployModel(s, snap, w)] : []), [],
     ...landedTable(s, snap, w),
     ...(lanes.length ? [[], ...lanes.map(l => fitWidth(l, w))] : []),
-    ...(notesOf(s).length ? [[], ...notesOf(s).map((n): Line => [{ t: n, c: C.you }])] : []),
+    ...(notesOf(s).length ? [[], ...notesOf(s).flatMap(n => noteLines(n, w))] : []),
   ]
 }
 // open: Machine details is opened.
-export const paneModel = (s: State, w: number, frame: number, open = false): Line[] => (s.snap ? paneBoard(s, s.snap, w, frame, open) : [noteLine(s), ...foremanModel(s, w), ...engineModel(s, w), ...testMapModel(s, w)])
+export const paneModel = (s: State, w: number, frame: number, open = false): Line[] => (s.snap ? paneBoard(s, s.snap, w, frame, open) : [...noteLines(s.note, w), ...foremanModel(s, w), ...engineModel(s, w), ...testMapModel(s, w)])
 
 // What the toasts compare between two polls: the cards that need you and the cards that landed, by card id.
 export type Seen = { needs: Map<string, string>; landed: Map<string, string> }

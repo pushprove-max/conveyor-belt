@@ -2,7 +2,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 import { refresh as refreshAutoBand } from './auto'
-import { boardOf, boardOfFeed, foremanOf, paneModel, parseFetch, parseLimit, parseStream, seatFromGit, seenOf, tableText, toasts } from './sources'
+import { boardOf, boardOfFeed, foremanOf, noteLines, paneModel, parseFetch, parseLimit, parseStream, seatFromGit, seenOf, tableText, toasts } from './sources'
 import { clockOf, setClock } from './elements'
 import type { Line } from './elements'
 import type { Research, Seen, State } from './sources'
@@ -614,11 +614,11 @@ export const register: Register = (on, options) => {
     void ensureBegun($)
     const s = (await read($, state)) as State | null
     const { Box, Text, Button } = $.ui.resolve(e)
-    if (!s) return <Text dimColor>{WAITING}</Text>
     // The pane's own width, with no upper or lower limit: the terminal gives it as `bodyColumns` (a dock can be as
     // narrow as 24 columns); a surface that leaves that out gives the pane's size as `viewport`. 56 only when neither
     // is given: a width wider than the dock's wraps every row.
     const w = Math.floor(Number(e.props.bodyColumns) || Number(e.viewport?.columns)) || 56
+    if (!s) return <Box flexDirection="column">{noteLines(WAITING, w, { d: true }).map((l, i) => <Box key={`w${i}`} flexDirection="row">{draw(Text, l, `w${i}`)}</Box>)}</Box>
     const f = await read($, frame)
     const open = (await read($, details)) === true
     const flip = () => { void update($, details, v => !v).catch(() => undefined) }
