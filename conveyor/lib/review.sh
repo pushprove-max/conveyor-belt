@@ -246,8 +246,8 @@ claudereview() { # <worktree> <brief> <instructions> <model> <effort>
 # The judge. With the control record's judge on (`control judge on`; judgeon()), a judge reads each review of a card's change that holds findings, before
 # the card acts on it: the findings, the card's staged change, the issue (the brief) and the findings already
 # declined on this issue's cards (the declined list, DECLINED, holds them). It marks each finding accepted, declined or
-# outside (real, but not caused by the card's change), with a one-line reason, and declines unless the finding earns its place (a P2 has a higher bar: rare-case and style P2s are declined; a P3 is judged as a P2, but not declined for being
-# minor). A declined finding becomes a line `DECLINED:
+# outside (real, but not caused by the card's change), with a one-line reason, and declines a finding at any level (P0 to P3) only when its claim is wrong about the code or its proof cannot happen with what the project really runs ("rare case" is
+# no reason at any level; a P3 is not declined for being minor). A declined finding becomes a line `DECLINED:
 # <finding> (judge: <reason>)` of the review, which is no finding (NOTFINDING): it causes no fix round and no
 # follow-up, and a review left with no finding is a GO; it goes to the declined list
 # (declined(), by: "judge", why: the reason). An outside finding becomes a line `OUTSIDE: <finding> (judge: <reason>)`
@@ -257,7 +257,7 @@ claudereview() { # <worktree> <brief> <instructions> <model> <effort>
 # tokens, usage, accepted: [{n, finding, place, reason, cost}], declined: [{n, finding, place, reason}], outside: [the same]}; n is the
 # finding's number as the judge was given it (its F<n>), and cost is what the judge wrote after "Cost to every card:",
 # which every accepted finding has.
-# Each finding reaches the judge marked with its place: inside the card's diff (the first file:line it names, a path under the worktree read as one in it, is a
+# Each finding reaches the judge marked with its place: inside the card's diff (any file:line it names, a path under the worktree read as one in it, is a
 # line the staged change adds or changes, or one of the two lines a removal sits between, or its file is one the
 # change deletes or changes as binary), outside it (an unchanged line beside a changed one too), or none (it
 # names no file:line). One outside it is accepted when the card's change causes it, and answered OUTSIDE when it is real
@@ -275,31 +275,28 @@ claudereview() { # <worktree> <brief> <instructions> <model> <effort>
 JUDGE='You are the judge of a code review. A reviewer read the staged change in this worktree (`git diff --cached`)
 against the issue below and wrote the findings at the end of this message, numbered F1, F2 and so on. Decide for
 each finding whether it counts: accept it, decline it, or mark it outside. Read the change and the code it touches;
-do not run tests or builds and change nothing. Decline unless the finding earns its place; a tie is a decline.
+do not run tests or builds and change nothing. When you cannot tell yet whether a claim is right or a proof can
+happen, read the code until you can: doubt alone is no reason to decline.
 Each finding is marked with its place: `inside the diff` (its file and line are in the staged change), `outside the
 diff` (they are not) or `no place` (it names no file and line).
 Answer OUTSIDE for a real defect that this card'"'"'s change did not cause: code the card neither changed nor broke.
 The card lands without a fix for it, and the finding is filed as a follow-up of the card. A finding is real when
 its proof can happen with what the project really runs and its claim is right. "Not about this card'"'"'s change" is
 never a reason to decline a real finding: answer OUTSIDE for it.
-Accept a finding only when all of these hold:
-- The card'"'"'s change causes it. Accept one outside the diff only when the change causes it: a caller or dependant
-  the change breaks.
+Accept a finding only when all of these hold. One rule holds at every level, P0 to P3:
+- It is inside the diff, or the card'"'"'s change causes it: a caller or dependant the change breaks. For one outside the
+  diff, the reason names the changed line that causes it.
 - Its proof can happen with what the project really runs: its real config, commands and inputs. Decline a proof that
   needs a stub built to misbehave, or a setup the project does not have.
-- It is not a finding already declined (listed before the findings, when there are any) raised again with nothing new.
-A P2 finding has a higher bar. Accept a P2 only when it is inside the diff, its proof uses what the project really
-runs, and it would cause a wrong result that users or the next card meet. Decline with the reason `rare case` a P2
-whose proof needs an unusual input, timing or setup. Decline with the reason `style` a P2 about wording, naming or
-form that causes no wrong result.
-Judge a P3 finding as a P2: accept it only when it is inside the diff, its proof uses what the project really runs,
-and the defect is real, and decline a P3 whose proof needs an unusual input, timing or setup with the reason `rare
-case`. A P3 is minor by its level: do not decline it because it causes no wrong result, or as `style` when it is a
-misleading name or message, a small inconsistency, or dead code the change left.
-The P2 and P3 bars above are for ACCEPT only, not for OUTSIDE.
-Answer OUTSIDE for a real finding of any level, also when its proof needs an uncommon input or timing.
-Decline a finding that the change did not cause only when it is not real, or when it is a finding already declined
-that is raised again with nothing new.
+Decline a finding at any level only when its claim is wrong about the code, or its proof cannot happen with what the
+project really runs. The reason says which of the two, and why. "Rare case" is no reason to decline at any level: an
+unusual input, timing or setup that the project really runs is not one. A P3 is minor by its level: do not decline it
+because it causes no wrong result.
+A finding already declined (listed before the findings, when there are any) and raised again with nothing new is
+declined for the reason it was declined, when that reason is one of the two above. Judge it again from the code when
+that reason was "rare case" or any other.
+Answer OUTSIDE for a real finding of any level that the change did not cause, also when its proof needs an uncommon
+input or timing.
 A finding marked `always accepted` is of a kind the project always accepts: answer ACCEPT for it. It is accepted
 whatever you answer, so its line always ends with its `Cost to every card:`.
 Answer with exactly one line for each finding, in order, and no other line:
@@ -322,10 +319,11 @@ judgemarks() { # <worktree> <the always-accepted kinds, a JSON array>
         /^@@ / { h = 0; if (f != "") { split($3, a, ","); s = substr(a[1], 2) + 0; print f "\t" s "\t" s + (a[2] == "" ? 1 : a[2] == 0 ? 2 : a[2] + 0) - 1 } }') "$RX"'
       ($names | split("\n") | map(select(. != ""))) as $files
       | ($hunks | split("\n") | map(select(. != "") | split("\t") | {file: .[0], from: (.[1] | tonumber), to: (.[2] | tonumber)})) as $h
-      | [inputs] | to_entries | map(.value as $l | ($l | split($wt) | join("") | split($real) | join("") | [scan("([A-Za-z0-9_./-]+):([0-9]+)")] | first) as $w
+      | [inputs] | to_entries | map(.value as $l | ($l | split($wt) | join("") | split($real) | join("") | [scan("([A-Za-z0-9_./-]+):([0-9]+)")]) as $ws
         | {n: (.key + 1), finding: $l,
-           place: (if $w == null then "none" else ($w[0] | ltrimstr("./")) as $p | ($w[1] | tonumber) as $ln
-             | if any($files[]; . == $p) and (all($h[]; .file != $p) or any($h[]; .file == $p and .from <= $ln and $ln <= .to)) then "inside" else "outside" end end),
+           place: (if ($ws | length) == 0 then "none"
+             elif any($ws[]; (.[0] | ltrimstr("./")) as $p | (.[1] | tonumber) as $ln
+               | any($files[]; . == $p) and (all($h[]; .file != $p) or any($h[]; .file == $p and .from <= $ln and $ln <= .to))) then "inside" else "outside" end),
            kind: ([$always[] | select(. as $k | $l | gsub("\\s*\\[E[0-9]+\\]"; "") | test("^\\[P[0-3]\\]\\[" + ($k | rx) + "\\]"; "i"))] | first)})'
 }
 # The lines each finding of a review cites, kept on the review's line (excerpts) so that the Board shows the lines the

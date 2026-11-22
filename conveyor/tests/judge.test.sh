@@ -99,7 +99,6 @@ t_judgeoutsidefiled() {
   loop run >/dev/null || fail "run exited non-zero"
   grep -qxF '`F<n> OUTSIDE: <one-line reason: why it is real, and why this card'"'"'s change did not cause it>`' "$STUB/judge-asked" \
     && grep -qxF 'never a reason to decline a real finding: answer OUTSIDE for it.' "$STUB/judge-asked" \
-    && grep -qxF 'The P2 and P3 bars above are for ACCEPT only, not for OUTSIDE.' "$STUB/judge-asked" \
     && ! grep -qF 'decline a `rare case` or `style` one as above' "$STUB/judge-asked" \
     && ! grep -qF 'with the reason `not about this card'"'"'s change`' "$STUB/judge-asked" \
     || fail "the judge's prompt has no OUTSIDE answer, or still declines a real finding for being outside the change: $(grep -n 'OUTSIDE\|not about' "$STUB/judge-asked")"
@@ -170,24 +169,29 @@ t_judgedecline() {
     || fail "the judge did not run on a model of another family than the reviewer's, or what it used is not recorded: $(jf 7 '.judge | tojson')"
 }
 
-# Bugs (#539): the judge is not told the higher bar for a P2, so a rare-case or style P2 starts a fix round (a fix
-# session and another review); a P2 it declines as `rare case` leaves the review a NO-GO, or is lost from the declined list.
+# Bugs (#539, #1378): the judge's prompt has two scope rules (a P2 "only when it is inside the diff", so a caller the
+# change breaks, always outside the diff, is declined), or tells it to decline a finding of some level as a rare case or
+# as style, so a real finding is lost; a P2 it declines with a reason that names why its proof cannot happen leaves the
+# review a NO-GO, or is lost from the declined list.
 t_judgerare() {
-  local f='[P2] a.txt:2 breaks when two cards land in the same second. Proof: start two cards at once on a slow disk' l
+  local f='[P2] a.txt:2 breaks when two cards land in the same second. Proof: start two cards at once on a slow disk' l old
   judging "[$(issue 7 2026-01-01)]"
   printf '%s\n' "$f" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
-  echo 'F1 DECLINE: rare case: the proof needs an unusual timing' > "$STUB/judge.1"
+  echo 'F1 DECLINE: its proof cannot happen with what the project runs: one card lands at a time' > "$STUB/judge.1"
   judgeone 7 "$STUB/review"
-  for l in 'A P2 finding has a higher bar. Accept a P2 only when it is inside the diff, its proof uses what the project really' \
-    'runs, and it would cause a wrong result that users or the next card meet. Decline with the reason `rare case` a P2' \
-    'whose proof needs an unusual input, timing or setup. Decline with the reason `style` a P2 about wording, naming or' \
-    'form that causes no wrong result.'; do
-    grep -qxF -- "$l" "$STUB/judge-asked" || fail "the judge's prompt does not hold the P2 bar: no line '$l'"
+  for l in 'Accept a finding only when all of these hold. One rule holds at every level, P0 to P3:' \
+    '- It is inside the diff, or the card'"'"'s change causes it: a caller or dependant the change breaks. For one outside the' \
+    'Decline a finding at any level only when its claim is wrong about the code, or its proof cannot happen with what the' \
+    'project really runs. The reason says which of the two, and why. "Rare case" is no reason to decline at any level: an'; do
+    grep -qxF -- "$l" "$STUB/judge-asked" || fail "the judge's prompt does not hold the one scope rule and decline rule: no line '$l'"
   done
-  [ "$(jr 7 | tr '\n' '|')" = "DECLINED: $f (judge: rare case: the proof needs an unusual timing)|USER-VISIBLE: no|VERDICT: GO|" ] \
-    || fail "a P2 the judge declined as a rare case did not leave the review a GO: $(jr 7)"
-  [ "$(jq -c '[.finding, .by, .why]' "$ST/declined.jsonl")" = "$(jq -cn --arg f "$f" '[$f, "judge", "rare case: the proof needs an unusual timing"]')" ] \
-    || fail "the rare-case P2 is not on the declined list, once, with the judge's reason: $(cat "$ST/declined.jsonl" 2>&1)"
+  old='only when it is inside the diff|with the reason `(rare case|style)`|A P2 finding has a higher bar|Judge a P3 finding as a P2|a tie is a decline|Decline unless the finding earns'
+  ! grep -qE "$old" "$STUB/judge-asked" \
+    || fail "the judge's prompt still holds a scope or decline rule for one level: $(grep -nE "$old" "$STUB/judge-asked")"
+  [ "$(jr 7 | tr '\n' '|')" = "DECLINED: $f (judge: its proof cannot happen with what the project runs: one card lands at a time)|USER-VISIBLE: no|VERDICT: GO|" ] \
+    || fail "a P2 the judge declined for its proof did not leave the review a GO: $(jr 7)"
+  [ "$(jq -c '[.finding, .by, .why]' "$ST/declined.jsonl")" = "$(jq -cn --arg f "$f" '[$f, "judge", "its proof cannot happen with what the project runs: one card lands at a time"]')" ] \
+    || fail "the declined P2 is not on the declined list, once, with the judge's reason: $(cat "$ST/declined.jsonl" 2>&1)"
 }
 
 # Bugs (#534): the writing method the reviewer and the judge read is missing, changed from the pinned upstream text,
@@ -257,6 +261,19 @@ t_judgemarks() {
   grep -qxF "F1 [inside the diff] [P1] $T/$CASE/cards/c7/a.txt:2 wrong word" "$STUB/judge-asked" || fail "a finding that names its file by the worktree's whole path was not marked as inside the diff: $(grep '^F1' "$STUB/judge-asked" 2>&1)"
   grep -qxF "F2 [inside the diff] $f" "$STUB/judge-asked" || fail "a finding whose proof holds a kind's name in brackets was marked as of that kind: $(grep '^F2' "$STUB/judge-asked" 2>&1)"
   [ "$(jr 7 | tail -n 1)" = 'VERDICT: GO' ] && [ "$(jf 7 '.judge.declined | length')" = 2 ] || fail "the two declined findings did not leave the review a GO: $(jr 7) $(jf 7 .judge)"
+}
+
+# Bug: a finding is marked inside the diff by its first file:line alone, so one whose second citation is a changed line
+# (the caller the change breaks, cited after the line it reads from) is marked outside and the judge declines it. It
+# calls judgemarks() alone: no card runs.
+t_judgemarksany() {
+  local w=$T/$CASE/w m; mkdir -p "$w" && git -C "$w" init -q || fail "the worktree could not be made"
+  printf '1\n2\n3\n' > "$w/a.txt"; printf 'x\n' > "$w/b.txt"; git -C "$w" add . && git -C "$w" -c user.name=t -c user.email=t@example.com commit -qm base || fail "the base commit failed"
+  printf '1\n2\nchanged\n' > "$w/a.txt"; git -C "$w" add a.txt
+  printf '%s\n' '[P1] b.txt:1 reads a.txt:3 that the change broke' '[P1] b.txt:1 and a.txt:1 two unchanged lines' '[P1] b.txt:1 alone' '[P1] no place' > "$w.review"
+  # shellcheck disable=SC2034 # STE is read by the sourced lib/review.sh
+  m=$(eval "$(grep -E '^(ROLLOUT|NOTFINDING|RX)=' "$SRC/lib/prompts.sh")"; STE=''; . "$SRC/lib/review.sh"; judgemarks "$w" '[]')
+  [ "$(jq -c 'map(.place)' <<<"$m")" = '["inside","outside","outside","none"]' ] || fail "a finding whose second citation is a changed line was not marked inside, or another was: $m"
 }
 
 # Bug: a finding that came back carries its id mark ([E2], REREVIEW) beside its kind mark, and the judge no longer

@@ -17,27 +17,27 @@ MINOR3='[P3] a.txt:1 the name says count but holds a sum. Proof: a.txt:1'
 t_minoron() {
   judging "[$(issue 7 2026-01-01 P1)]"
   printf '%s\n' "$MINOR3" '[P3] a.txt:2 odd spacing. Proof: a.txt:2' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
-  printf '%s\n' 'F1 ACCEPT: the name misleads the next reader. Cost to every card: none' 'F2 DECLINE: rare case' > "$STUB/judge.1"
+  printf '%s\n' 'F1 ACCEPT: the name misleads the next reader. Cost to every card: none' 'F2 DECLINE: its claim is wrong: the spacing is as the style guide has it' > "$STUB/judge.1"
   judgeone 7 "$STUB/review" fix
   [ "$(jf 7 .verdict)" = NO-GO ] && grep -qxF "E1 $MINOR3" "$T/$CASE/cards/c7.fix" && ! grep -q 'odd spacing' "$T/$CASE/cards/c7.fix" \
     || fail "an accepted P3 with the rule P3 on did not make a NO-GO whose fix is told it alone: $(jf 7 .verdict), $(cat "$T/$CASE/cards/c7.fix")"
   [ "$(jf 7 '.counts | tojson')" = '{"P0":0,"P1":0,"P2":0,"P3":1}' ] || fail "the review's counts do not count the accepted P3 alone: $(jf 7 '.counts | tojson')"
 }
 
-# Bugs: the judge is not told to judge a P3 as a P2, or is left to decline every P3 for causing no wrong result; a P3
+# Bugs: the judge is left to decline every P3 for causing no wrong result; a P3
 # finding the judge declines still costs a fix round, or never reaches the declined list with its reason.
 t_minordecline() {
   local l
   judging "[$(issue 7 2026-01-01 P1)]"
   printf '%s\n' "$MINOR3" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
-  echo 'F1 DECLINE: rare case' > "$STUB/judge.1"
+  echo 'F1 DECLINE: its claim is wrong: the name holds a count' > "$STUB/judge.1"
   judgeone 7 "$STUB/review"
-  for l in 'Judge a P3 finding as a P2: accept it only when it is inside the diff, its proof uses what the project really runs,' \
-    'case`. A P3 is minor by its level: do not decline it because it causes no wrong result, or as `style` when it is a'; do
+  for l in 'unusual input, timing or setup that the project really runs is not one. A P3 is minor by its level: do not decline it' \
+    'because it causes no wrong result.'; do
     grep -qxF -- "$l" "$STUB/judge-asked" || fail "the judge's prompt does not hold the P3 bar: no line '$l'"
   done
-  [ "$(jr 7 | tr '\n' '|')" = "DECLINED: $MINOR3 (judge: rare case)|USER-VISIBLE: no|VERDICT: GO|" ] || fail "a declined P3 did not leave the review a GO: $(jr 7)"
-  [ "$(jq -r '"\(.by): \(.why): \(.finding)"' "$ST/declined.jsonl")" = "judge: rare case: $MINOR3" ] || fail "the declined P3 is not in the declined list with its reason: $(cat "$ST/declined.jsonl" 2>&1)"
+  [ "$(jr 7 | tr '\n' '|')" = "DECLINED: $MINOR3 (judge: its claim is wrong: the name holds a count)|USER-VISIBLE: no|VERDICT: GO|" ] || fail "a declined P3 did not leave the review a GO: $(jr 7)"
+  [ "$(jq -r '"\(.by): \(.why): \(.finding)"' "$ST/declined.jsonl")" = "judge: its claim is wrong: the name holds a count: $MINOR3" ] || fail "the declined P3 is not in the declined list with its reason: $(cat "$ST/declined.jsonl" 2>&1)"
 }
 
 # Bugs: with the rule P3 off, an accepted P3 alone makes a NO-GO and costs a fix round, is filed as a follow-up, or
