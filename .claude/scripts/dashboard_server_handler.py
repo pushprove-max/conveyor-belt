@@ -38,8 +38,8 @@ class Handler(Pages, http.server.SimpleHTTPRequestHandler):
         # The test map's build runs the whole suite on the build machine: an admin's to start or stop.
         if not machine and body['action'] == 'testmap' and role_of(read_store(), user) != 'admin':
             return self.reply(403, 'only an admin builds the test map')
-        # Record CPU time changes the pack's test command, which every card runs: an admin's.
-        if not machine and body['action'] == 'test-settings' and body['args'][0] == 'cpu-time' and role_of(read_store(), user) != 'admin':
+        # Record CPU time and Record test times change the pack's test command or report, or file a card: an admin's.
+        if not machine and body['action'] == 'test-settings' and body['args'][0] in ('cpu-time', 'record-times') and not globals()['is_admin'](user):
             return self.reply(403, 'only an admin changes the test command')
         # Where a release's suite runs sends the release commit (its Git bundle) to that machine, an ssh host or a leased
         # devbox: an admin's choice. Check the box only reads what the saved machine has, so a member may press it.

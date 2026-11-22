@@ -455,6 +455,43 @@ test('Health: no test times from a runner Conveyor cannot read names the runner 
   assert.match(row.textContent, /Next: Add the report option --json --outputFile=<file> to the test command, then run setup again/);
 });
 
+// #1355. Bug: the Test times warning only pointed at the README, whatever the test command was. With the engine's plan
+// (timesPlan, one kind for each kind of test command) it says what the plan does and its button sends
+// `test-settings record-times` for that project; the row has no README pointer. A refusal (a member) is shown, not lost.
+const TIMES_PLANS = {
+  report: [{ kind: 'report', report: { runner: 'node --test', format: 'junit' } }, /sets test\.report in the pack to the report of node --test, so Conveyor reads each test file's times from it/],
+  wrap: [{ kind: 'wrap', file: 'w.test.sh', was: 'bash w.test.sh', command: 'wrapped bash w.test.sh' }, /wraps the test command, which runs only w\.test\.sh, in the helper that prints test times, and saves wrapped bash w\.test\.sh as test\.command/],
+  // Bug: the wrap words left out test.fileCommand, which the engine's plan also saves, so an admin did not see it.
+  'wrap with a file command': [{ kind: 'wrap', file: 'w.test.sh', was: 'bash w.test.sh', command: 'wrapped bash w.test.sh', fileCommand: 'wrapped bash' }, /saves wrapped bash w\.test\.sh as test\.command, and wrapped bash as test\.fileCommand in the pack/],
+  card: [{ kind: 'card', file: 'run-all.sh', title: 'Record test times: wrap each test file\'s run in run-all.sh', body: 'steps' }, /files a held card, with no GitHub issue, to wrap each test file's run in run-all\.sh: that script is yours\. Release the card when you agree/],
+};
+for (const [kind, [plan, words]] of Object.entries(TIMES_PLANS)) {
+  test(`Health: the Test times warning for a ${kind} plan says what it does and its button records the times`, async () => {
+    const data = full();
+    Object.assign(data.panels.health.data.records[0], { untimed: 2, timesPlan: plan });
+    const w = page('health');
+    deliver(w, data);
+    const row = dd(w, 'Test times');
+    assert.match(row.querySelector('.check-next').textContent, words);
+    assert.doesNotMatch(row.textContent, /README/, 'the row has no README pointer');
+    row.querySelector('[data-act="record-times"]').click();
+    await settle(); await settle();
+    assert.deepEqual(w.posts, [{ url: 'control', body: { action: 'test-settings', args: ['record-times'], repo: data.panels.health.data.records[0].repo } }]);
+    assert.match(dd(w, 'Test times').textContent, /Done: sent to main/);
+  });
+}
+test('Health: a refused Record test times says why and keeps its button', async () => {
+  const data = full();
+  Object.assign(data.panels.health.data.records[0], { untimed: 2, timesPlan: TIMES_PLANS.report[0] });
+  const w = page('health');
+  deliver(w, data);
+  w.reply = { ok: false, status: 403, text: () => Promise.resolve('only an admin changes the test command') };
+  dd(w, 'Test times').querySelector('[data-act="record-times"]').click();
+  await settle(); await settle();
+  assert.match(dd(w, 'Test times').textContent, /Not recorded:\s*only an admin changes the test command/);
+  assert.ok(dd(w, 'Test times').querySelector('[data-act="record-times"]:not([disabled])'), 'the button can be pressed again');
+});
+
 // Issue 629. Bug: Health told the owner to "Move this account's work to another on the Rules tab" for a 92% account
 // no card runs on, and for one the cards use when the host file listed no other account to move to; a failed read
 // showed "HTTP 401". Each fixture is one Claude account on the build machine.

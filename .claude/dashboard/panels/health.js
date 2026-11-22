@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Health: is the machinery running. Its part: {host: {name, reachable, error}, records | null (one per Conveyor
-// record: repoUrl (its repository's https address, else null), snapshotAt (when its kept snapshot was made, or null), loop, state (as its control record says: a loop it stops is off, not stopped), newest, stuck, unpushed, pushError, pushFailingSince, lastPushAt, gh, diskFreeKb, cycles, flaky: [{case, count, issue, files, url}] | null, slowOff: [{file, issue, url, cpu, budget, card, last: {cpu, card}}] | null, untimed: the last card test runs that recorded no test times, 0 when one did | null, split: {kept, wouldSplit: {cards, reviewed, go, fixes}, split} | null: the cards the rule Split large issues checked, report: {runner, format, path, env, args, option}, the pack's test.report | null, quarantined: [{line, field, time}] | null: the card records' lines set aside, serviceOld: {commit, refused, project} | null: the machine's Conveyor runs another commit, whose check refuses the pack), limit | null (the
+// record: repoUrl (its repository's https address, else null), snapshotAt (when its kept snapshot was made, or null), loop, state (as its control record says: a loop it stops is off, not stopped), newest, stuck, unpushed, pushError, pushFailingSince, lastPushAt, gh, diskFreeKb, cycles, flaky: [{case, count, issue, files, url}] | null, slowOff: [{file, issue, url, cpu, budget, card, last: {cpu, card}}] | null, untimed: the last card test runs that recorded no test times, 0 when one did | null, split: {kept, wouldSplit: {cards, reviewed, go, fixes}, split} | null: the cards the rule Split large issues checked, report: {runner, format, path, env, args, option}, the pack's test.report | null, timesPlan: {kind: report | wrap | card, ...} | null (what Record test times would do), quarantined: [{line, field, time}] | null: the card records' lines set aside, serviceOld: {commit, refused, project} | null: the machine's Conveyor runs another commit, whose check refuses the pack), limit | null (the
 // usage-limit reading of this machine's own login: only its Codex reading and, with billing "api", its api block (the week's dollars against the weekly cap) show here), limitError,
 // limits: [{repo, account (null: the default login), uses (build, review), pct, readAt, email}] | null (the weekly limit of each account the cards run on, as the build machine's guard reads it),
 // accounts: {error, list: [{machine (null: this machine), name, email, usedPct, fiveHourPct, resetsAt, readAt (when its figures were read), error,
@@ -174,8 +174,12 @@ window.DASH_APP.panel({
       // no format), the row names the runner and the report option that would give the times.
       if (typeof r.untimed === 'number' && r.untimed > 0) {
         const rp = r.report && typeof r.report === 'object' && typeof r.report.runner === 'string' && !r.report.format && typeof r.report.option === 'string' ? r.report : null;
+        // With a plan from the engine (timesPlan: report, wrap or card), the row says what the plan does and its button
+        // runs it (an admin's: the Board refuses a member); with none, the row points at the README.
+        const words = timesWords(r.timesPlan);
         check(`Test times${of}`, ctx.chip('Not recorded', 'warn'),
-          `the last ${r.untimed === 1 ? 'card test run' : `${r.untimed} card test runs`} recorded no test times${rp ? `; the test command runs ${rp.runner}, and Conveyor cannot read its output` : ''}`).next = rp
+          `the last ${r.untimed === 1 ? 'card test run' : `${r.untimed} card test runs`} recorded no test times${rp ? `; the test command runs ${rp.runner}, and Conveyor cannot read its output` : ''}`,
+          words ? TIMES_SAID.get(r.repo) : null).next = words ? [words, ' ', timesButton(r.repo, ctx)] : rp
           ? `Add the report option ${rp.option} to the test command, then run setup again: Conveyor reads each test file's times from that report. The section "Test file times" in conveyor/README.md tells more.`
           : 'Add them to the test command: the section "Test file times" in conveyor/README.md tells how.';
       }
@@ -433,6 +437,38 @@ window.DASH_APP.panel({
 // leaves the list as a dismissed one does, and the new issue's link stays in the pane until the page loads again. A
 // refused or failed filing keeps the preview open with the reason. The preview's fields are the same nodes at each
 // redraw (the live feed draws the panel every few seconds), so the owner's edits, focus and caret stay.
+// Record test times (conveyor/lib/setup.sh timesplan()): what the engine's plan does, in words, by its kind; null for a
+// plan the Board does not know. The answer to the button, by repo, stays through the redraws of the live feed.
+function timesWords(p) {
+  if (!p || typeof p !== 'object') return null;
+  if (p.kind === 'report' && p.report && typeof p.report.runner === 'string') {
+    return `Record test times sets test.report in the pack to the report of ${p.report.runner}, so Conveyor reads each test file's times from it.`;
+  }
+  if (p.kind === 'wrap' && typeof p.file === 'string' && typeof p.command === 'string') {
+    const fc = typeof p.fileCommand === 'string' && p.fileCommand ? `, and ${p.fileCommand} as test.fileCommand` : '';
+    return `Record test times wraps the test command, which runs only ${p.file}, in the helper that prints test times, and saves ${p.command} as test.command${fc} in the pack.`;
+  }
+  if (p.kind === 'card' && typeof p.file === 'string') {
+    return `Record test times files a held card, with no GitHub issue, to wrap each test file's run in ${p.file}: that script is yours. Release the card when you agree.`;
+  }
+  return null;
+}
+const TIMES_SAID = new Map();
+function timesButton(repo, ctx) {
+  const b = ctx.h('button', 'btn btn-quiet', 'Record test times');
+  b.type = 'button'; b.dataset.act = 'record-times';
+  b.addEventListener('click', () => {
+    b.disabled = true;
+    TIMES_SAID.delete(repo);
+    ctx.post('control', { action: 'test-settings', args: ['record-times'], repo })
+      .then((r) => r.text().then((t) => [r.ok, String(t).trim() || `the Board answered ${r.status}`]), () => [false, 'the Board did not answer'])
+      .then(([ok, said]) => {
+        TIMES_SAID.set(repo, ok ? `Done: ${said}` : `Not recorded:${ctx.refusal(said).replace(/\.$/, '')}.`);
+        ctx.redraw();
+      });
+  });
+  return b;
+}
 const PLUGIN_DISMISSED = new Set();
 const PLUGIN_FAILED = new Map();
 const PLUGIN_PREVIEW = new Map();

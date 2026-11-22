@@ -251,6 +251,14 @@ lists every project's rows, so it stays as it is.
   note is filed only from its own preview. The other notes stay as they are.
 - **Lint check** in Health counts the cards that landed with a lint command skipped because its tool is missing, as
   "2 unchecked". That command did not check their change. With no such card, the row does not show.
+- **Test times** in Health warns when the last card test runs recorded no test times. Its next step says what
+  **Record test times** does for your test command, and the button does it. Only an admin can use it. When the test
+  command is one that setup knows a report for, it sets `test.report` in the pack to that report. When the test
+  command runs only one test file, it wraps that command in `conveyor/tools/testtime.sh`. When the pack sets
+  `test.fileCommand`, it wraps that command too. When the test command runs
+  a script of your project, it files a held card with no GitHub issue. The card asks to wrap each test file's run
+  in that script, because the script is yours. Release the card when you agree. When no plan applies, the row
+  points to the section "Test file times" in `conveyor/README.md`.
 - A Health row whose error is one line says what failed in a short sentence, for example "The Board could not get
   main from GitHub." Click **Raw error** to read the error as it came, with **Copy output** to copy it.
 - **Work now**, at the foot of Health, shows what keeps the Conveyor machine busy now. Open it to read the machine.

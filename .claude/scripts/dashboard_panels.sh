@@ -68,7 +68,7 @@
 #           without them, slowOff: the snapshot's test files kept off card test steps, each with its issue's url, null
 #           likewise, untimed: how many of the last card test runs recorded no test times, null from a snapshot
 #           without it, unchecked: how many landed cards skipped a lint command for a missing tool, null likewise, report: the pack's test.report (the test runner setup found and how its times are read), null
-#           likewise, routes: each Claude route, subscription and proxy, with its state, null likewise, quarantined:
+#           likewise, timesPlan: what Record test times would do ({kind: report | wrap | card, ...}), null when no plan applies or from a snapshot without it, routes: each Claude route, subscription and proxy, with its state, null likewise, quarantined:
 #           the lines of the card records set aside as not whole records {line, field, time}, null likewise,
 #           serviceOld: the machine's Conveyor on another commit that refuses the pack {commit, refused, project}, null
 #           when it reads it, or likewise), limit (this machine's usage-limit reading: its cost, Codex and API spend figures), limits (the
@@ -428,7 +428,7 @@ PANELS_JQ='
           cap: ($R | slots)}}} end),
    health: {error: null, data: {
         host: {name: $conv.host, local: ($conv.local == true), reachable: $conv.reachable, error: $cerr}, stream: ($conv.stream // null),
-        records: (if $R == null then null else $R | map({repo, repoUrl: (.repoUrl // null), lastPushAt, steered, snapshotAt: (.snap.snapshotAt // null)} + (.snap.health | {loop, state: (.state // null), newest, stuck, unpushed, pushError, pushFailingSince, gh, ghReached, diskFreeKb, builderCap, models, cycles: (.cycles // null), untimed: (.untimed // null), unchecked: (.unchecked // null), split: (.split // null), report: (.report // null), routes: (.routes // null), quarantined: (.quarantined // null), serviceOld: (.serviceOld // null)}) + {flaky: (. as $r | .snap.flaky | arrays | map(. + {url: link($r)})) // null}
+        records: (if $R == null then null else $R | map({repo, repoUrl: (.repoUrl // null), lastPushAt, steered, snapshotAt: (.snap.snapshotAt // null)} + (.snap.health | {loop, state: (.state // null), newest, stuck, unpushed, pushError, pushFailingSince, gh, ghReached, diskFreeKb, builderCap, models, cycles: (.cycles // null), untimed: (.untimed // null), unchecked: (.unchecked // null), split: (.split // null), report: (.report // null), timesPlan: (.timesPlan // null), routes: (.routes // null), quarantined: (.quarantined // null), serviceOld: (.serviceOld // null)}) + {flaky: (. as $r | .snap.flaky | arrays | map(. + {url: link($r)})) // null}
           + {slowOff: (. as $r | .snap.slowOff | arrays | map(. + {url: link($r)})) // null}) end),
         limit: $lim.limit, limitError: $lim.error, limits: limitsOf($R), accounts: accountsOf($R), update: $upd,
         # The plugin problems each Foreman noted, once under each of its projects (repo, as the project filter reads

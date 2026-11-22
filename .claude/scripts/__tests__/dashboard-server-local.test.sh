@@ -169,6 +169,13 @@ r = req('POST', '/control', cookie=ana, body={'action': 'test-settings', 'args':
 check('member_cannot_change_the_test_command', r[0] == 403 and b'only an admin' in r[2] and len(RAN) == n, r)
 r = req('POST', '/control', cookie=mx, body={'action': 'test-settings', 'args': ['cpu-time', 'a.test.js'], 'repo': 'project'}, **other)
 check('admin_records_cpu_time', r[0] == 200 and len(RAN) == n + 1 and RAN[-1][-1].endswith("conveyor.sh test-settings cpu-time a.test.js'"), (r, RAN[-1:]))
+# Record test times (#1355) saves the pack's report or test command, or files a card: an admin's too. Bug it catches: a
+# member's ask ran it.
+n = len(RAN)
+r = req('POST', '/control', cookie=ana, body={'action': 'test-settings', 'args': ['record-times'], 'repo': 'project'}, **other)
+check('member_cannot_record_test_times', r[0] == 403 and b'only an admin' in r[2] and len(RAN) == n, r)
+r = req('POST', '/control', cookie=mx, body={'action': 'test-settings', 'args': ['record-times'], 'repo': 'project'}, **other)
+check('admin_records_test_times', r[0] == 200 and len(RAN) == n + 1 and RAN[-1][-1].endswith("conveyor.sh test-settings record-times'"), (r, RAN[-1:]))
 # Benchmarks (#326) start model sessions on the build machine for hours: a member's Start, preflight or Compare is
 # refused (403) and nothing runs; an admin's runs bench swe there. The tab's history is read behind the login. Bugs
 # it catches: a member started a run; the runs and their figures were read with no login.
