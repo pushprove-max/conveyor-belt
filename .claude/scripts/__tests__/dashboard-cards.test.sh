@@ -616,6 +616,15 @@ run
 [ -z "$(grep '^- ' "$SN")" ] || fail "a dismissed note for a model with no built-in price came back: $(cat "$SN")"
 # Bug: each cycle after the first listed the model again in price-notes.txt, so the file grew every Board refresh.
 [ "$(cat "${SN%/*}/price-notes.txt" 2>&1)" = claude-new-9 ] || fail "price-notes.txt does not list the added model once: $(cat "${SN%/*}/price-notes.txt" 2>&1)"
+# Bug (R10): with the Board's checkout and the build machine's at the same path, the record's main exists here too, and
+# the host's note was never added: the import ran only for a main not on this machine. ssh names the host.
+mkdir -p "$T/same/conveyor/state/foreman"
+PN2=${PN//new-9/new-7}
+jq --arg m "$T/same" '.records[0].main = $m | del(.stateDir)' "$T/host.before" > "$MAIN/conveyor/host.json"
+answer "$(snap "$(jq -cn --arg n "$PN2" '{priceNotes: [$n]}')")" "$P_URL" 1794000000 "$(snap)" "$C_URL" 0
+run
+[ "$(grep '^- ' "$T/same/conveyor/state/foreman/plugin-bugs.md" 2>&1)" = "$PN2" ] \
+  || fail "with ssh and a main that is also a path here, the host's note for a model with no built-in price is not in plugin-bugs.md: $(cat "$T/same/conveyor/state/foreman/plugin-bugs.md" 2>&1)"
 # Without ssh the folder is read under main as before, even when a checkout here has the repository as its origin.
 # With no ssh target Conveyor is read on this machine, where /srv/main is no checkout, so it gives no snapshot (the
 # machine panel is null) and the cycle's kept Foremen part is read.

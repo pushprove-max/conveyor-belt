@@ -51,5 +51,30 @@ class UnitsFeed(unittest.TestCase):
                 self.assertEqual(read(out, 'units-feed.json')[1]['records'], records, f'records {records!r} changed in the units feed')
 
 
+class ReadAt(unittest.TestCase):
+    """Bug (R14): a snapshot's readAt was the line's arrival less its took, so a line that came late over ssh was dated
+    after the start of the snapshot it holds, and a release reply between the two read as older than that snapshot."""
+    T = 1700000000  # a whole second: snapshotAt has no fraction
+
+    def take(self, snap, took, arrives):
+        with tempfile.TemporaryDirectory() as out:
+            feed = ds.Feed(out, '/nonexistent/dashboard.sh', out, 'h', '/h', [('r', '/m')], 'h')
+            real = ds.time.time
+            ds.time.time = lambda: arrives
+            try:
+                feed.take(feed.recs[0], {'type': 'snapshot', 'snap': snap, 'took': took})
+            finally:
+                ds.time.time = real
+            return feed.recs[0]['readAt']
+
+    def test_a_snapshot_is_dated_by_its_own_snapshotAt_whatever_the_line_s_delay(self):
+        at = ds.iso(self.T)
+        self.assertEqual(self.take({'snapshotAt': at}, 0.15, self.T + 0.25), self.T, 'a line 250 ms late was dated after its snapshotAt')
+
+    def test_a_snapshot_with_no_usable_snapshotAt_is_dated_by_arrival_less_took(self):
+        for snap in ({}, {'snapshotAt': 'x'}, {'snapshotAt': ds.iso(self.T + 60)}):
+            self.assertAlmostEqual(self.take(snap, 0.15, self.T + 0.25), self.T + 0.10, msg=f'snap {snap!r} was not dated by took')
+
+
 if __name__ == '__main__':
     unittest.main()

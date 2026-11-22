@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # A part of dashboard_limit.py, run in its namespace (run_part()), not a module of its own: the times, the Claude
 # accounts and their usage readings, the usage history and the transcripts' request rows.
+import math  # dashboard_limit.py imports both; named here so a linter reading this file alone finds them
+import sys
 
 
 def iso(t):
@@ -108,7 +110,9 @@ def fetch(folder=None, cache_dir=None):
         err = kept.get("error") if isinstance(kept.get("error"), str) else ""
         if err.startswith(RATE_LIMITED) and isinstance(kept.get("next"), (int, float)) and now < kept["next"]:
             err = re.sub(r"; retry after [0-9]+ s$", "", err)
-            print("%s; retry after %d s" % (err, math.ceil(kept["next"] - now)), file=sys.stderr)
+            # Rounded down, never to 0 (dashboard.sh reads 0 as no wait named): cached() adds it to NOW, the whole
+            # second the collect began in, so the kept retry-at is never past the deadline's own second.
+            print(f"{err}; retry after {max(1, math.floor(kept['next'] - now))} s", file=sys.stderr)
             return 1
     body, why = usage(account["folder"])
     if cache_dir:

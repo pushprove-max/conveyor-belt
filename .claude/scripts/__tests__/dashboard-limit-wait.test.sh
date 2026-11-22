@@ -94,4 +94,30 @@ with open(sys.argv[2]) as f:
 assert k["next"] == now + 3600 and k["error"] == "rate limited (429); retry after 3600 s", k
 assert k["body"] == {"seven_day": {"utilization": 45.0}} and k["bodyAt"] == now, k
 EOF
+# Bug (R26): fetch() named the wait rounded up, and dashboard.sh adds it to NOW, the whole second the collect began in:
+# with a kept deadline 3.4 s ahead, the retry-at was a second past the deadline's own second, and the collect in that
+# second did not ask. The wait is rounded down (at least 1: dashboard.sh reads 0 as no wait named), so NOW + wait is
+# never past floor(deadline). fetch() is called with the clock fixed: a real collect's fraction of a second cannot be.
+python3 - "$SOURCE/.claude/scripts" "$T/r26" "$H/.claude" <<'EOF' || fail "fetch named a wait that ends after the second of the kept deadline"
+import contextlib, io, json, sys, time
+sys.path.insert(0, sys.argv[1])
+import dashboard_limit as d
+cache_dir, folder = sys.argv[2], sys.argv[3]
+t0 = 1000.3
+time.time = lambda: t0
+for ahead, named in ((3.4, 3), (0.4, 1)):
+    cache = d.account_cache(cache_dir, folder)[0]
+    d.note(cache, {}, t0, None, "rate limited (429); retry after 3 s")
+    with open(cache) as f:
+        k = json.load(f)
+    k["next"] = t0 + ahead
+    with open(cache, "w") as f:
+        json.dump(k, f)
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        rc = d.fetch(folder, cache_dir)
+    assert rc == 1 and err.getvalue() == "rate limited (429); retry after %d s\n" % named, (ahead, rc, err.getvalue())
+    if ahead > 1:  # NOW (1000) + the wait named is 1003: the second the deadline (1003.7) is in, not 1004
+        assert int(t0) + named == int(t0 + ahead), (ahead, named)
+EOF
 echo "PASS: dashboard-limit-wait"

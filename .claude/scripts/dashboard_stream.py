@@ -6,7 +6,7 @@ dashboard.sh --loop runs it beside the page server. For every record conveyor/ho
 `conveyor.sh watch` running (conveyor/watch.py says what each line holds): over ssh to the build machine (at host.json's
 `ssh` target), or here on one machine (config()). After each line it writes <dashboard folder>/stream.json, the same
 object dashboard.sh's conveyor() gives ({host, local, reachable, error, records}), each record with readAt (when its
-snapshot began, by this machine's clock: data.js is dated when it is built, which can be after a change the snapshot
+snapshot began: the snapshotAt the host wrote in it, else this machine's clock less the line's took; data.js is dated when it is built, which can be after a change the snapshot
 did not read yet) and retried (the blocked cards its host's last retried line names: {card, issue, at}), plus `stream`: {live (every record's stream is up and its host's last snapshot worked), heardAt (the oldest of
 the times each record's host was last heard from), since (when the stream went down; null while live), error (why it
 is down), writtenAt (when this file was written: every TICK seconds at least)}. After a line that changed something it
@@ -26,6 +26,7 @@ has sent one. stream.json is written at least every TICK seconds while this runs
 /units reads units-feed.json, written with it: the same, each snapshot cut to what /units draws.
 Test seams: CONVEYOR_STREAM_DEAD, CONVEYOR_STREAM_TICK and CONVEYOR_STREAM_BACKOFF (the first wait, s).
 """
+import calendar
 import copy
 import datetime
 import glob
@@ -61,6 +62,17 @@ def end(*_):
 
 def iso(t):
     return None if t is None else datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+def began(snap, now, took):
+    """When the snapshot began: its own snapshotAt (the host's date of its build, so a line that came late through ssh
+    is not dated after what it began before), else `now` less `took`: the line's age, or when it came for a line that
+    names none. A snapshotAt that is not a date, or is after `now`, is not believed."""
+    try:
+        at = calendar.timegm(datetime.datetime.strptime(snap.get('snapshotAt'), '%Y-%m-%dT%H:%M:%SZ').timetuple())
+    except (TypeError, ValueError):
+        return now - took
+    return at if at <= now else now - took
 
 
 def config(main):
@@ -223,12 +235,11 @@ class Feed:
         with self.lock:
             rec['heardAt'] = now
             if kind == 'snapshot' and isinstance(ev.get('snap'), dict):
-                # When the snapshot began, by this machine's clock: what it read is that old, however late the line
-                # came. A line that does not say how long it took is dated when it came.
+                # When the snapshot began: what it read is that old, however late the line came (began()).
                 took = ev.get('took')
                 took = took if isinstance(took, (int, float)) and not isinstance(took, bool) and 0 <= took < 86400 else 0
                 rec.update(snap=ev['snap'], overlay=None, repoUrl=ev.get('repoUrl'), lastPushAt=ev.get('lastPushAt'),
-                           up=True, downAt=None, error=None, unreachable=False, snapAt=now, readAt=now - took, failed=None, failedAt=None)
+                           up=True, downAt=None, error=None, unreachable=False, snapAt=now, readAt=began(ev['snap'], now, took), failed=None, failedAt=None)
                 changed = True
             elif kind == 'live' and isinstance(ev.get('cards'), dict) and rec['snap'] is not None:
                 slow = figures_only(rec['overlay'], ev['cards'])

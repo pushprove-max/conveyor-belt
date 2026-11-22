@@ -415,7 +415,8 @@ lanes() {
 # project whose folder holds no mark has no Foreman: held false, and the page says so. When the host file names an
 # ssh target and a Foreman's first record's main is not on this machine (the belt runs on the host), the Foreman runs
 # in a checkout here whose remote is that repository (lib.sh's mine and FD), so its folder is read there
-# (checkout_of); with no such checkout, under main as before. There, the loop on the host notes a model with no
+# (checkout_of); with no such checkout, under main as before. A main that is also a path here (the same path on both
+# machines) is read here as it is. With an ssh target, the loop on the host notes a model with no
 # built-in price in the host's folder (noprice(), conveyor/lib/control.sh), which this machine does not read: each such
 # note the snapshot of one of the Foreman's projects gives (priceNotes, in <conveyor part>) is added to the folder read
 # here, under the lock the loop takes. Once a model: price-notes.txt in the folder lists the models added, so a note
@@ -459,9 +460,12 @@ foremen() { # <conveyor part>
     || { jq -cn '{foremen: null, error: "conveyor/host.json records are not understood"}'; return 0; }
   while IFS= read -r -d '' projects && IFS= read -r -d '' main && IFS= read -r -d '' hm && IFS= read -r -d '' sd \
     && IFS= read -r -d '' ssh && IFS= read -r -d '' led; do
-    # With ssh, a main not on this machine is the host's: the Foreman runs in a checkout here matched by its remote.
+    # With ssh, the belt runs on the host, whether or not its main is also a path here (the same path on both): the
+    # Foreman is here, and a main not on this machine is the host's, so the Foreman runs in a checkout matched by its remote.
     away=''
-    if [ -n "$ssh" ] && [ ! -d "$main" ]; then
+    if [ -n "$ssh" ] && [ -d "$main" ]; then
+      away=1
+    elif [ -n "$ssh" ]; then
       [[ $led != "~/"* ]] || led=$HOME/${led#"~/"}
       here=$(checkout_of "$(jq -r '.[0]' <<<"$projects")" "$led") && main=$here && away=1
     fi
