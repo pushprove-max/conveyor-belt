@@ -10,7 +10,7 @@ const test = cases(import.meta.url);
 test('Rules: one row a rule on the left, what the snapshot says they produce on the right', () => {
   const w = boot({ tab: 'rules' });
   deliver(w, full());
-  assert.deepEqual(Array.from(ruled(w).querySelectorAll('.rules-row'), (r) => r.dataset.rule), ['builder', 'reviewer', 'judge', 'judge-always', 'account', 'review-account', 'cap', 'guard', 'atonce', 'cores',
+  assert.deepEqual(Array.from(ruled(w).querySelectorAll('.rules-row'), (r) => r.dataset.rule), ['builder', 'reviewer', 'judge', 'judge-always', 'account', 'review-account', 'cap', 'guard', 'atonce', 'suite', 'cores',
     'build', 'never', 'start', 'dep-guard', 'split', 'pick', 'push', 'land-as', 'pr-merge', 'push-check', 'lint', 'visible',
     'standing-asked-fix', 'standing-review-followup', 'standing-release-check', 'standing-fixed-block', 'standing-review-retry', 'held', 'order']);
   assert.deepEqual(['start-queue', 'start-held'].map((a) => act(rulesP(w), a).getAttribute('aria-pressed')), ['true', 'false'], 'New issues start in: Queue, the default');

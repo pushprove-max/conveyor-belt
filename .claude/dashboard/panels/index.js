@@ -4,6 +4,6 @@ window.DASH_PANELS = ['machine', 'board','rules', 'needs', 'belt', 'belt3d', 'te
 // The files split from the panel files (parts/), loaded after app.js's own parts (app.js, DASH_APP.parts) and before
 // the panels: each panel file's, in the order that file asks for them.
 window.DASH_PARTS = ['parts/board-filters.js', 'parts/board-push.js', 'parts/board-cards.js',
-  'parts/rules-prices.js', 'parts/rules-moves.js', 'parts/rules-rows.js', 'parts/rules-produce.js', 'parts/rules-setup.js',
+  'parts/rules-prices.js', 'parts/rules-moves.js', 'parts/rules-suite.js', 'parts/rules-rows.js', 'parts/rules-produce.js', 'parts/rules-setup.js',
   'parts/tests-mutation.js', 'parts/tests-actions.js', 'parts/tests-rows.js',
   'parts/bench-score.js', 'parts/bench-versions.js', 'parts/bench-run.js', 'parts/bench-plan.js'];

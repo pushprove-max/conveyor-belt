@@ -309,7 +309,19 @@ one control, and the value in force is the selected part.
    **Weekly pause** is the usage at which no new card starts, with the usage now beside it. **Test files at once**
    is the most test files a parallel release suite runs together. The default is 2, and the next parallel run reads
    it. If the number is above the machine's test slots, the row says the suite runs at the slots
-   ([Releases](releases.md#a-release-from-the-board)). **Reserved cores**
+   ([Releases](releases.md#a-release-from-the-board)). On a devbox or a Linux box, the row says the suite machine's
+   slots cap it. **Release suite runs on** is the machine a release's full suite runs on: **This machine** (the
+   default), **Namespace Devbox** or **Linux box over ssh**. Card test steps stay on the build machine. A click on
+   a choice saves it, and Undo puts the last one back. Only an admin changes it, because the release commit goes to
+   that machine. On a devbox the row shows the Namespace login, the size with its CPUs, what happens after a run, the
+   box (its tag and, when the record keeps it, when it was set up) and its tools. The Board reads the login with a check when it shows the devbox. When you are not logged in, the
+   row shows the command `devbox login` to run in a terminal on the build machine, and **Check the box** stays off.
+   The Board reads the login again with each refresh, so the button comes on after you log in. For a Linux box, type
+   the **ssh target** and the **Folder there**, then press **Use this box**. **Check the box** stays off while you
+   edit the target and has not saved it. **Check the
+   box** shows each line of `suite-machine check` with "ok" or "missing". A missing tool shows **Set up now**, which
+   is off until Conveyor can run `.conveyor/test-machine.sh` from the Board
+   ([Where the suite runs](releases.md#where-the-suite-runs)). **Reserved cores**
    shows the cores that card work does not use. You set them in the host file
    ([Reserved cores](configuration.md#cores-kept-for-you)). The row also links to the Tests page, which holds the test
    limits.

@@ -249,6 +249,11 @@ def role_of(store, name):
     return 'admin' if name == LOCAL else users_of(store).get(name, {}).get('role')
 
 
+def is_admin(name):
+    """Whether a logged-in name is an admin, by the store as it is now."""
+    return role_of(read_store(), name) == 'admin'
+
+
 def need(store, name):
     u = users_of(store).get(name)
     if u is None:

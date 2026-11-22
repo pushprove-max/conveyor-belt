@@ -72,6 +72,7 @@
     cap: (a) => (a[0] === 'off' ? 'at once: the default' : `at once ${a[0]}`),
     guard: (a) => (a[0] === 'off' ? 'pause at: off' : `pause at ${a[0]}%`),
     atonce: (a) => `parallel suite: ${a[0]} test file${a[0] === '1' ? '' : 's'} at once`,
+    'suite-machine': (a) => `release suite on ${a[0] === 'ssh' ? `${a[1]} over ssh` : a[0] === 'devbox' ? 'a Namespace Devbox' : 'this machine'}`,
     model: seatWords,
     reviewer: seatWords,
     judge: (a) => {
@@ -114,6 +115,12 @@
     cap: limitGuess,
     guard: limitGuess,
     atonce: (r, action, a) => { r.suiteAtOnce = Number(a[0]); return [r, action]; },
+    'suite-machine': (r, action, a) => {
+      const was = r.suiteMachine && typeof r.suiteMachine === 'object' ? r.suiteMachine : {};
+      r.suiteMachine = a[0] === 'ssh' ? { kind: 'ssh', target: a[1], dir: a[3] || '~/conveyor-suite' }
+        : a[0] === 'devbox' ? { kind: 'devbox', size: a[2] || '4x8', tag: was.kind === 'devbox' ? was.tag : undefined, idleStop: '15m' } : { kind: 'local' };
+      return [r, 'suite'];
+    },
     judge: (r, action, a) => {
       if (a[0] === 'on' || a[0] === 'off') { r.judgeOn = a[0] === 'on'; return [r, 'judge']; }
       if (a[0] === 'always') { r.judgeAlways = a.slice(1); return [r, 'judge']; }

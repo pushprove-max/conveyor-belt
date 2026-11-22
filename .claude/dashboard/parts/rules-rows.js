@@ -8,7 +8,7 @@
   let KIND, MODEL, KINDS_MAX, STANDING, SETS, PINS_SHOWN, KNOWN_KINDS, GUARDS, BUILDS, ROLES, OTHER, S, ONB, OB,
     num, list, ctl, same, plural, pre, isArea, depKnown, landNow, landKnown, PRMERGE, prNow, prKnown, pushCheckOn,
     draftOf, draftPut, draftDrop, say, send, button, choice, seg, pickList, stepper, row, wouldSkip, skipWords,
-    fieldLabel, areaWould, unlisted, heldUnknown, arm, limitsLine, standingShown, pickShown, CAP0, draw, relength;
+    fieldLabel, areaWould, unlisted, heldUnknown, arm, limitsLine, standingShown, pickShown, CAP0, draw, relength, rulesSuite, suiteSlots;
 
   // ---- left: one row a rule ----
   // A role: its CLI (one of those installed on the loop's host, s.clis; the judge's the reviewer's too), then a model
@@ -224,7 +224,7 @@
       return el;
     }
     const r = c.rules && typeof c.rules === 'object' ? c.rules : {};
-    rulesBuild(el, r); rulesNever(el, d, r); rulesCap(el, d, c); rulesGuard(el, d, c); rulesAtOnce(el, c); rulesSeats(el, d); rulesJudge(el, c, d);
+    rulesBuild(el, r); rulesNever(el, d, r); rulesCap(el, d, c); rulesGuard(el, d, c); rulesAtOnce(el, c); rulesSuite(el, c); rulesSeats(el, d); rulesJudge(el, c, d);
     rulesAccounts(el, c); rulesGates(el, c, r); rulesLand(el, c); rulesCheck(el, c, r); rulesLint(el, r); rulesSplit(el, r);
     rulesPick(el, d, r); rulesCores(el); rulesStanding(el); rulesHeld(el, all); rulesPins(el, c, d); rulesIndexed(el);
     return el;
@@ -302,9 +302,13 @@
   function rulesAtOnce(el, c) {
     const h = S.ctx.h, at = num(c.suiteAtOnce), slots = S.cores && typeof S.cores.slots === 'number' ? S.cores.slots : null;
     const to = (n) => () => send('atonce', [String(n)], null);
+    // On a devbox or an ssh box the cap is that box's test slots, not this machine's.
+    const far = suiteSlots(c);
+    const note = far ? (far.n === null ? null : `Capped at the suite machine's slots: ${far.n} on the ${far.kind === 'devbox' ? 'devbox' : 'box'}.`)
+      : at !== null && slots !== null && at > slots ? `Runs at ${slots}: the machine has ${slots} test slot${slots === 1 ? '' : 's'}.` : null;
     el.append(row('atonce', 'Test files at once', 'test files a parallel release suite runs together',
       at === null ? newer(false) : stepper('test files at once', String(at), to(at - 1), to(at + 1), at > 1, at < 999),
-      at !== null && slots !== null && at > slots ? h('span', 'board-from', `Runs at ${slots}: the machine has ${slots} test slot${slots === 1 ? '' : 's'}.`) : null));
+      note ? h('span', 'board-from', note) : null));
   }
   function rulesGuard(el, d, c) {
     const h = S.ctx.h;
@@ -713,7 +717,7 @@
       num, list, ctl, same, plural, pre, isArea, depKnown, landNow, landKnown, PRMERGE, prNow, prKnown, pushCheckOn,
       draftOf, draftPut, draftDrop, say, send, button, choice, seg, pickList, stepper, row, wouldSkip, skipWords,
       fieldLabel, areaWould, unlisted, heldUnknown, arm, limitsLine, standingShown, pickShown, CAP0, draw,
-      relength } = shared);
+      relength, rulesSuite, suiteSlots } = shared);
     return { rules, index };
   });
 })();

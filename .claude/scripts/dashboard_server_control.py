@@ -4,6 +4,20 @@
 # answers and the ruling log, and run_script.
 
 
+def suite_word(x, first, extra, longest):
+    """Whether x is one word of control suite-machine: ASCII letters and digits and the characters extra, the first
+    of them a letter, a digit or one of first, at most longest long."""
+    def alnum(c):
+        return c.isascii() and c.isalnum()
+    return 0 < len(x) <= longest and (alnum(x[0]) or x[0] in first) and all(alnum(c) or c in extra for c in x)
+
+
+def suite_dir_ok(x):
+    """Whether x is a folder control suite-machine --dir takes: ~, a folder under ~/ or a full path."""
+    rest = x.removeprefix('~')
+    return x == '~' or (len(x) <= 256 and rest.startswith('/') and all((c.isascii() and c.isalnum()) or c in '._/@+-' for c in rest))
+
+
 def control_ok(body):
     """Whether the page's body is one action this route takes, with arguments of the shape conveyor.sh takes. The host
     checks again (a CLI it has not installed is refused there, with its reason)."""
@@ -22,6 +36,15 @@ def control_ok(body):
         return n == 1 and re.fullmatch(r'100|[1-9][0-9]?|off', v[0]) is not None
     if a == 'atonce':  # the test files a parallel release suite runs at once
         return n == 1 and v[0].isascii() and v[0].isdigit() and v[0][0] != '0' and len(v[0]) <= 3
+    if a == 'suite-machine':  # where a release's suite runs, as `control suite-machine` takes it (the host checks again)
+        if v == ['local'] or v == ['devbox']:
+            return True
+        if v[:2] == ['devbox', '--size'] and n == 3:
+            return suite_word(v[2], '', '._-', 20)  # a devbox size, such as 4x8
+        # An ssh target is user@host or a host, never one ssh reads as an option: it does not start with a dash.
+        return v[:1] == ['ssh'] and n in (2, 4) and suite_word(v[1], '._', '._@-', 128) and (n == 2 or (v[2] == '--dir' and suite_dir_ok(v[3])))
+    if a == 'suite-machine-check':  # Check the box: what the suite machine has
+        return n == 0
     if a in ('hold', 'release', 'unpin'):
         return issues(1, 50)
     if a == 'order':
@@ -398,6 +421,10 @@ def control_script(action, args, main, today, record=None, user=None):
             return '%s shut %s' % (conv, q(args[0]))
         return 'cd %s || exit 1; %s gh-write issue close %s --comment %s >/dev/null && { %s shut %s || [ $? = 1 ]; }' % (
             q(record or main), conv, q(args[0]), q("Closed from the Board's Needs you list."), conv, q(args[0]))
+    if action == 'suite-machine-check':
+        # The check's JSON line is the answer. It exits 1 when a need is missing, which is the answer too; with no
+        # output (the rule cannot be read) the command's own error is the answer.
+        return f'o=$({conv} suite-machine check --json) || [ $? = 1 ]; [ -n "$o" ] || exit 1; printf "%s\\n" "$o"'
     if action == 'build':
         return '%s declined build %s' % (conv, q(args[0]))
     if action == 'dismiss':

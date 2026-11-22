@@ -658,6 +658,8 @@ case \$1 in
     [ ! -e "$F/shut-fails" ] || { echo "conveyor: the card records do not check" >&2; exit 3; }
     echo "conveyor: issue #\$2 was closed while card c1 was blocked; the card is closed" ;;
   machine) echo "conveyor: the machine's Conveyor: \$2" ;;
+  # suite-machine check --json: the lines of the check; exit 1 with them when a need is missing, as the engine does.
+  suite-machine) printf '{"kind":"ssh","name":"box.example.com","ok":false,"needs":[{"need":"jq","ok":false,"detail":"not installed"}],"cpus":4,"slots":3}\n'; exit 1 ;;
   # A test action's id (of its file, the last argument), or an issue's address; a file named gone is not main's.
   testaction|testissue) [[ "\$*" != *gone* ]] || { echo "conveyor: the file is not a file of main" >&2; exit 2; }
     [ "\$1" != testissue ] || echo "\${CONVEYOR_FOREMAN-unset}:\${CLAUDE_CODE_SESSION_ID-unset}" >> "$F/testissue-mark"
@@ -724,6 +726,21 @@ done_part
 # This part's Board runs with the Foreman's mark, as one the Foreman's claim started does (test_issue_and_close_reach_conveyor).
 ( export CONVEYOR_FOREMAN=1 CLAUDE_CODE_SESSION_ID=foreman-1; control_part control "${PORTS[5]}"
 control_actions 'pause' 'resume' 'stop' 'cap 3' 'cap 9' 'cap 100' 'cap off' 'guard 90' 'guard off' 'atonce 3' 'atonce 999' 'hold 12 13' 'release 12' 'order 13 12' 'order' 'unpin 13'
+# The release suite machine's rule: each form of `control suite-machine` reaches it as sent. Check the box answers the
+# check's JSON line, with 200, though the check exits 1 for a missing tool; a check with no output answers its error.
+# Bug: a form the Rules row sends was refused with a Bad Request; a missing tool's check answered as a failed action,
+# so the row had no lines to show.
+control_actions 'suite-machine local' 'suite-machine devbox' 'suite-machine devbox --size 8x16' 'suite-machine ssh me@box.example.com' 'suite-machine ssh box.example.com --dir ~/suite' 'suite-machine ssh box --dir /srv/suite'
+fresh_control
+got=$(ctl "$(act suite-machine-check)")
+[ "$got" = 200 ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM suite-machine check --json" ] && jq -e '.ok == false and .needs[0].need == "jq" and .slots == 3' "$M/ctl.out" >/dev/null \
+  || fail "suite_machine_check_answers_its_lines: answered $got '$(cat "$M/ctl.out")', ran '$(calls)'"
+pass=$((pass + 1))
+fresh_control; echo "the control record cannot be read" > "$F/conveyor-refuse"
+got=$(ctl "$(act suite-machine-check)")
+[ "$got" = 409 ] && grep -q 'cannot be read' "$M/ctl.out" || fail "suite_machine_check_without_lines_answers_its_error: answered $got '$(cat "$M/ctl.out")'"
+pass=$((pass + 1))
+fresh_control
 # POST /machine pauses or resumes the whole machine: `conveyor.sh machine pause|resume` on the host's main, over the
 # same ssh. It is its own control: it names no project, and a project's action is never taken without its project.
 # Bug: the machine's pause could only be set by hand in the host file; and a pause sent with no project must never be
@@ -1149,6 +1166,10 @@ for b in "$(act frob)" "$(act 'pause;rm')" "$(act pause now)" "$(act cap 101)" "
   "$(act unlabel 12)" "$(act unlabel x backlog)" "$(act unlabel 12 '.x')" "$(act unlabel 12 'a b')" "$(act unlabel 12 'backlog;id')" "$(act unlabel 12 a b c d e f)" \
   "$(act depends)" "$(act depends 12)" "$(act depends 12 add)" "$(act depends 12 drop 7)" "$(act depends 12 ADD 7)" "$(act depends x add 7)" "$(act depends 012 add 7)" \
   "$(act depends 12 add 07)" "$(act depends 12 remove '7;id')" "$(act depends 12 add 7 -x)" "$(act depends add 12 7)" "$(act depends 12 add $(seq 21))" \
+  "$(act suite-machine)" "$(act suite-machine frob)" "$(act suite-machine local now)" "$(act suite-machine devbox 4x8)" "$(act suite-machine devbox --size)" "$(act suite-machine devbox --size '4x8;id')" \
+  "$(act suite-machine devbox --size 4x8 x)" "$(act suite-machine ssh)" "$(act suite-machine ssh -oProxyCommand=id)" "$(act suite-machine ssh 'a b')" "$(act suite-machine ssh box --dir)" \
+  "$(act suite-machine ssh box dir /x)" "$(act suite-machine ssh box --dir rel/x)" "$(act suite-machine ssh box --dir '~other')" "$(act suite-machine ssh box --dir '/x;id')" "$(act suite-machine ssh box --dir "$(printf '/a\nb')")" \
+  "$(act suite-machine-check now)" \
   '{"action":"hold","args":[12]}' '{"action":"pause"}' '{"action":"pause","args":[],"extra":1}' '{"action":["pause"],"args":[]}' '[]' 'not json'; do
   got=$(ctl "$b")
   [ "$got" = 400 ] || fail "control_bad_value_refused: '$b' answered $got '$(cat "$M/ctl.out")'"
@@ -1220,6 +1241,17 @@ for b in 'add zed role admin' 'role ana role admin' 'role max role member' 'rese
   pass=$((pass + 1))
 done
 [ "$(cksum < "$CONVEYOR_DASHBOARD_AUTH")" = "$BEFORE" ] || fail "member_refused_every_user_action: the store changed"
+# Where a release's suite runs sends the release commit to that machine: a member's change of it is refused and reaches
+# no host; Check the box, which only reads, still answers a member. Bug: a member could send the commit to an ssh host.
+fresh_control
+for b in 'suite-machine ssh box.example.com' 'suite-machine devbox' 'suite-machine local'; do
+  # shellcheck disable=SC2086
+  got=$(ctl "$(act $b)" "$A/ana"); { [ "$got" = 403 ] && [ -z "$(calls)" ]; } || fail "member_refused_the_suite_machine: '$b' answered $got '$(cat "$M/ctl.out")', ran '$(calls)'"
+  pass=$((pass + 1))
+done
+got=$(ctl "$(act suite-machine-check)" "$A/ana"); [ "$got" = 200 ] || fail "member_may_check_the_suite_machine: answered $got '$(cat "$M/ctl.out")'"
+pass=$((pass + 1))
+fresh_control
 # An action that is not a string is a bad request, not a crash (a list cannot be looked up in the action table).
 [ "$(um "$A/ana" POST /me '{"action":[]}')" = 400 ] || fail "malformed_own_action_is_400: answered $(um "$A/ana" POST /me '{"action":[]}')"
 [ "$(um "$A/adm" POST /users '{"action":[],"user":"example"}')" = 400 ] || fail "malformed_user_action_is_400: answered $(um "$A/adm" POST /users '{"action":[],"user":"example"}')"

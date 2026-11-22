@@ -41,6 +41,11 @@ class Handler(Pages, http.server.SimpleHTTPRequestHandler):
         # Record CPU time changes the pack's test command, which every card runs: an admin's.
         if not machine and body['action'] == 'test-settings' and body['args'][0] == 'cpu-time' and role_of(read_store(), user) != 'admin':
             return self.reply(403, 'only an admin changes the test command')
+        # Where a release's suite runs sends the release commit (its Git bundle) to that machine, an ssh host or a leased
+        # devbox: an admin's choice. Check the box only reads what the saved machine has, so a member may press it.
+        # (is_admin comes from the auth part, run in this namespace: globals() names it where a linter reads this file alone.)
+        if not machine and body['action'] == 'suite-machine' and not globals()['is_admin'](user):
+            return self.reply(403, 'only an admin changes where the release suite runs')
         # A benchmark's run, preflight or Compare starts model sessions on the build machine: an admin's.
         if not machine and body['action'] == 'bench' and role_of(read_store(), user) != 'admin':
             return self.reply(403, 'only an admin runs benchmarks')
