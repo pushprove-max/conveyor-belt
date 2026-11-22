@@ -70,9 +70,12 @@ t_pushablenext() {
 t_bulk() {
   setup "[$(issue 7 2026-01-01 area:billing)]"
   for i in $(seq 1 25); do jq -cn --arg i "$i" '{id: ("r-b" + $i), question: "billing?", answer: ("y" * 5000)}'; done >> "$STUB/rulings"
-  local out
+  local out ids
   out=$(pickfn brief c1-7 "$(jq -c '.[0]' "$STUB/issues.json")" 'The header.') || fail "brief failed: $(cat "$T/$CASE/err")"
-  grep -q '"r-b25"' <<<"$out" && grep -q '"r-b6"' <<<"$out" && ! grep -q '"r-b5"' <<<"$out" || fail "brief does not hold just the newest 20 rulings: $(head -c 400 <<<"$out")"
+  # Each of the newest 20 (r-b6 to r-b25) once and no other: a brief that drops one of them, as r-b7, or prints
+  # one twice, as r-b25, fails (no sort -u, so a repeat stays in the list).
+  ids=$(grep -o '"r-b[0-9]*"' <<<"$out" | tr -d '"' | sort -t b -k 2n | tr '\n' ' ')
+  [ "$ids" = "$(printf 'r-b%s ' $(seq 6 25))" ] || fail "brief does not hold just the newest 20 rulings, r-b6 to r-b25: $ids"
   [ "$(wc -c <<<"$out")" -lt 20000 ] || fail "brief rulings not cut short: $(wc -c <<<"$out") bytes"
 }
 
@@ -85,7 +88,11 @@ t_empty() {
   setup "$(jq -cs . <(issue 1 2026-01-01 backlog) <(issue 2 2026-01-01 dormant) <(issue 3 2026-01-01 ux-change) \
     <(issue 4 2026-01-01 awaiting-deploy P0) <(issue 5 2026-01-01 conveyor-followup awaiting-deploy P0))"
   loop control hold 1 2 3 >/dev/null
-  [ "$(loop pick --dry --issues "$STUB/issues.json" --state "$ST")" = '' ] || fail "an excluded issue would be picked"
+  local out rc
+  out=$(loop pick --dry --issues "$STUB/issues.json" --state "$ST"); rc=$?
+  # A dry pick that fails (exit 1, no output) is not a pick that found nothing; and it records no card.
+  [ "$rc" = 0 ] && [ "$out" = '' ] || fail "an excluded issue would be picked, or the dry pick failed (exit $rc): $out"
+  ! grep -qs '"step":"picked"' "$ST/cards.jsonl" || fail "the dry pick recorded a card: $(grep '"step":"picked"' "$ST/cards.jsonl")"
   # The Board finds the last push's marker in the folder `state-dir` names, never a path of its own.
   [ "$(find "$T/$CASE" -name control.json)" = "$(loop state-dir)/control.json" ] || fail "state-dir named $(loop state-dir), not the folder the control record is in"
   [ "$(loop snapshot --fresh | jq -c '.open.held | map([.issue, (.reasons | map(.label // .kind) | join(","))])')" \

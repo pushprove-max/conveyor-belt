@@ -47,10 +47,6 @@ t_cputimerefused() {
   done
 }
 
-# The engine's functions as the test-settings command loads them, in a shell of the case's main ($R): <commands> run there.
-# shellcheck source=/dev/null # the command's libraries, by its . lines (commands/test-settings.sh)
-ct_in() { ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
-  && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/test-settings.sh")" && names && eval "$1" ); } # <commands>
 # One card test run of the case's records that recorded no test times (health's untimed counts it).
 ct_untimed() { jq -cn '{card: "c0-1", issue: 1, step: "test", time: "2026-11-01T00:00:00Z", tokens: {claude: 0, codex: 0}, result: "pass", sha: "", reason: ""}' >> "$ST/cards.jsonl"; }
 
@@ -75,9 +71,11 @@ t_timesplanreport() {
 # times. The plan is cpuplan()'s, and record-times saves that command (and test.fileCommand's) as cpu-time does.
 t_timesplanwrap() {
   local p
-  setup '[]'; tune '.test.command = "bash w.test.sh" | del(.test.list) | del(.test.report) | .test.fileCommand = "bash"'
+  setup '[]'; tune '.test.command = "bash w.test.sh" | del(.test.list) | del(.test.report) | .test.fileCommand = "bash"'; ct_untimed
   printf 'exit 0\n' > "$R/w.test.sh"; git -C "$R" add w.test.sh && git -C "$R" commit -qm w || fail "main's test file"
-  p=$(ct_in 'timesplan') && [ "$(jq -r '[.kind, .file, .was] | join(" ")' <<<"$p")" = "wrap w.test.sh bash w.test.sh" ] || fail "no wrap plan for a one-file command: $p"
+  # The plan as the Tests page reads it, from the snapshot's health: a Health part that drops a wrap plan fails here.
+  p=$(loop snapshot --fresh | jq -c .health.timesPlan)
+  [ "$(jq -r '[.kind, .file, .was] | join(" ")' <<<"$p")" = "wrap w.test.sh bash w.test.sh" ] || fail "the snapshot's health has no wrap plan for a one-file command: $p"
   loop test-settings record-times > "$T/$CASE/rt.out" 2>&1 || fail "record-times failed: $(cat "$T/$CASE/rt.out")"
   [ "$(jq -r .test.command "$R/.conveyor/project.json")" = "$(jq -r .command <<<"$p")" ] \
     && [[ $(jq -r .test.command "$R/.conveyor/project.json") == *CONVEYOR_TEST_TIME* ]] || fail "record-times did not save the wrapped command: $(jq -c .test "$R/.conveyor/project.json")"
@@ -87,13 +85,20 @@ t_timesplanwrap() {
 # is a held card (no GitHub issue, picked only once released) whose body holds timinghint()'s wrap steps; the pack stays
 # as it was, and a second action does not file the same card again.
 t_timesplancard() {
-  local before
-  setup '[]'; tune '.test.command = "bash run-all.sh" | del(.test.list) | del(.test.report)'
+  local before p wrap
+  setup '[]'; tune '.test.command = "bash run-all.sh" | del(.test.list) | del(.test.report)'; ct_untimed
   printf 'for f in *.test.sh; do bash "$f"; done\n' > "$R/run-all.sh"; git -C "$R" add run-all.sh && git -C "$R" commit -qm s || fail "main's script"
   before=$(cat "$R/.conveyor/project.json")
+  # The command that wraps one file's run (timinghint()): the body must hold it as a line, not only its words.
+  # shellcheck disable=SC2016 # the line as the body prints it, $f and $out unexpanded
+  wrap='./testtime.sh "$f" -- <the file'\''s command> > "$out" 2>&1; rc=$?; cat "$out"; grep '\''^TESTRUN sec'\'' "$out" >> "$CONVEYOR_TEST_LOG/<its log>"'
+  # The plan as the Tests page reads it, from the snapshot's health: a Health part that drops a card plan fails here.
+  p=$(loop snapshot --fresh | jq -c .health.timesPlan)
+  jq -e --arg w "$wrap" '.kind == "card" and .file == "run-all.sh" and (.body | split("\n") | any(sub("^\\s+"; "") == $w))' <<<"$p" > /dev/null \
+    || fail "the snapshot's health has no card plan with the wrap command for a script: $p"
   loop test-settings record-times > "$T/$CASE/rt.out" 2>&1 || fail "record-times failed: $(cat "$T/$CASE/rt.out")"
-  jq -e '.cards | length == 1 and (.[0] | .held == true and .card == null and .file == "run-all.sh" and (.body | contains("testtime.sh") and contains("TESTRUN sec")))' \
-    "$ST/testactions/cards.json" > /dev/null || fail "no held card with the wrap steps: $(cat "$ST/testactions/cards.json" "$T/$CASE/rt.out")"
+  jq -e --arg w "$wrap" '.cards | length == 1 and (.[0] | .held == true and .card == null and .file == "run-all.sh" and (.body | split("\n") | any(sub("^\\s+"; "") == $w)))' \
+    "$ST/testactions/cards.json" > /dev/null || fail "no held card with the wrap command: $(cat "$ST/testactions/cards.json" "$T/$CASE/rt.out")"
   [ "$(cat "$R/.conveyor/project.json")" = "$before" ] || fail "record-times changed the pack for a script"
   loop test-settings record-times > "$T/$CASE/rt.out" 2>&1 && fail "a second record-times filed the card again"
   [ "$(jq '.cards | length' "$ST/testactions/cards.json")" = 1 ] || fail "a second record-times filed a second card: $(cat "$T/$CASE/rt.out")"

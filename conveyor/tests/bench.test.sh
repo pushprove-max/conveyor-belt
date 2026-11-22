@@ -221,11 +221,12 @@ The after group holds 2 cards: too small to mean anything (fewer than 5 cards)."
 # snapshot does not carry the latest drift watch, or keeps a stale one once the records change.
 t_benchdriftsnap() {
   setup '[]'
-  local out
-  driftrecs | grep -v '"card":"a5"' > "$ST/cards.jsonl"; driftrecs | grep '"card":"a5"' > "$ST/retried.jsonl"
+  local out recs=$T/$CASE/recs.jsonl
+  mkdir -p "$T/$CASE" && driftrecs > "$recs"
+  grep -v '"card":"a5"' "$recs" > "$ST/cards.jsonl"; grep '"card":"a5"' "$recs" > "$ST/retried.jsonl"
   recok "$ST/cards.jsonl" "the drift fixture"
   out=$(loop bench drift) || fail "bench drift failed: $out"
-  [ "$out" = "$("$SRC/bench/drift.sh" <(driftrecs))" ] || fail "bench drift did not compare the records and the retried file: $out"
+  [ "$out" = "$("$SRC/bench/drift.sh" "$recs")" ] || fail "bench drift did not compare the records and the retried file: $out"
   [ "$(loop snapshot --fresh | jq -c '.drift | [.before.cards, .after.cards, .after.engine]')" = "[5,2,\"$DRIFTB\"]" ] || fail "the snapshot has no drift watch of the records: $(loop snapshot --fresh | jq -c .drift)"
   jq -c '.card = "b4" | .issue = 2' <(grep '"card":"b1"' "$ST/cards.jsonl") >> "$ST/cards.jsonl"
   [ "$(loop snapshot --fresh | jq -c .drift.after.cards)" = 3 ] || fail "the snapshot kept the drift watch of the records before the change: $(loop snapshot --fresh | jq -c .drift)"

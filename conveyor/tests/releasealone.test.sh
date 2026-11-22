@@ -24,15 +24,19 @@ alsetup() { # <flips | breaks | "flips breaks"> [snap]
   # The snapshot step is a here-document, not quoted text, so each sleep in it can say why time must pass.
   [ -z "${2:-}" ] || snap=$(cat <<EOS
     if [ ! -s "\$STUB/counts" ]; then printf '%s\n' 'TESTRUN files=1' '-- FAIL alone.test'
-      b=\$(jq -r .progress $w.live)
+      # b is the watch's first stamp: read before the watch writes it, b was empty and any later stamp beat it.
+      i=0; while b=\$(jq -r '.progress // empty' $w.live 2>/dev/null); [ -z "\$b" ] && [ \$i -lt 600 ]; do
+        sleep 0.1 # sleep: the pause between two reads of the live record, until the watch's first stamp is in it
+        i=\$((i + 1)); done
       sleep 1 # sleep: the watch stamps its progress to the second, so the stamp it sets next differs from b only after a second
       mkdir -p $w.testlog/cases/ok $w.testlog/cases/failed; : > $w.testlog/cases/ok/a; : > $w.testlog/cases/failed/b
       i=0; while [ "\$(jq -r .progress $w.live)" = "\$b" ] && [ \$i -lt 600 ]; do
         sleep 0.1 # sleep: the pause between two reads of the progress, which only the real watch moves
         i=\$((i + 1)); done
-      s=\$(bash $SRC/conveyor.sh snapshot --fresh | jq -c '.suites[] | select(.kind == "release")'); a=\$(jq -r .progress $w.live)
+      # The watch can stamp again while the snapshot is made: its at is the progress read before it or the one after.
+      a0=\$(jq -r .progress $w.live); s=\$(bash $SRC/conveyor.sh snapshot --fresh | jq -c '.suites[] | select(.kind == "release")'); a=\$(jq -r .progress $w.live)
       jq -c '[.state, .failed, .cases]' <<<"\$s" > "\$STUB/counts"
-      jq -c --arg b "\$b" --arg a "\$a" '.rerun | [.round, .of, .case, .done, .failed, .files, .at >= .since, (.at == \$a and \$a > \$b)]' <<<"\$s" > "\$STUB/rerun"; fi
+      jq -c --arg b "\$b" --arg a0 "\$a0" --arg a "\$a" '.rerun | [.round, .of, .case, .done, .failed, .files, .at >= .since, ((.at == \$a0 or .at == \$a) and .at > \$b)]' <<<"\$s" > "\$STUB/rerun"; fi
 EOS
 )
   runsetup "$(printf '%s\n' '[ -n "${CONVEYOR_TEST_RERUN:-}" ] || echo "the whole run"' "for c in $1; do" \

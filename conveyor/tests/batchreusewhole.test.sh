@@ -17,7 +17,7 @@
 # alone. z.test, of which one case is kept and one is not, keeps its `ok` line. Bug it catches: the list named x.test's
 # cases as `ok` lines alone, and the run ran x.test whole again.
 t_batchreusewhole() {
-  local wt=$T/$CASE/wt keep list
+  local wt=$T/$CASE/wt keep list want
   git init -q "$wt" && echo a > "$wt/a.txt" && git -C "$wt" add a.txt && git -C "$wt" commit -qm init \
     && echo b >> "$wt/a.txt" && git -C "$wt" add a.txt || fail "the worktree could not be made"
   # batchkeep()'s answer for that batch: every unit of the cards' passes, and those it keeps.
@@ -25,7 +25,8 @@ t_batchreusewhole() {
     units: ["s.test\ts1", "x.test\tx1", "x.test\tx2", "y.test\ty1", "y.test\ty2", "z.test\tz1", "z.test\tz2"], kept: 5, all: false}')
   ( eval "$(sed -n '/^batchlist() {/,/^}/p' "$SRC/lib/claim.sh")"; batchlist "$wt" "$keep" ) || fail "batchlist failed"
   list=$(grep -Ev $'^(change|base|tree)\t' "$wt.rerun" | tr '\t\n' ' ,')
-  [ "$list" = "pass x.test,pass y.test,ok z.test z1," ] || fail "the batch's list is not pass x.test, pass y.test and z.test's kept case z1 alone (it names x.test or y.test by case, names s.test or z2, or leaves one out): $list"
+  want="pass x.test,pass y.test,ok z.test z1,"
+  [ "$list" = "$want" ] || fail "the batch's list is not pass x.test, pass y.test and z.test's kept case z1 alone (it names x.test or y.test by case, names s.test or z2, or leaves one out); expected, in this order: $want; got: $list"
 }
 
 # A file whose cases cannot run apart (x.test, named in $STUB/whole) honours only
@@ -36,11 +37,13 @@ t_batchreusewhole() {
 # batch's run ran a case a card passed alone again, or skipped the case both cards select; the test line counted only
 # the kept cases the runner's log names, so x.test's two, kept whole and not run, were left out.
 t_batchreuseshared() {
+  local want
   reusesetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]" 'a.txt s.test' 'x.txt x.test' 'y.txt y.test'
   echo x.test > "$STUB/whole"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   c7=$(cardof 7); c8=$(cardof 8)
-  [ "$(runs)" = "8 s1 y1 y2,7 s1 x1 x2,7 s1," ] || fail "the batch's run did not run s1 alone (it ran again x.test, which #7 passed whole, or y.test, which #8 passed, or skipped s1, which both cards select): $(runs)"
+  want="8 s1 y1 y2,7 s1 x1 x2,7 s1,"
+  [ "$(runs)" = "$want" ] || fail "the batch's run did not run s1 alone (it ran again x.test, which #7 passed whole, or y.test, which #8 passed, or skipped s1, which both cards select), or the runs came in another order; expected, in run order: $want; got: $(runs)"
   landedtogether "$c8 $c7" || fail "the two cards did not land as one batch: $(st 'select(.step == "landed")')"
   [ "$(st 'select(.issue == 7 and .step == "test") | [.result, .selected.cases, .selected.kept] | tojson' | tail -n 1)" = '["pass",1,4]' ] \
     || fail "#7's last test line does not say one case ran and four passes were kept (x.test's two, kept whole, and y.test's two): $(st 'select(.issue == 7 and .step == "test")')"

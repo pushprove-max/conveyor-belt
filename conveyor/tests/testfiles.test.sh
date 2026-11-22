@@ -117,7 +117,7 @@ t_tfpatfind() {
 t_tfcases() {
   setup '[]'; tune '.tests.patterns = ["*.test.*", "test_*.py", "*_test.go"]'
   printf '%s\n' "import test from 'node:test';" "test('a', async (t) => {" "  await t.test('sub', () => {});" '});' \
-    "test(\"b\", () => {});" 'for (const name of names) test(name, () => {});' 'test(`c ${n}`, () => {});' > "$R/node.test.mjs"
+    "test(\"b\", () => {});" 'for (const name of names)' '  test(name, () => {});' 'test(`c ${n}`, () => {});' > "$R/node.test.mjs"
   printf '%s\n' "describe('d', () => {" "  it('x', () => { expect(1).toBe(1); });" '  it(`y`, () => {});' "  test.only('z', () => {});" '});' > "$R/jest.test.js"
   printf '%s\n' 'import pytest' 'def helper():' '    pass' 'def test_one():' '    assert helper() is None' 'async def test_two():' '    pass' > "$R/test_a.py"
   printf '%s\n' 'package a' 'func helper() {}' 'func TestOne(t *testing.T) {' '	t.Fatal("x")' '}' 'func Test_two(t *testing.T) {}' 'func Testing() {}' > "$R/a_test.go"

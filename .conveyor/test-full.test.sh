@@ -13,7 +13,7 @@ fails=0
 no() { echo "not ok - $1"; fails=1; }
 
 # A scratch repo with the real script and the real pack's test.full: a passing shell test, a failing Python test, and
-# an untracked test file that would fail. Each test file notes that it ran.
+# an untracked test file that would fail. Each test file notes that it ran, so a check of what ran sees every file.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/lib"
 cp "$HERE/test-full.sh" "$HERE/test-share.sh" "$R/.conveyor/"
 full=$(jq -r '.test.full // empty' "$HERE/project.json")
@@ -24,11 +24,12 @@ printf 'import os, sys\nopen(os.path.join(os.path.dirname(__file__), "..", "ran"
 echo '[ -z "${CONVEYOR_TEST_LOG:-}" ] || { mkdir -p "$CONVEYOR_TEST_LOG/cases/ok" && : > "$CONVEYOR_TEST_LOG/cases/ok/own"; }' >"$R/lib/fx-own.test.sh"
 # It also times a file it starts, as a meta-runner does: that line is not the suite's.
 printf 'printf "TESTRUN sec\\tlib/inner.test.sh\\t1.0\\t1.0\\n"\n' >> "$R/lib/fx-own.test.sh"
+echo 'echo own >> "$(dirname "$0")/../ran"' >> "$R/lib/fx-own.test.sh"
 # Two engine case files that run the same two cases under the same names, as the engine's runner and each case file
 # do. Their names end in no tracked test file's path, so the test step does not take this test for a meta-runner.
 mkdir -p "$R/conveyor/tests"
 for f in conveyor/tests/fx-a.test.sh conveyor/tests/fx-b.test.sh; do
-  printf '%s\n' 't_one() { :; }' 't_two() { :; }' 'echo "TESTRUN cases=2"' \
+  n=${f#*fx-}; printf '%s\n' 't_one() { :; }' 't_two() { :; }' 'echo "TESTRUN cases=2"' "echo ${n%%.*} >> \"\$(dirname \"\$0\")/../../ran\"" \
     '[ -z "${CONVEYOR_TEST_LOG:-}" ] || { mkdir -p "$CONVEYOR_TEST_LOG/cases/ok" && : > "$CONVEYOR_TEST_LOG/cases/ok/one" && : > "$CONVEYOR_TEST_LOG/cases/ok/two"; }' > "$R/$f"
 done
 # The engine's runner, which runs the cases of those case files again; it notes that it ran.
@@ -50,7 +51,7 @@ got=$(cd "$T/log/cases" && find ok failed -type f | sort | tr '\n' ' ')
 of=$(awk -F= '/^TESTRUN cases=/ { n += $2 } END { print n + 0 }' "$T/out")
 [ "$of" = 5 ] || no "the full suite's case total is $of, not the 5 names it marks as ended: $(grep TESTRUN "$T/out")"
 [ $rc = 1 ] || no "a failing test file did not fail the full suite (exit $rc): $(cat "$T/out")"
-[ "$(sort "$R/ran" 2>/dev/null | tr '\n' ' ')" = "pass py " ] || no "the full suite did not run each tracked test file alone, and not the runner: $(cat "$R/ran" 2>&1)"
+[ "$(sort "$R/ran" 2>/dev/null | tr '\n' ' ')" = "a b own pass py " ] || no "the full suite did not run each tracked test file alone, and not the runner: $(cat "$R/ran" 2>&1)"
 # Bug (#720): the suite ran the engine's runner and then each case file, so each engine case ran twice (the runner
 # alone took 950 s of a release's 3600 s), and the totals counted the runner. Its first two lines count what it runs.
 [ "$(head -2 "$T/out" | tr '\n' ' ')" = "TESTRUN cases=5 TESTRUN files=5 " ] \
@@ -80,7 +81,7 @@ git -C "$R" rm -q lib/fx-fail.test.py && rm -f "$R/lib/fx-untracked.test.sh"
 # that is no tracked test file (a source file, a deleted one) is not run.
 # Bug: the list reached the files it runs, so a test file that runs a suite of its own (this one) ran a part of it:
 # lib/fx-env fails when it sees the list.
-echo '[ -z "${CONVEYOR_SUITE_FILES:-}" ]' > "$R/lib/fx-env.test.sh" && git -C "$R" add lib/fx-env.test.sh && git -C "$R" commit -qm env
+printf '%s\n' 'echo env >> "$(dirname "$0")/../ran"' '[ -z "${CONVEYOR_SUITE_FILES:-}" ]' > "$R/lib/fx-env.test.sh" && git -C "$R" add lib/fx-env.test.sh && git -C "$R" commit -qm env
 # Bug (#720): a list that names the engine's runner ran it, so its case files' cases ran twice.
 printf '%s\n' lib/fx-pass.test.sh lib/fx-env.test.sh conveyor/tests/fx-a.test.sh lib/source.sh lib/gone.test.sh \
   conveyor/conveyor.test.sh > "$T/list"
@@ -89,11 +90,12 @@ rm -f "$R/ran"
 got=$(sed -n 's/^-- ok //p' "$T/out" | sort | tr '\n' ' ')
 [ "$got" = "conveyor/tests/fx-a.test.sh lib/fx-env.test.sh lib/fx-pass.test.sh " ] || no "the suite with a list did not run only its tracked test files: $got"
 grep -qx 'TESTRUN files=3' "$T/out" && grep -qx 'TESTRUN cases=4' "$T/out" || no "the totals of a listed run are not of its files: $(grep TESTRUN "$T/out")"
-[ "$(cat "$R/ran" 2>&1)" = pass ] || no "the suite with a list naming the engine's runner ran it: $(cat "$R/ran" 2>&1)"
+[ "$(sort "$R/ran" 2>&1 | tr '\n' ' ')" = "a env pass " ] || no "the suite with a list naming the engine's runner ran it: $(cat "$R/ran" 2>&1)"
 
 # Bug: the whole test on main runs each failed case alone 3 times through this suite (fulltest.sh fullalone()), which
 # read no CONVEYOR_TEST_RERUN list, so each run alone was the whole suite again. With `fail` lines it runs only those
 # files: of the engine's runner the cases named (of it or of an engine case file), of a node file the case named.
+# Every fixture file notes that it ran, so a run that also starts a passed file or a case file is seen.
 printf '%s\n' "import { test } from 'node:test'; import { appendFileSync } from 'node:fs';" "const ran = new URL('../ran', import.meta.url);" \
   "test('a (b)', () => appendFileSync(ran, 'node a\\n'));" "test('c', () => appendFileSync(ran, 'node c\\n'));" > "$R/lib/fx-node.test.mjs"
 git -C "$R" add -A && git -C "$R" commit -qm runner && rm -f "$R/ran"
@@ -146,13 +148,13 @@ git -C "$R" rm -q conveyor/conveyor.test.sh && git -C "$R" commit -qm 'no runner
 rm -f "$R/ran"; printf 'pass\tlib/fx-pass.test.sh\noff\tlib/fx-pass.test.sh\n' > "$T/rerun"
 (cd "$R" && CONVEYOR_TEST_RERUN=$T/rerun bash -c "$full") > "$T/out" 2>&1
 got=$(sort "$R/ran" 2>/dev/null | tr '\n' ' ')
-[ "$got" = "node a node c pass " ] || no "a list with no failed case did not run the whole suite: $got"
+[ "$got" = "a b env node a node c own pass " ] || no "a list with no failed case did not run the whole suite: $got"
 # Bug (#88): a run with no per-file logs names its failed case's file by the pack's command (testrun.sh testfails()).
 # Its `fail` line selected no file, so each run alone ran nothing and passed, and the failure was taken as flaky.
 rm -f "$R/ran"; printf 'pass\tlib/fx-pass.test.sh\nfail\t%s\tc\n' "$full" > "$T/rerun"
 (cd "$R" && CONVEYOR_TEST_RERUN=$T/rerun bash -c "$full") > "$T/out" 2>&1
 got=$(sort "$R/ran" 2>/dev/null | tr '\n' ' ')
-[ "$got" = "node a node c pass " ] || no "a failed case named by the command, not a test file, ran no test file: $got"
+[ "$got" = "a b env node a node c own pass " ] || no "a failed case named by the command, not a test file, ran no test file: $got"
 
 # Bug (#720): the suite runs each engine case in its case file alone, not in the runner, so a case file that does not
 # start the runner with its cases (swebenchshow.test.sh only defined them) exits 0 having run none of them, while the

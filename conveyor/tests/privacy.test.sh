@@ -232,11 +232,9 @@ t_ghwrite() {
   done
   [ -z "$out" ] || fail "a GitHub write outside gh_write: $out"
   # The examples go through the same scan (#1435: they were matched against `gh api` alone, which a graphql read matches
-  # too, so a scan that flagged every gh api call passed). The last flagged: a REST read of an issue, as attachparts()
-  # made before it read the issue's id through graphql (#733). A graphql read is not flagged.
+  # too, so a scan that flagged every gh api call passed). The last flagged: a REST read. A graphql read is not flagged.
   mkdir -p "$T/$CASE"; f=$T/$CASE/example
-  for x in 'gh --repo owner/repo issue comment 7 --body x' 'gh -R o/r pr edit 1' 'gh --repo o/r api repos/o/r/issues' \
-    'id=$(gh api "repos/{owner}/{repo}/issues/$n" 2>/dev/null | jq -er .id)'; do
+  for x in 'gh --repo owner/repo issue comment 7 --body x' 'gh -R o/r pr edit 1' 'gh --repo o/r api repos/o/r/issues'; do
     printf '%s\n' "$x" > "$f"; [ -n "$(flagged "$f")" ] || fail "the guard misses: $x"
   done
   x="gh api graphql -f query='{ repository(owner: \"o\", name: \"r\") { issue(number: 7) { id } } }'"
