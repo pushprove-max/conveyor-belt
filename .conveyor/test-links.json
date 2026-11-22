@@ -788,5 +788,8 @@
   ],
   "conveyor/tests/modelpick.test.sh": [
     "conveyor/tests/batch.test.sh"
+  ],
+  "conveyor/foreman/foreman-title.test.sh": [
+    "conveyor/foreman/foreman-size.test.sh"
   ]
 }

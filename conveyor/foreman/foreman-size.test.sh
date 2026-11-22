@@ -94,9 +94,11 @@ t_race() {
 t_old() {
   local st
   fixture old
-  text RULESBODY 10 > "$FD/rules.md"; text STATEBODY 16 > "$FD/state.md"
+  # Small files that fit: without --rules-apart the fixed text and the owner rules take most of the limit, so a few
+  # lines of each leave room as the fixed text grows (10 lines of rules beside 16 of state no longer fitted).
+  text RULESBODY 4 > "$FD/rules.md"; text STATEBODY 4 > "$FD/state.md"
   marked; st=$(hook start sA | ctx)
-  [ "$(grep -c RULESBODY <<<"$st")" = 10 ] && [ "$(grep -c STATEBODY <<<"$st")" = 16 ] || fail "a start without --rules-apart lacks the rules or the state: ${st:0:300}"
+  [ "$(grep -c RULESBODY <<<"$st")" = 4 ] && [ "$(grep -c STATEBODY <<<"$st")" = 4 ] || fail "a start without --rules-apart lacks the rules or the state: $(grep -E 'did not fit|cut to fit' <<<"$st")"
   text RULESBODY 200 > "$FD/rules.md"; st=$(hook start sA)
   [ "${#st}" -lt 10000 ] && grep -qF "Read the rest from $FD/rules.md" <<<"$(ctx <<<"$st")" || fail "a start without --rules-apart is ${#st} characters or has no Read line"
 }
