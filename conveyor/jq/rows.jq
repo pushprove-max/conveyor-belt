@@ -70,8 +70,9 @@ map(select(.step != "push")) | group_by(.card) | map(. as $all
                gate: (if .step == "lint" then .lint.gate else null end),
                tail: (if .step == "blocked" or (.step == "test" and .result != "pass") or (.step == "review" and .result == "NO-GO") then .tail else null end),
                failures: (if .step == "test" and .result != "pass" then .failures else null end),
-               # A test line's failures' verdicts (card, main or flaky) and the seconds its run of them on main took (mainred.sh verdicts()).
-               verdicts: (if .step == "test" then .verdicts else null end), mainSec: (if .step == "test" then .mainRun.sec else null end),
+               # A test line's failures' verdicts (card, main or flaky) and the seconds its run of them on main took (mainred.sh verdicts());
+               # mainSec also on a start line of the test step after a wait for main, the seconds of the runs on main that wait took (card.sh mainwaited()).
+               verdicts: (if .step == "test" then .verdicts else null end), mainSec: (if .step == "test" or .step == "start" then .mainRun.sec else null end),
                # The card whose landing turned main red, on a test line that found it (verdicts()); a blocked line's class (block()).
                brokeMain: (if .step == "test" then .brokeMain else null end), class: (if .step == "blocked" then .class else null end),
                # A test line whose failed cases ran again at once (tests()): two runs (track.jq runs); on a pass line,

@@ -333,14 +333,153 @@ t_mainwaitfixclosed() {
 }
 # Bug it catches: a wait that ended on its own with main still red and its entry standing (the card tested again for
 # nothing, every LIVE). The live record is brought up to date, so the wait has checked again, and it still waits;
-# then main moves, which ends it.
+# then main moves to a commit that passes the case, which ends it.
 t_mainwaitstays() {
   local s mw l
   mwstart
   l=$(jq -r .last "$T/$CASE/cards/c9.live")
   wait_until "[ \"\$(jq -r .last '$T/$CASE/cards/c9.live' 2>/dev/null)\" != '$l' ]" || fail "the waiting card's live record was not brought up to date"
   [ -z "$(cat "$STUB/mw.out")" ] && [ -e "$T/$CASE/cards/c9.live" ] || fail "the wait ended with its entry standing and main unchanged: $(cat "$STUB/mw.out")"
-  echo m > "$R/m.txt"; git -C "$R" add m.txt; git -C "$R" commit -qm "main moves"
-  wait_until "grep -qx 'ended 0' '$STUB/mw.out'" 'cat "$STUB/mw.out"' || fail "the wait did not end once main moved"
+  echo 't_one() { :; }' > "$R/a.test"; echo one > "$R/ok.txt"; git -C "$R" add a.test ok.txt; git -C "$R" commit -qm "main is green"
+  wait_until "grep -qx 'ended 0' '$STUB/mw.out'" 'cat "$STUB/mw.out"' || fail "the wait did not end once main moved to a commit that passes a.test: one"
   wait "$mw"
+}
+
+# Issue 1313: cards c7, c8 and c9 fail `a.test: one` on a red main (redrunner's: no ok.txt, so a.test's one fails
+# there), at main's commit s. Each run of a file on main adds a line naming it to $STUB/mainruns. Given <ok.txt>, main
+# has it (redrunner()); while $STUB/broken stands, the machine fails c.test, which ends its run with nothing logged.
+mrshared() { # [<ok.txt on main>]
+  redrunner "${1:-}"
+  echo 't_one() { false; }' > "$R/a.test" && git -C "$R" add a.test && git -C "$R" commit -qm a.test || fail "main's a.test could not be committed"
+  { echo 'awk -F"\t" -v f="${CONVEYOR_TEST_FILE:-}" '"'"'$1 == "fail" && (f == "" || $2 == f) { print $2 }'"'"' "$CONVEYOR_TEST_RERUN" >> "$STUB/mainruns"'
+    echo '[ "${CONVEYOR_TEST_FILE:-}" != c.test ] || [ ! -e "$STUB/broken" ] || exit 1'
+    cat "$STUB/mainrun-cmd"; } > "$STUB/cmd.new" && mv "$STUB/cmd.new" "$STUB/mainrun-cmd" || fail "main's runs could not be counted"
+  s=$(git -C "$R" rev-parse HEAD); mkdir -p "$T/$CASE/cards"
+}
+# verdicts() of card <card> (its worktree made on main's commit when there is none) given <its last run's failures>:
+# its output in $STUB/v.<card>, its errors in $STUB/v.<card>.err.
+mrv() { # <card> <testfails() json>
+  [ -d "$T/$CASE/cards/$1" ] || git -C "$R" worktree add -q --detach "$T/$CASE/cards/$1" || fail "card $1's worktree could not be made"
+  eng 'TEST_WAIT=; TEST_RUN=; TEST_FREE=; verdicts '"$1"' "$CONVEYOR_CARDS/'"$1"'" '"'$2'"'' > "$STUB/v.$1" 2> "$STUB/v.$1.err"
+}
+# Bug it catches (issue 1313): each card that failed the same case on a red main ran the case on main again, so three
+# cards on one red commit paid for three runs of one file; and a card that read another's run counted its wait for that
+# run as seconds of its own run on main (mainRun.sec, the Board's mainSec). The three cards' verdicts() run at once, as
+# cards that fail together call it, main's run of a.test taking 2 seconds: a.test runs on main once, each card reads
+# that run's verdict, main, and two of the three ran nothing on main (sec 0).
+t_mainredshared() {
+  local s c p=() fl='{"files":[{"file":"a.test","cases":[{"name":"one","line":1}]}]}'
+  mrshared
+  { echo 'sleep 2'; cat "$STUB/mainrun-cmd"; } > "$STUB/cmd.new" && mv "$STUB/cmd.new" "$STUB/mainrun-cmd" || fail "main's run could not be slowed" # sleep: main's run must last while the other two cards wait for it, so their wait would show in mainRun.sec
+  for c in c7 c8 c9; do git -C "$R" worktree add -q --detach "$T/$CASE/cards/$c" || fail "card $c's worktree could not be made"; done
+  for c in c7 c8 c9; do mrv "$c" "$fl" & p+=($!); done
+  wait "${p[@]}"
+  for c in c7 c8 c9; do
+    [ "$(jq -c .verdicts "$STUB/v.$c")" = '[{"case":"a.test: one","verdict":"main"}]' ] || fail "card $c, given $fl, did not read main's verdict: $(cat "$STUB/v.$c" "$STUB/v.$c.err")"
+  done
+  [ "$(wc -l < "$STUB/mainruns")" = 1 ] || fail "three cards failing a.test: one at one commit of main ran it there $(wc -l < "$STUB/mainruns") times, not once"
+  [ "$(jq -s '[.[].mainRun.sec | select(. == 0)] | length' "$STUB"/v.c?)" = 2 ] \
+    || fail "the two cards that read a run of a.test on main did not say they ran nothing there (mainRun.sec 0): $(jq -c .mainRun "$STUB"/v.c?)"
+}
+# Bug it catches (E1): a card whose failures overlapped another's ran on main again a file main's run at that commit
+# already had a result of. c7 fails a.test: one; then c8 fails a.test: one and b.test: two: c8 reads a.test's result
+# and runs only b.test, and both are main's.
+t_mainredoverlap() {
+  mrshared
+  echo 't_two() { false; }' > "$R/b.test" && git -C "$R" add b.test && git -C "$R" commit -qm b.test || fail "main's b.test could not be committed"
+  mrv c7 '{"files":[{"file":"a.test","cases":[{"name":"one","line":1}]}]}'
+  mrv c8 '{"files":[{"file":"a.test","cases":[{"name":"one","line":1}]},{"file":"b.test","cases":[{"name":"two","line":1}]}]}'
+  [ "$(jq -c .verdicts "$STUB/v.c8")" = '[{"case":"a.test: one","verdict":"main"},{"case":"b.test: two","verdict":"main"}]' ] \
+    || fail "card c8, failing a.test: one and b.test: two on a red main, did not get main for both: $(cat "$STUB/v.c8" "$STUB/v.c8.err")"
+  [ "$(sort "$STUB/mainruns" | tr '\n' ' ')" = 'a.test b.test ' ] || fail "c7 (a.test) then c8 (a.test, b.test) did not run each file on main once: $(cat "$STUB/mainruns")"
+}
+# Bug it catches (E3): a card took the result of a run on main that ran no control (its card failed the sole control,
+# c.test, itself), so a broken machine (c.test fails there) was called a red main. c7 fails a.test: one and c.test;
+# c8 fails only a.test: one: c8's run of a.test has the control beside it, which fails, so its verdict is machine.
+t_mainredcontrol() {
+  mrshared; tune '.test.control = ["c.test"]'; : > "$STUB/broken"
+  mrv c7 '{"files":[{"file":"a.test","cases":[{"name":"one","line":1}]},{"file":"c.test","cases":[]}]}'
+  mrv c8 '{"files":[{"file":"a.test","cases":[{"name":"one","line":1}]}]}'
+  [ "$(jq -c .verdicts "$STUB/v.c8")" = '[{"case":"a.test: one","verdict":"machine"}]' ] \
+    || fail "card c8, failing a.test: one with the control c.test failing on main, did not get machine: $(cat "$STUB/v.c8" "$STUB/v.c8.err")"
+  [ "$(grep -cx a.test "$STUB/mainruns")" = 2 ] || fail "c8 did not run a.test on main beside the control: $(cat "$STUB/mainruns")"
+}
+# Bug it catches (E2): a failed control was kept with a run's results, so once the machine was repaired a card on the
+# same commit read the old failure and was called the machine's again. With c.test (the control) failing, c7's
+# a.test: one is the machine's; with the machine repaired, c8's is main's, from a run of its own.
+t_mainredmachinefixed() {
+  mrshared c.test; tune '.test.control = ["c.test"]'; : > "$STUB/broken"
+  mrv c7 '{"files":[{"file":"a.test","cases":[{"name":"one","line":1}]}]}'
+  [ "$(jq -c .verdicts "$STUB/v.c7")" = '[{"case":"a.test: one","verdict":"machine"}]' ] || fail "card c7 did not get machine with the control failing: $(cat "$STUB/v.c7" "$STUB/v.c7.err")"
+  rm -f "$STUB/broken"
+  mrv c8 '{"files":[{"file":"a.test","cases":[{"name":"one","line":1}]}]}'
+  [ "$(jq -c .verdicts "$STUB/v.c8")" = '[{"case":"a.test: one","verdict":"main"}]' ] \
+    || fail "card c8, failing a.test: one after the machine was repaired, did not get main: $(cat "$STUB/v.c8" "$STUB/v.c8.err")"
+}
+# Bug it catches (E1): a run on main of an older commit, kept as it ended, replaced the results of main's commit as it
+# is now. mainkeep() of a run at a commit that is no longer main's leaves the kept results as they were.
+t_mainkeepold() {
+  local s0 s kept
+  mrshared; s0=$(git -C "$R" rev-parse HEAD~1); s=$(git -C "$R" rev-parse HEAD)
+  kept='{"sha":"'"$s"'","hits":[],"files":{"a.test":{"ctl":[],"res":null}}}'
+  eng 'printf "%s\n" '"'$kept'"' > "$MAINPROBE"; sha='"$s0"' hits="[]" ctl="[]" mf="{\"files\":[]}"; mainkeep c7 "[{\"file\":\"a.test\",\"case\":null}]"; jq -c . "$MAINPROBE"' > "$STUB/kept" 2>&1
+  [ "$(cat "$STUB/kept")" = "$kept" ] || fail "a run at the older commit $s0 replaced the results kept at main's commit $s: $(cat "$STUB/kept")"
+}
+# Bug it catches (issue 1313): a card waiting on a red main woke at each new commit of main and ran its case on main
+# again, though main still failed it. Three waits on `a.test: one` at s (mainwait() itself, polled as it runs: only a
+# wait under way shows whether it stays or ends). Main moves and still fails it: a.test runs once there, and each card
+# waits on, at main's new commit. Main moves again and passes it: a.test runs once more, and all three waits end.
+t_mainwaitshared() {
+  local s s2 c p=()
+  mrshared
+  eng 'mainred c1 "a.test: one" a.test '"$s" || fail "the case was not recorded"
+  for c in c7 c8 c9; do
+    ( eng 'LIVE=0.2; mainwait "$CONVEYOR_CARDS/'"$c"'" '"$s"' "a.test: one"; echo "ended $?"' > "$STUB/mw.$c" 2>&1 ) & p+=($!)
+  done
+  for c in c7 c8 c9; do
+    wait_until "grep -qs 'fail on main at ${s:0:12} too' '$T/$CASE/cards/$c.live'" "cat '$STUB/mw.$c'" || fail "card $c did not wait for main, on a.test: one at $s"
+  done
+  git -C "$R" commit -q --allow-empty -m "main moves, still red"; s2=$(git -C "$R" rev-parse HEAD)
+  for c in c7 c8 c9; do
+    wait_until "grep -qs 'fail on main at ${s2:0:12} too' '$T/$CASE/cards/$c.live'" "cat '$STUB/mw.$c'" || fail "card $c, waiting on a.test: one, did not wait on at main's new commit $s2"
+  done
+  ! grep -qs '^ended' "$STUB"/mw.c? && [ "$(wc -l < "$STUB/mainruns")" = 1 ] \
+    || fail "main moved still failing a.test: one, and a wait ended, or a.test ran on main more than once: $(cat "$STUB"/mw.c? "$STUB/mainruns")"
+  echo one > "$R/ok.txt"; git -C "$R" add ok.txt; git -C "$R" commit -qm "main is green"
+  for c in c7 c8 c9; do
+    wait_until "grep -qx 'ended 0' '$STUB/mw.$c'" "cat '$STUB/mw.$c'" || fail "card $c's wait on a.test: one did not end once main passed it"
+  done
+  wait "${p[@]}"; [ "$(wc -l < "$STUB/mainruns")" = 2 ] || fail "a.test ran on main $(wc -l < "$STUB/mainruns") times over two commits, not twice"
+}
+# Bug it catches (E4): main deleted the test file a card waited on, and the run of the missing file on main failed as
+# before, so the card waited on. A wait on the file a.test (mainwait() itself, polled as it runs: only a wait under
+# way shows whether it ends) ends once main's commit has no a.test, which runs on main no more.
+t_mainwaitgone() {
+  local s mw
+  mrshared; mkdir -p "$T/$CASE/cards"
+  ( eng 'LIVE=0.2; mainwait "$CONVEYOR_CARDS/c9" '"$s"' a.test; echo "ended $?"' > "$STUB/mw.out" 2>&1 ) & mw=$!
+  wait_until "grep -qs 'fail on main at ${s:0:12} too' '$T/$CASE/cards/c9.live'" 'cat "$STUB/mw.out"' || fail "card c9 did not wait for main, on a.test at $s"
+  git -C "$R" rm -q a.test && git -C "$R" commit -qm "main deletes a.test" || fail "main could not delete a.test"
+  wait_until "grep -qx 'ended 0' '$STUB/mw.out'" 'cat "$STUB/mw.out"' || fail "the wait on a.test did not end once main deleted it"
+  wait "$mw"; [ ! -s "$STUB/mainruns" ] || fail "a.test, gone from main, ran there: $(cat "$STUB/mainruns")"
+}
+# Bug it catches (E6): a card's wait for main ran its case on main once main moved, and that run's seconds went into
+# the wait's (waitSec) and into no run on main, so the Board's Test failures (mainSec) left them out. Main is green
+# at a later commit than s, its run of a.test taking 2 seconds: card()'s wait (mainwaited()) runs a.test there and
+# ends; a start line of its test step carries that run (mainRun), the wait's seconds (mainsec) leave it out, and the
+# snapshot's metrics count it.
+t_mainwaitsec() {
+  local s out snap ms el
+  mrshared
+  { echo 'sleep 2'; cat "$STUB/mainrun-cmd"; } > "$STUB/cmd.new" && mv "$STUB/cmd.new" "$STUB/mainrun-cmd" || fail "main's run could not be slowed" # sleep: the run's seconds must stand out of the wait's own
+  echo 't_one() { :; }' > "$R/a.test"; echo one > "$R/ok.txt"; git -C "$R" add a.test ok.txt; git -C "$R" commit -qm "main is green"
+  out=$(eng 'c=c9 n=9 mainsec=0 t=$SECONDS; append "$(line c9 9 picked ok "{\"title\":\"title 9\"}")"
+    mainwaited "$CONVEYOR_CARDS/c9" '"$s"' "a.test: one"; echo "$mainsec $((SECONDS - t))"
+    append "$(line c9 9 landed ok "{\"product\":true,\"sha\":\"$(git rev-parse HEAD)\"}")"' 2>&1) || fail "the wait for main did not run: $out"
+  [ "$(st 'select(.card == "c9" and .step == "start") | [.of, .mainRun.sha, .mainRun.sec >= 2] | @tsv')" = "test	$(git -C "$R" rev-parse HEAD)	true" ] \
+    || fail "the wait on a.test: one at $s ran it on main without a start line carrying that run: $(st 'select(.card == "c9")') $out"
+  read -r ms el <<<"$(tail -n 1 <<<"$out")"; [ "$ms" -le $((el - 2)) ] || fail "the wait's seconds ($ms of $el) count the 2-second run on main: $out"
+  recok "$ST/cards.jsonl" "the wait for main"
+  snap=$(loop snapshot --fresh 2>/dev/null)
+  [ "$(jq '.metrics.today.testFailures.mainSec >= 2' <<<"$snap")" = true ] || fail "the snapshot's mainSec leaves out the run on main of the wait: $(jq -c '.metrics.today.testFailures' <<<"$snap")"
 }

@@ -120,10 +120,10 @@ redmsg() { # <card> <issue json>
   local t; t=$(redissue "$1") || t=$2
   jq -r --arg c "$1" --arg s "$(stdb ask card "$1" | jq -rs 'map(.mainRed // empty)[0] // ""')" '"fix(product): \(.title) (main \($s[0:12]))\n\nConveyor card \($c)"' <<<"$t"
 }
-# card()'s wait for main to change (mainred.sh mainwait()), its seconds added to card()'s mainsec.
+# card()'s wait for main to change (mainred.sh mainwait()), its seconds added to card()'s mainsec, less those of the runs on main it took (mainwait()'s mainrun): a start line of card()'s test step records them as its mainRun, which the Board's mainSec counts.
 mainwaited() { # <worktree> <main's commit> <case>...
-  local mw=$SECONDS; mainwait "$@"; mainsec=$((mainsec + SECONDS - mw))
-}
+  local mw=$SECONDS mainrun=null; mainwait "$@"; mainsec=$((mainsec + SECONDS - mw - $(jq '.sec // 0' <<<"$mainrun" 2>/dev/null || echo 0)))
+  [ "$mainrun" = null ] || record "$c" "$n" start ok "$(jq -c '{of: "test", mainRun: .}' <<<"$mainrun")"; }
 # A card's landed line's extra (card(), as it lands): <left> (its filed follow-ups) with waitSec, the seconds it waited
 # on other cards (settle()) and for main to change (mainwaited()), for the drift watch (bench/drift.sh); yesFrom; and
 # rollout, its rollout actions, as its ready file holds them too.

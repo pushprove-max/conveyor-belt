@@ -86,10 +86,11 @@
        blocks: ($b | group_by(.metrics.blockClass) | map({key: .[0].metrics.blockClass, value: length}) | from_entries),
        rebuildRate: ($cs | share(.metrics.rebuilds > 0)),
        # The test failures by verdict (mainred.sh verdicts()): the card's (to its fix), main's (it waited) or flaky; and mainSec,
-       # the seconds the runs of failing cases on main took, the time that check cost.
+       # the seconds the runs of failing cases on main took, the time that check cost: those of the test lines and of the
+       # waits for main (rows.jq: a start line's mainSec).
        testFailures: ([$cs[].x.log[] | select(.step == "test")] as $t | [$t[].verdicts[]?.verdict] as $v
          | {card: ($v | map(select(. == "card")) | length), main: ($v | map(select(. == "main")) | length),
-            flaky: ($v | map(select(. == "flaky")) | length), mainSec: ([$t[].mainSec | numbers] | add // 0)}),
+            flaky: ($v | map(select(. == "flaky")) | length), mainSec: ([$cs[].x.log[].mainSec | numbers] | add // 0)}),
        # The dollars are those of the priced steps; leftOut counts the steps with no price (each says why in the
        # timeline of its card), so a figure with steps left out is never read as complete. The tokens are those of
        # the steps whose usage was read; tokensLeftOut counts the steps whose usage was not (unread: their tokens are

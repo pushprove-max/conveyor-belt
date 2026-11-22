@@ -5,7 +5,8 @@
 # by lib/testrun.sh.
 # Before a card's failure goes to its fix session (card()), what still did not pass after the run again runs on main
 # (the owner, 2026-11-14: a fix session cannot repair main or the machine): in a worktree of main's commit as it is now
-# ($CARDS/mainrun/<card>), on a test slot, under the card's test time limit (testTimeout, which ends it even while it
+# ($CARDS/mainrun/<card>; once for each commit and file, its results read by every card that fails the file there:
+# mainprobe()), on a test slot, under the card's test time limit (testTimeout, which ends it even while it
 # waits for a whole-suite turn), with test.fileCommand, each failing file run alone once, its list (CONVEYOR_TEST_RERUN)
 # naming every other file of the card's runs as passed (those of its last run, and those its own list names) and, of a
 # file with failing cases, those cases; a file that failed naming no case or ran out of time, as `fail\t<file>` with no
@@ -30,12 +31,13 @@
 #   selection error".
 # - flaky: it failed on the first run and passed on the run again (PASSEDAGAIN; flakyrun() records it).
 # Prints the test line's part: {verdicts: [{case, verdict, why (a document's alone)}]} and, when the cases ran on main, mainRun: {sha, sec (the
-# seconds main's run took, its wait for a slot included), exit}, and brokeMain, the card whose landing turned main red, when the main-red
+# seconds the card's own run on main took, its wait for a slot included: 0 when it read every result from another
+# card's run, mainprobe()), exit}, and brokeMain, the card whose landing turned main red, when the main-red
 # record knows it for a case of verdict main. Each case whose verdict is main goes to the fix card of main's commit (mainred());
 # each whose verdict is machine to the machine hold (machinehold()), and to no fix card.
 # The card's own TEST_WAIT, TEST_RUN and TEST_FREE are kept (testrec()).
 verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
-  local mwt=$CARDS/mainrun/${2##*/} sha='' u um nt m=null mf=null s rc out='' fst v c f b w=$TEST_WAIT r=$TEST_RUN fr=$TEST_FREE cmd='' hits='[]' ctl='[]' cf='[]' chg lim
+  local sha='' u um nt m=null mf=null k fst v c f b cmd='' hits='[]' ctl='[]' cf='[]' chg
   packget test.command cmd test.control ctl 2>/dev/null || { cmd=''; ctl='[]'; }
   # The units that still did not pass, each {file, case}: case null for a file that failed naming no case or ran out of
   # time. The test command itself with no case (testfails()'s name for a run that logged no file) is none: it names no test.
@@ -53,36 +55,11 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
   jq -r '.[]' <<<"$nt" | while IFS= read -r f; do echo "conveyor: card $1: $f is no test file: its failure is a selection error of the card's run, not main's" >&2; done
   um=$(jq -c --slurpfile c <(printf '%s' "$chg") --argjson nt "$nt" '$c[0] as $c | if $c == null then [] else map(select(.file | IN($c[], $nt[]) | not)) end' <<<"$u") || um='[]'
   if [ "$um" != '[]' ]; then
-    if sha=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null) \
-      && out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
-        && git worktree add -q --detach "$mwt" "$sha" && deps "$mwt"; } 2>&1 < /dev/null) \
-      && { hits=$(cachehits "$mwt" | jq -cRn '[inputs | select(. != "")]') || hits='[]'
-        ctl=$(jq -cn --slurpfile h <(printf '%s' "$hits") --slurpfile u <(printf '%s' "$u") --slurpfile c <(printf '%s' "${ctl:-[]}") '$h[0] as $h | $u[0] as $u | $c[0] as $c | [$c | arrays[] | strings | select(($h == [] or IN($h[])) and (IN($u[].file) | not))] | unique' 2>/dev/null) || ctl='[]'; } \
-      && jq -r --slurpfile u <(printf '%s' "$u") --slurpfile um <(printf '%s' "$um") --slurpfile ctl <(printf '%s' "$ctl") --rawfile k <(awk -F'\t' '$1 == "pass" || $1 == "ok" || $1 == "fail" {print $2}' "$2.rerun" 2>/dev/null) \
-        '$u[0] as $u | $um[0] as $um | $ctl[0] as $ctl | ([.passed[]?, .files[]?.file, .okcases[]?.file, .passcases[]?.file, (.timeout.file // empty), ($k | split("\n")[] | select(. != ""))]
-          | unique - [$u[].file] - $ctl | .[] | "pass\t\(.)"),
-        ($um[] | if .case == null then "fail\t\(.file)" else "fail\t\(.file)\t\(.case)" end), ($ctl[] | "fail\t\(.)")' <<<"$3" > "$mwt.rerun"; then
-      # Its limit (issue 420): the card's own (testTimeout), never none, kept by timeout itself (TEST_HARD), as a
-      # runner waiting for a whole-suite turn stops the run's clock. Each failing file runs alone through
-      # test.fileCommand, as the card's own run does, once however many of its cases failed. With none set, it runs
-      # the way the pack's test command runs it (TEST_PACKONLY: testlist.sh nofilecmd(), #1275), never with Conveyor's
-      # own runner: a file that fails only there is not main's. When the test command cannot be given one file,
-      # nothing runs on main (<worktree>.stop), and each failure is the card's.
-      lim=${TEST_TIMEOUT:-}; [[ $lim =~ ^[1-9][0-9]*$ ]] || { packget tunables.testTimeout lim 2>/dev/null && [[ $lim =~ ^[1-9][0-9]*$ ]]; } || lim=3600
-      awk -F'\t' -v OFS='\t' '$1 != "fail" { print; next } !s[$2]++ { print "fail", $2 }' "$mwt.rerun" > "$mwt.rerun.new" && mv -f "$mwt.rerun.new" "$mwt.rerun"
-      s=$SECONDS; TEST_PACKONLY=1 CONVEYOR_TEST_ONESLOT=1 TEST_HARD=$lim tests "$mwt" test.fileCommand alone; rc=$?; s=$((SECONDS - s))
-      # A run that passed failed nothing (testfails() names a command that wrote no log as a file whatever its exit);
-      # one that did not run (<worktree>.stop) ran nothing on main.
-      if [ -s "$mwt.stop" ]; then mf=null; echo "conveyor: card $1: its failing cases did not run on main: $(head -n 1 "$mwt.stop")" >&2; elif [ $rc = 0 ]; then mf='{"files":[]}'; else mf=$(testfails "$mwt.test" "$rc") || mf=null; fi
-      # The controls that did not pass: each one the run did not end ok (failed, timed out or not run).
-      [ $rc = 0 ] || cf=$(jq -c --slurpfile c <(printf '%s' "$ctl") '$c[0] as $c | [.passed // []] as $p | [$c[] | select(IN($p[0][]) | not)]' <<<"${mf:-null}" 2>/dev/null) || cf=$ctl
-      m=$(jq -cn --arg sha "$sha" --argjson s "$s" --argjson rc "$rc" '{sha: $sha, sec: $s, exit: $rc}')
-    else
-      echo "conveyor: card $1: its failing cases could not be run on main: ${out:-the commit of main could not be read}" >&2
-    fi
-    git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; rmdir "${mwt%/*}" 2>/dev/null # the folder, once no card's run is in it
+    # The other files of the card's runs (those of its last run, and those its own list names): main's run names them passed.
+    k=$(jq -c --rawfile k <(awk -F'\t' '$1 == "pass" || $1 == "ok" || $1 == "fail" {print $2}' "$2.rerun" 2>/dev/null) \
+      '[.passed[]?, .files[]?.file, .okcases[]?.file, .passcases[]?.file, (.timeout.file // empty), ($k | split("\n")[] | select(. != ""))] | unique' <<<"$3") || k='[]'
+    mainprobe "${2##*/}" "$um" "$u" "$k" "$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null)" || :
   fi
-  TEST_WAIT=$w; TEST_RUN=$r; TEST_FREE=$fr
   fst=$(jq -ce objects "$2.first" 2>/dev/null) || fst=null
   v=$(jq -cn --slurpfile u <(printf '%s' "$u") --slurpfile um <(printf '%s' "$um") --slurpfile m <(printf '%s' "${mf:-null}") --slurpfile l <(printf '%s' "${3:-null}") \
     --slurpfile fst <(printf '%s' "$fst") --slurpfile h <(printf '%s' "$hits") --slurpfile ctl <(printf '%s' "${ctl:-[]}") --slurpfile cf <(printf '%s' "$cf") --argjson nt "$nt" \
@@ -104,6 +81,93 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
     | (.reds // []) | [(map(select(.sha == $s)) + reverse)[] | .cases[]? | select(.case | IN($mc[])) | .landing.card? | strings] | first // empty' "$MAINRED" 2>/dev/null) || b=''
   jq -cn --slurpfile v <(printf '%s' "$v") --slurpfile m <(printf '%s' "$m") --arg b "$b" '$v[0] as $v | $m[0] as $m | {verdicts: [$v[] | {case, verdict} + if .why then {why} else {} end]} + if $m then {mainRun: $m} else {} end
     + if $b == "" then {} else {brokeMain: $b} end'
+}
+# The run on main of <units> ([{file, case}]: verdicts(), mainwait()), once for each commit of main and file however
+# many cards ask (issue 1313). $MAINPROBE keeps the results at one commit of main, {sha, hits, files: {<file>: {ctl,
+# res}}} (res: the file's entry in testfails() of the run that ran it, {file, cases: []} when it failed there naming
+# no case; null when it has none, as the file passed there),
+# and a caller takes the result of each of its files that a run beside every control it would take ran, and runs the
+# rest. A result is kept only from a run whose controls all passed, and not of a file that cachehits() names or that
+# ran out of time, so a verdict of machine is never read from another card's run: the machine may have changed since.
+# Results of another commit replace the kept ones only while that commit is main's. Each file's lock (under
+# $MAINPROBE.locks, taken in one order) holds a second caller of the file until the first run's results are kept. A
+# run is of main's clean tree in a worktree of its own ($CARDS/mainrun/<name>), so its results are the same for every
+# card. A unit whose file <a commit with the units' files> has and main's commit does not (main deleted it) does not
+# run, and fails on main no more. Else the units run as verdicts() says: their files each run alone, the pack's
+# controls ($ctl: those with a recorded pass on main's content, none of <units no control is taken from>) beside them,
+# and <other files> named passed. Sets the caller's sha, hits, ctl, cf, mf (testfails() of main's run with the kept
+# results it took, null when nothing ran) and m ({sha, sec, exit}, null when nothing ran; sec: the seconds the
+# caller's own run took, 0 when it took every result from the kept ones). The caller's TEST_WAIT, TEST_RUN and
+# TEST_FREE are kept (testrec()).
+MAINPROBE=${STATE%/*}/mainprobe.json
+mainprobe() { # <name> <units, json> <units no control is taken from, json> <other files, json> <a commit with the units' files>
+  local mwt=$CARDS/mainrun/$1 out='' rc='' s=0 lim k l f lk=() o='' got='{}' ur gone=() p=${ctl:-[]} w=${TEST_WAIT-} r=${TEST_RUN-} fr=${TEST_FREE-}
+  local pick='$h[0] as $h | $u[0] as $u | $c[0] as $c | [$c | arrays[] | strings | select(($h == [] or IN($h[])) and (IN($u[].file) | not))] | unique'
+  mf=null; m=null; hits='[]'; cf='[]'
+  sha=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null) \
+    || { sha=''; echo "conveyor: card $1: its failing cases could not be run on main: the commit of main could not be read" >&2; return 1; }
+  while IFS= read -r f; do
+    ! { [ -n "$5" ] && git cat-file -e "$5:$f" && ! git cat-file -e "$sha:$f"; } 2>/dev/null || gone+=("$f")
+  done < <(jq -r '[.[].file] | unique[]' <<<"$2")
+  ur=$(jq -c '[.[] | select(.file | IN($ARGS.positional[]) | not)]' --args "${gone[@]}" <<<"$2") || ur='[]'
+  [ "$ur" != '[]' ] || { mf='{"files":[]}'; return 0; }
+  # A lock that cannot be taken is left out: that file's run is not shared.
+  mkdir -p "$MAINPROBE.locks" 2>/dev/null
+  while read -r k; do
+    { exec {l}>>"$MAINPROBE.locks/$k"; } 2>/dev/null || continue
+    if flock "$l"; then lk+=("$l"); else exec {l}>&-; fi
+  done < <(jq -r '[.[].file] | unique[]' <<<"$ur" | while IFS= read -r k; do printf '%s' "$k" | cksum; done | cut -d' ' -f1 | sort -un)
+  o=$(jq -ce --arg s "$sha" 'objects | select(.sha == $s)' "$MAINPROBE" 2>/dev/null) \
+    && hits=$(jq -c '.hits' <<<"$o") && ctl=$(jq -cn --slurpfile h <(printf '%s' "$hits") --slurpfile u <(printf '%s' "$3") --slurpfile c <(printf '%s' "$p") "$pick") \
+    && got=$(jq -c --slurpfile u <(printf '%s' "$ur") --slurpfile c <(printf '%s' "$ctl") '.files as $fs | [$u[0][].file | select($fs[.] and ($c[0] - $fs[.].ctl == []))] | unique | map({key: ., value: $fs[.].res}) | from_entries' <<<"$o") \
+    && f=$(jq -c --slurpfile g <(printf '%s' "$got") '[.[] | select(.file | IN($g[0] | keys[]) | not)]' <<<"$ur") && ur=$f || { got='{}'; hits='[]'; }
+  if [ "$ur" = '[]' ]; then
+    mf=$(jq -c '{files: [.[] | values]}' <<<"$got"); cf='[]'; rc=$(jq -r 'if any(.[]; . != null) then 1 else 0 end' <<<"$got")
+    echo "conveyor: card $1: its failing cases ran on main at ${sha:0:12} already: their verdicts are that run's" >&2
+  elif out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
+      && git worktree add -q --detach "$mwt" "$sha" && deps "$mwt"; } 2>&1 < /dev/null) \
+    && { hits=$(cachehits "$mwt" | jq -cRn '[inputs | select(. != "")]') || hits='[]'
+      ctl=$(jq -cn --slurpfile h <(printf '%s' "$hits") --slurpfile u <(printf '%s' "$3") --slurpfile c <(printf '%s' "$p") "$pick" 2>/dev/null) || ctl='[]'; } \
+    && jq -rn --slurpfile u <(printf '%s' "$3") --slurpfile um <(printf '%s' "$ur") --slurpfile ctl <(printf '%s' "$ctl") --slurpfile o <(printf '%s' "$4") \
+      '$u[0] as $u | $um[0] as $um | $ctl[0] as $ctl | ($o[0] - [$u[].file] - $ctl | .[] | "pass\t\(.)"),
+      ($um[] | if .case == null then "fail\t\(.file)" else "fail\t\(.file)\t\(.case)" end), ($ctl[] | "fail\t\(.)")' > "$mwt.rerun"; then
+    # Its limit (issue 420): the card's own (testTimeout), never none, kept by timeout itself (TEST_HARD), as a
+    # runner waiting for a whole-suite turn stops the run's clock. Each failing file runs alone through
+    # test.fileCommand, as the card's own run does, once however many of its cases failed. With none set, it runs
+    # the way the pack's test command runs it (TEST_PACKONLY: testlist.sh nofilecmd(), #1275), never with Conveyor's
+    # own runner: a file that fails only there is not main's. When the test command cannot be given one file,
+    # nothing runs on main (<worktree>.stop), and each failure is the card's.
+    lim=${TEST_TIMEOUT:-}; [[ $lim =~ ^[1-9][0-9]*$ ]] || { packget tunables.testTimeout lim 2>/dev/null && [[ $lim =~ ^[1-9][0-9]*$ ]]; } || lim=3600
+    awk -F'\t' -v OFS='\t' '$1 != "fail" { print; next } !s[$2]++ { print "fail", $2 }' "$mwt.rerun" > "$mwt.rerun.new" && mv -f "$mwt.rerun.new" "$mwt.rerun"
+    s=$SECONDS; TEST_PACKONLY=1 CONVEYOR_TEST_ONESLOT=1 TEST_HARD=$lim tests "$mwt" test.fileCommand alone; rc=$?; s=$((SECONDS - s))
+    # A run that passed failed nothing (testfails() names a command that wrote no log as a file whatever its exit);
+    # one that did not run (<worktree>.stop) ran nothing on main, and is not kept.
+    if [ -s "$mwt.stop" ]; then mf=null; echo "conveyor: card $1: its failing cases did not run on main: $(head -n 1 "$mwt.stop")" >&2; elif [ $rc = 0 ]; then mf='{"files":[]}'; else mf=$(testfails "$mwt.test" "$rc") || mf=null; fi
+    # The controls that did not pass: each one the run did not end ok (failed, timed out or not run).
+    [ $rc = 0 ] || cf=$(jq -c --slurpfile c <(printf '%s' "$ctl") '$c[0] as $c | [.passed // []] as $p | [$c[] | select(IN($p[0][]) | not)]' <<<"${mf:-null}" 2>/dev/null) || cf=$ctl
+    [ "$mf" = null ] || [ "$cf" != '[]' ] || mainkeep "$1" "$ur" || :
+    [ "$mf" = null ] || mf=$(jq -c --slurpfile g <(printf '%s' "$got") '.files += [$g[0][] | values]' <<<"$mf") || mf=null
+  else
+    echo "conveyor: card $1: its failing cases could not be run on main: ${out:-the list of its run could not be made}" >&2
+  fi
+  [ "$ur" = '[]' ] || { git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; rmdir "${mwt%/*}" 2>/dev/null; } # the folder, once no card's run is in it
+  for l in "${lk[@]}"; do exec {l}>&-; done
+  TEST_WAIT=$w; TEST_RUN=$r; TEST_FREE=$fr
+  [ -z "$rc" ] || m=$(jq -cn --arg sha "$sha" --argjson s "$s" --argjson rc "$rc" '{sha: $sha, sec: $s, exit: $rc}')
+}
+# Keeps in $MAINPROBE, under a lock of its own, the results of mainprobe()'s run of <units> (its sha, hits, ctl, mf):
+# those of a file cachehits() names or that ran out of time are not kept. Results at main's kept commit are added to
+# the kept ones; those of another commit replace them only while it is main's commit.
+mainkeep() { # <name> <units, json>
+  local k
+  { exec {k}>>"$MAINPROBE.lock"; } 2>/dev/null && flock "$k" || { echo "conveyor: card $1: its run on main could not be kept for the other cards" >&2; return 1; }
+  jq -cn --slurpfile o <(jq -ce objects "$MAINPROBE" 2>/dev/null) --arg s "$sha" --arg now "$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)" \
+    --slurpfile u <(printf '%s' "$2") --slurpfile h <(printf '%s' "$hits") --slurpfile c <(printf '%s' "$ctl") --slurpfile m <(printf '%s' "$mf") \
+    '($o[0] // {}) as $o | $h[0] as $h | $m[0] as $m
+      | ([$u[0][].file] | unique - $h - [$m.timeout.file // empty] | map({key: ., value: {ctl: $c[0], res: (. as $f | first($m.files[]? | select(.file == $f)) // null)}}) | from_entries) as $new
+      | if $o.sha == $s then $o | .files += $new elif $s == $now then {sha: $s, hits: $h, files: $new} else empty end' > "$MAINPROBE.new" \
+    && { [ ! -s "$MAINPROBE.new" ] || mv -f "$MAINPROBE.new" "$MAINPROBE"; } || echo "conveyor: card $1: its run on main could not be kept for the other cards" >&2
+  rm -f "$MAINPROBE.new"; exec {k}>&-
 }
 # The machine hold (issue 221): a case that failed on main as on the card, though its inputs did not change since it
 # last passed (testlist.sh cachehits()), or while every control (verdicts()) that ran beside it on the same slot failed, is the
@@ -467,17 +531,34 @@ redlisted() { # <case>...
     < <(jq -r --args '.reds[]? | select(any(.cases[]?; .case | IN($ARGS.positional[]))) | .card // ""' "$@" < "$MAINRED" 2>/dev/null)
   return 1
 }
-# A card whose every failure is main's (verdicts()) waits in its test step until main is at another commit than
-# <main's commit>, its live record saying so and brought up to date as it waits (so `health` does not call it stuck).
-# It only sleeps there: <worktree>.idle stands meanwhile, so the loop does not count it against the builder cap (idle()).
-# It ends too once the main-red record ($MAINRED) holds main red for none of <case>... (redlisted(); issue 358: the
-# owner or the Foreman removed a wrong entry, or its fix card closed as already done), when it held one as the wait
-# began; a wait on cases the record did not hold (mainred() could not write them) ends only as main moves.
+# A card whose every failure is main's (verdicts()) waits in its test step until main's state changes: main is at
+# another commit than <main's commit>, and the run on main there (mainprobe(), one for every card waiting there,
+# issue 1313) does not fail each of <case>... as main's (verdicts(): a case `<file>: <name>`, or a file failing naming
+# no case). While each fails at main's new commit, it waits on at that commit. Its live record says so and is brought
+# up to date as it waits (so `health` does not call it stuck). It only sleeps there: <worktree>.idle stands
+# meanwhile, so the loop does not count it against the builder cap (idle()). It ends too once the main-red record
+# ($MAINRED) holds main red for none of <case>... (redlisted(); issue 358: the owner or the Foreman removed a wrong
+# entry, or its fix card closed as already done), when it held one as the wait began; a wait on cases the record did
+# not hold (mainred() could not write them) ends only as main's state changes. Sets the caller's mainrun: the runs on
+# main it took, {sha, exit (the last run's), sec (their seconds added up: card.sh mainwaited())}, or null for none.
 mainwait() { # <worktree> <main's commit> <case>...
-  local at c listed=''; at=$(date -u +%FT%TZ); c=$(jq -rn '$ARGS.positional | join(", ")' --args "${@:3}")
+  local at c listed='' on=$2 u sha hits ctl cf mf m r; at=$(date -u +%FT%TZ); c=$(jq -rn '$ARGS.positional | join(", ")' --args "${@:3}")
+  mainrun=null
+  u=$(jq -cn '[$ARGS.positional[] | index(": ") as $i | if $i then {file: .[:$i], case: .[$i + 2:]} else {file: ., case: null} end]' --args "${@:3}")
   ! redlisted "${@:3}" || listed=1
-  while [ "$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)" = "$2" ] && { [ -z "$listed" ] || redlisted "${@:3}"; }; do
-    jq -cn --arg at "$at" --arg c "$c" --arg s "${2:0:12}" '{step: "test", at: $at, last: (now | todate), turns: 0, files: {run: 0, of: null}, tests: null,
+  while { [ -z "$listed" ] || redlisted "${@:3}"; }; do
+    if [ "$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)" != "$on" ]; then
+      packget test.control ctl 2>/dev/null || ctl='[]'
+      mainprobe "${1##*/}" "$u" "$u" '[]' "$on"; r=$?
+      [ "$m" = null ] || mainrun=$(jq -cn --argjson a "$mainrun" --argjson m "$m" '$m + {sec: (($a.sec // 0) + $m.sec)}') || mainrun=$m
+      [ $r = 0 ] && [ -n "$sha" ] && [ "$sha" != "$on" ] \
+        && jq -en --slurpfile u <(printf '%s' "$u") --slurpfile m <(printf '%s' "$mf") --slurpfile h <(printf '%s' "$hits") --slurpfile c <(printf '%s' "$ctl") --slurpfile f <(printf '%s' "$cf") \
+          '$u[0] as $u | $m[0] as $m | $h[0] as $h | $c[0] as $c | $f[0] as $f | ($c == [] or $c - $f != [])
+            and all($u[]; . as $x | ($x.file | IN($h[]) | not) and any($m.files[]?; .file == $x.file and (if $x.case == null then .cases == [] else any(.cases[]; .name == $x.case) end)))' >/dev/null \
+        || break
+      on=$sha
+    fi
+    jq -cn --arg at "$at" --arg c "$c" --arg s "${on:0:12}" '{step: "test", at: $at, last: (now | todate), turns: 0, files: {run: 0, of: null}, tests: null,
       action: "waiting for main to change: \($c) fail on main at \($s) too"}' > "$1.live.tmp" 2>/dev/null && mv -f "$1.live.tmp" "$1.live"
     : > "$1.idle"; sleep "$LIVE"
   done
