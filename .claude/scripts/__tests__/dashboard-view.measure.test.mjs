@@ -4,7 +4,7 @@
 // the feed's events of one version draw the tabs and the head once, at the next frame; the head is measured only when
 // what it shows changed; a feed that opens or closes draws Health alone. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { boot, deliver, next, full, panel, key, iso, clone, tick, T0, OVERVIEW, cases } from './dashboard-view.helpers.mjs';
+import { boot, deliver, next, full, withOpen, panel, key, iso, clone, tick, T0, OVERVIEW, cases } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 
@@ -45,6 +45,22 @@ test('a refresh measures the rows of each cut panel once, in arrange(), not also
     assert.equal(rows, 1, `${id}'s rows are measured once: ${rows}`);
   }
   assert.deepEqual(seen, [3, 3, 3], 'each read comes after all three panels were drawn: the arrange() round');
+});
+
+// Bug it guards: the Board's draw ended with relength(), which cut (measured) its panels at once, and the page's
+// arrange() after the part cut them again: a changed board part paid two layout reads for each panel.
+test('a changed board part measures the Board panel\'s rows once, in arrange(), not also when the Board draws', () => {
+  const w = boot({ tab: 'control', reducedMotion: true });
+  deliver(w, withOpen());
+  frame(w);
+  key(w, panel(w, 'board').querySelector('.panel-length'), 'Home');
+  assert.equal(body(w, 'board').classList.contains('scrolls'), true, 'the Board is cut to one row');
+  const asked = counted(w);
+  next(w, JSON.parse(JSON.stringify(withOpen()).replaceAll('Split the PROD stack', 'A new title')));
+  frame(w);
+  assert.match(body(w, 'board').textContent, /A new title/, 'the Board was drawn again');
+  const rows = asked.filter((el) => el.matches('.bcard') && body(w, 'board').contains(el)).length;
+  assert.equal(rows, 1, `the Board's rows are measured once: ${rows}`);
 });
 
 test('the feed\'s events of one version draw the head once, at the next frame; an event for another tab measures nothing; a new Density fits it again', () => {
@@ -97,6 +113,25 @@ test('the feed\'s events of one version draw the head once, at the next frame; a
   compact.dispatchEvent(new w.Event('change', { bubbles: true }));
   frame(w);
   assert.equal(inHead().filter((el) => el === top).length, 1, 'a new Density fits the head again');
+});
+
+// Bug it guards: every resize fitted the head again, so a change of the window's height alone (a phone's address bar
+// shown or hidden) measured every head tile though nothing in the head changed.
+test('a resize of the window\'s height alone measures nothing in the head; a new width fits it again', () => {
+  const w = boot({ feed: true, reducedMotion: true });
+  Object.defineProperty(w.document.getElementById('stats'), 'clientWidth', { configurable: true, get: () => 2000 });
+  const es = w.sources[0];
+  es.readyState = 1; es.emit('open');
+  es.emit('snapshot', full());
+  frame(w);
+  const asked = counted(w);
+  const top = w.document.querySelector('.top');
+  Object.defineProperty(w, 'innerHeight', { configurable: true, value: w.innerHeight - 120 });
+  w.dispatchEvent(new w.Event('resize'));
+  assert.deepEqual(asked.filter((el) => top.contains(el)).map((el) => el.className), [], 'a height-only resize measures no head tile');
+  Object.defineProperty(w, 'innerWidth', { configurable: true, value: w.innerWidth - 200 });
+  w.dispatchEvent(new w.Event('resize'));
+  assert.ok(asked.some((el) => el.matches('#stats > .stat')), 'a new width fits the head again');
 });
 
 test('a drag of a panel\'s length grip cuts it at once, with the new count in its foot', () => {

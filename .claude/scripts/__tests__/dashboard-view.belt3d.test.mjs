@@ -167,6 +167,8 @@ test('belt3d: a card running its test files one at a time shows the file that ru
   const t = lane(w, 1).now;
   assert.deepEqual([t.querySelector('.b3-l1').textContent, t.querySelector('.b3-pbar i').style.transform], ['file 2 of 3: b.test.sh, 2 min, 3 failed', 'scaleX(0.333)']);
   assert.ok(t.classList.contains('fail'), 'failed cases turn the bar red');
+  // Issue 1430: the phone's list showed the step and its time alone, not the file that runs.
+  assert.equal(b3(w).querySelector('.b3-row .b3-row-step').textContent, 'Test · file 2 of 3: b.test.sh, 2 min, 3 failed');
   // Issue 1362: the lane has the file's name only (the whole path ran past the slab); the tooltip and the details keep the path.
   w.scene3d.o.hover('sample:c1-1', 200, 120);
   assert.ok(b3(w).querySelector('.b3-tip').textContent.includes('file 2 of 3: conveyor/tests/b.test.sh, 2 min'), 'the tooltip holds the whole path');

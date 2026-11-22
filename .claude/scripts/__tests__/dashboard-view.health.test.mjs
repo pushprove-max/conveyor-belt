@@ -567,7 +567,8 @@ test('Metrics: a step that ran through the API proxy says so in the card timelin
   const det = Array.from(panel(w, 'metrics').querySelectorAll('details.card-detail')).find((d) => d.querySelector('.title').textContent === 'Landed one');
   det.querySelector('summary').click();
   const lines = Array.from(det.querySelectorAll('.timeline li'), (li) => li.textContent);
-  assert.match(lines[0], /^build · .* · claude-sonnet-5-5 medium · through the API proxy · /);
+  // '<model> at <effort>', as the Board says it elsewhere: the timeline said 'claude-sonnet-5-5 medium'.
+  assert.match(lines[0], /^build · .* · claude-sonnet-5-5 at medium · through the API proxy · /);
   assert.match(lines[1], / · on the subscription login( · |$)/);
   assert.doesNotMatch(lines[2], /API proxy|subscription/, 'a step with no route names none');
 });

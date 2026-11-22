@@ -385,7 +385,8 @@
             // A review's verdict in words ("review: changes asked"), never its code.
             const result = st.step === 'review' && /^(NO-)?GO$/.test(st.result) ? `: ${ctx.verdictSaid(st.result)}` : st.result && st.result !== 'ok' ? ` ${st.result}` : '';
             const parts = [st.step + result, sec(st.sec), `${tokens(st.tokens)} tokens`, num(st.usd) ? `${ctx.money(st.usd)}${st.override === true ? ' (priced from your override)' : ''}` : `not priced: ${st.unpriced || 'no reason given'}`];
-            if (st.model) parts.push(ctx.modelName(st.model) + (st.effort ? ` ${st.effort}` : ''));
+            // '<model> at <effort>', as the Board says it elsewhere (a card's seats).
+            if (st.model) parts.push(ctx.modelName(st.model) + (st.effort ? ` at ${st.effort}` : ''));
             // The route of a Claude session when a proxy is set (route): through the proxy, or on the subscription login.
             if (st.route === 'proxy') parts.push('through the API proxy');
             else if (st.route === 'subscription') parts.push('on the subscription login');

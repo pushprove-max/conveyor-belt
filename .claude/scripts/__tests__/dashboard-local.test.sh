@@ -277,7 +277,8 @@ run
 q '.panels.lanes.data.records[0].fast.landing | .state == "belt" and .card == "c5-123" and .step == "tests"' "the card of the issue the branch names is the lane's landing, with its step"
 answer "$(lane_card '{"card": "c5-123", "issue": 123, "title": "Fast thing", "reason": "worktree: branch does not merge", "since": "'"$(ago 30)"'"}' '.needsYou.blocked = [$c]')" "$P_URL" 0 "$(snap)" "$C_URL" 0
 run
-q '.panels.lanes.data.records[0].fast.landing | .state == "blocked" and .reason == "worktree: branch does not merge"' "a blocked landing carries its reason"
+# Its repository too: the Fast lane links the review's file paths in the landing's output to it (lanes.js).
+q '.panels.lanes.data.records[0].fast.landing | .state == "blocked" and .reason == "worktree: branch does not merge" and .repoUrl == "https://github.com/example/sample-project"' "a blocked landing carries its reason and its repository"
 answer "$(lane_card '{"card": "c5-123", "issue": 123, "title": "Fast thing", "sentence": "Customers see a new page.", "since": "'"$(ago 30)"'"}' '.needsYou.waiting = [$c]')" "$P_URL" 0 "$(snap)" "$C_URL" 0
 run
 q '.panels.lanes.data.records[0].fast.landing | .state == "waiting" and .reason == "Customers see a new page."' "a landing that waits for the owner's yes says what they would be approving"

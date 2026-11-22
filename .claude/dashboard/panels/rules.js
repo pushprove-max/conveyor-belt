@@ -731,7 +731,9 @@
   window.DASH_APP.overlay({
     part: PART,
     draw(d, ctx) {
-      if (!d) { if (OB.box) { OB.open = false; OB.box.hidden = true; OB.line.hidden = true; } return; }
+      // With the project choice shown (no ?project= and more than one project), the project left in ?repo= is not
+      // the one in view: no setup opens over the choice.
+      if (!d || ctx.picking()) { if (OB.box) { OB.open = false; OB.box.hidden = true; OB.line.hidden = true; } return; }
       // A project picked under Show since (the same part, another project of it) is taken: the setup is for it.
       if (S.raw && S.raw[0] === d && S.raw[2] === ctx.project(d).repo) { drawOnboard(); return; }
       take(d, ctx, null, false);

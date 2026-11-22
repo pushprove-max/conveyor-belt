@@ -81,6 +81,17 @@ t_thstart() {
   # Bug it catches: the snapshot did not carry the start, so the Board's Test settings could not show it.
   [ "$(jq -r '.settings.historyStart' <<<"$got")" = "$TH_START" ] || fail "the snapshot's settings.historyStart is not the start $TH_START: $(jq -c .settings <<<"$got")"
 }
+# Bug it catches: a tracked test file whose runs are all before the start had a row with no runs, so the Board said
+# Never run and offered Delete it, though it ran. Its row says everRun; a tracked file that never ran does not.
+t_theverrun() {
+  local got; th_fixture
+  tune '.tests.patterns = ["*.test"]'
+  touch "$R/g.test" "$R/n.test" && git -C "$R" add g.test n.test && git -C "$R" commit -qm tests || fail "the tracked test files"
+  loop test-settings history-start "$TH_START" || fail "the start $TH_START was not saved"
+  got=$(th_as snapshot testspart 2026-11-09) || fail "testspart failed with the start $TH_START: $got"
+  [ "$(jq -c '[.files[] | select(.file | IN("g.test", "n.test")) | [.file, .runsOnRecord, .everRun]]' <<<"$got")" = '[["g.test",0,true],["n.test",0,false]]' ] \
+    || fail "g.test, run only before the start $TH_START, is not everRun, or n.test, never run, is: $(jq -c '[.files[] | {file, runsOnRecord, everRun}]' <<<"$got")"
+}
 # Bug it catches: with no start set the filter dropped runs (a missing setting read as a date): every run counts, as
 # before the setting existed: the 900 s runs, the survey time and the carried time are in the median (30), usual
 # (700) and run count (13), and both failed steps, flaky entries and landed failures count.

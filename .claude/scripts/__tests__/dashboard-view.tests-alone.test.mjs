@@ -39,7 +39,7 @@ test('Tests alone: a wholeOnly file says its cost, and Make it run alone preview
   assert.match(body, /^This test file runs only in whole-suite runs: the pack marks it wholeOnly/);
   assert.match(body, /\nA change to it is tested only by a whole-suite run: 812\.4 CPU s/);
   assert.match(body, /or move what it runs into test files the runner can list\. Keep what it tests\./);
-  assert.match(body, /\nDone when:\n- The card's check runs the file alone through the pack's test list \(test\.list\), and it exits 0\..*\n- The pack no longer marks the file wholeOnly\.$/);
+  assert.match(body, /\n## Done when\n- The card's check runs the file alone through the pack's test list \(test\.list\), and it exits 0\..*\n- The pack no longer marks the file wholeOnly\.$/);
   w.reply = TA.reply('https://github.com/example/sample/issues/702');
   act(opened(w, WHOLE), 'issue-file').click();
   await settle();

@@ -116,17 +116,22 @@ test('Rules: Release suite runs on, on a Namespace Devbox, the Box line shows wh
 });
 
 // Bug this guards: Undo of "Use this machine" on a devbox that had been set up sent only its size, so the saved rule lost
-// its setupAt and the Box row said "set-up time not kept".
-test('Rules: Undo of a change from a set-up devbox sends its set-up time back with it', async () => {
+// its setupAt and the Box row said "set-up time not kept". Also (issue 1430): the row drawn while the Undo's save is out
+// (the guess of the record) left the set-up time out, so until the answer came the Box row said "set-up time not kept".
+test('Rules: Undo of a change from a set-up devbox sends its set-up time back with it, and the row drawn meanwhile keeps it', async () => {
   const w = boot({ tab: 'rules' });
   deliver(w, data(undefined));
   const at = '2026-11-20T15:04:00Z';
   await devboxShown(w, true, { ...DEVBOX, setupAt: at });
   await sent(w, () => act(row(w), 'suite-use-local').click());
   next(w, data(undefined));  // the record now holds this machine
-  assert.deepEqual(await sent(w, () => rulesP(w).querySelector('[data-act="undo"]').click()),
-    [{ action: 'suite-machine', args: ['devbox', '--size', '4x8', '--setup-at', at], repo: 'sample' }, { action: 'suite-machine-check', args: [], repo: 'sample' }],
-    'Undo puts the devbox back with its set-up time');
+  assert.deepEqual(await sent(w, () => {
+    rulesP(w).querySelector('[data-act="undo"]').click();
+    // Read before the save's answer: the row is the guess of the record.
+    assert.match(row(w).textContent, /Box\s*Namespace Devbox 4x8, set up (\d|[A-Z])/, 'the guess of the record keeps the set-up time the Undo sent');
+    assert.doesNotMatch(row(w).textContent, /set-up time not kept/);
+  }), [{ action: 'suite-machine', args: ['devbox', '--size', '4x8', '--setup-at', at], repo: 'sample' }, { action: 'suite-machine-check', args: [], repo: 'sample' }],
+  'Undo puts the devbox back with its set-up time');
 });
 
 // Bug this guards: the devbox choice could only lease a box by tag, so a devbox the owner already had filled the account's

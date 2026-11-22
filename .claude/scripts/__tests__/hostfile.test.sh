@@ -49,9 +49,14 @@ read_is no_file - '{"host":null,"local":null,"error":"this checkout has no conve
 # is of the files' text: a reader with rules of its own can give the same answer on every file a test writes, so only
 # its source shows it (bug: four copies of the rules, and units-fetch.sh's drifted from the Board's).
 n=$((n + 1))
+# A call of hostfile.sh: a shell line (not a comment) that runs it with bash, or a Python subprocess.run of it. A
+# comment or docstring that names it is no call (issue 1430: the check passed on those with the real call deleted).
+call="^[^#]*bash \"[^\"]*/hostfile\\.sh\"|subprocess\\.run\\(\\[[^]]*'hostfile\\.sh'"
+! printf '%s\n' '# hostof -- as hostfile.sh (its one reader) says' '    as hostfile.sh, its one reader, gives it' '    """hostfile.sh'"'"'s answer"""' | grep -qE "$call" \
+  || bad "a comment or docstring that names hostfile.sh is taken for a call of it"
 # The server's reading moved to dashboard_server_control.py (#1134): it must ask hostfile.sh; dashboard_server.py is still scanned for rules.
 for f in .claude/scripts/dashboard.sh .claude/scripts/dashboard_server.py .claude/scripts/dashboard_server_control.py .claude/scripts/dashboard_stream.py hooks/units-fetch.sh; do
-  [ "$f" = .claude/scripts/dashboard_server.py ] || grep -q 'hostfile\.sh' "$ENGINE/$f" || bad "$f does not ask hostfile.sh"
+  [ "$f" = .claude/scripts/dashboard_server.py ] || grep -qE "$call" "$ENGINE/$f" || bad "$f does not call hostfile.sh"
   hits=$(grep -nE "\.ssh *(\||//|!=|==)|\.host *(\||!=|==)|\.main *\| *(strings|select)|cfg\.get\(.(ssh|host|main).\)|uname -n|nodename" "$ENGINE/$f")
   [ -z "$hits" ] || bad "$f reads the host file's machine or checkout by itself: $hits"
 done

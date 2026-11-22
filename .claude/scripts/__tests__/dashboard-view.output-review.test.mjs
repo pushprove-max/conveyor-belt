@@ -5,7 +5,7 @@
 // fixture here. A test step's output keeping its mono block and failures list is in dashboard-view.cards-blocked.
 // Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { boot, panel, deliver, settle, full, cases, trackOf } from './dashboard-view.helpers.mjs';
+import { boot, panel, deliver, settle, full, cases, trackOf, openEvery } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 
@@ -16,6 +16,8 @@ const LINES = [
   '[P1] a/b.sh:12 The `x` call fails. Proof: `c/d.sh:5` sets `y`.',
   // Bug: a finding with the reviewer's no-behaviour mark after its level (prompts.sh REVIEWT) lost its place line.
   '[P3][cleanup] a.txt:1 The second check is redundant. Proof: line 2 makes it.',
+  // Bug (issue 1430): nor did one with a fix review's id before its place, the [E1] met first by the place's pattern.
+  '[P2] [E1] conveyor/lib/snapshot.sh:716 Claim. Proof: x',
   'VERDICT: NO-GO, three findings',
 ];
 
@@ -35,13 +37,14 @@ test('a review output draws one row per finding, in order: chip, bold sentence, 
   const { out, copied, rows: r } = draw();
   assert.equal(out.querySelector('pre.output-text'), null, 'no mono block for a review');
   assert.equal(out.querySelector('.output-fails'), null, 'no failures list for a review');
-  assert.equal(r.length, 6, 'five findings and the plain line, each a row');
+  assert.equal(r.length, 7, 'six findings and the plain line, each a row');
   const want = [
     ['P1', 'chip-warn', '"Run suite" also publishes the release.', '.claude/dashboard/panels/release.js:214', 'this button sends release-run.'],
     ['P2', 'chip-quiet', 'The notes step is skipped.', '.claude/dashboard/panels/release.js:166', 'notes() returns early when empty.'],
     ['P3', 'chip-quiet', 'The page names the old button.', 'docs/board.md:12', 'line 12 says "Run".'],
     ['P1', 'chip-warn', 'The x call fails.', 'a/b.sh:12', 'c/d.sh:5 sets y.'],
     ['P3', 'chip-quiet', 'The second check is redundant.', 'a.txt:1', 'line 2 makes it.'],
+    ['P2', 'chip-quiet', 'Claim.', 'conveyor/lib/snapshot.sh:716', 'x'],
   ];
   want.forEach(([p, tone, sentence, at, proof], i) => {
     const row = r[i], c = row.querySelector('.finding-head > .chip');
@@ -65,15 +68,36 @@ test('a review output draws one row per finding, in order: chip, bold sentence, 
   assert.equal(f.querySelector('.finding-proof-text a').getAttribute('href'), `${blob}/c/d.sh#L5`, "the proof's path links to its line");
   assert.equal(r[2].querySelector('.finding-text code, .finding-proof-text code'), null, 'a text with no code span or path draws as plain text');
   // D2: a line with no [Pn] prefix is a plain row of its whole text.
-  const plain = r[5];
+  assert.equal(r[5].querySelector('.finding-at a').getAttribute('href'), `${blob}/conveyor/lib/snapshot.sh#L716`, 'the place after [E1] links to its line');
+  const plain = r[6];
   assert.equal(plain.querySelector('.chip'), null);
   assert.equal(plain.querySelector('.finding-at'), null);
   assert.equal(plain.querySelector('details'), null);
-  assert.equal(plain.textContent, LINES[5]);
+  assert.equal(plain.textContent, LINES[6]);
   // D4: Copy output puts the raw lines on the clipboard, unchanged.
   out.querySelector('button.output-copy').click();
   await settle();
   assert.deepEqual(copied, [LINES.join('\n')]);
+});
+
+// Bug (issue 1430): a card with no GitHub issue (a main-red fix; a Fast lane branch not named as a card) has no issue
+// url to take its repository from, and the Fast lane passed no repository to its landing's output, so their review's
+// file paths were plain text. The part now carries each row's repoUrl (dashboard-cards.test.sh checks the row, and
+// dashboard-local.test.sh the Fast lane's blocked landing).
+test('a review output of a card with no issue links its place to the record\'s repository, On the belt and in the Fast lane', () => {
+  const w = boot();
+  const data = full(), repoUrl = 'https://github.com/example/sample-project', tail = '[P2] conveyor/lib/card.sh:52 Claim. Proof: x';
+  const card = data.panels.belt.data.cards[0];
+  Object.assign(card, { issue: 0, url: null, repoUrl, track: { ...trackOf('++>...', 'review 2 of 3'),
+    records: [{ name: 'review 1 (NO-GO)', state: 'done', sec: 60, at: '2026-01-01T00:01:00Z', output: tail }] } });
+  data.panels.lanes.data.records[0].fast.landing = { state: 'blocked', card: 'c0-red', reason: 'review NO-GO', tail, since: null, repoUrl };
+  deliver(w, data);
+  const belt = () => panel(w, 'belt').querySelector(`li[data-key="sample:${card.card}"]`);
+  openEvery(w, belt().querySelector('details.track-detail'));
+  const href = (el) => { const a = el && el.querySelector('li.output-finding .finding-at a'); return a ? a.getAttribute('href') : null; };
+  const want = `${repoUrl}/blob/HEAD/conveyor/lib/card.sh#L52`;
+  assert.equal(href(belt()), want, 'On the belt: the place links to its line in the record\'s repository');
+  assert.equal(href(panel(w, 'lanes').querySelector('li[data-lane="Fast lane"] > details.output')), want, 'the Fast lane landing: the same');
 });
 
 // #307. A landed card's worktree is gone, and the place's link opens main, which may hold other code there. Bugs: a

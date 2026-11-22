@@ -37,7 +37,7 @@ test('Tests fixes: Fix hollow cases previews each case with its kind and reason,
   assert.equal(title, `Fix the hollow cases of the test file ${X}`);
   assert.match(body, /\nIts hollow cases \(case \| kind \| reason\):\n- HOLLOW: loads \| no-assert \| no expect or assert call\n/);
   assert.match(body, /COVERED-BY: <test file>: <its case> \| <the deleted case>/);
-  assert.match(body, /\nDone when:\n- The judge's hollow check of the changed file, run by the card's check on a model of another family than the builder's where one is set up, names no hollow case among the cases above and the cases the change adds or changes\.\n- Each deleted case has its COVERED-BY line, naming a test file that is kept\.$/);
+  assert.match(body, /\n## Done when\n- The judge's hollow check of the changed file, run by the card's check on a model of another family than the builder's where one is set up, names no hollow case among the cases above and the cases the change adds or changes\.\n- Each deleted case has its COVERED-BY line, naming a test file that is kept\.$/);
   w.reply = TA.reply('https://github.com/example/sample/issues/701');
   act(opened(w, X), 'issue-file').click();
   await settle();
@@ -63,7 +63,7 @@ test('Tests fixes: Fix the waiting previews the clock and CPU of its runs and it
   assert.match(body, /^This test file waits more than it works: its last run took 2\.5 times its CPU seconds on the clock\./);
   assert.match(body, /\nIts recent runs, newest first \(clock, CPU\):\n- 30\.0 s on the clock for 12\.0 CPU s \(2\.5×\), card #509\n- 14\.0 s on the clock for 11\.5 CPU s \(1\.2×\), card #451\n\n/);
   assert.match(body, /\nThe waits the judge named \(case \| kind \| file:line \| reason\):\n- WAIT: mergewait \| polling \| conveyor\/tests\/merge\.test\.sh:40 \| it polls the lock file every second\n/);
-  assert.match(body, /\nDone when:\n- The file succeeds in 3 runs in a row alone on a test slot, and each run takes at most 2 times its CPU seconds on the clock\.$/);
+  assert.match(body, /\n## Done when\n- The file succeeds in 3 runs in a row alone on a test slot, and each run takes at most 2 times its CPU seconds on the clock\.$/);
 });
 
 // Bug it guards (#189): with no judge's WAIT lines the body showed an empty list. It says no wait is named yet.
@@ -84,13 +84,26 @@ test('Tests fixes: a Never run file shows why in its row, and Make it run and De
   let [title, body] = preview(w, NEVER, 'make-run');
   assert.equal(title, `Make the test file ${NEVER} run`);
   assert.match(body, /Why, as the engine can tell: the pack's tests\.patterns do not match it\./);
-  assert.match(body, /\nDone when:\n- The card's test step runs this file, and it succeeds\.$/);
+  assert.match(body, /\n## Done when\n- The card's test step runs this file, and it succeeds\.$/);
   [title, body] = preview(w, NEVER, 'delete-file');
   assert.equal(title, `Delete the test file ${NEVER}`);
   assert.match(body, /COVERED-BY: <test file>: <its case>/);
-  assert.match(body, /\nDone when:\n- The file is deleted, and each of its cases that matters has a COVERED-BY line naming a test that proves it\.$/);
+  assert.match(body, /\n## Done when\n- The file is deleted, and each of its cases that matters has a COVERED-BY line naming a test that proves it\.$/);
   [, body] = preview(w, SKIPPED, 'make-run');
   assert.match(body, /The engine cannot tell why\./);
+});
+
+// Bug it guards (issue 1430): a tracked file whose runs are all before the history start has no runs since it, so it
+// showed Never run and offered Make it run and Delete it, though it has runs on record (the engine's everRun).
+test('Tests fixes: a file run only before the history start is not Never run, and offers no Make it run or Delete it', () => {
+  const OLD = 'tests/old.test.sh', d = snap();
+  Object.assign(d.panels.tests.data.tests.settings, { historyStart: iso(Date.now() - 3600000) });
+  d.panels.tests.data.tests.files.push({ ...never(OLD, null), everRun: true });
+  const w = boot({ tab: 'tests' });
+  deliver(w, d);
+  assert.doesNotMatch(status(w, OLD).textContent, /Never run/);
+  const more = open(w, OLD);
+  assert.deepEqual([act(more, 'make-run'), act(more, 'delete-file')], [null, null]);
 });
 
 // Bug it guards (#778): a judge found that merge.test.sh checks what it protects through a proxy (the verdict
@@ -165,15 +178,25 @@ test('Tests fixes: Split it under More previews the split issue and files the ed
   const w = show({ whole: X });
   act(open(w, X), 'more').click();
   const off = act(opened(w, X), 'split');
-  assert.equal(off.disabled, true, 'a runner\'s Split it is disabled');
+  assert.equal(off.getAttribute('aria-disabled'), 'true', 'a runner\'s Split it is disabled');
   assert.equal(off.title, 'It runs other test files: split one of those, not the runner.');
+  // Bug it guards (issue 1430): the item was :disabled with its reason in its title alone, so the arrow keys skipped it
+  // and a keyboard user never heard why. It stays in the arrow keys' round, its reason its description, shown under the menu.
+  const why = w.document.getElementById(off.getAttribute('aria-describedby'));
+  assert.equal(why && why.textContent, 'Split it: It runs other test files: split one of those, not the runner.');
+  const items = Array.from(opened(w, X).querySelectorAll('[role="menuitem"]')), before = items[items.indexOf(off) - 1];
+  before.focus();
+  before.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+  assert.equal(w.document.activeElement, off, 'ArrowDown reaches the disabled Split it');
+  off.click();
+  assert.deepEqual([act(opened(w, X), 'issue-title'), w.posts.length], [null, 0], 'a click on it does nothing');
   act(open(w, MERGE), 'more').click();
   act(opened(w, MERGE), 'split').click();
   const more = opened(w, MERGE);
   assert.equal(act(more, 'issue-title').value, `Split the test file ${MERGE}`);
   const body = act(more, 'issue-body').value;
   assert.match(body, /^Split this test file into two or more test files of the same area\. Keep each of its cases once, and unchanged\.\n/);
-  assert.match(body, /\nDone when:\n- Each case of the file is in exactly one of the new test files, unchanged\.\n- Each new test file is under 600 lines\.\n- \.conveyor\/engine-areas\.json and the test map name the new test files\.$/);
+  assert.match(body, /\n## Done when\n- Each case of the file is in exactly one of the new test files, unchanged\.\n- Each new test file is under 600 lines\.\n- \.conveyor\/engine-areas\.json and the test map name the new test files\.$/);
   assert.doesNotMatch(body, /verdict/, 'with no split verdict, no judge\'s reason');
   TA.type(act(more, 'issue-body'), `${body}\nKeep the fixtures in one helper.`);
   w.reply = TA.reply('https://github.com/example/sample/issues/703');

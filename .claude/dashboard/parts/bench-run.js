@@ -135,24 +135,27 @@
     return [liveVerdict(r, cols, p, data), liveStats(cols, p, data), K.grid('main', grid, side)];
   }
   // The mockup's line: when the last run ended, after how long. A run that did not start, or has no end recorded, has neither.
-  function lastLine(r, The, took) {
+  function lastLine(r, took) {
     if (r.state === 'refused' || !r.ended) return K.NOT_KEPT;
-    return `${The} run ended ${stampOf(r.ended)}, after ${took !== null && took < 90 ? K.plural(Math.round(took), 'minute') : K.fmtMin(took)}.`;
+    return `The last run ended ${stampOf(r.ended)}, after ${took !== null && took < 90 ? K.plural(Math.round(took), 'minute') : K.fmtMin(took)}.`;
   }
   function lastRun(data) {
     const r = data.run, cols = K.paint(K.colsOf(r).map((c) => ({ ...c }))), n = K.num(r.n) || 0, tasks = K.list(data.tasks).filter(K.obj), took = K.elapsed(r);
     const all = cols.filter((c) => c.resolved === n && n).length, ran = Math.max(0, ...cols.map((c) => K.num(c.done) || 0)), refused = r.state === 'refused';
     const res = n === 1 ? `${all === cols.length ? `All ${cols.length}` : `${all} of ${cols.length}`} resolved it.` : `${cols.map((c) => `${K.colName(c)} ${K.num(c.resolved) || 0} of ${n}`).join(', ')}.`;
-    const v = lastLine(r, 'The last', took);
+    const v = lastLine(r, took);
     // The mockup's chips are resolved and unresolved: a cell with no result, or not run, was never graded, so it says not kept.
     const one = (c) => {
       const x = tasks.length === 1 ? K.list(tasks[0].cells).find((y) => K.obj(y) && y.arm === c.arm) : null, k = K.said(x);
       if (!x) return `${K.num(c.resolved) || 0} of ${n} resolved`;
       return k === 'yes' ? K.chip('resolved', 'ok') : k === 'no' ? K.chip('unresolved', 'bad') : K.chip(K.NOT_KEPT, 'quiet');
     };
+    // Minutes: the wall minutes of the arm's work in this run (bench swe show's wall), which count an interrupted task;
+    // minutes adds up kept results only, so a run stopped before a result read 0.
+    const mins = (c) => (K.num(c.wall) !== null ? c.wall : c.minutes);
     const s = K.box(r.id);
     s.append(K.table(['Arm', 'Result', ['Sessions', 'r'], ['Tokens', 'r'], ['Minutes', 'r'], ['Cost', 'r']], cols.map((c) => [K.armSaid({ s: c.s, label: K.colName(c) }), one(c),
-      { v: K.num(c.sessions) === null ? K.NOT_KEPT : String(c.sessions), c: 'r' }, { v: K.kTok(c.tokens), c: 'r' }, { v: K.num(c.minutes) === null ? K.NOT_KEPT : String(c.minutes), c: 'r' },
+      { v: K.num(c.sessions) === null ? K.NOT_KEPT : String(c.sessions), c: 'r' }, { v: K.kTok(c.tokens), c: 'r' }, { v: K.num(mins(c)) === null ? K.NOT_KEPT : String(mins(c)), c: 'r' },
       { v: K.costSaid(c.cost), c: 'r' }])));
     if (tasks.length) s.append(K.button(tasks.length === 1 ? 'Open the task' : 'Open its first task', '', 'open-task', `Open the task ${tasks[0].id}`, () => K.openTask(tasks[0].id)));
     // A run whose process ended with no end recorded (gone, no ended) has the verdict's warn tone; the mockup gives it no Stop.
@@ -193,7 +196,7 @@
     s.append(K.table(['Arm', 'Result', ['Minutes', 'r'], 'Hidden tests', 'Note'], arms.map((a) => {
       const c = a.cells.get(id), k = K.said(c);
       return [K.armSaid(a), K.chip(k === 'yes' ? 'resolved' : k === 'no' ? 'unresolved' : k === 'nr' ? 'not run' : K.NOT_KEPT, k === 'yes' ? 'ok' : k === 'no' ? 'bad' : 'quiet'),
-        { v: K.num(c.minutes) === null ? K.NOT_KEPT : String(Math.round(c.minutes)), c: 'r' }, { v: k === 'nr' ? '–' : K.testsSaid(c), c: 'bench-small' }, { v: noteOf(a, c), c: 'bench-small bench-muted' }];
+        { v: K.num(c.minutes) === null ? K.NOT_KEPT : String(Math.round(c.minutes)), c: 'r' }, { v: k === 'nr' ? K.NOT_KEPT : K.testsSaid(c), c: 'bench-small' }, { v: noteOf(a, c), c: 'bench-small bench-muted' }];
     }), 'bench-arms'));
     return s;
   }

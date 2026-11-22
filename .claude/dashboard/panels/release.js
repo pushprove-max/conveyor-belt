@@ -7,11 +7,13 @@
 // suite, the release), the version (the snapshot's next filled in; a version typed is drawn at once, its notes as
 // main's written says; a version with no notes says so under it) with two buttons, always both: a run button whose
 // label follows the state, and Release <version>, disabled with what it waits for in its text until the notes are on
-// main and the suite passed on main's head; and the changes since the tag, closed until opened. Each button acts on a
+// main and the suite passed on main's head (a full test run that passed there counts), and for a version released
+// already; and the changes since the tag, closed until opened. Each button acts on a
 // second click. Draft notes, Run suite, Run suite again and Run again on the new main send `conveyor.sh release-run prep
 // <version>`: release-prep alone, which, when main has no notes, writes a notes draft and starts a card that adds it
 // to main (step 1 shows that card under way, and the suite runs by itself once the card's commit is on the branch the
-// suite tests: after its push, and with Land as pr and Merge PR button or idle, its pull request's merge), else runs
+// suite tests, after its push, and with Land as pr and Merge PR button or idle, its pull request's merge, and no other
+// card is open), else runs
 // the whole suite, and releases nothing. Release <version> sends `release-run <version>`: release alone when the suite
 // of that version passed on main's head (step 2 and the confirm say "Uses the suite that passed"), else release-prep first
 // ("Runs the suite first"); then release makes the tag and the GitHub release. Beside release-prep's red result on main's
@@ -29,8 +31,8 @@
 // here shows no machine line or steps; step 2 shows the mode of the run under way and of the last run. Stop (`release-run stop`, a second click too) shows while a run is
 // under way and while a run waits on its notes card or on open cards (it ends the wait), else not. Each reason a refused or failed run printed shows under the step it belongs to, and each failed case
 // release-prep judged flaky (it passed every run alone) under the suite's step, and beside a red result the fix cards of
-// that run (its record's fixes), each with its state, and what happens next. The panel is wide or full,
-// never small: in the narrow column every line wraps.
+// that run (its record's fixes), each with its state, and what happens next. The panel is Small by default: in that
+// narrow column every line wraps, a change's title too.
 (() => {
   const VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
   const PAGE = 10;          // the changes shown at a time
@@ -43,10 +45,11 @@
   const list = (x) => (Array.isArray(x) ? x : []);
   const num = (v) => typeof v === 'number' && Number.isFinite(v);
   const MARK = { done: '✓', failed: '✗', now: '▶', todo: '·' };
-  // The suite's two modes: the flag release-run takes, the words step 2 says, the choice's name and its one line.
+  // The suite's two modes: the flag release-run takes, the words step 2 says, the choice's name and its one line, by
+  // the machine the suite runs on (box: the rule's devbox or ssh box by its name, else null for the build machine).
   const MODES = [
-    { mode: 'serial', said: 'one by one', label: 'One by one', line: 'Slower, the least load on the build machine.' },
-    { mode: 'parallel', said: 'in parallel', label: 'In parallel', line: 'Faster, more load on the build machine. The belt is slower meanwhile.' },
+    { mode: 'serial', said: 'one by one', label: 'One by one', line: (box) => `Slower, the least load on ${box || 'the build machine'}.` },
+    { mode: 'parallel', said: 'in parallel', label: 'In parallel', line: (box) => (box ? `Faster, more load on ${box}.` : 'Faster, more load on the build machine. The belt is slower meanwhile.') },
   ];
 
   // The mode of a run's suite (its record's mode) as a line on step 2, or null when the record has none or no file ran
@@ -108,11 +111,13 @@
     box.setAttribute('aria-label', q.textContent);
     if (rule) box.append(machineAsk(h, ctx, repo, rule, last));
     box.append(q);
+    // The machine chosen: the rule's box unless This machine was chosen over it.
+    const on = rule && choice.get(repo) !== 'local' ? rule.name : null;
     MODES.forEach((o) => {
       const b = h('button', 'btn release-mode-pick');
       b.type = 'button'; b.dataset.act = `mode-${o.mode}`;
       b.setAttribute('aria-pressed', String(o.mode === preset));
-      b.append(h('span', 'release-mode-name', o.label), h('span', 'board-from', o.mode === preset ? `${o.line} The rule's choice.` : o.line));
+      b.append(h('span', 'release-mode-name', o.label), h('span', 'board-from', o.mode === preset ? `${o.line(on)} The rule's choice.` : o.line(on)));
       b.addEventListener('click', () => {
         const local = rule && choice.get(repo) === 'local';
         asking.delete(repo); choice.delete(repo);
@@ -192,20 +197,46 @@
     return 2;
   }
 
-  // The state of one project's release of version v (cur: its last release run, when of v).
-  function stateOf(notes, run, v, m) {
+  // A release refused over release-prep's failed suite keeps that suite (its failed count, cases and mode:
+  // release-prep.sh relstart()): the suite failed, as before the refusal.
+  const keptRed = (c) => c.state === 'refused' && c.step === 'release' && num(c.failed) && c.failed > 0 && typeof c.sha === 'string' && c.sha !== '';
+  // A failed suite release --anyway can go over: release-prep's own, or the one a refused release kept (its red).
+  const overRed = (c) => c.step === 'release-prep' || (!!c.red && typeof c.red === 'object');
+  // A full test run that ended passed on main's head: release-prep reuses it and runs no test (suitereuse()); else null.
+  const greenOf = (suites, head) => suites.find((x) => x && x.kind === 'full test' && x.ended !== null && x.state === 'passed' && typeof x.sha === 'string' && x.sha === head) || null;
+  // Whether the run cur of the version ended with its suite failed (its own or the one a refused release kept). A failed
+  // suite on an older commit than main's head no longer counts once a full test run passed on the head (green):
+  // release-prep reuses that run.
+  const failedOf = (cur, green, head) => !!(cur && cur.ended !== null && (cur.state === 'failed' || keptRed(cur)) && !(green && cur.sha !== head));
+  // A version released already (the newest tag, or the run of it released it): release-prep refuses a tag that exists.
+  const releasedAlready = (m, s, v) => m.tag === `v${v}` || !!(s.cur && s.cur.state === 'released');
+  // Step 2 drawn from a full test run that passed on main's head (greenOf), when no release run of the version says more.
+  // The reasons (why) are those of the release run cur, whose suite can be on an older commit: named with its commit.
+  function greenStep(h, ctx, green, cur, why) {
+    const line = h('span', null, `The full test suite passed on ${short(green.sha)}`);
+    if (typeof green.ended === 'string') line.append(' · ', ctx.since(green.ended, ' ago'));
+    let from = null;
+    if (why.length) {
+      from = h('p', 'row-meta', `From the release run${cur && typeof cur.sha === 'string' && cur.sha ? ` on ${short(cur.sha)}` : ''}:`);
+      from.dataset.figure = 'reasons-from';
+    }
+    return step(h, 'Full suite', 'done', line, from, reasonsList(h, why));
+  }
+  // The state of one project's release of version v (cur: its last release run, when of v; green: a full test run that
+  // passed on main's head, which release-prep reuses with no test, else null).
+  function stateOf(notes, run, v, m, green) {
     const cur = run && run.version === v ? run : null;
     const going = !!(run && run.ended === null);
     const passed = !!(cur && cur.ended !== null && typeof cur.sha === 'string' && cur.sha
       && (cur.state === 'passed' || cur.state === 'released' || (cur.state === 'refused' && cur.step === 'release' && !cur.failed)));
-    const failed = !!(cur && cur.ended !== null && cur.state === 'failed');
+    const failed = failedOf(cur, green, m.head);
     // The suite's machine failed its start, setup or checkout: no test ran (lib/suitehost.sh).
     const notStarted = !!(cur && cur.ended !== null && cur.state === 'not started');
     const moved = passed && cur.state !== 'released' && (cur.moved === true || cur.sha !== m.head);
     const released = !!(run && run.ended !== null && run.state === 'released' && m.tag === `v${run.version}`);
     // release-prep found no notes on main and started a card that adds its draft (state waiting, notes.card:
     // lib/fulltest.sh relnotescard()); the run starts again by itself once the card's commit is on the branch the suite
-    // tests (relfixes()). Its card id, else ''. A
+    // tests and no other card is open (relfixes()). Its card id, else ''. A
     // card closed before it landed (its fixes entry closed: relfixes()) starts nothing: notesClosed, its id, else ''.
     const held = cur && cur.ended !== null && cur.state === 'waiting' && cur.notes && typeof cur.notes.card === 'string' ? cur.notes.card : '';
     const closed = !!held && list(cur.fixes).some((x) => x && x.card === held && x.state === 'closed');
@@ -225,8 +256,8 @@
     // version's notes are not written yet.
     else if (released && !notes) chip = ['Released', 'ok'];
     else if (!notes) chip = ['Notes missing', 'warn'];
-    else if (!passed) chip = ['Suite not run', 'quiet'];
-    else if (cur.state === 'released') chip = ['Released', 'ok'];
+    else if (!passed && !green) chip = ['Suite not run', 'quiet'];
+    else if (cur && cur.state === 'released') chip = ['Released', 'ok'];
     else chip = ['Ready to release', 'ok'];
     // Release reuses a passed release-prep of v on main's head, main not moved since (release-run); else it runs the
     // suite first.
@@ -380,10 +411,11 @@
     card.dataset.project = String(rec.repo || '');
     const suites = list(suitesAll), run = suites.find((x) => x && x.kind === 'release') || null;
     const full = suites.find((x) => x && x.kind === 'full test' && x.ended === null) || null;
+    const green = greenOf(suites, m.head);
     const v = (typed.has(rec.repo) ? typed.get(rec.repo) : String(m.next || '')).trim();
     // Whether main holds the notes of the version in the field, the one typed too (written: every version with notes).
     const notes = Array.isArray(m.written) ? m.written.includes(v) : v === m.next && m.notes === true;
-    const s = stateOf(notes, run, v, m);
+    const s = stateOf(notes, run, v, m, green);
     // The head row: the project, its newest tag, the changes since it, the status.
     const head = h('div', 'row-main');
     const tag = h('span', 'board-from', m.tag ? `Newest release ${m.tag}` : 'No release yet');
@@ -473,6 +505,8 @@
       scope.dataset.figure = 'suite-scope';
       s2 = step(h, 'Full suite', s.failed ? 'failed' : s.moved ? 'todo' : 'done', line, scope, modeLine(h, c, false), ...counts(h, c, false), flakyList(h, c),
         s.failed ? fixesList(h, ctx, c, typeof rec.url === 'string' ? rec.url : '') : null, reasonsList(h, why[1]));
+    } else if (green) {
+      s2 = greenStep(h, ctx, green, s.cur, why[1]);
     } else {
       s2 = step(h, 'Full suite', why[1].length ? 'failed' : 'todo', `Not run on main's head (${short(m.head)})`, reasonsList(h, why[1]));
     }
@@ -495,11 +529,16 @@
       const p = h('p', 'row-meta', suiteSaid);
       p.dataset.figure = 'suite-use';
       s2.append(p);
+    } else if (notes && green && !s.failed) {
+      suiteSaid = `Uses the full test suite that passed on ${short(green.sha)}`;
+      const p = h('p', 'row-meta', suiteSaid);
+      p.dataset.figure = 'suite-use';
+      s2.append(p);
     }
     // Release anyway, beside release-prep's red result on main's head when main holds the notes: the owner's release
     // over that failed suite (`release-run anyway <version>`). A release cannot be undone: a second click whose words
     // name the failed files and cases. The suite's status stays failed.
-    if (s.failed && s.cur.step === 'release-prep' && s.cur.sha === m.head && notes && VERSION.test(v)) {
+    if (s.failed && overRed(s.cur) && s.cur.sha === m.head && notes && VERSION.test(v)) {
       const c = s.cur, files = c.files && typeof c.files === 'object' ? list(c.files.failed).map(String) : [], named = list(c.cases).map(String);
       const ask = `Click again: release ${v} over this failed suite, with no new run. ${files.length ? `Failed files: ${files.join(', ')}. ` : ''}`
         + `${named.length ? `Failed cases: ${named.join(', ')}.` : 'The run named no failed case.'}`;
@@ -528,10 +567,11 @@
     const prog = run && run.files && typeof run.files === 'object' ? run.files : {};
     const bad = s.failed ? (num(s.cur.failed) ? s.cur.failed : list(s.cur.cases).length) : 0;
     const waits = !VERSION.test(v) ? 'needs a version such as 1.2.0'
-      : !notes ? `needs release notes docs/releases/${v}.md`
-        : s.going ? `the suite is running${num(prog.done) && num(prog.of) && prog.of > 0 ? ` (${prog.done} of ${prog.of} files)` : ''}`
-          : s.failed ? `the suite failed: ${bad} ${bad === 1 ? 'failure' : 'failures'}`
-            : !s.passed ? `needs the whole suite to succeed on main's head (${short(m.head)})` : '';
+      : releasedAlready(m, s, v) ? `v${v} is already released`
+        : !notes ? `needs release notes docs/releases/${v}.md`
+          : s.going ? `the suite is running${num(prog.done) && num(prog.of) && prog.of > 0 ? ` (${prog.done} of ${prog.of} files)` : ''}`
+            : s.failed ? `the suite failed: ${bad} ${bad === 1 ? 'failure' : 'failures'}`
+              : !s.passed && !green ? `needs the whole suite to succeed on main's head (${short(m.head)})` : '';
     const rel = h('button', 'btn', waits ? `Release ${v}: ${waits}` : `Release ${v}`);
     rel.type = 'button'; rel.dataset.act = 'release'; rel.disabled = !!waits;
     rel.title = waits ? `Release ${v} waits: ${waits}.` : `${suiteSaid}, then make the tag v${v} and the GitHub release.`;
@@ -554,7 +594,7 @@
       if (VERSION.test(v)) start(['prep', v], what, label !== 'Draft notes');
     });
     ctx.twice(rel, 'spend', `Click again to release ${v}. ${suiteSaid}.`, () => {
-      if (!waits) start([v], `Release ${v} started.`, !s.reuse);
+      if (!waits) start([v], `Release ${v} started.`, !s.reuse && !(green && !s.passed));
     });
     go.append(input, btn, rel);
     if (said.has(rec.repo)) { const t = h('span', 'undo-line', said.get(rec.repo)); t.setAttribute('role', 'status'); go.append(t); }

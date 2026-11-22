@@ -283,8 +283,8 @@ def shared_reading(usage_file, folder):
 
 def account_reading(cache_dir, folder, now):
     """{at, next, body, bodyAt, error} of `folder`'s account, kept in <cache_dir>/account-<sha8 of the folder>.json and
-    read again only once `next` has passed: ACCOUNT_TTL after a read, and after a failed one the longer of that and
-    the `retry after <n> s` it named. A failed read keeps the last figures and their time (bodyAt). fetch() keeps
+    read again only once `next` has passed: ACCOUNT_TTL after a read, and after a failed one the `retry after <n> s`
+    it named, else ACCOUNT_TTL. A failed read keeps the last figures and their time (bodyAt). fetch() keeps
     its reads of the account in use here too, so a 429 deadline outlives a switch whichever path was refused."""
     cache, kept = account_cache(cache_dir, folder)
     if isinstance(kept.get("next"), (int, float)) and now < kept["next"]:
@@ -325,6 +325,10 @@ def note(cache, kept, now, body, why):
             new = {"at": now, "next": now + max(ACCOUNT_TTL, int(wait.group(1)) if wait else 0),
                    "body": kept.get("body") if isinstance(kept.get("body"), dict) else None,
                    "bodyAt": kept.get("bodyAt") if isinstance(kept.get("bodyAt"), (int, float)) else None, "error": why}
+            # The wait the answer named (a 429's Retry-After) is kept as named, a shorter one than ACCOUNT_TTL too:
+            # raised to it, the read dashboard.sh retries at that named time was refused by this kept deadline.
+            if wait:
+                new["next"] = now + int(wait.group(1))
         err, nxt = kept.get("error"), kept.get("next")
         if isinstance(err, str) and err.startswith(RATE_LIMITED) and isinstance(nxt, (int, float)) and nxt > new["next"]:
             new.update(next=nxt, error=err)

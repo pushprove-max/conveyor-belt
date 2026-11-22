@@ -230,11 +230,14 @@
   // ---- where Conveyor loses tasks, what the arms agree on, the next run ----
   const LOSS = [['build', 'Build: wrong or no change'], ['review', 'Review: passed a wrong change'], ['fix round', 'Fix round: broke it again'], ['test step', 'Test step: tests wrong'], ['blocked', 'Blocked: never landed']];
   function lossRow(label, v, tot) { const d = h('div', 'bench-lrow'), top = h('div', 'bench-row bench-space'); top.append(h('span', null, label), h('b', null, String(v))); d.append(top, K.bar(tot ? v / tot : 0, 'bench-fill-bad')); return d; }
+  // With no Conveyor arm (L.conv falls back to the best arm) there is no box: its count would be another arm's losses.
   function losses(L) {
-    const c = L.conv, lost = c.f.cs.filter((x) => K.said(x) === 'no'), by = new Map();
+    const c = L.conv;
+    if (c.a.kind !== 'conveyor') return '';
+    const lost = c.f.cs.filter((x) => K.said(x) === 'no'), by = new Map();
     lost.forEach((x) => { const w = K.lossOf(x); if (w) by.set(w, (by.get(w) || 0) + 1); });
     const s = K.box('Where Conveyor loses tasks', `The first step where each unresolved task went wrong (${K.plural(lost.length, 'task')}).`);
-    if (c.a.kind === 'conveyor') s.append(...LOSS.map(([k, l]) => lossRow(l, by.get(k) || 0, lost.length)), K.note('The biggest bar is where an engine change gains the most.'));
+    s.append(...LOSS.map(([k, l]) => lossRow(l, by.get(k) || 0, lost.length)), K.note('The biggest bar is where an engine change gains the most.'));
     return s;
   }
   function agree(L) {

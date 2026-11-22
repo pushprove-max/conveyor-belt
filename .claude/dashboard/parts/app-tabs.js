@@ -218,6 +218,8 @@
     applyLayout();
     if (app.last) idsOf(app.tab).forEach((id) => draw(panels.get(id), app.last.panels[partOf(id)]));
     else if (!app.loaded && app.failedLoads) idsOf(app.tab).forEach((id) => draw(panels.get(id), { error: NOTHING, data: null }));
+    // The head and its overlays again: an overlay hides over a tab that shows the project choice (the Rules' setup).
+    drawHead();
     arrange();
     say(`${TABS.find((x) => x[0] === t)[1]} tab`);
   }

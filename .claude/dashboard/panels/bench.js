@@ -259,8 +259,10 @@
   function getJSON(url) {
     return window.fetch(url).then((r) => (r.ok ? r.json() : r.text().then((t) => Promise.reject(new Error(String(t).trim() || `the server answered ${r.status}`)))));
   }
+  // The history's stamp: the run in progress, and the control record's guard (`control guard` changes the history's
+  // guard and weekLeft.stop with no run moved).
   function readHist(again) {
-    const repo = B.repo, stamp = liveStamp(), was = B.hist;
+    const repo = B.repo, stamp = `${liveStamp()}|${JSON.stringify(B.d && B.d.guard !== undefined ? B.d.guard : null)}`, was = B.hist;
     if (typeof repo !== 'string' || (!again && was && was.repo === repo && (was.busy || was.stamp === stamp))) return;
     const o = { repo, stamp, busy: true, data: was && was.repo === repo ? was.data : null, error: null };
     B.hist = o;
@@ -481,9 +483,15 @@
     page.append(...P[B.page]());
     root.append(pages(), page);
     el.replaceChildren(root);
+    // A control that is off while an answer is out (Start, Check the arms first: K.B.busy) cannot take the focus: its key
+    // is kept until the answer's draw turns it on again.
     const keep = B.keep || a;
     B.keep = null;
-    if (keep) { const k = Array.from(el.querySelectorAll('[data-act]')).find((x) => x.dataset.act === keep); if (k) k.focus({ preventScroll: true }); }
+    if (keep) {
+      const k = Array.from(el.querySelectorAll('[data-act]')).find((x) => x.dataset.act === keep);
+      if (k && !k.disabled) k.focus({ preventScroll: true });
+      else if (B.busy) B.keep = keep;
+    }
   }
   function render(el, d, ctx) {
     const view = ctx.project(d);

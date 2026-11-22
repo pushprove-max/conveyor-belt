@@ -87,6 +87,9 @@ test('Scoreboard run history: Delete of two runs ticked takes one confirm that n
   del.click();
   assert.deepEqual(w.posts, [], 'the first click sends nothing');
   assert.equal(del.textContent, `Click again: delete ${a} and ${b} (1 result another run shows stays; the rest goes)`);
+  // Bug it guards: the button's own aria-label ('Delete <runs>') hid the confirm, so a screen reader never heard the
+  // shared-result warning.
+  assert.equal(del.getAttribute('aria-label'), del.textContent, 'a screen reader hears the confirm, not "Delete <runs>"');
   w.reply = BH.reply(`conveyor: deleted ${a}, ${b}; 1 result stays: another run shows it.`);
   del.click();
   assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['runs', 'delete', a, b]], 'one request deletes both');

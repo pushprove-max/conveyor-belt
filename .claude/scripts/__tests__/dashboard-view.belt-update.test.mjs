@@ -180,3 +180,22 @@ test('one beat of three running chips reads offsetWidth once', () => {
   assert.equal(offAtRead, true, 'read with the class off from every chip');
   assert.ok(Array.from(chips).every((c) => c.classList.contains('beat')), 'every running chip beats');
 });
+
+// Bug it catches (issue 1430): when an earlier card left the belt, ctx.list moved the kept card's row into its new place
+// with insertBefore, and a moved node is blurred: the focus on the second card's control fell to the page's body.
+test('a Belt part without the first card leaves the focus on the control of the second card that had it', () => {
+  const w = boot({ feed: true });
+  const es = w.sources[0], data = full();
+  data.panels.belt.data.cards[1].live = { turns: 3, lastOutputAt: iso(T0 - 4000), action: 'Bash: npm run lint' };
+  es.readyState = 1; es.emit('open');
+  es.emit('snapshot', data);
+  const action = row(w, 'widgetshop:c4-5').querySelector('.live-action');
+  action.focus();
+  const part = clone(data.panels.belt);
+  part.data.cards = part.data.cards.filter((c) => c.card !== data.panels.belt.data.cards[0].card);
+  es.emit('panel', { id: 'belt', part, updatedAt: iso(T0) });
+  tick(w, 1000);
+  assert.equal(row(w, 'sample:c3-63'), null, 'the first card left the belt');
+  assert.ok(row(w, 'widgetshop:c4-5').querySelector('.live-action') === action, 'the second card keeps its control');
+  assert.equal(w.document.activeElement, action, `the focus stays on it, not on ${w.document.activeElement.tagName}`);
+});

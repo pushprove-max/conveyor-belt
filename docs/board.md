@@ -90,7 +90,8 @@ that Conveyor builds next, so the two headings also show when a group is long.
 A long list in Needs you, Landed today, Declined, Cost or Metrics shows as many rows as the panel's length. Under the
 list are **Show 5 more** (the panel's length) and **Show all (N)**, where N is the number of items in the list. This is
 the one **Show all** of the panel. It also shows all of a panel that you made shorter with its lower edge. The panel's
-foot shows how many items it shows of all its items, for example "10 of 58". A batch of cards is one item. In Needs
+foot shows how many items it shows of all its items, for example "10 of 58". When the list shows all its items, the
+foot has **Show fewer**, which shows the first rows again. A batch of cards is one item. In Needs
 you and Declined, **Show 5 more** adds the new rows under the rows that you see, and those rows do not change: an
 F-number explanation that you opened in Declined stays open.
 
@@ -662,6 +663,9 @@ one of the two choices, or **Cancel**:
 - **In parallel**: faster, with more load on the build machine. The belt is slower while the suite runs. Conveyor adds
   `--parallel` to the command.
 
+When the chosen machine is the devbox or the ssh box of the rule, the two lines name that box in place of the build
+machine, and **In parallel** does not say that the belt is slower.
+
 The choice that matches the rule **Release suite mode** (Rules tab, Capacity) is pressed already and says "The rule's
 choice". **Draft notes** asks nothing and sends no mode: it runs no suite itself, so step 2 shows no mode for it. A
 suite that starts with no mode given uses the rule's mode. This includes the suite that runs after the notes card's commit is on the branch the suite tests and no other card is open.
@@ -698,9 +702,11 @@ To release from the panel:
 4. Wait for the suite. While it runs, **Release** says "the suite is running (N of M files)". If it fails, **Release**
    says "the suite failed: <count> failures". Fix the failures, then run the suite again.
 5. When the notes are on `main` and the suite passed on the head of `main`, **Release** is enabled. Click it, then
-   click again.
+   click again. A **Run full test suite** that passed on the head of `main` also counts: step 2 says "The full test
+   suite passed on <commit>", and the release uses that pass.
 
-**Release** is disabled until it can run. Its text says what it waits for.
+**Release** is disabled until it can run. Its text says what it waits for. For a version that is released already, it
+says "v<version> is already released".
 
 - **Draft notes**, **Run suite**, **Run suite again** and **Run again on the new main** run `conveyor.sh release-run prep <version>`. Conveyor
   runs `conveyor.sh release-prep <version>` and nothing more. If `main` has no notes for the version, it writes a draft
@@ -717,7 +723,8 @@ To release from the panel:
   pass and runs `conveyor.sh release <version>` ([Releases](releases.md)). Else Conveyor runs
   `conveyor.sh release-prep <version>`, which runs the whole suite first, and runs `conveyor.sh release <version>` when
   the suite passes. The second click's text says which of the two occurs. Nothing else starts a release.
-- **Release anyway** shows beside a failed suite on the head of `main`. The first click shows the failed files and
+- **Release anyway** shows beside a failed suite on the head of `main`. A release that was refused after that failed
+  suite keeps it: step 2 still shows the suite as failed, with its mode. The first click shows the failed files and
   cases. The second click is your yes to release over them: Conveyor runs `conveyor.sh release-run anyway <version>`,
   and the release names you and the failures. The status of the suite stays failed
   ([A release over a failed suite](releases.md#a-release-over-a-failed-suite)).
@@ -913,7 +920,8 @@ says why: the comment at the end of the line, or the comment lines just above it
 line says so. Click the "Proxy checks N" filter chip to see only these files. A command that is only text in a
 heredoc can also show as a proxy check.
 
-A file with no run on record shows "Never run". When Conveyor can tell why, the status says it: the pack's
+A file with no run on record shows "Never run". A file whose runs are all before the test history start ran, so it
+does not show "Never run". When Conveyor can tell why, the status says it: the pack's
 `tests.patterns` or the test command do not match the file, loading the file fails (with the error), or the file is
 skipped (with its skip markers). Open its row for two actions. **Make it run** opens an issue that asks a card to
 make the test command run the file, or to fix what stops it. After the Test step of the card, Conveyor checks that
@@ -986,7 +994,7 @@ Split it shows the issue first, with the title "Split the test file <file>". Its
 of the same area, with each case kept once and unchanged, each new file under 600 lines, and
 `.conveyor/engine-areas.json` and the test map updated. When the newest verdict of Judge is split, the text also gives
 the reason of Judge. Edit it, then click "File this issue". On a Whole suite only file, Split it is disabled: the file
-runs other test files, so split one of those. When the newest verdict is split, Split it is a button of the row and
+runs other test files, so split one of those. The reason shows under the menu, and the arrow keys still reach the item. When the newest verdict is split, Split it is a button of the row and
 not in More.
 
 Explain the slowdown gives the model the file's recorded times and the window where its time went up: from the last
@@ -1141,7 +1149,7 @@ map** read the arms in the same way. An archived run is not in it.
   rounds of a Conveyor arm, the tasks that reached the time limit, and the share of tasks run twice with the same
   result.
 - **Where Conveyor loses tasks**: the first step where each task that the Conveyor arm did not resolve went wrong: the
-  build, a review, a fix round, the test step, or a block.
+  build, a review, a fix round, the test step, or a block. With no Conveyor arm in the runs, this box does not show.
 - **What it agrees on**: the shared tasks by how many arms resolve them.
 - **Next run to make**: the run that answers the biggest open question, with its cost and machine time ("not kept"
   where a result did not keep one), and each arm that did not always fire. **Plan this run** opens **Plan a run** with that run set.
@@ -1238,7 +1246,7 @@ has not run yet. Point at a square to see the task. Click a square to open the t
 **Plan a run** starts with the question: **Does it work at all?** (5 tasks, the Conveyor arm), **Is one better than
 another?** (50 tasks, Conveyor and Claude alone) or **Which arm gives the most per dollar?** (30 tasks, up to 6 ready
 arms). The question sets the tasks and the arms. You can change both after that. **Arms** gives each arm's state
-(**ready**, **changed** or **expired**; "not kept" for an arm that has no check, or is being checked), its
+(**ready**, **changed**, **expired** or **checking**; "not kept" for an arm that has no check), its
 cost and minutes for each task, and the results kept for it, which the run reuses at no cost. Every arm has a row.
 An arm that the project does not offer shows "not kept" and has its box off. The **Tasks** slider sets
 the number of tasks, and shows the smallest difference that this number can show. **Before you start** gives a

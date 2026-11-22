@@ -568,8 +568,10 @@ def control_script(action, args, main, today, record=None, user=None):
             return '{ if [ "$w" = before ]; then echo %s; else %s retry %s; fi; }' % (q(done), conv, n)
         if action == 'decline':
             why = ' && %s && %s gh-write issue comment %s --body "Visible change declined: $o, "%s >/dev/null' % (owner, conv, n, q('%s (Board user %s): %s' % (today, user, said))) if said else ''
-            return 'cd %s || exit 1; %s%s && %s control hold %s >/dev/null && %s' % (
-                q(main), gate, why, conv, n, then('conveyor: issue #%s is held; it is not built until it is released' % args[0]))
+            # The card is retried before the hold: retry releases an issue it finds held (retry.sh again()), so a hold
+            # made first was undone and the declined card was built again.
+            held = q(f'conveyor: issue #{args[0]} is held; it is not built until it is released')
+            return f'cd {q(main)} || exit 1; {gate}{why} && {{ [ "$w" = before ] || {conv} retry {n}; }} && {conv} control hold {n} >/dev/null && echo {held}'
         # conveyor.sh's conditional() reads "(Board user <name>)" as who said yes, not as a condition.
         rest = ', %s (Board user %s)' % (today, user) + ('; condition: %s' % said if said else '')
         return ('cd %s || exit 1; %s && %s && b=$(gh issue view %s --json body --jq .body)'

@@ -298,13 +298,26 @@
       : l.mode === 'whole' ? `whole suite${typeof l.why === 'string' && l.why ? `: ${l.why}` : ''}` : null;
   }
   // How far a test run has got (testProgress), from its cases c or else its files f; null when neither says.
+  // A run of one test file at a time (files.now: the file that runs now) says that file and which of how many, as Belt 3D
+  // does: the cases' count is the running file's alone, so "25 of 25 tests" would read as the whole run done.
   function runSaid(c, f) {
-    if (c && num(c.done) && num(c.of)) return `${c.done} of ${c.of} tests${num(c.failed) && c.failed > 0 ? ` · ${c.failed} failed` : ''}`;
+    const one = fileSaid(c, f);
+    if (one) return one;
+    if (c && num(c.done) && num(c.of)) return `${c.done} of ${c.of} tests${failedSaid(c)}`;
     if (!f || !num(f.run)) return null;
     let prog = `${f.run}${num(f.of) ? ` of ${f.of}` : ''} test ${(num(f.of) ? f.of : f.run) === 1 ? 'file' : 'files'}`;
     // A run that ran more test files than it selected (over) says so apart, never as "N of M" with N above M.
     if (num(f.over) && f.over > 0) prog += ` · ${f.over} more ${f.over === 1 ? 'file' : 'files'} than selected`;
     return prog;
+  }
+  // runSaid's line for a run of one file at a time: "file N of M: <file>", or null when files.now names no file.
+  function fileSaid(c, f) {
+    const on = f && f.now && typeof f.now === 'object' && typeof f.now.file === 'string' && f.now.file ? f.now.file : null;
+    return on && num(f.run) && num(f.of) ? `file ${Math.min(f.run + 1, f.of)} of ${f.of}: ${on}${failedSaid(c)}` : null;
+  }
+  // " · N failed" when the cases c say some failed, else ''.
+  function failedSaid(c) {
+    return c && num(c.failed) && c.failed > 0 ? ` · ${c.failed} failed` : '';
   }
   // was: the timeline this one replaces, if any: whether it and its set-up were open is kept. A timeline with a step in
   // progress has retime(), which sets that step's bar's width and the time texts again as its time grows (belt.js, each

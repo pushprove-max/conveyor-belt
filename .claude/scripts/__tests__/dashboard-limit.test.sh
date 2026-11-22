@@ -528,6 +528,11 @@ rm -f "$AOUT/cache/claude-usage" "$AOUT/cache/claude-usage.retry"
 asked "Claude Code-credentials" || fail "limit_switch_back_to_default: the default folder's item is the unsuffixed one: $(cat "$T/security-calls")"
 acct=$(HOME="$AHOME" CONVEYOR_CLAUDE_PROFILES="$PROF" python3 "$LIM" account)
 [ "$(jq -c . <<<"$acct")" = "{\"folder\":\"$AHOME/.claude\",\"email\":\"noreply-d@example.com\"}" ] || fail "limit_switch_back_to_default: account says $acct"
+# Issue 1430: with no reading kept, a 429 deadline that another account's refused read left in claude-usage.retry held
+# the read of the account in use back until it ran out. limit() drops it; fetch keeps each account's own deadline.
+rm -f "$AOUT/cache/claude-usage"; echo "$(( $(date +%s) + 3600 )) rate limited (429); retry after 3600 s" > "$AOUT/cache/claude-usage.retry"
+: > "$T/security-calls"; arun
+asked "Claude Code-credentials" || fail "limit_retry_of_another_account: with no reading kept, the collect must ask for the account in use, not wait out a deadline it cannot tie to it: $(cat "$T/security-calls")"
 # fetch() puts the account it read for into the reading it prints.
 got=$(HOME="$AHOME" CONVEYOR_CLAUDE_PROFILES="$PROF" python3 -c "import sys, io; sys.path.insert(0, '${LIM%/*}'); import dashboard_limit as d
 class R(io.BytesIO):

@@ -277,8 +277,10 @@
   const minutes = (m) => (m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`);
   function drawList(list) {
     const h = view.ctx.h;
+    // A card in its test run says how far it has got, as its lane on the floor does (progress(): the file that runs now).
+    const said = (c) => { const p = c.kind === 'run' ? progress(c) : null; return p ? `${stepName(c)} · ${p.text}` : stepName(c); };
     const rows = list.map((c) => [c.kind === 'blocked', named(c), c.title || 'untitled',
-      c.kind === 'blocked' ? (c.yes ? 'Waiting for your yes' : `Stuck at ${NAMES[c.at]}`) : stepName(c), Number.isNaN(c.since) ? '' : minutes(mins(c))]);
+      c.kind === 'blocked' ? (c.yes ? 'Waiting for your yes' : `Stuck at ${NAMES[c.at]}`) : said(c), Number.isNaN(c.since) ? '' : minutes(mins(c))]);
     const sig = JSON.stringify(rows);
     if (view.listSig === sig) return;
     view.listSig = sig;

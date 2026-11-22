@@ -509,8 +509,11 @@
   const lock = (root) => { if (S.busy) root.querySelectorAll('.bcard button').forEach((b) => { b.disabled = true; }); };
   // The tab's panels, in their default order, each drawn from the one Board part: [id, title].
   const PANELS = [[LOOP, 'Loop'], [PUSH, 'Push landed and full test suite'], [PART, 'Board']];
-  // Draws the tab's panels (only: the one panel with that id), each in the place the page gave it (S.at).
-  function draw(only) {
+  // Draws the tab's panels (only: the one panel with that id), each in the place the page gave it (S.at). A draw from
+  // render (rendered) does not work the lengths out: the page runs arrange() after it draws a part, which cuts every
+  // panel once; relength() here would measure each panel's rows a second time.
+  function draw(only, rendered) {
+    const fit = () => { if (!rendered) relength(); };
     if (S.ctx.picking()) return;  // Show at every project: the page shows the project choice, a timer or a reply draws no project over it
     const h = S.ctx.h, motion = S.ctx.motion(), at = (id) => (!only || only === id ? elOf(id) : null);
     const top = at(LOOP), pushes = at(PUSH), el = at(PART);
@@ -519,7 +522,7 @@
     if (S.d.repo === null) {
       [top, pushes, el].forEach((x) => { if (x) x.replaceChildren(noLoop(S.ctx, issues(S.d.repos).length > 1)); });
       if (pushes) { const check = h('div', 'board-check'); check.append(...checkTiles()); pushes.append(check); }
-      relength();
+      fit();
       return;
     }
     const a = document.activeElement, from = a ? Array.from(S.at).find(([, p]) => p.el.contains(a)) : null;
@@ -549,7 +552,7 @@
       if (again && !again.disabled) again.focus({ preventScroll: true });
       else if (S.busy) S.keep = keep;
     } else if (keep && !from) S.keep = keep;  // kept for a panel not drawn now
-    relength();
+    fit();
   }
   // The Board panel: the row that filters, the split, the tab's line and the columns.
   function cards(el, motion) {
@@ -643,16 +646,16 @@
     const view = ctx.project(d);
     // The Board shows one project: with more than one on the host the Board panel's heading names it, whatever Show says.
     if (id === PART) ctx.title(issues(view.repos).length > 1 && view.repo ? `Board: ${view.repo}` : null);
-    if (S.raw && S.raw[0] === d && S.raw[1] === read && S.raw[2] === view.repo) { draw(id); return; }
+    if (S.raw && S.raw[0] === d && S.raw[1] === read && S.raw[2] === view.repo) { draw(id, true); return; }
     S.raw = [d, read, view.repo]; S.ctx = ctx; S.read = read;
     if (S.d && view.repo !== S.d.repo) { S.ctl = null; S.ctlAt = null; S.moved.clear(); S.floor = null; S.turned = false; S.unlabeled.clear(); S.groups.clear(); S.released.clear(); S.armed = false; S.dep = null; S.depSaid.clear(); S.seats = null; S.picks.clear(); }
     d = view;
     // A dependency answered shows on the card until a snapshot begun at or after the answer (with no time, the next).
     S.depSaid.forEach((v, k) => { if (v.at === null || (read !== null && read >= v.at)) S.depSaid.delete(k); });
-    if (S.d && !S.ctl && S.floor !== null && read !== null && read < S.floor) { S.turned = true; draw(); return; }
+    if (S.d && !S.ctl && S.floor !== null && read !== null && read < S.floor) { S.turned = true; draw(undefined, true); return; }
     if (S.ctl && (S.ctlAt === null || (read !== null && read >= S.ctlAt))) { if (S.ctlAt !== null) S.floor = S.ctlAt; S.ctl = null; S.ctlAt = null; S.moved.clear(); S.unlabeled.clear(); }
     S.d = d; S.turned = false;
-    draw();
+    draw(undefined, true);
   };
   // What the parts of this file hold (parts/board-*.js; boot.js loads them before the panels): each is given what
   // it uses from here and from the parts before it, and gives back what the others use.

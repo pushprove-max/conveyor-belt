@@ -345,8 +345,11 @@
   function draftFix(f, given) {
     const file = f.file, v = given || verdictOf(file), xs = fixable(f), line = (l) => l.replace(/\p{C}/gu, ' ').trimEnd();
     const names = [...new Set(xs.flatMap((x) => list(x.cases).filter((c) => typeof c === 'string')))];
-    const causes = list(v && v.causes).filter((x) => obj(x) && typeof x.case === 'string' && typeof x.kind === 'string');
-    const done = ['', 'Done when:', names.length
+    // Only the causes of a case among the failures the draft names: a judge's cause of a case whose failures are all
+    // before the history start is no failure this issue asks to fix.
+    const causes = list(v && v.causes).filter((x) => obj(x) && typeof x.case === 'string' && typeof x.kind === 'string' && names.includes(x.case));
+    // A '## Done when' heading, the section the engine's Done-when check reads (donewhen.sh); plain "Done when:" is none.
+    const done = ['', '## Done when', names.length
       ? line(`- The cases that failed (${names.slice(0, 10).join(', ')}${names.length > 10 ? ` and ${names.length - 10} more` : ''}) succeed in 10 runs in a row of this file alone on a test slot.`)
       : '- The file succeeds in 10 runs in a row alone on a test slot.',
     `- ${names.length ? 'They succeed' : 'It succeeds'} in a run beside the other files of the suite.`];
@@ -387,7 +390,7 @@
       const at = items.findIndex((x) => { const l = printable(said(x)); if (lines.concat(l, '', done).join('\n').length + 40 > BODY_MAX) return true; lines.push(l); return false; });
       if (at >= 0) lines.push(`- and ${items.length - at} more`);
     });
-    const body = lines.concat('', 'Done when:', done).join('\n');
+    const body = lines.concat('', '## Done when', done).join('\n');
     return body.length > BODY_MAX && lists.some((l) => l[3]) ? null : { kind: 'issue', what, repo: S.d.repo, file, title, body, verdict: null };
   }
   // Its waits (#189): the WAIT lines its newest judge named (the snapshot's waits), [{case, kind, at, reason}].

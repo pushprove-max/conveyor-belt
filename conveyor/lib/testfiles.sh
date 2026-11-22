@@ -24,9 +24,9 @@
 #   gives none; card (null for a whole-suite run and for a time the test-speed survey saved), time, whole (a
 #   whole-suite run), a whole-suite run's result: ok, fail or null, and a survey time's survey: true}; [] for a file never
 #   run; a survey time of a file that is not listed is left out), lastRun ({sec, cpu, clockPerCpu, time, whole, and
-#   survey: true when it is a survey time} of its newest run; null with
-#   none), timedRuns (its runs with CPU seconds), runsOnRecord (its runs on record; its older runs and test edits are
-#   not here but in testolder(), below, so the part does not grow with every run), wholeOnly (its test.files entry's wholeOnly), failedSteps (the test steps
+#   survey: true when it is a survey time} of its newest run; null with none), timedRuns (its runs with CPU seconds),
+#   runsOnRecord (its runs on record; its older runs and test edits are not here but in testolder(), below, so the part does not grow with every run),
+#   everRun (a run on record at all, one before the history start too: the Board's Never run has none), wholeOnly (its test.files entry's wholeOnly), failedSteps (the test steps
 #   that failed with it among the failed files, or with a case it defines that its runner named, or timed out in it;
 #   a step that went again counts with the failures of its first run too: failedrun, FAILURE),
 #   failures (those steps, newest first, each {card, issue, time, verdict: main, flaky, card or null, cases, tail}
@@ -613,8 +613,8 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
     | (reduce ($fl.entries | arrays | .[] | objects | .case | strings | caseowners[]) as $f ({}; .[$f] += 1)) as $flaky
     | alledits($cr) as $alledits
     # A survey time counts for each file the part has a row for (listed, run or filed), as testolder() counts it, so
-    # a file the patterns do not list keeps it beside its card runs (#1044); it adds no row of its own (#1036).
-    | [testruns($lf; $su) | fromstart($st)] as $tr | ([$all[], $tr[].file, $ta[].file, $tc[].file] | map({key: ., value: true}) | from_entries) as $rows
+    # a file the patterns do not list keeps it beside its card runs (#1044); it adds no row of its own (#1036). $ever: a run before the start too.
+    | [testruns($lf; $su) | fromstart($st)] as $tr | ([$all[], $tr[].file, $ta[].file, $tc[].file] | map({key: ., value: true}) | from_entries) as $rows | (if $st == "" then {} else [(testruns($ls; $su) | .file), ($sv[0][] | .file)] | map(strings | {key: ., value: true}) | from_entries end) as $ever
     | [$tr[], ($sv[0][] | select($rows[.file] == true) | fromstart($st)), ($all[], $ta[].file, $tc[].file | {file: ., none: true})]
     | group_by(.file)
     | map(.[0].file as $f | map(select(.none != true)) | sort_by(.time) as $r | [$r[].cpu | numbers] as $c | ($c | median) as $m | $c[-1] as $now
@@ -623,7 +623,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
         | {file: $f, cpu: $now, median: ($m | r3), change: (if $m > 0 then ($now - $m) / $m | r3 else null end),
            runs: ($r[-$keep:] | reverse | map(del(.file))),
            lastRun: (if $r == [] then null else $r[-1] | {sec, cpu, clockPerCpu: (if .sec != null and .cpu > 0 then .sec / .cpu | r3 else null end), time, whole} + (if .survey == true then {survey: true} else {} end) end),
-           timedRuns: ($c | length), runsOnRecord: ($r | length), wholeOnly: $wo, failedSteps: ($failed[$f] // [] | length),
+           timedRuns: ($c | length), runsOnRecord: ($r | length), everRun: ($r != [] or $ever[$f] == true), wholeOnly: $wo, failedSteps: ($failed[$f] // [] | length),
            failures: ($failed[$f] // [] | to_entries | map(.value + if .key < $keep then {} else {tail: null} end)),
            caught: ($catch[$f].caught // 0), changedToPass: ($catch[$f].changed // 0),
            flaky: ($flaky[$f] // 0),
@@ -646,7 +646,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
            if (.n[$e.file] // 0) < $keep then .out += [$e] | .n[$e.file] += 1 else . end) | .out),
        totals: (map(select(.removed | not)) | {files: (map(select(.timedRuns > 0)) | length), slower: (map(select(.slower)) | length)}) + {
          steps: {count: ($wk | length), waitSec: ([$wk[].wait | numbers] | add // 0 | r3), runSec: ([$wk[].run | numbers] | add // 0 | r3)}}}') || return 1
-  nv=$(neverwhy "$(jq -c '[.files[] | select(.runsOnRecord == 0 and (.removed | not)) | .file]' <<<"$out")") || nv='{}'
+  nv=$(neverwhy "$(jq -c '[.files[] | select((.everRun | not) and (.removed | not)) | .file]' <<<"$out")") || nv='{}'
   packget test.report rp 2>/dev/null && [ -n "$rp" ] || rp=null
   cp=$(cpuplan 2>/dev/null) || cp=null
   jq -c --slurpfile nv <(printf '%s' "$nv") --argjson rp "$rp" --argjson cp "$cp" --rawfile su "$su" --arg st "$hs" "$JSONL$HISTFROM"'$nv[0] as $nv | ($su | jsonl | map(fromstart($st))) as $su | .files |= map(.neverRun = ($nv[.file] // null))

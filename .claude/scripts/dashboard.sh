@@ -309,7 +309,10 @@ limit() {
   local st have now_in_use out acc cx=${CODEX_HOME:-$HOME/.codex}/sessions
   have=$(jq -r '.account.folder // empty' "$CACHE/claude-usage" 2>/dev/null)
   now_in_use=$(python3 "$HERE/dashboard_limit.py" account | jq -r .folder)
-  { [ -z "$have" ] || [ "$have" = "$now_in_use" ]; } || rm -f "$CACHE/claude-usage" "$CACHE/claude-usage.retry"
+  # A reading of another account goes, with the retry deadline. A deadline beside no reading of an account goes too:
+  # it cannot be told whose it is (a 429 of the account switched from would hold the read of the one in use back).
+  if [ -z "$have" ]; then rm -f "$CACHE/claude-usage.retry"
+  elif [ "$have" != "$now_in_use" ]; then rm -f "$CACHE/claude-usage" "$CACHE/claude-usage.retry"; fi
   # With the cache folder, fetch honours and keeps the account's own 429 deadline, which outlives the switch above.
   cached claude-usage python3 "$HERE/dashboard_limit.py" fetch "$now_in_use" "$ACCTS" > /dev/null
   st=$(cat "$RUN/st-claude-usage")

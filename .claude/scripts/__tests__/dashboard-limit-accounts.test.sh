@@ -31,10 +31,10 @@ class R(io.BytesIO):
 def urlopen(req, timeout=None):
     who = req.headers["Authorization"]
     asked.append(who)
-    if answer.get(who) in (429, "429 bare"):
+    if answer.get(who) in (429, "429 bare", "429 short"):
         m = Message()
-        if answer[who] == 429:
-            m["Retry-After"] = "3600"
+        if answer[who] != "429 bare":
+            m["Retry-After"] = "120" if answer[who] == "429 short" else "3600"
         raise urllib.error.HTTPError("u", 429, "x", m, None)
     return R(json.dumps({"seven_day": {"utilization": answer.get(who, 53)}}).encode()).__enter__()
 
@@ -139,6 +139,18 @@ clock[0] = t2 + d.ACCOUNT_TTL
 answer["Bearer tok-2"] = 40
 check(run_fetch(X)[0] == 0 and asked == ["Bearer tok-2"],
       "fetch did not read the account once its kept next had passed: %s" % asked)
+# Issue 1430: a 429 whose Retry-After (120 s) is shorter than ACCOUNT_TTL was kept as ACCOUNT_TTL, so the read
+# dashboard.sh retries at the named time was refused by fetch's own kept deadline ("retry after 170 s").
+t3 = t2 + d.ACCOUNT_TTL + 10000
+clock[0] = t3
+answer["Bearer tok-2"] = "429 short"
+asked.clear()
+check(run_fetch(X)[0] == 1 and asked == ["Bearer tok-2"], "a 429 naming 120 s was not asked and refused: %s" % asked)
+asked.clear()
+clock[0] = t3 + 130
+answer["Bearer tok-2"] = 40
+got = run_fetch(X)
+check(got[0] == 0 and asked == ["Bearer tok-2"], "fetch refused the read 130 s after a 429 that named 120 s: %s %s" % (asked, got))
 
 for f in fail:
     print("FAIL: " + f, file=sys.stderr)

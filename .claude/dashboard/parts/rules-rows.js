@@ -658,9 +658,9 @@
   }
   function rulesHeld(el, all) {
     const h = S.ctx.h;
-    // Held issues: the count, as a link to the list in the Held panel.
+    // Held issues: the count, as a link to the list in the Held panel, which a click opens first when it is collapsed.
     const link = h('a', 'rules-link', `View ${plural(all.length, 'held issue', 'held issues')}`);
-    link.href = '#rules-held'; link.dataset.act = 'held-link';
+    link.href = '#rules-held'; link.dataset.act = 'held-link'; link.addEventListener('click', () => { if (typeof S.ctx.expand === 'function') S.ctx.expand('rules-held'); });
     el.append(unlisted() ? row('held', 'Held issues', 'parked issues', h('span', 'board-from', heldUnknown()))
       : row('held', 'Held issues', 'parked issues', all.length ? link : h('span', 'board-value', 'No issue is held.')));
   }
@@ -714,7 +714,7 @@
     const grip = h('span', 'rules-grip', '⠿');
     grip.setAttribute('aria-hidden', 'true');
     const menu = h('details', 'rules-menu'), sum = h('summary', 'btn btn-quiet', '⋯'), acts = h('span', 'rules-menu-acts');
-    sum.setAttribute('aria-label', `Actions for #${n}`);
+    sum.setAttribute('aria-label', `Actions for #${n}`); sum.dataset.act = 'pin-menu';  // a redraw gives the focus back by data-act
     menu.open = S.pinMenu === n;
     menu.addEventListener('toggle', () => { if (menu.open) S.pinMenu = n; else if (S.pinMenu === n) S.pinMenu = null; });
     acts.append(...[i > 0 ? button('Move up', 'btn-quiet', 'pin-up', `Move #${n} up in the pinned order`, () => move(i, i - 1)) : null,

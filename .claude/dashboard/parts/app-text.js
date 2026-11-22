@@ -225,8 +225,9 @@
   const findingText = { sentences, pathsIn, repoOf, fileUrl, lineUrl, barePaths, linkTo, codeEl, fill, proofAt };
 
   // A review finding: "[P1] path:line The sentence. Proof: why", its place and proof each optional. A "[cleanup]" mark
-  // after the level (a fix that changes no behaviour, prompts.sh REVIEWT) is not drawn.
-  const FINDING = /^\[(P[0-3])\]\s*(?:\[cleanup\]\s*)?(.*)$/;
+  // after the level (a fix that changes no behaviour, prompts.sh REVIEWT) and a fix review's ids ("[E1]", "[F2]") are
+  // not drawn, so the place after them is still found (as reviewWhy and the Declined panel do).
+  const FINDING = /^\[(P[0-3])\]\s*(?:\[(?:E\d+|F\d+|cleanup)\]\s*)*(.*)$/;
   // A finding the judge declined, as the engine writes it into the review (review.sh): "DECLINED: <finding> (judge: <reason>)".
   const DECLINED = /^DECLINED:\s*(\[P[0-3]\].*?) \(judge: ([\s\S]*)\)\s*$/;
   // A finding the judge found real but not caused by the card's change (review.sh judged()): "OUTSIDE: <finding> (judge:
@@ -482,10 +483,12 @@
   }
   // Reuses the node of every item that is still there (by key), so a row keeps its focus, its typed text and the
   // position its marker moves from; new rows come in with the `enter` motion once the list has been filled once.
+  // The rows that left go first, and the row that holds the focus never moves (a node moved is blurred): the others
+  // are placed before and after it.
   function list(parent, items, keyOf, make, update) {
     const old = new Map(Array.from(parent.children).map((n) => [n.dataset.key, n]));
     const added = [];
-    items.forEach((item, i) => {
+    const nodes = items.map((item) => {
       const key = String(keyOf(item));
       let node = old.get(key);
       if (node) old.delete(key);
@@ -494,9 +497,15 @@
         if (parent.dataset.filled) node.classList.add('enter');
       }
       if (update) update(node, item);
-      if (parent.children[i] !== node) parent.insertBefore(node, parent.children[i] || null);
+      return node;
     });
     old.forEach((n) => n.remove());
+    const a = document.activeElement, f = a ? nodes.findIndex((n) => n.parentNode === parent && n.contains(a)) : -1;
+    if (f < 0) nodes.forEach((node, i) => { if (parent.children[i] !== node) parent.insertBefore(node, parent.children[i] || null); });
+    else {
+      for (let i = f + 1; i < nodes.length; i += 1) if (nodes[i - 1].nextSibling !== nodes[i]) parent.insertBefore(nodes[i], nodes[i - 1].nextSibling);
+      for (let i = f - 1; i >= 0; i -= 1) if (nodes[i].nextSibling !== nodes[i + 1]) parent.insertBefore(nodes[i], nodes[i + 1]);
+    }
     parent.dataset.filled = '1';
     return added;
   }

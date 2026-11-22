@@ -65,7 +65,7 @@
   // What app.js uses of its parts (parts/app-*.js), bound as each loads (core).
   let PAGE, address, answerer, applyLayout, arrangeSoon, attention, behind, buildHead, change, clip, clock, depPicked,
     depRef, details, draw, drawHead, dur, earlierTip, failure, failureLine, failureShort, findingText, findings,
-    fitHead, fixNow, flip, follow, fresh, goTo, idsOf, inRow, issueLink, joined, judged, keep, keptGet, keptScope,
+    fixNow, flip, follow, fresh, goTo, idsOf, inRow, issueLink, joined, judged, keep, keptGet, keptScope,
     lay, lengthDrag, lengthOk, list, loopEnd, machineWord, modelName, move, output, overlay, pack, pageOf,
     panelFaults, panelHref, param, params, partOf, pickRepo, project, projectSort, readLayout, refresh, refusal,
     restart, restartHere, retryText, reviewChip, rowsAbove, save, say, sendTime, setLength, setTab, shownAgain, since,
@@ -209,16 +209,25 @@
   // second click: the first turns the button to `ask` for ARM_MS, and it looks apart from a one-click button. No browser
   // dialog: it looks like nothing else on the page and blocks it.
   const ARM_MS = 5000;
+  // A button with its own aria-label hears the ask too while armed: its label would hide the changed text.
   function twice(b, tier, ask, go) {
-    const label = b.textContent;
+    const label = b.textContent, named = b.getAttribute('aria-label');
     let timer = null;
     b.classList.add(tier === 'final' ? 'btn-final' : 'btn-cost');
     b.dataset.guard = tier;
-    const reset = () => { window.clearTimeout(timer); timer = null; b.textContent = label; b.setAttribute('aria-pressed', 'false'); delete b.dataset.armed; };
+    const reset = () => {
+      window.clearTimeout(timer); timer = null; b.textContent = label; b.setAttribute('aria-pressed', 'false'); delete b.dataset.armed;
+      if (named !== null) b.setAttribute('aria-label', named);
+    };
     b.setAttribute('aria-pressed', 'false');
     b.addEventListener('click', () => {
       if (b.disabled) return;
-      if (timer === null) { b.textContent = ask; b.setAttribute('aria-pressed', 'true'); b.dataset.armed = ''; timer = window.setTimeout(reset, ARM_MS); return; }
+      if (timer === null) {
+        b.textContent = ask; b.setAttribute('aria-pressed', 'true'); b.dataset.armed = '';
+        if (named !== null) b.setAttribute('aria-label', ask);
+        timer = window.setTimeout(reset, ARM_MS);
+        return;
+      }
       reset();
       go();
     });
@@ -397,6 +406,15 @@
     el.addEventListener('drop', (e) => e.preventDefault());
     const p = { mod, el, body, count, tools, foot, rowsNote, showAll, grip, json: undefined, pick: '', state: 'loading', renders: 0, nums: new Map(), natural: 0 };
     showAll.addEventListener('click', () => {
+      // Show fewer of a panel whose lists were shown whole (clipApply): each list of its rows back to its first page,
+      // the focus on the list's Show more.
+      if (showAll.dataset.lists) {
+        Array.from(body.querySelectorAll('.show-more[data-list]')).filter((b) => !inRow(p, b)).forEach((b) => keep('pages', keptScope(mod), b.dataset.list, undefined));
+        p.ctx.redraw();
+        const next = body.querySelector('.show-more:not([hidden]) [data-act="list-more"]');
+        if (next) next.focus(); else showAll.focus();
+        return;
+      }
       const all = showAll.textContent === 'Show all';
       setLength(p, all ? 'all' : mod.rows, all ? `${title} shows all its rows` : `${title} shows its first ${mod.rows} rows`);
       showAll.focus();
@@ -441,6 +459,8 @@
       title(text) { heading.textContent = text || mod.title; },
       // relength(): the panel's rows changed without a new part (a group opened): its length and place are worked out again.
       relength() { clip(p); arrangeSoon(); },
+      // expand(id): panel id opened when it is collapsed, for a link that jumps into it (Rules' View N held issues).
+      expand(id) { if (modules.has(id) && layouts[tabOf(id)].collapsed.includes(id)) toggle('collapsed', id, false); },
       // redraw(): the panel drawn again from the part it has, its count too (what the owner did changed what it shows).
       redraw() { p.json = undefined; if (last) draw(p, last.panels[partOf(mod.id)]); arrangeSoon(); },
       // more(key, items, show, size): the shared long list (see more above), kept per panel and key. Its step is the
@@ -593,7 +613,9 @@
     }
     buildHead();
     wireMenu();
-    window.addEventListener('resize', fitHead);
+    // A resize fits the head again only when the window's or the head's width (or what the head shows) changed:
+    // refit(true), not fitHead().
+    window.addEventListener('resize', () => app.refit(true));
     // A restart costs the collector's time: it asks for a second click, as on the Board.
     twice(byId('restart'), 'spend', 'Click again to restart the Board\'s feed', restart);
     tick();
@@ -641,7 +663,7 @@
       if (tab === was && last) { idsOf(tab).forEach((id) => draw(panels.get(id), last.panels[partOf(id)])); arrangeSoon(); }
       drawHead();
     });
-    window.addEventListener('resize', () => { fitHead(); showTab(); arrangeSoon(); });
+    window.addEventListener('resize', () => { app.refit(true); showTab(); arrangeSoon(); });
     // A restart costs the collector's time: it asks for a second click.
     twice(byId('restart'), 'spend', 'Click again to restart the Board\'s feed', restart);
     tick();
@@ -688,7 +710,7 @@
     Object.defineProperties(app, Object.getOwnPropertyDescriptors(fn(app)));
     ({ PAGE, address, answerer, applyLayout, arrangeSoon, attention, behind, buildHead, change, clip, clock,
       depPicked, depRef, details, draw, drawHead, dur, earlierTip, failure, failureLine, failureShort, findingText,
-      findings, fitHead, fixNow, flip, follow, fresh, goTo, idsOf, inRow, issueLink, joined, judged, keep, keptGet,
+      findings, fixNow, flip, follow, fresh, goTo, idsOf, inRow, issueLink, joined, judged, keep, keptGet,
       keptScope, lay, lengthDrag, lengthOk, list, loopEnd, machineWord, modelName, move, output, overlay, pack,
       pageOf, panelFaults, panelHref, param, params, partOf, pickRepo, project, projectSort, readLayout, refresh,
       refusal, restart, restartHere, retryText, reviewChip, rowsAbove, save, say, sendTime, setLength, setTab,

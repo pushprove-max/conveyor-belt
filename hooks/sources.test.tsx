@@ -499,6 +499,8 @@ test('a follow-up shows its short title and its parent; a title no short one can
   expect(shortTitle('src/web/upload-form.tsx:12-14 the button is grey')).toBe('Upload form: Button is grey')
   // Bug: a cleanup follow-up's title ("[P3][cleanup] <file>:<line> ...", followups.sh) was kept raw.
   expect(shortTitle('[P3][cleanup] conveyor/lib/card.sh:52 the second check is redundant')).toBe('Card: Second check is redundant')
+  // Bug: nor was one with a review's id before the mark ("[P3] [E1][cleanup] <file>:<line> ...").
+  expect(shortTitle('[P3] [E1][cleanup] conveyor/lib/card.sh:52 x')).toBe('Card: X')
   expect(shortTitle('Fast lane lands through Conveyor')).toBe('Fast lane lands through Conveyor')
   const raw = '[P2] .claude/dashboard/panels/metrics.js:53 The Host row omits recorded memory usage'
   const line = beltCard({ title: raw, parent: 3874, track: track('>.....', 'building') })[0]

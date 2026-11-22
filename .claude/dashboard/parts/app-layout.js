@@ -201,7 +201,10 @@
       const drawn = open ? Array.from(p.body.querySelectorAll(p.mod.rowSelector || ROW_SEL)).filter((r) => !inRow(p, r)).length || n : 0;
       total = open ? drawn + lists.reduce((s, b) => s + Math.max(0, Number(b.dataset.items) - rowsAbove(b).length), 0) : 0;
     }
-    return { want, open, rows, n, limit, total, listCtl: lists.some((b) => !b.hidden), cut: n > limit, max: '' };
+    // past: a list of the panel's rows shown past its first page (its Show all), its control gone, else null: the
+    // foot's Show fewer puts the lists back to their first page (app.js).
+    const past = open && n <= limit ? lists.find((b) => b.hidden && Number(b.dataset.items) > Number(b.dataset.step)) || null : null;
+    return { want, open, rows, n, limit, total, listCtl: lists.some((b) => !b.hidden), cut: n > limit, max: '', past };
   }
   function clipMeasure(p, c) {
     if (!c.cut) return;
@@ -215,17 +218,21 @@
     clipMeasure(p, c);
     clipApply(p, c);
   }
-  function clipApply(p, { want, open, n, limit, total, listCtl, cut, max }) {
+  function clipApply(p, { want, open, n, limit, total, listCtl, cut, max, past }) {
     p.body.classList.toggle('scrolls', cut);
     p.body.style.maxHeight = max;
     p.el.dataset.rows = String(n);
     p.el.dataset.length = String(want);
+    p.showAll.dataset.lists = '';
     if (total !== null) {
       p.rowsNote.textContent = open && limit < total ? `${limit} of ${total}` : '';
-      // Cut at its edge with every list shown whole: the foot's Show all is then the one that shows the rest.
-      p.showAll.hidden = !cut || listCtl;
-      p.showAll.textContent = 'Show all';
-      p.showAll.setAttribute('aria-label', `Show all ${total} rows of ${p.mod.title}`);
+      // Cut at its edge with every list shown whole: the foot's Show all is then the one that shows the rest; a list
+      // shown past its first page (clipPlan's past): Show fewer.
+      const [word, label, lists] = past ? ['Show fewer', `Show the first ${past.dataset.step} rows`, '1'] : ['Show all', `Show all ${total} rows`, ''];
+      p.showAll.hidden = !past && (!cut || listCtl);
+      p.showAll.textContent = word;
+      p.showAll.setAttribute('aria-label', `${label} of ${p.mod.title}`);
+      p.showAll.dataset.lists = lists;
       p.foot.hidden = !p.rowsNote.textContent && p.showAll.hidden;
     } else {
       const more = want === 'all' && p.mod.rows !== 'all' && n > p.mod.rows;

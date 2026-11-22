@@ -132,7 +132,17 @@ test('a panel whose list uses ctx.more: the step is its length, its foot has no 
   assert.deepEqual(foot(), [false, '6 of 20', true]);
   act(p, 'list-all').click();
   assert.equal(rows(), 20);
-  assert.equal(p.querySelector('.panel-foot').hidden, true, 'all shown: nothing to count or show');
+  // Bug (issue 1430): once all showed, the list's controls and the foot were gone, so nothing set the panel back to
+  // its first page. The foot offers Show fewer, which does, with the focus on the list's Show more.
+  assert.deepEqual(foot(), [false, '', false], 'all shown: nothing to count, and the foot\'s one control');
+  const fewer = p.querySelector('.panel-foot .show-all');
+  assert.equal(fewer.textContent, 'Show fewer');
+  fewer.click();
+  for (const f of w.frames.splice(0)) f();
+  assert.equal(rows(), 3, 'back to the first page');
+  assert.deepEqual(moreText(p), ['Show 3 more', 'Show all (20)']);
+  assert.deepEqual(foot(), [false, '3 of 20', true]);
+  assert.equal(w.document.activeElement, act(p, 'list-more'), 'the focus is on the list\'s Show more');
 });
 
 // Bug: a ctx.more list that fits on one page (its control hidden) still took the panel's default length to all, so
@@ -165,7 +175,7 @@ test('a panel whose list uses ctx.more, cut at a length the owner set: the list\
   assert.equal(footAll.hidden, true, 'the list\'s Show all is the one shown');
   act(p, 'list-all').click();
   assert.equal(p.querySelector('.scrolls'), null, 'the panel is no longer cut');
-  assert.equal(p.querySelector('.panel-foot').hidden, true, 'all 20 shown');
+  assert.deepEqual([p.querySelector('.panel-rows').textContent, footAll.textContent], ['', 'Show fewer'], 'all 20 shown');
   // Cut again with the list whole: the foot's Show all is then the panel's one Show all.
   key(w, p.querySelector('.panel-length'), 'Home');
   assert.deepEqual([p.querySelector('.panel-rows').textContent, footAll.hidden, p.querySelectorAll('.show-more:not([hidden])').length], ['1 of 20', false, 0]);
@@ -193,7 +203,7 @@ test('a panel whose list uses ctx.more counts an item with rows in it once, and 
   // The project row and the first 3 of the 6 items: the batch, b1 and b2.
   assert.equal(p.querySelector('.panel-rows').textContent, '4 of 7');
   p.querySelector('[data-list="longs:items"] [data-act="list-all"]').click();
-  assert.equal(p.querySelector('.panel-foot').hidden, true, 'every item shown: no count');
+  assert.deepEqual([p.querySelector('.panel-rows').textContent, p.querySelector('.panel-foot .show-all').textContent], ['', 'Show fewer'], 'every item shown: no count, and Show fewer');
 });
 
 // Bug: a panel whose only list is inside a row (Release: a project's changes) counted the changes as its rows: cut at

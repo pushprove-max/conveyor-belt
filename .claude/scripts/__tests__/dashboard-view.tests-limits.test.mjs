@@ -40,7 +40,8 @@ test('Tests: Take a file off card runs picked sends nothing until Save, a new sn
   w.reply = { ok: false, status: 409, text: () => Promise.resolve('conveyor: the pack does not read') };
   act(sec(w), 'slow-issues-save').click();
   await settle();
-  assert.equal(w.posts.length, 1);
+  // Issue 1430: the whole request, so a Save sent with another action or for another project fails here.
+  assert.deepEqual(w.posts.map((p) => p.body), [{ action: 'test-settings', args: ['slow-issues', 'true'], repo: 'sample' }]);
   assert.match(lim(w, 'off-card-runs').querySelector('.rules-refused').textContent, /Not saved: conveyor: the pack does not read/);
   assert.equal(act(sec(w), 'slow-issues-field').value, 'true', 'refused: the value picked stays');
   assert.ok(shown(w, 'slow-issues-save'), 'and still unsaved');
@@ -135,7 +136,7 @@ test('Tests: the #457 rows show when the snapshot names them and not when it doe
   type(w, 'slow-issues-field', 'true');
   act(sec(w), 'slow-issues-save').click();
   await settle();
-  assert.deepEqual(w.posts.splice(0).map((p) => p.body.args), [['slow-issues', 'true']]);
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body), [{ action: 'test-settings', args: ['slow-issues', 'true'], repo: 'sample' }]);
 });
 
 // Issue 1338. Bug it catches: the Test settings did not show the test history's start, or a change to it was not sent

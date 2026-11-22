@@ -287,6 +287,25 @@ test('Setup: a project picked under Show is the one Set up sends to', async () =
   assert.deepEqual(await sent(w, () => act(box(w), 'rule-P0').click()), [{ action: 'rules', args: ['P0=on', 'P1=on', 'P2=on', 'P3=on', 'followups=on'], repo: 'widgetshop' }]);
 });
 
+// Bug guarded (issue 1430): Show at All projects clears ?project= and keeps ?repo=, so on a reload the setup of the
+// project left in ?repo= opened over the Rules tab's project choice, though no project is in view. Also: a switch to
+// the Rules tab (key 4) from a tab where that setup was open drew no overlay, so the box stayed over the choice.
+test('Setup: with every project shown, the setup of the project left in ?repo= does not open over the project choice', () => {
+  const w = boot({ query: '?tab=overview&repo=widgetshop' });
+  const d = snap({ at: '2026-11-01T00:00:00Z', rules: ALL });
+  const other = { ...clone(d.panels.rules.data), repo: 'widgetshop', repoUrl: 'https://github.com/example/WidgetShop' };
+  other.control = { ...other.control, onboarded: null };
+  Object.assign(d.panels.rules.data, { repos: ['sample', 'widgetshop'], others: { widgetshop: other } });
+  d.panels.machine.data.repos = ['sample', 'widgetshop'];
+  deliver(w, d);
+  assert.ok(shown(w), 'on Overview, which shows no project choice, widgetshop\'s setup opens');
+  key(w, act(box(w), 'onboard-next') || w.document.activeElement, '4');
+  assert.deepEqual(Array.from(rulesP(w).querySelectorAll('[data-act="pick-project"]'), (b) => b.dataset.project), ['sample', 'widgetshop'], 'the Rules tab shows the project choice');
+  assert.ok(!shown(w), 'no setup opens over the choice');
+  pickProject(w, 'widgetshop');
+  assert.ok(shown(w), 'picked, widgetshop\'s setup opens');
+});
+
 // Bug guarded: a switch to an onboarded project left the box of the one before open, its controls sending to the
 // project now shown.
 test('Setup: a switch to an onboarded project shuts the box of the one before', async () => {

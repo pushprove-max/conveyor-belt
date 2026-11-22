@@ -158,6 +158,7 @@ P=$(snap '{"needsYou": {"waiting": [{"card": "c1-12", "issue": 12, "title": "But
     "judge": {"model": "claude-j", "effort": "high", "modelFrom": "seed", "effortFrom": "seed", "choices": ["claude-j"], "efforts": ["high"], "default": "claude-j"}},
   "areaPrefix": "team/", "packLandAs": "pr", "packPrMerge": "idle", "packPick": {"lists": {"builder": {"claude-x": {"min": "medium", "max": "high"}}}, "efforts": {"claude": ["low", "medium", "high"]}}, "standing": ["asked-fix"], "pushCheck": false, "lintCommands": [{"run": "shellcheck {files}", "files": ["*.sh"]}], "snapshotAt": "2026-11-05T00:00:02Z",
   "health": {"state": "paused", "reason": "the loop says why", "unchecked": 2, "guard": {"at": 90, "reading": 42, "readAt": "'"$(ago 60)"'", "missing": false}, "cycles": [[40, 41]],
+    "engineStopped": {"pid": 1234, "since": "2026-11-05T00:00:00Z", "pids": [1234, 1235]},
     "pressure": {"state": "Busy", "cpu": 45.5, "memory": 1.5, "wakeMs": 0.2, "freeMB": null, "why": "CPU pressure 45.5% is at or above 40%"},
     "routes": {"subscription": {"state": "expired", "at": "2026-11-05T00:00:00Z"}, "proxy": {"state": "works", "at": "2026-11-05T00:00:01Z", "baseUrl": "http://127.0.0.1:4141", "route": "fallback"}},
     "unpushed": [{"card": "c5-7", "issue": 7, "sha": "abc", "since": "2026-11-05T00:00:00Z"}],
@@ -235,6 +236,9 @@ q '.panels.queue.data.awaitingDeploy | map([.repo, .issue, .title, .since, .url]
 q '.panels.queue.data.waiting | map([.repo, .issue, .waitsFor, .url]) == [["sample", 32, [20], "'"$PU"'/32"]]' "the queue lists each record's waiting issues with what each waits for"
 q '.panels.board.data.waits | map([.issue, .waitsFor]) == [[32, [20]]]' "the Board has the waiting issues with what each waits for"
 q '[.panels.health.data.records[] | .cycles] == [[[40, 41]], null]' "a dependency cycle reaches the health part; a record without the key has none"
+# Bug (issue 1430): Health's SIGCONT command for a card under a stopped engine named the engine's pid alone, as the part
+# dropped the engine's stopped processes, and the stopped wrapper under it kept holding the card.
+q '[.panels.health.data.records[] | .engineStopped] == [{pid: 1234, since: "2026-11-05T00:00:00Z", pids: [1234, 1235]}, null]' "a stopped engine with each stopped process under it reaches the health part; a record without it has null"
 # Issue 261: the landed cards with a skipped lint command (Health's Lint check row) and the pack's lint commands (the
 # Rules tab's Lint check list) reach the Board; dropped here, neither shows.
 q '[.panels.health.data.records[] | .unchecked] == [2, null] and .panels.rules.data.lintCommands == [{run: "shellcheck {files}", files: ["*.sh"]}]' \
@@ -450,6 +454,9 @@ q '.panels.bench.data | .repo == "sample" and .drift == {before: {cards: 5}, aft
 # longer carries them.
 q '.panels.bench.data | .bench == {presets: [1, 5, 20, 50], live: null} and .others.widgetshop.bench == null and .repos == ["sample", "widgetshop"]' \
   "the Benchmarks part holds its project's run in progress and versions"
+# Bug: Plan's guard warning kept an old history after `control guard` changed, as no run changed: the part carries the
+# control record's guard, which the tab's history read stamps.
+q '.panels.bench.data | .guard == 90 and (.others.widgetshop | has("guard"))' "the Benchmarks part holds its project's guard"
 q '.panels.tests.data | has("bench") or has("drift") | not' "the Tests part no longer carries the Benchmarks"
 q '.panels.rules.data | has("machine") | not' "the Rules part no longer carries the load limit: the Tests page has it"
 q '.panels.machine.data | .state == "running" and .cap == 5 and .used == 4 and (.projects | map([.repo, .state, .mode, .used, .cap])) == [["sample", "paused", "pause", 1, 3], ["widgetshop", "running", "run", 3, 2]]' \
@@ -692,9 +699,14 @@ q '.panels.board.data | (.building | map([.issue, .step, .waitsOn.issue, .waitsO
 q '.panels.board.data.building[0] | .pickedAt == "'"$PICKED"'" and .stepAt != .pickedAt' "a card in Building carries its pick-up time"
 # A card that gave up its land turn is in Building with the issue it gave way to, so the Board can say so.
 L='[{"card": "c0-9", "issue": 9, "title": "Fits", "step": "fix", "waitsOn": null, "gaveWay": 92, "gaveWayFixing": true, "beyond": "main is red", "stepAt": "'"$(ago 60)"'", "pickedAt": "'"$PICKED"'", "landed": false, "usd": 1, "reading": true},
-  {"card": "c0-10", "issue": 10, "title": "Fitted", "step": "review", "review": 2, "of": 3, "waitsOn": null, "gaveWay": 92, "stepAt": "'"$(ago 60)"'", "pickedAt": "'"$PICKED"'", "landed": false, "usd": 1, "reading": true}]'
+  {"card": "c0-10", "issue": 10, "title": "Fitted", "step": "review", "review": 2, "of": 3, "waitsOn": null, "gaveWay": 92, "stepAt": "'"$(ago 60)"'", "pickedAt": "'"$PICKED"'", "landed": false, "usd": 1, "reading": true},
+  {"card": "c0-red", "issue": 0, "title": "Main is red", "step": "review", "review": 1, "of": 3, "waitsOn": null, "stepAt": "'"$(ago 60)"'", "pickedAt": "'"$PICKED"'", "landed": false, "usd": 1, "reading": true}]'
 answer "$(jq -c --argjson l "$L" '.belt += $l' <<<"$P")" "$P_URL" 1794000000 "$C" "$C_URL" 0
 run
+# Bug (issue 1430): a row carried its repository only in its issue's url, so a card with no GitHub issue (a main-red
+# fix, a Tests page card: url null) gave the page no repository to link its review's file paths in
+# (dashboard-view.output-review.test.mjs draws that link).
+q '[.panels.belt.data.cards[] | select(.issue == 0) | [.card, .url, .repoUrl]] == [["c0-red", null, "'"${PU%/issues}"'"]]' "a belt row of a card with no GitHub issue carries its record's repository address"
 q '.panels.board.data | (.building | map([.issue, .step, .gaveWay])) == [[9, "fix", 92]] and (.review | map(select(.issue == 10) | .gaveWay)) == [92]' "a card that gave way is in Building or Review with the issue it gave way to"
 q '.panels.board.data | (.building | map(.gaveWayFixing)) == [true] and (.review | map(select(.issue == 10) | .gaveWayFixing)) == [false]' "a card that gave way for the fix of its failed tests says so, and one that gave way for another reason does not"
 # Issue 612: a main-red fix in a slot beyond the cap carries why, so the Board can say so; a card in its slot has none.

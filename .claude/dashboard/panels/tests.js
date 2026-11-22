@@ -225,7 +225,9 @@
       slower: f.slower === true, faster: num(f.change) !== null && f.change <= -share,
       waits: !runner && num(last.clockPerCpu) !== null && last.clockPerCpu > WAITS, flaky: (num(f.flaky) || 0) > 0,
       fails: notCard(f).length >= FAILS, hollow: hollowOf(f).length > 0, proxy: proxyOf(f).length > 0, issue: f.issue !== null && f.issue !== undefined, purpose: !!f.slowOnPurpose,
-      runner, whole: runner, never: !list(f.runs).length, wall: wallOnly(f),
+      // Never run: no run on record at all. A file whose runs are all before the history start has none since it, but
+      // it ran (everRun).
+      runner, whole: runner, never: !list(f.runs).length && f.everRun !== true, wall: wallOnly(f),
     })[k]);
   }
   const look = (f) => marks(f).some((m) => m[3]);
@@ -532,19 +534,27 @@
     if (!on) return wrap;
     const m = h('div', 'tests-menu');
     m.setAttribute('role', 'menu'); m.setAttribute('aria-label', `More actions: ${file}`);
+    // An item that is off stays in the arrow keys' round (aria-disabled, not disabled) and its reason is its
+    // description, a line under the menu: a title alone is out of a keyboard user's reach.
+    const whys = [];
     moreItems(f).forEach(([act, words, why, fn]) => {
-      const i = button(words, 'btn-quiet', act, `${words}: ${file}`, () => { S.menu = null; fn(); });
+      const i = button(words, 'btn-quiet', act, `${words}: ${file}`, () => { if (why) return; S.menu = null; fn(); });
       i.setAttribute('role', 'menuitem');
-      if (why) { i.disabled = true; i.title = why; }
+      if (why) {
+        const p = h('p', 'tests-fact tests-menu-why', `${words}: ${why}`);
+        p.id = `tests-menu-why-${act}`;
+        i.setAttribute('aria-disabled', 'true'); i.setAttribute('aria-describedby', p.id); i.title = why;
+        whys.push(p);
+      }
       m.append(i);
     });
     m.addEventListener('keydown', (e) => {
-      const items = Array.from(m.querySelectorAll('[role="menuitem"]:not(:disabled)')), at = items.indexOf(document.activeElement);
+      const items = Array.from(m.querySelectorAll('[role="menuitem"]')), at = items.indexOf(document.activeElement);
       if (e.key === 'Escape') { e.preventDefault(); S.menu = null; S.keep = { act: 'more', file }; draw(); return; }
       const step = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0;
       if (step && items.length) { e.preventDefault(); items[(at + step + items.length) % items.length].focus(); }
     });
-    wrap.append(m);
+    wrap.append(m, ...whys);
     return wrap;
   }
   // The line of an Optimize or a Mutation check asked on a row, beside its buttons: sending, refused with why, the

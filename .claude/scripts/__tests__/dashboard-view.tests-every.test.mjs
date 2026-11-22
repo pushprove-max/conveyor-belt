@@ -79,7 +79,7 @@ test('Tests: a wholeOnly runner has "Runs other test files", no Slower than usua
   assert.equal(act(shut, 'slow-mark-field'), null, 'no slow-on-purpose mark for a runner');
   act(shut, 'more').click();
   const menu = Array.from(tp(w).querySelectorAll('.tests-open')).find((r) => r.dataset.file === WHOLE);
-  assert.equal(act(menu, 'menu-mark').disabled, true, 'nor from its More menu');
+  assert.equal(act(menu, 'menu-mark').getAttribute('aria-disabled'), 'true', 'nor from its More menu');
   act(rowOf(w, CARD), 'open').click();
   const card = Array.from(tp(w).querySelectorAll('.tests-open')).find((r) => r.dataset.file === CARD);
   act(card, 'optimize').click();

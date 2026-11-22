@@ -295,14 +295,18 @@
   }
   function seatsForm(item) {
     const h = S.ctx.h, n = item.issue, d = S.seats.draft, f = h('div', 'board-seats-form');
+    const s = item.seats && typeof item.seats === 'object' ? item.seats : null, run = s && s.run && typeof s.run === 'object' ? s.run : {};
     SEATS.forEach(([k, name]) => {
       const p = projSeat(k), row = h('div', 'board-seat-row');
+      // What the seat runs on with no seat of the card's own: the seat the rule set (the Judge's pick, a trial or a
+      // promoted one: seats.run), else the project's (seatRun with no own seat).
+      const { x, by } = seatRun(k, true, {}, run), whose = by ? `${SEATBY[by].charAt(0).toUpperCase()}${SEATBY[by].slice(1)}` : 'Project\'s';
       row.dataset.seat = k;
-      const m = h('select', null), e = h('select', null), eff = h('label', 'board-seat-effort'), same = h('span', 'board-seat-same', 'the project\'s effort');
+      const m = h('select', null), e = h('select', null), eff = h('label', 'board-seat-effort'), same = h('span', 'board-seat-same', by ? 'the effort it names' : 'the project\'s effort');
       m.dataset.act = `seat-model-${k}`; e.dataset.act = `seat-effort-${k}`;
       m.setAttribute('aria-label', `${name} model of #${n}`); e.setAttribute('aria-label', `${name} effort of #${n}`);
       const opt = (v, text) => { const o = h('option', null, text); o.value = v; return o; };
-      m.append(opt('', `Project's: ${p && p.model ? seatText(p) : 'not set'}`), ...issues(p && p.choices).map((c) => opt(c, S.ctx.modelName(c))));
+      m.append(opt('', `${whose}: ${x && x.model ? seatText(x) : 'not set'}`), ...issues(p && p.choices).map((c) => opt(c, S.ctx.modelName(c))));
       m.value = d[k].model;
       // A saved model no longer in the allowed list matches no option: show the project's. The seat is marked stale
       // until the model menu changes, so Save does not read this as an edit and clear the saved setting; the base keeps

@@ -108,6 +108,8 @@ test('Declined: a reason links a file:line on a main-red fix card, finds the ful
     old('d000000000011', '[P1] conveyor/lib/rules.sh:20 a default leaves the rule unset. Proof: none'),
     // Bug: a finding with the cleanup mark after its level was not found as one that starts at its file:line.
     old('d000000000012', '[P1][cleanup] conveyor/lib/rules.sh:20 a click changes its row. Proof: none'),
+    // Bug: nor was one with a review's id before that mark, though the finding's own heading (HEAD_RE) takes it.
+    old('d000000000014', '[P3] [E1][cleanup] conveyor/lib/rules.sh:20 an id before the mark. Proof: none'),
     // Declined after the reason below was written (#409), so it cannot be the finding the reason names.
     line({ id: 'd000000000013', time: iso(T0 - 30000), card: 'c1-260', issue: 260, url: `${P}/260`,
       finding: '[P1] conveyor/lib/rules.sh:20 a later finding. Proof: none', round: 1, findings: null })];
@@ -121,8 +123,9 @@ test('Declined: a reason links a file:line on a main-red fix card, finds the ful
   const red = rowOf(w, '[P3] e.txt:1 a red nit').querySelector('.reason a.why-at');
   assert.equal(red.href, `${REPO}/blob/HEAD/conveyor/lib/snapshot.sh#L525`, "a main-red fix card's reason links to its repository");
   const both = rowOf(w, '[P1] conveyor/lib/rules.sh:80 one switch resets its row').querySelector('.reason a.why-at');
-  assert.equal(both.title, '2 findings start at conveyor/lib/rules.sh:20: Declined on #250: [P1] conveyor/lib/rules.sh:20 a default leaves the rule unset.'
-    + ' Declined on #250: [P1][cleanup] conveyor/lib/rules.sh:20 a click changes its row.', 'hover names every finding at that line declined before the reason, not one picked of them, and none declined after it');
+  assert.equal(both.title, '3 findings start at conveyor/lib/rules.sh:20: Declined on #250: [P1] conveyor/lib/rules.sh:20 a default leaves the rule unset.'
+    + ' Declined on #250: [P1][cleanup] conveyor/lib/rules.sh:20 a click changes its row.'
+    + ' Declined on #250: [P3] [E1][cleanup] conveyor/lib/rules.sh:20 an id before the mark.', 'hover names every finding at that line declined before the reason, not one picked of them, and none declined after it');
 });
 
 // Bug (#412): a finding was one long bold paragraph with its backticks shown raw, and in it and in its reason code and

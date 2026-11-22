@@ -1037,18 +1037,20 @@ fresh_control; echo 12 > "$F/waiting"
 [ "$(ctl "$(yes_act approve 12)")" = 200 ] && [ "$(calls | tr '\n' ,)" = "CONVEYOR_MAIN=$HM health,CONVEYOR_MAIN=$HM retry 12," ] \
   && [ "$(cat "$F/gh-body")" = "$(printf 'Old body\n\nVisible change approved: Quinn, %s (Board user max)' "$(TZ=America/New_York date +%F)")" ] \
   && grep -qx 'issue edit 12 --body-file -' "$F/gh-calls" && [ "$(cat "$F/gh-writes")" = 'issue edit 12 --body-file -' ] || fail "approve_writes_the_line_and_retries: ran '$(calls)', body '$(cat "$F/gh-body" 2>&1)'"
-# No: the issue is held, then the card is retried, so it waits under Held.
+# No: the card is retried, then the issue is held, so it waits under Held. Bug (issue 1430): the hold came first, and
+# the real retry releases an issue it finds held (retry.sh again()), so the declined card was built again; the stub
+# here releases nothing, so the order of the calls is what shows it.
 fresh_control; echo 12 > "$F/waiting"
-[ "$(ctl "$(yes_act decline 12)")" = 200 ] && [ "$(calls | tr '\n' ,)" = "CONVEYOR_MAIN=$HM health,CONVEYOR_MAIN=$HM control hold 12,CONVEYOR_MAIN=$HM retry 12," ] \
-  && [ ! -e "$F/gh-calls" ] || fail "decline_holds_and_retries: ran '$(calls)'"
+[ "$(ctl "$(yes_act decline 12)")" = 200 ] && [ "$(calls | tr '\n' ,)" = "CONVEYOR_MAIN=$HM health,CONVEYOR_MAIN=$HM retry 12,CONVEYOR_MAIN=$HM control hold 12," ] \
+  && [ ! -e "$F/gh-calls" ] || fail "decline_retries_then_holds: ran '$(calls)'"
 # Yes with a condition (from "Needs you"): the condition is on the approval line, quoting kept.
 fresh_control; echo 12 > "$F/waiting"
 [ "$(ctl "$(yes_act approve 12 "only for admins; don't show 'beta'")")" = 200 ] && [ "$(calls | tr '\n' ,)" = "CONVEYOR_MAIN=$HM health,CONVEYOR_MAIN=$HM retry 12," ] \
   && [ "$(cat "$F/gh-body")" = "$(printf "Old body\n\nVisible change approved: Quinn, %s (Board user max); condition: only for admins; don't show 'beta'" "$(TZ=America/New_York date +%F)")" ] \
   || fail "approve_with_a_condition_writes_it_on_the_line: ran '$(calls)', body '$(cat "$F/gh-body" 2>&1)'"
-# No with why: the reason is posted on the issue, then the issue is held and the card retried.
+# No with why: the reason is posted on the issue, then the card is retried and the issue held.
 fresh_control; echo 12 > "$F/waiting"
-[ "$(ctl "$(yes_act decline 12 'not for staff yet $(id)')")" = 200 ] && [ "$(calls | tr '\n' ,)" = "CONVEYOR_MAIN=$HM health,CONVEYOR_MAIN=$HM control hold 12,CONVEYOR_MAIN=$HM retry 12," ] \
+[ "$(ctl "$(yes_act decline 12 'not for staff yet $(id)')")" = 200 ] && [ "$(calls | tr '\n' ,)" = "CONVEYOR_MAIN=$HM health,CONVEYOR_MAIN=$HM retry 12,CONVEYOR_MAIN=$HM control hold 12," ] \
   && [ "$(cat "$F/gh-calls")" = "issue comment 12 --body Visible change declined: Quinn, $(TZ=America/New_York date +%F) (Board user max): not for staff yet \$(id)" ] \
   && [ "$(cat "$F/gh-writes")" = "$(cat "$F/gh-calls")" ] \
   || fail "decline_with_why_posts_it_then_holds: ran '$(calls)', gh '$(cat "$F/gh-calls" 2>&1)', through gh-write '$(cat "$F/gh-writes" 2>&1)'"
@@ -1079,7 +1081,7 @@ fresh_control; echo 12 > "$F/waiting"
   || fail "approve_acts_on_the_cards_repo: ran '$(calls)' in '$(cat "$F/gh-pwd" 2>&1)', body '$(cat "$F/gh-body" 2>&1)'"
 fresh_control; echo 12 > "$F/waiting"
 [ "$(ctl '{"action":"decline","args":["12","no"],"repo":"widgetshop"}')" = 200 ] \
-  && [ "$(calls | tr '\n' ,)" = "CONVEYOR_MAIN=$OM health,CONVEYOR_MAIN=$OM control hold 12,CONVEYOR_MAIN=$OM retry 12," ] \
+  && [ "$(calls | tr '\n' ,)" = "CONVEYOR_MAIN=$OM health,CONVEYOR_MAIN=$OM retry 12,CONVEYOR_MAIN=$OM control hold 12," ] \
   && [ "$(sort -u "$F/gh-pwd")" = "$OM" ] || fail "decline_acts_on_the_cards_repo: ran '$(calls)' in '$(cat "$F/gh-pwd" 2>&1)'"
 fresh_control; echo 12 > "$F/waiting"
 [ "$(ctl '{"action":"approve","args":["12"],"repo":"sample"}')" = 200 ] && [ "$(calls | tr '\n' ,)" = "CONVEYOR_MAIN=$HM health,CONVEYOR_MAIN=$HM retry 12," ] \

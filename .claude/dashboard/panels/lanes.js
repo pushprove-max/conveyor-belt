@@ -84,7 +84,8 @@
           if (open) li.append(...[].concat(landing(l, ctx, d.cardsError)));
           // The rows are drawn anew: the lane's output drawn before stays open for the same card.
           const was = Array.from(el.querySelectorAll('li[data-lane="Fast lane"] > details.output')).find((x) => x.parentElement.dataset.repo === repo);
-          const out = open && l.landing && l.landing.state === 'blocked' ? ctx.output(l.landing.tail, l.landing.card, null, was) : null;
+          // Its repository (the landing's repoUrl): the review's file paths link to their lines in it.
+          const out = open && l.landing && l.landing.state === 'blocked' ? ctx.output(l.landing.tail, l.landing.card, null, was, l.landing.repoUrl) : null;
           if (out) li.append(out);
         }));
         if (r.research) ul.append(lane('Research lane', of, repo, r.research, ctx, (li, head) => status(r.research, head, li, ctx)));

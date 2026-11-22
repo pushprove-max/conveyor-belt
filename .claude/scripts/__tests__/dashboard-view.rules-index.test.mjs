@@ -4,7 +4,7 @@
 // its menu. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { boot, deliver, settle, full, act, rulesP, record, css, cases, STORE } from './dashboard-view.helpers.mjs';
+import { boot, deliver, next, clone, settle, full, act, rulesP, record, css, cases, STORE } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const sent = async (w, fn) => { fn(); await settle(); return w.posts.splice(0).map((p) => p.body); };
@@ -103,6 +103,11 @@ test('Rules: a pinned row shows its title; dragging the first pin onto the secon
   more.click();
   assert.equal(w.document.activeElement, pins()[5].querySelector('.rules-menu > summary'), 'the focus goes to the menu of the first pin View remaining shows');
   assert.deepEqual(pins().slice(5).map((p) => p.querySelector('.rules-pin').textContent), ['#76 Split the PROD stack', '#99'], 'View remaining shows the rest; no title known: the number');
+  // Bug (issue 1430): the menu's summary had no data-act, so the redraw of the next snapshot lost the focus to the body.
+  const again = clone(d);
+  again.panels.rules.data.control.cap = 7;
+  next(w, again);
+  assert.equal(w.document.activeElement, pins()[5].querySelector('.rules-menu > summary'), 'a new snapshot leaves the focus on that pin\'s menu');
   const down = await sent(w, () => pins()[0].querySelector('[data-act="pin-down"]').click());
   assert.deepEqual(down, [{ action: 'order', args: ['23', '21', '20', '22', '24', '76', '99'], repo: 'sample' }]);
   const drag = await sent(w, () => {

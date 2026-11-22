@@ -72,7 +72,9 @@ test('Tests failures: a failure with no verdict on record counts for Fails often
 // cases, their kinds and output ends, the judge's causes and the Done-when the card's check holds; filing it posts one
 // test-issue with the title the engine knows. A file whose every failure is a card's has no Fix failures.
 test('Tests failures: Fix failures previews the issue with cases, kinds, output, causes and Done-when, and files it', async () => {
-  const w = show([judged('keep', { causes: CAUSES })]);
+  // Bug it guards (issue 1430): every cause of the judge was a CAUSE line, a cause of a case outside the failures the
+  // draft names too (here mergeorder, whose one failure a card caused); the assertion on #451|mergeorder below catches it.
+  const w = show([judged('keep', { causes: [...CAUSES, { case: 'mergeorder', kind: 'order', reason: 'a card changed the order' }] })]);
   assert.equal(act(open(w, X), 'fix-failures'), null, 'a file that only caught card changes has nothing to fix');
   let more = open(w, MERGE);
   act(more, 'fix-failures').click();
@@ -84,7 +86,10 @@ test('Tests failures: Fix failures previews the issue with cases, kinds, output,
   assert.doesNotMatch(body, /#451|mergeorder/, 'the failure a card caused is not one to fix');
   assert.match(body, /The causes the judge named:\n- CAUSE: mergeclean \| shared state \| two cases write the same lock file/);
   assert.match(body, /\nThe end of the output of card #509 \(.+\):\nok one\nnot ok mergeclean: the lock file was left by another case\n/);
-  assert.match(body, /\n\nDone when:\n- The cases that failed \(mergeclean, mergewait\) succeed in 10 runs in a row of this file alone on a test slot\.\n- They succeed in a run beside the other files of the suite\.$/);
+  // Bug it guards (issue 1430): the section was plain "Done when:", and the engine's Done-when check (donewhen.sh sect())
+  // reads only a "#" or "##" Done when heading, so a card built from the issue had no item checked.
+  assert.match(body, /^#{1,2}\s+Done when\s*$/m, 'the heading donewhen.sh reads');
+  assert.match(body, /\n\n## Done when\n- The cases that failed \(mergeclean, mergewait\) succeed in 10 runs in a row of this file alone on a test slot\.\n- They succeed in a run beside the other files of the suite\.$/);
   assert.equal(more.querySelector('.tests-preview-verdict'), null, 'a keep verdict is no verdict of this issue');
   assert.deepEqual(w.posts, [], 'the preview files nothing');
   w.reply = TA.reply('https://github.com/example/sample/issues/700');
@@ -123,7 +128,7 @@ test('Tests failures: with 40 flaky failures the Fix failures body stays within 
   const body = act(opened(w, MERGE), 'issue-body').value;
   assert.ok(body.length <= 2500, `${body.length} characters`);
   assert.match(body, /\n- and \d+ more\n/);
-  assert.match(body, /Done when:\n- The cases that failed \(case0, .+, case9 and 30 more\) succeed in 10 runs in a row of this file alone on a test slot\.\n- They succeed in a run beside the other files of the suite\.$/);
+  assert.match(body, /## Done when\n- The cases that failed \(case0, .+, case9 and 30 more\) succeed in 10 runs in a row of this file alone on a test slot\.\n- They succeed in a run beside the other files of the suite\.$/);
 });
 
 // Bug it guards (#188): the judge's stabilise verdict led nowhere, and its causes were lost in its text. The Judge tab

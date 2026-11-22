@@ -2,7 +2,7 @@
 // The dashboard page's Rules tab: the rules, what they produce, and the held issues, each its own panel.
 // Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { T0, clone, boot, state, deliver, next, settle, P, CONTROL, MODELS, CLIS, full, act, record,
+import { T0, clone, boot, state, deliver, next, settle, P, CONTROL, MODELS, CLIS, full, act, record, panel,
   rulesP, rulesAll, rulesText, ruled, produced, figure, nextUp, heldP, groupsOf, groupEl, rowsOf, heldMany, cases, pickProject } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
@@ -106,6 +106,11 @@ test('Rules: with 183 held issues the rules list none, and the held section is o
   assert.match(ruled(w).querySelector('[data-rule="held"]').textContent, /View 183 held issues/);
   assert.equal(ruled(w).querySelector('[data-act="held-link"]').getAttribute('href'), '#rules-held');
   assert.equal(heldP(w).id, 'rules-held');
+  // Bug (issue 1430): with the Held panel collapsed (its body hidden), the link jumped to a hidden list. It opens the panel.
+  panel(w, 'rules-held').querySelector('.tool.collapse').click();
+  assert.equal(panel(w, 'rules-held').dataset.collapsed, 'true', 'the Held panel is collapsed');
+  ruled(w).querySelector('[data-act="held-link"]').click();
+  assert.deepEqual([panel(w, 'rules-held').dataset.collapsed, panel(w, 'rules-held').querySelector('.panel-body').hidden], ['false', false], 'the link opens it');
   assert.equal(heldP(w).querySelector('.board-head').textContent, 'Held by you or a label · 183');
   assert.equal(figure(w, 'held'), '183');
   assert.deepEqual(groupsOf(w), [['web', 52, '31 ux-change'], ['No area', 41, ''], ['backend', 33, ''], ['infra', 21, '9 dormant'], ['tooling', 19, ''], ['console', 11, ''], ['site', 6, '']]);
@@ -489,11 +494,18 @@ test('Rules: a control keeps the keyboard focus through the change it sends', as
   twice.panels.rules.data.control.rules.P2 = false;  // it read the change the host took
   next(w, twice);
   act(rulesP(w), 'rules-set-order').click();  // the group that holds the pins
+  // Issue 1430: Unpin sits in the pin's closed menu; jsdom clicks it there all the same, so a redraw that shut the menu
+  // went unseen. The menu is opened as the owner opens it, and must stay open.
+  const menu22 = () => rulesP(w).querySelector('.rules-item[data-issue="22"] .rules-menu');
+  menu22().querySelector('summary').click();
+  await settle();
+  assert.equal(menu22().open, true, 'the menu of #22 is open');
   const unpin22 = rulesP(w).querySelector('.rules-item[data-issue="22"] [data-act="unpin"]');
   unpin22.focus();
   w.reply = { ok: false, status: 409, text: () => Promise.resolve('conveyor: the record is locked') };
   unpin22.click();
   await settle();
+  assert.equal(menu22().open, true, 'a refused unpin leaves the menu of #22 open');
   assert.equal(w.document.activeElement, rulesP(w).querySelector('.rules-item[data-issue="22"] [data-act="unpin"]'), 'a refused unpin leaves the focus on its own row');
 });
 

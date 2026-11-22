@@ -101,6 +101,17 @@ window.DASH_APP.panel({
     const stuck = (s) => (s.step === 'waiting' && s.waitsOn && typeof s.waitsOn === 'object'
       ? `${ref(s)} waiting on ${typeof s.waitsOn.issue === 'number' ? ref(s.waitsOn) : 'a card'}${s.waitsOn.state ? ` (${s.waitsOn.state})` : ''}`
       : `${ref(s)} in ${s.step}`);
+    // A card whose engine or own process is stopped by a signal (its stuck entry's stopped, health): nothing retries
+    // it, so its next step is the SIGCONT to each stopped process (stopped.pid, stopped.pids, stopped.own; for a stopped
+    // engine also each stopped process under it, the record's engineStopped.pids: a wrapper left stopped holds the
+    // card), not a retry.
+    const stoppedSaid = (s, r) => {
+      const st = s.stopped, own = st.own && typeof st.own === 'object' ? st.own : {};
+      const eng = st.of === 'engine' && r.engineStopped && Array.isArray(r.engineStopped.pids) ? r.engineStopped.pids : [];
+      const pids = [...new Set([st.pid, ...eng, ...(Array.isArray(st.pids) ? st.pids : []), own.pid, ...(Array.isArray(own.pids) ? own.pids : [])].filter(Number.isInteger))];
+      return `${ref(s)}: ${st.of === 'engine' ? 'Conveyor\'s engine' : 'the card\'s process'} is stopped by a signal, and nothing retries it. `
+        + `Send it SIGCONT${pids.length ? `: kill -CONT ${pids.join(' ')}` : ''}.`;
+    };
     (d.records || []).forEach((r) => {
       const of = d.records.length > 1 ? ` (${r.repo})` : '';
       // A loop its control record stops is not meant to run: it is off, not a fault. One meant to run with no
@@ -133,8 +144,11 @@ window.DASH_APP.panel({
         check(`Last push${of}`, ctx.chip(`${r.unpushed.length} not pushed`, 'warn'), 'oldest landed', ctx.since(r.unpushed[0].since, ' ago')).next =
           'Conveyor pushes after each landing. If Push on landing is off, Push landed on the Control tab pushes them.';
       } else check(`Last push${of}`, ctx.chip('All pushed', 'ok'), r.lastPushAt ? 'pushed' : 'no push recorded', r.lastPushAt ? ctx.since(r.lastPushAt, ' ago') : null);
-      if (r.stuck.length) check(`Stuck cards${of}`, ctx.chip(`${r.stuck.length} stuck`, 'bad'), plain(r.stuck.map(stuck).join(', '))).next =
-        "Conveyor stops a stuck session and tries it again by itself. If the session stays stuck, read the card's last step in On the belt.";
+      if (r.stuck.length) {
+        const halted = r.stuck.filter((s) => s && s.stopped && typeof s.stopped === 'object');
+        check(`Stuck cards${of}`, ctx.chip(`${r.stuck.length} stuck`, 'bad'), plain(r.stuck.map(stuck).join(', '))).next = [...halted.map((s) => stoppedSaid(s, r)),
+          ...(halted.length < r.stuck.length ? ["Conveyor stops a stuck session and tries it again by itself. If the session stays stuck, read the card's last step in On the belt."] : [])].join(' ');
+      }
       // A dependency cycle: its issues wait on each other, so none of them is ever picked.
       if (Array.isArray(r.cycles) && r.cycles.length) check(`Dependency cycles${of}`, ctx.chip(`${r.cycles.length} cycle${r.cycles.length === 1 ? '' : 's'}`, 'bad'),
         plain(r.cycles.map((c) => c.map((n) => `#${n}`).join(' ↔ ')).join('; '))).next = "Break each cycle: take one issue off another's Depends on: line on GitHub.";

@@ -279,7 +279,8 @@
     const n = ids.length, one = n === 1 ? ids[0] : null, s = K.box(one ? `Cost and time on ${one}` : 'Cost and time on the shared tasks'), x = headToHead(A, Bs, ids);
     const v = n === 1 && x.both ? `${A.label} and ${Bs.label} both resolved the one task they share.` : K.NOT_KEPT;
     const took = (f) => `${K.plural(Math.round(K.sum(f.cs.map((c) => K.num(c.sessions) || 0))), 'session')}, ${K.kTok(f.tokens)} tokens and ${f.wall === null ? 'minutes not kept' : `${f.wall} minutes`}`;
-    const w = `${x.d ? '' : 'There is no flipped task to explain. '}The only difference is cost and time: ${A.label} took ${took(fa)}; ${Bs.label} took ${took(fb)}.`;
+    // With no graded task in common, nothing tells the arms apart: no cost-and-time sentence of 0 sessions each.
+    const w = !n ? K.NOT_KEPT : `${x.d ? '' : 'There is no flipped task to explain. '}The only difference is cost and time: ${A.label} took ${took(fa)}; ${Bs.label} took ${took(fb)}.`;
     s.append(pair('Tokens', fa.tokens, fb.tokens, K.kTok, A, Bs), pair('Minutes', fa.wall, fb.wall, (m) => (K.num(m) === null ? K.NOT_KEPT : `${m} min`), A, Bs),
       pair('Sessions', fa.sessions, fb.sessions, (m) => (K.num(m) === null ? K.NOT_KEPT : String(Math.round(m * 10) / 10)), A, Bs));
     return [K.verdict('quiet', 'Head to head', v, w), s];

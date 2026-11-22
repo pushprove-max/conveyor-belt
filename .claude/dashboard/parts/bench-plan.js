@@ -13,8 +13,9 @@
   // Each question: its title, what it compares and the tasks it sets.
   const QS = { works: ['Does it work at all?', 'A new version or a changed arm: one total break shows.', 5], better: ['Is one better than another?', 'Two arms or two versions on the same tasks.', 50],
     value: ['Which arm gives the most per dollar?', 'Every ready arm, on the same tasks.', 30] };
-  // The states the mockup shows; an arm in another state (checking, unchecked, not offered) has none kept.
-  const ARM_STATE = { ready: ['ready', 'ok'], changed: ['changed', 'warn'], expired: ['expired', 'quiet'] };
+  // The states the mockup shows, and checking (a state known, not a figure missing); an arm in another state
+  // (unchecked, not offered) has none kept.
+  const ARM_STATE = { ready: ['ready', 'ok'], changed: ['changed', 'warn'], expired: ['expired', 'quiet'], checking: ['checking', 'info'] };
   const offered = () => K.armsOf().filter((a) => a.state !== 'not offered');
   // The arms a question ticks: the Conveyor arm; it and Claude alone; or every ready arm (6 at most).
   function armsFor(q) {

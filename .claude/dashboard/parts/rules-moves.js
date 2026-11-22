@@ -123,8 +123,10 @@
     'suite-mode': (r, action, a) => { r.suiteMode = a[0]; return [r, action]; },
     'suite-machine': (r, action, a) => {
       const was = r.suiteMachine && typeof r.suiteMachine === 'object' ? r.suiteMachine : {};
+      // An Undo of a devbox change sends the set-up time it had (--setup-at): the row drawn before the answer keeps it.
+      const at = (k) => (a.includes(k) ? a[a.indexOf(k) + 1] : undefined);
       r.suiteMachine = a[0] === 'ssh' ? { kind: 'ssh', target: a[1], dir: a[3] || '~/conveyor-suite' }
-        : a[0] === 'devbox' ? { kind: 'devbox', size: a[2] || '4x8', tag: was.kind === 'devbox' ? was.tag : undefined, idleStop: '15m', box: a.includes('--box') ? a[a.indexOf('--box') + 1] : undefined } : { kind: 'local' };
+        : a[0] === 'devbox' ? { kind: 'devbox', size: a[2] || '4x8', tag: was.kind === 'devbox' ? was.tag : undefined, idleStop: '15m', box: at('--box'), setupAt: at('--setup-at') } : { kind: 'local' };
       return [r, 'suite'];
     },
     judge: (r, action, a) => {
@@ -307,7 +309,10 @@
       // A row moved here stays, shown as moved, until a snapshot shows the move (moveJudge).
       if (!you && !holds.length && !pendingMove(x.issue)) return;
       const rest = others.filter((r) => r.kind !== 'label');
-      const how = holds.length ? (rest.length ? null : 'unlabel') : 'release';
+      // A split umbrella (its held entry's umbrella: its slices) is never picked: a release would clear the hold and
+      // build nothing, so it has no Queue here either (as on the Board's Held column).
+      const umbrella = list(x.umbrella).some((n) => num(n) !== null);
+      const how = umbrella ? null : holds.length ? (rest.length ? null : 'unlabel') : 'release';
       out.push(Object.assign({}, x, { holds, you, how, rest }));
     });
     // Within a group: the higher priority first, then the newer issue.

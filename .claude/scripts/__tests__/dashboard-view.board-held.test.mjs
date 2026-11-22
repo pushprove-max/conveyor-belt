@@ -359,4 +359,10 @@ test("Building shows a fix after failed tests as fixing, timed from the fix's st
   Object.assign(testing.panels.board.data.building[0], { step: 'tests', stepAt: iso(T0 - 60000), files: { run: 4, of: 6 } });
   next(w, testing);
   assert.equal(meta().firstChild.textContent, 'testing, 4 of 6 test files');
+  // Bug (issue 1430): a run of one test file at a time said its running file's cases, "25 of 25 tests", as if the run
+  // were done; it says the file that runs and which of how many, as Belt 3D does.
+  const one = clone(testing);
+  Object.assign(one.panels.board.data.building[0], { files: { run: 19, of: 50, now: { file: 'conveyor/tests/b.test.sh', at: iso(T0 - 60000) } }, tests: { done: 25, of: 25, failed: 0 } });
+  next(w, one);
+  assert.equal(meta().firstChild.textContent, 'testing, file 20 of 50: conveyor/tests/b.test.sh');
 });

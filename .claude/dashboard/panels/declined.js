@@ -115,7 +115,8 @@
     by.forEach((es) => es.sort((a, b) => b.t - a.t));
     const ats = new Map();
     const at = (place) => {
-      if (!ats.has(place)) ats.set(place, new RegExp(`^\\[P[0-9]\\](?:\\s*\\[cleanup\\])?\\s+${place.replace(SPECIAL_RE, '\\$&')}\\b(?![-–])`));
+      // The level, then any of the tags HEAD_RE takes ([E1], [cleanup]), then the place.
+      if (!ats.has(place)) ats.set(place, new RegExp(`^\\[P[0-9]\\](?:\\s*\\[(?:[A-Za-z]+[0-9]+|cleanup)\\])*\\s+${place.replace(SPECIAL_RE, '\\$&')}\\b(?![-–])`));
       return ats.get(place);
     };
     return { by, at };

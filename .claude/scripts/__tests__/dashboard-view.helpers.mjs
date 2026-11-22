@@ -622,7 +622,7 @@ export const SAYS = {
     'Per landed card', '$4.50, 2.3M tokens', 'claude-sonnet-5-5 $3.00, 1.5M tokens', 'Waiting on the owner', '43.8% of the most on average, 4 at most', 'load 4.5 at most, disk free 0 GB at least, memory used 12 GB at most', '1 pushed', '1 failed', '9 (7 landed, 2 blocked)',
     'Landed one', 'lead 1 h 36 min', 'waiting for room 1 min', 'waited on cap 2 min, Depends on 1 min', 'main broken by c4-6', '2 files, +30 −4', '2 pts of the weekly limit', 'findings 2 P1, 1 P2', 'Old record', 'lead —', 'diff —', 'blocked: timeout',
     'Landed, today / 7 days', 'Cycle time, median', 'Passed first review', 'Cost per landed card', 'All numbers', 'Recent cards',
-    'build · 10 min · 1.0M tokens · $2.00 · claude-sonnet-5-5 medium · 12 model replies · API 7 min · tool calls Bash 5, Edit 2 · 1 refused · cache hits 97% · ran claude-opus-5-5', 'review: changes asked · 5 min · 500k tokens · $1.00 · gpt-6.1-sol · findings: 2 P1, 1 P2',
+    'build · 10 min · 1.0M tokens · $2.00 · claude-sonnet-5-5 at medium · 12 model replies · API 7 min · tool calls Bash 5, Edit 2 · 1 refused · cache hits 97% · ran claude-opus-5-5', 'review: changes asked · 5 min · 500k tokens · $1.00 · gpt-6.1-sol · findings: 2 P1, 1 P2',
     'tests: 9 passed, 1 failed, 2 skipped of 12 (3 files)'], empty: 'Nothing measured in the last 7 days', failed: 'The Board could not read Metrics' },
 };
 

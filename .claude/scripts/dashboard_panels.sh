@@ -71,7 +71,8 @@
 #           likewise, timesPlan: what Record test times would do ({kind: report | wrap | card, ...}), null when no plan applies or from a snapshot without it, routes: each Claude route, subscription and proxy, with its state, null likewise, quarantined:
 #           the lines of the card records set aside as not whole records {line, field, time}, null likewise,
 #           serviceOld: the machine's Conveyor on another commit that refuses the pack {commit, refused, project}, null
-#           when it reads it, or likewise), limit (this machine's usage-limit reading: its cost, Codex and API spend figures), limits (the
+#           when it reads it, or likewise, engineStopped: the engine stopped by a signal {pid, since, pids: it and each
+#           stopped process under it}, null when it runs or likewise), limit (this machine's usage-limit reading: its cost, Codex and API spend figures), limits (the
 #           weekly limit reading of each account the cards run on, as each record's guard reads it: limitsOf), accounts (every Claude account read here
 #           and on the host, each with its own usage and what it is used for: accountsOf), stream
 #           ({live, heardAt, since, error, writtenAt}: whether Conveyor's part is the live feed's, when the host was last
@@ -144,7 +145,8 @@
 #           without it.
 #   bench   the Benchmarks tab: each record's (repo null when none is steered; repos and others as the Tests part's)
 #           bench (the snapshot's: the run in progress, the SWE-bench runs' board.json, conveyor/bench/swe.sh
-#           swe_board(), and the versions now, swe_versionsnow()) and drift (the snapshot's: the latest drift watch, conveyor/bench/drift.sh);
+#           swe_board(), and the versions now, swe_versionsnow()), drift (the snapshot's: the latest drift watch, conveyor/bench/drift.sh)
+#           and guard (its control record's weekly-limit guard: a change reads the runs again);
 #           each null from a snapshot without it. The runs and their results are read when shown (--bench).
 #   metrics records (each record's measured totals, today and week) and cards (each card of the 7 days with
 #           its metrics: step timeline, seconds, tokens, dollars, findings; null from a snapshot without them), steps
@@ -174,7 +176,9 @@
 PANELS_JQ='
   def total: if length == 0 then 0 elif any(. == null) then null else add * 10000 | round / 10000 end;
   def link($r): if $r.repoUrl != null and (.issue | type) == "number" and .issue > 0 then "\($r.repoUrl)/issues/\(.issue)" else null end;
-  def tag($r): . + {repo: $r.repo, url: link($r)};
+  # repoUrl too: a card with no GitHub issue (a main-red fix, a Tests page card) has no url to take the repository
+  # from, and its review'"'"'s file paths link to their lines in it (the page'"'"'s repoOf).
+  def tag($r): . + {repo: $r.repo, repoUrl: ($r.repoUrl // null), url: link($r)};
   def few($r): map(tag($r) | {repo, card, issue, title, url} + .);
   # The state of the machine of the records (the record list): not read (its host file does not read), paused (the
   # host file says so), running (a loop of one of them runs), else stopped.
@@ -334,7 +338,7 @@ PANELS_JQ='
           def own: select(.repo == $repo);
           ([$belt[] | own | mine | select(.landed != true) | {state: "belt", card, step, review, of, since: .stepAt}]
            + [$waiting[] | own | mine | {state: "waiting", card, reason: .sentence, since}]
-           + [$blocked[] | own | mine | {state: "blocked", card, reason, tail, since}]
+           + [$blocked[] | own | mine | {state: "blocked", card, reason, tail, since, repoUrl}]
            + [$landed[] | own | mine | {state: "landed", card, since: .time, reviews}]
            + [$R[] | own | .snap.branches | arrays | .[] | mine | {state: "landed", card, since: null, reviews: null}]
            + [$R[] | own | .snap.cost.cards | arrays | .[] | mine | select(.state | IN("landed", "closed")) | {state: "landed", card, since: null, reviews: null}])[0]
@@ -428,7 +432,7 @@ PANELS_JQ='
           cap: ($R | slots)}}} end),
    health: {error: null, data: {
         host: {name: $conv.host, local: ($conv.local == true), reachable: $conv.reachable, error: $cerr}, stream: ($conv.stream // null),
-        records: (if $R == null then null else $R | map({repo, repoUrl: (.repoUrl // null), lastPushAt, steered, snapshotAt: (.snap.snapshotAt // null)} + (.snap.health | {loop, state: (.state // null), newest, stuck, unpushed, pushError, pushFailingSince, gh, ghReached, diskFreeKb, builderCap, models, cycles: (.cycles // null), untimed: (.untimed // null), unchecked: (.unchecked // null), split: (.split // null), report: (.report // null), timesPlan: (.timesPlan // null), routes: (.routes // null), quarantined: (.quarantined // null), serviceOld: (.serviceOld // null)}) + {flaky: (. as $r | .snap.flaky | arrays | map(. + {url: link($r)})) // null}
+        records: (if $R == null then null else $R | map({repo, repoUrl: (.repoUrl // null), lastPushAt, steered, snapshotAt: (.snap.snapshotAt // null)} + (.snap.health | {loop, state: (.state // null), newest, stuck, unpushed, pushError, pushFailingSince, gh, ghReached, diskFreeKb, builderCap, models, cycles: (.cycles // null), untimed: (.untimed // null), unchecked: (.unchecked // null), split: (.split // null), report: (.report // null), timesPlan: (.timesPlan // null), routes: (.routes // null), quarantined: (.quarantined // null), serviceOld: (.serviceOld // null), engineStopped: (.engineStopped // null)}) + {flaky: (. as $r | .snap.flaky | arrays | map(. + {url: link($r)})) // null}
           + {slowOff: (. as $r | .snap.slowOff | arrays | map(. + {url: link($r)})) // null}) end),
         limit: $lim.limit, limitError: $lim.error, limits: limitsOf($R), accounts: accountsOf($R), update: $upd,
         # The plugin problems each Foreman noted, once under each of its projects (repo, as the project filter reads
@@ -513,7 +517,7 @@ PANELS_JQ='
    # drift (its snapshot'"'"'s latest drift watch, conveyor/bench/drift.sh). The runs and their results are read when the
    # tab shows them (--bench).
    bench: (if $R == null then {error: $cerr, data: null} else
-      def benchOf: {repo, bench: (.snap.bench | objects // null), drift: (.snap.drift | objects // null)};
+      def benchOf: {repo, bench: (.snap.bench | objects // null), drift: (.snap.drift | objects // null), guard: ((.snap.control | objects | .guard) // null)};
       {error: null, data: (([$R[] | select(.steered)][0] | if . == null then {repo: null} else benchOf end)
           + {repos: [$R[].repo], others: ([$R[] | select(.steered | not) | {key: .repo, value: benchOf}] | from_entries)})} end),
    # What Conveyor measured: the totals of each record for today, the 7 days and the 7 before them, each of the 7

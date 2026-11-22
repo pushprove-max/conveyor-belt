@@ -179,6 +179,20 @@ test('the effort menu is hidden while the model is the project\'s, and shown, en
   assert.equal(m.title, chosen(m), 'the title follows the chosen model');
 });
 
+// Bug (issue 1430): the row shows the seat the Judge picked (seats.run), but the form's empty option said
+// "Project's: <the project's model>", so the form read as if the card ran on the project's seat.
+test('Settings on a card whose builder is the Judge\'s pick at high: the builder\'s empty option names that pick', () => {
+  const w = boot({ tab: 'control' });
+  const d = full();
+  d.panels.board.data.queue[0].seats = { mode: 'on', run: { builder: { model: 'claude-fable-5-2', effort: 'high', by: 'judge' } } };
+  deliver(w, d);
+  act(bcard(w, 20), 'seats').click();
+  const form = bcard(w, 20).querySelector('.board-seats-form'), m = act(form, 'seat-model-builder');
+  assert.deepEqual([m.value, chosen(m)], ['', 'Judge\'s pick: claude-fable-5-2 at high']);
+  assert.equal(form.querySelector('[data-seat="builder"] .board-seat-same').textContent, 'the effort it names');
+  assert.match(chosen(act(form, 'seat-model-reviewer')), /^Project's: /, 'a seat the rule did not set is the project\'s');
+});
+
 // Bug: a card's saved model that left the allowed list made Settings throw (no selected option for the title).
 test('Settings opens on a card whose saved model is no longer allowed, showing the project\'s', () => {
   const w = boot({ tab: 'control' });

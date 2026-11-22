@@ -236,14 +236,16 @@ test('Versions, no version with a result: the verdict says not kept', async () =
 });
 
 // Bug it guards: two arms that share no graded task said "<A> and <B> share no task they both graded." in the verdict.
-test('Compare, 2 runs of 1 task, the two arms share no graded task: the verdict says not kept', async () => {
+// Also (issue 1430): its line said "The only difference is cost and time: … took 0 sessions", which nothing supports.
+test('Compare, 2 runs of 1 task, the two arms share no graded task: the verdict and its line say not kept', async () => {
   const set = BH.few();
   Object.assign(set.shows[BH.FEW1].tasks[0].cells.find((c) => c.arm === 'solo'), { result: null, state: 'not reached', resolved: undefined });
   const w = await opened(set, 'compare');
   await pickArm(w, 'a', 'arm:conveyor-codex-claude');
   await pickArm(w, 'b', 'arm:solo');
   assert.equal(text(q(w, '.bench-vv')), 'not kept');
-  none(w, 'compare', ['share no task']);
+  assert.equal(text(q(w, '.bench-vw')), 'not kept');
+  none(w, 'compare', ['share no task', 'The only difference is cost and time']);
 });
 
 // Bug it guards (#1231): while the page has not read the run of an older version picked as a side, Compare said its own
@@ -305,8 +307,9 @@ test('Task, 7 arms on a task the Caveman arm did not fire on: the Note says did 
 });
 
 // ---- Plan a run ----
-// Bug it guards: the arm table showed the engine's other state words ("unchecked", "checking"), where the mockup has
-// ready, changed and expired: an arm in any other state has no state kept. Start and Check the
+// Bug it guards: the arm table showed the engine's other state words ("unchecked"), where the mockup has ready, changed
+// and expired: an arm in any other state has no state kept, but for one being checked, a state known (issue 1430: it
+// read "not kept", the page's word for a figure a result did not keep). Start and Check the
 // arms first are on where the mockup has them on (ticked arms ready: Check runs again for them), off only with a word of
 // why; the Belt row says not kept when the limits are not kept.
 test('Plan a run, 2 runs of 1 task: the arm table shows the mockup\'s states, both buttons are on, and no why shows', async () => {
@@ -318,7 +321,8 @@ test('Plan a run, 2 runs of 1 task: the arm table shows the mockup\'s states, bo
   // Bug it guards (#1233): the arm not offered had no row; the mockup lists every arm. Its row shows "not kept" for the
   // state, and its box is off, so no run or check is sent for an arm the project does not offer.
   assert.equal(arms.length, 15, 'every arm has a row, the arm not offered too');
-  assert.deepEqual(Array.from(new Set(arms.map((r) => r[2]))), ['ready', 'expired', 'not kept']);
+  assert.deepEqual(Array.from(new Set(arms.map((r) => r[2]))), ['ready', 'expired', 'not kept', 'checking']);
+  assert.equal(q(w, `.bench-planarms tr[data-arm="${set.hist.arms[6].name}"]`).children[2].textContent, 'checking', 'the arm being checked says so');
   const row = q(w, `.bench-planarms tr[data-arm="${set.hist.arms[5].name}"]`);
   assert.ok(row, 'the row of the arm not offered');
   assert.equal(row.querySelector('input[type="checkbox"]').disabled, true, 'the arm not offered cannot be ticked');

@@ -271,8 +271,11 @@
   function drawOverlays(part) {
     overlays.forEach((mod) => {
       try {
+        // picking(): the tab in view shows the project choice (Show at every project, with more than one), as a panel of
+        // it says by its ctx.picking(): the overlay draws no project over that choice.
         mod.draw(part(mod.part), { h, chip, money, post, undoLine, refusal, project, state: stateBlock, param, params, issueLink, depRef, depPicked,
-          since, when, setTab, updatedAt: () => app.updatedAt, title() {}, relength() {} });
+          since, when, setTab, updatedAt: () => app.updatedAt, title() {}, relength() {},
+          picking: () => idsOf(app.tab).some((id) => panels.has(id) && app.needsPick(panels.get(id).mod)) });
       } catch { /* the overlay is not drawn */ }
     });
   }
@@ -297,7 +300,11 @@
   const fitKey = () => [window.innerWidth, app.prefs.density, byId('restart') ? byId('restart').hidden : '', ...app.headView.tiles.map((t) => `${t.a.textContent}|${Array.from(t.a.querySelectorAll('*'), (e) => (e.hidden ? 1 : 0)).join('')}`)].join('\n');
   // A fit lays the head out and measures it: drawHead() and a figure that lands fit it again only when that changed.
   let headQueued = false;  // a drawTabs() and drawHead() wait for the next frame (headSoon())
-  function refit() { if (app.headView && app.headView.fitted !== fitKey()) fitHead(); }
+  // A resize (resized) fits it again when the head's box changed its width too (its room at the last fit): the box can
+  // narrow with no change of the window's width.
+  function refit(resized) {
+    if (app.headView && (app.headView.fitted !== fitKey() || (resized && app.headView.box.clientWidth !== app.headView.room))) fitHead();
+  }
   function fitHead() {
     if (!app.headView) return;
     const box = app.headView.box, tiles = app.headView.tiles;
@@ -310,6 +317,7 @@
     const sum = (list) => list.reduce((s, t) => s + width.get(t), 0);
     box.style.minWidth = `${Math.ceil(sum(tiles.filter((t) => !t.spec.drop)))}px`;
     const room = box.clientWidth;
+    app.headView.room = room;
     let total = sum(tiles);
     tiles.filter((t) => t.spec.drop).sort((a, b) => a.spec.drop - b.spec.drop).forEach((t) => {
       if (total > room) { total -= width.get(t); t.a.hidden = true; }

@@ -186,7 +186,7 @@ h1 { font-size: var(--fs-lg); font-weight: 700; letter-spacing: -0.01em; }
 .btn:hover { transform: translateY(-1px); }
 .btn:active { transform: scale(.97); }
 /* A button that cannot work now looks it: greyed, and it neither lifts nor presses. */
-.btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+.btn:disabled, .btn[aria-disabled="true"] { opacity: .45; cursor: not-allowed; transform: none; }
 .btn-quiet { background: transparent; }
 .btn-primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 /* An action on a whole list ("Dismiss all shown"): a warning's colours, so it never looks like a harmless button. */
@@ -605,7 +605,8 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .delta { font-size: var(--fs-xs); font-weight: 650; color: var(--muted); }
 .delta.good { color: var(--ok); }
 .delta.bad { color: var(--bad); }
-.metric-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--sp-4); margin-bottom: var(--sp-4); }
+/* A chart's track is never wider than the panel, so a very narrow panel (a 280px fold screen) does not scroll sideways. */
+.metric-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: var(--sp-4); margin-bottom: var(--sp-4); }
 .chart { margin: 0; }
 .chart-svg { display: block; width: 100%; height: auto; overflow: visible; }
 .chart-svg .axis { stroke: var(--border); stroke-width: 1; }
@@ -667,7 +668,8 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .release-machine .release-mode-pick[aria-pressed="true"] { border: 2px solid var(--accent); }
 .release-cases, .release-reasons { margin: var(--sp-1) 0 0 var(--sp-4); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .release-change { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; }
-.release-change-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A change's title wraps and is never cut: the Release panel is Small by default, a narrow column. */
+.release-change-title { flex: 1 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 /* At Small, a card is one narrow column: each step's chip above its line, the version field above its button. */
 .panel[data-panel="release"][data-size="small"] .release-steps .row-main,
 .panel[data-panel="release"][data-size="small"] .release-go { flex-direction: column; align-items: stretch; }
@@ -851,6 +853,10 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .rules-next .board-title, .rules-held-row .board-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rules-marks { display: flex; flex: none; gap: var(--sp-1); }
 .rules-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); margin: var(--sp-3) 0; }
+/* By the produce panel's own width, not the window's: in a small panel (a third of a 1280px window) the four tiles go
+   two across, so a label such as "waiting on another card" is not a word a line. */
+.panel[data-panel="rules-produce"] > .panel-body { container: rules-produce / inline-size; }
+@container rules-produce (max-width: 560px) { .rules-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .rules-stat { display: grid; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
 .rules-big { font-size: var(--fs-xl); font-weight: 650; font-variant-numeric: tabular-nums; }
 .rules-forecast { font-size: var(--fs-sm); color: var(--muted); }
