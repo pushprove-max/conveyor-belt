@@ -419,7 +419,7 @@
       }
     },
     "landBatch": {
-      "description": "At most this many cards that are ready to land and share files land together, on one test run (1: each lands alone).",
+      "description": "At most this many cards that are ready to land land together, on one test run (1: each lands alone).",
       "type": "integer",
       "minimum": 1,
       "default": 8

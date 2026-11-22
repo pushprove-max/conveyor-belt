@@ -306,7 +306,8 @@ main).
 
 ## Landing
 
-Cards that share a file land in turn, or together in one batch that is tested once. A card whose change still applies
+Cards that share a file land in turn, or together in one batch that is tested once. With batches on, ready cards on
+other files land in one batch too ([How a batch lands](#how-a-batch-lands)). A card whose change still applies
 to a main that moved lands on the tests it already passed, with no second run and no second review. Its product checks
 run again on main. A change that had to be reworked to fit is reviewed and tested again (`conveyor/README.md`,
 Same-file cards).
@@ -325,6 +326,19 @@ change, then reviewed and tested there. When the other card passes its tests, th
 card first. When the other card fails its tests, the stacked card is put on main alone and lands first. When the other
 card's change changes, the card is stacked again once; after that it waits. A card whose issue has a `Depends on:`
 line that names the other card's issue waits.
+
+### How a batch lands
+
+With batches on, ready cards land through a queue, on any files. One card at a time has the landing turn. A ready card
+takes the turn when no other card has it. While another card has the turn, a ready card does not test or land again.
+It waits on that card, and the log says it is queued for the next batch. When the turn is free, the next ready card
+takes it, with every ready card in the queue, up to the pack's `landBatch` cards. That is the batch. Their changes go
+onto main one after another, and the batch is tested once on the result. When that run passes, all the cards of the
+batch land in one move of main, each with its own commit.
+
+When the run fails, the batch is split into two halves. Each half is tested on main with the cards that passed before
+it. The split goes on until it finds the card that breaks the run. That card goes back to its fix with the output of
+that run, and the other cards land. A run that fails ends the turn, so the queue does not wait for the fix.
 
 ## Push
 

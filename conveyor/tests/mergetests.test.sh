@@ -119,7 +119,7 @@ sharedturn() {
 t_mergesharedturn() {
   local a
   sharedonce turn; wait "$BPID"
-  [ "$(cat "$T/$CASE/b.out" 2>&1)" = $'another card has the landing turn, as its run again of the shared test files passed on main; nothing was landed\nland: 1' ] \
+  [ "$(cat "$T/$CASE/b.out" 2>&1)" = $'another card has the landing turn, as its batch or its run again of the shared test files lands first; nothing was landed\nland: 1' ] \
     || fail "card B was not refused while A had the landing turn: $(cat "$T/$CASE/b.out" 2>&1)"
   a=$(st 'select(.issue == 7 and .step == "landed") | .sha')
   [ -n "$a" ] && [ "$(cat "$STUB/n")" = 2 ] && [ "$(git -C "$R" log -1 --format=%s "$a^")" = "card-c lands" ] && [ ! -e "$T/$CASE/cards/land.turn" ] \

@@ -297,7 +297,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local route # route: where a failed test run goes (testroute())
   local cr # cr: a failed test line's carried part (testlist.sh carriedrec())
   local mainsec=0 mwon # mwon: main's commit and the cases it waits on there (mainred.sh mainwait()); mainsec: the seconds it has waited for main to change (mainwaited()); its landed line's waitSec adds them to waitsec
-  local repaired='' lane # repaired: the repair lane passed its test step (mainred.sh repairlane()), saying how; lane: its exit
+  local repaired='' lane queued='' # repaired: the repair lane passed its test step (mainred.sh repairlane()), saying how; lane: its exit; queued: another card had the landing turn (gather()), so it waits for the next batch
   local ins rr # ins, rr: the review's instructions, and fix when it reviews the fix alone (donewhen.sh rereview())
   local ph pf pb # ph, pf: the hash and the files of the change's lint policy diff (lintpolicy()); pb: the body kept by the card it resumes
   local shared sb # shared: 1 when this test step runs its shared test files again (sharedtests()), 2 when they ran again before for the change it holds; sb: the commit its last tests ran on

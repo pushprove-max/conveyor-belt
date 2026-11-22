@@ -82,7 +82,8 @@ cardready() {
   # the card's fix, as main alone passes it.
   # Batches: after a GO it is ready to land once its own checks and tests pass (tested()), and a batch may take it
   # while it waits (gather()); one with follow-ups to file lands on its own. Holding its files on main as it is now,
-  # its tests passed, it takes the ready cards that share them, and one run judges them all (batch()). Tests that
+  # its tests passed, it takes the landing turn and the ready cards that share them or wait on that turn, and one run
+  # judges them all (batch()); while another card has the turn, it waits for the next batch (turnq()). Tests that
   # passed while it waited on what its worktree still holds are not run again (testedhere()). A card that files a
   # last NO-GO's follow-ups keeps its pass there too, marked alone: no batch takes it or is taken by it.
   # Its extra's waitSec is what it has waited so far; settle() keeps it up to date while it waits (a batch lands it).
@@ -141,9 +142,12 @@ cardlanding() {
     # too when the fitted change is not the one that passed: testedhere()).
     # A change that no longer applies there is put back as it was (caught) and meets the conflict at landing; one
     # apart from its batch (batch()), which landed, is brought onto main by one session, as a waiting card is.
-    if [ -n "$away" ] || [ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" != "$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)" ]; then
-      [ -n "$away" ] && [ "$away" = "$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)" ] || [ -n "$apart" ] || caught=1
-      t=${#mates[@]}; unmate; old=$(git -C "$wt" rev-parse HEAD 2>/dev/null); away=''
+    # A card queued for the next batch (cardtest(): another card had the landing turn) waits on that card at its claim
+    # (turnq(), lib/claim.sh), as a waiting card does, and after the wait goes round again: a batch took it, or it has
+    # the turn and makes the next batch.
+    if [ -n "$away$queued" ] || [ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" != "$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)" ]; then
+      [ -n "$away" ] && [ "$away" = "$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)" ] || [ -n "$apart$queued" ] || caught=1
+      t=${#mates[@]}; [ -z "$queued" ] || t=queued; queued=''; unmate; old=$(git -C "$wt" rev-parse HEAD 2>/dev/null); away=''
       redbrief "$c" "$n" "$br"; settle "$c" "$n" "$wt" "$sprompt" land "$issue"; rc=$?
       [ $rc != 1 ] || return
       [ $rc != 3 ] || { go=landed; return; } # a batch landed it
@@ -209,7 +213,7 @@ cardtest() {
     go=next; return
   fi
   [ -z "$away" ] || away=$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)
-  sec=$SECONDS; rc=0; ran=''; own=''; apart=''; repaired=''; TEST_BATCH=''; TEST_REFUSED=''; rm -f "$wt.stop"
+  sec=$SECONDS; rc=0; ran=''; own=''; apart=''; queued=''; repaired=''; TEST_BATCH=''; TEST_REFUSED=''; rm -f "$wt.stop"
   # The times its own run took go on its test line (testlist.sh slowtests()); only a test rule files an issue about a test
   # file (testrulespass(), after the test line is recorded).
   testedhere "$wt" || own=1
@@ -227,7 +231,8 @@ cardtest() {
   [ $rc != 0 ] || [ -z "$own" ] || tested "$wt"
   [ $rc != 0 ] || [ "$shared" != 1 ] || cardpatch "$wt" > "$wt.sharedran" || rm -f "$wt.sharedran"
   if [ $rc = 0 ] && [ -z "$away" ] && [ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" = "$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)" ]; then
-    out=$(locked gather "$c" "$wt" "$me") || out=''
+    # Another card has the landing turn (gather() 2): it is queued, waiting on that card for the next batch (cardlanding()).
+    out=$(locked gather "$c" "$wt" "$me"); t=$?; [ $t = 0 ] || out=''; [ $t != 2 ] || queued=1
     # A full run its own run refused (tests()) stays on the line its batch's run writes.
     rf=$TEST_REFUSED; [ -z "$out" ] || { t=$ran; ran=1; batch "$c" "$wt" $out; rc=$?; [ -z "$apart" ] || ran=$t; }; TEST_REFUSED=${TEST_REFUSED:-$rf}
   fi
@@ -240,12 +245,16 @@ cardtest() {
     [ $t != 3 ] || { ran=1; batch "$c" "$wt" "${mates[@]}"; rc=$?; }
   fi
   sec=$((SECONDS - sec))
-  # It broke its batch, or its patch did not apply on the cards before it there: the cards that passed land without it.
+  # It broke its batch, or its patch did not apply on the cards before it there: the cards that passed land without it,
+  # its landing turn ended (landmates(), lib/claim.sh).
   if { [ $rc != 0 ] || [ -n "$apart" ]; } && [ ${#mates[@]} != 0 ]; then
     mapfile -d '' t5 < <(fives "$c" "$n" "$wt" "$cmsg" '' skip)
-    t=$(locked land "${t5[@]}") || { echo "conveyor: card $c: the cards of its batch that passed did not land: $t"; unmate; }
+    t=$(locked landmates "$c" "${t5[@]}") || { echo "conveyor: card $c: the cards of its batch that passed did not land: $t"; unmate; }
     mates=()
   fi
+  # A run that failed ends its landing turn: no ready card stays queued on it (turnq()) through its fix or its wait for
+  # main or the machine, where the card that fixes main would wait on it too.
+  [ $rc = 0 ] || locked turnfree "$c"
   [ -z "$back" ] || { git -C "$wt" reset -q --hard "$back" 2>/dev/null && git -C "$wt" apply --index "$wt.bpatch" 2>/dev/null; } \
     || { block "$c" "$n" "$wt" "the batch of the card landed, but the engine could not put the change of the card back in its worktree. The change is in the patch $wt.bpatch"; return; }
   rm -f "$wt.lent" # its worktree holds its own change again (batch())

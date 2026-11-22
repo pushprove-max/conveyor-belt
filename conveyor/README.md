@@ -1516,7 +1516,8 @@ file never makes one card wait for another, whatever their edits to it. Two card
 their changes do not apply together: a card whose change merges three-way (`git apply --3way`), with no conflict left,
 onto main with the other card's change already merged there does not wait on it, so changes to different parts of one
 file land in turn without waiting, each tested on main as the one before left it. Two cards that change the same lines
-of a file still wait, one behind the other. A card waits while a card it overlaps holds one of those files, then goes
+of a file still wait, one behind the other. With batches on, a ready card also waits for the landing turn, on any
+files (the queue, below). A card waits while a card it overlaps holds one of those files, then goes
 on from main as it is then. A ready card lands first: a card whose review gave a GO and whose tests passed on main does
 not wait for a card it overlaps that is still in its tests or its fix, even one picked before it. When both are
 ready, the card that became ready first lands first. The card that was passed is then put on main with the landed
@@ -1557,9 +1558,15 @@ Cards ready to land land in batches. A card is ready once its review gave a GO a
 tests passed: a card that waits to land runs them while it waits, holding nothing (failing tests send it to its fix and a
 failing check blocks it, as at its turn; a lint finding or execution error before them runs none and leaves it not
 ready, for its landing gate at its turn), and the card whose turn comes runs them first. When a ready card's turn to land comes, it takes the
-other ready cards waiting to land that share a file with it, or with a card taken before (in turn), up to the pack's
-`landBatch` (8 by default; 1 turns batches off), and holds the files of them all until the batch lands: another card
-waits on it only when its change does not apply together with the whole batch's. The batch is
+landing turn, then the other ready cards waiting to land that are queued for the next batch (on any files) or share a
+file with it, or with a card taken before (in turn), up to the pack's
+`landBatch` (8 by default; 1 turns batches off), and holds the files of them all until the batch lands: a card that
+is not ready and changes one of those files waits on it only when its change does not apply together with the whole
+batch's, and a ready card waits on it whatever files it changes. The queue: one card at a time has
+the landing turn, from its claim as a ready card or from when its batch forms, through its batch's run, until it
+lands, gives way, waits at its claim, blocks or fails a run. A ready card that finds another card with the turn, at
+its claim or when its own tests passed, is queued: it waits on that card, holding nothing, tests and lands nothing
+meanwhile, and the next batch takes it. The batch is
 in `order` first, then by when each card became ready, the card whose turn it is among them; a stacked card (below)
 goes after the card it is stacked on. Their changes are applied
 one on another in that order and tested once. That run reuses each card's passed tests: it
