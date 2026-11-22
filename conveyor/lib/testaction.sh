@@ -107,7 +107,8 @@ TAEXPLAIN="Explain the slowdown of one test file of this project. From its recor
 # names: Claude Code gives a session's commands its id, CLAUDE_CODE_SESSION_ID), or while the control record's new
 # issues start held (or the record cannot be read), it holds the issue in the control record, as the Foreman's
 # filing hooks do, which do not see an issue filed here, and says so on stderr: a Foreman's issue is not built
-# before the owner's yes.
+# before the owner's yes. Such an issue is made with the built label, which the pick skips, and has it taken off once
+# the hold is in the control record, so no pick between the two takes it.
 # With the control record's rules.testissues false (the Rules tab's Cards with no GitHub issue: Tests page actions On,
 # #1330) it files no issue: the card starts with no GitHub issue (testcard()), and it prints that, while new issues
 # start held too: the owner asked for the card on the Board. One asked for a Foreman session (foreman.sh ask
@@ -124,13 +125,15 @@ testissue() { # <test file> <title> <body>
   if [ "${CONVEYOR_FOREMAN:-}" = 1 ] || { [ -n "$s" ] && [ "${CLAUDE_CODE_SESSION_ID:-}" = "$s" ]; }; then why='it was filed for a Foreman session' fm=1
   else case $(jq -r '.start // empty' <<<"$c" 2>/dev/null) in queue) ;; held) why='new issues start held' ;; *) why='the control record cannot be read' ;; esac; fi
   if [ "$(jq -r '.rules.testissues' <<<"$c" 2>/dev/null)" = false ]; then testcard "$@" "${fm:+held}"; return; fi
-  out=$(gh_write issue create --title "${2:0:200}" --label "$TYPE" --label "$(jq -r '.[-1]' <<<"$PRIOS")" --body "$3" 2>&1); n=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1); n=${n##*/}
+  # An issue to be held is made with the built label, which the pick skips, until the hold is in the control record.
+  out=$(gh_write issue create --title "${2:0:200}" --label "$TYPE" --label "$(jq -r '.[-1]' <<<"$PRIOS")" ${why:+--label "$BUILT"} --body "$3" 2>&1); n=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1); n=${n##*/}
   [ -n "$n" ] || { echo "conveyor: the issue about $1 could not be filed: $out" >&2; return 1; }
   jq -cn --arg t "$(clock)" --arg f "$1" --argjson n "$n" '{time: $t, event: "filed", file: $f, issue: $n}' >> "$TAFILED" \
     || echo "conveyor: #$n is filed, but its record could not be written: the row of $1 does not show it" >&2
   if [ -n "$why" ]; then
-    if locked control hold "$n" > /dev/null 2>&1; then echo "conveyor: #$n is held, as $why: release it (conveyor.sh control release $n) once the owner says yes" >&2
-    else echo "conveyor: #$n is filed, but could not be held ($why): hold it (conveyor.sh control hold $n) unless the owner has said yes to it" >&2; fi
+    if ! locked control hold "$n" > /dev/null 2>&1; then echo "conveyor: #$n is filed, but could not be held ($why): hold it (conveyor.sh control hold $n) unless the owner has said yes to it, and take the $BUILT label off it, which the belt skips" >&2
+    elif gh_write issue edit "$n" --remove-label "$BUILT" > /dev/null 2>&1; then echo "conveyor: #$n is held, as $why: release it (conveyor.sh control release $n) once the owner says yes" >&2
+    else echo "conveyor: #$n is held, as $why, but the $BUILT label could not be taken off it: take it off before you release it (conveyor.sh control release $n), as the belt skips an issue with it" >&2; fi
   fi
   grep -oE '[^[:space:]]*/issues/[0-9]+' <<<"$out" | tail -n 1
 }
@@ -253,11 +256,14 @@ testpick() { # <the open issues json>
   open=$(jq -c 'map(.number)' <<<"${1:-[]}" 2>/dev/null) || open='[]'
   parts=$(jq -c 'map(select((.parts // []) != []) | {key: (.number | tostring), value: [.parts[] | .number | numbers]}) | from_entries' <<<"${1:-[]}" 2>/dev/null) || parts='{}'
   # The unheld cards not picked yet are read as an issue is: the state of each issue of another repository their `Depends on:` lines name is asked now (farstates()).
-  far=$(farstates "$(jq -c 'map(if .card == null and (.held | not) then {body} else {} end)' <<<"$rec")") \
+  # A card given back (card set, its lines gone) is picked again, so it is asked as one not picked yet is; one that landed is not picked again, so it is not asked.
+  have=$(stdb ask issue cards 0) || h=0
+  far=$(farstates "$(printf '%s\n%s\n' "$rec" "$have" | jq -Rcn --arg shut "$SHUT" --arg own "$OWNSHUT" 'input | fromjson as $r
+    | ([inputs | fromjson? | objects | select('"$TADONE"') | .card | strings] | INDEX(.)) as $landed
+    | $r | map(if (.held | not) and $landed[.card // ""] == null then {body} else {} end)')") \
     && rec=$(jq -c --argjson f "$far" '[., $f] | transpose | map(.[0] + (.[1] | if .far then {far} else {} end))' <<<"$rec") \
     || { exec {lock}>&-; echo "conveyor: the issues of other repositories the Tests page's cards depend on could not be read; its cards wait" >&2; return 1; }
   cards=$(recs) || { exec {lock}>&-; return 1; }
-  have=$(stdb ask issue cards 0) || h=0
   if [ "$h" = 1 ] && [ -z "${ONLY:-}" ]; then
     while read -r old; do
       RETRYWHY=$TCRETRY retry "$old" > /dev/null 2>&1 && echo "conveyor: card $old: $TCRETRY" >&2
@@ -292,7 +298,7 @@ testpick() { # <the open issues json>
       and ($only == null or (.value.parent | IN($only[]))) and (($fuoff | not) or ((.value.labels // []) | index($fu) == null))
       and ((.value.labels // []) | any(IN($never[])) | not)
       and (.value | [ups($fc; needs)[] | select(IN($open[]) and (IN($idone[]) | not))] == [])
-      and (.value.card != null or (.value | [farneeds[] as $x | select(.far[$x].open != false) | $x] == []))
+      and (.value | [farneeds[] as $x | select(.far[$x].open != false) | $x] == [])
       and all(.value.body // "" | splits("\r?\n") | select(test("^\\s*Depends on:")) | scan("c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]*-[0-9]+(?![A-Za-z0-9_])"); cardlanded(.))) | .key')
   exec {lock}>&-
 }
@@ -334,7 +340,8 @@ cardissue() { # <card id>
   [ -n "$sha" ] || { exec {fl}>&-; echo "conveyor: card $1 has not landed; nothing filed" >&2; return 2; }
   u=$(jq -r '.filedUrl // empty' <<<"$e")
   [ -z "$u" ] || { exec {fl}>&-; echo "conveyor: card $1 was filed before, as $u" >&2; echo "$u"; return 0; }
-  out=$(gh_write issue create --title "$(jq -r .title <<<"$e")" --body "$(jq -r .body <<<"$e")" 2>&1); u=$(grep -oE '[^[:space:]]*/issues/[0-9]+' <<<"$out" | tail -n 1); n=${u##*/}
+  # With the built label from the start: the belt skips an open issue with it, and builds one without it again.
+  out=$(gh_write issue create --title "$(jq -r .title <<<"$e")" --label "$BUILT" --body "$(jq -r .body <<<"$e")" 2>&1); u=$(grep -oE '[^[:space:]]*/issues/[0-9]+' <<<"$out" | tail -n 1); n=${u##*/}
   [ -n "$n" ] || { exec {fl}>&-; echo "conveyor: the issue of card $1 could not be filed: $out" >&2; return 1; }
   { exec {lock}>>"$TACARDS.lock"; } 2>/dev/null && flock "$lock" && rec=$(jq -ce '.cards | arrays' "$TACARDS" 2>/dev/null) \
     && jq -c --arg c "$1" --argjson n "$n" --arg u "$u" '{cards: map(if .card == $c then .filed = $n | .filedUrl = $u else . end)}' <<<"$rec" > "$TACARDS.new" && mv -f "$TACARDS.new" "$TACARDS" \

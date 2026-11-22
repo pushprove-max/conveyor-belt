@@ -202,6 +202,9 @@ t_tcland() {
   out=$(loop cardissue "$c" 2>&1) && [ "$out" = https://github.com/o/r/issues/100101 ] \
     && [ "$(jq -c '[.title, .body]' "$STUB/filed")" = "$(jq -cn --arg b "$body" '["Optimize the test file f.test.sh", $b]')" ] \
     || fail "cardissue $c did not file an issue with its title and body: $out $(cat "$STUB/filed" 2>&1)"
+  # Bug it catches (R129): the issue was made with no built label and closed after, so a pick in between built the landed work again.
+  [ "$(jq -c '.labels | map(.name)' "$STUB/filed")" = '["awaiting-deploy"]' ] \
+    || fail "cardissue $c did not make the issue with the built label: $(cat "$STUB/filed")"
   [ "$(cat "$STUB/closed")" = 100101 ] && grep -qF "Conveyor card $c landed this as commit $sha" "$STUB/close-comments" \
     || fail "cardissue $c did not close #100101 naming the commit $sha: $(cat "$STUB/closed" "$STUB/close-comments" 2>&1)"
   out=$(loop cardissue "$c" 2>/dev/null) && [ "$out" = https://github.com/o/r/issues/100101 ] && [ "$(wc -l < "$STUB/filed")" = 1 ] \
@@ -527,4 +530,32 @@ t_niyes() {
     || fail "the follow-up card of no issue did not land on its parent's yes: $(st 'select(.step | IN("picked", "blocked", "landed")) | [.step, .issue, .result, .reason[0:300]] | @json' | tail -n 4)"
   grep -qx "$P" "$STUB/asked" && grep -q '^# The yes of #7$' "$STUB/asked" && grep -q 'That yes gives a condition' "$STUB/asked" \
     || fail "the review of the follow-up card of no issue lacks the parent's yes or its condition: $(cat "$STUB/asked")"
+}
+
+# Bug it catches (R130): a card given back by `retry` (picked, blocked, its lines gone, its card id kept) was picked again
+# with no check of its `Depends on: other/repo#600`, as that issue of another repository was asked only for a card not picked
+# yet, so it started while #600 was open again. It waits while #600 is open and is picked once #600 is closed. A landed card
+# is not asked about (E1): the pick asked for every unheld card and held the records lock while it did.
+t_nifarretry() {
+  nisetup foremanissues; local id out new
+  loop card 'Add a Rules row' $'Make it so.\n\nDepends on: other/repo#600' > /dev/null 2>&1 || fail "card with a far Depends on line failed"
+  id=$(jq -r '.cards[0].id' "$(nicards)")
+  loop control release "$id" > /dev/null || fail "control release $id failed"
+  echo CLOSED > "$STUB/repo.other_repo.600"
+  fx_in 'locked testpick "[]"; append "$(line "'"$id"'" 0 blocked ok "{\"reason\":\"build: it failed\"}")"'
+  [ "$(head -n 1 "$T/$CASE/run.out")" = "$id 0 false" ] || fail "the pick did not take the Foreman order $id once other/repo#600 was closed: $(cat "$T/$CASE/run.out")"
+  out=$(loop retry "$id" 2>&1) && [ -z "$(st "select(.card == \"$id\")")" ] || fail "retry $id did not give back the blocked card: $out"
+  echo OPEN > "$STUB/repo.other_repo.600"
+  fx_in 'locked testpick "[]"'
+  [ "$RC" = 0 ] && [ ! -s "$T/$CASE/run.out" ] || fail "the pick took the retried card $id (Depends on: other/repo#600) while that issue is open: $(cat "$T/$CASE/run.out")"
+  echo CLOSED > "$STUB/repo.other_repo.600"
+  fx_in 'locked testpick "[]"'
+  # A card given back is taken again under a new card id.
+  [[ $(cat "$T/$CASE/run.out") =~ ^c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0\ 0\ false$ ]] || fail "the pick did not take the retried card $id once other/repo#600 closed: $(cat "$T/$CASE/run.out")"
+  # A card that landed is never picked again, so a pick asks GitHub nothing about its other/repo#600 (each ask holds the records lock for up to 30 seconds).
+  new=$(awk '{print $1}' "$T/$CASE/run.out")
+  fx_in 'append "$(line "'"$new"'" 0 landed ok "{\"sha\":\"abc\",\"product\":false}")"'
+  rm -f "$STUB/far-viewed"
+  fx_in 'locked testpick "[]"'
+  [ "$RC" = 0 ] && [ ! -s "$STUB/far-viewed" ] || fail "the pick asked GitHub about the landed card's other/repo#600: $(cat "$STUB/far-viewed" 2>/dev/null)"
 }

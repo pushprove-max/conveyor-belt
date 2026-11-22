@@ -439,3 +439,20 @@ t_taexplainwindow() {
   grep -qF 'oldest first, each with its card and its diff of those files: none: no commit that changed one of these files was made in that window.' <<<"$out" \
     && ! grep -qE '^(Card|Commit) ' <<<"$out" || fail "the facts of a window with no commit in it do not say so: $out"
 }
+
+# Bug this guards (R128): an issue filed for a Foreman session (new issues start in the queue) was open and unheld
+# until testissue held it, so a pick that listed the open issues in between took it before the owner's yes. The pick
+# is run, as the loop would run it, just before the hold, on the issues filed so far (as the owner's issues, which the
+# loop does not hold for being from outside); it must take none, and the issue is held with no built label left once
+# the hold is in.
+t_taissuerace() {
+  tasetup
+  # A function stands in for `locked` to run the pick at the moment the hold is asked for; the real one does the rest.
+  fx_in 'export CONVEYOR_FOREMAN=1; eval "$(declare -f locked | sed "1s/^locked/reallocked/")"
+    locked() { if [ "$1 $2" = "control hold" ]; then reallocked pick "" "" "$(jq -cs "map(. + {authorAssociation: \"OWNER\"})" "$STUB/filed")" > "$STUB/between" 2>&1; fi; reallocked "$@"; }
+    testissue tests/x.test.sh "Speed up tests/x.test.sh" "Measured: 12 CPU s."'
+  [ "$RC" = 0 ] && [ -e "$STUB/between" ] || fail "testissue for a Foreman session did not file and reach the hold (exit $RC): $(cat "$T/$CASE/run.out")"
+  [ ! -s "$STUB/between" ] || fail "a pick between the issue's filing and its hold took the Foreman's issue: $(cat "$STUB/between")"
+  [ "$(loop control | jq -c .held)" = '[100101]' ] || fail "the Foreman's issue is not held: $(loop control)"
+  [ "$(jq -c '.labels | map(.name)' "$STUB/filed")" = '["bug","P2"]' ] || fail "the built label was not taken off the held issue: $(cat "$STUB/filed")"
+}
