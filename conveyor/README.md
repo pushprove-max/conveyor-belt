@@ -454,9 +454,9 @@ below), and no record is of that file: the filter ran no case. Nothing of a run 
 `mainred.json`, to a wait for main or to a fix session. The step's `test` line has the reason `no result: <why>`, and
 the test step runs again. This is also true for a card that a restarted loop adopted. After the third such run in a
 row, the card is blocked with the reason "the changed tests gave no result 3 times in a row". A run that gives a
-result starts the count again. A run that fails is a run with a result, also when a file's filter ran no case: that
-file is not kept as passed, and its cases run again, but the run's other failures go on to main and the fix session as
-usual.
+result starts the count again. Any other failed run is a run with a result. This is also true when a file's filter
+ran no case. That file is not kept as passed, and its cases run again. The run's other failures go on to main and the
+fix session as usual.
 
 Before a failure goes to the fix session, what still did not pass after the run again runs on main (a fix session cannot repair main or the
 machine): in a worktree of main's commit as it is now, on a test
