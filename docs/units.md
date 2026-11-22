@@ -122,10 +122,11 @@ right-aligned and the title is what gives way.
   `issue open` when GitHub did not close it); beneath, when it was picked up, its overall time to the landing and the
   follow-ups it filed (`↳ 3 follow-ups: #13 #14 #15`).
 - **The measurements of a card**, in `/units` under each card that needs you, the same fields as the Board's per-card
-  detail, in two lines: where its time went (`lead`, `cycle`, `queued`, `slot wait`, `build`, `review`, `fix`,
+  detail, less two that only the Board shows (what the card waited on in the queue, with the time under each cause,
+  and the card whose landing broke main), in two lines: where its time went (`lead`, `cycle`, `queued`, `slot wait`, `build`, `review`, `fix`,
   `tests`, `landing`, `to push`, `waiting on you`), then what it made and cost (files and lines changed, findings by
   level, reviews, rebuilds, retries, follow-up depth, follow-ups filed, weekly limit points, tokens, dollars, and why
-  it is blocked), then one line a finished step (its seconds, tokens, dollars, model, findings, tests and the
+  it is blocked, for example `proof check` or `session failed`), then one line a finished step (its seconds, tokens, dollars, model, findings, tests and the
   session's own stats; a step with no price says why, `not priced: no model recorded`). A reading that was not taken
   reads `missing`, never 0; a snapshot from before the measurements shows none of these lines. Not in the pane. The header's `today` is the priced steps' dollars, with `+ N steps not priced` when some are left out.
 - **FAST LANE**: the lane's open change (commits ahead of the default branch, uncommitted files) and its card: on the

@@ -356,7 +356,7 @@ export const METRIC_PREV = { ...METRIC_TOTALS, cards: 10, landed: 8, blocked: 2,
 export const METRIC_DAYS = [[3, 1, 0, 1500, 1, 3], [4, 0, 0, null, null, null], [5, 2, 1, 1800, 0.5, 4], [6, 1, 0, 1600, 1, 5], [7, 1, 0, 1700, 0.5, 4.5], [8, 0, 1, null, null, null],
   [9, 2, 2, 1710, 0.667, 4.5]].map(([dd, landed, blocked, cycleSec, firstReviewPass, perLandedUsd]) => ({ day: `2026-11-0${dd}`, landed, blocked, cycleSec, firstReviewPass, perLandedUsd }));
 export const METRIC_SLOTS = [{ hour: 0, slots: 3, cap: 4 }, { hour: 5, slots: 0.5, cap: 4 }, { hour: 9, slots: 2, cap: 4 }];
-export const CARD_METRICS = { queueSec: 3600, slotSec: 60, buildSec: 600, reviewSec: 600, fixSec: 600, testSec: 300, rebuildSec: null, landSec: 60, pushSec: 240, waitMaxSec: null,
+export const CARD_METRICS = { queueSec: 3600, slotSec: 60, waitWhy: { cap: 120, 'Depends on': 60 }, brokeMain: 'c4-6', buildSec: 600, reviewSec: 600, fixSec: 600, testSec: 300, rebuildSec: null, landSec: 60, pushSec: 240, waitMaxSec: null,
   leadSec: 5760, cycleSec: 2160, reviews: 2, firstReview: 'NO-GO', findings: counts(0, 2, 1, 0), rebuilds: 0, retries: 0, blockClass: null, depth: 0, followups: 0,
   diff: { files: 2, added: 30, removed: 4 }, limit: { before: 10, after: 12, used: 2 }, usd: 6, tokens: 3000000, unpriced: 0,
   timeline: [
@@ -620,7 +620,7 @@ export const SAYS = {
   cost: { title: 'Cost', count: '', data: ['$4.25', 'Cards today', '$14.00', 'Cards, last 7 days', '$1.00', 'Landed in the last 7 days: 3 after 1 review, 1 after 2 reviews.', 'Per card, last 7 days', 'Landed days ago', '$0.00 today', '$6.25 in 7 days', 'Broken build', 'Blocked', '$0.75 today', '$3.50 in 7 days', 'Every session on this machine: $12.50 today, $80.00 this limit week.'], empty: 'No spend in the last 7 days', failed: 'The Board could not read Cost' },
   metrics: { title: 'Metrics', count: '', data: ['Lead time (opened to landed)', '1 h 58 min (90th: 2 h 21 min)', 'Passed first review', '66.7%', 'Findings per card', 'Block rate', '50%: 1 timeout, 1 visible change',
     'Per landed card', '$4.50, 2.3M tokens', 'claude-sonnet-5-5 $3.00, 1.5M tokens', 'Waiting on the owner', '43.8% of the most on average, 4 at most', 'load 4.5 at most, disk free 0 GB at least, memory used 12 GB at most', '1 pushed', '1 failed', '9 (7 landed, 2 blocked)',
-    'Landed one', 'lead 1 h 36 min', 'waiting for room 1 min', '2 files, +30 −4', '2 pts of the weekly limit', 'findings 2 P1, 1 P2', 'Old record', 'lead —', 'diff —', 'blocked: timeout',
+    'Landed one', 'lead 1 h 36 min', 'waiting for room 1 min', 'waited on cap 2 min, Depends on 1 min', 'main broken by c4-6', '2 files, +30 −4', '2 pts of the weekly limit', 'findings 2 P1, 1 P2', 'Old record', 'lead —', 'diff —', 'blocked: timeout',
     'Landed, today / 7 days', 'Cycle time, median', 'Passed first review', 'Cost per landed card', 'All numbers', 'Recent cards',
     'build · 10 min · 1.0M tokens · $2.00 · claude-sonnet-5-5 medium · 12 model replies · API 7 min · tool calls Bash 5, Edit 2 · 1 refused · cache hits 97% · ran claude-opus-5-5', 'review: changes asked · 5 min · 500k tokens · $1.00 · gpt-6.1-sol · findings: 2 P1, 1 P2',
     'tests: 9 passed, 1 failed, 2 skipped of 12 (3 files)'], empty: 'Nothing measured in the last 7 days', failed: 'The Board could not read Metrics' },

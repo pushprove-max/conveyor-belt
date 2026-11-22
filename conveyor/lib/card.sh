@@ -465,17 +465,17 @@ cardbuild() {
     # speedproof.sh ranproof() once its test step passed (mk).
     if ! jq -e --arg t "$TYPE" 'any(.labels[]?; .name == $t)' <<<"$issue" >/dev/null; then :
     elif sf=$(speedfile "$issue"); then
-      speedproof "$c" "$wt" "$issue" "$sf" || { SPEEDCHECKED=$SPEEDCHECK block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
+      speedproof "$c" "$wt" "$issue" "$sf" || { SPEEDCHECKED=$SPEEDCHECK BLOCKCLASS='proof check' block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
     elif sf=$(speedfile "$issue" "$OPTIMIZE") || sf=$(speedfile "$issue" "$REWRITE"); then
-      sk=$OPTREVIEW; optproof "$c" "$wt" "$issue" "$sf" || { SPEEDCHECKED=$SPEEDCHECK block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
+      sk=$OPTREVIEW; optproof "$c" "$wt" "$issue" "$sf" || { SPEEDCHECKED=$SPEEDCHECK BLOCKCLASS='proof check' block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
     elif sf=$(speedfile "$issue" "$FIXFAILS"); then
-      sk=$STEADYREVIEW; steadyproof "$c" "$wt" "$sf" || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
+      sk=$STEADYREVIEW; steadyproof "$c" "$wt" "$sf" || { BLOCKCLASS='proof check' block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
     elif { pk=$WAITFIX sk=$WAITREVIEW; sf=$(speedfile "$issue" "$pk"); } || { pk=$HOLLOWFIX sk=$HOLLOWREVIEW; sf=$(speedfile "$issue" "$pk"); } \
       || { pk=$DELFILE sk=$DELREVIEW; sf=$(speedfile "$issue" "$pk"); } || { pk=$ALONEFIX sk=$ALONEREVIEW; sf=$(alonefile "$issue"); } || { pk='' sk=''; false; }; then
-      fixproof "$c" "$wt" "$issue" "$sf" "$pk" || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
+      fixproof "$c" "$wt" "$issue" "$sf" "$pk" || { BLOCKCLASS='proof check' block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
       pt=$(git -C "$wt" add -A && git -C "$wt" write-tree)
     elif sf=$(speedfile "$issue" "$MAKERUN"); then
-      sk=$RUNREVIEW; mk=$sf; runproof "$wt" "$sf" || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
+      sk=$RUNREVIEW; mk=$sf; runproof "$wt" "$sf" || { BLOCKCLASS='proof check' block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
     else
       # A run on main that gave no result for a test file, twice (bugproof.sh bugproof() exit 2), is blocked with that reason: a
       # build session cannot repair the runner. A main-red fix card is proved by main's failing cases (bugproof.sh redproof()):
@@ -486,14 +486,14 @@ cardbuild() {
       if [ "$trc" = close ]; then
         greenclose "$c" "$n" "$wt"; return
       fi
-      [ "$trc" != block ] || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
+      [ "$trc" != block ] || { BLOCKCLASS='proof check' block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
       if [ "$trc" = build ]; then
         began "$c" "$n" build
         redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt$more"$'\n\n'"${BUGBUILD//'<why>'/"$BUGWHY"}"$'\n'"$(<"$wt.unfixed")") || { block "$c" "$n" "$wt" "build: $t"; return; }
         checked "$c" "$n" "$wt" "$issue" "$sprompt" build "$(jq -c --arg r "$BUGWHY" '. + {reason: $r}' <<<"$t")" || return
         bugproof "$c" "$wt" "$issue"; trc=$(bugstep $? again)
-        [ "$trc" != block ] || { block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
-        [ "$trc" != unproved ] || { block "$c" "$n" "$wt" "build: $BUGWHY"$'\n'"$(<"$wt.unfixed")"; return; }
+        [ "$trc" != block ] || { BLOCKCLASS='proof check' block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
+        [ "$trc" != unproved ] || { BLOCKCLASS='proof check' block "$c" "$n" "$wt" "build: $BUGWHY"$'\n'"$(<"$wt.unfixed")"; return; }
       fi
     fi
   elif [ -z "$br" ] && [ -z "$sf" ] && jq -e --arg t "$TYPE" 'any(.labels[]?; .name == $t)' <<<"$issue" >/dev/null 2>&1; then
@@ -502,10 +502,10 @@ cardbuild() {
     # it run card only when its test step ran its file (mk).
     if { pk=$WAITFIX sk=$WAITREVIEW; sf=$(speedfile "$issue" "$pk"); } || { pk=$HOLLOWFIX sk=$HOLLOWREVIEW; sf=$(speedfile "$issue" "$pk"); } \
       || { pk=$DELFILE sk=$DELREVIEW; sf=$(speedfile "$issue" "$pk"); } || { pk=$ALONEFIX sk=$ALONEREVIEW; sf=$(alonefile "$issue"); } || { pk='' sk=''; false; }; then
-      fixproof "$c" "$wt" "$issue" "$sf" "$pk" || { block "$c" "$n" "$wt" "$mode: $(<"$wt.unfixed")"; return; }
+      fixproof "$c" "$wt" "$issue" "$sf" "$pk" || { BLOCKCLASS='proof check' block "$c" "$n" "$wt" "$mode: $(<"$wt.unfixed")"; return; }
       pt=$(git -C "$wt" add -A && git -C "$wt" write-tree)
     elif sf=$(speedfile "$issue" "$MAKERUN"); then
-      sk=$RUNREVIEW; mk=$sf; runproof "$wt" "$sf" || { block "$c" "$n" "$wt" "$mode: $(<"$wt.unfixed")"; return; }
+      sk=$RUNREVIEW; mk=$sf; runproof "$wt" "$sf" || { BLOCKCLASS='proof check' block "$c" "$n" "$wt" "$mode: $(<"$wt.unfixed")"; return; }
     fi
   fi
   go=''
@@ -541,7 +541,7 @@ cardreview() {
     # A fix or rebase session changed a Fix the waiting, Fix hollow cases, Delete it or Make it run alone card: its check runs again on
     # what this review reads, and the card is blocked when it no longer holds.
     if [ -n "$pk" ] && [ "$(git -C "$wt" write-tree)" != "$pt" ]; then
-      fixproof "$c" "$wt" "$issue" "$sf" "$pk" || { block "$c" "$n" "$wt" "review $pass: $(<"$wt.unfixed")"; return; }
+      fixproof "$c" "$wt" "$issue" "$sf" "$pk" || { BLOCKCLASS='proof check' block "$c" "$n" "$wt" "review $pass: $(<"$wt.unfixed")"; return; }
       pt=$(git -C "$wt" add -A && git -C "$wt" write-tree)
     fi
     began "$c" "$n" review

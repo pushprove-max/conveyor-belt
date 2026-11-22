@@ -598,7 +598,7 @@ turnask() {
   # most every LIMIT_TTL seconds). Both are taken out of the loop's job list (they may take seconds: the sample asks
   # GitHub for the queue, and a job of the loop's would count as a card).
   if [ $((SECONDS - sampled)) -ge "$SAMPLE" ]; then
-    sampled=$SECONDS; ( sample "$building" "$cap" "$now" >/dev/null 2>&1 8>&- & )
+    sampled=$SECONDS; ( sample "$building" "$cap" "$now" "$mhold" >/dev/null 2>&1 8>&- & )
     [ "$running" = 0 ] || ( reading >/dev/null 2>&1 8>&- & )
   fi
 }

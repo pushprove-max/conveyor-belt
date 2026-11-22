@@ -5,11 +5,16 @@
     def r3: if . == null then null else . * 1000 | round / 1000 end;
     def share(f): if length == 0 then null else (map(select(f)) | length) / length | r3 end;
     def pos($a; $x): $a | bsearch($x) | if . < 0 then -1 - . else . end;
-    def blockclass($yes; $tail): if startswith($yes) then "visible change" elif test("prompt is too long"; "i") or ($tail | test("prompt is too long"; "i")) then "prompt too long"
+    # The class a blocked line names (block()'s BLOCKCLASS: "proof check" for a check that proves the change, whose
+    # reason starts as a failed session's does) comes first; else the class is read from the reason.
+    def blockclass($yes; $tail; $class): if ($class | type) == "string" then $class elif startswith($yes) then "visible change"
+      elif test("prompt is too long"; "i") or ($tail | test("prompt is too long"; "i")) then "prompt too long"
       elif test("exit 124[^0-9]") then "timeout" elif test("changed tests") then "tests failed" elif test("conflict") then "conflict"
-      elif test("no change|changed nothing") then "no change"
+      elif test("no change|changed nothing") then "no change" elif startswith("lint:") then "lint" elif test("^(worktree|brief):") then "setup"
+      elif startswith("a product check failed") then "product check" elif test("the engine could not"; "i") then "engine error"
       elif test("^(build|fix|rebase|review [0-9]+|review of)[: ]|session failed|review failed|without one clear verdict") then "session failed" else "other" end;
-    def cardm($now; $blocks; $st; $sf; $every; $yes): . as $c | .x.log as $log | ($log[0] // {}) as $p
+    # $sw: the samples' wait causes by issue ({"<issue>": [{t, why}]}, t in epoch seconds: sample(), lib/records.sh).
+    def cardm($now; $blocks; $st; $sf; $sw; $every; $yes): . as $c | .x.log as $log | ($log[0] // {}) as $p
       | def secs($k): [$log[] | select(.step == $k or .failed == $k) | .took | numbers] | if length == 0 then null else add end;
       ([.steps[] | select(.step == "review" and (.result | IN("fail", "stopped") | not))]) as $rv
       | ([$blocks[] | select(.issue == $c.issue and .end <= $c.startedAt)]) as $before
@@ -18,6 +23,9 @@
       | {queueSec: (if $cr == null then null else $pk - $cr end),
          slotSec: (if $cr == null or $cr > $pk then null elif pos($st; $pk + 0.5) - pos($st; $cr - 0.5) == 0 then null
            else (pos($sf; $pk + 0.5) - pos($sf; $cr - 0.5)) * $every end),
+         # waitWhy: of that time, the seconds of each cause the samples name for its issue (sample()'s wait).
+         waitWhy: (if $cr == null or $cr > $pk then null
+           else [$sw[$c.issue | tostring][]? | select(.t >= $cr and .t <= $pk)] | group_by(.why) | map({key: .[0].why, value: (length * $every)}) | from_entries end),
          buildSec: secs("build"), reviewSec: secs("review"), fixSec: secs("fix"), testSec: secs("test"), rebuildSec: secs("rebase"),
          # A landing that met a conflict ran until the rebuild began (the start line of the rebuild): those seconds are
          # landing seconds too, added to those of the landing that landed.
@@ -39,7 +47,9 @@
          findings: (if ($rv | length) == 0 or any($rv[]; .counts == null) then null
            else reduce $rv[].counts as $k ({P0: 0, P1: 0, P2: 0, P3: 0}; with_entries(.value += $k[.key])) end),
          rebuilds: ([$log[] | select(.step == "rebase")] | length), retries: ($before | length),
-         blockClass: (if $c.step == "blocked" then ($c.reason | blockclass($yes; $c.tail // "")) else null end),
+         blockClass: (if $c.step == "blocked" then ($c.reason | blockclass($yes; $c.tail // ""; [$log[] | select(.step == "blocked")] | last | .class)) else null end),
+         # brokeMain: the card whose landing turned main red, as its last test line that found main red names it (verdicts()).
+         brokeMain: ([$log[] | select(.step == "test") | .brokeMain | strings] | last),
          depth: $c.x.depth, followups: ($c.x.followups | length), diff: $c.x.diff,
          # A reading lower at the end than at the start means the weekly limit reset during the card: what it took
          # before the reset is not known, so used is null, never a negative figure.

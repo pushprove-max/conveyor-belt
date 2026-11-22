@@ -246,12 +246,16 @@ TRACK=$(<"$HERE/jq/track.jq")
 SNAPKEEP=20 PUSHKEEP=100
 # The measurements of each card, as `metrics` on every card the snapshot shows, and their totals. A card's:
 # queueSec (its issue opened to picked), slotSec (of that time, the seconds every slot was taken, from the samples;
-# null when no sample covers it), buildSec, reviewSec, fixSec, testSec, rebuildSec (each step's seconds added up),
+# null when no sample covers it), waitWhy (of that time, the seconds under each cause the samples name for its issue:
+# cap, overlap, Depends on, held, guard or machine hold; lib/records.sh sample()), buildSec, reviewSec, fixSec, testSec,
+# rebuildSec (each step's seconds added up),
 # landSec (every landing attempt, the one that met a conflict included), pushSec (landed to pushed), waitMaxSec (waiting on the owner: from the end of the issue's last blocked card to
 # its retry, or to this card's pick when its retry time is not recorded, and for a card that is blocked now, its end to now), leadSec (issue opened to landed) and
 # cycleSec (picked to landed), reviews, firstReview (its verdict), findings (by level, all reviews; null when a review
-# has none counted), rebuilds, retries (the issue's blocked cards before it), blockClass (why it is blocked: visible
-# change, no change, conflict, session failed, tests failed, timeout, prompt too long or other), depth, followups (how
+# has none counted), rebuilds, retries (the issue's blocked cards before it), blockClass (why it is blocked: the class
+# its blocked line names, proof check, else visible change, no change, conflict, session failed, tests failed, timeout,
+# prompt too long, lint, setup, product check, engine error or other), brokeMain (the card whose landing turned main red,
+# as its test line names it; null for none), depth, followups (how
 # many it filed), diff ({files, added, removed}), limit ({before, after, used}: weekly limit percent; used is null
 # when the limit reset during the card), usd (null when
 # a step is unpriced), tokens, unpriced (how many of its steps have no price) and timeline: each finished step with
@@ -289,7 +293,9 @@ CARDRUNS='. as $cs
     | ([$cs[] | if .x.blockedAt != null then {issue, end: .x.blockedAt, to: .x.endAt} else select(.step == "blocked") | {issue, end: .x.endAt, to: .x.retriedAt} end]) as $blocks
     | ([$cs[] | {card, issue, at: (.startedAt | fromdate)}]) as $picks
     | ($smp | map(.time | fromdate)) as $st | ($smp | map(select((.cap | type) == "number" and .slots >= .cap) | .time | fromdate)) as $sf
-    | [$cs | map(. + {metrics: cardm($now; $blocks; $st; $sf; $every; $yes)})] as $all
+    | ([$smp[] | select((.wait | type) == "object") | (.time | fromdate) as $t | .wait | to_entries[] | select(.value | type == "string") | {k: .key, t: $t, why: .value}]
+        | group_by(.k) | map({key: .[0].k, value: map({t, why})}) | from_entries) as $sw
+    | [$cs | map(. + {metrics: cardm($now; $blocks; $st; $sf; $sw; $every; $yes)})] as $all
     | ($all[0] | map(select(.issue != 0)) | group_by(.issue)
         | map(sort_by(.startedAt, .card) | reduce .[] as $k ({run: [], out: []}; .run += [$k] | .out += [{key: $k.card, value: .run}]
             | if ($k.step | IN("landed", "closed")) and $k.x.blockedAt == null then .run = [] else . end) | .out[])

@@ -72,6 +72,8 @@ map(select(.step != "push")) | group_by(.card) | map(. as $all
                failures: (if .step == "test" and .result != "pass" then .failures else null end),
                # A test line's failures' verdicts (card, main or flaky) and the seconds its run of them on main took (mainred.sh verdicts()).
                verdicts: (if .step == "test" then .verdicts else null end), mainSec: (if .step == "test" then .mainRun.sec else null end),
+               # The card whose landing turned main red, on a test line that found it (verdicts()); a blocked line's class (block()).
+               brokeMain: (if .step == "test" then .brokeMain else null end), class: (if .step == "blocked" then .class else null end),
                # A test line whose failed cases ran again at once (tests()): two runs (track.jq runs); on a pass line,
                # it passed only when what had not passed ran again.
                rerun: (if .step == "test" and .rerun != null then true else null end),

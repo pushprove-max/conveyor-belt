@@ -11,7 +11,7 @@ Usage: cardruns.py <cards> <kept> <out> <program> <samples> <now> <every> <yes>
   <samples>  the loop's samples ($smp), <now> health's time in epoch seconds, <every> the sample period, <yes> YES
 
 What <program> makes of a card reads only the cards of its issue, and of the rest only: the samples (each card's count
-of samples, and of full samples, from its issue's creation to its pick-up), now (only when a card of the issue is open
+of samples, and of full samples, and the wait causes they name for its issue, from its issue's creation to its pick-up), now (only when a card of the issue is open
 or blocked and not retried), <every> and <yes>. So the cards of an issue are run through <program> only when their lines,
 or one of those, changed since the last call; the rest are taken from <kept>. <kept> is a line `<key> <sha256 of the
 rest>`, then `<the issue's key>\t<card>\t<waits>\t<waits>` a card; any other summary is not used. When two issues
@@ -60,7 +60,7 @@ def main(cards, kept, out, program, samples, now, every, yes):
     key = hashlib.sha256(json.dumps([hashlib.sha256(prog).hexdigest(), hashlib.sha256(me).hexdigest(), ver, every, yes]).encode()).hexdigest()
     # The sample times, and those of the full samples, when each reads as the program reads it and they are in
     # order: then a card's counts are found here. Else every card's figures read the samples whole (sdig).
-    st, sf, sdig = [], [], None
+    st, sf, sw, sdig = [], [], {}, None
     try:
         for ln in sraw.split(b"\n"):
             if not ln.strip():
@@ -75,6 +75,11 @@ def main(cards, kept, out, program, samples, now, every, yes):
                     raise ValueError
                 if s["slots"] >= s["cap"]:
                     sf.append(t)
+            # The wait causes it names by issue, as the program keeps them (waitWhy): the string ones of an object.
+            if isinstance(s.get("wait"), dict):
+                for k, v in s["wait"].items():
+                    if isinstance(v, str):
+                        sw.setdefault(k, []).append([t, v])
         if st != sorted(st):
             raise ValueError
     except (ValueError, AttributeError):
@@ -95,7 +100,9 @@ def main(cards, kept, out, program, samples, now, every, yes):
             log = x.get("log") if isinstance(x.get("log"), list) else []
             p = log[0] if log and isinstance(log[0], dict) else {}
             cr, pk = (epoch(p.get("created")) if "created" in p and p.get("created") is not None else "none"), epoch(c.get("startedAt"))
-            # What the program reads of the samples for this card: nothing when slotSec is null whatever they hold.
+            # What the program reads of the samples for this card: nothing when slotSec and waitWhy are null whatever
+            # they hold; else the counts, and the wait causes its issue's samples name in that time (all the samples
+            # when its issue is not a whole number: the program names it otherwise).
             if cr == "none":
                 slot = None
             elif sdig is not None or cr is None or pk is None:
@@ -103,7 +110,9 @@ def main(cards, kept, out, program, samples, now, every, yes):
             elif cr > pk:
                 slot = None
             else:
-                slot = [pos(st, pk + 0.5) - pos(st, cr - 0.5), pos(sf, pk + 0.5) - pos(sf, cr - 0.5)]
+                ik = c.get("issue")
+                slot = [pos(st, pk + 0.5) - pos(st, cr - 0.5), pos(sf, pk + 0.5) - pos(sf, cr - 0.5),
+                        [w for w in sw.get(str(ik), []) if cr <= w[0] <= pk] if isinstance(ik, int) and not isinstance(ik, bool) else hashlib.sha256(sraw).hexdigest()]
             opened = not isinstance(c.get("x"), dict) or x.get("endAt") is None or (c.get("step") == "blocked" and x.get("retried") in (None, False))
             rows.append((g, ln, slot, opened))
             groups.setdefault(g, []).append(len(rows) - 1)

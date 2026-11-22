@@ -135,7 +135,7 @@ cardlanding() {
     # The test rules read the line just recorded (lib/testrules.sh): with their switch off, they file nothing.
     [ -z "$ran" ] || testrulespass > /dev/null
     # A Make it run card (#189) holds only when its test step ran its file and the file passed.
-    [ -z "$mk" ] || t=$(ranproof "$wt" "$mk") || { block "$c" "$n" "$wt" "test: $t"; return; }
+    [ -z "$mk" ] || t=$(ranproof "$wt" "$mk") || { BLOCKCLASS='proof check' block "$c" "$n" "$wt" "test: $t"; return; }
     # A card that gave way claims its files now; a card whose change is not on main as it is now (main moved while it
     # was away or during its tests) is fitted onto it, and its checks run again there, holding its files (its tests
     # too when the fitted change is not the one that passed: testedhere()).

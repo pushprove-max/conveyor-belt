@@ -30,11 +30,12 @@
 #   selection error".
 # - flaky: it failed on the first run and passed on the run again (PASSEDAGAIN; flakyrun() records it).
 # Prints the test line's part: {verdicts: [{case, verdict, why (a document's alone)}]} and, when the cases ran on main, mainRun: {sha, sec (the
-# seconds main's run took, its wait for a slot included), exit}. Each case whose verdict is main goes to the fix card of main's commit (mainred());
+# seconds main's run took, its wait for a slot included), exit}, and brokeMain, the card whose landing turned main red, when the main-red
+# record knows it for a case of verdict main. Each case whose verdict is main goes to the fix card of main's commit (mainred());
 # each whose verdict is machine to the machine hold (machinehold()), and to no fix card.
 # The card's own TEST_WAIT, TEST_RUN and TEST_FREE are kept (testrec()).
 verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
-  local mwt=$CARDS/mainrun/${2##*/} sha='' u um nt m=null mf=null s rc out='' fst v c f w=$TEST_WAIT r=$TEST_RUN fr=$TEST_FREE cmd='' hits='[]' ctl='[]' cf='[]' chg lim
+  local mwt=$CARDS/mainrun/${2##*/} sha='' u um nt m=null mf=null s rc out='' fst v c f b w=$TEST_WAIT r=$TEST_RUN fr=$TEST_FREE cmd='' hits='[]' ctl='[]' cf='[]' chg lim
   packget test.command cmd test.control ctl 2>/dev/null || { cmd=''; ctl='[]'; }
   # The units that still did not pass, each {file, case}: case null for a file that failed naming no case or ran out of
   # time. The test command itself with no case (testfails()'s name for a run that logged no file) is none: it names no test.
@@ -97,7 +98,12 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
   jq -e 'any(.[]; .verdict == "machine")' <<<"$v" >/dev/null \
     && { machinehold "$1" "$sha" "$(jq -c --slurpfile cf <(printf '%s' "$cf") --slurpfile h <(printf '%s' "$hits") '$cf[0] as $cf | $h[0] as $h | $cf + [.[] | select(.verdict == "machine") | .file | select(IN($h[]))] | unique' <<<"$v")" \
       "$(jq -c '[.[] | select(.verdict == "machine") | .case]' <<<"$v")" || :; }
-  jq -cn --slurpfile v <(printf '%s' "$v") --slurpfile m <(printf '%s' "$m") '$v[0] as $v | $m[0] as $m | {verdicts: [$v[] | {case, verdict} + if .why then {why} else {} end]} + if $m then {mainRun: $m} else {} end'
+  # brokeMain: the card whose landing turned main red, as the main-red record keeps it for a case of verdict main
+  # (mainred(): landing), the entry of main's commit first, then the newest; none when no landing is known.
+  b=$(jq -r --arg s "$sha" --slurpfile v <(printf '%s' "$v") '[$v[0][] | select(.verdict == "main") | .case] as $mc
+    | (.reds // []) | [(map(select(.sha == $s)) + reverse)[] | .cases[]? | select(.case | IN($mc[])) | .landing.card? | strings] | first // empty' "$MAINRED" 2>/dev/null) || b=''
+  jq -cn --slurpfile v <(printf '%s' "$v") --slurpfile m <(printf '%s' "$m") --arg b "$b" '$v[0] as $v | $m[0] as $m | {verdicts: [$v[] | {case, verdict} + if .why then {why} else {} end]} + if $m then {mainRun: $m} else {} end
+    + if $b == "" then {} else {brokeMain: $b} end'
 }
 # The machine hold (issue 221): a case that failed on main as on the card, though its inputs did not change since it
 # last passed (testlist.sh cachehits()), or while every control (verdicts()) that ran beside it on the same slot failed, is the

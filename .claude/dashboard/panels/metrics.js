@@ -50,6 +50,15 @@
       const sec = (v) => (num(v) ? ctx.dur(v) : NONE);
       const spread = (x) => (x && num(x.p50) ? `${ctx.dur(x.p50)} (90th: ${ctx.dur(x.p90)})` : NONE);
       const money = (v) => (num(v) ? ctx.money(v) : NONE);
+      // Why a card waited in the queue (the seconds under each cause the loop's samples named for its issue),
+      // and the card whose landing turned main red.
+      const waitAndBreak = (m) => {
+        const why = m.waitWhy && typeof m.waitWhy === 'object' ? Object.entries(m.waitWhy).filter(([, v]) => num(v)) : [];
+        const got = [];
+        if (why.length) got.push(h('span', null, `waited on ${why.map(([k, v]) => `${k} ${sec(v)}`).join(', ')}`));
+        if (typeof m.brokeMain === 'string' && m.brokeMain) got.push(ctx.chip(`main broken by ${m.brokeMain}`, 'warn'));
+        return got;
+      };
       // "—" and why, wherever a value does not exist yet.
       const none = (why) => { const p = h('p', 'metric-none'); p.append(h('span', 'none-value', NONE), h('span', 'unknown', why || 'not enough cards yet')); return p; };
       // Dollars are those of the priced steps: a figure that leaves steps out says how many (each card's timeline says why).
@@ -361,6 +370,7 @@
             `${int(m.reviews)} reviews`, `${int(m.fixes)} fixes`, `${int(m.testRuns)} test runs`, `findings ${m.findings ? ctx.findings({ counts: m.findings }) || 'none' : NONE}`,
             `${int(m.rebuilds)} rebuilds`, `${int(m.retries)} retries`, `depth ${int(m.depth)}`, `${int(m.followups)} follow-ups`]
             .forEach((x) => meta.append(h('span', x.includes(NONE) ? 'unknown' : null, x)));
+          meta.append(...waitAndBreak(m));
           // A restarted card's figures above are those of every run of its issue; its own are "this run".
           if (num(m.runs) && m.runs > 1 && m.thisRun) {
             const t = m.thisRun;

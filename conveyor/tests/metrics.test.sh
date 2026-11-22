@@ -375,3 +375,28 @@ t_metricsshut() {
     || fail "a card closed while blocked is counted landed: $(jq -c '[.metrics.today, .metrics.week, .landed, .cost]' <<<"$out")"
   [ "$(loop cards | jq -c '[.landed, .blocked]')" = '[0,0]' ] || fail "the cards summary of a card closed while blocked: $(loop cards)"
 }
+
+# Issue 1303. Bug it catches: the queue time of a card had no cause recorded, so no change to the wait could be
+# measured. #1 waits two samples with every slot taken (the loop's sample(), the minute's), one with the weekly limit
+# guard pausing the loop (a pause, not a rule on #1: the cause was lost when only a running loop was sampled), then one
+# on its Depends on: #2 line while the machine hold stands: those samples name #1's cause, and the last names #2's too
+# (the next in line, which only the hold keeps back): "machine hold", never "main red", as the hold is a fault of the
+# machine with no change to main behind it. The card of #1, picked after them, has waitWhy {cap: 120, guard: 60,
+# Depends on: 60} in the snapshot's metrics: 60 s a sample.
+t_metricswait() {
+  export TZ=UTC; y=$(date -u +%F); setup "[$(issue 1 "${y}T00:00:00Z"), $(issue 2 "${y}T00:00:01Z")]"
+  fx_in 'sample 4 4 running "" && sample 4 4 running ""'; [ "$RC" = 0 ] || fail "the samples with every slot taken failed: $(cat "$T/$CASE/run.out")"
+  fx_in 'sample 0 4 "paused by guard" ""'; [ "$RC" = 0 ] || fail "the sample with the guard pausing the loop failed: $(cat "$T/$CASE/run.out")"
+  jq -c '.[0].body = "Depends on: #2"' "$STUB/issues.json" > "$STUB/issues.new" && mv "$STUB/issues.new" "$STUB/issues.json"
+  fx_in 'sample 0 4 running "the machine fails x.test.sh on main"'; [ "$RC" = 0 ] || fail "the sample with the machine hold failed: $(cat "$T/$CASE/run.out")"
+  [ "$(jq -sc 'map(.wait)' "$ST/samples.jsonl")" = '[{"1":"cap"},{"1":"cap"},{"1":"guard"},{"1":"Depends on","2":"machine hold"}]' ] \
+    || fail "sample(), given 4 of 4 slots twice, then 0 of 4 paused by guard, then 0 of 4 with #1 depending on #2 and the machine hold standing, did not name each issue's cause: $(cat "$ST/samples.jsonl")"
+  # The samples' times are set to the fixture's day: 00:10 and 00:11 with every slot taken, 00:15 under the guard,
+  # 00:20 on the dependency.
+  jq -sc --arg y "$y" 'to_entries[] | .value.time = "\($y)T\(["00:10", "00:11", "00:15", "00:20"][.key]):00Z" | .value' "$ST/samples.jsonl" > "$ST/samples.new" \
+    && mv "$ST/samples.new" "$ST/samples.jsonl" || fail "the samples' times could not be set"
+  l 1 00:30 picked ok "{\"title\":\"T1\",\"created\":\"${y}T00:00:00Z\"}"; recok "$ST/cards.jsonl" "the wait fixture"
+  out=$(CONVEYOR_NOW=$(date -u -d "${y}T23:59:00Z" +%s) loop snapshot --fresh) || fail "snapshot of the wait fixture exited non-zero"
+  [ "$(jq -c '.belt[], .metrics.cards[] | select(.card == "c1") | .metrics.waitWhy' <<<"$out" | sort -u)" = '{"Depends on":60,"cap":120,"guard":60}' ] \
+    || fail "the card of #1 does not give its wait by cause: $(jq -c '[.belt[], .metrics.cards[] | select(.card == "c1") | .metrics]' <<<"$out")"
+}

@@ -228,6 +228,25 @@ t_mainredlinks() {
     && [ "$(git -C "$w/fix" diff --cached --name-only)" = .conveyor/test-links.json ] \
     || fail "D1: the fix card's worktree does not stage the link of lib/a.sh to tests/b.test.sh: $(cat "$w/fix/.conveyor/test-links.json" 2>&1)"
 }
+# Issue 1303. Bug it catches: nothing recorded which landing turned main red, so no time lost to a red main could be
+# put on the card that broke it. Landing l1's card ran b.test; landing ca after it did not, and b.test's flaky now fails
+# on main: card c7's failure gets the verdict main, and verdicts() and the test line card() writes from it name ca in
+# brokeMain, the landing the main-red record blames (mainred.sh brokeby()).
+t_mainredblame() {
+  rerunsetup '1 fail flaky' '2 fail flaky' 'main fail flaky'; rerunfiles
+  local v fl='{"of":null,"files":[{"file":"b.test","cases":[{"name":"flaky","line":"1"}]}],"timeout":null}'
+  eng 'append "$(line l1 1 test pass "{\"why\":{\"b.test\":[\"the card changed it\"]}}")" && append "$(line l1 1 landed ok "{\"product\":false,\"sha\":\"$(git rev-parse HEAD)\"}")"' \
+    || fail "landing l1's lines could not be written"
+  echo ca > "$R/ca.txt"; git -C "$R" add ca.txt; git -C "$R" commit -qm "landing ca"
+  eng 'append "$(line ca 2 landed ok "{\"product\":false,\"sha\":\"$(git rev-parse HEAD)\"}")"' || fail "landing ca's line could not be written"
+  git -C "$R" worktree add -q --detach "$T/$CASE/cards/c7" && rerunedit 'echo two >> a.txt' || fail "the card's worktree could not be made"
+  eng 'append "$(line c7 7 picked ok "{\"title\":\"title 7\"}")"' || fail "the card's picked line could not be written"
+  ! rerunstep || fail "the card's test step passed"
+  v=$(mrverdicts "$fl") || fail "verdicts failed: $v"
+  [ "$(jq -c '[.verdicts[].verdict, .brokeMain]' <<<"$v")" = '["main","ca"]' ] && [ "$(st 'select(.step == "test" and .card == "c7") | .brokeMain')" = ca ] \
+    || fail "given b.test: flaky failing on main after landing ca, verdicts() or c7's test line does not name ca in brokeMain: $v: $(st 'select(.step == "test" and .card == "c7")'): $(cat "$ST/mainred.json" 2>&1)"
+  loop check || fail "the record check refuses a test line with brokeMain"
+}
 # Issue 615. Bug it catches: card() staged the test links only as the fix card started, so a case that joined it later
 # (mainred.sh mainred()) changed its brief but its links never landed. The fix card's entry gains a case linking lib/d.sh to
 # tests/d.test.sh after its start; the next redbrief() before a session stages that link beside the first one.

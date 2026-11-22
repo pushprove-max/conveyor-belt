@@ -209,17 +209,43 @@ yesforms() { # <owner>
 }
 # One loop and host sample (README.md), appended to SAMPLES; only the loop writes there. Kept to 14 days of
 # minutes. A reading the host does not give is null.
-sample() { # <slots in use> <cap> <loop state>
-  local load mem disk queued='' issues
-  # queued: the issues a pick would take now, the control record's holds and rules applied (upnext); null when GitHub
-  # does not list them. Asked here, out of the loop's turn (run() starts this apart), one asking at a time.
+# wait, while the loop runs or the weekly limit guard pauses it and an issue waits: {"<issue>": <cause>} for the issues
+# of the line (upnext's whole list, less those a rule other than the guard leaves out, that wait for the owner's yes
+# before their build or that are stuck) up to and with the first one the pick would take. Each issue before that one
+# waits on its own cause: "held" (the control record holds it), "guard" (the weekly limit guard holds its seats) or a
+# dependency, "overlap" when this loop's same-file check added its Depends on: line (overlap(), OVL_SEEN; after a
+# restart it reads "Depends on"), else "Depends on". The one the pick would take waits on "guard" while the guard
+# pauses the loop (state "paused by guard"), else on "machine hold" while the machine hold stands (a fault of the
+# machine, not a red main: machineheld(), lib/mainred.sh), else on "cap" while every slot is taken or the machine
+# holds it back (room(), ROOMF); with none of these it waits on nothing and is not named. A red main holds no pick
+# back: a card that waits for main's fix leaves its slot (mainwait()). The metrics add these up per card (waitWhy,
+# jq/metrics.jq).
+sample() { # <slots in use> <cap> <loop state> [the machine hold, while one stands]
+  local load mem disk queued='' issues line='' w='' ovl room k full
+  # queued: the issues a pick would take now, the control record's holds and rules applied (upnext's filter, on its
+  # whole list); null when GitHub does not list them. Asked here, out of the loop's turn (run() starts this apart),
+  # one asking at a time.
   exec 6>>"$SAMPLES.lock" && flock -n 6 || return 0
-  issues=$({ p_newer "$ISSUES" "$SAMPLE" && cat "$ISSUES" || openissues "$FIELDS"; } 2>/dev/null) && queued=$(upnext "$issues" 2>/dev/null | jq -e length 2>/dev/null) || queued=''
+  issues=$({ p_newer "$ISSUES" "$SAMPLE" && cat "$ISSUES" || openissues "$FIELDS"; } 2>/dev/null) && line=$(upnext "$issues" '' all 2>/dev/null) \
+    && queued=$(jq -e 'map(select((.hold | not) and .rule == null and (.waits == [] or .forced) and (.before | not))) | length' <<<"$line" 2>/dev/null) || { queued=''; line=''; }
+  if [ -n "$line" ] && { [ "$3" = running ] || [ "$3" = "paused by guard" ]; }; then
+    ovl=$(for k in "${!OVL_SEEN[@]}"; do [[ ! $k =~ ^[0-9]+$ ]] || echo "$k"; done | jq -cs .) || ovl='[]'
+    room=$(jq -r '.issue | numbers' "$ROOMF" 2>/dev/null) || room=''
+    full=false; [[ ${2:-} =~ ^[0-9]+$ && $1 =~ ^[0-9]+$ ]] && [ "$2" -gt 0 ] && [ "$1" -ge "$2" ] && full=true
+    w=$(jq -c --argjson ovl "$ovl" --arg room "$room" --arg st "$3" --arg mhold "${4:-}" --argjson full "$full" '
+      def why: if .hold then "held" elif .rule == "the weekly limit guard" then "guard"
+        elif .waits != [] and (.forced | not) then (if .number | IN($ovl[]) then "overlap" else "Depends on" end) else null end;
+      [.[] | select((.rule == null or .rule == "the weekly limit guard") and (.stuck | not) and (.before | not))] as $l
+      | ([range($l | length) | select($l[.] | why == null)] | first) as $i
+      | [$l[:(if $i == null then ($l | length) else $i + 1 end)][]
+        | {key: (.number | tostring), value: (why // (if $st == "paused by guard" then "guard" elif $mhold != "" then "machine hold" elif $full or (.number | tostring) == $room then "cap" else null end))}
+        | select(.value != null)] | from_entries | select(. != {})' <<<"$line" 2>/dev/null) || w=''
+  fi
   load=$(p_load); mem=$(p_mem)
   disk=$(df -Pk "$CARDS" 2>/dev/null | awk 'NR == 2 {print $4}')
-  jq -cn --argjson s "$1" --argjson c "${2:-null}" --arg st "$3" --arg l "$load" --arg m "$mem" --arg d "$disk" --arg q "$queued" '
+  jq -cn --argjson s "$1" --argjson c "${2:-null}" --arg st "$3" --arg l "$load" --arg m "$mem" --arg d "$disk" --arg q "$queued" --argjson w "${w:-null}" '
     def n: tonumber? // null;
     {time: (now | todate), slots: $s, cap: $c, state: $st, queued: ($q | n), load: ($l | n), memUsedKb: ($m | split(" ")[0] | n), memTotalKb: ($m | split(" ")[1] // "" | n),
-     diskFreeKb: ($d | n)}' 2>/dev/null | stdb append samples 2>/dev/null || return 0
+     diskFreeKb: ($d | n)} + (if $w == null then {} else {wait: $w} end)' 2>/dev/null | stdb append samples 2>/dev/null || return 0
   stdb keep samples 30000 20160 2>/dev/null || return 0
 }

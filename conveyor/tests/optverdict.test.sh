@@ -285,4 +285,9 @@ t_optdirectcard() {
   loop run >/dev/null || fail "run exited non-zero"
   [ "$(st 'select(.step == "blocked") | .reason')" = "build: the verdict is indirect, and the change drops cases of f.test.sh that the issue's DIRECT lines say must keep passing: relpin" ] \
     || fail "card() did not send a Rewrite card to the Optimize check: $(st 'select(.step | IN("review", "blocked", "landed"))')"
+  # Issue 1303. Bug it catches: a proof-check block's reason starts "build: " as a failed session's does, and the
+  # metrics counted it as "session failed". Its blocked line names its class, and the snapshot's metrics give it.
+  [ "$(st 'select(.step == "blocked") | .class')" = "proof check" ] \
+    && [ "$(loop snapshot --fresh 2>/dev/null | jq -r '.metrics.cards[] | select(.issue == 7) | .metrics.blockClass')" = "proof check" ] \
+    || fail "the Optimize check's block of #7 is not in the class proof check: $(st 'select(.step == "blocked")'): $(loop snapshot --fresh 2>/dev/null | jq -c '.metrics.cards')"
 }
