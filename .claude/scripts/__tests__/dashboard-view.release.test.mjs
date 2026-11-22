@@ -97,6 +97,34 @@ test('#413: a version typed with no notes: Release names the missing notes file,
   assert.equal(act(card(w), 'release').textContent, 'Release 1.2.0: needs release notes docs/releases/1.2.0.md');
   assert.equal(card(w).querySelector('[data-figure="version-notes"]').textContent, '1.2.0 has no release notes: docs/releases/1.2.0.md is not on main.');
 });
+// Bug this guards (#1365): release-prep with no notes on main started a card that adds its draft, and its record waits
+// on it (state waiting, notes.card), but the panel drew that run as a refused notes step, or as no run at all, so the
+// owner could not see that the release goes on by itself once the card lands.
+test('#1365: a run waiting on its notes card shows the notes step under way with the card, not a refusal', () => {
+  const w = boot();
+  const why = 'notes card c20261114T081500-plugin-0 started: the notes draft is $HOME/state/release/1.0.0.md';
+  deliver(w, data({ ...RUN, sha: null, ended: '2026-11-14T08:15:00Z', state: 'waiting', reasons: [why],
+    notes: { card: 'c20261114T081500-plugin-0', then: 'release', mode: null, machine: null } }, { notes: false, written: [] }));
+  const s1 = stepOf(w, 'release-notes');
+  assert.equal(s1.dataset.state, 'now', 'the notes step is under way, not failed');
+  assert.equal(s1.querySelector('.release-line').textContent, 'docs/releases/1.0.0.md on main: card c20261114T081500-plugin-0 adds the notes draft');
+  assert.equal(s1.querySelector('[data-figure="notes-card"]').textContent, 'The suite runs by itself once the card\'s commit is on the branch the suite tests, then the release.');
+  assert.equal(s1.querySelector('[data-list="reasons"]'), null, 'the start line is not listed as a reason the run stopped');
+  assert.equal(chip(w), 'Notes card under way');
+});
+// Bug this guards (#1365): a notes card closed before it landed (relfixes() records its fixes entry closed) starts no
+// run, but the panel still said the suite runs by itself once the card lands.
+test('#1365: a run whose notes card was closed shows the notes step failed, not under way', () => {
+  const w = boot();
+  const id = 'c20261114T081500-plugin-0';
+  deliver(w, data({ ...RUN, sha: null, ended: '2026-11-14T08:15:00Z', state: 'waiting', reasons: [`notes card ${id} started`],
+    notes: { card: id, then: 'prep', mode: null, machine: null }, fixes: [{ issue: null, card: id, ids: [id], state: 'closed' }] }, { notes: false, written: [] }));
+  const s1 = stepOf(w, 'release-notes');
+  assert.equal(s1.dataset.state, 'failed', 'the closed card is not shown as a step under way');
+  assert.equal(s1.querySelector('.release-line').textContent, `docs/releases/1.0.0.md on main: missing: card ${id} was closed before it landed. Draft notes writes them again`);
+  assert.equal(s1.querySelector('[data-figure="notes-card"]'), null, 'the panel does not say the suite runs once the card lands');
+  assert.equal(chip(w), 'Notes missing');
+});
 
 // Bug this guards (#97): Release offered Wide and Full only, and started Wide; the owner wants it Small by default, and
 // a Small card must still show its three steps and its button, laid out in one column.

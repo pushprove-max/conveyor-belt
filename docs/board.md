@@ -604,11 +604,15 @@ with Conveyor, the panel says "No project releases with Conveyor."
 
 The top row of a card shows the project, its newest release tag (or "No release yet"), the number of changes since that
 tag, and one status. The status is the first of these that applies: Suite running, Suite failed, Main moved since the
-suite, Released, Notes missing, Suite not run, Ready to release.
+suite, Notes card under way, Released, Notes missing, Suite not run, Ready to release.
 
 Under the top row are three numbered steps. Each step has a mark: done, failed, in progress or to do.
 
-1. **Release notes**: `docs/releases/<version>.md` on `main`, "written" or "missing: Draft notes writes them".
+1. **Release notes**: `docs/releases/<version>.md` on `main`, "written" or "missing: Draft notes writes them". While
+   a card adds the notes draft to `main`, the step is in progress and names the card. A line under it says that the
+   suite runs by itself once the card's commit is on the branch the suite tests, and then the release when the run
+   was started as a release. A push or a merge can hold that commit (step 2 of "To release from the panel"). When the
+   card is closed before it lands, the step shows it failed and names the card: click **Draft notes** again.
 2. **Full suite**: the whole suite on the head of `main`. It shows passed or failed, with the commit and the time, or
    "Not run". While the suite runs, a bar shows the test files done of all the test files, with the names of the files
    that failed. A test case that ran out of time shows as "<case>: timed out". When release-prep runs the failed
@@ -649,8 +653,8 @@ one of the two choices, or **Cancel**:
   `--parallel` to the command.
 
 The choice that matches the rule **Release suite mode** (Rules tab, Capacity) is pressed already and says "The rule's
-choice". **Draft notes** asks nothing and sends no mode: it runs no suite, so step 2 shows no mode for it. A suite
-that starts with no mode given uses the rule's mode.
+choice". **Draft notes** asks nothing and sends no mode: it runs no suite itself, so step 2 shows no mode for it. A
+suite that starts with no mode given uses the rule's mode. This includes the suite that runs after the notes card's commit is on the branch the suite tests.
 
 When the project's rule sends the suite to another machine (a Namespace Devbox or a Linux box over ssh; see
 [Where the suite runs](releases.md#where-the-suite-runs)), the question also asks "On which machine?". The two choices
@@ -675,8 +679,11 @@ reason shows as a line, and only **Run suite again** shows.
 To release from the panel:
 
 1. Make sure that the field has the version to release.
-2. If **Release** says "needs release notes docs/releases/<version>.md", click **Draft notes**. Read the draft, then
-   commit it to `main`.
+2. If **Release** says "needs release notes docs/releases/<version>.md", click **Draft notes**. Conveyor writes a
+   draft and starts a card that adds it to `main`. When the card's commit is in the commit the suite tests, the suite
+   runs by itself. With **Push on landing** Off, that is after you press **Push landed** or **Push now**. With
+   **Land as** Pull request and **Merge PR** Button, that is after you click **Merge**. If the draft breaks the notes
+   style, the run stops and step 1 shows why: edit the draft, then commit it to `main`.
 3. If **Release** says "needs the whole suite to succeed on main's head (<commit>)", click **Run suite**.
 4. Wait for the suite. While it runs, **Release** says "the suite is running (N of M files)". If it fails, **Release**
    says "the suite failed: <count> failures". Fix the failures, then run the suite again.
@@ -687,7 +694,10 @@ To release from the panel:
 
 - **Draft notes**, **Run suite**, **Run suite again** and **Run again on the new main** run `conveyor.sh release-run prep <version>`. Conveyor
   runs `conveyor.sh release-prep <version>` and nothing more. If `main` has no notes for the version, it writes a draft
-  of them and stops. Else it runs the suite on the head of `main`: the whole suite, or only some of its files
+  of them. A draft in the notes style goes to `main` as a card with no GitHub issue, and the run waits for it. When the
+  card has landed and its commit is in the commit the suite tests, Conveyor runs `conveyor.sh release-prep <version>`
+  again, with the same mode and machine, and that run runs the suite. A push still owed holds it, and so does an open
+  pull request of Land as `pr` with Merge PR `button` or `idle`, until it is merged. A draft that breaks the notes style stops the run. Else it runs the suite on the head of `main`: the whole suite, or only some of its files
   ([Releases](releases.md)). An earlier suite run is a release's, a Run full test
   suite's or a Push landed's. When one of them passed on that same commit, no test runs. Step 2 says which: "Reused
   the green run of <time> on <commit>", "Reran 1 file, reused 2 passed files from <commit>" or "Ran the whole suite".

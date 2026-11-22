@@ -17,13 +17,13 @@
 # docs/releases/<version>.md in the release notes style (tools/notes-check.sh): `release` releases the commit with the
 # notes. When the head has no notes, release-prep has a model write a draft of them in that style (relnotes()), from
 # the issues landed and the commits since the newest vX.Y.Z tag (with no tag, an overview from the README and docs), to <state>/release/<version>.md (each line
-# checked against the issues and commits it names, reltrace(); a draft the style check refuses is rewritten once, relfix()), prints its path and stops, for the owner to read and the Foreman to commit as docs/releases/<version>.md; the run after the notes are
-# pushed runs the suite. It tags and releases nothing. With Land as pr and Merge PR release (lib/push.sh), it runs on
+# checked against the issues and commits it names, reltrace(); a draft the style check refuses is rewritten once, relfix()) and prints its path. A draft that passes the style check goes to main as a card (relnotescard()), and the run
+# waits on it: once the card lands, release-prep starts again by itself and runs the suite (a run while the card is under way waits on it again with no new draft, relnoteskept()); a draft that still breaks the style stops the run, for the owner to edit and commit as docs/releases/<version>.md. It tags and releases nothing. With Land as pr and Merge PR release (lib/push.sh), it runs on
 # the remote's head of the landing branch while that holds a commit the default branch lacks, and `release` checks that
 # head (release-prep's pass is on it) and merges the landing pull request only when every check passed (a refused merge
 # refuses the release), then makes the release commit on top of the merge and tags that commit.
 # Exit 0: passed and posted; 1: the suite failed (failure posted), the head has no notes yet (draft written, nothing
-# run), its notes break the style, or a step could not be done; 2: refused at the ask.
+# run; a notes card started when the draft passes the style check), its notes break the style, or a step could not be done; 2: refused at the ask.
 # release, in the main checkout, refuses (exit 1), changing nothing and naming each reason, unless all of:
 # - the version is higher than the newest vX.Y.Z tag of the remote, and its tag does not exist;
 # - the checkout is on the default branch, at the remote's head of it, with no uncommitted change to a tracked file;
@@ -48,7 +48,7 @@
 # with the notes file as its body (gh release create). Exit 0: released; 1: refused, or a step could not be done.
 # Each run of either keeps its record in $CARDS/release/run.json, which the snapshot reads (its suites and release):
 # {kind: "release", step (release-prep or release), version, since, ended (null while it runs), state (running, then
-# passed (release-prep), released (release), failed (the suite failed), not started (the suite's machine failed its start, setup or checkout: lib/suitehost.sh), refused (any other refusal) or stopped), sha
+# passed (release-prep), released (release), failed (the suite failed), not started (the suite's machine failed its start, setup or checkout: lib/suitehost.sh), waiting (release-prep's notes card is under way: relnotescard()), refused (any other refusal) or stopped), sha
 # (the commit the suite runs or ran on, null before it), mode (the suite's mode, serial or parallel, null before it:
 # release-prep's --serial or --parallel, which the suite's command is told as CONVEYOR_SUITE_MODE; a release keeps the
 # mode of the suite whose result it keeps, as relstart() does, and step 2 of the Board shows it), atOnce (the most test
@@ -66,8 +66,8 @@
 # the processes that carry its mark, `release-run stop` ends), red (a failed release-prep's suite a release may go over: {sha, files, cases}, else null)
 # and anyway (a release made over it: red with by, else null) and allowed (a release that passed over hits in named
 # commits: {by, commits}, else null), minver (the mod's check on its oldest Claude Code, relminver(): {version, state,
-# why}, else null) and by (what started the run when the owner did not: "fixes landed", else null)}; a
-# failed release-prep's record also gets fixes (its fix cards, each {issue, state}: open, landed or closed) and
+# why}, else null) and by (what started the run when the owner did not: "fixes landed" or "notes landed", else null), notes (a waiting run's notes card: {card, then, mode, machine}, relnotescard())}; a
+# failed or waiting release-prep's record also gets fixes (its fix cards, or its notes card, each {issue, state}: open, landed or closed) and
 # restarted (when release-prep started again on them), relfixes() (lib/fulltest.sh). A release after a passed release-prep of the same
 # version keeps that run's suite (sha, done, failed, cases, alone, moved, reused, since); one after a failed release-prep of
 # it keeps that suite too, its files and timedout, and makes red of it; one after a refused release of it keeps that
@@ -321,7 +321,7 @@ relstart() { # <command name> <version>
   # runs an EXIT trap prints bash's "wait_for: No record of process" to the run's stderr, which the record took as a
   # passed run's reason.
   trap 'relsig 143' TERM; trap 'relsig 130' INT; trap 'relsig 129' HUP
-  unset CONVEYOR_RELEASE_PID CONVEYOR_RELEASE_BY # the suite's own commands are no part of this run's record
+  unset CONVEYOR_RELEASE_PID CONVEYOR_RELEASE_BY CONVEYOR_RELEASE_THEN # the suite's own commands are no part of this run's record
 }
 # A stop's signal: the run's processes reaped, then the exit <code>. A child that took the signal before it reset its
 # traps (relstart()) only exits: the reap is this shell's alone, as the child's would end the run's processes.
@@ -367,7 +367,7 @@ relend() { # <exit> <stderr file>
   [ -n "$RELSTARTED" ] || return 0
   relrec --arg t "$(clock)" --argjson rc "$1" --rawfile e "$2" '.ended = $t
     | .reasons = [$e | split("\n")[] | select(. != "") | sub("^conveyor: [a-z-]+: (refused, nothing tagged or released: )?"; "")]
-    | .state = (if $rc == 0 then (if .step == "release" then "released" else "passed" end) elif .state | IN("failed", "not started") then .state else "refused" end)'
+    | .state = (if $rc == 0 then (if .step == "release" then "released" else "passed" end) elif .state | IN("failed", "not started", "waiting") then .state else "refused" end)'
 }
 # The command, its record kept; its stderr is printed once it ends.
 relrun() { # <function> <version>
@@ -547,10 +547,11 @@ relsuite() { # <command name> <commit>
   else echo "conveyor: $n: the whole suite failed on ${sha:0:12} (exit $rc; its output is in $wt.test); a failing status is posted" >&2; return 1; fi
 }
 releaseprep() { # <version>
-  local v=$1 cmd sha last d out
+  local v=$1 cmd sha last d out was nx=${CONVEYOR_RELEASE_THEN:-prep} # nx: what follows a pass (relnoteswait()), as relstart() unsets it
   packget test.full cmd || return 1
   [ -n "$cmd" ] || { echo "conveyor: release-prep: the pack names no full test suite (test.full); nothing run" >&2; return 2; }
   rellock release-prep || return $?
+  was=$(jq -r --arg v "$v" 'select(.step == "release-prep" and .state == "waiting" and .version == $v) | .notes.card // empty' "$RELRUN" 2>/dev/null) # the last run's notes card, before relstart()
   relstart release-prep "$v"
   # The commit `release` releases is the remote's head of the branch, and the tags are the remote's; with Merge PR
   # release, the head of LANDING (relhead(), lib/push.sh), which relfixes() (lib/fulltest.sh) reads too.
@@ -566,13 +567,12 @@ releaseprep() { # <version>
     echo "conveyor: release-prep: ${sha:0:12} holds docs/releases/$v.md"
     relsuite release-prep "$sha"; return
   fi
-  d=${STATE%/*}/release/$v.md
-  mkdir -p "${d%/*}" && rm -f "$d" "${d%.md}.sources.json" && out=$(relnotes "$v" "$last" "$sha" "$d") \
+  ! relnoteskept "$v" "$was" "$nx" "$sha" || return 1 # the last run's notes card is under way: it adds the draft it holds
+  d=${STATE%/*}/release/$v.md && mkdir -p "${d%/*}" && rm -f "$d" "${d%.md}.sources.json" && out=$(relnotes "$v" "$last" "$sha" "$d") \
     || { rm -f "$d" "${d%.md}.sources.json"; echo "conveyor: release-prep: the notes draft could not be written: $out; nothing run" >&2; return 1; }
   [ -z "$last" ] || out+=" The issues and commits each line comes from are in ${d%.md}.sources.json."
   local from="from the issues and commits since $last"; [ -n "$last" ] || from='an overview from the README and docs, as no release is tagged yet'
-  echo "conveyor: release-prep: the notes draft, $from, is $d.$out ${sha:0:12} ($REMOTE/$BRANCH) has no docs/releases/$v.md, so the suite is not run and no status is posted: read the draft, edit it as needed, commit it as docs/releases/$v.md on $BRANCH, push it, and run release-prep $v again" >&2
-  return 1
+  relnotescard "$v" "$d" "$nx" "the notes draft, $from, is $d.$out ${sha:0:12} ($REMOTE/$BRANCH) has no docs/releases/$v.md"
 }
 RELBY='' RELANY='' RELALLOW=() # release [--anyway] [--allow-commit <sha>]... --by <who>: the owner's choices, and who made them
 release() { # <version>
@@ -735,7 +735,7 @@ releasego() { # <version> [prep: release-prep alone | anyway <who>]
     # and released again without the owner's second press.
     if [ "${2:-}" = anyway ]; then bash "$HERE/conveyor.sh" release "$1" --anyway --by "$3"
     elif [ -n "$ok" ]; then CONVEYOR_RELEASE_SHA=$ok bash "$HERE/conveyor.sh" release "$1"
-    else bash "$HERE/conveyor.sh" release-prep "$1" ${RELMODE:+"--$RELMODE"} && [ "${2:-}" != prep ] && CONVEYOR_RELEASE_SHA=$(jq -r '.sha // ""' "$RELRUN") bash "$HERE/conveyor.sh" release "$1"; fi ) >"$CARDS/release/run.log" 2>&1 < /dev/null 8>&- &
+    else CONVEYOR_RELEASE_THEN=$([ "${2:-}" = prep ] || echo release) bash "$HERE/conveyor.sh" release-prep "$1" ${RELMODE:+"--$RELMODE"} && [ "${2:-}" != prep ] && CONVEYOR_RELEASE_SHA=$(jq -r '.sha // ""' "$RELRUN") bash "$HERE/conveyor.sh" release "$1"; fi ) >"$CARDS/release/run.log" 2>&1 < /dev/null 8>&- &
   exec {lk}>&- # the run's process holds the lock now
   if [ "${2:-}" = prep ]; then echo "conveyor: release-run: release-prep $1 is running, and nothing is released; its output is in $CARDS/release/run.log"
   elif [ "${2:-}" = anyway ]; then echo "conveyor: release-run: release $1 is running over release-prep's failed suite, by $3; its output is in $CARDS/release/run.log"

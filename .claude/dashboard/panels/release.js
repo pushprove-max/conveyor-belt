@@ -9,9 +9,11 @@
 // label follows the state, and Release <version>, disabled with what it waits for in its text until the notes are on
 // main and the suite passed on main's head; and the changes since the tag, closed until opened. Each button acts on a
 // second click. Draft notes, Run suite, Run suite again and Run again on the new main send `conveyor.sh release-run prep
-// <version>`: release-prep alone, which writes a notes draft and stops when main has no notes, else runs the whole
-// suite, and releases nothing. Release <version> sends `release-run <version>`: release alone when the suite of that
-// version passed on main's head (step 2 and the confirm say "Uses the suite that passed"), else release-prep first
+// <version>`: release-prep alone, which, when main has no notes, writes a notes draft and starts a card that adds it
+// to main (step 1 shows that card under way, and the suite runs by itself once the card's commit is on the branch the
+// suite tests: after its push, and with Land as pr and Merge PR button or idle, its pull request's merge), else runs
+// the whole suite, and releases nothing. Release <version> sends `release-run <version>`: release alone when the suite
+// of that version passed on main's head (step 2 and the confirm say "Uses the suite that passed"), else release-prep first
 // ("Runs the suite first"); then release makes the tag and the GitHub release. Beside release-prep's red result on main's
 // head, Release anyway sends `release-run anyway <version>`: release over that failed suite. Each button that starts the
 // suite (Run suite, Run suite again, Run again on the new main, and Release when it runs the suite first) asks, after
@@ -201,11 +203,19 @@
     const notStarted = !!(cur && cur.ended !== null && cur.state === 'not started');
     const moved = passed && cur.state !== 'released' && (cur.moved === true || cur.sha !== m.head);
     const released = !!(run && run.ended !== null && run.state === 'released' && m.tag === `v${run.version}`);
+    // release-prep found no notes on main and started a card that adds its draft (state waiting, notes.card:
+    // lib/fulltest.sh relnotescard()); the run starts again by itself once the card's commit is on the branch the suite
+    // tests (relfixes()). Its card id, else ''. A
+    // card closed before it landed (its fixes entry closed: relfixes()) starts nothing: notesClosed, its id, else ''.
+    const card = !notes && cur && cur.ended !== null && cur.state === 'waiting' && cur.notes && typeof cur.notes.card === 'string' ? cur.notes.card : '';
+    const notesClosed = card && list(cur.fixes).some((x) => x && x.card === card && x.state === 'closed') ? card : '';
+    const waiting = notesClosed ? '' : card;
     let chip;
     if (going) chip = ['Suite running', 'info'];
     else if (failed) chip = ['Suite failed', 'bad'];
     else if (notStarted) chip = ['Suite not started', 'bad'];
     else if (moved) chip = ['Main moved since the suite', 'warn'];
+    else if (waiting) chip = ['Notes card under way', 'info'];
     // A release just made: its own commits (the version in plugin.json) are on main past the tag, and the next
     // version's notes are not written yet.
     else if (released && !notes) chip = ['Released', 'ok'];
@@ -216,7 +226,7 @@
     // Release reuses a passed release-prep of v on main's head, main not moved since (release-run); else it runs the
     // suite first.
     const reuse = passed && !moved && cur.step === 'release-prep' && cur.state === 'passed';
-    return { cur, going, passed: passed && !moved, failed, notStarted, moved, released, reuse, chip };
+    return { cur, going, passed: passed && !moved, failed, notStarted, moved, released, reuse, waiting, notesClosed, chip };
   }
 
   // One numbered step: its mark (done, failed, in progress or to do), its name and its one line, then what else.
@@ -383,8 +393,18 @@
     if (run && run.ended !== null) list(run.reasons).forEach((r) => why[stepOf(String(r), run)].push(r));
     // 1. The notes.
     const notesFailed = why[0].length > 0 && run && run.version === v && run.state === 'refused';
-    const s1 = step(h, 'Release notes', notes ? 'done' : notesFailed ? 'failed' : 'todo',
-      `docs/releases/${v}.md on main: ${notes ? 'written' : 'missing: Draft notes writes them'}`, reasonsList(h, why[0]));
+    let s1;
+    if (s.waiting) {
+      // A step under way: the card that adds the draft to main, and what happens when it lands.
+      const p = h('p', 'row-meta', `The suite runs by itself once the card's commit is on the branch the suite tests${s.cur.notes.then === 'release' ? ', then the release' : ''}.`);
+      p.dataset.figure = 'notes-card';
+      s1 = step(h, 'Release notes', 'now', `docs/releases/${v}.md on main: card ${s.waiting} adds the notes draft`, p);
+    } else if (s.notesClosed) {
+      s1 = step(h, 'Release notes', 'failed', `docs/releases/${v}.md on main: missing: card ${s.notesClosed} was closed before it landed. Draft notes writes them again`);
+    } else {
+      s1 = step(h, 'Release notes', notes ? 'done' : notesFailed ? 'failed' : 'todo',
+        `docs/releases/${v}.md on main: ${notes ? 'written' : 'missing: Draft notes writes them'}`, reasonsList(h, why[0]));
+    }
     // 2. The whole suite on main's head.
     let s2;
     if (s.going) {
@@ -484,7 +504,7 @@
     input.value = typed.has(rec.repo) ? typed.get(rec.repo) : String(m.next || '');
     const [label, ask, title, what] = s.moved ? ['Run again on the new main', 'Click again to run the suite on the new main',
       'Run the whole suite on main\'s head. It releases nothing.', 'The suite runs again on the new main.']
-      : !notes ? ['Draft notes', 'Click again to draft the notes', `release-prep writes a draft of docs/releases/${v}.md for you to read and commit. It runs nothing else.`, 'The notes draft is being written.']
+      : !notes ? ['Draft notes', 'Click again to draft the notes', `release-prep writes a draft of docs/releases/${v}.md and starts a card that adds it to main. The suite runs when the card's commit is on the branch the suite tests. A draft that breaks the notes style stops for you to edit.`, 'The notes draft is being written.']
       : [s.passed || s.notStarted ? 'Run suite again' : 'Run suite', 'Click again to run the suite', 'Run the whole suite on main\'s head. It releases nothing.', 'The suite is running.'];
     const btn = h('button', 'btn', label);
     btn.type = 'button'; btn.dataset.act = 'release-prep'; btn.title = title;

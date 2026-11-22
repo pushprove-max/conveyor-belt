@@ -3,9 +3,9 @@
 # timeout: 120
 # Engine cases: a red release run's fix cards (relfixes(), lib/fulltest.sh, issue 758): the issues that carry
 # `Release fix: <version>` are recorded in the run's record, and release-prep starts again by itself once they have
-# all landed, are in the commit release-prep tests and no card is open. Each case but t_relfixesserve calls relfixes()
-# as the loop's job does. t_relfixesland's and t_relfixespr's fixture is release.test.sh's relsetup, as their
-# release-prep runs.
+# all landed, are in the commit release-prep tests and no card is open; so does a release-prep that waits on its notes
+# card (t_relnoteslanded). Each case but t_relfixesserve calls relfixes() as the loop's job does. t_relfixesland's,
+# t_relfixespr's and t_relnoteslanded's fixture is release.test.sh's relsetup, as their release-prep runs.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -79,6 +79,39 @@ t_relfixescard() {
   # wait_until: release-run prep runs as a process of its own after relfixes() returns; only its record shows that it ended and passed.
   wait_until "jq -e '.since != \"2026-11-19T09:00:00Z\" and .ended != null' '$RUN' > /dev/null" || fail "the run did not end: $(cat "$RUN")"
   fixrec "the run is not release-prep 1.1.0 started for the fix card, or did not pass" '.step == "release-prep" and .version == "1.1.0" and .state == "passed" and .by == "fixes landed"'
+}
+# #1365. Bug it catches: a release run that started a notes card (relnotescard(), commands/release-prep.sh) waited on it
+# for ever, or started again before it landed, or in another mode or with no release after it. The run was release-run
+# 1.1.0 --serial on a head with no notes (so then release, mode serial: the run itself records both) and the control
+# record's suite-mode is parallel: while the card is open nothing starts; once it has landed on origin's head (N, O and
+# the card's commit of docs/releases/1.1.0.md), release-prep starts again in serial mode, runs the suite on N, and
+# release follows its pass (it refuses here, main lacking N, but it runs).
+t_relnoteslanded() {
+  relsetup '' nonotes
+  local id n=$T/$CASE/notes N
+  RUN=$T/$CASE/cards/release/run.json
+  relmodel $'# 1.1.0\n\nCards can wait. [#5]\n\n## Cards\n\n- You can hold a card. [#5]'
+  loop control suite-mode parallel > /dev/null && loop release-run 1.1.0 --serial > /dev/null 2>&1 || fail "release-run 1.1.0 --serial did not start"
+  # wait_until: release-run runs release-prep as a process of its own; only its record shows that it ended, and the
+  # process (its pid) holds the release lock, which relfixes() needs, until it exits.
+  wait_until "jq -e '.ended != null' '$RUN' > /dev/null && ! kill -0 \$(jq -r .pid '$RUN') 2>/dev/null" || fail "the first run did not end: $(cat "$RUN")"
+  id=$(jq -r '.notes.card // ""' "$RUN")
+  [ -n "$id" ] && jq -e --arg c "$id" '.cards | map(select(.id == $c)) | length == 1' "$ST/testactions/cards.json" > /dev/null \
+    || fail "release-run 1.1.0 --serial on a head with no notes did not wait on a notes card it started: $(cat "$RUN" "${RUN%/*}/run.log")"
+  fixcall
+  fixrec "the open notes card $id is not recorded as the run's one fix, or a run started" '.state == "waiting" and .restarted == null and .fixes == [{issue: null, card: "'"$id"'", ids: ["'"$id"'"], state: "open"}]'
+  [ ! -e "$STUB/full-at" ] || fail "the suite ran with the notes card $id still open"
+  git clone -q "$T/$CASE/origin" "$n" && mkdir -p "$n/docs/releases" && cp "$ST/release/1.1.0.md" "$n/docs/releases/" && git -C "$n" add docs \
+    && git -C "$n" commit -q -m "docs: Release notes 1.1.0" && git -C "$n" push -q origin main && N=$(git -C "$n" rev-parse HEAD) \
+    || fail "the fixture could not be made"
+  jq -cn --arg c "$id" --arg s "$N" '{card: $c, issue: 0, step: "landed", time: "2026-11-19T12:00:00Z", tokens: {claude: 0, codex: 0}, result: "ok", sha: $s, reason: ""}' >> "$ST/cards.jsonl"
+  fixcall
+  grep -q 'release-prep 1.1.0 is running, then release 1.1.0 once its suite passes' "$T/$CASE.fix" \
+    || fail "release-run 1.1.0 did not start when the notes card $id landed: $(cat "$T/$CASE.fix") $(cat "$RUN")"
+  # wait_until: release-run runs as a process of its own after relfixes() returns; only its record shows that release ran.
+  wait_until "jq -e '.step == \"release\" and .ended != null' '$RUN' > /dev/null" || fail "release did not run after the suite: $(cat "$RUN") $(cat "${RUN%/*}/run.log")"
+  fixrec "the suite did not run in the first run's serial mode on $N, started for the notes card" '.version == "1.1.0" and .mode == "serial" and .sha == "'"$N"'" and .by == "notes landed"'
+  [ "$(cat "$STUB/full-at" 2>&1)" = "$N" ] || fail "the suite did not run on origin's head $N, which holds the notes: $(cat "$STUB/full-at" 2>&1)"
 }
 # #1347. Bug it catches: the Board's File on GitHub on a landed release fix card (cardissue()) copies its `Release fix:`
 # line into a new issue that it closes at once; relfixes() read that issue as a second fix, closed with no landed card of

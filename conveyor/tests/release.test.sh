@@ -97,14 +97,13 @@ t_reldraft() {
     || fail "the sources of the draft's lines are not recorded beside it: $(cat "$ST/release/1.1.0.sources.json" 2>&1)"
   [ ! -e "$STUB/full-at" ] || fail "the suite ran on a head with no notes"
   ! grep -q statuses "$STUB/gh-calls" 2>/dev/null || fail "a status was posted on a head with no notes: $(cat "$STUB/gh-calls")"
-  grep -qF "the notes draft, from the issues and commits since v1.0.0, is $ST/release/1.1.0.md. " <<<"$out" && grep -q 'run release-prep 1.1.0 again' <<<"$out" \
-    || fail "release-prep does not print the draft's path and say to commit the notes and run again: $out"
   [ "$(cat "$ST/release/1.1.0.md")" = $'# 1.1.0\n\nCards can wait.\n\n## Cards\n\n- You can hold a card.\n- Faster.' ] \
     || fail "the notes draft is not the model's: $(cat "$ST/release/1.1.0.md" 2>&1)"
   grep -q HOLD-BODY "$STUB/notes-prompt" && grep -q FAST-BODY "$STUB/notes-prompt" && grep -qx "${O:0:7}[0-9a-f]* fix: A fix" "$STUB/notes-prompt" \
     && grep -qE '^[0-9a-f]{7,} feat\(engine\): A new thing$' "$STUB/notes-prompt" && grep -qx '## #5: Hold a card' "$STUB/notes-prompt" \
     && grep -q '^- Begin with the line "# 1.1.0"' "$STUB/notes-prompt" && ! grep -q BEFORE-BODY "$STUB/notes-prompt" \
     || fail "the model was not given the issues and subjects since v1.0.0 alone, and the style: $(cat "$STUB/notes-prompt" 2>&1)"
+  notesshut # the draft passed the style check: its notes card (t_relnotescard) closed, the next press drafts again
 
   # A first answer that names the command file conveyor.sh (release 1.7.0's own draft did): the model is asked once
   # more, given the check's finding and the lines with their sources, and its rewrite is the draft, which passes the
@@ -123,23 +122,73 @@ t_reldraft() {
     && [ "$(jq -c . "$ST/release/1.1.0.sources.json" 2>&1)" = '[{"line":"Cards can wait.","issues":[5],"commits":[]},{"line":"- Conveyor'"'"'s doctor check warns when the model lists differ.","issues":[7],"commits":[]}]' ] \
     || fail "the rewrite is not traced to its sources: $out; $(cat "$ST/release/1.1.0.md" "$ST/release/1.1.0.sources.json" 2>&1)"
   ! grep -qF 'The draft breaks' <<<"$out" || fail "release-prep says a draft that passes the check breaks the style: $out"
+  notesshut
 
   # Both answers break the style: the draft is kept, its top lists the check's findings, and release-prep names them.
   # The note (its two findings, an issue number and a Closes line, and three more lines) moves the Closes line from 3
   # to 8: the findings name line 8, its line in the draft as saved, not line 3, which holds the note's own text.
   relmodels $'# 1.1.0\n\n- Cards can wait. Closes #5 [#5]' $'# 1.1.0\n\n- Cards can wait. Closes #5 [#5]'
+  local cards=$ST/testactions/cards.json run=$T/$CASE/cards/release/run.json; s=$(jq -c '.cards' "$cards")
   out=$(loop release-prep 1.1.0 2>&1); [ $? = 1 ] || fail "release-prep did not stop on a head with no notes: $out"
   grep -qF 'The draft breaks the release notes style: ' <<<"$out" && grep -qF '1.1.0.md:8: a Closes line' <<<"$out" \
     || fail "release-prep does not say the draft breaks the style, naming the rule and its line in the saved draft: $out"
   [ "$(cat "$STUB/notes-calls" 2>&1)" = 2 ] && head -n 1 "$ST/release/1.1.0.md" | grep -qF '<!--' && sed '/^-->$/q' "$ST/release/1.1.0.md" | grep -qF '1.1.0.md:8: a Closes line: - Cards can wait. Closes #5' \
     && [ "$(sed -n 8p "$ST/release/1.1.0.md")" = '- Cards can wait. Closes #5' ] \
     || fail "a draft that still breaks the style is not kept with the check's findings at its top, naming their lines in it: $(cat "$ST/release/1.1.0.md" 2>&1)"
+  # #1365: such a draft starts no card (it would put notes on main that release refuses) and the run stops as refused,
+  # the check's lines its reason, not waiting on a card.
+  [ "$(jq -c '.cards' "$cards")" = "$s" ] && jq -e '.state == "refused" and .notes == null and (.reasons | any(contains("1.1.0.md:8: a Closes line")))' "$run" > /dev/null \
+    || fail "a draft that still breaks the style started a card, or its run is not refused with the check's lines: $(cat "$cards" "$run")"
 
   printf '#!/usr/bin/env bash\nexit 1\n' > "$STUB/claude"
   echo '# an earlier draft' > "$ST/release/1.1.0.md" || fail "the fixture could not be made"
   out=$(loop release-prep 1.1.0 2>&1); [ $? = 1 ] && grep -q 'the notes draft could not be written: the model gave no notes (exit 1' <<<"$out" \
     || fail "release-prep does not say the model gave no notes: $out"
   [ ! -e "$ST/release/1.1.0.md" ] || fail "a draft was written when the model gave none"
+}
+# notesshut: the notes card the release run waits on (its record's notes.card) is closed, so the next release-prep
+# drafts again.
+notesshut() {
+  jq -cn --arg c "$(jq -r '.notes.card' "$T/$CASE/cards/release/run.json")" '{card: $c, issue: 0, step: "closed", time: "2026-11-19T12:00:00Z",
+    tokens: {claude: 0, codex: 0}, result: "ok", sha: "", reason: ""}' >> "$ST/cards.jsonl" || fail "the fixture could not be made"
+}
+
+# #1365. Bug: a draft that passes the style check stopped the run as refused, for the owner to commit it on main and
+# press again. One card with no issue, not held (the press was the yes), now puts the draft, word for word, on main as
+# docs/releases/1.1.0.md, and the record waits on it, to start the run again (relfixes()) as it was started: prep, the
+# mode and machine of the control record then. A second press while that card is open (not picked yet) starts no second
+# card adding the same file and writes no new draft: a new draft would not be the text the card adds, though the run
+# names it as the card's. With the card closed, the next press drafts again and starts a new card with its draft.
+t_relnotescard() {
+  local O out s id id2 cards run nc='[.cards[] | select(.title | contains("docs/releases/1.1.0.md"))]'
+  relsetup true nonotes; cards=$ST/testactions/cards.json run=$T/$CASE/cards/release/run.json
+  relmodel $'# 1.1.0\n\nCards can wait. [#5]\n\n## Cards\n\n- You can hold a card. [#5]'
+  out=$(loop release-prep 1.1.0 2>&1); [ $? = 1 ] || fail "release-prep did not stop on a head with no notes: $out"
+  [ ! -e "$STUB/full-at" ] || fail "the suite ran on a head with no notes"
+  id=$(jq -r "$nc"' | if length == 1 then .[0].id else "" end' "$cards" 2>/dev/null)
+  [ -n "$id" ] && grep -qF "notes card $id started: the notes draft, from the issues and commits since v1.0.0, is $ST/release/1.1.0.md. " <<<"$out" \
+    || fail "release-prep 1.1.0, its draft passing the style check, did not start one notes card and say so: $out; $(cat "$cards" 2>&1)"
+  [ "$(jq -r "$nc"'[0].body' "$cards" | sed -n '/^~~~$/,/^~~~$/p' | sed '1d;$d')" = "$(cat "$ST/release/1.1.0.md")" ] \
+    && jq -e "$nc"'[0] | .held == null and .label == "Release notes" and .card == null and (.body | contains("create docs/releases/1.1.0.md"))' "$cards" > /dev/null \
+    || fail "notes card $id does not ask for the draft, word for word, as docs/releases/1.1.0.md, or is held: $(cat "$cards")"
+  jq -e --arg c "$id" '.state == "waiting" and .notes == {card: $c, then: "prep", mode: null, machine: null} and (.reasons | any(startswith("notes card \($c) started")))' "$run" > /dev/null \
+    || fail "release-prep 1.1.0's record does not wait on notes card $id: $(cat "$run")"
+
+  s=$(cat "$ST/release/1.1.0.md" "$ST/release/1.1.0.sources.json"); relmodels $'# 1.1.0\n\nCards can wait. [#5]' $'# 1.1.0\n\nCards can wait. [#5]'
+  out=$(loop release-prep 1.1.0 2>&1); [ $? = 1 ] || fail "release-prep did not stop on a head with no notes: $out"
+  [ "$(jq -r "$nc"' | map(.id) | join(" ")' "$cards")" = "$id" ] && grep -qF "notes card $id is still under way" <<<"$out" \
+    && jq -e --arg c "$id" '.state == "waiting" and .notes.card == $c' "$run" > /dev/null \
+    || fail "release-prep 1.1.0 pressed again did not keep notes card $id as the one it waits on: $out; $(cat "$cards" "$run")"
+  [ ! -e "$STUB/notes-calls" ] && [ "$(cat "$ST/release/1.1.0.md" "$ST/release/1.1.0.sources.json")" = "$s" ] \
+    || fail "release-prep 1.1.0 pressed again wrote a new draft while notes card $id adds the first: $(cat "$ST/release/1.1.0.md")"
+
+  notesshut
+  out=$(loop release-prep 1.1.0 2>&1); [ $? = 1 ] || fail "release-prep did not stop on a head with no notes: $out"
+  id2=$(jq -r --arg c "$id" "$nc"' | map(select(.id != $c)) | if length == 1 then .[0].id else "" end' "$cards")
+  [ -n "$id2" ] && grep -qF "notes card $id2 started: " <<<"$out" && jq -e --arg c "$id2" '.notes.card == $c' "$run" > /dev/null \
+    && [ "$(cat "$ST/release/1.1.0.md")" = $'# 1.1.0\n\nCards can wait.' ] \
+    && [ "$(jq -r --arg c "$id2" '.cards[] | select(.id == $c) | .body' "$cards" | sed -n '/^~~~$/,/^~~~$/p' | sed '1d;$d')" = "$(cat "$ST/release/1.1.0.md")" ] \
+    || fail "release-prep 1.1.0 with notes card $id closed did not draft again and start a new card with that draft: $out; $(cat "$cards" "$run")"
 }
 
 # The release notes style check, then release-prep on a head with notes.

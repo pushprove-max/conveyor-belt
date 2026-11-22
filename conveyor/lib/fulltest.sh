@@ -446,6 +446,51 @@ $2" >/dev/null 2>&1; then jq -cn --argjson n "$n" '{issue: $n, reused: true}'
     || { jq -cn --arg r "${out:0:300}" '{issue: null, reused: false, why: ("its issue could not be filed: " + $r)}'; return; }
   jq -cn --argjson n "$n" '{issue: $n, reused: false}'
 }
+# The notes card (#1365), called by release-prep (commands/release-prep.sh, whose relrec() and RELMODE it uses) when
+# main's head has no docs/releases/<version>.md and the notes draft <file> is written. A draft the style check still
+# refuses after its rewrite (relfix(), whose words <what the run found> holds name the check's lines) stops the run,
+# for the owner to edit: no card puts notes on main that release would refuse. Else it starts one card with no GitHub
+# issue (tcadd(), lib/testaction.sh, as a release fix card is; not held: the owner's press that started the run is the
+# yes) whose change is the draft, word for word, as that file, and the run's record waits on it (relnoteswait()).
+# Exit 1 either way: the run goes no further now.
+relnotescard() { # <version> <file> <then> <what the run found>
+  local v=$1 id fence='~~~' body
+  "$HERE/tools/notes-check.sh" "$2" > /dev/null 2>&1 \
+    || { echo "conveyor: release-prep: $4, so the suite is not run and no status is posted: read the draft, edit it to the style, commit it as docs/releases/$v.md on $BRANCH, push it, and run release-prep $v again" >&2; return 1; }
+  while grep -q "^[[:space:]]*$fence" "$2"; do fence+='~'; done # a fence no line of the draft closes
+  body="Add the release notes of $v to $BRANCH: create docs/releases/$v.md holding the text between the two $fence lines below, word for word, and change no other file. release-prep wrote this draft, which passes the release notes style check, when $BRANCH had no notes; once this card lands, release-prep $v starts again by itself and runs the whole suite.
+
+$fence
+$(cat "$2")
+$fence"
+  id=$( . "$HERE/lib/testaction.sh" && tcadd "" "Release notes $v: add docs/releases/$v.md" "$body" "" "Release notes") \
+    || { echo "conveyor: release-prep: $4, and the notes card could not be started: commit the draft as docs/releases/$v.md on $BRANCH, push it, and run release-prep $v again" >&2; return 1; }
+  relnoteswait "$v" "$id" "$3" "notes card $id started: $4, so the card adds the draft as it is"
+}
+# relnoteskept <version> <card or empty> <then> <commit>: exit 0 when the notes card <card> the last run of <version>
+# waited on is still under way (lib/testaction.sh's cards: none of it has landed, and it is not closed or blocked): the
+# run waits on it again (relnoteswait()) and writes no new draft, as the card holds the draft it adds: a second card
+# would add the same file, and a new draft would not be the text the card adds. Else exit 1, nothing done.
+relnoteskept() { # <version> <card or empty> <then> <commit>
+  [ -n "$2" ] && ( . "$HERE/lib/testaction.sh" || exit 1
+    e=$(jq -ce --arg c "$2" 'first(.cards[]? | select(.id == $c)) | {ids: ([.id, .card, (.was // [])[]] | map(select(. != null))), now: (.card // .id)}' "$TACARDS" 2>/dev/null) \
+      && cs=$(stdb ask lines cards 2>/dev/null) \
+      && jq -se --argjson e "$e" 'any(.[]; (.step == "landed" and (.card | IN($e.ids[]))) or (.card == $e.now and (.step | IN("closed", "blocked")))) | not' <<<"$cs" > /dev/null ) || return 1
+  relnoteswait "$1" "$2" "$3" "notes card $2 is still under way: ${4:0:12} ($REMOTE/$BRANCH) has no docs/releases/$1.md yet, and no new draft is written, as the card adds the draft it holds"
+  return 0
+}
+# relnoteswait <version> <card> <then> <what the run found>: the run's record waits on the notes card <card>: state
+# waiting, notes {card, then: <then> (release when release-run without prep started the run, else prep), mode: the
+# --serial or --parallel given, else null, machine: "local" for --machine local, else null}. relfixes() starts the run
+# again so once the card has landed, its commit is in the head release-prep tests and no card is open. Exit 1: the run
+# goes no further now.
+relnoteswait() { # <version> <card> <then> <what the run found>
+  relrec --arg c "$2" --arg t "$3" --arg m "$RELMODE" --arg k "${CONVEYOR_RELEASE_MACHINE:-}" \
+    '.state = "waiting" | .notes = {card: $c, then: $t, mode: (if $m == "" then null else $m end), machine: (if $k == "local" then $k else null end)}' \
+    || { echo "conveyor: release-prep: $4; the run's record could not say it waits on notes card $2: release-prep $1 does not start again by itself when it lands" >&2; return 1; }
+  echo "conveyor: release-prep: $4; release-prep $1 starts again by itself once the card lands, and runs the suite" >&2
+  return 1
+}
 # The fix cards of a red release run: the issues, and the cards with no GitHub issue (rules.releaseissues false: `conveyor.sh card
 # --release`, cardnew(), lib/testaction.sh; their fixes entry has card and ids in place of issue), whose body has the line `Release fix: <version>` for the version of
 # the failed release-prep in $CARDS/release/run.json (commands/release-prep.sh), filed after that run ended. An issue
@@ -459,18 +504,23 @@ $2" >/dev/null 2>&1; then jq -cn --argjson n "$n" '{issue: $n, reused: true}'
 # card records with it, before the release lock is taken; the record is written only while this holds that lock, and
 # only when the record is still that red run's. The lock is then let go, and `release-run prep` takes it as from the
 # Board. The loop (`serve`) calls it once every IDLE seconds, a job beside the cards.
+# A release-prep that waits on its notes card (state waiting, notes.card: relnotescard(), commands/release-prep.sh) is
+# held and started again the same way, with that card, and no issue, as its one fix: the run as it was started,
+# `release-run [prep] <version> [--serial | --parallel] [--machine local]` from its notes (no mode: the control
+# record's suiteMode then), its record's by "notes landed".
 relfixes() {
-  local f=$CARDS/release/run.json r v e s is cs fx busy lk go='' sha hd
-  r=$(jq -ce 'select(.kind == "release" and .step == "release-prep" and .state == "failed" and (.ended | type) == "string" and .restarted == null)' "$f" 2>/dev/null) || return 0
-  v=$(jq -r .version <<<"$r") && e=$(jq -r .ended <<<"$r") && s=$(jq -r .since <<<"$r") || return 1
-  is=$(timeout 60 gh issue list --state all --limit 1000 --json number,body,createdAt,state --search "\"Release fix: $v\" in:body" < /dev/null 2>/dev/null) \
+  local f=$CARDS/release/run.json r v e s is='[]' cs fx busy lk go='' sha hd nc m a
+  r=$(jq -ce 'select(.kind == "release" and .step == "release-prep" and (.state == "failed" or (.state == "waiting" and (.notes.card | type) == "string"))
+    and (.ended | type) == "string" and .restarted == null)' "$f" 2>/dev/null) || return 0
+  v=$(jq -r .version <<<"$r") && e=$(jq -r .ended <<<"$r") && s=$(jq -r .since <<<"$r") && nc=$(jq -r '.notes.card // ""' <<<"$r") || return 1
+  { [ -n "$nc" ] || is=$(timeout 60 gh issue list --state all --limit 1000 --json number,body,createdAt,state --search "\"Release fix: $v\" in:body" < /dev/null 2>/dev/null); } \
     && cs=$(stdb ask lines cards 2>/dev/null) \
-    && fx=$(jq -c --arg v "$v" --arg e "$e" --slurpfile c <(printf '%s' "$cs") --slurpfile t <(jq -c '.cards | arrays' "${TACARDS:-/dev/null}" 2>/dev/null) \
+    && fx=$(jq -c --arg v "$v" --arg e "$e" --arg n "$nc" --slurpfile c <(printf '%s' "$cs") --slurpfile t <(jq -c '.cards | arrays' "${TACARDS:-/dev/null}" 2>/dev/null) \
       '($c | map(select(.step == "landed") | .issue)) as $landed | ("(^|\\n)[ \\t]*Release fix:[ \\t]*" + ($v | gsub("\\."; "\\.")) + "[ \\t]*\\r?(\\n|$)") as $re
       | (($t[0] // []) | map(.filed | numbers)) as $filed
       | ([.[] | select(.createdAt > $e and ((.body // "") | test($re)) and (.number | IN($filed[]) | not))
         | {issue: .number, state: (if .number | IN($landed[]) then "landed" elif .state == "OPEN" then "open" else "closed" end)}] | sort_by(.issue))
-      + ([$t[0][]? | select(.time > $e and ((.body // "") | test($re))) | ([.id, .card, (.was // [])[]] | map(select(. != null))) as $ids | (.card // .id) as $now
+      + ([$t[0][]? | select(if $n != "" then .id == $n else .time > $e and ((.body // "") | test($re)) end) | ([.id, .card, (.was // [])[]] | map(select(. != null))) as $ids | (.card // .id) as $now
         | {issue: null, card: .id, ids: $ids, state: (if any($c[]; .step == "landed" and (.card | IN($ids[]))) then "landed"
             elif any($c[]; .step == "closed" and .card == $now) then "closed" else "open" end)}] | sort_by(.card))' <<<"$is") \
     && busy=$(printf '%s' "$cs" | jq -s 'map(select(.step | IN("push", "pushed", "issue", "bugproof") | not)) | group_by(.card)
@@ -485,11 +535,18 @@ relfixes() {
   fi
   { exec {lk}>>"$CARDS/release/lock"; } 2>/dev/null || return 1
   flock -n "$lk" || { exec {lk}>&-; return 0; }
-  go=$(jq -c --arg s "$s" --argjson x "$fx" --argjson b "$busy" --arg t "$(clock)" 'select(.since == $s and .state == "failed" and .restarted == null)
+  go=$(jq -c --arg s "$s" --arg st "$(jq -r .state <<<"$r")" --argjson x "$fx" --argjson b "$busy" --arg t "$(clock)" 'select(.since == $s and .state == $st and .restarted == null)
     | .fixes = $x | if $x != [] and all($x[]; .state == "landed") and ($b | not) then .restarted = $t else . end' "$f" 2>/dev/null) \
     && [ -n "$go" ] && printf '%s\n' "$go" > "$f.new" && mv -f "$f.new" "$f" || go=''
   exec {lk}>&-
   [ -n "$(jq -r '.restarted // empty' <<<"${go:-null}")" ] || return 0
+  if [ -n "$nc" ]; then
+    a=(prep "$v"); [ "$(jq -r '.notes.then' <<<"$r")" != release ] || a=("$v")
+    m=$(jq -r '.notes.mode // ""' <<<"$r"); [[ ! $m =~ ^(serial|parallel)$ ]] || a+=("--$m")
+    [ "$(jq -r '.notes.machine // ""' <<<"$r")" != local ] || a+=(--machine local)
+    echo "conveyor: the notes card $nc of release $v has landed: release-prep $v starts again$([ "${a[0]}" = prep ] || echo ', then release')" >&2
+    CONVEYOR_RELEASE_BY='notes landed' bash "$HERE/conveyor.sh" release-run "${a[@]}" < /dev/null; return
+  fi
   echo "conveyor: each fix card of release $v's failed suite has landed ($(jq -r 'map(if .issue == null then .card else "#\(.issue)" end) | join(", ")' <<<"$fx")): release-prep $v starts again" >&2
   CONVEYOR_RELEASE_BY='fixes landed' bash "$HERE/conveyor.sh" release-run prep "$v" < /dev/null
 }

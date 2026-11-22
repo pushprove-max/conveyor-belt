@@ -1316,6 +1316,17 @@ A release's suite runs its test files one by one or in parallel. `release-prep` 
 <serial|parallel>`, or **Release suite mode** on the Rules tab), which is `serial` in a record that sets none. The
 record's `mode` keeps the mode the run used.
 
+When main has no `docs/releases/<version>.md`, `release-prep` writes a notes draft and runs no suite. A draft that
+passes the notes style check goes to main as a card with no GitHub issue, which adds the draft as it is. The run's
+record then has the state `waiting` and names the card in `notes`. The Board's Release panel shows the notes step in
+progress, with the card. Once the card has landed, its commit is on the branch the suite tests and no other card is
+open, `serve` starts the run again with its own mode and machine: `release-run prep <version>`, or `release-run
+<version>` when the release was asked for, which goes on to `release` after the suite passes. A mode not given then
+is the control record's `suiteMode`. A second run of the same version while the card is open starts no second card and writes no new draft.
+When the card is closed before it lands, nothing starts again, and the next run writes a new draft.
+A draft that still breaks the style after its rewrite stops the run as `refused`, with the check's lines as its
+reason, and starts no card.
+
 Run full test suite, Push landed and `release-prep` keep one record of results for each commit (`suites.jsonl` in the
 state folder): each test file's ok or fail, with the commit, the time and the run that made it. Each of them reads
 that record before it runs:
