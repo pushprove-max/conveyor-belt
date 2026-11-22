@@ -241,7 +241,7 @@ DECLINED_ID = re.compile(r'd[0-9a-f]{12}')  # a line of the declined list, as co
 # depends reads the open issues and writes the issue's body, each through gh (the write under gh-write's 60 s timeout).
 CONTROL_TIMEOUT = {'approve': 120, 'decline': 120, 'retry': 60, 'unblock': 60, 'close': 60,'start': 90, 'build': 60, 'depends': 120,
                    'testaction': 60, 'testmap': 60, 'test-close': 60, 'test-issue': 60,  # testaction and testmap stop wait up to 40 s for the end
-                   'suite-machine-check': 120,  # an ssh box's check waits for its connect, then its facts
+                   'suite-machine-check': 240,  # an ssh box's check waits for its connect, then its facts; a devbox's, for its login, its list and a box leased and given back
                    'replay': 60,  # the judge replay's estimate reads every review line of the records
                    'bench': 600,  # bench diff makes one model call a flipped task; its stop waits up to 90 s (another Stop, then the run's end)
                    'card': 360}  # Pick for me (card <issue> pick) waits up to conveyor.sh's PICK_TIMEOUT, 300 s, for the judge

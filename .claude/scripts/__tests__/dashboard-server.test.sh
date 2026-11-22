@@ -730,7 +730,7 @@ control_actions 'pause' 'resume' 'stop' 'cap 3' 'cap 9' 'cap 100' 'cap off' 'gua
 # check's JSON line, with 200, though the check exits 1 for a missing tool; a check with no output answers its error.
 # Bug: a form the Rules row sends was refused with a Bad Request; a missing tool's check answered as a failed action,
 # so the row had no lines to show.
-control_actions 'suite-machine local' 'suite-machine devbox' 'suite-machine devbox --size 8x16' 'suite-machine devbox --size 4x8 --setup-at 2026-11-20T15:04:00Z' 'suite-machine ssh me@box.example.com' 'suite-machine ssh box.example.com --dir ~/suite' 'suite-machine ssh box --dir /srv/suite'
+control_actions 'suite-machine local' 'suite-machine devbox' 'suite-machine devbox --size 8x16' 'suite-machine devbox --box hand-made' 'suite-machine devbox --size 4x8 --box hand-made --setup-at 2026-11-20T15:04:00Z' 'suite-machine devbox --size 4x8 --setup-at 2026-11-20T15:04:00Z' 'suite-machine ssh me@box.example.com' 'suite-machine ssh box.example.com --dir ~/suite' 'suite-machine ssh box --dir /srv/suite'
 fresh_control
 got=$(ctl "$(act suite-machine-check)")
 [ "$got" = 200 ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM suite-machine check --json" ] && jq -e '.ok == false and .needs[0].need == "jq" and .slots == 3' "$M/ctl.out" >/dev/null \
@@ -1167,6 +1167,7 @@ for b in "$(act frob)" "$(act 'pause;rm')" "$(act pause now)" "$(act cap 101)" "
   "$(act depends)" "$(act depends 12)" "$(act depends 12 add)" "$(act depends 12 drop 7)" "$(act depends 12 ADD 7)" "$(act depends x add 7)" "$(act depends 012 add 7)" \
   "$(act depends 12 add 07)" "$(act depends 12 remove '7;id')" "$(act depends 12 add 7 -x)" "$(act depends add 12 7)" "$(act depends 12 add $(seq 21))" \
   "$(act suite-machine)" "$(act suite-machine frob)" "$(act suite-machine local now)" "$(act suite-machine devbox 4x8)" "$(act suite-machine devbox --size)" "$(act suite-machine devbox --size '4x8;id')" \
+  "$(act suite-machine devbox --box)" "$(act suite-machine devbox --box 'a;id')" "$(act suite-machine devbox --box -x)" "$(act suite-machine devbox --box a --box b)" "$(act suite-machine devbox --box a --setup-at 2026-11-20T15:04:00Z)" \
   "$(act suite-machine devbox --size 4x8 x)" "$(act suite-machine devbox --size 4x8 --setup-at)" "$(act suite-machine devbox --size 4x8 --setup-at yesterday)" "$(act suite-machine devbox --size 4x8 --setup-at '2026-11-20T15:04:00Z;id')" "$(act suite-machine devbox --size 4x8 --since 2026-11-20T15:04:00Z)" "$(act suite-machine ssh)" "$(act suite-machine ssh -oProxyCommand=id)" "$(act suite-machine ssh 'a b')" "$(act suite-machine ssh box --dir)" \
   "$(act suite-machine ssh box dir /x)" "$(act suite-machine ssh box --dir rel/x)" "$(act suite-machine ssh box --dir '~other')" "$(act suite-machine ssh box --dir '/x;id')" "$(act suite-machine ssh box --dir "$(printf '/a\nb')")" \
   "$(act suite-machine-check now)" \
@@ -1249,7 +1250,8 @@ for b in 'suite-machine ssh box.example.com' 'suite-machine devbox' 'suite-machi
   got=$(ctl "$(act $b)" "$A/ana"); { [ "$got" = 403 ] && [ -z "$(calls)" ]; } || fail "member_refused_the_suite_machine: '$b' answered $got '$(cat "$M/ctl.out")', ran '$(calls)'"
   pass=$((pass + 1))
 done
-got=$(ctl "$(act suite-machine-check)" "$A/ana"); [ "$got" = 200 ] || fail "member_may_check_the_suite_machine: answered $got '$(cat "$M/ctl.out")'"
+# Bug: a member's check asked the account for a devbox, which can create one: the member's check runs with --no-create.
+got=$(ctl "$(act suite-machine-check)" "$A/ana"); [ "$got" = 200 ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM suite-machine check --json --no-create" ] || fail "member_may_check_the_suite_machine: answered $got '$(cat "$M/ctl.out")', ran '$(calls)'"
 pass=$((pass + 1))
 fresh_control
 # An action that is not a string is a bad request, not a crash (a list cannot be looked up in the action table).

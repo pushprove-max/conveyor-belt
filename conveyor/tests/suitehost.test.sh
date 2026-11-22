@@ -302,16 +302,24 @@ t_hostnostdinpath() {
 # an exec by what its script does (facts, setup, checkout, upload, run, poll or kill: the box's steps), and runs the script in
 # the box's folder as boxsetup's ssh does; a lease it handed out (acquire) is held until release, and an exec or a
 # release of any other lease, or of one given back, fails. A file $STUB/devbox-nologin is a login that has expired.
+# A file $STUB/devbox-full is an account at its devbox limit: acquire refuses. $STUB/devbox-list is what `devbox list -o json`
+# prints (no file: no boxes). A box named hand-made is the account's own, with no tag: exec reaches it by name, with no lease.
+# A file $STUB/devbox-tagged is a box already tagged: acquire reuses it; with none, acquire makes a box (conveyor-made) in the list.
 DEVBOX='#!/usr/bin/env bash
 L=lease-1274
 note() { printf "%s\n" "$*" >> "$STUB/devbox-calls"; }
 case $1 in
   auth) note "$@"; [ ! -e "$STUB/devbox-nologin" ] || { echo "not logged in" >&2; exit 1; } ;;
-  acquire) note "$@"; echo "Leasing a devbox"; echo "$L"; : > "$STUB/devbox-leased" ;;
+  list) note "$@"; cat "$STUB/devbox-list" 2> /dev/null || echo "[]" ;;
+  acquire) note "$@"; [ ! -e "$STUB/devbox-full" ] || { echo "rpc error: code = ResourceExhausted desc = failed to create devbox: per-user devbox limit reached" >&2; exit 1; }
+    [ -e "$STUB/devbox-tagged" ] || echo "[{\"name\":\"conveyor-made\"}]" > "$STUB/devbox-list"
+    echo "Leasing a devbox"; echo "$L"; : > "$STUB/devbox-leased" ;;
   release) note "$@"; [ "$2 $3" = "--lease_id $L" ] && [ -e "$STUB/devbox-leased" ] || { echo "no such lease" >&2; exit 1; }; rm -f "$STUB/devbox-leased"; echo "$L" >> "$STUB/devbox-released" ;;
   exec) shift; d=; [ "${1:-}" != -d ] || { d=-d; shift; }
-    [ "$1 $2 $3" = "--lease_id $L --" ] && [ -e "$STUB/devbox-leased" ] || { echo "no such lease" >&2; exit 1; }
-    shift 3; s=$*
+    if [ "$1 $2" = "hand-made --" ]; then shift 2
+    else [ "$1 $2 $3" = "--lease_id $L --" ] && [ -e "$STUB/devbox-leased" ] || { echo "no such lease" >&2; exit 1; }; shift 3; fi
+    s=$*
+    [ "$s" != true ] || { note "exec start"; exit 0; }
     case $s in *setup.blob*) t=setup ;; *wt.bundle*) t=checkout ;; *nohup*) t=run ;; *"tar -cf"*) t=poll ;; *"tar -xf"*) t=upload ;; *"kill -TERM"*) t=kill ;; *) t=facts ;; esac
     note "exec${d:+ -d} $t"
     [ -z "$d" ] || exec < /dev/null
@@ -391,8 +399,8 @@ t_devboxrun() {
   out=$(loop snapshot --fresh | jq -c '.suites[] | select(.kind == "release") | .machine.name') && [ "$out" = '"Namespace Devbox 4x8"' ] || fail "the snapshot does not name the run's machine as Namespace Devbox 4x8: $out"
   # Bug: suite-machine check named no login for the devbox rule, or asked a devbox that is leased for a run only for
   # bash, tools and slots, so it always read missing.
-  out=$(loop suite-machine check 2>&1) && [ "$out" = "$(printf 'conveyor: suite-machine: the suite runs on Namespace Devbox 4x8\nok: Namespace login: logged in')" ] \
-    || fail "suite-machine check with a login did not report the Namespace login alone as ok: $out"
+  out=$(loop suite-machine check 2>&1) && [ "$out" = "$(printf 'conveyor: suite-machine: the suite runs on Namespace Devbox 4x8\nok: Namespace login: logged in\nok: Devbox: the run reuses the box tagged conveyor-suite-main')" ] \
+    || fail "suite-machine check with a login did not report the Namespace login and the tagged box as ok: $out"
   # Bug: release-run atonce printed this machine's cap for the devbox rule, as the box's slots are known only to a run.
   out=$(loop release-run atonce 2>&1); [ $? = 1 ] && grep -q 'read when a run leases it' <<<"$out" || fail "release-run atonce with the devbox rule did not refuse to print a number: $out"
 }
@@ -412,6 +420,23 @@ t_devboxstop() {
   wait_until "! kill -0 $(cat "$STUB/box-sleep") 2>/dev/null" || { kill "$(cat "$STUB/box-sleep")"; fail "the suite still runs on the devbox after release-run stop: $out"; }
   jq -e '.state == "stopped"' "$RUN" > /dev/null || fail "the record does not say stopped: $(cat "$RUN")"
   [ "$(cat "$STUB/devbox-released" 2>&1)" = lease-1274 ] && [ ! -e "$STUB/devbox-leased" ] || fail "release-run stop did not give the lease back once: $(cat "$STUB/devbox-released" 2>&1); calls $(devboxcalls)"
+}
+# Bug: a run on a named devbox has no lease, so release-run stop skipped it and left the suite going on the owner's box. The stop
+# reaches the box by the name the record keeps, ends the suite there, and calls release for no lease.
+t_devboxnamedstop() {
+  local O RUN out
+  runsetup 'sleep 300 & echo $! > "$STUB/box-sleep"; wait'; devboxsetup 3 # sleep: the box's suite, which only the stop ends
+  echo '[{"name":"hand-made"}]' > "$STUB/devbox-list"
+  out=$(loop control suite-machine devbox --box hand-made 2>&1) || fail "control suite-machine devbox --box hand-made did not set the rule: $out"
+  out=$(loop release-run prep 1.1.0 2>&1) || fail "release-run prep did not start the run: $out"
+  # wait_until: the suite starts on the devbox in the background; only its note there shows when it runs.
+  wait_until '[ -s "$STUB/box-sleep" ]' || fail "the suite did not start on the named box: $(cat "$T/$CASE/cards/release/run.log" 2>&1)"
+  jq -e '.machine.step == "run" and .machine.box == "hand-made" and .machine.lease == null' "$RUN" > /dev/null || fail "the record does not say the run is under way on hand-made with no lease: $(jq -c .machine "$RUN")"
+  out=$(loop release-run stop 2>&1) || fail "the stop failed: $out"
+  # wait_until: a process sent TERM ends a moment later; only a check of it shows when it has.
+  wait_until "! kill -0 $(cat "$STUB/box-sleep") 2>/dev/null" || { kill "$(cat "$STUB/box-sleep")"; fail "the suite still runs on the named box after release-run stop: $out"; }
+  jq -e '.state == "stopped"' "$RUN" > /dev/null || fail "the record does not say stopped: $(cat "$RUN")"
+  ! grep -q '^release' "$STUB/devbox-calls" || fail "the stop called release for a box with no lease: $(devboxcalls)"
 }
 # Bug ("Not logged in to Namespace"): a run with an expired login went on to acquire a devbox, or ended refused or
 # failed, with a status posted, rather than not started with that reason; suite-machine check reported the login ok.
@@ -444,4 +469,53 @@ t_devboxfail() {
   relwait "the run did not end" '.ended != null'
   jq -e '.state == "not started" and (.machine.reason | test("jq is not installed there")) and .machine.step == "start"' "$RUN" > /dev/null || fail "a devbox with no jq did not end the run not started, naming jq: $(cat "$RUN")"
   [ "$(cat "$STUB/devbox-released" 2>&1)" = lease-1274 ] && [ ! -e "$STUB/devbox-leased" ] && [ ! -e "$STUB/runs" ] || fail "the lease was not given back once, or the suite ran: $(cat "$STUB/devbox-released" 2>&1); calls $(devboxcalls)"
+}
+# Bug (the devbox rule could name a box only by tag): a devbox the owner made by hand has no tag, `devbox acquire` found
+# none and tried to create one, and the account's limit refused, so the suite did not start. With the box named, the run
+# starts that box by name and runs on it, never acquires, and has no lease to give back; the commit status does not name it.
+t_devboxnamed() {
+  local O RUN out
+  runsetup "$BOXSUITE"; devboxsetup 3
+  # stub: the account is at its devbox limit, and its one box is untagged
+  : > "$STUB/devbox-full"; echo '[{"name":"hand-made"}]' > "$STUB/devbox-list"
+  out=$(loop control suite-machine devbox --box hand-made 2>&1) || fail "control suite-machine devbox --box hand-made did not set the rule: $out"
+  out=$(loop release-run prep 1.1.0 2>&1) || fail "release-run prep did not start the run: $out"
+  # relwait: release-run starts the run in the background and returns; only its record shows when the run has ended.
+  relwait "the run on the named devbox did not end" '.ended != null'
+  jq -e '.state == "passed" and .machine.kind == "devbox" and .machine.box == "hand-made" and .machine.lease == null and .machine.step == "done"' "$RUN" > /dev/null \
+    || fail "the run did not pass on the named box hand-made: $(cat "$RUN") $(cat "$T/$CASE/cards/release/run.log")"
+  [ "$(devboxcalls)" = 'auth check-login;exec start;exec facts;exec checkout;exec upload;exec -d run;exec poll' ] \
+    || fail "the calls were not login, start, facts, checkout, upload, run and polls (no setup script in this commit), with no acquire or release: $(devboxcalls)"
+  ! grep -q hand-made "$STUB/gh-calls" || fail "the commit status names the owner's box: $(cat "$STUB/gh-calls")"
+}
+# Bugs: suite-machine check passed while the account was at its devbox limit with no box to use, so the problem showed only
+# when the release started; a named box that the account does not have passed; a named box was checked by leasing one.
+t_devboxcheck() {
+  local out
+  setup '[]'; devboxsetup 3
+  : > "$STUB/devbox-full"; echo '[{"name":"hand-made"}]' > "$STUB/devbox-list"
+  out=$(loop suite-machine check 2>&1); [ $? = 1 ] && grep -q '^missing: Devbox: .*per-user devbox limit reached.*account is at its devbox limit.*control suite-machine devbox --box <name>, or remove one' <<<"$out" \
+    || fail "check with no box named at the limit did not say missing with the limit and the fix: $out"
+  # Bug: a member's check on the Board (--no-create) asked the account for a box, which can create one.
+  : > "$STUB/devbox-calls"
+  out=$(loop suite-machine check --json --no-create 2>&1) && jq -e '.ok and .boxes == ["hand-made"] and (.needs[1] | .ok and (.detail | test("does not ask for one")))' <<<"$out" > /dev/null \
+    || fail "check --no-create with no box named did not pass and list the boxes without asking for one: $out"
+  [ "$(devboxcalls)" = 'auth check-login;list -o json' ] || fail "check --no-create asked the account for a box: $(devboxcalls)"
+  # Bug: a check that reused the tagged box and one that created a box gave the same answer.
+  rm -f "$STUB/devbox-full"; echo '[{"name":"tagged-box"}]' > "$STUB/devbox-list"; : > "$STUB/devbox-tagged"
+  out=$(loop suite-machine check 2>&1) && grep -q '^ok: Devbox: the run reuses the box tagged conveyor-suite-' <<<"$out" && ! grep -q 'created' <<<"$out" \
+    || fail "check with a tagged box did not say the run reuses it: $out"
+  [ "$(cat "$STUB/devbox-released" 2>&1)" = lease-1274 ] || fail "check did not give back the lease it took: $(devboxcalls)"
+  rm -f "$STUB/devbox-tagged"; echo '[]' > "$STUB/devbox-list"
+  out=$(loop suite-machine check --json 2>&1) && jq -e '.ok and .boxes == ["conveyor-made"] and (.needs[1].detail | test("a new one was created"))' <<<"$out" > /dev/null \
+    || fail "check with no tagged box did not say a new box was created, and list it: $out"
+  : > "$STUB/devbox-full"; echo '[{"name":"hand-made"}]' > "$STUB/devbox-list"
+  out=$(loop control suite-machine devbox --box hand-made 2>&1) || fail "control suite-machine devbox --box hand-made did not set the rule: $out"
+  : > "$STUB/devbox-calls"
+  out=$(loop suite-machine check --json 2>&1) && jq -e '.ok and .boxes == ["hand-made"] and (.needs[1] | .need == "Devbox" and .ok and (.detail | test("hand-made")))' <<<"$out" > /dev/null \
+    || fail "check with the box hand-made did not pass and list the account's boxes: $out"
+  [ "$(devboxcalls)" = 'auth check-login;list -o json' ] || fail "check with a named box acquired a devbox: $(devboxcalls)"
+  loop control suite-machine devbox --box gone > /dev/null 2>&1 || fail "control suite-machine devbox --box gone did not set the rule"
+  out=$(loop suite-machine check 2>&1); [ $? = 1 ] && grep -q '^missing: Devbox: no devbox named gone is in this account; it has: hand-made' <<<"$out" \
+    || fail "check with a box the account lacks did not say missing with the boxes it has: $out"
 }

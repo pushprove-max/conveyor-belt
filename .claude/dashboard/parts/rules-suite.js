@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // The Rules tab's rule "Release suite runs on" (Capacity): the control record's suiteMachine, the machine a release's
 // whole suite runs on: this machine, a Namespace Devbox or a Linux box over ssh. A choice is sent as
-// `control suite-machine <local | devbox [--size <s>] | ssh <target> [--dir <d>]>`; Check the box sends
-// `suite-machine check --json` and shows each line with its chip. The Namespace login and the box's test slots are
+// `control suite-machine <local | devbox [--size <s>] [--box <name>] | ssh <target> [--dir <d>]>`; Check the box sends
+// `suite-machine check --json` and shows each line with its chip. A devbox's check also lists the account's devboxes
+// (boxes), which the "Use" choice offers beside "A new box for Conveyor". The Namespace login and the box's test slots are
 // the last check's: a devbox is checked once when it is shown, and again with each refresh, at most every 15 s, while
 // the login is missing, so a login made in a terminal turns Check on by itself.
 // Part of panels/rules.js, which asks for it by name (DASH_APP.use); boot.js loads it before the panels.
@@ -31,7 +32,7 @@
   function argsOf(m) {
     if (m.kind === 'devbox') {
       // The set-up time goes back with the box (an Undo of a change to this machine), or the Box row loses it.
-      return ['devbox'].concat(text(m.size) ? ['--size', m.size] : [], Number.isNaN(Date.parse(text(m.setupAt))) ? [] : ['--setup-at', m.setupAt]);
+      return ['devbox'].concat(text(m.size) ? ['--size', m.size] : [], text(m.box) ? ['--box', m.box] : [], Number.isNaN(Date.parse(text(m.setupAt))) ? [] : ['--setup-at', m.setupAt]);
     }
     if (m.kind === 'ssh' && TARGET.test(text(m.target))) return ['ssh', m.target].concat(text(m.dir) ? ['--dir', m.dir] : []);
     return ['local'];
@@ -72,7 +73,7 @@
       if (!quiet || BUSY || before !== JSON.stringify([LAST.rec, LAST.error])) draw();
     });
   }
-  // The check's lines, each with "ok" or "missing". A tool the box lacks (not the login, ssh, bash or the slots)
+  // The check's lines, each with "ok" or "missing". A tool the box lacks (not the login, the devbox, ssh, bash or the slots)
   // offers "Set up now", which cannot be sent yet: no action runs test-machine.sh there, so it stays off.
   function lines(c) {
     const h = S.ctx.h, l = last(c);
@@ -82,7 +83,7 @@
     l.rec.needs.forEach((n) => {
       const li = h('li', 'rules-suite-check');
       li.append(S.ctx.chip(n.ok ? 'ok' : 'missing', n.ok ? 'ok' : 'bad'), ' ', h('span', null, `${text(n.need)}: ${text(n.detail)}`));
-      if (!n.ok && !['ssh', 'bash 5.1+', 'Namespace login', 'test slots'].includes(n.need)) {
+      if (!n.ok && !['ssh', 'bash 5.1+', 'Namespace login', 'Devbox', 'test slots'].includes(n.need)) {
         const b = button('Set up now', 'btn-quiet', `suite-setup-${n.need}`, `Set up ${n.need} now`, () => {});
         b.disabled = true;
         li.append(' ', b, ' ', h('span', 'board-from', 'Runs test-machine.sh there. Asks the owner first.'));
@@ -103,16 +104,26 @@
     const sel = h('select'), cpus = cpusOf(size);
     sel.dataset.act = 'suite-size'; sel.setAttribute('aria-label', 'Devbox size');
     sizes.forEach((s) => { const o = h('option', null, s); o.value = s; o.selected = s === size; sel.append(o); });
-    sel.addEventListener('change', () => { if (sel.value !== size) send('suite-machine', ['devbox', '--size', sel.value]); });
+    const named = text(m.box), pickedBox = (b) => ['devbox', '--size', size].concat(b ? ['--box', b] : []);
+    sel.addEventListener('change', () => { if (sel.value !== size) send('suite-machine', ['devbox', '--size', sel.value].concat(named ? ['--box', named] : [])); });
+    // The account's devboxes, as the last check read them (`devbox list`): the box to use, or a new one for Conveyor.
+    const names = checked(c) && Array.isArray(checked(c).boxes) ? checked(c).boxes.filter((b) => typeof b === 'string') : null;
+    const pick = h('select');
+    pick.dataset.act = 'suite-box'; pick.setAttribute('aria-label', 'Devbox to use');
+    [['', 'A new box for Conveyor']].concat((names || []).concat(named && !(names || []).includes(named) ? [named] : []).map((b) => [b, b])).forEach(([v, label]) => {
+      const o = h('option', null, label); o.value = v; o.selected = v === named; pick.append(o);
+    });
+    pick.addEventListener('change', () => { if (pick.value !== named) send('suite-machine', pickedBox(pick.value)); });
     // When the box was set up: the record's setupAt, else said as not kept.
     const setup = Number.isNaN(Date.parse(text(m.setupAt))) ? 'set-up time not kept' : `set up ${S.ctx.when(m.setupAt)}`;
     const after = h('span', null, m.idleStop ? `Keep it, stop it after ${text(m.idleStop).replace(/m$/, ' min')} idle` : 'Delete it');
     const fact = (name, ...kids) => { const p = h('p', 'rules-suite-fact'); p.append(h('span', 'board-from', `${name} `), ...kids); return p; };
     box.append(
       fact('Namespace login', login === null ? S.ctx.chip('not checked', 'quiet') : S.ctx.chip(login ? 'logged in' : 'not logged in', login ? 'ok' : 'bad')),
-      fact('Size', sel, ' ', h('span', 'board-from', cpus === null ? '' : `${cpus} CPUs`)),
+      fact('Use', pick, ' ', h('span', 'board-from', names === null ? 'The account\'s devboxes are listed after a check.' : '')),
+      fact('Size', sel, ' ', h('span', 'board-from', named ? 'Used for a new box only.' : cpus === null ? '' : `${cpus} CPUs`)),
       fact('After a run', after),
-      fact('Box', h('span', null, `Namespace Devbox ${size}${text(m.tag) ? `, reused by its tag ${m.tag}` : ''}, ${setup}`)),
+      fact('Box', h('span', null, named ? `Your devbox ${named}, ${setup}` : `Namespace Devbox ${size}${text(m.tag) ? `, reused by its tag ${m.tag}` : ''}, ${setup}`)),
       fact('Tools', h('span', null, 'From .conveyor/test-machine.sh. It runs again only when the script changes.')));
     if (login === false) {
       const cmd = h('code', 'rules-suite-cmd', 'devbox login');

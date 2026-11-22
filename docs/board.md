@@ -313,13 +313,18 @@ one control, and the value in force is the selected part.
    slots cap it. **Release suite runs on** is the machine a release's full suite runs on: **This machine** (the
    default), **Namespace Devbox** or **Linux box over ssh**. Card test steps stay on the build machine. A click on
    a choice saves it, and Undo puts the last one back. Only an admin changes it, because the release commit goes to
-   that machine. On a devbox the row shows the Namespace login, the size with its CPUs, what happens after a run, the
-   box (its tag and when a run last set it up, or "set-up time not kept" until a run has) and its tools. The Board reads the login with a check when it shows the devbox. When you are not logged in, the
+   that machine. On a devbox the row shows the Namespace login, the box to use, the size with its CPUs, what happens after a run, the
+   box (its tag, or the devbox you named, and when a run last set it up, or "set-up time not kept" until a run has) and its tools.
+   **Use** lists the devboxes of your account, which the check reads, and **A new box for Conveyor**. Pick a box you
+   already have when your account is at its devbox limit, and the suite runs on that box. Pick **A new box for Conveyor**
+   to run on a box that Conveyor leases by its tag, as before. The Board reads the login with a check when it shows the devbox. When you are not logged in, the
    row shows the command `devbox login` to run in a terminal on the build machine, and **Check the box** stays off.
    The Board reads the login again with each refresh, so the button comes on after you log in. For a Linux box, type
    the **ssh target** and the **Folder there**, then press **Use this box**. **Check the box** stays off while you
    edit the target and has not saved it. **Check the
-   box** shows each line of `suite-machine check` with "ok" or "missing". A missing tool shows **Set up now**, which
+   box** shows each line of `suite-machine check` with "ok" or "missing". For a devbox with a box named, the check reads
+   the account's list and does not ask for a box. With no box named, an admin's check also asks the account for a box
+   under the tag, which can create one; a member's check does not. A missing tool shows **Set up now**, which
    is off until Conveyor can run `.conveyor/test-machine.sh` from the Board
    ([Where the suite runs](releases.md#where-the-suite-runs)). **Reserved cores**
    shows the cores that card work does not use. You set them in the host file

@@ -46,9 +46,12 @@ def control_ok(body):
     if a == 'suite-machine':  # where a release's suite runs, as `control suite-machine` takes it (the host checks again)
         if v == ['local'] or v == ['devbox']:
             return True
-        if v[:2] == ['devbox', '--size'] and n in (3, 5):
-            # a devbox size, such as 4x8; with --setup-at <time>, the Board's Undo putting the box's set-up time back
-            return suite_word(v[2], '', '._-', 20) and (n == 3 or (v[3] == '--setup-at' and setup_at_ok(v[4])))
+        if v[:1] == ['devbox'] and n % 2 == 1 and n > 1:
+            # --size <size> (such as 4x8), --box <a devbox the account has> and --setup-at <time> (the Board's Undo putting the
+            # box's set-up time back), each once; the host checks the rest
+            o = v[1::2]
+            ok = {'--size': lambda x: suite_word(x, '', '._-', 20), '--box': lambda x: suite_word(x, '', '._-', 128), '--setup-at': setup_at_ok}
+            return len(set(o)) == len(o) and all(k in ok and ok[k](x) for k, x in zip(o, v[2::2])) and ('--setup-at' not in o or '--size' in o)
         # An ssh target is user@host or a host, never one ssh reads as an option: it does not start with a dash.
         return v[:1] == ['ssh'] and n in (2, 4) and suite_word(v[1], '._', '._@-', 128) and (n == 2 or (v[2] == '--dir' and suite_dir_ok(v[3])))
     if a == 'suite-machine-check':  # Check the box: what the suite machine has
@@ -432,7 +435,9 @@ def control_script(action, args, main, today, record=None, user=None):
     if action == 'suite-machine-check':
         # The check's JSON line is the answer. It exits 1 when a need is missing, which is the answer too; with no
         # output (the rule cannot be read) the command's own error is the answer.
-        return f'o=$({conv} suite-machine check --json) || [ $? = 1 ]; [ -n "$o" ] || exit 1; printf "%s\\n" "$o"'
+        # A devbox's check asks the account for a box, which can create one: only an admin's check does; a member's reads.
+        flag = '' if user and globals()['is_admin'](user) else ' --no-create'
+        return f'o=$({conv} suite-machine check --json{flag}) || [ $? = 1 ]; [ -n "$o" ] || exit 1; printf "%s\\n" "$o"'
     if action == 'build':
         return '%s declined build %s' % (conv, q(args[0]))
     if action == 'dismiss':

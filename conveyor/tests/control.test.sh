@@ -392,7 +392,7 @@ t_controlsuitemachine() {
   out=$(loop control suite-machine devbox --size 8x16 --setup-at yesterday 2>&1); [ $? = 2 ] && [ "$(jq -r .suiteMachine.setupAt "$C")" = 2026-11-20T15:04:00Z ] || fail "control suite-machine devbox --setup-at yesterday was not refused with the record left as it was: $out"
   ctl suite-machine local > /dev/null  # a local rule keeps no setupAt: the next rule has none
   ctl suite-machine devbox --size 8x16 > /dev/null || fail "control suite-machine devbox --size 8x16 did not set the rule back"
-  for a in 'devbox --size' 'devbox --size -oX' 'devbox --size a/b' 'devbox 4x8' 'devbox --size 4x8 x' 'devbox --setup-at 2026-11-20T15:04:00Z' 'devbox --dir ~'; do
+  for a in 'devbox --size' 'devbox --size -oX' 'devbox --size a/b' 'devbox 4x8' 'devbox --size 4x8 x' 'devbox --setup-at 2026-11-20T15:04:00Z' 'devbox --dir ~' 'devbox --box' 'devbox --box -oX' 'devbox --box a/b'; do
     # shellcheck disable=SC2086 # each word an argument
     out=$(loop control suite-machine $a 2>&1); [ $? = 2 ] && [ "$(jq -c .suiteMachine "$C")" = '{"kind":"devbox","size":"8x16","tag":"conveyor-suite-main","idleStop":"15m"}' ] \
       || fail "control suite-machine $a was not refused with nothing changed: $out"
@@ -407,5 +407,17 @@ t_controlsuitemachine() {
   for a in '{"kind":"devbox","size":"4x8","tag":"conveyor-suite-x","idleStop":"15m","setupAt":"yesterday"}' '{"kind":"ssh","target":"h","dir":"~","setupAt":"2026-11-20T15:04:00Z"}'; do
     ! ctlcheck <<<"{\"suiteMachine\":$a}" >/dev/null || fail "the record {\"suiteMachine\":$a} was read"
   done
+  # Bug (an account's own devbox could not be used): the rule had no way to name a devbox that exists, so a box with no tag was never
+  # found and a new one was refused at the account's limit. --box keeps the name in the rule, the set-up time stays only for the same box,
+  # and a record with a bad box name is not read.
+  [ "$(ctl suite-machine devbox --box hand-made | jq -c .suiteMachine)" = '{"kind":"devbox","size":"4x8","tag":"conveyor-suite-main","idleStop":"15m","box":"hand-made"}' ] \
+    || fail "control suite-machine devbox --box hand-made did not write the box: $(jq -c .suiteMachine "$C")"
+  ctl suite-machine devbox --size 4x8 --box hand-made --setup-at 2026-11-20T15:04:00Z > /dev/null || fail "control suite-machine devbox --size 4x8 --box hand-made --setup-at <time> did not set the rule"
+  [ "$(ctl suite-machine devbox --box hand-made | jq -r .suiteMachine.setupAt)" = 2026-11-20T15:04:00Z ] || fail "saving the same named box again dropped its setupAt: $(jq -c .suiteMachine "$C")"
+  # Bug: the Size choice sends --size with the same --box, and the save dropped the set-up time of a box whose size the rule does not use.
+  [ "$(ctl suite-machine devbox --size 8x16 --box hand-made | jq -r .suiteMachine.setupAt)" = 2026-11-20T15:04:00Z ] || fail "a new size with the same named box dropped its setupAt: $(jq -c .suiteMachine "$C")"
+  [ "$(ctl suite-machine devbox --box other | jq -c '.suiteMachine | has("setupAt")')" = false ] || fail "another box kept the setupAt of hand-made: $(jq -c .suiteMachine "$C")"
+  [ "$(ctl suite-machine devbox | jq -c '.suiteMachine | has("box")')" = false ] || fail "control suite-machine devbox kept the box named before: $(jq -c .suiteMachine "$C")"
+  ! ctlcheck <<<'{"suiteMachine":{"kind":"devbox","size":"4x8","tag":"conveyor-suite-x","idleStop":"15m","box":"-x"}}' > /dev/null || fail "a devbox rule with the box name -x was read"
   [ "$(ctl suite-machine local | jq -c .suiteMachine)" = '{"kind":"local"}' ] || fail "control suite-machine local did not write this machine: $(jq -c .suiteMachine "$C")"
 }

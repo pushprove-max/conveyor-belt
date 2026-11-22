@@ -91,7 +91,7 @@ ctlcheck() { # [<file>]: the record on the input, or in the file, whole, or exit
       and (.pickBack == null or (.pickBack | type == "object" and keys == ["at", "reason"] and all(.[]; type == "string")))
       and (.suiteAtOnce | type == "number" and . >= 1 and . == floor)
       and (.suiteMachine | type == "object" and if .kind == "local" then keys == ["kind"]
-        elif .kind == "devbox" then (keys - ["setupAt"]) == ["idleStop", "kind", "size", "tag"] and (.setupAt == null or (.setupAt | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$"))) and (.size | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]*$"))
+        elif .kind == "devbox" then (keys - ["setupAt", "box"]) == ["idleStop", "kind", "size", "tag"] and (.box == null or (.box | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]*$"))) and (.setupAt == null or (.setupAt | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$"))) and (.size | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]*$"))
           and (.tag | type == "string" and test("^conveyor-suite-[A-Za-z0-9._-]+$")) and (.idleStop | type == "string" and test("^[1-9][0-9]*[smh]$"))
         else .kind == "ssh" and keys == ["dir", "kind", "target"]
         and (.target | type == "string" and test("^[A-Za-z0-9._][A-Za-z0-9._@-]*$")) and (.dir | type == "string" and test("^(~$|~/|/)") and (contains("\n") | not)) end)
@@ -1105,10 +1105,10 @@ capnow() { # [the control record, when the caller has read it]
 # Under the lock: one change to the control record, written whole beside it and moved into place, so a reader finds
 # the old record or the new one. Prints the record as it now stands. A bad action or argument changes nothing: exit 2.
 control() { # [action [arguments]]
-  local c a=${1:-} f=. new x ag es top=0 p='' open=''
+  local c a=${1:-} f=. new x ag es bx sz top=0 p='' open=''
   c=$(ctl) || return 1
   [ $# = 0 ] || shift
-  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | atonce <number> | suite-machine <local | ssh <target> [--dir <d>] | devbox [--size <s> [--setup-at <time>]]> | hold <issue>... | release <issue>... | adopt <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|lint|<areaPrefix><name>>=<on|off>... | rules <split|pick>=<off|shadow|on> | pick <small|medium> <docs|code> <promote|keep|drop|add|next> | pick <reviewer|judge> <promote <model> [effort]|drop> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | start queue filed | dep-guard <on|off> | land-as <main|pr> | pr-merge <button|release|idle> | push-check <on|off> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>... | card <issue> <builder|reviewer|judge> <model> [effort] | card <issue> [builder|reviewer|judge] clear | card <issue> pick]" >&2; return 2; }
+  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | atonce <number> | suite-machine <local | ssh <target> [--dir <d>] | devbox [--size <s>] [--box <name>] [--setup-at <time>]> | hold <issue>... | release <issue>... | adopt <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|lint|<areaPrefix><name>>=<on|off>... | rules <split|pick>=<off|shadow|on> | pick <small|medium> <docs|code> <promote|keep|drop|add|next> | pick <reviewer|judge> <promote <model> [effort]|drop> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | start queue filed | dep-guard <on|off> | land-as <main|pr> | pr-merge <button|release|idle> | push-check <on|off> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>... | card <issue> <builder|reviewer|judge> <model> [effort] | card <issue> [builder|reviewer|judge] clear | card <issue> pick]" >&2; return 2; }
   nums() { local x; for x; do [[ $x =~ ^[1-9][0-9]{0,8}$ ]] || return 1; done; }
   # A main-red fix card is of no issue (issue 0), named by its card id: there is nothing of it to hold or release.
   case $a in hold | release) for x; do [[ ! $x =~ ^(0+|c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0)$ ]] || {
@@ -1125,20 +1125,29 @@ control() { # [action [arguments]]
     # suite-machine: where a release's whole suite runs (suiteMachine, lib/suitehost.sh): here, or a Linux box over ssh,
     # its folder there ~/conveyor-suite unless --dir names one (~, a path under ~/, or a full path). A target is
     # user@host or a host (an ssh config name too), never one that ssh would read as an option. devbox: a Namespace
-    # Devbox of --size (4x8 unless given), leased under the tag conveyor-suite-<project>, and stopped when idle for 15m. Saved again
-    # with the same size, it keeps the setupAt of the box (a new size is a new box); --size <s> --setup-at <time> sets it (the Board's Undo).
+    # Devbox of --size (4x8 unless given), leased under the tag conveyor-suite-<project>, and stopped when idle for 15m; with --box <name>, the
+    # devbox of that name that the account already has, started and used as it is, with no devbox acquired. Saved again
+    # with the same box, or with no box named and the same size, it keeps the setupAt of the box (a named box has its own size; a new box, or a new size of a tagged box, is a new box); --size <s> --setup-at <time> sets it (the Board's Undo).
     suite-machine) if [ "$*" = local ]; then f='.suiteMachine = {kind: "local"}'
-      elif [ "${1:-}" = devbox ] && { [ $# = 1 ] || { [ $# = 3 ] && [ "$2" = --size ]; } || { [ $# = 5 ] && [ "$2" = --size ] && [ "$4" = --setup-at ]; }; }; then
-        # --setup-at <time>: the Board's Undo puts back the setupAt of the box the record had before this machine was chosen.
-        x=4x8 es=''
-        [ "${2:-}" != --size ] || x=$3
-        [ $# != 5 ] || es=$5
+      elif [ "${1:-}" = devbox ]; then
+        # --setup-at <time>: the Board's Undo puts back the setupAt of the box the record had before this machine was chosen, and
+        # needs the --size beside it. --box <name>: a devbox the account already has, used as it is (no devbox is acquired).
+        x=4x8 es='' bx='' sz=''
+        shift
+        while [ $# -gt 0 ]; do
+          [ $# -ge 2 ] || { bad; return; }
+          case $1 in --size) x=$2 sz=1 ;; --box) bx=$2 ;; --setup-at) es=$2 ;; *) bad; return ;; esac
+          shift 2
+        done
+        [ -z "$es" ] || [ -n "$sz" ] || { bad; return; }
         [[ $x =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "conveyor: control suite-machine: \"$x\" is not a devbox size (such as 4x8); nothing changed" >&2; return 2; }
+        [[ -z $bx || $bx =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "conveyor: control suite-machine: \"$bx\" is not a devbox name; nothing changed" >&2; return 2; }
         [[ -z $es || $es =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$ ]] || { echo "conveyor: control suite-machine: \"$es\" is not a time such as 2026-11-20T15:04:00Z; nothing changed" >&2; return 2; }
         # jq reads a --size among its arguments as its own option: the values alone are given.
-        set -- devbox "$x" "conveyor-suite-${REPO//[^A-Za-z0-9._-]/-}" "$es"; f='.suiteMachine as $o | .suiteMachine = {kind: "devbox", size: $v[1], tag: $v[2], idleStop: "15m"}
+        set -- devbox "$x" "conveyor-suite-${REPO//[^A-Za-z0-9._-]/-}" "$es" "$bx"; f='.suiteMachine as $o | .suiteMachine = {kind: "devbox", size: $v[1], tag: $v[2], idleStop: "15m"}
+          | if $v[4] != "" then .suiteMachine.box = $v[4] else . end
           | if $v[3] != "" then .suiteMachine.setupAt = $v[3]
-            elif $o.kind == "devbox" and $o.size == $v[1] and $o.tag == $v[2] and $o.setupAt then .suiteMachine.setupAt = $o.setupAt else . end'
+            elif $o.kind == "devbox" and $o.tag == $v[2] and ($o.box // "") == $v[4] and ($v[4] != "" or $o.size == $v[1]) and $o.setupAt then .suiteMachine.setupAt = $o.setupAt else . end'
       elif [ "${1:-}" = ssh ] && { [ $# = 2 ] || { [ $# = 4 ] && [ "$3" = --dir ]; }; }; then
         [[ $2 =~ ^[A-Za-z0-9._][A-Za-z0-9._@-]*$ ]] || { echo "conveyor: control suite-machine: \"$2\" is not an ssh target (user@host or a host); nothing changed" >&2; return 2; }
         [ $# = 2 ] || { [[ $4 =~ ^(~$|~/|/) ]] && [[ $4 != *$'\n'* ]]; } || { echo "conveyor: control suite-machine: \"$4\" is not ~, a folder under ~/ or a full path; nothing changed" >&2; return 2; }

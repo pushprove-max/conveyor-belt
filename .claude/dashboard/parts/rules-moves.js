@@ -118,7 +118,7 @@
     'suite-machine': (r, action, a) => {
       const was = r.suiteMachine && typeof r.suiteMachine === 'object' ? r.suiteMachine : {};
       r.suiteMachine = a[0] === 'ssh' ? { kind: 'ssh', target: a[1], dir: a[3] || '~/conveyor-suite' }
-        : a[0] === 'devbox' ? { kind: 'devbox', size: a[2] || '4x8', tag: was.kind === 'devbox' ? was.tag : undefined, idleStop: '15m' } : { kind: 'local' };
+        : a[0] === 'devbox' ? { kind: 'devbox', size: a[2] || '4x8', tag: was.kind === 'devbox' ? was.tag : undefined, idleStop: '15m', box: a.includes('--box') ? a[a.indexOf('--box') + 1] : undefined } : { kind: 'local' };
       return [r, 'suite'];
     },
     judge: (r, action, a) => {

@@ -2,14 +2,16 @@
 # The machine a release's whole suite runs on (relsuite(), commands/release-prep.sh; docs/releases.md, Where the suite
 # runs). The control record's suiteMachine is the rule: {kind: "local"}, this machine (the default, also when the record
 # has none), {kind: "ssh", target: <user@host>, dir: <folder there>}, a Linux box over ssh, or {kind: "devbox", size, tag,
-# idleStop}, a Namespace Devbox leased for the run, set with `conveyor.sh control suite-machine`. `release-run ... --machine local` runs one run here whatever the rule says (releasego() is
+# idleStop, and box when the owner named a devbox they already have}, a Namespace Devbox leased for the run (or that box), set with `conveyor.sh control suite-machine`. `release-run ... --machine local` runs one run here whatever the rule says (releasego() is
 # given CONVEYOR_RELEASE_MACHINE=local). A run goes through its steps in order, each named in the run's record as it
 # begins (machine.step, then done) with the seconds of each step that ended (machine.secs):
 # - start: local, nothing. ssh: the box answers over ssh with no password asked, has bash 5.1 or later, jq and git, and its
 #   test slots are read (HOSTFACTS): the most files a parallel suite runs at once there (relatonce()). devbox: the login
 #   to Namespace is checked ("Not logged in to Namespace" ends the run), `devbox acquire <tag> --size <size>
 #   --auto_stop_idle_timeout <idleStop>` leases a devbox, whose lease id is kept (SH_LEASE, and machine.lease in the
-#   record), and the devbox is checked as a box over ssh is, each command sent by `devbox exec --lease_id <id>`.
+#   record), and the devbox is checked as a box over ssh is, each command sent by `devbox exec --lease_id <id>`. With
+#   a box named in the rule (box), no devbox is acquired: `devbox exec <box> -- true` starts that box, the box is kept
+#   in the record (machine.box), and each command is sent by `devbox exec <box> --`; it is never given back.
 # - setup: local, nothing. ssh: the tested commit's .conveyor/test-machine.sh runs there when its blob is not the one the
 #   box last ran (<dir>/<repo>/setup.blob); with no such file it is skipped.
 # - checkout: the worktree of the commit here ($CARDS/release/wt, deps()), which the changed-tests selection and the
@@ -30,7 +32,7 @@
 # and dir (ssh's, else null), lease (a devbox's, else null), step, secs, reason}; a devbox's name is "Namespace Devbox
 # <size>". Sourced by commands/release-prep.sh and commands/suite-machine.sh.
 SH_KIND=local SH_NAME='this machine' SH_POST='the build machine' SH_TARGET='' SH_DIR='' SH_D='' SH_SLOTS='' SH_STEP='' SH_T=0 SH_WHY=''
-SH_SIZE='' SH_TAG='' SH_IDLE='' SH_LEASE=''
+SH_SIZE='' SH_TAG='' SH_IDLE='' SH_LEASE='' SH_BOX=''
 # What every check of a box prints, one fact a line: its bash version, each tool named (ok or missing), its CPUs and
 # its test slots: slot_pool's there, of lib/slots.sh sent on ssh's input and read from that stream, never reopened by path (some ssh servers refuse that) (hostfacts()), so its host file's testSlots
 # and its cores cap them as the suite's runner there finds them (.conveyor/test-full.sh), never its CPU count alone.
@@ -56,6 +58,7 @@ hostq() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
 # exec` on the run's lease, and with <detach> given, `devbox exec -d`, which does not wait for the script.
 hostssh() { # <script> [seconds] [detach]
   local t=() d=(); [ -z "${2:-}" ] || t=(timeout --kill-after=5 "$2"); [ -z "${3:-}" ] || d=(-d)
+  if [ "$SH_KIND" = devbox ] && [ -n "$SH_BOX" ]; then "${t[@]}" devbox exec "${d[@]}" "$SH_BOX" -- bash -c "$1"; return; fi
   [ "$SH_KIND" != devbox ] || { "${t[@]}" devbox exec "${d[@]}" --lease_id "$SH_LEASE" -- bash -c "$1"; return; }
   "${t[@]}" ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -- "$SH_TARGET" "bash -c $(hostq "$1")"
 }
@@ -67,11 +70,13 @@ hostrule() { # <command name>
   if [ "${CONVEYOR_RELEASE_MACHINE:-}" = local ]; then r='{"kind":"local"}'
   else r=$(ctl | jq -ce '.suiteMachine | objects') || { echo "conveyor: $1: the control record's suiteMachine cannot be read; nothing run" >&2; return 1; }; fi
   SH_KIND=$(jq -r .kind <<<"$r") SH_TARGET=$(jq -r '.target // ""' <<<"$r") SH_DIR=$(jq -r '.dir // ""' <<<"$r")
-  SH_SIZE=$(jq -r '.size // ""' <<<"$r") SH_TAG=$(jq -r '.tag // ""' <<<"$r") SH_IDLE=$(jq -r '.idleStop // ""' <<<"$r") SH_LEASE=''
+  SH_SIZE=$(jq -r '.size // ""' <<<"$r") SH_TAG=$(jq -r '.tag // ""' <<<"$r") SH_IDLE=$(jq -r '.idleStop // ""' <<<"$r") SH_LEASE='' SH_BOX=$(jq -r '.box // ""' <<<"$r")
   # shellcheck disable=SC2034,SC2088 # SH_POST is read by relsuite(), commands/release-prep.sh; the devbox's ~ is its own
   case $SH_KIND in
     ssh) SH_NAME=${SH_TARGET#*@} SH_POST='a Linux box over ssh' ;;
-    devbox) SH_NAME="Namespace Devbox $SH_SIZE" SH_POST=$SH_NAME SH_DIR='~/conveyor-suite' ;;
+    devbox) SH_NAME="Namespace Devbox $SH_SIZE" SH_POST=$SH_NAME SH_DIR='~/conveyor-suite'
+      # A named box: its size is the box's own, and its name is the owner's, never posted.
+      [ -z "$SH_BOX" ] || { SH_NAME="Namespace Devbox $SH_BOX" SH_POST='Namespace Devbox'; } ;;
     *) SH_KIND=local SH_NAME='this machine' SH_POST='the build machine' ;;
   esac
   hostd
@@ -132,16 +137,34 @@ hostlogin() {
   command -v devbox > /dev/null || { SH_WHY='the devbox command is not installed on this machine'; return 1; }
   timeout --kill-after=5 60 devbox auth check-login > /dev/null 2>&1 < /dev/null || { SH_WHY='Not logged in to Namespace'; return 1; }
 }
-# A devbox leased: `devbox acquire <tag>` with the size and the idle stop, which prints the lease id last. It is kept in
-# SH_LEASE and in the record, which `release-run stop` reads (hoststop()). Sets SH_WHY to why not, and fails.
-hostacquire() {
+# The account's devboxes: their names, a JSON array, from `devbox list -o json`, in SH_BOXES (null when they cannot be read:
+# SH_WHY says why, and it fails).
+hostboxes() {
+  SH_BOXES=$(timeout --kill-after=5 60 devbox list -o json 2> /dev/null < /dev/null | jq -c '[.[] | .name | strings]' 2> /dev/null) && [ -n "$SH_BOXES" ] \
+    || { SH_BOXES=null SH_WHY="the account's devboxes could not be listed with devbox list"; return 1; }
+}
+# A devbox leased: `devbox acquire <tag>` with the size and the idle stop, which prints the lease id last, in SH_LEASE.
+# Sets SH_WHY to why not, and fails.
+hostlease() { # <seconds>
   local out
-  hostlogin || return 1
-  out=$(timeout --kill-after=5 300 devbox acquire "$SH_TAG" --size "$SH_SIZE" --auto_stop_idle_timeout "$SH_IDLE" 2>&1 < /dev/null) \
+  out=$(timeout --kill-after=5 "$1" devbox acquire "$SH_TAG" --size "$SH_SIZE" --auto_stop_idle_timeout "$SH_IDLE" 2>&1 < /dev/null) \
     || { SH_WHY="a devbox could not be acquired: $(grep . <<<"$out" | tail -n 1)"; return 1; }
   out=$(grep . <<<"$out" | tail -n 1)
   [[ $out =~ ^[A-Za-z0-9][A-Za-z0-9._:-]*$ ]] || { SH_WHY="devbox acquire did not print a lease id: ${out:0:200}"; return 1; }
   SH_LEASE=$out
+}
+# The devbox of the run: a box named in the rule is started (`devbox exec <box> -- true`) and kept in the record; else
+# one is leased (hostlease()) and its lease kept in the record, which `release-run stop` reads (hoststop()).
+# Sets SH_WHY to why not, and fails.
+hostacquire() {
+  local out
+  hostlogin || return 1
+  if [ -n "$SH_BOX" ]; then
+    out=$(timeout --kill-after=5 300 devbox exec "$SH_BOX" -- true 2>&1 < /dev/null) \
+      || { SH_WHY="the devbox $SH_BOX could not be started: $(grep . <<<"$out" | tail -n 1)"; return 1; }
+    return 0
+  fi
+  hostlease 300 || return 1
   relrec --arg l "$SH_LEASE" '.machine.lease = $l'
 }
 # The step under way failed: the run ends "not started" with <reason>, which is printed, so the record's reasons hold it.
@@ -156,8 +179,8 @@ hostfail() { # <command name> <reason>
 hoststart() { # <command name>
   hostrule "$1" || return 1
   SH_T=$SECONDS SH_STEP=start
-  relrec --arg k "$SH_KIND" --arg n "$SH_NAME" --arg t "$SH_TARGET" --arg d "$SH_DIR" \
-    '.machine = {kind: $k, name: $n, target: (if $k == "ssh" then $t else null end), dir: (if $k == "ssh" then $d else null end), lease: null, step: "start", secs: {}, reason: null}'
+  relrec --arg k "$SH_KIND" --arg n "$SH_NAME" --arg t "$SH_TARGET" --arg d "$SH_DIR" --arg b "$SH_BOX" \
+    '.machine = {kind: $k, name: $n, target: (if $k == "ssh" then $t else null end), dir: (if $k == "ssh" then $d else null end), lease: null, step: "start", secs: {}, reason: null} + (if $b != "" then {box: $b} else {} end)'
   [ "$SH_KIND" != devbox ] || hostacquire || { hostfail "$1" "$SH_WHY"; return 1; }
   [ "$SH_KIND" = local ] || hostneeds || { hostfail "$1" "$SH_WHY"; return 1; }
 }
@@ -255,25 +278,52 @@ hostfinish() { # <command name>
 # record's machine has not reached done; a devbox's lease is given back too.
 hoststop() {
   local m via=''
-  m=$(jq -ce '.machine | objects | select((.kind == "ssh" or (.kind == "devbox" and (.lease | strings | length > 0))) and .step != "done")' "$RELRUN" 2>/dev/null) || return 0
-  SH_KIND=$(jq -r .kind <<<"$m") SH_TARGET=$(jq -r '.target // ""' <<<"$m") SH_DIR=$(jq -r '.dir // "~/conveyor-suite"' <<<"$m") SH_LEASE=$(jq -r '.lease // ""' <<<"$m") && hostd
+  m=$(jq -ce '.machine | objects | select((.kind == "ssh" or (.kind == "devbox" and (((.lease // "") | length > 0) or ((.box // "") | length > 0)))) and .step != "done")' "$RELRUN" 2>/dev/null) || return 0
+  SH_KIND=$(jq -r .kind <<<"$m") SH_TARGET=$(jq -r '.target // ""' <<<"$m") SH_DIR=$(jq -r '.dir // "~/conveyor-suite"' <<<"$m") SH_LEASE=$(jq -r '.lease // ""' <<<"$m") SH_BOX=$(jq -r '.box // ""' <<<"$m") && hostd
   [ "$SH_KIND" != ssh ] || via=' over ssh'
   hostssh "$SH_D; $HOSTKILL" 30 < /dev/null > /dev/null 2>&1 \
     || echo "conveyor: release-run stop: the suite's run on $(jq -r .name <<<"$m") could not be reached$via to stop it; it may still run there" >&2
   hostrelease "release-run stop"
 }
+# The Devbox need of a check, added to hostcheck()'s needs (n), and the account's devbox names in SH_BOXES (a JSON array, null
+# when the list cannot be read). A box named in the rule must be in that list (hostboxes()). With none named, the one way to know
+# whether the account can give one is to ask for it: a box is leased under the tag (an existing one is reused, else a new one
+# is made, which the list before and after tells) and given back at once; one refused for the account's limit says so, with the
+# fix (a box of the account, named in the rule, or one removed). With <no-create> (a member's check on the Board) none is asked for.
+hostboxneed() { # [no-create]
+  local ok=false msg='' was=''
+  hostboxes && was=$SH_BOXES || msg=$SH_WHY
+  if [ -n "$SH_BOX" ]; then
+    if [ -z "$was" ]; then :
+    elif jq -e --arg b "$SH_BOX" 'index($b) != null' <<<"$was" > /dev/null; then ok=true msg="the box $SH_BOX is started for the run"
+    else msg="no devbox named $SH_BOX is in this account; it has: $(jq -r 'join(", ")' <<<"$was"). Pick one with control suite-machine devbox --box <name>"; fi
+  elif [ "${1:-}" = no-create ]; then
+    ok=true msg="the run reuses the box tagged $SH_TAG, or creates one; this check does not ask for one"
+  elif hostlease 100; then
+    ok=true msg="the run reuses the box tagged $SH_TAG"
+    if [ -n "$was" ] && hostboxes && ! jq -e --argjson w "$was" '. - $w | length == 0' <<<"$SH_BOXES" > /dev/null; then
+      msg="no box tagged $SH_TAG was found, so a new one was created for the run to reuse"; fi
+    hostrelease suite-machine || msg="$msg (the lease taken to try it could not be given back; it stops itself when idle)"
+  else
+    msg=$SH_WHY
+    case $SH_WHY in *[Ll]imit*) msg="$SH_WHY. No box tagged $SH_TAG was found and the account is at its devbox limit: pick an existing devbox with control suite-machine devbox --box <name>, or remove one" ;; *) ;; esac
+  fi
+  n+=("$(jq -cn --argjson ok $ok --arg d "$msg" '{need: "Devbox", ok: $ok, detail: $d}')")
+}
 # `conveyor.sh suite-machine check [--json]`: one line a need of the rule's machine, ok or missing: ssh reach (a box
 # over ssh), bash 5.1 or later, jq, git and each tool the main checkout's .conveyor/test-machine.sh names on a
 # `# needs: <tool> [<version>]` line (the tool is the command; the version is for people, not checked), then its CPU count and test slots (slot_pool's, here or on the box: HOSTFACTS). With
-# json: {kind, name, ok, needs: [{need, ok, detail}], cpus, slots}. Exit 0: every need ok; 1: one is missing. For a
-# devbox, the one need is the Namespace login (hostlogin()), and cpus and slots are null: it is leased only for a run.
-hostcheck() { # [json]
+# json: {kind, name, ok, needs: [{need, ok, detail}], cpus, slots, boxes (a devbox's: the account's devbox names, else null)}. Exit 0: every need ok; 1: one is missing. For a
+# devbox, the needs are the Namespace login (hostlogin()) and the box (hostboxneed()), and cpus and slots are null: it is leased only for a run.
+hostcheck() { # [json [no-create]]
   local tools=() f rc v='' n=() ok sl=''
+  SH_BOXES=null
   hostrule suite-machine || return 1
   if [ "$SH_KIND" = devbox ]; then
     # A devbox is leased only for a run: its bash, tools and test slots cannot be read without one, its login can.
     hostlogin && ok=true || ok=false
     n+=("$(jq -cn --argjson ok $ok --arg w "$SH_WHY" '{need: "Namespace login", ok: $ok, detail: (if $ok then "logged in" else $w end)}')")
+    [ "$ok" = false ] || hostboxneed "${2:-}"
   else
     mapfile -t tools < <(sed -n 's/^# needs:[[:space:]]*//p' "$MAIN/.conveyor/test-machine.sh" 2>/dev/null | awk '{print $1}' | grep -E '^[A-Za-z0-9._+-]+$' | grep -vxE 'jq|git' | sort -u)
     f=$(hostfacts jq git "${tools[@]}" 2>&1); rc=$?
@@ -290,8 +340,8 @@ hostcheck() { # [json]
     sl=$(sed -n 's/^slots\t\([1-9][0-9]*\)$/\1/p' <<<"$f")
     n+=("$(jq -cn --arg c "$v" --arg s "$sl" '{need: "test slots", ok: ($c != "" and $s != ""), detail: (if $c == "" then "its CPU count cannot be read" elif $s == "" then "\($c) CPUs, its test slots cannot be read" else "\($c) CPUs, \($s) test slots" end)}')")
   fi
-  f=$(printf '%s\n' "${n[@]}" | jq -cs --arg k "$SH_KIND" --arg nm "$SH_NAME" --arg c "$v" --arg s "$sl" \
-    '{kind: $k, name: $nm, ok: all(.[]; .ok), needs: ., cpus: ($c | tonumber? // null), slots: ($s | tonumber? // null)}') || return 1
+  f=$(printf '%s\n' "${n[@]}" | jq -cs --arg k "$SH_KIND" --arg nm "$SH_NAME" --arg c "$v" --arg s "$sl" --argjson b "$SH_BOXES" \
+    '{kind: $k, name: $nm, ok: all(.[]; .ok), needs: ., cpus: ($c | tonumber? // null), slots: ($s | tonumber? // null), boxes: $b}') || return 1
   if [ "${1:-}" = json ]; then printf '%s\n' "$f"
   else jq -r '"conveyor: suite-machine: the suite runs on \(.name)", (.needs[] | "\(if .ok then "ok" else "missing" end): \(.need): \(.detail)")' <<<"$f"; fi
   jq -e .ok <<<"$f" > /dev/null

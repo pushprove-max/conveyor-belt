@@ -129,6 +129,51 @@ test('Rules: Undo of a change from a set-up devbox sends its set-up time back wi
     'Undo puts the devbox back with its set-up time');
 });
 
+// Bug this guards: the devbox choice could only lease a box by tag, so a devbox the owner already had filled the account's
+// limit and the suite did not start. The row lists the boxes the check read (the fake's), with "A new box for Conveyor",
+// sends the chosen one as --box (none for a new box), and an Undo puts the box back.
+test('Rules: a devbox\'s Use choice lists the account\'s devboxes, sends the one chosen, and Undo keeps it', async () => {
+  const w = boot({ tab: 'rules' });
+  deliver(w, data(undefined));
+  const shown = async (record) => { w.reply = reply({ ...login(true), boxes: ['hand-made', 'spare'] }); next(w, data(record)); await settle(); w.posts.length = 0; };
+  await shown(DEVBOX);
+  let pick = act(row(w), 'suite-box');
+  assert.deepEqual(Array.from(pick.options, (o) => [o.value, o.textContent]), [['', 'A new box for Conveyor'], ['hand-made', 'hand-made'], ['spare', 'spare']]);
+  assert.equal(pick.value, '', 'no box named: a new box for Conveyor');
+  pick.value = 'hand-made';
+  assert.deepEqual(await sent(w, () => pick.dispatchEvent(new w.Event('change'))),
+    [{ action: 'suite-machine', args: ['devbox', '--size', '4x8', '--box', 'hand-made'], repo: 'sample' }, { action: 'suite-machine-check', args: [], repo: 'sample' }],
+    'the chosen box is sent with --box');
+  await shown({ ...DEVBOX, box: 'hand-made' });
+  pick = act(row(w), 'suite-box');
+  assert.equal(pick.value, 'hand-made', 'the saved box is the one shown');
+  assert.match(row(w).textContent, /Box\s*Your devbox hand-made, set-up time not kept/);
+  await sent(w, () => act(row(w), 'suite-use-local').click());
+  next(w, data(undefined));
+  assert.deepEqual(await sent(w, () => rulesP(w).querySelector('[data-act="undo"]').click()),
+    [{ action: 'suite-machine', args: ['devbox', '--size', '4x8', '--box', 'hand-made'], repo: 'sample' }, { action: 'suite-machine-check', args: [], repo: 'sample' }],
+    'Undo puts the devbox back with its box');
+  await shown({ ...DEVBOX, box: 'hand-made' });
+  pick = act(row(w), 'suite-box');
+  pick.value = '';
+  assert.deepEqual(await sent(w, () => pick.dispatchEvent(new w.Event('change'))),
+    [{ action: 'suite-machine', args: ['devbox', '--size', '4x8'], repo: 'sample' }, { action: 'suite-machine-check', args: [], repo: 'sample' }],
+    'A new box for Conveyor sends no --box');
+});
+
+// Bug this guards: a missing Devbox line (the account is at its limit, so no box is found) offered a "Set up now" button that
+// cannot fix it and stays off, as for a missing tool; the fix is to pick a box, which the line says.
+test('Rules: a missing Devbox line offers no Set up now', async () => {
+  const w = boot({ tab: 'rules' });
+  deliver(w, data(undefined));
+  const rec = { ...login(true), boxes: ['hand-made'] };
+  rec.needs.push({ need: 'Devbox', ok: false, detail: 'the account is at its devbox limit: pick an existing devbox with control suite-machine devbox --box <name>, or remove one' });
+  rec.ok = false; w.reply = reply(rec);
+  next(w, data(DEVBOX)); await settle();
+  assert.match(row(w).textContent, /missing\s*Devbox: the account is at its devbox limit/);
+  assert.equal(row(w).querySelectorAll('[data-act^="suite-setup-"]').length, 0, 'no Set up now for the Devbox line');
+});
+
 // Bug this guards: a Linux box over ssh could not be set from the Board, or was sent with a target the engine refuses.
 test('Rules: Release suite runs on, on a Linux box over ssh, takes a target and a folder and sends them', async () => {
   const w = boot({ tab: 'rules' });

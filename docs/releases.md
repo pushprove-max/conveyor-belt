@@ -149,6 +149,11 @@ always run on this machine. Only the release suite moves.
   each run. The size is `4x8` unless you give one. Conveyor leases the devbox under the tag
   `conveyor-suite-<project>`, with the `devbox` command, which must be installed on this machine and logged in to
   Namespace. The devbox stops by itself after 15 minutes without use.
+- `conveyor.sh control suite-machine devbox --box <name>` runs it on a devbox you already have, such as one you made
+  by hand. Use this when your account is at its devbox limit, because Conveyor can find a box only by its tag and a
+  box with no tag counts against the limit. Conveyor starts that box and runs on it. It does not lease a box and does
+  not give the box back. The box stops by itself when it is idle, by its own setting. `devbox list` shows the names.
+  The commit status says "Namespace Devbox" and does not name the box.
 
 The box needs bash 5.1 or later, jq and git. Conveyor connects with ssh and does not ask for a password, so set up an ssh
 key for the box first. The box needs no access to the repository and gets no GitHub token. Conveyor sends it the
@@ -165,7 +170,12 @@ back with `devbox release` when the run ends. It also gives the lease back when 
 
 `conveyor.sh suite-machine check` prints one line for each need of the chosen machine, `ok` or `missing`: ssh reach,
 bash 5.1 or later, jq, git, each tool that `.conveyor/test-machine.sh` names, and the CPU count and test slots.
-For a devbox it prints one line, the Namespace login, because Conveyor leases a devbox only for a run.
+For a devbox it prints two lines: the Namespace login, and the box the run will use. With `--box`, the line says whether
+the account has that box. With no box named, Conveyor leases a box under the tag and gives it back at once, to learn
+whether the account can give one. The line says whether the run reuses the box with the tag, or a new box was created
+for it. When the account is at its devbox limit and no box is found, the line is `missing` and says to pick an existing
+box with `--box <name>`, or remove one. With `--no-create`, the check does not ask for a box, so it creates none; the
+Board runs a member's check that way. A devbox's bash, tools and test slots can be read only during a run.
 `--json` prints the same as JSON. The command exits 1 when a need is missing.
 
 A run on the box takes no test slot on this machine. In parallel mode it runs at most the box's test slots at once.
