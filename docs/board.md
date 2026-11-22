@@ -735,10 +735,14 @@ issue number, as a link, and the issue title.
   "Build · lint fixed". A lint fix before the landing, or before a review after a fix, is a Fix step: "Fix 2: lint
   findings". A lint fix before a review after a rebuild shows on the Land step: "Land · lint fix"
   ([Lint](configuration.md#lint)).
-- Each lint check shows in the card's steps as **lint**, with each command's result and its seconds under it. A
-  command whose tool is missing reads `skipped: missing <tool>`. When the change changed a trigger of a command that
-  ran, the line ends with `tools ran as installed`. A command that was skipped or had no files to check does not add
-  this note.
+- Each lint check shows in the card's steps as **lint**, with a row for each command under it: a short name (the
+  script's file name, such as `lint-shell.sh`; the size check as "Size, limit 800 lines"; for an inline command, its
+  first program after a guard, such as `ruff`), a chip for its result (Pass, No files, "Findings: 2 of this change",
+  Error, or "Skipped: missing <tool>" when its tool is missing) and its seconds. Hover over the name, or focus it, to see
+  the whole command; "Show command" shows it on a touch screen. A command with findings of this change, or an error,
+  comes first, with its findings (file, line and text, the first 20) or its error under the row. When the change changed
+  a trigger of a command that ran, the rows end with "Tools ran as installed". A lint check recorded without its
+  commands shows its reason as one line: each command's result and seconds.
 - A card in its Test step shows how many tests have run, "142 of 205 tests", and " · 2 failed" when any failed. A test
   command gives the count when it prints `TESTRUN cases=N`, and names each case as it ends with an empty file in
   `cases/ok` or `cases/failed` of its test log folder (`conveyor/README.md`, The test step). With no case count, the

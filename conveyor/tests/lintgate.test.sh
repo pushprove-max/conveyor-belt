@@ -208,6 +208,9 @@ t_lintgateleft() {
   grep -qx 'rc=1' "$T/$CASE/run.out" && [ "$(did)" = lintfix ] \
     && [ "$(st 'select(.step == "blocked") | .reason' | head -n 1)" = 'lint: 2 findings left after its fix session; nothing landed' ] \
     || fail "the finding left did not block the card after one fix session: $(cat "$T/$CASE/run.out"); $(did); $(st 'select(.step == "blocked") | .reason')"
+  # Bug (#1366): the lint line gave the count of a command's findings, never the findings, so the Board could not list them.
+  [ "$(st 'select(.step == "lint") | [.lint.commands[0].reported[] | [.file, .line, .text]] | tojson' | head -n 1)" = '[["a.txt",2,"E1 a bad word"]]' ] \
+    || fail "the first lint line does not carry its finding: $(st 'select(.step == "lint") | .lint.commands')"
 }
 
 # Bug: a lint command that fails to run (exit 2) at the gate is taken as findings and sent to a fix session, or as a
@@ -220,6 +223,9 @@ t_lintgateerror() {
   grep -qx 'rc=1' "$T/$CASE/run.out" && [ -z "$(did)" ] \
     && st 'select(.step == "blocked") | .reason' | grep -qF 'lint: an execution error, so nothing landed: lint command 1 (echo "lint: config broken"; exit 2): it exited 2: lint: config broken' \
     || fail "the execution error did not block the card with no fix session: $(cat "$T/$CASE/run.out"); $(did); $(st 'select(.step == "blocked") | .reason')"
+  # Bug (#1366): the lint line's command gave its result, error, but not why, so the Board's row for it said nothing more.
+  [ "$(st 'select(.step == "lint") | .lint.commands[0] | [.result, .why] | tojson')" = '["error","it exited 2: lint: config broken"]' ] \
+    || fail "the lint line's command does not carry its error: $(st 'select(.step == "lint") | .lint.commands')"
 }
 
 # Bug: a lint tool that is not installed blocks the card or is left out of its record. The gate lets the card go on,

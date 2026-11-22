@@ -528,7 +528,7 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .tl-item:hover > .tl-tip, .tl-item:focus-visible > .tl-tip { z-index: 2; left: var(--sp-1); top: 100%; width: auto; height: auto; clip-path: none; max-width: 90vw; overflow-wrap: anywhere; white-space: normal;
   padding: var(--sp-1) var(--sp-2); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); box-shadow: 0 4px 12px rgb(0 0 0 / .15); }
 .tl-item[data-state="failed"] > .tl-tip { color: var(--bad); }
-.tl-item > .tl-parts, .tl-item > .detail-why, .tl-item > .test-fails, .tl-item > .output { grid-column: 1 / -1; }
+.tl-item > .tl-parts, .tl-item > .detail-why, .tl-item > .test-fails, .tl-item > .lint-cmds, .tl-item > .output { grid-column: 1 / -1; }
 .tl-parts > summary { cursor: pointer; color: var(--muted); font-size: var(--fs-xs); }
 .tl-parts ol { margin: 2px 0 0; padding-left: var(--sp-5); }
 .track-detail .detail-todo { color: var(--muted); }
@@ -542,6 +542,16 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .test-file-name { font-family: var(--mono); font-weight: 700; overflow-wrap: anywhere; }
 .test-case { display: flex; flex-wrap: wrap; gap: 0 var(--sp-2); padding-left: var(--sp-3); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .test-case-name { font-family: var(--mono); color: var(--bad); }
+.lint-cmds { border-collapse: collapse; margin-top: 2px; font-size: var(--fs-sm); }
+.lint-cmds td { padding: 2px var(--sp-2) 2px 0; vertical-align: top; }
+.lint-cmd-word { font-family: var(--mono); font-weight: 700; overflow-wrap: anywhere; }
+.lint-cmd-show { font-size: var(--fs-xs); color: var(--muted); }
+.lint-cmd-show summary { cursor: pointer; }
+.lint-cmd-show code { display: block; font-family: var(--mono); overflow-wrap: anywhere; }
+.lint-cmd-sec { color: var(--muted); white-space: nowrap; }
+.lint-found { margin: 0; padding: 0 0 var(--sp-1) var(--sp-3); list-style: none; }
+.lint-finding { display: flex; flex-wrap: wrap; gap: 0 var(--sp-2); overflow-wrap: anywhere; }
+.lint-finding-at { font-family: var(--mono); color: var(--bad); }
 .reviews { display: grid; gap: var(--sp-1); margin-top: var(--sp-2); list-style: none; font-size: var(--fs-sm); }
 .review { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); }
 .parent { font-size: var(--fs-sm); color: var(--muted); }

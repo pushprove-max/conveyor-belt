@@ -68,6 +68,8 @@ t_track() {
   # The review gate's lint fix after a fix round is on Fix (49), after a rebuild on Land (50).
   card 49 $pre "review:NO-GO:$K" f fix "$(lintl findings review '')" f
   card 50 $pre "review:GO:$Z" t test:pass l x rebase "$(lintl findings review '')" f
+  # Issue 1366: a lint line's commands reach the Board's step record, so it can show a row for each (51); a line with none (39) has none.
+  card 51 picked worktree deps brief b build 'lint:findings:{"lint":{"commands":[{"n":1,"run":"bash x.sh {files}","result":"findings","sec":2,"findings":1,"reported":[{"file":"a.sh","line":3,"text":"bad"}]}],"asInstalled":false,"gate":"review"},"reason":"lint command 1 (bash x.sh {files}): findings, 1 of this change, 2 s"}' f
   # A fifth lands, after a fix round that took 3 minutes.
   card 5 $pre "review:NO-GO:$K" f - - fix r "review:GO:$Z" t test:pass l 'landed:ok:{"sha":"abd","product":false}'
   # Five cards land after a rebuild (two minutes each): no time of any step is estimated from them.
@@ -156,6 +158,10 @@ EOF
   # ("Fix 3: lint findings"), not as the six steps did while it ran ("Fix 1: lint findings").
   [ "$(b 39 '[.track.records[] | select(.name == "lint") | [.why, .gate]]')" = '[[null,"review"],["lint command 1 (x): skipped: missing shellcheck, 0 s","review"]]' ] \
     || fail "the lint lines' results in the history: $(b 39 .track.records)"
+  # Bug (#1366): the Board got only a lint line's one-sentence reason, so it could show nothing but that sentence.
+  [ "$(b 51 '[.track.records[] | select(.name == "lint") | .lint]')" = '[[{"n":1,"run":"bash x.sh {files}","result":"findings","sec":2,"findings":1,"reported":[{"file":"a.sh","line":3,"text":"bad"}]}]]' ] \
+    || fail "the lint line's commands in the history: $(b 51 .track.records)"
+  [ "$(b 39 '[.track.records[] | select(.name == "lint") | .lint]')" = '[null,null]' ] || fail "a lint line with no commands has a lint list: $(b 39 .track.records)"
   # The note /units and the Board draw on Build for a reply-check fix: running, done, and none without one.
   [ "$(jq -c '[.belt[] | select(.card | IN("c34", "c35", "c36", "c37")) | [.card, .track.steps[0].replyFix]] | sort' <<<"$out")" = '[["c34","done"],["c35","done"],["c36","now"],["c37",null]]' ] \
     || fail "the reply-check fix on Build: $(jq -c '[.belt[] | select(.card | IN("c34", "c35", "c36", "c37")) | [.card, .track.steps[0]]]' <<<"$out")"

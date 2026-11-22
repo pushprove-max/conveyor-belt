@@ -110,6 +110,66 @@
     if (files.length) box.append(rows);
     return box;
   }
+  // A lint command's short name for its row: the script's file name (`bash .conveyor/lint-shell.sh {files}` is
+  // lint-shell.sh), the size check as "Size, limit 800 lines", and for an inline command its first program after a
+  // `command -v <tool> ... || { ...; }` or `[ -x <tool> ] || { ...; }` guard (ruff, eslint). The whole command is on the name's hover and focus.
+  function lintName(run) {
+    if (/^size, limit \d+ lines$/.test(run)) return `Size${run.slice(4)}`;
+    const words = run.replace(/^(?:command -v \S+|\[ [^\]]*\])[^{]*\|\|\s*\{[^}]*\}\s*;\s*/, '').split(/\s+/).filter(Boolean);
+    const lead = words[0] ? words[0].split('/').pop() : '';
+    const arg = /^(bash|sh|python3?|node)$/.test(lead) ? words.slice(1).find((w) => !w.startsWith('-')) : null;
+    return (arg ? arg.split('/').pop() : lead) || run;
+  }
+  const LINT_RESULT = { pass: ['Pass', 'ok'], 'no files': ['No files', 'quiet'], error: ['Error', 'bad'] };
+  // A lint step's commands (the record's lint: [{n, run, result, sec, findings, reported: [{file, line, text}]}]): a
+  // small table, a row a command with its short name, a chip for its result and its seconds, and under a row with
+  // findings of this change what they are, as testFails() lists a failed run's cases. A command with findings of this
+  // change (a count above 0) or an error comes first. step and mine: the step's key and the card's drawn timeline, to keep
+  // a "Show command" open through a redraw. The whole command is on the name's hover and focus, and under "Show command" for a touch screen.
+  // null when the record has no command, and the step shows its reason.
+  function lintRows(cmds, step, mine) {
+    const ran = (Array.isArray(cmds) ? cmds : []).filter((c) => c && typeof c === 'object' && typeof c.run === 'string' && typeof c.result === 'string');
+    if (!ran.length) return null;
+    const failed = (c) => c.result === 'error' || (c.result === 'findings' && num(c.findings) && c.findings > 0);
+    const table = h('table', 'lint-cmds'), body = h('tbody');
+    ran.filter(failed).concat(ran.filter((c) => !failed(c))).forEach((c) => {
+      const key = `${step}:${c.n}`;
+      const old = mine ? Array.from(mine.querySelectorAll('details.lint-cmd-show')).find((x) => x.dataset.cmd === key) : null;
+      const row = h('tr', 'lint-cmd'), name = h('td', 'lint-cmd-name'), word = h('span', 'lint-cmd-word', lintName(c.run));
+      word.tabIndex = 0;
+      tip(word, c.run);
+      const show = h('details', 'lint-cmd-show');
+      show.dataset.cmd = key;
+      show.open = Boolean(old && old.open);
+      show.append(h('summary', null, 'Show command'), h('code', null, c.run));
+      name.append(word, show);
+      const skipped = c.result.startsWith('skipped: ');
+      const res = c.result === 'findings' ? [`Findings: ${num(c.findings) ? c.findings : 0} of this change`, 'bad']
+        : LINT_RESULT[c.result] || (skipped ? [`Skipped: ${c.result.slice(9)}`, 'warn'] : [c.result, 'quiet']);
+      const result = h('td', 'lint-cmd-result');
+      result.append(chip(res[0], res[1]));
+      row.append(name, result, h('td', 'lint-cmd-sec', num(c.sec) ? took(c.sec) : ''));
+      body.append(row);
+      const found = (Array.isArray(c.reported) ? c.reported : []).filter((f) => f && typeof f.text === 'string');
+      if (c.result === 'error' && typeof c.why === 'string' && c.why) found.push({ text: c.why });
+      if (!found.length) return;
+      const more = h('td'), items = h('ul', 'lint-found');
+      more.colSpan = 3;
+      found.forEach((f) => {
+        const li = h('li', 'lint-finding');
+        const at = `${typeof f.file === 'string' ? f.file : ''}${num(f.line) ? `:${f.line}` : ''}`;
+        if (at) li.append(h('span', 'lint-finding-at', at));
+        li.append(h('span', 'lint-finding-text', f.text));
+        items.append(li);
+      });
+      more.append(items);
+      const under = h('tr', 'lint-found-row');
+      under.append(more);
+      body.append(under);
+    });
+    table.append(body);
+    return table;
+  }
   // The changed lines no test reached in a test run, from the coverage report its command wrote (the record's
   // coverage: {uncovered: [{file, lines}], count, checked} or {unknown: why}): one line that sums it up, then a row a
   // file with its lines. A lead for the reviewer, never a failure. null when the record has no coverage.
@@ -336,18 +396,25 @@
     return li;
   }
   // What step s of bar b says under the bar. A blocked step's sentence and the output it failed on, and a NO-GO review's
-  // findings, as Needs you shows them. A failed test run shows its failing files and cases in place of its reason, and
+  // findings, as Needs you shows them. A lint step with its commands shows a row for each in place of its reason
+  // (lintRows). A failed test run shows its failing files and cases in place of its reason, and
   // its output under "Show full output". Its output stays open through a redraw: the toggle it replaces is the one of
   // the same step (its place among the card's steps, which only grow at the end, and its name).
   function stepSaid(b, s, at) {
     const els = [];
     const fails = testFails(s.failures);
     // Its bar's words on hover or focus say the same line, not the exit code.
+    const step = `${at.all.indexOf(s)}:${s.name}`;
+    const lint = lintRows(s.lint, step, at.mine);
     if (fails) { els.push(fails); b.why = fails.firstChild.textContent; }
+    else if (lint) {
+      els.push(lint);
+      // The rows say each command's result: the one note of the reason they do not is kept (lintline(), lib/lint.sh).
+      if (/(^|; )tools ran as installed(;|$)/.test(s.why || '')) els.push(h('p', 'detail-why', 'Tools ran as installed'));
+    }
     else if (typeof s.why === 'string' && s.why) els.push(h('p', 'detail-why', s.why));
     const cov = testCoverage(s.coverage);
     if (cov) els.push(cov);
-    const step = `${at.all.indexOf(s)}:${s.name}`;
     const old = at.mine ? Array.from(at.mine.querySelectorAll('details.output')).find((x) => x.dataset.step === step) : null;
     const out = output(s.output, at.card, s.name === 'tests failed' ? 'Show full output' : null, old, at.repoUrl, at.repo, /^review \d/.test(s.name) ? s.at : null);
     if (out) { out.dataset.step = step; els.push(out); }

@@ -200,7 +200,9 @@
                     # names the fix that starts next the reply check's, as the six steps do (rc), and no other one so.
                     checkFailed: $l.checkFailed,
                     # A lint line's gate (rows.jq gate): the Board numbers the lint fix after it as the six steps do.
-                    gate: (if $l.step == "lint" then $l.gate else null end)}
+                    gate: (if $l.step == "lint" then $l.gate else null end),
+                    # A lint line's commands, {n, run, result, sec, findings}: the Board shows a row a command in place of the reason.
+                    lint: (if $l.step == "lint" and ($l.lintCommands | length) > 0 then $l.lintCommands else null end)}
                    | with_entries(select(.value != null and .value != "")))]
            + (if $label == "" or $after == "wait" then [] else [{name: $label, sec: null} + (if $after | IN("pushfail", "pushheld", "issuefail")
                # A failed push or close of the issue: when it was last seen (the last line's time) and why, as the push step says.

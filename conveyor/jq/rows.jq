@@ -69,6 +69,8 @@ map(select(.step != "push")) | group_by(.card) | map(. as $all
                  or .step == "blocked" or .step == "fix" or .step == "worktree" or .step == "lint" then .reason else null end),
                # A lint line's gate (lintline(), lib/lint.sh): the track names the lint fix that starts next by it.
                gate: (if .step == "lint" then .lint.gate else null end),
+               # A lint line's commands (lintline()): the Board shows a row for each.
+               lintCommands: (if .step == "lint" then .lint.commands else null end),
                tail: (if .step == "blocked" or (.step == "test" and .result != "pass") or (.step == "review" and .result == "NO-GO") then .tail else null end),
                failures: (if .step == "test" and .result != "pass" then .failures else null end),
                # A test line's failures' verdicts (card, main or flaky) and the seconds its run of them on main took (mainred.sh verdicts());

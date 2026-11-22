@@ -263,6 +263,14 @@
       if (!again) openTip(el);
     }, true);
     doc.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeTip(); });
+    // A lint command's name shows its whole command when the keyboard reaches it (a click already does, and a mouse
+    // press would open and close it at once, so only a keyboard focus counts).
+    doc.addEventListener('focusin', (e) => {
+      const el = e.target && e.target.closest ? e.target.closest('.lint-cmd-word[data-tip]') : null;
+      const keyboard = () => { try { return el.matches(':focus-visible'); } catch { return true; } };
+      if (el && keyboard() && el !== app.tipAt) { closeTip(); openTip(el); }
+    });
+    doc.addEventListener('focusout', (e) => { if (e.target === app.tipAt && e.target.classList.contains('lint-cmd-word')) closeTip(); });
   }
 
   // ---- one panel's frame ----
