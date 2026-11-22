@@ -291,8 +291,16 @@ class Feed:
         self.cond = threading.Condition()
         self.version, self.data, self.texts, self.events, self.seen = 0, None, None, None, None
         self.followers = 0
+        # threading is the server's, run in this namespace: globals() names it where a linter reads this file alone.
+        self.loading = globals()['threading'].Lock()
 
     def look(self):
+        # The feed's thread and each new /events page look: under one lock, a second look at a new data.js waits for
+        # the first and finds it read, so the file is parsed and its version counted once, not once a caller.
+        with self.loading:
+            self.load()
+
+    def load(self):
         try:
             st = os.stat(self.path)
             key = (st.st_mtime_ns, st.st_size, st.st_ino)

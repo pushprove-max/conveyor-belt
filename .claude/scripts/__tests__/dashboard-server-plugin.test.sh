@@ -131,6 +131,36 @@ appender.join(10)
 check('keeps_a_note_appended_meanwhile', got == 200 and text(NOTES) == HEAD + A + '\n' + P + '\n',
       'dismiss of %r with a noprice append before its replace: %s %r' % (B, got, text(NOTES)))
 
+# #1462 (R13). Bug: two Dismisses at once, of two notes, each read the file, took its own note out of its copy and
+# replaced the file with it: the second replace put back the note the first had taken out. The replace is gated by a
+# barrier for two: two Dismisses that both read before either replaced pass it together; one that waits on the lock
+# for the other reaches it alone, and replaces once the barrier gives up.
+gate = threading.Barrier(2, timeout=0.5)
+
+
+def replace_gated(src, dst):
+    if dst == NOTES:
+        try:
+            gate.wait()
+        except threading.BrokenBarrierError:
+            pass
+    return real_replace(src, dst)
+
+
+with open(NOTES, 'w') as f:
+    f.write(WHOLE)
+both = {}
+dismissers = [threading.Thread(target=lambda n: both.__setitem__(n, post({'file': NOTES, 'line': n})), args=(n,)) for n in (A, B)]
+os.replace = replace_gated
+err, sys.stderr = sys.stderr, io.StringIO()
+list(map(threading.Thread.start, dismissers))
+for t in dismissers:
+    t.join(30)
+sys.stderr = err
+os.replace = real_replace
+check('two_dismisses_at_once', both == {A: 200, B: 200} and text(NOTES) == HEAD,
+      'dismiss of %r and of %r at once: %r %r' % (A, B, both, text(NOTES)))
+
 # File on GitHub, with both notes in the file again.
 with open(NOTES, 'w') as f:
     f.write(WHOLE)

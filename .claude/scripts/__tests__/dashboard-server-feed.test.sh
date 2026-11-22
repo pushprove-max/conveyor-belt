@@ -94,6 +94,34 @@ check(len(serialised) == 4, 'events_serialise_each_panel_once_a_version: two pag
 check(len(encoded) == 3, 'events_encode_each_event_once_a_version: two pages, a snapshot and two panel events must be '
       '3 encodings, not one set a page: %d' % len(encoded))
 
+# #1462 (R12). Bug: look() took no lock until it kept what it read, so the feed's thread and a new page's look at one
+# new data.js both parsed it, and each counted a version and built its Events: followers were woken twice for one
+# change. The parse is gated by a barrier for two: two looks that both reach it pass it together; a look that waits
+# for the other reaches it alone, and passes once the barrier gives up.
+gate, real_loads, built, RealEvents = threading.Barrier(2, timeout=0.5), ds.json.loads, [], ds.Events
+def gated_loads(*a, **k):
+    try:
+        gate.wait()
+    except threading.BrokenBarrierError:
+        pass
+    return real_loads(*a, **k)
+class CountedEvents(RealEvents):
+    def __init__(self, data):
+        built.append(data)
+        super().__init__(data)
+data_js(3, 3)
+before = feed.version
+ds.json.loads, ds.Events = gated_loads, CountedEvents
+lookers = [threading.Thread(target=feed.look) for _ in range(2)]
+for t in lookers:
+    t.start()
+for t in lookers:
+    t.join(5)
+ds.json.loads, ds.Events = real_loads, RealEvents
+check(feed.version == before + 1 and len(built) == 1 and feed.data['updatedAt'] == 't3',
+      'look_loads_a_new_data_js_once: two threads looked at one new data.js at once: the version must go up by 1 '
+      'and Events be built once, not %d and %d times' % (feed.version - before, len(built)))
+
 # #549. Bug: every logged-in request parsed the login store again, though it had not changed. Ten requests with a
 # session parse it once; a store changed as change_store changes it (a new file) is parsed again, and its change is seen.
 parsed, real_load = [], json.load
