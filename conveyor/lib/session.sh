@@ -139,11 +139,11 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
     && printf '%s\n' "$st" > "$out"
   while :; do
     sleep "$LIVE" > /dev/null 8>&- & timer=$!
-    who=''; wait -n -p who "$pid" "$timer"; rc=$?
+    # A bash before 5.3 takes a step that ended off its job table as a job starts (the timer): `wait -n` says "no such
+    # job" and waits out the timer (#1319). A step that ended is asked for by itself, below, for its kept status.
+    who=''; kill -0 "$pid" 2>/dev/null && wait -n -p who "$pid" "$timer" 2>/dev/null; rc=$?
     kill "$timer" 2>/dev/null; wait "$timer" 2>/dev/null
     [ "$who" != "$pid" ] || break
-    # A step that ended before that wait began is not among the jobs a bash before 5.3 waits for there: it would
-    # name the timer every time and the card would never end. Its exit is asked for by itself.
     kill -0 "$pid" 2>/dev/null || { wait "$pid"; rc=$?; break; }
     [ -n "$who" ] || break
     # A card that gave way (giveway()): once a card took its turn, the live record names it (gaveWay: its issue).

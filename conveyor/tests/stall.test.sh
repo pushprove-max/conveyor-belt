@@ -128,6 +128,29 @@ stallwatched() { # <step> <stuck> <last shell>
     LIVE=0.2 STUCK=$2; (cd "$W" && exec bash "$T/$CASE/step.sh") > "$W.out" 2>&1 < /dev/null &
     watch $! "$W.out" "$W.live" "$1" ); RC=$?; TOOK=$((SECONDS - s))
 }
+# Issue 1319: a step that ended before watch() started its timer. Bash 5.1 and 5.2 take a job that ended off their
+# job table when the next job starts, and their `wait -n` of such a pid writes "<pid>: no such job" to the caller's
+# stderr (into the verdict a main-red proof reads) and waits out the timer (LIVE); `wait <pid>` still gives its kept
+# status. Bash 5.3 finds the pid itself, so the case puts a `wait` in front of the builtin that does as 5.1 and 5.2 do
+# for a `wait -n` of a pid that has ended: a direct check on a 5.3 host cannot show that bash's behaviour otherwise.
+# Bug it catches: that line, the wait of LIVE, or the step's exit (7) lost.
+t_stallreaped() {
+  local out W=$T/$CASE/wt
+  mkdir -p "$W"; : > "$W.out"
+  out=$( ( eval "$(sed -n '/^rollout() {/,/^}/p; /^holds() {/,/^}/p; /^watch() {/,/^}/p' "$SRC/lib/session.sh")"
+    wait() { # bash 5.2's `wait -n [-p <name>] <pid>...`: a pid that has ended is no job; else the builtin
+      [ "$1" = -n ] || { builtin wait "$@"; return; }
+      local a=(-n) x; shift; [ "$1" != -p ] || { a+=(-p "$2"); shift 2; }
+      for x; do if kill -0 "$x" 2>/dev/null; then a+=("$x"); else echo "wait: $x: no such job" >&2; fi; done
+      builtin wait "${a[@]}"
+    }
+    # shellcheck disable=SC2034 # LIVE and STUCK are read by watch(), defined by the eval
+    LIVE=5 STUCK=600; (exit 7) & p=$!
+    while kill -0 "$p" 2>/dev/null; do command sleep 0.05; done # sleep: until this shell has reaped the step
+    s=$SECONDS; watch "$p" "$W.out" "$W.live" build; echo "rc $? took $((SECONDS - s))" ) 2>&1 )
+  [[ $out =~ ^rc\ 7\ took\ ([0-9]+)$ ]] && [ "${BASH_REMATCH[1]}" -lt 4 ] \
+    || fail "watch() of a step that ended with 7 before its timer began, under bash 5.2's wait -n, did not return 7 at once with nothing on stderr: $out"
+}
 # The runner (conveyor.test.sh) sources every area file before any case runs, so a function two files define is, in
 # every run, the later file's for the cases of both. Bug it catches (#871): views.test.sh and stall.test.sh each
 # defined a watched() of other arguments, and serve.test.sh an eng() of other arguments than mainred.test.sh's, which
