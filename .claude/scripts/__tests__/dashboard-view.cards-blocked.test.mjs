@@ -106,7 +106,7 @@ test("a card's steps show a NO-GO review's findings and the blocked step's sente
   const items = panel(w, 'needs').querySelectorAll('li[data-key="blocked:c2-13"] details.track-detail .timeline > li');
   assert.equal(items.length, 2);
   const [review, stopped] = items;
-  assert.equal(review.querySelector('details.output').open, false, 'the findings are closed until asked for');
+  assert.equal(review.querySelector('details.output').open, false, 'the review text is closed until asked for');
   // A review's findings are rows (dashboard-view.output-review), on a card's steps too.
   assert.deepEqual(Array.from(review.querySelectorAll('.output-finding'), (x) => [x.querySelector('.chip').textContent, x.querySelector('.finding-text').textContent,
     x.querySelector('.finding-at').textContent]), [['P1', 'wrong', 'a.sh:1'], ['P2', 'slow', 'b.sh:2']]);

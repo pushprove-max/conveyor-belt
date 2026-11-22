@@ -314,7 +314,8 @@ judgemarks() { # <worktree> <the always-accepted kinds, a JSON array>
            kind: ([$always[] | select(. as $k | $l | gsub("\\s*\\[E[0-9]+\\]"; "") | test("^\\[P[0-3]\\]\\[" + ($k | rx) + "\\]"; "i"))] | first)})'
 }
 # The lines each finding of a review cites, kept on the review's line (excerpts) so that the Board shows the lines the
-# review read after the card's worktree is gone (history excerpts). A finding cites its first file:line or file:a-b,
+# review read after the card's worktree is gone (history excerpts); a finding the judge declined (a DECLINED: line)
+# keeps its lines too, as the Board lists it. A finding cites its first file:line or file:a-b,
 # read as judgemarks() reads it (a path under the worktree read as one in it). The lines are read from git's trees only,
 # never from the disk: the staged tree the review read (side "new") when it has the file and the first line; the tree
 # of the worktree's HEAD (side "old"); and, for a review that follows a fix round, the tree before that fix (side
@@ -354,7 +355,7 @@ excerpts() { # <worktree> [<the tree before the fix round the review follows>]
       [ "$got" = '[]' ] || [ "$(jq length <<<"$out")" -ge "$EXCERPTS" ] \
         || { kept=1; out=$(jq -c --arg at "$at" --arg s "$side" --argjson a "$a" --argjson l "$got" '. + [{at: $at, side: $s, from: $a, lines: $l}]' <<<"$out"); }
     done
-  done < <(grep -Ev "$NOTFINDING" "$1.review" 2>/dev/null | jq -Rr --arg wt "$1/" --arg real "$(cd "$1" && pwd -P)/" \
+  done < <(sed -E 's/^DECLINED:[[:space:]]*//' "$1.review" 2>/dev/null | grep -Ev "$NOTFINDING" | jq -Rr --arg wt "$1/" --arg real "$(cd "$1" && pwd -P)/" \
     'split($wt) | join("") | split($real) | join("") | [scan("([A-Za-z0-9_./-]+):([0-9]{1,9})(?:[-–]([0-9]{1,9}))?")] | first // empty
       | [(.[0] | ltrimstr("./")), .[1], (.[2] // "")] | @tsv' | awk '!seen[$0]++')
   printf '%s\n' "$out"

@@ -528,7 +528,12 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .tl-item:hover > .tl-tip, .tl-item:focus-visible > .tl-tip { z-index: 2; left: var(--sp-1); top: 100%; width: auto; height: auto; clip-path: none; max-width: 90vw; overflow-wrap: anywhere; white-space: normal;
   padding: var(--sp-1) var(--sp-2); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); box-shadow: 0 4px 12px rgb(0 0 0 / .15); }
 .tl-item[data-state="failed"] > .tl-tip { color: var(--bad); }
-.tl-item > .tl-parts, .tl-item > .detail-why, .tl-item > .test-fails, .tl-item > .lint-cmds, .tl-item > .output { grid-column: 1 / -1; }
+.tl-item > .tl-parts, .tl-item > .detail-why, .tl-item > .test-fails, .tl-item > .lint-cmds, .tl-item > .output,
+.tl-item > .tl-review, .tl-item > .review-findings { grid-column: 1 / -1; }
+/* A review's verdict, findings count and judge's counts: one line under the bar, wrapping at the panel's edge. */
+.tl-review { display: flex; flex-wrap: wrap; align-items: center; gap: 2px var(--sp-2); margin: 0; }
+/* A declined finding is dimmed; the judge's reason under it is not. */
+.output-finding.is-declined > :not(.why-block) { opacity: 0.65; }
 .tl-parts > summary { cursor: pointer; color: var(--muted); font-size: var(--fs-xs); }
 .tl-parts ol { margin: 2px 0 0; padding-left: var(--sp-5); }
 .track-detail .detail-todo { color: var(--muted); }

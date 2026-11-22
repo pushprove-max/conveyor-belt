@@ -225,6 +225,8 @@
   // A review finding: "[P1] path:line The sentence. Proof: why", its place and proof each optional. A "[cleanup]" mark
   // after the level (a fix that changes no behaviour, prompts.sh REVIEWT) is not drawn.
   const FINDING = /^\[(P[0-3])\]\s*(?:\[cleanup\]\s*)?(.*)$/;
+  // A finding the judge declined, as the engine writes it into the review (review.sh): "DECLINED: <finding> (judge: <reason>)".
+  const DECLINED = /^DECLINED:\s*(\[P[0-3]\].*?) \(judge: ([\s\S]*)\)\s*$/;
   // A review's findings as rows, in their order: the priority chip (P0 and P1 warn, P2 and P3 quiet) and the sentence
   // in bold on one line, the place (path:line) under it as a link to that line, and the part after "Proof:" folded
   // under a closed "Proof:" toggle. Code spans and file paths in the sentence and proof are drawn as fill draws them,
@@ -238,7 +240,8 @@
     const lines = [card, repo, review].every((s) => typeof s === 'string' && s) ? reviewedLines(repo, card, review) : null;
     folded.forEach((x) => {
       if (!x.text.trim()) return;
-      const row = h('li', 'output-finding'), m = FINDING.exec(x.text), times = x.n > 1 ? ` ×${x.n}` : '';
+      const no = DECLINED.exec(x.text);
+      const row = h('li', 'output-finding'), m = FINDING.exec(no ? no[1] : x.text), times = x.n > 1 ? ` ×${x.n}` : '';
       if (!m) { row.append(h('p', 'finding-text', x.text + times)); list.append(row); return; }
       let rest = m[2];
       const at = /^(\S+:\d+(?:[-–]\d+)?)[:,]?\s+(?=\S)/.exec(rest);
@@ -248,7 +251,7 @@
       const head = h('div', 'finding-head'), said = h('p', 'finding-text');
       said.append(fill(h('strong', 'finding-claim'), sentence, repoUrl, known, 'finding'));
       if (times) said.append(times);
-      head.append(chip(m[1], m[1] === 'P0' || m[1] === 'P1' ? 'warn' : 'quiet'), said);
+      head.append(chip(m[1], m[1] === 'P0' || m[1] === 'P1' ? 'warn' : 'quiet'), ...(no ? [chip('Declined', 'quiet')] : []), said);
       row.append(head);
       if (at) { const p = h('p', 'finding-at'); p.append(codeEl(repoUrl, at[1], known, 'finding-at-link').el); row.append(p); }
       if (at && lines) row.append(lines(at[1]));
@@ -256,6 +259,14 @@
         const fold = h('details', 'finding-proof');
         fold.append(h('summary', 'finding-proof-label', 'Proof:'), fill(h('div', 'finding-proof-text'), proof, repoUrl, known, 'finding'));
         row.append(fold);
+      }
+      if (no) {
+        // The judge's reason, in its own block as the Declined panel draws it (panels/declined.js).
+        row.classList.add('is-declined');
+        const box = h('div', 'reason why-block');
+        box.dataset.by = 'judge';
+        box.append(h('strong', 'why-label', 'Why the judge declined it'), fill(h('div', 'why-text'), no[2].trim(), repoUrl, known, 'why'));
+        row.append(box);
       }
       list.append(row);
     });
@@ -372,13 +383,13 @@
   // repoUrl: the card's repository on GitHub (repoOf), in which a review finding's file paths link to their lines; none,
   // and they are code with no link. repo: the card's record (its repo), whose findings' places open the lines the review
   // read (findingRows) in the review whose record has the time reviewAt; none, and they do not.
-  function output(tail, card, label, was, repoUrl, repo, reviewAt) {
+  function output(tail, card, label, was, repoUrl, repo, reviewAt, raw) {
     if (typeof tail !== 'string' || !tail.trim()) return null;
-    const same = JSON.stringify([tail, typeof card === 'string' ? card : '', label || '']);
+    const same = JSON.stringify([tail, typeof card === 'string' ? card : '', label || '', raw === true]);
     if (was && was.outputText === same) return keptOutput(was, was);
     const folded = foldLines(tail, card);
-    const review = folded.some((x) => FINDING.test(x.text));
-    const det = h('details', 'output'), fails = review || folded.length < 2 ? [] : folded.filter((x) => FAILLINE.test(x.text));
+    const review = raw !== true && folded.some((x) => FINDING.test(x.text));
+    const det = h('details', 'output'), fails = review || raw === true || folded.length < 2 ? [] : folded.filter((x) => FAILLINE.test(x.text));
     det.append(h('summary', null, label || 'Show output'));
     det.dataset.card = typeof card === 'string' ? card : '';
     det.open = Boolean(was && was.open && was.dataset.card === det.dataset.card);
@@ -393,6 +404,20 @@
     outputCopy(det, pre, folded);
     det.outputText = same;
     return keptOutput(det, was);
+  }
+  // A review's findings as one list of rows, accepted and declined alike (findingRows), for the step that shows its
+  // output as plain text (output with raw); null when the output holds no finding. was: the list this one replaces in a
+  // redraw: the same output keeps it, so its open toggles stay open.
+  function reviewList(tail, card, was, repoUrl, repo, reviewAt) {
+    if (typeof tail !== 'string' || !tail.trim()) return null;
+    if (was && was.dataset.text === tail && was.dataset.card === String(card)) return was;
+    const folded = foldLines(tail, card);
+    if (!folded.some((x) => FINDING.test(x.text) || DECLINED.test(x.text))) return null;
+    const list = findingRows(folded, repoUrl, card, repo, reviewAt);
+    list.classList.add('review-findings');
+    list.dataset.text = tail;
+    list.dataset.card = String(card);
+    return list;
   }
   // A time that keeps counting between refreshes: the ticker rewrites its text, so no panel is redrawn for it.
   // offset (seconds) is added: a card's overall time is the earlier cards' seconds and the time since its pick-up.
@@ -527,7 +552,7 @@
   window.DASH_APP.core((given) => {
     app = given;
     app.bind(bindNames);
-    return { keep, PAGE, pageOf, rowsAbove, took, since, list, clock, when, findings, verdictSaid, judged, output,
+    return { keep, PAGE, pageOf, rowsAbove, took, since, list, clock, when, findings, verdictSaid, judged, output, reviewList,
       codeEl, fill, proofAt, pathsIn, repoOf, dur, modelName, survived, loopEnd, reviewChip, findingText, depRef,
       issueLink, keptScope, keptGet, refusal, depPicked, namesKey, retitle };
   });

@@ -727,15 +727,19 @@ issue number, as a link, and the issue title.
 ## Card steps
 
 - A finished review reads "Review 2: passed" or "Review 2: changes asked". A review the judge read says "judge: N
-  accepted, M declined". Each finding has an id, E1, E2 and so on, that it keeps from one review to the next. A
-  finding that came back after its fix says so, for example "E2 came back after 2 fix rounds".
-- **Show output** on a review lists its findings, one row each, in the order the reviewer gave them. A row shows the
+  accepted, M declined". The bar of a review step is named only "Review 2". The verdict, the count of findings and the
+  judge's counts are on one line under the bar. Each finding has an id, E1, E2 and so on, that it keeps from one review
+  to the next. A finding that came back after its fix says so, for example "E2 came back after 2 fix rounds".
+- Under a review's bar, its findings are one list, one row each, in the order the reviewer gave them. A finding that
+  the judge declined is in the list too: its row is dimmed and has a **Declined** mark, and under it a block, **Why the
+  judge declined it**, gives the judge's reason. A row shows the
   priority (P0 to P3), the finding, and under it the file and line. Click **Proof** to read the reviewer's proof. Click
   **Reviewed lines** to read the lines that the finding names, as that review read them. When the finding names lines
   that the change or a fix round deleted, you also see the deleted lines. These lines stay after the card's worktree is removed. The
-  file link goes to main, which can show different code. Each
-  other step's output shows as plain text, with its failures first. **Copy output** copies the output as plain text, for a
-  review too. This is the same in On the belt, Landed today and Needs you.
+  file link goes to main, which can show different code. **Show output** on a review step shows the review's text as
+  plain text, closed until you open it. Each other step's output shows as plain text, with its failures first.
+  **Copy output** copies the output as plain text, for a review too. This is the same in On the belt, Landed today and
+  Needs you.
 - A fix session shows what started it: **Fix 2: review findings**, **Fix 1: reply check**, **Fix 3: main changed under it**,
   **Fix 4: tests failed** or **Fix 5: lint findings**. Hover over the label for the full reason. The number is the
   Fix round that the Fix step shows. A fix and the lint fix before the review after it have the same number. A lint fix

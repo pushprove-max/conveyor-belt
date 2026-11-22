@@ -6,9 +6,9 @@
   'use strict';
   // What this part uses of app.js and of its other parts, each bound as it loads (app.bind, at the end).
   let app, SEEN_KEY, STEP_NAMES, chip, clock, codeEl, doc, fill, findings, form, h, judged, list, now, num, output, parse,
-    pathsIn, proofAt, repoOf, since, tip, took, verdictSaid, when;
+    pathsIn, proofAt, repoOf, reviewList, since, tip, took, verdictSaid, when;
   const bindNames = () => ({ SEEN_KEY, STEP_NAMES, chip, clock, codeEl, doc, fill, findings, form, h, judged, list, now, num,
-    output, parse, pathsIn, proofAt, repoOf, since, tip, took, verdictSaid, when } = app);
+    output, parse, pathsIn, reviewList, proofAt, repoOf, since, tip, took, verdictSaid, when } = app);
   const STEP_WORD = { done: 'done', now: 'in progress', skipped: 'skipped', failed: 'failed', todo: 'to come' };
   const STEP_MARK = { done: '✓', now: '▶', skipped: '–', failed: '✗', todo: '·' };
   const sixOf = (t) => (t && Array.isArray(t.steps) && t.steps.length === 6 && t.steps.every((s, i) => s && s.name === STEP_NAMES[i] && STEP_WORD[s.state]) ? t : null);
@@ -370,17 +370,21 @@
     li.dataset.state = b.state;
     li.tabIndex = 0;
     if (b.state === 'now') li.setAttribute('aria-current', 'step');
-    if (b.verdict) label.append(chip(verdictSaid(b.verdict), b.verdict === 'GO' ? 'ok' : 'warn'));
     if (b.parts.some((s) => s.rerun === true)) label.append(chip('passed on re-run', 'warn'));
-    const f = findings({ counts: b.counts });
-    if (f) label.append(h('span', 'tl-findings', f));
-    // What the judge made of the review, its declined count opening the card's lines in the Declined panel.
-    const jd = judged(b, at.card);
-    if (jd) label.append(jd);
     lane.setAttribute('aria-hidden', 'true');
     lane.append(bar);
     Object.assign(b, { lane, bar, dur: h('span', 'tl-dur'), tip: h('span', 'tl-tip') });
     li.append(label, lane, b.tip);
+    // A review's verdict, findings count and what the judge made of it (its declined count opening the card's lines in
+    // the Declined panel) are one line under the bar: the label is too narrow for them.
+    const f = findings({ counts: b.counts }), jd = judged(b, at.card);
+    if (b.verdict || f || jd) {
+      const line = h('p', 'tl-review');
+      if (b.verdict) line.append(chip(verdictSaid(b.verdict), b.verdict === 'GO' ? 'ok' : 'warn'));
+      if (f) line.append(h('span', 'tl-findings', f));
+      if (jd) line.append(jd);
+      li.append(line);
+    }
     // The test run in progress says how far it has got.
     const prog = b.state === 'now' ? testProgress(at.t) : null;
     if (prog) li.append(h('p', 'tl-tests', prog));
@@ -416,7 +420,12 @@
     const cov = testCoverage(s.coverage);
     if (cov) els.push(cov);
     const old = at.mine ? Array.from(at.mine.querySelectorAll('details.output')).find((x) => x.dataset.step === step) : null;
-    const out = output(s.output, at.card, s.name === 'tests failed' ? 'Show full output' : null, old, at.repoUrl, at.repo, /^review \d/.test(s.name) ? s.at : null);
+    // A review's findings are one list of rows under the bar; its Show output keeps the review's text as written.
+    const review = /^review \d/.test(s.name);
+    const was = review && at.mine ? Array.from(at.mine.querySelectorAll('.review-findings')).find((x) => x.dataset.step === step) : null;
+    const rows = review ? reviewList(s.output, at.card, was, at.repoUrl, at.repo, s.at) : null;
+    if (rows) { rows.dataset.step = step; els.push(rows); }
+    const out = output(s.output, at.card, s.name === 'tests failed' ? 'Show full output' : null, old, at.repoUrl, at.repo, review ? s.at : null, Boolean(rows));
     if (out) { out.dataset.step = step; els.push(out); }
     return els;
   }

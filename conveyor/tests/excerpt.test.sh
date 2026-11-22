@@ -49,6 +49,13 @@ t_excerpts() {
   # shellcheck disable=SC2034 # STE is read by the sourced lib/review.sh
   x=$(eval "$(grep -E '^(ROLLOUT|NOTFINDING)=' "$SRC/lib/prompts.sh")"; STE=''; . "$SRC/lib/review.sh"; excerpts "$w")
   [ "$(jq -c '.[0].lines | length' <<<"$x")" = 20 ] || fail "a wide range is kept whole: $x"
+  # A finding the judge declined is a DECLINED line (judge step); the Board lists it with its Reviewed lines, so they are
+  # kept as for an accepted finding, from the finding's place, never from one the judge's reason names.
+  printf '%s\n' '[P1] a.txt:1 kept' 'DECLINED: [P2] mid.txt:2 declined (judge: rare, see long.txt:3)' > "$w.review"
+  # shellcheck disable=SC2034 # STE is read by the sourced lib/review.sh
+  x=$(eval "$(grep -E '^(ROLLOUT|NOTFINDING)=' "$SRC/lib/prompts.sh")"; STE=''; . "$SRC/lib/review.sh"; excerpts "$w")
+  [ "$(jq -c '[.[].at] | unique' <<<"$x")" = '["a.txt:1","mid.txt:2"]' ] \
+    || fail "a declined finding's lines are not kept (a DECLINED line was read as no finding), for the review: $(cat "$w.review"): $x"
 }
 
 # Bug: the Board reads a card's reviewed lines on demand, as the snapshot leaves them out: history excerpts gives
