@@ -693,5 +693,17 @@
   ],
   "conveyor/tests/viewstrack.test.sh": [
     ".claude/scripts/__tests__/dashboard-local.test.sh"
+  ],
+  "conveyor/bench/swe.sh": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh"
+  ],
+  "conveyor/bench/swe_arms.sh": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh"
+  ],
+  "conveyor/tests/swebencharms.test.sh": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh"
+  ],
+  "conveyor/tests/swebenchstop.test.sh": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh"
   ]
 }

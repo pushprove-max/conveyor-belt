@@ -147,7 +147,7 @@ test('Tests fixes: Rewrite as a direct check past the body limit keeps every DIR
   assert.match(body, /\n- Last runs, newest first: \d/, `the runs line, which the card's CPU limit comes from, stays:\n${body}`);
   assert.ok(!body.includes("The judge's verdict ("), `the verdict line went to make room:\n${body}`);
 });
-test('Tests fixes: Rewrite as a direct check whose DIRECT lines alone pass the body limit makes no draft and says why', async () => {
+test('Tests fixes: Rewrite as a direct check whose DIRECT lines alone go over the body limit makes no draft and says why', async () => {
   const w = indirect(40);
   act(open(w, MERGE), 'rewrite-direct').click();
   await settle();
