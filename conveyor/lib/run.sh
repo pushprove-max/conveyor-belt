@@ -359,12 +359,15 @@ cardsrun() {
 # wait passes over it. A job that has gone from the shell's job table already (a `jobs` or `wait` took it) is no longer
 # found by `wait -n` in bash 5.2: the wait would go on to the timer. So the wait first looks that each of them is alive
 # (kill -0), and returns at once when one is not.
+# A wake (wakeloop(), lib/control.sh) ends it too: the URG trap run() sets kills the timer and sets nudged, so a wake
+# that came after the turn read the control record, and before its timer started, ends the wait at once as well.
 turnwait() {
   local j=() p
+  [ -z "${nudged:-}" ] || { nudged=''; return 0; }
   [ -z "$pusher" ] || j+=("$pusher")
   [ -z "$prober" ] || ! jobs -rp | grep -qx "$prober" || j+=("$prober")
   for p in "${j[@]}" "${!mine[@]}"; do kill -0 "$p" 2>/dev/null || return 0; done
-  wait -n "$timer" "${j[@]}" "${!mine[@]}" 2>/dev/null
+  wait -n "$timer" "${j[@]}" "${!mine[@]}" 2>/dev/null; nudged=''
 }
 # A `run` (not a serve) may end at this turn, read in run()'s own variables: no card of its own runs, no push
 # (pusher) or machine-hold look (prober) is under way, and no pick waits.
@@ -659,7 +662,7 @@ turnpick() {
 }
 run() { # [max-cards] [serve]
   local left=${1:--1} serve=${2:-} cap base='' picked running building idles started=0 c n again timer pusher='' owed tried='' triedat=0 ctl pct now='' p k lim='' waits sampled=-1000000 guard issues='' asking urgent red
-  local why say said='' old='' nopack told='' nocli self adopt='' held='' new t tester='' mtried=-1000000 stried=-1000000 taker='' ttook=-1000000 f muter='' utried=-1000000 woke
+  local why say said='' old='' nopack told='' nocli self adopt='' held='' new t tester='' mtried=-1000000 stried=-1000000 taker='' ttook=-1000000 f muter='' utried=-1000000 woke nudged=''
   local mhold htold='' prober='' htried=-1000000 gone gs merger='' gtried=-1000000 fixer='' rtried=-1000000 asker='' atried=-1000000
   local inuse # the machine's count of the turn (turncount())
   # The loop's own cards in progress: pid -> "card issue"; took: those it adopted at its start -> the commit they run;
@@ -681,6 +684,11 @@ run() { # [max-cards] [serve]
   while read -r p k t; do [ -z "$p" ] || [ -z "${took[$p]:-}" ] || kids[$p]+="$k $t"$'\n'; done <<<"$held"
   rm -f "$PUSHING" "$SAYS" # a loop killed during its push left them; no push runs here now, and this loop has said nothing yet
   self=$(p_started $$)
+  # A wake (wakeloop(), lib/control.sh, on a hold, a release or a filing) is URG: it kills the turn's timer, as the
+  # turn's own end does, and sets nudged, which turnwait() reads. A trapped signal also cuts short a `wait` this shell
+  # runs, so no wait of this shell's own may read its status as a job's (the cards' and other jobs' are subshells,
+  # where the trap is not set).
+  trap 'nudged=1; [ -z "${timer:-}" ] || kill "$timer" 2>/dev/null' URG
   speedretry
   [ -n "$OWN" ] || [ -z "$RAN" ] || FOLLOW=$serve
   if [ -n "$ONLY" ] && [ -z "$serve" ]; then [ "$left" -le 0 ] || lim=$left; left=-1; onlyreport; fi
@@ -726,7 +734,8 @@ run() { # [max-cards] [serve]
     # still worked that out wrote an error (a broken pipe) into the loop's output, at any turn.
     { [ "$running" != 0 ] || [ -n "$pusher" ] || [ -n "$waits" ]; } && t=$POLL || t=$IDLE
     sleep "$t" 8>&- & timer=$!
-    turnwait; kill "$timer" 2>/dev/null; wait "$timer" 2>/dev/null
+    # The timer is cleared once it is waited for: a wake then kills no other process given its pid.
+    turnwait; kill "$timer" 2>/dev/null; wait "$timer" 2>/dev/null; timer=''
   done
   if [ -n "$old" ]; then echo "conveyor: this run ends: the pack pins another Conveyor commit; start it again from that commit's install"
   elif [ "$started" = 0 ] && [ -z "$tried" ]; then

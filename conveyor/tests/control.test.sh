@@ -424,3 +424,33 @@ t_controlsuitemachine() {
   ! ctlcheck <<<'{"suiteMachine":{"kind":"devbox","size":"4x8","tag":"conveyor-suite-x","idleStop":"15m","box":"-x"}}' > /dev/null || fail "a devbox rule with the box name -x was read"
   [ "$(ctl suite-machine local | jq -c .suiteMachine)" = '{"kind":"local"}' ] || fail "control suite-machine local did not write this machine: $(jq -c .suiteMachine "$C")"
 }
+# Bug (issue 1333): a hold sent the running loop nothing, so the loop took the new record only once its turn's timer
+# ended. A hold wakes (URG) the process loop.json names, and only while loop.json's start time is that process's: a
+# pid used again by another process after the loop ended is sent nothing. The stand-in counts each URG it is sent.
+t_controlwake() {
+  controlsetup "[$(issue 4 2026-01-01)]"
+  bash -c 'trap "echo urg >> \"\$0.urg\"" URG; : > "$0.ready"; sleep 60 & s=$!; while kill -0 "$s" 2>/dev/null; do wait "$s"; done' "$STUB/loop" & e=$! # sleep: the stand-in loop's own wait
+  wait_until '[ -e "$STUB/loop.ready" ]' || fail "the stand-in loop did not start"
+  jq -cn --argjson p "$e" '{pid: $p, started: "Thu Jan  1 00:00:00 1970"}' > "$S/loop.json"
+  ctl hold 4 >/dev/null || fail "hold 4 was refused"
+  sleep 0.5 # sleep: a URG sent would have been counted by now
+  [ ! -e "$STUB/loop.urg" ] || fail "control hold 4 woke pid $e, which loop.json names with another start time: $(cat "$S/loop.json")"
+  jq -cn --argjson p "$e" --arg t "$(p_started "$e")" '{pid: $p, started: $t}' > "$S/loop.json"
+  ctl hold 4 >/dev/null || fail "hold 4 was refused"
+  WAIT_CEILING=10 wait_until '[ -s "$STUB/loop.urg" ]' || fail "control hold 4 did not wake the loop loop.json names: $(cat "$S/loop.json")"
+  kill "$e" 2>/dev/null; wait "$e" 2>/dev/null; return 0
+}
+# Bug (issue 1333): a release sent the running loop nothing, so a loop asleep on its idle timer (the pack's idle, here
+# 100 s) picked the released issue only once the timer ended. Here #4 is picked well before the timer would end.
+# It runs the real `serve` loop, as only its own turn shows that the wake ends the wait and that the pick follows it.
+t_controlwakeloop() {
+  controlsetup "[$(issue 4 2026-01-01)]"; tune '.tunables.idle = 100 | .tunables.poll = 1'; watchturns
+  ctl hold 4 >/dev/null || fail "hold 4 was refused"
+  loop serve > "$STUB/serve.out" 2>&1 & lp=$! # loop: only the loop's own turn shows its idle wait ending on the release
+  # The loop's first timer: it has picked nothing (#4 held) and sleeps on its idle timer.
+  wait_until "grep -qxF '$R' '$TURNS'" "cat '$STUB/serve.out'" || fail "the loop took no turn"
+  ctl release 4 >/dev/null || fail "release 4 was refused"
+  WAIT_CEILING=$(loadlimit 20 100) wait_until "[ -n \"\$(st 'select(.issue == 4 and .step == \"picked\") | .card' 2>/dev/null)\" ]" "cat '$STUB/serve.out'" \
+    || fail "control release 4 did not wake the loop asleep on its 100 s idle timer: #4 was not picked"
+  kill "$lp" 2>/dev/null; wait "$lp" 2>/dev/null; return 0
+}

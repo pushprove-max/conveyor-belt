@@ -128,7 +128,8 @@ goes turn after turn. Each turn calls these functions in this order:
 - `turnpick` picks an issue and starts its card. The turn then ends, and the next turn starts.
 
 When the turn picks nothing, it waits (`turnwait`) until a card, the push or the machine hold's check ends, or until
-the turn's timer ends. A `run` ends at the first turn where none of its cards, pushes, machine hold checks or picks
+the turn's timer ends. `conveyor.sh control hold`, `conveyor.sh control release` and the Foreman's filing hooks also
+end the wait, so the next turn starts at once. A `run` ends at the first turn where none of its cards, pushes, machine hold checks or picks
 is left (`runends`).
 
 ## The judge

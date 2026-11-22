@@ -87,3 +87,23 @@ t_filedlink() {
   loop control start held >/dev/null; echo '[ "$4" != open ] || exit 1' > "$STUB/list-cmd"
   out=$(loop control start queue filed 2>&1); [ $? = 1 ] && [ "$(jq -r .start "$C")" = held ] || fail "Queue with the open issues unread: $out $(cat "$C")"
 }
+# Bug (issue 1333): the filing hooks sent the running loop nothing, so an issue filed and released already (the
+# owner's yes given before filed ran, as in t_filedlink) was picked only once the loop's idle timer (here 100 s)
+# ended. GitHub lists the issue only once the command has ended (the stub's list-filed), after the release, so here
+# filed's wake alone can make the loop asleep on its timer pick it.
+# It runs the real `serve` loop, as only its own turn shows that the wake ends the wait and that the pick follows it.
+t_filedwake() {
+  filedsetup; rm -f "$STUB/list-filed"; tune '.tunables.idle = 100 | .tunables.poll = 1'; watchturns
+  loop control hold 4 >/dev/null || fail "hold 4 was refused"
+  cmd='gh issue create --title a --body a'
+  hook filing "$cmd" >/dev/null
+  o=$(gh issue create --title a --body a) || fail "the stub filed no issue"; n=${o##*/}
+  loop control release "$n" >/dev/null || fail "the release of #$n failed"
+  loop serve > "$STUB/serve.out" 2>&1 & lp=$! # loop: only the loop's own turn shows its idle wait ending on filed
+  # The loop's first timer: it has picked nothing (#4 held, #n not listed yet) and sleeps on its idle timer.
+  wait_until "grep -qxF '$R' '$TURNS'" "cat '$STUB/serve.out'" || fail "the loop took no turn"
+  touch "$STUB/list-filed"; out=$(hook filed "$cmd" "$o"$'\n')
+  WAIT_CEILING=$(loadlimit 20 100) wait_until "[ -n \"\$(st 'select(.issue == $n and .step == \"picked\") | .card' 2>/dev/null)\" ]" "cat '$STUB/serve.out'" \
+    || fail "filed (command: $cmd, output: $o) did not wake the loop asleep on its 100 s idle timer: #$n was not picked; filed said: $out"
+  kill "$lp" 2>/dev/null; wait "$lp" 2>/dev/null; return 0
+}

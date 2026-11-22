@@ -1306,9 +1306,21 @@ control() { # [action [arguments]]
   case $a in hold) movedlocked movedhold hold "$new" "$@" ;; adopt | start) x=$(jq -r --argjson c "$c" '.held - $c.held | .[]' <<<"$new")
     [ -z "$x" ] || movedlocked movedhold hold "$new" $x ;; release) x=$(jq -r '.held as $h | $ARGS.positional[] | select(tonumber | IN($h[]))' --args "$@" <<<"$c")
     [ -z "$x" ] || movedlocked movedhold release "$new" $x ;; esac
+  # A hold, a release and the filing hooks' own actions (adopt, start: foreman/foreman.sh filing and filed) wake the
+  # running loop, so it picks from the new record now, not once its turn's timer ends.
+  case $a in hold | release | adopt | start) wakeloop ;; esac
   # A resume puts back the cards a sign-in failure blocked, once each (signinback()).
   [ "$a" != resume ] || signinback
   printf '%s\n' "$new"
+}
+# The wake of the running loop: the process loop.json (SAYS) names, while it is that process, is sent URG, which ends
+# its turn's wait at once (run() and turnwait(), lib/run.sh). A loop on an engine before this one ignores URG, as its
+# default is. With no loop running, nothing is sent.
+wakeloop() {
+  local e t
+  IFS=$'\t' read -r e t < <(jq -r '[.pid, .started] | @tsv' "$SAYS" 2>/dev/null) && [[ $e =~ ^[1-9][0-9]*$ ]] && p_alive "$e" "$t" \
+    && kill -URG "$e" 2>/dev/null
+  return 0
 }
 # Under the lock: a step whose session never began its work because its sign-in failed (nostart(): NOSTART_SIGNIN),
 # with no fallback route left, pauses the loop as `control pause` does, so no further card meets the same failure;
