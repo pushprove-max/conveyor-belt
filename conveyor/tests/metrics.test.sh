@@ -384,7 +384,9 @@ t_metricsshut() {
 # machine with no change to main behind it. The card of #1, picked after them, has waitWhy {cap: 120, guard: 60,
 # Depends on: 60} in the snapshot's metrics: 60 s a sample.
 t_metricswait() {
-  export TZ=UTC; y=$(date -u +%F); setup "[$(issue 1 "${y}T00:00:00Z"), $(issue 2 "${y}T00:00:01Z")]"
+  # #1 is P1 so it stays first in the line when it depends on #2: of equal priority, the pick takes first an issue
+  # another waits on (upnext.jq), and #2, the pick, would end the line before #1's dependency is named.
+  export TZ=UTC; y=$(date -u +%F); setup "[$(issue 1 "${y}T00:00:00Z" P1), $(issue 2 "${y}T00:00:01Z")]"
   fx_in 'sample 4 4 running "" && sample 4 4 running ""'; [ "$RC" = 0 ] || fail "the samples with every slot taken failed: $(cat "$T/$CASE/run.out")"
   fx_in 'sample 0 4 "paused by guard" ""'; [ "$RC" = 0 ] || fail "the sample with the guard pausing the loop failed: $(cat "$T/$CASE/run.out")"
   jq -c '.[0].body = "Depends on: #2"' "$STUB/issues.json" > "$STUB/issues.new" && mv "$STUB/issues.new" "$STUB/issues.json"
