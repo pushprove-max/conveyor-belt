@@ -444,8 +444,9 @@ nochange() { # <card> <issue> <worktree> <brief>
     redproof "$c" "$wt"
     [ $? = 3 ] || { ncblock "$c" "$n" "$wt" "$t. Its cases on main as it is now: $(head -n 1 "$wt.unfixed")" "$why"; return; }
     t="Not needed: the session made no change, and its cases were checked again on main. $(head -n 1 "$wt.unfixed")"
-    res=$(line "$c" "$n" closed ok "$(jq -cn --arg r "$t" --argjson e "$(ending)" --argjson w "$(waited)" '{reason: $r} + $e + $w')") && locked append "$res" \
-      || { ncblock "$c" "$n" "$wt" "$t The engine could not write the closed line." "$why"; return; }
+    # Written only while its entry holds no case that did not run (bugproof.sh redclosed()): a case that joined it then keeps it open.
+    err=''; res=$(line "$c" "$n" closed ok "$(jq -cn --arg r "$t" --argjson e "$(ending)" --argjson w "$(waited)" '{reason: $r} + $e + $w')") && err=$(locked redclosed "$c" "$res") \
+      || { t=${t/, so the card closes as already done/}; ncblock "$c" "$n" "$wt" "${t%.}. ${err:-The engine could not write the closed line.}" "$why"; return; }
     clean "$wt"; return
   fi
   r=$(lastreply "$wt.out" whole)

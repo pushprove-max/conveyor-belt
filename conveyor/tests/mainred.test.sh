@@ -216,7 +216,7 @@ t_mainredlinks() {
   land ca 2 lib/a.sh lib/a.test.sh; a=$(git -C "$r" rev-parse HEAD)
   land cc 3 lib/c.sh lib/c.test.sh; h=$(git -C "$r" rev-parse HEAD)
   git -C "$r" worktree add -q --detach "$w/fix" "$h"
-  got=$( cd "$r" && eval "$(sed -n '/^mainred() {/,/^}/p; /^brokeby() {/,/^}/p; /^landingof() {/,/^}/p; /^testlinks() {/,/^}/p; /^TESTLINK_DEPTH=/p' "$SRC/lib/mainred.sh")"
+  got=$( cd "$r" && eval "$(sed -n '/^mainred() {/,/^}/p; /^brokeby() {/,/^}/p; /^landingof() {/,/^}/p; /^testlinks() {/,/^}/p; /^linkput() {/,/^}/p; /^TESTLINK_DEPTH=/p' "$SRC/lib/mainred.sh")"
     stdb() { cat "$w/cards.jsonl"; }
     export MAINRED=$w/mainred.json
     # The loop's mainred.sh redpick() names the fix card in the entry; here the record is given it.
@@ -255,7 +255,7 @@ t_mainredjoin() {
   mkdir -p "$w/fix/.conveyor"; git -C "$w/fix" init -q
   echo '{"lib/a.sh":["tests/b.test.sh"]}' > "$w/fix/.conveyor/test-links.json"
   jq -n '{reds: [{sha: "s", card: "cfix", cases: [{case: "b", links: {"lib/a.sh": ["tests/b.test.sh"]}}, {case: "d", links: {"lib/d.sh": ["tests/d.test.sh"]}}]}]}' > "$w/mainred.json"
-  got=$( eval "$(sed -n '/^redbrief() {/,/^}/p' "$SRC/lib/card.sh"; sed -n '/^testlinks() {/,/^}/p' "$SRC/lib/mainred.sh")"
+  got=$( eval "$(sed -n '/^redbrief() {/,/^}/p' "$SRC/lib/card.sh"; sed -n '/^testlinks() {/,/^}/p; /^linkput() {/,/^}/p' "$SRC/lib/mainred.sh")"
     # shellcheck disable=SC2034 # wt is read by redbrief(), run by the eval
     MAINRED=$w/mainred.json wt=$w/fix issue='{"title":"Main is red: b"}' sprompt='brief b'
     redissue() { echo '{"title":"Main is red: b, d"}'; }; issuepart() { echo "brief ${1:23:-2}"; }
@@ -275,7 +275,7 @@ t_mainredlinksonlylink() {
   echo '{}' > "$w/fix/.conveyor/test-links.json"; git -C "$w/fix" add -A; git -C "$w/fix" commit -qm links
   echo keep > "$w/out/file"; echo keep > "$w/out/.conveyor/test-links.json"
   jq -n '{reds: [{sha: "s", card: "cfix", cases: [{case: "b", links: {"lib/a.sh": ["tests/b.test.sh"]}}]}]}' > "$w/mainred.json"
-  got=$( eval "$(sed -n '/^testlinks() {/,/^}/p; /^linksonly() {/,/^}/p' "$SRC/lib/mainred.sh")"
+  got=$( eval "$(sed -n '/^testlinks() {/,/^}/p; /^linkput() {/,/^}/p; /^linksonly() {/,/^}/p' "$SRC/lib/mainred.sh")"
     MAINRED=$w/mainred.json
     testlinks cfix "$w/fix" && ln -sf "$w/out/file" "$w/fix/.conveyor/test-links.json" || exit 1
     linksonly cfix "$w/fix" && echo only
@@ -283,6 +283,80 @@ t_mainredlinksonlylink() {
     linksonly cfix "$w/fix" && echo dironly; : ) || fail "the fixture failed: $got"
   [ "$got" = only ] && [ "$(cat "$w/out/file")" = keep ] && [ "$(cat "$w/out/.conveyor/test-links.json")" = keep ] \
     || fail "linksonly() wrote through a symlink the session left, or took a symlinked .conveyor: $got: $(cat "$w/out/file" "$w/out/.conveyor/test-links.json")"
+}
+# A main-red fix card's worktree $T/$CASE/fix, main's .conveyor/test-links.json in it holding <main's links>, its entry
+# (cfix, $T/$CASE/mainred.json) a case b linking lib/a.sh to tests/b.test.sh, and a file $T/$CASE/out/file outside it.
+linkfix() { # <main's links>
+  local w=$T/$CASE
+  mkdir -p "$w/fix/.conveyor" "$w/out" && git -C "$w/fix" init -q && echo keep > "$w/out/file" || fail "the fixture could not be made"
+  printf '%s\n' "$1" > "$w/fix/.conveyor/test-links.json"; git -C "$w/fix" add -A; git -C "$w/fix" commit -qm links || fail "main's links could not be committed"
+  jq -n '{reds: [{sha: "s", card: "cfix", cases: [{case: "b", links: {"lib/a.sh": ["tests/b.test.sh"]}}]}]}' > "$w/mainred.json"
+}
+linkfns() { sed -n '/^testlinks() {/,/^}/p; /^linkput() {/,/^}/p; /^linksonly() {/,/^}/p' "$SRC/lib/mainred.sh"; }
+# R133. Bug it catches: testlinks() wrote the links to .conveyor/test-links.json.new with a plain open, after
+# linksonly() unlinked it, so a lingering session process that planted a symlink there in between made the engine
+# write through it to a file outside the worktree. A testlinks() that plants that link, then runs the real one: the
+# outside file keeps its text, and the staged links still count as the card's only change.
+t_mainredlinksnew() {
+  local w=$T/$CASE got
+  linkfix '{}'
+  got=$( eval "$(linkfns)"; MAINRED=$w/mainred.json
+    testlinks cfix "$w/fix" || exit 1
+    eval "real$(declare -f testlinks)"
+    testlinks() { ln -s "$w/out/file" "$2/.conveyor/test-links.json.new"; realtestlinks "$@"; }
+    linksonly cfix "$w/fix" && echo only; : ) || fail "the fixture failed: $got"
+  [ "$got" = only ] && [ "$(cat "$w/out/file")" = keep ] \
+    || fail "linksonly() with a symlink planted at test-links.json.new after its unlink wrote through it, or did not take the links alone: $got: $(cat "$w/out/file")"
+}
+# R132. Bug it catches: linksonly() took the change as links-only only when the links staged again came out the same
+# blob, so a case that joined the fix card's entry during its build (adding links of its own) made a session with no
+# change of its own fail the check, and bugproof() ran its cases on the old commit with only the links staged and
+# blocked it, before nochange() could check main as it is now. Both bugproof() (redproof() stubbed to say it ran)
+# and emptychange() take that change as none, the worktree reset to its commit. A staged link the entry lacks, a
+# link of main's copy taken out, or a link the engine staged before the session taken out (the bug it catches: only
+# main's copy and the entry were compared, so emptychange() reset that edit) is the session's own change:
+# emptychange() keeps it, and the staged file stays.
+t_mainredlinksadded() {
+  local w=$T/$CASE got
+  linkfix '{"lib/z.sh":["tests/z.test.sh"]}'
+  # shellcheck disable=SC2034 # CARDS and UNFIXED are read by the bugproof() eval loads
+  got=$( eval "$(linkfns; sed -n '/^emptychange() {/,/^}/p' "$SRC/lib/card.sh"; sed -n '/^bugproof() {/,/^}/p' "$SRC/lib/bugproof.sh")"
+    MAINRED=$w/mainred.json CARDS=$w UNFIXED=''; redproof() { echo "redproof ran"; return 2; }
+    testlinks cfix "$w/fix" || exit 1
+    jq '.reds[0].cases += [{case: "d", links: {"lib/d.sh": ["tests/d.test.sh"]}}]' "$MAINRED" > "$w/red.new" && mv "$w/red.new" "$MAINRED" || exit 1
+    bugproof cfix "$w/fix" '{}'; echo "bugproof $?"
+    emptychange cfix 0 "$w/fix" ""; echo "empty $? [$(git -C "$w/fix" status --porcelain)]"
+    # The last staged file takes out the link of d, which the engine staged with b's before it (bugproof()'s testlinks(),
+    # kept in STAGEDLINKS): the entry and main's copy alone do not show that link was there, so the removal is the session's.
+    for l in '{"lib/a.sh":["tests/b.test.sh","tests/own.test.sh"],"lib/z.sh":["tests/z.test.sh"]}' '{"lib/a.sh":["tests/b.test.sh"]}' \
+      '{"lib/a.sh":["tests/b.test.sh"],"lib/z.sh":["tests/z.test.sh"]}'; do
+      printf '%s\n' "$l" > "$w/fix/.conveyor/test-links.json"; git -C "$w/fix" add -A
+      emptychange cfix 0 "$w/fix" ""; echo "empty $? $(git -C "$w/fix" show :.conveyor/test-links.json | jq -c .)"
+    done )
+  [ "$got" = $'bugproof 0\nempty 0 []\nempty 1 {"lib/a.sh":["tests/b.test.sh","tests/own.test.sh"],"lib/z.sh":["tests/z.test.sh"]}\nempty 1 {"lib/a.sh":["tests/b.test.sh"]}\nempty 1 {"lib/a.sh":["tests/b.test.sh"],"lib/z.sh":["tests/z.test.sh"]}' ] \
+    || fail "a links-only change after a case joined the entry was not taken as no change, or a session's own link change was: $got"
+}
+# R132. Bug it catches: card.sh redbrief() before the review (testlinks()) staged every link of the entry again, so a
+# session that took out a link the engine staged had that edit put back before emptychange() read it, which then reset
+# it as links only. Entry cases b and d stage both links; the session takes d's out: testlinks() leaves it out and
+# emptychange() keeps the edit. The session puts main's copy back: testlinks() stages nothing, so the worktree is
+# main's. A case e joins after: its link alone is staged, not d's again (issue 615 still holds).
+t_mainredlinksout() {
+  local w=$T/$CASE got
+  linkfix '{}'
+  jq '.reds[0].cases += [{case: "d", links: {"lib/d.sh": ["tests/d.test.sh"]}}]' "$w/mainred.json" > "$w/red.new" && mv "$w/red.new" "$w/mainred.json" \
+    || fail "the fixture could not be made"
+  got=$( eval "$(linkfns; sed -n '/^emptychange() {/,/^}/p' "$SRC/lib/card.sh")"; MAINRED=$w/mainred.json
+    links() { git -C "$w/fix" show :.conveyor/test-links.json | jq -c .; }
+    testlinks cfix "$w/fix" || exit 1
+    echo '{"lib/a.sh":["tests/b.test.sh"]}' > "$w/fix/.conveyor/test-links.json"
+    testlinks cfix "$w/fix"; emptychange cfix 0 "$w/fix" ""; echo "out d: empty $? $(links)"
+    echo '{}' > "$w/fix/.conveyor/test-links.json"
+    testlinks cfix "$w/fix"; echo "main's: $(jq -c . "$w/fix/.conveyor/test-links.json")"
+    jq '.reds[0].cases += [{case: "e", links: {"lib/e.sh": ["tests/e.test.sh"]}}]' "$MAINRED" > "$w/red.new" && mv "$w/red.new" "$MAINRED" || exit 1
+    testlinks cfix "$w/fix"; echo "e joins: $(links)" )
+  [ "$got" = $'out d: empty 1 {"lib/a.sh":["tests/b.test.sh"]}\nmain\'s: {}\ne joins: {"lib/e.sh":["tests/e.test.sh"]}' ] \
+    || fail "testlinks() put back a link the session took out, or emptychange() did not keep that edit, or a joined case's link was not staged: $got"
 }
 # Issue 604. Bug it catches: a card that ran only some cases of a test file, named under the runner (`TESTRUN case`
 # lines, no why or times of the file, no wholeSuite), counted as not having run it, so the search for the landing that

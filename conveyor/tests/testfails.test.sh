@@ -97,6 +97,41 @@ EOF
   f=$(logfails 1 | jq -c '.files[] | select(.file == "t.py") | [.cases, .at]') || fail "the failures could not be read"
   [ "$f" = '[[],"t.py:3: assert x"]' ] || fail "the failed file's place is not the helper's assertion: $f ($(cat "$T/$CASE/wt.test"))"
 }
+# R141. Bug it catches: Conveyor's own runner (lib/filerun.sh) ran plain `pytest <file>`, whose default traceback ends
+# a failure with `tests/test_example.py:4: AssertionError`, a path from the package's folder that no frame pattern
+# reads, so the failure had no place. pytest is not installed here: its stand-in on PATH runs the file's test_
+# functions and prints a failure as pytest does, with --tb=native Python's own traceback, else pytest's default form.
+# The file runner runs a failing file: its failure's place is the assertion's line.
+t_testfailspytest() {
+  mkdir -p "$T/$CASE/wt/tests" "$T/$CASE/bin" && echo '[project]' > "$T/$CASE/wt/pyproject.toml" \
+    && printf '%s\n' 'import os' '' 'def test_example():' '    assert 1 + 1 == 3' > "$T/$CASE/wt/tests/test_example.py" || fail "the stub test file could not be made"
+  cat > "$T/$CASE/bin/pytest" <<'EOF'
+#!/usr/bin/env python3
+import os, runpy, sys, traceback
+f, rc = sys.argv[-1], 0
+for n, fn in runpy.run_path(os.path.abspath(f)).items():
+    if not n.startswith("test_"):
+        continue
+    try:
+        fn()
+    except AssertionError:
+        rc = 1
+        print("_" * 20, n, "_" * 20)
+        if "--tb=native" in sys.argv[1:-1]:
+            traceback.print_exc(file=sys.stdout)
+        else:
+            print("E       AssertionError")
+            print(f"{f}:{traceback.extract_tb(sys.exc_info()[2])[-1].lineno}: AssertionError")
+sys.exit(rc)
+EOF
+  chmod +x "$T/$CASE/bin/pytest" || fail "the pytest stand-in could not be made"
+  cat > "$T/$CASE/cmd" <<EOF
+cd wt && echo "== tests/test_example.py" | tee -a "\$CONVEYOR_TEST_LOG/a.log"
+PATH=$(printf %q "$T/$CASE/bin"):\$PATH bash $(printf %q "$SRC/lib/filerun.sh") tests/test_example.py; echo "-- FAIL tests/test_example.py" >> "\$CONVEYOR_TEST_LOG/a.log"; exit 1
+EOF
+  f=$(logfails 1 | jq -r '.files[] | select(.file == "tests/test_example.py") | .at') || fail "the failures could not be read"
+  [ "$f" = 'tests/test_example.py:4: assert 1 + 1 == 3' ] || fail "the failed pytest file's place is not its assertion's line: $f ($(cat "$T/$CASE/wt.test"))"
+}
 # #1084, E1 of its review. Bug it catches: the text of a failure's place was read through a symbolic link in the
 # worktree, so a link to a file outside it (committed, or made by a test) put that file's line into a report that may
 # go to a GitHub issue. A frame names a link to a file outside the worktree, another a file under a linked folder: each

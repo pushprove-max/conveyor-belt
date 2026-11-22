@@ -210,6 +210,38 @@ t_mainrednochangered() {
     || fail "the fix card whose cases still fail on main was not blocked naming the run, or went to review: $out: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
 }
 
+# R86: nochange() alone on main-fix card cfix, its session making no change, its cases passing on main; while they run
+# (redrun(), wrapped), mainred() adds the case `b.test: two` to its entry. Bug it catches: redproof() read the entry's
+# cases once and the closed line was written anyway, so the added case, never run, was held red by the entry no more
+# (redlisted()). The card is blocked naming the added case, not closed, and its entry still holds main red.
+t_mainredjoinrun() {
+  redsetup $'one\nc.test'
+  local s w=$T/$CASE/cards/cfix out
+  s=$(git -C "$R" rev-parse HEAD)
+  jq -c '.reds[0].card = "cfix"' "$ST/mainred.json" > "$STUB/red.new" && mv "$STUB/red.new" "$ST/mainred.json"
+  git -C "$R" worktree add -q --detach "$w" HEAD || fail "the fix card's worktree could not be made"
+  out=$(eng 'eval "real$(declare -f redrun)"; redrun() { realredrun "$@"; mainred c9 "b.test: two" b.test '"$s"' > /dev/null 2>&1; }
+    nochange cfix 0 "$CONVEYOR_CARDS/cfix" brief; redopen cfix && echo open' 2>&1)
+  # The blocked reason quotes the run's result without its "so the card closes as already done": the card stayed open.
+  [[ $(st 'select(.card == "cfix" and .step == "blocked") | .reason') == *'without the change. The card was not closed: a case joined its entry in the main-red record while its cases ran, and did not run: `b.test: two`.'* ]] \
+    && [ -z "$(st 'select(.card == "cfix" and .step == "closed")')" ] && [[ $out == *open* ]] \
+    || fail "the fix card closed as already done though a case joined its entry while its cases ran, or its blocked reason said it closes: $out: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
+}
+
+# R86, card.sh greenclose() on fix card cfix whose check before the build (redgreen()) found its cases passing, while
+# redclosed() refuses the closed line (stubbed: a case joined). Bug it catches: the blocked reason quoted the result
+# "..., so the card closes as already done." and then said the card was not closed. It drops that clause.
+t_mainredgreenjoin() {
+  setup "[$(issue 7 2026-01-01)]"
+  local w=$T/$CASE/cards/cfix
+  mkdir -p "$w" && echo 'Main is no longer red for `c.test`: they pass on main'"'"'s code at s1 in each of 3 runs, so the card closes as already done.' > "$w.unfixed" \
+    || fail "the fixture could not be made"
+  eng 'redclosed() { echo "The card was not closed: a case joined."; return 1; }; greenclose cfix 0 "$CONVEYOR_CARDS/cfix"' > /dev/null 2>&1
+  # block() adds a note after it: the fixture's card folder is no git worktree, so no patch is kept.
+  [[ $(st 'select(.card == "cfix" and .step == "blocked") | .reason') == 'build: Main is no longer red for `c.test`: they pass on main'"'"'s code at s1 in each of 3 runs. The card was not closed: a case joined.'* ]] \
+    || fail "greenclose() given a refused closed line did not block cfix with the result less its closing clause: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
+}
+
 # #1275: a pack that sets no test.fileCommand, its test command `PACK_LOADER=1 node --test` given a file as test.list
 # <form> says. Main's p.test.js loads only with PACK_LOADER set (as a TypeScript file loads only through its project's
 # loader): it passes under the pack's command, and fails to load under Conveyor's own runner (lib/filerun.sh: plain
@@ -415,6 +447,19 @@ t_mainredmachinefixed() {
   mrv c8 '{"files":[{"file":"a.test","cases":[{"name":"one","line":1}]}]}'
   [ "$(jq -c .verdicts "$STUB/v.c8")" = '[{"case":"a.test: one","verdict":"main"}]' ] \
     || fail "card c8, failing a.test: one after the machine was repaired, did not get main: $(cat "$STUB/v.c8" "$STUB/v.c8.err")"
+}
+# R98. Bug it catches: the results of a run on main were kept by main's commit alone, so once an install repaired the
+# dependency folders (a node_modules that lacked a package made a file fail there), a card at the same commit read
+# the old failure, and its own failure was blamed on main. The pack links node_modules from the main checkout; c7's
+# a.test: one runs on main, the folder is made again (as npm ci does), and c8's a.test runs on main again.
+t_mainreddepsnew() {
+  mrshared; tune '.linkFromMain = ["node_modules"]'
+  echo /node_modules >> "$R/.git/info/exclude" && mkdir "$R/node_modules" || fail "main's dependency folder could not be made"
+  mrv c7 '{"files":[{"file":"a.test","cases":[{"name":"one","line":1}]}]}'
+  rm -rf "$R/node_modules" && mkdir "$R/node_modules" || fail "main's dependency folder could not be made again"
+  mrv c8 '{"files":[{"file":"a.test","cases":[{"name":"one","line":1}]}]}'
+  [ "$(tr '\n' ' ' < "$STUB/mainruns")" = 'a.test a.test ' ] \
+    || fail "after main's node_modules was made again at the same commit, c8 read c7's run of a.test on main and did not run it there again: $(cat "$STUB/mainruns" "$STUB/v.c8.err")"
 }
 # Bug it catches (E1): a run on main of an older commit, kept as it ended, replaced the results of main's commit as it
 # is now. mainkeep() of a run at a commit that is no longer main's leaves the kept results as they were.

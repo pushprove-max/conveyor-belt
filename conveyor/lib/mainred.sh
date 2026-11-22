@@ -83,9 +83,10 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
     + if $b == "" then {} else {brokeMain: $b} end'
 }
 # The run on main of <units> ([{file, case}]: verdicts(), mainwait()), once for each commit of main and file however
-# many cards ask (issue 1313). $MAINPROBE keeps the results at one commit of main, {sha, hits, files: {<file>: {ctl,
-# res}}} (res: the file's entry in testfails() of the run that ran it, {file, cases: []} when it failed there naming
-# no case; null when it has none, as the file passed there),
+# many cards ask (issue 1313). $MAINPROBE keeps the results at one commit of main and state of its dependency folders,
+# {sha, deps, hits, files: {<file>: {ctl, res}}} (deps: depkey(), so a run after the folders change, as when an
+# install repairs them, never reads a result of the run before it: R98; res: the file's entry in testfails() of the
+# run that ran it, {file, cases: []} when it failed there naming no case; null when it has none, as the file passed there),
 # and a caller takes the result of each of its files that a run beside every control it would take ran, and runs the
 # rest. A result is kept only from a run whose controls all passed, and not of a file that cachehits() names or that
 # ran out of time, so a verdict of machine is never read from another card's run: the machine may have changed since.
@@ -101,7 +102,7 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
 # TEST_FREE are kept (testrec()).
 MAINPROBE=${STATE%/*}/mainprobe.json
 mainprobe() { # <name> <units, json> <units no control is taken from, json> <other files, json> <a commit with the units' files>
-  local mwt=$CARDS/mainrun/$1 out='' rc='' s=0 lim k l f lk=() o='' got='{}' ur gone=() p=${ctl:-[]} w=${TEST_WAIT-} r=${TEST_RUN-} fr=${TEST_FREE-}
+  local mwt=$CARDS/mainrun/$1 out='' rc='' s=0 lim k l f lk=() o='' got='{}' ur gone=() p=${ctl:-[]} w=${TEST_WAIT-} r=${TEST_RUN-} fr=${TEST_FREE-} dk
   local pick='$h[0] as $h | $u[0] as $u | $c[0] as $c | [$c | arrays[] | strings | select(($h == [] or IN($h[])) and (IN($u[].file) | not))] | unique'
   mf=null; m=null; hits='[]'; cf='[]'
   sha=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null) \
@@ -117,7 +118,8 @@ mainprobe() { # <name> <units, json> <units no control is taken from, json> <oth
     { exec {l}>>"$MAINPROBE.locks/$k"; } 2>/dev/null || continue
     if flock "$l"; then lk+=("$l"); else exec {l}>&-; fi
   done < <(jq -r '[.[].file] | unique[]' <<<"$ur" | while IFS= read -r k; do printf '%s' "$k" | cksum; done | cut -d' ' -f1 | sort -un)
-  o=$(jq -ce --arg s "$sha" 'objects | select(.sha == $s)' "$MAINPROBE" 2>/dev/null) \
+  dk=$(depkey)
+  o=$(jq -ce --arg s "$sha" --arg d "$dk" 'objects | select(.sha == $s and .deps == $d)' "$MAINPROBE" 2>/dev/null) \
     && hits=$(jq -c '.hits' <<<"$o") && ctl=$(jq -cn --slurpfile h <(printf '%s' "$hits") --slurpfile u <(printf '%s' "$3") --slurpfile c <(printf '%s' "$p") "$pick") \
     && got=$(jq -c --slurpfile u <(printf '%s' "$ur") --slurpfile c <(printf '%s' "$ctl") '.files as $fs | [$u[0][].file | select($fs[.] and ($c[0] - $fs[.].ctl == []))] | unique | map({key: ., value: $fs[.].res}) | from_entries' <<<"$o") \
     && f=$(jq -c --slurpfile g <(printf '%s' "$got") '[.[] | select(.file | IN($g[0] | keys[]) | not)]' <<<"$ur") && ur=$f || { got='{}'; hits='[]'; }
@@ -155,19 +157,28 @@ mainprobe() { # <name> <units, json> <units no control is taken from, json> <oth
   TEST_WAIT=$w; TEST_RUN=$r; TEST_FREE=$fr
   [ -z "$rc" ] || m=$(jq -cn --arg sha "$sha" --argjson s "$s" --argjson rc "$rc" '{sha: $sha, sec: $s, exit: $rc}')
 }
-# Keeps in $MAINPROBE, under a lock of its own, the results of mainprobe()'s run of <units> (its sha, hits, ctl, mf):
-# those of a file cachehits() names or that ran out of time are not kept. Results at main's kept commit are added to
-# the kept ones; those of another commit replace them only while it is main's commit.
+# Keeps in $MAINPROBE, under a lock of its own, the results of mainprobe()'s run of <units> (its sha, dk, hits, ctl,
+# mf): those of a file cachehits() names or that ran out of time are not kept. Results at main's kept commit and
+# dependency state are added to the kept ones; those of another commit or state replace them only while it is main's commit.
 mainkeep() { # <name> <units, json>
   local k
   { exec {k}>>"$MAINPROBE.lock"; } 2>/dev/null && flock "$k" || { echo "conveyor: card $1: its run on main could not be kept for the other cards" >&2; return 1; }
-  jq -cn --slurpfile o <(jq -ce objects "$MAINPROBE" 2>/dev/null) --arg s "$sha" --arg now "$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)" \
+  jq -cn --slurpfile o <(jq -ce objects "$MAINPROBE" 2>/dev/null) --arg s "$sha" --arg d "${dk-}" --arg now "$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)" \
     --slurpfile u <(printf '%s' "$2") --slurpfile h <(printf '%s' "$hits") --slurpfile c <(printf '%s' "$ctl") --slurpfile m <(printf '%s' "$mf") \
     '($o[0] // {}) as $o | $h[0] as $h | $m[0] as $m
       | ([$u[0][].file] | unique - $h - [$m.timeout.file // empty] | map({key: ., value: {ctl: $c[0], res: (. as $f | first($m.files[]? | select(.file == $f)) // null)}}) | from_entries) as $new
-      | if $o.sha == $s then $o | .files += $new elif $s == $now then {sha: $s, hits: $h, files: $new} else empty end' > "$MAINPROBE.new" \
+      | if $o.sha == $s and $o.deps == $d then $o | .files += $new elif $s == $now then {sha: $s, deps: $d, hits: $h, files: $new} else empty end' > "$MAINPROBE.new" \
     && { [ ! -s "$MAINPROBE.new" ] || mv -f "$MAINPROBE.new" "$MAINPROBE"; } || echo "conveyor: card $1: its run on main could not be kept for the other cards" >&2
   rm -f "$MAINPROBE.new"; exec {k}>&-
+}
+# The state of the dependency folders a run on main is given (deps(), lib/push.sh: each path of the pack's
+# linkFromMain, linked from the main checkout), for mainprobe(): of each, p_filekey() of the folder itself in the main
+# checkout (its times to the nanosecond and inode), a line each, or `none <path>` when it is not there. An install
+# that makes the folder again (npm ci), or adds or takes out a package in it, changes the state.
+depkey() {
+  local ps p
+  packget linkFromMain ps 2>/dev/null || ps='[]'
+  while IFS= read -r -d '' p; do p_filekey "$MAIN/$p" || echo "none $p"; done < <(jq -j '.[]? | strings | "\(.)\u0000"' <<<"$ps" 2>/dev/null)
 }
 # The machine hold (issue 221): a case that failed on main as on the card, though its inputs did not change since it
 # last passed (testlist.sh cachehits()), or while every control (verdicts()) that ran beside it on the same slot failed, is the
@@ -264,9 +275,10 @@ repairholder() {
 # (cleanrun()). The control runs are given none of the card's test files (CONVEYOR_TEST_FILES empty, as on main's run,
 # verdicts()): a pack's test.fileCommand that runs each file that list names would fail the control's own run on a
 # file the change adds, which this commit lacks, and that failure be taken for the control's. Sets REPAIRED: what the runs showed.
+# A pass writes <worktree>.uncovered from the clean run of the card's changed tests (testlist.sh uncovered()).
 # shellcheck disable=SC2034 # REPAIRED is read by card() (lib/card.sh)
 repairproof() { # <card> <worktree>
-  local mwt=$CARDS/mainrun/$1.repair cj cs sha='' out cmd rc=1 brc=0 LISTNONE='' TEST_GIVEN='' RUNOFF='' TEST_CASES='' TEST_FILES=''
+  local mwt=$CARDS/mainrun/$1.repair cj cs sha='' out cmd rc=1 brc=0 t0 LISTNONE='' TEST_GIVEN='' RUNOFF='' TEST_CASES='' TEST_FILES=''
   cj=$(jq -ce 'objects | .controls | select(length > 0)' "$MACHINEHOLD" 2>/dev/null) || { REPAIRED="the machine hold names no file to run"; return 1; }
   cs=$(jq -r 'join(", ")' <<<"$cj")
   if ! packget test.fileCommand cmd 2>/dev/null; then REPAIRED="the pack's test.fileCommand could not be read"
@@ -288,11 +300,14 @@ repairproof() { # <card> <worktree>
       REPAIRED="the run with the change passed, but its logs do not say that $cs passed in it"
     # A change linked to no test file runs none (listcmd()), and one whose list cannot be made stops with why
     # (<worktree>.stop).
-    elif ! { rm -f "$2.stop"; listcmd "$2" 2>"$2.test" &&{ [ -n "$LISTNONE" ] || cleanrun "$2" "$LISTCMD"; }; }; then
+    elif ! { rm -f "$2.stop"; t0=$(date +%s); listcmd "$2" 2>"$2.test" &&{ [ -n "$LISTNONE" ] || cleanrun "$2" "$LISTCMD"; }; }; then
       if [ -s "$2.stop" ]; then REPAIRED="$cs failed on main's code at ${sha:0:12} without the change and passed with it, but the card's changed tests did not run: $(<"$2.stop")"
       else REPAIRED="$cs failed on main's code at ${sha:0:12} without the change and passed with it, but the card's changed tests failed in a clean harness"; fi
     else
       REPAIRED="repair lane: $cs failed on main's code at ${sha:0:12} without the change and passed with it, and the card's changed tests passed, each in a clean harness"; rc=0
+      # The card's test line (card.sh, testrec()) gives the coverage of this clean run, read from the reports written
+      # since it began (testlist.sh uncovered()), not that of the card's earlier run the machine held: R137.
+      uncovered "$2" "$t0"
     fi
   else
     REPAIRED="$cs could not be run on main's code at ${sha:-a commit that could not be read}: ${out:0:400}"
@@ -445,27 +460,53 @@ landingof() { # <sha> <card> <issue> <test file>
 }
 # A main-red fix card (card()) stages the links its entry's cases found (mainred(): links) into
 # .conveyor/test-links.json, {"<changed file>": ["<test file>", ...]}, beside the links already there, so they land
-# with its fix and every later card's test selection (.conveyor/test-changed.sh) reads them.
+# with its fix and every later card's test selection (.conveyor/test-changed.sh) reads them. STAGEDLINKS[<worktree>] keeps,
+# in the engine's own process (no file a session could replace), the links it staged there: one staged before is not
+# staged again (card.sh redbrief() calls this before each step), so a session's edit that takes it out stays, and
+# linksonly() reads that edit as the session's own.
 testlinks() { # <card> <worktree>
-  local new f=$2/.conveyor/test-links.json old
-  new=$(jq -c --arg c "$1" 'reduce (.reds[]? | select(.card == $c) | .cases[] | .links // {} | to_entries[]) as $e ({}; .[$e.key] += $e.value)' "$MAINRED" 2>/dev/null) || return 0
-  [ "$new" != '{}' ] || return 0
+  local add new f=$2/.conveyor/test-links.json old d
+  declare -gA STAGEDLINKS; d=${STAGEDLINKS[$2]:-null}
+  add=$(jq -c --arg c "$1" --argjson d "$d" 'reduce (.reds[]? | select(.card == $c) | .cases[] | .links // {} | to_entries[]) as $e ({}; .[$e.key] += $e.value)
+    | with_entries(.value = (.value - ($d[.key] // []) | unique)) | with_entries(select(.value != []))' "$MAINRED" 2>/dev/null) || return 0
+  [ "$add" != '{}' ] || return 0
   old=$(jq -ce objects "$f" 2>/dev/null) || old='{}'
-  mkdir -p "${f%/*}" && jq -n --argjson a "$old" --argjson b "$new" 'reduce ($b | to_entries[]) as $e ($a; .[$e.key] = ((.[$e.key] // []) + $e.value | unique))' > "$f.new" \
-    && mv -f "$f.new" "$f" && git -C "$2" add -- .conveyor/test-links.json
+  mkdir -p "${f%/*}" && new=$(jq -n --argjson a "$old" --argjson b "$add" 'reduce ($b | to_entries[]) as $e ($a; .[$e.key] = ((.[$e.key] // []) + $e.value | unique))') \
+    && printf '%s\n' "$new" | linkput "$2" && git -C "$2" add -- .conveyor/test-links.json \
+    && STAGEDLINKS[$2]=$(jq -cn --argjson a "$d" --argjson b "$add" 'reduce ($b | to_entries[]) as $e ($a // {}; .[$e.key] = ((.[$e.key] // []) + $e.value | unique))')
+}
+# Writes stdin as <worktree>'s .conveyor/test-links.json: first into a new file beside the worktree, outside it
+# (mktemp: made only where no file is, under a name no process knows before), then renamed into place. A rename
+# replaces a symlink or hard link a lingering session process put at the file, and never writes through it to a file
+# outside the worktree (R133).
+linkput() { # <worktree>
+  local t
+  t=$(mktemp "$1.links.XXXXXX") || return 1
+  cat > "$t" && mv -f "$t" "$1/.conveyor/test-links.json" || { rm -f "$t"; return 1; }
 }
 # Whether the staged change of main-red fix card <card>'s worktree is only the links testlinks() stages (issue 323):
-# its session made no change of its own. The links are staged again from main's copy of the file and must come out
-# the same; when they do not, the staged file is put back as it was. The session wrote the worktree: a .conveyor that
-# is a symlink is not taken, and the file and testlinks()'s .new are unlinked before each write, so no write follows a
-# symlink or hard link the session left there to a file outside the worktree.
+# its session made no change of its own. The links are staged again from main's copy of the file, with the links its
+# entry holds now; the staged file must hold every link of main's copy and every link the engine staged before
+# (testlinks(): STAGEDLINKS; with none, the engine staged no links and the change is the session's), and no link the new
+# one lacks. So a case added to its entry during the build, whose links the new file has and the staged one not, still
+# leaves the change links-only (R132), and a link the session took out does not. When the check fails, the staged
+# file and STAGEDLINKS are put back as they were. The session wrote the worktree: a .conveyor that is a symlink is not
+# taken, and each write is renamed into place (linkput()), so no write follows a symlink or hard link the session left
+# there to a file outside the worktree.
 linksonly() { # <card> <worktree>
-  local f=.conveyor/test-links.json b
-  [ "$(git -C "$2" diff --cached --name-only --no-renames HEAD 2>/dev/null)" = "$f" ] && [ ! -L "$2/.conveyor" ] && [ -d "$2/.conveyor" ] \
-    && b=$(git -C "$2" rev-parse -q --verify ":$f") && rm -f "$2/$f" "$2/$f.new" || return 1
-  { git -C "$2" show "HEAD:$f" > "$2/$f" 2>/dev/null || rm -f "$2/$f"; } && git -C "$2" add -A -- "$f" && testlinks "$1" "$2" \
-    && [ "$(git -C "$2" rev-parse -q --verify ":$f")" = "$b" ] && return 0
-  rm -f "$2/$f" "$2/$f.new"; git -C "$2" cat-file blob "$b" > "$2/$f" && git -C "$2" add -- "$f"
+  local f=.conveyor/test-links.json b h e
+  declare -gA STAGEDLINKS; e=${STAGEDLINKS[$2]-}
+  [ -n "$e" ] && [ "$(git -C "$2" diff --cached --name-only --no-renames HEAD 2>/dev/null)" = "$f" ] && [ ! -L "$2/.conveyor" ] && [ -d "$2/.conveyor" ] \
+    && b=$(git -C "$2" rev-parse -q --verify ":$f") || return 1
+  unset 'STAGEDLINKS[$2]' # so testlinks() stages each link of the entry again
+  if h=$(git -C "$2" show "HEAD:$f" 2>/dev/null); then printf '%s\n' "$h" | linkput "$2"; else h='{}'; rm -f "$2/$f"; fi \
+    && git -C "$2" add -A -- "$f" && testlinks "$1" "$2" \
+    && jq -en --slurpfile s <(git -C "$2" cat-file blob "$b") --slurpfile n <(git -C "$2" cat-file blob ":$f" 2>/dev/null || echo '{}') \
+      --argjson e "$e" --argjson h "$h" '
+      def within($a; $b): ($a | type) == "object" and all($a | to_entries[]; (.value | type) == "array" and .value - ($b[.key] // []) == []);
+      $s[0] as $s | within($h; $s) and within($e; $s) and within($s; $n[0])' >/dev/null 2>&1 && return 0
+  git -C "$2" cat-file blob "$b" | linkput "$2" && git -C "$2" add -- "$f"
+  STAGEDLINKS[$2]=$e
   return 1
 }
 # Whether a main-red fix card is open: not picked yet ("") or given back by `retry` (no line of it in the card

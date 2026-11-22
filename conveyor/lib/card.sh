@@ -105,8 +105,8 @@ codediff() { # <old engine folder> <new engine folder>
 # A main-red fix card (issue 0, no branch): a case found failing on its commit while it runs (mainred.sh mainred()) joins its
 # brief. card() calls this right before each session, review, judge, settle() and land, as a case can come at any time
 # (during a review too, with the fix session straight after it). Sets card()'s issue and sprompt. A case that joined
-# brings its links too (issue 615): they are staged in card()'s worktree (mainred.sh testlinks()) to land with the fix, as the
-# links of the cases it started with were; staged again on each call, so one that could not be is tried again.
+# brings its links too (issue 615), staged in card()'s worktree (mainred.sh testlinks()) to land with the fix: each call stages
+# the links not staged before, so one that could not be is tried again, and one a session took out is not put back.
 redbrief() { # <card> <issue> <branch>
   local red
   [ "$2" = 0 ] && [ -z "$3" ] || return 0
@@ -414,11 +414,11 @@ keptrep() {
     || rep=$(repeats "$wt")
 }
 # Ends a main-red fix card as closed, its reason the first line of <worktree>.unfixed (bugproof.sh redgreen(), redproof()): main is no
-# longer red for its cases. Its change is dropped: the worktree goes. A closed line that cannot be written blocks the card.
+# longer red for its cases. Its change is dropped: the worktree goes. A closed line that cannot be written (bugproof.sh redclosed(): a case joined its entry as they ran, too) blocks the card, its reason without the result's "so the card closes" clause.
 greenclose() { # <card> <issue number> <worktree>
-  local t out
-  t=$(head -n 1 "$3.unfixed") && out=$(line "$1" "$2" closed ok "$(jq -cn --arg r "$t" --argjson e "$(ending)" --argjson w "$(waited)" '{reason: $r} + $e + $w')") && locked append "$out" \
-    || { block "$1" "$2" "$3" "build: $(head -n 1 "$3.unfixed" 2>/dev/null) The engine could not write the closed line"; return; }
+  local t out err=''
+  t=$(head -n 1 "$3.unfixed") && out=$(line "$1" "$2" closed ok "$(jq -cn --arg r "$t" --argjson e "$(ending)" --argjson w "$(waited)" '{reason: $r} + $e + $w')") && err=$(locked redclosed "$1" "$out") \
+    || { t=$(head -n 1 "$3.unfixed" 2>/dev/null); t=${t/, so the card closes as already done/}; block "$1" "$2" "$3" "build: ${t%.}. ${err:-The engine could not write the closed line.}"; return; }
   clean "$3"
 }
 # The build, then the checks a bug card's change must pass before its review (or, on a retry with no build, those of

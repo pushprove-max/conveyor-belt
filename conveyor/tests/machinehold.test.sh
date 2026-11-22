@@ -273,6 +273,22 @@ t_repairempty() {
   repairsetup
   repairheld 'echo "exit 0" > conveyor/lib/slots.sh' 'card.repair broken,' 'the run with the change passed, but its logs do not say that c.test passed in it'
 }
+# R137: with test.coverage set, card c-7 mends the harness, its earlier run (held by the machine) having left a
+# coverage that says the changed line of conveyor/lib/slots.sh was not reached; the lane's clean run of the card's
+# changed tests writes a report that reaches it. Bug it catches: the lane never read its own run's report, so the
+# test pass line (testrec(), as card() writes it after the lane) gave the held run's coverage.
+t_repaircoverage() {
+  repairsetup
+  local out
+  tune '.test.coverage = {format: "lcov", path: "cov.info"}'
+  echo 'case ${PWD##*/} in c-7) printf "SF:conveyor/lib/slots.sh\nDA:1,1\nend_of_record\n" > cov.info ;; esac' >> "$STUB/pre"
+  eng 'machinehold c-7 "$(git rev-parse HEAD)" "[\"c.test\"]" "[\"b.test: flaky\"]"' || fail "the hold could not be written"
+  rulewt c-7 'echo "harness() { return 0; }" > conveyor/lib/slots.sh'
+  echo '{"uncovered":[{"file":"conveyor/lib/slots.sh","lines":"1"}],"count":1,"checked":1}' > "$T/$CASE/cards/c-7.uncovered"
+  out=$(eng 'repairlane c-7 "$CONVEYOR_CARDS/c-7"; echo "$? $(testrec "$CONVEYOR_CARDS/c-7" 0 0 | jq -c .coverage)"')
+  [ "$out" = '0 {"uncovered":[],"count":0,"checked":1}' ] \
+    || fail "the repair lane's pass did not give its clean run's coverage (exit, then coverage): $out ($(cat "$STUB/clean" 2>&1))"
+}
 # D1: the card adds a test file, d.test, which main's commit lacks, and main's harness is sound, so c.test passes there.
 # The stub fails any run given a file that is not there: it stands for a pack whose test.fileCommand runs each file
 # CONVEYOR_TEST_FILES names (this project's .conveyor/test-changed.sh --file runs only the file it is given, so it would

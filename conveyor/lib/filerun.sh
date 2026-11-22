@@ -9,7 +9,7 @@
 #   .js .mjs .cjs .jsx .ts .mts .cts .tsx  under a package.json: `npx --no vitest run <absolute path>` when that
 #                     package or the checkout's lists vitest, else `npx --no jest --runTestsByPath <path>` for jest,
 #                     else `bun test ./<path>` with a bun.lock or bun.lockb there, else `node --test <path>`
-#   .py               under pyproject.toml, setup.py, setup.cfg, pytest.ini or tox.ini: `pytest <path>`
+#   .py               under pyproject.toml, setup.py, setup.cfg, pytest.ini or tox.ini: `pytest --tb=native <path>`
 #   *_test.go         under go.mod: `go test -count=1 ./<the file's folder>`, its package only
 #   tests/<name>.rs   of a crate (Cargo.toml): `cargo test --test <name>`, that test target only
 #   *_spec.rb         under a Gemfile or .rspec: `bundle exec rspec <path>` (with a Gemfile), else `rspec <path>`
@@ -100,7 +100,9 @@ case $f in
       if [ "${b[0]}" = node ]; then t=("--test-name-pattern=$x" "${t[@]}"); else t+=(-t "$x"); fi; fi ;;
   *.py)
     d=$(near pyproject.toml setup.py setup.cfg pytest.ini tox.ini) || none "no pyproject.toml, setup.py, setup.cfg, pytest.ini or tox.ini holds it"
-    r=${f#"$d"/}; b=(pytest)
+    # --tb=native: Python's own traceback (`File "<absolute path>", line <n>`), the frames testfails() reads a
+    # failure's place from (lib/failat.sh PYFRAMERX); pytest's default form names it only from the package's folder.
+    r=${f#"$d"/}; b=(pytest --tb=native)
     if [ ${#cs[@]} = 0 ]; then t=("$r"); else for c in "${cs[@]}"; do t+=("$r::$c"); done; fi ;;
   *_test.go)
     d=$(near go.mod) || none "no go.mod holds it"

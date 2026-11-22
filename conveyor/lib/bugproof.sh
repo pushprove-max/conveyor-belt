@@ -362,10 +362,11 @@ bugnamed() { # <card> <worktree> <issue json>
 # fails, a run gave no result for a case, or a run could not be made (card() blocks the card with that first line).
 # The output of each run (redkeep()) stays beside the card's kept work after the run's worktree goes: a reason that a
 # run gave no result, or could not be made, names that file and quotes its end. A check that holds, or a card that
-# closes as already done, keeps none.
+# closes as already done, keeps none. Sets REDRAN: the cases it ran (redclosed()).
 redproof() { # <card> <worktree>
   local mwt=$CARDS/mainrun/$1.unfixed cs sha='' out wo='' wi='' rc=2 kw='' ki='' kf='' fc nw
-  cs=$(redcases "$1") \
+  REDRAN=''
+  cs=$(redcases "$1") && REDRAN=$cs \
     || { echo "the main-red record names no case of this card, so the cases main fails could not be run" > "$2.unfixed"; return 2; }
   if sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
     && out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
@@ -413,16 +414,32 @@ redcases() { # <card>
   jq -ce --arg c "$1" '[.reds[]? | select(.card == $c) | .cases[] | {name: .case, file, files: [.files[]? | strings], case: (.file as $f
     | if .case == $f then "" elif .case | startswith($f + ": ") then .case[($f | length) + 2:] else .case end)}] | select(. != [])' "$MAINRED" 2>/dev/null
 }
+# Appends <closed line>, which closes main-red fix card <card> as already done (card.sh greenclose(), followups.sh
+# nochange()), under the records' lock (locked(): the caller takes it) and then the main-red record's lock, the order
+# pick() takes them in (mainred.sh redpick()), only while its entry holds no case but those the run that closes it ran
+# (REDRAN: redproof(), redgreen()). A case mainred() added to the entry while they ran never ran, and the closed line
+# would end the entry's hold on it (mainred.sh redlisted()). Else nothing is written, and it prints why, exit 1 (R86).
+redclosed() { # <card> <closed line>
+  local lock add rc=1
+  { exec {lock}>>"$MAINRED.lock"; } 2>/dev/null && flock "$lock" || { echo "The main-red record could not be locked, so the card was not closed."; return 1; }
+  add=$(redcases "$1" | jq -r --argjson r "${REDRAN:-[]}" '[.[] | select(IN($r[]) | not) | "`\(.name)`"] | join(", ")' 2>/dev/null) || add='its cases could not be read'
+  if [ -n "$add" ]; then echo "The card was not closed: a case joined its entry in the main-red record while its cases ran, and did not run: $add."
+  elif append "$2"; then rc=0
+  else echo "The engine could not write the closed line."; fi
+  exec {lock}>&-
+  return $rc
+}
 # The check that comes before a main-red fix card's build session (card.sh cardbuild()): the cases its entry holds run alone
 # on main's code at the card's commit, as redproof() runs them without the change, FULL_ALONE times (the runs the flaky rule
 # asks of a case that failed in a full run: lib/fulltest.sh). Exit 0 when every case passes in every run: main is no longer
 # red for them, and the result (<worktree>.unfixed, whose first line card() gives as the close reason) says the card closes as
 # already done, with no session. Exit 1 when a case fails or gives no result in any run (one that fails in one run in three
 # is not closed), or a run could not be made: the build session goes on as it would, and the check after it decides.
+# Sets REDRAN: the cases it ran (redclosed()).
 redgreen() { # <card> <worktree>
   local mwt=$CARDS/mainrun/$1.unfixed cs sha wo='' i=0
-  rm -f "$2.unfixed"
-  if cs=$(redcases "$1") && sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
+  rm -f "$2.unfixed"; REDRAN=''
+  if cs=$(redcases "$1") && REDRAN=$cs && sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
     && { git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
       && git worktree add -q --detach "$mwt" "$sha" && deps "$mwt"; } > /dev/null 2>&1 < /dev/null; then
     for ((i = 0; i < FULL_ALONE; i++)); do

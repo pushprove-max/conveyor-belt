@@ -116,7 +116,7 @@ t_filerunbun() {
 # node id <file>::<case> names one case, and pytest runs nothing when there is no such case.
 t_filerunpytest() {
   frsetup 'svc/pyproject.toml=x' 'svc/tests/test_x.py=x'
-  frcheck svc/tests/test_x.py 'pytest /svc|tests/test_x.py' 'pytest /svc|tests/test_x.py::conveyor-no-case'
+  frcheck svc/tests/test_x.py 'pytest /svc|--tb=native tests/test_x.py' 'pytest /svc|--tb=native tests/test_x.py::conveyor-no-case'
 }
 
 # Bug it catches: go test ran the whole module (./...) or from outside it: it runs the file's package only, from the
