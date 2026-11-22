@@ -129,6 +129,9 @@ t_optkeep() {
   # prompt (OPTREVIEW, which card() gives the review of an Optimize card) is text with no behaviour to run, so it is read.
   tr '\n' ' ' < "$T/$CASE/optreview" | grep -qF 'A file kept must cost less than that figure, or than the slowest of the recent runs the issue lists; for stabilise, no more than it; and, when another test file is merged into it, no more than that figure plus the median on record of each test file merged into it. The files of a split' \
     || fail "the review is not told one limit for a kept file, with the limit of a merge into it"
+  # The match above is of a substring: a second limit elsewhere in the prompt (#1435) is caught by a count of the rule.
+  [ "$(tr '\n' ' ' < "$T/$CASE/optreview" | grep -oF 'A file kept must cost' | wc -l)" = 1 ] \
+    || fail "the review is told a limit for a kept file more than once: $(cat "$T/$CASE/optreview")"
 }
 
 # D1. Bug it catches: an Optimize card that keeps its file as slow as its median lands. The check fails, and the

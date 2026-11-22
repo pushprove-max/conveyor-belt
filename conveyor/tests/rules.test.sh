@@ -93,6 +93,10 @@ t_packrules() {
     = '["Bash git-safety.sh","Bash bash-guardrails.sh","Bash adversarial-review-gate.sh","Bash dependency-addition-guard.sh","Edit|Write|MultiEdit dependency-addition-guard.sh","Edit|Write|MultiEdit ruling-cite-gate.sh","AskUserQuestion worker-ask-guard.sh","Bash pack-bash-guard.sh","Bash pack-test-guard.sh","Edit|Write|MultiEdit pack-edit-guard.sh"]' ] \
     && [ "$(jq -cS 'del(.hooks)' "$s")" = "$(jq -cS 'del(.hooks)' "$SRC/card-settings.json")" ] \
     || fail "the card's settings are not the generic ones with the pack's hooks after them: $(jq -c . "$s")"
+  # The pack's entries whole, not only their commands (#1435): one that lost its `type: "command"` is a hook Claude Code
+  # does not run.
+  jq -e --slurpfile p "$SRC/lib/test-hooks.json" '$p[0].hooks.PreToolUse as $k | .hooks.PreToolUse[-($k | length):] == $k' "$s" > /dev/null \
+    || fail "the pack's hook entries in the card's settings are not lib/test-hooks.json's as written: $(jq -c '.hooks.PreToolUse[-2:]' "$s")"
   # Card sessions are headless and never pause, so a 1-hour cache write (2x the input price against 1.25x) buys nothing.
   [ "$(jq -r '.env.CLAUDE_CODE_PROMPT_CACHE_TTL' "$s")" = 5m ] || fail "the card's session was not given the 5-minute prompt cache lifetime: $(jq -c .env "$s")"
   # A card session opens no Board: its settings, the pack's hooks with them, carry no SessionStart hook and no opener.

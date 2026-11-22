@@ -21,11 +21,15 @@ modesetup() {
   tune '.test.full = "bash .conveyor/test-full.sh"'
   mkdir -p "$R/t" && cp "$SRC/../.conveyor/test-full.sh" "$SRC/../.conveyor/test-share.sh" "$R/.conveyor/" || fail "the fixture could not be made"
   POOL=2:$T/$CASE/pool
+  # A share of 1 MB (the host file's testTmpMB, which names no stateDir, so the state folder stays $ST): with the
+  # 2048 MB default, a machine with under 6 GiB free in its temp space started no second file (share_noroom) (#1435).
+  mkdir -p "$XDG_CONFIG_HOME/conveyor" && echo '{"testTmpMB": 1}' > "$XDG_CONFIG_HOME/conveyor/host.json" || fail "the fixture could not be made"
   # Each start line also names the pool slot the file was started on, "none" when it holds none: the slot file that
-  # CONVEYOR_TEST_SLOT's descriptor is open on (a turn on the run's home slot, <fd>.t, names the home slot's descriptor).
+  # CONVEYOR_TEST_SLOT's descriptor is open on (a turn on the run's home slot, <fd>.t, names the home slot's descriptor),
+  # then the order test-full.sh started it in: in a parallel run, the file's own log folder, <n>.log, is the nth started.
   for i in 1 2 3 4; do
     printf '%s\n' "p=${POOL#2:}" 'd=${CONVEYOR_TEST_SLOT:-}; d=${d%%.*}; k=none; for s in 1 2; do [ -n "$d" ] && [ "/dev/fd/$d" -ef "$p/$s" ] && k=$s; done' \
-      'echo "$0 start $EPOCHREALTIME $k" >> "$STUB/times"' 'sleep 0.5' 'echo "$0 end $EPOCHREALTIME" >> "$STUB/times"' > "$R/t/f$i.test.sh" # sleep: a stand-in test file that runs a while, so files run at once overlap
+      'n=${CONVEYOR_TEST_LOG##*/}; echo "$0 start $EPOCHREALTIME $k ${n%.log}" >> "$STUB/times"' 'sleep 0.5' 'echo "$0 end $EPOCHREALTIME" >> "$STUB/times"' > "$R/t/f$i.test.sh" # sleep: a stand-in test file that runs a while, so files run at once overlap
   done
   git -C "$R" add -f .conveyor/test-full.sh .conveyor/test-share.sh t && git -C "$R" commit -qm 'the suite' && git -C "$R" push -q origin main || fail "the fixture could not be made"
 }
@@ -55,8 +59,9 @@ t_relparallel() {
   for f in 1 2 3 4; do grep -qxF -- "-- ok t/f$f.test.sh" "$wt.test" || fail "the suite's output has no result line of t/f$f.test.sh: $(cat "$wt.test")"; done
   # Two exactly: files ran at once, and never more than the pool's two slots.
   [ "$(atonce)" = 2 ] || fail "the four files did not run two at once on a pool of two slots: $(cat "$STUB/times")"
-  # The two started first, in either order, as both start at once.
-  [ "$(tr , . < "$STUB/times" | awk '$2 == "start"' | sort -k3,3g | head -2 | awk '{ print $1 }' | sort | paste -sd' ' -)" = "t/f3.test.sh t/f4.test.sh" ] \
+  # The two started first, in either order, as both start at once. By the order test-full.sh started them, not by the
+  # files' own start times (#1435): under load f3 wrote its line after f4 had ended and f2 had started on its slot.
+  [ "$(awk '$2 == "start" { print $5, $1 }' "$STUB/times" | sort -n | head -2 | awk '{ print $2 }' | sort | paste -sd' ' -)" = "t/f3.test.sh t/f4.test.sh" ] \
     || fail "the two files the suite record times longest did not start first: $(cat "$STUB/times")"
   # Bug: a scheduler that kept to two files at once but took no slot for each (no slot_take, slot_mine, slot_free)
   # still passed the checks above: its files all ran on the run's own slot, beside each other, while other cards took

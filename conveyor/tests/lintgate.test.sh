@@ -52,16 +52,17 @@ t_lintgatestaged() {
   recok "$ST/cards.jsonl" "lintline"
 }
 # Bug: a command whose tool is missing (skipped) and whose trigger the change changed makes the lint line say the
-# tools ran as installed, though no tool ran.
+# tools ran as installed, though no tool ran. Bug (#1435): the case called lintrun() and lintline() rather than the gate,
+# and passed with an empty reason; it runs lintgate(), and the reason names the skipped command.
 t_lintgateskiptrigger() {
   gatesetup '[]' 'echo "lint: missing shellcheck"; exit 127'
   tune '.lint.commands[0].triggers = [".lintrc"]'
   fx_wt 'echo two >> a.txt && echo new > .lintrc' .lintrc old
   # shellcheck disable=SC2016 # expanded in fx_in's shell
-  fx_in 'lintrun "$FXWT" "$(git -C "$FXWT" rev-parse HEAD)" c7 "$T/$CASE/o"; rc=$?; echo "rc=$rc"; lintline c7 7 "$T/$CASE/o" $rc review'
+  fx_in 'lintgate c7 7 "$FXWT" "{}" prompt br; echo "rc=$?"'
   grep -qx 'rc=0' "$T/$CASE/run.out" || fail "the skipped command did not let the gate go on: $(cat "$T/$CASE/run.out")"
-  [ "$(st 'select(.step == "lint") | [.lint.commands[0].result, .lint.asInstalled, (.reason | contains("tools ran as installed"))] | tojson')" = '["skipped: missing shellcheck",false,false]' ] \
-    || fail "the lint line of a skipped command says the tools ran as installed: $(st 'select(.step == "lint")')"
+  [ "$(st 'select(.step == "lint") | [.lint.commands[0].result, .lint.asInstalled, (.reason | contains("tools ran as installed")), (.reason | test("^lint command 1 \\(.+\\): skipped: missing shellcheck, "))] | tojson')" = '["skipped: missing shellcheck",false,false,true]' ] \
+    || fail "the lint line of a skipped command says the tools ran as installed, or its reason does not name the skipped command: $(st 'select(.step == "lint")')"
 }
 
 # Bugs: a lint command that writes a tracked file, adds a file git neither tracks nor ignores, or changes the index

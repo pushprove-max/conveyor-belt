@@ -110,8 +110,9 @@ t_followrefuse() {
   pushed "git checkout -q $A -- conveyor/schema/pack.schema.json && rm conveyor/foreman/stop.sh"; F=$NEW
   out=$(takeby "$A" 2>&1)
   [ "$(engine .commit)" = "$A" ] && [ "$(engine .refused.commit)" = "$F" ] || fail "a commit lacking a hook was taken: $out $(cat "$R/.git/conveyor-engine.json")"
-  [ "$(loop snapshot --fresh | jq -c --arg f "$F" '.needsYou.engine | [.commit == $f, .reason]')" = '[true,"it lacks hooks .claude/settings.json runs through shim.sh: conveyor/foreman/stop.sh"]' ] \
-    || fail "Needs you does not name the commit lacking a hook and the hook: $(loop snapshot --fresh | jq -c .needsYou.engine)"
+  s=$(loop snapshot --fresh)
+  [ "$(jq -c --arg f "$F" '.needsYou.engine | [.commit == $f, .reason]' <<<"$s")" = '[true,"it lacks hooks .claude/settings.json runs through shim.sh: conveyor/foreman/stop.sh"]' ] \
+    || fail "Needs you does not name the commit lacking a hook and the hook: $(jq -c .needsYou.engine <<<"$s")"
   [ ! -e "$V/$F" ] || fail "the install of a commit refused for a missing hook was kept"
   # A refused commit is not tried again: it would be installed and checked once a minute for nothing.
   out=$(takeby "$A" 2>&1); [ -z "$out" ] || fail "a refused commit was tried again: $out"

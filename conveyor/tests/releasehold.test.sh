@@ -140,6 +140,9 @@ rh_boardpush() { # <the Board's push, as loop arguments...>
   rh_hold
   out=$(loop "$@" 2>&1); [ $? = 2 ] && grep -q 'a release run is under way, so nothing is pushed until it ends' <<<"$out" \
     || { touch "$STUB/letgo"; fail "$* during a release run was not refused with its reason: $out"; }
+  # Bug (#1435): a refused Push now wrote no result, so the push status kept the push before it.
+  [ "$1" != push-now ] || loop health | jq -e '.pushLast | .by == "now" and .started == false and .why == "a release run is under way, so nothing is pushed until it ends"' > /dev/null \
+    || { touch "$STUB/letgo"; fail "$* refused during a release run does not show as the last push, with its reason: $(loop health | jq -c .pushLast)"; }
   touch "$STUB/letgo"; wait_until "flock -n -x '$ST/release.hold' true" || fail "the stand-in run did not let the hold go"
   [ "$(ftorigin)" != "$(ftmain)" ] || fail "$* pushed during a release run"
   ( exec {pl}>>"$ST/pushed.lock" && flock -x "$pl" && touch "$STUB/pushlocked" && while [ ! -e "$STUB/pushgo" ]; do sleep 0.1; done ) & # sleep: the loop's stand-in push holds the push lock until the case lets it go

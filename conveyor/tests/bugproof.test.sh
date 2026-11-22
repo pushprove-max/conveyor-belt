@@ -251,11 +251,13 @@ t_bugpatterns() {
 
 # #137. Bug it catches: a pack whose test command cannot run one file alone has no way to run a change's test files.
 # With test.fileCommand set, the check runs it once for each test file, given the file, in place of test.command:
-# the file fails on main without the fix, and the check holds.
+# the file fails on main without the fix, and the check holds. Bug (#1435): what the run on main had staged was not
+# checked, so a proof run with the fix a.txt staged beside a.test.sh passed too; the command logs it.
 t_bugfilecommand() {
-  TUNE='.test.fileCommand = "case $PWD in */mainrun/*) echo \"$CONVEYOR_TEST_FILE\" >> \"$STUB/fileran\" ;; esac; bash"' bugtest 'grep -qx two a.txt'
+  TUNE='.test.fileCommand = "case $PWD in */mainrun/*) echo \"$CONVEYOR_TEST_FILE\" >> \"$STUB/fileran\"; git diff --cached --name-only >> \"$STUB/filestaged\" ;; esac; bash"' bugtest 'grep -qx two a.txt'
   [ "$(cat "$STUB/fileran" 2>&1)" = a.test.sh ] && [ ! -e "$STUB/mainran" ] \
     || fail "the check did not run the test file alone with test.fileCommand: $(cat "$STUB/fileran" "$STUB/mainran" 2>&1)"
+  [ "$(cat "$STUB/filestaged" 2>&1)" = a.test.sh ] || fail "the run on main had more than the test file staged: $(cat "$STUB/filestaged" 2>&1)"
   [ "$RC" = 0 ] && grep -q '^The run failed there (exit 1)' "$FXWT.unfixed" \
     || fail "the test run through test.fileCommand did not prove the fix (exit $RC): $BW $(cat "$FXWT.unfixed" 2>&1)"
 }

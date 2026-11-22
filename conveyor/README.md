@@ -1331,8 +1331,9 @@ landing while it runs. One run at a time per project: a second press while one r
   once, through the same push and checks a card's push uses, and never a commit the run did not test (one that landed
   during the run waits for the next push); the Board says so. A remote whose main holds a commit the tested one lacks
   (one made there by hand) refuses it, and it is not merged and pushed again as a card's push is: that merge is a
-  commit the run did not test, so nothing is pushed and the Board shows the push failed and why. Red: nothing is
-  pushed; press Push landed again once main is green. A press with no landed commit to push is refused.
+  commit the run did not test, so nothing is pushed and the Board shows the push failed and why. Red, when each
+  failed case passes alone each time (flaky): the commit it tested is pushed as on green, and the result says
+  "Flaky". Else red: nothing is pushed; press Push landed again once main is green. A press with no landed commit to push is refused.
 - **Push anyway** (`full-test anyway <run id>`), beside a red result: after a confirm that names the failed cases, the
   commit that red run tested is pushed with no new run, logged (`fulltest.jsonl` in the state folder) as the owner's
   push over a red suite, with the Board user who confirmed it. The Board sends the id of the red run the confirm named;

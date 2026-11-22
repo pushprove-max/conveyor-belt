@@ -144,6 +144,27 @@ t_fullred() {
   [ "$(jq -c '[.suites[] | select(.kind == "full test") | [.state, .sha, .failed, .cases, (.ended != null)]]' <<<"$s")" \
     = "[[\"failed\",\"$A\",4,[\"code.test: breaks\",\"flaky.test: flips\",\"net.test: fetch\",\"old.test: old\"],true]]" ] || fail "the snapshot's suites do not show the red run: $(jq -c .suites <<<"$s")"
 }
+# Bug this guards (#1435, #1079 item 1): Push landed whose red run failed only a case that passes alone each time pushed
+# nothing, though the code passed. The suite's flaky.test fails in the whole run and passes alone (t_fullred's).
+t_fullflakypush() {
+  setup "[$(issue 7 2026-01-01)]"
+  local A
+  tune '.test.full = ". \"$STUB/full-cmd\""'
+  cat > "$STUB/full-cmd" <<'EOF'
+rr=${CONVEYOR_TEST_RERUN:-}; log=$CONVEYOR_TEST_LOG/run.log
+[ -n "$rr" ] || { echo "== ok.test" | tee -a "$log"; echo "ok fine"; echo "-- ok ok.test" >> "$log"; }
+echo "== flaky.test" | tee -a "$log"
+if [ -n "$rr" ]; then echo "ok flips"; echo "-- ok flaky.test" >> "$log"; exit 0; fi
+echo "FAIL [flips]: at random"; echo "-- FAIL flaky.test" >> "$log"; exit 1
+EOF
+  ftland; A=$(ftmain)
+  # ftended polls: `loop full-test push` returns once it has started the run in the background (lib/fulltest.sh); the
+  # judge and the push after it run there, and only the run's line and its removed .running file show their end.
+  loop full-test push > /dev/null || fail "push landed did not start"; ftended 1
+  [ "$(ftl '[.state, .pushed.ok, [.cases[] | [.case, .verdict]]]')" = '["flaky",true,[["flaky.test: flips","flaky"]]]' ] && [ "$(ftorigin)" = "$A" ] \
+    || fail "a red Push landed whose only failed case passed alone did not push main, or is not recorded flaky: origin $(ftorigin), main $A, $(cat "$ST/fulltest.jsonl" "$ST/fulltest.jsonl.log" 2>&1)"
+  [ "$(jq -c '[.entries[] | .case]' "$ST/flaky.json")" = '["flaky.test: flips"]' ] || fail "the case is not on the flaky-test record: $(cat "$ST/flaky.json" 2>&1)"
+}
 # <id> <commit>: a red run's line at <commit> (its id given), with t_fullred's cases and verdicts, its fix cases filed as
 # 100101 and 100102. Each case's why is null, so it is not the line t_fullred writes: there fulljudge() gives the
 # flaky and the declined case a why. t_fullredagain and t_fullanyway check no why.
@@ -266,7 +287,8 @@ t_pushnow() {
   wait_until '[ -n "$(st "select(.issue == 7 and .step == \"pushed\")")" ] && [ ! -e "$ST/pushing" ]' 'cat "$ST/pushnow.log" "$ST/cards.jsonl"'
   [ "$(ftorigin)" = "$A" ] && [ "$(tail -n 1 "$STUB/hookruns")" = "$A" ] || fail "push-now did not push main through the pre-push hook: origin $(ftorigin), main $A, hook $(cat "$STUB/hookruns")"
   [ ! -e "$STUB/full-ran" ] && [ ! -s "$ST/fulltest.jsonl" ] || fail "push-now ran the full test suite"
-  # Nothing is unpushed now: refused with the reason, and nothing is pushed or recorded.
+  # Nothing is unpushed now: refused with the reason, and nothing is pushed or recorded on the card (the refusal as the
+  # last push: serve.test.sh t_pushnowrefused).
   out=$(loop push-now 2>&1); [ $? = 2 ] && grep -q 'no landed commit' <<<"$out" || fail "push-now with nothing unpushed was not refused: $out"
   [ "$(ftpushes)" = 2 ] && [ "$(wc -l < "$STUB/hookruns")" = 2 ] || fail "push-now with nothing unpushed changed something: $(cat "$STUB/hookruns")"
 }
@@ -409,6 +431,9 @@ t_pushnowbusy() {
   loop full-test > /dev/null || fail "full-test did not start"
   wait_until '[ -s "$STUB/full-at" ]' 'cat "$ST/fulltest.jsonl.log"'
   out=$(loop push-now 2>&1); [ $? = 2 ] && grep -q 'a full test run is under way' <<<"$out" || fail "push-now during a full test run was not refused: $out"
+  # Bug (#1435): the refusal wrote no result, so the push status kept the push before it.
+  loop health | jq -e '.pushLast | .by == "now" and .started == false and (.why | startswith("a full test run is under way (run, since "))' > /dev/null \
+    || fail "a push-now refused during a full test run does not show as the last push, with its reason: $(loop health | jq -c .pushLast)"
   : > "$STUB/go"; ftended 1
   [ "$(ftorigin)" = "$O0" ] && [ "$(ftpushes)" = 0 ] && [ ! -e "$STUB/hookruns" ] || fail "push-now during a full test run pushed: origin $(ftorigin), $(cat "$STUB/hookruns" 2>&1)"
 }

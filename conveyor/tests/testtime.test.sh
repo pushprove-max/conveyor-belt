@@ -25,7 +25,8 @@ t_testtime() {
   [ "$(cat "$d/err")" = "to stderr" ] || fail "the command's stderr changed: $(cat "$d/err")"
   [ "$(head -n 1 "$d/out")" = "line one" ] && [ "$(wc -l < "$d/out")" = 2 ] || fail "the command's output changed: $(cat "$d/out")"
   [ "$(grep -c '^TESTRUN sec' "$d/out")" = 1 ] || fail "not one TESTRUN sec line: $(cat "$d/out")"
-  # The line ends the output, after the command's.
+  # The line ends the output, after the command's. Its clock seconds are at least the child's 0.3 s of wall time, less
+  # a rounding (#1435: a line of 0.0 clock and 0.1 CPU seconds passed).
   tail -n 1 "$d/out" | awk -F'\t' 'NF == 4 && $1 == "TESTRUN sec" && $2 == "tests/a b.test" && $3 ~ /^[0-9]+\.[0-9]$/ && $4 ~ /^[0-9]+\.[0-9]$/ &&
-    $4 >= 0.1 && $3 >= $4 - 0.1 { ok = 1 } END { exit !ok }' || fail "the TESTRUN sec line has no clock and CPU seconds of the command: $(tail -n 1 "$d/out")"
+    $4 >= 0.1 && $3 >= 0.2 && $3 >= $4 - 0.1 { ok = 1 } END { exit !ok }' || fail "the TESTRUN sec line has no clock and CPU seconds of the command: $(tail -n 1 "$d/out")"
 }

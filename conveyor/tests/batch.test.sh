@@ -21,7 +21,8 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # Each of these waits gives up once the card it waits on is gone (a card that holds its files lands or is blocked, its
 # worktree removed): a card that takes another path fails the case rather than hanging it. A card in $STUB/ready not
 # yet picked is not gone: the hold waits for it (the hold marks each card it saw, $STUB/seen.<n>). Under load the loop
-# can pick #9 after #7 reached its hold, and a hold that went on then made a batch without #9 (#276).
+# can pick #9 after #7 reached its hold, and a hold that went on then made a batch without #9 (#276). So too each
+# review's wait (s): a card starts in the background and makes its worktree there, and one with none yet is not gone.
 # A live record every second (the pack's default), not the test pack's 0.2 s: a card waiting at its claim, or on the
 # card whose batch took it, looks again each `live` seconds, and these cases' cards wait a lot; at 0.2 s those looks
 # were 10 to 17% of each case's instructions. The cases wait on what the cards do, not on those seconds.
@@ -37,9 +38,11 @@ batchsetup() { # <issues json>
 n=${PWD##*-}
 [ "$n" != 7 ] || jq -e '.order != []' "$ST/control.json" >/dev/null 2>&1 \
   || { jq -c '.order = [8, 9, 7, 10]' "$ST/control.json" > "$STUB/c.new.7" && mv "$STUB/c.new.7" "$ST/control.json"; }
-[ "$n" = 7 ] || [ -e "$STUB/rev.$n" ] || { : > "$STUB/rev.$n"; while [ -d "$STUB" ]; do jq -e .held ../*-7.claim >/dev/null 2>&1 && break; ls -d ../*-7 >/dev/null 2>&1 || break; sleep 0.1; done
+[ "$n" = 7 ] || [ -e "$STUB/rev.$n" ] || { : > "$STUB/rev.$n"; s=''; while [ -d "$STUB" ]; do jq -e .held ../*-7.claim >/dev/null 2>&1 && break
+    if ls -d ../*-7 >/dev/null 2>&1; then s=1; elif [ -n "$s" ]; then break; fi; sleep 0.1; done
   [ -e "$STUB/overlap" ] || rm -f ../*-7.cpatch
-  [ "$n" != 9 ] || while [ -d "$STUB" ]; do jq -e .tested ../*-8.ready >/dev/null 2>&1 && break; ls -d ../*-8 >/dev/null 2>&1 || break; sleep 0.1; done; }
+  s=''; [ "$n" != 9 ] || while [ -d "$STUB" ]; do jq -e .tested ../*-8.ready >/dev/null 2>&1 && break
+    if ls -d ../*-8 >/dev/null 2>&1; then s=1; elif [ -n "$s" ]; then break; fi; sleep 0.1; done; }
 EOF
   cat > "$STUB/hold" <<'EOF'
 case $PWD in *-7) [ -e "$STUB/held" ] || while [ -d "$STUB" ]; do
@@ -115,7 +118,10 @@ t_batchland() {
   [ "$(wc -l < "$STUB/tests")" = 1 ] || fail "the three cards did not land on one test run: $(wc -l < "$STUB/tests") runs"
   [ "$(git -C "$R" log --reverse --format=%s HEAD~3..HEAD | tr '\n' ,)" = "feat(product): title 8 (#8),feat(product): title 9 (#9),feat(product): title 7 (#7)," ] \
     && [ "$(git -C "$R" log -1 --format=%s HEAD~3)" = "a longer a.txt" ] || fail "main did not get one commit per card, in the batch's order: $(git -C "$R" log --format=%s | tr '\n' ,)"
-  git -C "$R" log -1 --format=%B HEAD~1 | grep -qx 'Closes #9' || fail "a card's commit lost its own message: $(git -C "$R" log -1 --format=%B HEAD~1)"
+  # Each card's commit keeps its own body (#1435: only #9's was checked, so a batch that dropped #8's and #7's passed).
+  for s in 'HEAD~2 8' 'HEAD~1 9' 'HEAD 7'; do
+    git -C "$R" log -1 --format=%B "${s% *}" | grep -qx "Closes #${s#* }" || fail "#${s#* }'s commit lost its own message: $(git -C "$R" log -1 --format=%B "${s% *}")"
+  done
   for n in 7 8 9; do
     s=$(st "select(.issue == $n and .step == \"landed\") | .sha")
     [ "$(git -C "$R" log -1 --format=%s "$s" 2>/dev/null)" = "feat(product): title $n (#$n)" ] || fail "#$n's landed line does not name its own commit: $s"

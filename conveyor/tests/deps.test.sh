@@ -312,7 +312,7 @@ t_followdepscycle() {
   deps_setup "$(jq -cs . <(dep "$(issue 60 2026-01-01 P0)" 'Depends on: #50') <(depfu 100101 50 | jq -c '.body += "\nDepends on: #60"'))"
   mkdir -p "$ST"; landed 50 '[100101]' > "$ST/cards.jsonl"
   [ "$(loop health | jq -c .cycles)" = '[[60,100101]]' ] || fail "health does not report a cycle through a follow-up: $(loop health | jq -c .cycles)"
-  # The run is waited for until it ends: one that polls forever ends at its own time limit (exit 124) instead.
+  # loop: only a run shows it ends instead of polling; one that polls forever ends at its own time limit (exit 124).
   tune '.tunables.poll = 1'; CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards timeout 60 bash "$SRC/conveyor.sh" run --only 60 1 > "$STUB/cyc.out" 2>&1
   [ $? != 124 ] || fail "a run limited to an issue in a cycle through a follow-up polls forever: $(cat "$STUB/cyc.out")"
   grep -q '#60 is in a dependency cycle' "$STUB/cyc.out" || fail "a run limited to an issue in a cycle through a follow-up does not say so: $(cat "$STUB/cyc.out")"

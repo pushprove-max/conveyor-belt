@@ -10,8 +10,10 @@ case $2 in
   list) j=; for a; do [ "$j" != 1 ] || { j=$a; break; }; [ "$a" != --json ] || j=1; done
     [ "$j" != 1 ] || { echo 'flag needs an argument: --json' >&2; exit 1; }
     case $j in ''|-*) printf '#7\tTitle\n'; exit 0 ;; esac
-    if [ "$4" = closed ]; then echo "$*" >> "$STUB/closed-asked"; [ ! -e "$STUB/closed-fail" ] || exit 1; cat "$STUB/closed-issues.json" 2>/dev/null || echo '[]'; else [ ! -f "$STUB/list-cmd" ] || . "$STUB/list-cmd"
-    if [ "$4" = all ]; then issues | jq -c "sort_by(-.number) | .[:$6]"; else issues | jq -c ".[:$6]"; fi; fi ;; # all: newest first, as on GitHub
+    # Each issue with the fields --json names alone, as gh gives them: a caller that asks for too few is not given more.
+    fields() { jq -c --arg f "$j" '($f | split(",")) as $k | map(with_entries(select(.key | IN($k[]))))'; }
+    if [ "$4" = closed ]; then echo "$*" >> "$STUB/closed-asked"; [ ! -e "$STUB/closed-fail" ] || exit 1; { cat "$STUB/closed-issues.json" 2>/dev/null || echo '[]'; } | fields; else [ ! -f "$STUB/list-cmd" ] || . "$STUB/list-cmd"
+    if [ "$4" = all ]; then issues | jq -c "sort_by(-.number) | .[:$6]" | fields; else issues | jq -c ".[:$6]" | fields; fi; fi ;; # all: newest first, as on GitHub
   # Another repository's issue (gh issue view <n> --repo <owner/repo> --json state): $STUB/repo.<owner_repo>.<n> holds
   # its state, else CLOSED; with $STUB/repo-fail.<owner_repo>, that repository cannot be read. Each ask is a line <owner/repo>#<n> of $STUB/far-viewed.
   view) case "$*" in *' --repo '*) k=${5//\//_}; echo "$5#$3" >> "$STUB/far-viewed"; [ ! -e "$STUB/repo-fail.$k" ] || { echo "GraphQL: Could not resolve to a Repository with the name '$5'. (repository)" >&2; exit 1; }

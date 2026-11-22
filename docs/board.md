@@ -576,9 +576,10 @@ step stays to come until you press Push landed or Push now. With the rule On, a 
 **Push landed** and **Run full test suite** are on the Control tab, which shows "N landed, not pushed". Push landed runs
 the project's full test suite, the `test.full` of the pack (the project's settings, `.conveyor/project.json`), on
 main. Setup sets `test.full` to your test command in a new pack. Green, it pushes the landed commits that the run tested.
-Red, it pushes nothing: it runs each failed case alone and judges it. A case that passes alone goes on the flaky-test
+Red, it runs each failed case alone and judges it. A case that passes alone goes on the flaky-test
 record. A case that fails in the code becomes a P1 fix card. A case that fails for the machine or the network is
-declined, with its reason. **Push anyway**, beside a red result, pushes those commits after a confirm. **Run full test
+declined, with its reason. When each failed case passes alone, Push landed pushes, and the result says "Flaky".
+Else it pushes nothing. **Push anyway**, beside a red result, pushes those commits after a confirm. **Run full test
 suite** runs the suite and pushes nothing. A project with no `test.full` shows both buttons greyed
 (`conveyor/README.md`, The full test suite).
 
@@ -593,7 +594,8 @@ commands name, runs the whole suite ([Releases](releases.md)).
 It pushes main as Conveyor does after each card when the rule is On: through the project's pre-push hook only. If the
 hook fails, nothing is pushed and the card shows in Needs you with the failed check. It is greyed while a full test
 run is under way, or when nothing waits for a push. Use Push now for a small change that the card's own tests and the
-pre-push hook cover. Use Push landed when you want the whole suite green before the push.
+pre-push hook cover. Use Push landed when you want the whole suite to run before the push: it pushes when
+the suite is green, or when each failed case passes alone.
 
 Under the buttons, the Board shows the push. While it runs: the commit, what runs ("Tests before the push running",
 "Getting the push ready (worktree, dependencies, test slot)", "Pre-push hook running", "Push running with no pre-push

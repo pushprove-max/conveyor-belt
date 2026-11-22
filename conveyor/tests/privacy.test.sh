@@ -123,6 +123,7 @@ t_privprivate() {
   local H=/home; local f="[P2] a.txt:1 reads $H/user/notes.txt" # the home path is put together here, as AT is
   setup "[$(issue 7 2026-01-01)]"; for i in 1 2 3; do printf '%s\nUSER-VISIBLE: no\nVERDICT: NO-GO\n' "$(moved "${i/3/}" "$f")" > "$STUB/review.$i"; done
   [ "$(bash "$SRC/lib/pack.sh" get privacy.mode "$R/.conveyor/project.json")" = private ] || fail "the test pack is not in private mode"
+  # loop: only a whole card files its review's findings as follow-ups when its reviews run out, the warning in its output
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   grep -q "reads $H/user/notes.txt" "$STUB/filed" && [ "$(st 'select(.step == "landed") | .issue')" = 7 ] || fail "a private repo's follow-up was not filed: $(cat "$STUB/filed" 2>&1)"
   grep -q 'privacy warning .*line [0-9]*: home path' <<<"$out" && ! grep -q 'privacy warning.*notes\.txt' <<<"$out" || fail "no privacy warning, or it names the match: $out"
@@ -217,18 +218,27 @@ t_ghwrite() {
   # gh, then any options before the command (gh --repo o/r issue comment ...), then the command.
   local g='gh([[:space:]]+-[^[:space:]]*([[:space:]]+[^-[:space:]][^[:space:]]*)?)*[[:space:]]+'
   local w="$g(issue|pr)[[:space:]]+(comment|edit|create|close|reopen|delete|transfer|lock|unlock|pin|unpin|merge|review)|$g(label|release|repo)[[:space:]]+(create|edit|delete|upload|clone)"
+  # The lines of <file> the scan flags: a write, or a gh api call that is no graphql read.
+  flagged() {
+    grep -nHE "$w" "$1"
+    if grep -qE "${g}api" "$1"; then
+      grep -nHE "${g}api" "$1" | grep -vE "${g}api[[:space:]]+graphql" || :
+      grep -nHE "${g}api.*(-X|--method)|mutation" "$1" || :
+    fi
+  }
   for f in "${files[@]}"; do
     [ "$f" != "$SRC/conveyor.test.sh" ] || continue
-    out+=$(grep -nHE "$w" "$f")
-    if grep -qE "${g}api" "$f"; then
-      out+=$(grep -nHE "${g}api" "$f" | grep -vE "${g}api[[:space:]]+graphql" || :)
-      out+=$(grep -nHE "${g}api.*(-X|--method)|mutation" "$f" || :)
-    fi
+    out+=$(flagged "$f")
   done
   [ -z "$out" ] || fail "a GitHub write outside gh_write: $out"
-  # The last: a REST read of an issue, as attachparts() made before it read the issue's id through graphql (#733).
-  for f in 'gh --repo owner/repo issue comment 7 --body x' 'gh -R o/r pr edit 1' 'gh --repo o/r api repos/o/r/issues' \
+  # The examples go through the same scan (#1435: they were matched against `gh api` alone, which a graphql read matches
+  # too, so a scan that flagged every gh api call passed). The last flagged: a REST read of an issue, as attachparts()
+  # made before it read the issue's id through graphql (#733). A graphql read is not flagged.
+  mkdir -p "$T/$CASE"; f=$T/$CASE/example
+  for x in 'gh --repo owner/repo issue comment 7 --body x' 'gh -R o/r pr edit 1' 'gh --repo o/r api repos/o/r/issues' \
     'id=$(gh api "repos/{owner}/{repo}/issues/$n" 2>/dev/null | jq -er .id)'; do
-    { grep -qE "$w" <<<"$f" || grep -qE "${g}api" <<<"$f"; } || fail "the guard misses: $f"
+    printf '%s\n' "$x" > "$f"; [ -n "$(flagged "$f")" ] || fail "the guard misses: $x"
   done
+  x="gh api graphql -f query='{ repository(owner: \"o\", name: \"r\") { issue(number: 7) { id } } }'"
+  printf '%s\n' "$x" > "$f"; [ -z "$(flagged "$f")" ] || fail "the guard flags a graphql read: $x"
 }

@@ -33,7 +33,8 @@ t_fail() {
   st 'select(.issue == 9 and .step == "blocked") | .tail' | grep -qx 'FAIL schema mismatch' || fail "a failed review's errors lost their failing line: $(st 'select(.issue == 9 and .step == "blocked") | .tail')"
   echo 'exec sleep 30' > "$STUB/review-cmd" # sleep: a review that hangs, cut by reviewTimeout
   flcard 10 'echo two >> a.txt'; tuned '.tunables.reviewTimeout = 1' flfail 10 review
-  st 'select(.issue == 10 and .step == "blocked") | .reason' | grep -q 'review 1: .*exit 124' || fail "hung review not blocked as timed out: $(cat "$T/$CASE/run.out")"
+  # The reason names the timeout, as the build's does (#1435: a reason with no timeout text passed).
+  st 'select(.issue == 10 and .step == "blocked") | .reason' | grep -q 'review 1: .*exit 124, the 1s timeout' || fail "hung review not blocked as timed out: $(cat "$T/$CASE/run.out")"
   # Bug: a review that timed out with no readable usage wrote no spent, losing its model and seconds and
   # leaving the failed review out of the unpriced steps.
   [ "$(st 'select(.issue == 10 and .step == "blocked") | [.spent.step, (.spent.model | type), (.spent.sec | type), (.spent.unread | type), .spent.stats.turns] | tojson')" = '["review","string","number","string",0]' ] \

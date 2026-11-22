@@ -12,7 +12,7 @@
 # sent back to build and blocked by the bug-card check, as no test can fail on main for it; or a finding with no mark
 # is filed as a cleanup, so its card skips the check. The two findings of one last NO-GO of #7 are filed as the card
 # files them; then the cleanup follow-up's card runs. That part is a whole card run (the loop): the check is skipped
-# inline in card() by the issue's labels, which no engine function returns alone.
+# in cardbuild() by the issue's labels, which no engine function returns alone.
 t_cleanup() {
   setup "[$(issue 7 2026-01-01)]"
   printf '%s\n' '[P3][cleanup] a.txt:1 the second check is redundant. Proof: line 1 already checks it' \

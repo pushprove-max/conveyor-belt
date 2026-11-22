@@ -125,13 +125,15 @@ t_adoptkill() {
   local out k p8 p9 deaf
   adoptsetup '[]'
   # A review that ignores TERM, and on TERM starts another that ignores it too (its pid in $STUB/spawned), then ends.
-  # That it does is checked here, so a spawned file that is missing later means no TERM came. What is under test is
+  # That it does is checked here, so a spawned file that is missing later means no TERM came. It waits on its sleep
+  # with `wait`, so its TERM trap runs at once: with a foreground sleep, bash ran the trap only when the sleep ended, and
+  # a TERM with a KILL within that second left no spawned file (#1435). What is under test is
   # which signals the loop sends to a real process tree and what those processes then do, which no function call
   # shows: so these are real processes, and the case polls for each one's mark file, as each starts in its own time.
   cat > "$STUB/deaf.sh" <<'EOF2'
 deaf() { trap '' TERM; echo "$BASHPID" > "$STUB/spawned"; while :; do sleep 1; done; } # sleep: a stand-in that goes on until it is killed
 trap 'deaf & exit' TERM; : > "$STUB/deafup"
-while :; do sleep 1; done # sleep: a stand-in that goes on until TERM
+while :; do sleep 1 & wait $!; done # sleep: a stand-in that goes on until TERM
 EOF2
   bash "$STUB/deaf.sh" & k=$!; until [ -e "$STUB/deafup" ] || ! kill -0 $k 2>/dev/null; do sleep 0.1; done; kill -TERM $k
   wait $k; until [ -s "$STUB/spawned" ]; do sleep 0.1; done # the one it started on TERM writes its pid as it starts

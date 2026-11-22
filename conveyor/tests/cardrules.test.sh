@@ -209,6 +209,8 @@ t_swerules() {
   [[ $r == "$(cat "$SRC/rules/card-core.md")"* ]] && [[ $r == *PACK-CARD-RULE* ]] && [[ $r == *AREA-RULE-X* ]] && [[ $r != *AREA-RULE-OTHER* ]] \
     || fail "the card's rules are not the core rules, the project's card rules and the area rule of x.py alone: $r"
   jq -e '.areas | keys == ["x.py"]' "$SWE_FX/pack.seen" > /dev/null || fail "the card's pack maps an area its task does not name: $(jq -c .areas "$SWE_FX/pack.seen")"
+  # With P3 off, the task's issue is labelled the least urgent priority whose rule is on, P2 (#1435: a P0 passed too).
+  [ "$(jq -c .labels "$SWE_FX/issue.seen" 2>&1)" = '[{"name":"P2"}]' ] || fail "the task's issue is not labelled P2, the least urgent priority still on: $(cat "$SWE_FX/issue.seen")"
 }
 
 # The benchmark's fix and testFix seats (the repairs of review findings and of failed tests). Bugs: a saved arm took a

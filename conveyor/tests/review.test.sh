@@ -69,7 +69,7 @@ t_land() {
 t_nogo() {
   setup "[$(issue 7 2026-01-01 area:billing)]"; echo "$NOGO" > "$STUB/review.1"; moved 2 "$NOGO" > "$STUB/review.2"; echo "$GO" > "$STUB/review.3"
   { printf 'a%.0s' {1..1500}; echo; cat "$STUB/review.1"; } > "$STUB/review.0"; mv "$STUB/review.0" "$STUB/review.1"
-  # loop: each review's line (its tail, counts, excerpts and reason) is written inline in card(), and the fix sessions' flags are session()'s: afterreview gives neither
+  # loop: each review's line (its tail, counts, excerpts and reason) is written in cardreview(), and the fix sessions' flags are session()'s: afterreview gives neither
   loop run >/dev/null || fail "run exited non-zero"
   # A NO-GO keeps its findings whole in its line's tail (the Board's output of that step): a long line before them in
   # the review does not cut them off, as the reason's length cap would.
@@ -138,7 +138,7 @@ t_nogounproven() {
   setup "[$(issue 7 2026-01-03)]"
   U="UNPROVEN: the sandbox could not start git diff $(printf 'x%.0s' {1..300})"
   printf '%s\n' "$U" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
-  # loop: the block is made inline in card() (card.sh) after the review, which no engine function returns alone.
+  # loop: the block is made in cardfix() (card.sh) after the review, which no engine function returns alone.
   loop run --only 7 >/dev/null
   [ "$(wc -l < "$STUB/sessions")" = 1 ] || fail "a fix session was started for a NO-GO with no finding: $(cat "$STUB/sessions")"
   [ "$(st 'select(.step == "blocked") | .reason')" = "review 1 is NO-GO with no finding to fix: ${U:0:200}" ] \
@@ -340,7 +340,7 @@ t_declinefail() {
 }
 # Bug: card() ignores decline()'s failure after the landing: the depth-capped card ends landed and clean, and its review
 # goes with its worktree. A loop run: the landing, then decline(), then the block that keeps the review are joined
-# inline in card(), which no engine function exposes alone.
+# in cardland() (cardland.sh), which no engine function exposes alone.
 t_declinefailrun() {
   # Its last NO-GO is a P2 back after its one fix round (the last review, as a third NO-GO is), in two reviews.
   setup "[$(issue 7 2026-01-01 conveyor-followup bug P1 | jq -c '.body = "Follow-up depth: 2"')]"; provenbug

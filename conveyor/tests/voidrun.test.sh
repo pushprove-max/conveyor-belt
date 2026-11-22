@@ -14,10 +14,10 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # run the plan names `<run> term` it is killed by TERM as it begins, before its runner logs a line, as the service
 # stopping killed it. The TERM goes to the run's timeout (testonce()), the parent of the per-file command (filecmd(),
 # lib/testrun.sh), whose own timeout of the file is the stub's parent ($PPID): TERM to that one would end only the file,
-# which filecmd() logs as failed, a result.
+# which filecmd() logs as failed, a result. Each run killed so is a line of $STUB/termed.
 voidsetup() { # <plan lines>
   rerunsetup "$@"; rerunfiles
-  echo '! grep -qxF "$n term" "$STUB/plan" || { kill -TERM "$(ps -o ppid= -p "$(ps -o ppid= -p "$PPID" | tr -d " ")")"; sleep 30; }' > "$STUB/pre" # sleep: until the TERM sent to the run's timeout (testonce()) ends the run; tr: ps pads a short PID with spaces, which ps -p refuses
+  echo '! grep -qxF "$n term" "$STUB/plan" || { echo "$n" >> "$STUB/termed"; kill -TERM "$(ps -o ppid= -p "$(ps -o ppid= -p "$PPID" | tr -d " ")")"; sleep 30; }' > "$STUB/pre" # sleep: until the TERM sent to the run's timeout (testonce()) ends the run; tr: ps pads a short PID with spaces, which ps -p refuses
 }
 voidsteps() { st 'select(.step == "test" or .step == "fix") | [.step, .result, (.reason // "" | select(. != "") | sub(": .*"; ""))] | join(" ")' | tr '\n' ,; }
 
@@ -45,6 +45,9 @@ t_voidrun() {
   # Main's run is of the failing file alone (mainred.sh verdicts(): its list names each failing file, not its cases).
   [ "$(tline 1 '[.verdicts, .mainRun] | tojson')" = '[null,null]' ] && [ "$(sed -n 's/^fail\t//p' "$STUB/rerun.main" | tr '\t\n' ':|')" = "c.test|" ] \
     || fail "a run with no result ran on main: $(tline 1 tojson): $(cat "$STUB/rerun.main" 2>&1)"
+  # Main's run of the case was killed: the stub sent the TERM, and the test line's main run ended on it (exit 143).
+  # #1435: a main run that passed gives the same verdict below, so the kill is checked here.
+  grep -qx main "$STUB/termed" && [ "$(tline 2 '.mainRun.exit')" = 143 ] || fail "main's run of c.test was not killed: $(cat "$STUB/termed" 2>&1), $(tline 2 .mainRun)"
   [ "$(tline 2 '.verdicts | tojson')" = '[{"case":"c.test: three","verdict":"card"}]' ] || fail "a killed run on main gave the case to main: $(tline 2 .verdicts)"
 }
 

@@ -39,9 +39,11 @@ t_swearms() {
 
 # Bug (#338): an arm on the builder's model keeps each model's results under a key of its own, but the results and
 # diff called both keys by the arm's label alone, so two models' runs could not be told apart. An arm of a fixed model
-# (its key is its name) has the model in its label already, and was named with it twice.
+# (its key is its name) has the model in its label already, and was named with it twice. results and diff read only
+# the result files the case writes in the state folder's bench/swe, so it makes no SWE-bench fixture (swe()).
 t_swearmmodel() {
-  swe; local m out
+  local m out B
+  setup '[]'; B=$ST/bench/swe
   for m in m1 m2; do
     mkdir -p "$B/results/stub-a-$m" && jq -nc --arg m "$m" '{task: "proj__a-1", arm: "stub-a", label: "Stub a", key: "stub-a-\($m)", engine: null, version: null,
       model: $m, resolved: true, fired: true, sessions: 1, tokens: 7, minutes: 1}' > "$B/results/stub-a-$m/proj__a-1.json" || fail "the results could not be written"

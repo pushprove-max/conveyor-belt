@@ -24,6 +24,7 @@ t_relreuse() {
   local O RUN out
   relreusesetup 'exit 1'
   out=$(loop release-run 1.1.0 2>&1) && grep -q 'with the suite that passed on' <<<"$out" || fail "release-run did not start release alone on the pass: $out"
+  # A poll: release-run starts the release in the background and returns, and only the run's record shows its end.
   relwait "the run did not end" '.step == "release" and .ended != null'
   [ ! -e "$STUB/runs" ] || fail "the suite ran again on the commit it passed on: $(cat "$T/$CASE/cards/release/run.log")"
   jq -e --arg o "$O" '.state == "released" and .sha == $o and .done == 3' "$RUN" > /dev/null || fail "release did not release the passed commit $O: $(cat "$RUN") $(cat "$T/$CASE/cards/release/run.log")"
@@ -38,6 +39,7 @@ t_relreusemoved() {
   git -C "$R" commit -q --allow-empty -m 'fix: landed after the pass' && git -C "$R" push -q origin main || fail "the fixture could not be made"
   new=$(git -C "$R" rev-parse HEAD)
   out=$(loop release-run 1.1.0 2>&1) && grep -q 'release-prep 1.1.0 is running' <<<"$out" || fail "release-run did not start release-prep: $out"
+  # A poll: release-run starts release-prep, then release, in the background, and only the run's record shows the end.
   relwait "the run did not end" '.step == "release" and .ended != null'
   [ "$(wc -l < "$STUB/runs" 2>/dev/null)" = 1 ] && [ "$(cat "$STUB/full-at")" = "$new" ] || fail "the suite did not run once on the new head $new: $(cat "$STUB/full-at" 2>&1)"
   jq -e --arg n "$new" '.state == "released" and .sha == $n' "$RUN" > /dev/null || fail "release did not release the tested head: $(cat "$RUN")"

@@ -35,7 +35,8 @@ la_nofull() { # <args...>
 # D<n> lines on the build line) and tests: a run of two cases of one file (its why names a second file, which the test
 # cache kept off: the body must not list it as run), then a pass that reused that run (its line
 # names no test, as card() writes it), then later runs that must not hide the cases run before: one that names both
-# files and no case (the cache kept them all), one that ran one case of a third file only, one that selected that file
+# files and no case (the cache kept them all), one that ran one case of a third file and case one of the first again
+# (the body names each case once: #1435), one that selected that file
 # and no case (its times carried from the run before), and one that selected no file. With <fix rounds>, that many
 # fix lines come before the tests. The lines are made as record() makes them (line()), then appended in one state
 # database call, not one call a line as record() makes.
@@ -48,7 +49,7 @@ la_land() { # <n> [<fix rounds>]
     $fx line c$1 $1 test pass '{\"ended\":\"passed\",\"tests\":{\"passed\":4,\"failed\":0},\"ran\":[\"t/a.test.sh\"],\"why\":{\"t/a.test.sh\":[\"changed\"],\"t/b.test.sh\":[\"passed before with the same inputs\"]},\"ranCases\":{\"t/a.test.sh\":[\"one\",\"two\"]}}' &&
     line c$1 $1 test pass '{\"sec\":1,\"usage\":{\"input\":0,\"write\":0,\"write1h\":0,\"read\":0,\"output\":0},\"reused\":true}' &&
     line c$1 $1 test pass '{\"ended\":\"passed\",\"tests\":{\"passed\":0,\"failed\":0},\"ran\":[\"t/a.test.sh\",\"t/c.test.sh\"],\"ranCases\":{}}' &&
-    line c$1 $1 test pass '{\"ended\":\"passed\",\"tests\":{\"passed\":1,\"failed\":0},\"ran\":[\"t/c.test.sh\"],\"ranCases\":{\"t/c.test.sh\":[\"three\"]}}' &&
+    line c$1 $1 test pass '{\"ended\":\"passed\",\"tests\":{\"passed\":2,\"failed\":0},\"ran\":[\"t/a.test.sh\",\"t/c.test.sh\"],\"ranCases\":{\"t/a.test.sh\":[\"one\"],\"t/c.test.sh\":[\"three\"]}}' &&
     line c$1 $1 test pass '{\"ended\":\"passed\",\"tests\":{\"passed\":null,\"failed\":null},\"selected\":{\"files\":1,\"filesOf\":null,\"cases\":0,\"casesOf\":12,\"kept\":1},\"carried\":[\"t/c.test.sh\"],\"times\":{\"t/c.test.sh\":1}}' &&
     line c$1 $1 test pass '{\"ended\":\"nothing selected\",\"tests\":{\"passed\":0,\"failed\":0},\"selected\":{\"files\":0,\"filesOf\":12,\"cases\":null,\"casesOf\":null}}' &&
     line c$1 $1 landed ok '{\"sha\":\"$sha\",\"product\":false}') && locked append \"\$l\"" \
@@ -105,7 +106,7 @@ t_landpr() {
   body=$(jq -r .body "$STUB/pr.7")
   [ "$(grep -o '^Closes #[0-9]*' <<<"$body" | paste -sd ' ')" = 'Closes #1 Closes #2' ] || fail "the body does not close both issues, in landing order: $body"
   want=$(printf '%s\n' '## #2 T2' '' 'Closes #2' '- Card: `c2`' '- Done when: 2 of 2 met' '  - D1 met: t/a.test.sh case one' '  - D2 met: f2.txt holds 2' \
-    '- Fix rounds: 2' '- Tests: passed, 1 passed, 0 failed' '  - `t/a.test.sh`: one, two' '  - `t/c.test.sh`: three')
+    '- Fix rounds: 2' '- Tests: passed, 2 passed, 0 failed' '  - `t/a.test.sh`: one, two' '  - `t/c.test.sh`: three')
   [ "$(awk '/^## / {p = ($0 == "## #2 T2")} p && NF' <<<"$body")" = "$(grep . <<<"$want")" ] || fail "card 2's part of the body is not its Done-when lines, its fix rounds and the tests it ran: $body"
   # Card 1 has none: with card 2's two, a count fixed at any one value fails one of these checks.
   [ "$(awk '/^## / {p = ($0 == "## #1 T1")} p && /^- Fix rounds:/' <<<"$body")" = '- Fix rounds: 0' ] || fail "card 1's part of the body does not give its zero fix rounds: $body"

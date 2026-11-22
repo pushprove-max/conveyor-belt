@@ -185,6 +185,11 @@ test('Control: a red run lists each failed case and its outcome, and Push anyway
   next(w, data({ fullTest: { command: true, why: null, running: null, last: { ...RED, state: 'passed', exit: 0, cases: [], pushed: { ok: true, reason: null } } } }));
   assert.equal(act(pushP(w), 'push-anyway'), null);
   assert.match(part(w, 'full-test').textContent, new RegExp(`Passed on ${A.slice(0, 12)}; pushed ${A.slice(0, 12)}`));
+  // Bug (#1435): Push landed's red run whose every failed case passed alone (state flaky) pushed, but read as one that
+  // did not run. It says the cases were flaky and that it pushed, and offers no Push anyway.
+  next(w, data({ fullTest: { command: true, why: null, running: null, last: { ...RED, state: 'flaky', cases: [RED.cases[1]], pushed: { ok: true, reason: null } } } }));
+  assert.equal(act(pushP(w), 'push-anyway'), null);
+  assert.match(part(w, 'full-test').textContent, new RegExp(`Flaky on ${A.slice(0, 12)}: 1 case failed in the run and passed alone each time; pushed ${A.slice(0, 12)}`));
   // The push over a red suite is shown as the owner's.
   next(w, data({ fullTest: { command: true, why: null, running: null, last: { ...RED, kind: 'anyway', by: 'Board user owner', pushed: { ok: true, reason: null } } } }));
   assert.match(part(w, 'full-test').textContent, new RegExp(`Board user owner pushed over a red suite: pushed ${A.slice(0, 12)}`));

@@ -345,16 +345,29 @@ t_serverun() {
 
 # One push carries three landings, and GitHub keeps the issue of the first of them open. The three are
 # asked about in turn under one wait: the other two have their issue line at once, not after the first one's wait
-# (asked one after the other, the last card of a long batch was dropped from the belt before its answer came).
+# (asked one after the other, the last card of a long batch was dropped from the belt before its answer came). The
+# push is the engine's push() of the newest landing, in the shell the three landed in, as the loop calls it.
 t_servebatch() {
-  servesetup; serveeng "$SRC" 'stubland 11; stubland 12; stubland 13' || fail "three cards did not land for the batch"
-  open=$(st 'select(.step == "landed" and .issue > 10) | .issue' | head -n 1); echo OPEN > "$STUB/state.$open"
-  tuned '.tunables.closeWait = 6' loop run > /dev/null 2>&1 || fail "the run that pushes the batch failed"
+  local open=11
+  servesetup; echo OPEN > "$STUB/state.$open"; tune '.tunables.closeWait = 6'
+  serveeng "$SRC" 'stubland 11 && stubland 12 && stubland 13 || exit 1; push c13 13 > /dev/null' || fail "three cards did not land, or their push failed"
   [ "$(st 'select(.step == "pushed" and .issue > 10) | .issue' | wc -l)" = 3 ] || fail "the batch push did not mark its three cards pushed"
   [ "$(jq -cs --argjson o "$open" 'map(select(.issue > 10 and (.step | IN("pushed", "issue")))) | (map(select(.step == "pushed") | .time | fromdate) | max) as $p
       | map(select(.step == "issue")) | [(map(.result) | join(" ")), (.[2].issue == $o), (.[2].reason | test("still shows the issue open")), (.[:2] | all((.time | fromdate) - $p < 4)), ((.[2].time | fromdate) - $p >= 5)]' "$S/cards.jsonl")" \
     = '["ok ok fail",true,true,true,true]' ] || fail "the issue checks of a batch push were not made in turn under one wait: $(st 'select(.issue > 10 and (.step | IN("pushed", "issue"))) | "\(.issue) \(.step) \(.result) \(.time) \(.reason)"' | tr '\n' ,)"
-  loopend
+}
+
+# Bug this guards (#1435, issue 1078 item 4): a Push now refused with nothing unpushed wrote no result, so the
+# snapshot's push status (the Board's, and /units') kept showing the push that passed before it. The pass is the
+# engine's push() of a landing, as t_servebatch makes it; then the refusal is the last push: by now, not started, why.
+t_pushnowrefused() {
+  servesetup
+  serveeng "$SRC" 'stubland 11 || exit 1; push c11 11 > /dev/null' || fail "card 11 did not land, or its push failed"
+  [ "$(loop health | jq -c '.pushLast | [.by, .ok]')" = '["loop",true]' ] || fail "the push before the Push now is not the last push: $(loop health | jq -c .pushLast)"
+  out=$(loop push-now 2>&1); [ $? = 2 ] && grep -q 'no landed commit' <<<"$out" || fail "push-now with nothing unpushed was not refused: $out"
+  s=$(loop snapshot --fresh)
+  jq -e --arg a "$(git -C "$R" rev-parse --short=12 HEAD)" '.health.pushLast | .by == "now" and .started == false and .ok == false and .why == "no landed commit of main (\($a)) is unpushed"' <<<"$s" > /dev/null \
+    || fail "loop push-now refused with nothing unpushed does not show as the last push, with its reason: $(jq -c .health.pushLast <<<"$s")"
 }
 
 # Bugs: a push holds up the next pick; two landings during one push bring two more pushes, or a push is started

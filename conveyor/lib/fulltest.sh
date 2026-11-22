@@ -19,7 +19,8 @@
 # an ancestor, only the files that failed there, those the commits since change and those the changed-tests command
 # selects for them run (the command is told the list by the file CONVEYOR_SUITE_FILES names), and the other files keep
 # that run's ok; else the whole suite runs. Its results go to $SUITES (suitekeep()), for the next run of any of them.
-# A red run pushes nothing. Each case that failed (testfails(): "<file>: <case>", the file alone for a file that failed
+# A red run pushes nothing, but for Push landed's whose every failed case is judged flaky (below): that run, state
+# flaky, pushes as a green one does. Each case that failed (testfails(): "<file>: <case>", the file alone for a file that failed
 # naming no case or ran out of time) is run alone FULL_ALONE times on the same commit: the command is told, in its
 # CONVEYOR_TEST_RERUN list (README.md, The test step), that every other file of the run passed and, of the case's
 # file, to run that case alone. It is then judged as the nightly whole test judges a case:
@@ -35,7 +36,7 @@
 # A run that cannot start (its worktree, its test slots) tested nothing: its line says why (state error).
 # $FULLTEST (fulltest.jsonl) keeps a line for each run as it ends and for each push anyway: time, id (12 hex digits of
 # its own), kind (run or anyway),
-# push (asked to push), sha (the commit run or pushed), state (passed, failed or error, with reason), exit, cases (a red
+# push (asked to push), sha (the commit run or pushed), state (passed, flaky, failed or error, with reason), exit, cases (a red
 # run's: each {case, line, runs: each run alone, passed, failed, timeout or killed, verdict: flaky, fix or declined, why,
 # issue, reused}; an anyway line's: those of the red run it pushed over), pushed ({ok, reason}; null: nothing was to be
 # pushed), by (who pushed anyway) and reused (a run's: null for a whole suite, else {sha, time, ran, kept, machine}: the
@@ -223,30 +224,37 @@ fulltest() { # [push | anyway <run id> [--by <who>]]
 # `conveyor.sh push-now` (the Board's "Push now"): what landed and is not pushed, pushed as the loop pushes it while the
 # rule "Push when a card lands" is on, with no full test run: push() of main through the project's pre-push hook, under
 # the card of the newest landing origin lacks, a failure recorded as that card's push line (kind check or transport).
-# Refused (exit 2), with the reason and nothing changed, when main holds no landed commit origin lacks, while a full
+# Refused (exit 2), with the reason and nothing pushed, when main holds no landed commit origin lacks, while a full
 # test run holds its lock (Run full test suite, Push landed or Push anyway), or while a release run is under way
-# (relshare()). The ask returns once the push has started:
+# (relshare()); a refusal is written as the last push (nowrefused()), so the Board and /units say why rather than
+# show the push before it. The ask returns once the push has started:
 # it goes on in the background (its output in $PUSHNOW_LOG, the pre-push hook's in the push's own log: push()), so the
 # Board is not kept waiting for the pre-push hook.
 PUSHNOW_LOG=${STATE%/*}/pushnow.log
 pushnow() {
-  local lk hk sha o c n
+  local lk hk sha o c n rc
   [ $# = 0 ] || { echo "usage: conveyor.sh push-now" >&2; return 2; }
   mkdir -p "$CARDS/fulltest" && { exec {lk}>>"$FULLTEST.lock"; } 2>/dev/null || { echo "conveyor: the full test's lock could not be made; nothing pushed" >&2; return 1; }
-  flock -n "$lk" || { exec {lk}>&-; echo "conveyor: a full test run is under way$(jq -r '" (\(.how), since \(.since), on \(.sha[0:12]))"' "$FULLTEST.running" 2>/dev/null); nothing pushed" >&2; return 2; }
+  flock -n "$lk" || { exec {lk}>&-; nowrefused "a full test run is under way$(jq -r '" (\(.how), since \(.since), on \(.sha[0:12]))"' "$FULLTEST.running" 2>/dev/null)"; return 2; }
   exec {lk}>&-
   sha=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}") || { echo "conveyor: main could not be read; nothing pushed" >&2; return 1; }
-  o=$(fullowed "$sha") || { echo "conveyor: no landed commit of main (${sha:0:12}) is unpushed; nothing pushed" >&2; return 2; }
+  o=$(fullowed "$sha") || { nowrefused "no landed commit of main (${sha:0:12}) is unpushed"; return 2; }
   read -r c n <<<"$o"
   # The share of the release hold is taken here, before the answer says main is pushed, and the job keeps it to its
   # end (RELKEPT, push()): a release run that begins meanwhile waits for the push rather than refusing it.
-  relshare || return
+  relshare || { rc=$?; [ $rc != 2 ] || nowrefused "$RELNOPUSH" quiet; return $rc; }
   # The push file names this job while it pushes (pushing()), and push() clears it and writes the push's result,
   # by now, at the end (pushlast()); $PUSHNOW_LOG gets push()'s line naming the push's own log at once.
   ( trap '' HUP; exec {LOGFD}>&- && exec {LOGFD}>&2
     RELKEPT=$hk PUSHBY=now push "$c" "$n" ) > "$PUSHNOW_LOG" 2>&1 < /dev/null 8>&- &
   exec {hk}>&-
   echo "conveyor: main (${sha:0:12}) is being pushed through the pre-push hook, with no full test run"
+}
+# A Push now refused for <why>: says so (with quiet, the caller already did) and writes it as the last push that
+# ended (pushlast(), lib/push.sh: by now, started false, why), the result health, the Board and /units show.
+nowrefused() { # <why> [quiet]
+  [ -n "${2:-}" ] || echo "conveyor: $1; nothing pushed" >&2
+  pwhy=$1 pcheck='' plog='' PUSHBY=now pushlast '' ''
 }
 # The share of the release hold (holdtake(), lib/push.sh) of a push that the caller starts in the background, in the
 # caller's hk, for the push to keep (RELKEPT, push()). Refused (exit 2, the reason RELNOPUSH) while a release run is
@@ -322,6 +330,11 @@ fullrun() { # <run | push | anyway> <commit> <command> <"card issue" to push und
     # Each case run alone below runs in this worktree and starts a new log folder: the suite's counts are kept first.
     jq -c --slurpfile p <(suiteprog "$wt") '. + {counts: $p[0]}' "$FULLTEST.running" > "$FULLTEST.running.new" 2>/dev/null && mv -f "$FULLTEST.running.new" "$FULLTEST.running"
     cases=$(fulljudge "$wt" "$sha" "$3" "$f") || cases='[]'
+    # Push landed pushes a red run whose every failed case passed alone each time (flaky, on the flaky-test record):
+    # the code passed, only the run did not (#1079 item 1). The run's state is flaky.
+    if [ "$how" = push ] && jq -e 'length > 0 and all(.verdict == "flaky")' <<<"$cases" > /dev/null 2>&1; then
+      state=flaky; pushed=$(fullpush "$sha" "$c" "$n")
+    fi
   fi
   git worktree remove --force "$wt" 2>/dev/null; rm -rf "$wt".*
   fullline "$(jq -cn --arg s "$sha" --argjson p "$([ "$how" = push ] && echo true || echo false)" --arg st "$state" --argjson rc "$rc" --slurpfile c <(printf '%s' "$cases") --argjson pu "$pushed" --slurpfile u <(printf '%s' "$reused") \

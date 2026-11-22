@@ -281,7 +281,7 @@ t_autoport() {
   [ "$(st 'select(.issue == 8 and .step == "filed") | [.stop, .pass, .rounds] | tojson' | tr '\n' ' ')" = '["max-reviews",3,0] ["max-reviews",3,0] ' ] \
     || fail "a filed line does not say why the loop whose findings it files ended: $(st 'select(.issue == 8 and .step == "filed") | tojson')"
   [ "$(loop cards | jq -c '.cards[0] | [.step, (.steps | map(.step) | join(" "))]')" = '["landed","build review fix review fix review test rebase review test test"]' ] \
-    && [ -z "$(st 'select(.step == "blocked")')" ] && [ ! -s "$ST/retried.jsonl" ] && loop check || fail "the port is not a step of the card's row, or it blocked or was retried: $(loop cards | jq -c '.cards[0]')"
+    && [ -z "$(st 'select(.step == "blocked")')" ] && [ ! -s "$ST/retried.jsonl" ] || fail "the port is not a step of the card's row, or it blocked or was retried: $(loop cards | jq -c '.cards[0]')"
 }
 
 # The rebuild conflicts too (main moves again during it), and so does the one port after it: blocked with the

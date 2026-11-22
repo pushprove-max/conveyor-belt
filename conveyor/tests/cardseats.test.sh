@@ -48,6 +48,7 @@ t_cardseatrun() {
   printf '%s\n' '[P1] a.txt:2 wrong word' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"; cp "$STUB/review.1" "$STUB/review.2"
   printf '%s\n' 'USER-VISIBLE: no' 'VERDICT: GO' > "$STUB/review.3"
   echo 'F1 DECLINE: no' > "$STUB/judge"
+  # loop: only whole cards of one run show each card's seats kept to it, through its build, review, judge and port
   : > "$STUB/sessions"; loop run >/dev/null || fail "run exited non-zero"
   [ "$(st 'select(.step == "build") | "#\(.issue) \(.model) \(.effort)"' | sort | tr '\n' ,)" = "#7 m2 high,#8 m medium," ] \
     || fail "the builds did not run on each card's builder: $(st 'select(.step == "build") | [.issue, .model, .effort] | tostring' | tr '\n' ' ')"
@@ -86,6 +87,7 @@ t_cardseatfix() {
   # The changed tests fail, every run, until the session told they fail has run.
   echo 'echo two >> a.txt; ! grep -q "The changed tests fail" "$STUB/brief" || touch "$STUB/testfixed"' > "$STUB/build"
   echo '[ -e "$STUB/testfixed" ] || { echo "FAIL a.test.sh"; exit 1; }' > "$STUB/test-cmd"
+  # loop: only a whole card has the review's fix and then the failed tests' fix in turn, each on its own seat
   : > "$STUB/sessions"; loop run >/dev/null || fail "run exited non-zero"
   [ "$(st 'select(.issue == 7 and (.step | IN("build", "fix"))) | "\(.step) \(.model) \(.effort)"' | tr '\n' ,)" = "build m medium,fix m2 high,fix m2 medium," ] \
     || fail "the build, review fix and test fix did not run on builder, fix and testFix: $(st 'select(.issue == 7) | [.step, .result, .model, .effort] | tostring' | tr '\n' ' ')"
@@ -225,11 +227,11 @@ t_cardpickoc() {
   seatsetup "[$(issue 7 2026-01-01)]"
   tune '.models.allowed.opencode = ["opencode:prov/mod-1"]'
   jq -c '.judge = {cli: "opencode", model: "opencode:prov/mod-1", effort: "high"}' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
-  jq -cn '{type: "text", part: {type: "text", text: "{\"builder\": {\"model\": \"opencode:prov/mod-1\", \"effort\": null, \"why\": \"cheap\"}, \"reviewer\": {\"model\": \"x\", \"effort\": \"low\", \"why\": \"small\"}, \"judge\": {\"model\": \"j\", \"effort\": \"medium\", \"why\": \"fine\"}}"}}' > "$STUB/oc-answer"
-  printf '%s\n' '#!/usr/bin/env bash' 'cat > "$STUB/oc-asked"; echo "$*" > "$STUB/oc-run"; cat "$STUB/oc-answer"' > "$STUB/opencode"; chmod +x "$STUB/opencode"
+  # The shared opencode stub (tests/stubs/opencode) answers it, and logs the ask (brief) and its arguments (sessions).
+  echo '{"builder": {"model": "opencode:prov/mod-1", "effort": null, "why": "cheap"}, "reviewer": {"model": "x", "effort": "low", "why": "small"}, "judge": {"model": "j", "effort": "medium", "why": "fine"}}' > "$STUB/opencode-answer"
   out=$(loop control card 7 pick 2>&1) || fail "Pick for me with an OpenCode judge failed: $out"
   [ "$(jq -c '[.builder.effort, .model]' <<<"$out")" = '[null,"opencode:prov/mod-1"]' ] || fail "the pick of an OpenCode builder: $out"
-  grep -q -- '-m prov/mod-1 --variant high' "$STUB/oc-run" && grep -qx 'body of 7' "$STUB/oc-asked" || fail "OpenCode was not asked as the judge: $(cat "$STUB/oc-run")"
+  grep -q -- '-m prov/mod-1 --variant high' "$STUB/sessions" && grep -qx 'body of 7' "$STUB/brief" || fail "OpenCode was not asked as the judge: $(cat "$STUB/sessions")"
 }
 
 # Bugs: Pick for me called the judge on the builder's route (through the builder's proxy); and on the reviewAccount

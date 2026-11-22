@@ -60,6 +60,7 @@ fi
 J='{"model":"m","tokens":{"claude":5,"codex":0},"accepted":[],"declined":[]}' # a judge session on the review
 if [ "$V" = B ] && [[ $t == *a-1 ]]; then rec review NO-GO '[P1] x.py:1 the fix is wrong' "$J" '' '{"P0":0,"P1":2,"P2":1,"P3":0}'; rec fix ok; rec review NO-GO '[P1] x.py:1 still wrong' "$J" $'[P1] x.py:1 still wrong\n[P2] y.py:2 past the cut reason' '{"P0":0,"P1":1,"P2":1,"P3":0}'; rec blocked blocked 'review: the last review said NO-GO'; exit 0; fi
 cp "$CONVEYOR_MAIN/conveyor/state/control.json" "$SWE_FX/control.seen"; cp "$CONVEYOR_MAIN/.conveyor/project.json" "$SWE_FX/pack.seen"; (set -- run; HERE=$SWE_SRC; . "$SWE_SRC/lib/paths.sh" && . "$SWE_SRC/lib/prompts.sh" && cardrules "$(gh issue view 1)") > "$SWE_FX/rules.seen" 2>&1
+gh issue view 1 > "$SWE_FX/issue.seen" 2>&1 # the task's issue, as the card's gh gives it (its priority label)
 cat "$HOME/.codex/auth.json" > "$SWE_FX/codex.seen" 2>/dev/null || :
 # The Codex sandbox the engine under test gives a review in this container (codexsb()).
 (set -- run; HERE=$SWE_SRC; . "$SWE_SRC/lib/paths.sh" && . "$SWE_SRC/lib/control.sh" && codexsb read-only && echo "${CODEX_SB[*]}") > "$SWE_FX/sandbox.seen" 2>&1
@@ -574,6 +575,8 @@ t_sweharness() {
   h grade o/ds rev1 o__p-9 "$C/patch" "$C/grade9" r1 > /dev/null; [ $? = 3 ] || fail "a task missing from the dataset was not reported as one the harness could not run"
   # Bug: `bench swe stop` sends SIGTERM to the grade, which then ended without removing its cache and the row in it.
   : > "$C/hold"; SWE_HOLD=$C/hold h grade o/ds rev1 o__p-1 "$C/patch" "$C/gradestop" r1 > /dev/null 2>&1 &
+  # A poll: what is tested is what a real grade process does on SIGTERM with the official harness under it, which no
+  # function call shows, and the grade reaches the harness (it writes its parent's pid) in its own time.
   wait_until "[ -s '$C/hold.pid' ]" || { rm -f "$C/hold"; fail "the stopped grade did not reach the official harness"; }
   kill -TERM "$(cat "$C/hold.pid")"; wait $!; rm -f "$C/hold"
   [ -z "$(ls -A "$C/tmp")" ] && ! grep -rlE 'REFFIX|HIDDENTEST' "$C" || fail "a grade stopped with SIGTERM left its cache, with the reference fix and hidden tests, on disk"

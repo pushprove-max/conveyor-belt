@@ -70,6 +70,7 @@
   function lastHead(x, at, cases, pushed) {
     if (x.kind === 'anyway') return `${x.by || 'The owner'} pushed over a red suite: ${pushed}`;
     if (x.state === 'passed') return `Passed on ${at}; ${pushed}`;
+    if (x.state === 'flaky') return `Flaky on ${at}: ${cases.length} ${cases.length === 1 ? 'case' : 'cases'} failed in the run and passed alone each time; ${pushed}`;
     if (x.state === 'failed') return `Failed on ${at}: ${cases.length} ${cases.length === 1 ? 'case' : 'cases'} failed, and Conveyor pushed nothing${x.push ? '. When main is green, press Push landed again.' : ''}`;
     return `Did not run on ${at}: ${x.reason || 'Conveyor recorded no reason'}`;
   }

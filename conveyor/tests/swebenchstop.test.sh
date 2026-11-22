@@ -35,10 +35,13 @@ t_swestop() {
   swe; local p out id
   : > "$SWE_FX/hold"
   loop bench swe 2 > "$T/$CASE/run.out" 2>&1 &
+  # A poll: only a running trial has what Stop must end (the run, the sandbox's loop and the trial's
+  # container), and the trial reaches its build in its own time.
   wait_until "[ -s '$SWE_FX/pid' ]" || fail "the task's build did not start"
   p=$(cat "$SWE_FX/pid"); id=$(jq -r .id "$B/live.json"); swecheckbox
   out=$(loop bench swe stop "$id" 2>&1) || fail "stop failed: $out"
   [ "$out" = "conveyor: run $id is stopped. Its finished tasks are kept." ] || fail "Stop did not say the run is stopped: $out"
+  # A poll: the sandbox's loop is a real process that Stop's signal ends in its own time.
   wait_until "! kill -0 $p 2>/dev/null" || fail "the engine loop of the sandbox still runs after Stop"
   wait $! 2>/dev/null
   # Bug (#646 review E3): the arm's active time left out the work Stop interrupted: its wall minutes are kept. A run
@@ -59,6 +62,7 @@ t_swestopgrade() {
   swe; local out id other=sweb.eval.proj__a-1.conveyor-r20261119T000000-1-proj__a-1
   : > "$SWE_FX/ghold"; mkdir -p "$SWE_FX/boxes/$other"
   loop bench swe 1 --arm stub-a > "$T/$CASE/run.out" 2>&1 &
+  # A poll: only a running trial's grade has the container Stop must remove, and it starts in its own time.
   wait_until "ls '$SWE_FX/boxes' | grep -v '^$other\$' | grep -q '^sweb\\.eval\\.'" || fail "the grade's container did not start: $(cat "$T/$CASE/run.out")"
   id=$(jq -r .id "$B/live.json")
   out=$(loop bench swe stop "$id" 2>&1); rm -f "$SWE_FX/ghold"
@@ -72,6 +76,7 @@ t_swestoppre() {
   swe; local out id
   : > "$SWE_FX/phold"
   loop bench swe 1 --arm stub-slow > "$T/$CASE/run.out" 2>&1 &
+  # A poll: only a running preflight has the container Stop must remove, and it starts in its own time.
   wait_until "[ -n \"\$(ls '$SWE_FX/boxes' 2>/dev/null)\" ]" || fail "the preflight's container did not start"
   id=$(jq -r .id "$B/live.json")
   out=$(loop bench swe stop "$id" 2>&1); rm -f "$SWE_FX/phold"
@@ -112,6 +117,8 @@ t_swestopstale() {
   out=$(loop bench swe 1 2>&1) || fail "the first run failed: $out"
   a=$(jq -r .id "$B/live.json"); rm -f "$SWE_FX/pid"; : > "$SWE_FX/hold"
   loop bench swe 2 > "$T/$CASE/run.out" 2>&1 &
+  # A poll: only a second run still running shows that a late Stop of the first leaves it running, and it reaches its
+  # build in its own time.
   wait_until "[ -s '$SWE_FX/pid' ]" || fail "the second run's build did not start"
   p=$(cat "$SWE_FX/pid"); b=$(jq -r .id "$B/live.json")
   out=$(loop bench swe stop "$a" 2>&1) && [ "$out" = "conveyor: run $a finished before Stop." ] || fail "the late Stop did not say its run had ended: $out"

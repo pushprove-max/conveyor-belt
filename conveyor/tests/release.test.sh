@@ -159,7 +159,8 @@ t_reldraft() {
   [ "$(jq -c '.cards' "$cards")" = "$s" ] && jq -e '.state == "refused" and .notes == null and (.reasons | any(contains("1.1.0.md:8: a Closes line")))' "$run" > /dev/null \
     || fail "a draft that still breaks the style started a card, or its run is not refused with the check's lines: $(cat "$cards" "$run")"
 
-  printf '#!/usr/bin/env bash\nexit 1\n' > "$STUB/claude"
+  # stub: the shared claude stub put back (relmodels replaced it), its call exiting 1 (claude-rc)
+  cp "$SRC/tests/stubs/claude" "$STUB/claude" && echo 1 > "$STUB/claude-rc" || fail "the fixture could not be made"
   echo '# an earlier draft' > "$ST/release/1.1.0.md" || fail "the fixture could not be made"
   out=$(loop release-prep 1.1.0 2>&1); [ $? = 1 ] && grep -q 'the notes draft could not be written: the model gave no notes (exit 1' <<<"$out" \
     || fail "release-prep does not say the model gave no notes: $out"

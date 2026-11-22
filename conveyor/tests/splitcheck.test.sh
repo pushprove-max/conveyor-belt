@@ -23,7 +23,8 @@
 # on main's f.test.sh too. Else a run of one other file (test.fileCommand, as `test-changed.sh --file` selects that
 # file alone) does not run g.test.sh. Either failure makes the run exit 1, its
 # files named in its log. Each run adds a line to $STUB/runs (the file it names and the checkout it runs in), and each
-# run of g.test.sh its checkout to $STUB/ran-g. The check's exit is in $RC and the first line of what the review is shown in
+# run of g.test.sh its checkout to $STUB/ran-g, and each time line it writes of a file that file's name to $STUB/timed. A
+# run of one file (CONVEYOR_TEST_FILE) runs that file of the list alone. The check's exit is in $RC and the first line of what the review is shown in
 # $WHY.
 # The files given after <change> are those the split adds.
 splitrun() { # <change> <cpu f.test.sh> <cpu f1.test.sh> <cpu f2.test.sh> <cpu probe> [<added file>...]
@@ -50,6 +51,8 @@ elif [ -e "$STUB/other-fail" ]; then
 fi
 while IFS=$'\t' read -r k f c; do
   [ "$k" = fail ] && [ "$f" != g.test.sh ] || continue
+  # A run of one file (test.fileCommand) runs that file alone, as `test-changed.sh --file` does.
+  [ -z "${CONVEYOR_TEST_FILE:-}" ] || [ "$f" = "$CONVEYOR_TEST_FILE" ] || continue
   if [ -n "$c" ]; then
     [ ! -e "$STUB/probe-whole" ] || printf '== %s\nok one\n-- ok %s\n' "$f" "$f"
     x=$(cat "$STUB/cpu-probe"); [ -z "$x" ] || printf 'TESTRUN sec\t%s\t1\t%s\n' "$f" "$x" >> "$CONVEYOR_TEST_LOG/r"; continue
@@ -59,7 +62,7 @@ while IFS=$'\t' read -r k f c; do
   else
     printf '== %s\nok one\n-- ok %s\n' "$f" "$f"; [ ! -e "$STUB/other-fail" ] || printf '== %s\n-- ok %s\n' "$f" "$f" >> "$CONVEYOR_TEST_LOG/r"
   fi
-  printf 'TESTRUN sec\t%s\t1\t%s\n' "$f" "$(cat "$STUB/cpu-$f")" >> "$CONVEYOR_TEST_LOG/r"
+  printf 'TESTRUN sec\t%s\t1\t%s\n' "$f" "$(cat "$STUB/cpu-$f")" >> "$CONVEYOR_TEST_LOG/r"; echo "$f" >> "$STUB/timed"
 done < "$CONVEYOR_TEST_RERUN"
 exit $rc
 EOF
@@ -83,6 +86,9 @@ t_splitfits() {
   grep -qxF 'This change splits the test file f.test.sh, so no test must fail on main'"'"'s code. Run alone with the change, on a test slot, f1.test.sh, f2.test.sh passed in 11 CPU s summed (the median on record of f.test.sh is 10 CPU s): f1.test.sh 4 CPU s, f2.test.sh 7 CPU s.' "$T/$CASE/cards/c7.unfixed" \
     || fail "the review is not shown each file's CPU seconds: $(cat "$T/$CASE/cards/c7.unfixed")"
   [ "$(st 'select(.step == "bugproof") | "\(.result) \(.speed.after)"')" = 'ok 11' ] || fail "the bugproof line: $(st 'select(.step == "bugproof")')"
+  # Bug (#1435): the stub's run of one file ran every file of the list, so each file's time line was logged twice (in
+  # the run's times, gone with its worktree: the stub notes each one it writes in $STUB/timed).
+  [ "$(sort "$STUB/timed" 2>&1 | tr '\n' ' ')" = 'f1.test.sh f2.test.sh ' ] || fail "each file's run alone did not log its time line once: $(cat "$STUB/timed" 2>&1)"
 }
 
 # #349: no test file has a CPU budget. Bug it catches: a split whose sum is fine (10, no more than the old file) is

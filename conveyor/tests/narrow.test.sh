@@ -130,7 +130,7 @@ t_narrowrerun() {
 
 # #351 scenario 2, and its stub that must never be called. Bug it catches: a card ran the suite command, which ignores
 # the list it is given (npm test running every file, 45 minutes a card). test.command and test.full are a stub that
-# runs every file and records `suite`; the test step of a card whose change touches lib/cartsum.js runs
+# stands in for a command that runs every file: it runs none, and records `suite`; the test step of a card whose change touches lib/cartsum.js runs
 # lib/cartsum.test.js alone through test.fileCommand, passes, and neither suite command ever started.
 # #351 scenario 10 too. Bug it catches: a card built or refreshed the test map, a whole-suite run under coverage, which
 # only the owner starts (setup, the Board). Main is a Node project (package.json, so the map's tool is there) whose

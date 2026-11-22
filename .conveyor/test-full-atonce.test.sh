@@ -28,7 +28,9 @@ for i in 1 2 3 4 5 6; do
     'find "$LIVE" -name "live.*" | wc -l >> "$LIVE/seen"; rm "$LIVE/live.$$"' > "$R/conveyor/tests/fx-$i.test.sh"
 done
 git -C "$R" init -q && git -C "$R" add -A && git -C "$R" commit -qm init
-mkdir "$T/config"
+# A share of 1 MB (the host file's testTmpMB): with the 2048 MB default, a machine with under 6 GiB free in its temp
+# space started no second file (test-share.sh's share_noroom), and one with under 10 GiB never ran 4 at once (#1435).
+mkdir -p "$T/config/conveyor" && echo '{"testTmpMB": 1}' > "$T/config/conveyor/host.json"
 
 # The pool's slots for a pool of <size>: slot_pool makes it no larger than the machine's cores.
 slots() { (XDG_CONFIG_HOME=$T/config CONVEYOR_TEST_POOL=$1:$T/slots$1 && . "$HERE/../conveyor/lib/slots.sh" && slot_pool > /dev/null && echo "$SLOT_N"); }

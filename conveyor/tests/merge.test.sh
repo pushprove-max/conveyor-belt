@@ -79,6 +79,11 @@ t_mergedocs() {
   claims 'echo eight > README.md'
   [ "$(tr '\n' ' ' < "$T/$CASE/claims")" = '[true,[]] [true,[]] ' ] && [ ! -s "$T/$CASE/run.out" ] \
     || fail "c8 waited on c7 over README.md alone: $(cat "$T/$CASE/claims" "$T/$CASE/run.out")"
+  # Bug (#1435): with both claims naming no file, the check above passes whatever together() makes of a clash in
+  # README.md alone. Given README.md as the file they share, it leaves *.md out of both changes, so c7 goes together
+  # with c8 (named: no overlap); one that kept README.md in would find the clash and name none.
+  fx_in 'cd "$R" && together "'"$W8"'.cpatch" "[\"README.md\"]" "[{\"card\":\"c7\",\"paths\":[\"README.md\"]}]" "$(cardpatch "'"$W8"'" ":(exclude)*.md")"'
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = '["c7"]' ] || fail "together() took c7, whose change clashes with c8's in README.md alone, as an overlap: $(cat "$T/$CASE/run.out")"
   echo seven > "$R/README.md"; git -C "$R" commit -qam "c7 lands"
   fx_in 'cd "$R" && ready "'"$W8"'"'
   [ "$RC" = 1 ] || fail "c8's change, which conflicts with c7's in README.md, was taken to fit onto main with no session: $(cat "$T/$CASE/run.out")"
