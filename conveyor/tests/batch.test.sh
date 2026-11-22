@@ -16,8 +16,7 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # becomes ready when its own tests pass at its turn, so it is the last ready of the three. The cards' changes apply
 # together, so they would not wait on #7: each other card takes away the patch #7's claim keeps once #7 holds a.txt,
 # and waits on it as on a card whose change cannot be read (together()), so #7 is among the cards of the batch it
-# makes. With $STUB/overlap the patch stays: the cards that wait on #7 are those whose change does not apply with its.
-# Each of these waits gives up once the card it waits on is gone (a card that holds its files lands or is blocked, its
+# makes. Each of these waits gives up once the card it waits on is gone (a card that holds its files lands or is blocked, its
 # worktree removed): a card that takes another path fails the case rather than hanging it. A card in $STUB/ready not
 # yet picked is not gone: the hold waits for it (the hold marks each card it saw, $STUB/seen.<n>). Under load the loop
 # can pick #9 after #7 reached its hold, and a hold that went on then made a batch without #9 (#276).
@@ -37,7 +36,7 @@ n=${PWD##*-}
 [ "$n" != 7 ] || jq -e '.order != []' "$ST/control.json" >/dev/null 2>&1 \
   || { jq -c '.order = [8, 9, 7, 10]' "$ST/control.json" > "$STUB/c.new.7" && mv "$STUB/c.new.7" "$ST/control.json"; }
 [ "$n" = 7 ] || [ -e "$STUB/rev.$n" ] || { : > "$STUB/rev.$n"; while [ -d "$STUB" ]; do jq -e .held ../*-7.claim >/dev/null 2>&1 && break; ls -d ../*-7 >/dev/null 2>&1 || break; sleep 0.1; done
-  [ -e "$STUB/overlap" ] || rm -f ../*-7.cpatch
+  rm -f ../*-7.cpatch
   [ "$n" != 9 ] || while [ -d "$STUB" ]; do jq -e .tested ../*-8.ready >/dev/null 2>&1 && break; ls -d ../*-8 >/dev/null 2>&1 || break; sleep 0.1; done; }
 EOF
   cat > "$STUB/hold" <<'EOF'
@@ -45,55 +44,87 @@ case $PWD in *-7) [ -e "$STUB/held" ] || while [ -d "$STUB" ]; do
   w=1 g=''; for n in $(cat "$STUB/ready"); do
     if ls -d ../*-$n >/dev/null 2>&1; then : > "$STUB/seen.$n"; elif [ -e "$STUB/seen.$n" ]; then g=1; fi
     jq -e .tested ../*-$n.ready >/dev/null 2>&1 && jq -e '.held == false' ../*-$n.claim >/dev/null 2>&1 || w=''; done
-  [ -z "$w$g" ] || { [ ! -e "$STUB/holdsec" ] || sleep 1; : > "$STUB/held"; exit 0; }; sleep 0.1; done ;; esac # sleep: #8 and #9 must have waited a second on #7
+  [ -z "$w$g" ] || { : > "$STUB/held"; exit 0; }; sleep 0.1; done ;; esac
 EOF
   echo '8 9' > "$STUB/ready"; tune --arg h "$STUB/hold" '.checks = [$h]'
 }
 cardof() { st "select(.issue == $1 and .step == \"picked\") | .card"; } # <issue>: its card id
-# A line of the review stub for cases about cards that wait on #7: #8's and #9's reviews take away the change #7's
-# claim keeps, so they wait on #7 at their claims and are not stacked on it (stackto() reads that change).
-# shellcheck disable=SC2016 # run by the review stub
-NOSTACK='case $n in 8|9) rm -f ../*-7.cpatch ;; esac'
 batchruns() { grep -c "tests a batch of" <<<"$out"; } # the batch test runs the loop said it made
+
+# The direct cases call the engine's functions (gather(), batch(), land(), together(), claim(), stackto()) in a shell
+# of the engine (fx_in), on cards made here, not run by a loop: what they prove is what those functions do, and a loop
+# run paid for each card's sessions and waits. bmain: main as batchsetup leaves it (batches on, a.txt of 20 lines, its
+# first `one`), the cards' folder CARDS, no product check.
+bmain() {
+  setup '[]'; tune '.landBatch = 8'; seq 20 | sed 1s/1/one/ > "$R/a.txt"; git -C "$R" commit -qam "a longer a.txt"
+  CARDS=$T/$CASE/cards; mkdir -p "$CARDS"
+}
+# Card c<n>-<n>: a worktree of main with <change> made there and staged, and a picked line. Given <since>, it is a
+# ready card as it waits at its claim: a live claim (this shell's pid) on the files it changes, held when <held> is
+# true, the patch of its change that claim keeps (<worktree>.cpatch), and its ready record (issue, commit message,
+# extra with waitSec <n> - 6), its tests passed at <since> (bfx runs tested()). With no <since>, it is still in its
+# review: no claim, not ready.
+bwt() { # <n> <change> [<since> [true: held]]
+  local w=$CARDS/c$1-$1
+  git -C "$R" worktree add -q --detach "$w" main && (cd "$w" && eval "$2") && git -C "$w" add -A || fail "the change of card $1"
+  echo "{\"card\":\"c$1-$1\",\"issue\":$1,\"step\":\"picked\"}" >> "$ST/cards.jsonl"
+  [ -n "${3:-}" ] || return 0
+  git -C "$w" diff --cached --name-only | jq -Rsc --argjson p $$ --argjson h "${4:-false}" '{pid: $p, paths: (split("\n") | map(select(. != ""))), held: $h}' > "$w.claim"
+  git -C "$w" diff --cached --binary --no-renames > "$w.cpatch"
+  jq -cn --argjson n "$1" --argjson s "$3" '{issue: $n, msg: "feat(product): title \($n) (#\($n))\n\nCloses #\($n)", extra: {waitSec: ($n - 6)}, at: $s}' > "$w.ready"
+}
+border() { jq -c --argjson o "$1" '.order = $o' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"; } # <the control record's order list>
+# <commands> in a shell of the engine at main (fx_in: its output in $T/$CASE/run.out), once each card's tests are
+# marked passed at its since (tested()). W is #7's worktree: #7 has the landing turn and makes the batch.
+bfx() { # <commands>
+  fx_in 'cd "$R" || exit 9; W=$CARDS/c7-7
+    for r in "$CARDS"/*.ready; do s=$(jq .at "$r") && tested "${r%.ready}" && jq -c --argjson s "$s" ".since = \$s | del(.at)" "$r" > "$r.new" && mv "$r.new" "$r" || exit 9; done
+    '"$1"
+}
+# The batch #7 makes (gather()) and its run (batch()), as card() calls them; then (BLAND) its landing (fives(), land())
+# and one push.
+BGATHER='mapfile -t b < <(gather c7-7 "$W" $$); echo "gather: ${b[*]}"'
+BBATCH='batch c7-7 "$W" "${b[@]}"; brc=$?; echo "batch: $brc apart=$apart mates=${mates[*]}"'
+BRUN="s0=\$SECONDS; $BGATHER; $BBATCH"
+BLAND='mapfile -d "" t5 < <(fives c7-7 7 "$W" "$(jq -r .msg "$W.ready")" "$(jq -c .extra "$W.ready")"); land "${t5[@]}"; echo "land: $?"; push c7-7 7 > /dev/null; echo "push: $?"'
+# The landing of the cards of #7's batch that passed without #7 (it broke the batch, or is apart), as card() lands them.
+BMATES='mapfile -d "" t5 < <(fives c7-7 7 "$W" "" "" skip); landmates c7-7 "${t5[@]}"; echo "land: $?"'
+# <issue>'s claim (claim()), as card() makes it at its landing; its wait printed, `claim <issue>: <wait>`.
+cl() { echo "claim $1: $(claim "c$1-$1" "$CARDS/c$1-$1" $$)"; }
+bout() { grep -qxF "$1" "$T/$CASE/run.out"; } # <line>: the engine shell printed it
+bruns() { sed -n 's/^conveyor: card c7-7 tests a batch of [0-9]*: //p' "$T/$CASE/run.out" | paste -sd ,; } # each batch run's cards, in order
+landedon() { st 'select(.step == "landed") | "\(.issue) \(.batch // [] | join(" "))"' | tr '\n' ,; } # each landed line's issue and batch
 
 # The owner (2026-11-12): eight cards that shared files landed one after another, each on its own 10 to 25 minute
 # test run. Three ready cards sharing a file land together: one test run, then one move of main with each card's own
-# commit and message, in the order they became ready (#7, whose turn it is, last), and each card's own landed line,
-# as if it landed alone, naming the batch; one push carries them. #7's check holds a second more once #8 and #9 wait
-# ($STUB/holdsec), so each has waited a second at least when the batch lands it. Main's hooks judge each card's commit
-# as if it landed alone: #8 adds eight.txt, and main's commit-msg hook refuses a commit that adds eight.txt without
-# naming #8, so #9's and #7's commits, after #8's, pass it only if their hooks see their own change, not #8's too.
+# commit and message, in the order list's order (#8, #9, then #7, whose turn it is), and each card's own landed line,
+# as if it landed alone, naming the batch, with its own waitSec; one push carries them. Main's hooks judge each card's
+# commit as if it landed alone: #8 adds eight.txt, and main's commit-msg hook refuses a commit that adds eight.txt
+# without naming #8, so #9's and #7's commits, after #8's, pass it only if their hooks see their own change, not #8's.
 t_batchland() {
-  batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"; : > "$STUB/holdsec"
-  echo 'case $PWD in *-7) sed -i 1s/.*/seven/ a.txt ;; *-8) echo eight >> a.txt; : > eight.txt ;; *) sed -i 10s/.*/nine/ a.txt ;; esac' > "$STUB/build"
+  local n s
+  bmain; border '[8, 9, 7]'
   printf '%s\n' '! git diff --cached --name-only | grep -qx eight.txt || grep -q "(#8)" "$1" || { echo "eight.txt without #8"; exit 1; }' > "$R/.git/hooks/commit-msg"
   chmod +x "$R/.git/hooks/commit-msg"
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  c7=$(cardof 7); c8=$(cardof 8); c9=$(cardof 9)
-  [ "$(batchruns)" = 1 ] && [ "$(wc -l < "$STUB/tests")" = 4 ] || fail "the three cards did not land on one test run after their own three: $(wc -l < "$STUB/tests") runs: $out"
-  grep -q "card $c7 tests a batch of 3: $c8 $c9 $c7" <<<"$out" || fail "#7 did not test a batch of three, in the order they became ready: $out"
+  bwt 7 'sed -i 1s/.*/seven/ a.txt' 300 true; bwt 8 'echo eight >> a.txt; : > eight.txt' 100; bwt 9 'sed -i 10s/.*/nine/ a.txt' 200
+  bfx "$BRUN; $BLAND"
+  bout 'gather: c8-8 c9-9 c7-7' || fail "#7 did not make a batch of three in the order list's order: $(cat "$T/$CASE/run.out")"
+  bout 'batch: 0 apart= mates=c8-8 c9-9 c7-7' && bout 'land: 0' && bout 'push: 0' || fail "the batch did not pass, land and push: $(cat "$T/$CASE/run.out")"
+  [ "$(wc -l < "$STUB/tests")" = 1 ] || fail "the three cards did not land on one test run: $(wc -l < "$STUB/tests") runs"
   [ "$(git -C "$R" log --reverse --format=%s HEAD~3..HEAD | tr '\n' ,)" = "feat(product): title 8 (#8),feat(product): title 9 (#9),feat(product): title 7 (#7)," ] \
-    && [ "$(git -C "$R" log -1 --format=%s HEAD~3)" = "a longer a.txt" ] || fail "main did not get one commit per card, in the order they became ready: $(git -C "$R" log --format=%s | tr '\n' ,)"
+    && [ "$(git -C "$R" log -1 --format=%s HEAD~3)" = "a longer a.txt" ] || fail "main did not get one commit per card, in the batch's order: $(git -C "$R" log --format=%s | tr '\n' ,)"
   git -C "$R" log -1 --format=%B HEAD~1 | grep -qx 'Closes #9' || fail "a card's commit lost its own message: $(git -C "$R" log -1 --format=%B HEAD~1)"
   for n in 7 8 9; do
     s=$(st "select(.issue == $n and .step == \"landed\") | .sha")
     [ "$(git -C "$R" log -1 --format=%s "$s" 2>/dev/null)" = "feat(product): title $n (#$n)" ] || fail "#$n's landed line does not name its own commit: $s"
-    [ "$(st "select(.issue == $n and .step == \"landed\") | .batch | join(\" \")")" = "$c8 $c9 $c7" ] \
-      || fail "#$n's landed line does not name the batch, in order: $(st "select(.issue == $n and .step == \"landed\")")"
-    # Bug it catches: a card a batch landed (#8, #9) had no waitSec, or none of its wait on #7, so the drift watch had
-    # no wait for it.
-    [ "$(st "select(.issue == $n and .step == \"landed\") | .waitSec | type == \"number\" and ($n == 7 or . >= 1)")" = true ] \
-      || fail "#$n's landed line has no waitSec, or not its wait on #7: $(st "select(.issue == $n and .step == \"landed\")")"
-    [ "$(st "select(.issue == $n and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test landed " ] \
-      || fail "steps of #$n: $(st "select(.issue == $n) | .step" | tr '\n' ' ')"
+    # Bug it catches: a card a batch landed (#8, #9) had no waitSec, or another card's, so the drift watch had no wait for it.
+    [ "$(st "select(.issue == $n and .step == \"landed\") | [(.batch | join(\" \")), .waitSec] | tojson")" = "[\"c8-8 c9-9 c7-7\",$((n - 6))]" ] \
+      || fail "#$n's landed line does not name the batch, in order, or has not its own waitSec: $(st "select(.issue == $n and .step == \"landed\")")"
   done
-  [ "$(st 'select(.step == "landed") | .card' | wc -l)" = 3 ] || fail "not three landed lines"
-  [ "$(st 'select(.step == "pushed") | .head' | sort -u | wc -l)" = 1 ] && [ "$(st 'select(.step == "pushed") | .card' | wc -l)" = 3 ] \
+  [ "$(st 'select(.step == "pushed") | .head' | sort -u | wc -l)" = 1 ] && [ "$(st 'select(.step == "pushed") | .issue' | sort | tr '\n' ' ')" = "7 8 9 " ] \
     && [ "$(git -C "$T/$CASE/origin" rev-parse main)" = "$(git -C "$R" rev-parse main)" ] || fail "one push did not carry the three commits: $(st 'select(.step == "pushed")')"
-  [ "$(sed -n '1p;10p;$p' "$R/a.txt" | tr '\n' ' ')" = "seven nine eight " ] && [ -z "$(git -C "$R" status --porcelain)" ] && [ -z "$(ls "$T/$CASE/cards")" ] \
-    || fail "main does not hold the three changes, is dirty, or a worktree or mark is left: $(ls "$T/$CASE/cards")"
-  [ -z "$(git -C "$R" worktree list | grep -v "^$R ")" ] || fail "a worktree is left in git's list: $(git -C "$R" worktree list)"
-  [ "$(wc -l < "$STUB/reviews")" = 3 ] || fail "a card was reviewed again: $(st '"\(.issue) \(.step) \(.result)"' | tr '\n' ,)"
+  [ "$(sed -n '1p;10p;$p' "$R/a.txt" | tr '\n' ' ')" = "seven nine eight " ] && [ -z "$(git -C "$R" status --porcelain)" ] \
+    || fail "main does not hold the three changes, or is dirty: $(git -C "$R" status --porcelain)"
 }
 
 # The owner: a ready card is one whose own tests passed; a batch never lands a card that fails them alone, though
@@ -131,117 +162,99 @@ EOF
   loop check >/dev/null 2>&1 || fail "the record check refuses a test line, the reused pass's among them: $(loop check 2>&1)"
 }
 
+# The three cards of the cases of a red batch: #7 (whose turn it is) changes line 1 of a.txt, #8 appends a line and
+# #9 changes line 10, each ready, #8 first, then #9, then #7, whose claim holds a.txt.
+redcards() {
+  bwt 7 'sed -i 1s/.*/seven/ a.txt' 300 true; bwt 8 'echo eight >> a.txt' 100; bwt 9 'sed -i 10s/.*/nine/ a.txt' 200
+}
+# The test line card() writes for a card of the batch that its batch's run judged red, in $STUB/line.<card>, from the
+# output and logs that run left it (batch(): <worktree>.test, .testlog). BMATELINE, for the card $m that #7's batch
+# took: its exit and seconds come as card() gets them, from settle() (lib/claim.sh), which reads them from the
+# card's batch mark (fail, sec) and returns 4. BOWNLINE, for #7: its exit is batch()'s, its seconds those card()
+# counts from before gather() to after batch() (lib/cardland.sh), and its times those of its own run (TEST_RUN).
+BMATELINE='trc="" sec=""; settle "$m" "${m##*-}" "$CARDS/$m" "" land "{}"; echo "settle $m: $? trc=$trc"
+  failline "$CARDS/$m" "$trc" "$sec" "$(testfails "$CARDS/$m.test" "$trc")" null null > "$STUB/line.$m"'
+BOWNLINE='failline "$W" "$brc" "$((SECONDS - s0))" "$(testfails "$W.test" "$brc")" null null > "$STUB/line.c7-7"'
+
 # A batch whose tests fail is split, halves then single cards, no test left out. #8 and #9 each pass alone, but
 # eight and nine together fail clash.test. The batch is #8, #9, #7 (the order they became ready): red; #8 alone on
 # main passes, so #9 and #7 on top of it are what failed (split with no run of its own); #9 on top of #8 fails and #7
-# on top of #8 passes. #8 and #7 land; #9 goes to its fix with the failing test named, as when its own tests fail,
-# then lands on its own. #9 is told of its red run before #7's run on top of #8 ends, so its fix waits until #7 has
-# landed: tests that passed after its fix on main as it was before would run once more on main as #7 left it.
+# on top of #8 passes. #8 and #7 land; #9, out of them, is told its red run (its batch mark's fail).
 # Bug: #9 was given the red run's output but not the runner's logs of it (they stayed with #7), so its failed test line
 # named no failing file. It gets both: its line names a.test.sh, the file whose run failed (a card runs each test file
 # alone: the file's run fails, and the run names no file of its own).
 t_batchsplit() {
-  batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"
-  cat > "$STUB/build" <<'EOF'
-if grep -q '^# The changed tests fail' "$STUB/brief"; then cp "$STUB/brief" "$STUB/fixbrief"; sed -i 's/^nine$/nine-fixed/' a.txt
-  while [ -d "$STUB" ]; do jq -e 'select(.issue == 7 and .step == "landed")' "$ST/cards.jsonl" >/dev/null 2>&1 && break; sleep 0.1; done
-else case $PWD in *-7) sed -i 1s/.*/seven/ a.txt ;; *-8) echo eight >> a.txt ;; *) sed -i 10s/.*/nine/ a.txt ;; esac; fi
-EOF
-  echo '! { grep -qx eight a.txt && grep -qx nine a.txt; } || { echo "FAIL clash.test: eight and nine together"; exit 1; }' >> "$STUB/test-cmd"
-  # The run of #7 on top of #8 ends only once #9 has its red test line. Without this wait nothing kept that order: the
-  # stub run ended and #8 and #7 landed first, so #9 found main moved and ran its failure again there before its fix.
-  echo 'case $PWD in *-7) grep -qx nine a.txt || ! grep -qx eight a.txt || while [ -d "$STUB" ]; do
-  jq -e "select(.issue == 9 and .step == \"test\" and .result == \"fail\")" "$ST/cards.jsonl" >/dev/null 2>&1 && break; sleep 0.1; done ;; esac' >> "$STUB/test-cmd"
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  c7=$(cardof 7); c8=$(cardof 8)
-  # The two red runs (all, #8 #9) each run once more before they count as red (tests()). #8 alone on main runs no
-  # test: it passed them on its own change, unchanged since (batch(): a batch run reuses each card's passed tests).
-  [ "$(batchruns)" = 4 ] && [ "$(wc -l < "$STUB/tests")" = 9 ] \
-    || fail "not 4 runs of the batch (all, #8, #8 #9, #8 #7), the red two run again and #8 alone running nothing, beside the three own runs and #9's after its fix: $(wc -l < "$STUB/tests"): $out"
-  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "8 7 9 " ] || fail "#8 and #7 did not land before #9: $(st '"\(.issue) \(.step) \(.result)"' | tr '\n' ,)"
-  [ "$(st 'select(.step == "landed" and .issue != 9) | .batch | join(" ")' | sort -u)" = "$c8 $c7" ] && [ "$(st 'select(.step == "landed" and .issue == 9) | .batch')" = null ] \
-    || fail "#8 and #7 did not land as one batch, or #9 did not land alone: $(st 'select(.step == "landed")')"
-  st 'select(.issue == 9 and .step == "test" and .result == "fail") | .tail' | grep -q 'FAIL clash.test' || fail "#9's test line does not name the failing test"
-  [ "$(st 'select(.issue == 9 and .step == "test" and .result == "fail") | .failures.files | map(.file) | join(" ")')" = a.test.sh ] \
-    || fail "#9's test line does not name the failing file of the run that judged it: $(st 'select(.issue == 9 and .step == "test" and .result == "fail") | .failures | tojson')"
-  grep -q '^# The changed tests fail' "$STUB/fixbrief" && grep -q 'FAIL clash.test' "$STUB/fixbrief" || fail "#9's fix was not given the failing test"
-  [ "$(st "select(.issue == 9 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test test fix review test landed " ] \
-    && [ "$(st 'select(.issue == 9 and .step == "test") | .result' | tr '\n' ' ')" = "pass fail pass " ] \
-    || fail "#9 did not pass its own tests, fail the batch's, then pass after its fix: $(st "select(.issue == 9) | \"\(.step) \(.result)\"" | tr '\n' ,)"
-  [ "$(st 'select(.issue != 9 and .step == "test") | "\(.issue) \(.result)"' | sort | tr '\n' ,)" = "7 pass,8 pass," ] || fail "#7 and #8 did not each get one test line, a pass"
-  [ "$(sed -n '1p;10p;$p' "$R/a.txt" | tr '\n' ' ')" = "seven nine-fixed eight " ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "main does not hold the three changes: $(cat "$R/a.txt")"
+  bmain; redcards
+  echo '! { grep -qx eight a.txt && grep -qx nine a.txt; } || { sleep 1; echo "FAIL clash.test: eight and nine together"; exit 1; }' >> "$STUB/test-cmd" # sleep: a red run takes 1 s or more, so the seconds on #9's line can be told from none
+  bfx "$BRUN; "'echo "nine: $(jq -c "[.fail, (.sec | type)]" "$CARDS/c9-9.batch")"; '"m=c9-9; $BMATELINE; $BLAND"
+  bout 'gather: c8-8 c9-9 c7-7' || fail "#7 did not make the batch of #8, #9 and itself: $(cat "$T/$CASE/run.out")"
+  [ "$(bruns)" = 'c8-8 c9-9 c7-7,c8-8,c8-8 c9-9,c8-8 c7-7' ] || fail "the red batch was not split into halves, then single cards on top of #8 (all, #8, #8 #9, #8 #7): $(bruns)"
+  # The two red runs (all, #8 #9) each run once more before they count as red (tests()).
+  [ "$(wc -l < "$STUB/tests")" = 6 ] || fail "not six test runs (the red two run twice): $(wc -l < "$STUB/tests")"
+  bout 'batch: 0 apart= mates=c8-8 c7-7' && bout 'nine: [1,"number"]' || fail "#8 and #7 did not pass as one batch, or #9 was not told its red run: $(cat "$T/$CASE/run.out")"
+  bout 'land: 0' && [ "$(landedon)" = '8 c8-8 c7-7,7 c8-8 c7-7,' ] || fail "#8 and #7 did not land as one batch: $(landedon) $(cat "$T/$CASE/run.out")"
+  jq -e '.tail | test("FAIL clash.test")' "$STUB/line.c9-9" > /dev/null || fail "#9's test line does not name the failing test: $(cat "$STUB/line.c9-9")"
+  # Bug it catches: #9's line had no exit or seconds of the red run that judged it (settle() did not hand on its mark's fail and sec).
+  bout 'settle c9-9: 4 trc=1' && jq -e '.reason == "exit 1" and .sec >= 1' "$STUB/line.c9-9" > /dev/null \
+    || fail "#9 was not handed its red run's exit and seconds: $(grep '^settle' "$T/$CASE/run.out") $(jq -c '{reason, sec}' "$STUB/line.c9-9")"
+  [ "$(jq -r '.failures.files | map(.file) | join(" ")' "$STUB/line.c9-9")" = a.test.sh ] \
+    || fail "#9's test line does not name the failing file of the run that judged it: $(jq -c .failures "$STUB/line.c9-9")"
+  [ "$(sed -n '1p;10p;$p' "$R/a.txt" | tr '\n' ' ')" = "seven 10 eight " ] || fail "main does not hold #7's and #8's changes alone: $(cat "$R/a.txt")"
 }
+
+# The wait claim() gives a card on #7 for a.txt, as cl prints it. The claim cases set the order list batchsetup's
+# review sets, #8, #9, #7, #10: ordered cards never go past each other (claim()), so a card waits on #7 while #7
+# holds a.txt, unless their changes apply together.
+ON7='{"on":"c7-7","paths":["a.txt"]}'
 
 # Two cards that apply together are not kept apart at their claims, so the batch's one test run is what judges them
 # together. #7 holds a.txt and changes its lines 10 and 20; #8 appends a line and #9 changes line 10, so each waits
-# on #7 for a real overlap, and #8's and #9's changes apply together. Eight and nine together fail clash.test: #7's
-# batch is #8 and #9 (its own patch does not apply on theirs), red; #8 alone passes and lands, #9 on top of it is
-# what failed and goes to its fix. No commit on main ever holds eight beside nine.
+# on #7 for a real overlap, and #8's and #9's changes apply together: #9 does not wait on #8, though it would with
+# no patch of #8's change kept (a card with none overlaps on any shared file, together()). #7's batch is #8 and #9
+# (its own patch does not apply on theirs). Eight and nine together fail clash.test: #8 alone passes and lands, #9 on
+# top of it is what failed. Main never holds eight beside nine.
 t_batchtogether() {
-  batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"; : > "$STUB/overlap"
-  cat > "$STUB/build" <<'EOF'
-if grep -q '^# The changed tests fail' "$STUB/brief"; then sed -i 's/^nine$/nine-fixed/' a.txt
-elif grep -q '^# Main moved: apply the same change' "$STUB/brief"; then sed -i 1s/.*/seven/ a.txt
-else case $PWD in *-7) sed -i '10s/.*/seven/;20s/.*/seven/' a.txt ;; *-8) echo eight >> a.txt ;; *) sed -i 10s/.*/nine/ a.txt ;; esac; fi
-EOF
-  echo "$NOSTACK" >> "$STUB/review-cmd"
+  bmain; border '[8, 9, 7, 10]'
+  bwt 7 "sed -i '10s/.*/seven/;20s/.*/seven/' a.txt" 300 true; bwt 8 'echo eight >> a.txt' 100; bwt 9 'sed -i 10s/.*/nine/ a.txt' 200
   echo '! { grep -qx eight a.txt && grep -qx nine a.txt; } || { echo "FAIL clash.test: eight and nine together"; exit 1; }' >> "$STUB/test-cmd"
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  c7=$(cardof 7); c8=$(cardof 8); c9=$(cardof 9)
-  grep -q "card $c8 waits on card $c7, which changes the same files: a.txt" <<<"$out" && grep -q "card $c9 waits on card $c7, which changes the same files: a.txt" <<<"$out" \
-    || fail "#8 and #9 did not each wait on #7, which their changes overlap: $out"
-  grep -q "card $c7 tests a batch of 2: $c8 $c9" <<<"$out" || fail "#8 and #9, which apply together, were not tested together in #7's batch: $out"
-  st 'select(.issue == 9 and .step == "test" and .result == "fail") | .tail' | grep -q 'FAIL clash.test' || fail "the batch's run did not judge #9 red on top of #8: $(st '"\(.issue) \(.step) \(.result)"' | tr '\n' ,)"
-  for s in $(git -C "$R" rev-list main); do
-    ! { git -C "$R" show "$s:a.txt" | grep -qx eight && git -C "$R" show "$s:a.txt" | grep -qx nine; } || fail "main held eight beside nine at $s: the two landed broken"
-  done
-  [ "$(st 'select(.step == "landed") | .issue' | head -n 1)" = 8 ] && [ "$(st 'select(.step == "landed") | .issue' | sort | tr '\n' ' ')" = "7 8 9 " ] \
-    || fail "#8 did not land first, or a card never landed: $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
-  [ "$(sed -n '1p;10p;$p' "$R/a.txt" | tr '\n' ' ')" = "seven nine-fixed eight " ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "main does not hold the three changes, #9's as fixed: $(cat "$R/a.txt")"
+  bfx 'rm "$CARDS/c8-8.cpatch"; cl 9; cl 8; cl 9; '"$BRUN; $BMATES"
+  bout 'claim 9: {"on":"c8-8","paths":["a.txt"]}' || fail "#9 did not wait on #8 with no patch of #8's change kept: $(cat "$T/$CASE/run.out")"
+  bout "claim 8: $ON7" && [ "$(grep -cxF "claim 9: $ON7" "$T/$CASE/run.out")" = 1 ] \
+    || fail "#8 and #9 did not each wait on #7 alone, which their changes overlap: $(cat "$T/$CASE/run.out")"
+  bout 'gather: c8-8 c9-9 c7-7' && bout 'batch: 0 apart=1 mates=c8-8' || fail "#7's batch was not #8 and #9, its own change apart, or #8 did not pass alone: $(cat "$T/$CASE/run.out")"
+  [ "$(bruns)" = 'c8-8 c9-9,c8-8,c8-8 c9-9' ] || fail "#8 and #9, which apply together, were not tested together, then apart: $(bruns)"
+  jq -e '.fail == 1' "$CARDS/c9-9.batch" > /dev/null && grep -q 'FAIL clash.test' "$CARDS/c9-9.test" || fail "the batch's run did not judge #9 red on top of #8: $(cat "$CARDS/c9-9.batch")"
+  bout 'land: 0' && [ "$(landedon)" = '8 ,' ] && [ "$(sed -n '10p;$p' "$R/a.txt" | tr '\n' ' ')" = "10 eight " ] \
+    || fail "#8 did not land alone, or main holds eight beside nine: $(landedon) $(cat "$R/a.txt")"
 }
 
 # Bug: the card that tests a batch kept no patch of the batch's change, so a card whose change applied with the
 # whole batch waited on it for the length of the batch's test run, as before this rule. #7's batch is #8 and itself
-# (line 1 and a new last line of a.txt); #10 changes line 15 and claims a.txt only once the batch is made, while its
-# tests run (they end once #10 has claimed). #10 does not wait on #7, and all three land.
+# (line 1 and a new last line of a.txt); #10, still in its tests, changes line 15 and claims a.txt once the batch is
+# made: it does not wait on #7. With no patch kept, it waits.
 t_batchapart() {
-  batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 10 2026-01-04)]"; echo 8 > "$STUB/ready"
-  echo 'case $PWD in *-7) sed -i 1s/.*/seven/ a.txt ;; *-8) echo eight >> a.txt ;; *) sed -i 15s/.*/ten/ a.txt ;; esac' > "$STUB/build"
-  echo '[ "$n" != 10 ] || while [ -d "$STUB" ]; do ls ../*-8.batch >/dev/null 2>&1 && break; sleep 0.1; done' >> "$STUB/review-cmd"
-  echo 'case $PWD in *-7) ! ls ../*-8.batch >/dev/null 2>&1 || while [ -d "$STUB" ]; do ls ../*-10.claim >/dev/null 2>&1 && break; sleep 0.1; done ;; esac' >> "$STUB/test-cmd"
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  c7=$(cardof 7); c8=$(cardof 8); c10=$(cardof 10)
-  grep -q "card $c7 tests a batch of 2: $c8 $c7" <<<"$out" || fail "#7 did not test a batch of #8 and itself: $out"
-  ! grep -q "card $c10 waits on" <<<"$out" || fail "#10, whose change applies with the whole batch, waited on it: $out"
-  [ "$(st 'select(.step == "landed") | .issue' | sort -n | tr '\n' ' ')" = "7 8 10 " ] || fail "a card never landed: $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
-  [ "$(sed -n '1p;15p;$p' "$R/a.txt" | tr '\n' ' ')" = "seven ten eight " ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "main does not hold the three changes: $(cat "$R/a.txt")"
+  bmain; border '[8, 9, 7, 10]'
+  bwt 7 'sed -i 1s/.*/seven/ a.txt' 300 true; bwt 8 'echo eight >> a.txt' 100; bwt 10 'sed -i 15s/.*/ten/ a.txt'
+  bfx "$BGATHER"'; cl 10; rm "$W.cpatch" "$CARDS/c10-10.claim"; cl 10'
+  bout 'gather: c8-8 c7-7' || fail "#7 did not make a batch of #8 and itself: $(cat "$T/$CASE/run.out")"
+  bout 'claim 10: ' || fail "#10, whose change applies with the whole batch, waited on it: $(cat "$T/$CASE/run.out")"
+  bout "claim 10: $ON7" || fail "#10 did not wait on #7 with no patch of the batch kept, so the case does not show the patch is what lets it on: $(cat "$T/$CASE/run.out")"
 }
 
 # Bug: a batch with a card whose change did not apply on the cards before it kept no patch at all, so a card on
 # another part of the file waited on the batch's card for the whole test run. #7 (lines 10 and 20) holds a.txt; #8
-# appends a line and #9 changes line 10, so both wait on #7 and its batch is those two, its own patch left out. #10
-# changes line 3 and claims a.txt while that batch is tested: it applies with #8 and #9, and does not wait on #7.
-# #7, then fitted onto main, may find #10 holding a.txt and be stacked on it (a session that brings #7 onto main or
-# onto a stack's base changes line 1 alone). Bug it catches too: #10 then waited on #7, an older card stacked on it.
+# appends a line and #9 changes line 10, so its batch is those two, its own patch left out of the change its claim
+# keeps. #10, still in its tests, changes line 3 and claims a.txt while that batch is tested: it applies with #8 and
+# #9, and does not wait on #7. With no patch kept, it waits.
 t_batchleftout() {
-  batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03),$(issue 10 2026-01-04)]"; : > "$STUB/overlap"
-  cat > "$STUB/build" <<'EOF'
-if grep -q '^# Main moved: apply the same change\|^# Stacked: apply the same change' "$STUB/brief"; then sed -i 1s/.*/seven/ a.txt
-else case $PWD in *-7) sed -i '10s/.*/seven/;20s/.*/seven/' a.txt ;; *-8) echo eight >> a.txt ;; *-9) sed -i 10s/.*/nine/ a.txt ;; *) sed -i 3s/.*/ten/ a.txt ;; esac; fi
-EOF
-  echo '[ "$n" != 10 ] || while [ -d "$STUB" ]; do ls ../*-8.batch >/dev/null 2>&1 && break; sleep 0.1; done' >> "$STUB/review-cmd"
-  echo 'case $PWD in *-7) ! ls ../*-8.batch >/dev/null 2>&1 || while [ -d "$STUB" ]; do ls ../*-10.claim >/dev/null 2>&1 && break; sleep 0.1; done ;; esac' >> "$STUB/test-cmd"
-  # The batch lands during #10's own tests, and main has moved when they end, so #10 claims again. Those tests last
-  # until #7, left out of its batch, has given way to be fitted: until then #7 still holds a.txt, and #10 claiming
-  # again in that moment would wait on it for a reason this case is not about.
-  echo 'case $PWD in *-10) [ -e "$STUB/ten" ] || { : > "$STUB/ten"; while [ -d "$STUB" ]; do jq -e .held ../*-7.claim >/dev/null 2>&1 || break; sleep 0.1; done; } ;; esac' >> "$STUB/test-cmd"
-  echo "$NOSTACK" >> "$STUB/review-cmd"
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  c7=$(cardof 7); c8=$(cardof 8); c9=$(cardof 9); c10=$(cardof 10)
-  grep -q "card $c7 tests a batch of 2: $c8 $c9" <<<"$out" || fail "#7 did not test a batch of #8 and #9: $out"
-  ! grep -q "card $c10 waits on" <<<"$out" || fail "#10, whose change applies with the batch of #8 and #9, waited: $out"
-  [ "$(st 'select(.step == "landed") | .issue' | sort -n | tr '\n' ' ')" = "7 8 9 10 " ] || fail "a card never landed: $(st '"\(.issue) \(.step) \(.result) \(.reason)"' | tr '\n' ,)"
-  [ "$(sed -n '1p;3p;10p;$p' "$R/a.txt" | tr '\n' ' ')" = "seven ten nine eight " ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "main does not hold the four changes: $(cat "$R/a.txt")"
+  bmain; border '[8, 9, 7, 10]'
+  bwt 7 "sed -i '10s/.*/seven/;20s/.*/seven/' a.txt" 300 true; bwt 8 'echo eight >> a.txt' 100; bwt 9 'sed -i 10s/.*/nine/ a.txt' 200
+  bwt 10 'sed -i 3s/.*/ten/ a.txt'
+  bfx "$BGATHER"'; cp "$W.cpatch" "$STUB/kept"; cl 10; '"$BBATCH"'; rm "$W.cpatch" "$CARDS/c10-10.claim"; cl 10'
+  bout 'gather: c8-8 c9-9 c7-7' && [ "$(bruns)" = 'c8-8 c9-9' ] || fail "#7's batch was not #8 and #9: $(cat "$T/$CASE/run.out")"
+  [ "$(grep '^+[^+]' "$STUB/kept" | tr '\n' ' ')" = "+nine +eight " ] || fail "#7's claim does not keep the change of #8 and #9 alone: $(cat "$STUB/kept")"
+  bout 'claim 10: ' || fail "#10, whose change applies with the batch of #8 and #9, waited: $(cat "$T/$CASE/run.out")"
+  bout "claim 10: $ON7" || fail "#10 did not wait on #7 with no patch of the batch kept, so the case does not show the patch is what lets it on: $(cat "$T/$CASE/run.out")"
 }
 
 # Bug: the batch's own card, red in a run that was not the batch's last, kept that run's output but the runner's logs
@@ -250,77 +263,57 @@ EOF
 # the others by when each became ready: #8 was ready before #9 and #7, and goes last), and seven and nine together fail
 # clash.test: #7 is red on top of #9, then #8 passes there, and main gets #9's commit, then #8's, in the batch's order.
 # #7's line names a.test.sh, the file whose run failed, and its case, from the logs of its own run.
-# Bug: its line held the times of the run after its own (#9 and #8's, the one run that takes 3 s more, so the other
-# runs are not slowed for nothing): its run is under 3 s.
+# Bug: its line held the times of the run after its own (#9 and #8's, the one run that takes 6 s more, so the other
+# runs are not slowed for nothing): its run is under 6 s (its own red run, twice, took 3 s under load).
 t_batchfails() {
-  batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"
-  jq -c '.order = [9, 7]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
-  cat > "$STUB/build" <<'EOF'
-if grep -q '^# The changed tests fail' "$STUB/brief"; then sed -i 1s/.*/seven-fixed/ a.txt
-else case $PWD in *-7) sed -i 1s/.*/seven/ a.txt ;; *-8) echo eight >> a.txt ;; *) sed -i 10s/.*/nine/ a.txt ;; esac; fi
-EOF
+  bmain; border '[9, 7]'; redcards
   cat >> "$STUB/test-cmd" <<'EOF'
-! { grep -qx eight a.txt && grep -qx nine a.txt && ! grep -q ^seven a.txt; } || sleep 3 # sleep: the run after #7's red one (#9 and #8) takes 3 s more, so its times are told from #7's
+! { grep -qx eight a.txt && grep -qx nine a.txt && ! grep -q ^seven a.txt; } || sleep 6 # sleep: the run after #7's red one (#9 and #8) takes 6 s more, so its times are told from #7's
 ! { grep -qx seven a.txt && grep -qx nine a.txt; } || { echo "FAIL [clash]: seven and nine together"; exit 1; }
 EOF
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  c7=$(cardof 7); c8=$(cardof 8); c9=$(cardof 9)
-  grep -q "card $c7 tests a batch of 3: $c9 $c7 $c8" <<<"$out" || fail "the ordered #9 and #7 did not go before #8 in the batch, though #8 was ready first: $out"
-  [ "$(st 'select(.step == "landed" and .issue != 7) | .batch | join(" ")' | sort -u)" = "$c9 $c8" ] || fail "#9 and #8 did not land as one batch, a run after #7's red one: $out"
-  # #7 has two red test lines: its batch's run, then (main having moved: #9 and #8 landed) the same failure run again
-  # on main as it is now before its fix round (#582). Each names a.test.sh and its case, and its own run's times.
-  [ "$(st 'select(.issue == 7 and .step == "test" and .result == "fail") | .failures | [.of, .files] | tojson' | sort -u)" = '[1,[{"file":"a.test.sh","cases":[{"name":"clash","line":"FAIL [clash]: seven and nine together"}]}]]' ] \
-    || fail "#7's test line does not name the failing file and case of the run that judged it: $(st 'select(.issue == 7 and .step == "test" and .result == "fail") | .failures | tojson')"
-  st 'select(.issue == 7 and .step == "test" and .result == "fail")' | jq -se 'length == 2 and all(.run | type == "number" and . < 3)' >/dev/null \
-    || fail "#7's test line holds the times of a later run, not its own: $(st 'select(.issue == 7 and .step == "test") | [.result, .run]' | jq -sc .)"
-  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "9 8 7 " ] || fail "#7 did not land after its fix: $(st '"\(.issue) \(.step) \(.result)"' | tr '\n' ,)"
-  [ "$(git -C "$R" log --reverse --format=%s HEAD~3..HEAD | tr '\n' ,)" = "feat(product): title 9 (#9),feat(product): title 8 (#8),feat(product): title 7 (#7)," ] \
+  bfx "$BRUN; $BOWNLINE; $BMATES"
+  bout 'gather: c9-9 c7-7 c8-8' || fail "the ordered #9 and #7 did not go before #8 in the batch, though #8 was ready first: $(cat "$T/$CASE/run.out")"
+  [ "$(bruns)" = 'c9-9 c7-7 c8-8,c9-9,c9-9 c7-7,c9-9 c8-8' ] || fail "#7 was not red on top of #9 before #8 passed there: $(bruns)"
+  bout 'batch: 1 apart= mates=c9-9 c8-8' && bout 'land: 0' && [ "$(landedon)" = '9 c9-9 c8-8,8 c9-9 c8-8,' ] \
+    || fail "#9 and #8 did not land as one batch, a run after #7's red one: $(landedon) $(cat "$T/$CASE/run.out")"
+  [ "$(git -C "$R" log --reverse --format=%s HEAD~2..HEAD | tr '\n' ,)" = "feat(product): title 9 (#9),feat(product): title 8 (#8)," ] \
     || fail "main's commits are not in the batch's order: $(git -C "$R" log --format=%s | tr '\n' ,)"
+  [ "$(jq -c '.failures | [.of, .files]' "$STUB/line.c7-7")" = '[1,[{"file":"a.test.sh","cases":[{"name":"clash","line":"FAIL [clash]: seven and nine together"}]}]]' ] \
+    || fail "#7's test line does not name the failing file and case of the run that judged it: $(jq -c .failures "$STUB/line.c7-7")"
+  jq -e '.run | type == "number" and . < 6' "$STUB/line.c7-7" > /dev/null || fail "#7's test line holds the times of a later run, not its own: $(jq -c .run "$STUB/line.c7-7")"
+  # Its seconds are its whole test step's, the later run's 6 s among them, as card() counts them; its exit is batch()'s.
+  jq -e '.reason == "exit 1" and .sec >= 6' "$STUB/line.c7-7" > /dev/null || fail "#7's test line lacks batch()'s exit or its test step's seconds: $(jq -c '{reason, sec}' "$STUB/line.c7-7")"
 }
 
 # A card whose patch does not apply on top of those before it in the batch leaves it, even the card whose turn it is:
 # #8 and #9 became ready before #7, which changes the line #8 changes, so #8 and #9 land on one test run in the order
-# they became ready, and #7 is fitted after, as a waiting card is: one session brings it onto main, it is reviewed
-# again there, and lands on its own tests.
+# they became ready, and #7 is apart (fitted after, as a waiting card is), its worktree holding its own change again.
 t_batchleft() {
-  batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"
-  cat > "$STUB/build" <<'EOF'
-if grep -q '^# Main moved: apply the same change' "$STUB/brief"; then sed -i 1s/.*/seven-eight/ a.txt
-else case $PWD in *-7) sed -i 1s/.*/seven/ a.txt ;; *-8) sed -i 1s/.*/eight/ a.txt ;; *) sed -i 10s/.*/nine/ a.txt ;; esac; fi
-EOF
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  c7=$(cardof 7); c8=$(cardof 8); c9=$(cardof 9)
-  grep -q "card $c7 tests a batch of 2: $c8 $c9" <<<"$out" && [ "$(batchruns)" = 1 ] || fail "#7's batch was not #8 then #9: $out"
-  [ "$(wc -l < "$STUB/tests")" = 5 ] || fail "not one run for the batch beside the three own runs, and one for #7 after its fit: $(wc -l < "$STUB/tests")"
-  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "8 9 7 " ] && [ "$(st 'select(.step == "landed" and .issue != 7) | .batch | join(" ")' | sort -u)" = "$c8 $c9" ] \
-    && [ "$(st 'select(.step == "landed" and .issue == 7) | .batch')" = null ] || fail "#8 and #9 did not land as one batch before #7: $(st 'select(.step == "landed")')"
-  [ "$(st "select(.issue == 7 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test fix review test landed " ] \
-    || fail "steps of #7: $(st "select(.issue == 7) | .step" | tr '\n' ' ')"
-  st 'select(.issue == 7 and .step == "fix") | .reason' | grep -q '^main moved since the card' || fail "#7 was not brought onto main after the batch landed"
-  st '.reason' | grep -q 'rebase onto main conflicts' && fail "a card met a landing conflict: $(st '"\(.issue) \(.step) \(.reason)"' | tr '\n' ,)"
-  [ "$(sed -n '1p;10p' "$R/a.txt" | tr '\n' ' ')" = "seven-eight nine " ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "main does not hold the three changes: $(cat "$R/a.txt")"
+  bmain
+  bwt 7 'sed -i 1s/.*/seven/ a.txt' 300 true; bwt 8 'sed -i 1s/.*/eight/ a.txt' 100; bwt 9 'sed -i 10s/.*/nine/ a.txt' 200
+  bfx "$BRUN; $BMATES"
+  bout 'gather: c8-8 c9-9 c7-7' && [ "$(bruns)" = 'c8-8 c9-9' ] && [ "$(wc -l < "$STUB/tests")" = 1 ] || fail "#7's batch was not #8 then #9, on one test run: $(cat "$T/$CASE/run.out")"
+  bout 'batch: 0 apart=1 mates=c8-8 c9-9' || fail "#7 was not apart from its batch: $(cat "$T/$CASE/run.out")"
+  bout 'land: 0' && [ "$(landedon)" = '8 c8-8 c9-9,9 c8-8 c9-9,' ] || fail "#8 and #9 did not land as one batch: $(landedon) $(cat "$T/$CASE/run.out")"
+  [ "$(sed -n '1p;10p' "$R/a.txt" | tr '\n' ' ')" = "eight nine " ] || fail "main does not hold #8's and #9's changes: $(cat "$R/a.txt")"
+  [ "$(git -C "$CARDS/c7-7" diff --cached -U0 | grep '^[-+][^-+]' | tr '\n' ' ')" = "-one +seven " ] || fail "#7's worktree does not hold its own change again: $(git -C "$CARDS/c7-7" diff --cached)"
 }
 
 # The product checks judge what lands: the change of the cards a run tests together, not each card's alone. #8 adds
 # flag-a and #9 flag-b, each passing the check alone; together they fail it, a red run that splits the batch as failing
-# tests do. #8 and #7 land, and #9 goes to its fix with the check named.
+# tests do. #8 and #7 land, and #9's test line names the check.
 t_batchcheck() {
-  batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"
-  cat > "$STUB/build" <<'EOF'
-if grep -q '^# The changed tests fail' "$STUB/brief"; then cp "$STUB/brief" "$STUB/fixbrief"; rm -f flag-b
-else case $PWD in *-7) sed -i 1s/.*/seven/ a.txt ;; *-8) echo eight >> a.txt; : > flag-a ;; *) sed -i 10s/.*/nine/ a.txt; : > flag-b ;; esac; fi
-EOF
-  printf '%s\n' '! { git cat-file -e "$2:flag-a" 2>/dev/null && git cat-file -e "$2:flag-b" 2>/dev/null; } || { echo "flag-a and flag-b together"; exit 1; }' > "$STUB/flags"
+  bmain
+  bwt 7 'sed -i 1s/.*/seven/ a.txt' 300 true; bwt 8 'echo eight >> a.txt; : > flag-a' 100; bwt 9 'sed -i 10s/.*/nine/ a.txt; : > flag-b' 200
+  printf '%s\n' '! { git cat-file -e "$2:flag-a" 2>/dev/null && git cat-file -e "$2:flag-b" 2>/dev/null; } || { sleep 1; echo "flag-a and flag-b together"; exit 1; }' > "$STUB/flags" # sleep: as in batchsplit
   tune --arg f "$STUB/flags" '.checks += [$f]'
-  # #9 is picked only once #7 is in its hold, as the loop can pick it under load (#276): the batch still takes it.
-  # shellcheck disable=SC2016 # run by the loop's same-file check
-  export CONVEYOR_OVERLAP_CMD='case $(cat) in *"queued issue"?"#9 "*) while [ -d "$STUB" ] && [ ! -e "$STUB/seen.8" ]; do sleep 0.1; done ;; esac; exit 1'
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  c7=$(cardof 7); c8=$(cardof 8)
-  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "8 7 9 " ] && [ "$(st 'select(.step == "landed" and .issue != 9) | .batch | join(" ")' | sort -u)" = "$c8 $c7" ] \
-    || fail "#8 and #7 did not land as one batch before #9: $(st 'select(.step == "landed")'); steps of #9: $(st 'select(.issue == 9) | "\(.step) \(.reason)"' | tr '\n' ,)"
-  st 'select(.issue == 9 and .step == "test" and .result == "fail") | .tail' | grep -q 'flag-a and flag-b together' || fail "#9's test line does not name the failing check"
-  grep -q 'flag-a and flag-b together' "$STUB/fixbrief" || fail "#9's fix was not given the failing check"
+  bfx "$BRUN; m=c9-9; $BMATELINE; $BLAND"
+  [ "$(bruns)" = 'c8-8 c9-9 c7-7,c8-8,c8-8 c9-9,c8-8 c7-7' ] || fail "the batch the check refused was not split as a red run: $(bruns)"
+  bout 'batch: 0 apart= mates=c8-8 c7-7' && bout 'land: 0' && [ "$(landedon)" = '8 c8-8 c7-7,7 c8-8 c7-7,' ] \
+    || fail "#8 and #7 did not land as one batch: $(landedon) $(cat "$T/$CASE/run.out")"
+  jq -e '.tail | test("flag-a and flag-b together")' "$STUB/line.c9-9" > /dev/null || fail "#9's test line does not name the failing check: $(cat "$STUB/line.c9-9")"
+  bout 'settle c9-9: 4 trc=1' && jq -e '.reason == "exit 1" and .sec >= 1' "$STUB/line.c9-9" > /dev/null \
+    || fail "#9 was not handed the exit and seconds of the run the check refused: $(grep '^settle' "$T/$CASE/run.out") $(jq -c '{reason, sec}' "$STUB/line.c9-9")"
   [ -e "$R/flag-a" ] && [ ! -e "$R/flag-b" ] || fail "main holds the two flags the check refuses together"
 }
 
@@ -340,31 +333,26 @@ t_batchalone() {
 
 # The batch's card holds the files of every card it took while the batch is tested. #8 changes a.txt and b.txt; #6,
 # picked before it, changes the line of b.txt after the one #8 changes, so its change does not apply with the batch's,
-# and ends its review during the batch's run: it is told to wait on #7 for b.txt, which #7 itself does not change. With
-# batches on it is stacked on #7 in place of that wait (stackto(), #223), onto main plus the change #7's claim keeps,
-# the whole batch's: its line 2 then meets #8's line 1 there, so a session fits it (stacked onto #7's own change alone,
-# it would apply as it is). It lands after the batch, brought onto main as the batch left it, never past what the
-# batch was tested on. Only #7 is in the order list: ordered first, #8 waits on it, and #6 names it, the card that
-# holds the batch's files, as the card to wait on (of #7 and #8, which goes first); the batch is #7, then #8.
+# and ends its review while the batch is tested: it is told to wait on #7 for b.txt, which #7 itself does not change.
+# With batches on it is stacked on #7 in place of that wait (stackto(), #223), onto main plus the change #7's claim
+# keeps, the whole batch's: its line 2 then meets #8's line 1 there, so a session fits it (stacked onto #7's own change
+# alone, it would apply as it is). Only #7 is in the order list: ordered first, and #6 names it, the card that holds
+# the batch's files, as the card to wait on (of #7 and #8, which goes first); the batch is #7, then #8.
 t_batchhold() {
-  batchsetup "[$(issue 6 2025-12-31),$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; echo 8 > "$STUB/ready"
-  jq -c '.order = [7]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
+  local base
+  bmain; border '[7]'; issue 6 2025-12-31 > "$STUB/issue.6"
   seq 20 > "$R/b.txt"; git -C "$R" add b.txt; git -C "$R" commit -qm "b.txt"
-  echo 'case $PWD in *-6) sed -i 2s/.*/six/ b.txt ;; *-7) sed -i 1s/.*/seven/ a.txt ;; *) echo eight >> a.txt; sed -i 1s/.*/eight/ b.txt ;; esac' > "$STUB/build"
-  echo '[ "$n" != 6 ] || [ -e "$STUB/rev6" ] || { : > "$STUB/rev6"; while [ -d "$STUB" ]; do [ -e "$STUB/inbatch" ] && break; ls -d ../*-7 >/dev/null 2>&1 || break; sleep 0.1; done; }' >> "$STUB/review-cmd"
-  # The batch's run goes on once #6 holds nothing (stacked or waiting), or is gone (it held b.txt beside the batch and landed).
-  cat >> "$STUB/test-cmd" <<'EOF'
-if grep -qx seven a.txt && grep -qx eight b.txt && [ ! -e "$STUB/inbatch" ]; then : > "$STUB/inbatch"
-  while [ -d "$STUB" ]; do jq -e '.held == false' ../*-6.claim >/dev/null 2>&1 && break; ls -d ../*-6 >/dev/null 2>&1 || break; sleep 0.1; done; fi
-EOF
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  c6=$(cardof 6); c7=$(cardof 7); c8=$(cardof 8)
-  grep -q "card $c6 is stacked on card $c7, which changes the same files" <<<"$out" \
-    && st "select(.issue == 6 and .step == \"fix\") | .reason" | grep -q "^stacked on card $c7, " \
-    || fail "#6 was not stacked on the batch's card for b.txt, onto the batch's change: $(st 'select(.issue == 6) | "\(.step) \(.reason)"' | tr '\n' ,) $out"
-  [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "7 8 6 " ] && [ "$(st 'select(.step == "landed" and .issue != 6) | .batch | join(" ")' | sort -u)" = "$c7 $c8" ] \
-    || fail "#6 did not land after the batch of #7 and #8: $(st 'select(.step == "landed")')"
-  [ "$(sed -n '1p;2p' "$R/b.txt" | tr '\n' ' ')" = "eight six " ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "main does not hold the three changes: $(cat "$R/b.txt")"
+  bwt 6 'sed -i 2s/.*/six/ b.txt'; bwt 7 'sed -i 1s/.*/seven/ a.txt' 300 true; bwt 8 'echo eight >> a.txt; sed -i 1s/.*/eight/ b.txt' 100
+  bfx "$BGATHER"'; w=$(claim c6-6 "$CARDS/c6-6" $$); echo "claim 6: $w"
+    stackto c6-6 "$CARDS/c6-6" "$w" "$(cat "$STUB/issue.6")" > "$STUB/base"; echo "stack: $?"'
+  bout 'gather: c7-7 c8-8' && [ "$(jq -c .paths "$CARDS/c7-7.claim")" = '["a.txt","b.txt"]' ] \
+    || fail "#7 did not make the batch of itself and #8, holding both cards' files: $(cat "$T/$CASE/run.out") $(cat "$CARDS/c7-7.claim")"
+  bout 'claim 6: {"on":"c7-7","paths":["b.txt"]}' || fail "#6 was not told to wait on #7, the batch's card, for b.txt: $(cat "$T/$CASE/run.out")"
+  base=$(cat "$STUB/base")
+  bout 'stack: 0' && [ "$(jq -r '"\(.on) \(.base)"' "$CARDS/c6-6.stack")" = "c7-7 $base" ] || fail "#6 was not stacked on #7: $(cat "$T/$CASE/run.out")"
+  [ "$(git -C "$R" rev-parse "$base^")" = "$(git -C "$R" rev-parse main)" ] \
+    && [ "$(git -C "$R" show "$base:a.txt" | sed -n '1p;$p' | tr '\n' ' ')$(git -C "$R" show "$base:b.txt" | sed -n '1p;2p' | tr '\n' ' ')" = "seven eight eight 2 " ] \
+    || fail "#6's stack base is not main plus the batch's whole change (#7's a.txt line 1, #8's a.txt line 21 and b.txt line 1): $(git -C "$R" show --stat "$base")"
 }
 
 # A later card's change that no longer applies to main's checkout leaves nothing of the batch there: main's checkout
