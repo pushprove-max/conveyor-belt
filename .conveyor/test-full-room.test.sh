@@ -27,8 +27,10 @@ repo() { # <name> <file>...: a scratch repo with the real script and a test file
   echo times > "$r/.gitignore"
   git -C "$r" init -q && git -C "$r" add -A && git -C "$r" commit -qm init
 }
-# The real suite runner, on a scratch repo: only a run of it shows a file kept from starting until a worker ends, as
-# the wait is in its loop that starts the workers, not in a function of its own.
+# The real suite runner, on a scratch repo: only a run of it shows a file kept from starting until a file ends. A
+# file of the same run (wait) waits in its loop that starts the workers, not in a function of its own. A file of
+# another run (two1, two2, held) waits in share_take, through share_run in runone, a function of the runner that
+# cannot be called apart from it; the run shows that runone takes that path.
 suite() { # <name> <share in MB> <env>...: the suite run in that repo, with a host file of its own that gives the share
   mkdir -p "$T/$1.config/conveyor" && echo "{\"testTmpMB\": $2}" > "$T/$1.config/conveyor/host.json"
   (cd "$T/$1" && unset CONVEYOR_TEST_SLOT CONVEYOR_CARD CONVEYOR_TEST_WHOLE CONVEYOR_TEST_LOG && XDG_CONFIG_HOME=$T/$1.config \
