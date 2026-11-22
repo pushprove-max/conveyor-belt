@@ -203,10 +203,12 @@ of these:
 - `repeat`: a finding comes back after its fix, and each finding of the review is P2 or P3. A P0 or P1 that comes
   back blocks the card.
 
-If a finding of the last review is a privacy hit in the card's own change, the card gets one more fix session. The
-findings that are still open when the loop ends become follow-ups. If the last review is a `NO-GO` that holds a P0
-finding, the card does not land and files no follow-ups. It blocks, and the reason names the P0. The card's work and
-reviews are kept, so you can retry it. The review that ends the loop and the `filed` step
+If a finding of the last review is a privacy hit in the card's own change, the card gets one more fix session. If the
+last review is a `NO-GO` that holds a P1 finding, the card also gets one fix session, once, and one more review of that
+fix alone. If that review still holds a P1, the card blocks and files no follow-up, as it does for a P1 that comes back
+after its fix. The findings that are still open when the loop ends become follow-ups. If the last review is a `NO-GO`
+that holds a P0 finding, the card does not land and files no follow-ups. It blocks, and the reason names the P0. The
+card's work and reviews are kept, so you can retry it. The review that ends the loop and the `filed` step
 record the reason as `stop`, with `pass` (the reviews of this card) and `rounds` (the reviews of earlier cards). On the
 Board, that review shows "Fix loop ended:" and the reason.
 

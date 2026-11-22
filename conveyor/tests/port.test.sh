@@ -11,8 +11,10 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # A line of a build stub: the session that ports a card after its landing conflict moves main's a.txt again, so the
 # card's landing conflicts once more and it blocks for the owner (a case that goes on to `retry` it).
 AGAIN='if grep -q "^# Landing conflict" "$STUB/brief"; then echo TWO > "$R/a.txt"; git -C "$R" commit -qam again; fi'
-# NOGO3 with its P0 made a P1: a last NO-GO that lands with its follow-ups filed (one with a P0 blocks the card).
-PORTNOGO=${NOGO3/\[P0\]/[P1]}
+# NOGO3 with each finding a P2 (its P0, and the line with no level, which counts as a P1): a last NO-GO that lands with its follow-ups filed (one with a P0 or a P1 does not land).
+PORTNOGO=${NOGO3/\[P0\]/[P2]}; PORTNOGO=${PORTNOGO/$'\n'b.txt:22/$'\n'[P2] b.txt:22}
+# NOGO with its P1 made a P2, for the same reason.
+export PORTNOGO2=${NOGO/\[P1\]/[P2]}
 
 # Bugs: a card that passed its review is thrown away when another change landed on its lines first; the
 # rebuild starts from the card's stale tree; its result lands unreviewed, or over the other change; a card is rebuilt
@@ -82,7 +84,7 @@ t_portfix() {
     || fail "the withdrawn follow-ups were not closed as not planned, each naming #8: $(cat "$STUB/closed" "$STUB/close-comments" 2>&1)"
   local k old s
   k=$(st 'select(.issue == 8 and .step == "blocked") | "\($ENV.ST)/\(.kept)"'); old=$(st 'select(.issue == 8 and .step == "blocked") | .card')
-  [ "$(sed -n 2p "$k/$old.withdrawn")" = '#100102 b.txt:22 no mark here' ] && [ -s "$k/$old.patch" ] || fail "the withdrawn findings or the patch are not in the kept folder: $(ls "$k")"
+  [ "$(sed -n 2p "$k/$old.withdrawn")" = '#100102 [P2] b.txt:22 no mark here' ] && [ -s "$k/$old.patch" ] || fail "the withdrawn findings or the patch are not in the kept folder: $(ls "$k")"
   echo "$GO" > "$STUB/review.5"; echo "$GO" > "$STUB/review.6"
   # The third run fails, and its run again too (tests()), so the test fix starts.
   echo 'echo x >> "$STUB/tests"; case $(wc -l < "$STUB/tests") in 3|4) echo "FAIL widget.test.ts"; printf "%s\n" "== widget.test.ts" "-- FAIL widget.test.ts" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1 ;; esac' > "$STUB/test-cmd"
@@ -96,7 +98,7 @@ t_portfix() {
     || fail "the port session of a finished loop was not told the patch and the commit it was built on, or to change nothing else: $(tail -n 6 "$STUB/brief.$s")"
   [ "$(st 'select(.issue == 8 and '"$NOMARK"') | "\(.step) \(.result)"' | tr '\n' ,)" = "picked ok,worktree ok,brief ok,build ok,review GO,test fail,fix ok,review GO,test pass,landed ok," ] \
     && [ "$(st 'select(.issue == 8 and .step == "landed") | .leftover')" = true ] \
-    && [ "$(tail -n 3 "$STUB/filed" | jq -r .title | tr '\n' '|')" = '[P1] a.txt:1 wrong word|b.txt:22 no mark here|[P2] c.txt:3 a nit|' ] \
+    && [ "$(tail -n 3 "$STUB/filed" | jq -r .title | tr '\n' '|')" = '[P2] a.txt:1 wrong word|[P2] b.txt:22 no mark here|[P2] c.txt:3 a nit|' ] \
     || fail "a test fix after the port's GO lost the earlier loop's findings: $(steps 8)"
   [ "$(st 'select(.issue == 8 and .step == "filed") | .followups | length')" = 3 ] || fail "no filed line names the three follow-ups: $(steps 8)"
   recok "$ST/cards.jsonl" "a card that landed on a NO-GO (its filed line, and its landed line with leftover and followups)"
@@ -141,7 +143,7 @@ t_resumeport() {
   resumesetup 8
   portkept 8 c1-8 'rebase onto main conflicts: CONFLICT (content): Merge conflict in a.txt' 'echo two >> a.txt' "$PORTNOGO" \
     "$(kline c1-8 8 review NO-GO "$e"; kline c1-8 8 filed ok "$e"; kline c1-8 8 rebase ok; kline c1-8 8 review GO '{"stop":"go","pass":1,"rounds":0}')"
-  printf '%s\n' '#100101 [P1] a.txt:1 wrong word' '#100102 b.txt:22 no mark here' '#100103 [P2] c.txt:3 a nit' > "$K/c1-8.withdrawn"
+  printf '%s\n' '#100101 [P2] a.txt:1 wrong word' '#100102 [P2] b.txt:22 no mark here' '#100103 [P2] c.txt:3 a nit' > "$K/c1-8.withdrawn"
   echo ONE > "$R/a.txt" && git -C "$R" commit -qam other || fail "main could not move"
   fu() { jq -cn --argjson n "$1" --arg p "$2" --arg f "$3" '{number:$n,title:$f,body:"Follow-up to #\($p) (Conveyor card c1-\($p)). Its last review said NO-GO.\n\nFinding: \($f)\nWhere: x\nFollow-up depth: 1"}'; }
   jq -cs . <(fu 57 80 '[P1] other.txt:1 of another issue') <(fu 56 8 '[P1] done.txt:2 landed since') <(fu 100102 8 'b.txt:22 no mark here') <(fu 55 8 '[P1] old.txt:9 an old finding') > "$STUB/closed-issues.json"
@@ -149,7 +151,7 @@ t_resumeport() {
   loop retry 8 >/dev/null || fail "retry of #8 exited non-zero"
   # After resumeplan, as card() goes on: its brief's carried findings, and what follows a GO on the port's one review.
   resumed 8 'carried 8 "$wt" > "$T/$CASE/carried" || exit 3
-    res=GO finrev=$(<"$wt.review") pass=1 rebased="" tfix="" lfix="" privfix="" earlier="" earlyend=""; afterreview
+    res=GO finrev=$(<"$wt.review") pass=1 rebased="" tfix="" lfix="" privfix="" p1fix="" earlier="" earlyend=""; afterreview
     jq -cn --arg a "$after" --arg s "$stop" --argjson e "${earlyend:-null}" --arg r "$earlier" "{after: \$a, stop: \$s, earlyend: \$e, earlier: (\$r | test(\"c.txt:3 a nit\"))}" > "$T/$CASE/after"
     printf "%s\n" "--- kept" "+++ ported" "@@ -1,2 +1,2 @@" "-+ONE" "++TWO" " +two" > "$wt.port" && cp "$wt.port" "$T/$CASE/port.fixture" || exit 3
     printf -v ins "%s\n\n%s\n%s" "$REVIEW" "$PORTREVIEW" "The difference is the file $wt.port."
@@ -166,7 +168,7 @@ t_resumeport() {
     || fail "a kept patch whose finished loop no longer applies to main was not taken up as a port with one review of it alone: $RESUMED"
   [ "$(cat "$T/$CASE/after")" = "{\"after\":\"last\",\"stop\":\"go\",\"earlyend\":$e,\"earlier\":true}" ] \
     || fail "a GO on the port's review does not land with the earlier loop's last NO-GO and why that loop ended: $(cat "$T/$CASE/after")"
-  grep -qx '\[P2\] c.txt:3 a nit' "$T/$CASE/carried" && grep -qx '#100102 b.txt:22 no mark here' "$T/$CASE/carried" && ! grep -q 'NEW CARD' "$T/$CASE/carried" \
+  grep -qx '\[P2\] c.txt:3 a nit' "$T/$CASE/carried" && grep -qx '#100102 \[P2\] b.txt:22 no mark here' "$T/$CASE/carried" && ! grep -q 'NEW CARD' "$T/$CASE/carried" \
     || fail "the port's brief lacks the last review's findings or a withdrawn follow-up's finding, or carries a NEW CARD line as a finding: $(cat "$T/$CASE/carried")"
   grep -q -- '--state closed .*--label conveyor-followup .*Follow-up to #8' "$STUB/closed-asked" && grep -qx '#55 \[P1\] old.txt:9 an old finding' "$T/$CASE/carried" \
     && [ "$(grep -c '^#100102 ' "$T/$CASE/carried")" = 1 ] && ! grep -Eq '^#(56|57) ' "$T/$CASE/carried" \
@@ -205,7 +207,7 @@ t_rebasebig() {
     issue=$(gh issue view 11 --json number,title,body,labels,milestone) && hdr=$(header on) && b=$(brief c1-11 "$issue" "$hdr") || exit 3
     p=$(cardprompt c1-11 "$hdr" "the card rules" "$b")
     rebaseprompt "$p" "$wt" "$cm" 0123abc > "$T/$CASE/rebuild" && rebaseprompt "$p" "$wt" "$cm" 0123abc port > "$T/$CASE/port" || exit 3
-    printf "%s\n" "$NOGO" > "$wt.review"; res=NO-GO fin="" finrev="" finend="{}" pass=2 rounds=0 tfix="" lfix="" mode="" privfix=""
+    printf "%s\n" "$PORTNOGO2" > "$wt.review"; res=NO-GO fin="" finrev="" finend="{}" pass=2 rounds=0 tfix="" lfix="" mode="" privfix="" p1fix=""
     for rebased in 1 ""; do afterreview; echo "$after $stop"; done > "$T/$CASE/after"'
   [ "$RC" = 0 ] || fail "the rebuild's prompt or the decision after its review could not be made (exit $RC): $(cat "$T/$CASE/run.out")"
   local f; for f in rebuild port; do
@@ -221,7 +223,7 @@ t_rebasebig() {
   # A last review's NO-GO, its three follow-ups filed, whose landing conflicts: landconflict() ports it (no rebuild)
   # and withdraws them; the port's own last NO-GO files three more, its landing conflicts again, and the card blocks
   # with those withdrawn too.
-  conflicted 11 'printf "%s\n" "$NOGO" > "$wt.review"; res=NO-GO
+  conflicted 11 'printf "%s\n" "$PORTNOGO2" > "$wt.review"; res=NO-GO
     for u in "[100101,100102,100103]" "[100104,100105,100106]"; do ups=$u; land1; go=end; landconflict; outcome; done'
   [ "$OUTCOME" = '{"go":"next","rebased":"","ported":"1","parsecheck":"1","kept":"","pass":0}
 {"go":"end","rebased":"","ported":"1","parsecheck":"1","kept":"","pass":0}' ] \
@@ -373,13 +375,13 @@ t_resume() {
   resumesetup 7
   # A visible change stops only a card that touches product code: #7 and #11 change a file under web/ too.
   portkept 7 c1-7 "visible to customers or staff: needs Dana's yes: guests see a new Pay button" 'echo two >> a.txt; mkdir -p web; echo pay >> web/pay.ts' \
-    "$(printf '%s\n' '[P1] a.txt:31 wrong word' "$YES" 'VERDICT: NO-GO')"
+    "$(printf '%s\n' '[P2] a.txt:31 wrong word' "$YES" 'VERDICT: NO-GO')"
   # The issue as the kept review read it, kept beside the patch when the card stopped for the yes (visgate()).
   issue 7 2026-01-01 | jq -c '{body}' > "$K/c1-7.body"
   issue 7 2026-01-01 | jq -c '[.body += "\nVisible change approved: r-11"]' > "$STUB/issues.json"
   loop retry 7 | grep -q 'lands from the kept patch .*-7\.patch, with no build and no review' || fail "retry does not say the approved next card lands from the kept patch"
   # After resumeplan, what card() does on the kept review of a landing with no review (pass 0, as card() sets it).
-  resumed 7 'res=$(verdict "$wt.review") finrev="" pass=0 rebased="" tfix="" lfix="" privfix=""; afterreview; echo "$after $stop" > "$T/$CASE/after"'
+  resumed 7 'res=$(verdict "$wt.review") finrev="" pass=0 rebased="" tfix="" lfix="" privfix="" p1fix=""; afterreview; echo "$after $stop" > "$T/$CASE/after"'
   [ "$(jq -c '[.mode, .note, .staged]' <<<"$RESUMED")" = '["land","landing from the kept patch of card c1-7: no build and no review",["a.txt","web/pay.ts"]]' ] \
     || fail "an approved kept patch was not taken up to land with no build and no review: $RESUMED"
   [ "$(cat "$T/$CASE/after")" = "last land" ] || fail "the kept NO-GO of a patch landed by retry is not a last review that files its finding: $(cat "$T/$CASE/after")"

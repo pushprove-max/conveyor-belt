@@ -145,7 +145,7 @@ keptblock() { # <issue> <reviews> <reason> [<before>] [<retry>]
 # A card retried from a kept patch carries its earlier review rounds. Bug: a retry began the round count again, so
 # a card blocked after two reviews had three more.
 t_retryrounds() {
-  setup "[$(issue 7 2026-01-01)]"; echo "$NOGO" > "$STUB/review.3"
+  setup "[$(issue 7 2026-01-01)]"; echo "${NOGO/\[P1\]/[P2]}" > "$STUB/review.3"
   # The fix session after the second review fails: the card blocks after two reviews, its patch kept.
   fx_wt 'echo two >> a.txt' b.txt base; keptblock 7 2 'fix: the session failed'
   # Its retried lines carry another project name, as they do after the project is renamed in host.json. Bug: the round
@@ -158,7 +158,7 @@ t_retryrounds() {
   [ "$(jq -c '[.mode, .rounds]' <<<"$RESUMED")" = '["session",2]' ] \
     && [ "$AFTER" = '{"res":"NO-GO","after":"last","last":"1","stop":"max-reviews","hard":"","last0":"","isfu":"","priv":"","why":""}' ] \
     || fail "the retried card did not have one review round left: $RESUMED $AFTER"
-  [ "$(cat "$T/$CASE/ups")" = '[100101]' ] && [ "$(jq -r .title "$STUB/filed")" = '[P1] a.txt:1 wrong word' ] \
+  [ "$(cat "$T/$CASE/ups")" = '[100101]' ] && [ "$(jq -r .title "$STUB/filed")" = '[P2] a.txt:1 wrong word' ] \
     || fail "the last review of the retried card did not file its finding: $(cat "$STUB/filed" 2>&1)"
 }
 
@@ -257,12 +257,12 @@ t_reviewrounds() {
 # again, so a NO-GO on the third review of the issue (a finding no fix round was told) was fixed and reviewed again.
 t_reviewlimit() {
   yesblock
-  printf '%s\n' '[P1] b.txt:2 another word' "$YES" 'VERDICT: NO-GO' > "$STUB/review.3"
+  printf '%s\n' '[P2] b.txt:2 another word' "$YES" 'VERDICT: NO-GO' > "$STUB/review.3"
   # Its third review is the last: no fix session, and it lands with the new finding filed (followups(), as card() calls it).
   retried 7 "$STUB/review.3" '[ -n "$isfu" ] || followups c9 "$issue" "$wt.review" > "$T/$CASE/ups"'
   [ "$(jq -c '[.mode, .rounds]' <<<"$RESUMED")" = '["review",2]' ] \
     && [ "$AFTER" = '{"res":"NO-GO","after":"last","last":"1","stop":"max-reviews","hard":"","last0":"","isfu":"","priv":"","why":""}' ] \
-    && [ "$(cat "$T/$CASE/ups")" = '[100101]' ] && [ "$(jq -r .title "$STUB/filed")" = '[P1] b.txt:2 another word' ] \
+    && [ "$(cat "$T/$CASE/ups")" = '[100101]' ] && [ "$(jq -r .title "$STUB/filed")" = '[P2] b.txt:2 another word' ] \
     || fail "a kept patch reviewed again did not count its loop's reviews: $RESUMED $AFTER $(cat "$STUB/filed" 2>&1)"
 }
 
@@ -280,8 +280,9 @@ t_retryotherrounds() {
     jq -cn --arg c "${c%%:*}" --arg r "${c#*:}" '{card: $c, issue: 7, step: "review", time: "2025-01-01T00:00:00Z", result: "NO-GO", repo: $r}' >> "$ST/retried.jsonl"
   done; done
   moved 1 "$NOGO" > "$STUB/review.1"
-  # Issue 1075: a last NO-GO with only P1 and P2 findings files them and lands. Bug: it blocked as one with a P0 does.
-  printf '%s\n' '[P1] a.txt:3 drops the payment' '[P2] c.txt:3 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.3"
+  # Issue 1075: a last NO-GO with only P2 findings files them and lands. Bug: it blocked as one with a P0 does. (One
+  # with a P1 gets a fix round first: t_p1lastnew.)
+  printf '%s\n' '[P2] a.txt:3 drops the payment' '[P2] c.txt:3 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.3"
   # Its first review is followed by a fix round; its third (pass 3, the round limit) ends the loop, the review line
   # and the filed line given why (ended), and files its findings (followups(), as card() calls it).
   retried 7 "$STUB/review.1" 'cp "$STUB/review.3" "$wt.review"; pass=3 res=NO-GO; afterreview
@@ -290,7 +291,7 @@ t_retryotherrounds() {
   [ "$(jq -c '[.mode, .rounds]' <<<"$RESUMED")" = '["session",0]' ] && [ "$(jq -c '[.after, .stop]' <<<"$AFTER")" = '["fix",""]' ] \
     || fail "the retried card did not start at rounds 0 and go to a fix round after its first review: $RESUMED $AFTER"
   [ "$(cat "$T/$CASE/after3")" = '["last","max-reviews","",{"stop":"max-reviews","pass":3,"rounds":0}]' ] \
-    && [ "$(cat "$T/$CASE/ups")" = '[100101,100102]' ] && [ "$(jq -r .title "$STUB/filed" | tr '\n' '|')" = '[P1] a.txt:3 drops the payment|[P2] c.txt:3 a nit|' ] \
+    && [ "$(cat "$T/$CASE/ups")" = '[100101,100102]' ] && [ "$(jq -r .title "$STUB/filed" | tr '\n' '|')" = '[P2] a.txt:3 drops the payment|[P2] c.txt:3 a nit|' ] \
     || fail "the third review did not end the loop saying why, or did not file its findings: $(cat "$T/$CASE/after3") $(cat "$STUB/filed" 2>&1)"
   # The review line and the filed line, as card() writes them with ended (kline, port.test.sh), pass the record check,
   # and the Board's card reads why the loop ended from the snapshot's reviews (the snapshot's landed are today's).

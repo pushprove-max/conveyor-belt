@@ -254,7 +254,7 @@ t_lintgateoff() {
 # gets one fix session, then that pass's review session: three NO-GO reviews, and the last one lands with follow-ups.
 t_lintgatefix() {
   gatesetup "[$(issue 7 2026-01-01)]"
-  for i in 1 2 3; do moved $i "$NOGO" > "$STUB/review.$i"; done
+  for i in 1 2 3; do moved $i "${NOGO/\[P1\]/[P2]}" > "$STUB/review.$i"; done
   gatesessions 'echo BAD >> a.txt' "sed -i '/BAD/d' a.txt; echo good >> a.txt" 'echo "BAD again" >> a.txt'
   # loop: only card()'s review loop shows a lint fix before each pass's review and the count of reviews kept at three
   loop run > /dev/null || fail "run exited non-zero"

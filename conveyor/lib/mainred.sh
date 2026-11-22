@@ -483,3 +483,26 @@ mainwait() { # <worktree> <main's commit> <case>...
   done
   rm -f "$1.live" "$1.idle"
 }
+
+# What the Test step does next, decided with nothing done. Called as `testroute checks <the exit of donewhen.sh treecheck()>`, for
+# the project's checks at the start of the step, it prints block (2: they could not run), checkfix (1: they failed,
+# so one fix session follows) or nothing (another exit, 0 when they pass: the tests run). Called as
+# `testroute verdicts <mainred.sh verdicts() json>`, for a test run that failed, it prints machine (the machine is at fault
+# and no failure is the card's: the repair lane, then the machine hold), main (every failure is main's: the wait for
+# main) or nothing (a failure is the card's). For that failure, called as `testroute <worktree>`, it prints nothing
+# (the repair lane passed this test step: repaired), moved (main moved since the card's commit, and it was not
+# fitted onto main yet: tmain), block (the tests failed again after their one test-fix round: tfix) or fix (that
+# round). It reads card()'s repaired, tmain and tfix (bash's dynamic scope).
+testroute() {
+  if [ "$1" = checks ]; then
+    case $2 in 1) echo checkfix ;; 2) echo block ;; esac
+  elif [ "$1" = verdicts ]; then
+    if jq -e '[.verdicts[] | select(.verdict != "flaky")] | length > 0 and all(.verdict | IN("main", "machine")) and any(.verdict == "machine")' <<<"$2" >/dev/null; then echo machine
+    elif jq -e '[.verdicts[] | select(.verdict != "flaky")] | length > 0 and all(.verdict == "main")' <<<"$2" >/dev/null; then echo main
+    fi
+  elif [ -n "$repaired" ]; then :
+  elif [ -z "$tmain" ] && [ "$(git -C "$1" rev-parse HEAD 2>/dev/null)" != "$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)" ]; then echo moved
+  elif [ -n "$tfix" ]; then echo block
+  else echo fix
+  fi
+}

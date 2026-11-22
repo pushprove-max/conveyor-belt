@@ -190,11 +190,11 @@ failline() { # <worktree> <exit> <seconds> <failures json, or null> <verdicts js
      + (if $f then {failures:($f | del(.passed, .okcases, .passcases))} else {} end) + (if $t == "" then {} else {tail:$t} end) + $r + $v'
 }
 # What card() does after a review, decided from its verdict (res) and the loop's state, with nothing done: after is
-# hard (a repeated P0 or P1 did not hold after its fix: block), p0 (a last NO-GO holds a P0: block), go (land), last (a
-# last review: land with follow-ups), nofinding (a NO-GO with no finding to fix: block) or fix (a fix round). It reads
-# card()'s wt, issue, res, fin, finrev, finend, pass, rounds (the rounds a retried card carries), rebased, tfix, lfix,
-# mode and privfix, and sets card()'s after, last, earlier, earlyend, fin, rep, hard, priv, stop, last0, ended, isfu
-# and why (bash's dynamic scope).
+# hard (a repeated P0 or P1 did not hold after its fix: block), p0 (a last NO-GO holds a P0: block), p1 (a last NO-GO
+# holds a P1 after its one fix round: block), go (land), last (a last review: land with follow-ups), nofinding (a NO-GO
+# with no finding to fix: block) or fix (a fix round). It reads card()'s wt, issue, res, fin, finrev, finend, pass, rounds
+# (the rounds a retried card carries), rebased, tfix, lfix, mode, privfix and p1fix, and sets card()'s after, last,
+# earlier, earlyend, fin, rep, hard, priv, p1, stop, last0, ended, isfu and why (bash's dynamic scope).
 afterreview() {
   local d
   # A GO on the review of a port lands with the earlier loop's outcome: after its last NO-GO, that review's
@@ -212,16 +212,20 @@ afterreview() {
   # last0: the first P0 finding of a last NO-GO (one that ends the loop): the card blocks with it and files none of
   # its findings, its work and reviews kept for a retry. Bug: a P0 first found on the last review was filed as a
   # follow-up and the card landed it on main.
-  priv=''; stop=''; last0=''
+  # p1: the first P1 finding of a last NO-GO with no P0. It gets one fix round, once a card (p1fix), and a fix-only
+  # review; a P1 still held after that blocks the card. A follow-up would land a miss of the issue on main.
+  priv=''; stop=''; last0=''; p1=''
   if [ -z "$hard" ]; then
     stop=$(loopstop "$res" "$((pass + rounds))" "$rebased" "$tfix" "$lfix" "$mode" "$rep" "$wt.review")
     [ -z "$stop" ] || [ "$res" = GO ] || [ -n "$privfix" ] || ! priv=$(privown "$wt") || [ -z "$priv" ] || stop=''
     [ -z "$stop" ] || [ "$res" = GO ] || last0=$(findings "$wt.review" | jq -rs 'map(select(.level == "P0")) | first // empty | .line[:300]')
+    [ -z "$stop" ] || [ "$res" = GO ] || [ -n "$last0" ] || p1=$(findings "$wt.review" | jq -rs 'map(select(.level == "P1")) | first // empty | .line[:300]'); [ -z "$p1" ] || [ -n "$p1fix" ] || stop=''
   fi
   # The review line, and the filed line after it, say why the loop ended: stop, with pass and rounds as they are here.
   ended=$(jq -cn --arg s "$stop" --argjson p "$pass" --argjson r "$rounds" 'if $s == "" then {} else {stop: $s, pass: $p, rounds: $r} end')
   if [ -n "$hard" ]; then after=hard
   elif [ -n "$last0" ]; then after=p0
+  elif [ -n "$p1" ] && [ -n "$p1fix" ]; then after=p1
   elif [ "$res" = GO ] && [ -z "$earlier" ]; then after=go
   elif [ -n "$stop" ]; then
     # A card whose issue is a follow-up at the depth cap (fudepth(), lib/followups.sh) files none: its findings are
@@ -231,28 +235,6 @@ afterreview() {
   # card blocks with the reviewer's own line (its first UNPROVEN line, else its VERDICT line), cut at 200 characters.
   elif ! grep -Evq "$NOTFINDING" "$wt.review"; then after=nofinding; why=$(grep -m1 '^UNPROVEN:' "$wt.review" || grep -m1 '^VERDICT:' "$wt.review")
   else after=fix
-  fi
-}
-# What the Test step does next, decided with nothing done. Called as `testroute checks <the exit of donewhen.sh treecheck()>`, for
-# the project's checks at the start of the step, it prints block (2: they could not run), checkfix (1: they failed,
-# so one fix session follows) or nothing (another exit, 0 when they pass: the tests run). Called as
-# `testroute verdicts <mainred.sh verdicts() json>`, for a test run that failed, it prints machine (the machine is at fault
-# and no failure is the card's: the repair lane, then the machine hold), main (every failure is main's: the wait for
-# main) or nothing (a failure is the card's). For that failure, called as `testroute <worktree>`, it prints nothing
-# (the repair lane passed this test step: repaired), moved (main moved since the card's commit, and it was not
-# fitted onto main yet: tmain), block (the tests failed again after their one test-fix round: tfix) or fix (that
-# round). It reads card()'s repaired, tmain and tfix (bash's dynamic scope).
-testroute() {
-  if [ "$1" = checks ]; then
-    case $2 in 1) echo checkfix ;; 2) echo block ;; esac
-  elif [ "$1" = verdicts ]; then
-    if jq -e '[.verdicts[] | select(.verdict != "flaky")] | length > 0 and all(.verdict | IN("main", "machine")) and any(.verdict == "machine")' <<<"$2" >/dev/null; then echo machine
-    elif jq -e '[.verdicts[] | select(.verdict != "flaky")] | length > 0 and all(.verdict == "main")' <<<"$2" >/dev/null; then echo main
-    fi
-  elif [ -n "$repaired" ]; then :
-  elif [ -z "$tmain" ] && [ "$(git -C "$1" rev-parse HEAD 2>/dev/null)" != "$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)" ]; then echo moved
-  elif [ -n "$tfix" ]; then echo block
-  else echo fix
   fi
 }
 # What a bug card does after its bug-card check (bugproof.sh bugproof()), from that check's exit: close (3: every case passes on
@@ -295,7 +277,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local lfix='' # lfix: the change the landing gate's lint fix left, its cardpatch() (lintgate(), lib/lint.sh)
   local fixtree='' # fixtree: the tree before the last fix round, which holds the lines that fix deleted (excerpts())
   local after # what follows a review (afterreview())
-  local priv privfix='' # priv: a last-review finding that is a privacy hit in the card's own change (privown()); privfix: its fix round was given
+  local priv privfix='' p1 p1fix='' # priv: a last-review finding that is a privacy hit in the card's own change (privown()); privfix: its fix round was given; p1: the P1 finding that gets one fix round, p1fix: that round was given
   local tmain='' # tmain: set once a failed test step has fitted the card onto a main that had moved (#582)
   local voids=0 # voids: the test runs in a row that gave no result (voidrun())
   local held # held: its test step waited for main or the machine (mainred.sh mainwait(), holdwait())
@@ -608,12 +590,14 @@ cardfix() {
   [ -z "$rline" ] || record "$c" "$n" review "$res" "$(jq -c --argjson e "$ended" '. + $e' <<<"$rline")"; rline=''
   [ "$after" != hard ] || { block "$c" "$n" "$wt" "the fix for $hard"; return; }
   [ "$after" != p0 ] || { block "$c" "$n" "$wt" "review $pass is the last review and still holds a P0 finding, so it files no follow-up: $last0"; return; }
+  [ "$after" != p1 ] || { block "$c" "$n" "$wt" "review $pass is the last review and still holds a P1 finding after its one fix round, so it files no follow-up: $p1"; return; }
   [ "$after" != nofinding ] || { block "$c" "$n" "$wt" "review $pass is NO-GO with no finding to fix: ${why:0:200}"; return; }
   if [ "$after" != fix ]; then mode=''
   else
     # A card stacked on this one (stackto()) that passed its tests goes on during this round, fitted onto main alone
     # (giveway(), claim()).
     [ -z "$priv" ] || { privfix=1; echo "conveyor: card $c: a finding of its last review is a privacy hit in its own change, so it goes to one more fix round: ${priv:0:200}"; }
+    [ -z "$p1" ] || { p1fix=1; echo "conveyor: card $c: its last review holds a P1 finding, so it goes to one fix round and a review of that fix: ${p1:0:200}"; }
     locked giveway "$c" "$wt" fix; began "$c" "$n" fix
     old=$(git -C "$wt" write-tree); more=''; [ -z "$rep" ] || more=$'\n\n'"$(again "$rep")"
     # The fix is told the accepted findings only: a finding the judge declined (a DECLINED line), a P3 listed only

@@ -166,3 +166,42 @@ t_reusereindent() {
   git -C "$d" reset -q --hard; printf '# one\n# two\n# three\n' | cat - "$d/f.py" > "$d/g" && mv "$d/g" "$d/f.py"; git -C "$d" commit -qam above; stage '    print("inside")'
   testedhere "$d" && reuse || fail "the same change at other line numbers, on a main that moved, lost its test pass or review (patch $(cardpatch "$d"))"
 }
+
+# Issue 1302: a P1 first found in the last review (the third) gets one fix round and a review of that fix alone before
+# the card can land; if the P1 still holds the card blocks. Bug: the loop's end decided, so the card landed with the P1
+# filed as a follow-up. p1last runs card #7 through two P2 rounds and a third review that finds the P1, then gives the
+# fourth review (<review 4>) and reads the steps (steps), the prompts of the reviews (prompt.N) and the follow-ups (filed).
+p1last() { # <review 4>
+  setup "[$(issue 7 2026-01-01)]"; steps() { st "select(.issue == 7 and $NOMARK) | \"\(.step) \(.result)\"" | tr '\n' ,; }
+  sed -i 's|^cat > /dev/null; echo x >> "$STUB/reviews";|echo x >> "$STUB/reviews"; cat > "$STUB/prompt.$(wc -l < "$STUB/reviews")";|' "$STUB/codex"
+  echo 'echo "fix$(wc -l < "$STUB/sessions")" >> a.txt' > "$STUB/build"
+  printf '%s\n' '[P2] a.txt:1 first nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
+  printf '%s\n' '[P2] a.txt:2 second nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
+  printf '%s\n' '[P1] a.txt:3 drops what the issue asks' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.3"
+  printf '%s\n' "$1" > "$STUB/review.4"
+  # loop: only a whole card shows that the fix round and its review come before any landing.
+  loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
+}
+p1fixround() { # the fix round and its fix-only review came before any landing or block
+  [[ "$(steps)" == "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review NO-GO,fix ok,review NO-GO,fix ok,review $1"* ]] \
+    && [ "$(wc -l < "$STUB/reviews")" = 4 ] && grep -q '^Review the fix of the last review.s findings, not the whole staged change' "$STUB/prompt.4" \
+    || fail "the P1 of the last review did not get one fix round and a review of that fix alone before the end: $(steps) $(wc -l < "$STUB/reviews") reviews"
+}
+
+# Done when: the fix clears the P1, so the card lands and files no follow-up for it.
+t_p1lastfixed() {
+  p1last $'USER-VISIBLE: no\nVERDICT: GO'
+  p1fixround GO
+  [ "$(steps)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review NO-GO,fix ok,review NO-GO,fix ok,review GO,test pass,landed ok," ] && [ ! -e "$STUB/filed" ] \
+    || fail "a P1 cleared by its fix round did not land with nothing filed: $(steps) $(cat "$STUB/filed" 2>&1)"
+}
+
+# Done when: the P1 still holds after that fix, so the card blocks with its patch kept and files no follow-up.
+t_p1laststill() {
+  p1last $'[P1] a.txt:3 drops what the issue asks\nUSER-VISIBLE: no\nVERDICT: NO-GO'
+  p1fixround NO-GO
+  [ -z "$(st 'select(.issue == 7 and .step == "landed")')" ] && [ -n "$(st 'select(.issue == 7 and .step == "blocked")')" ] && [ ! -e "$STUB/filed" ] \
+    || fail "a P1 that holds after its fix round did not block with nothing filed: $(steps) $(cat "$STUB/filed" 2>&1)"
+  c=$(st 'select(.issue == 7 and .step == "picked") | .card')
+  [ -n "$(cat "$ST/kept/$c"/*.patch 2>/dev/null)" ] || fail "the blocked card's patch was not kept: $(ls "$ST/kept/$c" 2>&1)"
+}

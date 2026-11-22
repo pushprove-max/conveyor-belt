@@ -120,7 +120,7 @@ t_privjson() {
 # A private pack (the test pack's mode): the finding t_privacy holds is posted and filed, with a warning that names no
 # matched text.
 t_privprivate() {
-  local H=/home; local f="[P1] a.txt:1 reads $H/user/notes.txt" # the home path is put together here, as AT is
+  local H=/home; local f="[P2] a.txt:1 reads $H/user/notes.txt" # the home path is put together here, as AT is
   setup "[$(issue 7 2026-01-01)]"; for i in 1 2 3; do printf '%s\nUSER-VISIBLE: no\nVERDICT: NO-GO\n' "$(moved "${i/3/}" "$f")" > "$STUB/review.$i"; done
   [ "$(bash "$SRC/lib/pack.sh" get privacy.mode "$R/.conveyor/project.json")" = private ] || fail "the test pack is not in private mode"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"

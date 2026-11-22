@@ -23,7 +23,7 @@ AFTERREVIEW='res=$(verdict "$wt.review"); afterreview
     "{\$res, \$after, \$last, \$stop, \$hard, \$last0, \$isfu, \$priv, \$why}" > "$T/$CASE/after.json" || exit 3'
 # The state card() holds at its first review that AFTERREVIEW reads, apart from what resumeplan sets (mode, rounds,
 # fin, finend).
-FIRSTPASS='pass=1 finrev="" earlier="" rebased="" tfix="" lfix="" privfix="" isfu="" why=""'
+FIRSTPASS='pass=1 finrev="" earlier="" rebased="" tfix="" lfix="" privfix="" p1fix="" isfu="" why=""'
 afterrun() { # <issue json> [<before>] [<after>]
   rm -f "$T/$CASE/after.json"
   ISSUE=$1 fx_in 'wt=$FXWT issue=$ISSUE mode="" rounds=0 fin="" finend="{}"; '"$FIRSTPASS"'
@@ -202,7 +202,7 @@ EOF
 # Bug: a blocked card's session output, error output and last review were deleted with its worktree.
 t_filefail() {
   # The last review holds no P0 (a last P0 blocks the card before any filing, t_lastp0), so its findings are filed.
-  setup "[$(issue 7 2026-01-01)]"; for i in 1 2; do moved $i "$NOGO3" > "$STUB/review.$i"; done; echo "${NOGO3/\[P0\]/[P1]}" > "$STUB/review.3"; head=$(git -C "$R" rev-parse HEAD)
+  setup "[$(issue 7 2026-01-01)]"; for i in 1 2; do moved $i "$NOGO3" > "$STUB/review.$i"; done; n3=${NOGO3/\[P0\]/[P2]}; echo "${n3/b.txt:22/[P2] b.txt:22}" > "$STUB/review.3"; head=$(git -C "$R" rev-parse HEAD)
   echo '[ "$n" != 100102 ] || { echo "could not add label" >&2; exit 1; }' > "$STUB/create-cmd"
   # loop: only a whole card run files a last review's findings, then withdraws them when a filing fails
   loop run >/dev/null || fail "run exited non-zero"
@@ -217,7 +217,7 @@ t_filefail() {
   [ "$(ls "$k" | sed 's/.*\.//' | sort | tr '\n' ' ')" = "base err out patch rerun review rounds test testlog withdrawn " ] && grep -q 'wrong word' "$k"/*.review || fail "evidence not kept: $(ls "$k")"
   # Bugs: the blocked card's change went with its worktree; the withdrawn follow-up closed as completed, its finding kept nowhere.
   grep -qx '+two' "$k"/*.patch && [ "$(cat "$k"/*.base)" = "$head" ] || fail "the blocked card's change was not kept as a patch with the commit it was built on: $(ls "$k")"
-  [ "$(cat "$k"/*.withdrawn)" = '#100101 [P1] a.txt:1 wrong word' ] && grep -q -- '--reason not planned --comment .*#7 ' "$STUB/close-comments" \
+  [ "$(cat "$k"/*.withdrawn)" = '#100101 [P2] a.txt:1 wrong word' ] && grep -q -- '--reason not planned --comment .*#7 ' "$STUB/close-comments" \
     || fail "the withdrawn follow-up was not closed as not planned naming #7, or its finding was not kept: $(cat "$STUB/close-comments" "$k"/*.withdrawn 2>&1)"
 }
 
@@ -259,6 +259,22 @@ t_privfixrun() {
   [ "$AFTER" = "$(jq -cn --arg p "[P0] a.txt:3 flags $HX/bench" '{res: "NO-GO", after: "fix", last: "", stop: "", hard: "", last0: "", isfu: "", priv: $p, why: ""}')" ] \
     || fail "the privacy finding on the card's own line on its last review did not go to a fix round: $AFTER"
   grep -qxF "E1 [P0] a.txt:3 flags $HX/bench" "$T/$CASE/fix" || fail "the fix round is not told the privacy finding: $(cat "$T/$CASE/fix")"
+}
+
+# Bug: a P1 that is new in a last review (the fix-only review after its one fix round finds another, not the one fixed,
+# so repeats() does not see it) landed as a follow-up. The first last review with a P1 goes to a fix round (after fix, no
+# stop); once that round is given (p1fix) a last review that holds a P1 blocks (after p1), and one with only a P2 still
+# lands with its follow-up.
+t_p1lastnew() {
+  setup "[$(issue 7 2026-01-01)]"; fx_wt 'echo fix1 >> a.txt' b.txt base
+  printf '%s\n' '[P1] a.txt:3 drops what the issue asks' '[P2] c.txt:3 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
+  afterrun "$(issue 7 2026-01-01)" 'pass=3'
+  [ "$(jq -c '[.after, .stop, .last]' <<<"$AFTER")" = '["fix","",""]' ] || fail "a new P1 on the last review did not go to one fix round: $AFTER"
+  afterrun "$(issue 7 2026-01-01)" 'pass=4 p1fix=1'
+  [ "$(jq -c '[.after, .stop, .last]' <<<"$AFTER")" = '["p1","max-reviews",""]' ] || fail "a new P1 after the P1 fix round did not block: $AFTER"
+  printf '%s\n' '[P2] c.txt:3 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
+  afterrun "$(issue 7 2026-01-01)" 'pass=4 p1fix=1'
+  [ "$(jq -c '[.after, .stop, .last]' <<<"$AFTER")" = '["last","max-reviews","1"]' ] || fail "a last review with only a P2 after the P1 fix round did not land: $AFTER"
 }
 
 # Bug: a follow-up chain goes past the cap: a card whose issue is a follow-up at the cap (MAX_DEPTH, 2) files another

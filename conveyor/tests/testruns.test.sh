@@ -42,7 +42,7 @@ t_tests() {
 t_testsland() {
   local p
   setup "[$(issue 7 2026-01-01)]"
-  for i in 1 2 3 4; do moved "$i" "$NOGO" > "$STUB/review.$i"; done
+  for i in 1 2 3 4; do moved "$i" "${NOGO/\[P1\]/[P2]}" > "$STUB/review.$i"; done
   # The build adds a line and keeps the settings file it is given, as it is while the session runs; each later session
   # changes the card, so each review after it reads a new change. The first run fails, and its run again too (tests());
   # the run after the test fix passes, marking whether it came before any follow-up was filed.
@@ -79,7 +79,7 @@ EOS
 t_testsfix() {
   local head out
   setup "[$(issue 7 2026-01-01)]"
-  for i in 1 2 3 4; do moved "$i" "$NOGO" > "$STUB/review.$i"; done
+  for i in 1 2 3 4; do moved "$i" "${NOGO/\[P1\]/[P2]}" > "$STUB/review.$i"; done
   echo 'echo x >> "$STUB/tests"; seq 300 | sed "s/^/out line /"; for i in $(seq 59); do printf "FAIL %03000d\n" 0; done; echo "FAIL gadget.test.ts: expected 2"; printf "%s\n" "== gadget.test.ts" "-- FAIL gadget.test.ts" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1' > "$STUB/test-cmd"
   head=$(git -C "$R" rev-parse HEAD)
   # A whole card: the one fix round, and the block after it, are card()'s test step, which only the card's own run
