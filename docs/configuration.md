@@ -713,7 +713,9 @@ To make the map by hand, run `conveyor.sh testmap build`, or click **Build the t
 The build runs on the build machine, on a test slot, and makes the map as setup does. The command returns when the
 build starts. Only one build runs at a time. `conveyor.sh testmap stop` stops the build, and the map that was there
 stays. The file `.conveyor/test-map.build.json` keeps the start, the end, the result and the reason of the last
-build. When `test.map` is `off`, the command tells you how to turn the map on: remove `test.map` from the pack, then
+build. When a build fails, the reason gives the first line of the error, from the run or from the save of the map.
+The files of that run stay in the folder `test-map.failed` in the state folder until the next build starts: `pairs`,
+`skipped`, `err` (the error of the run), `save.err` (the error of the save) and `log` (the output of the run). When `test.map` is `off`, the command tells you how to turn the map on: remove `test.map` from the pack, then
 run setup with `--test-map yes`, or run `conveyor.sh testmap build` again. When your language has no tool in the
 table, or the tool is not installed, the command tells you why. When `test.map` names a map that your project keeps itself, the command tells you that Conveyor does not make that map.
 

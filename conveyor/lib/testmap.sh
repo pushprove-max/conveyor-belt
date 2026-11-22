@@ -108,6 +108,8 @@ mapone() { # <dir> <test file> <language>
 # it is written to <tmp>/skipped, a line {file, why} each (why: the end of its output, mapskip()). So is a Node test
 # file whose imports show it runs only under another runner (mapother()), before it runs. It fails (its output's last
 # lines to stderr) when the tool fails, a Python suite fails, or no test file ran. The run's output is in <tmp>/log.
+# Each test file's (Go: package's) coverage is removed once its pairs are read (#1348): kept to the end of a suite of
+# 1500 files, it can fill a /tmp that has a quota, and a <tmp>/skipped cut short there cannot be saved.
 # With MAPRUN set, it says how far it is (mapstart(), mapstep()): a file at a time for Node, Ruby and Rust, a package's
 # files at a time for Go; for Python, as the run's output names its test files (mappyran()), looked at every 2 seconds
 # while the suite runs.
@@ -151,7 +153,7 @@ mapcollect() { # <dir> <language> <tmp folder> [<test file>...]
             | select(.value | (if type == "object" then .lines else . end) | arrays | any(type == "number" and . > 0))
             | .key | select(startswith($r)) | ltrimstr($r) | "\($t)\t\(.)"' "$tmp/c$n/.resultset.json" 2>> "$tmp/out"; then ok=$((ok + 1))
         else mapskip "$tmp" '' "$t"; fi
-        cat "$tmp/out" >> "$tmp/log" 2>/dev/null; rm -f "$tmp/out"
+        cat "$tmp/out" >> "$tmp/log" 2>/dev/null; rm -rf "$tmp/out" "$tmp/c$n"
         [ -z "${MAPRUN:-}" ] || mapstep $n
       done ;;
     python)
@@ -184,7 +186,7 @@ mapcollect() { # <dir> <language> <tmp folder> [<test file>...]
           awk -v m="$mod/" 'NR > 1 && $NF > 0 { f = $1; sub(/:[^:]*$/, "", f); if (index(f, m) == 1) print substr(f, length(m) + 1) }' "$tmp/go$n" | sort -u \
             | while IFS= read -r f; do printf '%s\n' "${ts[@]}" | grep -E "$rx" | while IFS= read -r t; do printf '%s\t%s\n' "$t" "$f"; done; done
         else mapfile -t w < <(printf '%s\n' "${ts[@]}" | grep -E "$rx"); mapskip "$tmp" '' "${w[@]}"; fi
-        cat "$tmp/out" >> "$tmp/log" 2>/dev/null; rm -f "$tmp/out"
+        cat "$tmp/out" >> "$tmp/log" 2>/dev/null; rm -f "$tmp/out" "$tmp/go$n"
         [ -z "${MAPRUN:-}" ] || { k=$((k + $(printf '%s\n' "${ts[@]}" | grep -cE "$rx"))); mapstep $k; }
       done < <(printf '%s\n' "${ts[@]}" | sed -e 's|/[^/]*$||' -e 's|^[^/]*_test\.go$|.|' | sort -u) ;;
     rust)
@@ -193,7 +195,7 @@ mapcollect() { # <dir> <language> <tmp folder> [<test file>...]
         if (cd "$d" && "${run[@]}" "cargo llvm-cov --json --summary-only --test $(printf %q "$m") > $(printf %q "$tmp/rs$n.json")") > "$tmp/out" 2>&1 < /dev/null; then ok=$((ok + 1))
           jq -r --arg r "$abs/" --arg t "$t" '.data[]?.files[]? | select(.summary.lines.covered > 0) | .filename | select(startswith($r)) | ltrimstr($r) | "\($t)\t\(.)"' "$tmp/rs$n.json"
         else mapskip "$tmp" '' "$t"; fi
-        cat "$tmp/out" >> "$tmp/log" 2>/dev/null; rm -f "$tmp/out"
+        cat "$tmp/out" >> "$tmp/log" 2>/dev/null; rm -f "$tmp/out" "$tmp/rs$n.json"
         [ -z "${MAPRUN:-}" ] || mapstep $n
       done ;;
     *) echo "no coverage tool for $lang" >&2; return 1 ;;
@@ -265,22 +267,40 @@ mapcost() {
 # Makes the map of <dir> (setup's main checkout) with the whole suite under coverage
 # (mapcollect()), and says how many sources and tests it mapped, how many test files it could not map, and how long
 # the run took; exit 1, saying why, when the language has no tool, or the run fails (the tool fails, or no test file
-# maps): the map there is kept, and with none a card's tests are found by name.
-# The run says how far it is as it goes, and why it failed when it does, in test-map.run.json (mapprogpath()).
+# maps), or the map cannot be saved (mapwrite()): the map there is kept, and with none a card's tests are found by name.
+# The run says how far it is as it goes, and why it failed when it does, in test-map.run.json (mapprogpath()): the
+# first line of the save's own error when the save failed, else of the run's. A run that fails keeps its files (pairs,
+# skipped, err: the run's stderr, save.err: the save's, log: the run's output) in test-map.failed in the state folder
+# (mapkeptpath()) until the next build starts, as its temporary folder is removed.
+mapkeptpath() { echo "${STATE%/*}/test-map.failed"; }
 mapbuild() { # <dir>
-  local lang tool tmp w=$SECONDS rc=0 sec MAPRUN=1
+  local lang tool tmp at=$SECONDS rc=0 sec why e k f MAPRUN=1
   lang=$(maplang "$1"); tool=$(maptool "$lang" "$1") || { echo "conveyor: no test map: $tool; a card's tests are found by name" >&2; return 1; }
   tmp=$(mktemp -d) || return 1
+  k=$(mapkeptpath); rm -rf "$k"
   mapcollect "$1" "$lang" "$tmp" > "$tmp/pairs" 2> "$tmp/err" || rc=1
   [ $rc != 0 ] || [ -s "$tmp/pairs" ] || { echo 'it mapped no test file' > "$tmp/err"; rc=1; }
-  sec=$((SECONDS - w))
-  if [ $rc = 0 ] && mapwrite "$1" "$tmp/pairs" "$tmp/skipped" "$lang" "$sec"; then
+  sec=$((SECONDS - at))
+  if [ $rc = 0 ] && mapwrite "$1" "$tmp/pairs" "$tmp/skipped" "$lang" "$sec" 2> "$tmp/save.err"; then
     mapend
     jq -r --arg tool "$tool" --arg f "$(mappath)" '"conveyor: wrote the test map \($f) with \($tool): \(.sources | length) source files, \(.tests | length) test files\(.notMapped | length
       | if . > 0 then ", \(.) not mapped (each with why in its notMapped)" else "" end), in \(.seconds)s"' "$(mappath)"
   else
-    mapend "the run with $tool failed after ${sec}s: $(mapwhy "$tmp/err" || echo 'the map could not be written')"
-    echo "conveyor: no test map: the run with $tool failed after ${sec}s; a card's tests are found by name: $(cat "$tmp/err")" >&2; rc=1
+    # why: the reason's one line; e: the whole error, as the output gives it.
+    if [ $rc = 0 ]; then
+      why="the map could not be written$(mapwhy "$tmp/save.err" | sed 's/^/: /')"
+      e=$(cat "$tmp/save.err" 2>/dev/null); e="the map could not be written${e:+: $e}"
+    else
+      why=$(mapwhy "$tmp/err" || echo 'it stopped with no error message')
+      e=$(cat "$tmp/err" 2>/dev/null); e=${e:-$why}
+    fi
+    mapend "the run with $tool failed after ${sec}s: $why"
+    echo "conveyor: no test map: the run with $tool failed after ${sec}s; a card's tests are found by name: $e" >&2
+    if mkdir -p "$k"; then
+      for f in pairs skipped err save.err log; do [ ! -e "$tmp/$f" ] || mv -f "$tmp/$f" "$k/"; done
+      echo "conveyor: the failed run's files are kept in $k" >&2
+    fi
+    rc=1
   fi
   rm -rf "$tmp"; return $rc
 }
@@ -478,7 +498,7 @@ mapcovoff() {
 # run's coverage (Go, Rust, Ruby: from a run of its tests under the language's tool, mapcollect()), saying what it
 # mapped; a run whose coverage maps no test file, or that fails, keeps the map there, and says so.
 maprefresh() { # <worktree>
-  local c=$1.mapcov lang abs sec ts=() MAPRUN=1
+  local c=$1.mapcov lang abs sec why ts=() MAPRUN=1
   [ -s "$c/lang" ] || return 0
   lang=$(cat "$c/lang"); sec=$(( $(date +%s) - $(cat "$c/start") ))
   abs=$(cd "$1" && pwd -P) && mapfile -t ts < <(maptests "$1" "$lang")
@@ -493,10 +513,13 @@ maprefresh() { # <worktree>
   # and still not mapped by this run, stay listed.
   case $lang in node|python) jq -c --rawfile p "$c/pairs" --rawfile ts <(printf '%s\n' "${ts[@]}") '[$p | split("\n")[] | split("\t")[0]] as $m
     | ($ts | split("\n")) as $ts | .notMapped[]? | select(.file as $f | ($ts | index($f)) and ($m | index($f) | not))' "$(mappath)" > "$c/skipped" 2>/dev/null || : ;; esac
-  if [ -s "$c/pairs" ] && mapwrite "$1" "$c/pairs" "$c/skipped" "$lang" "$sec"; then
+  # A save that fails says its own error, as mapbuild()'s does.
+  if [ ! -s "$c/pairs" ]; then why="the whole run's coverage mapped no test file"
+  elif mapwrite "$1" "$c/pairs" "$c/skipped" "$lang" "$sec" 2> "$c/save.err"; then why=''
     mapend
     jq -r '"conveyor: test map: made again from the whole run'\''s coverage: \(.sources | length) source files, \(.tests | length) test files"' "$(mappath)"
-  else mapend "the whole run's coverage mapped no test file"; echo "conveyor: test map: not made again: the whole run's coverage mapped no test file"; fi
+  else why="the map could not be written$(mapwhy "$c/save.err" | sed 's/^/: /')"; fi
+  [ -z "$why" ] || { mapend "$why"; echo "conveyor: test map: not made again: $why"; }
   rm -rf "$c"
 }
 # A whole run on main that collected coverage (mapcovon()) but makes no map from it, as it failed or ran short: its

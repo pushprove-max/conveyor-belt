@@ -312,6 +312,43 @@ t_testmapallfail() {
     "$T/$CASE/eng.out" > /dev/null || fail "the failed run's state does not say why: $(cat "$T/$CASE/eng.out")"
 }
 
+# Bug it catches (#1348): a build whose run went through and whose save (mapwrite()) failed said only "the map could
+# not be written", and its pairs, skipped and err were deleted, so the cause could not be found. The save fails here
+# for real (test-map.json.new is a folder, so the map cannot be written there): its own error is the reason, the run's
+# files are kept in the state folder, and the next build removes them.
+t_testmapsavefail() {
+  nodemain; mkdir "$R/.conveyor/test-map.json.new" || fail "the folder in the map's place could not be made"
+  ! mapeng 'mapbuild "$R"' || fail "a build whose save failed said it made the map: $(cat "$T/$CASE/eng.out")"
+  mapeng 'mapstate "$R"; mapkeptpath' || fail "the map's state could not be read: $(cat "$T/$CASE/eng.out")"
+  sed -n 1p "$T/$CASE/eng.out" | jq -e '.state == "failed" and (.why | test("^the run with V8 coverage failed after [0-9]+s: the map could not be written: .*test-map\\.json\\.new: Is a directory$"))' \
+    > /dev/null || fail "the failed save's reason does not hold its own error: $(cat "$T/$CASE/eng.out")"
+  local k; k=$(sed -n 2p "$T/$CASE/eng.out")
+  grep -qxF $'test/a.test.js\tsrc/a.js' "$k/pairs" && [ -e "$k/skipped" ] && [ -e "$k/err" ] && grep -qF 'test-map.json.new: Is a directory' "$k/save.err" \
+    || fail "the failed run's files were not kept in $k: $(ls -l "$k" 2>&1)"
+  rmdir "$R/.conveyor/test-map.json.new" && mapeng 'mapbuild "$R"' || fail "the next build did not make the map: $(cat "$T/$CASE/eng.out")"
+  [ ! -e "$k" ] || fail "the next build left the earlier build's files in $k: $(ls "$k")"
+}
+
+# Bug it catches (#1348): a run that ended with an error and said nothing (mapcollect() fails with no stderr) was
+# reported as "the map could not be written", the reason of a failed save, so the two could not be told apart.
+t_testmapsilent() {
+  setup '[]'; echo '{"name": "fixture"}' > "$R/package.json" || fail "the fixture's package.json"
+  ! mapeng 'mapcollect() { return 1; }; mapbuild "$R"' || fail "a run that failed made a map: $(cat "$T/$CASE/eng.out")" # mapcollect: a run that fails with no message
+  mapeng 'mapstate "$R"' && jq -e '.state == "failed" and (.why | test("^the run with V8 coverage failed after [0-9]+s: it stopped with no error message$"))' \
+    "$T/$CASE/eng.out" > /dev/null || fail "a run that failed with no message gave a save's reason: $(cat "$T/$CASE/eng.out")"
+}
+
+# Bug it catches (#1348): the run kept each test file's V8 coverage folder to its end, so a suite of 1500 files can
+# fill a /tmp that has a quota, and a skipped cut short there cannot be saved (the likely cause of #1348's failed save:
+# its files were deleted, so it is not proven). Each folder goes once its pairs are read, and the pairs are still there.
+t_testmapcovfree() {
+  nodemain
+  mapeng 'd=$T/$CASE/collect && mkdir "$d" && mapcollect "$R" node "$d" > "$d/pairs" && cat "$d/pairs" && ls "$d"' \
+    || fail "the run failed: $(cat "$T/$CASE/eng.out")"
+  grep -qxF $'test/a.test.js\tsrc/a.js' "$T/$CASE/eng.out" || fail "the run lost its pairs: $(cat "$T/$CASE/eng.out")"
+  ! grep -qxE 'c[0-9]+' "$T/$CASE/eng.out" || fail "the run kept a test file's coverage folder to its end: $(cat "$T/$CASE/eng.out")"
+}
+
 # Bug it catches (#327): a Claude Code mod test (it imports claude-code/testing) was run under node --test, failed,
 # and stopped the build. It is left out before it runs, and listed as not mapped with why.
 t_testmapother() {
@@ -380,6 +417,19 @@ t_testmaprefreshkeep() {
     maprefresh "$R"' && grep -qF 'test map: made again' "$T/$CASE/eng.out" || fail "the refresh made no map: $(cat "$T/$CASE/eng.out")"
   mapis '.tests == ["test/a.test.js", "test/b.test.js"] and .notMapped == [{file: "test/c.test.js", why: "it failed"}]' \
     "the refresh dropped the file not mapped, or kept one that is no test file now or that it mapped"
+}
+
+# Bug it catches (#1348): a refresh whose save (mapwrite()) failed said the whole run's coverage mapped no test file,
+# which was not true, and its save's error was lost. The save fails for real (test-map.json.new is a folder): the
+# refresh and the map's state give its own error.
+t_testmaprefreshsave() {
+  nodemain; nodemap; tune '.test.command = "npm test"'; mkdir "$R/.conveyor/test-map.json.new" || fail "the folder in the map's place could not be made"
+  mapeng 'mapcovon "$R" > /dev/null && mapcovoff
+    echo "{\"result\": [{\"url\": \"file://$(pwd -P)/test/a.test.js\"}, {\"url\": \"file://$(pwd -P)/src/a.js\"}]}" > "$R.mapcov/v8/coverage-a.json"
+    maprefresh "$R"; mapstate "$R"' || fail "the refresh could not run: $(cat "$T/$CASE/eng.out")"
+  grep -qE '^conveyor: test map: not made again: the map could not be written: .*test-map\.json\.new: Is a directory$' "$T/$CASE/eng.out" \
+    && tail -n 1 "$T/$CASE/eng.out" | jq -e '.state == "failed" and (.why | test("^the map could not be written: .*test-map\\.json\\.new: Is a directory$"))' > /dev/null \
+    || fail "the refresh's failed save did not give its own error: $(cat "$T/$CASE/eng.out")"
 }
 
 # Bug it catches (#176): a Python map's refresh counted only the engine runner's `-- ok` marks, so pytest's run stayed
