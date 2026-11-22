@@ -57,10 +57,13 @@ EOF
 # Every input of the kept snapshot dated in 2000, and the kept snapshot itself <s> seconds old: none changed since.
 # Its build-start file (snapshot.json.at) is dated the same, as a build that ended leaves it (snapkept_building).
 # GitHub's answers (snapgh/at) too: asked after the kept snapshot's build began, they are taken for a build to come.
+# Its build counted each card's lines of the records as they are now (snapshot.json.records, snapkeep): a line a case
+# wrote into them before this is one the kept snapshot holds.
 snapkept_quiet() { # <s>
   local t; printf -v t '%(%Y%m%d%H%M.%S)T' $(($(date +%s) - $1))
   touch -c -t 200001010000 "$ST/cards.jsonl" "$ST/retried.jsonl" "$ST/control.json" "$ST/snapgh/at" && mkdir -p "$T/$CASE/cards" && touch -t 200001010000 "$T/$CASE/cards" \
-    && touch -t "$t" "$ST/snapshot.json" "$ST/snapshot.json.at" || fail "the fixture's times could not be set"
+    && touch -t "$t" "$ST/snapshot.json" "$ST/snapshot.json.at" \
+    && jq -r .card "$ST/cards.jsonl" | sort | uniq -c | awk '{ print $1 "\t" $2 }' > "$ST/snapshot.json.records" || fail "the fixture's times could not be set"
 }
 # Waits until no build is under way and the kept snapshot shows c9. A build is under way from the time it dates
 # snapshot.json.at (snapkeep) to the rename that dates the kept snapshot the same. Bug (#1242): this wait took the
@@ -122,7 +125,9 @@ snapkept_held() {
   snapkept_new
 }
 snapkept_fresh() { CONVEYOR_GITHUB=$T/$CASE/github PATH=$T/$CASE/bin:$PATH loop snapshot --fresh > "$T/$CASE/out$1"; }
-snapkept_c9() { jq -e '.belt | map(.card) | index("c9")' "$T/$CASE/out$1" > /dev/null; }
+# c9 on the belt of the build the call printed: a card the reader adds from the records (fromRecords: c9's line came
+# after that build counted the records) is left out, as it shows c9 whichever build was printed.
+snapkept_c9() { jq -e '.belt | map(select(.fromRecords != true) | .card) | index("c9")' "$T/$CASE/out$1" > /dev/null; }
 
 # Bug (#1101): under five starting cards, six `snapshot --fresh` calls ran at once and none replaced the snapshot.
 # Bug: a call that came while a build ran printed that build, which read the records before the caller's change
@@ -196,9 +201,10 @@ t_snapkeptrename() {
   lim=$(loadlimit 2000 3000) # under the build's 3 s
   [ "$t0" -lt "$lim" ] || fail "the reader's output ended ${t0} ms after it began: it waited for the writer's build (limit $lim ms: 2000 ms times the load factor $CASE_LOAD)"
   # Bug (#1032): the old snapshot, its belt without c9, did not say the records changed after it, so the Foreman's
-  # watcher took its empty belt for an idle Conveyor while c9 was in flight.
-  jq -e '.recordsNewer == true and (.belt | map(.card) | index("c9") | not)' <<<"$out" > /dev/null \
-    || fail "the old snapshot did not say the records changed after it: $(jq -c '{recordsNewer, belt: [.belt[].card]}' <<<"$out")"
+  # watcher took its empty belt for an idle Conveyor while c9 was in flight. (c9 joins the reader's belt from the
+  # records, fromRecords, as a card picked since: the old snapshot's own belt is the rest.)
+  jq -e '.recordsNewer == true and (.belt | map(select(.fromRecords != true) | .card) | index("c9") | not)' <<<"$out" > /dev/null \
+    || fail "the old snapshot did not say the records changed after it: $(jq -c '{recordsNewer, belt: [.belt[] | [.card, .fromRecords]]}' <<<"$out")"
   wait_until snapkept_building || fail "no writer was building after the reader"
   jq -e '.belt | map(.card) | index("c9") | not' "$ST/snapshot.json" > /dev/null || fail "while the writer built, the kept file was not the old snapshot whole"
   loop snapshot | jq -e .belt > /dev/null || fail "while the writer built, a reader did not print a whole snapshot"
@@ -333,4 +339,71 @@ t_snapkeptstarted() {
     || fail "units-feed.json did not show c7 on the belt: $(jq -c '.records[0].snap.belt' "$T/$CASE/units-feed.json" 2>&1)"
   # One build after the lock is let go: a writer the read started finds nothing due, so none builds after the case.
   exec {lk}>&-; loop snapshot --fresh > /dev/null || fail "the snapshot after the read exited non-zero"
+}
+
+# Bug (R29): recordsNow's landed read the rule "Push when a card lands" from the kept snapshot, so a card that landed
+# after the owner turned the rule on was left out of the count until a new build ended. The kept snapshot holds the
+# rule off; c8 lands since; the count with the rule still off, then with the control record's rule on: one more.
+t_snapkeptpush() {
+  local lk off on now
+  snapkept_setup; loop control rules push=off > /dev/null || fail "the rule could not be turned off"
+  jq -c '.control.rules.push = false' "$ST/snapshot.json" > "$T/$CASE/kept" && mv "$T/$CASE/kept" "$ST/snapshot.json" || fail "the kept snapshot could not be set"
+  snapkept_quiet 20; now=$(export TZ=UTC; printf '%(%Y-%m-%dT%H:%M:%SZ)T' -1)
+  { snapkept_line c8 3 picked ok 09 "{\"time\": \"$now\", \"title\": \"eight\"}"; snapkept_line c8 3 landed ok 09 "{\"time\": \"$now\", \"sha\": \"abe\", \"product\": false}"; } >> "$ST/cards.jsonl"
+  exec {lk}>>"$ST/snapshot.json.lock" && flock "$lk" || fail "the kept lock could not be held"
+  off=$(loop snapshot | jq '.recordsNow.landed') || fail "the reader exited non-zero with the rule off"
+  loop control rules push=on > /dev/null || fail "the rule could not be turned on"
+  on=$(loop snapshot | jq '.recordsNow.landed') || fail "the reader exited non-zero with the rule on"
+  [[ $off =~ ^[0-9]+$ ]] && [ "$on" = $((off + 1)) ] \
+    || fail "with the rule turned on since the kept snapshot (off there), c8 landed since is not counted: landed $off with the rule off, $on with it on"
+  exec {lk}>&-; loop snapshot --fresh > /dev/null || fail "the snapshot after the reads exited non-zero"
+}
+
+# Bug (R52): a line stamped before a build began, which waited for the records' lock, was appended after the build
+# copied the records: the snapshot did not hold it, and recordsNow, which read only the lines stamped since the build
+# began, left it out too, so c8's block showed nowhere until the next build. Here the records' lock is held while c8's
+# blocked line, stamped 5 s before, waits for it, and the snapshot is built; then the lock is let go.
+# Bug (E1): the build kept the records' size, and a line past it was taken as since; a retry of another card then
+# took that card's lines out (moveout(), lib/issues.sh), and c8's late line, now before that size, was left out again.
+# Here c1's lines are taken out after the build, as `retry` takes out every line of the cards it gives back.
+t_snapkeptlate() {
+  local rl lk ap t out
+  snapkept_setup
+  t=$(export TZ=UTC; printf '%(%Y-%m-%dT%H:%M:%SZ)T' $(($(date +%s) - 5)))
+  exec {rl}>>"$ST/cards.jsonl" && flock "$rl" || fail "the records' lock could not be held"
+  # The append as record() makes it (locked append, lib/records.sh): the line is stamped, then waits for the lock.
+  # Neither the appender nor the build keeps a copy of the case's lock descriptor: one would hold the lock on.
+  ( exec {rl}>&-; flock 9 && snapkept_line c8 3 blocked blocked 09 "{\"time\": \"$t\", \"reason\": \"late\"}" >> "$ST/cards.jsonl" ) 9>>"$ST/cards.jsonl" & ap=$!
+  loop snapshot --fresh > /dev/null {rl}>&- || fail "the snapshot built under the records' lock exited non-zero"
+  exec {rl}>&-; wait "$ap" || fail "the blocked line was not appended once the lock was let go"
+  jq -e '.health.blocked | map(.card) | index("c8") | not' "$ST/snapshot.json" > /dev/null || fail "the kept snapshot holds c8's block, so the case proves nothing"
+  exec {lk}>>"$ST/snapshot.json.lock" && flock "$lk" || fail "the kept lock could not be held"
+  out=$(loop snapshot) || fail "the reader exited non-zero"
+  jq -e '.recordsNewer == true and (.recordsNow.blocked | map(.card) | index("c8"))' <<<"$out" > /dev/null \
+    || fail "the reader did not list c8, blocked by a line appended after the build: $(jq -c '{snapshotAt, recordsNewer, recordsNow}' <<<"$out")"
+  grep -vF '"card":"c1"' "$ST/cards.jsonl" > "$T/$CASE/rest" && mv "$T/$CASE/rest" "$ST/cards.jsonl" || fail "c1's lines could not be taken out"
+  out=$(loop snapshot) || fail "the reader after the rewrite exited non-zero"
+  jq -e '.recordsNow.blocked | map(.card) | index("c8")' <<<"$out" > /dev/null \
+    || fail "after c1's lines were taken out of the records, the reader did not list c8, blocked by a line appended after the build: $(jq -c '{snapshotAt, recordsNewer, recordsNow}' <<<"$out")"
+  exec {lk}>&-; loop snapshot --fresh > /dev/null || fail "the snapshot after the read exited non-zero"
+}
+
+# Bug (R67): recordsNow, with loop.json's counts, was given only when the card records changed after the kept
+# snapshot, so when loop.json alone changed the Foreman's status gave the snapshot's old building count. The kept
+# snapshot says building 1; loop.json, written since, says 2; the status of what the reader prints says 2.
+t_snapkeptloop() {
+  local lk out c=$T/$CASE/config
+  snapkept_setup
+  jq -c '.health += {building: 1, builderCap: 4, waitingCount: 0}' "$ST/snapshot.json" > "$T/$CASE/kept" && mv "$T/$CASE/kept" "$ST/snapshot.json" \
+    || fail "the kept snapshot could not be set"
+  snapkept_quiet 20
+  jq -cn --argjson p "$$" '{pid: $p, state: "running", building: 2, waiting: 0, running: 2}' > "$ST/loop.json"
+  exec {lk}>>"$ST/snapshot.json.lock" && flock "$lk" || fail "the kept lock could not be held"
+  loop snapshot > "$T/$CASE/snap" || fail "the reader exited non-zero"
+  exec {lk}>&-
+  mkdir -p "$c/conveyor" && jq -n --arg m "$R" '{records: [{repo: "alpha", main: $m}]}' > "$c/conveyor/host.json" || fail "the host file could not be written"
+  out=$(XDG_CONFIG_HOME=$c CONVEYOR_FOREMAN_DIR=$T/$CASE/foreman CONVEYOR_MAIN=$R CONVEYOR_FOREMAN_ASK="cat $T/$CASE/snap" bash "$SRC/foreman/watch-conveyor.sh" --status 2>&1)
+  grep -qF 'building 2 of the cap 4' <<<"$out" \
+    || fail "the status of a snapshot older than loop.json did not give loop.json's count: $out $(jq -c '{recordsNewer, recordsNow}' "$T/$CASE/snap")"
+  loop snapshot --fresh > /dev/null || fail "the snapshot after the read exited non-zero"
 }

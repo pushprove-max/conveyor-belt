@@ -376,7 +376,7 @@ logmoved() { # <worktree>
   p_mtimes "$1.test" "${logs[@]}" | sort -rn | sed -n '1s/ .*//p'
 }
 suites() {
-  local r fr l t m free
+  local r fr l t m free p at lg again
   if r=$(jq -ce 'objects | select(.kind == "release") | del(.pid)' "$CARDS/release/run.json" 2>/dev/null); then
     if [ "$(jq -r .ended <<<"$r")" = null ]; then
       if ( flock -n 9 ) 9>>"$CARDS/release/lock" 2>/dev/null; then
@@ -385,11 +385,16 @@ suites() {
         # A card that lands while the suite runs moves main: the panel says so now, not at the suite's end. While the
         # failed cases run alone (rerun), the counts are the suite's, and the worktree's progress is the pass under way:
         # its done, failed and files, and at, when its test run last moved (the live record's progress or its logs' last change, whichever is later; not before the pass).
-        r=$(jq -c --slurpfile p <(suiteprog "$CARDS/release/wt") --arg h "$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)" \
-          --arg at "$(jq -r '.progress // empty' "$CARDS/release/wt.live" 2>/dev/null)" --arg lg "$(logmoved "$CARDS/release/wt")" \
-          '(if .counts != null and (.rerun | type) == "object" then .rerun += ($p[0] | {done, failed, files})
+        # The record is read again (again) after the logs: a pass that ended meanwhile (fulljudge(), lib/fulltest.sh)
+        # changed its rerun, and its logs can be the next pass's or the suite's, so a rerun read again unchanged is the
+        # only one shown with that progress; one that changed is shown with none.
+        p=$(suiteprog "$CARDS/release/wt"); at=$(jq -r '.progress // empty' "$CARDS/release/wt.live" 2>/dev/null); lg=$(logmoved "$CARDS/release/wt")
+        { again=$(<"$CARDS/release/run.json"); } 2>/dev/null || again=''
+        r=$(jq -c --argjson p "${p:-null}" --arg h "$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)" \
+          --arg at "$at" --arg lg "$lg" --arg again "$again" \
+          '(if .counts != null and (.rerun | type) == "object" and ([$again | fromjson? | objects | .rerun] | first) == .rerun then .rerun += ($p | {done, failed, files})
               + {at: ([.rerun.since, $at, (if $lg == "" then null else $lg | tonumber | todate end)] | map(select(type == "string" and . != "")) | max)} else . end)
-            | . + (.counts // $p[0]) | del(.counts) | if .main != null and $h != "" and .main != $h then .moved = true else . end' <<<"$r"); fi
+            | . + (.counts // $p) | del(.counts) | if .main != null and $h != "" and .main != $h then .moved = true else . end' <<<"$r"); fi
     fi
   fi
   # A full test's marker read before and after its lock is found free ended with no result (fulldead()): a run that
