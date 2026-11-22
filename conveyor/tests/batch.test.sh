@@ -16,7 +16,9 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # becomes ready when its own tests pass at its turn, so it is the last ready of the three. The cards' changes apply
 # together, so they would not wait on #7: each other card takes away the patch #7's claim keeps once #7 holds a.txt,
 # and waits on it as on a card whose change cannot be read (together()), so #7 is among the cards of the batch it
-# makes. Each of these waits gives up once the card it waits on is gone (a card that holds its files lands or is blocked, its
+# makes. With $STUB/overlap the patch stays (t_stackbatch, batchmain.test.sh: the card that waits on #7 is stacked on
+# that patch): the cards that wait on #7 are those whose change does not apply with its.
+# Each of these waits gives up once the card it waits on is gone (a card that holds its files lands or is blocked, its
 # worktree removed): a card that takes another path fails the case rather than hanging it. A card in $STUB/ready not
 # yet picked is not gone: the hold waits for it (the hold marks each card it saw, $STUB/seen.<n>). Under load the loop
 # can pick #9 after #7 reached its hold, and a hold that went on then made a batch without #9 (#276).
@@ -36,7 +38,7 @@ n=${PWD##*-}
 [ "$n" != 7 ] || jq -e '.order != []' "$ST/control.json" >/dev/null 2>&1 \
   || { jq -c '.order = [8, 9, 7, 10]' "$ST/control.json" > "$STUB/c.new.7" && mv "$STUB/c.new.7" "$ST/control.json"; }
 [ "$n" = 7 ] || [ -e "$STUB/rev.$n" ] || { : > "$STUB/rev.$n"; while [ -d "$STUB" ]; do jq -e .held ../*-7.claim >/dev/null 2>&1 && break; ls -d ../*-7 >/dev/null 2>&1 || break; sleep 0.1; done
-  rm -f ../*-7.cpatch
+  [ -e "$STUB/overlap" ] || rm -f ../*-7.cpatch
   [ "$n" != 9 ] || while [ -d "$STUB" ]; do jq -e .tested ../*-8.ready >/dev/null 2>&1 && break; ls -d ../*-8 >/dev/null 2>&1 || break; sleep 0.1; done; }
 EOF
   cat > "$STUB/hold" <<'EOF'

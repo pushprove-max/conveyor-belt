@@ -35,18 +35,28 @@ else case $PWD in *-7) sed -i 1s/.*/seven/ a.txt ;; *-8) echo eight >> a.txt ;; 
 EOF
   during 'sed -i 10s/.*/ten/ a.txt; git commit -qam "line ten"'
   # #9, once out of the batch, looks at its claim each second, and so does #8 at its batch: which comes first decided
-  # whether #9 found #8 still held (stacked on it, below) or gone (fitted onto main alone). The batch's landing waits
-  # for #9's stack, or for #9 gone, at the limit reading taken just before it (card(): `reading fresh`), outside the lock
-  # #9's claim takes; the engine stops that reading after 30 s, so a #9 that is never stacked fails below, not hangs.
-  # shellcheck disable=SC2016 # run by the limit reading
-  printf '%s\n' '[ ! -e "$STUB/moved" ] || [ -e "$STUB/stackseen" ] || while ls -d "$CONVEYOR_CARDS"/*-9 >/dev/null 2>&1 && ! ls "$CONVEYOR_CARDS"/*-9.batch >/dev/null 2>&1; do
-  ! ls "$CONVEYOR_CARDS"/*-9.stack >/dev/null 2>&1 || { : > "$STUB/stackseen"; break; }; sleep 0.1; done; false' > "$STUB/limitcmd"
-  # shellcheck disable=SC2016 # run by the limit reading
-  local -x CONVEYOR_LIMIT_CMD='. "$STUB/limitcmd"'
+  # whether #9 found #8 still held (stacked on it, below) or gone (fitted onto main alone). A stand-in release run holds
+  # the release hold until #9, out of the batch once main moved, is stacked, so the batch's landing waits at its land
+  # step (releasewait(), lib/push.sh), outside the lock #9's claim takes. That wait has no time limit of its own: the
+  # limit reading this case waited in before is stopped by the engine after 30 s, so on a loaded machine the batch
+  # could land before #9 was stacked. The stand-in lets go too once #9 is gone, or once #7 waits there with #9 still
+  # in its batch, which then fail below; a #9 that is never stacked holds the landing until the case's time limit.
+  local CARDS=$T/$CASE/cards hp
+  ( exec {h}>>"$ST/release.hold" && flock -x "$h" && : > "$STUB/relheld" || exit 1
+    while [ -d "$STUB" ]; do
+      if [ -e "$STUB/moved" ] && ! ls "$CARDS"/*-9.batch >/dev/null 2>&1; then
+        ! ls "$CARDS"/*-9.stack >/dev/null 2>&1 || { : > "$STUB/stackseen"; break; }
+        ls -d "$CARDS"/*-9 >/dev/null 2>&1 || break
+      fi
+      ! { grep -qs 'waiting for the release' "$CARDS"/*-7.live && ls "$CARDS"/*-9.batch >/dev/null 2>&1; } || break
+      sleep 0.1 # sleep: the stand-in run holds the release hold until #9 is stacked
+    done ) & hp=$!
+  wait_until '[ -e "$STUB/relheld" ]' || fail "the stand-in release run did not take the release hold"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
+  kill "$hp" 2>/dev/null; wait "$hp" 2>/dev/null
   c7=$(cardof 7); c8=$(cardof 8); c9=$(cardof 9)
   grep -q "card $c7 tests a batch of 3: $c8 $c9 $c7" <<<"$out" && [ "$(batchruns)" = 1 ] || fail "#7 did not test one batch of three: $out"
-  [ -e "$STUB/stackseen" ] || fail "the batch's landing did not wait at its limit reading for #9 to be stacked on #8: $out"
+  [ -e "$STUB/stackseen" ] || fail "#9 was not stacked on #8 while the release hold kept the batch from landing: $out"
   [ "$(wc -l < "$STUB/tests")" = 5 ] || fail "not one run for the batch beside the three own runs, and one for #9 after its fit: $(wc -l < "$STUB/tests"): $out"
   [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "8 7 9 " ] && [ "$(st 'select(.step == "landed" and .issue != 9) | .batch | join(" ")' | sort -u)" = "$c8 $c7" ] \
     && [ "$(st 'select(.step == "landed" and .issue == 9) | .batch')" = null ] || fail "#8 and #7 did not land as one batch before #9: $(st 'select(.step == "landed")')"
