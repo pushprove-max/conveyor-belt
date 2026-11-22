@@ -187,9 +187,9 @@ reviewseen() { # <worktree> <the proof's heading>
   printf '%s' "$m"
 }
 # The commit message of a card of an issue: its subject from the pack's type label (fix, else feat) and area prefix
-# (its first area label, else product), then its Closes and card lines.
+# (its first area label, else product), then its Closes and card lines; a Tests page card's (number 0) names no issue.
 cardsubject() { # <card> <issue json>
-  jq -r --arg c "$1" --arg t "$TYPE" --arg p "$AREA" '(.labels | map(.name)) as $l | "\(if $l | index($t) then "fix" else "feat" end)(\($l | map(select(startswith($p)) | ltrimstr($p)) | .[0] // "product")): \(.title) (#\(.number))\n\nCloses #\(.number)\nConveyor card \($c)"' <<<"$2"
+  jq -r --arg c "$1" --arg t "$TYPE" --arg p "$AREA" '(.labels | map(.name)) as $l | (.number != 0) as $i | "\(if $l | index($t) then "fix" else "feat" end)(\($l | map(select(startswith($p)) | ltrimstr($p)) | .[0] // "product")): \(.title)\(if $i then " (#\(.number))" else "" end)\n\n\(if $i then "Closes #\(.number)\n" else "" end)Conveyor card \($c)"' <<<"$2"
 }
 # A failed (or held) test step's line, past its common fields: the run's record (testrec()), its reason (the exit, and
 # the timeout with the file still running when there was one), its failures (testfails()), the last 60 lines of its
@@ -335,15 +335,15 @@ cardopen() {
     || { block "$c" "$n" "$wt" "worktree: branch $br does not merge into main as it stands; rebase it on main and land it again: ${err:0:400}"; return; }
   # Its issue's retried lines, read by prior() and carried(), kept in this shell (stdb, lib/records.sh).
   [ "$n" = 0 ] || stdb ask issue retried "$n" >/dev/null 2>&1 || :
-  # A card of issue 0 with no branch is a main-red fix card (mainred.sh redpick()): its entry in the main-is-red record stands in.
-  issue=$(if [ -n "$br" ] && [ "$n" = 0 ]; then branchissue "$br" "$tip"; elif [ "$n" = 0 ]; then redissue "$c"; else gh issue view "$n" --json number,title,body,labels,milestone; fi) || issue=''
+  # A card of issue 0 with no branch is a main-red fix card (mainred.sh redpick()) or a Tests page card (testpick(), lib/testaction.sh): its record stands in.
+  issue=$(if [ -n "$br" ] && [ "$n" = 0 ]; then branchissue "$br" "$tip"; elif [ "$n" = 0 ]; then redissue "$c" || testcardissue "$c"; else gh issue view "$n" --json number,title,body,labels,milestone; fi) || issue=''
   # The control record's rule "visible changes need the owner's yes" (yesrule()), as the card starts. Off, nothing below
   # waits for or asks for a `Visible change approved:` line: no condition, section or inherited yes is held to, the
   # brief and the review leave the approval out, and a visible change lands as any change does.
   yesrule "${CARDCTL:-}" || { vrule=off; rv=$REVIEWOFF; }
   # The test file of a speed-up or Optimize card (a bug card whose issue speedproof.sh speedfile() names): its build is told the
   # target (speedproof.sh speedbrief()).
-  [ -z "$issue" ] || ! jq -e --arg t "$TYPE" 'any(.labels[]?; .name == $t)' <<<"$issue" >/dev/null || sf=$(speedfile "$issue") || sf=$(speedfile "$issue" "$OPTIMIZE") || sf=$(speedfile "$issue" "$REWRITE") || sf=''
+  [ -z "$issue" ] || ! jq -e --arg t "$TYPE" 'any(.labels[]?; .name == $t)' <<<"$issue" >/dev/null || sf=$(speedfile "$issue") || sf=$(speedfile "$issue" "$OPTIMIZE") || sf=$(speedfile "$issue" "$REWRITE") || sf=$(speedfile "$issue" "$SPLIT") || sf=''
   # The visible-change gate before the build: seen, nyes, sect, ybase, heldto, vmode and yfile (visplan()).
   visplan
   # A follow-up whose parent (or an issue up its chain) has the owner's yes (inherit()).
@@ -448,7 +448,7 @@ cardbuild() {
     # and goes on unchecked when it names none). When none does, or it adds none, it goes back to its build session once, told why; when the check
     # still does not hold after it, the card is blocked with that reason and no review. The review is shown the
     # check's result. A bug card that speeds up one test file (speedproof.sh speedfile()) is checked by speedproof.sh speedproof() instead, and one
-    # that optimizes one (speedproof.sh speedfile() with OPTIMIZE, or REWRITE: Rewrite as a direct check, #778) by speedproof.sh optproof(): when the change does not do what its issue's verdict
+    # that optimizes one (speedproof.sh speedfile() with OPTIMIZE, REWRITE: Rewrite as a direct check, #778, or SPLIT: Split it, #1330) by speedproof.sh optproof(): when the change does not do what its issue's verdict
     # asks, its file costs more than its recent runs allow, a split takes more
     # CPU seconds than it may, or a file does not pass, the card is blocked with that reason and no review, its blocked line
     # carrying the check's version (SPEEDCHECK, lib/speedproof.sh). One that fixes the failures of one (speedproof.sh speedfile() with
@@ -461,7 +461,7 @@ cardbuild() {
     if ! jq -e --arg t "$TYPE" 'any(.labels[]?; .name == $t)' <<<"$issue" >/dev/null; then :
     elif sf=$(speedfile "$issue"); then
       speedproof "$c" "$wt" "$issue" "$sf" || { SPEEDCHECKED=$SPEEDCHECK BLOCKCLASS='proof check' block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
-    elif sf=$(speedfile "$issue" "$OPTIMIZE") || sf=$(speedfile "$issue" "$REWRITE"); then
+    elif sf=$(speedfile "$issue" "$OPTIMIZE") || sf=$(speedfile "$issue" "$REWRITE") || sf=$(speedfile "$issue" "$SPLIT"); then
       sk=$OPTREVIEW; optproof "$c" "$wt" "$issue" "$sf" || { SPEEDCHECKED=$SPEEDCHECK BLOCKCLASS='proof check' block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
     elif sf=$(speedfile "$issue" "$FIXFAILS"); then
       sk=$STEADYREVIEW; steadyproof "$c" "$wt" "$sf" || { BLOCKCLASS='proof check' block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }

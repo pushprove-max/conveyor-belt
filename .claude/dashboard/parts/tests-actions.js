@@ -9,7 +9,7 @@
     section, setting, ACTS, FILES_MAX, RUNNER_WHY, MODEL, OTHER, ID, TITLE_MAX, BODY_MAX, NO_SEAT, WAIT, SENDING, ta,
     ctlTests, actions, mmss, limitOf, used, seatOf, tmodel, MUT_WHY, mutAsk, progress, mutNow, actBtn, send, copy,
     actArgs, stop, result, running, queued, live, queuedSaid, actNow, md, draftIssue, shows, asking, field,
-    anyIssueUrl, draw;
+    anyIssueUrl, noIssue, draw;
 
   // ---- the Tests model: CLI, model (Other… for a typed name) and effort, as the Rules tab's roles ----
   function seatCtl() {
@@ -150,12 +150,15 @@
     // With no Tests model (or every file a runner, for Optimize) a click says why in the bar: each file left out.
     const judge = actBtn('Judge', 'bulk-judge', `Judge the ${n} selected files`, () => startMany('judge', files));
     if (!tmodel()) judge.title = NO_SEAT;
-    const opt = actBtn('Optimize', 'bulk-optimize', `Optimize: preview an issue for each of the ${n} selected files`, () => {
+    // With the rule Tests page issues off (noIssue()), it starts a card for each, with no GitHub issue, in place of the preview.
+    const opt = actBtn('Optimize', 'bulk-optimize', `Optimize: ${noIssue() ? 'start a card with no GitHub issue' : 'preview an issue'} for each of the ${n} selected files`, () => {
       const { files: fs, left } = chosen(files, 'optimize');
       S.answers = null;  // the preview names the files left out
       if (!fs.length) { S.answers = { what: 'Optimize', lines: [], left, note: 'No file to act on.' }; draw(); return; }
       if (fs.length > FILES_MAX) { S.answers = { what: 'Optimize', lines: [], left, note: `At most ${FILES_MAX} files at a time: ${fs.length} are selected. Select fewer.` }; draw(); return; }
-      S.ask = { kind: 'many', repo: S.d.repo, items: fs.map((f) => { const d = draftIssue(f); return { file: f.file, title: d.title, body: d.body }; }), left };
+      const items = fs.map((f) => { const d = draftIssue(f); return { file: f.file, title: d.title, body: d.body }; });
+      if (noIssue()) { bulk('Optimize', 'test-issue', items.flatMap((it) => [it.file, it.title, it.body]), items.map((it) => it.file), left); return; }
+      S.ask = { kind: 'many', repo: S.d.repo, items, left };
       S.keep = { act: 'many-title', file: fs[0].file }; draw();
     });
     if (!chosen(files, 'optimize').files.length) opt.title = RUNNER_WHY;
@@ -204,8 +207,9 @@
     }), button('Cancel', 'btn-quiet', 'bulk-cancel', 'Cancel: file nothing', () => { S.ask = null; draw(); say('Cancelled. Nothing was filed.'); }));
     return el;
   }
-  // ---- Optimize: each issue the Board filed for a file, as its cards left it (the snapshot's optimize) ----
-  const optsOf = (f) => list(f.optimize).filter((o) => obj(o) && num(o.issue) !== null)
+  // ---- Optimize: each issue the Board filed for a file, and each Tests page card of no issue (issue null, with its
+  // name, "No issue", which issueLink() shows), as its cards left it (the snapshot's optimize) ----
+  const optsOf = (f) => list(f.optimize).filter((o) => obj(o) && (num(o.issue) !== null || (o.issue === null && typeof o.name === 'string')))
     .sort((x, y) => (Date.parse(y.time) || 0) - (Date.parse(x.time) || 0));
   function stateSaid(o) {
     if (o.state === 'blocked') return `blocked: ${typeof o.reason === 'string' && o.reason ? o.reason : 'no reason recorded'}`;
@@ -250,7 +254,7 @@
     });
     return out;
   }
-  const optRunSaid = (o) => `first run after Optimize #${o.issue} landed`;
+  const optRunSaid = (o) => `first run after ${num(o.issue) !== null ? `Optimize #${o.issue}` : 'the Optimize card of no issue'} landed`;
 
   // ---- Recent actions: each kept action and each Optimize issue, newest first, collapsed until opened ----
   // A file named there opens its row: the search and the filter let it show.
@@ -302,7 +306,7 @@
     gone.forEach((f) => {
       const o = optsOf(f).find((x) => x.state === 'landed' && (x.fix === 'deleted' || x.fix === 'merged')) || {}, li = h('li', 'tests-gone');
       li.dataset.file = f.file;
-      li.append(h('span', 'board-label', f.file), h('span', null, ` · its last run ${one(f.cpu)} CPU s, its median ${one(f.median)} CPU s · `), num(o.issue) === null ? '' : S.ctx.issueLink(o),
+      li.append(h('span', 'board-label', f.file), h('span', null, ` · its last run ${one(f.cpu)} CPU s, its median ${one(f.median)} CPU s · `), num(o.issue) === null && typeof o.name !== 'string' ? '' : S.ctx.issueLink(o),
         h('span', null, ` · ${o.fix || 'removed'}${o.landed ? ` ${S.ctx.when(o.landed)}` : ''} · ${intoSaid(o) ? `its cases are now in ${intoSaid(o)}` : 'no test file is on record for its cases'}`));
       ul.append(li);
     });
@@ -469,7 +473,7 @@
       section, setting, ACTS, FILES_MAX, RUNNER_WHY, MODEL, OTHER, ID, TITLE_MAX, BODY_MAX, NO_SEAT, WAIT, SENDING,
       ta, ctlTests, actions, mmss, limitOf, used, seatOf, tmodel, MUT_WHY, mutAsk, progress, mutNow, actBtn, send,
       copy, actArgs, stop, result, running, queued, live, queuedSaid, actNow, md, draftIssue, shows, asking, field,
-      anyIssueUrl, draw } = shared);
+      anyIssueUrl, noIssue, draw } = shared);
     return { actionsHead, selBar, optsOf, stateSaid, fixSaid, gainOf, helpedChip, numbersSaid, mutantsSaid, optRuns,
       optRunSaid, recent, removed, weakened, editsOf, editSaid, editIssue, editsSection, autofile };
   });

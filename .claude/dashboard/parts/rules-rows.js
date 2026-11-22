@@ -225,7 +225,7 @@
     }
     const r = c.rules && typeof c.rules === 'object' ? c.rules : {};
     rulesBuild(el, r); rulesNever(el, d, r); rulesCap(el, d, c); rulesGuard(el, d, c); rulesAtOnce(el, c); rulesSuite(el, c); rulesSeats(el, d); rulesJudge(el, c, d);
-    rulesAccounts(el, c); rulesGates(el, c, r); rulesLand(el, c); rulesCheck(el, c, r); rulesLint(el, r); rulesSplit(el, r);
+    rulesAccounts(el, c); rulesGates(el, c, r); rulesLand(el, c); rulesCheck(el, c, r); rulesLint(el, r); rulesSplit(el, r); rulesTestIssues(el, r);
     rulesPick(el, d, r); rulesCores(el); rulesStanding(el); rulesHeld(el, all); rulesPins(el, c, d); rulesIndexed(el);
     return el;
   }
@@ -480,6 +480,17 @@
       seg('Split large issues', splitTo('off', 'Off'), splitTo('shadow', 'Shadow'), splitTo('on', 'On')),
       splitAt === null ? newer(false) : splitAt === 'shadow' ? h('span', 'board-from rules-off', 'shadow: the verdict is recorded, and the issue is built whole')
         : splitAt === 'off' ? offLine(false, 'no issue is checked') : null));
+  }
+  function rulesTestIssues(el, r) {
+    // Tests page issues (#1330): On (the default) files a GitHub issue for each card a Tests page action makes
+    // (`conveyor.sh testissue`); Off starts that card at once with no issue. An engine whose record has no
+    // rules.testissues is sent neither choice.
+    const on = r.testissues !== false, known = typeof r.testissues === 'boolean';
+    const tOn = choice('On', 'testissues-on', 'Tests page issues: on', on, () => { if (!on) send('rules', ['testissues=on'], null, ['rules', ['testissues=off']]); });
+    const tOff = choice('Off', 'testissues-off', 'Tests page issues: off', !on, () => { if (on) send('rules', ['testissues=off'], null, ['rules', ['testissues=on']]); });
+    tOn.disabled = tOff.disabled = !known;
+    el.append(row('testissues', 'Tests page issues', 'an action on the Tests page files a GitHub issue, and the belt builds that issue as a card',
+      seg('Tests page issues', tOn, tOff), known ? offLine(on, 'an action on the Tests page starts its card at once, with no GitHub issue') : newer(known)));
   }
   function rulesPick(el, d, r) {
     const h = S.ctx.h;

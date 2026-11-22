@@ -7,7 +7,7 @@ def fails: type == "object" and keys == ["files", "of", "timeout"] and (.of | . 
 def need: ["card", "issue", "reason", "result", "sha", "step", "time", "tokens"];
 def known: ["product", "title", "usage", "kept", "leftover", "followups", "sec", "visible", "branch", "created", "counts", "of", "model", "effort",
   "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "doneWhenItems", "doneWhenHolds", "excerpts", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost", "survived", "answers",
-  "wait", "run", "slotsFree", "selected", "ended", "list", "coverage", "slow", "timed", "times", "clocks", "carried", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "waitSec", "wide", "pr", "doneLines", "ran", "checks", "split", "grown", "rollout", "pick", "lint", "stop", "pass", "rounds", "flaky", "waitFor", "log", "brokeMain", "class", "resumed"];
+  "wait", "run", "slotsFree", "selected", "ended", "list", "coverage", "slow", "timed", "times", "clocks", "carried", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "testFile", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "waitSec", "wide", "pr", "doneLines", "ran", "checks", "split", "grown", "rollout", "pick", "lint", "stop", "pass", "rounds", "flaky", "waitFor", "log", "brokeMain", "class", "resumed"];
 def steps: ["picked", "split", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof", "grown", "lint", "seats"];
 # Each required field's own test.
 def needok($k): if $k == "issue" then .issue | type == "number" elif $k == "time" then (try (.time | fromdate | type == "number") catch false)
@@ -38,6 +38,8 @@ def ok: . as $r | (keys - known) == need
         and (.rollout == null or ((.step | IN("review", "landed")) and (.rollout | type == "array" and length > 0
           and all(type == "object" and keys == ["action", "fails", "place"] and all(type == "string")))))
         and (.visible // "" | type == "string") and (.branch // "" | type == "string") and (.mainRed // "" | type == "string")
+        # testFile: a Tests page card's picked line names its test file (testpick(), lib/testaction.sh).
+        and (.testFile == null or (.step == "picked" and (.testFile | type == "string")))
         and (.model // "" | type == "string") and (.effort // "" | type == "string") and (.head // "" | type == "string") and (.unread // "" | type == "string")
         and (.patch // "" | type == "string") and (.main // "" | type == "string") and (.seen // "" | type == "string")
         # route: the route a Claude or Codex session took when a proxy is set (session1(), claudereview(), codexreview()).

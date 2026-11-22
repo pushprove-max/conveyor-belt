@@ -66,7 +66,7 @@
   // The words of each action's change (words), from its args a.
   const seatWords = (a, action) => `${action === 'model' ? 'builder' : 'reviewer'} ${a[0] === 'default' ? 'back to the default' : a.join(' ')}`;
   const accountWords = (a, action) => `${action === 'account' ? 'account' : 'review account'} ${a.length ? a[0] : 'back to the default'}`;
-  const RULE_WORDS = { followups: 'Follow-ups', push: 'Push on landing', visible: 'Approve visible changes', lint: 'Lint check', split: 'Split large issues', pick: 'Pick settings' };
+  const RULE_WORDS = { followups: 'Follow-ups', push: 'Push on landing', visible: 'Approve visible changes', lint: 'Lint check', testissues: 'Tests page issues', split: 'Split large issues', pick: 'Pick settings' };
   const WORDS = {
     rules: (a) => a.map((x) => { const [k, o] = x.split('='); return isArea(k) ? `${o === 'off' ? 'never build' : 'build'} ${k}` : `${own(RULE_WORDS, k) ? RULE_WORDS[k] : k} ${o}`; }).join(', '),
     cap: (a) => (a[0] === 'off' ? 'at once: the default' : `at once ${a[0]}`),
@@ -148,7 +148,7 @@
       const never = list(r.rules.never).filter((y) => y !== key);
       r.rules.never = o === 'off' ? never.concat([key]) : never;
     });
-    return [r, isArea(k) ? 'never' : k === 'push' || k === 'visible' || k === 'lint' || k === 'split' || k === 'pick' ? k : 'build'];
+    return [r, isArea(k) ? 'never' : ['push', 'visible', 'lint', 'testissues', 'split', 'pick'].includes(k) ? k : 'build'];
   }
   // A setting as the record would hold it once the host takes it, and the row it is in; null for an action that is
   // not one setting (release, order, unpin...): those show when the host answers.

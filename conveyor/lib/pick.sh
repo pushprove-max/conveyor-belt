@@ -156,6 +156,9 @@ pick() { # [retried or ""] [the weekly limit reading's percent] [the open issues
   if [ -z "${1:-}" ] && [ -z "$ONLY" ] && [ -s "${MAINRED:-}" ] && n=$(redpick) && [ -n "$n" ]; then echo "$n"; return 0; fi
   # A pick for the slot beyond the project's cap (BEYOND, set by run(): redfix()) takes a main-red fix card or nothing.
   [ -z "${BEYOND:-}" ] || return 0
+  # Then a Tests page card with no GitHub issue (testpick(), lib/testaction.sh), asked for at once, ahead of the
+  # queue, the same way.
+  if [ -z "${1:-}" ] && [ -z "$ONLY" ] && [ -s "${TACARDS:-}" ] && n=$(testpick) && [ -n "$n" ]; then echo "$n"; return 0; fi
   u=$(upnext "$issues" "${1:-}" | jq -r '.[] | "\(.number) \(.again)"') || return 1
   # The first issue whose fields for its picked line read as JSON: one that does not is named in the log and skipped,
   # and the next one is taken on this same pick, so it holds back no other ready issue.

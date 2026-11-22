@@ -198,7 +198,8 @@ cards() {
 # null, for the Foreman's watcher; landingPr ({number, url, merge, cards}): the open pull request of Land as pr as
 # GitHub last showed it ($LANDPR, prstate() and prsync(), lib/push.sh), with how many cards its pushed lines name and its last merge (a merge
 # GitHub refused gives the reason), for the Board's Merge and the Foreman; null with none open. Every object of it that names a main-red fix card
-# (card) also has name, "Main is red (<commit>)", as rows.jq names it: the card has no issue (issue 0) to be shown by.
+# (card) also has name, "Main is red (<commit>)", as rows.jq names it, and so does a Tests page card ("Tests page:
+# <file>"): the card has no issue (issue 0) to be shown by.
 # A bad line is set aside first (check()); records that still do not check give no record: the reason and exit 1.
 # It also says what the control record makes of the loop: state (running, paused, stopped, "paused by guard":
 # the weekly limit reading is at or over the guard, or "control record unreadable"; a loop that is not running picks
@@ -439,7 +440,8 @@ health() {
     --slurpfile old "$hd/old" --slurpfile mh <(jq -c 'objects | {since, card, sha, controls, cases}' "$MACHINEHOLD" 2>/dev/null) --slurpfile lp <(jq -c 'objects | select(.merged == null and .closed == null and (.number | type) == "number") | {number, url, merge}' "$LANDPR" 2>/dev/null) --slurpfile qt <(jq -c 'objects | {line, field, time}' "$QUARANTINE" 2>/dev/null) --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) --rawfile carry <(printf '%s\n' "$carry") "$UNTIMED$SPLITM"'
     (($ENV.CONVEYOR_NOW // "" | tonumber?) // now) as $now
     | ($ahead | split("\n") | map(select(. != "")) | INDEX(.)) as $ahead
-    | ([.[], $old[] | select(.step == "picked" and (.mainRed | type) == "string") | {key: .card, value: "Main is red (\(.mainRed[0:12]))"}] | from_entries) as $names
+    | ([.[], $old[] | select(.step == "picked") | if (.mainRed | type) == "string" then {key: .card, value: "Main is red (\(.mainRed[0:12]))"}
+        elif (.testFile | type) == "string" then {key: .card, value: "Tests page: \(.testFile)"} else empty end] | from_entries) as $names
     | [.[] | select(.step == "landed" and $ahead[.sha]) | {card, issue, sha, since: .time}] as $un
     # The cards the push in progress carries: each whose landed commit is one it carries.
     | ($carry | split("\n") | map(select(. != "")) | INDEX(.)) as $carry

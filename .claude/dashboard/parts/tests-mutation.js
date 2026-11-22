@@ -101,6 +101,20 @@
       say(ok ? said(text) : `Not done: ${S.ctx.refusal(text)}`);
     });
   }
+  // The rule Tests page issues (#1330, the control record's rules.testissues): with it off, an action that makes a card
+  // (Optimize, Fix failures, Split it and the other fix actions) starts that card at once, with no GitHub issue: its
+  // draft d is sent as it is (test-issue: `conveyor.sh testissue`, which starts the card when the rule is off), in place
+  // of the issue preview. With it on, the preview opens (keep: the field to focus), to be edited and filed.
+  const noIssue = () => { const c = obj(S.d && S.d.control); return !!(c && obj(c.rules) && c.rules.testissues === false); };
+  function askIssue(d, keep) {
+    const k = dk(d.file), note = (state, text = '') => S.notes.set(k, { what: d.what || 'Optimize', state, text });
+    S.notes.delete(k);
+    if (!noIssue()) { S.ask = d; S.keep = keep || { act: 'issue-title', file: d.file }; draw(); return; }
+    S.ask = null;
+    if (S.busy) { note('refused', WAIT); draw(); say(WAIT); return; }
+    note('sending');
+    send('test-issue', [d.file, d.title, d.body], (t) => t, (t) => note('done', t), (no) => note('refused', no));
+  }
   // The text of an action as seen here, with the snapshot's text added: a whole text replaces it; the end of a long
   // one (textCut) is joined to it where the two meet, so the text seen before stays.
   function merge(was, t) {
@@ -258,7 +272,7 @@
       // The preview is on the Overview tab: it opens there, scrolled to, with the cursor in its body (#130).
       const fix = a.verdict === 'stabilise';
       const b = button('Optimize with this verdict', 'btn-quiet tests-act', 'optimize-verdict', `${fix ? 'Fix failures' : 'Optimize'} ${a.file}: preview an issue with this verdict`, () => {
-        S.ask = fix ? draftFix(f, a) : draftIssue(f, a); S.tabs.set(dk(f.file), 'overview'); S.keep = { act: 'issue-body', file: f.file, scroll: true }; draw();
+        S.tabs.set(dk(f.file), 'overview'); askIssue(fix ? draftFix(f, a) : draftIssue(f, a), { act: 'issue-body', file: f.file, scroll: true });
       });
       // A runner's time is its files' time, so no Optimize; its failures are its own, so Fix failures holds.
       if (f.wholeOnly === true && !fix) { b.disabled = true; b.title = RUNNER_WHY; }
@@ -434,6 +448,6 @@
     return { MUT_WHY, mutDone, survivors, trimmed, mutState, mutCell, mutAsk, progress, mutNow, actBtn, send, merge,
       copy, actArgs, start, stop, verdictChip, result, running, queued, live, queuedSaid, actNow, md, reasonOf, box,
       rowAction, draftIssue, draftFix, drafted, caseHit, shows, neverWhy, draftHollow, draftWaits, draftRun,
-      draftDirect, draftSplit, SPLIT_RUNNER_WHY, draftDelete };
+      draftDirect, draftSplit, SPLIT_RUNNER_WHY, draftDelete, noIssue, askIssue };
   });
 })();

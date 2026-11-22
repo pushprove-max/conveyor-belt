@@ -2,7 +2,7 @@
 # The control record, whole: the file's keys over CTL0's, so a record written before a key existed still reads.
 # mode is run, pause or stop; cap and guard are a number or null; held and order are issue numbers; rules.never is
 # the area labels never built, rules.push whether a card that lands is pushed (off: land only, owed()), rules.visible whether a visible change
-# needs the owner's yes (yesrule()), rules.lint the rule Lint check (lintgate(), lib/lint.sh), rules.split the rule Split large issues, off, shadow or on (splitcheck(), lib/slices.sh), rules.pick the rule Pick settings, the same (modelpick(), lib/modelpick.sh), picks the owner's decision on each group's trial challenger ({"<small|medium> <docs|code>": {decision: promote, keep, drop, add or next, at, challenger and promoted: {model, effort}, when the owner's next set them}}) and on the reviewer and judge seats ({"reviewer" or "judge": {decision: promote, at, choice: {model, effort}}}, `control pick`) and pickBack null or {at, reason}, the rule's own return to shadow (pickback()); model, reviewer and judge (the review's judge, judgeseat()) are null or {cli: the
+# needs the owner's yes (yesrule()), rules.lint the rule Lint check (lintgate(), lib/lint.sh), rules.testissues the rule Tests page issues (testissue(), lib/testaction.sh), rules.split the rule Split large issues, off, shadow or on (splitcheck(), lib/slices.sh), rules.pick the rule Pick settings, the same (modelpick(), lib/modelpick.sh), picks the owner's decision on each group's trial challenger ({"<small|medium> <docs|code>": {decision: promote, keep, drop, add or next, at, challenger and promoted: {model, effort}, when the owner's next set them}}) and on the reviewer and judge seats ({"reviewer" or "judge": {decision: promote, at, choice: {model, effort}}}, `control pick`) and pickBack null or {at, reason}, the rule's own return to shadow (pickback()); model, reviewer and judge (the review's judge, judgeseat()) are null or {cli: the
 # CLI that runs the seat (claude, codex or opencode), model, effort (null: the seed's)}, cli left out of one that names
 # a model of the pack's models.allowed, whose program it is (seatnow()); fix (the session that repairs review
 # findings) and testFix (the one that repairs failed changed tests) are null, the card's builder, or a builder seat of
@@ -43,7 +43,8 @@ CTL_K=()
 # before a push runs (pushCheck null). A card that lands is not pushed (rules.push
 # off: land only, owed()): it waits for the Board's Push landed, or for the owner to turn the rule on. A visible change needs no yes from the owner (rules.visible off; on: a card waits for a
 # `Visible change approved:` line, yesrule()). The rule Lint check is on (rules.lint: the pack's lint commands run at
-# the review gate, lintgate(), lib/lint.sh). The rule Split large issues is on (rules.split: the judge's
+# the review gate, lintgate(), lib/lint.sh). The rule Tests page issues is on (rules.testissues: a Tests page action
+# files a GitHub issue for its card; off, its card starts with none). The rule Split large issues is on (rules.split: the judge's
 # verdict on a large issue that is too big is acted on: its slices are filed, splitcheck()). The rule Pick settings is off
 # (rules.pick: no card's group and builder choice is recorded, modelpick()). No Tests seat is set: no test action starts (testaction()). The project
 # is not onboarded (onboarded null; `control onboarded` sets {at, rules}: when the owner finished the Board's setup and
@@ -72,7 +73,7 @@ ctlcheck() { # [<file>]: the record on the input, or in the file, whole, or exit
       and (.start | IN("queue", "held")) and (.startSeen | type == "array" and all(type == "number"))
       and (.startHeld | type == "array" and all(type == "object" and keys == ["from", "to"] and (.from | type == "number") and (.to == null or (.to | type == "number"))))
       and ((.start == "held") == (.startHeld | length > 0 and (last.to == null)))
-      and (.rules | (.never | type == "array" and all(type == "string")) and ([.P0, .P1, .P2, .P3, .followups, .push, .visible, .lint] | all(type == "boolean"))
+      and (.rules | (.never | type == "array" and all(type == "string")) and ([.P0, .P1, .P2, .P3, .followups, .push, .visible, .lint, .testissues] | all(type == "boolean"))
         and ([.split, .pick] | all(IN("off", "shadow", "on"))))
       and ([.model, .reviewer, .judge, .tests, .fix, .testFix] | all(. == null or (type == "object" and (keys - ["effort", "cli"]) == ["model"] and (.model | type == "string")
         and (.effort == null or (.effort | type == "string")) and (.cli == null or (.cli | IN("claude", "codex", "opencode"))))))
@@ -1110,7 +1111,7 @@ control() { # [action [arguments]]
   local c a=${1:-} f=. new x ag es bx sz top=0 p='' open=''
   c=$(ctl) || return 1
   [ $# = 0 ] || shift
-  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | atonce <number> | tests-from <UTC time | clear> | suite-machine <local | ssh <target> [--dir <d>] | devbox [--size <s>] [--box <name>] [--setup-at <time>]> | hold <issue>... | release <issue>... | adopt <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|lint|<areaPrefix><name>>=<on|off>... | rules <split|pick>=<off|shadow|on> | pick <small|medium> <docs|code> <promote|keep|drop|add|next> | pick <reviewer|judge> <promote <model> [effort]|drop> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | start queue filed | dep-guard <on|off> | land-as <main|pr> | pr-merge <button|release|idle> | push-check <on|off> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>... | card <issue> <builder|reviewer|judge> <model> [effort] | card <issue> [builder|reviewer|judge] clear | card <issue> pick]" >&2; return 2; }
+  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | atonce <number> | tests-from <UTC time | clear> | suite-machine <local | ssh <target> [--dir <d>] | devbox [--size <s>] [--box <name>] [--setup-at <time>]> | hold <issue>... | release <issue>... | adopt <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|lint|testissues|<areaPrefix><name>>=<on|off>... | rules <split|pick>=<off|shadow|on> | pick <small|medium> <docs|code> <promote|keep|drop|add|next> | pick <reviewer|judge> <promote <model> [effort]|drop> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | account [<name>] | review-account [<name>] | start <queue|held> | start queue filed | dep-guard <on|off> | land-as <main|pr> | pr-merge <button|release|idle> | push-check <on|off> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>... | card <issue> <builder|reviewer|judge> <model> [effort] | card <issue> [builder|reviewer|judge] clear | card <issue> pick]" >&2; return 2; }
   nums() { local x; for x; do [[ $x =~ ^[1-9][0-9]{0,8}$ ]] || return 1; done; }
   # A main-red fix card is of no issue (issue 0), named by its card id: there is nothing of it to hold or release.
   case $a in hold | release) for x; do [[ ! $x =~ ^(0+|c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0)$ ]] || {
@@ -1193,10 +1194,11 @@ control() { # [action [arguments]]
     push-check) [ $# = 1 ] && [[ $1 =~ ^(on|off)$ ]] || { bad; return; }; f='.pushCheck = ($v[0] == "on")' ;;
     rules) [ $# != 0 ] || { bad; return; }
       # An area rule is the pack's area prefix and a name; push is whether a card that lands is pushed, visible whether
-      # a change customers or staff will see needs the owner's yes, lint the rule Lint check (lintgate(), lib/lint.sh); split (Split large issues) and pick (Pick
+      # a change customers or staff will see needs the owner's yes, lint the rule Lint check (lintgate(), lib/lint.sh),
+      # testissues whether a Tests page action files a GitHub issue for its card (testissue(), lib/testaction.sh); split (Split large issues) and pick (Pick
       # settings) are off, shadow or on, kept as that word.
       packget labels.areaPrefix p || return 1
-      for x; do [[ $x =~ ^(P[0-3]|followups|push|visible|lint)=(on|off)$ || $x =~ ^(split|pick)=(off|shadow|on)$ ]] || { [[ $x == "$p"* ]] && [[ ${x#"$p"} =~ ^[^=[:space:]]+=(on|off)$ ]]; } || { bad; return; }; done
+      for x; do [[ $x =~ ^(P[0-3]|followups|push|visible|lint|testissues)=(on|off)$ || $x =~ ^(split|pick)=(off|shadow|on)$ ]] || { [[ $x == "$p"* ]] && [[ ${x#"$p"} =~ ^[^=[:space:]]+=(on|off)$ ]]; } || { bad; return; }; done
       f='reduce ($v[] | capture("^(?<k>.*)=(?<o>on|off|shadow)$")) as $r (.; if $r.k | IN("split", "pick") then .rules[$r.k] = $r.o elif $r.k | startswith($p) | not then .rules[$r.k] = ($r.o == "on")
            elif $r.o == "off" then .rules.never = (.rules.never + [$r.k] | unique) else .rules.never -= [$r.k] end)
          | if any($v[]; startswith("pick=")) then .pickBack = null else . end' ;;

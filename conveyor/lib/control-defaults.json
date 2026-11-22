@@ -15,6 +15,7 @@
     "split": "on",
     "pick": "off",
     "lint": true,
+    "testissues": true,
     "never": []
   },
   "model": {

@@ -149,9 +149,10 @@ recordsnow() { # <snapshotAt>
       ($ids | split("\n") | map(select(. != "") | .[9:-1]) | INDEX(.)) as $have
       | [inputs | fromjson? | objects | select((.card | type) == "string" and (.time | type) == "string" and .time >= $at)] as $new
       | $k[0] as $s
-      # A main-red fix card has no issue: its name, as the belt has it, or as its picked line gives it (views.sh).
+      # A main-red fix card or a Tests page card has no issue: its name, as the belt has it, or as its picked line gives it (views.sh).
       | ([$s.belt | arrays | .[] | objects | select((.card | type) == "string" and (.name | type) == "string") | {key: .card, value: .name}]
-         + [$new[] | select(.step == "picked" and (.mainRed | type) == "string") | {key: .card, value: "Main is red (\(.mainRed[0:12]))"}] | from_entries) as $names
+         + [$new[] | select(.step == "picked" and (.mainRed | type) == "string") | {key: .card, value: "Main is red (\(.mainRed[0:12]))"}]
+         + [$new[] | select(.step == "picked" and (.testFile | type) == "string") | {key: .card, value: "Tests page: \(.testFile)"}] | from_entries) as $names
       # Its title, as the belt has it, or as its picked line gives it: a card picked since has no line on the belt.
       | ([$s.belt | arrays | .[] | objects | select((.card | type) == "string" and (.title | type) == "string") | {key: .card, value: .title}]
          + [$new[] | select(.step == "picked" and (.title | type) == "string") | {key: .card, value: .title}] | from_entries) as $titles

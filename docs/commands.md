@@ -99,8 +99,9 @@ Cards:
 - `parts <parent> <issue>...` attaches the issues as GitHub sub-issues of the parent ([Issues](#issues)).
 - `retry <issue>` gives a blocked card back; with `--fresh`, its next card builds from nothing. `shut <issue>` stops an open card and shuts it, or shuts a blocked card whose issue was closed. `unblock <issue> --hold` holds a
   blocked card's issue and keeps its work. A main-red fix
-  card has no issue. It shows as "Main is red (<commit>)". Use `retry <card id>` and `shut <card id>`. `retry 0`
-  lists the blocked ones by card id.
+  card has no issue. It shows as "Main is red (<commit>)". A card from the Tests page with the rule Tests page issues
+  Off has no issue too. It shows as "Tests page: <file>". For these cards, use `retry <card id>` and
+  `shut <card id>`. `retry 0` lists the blocked ones by card id.
 - `land-branch <branch>` lands a branch's tip as one card, reviewed and tested as any card. A branch named as a card
   id (`c<time>-<project>-<issue>`) lands as that issue. Other branches land as issue 0, also when the name has a
   number in it. A blocked card of issue 0 is closed with `shut <card id>`. Its kept patch stays, and its branch is

@@ -174,9 +174,10 @@ The check also covers `foreman.sh ask <project> testissue`. An issue for new wor
 section nor the label, is not checked, and nor is an issue that the engine files itself, such as a follow-up.
 
 The Foreman can also file an issue about a test file with `conveyor.sh testissue`, the Tests page's command. This
-command holds the issue in the project's record and says so. It does this for a Foreman session, and also when the
-project's New issues start in is Held. The Foreman runs it with `foreman.sh ask <project> testissue`, so the issue is
-held also when the project is on a host, or is another project of the Foreman's group.
+command holds the issue in the project's record and says so. It does this for a Foreman session, also when the Rules
+tab's **Tests page issues** is Off. It also holds an issue that it files when the project's New issues start in is
+Held. The Foreman runs it with `foreman.sh ask <project> testissue`, so the issue is held also when the project is on
+a host, or is another project of the Foreman's group.
 
 The Foreman's start names `foreman.sh` by one command, `conveyor/foreman.sh` in the data folder (`~/.local/share`
 unless `XDG_DATA_HOME` says otherwise). Its path does not change when the engine moves to a new version, and it runs

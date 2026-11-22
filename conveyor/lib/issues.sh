@@ -18,26 +18,29 @@ strays() {
 # rewritten in place, never replaced: the lock is held on the file itself, and a writer waiting for it must find
 # the same file when its turn comes.
 # A main-red fix card (issue 0, mainred.sh redpick()) is given back by its card id: its lines move out the same way, and the loop
-# picks its main commit's entry again, a new card built from nothing.
+# picks its main commit's entry again, a new card built from nothing. So is a Tests page card of no issue (testpick(),
+# lib/testaction.sh): the loop picks its action again.
 # RETRYWHY, when set, is why the loop retried the card itself (speedretry()): its blocked line keeps it as retriedWhy.
-retry() { # <issue, or the card id of a main-red fix card> [fresh: an issue's next card builds from nothing]
+retry() { # <issue, or the card id of a main-red fix card or a Tests page card> [fresh: an issue's next card builds from nothing]
   local n=$1 ends l what k='.issue == $n' a p f
   check || return 1
   # No issue is #0: every main-red fix card is of issue 0, so a retry of it would give back each of them. Said: how to
   # name one, and the blocked ones by card id beside the name they are shown by.
   if [[ $1 =~ ^0+$ ]]; then
     l=$(stdb ask issue cards 0) || return 1
-    l=$(jq -rs 'map(select(.step != "push")) | [group_by(.card)[] | select(any(.step == "picked" and (.mainRed | type) == "string") and last.step == "blocked")
-      | "\(.[0].card) (Main is red (\(map(.mainRed | strings) | first | .[0:12])))"] | if . == [] then "none is blocked now" else "blocked now: " + join(", ") end' <<<"$l") || return 1
-    echo "conveyor: no issue is #0. A main-red fix card, shown as \"Main is red (<commit>)\", has no issue: retry it by its card id, \`conveyor.sh retry <card id>\` ($l); nothing changed" >&2
+    l=$(jq -rs 'map(select(.step != "push")) | [group_by(.card)[] | (map(select(.step == "picked")) | first) as $p
+      | select((($p.mainRed | type) == "string" or ($p.testFile | type) == "string") and last.step == "blocked")
+      | "\(.[0].card) (\(if ($p.mainRed | type) == "string" then "Main is red (\($p.mainRed[0:12]))" else "Tests page: \($p.testFile)" end))"]
+      | if . == [] then "none is blocked now" else "blocked now: " + join(", ") end' <<<"$l") || return 1
+    echo "conveyor: no issue is #0. A main-red fix card, shown as \"Main is red (<commit>)\", or a Tests page card, shown as \"Tests page: <file>\", has no issue: retry it by its card id, \`conveyor.sh retry <card id>\` ($l); nothing changed" >&2
     return 1
   fi
   if [[ $1 =~ ^[0-9]+$ ]]; then
     what="issue #$1"; a=(--argjson n "$1"); l=$(stdb ask issue cards "$1") || return 1
   else
     what="card $1"; k='.card == $n'; a=(--arg n "$1"); l=$(stdb ask card "$1") || return 1
-    [ -z "$l" ] || jq -se 'any(.step == "picked" and .mainRed)' <<<"$l" >/dev/null \
-      || { echo "conveyor: card $1 is no main-red fix card: retry takes a card's issue number; nothing changed" >&2; return 1; }
+    [ -z "$l" ] || jq -se 'any(.step == "picked" and (.mainRed or .testFile))' <<<"$l" >/dev/null \
+      || { echo "conveyor: card $1 is no main-red fix card and no Tests page card: retry takes a card's issue number; nothing changed" >&2; return 1; }
   fi
   # A card with a pushed line has landed, whatever line follows it and whatever their times: its commit is on main.
   ends=$(jq -rs "${a[@]}" --arg shut "$SHUT" --arg own "$OWNSHUT" "map(select($k))"' | group_by(.card)
@@ -116,7 +119,8 @@ retry() { # <issue, or the card id of a main-red fix card> [fresh: an issue's ne
 # Once the issue is opened again, a turn of the loop gives it back as `retry` does (reopened()), the new card starting
 # from that work.
 # A main-red fix card (issue 0, mainred.sh redpick()), which has no issue to close, is shut by its card id: its main commit then
-# starts no card again, and `retry <card id>` gives it back. So is a land-branch card of issue 0 (landbranch(), a
+# starts no card again, and `retry <card id>` gives it back. So is a Tests page card of no issue (testpick(),
+# lib/testaction.sh): its action then starts no card again until `retry <card id>`. So is a land-branch card of issue 0 (landbranch(), a
 # branch that names no issue), whose change landed some other way: its kept work stays where block() put it, and its
 # branch is left alone.
 # A card the owner stopped with `shut` (shutopen(), lib/run.sh), named in <own> (a json array of card ids), ends with a
@@ -127,10 +131,10 @@ retry() { # <issue, or the card id of a main-red fix card> [fresh: an issue's ne
 # card id whatever its issue.
 SHUT='the issue was closed by hand while the card was blocked'
 OWNSHUT='shut by the owner'
-shut() { # <closed issue numbers, a json array, or a card id: of a card of an issue, or of a main-red fix card or of a land-branch card of issue 0> [own]
+shut() { # <closed issue numbers, a json array, or a card id: of a card of an issue, or of a main-red fix card, a Tests page card or a land-branch card of issue 0> [own]
   local closed=$1 own=${2:-[]} c n b o l t='.[0].issue | IN($closed[])' found=''
   check || return 1
-  [[ $1 == '['* ]] || { closed=$(jq -cn --arg c "$1" '$c'); t='.[0].card == $closed and (.[0].issue != 0 or any(.[]; .step == "picked" and (.mainRed or .branch)))'; }
+  [[ $1 == '['* ]] || { closed=$(jq -cn --arg c "$1" '$c'); t='.[0].card == $closed and (.[0].issue != 0 or any(.[]; .step == "picked" and (.mainRed or .testFile or .branch)))'; }
   while read -r c n b o; do
     l=$(line "$c" "$n" closed ok "$(jq -cn --arg r "$([ "$o" = own ] && echo "$OWNSHUT" || echo "$SHUT")" '{reason: $r}')") && append "$l" || return 1
     found=1
@@ -144,7 +148,7 @@ shut() { # <closed issue numbers, a json array, or a card id: of a card of an is
         | [range(length) as $i | $e[$i] | select(.step != "pushed" and (.step != "blocked" or ($e[$i + 1:] | all(.step == "blocked"))))] | last | .step) == "blocked"
       and ('"$t"'))
     | "\(.[0].card) \(.[0].issue) \(if .[0].issue == 0 and any(.[]; .step == "picked" and .branch) then "branch" else "-" end) \(if (.[0].card | IN($own[])) or (map(select(.step == "blocked")) | last | .reason // "" | startswith($ownshut)) then "own" else "-" end)"' < <(stdb ask lines cards))
-  [[ $1 == '['* ]] || [ -n "$found" ] || { echo "conveyor: card $1 is no open or blocked card (one of issue 0 must be a main-red fix card or a land-branch card): it has no card lines, or it landed, closed or was shut already; nothing changed" >&2; return 1; }
+  [[ $1 == '['* ]] || [ -n "$found" ] || { echo "conveyor: card $1 is no open or blocked card (one of issue 0 must be a main-red fix card, a Tests page card or a land-branch card): it has no card lines, or it landed, closed or was shut already; nothing changed" >&2; return 1; }
 }
 # At a turn of the loop, outside the lock: an issue of the open list given whose newest card was shut (above) is given
 # back with `retry` (under the lock) once GitHub says the issue itself is open: a stale open list alone gives nothing

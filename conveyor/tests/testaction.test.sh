@@ -205,6 +205,8 @@ t_tasamesecond() {
 # no Close its issue as done.
 t_taissue() {
   tasetup; local out
+  # #1330 D2: the rule Tests page issues is on unless the owner turns it off, and on, the action files its issue (below).
+  [ "$(loop control | jq -c .rules.testissues)" = true ] || fail "the rule Tests page issues is not on by default: $(loop control | jq -c .rules)"
   out=$(loop testissue tests/x.test.sh "Speed up tests/x.test.sh" "Measured: 12 CPU s.") || fail "testissue failed: $out"
   [ "$out" = https://github.com/o/r/issues/100101 ] || fail "testissue does not print the issue's address: $out"
   [ "$(jq -c '[.title, (.labels | map(.name))]' "$STUB/filed")" = '["Speed up tests/x.test.sh",["bug","P2"]]' ] || fail "the issue filed: $(cat "$STUB/filed")"

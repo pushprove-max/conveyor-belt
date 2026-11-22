@@ -108,25 +108,80 @@ TAEXPLAIN="Explain the slowdown of one test file of this project. From its recor
 # issues start held (or the record cannot be read), it holds the issue in the control record, as the Foreman's
 # filing hooks do, which do not see an issue filed here, and says so on stderr: a Foreman's issue is not built
 # before the owner's yes.
+# With the control record's rule Tests page issues off (rules.testissues false, #1330) it files no issue: the card
+# starts with no GitHub issue (testcard()), and it prints that, while new issues start held too: the owner asked for
+# the card on the Board. One asked for a Foreman session (foreman.sh ask <project> testissue) is filed and held as
+# with the rule on: a card with no issue cannot wait for the owner's yes.
 TAFILED=$TESTACTS/filed.jsonl
 testissue() { # <test file> <title> <body>
-  local out n s='' why=''
+  local out n s='' why='' c fm=''
   [ $# = 3 ] && [[ -n ${2//[[:space:]]/} && $2 != *$'\n'* && -n ${3//[[:space:]]/} ]] || { echo "usage: conveyor.sh testissue <test file> <title> <body>" >&2; return 2; }
   [[ -n $1 && $1 != /* && /$1/ != */../* && /$1/ != */./* && $1 != *$'\n'* ]] && [ "$(git -C "$MAIN" cat-file -t "refs/heads/$BRANCH:$1" 2>/dev/null)" = blob ] \
     || { echo "conveyor: $1 is not a file of $BRANCH; nothing filed" >&2; return 2; }
   mkdir -p "$TESTACTS" || { echo "conveyor: the test actions' folder could not be made; nothing filed" >&2; return 1; }
+  read -r s _ 2>/dev/null < "$ST/foreman/session"
+  c=$(ctl 2>/dev/null) || c=''
+  if [ "${CONVEYOR_FOREMAN:-}" = 1 ] || { [ -n "$s" ] && [ "${CLAUDE_CODE_SESSION_ID:-}" = "$s" ]; }; then why='it was filed for a Foreman session' fm=1
+  else case $(jq -r '.start // empty' <<<"$c" 2>/dev/null) in queue) ;; held) why='new issues start held' ;; *) why='the control record cannot be read' ;; esac; fi
+  if [ -z "$fm" ] && [ "$(jq -r '.rules.testissues' <<<"$c" 2>/dev/null)" = false ]; then testcard "$@"; return; fi
   out=$(gh_write issue create --title "${2:0:200}" --label "$TYPE" --label "$(jq -r '.[-1]' <<<"$PRIOS")" --body "$3" 2>&1); n=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1); n=${n##*/}
   [ -n "$n" ] || { echo "conveyor: the issue about $1 could not be filed: $out" >&2; return 1; }
   jq -cn --arg t "$(clock)" --arg f "$1" --argjson n "$n" '{time: $t, event: "filed", file: $f, issue: $n}' >> "$TAFILED" \
     || echo "conveyor: #$n is filed, but its record could not be written: the row of $1 does not show it" >&2
-  read -r s _ 2>/dev/null < "$ST/foreman/session"
-  if [ "${CONVEYOR_FOREMAN:-}" = 1 ] || { [ -n "$s" ] && [ "${CLAUDE_CODE_SESSION_ID:-}" = "$s" ]; }; then why='it was filed for a Foreman session'
-  else case $(ctl 2>/dev/null | jq -r '.start // empty' 2>/dev/null) in queue) ;; held) why='new issues start held' ;; *) why='the control record cannot be read' ;; esac; fi
   if [ -n "$why" ]; then
     if locked control hold "$n" > /dev/null 2>&1; then echo "conveyor: #$n is held, as $why: release it (conveyor.sh control release $n) once the owner says yes" >&2
     else echo "conveyor: #$n is filed, but could not be held ($why): hold it (conveyor.sh control hold $n) unless the owner has said yes to it" >&2; fi
   fi
   grep -oE '[^[:space:]]*/issues/[0-9]+' <<<"$out" | tail -n 1
+}
+# A Tests page card with no GitHub issue (testissue() with the rule Tests page issues off, #1330), a card of issue 0
+# as a main-red fix card is. $TACARDS keeps {cards: [{file, title, body, time, card}]}: the test file, the title and
+# body the action would have filed, when it was asked, and card, null until the loop picks it (testpick()). One writer
+# at a time (a lock of its own). It keeps every card not picked yet and the newest 200 picked ones (card() reads a
+# picked card's record while it builds). Prints that the card is queued.
+TACARDS=$TESTACTS/cards.json
+testcard() { # <test file> <title> <body>
+  local lock rec
+  { exec {lock}>>"$TACARDS.lock"; } 2>/dev/null && flock "$lock" || { echo "conveyor: the record of the Tests page's cards could not be locked; no card started" >&2; return 1; }
+  rec=$(jq -ce '.cards | arrays' "$TACARDS" 2>/dev/null) || rec='[]'
+  # The record goes to jq on its input: Linux refuses an argument over 128 KiB.
+  jq -c --arg f "$1" --arg t "${2:0:200}" --arg b "$3" --arg at "$(clock)" '. + [{file: $f, title: $t, body: $b, time: $at, card: null}]
+    | ([to_entries[] | select(.value.card != null) | .key] | .[:-200]) as $old | {cards: [to_entries[] | select(.key | IN($old[]) | not) | .value]}' <<<"$rec" > "$TACARDS.new" \
+    && mv -f "$TACARDS.new" "$TACARDS" || { rm -f "$TACARDS.new"; exec {lock}>&-; echo "conveyor: the record of the Tests page's cards could not be written; no card started" >&2; return 1; }
+  exec {lock}>&-
+  echo "Card queued with no GitHub issue: ${2:0:200}"
+}
+# Under the lock (pick()), after the main-red fix cards and ahead of the queue: the oldest Tests page card not picked
+# yet. Its picked line has the action's title and its test file (testFile), which the Board shows it by. Prints
+# "<card> 0 false", `wait` when the machine holds it back, nothing when no card waits. A card whose lines left the
+# card records (`retry <card id>`, lib/issues.sh, or a stop of the loop, lib/run.sh) is given back: its entry is picked
+# again, a new card built from nothing, as redpick() does. With the records of issue 0 unread, only a card not picked
+# yet is.
+testpick() {
+  local lock rec i l card have h=1
+  [ -s "$TACARDS" ] || return 0
+  { exec {lock}>>"$TACARDS.lock"; } 2>/dev/null && flock "$lock" || { echo "conveyor: the record of the Tests page's cards could not be locked; its cards wait" >&2; return 1; }
+  rec=$(jq -ce '.cards | arrays' "$TACARDS" 2>/dev/null) || rec='[]'
+  have=$(stdb ask issue cards 0) || h=0
+  while read -r i; do
+    room 0 >/dev/null || { exec {lock}>&-; echo wait; return 0; }
+    # A card id is its second, its project and its issue: a card of issue 0 picked in the same second waits for the next.
+    while card="c$(date -u +%Y%m%dT%H%M%S)-$CTAG-0"; [ -n "$(stdb ask card "$card")" ] || stdb ask lines retried | grep -F "\"card\":\"$card\"" >/dev/null; do sleep 1; done
+    jq -c --argjson i "$i" --arg c "$card" '{cards: (.[$i].card = $c)}' <<<"$rec" > "$TACARDS.new" && mv -f "$TACARDS.new" "$TACARDS" \
+      && l=$(line "$card" 0 picked ok "$(jq -c --argjson i "$i" '.[$i] | {title, testFile: .file}' <<<"$rec")") && append "$l" \
+      || { rm -f "$TACARDS.new"; exec {lock}>&-; echo "conveyor: the Tests page's card about $(jq -r --argjson i "$i" '.[$i].file' <<<"$rec") could not be picked" >&2; return 1; }
+    exec {lock}>&-; echo "$card 0 false"; return 0
+  # The record and the lines go to jq on its input: Linux refuses an argument over 128 KiB.
+  done < <(printf '%s\n%s\n' "$rec" "$have" | jq -Rrn --argjson h "$h" 'input | fromjson as $r | ([inputs | fromjson? | objects | .card | strings] | INDEX(.)) as $have
+    | $r | to_entries[] | select(.value.card == null or ($h == 1 and $have[.value.card] == null)) | .key')
+  exec {lock}>&-
+}
+# What stands in for the issue of a Tests page card (card()): the title and body its action made, labelled as
+# testissue() files the issue (the pack's type and its last priority), so it is held to its action's check
+# (lib/speedproof.sh) as that issue's card is. Fails for any other card.
+testcardissue() { # <card>
+  [ -n "$1" ] && jq -ce --arg c "$1" --arg t "$TYPE" --argjson p "$PRIOS" 'first(.cards[]? | select(.card == $c))
+    | {number: 0, title, body, milestone: null, labels: [{name: $t}, {name: $p[-1]}]}' "$TACARDS" 2>/dev/null
 }
 taput() { printf '%s\n' "$2" > "$1.new" && mv -f "$1.new" "$1" || { rm -f "$1.new"; return 1; }; } # <file> <record>
 testaction() { # <judge | explain | run> <test file> | stop <id>

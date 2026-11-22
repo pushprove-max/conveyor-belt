@@ -36,7 +36,8 @@
 #   issue of its earlier fix when it is flaky again: two entries within FLAKY_DAYS days, FLAKYAGAIN in lib/flaky.sh; else null), issue (the issue last filed for it, the highest number of the slow-test record's, the test rules' log's and the Board's filings ($TAFILED), else null; the Board's Close its issue as done closes it), slowOnPurpose (its reason, else null), usual (the median of
 #   its runs before its last slower.runs runs; null with fewer than slower.minRuns runs on record) and slower; a wholeOnly
 #   file (a runner that starts other test files whole, each timed on its own) has slower false; optimize: each issue the Board filed for it ($TAFILED: Optimize, and older
-#   speed-up, issues), newest first: {issue, time (filed), state (open: no card took it; building; blocked, with reason;
+#   speed-up, issues), and each Tests page card of no issue ($TACARDS: issue null, with card, null until picked, and
+#   name "No issue"), newest first: {issue, time (filed), state (open: no card took it; building; blocked, with reason;
 #   landed, with sha and landed, the time; closed: its card closed it without landing), fix, into, before and after
 #   (from the bugproof line's speed of its landed card, else of its newest: fix is sped up, split, merged or deleted,
 #   into the test files a split added or a merge changed, or, for a delete, those the last review of its landed card
@@ -564,12 +565,16 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
     --slurpfile cs <(printf '%s' "$cs") --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") --argjson ru "$ru" --rawfile all <(printf '%s\0' "${tf[@]}") \
     --slurpfile hv <(printf '%s' "$hv") --slurpfile px <(printf '%s' "$px") --slurpfile mu <(cat "$MUTS"/*.json 2>/dev/null | jq -c 'objects' 2>/dev/null) --rawfile mq "$(rawok "$MUTS/asked")" --rawfile su "$su" --slurpfile sv <(printf '%s' "$sv") --slurpfile last <(jq -ce 'objects' "$TESTRULES" 2>/dev/null || echo null) \
     --rawfile rl "$(rawok "$TESTRULESLOG")" --argjson shown "$TESTRULES_SHOWN" --rawfile tf "$(rawok "$TAFILED")" \
+    --slurpfile tc <(jq -c '[.cards | arrays | .[] | objects | select(.file | type == "string") | {file, time, card: ((.card | strings) // null), issue: null}]' "$TACARDS" 2>/dev/null || echo '[]') \
     --slurpfile tj <(cat "$TESTACTS"/*.json 2>/dev/null | jq -c 'objects | select(.action == "judge" and .state == "done" and (.file | type) == "string" and (.waits | type) == "array") | {file, end, waits}' 2>/dev/null) "$HISTFROM"'$fs[0] as $fs | ($fl[0] | if (.entries | type) == "array" then .entries |= map(fromstart($st)) else . end) as $fl | $sf[0] as $sf | ($all | split("\u0000") | map(select(. != ""))) as $all | $hv[0] as $hv | $px[0] as $px | '"$JSONL$OWNERS$FAILURE$RUNDEFS$FLAKYAGAIN"'
     # The rules log and the Board test issues, each read once: the log'"'"'s last $shown lines, newest first (lg), and
     # their filed lines (fd); the test issues with a file and an issue number (ta).
     ($su | jsonl) as $su | ($rl | split("\n") | if .[-1] == "" then .[:-1] else . end | .[-$shown:] | map(fromjson? | objects) | reverse) as $lg
     | ($rl | jsonl) as $rl | ($tf | jsonl | map(select(.event == "filed"))) as $tf | [$rl[], $tf[] | select(.event == "filed")] as $fd
     | [$tf[] | select((.file | type == "string") and (.issue | type == "number"))] as $ta
+    # The Tests page cards of no issue ($TACARDS, lib/testaction.sh testcard()), each {file, time, card (null until
+    # picked), issue: null}: kept in the Optimize history as a filing is (tc).
+    | $tc[0] as $tc
     |
     def median: sort | if length == 0 then null else (.[(length - 1) / 2 | floor] + .[length / 2 | floor]) / 2 end;
     def r3: if . == null then null else . * 1000 | round / 1000 end;
@@ -577,7 +582,8 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
     # A check that ended done, as the Optimize history counts it: {at, killed, of}; null for none.
     | def mutsaid: if . == null then null else {at, killed, of: (.mutants | length)} end;
     # A Board filing ($TAFILED) as its cards left it, given the runs of its file ($r, oldest first).
-    def optimize($r): . as $o | [$cr[] | select(.issue == $o.issue)] as $c
+    # A Tests page card of no issue (tc) by the lines of its card, none before it is picked.
+    def optimize($r): . as $o | [$cr[] | select(if $o.issue == null then $o.card != null and .card == $o.card else .issue == $o.issue end)] as $c
         | (first($c[] | select(.step == "landed")) // null) as $l
         | ([$c[] | select(.step == "bugproof" and (.speed | type == "object") and ($l == null or .card == $l.card))] | last | .speed // {}) as $p
         # A delete changes no other test file: the files that cover its cases are those its card'"'"'s last review named
@@ -592,7 +598,8 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
            sha: ($l.sha // null), landed: ($l.time // null), fix: ($p.fix // null), into: (if $p.fix == "deleted" then $cov else $p.into // [] end),
            before: ($p.before // null), after: ($p.after // null), since: ($since | if . == null then null else median | r3 end), sinceRuns: ($since | length),
            mutantsBefore: (if $l == null then null else [$mu[] | select(.file == $o.file and .state == "done" and .at < $l.time)] | max_by(.at) | mutsaid end),
-           mutantsAfter: (if $l == null then null else [$mu[] | select(.file == $o.file and .state == "done" and .at > $l.time)] | max_by(.at) | mutsaid end)};
+           mutantsAfter: (if $l == null then null else [$mu[] | select(.file == $o.file and .state == "done" and .at > $l.time)] | max_by(.at) | mutsaid end)}
+        + (if $o.issue == null then {card: $o.card, name: "No issue"} else {} end);
     # The asked list of the mutation checks (lib/mutate.sh mutask()): each file to its place, 1 first.
     ($mq | split("\n") | map(select(. != "")) | to_entries | map({key: .value, value: (.key + 1)}) | from_entries) as $place
     # The failed test steps of each file (FAILURE: failedrun), newest first.
@@ -607,8 +614,8 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
     | alledits($cr) as $alledits
     # A survey time counts for each file the part has a row for (listed, run or filed), as testolder() counts it, so
     # a file the patterns do not list keeps it beside its card runs (#1044); it adds no row of its own (#1036).
-    | [testruns($lf; $su) | fromstart($st)] as $tr | ([$all[], $tr[].file, $ta[].file] | map({key: ., value: true}) | from_entries) as $rows
-    | [$tr[], ($sv[0][] | select($rows[.file] == true) | fromstart($st)), ($all[], $ta[].file | {file: ., none: true})]
+    | [testruns($lf; $su) | fromstart($st)] as $tr | ([$all[], $tr[].file, $ta[].file, $tc[].file] | map({key: ., value: true}) | from_entries) as $rows
+    | [$tr[], ($sv[0][] | select($rows[.file] == true) | fromstart($st)), ($all[], $ta[].file, $tc[].file | {file: ., none: true})]
     | group_by(.file)
     | map(.[0].file as $f | map(select(.none != true)) | sort_by(.time) as $r | [$r[].cpu | numbers] as $c | ($c | median) as $m | $c[-1] as $now
         | ($fs[$f] // {}) as $own | ($own.wholeOnly == true) as $wo
@@ -628,7 +635,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
              else {file, at, sha, seed, state, reason, of: (.mutants | length), tried, killed, survived, noresult, notMutated, end} end),
            mutationPlace: ($place[$f] // null), cases: (if $f | test("\\.(sh|bash)$") then $cs[0][$f] // [] else null end),
            waits: ([$tj[] | select(.file == $f)] | max_by(.end // "") | if . == null or .waits == [] then null else .waits end)}
-        | .optimize = ([$ta[] | select(.file == $f)] | unique_by(.issue) | sort_by(.time) | reverse | map(optimize($r)))
+        | .optimize = (([$ta[] | select(.file == $f)] | unique_by(.issue)) + [$tc[] | select(.file == $f)] | sort_by(.time) | reverse | map(optimize($r)))
         | .removed = (($f | IN($all[]) | not) and any(.optimize[]; .state == "landed" and (.fix | IN("deleted", "merged")))))
     | sort_by(-(.cpu // -1), .file)
     | [$lf[] | select(.reused != true and ((.time | fromdate? | strflocaltime("%Y-%m-%d")) // "") >= $since)] as $wk

@@ -15,7 +15,7 @@ const typeFind = (w, v) => { const f = act(rulesP(w), 'rules-find'); f.value = v
 
 // Bugs: the index did not list the six groups, or a group showed another group's rules, or the search missed a rule
 // by its name or showed the groups with no match, so a rule could not be found or the pane stayed a long flat list.
-test('Rules: the index lists six groups; Picking shows only its six rules; "push" shows only the matching rules of Landing and push', () => {
+test('Rules: the index lists six groups; Picking shows only its seven rules; "push" shows only the matching rules of Landing and push', () => {
   const w = boot({ tab: 'rules' });
   deliver(w, full());
   assert.deepEqual(Array.from(rulesP(w).querySelectorAll('.rules-index button'), (b) => [b.textContent, b.getAttribute('aria-pressed')]),
@@ -23,7 +23,7 @@ test('Rules: the index lists six groups; Picking shows only its six rules; "push
   assert.deepEqual(shownSets(w), ['models'], 'no search text: the group picked alone');
   act(rulesP(w), 'rules-set-picking').click();
   assert.equal(act(rulesP(w), 'rules-set-picking').getAttribute('aria-pressed'), 'true');
-  assert.deepEqual(shownRules(w), ['build', 'never', 'start', 'dep-guard', 'split', 'pick']);
+  assert.deepEqual(shownRules(w), ['build', 'never', 'start', 'dep-guard', 'split', 'testissues', 'pick']);
   typeFind(w, 'push');
   assert.deepEqual(shownSets(w), ['landing'], 'a group with no match hides');
   assert.ok(['push', 'push-check'].every((k) => shownRules(w).includes(k)), shownRules(w).join());

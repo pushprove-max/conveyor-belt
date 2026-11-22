@@ -7,9 +7,11 @@
 # as the Board's Tests page files it (`conveyor.sh testissue`). The file is the one that filing kept for the issue
 # ($TAFILED), else the title's word after that start. Prints it; fails for any other issue.
 # A Rewrite as a direct check issue (#778, REWRITE: "Rewrite the test file <file> as direct checks") is an Optimize
-# issue with the verdict indirect (optverdict()).
-# shellcheck disable=SC2034 # OPTIMIZE and REWRITE are used in lib/card.sh
-SPEEDUP='Speed up the test file ' OPTIMIZE='Optimize the test file ' REWRITE='Rewrite the test file '
+# issue with the verdict indirect (optverdict()), and a Split it issue (#768, SPLIT: "Split the test file <file>") one
+# with the verdict split. A Tests page card with no issue (testcardissue(), lib/testaction.sh) has no filing kept: its
+# file is its title's.
+# shellcheck disable=SC2034 # OPTIMIZE, REWRITE and SPLIT are used in lib/card.sh
+SPEEDUP='Speed up the test file ' OPTIMIZE='Optimize the test file ' REWRITE='Rewrite the test file ' SPLIT='Split the test file '
 speedfile() { # <issue json> [title start: SPEEDUP]
   local t f p=${2:-$SPEEDUP}
   t=$(jq -r '.title // ""' <<<"$1"); [[ $t == "$p"* ]] || return 1
@@ -20,10 +22,11 @@ speedfile() { # <issue json> [title start: SPEEDUP]
 # The verdict an Optimize card is checked by (speedproof(), optproof()): the one its issue's body names on the Board's
 # line "The judge's verdict (<when, seat>): <verdict>." (draftIssue(), .claude/dashboard/panels/tests.js), else on its
 # last VERDICT: line (TAVERDICTS, lib/testaction.sh), in lower case; <none> ("speed up" when not given) for an issue
-# that names none (a speed-up issue). A Rewrite as a direct check issue (its title starts REWRITE) is indirect,
-# whatever its body says.
+# that names none (a speed-up issue). A Rewrite as a direct check issue (its title starts REWRITE) is indirect, and
+# a Split it issue (SPLIT) split, whatever its body says.
 optverdict() { # <issue json> [<none>]
   ! speedfile "$1" "$REWRITE" > /dev/null || { echo indirect; return 0; }
+  ! speedfile "$1" "$SPLIT" > /dev/null || { echo split; return 0; }
   jq -r --arg v "$TAVERDICTS" --arg n "${2:-speed up}" '[(.body // "") | split("\n")[] | sub("^[\\s*`_>-]+"; "")] as $l
     | ([$l[] | capture("^The judge.s verdict \\(.*\\):\\s*(?<v>" + $v + ")[\\s.*`_]*$"; "i").v | ascii_downcase] | last)
       // ([$l[] | capture("^VERDICT:[\\s*`_]*(?<v>" + $v + ")([^[:alpha:]].*)?$"; "i").v | ascii_downcase] | last) // $n' <<<"$1" 2>/dev/null \
@@ -305,7 +308,7 @@ speedproof() { # <card> <worktree> <issue json> <test file> [<test file the chan
   git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; rmdir "${mwt%/*}" 2>/dev/null # the folder, once no card's run is in it
   [ -z "$why" ]
 }
-# The check of an Optimize card (card(): a bug card whose issue speedfile() names with OPTIMIZE or REWRITE), in place of the
+# The check of an Optimize card (card(): a bug card whose issue speedfile() names with OPTIMIZE, REWRITE or SPLIT), in place of the
 # bug-card check: the card speeds its test file up, splits it, merges it into another test file or deletes it, and
 # keeps what it tests, so no test must fail on main's code. A change that keeps the file, or adds test files (a split),
 # is checked as a speed-up (speedproof(), given the test files it adds). A change that removes the file and adds no
