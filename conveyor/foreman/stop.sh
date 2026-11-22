@@ -14,13 +14,15 @@
 #     entry of human origin after the opening) answers the owner, so its reply is not judged as a wake reply;
 #   - leaves the Foreman's own work undone ("haven't filed it", "I still need to file", "I'll fix", "want me to ..."); an "I'll <verb>" in a
 #     sentence that ties it to a later event or a standing rule (when, once, after, until, every, if ...) is not that.
-#   A line in the plugin-problem form (PLUG: "Plugin problem (for the conveyor-belt repo): <what was seen>") reports a
+#   A line in the plugin-problem form (PLUG: "Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what was expected>") reports a
 #   suspected defect in Conveyor itself, which the owner fixes (the owner files it too, except in the plugin's own
 #   repository, where the Foreman files it): it needs the owner, so the wake and
 #   unfinished-work checks read the reply without it, and each such line is noted once in $FD/plugin-bugs.md (time,
 #   card, what was seen, evidence path) before any check, so the finding outlives a refused or short reply. In the
 #   plugin's own repository (lib.sh plugin_home) the Foreman files it there itself, so a line that does not end
 #   "filed as #<n>" is refused too, at every stop of the turn (not only once, as the checks above are).
+#   A plugin-problem line that holds [likely] gives a cause the Foreman did not check: it is noted nowhere and the
+#   stop is refused once per turn, as the checks above are.
 # Each refused stop is noted in $FD/refused-stops (lib.sh refused_put), which waiter.sh reads.
 set -uo pipefail
 INPUT=$(cat)
@@ -61,7 +63,7 @@ TURN=$(jq -cs --arg w "$W" 'def txt: .message.content | if type == "string" then
 U=$(jq -r '.uuid // empty' <<<"$TURN" 2>/dev/null); REPLY=$(jq -r '.reply // empty' <<<"$TURN" 2>/dev/null)
 [ -n "$U" ] && [ -n "$REPLY" ] || exit 0
 PLUG='^[[:space:]*_>-]*plugin problem \(for the conveyor-belt repo\):[[:space:]*_]*'
-FORM="'Plugin problem (for the conveyor-belt repo): <what you saw>, card <card>, evidence <path>'"
+FORM="'Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what you expected>, card <card>, evidence <path>'"
 # Each plugin-problem line is noted once: a reply that says it again (after a refusal) adds no second note. A line
 # that ends "filed as #<n>" names the issue it was filed as; in the plugin's own repository, said after the same line
 # without it (or as the line context gives a listed note), it takes that note's place, so the note names the issue
@@ -71,10 +73,13 @@ NOTES=$FD/plugin-bugs.md
 FILED='[,;]?[[:space:]]*filed as #([1-9][0-9]*)[[:space:]]*\.?$'
 NOISSUE='[,;]?[[:space:]]*filed as #[0-9]+[[:space:]]*\.?$'
 UNFILED=()
+# A line that holds [likely] is a guessed cause sent as a finding: it is not noted, and the stop is refused below.
+GUESS=
 shopt -s nocasematch
 while IFS= read -r l; do
   [[ $l =~ $PLUG ]] || continue
   seen=${l:${#BASH_REMATCH[0]}}; seen=${seen%"${seen##*[![:space:]]}"}; [ -n "$seen" ] || continue
+  [[ $seen == *'[likely]'* ]] && { GUESS=$l; continue; }
   what=$seen
   if [[ $seen =~ $FILED ]]; then what=${seen:0:${#seen}-${#BASH_REMATCH[0]}}
   else
@@ -118,11 +123,17 @@ REST=$(grep -viE "$PLUG" <<<"$REPLY" | grep -viE "$DONE")
 # unfiled; filing it, or leaving the line out (its note stays listed at start-up), lets the stop pass. In any other
 # project the owner files it, and the line passes as it is.
 if [ ${#UNFILED[@]} != 0 ] && plugin_home; then
-  block "This project is the plugin's own repository, so a plugin problem is a defect you file here yourself, as any issue you file (it starts held until the owner says yes). File it now, then name the issue at the end of the line: 'Plugin problem (for the conveyor-belt repo): <what you saw>, card <card>, evidence <path>, filed as #<n>'. Not filed: ${UNFILED[0]}"
+  block "This project is the plugin's own repository, so a plugin problem is a defect you file here yourself, as any issue you file (it starts held until the owner says yes). File it now, then name the issue at the end of the line: 'Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what you expected>, card <card>, evidence <path>, filed as #<n>'. Not filed: ${UNFILED[0]}"
 fi
+GUESSMSG="A plugin problem says what you saw, not a cause you did not check: give the command, what it did and what you expected, and leave the cause out. Form: $FORM"
+# In the plugin's own repository a guessed cause is refused at every stop, as an unfiled line is: said again with
+# [likely] after a refusal, it must not pass as filed work. In any other project it is refused once per turn.
+[ -z "$GUESS" ] || ! plugin_home || block "$GUESSMSG"
 MARK=$FD/reply-mark
 [ "$(cat "$MARK" 2>/dev/null)" != "$U" ] || exit 0
 refuse() { { mkdir -p "$FD" && printf '%s\n' "$U" > "$MARK"; } 2>/dev/null || exit 0; block "$1"; }
+
+[ -z "$GUESS" ] || refuse "$GUESSMSG"
 
 if [ -n "$W" ] && jq -e --arg w "$W" '(.opening | contains($w)) and (.owner | not)' <<<"$TURN" >/dev/null 2>&1 && [ "$(wc -w <<<"$REST")" -gt 1 ]; then
   # What needs the owner is said to them: a reply that never says you, your or owner reports, and so does a sentence

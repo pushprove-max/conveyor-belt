@@ -180,11 +180,11 @@ out=$(turn u10 'Stop hook feedback: Conveyor: alpha: blocked: #7' "$bug"); [ -z 
   || fail "the plugin problem was not noted with its time, card, finding and evidence: $(cat "$FD/plugin-bugs.md" 2>&1)"
 # A status note beside it is still refused, the form named; the line said again is not noted twice.
 out=$(turn u11 'Stop hook feedback: Conveyor: alpha: blocked: #7' "Released #926 so its review could finish."$'\n'"$bug")
-jq -e '.decision == "block" and (.reason | contains("Plugin problem (for the conveyor-belt repo): <what you saw>"))' <<<"$out" >/dev/null || fail "a status note beside a plugin problem passed: $out"
+jq -e '.decision == "block" and (.reason | contains("Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what you expected>"))' <<<"$out" >/dev/null || fail "a status note beside a plugin problem passed: $out"
 [ "$(grep -c '^- ' "$FD/plugin-bugs.md")" = 1 ] || fail "a plugin problem said again was noted twice: $(cat "$FD/plugin-bugs.md")"
 # A finding in other words is refused, and told the form that keeps it.
 out=$(turn u12 'Stop hook feedback: Conveyor: alpha: blocked: #7' 'The tests likely failed because Conveyor does not install packages in card worktrees, another plugin problem.')
-jq -e '.decision == "block" and (.reason | contains("Plugin problem (for the conveyor-belt repo): <what you saw>, card <card>, evidence <path>"))' <<<"$out" >/dev/null \
+jq -e '.decision == "block" and (.reason | contains("Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what you expected>, card <card>, evidence <path>"))' <<<"$out" >/dev/null \
   || fail "a refused plugin finding was not told the form to use: $out"
 # Only the owner can file a plugin problem, so "not filed yet" on its line is no unfinished work of the Foreman's; a
 # finding that is part of one noted before is noted on its own.

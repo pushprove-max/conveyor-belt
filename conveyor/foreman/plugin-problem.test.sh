@@ -173,6 +173,43 @@ t_issuecard() {
     || fail "for the reply '$reply' the note's card field is not - or its text lost an issue number: $(cat "$FD/plugin-bugs.md" 2>&1)"
 }
 
+# Bug (#1352): a plugin-problem line carried a guessed cause tagged [likely] and went to the plugin's repository as a
+# finding. The line with [likely] is refused and not noted; the same line without it is noted and passes.
+t_guess() {
+  fixture guess https://github.com/example/alpha
+  base='Plugin problem (for the conveyor-belt repo): control release 1345 leaves card 1345 held in foreman status, it should be started, card c20261118T045400-alpha-7, evidence ~/cards/x.log'
+  guess="$base; the open range seems to still cover it [likely]"
+  out=$(turn u1 "$guess")
+  jq -e '.decision == "block" and (.reason | contains("not a cause you did not check"))' <<<"$out" >/dev/null \
+    || fail "the plugin problem '$guess' was not refused for its guessed cause: $out"
+  [ ! -s "$FD/plugin-bugs.md" ] || fail "the plugin problem '$guess' was noted: $(cat "$FD/plugin-bugs.md")"
+  out=$(turn u2 "$base"); [ -z "$out" ] || fail "the plugin problem '$base' with no guess was refused: $out"
+  [ "$(grep -c '^- ' "$FD/plugin-bugs.md" 2>/dev/null)" = 1 ] || fail "the plugin problem '$base' was not noted once: $(cat "$FD/plugin-bugs.md" 2>&1)"
+}
+
+# Bug (#1352 E1): in the plugin's own repository the guess refusal set reply-mark, and the same [likely] line said
+# again at the turn's next stop passed with no issue named. It is refused at every stop until the guess is left out.
+t_guesshome() {
+  fixture guesshome "git@github.com:${OWN#https://github.com/}.git"
+  out=$(turn u1 "$LINE [likely]")
+  jq -e '.decision == "block"' <<<"$out" >/dev/null || fail "the plugin problem '$LINE [likely]' passed at the first stop: $out"
+  out=$(again "$LINE [likely]")
+  jq -e '.decision == "block" and (.reason | contains("not a cause you did not check"))' <<<"$out" >/dev/null     || fail "the plugin problem '$LINE [likely]' passed at the turn's second stop: $out"
+  out=$(again "$LINE, filed as #449"); [ -z "$out" ] || fail "the plugin problem '$LINE, filed as #449' without the guess was refused: $out"
+}
+
+# Bug (#1352): the start text asked for "what you saw", so a guess fitted the form. It asks for the command, what it
+# did and what was expected, in the plugin's own repository and in any other project.
+form_check() {
+  local own=$1
+  fixture "form$own" "$([ "$own" = home ] && echo "git@github.com:${OWN#https://github.com/}.git" || echo https://github.com/example/alpha)"
+  out=$(start)
+  grep -qF 'Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what you expected>, card <card>, evidence <path>' <<<"$out" \
+    || fail "the start text in the $own project has no form with the command, what it did and what was expected: $out"
+}
+t_formhome() { form_check home; }
+t_formother() { form_check other; }
+
 # The default list is every t_ function in this file: a hand-kept list left t_split out (bug #558).
 cases=$(declare -F | sed -n 's/^declare -f t_//p')
 SEL=${CONVEYOR_SHELL_TEST_CASE:-$cases}; SEL=${SEL//,/ }
