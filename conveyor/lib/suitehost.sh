@@ -46,12 +46,20 @@ printf "slots\t%s\n" "$(eval "$(cat)" > /dev/null 2>&1 && slot_pool > /dev/null 
 HOSTRUN='bash -c "$1" > ../wt.test 2>&1 < /dev/null; r=$?
 [ "$SECONDS" -lt "$2" ] || { r=124; echo "conveyor: the suite ran past its time limit, $2 s (testTimeout), on $3" >> ../wt.test; }
 echo "$r" > ../wt.rc'
-# The suite's run on the box stopped: its process group, which setsid made, else its process. Exit 0: it was stopped;
-# 3: there was none to stop (the run had ended, or none started); another exit is the box's, or ssh's, not reached.
-HOSTKILL='r=3; p=$(cat "$D/wt.pid" 2> /dev/null) && { kill -TERM -- -"$p" 2> /dev/null || kill -TERM "$p" 2> /dev/null; } && r=0; rm -f "$D/wt.pid"; exit $r'
-# HOSTKILL's <exit> (hostssh's) in words: stopped, ended, or not reached <via> (' over ssh' or nothing).
-hostkilled() { # <exit> <via>
-  case $1 in 0) echo 'was stopped there' ;; 3) echo 'had already ended there' ;; *) echo "could not be reached$2 to stop it; it may still run there" ;; esac
+# The suite's run on the box stopped: its process group, which setsid made, else its process. It prints
+# "conveyor-kill: stopped" when it was stopped, "conveyor-kill: ended" when there was none to stop (the run had ended, or
+# none started): its output, not its exit, as `devbox exec` gives 1 for any exit of its command but 0.
+HOSTKILL='r=ended; p=$(cat "$D/wt.pid" 2> /dev/null) && { kill -TERM -- -"$p" 2> /dev/null || kill -TERM "$p" 2> /dev/null; } && r=stopped; rm -f "$D/wt.pid"; echo "conveyor-kill: $r"'
+# The run on the rule's box stopped (HOSTKILL), in words: stopped, ended, or not reached <via> (' over ssh' or nothing),
+# which fails.
+hostkill() { # <via>
+  local o
+  o=$(hostssh "$SH_D; $HOSTKILL" 30 < /dev/null 2> /dev/null)
+  case $'\n'$o$'\n' in
+    *$'\nconveyor-kill: stopped\n'*) echo 'was stopped there' ;;
+    *$'\nconveyor-kill: ended\n'*) echo 'had already ended there' ;;
+    *) echo "could not be reached$1 to stop it; it may still run there"; return 1 ;;
+  esac
 }
 # The seconds one poll of the run on the box may take (hosttests()): its 10 s wait there, then the copy of its output.
 HOSTPOLL=60
@@ -265,10 +273,10 @@ hosttests() { # <worktree> <field> [alone]
     jq -cn --arg at "$at" --arg l "$now" --arg p "$pr" '{step: "test", at: $at, last: $l, progress: $p}' > "$1.live.tmp" && mv -f "$1.live.tmp" "$1.live"
     # Given up on, the run there is stopped too, when the box answers that: else it would run on, unseen.
     [ $i -lt 6 ] || {
-      hostssh "$SH_D; $HOSTKILL" 30 < /dev/null > /dev/null 2>&1; out="it $(hostkilled $? "$via")"
+      out="it $(hostkill "$via")"
       printf 'conveyor: %s stopped answering%s while the suite ran there; %s\n' "$SH_NAME" "$via" "$out" >> "$1.test"; rm -rf "$1.send" "$1.got"; return 1; }
     [ -s "$1.rc" ] || [ $((SECONDS - t0)) -lt $((lim + HOSTPOLL)) ] || {
-      hostssh "$SH_D; $HOSTKILL" 30 < /dev/null > /dev/null 2>&1; out=$(hostkilled $? "$via")
+      out=$(hostkill "$via")
       printf 'conveyor: the suite ran past its time limit, %s s (testTimeout), on %s and %s\n' "$lim" "$SH_NAME" "$out" >> "$1.test"; rm -rf "$1.send" "$1.got"; return 124; }
   done
   rc=$(<"$1.rc"); rm -rf "$1.rc" "$1.send" "$1.got"
@@ -286,12 +294,11 @@ hostfinish() { # <command name>
 # `release-run stop`: the run on the box over ssh or the devbox that the record names, stopped there (HOSTKILL), when the
 # record's machine has not reached done; a devbox's lease is given back too.
 hoststop() {
-  local m via='' rc
+  local m via='' out
   m=$(jq -ce '.machine | objects | select((.kind == "ssh" or (.kind == "devbox" and (((.lease // "") | length > 0) or ((.box // "") | length > 0)))) and .step != "done")' "$RELRUN" 2>/dev/null) || return 0
   SH_KIND=$(jq -r .kind <<<"$m") SH_TARGET=$(jq -r '.target // ""' <<<"$m") SH_DIR=$(jq -r '.dir // "~/conveyor-suite"' <<<"$m") SH_LEASE=$(jq -r '.lease // ""' <<<"$m") SH_BOX=$(jq -r '.box // ""' <<<"$m") && hostd
   [ "$SH_KIND" != ssh ] || via=' over ssh'
-  hostssh "$SH_D; $HOSTKILL" 30 < /dev/null > /dev/null 2>&1; rc=$?
-  [ $rc = 0 ] || [ $rc = 3 ] || echo "conveyor: release-run stop: the suite's run on $(jq -r .name <<<"$m") $(hostkilled $rc "$via")" >&2
+  out=$(hostkill "$via") || echo "conveyor: release-run stop: the suite's run on $(jq -r .name <<<"$m") $out" >&2
   hostrelease "release-run stop"
 }
 # The Devbox need of a check, added to hostcheck()'s needs (n), and the account's devbox names in SH_BOXES (a JSON array, null

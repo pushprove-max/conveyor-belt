@@ -318,7 +318,7 @@ t_hostnostdinpath() {
 }
 # The stand-in devbox of the cases below: no case reaches a Namespace account. It notes each call in $STUB/devbox-calls,
 # an exec by what its script does (facts, setup, checkout, upload, run, poll or kill: the box's steps), and runs the script in
-# the box's folder as boxsetup's ssh does; a lease it handed out (acquire) is held until release, and an exec or a
+# the box's folder as boxsetup's ssh does, its exit 1 for any exit of the script but 0, as the real `devbox exec` gives; a lease it handed out (acquire) is held until release, and an exec or a
 # release of any other lease, or of one given back, fails. A file $STUB/devbox-nologin is a login that has expired.
 # A file $STUB/devbox-full is an account at its devbox limit: acquire refuses. $STUB/devbox-list is what `devbox list -o json`
 # prints (no file: no boxes). A box named hand-made is the account's own, with no tag: exec reaches it by name, with no lease.
@@ -348,7 +348,7 @@ case $1 in
     note "exec${d:+ -d} $t"
     [ -z "$d" ] || exec < /dev/null
     for f in /dev/fd/*; do f=${f##*/}; [ "$f" -le 2 ] || eval "exec $f>&-"; done 2> /dev/null
-    cd "$STUB/box" && exec env -i HOME="$STUB/box" PATH="$STUB/box/bin:$(cat "$STUB/box/path" 2> /dev/null || printf %s "$PATH")" STUB="$STUB" "$@" ;;
+    cd "$STUB/box" && env -i HOME="$STUB/box" PATH="$STUB/box/bin:$(cat "$STUB/box/path" 2> /dev/null || printf %s "$PATH")" STUB="$STUB" "$@" || exit 1 ;;
   *) note "$@"; exit 2 ;;
 esac'
 # devboxsetup [cpus]: the release fixture with the stand-in box (boxsetup), the stand-in devbox on PATH and the devbox
@@ -461,6 +461,21 @@ t_devboxnamedstop() {
   wait_until "! kill -0 $(cat "$STUB/box-sleep") 2>/dev/null" || { kill "$(cat "$STUB/box-sleep")"; fail "the suite still runs on the named box after release-run stop: $out"; }
   jq -e '.state == "stopped"' "$RUN" > /dev/null || fail "the record does not say stopped: $(cat "$RUN")"
   ! grep -q '^release' "$STUB/devbox-calls" || fail "the stop called release for a box with no lease: $(devboxcalls)"
+}
+# Bug: a stop on a devbox whose suite had already ended said the devbox could not be reached, as HOSTKILL told "ended"
+# by its exit (3), which `devbox exec` gives as 1. The stand-in devbox gives 1 so too. A function call, not a release
+# run: only hostkill() is under test; the second call finds the run the first one stopped gone.
+t_devboxkillended() {
+  local out p
+  setup '[]'; devboxsetup 3
+  : > "$STUB/devbox-leased"
+  sleep 300 & p=$! # sleep: the devbox's suite, which only the stop ends
+  mkdir -p "$BOX" && echo "$p" > "$BOX/wt.pid" || fail "the fixture could not be made"
+  # shellcheck disable=SC2034,SC2088 # the box's ~ is text; the variables are suitehost.sh's, read by hostkill()
+  kill1() { (REPO=main; . "$SRC/lib/suitehost.sh" && SH_KIND=devbox SH_LEASE=lease-1274 SH_DIR='~/conveyor-suite' && hostd && hostkill '') 2>&1; }
+  out=$(kill1) && [ "$out" = 'was stopped there' ] || { kill "$p" 2> /dev/null; fail "hostkill on a devbox with its suite (pid $p) running did not say it was stopped: $out; calls $(devboxcalls)"; }
+  wait "$p" 2> /dev/null
+  out=$(kill1) && [ "$out" = 'had already ended there' ] || fail "hostkill on a devbox with no suite running (no wt.pid) did not say it had ended: $out; calls $(devboxcalls)"
 }
 # Bug ("Not logged in to Namespace"): a run with an expired login went on to acquire a devbox, or ended refused or
 # failed, with a status posted, rather than not started with that reason; suite-machine check reported the login ok.
