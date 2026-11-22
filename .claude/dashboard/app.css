@@ -65,7 +65,8 @@ ul, ol { list-style: none; }
 a { color: var(--accent); text-underline-offset: 2px; }
 button, input { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--radius-sm); }
-.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* #panel-belt3d .panel-title: the 3D View tab shows no "Belt 3D" heading; the title stays for screen readers. */
+.sr-only, #panel-belt3d .panel-title { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .skip { position: absolute; left: var(--sp-4); top: -100px; padding: var(--sp-2) var(--sp-3); background: var(--surface); border-radius: var(--radius-sm); z-index: 30; }
 .skip:focus { top: var(--sp-2); }
 .ico { width: 1em; height: 1em; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }

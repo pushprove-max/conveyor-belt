@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { VIEW, read, html, LIST, panelState, PANEL_STATES, PANEL_DRAWN, CONTROL_IDS, RULES_IDS, TESTS_IDS, titleOf, BELT3D_IDS, OVERVIEW, boot, $, panel, state, order, deliver, full, SAYS, cases, caseNames, moreText, act, key, next } from './dashboard-view.helpers.mjs';
+import { VIEW, read, html, css, LIST, panelState, PANEL_STATES, PANEL_DRAWN, CONTROL_IDS, RULES_IDS, TESTS_IDS, titleOf, BELT3D_IDS, OVERVIEW, boot, $, panel, state, order, deliver, full, SAYS, cases, caseNames, moreText, act, key, next } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 
@@ -36,6 +36,23 @@ test('every panel is one file in panels/ and one entry of the list', () => {
   const bt = boot({ tab: 'bench' });
   assert.deepEqual(order(bt), ['bench'], 'the Benchmarks tab holds the Benchmarks panel alone');
   assert.equal(panel(bt, 'bench').dataset.size, 'full');
+});
+
+// The 3D View tab shows no "Belt 3D" heading, but keeps it for screen readers; other tabs show their headings. Bug it
+// catches: the app.css rule that hides the Belt 3D title is lost (the heading shows again) or hides every panel title.
+// jsdom has no layout, so the check is the computed styles of app.css, loaded into the page.
+test('the Belt 3D title is hidden but for screen readers; the other titles show', () => {
+  const b = boot({ tab: 'belt3d' }), t = boot({ tab: 'tests' });
+  for (const w of [b, t]) { const st = w.document.createElement('style'); st.textContent = css; w.document.head.append(st); }
+  const hidden = b.getComputedStyle($(b, '#panel-belt3d .panel-title'));
+  assert.deepEqual([hidden.position, hidden.width, hidden.height, hidden.overflow], ['absolute', '1px', '1px', 'hidden'], 'the Belt 3D title is visually hidden');
+  assert.equal($(b, '#panel-belt3d .panel-title').textContent, 'Belt 3D', 'and its text stays for screen readers');
+  // display: none or visibility: hidden would hide the title from screen readers too.
+  assert.deepEqual([hidden.display, hidden.visibility], ['block', 'visible'], 'the Belt 3D title stays in the accessibility tree');
+  const shown = t.getComputedStyle($(t, `#panel-${TESTS_IDS[0]} .panel-title`));
+  assert.notEqual(shown.width, '1px', 'the Tests title is not hidden');
+  assert.notEqual(shown.position, 'absolute', 'the Tests title is not hidden');
+  assert.deepEqual([shown.display, shown.visibility], ['block', 'visible'], 'the Tests title is shown');
 });
 
 // A panel states its tab and its default length in its module; the page shows it on that tab, cut to that length.
