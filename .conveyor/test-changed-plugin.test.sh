@@ -17,16 +17,19 @@ no() { echo "not ok - $1"; }
 
 # A scratch repo: the real script, an empty engine map, a mod's two sources and their test files, and a stub `claude`
 # on PATH whose `plugin test` prints the parts $R/plugin-out holds (as Claude Code's runner prints them: a `<file>:`
-# heading, a `(pass)` or `(fail)` line a test), exits 1 when one says (fail), and counts its runs in $R/runs.
+# heading, a `(pass)` or `(fail)` line a test), exits 1 when one says (fail), and counts its runs in $R/runs. When
+# $R/write is there, it writes 600 KB in its TMPDIR for each of the two test files, as each file's tests would.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/hooks" "$R/bin"
 cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$HERE/no-records-split.sh" "$R/.conveyor/"
 echo '{"outside": "conveyor/README.md"}' > "$R/.conveyor/engine-areas.json"
 for s in a b; do echo "export const $s = 1" > "$R/hooks/$s.ts"; printf "test('%s one', () => {})\ntest('%s two', () => {})\n" "$s" "$s" > "$R/hooks/$s.test.tsx"; done
 # Its `plugin validate` (the checks' run of it on a change to hooks/: issue 604) passes.
+# stub: the test step runs the plugin's tests through `claude plugin test`, which no test here can run for real.
 printf '%s\n' '#!/usr/bin/env bash' '[ "$1 $2" != "plugin validate" ] || { echo "✔ Validation passed"; exit 0; }' '[ "$1 $2" = "plugin test" ] || exit 2' 'echo run >> "$(dirname "$0")/../runs"' \
+  '[ ! -e "$(dirname "$0")/../write" ] || for f in a b; do head -c 614400 /dev/zero > "$TMPDIR/$f"; done' \
   'cat "$(dirname "$0")/../plugin-out"' '! grep -q "^(fail)" "$(dirname "$0")/../plugin-out"' > "$R/bin/claude"
 chmod +x "$R/bin/claude"
-printf 'runs\nplugin-out\nlog/\n' > "$R/.gitignore"
+printf 'runs\nplugin-out\nwrite\nlog/\n' > "$R/.gitignore"
 git -C "$R" init -q && git -C "$R" add -A && git -C "$R" commit -qm init
 # run <the runner's output> <changed file>...: the card's test step on the copy (its log in $R/log); its output in
 # $T/out, its exit in $T/rc. Prints the log's result lines.
@@ -64,6 +67,17 @@ p_missing() {
     && ok "a plugin test file the runner printed no part for fails" || no "b not run: '$got', exit $(cat "$T/rc"): $(cat "$T/out")"
 }
 
-for p in source perfile missing; do part "$p"; done
+# Bug (#1394 R30): the one plugin run ran under the share of the first file selected, so the files' writes together
+# (1,200 KB) passed that share (1 MB) though each file's (600 KB) is within it, and the files failed. The run has a
+# share for each plugin test file: both pass.
+p_share() {
+  mkdir -p "$T/config/conveyor" && echo '{"testTmpMB": 1}' > "$T/config/conveyor/host.json" && : > "$R/write"
+  got=$(XDG_CONFIG_HOME=$T/config run "$PASS" hooks/a.test.tsx hooks/b.test.tsx)
+  [ "$got" = "-- ok hooks/a.test.tsx|-- ok hooks/b.test.tsx" ] && [ "$(cat "$T/rc")" = 0 ] && [ "$(runs)" = 1 ] \
+    && ok "the plugin run has a share for each plugin test file: files within their own share pass though their writes together pass one share" \
+    || no "a 1 MB share, the plugin run writing 600 KB for each of two files: '$got', runs $(runs), exit $(cat "$T/rc"): $(cat "$T/out")"
+}
+
+for p in source perfile missing share; do part "$p"; done
 wait
 for p in "${PARTS[@]}"; do cat "$T/$p.res"; grep -q '^ok' "$T/$p.res" || echo "not ok - part $p checked nothing"; done | awk '{ sub(/^ok -/, "ok " NR " -"); sub(/^not ok -/, "not ok " NR " -"); print } /^not ok/ { f = 1 } END { exit f }'

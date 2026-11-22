@@ -88,9 +88,12 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    count to its share. The suite checks them when the test file ends. The test file fails when they and its temp
    folder hold its share, or when one of them is as large as the share. A test file that ran while another test
    file wrote them also fails, because the suite cannot tell which file wrote them. Before a file starts, that space
-   must hold a share for each file that runs, one for the new file and one for Conveyor. When files run at the same time, the file waits until a file that runs
+   must hold a share for each file that runs, one for the new file and one for Conveyor. This count includes the
+   files of the other suites and card test steps that run on the machine at the same time, when they use the same
+   folder of test slots. When files run at the same time, the file waits until a file that runs
    ends. When no file runs and the space is still too small, the file fails and does not run, and its output gives
-   the space that is free and the space that it needs.
+   the space that is free and the space that it needs. A card's test step runs all the plugin's test files in one
+   `claude plugin test` run, which gets one share for each of these files.
 
    The suite also checks the files that the plugin ships. It makes the list of these files and copies them into an
    empty folder. It fails when the copy does not have a file of the list, or has a file that is not on the list, and

@@ -108,7 +108,8 @@ echo "TESTRUN files=${#files[@]}"
 runlog "TESTRUN cases=$((engine + other))" "TESTRUN files=${#files[@]}"
 # One test file run: its output, then its `TESTRUN sec` and `-- ok|FAIL` lines; exit 1 when it failed. <n> names its
 # scratch files in $tmp. Its TMPDIR is a folder of its own there, removed when it ends (share_run); a run stopped first
-# (its timeout) removes it with $tmp. It does not start while share_noroom says why (the reason is its output), and a
+# (its timeout) removes it with $tmp. It does not start while share_noroom says why (the reason is its output) and no
+# file of another run holds a share there (share_others): while one does, share_run waits for room (share_take). A
 # file whose temp folder reaches its share fails with the reason.
 runone() { # <test file> <n>
   local t=$1 stamp=$tmp/$2.stamp tt=$tmp/$2.times c n st s e r why
@@ -119,7 +120,7 @@ runone() { # <test file> <n>
     *) c=(bash "$t") ;;
   esac
   n=$(marks); touch "$stamp"; echo "== $t"
-  if why=$(share_noroom "$tmp" 0); then
+  if why=$(share_noroom "$tmp" 0) && [ "$(share_others "$tmp")" = 0 ]; then
     echo "test-full: $t did not start: $why"; st=1
   else
     times > "$tt"; s=${EPOCHREALTIME/,/.}
@@ -189,7 +190,8 @@ reap() { # one file that ended: its output printed, its result counted
 i=0
 for t in "${files[@]}"; do
   # A file waits for one that runs to end while the space cannot hold its share (share_noroom); with none running, it
-  # starts, and runone fails it with the reason when there is still no room.
+  # starts, and runone waits while files of other runs hold their shares, then fails it with the reason when there is
+  # still no room.
   while [ ${#job[@]} -ge "$AT" ] || { [ ${#job[@]} -gt 0 ] && share_noroom "$tmp" ${#job[@]} > /dev/null; }; do reap; done
   i=$((i + 1)); own=''
   case $t in conveyor/conveyor.test.sh | conveyor/tests/*.test.sh) own=1 ;; *.sh) ! grep -q '^\. .*slot_pool' "$t" || own=1 ;; esac

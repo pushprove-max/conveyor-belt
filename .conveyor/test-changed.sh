@@ -1514,18 +1514,25 @@ trap 'chmod -R u+w "$o.tmp" 2>/dev/null; rm -rf "$o" "$o".* "${rlist:-}"' EXIT
 # runner, `claude plugin test` on the plugin, which runs every such file of the plugin in one run. So it runs once, at
 # the first such file, and a file's result is its own part of that run's output: its `<file>:`
 # heading and the lines under it. A file with a `(fail)` line there, or with no `(pass)` line (it did not run), fails.
+# That run has a share of the temp space for each plugin test file, and its own TMPDIR, $o.tmp/p (share_run): under
+# the share of its first file, the files' writes together failed it, or left the later files' parts cut off (#1394).
+# When it did not start or wrote past its share, each file fails with the reason.
 plugintest() { # <test file>
-  [ -s "$o.plugin" ] || env "${mk[@]}" claude plugin test . > "$o.plugin" 2>&1
-  awk -v f="$1:" '$0 == f { on = 1; next } on && /^[^ (].*:$/ { exit } on' "$o.plugin" > "$o.part"
+  local n p='test-changed: the plugin test run'
+  if [ ! -s "$o.plugin" ]; then
+    n=$(git ls-files -co --exclude-standard '*.test.ts' '*.test.tsx' | grep -c .)
+    ( LIMKB=$((LIMKB * (n > 1 ? n : 1)))
+      share_run "$p (claude plugin test, a share for each of its $n test files)" "$o.tmp/p" env "${mk[@]}" claude plugin test . ) > "$o.plugin" 2>&1
+  fi
+  awk -v f="$1:" -v p="$p (" 'index($0, p) == 1 { next } $0 == f { on = 1; next } on && /^[^ (].*:$/ { exit } on' "$o.plugin" > "$o.part"
   cat "$o.part"
+  ! awk -v p="$p (" 'index($0, p) == 1 { print; r = 1 } END { exit !r }' "$o.plugin" || return 1
   grep -q '^(pass)' "$o.part" && ! grep -q '^(fail)' "$o.part"
 }
 # One test file's command, run one at a time after the engine case files (below), with its share of the temp space
-# and its own TMPDIR, $o.tmp/f (share_run); it does not start, and fails with the reason, while the space cannot hold
-# its share.
+# and its own TMPDIR, $o.tmp/f (share_run); it waits for room for its share, or fails with the reason.
 fshare() { # <test file> <command>...
-  local nr t=$1; shift
-  if nr=$(share_noroom "$o.tmp" 0); then echo "test-changed: $t did not start: $nr"; return 1; fi
+  local t=$1; shift
   share_run "test-changed: $t" "$o.tmp/f" "$@"
 }
 # The meta-runner hook (BASH_ENV, header above): a bash test file of this checkout, started whole under the mark of
@@ -1596,8 +1603,9 @@ eend() {
   exit 143
 }
 trap eend TERM INT HUP
-# One that starts waits for one that runs to end while the space cannot hold a share for each (share_noroom); with
-# none running and still no room, it fails without running, with the reason. erun: the pid of each still running.
+# One that starts waits for one that runs to end while the space cannot hold a share for each (share_noroom), and for
+# the files of other runs while they hold theirs (share_run); with none running and still no room, it fails without
+# running, with the reason. erun: the pid of each still running.
 declare -A erun=()
 # One that ended: its exit in erc. One that ended before this wait began is not among the jobs a bash before 5.3 waits
 # for with `wait -n` (p is left unset): its exit is asked for by itself, as test-full.sh reap() does.
@@ -1619,7 +1627,8 @@ for t in $(printf '%s\n' "${!ecases[@]}" | LC_ALL=C sort); do
   while [ ${#erun[@]} -gt 0 ] && nr=$(share_noroom "$o.tmp" ${#erun[@]}); do
     ereap
   done
-  if nr=$(share_noroom "$o.tmp" 0); then echo "test-changed: $t did not start: $nr" > "$o.e$k"; erc[$t]=1; continue; fi
+  # While files of other runs hold their shares there, it starts, and share_run waits for room (share_take).
+  if nr=$(share_noroom "$o.tmp" 0) && [ "$(share_others "$o.tmp")" = 0 ]; then echo "test-changed: $t did not start: $nr" > "$o.e$k"; erc[$t]=1; continue; fi
   for c in ${ecases[$t]}; do printf 'TESTRUN case\t%s\t%s\n' "$t" "$c" >> "$log"; done
   [ -z "$slots" ] || slot_take
   ( [ -z "$slots" ] || slot_mine
@@ -1678,7 +1687,7 @@ for t in "${order[@]}"; do
     case $t in
       *.mjs) nodecases "$t"; fshare "$t" env "${mk[@]}" node --max-old-space-size=4096 --test "${nargs[@]}" "$t" ;;
       *.py) fshare "$t" env "${mk[@]}" python3 "$t" ;;
-      *.ts|*.tsx) fshare "$t" plugintest "$t" ;;
+      *.ts|*.tsx) plugintest "$t" ;;
       # An engine case file's run with no case (nocase, above): a selection of a blank, which the file keeps (it gives
       # the runner all its cases only when none is set) and in which the runner finds no case.
       *) fshare "$t" env "${mk[@]}" ${p:+"CONVEYOR_SHELL_TEST_CASE=$p"} ${nocase[$t]:+"CONVEYOR_SHELL_TEST_CASE= "} bash "$t" ;;
