@@ -192,8 +192,8 @@ t_guess() {
   out=$(turn u1 "$line"); [ -z "$out" ] || fail "the plugin problem '$line' with [likely] was refused: $out"
   grep -qE '^- [^ ]+ · card c20261118T045400-alpha-7 · control release 1345 leaves card 1345 held in foreman status, it should be started, cause not checked: the open range seems to still cover it, card c20261118T045400-alpha-7, evidence ~/cards/x\.log · evidence: ~/cards/x\.log$' "$FD/plugin-bugs.md" \
     || fail "the plugin problem '$line' was not noted with its tagged text in a cause not checked part: $(cat "$FD/plugin-bugs.md" 2>&1)"
-  out=$(turn u2 "$line"); [ -z "$out" ] || fail "the same plugin problem said again was refused: $out"
-  [ "$(grep -c '^- ' "$FD/plugin-bugs.md")" = 1 ] || fail "the same plugin problem said again was noted twice: $(cat "$FD/plugin-bugs.md")"
+  out=$(turn u2 "$line"); [ -z "$out" ] || fail "the same plugin problem '$line' said again was refused: $out"
+  [ "$(grep -c '^- ' "$FD/plugin-bugs.md")" = 1 ] || fail "the same plugin problem '$line' said again was noted twice: $(cat "$FD/plugin-bugs.md")"
 }
 
 # Bug (review of #1357): a cause with the words ", card lookups use old data" was cut there, as if they began the card
