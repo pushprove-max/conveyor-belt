@@ -165,12 +165,45 @@ test('belt3d: a card running its test files one at a time shows the file that ru
   const files = { run: 1, of: 3, now: { file: 'conveyor/tests/b.test.sh', at: iso(T0 - 120000) } };
   next(w, floor({ belt: [runCard('c1-1', 1, 'tests', { track: { steps, at: 3, since: iso(T0 - 120000), tests: { done: 25, of: 25, failed: 3 }, files } })] }));
   const t = lane(w, 1).now;
-  assert.deepEqual([t.querySelector('.b3-l1').textContent, t.querySelector('.b3-pbar i').style.transform], ['file 2 of 3: conveyor/tests/b.test.sh, 2 min, 3 failed', 'scaleX(0.333)']);
+  assert.deepEqual([t.querySelector('.b3-l1').textContent, t.querySelector('.b3-pbar i').style.transform], ['file 2 of 3: b.test.sh, 2 min, 3 failed', 'scaleX(0.333)']);
   assert.ok(t.classList.contains('fail'), 'failed cases turn the bar red');
+  // Issue 1362: the lane has the file's name only (the whole path ran past the slab); the tooltip and the details keep the path.
+  w.scene3d.o.hover('sample:c1-1', 200, 120);
+  assert.ok(b3(w).querySelector('.b3-tip').textContent.includes('file 2 of 3: conveyor/tests/b.test.sh, 2 min'), 'the tooltip holds the whole path');
   w.scene3d.o.pick('sample:c1-1');
   const box = b3(w).querySelector('.b3-detail');
   assert.equal(box.querySelectorAll('.b3-six li')[3].querySelector('em').textContent, '2 min so far · 3rd run, 1 h 02 min in all');
   assert.ok(box.textContent.includes('file 2 of 3: conveyor/tests/b.test.sh, 2 min, 3 failed') && !/\b25 of 25\b|Test 25\/25/.test(box.textContent), box.textContent);
+});
+
+// Issue 1362. Bug it catches: the details of an issue that waits on a card in its test run showing that card's file by
+// name only (the short text is for the lane alone).
+test('belt3d: the details of a held issue give the whole test file path of the card it waits on', async () => {
+  const file = '.claude/scripts/__tests__/dashboard-view.health.test.mjs';
+  const files = { run: 4, of: 6, now: { file, at: iso(T0 - 120000) } };
+  const w = await open3d(floor({
+    belt: [runCard('c20-1', 20, 'tests', { track: { steps: trackOf('++->..', 'tests').steps, at: 3, since: iso(T0 - 120000), tests: null, files } })],
+    queue: { next: null, waiting: [], held: [{ repo: 'sample', issue: 77, title: 'Held and waits', url: null, waitsFor: [20] }] },
+  }));
+  w.scene3d.o.pick('sample#77');
+  const ps = Array.from(b3(w).querySelectorAll('.b3-detail p'), (p) => p.textContent);
+  assert.ok(ps.some((t) => t.includes(`file 5 of 6: ${file}, 2 min`)), ps.join(' | '));
+});
+// Issue 1362: a long status line, or the "went back" line, ran past the slab, and the tests bar was drawn over the
+// middle of the status text. jsdom does no layout: the rules that cut the text and place the bar are read from the
+// computed styles of app.css, loaded into the page. Bug it catches: any of the three rules missing.
+test('belt3d: the status text and the "went back" line end in "…" inside the slab, and the tests bar is a line under the text', async () => {
+  const w = await open3d(full());
+  const st = w.document.createElement('style'); st.textContent = css; w.document.head.append(st);
+  const files = { run: 4, of: 6, now: { file: 'dashboard-view.health.test.mjs', at: iso(T0 - 120000) } };
+  next(w, floor({ belt: [runCard('c1-1', 1, 'tests', { track: { steps: trackOf('++->..', 'tests').steps, at: 3, since: iso(T0 - 120000), tests: null, files } })] }));
+  // jsdom spells a zero minimum "0" or "0px".
+  const now = lane(w, 1).now, cut = (el) => { const c = w.getComputedStyle(el); return [c.overflow, c.textOverflow, /^0(px)?$/.test(c.minWidth) ? '0' : c.minWidth]; };
+  assert.deepEqual(cut(now.querySelector('.b3-l1 span')), ['hidden', 'ellipsis', '0'], 'the status text');
+  assert.deepEqual(cut(now.querySelector('.b3-ret')), ['hidden', 'ellipsis', '0'], 'the "went back" line');
+  const bar = now.querySelector('.b3-pbar'), kids = Array.from(now.children);
+  assert.notEqual(w.getComputedStyle(bar).position, 'absolute', 'the bar is in the flow, not drawn over the text');
+  assert.ok(kids.indexOf(bar) > kids.indexOf(now.querySelector('.b3-l1')), 'the bar comes after the status text');
 });
 
 // Issue 423: a card that went back a step is amber between the two steps. What its lane shows: the way back the scene

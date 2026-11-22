@@ -144,7 +144,9 @@
     if (on) {
       const at = Date.parse(on.at), failed = c.tests && num(c.tests.failed) ? c.tests.failed : 0;
       const t = Number.isNaN(at) ? '' : `, ${view.ctx.took(Math.max(0, (Date.now() - at) / 1000))}`;
-      return { text: `file ${Math.min(f.run + 1, f.of)} of ${f.of}: ${on.file}${t}${failed ? `, ${failed} failed` : ''}`, share: f.run / f.of, failed: failed > 0 };
+      // The lane has room for the file's name; the tooltip and the details have its whole path (`whole`).
+      const line = (file) => `file ${Math.min(f.run + 1, f.of)} of ${f.of}: ${file}${t}${failed ? `, ${failed} failed` : ''}`;
+      return { text: line(on.file.split('/').pop() || on.file), whole: line(on.file), share: f.run / f.of, failed: failed > 0 };
     }
     if (c.tests) return { text: `Test ${c.tests.done}/${c.tests.of}${num(c.tests.failed) && c.tests.failed ? `, ${c.tests.failed} failed` : ''}`, share: c.tests.done / c.tests.of, failed: num(c.tests.failed) && c.tests.failed > 0 };
     if (c.files) return { text: `Test files ${c.files.run}/${c.files.of}`, share: c.files.run / c.files.of, failed: false };
@@ -155,10 +157,11 @@
   const nth = (n) => `${n}${[11, 12, 13].includes(n % 100) ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th'}`;
   const runs = (c, s) => (c.kind === 'run' && s.name === 'Test' && num(s.n) && s.n > 1 && !Number.isNaN(c.since)
     ? ` · ${nth(s.n)} run, ${view.ctx.took((num(s.sec) ? s.sec : 0) + Math.max(0, (Date.now() - c.since) / 1000))} in all` : '');
-  function status(c) {
+  // `short`: a test file's name only, as the lane has it; else its whole path, as the tooltip and the details have it.
+  function status(c, short) {
     if (c.kind === 'run') {
       const p = progress(c);
-      if (p) return p.text;
+      if (p) return short || !p.whole ? p.text : p.whole;
       if (c.waitsOn !== null && c.waitsOn !== undefined) return `Waits on ${ref(c.waitsOn)} to land`;
       return `${stepName(c)}${time(c) ? ` · ${time(c)}` : ''}`;
     }
@@ -255,7 +258,7 @@
       txt(r.name.lastChild, c.title || 'untitled');
       const p = progress(c);
       cls(r.now, `b3-lb b3-st${stuck ? ' bad' : ''}${p ? ' tests' : ''}${p && p.failed ? ' fail' : ''}`);
-      txt(r.text, status(c));
+      txt(r.text, status(c, true));
       if (p) fill(r.bar, p.share);
       txt(r.why, stuck ? c.reason : '');
       const b = backWay(c);
@@ -435,7 +438,7 @@
       const pb = h('div', 'b3-pb'), bar = h('i');
       fill(bar, p.share);
       pb.append(bar);
-      parts.push(h('h3', null, 'Tests'), pb, h('p', null, p.text));
+      parts.push(h('h3', null, 'Tests'), pb, h('p', null, p.whole || p.text));
     } else if (tests) {
       const pb = h('div', 'b3-pb'), bar = h('i');
       fill(bar, tests.done / tests.of);
