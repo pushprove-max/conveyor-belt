@@ -577,6 +577,26 @@ one of the two choices, or **Cancel**:
 - **In parallel**: faster, with more load on the build machine. The belt is slower while the suite runs. Conveyor adds
   `--parallel` to the command.
 
+When the project's rule sends the suite to another machine (a Namespace Devbox or a Linux box over ssh; see
+[Where the suite runs](releases.md#where-the-suite-runs)), the question also asks "On which machine?". The two choices
+are **This machine** (the belt is slower meanwhile) and the machine of the rule, with "the rule's choice" and, when the
+newest run was on that machine, when it ended. The rule's machine is the one chosen at first, and the chosen one shows
+in a frame. A click on **This machine** makes Conveyor add `--machine local` to the command, for that one run. With the
+rule on this machine, the question has no machine part.
+
+While a run goes on a devbox or a box over ssh, step 2 shows a line with the machine, the box (the lease of a devbox,
+the address of an ssh box), the commit and when the lease began. Under it are the steps of that machine, each a chip:
+**Start** (with "reused" or its time), **Set up** (with "not needed" or its time), **Check out**, **Run**, **Bring back
+results** and **Give back the box**. A finished step is green, the step now is blue. A run on this machine shows no
+such line and no chips.
+
+When the machine fails to start, set up or check out, no test runs. The status is Suite not started. The chip of the
+failed step says why, for example "Start · not logged in to Namespace". One line says what to do. For a login, it says
+to run `devbox login` once in a terminal on the build machine, then click **Run suite again**. Two buttons show:
+**Run on this machine instead**, which runs the suite on this machine for that one time, and **Run suite again**. The
+suite never moves to another machine by itself. When it is this machine that fails (its worktree cannot be made), the
+reason shows as a line, and only **Run suite again** shows.
+
 To release from the panel:
 
 1. Make sure that the field has the version to release.
@@ -608,7 +628,8 @@ To release from the panel:
   ([A release over a failed suite](releases.md#a-release-over-a-failed-suite)).
 
 **Stop** shows only while a run is in progress. After a second click, it stops the processes of that run. Conveyor
-itself continues.
+itself continues. During a run on a devbox, the line beside it says that Stop stops the run on the devbox and gives the
+box back.
 
 When a card lands while the suite runs, the status stays Suite running, and the suite step says that `main` moved. The
 two buttons stay disabled until the suite ends. Then the status is Main moved since the suite, and the button is **Run again

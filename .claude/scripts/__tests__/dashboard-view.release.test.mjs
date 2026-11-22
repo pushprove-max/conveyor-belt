@@ -15,10 +15,10 @@ const COMMITS = Array.from({ length: 26 }, (_, i) => ({ sha: (100 + i).toString(
   subject: `fix(plugin): [P1] conveyor/foreman/watch-conveyor.sh:${56 + i} Suite status counts cases ${26 - i}. Proof: .conveyor/project.json:33 runs it (#${126 - i})` }));
 // The plugin: docs/releases/1.0.0.md on main and no tag yet. The shop: tags, but no docs/releases/ (it ships by its
 // own deploy).
-function data(run, plugin = {}) {
+function data(run, plugin = {}, rule = null) {
   const d = full();
   d.panels.release.data.records = [
-    { repo: 'plugin', url: URL, suites: run ? [run] : [], release: { tag: null, count: 26, next: '1.0.0', notes: true, written: ['1.0.0'], head: HEAD, releases: true, commits: COMMITS, ...plugin } },
+    { repo: 'plugin', url: URL, suiteMachine: rule, suites: run ? [run] : [], release: { tag: null, count: 26, next: '1.0.0', notes: true, written: ['1.0.0'], head: HEAD, releases: true, commits: COMMITS, ...plugin } },
     { repo: 'shop', url: 'https://github.com/example/shop', suites: [], release: { tag: 'v1.33.0', count: 673, next: '1.34.0', notes: false, head: NEW, releases: false, commits: [] } },
   ];
   return d;
@@ -389,4 +389,156 @@ test('D5: a refused release shows each reason under the step it belongs to', () 
   assert.deepEqual(reasons('full-suite'), ['main moved while the suite ran, from bbbbbbbbbbbb to cccccccccccc']);
   assert.deepEqual(reasons('release'), ['the privacy check found 1 hit in the changes since the first commit']);
   assert.equal(stepOf(w, 'release').dataset.state, 'failed');
+});
+
+// The suite's machine (#1270). The rule is the control record's suiteMachine; the run's record names where it went.
+const DEVBOX = { kind: 'devbox', size: 'XL', tag: 'conveyor-suite-plugin', idleStop: '15m' };
+const BOX = { kind: 'devbox', name: 'Namespace Devbox XL', target: null, dir: null, lease: 'lease-7f3a', step: 'checkout', secs: { start: 0, setup: 0 }, reason: null };
+const steps = (w) => Array.from(card(w).querySelectorAll('[data-list="machine-steps"] li'), (li) => [li.dataset.step, li.dataset.state, li.textContent.trim()]);
+
+// Bug this guards: a run on a devbox looked like any other run, so the owner could not see which box held the suite,
+// what it was doing, or what Stop would do to it.
+test('#1270 D1: a run on a devbox shows the machine line, the six steps in order with done and now, and what Stop does', () => {
+  const w = boot();
+  deliver(w, data({ ...RUN, ended: null, state: 'running', machine: BOX }, {}, DEVBOX));
+  const line = card(w).querySelector('[data-figure="machine"]');
+  assert.match(line.textContent, /^On Namespace Devbox XL \(lease-7f3a\) · commit bbbbbbb · leased /);
+  assert.deepEqual(steps(w).map(([k, s]) => [k, s]),
+    [['start', 'done'], ['setup', 'done'], ['checkout', 'now'], ['run', 'todo'], ['results', 'todo'], ['done', 'todo']]);
+  assert.deepEqual(steps(w).map(([, , t]) => t), ['Start · reused', 'Set up · not needed', 'Check out', 'Run', 'Bring back results', 'Give back the box']);
+  const chips = Array.from(card(w).querySelectorAll('[data-list="machine-steps"] .chip'), (c) => c.className);
+  assert.deepEqual(chips, ['chip chip-ok', 'chip chip-ok', 'chip chip-info', 'chip chip-quiet', 'chip chip-quiet', 'chip chip-quiet']);
+  assert.equal(card(w).querySelector('[data-figure="stop-line"]').textContent, 'Stops the run on the devbox and gives the box back.');
+  assert.ok(act(card(w), 'release-stop'), 'Stop shows beside its line');
+  // The results step covers two chips: the results are back, the box is being given back.
+  next(w, data({ ...RUN, ended: null, state: 'running', machine: { ...BOX, step: 'results', secs: { start: 12, setup: 0, checkout: 30, run: 600 } } }, {}, DEVBOX));
+  assert.deepEqual(steps(w).map(([, s]) => s), ['done', 'done', 'done', 'done', 'done', 'now']);
+  assert.equal(steps(w)[0][2], 'Start · under a minute');
+});
+
+// Bug this guards: a run on this machine showed a machine line and steps that only a remote run has.
+test('#1270 D4: a run on this machine shows no machine line, steps or Stop line', () => {
+  const w = boot();
+  deliver(w, data({ ...RUN, ended: null, state: 'running', machine: { kind: 'local', name: 'this machine', target: null, dir: null, lease: null, step: 'run', secs: {}, reason: null } }, {}, DEVBOX));
+  assert.equal(card(w).querySelector('[data-figure="machine"]'), null);
+  assert.equal(card(w).querySelector('[data-list="machine-steps"]'), null);
+  assert.equal(card(w).querySelector('[data-figure="stop-line"]'), null);
+  next(w, data({ ...RUN, ended: null, state: 'running', machine: null }, {}, DEVBOX));
+  assert.equal(card(w).querySelector('[data-figure="machine"]'), null, 'a record with no machine shows none');
+});
+
+const NOT_STARTED = { ...RUN, ended: '2026-11-14T08:01:00Z', state: 'not started', machine: { ...BOX, lease: null, step: 'start', secs: { start: 3 }, reason: 'Not logged in to Namespace' }, reasons: ['Not logged in to Namespace'] };
+// Bug this guards: a devbox that could not start left "Suite not run" with no reason and no way on; the owner could not
+// tell a login to fix from a broken suite.
+test('#1270 D2: a run that did not start shows its chip, the failed step with its reason, one fix line and both buttons; Run on this machine instead sends --machine local', async () => {
+  const w = boot();
+  deliver(w, data(NOT_STARTED, {}, DEVBOX));
+  assert.equal(chip(w), 'Suite not started');
+  assert.equal(stepOf(w, 'full-suite').dataset.state, 'failed');
+  assert.deepEqual(steps(w)[0], ['start', 'failed', 'Start · not logged in to Namespace']);
+  assert.deepEqual(steps(w).slice(1).map(([, s]) => s), ['todo', 'todo', 'todo', 'todo', 'todo']);
+  assert.equal(card(w).querySelector('[data-figure="machine-fix"]').textContent, 'Run devbox login once in a terminal on the build machine, then press Run suite again.');
+  assert.equal(card(w).querySelector('[data-list="reasons"]'), null, 'the reason shows once, in the failed step\'s chip');
+  assert.equal(act(card(w), 'release-prep').textContent, 'Run suite again');
+  assert.equal(act(card(w), 'run-here').textContent, 'Run on this machine instead');
+  assert.deepEqual(await sent(w, () => act(card(w), 'run-here').click()), [], 'one press sends nothing');
+  assert.deepEqual(await sent(w, () => act(card(w), 'run-here').click()), [{ action: 'release-run', args: ['prep', '1.0.0', '--machine', 'local'], repo: 'plugin' }]);
+});
+
+// Bug this guards: the suite's start could fail for a reason other than the login and still be told to log in.
+test('#1270 D2: another reason for a run that did not start gets the general fix line', () => {
+  const w = boot();
+  deliver(w, data({ ...NOT_STARTED, machine: { ...NOT_STARTED.machine, step: 'setup', reason: 'its .conveyor/test-machine.sh failed: no space left' } }, {}, DEVBOX));
+  assert.deepEqual(steps(w).map(([, s]) => s), ['done', 'failed', 'todo', 'todo', 'todo', 'todo']);
+  assert.equal(steps(w)[1][2], 'Set up · its .conveyor/test-machine.sh failed: no space left');
+  assert.match(card(w).querySelector('[data-figure="machine-fix"]').textContent, /^Fix the cause named in the failed step, then press Run suite again\.$/);
+});
+
+// Bug this guards: the owner could not choose the machine for one run, or the rule's choice was not the one preset.
+test('#1270 D3: the machine question presets the rule; the press sends the chosen machine, and This machine sends --machine local', async () => {
+  const w = boot();
+  const last = { ...RUN, ended: '2026-11-14T08:25:00Z', state: 'passed', machine: BOX };
+  deliver(w, data(last, {}, DEVBOX));
+  const press = () => { act(card(w), 'release-prep').click(); act(card(w), 'release-prep').click(); };
+  assert.deepEqual(await sent(w, press), []);
+  const ask = card(w).querySelector('[data-figure="machine-ask"]');
+  assert.equal(ask.querySelector('p').textContent, 'On which machine?');
+  assert.match(act(ask, 'machine-local').textContent, /^This machine.*The belt is slower meanwhile\./);
+  assert.match(act(ask, 'machine-rule').textContent, /^Namespace Devbox XL.*the rule's choice · last run /);
+  assert.equal(act(ask, 'machine-rule').getAttribute('aria-pressed'), 'true', 'the rule\'s machine is preset');
+  assert.equal(act(ask, 'machine-local').getAttribute('aria-pressed'), 'false');
+  assert.equal(card(w).querySelector('[data-figure="mode-ask"] > p').textContent, 'Run the test files one by one or in parallel?', 'the mode question stays');
+  // The preset sends no machine: the rule applies.
+  assert.deepEqual(await sent(w, () => act(card(w), 'mode-parallel').click()), [{ action: 'release-run', args: ['prep', '1.0.0', '--parallel'], repo: 'plugin' }]);
+  press();
+  act(card(w), 'machine-local').click();
+  assert.equal(act(card(w), 'machine-local').getAttribute('aria-pressed'), 'true');
+  assert.equal(act(card(w), 'machine-rule').getAttribute('aria-pressed'), 'false');
+  assert.deepEqual(await sent(w, () => act(card(w), 'mode-serial').click()), [{ action: 'release-run', args: ['prep', '1.0.0', '--serial', '--machine', 'local'], repo: 'plugin' }]);
+  // The choice is for one run: the next question starts on the rule again.
+  press();
+  assert.equal(act(card(w), 'machine-rule').getAttribute('aria-pressed'), 'true');
+  act(card(w), 'machine-local').click();
+  act(card(w), 'mode-cancel').click();
+  press();
+  assert.equal(act(card(w), 'machine-rule').getAttribute('aria-pressed'), 'true', 'Cancel drops the choice');
+});
+
+// Bug this guards: a rule of this machine asked a machine question with nothing to choose.
+for (const [name, rule] of [['none', null], ['on this machine', { kind: 'local' }]]) {
+  test(`#1270 D3: with the rule ${name}, the question asks no machine`, () => {
+    const w = boot();
+    deliver(w, data(null, {}, rule));
+    act(card(w), 'release-prep').click(); act(card(w), 'release-prep').click();
+    assert.ok(card(w).querySelector('[data-figure="mode-ask"]'));
+    assert.equal(card(w).querySelector('[data-figure="machine-ask"]'), null);
+  });
+}
+
+// Bug this guards: the question showed the last run's time under another box's name, or after a run here, as if that box had run it.
+const ENDED = { ended: '2026-11-14T08:25:00Z', state: 'passed' };
+const SSH_RULE = { kind: 'ssh', target: 'ci@box-b.example.com' };
+const onSsh = (host) => ({ ...BOX, kind: 'ssh', name: `${host}.example.com`, target: `ci@${host}.example.com`, lease: null });
+for (const [name, machine, rule, want] of [
+  ['the rule\'s machine ran it', BOX, DEVBOX, /last run /],
+  ['another box ran it', onSsh('box-a'), SSH_RULE, /the rule's choice$/],
+  ['the same ssh box ran it', onSsh('box-b'), SSH_RULE, /last run /],
+  ['a run here', { ...BOX, kind: 'local', name: 'this machine' }, DEVBOX, /the rule's choice$/],
+]) {
+  test(`#1270 D3: the last run time, when ${name}`, () => {
+    const w = boot();
+    deliver(w, data({ ...RUN, ...ENDED, machine }, {}, rule));
+    act(card(w), 'release-prep').click(); act(card(w), 'release-prep').click();
+    assert.match(act(card(w), 'machine-rule').textContent, want);
+  });
+}
+
+// Bug this guards: the machine line said "commit " with nothing after it while the machine started, or when its start failed
+// (the record gets its commit after the machine starts).
+test('#1270 D1: a run with no commit yet shows the machine line without one', () => {
+  const w = boot();
+  deliver(w, data({ ...RUN, sha: null, ended: null, state: 'running', machine: { ...BOX, step: 'start', secs: {} } }, {}, DEVBOX));
+  const text = card(w).querySelector('[data-figure="machine"]').textContent;
+  assert.match(text, /^On Namespace Devbox XL \(lease-7f3a\) · leased /);
+  assert.doesNotMatch(text, /commit/);
+});
+
+// Bug this guards: a worktree that could not be made on this machine (a not started run with a local machine) showed no
+// reason and offered to run on this machine, the one that failed.
+test('#1270 D2: a run not started on this machine shows its reason and Run suite again, and no offer to run here', () => {
+  const w = boot();
+  const reason = 'the worktree of bbbbbbbbbbbb could not be made: no space left';
+  const machine = { kind: 'local', name: 'this machine', target: null, dir: null, lease: null, step: 'checkout', secs: {}, reason };
+  deliver(w, data({ ...NOT_STARTED, machine, reasons: [reason] }, {}, null));
+  assert.equal(chip(w), 'Suite not started');
+  assert.deepEqual(Array.from(card(w).querySelectorAll('[data-list="reasons"] li'), (li) => li.textContent), [reason]);
+  assert.equal(card(w).querySelector('[data-list="machine-steps"]'), null);
+  assert.equal(card(w).querySelector('[data-act="run-here"]'), null);
+  assert.equal(act(card(w), 'release-prep').textContent, 'Run suite again');
+});
+
+// Bug this guards: the pressed machine looked like the other one (aria-pressed alone shows a sighted owner nothing).
+// jsdom lays nothing out: the rule that marks the pressed choice is read.
+test('#1270 D3: the pressed machine choice has its own style', () => {
+  assert.match(css, /\.release-machine \.release-mode-pick\[aria-pressed="true"\] \{[^}]*border: 2px solid var\(--accent\)/);
 });

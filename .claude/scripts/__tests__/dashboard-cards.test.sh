@@ -153,7 +153,7 @@ P=$(snap '{"needsYou": {"waiting": [{"card": "c1-12", "issue": 12, "title": "But
     "order": [{"issue": 20, "title": "Next up", "priority": "P1", "followup": true, "retried": false}], "holding": [{"issue": 30, "title": "Held one"}],
     "skipped": [{"issue": 31, "title": "Infra one", "rule": "area:infra"}],
     "waiting": [{"issue": 32, "title": "Second half", "priority": "P2", "followup": false, "retried": false, "created": "2026-11-01T00:00:00Z", "waitsFor": [20]}]},
-  "control": {"mode": "pause", "cap": null, "guard": 90, "held": [30], "order": [], "rules": {"P0": true, "P1": true, "P2": true, "followups": true, "never": ["area:infra"]}, "model": null, "reviewer": null, "judgeOn": true},
+  "control": {"mode": "pause", "cap": null, "guard": 90, "held": [30], "order": [], "rules": {"P0": true, "P1": true, "P2": true, "followups": true, "never": ["area:infra"]}, "model": null, "reviewer": null, "judgeOn": true, "suiteMachine": {"kind": "ssh", "target": "dev@192.0.2.7", "dir": "~/suite"}},
   "modelSettings": {"builder": {"model": "claude-x", "effort": "medium", "modelFrom": "seed", "effortFrom": "seed", "choices": ["claude-x"], "efforts": ["low"]},
     "judge": {"model": "claude-j", "effort": "high", "modelFrom": "seed", "effortFrom": "seed", "choices": ["claude-j"], "efforts": ["high"], "default": "claude-j"}},
   "areaPrefix": "team/", "packLandAs": "pr", "packPrMerge": "idle", "packPick": {"lists": {"builder": {"claude-x": {"min": "medium", "max": "high"}}}, "efforts": {"claude": ["low", "medium", "high"]}}, "standing": ["asked-fix"], "pushCheck": false, "lintCommands": [{"run": "shellcheck {files}", "files": ["*.sh"]}], "snapshotAt": "2026-11-05T00:00:02Z",
@@ -208,11 +208,12 @@ answer "$P" "$P_URL" 1794000000 "$C" "$C_URL" 0
 run
 # Bug: the Release panel gets nothing of a record's main or its release run, or a record from an older engine breaks it;
 # its changes link no issue, for want of the repository's address.
-q '.panels.release == {error: null, data: {records: [{repo: "sample", url: "https://github.com/example/sample-project", release: null, suites: null},
-  {repo: "widgetshop", url: "https://github.com/example/WidgetShop",
+q '.panels.release == {error: null, data: {records: [{repo: "sample", url: "https://github.com/example/sample-project", release: null, suites: null,
+    suiteMachine: {kind: "ssh", target: "dev@192.0.2.7", dir: "~/suite"}},
+  {repo: "widgetshop", url: "https://github.com/example/WidgetShop", suiteMachine: null,
   release: {tag: "v1.0.0", count: 2, commits: [], next: "1.1.0", notes: true, head: "abc"},
   suites: [{kind: "release", version: "1.1.0", sha: "abc", ended: null, state: "running", done: 3, failed: 1, cases: ["x: y"]}]}]}}' \
-  "the Release part is each record's release and suites as its snapshot gives them, null from a snapshot from before them"
+  "the Release part is each record's release, suites and the rule's suite machine as its snapshot gives them, null from a snapshot from before them"
 q '.panels.belt.data | .cap == 5 and (.cards | map([.repo, .issue, .step, .url])) == [["sample", 801, "review", "'"$PU"'/801"], ["widgetshop", 5, "build", "'"$CU"'/5"]]' "belt rows name their repo and link to that repo's issue (an ssh origin is the repo's https address)"
 q '.panels.belt.data.cards[0] | .review == 2 and .of == 3 and .model == "gpt-x" and .usd == 1.25 and (.stepAt | fromdateiso8601) > 0' "a belt row keeps its step, review number, model, cost and the time the step began"
 q '.panels.needs.data.cards | (.waiting | map([.repo, .issue, .sentence, .url])) == [["sample", 12, "Staff see a new button.", "'"$PU"'/12"]] and (.blocked | map([.issue, .reason])) == [[13, "tests failed twice"]]' "what waits on the owner: the visible change with the reviewer's sentence, and the blocked card with its reason"

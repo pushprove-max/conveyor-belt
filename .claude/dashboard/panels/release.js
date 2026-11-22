@@ -16,7 +16,13 @@
 // head, Release anyway sends `release-run anyway <version>`: release over that failed suite. Each button that starts the
 // suite (Run suite, Run suite again, Run again on the new main, and Release when it runs the suite first) asks, after
 // its second click and before it sends, whether the suite runs its test files one by one or in parallel, and sends the
-// choice last, `--serial` or `--parallel`; step 2 shows the mode of the run under way and of the last run. Stop (`release-run stop`, a second click too) shows only while a run is
+// choice, `--serial` or `--parallel`, then, last, `--machine local` when the control record's suiteMachine (the record's
+// part of that name) names a devbox or an ssh box and the owner chose This machine in the question "On which machine?"
+// (the rule's machine is preset). While a run goes on such a box, step 2 says the machine, the box, the commit and the
+// lease, shows the machine's steps as chips and says what Stop does there; a run that did not start (state "not
+// started") on a box shows its failed step with the reason, one fix line, Run on this machine instead and Run suite again
+// (one that did not start on this machine lists the reason, with the fix line and Run suite again); a run
+// here shows no machine line or steps; step 2 shows the mode of the run under way and of the last run. Stop (`release-run stop`, a second click too) shows only while a run is
 // under way. Each reason a refused or failed run printed shows under the step it belongs to, and each failed case
 // release-prep judged flaky (it passed every run alone) under the suite's step, and beside a red result the fix cards of
 // that run (its record's fixes), each with its state, and what happens next. The panel is wide or full,
@@ -28,6 +34,7 @@
   const said = new Map();   // repo -> what the build machine answered to the last press
   const opened = new Set(); // repos whose changes list is open, kept through a redraw
   const asking = new Map(); // repo -> {v, args, what}: a press that waits for the suite's mode, kept through a redraw
+  const choice = new Map(); // repo -> 'local': This machine chosen in the question over the rule's, kept through a redraw
   const short = (sha) => (typeof sha === 'string' ? sha.slice(0, 12) : '');
   const list = (x) => (Array.isArray(x) ? x : []);
   const num = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -51,27 +58,103 @@
     return p;
   }
 
-  // The question a press that starts the suite waits on: one by one or in parallel, each with what it means, and
-  // Cancel. A choice sends the press's args with the mode last.
-  function modeAsk(h, ctx, repo, a) {
+  // The machine the control record's suiteMachine rule names, as the panel says it: a devbox by its name, a box over
+  // ssh by its host; null for this machine (the default) or a rule that is unreadable.
+  function ruleOf(sm) {
+    if (!sm || typeof sm !== 'object') return null;
+    if (sm.kind === 'devbox') return { kind: 'devbox', name: `Namespace Devbox${sm.size ? ` ${sm.size}` : ''}` };
+    if (sm.kind === 'ssh' && typeof sm.target === 'string' && sm.target) return { kind: 'ssh', name: sm.target.replace(/^.*@/, '') };
+    return null;
+  }
+
+  // The machine question: This machine, or the rule's machine (preset), each with its line. A press sets the choice
+  // and draws the question again; `last` is when the last run on the rule's machine ended, else null.
+  function machineAsk(h, ctx, repo, rule, last) {
+    const box = h('div', 'release-machine');
+    box.dataset.figure = 'machine-ask';
+    box.setAttribute('role', 'group');
+    const q = h('p', 'row-meta', 'On which machine?');
+    box.setAttribute('aria-label', q.textContent);
+    box.append(q);
+    const here = choice.get(repo) === 'local';
+    [['local', 'This machine', ['The belt is slower meanwhile.']],
+      ['rule', rule.name, ['the rule\'s choice', ...(last ? [' · last run ', ctx.since(last, ' ago')] : [])]]].forEach(([key, name, line]) => {
+      const b = h('button', 'btn release-mode-pick');
+      b.type = 'button'; b.dataset.act = `machine-${key}`;
+      b.setAttribute('aria-pressed', String((key === 'local') === here));
+      const l = h('span', 'board-from'); l.append(...line);
+      b.append(h('span', 'release-mode-name', name), l);
+      b.addEventListener('click', () => { if (key === 'local') choice.set(repo, 'local'); else choice.delete(repo); ctx.redraw(); });
+      box.append(b);
+    });
+    return box;
+  }
+
+  // The question a press that starts the suite waits on: the machine (when the rule names another than this one), then
+  // one by one or in parallel, each with what it means, and Cancel. A choice sends the press's args with the mode, then
+  // `--machine local` when This machine was chosen over the rule's.
+  function modeAsk(h, ctx, repo, a, rule, last) {
     const box = h('div', 'release-mode');
     box.dataset.figure = 'mode-ask';
     box.setAttribute('role', 'group');
     const q = h('p', 'row-meta', 'Run the test files one by one or in parallel?');
     box.setAttribute('aria-label', q.textContent);
+    if (rule) box.append(machineAsk(h, ctx, repo, rule, last));
     box.append(q);
     MODES.forEach((o) => {
       const b = h('button', 'btn release-mode-pick');
       b.type = 'button'; b.dataset.act = `mode-${o.mode}`;
       b.append(h('span', 'release-mode-name', o.label), h('span', 'board-from', o.line));
-      b.addEventListener('click', () => { asking.delete(repo); send(ctx, repo, [...a.args, `--${o.mode}`], a.what); });
+      b.addEventListener('click', () => {
+        const local = rule && choice.get(repo) === 'local';
+        asking.delete(repo); choice.delete(repo);
+        send(ctx, repo, [...a.args, `--${o.mode}`, ...(local ? ['--machine', 'local'] : [])], a.what);
+      });
       box.append(b);
     });
     const no = h('button', 'btn btn-quiet', 'Cancel');
     no.type = 'button'; no.dataset.act = 'mode-cancel';
-    no.addEventListener('click', () => { asking.delete(repo); ctx.redraw(); });
+    no.addEventListener('click', () => { asking.delete(repo); choice.delete(repo); ctx.redraw(); });
     box.append(no);
     return box;
+  }
+
+  // The steps of a run on a box over ssh or a devbox, in the order lib/suitehost.sh goes through them: each as a chip
+  // with its time. The record's machine.step is the one under way (or, for a run not started, the one that failed);
+  // results is two chips, the results came back with the last poll and the box is given back. Done steps are ok, the
+  // one under way info, the failed one bad, the rest quiet.
+  const MSTEPS = [['start', 'Start'], ['setup', 'Set up'], ['checkout', 'Check out'], ['run', 'Run'], ['results', 'Bring back results'], ['done', 'Give back the box']];
+  const MAT = { start: 0, setup: 1, checkout: 2, run: 3, results: 5, done: 6 };
+  function machineSteps(h, ctx, m, failed) {
+    const at = Object.hasOwn(MAT, m.step) ? MAT[m.step] : 0, secs = m.secs && typeof m.secs === 'object' ? m.secs : {};
+    const ul = h('ul', 'release-machine-steps');
+    ul.dataset.list = 'machine-steps';
+    MSTEPS.forEach(([key, label], i) => {
+      const state = failed && i === at ? 'failed' : i < at ? 'done' : i === at ? 'now' : 'todo';
+      const t = secs[i === 5 ? 'results' : key];
+      let more = '';
+      if (state === 'failed') more = typeof m.reason === 'string' ? m.reason.replace(/^[A-Z](?=[a-z])/, (c) => c.toLowerCase()) : '';
+      else if (state === 'done' && num(t)) more = key === 'start' && m.kind === 'devbox' && t === 0 ? 'reused' : key === 'setup' && t === 0 ? 'not needed' : ctx.dur(t);
+      const li = h('li', null);
+      li.dataset.step = key; li.dataset.state = state;
+      li.append(ctx.chip(more ? `${label} · ${more}` : label, { done: 'ok', now: 'info', failed: 'bad', todo: 'quiet' }[state]));
+      ul.append(li);
+    });
+    return ul;
+  }
+
+  // "On <machine> (<box>) · commit <sha7> · leased <time>" and the machine's steps, for a run on a box (not this
+  // machine); null for a run here or a record with no machine.
+  function machineLines(h, ctx, run, failed) {
+    const m = run.machine && typeof run.machine === 'object' && run.machine.kind !== 'local' ? run.machine : null;
+    if (!m) return [];
+    const box = m.kind === 'devbox' ? m.lease : m.target;
+    // The commit is recorded once the machine has started (release-prep), so a run still starting, or one whose start failed, has none.
+    const sha = short(run.sha).slice(0, 7);
+    const p = h('p', 'row-meta', `On ${m.name || m.kind}${box ? ` (${box})` : ''}${sha ? ` · commit ${sha}` : ''}`);
+    p.dataset.figure = 'machine';
+    if (typeof run.since === 'string' && !failed) p.append(` · ${m.kind === 'devbox' ? 'leased' : 'started'} `, ctx.since(run.since, ' ago'));
+    return [p, machineSteps(h, ctx, m, failed)];
   }
 
   function send(ctx, repo, args, what) {
@@ -108,11 +191,14 @@
     const passed = !!(cur && cur.ended !== null && typeof cur.sha === 'string' && cur.sha
       && (cur.state === 'passed' || cur.state === 'released' || (cur.state === 'refused' && cur.step === 'release' && !cur.failed)));
     const failed = !!(cur && cur.ended !== null && cur.state === 'failed');
+    // The suite's machine failed its start, setup or checkout: no test ran (lib/suitehost.sh).
+    const notStarted = !!(cur && cur.ended !== null && cur.state === 'not started');
     const moved = passed && cur.state !== 'released' && (cur.moved === true || cur.sha !== m.head);
     const released = !!(run && run.ended !== null && run.state === 'released' && m.tag === `v${run.version}`);
     let chip;
     if (going) chip = ['Suite running', 'info'];
     else if (failed) chip = ['Suite failed', 'bad'];
+    else if (notStarted) chip = ['Suite not started', 'bad'];
     else if (moved) chip = ['Main moved since the suite', 'warn'];
     // A release just made: its own commits (the version in plugin.json) are on main past the tag, and the next
     // version's notes are not written yet.
@@ -124,7 +210,7 @@
     // Release reuses a passed release-prep of v on main's head, main not moved since (release-run); else it runs the
     // suite first.
     const reuse = passed && !moved && cur.step === 'release-prep' && cur.state === 'passed';
-    return { cur, going, passed: passed && !moved, failed, moved, released, reuse, chip };
+    return { cur, going, passed: passed && !moved, failed, notStarted, moved, released, reuse, chip };
   }
 
   // One numbered step: its mark (done, failed, in progress or to do), its name and its one line, then what else.
@@ -301,8 +387,36 @@
       stop.type = 'button'; stop.dataset.act = 'release-stop';
       stop.title = 'End this run\'s processes. Nothing else of Conveyor stops.';
       const moved = run.moved === true ? h('p', 'warn-note', 'Main moved while the suite runs: a card landed, so the suite does not test the new main.') : null;
-      s2 = step(h, 'Full suite', 'now', line, modeLine(h, run, true), ...rerunLines(h, ctx, run), moved,
-        ctx.twice(stop, 'final', 'Click again to stop the run', () => send(ctx, rec.repo, ['stop'], 'The run is stopped.')));
+      const lines = machineLines(h, ctx, run, false);
+      const stopBox = h('div', 'release-stop');
+      stopBox.append(ctx.twice(stop, 'final', 'Click again to stop the run', () => send(ctx, rec.repo, ['stop'], 'The run is stopped.')));
+      if (lines.length) {
+        const sl = h('span', 'board-from', run.machine.kind === 'devbox' ? 'Stops the run on the devbox and gives the box back.' : 'Stops the run on the box.');
+        sl.dataset.figure = 'stop-line';
+        stopBox.append(sl);
+      }
+      s2 = step(h, 'Full suite', 'now', line, ...lines, modeLine(h, run, true), ...rerunLines(h, ctx, run), moved, stopBox);
+    } else if (s.notStarted) {
+      // A run that did not start: its failed step's chip says why, with one fix line, and the two ways on.
+      // On this machine (its worktree could not be made) the machine's chips are not shown, so the reason is listed, and
+      // running on this machine instead is no way on.
+      const mc = s.cur.machine, reason = String(mc && mc.reason || ''), remote = !!(mc && typeof mc === 'object' && mc.kind !== 'local');
+      const fix = h('p', 'row-meta', /not logged in to namespace/i.test(reason)
+        ? 'Run devbox login once in a terminal on the build machine, then press Run suite again.'
+        : `Fix the cause named in the ${remote ? 'failed step' : 'reason'}, then press Run suite again.`);
+      fix.dataset.figure = 'machine-fix';
+      let here = null;
+      if (remote) {
+        here = h('button', 'btn', 'Run on this machine instead');
+        here.type = 'button'; here.dataset.act = 'run-here';
+        here.title = 'Run the whole suite on this machine, whatever the rule says. It releases nothing.';
+        here.disabled = !VERSION.test(v);
+        ctx.twice(here, 'spend', 'Click again to run the suite on this machine', () => {
+          if (VERSION.test(v)) send(ctx, rec.repo, ['prep', v, '--machine', 'local'], 'The suite runs on this machine.');
+        });
+      }
+      s2 = step(h, 'Full suite', 'failed', `Not started on ${(mc && mc.name) || 'its machine'}`, ...machineLines(h, ctx, s.cur, true), fix,
+        remote && reason ? null : reasonsList(h, reason ? [reason] : why[1]), here);
     } else if (s.cur && (s.passed || s.failed || s.moved)) {
       const c = s.cur, line = h('span', null, `${s.failed ? 'Failed' : 'Passed'} on ${short(c.sha)}`);
       if (typeof c.ended === 'string') line.append(' · ', ctx.since(c.ended, ' ago'));
@@ -364,7 +478,7 @@
     const [label, ask, title, what] = s.moved ? ['Run again on the new main', 'Click again to run the suite on the new main',
       'Run the whole suite on main\'s head. It releases nothing.', 'The suite runs again on the new main.']
       : !notes ? ['Draft notes', 'Click again to draft the notes', `release-prep writes a draft of docs/releases/${v}.md for you to read and commit. It runs nothing else.`, 'The notes draft is being written.']
-      : [s.passed ? 'Run suite again' : 'Run suite', 'Click again to run the suite', 'Run the whole suite on main\'s head. It releases nothing.', 'The suite is running.'];
+      : [s.passed || s.notStarted ? 'Run suite again' : 'Run suite', 'Click again to run the suite', 'Run the whole suite on main\'s head. It releases nothing.', 'The suite is running.'];
     const btn = h('button', 'btn', label);
     btn.type = 'button'; btn.dataset.act = 'release-prep'; btn.title = title;
     btn.disabled = s.going || !VERSION.test(v);
@@ -406,7 +520,12 @@
     // The question shows while it is of the version in the field and the button pressed can still run: no run under
     // way, and Release waiting for nothing.
     const a = asking.get(rec.repo);
-    if (a && a.v === v && !(a.args[0] === 'prep' ? btn.disabled : waits)) card.append(modeAsk(h, ctx, rec.repo, a));
+    if (a && a.v === v && !(a.args[0] === 'prep' ? btn.disabled : waits)) {
+      // The rule's machine, and when its last run ended: the record keeps only the newest run, so that is the run of this
+      // very machine (same kind and name; a run on another box or here says nothing of it).
+      const rule = ruleOf(rec.suiteMachine), lm = run && run.machine && typeof run.machine === 'object' ? run.machine : null;
+      card.append(modeAsk(h, ctx, rec.repo, a, rule, rule && lm && lm.kind === rule.kind && String(lm.name).trim() === rule.name && typeof run.ended === 'string' ? run.ended : null));
+    }
     // A version with no notes on main says so under the box.
     if (VERSION.test(v) && !notes) {
       const p = h('p', 'row-meta', `${v} has no release notes: docs/releases/${v}.md is not on main.`);

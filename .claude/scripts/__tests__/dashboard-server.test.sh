@@ -879,9 +879,9 @@ fresh_control
 pass=$((pass + 8))
 # The Release panel's Release (the version typed) and Stop reach `conveyor.sh release-run` on the record. Bug: a press
 # reaches no command, or a version the engine does not take (or a word the shell reads) reaches the host. Run suite's
-# `prep <version>` (release-prep alone) reaches it as two words. The suite's mode the owner chose (#791) reaches it last.
-# Bug: a press with the mode is refused, so no suite starts from the panel.
-for a in 1.2.0 stop 'prep 1.2.0' 'prep 1.2.0 --parallel' 'prep 1.2.0 --serial' '1.2.0 --parallel'; do
+# `prep <version>` (release-prep alone) reaches it as two words. The suite's mode the owner chose (#791) reaches it after the version, then `--machine local`
+# (this machine chosen over the rule's) last. Bug: a press with the mode or the machine is refused, so no suite starts from the panel.
+for a in 1.2.0 stop 'prep 1.2.0' 'prep 1.2.0 --parallel' 'prep 1.2.0 --serial' '1.2.0 --parallel' 'prep 1.2.0 --machine local' 'prep 1.2.0 --serial --machine local' '1.2.0 --parallel --machine local'; do
   fresh_control
   # shellcheck disable=SC2086 # each word an argument
   [ "$(ctl "$(act release-run $a)")" = 200 ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM release-run $a" ] || fail "release_run_${a// /_}_reaches_conveyor: $(cat "$M/ctl.out") ran '$(calls)'"
@@ -893,7 +893,7 @@ fresh_control
   || fail "release_run_anyway_names_the_user: $(cat "$M/ctl.out") ran '$(calls)'"
 fresh_control
 for a in '' 1.2 01.2.0 'v1.2.0' '1.2.0 stop' '1.2.0;id' prep 'prep stop' 'prep 1.2' '1.2.0 prep' anyway 'anyway 1.2' 'anyway 1.2.0 --by' \
-  --parallel 'prep --parallel' 'stop --serial' 'anyway 1.2.0 --parallel' '1.2.0 --fast' '1.2.0 --serial --parallel'; do
+  --parallel 'prep --parallel' 'stop --serial' 'anyway 1.2.0 --parallel' '1.2.0 --fast' '1.2.0 --serial --parallel' '--machine local' 'stop --machine local' 'anyway 1.2.0 --machine local' 'prep 1.2.0 --machine ssh' 'prep 1.2.0 --machine local --serial' 'prep 1.2.0 --machine'; do
   # shellcheck disable=SC2086 # each word an argument
   [ "$(ctl "$(act release-run $a)")" = 400 ] || fail "release_run_takes_a_version_or_stop: '$a' answered '$(cat "$M/ctl.out")'"
 done
