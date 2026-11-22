@@ -330,7 +330,9 @@
     // "Every step" of an earlier card id (a retry, panels/belt.js): its own steps are one of this card's earlier
     // attempts now, which keeps their open output boxes, and this card's steps take nothing from it.
     const mine = was && was.dataset.card === card ? was.querySelector(':scope > ol.timeline') : null;
-    const ups = filed || filedOf([t, ...(Array.isArray(earlier) ? earlier : []).map((e) => e && e.track)]);
+    // The earlier attempts first and this card last: a later filing of a finding replaces an earlier one, as the
+    // engine withdraws the follow-up it filed for a landing it then refused, and the retry files its replacement.
+    const ups = filed || filedOf([...(Array.isArray(earlier) ? earlier : []).map((e) => e && e.track), t]);
     const before = earlierLines(was, earlier, repoUrl, repo, ups);
     const all = stepsOf(t);
     const { bars, wait } = barsOf(t, all);
@@ -360,7 +362,7 @@
     });
   }
   // The follow-ups filed for the findings the judge found outside a card's change (a filed line's outside) in the
-  // tracks given: a Map from the finding to its issue number or follow-up card id.
+  // tracks given, the first first: a Map from the finding to its issue number or follow-up card id, the last filing's.
   const filedOf = (tracks) => new Map(tracks.flatMap((t) => stepsOf(t)).flatMap((x) => (x.name === 'follow-ups filed' && Array.isArray(x.outside) ? x.outside : []))
     .filter((o) => o && typeof o.finding === 'string' && (typeof o.issue === 'number' || typeof o.issue === 'string')).map((o) => [o.finding, o.issue]));
   // The bars of track t (all: its steps), one a step and one for the set-up steps together, and the queue's wait.

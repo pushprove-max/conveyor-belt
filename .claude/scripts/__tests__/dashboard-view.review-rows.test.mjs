@@ -108,6 +108,8 @@ test('a finding the judge found outside the change shows as filed as a follow-up
 // Bug it guards (#1424): a retry that lands from a kept patch (after a yes) writes no review of its own and files the
 // outside findings of the review it kept, so the filed line is on the retry and the review on its earlier attempt;
 // that review's row still said "To be filed as a follow-up" after the filing.
+// Bug it guards (follow-up of #1424): the earlier attempt filed the finding too, and the engine withdrew that issue when
+// it refused the landing; the row linked the withdrawn issue, as the earlier attempt's filing was read last.
 test('an earlier attempt\'s outside finding names the follow-up the retry filed', () => {
   const OUT = '[P2] .claude/dashboard/panels/belt.js:12 The count skips the last card. Proof: open the Belt with two cards.';
   const w = boot();
@@ -115,7 +117,8 @@ test('an earlier attempt\'s outside finding names the follow-up the retry filed'
   const card = data.panels.belt.data.cards[0];
   const prior = { card: 'c3-60', start: iso(T0 - 3600000), end: iso(T0 - 2400000), sec: 1200, reason: 'waits for a yes', track: trackOf('++....', '', { at: null, since: null, records: [
     { name: 'picked', state: 'done', sec: null, at: at(0) },
-    { name: 'review 1 (GO)', state: 'done', sec: 60, at: at(10), output: `OUTSIDE: ${OUT} (judge: real: the count is wrong on main.)`, judge: { ran: true, accepted: 0, declined: 0, outside: 1, go: true } }] }) };
+    { name: 'review 1 (GO)', state: 'done', sec: 60, at: at(10), output: `OUTSIDE: ${OUT} (judge: real: the count is wrong on main.)`, judge: { ran: true, accepted: 0, declined: 0, outside: 1, go: true } },
+    { name: 'follow-ups filed', state: 'done', sec: 2, at: at(20), n: 1, outside: [{ finding: OUT, issue: 100099 }] }] }) };
   card.track = trackOf('+++++>', 'push', { since: at(900), records: [
     { name: 'picked', state: 'done', sec: null, at: at(100) }, { name: 'follow-ups filed', state: 'done', sec: 2, at: at(200), n: 1, outside: [{ finding: OUT, issue: 100102 }] }] });
   card.earlier = [prior];
@@ -124,5 +127,5 @@ test('an earlier attempt\'s outside finding names the follow-up the retry filed'
   const finding = det.querySelector(':scope > details.tl-earlier .review-findings > .output-finding');
   assert.deepEqual(Array.from(finding.querySelectorAll('.finding-head > .chip'), (c) => c.textContent), ['P2', 'Filed as a follow-up'], 'the earlier attempt\'s review row');
   const link = finding.querySelector('.finding-head > .issue');
-  assert.equal(link && link.textContent, '#100102', 'it names the issue the retry filed');
+  assert.equal(link && link.textContent, '#100102', 'it names the issue the retry filed, not the one the earlier attempt filed and the engine withdrew');
 });
