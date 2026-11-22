@@ -102,6 +102,23 @@ test('a running card shows the effort beside its model, and the model alone when
   assert.ok(meta('sample:c3-63').includes('gpt-x'), `the model is still shown: ${meta('sample:c3-63')}`);
 });
 
+// Bug it catches (issue 1334): a card picked since the kept snapshot was on no belt until a new snapshot build ended.
+// The snapshot reader now adds it from the card records (fromRecords), with no model or cost yet: the belt shows it,
+// its title and step, and says its details come with the next snapshot, not "no AI model in this step".
+test('a card the snapshot reader added from the card records shows on the belt, marked as not yet in a full snapshot', () => {
+  const w = boot();
+  const data = full();
+  data.panels.belt.data.cards.push({ repo: 'sample', card: 'c9-70', issue: 70, name: null, title: 'Picked since the snapshot', step: 'build', stepAt: iso(T0 - 5000), landed: false, fromRecords: true });
+  deliver(w, data);
+  const r = row(w, 'sample:c9-70');
+  assert.ok(r, 'the card from the records has a row on the belt');
+  assert.match(r.textContent, /Picked since the snapshot/, `its title is shown: ${r.textContent}`);
+  assert.match(r.textContent, /Building/, `its step is shown: ${r.textContent}`);
+  const meta = r.querySelector('.row-meta').textContent;
+  assert.match(meta, /details come with the next snapshot/, `it is marked as in no full snapshot yet: ${meta}`);
+  assert.ok(!/no AI model in this step/.test(meta), `it does not say its step runs no model: ${meta}`);
+});
+
 // Bug it catches: each card's timeline and its earlier attempts were built at every change, though "Every step" was
 // closed; and an open one must still follow each change with the keyboard where it was.
 test('"Every step" holds no steps while closed, draws them and its earlier attempts on open, and follows a change while open', () => {

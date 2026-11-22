@@ -7,7 +7,7 @@
 # a minute, with 12 to 35 of them running at once, so no reader got one before it stopped waiting.
 # When an input changed after that build began (a record line, the retried lines, the control record, the files the
 # stream watches beside them (watch.py STATE_FILES), a card's live record or a proof run's, a card begun or ended, the
-# issues list the stream keeps: snapinputs) or the kept snapshot is SNAPOLD seconds old
+# issues list the stream keeps or the loop's, ISSUES: snapinputs) or the kept snapshot is SNAPOLD seconds old
 # (what counts on the clock alone, and an issues list asked of GitHub), the reader starts the writer in the background.
 # The writer is one process a project (it holds KEPT.lock while it builds; a second one finds it held and ends): it
 # builds, writes the new snapshot beside KEPT, dates it when its build began and renames it into place, so a reader
@@ -32,7 +32,7 @@ case ${2-} in
 esac
 # Whether an input of the kept snapshot changed after its build began (KEPT's time is when that build began).
 snapinputs() {
-  local f=("$STATE" "$RETRIED" "$CONTROL" "$ST/pushed" "$ST/limit.jsonl" "$ST/maintest.json" "$ST/loop.json" "$CARDS" "$CARDS/mainrun")
+  local f=("$STATE" "$RETRIED" "$CONTROL" "$ST/pushed" "$ST/limit.jsonl" "$ST/maintest.json" "$ST/loop.json" "$ISSUES" "$CARDS" "$CARDS/mainrun")
   [ -z "$GITHUB" ] || f+=("$GITHUB/issues")
   [ -n "$(find "${f[@]}" -maxdepth 1 \( ! -path "$CARDS/*" -o -path "$CARDS/mainrun" -o -name '*.live' \) -newer "$KEPT" -print -quit 2>/dev/null)" ]
 }
@@ -101,18 +101,24 @@ snapwriter() {
 # the card records or the retried file changed after its build began: its belt can leave out a card begun since. A
 # retry rewrites the records, so the next build reads them whole and can take minutes (#1032: the Foreman's watcher
 # read the snapshot from before the retry, with the belt empty, and woke the Foreman with "Conveyor is idle").
-# While recordsNewer is true, recordsNow (recordsnow) follows it.
+# While recordsNewer is true, recordsNow (recordsnow) follows it, and each card of its started is added to the belt
+# (its issue taken out of queue.next, queue.order and queue.waiting).
 snapprint() {
-  local k s m now newer=false at rn=''
+  local k s m now newer=false at rn='' r=''
   k=$(p_filekey "$KEPT") && k=${k#* } && [[ $k =~ ^([0-9]+)[.,]([0-9]{3}) ]] || { echo "conveyor: cannot read $KEPT" >&2; return 1; }
   s=${BASH_REMATCH[1]} m=$((BASH_REMATCH[1] * 1000 + 10#${BASH_REMATCH[2]}))
   at=$(export TZ=UTC; printf '%(%Y-%m-%dT%H:%M:%SZ)T' "$s")
   # The shell's own test of the times (to the nanosecond, as find -newer): no program on each read.
   { [ "$STATE" -nt "$KEPT" ] || [ "$RETRIED" -nt "$KEPT" ]; } && newer=true
-  if [ "$newer" = true ]; then rn=$(recordsnow "$at" 2>/dev/null) && [ -n "$rn" ] || rn=null; rn="\"recordsNow\":$rn,"; fi
+  if [ "$newer" = true ]; then r=$(recordsnow "$at" 2>/dev/null) && [ -n "$r" ] || r=null; rn="\"recordsNow\":$r,"; fi
   now=${EPOCHREALTIME/[.,]/}; now=$((10#$now / 1000)); m=$((now > m ? now - m : 0))
   printf '{"snapshotAt":"%s","snapshotAge":%d.%03d,"recordsNewer":%s,%s' "$at" $((m / 1000)) $((m % 1000)) "$newer" "$rn"
-  tail -c +2 "$KEPT"
+  # A card started since joins the belt (recordsNow's started) and its issue leaves the queue's lists, so it is not
+  # shown in Queue and on the belt at once: one program more, only while there is one.
+  if [[ $r == *'"started":[{'* ]]; then jq -c --argjson r "$r" '[$r.started[].issue | numbers | select(. > 0)] as $n
+      | .belt = (.belt // []) + $r.started
+      | (.queue | objects | (.next, .order, .waiting) | arrays) |= map(select((.issue | IN($n[])) | not))' "$KEPT" | tail -c +2
+  else tail -c +2 "$KEPT"; fi
 }
 # What the card records and loop.json say now, which stay current while a new build takes minutes: the kept snapshot
 # can show nothing blocked and nothing building while cards block and build (#1101). One object: blocked, each card
@@ -125,7 +131,10 @@ snapprint() {
 # review and in its Test step too), null when no process of that loop lives; landed, the
 # count of landed cards on the belt for their push, which no loop count holds: those the kept snapshot's belt has
 # landed with no closing line since, and, unless the rule "Push when a card lands" is off, each card whose last
-# closing line since is landed (a card pushed since leaves it, though the belt keeps it until its issue closes). Nothing is
+# closing line since is landed (a card pushed since leaves it, though the belt keeps it until its issue closes); started,
+# each card picked since that the kept belt does not hold, with no closing line since and still in the records, as a
+# belt card {card, issue, name, title, step (from its last step line, as rows.jq names it, roughly), stepAt, landed
+# false, fromRecords true: it is in no full build yet, so it has no track, model or cost}. Nothing is
 # printed when the pack names no owner. A line of the second the build began is read again (the snapshot may hold
 # it): a card is listed once.
 # Only the lines since are read whole: a line's first "time" field is its own (line(), lib/records.sh).
@@ -155,7 +164,15 @@ recordsnow() { # <snapshotAt>
         {blocked: [$all[] | select(yes | not)], waiting: [$all[] | select(yes) | . + {sentence: (.reason | if startswith($lintyes) then ltrimstr($lintyes) else ltrimstr($yes) end)}],
          building: $loop.building, waitingCount: $loop.waiting, running: $loop.running,
          landed: ([$s.belt | arrays | .[] | objects | select(.landed == true and (.card | type) == "string" and $have[.card] != null and $ended[.card] == null) | .card]
-           + (if ($s.control | objects | .rules.push?) == false then [] else [$ends[] | select(.step == "landed") | .card] end) | unique | length)}'
+           + (if ($s.control | objects | .rules.push?) == false then [] else [$ends[] | select(.step == "landed") | .card] end) | unique | length),
+         started: (([$s.belt | arrays | .[] | objects | .card | strings] | INDEX(.)) as $onbelt
+           | [$new | group_by(.card)[] | select(any(.step == "picked") and $have[.[0].card] != null and $onbelt[.[0].card] == null and $ended[.[0].card] == null)
+             | (map(select(.step | IN("brief", "build", "fix", "rebase", "review", "test"))) | last) as $l
+             | {card: .[0].card, issue: (map(select(.step == "picked")) | last | .issue), name: $names[.[0].card], title: $titles[.[0].card],
+                step: (if $l == null then "brief" elif $l.step == "brief" then "build" elif $l.step | IN("build", "fix", "rebase") then "review"
+                  elif $l.step == "test" then (if $l.result == "fail" then "fix" else "landing" end)
+                  elif $l.result == "GO" then "tests" elif $l.result == "NO-GO" then "fix" else "review" end),
+                stepAt: last.time, landed: false, fromRecords: true}])}'
 }
 if [ -z "$fresh" ] && [ -s "$KEPT" ]; then
   if snapdue; then

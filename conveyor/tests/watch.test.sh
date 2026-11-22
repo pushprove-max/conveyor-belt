@@ -72,8 +72,13 @@ t_watch() {
   # GitHub goes slow, and a read of it is under way (one is asked every second).
   : > "$STUB/slow"; till "a read of GitHub, once it was slow," test -e "$STUB/slowed"
   rec c2 7 picked '{"title":"title 7"}'
-  come '.type == "snapshot" and .why == "record" and (.snap.belt | any(.card == "c2"))' "a record appended on the host, while GitHub was slow,"
-  [ "$(ev '.why == "record"' | jq -c '.snap.queue.order | map(.issue)')" = '[]' ] || fail "the snapshot after the record did not read GitHub's last answer: $(ev '.why == "record"' | jq -c .snap.queue)"
+  # The reader shows c2 at once from the records (fromRecords, #1334); the build after it is the one checked here.
+  come '.type == "snapshot" and .why == "record" and (.snap.belt | any(.card == "c2" and .fromRecords != true))' "a record appended on the host, while GitHub was slow,"
+  [ "$(ev '.why == "record" and (.snap.belt | any(.card == "c2" and .fromRecords != true))' | jq -c '.snap.queue.order | map(.issue)')" = '[]' ] || fail "the snapshot after the record did not read GitHub's last answer: $(ev '.why == "record"' | jq -c .snap.queue)"
+  # Bug (#1334): the loop's issues list (issues.json) was no file the stream watched, so a new issue it held waited for
+  # a refresh, and GitHub's answer here never comes (it is slow): the change is sent as a record change.
+  echo "[$(issue 7 2026-01-01 P1),$(issue 8 2026-01-02)]" > "$S/issues.json"
+  come '.type == "snapshot" and .why == "record" and (.snap.queue.order | any(.issue == 8))' "a new issue in the loop's issues list"
   loop control pause >/dev/null
   come '.type == "snapshot" and .why == "control" and .snap.control.mode == "pause"' "a control change"
   kill $pid; wait $pid 2>/dev/null; :

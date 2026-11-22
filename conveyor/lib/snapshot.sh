@@ -524,7 +524,11 @@ snapshot() (
   d=$(mktemp -d) || exit 1; trap 'rm -rf "$d"' EXIT; trap 'exit 143' TERM INT HUP
   # The issues first: a new one is held (adopt) before the copy, so the snapshot never shows it in the queue. When
   # its hold cannot be saved, the issues are not known: a new issue is never shown queued when it is not held.
-  saw=$(clock) || exit 1; issues=$(openissues "$FIELDS" 2>/dev/null) || issues=''
+  # The loop's own list (ISSUES, asked of GitHub before each pick, a shut card's issue taken out: run.sh) is read in
+  # place of the feed's copy when it is newer: a new issue shows at the loop's next pick, not the feed's next read.
+  saw=$(clock) || exit 1
+  if [ -n "$GITHUB" ] && [ -s "$ISSUES" ] && [ "$ISSUES" -nt "$GITHUB/issues" ]; then issues=$(<"$ISSUES")
+  else issues=$(openissues "$FIELDS" 2>/dev/null) || issues=''; fi
   snapcopy "$issues"; case $? in 0) ;; 3) issues='' ;; *) echo "conveyor: cannot copy the card records" >&2; exit 1 ;; esac
   READ=$d/${STATE##*/}; READ_OLD=$d/${RETRIED##*/}; CONTROL=$d/control.json; LIVEJSON=$(live); : "${LIVEJSON:={\}}"
   # The control record read once, in this shell: the readers below (health's among them) find it kept (ctlread).

@@ -2,8 +2,8 @@
 // On the belt: each card being built and where it is. Its part: {cards, cap, waiting, building (the loop's count now
 // while a snapshot is behind the card records, else null), behind ([{repo, at}]: ctx.behind)}; a card is {repo, card,
 // issue, title, url, parent, step, review, of, stepAt, landed, model, tokens, usd, reading, atEnd, live ({turns, lastOutputAt,
-// action} | null), reviews, track, start, pickedAt, priorSec, earlier, totalSec}, as `conveyor.sh snapshot` gives its
-// belt. track is the six steps Build, Review, Fix,
+// action} | null), reviews, track, start, pickedAt, priorSec, earlier, totalSec, fromRecords}, as `conveyor.sh snapshot` gives its
+// belt (fromRecords: a card started since the kept snapshot, from the card records, with no track or cost yet). track is the six steps Build, Review, Fix,
 // Test, Land, Push, each done, now, skipped, failed or todo with its measured seconds, the step in progress (at, label,
 // since), reason (why Push failed), files and tests (a running test run's {run, of} and {done, of, failed}) and detail (every recorded step, shown on demand).
 // Only what was measured is shown (no estimate of time from past cards): the time in the step, the
@@ -164,7 +164,9 @@
         // A proof run that waits for a test slot (its live action, testrun.sh) runs no tests yet.
         const slotWait = c.step === 'proof' && c.live && typeof c.live.action === 'string' && c.live.action.startsWith('waiting for a test slot');
         // The effort the step runs at beside its model, as the seat lines name it (board.js seatText()); none known, the model alone.
-        const model = (c.model ? `${ctx.modelName(c.model)}${typeof c.effort === 'string' && c.effort ? ` at ${c.effort}` : ''}` : '') || (slotWait ? 'waiting for a test slot' : c.step === 'tests' || c.step === 'proof' ? 'running tests' : 'no AI model in this step');
+        // A card the snapshot reader added from the card records (fromRecords: in no full build yet) has no model or
+        // cost yet: the next snapshot gives them.
+        const model = c.fromRecords === true ? 'new card: details come with the next snapshot' : (c.model ?`${ctx.modelName(c.model)}${typeof c.effort === 'string' && c.effort ? ` at ${c.effort}` : ''}` : '') || (slotWait ? 'waiting for a test slot' : c.step === 'tests' || c.step === 'proof' ? 'running tests' : 'no AI model in this step');
         if (redo(meta, [c.repo, model])) meta.replaceChildren(ctx.tag(c.repo), h('span', null, model), h('span', 'live-cost'));
         // The cost is the same node from one change to the next: the dollars are drawn again only when they changed (so
         // they count on from the figure shown), the tokens' text is set in place.

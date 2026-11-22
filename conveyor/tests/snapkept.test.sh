@@ -283,11 +283,54 @@ t_snapkeptnow() {
   jq -e --arg now "$now" '.recordsNewer == true and .recordsNow == {building: 2, waitingCount: 1, running: 4, landed: 1, blocked: [
       {card: "c5", issue: 5, name: null, title: null, reason: "old block", since: "2026-11-17T10:08:00Z"},
       {card: "c3", issue: 0, name: "Main is red (abcdef012345)", title: "red", reason: "the session made no change", since: $now}],
-      waiting: [{card: "c6", issue: 6, name: null, title: "six", reason: "visible to customers or staff: needs Dana'"'"'s yes: a new button", since: $now, sentence: "a new button"}]}' <<<"$out" > /dev/null \
+      waiting: [{card: "c6", issue: 6, name: null, title: "six", reason: "visible to customers or staff: needs Dana'"'"'s yes: a new button", since: $now, sentence: "a new button"}], started: []}' <<<"$out" > /dev/null \
     || fail "the reader did not give what the records and loop.json say now: $(jq -c '{recordsNewer, recordsNow}' <<<"$out")"
   dead=$(sh -c 'echo $$'); jq -cn --argjson p "$dead" '{pid: $p, state: "running", building: 2, waiting: 1, running: 4}' > "$ST/loop.json"
   out=$(loop snapshot) && jq -e '.recordsNow | .building == null and .waitingCount == null and .running == null' <<<"$out" > /dev/null \
     || fail "the reader gave the count of a loop whose process is gone: $(jq -c .recordsNow <<<"$out")"
   # One build after the lock is let go: a writer the reads started finds nothing due, so none builds after the case.
   exec {lk}>&-; loop snapshot --fresh > /dev/null || fail "the snapshot after the reads exited non-zero"
+}
+
+# Bug (#1334): the snapshot read the open issues only from the stream's copy, which `watch` asks of GitHub once a
+# minute, so an issue the loop's own list (issues.json, asked of GitHub before each pick) already held waited up to that
+# minute to show in Queue. Here the stream's copy holds #1 to #3 and the loop's list, written after the kept snapshot,
+# holds #4 too: a plain reader starts a build (issues.json is one of its inputs), and that build lists #4 in Queue with
+# no question to GitHub. The wait is on the background writer the reader starts: only it shows the reader saw the change.
+t_snapkeptissues() {
+  local g=$T/$CASE/github
+  snapkept_setup; mkdir -p "$g" && loop github "$g" || fail "the stream's GitHub folder could not be filled"
+  snapkept_quiet 1; touch -t 200001010000 "$g/issues" || fail "the stream's copy could not be dated"
+  echo ': > "$STUB/listed"' > "$STUB/list-cmd"
+  jq -c ". + [$(issue 4 2026-11-04)]" "$STUB/issues.json" > "$ST/issues.json" || fail "the loop's issues list could not be written"
+  CONVEYOR_GITHUB=$g loop snapshot > /dev/null || fail "the reader exited non-zero"
+  wait_until "! snapkept_building && jq -e '.queue.next | map(.issue) | index(4)' '$ST/snapshot.json'" \
+    "jq -c '[.queue.next[].issue]' '$ST/snapshot.json'" || fail "no build after the loop wrote issues.json listed #4 in Queue"
+  [ ! -e "$STUB/listed" ] || fail "the build asked GitHub for the issues, though the loop's list was newer than the stream's copy"
+}
+
+# Bug (#1334): a card picked after the kept snapshot's build began was on no belt until a new build ended, which takes
+# minutes on a long history, so the Board and /units showed the belt without it. The kept lock is held, so no build
+# ends meanwhile: the reader adds c7, picked and briefed since, to the belt from the records (fromRecords: in no full
+# build yet), and units-feed.json (put(), dashboard_stream.py, the file /units reads) keeps it on the belt.
+t_snapkeptstarted() {
+  local out now lk want
+  snapkept_setup; snapkept_quiet 20; now=$(export TZ=UTC; printf '%(%Y-%m-%dT%H:%M:%SZ)T' -1)
+  { snapkept_line c7 3 picked ok 09 "{\"time\": \"$now\", \"title\": \"seven\"}"; snapkept_line c7 3 brief ok 09 "{\"time\": \"$now\"}"; } >> "$ST/cards.jsonl"
+  exec {lk}>>"$ST/snapshot.json.lock" && flock "$lk" || fail "the kept lock could not be held"
+  out=$(loop snapshot) || fail "the reader exited non-zero"
+  want='[{card: "c7", issue: 3, name: null, title: "seven", step: "build", stepAt: $now, landed: false, fromRecords: true}]'
+  jq -e --arg now "$now" ".belt | map(select(.card == \"c7\")) == $want" <<<"$out" > /dev/null \
+    || fail "the reader's belt did not show c7, picked since the kept snapshot: $(jq -c '.belt | map({card, step, fromRecords})' <<<"$out")"
+  jq -e '.belt | map(.card) | index("c2")' <<<"$out" > /dev/null || fail "the reader's belt lost the kept snapshot's own card c2"
+  # The kept Queue held #3 before c7 picked it: shown in Queue and on the belt at once, it would be counted twice.
+  jq -e '.queue.next | map(.issue) | index(3)' "$ST/snapshot.json" > /dev/null || fail "the kept snapshot did not queue #3, so the check below proves nothing"
+  jq -e '[.queue | (.next, .order, .waiting) | arrays | .[].issue] | index(3) == null' <<<"$out" > /dev/null \
+    || fail "the reader still listed #3 in Queue though c7 holds it on the belt: $(jq -c '.queue | {next: [.next[]?.issue], order: [.order[]?.issue]}' <<<"$out")"
+  python3 -c 'import json, sys; sys.path.insert(0, sys.argv[1]); import dashboard_stream as s; s.put(sys.argv[2], {"records": [{"repo": "r", "snap": json.load(sys.stdin)}]})' \
+    "$SRC/../.claude/scripts" "$T/$CASE" <<<"$out" || fail "the stream's files could not be written"
+  jq -e --arg now "$now" ".records[0].snap.belt | map(select(.card == \"c7\")) == $want" "$T/$CASE/units-feed.json" > /dev/null \
+    || fail "units-feed.json did not show c7 on the belt: $(jq -c '.records[0].snap.belt' "$T/$CASE/units-feed.json" 2>&1)"
+  # One build after the lock is let go: a writer the read started finds nothing due, so none builds after the case.
+  exec {lk}>&-; loop snapshot --fresh > /dev/null || fail "the snapshot after the read exited non-zero"
 }

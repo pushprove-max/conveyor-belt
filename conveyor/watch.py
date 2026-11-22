@@ -74,7 +74,7 @@ PROOF_LIVE = '.unfixed.live'  # mainrun/<card>.unfixed.live: the live record of 
 POLL = 0.5
 SNAPSHOT_LIMIT = 120  # a snapshot that hangs is killed, and the next change tries again
 STATE_FILES = {'cards.jsonl': 'record', 'retried.jsonl': 'record', 'pushed': 'record', 'limit.jsonl': 'record', 'maintest.json': 'record', 'control.json': 'control',
-               'loop.json': 'loop', 'snapshot.json': 'kept'}
+               'issues.json': 'record', 'loop.json': 'loop', 'snapshot.json': 'kept'}
 # Asked for while another waits, the one that says more is kept: a refresh is the least, then GitHub's.
 RANK = {None: 0, 'refresh': 1, 'github': 2}
 GITHUB_URL = re.compile(r'github\.com[:/]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(\.git)?$')

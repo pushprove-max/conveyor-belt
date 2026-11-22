@@ -104,6 +104,11 @@ every 15 s, and these figures can be up to 30 s behind.
 On the belt, a running card shows the model of its step with the effort beside it, for example "Claude Opus 5.5 at
 high". When the effort is not known, it shows the model alone.
 
+A new issue shows in Queue when the loop next asks GitHub for the open issues, before each pick. When the loop does not
+run, it shows when the Board's feed next asks GitHub. An issue that you release shows in Queue when the Board next reads
+Conveyor. A card that the loop picks shows on the belt at once, with its title, issue and step, and its issue leaves
+Queue. Until the next snapshot is made, it shows "new card: details come with the next snapshot" in place of its model, and it has no cost or track.
+
 The Declined panel's heading has two buttons that dismiss lines for good. **Dismiss all shown (n)** dismisses the
 lines that the panel shows now. **Dismiss all (n)** dismisses every line that the panel counts, also the lines it does
 not show. Click the button, then click it again. If the lines that the button counts change before the second click,
