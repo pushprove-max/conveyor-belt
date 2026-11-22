@@ -388,9 +388,9 @@
     const chip = ctx.chip(s.chip[0], s.chip[1]);
     chip.dataset.figure = 'status';
     head.append(h('span', 'title', String(rec.repo || '')), tag, count, chip);
-    // Each reason of the last run that ended, under its step.
+    // Each reason of the last run that ended, under its step, only when that run was of the version in the field.
     const why = [[], [], []];
-    if (run && run.ended !== null) list(run.reasons).forEach((r) => why[stepOf(String(r), run)].push(r));
+    if (run && run.ended !== null && run.version === v) list(run.reasons).forEach((r) => why[stepOf(String(r), run)].push(r));
     // 1. The notes.
     const notesFailed = why[0].length > 0 && run && run.version === v && run.state === 'refused';
     let s1;

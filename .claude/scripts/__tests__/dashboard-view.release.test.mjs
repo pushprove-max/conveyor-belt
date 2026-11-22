@@ -112,6 +112,16 @@ test('#1365: a run waiting on its notes card shows the notes step under way with
   assert.equal(s1.querySelector('[data-list="reasons"]'), null, 'the start line is not listed as a reason the run stopped');
   assert.equal(chip(w), 'Notes card under way');
 });
+// Bug this guards (#1371): every reason of the last run was listed under the version typed in the field, so while 1.0.0
+// waited on its notes card, typing 1.1.0 showed "notes card ... started" under the notes step of 1.1.0.
+test('#1371: a version typed that the last run was not of shows none of that run\'s reasons', () => {
+  const w = boot();
+  deliver(w, data({ ...RUN, sha: null, ended: '2026-11-14T08:15:00Z', state: 'waiting', reasons: ['notes card c20261114T081500-plugin-0 started'],
+    notes: { card: 'c20261114T081500-plugin-0', then: 'release', mode: null, machine: null } }, { notes: false, written: [] }));
+  const field = card(w).querySelector('[data-field="version"]');
+  field.value = '1.1.0'; field.dispatchEvent(new w.Event('input'));
+  assert.equal(card(w).querySelector('[data-list="reasons"]'), null, 'typed 1.1.0 after a run of 1.0.0: no reasons of that run are listed');
+});
 // Bug this guards (#1375): the Draft notes tooltip said the suite runs once the notes commit is on the branch, but the
 // run also waits while another card is open (relfixes() busy), so the owner saw no reason for the wait.
 test('#1375: the Draft notes tooltip says the suite also waits for open cards', () => {
