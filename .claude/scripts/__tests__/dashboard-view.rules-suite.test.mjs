@@ -160,23 +160,10 @@ test('Rules: Release suite runs on, with no Namespace login, shows devbox login,
   assert.deepEqual(await sent(w, () => { w.clock += 60000; next(w, data(DEVBOX)); }), [], 'a login that is there is not read again by itself');
 });
 
-// Bug this guards: a refresh that differs only in readAt draws nothing (the live feed sends one every few seconds), and
-// it returned before the login retry, so Check the box stayed off after the owner logged in to Namespace.
-test('Rules: a refresh that changes only readAt still reads the missing Namespace login again', async () => {
-  const w = boot({ tab: 'rules' });
-  await devboxShown(w, false);
-  assert.ok(act(row(w), 'suite-check').disabled, 'Check the box is off while the login is missing');
-  w.reply = reply(login(true));
-  w.clock += 16000;
-  const d = data(DEVBOX);
-  d.panels.rules.data.readAt = '2026-11-22T00:00:30Z';
-  assert.deepEqual(await sent(w, () => next(w, d)), [{ action: 'suite-machine-check', args: [], repo: 'sample' }],
-    'a refresh with only a new readAt reads the login again');
-  assert.ok(!act(row(w), 'suite-check').disabled, 'Check the box is on once the login is there');
-});
-
-// Bug this guards: the login retry of a readAt-only refresh drew the tab when it started and when it ended, replacing
-// the open Group by select (issue 294) for a login that was still missing. A changed answer is still drawn.
+// Bugs this guards: the login retry of a readAt-only refresh drew the tab when it started and when it ended, replacing
+// the open Group by select (issue 294) for a login that was still missing. A changed answer is still drawn. The same
+// refresh (the live feed sends one every few seconds) also returned before the login retry, so Check the box stayed
+// off after the owner logged in to Namespace.
 test('Rules: the login retry of a readAt-only refresh keeps the open Group by select while the login stays missing', async () => {
   const w = boot({ tab: 'rules' });
   await devboxShown(w, false);
@@ -194,7 +181,8 @@ test('Rules: the login retry of a readAt-only refresh keeps the open Group by se
   w.clock += 16000;
   const e = data(DEVBOX);
   e.panels.rules.data.readAt = '2026-11-22T00:01:00Z';
-  await sent(w, () => next(w, e));
+  assert.deepEqual(await sent(w, () => next(w, e)), [{ action: 'suite-machine-check', args: [], repo: 'sample' }],
+    'a refresh with only a new readAt reads the login again');
   assert.ok(!act(row(w), 'suite-check').disabled, 'a login now there is drawn: Check the box is on');
 });
 
