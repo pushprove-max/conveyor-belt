@@ -628,8 +628,11 @@
   // waiting, skipped and open issues give it), a drag handle and a menu of Move up (not on the first), Move down (not on the
   // last) and Unpin; the first PINS_SHOWN, then "View remaining N pins". unpin takes this one issue out of the
   // record's order on the host, under its lock: an order sent whole from here would drop a pin set elsewhere (the Board).
+  // A pin whose issue the snapshot's open issues do not list is closed, and is not shown (the engine drops it at its next
+  // read of the open issues); with no list of open issues, every pin is shown.
   function rulesPins(el, c, d) {
-    const h = S.ctx.h, order = list(c.order);
+    const h = S.ctx.h, opened = d.open && Array.isArray(d.open.issues) ? new Set(d.open.issues.map((x) => x && x.issue)) : null;
+    const order = list(c.order).filter((n) => !opened || opened.has(n));
     if (!order.length) return;
     const titles = new Map(list(d.queue).concat(list(d.held), list(d.waits), list(d.skipped), list(d.open && d.open.issues), list(d.open && d.open.held))
       .filter((x) => x && typeof x.title === 'string' && x.title).map((x) => [x.issue, x.title]));

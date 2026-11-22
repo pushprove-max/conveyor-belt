@@ -119,6 +119,17 @@ test('Rules: a pinned row shows its title; dragging the first pin onto the secon
   assert.deepEqual(far, [{ action: 'order', args: ['23', '20', '22', '21', '24', '76', '99'], repo: 'sample' }], 'a drop further down moves the one pin there');
 });
 
+// Bug (#1359): a pin stayed in Pinned issues after its issue closed (the record's order is cleaned only at the next read
+// of the open issues), so a finished issue looked pinned. With no list of open issues every pin shows (as the case above).
+test('Rules: Pinned issues shows only the pins whose issue is still open in the snapshot', () => {
+  const w = boot({ tab: 'rules' });
+  const d = full();
+  d.panels.rules.data.control.order = [21, 98, 20];
+  d.panels.rules.data.open = { ...d.panels.rules.data.open, issues: [20, 21, 22].map((issue) => ({ issue, title: `Open ${issue}`, labels: [] })) };
+  deliver(w, d);
+  assert.deepEqual(Array.from(rulesP(w).querySelectorAll('[data-rule="order"] .rules-pin-row'), (p) => p.dataset.issue), ['21', '20'], '#98 is closed: not pinned');
+});
+
 // Bugs: an On/Off rule's state was not the pressed part of one control, or it waited for a Save; a seat's pick was sent
 // before its Save, or the seat said its model again beside the selects that show it.
 test('Rules: an On/Off rule is one control with its state pressed and saves at once; a seat saves only on its Save', async () => {

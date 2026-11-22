@@ -1449,13 +1449,14 @@ adopt() { # <open issues json>
   ctlput "$c" "$new"
 }
 # The record with adopt's holds added, saved nowhere: adopt saves it, and `pick --dry` reads it as the record. A
-# forced issue (`control force`) leaves forced once a card of it has landed or it is no longer open; the card records
-# are read only while forced lists one, and a line not whole yet (a card writing it) is skipped.
+# forced issue (`control force`) leaves forced, and a pinned one (`control order`) leaves order, once a card of it has
+# landed or it is no longer open; the card records are read only while forced or order lists one, and a line not whole
+# yet (a card writing it) is skipped.
 adopted() { # <control record> <open issues json>
-  jq -c --argjson c "$1" --arg fu "$FOLLOWUP" --rawfile r <([[ $1 == *'"forced":[]'* ]] || recs 2>/dev/null) "$INSIDE"'[.[] | select((.number | IN($c.startSeen[]) | not)
+  jq -c --argjson c "$1" --arg fu "$FOLLOWUP" --rawfile r <([[ $1 == *'"forced":[]'* && $1 == *'"order":[]'* ]] || recs 2>/dev/null) "$INSIDE"'[.[] | select((.number | IN($c.startSeen[]) | not)
       and (((.labels // [] | any(.name == $fu) | not) and (.number as $i | $c.startHeld | any($i > .from and (.to == null or $i <= .to))))
         or (.authorAssociation | type == "string") and (inside | not))) | .number] as $n
     | map(.number) as $open | [$r | splits("\n") | fromjson? | objects | select(.step == "landed") | .issue] as $landed
     | if $n == [] then $c else $c | .held = (.held + $n | unique) | .startSeen = (.startSeen + $n | unique) end
-    | if .forced == [] then . else .forced |= map(select(IN($open[]) and (IN($landed[]) | not))) end' <<<"$2"
+    | (.forced, .order) |= map(select(IN($open[]) and (IN($landed[]) | not)))' <<<"$2"
 }

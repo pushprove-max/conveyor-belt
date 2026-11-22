@@ -215,6 +215,20 @@ t_depguard() {
   [ "$(jq -c .forced "$C")" = '[3,4,5]' ] && readopen && [ "$(jq -c .forced "$C")" = '[]' ] \
     || fail "a forced issue that landed, or whose issue closed, is still forced: $(cat "$C")"
 }
+# Bug (#1359): a pinned issue (control order) stayed in the record's order for ever after its issue closed or its card
+# landed, so the Rules tab listed a finished issue as pinned. adopt() takes it out, as it does a forced one, and changes
+# nothing when the open issues could not be listed (no text at all is what a failed gh read gives; a listed [] means
+# every issue closed, and clears the pins).
+t_adoptorder() {
+  setup "$(jq -cs . <(issue 1 2026-01-01 P1) <(issue 2 2026-01-02 P1))"
+  C=$ST/control.json; ctl() { loop control "$@" 2>&1; }
+  ctl order 1 2 >/dev/null
+  fx_in 'locked adopt ""'; [ "$RC" != 0 ] && [ "$(jq -c .order "$C")" = '[1,2]' ] || fail "with no list of open issues, the pins changed: $(cat "$C")"
+  jq -c 'map(select(.number != 2))' "$STUB/issues.json" > "$STUB/issues.new" && mv "$STUB/issues.new" "$STUB/issues.json"
+  readopen; [ "$(jq -c .order "$C")" = '[1]' ] || fail "the pin of a closed issue is still in order: $(cat "$C")"
+  landed 1 >> "$ST/cards.jsonl"
+  readopen; [ "$(jq -c .order "$C")" = '[]' ] || fail "the pin of an issue whose card landed is still in order: $(cat "$C")"
+}
 # Bugs: an issue that depends on #50 is picked while a follow-up filed from #50, or one filed from that
 # follow-up, is open (held here: one kept off the belt is still waited for), or not picked once each is closed (a
 # withdrawn one too); the snapshot does not name the open follow-ups in waitsFor; an issue with no Depends on line
