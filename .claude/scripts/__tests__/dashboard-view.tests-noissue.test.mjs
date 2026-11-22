@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// The rule Tests page issues (#1330, the control record's rules.testissues): its switch in the Rules tab, sent as
-// `control rules testissues=on|off`, and, with it off, the Tests page's actions that make a card, which start the card at
-// once (test-issue: `conveyor.sh testissue` starts a card of no issue when the rule is off) in place of the issue
-// preview. Shared setup: dashboard-view.helpers.mjs.
+// The rule of the Tests page's cards with no GitHub issue (#1330, the control record's rules.testissues): its switch
+// Tests page actions in the Rules tab's Done without asking, group Cards with no GitHub issue (#1346: On is
+// testissues=off), sent as `control rules testissues=on|off`, and, with it On, the Tests page's actions that make a
+// card, which start the card at once (test-issue: `conveyor.sh testissue` starts a card of no issue when the rule is
+// off) in place of the issue preview. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
 import { boot, deliver, next, settle, full, act, rulesP, cases, iso, T0, TA } from './dashboard-view.helpers.mjs';
 
@@ -17,24 +18,29 @@ function rulesData(v) {
   return d;
 }
 const row = (w) => rulesP(w).querySelector('.rules-set [data-rule="testissues"]');
-const pressed = (w) => ['testissues-on', 'testissues-off'].map((a) => act(rulesP(w), a).getAttribute('aria-pressed'));
+const pressed = (w) => ['noissue-tests-on', 'noissue-tests-off'].map((a) => act(rulesP(w), a).getAttribute('aria-pressed'));
 
-// Bugs this guards: the owner could not turn off the issues of the Tests page's actions from the Board; Off sent
-// nothing or another rule; the row was not in Picking, or did not say what Off does; an engine before the rule was
-// sent a rule it refuses.
-test('Rules: Tests page issues, in Picking and On by default, is turned off and on from its row, and says what Off does', async () => {
+// Bugs this guards (#1346 D3, D7): the switch stayed under Picking, or was not in Done without asking's group Cards
+// with no GitHub issue; its On kept the old meaning (files an issue), so a project that had set testissues=off saw it
+// Off and one with the default saw it On; On or Off sent nothing or the opposite rule; the row did not say what Off
+// does; an engine before the rule was sent a rule it refuses.
+test('Rules: Tests page actions, under Done without asking in Cards with no GitHub issue, is On for testissues off and sends the rule turned', async () => {
   const w = boot({ tab: 'rules' });
   deliver(w, rulesData(true));
-  assert.equal(row(w).closest('.rules-set').dataset.set, 'picking');
-  assert.match(row(w).textContent, /Tests page issues/);
-  assert.deepEqual(pressed(w), ['true', 'false']);
-  assert.deepEqual(await sent(w, () => act(rulesP(w), 'testissues-off').click()), [{ action: 'rules', args: ['testissues=off'], repo: 'sample' }]);
+  const group = row(w).closest('.rules-group');
+  assert.equal(row(w).closest('.rules-set').dataset.set, 'standing', 'the switch is in Done without asking');
+  assert.equal(rulesP(w).querySelector('.rules-set[data-set="picking"] [data-rule="testissues"]'), null, 'the switch is no longer under Picking');
+  assert.ok(group && group.dataset.group === 'noissue' && group.querySelector('.rules-group-name').textContent === 'Cards with no GitHub issue', 'the switch is in its group');
+  assert.match(row(w).textContent, /Tests page actions/);
+  assert.deepEqual(pressed(w), ['false', 'true'], 'testissues true (the default: issues filed) shows Off');
+  assert.match(row(w).textContent, /off: an action on the Tests page files a GitHub issue, and the belt builds that issue as a card/);
+  assert.deepEqual(await sent(w, () => act(rulesP(w), 'noissue-tests-on').click()), [{ action: 'rules', args: ['testissues=off'], repo: 'sample' }]);
   next(w, rulesData(false));
-  assert.deepEqual(pressed(w), ['false', 'true']);
-  assert.match(row(w).textContent, /off: an action on the Tests page starts its card at once, with no GitHub issue/);
-  assert.deepEqual(await sent(w, () => act(rulesP(w), 'testissues-on').click()), [{ action: 'rules', args: ['testissues=on'], repo: 'sample' }]);
+  assert.deepEqual(pressed(w), ['true', 'false'], 'a project that had set testissues=off shows On');
+  assert.doesNotMatch(row(w).textContent, /off:/);
+  assert.deepEqual(await sent(w, () => act(rulesP(w), 'noissue-tests-off').click()), [{ action: 'rules', args: ['testissues=on'], repo: 'sample' }]);
   next(w, rulesData('none'));
-  assert.ok(act(rulesP(w), 'testissues-on').disabled && act(rulesP(w), 'testissues-off').disabled, 'an older engine is sent neither');
+  assert.ok(act(rulesP(w), 'noissue-tests-on').disabled && act(rulesP(w), 'noissue-tests-off').disabled, 'an older engine is sent neither');
   assert.match(row(w).textContent, /needs a newer Conveyor/);
 });
 

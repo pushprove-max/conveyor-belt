@@ -66,9 +66,11 @@
   // The words of each action's change (words), from its args a.
   const seatWords = (a, action) => `${action === 'model' ? 'builder' : 'reviewer'} ${a[0] === 'default' ? 'back to the default' : a.join(' ')}`;
   const accountWords = (a, action) => `${action === 'account' ? 'account' : 'review account'} ${a.length ? a[0] : 'back to the default'}`;
-  const RULE_WORDS = { followups: 'Follow-ups', push: 'Push on landing', visible: 'Approve visible changes', lint: 'Lint check', testissues: 'Tests page issues', split: 'Split large issues', pick: 'Pick settings' };
+  const RULE_WORDS = { followups: 'Follow-ups', push: 'Push on landing', visible: 'Approve visible changes', lint: 'Lint check', split: 'Split large issues', pick: 'Pick settings' };
   const WORDS = {
-    rules: (a) => a.map((x) => { const [k, o] = x.split('='); return isArea(k) ? `${o === 'off' ? 'never build' : 'build'} ${k}` : `${own(RULE_WORDS, k) ? RULE_WORDS[k] : k} ${o}`; }).join(', '),
+    // testissues, the switch Tests page actions of Cards with no GitHub issue, is On while the record's rule is off.
+    rules: (a) => a.map((x) => { const [k, o] = x.split('='); return isArea(k) ? `${o === 'off' ? 'never build' : 'build'} ${k}`
+      : k === 'testissues' ? `Tests page actions with no GitHub issue ${o === 'off' ? 'on' : 'off'}` : `${own(RULE_WORDS, k) ? RULE_WORDS[k] : k} ${o}`; }).join(', '),
     cap: (a) => (a[0] === 'off' ? 'at once: the default' : `at once ${a[0]}`),
     guard: (a) => (a[0] === 'off' ? 'pause at: off' : `pause at ${a[0]}%`),
     atonce: (a) => `parallel suite: ${a[0]} test file${a[0] === '1' ? '' : 's'} at once`,

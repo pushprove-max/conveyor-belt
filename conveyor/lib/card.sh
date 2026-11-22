@@ -187,9 +187,10 @@ reviewseen() { # <worktree> <the proof's heading>
   printf '%s' "$m"
 }
 # The commit message of a card of an issue: its subject from the pack's type label (fix, else feat) and area prefix
-# (its first area label, else product), then its Closes and card lines; a Tests page card's (number 0) names no issue.
+# (its first area label, else product), then its Closes and card lines; a card with no GitHub issue's (number 0) names no issue, and carries its body (the words it came from), a closing keyword's issue named without its # or address so the push closes none. With the pack's privacy.mode public, such a message has each word the privacy check flags masked (privmask(), lib/issues.sh), as a follow-up's text is: the body can quote test output, and the push checks no commit message. Fails when the pack or the check could not be read.
 cardsubject() { # <card> <issue json>
-  jq -r --arg c "$1" --arg t "$TYPE" --arg p "$AREA" '(.labels | map(.name)) as $l | (.number != 0) as $i | "\(if $l | index($t) then "fix" else "feat" end)(\($l | map(select(startswith($p)) | ltrimstr($p)) | .[0] // "product")): \(.title)\(if $i then " (#\(.number))" else "" end)\n\n\(if $i then "Closes #\(.number)\n" else "" end)Conveyor card \($c)"' <<<"$2"
+  local m pm; m=$(jq -r --arg c "$1" --arg t "$TYPE" --arg p "$AREA" '(.labels | map(.name)) as $l | (.number != 0) as $i | "\(if $l | index($t) then "fix" else "feat" end)(\($l | map(select(startswith($p)) | ltrimstr($p)) | .[0] // "product")): \(.title)\(if $i then " (#\(.number))" else "" end)\n\n\(if $i then "Closes #\(.number)\n" else .body // "" | gsub("(?i)\\b(?<k>close[sd]?|fix(?:e[sd])?|resolve[sd]?)(?<s>:?\\s+)(?:https?://\\S+/(?:issues|pull)/|(?<r>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#)(?<n>[0-9]+)"; "\(.k)\(.s)issue \(if .r then .r + " " else "" end)\(.n)") | sub("\\s+\\z"; "") | if . == "" then "" else . + "\n\n" end end)Conveyor card \($c)"' <<<"$2") && packget privacy.mode pm || return 1
+  if [ "$pm" = public ] && [ "$(jq -r .number <<<"$2")" = 0 ]; then privmask "$m"; else printf '%s\n' "$m"; fi
 }
 # A failed (or held) test step's line, past its common fields: the run's record (testrec()), its reason (the exit, and
 # the timeout with the file still running when there was one), its failures (testfails()), the last 60 lines of its
@@ -310,7 +311,7 @@ card() { # <card> <issue> [<branch> <tip>]
   [ -n "$br" ] || [ "$n" = 0 ] || modelpick "$c" "$n"
   go=end; cardopen; sx=$?; [ "$go" != end ] || return $sx
   go=end; cardbuild; sx=$?; [ "$go" != end ] || return $sx
-  msg=$(cardsubject "$c" "$issue")
+  msg=$(cardsubject "$c" "$issue") || { block "$c" "$n" "$wt" "the engine could not make the card's commit message, or its privacy check could not be made, so nothing landed"; return; }
   # A branch that names no issue lands under its own first commit's subject, which names no issue to close.
   [ "$n" != 0 ] || [ -z "$br" ] || msg=$(jq -r --arg c "$c" --arg b "$br" '"\(.title)\n\nConveyor card \($c), branch \($b)"' <<<"$issue")
   prv=$'\n\n'"$PORTREVIEW"$'\n'"The difference is the file $wt.port."; kp=$fromk/$from.patch
@@ -335,7 +336,8 @@ cardopen() {
     || { block "$c" "$n" "$wt" "worktree: branch $br does not merge into main as it stands; rebase it on main and land it again: ${err:0:400}"; return; }
   # Its issue's retried lines, read by prior() and carried(), kept in this shell (stdb, lib/records.sh).
   [ "$n" = 0 ] || stdb ask issue retried "$n" >/dev/null 2>&1 || :
-  # A card of issue 0 with no branch is a main-red fix card (mainred.sh redpick()) or a Tests page card (testpick(), lib/testaction.sh): its record stands in.
+  # A card of issue 0 (no GitHub issue): its local record stands in, a branch's (branchissue()), a main-red fix card's (redissue()) or a Tests page card's
+  # (testcardissue(), lib/testaction.sh). None is split for its size (splitcheck() above); testpick() picks a Tests page card only once released and the cards it depends on by card id landed, and retries it once.
   issue=$(if [ -n "$br" ] && [ "$n" = 0 ]; then branchissue "$br" "$tip"; elif [ "$n" = 0 ]; then redissue "$c" || testcardissue "$c"; else gh issue view "$n" --json number,title,body,labels,milestone; fi) || issue=''
   # The control record's rule "visible changes need the owner's yes" (yesrule()), as the card starts. Off, nothing below
   # waits for or asks for a `Visible change approved:` line: no condition, section or inherited yes is held to, the
@@ -627,8 +629,8 @@ cardfix() {
   fi
   go=''
 }
-# The resume of a retried card (card()). A retried issue (not issue 0: a branch, or a main-red fix card, which `retry`
-# gives back built from nothing): the last kept review of its blocked cards comes along (its findings go in the brief,
+# The resume of a retried card (card()). A retried issue, or a card with no GitHub issue given back (testcardwas(), lib/testaction.sh; not
+# a branch, nor a main-red fix card, which `retry` gives back built from nothing): the last kept review of its blocked cards comes along (its findings go in the brief,
 # and stay kept if this card blocks before a review of its own), and the last kept patch is applied when it still
 # applies. No build and no review only when that review is the review of that patch: both kept by the same card
 # (in its kept folder, or beside its worktree when it could not be moved there).
@@ -641,7 +643,7 @@ cardfix() {
 # could not take out again, or retried lines it could not read.
 resumeplan() {
   local prev d t rev='' kw='' crev='[]' # rev: the kept review prior() found; kw: keptway()'s answer for a kept patch; crev: the review lines of the kept-patch chain this card carries (pro and rounds are read from them)
-  if [ -z "$br" ] && [ "$n" != 0 ] && prev=$(prior "$n") && [ -n "$prev" ]; then
+  if [ -z "$br" ] && prev=$(prior "$n" "$([ "$n" != 0 ] || testcardwas "$c")") && [ -n "$prev" ]; then
     from=$(jq -r .card <<<"$prev"); fromk=$(jq -r .kept <<<"$prev"); was=$(jq -r .reason <<<"$prev"); rev=$(jq -r .review <<<"$prev")
     [ -z "$rev" ] || cp "$rev" "$wt.review"
     if [ -n "$from" ]; then

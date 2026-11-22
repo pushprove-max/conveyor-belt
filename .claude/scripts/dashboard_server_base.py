@@ -110,6 +110,8 @@ SETUP_PAGE = b'''<!doctype html><meta charset=utf-8><title>Conveyor Board: set y
 # <json>] [--again] | stop [<run id>] | runs archive|restore|delete <run id>... | versions | arms check
 # [--settings <json>] <arm>... | arms save <name> <spec json> | diff <A> <B> [--json]`, an arm being a host arm's name or
 # a saved revision's ID; Start and a check answer their receipt; an admin's alone),
+# or card-issue (Landed today's File on GitHub on a landed card with no GitHub issue, by its card id: `conveyor.sh
+# cardissue <card id>`, which answers the issue's address),
 # or the Tests page's actions: testaction (`conveyor.sh testaction`: judge, explain or run one file, stop one; an
 # explain sends --time <zone> <12-hour | 24-hour>, the browser's time zone and its Time setting, first), tests
 # (its seat), mutate (Mutation check: `conveyor.sh mutate ask <file>...`, one ask for a list of files), testrules (Auto-file: `conveyor.sh testrules on|off|guard|set`), flaky-off (Keep a case off: `conveyor.sh
@@ -240,7 +242,7 @@ def bench_spec_ok(name, x):
 DECLINED_ID = re.compile(r'd[0-9a-f]{12}')  # a line of the declined list, as conveyor.sh's declined() names it
 # depends reads the open issues and writes the issue's body, each through gh (the write under gh-write's 60 s timeout).
 CONTROL_TIMEOUT = {'approve': 120, 'decline': 120, 'retry': 60, 'unblock': 60, 'close': 60,'start': 90, 'build': 60, 'depends': 120,
-                   'testaction': 60, 'testmap': 60, 'test-close': 60, 'test-issue': 60,  # testaction and testmap stop wait up to 40 s for the end
+                   'testaction': 60, 'testmap': 60, 'test-close': 60, 'test-issue': 60, 'card-issue': 150,  # card-issue files and closes, each under gh-write's 60 s; testaction and testmap stop wait up to 40 s for the end
                    'suite-machine-check': 240,  # an ssh box's check waits for its connect, then its facts; a devbox's, for its login, its list and a box leased and given back
                    'replay': 60,  # the judge replay's estimate reads every review line of the records
                    'bench': 600,  # bench diff makes one model call a flipped task; its stop waits up to 90 s (another Stop, then the run's end)

@@ -11,17 +11,32 @@ The loop looks for answers after each wait of the `tunables.idle` setting in the
 retry or shut the card by hand first, the loop closes the decision and takes no step.
 A card stopped for your yes, and a main-red fix card, are not put as decisions.
 
-With the Rules tab's **Tests page issues** Off, an action on the Tests page starts a card with no GitHub issue. Its
-record is only in Conveyor: the Board shows the card as "Tests page: <file>", with the title of the action. It
-builds, reviews, tests and lands as any card does, and is held to the same check as the issue of that action. Its
-commit names no issue, and its landing closes none. Follow-ups from its review are filed as issues. When such a card
-is blocked, Retry and Close in Needs you use its card id, as `conveyor.sh retry <card id>` and `conveyor.sh shut <card
-id>` do. Retry starts the action again as a new card. Close ends the card, and the action starts no card again.
-
 When the nightly whole test files an issue for a test that fails on main and the issue is held, the held issue also shows
 as an open decision, once. The recommended option is "Release it, first in the order": the loop puts the issue first in
 the `order` list and releases it. "Leave it held" changes nothing. If you release the issue by hand, or close it, the
 loop closes the decision.
+
+## Cards with no GitHub issue
+
+With the Rules tab's **Tests page actions** On (in **Done without asking**, group **Cards with no GitHub issue**), an
+action on the Tests page starts a card with no GitHub issue. Its record is only in Conveyor: the Board shows the card
+as "Tests page: <file>", with the title of the action. It builds, reviews, tests and lands as any card does, and is
+held to the same check as the issue of that action. No size check splits it. Follow-ups from its review are filed as
+issues.
+
+- **Held**: a card that a Foreman session starts is held until you say yes. `conveyor.sh control release <card id>`
+  releases it, and the loop picks it in its turn.
+- **Depends on**: a line `Depends on: <card id>` in the text of the card holds it until the card of that id lands.
+- **On a block**: Conveyor tries the card again one time, with its work kept. If it blocks again, it stays in Needs
+  you with its reason. Retry and Close in Needs you use its card id, as `conveyor.sh retry <card id>` and
+  `conveyor.sh shut <card id>` do. Retry starts the card again from its kept work. Close ends the card, and the action
+  starts no card again.
+- **On landing**: its commit message has its title, the text it came from and its card id. It has no `Closes` line,
+  and a "Fixes #12" in the text goes in as "Fixes issue 12", so the push closes no issue. When the pack's
+  `privacy.mode` is public, each part of the message that the privacy check flags (a home path in test output, for
+  example) goes in as a mark of what it is, such as `<home path>`. **Landed today** keeps the
+  record of the card, and its **File on GitHub** files an issue from it
+  ([Board: Done without asking](board.md#rules)).
 
 ## Build
 

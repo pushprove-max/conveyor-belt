@@ -60,10 +60,11 @@ cardready() {
   cmsg=$(grep -Ev "^Rollout: $ROLLOUT" <<<"$cmsg" || :); cmsg=$cmsg${cmsg:+${rmsg:+$'\n'}}$rmsg
   # A main-red fix card names its cases and main's commit, as its entry holds them now (a case added during its
   # build or a review too). A Tests page card of issue 0 (testcardissue(), lib/testaction.sh) keeps its subject
-  # (cardsubject()), which closes no issue.
+  # (cardsubject()), with its body, which closes no issue.
   [ "$n" != 0 ] || [ -n "$br" ] || testcardissue "$c" > /dev/null || msg=$(redmsg "$c" "$issue")
-  # The card's commit trailers go into the message after its Closes line (before the card line).
-  cmsg=$(jq -rn --arg m "$msg" --arg t "$cmsg" 'if $t == "" then $m else $m | sub("\nConveyor card "; "\n\($t)\nConveyor card ") end')
+  # The card's commit trailers go into the message after its Closes line, before its card line, the last one: a body
+  # with a line of its own that starts "Conveyor card " does not take them.
+  cmsg=$(jq -rn --arg m "$msg" --arg t "$cmsg" 'if $t == "" then $m else $m | sub("\nConveyor card (?<c>[^\n]*)\\z"; "\n\($t)\nConveyor card \(.c)") end')
   # Same-file cards (at settle()): it holds its files from its landing step through its tests and landing, unless
   # it waits here on a card that holds one of them or goes before it. Its patch still applying to main, it goes on
   # with no second review (unless an ordered card went past it and main moved: then it is reviewed again on main);

@@ -338,12 +338,13 @@ one control, and the value in force is the selected part.
    ([Reserved cores](configuration.md#cores-kept-for-you)). The row also links to the Tests page, which holds the test
    limits.
 3. **Picking**: **Build issues** (the P0 to P3 switches and Follow-ups), **Never build** (area labels), **New issues
-   start in**, **Dependency guard**, **Split large issues**, **Tests page issues** and **Pick settings**. A main-red fix card is built
+   start in**, **Dependency guard**, **Split large issues** and **Pick settings**. A main-red fix card is built
    whatever the P0 to P3 switches say, by design: held, every card that meets the red main would wait for good.
 4. **Landing and push**: **Push on landing**, **Land as**, **Merge PR**, **Test before a push**, **Lint check** and
    **Approve visible changes**.
 5. **Done without asking**: **Requested fix**, **Review follow-up**, **Release check**, **Fixed block** and
-   **Review retry**, each On or Off.
+   **Review retry**, each On or Off. Under them, the group **Cards with no GitHub issue** has **Tests page actions**,
+   On or Off.
 6. **Issue order**: **Held issues** shows the count. Click it to go to the held list. **Pinned issues** shows one
    row for each pinned issue, with its number and title. Conveyor picks them first, from top to bottom. Drag a row to
    a new place, or use its menu (**⋯**): **Move up**, **Move down** or **Unpin**. The first five pins show. **View
@@ -422,12 +423,6 @@ the Judge would split a large issue into, and builds the issue whole. The tab sa
 and the issue is built whole". On files the slices as follow-ups and as sub-issues of the issue, and holds the issue
 as their umbrella until all its slices are closed. Off checks no issue ([Split large issues](configuration.md#split-large-issues)).
 
-**Tests page issues** is a switch per project, On by default. On, an action on the Tests page that makes a card files a
-GitHub issue, and the belt builds that issue as a card. Off, the action files no issue: it starts its card at once, and
-the tab says "off: an action on the Tests page starts its card at once, with no GitHub issue". The switch covers each
-such action: Optimize, Rewrite as a direct check, Split it, Fix failures, Fix the waiting, Fix hollow cases, Make it
-run, Make it run alone and Delete it. `conveyor.sh control rules testissues=off` sets the same switch from a shell.
-
 **Pick settings** has three settings per project: Off, Shadow and On. Off is the default. Shadow and On record the
 group of each card, the builder that the rule chooses for it, and the Judge's choice of seats. With Shadow, the card
 builds on its builder as before, and the tab says "shadow: the pick is recorded, and the card builds on its builder
@@ -452,6 +447,21 @@ The **Done without asking** rules turn each standing kind of yes on or off ([Sta
 All are Off until you turn them on. **Review retry** On: the Foreman's watcher tries again each card
 that its review blocked, and the Foreman gets no wake for it. A retry that fails still wakes the Foreman, with the
 reason.
+
+The group **Cards with no GitHub issue**, under **Done without asking**, has the switch **Tests page actions**, one per
+project. It is Off by default. Off, an action on the Tests page that makes a card files a GitHub issue, and the belt
+builds that issue as a card. The tab then says "off: an action on the Tests page files a GitHub issue, and the belt
+builds that issue as a card". On, the action files no issue: it starts its card at once. The switch covers each such
+action: Optimize, Rewrite as a direct check, Split it, Fix failures, Fix the waiting, Fix hollow cases, Make it run,
+Make it run alone and Delete it. From a shell, `conveyor.sh control rules testissues=off` turns the switch On, and
+`testissues=on` turns it Off. A project that set this switch when it was under **Picking** keeps its choice.
+
+A card with no GitHub issue builds, is reviewed, is tested and lands as other cards do
+([Cards with no GitHub issue](cards.md#cards-with-no-github-issue)). In **Landed today**, its row keeps its title, its
+steps and its result, and **Card text** shows the text that it came from. **File on GitHub** files an issue with the
+title and text of the card. Conveyor closes that issue at once with a comment that names the commit, because the work
+is already on main. The row then links the issue. A card that shows **Already fixed** landed no commit, so its row has
+no **File on GitHub**.
 
 ## Held issues and dependencies
 
@@ -897,12 +907,13 @@ An issue that you file from the Tests page goes to the queue. When the Rules tab
 issue is held. `conveyor.sh testissue <test file> <title> <body>` files the same issue from a shell. When a Foreman
 session runs it, the issue is held too, and the command says so.
 
-When the Rules tab's **Tests page issues** is Off, these buttons show no preview and file no issue. A click starts the
-card at once, with the title and text that the preview would show, and the row says "Card queued with no GitHub
-issue". Optimize on the selected files does the same for each file. The loop picks such a card before the queue. On
-the belt the card shows as "Tests page: <file>", with its title. `conveyor.sh testissue` does the same when the rule
-is Off, also while New issues start in is Held: you asked for the card. For a Foreman session it files the issue and
-holds it, as when the rule is On: a card with no issue cannot wait for your yes.
+When the Rules tab's **Tests page actions** (under **Cards with no GitHub issue**) is On, these buttons show no preview
+and file no issue. A click starts the card at once, with the title and text that the preview would show, and the row
+says "Card queued with no GitHub issue". Optimize on the selected files does the same for each file. The loop picks
+such a card before the queue. On the belt the card shows as "Tests page: <file>", with its title. `conveyor.sh
+testissue` does the same when the switch is On, also while New issues start in is Held: you asked for the card. For a
+Foreman session it files no issue either, but the card starts held, and the command says so. The card waits for your
+yes: `conveyor.sh control release <card id>` releases it.
 
 Split it shows the issue first, with the title "Split the test file <file>". Its text asks for two or more test files
 of the same area, with each case kept once and unchanged, each new file under 600 lines, and

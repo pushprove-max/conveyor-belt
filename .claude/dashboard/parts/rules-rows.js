@@ -482,15 +482,17 @@
         : splitAt === 'off' ? offLine(false, 'no issue is checked') : null));
   }
   function rulesTestIssues(el, r) {
-    // Tests page issues (#1330): On (the default) files a GitHub issue for each card a Tests page action makes
-    // (`conveyor.sh testissue`); Off starts that card at once with no issue. An engine whose record has no
+    // Tests page actions, in Done without asking's group Cards with no GitHub issue (#1330, #1346): On starts the
+    // card a Tests page action makes at once with no GitHub issue (`conveyor.sh testissue`), the record's
+    // rules.testissues false; Off (the default, rules.testissues true) files a GitHub issue for it. The record keeps
+    // the same setting as before the move, so a project that set it keeps its choice. An engine whose record has no
     // rules.testissues is sent neither choice.
-    const on = r.testissues !== false, known = typeof r.testissues === 'boolean';
-    const tOn = choice('On', 'testissues-on', 'Tests page issues: on', on, () => { if (!on) send('rules', ['testissues=on'], null, ['rules', ['testissues=off']]); });
-    const tOff = choice('Off', 'testissues-off', 'Tests page issues: off', !on, () => { if (on) send('rules', ['testissues=off'], null, ['rules', ['testissues=on']]); });
+    const on = r.testissues === false, known = typeof r.testissues === 'boolean';
+    const tOn = choice('On', 'noissue-tests-on', 'Tests page actions with no GitHub issue: on', on, () => { if (!on) send('rules', ['testissues=off'], null, ['rules', ['testissues=on']]); });
+    const tOff = choice('Off', 'noissue-tests-off', 'Tests page actions with no GitHub issue: off', !on, () => { if (on) send('rules', ['testissues=on'], null, ['rules', ['testissues=off']]); });
     tOn.disabled = tOff.disabled = !known;
-    el.append(row('testissues', 'Tests page issues', 'an action on the Tests page files a GitHub issue, and the belt builds that issue as a card',
-      seg('Tests page issues', tOn, tOff), known ? offLine(on, 'an action on the Tests page starts its card at once, with no GitHub issue') : newer(known)));
+    el.append(row('testissues', 'Tests page actions', 'an action on the Tests page starts its card at once, with no GitHub issue',
+      seg('Tests page actions', tOn, tOff), known ? offLine(on, 'an action on the Tests page files a GitHub issue, and the belt builds that issue as a card') : newer(known)));
   }
   function rulesPick(el, d, r) {
     const h = S.ctx.h;
@@ -671,16 +673,24 @@
   }
   function rulesIndexed(el) {
     const h = S.ctx.h;
-    // The six groups (SETS), each with its rows; the index and the search pick which show (index()). The setup takes
-    // the rows by their rule from here, so a row stays a .rules-row of its own.
+    // The six groups (SETS), each with its rows, and a group of rows inside one under its own name; the index and the
+    // search pick which show (index()). The setup takes the rows by their rule from here, so a row stays a .rules-row
+    // of its own.
     const byRule = new Map(Array.from(el.querySelectorAll(':scope > .rules-row'), (x) => [x.dataset.rule, x]));
+    const rowsOf = (keys) => keys.filter((x) => byRule.has(x)).map((x) => byRule.get(x));
     const sets = h('div', 'rules-sets');
     SETS.forEach(([k, name, what, keys]) => {
       const set = h('section', 'rules-set');
       set.dataset.set = k;
       set.append(h('h4', 'rules-set-name', name), h('p', 'rules-set-what', what),
         ...(k === 'models' ? [h('p', 'rules-set-what', 'Save model changes per seat. Other rules save as you change them.')] : []),
-        ...keys.filter((x) => byRule.has(x)).map((x) => byRule.get(x)));
+        ...keys.flatMap((x) => {
+          if (!Array.isArray(x)) return rowsOf([x]);
+          const [g, gname, ...grows] = x, group = h('section', 'rules-group');
+          group.dataset.group = g;
+          group.append(h('h5', 'rules-group-name', gname), ...rowsOf(grows));
+          return [group];
+        }));
       sets.append(set);
     });
     const none = h('p', 'board-from rules-none');
@@ -701,9 +711,10 @@
     both.append(pick, sets);
     el.append(h('p', 'rules-hint', 'Choose a group or search for a rule to edit it in place.'), both);
   }
-  // The Rules panel shows the group picked, or, with search text, each rule whose group's name, own name or key holds
-  // it (any case), and each group with such a rule; with none, a line that says so. The index marks the group picked
-  // while no search is typed.
+  // The Rules panel shows the group picked, or, with search text, each rule whose group's name (or the name of the
+  // group of rows it is in), own name or key holds it (any case), and each group with such a rule; with none, a line
+  // that says so. A group of rows with no rule shown is hidden too. The index marks the group picked while no search
+  // is typed.
   function index(el) {
     const q = S.ruleFind.trim().toLowerCase();
     let any = false;
@@ -711,10 +722,12 @@
       const name = set.querySelector('.rules-set-name').textContent.toLowerCase();
       let hits = 0;
       set.querySelectorAll('.rules-row').forEach((r) => {
-        const hit = !q || name.includes(q) || r.dataset.rule.includes(q) || r.querySelector('.board-label').textContent.toLowerCase().includes(q);
+        const g = r.closest('.rules-group'), gname = g ? g.querySelector('.rules-group-name').textContent.toLowerCase() : '';
+        const hit = !q || name.includes(q) || (g && gname.includes(q)) || r.dataset.rule.includes(q) || r.querySelector('.board-label').textContent.toLowerCase().includes(q);
         r.hidden = !hit;
         if (hit) hits += 1;
       });
+      set.querySelectorAll('.rules-group').forEach((g) => { g.hidden = !Array.from(g.querySelectorAll('.rules-row')).some((r) => !r.hidden); });
       set.hidden = q ? !hits : set.dataset.set !== S.ruleSet;
       if (!set.hidden) any = true;
     });

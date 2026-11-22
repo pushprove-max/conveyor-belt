@@ -9,6 +9,9 @@
 // Under the day's sum, the day's totals, one line a project: the findings the judge accepted and declined on the
 // reviews of the cards that landed today, and the fix rounds of those cards. The live part holds the day's newest
 // cards; the older ones come from the history (older below).
+// A card with no GitHub issue (issue 0) also has body, and filed and filedUrl once File on GitHub filed an issue from it.
+// What File on GitHub asked, by card ("<repo>/<card>"): {busy} while it is out, then {said}, the build machine's answer.
+const FILING = new Map();
 window.DASH_APP.panel({
   id: 'landed',
   title: 'Landed today',
@@ -51,9 +54,38 @@ window.DASH_APP.panel({
     // an open tip, and draws again only a card that changed (every card when the panel is drawn whole, ctx.whole).
     const ul = el.querySelector(':scope > ul.rows') || h('ul', 'rows');
     const keyOf = (c) => `${c.repo}/${c.card}`;
+    // The record of a card with no GitHub issue (body: the words it came from): its text, folded, and File on GitHub,
+    // which files an issue with its title and body (`conveyor.sh cardissue`, closed at once: the work is on main), or,
+    // once one is filed, its link. What the build machine answered shows under it (FILING) until a new part has the link.
+    const record = (c) => {
+      const box = h('div', 'row-record'), text = h('details', 'row-body'), f = FILING.get(keyOf(c));
+      text.append(h('summary', null, 'Card text'), h('p', 'row-body-text', c.body || 'no text'));
+      box.append(text);
+      // A card closed as already fixed landed nothing, and `cardissue` files only for a landed card: no button.
+      if (c.step === 'closed') return box;
+      if (typeof c.filedUrl === 'string' && c.filedUrl) {
+        const a = h('a', 'issue-link', typeof c.filed === 'number' ? `Filed as #${c.filed}` : 'Filed on GitHub');
+        a.href = c.filedUrl; a.target = '_blank'; a.rel = 'noopener';
+        box.append(a);
+        return box;
+      }
+      const b = h('button', 'btn btn-quiet', 'File on GitHub');
+      b.type = 'button'; b.dataset.act = 'card-issue'; b.disabled = !!(f && f.busy);
+      b.setAttribute('aria-label', `File an issue on GitHub from card ${c.card}, with its title and text`);
+      b.addEventListener('click', () => {
+        const done = (ok, t) => { FILING.set(keyOf(c), { said: ok ? `Filed: ${t}` : `Not filed: ${t}` }); ctx.redraw(); };
+        FILING.set(keyOf(c), { busy: true, said: 'Asking the build machine…' }); ctx.redraw();
+        ctx.post('control', { action: 'card-issue', args: [c.card], repo: c.repo })
+          .then((r) => r.text().then((t) => done(r.ok, String(t).trim() || `the build machine answered ${r.status}`)),
+            () => done(false, 'the build machine did not answer. Make sure that it is on. Then try again'));
+      });
+      box.append(b);
+      if (f && f.said) box.append(h('span', 'board-from', f.said));
+      return box;
+    };
     // The collector gives them newest first.
     const fill = (li, c) => {
-      const json = JSON.stringify(c);
+      const json = JSON.stringify([c, FILING.get(keyOf(c)) || null]);
       if (li.json === json && !ctx.whole) return;
       li.json = json;
       const parts = [];
@@ -76,6 +108,7 @@ window.DASH_APP.panel({
         h('span', null, `landed ${ctx.clock(c.time)}`), h('span', null, `${c.reviews} ${c.reviews === 1 ? 'review' : 'reviews'}`), h('span', 'num', ctx.money(c.usd)));
       if (Array.isArray(c.followups) && c.followups.length) meta.append(h('span', null, `follow-ups ${c.followups.map((n) => `#${n}`).join(' ')}`));
       parts.push(head, meta);
+      if (c.issue === 0 && typeof c.body === 'string') parts.push(record(c));
       // Its rollout actions, beside its push state: what an operator must do, in order, to deploy it. No finding.
       (Array.isArray(c.rollout) ? c.rollout : []).forEach((r) => {
         if (r && typeof r.action === 'string') parts.push(h('p', 'row-meta', `Before deploy: ${r.action}. Without it: ${r.fails}. At ${r.place}`));

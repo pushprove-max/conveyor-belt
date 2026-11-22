@@ -150,7 +150,7 @@
     // With no Tests model (or every file a runner, for Optimize) a click says why in the bar: each file left out.
     const judge = actBtn('Judge', 'bulk-judge', `Judge the ${n} selected files`, () => startMany('judge', files));
     if (!tmodel()) judge.title = NO_SEAT;
-    // With the rule Tests page issues off (noIssue()), it starts a card for each, with no GitHub issue, in place of the preview.
+    // With the Rules tab's Cards with no GitHub issue: Tests page actions On (noIssue()), it starts a card for each, with no GitHub issue, in place of the preview.
     const opt = actBtn('Optimize', 'bulk-optimize', `Optimize: ${noIssue() ? 'start a card with no GitHub issue' : 'preview an issue'} for each of the ${n} selected files`, () => {
       const { files: fs, left } = chosen(files, 'optimize');
       S.answers = null;  // the preview names the files left out

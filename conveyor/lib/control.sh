@@ -2,7 +2,7 @@
 # The control record, whole: the file's keys over CTL0's, so a record written before a key existed still reads.
 # mode is run, pause or stop; cap and guard are a number or null; held and order are issue numbers; rules.never is
 # the area labels never built, rules.push whether a card that lands is pushed (off: land only, owed()), rules.visible whether a visible change
-# needs the owner's yes (yesrule()), rules.lint the rule Lint check (lintgate(), lib/lint.sh), rules.testissues the rule Tests page issues (testissue(), lib/testaction.sh), rules.split the rule Split large issues, off, shadow or on (splitcheck(), lib/slices.sh), rules.pick the rule Pick settings, the same (modelpick(), lib/modelpick.sh), picks the owner's decision on each group's trial challenger ({"<small|medium> <docs|code>": {decision: promote, keep, drop, add or next, at, challenger and promoted: {model, effort}, when the owner's next set them}}) and on the reviewer and judge seats ({"reviewer" or "judge": {decision: promote, at, choice: {model, effort}}}, `control pick`) and pickBack null or {at, reason}, the rule's own return to shadow (pickback()); model, reviewer and judge (the review's judge, judgeseat()) are null or {cli: the
+# needs the owner's yes (yesrule()), rules.lint the rule Lint check (lintgate(), lib/lint.sh), rules.testissues the Rules tab's Cards with no GitHub issue: Tests page actions, On while it is false (testissue(), lib/testaction.sh), rules.split the rule Split large issues, off, shadow or on (splitcheck(), lib/slices.sh), rules.pick the rule Pick settings, the same (modelpick(), lib/modelpick.sh), picks the owner's decision on each group's trial challenger ({"<small|medium> <docs|code>": {decision: promote, keep, drop, add or next, at, challenger and promoted: {model, effort}, when the owner's next set them}}) and on the reviewer and judge seats ({"reviewer" or "judge": {decision: promote, at, choice: {model, effort}}}, `control pick`) and pickBack null or {at, reason}, the rule's own return to shadow (pickback()); model, reviewer and judge (the review's judge, judgeseat()) are null or {cli: the
 # CLI that runs the seat (claude, codex or opencode), model, effort (null: the seed's)}, cli left out of one that names
 # a model of the pack's models.allowed, whose program it is (seatnow()); fix (the session that repairs review
 # findings) and testFix (the one that repairs failed changed tests) are null, the card's builder, or a builder seat of
@@ -43,8 +43,8 @@ CTL_K=()
 # before a push runs (pushCheck null). A card that lands is not pushed (rules.push
 # off: land only, owed()): it waits for the Board's Push landed, or for the owner to turn the rule on. A visible change needs no yes from the owner (rules.visible off; on: a card waits for a
 # `Visible change approved:` line, yesrule()). The rule Lint check is on (rules.lint: the pack's lint commands run at
-# the review gate, lintgate(), lib/lint.sh). The rule Tests page issues is on (rules.testissues: a Tests page action
-# files a GitHub issue for its card; off, its card starts with none). The rule Split large issues is on (rules.split: the judge's
+# the review gate, lintgate(), lib/lint.sh). rules.testissues is on (a Tests page action files a GitHub issue for its
+# card; off, the Rules tab's Cards with no GitHub issue: Tests page actions On, its card starts with none). The rule Split large issues is on (rules.split: the judge's
 # verdict on a large issue that is too big is acted on: its slices are filed, splitcheck()). The rule Pick settings is off
 # (rules.pick: no card's group and builder choice is recorded, modelpick()). No Tests seat is set: no test action starts (testaction()). The project
 # is not onboarded (onboarded null; `control onboarded` sets {at, rules}: when the owner finished the Board's setup and

@@ -25,4 +25,10 @@ elif [ "${1:-}" = card ] && [ "${3:-}" = pick ]; then
   . "$HERE/lib/review.sh" || exit 1
   cardpick "$2"
 else case ${1:-}:${2:-} in model:* | reviewer:* | judge:* | tests:*) [[ " $CLINAMES " != *" ${2:-} "* ]] || hostclis "$2" >/dev/null ;; esac
+  # `release <card id>` of a held card with no GitHub issue (testrelease(), lib/testaction.sh); any other card id is
+  # refused by control() as before.
+  if [ "${1:-}" = release ] && [ $# = 2 ] && [[ $2 =~ ^c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0$ ]]; then
+    . "$HERE/lib/testaction.sh" || exit 1
+    testrelease "$2"; rc=$?; [ "$rc" = 3 ] || exit "$rc"
+  fi
   locked control "$@"; fi

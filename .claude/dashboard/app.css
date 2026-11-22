@@ -741,6 +741,7 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .rules-set + .rules-set { margin-top: var(--sp-4); }
 .rules-set-name { margin: 0; font-size: var(--fs-md); font-weight: 700; }
 .rules-set-what { margin: 0; font-size: var(--fs-sm); color: var(--muted); }
+.rules-group-name { margin: var(--sp-3) 0 0; font-size: var(--fs-sm); font-weight: 700; }
 .rules-row { display: grid; grid-template-columns: minmax(16ch, 26ch) minmax(0, 1fr); align-items: center; gap: var(--sp-3); padding: var(--sp-3) 0; border-top: 1px solid var(--surface-2); }
 .rules-key { display: grid; }
 /* A narrow Rules panel (by its own width, not the window's): the groups above the group, then each rule's label and

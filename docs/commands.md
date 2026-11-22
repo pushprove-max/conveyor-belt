@@ -99,9 +99,10 @@ Cards:
 - `parts <parent> <issue>...` attaches the issues as GitHub sub-issues of the parent ([Issues](#issues)).
 - `retry <issue>` gives a blocked card back; with `--fresh`, its next card builds from nothing. `shut <issue>` stops an open card and shuts it, or shuts a blocked card whose issue was closed. `unblock <issue> --hold` holds a
   blocked card's issue and keeps its work. A main-red fix
-  card has no issue. It shows as "Main is red (<commit>)". A card from the Tests page with the rule Tests page issues
-  Off has no issue too. It shows as "Tests page: <file>". For these cards, use `retry <card id>` and
-  `shut <card id>`. `retry 0` lists the blocked ones by card id.
+  card has no issue. It shows as "Main is red (<commit>)". A card from the Tests page with the Rules tab's Tests page
+  actions On (Cards with no GitHub issue) has no issue too. It shows as "Tests page: <file>". For these cards, use
+  `retry <card id>` and `shut <card id>`. `retry 0` lists the blocked ones by card id. `control release <card id>`
+  releases such a card that started held.
 - `land-branch <branch>` lands a branch's tip as one card, reviewed and tested as any card. A branch named as a card
   id (`c<time>-<project>-<issue>`) lands as that issue. Other branches land as issue 0, also when the name has a
   number in it. A blocked card of issue 0 is closed with `shut <card id>`. Its kept patch stays, and its branch is
@@ -148,6 +149,8 @@ Tests:
   At most 3 run at once; the others wait as queued. `testaction stop <id>` stops one, or takes a queued one off
   (`conveyor/README.md`, Test actions).
 - `testissue <test file> <title> <body>` files the Board's issue about one test file.
+- `cardissue <card id>` is the Board's File on GitHub on a landed card with no GitHub issue. It files an issue with
+  the card's title and text, closes it with a comment that names the commit, and prints its address.
 - `testmap` prints the state of the test map. `testmap build` makes the map now, on a test slot, and `testmap stop`
   stops that build ([The test map](configuration.md#the-test-map)).
 - `mutate <test file>` runs a mutation check of one test file now: it changes a line of the code the file tests, up

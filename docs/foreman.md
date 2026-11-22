@@ -173,11 +173,13 @@ already solves the same problem (or that none was found), and what the reader se
 The check also covers `foreman.sh ask <project> testissue`. An issue for new work that you ordered, with neither the
 section nor the label, is not checked, and nor is an issue that the engine files itself, such as a follow-up.
 
-The Foreman can also file an issue about a test file with `conveyor.sh testissue`, the Tests page's command. This
-command holds the issue in the project's record and says so. It does this for a Foreman session, also when the Rules
-tab's **Tests page issues** is Off. It also holds an issue that it files when the project's New issues start in is
-Held. The Foreman runs it with `foreman.sh ask <project> testissue`, so the issue is held also when the project is on
-a host, or is another project of the Foreman's group.
+The Foreman can also file an issue about a test file with `conveyor.sh testissue`, the Tests page's command. For a
+Foreman session, this command holds the issue in the project's record and says so. It also holds an issue that it
+files when the project's New issues start in is Held. When the Rules tab's **Tests page actions** (under **Cards with
+no GitHub issue**) is On, the command files no issue. For a Foreman session, it starts a held card with no GitHub
+issue and says so: `conveyor.sh control release <card id>` releases the card after your yes. The Foreman runs the
+command with `foreman.sh ask <project> testissue`, so the issue or the card is held also when the project is on a
+host, or is another project of the Foreman's group.
 
 The Foreman's start names `foreman.sh` by one command, `conveyor/foreman.sh` in the data folder (`~/.local/share`
 unless `XDG_DATA_HOME` says otherwise). Its path does not change when the engine moves to a new version, and it runs

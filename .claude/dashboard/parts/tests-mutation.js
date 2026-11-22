@@ -101,10 +101,11 @@
       say(ok ? said(text) : `Not done: ${S.ctx.refusal(text)}`);
     });
   }
-  // The rule Tests page issues (#1330, the control record's rules.testissues): with it off, an action that makes a card
+  // The Rules tab's Cards with no GitHub issue: Tests page actions (#1330, the control record's rules.testissues): with
+  // it On (rules.testissues off), an action that makes a card
   // (Optimize, Fix failures, Split it and the other fix actions) starts that card at once, with no GitHub issue: its
   // draft d is sent as it is (test-issue: `conveyor.sh testissue`, which starts the card when the rule is off), in place
-  // of the issue preview. With it on, the preview opens (keep: the field to focus), to be edited and filed.
+  // of the issue preview. With it Off, the preview opens (keep: the field to focus), to be edited and filed.
   const noIssue = () => { const c = obj(S.d && S.d.control); return !!(c && obj(c.rules) && c.rules.testissues === false); };
   function askIssue(d, keep) {
     const k = dk(d.file), note = (state, text = '') => S.notes.set(k, { what: d.what || 'Optimize', state, text });

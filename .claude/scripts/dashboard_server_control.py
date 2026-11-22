@@ -198,6 +198,9 @@ def control_ok(body):
         return n % 3 == 0 and 3 <= n <= 3 * TEST_FILES_MAX and all(
             TEST_FILE.fullmatch(f) is not None and said_ok(t) and len(t) <= 200 and 1 <= len(b.strip()) and len(b) <= TEST_ISSUE_BODY
             and all(line.isprintable() for line in b.split('\n')) for f, t, b in zip(v[0::3], v[1::3], v[2::3]))
+    if a == 'card-issue':  # Landed today's File on GitHub on a landed card with no GitHub issue, by its card id
+        # (REDCARD comes from the base part, run in this namespace: globals() names it where a linter reads this file alone.)
+        return n == 1 and globals()['REDCARD'].fullmatch(v[0]) is not None
     return False
 
 
@@ -511,6 +514,10 @@ def control_script(action, args, main, today, record=None, user=None):
         return '%s flaky off %s %s %s' % (conv, q(args[0]), q('Board user %s' % user), q(args[1]))
     if action == 'test-close':
         return 'cd %s || exit 1; %s gh-write issue close %s --comment %s' % (q(record or main), conv, q(args[0]), q(args[1]))
+    if action == 'card-issue':
+        # The engine files the issue from the card's record (its title and body), closes it naming the commit the card
+        # landed as, and answers its address.
+        return f'cd {q(record or main)} || exit 1; {conv} cardissue {q(args[0])}'
     if action == 'test-issue':
         # The engine files it (the pack's type and last priority) and keeps it for the file's row: Close its issue as done.
         # The owner pressed the button: the Foreman's mark that a Board started from a Foreman session inherits is

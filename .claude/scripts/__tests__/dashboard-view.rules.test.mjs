@@ -11,8 +11,8 @@ test('Rules: one row a rule on the left, what the snapshot says they produce on 
   const w = boot({ tab: 'rules' });
   deliver(w, full());
   assert.deepEqual(Array.from(ruled(w).querySelectorAll('.rules-row'), (r) => r.dataset.rule), ['builder', 'reviewer', 'judge', 'judge-always', 'account', 'review-account', 'cap', 'guard', 'atonce', 'suite', 'cores',
-    'build', 'never', 'start', 'dep-guard', 'split', 'testissues', 'pick', 'push', 'land-as', 'pr-merge', 'push-check', 'lint', 'visible',
-    'standing-asked-fix', 'standing-review-followup', 'standing-release-check', 'standing-fixed-block', 'standing-review-retry', 'held', 'order']);
+    'build', 'never', 'start', 'dep-guard', 'split', 'pick', 'push', 'land-as', 'pr-merge', 'push-check', 'lint', 'visible',
+    'standing-asked-fix', 'standing-review-followup', 'standing-release-check', 'standing-fixed-block', 'standing-review-retry', 'testissues', 'held', 'order']);
   assert.deepEqual(['start-queue', 'start-held'].map((a) => act(rulesP(w), a).getAttribute('aria-pressed')), ['true', 'false'], 'New issues start in: Queue, the default');
   assert.match(ruled(w).querySelector('[data-rule="start"]').textContent, /New issues start in/);
   for (const r of ruled(w).querySelectorAll('.rules-row')) assert.ok(r.querySelector('.rules-what').textContent, `${r.dataset.rule} says what it does`);

@@ -19,7 +19,7 @@ strays() {
 # the same file when its turn comes.
 # A main-red fix card (issue 0, mainred.sh redpick()) is given back by its card id: its lines move out the same way, and the loop
 # picks its main commit's entry again, a new card built from nothing. So is a Tests page card of no issue (testpick(),
-# lib/testaction.sh): the loop picks its action again.
+# lib/testaction.sh): the loop picks its action again, a new card that starts from its kept work (resumeplan()).
 # RETRYWHY, when set, is why the loop retried the card itself (speedretry()): its blocked line keeps it as retriedWhy.
 retry() { # <issue, or the card id of a main-red fix card or a Tests page card> [fresh: an issue's next card builds from nothing]
   local n=$1 ends l what k='.issue == $n' a p f
@@ -234,14 +234,18 @@ moveout() { # <jq test> <jq arguments>...
 # work (its worktree could not be made, its dependencies not linked) keeps nothing, and the work is still there.
 # A review that block() could not move into the kept folder is still beside the card's worktree, whether or not the
 # line names a folder: it is read there, before the kept folder, since it is there only when the move failed.
-prior() { # <issue>
+# Of issue 0 (no issue), only the cards named count, those given back of a card with no GitHub issue (testcardwas(),
+# lib/testaction.sh); with none named, there is nothing.
+prior() { # <issue> [cards of issue 0, one a line]
   local l k c patch='' rev=''
+  [ "$1" != 0 ] || [ -n "${2:-}" ] || return 0
   while IFS= read -r l; do
     k=$(jq -r .kept <<<"$l"); c=$(jq -r .card <<<"$l")
     [ -z "$k" ] || [ ! -f "$k/$c.patch" ] || [ ! -s "$k/$c.patch" ] || patch=$l
     if [ -f "$CARDS/$c.review" ] && [ -s "$CARDS/$c.review" ]; then rev=$CARDS/$c.review
     elif [ -n "$k" ] && [ -f "$k/$c.review" ] && [ -s "$k/$c.review" ]; then rev=$k/$c.review; fi
-  done < <(jq -c --argjson n "$1" --arg st "$ST" 'select(.issue == $n and .step == "blocked") | {card, kept: (.kept // "" | if . == "" then . else $st + "/" + . end), reason}' < <(stdb ask issue retried "$1" 2>/dev/null) 2>/dev/null)
+  done < <(jq -c --argjson n "$1" --arg st "$ST" --arg cs "${2:-}" '($cs | split("\n") | map(select(. != ""))) as $cs | select(.issue == $n and .step == "blocked" and ($n != 0 or (.card | IN($cs[]))))
+    | {card, kept: (.kept // "" | if . == "" then . else $st + "/" + . end), reason}' < <(stdb ask issue retried "$1" 2>/dev/null) 2>/dev/null)
   [ -n "$patch$rev" ] || return 0
   jq -cn --argjson p "${patch:-null}" --arg r "$rev" '{card: ($p.card // ""), kept: ($p.kept // ""), reason: ($p.reason // ""), review: $r}'
 }

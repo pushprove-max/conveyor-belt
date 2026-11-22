@@ -101,6 +101,7 @@ cmd release-run release-prep.sh 'release-run [prep] <version> [--parallel | --se
 cmd suite-machine suite-machine.sh 'suite-machine check [--json]'
 cmd testaction testaction.sh 'testaction <judge | explain [--time <zone> <12-hour | 24-hour>] | run> <test file> | testaction stop <id>'
 cmd testissue testaction.sh 'testissue <test file> <title> <body>'
+cmd cardissue testaction.sh 'cardissue <card id>'
 cmd mutate testaction.sh 'mutate <test file> | mutate ask <test file>...'
 cmd test-settings test-settings.sh 'test-settings <what> [<file>] [<value>]'
 cmd prices prices.sh 'prices set <model> <input> <output> <cache read> | prices clear <model>'
