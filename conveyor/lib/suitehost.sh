@@ -32,12 +32,12 @@
 SH_KIND=local SH_NAME='this machine' SH_POST='the build machine' SH_TARGET='' SH_DIR='' SH_D='' SH_SLOTS='' SH_STEP='' SH_T=0 SH_WHY=''
 SH_SIZE='' SH_TAG='' SH_IDLE='' SH_LEASE=''
 # What every check of a box prints, one fact a line: its bash version, each tool named (ok or missing), its CPUs and
-# its test slots: slot_pool's there, of lib/slots.sh sent on ssh's input (hostfacts()), so its host file's testSlots
+# its test slots: slot_pool's there, of lib/slots.sh sent on ssh's input and read from that stream, never reopened by path (some ssh servers refuse that) (hostfacts()), so its host file's testSlots
 # and its cores cap them as the suite's runner there finds them (.conveyor/test-full.sh), never its CPU count alone.
 HOSTFACTS='printf "bash\t%s\n" "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"
 for t; do printf "tool\t%s\t%s\n" "$t" "$(command -v "$t" > /dev/null && echo ok || echo missing)"; done
 printf "cpus\t%s\n" "$(nproc 2> /dev/null || getconf _NPROCESSORS_ONLN 2> /dev/null || echo 0)"
-printf "slots\t%s\n" "$(. /dev/stdin > /dev/null 2>&1 && slot_pool > /dev/null 2>&1 && echo "$SLOT_N")"'
+printf "slots\t%s\n" "$(eval "$(cat)" > /dev/null 2>&1 && slot_pool > /dev/null 2>&1 && echo "$SLOT_N")"'
 # The suite's run on the box (hosttests()), given its <command>, <time limit> and the box's <name>: its exit in wt.rc,
 # timed by the box's own clock, which starts before this machine's: a run that ends past the limit, even with 0, has
 # 124, the exit of a run here that timed out, and its output says so.

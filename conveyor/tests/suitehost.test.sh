@@ -280,6 +280,24 @@ t_hostcheck() {
   out=$(unset CONVEYOR_TEST_SLOT; CONVEYOR_TEST_POOL=1:$T/$CASE/pool loop release-run atonce 2>&1) && [ "$out" = 2 ] \
     || fail "release-run atonce with the ssh rule, suiteAtOnce 9, the box's 3 CPUs and 2 slots and one slot here did not print 2: $out"
 }
+# Bug: the box's test slots were read by opening its input again by path (`. /dev/stdin`), which a Namespace devbox's ssh
+# refuses ("Permission denied"): the check said "its test slots cannot be read" and hostneeds refused the box. Here the
+# box's bash refuses to read /dev/stdin, /dev/fd/* and /proc/self/fd/* by path (a `.` that says so, from BASH_ENV).
+t_hostnostdinpath() {
+  local out
+  setup '[]'; boxsetup 3; boxrule
+  printf '%s\n' '. () { case $1 in /dev/stdin|/dev/fd/*|/proc/self/fd/*) echo "bash: line 1: $1: Permission denied" >&2; return 1;; esac; builtin . "$@"; }' \
+    'source () { . "$@"; }' > "$STUB/nopath.sh" || fail "the fixture could not be made"
+  # stub: the box's bash, which reads no input by path: it runs the real bash with the BASH_ENV file above
+  printf '%s\n' '#!/bin/sh' "BASH_ENV=$STUB/nopath.sh exec $(command -v bash) \"\$@\"" > "$STUB/box/bin/bash" && chmod +x "$STUB/box/bin/bash" || fail "the fixture could not be made"
+  out=$(loop suite-machine check 2>&1); grep -qx 'ok: test slots: 3 CPUs, 2 test slots' <<<"$out" \
+    || fail "suite-machine check did not read the test slots of a box whose bash cannot open /dev/stdin by path: $out"
+  # hostneeds() is what refused the box: `release-run atonce` reads the box's slots through it and prints them (2 here,
+  # not this machine's cap of 9 or its one slot), and fails with "cannot be read" when hostneeds refuses the box.
+  jq -c '.suiteAtOnce = 9' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json" || fail "the fixture could not be made"
+  out=$(unset CONVEYOR_TEST_SLOT; CONVEYOR_TEST_POOL=1:$T/$CASE/pool loop release-run atonce 2>&1) && [ "$out" = 2 ] \
+    || fail "release-run atonce (hostneeds) did not accept a box whose bash cannot open /dev/stdin by path and print its 2 test slots: $out"
+}
 # The stand-in devbox of the cases below: no case reaches a Namespace account. It notes each call in $STUB/devbox-calls,
 # an exec by what its script does (facts, setup, checkout, upload, run, poll or kill: the box's steps), and runs the script in
 # the box's folder as boxsetup's ssh does; a lease it handed out (acquire) is held until release, and an exec or a
