@@ -188,7 +188,9 @@
 #   cksum of that history as written, less every waitMaxSec and runSec in metrics.cards (thisRun's too), which grow
 #   with the clock while a card is blocked or open (null when it could not be written); the Board reads the history again only when
 #   it or the day changed.
-# health: the health record, which names builderCap, models and efforts as in force (the control record's, else the seed's).
+# health: the health record, which names builderCap, models and efforts as in force (the control record's, else the seed's),
+#   and timesPlan, what Record test times would do while its untimed is above 0 (timesplan(), lib/setup.sh: {kind: report |
+#   wrap | card, ...}), else null.
 # testSlots: the machine's test-slot pool (lib/slots.sh), {used: the slots a test run holds now, of: the pool's size};
 #   null when the pool cannot be read.
 # flaky: the cases of the flaky-test record (lib/flaky.sh) with entries in the last FLAKY_DAYS days to the health
@@ -554,7 +556,8 @@ snapshot() (
   # accounts below run in subshells, and each would work them out again with its own jq runs.
   modelsallowed allowed 2>/dev/null || :; routesnow >/dev/null
   # shellcheck disable=SC2034 # read by health (lib/views.sh), which conveyor.sh sources beside this file
-  h=$(ISSUESJSON=${issues:-null}; health) && printf '%s\n' "$h" > "$d/health" || exit 1
+  # The plan of Record test times joins health (timesadd(), lib/setup.sh), while the last card test runs recorded none.
+  h=$(ISSUESJSON=${issues:-null}; health) && h=$(timesadd "$h") && printf '%s\n' "$h" > "$d/health" || exit 1
   snaprows "$READ_OLD" "$RETRIED.rows" "$d/old" 2>/dev/null || { echo "conveyor: $RETRIED does not read as card records; stopping" >&2; exit 1; }
   models=$(jq -c .models <<<"$h"); settings=$(modelsettings "$control"); ACCT=$(ctlacct "$control")
   # A main-red fix card is titled from its entry as it is now (mainred.sh redtitles()), so a case added while it runs shows.

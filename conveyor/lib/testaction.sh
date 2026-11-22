@@ -143,7 +143,7 @@ testissue() { # <test file> <title> <body>
 # picked yet and the newest 200 picked ones (card() reads a picked card's record while it builds, and the Board's
 # Landed today shows a landed one's). Prints that the card is queued; one held also says on stderr how to release it.
 TACARDS=$TESTACTS/cards.json
-testcard() { # <test file> <title> <body> [held]
+testcard() { # <test file> <title> <body> [held [<why it is held>]]
   local lock rec id
   { exec {lock}>>"$TACARDS.lock"; } 2>/dev/null && flock "$lock" || { echo "conveyor: the record of the Tests page's cards could not be locked; no card started" >&2; return 1; }
   rec=$(jq -ce '.cards | arrays' "$TACARDS" 2>/dev/null) || rec='[]'
@@ -154,7 +154,7 @@ testcard() { # <test file> <title> <body> [held]
     | ([to_entries[] | select(.value.card != null) | .key] | .[:-200]) as $old | {cards: [to_entries[] | select(.key | IN($old[]) | not) | .value]}' <<<"$rec" > "$TACARDS.new" \
     && mv -f "$TACARDS.new" "$TACARDS" || { rm -f "$TACARDS.new"; exec {lock}>&-; echo "conveyor: the record of the Tests page's cards could not be written; no card started" >&2; return 1; }
   exec {lock}>&-
-  [ "${4:-}" != held ] || echo "conveyor: card $id is held, as it was asked for a Foreman session: release it (conveyor.sh control release $id) once the owner says yes" >&2
+  [ "${4:-}" != held ] || echo "conveyor: card $id is held, ${5:-as it was asked for a Foreman session}: release it (conveyor.sh control release $id) once the owner says yes" >&2
   echo "Card queued with no GitHub issue: ${2:0:200}"
 }
 # A card id no card has yet: its second, its project and its issue 0, as every card of issue 0 is named. One that a

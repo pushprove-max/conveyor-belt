@@ -718,8 +718,9 @@ except SyntaxError as x: print(f"{sys.argv[1]}: line {x.lineno}: {x.msg}"); sys.
 #                                test.fileCommand its wrapped one, when it gives one
 #   history-start <time | clear> the control record's testsFrom (histstart()): a UTC time like 2026-11-21T00:00:00Z;
 #                                only the runs and failures on or after it count; clear: all of them count
-# A file with no setting left is taken out of test.files (packset()).
-TESTSET_USAGE='usage: conveyor.sh test-settings slow-issues <true | false> | slow-mark <file> <reason> | slow-mark-clear <file> | cpu-time <file> | history-start <UTC time | clear>'
+# A file with no setting left is taken out of test.files (packset()). record-times (no argument) runs the plan the snapshot's
+# health gives as timesPlan (Record test times: recordtimes(), lib/setup.sh).
+TESTSET_USAGE='usage: conveyor.sh test-settings slow-issues <true | false> | slow-mark <file> <reason> | slow-mark-clear <file> | cpu-time <file> | history-start <UTC time | clear> | record-times'
 testsettings() { # <what> [<file>] [<value>]
   local why='' r=${3:-} p
   case ${1:-}:$# in

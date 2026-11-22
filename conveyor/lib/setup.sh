@@ -549,6 +549,19 @@ setuplane() {
 # wrap each test file's run with tools/testtime.sh (conveyor/README.md, Test file times), each run; it
 # never changes the project's script.
 timinghint() {
+  local w ws
+  ws=$(timingscripts) || return 1
+  while IFS= read -r w; do
+    [ -n "$w" ] || continue
+    echo "conveyor: the test command runs $w, which prints no \`TESTRUN sec\` lines, so cards record no test times."
+    echo "  If it runs the test files one by one, copy $HERE/tools/testtime.sh into the project and wrap each file's run"
+    echo "  with it, writing its line to the script's log in \$CONVEYOR_TEST_LOG before the file's \`-- ok|FAIL <file>\` line:"
+    echo "    ./testtime.sh \"\$f\" -- <the file's command> > \"\$out\" 2>&1; rc=\$?; cat \"\$out\"; grep '^TESTRUN sec' \"\$out\" >> \"\$CONVEYOR_TEST_LOG/<its log>\""
+    echo "  conveyor/README.md, Test file times, says more."
+  done <<<"$ws"
+}
+# The scripts timinghint() speaks of, one a line, as the test command writes each.
+timingscripts() {
   local cmd w p ws=()
   packget test.command cmd || return 1
   read -ra ws <<<"$cmd"
@@ -556,12 +569,57 @@ timinghint() {
     w=${w//[\"\']/}; w=${w%%[;&|)]*}; [[ $w == *.sh ]] || continue
     p=$w; [[ $p == /* ]] || p=$MAIN/$p
     [ -f "$p" ] && ! grep -qE 'TESTRUN sec|testtime\.sh' "$p" || continue
-    echo "conveyor: the test command runs $w, which prints no \`TESTRUN sec\` lines, so cards record no test times."
-    echo "  If it runs the test files one by one, copy $HERE/tools/testtime.sh into the project and wrap each file's run"
-    echo "  with it, writing its line to the script's log in \$CONVEYOR_TEST_LOG before the file's \`-- ok|FAIL <file>\` line:"
-    echo "    ./testtime.sh \"\$f\" -- <the file's command> > \"\$out\" 2>&1; rc=\$?; cat \"\$out\"; grep '^TESTRUN sec' \"\$out\" >> \"\$CONVEYOR_TEST_LOG/<its log>\""
-    echo "  conveyor/README.md, Test file times, says more."
+    echo "$w"
   done
+}
+# Record test times: what the Tests page's action does when the last card test runs recorded no test times, as JSON,
+# for the first of these that applies, or null with none:
+#   {kind: "report", report}  the pack's test.report is set to the report setup knows for the test command
+#                             (reportguess(): a runner whose report Conveyor reads; none when the pack names a format)
+#   {kind: "wrap", file, was, command[, fileCommand]}  the test command runs one test file: it is wrapped with
+#                             tools/testtime.sh, as cpuplan() gives it
+#   {kind: "card", file, title, body}  the test command runs a script of the project that prints no test times: a held
+#                             card for the owner, whose body is timinghint()'s wrap steps (the script is the owner's)
+timesplan() {
+  local cmd r p f
+  packget test.command cmd || return 1
+  if ! jq -e '.test.report.format' "$PACK" >/dev/null 2>&1 && r=$(reportguess "$cmd") && jq -e '.format' <<<"$r" >/dev/null 2>&1; then
+    jq -cn --argjson r "$r" '{kind: "report", report: $r}'; return 0
+  fi
+  if p=$(cpuplan 2>/dev/null) && jq -e '.file' <<<"$p" >/dev/null 2>&1; then jq -c '{kind: "wrap"} + .' <<<"$p"; return 0; fi
+  f=$(timingscripts | head -n 1) || return 1
+  if [ -n "$f" ]; then
+    jq -cn --arg f "$f" --arg b "$(timinghint)" '{kind: "card", file: $f, title: "Record test times: wrap each test file'"'"'s run in \($f)", body: $b}'; return 0
+  fi
+  echo null
+}
+# The health record <json> with the plan of Record test times (timesplan()) as timesPlan while the last card test runs
+# recorded no test times (its untimed is above 0), else null: the snapshot's Health part, for the Tests page's action.
+timesadd() { # <health json>
+  local p=null
+  [ "$(jq -r '.untimed // 0' <<<"$1")" = 0 ] || p=$(timesplan 2>/dev/null) || p=null
+  jq -c --argjson p "$p" '.timesPlan = $p' <<<"$1"
+}
+# conveyor.sh test-settings record-times: the plan of timesplan() run, as an admin's pack change the Board's Tests page
+# makes: a report or a wrapped command saved in the pack (packset()), or the held card filed (testcard(): no GitHub
+# issue; held until `control release`). With no plan, or a card of that title already waiting, it says so and changes
+# nothing.
+recordtimes() {
+  local p k t
+  [ $# = 0 ] || { echo "usage: conveyor.sh test-settings record-times" >&2; return 2; }
+  p=$(timesplan) || { echo "conveyor: test-settings record-times: the pack cannot be read; nothing changed" >&2; return 1; }
+  k=$(jq -r '.kind // empty' <<<"$p")
+  case $k in
+    report) packset --argjson r "$(jq -c .report <<<"$p")" '.test.report = $r' ;;
+    wrap) testsettings cpu-time "$(jq -r .file <<<"$p")" ;;
+    card) t=$(jq -r .title <<<"$p")
+      if jq -e --arg t "$t" 'any(.cards[]?; .title == $t and .card == null)' "$TACARDS" >/dev/null 2>&1; then
+        echo "conveyor: test-settings record-times: the held card \"$t\" is waiting already; nothing changed" >&2; return 1
+      fi
+      mkdir -p "$TESTACTS" || { echo "conveyor: test-settings record-times: the test actions' folder could not be made; no card filed" >&2; return 1; }
+      testcard "$(jq -r .file <<<"$p")" "$t" "$(jq -r .body <<<"$p")" held "as it asks the owner to change a script of the project" ;;
+    *) echo "conveyor: test-settings record-times: no plan applies to this test command; nothing changed" >&2; return 1 ;;
+  esac
 }
 # The pack's test.report for a test command (setup()), as JSON: {runner, format, path} when the command already has
 # its runner write a report tools/testreport.py reads (path: the report's file, from the checkout's root; none for

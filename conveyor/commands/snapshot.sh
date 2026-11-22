@@ -24,7 +24,7 @@
 # call asks at a time (SNAPGH.lock), and a call asks nothing when another one asked after it began (--fresh) or after
 # the kept snapshot's build began (the writer): two calls for one rebuild ask GitHub once.
 KEPT=$ST/snapshot.json SNAPOLD=30 SNAPGAP=5 SNAPGH=$ST/snapgh
-SNAPLIBS='slots prompts control views snapshot issues pick testrun push flaky fulltest testaction testfiles testrules lane run machine install'
+SNAPLIBS='slots prompts control views snapshot issues pick testrun push flaky fulltest testaction testfiles testrules lane run machine install setup'
 case ${2-} in
   '') fresh='' ;;
   --fresh) fresh=1 ;;

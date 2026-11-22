@@ -941,6 +941,12 @@ record, not the pack. The Board saves it too, in "Test history starts at" of the
   snapshot's `cpuTime` gives it, refused with its `why` when no wrapper applies. The test command finds the helper in
   `CONVEYOR_TEST_TIME`, and puts the helper's `TESTRUN sec` line in the run's log. Only an admin can save it from the
   Board.
+- `test-settings record-times`: the plan the snapshot's health gives as `timesPlan` while the last card test runs
+  recorded no test times. It sets the pack's `test.report` to the report that `setup` knows for the test command
+  (`kind` `report`); or wraps a test command that runs one test file in `conveyor/tools/testtime.sh`, as `cpu-time`
+  does (`wrap`); or, for a test command that runs a script of the project, files a held card with no GitHub issue whose
+  body gives the steps to wrap each file's run (`card`). Release the card with `control release <card id>`. With no
+  plan, or the same card waiting, it changes nothing and says so.
 - `test-settings history-start <UTC time | clear>`: the time, such as `2026-11-21T00:00:00Z`, from which the Tests
   snapshot, the test rules and the facts the Tests judge is given count runs, failed steps and flaky entries. Older
   ones are kept and not counted. `clear` counts every run again.
