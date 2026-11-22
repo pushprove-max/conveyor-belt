@@ -3,8 +3,9 @@
 # The share of the temp space each test file gets, for the suites that run test files: the full suite
 # (.conveyor/test-full.sh) and the card's test step (.conveyor/test-changed.sh), which source this file. A run with no
 # share filled a 31 GB /tmp, and 155 files failed with "Disk quota exceeded" (#1238). Each file runs with a TMPDIR of
-# its own, removed when it ends (share_run), and a file that writes past its share (the host file's testTmpMB,
-# docs/setup.md) fails alone, with the reason: the other files and the belt keep their space. A file starts only when
+# its own, removed when it ends (share_run), and a file that writes past its share there (the host file's testTmpMB,
+# docs/setup.md) fails alone, with the reason: the other files and the belt keep their space. Writes in the checkout
+# count to the share too, once the file has ended (share_run). A file starts only when
 # the space holds a share for it (share_noroom), and its caller then waits for one that runs to end, or fails it.
 
 # share_init <folder>: SHARE (the share in MB), LIMKB (in KB) and SPACE (the mount point of the space <folder> is in);
@@ -61,17 +62,21 @@ share_noroom() {
 
 # share_guard <temp folder> <pid file> <mark>: stops the test file that <pid file> names once its temp folder holds its
 # share or more, as the size limit (ulimit -f, share_run) caps one file but not many: TERM to it and its children,
-# KILL 10 s later. <mark> keeps the folder's size then, for share_run's reason. It first closes every descriptor from 3
-# up it inherited: its `sleep` runs on for up to 1 s after share_run kills it, and held the test file's slot (the lock
-# its worker inherits, conveyor/lib/slots.sh) that long, so the suite's next file waited for it.
+# KILL 10 s later. <mark> keeps the folder's size then, for share_run's reason. It looks once the file has started and
+# then every 0.1 s: a look each 1 s let a file write a share and more before the first look (#1394). It first closes
+# every descriptor from 3 up it inherited: its `sleep` runs on for up to 0.1 s after share_run kills it, and held the
+# test file's slot (the lock its worker inherits, conveyor/lib/slots.sh) that long, so the suite's next file waited.
 share_guard() {
   local p='' k f
   for f in /dev/fd/*; do f=${f##*/}; [[ $f =~ ^[0-9]+$ ]] && [ "$f" -ge 3 ] && eval "exec $f>&-" 2>/dev/null; done
-  while sleep 1; do
-    [ -n "$p" ] || read -r p < "$2" || continue
-    k=$(du -sk "$1" | cut -f1)
-    [ "${k:-0}" -ge "$LIMKB" ] || continue
-    echo "$k" > "$3"; pkill -TERM -P "$p"; kill -TERM "$p"; sleep 10; pkill -KILL -P "$p"; kill -KILL "$p"; return 0
+  while :; do
+    if [ -n "$p" ] || read -r p < "$2"; then
+      k=$(du -sk "$1"); k=${k%%[[:space:]]*}
+      if [ "${k:-0}" -ge "$LIMKB" ]; then
+        echo "$k" > "$3"; pkill -TERM -P "$p"; kill -TERM "$p"; sleep 10; pkill -KILL -P "$p"; kill -KILL "$p"; return 0
+      fi
+    fi
+    sleep 0.1 || return 0
   done 2>/dev/null
 }
 
@@ -79,11 +84,14 @@ share_guard() {
 # TMPDIR <folder>, made here and removed when it ends, no one file it writes larger than its share (ulimit -f, in KB
 # in bash) and stopped once the folder holds its share (share_guard). It prints the command's output, then, when the
 # folder reached its share (also when the command ended by itself between the guard's looks), `<label> wrote ...`
-# with the share and the space, and exits with the command's status, or 1 then. A TERM, INT or HUP to it is passed to
+# with the share and the space, and exits with the command's status, or 1 then. The same when the files new in the
+# checkout ($PWD) and the folder hold its share together, or one new file there is at the size limit: these are seen
+# only once the command has ended, and a file run beside it in a parallel suite that wrote them while it ran fails it
+# too, as nothing tells which file wrote them. A TERM, INT or HUP to it is passed to
 # the command, and the folder is still removed; a run stopped with KILL leaves the folder to its caller's own temp
 # folder, which <folder> is in. It runs in a subshell of its own, so its traps are not its caller's.
 share_run() (
-  local label=$1 ft=$2 g c='' k st; shift 2
+  local label=$1 ft=$2 g c='' k st o f pr; shift 2
   mkdir "$ft" || { echo "$label did not start: its temp folder $ft could not be made"; return 1; }
   trap '[ -z "$c" ] || kill -TERM "$c" 2>/dev/null' TERM INT HUP
   share_guard "$ft" "$ft.pid" "$ft.over" > /dev/null 2>&1 < /dev/null & g=$!
@@ -93,7 +101,19 @@ share_run() (
   while wait "$c"; st=$?; kill -0 "$c" 2>/dev/null; do :; done
   kill "$g" 2>/dev/null; wait "$g" 2>/dev/null
   k=$(du -sk "$ft" 2>/dev/null | cut -f1); [ ! -s "$ft.over" ] || read -r k < "$ft.over"
-  [ "${k:-0}" -lt "$LIMKB" ] || { echo "$label wrote $k KB in its temp folder, and its share of the space under $SPACE is $LIMKB KB (the host file's testTmpMB, $SHARE MB): it fails"; st=1; }
+  # The files new in the checkout ($PWD, its .git and the folder <folder> is in left out) since the command started:
+  # the size limit kills only the command that writes, so a test whose last command passes exits 0 with a file cut at
+  # its share there, and a test can write many files there that each stay under the limit (#1394).
+  pr=(find "$PWD" \( -path "$PWD/.git" -o -path "${ft%/*}" \) -prune -o -type f -newer "$ft.pid")
+  o=$("${pr[@]}" -exec du -k {} + 2>/dev/null | awk '{ s += $1 } END { print s + 0 }')
+  while IFS= read -r f; do
+    echo "$label wrote a file larger than its share, or one the size limit (ulimit -f) cut at its share of $LIMKB KB (the host file's testTmpMB, $SHARE MB): $f: it fails, or a file run beside it wrote it"; st=1
+  done < <("${pr[@]}" -size +$((LIMKB * 1024 - 1))c -print 2>/dev/null)
+  if [ "${k:-0}" -ge "$LIMKB" ]; then
+    echo "$label wrote $k KB in its temp folder, and its share of the space under $SPACE is $LIMKB KB (the host file's testTmpMB, $SHARE MB): it fails"; st=1
+  elif [ $((${k:-0} + o)) -ge "$LIMKB" ]; then
+    echo "$label wrote $o KB in $PWD, outside its temp folder, and ${k:-0} KB in it, and its share of the space is $LIMKB KB (the host file's testTmpMB, $SHARE MB): it fails, or a file run beside it wrote them"; st=1
+  fi
   # u+w: the folder may hold read-only folders (an install), which rm cannot empty.
   chmod -R u+w "$ft" 2>/dev/null; rm -rf "$ft" "$ft.pid" "$ft.over"
   return "$st"

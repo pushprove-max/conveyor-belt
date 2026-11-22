@@ -84,8 +84,11 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    gets a share of that space: the host file's `testTmpMB`, in MB ([Setup](setup.md#the-host-file)), or 2048 when
    the host file does not set it. A file that fills its temp folder to its share stops and fails, and its output
    gives the share and the space. No single file that a test file writes, in any folder, can be larger than the
-   share. The other files run on. Before a file starts, that space must hold a share for each file that runs, one
-   for the new file and one for Conveyor. When files run at the same time, the file waits until a file that runs
+   share. The other files run on. The files that a test file writes in the checkout, outside its temp folder, also
+   count to its share. The suite checks them when the test file ends. The test file fails when they and its temp
+   folder hold its share, or when one of them is as large as the share. A test file that ran while another test
+   file wrote them also fails, because the suite cannot tell which file wrote them. Before a file starts, that space
+   must hold a share for each file that runs, one for the new file and one for Conveyor. When files run at the same time, the file waits until a file that runs
    ends. When no file runs and the space is still too small, the file fails and does not run, and its output gives
    the space that is free and the space that it needs.
 
